@@ -60,7 +60,7 @@ class Decision:
 
 def plugin_json_rel(repo: str | Path, ref: str, plugin: str) -> str | None:
     """`ref` の木で、名前が `plugin` のディレクトリの `.claude-plugin/plugin.json` の位置。無い・2 つ以上なら None。"""
-    p = _git(repo, "ls-tree", "-r", "--name-only", ref)
+    p = _git_run(repo, "ls-tree", "-r", "--name-only", ref)
     if p.returncode:
         return None
     tail = f"{plugin}/.claude-plugin/plugin.json"
@@ -68,12 +68,12 @@ def plugin_json_rel(repo: str | Path, ref: str, plugin: str) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def _git(repo: str | Path, *args: str) -> subprocess.CompletedProcess:
+def _git_run(repo: str | Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
 
 def _version_at(repo: str | Path, ref: str, rel: str) -> str | None:
-    p = _git(repo, "show", f"{ref}:{rel}")
+    p = _git_run(repo, "show", f"{ref}:{rel}")
     if p.returncode:
         return None
     try:
@@ -88,7 +88,7 @@ def observe(repo: str | Path, plugin: str, base: str, production: str | None, fe
     タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
     `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。"""
     unreadable: list[str] = []
-    if fetch and _git(repo, "fetch", "-q", "origin", "--tags").returncode:
+    if fetch and _git_run(repo, "fetch", "-q", "origin", "--tags").returncode:
         unreadable.append("origin")
     base_ref = f"origin/{base}"
     rel = rel or plugin_json_rel(repo, base_ref, plugin)
@@ -99,7 +99,7 @@ def observe(repo: str | Path, plugin: str, base: str, production: str | None, fe
     prod_version = _version_at(repo, prod_ref, rel) if prod_ref and rel else None
     if prod_ref and prod_version is None:
         unreadable.append(prod_ref)
-    p = _git(repo, "tag", "--list", f"{plugin}--v*")
+    p = _git_run(repo, "tag", "--list", f"{plugin}--v*")
     tags: list[str] = []
     if p.returncode:
         unreadable.append("tags")
@@ -163,3 +163,49 @@ def own_released(repo: str | Path, branch: str, base: str) -> bool | None:
         return bool(json.loads(r.stdout or "[]"))
     except ValueError:
         return None
+
+
+@dataclass
+class BumpStop:
+    """`bump` を止める理由（要約・数値・終了コード）。"""
+
+    summary: str
+    metrics: dict
+    code: int
+
+
+def bump_check(repo: str | Path, plugin: str, old: str, new: str, base: str, rel: str) -> tuple[str | None, BumpStop | None]:
+    """`bump` が書き換える前の判定（#2164 の I7）。打ち直しなら (origin のベースブランチの版, None)、書き換えてよければ (None, None)。
+    新しい版がベースブランチの版以下か、正式版でそのタグがあれば終了コード 3 で止める（版を戻さない）。
+    版の形が違う・ベースブランチの版を読めない・自分の配布の照会ができなければ、推定で進めずに終了コード 2 で止める。
+    作業場所がすでに新しい版で、ベースブランチの版が等しいときだけ `release/v<新しい版>` → ベースブランチのマージ済みの
+    PR を 1 回照会し、あれば自分の配布の後の流し直しとして打ち直しにする。"""
+    if versions.parse_version(new) is None:
+        return None, BumpStop(f"版の形が違う: {new}（X.Y.Z / X.Y.Z-dev.N / X.Y.Z-rc.N）", {"plugin": plugin, "to": new}, 2)
+    obs = observe(repo, plugin, base, None, rel=rel)
+    metrics = {"plugin": plugin, "from": old, "to": new, "base_version": obs.base_version}
+    if obs.unreadable:
+        why = f"版を確かめる値を読めない: {'・'.join(obs.unreadable)}。推定で上げない"
+        return None, BumpStop(why, {**metrics, "unreadable": obs.unreadable}, 2)
+    cmp = versions.compare_versions(obs.base_version, new)
+    if old == new and cmp < 0:
+        return obs.base_version, None
+    if old == new and cmp == 0:
+        own = own_released(repo, f"release/v{new}", base)
+        if own is None:
+            why = f"release/v{new} → {base} のマージ済みの PR を照会できない。推定で進めない"
+            return None, BumpStop(why, {**metrics, "unreadable": ["pr"]}, 2)
+        if own:
+            return obs.base_version, None
+    d = taken(obs, new)
+    if cmp < 0 and not d.is_taken:
+        return None, None
+    existing = obs.base_version if cmp >= 0 else d.existing
+    if d.is_taken:
+        nxt = d.next_free
+    elif versions.parse_version(new).prerelease:
+        nxt = decide_dev(obs).version
+    else:
+        nxt = versions.next_patch(obs.base_version)
+    why = f"{plugin} の {new} はすでに出ている（{existing}）。版を戻さない（次に空いている版は {nxt}）"
+    return None, BumpStop(why, {**metrics, "existing": existing, "next_free": nxt}, 3)

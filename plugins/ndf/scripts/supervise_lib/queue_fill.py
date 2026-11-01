@@ -138,13 +138,13 @@ KEEP_ON_REDECIDE = {VERSION_RECORD, VERSION_PLAN, SUPERSEDED, "plan.json"}  # �
 GATE_2_STEPS = ("approve", "mvv")  # 本番のプランの先頭で承認ゲート 2 を通すステップ
 
 
-def _now() -> str:
+def _version_now() -> str:
     import datetime
 
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
-def _read_json(path: Path) -> dict | None:
+def _read_version_json(path: Path) -> dict | None:
     try:
         d = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -152,7 +152,7 @@ def _read_json(path: Path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def _write_json(path: Path, obj: dict) -> None:
+def _write_version_json(path: Path, obj: dict) -> None:
     write_text_atomic(path, json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
 
 
@@ -205,7 +205,7 @@ class _Fill:
         return b if b and RELEASE_VERSION not in b else f"release/v{version}"
 
     def log(self, text: str, **extra) -> None:
-        line = json.dumps({"kind": "version", "at": _now(), "text": text, **extra}, ensure_ascii=False)
+        line = json.dumps({"kind": "version", "at": _version_now(), "text": text, **extra}, ensure_ascii=False)
         with (self.sd / "progress.jsonl").open("a") as f:
             f.write(line + "\n")
 
@@ -221,10 +221,10 @@ class _Fill:
             "level": self.level,
             "observed": observed,
             "series_from": series_from,
-            "at": _now(),
+            "at": _version_now(),
             "history": [],
         }
-        _write_json(self.record_path, rec)
+        _write_version_json(self.record_path, rec)
         return rec
 
     def ensure_filled(self, rec: dict) -> None:
@@ -252,10 +252,10 @@ class _Fill:
                 target, n = dst / f"{f.name}.{n}", n + 1
             os.replace(f, target)
         left = {"作業場所": self.info.get("作業場所"), "branch": self.info.get("branch"), "superseded": str(dst)}
-        hist = {"from": old, "to": new, "reason": reason, "existing": existing, "observed": observed, "left": left, "at": _now()}
-        rec = {**rec, "version": new, "base": versions.release_base(new), "observed": observed, "at": _now()}
+        hist = {"from": old, "to": new, "reason": reason, "existing": existing, "observed": observed, "left": left, "at": _version_now()}
+        rec = {**rec, "version": new, "base": versions.release_base(new), "observed": observed, "at": _version_now()}
         rec["history"] = [*(rec.get("history") or []), hist]
-        _write_json(self.record_path, rec)
+        _write_version_json(self.record_path, rec)
         self.log(
             f"版を {old} から {new} へ決め直した（{reason}）。前の作業場所 {left['作業場所']} と branch {left['branch']} は残した",
             version=new,
@@ -270,7 +270,7 @@ class _Fill:
             if not i.get("plan"):
                 continue
             f = state_dir_of(str(Path(i["plan"]).absolute())) / VERSION_RECORD
-            rec = _read_json(f)
+            rec = _read_version_json(f)
             if rec and rec.get("base"):
                 found.append((f.stat().st_mtime, rec, str(f)))
         if not found:
@@ -280,7 +280,7 @@ class _Fill:
 
     def approved(self) -> bool:
         """本番のプランの状態に承認ゲート 2 の通過（approve か mvv のステップが 0 で終えた記録）があるか。"""
-        state = _read_json(self.sd / "state.json") or {}
+        state = _read_version_json(self.sd / "state.json") or {}
         return any(e.get("id") in GATE_2_STEPS and e.get("exit") == 0 for e in state.get("log") or [] if isinstance(e, dict))
 
 
@@ -355,5 +355,5 @@ def fill_release_version(plan: str, items: list[dict]) -> tuple[str | None, dict
     f = _Fill(plan, text, info, items)
     if not f.plugin or not f.base:
         return "版の差し込みを埋められない: プランの「版」の欄にプラグインが無いか、起点が無い", None
-    rec = _read_json(f.record_path)
+    rec = _read_version_json(f.record_path)
     return (_fill_prod if f.field.get("チャネル") == "prod" else _fill_dev)(f, rec)

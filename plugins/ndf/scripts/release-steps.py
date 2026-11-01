@@ -94,7 +94,6 @@ from step_result import (
     EXIT_GATE,
     EXIT_INFRA_WAIT,
     EXIT_PRECONDITION,
-    EXIT_UNREADABLE,
     PRESENT_HEADINGS,
     StepError,
     approval_present,
@@ -385,68 +384,14 @@ def plan_bump(root, pdir, plugin, old, new):
 
 
 def bump_guard(root, plugin, old, new, base) -> str | None:
-    """`bump` が書き換える前の判定（#2164 の I7）。打ち直しなら origin のベースブランチの版を返し、書き換えてよければ None。
-    新しい版がベースブランチの版以下か、正式版でそのタグがあれば `stopped`・終了コード 3 で止める（版を戻さない）。
-    ベースブランチの版を読めない・自分の配布の照会ができなければ、推定で進めずに終了コード 2 で止める。
-    作業場所がすでに新しい版で、ベースブランチの版が等しいときだけ `release/v<新しい版>` → ベースブランチのマージ済みの
-    PR を 1 回照会し、あれば自分の配布の後の流し直しとして打ち直しにする。"""
+    """`bump` が書き換える前の判定（#2164 の I7。中身は release_version.bump_check）。打ち直しなら origin のベースブランチの版。"""
     import release_version
-    import versions
 
-    if versions.parse_version(new) is None:
-        raise StepError(f"版の形が違う: {new}（X.Y.Z / X.Y.Z-dev.N / X.Y.Z-rc.N）", EXIT_UNREADABLE)
     rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
-    obs = release_version.observe(root, plugin, base, None, rel=rel)
-    metrics = {"plugin": plugin, "from": old, "to": new, "base_version": obs.base_version}
-    if obs.unreadable:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                f"版を確かめる値を読めない: {'・'.join(obs.unreadable)}。推定で上げない",
-                [],
-                {**metrics, "unreadable": obs.unreadable},
-            ),
-            code=EXIT_UNREADABLE,
-        )
-    cmp = versions.compare_versions(obs.base_version, new)
-    if old == new and cmp < 0:
-        return obs.base_version
-    if old == new and cmp == 0:
-        own = release_version.own_released(root, f"release/v{new}", base)
-        if own is None:
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"release/v{new} → {base} のマージ済みの PR を照会できない。推定で進めない",
-                    [],
-                    {**metrics, "unreadable": ["pr"]},
-                ),
-                code=EXIT_UNREADABLE,
-            )
-        if own:
-            return obs.base_version
-    d = release_version.taken(obs, new)
-    if cmp >= 0 or d.is_taken:
-        existing = obs.base_version if cmp >= 0 else d.existing
-        if d.is_taken:
-            nxt = d.next_free
-        elif versions.parse_version(new).prerelease:
-            nxt = release_version.decide_dev(obs).version
-        else:
-            nxt = versions.next_patch(obs.base_version)
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                f"{plugin} の {new} はすでに出ている（{existing}）。版を戻さない（次に空いている版は {nxt}）",
-                [],
-                {**metrics, "existing": existing, "next_free": nxt},
-            ),
-            code=EXIT_PRECONDITION,
-        )
-    return None
+    already, stop = release_version.bump_check(root, plugin, old, new, base, rel)
+    if stop:
+        emit(result(TOOL, "stopped", stop.summary, [], stop.metrics), code=stop.code)
+    return already
 
 
 def cmd_bump(a):
