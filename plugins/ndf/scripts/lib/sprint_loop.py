@@ -62,6 +62,7 @@ from sprint_loop_gate import (
     select_cmd,
     wait_lap,
     sprint_pipeline,
+    queue_command,
     refusal_order,
     build_close,
     refused_stop,
@@ -170,6 +171,12 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
     return loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name))
 
 
+def resume_record(env: Env, rec: dict) -> None:
+    """止まった記録を解く: stop を再開の時刻つきで stops へ移し、running に戻す。"""
+    rec["stops"].append({**rec["stop"], "resumed_at": env.now()})
+    rec["stop"], rec["status"] = None, "running"
+
+
 def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
     """止まった理由ごとに解けたかを見る（I7）。解ければ stop を stops へ移す。"""
     stop, name = rec["stop"], rec["name"]
@@ -210,8 +217,7 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
         nxt = f"{queue} && {wait_lap(rec, done)}"
     elif cond == "refused" and lap:
         nxt = f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {name} --mode <モード> --dev <開発版>（モードと版を決め直す）"
-    rec["stops"].append({**stop, "resumed_at": env.now()})
-    rec["stop"], rec["status"] = None, "running"
+    resume_record(env, rec)
     write_record(env, rec, before)
     update_handoff(env, rec, f"再開した（{cond} が解けた）", resume_command(rec), nxt)
     return loop_ok(f"開発ループ {name} を再開した（{cond} が解けた）", rec, status="resumed", next_=nxt, resolved=cond)
@@ -263,8 +269,7 @@ def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
         for s in stages_after(lap, plan)
     ]
     stages = [s for s in rest if s] + [close]
-    queue = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + " --max 3"
-    queue += "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}"
+    queue = queue_command(stages, done)
     lap.setdefault("dones", []).append(str(done))
     step = gate2_resume_step(plan)
     if step is None:
@@ -342,8 +347,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         queue, pipeline = sprint_pipeline(index, close, done, rec)
         lap["dones"] = [str(done)]
         if rec.get("status") == "stopped":  # refused からのやり直し
-            rec["stops"].append({**rec["stop"], "resumed_at": env.now()})
-            rec["stop"], rec["status"] = None, "running"
+            resume_record(env, rec)
         write_record(env, rec, before)
         update_handoff(env, rec, f"周回 {lap['n']} のスプリントを組んだ。pipeline を流す", resume_command(rec), pipeline)
         return loop_ok(

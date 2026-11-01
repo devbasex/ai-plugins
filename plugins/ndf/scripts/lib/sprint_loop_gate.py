@@ -63,6 +63,15 @@ def select_cmd(name: str) -> str:
     return f"python3 {shlex.quote(str(SPRINT_STATE))} loop select {name}"
 
 
+QUEUE_MAX = 3  # まとめの queue の同時に流す計画の上限（supervise.py queue --max）
+
+
+def queue_command(stages: list[list[str]], done: Path) -> str:
+    """まとめの queue の 1 行: 先頭のステージを --max で流し、残りのステージを --then でつなぎ、--done で終わる。"""
+    head = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + f" --max {QUEUE_MAX}"
+    return head + "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}"
+
+
 def wait_lap(rec: dict, done: Path) -> str:
     return f"python3 {shlex.quote(str(SUPERVISE))} wait {shlex.quote(str(done))} && python3 {shlex.quote(str(SPRINT_STATE))} loop lap {rec['name']} --done {shlex.quote(str(done))}"
 
@@ -75,9 +84,7 @@ def sprint_pipeline(index: list[dict], close: list[str], done: Path, rec: dict) 
     if not hands:
         queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
         return queue, f"{queue} && {wait_lap(rec, done)}"
-    queue = (
-        f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, close)) + f" --max 3 --done {shlex.quote(str(done))}"
-    )
+    queue = queue_command([close], done)
     todo = " → ".join(e.get("command") or f"{e['name']}（{e['manual']} で行う）" for e in hands)
     return queue, f"{first['command']} を流し、続けて {todo} を終えてから: {queue} && {wait_lap(rec, done)}"
 
@@ -354,8 +361,7 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
     stages.append(build_close(env, rec, lap, kept, tag=tag))
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
-    head = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + " --max 3"
-    return head + "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}", done
+    return queue_command(stages, done), done
 
 
 GATE_2_RESUME_STEPS = ("bump", "promote-approved", "merge-approved")  # 承認ゲート 2 の承認の後に入るステップ（pace.md の続け方）
