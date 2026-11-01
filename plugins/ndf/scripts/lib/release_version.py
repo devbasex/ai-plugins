@@ -188,18 +188,31 @@ def bump_check(repo: str | Path, plugin: str, old: str, new: str, base: str, rel
         why = f"版を確かめる値を読めない: {'・'.join(obs.unreadable)}。推定で上げない"
         return None, BumpStop(why, {**metrics, "unreadable": obs.unreadable}, 2)
     cmp = versions.compare_versions(obs.base_version, new)
-    if old == new and cmp < 0:
-        return obs.base_version, None
-    if old == new and cmp == 0:
-        own = own_released(repo, f"release/v{new}", base)
-        if own is None:
-            why = f"release/v{new} → {base} のマージ済みの PR を照会できない。推定で進めない"
-            return None, BumpStop(why, {**metrics, "unreadable": ["pr"]}, 2)
-        if own:
-            return obs.base_version, None
+    if old == new:
+        rerun = _rerun(repo, new, base, obs, cmp, metrics)
+        if rerun is not None:
+            return rerun
     d = taken(obs, new)
     if cmp < 0 and not d.is_taken:
         return None, None
+    return None, _taken_stop(plugin, new, obs, cmp, d, metrics)
+
+
+def _rerun(repo: str | Path, new: str, base: str, obs: Observed, cmp: int, metrics: dict) -> tuple[str | None, BumpStop | None] | None:
+    """作業場所がすでに新しい版のときの打ち直しの判定。打ち直しか止めるなら (already, stop)、どちらでもなければ None。"""
+    if cmp < 0:
+        return obs.base_version, None
+    if cmp > 0:
+        return None
+    own = own_released(repo, f"release/v{new}", base)
+    if own is None:
+        why = f"release/v{new} → {base} のマージ済みの PR を照会できない。推定で進めない"
+        return None, BumpStop(why, {**metrics, "unreadable": ["pr"]}, 2)
+    return (obs.base_version, None) if own else None
+
+
+def _taken_stop(plugin: str, new: str, obs: Observed, cmp: int, d: Decision, metrics: dict) -> BumpStop:
+    """新しい版がすでに出ているときに止める理由（既に出ている版と次に空いている版）。"""
     existing = obs.base_version if cmp >= 0 else d.existing
     if d.is_taken:
         nxt = d.next_free
@@ -208,4 +221,4 @@ def bump_check(repo: str | Path, plugin: str, old: str, new: str, base: str, rel
     else:
         nxt = versions.next_patch(obs.base_version)
     why = f"{plugin} の {new} はすでに出ている（{existing}）。版を戻さない（次に空いている版は {nxt}）"
-    return None, BumpStop(why, {**metrics, "existing": existing, "next_free": nxt}, 3)
+    return BumpStop(why, {**metrics, "existing": existing, "next_free": nxt}, 3)
