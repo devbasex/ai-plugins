@@ -343,6 +343,19 @@ def test_entry_env_missing_from_entry_points_to_entry_file(tree: Path):
     assert "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json の env" in item["detail"]
 
 
+def test_scope_on_an_imported_library_counts_the_entrypoints_violation(tree: Path):
+    """範囲がエントリポイントの import するモジュールだけでも、そこで増えた読みの違反で止まる。"""
+    lib = tree / "plugins/ndf/scripts/lib/repo.py"
+    lib.write_text(
+        "import os\n" + REPO_LIB.replace("def read_worktree_decl(root):", 'def read_worktree_decl(root):\n    os.environ.get("NDF_Z")')
+    )
+    code, r = run(tree, "plugins/ndf/scripts/lib/repo.py")
+    assert code == 1, r
+    assert ("env-undeclared", "NDF_Z") in kinds(r)
+    code, r = run(tree, "plugins/ndf/skills/a/SKILL.md")
+    assert code == 0 and r["metrics"]["outside"] >= 1, r
+
+
 def test_entry_dynamic_env_read_is_reported(tree: Path):
     edit(tree, 'v = os.environ.get("NDF_X")', 'v = os.environ.get("NDF_X")\n    w = os.environ.get("NDF_" + str(v))')
     code, r = run(tree)

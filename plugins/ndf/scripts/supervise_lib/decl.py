@@ -206,6 +206,8 @@ NEEDS = {
     "sprint": ("base", "test"),
     "close": ("base", "test"),
 }
+# 本番のブランチを使う雛形（`--production-branch` を受ける種別と同じ）。ほかの種別では既定ブランチを問い合わせない（git の起動を増やさない）
+USES_PRODUCTION = ("release", "sprint", "close")
 
 
 def test_kind(a) -> str:
@@ -223,7 +225,8 @@ def apply_decls(a) -> None:
 
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
     - 本番のブランチ（a.production_branch）: --production-branch → `repo.production_branch`（worktree.json の
-      production_branch → 既定ブランチ。決め方の正本は `repo.production_of`。#2097）
+      production_branch → 既定ブランチ。決め方の正本は `repo.production_of`。#2097）。既定ブランチへの補完は
+      本番を使う雛形（`USES_PRODUCTION`）だけで行う
     - テスト（a.strategy・a.test_limits・a.test_cmd・a.no_reports）: --test-cmd（雛形）→ project.json の test →
       supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
       --test-all は廃止（知らせて無視する）
@@ -240,7 +243,7 @@ def apply_decls(a) -> None:
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
     _apply_simple_decls(a, wt, sv)
-    if not a.production_branch and roots:
+    if not a.production_branch and roots and a.kind in USES_PRODUCTION:
         a.production_branch = repo.production_branch(roots[0], wt)[0]
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)

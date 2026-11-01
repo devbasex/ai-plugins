@@ -102,6 +102,12 @@ class Checker:
     def facts(self, rel: str) -> dict:
         return extract_sh.facts(self.root, rel, self.c.settings) if rel.endswith(".sh") else self.py.facts(rel)
 
+    def reached(self, rel: str) -> set[str]:
+        """`rel` が import でたどるファイル（自身を含む）。Python のエントリポイントだけたどり、ほかは自身だけ。"""
+        if rel.endswith(".py") and rel in self.c.entrypoints:
+            return {m.rel for m in self.py.reach(rel)}
+        return {rel}
+
     def draft(self, rel: str) -> dict:
         return draft(rel, self.facts(rel), self.callers.of(rel), rel in self.hooks)
 
@@ -260,20 +266,24 @@ class Checker:
         return out, metrics
 
 
-def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str]) -> tuple[list[dict], int, int]:
+def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str], reach=None) -> tuple[list[dict], int, int]:
+    """範囲（`targets`）の合否に数える違反を選ぶ。違反の `path` が範囲に無くても、`via` のファイルか、
+    `reach(path)`（エントリポイントが import でたどるモジュール）が範囲に入れば数える。"""
     allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
     hit, items, outside = set(), [], 0
     everything = not targets or any(SELF == t or t.startswith(CONTRACTS) or t.startswith(ALLOW) for t in targets)
 
-    def mine(path: str) -> bool:
-        return everything or path in targets
+    def mine(path: str, via: str = "") -> bool:
+        if everything or path in targets or (via and via.rsplit(":", 1)[0] in targets):
+            return True
+        return bool(reach and targets & reach(path))
 
     for x in found:
         k = (x["path"], x["name"], x["kind"])
         if k in allowed and x["kind"] in ALLOW_KINDS:
             hit.add(k)
             continue
-        if mine(x["path"]):
+        if mine(x["path"], x.get("via", "")):
             items.append(x)
         else:
             outside += 1
@@ -356,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     found, metrics = ck.run()
     targets = {Path(t).resolve().relative_to(root).as_posix() if Path(t).is_absolute() else t for t in a.files}
-    items, allowed, outside = judge(root, found, allow, targets)
+    items, allowed, outside = judge(root, found, allow, targets, ck.reached)
     try:
         added, base, state = allow_ratchet(root, allow_dir, allow, a.base)
     except ratchet.RatchetError as e:

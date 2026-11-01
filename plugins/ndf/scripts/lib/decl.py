@@ -5,7 +5,7 @@
 - `worktree`（チームの設定。git が追跡する）: 呼ばれた木の根 → 無ければメインディレクトリ
 - `main`（個人の設定。`.ndf/.gitignore` に載る）: メインディレクトリ → 無ければ呼ばれた木の根
 
-メインディレクトリは、共通ディレクトリの `core.worktree`（サブモジュールでは `--git-common-dir` の親が
+メインディレクトリは、共通ディレクトリの名前が `.git` ならその親、そうでなければ `core.worktree`（サブモジュールでは `--git-common-dir` の親が
 `.git/modules/<名前>` を指すため。#2054）→ `--git-common-dir` の親の順に決める。標準ライブラリと `proc` だけで書く。
 """
 
@@ -43,6 +43,8 @@ def main_dir(root) -> Path | None:
     common = proc.git_out(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if not common:
         return None
+    if Path(common).name == ".git":  # 通常の木。core.worktree を問い合わせない（git の起動を 1 回に保つ）
+        return Path(common).parent
     wt = proc.git_out(root, "config", "--file", str(Path(common) / "config"), "--get", "core.worktree")
     if wt:
         p = (Path(common) / wt).resolve()
@@ -51,7 +53,7 @@ def main_dir(root) -> Path | None:
     return Path(common).parent
 
 
-def _candidates(root, name: str):
+def _setting_candidates(root, name: str):
     """`.ndf/<name>` を探す順（重なりを除く）に返す。メインディレクトリは要るときだけ解く（git の起動を減らす）。
 
     契約に無い名前は `KeyError`。
@@ -69,4 +71,4 @@ def _candidates(root, name: str):
 def setting_path(root, name: str) -> Path | None:
     """`.ndf/<name>` の開くパス。どちらの木にも無ければ `None`。契約に無い名前は `KeyError`。"""
     places()[name]  # 契約に無い名前は探す前に KeyError
-    return next((p for p in _candidates(root, name) if p.is_file()), None)
+    return next((p for p in _setting_candidates(root, name) if p.is_file()), None)
