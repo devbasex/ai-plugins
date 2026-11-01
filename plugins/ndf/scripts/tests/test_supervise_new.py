@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+from release_repo import push_origin  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
@@ -131,13 +133,35 @@ def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
     assert "unknown" not in json.dumps(close["steps"], ensure_ascii=False)
 
 
-def test_new_sprint_and_close_with_package_plugin_still_need_versions(tmp_path):
-    """#1336 の I6: 雛形で組む経路だけが版数を要する。"""
+VERSION_LIKE = re.compile(r"\b\d+\.\d+\.\d+(?:-(?:dev|rc)\.\d+)?\b")
+
+
+def release_plans(out: Path) -> dict[str, dict]:
+    return {f.stem: json.loads(f.read_text()) for f in sorted(out.glob("*release*.json"))}
+
+
+def test_new_sprint_and_close_without_versions_write_no_version(tmp_path):
+    """#2164 の受け入れ条件 1・I1: 版を渡さずに作ったプランと sprint.json は具体的な版を持たず、作業場所・branch・承認資料は
+    版の差し込みで書く。本番は開発版のプラン release の版の記録を読む（系列）。"""
     root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    p = cli(*new_sprint_args(root, tmp_path / "m", name="m6", issue=("216",), version=None), cwd=root)
-    assert p.returncode == 2 and "--version" in p.stderr
-    p = close_cli(root, tmp_path / "c", "--version", "3.8.0-dev.1")
-    assert p.returncode == 2 and "--prod" in p.stderr and "--version" not in p.stderr.split("無い:")[-1]
+    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main", "production_branch": "live"}\n')
+    out = tmp_path / "m"
+    p = cli(*new_sprint_args(root, out, "--level", "minor", name="m6", issue=("216",), version=None), cwd=root)
+    assert p.returncode == 0, p.stderr
+    c = close_cli(root, tmp_path / "c")
+    assert c.returncode == 0, c.stderr
+    for d in (out, tmp_path / "c"):
+        assert not VERSION_LIKE.search((d / "sprint.json").read_text())
+        plans = release_plans(d)
+        assert plans, d
+        for name, plan in plans.items():
+            assert not VERSION_LIKE.search(json.dumps(plan, ensure_ascii=False)), name
+            assert plan["branch"] == "release/v{release_version}" and plan["作業場所"].endswith("/release/v{release_version}")
+            prod = plan["版"]["チャネル"] == "prod"
+            assert plan["版"]["明示"] is None and plan["版"]["系列"] == ("release" if prod else None)
+            approval = "approval-foo-v{release_base}.md"
+            assert approval in json.dumps(plan["steps"], ensure_ascii=False), name
+    assert {p["版"]["上げ幅"] for p in release_plans(out).values()} == {"minor"}
 
 
 SAMPLES = {
@@ -520,7 +544,7 @@ def plugin_repo(tmp_path):
     (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "serena")
-    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    push_origin(root)
     return root
 
 

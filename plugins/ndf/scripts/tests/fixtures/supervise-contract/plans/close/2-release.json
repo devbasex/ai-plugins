@@ -7,6 +7,13 @@
   "作業場所": "<TMP>/repo/.worktrees/release/v1.2.0-dev.2",
   "branch": "release/v1.2.0-dev.2",
   "起点": "origin/main",
+  "版": {
+    "プラグイン": "foo",
+    "チャネル": "dev",
+    "上げ幅": "patch",
+    "明示": "1.2.0-dev.2",
+    "系列": null
+  },
   "規則": "run のステップが落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。",
   "上限": 112,
   "steps": [
@@ -15,6 +22,10 @@
       "type": "run",
       "stage": "配布",
       "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0-dev.2 --base main",
+      "on_exit": {
+        "2": "stop",
+        "3": "stop"
+      },
       "on_fail": "judge",
       "next": "changelog"
     },

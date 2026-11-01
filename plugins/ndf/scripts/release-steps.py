@@ -383,6 +383,17 @@ def plan_bump(root, pdir, plugin, old, new):
     return ed
 
 
+def bump_guard(root, plugin, old, new, base) -> str | None:
+    """`bump` が書き換える前の判定（#2164 の I7。中身は release_version.bump_check）。打ち直しなら origin のベースブランチの版。"""
+    import release_version
+
+    rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
+    already, stop = release_version.bump_check(root, plugin, old, new, base, rel)
+    if stop:
+        emit(result(TOOL, "stopped", stop.summary, [], stop.metrics), code=stop.code)
+    return already
+
+
 def cmd_bump(a):
     root = git_root(a.root)
     a.base = a.base or delivery.load_delivery(root).base  # 既定は宣言のベースブランチ（#1336）
@@ -392,18 +403,16 @@ def cmd_bump(a):
     except (OSError, ValueError, KeyError) as e:
         raise StepError(f"旧版を plugin.json から読めない: {e}", 2)
     new = a.to
-    if old == new:
-        base_ver = base_version(root, pdir, f"origin/{a.base}")
-        if base_ver is None or base_ver == new:
-            raise StepError(f"旧版と新版が同じ: {old}" + ("" if base_ver else f"（origin/{a.base} の版を読めない）"))
-        # 同じステップの打ち直し（作業場所の版はすでに上げてある）
+    already = bump_guard(root, a.plugin, old, new, a.base)
+    if already:
+        # 同じステップの打ち直し（作業場所の版はすでに上げてある）か、自分の配布の後の流し直し
         emit(
             result(
                 TOOL,
                 "ok",
-                f"{a.plugin} はすでに {new}（origin/{a.base} は {base_ver}）。上げ直さない",
+                f"{a.plugin} はすでに {new}（origin/{a.base} は {already}）。上げ直さない",
                 [],
-                {"plugin": a.plugin, "from": base_ver, "to": new, "already": True},
+                {"plugin": a.plugin, "from": already, "to": new, "already": True},
             )
         )
     ed = plan_bump(root, pdir, a.plugin, old, new)

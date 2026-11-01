@@ -1674,7 +1674,7 @@ def test_new_sprint_without_design_skips_gate(tmp_path):
     assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
 
 
-@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"], ["--name", "m", "--issue", "1"]])
+@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
 def test_new_sprint_rejects_bad_args(tmp_path, args):
     assert cli("new", "sprint", "--worktree", str(tmp_path), *args).returncode == 2
 
@@ -2059,6 +2059,7 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
         return real(plans, adm, args)
 
     monkeypatch.setattr(flow, "run_stage", batch)
+    monkeypatch.setattr(queue, "fill_release_version", lambda plan, items: (None, None))  # 版の差し込みは test_release_version が見る
     done = tmp_path / "done.json"
     res = queue.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
     assert res["status"] == "ok", res

@@ -486,6 +486,7 @@ def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path,
         return [{"plan": q, "result": "完了", "report": str(paths.state_dir_of(q) / "report.md")} for q in plans]
 
     monkeypatch.setattr(flow, "run_stage", batch)
+    monkeypatch.setattr(queue, "fill_release_version", lambda plan, items: (None, None))  # 版の差し込みは test_release_version が見る
     if alone:  # 検査の関門の後・開発版の出し直し: 検査の報告だけが残っている
         report_with_pr(check, "https://github.com/o/r/pull/1915")
         queue.cmd_queue([release], 3, poll=0.05)

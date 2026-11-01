@@ -51,8 +51,9 @@ from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _refine_step, _retro_step, _spec_pr_steps
 
 
-def prod_version(version: str) -> str:
-    return re.sub(r"-.*$", "", version)
+def prod_version(version: str | None) -> str | None:
+    """明示の開発版から本番の明示の版を作る。開発版が無ければ None（本番は開発版のプランの版の記録から読む。#2164）。"""
+    return re.sub(r"-.*$", "", version) if version else None
 
 
 DESIGN_RESULTS_STAGE = "設計の結果"
@@ -185,7 +186,11 @@ def close_waves(a) -> list[dict]:
     return [
         check,
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, a.prod, "prod", changed)}, "then_of": "最終の検査"},
+        {
+            "name": "本番",
+            "plans": {"release-prod": plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)},
+            "then_of": "最終の検査",
+        },
         close,
     ]
 

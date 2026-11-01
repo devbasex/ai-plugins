@@ -19,7 +19,7 @@ from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
 from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
-from supervise_lib.queue_fill import FINISHED, fill_queue_pr, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
+from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
@@ -195,7 +195,7 @@ def start_listing(done_path: Path, all_plans: list[str], **extra) -> None:
 
 
 def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[dict], list[str]]:
-    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS を埋める。(流さないプランの items, 流すプラン) を返す。
+    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS と版の差し込みを埋める。(流さないプランの items, 流すプラン) を返す。
 
     後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由と `unfilled` を残す（#2079）。"""
     not_done = [i for i in items if i["result"] != "完了"]
@@ -211,8 +211,11 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
     skipped, runnable = [], []
     for p in stage:
         err = (None if prs is None else fill_queue_prs(p, prs)) or fill_queue_pr(p, items)
+        version = None
+        if not err:  # 版の差し込みは、ほかの差し込みを埋めた後に（差し込み前の写しに版だけを残す。#2164）
+            err, version = fill_release_version(p, items)
         if err:
-            skipped.append({"plan": p, "result": NOT_RUN, "reason": err, "unfilled": True})
+            skipped.append({"plan": p, "result": NOT_RUN, "reason": err, "unfilled": True, **({"version": version} if version else {})})
         else:
             runnable.append(p)
     return skipped, runnable

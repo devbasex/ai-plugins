@@ -12,8 +12,10 @@ from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, reject_step, with_margin
 from supervise_lib.procedures import with_record
+from supervise_lib.queue_fill import RELEASE_BASE, RELEASE_VERSION  # 版の差し込み（キューが流す直前に版の記録で埋める。#2164 の決定 7）
 
 
+BUMP_STOP = {"2": "stop", "3": "stop"}  # bump が版を読めない（2）・版がもう出ている（3）なら judge を通らずに止める（#2164 の I7）
 MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記録（PR のコメントか承認資料の末尾）
 RULE_RELEASE_DEV = (
     "run のステップが落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
@@ -37,6 +39,36 @@ def plan_release(a) -> dict:
     if not maker:
         raise DeclError(f"配布の形 {form!r} の雛形が無い（雛形のある形: {', '.join(RELEASE_FORMS)}）。その形は /ndf:release で配る")
     return maker(a)
+
+
+DEV_SERIES = "release"  # スプリントの本番のプランが版を読む開発版のプランの名前（#2164）
+
+
+def release_names(version: str | None) -> tuple[str, str]:
+    """配布のプランの (作業場所のリポジトリからの位置, branch)。版が無ければ版の差し込みで書き、キューが流す時点に埋める。"""
+    v = version or RELEASE_VERSION
+    return f".worktrees/release/v{v}", f"release/v{v}"
+
+
+def release_version_of(a) -> tuple[str, str]:
+    """(出す版, その接尾辞を外した版)。明示の版が無ければ版の差し込み（#2164）。"""
+    v = getattr(a, "version", None)
+    return (v, re.sub(r"-.*$", "", v)) if v else (RELEASE_VERSION, RELEASE_BASE)
+
+
+def version_field(a, plugin: str, dev: bool) -> dict:
+    """プランの「版」の欄（#2164）。キューの版の差し込みが読む。本番で明示の版も系列も無ければ組めない。"""
+    explicit = getattr(a, "version", None) or None
+    series = None if dev or explicit else getattr(a, "series", None) or None
+    if not dev and not explicit and not series:
+        raise DeclError("本番の配布に要る版が無い（--prod か、版を読む開発版のプランの系列）")
+    return {
+        "プラグイン": plugin,
+        "チャネル": "dev" if dev else "prod",
+        "上げ幅": getattr(a, "level", None) or "patch",
+        "明示": explicit,
+        "系列": series,
+    }
 
 
 def _validate_release_decl(rel: dict, dev: bool, a) -> tuple[str, list[str]]:
@@ -79,8 +111,7 @@ def _cleanup_step(v: str, prs: str, repo: str | None) -> dict:
 
 def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) -> list[dict]:
     """開発版の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。"""
-    v = a.version
-    base = re.sub(r"-.*$", "", v)
+    v, base = release_version_of(a)
     advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くスプリントの状態（pace: normal。#1400）
     prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
     m = re.fullmatch(r"\{queue_pr:([A-Za-z0-9._-]+)\}", prs.strip())
@@ -156,6 +187,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
             "type": "run",
             "stage": "配布",
             "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {a.base}",
+            "on_exit": dict(BUMP_STOP),
             "on_fail": "judge",
             "next": "changelog" if dev else "bump-others",
         },
@@ -305,10 +337,10 @@ def plan_release_package_plugin(a) -> dict:
     （本番のブランチ）→ 後片付け。本番は release の後に record（本番のリリースの PR へリリース記録）を挟み、落ちたら
     judge-record（record か stop）へ回す。sync-check は同期とチェックの宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
-    v, dev = a.version, a.channel == "dev"
+    dev = a.channel == "dev"
     plugin, runtimes = _validate_release_decl(a.release, dev, a)
     rts = ",".join(runtimes)
-    base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
+    v, base = release_version_of(a)  # 開発版の本番承認の提示物は正式版の番号で作る
     # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
     prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
@@ -350,6 +382,7 @@ def plan_release_package_plugin(a) -> dict:
         "作業場所": a.worktree,
         "branch": a.branch or f"release/v{v}",
         "起点": f"origin/{a.base}",
+        "版": version_field(a, plugin, dev),
         "規則": rule,
         "steps": steps,
     }

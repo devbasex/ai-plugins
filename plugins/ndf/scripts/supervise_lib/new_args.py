@@ -222,8 +222,8 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "配る版（例 10.17.11-dev.1）",
-                "sprint": "開発版の版（例 3.8.0-dev.1。release.form の雛形で配るときだけ要る）",
-                "close": "開発版の版（最終の検査で変更があったときに配る。release.form の雛形で配るときだけ要る）",
+                "sprint": "開発版の明示の版（例 3.8.0-dev.1。省けば配布のステップを流す時点に origin から次に空いている版を決める）",
+                "close": "開発版の明示の版（最終の検査で変更があったときに配る。省けば配布のステップを流す時点に決める）",
             }
         },
         "release sprint close",
@@ -302,7 +302,15 @@ NEW_ARGS = [
         },
         "sprint",
     ),
-    ("--prod", {"help": "本番の版（例 10.18.0。release.form の雛形で配るときだけ要る）"}, "close"),
+    ("--prod", {"help": "本番の明示の版（例 10.18.0。省けば開発版のプランの版の記録の基底の版）"}, "close"),
+    (
+        "--level",
+        {
+            "choices": ["patch", "minor", "major"],
+            "help": "版を流す時点に決めるときの上げ幅（既定 patch。新しい系列を始めるときだけ使い、明示の版には使わない）",
+        },
+        "sprint close",
+    ),
     (
         "--record-pr",
         {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けば配布の経路から導く。#2089）"},
@@ -320,8 +328,8 @@ NEW_REQUIRED = {
     "fix": "--worktree か --branch・--tests・--title",
     "check": "--pr か --since-last（--id と組）",
     "release": "--version・--prs（か --prs-from-queue）・--channel",
-    "sprint": "--name・--issue（release.form の雛形で配るときは --version も）",
-    "close": "--name・--issue・--state（release.form の雛形で配るときは --version・--prod も）",
+    "sprint": "--name・--issue",
+    "close": "--name・--issue・--state",
 }
 
 
@@ -412,8 +420,7 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
 
 
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
-    """sprint / close の引数の組を確かめる。版数（--version・--prod）はリリースの経路が雛形のときだけ要り、
-    宣言を読んだ後に apply_decls が確かめる（#1336）。"""
+    """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければ配布のステップを流す時点に決める（#2164）。"""
     if not (a.name and a.issue):
         ap.error(f"new {a.kind} には --name・--issue が要る")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
