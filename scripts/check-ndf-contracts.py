@@ -28,16 +28,18 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
-from allowlist import AllowError, allow_file_name, load_allow  # noqa: E402
+from allowlist import AllowError, allow_file_name, load_allow, under  # noqa: E402
 from contracts_lib import extract_sh, ratchet  # noqa: E402
 from contracts_lib.draft import Callers, draft  # noqa: E402
 from contracts_lib.extract_py import PyExtractor, is_runnable  # noqa: E402
-from contracts_lib.model import CONTRACTS, ContractError, Contracts, entry_file_name, flat_args, load  # noqa: E402
+from contracts_lib.model import CONTRACTS, ContractError, Contracts, entry_file_name, flat_args, load, positional_order  # noqa: E402
 from contracts_lib.render import render  # noqa: E402
 
 REPO = HERE.parent
 SELF = "scripts/check-ndf-contracts.py"
 ALLOW = "scripts/contract-allow"
+# チェッカ自身とその部品。変えると木全体の違反が増減するため、範囲に入れば木全体を数える
+WHOLE = (SELF, ALLOW, CONTRACTS, "scripts/contracts_lib", "scripts/lib")
 INDEX = CONTRACTS + "/index.md"
 ALLOW_KINDS = (
     "args-unparsed",
@@ -141,6 +143,22 @@ class Checker:
             out.append(
                 v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す")
             )
+        if got == want:
+            code_order: dict[str, list[str]] = {}
+            for s, p in f["positionals"]:
+                code_order.setdefault(s, []).append(p)
+            for s, names in sorted(positional_order(e["args"]).items()):
+                if names and names != code_order.get(s, []):
+                    where = f"{s}:" if s else ""
+                    order = ", ".join(code_order[s])
+                    out.append(
+                        v(
+                            "contract-stale",
+                            rel,
+                            f"arg-order:{where}",
+                            f"契約の positionals の順がコードの登録順と違う。{cf} を {order} の順にする",
+                        )
+                    )
 
     def match_env(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
         cf = self.c.entry_files[rel]
@@ -267,16 +285,17 @@ class Checker:
 
 
 def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str], reach=None) -> tuple[list[dict], int, int]:
-    """範囲（`targets`）の合否に数える違反を選ぶ。違反の `path` が範囲に無くても、`via` のファイルか、
-    `reach(path)`（エントリポイントが import でたどるモジュール）が範囲に入れば数える。"""
+    """範囲（`targets`。ファイルかディレクトリ）の合否に数える違反を選ぶ。違反の `path` が範囲に無くても、
+    `via` のファイルか、`reach(path)`（エントリポイントが import でたどるモジュール）が範囲に入れば数える。
+    チェッカ自身とその部品（`WHOLE`）が範囲に入れば木全体を数える。"""
     allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
     hit, items, outside = set(), [], 0
-    everything = not targets or any(SELF == t or t.startswith(CONTRACTS) or t.startswith(ALLOW) for t in targets)
+    everything = not targets or any(under(t, WHOLE) or under(w, targets) for t in targets for w in WHOLE)
 
     def mine(path: str, via: str = "") -> bool:
-        if everything or path in targets or (via and via.rsplit(":", 1)[0] in targets):
+        if everything or under(path, targets) or (via and under(via.rsplit(":", 1)[0], targets)):
             return True
-        return bool(reach and targets & reach(path))
+        return bool(reach and any(under(m, targets) for m in reach(path)))
 
     for x in found:
         k = (x["path"], x["name"], x["kind"])

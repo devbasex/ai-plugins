@@ -63,8 +63,8 @@
           "--file"
         ],
         "positionals": [
-          "agent",
-          "pr"
+          "pr",
+          "agent"
         ]
       },
       "record-fix": {
@@ -87,8 +87,8 @@
           "--head-branch"
         ],
         "positionals": [
-          "new_pr",
-          "pr"
+          "pr",
+          "new_pr"
         ]
       },
       "should-rotate": {

@@ -163,13 +163,22 @@ def flat_args(args: dict) -> set[tuple[str, str, str]]:
     return out
 
 
-def args_of(options: set[tuple[str, str]], positionals: set[tuple[str, str]]) -> dict:
-    """拾った引数を契約の args の形にする。"""
-    out: dict = {"options": sorted(o for s, o in options if not s), "positionals": sorted(p for s, p in positionals if not s)}
-    subs = sorted({s for s, _ in options | positionals if s})
+def args_of(options: set[tuple[str, str]], positionals: list[tuple[str, str]]) -> dict:
+    """拾った引数を契約の args の形にする。位置引数は呼び出しで並びが意味を持つため、登録した順のまま置く。"""
+    out: dict = {"options": sorted(o for s, o in options if not s), "positionals": [p for s, p in positionals if not s]}
+    subs = sorted(({s for s, _ in options} | {s for s, _ in positionals}) - {""})
     if subs:
         out["subcommands"] = {
-            s: {"options": sorted(o for t, o in options if t == s), "positionals": sorted(p for t, p in positionals if t == s)}
-            for s in subs
+            s: {"options": sorted(o for t, o in options if t == s), "positionals": [p for t, p in positionals if t == s]} for s in subs
         }
+    return out
+
+
+def positional_order(args: dict) -> dict[str, list[str]]:
+    """契約の args の位置引数を副命令ごとの並びにする（unparsed は空）。"""
+    if "unparsed" in args:
+        return {}
+    out = {"": list(args.get("positionals", []))}
+    for name, sub in args.get("subcommands", {}).items():
+        out[name] = list(sub.get("positionals", []))
     return out

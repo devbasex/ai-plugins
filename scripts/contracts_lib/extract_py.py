@@ -25,7 +25,7 @@ class ModFacts:
     runnable: bool = False
     imports: set[str] = field(default_factory=set)
     options: set[tuple[str, str]] = field(default_factory=set)  # (副命令, 引数)
-    positionals: set[tuple[str, str]] = field(default_factory=set)
+    positionals: list[tuple[str, str]] = field(default_factory=list)  # (副命令, 引数)。登録した順
     has_parser: bool = False
     argv: bool = False
     env: dict[str, int] = field(default_factory=dict)  # 名前 → 行
@@ -224,7 +224,8 @@ class _Scan(ast.NodeVisitor):
         if opts:
             self.f.options |= {(sub, o) for o in opts}
         elif strs:
-            self.f.positionals.add((sub, strs[0]))
+            if (sub, strs[0]) not in self.f.positionals:
+                self.f.positionals.append((sub, strs[0]))
 
     def _write_call(self, node, fn, recv):
         """ファイルの書き（書きモードの `open`・`write_text`・`write_bytes`・JSON の書き手）。"""
@@ -372,13 +373,15 @@ class PyExtractor:
         """エントリポイントの事実（契約の項目と同じ語で）。"""
         mods = self.reach(entry)
         own = [m for m in mods if m.rel == entry or not m.runnable]
-        args_mods = [m for m in own if m.rel == entry or not m.rel.startswith(LIB + "lib/") or m.has_parser]
         top = mods[0]
+        # 入口が sys.argv を手で読み自身のパーサーを持たないなら、import 先のパーサーは入口の引数ではない
+        manual = top.argv and not top.has_parser
+        args_mods = [top] if manual else [m for m in own if m.rel == entry or not m.rel.startswith(LIB + "lib/") or m.has_parser]
         opts = set().union(*(m.options for m in args_mods))
-        pos = set().union(*(m.positionals for m in args_mods))
+        pos = list(dict.fromkeys(p for m in args_mods for p in m.positionals))
         out = {
             "summary": top.summary,
-            "argv_manual": top.argv and not opts and not pos,
+            "argv_manual": manual or (top.argv and not opts and not pos),
             "options": opts,
             "positionals": pos,
             "env": {},

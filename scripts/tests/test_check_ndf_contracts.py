@@ -326,6 +326,34 @@ def test_entry_positional_args_are_compared(tree: Path):
     assert run(tree)[0] == 0
 
 
+def test_entry_positional_args_keep_the_registered_order(tree: Path):
+    """位置引数は登録した順で契約に載せる。並びが違えば、呼び出す側が逆に渡すため止める。"""
+    edit(tree, 'ap.add_argument("--root")', 'ap.add_argument("--root")\n    ap.add_argument("target")\n    ap.add_argument("base")')
+    _entry(tree, args={"options": ["--root"], "positionals": ["base", "target"]})
+    code, r = run(tree)
+    assert code == 1 and kinds(r) == [("contract-stale", "arg-order:")], r
+    assert "target, base" in r["items"][0]["detail"]
+    _entry(tree, args={"options": ["--root"], "positionals": ["target", "base"]})
+    assert run(tree)[0] == 0
+    code = subprocess.run(
+        [sys.executable, str(CHECK), "--root", str(tree), "--draft", "plugins/ndf/scripts/tool.py"], capture_output=True, text=True
+    )
+    assert json.loads(code.stdout)["args"]["positionals"] == ["target", "base"]
+
+
+def test_entry_manual_argv_ignores_an_imported_modules_parser(tree: Path):
+    """入口が sys.argv を手で読むなら、import 先の別用途のパーサーの引数を入口の引数にしない。"""
+    (tree / "plugins/ndf/scripts/acct.py").write_text(
+        'import argparse\n\n\ndef parser():\n    p = argparse.ArgumentParser()\n    p.add_argument("--code")\n    return p\n'
+    )
+    edit(tree, '    ap = argparse.ArgumentParser()\n    ap.add_argument("--root")\n    a = ap.parse_args()\n', "    a = sys.argv[1:]\n")
+    edit(tree, "repo.read_worktree_decl(a.root)", "repo.read_worktree_decl(a[0])")
+    edit(tree, "import repo\n", "import acct\nimport repo\n")
+    code, r = run(tree)
+    assert code == 1
+    assert ("args-unparsed", "") in kinds(r) and ("arg-undeclared", "--code") not in kinds(r), r
+
+
 def test_entry_env_in_contract_without_env_item_points_to_env_dir(tree: Path):
     (tree / "plugins/ndf/contracts/env/NDF_X.json").unlink()
     run(tree, "--render")
@@ -354,6 +382,14 @@ def test_scope_on_an_imported_library_counts_the_entrypoints_violation(tree: Pat
     assert ("env-undeclared", "NDF_Z") in kinds(r)
     code, r = run(tree, "plugins/ndf/skills/a/SKILL.md")
     assert code == 0 and r["metrics"]["outside"] >= 1, r
+
+
+@pytest.mark.parametrize("scope", ["plugins/ndf/scripts", "scripts/contracts_lib/extract_py.py", "scripts/lib/py_imports.py"])
+def test_scope_on_a_directory_or_the_checkers_parts_counts_the_violation(tree: Path, scope: str):
+    """範囲がディレクトリでも、チェッカ自身の部品（scripts/contracts_lib/・scripts/lib/）でも、木の違反で止まる。"""
+    edit(tree, 'os.environ.get("NDF_X")', 'os.environ.get("NDF_X") or os.getenv("NDF_Y")')
+    code, r = run(tree, scope)
+    assert code == 1 and ("env-undeclared", "NDF_Y") in kinds(r), r
 
 
 def test_entry_dynamic_env_read_is_reported(tree: Path):
@@ -492,7 +528,7 @@ def test_visit_call_add_argument_collects_options_and_positionals():
     f = _scan_call(src)
     assert f.has_parser is True
     assert f.options == {("", "--root"), ("", "-r")}
-    assert f.positionals == {("run", "target"), ("run", "a")}
+    assert f.positionals == [("run", "target"), ("run", "a")]
 
 
 def test_visit_call_nested_subcommand_keeps_its_parent():
@@ -506,14 +542,14 @@ def test_visit_call_nested_subcommand_keeps_its_parent():
         "hi.add_argument('--history')\n"
     )
     f = _scan_call(src)
-    assert f.positionals == {("history import", "progress")}
+    assert f.positionals == [("history import", "progress")]
     assert f.options == {("history import", "--history")}
 
 
 def test_visit_call_add_argument_without_strings_still_marks_parser():
     f = _scan_call("p.add_argument(x)")
     assert f.has_parser is True
-    assert f.options == set() and f.positionals == set()
+    assert f.options == set() and f.positionals == []
 
 
 @pytest.mark.parametrize(

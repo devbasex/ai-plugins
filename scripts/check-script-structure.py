@@ -76,7 +76,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from allowlist import AllowError, allow_file_name  # noqa: E402
+from allowlist import AllowError, allow_file_name, under  # noqa: E402
 from allowlist import load_allow as _load_rows  # noqa: E402
 from py_imports import IMPORT_ROOTS  # noqa: E402
 from py_imports import imported as _imported  # noqa: E402
@@ -85,6 +85,7 @@ from py_imports import module_file as _module_file  # noqa: E402
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 SELF = "scripts/check-script-structure.py"
+SHARED_LIB = "scripts/lib"
 MAX_LINES = 500
 KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary", "require-groups")
 LIB = "plugins/ndf/scripts/"
@@ -807,26 +808,22 @@ def _rel(root: Path, target: str) -> str:
     return "/".join(parts) or "."
 
 
-def _under(path: str, targets: set[str]) -> bool:
-    """`path` が指定のどれかと同じか、指定のディレクトリの下にあるか。"""
-    return any(t == "." or path == t or path.startswith(t + "/") for t in targets)
-
-
 class Scope:
     """位置引数のファイルの指定。違反と例外の行が指定に関わるかを決める（#1668）。"""
 
     def __init__(self, root: Path, allow_dir: Path, targets: list[str]):
         self.targets = {_rel(root, t) for t in targets}
         allow_rel = _rel(root, str(allow_dir.resolve()))
-        self.everything = _under(SELF, self.targets) or _under(allow_rel, self.targets)
+        # 例外リストの置き場と、チェッカ自身とその部品（scripts/lib/）の変更は木全体の結果を変える
+        self.everything = under(SELF, self.targets) or under(allow_rel, self.targets) or any(under(t, (SHARED_LIB,)) for t in self.targets)
         self.allow_files = {Path(t).name for t in self.targets if t.startswith(allow_rel + "/")}
 
     def row(self, r: dict) -> bool:
         """例外の行が指定に関わるか（行の `path` か、行のファイルが指定にある）。"""
-        return self.everything or _under(r["path"], self.targets) or allow_file_name(r) in self.allow_files
+        return self.everything or under(r["path"], self.targets) or allow_file_name(r) in self.allow_files
 
     def violation(self, v: dict, row: dict | None) -> bool:
-        if self.everything or _under(v["path"], self.targets) or any(_under(o, self.targets) for o in v.get("others", ())):
+        if self.everything or under(v["path"], self.targets) or any(under(o, self.targets) for o in v.get("others", ())):
             return True
         return row is not None and allow_file_name(row) in self.allow_files
 

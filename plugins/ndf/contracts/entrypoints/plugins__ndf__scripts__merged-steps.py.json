@@ -121,7 +121,11 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "1": "取り込み・CI・マージが失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "4": "PR がベースブランチと衝突している（merge-when-green・promote。mergeStateStatus が DIRTY か、マージの拒否）",
+    "10": "承認ゲート 2 で止まる（metrics.gate が production-merge）か、git branch -D が要るブランチがある（同意が要る。どちらも提示物を書く）",
+    "75": "CI の基盤待ち（merge-when-green・promote。items[].result: infra_wait）"
   },
   "callers": [
     "plugins/ndf/scripts/hook_lib/token_guard.py",

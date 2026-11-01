@@ -106,7 +106,7 @@ def facts(root: Path, rel: str, settings: dict[str, dict]) -> dict:
         "summary": summary(text),
         "argv_manual": False,
         "options": opts,
-        "positionals": set(),
+        "positionals": [],
         "env": env,
         "env_dynamic": {},
         "writes": writes,

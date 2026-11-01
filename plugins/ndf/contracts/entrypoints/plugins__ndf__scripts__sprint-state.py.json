@@ -24,8 +24,8 @@
       "--root"
     ],
     "positionals": [
-      "issue",
-      "loop_name"
+      "loop_name",
+      "issue"
     ],
     "subcommands": {
       "gate": {
@@ -43,8 +43,8 @@
           "--withdraw"
         ],
         "positionals": [
-          "name",
-          "sprint"
+          "sprint",
+          "name"
         ]
       },
       "init": {
@@ -84,8 +84,8 @@
           "--section"
         ],
         "positionals": [
-          "doc",
-          "sprint"
+          "sprint",
+          "doc"
         ]
       },
       "status": {

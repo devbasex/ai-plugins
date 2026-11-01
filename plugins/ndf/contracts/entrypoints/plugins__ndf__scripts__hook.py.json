@@ -3,23 +3,7 @@
   "path": "plugins/ndf/scripts/hook.py",
   "summary": "NDF の hook の 1 本のエントリポイント（#1142 の決定 20）。PreToolUse・Stop・Notification ほかを標準入力の JSON で受ける。",
   "args": {
-    "options": [
-      "--json",
-      "--yes"
-    ],
-    "positionals": [
-      "name"
-    ],
-    "subcommands": {
-      "add": {
-        "options": [
-          "--code"
-        ],
-        "positionals": [
-          "name"
-        ]
-      }
-    }
+    "unparsed": "sys.argv を手で読む（_args が副命令と --runtime を、_opt が --base・--root を拾う）"
   },
   "env": [
     "CLAUDE_CODE_ENTRYPOINT",

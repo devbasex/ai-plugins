@@ -65,6 +65,7 @@
         "paths": [
           "plugins/ndf",
           "scripts/script-structure-allow",
+          "scripts/lib",
           "scripts/check-script-structure.py"
         ],
         "ci_jobs": [
@@ -82,6 +83,7 @@
           "plugins/ndf",
           "scripts/contract-allow",
           "scripts/contracts_lib",
+          "scripts/lib",
           "scripts/check-ndf-contracts.py"
         ],
         "ci_jobs": [

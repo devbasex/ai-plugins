@@ -639,10 +639,11 @@ def test_allow_rows_count_by_their_path_or_their_file(tmp_path: Path):
     assert code == 1 and kinds(r) == {("unused-allow", "plugins/ndf/scripts/gone.py:f")}
 
 
-def test_giving_the_check_itself_counts_every_violation(tmp_path: Path):
+@pytest.mark.parametrize("scope", ["scripts/check-script-structure.py", "scripts/lib/py_imports.py"])
+def test_giving_the_check_itself_counts_every_violation(tmp_path: Path, scope: str):
     scoped_tree(tmp_path)
     full = run(tmp_path, [])[1]
-    code, r = run(tmp_path, [], "scripts/check-script-structure.py")
+    code, r = run(tmp_path, [], scope)
     assert code == 1 and r["items"] == full["items"]
 
 

@@ -3,23 +3,7 @@
   "path": "plugins/ndf/scripts/relay.py",
   "summary": "NDF のラッパー relay.py のランチャー（#895・#1142 の C6）。",
   "args": {
-    "options": [
-      "--json",
-      "--yes"
-    ],
-    "positionals": [
-      "name"
-    ],
-    "subcommands": {
-      "add": {
-        "options": [
-          "--code"
-        ],
-        "positionals": [
-          "name"
-        ]
-      }
-    }
+    "unparsed": "sys.argv を手で読む（relay_lib.main が副命令ごとに振り分ける）"
   },
   "env": [
     "CLAUDE_CONFIG_DIR",

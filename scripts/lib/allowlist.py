@@ -60,6 +60,11 @@ def load_allow(
     return rows
 
 
+def under(path: str, targets: Iterable[str]) -> bool:
+    """`path` が範囲の指定のどれかと同じか、指定のディレクトリの下にあるか（`.` は木全体）。"""
+    return any(t == "." or path == t or path.startswith(t + "/") for t in targets)
+
+
 def unused(allow: Iterable[dict], hit: set[tuple[str, str, str]]) -> list[dict]:
     """違反に当たらなかった項目（`unused-allow` の候補）。`hit` は当たった `(path, name, kind)`。"""
     return [r for r in allow if (r["path"], r["name"], r["kind"]) not in hit]
