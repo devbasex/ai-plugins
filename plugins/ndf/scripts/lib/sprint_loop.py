@@ -223,6 +223,20 @@ EPOCH = clock.parse("1970-01-01T00:00:00Z")  # 時刻の無い答え（止まっ
 def gate2_answer(lap: dict, since: str | None = None) -> str | None:
     """承認ゲート 2 の答え: 止まった時刻（since）より後の、周回の状態の利用者の承認と差し戻しの記録のうち最新のもの。
     approved / rejected、どちらも無ければ None。since より前の答え（同じ周回の前の関門への答え）は数えない。"""
+    path = lap.get("state_path") or ""
+    state = jsonio.read(path, missing={}, broken={}, want=dict) if path else {}
+    try:
+        rows = gr.read_rejections()
+    except jsonio.JsonReadError:
+        rows = []
+    sp = str(Path(path).resolve()) if path else None
+    # 承認の行（#2183）は状態ファイルの gates の方で読む
+    rejections = [r for r in rows if gr.is_rejection(r) and r.get("gate") == GATE_2 and r.get("sprint") == sp]
+    return latest_gate2_answer(state.get("gates", []), rejections, since)
+
+
+def latest_gate2_answer(gates: list[dict], rejections: list[dict], since: str | None) -> str | None:
+    """関門 2 の利用者の承認（gates）と差し戻し（rejections）のうち、since 以後で最新のもの。同じ時刻は承認を採る。"""
     after = clock.parse(since, naive="utc") if since else None
 
     def fresh(at):
@@ -231,17 +245,8 @@ def gate2_answer(lap: dict, since: str | None = None) -> str | None:
             return t or EPOCH
         return t if t is not None and t >= after else None
 
-    state = jsonio.read(lap.get("state_path") or "", missing={}, broken={}, want=dict) if lap.get("state_path") else {}
-    answers = [
-        (k, "approved") for g in state.get("gates", []) if g.get("name") == GATE_2 and g.get("by") != "mvv" and (k := fresh(g.get("at")))
-    ]
-    try:
-        rows = gr.read_rejections()
-    except jsonio.JsonReadError:
-        rows = []
-    sp = str(Path(lap.get("state_path") or "").resolve()) if lap.get("state_path") else None
-    rows = [r for r in rows if gr.is_rejection(r)]  # 承認の行（#2183）は状態ファイルの gates の方で読む
-    answers += [(k, "rejected") for r in rows if r.get("gate") == GATE_2 and r.get("sprint") == sp and (k := fresh(r.get("at")))]
+    answers = [(k, "approved") for g in gates if g.get("name") == GATE_2 and g.get("by") != "mvv" and (k := fresh(g.get("at")))]
+    answers += [(k, "rejected") for r in rejections if (k := fresh(r.get("at")))]
     return max(answers, key=lambda a: a[0])[1] if answers else None
 
 
