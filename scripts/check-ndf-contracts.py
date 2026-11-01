@@ -131,6 +131,9 @@ class Checker:
 
     def match_args(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
         cf = self.c.entry_files[rel]
+        if f.get("args_unresolved"):
+            out.append(v("args-unparsed", rel, "", f"副命令か引数を受けるパーサーを静的に決められない。{cf} の args を unparsed にする"))
+            return
         if f["argv_manual"] or "unparsed" in e["args"]:
             out.append(v("args-unparsed", rel, "", "sys.argv を手で読む（引数を静的に拾えない）"))
         if "unparsed" in e["args"]:

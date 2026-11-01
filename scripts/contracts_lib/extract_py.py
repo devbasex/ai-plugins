@@ -15,6 +15,7 @@ from py_imports import IMPORT_ROOTS, LIB, imported_tree, module_file
 
 FILE_NAME = re.compile(r"^[\w*.-]*\w[\w*-]*\.(json|jsonl|md|txt|log|yml|yaml|toml|sh|csv|html|db|lock|pid|rc|out)$")
 JSONIO_WRITERS = {"write_atomic", "append_jsonl"}
+PARSER_GROUPS = {"add_argument_group", "add_mutually_exclusive_group"}
 
 
 @dataclass
@@ -39,6 +40,9 @@ class ModFacts:
     summary: str = ""
     constants: dict[str, object] = field(default_factory=dict)
     unparsed: bool = False
+    args_unresolved: bool = False  # 定数でない名前の副命令がある
+    loose_args: bool = False  # 補助関数の引数や戻り値のパーサーへ足した引数がある（副命令があれば決められない）
+    has_subparsers: bool = False
 
 
 def _const_str(node: ast.AST, consts: dict) -> str | None:
@@ -139,7 +143,11 @@ class _Scan(ast.NodeVisitor):
         fn = _func_name(call.func)
         recv = getattr(call.func, "value", None)
         recv_id = recv.id if isinstance(recv, ast.Name) else None
-        if fn == "add_subparsers":
+        if fn == "ArgumentParser":
+            self.sub_of[tgt.id] = ""
+        elif fn in PARSER_GROUPS and recv_id in self.sub_of:
+            self.sub_of[tgt.id] = self.sub_of[recv_id]
+        elif fn == "add_subparsers":
             self.subparsers_of[tgt.id] = self.sub_of.get(recv_id, "") if recv_id else ""
         elif fn == "add_parser":
             name = _const_str(call.args[0], self.f.constants) if call.args else None
@@ -215,10 +223,17 @@ class _Scan(ast.NodeVisitor):
 
     def _argparse_call(self, node, fn, recv):
         """`add_argument` の引数（副命令ごとのオプションか位置引数）。"""
+        if fn == "add_subparsers":
+            self.f.has_subparsers = True
+        if fn == "add_parser" and (not node.args or _const_str(node.args[0], self.f.constants) is None):
+            self.f.args_unresolved = True  # 定数表や引数から作る副命令
         if fn != "add_argument":
             return
         self.f.has_parser = True
-        sub = self.sub_of.get(recv.id, "") if isinstance(recv, ast.Name) else ""
+        known = isinstance(recv, ast.Name) and recv.id in self.sub_of
+        # 補助関数の引数や戻り値のパーサーは、副命令があればどの副命令の引数か決められない（facts が決める）
+        self.f.loose_args |= not known
+        sub = self.sub_of[recv.id] if known else ""
         strs = [s for s in (_const_str(a, self.f.constants) for a in node.args) if s]
         opts = [s for s in strs if s.startswith("-")]
         if opts:
@@ -382,6 +397,11 @@ class PyExtractor:
         out = {
             "summary": top.summary,
             "argv_manual": manual or (top.argv and not opts and not pos),
+            "args_unresolved": not manual
+            and (
+                any(m.args_unresolved for m in args_mods)
+                or (any(m.loose_args for m in args_mods) and any(m.has_subparsers for m in args_mods))
+            ),
             "options": opts,
             "positionals": pos,
             "env": {},

@@ -3,36 +3,7 @@
   "path": "plugins/ndf/skills/pr-review/scripts/pr-review-steps.py",
   "summary": "pr-review-steps.py: `/ndf:pr-review` の手順のうち、判断の要らない収集・判定・投稿を行う（#860）。",
   "args": {
-    "options": [
-      "--branch",
-      "--focus",
-      "--out-dir",
-      "--pr",
-      "--repo"
-    ],
-    "positionals": [
-      "pr"
-    ],
-    "subcommands": {
-      "delegate": {
-        "options": [
-          "--poll",
-          "--timeout"
-        ],
-        "positionals": [
-          "cli"
-        ]
-      },
-      "finish": {
-        "options": [
-          "--findings",
-          "--out-dir",
-          "--repo",
-          "--reviewer"
-        ],
-        "positionals": []
-      }
-    }
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "GH_TOKEN",

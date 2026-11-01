@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 WORKFLOW = ".github/workflows/script-structure.yml"
@@ -63,13 +64,13 @@ def added(root: Path, sha: str, allow_rel: str, now: list[dict], name_of) -> lis
     before = _names_at(root, sha, allow_rel)
     now_names = {name_of(r) for r in now}
     gone = [_row_at(root, sha, allow_rel, f) for f in sorted(before - now_names)]
-    removed = {(r.get("kind"), r.get("name")) for r in gone}
+    removed = Counter((r.get("kind"), r.get("name")) for r in gone)
     out = []
     for r in now:
         if name_of(r) in before:
             continue
-        if (r["kind"], r["name"]) in removed:
-            removed.discard((r["kind"], r["name"]))
+        if removed[(r["kind"], r["name"])] > 0:
+            removed[(r["kind"], r["name"])] -= 1
             continue
         out.append(r)
     return out

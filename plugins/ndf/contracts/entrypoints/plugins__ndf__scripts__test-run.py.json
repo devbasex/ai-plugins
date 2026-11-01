@@ -3,31 +3,7 @@
   "path": "plugins/ndf/scripts/test-run.py",
   "summary": "テストの実行の入口（#1334 F2・F4・F5）。supervise の run のステップが呼ぶ。",
   "args": {
-    "options": [
-      "--base",
-      "--limit",
-      "--root",
-      "--template",
-      "--test-kind"
-    ],
-    "positionals": [],
-    "subcommands": {
-      "scope": {
-        "options": [
-          "--changed",
-          "--only-kind",
-          "--paths"
-        ],
-        "positionals": []
-      },
-      "whole": {
-        "options": [
-          "--paths",
-          "--pr"
-        ],
-        "positionals": []
-      }
-    }
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "GH_TOKEN",

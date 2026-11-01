@@ -3,61 +3,7 @@
   "path": "plugins/ndf/scripts/pr-steps.py",
   "summary": "pr-steps.py: pr の決まった手順（#858）。LLM に残るのはコミットメッセージ・PR 本文・同意の判断だけ。",
   "args": {
-    "options": [
-      "--mode",
-      "--root",
-      "--stages"
-    ],
-    "positionals": [],
-    "subcommands": {
-      "commit": {
-        "options": [
-          "--message",
-          "--message-file"
-        ],
-        "positionals": []
-      },
-      "create": {
-        "options": [
-          "--base",
-          "--body-file",
-          "--draft",
-          "--title"
-        ],
-        "positionals": []
-      },
-      "plan": {
-        "options": [
-          "--base",
-          "--draft",
-          "--force",
-          "--message"
-        ],
-        "positionals": []
-      },
-      "report": {
-        "options": [],
-        "positionals": [
-          "pr"
-        ]
-      },
-      "template": {
-        "options": [
-          "--force",
-          "--mode",
-          "--out"
-        ],
-        "positionals": []
-      },
-      "update": {
-        "options": [
-          "--body-file",
-          "--pr",
-          "--title"
-        ],
-        "positionals": []
-      }
-    }
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "CROSS_REVIEW_TMP_DIR",

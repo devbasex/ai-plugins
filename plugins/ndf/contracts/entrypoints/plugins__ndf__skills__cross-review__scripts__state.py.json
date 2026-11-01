@@ -164,7 +164,7 @@
     }
   ],
   "stdin": "none",
-  "stdout": "none",
+  "stdout": "kv",
   "writes": [],
   "reads": [],
   "exit": {

@@ -3,46 +3,7 @@
   "path": "plugins/ndf/skills/backlog-refinement/scripts/upkeep.py",
   "summary": "upkeep.py: backlog-refinement の手順 1（候補の収集）と手順 3（反映）の決まった手順。",
   "args": {
-    "options": [
-      "--repo",
-      "--state-dir"
-    ],
-    "positionals": [],
-    "subcommands": {
-      "apply": {
-        "options": [
-          "--max-wait",
-          "--max-waits",
-          "--plan"
-        ],
-        "positionals": []
-      },
-      "candidates": {
-        "options": [
-          "--add",
-          "--all",
-          "--limit",
-          "--since-ref"
-        ],
-        "positionals": []
-      },
-      "rank": {
-        "options": [
-          "--approved",
-          "--auto-threshold",
-          "--capacity",
-          "--dependents-steps",
-          "--label-floor",
-          "--large-min-size",
-          "--large-slot-ratio",
-          "--margin-steps",
-          "--scale",
-          "--scores",
-          "--size-exponent"
-        ],
-        "positionals": []
-      }
-    }
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "GH_TOKEN",

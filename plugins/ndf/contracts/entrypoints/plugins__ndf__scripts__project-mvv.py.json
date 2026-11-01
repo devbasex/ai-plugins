@@ -3,38 +3,7 @@
   "path": "plugins/ndf/scripts/project-mvv.py",
   "summary": "project-mvv.py: プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）の判定・候補・照合・承認・改訂の兆候（#1366）。",
   "args": {
-    "options": [
-      "--accept-unknown",
-      "--body",
-      "--budget",
-      "--by",
-      "--current",
-      "--diff",
-      "--format",
-      "--kind",
-      "--materials",
-      "--milestone",
-      "--mvv",
-      "--out-dir",
-      "--reason",
-      "--reason-file",
-      "--repo",
-      "--request-file",
-      "--root",
-      "--sprint",
-      "--trend-commits",
-      "--trend-issues",
-      "--version"
-    ],
-    "positionals": [],
-    "subcommands": {
-      "schema": {
-        "options": [
-          "--out"
-        ],
-        "positionals": []
-      }
-    }
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "CLAUDE_CONFIG_DIR",

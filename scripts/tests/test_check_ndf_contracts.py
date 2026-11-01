@@ -269,6 +269,19 @@ def test_renaming_an_allow_item_with_the_same_kind_and_name_passes(tree: Path):
     assert code == 0, r
 
 
+def test_moving_two_allow_items_with_the_same_kind_and_name_offsets_both(monkeypatch):
+    """同じ kind・name の項目を 2 つ同時に付け替えても、消した 2 件で足した 2 件を相殺する。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import ratchet
+
+    rows = {f"{p}.json": {"kind": "env-undeclared", "name": "NDF_Y", "path": p} for p in ("a", "b", "c", "d")}
+    monkeypatch.setattr(ratchet, "_names_at", lambda *a: {"a.json", "b.json"})
+    monkeypatch.setattr(ratchet, "_row_at", lambda root, sha, rel, name: rows[name])
+    now = [rows["c.json"], rows["d.json"]]
+    assert ratchet.added(Path("."), "sha", "x", now, lambda r: f"{r['path']}.json") == []
+    assert ratchet.added(Path("."), "sha", "x", [*now, dict(rows["c.json"], path="e")], lambda r: f"{r['path']}.json") != []
+
+
 def test_first_version_before_ci_runs_the_check_is_initial(tree: Path):
     (tree / "scripts").mkdir(exist_ok=True)
     (tree / "scripts/check-ndf-contracts.py").write_text("# exists at the merge base\n")
@@ -544,6 +557,49 @@ def test_visit_call_nested_subcommand_keeps_its_parent():
     f = _scan_call(src)
     assert f.positionals == [("history import", "progress")]
     assert f.options == {("history import", "--history")}
+    assert not f.args_unresolved and not f.loose_args
+
+
+@pytest.mark.parametrize(
+    "src, unresolved, loose",
+    [
+        # 定数表の繰り返しで作る副命令
+        ("s = p.add_subparsers()\nfor n in NAMES:\n    k = s.add_parser(n)\n    k.add_argument('--a')\n", True, True),
+        # 補助関数の引数のパーサーへ足す引数
+        ("s = p.add_subparsers()\ndef add(q):\n    q.add_argument('--root')\n", False, True),
+    ],
+)
+def test_visit_call_marks_subcommands_it_cannot_resolve(src, unresolved, loose):
+    f = _scan_call("p = argparse.ArgumentParser()\n" + src)
+    assert (f.args_unresolved, f.loose_args, f.has_subparsers) == (unresolved, loose, True)
+
+
+def test_visit_call_group_options_belong_to_their_subcommand():
+    src = (
+        "p = argparse.ArgumentParser()\n"
+        "s = p.add_subparsers()\n"
+        "r = s.add_parser('run')\n"
+        "g = r.add_mutually_exclusive_group()\n"
+        "g.add_argument('--a')\n"
+    )
+    f = _scan_call(src)
+    assert f.options == {("run", "--a")} and not f.loose_args
+
+
+def test_unresolved_subcommands_are_args_unparsed(tmp_path: Path):
+    from contracts_lib.extract_py import PyExtractor
+
+    (tmp_path / "t.py").write_text(
+        "import argparse\n"
+        "def main():\n"
+        "    ap = argparse.ArgumentParser()\n"
+        "    sub = ap.add_subparsers()\n"
+        "    for n in ('a', 'b'):\n"
+        "        sub.add_parser(n).add_argument('--x')\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
+    assert PyExtractor(tmp_path, {}).facts("t.py")["args_unresolved"] is True
 
 
 def test_visit_call_add_argument_without_strings_still_marks_parser():

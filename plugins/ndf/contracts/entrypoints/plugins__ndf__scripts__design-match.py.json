@@ -3,16 +3,20 @@
   "path": "plugins/ndf/scripts/design-match.py",
   "summary": "design-match.py: 完了判定の設計との突き合わせのうち、機械で行う 2 つ（#1241）。LLM を呼ばず、読むだけ。",
   "args": {
-    "options": [
-      "--design",
-      "--issue"
-    ],
+    "options": [],
     "positionals": [],
     "subcommands": {
       "specs": {
         "options": [
           "--base",
           "--max-lines"
+        ],
+        "positionals": []
+      },
+      "tests": {
+        "options": [
+          "--design",
+          "--issue"
         ],
         "positionals": []
       }

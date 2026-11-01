@@ -3,18 +3,7 @@
   "path": "plugins/ndf/scripts/gate-rejections.py",
   "summary": "承認ゲートの利用者の答え（差し戻し・承認）を記録し、差し戻しを承認ゲートごとに数える（#1833・#2183）。",
   "args": {
-    "options": [
-      "--at",
-      "--gate",
-      "--issue",
-      "--outcome",
-      "--pr",
-      "--repo",
-      "--root",
-      "--sprint",
-      "--what"
-    ],
-    "positionals": []
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "CLAUDE_CONFIG_DIR",

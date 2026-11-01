@@ -3,20 +3,7 @@
   "path": "plugins/ndf/scripts/check-trigger.py",
   "summary": "check-trigger.py: 検査（構造改善と実装レビュー）のトリガーを判定し、検査の範囲の用意と後始末と記録を持つ（#1078）。",
   "args": {
-    "options": [
-      "--advance-done",
-      "--failed",
-      "--final",
-      "--id",
-      "--of",
-      "--pr",
-      "--review",
-      "--root",
-      "--since",
-      "--state",
-      "--target-pr"
-    ],
-    "positionals": []
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
     "GH_TOKEN",

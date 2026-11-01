@@ -3,12 +3,7 @@
   "path": "plugins/ndf/scripts/release-steps.py",
   "summary": "リポジトリが宣言した配布のコマンドを、配布の段階に合わせて走らせる（#893）。",
   "args": {
-    "options": [
-      "--approval",
-      "--approved-sha",
-      "--promote",
-      "--version"
-    ],
+    "options": [],
     "positionals": [],
     "subcommands": {
       "approval-facts": {
@@ -88,12 +83,16 @@
           "--base",
           "--head",
           "--plugin",
-          "--prs"
+          "--promote",
+          "--prs",
+          "--version"
         ],
         "positionals": []
       },
       "release": {
         "options": [
+          "--approval",
+          "--approved-sha",
           "--channel",
           "--ci-wait",
           "--plugins",

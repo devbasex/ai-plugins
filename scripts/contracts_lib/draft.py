@@ -67,6 +67,8 @@ def draft(path: str, facts: dict, callers: list[str], hook: bool) -> dict:
     args = (
         {"unparsed": "sys.argv を手で読む（柱 P8 で argparse へ移す）"}
         if facts["argv_manual"]
+        else {"unparsed": "副命令か引数を受けるパーサーを静的に決められない"}
+        if facts.get("args_unresolved")
         else args_of(facts["options"], facts["positionals"])
     )
     settings: dict[str, set] = {}
