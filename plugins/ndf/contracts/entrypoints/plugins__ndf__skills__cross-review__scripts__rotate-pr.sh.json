@@ -3,11 +3,7 @@
   "path": "plugins/ndf/skills/cross-review/scripts/rotate-pr.sh",
   "summary": "PR rotation — light モード (default) / squash モード",
   "args": {
-    "options": [
-      "--help",
-      "--mode"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

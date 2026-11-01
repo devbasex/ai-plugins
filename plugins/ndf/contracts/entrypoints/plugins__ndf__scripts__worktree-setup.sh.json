@@ -3,12 +3,7 @@
   "path": "plugins/ndf/scripts/worktree-setup.sh",
   "summary": "NDF plugin: 作業ツリー運用をこのリポジトリへ導入する。",
   "args": {
-    "options": [
-      "--",
-      "--force",
-      "--from"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "WT_DECLARATION_FILE",

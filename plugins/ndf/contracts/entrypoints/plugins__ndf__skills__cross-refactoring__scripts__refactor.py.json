@@ -21,9 +21,12 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_LOCK_DIR",
     "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_SKIP_AUTH_CHECK",
+    "NDF_STEP_EXTEND_FILE",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -57,7 +60,7 @@
     }
   ],
   "stdin": "none",
-  "stdout": "none",
+  "stdout": "kv",
   "writes": [],
   "reads": [],
   "exit": {

@@ -708,3 +708,61 @@ def test_shell_positionals_without_options_are_args_unparsed(tmp_path: Path, bod
 
     (tmp_path / "t.sh").write_text("#!/bin/bash\n" + body)
     assert facts(tmp_path, "t.sh", {})["args_unresolved"] is unresolved
+
+
+@pytest.mark.parametrize(
+    ("body", "unresolved"),
+    [
+        # --オプションに加えて副命令を読む（worktree-deps.sh の形。#2363 round 7）
+        ('SUB="${1:-}"\nshift\nwhile [ $# -gt 0 ]; do\n  case "$1" in\n    --x) shift ;;\n  esac\ndone\n', True),
+        # case の --名前) 以外の腕で位置引数を受ける
+        ('while [ $# -gt 0 ]; do\n  case "$1" in\n    --x) shift ;;\n    *) PR="$1"; shift ;;\n  esac\ndone\n', True),
+        # --名前) の腕の中で値を読むだけなら、オプションだけを受ける
+        (
+            'while [ $# -gt 0 ]; do\n  case "$1" in\n    --x)\n      X="$2"\n      shift 2\n      ;;\n    *) exit 2 ;;\n  esac\ndone\n',
+            False,
+        ),
+    ],
+)
+def test_shell_positionals_beside_options_are_args_unparsed(tmp_path: Path, body: str, unresolved: bool):
+    from contracts_lib.extract_sh import facts
+
+    (tmp_path / "t.sh").write_text("#!/bin/bash\n" + body)
+    assert facts(tmp_path, "t.sh", {})["args_unresolved"] is unresolved
+
+
+@pytest.mark.parametrize(
+    "src, dynamic",
+    [
+        ("def main(a):\n    Path(a.output).write_text('x')\n", {"main"}),
+        ("def main(a):\n    open(a.output, 'w')\n", {"main"}),
+        ("def main(a):\n    Path('d/b.md').write_text('x')\n", set()),
+        ("def main(a):\n    open(a.output)\n", set()),
+    ],
+)
+def test_visit_call_write_without_a_file_name_is_file_dynamic(src, dynamic):
+    assert _scan_call(src).file_dynamic == dynamic
+
+
+def test_entry_write_without_a_file_name_is_reported(tree: Path):
+    edit(tree, 'Path("out.json").write_text("{}")', 'Path("out.json").write_text("{}")\n    Path(a.root).write_text("")')
+    code, r = run(tree)
+    assert code == 1
+    item = _item(r, "file-dynamic")
+    assert item["path"] == "plugins/ndf/scripts/tool.py" and item["name"] == "main"
+
+
+def test_imports_resolve_from_the_scripts_dir_and_relative_levels(tmp_path: Path):
+    """パッケージの奥のモジュールが `from ..paths import x`・`import pkg.y` で読む先もたどる（#2363 round 7）。"""
+    from contracts_lib.extract_py import PyExtractor
+
+    s = tmp_path / "plugins/ndf/skills/k/scripts"
+    (s / "pkg/commands").mkdir(parents=True)
+    (s / "e.py").write_text("from pkg.commands import setup\nif __name__ == '__main__':\n    setup.run()\n")
+    (s / "pkg/__init__.py").write_text("")
+    (s / "pkg/commands/__init__.py").write_text("")
+    (s / "pkg/commands/setup.py").write_text("from ..paths import P\nimport pkg.other\ndef run():\n    return P\n")
+    (s / "pkg/paths.py").write_text("import os\nP = os.environ.get('NDF_REL')\n")
+    (s / "pkg/other.py").write_text("import os\nQ = os.getenv('NDF_ABS')\n")
+    env = PyExtractor(tmp_path, {}).facts("plugins/ndf/skills/k/scripts/e.py")["env"]
+    assert {"NDF_REL", "NDF_ABS"} <= set(env), env

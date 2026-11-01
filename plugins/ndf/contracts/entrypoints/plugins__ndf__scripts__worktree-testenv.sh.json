@@ -3,16 +3,7 @@
   "path": "plugins/ndf/scripts/worktree-testenv.sh",
   "summary": "NDF plugin: 作業ツリーごとにテスト環境を分けて立てる。",
   "args": {
-    "options": [
-      "--",
-      "--idle",
-      "--kind",
-      "--out",
-      "--profile",
-      "--tag",
-      "--volumes"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "WT_DOCKER_COMMAND",

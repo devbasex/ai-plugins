@@ -3,10 +3,7 @@
   "path": "plugins/ndf/scripts/worktree-deps.sh",
   "summary": "NDF plugin: worktree の依存の用意（#1337）。",
   "args": {
-    "options": [
-      "--if-unprepared"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "TMPDIR",

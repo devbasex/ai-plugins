@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from py_imports import IMPORT_ROOTS, LIB, imported_tree, module_file
+from py_imports import IMPORT_ROOTS, LIB, imported_files, scripts_root
 
 FILE_NAME = re.compile(r"^[\w*.-]*\w[\w*-]*\.(json|jsonl|md|txt|log|yml|yaml|toml|sh|csv|html|db|lock|pid|rc|out)$")
 JSONIO_WRITERS = {"write_atomic", "append_jsonl"}
@@ -31,6 +31,7 @@ class ModFacts:
     argv: bool = False
     env: dict[str, int] = field(default_factory=dict)  # 名前 → 行
     env_dynamic: set[str] = field(default_factory=set)  # 関数名
+    file_dynamic: set[str] = field(default_factory=set)  # ファイル名を静的に拾えない書きを持つ関数名
     writes: dict[str, int] = field(default_factory=dict)  # ファイル名か glob → 行
     setting_keys: dict[tuple[str, str], int] = field(default_factory=dict)  # (設定ファイル, キー) → 行
     setting_opens: dict[tuple[str, str], int] = field(default_factory=dict)  # (設定ファイル, 関数) → 行
@@ -284,6 +285,8 @@ class _Scan(ast.NodeVisitor):
 
     def _write(self, node, line):
         names = _glob_of(node, self.f.constants)
+        if not names:
+            self.f.file_dynamic.add(self.func)  # 名前を組み立てて書く（設計の決定 5 の file-dynamic）
         for n in names:
             if n not in self.settings:
                 self.f.writes.setdefault(n, line)
@@ -364,8 +367,10 @@ class PyExtractor:
             return f
         f.runnable = is_runnable(tree)
         f.constants = _module_constants(tree)
-        roots = (Path(rel).parent.as_posix() + "/", *IMPORT_ROOTS)
-        f.imports = {m for m in (module_file(self.root, n, roots) for n in imported_tree(rel, tree, roots)) if m}
+        # 入口の scripts ディレクトリ（`sys.path` の先頭）を残し、相対 import は level で解く
+        here = Path(rel).parent.as_posix() + "/"
+        roots = tuple(dict.fromkeys(r for r in (scripts_root(rel), here, *IMPORT_ROOTS) if r))
+        f.imports = imported_files(self.root, rel, tree, roots)
         doc = ast.get_docstring(tree) or ""
         f.summary = doc.strip().split("\n")[0] if doc else ""
         _Scan(f, self.settings, self.readers).visit(tree)
@@ -406,6 +411,7 @@ class PyExtractor:
             "positionals": pos,
             "env": {},
             "env_dynamic": {},
+            "file_dynamic": {},
             "writes": {},
             "setting_keys": {},
             "setting_opens": {},
@@ -419,6 +425,8 @@ class PyExtractor:
                 out["env"].setdefault(k, f"{m.rel}:{line}")
             for fn in m.env_dynamic:
                 out["env_dynamic"].setdefault((m.rel, fn), m.rel)
+            for fn in m.file_dynamic:
+                out["file_dynamic"].setdefault((m.rel, fn), m.rel)
             for k, line in m.writes.items():
                 out["writes"].setdefault(k, f"{m.rel}:{line}")
             for k, line in m.setting_keys.items():

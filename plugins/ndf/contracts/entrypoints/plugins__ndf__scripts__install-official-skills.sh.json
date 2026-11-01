@@ -3,14 +3,7 @@
   "path": "plugins/ndf/scripts/install-official-skills.sh",
   "summary": "Anthropic公式Skillsのインストーラ",
   "args": {
-    "options": [
-      "--all",
-      "--help",
-      "--list",
-      "--scope",
-      "--update"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "HOME",

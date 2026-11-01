@@ -3,14 +3,7 @@
   "path": "plugins/ndf/scripts/pr-body-decisions.sh",
   "summary": "NDF plugin: 設計 Pull Request の本文の「決めたこと」の節を、設計文書の決定の見出しと突き合わせる。",
   "args": {
-    "options": [
-      "--after-push",
-      "--base",
-      "--body",
-      "--repo",
-      "--wait-seconds"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

@@ -3,15 +3,7 @@
   "path": "plugins/ndf/scripts/progress-record.sh",
   "summary": "NDF plugin: issue の本文へ工程の進行を記録する。",
   "args": {
-    "options": [
-      "--mode",
-      "--note",
-      "--pace",
-      "--plan",
-      "--repo",
-      "--worktree"
-    ],
-    "positionals": []
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "NDF_PROGRESS_LOCK_TIMEOUT",

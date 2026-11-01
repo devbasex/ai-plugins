@@ -1,8 +1,8 @@
 """シェルのエントリポイントから、引数・環境変数・ファイルの書き・終了コード・設定の読みを拾う。
 
 環境変数は「ファイルの中で代入されない大文字の変数」、引数は `case` の `--名前)`、書きは `>`・`>>` の
-文字列のファイル名。`source` した先は追わない（設計の決定 5）。`case` の `--名前)` が無いのに関数の外で位置引数
-（`$1`・`"$@"`・`$#`・`shift`）を読む入口は、位置引数や副命令を静的に拾えないため `args_unresolved` にする（#2363 round 6）。
+文字列のファイル名。`source` した先は追わない（設計の決定 5）。関数の外で位置引数（`$1`・`"$@"`・`$#`・`shift`）を
+読む入口は、`case` の `--名前)` があっても位置引数や副命令を静的に拾えないため `args_unresolved` にする（#2363 round 6・7）。
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ EXIT = re.compile(r"\bexit\s+([0-9]+)\b")
 POSITIONAL = re.compile(r"\$[1-9#@*]|\$\{(?:[1-9@*]|#\})|\bshift\b")  # `${#配列[@]}` は長さで、位置引数でない
 FUNC_ONE_LINE = re.compile(r"^\s*(?:function\s+)?[\w-]+\s*\(\)\s*\{.*\}\s*;?\s*$")
 FUNC_START = re.compile(r"^\s*(?:function\s+[\w-]+|[\w-]+\s*\(\))")
+# `--名前)` を読む繰り返しの骨組み（`case "$1" in`・`while [ $# -gt 0 ]`・単独の `shift`）。位置引数の読みに数えない
+OPT_LOOP = re.compile(r"^\s*(?:case\s+\"?\$\{?1\}?\"?\s+in\b|(?:while|until)\b.*\$#|shift(?:\s+\d+)?\s*;?\s*$)")
 BUILTINS = {
     "BASH_SOURCE",
     "BASH_REMATCH",
@@ -72,9 +74,13 @@ def _code_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def reads_positionals(lines: list[tuple[int, str]]) -> bool:
-    """関数の外で位置引数を読むか。関数の中の `$1` はその関数の引数のため数えない（関数は行頭の `}` で閉じる書き方を前提にする）。"""
-    in_func = False
+def reads_positionals(lines: list[tuple[int, str]], options: bool = False) -> bool:
+    """関数の外で位置引数を読むか。関数の中の `$1` はその関数の引数のため数えない（関数は行頭の `}` で閉じる書き方を前提にする）。
+
+    `options` が真なら、`--名前)` の腕の中と、それを読む繰り返しの骨組み（`OPT_LOOP`）は数えない。腕の外で
+    `$1` を読む（`SUB="$1"`・`*) X="$1"`）入口は、オプションに加えて位置引数を受ける。
+    """
+    in_func = in_arm = False
     for _, line in lines:
         if FUNC_ONE_LINE.match(line):
             continue
@@ -84,6 +90,14 @@ def reads_positionals(lines: list[tuple[int, str]]) -> bool:
         if in_func:
             in_func = not line.startswith("}")
             continue
+        if options:
+            m = CASE_ARM.match(line)
+            in_arm = in_arm or bool(m and "--" in m.group(1))
+            if in_arm:
+                in_arm = ";;" not in line
+                continue
+            if OPT_LOOP.match(line):
+                continue
         if POSITIONAL.search(line):
             return True
     return False
@@ -126,11 +140,12 @@ def facts(root: Path, rel: str, settings: dict[str, dict]) -> dict:
     return {
         "summary": summary(text),
         "argv_manual": False,
-        "args_unresolved": not opts and reads_positionals(lines),
+        "args_unresolved": reads_positionals(lines, options=bool(opts)),
         "options": opts,
         "positionals": [],
         "env": env,
         "env_dynamic": {},
+        "file_dynamic": {},
         "writes": writes,
         "setting_keys": {},
         "setting_opens": opens,

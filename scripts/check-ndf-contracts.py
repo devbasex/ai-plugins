@@ -176,6 +176,8 @@ class Checker:
     def collect_code_items(f: dict, code: set) -> None:
         for (mod, fn), _ in f["env_dynamic"].items():
             code.add(("env-dynamic", mod, fn, "名前を組み立てる・走査する環境変数の読み"))
+        for (mod, fn), _ in f.get("file_dynamic", {}).items():
+            code.add(("file-dynamic", mod, fn, "名前を組み立てて書く（書き先のファイル名を静的に拾えない）"))
         for (mod, file, fn), via in f["setting_opens"].items():
             code.add(("setting-open-outside-reader", mod, file, f"読み手の関数の外で .ndf/{file} を開く（{fn}。{via}）"))
 

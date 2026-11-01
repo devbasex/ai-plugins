@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/skills/cross-refactoring/scripts/refactor.py",
+  "name": "code-metrics.json#error",
+  "kind": "setting-undeclared",
+  "reason": "error は code-metrics.json のキーではなく、読み手 codemetrics.load_config が整えて返す設定の項目（refactor_lib/codemetrics_record.py）。抽出の規則（読み手の戻り値への .get / []）が拾う外れ"
+}

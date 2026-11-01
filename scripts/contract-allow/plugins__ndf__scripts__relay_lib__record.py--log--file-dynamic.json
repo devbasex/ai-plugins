@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/relay_lib/record.py",
+  "name": "log",
+  "kind": "file-dynamic",
+  "reason": "log は書き先のパスを引数・変数・組み立てた式で受けるため、ファイル名を静的に拾えない（#2363 round 7 で file-dynamic を検出し始めた時点の既存分）。書き先を定数のファイル名にして契約の writes へ載せたら消す"
+}
