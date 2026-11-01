@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/worktree-session.sh",
+  "summary": "NDF plugin: セッション開始時に、主ディレクトリの逸脱を提示する。宣言で有効にした",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "NDF_HOOK_ENV",
+    "TMPDIR",
+    "WT_DIRTY_LIST_MAX"
+  ],
+  "settings": [],
+  "stdin": "hook-json",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/hooks/codex.json",
+    "plugins/ndf/scripts/hook-env.py",
+    "plugins/ndf/scripts/hook_lib/worktree.py",
+    "plugins/ndf/scripts/lib/README.md"
+  ]
+}

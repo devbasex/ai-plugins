@@ -1,0 +1,5 @@
+{
+  "name": "GIT_REPO",
+  "set_by": "runtime",
+  "summary": "GIT_REPO。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/wait-notify.py:52）が決める"
+}

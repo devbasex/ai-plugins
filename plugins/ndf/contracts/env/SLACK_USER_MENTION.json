@@ -1,0 +1,5 @@
+{
+  "name": "SLACK_USER_MENTION",
+  "set_by": "runtime",
+  "summary": "SLACK_USER_MENTION。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/wait-notify.py:89）が決める"
+}

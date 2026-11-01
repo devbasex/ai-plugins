@@ -1,0 +1,7 @@
+{
+  "name": "target-json",
+  "pattern": "target.json",
+  "kind": "result",
+  "place": "worktree",
+  "skill_readers": []
+}

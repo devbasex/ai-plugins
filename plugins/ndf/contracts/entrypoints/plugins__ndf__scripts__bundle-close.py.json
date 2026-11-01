@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/bundle-close.py",
+  "summary": "bundle-close.py: 旧名の入口（#1407）。案内を stderr に 1 行出し、引数をそのまま新しい名前のスクリプトへ渡す。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "none",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/legacy_names.py"
+  ]
+}

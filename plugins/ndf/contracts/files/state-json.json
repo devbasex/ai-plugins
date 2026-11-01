@@ -1,0 +1,7 @@
+{
+  "name": "state-json",
+  "pattern": "state.json",
+  "kind": "state",
+  "place": "worktree",
+  "skill_readers": []
+}

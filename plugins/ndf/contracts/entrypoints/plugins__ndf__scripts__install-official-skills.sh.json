@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/install-official-skills.sh",
+  "summary": "Anthropic公式Skillsのインストーラ",
+  "args": {
+    "options": [
+      "--all",
+      "--help",
+      "--list",
+      "--scope",
+      "--update"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "HOME",
+    "XDG_CACHE_HOME"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/official-skills-autoloader/SKILL.md"
+  ]
+}

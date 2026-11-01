@@ -1,0 +1,33 @@
+{
+  "file": "supervise.json",
+  "summary": "プランの実行の宣言（テスト・同期とチェック・整形・配布）",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/supervise_lib/decl.py:read_decl",
+    "plugins/ndf/scripts/lib/delivery.py:_read_supervise"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "test": {
+      "summary": "test（このリポジトリの宣言にある最上位のキー）"
+    },
+    "sync_checks": {
+      "summary": "sync_checks（このリポジトリの宣言にある最上位のキー）"
+    },
+    "format": {
+      "summary": "format（このリポジトリの宣言にある最上位のキー）"
+    },
+    "queue": {
+      "summary": "queue（このリポジトリの宣言にある最上位のキー）"
+    },
+    "release": {
+      "summary": "release（このリポジトリの宣言にある最上位のキー）"
+    },
+    "slow": {
+      "summary": "slow（読む箇所 plugins/ndf/scripts/supervise_lib/slow.py:77）"
+    }
+  }
+}

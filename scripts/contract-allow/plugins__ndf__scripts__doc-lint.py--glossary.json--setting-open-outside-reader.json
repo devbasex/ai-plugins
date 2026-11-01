@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/doc-lint.py",
+  "name": "glossary.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/glossary.json を開く（generated_documents。plugins/ndf/scripts/doc-lint.py:88））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

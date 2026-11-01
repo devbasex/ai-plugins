@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/statusline.sh",
+  "summary": "ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "AWS_PROFILE",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CONFIG_DIR",
+    "HOME",
+    "NDF_STATUSLINE_AUTH_CACHE"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/statusline-switch.sh",
+    "plugins/ndf/skills/statusline/SKILL.md"
+  ]
+}

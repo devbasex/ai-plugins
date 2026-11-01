@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/hook.py",
+  "summary": "NDF の hook の 1 本のエントリポイント（#1142 の決定 20）。PreToolUse・Stop・Notification ほかを標準入力の JSON で受ける。",
+  "args": {
+    "options": [
+      "--json",
+      "--yes"
+    ],
+    "positionals": [
+      "name"
+    ],
+    "subcommands": {
+      "add": {
+        "options": [
+          "--code"
+        ],
+        "positionals": [
+          "name"
+        ]
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_PLUGIN_DATA",
+    "DEBUG_SLACK_NOTIFY",
+    "DEVBASE_SHELLRC_DIR",
+    "HOME",
+    "KIRO_SESSION_ID",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_CODEX_SLACK_NOTIFY",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_MVV_STATE_DIR",
+    "NDF_RELAY",
+    "NDF_RELAY_CLAUDE",
+    "NDF_RELAY_DEPTH",
+    "NDF_RELAY_DIR",
+    "NDF_RELAY_REEXEC",
+    "NDF_RELAY_UV",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SLACK_API_BASE",
+    "NDF_SLACK_NOTIFY_DONE",
+    "NDF_SLEEP_MAX_SEC",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISOR_CUT_RATIO",
+    "PATH",
+    "SHELL",
+    "SLACK_BOT_TOKEN",
+    "SLACK_CHANNEL_ID",
+    "TMPDIR",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "ZDOTDIR"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "hook-json",
+  "stdout": "json",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/README.md",
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/hooks/codex.json",
+    "plugins/ndf/scripts/hook_lib/goal_skill.py",
+    "plugins/ndf/scripts/hook_lib/words.py"
+  ]
+}

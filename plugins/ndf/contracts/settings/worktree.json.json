@@ -1,0 +1,27 @@
+{
+  "file": "worktree.json",
+  "summary": "ベースブランチ・本番のブランチ・worktree の規則",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/repo.py:read_worktree_decl",
+    "plugins/ndf/scripts/supervise_lib/decl.py:read_decl"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "base_branch": {
+      "summary": "base_branch（このリポジトリの宣言にある最上位のキー）"
+    },
+    "production_branch": {
+      "summary": "production_branch（このリポジトリの宣言にある最上位のキー）"
+    },
+    "guard": {
+      "summary": "guard（このリポジトリの宣言にある最上位のキー）"
+    },
+    "tool_paths": {
+      "summary": "tool_paths（読む箇所 plugins/ndf/scripts/lib/tool_paths.py:64）"
+    }
+  }
+}

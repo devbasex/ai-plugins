@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/worktree-guard.sh",
+  "summary": "NDF plugin: 主ディレクトリを編集しようとしたときに、worktree で作業する旨を伝える guard の古いエントリポイント。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "HOME",
+    "NDF_HOOK_PYTHON"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/hook_python.py"
+  ]
+}

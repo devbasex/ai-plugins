@@ -1,0 +1,5 @@
+{
+  "name": "WT_WORKTREE_DIR",
+  "set_by": "runtime",
+  "summary": "WT_WORKTREE_DIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/worktree-setup.sh:244）が決める"
+}

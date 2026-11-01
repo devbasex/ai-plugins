@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/refactor-scope.py",
+  "summary": "refactor-scope.py: 検査のプランが cross-refactoring へ渡す `--scope` の範囲を組んで出す（#1484）。",
+  "args": {
+    "options": [
+      "--pr",
+      "--root",
+      "--scope",
+      "--tests"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/scripts/supervise_lib/templates.py"
+  ]
+}

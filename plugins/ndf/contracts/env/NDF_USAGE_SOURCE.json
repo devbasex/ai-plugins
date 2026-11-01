@@ -1,0 +1,5 @@
+{
+  "name": "NDF_USAGE_SOURCE",
+  "set_by": "user",
+  "summary": "NDF_USAGE_SOURCE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/skills/external-ai/scripts/external-ai.py:256）が決める"
+}

@@ -1,0 +1,23 @@
+{
+  "file": "mvv.json",
+  "summary": "プロジェクト MVV の版と承認",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/project_mvv.py:decl_paths"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "body": {
+      "summary": "body（このリポジトリの宣言にある最上位のキー）"
+    },
+    "settings": {
+      "summary": "settings（このリポジトリの宣言にある最上位のキー）"
+    },
+    "versions": {
+      "summary": "versions（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

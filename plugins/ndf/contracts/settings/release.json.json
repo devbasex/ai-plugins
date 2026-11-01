@@ -1,0 +1,20 @@
+{
+  "file": "release.json",
+  "summary": "配布の手順",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/release-steps.py:load_steps"
+  ],
+  "keys": {
+    "$schema": {
+      "summary": "$schema（このリポジトリの宣言にある最上位のキー）"
+    },
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "steps": {
+      "summary": "steps（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

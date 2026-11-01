@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/progress-record.sh",
+  "summary": "NDF plugin: issue の本文へ工程の進行を記録する。",
+  "args": {
+    "options": [
+      "--mode",
+      "--note",
+      "--pace",
+      "--plan",
+      "--repo",
+      "--worktree"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "NDF_PROGRESS_LOCK_TIMEOUT",
+    "SCRIPTS",
+    "SR_ABSORBED_SUMMARY",
+    "SR_GAPS",
+    "SR_GH_ERR",
+    "WF_MODES",
+    "WF_STAGE_MATRIX"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/gh_parts.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/scripts/projects-sync.sh",
+    "plugins/ndf/skills/development-workflow/references/glossary.md"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/spec-copy.py",
+  "summary": "spec-copy.py: 課題の本文にある要求の写しを作り、本文と写しの食い違いを返す。",
+  "args": {
+    "options": [
+      "--repo"
+    ],
+    "positionals": [
+      "file",
+      "issue"
+    ]
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/scripts/supervise_lib/sprint_waves.py",
+    "plugins/ndf/skills/design/SKILL.md",
+    "plugins/ndf/skills/development-workflow/references/glossary.md",
+    "plugins/ndf/skills/fix/SKILL.md"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "NDF_HOOK_PYTHON",
+  "set_by": "user",
+  "summary": "NDF_HOOK_PYTHON。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/hook_python.py:54）が決める"
+}

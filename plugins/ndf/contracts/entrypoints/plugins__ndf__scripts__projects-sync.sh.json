@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/projects-sync.sh",
+  "summary": "NDF plugin: 進行の記録の入口。issue の本文の `## 進行` と、ボードのアイテムのフィールドを",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "SR_ABSORBED_SUMMARY",
+    "SR_GAPS",
+    "SR_GH_ERR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/scripts/progress-record.sh",
+    "plugins/ndf/scripts/resolve.sh",
+    "plugins/ndf/scripts/sprint-close.py"
+  ]
+}

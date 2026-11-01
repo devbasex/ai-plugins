@@ -1,0 +1,10 @@
+{
+  "file": "runtimes.json",
+  "summary": "使ってよいランタイム",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/runtime_policy.py:find"
+  ],
+  "keys": {}
+}

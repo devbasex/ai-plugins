@@ -1,0 +1,5 @@
+{
+  "name": "DEVBASE_SHELLRC_DIR",
+  "set_by": "runtime",
+  "summary": "DEVBASE_SHELLRC_DIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/relay_lib/shellrc.py:26）が決める"
+}

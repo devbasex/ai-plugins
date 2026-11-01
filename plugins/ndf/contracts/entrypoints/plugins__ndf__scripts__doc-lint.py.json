@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/doc-lint.py",
+  "summary": "doc-lint.py: 追加した行だけに、文書の書き方のチェックを掛ける（#870 B2）。",
+  "args": {
+    "options": [
+      "--all-lines",
+      "--base",
+      "--exclude",
+      "--root"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/glossary.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/skills/development-workflow/references/glossary.md"
+  ]
+}

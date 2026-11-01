@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/wait-review.sh",
+  "summary": "レビューの席の完了待ち — monitor.py の薄いラッパ。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+  ]
+}

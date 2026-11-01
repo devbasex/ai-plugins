@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/acceptance-check.py",
+  "summary": "受け入れ条件の確認の区分を課題の本文へ記録する・読む（#2144。完了判定 `quality-gates` が呼ぶ）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "record": {
+        "options": [
+          "--issue",
+          "--post-release",
+          "--pre-merge",
+          "--repo"
+        ],
+        "positionals": []
+      },
+      "show": {
+        "options": [
+          "--issue",
+          "--repo"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/quality-gates/SKILL.md"
+  ]
+}

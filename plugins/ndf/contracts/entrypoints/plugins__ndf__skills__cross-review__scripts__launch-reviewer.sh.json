@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh",
+  "summary": "cross-review レビュワー起動の入口（4 ランタイム共通）。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/review_criteria.py",
+    "plugins/ndf/skills/cross-review/SKILL.md",
+    "plugins/ndf/skills/cross-review/docs/01-state-and-review.md",
+    "plugins/ndf/skills/cross-review/docs/04-contracts.md"
+  ]
+}

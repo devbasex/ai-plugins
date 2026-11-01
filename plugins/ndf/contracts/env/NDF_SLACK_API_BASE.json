@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SLACK_API_BASE",
+  "set_by": "user",
+  "summary": "NDF_SLACK_API_BASE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/notify.py:84）が決める"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "NDF_STEP_EXTEND_FILE",
+  "set_by": "user",
+  "summary": "NDF_STEP_EXTEND_FILE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/drive_pause.py:108）が決める"
+}

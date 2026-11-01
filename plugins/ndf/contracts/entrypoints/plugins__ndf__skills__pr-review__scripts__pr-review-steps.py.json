@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/pr-review/scripts/pr-review-steps.py",
+  "summary": "pr-review-steps.py: `/ndf:pr-review` の手順のうち、判断の要らない収集・判定・投稿を行う（#860）。",
+  "args": {
+    "options": [
+      "--branch",
+      "--focus",
+      "--out-dir",
+      "--pr",
+      "--repo"
+    ],
+    "positionals": [
+      "pr"
+    ],
+    "subcommands": {
+      "delegate": {
+        "options": [
+          "--poll",
+          "--timeout"
+        ],
+        "positionals": [
+          "cli"
+        ]
+      },
+      "finish": {
+        "options": [
+          "--findings",
+          "--out-dir",
+          "--repo",
+          "--reviewer"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "target-json"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/skills/development-workflow/references/glossary.md",
+    "plugins/ndf/skills/external-ai/SKILL.md",
+    "plugins/ndf/skills/pr-review/SKILL.md",
+    "plugins/ndf/skills/pr-review/scripts/pr_review_context.py"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "HOME",
+  "set_by": "runtime",
+  "summary": "HOME。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/write_target.py:92）が決める"
+}

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/ask.py",
+  "summary": "問い合わせの記録の副命令（#2206）。記録の置き場と形は `lib/ask_ledger.py` にある。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "decide": {
+        "options": [
+          "--answer",
+          "--question",
+          "--reason",
+          "--ref"
+        ],
+        "positionals": []
+      },
+      "summary": {
+        "options": [
+          "--cwd",
+          "--since"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/README.md",
+    "plugins/ndf/agents/director.md",
+    "plugins/ndf/scripts/hook_lib/ask_guard.py",
+    "plugins/ndf/scripts/relay_lib/mark.py",
+    "plugins/ndf/skills/backlog-refinement/SKILL.md"
+  ]
+}
