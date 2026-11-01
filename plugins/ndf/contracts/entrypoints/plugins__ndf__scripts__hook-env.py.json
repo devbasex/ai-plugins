@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/hook-env.py",
+  "summary": "hook の環境を用意する（#1142 の決定 20）。SessionStart（`worktree-session.sh`）が 1 回起動する。",
+  "args": {
+    "unparsed": "sys.argv を手で読む（柱 P8 で argparse へ移す）"
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_HOOK_PYTHON",
+    "NDF_HOOK_REEXEC"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/hook_python.py",
+    "plugins/ndf/scripts/wait-notify.py",
+    "plugins/ndf/scripts/worktree-session.sh",
+    "plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh"
+  ]
+}

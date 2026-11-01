@@ -1,0 +1,5 @@
+{
+  "name": "NDF_WORKTREE_BASE",
+  "set_by": "user",
+  "summary": "NDF_WORKTREE_BASE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/worktree_base.py:23）が決める"
+}

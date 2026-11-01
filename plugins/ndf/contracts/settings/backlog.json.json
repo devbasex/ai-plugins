@@ -1,0 +1,14 @@
+{
+  "file": "backlog.json",
+  "summary": "バックログの棚卸しの品質の閾値",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_cmd.py:read_backlog_decl"
+  ],
+  "keys": {
+    "quality": {
+      "summary": "quality（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

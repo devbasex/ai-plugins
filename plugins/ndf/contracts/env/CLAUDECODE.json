@@ -1,0 +1,5 @@
+{
+  "name": "CLAUDECODE",
+  "set_by": "runtime",
+  "summary": "CLAUDECODE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/resolve.sh:56）が決める"
+}

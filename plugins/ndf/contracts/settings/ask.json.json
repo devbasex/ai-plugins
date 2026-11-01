@@ -1,0 +1,10 @@
+{
+  "file": "ask.json",
+  "summary": "人へ問う区分と費用の閾値（ask_guard の宣言）",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/ask_policy.py:load_ask_declaration"
+  ],
+  "keys": {}
+}

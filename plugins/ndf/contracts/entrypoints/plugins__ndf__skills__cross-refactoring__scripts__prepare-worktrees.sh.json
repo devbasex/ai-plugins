@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh",
+  "summary": "cross-refactoring: 作業ディレクトリの準備と、手順書となる Skill の配置。",
+  "args": {
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [
+    "CROSS_REFACTORING_TMP_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/cross-refactoring/SKILL.md",
+    "plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md",
+    "plugins/ndf/skills/cross-refactoring/scripts/drive.py",
+    "plugins/ndf/skills/cross-refactoring/scripts/launch-cli.sh",
+    "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/worktree.py"
+  ]
+}

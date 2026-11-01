@@ -1,0 +1,5 @@
+{
+  "name": "NDF_UPKEEP_STATE_DIR",
+  "set_by": "user",
+  "summary": "NDF_UPKEEP_STATE_DIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/sprint_loop_record.py:124）が決める"
+}

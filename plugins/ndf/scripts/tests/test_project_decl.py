@@ -380,6 +380,24 @@ def test_hand_values_are_kept_and_mismatch_shows_both(laravel, env, tmp_path):
     assert new_wt["guard"] == wt["guard"]
 
 
+def test_delivery_rows_on_production_or_base_are_written_as_channel(laravel, env, tmp_path):
+    """#2336 の決定 7: 本番・起点の名前を写した `branch` は worktree.json の値で `channel` に直し、ほかのブランチの行は変えない。"""
+    write(laravel, ".ndf/worktree.json", json.dumps({"version": 1, "production_branch": "release"}))
+    row = {"kind": "auto", "trigger": "push", "versioned": False}
+    rows = [
+        {**row, "target": "prod", "branch": "release"},
+        {**row, "target": "stg", "branch": "main"},
+        {**row, "target": "pre", "branch": "feature/x"},
+    ]
+    code, _, text, _ = analyze(env, laravel, tmp_path, {**LARAVEL_ANSWERS, "delivery": {"value": rows}})
+    assert code == 0, text
+    assert decl(laravel)["delivery"] == [
+        {**row, "target": "prod", "channel": "production"},
+        {**row, "target": "stg", "channel": "base"},
+        {**row, "target": "pre", "branch": "feature/x"},
+    ]
+
+
 def test_hand_secret_value_is_dropped_before_keeping(laravel, env, tmp_path):
     write(laravel, ".ndf/project.json", json.dumps({"version": 1, "issues": {"primary": "redmine", "others": [TOKEN]}}))
     code, out, text, _ = analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)

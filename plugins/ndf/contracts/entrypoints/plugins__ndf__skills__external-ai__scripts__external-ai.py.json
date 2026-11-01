@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/external-ai/scripts/external-ai.py",
+  "summary": "external-ai.py: 外部 CLI（codex / agy / kiro / claude）の起動・上限つきの待ち・回収を 1 本で行う。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [],
+        "positionals": [
+          "runtime"
+        ]
+      },
+      "run": {
+        "options": [
+          "--model",
+          "--no-auth-check",
+          "--output-file",
+          "--phase",
+          "--poll",
+          "--prompt-file",
+          "--stall-timeout",
+          "--timeout",
+          "--tmp-dir",
+          "--workdir"
+        ],
+        "positionals": [
+          "runtime"
+        ]
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_EXTERNAL_AI_TMP_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SKIP_AUTH_CHECK",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_USAGE_KIND",
+    "NDF_USAGE_SOURCE"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/agents/corder.md",
+    "plugins/ndf/agents/qa.md",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/auth.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py"
+  ]
+}

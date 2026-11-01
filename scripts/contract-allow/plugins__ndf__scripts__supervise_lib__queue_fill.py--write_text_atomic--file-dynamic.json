@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/supervise_lib/queue_fill.py",
+  "name": "write_text_atomic",
+  "kind": "file-dynamic",
+  "reason": "write_text_atomic は書き先のパスを引数・変数・組み立てた式で受けるため、ファイル名を静的に拾えない（#2363 round 7 で file-dynamic を検出し始めた時点の既存分）。書き先を定数のファイル名にして契約の writes へ載せたら消す"
+}

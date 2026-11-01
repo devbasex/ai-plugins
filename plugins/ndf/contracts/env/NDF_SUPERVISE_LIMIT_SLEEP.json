@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SUPERVISE_LIMIT_SLEEP",
+  "set_by": "user",
+  "summary": "NDF_SUPERVISE_LIMIT_SLEEP。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/supervise_lib/claude.py:409）が決める"
+}

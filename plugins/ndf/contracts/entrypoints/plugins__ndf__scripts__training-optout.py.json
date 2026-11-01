@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/training-optout.py",
+  "summary": "training-optout.py: LLM のアカウントが入力を学習に使わない設定かを確かめ、NDF のセッションの開始で Off にする（#1597）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [
+          "--config-dir",
+          "--runtime"
+        ],
+        "positionals": []
+      },
+      "session-start": {
+        "options": [
+          "--runtime"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK"
+  ],
+  "settings": [],
+  "stdin": "hook-json",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/README.md",
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/hooks/codex.json",
+    "plugins/ndf/scripts/lib/claude_training.py"
+  ]
+}

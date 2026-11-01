@@ -14,7 +14,8 @@
 **壊れた宣言（読めない・空・知らない名前・知らないキー）は `None` へ落とさず止める。** 綴りの誤りを
 「宣言が無い」と読むと、制限が黙って外れるためである（設計の決定 2）。
 
-読む順は `project_decl` と同じで、メインディレクトリの `.ndf/` → `root` の `.ndf/`。
+読む順はメインディレクトリの `.ndf/` → `root` の `.ndf/`（契約の `place: main`。Pull Request の変更だけで許可を広げられない
+ようにする。#2363）。
 シェルからは `runtime_policy.py check <runtime> --root <dir>` で呼ぶ（外か壊れていれば終了コード 3）。
 """
 
@@ -27,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-import repo
+import decl
 import statefile
 from assignment import ALL_RUNTIMES, SEAT_PATTERN, AssignmentError
 
@@ -159,15 +160,8 @@ def _parse_review_seats(seats: Any, allowed: tuple[str, ...], broken: Callable[[
 
 
 def find(root) -> Optional[Path]:
-    """宣言のファイル。メインディレクトリ → `root` の順に探す。無ければ `None`。"""
-    if not root:
-        return None
-    main = repo.main_dir(root)
-    for base in dict.fromkeys(p for p in (main, Path(root).resolve()) if p):
-        f = Path(base) / DECL
-        if f.is_file():
-            return f
-    return None
+    """宣言のファイル。メインディレクトリ → `root` の順に探す（`decl.setting_path`）。無ければ `None`。"""
+    return decl.setting_path(Path(root).resolve(), DECL.name) if root else None
 
 
 def read_policy(root) -> Optional[RuntimePolicy]:

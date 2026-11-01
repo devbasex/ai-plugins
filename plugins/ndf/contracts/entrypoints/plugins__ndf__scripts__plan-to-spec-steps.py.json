@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/plan-to-spec-steps.py",
+  "summary": "plan-to-spec-steps.py: 確定仕様化の決まった手順（#872。試作は #827 の phase-steps.py）。",
+  "args": {
+    "options": [
+      "--root"
+    ],
+    "positionals": [],
+    "subcommands": {
+      "spec-finalize": {
+        "options": [
+          "--design",
+          "--spec",
+          "--title"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/phase-steps.py",
+    "plugins/ndf/skills/plan-to-spec/SKILL.md",
+    "plugins/ndf/skills/plan-to-spec/references/excerpt.md"
+  ]
+}

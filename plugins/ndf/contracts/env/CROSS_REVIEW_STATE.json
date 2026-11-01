@@ -1,0 +1,5 @@
+{
+  "name": "CROSS_REVIEW_STATE",
+  "set_by": "runtime",
+  "summary": "CROSS_REVIEW_STATE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/skills/fix/scripts/fix-steps.py:226）が決める"
+}

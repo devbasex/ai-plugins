@@ -1,0 +1,7 @@
+{
+  "name": "report-md",
+  "pattern": "report.md",
+  "kind": "report",
+  "place": "state-dir",
+  "skill_readers": []
+}

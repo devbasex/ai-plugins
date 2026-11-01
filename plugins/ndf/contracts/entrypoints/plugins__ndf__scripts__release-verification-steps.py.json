@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/release-verification-steps.py",
+  "summary": "release-verification-steps.py: リリース後テストの導入確認（#862。試作は #827 の phase-steps.py）。",
+  "args": {
+    "options": [
+      "--root"
+    ],
+    "positionals": [],
+    "subcommands": {
+      "verify-install": {
+        "options": [
+          "--expect",
+          "--plugins",
+          "--ref",
+          "--runtimes"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "LANG",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "PATH"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/phase-steps.py",
+    "plugins/ndf/scripts/release_lib/materials.py",
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md"
+  ]
+}

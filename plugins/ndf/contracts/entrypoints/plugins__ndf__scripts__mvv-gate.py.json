@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/mvv-gate.py",
+  "summary": "mvv-gate.py: 関門の材料が MVV に従うかを判定し、従えば関門を省いた記録を残す（#1078）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [
+          "--advise",
+          "--gate",
+          "--log",
+          "--material",
+          "--mode",
+          "--note",
+          "--pr",
+          "--repo",
+          "--root",
+          "--sprint"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_MVV_CLAUDE",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL"
+  ],
+  "settings": [
+    {
+      "file": "pace.json",
+      "keys": [
+        "boundary_paths"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "10": "利用者の承認待ち（status gate。機械のチェックの不成立・MVV 判定の差し戻し・関門の記録を書けない）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/approved_commit.py",
+    "plugins/ndf/scripts/lib/clock.py",
+    "plugins/ndf/scripts/lib/legacy_names.py",
+    "plugins/ndf/scripts/lib/pace.py"
+  ]
+}

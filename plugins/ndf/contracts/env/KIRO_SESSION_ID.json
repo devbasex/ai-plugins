@@ -1,0 +1,5 @@
+{
+  "name": "KIRO_SESSION_ID",
+  "set_by": "runtime",
+  "summary": "KIRO_SESSION_ID。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/payload.py:119）が決める"
+}

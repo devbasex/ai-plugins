@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/test-run.py",
+  "summary": "テストの実行の入口（#1334 F2・F4・F5）。supervise の run のステップが呼ぶ。",
+  "args": {
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_WHOLE_RUNS_DIR",
+    "WT_DOCKER_COMMAND",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies",
+        "test"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/gh_checks.py",
+    "plugins/ndf/scripts/lib/test_strategy.py",
+    "plugins/ndf/scripts/lib/test_triage.py",
+    "plugins/ndf/scripts/merged_lib/reading.py",
+    "plugins/ndf/scripts/release_lib/materials.py"
+  ]
+}

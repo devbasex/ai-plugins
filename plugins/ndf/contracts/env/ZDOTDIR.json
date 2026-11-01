@@ -1,0 +1,5 @@
+{
+  "name": "ZDOTDIR",
+  "set_by": "runtime",
+  "summary": "ZDOTDIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/relay_lib/shellrc.py:33）が決める"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SKILL_REPO",
+  "set_by": "user",
+  "summary": "NDF_SKILL_REPO。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/issue-file.py:134）が決める"
+}

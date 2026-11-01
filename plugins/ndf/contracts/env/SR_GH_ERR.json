@@ -1,0 +1,5 @@
+{
+  "name": "SR_GH_ERR",
+  "set_by": "runtime",
+  "summary": "SR_GH_ERR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/progress-record.sh:188）が決める"
+}

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/worktree-setup.sh",
+  "summary": "NDF plugin: 作業ツリー運用をこのリポジトリへ導入する。",
+  "args": {
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [
+    "WT_DECLARATION_FILE",
+    "WT_DECLARATION_LOCAL_FILE",
+    "WT_WORKTREE_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/README.md",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/scripts/lib/worktree-common.sh",
+    "plugins/ndf/scripts/project-decl.py"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/rotate-pr.sh",
+  "summary": "PR rotation — light モード (default) / squash モード",
+  "args": {
+    "unparsed": "--オプションと位置引数（副命令・値。$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/skills/cross-review/SKILL.md",
+    "plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md",
+    "plugins/ndf/skills/cross-review/docs/03-review-output.md",
+    "plugins/ndf/skills/cross-review/docs/07-posts-and-records.md"
+  ]
+}

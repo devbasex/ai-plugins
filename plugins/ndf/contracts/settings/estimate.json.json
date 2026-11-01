@@ -1,0 +1,20 @@
+{
+  "file": "estimate.json",
+  "summary": "見積もりの設定",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/estimate_records.py:load_estimate_decl"
+  ],
+  "keys": {
+    "records_dir": {
+      "summary": "records_dir（読む箇所 plugins/ndf/scripts/lib/estimate_records.py:225）"
+    },
+    "window": {
+      "summary": "window（読む箇所 plugins/ndf/scripts/supervise_lib/verify_steps.py:69）"
+    },
+    "min_samples": {
+      "summary": "min_samples（読む箇所 plugins/ndf/scripts/supervise_lib/verify_steps.py:69）"
+    }
+  }
+}

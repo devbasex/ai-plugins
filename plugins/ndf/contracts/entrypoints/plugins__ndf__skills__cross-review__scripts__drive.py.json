@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/drive.py",
+  "summary": "drive.py: cross-review の収束ループを、LLM の判断が要る地点まで進めて止まる。",
+  "args": {
+    "options": [
+      "--reopen",
+      "--result-file",
+      "--rotate-mode",
+      "--worktree"
+    ],
+    "positionals": [
+      "pr"
+    ]
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_STEP_EXTEND_FILE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_WHOLE_RUNS_DIR",
+    "NDF_WORKTREE_BASE",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "drive-prx-report-md"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/bg-wait.sh",
+    "plugins/ndf/scripts/lib/drive_pause.py",
+    "plugins/ndf/scripts/lib/durable.py",
+    "plugins/ndf/scripts/lib/loop_drive.py"
+  ]
+}

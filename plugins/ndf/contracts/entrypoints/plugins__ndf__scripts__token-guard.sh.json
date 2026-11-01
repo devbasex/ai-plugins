@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/token-guard.sh",
+  "summary": "NDF plugin: 待ちの呼び出しと、文脈が上限を超えた conductor の工程の起動を止める guard の古いエントリポイント",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "HOME",
+    "NDF_HOOK_PYTHON"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/relay_lib/__init__.py"
+  ]
+}

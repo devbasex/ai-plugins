@@ -1,0 +1,5 @@
+{
+  "name": "CODEX_HOME",
+  "set_by": "runtime",
+  "summary": "CODEX_HOME。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/usage_capture.py:118）が決める"
+}

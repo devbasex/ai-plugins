@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/lib/monitor_types.py",
+  "name": "_tmp_dir",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/scripts/lib/monitor_types.py の _tmp_dir）。静的に拾えない"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PRESENTATION_DIR",
+  "set_by": "user",
+  "summary": "NDF_PRESENTATION_DIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/step_result.py:207）が決める"
+}

@@ -1,0 +1,39 @@
+{
+  "file": "pace.json",
+  "summary": "進め方（fast / auto）の許可と閾値",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/pace.py:_read_pace_decl",
+    "plugins/ndf/scripts/lib/pace.py:read_pace"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "fast": {
+      "summary": "fast（このリポジトリの宣言にある最上位のキー）"
+    },
+    "auto": {
+      "summary": "auto（このリポジトリの宣言にある最上位のキー）"
+    },
+    "areas": {
+      "summary": "areas（このリポジトリの宣言にある最上位のキー）"
+    },
+    "boundary_paths": {
+      "summary": "boundary_paths（このリポジトリの宣言にある最上位のキー）"
+    },
+    "triggers": {
+      "summary": "triggers（このリポジトリの宣言にある最上位のキー）"
+    },
+    "loop": {
+      "summary": "loop（このリポジトリの宣言にある最上位のキー）"
+    },
+    "enabled": {
+      "summary": "enabled（読む箇所 plugins/ndf/scripts/lib/sprint_loop.py:102）"
+    },
+    "verify": {
+      "summary": "verify（読む箇所 plugins/ndf/scripts/lib/sprint_loop.py:102）"
+    }
+  }
+}

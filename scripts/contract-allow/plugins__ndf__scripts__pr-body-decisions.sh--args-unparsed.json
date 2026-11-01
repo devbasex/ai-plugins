@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/pr-body-decisions.sh",
+  "name": "",
+  "kind": "args-unparsed",
+  "reason": "--オプションに加えてシェルの位置引数（副命令・値。$1・\"$@\"）を手で読み、静的に拾えない。引数は入口の usage を正本とする"
+}

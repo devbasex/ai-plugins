@@ -1,0 +1,7 @@
+{
+  "name": "laps-md",
+  "pattern": "laps.md",
+  "kind": "report",
+  "place": "main",
+  "skill_readers": []
+}

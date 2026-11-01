@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh",
+  "summary": "Usage: fetch-pr-comments.sh [--strict] <owner/repo> <pr_number>",
+  "args": {
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/cross-review/docs/01-state-and-review.md",
+    "plugins/ndf/skills/cross-review/docs/04-contracts.md",
+    "plugins/ndf/skills/cross-review/scripts/review_lib/github.py",
+    "plugins/ndf/skills/fix/scripts/fix-steps.py",
+    "scripts/check-cross-skill-refs.py"
+  ]
+}
