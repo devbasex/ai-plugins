@@ -30,7 +30,7 @@
 
 ### 決定 4: 例外リストが増えないことを CI で確かめるため、ベースブランチの merge-base と比べる
 
-ラチェットは `git ls-tree` で merge-base の例外リストを読み、今の木にだけある項目を `allow-added` で落とす。起点は `GITHUB_BASE_REF` → `.ndf/worktree.json` の `base_branch` の順に決め、`origin/<名前>` と HEAD の merge-base を取る。CI のジョブは `fetch-depth: 0` で取得する。同じ差分で同じ `kind`・`name` の項目を消している追加は、ファイルの移動に伴う付け替えとして増加に数えない。CI の中で起点を決められなければ 3 で止まり、手元では `ratchet: skipped` を出して続ける（手元に origin が無い木でも他の検査を使えるようにする）。merge-base に `scripts/check-ndf-contracts.py` が無い変更（構造チェックを入れる変更。E6 で今の外れを載せ、同じ変更で CI へ足す）は初版として増加を数えず `ratchet: initial` を出す。初版を例外リストの置き場（`scripts/contract-allow/`）の有無で決めないのは、置き場を丸ごと消した次の変更で好きなだけ足せてしまうためである。
+ラチェットは `git ls-tree` で merge-base の例外リストを読み、今の木にだけある項目を `allow-added` で落とす。起点は `GITHUB_BASE_REF` → `.ndf/worktree.json` の `base_branch` の順に決め、`origin/<名前>` と HEAD の merge-base を取る。CI のジョブは `fetch-depth: 0` で取得する。同じ差分で同じ `kind`・`name` の項目を消している追加は、ファイルの移動に伴う付け替えとして増加に数えない。CI の中で起点を決められなければ 3 で止まり、手元では `ratchet: skipped` を出して続ける（手元に origin が無い木でも他の検査を使えるようにする）。merge-base の `.github/workflows/script-structure.yml` が `check-ndf-contracts.py` を走らせていない変更（E6 で今の外れを載せ、同じ変更で CI へ足す変更）は初版として増加を数えず `ratchet: initial` を出す。初版を例外リストの置き場（`scripts/contract-allow/`）の有無で決めないのは、置き場を丸ごと消した次の変更で好きなだけ足せてしまうためである。`scripts/check-ndf-contracts.py` の有無で決めないのは、構造チェックを作る S2 と CI へ足す S7 を別の Pull Request に分けると、S7 の merge-base に既にスクリプトがあり、E6 で載せた外れが全て `allow-added` で落ちるためである（Pull Request の分け方は `implementation-plan` が決める）。
 
 採らなかった案: 例外の項目の数を別のファイルに持ち比べる（数を 2 か所が持つ）、コミットの印で追加を許す（印を付ければ増やせ、ラチェットにならない）。既存の `script-structure-allow/` へのラチェットは、この課題の受け入れ条件に無いため入れない。
 
