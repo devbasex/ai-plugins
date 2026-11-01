@@ -702,6 +702,47 @@ def _release_pr_body(root, a, plugin, plugins):
     )
 
 
+def _merge_release_pr(root, a, plugin, plugins, branch, base):
+    """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、PR 番号とマージコミットを返す。"""
+    ver = a.version
+    pr = _reusable_release_pr(root, branch, base)
+    if pr is None:
+        body = _release_pr_body(root, a, plugin, plugins)
+        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
+    release_pr = pr["number"]
+    release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
+    return release_pr, release_commit
+
+
+def _merge_prod_pr(root, a, plugin, base, prod, release_pr, approved, allowed, verdict, items, metrics):
+    """本番の PR（ベースブランチ → 本番チャネル）を使い回すか作り、承認と比べた先端を指定してマージする。
+    先端が動いたら比べ直し、許可リストの下に収まる限り HEAD_MOVED_RETRIES 回まで入れ直す。収まらないか
+    回数を使い切ったら承認ゲートで止める。本番の PR 番号・マージコミット・最後に比べた判定を返す。"""
+    ver = a.version
+    mp = find_pr(root, base, prod, states=("OPEN",))
+    main_pr = (
+        mp["number"]
+        if mp
+        else create_pr(
+            root,
+            prod,
+            base,
+            f"Release: {plugin} v{ver} を {prod} へ",
+            f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        )
+    )
+    for left in range(HEAD_MOVED_RETRIES, -1, -1):
+        try:
+            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
+            break
+        except HeadMoved:
+            moved = approval.check_approved(root, approved, base, allowed)
+            if not moved.ok or not left:
+                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
+            verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
+    return main_pr, merge, verdict
+
+
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
@@ -719,13 +760,7 @@ def cmd_release(a):
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
 
-    # 開発版の PR（release/v<版> → ベースブランチ）
-    pr = _reusable_release_pr(root, branch, base)
-    if pr is None:
-        body = _release_pr_body(root, a, plugin, plugins)
-        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
-    release_pr = pr["number"]
-    release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
+    release_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
 
     metrics = {
         "channel": a.channel,
@@ -751,27 +786,7 @@ def cmd_release(a):
     if not verdict.ok:
         emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
     metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-    mp = find_pr(root, base, prod, states=("OPEN",))
-    main_pr = (
-        mp["number"]
-        if mp
-        else create_pr(
-            root,
-            prod,
-            base,
-            f"Release: {plugin} v{ver} を {prod} へ",
-            f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
-        )
-    )
-    for left in range(HEAD_MOVED_RETRIES, -1, -1):
-        try:
-            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
-            break
-        except HeadMoved:
-            moved = approval.check_approved(root, approved, base, allowed)
-            if not moved.ok or not left:
-                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
-            verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
+    main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, base, prod, release_pr, approved, allowed, verdict, items, metrics)
     metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
     items += approval.tolerated_items(verdict)
     git(root, "fetch", "-q", "origin")
