@@ -284,6 +284,23 @@ class _Fill:
         return any(e.get("id") in GATE_2_STEPS and e.get("exit") == 0 for e in state.get("log") or [] if isinstance(e, dict))
 
 
+def _recheck_dev(f: _Fill, obs, rec: dict):
+    """記録がある開発版の版を確かめ直す。(使う記録, 止める理由) を返す。止めるときは記録が None。"""
+    import release_version
+
+    d = release_version.taken(obs, rec["version"], rec.get("how") or "decided", f.level)
+    if not d.is_taken:
+        return rec, None
+    own = release_version.own_released(f.repo, f.branch_of(rec["version"]), f.base)
+    if own is None:
+        return None, _stopped("unreadable", rec["version"], unreadable=["pr"])
+    if own:
+        return rec, None
+    if rec.get("how") == "explicit":
+        return None, _stopped("taken", d.version, d.existing, d.next_free)
+    return f.redecide(rec, release_version.decide_dev(obs, f.level).version, "taken", d.existing, obs.as_dict()), None
+
+
 def _fill_dev(f: _Fill, rec: dict | None):
     import release_version
 
@@ -296,15 +313,9 @@ def _fill_dev(f: _Fill, rec: dict | None):
             return _stopped("taken", d.version, d.existing, d.next_free)
         rec = f.write_record(d.version, d.how, obs.as_dict())
     else:
-        d = release_version.taken(obs, rec["version"], rec.get("how") or "decided", f.level)
-        if d.is_taken:
-            own = release_version.own_released(f.repo, f.branch_of(rec["version"]), f.base)
-            if own is None:
-                return _stopped("unreadable", rec["version"], unreadable=["pr"])
-            if not own:
-                if rec.get("how") == "explicit":
-                    return _stopped("taken", d.version, d.existing, d.next_free)
-                rec = f.redecide(rec, release_version.decide_dev(obs, f.level).version, "taken", d.existing, obs.as_dict())
+        rec, stopped = _recheck_dev(f, obs, rec)
+        if stopped:
+            return stopped
     f.ensure_filled(rec)
     return None, None
 
