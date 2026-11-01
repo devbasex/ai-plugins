@@ -4799,6 +4799,46 @@
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md",
       "code": "run_id"
+    },
+    {
+      "term": "実行の文脈",
+      "context": "ndf-workflow",
+      "meaning": "実行の核が本体へ渡す 1 つの値。解決した入力・実行の識別子・期限・記録の書き口・再試行・型の読み書きを持つ（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-design.md",
+      "code": "run_context"
+    },
+    {
+      "term": "実行の記録",
+      "context": "ndf-workflow",
+      "meaning": "1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines のファイル（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-design.md",
+      "code": "run_log"
+    },
+    {
+      "term": "上限の宣言",
+      "context": "ndf-workflow",
+      "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-design.md",
+      "code": "limits_declaration"
+    },
+    {
+      "term": "名前の対応表",
+      "context": "ndf-workflow",
+      "meaning": "同じ意味の値の正しい名前と、読むだけ受ける旧い名前の対応（plugins/ndf/contracts/names.json。#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-design.md",
+      "code": "names"
+    },
+    {
+      "term": "持ち主の鍵",
+      "context": "ndf-worktree",
+      "meaning": "持ち主の記録を取り合う単位。入口の契約が、解決した入力から作る形を宣言する（例 cross-refactoring:pr=2301。#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-design.md",
+      "code": "lease_key"
     }
   ]
 }
