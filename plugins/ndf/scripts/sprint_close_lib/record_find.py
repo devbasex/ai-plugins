@@ -101,7 +101,7 @@ def _closers_of(root, repo: str, issues: tuple[int, ...]) -> dict[int, set[int]]
     return closers_of
 
 
-def _candidates(root, repo: str, closers: tuple[int, ...]) -> set[int]:
+def _record_candidates(root, repo: str, closers: tuple[int, ...]) -> set[int]:
     """閉じる PR と、それを参照する PR の和。"""
     cands = set(closers)
     for pr in closers:
@@ -139,7 +139,7 @@ def find_record(root, repo: str | None, issues) -> RecordHit:
         closers = tuple(sorted(set().union(*closers_of.values()))) if closers_of else ()
         if not closers:
             return RecordHit(issues=issues)
-        cands = _candidates(root, repo, closers)
+        cands = _record_candidates(root, repo, closers)
         kept, pre = _released_records(root, repo, cands, closers_of)
     except _Unreadable as e:
         return RecordHit(issues=issues, error=str(e))
