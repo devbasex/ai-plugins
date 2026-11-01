@@ -115,5 +115,6 @@
 | [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) | 配布先を Claude Code と Codex に限り、agy・Kiro CLI は cross 系の相手役としてだけ起動すること（#2231）。導入物の不在の検査（`test_distribution_runtimes.py`）、相手役の起動経路が配布物を読まないこと、前の版で入れた手元の扱い。利用者向けの残し方と消し方は `plugins/ndf/README.md` が正 |
 | [ndf-sprint-close-final-stage.md](ndf-sprint-close-final-stage.md) | スプリント課題を最終工程の記録（閉じる条件 3・`--final-stage`）を確かめてから閉じること、振り返りの行を記録の PR の最後の配布の記録と比べる基準（`dist_comment_id`）、まとめのプランの並び（retro の後に close）、既定ブランチ宛の Pull Request の closing keywords を閉じる予定の参照へ置き換えること（#2228・#2082・#2119）。手順は `progress-tracking` の「スプリントを閉じる」が正 |
 | [ndf-sprint-close-record-pr-at-run-time.md](ndf-sprint-close-record-pr-at-run-time.md) | まとめの close が、まとめを流し始める時点にリリース記録の PR を見つけて課題を閉じる（差し込み {queue_record}・find_record の規則・止まる条件。#2230 #2044 #2121） |
+| [ndf-release-version-at-run-time.md](ndf-release-version-at-run-time.md) | スプリントの配布の版を配布のプランを流す時点に決めること（版の差し込み・版の記録・決め直し・本番の系列・bump の止まり方。#2164） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
