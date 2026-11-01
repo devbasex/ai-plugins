@@ -6,7 +6,6 @@ GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -42,23 +41,18 @@ def slug(owner_repo_value: str | None) -> str | None:
 
 
 def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
-    """`.ndf/worktree.json` の中身と、読めなかった理由。置き場は `decl.setting_path`（`root` → メインディレクトリ）。
+    """`.ndf/worktree.json` の中身と、読めなかった理由。置き場は `decl.read_json_setting`（`root` → メインディレクトリ。
+    `production_branch` だけはメインディレクトリ → `root`。Pull Request の変更で本番チャネルを動かせないようにする。#2363）。
 
     `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
     無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
     """
     if not root:
         return {}, None
-    f = decl.setting_path(root, WORKTREE_DECL.name) if fallback else Path(root) / WORKTREE_DECL
-    if f is None or not f.is_file():
-        return {}, None
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        return {}, f"{WORKTREE_DECL}: JSON として読めない（{e}）"
-    if not isinstance(data, dict):
-        return {}, f"{WORKTREE_DECL}: 最上位がオブジェクトでない"
-    return data, None
+    if fallback:
+        return decl.read_json_setting(root, WORKTREE_DECL.name)
+    f = Path(root) / WORKTREE_DECL
+    return decl.load_file(f, WORKTREE_DECL.name) if f.is_file() else ({}, None)
 
 
 def _branch_value(v) -> str | None:

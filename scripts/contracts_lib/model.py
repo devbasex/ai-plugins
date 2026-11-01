@@ -138,8 +138,11 @@ def load(root: Path) -> Contracts:
         _one_of(f, d, "scope", SCOPES)
         _strs(f, d, "readers")
         for k, v in d["keys"].items():
-            if not isinstance(v, dict) or "summary" not in v or set(v) - {"summary", "migrate_from", "duplicates"}:
-                raise ContractError(f"{f.name}: keys.{k} は summary と任意の migrate_from・duplicates を持つ")
+            if not isinstance(v, dict) or "summary" not in v or set(v) - {"summary", "migrate_from", "duplicates", "place"}:
+                raise ContractError(f"{f.name}: keys.{k} は summary と任意の migrate_from・duplicates・place を持つ")
+            # キーの place はファイルの place より先に効く（認可に関わる値をメインディレクトリから読む。lib/decl.py の key_places）
+            if "place" in v and v["place"] not in SETTING_PLACES:
+                raise ContractError(f"{f.name}: keys.{k}.place は {' / '.join(SETTING_PLACES)} のどれか")
         if f.name != d["file"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['file']}.json にする")
         c.settings[d["file"]] = d

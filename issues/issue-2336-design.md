@@ -210,7 +210,7 @@ erDiagram
 | `place` | 文字列 | `worktree` か `main`（決定 9 の規則で決める） |
 | `scope` | 文字列 | `team`（追跡する）か `personal`（`.ndf/.gitignore` に載る） |
 | `readers` | 文字列の並び | 開いてよい関数（`plugins/ndf/scripts/lib/repo.py:read_worktree_decl` の形） |
-| `keys` | オブジェクト | `{"<キー>": {"summary": "...", "migrate_from": "<ファイル>#<キー>", "duplicates": "<ファイル>#<キー>"}}`。`migrate_from`・`duplicates` は任意 |
+| `keys` | オブジェクト | `{"<キー>": {"summary": "...", "migrate_from": "<ファイル>#<キー>", "duplicates": "<ファイル>#<キー>", "place": "main"}}`。`migrate_from`・`duplicates`・`place`（ファイルの `place` と違う置き場。認可に関わる値。決定 9 の追記）は任意 |
 
 ### 環境変数の項目（`contracts/env/<名前>.json`）
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import decl as setting_decl
 import delivery
 import formatting
 import project_decl
@@ -75,7 +76,11 @@ def step_budgets(decl: dict) -> StepBudgets:
 
 
 def read_decl(roots, name: str) -> dict:
-    """roots の順に .ndf/<name> を探し、最初に見つかった宣言を返す。どこにも無ければ {}。"""
+    """roots の順に .ndf/<name> を探し、最初に見つかった宣言を返す。どこにも無ければ {}。
+
+    契約がキーごとに別の置き場を宣言した値（`worktree.json` の `production_branch`）は、見つけた木から
+    `setting_decl.overlay_keys` で読み直す（Pull Request の変更で本番のブランチを動かせないようにする。#2363）。
+    """
     for r in roots:
         f = Path(r) / ".ndf" / name
         if not f.is_file():
@@ -88,6 +93,10 @@ def read_decl(roots, name: str) -> dict:
             schema.load_shape(Decl, d, str(f))
         except schema.ShapeError as e:
             raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
+        if name in setting_decl.places():
+            d, why = setting_decl.overlay_keys(r, name, d, f)
+            if why:
+                raise DeclError(why)
         return d
     return {}
 

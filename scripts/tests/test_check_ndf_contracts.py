@@ -223,6 +223,16 @@ def test_malformed_item_stops_with_2(tree: Path):
     assert run(tree)[0] == 2
 
 
+def test_key_place_main_is_accepted_and_other_values_stop_with_2(tree: Path):
+    """認可に関わるキーはキーごとの place でメインディレクトリから読むと宣言できる（#2363）。"""
+    f = tree / "plugins/ndf/contracts/settings/worktree.json.json"
+    wj(f, dict(SETTING, keys={"base_branch": {"summary": "ベースブランチ", "place": "main"}}))
+    assert run(tree, "--render")[0] == 0
+    assert run(tree)[0] == 0
+    wj(f, dict(SETTING, keys={"base_branch": {"summary": "ベースブランチ", "place": "tmp"}}))
+    assert run(tree)[0] == 2
+
+
 def git(root: Path, *a: str) -> None:
     subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True)
 

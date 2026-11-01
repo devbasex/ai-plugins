@@ -1,7 +1,7 @@
 {
   "file": "runtimes.json",
-  "summary": "使ってよいランタイム",
-  "place": "worktree",
+  "summary": "使ってよいランタイム（認可に関わるため、Pull Request の変更で広げられないようメインディレクトリから読む。#2363）",
+  "place": "main",
   "scope": "team",
   "readers": [
     "plugins/ndf/scripts/lib/runtime_policy.py:find"

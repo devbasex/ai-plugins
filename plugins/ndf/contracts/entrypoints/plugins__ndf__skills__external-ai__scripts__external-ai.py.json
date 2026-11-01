@@ -49,14 +49,7 @@
     "NDF_USAGE_KIND",
     "NDF_USAGE_SOURCE"
   ],
-  "settings": [
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
-      ]
-    }
-  ],
+  "settings": [],
   "stdin": "none",
   "stdout": "step-result",
   "writes": [],

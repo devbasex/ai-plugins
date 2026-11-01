@@ -30,7 +30,9 @@ def render(c: Contracts) -> str:
             for x in e["settings"]
             if x["file"] == name
         ]
-        lines.append(f"| `{name}` | {s['place']} | {s['scope']} | {_cell(s['readers'])} | {_cell(users)} |")
+        main_keys = [k for k, v in s["keys"].items() if v.get("place", s["place"]) != s["place"]]
+        place = f"{s['place']}（{', '.join(main_keys)} は {s['keys'][main_keys[0]]['place']}）" if main_keys else s["place"]
+        lines.append(f"| `{name}` | {place} | {s['scope']} | {_cell(s['readers'])} | {_cell(users)} |")
     lines += [
         "",
         "## 受け渡しのファイル",

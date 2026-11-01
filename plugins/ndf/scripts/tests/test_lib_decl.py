@@ -19,6 +19,7 @@ import decl  # noqa: E402
 import delivery  # noqa: E402
 import project_decl  # noqa: E402
 import repo  # noqa: E402
+import runtime_policy  # noqa: E402
 
 GIT = ["git", "-c", "user.email=a@b", "-c", "user.name=a", "-c", "init.defaultBranch=main", "-c", "protocol.file.allow=always"]
 
@@ -150,3 +151,83 @@ def test_old_supervise_test_command_is_read_only_without_project_suites(repo_wt)
     wj(wt / ".ndf/project.json", {"test": {"suites": [{"name": "p", "runner": "pytest", "command": "pytest -q"}]}})
     got, note = sdecl._project_decl([wt], sdecl.read_decl([wt], sdecl.SUPERVISE_DECL))
     assert "make test" not in json.dumps(got)
+
+
+# 認可に関わる値（本番マージの判定・本番のブランチ・使ってよいランタイム）はメインディレクトリから読む（#2363）。
+# Pull Request の変更だけで承認ゲート 2 やランタイムの制限を緩められないようにする。
+
+PROD_ROW = dict(ROW, channel="production")
+
+
+def test_authorization_values_are_declared_main_in_the_contract():
+    assert decl.places()["runtimes.json"] == "main"
+    assert decl.key_places("project.json")["delivery"] == "main"
+    assert decl.key_places("worktree.json")["production_branch"] == "main"
+    assert "test" not in decl.key_places("project.json") and "base_branch" not in decl.key_places("worktree.json")
+
+
+def test_pr_head_delivery_does_not_loosen_the_merge_gate(repo_wt):
+    main, wt = repo_wt
+    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
+    wj(main / ".ndf/project.json", {"test": "main", "delivery": [PROD_ROW]})
+    wj(wt / ".ndf/project.json", {"test": "wt", "delivery": []})
+    assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.PRODUCTION
+    # 認可に関わらない値は今のまま Pull Request の head を先に読む（#2317・#1709）
+    assert project_decl.read_project_decl(wt)["test"] == "wt"
+
+
+def test_pr_head_cannot_drop_delivery_absent_in_the_main_directory(repo_wt):
+    """メインディレクトリの宣言に delivery が無ければ、head が足した delivery でも判定を緩めない（undetermined）。"""
+    main, wt = repo_wt
+    wj(main / ".ndf/project.json", {"test": "main"})
+    wj(wt / ".ndf/project.json", {"test": "wt", "delivery": []})
+    assert "delivery" not in project_decl.read_project_decl(wt)
+    assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
+
+
+def test_pr_head_cannot_move_the_production_branch(repo_wt):
+    main, wt = repo_wt
+    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
+    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    wj(wt / ".ndf/worktree.json", {"base_branch": "feat", "production_branch": "release"})
+    d = delivery.load_delivery(wt)
+    assert d.production == "main" and d.base == "feat"
+    assert repo.production_branch(wt)[0] == "main"
+    assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
+
+
+def test_authorization_values_fall_back_to_the_called_tree_without_a_main_declaration(repo_wt):
+    """メインディレクトリに宣言が無いときは、今の develop と同じく呼ばれた木の宣言を読む。"""
+    main, wt = repo_wt
+    wj(wt / ".ndf/worktree.json", {"production_branch": "release"})
+    wj(wt / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    d = delivery.load_delivery(wt)
+    assert d.production == "release" and d.rows and d.rows[0]["branch"] == "release"
+
+
+def test_broken_main_declaration_is_a_problem_not_a_fallback(repo_wt):
+    main, wt = repo_wt
+    (main / ".ndf").mkdir()
+    (main / ".ndf/project.json").write_text("{")
+    wj(wt / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
+
+
+def test_pr_head_runtimes_does_not_widen_the_allowed_runtimes(repo_wt):
+    main, wt = repo_wt
+    wj(main / ".ndf/runtimes.json", {"allowed": ["claude"]})
+    wj(wt / ".ndf/runtimes.json", {"allowed": ["claude", "codex"]})
+    assert runtime_policy.read_policy(wt).allowed == ("claude",)
+    with pytest.raises(runtime_policy.RuntimePolicyError):
+        runtime_policy.check_runtime("codex", wt)
+
+
+def test_supervise_plan_reads_the_production_branch_from_the_main_directory(repo_wt):
+    """雛形の引数（supervise_lib/decl.read_decl）も、head の production_branch で本番チャネルを動かせない。"""
+    sys.path.append(str(SCRIPTS))
+    import supervise_lib.decl as sdecl  # noqa: PLC0415
+
+    main, wt = repo_wt
+    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
+    wj(wt / ".ndf/worktree.json", {"base_branch": "feat", "production_branch": "release"})
+    assert sdecl.read_decl([wt, main], sdecl.WORKTREE_DECL) == {"base_branch": "feat", "production_branch": "main"}

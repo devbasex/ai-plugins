@@ -31,7 +31,8 @@
       "summary": "services（このリポジトリの宣言にある最上位のキー）"
     },
     "delivery": {
-      "summary": "配布の経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない（branch は channel の無い行だけ）"
+      "summary": "配布の経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない（branch は channel の無い行だけ）。本番マージの判定（承認ゲート 2）に使うため、メインディレクトリから読む（#2363）",
+      "place": "main"
     },
     "issues": {
       "summary": "issues（このリポジトリの宣言にある最上位のキー）"
