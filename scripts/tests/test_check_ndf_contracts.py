@@ -286,3 +286,140 @@ def test_ci_without_a_base_stops_with_3(tree: Path):
 def test_this_repository_matches_its_contracts():
     code, r = run(REPO)
     assert code == 0, r["items"][:5]
+
+
+# --- Checker.entry の分岐ごとの現状固定（I-001） ---
+
+
+def _entry(tree: Path, **kw) -> None:
+    wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json", dict(ENTRY, **kw))
+    assert run(tree, "--render")[0] == 0
+
+
+def _item(r: dict, kind: str) -> dict:
+    return next(i for i in r["items"] if i["kind"] == kind)
+
+
+def test_entry_manual_argv_is_args_unparsed(tree: Path):
+    edit(tree, '    ap = argparse.ArgumentParser()\n    ap.add_argument("--root")\n    a = ap.parse_args()\n', "    a = sys.argv[1:]\n")
+    edit(tree, "repo.read_worktree_decl(a.root)", "repo.read_worktree_decl(a[0])")
+    code, r = run(tree)
+    assert code == 1
+    item = _item(r, "args-unparsed")
+    assert (item["path"], item["name"]) == ("plugins/ndf/scripts/tool.py", "")
+    assert ("contract-stale", "arg:--root") in kinds(r)
+
+
+def test_entry_unparsed_contract_skips_arg_comparison_but_still_reports(tree: Path):
+    _entry(tree, args={"unparsed": "手で読む"})
+    code, r = run(tree)
+    assert code == 1
+    assert kinds(r) == [("args-unparsed", "")]
+
+
+def test_entry_positional_args_are_compared(tree: Path):
+    edit(tree, 'ap.add_argument("--root")', 'ap.add_argument("--root")\n    ap.add_argument("target")')
+    code, r = run(tree)
+    assert code == 1 and ("arg-undeclared", "target") in kinds(r)
+    assert "positional" in _item(r, "arg-undeclared")["detail"]
+    _entry(tree, args={"options": ["--root"], "positionals": ["target"]})
+    assert run(tree)[0] == 0
+
+
+def test_entry_env_in_contract_without_env_item_points_to_env_dir(tree: Path):
+    (tree / "plugins/ndf/contracts/env/NDF_X.json").unlink()
+    run(tree, "--render")
+    code, r = run(tree)
+    assert code == 1
+    item = _item(r, "env-undeclared")
+    assert item["name"] == "NDF_X"
+    assert "plugins/ndf/contracts/env/NDF_X.json" in item["detail"]
+
+
+def test_entry_env_missing_from_entry_points_to_entry_file(tree: Path):
+    edit(tree, 'os.environ.get("NDF_X")', 'os.environ.get("NDF_X") or os.getenv("NDF_Y")')
+    item = _item(run(tree)[1], "env-undeclared")
+    assert item["name"] == "NDF_Y"
+    assert "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json の env" in item["detail"]
+
+
+def test_entry_dynamic_env_read_is_reported(tree: Path):
+    edit(tree, 'v = os.environ.get("NDF_X")', 'v = os.environ.get("NDF_X")\n    w = os.environ.get("NDF_" + str(v))')
+    code, r = run(tree)
+    assert code == 1
+    item = _item(r, "env-dynamic")
+    assert item["path"] == "plugins/ndf/scripts/tool.py" and item["name"] == "main"
+
+
+def test_entry_reads_without_file_item_is_stale(tree: Path):
+    _entry(tree, reads=["nothing"])
+    code, r = run(tree)
+    assert code == 1 and kinds(r) == [("contract-stale", "read:nothing")]
+
+
+def test_entry_reads_with_file_item_passes(tree: Path):
+    _entry(tree, reads=["out"])
+    assert run(tree)[0] == 0
+
+
+def test_entry_setting_without_settings_item_is_stale(tree: Path):
+    _entry(tree, settings=[{"file": "worktree.json", "keys": ["base_branch"]}, {"file": "nope.json", "keys": []}])
+    code, r = run(tree)
+    assert code == 1 and ("contract-stale", "setting:nope.json") in kinds(r)
+
+
+def test_entry_write_whose_file_item_is_missing_is_stale(tree: Path):
+    _entry(tree, writes=["out", "ghost"])
+    code, r = run(tree)
+    assert code == 1 and kinds(r) == [("contract-stale", "write:ghost")]
+
+
+def test_entry_write_matches_a_glob_pattern(tree: Path):
+    wj(
+        tree / "plugins/ndf/contracts/files/out.json",
+        {"name": "out", "pattern": "*.json", "kind": "result", "place": "worktree", "skill_readers": []},
+    )
+    assert run(tree, "--render")[0] == 0
+    assert run(tree)[0] == 0
+
+
+def test_entry_exit_unknown_is_reported_with_its_reason(tree: Path):
+    _entry(tree, exit={"unknown": "読み切れない"})
+    code, r = run(tree)
+    assert code == 1
+    item = _item(r, "exit-unknown")
+    assert (item["name"], item["detail"]) == ("", "読み切れない")
+
+
+def test_entry_external_contract_has_no_caller_check(tree: Path):
+    e = {k: val for k, val in ENTRY.items() if k != "callers"}
+    wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json", dict(e, external="手で呼ぶ"))
+    assert run(tree, "--render")[0] == 0
+    (tree / "plugins/ndf/skills/a/SKILL.md").write_text("nothing\n")
+    assert run(tree)[0] == 0
+
+
+def test_entry_reports_every_kind_at_once(tree: Path):
+    edit(tree, 'ap.add_argument("--root")', 'ap.add_argument("--new")')
+    edit(tree, 'os.environ.get("NDF_X")', 'os.getenv("NDF_Y")')
+    edit(tree, 'decl.get("base_branch")', 'decl.get("zzz")')
+    edit(tree, 'Path("out.json").write_text("{}")', 'open("other.json", "w")')
+    _entry(tree, reads=["nothing"], exit={"unknown": "不明"})
+    (tree / "plugins/ndf/skills/a/SKILL.md").write_text("nothing\n")
+    code, r = run(tree)
+    assert code == 1
+    assert sorted(kinds(r)) == sorted(
+        [
+            ("arg-undeclared", "--new"),
+            ("contract-stale", "arg:--root"),
+            ("env-undeclared", "NDF_Y"),
+            ("contract-stale", "env:NDF_X"),
+            ("setting-undeclared", "worktree.json#zzz"),
+            ("contract-stale", "setting:worktree.json#base_branch"),
+            ("file-undeclared", "other.json"),
+            ("contract-stale", "write:out"),
+            ("contract-stale", "read:nothing"),
+            ("exit-unknown", ""),
+            ("caller-stale", "plugins/ndf/skills/a/SKILL.md"),
+        ]
+    )
