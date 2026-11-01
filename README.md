@@ -48,7 +48,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 | プラグイン名 | バージョン | できること | 詳細 |
 | --- | --- | --- | --- |
-| **ndf** | 10.27.4 | 開発の作業手順（Skill）と専門のサブエージェント。Claude Code と Codex へ同じ名前で入る | [README](./plugins/ndf/README.md) |
+| **ndf** | 10.27.5-dev.1 | 開発の作業手順（Skill）と専門のサブエージェント。Claude Code と Codex へ同じ名前で入る | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 3.0.2 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
 
 外部サービスへつなぐ MCP サーバーの設定のプラグインが 10 個あります（Claude Code / Codex 向け）。
@@ -69,7 +69,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 ### NDF プラグインの Skill の一覧
 
-**NDFプラグイン v10.27.4** に入る Skill の数は、AI ツールごとに違います。
+**NDFプラグイン v10.27.5-dev.1** に入る Skill の数は、AI ツールごとに違います。
 Claude Code向け core 49個、Codex向け core 45個です。
 元Skills（49個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
