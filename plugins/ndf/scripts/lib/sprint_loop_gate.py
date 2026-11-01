@@ -31,7 +31,6 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
-    prod_of,
     write_record,
     open_record,
     current_lap,
@@ -98,15 +97,14 @@ def refusal_order(summary: str) -> dict:
 
 def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "close") -> list[str]:
     """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。
-    記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。"""
+    記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。
+    版も渡さない。周回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
+    まとめの配布の版は流す時点に次に空いている版で決める（#2164）。"""
     prev = rec["laps"][lap["n"] - 2] if lap["n"] >= 2 else None
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
     cmd = [sys.executable, str(SUPERVISE), "new", "close", "--pace", "auto", "--name", lap["sprint"], "--worktree", str(env.main_dir())]
     cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", lap.get("mode") or "standard"]
-    v = lap.get("versions") or {}
-    if v.get("dev"):
-        cmd += ["--version", v["dev"], "--prod", v.get("prod") or prod_of(v["dev"])]
     if carry:
         cmd += ["--carry", *map(str, carry)]
     if lap.get("milestone"):

@@ -610,6 +610,8 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     sl_select.cmd_select(env, "l1")
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     assert "--carry 31 32" in out["metrics"]["close_command"] and "--pace auto" in out["metrics"]["close_command"]
+    # 周回の版は出し終えているので、まとめへ明示の版として渡さない（流す時点に次に空いている版で決める。#2164）
+    assert "--version" not in out["metrics"]["close_command"] and "--prod" not in out["metrics"]["close_command"]
     assert "1-close.json" in out["metrics"]["queue"].split("--then")[-1]
     assert out["metrics"]["pipeline"].count("&&") == 2 and "wait" in out["metrics"]["pipeline"]
     rows = sl.cmd_list(env, "l1")["items"]
