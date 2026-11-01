@@ -161,7 +161,8 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 ステージの `command` と `resume` をそのまま写す。
 
 1. プランを書き出す。ステージごとのプランと目録（`$O/sprint.json`）ができる:
-   `sv new sprint --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --state $S --out $O`。
+   `sv new sprint --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --state $S --out $O`。
+   版数は渡さず、開発版のプランを流す時点に queue が決める（明示するなら `--version`）
    設計の前に別の課題を取り込むと決めていれば `--absorb <課題>:<取り込み先>` を足す（取り込んだ課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
 3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が答えたら、設計 PR ごとに
@@ -172,7 +173,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `関門 2` のステージの `gate` に沿って
-   承認資料を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "関門 2" --what <要約> --by user --outcome approved|rejected`
+   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "関門 2" --what <要約> --by user --outcome approved|rejected`
    を打つ。差し戻されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json --max 3 --done $O/done-10.json` と `sv wait $O/done-10.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う

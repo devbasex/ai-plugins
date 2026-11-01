@@ -383,6 +383,17 @@ def plan_bump(root, pdir, plugin, old, new):
     return ed
 
 
+def bump_guard(root, plugin, old, new, base) -> str | None:
+    """`bump` が書き換える前の判定（#2164 の I7。中身は release_version.bump_check）。打ち直しなら origin のベースブランチの版。"""
+    import release_version
+
+    rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
+    already, stop = release_version.bump_check(root, plugin, old, new, base, rel)
+    if stop:
+        emit(result(TOOL, "stopped", stop.summary, [], stop.metrics), code=stop.code)
+    return already
+
+
 def cmd_bump(a):
     root = git_root(a.root)
     a.base = a.base or delivery.load_delivery(root).base  # 既定は宣言のベースブランチ（#1336）
@@ -392,18 +403,16 @@ def cmd_bump(a):
     except (OSError, ValueError, KeyError) as e:
         raise StepError(f"旧版を plugin.json から読めない: {e}", 2)
     new = a.to
-    if old == new:
-        base_ver = base_version(root, pdir, f"origin/{a.base}")
-        if base_ver is None or base_ver == new:
-            raise StepError(f"旧版と新版が同じ: {old}" + ("" if base_ver else f"（origin/{a.base} の版を読めない）"))
-        # 同じステップの打ち直し（作業場所の版はすでに上げてある）
+    already = bump_guard(root, a.plugin, old, new, a.base)
+    if already:
+        # 同じステップの打ち直し（作業場所の版はすでに上げてある）か、自分の配布の後の流し直し
         emit(
             result(
                 TOOL,
                 "ok",
-                f"{a.plugin} はすでに {new}（origin/{a.base} は {base_ver}）。上げ直さない",
+                f"{a.plugin} はすでに {new}（origin/{a.base} は {already}）。上げ直さない",
                 [],
-                {"plugin": a.plugin, "from": base_ver, "to": new, "already": True},
+                {"plugin": a.plugin, "from": already, "to": new, "already": True},
             )
         )
     ed = plan_bump(root, pdir, a.plugin, old, new)
@@ -693,6 +702,35 @@ def _release_pr_body(root, a, plugin, plugins):
     )
 
 
+def _merge_release_pr(root, a, plugin, plugins, branch, base):
+    """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、PR 番号とマージコミットを返す。"""
+    pr = _reusable_release_pr(root, branch, base)
+    if pr is None:
+        body = _release_pr_body(root, a, plugin, plugins)
+        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{a.version}", body), "state": "OPEN"}
+    n = pr["number"]
+    return n, (wait_and_merge(root, n, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, n))
+
+
+def _merge_prod_pr(root, a, plugin, base, prod, release_pr, approved, allowed, verdict, items, metrics):
+    """本番の PR を使い回すか作り、承認と比べた先端を指定してマージする。先端が動いたら比べ直し、許可リストの下に
+    収まる限り HEAD_MOVED_RETRIES 回まで入れ直し、それ以外は承認ゲートで止める。(PR 番号, マージコミット, 判定) を返す。"""
+    mp = find_pr(root, base, prod, states=("OPEN",))
+    title = f"Release: {plugin} v{a.version} を {prod} へ"
+    body = f"{plugin} v{a.version} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    main_pr = mp["number"] if mp else create_pr(root, prod, base, title, body)
+    for left in range(HEAD_MOVED_RETRIES, -1, -1):
+        try:
+            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
+            break
+        except HeadMoved:
+            moved = approval.check_approved(root, approved, base, allowed)
+            if not moved.ok or not left:
+                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
+            verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
+    return main_pr, merge, verdict
+
+
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
@@ -709,15 +747,7 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
-
-    # 開発版の PR（release/v<版> → ベースブランチ）
-    pr = _reusable_release_pr(root, branch, base)
-    if pr is None:
-        body = _release_pr_body(root, a, plugin, plugins)
-        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
-    release_pr = pr["number"]
-    release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
-
+    release_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
         "version": ver,
@@ -742,32 +772,11 @@ def cmd_release(a):
     if not verdict.ok:
         emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
     metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-    mp = find_pr(root, base, prod, states=("OPEN",))
-    main_pr = (
-        mp["number"]
-        if mp
-        else create_pr(
-            root,
-            prod,
-            base,
-            f"Release: {plugin} v{ver} を {prod} へ",
-            f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
-        )
-    )
-    for left in range(HEAD_MOVED_RETRIES, -1, -1):
-        try:
-            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
-            break
-        except HeadMoved:
-            moved = approval.check_approved(root, approved, base, allowed)
-            if not moved.ok or not left:
-                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
-            verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
+    main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, base, prod, release_pr, approved, allowed, verdict, items, metrics)
     metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
     items += approval.tolerated_items(verdict)
     git(root, "fetch", "-q", "origin")
-    if not merge:
-        merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
     _publish_tag_and_release(root, plugin, ver, tag, merge)
 
     metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})

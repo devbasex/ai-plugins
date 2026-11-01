@@ -15,7 +15,7 @@ from gate_answer import GATE_1
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
-from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
+from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
@@ -337,18 +337,23 @@ def plan_sprint_check(a, repo: str) -> dict:
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
     """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
     単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
-    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。"""
-    version = version or a.version
+    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
+    `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
+    プランの版の記録から。#2164）。"""
+    version = version or (a.version if channel == "dev" else None)
+    wt, branch = release_names(version)
     ns = argparse.Namespace(
         **decl_fields(a),
         version=version,
+        level=getattr(a, "level", None),
+        series=DEV_SERIES if channel == "prod" else None,
         prs=["{queue_pr:check}"],
         prs_from_queue=False,
         channel=channel,
         repo=repo,
         prev_tag=None,
-        worktree=f"{repo}/.worktrees/release/v{version}",
-        branch=f"release/v{version}",
+        worktree=f"{repo}/{wt}",
+        branch=branch,
         issue=a.issue,
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
@@ -465,19 +470,23 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
     return plan_check_since(ns)
 
 
-def plan_mvv_release(a, repo: str, version: str, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
+def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
     """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップが関門 2 を判定する。
-    prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。"""
+    prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
+    `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""
+    wt, branch = release_names(version)
     ns = argparse.Namespace(
         **decl_fields(a),
         version=version,
+        level=getattr(a, "level", None),
+        series=DEV_SERIES if channel == "prod" else None,
         prs=prs or [],
         prs_from_queue=prs is None,
         channel=channel,
         repo=repo,
         prev_tag=None,
-        worktree=f"{repo}/.worktrees/release/v{version}",
-        branch=f"release/v{version}",
+        worktree=f"{repo}/{wt}",
+        branch=branch,
         issue=a.issue,
         mode=a.mode,
         mvv=a.state,

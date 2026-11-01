@@ -232,7 +232,7 @@ def apply_decls(a) -> None:
     - 実装の上限（a.impl_timeout）と想定最大時間（a.refactor_budget_minutes）: 引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
 
-    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）と require_versions で組む。
+    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     wt = read_decl(roots, WORKTREE_DECL)
@@ -324,16 +324,6 @@ def delivery_decl(a) -> "delivery.DeliveryDecl":
         base=a.base,
         production=a.production_branch,
     )
-
-
-def require_versions(a) -> None:
-    """版数（--version・close は --prod も）は、リリースの経路が雛形（template）で組むときだけ要る（#1336 の I6）。"""
-    if not delivery.needs_version(a.routes):
-        return
-    need = [("version", "--version", "版数"), *([("prod", "--prod", "本番の版")] if a.kind == "close" else [])]
-    gaps = [f"{what}（{flag}。release.form の雛形は版数で組む）" for attr, flag, what in need if not getattr(a, attr, None)]
-    if gaps:
-        raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(gaps))
 
 
 def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:

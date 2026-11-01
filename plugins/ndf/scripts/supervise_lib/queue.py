@@ -19,7 +19,7 @@ from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
 from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
-from supervise_lib.queue_fill import FINISHED, fill_queue_pr, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
+from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
@@ -130,17 +130,11 @@ def cmd_queue(
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
-    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
-    stages = [list(plans), *then_stages]
-    all_plans = [p for stage in stages for p in stage]
-    done_path = queue_done_path(plans, done)
-    try:
-        decl = queue_decl_of([_read_plan(p) for p in all_plans])
-    except DeclError as e:
-        return _not_started(str(e), max_, done_path)
-    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
-    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
-    listing = _read_listing(queue_plans_path(done_path))
+    stages, all_plans = _normalize_stages(plans, then)
+    prepared = _prepare_queue(all_plans, plans, done, max_)
+    if isinstance(prepared, dict):
+        return prepared
+    decl, done_path, seen, listing = prepared
     try:
         prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
     except durable.DurableError as e:
@@ -165,6 +159,26 @@ def cmd_queue(
         return got.value
     finally:
         durable.close()
+
+
+def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[str]], list[str]]:
+    """then（プランの並びかステージの並び）を、先頭のステージ plans に続くステージの並びとすべてのプランの並びにする。"""
+    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
+    stages = [list(plans), *then_stages]
+    return stages, [p for stage in stages for p in stage]
+
+
+def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max_: int):
+    """宣言を読み、done を消して知らせ始める位置と前の一覧を読む。宣言の形が違えば _not_started の結果を返す。"""
+    done_path = queue_done_path(plans, done)
+    try:
+        decl = queue_decl_of([_read_plan(p) for p in all_plans])
+    except DeclError as e:
+        return _not_started(str(e), max_, done_path)
+    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
+    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
+    listing = _read_listing(queue_plans_path(done_path))
+    return decl, done_path, seen, listing
 
 
 def _read_plan(plan: str) -> dict:
@@ -195,7 +209,7 @@ def start_listing(done_path: Path, all_plans: list[str], **extra) -> None:
 
 
 def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[dict], list[str]]:
-    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS を埋める。(流さないプランの items, 流すプラン) を返す。
+    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS と版の差し込みを埋める。(流さないプランの items, 流すプラン) を返す。
 
     後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由と `unfilled` を残す（#2079）。"""
     not_done = [i for i in items if i["result"] != "完了"]
@@ -211,11 +225,33 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
     skipped, runnable = [], []
     for p in stage:
         err = (None if prs is None else fill_queue_prs(p, prs)) or fill_queue_pr(p, items)
+        version = None
+        if not err and _release_skipped_by_condition(p):
+            runnable.append(p)  # 版を照会せずに流す。engine が実行の条件を打ち直して完了で終える
+            continue
+        if not err:  # 版の差し込みは、ほかの差し込みを埋めた後に（差し込み前の写しに版だけを残す。#2164）
+            err, version = fill_release_version(p, items)
         if err:
-            skipped.append({"plan": p, "result": NOT_RUN, "reason": err, "unfilled": True})
+            skipped.append({"plan": p, "result": NOT_RUN, "reason": err, "unfilled": True, **({"version": version} if version else {})})
         else:
             runnable.append(p)
     return skipped, runnable
+
+
+def _release_skipped_by_condition(plan: str) -> bool:
+    """「版」と「実行の条件」を持つ配布のプランで、条件が配布不要（skip_code）を返すか。
+
+    条件で飛ぶ配布は版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
+    判定できないときと流すときは False（版を埋めてから流し、engine が条件を打ち直す）。"""
+    try:
+        info = json.loads(Path(plan).read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(info, dict) or not isinstance(info.get("版"), dict) or not isinstance(info.get("実行の条件"), dict):
+        return False
+    from supervise_lib.steps import COND_SKIP, run_condition  # 条件のあるプランだけが読み込む
+
+    return run_condition(info["実行の条件"], info, state_dir_of(str(Path(plan).absolute())))[0] == COND_SKIP
 
 
 def touched_files(body: str) -> list[str]:
