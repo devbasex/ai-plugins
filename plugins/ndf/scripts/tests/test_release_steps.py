@@ -574,7 +574,7 @@ def test_bump_rerun_after_the_version_was_raised_is_ok(repo):
     assert res["status"] == "ok" and res["metrics"]["from"] == "1.2.3" and res["items"] == []
 
 
-def fake_gh(tmp: Path, out: str, code: int = 0) -> dict:
+def fake_gh_list(tmp: Path, out: str, code: int = 0) -> dict:
     """`gh pr list` の答えを固定する偽の gh を PATH の先頭に置いた環境（自分の配布の照会。#2164）。"""
     d = tmp / "fakebin"
     d.mkdir(exist_ok=True)
@@ -618,11 +618,11 @@ def test_bump_to_a_release_with_a_tag_stops(repo):
 def test_bump_at_the_base_is_a_rerun_only_after_its_own_release(repo, tmp_path):
     """作業場所とベースブランチがともに新しい版なら、release/v<版> のマージ済みの PR があるときだけ打ち直し（決定 2）。"""
     bump_repo(repo, "1.2.4", "1.2.4")
-    own = run_env(repo, fake_gh(tmp_path, '[{"number": 7}]'), "bump", "--plugin", "ndf", "--to", "1.2.4")
+    own = run_env(repo, fake_gh_list(tmp_path, '[{"number": 7}]'), "bump", "--plugin", "ndf", "--to", "1.2.4")
     assert own.returncode == 0 and last_json(own)["metrics"]["already"] is True, own.stdout
-    other = run_env(repo, fake_gh(tmp_path, "[]"), "bump", "--plugin", "ndf", "--to", "1.2.4")
+    other = run_env(repo, fake_gh_list(tmp_path, "[]"), "bump", "--plugin", "ndf", "--to", "1.2.4")
     assert other.returncode == 3 and last_json(other)["metrics"]["existing"] == "1.2.4"
-    unknown = run_env(repo, fake_gh(tmp_path, "", 1), "bump", "--plugin", "ndf", "--to", "1.2.4")
+    unknown = run_env(repo, fake_gh_list(tmp_path, "", 1), "bump", "--plugin", "ndf", "--to", "1.2.4")
     assert unknown.returncode == 2 and last_json(unknown)["metrics"]["unreadable"] == ["pr"]
 
 

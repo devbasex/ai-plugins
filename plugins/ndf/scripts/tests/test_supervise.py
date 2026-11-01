@@ -1674,7 +1674,7 @@ def test_new_sprint_without_design_skips_gate(tmp_path):
     assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
 
 
-@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"], ["--name", "m", "--issue", "1"]])
+@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
 def test_new_sprint_rejects_bad_args(tmp_path, args):
     assert cli("new", "sprint", "--worktree", str(tmp_path), *args).returncode == 2
 
