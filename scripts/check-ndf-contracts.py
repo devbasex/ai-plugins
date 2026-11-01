@@ -113,28 +113,47 @@ class Checker:
         return None
 
     def entry(self, rel: str, e: dict, out: list[dict], code: set) -> None:
-        f, cf = self.facts(rel), self.c.entry_files[rel]
+        f = self.facts(rel)
+        self.match_args(rel, e, f, out)
+        self.match_env(rel, e, f, out)
+        self.collect_code_items(f, code)
+        self.match_setting_keys(rel, e, f, out)
+        self.match_files(rel, e, f, out)
+        self.match_exit_and_callers(rel, e, out)
+
+    def match_args(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
+        cf = self.c.entry_files[rel]
         if f["argv_manual"] or "unparsed" in e["args"]:
             out.append(v("args-unparsed", rel, "", "sys.argv を手で読む（引数を静的に拾えない）"))
-        if "unparsed" not in e["args"]:
-            got = {("" if not s else s, "option", o) for s, o in f["options"]} | {(s, "positional", p) for s, p in f["positionals"]}
-            want = flat_args(e["args"])
-            for s, k, n in sorted(got - want):
-                out.append(v("arg-undeclared", rel, f"{s}:{n}" if s else n, f"契約の args に無い {k}。{cf} の args へ足す"))
-            for s, k, n in sorted(want - got):
-                out.append(
-                    v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す")
-                )
+        if "unparsed" in e["args"]:
+            return
+        got = {("" if not s else s, "option", o) for s, o in f["options"]} | {(s, "positional", p) for s, p in f["positionals"]}
+        want = flat_args(e["args"])
+        for s, k, n in sorted(got - want):
+            out.append(v("arg-undeclared", rel, f"{s}:{n}" if s else n, f"契約の args に無い {k}。{cf} の args へ足す"))
+        for s, k, n in sorted(want - got):
+            out.append(
+                v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す")
+            )
+
+    def match_env(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
+        cf = self.c.entry_files[rel]
         for name, via in sorted(f["env"].items()):
             if name not in e["env"] or name not in self.c.env:
                 where = f"{cf} の env" if name not in e["env"] else f"{CONTRACTS}/env/{name}.json"
                 out.append(v("env-undeclared", rel, name, f"契約に無い環境変数の読み。{where} へ足す", via))
         for name in sorted(set(e["env"]) - set(f["env"])):
             out.append(v("contract-stale", rel, f"env:{name}", f"契約の env の {name} をコードが読まない。{cf} から消す"))
+
+    @staticmethod
+    def collect_code_items(f: dict, code: set) -> None:
         for (mod, fn), _ in f["env_dynamic"].items():
             code.add(("env-dynamic", mod, fn, "名前を組み立てる・走査する環境変数の読み"))
         for (mod, file, fn), via in f["setting_opens"].items():
             code.add(("setting-open-outside-reader", mod, file, f"読み手の関数の外で .ndf/{file} を開く（{fn}。{via}）"))
+
+    def match_setting_keys(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
+        cf = self.c.entry_files[rel]
         want_keys = {(s["file"], k) for s in e["settings"] for k in s["keys"]}
         for (file, key), via in sorted(f["setting_keys"].items()):
             item = self.c.settings.get(file, {"keys": {}})
@@ -152,6 +171,9 @@ class Checker:
             out.append(
                 v("contract-stale", rel, f"setting:{file}#{key}", f"契約の settings の {file}#{key} をコードが読まない。{cf} から消す")
             )
+
+    def match_files(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
+        cf = self.c.entry_files[rel]
         for written, via in sorted(f["writes"].items()):
             if not self.file_of(written, e["writes"]):
                 out.append(
@@ -175,14 +197,18 @@ class Checker:
         for s in e["settings"]:
             if s["file"] not in self.c.settings:
                 out.append(v("contract-stale", rel, f"setting:{s['file']}", f"{CONTRACTS}/settings/{s['file']}.json が無い"))
+
+    def match_exit_and_callers(self, rel: str, e: dict, out: list[dict]) -> None:
+        cf = self.c.entry_files[rel]
         if "unknown" in e["exit"]:
             out.append(v("exit-unknown", rel, "", e["exit"]["unknown"]))
-        if "callers" in e:
-            if not e["callers"]:
-                out.append(v("no-caller", rel, "", f"呼び手が無い。{cf} の callers か external を書く"))
-            for c in e["callers"]:
-                if not self.callers.contains(c, rel):
-                    out.append(v("caller-stale", rel, c, f"呼び手 {c} が {Path(rel).name} を含まない。{cf} の callers を直す"))
+        if "callers" not in e:
+            return
+        if not e["callers"]:
+            out.append(v("no-caller", rel, "", f"呼び手が無い。{cf} の callers か external を書く"))
+        for c in e["callers"]:
+            if not self.callers.contains(c, rel):
+                out.append(v("caller-stale", rel, c, f"呼び手 {c} が {Path(rel).name} を含まない。{cf} の callers を直す"))
 
     def run(self) -> tuple[list[dict], dict]:
         out: list[dict] = []
