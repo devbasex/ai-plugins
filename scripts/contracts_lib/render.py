@@ -17,7 +17,12 @@ def _cell(xs) -> str:
 
 def render(c: Contracts) -> str:
     lines = [HEADER]
-    lines += ["## 設定（`.ndf/`）", "", "| 設定 | 置き場 | 範囲 | 読み手の関数 | 読むエントリポイント（キー） |", "| --- | --- | --- | --- | --- |"]
+    lines += [
+        "## 設定（`.ndf/`）",
+        "",
+        "| 設定 | 置き場 | 範囲 | 読み手の関数 | 読むエントリポイント（キー） |",
+        "| --- | --- | --- | --- | --- |",
+    ]
     for name, s in sorted(c.settings.items()):
         users = [
             f"{p}（{', '.join(x['keys'])}）" if x["keys"] else p
@@ -26,7 +31,13 @@ def render(c: Contracts) -> str:
             if x["file"] == name
         ]
         lines.append(f"| `{name}` | {s['place']} | {s['scope']} | {_cell(s['readers'])} | {_cell(users)} |")
-    lines += ["", "## 受け渡しのファイル", "", "| 名前 | 型 | 種類 | 置き場 | 書くエントリポイント | 読むエントリポイント・Skill |", "| --- | --- | --- | --- | --- | --- |"]
+    lines += [
+        "",
+        "## 受け渡しのファイル",
+        "",
+        "| 名前 | 型 | 種類 | 置き場 | 書くエントリポイント | 読むエントリポイント・Skill |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
     for name, f in sorted(c.files.items()):
         writers = [p for p, e in sorted(c.entrypoints.items()) if name in e["writes"]]
         readers = [p for p, e in sorted(c.entrypoints.items()) if name in e["reads"]] + list(f["skill_readers"])

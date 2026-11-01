@@ -51,9 +51,9 @@ def test_every_setting_has_a_place():
 def test_team_setting_is_read_from_the_called_tree_first(repo_wt):
     main, wt = repo_wt
     wj(main / ".ndf/project.json", {"test": "main"})
-    assert decl.locate(wt, "project.json") == main / ".ndf/project.json"
+    assert decl.setting_path(wt, "project.json") == main / ".ndf/project.json"
     wj(wt / ".ndf/project.json", {"test": "wt"})
-    assert decl.locate(wt, "project.json") == wt / ".ndf/project.json"
+    assert decl.setting_path(wt, "project.json") == wt / ".ndf/project.json"
     # #2317・#1709: Pull Request の worktree が変えた宣言を使う
     assert project_decl.read_project_decl(wt) == {"test": "wt"}
 
@@ -61,14 +61,14 @@ def test_team_setting_is_read_from_the_called_tree_first(repo_wt):
 def test_personal_setting_is_read_from_the_main_directory_first(repo_wt):
     main, wt = repo_wt
     wj(wt / ".ndf/worktree.local.json", {"v": "wt"})
-    assert decl.locate(wt, "worktree.local.json") == wt / ".ndf/worktree.local.json"
+    assert decl.setting_path(wt, "worktree.local.json") == wt / ".ndf/worktree.local.json"
     wj(main / ".ndf/worktree.local.json", {"v": "main"})
-    assert decl.locate(wt, "worktree.local.json") == main / ".ndf/worktree.local.json"
+    assert decl.setting_path(wt, "worktree.local.json") == main / ".ndf/worktree.local.json"
 
 
 def test_unknown_setting_raises():
     with pytest.raises(KeyError):
-        decl.locate(".", "nope.json")
+        decl.setting_path(".", "nope.json")
 
 
 def test_main_dir_of_a_submodule_worktree_is_the_submodule(tmp_path: Path):

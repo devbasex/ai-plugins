@@ -83,8 +83,19 @@ def _check_entry(f: Path, d: dict) -> None:
     _need(
         f,
         d,
-        {"version": int, "path": str, "summary": str, "args": dict, "env": list, "settings": list, "stdin": str,
-         "stdout": str, "writes": list, "reads": list, "exit": dict},
+        {
+            "version": int,
+            "path": str,
+            "summary": str,
+            "args": dict,
+            "env": list,
+            "settings": list,
+            "stdin": str,
+            "stdout": str,
+            "writes": list,
+            "reads": list,
+            "exit": dict,
+        },
         {"callers": list, "external": str},
     )
     if ("callers" in d) == ("external" in d):

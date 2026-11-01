@@ -51,7 +51,7 @@ def main_dir(root) -> Path | None:
     return Path(common).parent
 
 
-def candidates(root, name: str) -> list[Path]:
+def _search_order(root, name: str) -> list[Path]:
     """`.ndf/<name>` を探す順（重なりを除く）。契約に無い名前は `KeyError`。"""
     place = places()[name]
     here = Path(root) if root else None
@@ -60,6 +60,6 @@ def candidates(root, name: str) -> list[Path]:
     return [Path(b) / ".ndf" / name for b in dict.fromkeys(p for p in order if p)]
 
 
-def locate(root, name: str) -> Path | None:
+def setting_path(root, name: str) -> Path | None:
     """`.ndf/<name>` の開くパス。どちらの木にも無ければ `None`。契約に無い名前は `KeyError`。"""
-    return next((p for p in candidates(root, name) if p.is_file()), None)
+    return next((p for p in _search_order(root, name) if p.is_file()), None)

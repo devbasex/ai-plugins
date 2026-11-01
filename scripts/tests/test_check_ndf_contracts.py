@@ -41,13 +41,13 @@ def main():
 if __name__ == "__main__":
     sys.exit(main())
 '''
-REPO_LIB = '''import json
+REPO_LIB = """import json
 from pathlib import Path
 
 
 def read_worktree_decl(root):
     return json.loads((Path(root) / ".ndf" / "worktree.json").read_text()), None
-'''
+"""
 ENTRY = {
     "version": 1,
     "path": "plugins/ndf/scripts/tool.py",
@@ -82,9 +82,7 @@ def env_clean() -> dict:
 
 
 def run(root: Path, *extra: str, env: dict | None = None) -> tuple[int, dict]:
-    p = subprocess.run(
-        [sys.executable, str(CHECK), "--root", str(root), *extra], capture_output=True, text=True, env=env or env_clean()
-    )
+    p = subprocess.run([sys.executable, str(CHECK), "--root", str(root), *extra], capture_output=True, text=True, env=env or env_clean())
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip().startswith("{") else {}
 
 
@@ -128,8 +126,11 @@ def test_undeclared_entrypoint_fails_with_a_draft(tree: Path):
     assert code == 1
     item = next(i for i in r["items"] if i["kind"] == "entry-undeclared")
     assert item["path"] == "plugins/ndf/scripts/new.py" and '"path": "plugins/ndf/scripts/new.py"' in item["detail"]
-    code, out = 0, subprocess.run(
-        [sys.executable, str(CHECK), "--root", str(tree), "--draft", "plugins/ndf/scripts/new.py"], capture_output=True, text=True
+    code, out = (
+        0,
+        subprocess.run(
+            [sys.executable, str(CHECK), "--root", str(tree), "--draft", "plugins/ndf/scripts/new.py"], capture_output=True, text=True
+        ),
     )
     assert out.returncode == 0 and json.loads(out.stdout)["path"] == "plugins/ndf/scripts/new.py"
 
@@ -144,7 +145,12 @@ def test_draft_rejects_a_non_entrypoint(tree: Path):
         ('ap.add_argument("--root")', 'ap.add_argument("--root")\n    ap.add_argument("--new")', "arg-undeclared", "--new"),
         ('os.environ.get("NDF_X")', 'os.environ.get("NDF_X") or os.getenv("NDF_Y")', "env-undeclared", "NDF_Y"),
         ('decl.get("base_branch")', 'decl.get("base_branch") or decl.get("zzz")', "setting-undeclared", "worktree.json#zzz"),
-        ('Path("out.json").write_text("{}")', 'Path("out.json").write_text("{}")\n    open("other.json", "w")', "file-undeclared", "other.json"),
+        (
+            'Path("out.json").write_text("{}")',
+            'Path("out.json").write_text("{}")\n    open("other.json", "w")',
+            "file-undeclared",
+            "other.json",
+        ),
     ],
 )
 def test_reads_and_writes_outside_the_contract_fail(tree: Path, old, new, kind, name):

@@ -64,8 +64,10 @@ class Callers:
 
 def draft(path: str, facts: dict, callers: list[str], hook: bool) -> dict:
     """項目の下書き。呼び手が無ければ `external` に補う理由の印を置く。"""
-    args = {"unparsed": "sys.argv を手で読む（柱 P8 で argparse へ移す）"} if facts["argv_manual"] else args_of(
-        facts["options"], facts["positionals"]
+    args = (
+        {"unparsed": "sys.argv を手で読む（柱 P8 で argparse へ移す）"}
+        if facts["argv_manual"]
+        else args_of(facts["options"], facts["positionals"])
     )
     settings: dict[str, set] = {}
     for file, key in facts["setting_keys"]:

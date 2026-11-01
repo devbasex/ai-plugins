@@ -40,8 +40,18 @@ SELF = "scripts/check-ndf-contracts.py"
 ALLOW = "scripts/contract-allow"
 INDEX = CONTRACTS + "/index.md"
 ALLOW_KINDS = (
-    "args-unparsed", "env-dynamic", "file-dynamic", "setting-open-outside-reader", "setting-duplicate", "exit-unknown",
-    "no-caller", "entry-undeclared", "arg-undeclared", "env-undeclared", "setting-undeclared", "file-undeclared",
+    "args-unparsed",
+    "env-dynamic",
+    "file-dynamic",
+    "setting-open-outside-reader",
+    "setting-duplicate",
+    "exit-unknown",
+    "no-caller",
+    "entry-undeclared",
+    "arg-undeclared",
+    "env-undeclared",
+    "setting-undeclared",
+    "file-undeclared",
 )
 
 
@@ -112,7 +122,9 @@ class Checker:
             for s, k, n in sorted(got - want):
                 out.append(v("arg-undeclared", rel, f"{s}:{n}" if s else n, f"契約の args に無い {k}。{cf} の args へ足す"))
             for s, k, n in sorted(want - got):
-                out.append(v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す"))
+                out.append(
+                    v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す")
+                )
         for name, via in sorted(f["env"].items()):
             if name not in e["env"] or name not in self.c.env:
                 where = f"{cf} の env" if name not in e["env"] else f"{CONTRACTS}/env/{name}.json"
@@ -127,16 +139,36 @@ class Checker:
         for (file, key), via in sorted(f["setting_keys"].items()):
             item = self.c.settings.get(file, {"keys": {}})
             if (file, key) not in want_keys or key not in item["keys"]:
-                out.append(v("setting-undeclared", rel, f"{file}#{key}", f"契約に無い設定のキーの読み。{cf} の settings と {CONTRACTS}/settings/{file}.json の keys へ足す", via))
+                out.append(
+                    v(
+                        "setting-undeclared",
+                        rel,
+                        f"{file}#{key}",
+                        f"契約に無い設定のキーの読み。{cf} の settings と {CONTRACTS}/settings/{file}.json の keys へ足す",
+                        via,
+                    )
+                )
         for file, key in sorted(want_keys - set(f["setting_keys"])):
-            out.append(v("contract-stale", rel, f"setting:{file}#{key}", f"契約の settings の {file}#{key} をコードが読まない。{cf} から消す"))
+            out.append(
+                v("contract-stale", rel, f"setting:{file}#{key}", f"契約の settings の {file}#{key} をコードが読まない。{cf} から消す")
+            )
         for written, via in sorted(f["writes"].items()):
             if not self.file_of(written, e["writes"]):
-                out.append(v("file-undeclared", rel, written, f"契約に無い受け渡しのファイルの書き。{CONTRACTS}/files/ に項目を作り {cf} の writes へ足す", via))
+                out.append(
+                    v(
+                        "file-undeclared",
+                        rel,
+                        written,
+                        f"契約に無い受け渡しのファイルの書き。{CONTRACTS}/files/ に項目を作り {cf} の writes へ足す",
+                        via,
+                    )
+                )
         for name in e["writes"]:
             pat = self.c.files.get(name, {}).get("pattern")
             if pat is None or not any(w == pat or fnmatch(w, pat) for w in f["writes"]):
-                out.append(v("contract-stale", rel, f"write:{name}", f"契約の writes の {name} をコードが書かない（か項目が無い）。{cf} から消す"))
+                out.append(
+                    v("contract-stale", rel, f"write:{name}", f"契約の writes の {name} をコードが書かない（か項目が無い）。{cf} から消す")
+                )
         for name in e["reads"]:
             if name not in self.c.files:
                 out.append(v("contract-stale", rel, f"read:{name}", f"契約の reads の {name} に項目が無い"))
@@ -161,7 +193,14 @@ class Checker:
             e = self.c.entrypoints.get(rel)
             if e is None:
                 d = json.dumps(self.draft(rel), ensure_ascii=False)
-                out.append(v("entry-undeclared", rel, "", f"契約の項目が無い。{CONTRACTS}/entrypoints/{entry_file_name(rel)} に次の下書きを補って置く: {d}"))
+                out.append(
+                    v(
+                        "entry-undeclared",
+                        rel,
+                        "",
+                        f"契約の項目が無い。{CONTRACTS}/entrypoints/{entry_file_name(rel)} に次の下書きを補って置く: {d}",
+                    )
+                )
                 continue
             self.entry(rel, e, out, code)
         for rel in sorted(set(self.c.entrypoints) - set(entries)):
@@ -171,19 +210,26 @@ class Checker:
         for file, s in sorted(self.c.settings.items()):
             for key, k in s["keys"].items():
                 if "duplicates" in k:
-                    out.append(v("setting-duplicate", f"{CONTRACTS}/settings/{file}.json", f"{file}#{key}", f"{k['duplicates']} と同じ値を持つ"))
+                    out.append(
+                        v("setting-duplicate", f"{CONTRACTS}/settings/{file}.json", f"{file}#{key}", f"{k['duplicates']} と同じ値を持つ")
+                    )
         used_env = {n for e in self.c.entrypoints.values() for n in e["env"]}
         for name in sorted(set(self.c.env) - used_env):
             out.append(v("contract-stale", f"{CONTRACTS}/env/{name}.json", name, "どのエントリポイントも読まない環境変数の項目。消す"))
         used_files = {n for e in self.c.entrypoints.values() for n in e["writes"] + e["reads"]}
         for name in sorted(set(self.c.files) - used_files):
-            out.append(v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す"))
+            out.append(
+                v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す")
+            )
         idx = self.root / INDEX
         if not idx.is_file() or idx.read_text(encoding="utf-8") != render(self.c):
             out.append(v("index-stale", INDEX, "", "逆引きが項目と一致しない。python3 scripts/check-ndf-contracts.py --render を打つ"))
         metrics = {
-            "entrypoints": len(entries), "candidates": len(cands), "files": len(self.c.files),
-            "settings": len(self.c.settings), "env": len(self.c.env),
+            "entrypoints": len(entries),
+            "candidates": len(cands),
+            "files": len(self.c.files),
+            "settings": len(self.c.settings),
+            "env": len(self.c.env),
         }
         return out, metrics
 
@@ -208,7 +254,9 @@ def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str]) -
     for r in allow:
         if (r["path"], r["name"], r["kind"]) not in hit:
             if mine(r["path"]):
-                items.append(v("unused-allow", r["path"], r["name"], f"{r['kind']} の例外に当たる違反が無い。{ALLOW}/{allow_file_name(r)} を消す"))
+                items.append(
+                    v("unused-allow", r["path"], r["name"], f"{r['kind']} の例外に当たる違反が無い。{ALLOW}/{allow_file_name(r)} を消す")
+                )
             else:
                 outside += 1
     items.sort(key=lambda i: (i["path"], i["kind"], i["name"]))
@@ -216,7 +264,11 @@ def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str]) -
 
 
 def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
-    print(json.dumps({"tool": "check-ndf-contracts", "status": status, "summary": summary, "items": items, "metrics": metrics}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"tool": "check-ndf-contracts", "status": status, "summary": summary, "items": items, "metrics": metrics}, ensure_ascii=False
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,7 +293,12 @@ def main(argv: list[str] | None = None) -> int:
         changed = not idx.is_file() or idx.read_text(encoding="utf-8") != text
         if changed:
             idx.write_text(text, encoding="utf-8")
-        emit("ok", "逆引きを書き直した" if changed else "逆引きは変わらない", [{"path": INDEX, "result": "changed" if changed else "unchanged"}], {})
+        emit(
+            "ok",
+            "逆引きを書き直した" if changed else "逆引きは変わらない",
+            [{"path": INDEX, "result": "changed" if changed else "unchanged"}],
+            {},
+        )
         return 0
     ck = Checker(root, c)
     if a.draft:
@@ -267,7 +324,14 @@ def main(argv: list[str] | None = None) -> int:
         if state == "checked":
             rel_allow = allow_dir.resolve().relative_to(root).as_posix() if allow_dir.resolve().is_relative_to(root) else ALLOW
             for r in ratchet.added(root, sha, rel_allow, allow, allow_file_name):
-                items.append(v("allow-added", r["path"], r["name"], f"例外リストへ項目を足した（{allow_file_name(r)}）。例外を足さずに契約かコードを直す"))
+                items.append(
+                    v(
+                        "allow-added",
+                        r["path"],
+                        r["name"],
+                        f"例外リストへ項目を足した（{allow_file_name(r)}）。例外を足さずに契約かコードを直す",
+                    )
+                )
     metrics.update(allowed=allowed, violations=len(items), base=base, ratchet=state)
     if targets:
         metrics.update(targets=len(targets), outside=outside)

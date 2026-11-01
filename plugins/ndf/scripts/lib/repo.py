@@ -21,9 +21,8 @@ WORKTREE_DECL = Path(".ndf") / "worktree.json"
 SPEC_DIR = "docs/specifications"
 
 
-def main_dir(root) -> Path | None:
-    """`root` の worktree が属するメインディレクトリ（決め方は `decl.main_dir`）。git でなければ `None`。"""
-    return decl.main_dir(root)
+# メインディレクトリの決め方の正本は decl.main_dir（サブモジュールは core.worktree。#2054）
+main_dir = decl.main_dir
 
 
 def owner_repo_from_url(url: str) -> str | None:
@@ -43,14 +42,14 @@ def slug(owner_repo_value: str | None) -> str | None:
 
 
 def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
-    """`.ndf/worktree.json` の中身と、読めなかった理由。置き場は `decl.locate`（`root` → メインディレクトリ）。
+    """`.ndf/worktree.json` の中身と、読めなかった理由。置き場は `decl.setting_path`（`root` → メインディレクトリ）。
 
     `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
     無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
     """
     if not root:
         return {}, None
-    f = decl.locate(root, WORKTREE_DECL.name) if fallback else Path(root) / WORKTREE_DECL
+    f = decl.setting_path(root, WORKTREE_DECL.name) if fallback else Path(root) / WORKTREE_DECL
     if f is None or not f.is_file():
         return {}, None
     try:
