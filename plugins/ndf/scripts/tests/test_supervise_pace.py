@@ -25,6 +25,7 @@ from supervise_lib import engine, flow, paths, queue  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
+from sprint_args import new_sprint_args  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -57,26 +58,7 @@ def assert_transitions_exist(plan: dict) -> None:
 def new_fast_sprint(tmp_path, state, *extra):
     out = tmp_path / "m"
     p = cli(
-        "new",
-        "sprint",
-        "--name",
-        "m26",
-        "--worktree",
-        str(tmp_path),
-        "--issue",
-        "11",
-        "12",
-        "--design",
-        "11",
-        "--version",
-        "10.18.0-dev.1",
-        "--pace",
-        "fast",
-        "--state",
-        str(state),
-        "--out",
-        str(out),
-        *extra,
+        *new_sprint_args(tmp_path, out, "--pace", "fast", "--state", str(state), *extra, name="m26", issue=("11", "12"), design=("11",))
     )
     return p, out
 
@@ -167,25 +149,7 @@ def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     (repo / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}')
     (repo / ".ndf" / "supervise.json").write_text((REPO / ".ndf" / "supervise.json").read_text())
     out = tmp_path / "m"
-    p = cli(
-        "new",
-        "sprint",
-        "--name",
-        "m",
-        "--worktree",
-        str(repo),
-        "--issue",
-        "1",
-        "--version",
-        "1.0.0-dev.1",
-        "--pace",
-        "fast",
-        "--state",
-        str(sprint_state(tmp_path, "fast")),
-        "--out",
-        str(out),
-        cwd=repo,
-    )
+    p = cli(*new_sprint_args(repo, out, "--pace", "fast", "--state", str(sprint_state(tmp_path, "fast")), version="1.0.0-dev.1"), cwd=repo)
     assert p.returncode == 1 and "pace.json" in json.loads(p.stdout)["summary"]
 
 
@@ -291,7 +255,7 @@ def test_check_since_last_with_pr_is_a_usage_error(tmp_path):
 # ---------- new close ----------
 
 
-def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
+def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
     out = tmp_path / "close"
     p = cli(
         "new",
@@ -325,19 +289,21 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
     stages = [s.get("stage") for s in close["steps"]]
     for stage in ("確定仕様化", "後片付け", "振り返り"):
         assert stages.count(stage) == 1
-    assert stages.index("確定仕様化") < stages.index("後片付け") < stages.index("振り返り")
+    assert stages.index("確定仕様化") < stages.index("振り返り") < stages.index("後片付け")  # 振り返りの後に閉じる（#2228）
     cl = steps_of(close)["close"]["cmd"]
     assert "--record-pr {queue_pr:release-prod}" in cl and "--issues 11,12" in cl and "--with-verification" in cl
+    assert "--final-stage 振り返り" in cl
     assert close["課題"] == [11, 12] and close.get("記録")
     cmd = waves["最終の検査"]["command"]
     assert cmd.count("--then") == 3
     assert_transitions_exist(close)
     # 棚卸しは振り返りの後の別のステップ（#842）。振り返りのプロンプトは棚卸しを含まない
     steps = steps_of(close)
-    assert steps["retro"]["next"] == "refine" and "backlog-refinement" not in steps["retro"]["prompt"]
+    assert steps["retro"]["next"] == "close" and steps["close"]["next"] == "refine"
+    assert "backlog-refinement" not in steps["retro"]["prompt"]
     refine = steps["refine"]
     assert refine["stage"] == "棚卸し" and refine["type"] == "work" and refine["timeout"] > 0
-    assert refine["next"] == "end" and stages.index("振り返り") < stages.index("棚卸し")
+    assert refine["next"] == "end" and stages.index("後片付け") < stages.index("棚卸し")
     # 無人で通す: 上限を上げて打ち直さない・終了コード 10 で承認を求めない・記録のリポジトリの外へ書かない
     for words in ("--limit` を上げて打ち直さず", "承認を求めず", "`--repo` を渡さない", "親 issue の起票"):
         assert words in refine["prompt"]
@@ -504,7 +470,7 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
 @pytest.mark.parametrize("alone", [True, False])
 def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path, monkeypatch, alone):
     out = tmp_path / "m"
-    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
     check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]

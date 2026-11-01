@@ -59,17 +59,10 @@ def plugin_json_path(name: str) -> str:
     return f"plugins/{name}/.claude-plugin/plugin.json"
 
 
-# `README.md` はランタイムを Claude Code / Kiro / Codex / agy の順、`plugins/ndf/README.md` は
-# Claude Code / Codex / Kiro CLI / agy の順で書いている。位置ではなく名前で対応づける。表記も
-# 2 本で違う（`Kiro` と `Kiro CLI`）ため、対応表を文書ごとに持つ。**agy はどちらも同じ表記で
-# ある。** コマンド名がそのまま配布先の名前であり、製品名で言い換えると読み手が結び付けられない。
-ROOT_README_RUNTIMES = {"Claude Code": "claude", "Kiro": "kiro", "Codex": "codex", "agy": "agy"}
-PLUGIN_README_RUNTIMES = {
-    "Claude Code": "claude",
-    "Codex": "codex",
-    "Kiro CLI": "kiro",
-    "agy": "agy",
-}
+# 配布先は Claude Code と Codex の 2 つで、`README.md`・`plugins/ndf/README.md` のどちらも
+# この順で書いている。位置ではなく名前で対応づけ、表記が分かれたときに備えて対応表を文書ごとに持つ。
+ROOT_README_RUNTIMES = {"Claude Code": "claude", "Codex": "codex"}
+PLUGIN_README_RUNTIMES = {"Claude Code": "claude", "Codex": "codex"}
 
 
 def runtime_alternation(labels: dict[str, str]) -> str:
@@ -232,7 +225,7 @@ class RepositoryMetrics:
     source: str
 
 
-# 点で照合する版数記載（G・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
+# 点で照合する版数記載（G・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
 POINT_VERSION_SPECS: list[PointVersionSpec] = [
     PointVersionSpec(
@@ -241,12 +234,6 @@ POINT_VERSION_SPECS: list[PointVersionSpec] = [
         "**NDFプラグイン v<版>**",
         re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*"),
     ),  # G
-    PointVersionSpec(
-        PLUGIN_README,
-        "Kiro の確認例の版数",
-        "（Kiro CLI用 / v<版>）",
-        re.compile(r"Kiro CLI用 / v" + VERSION + r"）"),
-    ),  # K
     PointVersionSpec(
         PLUGIN_README,
         "Codex のキャッシュパスの例の版数",
@@ -782,7 +769,7 @@ def main() -> int:
     root = Path(args.root).resolve()
 
     report = Report()
-    counts = {runtime: manifest_skill_count(root, runtime, report) for runtime in ("claude", "codex", "kiro", "agy")}
+    counts = {runtime: manifest_skill_count(root, runtime, report) for runtime in ("claude", "codex")}
     skills = skill_dir_count(root, SKILLS_DIR, report)
     version = plugin_version(root, report)
 

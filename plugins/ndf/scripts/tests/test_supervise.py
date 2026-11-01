@@ -32,6 +32,7 @@ import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
+from sprint_args import new_sprint_args  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -328,6 +329,15 @@ def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran)
     steps[0]["on_exit"] = {"6": "after"}
     s, text = run_plan(tmp_path, steps)
     assert [e["id"] for e in s.state.log] == ["review", "after"], text
+    # 検査のプランの review（templates の雛形そのもの）も、収束しなければ後続の base-sync へ進まない
+    from types import SimpleNamespace
+
+    from supervise_lib.templates import _inspect_steps
+
+    review = next(s for s in _inspect_steps(SimpleNamespace(), "1", "x") if s["id"] == "review")
+    review = {**review, "drive": "fake", "args": "", "next": "after"}
+    s, text = run_plan(tmp_path, [review, *steps[1:]])
+    assert [e["id"] for e in s.state.log] == ran, text
 
 
 def _skipping_drive(tmp_path, monkeypatch):
@@ -723,22 +733,7 @@ def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
 
 def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
     out = tmp_path / "m"
-    p = cli(
-        "new",
-        "sprint",
-        "--name",
-        "m",
-        "--worktree",
-        str(tmp_path),
-        "--issue",
-        "1",
-        "--mode",
-        "light",
-        "--version",
-        "10.18.0-dev.1",
-        "--out",
-        str(out),
-    )
+    p = cli(*new_sprint_args(tmp_path, out, "--mode", "light"))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
@@ -1519,6 +1514,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert st["facts"]["presentation_to"] == "issues/approval-ndf-v10.17.11.md"
     assert st["facts"]["gate_next"] == "explain" and st["verify"]["cwd"] == "/r"
     assert "--ref develop" in st["verify"]["cmd"] and "--channel dev" in st["release"]["cmd"]
+    assert st["verify"]["stage"] == "配布"  # 開発版の導入の確認は「配布」（#2288 の AC2）
 
     p = cli(
         "new",
@@ -1552,7 +1548,9 @@ def test_new_release_dev_and_prod(tmp_path):
         "fix",
         "judge-record",
     ]
-    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
+    # 導入の確認だけのステップは「リリース後テスト」と記録しない。それは仕上げの release-verify が担う（#2288 の AC1）
+    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "配布"
+    assert not [s for s in plan["steps"] if s.get("stage") == "リリース後テスト"]
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
     # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
     assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state?:release}' --by user" in st["approve"]["cmd"]
@@ -1580,23 +1578,7 @@ def test_new_release_requires_version():
 
 def test_new_sprint_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
-    p = cli(
-        "new",
-        "sprint",
-        "--name",
-        "v10-18",
-        "--worktree",
-        str(tmp_path),
-        "--issue",
-        "11",
-        "12",
-        "--design",
-        "11",
-        "--version",
-        "10.18.0-dev.1",
-        "--out",
-        str(out),
-    )
+    p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
     assert p.returncode == 0, p.stderr
     res = json.loads(p.stdout)
     assert res["status"] == "ok"
@@ -1686,7 +1668,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
 
 def test_new_sprint_without_design_skips_gate(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
     assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
@@ -2531,10 +2513,7 @@ def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
 
 def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder(tmp_path):
     out = tmp_path / "m"
-    p = cli(
-        "new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1",
-        "--tests", "tests/cli", "--scope", "lib/a", "--out", str(out),
-    )  # fmt: skip
+    p = cli(*new_sprint_args(tmp_path, out, "--tests", "tests/cli", "--scope", "lib/a"))
     assert p.returncode == 0, p.stderr
     check = next(out.glob("*-check.json"))
     refactor = next(s for s in json.loads(check.read_text())["steps"] if s["id"] == "refactor")
@@ -2561,7 +2540,7 @@ def test_refactor_step_stops_with_the_scope_exit_code_before_starting_the_drive(
 
 def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     for name in ("検査", "配布"):
@@ -2578,7 +2557,7 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
 def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
     """normal の雛形の経路は配布の後に関門 2 と本番を置き、本番は承認の後に単独で流す（#1914）。"""
     out = tmp_path / "m"
-    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     index = json.loads((out / "sprint.json").read_text())["ステージ"]
     assert [w["name"] for w in index][-3:] == ["配布", "関門 2", "本番"]
@@ -2601,7 +2580,7 @@ def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
     from supervise_lib import paths, queue
 
     out = tmp_path / "m"
-    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     check, prod = waves["検査"]["plans"][0], waves["本番"]["plans"][0]

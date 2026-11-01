@@ -1,7 +1,8 @@
 # Skill 執筆規約
 
-`plugins/ndf/skills/` は 4 ランタイム（Claude Code / Codex / Kiro / agy）へ配布する Skill の
-編集元である。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
+`plugins/ndf/skills/` は Claude Code と Codex へ配布する Skill の編集元である。Kiro と agy へは配らないが、
+cross-refactoring が担当の worktree へ写す手順書（`refactoring` など）を相手役の Kiro・agy が Skill として読むため、
+下の表の Kiro・agy の列（可搬性の規則）は残す。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
 に委ねるが、**本文のうち、実行先のリポジトリに依存する部分は規約が扱う**（「対象リポジトリを
 仮定しない」）。手順の中身が正しいかと、その手順が ai-plugins でしか成立しないかは別の問題で、
 後者は Skill を書く人ごとに判断が分かれるためである。
@@ -33,7 +34,7 @@ python3 scripts/check-skill-repo-assumptions.py --report  # 走査の規模と�
 
 ## `description` を単一の真実とする
 
-4 ランタイムに共通する土台は Agent Skills 仕様の 6 項目（`name` / `description` / `license` /
+読む 4 ランタイムに共通する土台は Agent Skills 仕様の 6 項目（`name` / `description` / `license` /
 `compatibility` / `metadata` / `allowed-tools`）である。ただし共通に効く度合いは項目ごとに異なる。
 
 | 項目 | 4 ランタイムでの扱い |
@@ -139,11 +140,9 @@ description: "Delete merged branches and worktrees, stopping only where git refu
   （[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-8）
 - 「常時注入のみ」に相当する機能は Codex と Kiro と agy にない。3 つとも
   `user-invocable: false` を解釈せず、この分類の Skill も通常の Skill として扱う。唯一の対象で
-  ある `ndf-policies` は 4 ランタイムすべてへ配布している（`plugins/ndf/manifests/`）ため、
-  Codex と agy では暗黙起動されうる。したがってこの分類の Skill は `description` に**「知識として参照する。手順として
-  実行しない」旨を明記する**。Kiro は Skill として配らず `.kiro/steering/` へ常時指示として
-  置き換えることで回避する（[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md)
-  の Task 0-9）。`description` の書き換えは同計画の Task 0-10 で行う
+  ある `ndf-policies` は Codex へも配布している（`plugins/ndf/manifests/`）ため、
+  Codex では暗黙起動されうる。したがってこの分類の Skill は `description` に**「知識として参照する。手順として
+  実行しない」旨を明記する**（[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-10）
 - **Claude Code では** `disable-model-invocation: true` の Skill は `description` がコンテキスト
   へ載らず、`user-invocable: false` は載る。Codex と Kiro と agy にはこのキーがなく
   `description` は常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した
@@ -284,9 +283,7 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 | `SKILL.md` 行数 | 500 行。超えるものは補助ファイルへ分割 | 仕様の推奨、コンパクション対策 |
 | `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
 | Claude Code の初期 Skill 一覧の合計 | **27,900 文字**（10,000 トークン = コンテキストの 1%）。1 項目は `description` + `when_to_use` を合わせて 1,536 文字で切り詰め | Claude Code 公式ドキュメント。既定モデル Opus 5 のコンテキスト 1,000,000 から算出。文字数は較正した換算比による |
-| Codex の初期 Skill 一覧の合計 | **15,177 文字**（5,440 トークン = コンテキストの 2%） | Codex 公式ドキュメント。既定モデル gpt-5.6-sol のコンテキスト 272,000 から算出。**4 ランタイムで最も厳しく、実質の制約になる** |
-| Kiro の初期 Skill 一覧の合計 | **27,900 文字**（10,000 トークン = コンテキストの 1%） | 公式ドキュメントに規定が無いため、コンテキスト長が同じ Claude Code の 1% を借りる。既定モデル auto のコンテキスト 1,000,000 から算出 |
-| agy の初期 Skill 一覧の合計 | **27,900 文字**（10,000 トークン = コンテキストの 1%） | 公式ドキュメントに規定が無いため、Kiro と同じく Claude Code の 1% を借りる。既定モデルは Gemini 3.x Flash 系で、コンテキスト長を出す手段が見当たらないため 1,000,000 を前提に置く |
+| Codex の初期 Skill 一覧の合計 | **15,177 文字**（5,440 トークン = コンテキストの 2%） | Codex 公式ドキュメント。既定モデル gpt-5.6-sol のコンテキスト 272,000 から算出。**配布先の 2 ランタイムで厳しい側で、実質の制約になる** |
 | 全 Skill の frontmatter 合計 | 20,000 文字（**警告のみ**） | リポジトリ固有の目安。ランタイムが課す制約ではないため、超過しても警告にとどめる。**plugin family をまたいだ合計**。値は Codex の予算から逆算する（[目安の決め方](#frontmatter-合計の目安は-codex-の予算から逆算する)） |
 
 ### 予算はトークンで効く
@@ -333,7 +330,6 @@ Skill を増減したときや、既定モデルが変わったときに再実�
 | --- | --- | ---: | --- | ---: | ---: |
 | Claude Code | Opus 5 | 1,000,000 | 1% | 10,000 | 27,900 |
 | Codex | gpt-5.6-sol | 272,000 | 2% | 5,440 | 15,177 |
-| Kiro | auto | 1,000,000 | 1%（Claude Code から借りる） | 10,000 | 27,900 |
 
 文字換算は較正値（2026-09-01 実測で 2.79 文字/トークン）による。`--calibrate` を実行すると
 この値は更新される。
@@ -379,19 +375,6 @@ Skill の一覧 7.4k は、他のプラグインと組み込みを含む全量�
 コンテキストの内訳を測り、上の表を差し替えたうえで値を決める。据え置いたまま Skill を足すと
 警告が出続け、目安として働かなくなる。
 
-**Kiro の規定は Claude Code から借りている。** 公式ドキュメント（kiro.dev/docs/skills）に一覧
-予算の記述が無いため、既定モデル `auto` のコンテキスト長が同じ 1,000,000 である Claude Code の
-1% を当てる。憶測で独自の値を置くより、同じ土俵の実在する規定へ揃えるほうが根拠が残る。
-コンテキスト 1,000,000 は過去の実測の記録で、kiro-cli 2.20.1 では同じ手段（`--list-models`）を
-取れない。値を更新するときは、その時点で一覧を取れる手段から確かめ直す。
-**NDF は Kiro でも 1M コンテキストのモデルだけを対象とする**（`dev.kiro/install.sh` が導入時に
-この前提を出力する。モデルの一覧を取る手段が kiro-cli の版によって変わるため、機械でのチェックは
-置いていない）。
-
-起動時に読み込むコンテキスト量（Kiro が全 `SKILL.md` を読む合計）に**上限は置かない**。
-コンテキスト長が同じ Claude Code に上限を置かないため、Kiro だけを縛る根拠が無い。数は smoke test のログへ残るため、増え方は
-後から追える。
-
 **コンテキストが最も長い Claude Code ではなく、Codex が全体の制約になる。** 比率が 2 倍でも
 コンテキストが 1/3.7 のため、予算は Claude Code の約半分にしかならない。Skill を増やすときは
 Codex の 5,440 文字を基準に考える。
@@ -405,7 +388,6 @@ Claude Code 側は `skillListingBudgetFraction` 設定または `SLASH_COMMAND_T
 | --- | :-: | :-: | :-: | :-: |
 | Claude Code | ○ | ○ | ○（`description` と合算して 1,536 文字で切り詰め） | **×** |
 | Codex | ○ | ○ | × | **○** |
-| Kiro | ○ | ○ | × | 規定なし（多い側で見積もる） |
 
 パスを載せるのは Codex だけである（*"In Codex, the initial list also includes each skill's
 file path."*）。Claude Code の公式記述は *"a listing of skill names and descriptions"* で
@@ -429,9 +411,9 @@ Codex は起動時に全 Skill の `name` と `description` とファイルパ�
 超過分を逃がす。
 
 逃がし先は配布先で選ぶ。Claude Code だけに配布する Skill は `when_to_use` へ移してよい。
-一方 `when_to_use` は Codex と Kiro と agy では読まれないため、この 3 ランタイムへも配布する
-Skill のトリガ語を `when_to_use` へ移すと、そのランタイムでは一覧に載らず暗黙起動に効かなくなる。
-4 ランタイムへ配布する Skill はトリガ語を `description` に残したまま要約し、手順の説明を
+一方 `when_to_use` は Codex では読まれないため、Codex へも配布する
+Skill のトリガ語を `when_to_use` へ移すと、Codex では一覧に載らず暗黙起動に効かなくなる。
+Codex へも配布する Skill はトリガ語を `description` に残したまま要約し、手順の説明を
 本文へ逃がす。
 
 Claude Code のコンパクション後は、呼び出し済み Skill の先頭 5,000 トークンのみが再添付され、

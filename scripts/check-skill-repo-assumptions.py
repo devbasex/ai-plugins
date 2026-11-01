@@ -111,7 +111,7 @@ EXCLUSIONS: dict[str, str] = {
     "plugins/ndf/scripts/project_lib/model.py": "NDF 自身の宣言の形（project.schema.json）の URL。対象リポジトリを指していない",
 }
 
-RUNTIMES = ("claude", "codex", "kiro", "agy")
+RUNTIMES = ("claude", "codex")
 
 
 def canon(path: pathlib.Path | str) -> str:

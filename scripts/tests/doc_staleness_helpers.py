@@ -28,12 +28,10 @@ OTHER_VERSION = "1.4.2"
 # v10.5.0 で無くなった。#116）。
 SKILL_DIRS = ["alpha", "bravo", "charlie", "delta", "echo"]
 
-# ランタイムごとの配布 Skill 数。4 つとも別の値にして、取り違えを検出できるようにする。
+# ランタイムごとの配布 Skill 数。2 つを別の値にして、取り違えを検出できるようにする。
 MANIFESTS = {
     "claude": ["alpha", "bravo", "charlie", "delta", "echo"],
     "codex": ["alpha", "bravo", "charlie"],
-    "kiro": ["alpha", "bravo", "charlie", "delta"],
-    "agy": ["alpha", "bravo"],
 }
 
 # 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「チェックする記載」に対応する。
@@ -42,7 +40,7 @@ ROOT_README = """# Fixture Marketplace
 
 **NDFプラグイン v9.3.0** のチェック用の最小構成です。
 
-- **公開Skills**: Claude Code向け core 5個、Kiro向け core 4個、Codex向け core 3個、agy向け core 2個に分離。
+- **公開Skills**: Claude Code向け core 5個、Codex向け core 3個に分離。
 - **元Skills（5個）**:
   - 第1群 (4): alpha, bravo, charlie, delta
   - 第2群 (1): echo
@@ -111,7 +109,7 @@ VERSIONING_MD = """# Fixture Versioning
 最初のタグは `ndf--v8.5.4` である。それより前の版（`8.4.0` 以前）はタグでは戻せない。
 """
 
-# K: Kiro の確認例 / L: Codex のキャッシュパスの例（2 箇所） / M: `codex plugin list` の出力例
+# L: Codex のキャッシュパスの例（2 箇所） / M: `codex plugin list` の出力例
 PLUGIN_README = """# NDF Plugin
 
 配布物は 1 ディレクトリにまとまっています。
@@ -120,8 +118,6 @@ PLUGIN_README = """# NDF Plugin
 | --- | --- | --- |
 | Claude Code | 5 個 | `.claude-plugin/plugin.json` |
 | Codex | 3 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 4 個 | `dev.kiro/install.sh` |
-| agy | 2 個 | `dev.agy/plugin.json` |
 
 ## レイアウト
 
@@ -134,13 +130,6 @@ plugins/ndf/
 ## 更新情報
 
 版ごとの変更と移行の手順は CHANGELOG.md の `[ndf <版>]` の節にあります。
-
-## Kiro CLI で確かめる
-
-```bash
-kiro agent list
-# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）
-```
 
 ## Codex で確かめる
 
@@ -259,7 +248,6 @@ def retarget_version(root: Path, version: str) -> None:
     edit(versioning, f"`{old_next}-rc.1`", f"`{new_next}-rc.1`")
 
     plugin_readme = root / "plugins/ndf/README.md"
-    edit(plugin_readme, f"Kiro CLI用 / v{VERSION}）", f"Kiro CLI用 / v{version}）")
     edit_all(plugin_readme, f"ndf/{VERSION}/skills/", f"ndf/{version}/skills/", 2)
     edit(plugin_readme, f"enabled  {VERSION}  <path>", f"enabled  {version}  <path>")
 

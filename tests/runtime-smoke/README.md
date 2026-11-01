@@ -1,13 +1,11 @@
 # Runtime Smoke Tests
 
-`scripts/runtime-smoke-test.sh` runs Claude, Codex, Kiro, and agy plugin smoke tests in disposable Docker containers. The host home directory and credential directories are not mounted.
+`scripts/runtime-smoke-test.sh` runs Claude and Codex plugin smoke tests in disposable Docker containers. The host home directory and credential directories are not mounted.
 
 ```bash
 bash scripts/runtime-smoke-test.sh
 bash scripts/runtime-smoke-test.sh --runtime claude
 bash scripts/runtime-smoke-test.sh --runtime codex
-bash scripts/runtime-smoke-test.sh --runtime kiro
-bash scripts/runtime-smoke-test.sh --runtime agy
 ```
 
 Artifacts are written to `tmp/runtime-smoke/<runtime>/` by default:
@@ -37,16 +35,14 @@ The authenticated GitHub workflow passes only `ANTHROPIC_API_KEY` and `OPENAI_AP
 
 ## CLI の版
 
-像は 4 ランタイムの CLI を、CLI の版の一覧 `tests/runtime-smoke/cli-versions.env` に書いた版で入れる。版を上げるときに書き換えるのはこのファイルだけで、Containerfile は版を持たない（`ARG` に既定値を置かない）。
+像は 2 ランタイムの CLI を、CLI の版の一覧 `tests/runtime-smoke/cli-versions.env` に書いた版で入れる。版を上げるときに書き換えるのはこのファイルだけで、Containerfile は版を持たない（`ARG` に既定値を置かない）。
 
 | ランタイム | 一覧のキー | 取得先 |
 | --- | --- | --- |
 | claude | `CLAUDE_CODE_VERSION` | npm の `@anthropic-ai/claude-code@<版>` |
 | codex | `CODEX_VERSION` | npm の `@openai/codex@<版>` |
-| kiro | `KIRO_CLI_VERSION`・`KIRO_CLI_SHA256_<arch>` | `https://prod.download.cli.kiro.dev/stable/<版>/kirocli-<arch>-linux-musl.tar.gz`（sha256 で確かめる） |
-| agy | `AGY_VERSION`・`AGY_URL_<arch>`・`AGY_SHA512_<arch>` | 一覧の url（sha512 で確かめる） |
 
-`<arch>` は `uname -m` の値を大文字にしたもの（`X86_64`・`AARCH64`）。`scripts/runtime-smoke-test.sh` は一覧の各行を `--build-arg` で像の作成へ渡し、`--cli-versions <パス>` で別の一覧を受ける。像の作成は、取得・checksum・`--version` の出力から取り出した版数と一覧の版数の完全一致のどれかが落ちたら失敗する。
+`scripts/runtime-smoke-test.sh` は一覧の各行を `--build-arg` で像の作成へ渡し、`--cli-versions <パス>` で別の一覧を受ける。像の作成は、取得・`--version` の出力から取り出した版数と一覧の版数の完全一致のどれかが落ちたら失敗する。
 
 配布の経路のスモーク（`runtime-plugin-smoke.yml` の `runtime-smoke (<ランタイム>)`）と認証つきのスモークは、一覧の版だけを入れる。その時点の最新の版は、別の workflow `runtime-plugin-smoke-latest.yml` が毎日 06:00 JST に develop の上で試す（Actions の画面から手でも起動できる。PR と push では走らず、必須のチェックに入らない）。落ちたら、題が `最新の版のスモークが落ちた: <ランタイム>` の課題をランタイムごとに 1 件作り、開いていればコメントを足す。課題には入れた版と実行の URL が載る。
 
@@ -55,10 +51,10 @@ The authenticated GitHub workflow passes only `ANTHROPIC_API_KEY` and `OPENAI_AP
 1. 最新の版を一覧の形で出す（失敗の課題に載った版を使ってもよい）
 
    ```bash
-   python3 scripts/runtime-smoke-latest.py resolve --runtime <claude|codex|kiro|agy>
+   python3 scripts/runtime-smoke-latest.py resolve --runtime <claude|codex>
    ```
 
-2. 出力の行で、`tests/runtime-smoke/cli-versions.env` の同じキーの行を置き換える（kiro と agy は checksum と url の行も）
+2. 出力の行で、`tests/runtime-smoke/cli-versions.env` の同じキーの行を置き換える
 3. 手元でスモークを走らせ、`tmp/runtime-smoke/<ランタイム>/version.log` の版が一覧の版と同じことを見る
 
    ```bash

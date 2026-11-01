@@ -1,16 +1,34 @@
-"""本文の課題を閉じる closing keywords（GitHub が課題を自動で閉じるキーワード `Closes #n` など）と、課題の参照の読み取り。
-`pr-steps.py`（closing keywords の検査）と `release-steps.py`（版に含む PR から課題へたどる。宛先が既定ブランチでない PR は
-GitHub の `closingIssuesReferences` が空になる）、`sprint-close.py`（参照だけの課題）が使う。"""
+"""本文の課題を閉じる closing keywords（GitHub が課題を自動で閉じるキーワード `Closes #n` など）と、閉じる予定の参照
+（`最終工程の後に閉じる: #n`。GitHub は閉じず、`sprint-close.py` がスプリント課題として集める）と、課題の参照の読み取り。
+`pr-steps.py`（closing keywords の検査と、既定ブランチ宛の本文の置き換え）と `supervise_lib/pr.py`（同じ置き換え）、
+`release-steps.py`（版に含む PR から課題へたどる。宛先が既定ブランチでない PR は GitHub の `closingIssuesReferences` が
+空になる）、`sprint-close.py`（参照だけの課題）が使う。閉じる指定の形はこのモジュールだけが持ち、
+`closing-issues.sh` は同じ形を読む（#2228）。"""
 
 from __future__ import annotations
 
 import re
 
-CLOSING = re.compile(
-    r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
-    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
-    re.I,
-)
+_TARGET = r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)"
+_KEYWORD = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
+DEFERRED = "最終工程の後に閉じる"  # 閉じる予定の参照の語。GitHub の closing keywords を含まない（#2228 の I9）
+_DEFERRED_LEAD = DEFERRED + r"\s*:\s*"
+
+CLOSING = re.compile(_KEYWORD + _TARGET, re.I)
+_ANY_CLOSING = re.compile(r"(?:" + _KEYWORD + r"|" + _DEFERRED_LEAD + r")" + _TARGET, re.I)
+
+
+def defer_closing(text):
+    """closing keywords を閉じる予定の参照へ置き換える。(置き換えた本文, 置き換えた指し先の字面の並び) を返す。
+
+    指し先の字面（`#12`・`owner/repo#12`・課題の URL）は変えない。宛先が既定ブランチの Pull Request の本文だけに使う。"""
+    targets: list[str] = []
+
+    def repl(m):
+        targets.append(m.group(1))
+        return f"{DEFERRED}: {m.group(1)}"
+
+    return CLOSING.sub(repl, text or ""), targets
 
 
 def closing_words(text):
@@ -19,12 +37,12 @@ def closing_words(text):
 
 
 def closing_issues(text):
-    """closing keywords が指す課題の字面（`#12`・`owner/repo#12`・課題の URL）。"""
-    return [m.group(2) for m in CLOSING.finditer(text or "")]
+    """closing keywords と閉じる予定の参照が指す課題の字面（`#12`・`owner/repo#12`・課題の URL）を現れた順で返す。"""
+    return [m.group(1) for m in _ANY_CLOSING.finditer(text or "")]
 
 
 def closing_numbers(text) -> list[int]:
-    """closing keywords が指す課題の番号を、重ねずに現れた順で返す。"""
+    """closing keywords と閉じる予定の参照が指す課題の番号を、重ねずに現れた順で返す。"""
     out: list[int] = []
     for ref in closing_issues(text):
         n = int(re.search(r"(\d+)$", ref).group(1))
@@ -45,7 +63,7 @@ def issue_ref(ref, repo):
 
 
 def closing_refs(text, repo) -> list[tuple[str, int]]:
-    """closing keywords が指す課題を (owner/name, 番号) で、重ねずに現れた順で返す。`#12` は `repo` の課題。"""
+    """closing keywords と閉じる予定の参照が指す課題を (owner/name, 番号) で、重ねずに現れた順で返す。`#12` は `repo` の課題。"""
     out: list[tuple[str, int]] = []
     for ref in closing_issues(text):
         got = issue_ref(ref, repo)

@@ -104,7 +104,7 @@
 | `scripts/pr-steps.py` | `upsert` で、宛先（新しく作るなら `--base` か起点、既存なら `baseRefName`）が `merge_closes_issues` に当たれば本文を `defer_closing` に通す。置き換えた指し先を `metrics.deferred_closing` に載せる |
 | `scripts/supervise_lib/pr.py` | `_publish` で同じ判定と置き換えを行ってから `gh pr create` / `gh pr edit` へ渡す |
 | `scripts/supervise_lib/sprint_close_steps.py`・`sprint.py`・`release_templates.py` | まとめのプランの並びを `merge →（release-verify）→ retro → close → refine` にする。`close` は `--final-stage 振り返り` を明示し、`retro` の指示に「課題を閉じない（次の close が閉じる）」を足す |
-| `tests/fixtures/supervise-contract/plans/close/4-close.json` | まとめのプランの契約の写しを新しい並びに合わせる |
+| `plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/close/4-close.json` | まとめのプランの契約の写しを新しい並びに合わせる |
 | `skills/progress-tracking/SKILL.md` の「スプリントを閉じる」 | 閉じる時点の正本。閉じる条件 3・`--final-stage` の値と呼ぶ Skill の対応・閉じる予定の参照・プランの並びを持つ |
 | `skills/pr/SKILL.md` の「closing keywords は本文だけに書く」 | 既定ブランチ宛では NDF の手順が置き換えることを書き、閉じる時点は正本を指す |
 | `skills/release-verification/SKILL.md`・`retrospective`・`release`・`merged` と `development-workflow` の references（`pace.md`・`loop.md`・`stage-completeness.md`・`glossary.md`） | 閉じる時点・順序・閉じる条件の写しを外し、正本を指す。順序の説明の文を新しい並びに直す |

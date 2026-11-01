@@ -17,7 +17,6 @@ main 以外で別 Skill へ回す・PR が無い）。`plan` の `metrics` が�
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 import tempfile
@@ -40,12 +39,15 @@ from step_result import (
     result,
     run,
 )
-import gh_parts  # noqa: E402
 from closing import closing_issues, closing_words  # noqa: E402
 import repo  # noqa: E402
+from repo import defer_for_base  # noqa: E402
 import tool_paths  # noqa: E402
 from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pr_steps_lib.gh_pr import existing_pr, pr_for_report, send_body, target_pr  # noqa: E402  PR の読み書き
 
 TOOL = "pr"
 SCRIPTS = Path(__file__).resolve().parent
@@ -94,51 +96,6 @@ def compare_ref(root, base):
         if git(root, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0:
             return ref
     raise StepError(f"起点 {base} が無い（git fetch origin {base} を先に打つ）", EXIT_PRECONDITION)
-
-
-def repo_owner_name(root):
-    p = gh_parts.gh(["repo", "view", "--json", "owner,name"], cwd=root)
-    if p.returncode == 0:
-        try:
-            d = json.loads(p.stdout)
-            return d["owner"]["login"], d["name"]
-        except (ValueError, KeyError, TypeError):
-            pass
-    slug = repo.owner_repo(root)
-    if not slug:
-        raise StepError("リポジトリの所有者と名前を決められない", EXIT_UNREADABLE)
-    owner, _, name = slug.partition("/")
-    return owner, name
-
-
-def existing_pr(root, branch):
-    """head が branch の OPEN の PR（{number, url, isDraft, baseRefName}）。無ければ None。上限なら REST。"""
-    p = gh_parts.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"], cwd=root)
-    if p.returncode == 0:
-        try:
-            prs = json.loads(p.stdout or "[]")
-        except ValueError:
-            raise StepError("gh pr list の出力を読めない", EXIT_UNREADABLE)
-        return prs[0] if prs else None
-    if not gh_parts.is_rate_limited(p.stderr):
-        raise StepError(f"gh pr list が失敗: {p.stderr.strip()[:300]}", EXIT_PRECONDITION)
-    owner, name = repo_owner_name(root)
-    q = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls?head={owner}:{branch}&state=open"], cwd=root)
-    if q.returncode != 0:
-        raise StepError(f"REST でも既存の PR を引けない: {q.stderr.strip()[:300]}")
-    try:
-        prs = json.loads(q.stdout or "[]")
-    except ValueError:
-        raise StepError("REST の出力を読めない", EXIT_UNREADABLE)
-    if not prs:
-        return None
-    pr = prs[0]
-    return {
-        "number": pr["number"],
-        "url": pr["html_url"],
-        "isDraft": pr.get("draft", False),
-        "baseRefName": pr.get("base", {}).get("ref", ""),
-    }
 
 
 def diff_numbers(root, ref):
@@ -333,64 +290,17 @@ def decisions_sync(root, number):
     return run(["bash", str(script), "sync", str(number)], cwd=root, check=False).returncode
 
 
-def rest_create(root, branch, base, title, body, draft):
-    owner, name = repo_owner_name(root)
-    payload = {"title": title, "head": branch, "base": base, "body": body, "draft": bool(draft)}
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False)
-        tmp = f.name
-    try:
-        p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
-    finally:
-        Path(tmp).unlink(missing_ok=True)  # 本文を /tmp に残さない
-    if p.returncode != 0:
-        raise StepError(f"REST でも作成が失敗: {p.stderr.strip()[:300]}")
-    d = json.loads(p.stdout)
-    return d["number"], d["html_url"]
-
-
-def send_body(root, branch, body, body_path, a, must_exist):
-    """gh へ本文ファイルを渡して PR を作る・更新する。(番号, URL, action) を返す。"""
-    if getattr(a, "pr", None):
-        pr = {"number": a.pr, "url": f"#{a.pr}"}
-    else:
-        pr = existing_pr(root, branch)
-    if pr:
-        args = ["pr", "edit", str(pr["number"]), "--body-file", body_path]
-        if a.title:
-            args += ["--title", a.title]
-        p = gh_parts.gh(args, cwd=root)
-        if p.returncode != 0:
-            raise StepError(f"gh pr edit {pr['number']} が失敗: {p.stderr.strip()[:300]}")
-        return pr["number"], pr["url"], "updated"
-    if must_exist:
-        raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
-    if not a.title:
-        raise StepError("--title が要る", EXIT_UNREADABLE)
-    base = a.base or repo.base_branch(root) or "main"
-    args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
-    if a.draft:
-        args.append("--draft")
-    p = gh_parts.gh(args, cwd=root)
-    if p.returncode == 0:
-        url = (p.stdout.strip().splitlines() or [""])[-1]
-        m = re.search(r"/pull/(\d+)", url)
-        return (int(m.group(1)) if m else None), url, "created"
-    if gh_parts.is_rate_limited(p.stderr):
-        number, url = rest_create(root, branch, base, a.title, body, a.draft)
-        return number, url, "created_rest"
-    raise StepError(f"gh pr create が失敗: {p.stderr.strip()[:300]}")
-
-
 def upsert(a, must_exist):
     root = git_root(a.root)
     branch = current_branch(root)
     body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
+    pr, base = target_pr(root, branch, a, must_exist)
+    body, deferred = defer_for_base(root, base, body)  # 既定ブランチ宛はマージで閉じないよう置き換える（#2228 の I7）
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(body)
         body_path = f.name
     try:
-        number, url, action = send_body(root, branch, body, body_path, a, must_exist)
+        number, url, action = send_body(root, branch, body, body_path, a, pr, base)
     finally:
         Path(body_path).unlink(missing_ok=True)  # 本文を /tmp に残さない
     sync_exit = decisions_sync(root, number) if number else None
@@ -401,9 +311,11 @@ def upsert(a, must_exist):
         "branch": branch,
         "draft": bool(getattr(a, "draft", False)),
         "closing_issues_in_body": closing_issues(body),
+        "deferred_closing": deferred,
         "decisions_sync_exit": sync_exit,
     }
     items = [{"kind": "pr", "name": url, "result": action}]
+    items += [{"kind": "closing", "name": t, "result": "deferred"} for t in deferred]
     if sync_exit is not None:
         items.append({"kind": "decisions", "name": "pr-body-decisions.sh sync", "result": f"exit={sync_exit}"})
     nxt = None
@@ -457,32 +369,6 @@ def cmd_update(a):
 
 
 # --- report -----------------------------------------------------------------------
-
-
-def pr_for_report(root, number):
-    fields = "number,title,url,isDraft,baseRefName,headRefName,body"
-    p = gh_parts.gh(["pr", "view", str(number), "--json", fields], cwd=root)
-    if p.returncode == 0:
-        try:
-            return json.loads(p.stdout)
-        except ValueError:
-            raise StepError("gh pr view の出力を読めない", EXIT_UNREADABLE)
-    if not gh_parts.is_rate_limited(p.stderr):
-        raise StepError(f"gh pr view {number} が失敗: {p.stderr.strip()[:300]}")
-    owner, name = repo_owner_name(root)
-    q = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls/{number}"], cwd=root)
-    if q.returncode != 0:
-        raise StepError(f"REST でも PR を引けない: {q.stderr.strip()[:300]}")
-    d = json.loads(q.stdout)
-    return {
-        "number": d["number"],
-        "title": d["title"],
-        "url": d["html_url"],
-        "isDraft": d.get("draft", False),
-        "baseRefName": d["base"]["ref"],
-        "headRefName": d["head"]["ref"],
-        "body": d.get("body") or "",
-    }
 
 
 def section(body, heading):

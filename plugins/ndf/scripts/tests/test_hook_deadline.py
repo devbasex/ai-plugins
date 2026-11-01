@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -130,15 +129,8 @@ def _hook_timeouts(path: Path) -> list[float]:
     return found
 
 
-@pytest.mark.parametrize("rel", ["hooks/claude.json", "hooks/codex.json", "dev.agy/hooks.json"], ids=["claude", "codex", "agy"])
+@pytest.mark.parametrize("rel", ["hooks/claude.json", "hooks/codex.json"], ids=["claude", "codex"])
 def test_the_hook_limit_leaves_the_margin(rel):
     limits = _hook_timeouts(PLUGIN / rel)
     assert limits
     assert all(deadline.DEADLINE_SECONDS + deadline.MARGIN_SECONDS <= t for t in limits)
-
-
-def test_the_kiro_prompt_hook_limit_leaves_the_margin():
-    text = (PLUGIN / "dev.kiro" / "install.sh").read_text(encoding="utf-8")
-    m = re.search(r'hooks\["userPromptSubmit"\]\s*=\s*\[.*?guard_script.*?"timeout_ms":\s*(\d+)', text, re.S)
-    assert m
-    assert deadline.DEADLINE_SECONDS + deadline.MARGIN_SECONDS <= int(m.group(1)) / 1000

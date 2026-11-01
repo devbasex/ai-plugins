@@ -21,6 +21,8 @@
 語の正本の行は `development-workflow` の
 [`references/glossary.md`](../../plugins/ndf/skills/development-workflow/references/glossary.md) にもある。
 closing keywords は、Pull Request の本文に課題の番号と一緒に書くと、マージのときに GitHub がその課題を自動で閉じるキーワードである。
+閉じる予定の参照（`最終工程の後に閉じる: #12`。既定ブランチ宛の本文で NDF の手順が closing keywords を置き換えた形）も、
+`closing-issues.sh` が closing keywords と同じ指し先の規則で本文から集め、参照だけの課題にしない。
 
 ## 背景
 

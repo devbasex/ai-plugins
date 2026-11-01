@@ -192,7 +192,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 
 ## Pull Request の作成の時点で見るもの
 
-**リリース（`配布`）の記録まで待たない。** `gh pr create` を観測し、本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の通過記録を
+**リリース（`配布`）の記録まで待たない。** `gh pr create` を観測し、本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）と閉じる予定の参照（`最終工程の後に閉じる: #N`）が指す課題の通過記録を
 読んで、記録の無い必須の工程を案内する（#424）。
 
 | 何を見るか | 出すもの |

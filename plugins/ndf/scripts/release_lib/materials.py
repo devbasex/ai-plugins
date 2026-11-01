@@ -270,7 +270,8 @@ def read_unconfirmed(root: Path, base: str, issues) -> tuple[Unconfirmed, ...] |
 
 def read_unverified(bodies: dict[tuple[str, int], str], verdicts: dict, repo: str) -> tuple[Unverified, ...] | None:
     """閉じる課題（(owner/name, 番号)）の受け入れ条件のうち、印が無く、リリース後テストの表（verdicts）にその
-    リポジトリの課題として合格の行が無いもの。どの課題にも受け入れ条件が無ければ None。"""
+    リポジトリの課題として合格の行が無いもの。本文の `## 受け入れ条件の確認` でマージ前に確かめたと記録された
+    条件は載せない（#2144。記録の無い課題は今までどおり）。どの課題にも受け入れ条件が無ければ None。"""
     out, found = [], False
     for (owner, n), body in bodies.items():
         rows = acceptance.criteria_lines(body or "")
@@ -282,7 +283,8 @@ def read_unverified(bodies: dict[tuple[str, int], str], verdicts: dict, repo: st
             continue
         passed = v.passed if v is not None else frozenset()
         other = None if same_repo(owner, repo) else owner
-        out += [Unverified(n, c.number, text, other) for c, text in rows if not c.checked and c.number not in passed]
+        done = passed | acceptance.pre_merge_numbers(body or "")
+        out += [Unverified(n, c.number, text, other) for c, text in rows if not c.checked and c.number not in done]
     return tuple(out) if found else None
 
 

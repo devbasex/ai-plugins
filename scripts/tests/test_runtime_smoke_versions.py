@@ -1,6 +1,6 @@
 """スモークが入れる CLI の版の固定と、最新の版のスモークの workflow の形（#1982 の I2・I3・I5）。
 
-- I2: CLI の版の一覧（`tests/runtime-smoke/cli-versions.env`）のキーの集合が、4 つの Containerfile が
+- I2: CLI の版の一覧（`tests/runtime-smoke/cli-versions.env`）のキーの集合が、2 つの Containerfile が
   宣言する `ARG` の名前の和集合と一致し、各 `ARG` は接頭辞のランタイムの Containerfile にだけ現れ、
   値は空でなく、`ARG` は既定値を持たない
 - I3: 配布の経路の取得先は版数を含む取得先だけ（`latest`・公式のインストーラを使わない）
@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 SMOKE = REPO / "tests" / "runtime-smoke"
 VERSIONS = SMOKE / "cli-versions.env"
 LATEST_WORKFLOW = REPO / ".github" / "workflows" / "runtime-plugin-smoke-latest.yml"
-PREFIXES = {"claude": "CLAUDE_CODE_", "codex": "CODEX_", "kiro": "KIRO_CLI_", "agy": "AGY_"}
+PREFIXES = {"claude": "CLAUDE_CODE_", "codex": "CODEX_"}
 ARG_RE = re.compile(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)(=.*)?\s*$", re.MULTILINE)
 
 
@@ -64,10 +64,8 @@ def test_versions_match_containerfile_args():
 
 def test_versions_are_concrete():
     versions = read_versions(VERSIONS)
-    for key in ("CLAUDE_CODE_VERSION", "CODEX_VERSION", "KIRO_CLI_VERSION", "AGY_VERSION"):
+    for key in ("CLAUDE_CODE_VERSION", "CODEX_VERSION"):
         assert re.fullmatch(r"[0-9]+(\.[0-9]+)+", versions[key]), f"{key} が版数でない: {versions[key]}"
-    for key in ("AGY_URL_X86_64", "AGY_URL_AARCH64"):
-        assert f"/{versions['AGY_VERSION']}-" in versions[key], f"{key} が AGY_VERSION の版を含まない"
 
 
 @pytest.mark.parametrize("runtime", sorted(PREFIXES))

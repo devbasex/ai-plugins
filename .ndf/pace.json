@@ -3,12 +3,12 @@
   "fast": {
     "enabled": true,
     "modes": ["light", "standard", "legacy-refactor"],
-    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex,kiro"
+    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex"
   },
   "auto": {
     "enabled": true,
     "modes": ["light", "standard", "legacy-refactor"],
-    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex,kiro"
+    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex"
   },
   "areas": [
     {"name": "駆動", "common": true,

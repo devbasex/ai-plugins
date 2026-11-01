@@ -7,7 +7,7 @@
 チェックは 3 種類に分かれる。
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
-- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex / Kiro CLI / agy）と
+- **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex）と
   frontmatter 総量。
   予算はチェック対象の plugin family すべての合計に対して判定する
 - **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
@@ -95,36 +95,15 @@ CLAUDE_ITEM_TRUNCATE = 1_536
 # Codex（公式ドキュメント "Build skills"）:
 #   "at most 2% of the model's context window, or 8,000 characters when the
 #    context window is unknown"
-#   既定モデル gpt-5.6-sol のコンテキストは 272,000（kiro-cli --list-models で実測）。
+#   既定モデル gpt-5.6-sol のコンテキストは 272,000（kiro-cli --list-models で実測した過去の記録）。
 #   2% = 5,440 トークン。コンテキスト長が判明しているため 8,000 のフォールバックは使わない。
 #   比率は 2 倍でもコンテキストが 1/3.7 のため、**予算は Claude Code の約半分**にしかならず、
 #   実質ここが全体の制約になる。
-#
-# Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
-#   既定モデル auto のコンテキストは 1,000,000。**この値は過去の実測の記録である。**
-#   当時は `kiro-cli --list-models` で一覧を取れたが、2.20.1 にそのオプションは無く、
-#   同じ手段では再検証できない（`--list` は認証を要求する）。値を更新するときは、
-#   その時点で一覧を取れる手段を確かめ、この行の出典も書き直すこと。Claude Code の
-#   Opus 5 と同じである。**NDF は Kiro でも 1M コンテキストのモデルだけを対象とする**
-#   （`plugins/ndf/dev.kiro/install.sh` が導入時にこの前提を出力する。モデルの一覧を
-#   取る手段が kiro-cli の版によって変わるため、機械でのチェックは置いていない）。
-#   規定が無い以上どこかから基準を借りるほかなく、コンテキスト長が同じ Claude Code の
-#   1% を当てる。憶測で独自の値を置くより、同じ土俵の実在する規定へ揃えるほうが根拠が残る。
-#
-# agy（Antigravity CLI）: 公式ドキュメント（antigravity.google/docs/skills）に一覧予算の
-#   規定が無い。既定のモデルは Gemini 3.x Flash 系（`agy models` の先頭が
-#   `gemini-3.8-flash-high`。1.1.25 で実測）で、コンテキスト長を出す手段は見当たらない
-#   （`agy models` は名前と表示名だけを返し、`/context` にあたるコマンドも無い）。
-#   **この 2 つの値は Claude Code から借りたものである。** Gemini 3.x Flash の
-#   コンテキスト長 1,000,000 は Claude Code の Opus 5 と同じであり、規定が無い以上
-#   どこかから基準を借りるほかない。憶測で独自の値を置くより、同じコンテキスト長を持つ
-#   実在する規定へ揃えるほうが根拠が残る（Kiro CLI と同じ扱い）。
 
 # 一覧に何が載るかはランタイムごとに違う。**公式に記述があるのは Claude Code と Codex
 # だけ**である。
 #   Claude Code: "loads a listing of skill names and descriptions into context"
 #   Codex:       "In Codex, the initial list also includes each skill's file path."
-# Kiro CLI と agy は一覧の構成も公式に記述が無いため、多い側（パスを含む）で見積もる。
 
 
 class Listing(NamedTuple):
@@ -136,12 +115,9 @@ class Listing(NamedTuple):
     includes_path: bool  # 一覧に Skill のファイルパスが載るか
 
 
-# Kiro と agy の割合は Claude Code から借りる（上の Kiro・agy のコメント）
 LISTINGS = {
     "claude": Listing(1_000_000, 0.01, "error", False),
     "codex": Listing(272_000, 0.02, "error", True),
-    "kiro": Listing(1_000_000, 0.01, "error", True),
-    "agy": Listing(1_000_000, 0.01, "error", True),
 }
 
 # 全 Skill の frontmatter 合計。**plugin family をまたいで合計する**（利用者の環境では
@@ -550,7 +526,7 @@ def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     """
     man_dir = skills_dir.parent / "manifests"
     out: dict[str, set[str]] = {}
-    for runtime in ("claude", "codex", "kiro", "agy"):
+    for runtime in ("claude", "codex"):
         f = man_dir / f"{runtime}-skills.txt"
         if not f.exists():
             continue
@@ -788,7 +764,7 @@ def _discover_skills_dirs() -> list[pathlib.Path]:
     for d in sorted(pathlib.Path("plugins").glob("*")):
         if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
             continue
-        if d.name.endswith(("-claude", "-codex", "-kiro")):
+        if d.name.endswith(("-claude", "-codex")):
             continue
         found.append(d / "skills")
         # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、

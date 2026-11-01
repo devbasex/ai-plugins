@@ -23,7 +23,6 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 SYNC = SCRIPTS / "projects-sync.sh"
 RECORD = SCRIPTS / "progress-record.sh"
-AGY_RECORD = SCRIPTS.parent / "dev.agy" / "scripts" / "progress-record.sh"
 WF_LIB = SCRIPTS.parent / "skills" / "development-workflow" / "scripts" / "lib" / "workflow-common.sh"
 STAGE_CHECK = SCRIPTS.parent / "skills" / "development-workflow" / "scripts" / "stage-check.sh"
 GUARD = SCRIPTS.parent / "skills" / "development-workflow" / "scripts" / "workflow-guard.sh"
@@ -338,14 +337,6 @@ def test_the_body_lists_the_stages_of_the_one_stage_table(env: Env) -> None:
     common = (SCRIPTS / "lib" / "projects-common.sh").read_text(encoding="utf-8")
     for name in ("PJ_STAGES=", "PJ_MODES=", "PJ_PACES="):
         assert name not in common
-
-
-def test_the_agy_layout_records_through_the_symlink(env: Env) -> None:
-    """agy の配置（dev.agy/scripts は symlink）から呼んでも積まれる。"""
-    assert AGY_RECORD.exists()
-    out = env.run(str(AGY_RECORD), "42", "設計")
-    assert out.returncode == 0, out.stderr
-    assert env.stages(42) == ["設計"]
 
 
 @pytest.mark.parametrize("verb", ["view", "edit"])

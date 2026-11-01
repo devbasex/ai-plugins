@@ -43,14 +43,6 @@ DEVIN_API_KEY=your-devin-api-key
 codex plugin add mcp-devin@ai-plugins
 ```
 
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/mcp-devin/dev.kiro/install.sh
-```
-
 ### 必要な環境変数
 
 - `DEVIN_API_KEY`

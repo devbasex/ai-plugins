@@ -1,7 +1,7 @@
 """check-skill-frontmatter.py の measure_aggregate が数える初期一覧の文字数を固定する。
 
 配布先ごとの数え方（Claude Code は description と when_to_use を連結して切り詰め、
-パスを載せない。Codex / Kiro / agy は description だけでパスを載せる）と、
+パスを載せない。Codex は description だけでパスを載せる）と、
 manifest に無い Skill を数えないこと、frontmatter 総量を固定する。
 """
 
@@ -37,7 +37,7 @@ def _skill(dir_name: str, block: str, **fm) -> dict:
 
 def test_counts_name_description_and_path_per_runtime(tmp_path):
     m = _load()
-    skills_dir = _tree(tmp_path, {"claude": ["alpha"], "codex": ["alpha"], "kiro": ["alpha"], "agy": ["alpha"]})
+    skills_dir = _tree(tmp_path, {"claude": ["alpha"], "codex": ["alpha"]})
     skills = [_skill("alpha", "x" * 10, name="alpha", description="desc", when_to_use="wtu")]
     rel = len("skills/alpha/SKILL.md")
     got = m.measure_aggregate(skills, skills_dir)
@@ -45,8 +45,6 @@ def test_counts_name_description_and_path_per_runtime(tmp_path):
         "listings": {
             "claude": len("alpha") + len("descwtu"),
             "codex": len("alpha") + len("desc") + rel,
-            "kiro": len("alpha") + len("desc") + rel,
-            "agy": len("alpha") + len("desc") + rel,
         },
         "frontmatter_total": 10,
     }
@@ -83,7 +81,7 @@ def test_missing_frontmatter_falls_back_to_dir_name(tmp_path):
 def test_manifest_comments_are_ignored(tmp_path):
     m = _load()
     skills_dir = _tree(tmp_path, {})
-    (skills_dir.parent / "manifests/kiro-skills.txt").write_text("# header\nalpha  # note\n\n", encoding="utf-8")
+    (skills_dir.parent / "manifests/codex-skills.txt").write_text("# header\nalpha  # note\n\n", encoding="utf-8")
     skills = [_skill("alpha", "", name="alpha", description="dd")]
     got = m.measure_aggregate(skills, skills_dir)
-    assert got["listings"] == {"kiro": len("alpha") + 2 + len("skills/alpha/SKILL.md")}
+    assert got["listings"] == {"codex": len("alpha") + 2 + len("skills/alpha/SKILL.md")}
