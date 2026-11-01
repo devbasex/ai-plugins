@@ -67,6 +67,21 @@ def wait_lap(rec: dict, done: Path) -> str:
     return f"python3 {shlex.quote(str(SUPERVISE))} wait {shlex.quote(str(done))} && python3 {shlex.quote(str(SPRINT_STATE))} loop lap {rec['name']} --done {shlex.quote(str(done))}"
 
 
+def sprint_pipeline(index: list[dict], close: list[str], done: Path, rec: dict) -> tuple[str, str]:
+    """manifest のステージ配列から queue と pipeline の文字列を組む。最初の command の後に手で行うステージか
+    別の command（単独の queue の承認ゲート 2）があれば、それを終えるまでまとめへ進めない。"""
+    first = next(e for e in index if e.get("command"))
+    hands = [e for e in index[index.index(first) + 1 :] if e.get("command") or "manual" in e]  # 関門は queue と loop gate が扱う
+    if not hands:
+        queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
+        return queue, f"{queue} && {wait_lap(rec, done)}"
+    queue = (
+        f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, close)) + f" --max 3 --done {shlex.quote(str(done))}"
+    )
+    todo = " → ".join(e.get("command") or f"{e['name']}（{e['manual']} で行う）" for e in hands)
+    return queue, f"{first['command']} を流し、続けて {todo} を終えてから: {queue} && {wait_lap(rec, done)}"
+
+
 def refusal_order(summary: str) -> dict:
     return {**step_result.result(TOOL, "stopped", summary, [], {"status": "refused"}), "exit": EXIT_REFUSED}
 

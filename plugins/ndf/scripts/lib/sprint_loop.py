@@ -61,6 +61,7 @@ from sprint_loop_gate import (
     loop_ok,
     select_cmd,
     wait_lap,
+    sprint_pipeline,
     refusal_order,
     build_close,
     refused_stop,
@@ -296,21 +297,6 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
         new += ["--designed", *map(str, designed)]
     new += list(extra)
     return new
-
-
-def sprint_pipeline(index: list[dict], close: list[str], done: Path, rec: dict) -> tuple[str, str]:
-    """manifest のステージ配列から queue と pipeline の文字列を組む。最初の command の後に手で行うステージか
-    別の command（単独の queue の承認ゲート 2）があれば、それを終えるまでまとめへ進めない。"""
-    first = next(e for e in index if e.get("command"))
-    hands = [e for e in index[index.index(first) + 1 :] if e.get("command") or "manual" in e]  # 関門は queue と loop gate が扱う
-    if not hands:
-        queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
-        return queue, f"{queue} && {wait_lap(rec, done)}"
-    queue = (
-        f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, close)) + f" --max 3 --done {shlex.quote(str(done))}"
-    )
-    todo = " → ".join(e.get("command") or f"{e['name']}（{e['manual']} で行う）" for e in hands)
-    return queue, f"{first['command']} を流し、続けて {todo} を終えてから: {queue} && {wait_lap(rec, done)}"
 
 
 def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra: list[str]) -> dict:
