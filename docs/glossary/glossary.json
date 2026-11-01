@@ -3154,9 +3154,16 @@
       "pending_source": "issues/old/issue-1485-design.md"
     },
     {
+      "term": "記録の PR",
+      "context": "ndf-workflow",
+      "meaning": "リリース記録（## 配布の記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230）",
+      "source": "",
+      "pending_source": "issues/issue-2230-design.md"
+    },
+    {
       "term": "記録の置き場が分からない",
       "context": "ndf-workflow",
-      "meaning": "まとめの close が読むリリース記録の Pull Request を、プランが組まれた時点で決められない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す",
+      "meaning": "まとめの close が読むリリース記録の Pull Request が分からない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す。まとめのプランは組まず（#2230）、手で打つ入口と前の版で組んだプランだけが渡す",
       "source": "docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md"
     },
     {
