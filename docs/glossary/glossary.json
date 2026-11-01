@@ -3157,8 +3157,7 @@
       "term": "記録の PR",
       "context": "ndf-workflow",
       "meaning": "リリース記録（## 配布の記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230）",
-      "source": "",
-      "pending_source": "issues/issue-2230-design.md"
+      "source": "docs/specifications/ndf-sprint-close-record-pr-at-run-time.md"
     },
     {
       "term": "記録の置き場が分からない",
