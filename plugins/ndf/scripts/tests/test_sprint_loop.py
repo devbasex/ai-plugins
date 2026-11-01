@@ -989,3 +989,75 @@ def test_lap_with_a_plan_skipped_after_a_finished_stage_is_still_done(env):
     ]
     sl.cmd_lap(env, "l1", False, write_done(env, items), [])
     assert rec(env)["laps"][0]["outcome"] == sl.DONE
+
+
+# ---------------------------------------------------------------- gate2_answer の現状固定（I-004）
+
+
+def g2_lap(tmp_path, gates=None):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"gates": gates or []}))
+    return {"state_path": str(state)}, str(state.resolve())
+
+
+def g2_ledger(*rows, raw=None):
+    import gate_rejections as gr
+
+    p = gr.ledger_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(raw if raw is not None else "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+
+
+def test_gate2_answer_is_none_without_a_state_path_or_answers(tmp_path):
+    assert sl.gate2_answer({}) is None
+    assert sl.gate2_answer({}, "2026-10-01T00:00:00Z") is None
+    lap, _ = g2_lap(tmp_path)
+    assert sl.gate2_answer(lap) is None
+    assert sl.gate2_answer({"state_path": str(tmp_path / "missing.json")}) is None
+
+
+def test_gate2_answer_reads_user_approvals_of_gate_2_only_after_since(tmp_path):
+    gates = [
+        {"name": "関門 2", "by": "mvv", "at": "2026-10-05T00:00:00Z"},  # MVV の通過は数えない
+        {"name": "関門 1", "by": "user", "at": "2026-10-05T00:00:00Z"},  # 別の関門は数えない
+        {"name": "関門 2", "by": "user", "at": "2026-10-01T00:00:00Z"},  # since より前
+    ]
+    lap, _ = g2_lap(tmp_path, gates)
+    assert sl.gate2_answer(lap, "2026-10-02T00:00:00Z") is None
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"  # 同じ時刻は数える
+    assert sl.gate2_answer(lap) == "approved"
+    lap2, _ = g2_lap(tmp_path, [{"name": "関門 2", "by": "user"}])  # 時刻の無い答え
+    assert sl.gate2_answer(lap2) == "approved"
+    assert sl.gate2_answer(lap2, "2026-10-01T00:00:00Z") is None
+
+
+def test_gate2_answer_reads_rejections_of_the_same_sprint_from_the_ledger(tmp_path):
+    lap, sp = g2_lap(tmp_path)
+    g2_ledger(
+        {"gate": "関門 2", "sprint": sp, "at": "2026-10-03T00:00:00Z"},  # outcome の無い行は差し戻し
+        {"gate": "関門 2", "sprint": sp, "at": "2026-10-09T00:00:00Z", "outcome": "approved"},  # 承認の行は読まない
+        {"gate": "関門 1", "sprint": sp, "at": "2026-10-09T00:00:00Z"},
+        {"gate": "関門 2", "sprint": "/other.json", "at": "2026-10-09T00:00:00Z"},
+    )
+    assert sl.gate2_answer(lap, "2026-10-02T00:00:00Z") == "rejected"
+    assert sl.gate2_answer(lap, "2026-10-04T00:00:00Z") is None
+    assert sl.gate2_answer(lap) == "rejected"
+
+
+def test_gate2_answer_takes_the_latest_answer(tmp_path):
+    lap, sp = g2_lap(tmp_path, [{"name": "関門 2", "by": "user", "at": "2026-10-05T00:00:00Z"}])
+    g2_ledger({"gate": "関門 2", "sprint": sp, "at": "2026-10-04T00:00:00Z", "outcome": "rejected"})
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"
+    g2_ledger({"gate": "関門 2", "sprint": sp, "at": "2026-10-06T00:00:00Z", "outcome": "rejected"})
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "rejected"
+    g2_ledger({"gate": "関門 2", "sprint": sp, "at": "2026-10-05T00:00:00Z", "outcome": "rejected"})  # 同じ時刻は先の承認
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"
+
+
+def test_gate2_answer_treats_a_broken_ledger_as_empty(tmp_path):
+    lap, _ = g2_lap(tmp_path, [{"name": "関門 2", "by": "user", "at": "2026-10-05T00:00:00Z"}])
+    g2_ledger(raw="{壊れた行\n")
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"
+    (tmp_path / "x").mkdir()
+    lap2, _ = g2_lap(tmp_path / "x")
+    assert sl.gate2_answer(lap2) is None
