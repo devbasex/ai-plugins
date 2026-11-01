@@ -105,6 +105,7 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
     work = flow["work"]
     (work / "scripts").mkdir(exist_ok=True)
     shutil.copy(CHECK, work / "scripts" / "check-script-structure.py")
+    shutil.copytree(CHECK.parent / "lib", work / "scripts" / "lib", ignore=shutil.ignore_patterns("__pycache__"))  # 共通部品（#2336）
     _write(work, "plugins/ndf/scripts/lib/accounts.py", "def remove(p):\n    return p\n")
     _write(work, "plugins/ndf/scripts/big.py", "x = 1\n" * 400)
     _write(work, "plugins/ndf/scripts/clean.py", "def clean():\n    return 1\n")
