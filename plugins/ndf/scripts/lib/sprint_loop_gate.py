@@ -74,8 +74,9 @@ def refusal_order(summary: str) -> dict:
 # ---------------------------------------------------------------- sprint
 
 
-def build_close(env: Env, rec: dict, lap: dict, issues: list[int], record_pr=None, tag: str = "close") -> list[str]:
-    """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。"""
+def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "close") -> list[str]:
+    """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。
+    記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。"""
     prev = rec["laps"][lap["n"] - 2] if lap["n"] >= 2 else None
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
@@ -86,8 +87,6 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], record_pr=Non
         cmd += ["--version", v["dev"], "--prod", v.get("prod") or prod_of(v["dev"])]
     if carry:
         cmd += ["--carry", *map(str, carry)]
-    if record_pr:
-        cmd += ["--record-pr", str(record_pr)]
     if lap.get("milestone"):
         cmd += ["--milestone", lap["milestone"]]
     code, so, se = env.run(cmd, cwd=str(env.main_dir()))

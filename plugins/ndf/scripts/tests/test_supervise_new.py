@@ -127,7 +127,8 @@ def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
     note = manifest["ステージ"][1]["note"]
     assert "delivery" in note and ("不明" in note if delivery else "無い" in note)
     close = json.loads(Path(manifest["ステージ"][2]["plans"][0]).read_text())
-    assert "--record-pr unknown " in next(s["cmd"] for s in close["steps"] if s["id"] == "close")  # #1875
+    assert "--record-pr {queue_record} " in next(s["cmd"] for s in close["steps"] if s["id"] == "close")  # #2230
+    assert "unknown" not in json.dumps(close["steps"], ensure_ascii=False)
 
 
 def test_new_sprint_and_close_with_package_plugin_still_need_versions(tmp_path):

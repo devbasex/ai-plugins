@@ -247,8 +247,8 @@ def gate2_answer(lap: dict, since: str | None = None) -> str | None:
 def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
     """承認ゲート 2 の承認の後の続き: 止まった計画を経路に合う再開のステップから続け → 同じ queue の残りのステージと
     まとめの queue → wait → loop lap の 1 行。続けるステップが無い計画（gate-2 のプラン）は手で行う本番を先に示す。"""
-    pr = (stop.get("values") or {}).get("pr")
-    close = build_close(env, rec, lap, lap.get("issues_kept") or selected_issues(lap), record_pr=pr if isinstance(pr, int) else None)
+    # 止まった記録の values.pr は検査のスプリント PR で、記録の PR ではない。まとめは {queue_record} で流す時点に探す（#2230 の決定 5）
+    close = build_close(env, rec, lap, lap.get("issues_kept") or selected_issues(lap))
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     plan = lap.get("gate2_plan") or lap.get("prod_plan") or "<本番のプラン>"
     moved = {w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]}
@@ -447,7 +447,8 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
         if any(i.get("result") == "関門" for i in items):
             return handle_gate(env, rec, before, lap, items)
         state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
-        bad = [i for i in items if i.get("result") not in FINISHED and i.get("result") != NOT_RUN]
+        # 差し込みを埋められずに流さなかった計画（unfilled。記録の PR が見つからないまとめなど）は失敗に数える（#2230 の決定 7）
+        bad = [i for i in items if i.get("unfilled") or (i.get("result") not in FINISHED and i.get("result") != NOT_RUN)]
         outcome = FAILED if failed or bad or failure_key(state) else DONE
         close_lap(env, rec, lap, outcome, state, deferred_issues)
         return after_close(env, rec, before, f"周回 {lap['n']} を {outcome} で締めた")

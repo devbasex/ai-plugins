@@ -58,27 +58,30 @@ def has_release_template(a) -> bool:
 
 
 RECORD_NONE = "0"  # 本番の記録なし（配布なし。sprint-close.py は閉じる条件 1・2 を見ない。#1336）
-RECORD_UNKNOWN = "unknown"  # 記録の置き場が分からない（sprint-close.py は課題を開いたまま残す。#1875）
+RECORD_FOUND = "{queue_record}"  # まとめを流し始める時点に queue が GitHub から探すリリース記録の PR（#2230）
 
 
 def has_record(record_pr: str) -> bool:
-    """まとめの close が読む配布の記録の PR（{queue_pr:…}）があるか。"""
-    return record_pr not in (RECORD_NONE, RECORD_UNKNOWN)
+    """まとめの close が読む配布の記録の PR（番号か {queue_pr:…}・{queue_record}）があるか。"""
+    return record_pr != RECORD_NONE
 
 
 def record_pr_ref(a) -> str:
-    """まとめの close が読む配布の記録の PR: 雛形の本番の PR か、昇格の PR（#837）。昇格は route_waves が昇格の
-    プラン（計画名 promote）を置くときだけ。経路がすべて届けない経路なら RECORD_NONE、それ以外の届ける経路
-    （merge・手で届ける・検証の環境だけ・手動反映の本番系の昇格）は記録の置き場が分からず RECORD_UNKNOWN。"""
+    """まとめの close が読む配布の記録の PR。経路がすべて届けない経路なら RECORD_NONE。開発ループのまとめ（pace: auto）は
+    経路にかかわらず RECORD_FOUND（承認ゲート 2 の後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
+    雛形の本番の PR か、昇格の PR（#837。route_waves が昇格のプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
+    検証の環境だけ・手動反映の本番系）は RECORD_FOUND。"""
+    rs = routes_of(a)
+    if all(r.stage == delivery.STAGE_NONE for r in rs):
+        return RECORD_NONE
+    if getattr(a, "pace", None) == "auto":
+        return RECORD_FOUND
     if has_release_template(a):
         return "{queue_pr:release-prod}"
-    rs = routes_of(a)
     manual_prod = getattr(a, "state", None) and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION
     if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in rs):
         return "{queue_pr:promote}"
-    if all(r.stage == delivery.STAGE_NONE for r in rs):
-        return RECORD_NONE
-    return RECORD_UNKNOWN
+    return RECORD_FOUND
 
 
 def manual_release_wave(a) -> dict:
