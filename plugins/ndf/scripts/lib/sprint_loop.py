@@ -177,46 +177,90 @@ def resume_record(env: Env, rec: dict) -> None:
     rec["stop"], rec["status"] = None, "running"
 
 
+def _resume_mvv_changed(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+    return (
+        stopped_result(
+            env,
+            rec,
+            "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）",
+        ),
+        nxt,
+    )
+
+
+def _resume_user_stop(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+    (loop_dir(env, rec["name"]) / STOP_FILE).unlink(missing_ok=True)
+    return None, nxt
+
+
+def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+    unit = stop["condition"].removeprefix("budget_")
+    used = consumed(rec)[unit]
+    if used >= rec["budget"][unit]:
+        write_record(env, rec, before)
+        return (
+            stopped_result(
+                env, rec, f"予算（{unit}）を超えたまま（消費 {used} / 予算 {rec['budget'][unit]}）。--budget-{unit} で上書きして再開する"
+            ),
+            nxt,
+        )
+    return None, nxt
+
+
+def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+    if not lap:
+        return None, nxt
+    answer = gate2_answer(lap, stop.get("at"))
+    if answer is None:
+        return stopped_result(env, rec, "承認ゲート 2 の答え（承認か差し戻し）がまだ無い"), nxt
+    if answer == "rejected":
+        close_lap(env, rec, lap, RETURNED)
+        return None, nxt
+    return None, gate2_pipeline(env, rec, lap, stop)
+
+
+def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+    if not lap:
+        return None, nxt
+    if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
+        return (
+            None,
+            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す）",
+        )
+    # 承認ゲート 1 の後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
+    moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
+    try:
+        queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
+    except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
+        write_record(env, rec, before)
+        return stopped_result(env, rec, f"承認ゲート 1 の後の続きをまだ組めない: {str(e)[:200]}"), nxt
+    return None, f"{queue} && {wait_lap(rec, done)}"
+
+
+_RESUME_HANDLERS = {
+    "mvv_changed": _resume_mvv_changed,
+    "user_stop": _resume_user_stop,
+    "gate2_returned": _resume_gate2,
+    "refused": _resume_refused,
+}
+
+
+def _resume_handler(cond: str):
+    """止まった理由に対応する再開の手続き。budget_* は接頭辞で引く。無ければ None（そのまま解く）。"""
+    if cond.startswith("budget_"):
+        return _resume_budget
+    return _RESUME_HANDLERS.get(cond)
+
+
 def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
     """止まった理由ごとに解けたかを見る（I7）。解ければ stop を stops へ移す。"""
     stop, name = rec["stop"], rec["name"]
     cond, nxt = stop["condition"], select_cmd(name)
-    lap = current_lap(rec)
-    if cond == "mvv_changed":
-        return stopped_result(
-            env,
-            rec,
-            "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）",
-        )
-    if cond == "user_stop":
-        (loop_dir(env, name) / STOP_FILE).unlink(missing_ok=True)
-    elif cond.startswith("budget_"):
-        unit = cond.removeprefix("budget_")
-        used = consumed(rec)[unit]
-        if used >= rec["budget"][unit]:
-            write_record(env, rec, before)
-            return stopped_result(
-                env, rec, f"予算（{unit}）を超えたまま（消費 {used} / 予算 {rec['budget'][unit]}）。--budget-{unit} で上書きして再開する"
-            )
-    elif cond == "gate2_returned" and lap:
-        answer = gate2_answer(lap, stop.get("at"))
-        if answer is None:
-            return stopped_result(env, rec, "承認ゲート 2 の答え（承認か差し戻し）がまだ無い")
-        if answer == "rejected":
-            close_lap(env, rec, lap, RETURNED)
-        else:
-            nxt = gate2_pipeline(env, rec, lap, stop)
-    elif cond == "refused" and lap and (stop.get("values") or {}).get("step") == CONTINUATION_STEP:
-        # 承認ゲート 1 の後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
-        moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
-        try:
-            queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
-        except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
-            write_record(env, rec, before)
-            return stopped_result(env, rec, f"承認ゲート 1 の後の続きをまだ組めない: {str(e)[:200]}")
-        nxt = f"{queue} && {wait_lap(rec, done)}"
-    elif cond == "refused" and lap:
-        nxt = f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {name} --mode <モード> --dev <開発版>（モードと版を決め直す）"
+    handler = _resume_handler(cond)
+    if handler:
+        stopped, nxt = handler(env, rec, before, stop, current_lap(rec), nxt)
+        if stopped is not None:
+            return stopped
     resume_record(env, rec)
     write_record(env, rec, before)
     update_handoff(env, rec, f"再開した（{cond} が解けた）", resume_command(rec), nxt)
