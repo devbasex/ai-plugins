@@ -196,13 +196,37 @@ def test_pr_head_cannot_move_the_production_branch(repo_wt):
     assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
 
 
-def test_authorization_values_fall_back_to_the_called_tree_without_a_main_declaration(repo_wt):
-    """メインディレクトリに宣言が無いときは、今の develop と同じく呼ばれた木の宣言を読む。"""
+def test_pr_head_cannot_add_authorization_values_absent_in_the_main_directory(repo_wt):
+    """メインディレクトリにファイルが無いときも、head が足したファイルの認可の値で判定を緩めない（#2363 round 5）。"""
     main, wt = repo_wt
-    wj(wt / ".ndf/worktree.json", {"production_branch": "release"})
+    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
     wj(wt / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    wj(wt / ".ndf/worktree.json", {"base_branch": "feat", "production_branch": "x"})
     d = delivery.load_delivery(wt)
+    assert d.production == "main" and d.base == "feat"
+    assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
+    (main / ".ndf/project.json").unlink()
+    assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
+
+
+def test_authorization_values_are_read_in_the_main_directory_itself(repo_wt):
+    main, _ = repo_wt
+    wj(main / ".ndf/worktree.json", {"production_branch": "release"})
+    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    d = delivery.load_delivery(main)
     assert d.production == "release" and d.rows and d.rows[0]["branch"] == "release"
+
+
+def test_main_dir_is_resolved_once_per_root(repo_wt, monkeypatch):
+    main, wt = repo_wt
+    wj(main / ".ndf/worktree.json", {"production_branch": "main"})
+    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    decl._MAIN_DIRS.clear()
+    calls = []
+    real = decl.proc.git_out
+    monkeypatch.setattr(decl.proc, "git_out", lambda root, *a: calls.append(a) or real(root, *a))
+    delivery.load_delivery(wt)
+    assert calls.count(("rev-parse", "--path-format=absolute", "--git-common-dir")) == 1
 
 
 def test_broken_main_declaration_is_a_problem_not_a_fallback(repo_wt):

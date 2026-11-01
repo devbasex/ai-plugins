@@ -7,8 +7,8 @@
 
 認可に関わる値（本番マージの判定に使う `project.json` の `delivery`・`worktree.json` の `production_branch`・
 `runtimes.json`）は、Pull Request の変更だけで承認ゲート 2 やランタイムの制限を緩められないよう `main` に置く（#2363）。
-ファイルごとならファイルの `place`、キーごとなら `keys.<キー>.place` に書く。キーの値は `read_json_setting` が、`main` の
-順で最初に見つかったファイル（メインディレクトリ → 呼ばれた木）の値で上書きする（そのファイルに無ければ消す）。
+ファイルごとならファイルの `place`、キーごとなら `keys.<キー>.place` に書く。`main` のキーの値は `read_json_setting` が
+メインディレクトリのファイルの値で上書きする（キーかファイルが無ければ消す。呼ばれた木の値で補わない）。
 
 メインディレクトリは、共通ディレクトリの名前が `.git` ならその親、そうでなければ `core.worktree`（サブモジュールでは `--git-common-dir` の親が
 `.git/modules/<名前>` を指すため。#2054）→ `--git-common-dir` の親の順に決める。標準ライブラリと `proc` だけで書く。
@@ -54,10 +54,26 @@ def key_places(name: str) -> dict[str, str]:
     return {k: v["place"] for k, v in keys.items() if isinstance(v, dict) and v.get("place", own) != own}
 
 
+_MAIN_DIRS: dict[str, Path] = {}
+
+
 def main_dir(root) -> Path | None:
-    """`root` の worktree が属するメインディレクトリ。git でなければ `None`。例外を上げない。"""
+    """`root` の worktree が属するメインディレクトリ。git でなければ `None`。例外を上げない。
+
+    解けた結果は `root` ごとにプロセスの中で覚え、同じ判定の中で git を起動し直さない（#2363）。
+    """
     if not root:
         return None
+    key = str(Path(root).resolve())
+    if key not in _MAIN_DIRS:
+        got = _resolve_main_dir(root)
+        if got is None:
+            return None
+        _MAIN_DIRS[key] = got
+    return _MAIN_DIRS[key]
+
+
+def _resolve_main_dir(root) -> Path | None:
     common = proc.git_out(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if not common:
         return None
@@ -102,17 +118,26 @@ def load_file(f: Path, name: str) -> tuple[dict, str | None]:
 
 
 def overlay_keys(root, name: str, data: dict, found: Path | None) -> tuple[dict, str | None]:
-    """`data`（`found` から読んだ中身）のうち、ファイルと違う置き場のキーをその置き場の順で読んだ値に替える。
+    """`data`（`found` から読んだ中身）のうち、ファイルと違う置き場のキーをその置き場のファイルの値に替える。
 
-    その置き場で最初に見つかったファイルが `found` と同じなら何もしない。そのファイルにキーが無ければ消す（呼ばれた木の
-    値で補わない）。そのファイルが読めなければ `({}, 理由)`。
+    `main` のキーは、メインディレクトリが解ければメインディレクトリのファイルからだけ読む。そこにファイルが無ければ
+    キーを消す（呼ばれた木の値で補わない。Pull Request が足したファイルだけで判定を緩められないようにする。#2363）。
+    メインディレクトリが解けない（git でない）か呼ばれた木そのものなら `found` の値のまま。`worktree` のキーは
+    その置き場の順で最初に見つかったファイルを読む。そのファイルが読めなければ `({}, 理由)`。
     """
     out = dict(data)
     for place in sorted(set((kp := key_places(name)).values())):
-        f = setting_path(root, name, place)
-        if f is None or (found is not None and f.resolve() == found.resolve()):
+        if place == "main":
+            main = main_dir(root)
+            if main is None:
+                continue
+            f = main / ".ndf" / name
+            f = f if f.is_file() else None
+        else:
+            f = setting_path(root, name, place)
+        if f is not None and found is not None and f.resolve() == found.resolve():
             continue
-        other, why = load_file(f, name)
+        other, why = load_file(f, name) if f is not None else ({}, None)
         if why:
             return {}, why
         for k in (k for k, p in kp.items() if p == place):
