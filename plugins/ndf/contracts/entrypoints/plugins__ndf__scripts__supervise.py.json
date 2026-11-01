@@ -46,7 +46,7 @@
         ],
         "positionals": []
       },
-      "import": {
+      "history import": {
         "options": [
           "--history"
         ],

@@ -112,7 +112,7 @@ def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str
         if not isinstance(row, dict) or row.get("kind") not in ("auto", "manual"):
             problems.append(f"{PJ} の delivery[{i}]: kind が auto / manual のオブジェクトでない")
             return None, None
-        if "channel" in row and row["channel"] not in ("production", "base"):
+        if row.get("channel") is not None and row["channel"] not in ("production", "base"):
             problems.append(f"{PJ} の delivery[{i}]: channel が production / base でない")
             return None, None
     return v, None

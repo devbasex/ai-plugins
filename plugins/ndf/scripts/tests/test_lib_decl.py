@@ -58,6 +58,15 @@ def test_team_setting_is_read_from_the_called_tree_first(repo_wt):
     assert project_decl.read_project_decl(wt) == {"test": "wt"}
 
 
+def test_team_setting_found_in_the_called_tree_does_not_resolve_the_main_directory(repo_wt, monkeypatch):
+    main, wt = repo_wt
+    wj(wt / ".ndf/project.json", {"test": "wt"})
+    calls = []
+    monkeypatch.setattr(decl, "main_dir", lambda root: calls.append(root) or main)
+    assert decl.setting_path(wt, "project.json") == wt / ".ndf/project.json"
+    assert calls == []
+
+
 def test_personal_setting_is_read_from_the_main_directory_first(repo_wt):
     main, wt = repo_wt
     wj(wt / ".ndf/worktree.local.json", {"v": "wt"})
@@ -117,6 +126,11 @@ def test_channel_wins_over_branch_and_branch_only_rows_still_read():
     d = _rows([dict(ROW, channel="production", branch="old"), dict(ROW, branch="main")])
     assert [r["branch"] for r in d.rows] == ["main", "main"]
     assert [r.route for r in delivery.routes(d)] == [r.route for r in delivery.routes(_rows([dict(ROW, branch="main")] * 2))]
+
+
+def test_null_channel_reads_the_branch():
+    d = _rows([dict(ROW, channel=None, branch="main")])
+    assert not d.problems and d.rows[0]["branch"] == "main"
 
 
 def test_bad_channel_is_a_problem():

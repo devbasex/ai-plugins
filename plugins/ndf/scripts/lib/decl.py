@@ -51,15 +51,22 @@ def main_dir(root) -> Path | None:
     return Path(common).parent
 
 
-def _search_order(root, name: str) -> list[Path]:
-    """`.ndf/<name>` を探す順（重なりを除く）。契約に無い名前は `KeyError`。"""
+def _candidates(root, name: str):
+    """`.ndf/<name>` を探す順（重なりを除く）に返す。メインディレクトリは要るときだけ解く（git の起動を減らす）。
+
+    契約に無い名前は `KeyError`。
+    """
     place = places()[name]
     here = Path(root) if root else None
-    main = main_dir(root)
-    order = (here, main) if place == "worktree" else (main, here)
-    return [Path(b) / ".ndf" / name for b in dict.fromkeys(p for p in order if p)]
+    seen: set[Path] = set()
+    for which in ("here", "main") if place == "worktree" else ("main", "here"):
+        base = here if which == "here" else main_dir(root)
+        if base and base not in seen:
+            seen.add(base)
+            yield base / ".ndf" / name
 
 
 def setting_path(root, name: str) -> Path | None:
     """`.ndf/<name>` の開くパス。どちらの木にも無ければ `None`。契約に無い名前は `KeyError`。"""
-    return next((p for p in _search_order(root, name) if p.is_file()), None)
+    places()[name]  # 契約に無い名前は探す前に KeyError
+    return next((p for p in _candidates(root, name) if p.is_file()), None)

@@ -88,7 +88,8 @@ class _Scan(ast.NodeVisitor):
             if ":" in qual:
                 self.by_func.setdefault(qual.rsplit(":", 1)[1], []).extend(files)
         self.func = "<module>"
-        self.sub_of: dict[str, str] = {}
+        self.sub_of: dict[str, str] = {}  # 副命令のパーサーの変数 → 副命令（入れ子は親から空白で繋ぐ）
+        self.subparsers_of: dict[str, str] = {}  # `add_subparsers` の変数 → 親の副命令（最上位は空）
         self.decl_vars: dict[str, str] = {}
 
     def visit_FunctionDef(self, node):
@@ -127,11 +128,24 @@ class _Scan(ast.NodeVisitor):
                 self.decl_vars[tgt.elts[0].id] = reader
             elif isinstance(tgt, ast.Name):
                 self.decl_vars[tgt.id] = reader
-        if isinstance(node.value, ast.Call) and _func_name(node.value.func) == "add_parser":
-            name = _const_str(node.value.args[0], self.f.constants) if node.value.args else None
-            if name and isinstance(node.targets[0], ast.Name):
-                self.sub_of[node.targets[0].id] = name
+        self._subparser_assign(node)
         self.generic_visit(node)
+
+    def _subparser_assign(self, node):
+        """`add_subparsers` と `add_parser` の代入から、副命令の親子をたどって変数ごとの副命令を覚える。"""
+        call, tgt = node.value, node.targets[0]
+        if not isinstance(call, ast.Call) or not isinstance(tgt, ast.Name):
+            return
+        fn = _func_name(call.func)
+        recv = getattr(call.func, "value", None)
+        recv_id = recv.id if isinstance(recv, ast.Name) else None
+        if fn == "add_subparsers":
+            self.subparsers_of[tgt.id] = self.sub_of.get(recv_id, "") if recv_id else ""
+        elif fn == "add_parser":
+            name = _const_str(call.args[0], self.f.constants) if call.args else None
+            if name:
+                parent = self.subparsers_of.get(recv_id, "") if recv_id else ""
+                self.sub_of[tgt.id] = f"{parent} {name}" if parent else name
 
     def _reader_call(self, node) -> str | None:
         if isinstance(node, ast.Subscript):

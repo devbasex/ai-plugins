@@ -482,6 +482,21 @@ def test_visit_call_add_argument_collects_options_and_positionals():
     assert f.positionals == {("run", "target"), ("run", "a")}
 
 
+def test_visit_call_nested_subcommand_keeps_its_parent():
+    src = (
+        "p = argparse.ArgumentParser()\n"
+        "sub = p.add_subparsers()\n"
+        "hp = sub.add_parser('history')\n"
+        "hs = hp.add_subparsers()\n"
+        "hi = hs.add_parser('import')\n"
+        "hi.add_argument('progress')\n"
+        "hi.add_argument('--history')\n"
+    )
+    f = _scan_call(src)
+    assert f.positionals == {("history import", "progress")}
+    assert f.options == {("history import", "--history")}
+
+
 def test_visit_call_add_argument_without_strings_still_marks_parser():
     f = _scan_call("p.add_argument(x)")
     assert f.has_parser is True
