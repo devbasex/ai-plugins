@@ -4765,11 +4765,25 @@
       "term": "例外リスト",
       "code": "allow_list",
       "context": "ndf-workflow",
-      "meaning": "構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場（既定は scripts/script-structure-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
+      "meaning": "構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。構造チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
       "deprecated": [
         "許可の一覧"
       ],
-      "pending_source": "issues/issue-2336-requirements.md"
+      "pending_source": "issues/issue-2336-design.md"
+    },
+    {
+      "term": "移行の読み",
+      "code": "migration_read",
+      "context": "ndf-workflow",
+      "meaning": "1 か所へ寄せた設定の値を、新しい置き場に無いときだけ古い置き場から読むこと。契約の一覧の設定ファイルの項目に migrate_from として書く",
+      "pending_source": "issues/issue-2336-design.md"
+    },
+    {
+      "term": "設定の置き場",
+      "code": "setting_place",
+      "context": "ndf-workflow",
+      "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
+      "pending_source": "issues/issue-2336-design.md"
     }
   ]
 }
