@@ -615,6 +615,14 @@ def test_bump_to_a_release_with_a_tag_stops(repo):
     assert p.returncode == 3 and res["metrics"]["existing"] == "ndf--v1.2.4" and res["metrics"]["next_free"] == "1.2.5"
 
 
+def test_bump_to_a_release_below_the_base_without_a_tag_stops(repo):
+    """現状固定: タグの無い正式版でもベースブランチの版以下なら止め、次に空いている版はベースブランチの次のパッチ。"""
+    bump_repo(repo, "1.2.5", "1.2.5")
+    p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
+    res = last_json(p)
+    assert p.returncode == 3 and res["metrics"]["existing"] == "1.2.5" and res["metrics"]["next_free"] == "1.2.6", p.stdout
+
+
 def test_bump_at_the_base_is_a_rerun_only_after_its_own_release(repo, tmp_path):
     """作業場所とベースブランチがともに新しい版なら、release/v<版> のマージ済みの PR があるときだけ打ち直し（決定 2）。"""
     bump_repo(repo, "1.2.4", "1.2.4")
