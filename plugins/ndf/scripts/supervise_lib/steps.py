@@ -50,6 +50,35 @@ def last_json(text: str) -> dict | None:
     return None
 
 
+# ---- 計画の実行の条件（engine の実行の前と、queue の版の差し込みの前で共有する） ----
+
+COND_RUN, COND_SKIP, COND_UNKNOWN = "run", "skip", "unknown"
+
+
+def condition_cwd(plan: dict) -> str | None:
+    """条件を打つ場所: プランの `リポジトリ`、無ければ作業場所（まだ無ければその親のリポジトリ）。"""
+    wt = Path(plan.get("作業場所") or "")
+    cwd = plan.get("リポジトリ") or (
+        str(wt) if str(wt) and wt.is_dir() else str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None
+    )
+    return cwd if cwd and Path(cwd).is_dir() else None
+
+
+def run_condition(cond: dict, plan: dict, state_dir: str | Path) -> tuple[str, int, str, float]:
+    """条件を打ち、(COND_RUN / COND_SKIP / COND_UNKNOWN, 終了コード, 要約, 秒) を返す。"""
+    cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(state_dir))
+    started = time.time()
+    try:
+        p = subprocess.run(cmd, shell=True, cwd=condition_cwd(plan), capture_output=True, text=True, timeout=cond.get("timeout", 900))
+        code, text = p.returncode, p.stdout + p.stderr
+    except subprocess.TimeoutExpired as e:
+        code, text = 124, f"打ち切り（{e.timeout} 秒）"
+    out = last_json(text) or {}
+    summary = str(out.get("summary") or text.strip()[-200:] or f"exit={code}")
+    verdict = COND_RUN if code == 0 else COND_SKIP if code == cond.get("skip_code", 3) else COND_UNKNOWN
+    return verdict, code, summary, round(time.time() - started, 1)
+
+
 def prior_results(state) -> dict[str, dict]:
     """前の実行の結果（`--from` の再開で inputs が読む。#1676 の I7・I8）。前の実行の範囲（`RunState.prior_rows`）の
     `step` の行のうち、ステップごとに最後の行の `exit` と、出力ファイル（`out`）の本文を返す。`out` の無い古い行は `summary`。"""

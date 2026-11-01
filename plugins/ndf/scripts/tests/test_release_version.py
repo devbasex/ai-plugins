@@ -331,3 +331,13 @@ def test_fill_stage_reports_the_version_of_a_plan_it_did_not_run(tmp_path, world
     plan = write_plan(tmp_path, world, explicit="10.27.5-dev.1")
     skipped, runnable = queue.fill_stage(True, [str(plan)], [])
     assert runnable == [] and skipped[0]["unfilled"] is True and skipped[0]["version"]["cause"] == "taken"
+
+
+@pytest.mark.parametrize(("code", "runs"), [(3, True), (0, False)])
+def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code, runs):
+    """実行の条件が配布不要なら、明示の版が既出でも版を照会せずに流す（engine が条件で完了にする）。要るなら従来どおり止める。"""
+    plan = write_plan(tmp_path, world, explicit="10.27.5-dev.1")
+    info = json.loads(plan.read_text())
+    plan.write_text(json.dumps({**info, "実行の条件": {"cmd": f"exit {code}", "skip_code": 3}}, ensure_ascii=False))
+    skipped, runnable = queue.fill_stage(True, [str(plan)], [])
+    assert (runnable == [str(plan)] and skipped == []) if runs else (runnable == [] and skipped[0]["unfilled"] is True)

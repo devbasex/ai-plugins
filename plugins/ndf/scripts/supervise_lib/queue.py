@@ -226,6 +226,9 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
     for p in stage:
         err = (None if prs is None else fill_queue_prs(p, prs)) or fill_queue_pr(p, items)
         version = None
+        if not err and _release_skipped_by_condition(p):
+            runnable.append(p)  # 版を照会せずに流す。engine が実行の条件を打ち直して完了で終える
+            continue
         if not err:  # 版の差し込みは、ほかの差し込みを埋めた後に（差し込み前の写しに版だけを残す。#2164）
             err, version = fill_release_version(p, items)
         if err:
@@ -233,6 +236,22 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
         else:
             runnable.append(p)
     return skipped, runnable
+
+
+def _release_skipped_by_condition(plan: str) -> bool:
+    """「版」と「実行の条件」を持つ配布のプランで、条件が配布不要（skip_code）を返すか。
+
+    条件で飛ぶ配布は版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
+    判定できないときと流すときは False（版を埋めてから流し、engine が条件を打ち直す）。"""
+    try:
+        info = json.loads(Path(plan).read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(info, dict) or not isinstance(info.get("版"), dict) or not isinstance(info.get("実行の条件"), dict):
+        return False
+    from supervise_lib.steps import COND_SKIP, run_condition  # 条件のあるプランだけが読み込む
+
+    return run_condition(info["実行の条件"], info, state_dir_of(str(Path(plan).absolute())))[0] == COND_SKIP
 
 
 def touched_files(body: str) -> list[str]:
