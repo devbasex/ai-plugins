@@ -54,7 +54,7 @@
 | I1 | エントリポイントの契約 | 数え上げの規則が拾うファイルと、契約の項目が 1 対 1 に対応する | 項目の無いファイルは `entry-undeclared`、ファイルの無い項目は `entry-stale` |
 | I2 | エントリポイントの契約 | コードから拾った引数・環境変数の読み・設定のキーの読み・受け渡しのファイルの書きは、どれも契約にあるか例外の項目に当たる | 種類ごとの違反（`arg-undeclared` など）。`items` に下書きの項目を添える |
 | I3 | エントリポイントの契約 | 契約にある引数・環境変数・設定のキー・書くファイルは、コードから拾える | `contract-stale`（例外の項目で許すのは、静的に拾えない種類だけ） |
-| I4 | 例外リスト | ベースブランチの merge-base と比べて、項目が増えない。同じ差分で同じ `kind`・`name` の項目を消す付け替えは増加に数えない | `allow-added`（例外の項目で許せない） |
+| I4 | 例外リスト | ベースブランチの merge-base と比べて、項目が増えない。同じ差分で同じ `kind`・`name` の項目を消す付け替えは増加に数えない。merge-base の `.github/workflows/script-structure.yml` が `check-ndf-contracts.py` を走らせていない変更（ラチェットを CI へ足す変更）は初版として増加を数えず、その変更で載せた項目が次の変更からの基準になる。構造チェックのスクリプトを足す変更と CI へ足す変更を別の Pull Request に分けても成り立つ | `allow-added`（例外の項目で許せない）。初版は `metrics.ratchet` が `initial` |
 | I5 | 例外リスト | どの項目も今の違反に当たる | `unused-allow` |
 | I6 | 設定ファイル | 置き場は 1 つで、読み手の関数は `lib/decl.locate` だけを通して開く | 読み手の関数の外で開けば `setting-open-outside-reader` |
 | I7 | 設定ファイル | 1 つの値を持つキーは 1 つだけ。2 か所目は `duplicates` で宣言し、例外の項目に載る | `setting-duplicate` |
@@ -391,6 +391,7 @@ graph LR
 | AC3・I5 | 違反に当たらない例外の項目を残した木で `unused-allow`、消した木で 0 | — |
 | AC4・I4 | merge-base に無い例外の項目を足した木（項目が今の違反に当たっていても）で `allow-added`。同じ `kind`・`name` の項目を消して別のパスで足した木は通る | 比べる ref を HEAD にするよう壊すと落ちる |
 | AC4 | CI の中で起点の ref を決められないとき 3、手元では `ratchet: skipped` で 0 | — |
+| AC4・I4 | merge-base の `script-structure.yml` が `check-ndf-contracts.py` を走らせていない木（merge-base に `scripts/check-ndf-contracts.py` があっても）で例外の項目を足しても `ratchet: initial` で 0。merge-base の CI が構造チェックを走らせ `scripts/contract-allow/` が無い木（例外リストを丸ごと消した後）で足すと `allow-added` | 初版をスクリプトの有無か例外リストの置き場の有無で判定するよう壊すと、前者は分けた Pull Request の木が、後者は丸ごと消した後の木が通り落ちる |
 | AC5・I7 | `production_branch` を読む経路が `repo.production_branch` だけになり、`delivery` の行が `channel` で本番を指す。`duplicates` を宣言して例外の項目が無い木で `setting-duplicate` | `delivery.build` に独自の後退を戻すと、`worktree.json` に `production_branch` が無い宣言で経路の判定と雛形の判定が食い違い落ちる（#2097 の再現） |
 | AC6・I10 | 古い置き場だけを持つ `.ndf/`（`delivery` の行が `branch` だけ・`supervise.json` の `test` だけ）で、寄せた値を読むエントリポイントを起動し、寄せる前と同じ値を得る。両方あれば新しい置き場が勝つ | 移行の読みを外すと値が空になり落ちる |
 | AC7・I6 | worktree の `.ndf/project.json` とメインディレクトリのそれが違う木で、`test-run.py` の待つチェック（#2317）と cross-refactoring の `init` の戦略（#1709）が worktree の値を使う。`main` の置き場の設定は逆に読む | `locate` の順を逆にすると落ちる |
