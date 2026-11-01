@@ -395,7 +395,8 @@ def bump_guard(root, plugin, old, new, base) -> str | None:
 
     if versions.parse_version(new) is None:
         raise StepError(f"版の形が違う: {new}（X.Y.Z / X.Y.Z-dev.N / X.Y.Z-rc.N）", EXIT_UNREADABLE)
-    obs = release_version.observe(root, plugin, base, None)
+    rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
+    obs = release_version.observe(root, plugin, base, None, rel=rel)
     metrics = {"plugin": plugin, "from": old, "to": new, "base_version": obs.base_version}
     if obs.unreadable:
         emit(

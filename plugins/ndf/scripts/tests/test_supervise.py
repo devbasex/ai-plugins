@@ -2059,6 +2059,7 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
         return real(plans, adm, args)
 
     monkeypatch.setattr(flow, "run_stage", batch)
+    monkeypatch.setattr(queue, "fill_release_version", lambda plan, items: (None, None))  # 版の差し込みは test_release_version が見る
     done = tmp_path / "done.json"
     res = queue.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
     assert res["status"] == "ok", res

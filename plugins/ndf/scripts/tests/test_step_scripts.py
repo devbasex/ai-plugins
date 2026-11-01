@@ -16,6 +16,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+from release_repo import push_origin  # noqa: E402
 
 PY = sys.executable
 
@@ -354,8 +355,9 @@ def plugin_repo(repo, name="mcp-x", version="1.0.0"):
 def test_bump_updates_manifest_and_leaves_the_readme(repo, env):
     """受け入れ条件 6: bump は plugin の README に触れず、版ごとの更新の節が無いことを manual に出さない。"""
     pdir = plugin_repo(repo)
+    push_origin(repo)  # bump は origin のベースブランチの版を読んでから上げる（#2164）
     before = (pdir / "README.md").read_bytes()
-    code, out, err = call("release-steps.py", ["bump", "--plugin", "mcp-x", "--to", "1.1.0", "--root", str(repo)], env)
+    code, out, err = call("release-steps.py", ["bump", "--plugin", "mcp-x", "--to", "1.1.0", "--base", "develop", "--root", str(repo)], env)
     assert code == 0, err
     check_shape(out)
     assert out["tool"] == "release" and out["status"] == "ok"

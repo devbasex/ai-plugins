@@ -58,10 +58,14 @@ class Decision:
         return self.existing is not None
 
 
-def plugin_json_rel(plugin: str) -> str:
-    """リポジトリの根からのプラグインの `plugin.json` の位置（`release-steps.py` の `plugin_dir` と同じ置き方）。"""
-    d = f"plugins/{plugin}" if plugin in ("ndf", "playwright-kit") else f"plugins/mcp/{plugin}"
-    return f"{d}/.claude-plugin/plugin.json"
+def plugin_json_rel(repo: str | Path, ref: str, plugin: str) -> str | None:
+    """`ref` の木で、名前が `plugin` のディレクトリの `.claude-plugin/plugin.json` の位置。無い・2 つ以上なら None。"""
+    p = _git(repo, "ls-tree", "-r", "--name-only", ref)
+    if p.returncode:
+        return None
+    tail = f"{plugin}/.claude-plugin/plugin.json"
+    hits = [f for f in p.stdout.splitlines() if f == tail or f.endswith(f"/{tail}")]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _git(repo: str | Path, *args: str) -> subprocess.CompletedProcess:
@@ -79,19 +83,20 @@ def _version_at(repo: str | Path, ref: str, rel: str) -> str | None:
     return v if isinstance(v, str) and versions.parse_version(v) else None
 
 
-def observe(repo: str | Path, plugin: str, base: str, production: str | None, fetch: bool = True) -> Observed:
+def observe(repo: str | Path, plugin: str, base: str, production: str | None, fetch: bool = True, rel: str | None = None) -> Observed:
     """origin を取り直してから、ベースブランチ・本番のブランチ・タグを読む。本番のブランチが無ければ読まない（読めないに数えない）。
-    タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。"""
+    タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
+    `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。"""
     unreadable: list[str] = []
     if fetch and _git(repo, "fetch", "-q", "origin", "--tags").returncode:
         unreadable.append("origin")
-    rel = plugin_json_rel(plugin)
     base_ref = f"origin/{base}"
-    base_version = _version_at(repo, base_ref, rel)
+    rel = rel or plugin_json_rel(repo, base_ref, plugin)
+    base_version = _version_at(repo, base_ref, rel) if rel else None
     if base_version is None:
         unreadable.append(base_ref)
     prod_ref = f"origin/{production}" if production else ""
-    prod_version = _version_at(repo, prod_ref, rel) if prod_ref else None
+    prod_version = _version_at(repo, prod_ref, rel) if prod_ref and rel else None
     if prod_ref and prod_version is None:
         unreadable.append(prod_ref)
     p = _git(repo, "tag", "--list", f"{plugin}--v*")
