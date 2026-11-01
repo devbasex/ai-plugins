@@ -400,7 +400,13 @@ def bump_guard(root, plugin, old, new, base) -> str | None:
     metrics = {"plugin": plugin, "from": old, "to": new, "base_version": obs.base_version}
     if obs.unreadable:
         emit(
-            result(TOOL, "stopped", f"版を確かめる値を読めない: {'・'.join(obs.unreadable)}。推定で上げない", [], {**metrics, "unreadable": obs.unreadable}),
+            result(
+                TOOL,
+                "stopped",
+                f"版を確かめる値を読めない: {'・'.join(obs.unreadable)}。推定で上げない",
+                [],
+                {**metrics, "unreadable": obs.unreadable},
+            ),
             code=EXIT_UNREADABLE,
         )
     cmp = versions.compare_versions(obs.base_version, new)
@@ -410,7 +416,13 @@ def bump_guard(root, plugin, old, new, base) -> str | None:
         own = release_version.own_released(root, f"release/v{new}", base)
         if own is None:
             emit(
-                result(TOOL, "stopped", f"release/v{new} → {base} のマージ済みの PR を照会できない。推定で進めない", [], {**metrics, "unreadable": ["pr"]}),
+                result(
+                    TOOL,
+                    "stopped",
+                    f"release/v{new} → {base} のマージ済みの PR を照会できない。推定で進めない",
+                    [],
+                    {**metrics, "unreadable": ["pr"]},
+                ),
                 code=EXIT_UNREADABLE,
             )
         if own:

@@ -156,9 +156,7 @@ def own_released(repo: str | Path, branch: str, base: str) -> bool | None:
     """`branch` → `base` のマージ済みの PR があるか（自分の配布か）。1 回だけ照会し、照会できなければ None。"""
     import gh_call
 
-    r = gh_call.gh(
-        ["pr", "list", "--head", branch, "--base", base, "--state", "merged", "--json", "number", "--limit", "1"], cwd=str(repo)
-    )
+    r = gh_call.gh(["pr", "list", "--head", branch, "--base", base, "--state", "merged", "--json", "number", "--limit", "1"], cwd=str(repo))
     if r.returncode:
         return None
     try:

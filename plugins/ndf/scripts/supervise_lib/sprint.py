@@ -186,7 +186,11 @@ def close_waves(a) -> list[dict]:
     return [
         check,
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)}, "then_of": "最終の検査"},
+        {
+            "name": "本番",
+            "plans": {"release-prod": plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)},
+            "then_of": "最終の検査",
+        },
         close,
     ]
 

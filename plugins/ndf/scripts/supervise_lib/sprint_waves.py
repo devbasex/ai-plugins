@@ -470,9 +470,7 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
     return plan_check_since(ns)
 
 
-def plan_mvv_release(
-    a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None
-) -> dict:
+def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
     """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップが関門 2 を判定する。
     prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
     `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""

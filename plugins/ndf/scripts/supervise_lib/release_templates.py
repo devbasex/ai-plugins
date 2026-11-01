@@ -62,7 +62,13 @@ def version_field(a, plugin: str, dev: bool) -> dict:
     series = None if dev or explicit else getattr(a, "series", None) or None
     if not dev and not explicit and not series:
         raise DeclError("本番の配布に要る版が無い（--prod か、版を読む開発版のプランの系列）")
-    return {"プラグイン": plugin, "チャネル": "dev" if dev else "prod", "上げ幅": getattr(a, "level", None) or "patch", "明示": explicit, "系列": series}
+    return {
+        "プラグイン": plugin,
+        "チャネル": "dev" if dev else "prod",
+        "上げ幅": getattr(a, "level", None) or "patch",
+        "明示": explicit,
+        "系列": series,
+    }
 
 
 def _validate_release_decl(rel: dict, dev: bool, a) -> tuple[str, list[str]]:
