@@ -112,7 +112,21 @@ def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str
         if not isinstance(row, dict) or row.get("kind") not in ("auto", "manual"):
             problems.append(f"{PJ} の delivery[{i}]: kind が auto / manual のオブジェクトでない")
             return None, None
+        if "channel" in row and row["channel"] not in ("production", "base"):
+            problems.append(f"{PJ} の delivery[{i}]: channel が production / base でない")
+            return None, None
     return v, None
+
+
+def _resolve_channels(rows: list[dict] | None, base: str | None, production: str | None) -> list[dict] | None:
+    """`channel`（`production` / `base`）を持つ行を、読んだ時点で 1 回だけブランチ名へ解いて `branch` に入れる。
+
+    `channel` と `branch` の両方があれば `channel` が勝つ。`channel` の無い行は `branch` をそのまま使う（移行の読み）。
+    """
+    if rows is None:
+        return None
+    names = {"production": production, "base": base}
+    return [dict(r, branch=names[r["channel"]]) if r.get("channel") in names else r for r in rows]
 
 
 def build(
@@ -129,12 +143,11 @@ def build(
     problems = list(problems or [])
     sources = {}
     wt_base = wt.get("base_branch") if isinstance(wt.get("base_branch"), str) and wt.get("base_branch") else None
-    wt_prod = wt.get("production_branch") if isinstance(wt.get("production_branch"), str) and wt.get("production_branch") else None
     b = base or wt_base or default_branch
     sources["base"] = "引数" if base else (f"{WT} の base_branch" if wt_base else "既定ブランチ")
-    p = production or wt_prod or default_branch
-    sources["production"] = "引数" if production else (f"{WT} の production_branch" if wt_prod else "既定ブランチ（origin/HEAD）")
+    p, sources["production"] = (production, "引数") if production else repo.production_of(wt, default_branch)
     rows, unknown = _rows_of(project, problems)
+    rows = _resolve_channels(rows, b, p)
     rel = release if isinstance(release, dict) else None
     return DeliveryDecl(b, p, rows, rel, problems, sources, unknown)
 

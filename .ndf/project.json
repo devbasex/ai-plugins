@@ -227,7 +227,7 @@
       "target": "ndf プラグイン（Claude Code・Codex）",
       "kind": "manual",
       "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
-      "branch": "main",
+      "channel": "production",
       "versioned": true
     }
   ],

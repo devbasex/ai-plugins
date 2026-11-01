@@ -18,7 +18,8 @@
       "summary": "languages（このリポジトリの宣言にある最上位のキー）"
     },
     "test": {
-      "summary": "test（このリポジトリの宣言にある最上位のキー）"
+      "summary": "テストの戦略（suites）。テストのコマンドの正本（決定 8）",
+      "migrate_from": "supervise.json#test"
     },
     "test_duration": {
       "summary": "test_duration（このリポジトリの宣言にある最上位のキー）"
@@ -30,7 +31,7 @@
       "summary": "services（このリポジトリの宣言にある最上位のキー）"
     },
     "delivery": {
-      "summary": "delivery（このリポジトリの宣言にある最上位のキー）"
+      "summary": "配布の経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない（branch は channel の無い行だけ）"
     },
     "issues": {
       "summary": "issues（このリポジトリの宣言にある最上位のキー）"

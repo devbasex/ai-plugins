@@ -10,6 +10,7 @@ from pathlib import Path
 import delivery
 import formatting
 import project_decl
+import repo
 import schema
 from typing import Annotated
 
@@ -221,7 +222,8 @@ def apply_decls(a) -> None:
     """引数に無いものを .ndf/ の宣言から埋める。雛形に要るのにどちらにも無ければ DeclError。
 
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
-    - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
+    - 本番のブランチ（a.production_branch）: --production-branch → `repo.production_branch`（worktree.json の
+      production_branch → 既定ブランチ。決め方の正本は `repo.production_of`。#2097）
     - テスト（a.strategy・a.test_limits・a.test_cmd・a.no_reports）: --test-cmd（雛形）→ project.json の test →
       supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
       --test-all は廃止（知らせて無視する）
@@ -238,6 +240,8 @@ def apply_decls(a) -> None:
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
     _apply_simple_decls(a, wt, sv)
+    if not a.production_branch and roots:
+        a.production_branch = repo.production_branch(roots[0], wt)[0]
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
     if getattr(a, "glossary_ready", None) is None:

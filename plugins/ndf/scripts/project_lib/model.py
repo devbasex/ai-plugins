@@ -128,7 +128,8 @@ class Delivery(schema.Shape):
     target: str
     kind: Literal["auto", "manual"]
     trigger: str
-    branch: Optional[str] = None
+    branch: Optional[str] = None  # channel の無い行だけで読む（ほかのブランチで動く行と、移行の読み）
+    channel: Optional[Literal["production", "base"]] = None  # 本番のブランチ / ベースブランチへのマージで動く（名前を写さない。#2336）
     versioned: bool
     production: Optional[StrictBool] = None  # true: 本番系へ届く / false: 届かない（検証の環境）/ 無し: 決めない（#1454）
 

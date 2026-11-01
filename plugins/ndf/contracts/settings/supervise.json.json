@@ -12,7 +12,7 @@
       "summary": "version（このリポジトリの宣言にある最上位のキー）"
     },
     "test": {
-      "summary": "test（このリポジトリの宣言にある最上位のキー）"
+      "summary": "no_reports だけが正本。command・all は project.json の test が無いときだけ読む移行の読み"
     },
     "sync_checks": {
       "summary": "sync_checks（このリポジトリの宣言にある最上位のキー）"

@@ -15,7 +15,7 @@
       "summary": "base_branch（このリポジトリの宣言にある最上位のキー）"
     },
     "production_branch": {
-      "summary": "production_branch（このリポジトリの宣言にある最上位のキー）"
+      "summary": "本番のブランチの正本（無ければ既定ブランチ。決め方は lib/repo.py の production_of）"
     },
     "guard": {
       "summary": "guard（このリポジトリの宣言にある最上位のキー）"
