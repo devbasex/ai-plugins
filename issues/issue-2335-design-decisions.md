@@ -131,9 +131,9 @@ YAML は読むのに `yamlio`（ruamel）を要し、核が読む度に依存が
 
 根拠: Value 10 / Value 1（MVV 版 3）
 
-### 決定 12: 許可の一覧が減る方向にしか動かないよう、既存の例外リストの置き場を使い、ベースブランチと比べて行の増加を落とす
+### 決定 12: 例外リストが減る方向にしか動かないよう、既存の例外リストの置き場を使い、ベースブランチと比べて行の増加を落とす
 
-許可の一覧は `scripts/script-structure-allow/` の 1 項目 1 ファイルをそのまま使い、新しい検査の種類（`core-entry`・`contract`・
+例外リストは `scripts/script-structure-allow/` の 1 項目 1 ファイルをそのまま使い、新しい検査の種類（`core-entry`・`contract`・
 `limit-literal`・`name-alias`・`argv`・`md-read`）の行を足す。構造チェックはベースブランチ（`.ndf/worktree.json` の `base_branch`）の
 置き場と比べ、起点に既にあった種類で行が増えたら落とす。新しい種類を入れる Pull Request だけが、その種類の最初の行を足せる。
 
