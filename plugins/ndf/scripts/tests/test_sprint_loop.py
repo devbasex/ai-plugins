@@ -918,6 +918,22 @@ def test_manual_release_stage_holds_the_close_until_it_is_done(env):
     assert rest.startswith("python3 ") and "1-close.json" in rest and "loop lap l1" in rest
 
 
+def test_sprint_pipeline_chains_close_after_the_first_command_without_hands(tmp_path):
+    done, rec_ = tmp_path / "done-1.json", {"name": "l1"}
+    index = [{"name": "設計", "gate": True}, {"name": "実装", "command": "Q1"}]
+    queue, pipeline = sl.sprint_pipeline(index, ["c1", "c 2"], done, rec_)
+    assert queue == f"Q1 --then c1 'c 2' --done {done}"
+    assert pipeline == f"{queue} && {sl_gate.wait_lap(rec_, done)}"
+
+
+def test_sprint_pipeline_waits_for_hands_before_the_close(tmp_path):
+    done, rec_ = tmp_path / "done-1.json", {"name": "l1"}
+    index = [{"name": "実装", "command": "Q1"}, {"name": "ゲート 2", "command": "Q2"}, {"name": "リリース", "manual": "/ndf:release"}]
+    queue, pipeline = sl.sprint_pipeline(index, ["c1"], done, rec_)
+    assert queue == f"python3 {sl.SUPERVISE} queue c1 --max 3 --done {done}"
+    assert pipeline == f"Q1 を流し、続けて Q2 → リリース（/ndf:release で行う） を終えてから: {queue} && {sl_gate.wait_lap(rec_, done)}"
+
+
 def test_refused_continuation_after_gate_1_is_rebuilt_from_the_kept_issues(env, monkeypatch):
     lap = built_lap(env)
     real = sl_gate.continuation
