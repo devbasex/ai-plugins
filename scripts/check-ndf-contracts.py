@@ -6,7 +6,7 @@
 コードから拾った引数・環境変数の読み・`.ndf/` の設定のキーの読み・受け渡しのファイルの書きが契約にあるか、
 契約にあるものがコードから拾えるか、呼び手がいるか、逆引き（`contracts/index.md`）が項目と一致するかを見る。
 今の外れは例外リスト（`scripts/contract-allow/`。1 項目 1 ファイル）に載せ、ベースブランチとの merge-base より
-項目が増えた変更を `allow-added` で落とす。形と規則は `issues/issue-2336-design.md`。
+項目が増えた変更を `allow-added` で落とす。形と規則の理由は `docs/specifications/ndf-entrypoint-contracts.md`。
 
     python3 scripts/check-ndf-contracts.py [--root <リポジトリ>] [--allow <ディレクトリ>] [--base <ref>] [<ファイル>...]
     python3 scripts/check-ndf-contracts.py --render [--root <リポジトリ>]
