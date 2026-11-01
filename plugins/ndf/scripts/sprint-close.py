@@ -33,8 +33,8 @@ closed / already_closed / failed / kept_open / closed_unverified（既に閉じ�
 {kind:"board_note"} の項目に理由が載り、課題を閉じる処理は続ける。metrics.final_stage は判定に使った最終工程。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件 1・2 を見ずに --issues の課題を閉じる（条件 3 の振り返りは、比べる配布の記録が無いため行があれば満たす）。--issues と一緒のときだけ受ける。
-`--record-pr unknown` は「記録の置き場が分からない」（リリースの経路が雛形でも昇格でもなく、まとめのプランが
-記録の PR を決められない）。配布の記録を読まず、どの課題も閉じず、ボードも書かずに --issues の課題を理由つきの
+`--record-pr unknown` は「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。
+今のまとめのプランは組まず、記録の PR を流す時点に `{queue_record}` で解決する）。配布の記録を読まず、どの課題も閉じず、ボードも書かずに --issues の課題を理由つきの
 kept_open で返す（終了コード 0）。--issues と一緒のときだけ受ける。
 終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
 閉じる課題が 0 件・--record-pr 0 / unknown に --issues が無い / 3 = 呼び出しの誤り。
@@ -71,7 +71,7 @@ import gh_rest  # noqa: E402
 import locks  # noqa: E402
 import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#2227）
 
-from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
+from dist_record import parse_record, released  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 sys.path.insert(0, str(HERE))
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
@@ -86,7 +86,7 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
 )
 
 TOOL = "sprint-close"
-RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（supervise_lib/sprint_routes.py が渡す。#1875）
+RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
 UNKNOWN_REASON = "配布の記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
 LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
@@ -221,7 +221,7 @@ def _closing_blocker(a, rec, record_repo):
         kept_all = UNKNOWN_REASON  # 記録を読めないので閉じない（#1875）
     elif not rec["found"] or not stage:
         kept_all = "配布の記録が読めない"
-    elif not (stage.startswith("本番") or stage.startswith("配布なし")):
+    elif not released(stage):
         kept_all = "本番への配布の前（本番への配布の後に閉じる）"
     verdicts = None
     verify = a.with_verification or a.final_stage == STAGE_VERIFY  # 最終工程がリリース後テストなら必ず見る（I4）

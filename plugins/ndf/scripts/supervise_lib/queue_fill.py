@@ -1,10 +1,12 @@
 """queue の差し込み（`{queue_pr:<名>}`・`{queue_state:<名>}`）を、名前の一致する計画の結果で埋める（#1488・#2079）。
+`{queue_record}` は、計画の `課題` のリリース記録を置いた PR を GitHub から探して埋める（#2230。`sprint_close_lib/record_find.py`）。
 
 `queue.py` から切り出した。`queue` は同じ名前で読み込み直して公開する。
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -16,6 +18,7 @@ FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（
 
 
 QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の Pull Request 1 本
+QUEUE_RECORD = "{queue_record}"  # 計画の `課題` のリリース記録を置いた PR（#2230）
 QUEUE_STATE = re.compile(r"\{queue_state(\??):([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）。`?` 付きは無ければ空
 
 
@@ -76,22 +79,41 @@ def _fill_states(text: str, states: list[tuple[str, str]], items: list[dict], pl
     return text, missing
 
 
+def _fill_record(text: str, plan: str) -> tuple[str, list[str]]:
+    """{queue_record} を、計画の `課題` のリリース記録を置いた PR の番号で置き換える。見つからなければ理由の文で返す。"""
+    from sprint_close_lib.record_find import find_record  # GitHub を読む差し込みを持つ計画だけが読み込む
+
+    try:
+        info = json.loads(text)
+    except ValueError:
+        return text, [f"{QUEUE_RECORD}（計画の JSON を読めない）"]
+    issues = [n for n in info.get("課題") or [] if isinstance(n, int)] if isinstance(info, dict) else []
+    root = (info.get("リポジトリ") if isinstance(info, dict) else None) or str(Path(plan).parent)
+    hit = find_record(root, None, issues)
+    if hit.pr is None:
+        return text, [f"{QUEUE_RECORD}（{hit.reason()}）"]
+    return text.replace(QUEUE_RECORD, str(hit.pr)), []
+
+
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
     前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。完了して PR が無い・飛ばされたなら 0。
     {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（#1488）。結果（完了した報告・
     状態ディレクトリ）が見つからなければ、0・空文字で埋めずに計画を書き換えず理由を返す（#2079）。
-    {queue_state?:<名>} だけは、無いことを読む側が扱うと明示した差し込みで、無ければ空文字で埋める（単独で流す本番の approve）。"""
+    {queue_state?:<名>} だけは、無いことを読む側が扱うと明示した差し込みで、無ければ空文字で埋める（単独で流す本番の approve）。
+    {queue_record} は計画の `課題` のリリース記録を置いた PR で置き換え、見つからなければ同じく書き換えずに理由を返す（#2230）。"""
     try:
         text = Path(plan).read_text()
     except OSError as e:
         return f"計画を読めない: {e}"
     names, states = sorted(set(QUEUE_PR.findall(text))), sorted(set(QUEUE_STATE.findall(text)))
-    if not names and not states:
+    record = QUEUE_RECORD in text
+    if not names and not states and not record:
         return None
     text, missing_prs = _fill_prs(text, names, items, plan)
     text, missing_states = _fill_states(text, states, items, plan)
-    missing = missing_prs + missing_states
+    text, missing_record = _fill_record(text, plan) if record else (text, [])
+    missing = missing_prs + missing_states + missing_record
     if missing:
         return "差し込みを埋める前の計画の結果が見つからない: " + "、".join(missing)
     write_text_atomic(Path(plan), text)

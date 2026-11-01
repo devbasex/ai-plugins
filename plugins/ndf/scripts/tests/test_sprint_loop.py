@@ -931,3 +931,45 @@ def test_refused_continuation_after_gate_1_is_rebuilt_from_the_kept_issues(env, 
     assert got["status"] == "ok" and "loop lap l1" in got["metrics"]["next"]
     close = next(c for c in reversed(env.calls) if "close" in c)
     assert close[close.index("--issue") + 1 : close.index("--state")] == ["12"]
+
+
+def test_gate_2_resume_builds_the_close_without_the_check_pr_as_the_record(env):
+    """#2230 の受け入れ条件 2: 承認ゲート 2 の後のまとめへ、止まった記録の values.pr（検査のスプリント PR）を --record-pr で渡さない。"""
+    lap = built_lap(env)
+    assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]))["exit"] == 3
+    r = rec(env)
+    r["stop"]["values"]["pr"] = 2103
+    sl.write_record(env, r)
+    approve_gate_2(sl.current_lap(rec(env)))
+    env.calls.clear()
+    nxt = sl.cmd_start(env, "l1", [], {})["metrics"]["next"]
+    closes = [c for c in env.calls if "new" in c and "close" in c]
+    assert closes and all("--record-pr" not in c for c in closes) and "loop lap l1" in nxt
+
+
+def test_lap_with_an_unfilled_close_is_closed_as_failed(env):
+    """#2230 の決定 7: 差し込みを埋められずに流さなかったまとめ（記録の PR が見つからない）がある周回は完了で締めない。"""
+    lap = built_lap(env, nums=(11,))
+    set_state(env, lap)
+    items = [
+        {"plan": str(Path(lap["out"]) / "check.json"), "result": "完了"},
+        {
+            "plan": str(Path(lap["out"]) / "close" / "1-close.json"),
+            "result": "流さなかった",
+            "reason": "{queue_record}（…）",
+            "unfilled": True,
+        },
+    ]
+    sl.cmd_lap(env, "l1", False, write_done(env, items), [])
+    assert rec(env)["laps"][0]["outcome"] == sl.FAILED
+
+
+def test_lap_with_a_plan_skipped_after_a_finished_stage_is_still_done(env):
+    lap = built_lap(env, nums=(11,))
+    set_state(env, lap)
+    items = [
+        {"plan": str(Path(lap["out"]) / "check.json"), "result": "完了"},
+        {"plan": str(Path(lap["out"]) / "prod.json"), "result": "流さなかった", "reason": "前のステージを流さなかった"},
+    ]
+    sl.cmd_lap(env, "l1", False, write_done(env, items), [])
+    assert rec(env)["laps"][0]["outcome"] == sl.DONE

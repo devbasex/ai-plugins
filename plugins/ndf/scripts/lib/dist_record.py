@@ -1,7 +1,7 @@
 """リリース記録（`## 配布の記録`）の形を 1 か所に持つ（#1273 の決定 3）。
 
 形の正本は `skills/progress-tracking/SKILL.md` の「配布の記録」の表である。書く側（`release-steps.py record`）は
-`format_record` で組み、読む側（`sprint-close.py`）は `parse_record` で読む。見出しと行の名前をほかのモジュールに写さない。
+`format_record` で組み、読む側（`sprint-close.py`・`sprint_close_lib/record_find.py`）は `parse_record` で読む。見出しと行の名前をほかのモジュールに写さない。
 
 使う側は `deps.require("md")` を先に呼ぶ。
 """
@@ -36,6 +36,12 @@ def format_record(prev: str | None, new: str, prs, *, stage_note: str, version_n
             "",
         ]
     )
+
+
+def released(stage) -> bool:
+    """段階が本番か配布なしか（課題を閉じてよい段階。`sprint-close.py` と `sprint_close_lib/record_find.py` が使う）。"""
+    stage = stage or ""
+    return stage.startswith("本番") or stage.startswith("配布なし")
 
 
 def _strip_note(text):
