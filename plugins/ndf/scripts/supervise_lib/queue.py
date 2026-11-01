@@ -130,17 +130,11 @@ def cmd_queue(
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
-    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
-    stages = [list(plans), *then_stages]
-    all_plans = [p for stage in stages for p in stage]
-    done_path = queue_done_path(plans, done)
-    try:
-        decl = queue_decl_of([_read_plan(p) for p in all_plans])
-    except DeclError as e:
-        return _not_started(str(e), max_, done_path)
-    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
-    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
-    listing = _read_listing(queue_plans_path(done_path))
+    stages, all_plans = _normalize_stages(plans, then)
+    prepared = _prepare_queue(all_plans, plans, done, max_)
+    if isinstance(prepared, dict):
+        return prepared
+    decl, done_path, seen, listing = prepared
     try:
         prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
     except durable.DurableError as e:
@@ -165,6 +159,26 @@ def cmd_queue(
         return got.value
     finally:
         durable.close()
+
+
+def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[str]], list[str]]:
+    """then（プランの並びかステージの並び）を、先頭のステージ plans に続くステージの並びとすべてのプランの並びにする。"""
+    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
+    stages = [list(plans), *then_stages]
+    return stages, [p for stage in stages for p in stage]
+
+
+def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max_: int):
+    """宣言を読み、done を消して知らせ始める位置と前の一覧を読む。宣言の形が違えば _not_started の結果を返す。"""
+    done_path = queue_done_path(plans, done)
+    try:
+        decl = queue_decl_of([_read_plan(p) for p in all_plans])
+    except DeclError as e:
+        return _not_started(str(e), max_, done_path)
+    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
+    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
+    listing = _read_listing(queue_plans_path(done_path))
+    return decl, done_path, seen, listing
 
 
 def _read_plan(plan: str) -> dict:
