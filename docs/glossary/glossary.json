@@ -4746,6 +4746,59 @@
       "context": "ndf-workflow",
       "meaning": "`new sprint` / `new close` の `--version`・`--prod`、`new release` の `--version` で渡した版。プランを作る時点で決まり、キューはその版がまだ出ていないかだけを確かめる",
       "source": ""
+    },
+    {
+      "term": "実行の核",
+      "context": "ndf-workflow",
+      "meaning": "入口・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md",
+      "code": "run_core"
+    },
+    {
+      "term": "契約の一覧",
+      "context": "ndf-workflow",
+      "meaning": "入口ごとの入力（引数・環境変数・設定・標準入力）・出力・書く状態・終了コードと、受け渡すファイルの形を 1 か所に書いた宣言（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md",
+      "code": "contract_registry"
+    },
+    {
+      "term": "原因の型",
+      "context": "ndf-workflow",
+      "meaning": "課題を原因で分けた A〜I の区分。A 失敗の判定・B 記録とログ・C 回復と再開・D 待ちと上限・E 解決の時点・F 並行の衝突・G 機能と方針・H 文書・I その他（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md"
+    },
+    {
+      "term": "柱",
+      "context": "ndf-workflow",
+      "meaning": "#2335 の子で、原因の型ごとの仕組みを入れる課題（P0〜P8、#2336〜#2344）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md"
+    },
+    {
+      "term": "許可の一覧",
+      "context": "ndf-workflow",
+      "meaning": "実行の核と契約を通らない今の外れを並べた一覧。構造チェックが読み、一覧を増やす変更を落とす（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md",
+      "code": "allowlist"
+    },
+    {
+      "term": "機械用のブロック",
+      "context": "ndf-workflow",
+      "meaning": "課題・PR の本文に埋めた、機械が値を読むための <!-- ndf:... --> の JSON（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md"
+    },
+    {
+      "term": "実行の識別子",
+      "context": "ndf-workflow",
+      "meaning": "1 回の入口の実行に実行の核が振る識別子。記録・持ち主の記録・耐久の記録をつなぐ（#2335）",
+      "source": "",
+      "pending_source": "issues/issue-2335-requirements.md",
+      "code": "run_id"
     }
   ]
 }
