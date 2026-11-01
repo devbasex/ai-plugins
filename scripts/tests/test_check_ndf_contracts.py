@@ -423,3 +423,132 @@ def test_entry_reports_every_kind_at_once(tree: Path):
             ("caller-stale", "plugins/ndf/skills/a/SKILL.md"),
         ]
     )
+
+
+# --- _Scan.visit_Call: 呼び出しの形ごとに拾う事実（現状固定） ---
+
+sys.path.insert(0, str(REPO / "scripts"))
+from contracts_lib.extract_py import ModFacts, _Scan  # noqa: E402
+
+
+def _scan_call(src: str, settings: dict | None = None, readers: dict | None = None, stdout: str = "none") -> ModFacts:
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(src))
+    f = ModFacts(rel="m.py", stdout=stdout)
+    f.constants = {"NAME": "NDF_C", "OUT": "c.json", "CODE": 4}
+    _Scan(f, settings or {}, readers or {}).visit(tree)
+    return f
+
+
+@pytest.mark.parametrize(
+    "src, env, dynamic",
+    [
+        ("os.environ.get('NDF_A')", {"NDF_A": 1}, set()),
+        ("environ.get(NAME)", {"NDF_C": 1}, set()),
+        ("os.getenv('NDF_B', 'x')", {"NDF_B": 1}, set()),
+        ("def f(n):\n    return os.getenv(n)", {}, {"f"}),
+        ("os.environ.setdefault('NDF_S', '1')", {}, set()),
+        ("os.environ.get()", {}, set()),
+    ],
+)
+def test_visit_call_env_reads(src, env, dynamic):
+    f = _scan_call(src)
+    assert f.env == env
+    assert f.env_dynamic == dynamic
+
+
+def test_visit_call_get_on_reader_variable_is_a_setting_key():
+    src = "def g():\n    d = read_decl()\n    d.get('base_branch')\n    other.get('x')\n"
+    f = _scan_call(src, settings={"worktree.json": {}}, readers={"lib.py:read_decl": ["worktree.json"]})
+    assert f.setting_keys == {("worktree.json", "base_branch"): 3}
+    assert f.env == {}
+
+
+def test_visit_call_add_argument_collects_options_and_positionals():
+    src = (
+        "p = argparse.ArgumentParser()\n"
+        "s = p.add_subparsers()\n"
+        "r = s.add_parser('run')\n"
+        "p.add_argument('--root', '-r')\n"
+        "r.add_argument('target')\n"
+        "r.add_argument('a', 'b')\n"
+        "p.add_argument(x)\n"
+    )
+    f = _scan_call(src)
+    assert f.has_parser is True
+    assert f.options == {("", "--root"), ("", "-r")}
+    assert f.positionals == {("run", "target"), ("run", "a")}
+
+
+def test_visit_call_add_argument_without_strings_still_marks_parser():
+    f = _scan_call("p.add_argument(x)")
+    assert f.has_parser is True
+    assert f.options == set() and f.positionals == set()
+
+
+@pytest.mark.parametrize(
+    "src, writes",
+    [
+        ("open('a.json', 'w')", {"a.json": 1}),
+        ("open('a.json', mode='a')", {"a.json": 1}),
+        ("open('a.json', 'x')", {"a.json": 1}),
+        ("open('a.json')", {}),
+        ("open('a.json', 'r')", {}),
+        ("open('a.json', mode='rb')", {}),
+        ("io.open('a.json', 'w')", {}),
+        ("Path('d/b.md').write_text('x')", {"b.md": 1}),
+        ("Path(OUT).write_bytes(b'')", {"c.json": 1}),
+        ("write_atomic(f'runs/{n}-x.json', {})", {"*-x.json": 1}),
+        ("append_jsonl('log.jsonl', {})", {"log.jsonl": 1}),
+        ("write_atomic()", {}),
+        ("open('state.json', 'w')", {}),
+    ],
+)
+def test_visit_call_writes(src, writes):
+    f = _scan_call(src, settings={"state.json": {}})
+    assert f.writes == writes
+
+
+@pytest.mark.parametrize(
+    "src, exits",
+    [
+        ("sys.exit(3)", {"3": ""}),
+        ("raise SystemExit(5)", {"5": ""}),
+        ("sys.exit(CODE)", {"4": "CODE"}),
+        ("exit(2)", {}),
+        ("other.exit(2)", {}),
+        ("sys.exit()", {}),
+        ("sys.exit(True)", {}),
+        ("raise StepError('m', 6)", {"6": ""}),
+        ("raise StepError('m')", {}),
+    ],
+)
+def test_visit_call_exits(src, exits):
+    assert _scan_call(src).exits == exits
+
+
+@pytest.mark.parametrize(
+    "src, before, after",
+    [
+        ("print('x')", "none", "text"),
+        ("print('x')", "json", "json"),
+        ("json.dumps({})", "none", "json"),
+        ("json.dumps({})", "text", "json"),
+        ("json.dumps({})", "step-result", "step-result"),
+        ("other.dumps({})", "none", "none"),
+        ("print(json.dumps({}))", "none", "json"),
+        ("emit({})", "json", "step-result"),
+        ("emit_result({})", "none", "step-result"),
+        ("emit({})\nprint('x')", "none", "step-result"),
+    ],
+)
+def test_visit_call_stdout_kind(src, before, after):
+    assert _scan_call(src, stdout=before).stdout == after
+
+
+def test_visit_call_visits_nested_calls():
+    f = _scan_call("sys.exit(os.getenv('NDF_N'))")
+    assert f.env == {"NDF_N": 1}
+    assert f.exits == {}
