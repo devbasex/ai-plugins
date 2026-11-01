@@ -4760,7 +4760,7 @@
       "code": "contract_registry",
       "context": "ndf-workflow",
       "meaning": "エントリポイントごとの入力（引数・環境変数・.ndf/ の設定のキー・標準入力）・出力・書く状態・終了コードと、受け渡しのファイル・設定・環境変数の書き手と読み手と置き場を持つ、リポジトリで 1 つの宣言",
-      "pending_source": "issues/issue-2336-requirements.md"
+      "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "原因の型",
@@ -4836,7 +4836,7 @@
       "code": "handoff_file",
       "context": "ndf-workflow",
       "meaning": "あるエントリポイントが書き、別のエントリポイントか Skill の手順が読むファイル（状態・記録・結果）。1 つのエントリポイントの中で作って消す一時ファイルは含まない",
-      "pending_source": "issues/issue-2336-requirements.md"
+      "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "例外リスト",
@@ -4846,21 +4846,21 @@
       "deprecated": [
         "許可の一覧"
       ],
-      "pending_source": "issues/issue-2336-design.md"
+      "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "移行の読み",
       "code": "migration_read",
       "context": "ndf-workflow",
       "meaning": "1 か所へ寄せた設定の値を、新しい置き場に無いときだけ古い置き場から読むこと。契約の一覧の設定ファイルの項目に migrate_from として書く",
-      "pending_source": "issues/issue-2336-design.md"
+      "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
       "term": "設定の置き場",
       "code": "setting_place",
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
-      "pending_source": "issues/issue-2336-design.md"
+      "source": "docs/specifications/ndf-entrypoint-contracts.md"
     }
   ]
 }
