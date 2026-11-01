@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/backlog-refinement/scripts/upkeep.py",
+  "summary": "upkeep.py: backlog-refinement の手順 1（候補の収集）と手順 3（反映）の決まった手順。",
+  "args": {
+    "options": [
+      "--repo",
+      "--state-dir"
+    ],
+    "positionals": [],
+    "subcommands": {
+      "apply": {
+        "options": [
+          "--max-wait",
+          "--max-waits",
+          "--plan"
+        ],
+        "positionals": []
+      },
+      "candidates": {
+        "options": [
+          "--add",
+          "--all",
+          "--limit",
+          "--since-ref"
+        ],
+        "positionals": []
+      },
+      "rank": {
+        "options": [
+          "--approved",
+          "--auto-threshold",
+          "--capacity",
+          "--dependents-steps",
+          "--label-floor",
+          "--large-min-size",
+          "--large-slot-ratio",
+          "--margin-steps",
+          "--scale",
+          "--scores",
+          "--size-exponent"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_UPKEEP_NO_SLEEP",
+    "NDF_UPKEEP_STATE_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "apply-json",
+    "candidates-json",
+    "estimates-json",
+    "rank-json"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/scripts/lib/sprint_loop_record.py",
+    "plugins/ndf/scripts/lib/sprint_loop_select.py",
+    "plugins/ndf/scripts/supervise_lib/sprint_close_steps.py",
+    "plugins/ndf/skills/backlog-refinement/SKILL.md"
+  ]
+}

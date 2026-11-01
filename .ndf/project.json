@@ -72,6 +72,23 @@
         ]
       },
       {
+        "name": "ndf-contracts",
+        "runner": "check-ndf-contracts",
+        "kind": "lint",
+        "command": "python3 scripts/check-ndf-contracts.py",
+        "scope_command": "python3 scripts/check-ndf-contracts.py {paths}",
+        "needs": [],
+        "paths": [
+          "plugins/ndf",
+          "scripts/contract-allow",
+          "scripts/contracts_lib",
+          "scripts/check-ndf-contracts.py"
+        ],
+        "ci_jobs": [
+          ".github/workflows/script-structure.yml"
+        ]
+      },
+      {
         "name": "lint",
         "runner": "check-lint",
         "kind": "lint",
@@ -210,7 +227,7 @@
       "target": "ndf プラグイン（Claude Code・Codex）",
       "kind": "manual",
       "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
-      "branch": "main",
+      "channel": "production",
       "versioned": true
     }
   ],

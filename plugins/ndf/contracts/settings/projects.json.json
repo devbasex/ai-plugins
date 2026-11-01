@@ -1,0 +1,10 @@
+{
+  "file": "projects.json",
+  "summary": "GitHub Projects のボードの宣言",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/projects-common.sh"
+  ],
+  "keys": {}
+}

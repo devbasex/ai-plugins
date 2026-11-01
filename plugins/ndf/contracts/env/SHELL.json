@@ -1,0 +1,5 @@
+{
+  "name": "SHELL",
+  "set_by": "runtime",
+  "summary": "SHELL。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/relay_lib/install.py:97）が決める"
+}

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/wait-notify.py",
+  "summary": "利用者の回答か承認を待つときだけ Slack へ知らせる（#821）。",
+  "args": {
+    "unparsed": "sys.argv を手で読む（柱 P8 で argparse へ移す）"
+  },
+  "env": [
+    "CLAUDE_CODE_ENTRYPOINT",
+    "DEBUG_SLACK_NOTIFY",
+    "GIT_REPO",
+    "KIRO_SESSION_ID",
+    "NDF_CODEX_SLACK_NOTIFY",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_HOOK_PYTHON",
+    "NDF_HOOK_REEXEC",
+    "NDF_SLACK_API_BASE",
+    "NDF_SLACK_NOTIFY_DONE",
+    "REDMINE_URL",
+    "SLACK_BOT_TOKEN",
+    "SLACK_CHANNEL_ID",
+    "SLACK_USER_MENTION",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [],
+  "stdin": "text",
+  "stdout": "none",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/hook_lib/wait_notify.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/wait_notice.py"
+  ]
+}

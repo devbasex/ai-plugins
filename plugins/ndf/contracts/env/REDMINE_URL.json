@@ -1,0 +1,5 @@
+{
+  "name": "REDMINE_URL",
+  "set_by": "runtime",
+  "summary": "REDMINE_URL。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/wait-notify.py:72）が決める"
+}

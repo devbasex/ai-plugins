@@ -224,7 +224,7 @@ stateDiagram-v2
 ### `pace: normal` のスプリントの本番のステージ（#1914）
 
 `supervise.py new sprint`（`pace: normal`）は、`.ndf/supervise.json` に雛形のある `release.form` があり（`has_release_template`）、
-本番のブランチ（`--production-branch` か `.ndf/worktree.json` の `production_branch`）が決まっているとき（`has_prod_branch`）、
+本番のブランチ（`--production-branch` → `.ndf/worktree.json` の `production_branch` → 既定ブランチ。決め方は `lib/repo.production_branch`）が決まっているとき（`has_prod_branch`）、
 目録（`sprint.json`）の `ステージ` の末尾を次の 3 つにする（`supervise_lib/sprint.py` の `sprint_plans`。番号は前のステージの数で変わる）。
 
 | `name` | 持つキー | 中身 |
@@ -301,7 +301,6 @@ sequenceDiagram
 | まとめの queue の本番が飛ばされたとき | 最終の検査で変更が無いと、まとめの queue の `release-prod` / `promote` が飛ばされて記録の PR が `0` になり、`new sprint` の本番で出た配布のリリース後テストは見ずに閉じる |
 | `release-verify` の所要 | まとめのプランの上限とステップの `timeout`（3600 秒）に収まるかは、流したスプリントで測る |
 | 課題を閉じた後の本文 | 工程表のチェックボックスは更新しない（受け入れ条件の印は `--with-verification` の経路で閉じる前に付ける。[ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md)）。コミットの件名の closing keywords（`Closes #N` など、GitHub が課題を自動で閉じるキーワード）で GitHub が先に閉じる経路も塞がない |
-| `pace: normal` の本番のブランチの後退 | `.ndf/worktree.json` に `production_branch` が無く既定ブランチを本番にするリポジトリでは、N6 により本番のステージが置かれない（直すのは #2097） |
 | `pace: normal` の承認の前の本番 | スクリプトは承認ゲート 2 の答えを確かめずに「本番」のステージの `command` を流せる。止めるのは本番のプランの `release --approval` が承認の記録を確かめる時点である（[ndf-release-approved-commit.md](ndf-release-approved-commit.md) の I10） |
 | `pace: normal` の本番を単独で流す初回 | 本番のプランを目録から単独で流すのは、`pace: normal` のスプリントの承認ゲート 2 の後が最初になる。検査では本番へ配らず、置き換えの処理を単独で当てて確かめた。実機はリリース後テストで見る |
 | 手で閉じていないことの確かめ | 昇格の形か版数を上げない配布で本番まで出たスプリントで、まとめの `close` が課題を `closed` にしたかを、キューの記録と課題を閉じた主体で確かめる（リリース後テスト） |

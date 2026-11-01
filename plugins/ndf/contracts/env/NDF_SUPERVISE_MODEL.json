@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SUPERVISE_MODEL",
+  "set_by": "user",
+  "summary": "NDF_SUPERVISE_MODEL。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/supervise_lib/claude.py:179）が決める"
+}

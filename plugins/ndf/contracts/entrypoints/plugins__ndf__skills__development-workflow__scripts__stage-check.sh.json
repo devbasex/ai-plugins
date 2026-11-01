@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/development-workflow/scripts/stage-check.sh",
+  "summary": "NDF plugin: 通過記録を記録し、報告する（#221）。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/development-workflow/references/context-window.md",
+    "plugins/ndf/skills/development-workflow/references/glossary.md",
+    "plugins/ndf/skills/development-workflow/references/stage-completeness.md",
+    "plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh",
+    "plugins/ndf/skills/merged/SKILL.md"
+  ]
+}

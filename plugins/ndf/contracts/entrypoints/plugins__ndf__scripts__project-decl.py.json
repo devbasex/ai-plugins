@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/project-decl.py",
+  "summary": "project-decl.py: プロジェクトの宣言（`.ndf/project.json`）の判定・測定・書き出し（#1333）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [
+          "--force",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "measure": {
+        "options": [
+          "--budget",
+          "--out",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "schema": {
+        "options": [
+          "--out"
+        ],
+        "positionals": []
+      },
+      "write": {
+        "options": [
+          "--answers",
+          "--dry-run",
+          "--measure",
+          "--root"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/delivery.py",
+    "plugins/ndf/scripts/lib/project_decl.py",
+    "plugins/ndf/scripts/project_lib/__init__.py",
+    "plugins/ndf/scripts/project_lib/model.py",
+    "plugins/ndf/skills/development-workflow/SKILL.md"
+  ]
+}

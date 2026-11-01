@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/sprint-close.py",
+  "summary": "sprint-close.py: スプリントを閉じる（progress-tracking の「スプリントを閉じる」の手順）。",
+  "args": {
+    "options": [
+      "--dry-run",
+      "--final-stage",
+      "--issues",
+      "--label",
+      "--prs",
+      "--record-pr",
+      "--repo",
+      "--root",
+      "--with-verification"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/acceptance-check.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/acceptance.py",
+    "plugins/ndf/scripts/lib/closing.py",
+    "plugins/ndf/scripts/lib/dist_record.py"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/development-workflow/scripts/workflow-guard.sh",
+  "summary": "NDF plugin: tool 実行前の hook。設計 Pull Request のマージを承認ラベルに縛り（#266）、",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/hook.py",
+    "plugins/ndf/scripts/hook_lib/words.py",
+    "plugins/ndf/skills/development-workflow/SKILL.md",
+    "plugins/ndf/skills/development-workflow/references/production-merge.md",
+    "plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh"
+  ]
+}

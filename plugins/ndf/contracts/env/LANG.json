@@ -1,0 +1,5 @@
+{
+  "name": "LANG",
+  "set_by": "runtime",
+  "summary": "LANG。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/release-verification-steps.py:88）が決める"
+}

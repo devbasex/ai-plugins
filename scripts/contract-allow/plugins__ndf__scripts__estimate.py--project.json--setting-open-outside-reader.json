@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/estimate.py",
+  "name": "project.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/project.json を開く（_materials。plugins/ndf/scripts/estimate.py:105））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

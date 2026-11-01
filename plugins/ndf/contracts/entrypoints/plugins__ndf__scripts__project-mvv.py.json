@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/project-mvv.py",
+  "summary": "project-mvv.py: プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）の判定・候補・照合・承認・改訂の兆候（#1366）。",
+  "args": {
+    "options": [
+      "--accept-unknown",
+      "--body",
+      "--budget",
+      "--by",
+      "--current",
+      "--diff",
+      "--format",
+      "--kind",
+      "--materials",
+      "--milestone",
+      "--mvv",
+      "--out-dir",
+      "--reason",
+      "--reason-file",
+      "--repo",
+      "--request-file",
+      "--root",
+      "--sprint",
+      "--trend-commits",
+      "--trend-issues",
+      "--version"
+    ],
+    "positionals": [],
+    "subcommands": {
+      "schema": {
+        "options": [
+          "--out"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/legacy_names.py",
+    "plugins/ndf/scripts/lib/project_mvv.py",
+    "plugins/ndf/scripts/lib/sprint_mvv.py",
+    "plugins/ndf/scripts/project_lib/mvv_candidates.py"
+  ]
+}

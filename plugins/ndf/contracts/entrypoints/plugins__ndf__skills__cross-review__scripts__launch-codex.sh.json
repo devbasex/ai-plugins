@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/launch-codex.sh",
+  "summary": "cross-review codex launcher（互換のための薄い委譲）。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/monitor.py",
+    "plugins/ndf/skills/cross-review/docs/03-review-output.md",
+    "plugins/ndf/skills/cross-review/scripts/review_lib/commands/start_round.py"
+  ]
+}

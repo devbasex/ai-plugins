@@ -1,0 +1,10 @@
+{
+  "file": "code-metrics.json",
+  "summary": "構造改善のコードの測り方",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics.py:load_config"
+  ],
+  "keys": {}
+}

@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/supervise_lib/sprint.py",
+  "name": "mvv.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/mvv.json を開く（pace_refusal。plugins/ndf/scripts/supervise_lib/sprint.py:197））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

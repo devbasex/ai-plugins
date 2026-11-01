@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/parallel-measure.py",
+  "summary": "並列の本数と並行度を測る（#621）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "capacity": {
+        "options": [
+          "--anon-baseline-mib",
+          "--cgroup-dir",
+          "--max",
+          "--max-add",
+          "--meminfo",
+          "--oom-baseline",
+          "--peak-factor",
+          "--per-lane-mib",
+          "--per-lane-min-mib",
+          "--psi",
+          "--psi-some-max",
+          "--reserve-mib",
+          "--running",
+          "--sample-seconds",
+          "--swap-free-min-pct",
+          "--swap-io-max-pages-per-sec",
+          "--vmstat",
+          "--vmstat-after"
+        ],
+        "positionals": []
+      },
+      "concurrency": {
+        "options": [
+          "--input",
+          "--now",
+          "--repo"
+        ],
+        "positionals": [
+          "numbers"
+        ]
+      }
+    }
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md",
+    "plugins/ndf/skills/development-workflow/references/parallel-work.md",
+    "plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md"
+  ]
+}

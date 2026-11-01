@@ -1,0 +1,5 @@
+{
+  "name": "AI_GATEWAY_API_KEY",
+  "set_by": "runtime",
+  "summary": "AI_GATEWAY_API_KEY。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/jev.py:57）が決める"
+}

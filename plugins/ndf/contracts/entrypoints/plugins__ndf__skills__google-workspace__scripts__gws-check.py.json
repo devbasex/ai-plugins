@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/google-workspace/scripts/gws-check.py",
+  "summary": "gws-check.py: gws（Google Workspace CLI）の有無と認証の状態を確かめ、次の手を返す（#744）。",
+  "args": {
+    "options": [
+      "--install"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/google-workspace/SKILL.md",
+    "plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py"
+  ]
+}

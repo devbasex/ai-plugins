@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/measure.py",
+  "summary": "cross-review の効果を、状態ファイル 1 つから測る（#156）。",
+  "args": {
+    "options": [
+      "--output"
+    ],
+    "positionals": [
+      "state_file"
+    ]
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "json",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/parallel-measure.py",
+    "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics.py",
+    "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics_record.py",
+    "plugins/ndf/skills/cross-review/SKILL.md",
+    "plugins/ndf/skills/cross-review/docs/04-contracts.md"
+  ]
+}

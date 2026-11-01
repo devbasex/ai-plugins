@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/merged-steps.py",
+  "summary": "merged-steps.py: merged の後片付けの決まった手順。",
+  "args": {
+    "options": [
+      "--approved-from",
+      "--base",
+      "--expect-head-from",
+      "--gate-approved",
+      "--infra-gap",
+      "--infra-reruns",
+      "--interval",
+      "--method",
+      "--no-checks-after",
+      "--out",
+      "--pr",
+      "--prepare",
+      "--recheck",
+      "--root",
+      "--stale-after",
+      "--timeout"
+    ],
+    "positionals": [],
+    "subcommands": {
+      "base-return": {
+        "options": [
+          "--limit",
+          "--state"
+        ],
+        "positionals": []
+      },
+      "base-sync": {
+        "options": [
+          "--push"
+        ],
+        "positionals": []
+      },
+      "cleanup": {
+        "options": [],
+        "positionals": [
+          "prs"
+        ]
+      },
+      "merge-gate": {
+        "options": [
+          "--base",
+          "--pr"
+        ],
+        "positionals": []
+      },
+      "merge-when-green": {
+        "options": [
+          "--expect-head",
+          "--no-cleanup"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "probe": {
+        "options": [
+          "--act",
+          "--head",
+          "--pr"
+        ],
+        "positionals": []
+      },
+      "promote": {
+        "options": [
+          "--base",
+          "--head"
+        ],
+        "positionals": []
+      },
+      "sweep-trash": {
+        "options": [
+          "--only",
+          "--ref",
+          "--yes"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_WORKTREE_BASE"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/hook_lib/token_guard.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/approved_commit.py",
+    "plugins/ndf/scripts/lib/manual_checks.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py"
+  ]
+}

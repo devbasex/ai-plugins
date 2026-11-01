@@ -1,0 +1,5 @@
+{
+  "name": "NDF_STATUSLINE_AUTH_CACHE",
+  "set_by": "user",
+  "summary": "NDF_STATUSLINE_AUTH_CACHE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/statusline.sh:102）が決める"
+}

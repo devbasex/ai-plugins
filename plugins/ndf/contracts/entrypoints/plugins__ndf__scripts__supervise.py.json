@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/supervise.py",
+  "summary": "フェーズをスクリプトで駆動する。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "design-approved": {
+        "options": [
+          "--pr",
+          "--state"
+        ],
+        "positionals": []
+      },
+      "design-glossary": {
+        "options": [
+          "--mode",
+          "--out",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "design-results": {
+        "options": [
+          "--base",
+          "--design",
+          "--manifest",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "expected": {
+        "options": [
+          "--history",
+          "--slow"
+        ],
+        "positionals": [
+          "plan"
+        ]
+      },
+      "format": {
+        "options": [
+          "--commit",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "import": {
+        "options": [
+          "--history"
+        ],
+        "positionals": [
+          "progress"
+        ]
+      },
+      "note": {
+        "options": [
+          "--next",
+          "--report",
+          "--section"
+        ],
+        "positionals": [
+          "doc"
+        ]
+      },
+      "queue": {
+        "options": [
+          "--done",
+          "--from",
+          "--max",
+          "--poll",
+          "--resume",
+          "--then"
+        ],
+        "positionals": [
+          "plans"
+        ]
+      },
+      "run": {
+        "options": [
+          "--from",
+          "--slow",
+          "--state-dir"
+        ],
+        "positionals": [
+          "plan"
+        ]
+      },
+      "sync-check": {
+        "options": [
+          "--commit",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "sync-title": {
+        "options": [
+          "--doc",
+          "--pr"
+        ],
+        "positionals": []
+      },
+      "wait": {
+        "options": [
+          "--poll",
+          "--timeout"
+        ],
+        "positionals": [
+          "done"
+        ]
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_STEP_EXTEND_FILE",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL",
+    "NDF_SV_STATE_DIR",
+    "NDF_WHOLE_RUNS_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "min_samples",
+        "records_dir",
+        "window"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release",
+        "slow",
+        "test"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "actuals-run-json",
+    "report-md",
+    "state-json"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/hook_lib/shell_checks.py",
+    "plugins/ndf/scripts/hook_lib/token_guard.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/claude_accounts.py",
+    "plugins/ndf/scripts/lib/claude_settings.py"
+  ]
+}

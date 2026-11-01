@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/skills/external-ai/scripts/external-ai.py",
+  "name": "cmd_run",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/skills/external-ai/scripts/external-ai.py の cmd_run）。静的に拾えない"
+}

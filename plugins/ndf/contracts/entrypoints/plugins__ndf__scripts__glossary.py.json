@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/glossary.py",
+  "summary": "glossary.py: プロジェクトの用語集を扱う 7 つの副命令。",
+  "args": {
+    "options": [
+      "--base",
+      "--check",
+      "--diff",
+      "--document",
+      "--file",
+      "--head",
+      "--limit",
+      "--mode",
+      "--root",
+      "--rules",
+      "--source"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    ".github/workflows/glossary.yml",
+    "plugins/ndf/scripts/doc-lint.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/comment_mask.py",
+    "plugins/ndf/scripts/merged_lib/base_sync.py"
+  ]
+}

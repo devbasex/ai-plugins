@@ -1,0 +1,7 @@
+{
+  "name": "report-md",
+  "pattern": "report.md",
+  "kind": "report",
+  "place": "worktree",
+  "skill_readers": []
+}

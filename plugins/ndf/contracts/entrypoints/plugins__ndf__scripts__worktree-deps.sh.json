@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/worktree-deps.sh",
+  "summary": "NDF plugin: worktree の依存の用意（#1337）。",
+  "args": {
+    "options": [
+      "--if-unprepared"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "TMPDIR",
+    "WT_DECLARATION_FILE",
+    "WT_LINES"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/run_state.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/scripts/lib/worktree-copy.sh",
+    "plugins/ndf/scripts/lib/worktree-declaration.sh",
+    "plugins/ndf/scripts/lib/worktree_deps.py"
+  ]
+}

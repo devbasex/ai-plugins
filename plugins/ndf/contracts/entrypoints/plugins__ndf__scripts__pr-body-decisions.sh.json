@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/pr-body-decisions.sh",
+  "summary": "NDF plugin: 設計 Pull Request の本文の「決めたこと」の節を、設計文書の決定の見出しと突き合わせる。",
+  "args": {
+    "options": [
+      "--after-push",
+      "--base",
+      "--body",
+      "--repo",
+      "--wait-seconds"
+    ],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    ".github/workflows/pr-body-decisions.yml",
+    "plugins/ndf/scripts/lib/design_body.py",
+    "plugins/ndf/scripts/pr-steps.py",
+    "plugins/ndf/scripts/supervise.py",
+    "plugins/ndf/scripts/supervise_lib/paths.py"
+  ]
+}

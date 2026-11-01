@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/release-steps.py",
+  "summary": "リポジトリが宣言した配布のコマンドを、配布の段階に合わせて走らせる（#893）。",
+  "args": {
+    "options": [
+      "--approval",
+      "--approved-sha",
+      "--promote",
+      "--version"
+    ],
+    "positionals": [],
+    "subcommands": {
+      "approval-facts": {
+        "options": [
+          "--approval",
+          "--plugin",
+          "--prev-tag",
+          "--prs",
+          "--version"
+        ],
+        "positionals": []
+      },
+      "approve": {
+        "options": [
+          "--answer-from",
+          "--approval",
+          "--approved-sha",
+          "--by",
+          "--facts-from"
+        ],
+        "positionals": []
+      },
+      "bump": {
+        "options": [
+          "--base",
+          "--plugin",
+          "--to"
+        ],
+        "positionals": []
+      },
+      "changed-plugins": {
+        "options": [
+          "--approval",
+          "--decided",
+          "--plugin",
+          "--prs",
+          "--set",
+          "--since"
+        ],
+        "positionals": []
+      },
+      "changelog": {
+        "options": [
+          "--plugin",
+          "--prs",
+          "--version"
+        ],
+        "positionals": []
+      },
+      "check": {
+        "options": [
+          "--root"
+        ],
+        "positionals": []
+      },
+      "deploy-facts": {
+        "options": [
+          "--out",
+          "--verify"
+        ],
+        "positionals": []
+      },
+      "notes": {
+        "options": [
+          "--approval",
+          "--check-state",
+          "--plugin",
+          "--prs",
+          "--ref",
+          "--verified",
+          "--version"
+        ],
+        "positionals": []
+      },
+      "record": {
+        "options": [
+          "--base",
+          "--head",
+          "--plugin",
+          "--prs"
+        ],
+        "positionals": []
+      },
+      "release": {
+        "options": [
+          "--channel",
+          "--ci-wait",
+          "--plugins",
+          "--version"
+        ],
+        "positionals": []
+      },
+      "run": {
+        "options": [
+          "--dry-run",
+          "--root",
+          "--stage",
+          "--version"
+        ],
+        "positionals": []
+      },
+      "verify-facts": {
+        "options": [
+          "--base",
+          "--out",
+          "--verify"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_WHOLE_RUNS_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/acceptance.py",
+    "plugins/ndf/scripts/lib/approved_commit.py",
+    "plugins/ndf/scripts/lib/closing.py",
+    "plugins/ndf/scripts/lib/dist_record.py"
+  ]
+}

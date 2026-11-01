@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/usage-report.py",
+  "summary": "使用量の帳簿の集計（#1953 の入出力の契約 C3）。帳簿を 1 つ選び、期間・スプリント・呼び出し元ごとの合計を出す。",
+  "args": {
+    "options": [
+      "--all-repos",
+      "--by",
+      "--format",
+      "--ledger",
+      "--milestone",
+      "--repo",
+      "--root",
+      "--since",
+      "--until"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "json",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "集計した（帳簿が無い・空も 0 件として 0）",
+    "2": "引数の誤り"
+  },
+  "external": "利用者が手で打つ集計（docs/specifications/ndf-usage-ledger-by-runtime.md の契約）"
+}

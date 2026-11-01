@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/critique.sh",
+  "summary": "cross-review 反証の起動（#156 の 3 本目）。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "NDF_CRITIQUE_PRINT_TIMEOUT"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/skills/cross-review/docs/04-contracts.md",
+    "plugins/ndf/skills/cross-review/docs/06-evidence.md",
+    "plugins/ndf/skills/cross-review/scripts/critique-round.sh",
+    "plugins/ndf/skills/cross-review/scripts/review_lib/commands/collect_critiques.py"
+  ]
+}

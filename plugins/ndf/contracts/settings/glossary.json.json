@@ -1,0 +1,26 @@
+{
+  "file": "glossary.json",
+  "summary": "用語集の正本と生成物の置き場",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/glossary.py:load_declaration"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "format": {
+      "summary": "format（このリポジトリの宣言にある最上位のキー）"
+    },
+    "source": {
+      "summary": "source（このリポジトリの宣言にある最上位のキー）"
+    },
+    "document": {
+      "summary": "document（このリポジトリの宣言にある最上位のキー）"
+    },
+    "check": {
+      "summary": "check（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

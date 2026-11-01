@@ -1,0 +1,7 @@
+{
+  "name": "actuals-run-json",
+  "pattern": "actuals-run.json",
+  "kind": "result",
+  "place": "worktree",
+  "skill_readers": []
+}

@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/supervise_lib/sprint_routes.py",
+  "name": "pace.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/pace.json を開く（pace_decl。plugins/ndf/scripts/supervise_lib/sprint_routes.py:19））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

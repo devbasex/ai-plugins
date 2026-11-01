@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/instructions-check.py",
+  "summary": "エージェント向け指示書を適切に保つチェック（#554）。",
+  "args": {
+    "options": [
+      "--criteria",
+      "--refresh",
+      "--refresh-timeout",
+      "--report",
+      "--root",
+      "--scope"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    ".github/workflows/runtime-plugin-validate.yml",
+    "CLAUDE.md",
+    "plugins/ndf/scripts/instructions_lib/__init__.py",
+    "plugins/ndf/scripts/instructions_lib/collect.py",
+    "plugins/ndf/scripts/instructions_lib/declaration.py"
+  ]
+}

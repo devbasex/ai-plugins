@@ -1,0 +1,7 @@
+{
+  "name": "candidates-json",
+  "pattern": "candidates.json",
+  "kind": "result",
+  "place": "worktree",
+  "skill_readers": []
+}

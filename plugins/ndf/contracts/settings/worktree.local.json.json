@@ -1,0 +1,10 @@
+{
+  "file": "worktree.local.json",
+  "summary": "各自の機械の worktree の値（個人）",
+  "place": "main",
+  "scope": "personal",
+  "readers": [
+    "plugins/ndf/scripts/lib/worktree-declaration.sh"
+  ],
+  "keys": {}
+}

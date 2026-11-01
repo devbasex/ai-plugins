@@ -1,0 +1,5 @@
+{
+  "name": "CLAUDE_CODE_ENTRYPOINT",
+  "set_by": "runtime",
+  "summary": "CLAUDE_CODE_ENTRYPOINT。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/wait_notify.py:186）が決める"
+}

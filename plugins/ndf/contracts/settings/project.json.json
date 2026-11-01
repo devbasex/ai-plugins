@@ -1,0 +1,52 @@
+{
+  "file": "project.json",
+  "summary": "プロジェクトの宣言（言語・テスト・CI・配布・課題の置き場）",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/project_decl.py:read_project_decl_checked",
+    "plugins/ndf/scripts/lib/project_decl.py:read_project_decl"
+  ],
+  "keys": {
+    "$schema": {
+      "summary": "$schema（このリポジトリの宣言にある最上位のキー）"
+    },
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "languages": {
+      "summary": "languages（このリポジトリの宣言にある最上位のキー）"
+    },
+    "test": {
+      "summary": "テストの戦略（suites）。テストのコマンドの正本（決定 8）",
+      "migrate_from": "supervise.json#test"
+    },
+    "test_duration": {
+      "summary": "test_duration（このリポジトリの宣言にある最上位のキー）"
+    },
+    "ci": {
+      "summary": "ci（このリポジトリの宣言にある最上位のキー）"
+    },
+    "services": {
+      "summary": "services（このリポジトリの宣言にある最上位のキー）"
+    },
+    "delivery": {
+      "summary": "配布の経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない（branch は channel の無い行だけ）"
+    },
+    "issues": {
+      "summary": "issues（このリポジトリの宣言にある最上位のキー）"
+    },
+    "checks": {
+      "summary": "checks（このリポジトリの宣言にある最上位のキー）"
+    },
+    "ndf_policies": {
+      "summary": "ndf_policies（このリポジトリの宣言にある最上位のキー）"
+    },
+    "instructions": {
+      "summary": "instructions（このリポジトリの宣言にある最上位のキー）"
+    },
+    "analysis": {
+      "summary": "analysis（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "AWS_PROFILE",
+  "set_by": "runtime",
+  "summary": "AWS_PROFILE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/statusline.sh:100）が決める"
+}

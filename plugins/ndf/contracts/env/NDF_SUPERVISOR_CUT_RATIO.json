@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SUPERVISOR_CUT_RATIO",
+  "set_by": "user",
+  "summary": "NDF_SUPERVISOR_CUT_RATIO。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/token_guard.py:361）が決める"
+}
