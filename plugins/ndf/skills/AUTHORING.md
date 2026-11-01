@@ -132,7 +132,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
 | 明示指示専用 | `disable-model-invocation: true`（引数を取るなら + `argument-hint`） | `agents/openai.yaml` の `policy.allow_implicit_invocation: false`。加えて `description` に明示指示専用である旨を記載する | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 制御手段なし。Kiro と同じく `description` へ記載する | 取り消しが難しく、かつ明示起動が定着している操作 |
 | 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | 相当機能なし | `ndf-policies` |
-| 工程から呼ぶ専用 | `user-invocable: false`（スラッシュコマンドの一覧と `/<name>` の入力から外れ、モデルからは呼べる）。`description` に「工程と AI から呼ぶ」と書く | 相当機能なし | 相当機能なし | 相当機能なし | 工程と他の Skill から呼ばれ、利用者が単独で呼ぶ場面の無いもの（`document-drafting`・`document-sources`・`document-systems`・`document-style`）。利用者の入口は `document-rebuild` |
+| 工程から呼ぶ専用 | `user-invocable: false`（スラッシュコマンドの一覧と `/<name>` の入力から外れ、モデルからは呼べる）。`description` に「工程と AI から呼ぶ」と書く | 相当機能なし | 相当機能なし | 相当機能なし | 工程と他の Skill から呼ばれ、利用者が単独で呼ぶ場面の無いもの（`document-drafting`・`document-sources`・`document-systems`）。`document-style` は利用者が単独で呼ぶ場面がある（書いた文章を直す）ため自動発動（既定）に置く。利用者の入口は `document-rebuild` |
 
 - Codex の相当機能は `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false`
   である。`scripts/build-runtime-plugins.sh` が `disable-model-invocation: true` の Skill に対して
