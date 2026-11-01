@@ -37,7 +37,7 @@ def test_the_declaration_has_the_structure_check_as_a_lint_suite():
     suite = _structure_suite(strategy)
     assert suite.kind == ts.LINT and ts.has_paths(suite.scope_command)
     assert "scripts/check-script-structure.py" in suite.scope_command
-    assert suite.paths == ["plugins/ndf", "scripts/script-structure-allow", "scripts/check-script-structure.py"]
+    assert suite.paths == ["plugins/ndf", "scripts/script-structure-allow", "scripts/lib", "scripts/check-script-structure.py"]
 
 
 def test_the_structure_check_runs_only_when_its_paths_change():
