@@ -36,9 +36,9 @@ def section(text: str, heading: str) -> str:
     return heading + (rest[: ends[0]] if ends else rest)
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex", "kiro", "agy"])
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
 def test_the_skill_is_distributed(runtime: str) -> None:
-    """4 つの manifest すべてに載る。"""
+    """配布先の 2 つの manifest に載る。"""
     manifest = ROOT / "plugins" / "ndf" / "manifests" / f"{runtime}-skills.txt"
     names = [line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
     assert "backlog-refinement" in names

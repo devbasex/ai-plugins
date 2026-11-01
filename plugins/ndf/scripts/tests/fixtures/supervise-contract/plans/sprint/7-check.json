@@ -54,6 +54,9 @@
       "stage": "構造改善",
       "timeout": 1980,
       "cmd": "ndf_scope=$(python3 <NDF>/scripts/refactor-scope.py --pr {pr}) || exit 2; python3 <NDF>/skills/cross-refactoring/scripts/drive.py {pr} --workflow-step --scope $ndf_scope",
+      "on_exit": {
+        "6": "review"
+      },
       "on_fail": "abort",
       "next": "review"
     },
@@ -66,9 +69,6 @@
       "timeout": 3600,
       "args": "{pr} --max-rounds 4",
       "on_fail": "abort",
-      "on_exit": {
-        "6": "base-sync"
-      },
       "next": "base-sync"
     },
     {

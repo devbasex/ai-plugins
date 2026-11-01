@@ -16,6 +16,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 REPO = SCRIPTS.parents[2]
 MVV_PY = SCRIPTS / "project-mvv.py"
 GATE_PY = SCRIPTS / "mvv-gate.py"
@@ -111,7 +114,7 @@ def calls(env: dict, what: str = "") -> int:
 
 
 def run(env: dict, *args: str, script: Path = MVV_PY) -> tuple[int, dict, str]:
-    p = subprocess.run([PY, str(script), *args], capture_output=True, text=True, env=env["env"], cwd=env["root"], timeout=60)
+    p = inproc.run(script, *args, env=env["env"], cwd=env["root"])
     lines = [ln for ln in p.stdout.splitlines() if ln.startswith("{")]
     out = json.loads(lines[-1]) if lines else {}
     if out:

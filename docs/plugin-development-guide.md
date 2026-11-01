@@ -35,13 +35,9 @@ marketplace 定義はこの 1 つだけです。Codex は専用の定義を持�
 同じ `source` を読みます。`policy` / `category` / `interface` は Codex が要求する項目で、同じ entry へ
 含めます（Claude Code はこれらを読み込み時に無視し、`claude plugin validate` は warning 付きで通ります）。
 
-Kiro CLI は marketplace を読まないため、installer で導入します。
-
-```bash
-bash plugins/ndf/dev.kiro/install.sh
-bash plugins/playwright-kit/dev.kiro/install.sh
-bash plugins/mcp/<プラグイン名>/dev.kiro/install.sh
-```
+配布先は Claude Code と Codex の 2 つです。Kiro CLI と agy へはどのプラグインも配りません。この 2 つは
+cross-review / cross-refactoring の相手役として CLI を起動するだけで、導入物を持ちません（`dev.kiro/`・`dev.agy/`・
+`kiro-skills.txt`・`agy-skills.txt` を足すと `scripts/tests/test_distribution_runtimes.py` が落とします）。
 
 ## プラグイン構造
 
@@ -62,25 +58,18 @@ plugins/{plugin-name}/
 │   └── {skill-name}/
 │       └── SKILL.md
 ├── manifests/                   # ランタイム別の配布 Skill 一覧（Skill を配る場合）
-│   └── {claude,codex,kiro}-skills.txt
+│   └── {claude,codex}-skills.txt
 ├── hooks/                       # フック（オプション）
 │   ├── claude.json              # Claude Code 用
 │   └── codex.json               # Codex 用
-├── dev.kiro/                    # Kiro CLI 用（installer など）
-│   └── install.sh
-├── dev.agy/                     # agy 用（マニフェスト・hooks.json・symlink）
-│   ├── plugin.json
-│   └── hooks.json
 └── README.md                    # プラグイン説明
 ```
 
-4 ランタイムが同じディレクトリを読みます。読む対象はマニフェストと installer が決めるため、
-公開される Skill と hook はランタイムごとに異なります。`dev.kiro` と `dev.agy` は Agent Plugins
-仕様 §8.2 が定めるクライアント拡張ディレクトリです。
+2 ランタイムが同じディレクトリを読みます。読む対象はマニフェストが決めるため、
+公開される Skill と hook はランタイムごとに異なります。
 
-**ルート直下の `plugin.json` は、agy へ配るためには置きません。** 置くと Codex がそちらを
-優先して読み、`skills/` の実体を全件配ってしまいます（`plugins/ndf` で実測）。agy 向けの
-定義は `dev.agy/plugin.json` へ置きます。
+**`.codex-plugin/` を持つプラグインはルート直下に `plugin.json` を置きません。** 置くと Codex がそちらを
+優先して読み、`skills/` の実体を全件配ってしまいます（`plugins/ndf` で実測）。
 
 ルートの `plugin.json`（Agent Plugins 形式）は、`skills/` を全件公開してよく hook も持たない
 プラグインにだけ置きます。判断の基準は
@@ -134,11 +123,11 @@ plugins/{plugin-name}/
 
 2. **ディレクトリ構造を作成**
    ```bash
-   mkdir -p plugins/{plugin-name}/{.claude-plugin,.codex-plugin,commands,agents,skills,manifests,hooks,dev.kiro}
+   mkdir -p plugins/{plugin-name}/{.claude-plugin,.codex-plugin,commands,agents,skills,manifests,hooks}
    ```
 
    使わないディレクトリは作らなくて構いません。Skill を配らないなら `skills/` と
-   `manifests/`、hook が無いなら `hooks/`、Kiro CLI へ配らないなら `dev.kiro/` は不要です。
+   `manifests/`、hook が無いなら `hooks/` は不要です。
 
 3. **plugin.jsonを作成** - 必須フィールドをすべて含める
 
@@ -185,25 +174,23 @@ frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHOR
 | 1 | `plugins/ndf/skills/<名前>/SKILL.md` | 実体 | `check-skill-frontmatter.py`（形だけ） |
 | 2 | `plugins/ndf/manifests/<ランタイム>-skills.txt` | 配るランタイムの分だけ名前を 1 行 | `validate-runtime-plugins.sh`（どの manifest にも無いときだけ。配る先は判断） |
 | 3 | `plugins/ndf/.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` の `skills` 配列 | `./skills/<名前>`（manifest に載せたランタイムの分） | `validate-runtime-plugins.sh` |
-| 4 | `bash scripts/build-runtime-plugins.sh` の生成物 | `dev.agy/skills/<名前>`（agy へ配るとき）、`skills/<名前>/agents/openai.yaml`（`disable-model-invocation: true` のとき）をコミット | `build-runtime-plugins.sh --check` |
-| 5 | `README.md` の概要「公開Skills」とプラグイン一覧表の `ndf` 行（2 行） | `Claude Code向け core 45個` の形で 4 ランタイム | `check-doc-staleness.py` |
+| 4 | `bash scripts/build-runtime-plugins.sh` の生成物 | `skills/<名前>/agents/openai.yaml`（`disable-model-invocation: true` のとき）をコミット | `build-runtime-plugins.sh --check` |
+| 5 | `README.md` の概要「公開Skills」とプラグイン一覧表の `ndf` 行（2 行） | `Claude Code向け core 45個` の形で 2 ランタイム | `check-doc-staleness.py` |
 | 6 | `README.md` の「元Skills（N個）」 | 実体の数 | `check-doc-staleness.py` |
 | 7 | `README.md` のカテゴリ内訳 | `- 運用 (2): skill-stats, statusline` の形。名前と括弧の数 | `check-doc-staleness.py`（合計だけ。どのカテゴリに入れるかは判断） |
-| 8 | `plugins/ndf/README.md` の配布先の表 4 行 | `\| Claude Code \| 45 個 \|` の形 | `check-doc-staleness.py` |
+| 8 | `plugins/ndf/README.md` の配布先の表 2 行 | `\| Claude Code \| 45 個 \|` の形 | `check-doc-staleness.py` |
 | 9 | `plugins/ndf/README.md` のレイアウト図 | `唯一の実体（45 個）` | `check-doc-staleness.py` |
-| 10 | `plugin.json` 3 本（claude・codex・`dev.agy`）の `description` | `45 focused NDF skills` の形 | `validate-runtime-plugins.sh` |
+| 10 | `plugin.json` 2 本（claude・codex）の `description` | `45 focused NDF skills` の形 | `validate-runtime-plugins.sh` |
 | 11 | `.claude-plugin/marketplace.json` の `ndf` の `description` | 10 と同じ形（Claude Code の数） | `validate-runtime-plugins.sh` |
-| 12 | `scripts/tests/test_agy_distribution.py` の `EXPECTED_COUNTS` | 4 ランタイムの数 | `pytest`（件数の assert だけで、直す場所を名指ししない） |
-| 13 | `plugins/ndf/README.md` の agy の節「Skill N 個」 | agy の数 | **拾わない**（#611） |
-| 14 | `plugins/ndf/README.md` の「Codex の暗黙起動抑止」の数と表 | `disable-model-invocation: true` のときだけ | **拾わない**（#611） |
-| 15 | `docs/ndf-plugin-reference.md` の数 | 4 ランタイムの数と実体の数 | **拾わない**（#611） |
+| 12 | `plugins/ndf/README.md` の「Codex の暗黙起動抑止」の数と表 | `disable-model-invocation: true` のときだけ | **拾わない** |
+| 13 | `docs/ndf-plugin-reference.md` の数 | 2 ランタイムの数と実体の数 | **拾わない** |
 
 **数の形は 3 通りあります。** `README.md` は `core 45個`（空白なし）、`plugins/ndf/README.md` は
 `45 個`、`plugin.json` は `45 focused NDF skills` です。数だけを機械的に置き換えると、どれかに
 当たりません。数はランタイムごとに manifest の行数から決めます。
 
 ```bash
-for r in claude codex kiro agy; do
+for r in claude codex; do
   printf '%s ' "$r"; grep -cvE '^[[:space:]]*(#|$)' "plugins/ndf/manifests/$r-skills.txt"
 done
 ls -d plugins/ndf/skills/*/ | wc -l   # 実体の数（6・9）
@@ -245,12 +232,9 @@ uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
 上書きされる**（`--scope local` を指定しても起きる）。続けて `marketplace remove` すると
 clone と導入記録まで消える。
 
-手元で確かめる手段は 2 つある。
+手元で確かめる手段は次のとおり。
 
 ```bash
-# Kiro CLI: installer が任意のディレクトリへ導入する。取得元を書き換えない
-bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes
-
 # Claude Code: 1 つのプラグインをディレクトリから読み込む
 claude --plugin-dir plugins/ndf
 ```
@@ -293,6 +277,29 @@ uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
 `--with pytest` を省くと `Failed to spawn: pytest` で終わります。`-n auto` は `pytest-xdist` の指定で、コア数だけ並列に回します（`--with pytest-xdist` を省くと `-n` を解釈できずに終わります）。リポジトリの根に uv の
 対象プロジェクト（`pyproject.toml`）が無く、`pytest` が環境にも入っていないためです。
 `plugins/ndf/skills/*/tests/` の既存のテストも同じ形で実行します。
+
+### テストを削る基準
+
+全体テスト（`.ndf/project.json` の `test.suites` の全部）は手元で 180 秒以内に終わる大きさに保つ。テストの数がそのまま全体テストの長さと保守の費用になるため、守る振る舞いを別のテストが確かめているテストは残さない。次のどれかに当たるテストは消すか、1 件にまとめる。
+
+| # | 基準 | 例 |
+| --- | --- | --- |
+| 1 | 重複: 同じ経路を、別の名前で同じ入力から確かめている | 同じ CLI を同じ引数で起動し、同じ終了コードを見るテストが 2 件ある |
+| 2 | 消えた機能の残骸: 廃止した機能・オプションを確かめている | 外した副命令が「無い」ことだけを確かめる |
+| 3 | `.md` の文言の固定 | Skill の本文に決まった文があるかを照合する |
+| 4 | 実装の細部の固定: 内部の関数名・呼び出しの回数・中間の値を固定し、利用者に見える振る舞いを確かめていない | 判定は NDF の `tdd-cycle` の `references/test-quality.md` の「判定の基準」に従う |
+| 5 | 総当たり: 1 つの振る舞いを、全テンプレート・全組み合わせで確かめている | 代表は「分岐ごとに 1 つ・境界の両側」で選び、残りを消す |
+| 6 | suite・CI のジョブが既に走らせる検査を、テストの中でもう一度走らせる | `script-structure` の suite と同じ検査を、テストがリポジトリ全体へ流す |
+
+消す・まとめるときは、1 件ごとに、当たった基準の番号と、守っていた振る舞いを今後どのテストが守るか（守らなくてよいならその理由）を PR から追える形で残す。落ちるから消すのは基準に当たらない。
+
+遅いテストを速くするときは、確かめる振る舞いを弱めずに次の 3 つの手段を使う。テストを速くするためにテストの対象のコードを変えない。
+
+- 待ちの値を、対象のコードが既に持つ環境変数で縮める
+- 1 つの CLI の配線（引数・終了コード・結果 JSON）は代表の数件の起動で確かめ、分岐はプロセスの中で関数を呼んで確かめる。スクリプトの起動だけで 1 件 0.2〜0.4 秒かかる
+- git のリポジトリのような重い準備は、プロセスごとに 1 度作って複製する
+
+テストが起こした子孫のプロセスは、pytest が SIGTERM で止められたときと終わったときに、根の `conftest.py` が読み込む `scripts/pytest_child_cleanup.py` が止める。テストの中で止め忘れても次のテストへ持ち越さないが、テストは自分で起こしたプロセスを自分で止める。
 
 ローカル hook は任意で導入できます。
 

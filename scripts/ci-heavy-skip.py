@@ -52,7 +52,7 @@ TESTED_DOCS_RE = re.compile(
 )
 MANIFEST_RE = re.compile(
     r"^(\.claude-plugin/marketplace\.json"
-    r"|plugins/.+/(\.claude-plugin/|\.codex-plugin/|dev\.agy/)?plugin\.json)$"
+    r"|plugins/.+/(\.claude-plugin/|\.codex-plugin/)?plugin\.json)$"
 )
 MANIFEST_LINE_RE = re.compile(r'^\s*"(version|description)"\s*:')
 ANCESTOR_LIMIT = 20

@@ -204,6 +204,14 @@ def _reassigned_lines(state: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _budget_source_text(state: dict[str, Any]) -> str:
+    """想定最大時間の出所の添え書き（#2047）。下限まで上げた実行だけ「下限から決めた」と上げる前の分を添える。"""
+    if state.get("budget_source") != "floor":
+        return ""
+    before = (state.get("budget_floor") or {}).get("from_minutes")
+    return f"（下限から決めた。既定 {before} 分）"
+
+
 def _print_header(state: dict[str, Any]) -> None:
     budget_seconds = int(state.get("budget_minutes") or 0) * 60
     # 止まっていた時間の分だけ締め切りをずらしたなら、所要からその秒を除いて想定最大時間と比べる（#1491・決定 8）
@@ -217,7 +225,7 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"- 件数: {counts_line(state)}")
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
     print(
-        f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
+        f"- 想定最大時間: {state.get('budget_minutes')} 分{_budget_source_text(state)} / 所要: {elapsed / 60:.1f} 分"
         f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。{paused}cross-review を除く）"
     )
     print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}） / モデル: {_implementer_model_text(state)}")

@@ -1,9 +1,8 @@
 # playwright-kit Plugin
 
-Playwright による E2E テストの計画・実装・証跡管理を提供するプラグインです。3 ランタイム分の
+Playwright による E2E テストの計画・実装・証跡管理を提供するプラグインです。Claude Code と Codex の
 配布物を `plugins/playwright-kit/` の 1 ディレクトリにまとめており、Skill の実体は `skills/` の
-1 箇所だけです。ランタイム固有のファイルは `.claude-plugin/`（Claude Code）と `dev.kiro/`
-（Kiro CLI）に分かれ、Codex はルートの `plugin.json`（Agent Plugins 形式）を読みます。
+1 箇所だけです。Claude Code は `.claude-plugin/` を、Codex はルートの `plugin.json`（Agent Plugins 形式）を読みます。
 
 NDF プラグイン v6.1.0 までは NDF に同梱していました。**Skill 名は変えていない**ため、
 `/playwright-` まで打てば従来どおり 4 個が候補に出ます。
@@ -36,24 +35,6 @@ codex plugin marketplace add devbasex/ai-plugins
 codex plugin add playwright-kit@ai-plugins
 ```
 
-### Kiro CLI
-
-Kiro にはプラグイン機構がないため、installer が `.kiro/skills/` へ symlink を張ります。
-
-```bash
-# プロジェクトへ導入（既定）
-bash plugins/playwright-kit/dev.kiro/install.sh
-
-# ホーム配下へ導入
-bash plugins/playwright-kit/dev.kiro/install.sh --scope global
-
-# 書き込みを行わず内容だけ確認
-bash plugins/playwright-kit/dev.kiro/install.sh --dry-run
-```
-
-NDF の installer と違い、エージェント定義・常時指示・プロンプト・フックは扱いません
-（このプラグインは Skill だけを配ります）。
-
 ### 更新
 
 ```bash
@@ -64,9 +45,6 @@ NDF の installer と違い、エージェント定義・常時指示・プロ�
 # Codex
 codex plugin marketplace upgrade ai-plugins
 codex plugin add playwright-kit@ai-plugins
-
-# Kiro CLI
-bash plugins/playwright-kit/dev.kiro/install.sh
 ```
 
 ## 更新情報

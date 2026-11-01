@@ -15,6 +15,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 SUPERVISE = SCRIPTS / "supervise.py"
 SPRINT_STATE = SCRIPTS / "sprint-state.py"
 REPO = SCRIPTS.parents[2]
@@ -61,7 +64,7 @@ def new_sprint(tmp_path, repo, state, *extra, pace="auto", design=True):
     args = ["new", "sprint", "--name", "m27", "--worktree", str(repo), "--issue", "11", "12"]
     args += ["--design", "11"] if design else []
     args += ["--version", "10.18.0-dev.1", "--pace", pace, "--state", str(state), "--out", str(out), *extra]
-    p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
+    p = inproc.run(SUPERVISE, *args, cwd=repo)
     return p, out
 
 
