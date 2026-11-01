@@ -1,5 +1,7 @@
 # Runtime Plugin Container Smoke Test 仕様
 
+> **配布先は Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI への配布・導入物・生成・検査・スモークの記述は配布先を 4 つにしていた時点のもので、配布先については [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+
 ## 概要
 
 runtime 分離後の Claude Code / Codex / Kiro 向け plugin 配布物を、ホスト環境を汚染しない Docker コンテナ内で smoke test する仕様。

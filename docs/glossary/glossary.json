@@ -4691,19 +4691,19 @@
       "term": "相手役",
       "context": "ndf-agent-cli",
       "meaning": "cross-review のレビュー担当、cross-refactoring の提案・実装の担当として、ホストから CLI プロセスで起動されるランタイム（#2231）",
-      "pending_source": "issues/issue-2231-requirements.md"
+      "source": "docs/specifications/ndf-distribution-runtimes.md"
     },
     {
       "term": "マニフェスト",
       "context": "ndf-release",
       "meaning": "plugins/ndf/manifests/<ランタイム>-skills.txt。ランタイムごとに配る Skill の一覧で、配布の唯一の基準（#2231）",
-      "pending_source": "issues/issue-2231-requirements.md"
+      "source": "docs/specifications/ndf-distribution-runtimes.md"
     },
     {
       "term": "配布先のランタイム",
       "context": "ndf-release",
       "meaning": "マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231）",
-      "pending_source": "issues/issue-2231-design.md"
+      "source": "docs/specifications/ndf-distribution-runtimes.md"
     },
     {
       "term": "最終工程の記録",
