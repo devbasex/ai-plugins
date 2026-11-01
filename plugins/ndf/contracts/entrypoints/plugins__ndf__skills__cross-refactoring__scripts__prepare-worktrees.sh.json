@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh",
   "summary": "cross-refactoring: 作業ディレクトリの準備と、手順書となる Skill の配置。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "CROSS_REFACTORING_TMP_DIR"

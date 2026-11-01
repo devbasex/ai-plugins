@@ -209,6 +209,20 @@ def test_pr_head_cannot_add_authorization_values_absent_in_the_main_directory(re
     assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
 
 
+def test_pr_head_base_branch_does_not_move_a_base_channel_row(repo_wt):
+    """`channel: base` の行は、メインディレクトリの base_branch で解く（head の base_branch で本番から外せない。#2363 round 6）。"""
+    main, wt = repo_wt
+    base_row = {"kind": "auto", "channel": "base", "target": "prod"}
+    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
+    wj(main / ".ndf/project.json", {"delivery": [base_row]})
+    wj(wt / ".ndf/worktree.json", {"base_branch": "develop", "production_branch": "main"})
+    d = delivery.load_delivery(wt)
+    assert d.base == "develop" and d.rows[0]["branch"] == "main"
+    assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
+    (main / ".ndf/worktree.json").unlink()  # メインディレクトリに無ければ既定ブランチで解き、head の値で補わない
+    assert delivery.load_delivery(wt).rows[0]["branch"] == repo.default_branch(wt)
+
+
 def test_authorization_values_are_read_in_the_main_directory_itself(repo_wt):
     main, _ = repo_wt
     wj(main / ".ndf/worktree.json", {"production_branch": "release"})

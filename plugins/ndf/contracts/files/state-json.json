@@ -2,6 +2,6 @@
   "name": "state-json",
   "pattern": "state.json",
   "kind": "state",
-  "place": "worktree",
+  "place": "state-dir",
   "skill_readers": []
 }

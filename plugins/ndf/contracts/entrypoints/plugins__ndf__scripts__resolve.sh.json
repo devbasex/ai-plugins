@@ -3,8 +3,7 @@
   "path": "plugins/ndf/scripts/resolve.sh",
   "summary": "NDF plugin: Skill が使うスクリプトの置き場所を 1 つに決めて、絶対パスを標準出力へ書く。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "CLAUDECODE",

@@ -407,7 +407,16 @@ def test_scope_on_an_imported_library_counts_the_entrypoints_violation(tree: Pat
     assert code == 0 and r["metrics"]["outside"] >= 1, r
 
 
-@pytest.mark.parametrize("scope", ["plugins/ndf/scripts", "scripts/contracts_lib/extract_py.py", "scripts/lib/py_imports.py"])
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "plugins/ndf/scripts",
+        "./plugins/ndf/scripts",  # 先頭の ./ と末尾の / を除いてから照合する（#2363 round 6）
+        "plugins/ndf/scripts/",
+        "scripts/contracts_lib/extract_py.py",
+        "scripts/lib/py_imports.py",
+    ],
+)
 def test_scope_on_a_directory_or_the_checkers_parts_counts_the_violation(tree: Path, scope: str):
     """範囲がディレクトリでも、チェッカ自身の部品（scripts/contracts_lib/・scripts/lib/）でも、木の違反で止まる。"""
     edit(tree, 'os.environ.get("NDF_X")', 'os.environ.get("NDF_X") or os.getenv("NDF_Y")')
@@ -682,3 +691,20 @@ def test_visit_call_visits_nested_calls():
     f = _scan_call("sys.exit(os.getenv('NDF_N'))")
     assert f.env == {"NDF_N": 1}
     assert f.exits == {}
+
+
+@pytest.mark.parametrize(
+    ("body", "unresolved"),
+    [
+        ('PR="${1:?}"\nROUND="$2"\n', True),  # 位置引数を手で読む（launch-reviewer.sh の形。#2363 round 6）
+        ('main "$@"\n', True),
+        ('f() {\n  local x="$1"\n}\nf a\n', False),  # 関数の中の $1 はその関数の引数
+        ('g() { echo "$1"; }\nn="${#ARR[@]}"\n', False),  # 1 行の関数と配列の長さ
+        ('while [ $# -gt 0 ]; do\n  case "$1" in\n    --x) shift ;;\n  esac\ndone\n', False),  # case の --名前) は拾える
+    ],
+)
+def test_shell_positionals_without_options_are_args_unparsed(tmp_path: Path, body: str, unresolved: bool):
+    from contracts_lib.extract_sh import facts
+
+    (tmp_path / "t.sh").write_text("#!/bin/bash\n" + body)
+    assert facts(tmp_path, "t.sh", {})["args_unresolved"] is unresolved

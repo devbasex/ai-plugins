@@ -28,7 +28,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
-from allowlist import AllowError, allow_file_name, load_allow, under  # noqa: E402
+from allowlist import AllowError, allow_file_name, load_allow, rel_target, under  # noqa: E402
 from contracts_lib import extract_sh, ratchet  # noqa: E402
 from contracts_lib.draft import Callers, draft  # noqa: E402
 from contracts_lib.extract_py import PyExtractor, is_runnable  # noqa: E402
@@ -387,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(ck.draft(rel), ensure_ascii=False, indent=2))
         return 0
     found, metrics = ck.run()
-    targets = {Path(t).resolve().relative_to(root).as_posix() if Path(t).is_absolute() else t for t in a.files}
+    targets = {rel_target(root, t) for t in a.files}
     items, allowed, outside = judge(root, found, allow, targets, ck.reached)
     try:
         added, base, state = allow_ratchet(root, allow_dir, allow, a.base)

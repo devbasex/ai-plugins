@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/cross-review/scripts/wait-review.sh",
   "summary": "レビューの席の完了待ち — monitor.py の薄いラッパ。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

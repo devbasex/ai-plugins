@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/cross-review/scripts/launch-agy.sh",
   "summary": "cross-review agy launcher（互換のための薄い委譲）。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

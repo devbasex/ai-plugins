@@ -77,6 +77,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from allowlist import AllowError, allow_file_name, under  # noqa: E402
+from allowlist import rel_target as _rel  # noqa: E402
 from allowlist import load_allow as _load_rows  # noqa: E402
 from py_imports import IMPORT_ROOTS  # noqa: E402
 from py_imports import imported as _imported  # noqa: E402
@@ -794,18 +795,6 @@ def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
         "result": result,
         "detail": detail,
     }
-
-
-def _rel(root: Path, target: str) -> str:
-    """指定のパスを根からの相対パス（`/` 区切り・末尾の `/` なし）にする。根の外の絶対パスはそのまま返す。"""
-    p = Path(target)
-    if p.is_absolute():
-        try:
-            p = p.resolve().relative_to(root)
-        except ValueError:
-            return p.as_posix()
-    parts = [x for x in p.as_posix().split("/") if x not in ("", ".")]
-    return "/".join(parts) or "."
 
 
 class Scope:

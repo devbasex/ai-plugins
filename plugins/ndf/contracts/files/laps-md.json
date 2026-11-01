@@ -2,6 +2,6 @@
   "name": "laps-md",
   "pattern": "laps.md",
   "kind": "report",
-  "place": "worktree",
+  "place": "main",
   "skill_readers": []
 }

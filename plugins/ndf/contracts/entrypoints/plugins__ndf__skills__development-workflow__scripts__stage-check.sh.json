@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/development-workflow/scripts/stage-check.sh",
   "summary": "NDF plugin: 通過記録を記録し、報告する（#221）。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

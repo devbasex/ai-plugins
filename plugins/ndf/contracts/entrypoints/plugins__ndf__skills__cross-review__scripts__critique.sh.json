@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/cross-review/scripts/critique.sh",
   "summary": "cross-review 反証の起動（#156 の 3 本目）。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "NDF_CRITIQUE_PRINT_TIMEOUT"

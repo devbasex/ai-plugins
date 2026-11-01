@@ -3,8 +3,7 @@
   "path": "plugins/ndf/scripts/projects-sync.sh",
   "summary": "NDF plugin: 進行の記録の入口。issue の本文の `## 進行` と、ボードのアイテムのフィールドを",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "SR_ABSORBED_SUMMARY",

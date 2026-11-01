@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh",
   "summary": "Usage: fetch-pr-comments.sh [--strict] <owner/repo> <pr_number>",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

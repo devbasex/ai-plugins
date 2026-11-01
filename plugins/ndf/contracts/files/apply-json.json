@@ -2,6 +2,6 @@
   "name": "apply-json",
   "pattern": "apply.json",
   "kind": "result",
-  "place": "worktree",
+  "place": "tmp",
   "skill_readers": []
 }

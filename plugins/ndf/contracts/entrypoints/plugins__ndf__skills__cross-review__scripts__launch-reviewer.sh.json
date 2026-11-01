@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh",
   "summary": "cross-review レビュワー起動の入口（4 ランタイム共通）。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [],
   "settings": [],

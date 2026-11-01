@@ -29,17 +29,17 @@
 
 | 名前 | 型 | 種類 | 置き場 | 書くエントリポイント | 読むエントリポイント・Skill |
 | --- | --- | --- | --- | --- | --- |
-| `actuals-run-json` | `actuals-run.json` | result | worktree | `plugins/ndf/scripts/supervise.py` | — |
-| `apply-json` | `apply.json` | result | worktree | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `candidates-json` | `candidates.json` | result | worktree | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `drive-prx-report-md` | `drive-pr*-report.md` | report | worktree | `plugins/ndf/skills/cross-review/scripts/drive.py` | — |
-| `estimates-json` | `estimates.json` | result | worktree | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `laps-md` | `laps.md` | report | worktree | `plugins/ndf/scripts/sprint-state.py` | — |
-| `loop-json` | `loop.json` | result | worktree | `plugins/ndf/scripts/sprint-state.py` | — |
-| `rank-json` | `rank.json` | result | worktree | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `report-md` | `report.md` | report | worktree | `plugins/ndf/scripts/supervise.py` | — |
-| `state-json` | `state.json` | state | worktree | `plugins/ndf/scripts/supervise.py` | — |
-| `target-json` | `target.json` | result | worktree | `plugins/ndf/skills/pr-review/scripts/pr-review-steps.py` | — |
+| `actuals-run-json` | `actuals-run.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
+| `apply-json` | `apply.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `candidates-json` | `candidates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `drive-prx-report-md` | `drive-pr*-report.md` | report | tmp | `plugins/ndf/skills/cross-review/scripts/drive.py` | — |
+| `estimates-json` | `estimates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `laps-md` | `laps.md` | report | main | `plugins/ndf/scripts/sprint-state.py` | — |
+| `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
+| `rank-json` | `rank.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `report-md` | `report.md` | report | state-dir | `plugins/ndf/scripts/supervise.py` | — |
+| `state-json` | `state.json` | state | state-dir | `plugins/ndf/scripts/supervise.py` | — |
+| `target-json` | `target.json` | result | tmp | `plugins/ndf/skills/pr-review/scripts/pr-review-steps.py` | — |
 
 ## 環境変数
 

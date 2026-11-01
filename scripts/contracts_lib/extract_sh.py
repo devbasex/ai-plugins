@@ -1,7 +1,8 @@
 """シェルのエントリポイントから、引数・環境変数・ファイルの書き・終了コード・設定の読みを拾う。
 
 環境変数は「ファイルの中で代入されない大文字の変数」、引数は `case` の `--名前)`、書きは `>`・`>>` の
-文字列のファイル名。`source` した先は追わない（設計の決定 5）。
+文字列のファイル名。`source` した先は追わない（設計の決定 5）。`case` の `--名前)` が無いのに関数の外で位置引数
+（`$1`・`"$@"`・`$#`・`shift`）を読む入口は、位置引数や副命令を静的に拾えないため `args_unresolved` にする（#2363 round 6）。
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ READ_VARS = re.compile(r"\b(?:read|for|mapfile|readarray|getopts)\s+(?:-\w+\s+)*
 CASE_ARM = re.compile(r"^\s*\(?((?:--?[\w-]+\|?)+)\)")
 REDIRECT = re.compile(r"(?<![0-9&<])>>?\s*\"?([^\s\"';|&)<>]+)")
 EXIT = re.compile(r"\bexit\s+([0-9]+)\b")
+POSITIONAL = re.compile(r"\$[1-9#@*]|\$\{(?:[1-9@*]|#\})|\bshift\b")  # `${#配列[@]}` は長さで、位置引数でない
+FUNC_ONE_LINE = re.compile(r"^\s*(?:function\s+)?[\w-]+\s*\(\)\s*\{.*\}\s*;?\s*$")
+FUNC_START = re.compile(r"^\s*(?:function\s+[\w-]+|[\w-]+\s*\(\))")
 BUILTINS = {
     "BASH_SOURCE",
     "BASH_REMATCH",
@@ -68,6 +72,23 @@ def _code_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def reads_positionals(lines: list[tuple[int, str]]) -> bool:
+    """関数の外で位置引数を読むか。関数の中の `$1` はその関数の引数のため数えない（関数は行頭の `}` で閉じる書き方を前提にする）。"""
+    in_func = False
+    for _, line in lines:
+        if FUNC_ONE_LINE.match(line):
+            continue
+        if FUNC_START.match(line):
+            in_func = True
+            continue
+        if in_func:
+            in_func = not line.startswith("}")
+            continue
+        if POSITIONAL.search(line):
+            return True
+    return False
+
+
 def summary(text: str) -> str:
     for line in text.splitlines()[1:12]:
         s = line.lstrip("#").strip()
@@ -105,6 +126,7 @@ def facts(root: Path, rel: str, settings: dict[str, dict]) -> dict:
     return {
         "summary": summary(text),
         "argv_manual": False,
+        "args_unresolved": not opts and reads_positionals(lines),
         "options": opts,
         "positionals": [],
         "env": env,

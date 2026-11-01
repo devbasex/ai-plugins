@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import decl
 import project_decl
 import repo
 
@@ -138,8 +139,13 @@ def build(
     problems: list[str] | None = None,
     base: str | None = None,
     production: str | None = None,
+    channel_base: str | None = None,
 ) -> DeliveryDecl:
-    """読んだ宣言の中身から組む。`base` / `production` を渡せばそれを先に使う（引数が宣言より先に効く）。"""
+    """読んだ宣言の中身から組む。`base` / `production` を渡せばそれを先に使う（引数が宣言より先に効く）。
+
+    `channel_base` を渡せば、`channel: base` の行はそのブランチへ解く（認可に関わる判定の値。`load_delivery` が
+    メインディレクトリの `base_branch` を渡す）。渡さなければ起点（`base`）で解く。
+    """
     problems = list(problems or [])
     sources = {}
     wt_base = wt.get("base_branch") if isinstance(wt.get("base_branch"), str) and wt.get("base_branch") else None
@@ -147,7 +153,7 @@ def build(
     sources["base"] = "引数" if base else (f"{WT} の base_branch" if wt_base else "既定ブランチ")
     p, sources["production"] = (production, "引数") if production else repo.production_of(wt, default_branch)
     rows, unknown = _rows_of(project, problems)
-    rows = _resolve_channels(rows, b, p)
+    rows = _resolve_channels(rows, channel_base or b, p)
     rel = release if isinstance(release, dict) else None
     return DeliveryDecl(b, p, rows, rel, problems, sources, unknown)
 
@@ -178,7 +184,30 @@ def load_delivery(root) -> DeliveryDecl:
             if why:
                 problems.append(why)
             break
-    return build(wt, project, sv.get("release"), default_branch=repo.default_branch(root), problems=problems)
+    default = repo.default_branch(root)
+    return build(
+        wt,
+        project,
+        sv.get("release"),
+        default_branch=default,
+        problems=problems,
+        channel_base=_main_base(wt, main, root) or default,
+    )
+
+
+def _main_base(wt: dict, main, root) -> str | None:
+    """`channel: base` を解く起点のブランチ。メインディレクトリの `worktree.json` の `base_branch` から読む。
+
+    `channel: base` の行は本番チャネルの判定（承認ゲート 2）に効くため、Pull Request の head の `base_branch` で
+    行を本番から外せないようにする（#2363 round 6）。メインディレクトリにファイルかキーが無ければ `None`（既定ブランチ）で、
+    呼ばれた木の値で補わない。メインディレクトリが解けない（git でない）か呼ばれた木そのものなら、読んだ `wt` の値を使う。
+    """
+    if main is None or Path(main).resolve() == Path(root).resolve():
+        got = wt.get("base_branch")
+    else:
+        f = Path(main) / WT
+        got = decl.load_file(f, repo.WORKTREE_DECL.name)[0].get("base_branch") if f.is_file() else None
+    return got if isinstance(got, str) and got else None
 
 
 def _row_text(row: dict) -> str:

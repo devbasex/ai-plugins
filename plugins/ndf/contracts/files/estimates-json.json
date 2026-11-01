@@ -2,6 +2,6 @@
   "name": "estimates-json",
   "pattern": "estimates.json",
   "kind": "result",
-  "place": "worktree",
+  "place": "tmp",
   "skill_readers": []
 }

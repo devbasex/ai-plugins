@@ -3,8 +3,7 @@
   "path": "plugins/ndf/skills/cross-review/scripts/critique-round.sh",
   "summary": "cross-review 反証の 1 ラウンド（#549 レビュー対応）。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "CRITIQUE_RETRY_AGENTS"

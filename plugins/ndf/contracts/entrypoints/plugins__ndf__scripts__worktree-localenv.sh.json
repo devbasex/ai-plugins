@@ -3,8 +3,7 @@
   "path": "plugins/ndf/scripts/worktree-localenv.sh",
   "summary": "NDF plugin: 作業ツリーでのローカル動作検証を支える。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "WT_LINES"

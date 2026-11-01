@@ -3,8 +3,7 @@
   "path": "plugins/ndf/scripts/statusline-switch.sh",
   "summary": "NDF plugin: statusline の導入・切替・復元を行う。",
   "args": {
-    "options": [],
-    "positionals": []
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
   },
   "env": [
     "HOME"
