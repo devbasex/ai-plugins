@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_repo import push_origin  # noqa: E402
+
 SCRIPTS = Path(__file__).resolve().parents[1]
 RELEASE_STEPS = SCRIPTS / "release-steps.py"
 INSTRUCTIONS_CHECK = SCRIPTS / "instructions-check.py"
@@ -70,7 +73,7 @@ def read_size(root: Path) -> int:
 def commit(root: Path) -> None:
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "t")
-    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    push_origin(root)
 
 
 def check(root: Path) -> subprocess.CompletedProcess:

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+from release_repo import push_origin  # noqa: E402
 
 PY = sys.executable
 
@@ -558,7 +560,7 @@ def bump_repo(root: Path, base_version: str, work_version: str) -> None:
     f.write_text(json.dumps({"version": base_version}), encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "base")
-    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    push_origin(root)
     if work_version != base_version:
         f.write_text(json.dumps({"version": work_version}), encoding="utf-8")
         git(root, "commit", "-q", "-am", "bump")
@@ -572,11 +574,65 @@ def test_bump_rerun_after_the_version_was_raised_is_ok(repo):
     assert res["status"] == "ok" and res["metrics"]["from"] == "1.2.3" and res["items"] == []
 
 
-def test_bump_to_the_version_of_the_base_still_stops(repo):
-    bump_repo(repo, "1.2.4", "1.2.4")
+def fake_gh(tmp: Path, out: str, code: int = 0) -> dict:
+    """`gh pr list` の答えを固定する偽の gh を PATH の先頭に置いた環境（自分の配布の照会。#2164）。"""
+    d = tmp / "fakebin"
+    d.mkdir(exist_ok=True)
+    (d / "gh").write_text(f"#!/bin/sh\nprintf '%s' '{out}'\nexit {code}\n")
+    (d / "gh").chmod(0o755)
+    return {**os.environ, "PATH": f"{d}:{os.environ['PATH']}"}
+
+
+def run_env(root: Path, env: dict, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([PY, str(SCRIPT), *args[:1], "--root", str(root), *args[1:]], capture_output=True, text=True, env=env)
+
+
+def last_json(p: subprocess.CompletedProcess) -> dict:
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def manifest(root: Path) -> str:
+    return (root / "plugins/ndf/.claude-plugin/plugin.json").read_text(encoding="utf-8")
+
+
+def test_bump_below_or_at_the_base_stops_without_writing(repo):
+    """ベースブランチが 10.27.5 のとき 10.27.5-dev.1 へは上げない（版を戻さない。受け入れ条件 5）。"""
+    bump_repo(repo, "10.27.5", "10.27.5")
+    before = manifest(repo)
+    p = run(repo, "bump", "--plugin", "ndf", "--to", "10.27.5-dev.1")
+    res = last_json(p)
+    assert p.returncode == 3 and res["status"] == "stopped", p.stdout
+    assert res["metrics"]["existing"] == "10.27.5" and res["metrics"]["next_free"] == "10.27.6-dev.1"
+    assert manifest(repo) == before
+
+
+def test_bump_to_a_release_with_a_tag_stops(repo):
+    bump_repo(repo, "1.2.3", "1.2.3")
+    git(repo, "tag", "ndf--v1.2.4")
+    push_origin(repo)
     p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
-    assert p.returncode != 0
-    assert "旧版と新版が同じ" in p.stdout + p.stderr
+    res = last_json(p)
+    assert p.returncode == 3 and res["metrics"]["existing"] == "ndf--v1.2.4" and res["metrics"]["next_free"] == "1.2.5"
+
+
+def test_bump_at_the_base_is_a_rerun_only_after_its_own_release(repo, tmp_path):
+    """作業場所とベースブランチがともに新しい版なら、release/v<版> のマージ済みの PR があるときだけ打ち直し（決定 2）。"""
+    bump_repo(repo, "1.2.4", "1.2.4")
+    own = run_env(repo, fake_gh(tmp_path, '[{"number": 7}]'), "bump", "--plugin", "ndf", "--to", "1.2.4")
+    assert own.returncode == 0 and last_json(own)["metrics"]["already"] is True, own.stdout
+    other = run_env(repo, fake_gh(tmp_path, "[]"), "bump", "--plugin", "ndf", "--to", "1.2.4")
+    assert other.returncode == 3 and last_json(other)["metrics"]["existing"] == "1.2.4"
+    unknown = run_env(repo, fake_gh(tmp_path, "", 1), "bump", "--plugin", "ndf", "--to", "1.2.4")
+    assert unknown.returncode == 2 and last_json(unknown)["metrics"]["unreadable"] == ["pr"]
+
+
+def test_bump_without_origin_stops_as_unreadable(repo):
+    bump_repo(repo, "1.2.3", "1.2.3")
+    git(repo, "remote", "remove", "origin")
+    before = manifest(repo)
+    p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
+    assert p.returncode == 2 and "origin" in last_json(p)["metrics"]["unreadable"]
+    assert manifest(repo) == before
 
 
 def test_bump_leaves_a_line_repeated_elsewhere_to_the_hand(repo):
@@ -650,7 +706,7 @@ def test_changed_plugins_without_the_tag_is_two(repo):
 
 def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     root = changed_repo(repo)
-    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    push_origin(root)
     _, res = changed(root, "--since", "ndf--v1.0.0")
     it = res["items"][0]
     p = run(root, "bump", "--plugin", it["name"], "--to", it["to"])

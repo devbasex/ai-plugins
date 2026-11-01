@@ -27,3 +27,14 @@ def seed_release_repo(tmp_path: Path) -> tuple[Path, Path]:
     (seed / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
     (seed / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "foo"}}))
     return origin, seed
+
+
+def push_origin(root: Path, branch: str = "develop") -> Path:
+    """root の HEAD を、隣に置く bare の origin の `branch` へ送り、取り直す（`bump` は origin を取り直してから版を読む。#2164）。"""
+    bare = root.parent / f"{root.name}-origin.git"
+    if not bare.exists():
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+        _git(root, "remote", "add", "origin", str(bare))
+    _git(root, "push", "-q", "-f", "--tags", "origin", f"HEAD:refs/heads/{branch}")
+    _git(root, "fetch", "-q", "origin")
+    return bare
