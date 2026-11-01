@@ -297,6 +297,26 @@ def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
     )
 
 
+def allow_ratchet(root: Path, allow_dir: Path, allow, base_arg: str | None) -> tuple[list[dict], str, str]:
+    """例外リストの追加違反と、比べた起点・ラチェットの状態を返す。起点が決まらないときは RatchetError を投げる。"""
+    base = ratchet.base_ref(root, base_arg)
+    added: list[dict] = []
+    sha = base.rsplit("@", 1)[1]
+    state = "initial" if ratchet.initial(root, sha) else "checked"
+    if state == "checked":
+        rel_allow = allow_dir.resolve().relative_to(root).as_posix() if allow_dir.resolve().is_relative_to(root) else ALLOW
+        for r in ratchet.added(root, sha, rel_allow, allow, allow_file_name):
+            added.append(
+                v(
+                    "allow-added",
+                    r["path"],
+                    r["name"],
+                    f"例外リストへ項目を足した（{allow_file_name(r)}）。例外を足さずに契約かコードを直す",
+                )
+            )
+    return added, base, state
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
@@ -338,26 +358,13 @@ def main(argv: list[str] | None = None) -> int:
     targets = {Path(t).resolve().relative_to(root).as_posix() if Path(t).is_absolute() else t for t in a.files}
     items, allowed, outside = judge(root, found, allow, targets)
     try:
-        base = ratchet.base_ref(root, a.base)
+        added, base, state = allow_ratchet(root, allow_dir, allow, a.base)
     except ratchet.RatchetError as e:
         if os.environ.get("CI"):
             emit("stopped", str(e), [], metrics)
             return 3
-        base, state = None, "skipped"
-    if base:
-        sha = base.rsplit("@", 1)[1]
-        state = "initial" if ratchet.initial(root, sha) else "checked"
-        if state == "checked":
-            rel_allow = allow_dir.resolve().relative_to(root).as_posix() if allow_dir.resolve().is_relative_to(root) else ALLOW
-            for r in ratchet.added(root, sha, rel_allow, allow, allow_file_name):
-                items.append(
-                    v(
-                        "allow-added",
-                        r["path"],
-                        r["name"],
-                        f"例外リストへ項目を足した（{allow_file_name(r)}）。例外を足さずに契約かコードを直す",
-                    )
-                )
+        added, base, state = [], None, "skipped"
+    items.extend(added)
     metrics.update(allowed=allowed, violations=len(items), base=base, ratchet=state)
     if targets:
         metrics.update(targets=len(targets), outside=outside)
