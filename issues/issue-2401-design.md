@@ -2,13 +2,13 @@
 
 ## 目的
 
-- **今どうなっているか**: リリース後テストの worker が導入の確認のスクリプトとは別に手で導入を試し、利用者の Claude Code に入っていた ndf が 10.27.7 から 10.27.10 へ黙って上がった（2026-11-02 15:30 JST）。手順書にも起動指示にも禁止が無く、変わったことを機械で知る仕組みも無い
+- **今どうなっているか**: リリース後テストの worker が、導入の確認のスクリプトとは別に手で導入を試した。その操作で、利用者の Claude Code に入っていた ndf が 10.27.7 から 10.27.10 へ黙って上がった（2026-11-02 15:30 JST）。手順書にも起動指示にも禁止が無く、変わったことを機械で知る仕組みも無い
 - **誰に効くか**: NDF のスプリントを回す利用者（同じマシンで別の開発ループを動かしている利用者を含む）
 - **変えると何が成り立つか**: worker は利用者の設定ディレクトリで導入の操作を打たない。打たれて変わったら、まとめのプランが振り返りへ進まずに止まり、変わったプラグインと前後の版を人へ示す
 
 ## 適用範囲
 
-- **働く範囲**: NDF を使うどのリポジトリでも働く。リリース後テストの手順書（`release-verification` の Skill）、まとめのプランのリリース後テストのステップ、導入の確認のスクリプト（`release-verification-steps.py`）を変える
+- **働く範囲**: NDF を使うどのリポジトリでも働く。変えるのは 3 つである。リリース後テストの手順書（`release-verification` の Skill）・まとめのプランのリリース後テストのステップ・導入の確認のスクリプト（`release-verification-steps.py`）
 - **プロジェクトごとに違うもの**: 無し。利用者の設定ディレクトリの場所は環境変数（`CLAUDE_CONFIG_DIR`・`CODEX_HOME`）と既定の場所（`~/.claude`・`~/.codex`）から決め、設定も引数も足さない
 - **当たるモード**: リリース後テストを通るすべてのモード（まとめのプランの前後の検査は、まとめのプランがリリース後テストのステップを組むときだけ）
 
@@ -31,7 +31,7 @@
 | リリース（`ndf-release`） | 利用者の設定ディレクトリ・導入の操作・利用者の設定の控え・リリース後テスト |
 | 開発の工程（`ndf-workflow`） | まとめのプラン・ステップ・止まる（人へ戻す） |
 
-関係は公開された言語。まとめのプランは導入の確認のスクリプトを run のステップとして打ち、結果 JSON（`plugins/ndf/scripts/lib/README.md` の「手順のスクリプトの結果」）の終了コードと `summary` だけを読む。控えの中身は読まない。
+関係は公開された言語。まとめのプランは導入の確認のスクリプトを run のステップとして打つ。読むのは結果 JSON（`plugins/ndf/scripts/lib/README.md` の「手順のスクリプトの結果」）の終了コードと `summary` だけで、控えの中身は読まない。
 
 ### 集約
 
@@ -88,7 +88,7 @@
 | --- | --- |
 | `release-verification` の Skill（`SKILL.md`） | 手順 1 に節「利用者の設定ディレクトリで導入しない」を置き、禁止・保留の書き方・「判断が要る」での返し方の正本になる。プランの外で使うときに控えを取って比べる手順も持つ |
 | `release-verification-steps.py` の利用者の設定の読み取り（`user_config_snapshot`） | 利用者の設定ディレクトリを読むだけで、控えの項目（鍵と値の組）と読めなかったファイルの一覧を返す |
-| `release-verification-steps.py` の `user_env_snapshot` | 今の rc ファイルとリンクの項目に、`user_config_snapshot` の項目を足して返す |
+| `release-verification-steps.py` の `user_env_snapshot` | 今の rc ファイルとリンクの項目（`.bashrc`・`.zshrc`・`.local/bin/claude`）に、`user_config_snapshot` の項目を足して返す |
 | `release-verification-steps.py` の `_env_items` | 前後の鍵の和集合で差分を作る（片方にしか無い鍵も `changed` にする） |
 | `release-verification-steps.py` の副命令 `user-config-save` | 控えを `--out` のファイルへ書き、結果 JSON を出す |
 | `release-verification-steps.py` の副命令 `user-config-check` | `--before` の控えと今の状態を比べ、結果 JSON を出す |
@@ -238,7 +238,13 @@ sequenceDiagram
   end
 ```
 
-この図に含めない構成要素: `user_config_snapshot`・`user_env_snapshot`・`_env_items`（控えの副命令と `verify-install` の中で呼ばれる）、`release_verify_step`・`user_config_steps`・`close_plan`（まとめのプランを組む側で、実行の前に働く）。`release-verification` の Skill は worker が読む手順として「worker」に含める。
+この図に含めない構成要素は次のとおりである。
+
+| 構成要素 | 図に含めない理由 |
+| --- | --- |
+| `user_config_snapshot`・`user_env_snapshot`・`_env_items` | 控えの副命令と `verify-install` の中で呼ばれる |
+| `release_verify_step`・`user_config_steps`・`close_plan` | まとめのプランを組む側で、実行の前に働く |
+| `release-verification` の Skill | worker が読む手順として「worker」に含める |
 
 ## 非機能の実現方式
 
@@ -260,7 +266,7 @@ sequenceDiagram
 
 ### 決定 2: worker が止まったときも比べるため、リリース後テストのステップの失敗を、必ず止まる比べるステップへ回す
 
-worker が手で導入したうえで「判断が要る」か「できなかった」で返すと、今は比べずにプランが止まり、変わったことが報告に出ない。失敗の行き先 `config-check-on-fail` は `on_exit: {"0": "stop"}` を持ち、変わっていなくても止まる（リリース後テストの失敗はそのまま人へ戻る）。変わっていれば終了コード 1 で、変わった項目が理由に載る。
+worker が手で導入したうえで「判断が要る」か「できなかった」で返すと、今は比べずにプランが止まり、変わったことが報告に出ない。失敗の行き先 `config-check-on-fail` は `on_exit: {"0": "stop"}` を持つ。変わっていなくても止まり、リリース後テストの失敗はそのまま人へ戻る。変わっていれば終了コード 1 で、変わった項目が理由に載る。
 
 失敗の行き先を `config-check` にする形は採らない。変わっていなければ振り返りへ進み、リリース後テストの失敗が人へ戻らなくなる。
 
@@ -290,7 +296,7 @@ worker が手で導入したうえで「判断が要る」か「できなかっ�
 
 ### 決定 6: 導入の確かめの判定を今と同じに保つため、`verify-install` は読めない設定のファイルで止まらず、控えの 2 つの副命令は止まる
 
-`verify-install` の目的は導入した版と中身を確かめることで、利用者の設定のファイルが読めないことはその合否と別である。読めないことは値として前後で比べ、途中で読めるようになったか壊れたかだけを差分に出す。控えの 2 つの副命令は比べることだけが目的なので、読めなければ「変わっていない」と言えず、終了コード 2 で止まる（受け入れ条件 4 の「控えが取れなかったときも人へ戻す」）。
+`verify-install` の目的は導入した版と中身を確かめることで、利用者の設定のファイルが読めないことはその合否と別である。読めないことは値として前後で比べ、途中で読めるようになったか壊れたかだけを差分に出す。控えの 2 つの副命令は比べることだけが目的である。読めなければ「変わっていない」と言えないため、終了コード 2 で止まる（受け入れ条件 4 の「控えが取れなかったときも人へ戻す」）。
 
 根拠: Value 3 / Value 6（MVV 版 4）
 
@@ -302,7 +308,7 @@ worker は Skill の本文を読んで動くが、起動指示は Skill の本�
 
 ### 決定 8: プランの外で Skill を使うときも比べられるため、手順書に控えと比較の 2 行を置く
 
-`/ndf:release-verification` を利用者が直接呼ぶときは、まとめのプランの前後のステップが無い。手順書の手順 1 の前に `user-config-save`、記録の後に `user-config-check` を打つ手順を置き、まとめのプランの中では前後のステップが打つため打たないと書く。
+`/ndf:release-verification` を利用者が直接呼ぶときは、まとめのプランの前後のステップが無い。手順書の手順 1 の前に `user-config-save`、記録の後に `user-config-check` を打つ手順を置く。まとめのプランの中では前後のステップが打つため、打たないと書く。
 
 根拠: Value 5（MVV 版 4）
 
@@ -321,7 +327,7 @@ worker は Skill の本文を読んで動くが、起動指示は Skill の本�
 | I2 | 取得元の URL に `user:pass@` を含む設定と、Codex の `auth.json` と `config.toml` のほかの表に置いた目印の文字列が、控えのファイルにも結果 JSON にも出ない | 伏せずに写す・ほかの表を写すと落ちる |
 | 受け入れ条件 7 | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4`・`python3 scripts/check-skill-frontmatter.py`・`claude plugin validate .` が通る | — |
 
-既存の `test_supervise_pace_verify.py` の `test_close_comes_after_the_retro_and_before_the_refine` は、つながりの期待値に 2 つのステップが入る（つながりを変えることが受け入れ条件 4 の振る舞いである）。
+既存の `test_supervise_pace_verify.py` の `test_close_comes_after_the_retro_and_before_the_refine` は、つながりの期待値に 2 つのステップが入る。つながりを変えることが、受け入れ条件 4 の振る舞いである。
 
 ## 設計の結果
 
