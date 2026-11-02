@@ -5,7 +5,7 @@
 - **今どうなっているか**: プランの worker と Agent の `ndf:worker` は、ステップに要る Skill を受け取る仕組みを持たない。#2372 では `document-style` だけを 3 つの system プロンプトと worker の定義へ書き足した。そのため文書を書かないステップにも常に載り、別の Skill を届けたいときは同じ書き足しがまた要る
 - **誰に効くか**: NDF でスプリントを回す利用者（worker が書く文書とコードの質）と、NDF の保守者（Skill を届ける経路が 1 か所になる）
 - **変えると何が成り立つか**: worker が動くとき、そのステップの工程に要る Skill だけが届く。新しい Skill をある工程へ届ける変更は、対応表の 1 行の追加で済む
-- **`document-style` が届く工程は今より狭めない**: 今は #2372 の書き足し（PR #2377）で、他者が読む文書を書く worker に工程を問わず届いている。対応表には、要求の初期値の 4 工程（設計・ドキュメント再構成・Pull Request・振り返り）に `document-style` を置く。あわせて、他者が読む文書を書く 6 工程（要求と受け入れ条件・計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸し）にも置く（決定 9）
+- **`document-style` が届く工程は今より狭めない**: 今は #2372 の書き足し（PR #2377）で、他者が読む文書を書く worker に工程を問わず届いている。対応表には、要求の初期値の 4 工程（設計・ドキュメント再構成・Pull Request・振り返り）に `document-style` を置く。あわせて、他者が読む文書を書く 6 工程（要求と受け入れ条件・計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸し）にも置く（決定 9）。工程を問わず届いていた今の経路が消えるため、雛形で `stage` を持たずに文書を直す work（`supervise_lib/templates.py` の `fix-doc`。`doc-lint` で当たった文書の行を直す）には、入力の `doc-lint` と同じ `stage: 完了判定` を付ける。テストの失敗を直す `fix` の work はコードを直すステップで、`stage` を持たないまま空の一覧にする（受け入れ条件 2）
 
 ## 適用範囲
 
@@ -53,8 +53,8 @@
 | I3 | プランのステップ | `skills`・`skills_add` 欄に書いた Skill は、すべて対応表の `rule_skills` に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。工程 Skill（`development-workflow` など）は実在しても載らないため通らない | ステップを 1 つも流す前の検査で落ち、ステップの `id` と名前と理由（規則の Skill でない・実在しない）を示して止まる |
 | I4 | プランのステップ | 届ける Skill は「`skills` があればその一覧、無ければ対応表のその工程の一覧（工程が無い・対応表に無ければ空）」に `skills_add` を足し、重ねずに並べたものである | テストで落ちる |
 | I5 | プランのステップ | worker の起動に渡すもの（system プロンプト・プロンプト・引数）が含む Skill の本文は I4 の結果だけである。judge の起動は Skill を含まない | テストで落ちる |
-| I6 | 進捗ログ | 対応表を読めない、または届ける Skill の `SKILL.md` を読めないステップは worker を起動しない。読めなかった名前かファイルを進捗ログの行に残し、ステップを失敗にする | テストで落ちる |
-| I7 | 進捗ログ | Skill を解決した work・drive・pr のステップは、起動の前に届けた Skill の行を 1 行持つ。0 件のときも空の一覧で書く | テストで落ちる |
+| I6 | 進捗ログ | 対応表を読めない、または届ける Skill の `SKILL.md` を読めないときは worker を起動しない。読めなかった名前かファイルを進捗ログの行に残し、ステップを失敗にする。解決する時点は I7 の単位と同じで、drive のステップは pause の worker を起動する前ごとに解決する。pause が無く worker を起動しない drive は解決せず、対応表が読めなくても失敗にしない | テストで落ちる |
+| I7 | 進捗ログ | 届けた Skill の行は worker の起動 1 回に 1 行で、起動の前に書く。0 件のときも空の一覧で書く。work・pr のステップは worker を 1 回起動するため 1 行である。drive のステップは pause の worker の起動ごとに 1 行（N 回起動すれば N 行。行の `step` は drive のステップの `id`）で、pause が無ければ行は無い | テストで落ちる |
 | I8 | — | `ndf:worker` の定義は Skill の名前を持たず、`Skill` と `Agent` のツールを外したままである | テストで落ちる |
 
 I1 の範囲の外で Skill の名前を持つファイルは、Skill を届ける経路ではないため対象にしない。2026-11-02 に次のコマンドが返したのは、テストを除いて 4 つである。
@@ -114,7 +114,7 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 | 届ける Skill の解決 | 対応表を読み、値に `rule_skills` に無い名前があれば読めない対応表として例外にする（決定 6）。ステップから届ける Skill を決める（I4）。プランの欄を照合する（I3）。本文の節を組む。どれも副作用を持たず、読めないときは例外で知らせる | `plugins/ndf/scripts/lib/stage_skills.py`（新設） |
 | 引くコマンド | 工程を受け、名前と絶対パスを統一 JSON レポートで返す（F1） | `plugins/ndf/scripts/stage-skills.py`（新設） |
 | 実行の入口の検査 | ステップを流す前に `skills`・`skills_add` を照合する（E2） | `supervise_lib/engine.py` の `setup` |
-| 届ける Skill の記録 | ステップの開始で解決を呼び、進捗ログへ 1 行書き、本文の節か誤りを返す（E3・E5）。進捗ログへ書くため純粋な処理ではない | `supervise_lib/steps.py`（関数を 1 つ足す） |
+| 届ける Skill の記録 | worker の起動の前に解決を呼び（work・pr はステップの開始、drive は pause の worker の起動ごと。I7）、進捗ログへ 1 行書き、本文の節か誤りを返す（E3・E5）。進捗ログへ書くため純粋な処理ではない | `supervise_lib/steps.py`（関数を 1 つ足す） |
 | worker の起動の組み立て | work・drive のステップで本文の節を system プロンプトへ入れる（通常・full・ランタイム指定の worker、drive の pause の worker。drive の pause の worker は、drive のステップが回す cross-review・cross-refactoring の駆動〔`drive.py`〕が判断待ちで止まったとき、`DriveStep._delegate_pause` が `WorkStep.call_worker` で起動する worker で、止まりの指示ファイルを読んで結果ファイルを書く） | `supervise_lib/worker_steps.py` |
 | PR 本文の書き手の起動 | pr のステップで本文の節を `PR_SYSTEM` の後へ入れる | `supervise_lib/pr.py` の `_llm_body` |
 | 使用量の種類の見分け | system プロンプトの先頭で `pr`・`judge`・`slow` を見分ける（後ろに本文の節が付いても `pr` のまま） | `supervise_lib/claude.py` の `claude_kind` |
@@ -122,6 +122,7 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 | プランの形の説明 | `skills`・`skills_add` 欄を説明に足す | `supervise_lib/plan.py` の先頭の説明 |
 | worker の定義 | 「起動指示の『読む Skill』に挙がった `SKILL.md` だけを読む」へ一般化し、`document-style` の例外の段落を消す | `plugins/ndf/agents/worker.md` |
 | supervisor → worker の規約 | 起動指示の項目に「読む Skill」を足して 6 項目にし、引くコマンドでの決め方（工程の名前の出どころは決定 10）を書く。worker の規則 6（Skill を起動せず `SKILL.md` を読まない）の `document-style` の例外の文を一般化する | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
+| プランの雛形 | `stage` を持たずに文書を直す `fix-doc` の work に `stage: 完了判定` を付ける（目的の「今より狭めない」） | `supervise_lib/templates.py` |
 | 確定仕様 | 「worker は `SKILL.md` を読まない」の 3 か所を、工程 Skill に限る形へ直す（決定 6） | `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
 | テスト | 対応表・解決・検査・記録・起動の組み立ての単体テストと、`rule_skills` と工程 Skill が重ならないことの構造チェック（決定 6）。#2372 のテストを置き換える | `plugins/ndf/scripts/tests/test_stage_skills.py`（新設）、`test_supervise_document_style.py`（削除） |
 
@@ -200,6 +201,7 @@ plugins/ndf/
 │   │   ├── pr.py                         # 変える（_llm_body）
 │   │   ├── prompts.py                    # 変える（#2372 の撤去）
 │   │   ├── steps.py                      # 変える（記録の関数）
+│   │   ├── templates.py                  # 変える（fix-doc の stage）
 │   │   └── worker_steps.py               # 変える（起動の組み立て）
 │   └── tests/
 │       ├── test_stage_skills.py          # 新設
@@ -330,7 +332,7 @@ sequenceDiagram
         R-->>E: ステップの id と名前
         E-->>E: ステップを流さずに止まる
     end
-    H->>D: ステップの開始
+    H->>D: worker の起動の前（work・pr はステップの開始、drive は pause の起動ごと）
     D->>R: load_table・resolve・render
     alt 対応表か SKILL.md を読めない
         R-->>D: SkillsError
@@ -344,7 +346,7 @@ sequenceDiagram
     end
 ```
 
-**記録は起動の前に書く。** 起動が落ちても、何を渡そうとしたかが残る。
+**記録は起動の前に書く。** 起動が落ちても、何を渡そうとしたかが残る。drive のステップは pause の worker を 0〜N 回起動するため、解決と記録はステップの開始ではなく pause の起動ごとに行う（I6・I7）。pause が無ければ解決も記録もしない。
 
 `ndf:worker` の経路は `supervise.py` を通らない。supervisor は作業を 1 つ渡すとき、その作業が属する工程の名前で `stage-skills.py lookup <工程>` を打つ（名前の出どころは決定 10）。出力の `items` の名前と `path` を、起動指示の「読む Skill」に並べる。終了コードが 0 以外なら欄を空にせず、supervisor が `結果: 判断が要る` で返す（E6）。
 
@@ -399,7 +401,9 @@ sequenceDiagram
 | 受け入れ条件 11・I8 | `worker.md` の frontmatter が `disallowedTools` に `Skill` と `Agent` を持ち、本文が Skill の名前を持たない | 定義へ `skills:` か特定の Skill の名前を書く |
 | 受け入れ条件 12 | `prompts.py` に `DOCUMENT_STYLE`・`DOCUMENT_RULE`・`_style_rules` が無く、設計の工程の work ステップには `document-style` の本文が届く | 撤去だけをして対応表の行を入れない |
 | 受け入れ条件 13・決定 9 | 設計・ドキュメント再構成・Pull Request・振り返りの 4 工程と、要求と受け入れ条件・計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸しの 6 工程のステップに `document-style` が届く | 10 のどれかの行を対応表から落とす |
-| 受け入れ条件 14・I7 | work・drive・pr のステップごとに `kind: skills` の行が 1 行、起動の前に書かれ、0 件のときは空の一覧である | 0 件のときに行を省く、または起動の後に書く |
+| 受け入れ条件 13・決定 9 | 雛形が作る `fix-doc` の work ステップが `stage: 完了判定` を持ち、`document-style` が届く | `fix-doc` の `stage` を消す |
+| 受け入れ条件 14・I7 | work・pr のステップは `kind: skills` の行が 1 行、起動の前に書かれ、0 件のときは空の一覧である。drive のステップは pause の worker を 2 回起動すると行が 2 行、pause が無いと行が 0 行である | 0 件のときに行を省く、起動の後に書く、または drive の行をステップの開始で 1 行だけ書く |
+| I6（drive） | pause の無い drive のステップは、対応表のファイルを壊しても失敗しない。pause がある drive は、壊した対応表で pause の worker を起動せずに失敗する | drive のステップの開始で解決して失敗にする |
 | 受け入れ条件 15・I6 | 対応表のファイルを壊すか `SKILL.md` を消すと、worker を起動せずにステップが失敗し、行の `error` に名前かファイルが出る | 読めない Skill を飛ばして起動する |
 | JUDGE の除外（I5） | judge のステップの system プロンプトは対応表の行がある工程でも `JUDGE_SYSTEM` のままである | judge にも節を入れる |
 
@@ -409,13 +413,13 @@ sequenceDiagram
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2376 | 実装する | — | `plugins/ndf/scripts/stage-skills.py`、`plugins/ndf/scripts/lib/stage-skills.json`、`plugins/ndf/scripts/lib/stage_skills.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/pr.py`、`plugins/ndf/scripts/supervise_lib/prompts.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/worker_steps.py`、`plugins/ndf/scripts/tests/test_stage_skills.py`、`plugins/ndf/scripts/tests/test_supervise_document_style.py`、`plugins/ndf/agents/worker.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
+| #2376 | 実装する | — | `plugins/ndf/scripts/stage-skills.py`、`plugins/ndf/scripts/lib/stage-skills.json`、`plugins/ndf/scripts/lib/stage_skills.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/pr.py`、`plugins/ndf/scripts/supervise_lib/prompts.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/supervise_lib/worker_steps.py`、`plugins/ndf/scripts/tests/test_stage_skills.py`、`plugins/ndf/scripts/tests/test_supervise_document_style.py`、`plugins/ndf/agents/worker.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 10 工程のほかに `document-style` が要る工程 | 決定 9 で、他者が読む文書を書く工程として 10 工程に置いた。ほかの工程（実装・実装レビューなど）の worker が他者の読む文書を書くかは、工程ごとには数えていない。見つかったら対応表に 1 行足す（受け入れ条件は変わらない） |
+| 10 工程のほかに `document-style` が要る工程 | 決定 9 で、他者が読む文書を書く工程として 10 工程に置いた。ほかの工程（実装・コードレビューなど）の worker が他者の読む文書を書くかは、工程ごとには数えていない。見つかったら対応表に 1 行足す（受け入れ条件は変わらない） |
 | 実装の PR の測定 | 上の測定は問い 1 つの起動である。実在のステップで上限（決定 7）に収まるかは、実装の PR の手動確認で測る |
 | full の worker での重なり | full の worker はプラグインを読み込むため、本文を持ったうえで同じ Skill を Skill のツールで読み直すことがありうる。費用への影響は実装の PR の測定で見る |
 | `ndf:worker` の手動確認 | supervisor は LLM のため、「読む Skill」の欄を引くコマンドで決めるかはリリース後テストで見る（要求の「検証手段」） |
@@ -434,7 +438,7 @@ sequenceDiagram
 | 受け入れ条件 6 | `skills` 欄の無い既存のプランは、書き換えずに今と同じく動く |
 | 受け入れ条件 7 | 通常の worker の起動に、そのステップの Skill の規則だけが届く |
 | 受け入れ条件 8 | full の worker の起動に、そのステップの Skill だけが届く |
-| 受け入れ条件 9 | PR 本文の書き手に、Pull Request の工程の Skill の規則が Tool なしで読める形で届く |
+| 受け入れ条件 9 | PR 本文の書き手に、Pull Request の工程に当てた Skill の規則が Tool なしで読める形で届く |
 | 受け入れ条件 10 | 工程から Skill の名前と `SKILL.md` の絶対パスを返すコマンドがあり、supervisor はそれで「読む Skill」を決める |
 | 受け入れ条件 11 | `ndf:worker` の定義は Skill の名前を持たず、`Skill` と `Agent` のツールは使えないまま |
 | 受け入れ条件 12 | `prompts.py` の #2372 の書き足しが消え、同じ規則が対応表から届く |
