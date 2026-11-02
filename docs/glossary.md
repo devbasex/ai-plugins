@@ -856,15 +856,15 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 進捗の受け口 | — | ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路 | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
 | 実行ジョブの token | — | 実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、Pull Request の参照はそのジョブの取り込むリポジトリのものだけを残せる。承認の依頼の答えを読める | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
 | 冪等の鍵 | — | 進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
-| アカウント | — | Neural Development Factory で、プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| アカウント | — | Neural Development Factory で、料金プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 席 | — | チームのアカウントの中で、1 人の利用者に割り当てる枠。種類は standard と premium | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 使える量 | — | プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 料金プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 使える量 | — | 料金プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 利用者 | — | Google か GitHub の 1 つのアカウントで Neural Development Factory にログインした人。Cognito の `sub` を利用者の ID として持つ。同じ人でも IdP が違えば別の利用者である | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | チームの持ち主 | — | チームのアカウントを作った利用者。席を足す・種類を変える・外すことができる唯一の利用者 | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 使える量の判定 | — | 呼び出す側が渡した今の値（動いているスプリントの実行の数・その月の token の数）を使える量の上限と照らし、許すか断るかと理由を返すこと | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | GitHub の仲立ち | — | GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 実行の形態 | — | アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 実行の形態 | — | アカウントのランナーが Claude をどう呼ぶか。`local`（手元のマシン）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない | — | — | — |
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
 | 起票の代行 | — | 記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理 | — | — | — |
@@ -890,10 +890,13 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | スプリント全体の欄 | — | スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172） | — | — | — |
 | 区間 | — | 1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | 区間の上限 | — | 1 つの実行ジョブで起動してよい区間の数の上限（既定 20）。超えたジョブは section_limit で終わる | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 同時のジョブの数 | `max_jobs` | 手元のランナーが同時に動かす実行ジョブの数の上限。ランナーが登録と心拍で申告し、サービスはそれを超えて指示を渡さない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 同時のジョブの数 | `max_jobs` | 手元のマシンが同時に動かす実行ジョブの数の上限。手元のマシンが登録と心拍で申告し、サービスはそれを超えて指示を渡さない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | マイルストーンの持ち分 | — | 終わりの状態でない開発ループが、リポジトリのマイルストーン 1 つを選定の対象として占めていることを表す実行の枠の行。同じリポジトリのループどうしで重ならない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | 課題の持ち分 | — | 終わりの状態でない手動のスプリントの実行が、リポジトリの課題 1 つを持っていることを表す実行の枠の行。同じ課題を 2 つの実行に入れない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 手元のランナーの枠 | — | 1 つの手元のランナーが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 手元のマシンの枠 | — | 1 つの手元のマシンが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない | 手元のランナーの枠 | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 手元のマシン | `local_runner` | 利用者の環境に登録し、同時のジョブの数まで実行ジョブを受け取るマシン。受け取った実行ジョブごとに別のランナーが動く | 手元のランナー | — | — |
+| Factory のオーガナイザー | — | 同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（配布を 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他 | — | — | — |
+| 配布の実行 | — | Factory のオーガナイザーが、まとめた配布 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、本番の配布を流し、結果を返して終わる。同じリポジトリで同時に 1 本まで | — | — | — |
 | 画面の地図 | — | Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
 | デザインのトークン | — | 色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
 | ダミーの API クライアント | — | 画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる | — | — | `docs/specifications/ndf-factory-ui-components.md` |

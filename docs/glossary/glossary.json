@@ -4390,7 +4390,7 @@
     {
       "term": "アカウント",
       "context": "ndf-factory",
-      "meaning": "Neural Development Factory で、プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す",
+      "meaning": "Neural Development Factory で、料金プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
@@ -4400,7 +4400,7 @@
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
-      "term": "プラン",
+      "term": "料金プラン",
       "context": "ndf-factory",
       "meaning": "アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
@@ -4408,7 +4408,7 @@
     {
       "term": "使える量",
       "context": "ndf-factory",
-      "meaning": "プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ",
+      "meaning": "料金プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
@@ -4438,7 +4438,7 @@
     {
       "term": "実行の形態",
       "context": "ndf-factory",
-      "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
+      "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のマシン）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
@@ -4968,7 +4968,7 @@
       "term": "同時のジョブの数",
       "context": "ndf-factory",
       "code": "max_jobs",
-      "meaning": "手元のランナーが同時に動かす実行ジョブの数の上限。ランナーが登録と心拍で申告し、サービスはそれを超えて指示を渡さない",
+      "meaning": "手元のマシンが同時に動かす実行ジョブの数の上限。手元のマシンが登録と心拍で申告し、サービスはそれを超えて指示を渡さない",
       "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
@@ -4984,10 +4984,38 @@
       "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
-      "term": "手元のランナーの枠",
+      "term": "手元のマシンの枠",
       "context": "ndf-factory",
-      "meaning": "1 つの手元のランナーが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない",
-      "source": "docs/specifications/ndf-factory-dev-loops.md"
+      "meaning": "1 つの手元のマシンが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない",
+      "source": "docs/specifications/ndf-factory-dev-loops.md",
+      "deprecated": [
+        "手元のランナーの枠"
+      ]
+    },
+    {
+      "term": "手元のマシン",
+      "context": "ndf-factory",
+      "code": "local_runner",
+      "meaning": "利用者の環境に登録し、同時のジョブの数まで実行ジョブを受け取るマシン。受け取った実行ジョブごとに別のランナーが動く",
+      "deprecated": [
+        "手元のランナー"
+      ],
+      "source": "",
+      "pending_source": "issues/issue-2439-design.md"
+    },
+    {
+      "term": "Factory のオーガナイザー",
+      "context": "ndf-factory",
+      "meaning": "同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（配布を 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他",
+      "source": "",
+      "pending_source": "issues/issue-2439-design.md"
+    },
+    {
+      "term": "配布の実行",
+      "context": "ndf-factory",
+      "meaning": "Factory のオーガナイザーが、まとめた配布 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、本番の配布を流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
+      "source": "",
+      "pending_source": "issues/issue-2439-design.md"
     },
     {
       "term": "画面の地図",
