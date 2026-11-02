@@ -4861,6 +4861,27 @@
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "統括役",
+      "code": "relay_hub",
+      "context": "ndf-workflow",
+      "meaning": "同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "名前つきのラッパー",
+      "code": "named_relay",
+      "context": "ndf-workflow",
+      "meaning": "統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "端末の結び付け",
+      "code": "attach",
+      "context": "ndf-workflow",
+      "meaning": "利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける",
+      "pending_source": "issues/issue-2346-requirements.md"
     }
   ]
 }

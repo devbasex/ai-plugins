@@ -342,6 +342,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 例外リスト | `allow_list` | 構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。構造チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える | 許可の一覧 | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 移行の読み | `migration_read` | 1 か所へ寄せた設定の値を、新しい置き場に無いときだけ古い置き場から読むこと。契約の一覧の設定ファイルの項目に migrate_from として書く | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 設定の置き場 | `setting_place` | .ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
+| 統括役 | `relay_hub` | 同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない | — | — | — |
+| 名前つきのラッパー | `named_relay` | 統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | — |
+| 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
