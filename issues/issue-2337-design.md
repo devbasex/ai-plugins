@@ -52,7 +52,7 @@
 | --- | --- | --- | --- |
 | I1 | 実行 | 結果の `status` は `ok` / `gate` / `stopped` のどれかで、終了コードは `step_result.code_matches` を満たす。例外・SIGTERM・時間切れは `stopped`・1 で、`summary` に理由、`gaps` に `interrupted`（SIGTERM）か `timeout`（時間切れ）か `exception`（例外）を持つ | 核が本体の結果を捨て、`stopped` を返す |
 | I2 | 実行 | `ok` を返すのは `gaps` が空のときだけ | `stopped`・6。本体の `gaps` はそのまま残す |
-| I3 | 実行 | 核が本体の終わり方を読み替えた後の結果（「核が受け取る値の読み替え」と「終了コードから状態を決める規則」で決めたもの）は、`status` と終了コードが食い違わず、終了コードは契約の `exit` の鍵に含まれる。本体に結果 JSON を求めるのは契約の `stdout` が `step-result` のときだけで、それ以外の契約の本体が `None`・整数を返すことと、`SystemExit`（`argparse` の `--help` を含む）で終えることは破れに当たらない | `stopped`・1。`summary` に違いの中身 |
+| I3 | 実行 | 核が本体の終わり方を読み替えた後の結果（「核が受け取る値の読み替え」と「終了コードから状態を決める規則」で決めたもの）は、`status` と終了コードが食い違わず、終了コードは契約の `exit` の鍵に含まれる。本体が `SystemExit`（`argparse` の `--help` を含む）で終えることは、契約の `stdout` によらず破れに当たらない。本体に結果 JSON を求めるのは契約の `stdout` が `step-result` のときだけで、破れになるのは本体が結果 JSON を出さずに返ったときである。`step-result` 以外の契約の本体が `None`・整数を返すことは破れに当たらない | `stopped`・1。`summary` に違いの中身 |
 | I4 | 契約の一覧 | 核の対象外の印を持たないエントリポイントは、Python なら `if __name__ == "__main__":` の中身が `run_core.main("<契約の path>", <本体>)` の 1 文、シェルなら先頭の実行文が `rc_enter "<契約の path>" "$@"` | 構造チェック（`core-entry`）が名前を出して落とす |
 | I5 | 契約の一覧 | 核の対象外の印は、hook の定義か、ランタイムが直接起動する根拠を持つエントリポイントにだけ付く | 構造チェック（`core-exempt`）が落とす |
 | I6 | 契約の一覧 | 構造チェックの例外リストの `core-entry`・`exit-meaning`・`result-read` の行は、ベースブランチより増えない | 構造チェック（`allow-added`）が落とす |
@@ -61,7 +61,7 @@
 | I9 | 実行 | 核は、本体が結果を出さずに正常に終えたとき標準出力へ何も足さない。結果ファイルの環境変数（`NDF_RESULT_FILE`）を子プロセスへ継がない | 契約の標準出力の形を照らすテストが落とす |
 | I10 | 作業の結果 | work のステップを成功と読むのは、作業の結果ファイルが結果 JSON の形で `status` が `ok` のときだけ。無い・読めない・形が違えば `stopped` | ステップを失敗にする（`on_fail` か止まる） |
 | I11 | フェーズの結果 | `supervise.py run` の終了コードはフェーズの結果の `status` から決まる（`ok` 0・`gate` 10・`stopped` 1） | テストが落とす |
-| I12 | 実行 | 外部 CLI の起動を `ok` と読むのは、監視が正常な終わり（監視ログの状態が `OK` か `NO_RESULT`）を記録し、監視の理由が失敗（時間切れ・利用上限・認証切れ・起動の失敗）を示さず、結果ファイルが空でなく読めるときだけ。結果ファイルがあっても、監視の状態か理由が失敗を示せば `ok` にしない。進捗の文の語で止まりを決めない | `stopped` と理由 |
+| I12 | 実行 | 外部 CLI の起動を `ok` と読むのは、監視ログの状態（`status`）が `OK` か `NO_RESULT` で、理由（`reason`）が `ok` か `missing` で、結果ファイルが空でなく読めるときだけ。理由がそれ以外（`cli_timeout`・`usage_limit`・`auth_expired`・`model_unavailable` など、`monitor_outcome.REASONS` の残りの値）なら、状態が `OK` か `NO_RESULT` でも失敗と読む。結果ファイルがあっても、監視の状態か理由が失敗を示せば `ok` にしない。進捗の文の語で止まりを決めない | `stopped` と理由 |
 | I13 | 実行 | ほかのエントリポイントの結果 JSON を読んで次の手を決める箇所は共通の読み手を通し、`ok` でない結果を成功と読まない | 構造チェック（`result-read`）が落とす |
 | I14 | 閉じる判定 | 閉じる対象のうち閉じなかった課題（`kept_open`・`closed_unverified`・`failed`）が 1 件でもあれば `ok` を返さない。参照しているだけの課題は状態に影響しない | `failed` があれば `stopped`・1、無ければ `gate`・10 |
 
@@ -124,7 +124,7 @@
 | 進捗の分類（`supervise_lib/state.py`） | worker の進捗の行を `state` の値と同じ文の繰り返しで分け、文の語を読まない | 変更 | F6 |
 | フェーズの実行（`supervise_lib/engine.py`・`commands.py`・`steps.py`） | 終わり方をフェーズの結果へ書き、`supervise.py run` の終了コードにする。`steps.last_json` を共通の読み手へ寄せる | 変更 | F5 |
 | エージェントの定義（`plugins/ndf/agents/worker.md`・`supervisor.md`・`supervisor-waits.md`） | worker は渡された置き場へ作業の結果ファイルを書く。supervisor は置き場を渡し、成否をそのファイルで決める | 変更 | F4 |
-| 外部 CLI の起動（`skills/external-ai/scripts/external-ai.py`） | `ok` の条件を「監視が正常な終わりを記録し、監視の状態・理由が失敗を示さず、結果ファイルが空でなく読める」（I12）にそろえる | 変更 | F6 |
+| 外部 CLI の起動（`skills/external-ai/scripts/external-ai.py`） | `ok` の条件を「監視ログの状態が `OK` か `NO_RESULT`、理由が `ok` か `missing` で、結果ファイルが空でなく読める」（I12）にそろえる | 変更 | F6 |
 | 課題を閉じる処理（`plugins/ndf/scripts/sprint-close.py`） | 閉じなかった課題があれば `gate`・10（失敗があれば `stopped`・1）。呼び出しの誤りを 2 にする | 変更 | F7 |
 | 64 のエントリポイント | 末尾を核の 1 文にする。独自の `EXIT_` 定数を表の定数へ置き換える（`handoff.py` の 4・5 ほか） | 変更 | F1・F3 |
 | 文書（`skills/progress-tracking/SKILL.md`・`development-workflow/references/`・`plugins/ndf/scripts/lib/README.md`・用語集） | 終了コードが変わる箇所と、作業の結果ファイルの書き方を直す | 変更 | F4・F5・F7 |
