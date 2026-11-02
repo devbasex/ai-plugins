@@ -25,7 +25,7 @@ from claude_settings import metered_settings
 import procs
 import usage_capture
 from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
-from supervise_lib.claude_response import failure_kind, is_usage_limit, response_data  # noqa: F401  応答の読みは部品が持つ
+from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
 
 
@@ -242,10 +242,18 @@ def call_claude(
         return ClaudeCall(
             ok=False, text=f"打ち切り（{timeout} 秒）", usage={}, seconds=timeout, kind=claude_kind(system, full), model_usage=None
         )
-    data = response_data(p)
+    try:
+        data = json.loads(p.stdout)
+    except json.JSONDecodeError:
+        data = {"result": p.stdout, "is_error": p.returncode != 0}
+    if not isinstance(data, dict):
+        data = {"result": p.stdout, "is_error": p.returncode != 0}
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
-    failure = failure_kind(data, p, ok)
+    result = str(data.get("result") or "")
+    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
+    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
+    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
     usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
     return ClaudeCall(
         {
@@ -258,9 +266,16 @@ def call_claude(
             "turns": data.get("num_turns"),
             "session": data.get("session_id"),
             "seconds": round(time.time() - started, 1),
-            **failure,
+            "limit": limit,
+            "auth": auth,
+            "resets_at": limit_reset_at("\n".join([result, p.stderr])) if limit else None,
         }
     )
+
+
+def is_usage_limit(text: str) -> bool:
+    """利用上限で落ちたか。lib/monitor.py の USAGE LIMIT の表と同じ文言で照合する。"""
+    return any(rx.search(text or "") for rx in USAGE_LIMIT_FATAL) or bool(LIMIT_EPOCH.search(text or ""))
 
 
 class UsageLimit(Exception):
