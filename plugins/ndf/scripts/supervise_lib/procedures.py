@@ -22,6 +22,26 @@ def requirements_path(n: int) -> str:
     return REQUIREMENTS.format(n=n)
 
 
+def rebuild_step(n: int, doc: str) -> dict:
+    """設計文書を組み直すステップ（工程「ドキュメント再構成」）。
+
+    design の Skill は組み直しを設計 PR を出す手順の直前に置き、push しない指示の worker はその手前で止まる。
+    プランがこのステップを持たないと、組み直しを通さないまま PR とレビューへ進む。
+    """
+    return {
+        "id": "rebuild",
+        "type": "work",
+        "full": True,
+        "kind": "設計",
+        "stage": "ドキュメント再構成",
+        "issues": True,
+        "timeout": 3600,
+        "next": "pr",
+        "prompt": f"/ndf:document-rebuild {doc}（#{n} の設計文書。同じディレクトリの issue-{n}-design-*.md も含む）。"
+        "内容を足さずに組み直し、前後の値の表を報告に載せる。コミットする（push しない）。",
+    }
+
+
 def with_record(plan: dict) -> dict:
     """プランへ `記録`（工程が変わるたびに課題ごとに打つスクリプト）を持たせる。"""
     plan["記録"] = str(RECORD_SH)

@@ -1,7 +1,6 @@
 ---
 name: document-style
-description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文。工程と AI から呼ぶ）."
-user-invocable: false
+description: "Write Markdown docs, specs, PR and issue bodies, comments, and reports for a third-party reader, with tables and mermaid. Use when writing or editing Markdown text another person will read（ドキュメント作成・仕様書を書く・PR本文・Issue本文・報告を書く・文章を直す）."
 allowed-tools:
   - Read
   - Write

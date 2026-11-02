@@ -116,5 +116,6 @@
 | [ndf-sprint-close-final-stage.md](ndf-sprint-close-final-stage.md) | スプリント課題を最終工程の記録（閉じる条件 3・`--final-stage`）を確かめてから閉じること、振り返りの行を記録の PR の最後の配布の記録と比べる基準（`dist_comment_id`）、まとめのプランの並び（retro の後に close）、既定ブランチ宛の Pull Request の closing keywords を閉じる予定の参照へ置き換えること（#2228・#2082・#2119）。手順は `progress-tracking` の「スプリントを閉じる」が正 |
 | [ndf-sprint-close-record-pr-at-run-time.md](ndf-sprint-close-record-pr-at-run-time.md) | まとめの close が、まとめを流し始める時点にリリース記録の PR を見つけて課題を閉じる（差し込み {queue_record}・find_record の規則・止まる条件。#2230 #2044 #2121） |
 | [ndf-release-version-at-run-time.md](ndf-release-version-at-run-time.md) | スプリントの配布の版を配布のプランを流す時点に決めること（版の差し込み・版の記録・決め直し・本番の系列・bump の止まり方。#2164） |
+| [ndf-entrypoint-contracts.md](ndf-entrypoint-contracts.md) | NDF のエントリポイントの契約（plugins/ndf/contracts/ の契約の一覧・構造チェック check-ndf-contracts.py と例外リストのラチェット・.ndf/ の設定を読む木を lib/decl.py で解くこと・本番のブランチとテストのコマンドの 1 か所化と移行の読み。#2336） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
