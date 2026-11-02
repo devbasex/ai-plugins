@@ -144,6 +144,7 @@
       "id": "fix-doc",
       "type": "work",
       "kind": "修正",
+      "stage": "完了判定",
       "inputs": [
         "doc-lint"
       ],

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import gh_call
+import stage_skills
 import test_strategy as ts
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
@@ -48,6 +49,25 @@ def last_json(text: str) -> dict | None:
             except json.JSONDecodeError:
                 continue
     return None
+
+
+SKILLS_FORM = "本文"  # プランの worker への Skill の渡し方（本文を system プロンプトへ入れる。#2376 の決定 4）
+
+
+def deliver_skills(ctx, step: dict) -> tuple[str, str | None]:
+    """worker を起動する前に、ステップへ届ける Skill を決めて進捗ログへ 1 行書く（#2376 の I6・I7）。
+
+    (本文の節, 誤り) を返す。節は system プロンプトの種類の文の後ろへ足す形（0 件なら空文字）。対応表か SKILL.md を
+    読めなければ、行に `error` を付けて書き、誤りを返す（呼び手は worker を起動せずにステップを失敗にする）。"""
+    rec = {"kind": "skills", "step": step.get("id"), "stage": step.get("stage"), "names": [], "form": SKILLS_FORM}
+    try:
+        names = stage_skills.skills_for_step(step, stage_skills.load_table())
+        section = stage_skills.render(names)
+    except stage_skills.SkillsError as e:
+        ctx.state.progress_write({**rec, "error": e.what})
+        return "", f"届ける Skill を読めない: {e.what}"
+    ctx.state.progress_write({**rec, "names": names})
+    return ("\n\n" + section if section else ""), None
 
 
 # ---- 計画の実行の条件（engine の実行の前と、queue の版の差し込みの前で共有する） ----

@@ -15,7 +15,7 @@ from loop_drive import review_answer
 from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
-from supervise_lib.steps import RunStep, last_json
+from supervise_lib.steps import RunStep, deliver_skills, last_json
 import project_mvv
 
 # worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
@@ -60,10 +60,12 @@ class WorkStep:
                 parts.append(f"## 課題 #{n}\n\n（本文を取れない。gh issue view {n} で読む）")
         return "\n\n".join(parts)
 
-    def call_worker(self, ctx, step: dict, prompt: str, cwd: str, name: str) -> dict:
-        """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。"""
+    def call_worker(self, ctx, step: dict, prompt: str, cwd: str, name: str, block: str = "") -> dict:
+        """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。
+
+        `block` は `deliver_skills` が返した Skill の本文の節で、種類の文と MVV の節の間へ入れる。"""
         rt = step.get("runtime")
-        system = WORK_SYSTEM + self.mvv_system(ctx)
+        system = WORK_SYSTEM + block + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
             return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), serena=bool(step.get("serena")))
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
@@ -118,6 +120,11 @@ class WorkStep:
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()
+        # 届ける Skill は最初の起動の前に 1 回だけ決める。起こし直し（resume）は同じ節を持つ system を渡す
+        block, err = deliver_skills(ctx, step)
+        if err:
+            ctx.state.cur.update(exit=1, text=err, seconds=round(time.time() - started, 1))
+            return False, err
         issues = self.issue_text(ctx, step)
         cwd = step.get("cwd", ctx.cwd)
         rule = self.concurrent_rule(ctx, step)
@@ -134,11 +141,11 @@ class WorkStep:
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
         full = bool(step.get("full"))
-        system = FULL_SYSTEM + self.mvv_system(ctx)
+        system = FULL_SYSTEM + block + self.mvv_system(ctx)
         if full:
             res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), full=True)
         else:
-            res = self.call_worker(ctx, step, prompt, cwd, step["id"])
+            res = self.call_worker(ctx, step, prompt, cwd, step["id"], block)
         if not res.get("runtime"):  # runtime を指定した work は claude -p に数えない（帳簿から集める）
             ctx.claude.record_usage("work", res)
         # 報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
@@ -233,7 +240,10 @@ class DriveStep:
             return f"{kind} の prompt_file が無い"
         wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
         prompt = f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n終えたら結果ファイル {res_file} を書く。"
-        res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}")
+        block, err = deliver_skills(ctx, step)  # pause の worker の起動ごとに決めて記録する（#2376 の I7）
+        if err:
+            return err
+        res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}", block)
         if not res.get("runtime"):  # runtime の worker の分はステップの終わりに帳簿から集める
             ctx.claude.record_usage("work", res)
         texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")

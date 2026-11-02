@@ -18,6 +18,7 @@ from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
 from supervise_lib.prompts import DESIGN_DIFF_HEADING, DESIGN_DIFF_NONE, PR_SYSTEM
+from supervise_lib.steps import deliver_skills
 from step_result import result
 
 PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
@@ -200,7 +201,10 @@ class PrStep:
         # 設計 PR の題は設計文書の H1（#1289 の決定 1）。読めなければ title のまま出し、既存の PR の題は書き直さない
         doc_title = design_title(Path(ctx.cwd) / step["title_doc"]) if step.get("title_doc") else None
         if step.get("body", "llm") == "llm":
-            body = self._llm_body(ctx, step, body, changes, issues, mats)
+            body, err = self._llm_body(ctx, step, body, changes, issues, mats)
+            if err:
+                ctx.state.cur.update(exit=1, text=err)
+                return False, err
         sections = list(mats.sections)
         if diff is not None:
             body, placed = with_design_diff(body, diff)
@@ -290,16 +294,22 @@ class PrStep:
 """
         return title, changes, issues, body
 
-    def _llm_body(self, ctx, step: dict, body: str, changes: str, issues: str, mats: Materials | None = None) -> str:
-        """LLM で本文を補う。使えない応答のときは機械生成の本文を返す。"""
+    def _llm_body(self, ctx, step: dict, body: str, changes: str, issues: str, mats: Materials | None = None) -> tuple[str, str | None]:
+        """LLM で本文を補う。(本文, 誤り) を返し、使えない応答のときは機械生成の本文を返す。
+
+        起動の前にステップの工程の Skill を決めて本文の節を `PR_SYSTEM` の後ろへ入れる（#2376）。読めなければ
+        起動せずに誤りを返す。"""
         mats = mats or Materials()
+        block, err = deliver_skills(ctx, step)
+        if err:
+            return body, err
         design = ""
         for d in step.get("docs", []):
             f = Path(ctx.cwd) / d
             if f.is_file():
                 design += f"\n### {d}\n" + f.read_text()[:TAIL]
         res = ctx.claude.call(
-            PR_SYSTEM,
+            PR_SYSTEM + block,
             f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n"
             + "".join(f"{n}\n" for n in mats.migration_notes)
             + f"\n## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
@@ -315,7 +325,7 @@ class PrStep:
             body = with_migration(body, migration_section(mats.migration), bool(mats.migration))
             if PR_FOOTER not in body:
                 body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
-        return body
+        return body, None
 
     def _publish(self, ctx, base: str, branch: str, title: str, body: str, retitle: bool = False) -> tuple[bool, str]:
         """既存の PR があれば本文を書き直し（retitle なら題も。#1289 の決定 6）、無ければ Draft で作る。

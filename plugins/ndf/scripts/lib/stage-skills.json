@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rule_skills": ["document-style", "logging-guidelines"],
+  "stages": {
+    "要求と受け入れ条件": ["document-style"],
+    "設計": ["document-style"],
+    "ドキュメント再構成": ["document-style"],
+    "ドキュメントレビュー": ["document-style"],
+    "計画": ["document-style"],
+    "実装": ["logging-guidelines"],
+    "完了判定": ["document-style"],
+    "Pull Request": ["document-style"],
+    "確定仕様化": ["document-style"],
+    "振り返り": ["document-style"],
+    "棚卸し": ["document-style"]
+  }
+}
