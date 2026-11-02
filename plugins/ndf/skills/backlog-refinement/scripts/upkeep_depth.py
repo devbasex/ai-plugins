@@ -126,47 +126,60 @@ def cause_share(causes: list[dict], types: list[dict], open_numbers: set | None)
     return top, rows.count(top) / len(rows)
 
 
+def _due_review(rows: list[dict], cfg: dict, open_now: int | None, no_issue) -> tuple[list, dict]:
+    """review の起動条件（件数・課題なし・open の増加・持ち越し）。"""
+    trig, values = [], {}
+    c = cfg["review"]
+    values["count"] = diffs_since(rows, "review")
+    if values["count"] >= c["every"]:
+        trig.append("count")
+    if no_issue:
+        trig.append("no_issue")
+    prev = next((r for r in reversed(_ran(rows, "review")) if isinstance(r.get("open_after"), int)), None)
+    if prev and open_now is not None and prev["open_after"] > 0:
+        values["open_growth"] = round((open_now - prev["open_after"]) / prev["open_after"], 4)
+        if values["open_growth"] >= c["open_growth"]:
+            trig.append("open_growth")
+    last_diff = next((r for r in reversed(_ran(rows, "diff"))), None)
+    carry = ((last_diff or {}).get("values") or {}).get("carry")
+    if isinstance(carry, int):
+        values["carry"] = carry
+        if carry > c["carry_factor"] * cfg["candidate_limit"]:
+            trig.append("carry")
+    return trig, values
+
+
+def _due_overhaul(rows: list[dict], cfg: dict, causes, types, open_numbers) -> tuple[list, dict]:
+    """overhaul の起動条件（件数・作成超過・open の連続増加・原因の偏り）。"""
+    trig, values = [], {}
+    c = cfg["overhaul"]
+    values["count"] = diffs_since(rows, "overhaul")
+    if values["count"] >= c["every"]:
+        trig.append("count")
+    last_ov = max((i for i, r in enumerate(rows) if r.get("depth") == "overhaul" and r.get("event") == "ran"), default=-1)
+    reviews = _ran(rows[last_ov + 1 :], "review")[-c["streak"] :]
+    if len(reviews) >= c["streak"]:
+        if all((r.get("created") or 0) > (r.get("closed") or 0) for r in reviews):
+            trig.append("created_over_closed")
+        if all((r.get("open_after") or 0) > (r.get("open_before") or 0) for r in reviews):
+            trig.append("open_rising")
+    top, share = cause_share(list(causes), list(types), open_numbers)
+    values["cause_share"] = {"type": top, "share": round(share, 4)}
+    if top and share > c["cause_share"]:
+        trig.append("cause_share")
+    return trig, values
+
+
 def due(
     depth: str, rows: list[dict], cfg: dict, *, open_now: int | None, no_issue=False, manual=False, causes=(), types=(), open_numbers=None
 ):
     """(起動した条件, 判定に使った値)。条件が空なら起動しない。"""
-    trig, values = [], {}
-    if manual:
-        trig.append("manual")
     if depth == "review":
-        c = cfg["review"]
-        values["count"] = diffs_since(rows, "review")
-        if values["count"] >= c["every"]:
-            trig.append("count")
-        if no_issue:
-            trig.append("no_issue")
-        prev = next((r for r in reversed(_ran(rows, "review")) if isinstance(r.get("open_after"), int)), None)
-        if prev and open_now is not None and prev["open_after"] > 0:
-            values["open_growth"] = round((open_now - prev["open_after"]) / prev["open_after"], 4)
-            if values["open_growth"] >= c["open_growth"]:
-                trig.append("open_growth")
-        last_diff = next((r for r in reversed(_ran(rows, "diff"))), None)
-        carry = ((last_diff or {}).get("values") or {}).get("carry")
-        if isinstance(carry, int):
-            values["carry"] = carry
-            if carry > c["carry_factor"] * cfg["candidate_limit"]:
-                trig.append("carry")
+        trig, values = _due_review(rows, cfg, open_now, no_issue)
     else:
-        c = cfg["overhaul"]
-        values["count"] = diffs_since(rows, "overhaul")
-        if values["count"] >= c["every"]:
-            trig.append("count")
-        last_ov = max((i for i, r in enumerate(rows) if r.get("depth") == "overhaul" and r.get("event") == "ran"), default=-1)
-        reviews = _ran(rows[last_ov + 1 :], "review")[-c["streak"] :]
-        if len(reviews) >= c["streak"]:
-            if all((r.get("created") or 0) > (r.get("closed") or 0) for r in reviews):
-                trig.append("created_over_closed")
-            if all((r.get("open_after") or 0) > (r.get("open_before") or 0) for r in reviews):
-                trig.append("open_rising")
-        top, share = cause_share(list(causes), list(types), open_numbers)
-        values["cause_share"] = {"type": top, "share": round(share, 4)}
-        if top and share > c["cause_share"]:
-            trig.append("cause_share")
+        trig, values = _due_overhaul(rows, cfg, causes, types, open_numbers)
+    if manual:
+        trig.insert(0, "manual")
     if open_now is not None:
         values["open"] = open_now
     return trig, values
