@@ -1,0 +1,491 @@
+/* 部品の見た目。値はデザインのトークン（tokens.json → CSS の変数）で引く。
+   ブレークポイントは 768px（一覧を表へ）と 1024px（案内を横へ）の 2 つ。メディアクエリは変数を使えないため値をここに書く */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-base);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+  line-height: var(--font-line-height);
+  overflow-wrap: anywhere;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+h1,
+h2,
+p,
+dl,
+ul {
+  margin-top: 0;
+}
+
+/* 枠 */
+.ui-shell__bar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ui-shell__brand {
+  font-weight: var(--font-weight-bold);
+  margin-right: auto;
+}
+
+.ui-shell__main {
+  max-width: var(--size-content);
+  margin: 0 auto;
+  padding: var(--space-4);
+}
+
+.ui-login {
+  max-width: 480px;
+  padding-top: var(--space-8);
+}
+
+/* ナビゲーション。1024px 未満はメニューのボタンで開く */
+.ui-nav {
+  order: 3;
+  width: 100%;
+}
+
+.ui-nav__toggle {
+  min-height: var(--size-touch);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-base);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.ui-nav__links {
+  display: none;
+  flex-direction: column;
+  padding-top: var(--space-2);
+}
+
+.ui-nav__links--open {
+  display: flex;
+}
+
+.ui-nav__link {
+  display: flex;
+  align-items: center;
+  min-height: var(--size-touch);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+}
+
+.ui-nav__link[aria-current="page"] {
+  background: var(--color-info-bg);
+  font-weight: var(--font-weight-bold);
+}
+
+@media (min-width: 1024px) {
+  .ui-nav {
+    order: 0;
+    width: auto;
+  }
+
+  .ui-nav__toggle {
+    display: none;
+  }
+
+  .ui-nav__links {
+    display: flex;
+    flex-direction: row;
+    gap: var(--space-1);
+    padding-top: 0;
+  }
+}
+
+/* つながりの状態 */
+.ui-connection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.ui-connection__main,
+.ui-connection__pending {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+}
+
+.ui-connection--online .ui-connection__main {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.ui-connection--offline .ui-connection__main {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.ui-connection__pending {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+/* 画面の題 */
+.ui-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.ui-page-header__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+}
+
+.ui-page-header__actions,
+.ui-row,
+.ui-links,
+.ui-approval {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ui-stack,
+.ui-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.ui-section {
+  margin: var(--space-6) 0;
+}
+
+.ui-section__title {
+  font-size: var(--font-size-lg);
+}
+
+.ui-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--size-touch);
+}
+
+.ui-wrap {
+  overflow-wrap: anywhere;
+}
+
+.ui-plain-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ui-card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.ui-code {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* ボタン */
+.ui-button {
+  min-height: var(--size-touch);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-base);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-button--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.ui-button--danger {
+  background: var(--color-base);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.ui-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 入力 */
+.ui-field,
+.ui-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.ui-field__label {
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+}
+
+.ui-field__control {
+  min-height: var(--size-touch);
+  width: 100%;
+  max-width: 480px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-base);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.ui-search {
+  margin-bottom: var(--space-4);
+}
+
+.ui-field__error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+/* 操作の結果の文 */
+.ui-alert {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.ui-alert--info {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.ui-alert--success {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.ui-alert--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* 状態の札 */
+.ui-badge {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.ui-badge--neutral {
+  background: var(--color-neutral-bg);
+  color: var(--color-neutral);
+}
+
+.ui-badge--info {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.ui-badge--success {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.ui-badge--warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.ui-badge--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* 空・読み込み中・失敗 */
+.ui-state {
+  padding: var(--space-6) var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.ui-state--error {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.ui-approval__note {
+  width: 100%;
+  margin: 0;
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+}
+
+/* 名前と値の組。768px 未満は縦に積む */
+.ui-details {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.ui-details__row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+}
+
+.ui-details dt {
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.ui-details dd {
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .ui-details__row {
+    grid-template-columns: minmax(12rem, 1fr) 3fr;
+  }
+}
+
+/* 一覧。768px 未満は 1 行を 1 枚のカードに積む */
+.ui-datalist {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ui-datalist thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.ui-datalist tbody,
+.ui-datalist tr,
+.ui-datalist td {
+  display: block;
+}
+
+.ui-datalist__row {
+  position: relative;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.ui-datalist td {
+  padding: var(--space-1) 0;
+}
+
+.ui-datalist td::before {
+  content: attr(data-label);
+  display: block;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* 行のどこを押しても 1 列目のリンクへ移る */
+.ui-datalist__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.ui-datalist__row--link:hover {
+  background: var(--color-surface);
+}
+
+@media (min-width: 768px) {
+  .ui-datalist thead {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    display: table-header-group;
+  }
+
+  .ui-datalist tbody {
+    display: table-row-group;
+  }
+
+  .ui-datalist tr {
+    display: table-row;
+  }
+
+  .ui-datalist th,
+  .ui-datalist td {
+    display: table-cell;
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .ui-datalist th {
+    background: var(--color-surface);
+    font-size: var(--font-size-sm);
+  }
+
+  .ui-datalist__row {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .ui-datalist td::before {
+    content: none;
+  }
+}

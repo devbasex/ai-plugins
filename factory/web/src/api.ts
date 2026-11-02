@@ -116,6 +116,8 @@ export interface Api {
   startSprintRun(id: string, repositoryId: number, issues: number[]): Promise<{ sprint_run_id: string; state: string }>;
   // repositoryId を省くとアカウントの新しい順の 50 件（画面は 1 回だけ呼んでリポジトリごとに分ける）
   sprintRuns(id: string, repositoryId?: number): Promise<{ sprint_runs: SprintRunSummary[] }>;
+  // 実行の ID の配列で受け、見つかった要素の配列を返す（1 件のときも要素 1 個の配列）。見つからない ID の要素は返さない
+  sprintRunDetails(id: string, sprintRunIds: string[]): Promise<SprintRunSummary[]>;
   cancelSprintRun(id: string, sprintRunId: string): Promise<{ state: string }>;
 }
 
@@ -123,7 +125,7 @@ export interface Api {
 export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (...a) => fetch(...a)): Api {
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = auth.getToken();
-    if (!token) throw new ApiFailure(401, "unauthorized", "ログインしてください");
+    if (!token) throw new ApiFailure(401, "unauthorized", "unauthorized");
     const res = await doFetch(`${apiUrl}${path}`, {
       method,
       headers: {
@@ -163,6 +165,12 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     startSprintRun: (id, repository_id, issues) => request("POST", `/accounts/${seg(id)}/sprint-runs`, { repository_id, issues }),
     sprintRuns: (id, repositoryId) =>
       request("GET", `/accounts/${seg(id)}/sprint-runs${repositoryId === undefined ? "" : `?repository_id=${repositoryId}`}`),
+    // 詳細の経路はまだ無いため、アカウントの新しい順の 50 件から選ぶ。#2172 が詳細の経路を足したらここだけを差し替える
+    sprintRunDetails: async (id, sprintRunIds) => {
+      const wanted = new Set(sprintRunIds);
+      const { sprint_runs } = await request<{ sprint_runs: SprintRunSummary[] }>("GET", `/accounts/${seg(id)}/sprint-runs`);
+      return sprint_runs.filter((r) => wanted.has(r.sprint_run_id));
+    },
     cancelSprintRun: (id, sprintRunId) => request("POST", `/accounts/${seg(id)}/sprint-runs/${seg(sprintRunId)}/cancel`),
   };
 }
