@@ -91,7 +91,7 @@ def item_path(root, item_id: str) -> Path:
     return D.backlog_dir(root) / "research" / f"{aspect}--{_item_slug(target)}.item.json"
 
 
-def read_item(root, item_id: str) -> dict | None:
+def read_research_item(root, item_id: str) -> dict | None:
     """項目の記録。前の版のファイル名の記録は、記録の id がその項目のときだけ読む（同じ名前に上書きされた別の項目を読まない）。"""
     rec = jsonio.read(item_path(root, item_id), missing=None, broken=None, want=dict)
     if rec is None:
@@ -154,7 +154,7 @@ def plan(root, since: str | None) -> dict:
     cut = _iso_epoch(since)
     todo, fresh = [], []
     for it in items:
-        rec = read_item(root, it["id"])
+        rec = read_research_item(root, it["id"])
         checked = _iso_epoch((rec or {}).get("checked_at"))
         if checked is None or (cut is not None and checked < cut):
             todo.append(it["id"])
@@ -179,7 +179,7 @@ def consulted(root, run: str | None) -> dict:
     if run:
         done = []
         for it in items:
-            rec = read_item(root, it["id"]) or {}
+            rec = read_research_item(root, it["id"]) or {}
             if (rec.get("by") or {}).get("run") == run:
                 done.append({"id": it["id"], "checked_at": rec.get("checked_at"), "sources": len(rec.get("sources") or [])})
         out["researched"], out["sources"] = done, sum(x["sources"] for x in done)
