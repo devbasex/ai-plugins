@@ -108,7 +108,7 @@ erDiagram
 | スプリントの実行 | `RUN#<sprintRunId>` | `RUN` | `ACCOUNT#<accountId>` / `RUN#<createdAt>` |
 | 実行ジョブ | `JOB#<jobId>` | `JOB` | `ACTIVE_JOBS` / `<createdAt>#<jobId>`（終わりの状態でない間だけ。終わりへ移すときに外す） |
 
-列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のランナーの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [#2347 の設計の「データ構造」](../../issues/issue-2347-design.md#データ構造) にある。
+列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のランナーの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [開発ループの確定仕様の「実行の表の行」](ndf-factory-dev-loops-data-and-contracts.md#実行の表の行) にある。
 
 | 行 | 列 | 型 | 空 | 意味 |
 | --- | --- | --- | --- | --- |

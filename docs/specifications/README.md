@@ -121,6 +121,7 @@
 | [ndf-worker-stage-skills.md](ndf-worker-stage-skills.md) | プランの worker と ndf:worker へ、ステップの工程に要る規則の Skill だけを届ける仕組み。Skill の対応表（stage-skills.json）と規則の Skill の一覧、プランの skills・skills_add 欄と流す前の検査、本文を system プロンプトへ入れる渡し方と起動指示の「読む Skill」、進捗ログの kind: skills の行、stage-skills.py lookup。規約は supervise_lib/plan.py と agent-layers.md が正 |
 | [ndf-supervise-verification-mark-after-ok.md](ndf-supervise-verification-mark-after-ok.md) | まとめのプランで「リリース後テスト」の進行の印を、記録を投稿したステップが ok で終わった後に付けること（STAGES_AFTER_OK・record_stage の after_ok・release-verify の worker は進捗記録を打たない）、ほかの工程は始めに付けること、印と記録が食い違いうる経路（#2288・#2356）。プランの外の印の時点は release-verification が正 |
 | [ndf-factory-dev-loops.md](ndf-factory-dev-loops.md) | Neural Development Factory: 開発ループ（集約・状態の写し方・周回の開始）・同じリポジトリで並行する実行の取り合い（課題・マイルストーンの持ち分・NDF の版・同時の数）・移行の埋め戻し・ランナーの区間と ndf-next・形態 local の利用上限・手元のランナーの同時のジョブの数・loops.yaml の経路。#2347 |
+| [ndf-factory-dev-loops-data-and-contracts.md](ndf-factory-dev-loops-data-and-contracts.md) | Neural Development Factory: 開発ループの実行の表の行・移行の済みの行と埋め戻し・環境変数と、実行ジョブの指示・進捗の事象・ndf-next の受け渡しの形・手元のランナーの申告・loops.yaml の経路の契約（ndf-factory-dev-loops.md から分けた）。#2347 |
 | [ndf-factory-ui-components.md](ndf-factory-ui-components.md) | Neural Development Factory: Web の画面の部品の一覧と使い分け・デザインのトークン・端末の幅・文言と書式（国際化）・API クライアントとダミー・つながりの状態・常に成り立つ条件・検査（check:source・check:bundle・E2E）。#2382 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
