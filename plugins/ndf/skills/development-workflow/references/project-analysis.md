@@ -70,7 +70,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 | --- | --- | --- |
 | `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置き場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を答えとして示し、手元で全体テストを回さない方針があるときだけ書き換える |
 | `branches`（P6） | `{"base": "<起点>", "production": "<本番>"}` | origin の HEAD・直近 100 件のマージ先・最後のコミットの日時を見る。長くコミットの無いブランチ（`develop` など）は採らない |
-| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "branch"?, "versioned", "production"?}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める。`production`（本番系へ届くか。[pace.md](pace.md) の「手動反映の本番系の形」）は解析では書かず、利用者が書く |
+| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "channel"?: "production" / "base", "branch"?, "versioned", "production"?}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める。本番のブランチ・起点のブランチへのマージで動く行は `channel`（`"production"` / `"base"`）で書き、ブランチ名を写さない。`branch` はほかのブランチで動く行だけに書く（`write` は本番・起点の名前を写した `branch` を `channel` に直す）。`production`（本番系へ届くか。[pace.md](pace.md) の「手動反映の本番系の形」）は解析では書かず、利用者が書く |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 
@@ -101,9 +101,24 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は宣言・差分・出力のどれにも出ない
 - `.ndf/worktree.json` には、`base_branch`・`production_branch` のうち無いキーだけを足す。ほかのキーと順序は変えない
 - 解析の結果が前と同じなら、ファイルを書かない
-- 宣言はメインディレクトリの `.ndf/` に書き、コミットは利用者に任せる。要らなければコミットしない。`.gitignore` の対象なら、そのことが出力に出る
+- 宣言はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
 
 宣言の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`project-decl.py schema` の生成物）。
+
+## `.ndf/` の追跡
+
+**`.ndf/` は追跡する（コミットしてチームで共有する）のが標準である。** 宣言（`project.json`・`worktree.json`・`mvv.md`・`mvv.json`・`glossary.json` など）は
+clone した全員と CI で同じ値のまま効き、変える Pull Request を承認ゲートで人が見る（共通原則の C7）。追跡から外すのは次の 2 種類だけである。
+
+| 外すもの | 外し方 |
+| --- | --- |
+| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `worktree-setup.sh init` が作る |
+| 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
+
+ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
+宣言を書く・確かめるコマンド（`project-mvv.py approve` / `check`・`project-decl.py write`・`glossary.py init`）は、宣言が `.gitignore` の対象なら
+`status: ok` のまま、除外している行（`<ファイル>:<行>` とパターン）と対象のファイルを `items`（`kind: note`・`key: gitignore`・`result: ignored`）と
+要約に出す。検出は `scripts/lib/ndf_tracking.py` が持つ。
 
 ## 指示書の案内
 

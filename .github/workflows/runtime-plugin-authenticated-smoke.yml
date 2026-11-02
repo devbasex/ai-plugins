@@ -12,8 +12,6 @@ on:
           - all
           - claude
           - codex
-          - kiro
-          - agy
 
 jobs:
   authenticated-smoke:

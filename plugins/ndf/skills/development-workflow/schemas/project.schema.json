@@ -193,6 +193,22 @@
           "default": null,
           "title": "Branch"
         },
+        "channel": {
+          "anyOf": [
+            {
+              "enum": [
+                "production",
+                "base"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
         "versioned": {
           "title": "Versioned",
           "type": "boolean"

@@ -125,7 +125,7 @@ run のステップ:
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに置き換わる
-- `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`: 終了コードを読んだら `skip_to` の次・関門（10〜19）の
+- `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`（run と drive。drive は 0・1 と、欠けの残る終わりの 6）: 終了コードを読んだら `skip_to` の次・関門（10〜19）の
   前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
   <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
   鍵が整数でない・行き先が知らないステップの id なら、ステップを流す前に `結果: 止まった`
@@ -142,7 +142,13 @@ run のステップ:
 
 queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull Request（空白区切り）、`{queue_pr:<計画名>}` は
 名前（ファイル名の stem か、その末尾の `-<計画名>`）が一致する計画の Pull Request 1 本（前のステージに無ければ
-同じディレクトリの計画の報告。無い・飛ばされたなら `0`）
+同じディレクトリの計画の報告。完了して Pull Request が無い・飛ばされたなら `0`）、`{queue_state:<計画名>}` は
+同じ名前の計画の状態ディレクトリの絶対パス。名前の一致する計画の結果（完了した報告・状態ディレクトリ）が見つからなければ
+埋めずに、そのプランを流さない（`0`・空文字で黙って埋めない。#2079）。`{queue_state?:<計画名>}` は無いことを読む側が扱う差し込みで、無ければ空文字で埋め、残っても止めない。
+`{queue_record}` は計画の `課題` のリリース記録（`## 配布の記録`）を置いた PR の番号で、課題を閉じる PR とそれを参照する PR を
+GitHub から読み、段階が本番か配布なしで `スプリント:` がその閉じる PR を含む記録を採る。見つからない・2 つ以上のスプリントに
+ある・GitHub を読めなければ、同じく埋めずにそのプランを流さない（#2230）。置き換わらずに `{queue_pr:…}`・`{queue_state:…}`・
+`{queue_record}` が残ったコマンドのステップは、run でも queue でもコマンドを打たずに止まる
 
 ステップの遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
@@ -202,6 +208,13 @@ from pathlib import Path
 
 # queue が --then のプランを流す前に、先行のプランの Pull Request の番号へ置き換える印
 QUEUE_PRS = "{queue_prs}"
+# queue が名前の一致する計画の結果とリリース記録で置き換える差し込み（{queue_pr:<名>}・{queue_state:<名>}・{queue_record}）
+QUEUE_NAMED = re.compile(r"\{queue_(?:pr|state):[A-Za-z0-9._-]+\}|\{queue_record\}")
+
+
+def leftover_placeholders(text: str) -> list[str]:
+    """置き換わらずに残った {queue_pr:<名>}・{queue_state:<名>}・{queue_record}（出た順、重なりは 1 つ。#2079・#2230）。"""
+    return list(dict.fromkeys(QUEUE_NAMED.findall(text or "")))
 
 
 def sprint_state_path(a) -> str:

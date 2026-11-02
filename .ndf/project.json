@@ -5,8 +5,14 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 917,
+      "files": 960,
       "version": "3.11"
+    },
+    {
+      "name": "typescript",
+      "frameworks": [],
+      "files": 100,
+      "version": "24"
     },
     {
       "name": "shell",
@@ -16,7 +22,8 @@
     {
       "name": "javascript",
       "frameworks": [],
-      "files": 8
+      "files": 8,
+      "version": "24"
     }
   ],
   "test": {
@@ -58,7 +65,26 @@
         "paths": [
           "plugins/ndf",
           "scripts/script-structure-allow",
+          "scripts/lib",
           "scripts/check-script-structure.py"
+        ],
+        "ci_jobs": [
+          ".github/workflows/script-structure.yml"
+        ]
+      },
+      {
+        "name": "ndf-contracts",
+        "runner": "check-ndf-contracts",
+        "kind": "lint",
+        "command": "python3 scripts/check-ndf-contracts.py",
+        "scope_command": "python3 scripts/check-ndf-contracts.py {paths}",
+        "needs": [],
+        "paths": [
+          "plugins/ndf",
+          "scripts/contract-allow",
+          "scripts/contracts_lib",
+          "scripts/lib",
+          "scripts/check-ndf-contracts.py"
         ],
         "ci_jobs": [
           ".github/workflows/script-structure.yml"
@@ -105,9 +131,9 @@
   "test_duration": {
     "measured": [
       {
-        "seconds": 1113.0,
+        "seconds": 1548.0,
         "source": "ci-steps",
-        "detail": "run 40160663747（.github/workflows/pytest.yml）のテストの step 4 個の合計"
+        "detail": "run 41193796288（.github/workflows/pytest.yml）のテストの step 4 個の合計"
       }
     ]
   },
@@ -115,29 +141,34 @@
     "provider": "github-actions",
     "workflows": [
       {
-        "path": ".github/workflows/glossary.yml",
+        "path": ".github/workflows/factory-check.yml",
         "jobs": 1,
         "wall_seconds": 10.0
       },
       {
-        "path": ".github/workflows/lint.yml",
-        "jobs": 1,
-        "wall_seconds": 15.0
-      },
-      {
-        "path": ".github/workflows/pr-base-guard.yml",
-        "jobs": 1,
-        "wall_seconds": 8.0
-      },
-      {
-        "path": ".github/workflows/pr-body-decisions.yml",
+        "path": ".github/workflows/glossary.yml",
         "jobs": 1,
         "wall_seconds": 9.0
       },
       {
+        "path": ".github/workflows/lint.yml",
+        "jobs": 1,
+        "wall_seconds": 19.0
+      },
+      {
+        "path": ".github/workflows/pr-base-guard.yml",
+        "jobs": 1,
+        "wall_seconds": 10.0
+      },
+      {
+        "path": ".github/workflows/pr-body-decisions.yml",
+        "jobs": 1,
+        "wall_seconds": 11.0
+      },
+      {
         "path": ".github/workflows/pytest.yml",
         "jobs": 4,
-        "wall_seconds": 616.0
+        "wall_seconds": 922.0
       },
       {
         "path": ".github/workflows/runtime-plugin-authenticated-smoke.yml",
@@ -150,17 +181,17 @@
       {
         "path": ".github/workflows/runtime-plugin-smoke.yml",
         "jobs": 5,
-        "wall_seconds": 65.0
+        "wall_seconds": 73.0
       },
       {
         "path": ".github/workflows/runtime-plugin-validate.yml",
-        "jobs": 9,
-        "wall_seconds": 28.0
+        "jobs": 10,
+        "wall_seconds": 113.0
       },
       {
         "path": ".github/workflows/script-structure.yml",
         "jobs": 1,
-        "wall_seconds": 15.0
+        "wall_seconds": 26.0
       },
       {
         "path": "dynamic/pages/pages-build-deployment",
@@ -180,10 +211,8 @@
       "required-checks-check",
       "runtime-plugin-build-check",
       "runtime-plugin-validate",
-      "runtime-smoke (agy)",
       "runtime-smoke (claude)",
       "runtime-smoke (codex)",
-      "runtime-smoke (kiro)",
       "script-structure-check",
       "skill-frontmatter-check",
       "skill-repo-assumptions-check",
@@ -197,10 +226,10 @@
   },
   "delivery": [
     {
-      "target": "ndf プラグイン（Claude Code・Codex・Kiro）",
+      "target": "ndf プラグイン（Claude Code・Codex）",
       "kind": "manual",
       "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
-      "branch": "main",
+      "channel": "production",
       "versioned": true
     }
   ],
@@ -233,8 +262,9 @@
   },
   "analysis": {
     "analyzer": 2,
-    "at": "2026-10-25T04:18:08+00:00",
+    "at": "2026-10-31T11:01:54+00:00",
     "inputs": {
+      ".github/workflows/factory-check.yml": "60a41abee313ad075bbf9d67c00189cdbaf586b8",
       ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
       ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
       ".github/workflows/pr-base-guard.yml": "71c0cda668b533694c48064813b68bbd03cd6efc",
@@ -243,11 +273,13 @@
       ".github/workflows/runtime-plugin-authenticated-smoke.yml": "15e89f83316c0f275f94c1dfff1981a0add61477",
       ".github/workflows/runtime-plugin-smoke-latest.yml": "4495e9fe0d54537c07e98dc93d5592258801261c",
       ".github/workflows/runtime-plugin-smoke.yml": "ff951c3adc274597eba75904fe5498f5f9175d4e",
-      ".github/workflows/runtime-plugin-validate.yml": "ff3bfbce63461fca5e024045154bf53487cf16f6",
+      ".github/workflows/runtime-plugin-validate.yml": "63ee3f6bfcbe835e49d6b1c0ae7e6e9cd46aea94",
       ".github/workflows/script-structure.yml": "8d07e6bbe7a20e80da9d8fa830d53be7c698a254",
-      "AGENTS.md": "1f92a717ed8590f528efe8132975c288a16bf6b9",
+      "AGENTS.md": "afdd75dfc8cb7feab6f377bfc388ad10d809bbf6",
       "CLAUDE.md": "3e34760f5ad5d1df9f965f1acb795e279babdb1a",
       "KIRO.md": "f15c72bb7ec964a5c3b04e649972d3948f03b12a",
+      "factory/package.json": "b3ad8f1459190e4c84dc35405c85c69d6a7293d1",
+      "factory/vitest.config.ts": "5072b0ecad3046aaa51fbabedfbfa87c80416f15",
       "pyproject.toml": "4fe2a1d2450f2ce5a90e34f20340a467e35d0d01",
       "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
     },
@@ -259,9 +291,9 @@
       ]
     },
     "written": {
-      "languages": "320a7cb8a0983114f280919dfd4a931307ee34f149b1983226b870e32817124f",
-      "test_duration": "3dc9bfb50364d4c9e4fea7b4ec4f17084026c8d9d7168f8c87b33647c60aad01",
-      "ci": "110c8db4b84130256ae88b38e3e4ece30c91da1c568be8cc6ac8b564864d8ab4",
+      "languages": "a700a1292f7f5c86d732ecceefdc71ada29f66dcd9beb78111f49ba0a9054a3d",
+      "test_duration": "cd482f866f6a3710186622c27a6a5822f95a789d55ae82bec88f634ddc74c9a5",
+      "ci": "62c607bae178d146a8f2bf78f8ac155f11ace605527099bbacec6963e0f8d412",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
       "delivery": "d4f1c6e5121b913e9147eb9552c3c78f2a4944bba1562c14c6a4056b1da7ac77",
       "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",

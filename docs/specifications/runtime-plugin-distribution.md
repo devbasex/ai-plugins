@@ -1,5 +1,7 @@
 # Runtime Plugin Distribution 仕様
 
+> **配布先は Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI への配布・導入物・生成・検査・スモークの記述は配布先を 4 つにしていた時点のもので、配布先については [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+
 ## 概要
 
 AI Plugins marketplace は、Claude Code / Codex / Kiro CLI / agy へ同じ plugin を配布する。
@@ -324,6 +326,5 @@ MCP plugin を変更する場合:
 - [NDF プラグイン README](../../plugins/ndf/README.md)
 - [playwright-kit プラグイン README](../../plugins/playwright-kit/README.md)
 - [Runtime Smoke の CLI の版](runtime-smoke-cli-versions.md)
-- [`scripts/lib/agy_agents.py`](../../scripts/lib/agy_agents.py)（agy に配る定義の生成と model の対応表）
 - [Agent Plugins 仕様](https://github.com/agentplugins/agent-plugins-spec)
 - 課題 [#2087](https://github.com/devbasex/ai-plugins/issues/2087)（agy に配るエージェント定義）

@@ -31,7 +31,6 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
-    prod_of,
     write_record,
     open_record,
     current_lap,
@@ -63,8 +62,30 @@ def select_cmd(name: str) -> str:
     return f"python3 {shlex.quote(str(SPRINT_STATE))} loop select {name}"
 
 
+QUEUE_MAX = 3  # まとめの queue の同時に流す計画の上限（supervise.py queue --max）
+
+
+def queue_command(stages: list[list[str]], done: Path) -> str:
+    """まとめの queue の 1 行: 先頭のステージを --max で流し、残りのステージを --then でつなぎ、--done で終わる。"""
+    head = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + f" --max {QUEUE_MAX}"
+    return head + "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}"
+
+
 def wait_lap(rec: dict, done: Path) -> str:
     return f"python3 {shlex.quote(str(SUPERVISE))} wait {shlex.quote(str(done))} && python3 {shlex.quote(str(SPRINT_STATE))} loop lap {rec['name']} --done {shlex.quote(str(done))}"
+
+
+def sprint_pipeline(index: list[dict], close: list[str], done: Path, rec: dict) -> tuple[str, str]:
+    """manifest のステージ配列から queue と pipeline の文字列を組む。最初の command の後に手で行うステージか
+    別の command（単独の queue の承認ゲート 2）があれば、それを終えるまでまとめへ進めない。"""
+    first = next(e for e in index if e.get("command"))
+    hands = [e for e in index[index.index(first) + 1 :] if e.get("command") or "manual" in e]  # 関門は queue と loop gate が扱う
+    if not hands:
+        queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
+        return queue, f"{queue} && {wait_lap(rec, done)}"
+    queue = queue_command([close], done)
+    todo = " → ".join(e.get("command") or f"{e['name']}（{e['manual']} で行う）" for e in hands)
+    return queue, f"{first['command']} を流し、続けて {todo} を終えてから: {queue} && {wait_lap(rec, done)}"
 
 
 def refusal_order(summary: str) -> dict:
@@ -74,20 +95,18 @@ def refusal_order(summary: str) -> dict:
 # ---------------------------------------------------------------- sprint
 
 
-def build_close(env: Env, rec: dict, lap: dict, issues: list[int], record_pr=None, tag: str = "close") -> list[str]:
-    """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。"""
+def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "close") -> list[str]:
+    """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。
+    記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。
+    版も渡さない。周回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
+    まとめの配布の版は流す時点に次に空いている版で決める（#2164）。"""
     prev = rec["laps"][lap["n"] - 2] if lap["n"] >= 2 else None
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
     cmd = [sys.executable, str(SUPERVISE), "new", "close", "--pace", "auto", "--name", lap["sprint"], "--worktree", str(env.main_dir())]
     cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", lap.get("mode") or "standard"]
-    v = lap.get("versions") or {}
-    if v.get("dev"):
-        cmd += ["--version", v["dev"], "--prod", v.get("prod") or prod_of(v["dev"])]
     if carry:
         cmd += ["--carry", *map(str, carry)]
-    if record_pr:
-        cmd += ["--record-pr", str(record_pr)]
     if lap.get("milestone"):
         cmd += ["--milestone", lap["milestone"]]
     code, so, se = env.run(cmd, cwd=str(env.main_dir()))
@@ -340,8 +359,7 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
     stages.append(build_close(env, rec, lap, kept, tag=tag))
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
-    head = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + " --max 3"
-    return head + "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}", done
+    return queue_command(stages, done), done
 
 
 GATE_2_RESUME_STEPS = ("bump", "promote-approved", "merge-approved")  # 承認ゲート 2 の承認の後に入るステップ（pace.md の続け方）

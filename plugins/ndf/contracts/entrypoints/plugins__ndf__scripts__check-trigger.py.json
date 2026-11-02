@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/check-trigger.py",
+  "summary": "check-trigger.py: 検査（構造改善と実装レビュー）のトリガーを判定し、検査の範囲の用意と後始末と記録を持つ（#1078）。",
+  "args": {
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "TMPDIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/clock.py",
+    "plugins/ndf/scripts/lib/merged_range.py",
+    "plugins/ndf/scripts/lib/pace.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py"
+  ]
+}

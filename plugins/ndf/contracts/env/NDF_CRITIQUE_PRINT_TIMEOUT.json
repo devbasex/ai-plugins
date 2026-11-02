@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CRITIQUE_PRINT_TIMEOUT",
+  "set_by": "user",
+  "summary": "NDF_CRITIQUE_PRINT_TIMEOUT。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/skills/cross-review/scripts/critique.sh:156）が決める"
+}

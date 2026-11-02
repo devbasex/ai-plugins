@@ -7,6 +7,13 @@
   "作業場所": "<TMP>/repo/.worktrees/release/v1.2.0",
   "branch": "release/v1.2.0",
   "起点": "origin/main",
+  "版": {
+    "プラグイン": "foo",
+    "チャネル": "prod",
+    "上げ幅": "patch",
+    "明示": "1.2.0",
+    "系列": null
+  },
   "規則": "関門 2 は利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。",
   "上限": 100,
   "steps": [
@@ -31,6 +38,10 @@
       "type": "run",
       "stage": "配布",
       "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0 --base main",
+      "on_exit": {
+        "2": "stop",
+        "3": "stop"
+      },
       "on_fail": "judge",
       "next": "bump-others"
     },
@@ -95,7 +106,7 @@
     {
       "id": "verify",
       "type": "run",
-      "stage": "リリース後テスト",
+      "stage": "配布",
       "timeout": 1500,
       "cwd": "<TMP>/repo",
       "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0 --runtimes claude'",
@@ -175,6 +186,14 @@
       "cmd": "sh -c 'python3 <NDF>/scripts/sprint-state.py gate \"$1\" \"$2\" --withdraw >/dev/null || echo \"$2 の MVV 判定の記録を外せなかった\"; echo \"$3\"; exit 10' handoff <TMP>/out/sprint/sprint.json '関門 2' '判定のコメントが失敗した。関門 2 は自動で通さず、利用者の承認を求める'",
       "gate_next": "end",
       "next": "end"
+    },
+    {
+      "id": "reject",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/sprint-state.py gate <TMP>/out/sprint/sprint.json '関門 2' --what '関門 2 で差し戻された（直して再提示する）' --by user --outcome rejected --root <TMP>/repo",
+      "next": "mvv",
+      "from_only": true
     }
   ],
   "base_branch": "main",

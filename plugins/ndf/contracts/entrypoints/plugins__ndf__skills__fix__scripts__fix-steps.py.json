@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/fix/scripts/fix-steps.py",
+  "summary": "fix-steps.py: `/ndf:fix` の手順のうち、判断の要らない取得と集計を行う。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "context": {
+        "options": [
+          "--repo",
+          "--root"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "finalize": {
+        "options": [
+          "--decisions",
+          "--no-sync",
+          "--out",
+          "--pr",
+          "--repo",
+          "--root",
+          "--sync-script"
+        ],
+        "positionals": []
+      },
+      "remaining": {
+        "options": [
+          "--repo",
+          "--result"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "CROSS_REVIEW_STATE",
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/body_findings.py",
+    "plugins/ndf/scripts/lib/design_body.py",
+    "plugins/ndf/scripts/lib/review_criteria.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py"
+  ]
+}

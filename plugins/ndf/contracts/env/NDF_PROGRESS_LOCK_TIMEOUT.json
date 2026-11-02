@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PROGRESS_LOCK_TIMEOUT",
+  "set_by": "user",
+  "summary": "NDF_PROGRESS_LOCK_TIMEOUT。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/progress-record.sh:154）が決める"
+}

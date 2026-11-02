@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/lib/limits.py",
+  "name": "safe_int_env",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/scripts/lib/limits.py の safe_int_env）。静的に拾えない"
+}

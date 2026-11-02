@@ -1,0 +1,7 @@
+{
+  "name": "rank-json",
+  "pattern": "rank.json",
+  "kind": "result",
+  "place": "tmp",
+  "skill_readers": []
+}

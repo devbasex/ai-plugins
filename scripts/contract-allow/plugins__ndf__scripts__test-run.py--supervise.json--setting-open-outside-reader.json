@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/test-run.py",
+  "name": "supervise.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/supervise.json を開く（_supervise_decl。plugins/ndf/scripts/test-run.py:51））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

@@ -234,6 +234,7 @@ graph TD
 | スプリントの実行 | 実行の制御（#2186） | スプリントの実行 | 実行ジョブ | NDF の版・スプリントの状態・ジョブの結果 |
 | 実行の枠 | 実行の制御（#2186） | アカウントの枠 | — | 終わりの状態でない数（アカウント全体・リポジトリごと） |
 | 進捗の記録 | 進捗の受け口（#2171） | スプリントの実行の識別子ごとの列 | 進捗の事象 | 種類・発生の時刻・冪等の鍵 |
+| 起票の依頼の台帳 | 起票の代行 | スプリントの実行ごとの台帳 | 依頼（中身の要約値ごと） | 状態・起票した数 |
 | 承認の依頼 | 承認（#2173） | 承認の依頼 | — | 種類（ゲート 1・ゲート 2・判断）・答え |
 | 使用量の記録 | 課金（#2174） | アカウントと月ごとの台帳 | 使用量の行 | モデル・入力と出力の token・費用 |
 
@@ -301,7 +302,7 @@ erDiagram
 | `runner` | `<job_id>:<seq>`（`seq` はジョブの中で 1 から増やす）。`job.finished` だけは `<job_id>:finished` | ランナーが事象を作った時刻 |
 | `github` | `github:<X-GitHub-Delivery の値>` | 本文の対象の更新時刻（`pull_request.updated_at`、チェックは `check_run.completed_at`、無ければ `check_run.started_at`）。受け取った時刻は使わない |
 | `api` | `api:<承認の依頼の識別子>`。1 つの依頼への答えは 1 つ | API が答えを受け付けた時刻 |
-| `control` | `<job_id>:finished` | 実行の制御が ECS の停止の知らせを受けた時刻 |
+| `control` | `job.finished` は `<job_id>:finished`。`issue.request_resolved` は `<依頼の冪等の鍵>:resolved`（依頼 1 件に結果は 1 件） | `job.finished` は実行の制御が ECS の停止の知らせを受けた時刻、`issue.request_resolved` は起票の代行が結果を決めた時刻 |
 
 **重複の拒否は、冪等の鍵の表への条件つきの書き込みと事象の書き込みを 1 つのトランザクションで行う。** 冪等の鍵が既にあればトランザクションごと書かない。`job.finished` はランナーと実行の制御が同じ鍵を使うため、先に書いた 1 つだけが残る。
 
@@ -309,6 +310,7 @@ erDiagram
 | --- | --- | --- | --- | --- |
 | 進捗の受け口（#2171） | C | — | R（`gate.answered` の照合） | — |
 | 実行の制御（#2186） | C（`job.*`） | C・U | R | — |
+| 起票の代行 | R（`issue.requested`）・C（`issue.request_resolved`） | R | — | — |
 | 一覧と詳細（#2172） | R | R | R | — |
 | 承認と通知（#2173） | R | — | C・U | — |
 | 課金（#2174） | R | — | — | C |
@@ -350,20 +352,23 @@ erDiagram
 | `gate.answered` | API（#2173） | 承認の依頼の識別子・種類・承認か差し戻しか（判断では無し）・答えた人のアカウント。本文は事象に載せない | #2171・#2172 |
 | `usage.recorded` | ランナー（claude の結果の使用量） | モデル・入力と出力の token・費用・ステップ | #2174 |
 | `decision.delegated` | ランナー（#2206 の代わりの判断の記録） | 問い・選んだ答え・理由・hook が止めたときの区分 | #2172 |
+| `issue.requested` | ランナー（NDF が `NDF_ISSUE_REQUEST_FILE` へ書いた別のリポジトリへの起票の依頼） | 起票先・題・本文 | 起票の代行・#2172 |
+| `issue.request_resolved` | 起票の代行（`control`、#2216） | 依頼の鍵・結果（起票したか下書きへ回したか）・起票した Issue の参照か下書きへ回した理由・同じ中身の最初の依頼の鍵 | #2172・#2173（下書きへ回したとき） |
 | `job.finished` | ランナー。送れずに終わったときは実行の制御 | 結果（`gate` / `stopped` / `done` / `failed`）・要約 | #2186・#2172 |
 | `pr.updated`・`ci.updated` | GitHub の Webhook | Pull Request の番号と状態・チェックの名前と結論 | #2172 |
 
 課金の境界はランナーが `usage.recorded` を出すところまでで、料金の計算・台帳・決済・Bedrock の請求との突き合わせは #2174 が持つ（決定 14）。
 
-**受け口の認証は出所ごとに 1 つで、認証の手段と事象の `source` が食い違えば拒む。** 実行の制御は受け口を通らず、#2171 が公開する追記の関数（`appendControlEvent`）で進捗の記録へ直に書く。
+**受け口の認証は出所ごとに 1 つで、認証の手段と事象の `source` が食い違えば拒む。** 実行の制御は受け口を通らず、#2171 が公開する追記の関数（`appendControlEvent`）で進捗の記録へ直に書く。起票の代行も受け口を通らず、`appendIssueRequestResolved` で `issue.request_resolved` だけを直に書く。**別のリポジトリの修正は、ランナーが起票の依頼を送り、サービスが代わりに起票するか下書きを人へ回す。** ランナーの token と導入の token は実行のリポジトリ 1 つのまま広げない。サービスが起票するのは、依頼の実行が属するアカウントが登録し GitHub App を入れたリポジトリで、公開範囲が広がらず、秘密らしい値が無く、実行ごとの上限の内のときだけで、使う token は起票先の 1 リポジトリと Issues の書き込みだけに絞る。そうでない依頼は起票せず、結果（`issue.request_resolved` の `drafted`）を #2173 が知らせとして、#2172 が依頼の題と本文の下書きとして人へ回す（承認の依頼にはしない）。相手先の流儀（課題追跡の宣言・テンプレート）を読む判定は #2239 が持つ。判定の順序と理由の一覧は [起票の依頼と起票の代行](ndf-factory-issue-requests.md) にある。
 
 | 出所 | 認証の手段 | 書ける種類 |
 | --- | --- | --- |
-| `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致し、`step.recorded` の Pull Request が token のリポジトリのものであること | `gate.answered`・`pr.updated`・`ci.updated` を除く種類 |
+| `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致し、`step.recorded` の Pull Request が token のリポジトリのもので、`issue.requested` の起票先が token のリポジトリと別であること | `gate.answered`・`pr.updated`・`ci.updated`・`issue.request_resolved` を除く種類 |
 | `api` | #2173 のサービスの IAM ロールによる署名だけ（利用者の Cognito の token では書けない）。加えて、依頼の識別子・属するスプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致するときだけ書く（未保存なら 403）。利用者の token と `account_id` の確かめは #2173 の API が行う | `gate.answered` |
 | `github` | `X-Hub-Signature-256` を GitHub App の Webhook の秘密で検証する | `pr.updated`・`ci.updated` |
 
 **GitHub の Webhook の宛先のスプリントの実行は、`pr_ref` が同じ事象の `sprint_run_id` で引く。** ちょうど 1 つに決まらなければ 202 で保存しない。
+
 
 **受け口の応答**: 受け取ったら 202（同じ冪等の鍵の 2 回目も 202）、認証できなければ 401、認証の手段と `source`・種類・識別子が食い違えば 403、形が違えば 400、保存などができなければ 503。ランナーは 5xx と接続の失敗を、同じ事象のまま送り直す。経路と本文の形は [契約の定義と型・進捗の受け口・実行ジョブの token](ndf-factory-contracts-and-progress.md) にある。
 

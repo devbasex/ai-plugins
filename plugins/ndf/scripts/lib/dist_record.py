@@ -1,7 +1,7 @@
 """リリース記録（`## 配布の記録`）の形を 1 か所に持つ（#1273 の決定 3）。
 
 形の正本は `skills/progress-tracking/SKILL.md` の「配布の記録」の表である。書く側（`release-steps.py record`）は
-`format_record` で組み、読む側（`sprint-close.py`）は `parse_record` で読む。見出しと行の名前をほかのモジュールに写さない。
+`format_record` で組み、読む側（`sprint-close.py`・`sprint_close_lib/record_find.py`）は `parse_record` で読む。見出しと行の名前をほかのモジュールに写さない。
 
 使う側は `deps.require("md")` を先に呼ぶ。
 """
@@ -38,6 +38,12 @@ def format_record(prev: str | None, new: str, prs, *, stage_note: str, version_n
     )
 
 
+def released(stage) -> bool:
+    """段階が本番か配布なしか（課題を閉じてよい段階。`sprint-close.py` と `sprint_close_lib/record_find.py` が使う）。"""
+    stage = stage or ""
+    return stage.startswith("本番") or stage.startswith("配布なし")
+
+
 def _strip_note(text):
     """版の文字列から全角の括弧の注記を落とす。"""
     return re.sub(r"\s*（.*$", "", text).strip()
@@ -57,6 +63,11 @@ def _read_dist_block(block):
                 out["version"] = _strip_note(ln.split("→", 1)[1])
                 break
     return out
+
+
+def _heading_sections(text, lines):
+    """本文の節のうち、見出しの行が `#` で始まるもの（ブロックの切り出しと配布の記録の読み取りが共有する）。"""
+    return [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
 
 
 def _verify_blocks(lines, sections):
@@ -80,6 +91,20 @@ def _verify_blocks(lines, sections):
 
 
 _EXPLICIT_VERSION = re.compile(r"v?\d+\.\d+\.\d+")
+_BASE_VERSION = re.compile(r"v?(\d+\.\d+\.\d+)")
+
+
+def verify_block_for_base(text, version):
+    """本文（text）のリリース後テストのブロックのうち、`対象の版:` の基底が version の基底と一致する最後のブロックの
+    本文。無ければ None。parse_record の完全な版の一致とは別の規則で、受け入れ条件の版ごとの判定が使う。"""
+    want = _BASE_VERSION.match(str(version))
+    lines = text.splitlines()
+    blocks = [
+        b
+        for b in _verify_blocks(lines, _heading_sections(text, lines))
+        if want and (m := _BASE_VERSION.match(b["ver"] or "")) and m.group(1) == want.group(1)
+    ]
+    return "\n".join(blocks[-1]["lines"]) if blocks else None
 
 
 def _is_explicit_version(ver):
@@ -103,22 +128,41 @@ def _pick_verify_block(blocks, stage, version, dist_start):
     return "\n".join(after[-1]["lines"]) if after else None
 
 
-def parse_record(text):
+def _dist_comment_id(parts, dist_line):
+    """最後の配布の記録の見出しの行を含む部分のコメントの識別子（振り返りの行を比べる基準。#2228 の決定 10）。
+
+    parts は (先頭の行の番号, コメントの識別子) の並び（本文は識別子が None）。記録が本文にあれば、記録の PR の
+    最初のコメントの識別子を使い、コメントが 1 件も無ければ None。parts が無ければ None。"""
+    if not parts:
+        return None
+    hit = None
+    for start, cid in parts:
+        if start <= dist_line:
+            hit = cid
+    if hit is not None:
+        return hit
+    return next((cid for _, cid in parts if cid is not None), None)
+
+
+def parse_record(text, parts=None):
     """最後の配布の記録と、使うリリース後テストのブロックを読む。
 
-    戻り値: {"found", "stage", "version", "sprint_prs", "verify_block"}。
+    parts は text を組んだ部分ごとの (先頭の行の番号, コメントの識別子) の並び（sprint-close.py の read_record が返す）。
+    戻り値: {"found", "stage", "version", "sprint_prs", "verify_block", "dist_comment_id"}。
     verify_block は本番なら対象の版が一致する最後のブロック（無ければ最後の配布の記録より後で、対象の版が版数でない
     最後のブロック）、
     配布なしなら最後の配布の記録より後の最後のブロック。無ければ None。
+    dist_comment_id は最後の配布の記録のコメントの識別子（_dist_comment_id。記録が無ければ None）。
     """
     lines = text.splitlines()
-    sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
+    sections = _heading_sections(text, lines)
     dists = [s for s in sections if lines[s.heading.line].startswith(DIST)]
     dist_start = dists[-1].heading.line if dists else None
-    out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None}
+    out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None, "dist_comment_id": None}
     if dist_start is None:
         return out
     out.update(_read_dist_block(lines[dists[-1].start : dists[-1].end]))
     blocks = _verify_blocks(lines, sections)
     out["verify_block"] = _pick_verify_block(blocks, out["stage"] or "", out["version"], dist_start)
+    out["dist_comment_id"] = _dist_comment_id(parts, dist_start)
     return out

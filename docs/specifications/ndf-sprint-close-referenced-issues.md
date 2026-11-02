@@ -21,6 +21,8 @@
 語の正本の行は `development-workflow` の
 [`references/glossary.md`](../../plugins/ndf/skills/development-workflow/references/glossary.md) にもある。
 closing keywords は、Pull Request の本文に課題の番号と一緒に書くと、マージのときに GitHub がその課題を自動で閉じるキーワードである。
+閉じる予定の参照（`最終工程の後に閉じる: #12`。既定ブランチ宛の本文で NDF の手順が closing keywords を置き換えた形）も、
+`closing-issues.sh` が closing keywords と同じ指し先の規則で本文から集め、参照だけの課題にしない。
 
 ## 背景
 
@@ -63,7 +65,7 @@ closing keywords を書かない経路は規約として残る（`pace: fast` �
 | 参照だけの課題の状態を読めなくても、他の課題の処理と終了コードは変わらない | その番号を `kept_open`（理由の先頭に「状態を読めない」）にして続ける |
 | closing keywords は本文だけから読む。題の closing keywords で課題を閉じない | 実装の誤り。テストが落とす |
 | 参照だけの課題の判定は、閉じる条件にも `--dry-run` にも左右されない（どちらでも `kept_open` で載る） | テストが落とす |
-| 参照だけの課題の行は、スプリント課題の行の後、ボードの NOTE の行の前に、PR の並び・題・本文の順で現れた順に並ぶ | — |
+| 参照だけの課題の行は、スプリント課題の行の後、ボードへ書けなかった行（`kind: "board_note"`）の前に、PR の並び・題・本文の順で現れた順に並ぶ | — |
 | 参照だけの課題 1 件につき `gh issue view` は 1 回、スプリントの PR 1 本につき `gh pr view` は 1 回 | テストが落とす |
 | `--record-pr 0`（本番の記録なし）と `--record-pr unknown`（記録の置き場が分からない）ではスプリントの PR を読まないため、参照だけの課題の行も 0 件の停止も起きない | — |
 

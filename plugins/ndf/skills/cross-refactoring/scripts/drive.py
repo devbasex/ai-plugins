@@ -14,7 +14,7 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 耐久の記録の実行の鍵は `refactor-<状態の置き場の sha256 の先頭 12 字>`（置き場が求まらなければ
 `<作業ディレクトリ>#<PR>`）。done で終わり状態ファイルが残る実行の回は、PR の head と結果を変える引数が同じなら記録した結果を返す（#1263）。
 
-止まるときの JSON の形と終了コードの表はライブラリの `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
+止まるときの JSON の形と終了コードの表はライブラリの `scripts/lib/drive_pause.py` にある（止まりは 23 だけ、欠けの残る結果は 6。中断の `metrics.exit` が 4 なら refactor.py の中断）。
 子の起動・KEY=VALUE の読み取りは `scripts/lib/loop_drive.py` にある。最終ステータスは決めない。最終ゲートの cross-review の
 駆動が `--result-file` で回答ファイルへ書いた値（`loop_drive.review_status` が決めたもの）をそのまま finalize へ渡す（#1656）。
 対象のリポジトリは打った場所（現在のディレクトリが属する git の作業ツリーの根）で決まる。決められなければ耐久の記録を開かずに
@@ -25,6 +25,9 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 unpublished は手元の HEAD が公開した地点より進んでいるか（plan-comment が判定できなければ null）。
 done・stopped・pause の各出口で、結果 JSON を組む前に `refactor.py plan-comment` を 1 度だけ打ち、リファクタリング計画のコメントを書き直す（#1692）。
 最終ゲートを経ずに終わった実行は完了にせず、中断（stopped・metrics.exit に最終ゲートの終了コード）で終える（#1482）。
+`init` が時間の枠の不足（`SKIP=init-timeout` / `SKIP=window`）で止まったときだけ、リファクタリングを飛ばした欠けの残る結果
+（stopped・`gaps` 1 件・`metrics.skipped`・終了コード 6）で返す（#2047）。`init` が想定最大時間を下限まで上げた（`BUDGET_SOURCE=floor`）ら、
+ステップの延長（`drive_pause.write_extension`）へ想定最大時間の秒を書く。
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ import durable  # noqa: E402
 import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
+import run_owner  # noqa: E402  持ち主の記録（#2229）
 from loop_drive import call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
@@ -121,6 +125,14 @@ def _target_root() -> Path:
         raise Stop(str(e), e.code) from None
 
 
+class Skip(Stop):
+    """時間の枠の不足でリファクタリングを飛ばす（`init` の `SKIP`）。捕まえ損ねても `Stop` として中断に落ちる（#2047）。"""
+
+    def __init__(self, kind: str, detail: str, code: int):
+        super().__init__(f"時間の枠に収まらずリファクタリングを飛ばした: {detail}", code)
+        self.kind, self.detail = kind, detail
+
+
 class Drive(AssigneeLaunch):
     def __init__(self, pr: int, init_args: list[str], root: str | None = None):
         self.pr = pr
@@ -151,6 +163,8 @@ class Drive(AssigneeLaunch):
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = self.call(_refactor_cmd(*args))
         vs = parse_vars(out)
+        if rc == ABORT and (kind := vs.get("SKIP")):  # 時間の枠の不足（#2047 の I5）。リファクタリングを飛ばして返す
+            raise Skip(kind, vs.get("SKIP_DETAIL") or "", rc)
         if rc == ABORT or rc not in ok:  # 子が出した中断の理由の 1 行（ABORT_DETAIL）を添える（#1944 の決定 6）
             raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {why}" if (why := vs.get("ABORT_DETAIL")) else ""), rc)
         self.v.update(vs)
@@ -266,11 +280,20 @@ class Drive(AssigneeLaunch):
     # --- 進行（繰り返しは耐久ワークフロー `refactor_drive` が持つ） ---
     def start(self) -> None:
         """init（1 つの実行の回で 1 回だけ。I19）と worktree の用意。"""
-        self.rf("init", str(self.pr), *self.init_args)
+        self.rf("init", str(self.pr), *self.init_args, *run_owner.run_args(self.init_args))  # 実行の識別子（#2229）
         if "TMP_DIR" not in self.v or "ID" not in self.v:
             raise Stop("refactor.py init が TMP_DIR / ID を返さない", 2)
+        self.own("touch")
+        if self.v.get("BUDGET_SOURCE") == "floor":  # 下限まで上げた想定最大時間で、親のステップの締め切りを延ばす（#2047 の決定 4）
+            minutes = int(self.v.get("BUDGET_MINUTES") or 0)
+            dp.write_extension(minutes * 60, f"想定最大時間を下限の {minutes} 分へ上げた")
         self.extra_env["CROSS_REFACTORING_TMP_DIR"] = self.v["TMP_DIR"]
         self.sh("prepare-worktrees.sh", ["bash", str(HERE / "prepare-worktrees.sh"), self.v["ID"]])
+
+    def own(self, what: str) -> None:
+        """rf<n> の持ち主の記録へ動いた時刻（touch）か終わり（finish）を書く。別の実行が引き継いでいれば止まる（#2229 の I12）。"""
+        if why := run_owner.mark_owner(self.v.get("WORKTREE_ROOT"), self.v.get("RUN"), what):
+            raise Stop(f"持ち主の記録を更新できない: {why}", 1)
 
     def phases(self) -> bool:
         """提案から実装の取り込みまで。最終ゲートへ直に進むなら真を返す。"""
@@ -378,6 +401,15 @@ class Drive(AssigneeLaunch):
             c,
         )
 
+    def skipped(self, e: Skip) -> dict:
+        """時間の枠の不足で飛ばした結果（欠けの残る結果・終了コード 6）。状態ファイルが無ければ（打ち切りは保存の前）件数は持たない。"""
+        if not self.comment_done:
+            self.refresh_plan_comment()
+        skipped = {"kind": e.kind, "reason": e.detail}
+        metrics = {**(self.counts() if self.has_state() else {}), "skipped": skipped, "exit": e.code}
+        gap = {"kind": "refactor", "name": e.kind, "reason": f"時間の枠に収まらず飛ばした: {e.detail}"}
+        return dp.incomplete(TOOL, str(e), metrics, gap)
+
     def stopped(self, e: Stop) -> dict:
         if not self.comment_done:
             self.refresh_plan_comment()
@@ -475,6 +507,10 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
         else:
             d.rf("finalize", d.v["ID"])
             result = d.done()
+        result["items"] = [*result.get("items", []), *json.loads(d.v.get("SWEPT") or "[]")]  # 開始の片付けの結果
+        d.own("finish")
+    except Skip as e:
+        result = d.skipped(e)
     except Stop as e:
         result = d.stopped(e)
     head = pr_head(d.call, pr) if result.get("status") == "ok" else None

@@ -8,6 +8,7 @@
   ],
   "awaiting": [
     {"name": "service-boundary-check", "reason": "サービスのディレクトリの境界の検査（#2169）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
-    {"name": "factory-check", "reason": "factory/ の契約の検査と web・api の型検査とテスト（#2170）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
+    {"name": "factory-check", "reason": "factory/ の契約の検査と web・api の型検査とテスト（#2170）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
+    {"name": "ndf-contracts-check", "reason": "エントリポイントの契約の一覧の構造チェック（#2336）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
   ]
 }

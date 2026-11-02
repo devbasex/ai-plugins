@@ -11,6 +11,7 @@ import { claudeEnv, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type M
 import { exec, packState, unpackState } from "./state.ts";
 import {
   delegatedFromRecord,
+  issueRequestFromLine,
   gateKindOf,
   gateRecordName,
   isSprintState,
@@ -70,6 +71,10 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   jobEnv.GH_CONFIG_DIR = join(jobHome, "gh");
   jobEnv.GIT_CONFIG_GLOBAL = gitConfig;
   jobEnv.NDF_WORKTREE_BASE = join(work, "worktrees");
+  // 別のリポジトリへの起票は、NDF がこのファイルへ依頼の行を足し、ここで issue.requested にする（#2216）。
+  // 作業のディレクトリ（repo）の外に置き、コミットに入れない
+  const issueRequests = join(jobHome, "issue-requests.jsonl");
+  jobEnv.NDF_ISSUE_REQUEST_FILE = issueRequests;
   const sh = (cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string> }) => run(cmd, args, { env: jobEnv, ...opts });
   const childEnv = () => claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, stsAssumeRole, sessionName, credentialDir);
   // 版を固定して取った取得元。スクリプトは入れた版と同じこの写しから読む
@@ -159,6 +164,8 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       } else {
         offsets.set(askLedger, (await readFile(askLedger, "utf8").catch(() => "")).length);
       }
+      // 起票の依頼は前のジョブが送った行を送り直さない
+      offsets.set(issueRequests, (await readFile(issueRequests, "utf8").catch(() => "")).length);
       let plan: string | null = null;
       let lastText = "";
       const poll = async () => {
@@ -189,6 +196,14 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
         const sources = decisions.length > 0 ? verdictSourcesOf(rows(content)) : new Map<string, string>();
         for (const row of decisions) {
           const body = delegatedFromRecord(row, sources);
+          if (body) await emit(body);
+        }
+        // 別のリポジトリへの起票の依頼（NDF_ISSUE_REQUEST_FILE の 1 行 1 件）
+        const requests = await readFile(issueRequests, "utf8").catch(() => "");
+        const fromRequest = offsets.get(issueRequests) ?? 0;
+        offsets.set(issueRequests, requests.length);
+        for (const row of rows(requests.slice(fromRequest))) {
+          const body = issueRequestFromLine(row);
           if (body) await emit(body);
         }
       };

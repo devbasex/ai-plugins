@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [claude, codex, kiro, agy]
+        runtime: [claude, codex]
     env:
       RUNTIME: ${{ matrix.runtime }}
       LATEST_VERSIONS: tmp/runtime-smoke-latest/cli-versions.env

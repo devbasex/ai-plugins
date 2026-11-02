@@ -14,11 +14,11 @@ from gate_answer import GATE_1
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
-from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
-from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
+from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
+from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
-from supervise_lib.verify_steps import handoff_step, merge_steps
+from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
@@ -45,6 +45,82 @@ def sprint_branch(a) -> str:
     """スプリントブランチ（`sprint/<名前>`）。`sprint/<名前>` の参照が無く、改名の前の旧名の頭の参照があれば
     そちらを使い続ける（#1407 の I4）。参照はローカルと origin のものだけを見て、fetch しない（決定 6）。"""
     return _branch_of(str(Path(a.worktree).resolve()), a.name)
+
+
+def _review_steps(n: int, copy: str) -> list:
+    """設計のプランのレビューのまとまり（review / sync-review / requirements-recheck）。"""
+    return [
+        # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
+        {
+            "id": "review",
+            "type": "drive",
+            "drive": "cross-review",
+            "kind": "ドキュメントレビュー",
+            "stage": "ドキュメントレビュー",
+            "timeout": 3600,
+            "args": "{pr}",
+            "on_fail": "ready",
+            "next": "sync-review",
+        },
+        # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
+        {
+            "id": "sync-review",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+            "next": "requirements-recheck",
+        },
+        # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
+        # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
+        {
+            "id": "requirements-recheck",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
+            "next": "glossary-check",
+        },
+    ]
+
+
+def _glossary_steps(glossary_check: str, push: str) -> list:
+    """設計のプランの用語チェックのまとまり（glossary-check / fix-glossary / glossary-recheck / push-glossary）。"""
+    return [
+        # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+        {
+            "id": "glossary-check",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": glossary_check,
+            "on_fail": "fix-glossary",
+            "next": "push-glossary",
+        },
+        {
+            "id": "fix-glossary",
+            "type": "work",
+            "kind": "修正",
+            "stage": "ドキュメントレビュー",
+            "inputs": ["glossary-check"],
+            "timeout": 1800,
+            "next": "glossary-recheck",
+            "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
+            "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
+            "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
+            "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。",
+        },
+        {
+            "id": "glossary-recheck",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": glossary_check,
+            "on_fail": "push-glossary",
+            "next": "push-glossary",
+        },
+        {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
+    ]
 
 
 def plan_sprint_design(a, n: int, repo: str) -> dict:
@@ -106,10 +182,11 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "stage": "設計",
                 "issues": True,
                 "timeout": 3600,
-                "next": "pr",
                 "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
                 "コミットする（push しない）。",
+                "next": "rebuild",
             },
+            rebuild_step(n, doc),
             # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（承認ゲート 1 の材料）
             {
                 "id": "pr",
@@ -135,70 +212,8 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "cmd": SYNC_DESIGN_BODY,
                 "next": "review",
             },
-            # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
-            {
-                "id": "review",
-                "type": "drive",
-                "drive": "cross-review",
-                "kind": "ドキュメントレビュー",
-                "stage": "ドキュメントレビュー",
-                "timeout": 3600,
-                "args": "{pr}",
-                "on_fail": "ready",
-                "next": "sync-review",
-            },
-            # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
-            {
-                "id": "sync-review",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
-                "next": "requirements-recheck",
-            },
-            # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
-            # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
-            {
-                "id": "requirements-recheck",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
-                "next": "glossary-check",
-            },
-            # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
-            {
-                "id": "glossary-check",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": glossary_check,
-                "on_fail": "fix-glossary",
-                "next": "push-glossary",
-            },
-            {
-                "id": "fix-glossary",
-                "type": "work",
-                "kind": "修正",
-                "stage": "ドキュメントレビュー",
-                "inputs": ["glossary-check"],
-                "timeout": 1800,
-                "next": "glossary-recheck",
-                "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
-                "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
-                "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
-                "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。",
-            },
-            {
-                "id": "glossary-recheck",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": glossary_check,
-                "on_fail": "push-glossary",
-                "next": "push-glossary",
-            },
-            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
+            *_review_steps(n, copy),
+            *_glossary_steps(glossary_check, push),
             # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
             {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": DESIGN_READY, "next": "gate"},
@@ -323,18 +338,23 @@ def plan_sprint_check(a, repo: str) -> dict:
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
     """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
     単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
-    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。"""
-    version = version or a.version
+    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
+    `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
+    プランの版の記録から。#2164）。"""
+    version = version or (a.version if channel == "dev" else None)
+    wt, branch = release_names(version)
     ns = argparse.Namespace(
         **decl_fields(a),
         version=version,
+        level=getattr(a, "level", None),
+        series=DEV_SERIES if channel == "prod" else None,
         prs=["{queue_pr:check}"],
         prs_from_queue=False,
         channel=channel,
         repo=repo,
         prev_tag=None,
-        worktree=f"{repo}/.worktrees/release/v{version}",
-        branch=f"release/v{version}",
+        worktree=f"{repo}/{wt}",
+        branch=branch,
         issue=a.issue,
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
@@ -366,7 +386,7 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
             s["next"] = "mvv"
     gate["inputs"] = [*gate["inputs"], "mvv"]
     gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
-    plan["steps"] = [*steps, *advise_design_steps(a), gate]
+    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}")]
     return plan
 
 
@@ -406,6 +426,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
         },
         *merge_steps(a, next="end", on_fail="handoff"),
         handoff_step(sprint_state_path(a), GATE_1, "承認ラベルの付与かマージ"),
+        reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
@@ -450,19 +471,23 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
     return plan_check_since(ns)
 
 
-def plan_mvv_release(a, repo: str, version: str, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
+def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
     """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップが関門 2 を判定する。
-    prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。"""
+    prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
+    `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""
+    wt, branch = release_names(version)
     ns = argparse.Namespace(
         **decl_fields(a),
         version=version,
+        level=getattr(a, "level", None),
+        series=DEV_SERIES if channel == "prod" else None,
         prs=prs or [],
         prs_from_queue=prs is None,
         channel=channel,
         repo=repo,
         prev_tag=None,
-        worktree=f"{repo}/.worktrees/release/v{version}",
-        branch=f"release/v{version}",
+        worktree=f"{repo}/{wt}",
+        branch=branch,
         issue=a.issue,
         mode=a.mode,
         mvv=a.state,

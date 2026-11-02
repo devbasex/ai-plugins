@@ -1,0 +1,5 @@
+{
+  "name": "WT_DOCKER_COMMAND",
+  "set_by": "runtime",
+  "summary": "WT_DOCKER_COMMAND。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/container_reach.py:54）が決める"
+}

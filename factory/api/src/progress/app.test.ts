@@ -288,6 +288,38 @@ describe("step.recorded の Pull Request の照合（#2186 の受け入れ条件
   });
 });
 
+describe("別のリポジトリへの起票の依頼（#2216 の受け入れ条件 8・11・12、I45）", () => {
+  const request = (repo: string, patch: Record<string, unknown> = {}) =>
+    runnerEvent({ type: "issue.requested", payload: { repo, title: "直してほしい", body: "由来: org-a/repo-a#1", ...patch } });
+  const bearer = async () => `Bearer ${await t.tokens.sign({ jobId: "job-1", sprintRunId: "sr-1", repo: "org-a/repo-a" })}`;
+
+  it("token の repo と違うリポジトリ宛ての依頼は 202 で、列に 1 件残る", async () => {
+    expect((await t.runner(request("org-b/repo-b"), { authorization: await bearer() })).status).toBe(202);
+    expect(t.store.listRun("sr-1").map((e) => e.type)).toEqual(["issue.requested"]);
+  });
+
+  it("token の repo 宛ては大文字と小文字を問わず 403 で保存しない", async () => {
+    await expectRejected(await t.runner(request("org-a/repo-a"), { authorization: await bearer() }), 403, FORBIDDEN);
+    await expectRejected(await t.runner(request("ORG-A/repo-a"), { authorization: await bearer() }), 403, FORBIDDEN);
+  });
+
+  it("形の違う依頼は token の repo と同じ宛てでも 400（契約の定義が出所の照合より先）", async () => {
+    for (const patch of [{ title: "あ".repeat(257) }, { body: "" }]) {
+      const res = await t.runner(request("org-a/repo-a", patch), { authorization: await bearer() });
+      expect(res.status).toBe(400);
+    }
+    expect(t.store.events).toHaveLength(0);
+  });
+
+  it("runner は issue.request_resolved を書けない", async () => {
+    const resolved = runnerEvent({
+      type: "issue.request_resolved",
+      payload: { request_key: "job-1:1", outcome: "drafted", reason: "not_registered", duplicate_of: null },
+    });
+    await expectRejected(await t.runner(resolved, { authorization: await bearer() }), 403, FORBIDDEN);
+  });
+});
+
 describe("GitHub の Webhook（受け入れ条件 12）", () => {
   const prBody = (patch: Record<string, unknown> = {}) => ({
     action: "synchronize",

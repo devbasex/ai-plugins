@@ -112,13 +112,13 @@ fi
 python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディレクトリ>
 ```
 
-出力は 1 行の JSON（形は `$SCRIPTS/lib/README.md`）。`status` を見て次を決める。
+出力は 1 行の JSON（形と状態の意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」）。終了コードを見て次を決める。
 
-| `status`（終了コード） | 次にすること |
+| 終了コード | 次にすること |
 | --- | --- |
-| `ok`（0） | 「スプリント課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
-| `gate`（10） | `git branch -d` が拒んだブランチがある。`presentation_path` の承認資料を示して同意（`ndf-ask:redline:C4`）を取り、同意を得た対象にだけ `next` のコマンド（`git branch -D`）を打つ |
-| `stopped`（1 / 2 / 3） | `summary` と `items[].reason` を報告して止まる |
+| 0 | 「スプリント課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
+| 10 | `git branch -d` が拒んだブランチがある。`presentation_path` の承認資料を示して同意（`ndf-ask:redline:C4`）を取り、同意を得た対象にだけ `next` のコマンド（`git branch -D`）を打つ |
+| 1 / 2 / 3 | `summary` と `items[].reason` を報告して止まる |
 
 - `items[]` の `result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
 - worktree の未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る（`退避先 <パス>`。退避するものが残らなければ `退避するものは無かった` で、退避先を作らない）
@@ -198,14 +198,14 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 # **gate も同じ実体を読む**ため、Skill の下にコピーは無い。
 CLOSING="$SCRIPTS/lib/closing-issues.sh"
 
-# 1. 本文から closing keywords が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
+# 1. 本文から closing keywords と閉じる予定の参照が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
 gh pr view <PR番号> --json body -q .body | bash "$CLOSING"
 
 # 2. まだ OPEN のものだけに絞り、報告へ載せる
 gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state    # OPEN / CLOSED
 ```
 
-- GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が 1 つも無ければ何もしない。スクリプトは何も出さずに終了コード 0 で終わる
+- GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）も閉じる予定の参照（`最終工程の後に閉じる: #N`。`progress-tracking` の「スプリントを閉じる」）も 1 つも無ければ何もしない。スクリプトは何も出さずに終了コード 0 で終わる
 - **この一覧は、後片付けの進捗記録を書く先でもある**（`progress-tracking` の「工程の単位と
   記録する課題」。後片付けは Pull Request 単位で、マージした側が本文の closing keywords（`Closes #N` などの記法）が指す課題
   すべてへ書く）
@@ -278,7 +278,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 | 対象外 | 名前と理由（起点 / 本番チャネル / 現在のブランチ / fork / 先端が `headRefOid` と違う / 対応する Pull Request が無い）。先端が違う・Pull Request が無いリモートブランチには、先端のハッシュと `headRefOid`、マージ後に積まれたコミット（`git log --oneline <headRefOid>..origin/<名前>`）を添える |
 | 止まった対象 | 「止まる条件」の「止まったときの一覧」と、同意の結果 |
 | 未完了 | 退避が失敗した worktreeのパス、退避先・退避済みのパス・失敗したパスと `mv` の出力（退避済みのものは退避先に残す。戻すなら同じ `mv` の逆）、「原因を取り除いた後に `/ndf:merged <PR番号>` をもう一度実行する」 |
-| スプリント課題 | このマージの closing keywords（`Closes #N` などの記法）が指す課題のうち OPEN のもの。「閉じるのはスプリントの最終工程（`progress-tracking` の「スプリントを閉じる」）」と添える |
+| スプリント課題 | このマージの closing keywords（`Closes #N` などの記法）と閉じる予定の参照が指す課題のうち OPEN のもの。「閉じるのはスプリントの最終工程（`progress-tracking` の「スプリントを閉じる」）」と添える |
 | スプリントの最後か | 最後 / 残りあり / **判断できない** |
 
 あわせて次も載せる。

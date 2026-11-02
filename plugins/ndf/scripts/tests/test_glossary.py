@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 SCRIPTS = Path(__file__).resolve().parents[1]
 SCRIPT = SCRIPTS / "glossary.py"
 PY = sys.executable
@@ -37,10 +40,18 @@ def write_json(root, rel, obj):
     return write(root, rel, json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
 
 
-def run(root, *args):
-    p = subprocess.run([PY, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True, cwd=root)
+def _parsed(p):
     lines = p.stdout.strip().splitlines()
     return p.returncode, (json.loads(lines[-1]) if lines else None), p.stderr
+
+
+def run(root, *args):
+    """分岐はプロセスの中で main を呼んで確かめる（起動の配線は `run_cli` の代表の数件）。"""
+    return _parsed(inproc.run(SCRIPT, *args, "--root", str(root), cwd=root))
+
+
+def run_cli(root, *args):
+    return _parsed(subprocess.run([PY, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True, cwd=root))
 
 
 def commit(root, msg="c"):
@@ -816,7 +827,7 @@ def test_init_places_outside_root_are_2(bare, tmp_path, idx):
 
 def test_command_lines_are_step_results(repo):
     for args in (["gate", "--mode", "standard"], ["render", "--check"], ["check"], ["diff", "--base", "develop"]):
-        code, out, _ = run(repo, *args)
+        code, out, _ = run_cli(repo, *args)
         assert code == 0 and out["tool"] == "glossary" and out["status"] == "ok"
     assert os.access(SCRIPT, os.X_OK)
 

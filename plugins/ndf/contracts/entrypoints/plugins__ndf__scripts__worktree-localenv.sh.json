@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/worktree-localenv.sh",
+  "summary": "NDF plugin: 作業ツリーでのローカル動作検証を支える。",
+  "args": {
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [
+    "WT_LINES"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/worktree-copy.sh",
+    "plugins/ndf/skills/development-workflow/references/scripts-lookup.md",
+    "plugins/ndf/skills/worktree/SKILL.md",
+    "plugins/ndf/skills/worktree/references/declaration.md",
+    "plugins/ndf/skills/worktree/references/local-environment.md"
+  ]
+}

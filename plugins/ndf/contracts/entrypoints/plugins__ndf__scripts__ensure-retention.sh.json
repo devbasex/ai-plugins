@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/ensure-retention.sh",
+  "summary": "NDF plugin: Claude Code の設定の置き場（CLAUDE_CONFIG_DIR、無ければ ~/.claude）の settings.json の cleanupPeriodDays を最低 90 日に保つ。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [],
+  "settings": [],
+  "stdin": "hook-json",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/scripts/lib/run_state_kinds.py"
+  ]
+}

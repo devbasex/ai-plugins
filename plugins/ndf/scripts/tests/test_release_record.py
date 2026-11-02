@@ -212,7 +212,9 @@ def test_sprint_close_closes_with_the_record_the_step_wrote(repo, gh, tmp_path):
         encoding="utf-8",
     )
     env = {**gh.env, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}", "FAKE_GH_STATE": str(state)}
-    code, out, err = harness.call("sprint-close.py", ["--record-pr", "40", "--repo", "o/r", "--issues", "5", "--dry-run"], env, repo)
+    code, out, err = harness.call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "40", "--repo", "o/r", "--issues", "5", "--dry-run"], env, repo
+    )
     assert code == 0, (out, err)
     assert harness.issues_of(out)["o/r#5"]["result"] == "would_close"
 

@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/lib/project_mvv.py",
+  "name": "mvv.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/mvv.json を開く（load_mvv_at_ref。plugins/ndf/scripts/lib/project_mvv.py:208））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

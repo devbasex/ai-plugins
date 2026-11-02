@@ -6,12 +6,13 @@ GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
 
+import decl
 import proc
+from closing import defer_closing
 
 ORIGIN_URL = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 WORKTREE_DECL = Path(".ndf") / "worktree.json"
@@ -19,10 +20,8 @@ WORKTREE_DECL = Path(".ndf") / "worktree.json"
 SPEC_DIR = "docs/specifications"
 
 
-def main_dir(root) -> Path | None:
-    """`root` の worktree が属するメインディレクトリ（`git --git-common-dir` の親）。git でなければ `None`。"""
-    common = proc.git_out(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    return Path(common).parent if common else None
+# メインディレクトリの決め方の正本は decl.main_dir（サブモジュールは core.worktree。#2054）
+main_dir = decl.main_dir
 
 
 def owner_repo_from_url(url: str) -> str | None:
@@ -42,24 +41,18 @@ def slug(owner_repo_value: str | None) -> str | None:
 
 
 def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
-    """`.ndf/worktree.json` の中身と、読めなかった理由。`root` → メインディレクトリの順に探す。
+    """`.ndf/worktree.json` の中身と、読めなかった理由。置き場は `decl.read_json_setting`（`root` → メインディレクトリ。
+    `production_branch` だけはメインディレクトリ → `root`。Pull Request の変更で本番チャネルを動かせないようにする。#2363）。
 
     `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
     無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
     """
-    main = main_dir(root) if root and fallback else None
-    for base in dict.fromkeys(p for p in (Path(root) if root else None, main) if p):
-        f = Path(base) / WORKTREE_DECL
-        if not f.is_file():
-            continue
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            return {}, f"{WORKTREE_DECL}: JSON として読めない（{e}）"
-        if not isinstance(data, dict):
-            return {}, f"{WORKTREE_DECL}: 最上位がオブジェクトでない"
-        return data, None
-    return {}, None
+    if not root:
+        return {}, None
+    if fallback:
+        return decl.read_json_setting(root, WORKTREE_DECL.name)
+    f = Path(root) / WORKTREE_DECL
+    return decl.load_file(f, WORKTREE_DECL.name) if f.is_file() else ({}, None)
 
 
 def _branch_value(v) -> str | None:
@@ -83,6 +76,21 @@ def default_branch(root) -> str | None:
         if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None:
             return b
     return None
+
+
+def merge_closes_issues(root, base) -> bool:
+    """宛先 `base` の Pull Request をマージすると、GitHub が本文の closing keywords で課題を閉じるか。
+
+    GitHub が閉じるのは既定ブランチへのマージだけである。既定ブランチを決められない・宛先が分からないときも真を返す
+    （置き換えても閉じる予定の参照として NDF の手順で閉じられ、失うものが無い。#2228 の決定 9）。"""
+    d = default_branch(root)
+    return d is None or not base or str(base).removeprefix("origin/") == d
+
+
+def defer_for_base(root, base, text):
+    """宛先 base の Pull Request の本文を、マージで GitHub が課題を閉じるとき（merge_closes_issues）だけ
+    closing.defer_closing に通す。(本文, 置き換えた指し先の字面の並び) を返す。`pr-steps.py` と `supervise_lib/pr.py` が使う。"""
+    return defer_closing(text) if merge_closes_issues(root, base) else (text or "", [])
 
 
 def base_branch(root) -> str | None:
@@ -133,16 +141,22 @@ def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]
     return None, f"宣言も {remote} の HEAD も main / master も無い"
 
 
+def production_of(wt: dict, default: str | None) -> tuple[str | None, str]:
+    """本番チャネルの決め方の正本（#2097）。`worktree.json` の中身の `production_branch` → `default`（既定ブランチ）の順。"""
+    v = _branch_value(wt.get("production_branch"))
+    if v:
+        return v, f"{WORKTREE_DECL} の production_branch"
+    if default:
+        return default, "既定ブランチ（origin/HEAD → ローカルの main / master）"
+    return None, "production_branch も既定ブランチ（origin/HEAD・main・master）も無い"
+
+
 def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
     """本番チャネルと、その出所。`.ndf/worktree.json` の `production_branch` → 既定ブランチ（`default_branch`）の順。
 
     `decl` を渡せばそれを `worktree.json` の中身として使う（読み直さない）。決まらなければ `(None, 理由)`。
     """
     wt = read_worktree_decl(root)[0] if decl is None else decl
-    v = _branch_value(wt.get("production_branch"))
-    if v:
-        return v, f"{WORKTREE_DECL} の production_branch"
-    d = default_branch(root)
-    if d:
-        return d, "既定ブランチ（origin/HEAD → ローカルの main / master）"
-    return None, "production_branch も既定ブランチ（origin/HEAD・main・master）も無い"
+    if _branch_value(wt.get("production_branch")):
+        return production_of(wt, None)
+    return production_of(wt, default_branch(root))

@@ -1,0 +1,7 @@
+{
+  "name": "estimates-json",
+  "pattern": "estimates.json",
+  "kind": "result",
+  "place": "tmp",
+  "skill_readers": []
+}

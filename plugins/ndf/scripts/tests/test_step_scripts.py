@@ -14,6 +14,10 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+from release_repo import push_origin  # noqa: E402
+
 PY = sys.executable
 
 FAKE_GH = """#!{py}
@@ -50,6 +54,8 @@ def env(tmp_path):
     e["PATH"] = f"{bindir}{os.pathsep}{e['PATH']}"
     e["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
     e["NDF_WORKTREE_BASE"] = str(tmp_path / "wtbase")
+    e["TMPDIR"] = str((tmp_path / "systmp").resolve())  # 片付け（run_state.sweep_states）が手元の一時の置き場に触れない
+    (tmp_path / "systmp").mkdir(exist_ok=True)
     e["FAKE_GH_PRS"] = "{}"
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         e.pop(k, None)
@@ -70,8 +76,12 @@ def repo(tmp_path):
     return root
 
 
-def call(script, args, env, cwd=None):
-    p = subprocess.run([PY, str(SCRIPTS / script), *args], capture_output=True, text=True, env=env, cwd=cwd)
+def call(script, args, env, cwd=None, proc=False):
+    """分岐はプロセスの中で main を呼ぶ。子のプロセスへ渡す入口（phase-steps.py）は `proc=True` で起動して確かめる。"""
+    if proc:
+        p = subprocess.run([PY, str(SCRIPTS / script), *args], capture_output=True, text=True, env=env, cwd=cwd)
+    else:
+        p = inproc.run(SCRIPTS / script, *args, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines else None
     return p.returncode, out, p.stderr
@@ -345,8 +355,9 @@ def plugin_repo(repo, name="mcp-x", version="1.0.0"):
 def test_bump_updates_manifest_and_leaves_the_readme(repo, env):
     """受け入れ条件 6: bump は plugin の README に触れず、版ごとの更新の節が無いことを manual に出さない。"""
     pdir = plugin_repo(repo)
+    push_origin(repo)  # bump は origin のベースブランチの版を読んでから上げる（#2164）
     before = (pdir / "README.md").read_bytes()
-    code, out, err = call("release-steps.py", ["bump", "--plugin", "mcp-x", "--to", "1.1.0", "--root", str(repo)], env)
+    code, out, err = call("release-steps.py", ["bump", "--plugin", "mcp-x", "--to", "1.1.0", "--base", "develop", "--root", str(repo)], env)
     assert code == 0, err
     check_shape(out)
     assert out["tool"] == "release" and out["status"] == "ok"
@@ -429,7 +440,7 @@ def load_verification():
 
 @pytest.mark.parametrize("installed", ["symlink", "copy", "differs", "missing"])
 def test_compare_files_follows_a_symlink_to_a_directory(tmp_path, installed):
-    """dev.agy/skills/<名前> → ../../skills/<名前> のようなディレクトリへの symlink を比べられる。"""
+    """<配置>/<名前> → ../skills/<名前> のようなディレクトリへの symlink を比べられる。"""
     mod = load_verification()
     src = tmp_path / "src" / "p"
     (src / "skills" / "a").mkdir(parents=True)
@@ -465,49 +476,6 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
     assert out == ["codex: p/skills/a/SKILL.md"]
 
 
-def kiro_project(tmp_path):
-    """この checkout の dev.kiro/install.sh で <tmp>/proj へ導入し、(src, proj) を返す。"""
-    src = SCRIPTS.parents[2]
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    p = subprocess.run(
-        ["bash", str(src / "plugins/ndf/dev.kiro/install.sh"), "--project", str(proj), "--yes"],
-        capture_output=True,
-        text=True,
-        cwd=str(src),
-    )
-    assert p.returncode == 0, p.stdout + p.stderr
-    return src, proj
-
-
-def test_compare_kiro_accepts_what_the_installer_made(tmp_path):
-    src, proj = kiro_project(tmp_path)
-    assert load_verification().compare_kiro(src, proj) == []
-
-
-@pytest.mark.parametrize("broken", ["skill_link", "prompt", "steering", "agent", "policy_link"])
-def test_compare_kiro_reports_missing_or_changed_outputs(tmp_path, broken):
-    """Kiro の生成物（skills / prompts / steering / agents）の欠落・内容違いを不一致にする。"""
-    src, proj = kiro_project(tmp_path)
-    kiro = proj / ".kiro"
-    if broken == "skill_link":
-        (kiro / "skills" / "pr").unlink()
-        want = "kiro: .kiro/skills/pr"
-    elif broken == "prompt":
-        (kiro / "prompts" / "pr.md").write_text("changed\n", encoding="utf-8")
-        want = "kiro: .kiro/prompts/pr.md"
-    elif broken == "steering":
-        (kiro / "steering" / "ndf-policies.md").write_text("stale\n", encoding="utf-8")
-        want = "kiro: .kiro/steering/ndf-policies.md"
-    elif broken == "agent":
-        (kiro / "agents" / "ndf.json").write_text("{", encoding="utf-8")
-        want = "kiro: .kiro/agents/ndf.json"
-    else:
-        (kiro / "skills" / "ndf-policies").symlink_to(src / "plugins/ndf/skills/ndf-policies")
-        want = "kiro: .kiro/skills/ndf-policies が残っている（steering へ移した Skill）"
-    assert load_verification().compare_kiro(src, proj) == [want]
-
-
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
@@ -516,13 +484,13 @@ def test_phase_steps_forwards_with_root_before_or_after(repo, env, root_first):
     spec_repo(repo)
     sub = ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md"]
     args = ["--root", str(repo), *sub] if root_first else [*sub, "--root", str(repo)]
-    code, out, err = call("phase-steps.py", args, env, cwd=str(repo.parent))
+    code, out, err = call("phase-steps.py", args, env, cwd=str(repo.parent), proc=True)
     assert code == 0, err
     assert out["tool"] == "plan-to-spec" and out["status"] == "ok"
 
 
 def test_phase_steps_forwards_exit_code(repo, env):
-    code, out, _ = call("phase-steps.py", [f"--root={repo}", "bump", "--plugin", "nope", "--to", "1.1.0"], env)
+    code, out, _ = call("phase-steps.py", [f"--root={repo}", "bump", "--plugin", "nope", "--to", "1.1.0"], env, proc=True)
     assert code == 3 and out["tool"] == "release"
 
 

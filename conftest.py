@@ -16,6 +16,8 @@
    シェルから起動しても、既定値を前提にするテストが同じ結果になる（#678）
 6. `SHARD_TOTAL` と `SHARD_INDEX` が与えられたら、収集した項目をファイル単位で分け、
    自分の分だけを残す。継続的統合がジョブを分けて回すために使う（#882）
+7. pytest が SIGTERM で止められたとき・終わったときに、テストが起こした子孫のプロセスを止める
+   （`scripts/pytest_child_cleanup.py`。#2291）
 
 どの束のディレクトリを起点にしても読まれるよう、テストの基準のディレクトリ（rootdir）は
 根の設定ファイル（`pytest.ini`）がリポジトリの根へ固定する。
@@ -28,6 +30,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import zlib
 from pathlib import Path
@@ -36,9 +39,11 @@ import pytest
 
 # `pytester` は playwright-kit の pytest plugin の自己テストが使う。pytest はこの宣言を
 # 最上位の conftest.py でしか受け付けない。
-pytest_plugins = ["pytester"]
-
+# `pytest_child_cleanup` は、テストが起こした子孫のプロセスを、pytest が SIGTERM で止められたとき・
+# 終わったときに止める（#2291）。親と xdist の各 worker で働く。
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "scripts"))
+pytest_plugins = ["pytester", "pytest_child_cleanup"]
 
 # `plugins/<family>/dev.agy/skills/` は配布 Skill への symlink である。実体は
 # `plugins/<family>/skills/` にあり、そちらを収集する。両方をたどると同じテストが 2 度
@@ -129,6 +134,14 @@ def pytest_unconfigure(config) -> None:
     """実行が終わったら、外した環境変数を戻す。"""
     os.environ.update(_saved_monitor_env)
     _saved_monitor_env.clear()
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """テストのセッションの終わりに、寿命の窓を過ぎた `ndf-tests-*`（止められたセッションの残り）を片付ける（#2229）。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "plugins" / "ndf" / "scripts" / "lib"))
+    import run_state
+
+    run_state.sweep_states(None, kinds=("test-tmp",), tmp_only=True)
 
 
 # ジョブの分割（#882）。**分ける単位はファイルで、割り当てはパスの剰余だけで決める。**

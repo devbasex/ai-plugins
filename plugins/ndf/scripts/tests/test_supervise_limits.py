@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -87,7 +88,10 @@ class _FakeJudge:
 
 def drive(tmp: Path, plan: dict, decide, start: str | None = None) -> tuple[list[str], str, engine.Engine]:
     """プランをスタブの結果で流し、(流したステップの id, 報告, Engine) を返す。"""
-    plan = {k: v for k, v in json.loads(json.dumps(plan)).items() if k not in DROP}
+    # queue が流す前に埋める差し込みを、埋めた後の形にする（残っているとステップを打たずに止まる。#2079）
+    filled = re.sub(r"\{queue_pr:[A-Za-z0-9._-]+\}", "1", json.dumps(plan))
+    filled = re.sub(r"\{queue_state:[A-Za-z0-9._-]+\}", json.dumps(str(tmp / "check-state"))[1:-1], filled)
+    plan = {k: v for k, v in json.loads(filled).items() if k not in DROP}
     plan["作業場所"] = str(tmp)
     eng = engine.Engine(plan, tmp / "state")
     for kind in ("run", "work", "drive", "pr"):
@@ -116,11 +120,22 @@ def reason_of(text: str) -> str:
 # --- L1・I1: 雛形ごとに、修正のループのそれぞれを 3 回ずつ通しても上限で止まらない ---
 
 
-def test_every_template_plan_gets_through_each_fix_loop_three_times(plans, tmp_path):
+def _failing_sets(plans: dict[str, dict]) -> dict[frozenset, tuple[str, dict]]:
+    """修正のループの入口の組ごとに、最初のプランを 1 つ（総当たりを代表の組に絞る。修正のループの無いプランは除く）。"""
+    reps: dict[frozenset, tuple[str, dict]] = {}
     for name, plan in plans.items():
         fixes, _ = limits.loops(plan)
         failing = {k.split("→")[0] for k in fixes}
-        failing = {c for c in failing if any(s["id"] == c and s.get("on_fail") for s in plan["steps"])}
+        failing = frozenset(c for c in failing if any(s["id"] == c and s.get("on_fail") for s in plan["steps"]))
+        if failing:
+            reps.setdefault(failing, (name, plan))
+    return reps
+
+
+def test_every_fix_loop_shape_gets_through_each_fix_loop_three_times(plans, tmp_path):
+    reps = _failing_sets(plans)
+    assert len(reps) >= 4, sorted(n for n, _ in reps.values())  # impl・check・release・release-prod の形
+    for failing, (name, plan) in reps.items():
         visits: dict[str, int] = {}
 
         def decide(sid, step, failing=failing, visits=visits):
@@ -290,7 +305,7 @@ def test_1909_3_the_route_of_m1910_reaches_record(plans, tmp_path):
 
 
 DESIGN_ROUTE = (
-    "glossary", ("requirements-check", 1), "requirements", "design", "pr", "sync-body", "review", "sync-review",
+    "glossary", ("requirements-check", 1), "requirements", "design", "rebuild", "pr", "sync-body", "review", "sync-review",
     "requirements-recheck", ("glossary-check", 1), "fix-glossary", "glossary-recheck", "push-glossary", "ready", ("gate", "gate"),
 )  # fmt: skip
 

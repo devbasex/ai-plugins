@@ -486,8 +486,10 @@ class Term:
 
     def wait_start(self, n, timeout=15):
         self.wait(lambda: len(self.starts()) >= n, timeout, f"{n} 回目の起動")
-        # 子が端末を raw にするまで少し待つ（raw の前の入力は行の編集に掛かる）
-        time.sleep(0.3)
+        # 子が端末を raw にするまで待つ（raw の前の入力は行の編集に掛かる）。偽の claude は raw にした直後に
+        # 入力の記録のファイルを作る
+        raw = self.fake_dir / f"input-{self.starts()[n - 1]['pid']}"
+        self.wait(raw.exists, timeout, f"{n} 回目の子が端末を raw にする")
 
     def finish(self, timeout=20):
         try:
@@ -643,13 +645,16 @@ def test_run_chain_three_sections(term):
 
 
 def test_run_waits_for_user_input_quiet(term):
-    """利用者の入力から静止の秒数がたつまで /exit を送らない（AC6）。"""
-    t = term(env={"NDF_RELAY_QUIET": "1.5"})
+    """利用者の入力から静止の秒数がたつまで /exit を送らない（AC6）。
+
+    打ちかけの文字の後ろに /exit が付くため子は終わらず、終わりの待ちの後に止められる。待ちは 1 秒に縮める。"""
+    t = term(env={"NDF_RELAY_QUIET": "1.5", "NDF_RELAY_EXIT_WAIT": "1"})
     t.wait_start(1)
     t.type("mark x\r")
     for _ in range(6):
         time.sleep(0.4)
         t.type("a")  # 打っている途中
+
     assert len(t.starts()) == 1
     assert b"/exit" not in t.child_input(0)
     t.wait_start(2)
@@ -2136,7 +2141,7 @@ def question_rows(t, n=0):
 
 def test_guard_question_blocks_exit(term):
     """G1: 合図の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
-    t = term(env={"NDF_RELAY_QUIET": "1.5"})
+    t = term(env={"NDF_RELAY_QUIET": "0.5"})
     t.wait_start(1)
     t.type("mark 次\r")  # 合図の後に応答が再開して質問が出た形
     t.type("q open\r")
@@ -2144,7 +2149,7 @@ def test_guard_question_blocks_exit(term):
     assert question_rows(t)[0] == {"action": "open", "stdout": "", "code": 0}
     d = pathlib.Path(t.starts()[0]["relay_dir"])
     assert (d / "question").exists() and (d / "next.json").exists()
-    time.sleep(3)
+    time.sleep(1.2)  # 静止の待ちの 2 倍を超えても書かない
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
     t.type("q close\r")
     t.wait(lambda: not (d / "question").exists(), what="合図が消える")
@@ -2222,10 +2227,10 @@ def test_guard_lock_held_then_question_appears(term):
         fcntl.flock(f, fcntl.LOCK_EX)
         t.type("mark 次\r")
         t.wait(lambda: (d / "next.json").exists(), what="合図")
-        time.sleep(1.5)
+        time.sleep(0.8)  # 静止の待ち（0.3 秒）の 2 倍を超えても書かない
         assert b"/exit" not in t.child_input(0)
         (d / "question").write_text("")
-    time.sleep(1.5)
+    time.sleep(0.8)
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
     t.type("q close\r")
     t.type("mark 次\r")
@@ -3515,7 +3520,7 @@ def test_slow_usage_endpoint_does_not_stall_relay(term, accounts):
     accounts.add("b", util5=30)
     t = account_term(term, accounts)
     t.wait_start(1)
-    accounts.fake.delay = 8  # 定期の確認（1 秒ごと）の取得が待たされる
+    accounts.fake.delay = 3  # 定期の確認（1 秒ごと）の取得が、下で打つ時点（1.5 秒後）にまだ待たされている
     time.sleep(1.5)
     pid = t.starts()[0]["pid"]
     sent = time.time()

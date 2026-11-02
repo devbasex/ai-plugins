@@ -1,0 +1,5 @@
+{
+  "name": "NDF_DEPS_REEXEC",
+  "set_by": "user",
+  "summary": "NDF_DEPS_REEXEC。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/deps.py:167）が決める"
+}

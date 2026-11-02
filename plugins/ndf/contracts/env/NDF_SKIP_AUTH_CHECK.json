@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SKIP_AUTH_CHECK",
+  "set_by": "user",
+  "summary": "NDF_SKIP_AUTH_CHECK。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/auth.py:133）が決める"
+}

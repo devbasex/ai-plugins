@@ -86,7 +86,7 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 
 ### 4. PR の作成・更新
 
-本文を日本語で書いてファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
+本文は `document-style` の規則で日本語で書き、ファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
 `## Summary`・`## 利用者向けの変化`・`## 移行の手順`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
 （`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。テンプレートは
 `python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md [--mode <モード>]` が書く。
@@ -152,12 +152,19 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
 スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。
+開発の起点（`base_branch`）が既定ブランチと同じリポジトリでは、上の develop の行の Pull Request が既定ブランチ宛になる。
+そのときの本文の扱いは次の節にある。
 
 ## closing keywords は本文だけに書く
 
 **closing keywords（`Closes` / `Fixes` / `Resolves` の後に番号を書く記法）は Pull Request の本文だけに、番号ごとに書く。** コミット
 メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の closing keywords は
 外さない**（`stage-completeness.md` と `progress-tracking` の「スプリントを閉じる」が本文を入力にする）。
+
+**宛先が既定ブランチの Pull Request では、`pr-steps.py create` / `update` が本文の closing keywords を閉じる予定の参照
+（`最終工程の後に閉じる: #<番号>`）へ置き換えてから送る。** 書く側は closing keywords で書いてよい。置き換えた
+指し先は結果の `metrics.deferred_closing` に載る。課題を閉じる時点と閉じる予定の参照の形は `progress-tracking` の
+「スプリントを閉じる」が正本である。
 
 ## 設計 Pull Request の本文
 

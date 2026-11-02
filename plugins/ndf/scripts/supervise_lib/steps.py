@@ -50,6 +50,35 @@ def last_json(text: str) -> dict | None:
     return None
 
 
+# ---- 計画の実行の条件（engine の実行の前と、queue の版の差し込みの前で共有する） ----
+
+COND_RUN, COND_SKIP, COND_UNKNOWN = "run", "skip", "unknown"
+
+
+def condition_cwd(plan: dict) -> str | None:
+    """条件を打つ場所: プランの `リポジトリ`、無ければ作業場所（まだ無ければその親のリポジトリ）。"""
+    wt = Path(plan.get("作業場所") or "")
+    cwd = plan.get("リポジトリ") or (
+        str(wt) if str(wt) and wt.is_dir() else str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None
+    )
+    return cwd if cwd and Path(cwd).is_dir() else None
+
+
+def run_condition(cond: dict, plan: dict, state_dir: str | Path) -> tuple[str, int, str, float]:
+    """条件を打ち、(COND_RUN / COND_SKIP / COND_UNKNOWN, 終了コード, 要約, 秒) を返す。"""
+    cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(state_dir))
+    started = time.time()
+    try:
+        p = subprocess.run(cmd, shell=True, cwd=condition_cwd(plan), capture_output=True, text=True, timeout=cond.get("timeout", 900))
+        code, text = p.returncode, p.stdout + p.stderr
+    except subprocess.TimeoutExpired as e:
+        code, text = 124, f"打ち切り（{e.timeout} 秒）"
+    out = last_json(text) or {}
+    summary = str(out.get("summary") or text.strip()[-200:] or f"exit={code}")
+    verdict = COND_RUN if code == 0 else COND_SKIP if code == cond.get("skip_code", 3) else COND_UNKNOWN
+    return verdict, code, summary, round(time.time() - started, 1)
+
+
 def prior_results(state) -> dict[str, dict]:
     """前の実行の結果（`--from` の再開で inputs が読む。#1676 の I7・I8）。前の実行の範囲（`RunState.prior_rows`）の
     `step` の行のうち、ステップごとに最後の行の `exit` と、出力ファイル（`out`）の本文を返す。`out` の無い古い行は `summary`。"""
@@ -181,7 +210,30 @@ class RunStep:
             return ""
         return str(test.get("no_reports") or "") if isinstance(test, dict) else ""
 
-    def run_cmd(self, ctx, step: dict) -> tuple[int, str]:
+    @staticmethod
+    def extension(ctx, step: dict, path: Path, timeout) -> int | None:
+        """延長のファイルの秒から、この呼び出しの開始からの締め切り（`with_margin`）を返す。今の `timeout` 以下なら None。
+        延ばしたら `cur.extended_timeout` と進捗ログの 1 行に残す（#2047 の決定 4）。"""
+        import drive_pause
+        from supervise_lib.verify_steps import with_margin
+
+        got = drive_pause.read_extension(path)
+        if got is None:
+            return None
+        longer = with_margin(int(got[0]))
+        if longer <= int(timeout):
+            return None
+        cur = ctx.state.cur
+        if isinstance(cur, dict) and int((cur.get("extended_timeout") or {}).get("timeout") or 0) < longer:
+            cur["extended_timeout"] = {"seconds": int(got[0]), "timeout": longer, "planned": int(timeout), "reason": got[1]}
+            write = getattr(ctx.state, "progress_write", None)
+            if write:
+                write({"kind": "extend", "step": step.get("id"), "timeout": longer, "planned": int(timeout), "reason": got[1]})
+        return longer
+
+    def run_cmd(self, ctx, step: dict, extend_file: Path | None = None) -> tuple[int, str]:
+        """コマンドを締め切りまで待つ。`extend_file` を渡すと（drive のステップ）、子へ `NDF_STEP_EXTEND_FILE` で置き場を渡し、
+        子が書いた見込みの秒で締め切りを後ろへずらす（#2047 の決定 4）。"""
         cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
@@ -205,6 +257,12 @@ class RunStep:
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
+        extend = None
+        if extend_file is not None:
+            import drive_pause
+
+            env[drive_pause.EXTEND_ENV] = str(extend_file)
+            extend = lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t  # noqa: E731
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
             p = run_ticking(
@@ -216,6 +274,7 @@ class RunStep:
                 timeout=timeout,
                 env=env,
                 err_path=ctx.state.run_log,
+                extend=extend,
             )
             return p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:

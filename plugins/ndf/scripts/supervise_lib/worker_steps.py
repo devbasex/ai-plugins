@@ -173,7 +173,9 @@ class DriveStep:
         script = paths.DRIVES.get(step.get("drive", ""))
         return f"python3 {script} {step.get('args', '')}".strip() if script else ""
 
-    def drive_loop(self, ctx, step: dict, cmd: str, depth: int = 0, inner: list[dict] | None = None) -> tuple[bool, dict | None, str]:
+    def drive_loop(
+        self, ctx, step: dict, cmd: str, depth: int = 0, inner: list[dict] | None = None, extend_file: Path | None = None
+    ) -> tuple[bool, dict | None, str]:
         """駆動を打ち、pause のたびに worker へ渡して打ち直す。(成功, 最後の結果, 出力) を返す。
 
         入れ子の駆動（最終ゲートの item.command）の metrics は `inner` へ足す（外側の結果は内側の件数を持たない）。"""
@@ -181,7 +183,7 @@ class DriveStep:
         texts = []
         max_pauses = step.get("max_pauses", DEFAULT_MAX_PAUSES)
         for _ in range(max_pauses + 1):
-            code, text = self.run.run_cmd(ctx, {**step, "cmd": cmd})
+            code, text = self.run.run_cmd(ctx, {**step, "cmd": cmd}, extend_file)
             texts.append(text)
             out = last_json(text)
             if out is None:
@@ -195,7 +197,7 @@ class DriveStep:
             ctx.state.cur.setdefault("pauses", []).append(kind)
             res_file = Path(item["result_file"])
             if item.get("command") and depth == 0:
-                ok, sub = self._drive_nested(ctx, step, item, res_file, depth, inner, texts)
+                ok, sub = self._drive_nested(ctx, step, item, res_file, depth, inner, texts, extend_file)
                 if not ok:
                     return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
                 continue
@@ -205,10 +207,18 @@ class DriveStep:
         return False, None, "\n".join(texts) + f"\npause が上限 {max_pauses} を超えた"
 
     def _drive_nested(
-        self, ctx, step: dict, item: dict, res_file: Path, depth: int, inner: list[dict] | None, texts: list[str]
+        self,
+        ctx,
+        step: dict,
+        item: dict,
+        res_file: Path,
+        depth: int,
+        inner: list[dict] | None,
+        texts: list[str],
+        extend_file: Path | None = None,
     ) -> tuple[bool, dict | None]:
         """item.command の駆動を回し、通れば件数から答えを結果ファイルへ書く。(成功, 内側の最後の結果) を返す。"""
-        ok, sub, sub_text = self.drive_loop(ctx, step, item["command"], depth + 1, inner)
+        ok, sub, sub_text = self.drive_loop(ctx, step, item["command"], depth + 1, inner, extend_file)
         if inner is not None and sub and isinstance(sub.get("metrics"), dict):
             inner.append(sub["metrics"])
         texts.append(sub_text)
@@ -243,11 +253,18 @@ class DriveStep:
             return False, err
         # 入れ子の駆動（最終ゲートの item.command）の metrics を控える。外側の結果は内側の件数を持たない
         inner: list[dict] = []
-        ok, out, text = self.drive_loop(ctx, step, cmd, inner=inner)
+        # ステップの延長の置き場（#2047 の決定 4）。試行ごとに分け、前の試行のファイルは読まない
+        extend_file = Path(ctx.state.dir) / f"{len(getattr(ctx.state, 'log', []) or []) + 1:02d}-{step['id']}.extend.json"
+        extend_file.unlink(missing_ok=True)
+        ok, out, text = self.drive_loop(ctx, step, cmd, inner=inner, extend_file=extend_file)
         note_runtimes(ctx, step, started)
         if out or inner:
             ctx.state.cur["counts"] = dict((out or {}).get("metrics") or {})
             if inner:
                 ctx.state.cur["counts"]["inner"] = inner[-1]
-        ctx.state.cur.update(exit=0 if ok else 1, text=text, seconds=round(time.time() - started, 1))
+        # 欠けの残る終わり（stopped と gaps。収束しなかったなど）は終了コード 6 として控え、on_exit で分けられるようにする
+        code = 0 if ok else (6 if out and out.get("status") == "stopped" and out.get("gaps") else 1)
+        if code == 6:
+            ctx.state.cur["gaps"] = list(out.get("gaps") or [])  # フェーズレポートの「欠けを残して進んだステップ」（#2047 の決定 5）
+        ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return ok, text

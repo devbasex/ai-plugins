@@ -16,7 +16,6 @@ from hook_lib import payload
 from worktree_helpers import SCRIPTS_DIR
 
 HOOKS_DIR = SCRIPTS_DIR.parent / "hooks"
-INSTALL_SH = SCRIPTS_DIR.parent / "dev.kiro" / "install.sh"
 
 
 def guard_entries(runtime: str) -> list[dict]:
@@ -43,12 +42,3 @@ def test_sessionstart_runs_the_session_script(runtime: str) -> None:
     config = json.loads((HOOKS_DIR / f"{runtime}.json").read_text(encoding="utf-8"))
     commands = [hook["command"] for entry in config["hooks"]["SessionStart"] for hook in entry["hooks"]]
     assert any("worktree-session.sh" in c for c in commands), commands
-
-
-def test_kiro_installer_wires_both_hooks() -> None:
-    """Kiro CLI は導入スクリプトがエージェント定義へ書き込む。"""
-    body = INSTALL_SH.read_text(encoding="utf-8")
-    assert "worktree-session.sh" in body
-    assert "worktree-guard.sh" in body
-    assert '"userPromptSubmit"' in body
-    assert 'hooks.setdefault("agentSpawn"' in body

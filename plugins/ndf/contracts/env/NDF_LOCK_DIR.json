@@ -1,0 +1,5 @@
+{
+  "name": "NDF_LOCK_DIR",
+  "set_by": "user",
+  "summary": "NDF_LOCK_DIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/gh_parts.py:138）が決める"
+}

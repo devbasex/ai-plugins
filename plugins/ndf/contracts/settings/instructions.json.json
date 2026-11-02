@@ -1,0 +1,32 @@
+{
+  "file": "instructions.json",
+  "summary": "指示書のファイルと予算",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/instructions_lib/declaration.py:load"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "files": {
+      "summary": "files（このリポジトリの宣言にある最上位のキー）"
+    },
+    "imports": {
+      "summary": "imports（このリポジトリの宣言にある最上位のキー）"
+    },
+    "released": {
+      "summary": "released（このリポジトリの宣言にある最上位のキー）"
+    },
+    "decisions": {
+      "summary": "decisions（このリポジトリの宣言にある最上位のキー）"
+    },
+    "pending_marker": {
+      "summary": "pending_marker（このリポジトリの宣言にある最上位のキー）"
+    },
+    "budget": {
+      "summary": "budget（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

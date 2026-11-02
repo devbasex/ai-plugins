@@ -9,7 +9,6 @@ DBOS を import しない（`wait` ほかの副命令が払わないよう、`fl
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import time
@@ -18,8 +17,9 @@ from pathlib import Path
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
-from supervise_lib.paths import queue_done_path, queue_plans_path, report_result, state_dir_of, wait_cursor_path
+from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
+from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
@@ -104,72 +104,7 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
     return None
 
 
-QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の Pull Request 1 本
-QUEUE_STATE = re.compile(r"\{queue_state:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）
-
-
-def plan_pr(item: dict) -> str:
-    """完了か関門で終えた計画の報告の Pull Request の番号（設計のプランは承認ゲート 1 の関門で終わる。#1426 の決定 4）。無ければ空。"""
-    rep = Path(item.get("report") or "")
-    if item.get("result") not in FINISHED or not rep.is_file():
-        return ""
-    m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
-    return pr_number(m.group(1).strip()) if m else ""
-
-
-def named(plan: str, name: str) -> bool:
-    stem = Path(plan).stem
-    return stem == name or stem.endswith(f"-{name}")
-
-
-def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
-    """名前の一致する計画の結果。`items` に無ければ、`plan` と同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。"""
-    hits = [i for i in items if named(i.get("plan", ""), name)]
-    if hits:
-        return hits
-    return [
-        {
-            "plan": str(f),
-            "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
-            "report": str(state_dir_of(str(f)) / "report.md"),
-        }
-        for f in sorted(Path(plan).parent.glob("*.json"))
-        if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()
-    ]
-
-
-def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
-    """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
-    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。
-    {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（無ければ空文字。#1488）。"""
-    try:
-        text = Path(plan).read_text()
-    except OSError as e:
-        return f"計画を読めない: {e}"
-    names, states = set(QUEUE_PR.findall(text)), set(QUEUE_STATE.findall(text))
-    if not names and not states:
-        return None
-    for name in names:
-        hits = results_named(name, items, plan)
-        prs = [n for n in (plan_pr(i) for i in hits) if n]
-        text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
-    for name in states:
-        hits = [i for i in results_named(name, items, plan) if i.get("plan")]
-        text = text.replace(f"{{queue_state:{name}}}", str(state_dir_of(str(Path(hits[-1]["plan"]).absolute()))) if hits else "")
-    write_text_atomic(Path(plan), text)
-    return None
-
-
-def write_text_atomic(path: Path, text: str) -> None:
-    """一時ファイルへ書いてから rename する（待つ側が書きかけを読まない）。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text)
-    os.replace(tmp, path)
-
-
 NOT_RUN = "流さなかった"
-FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（止まったは次の実行の回で頭から流す）
 NO_REPORT = "報告なし"
 
 
@@ -195,17 +130,11 @@ def cmd_queue(
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
-    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
-    stages = [list(plans), *then_stages]
-    all_plans = [p for stage in stages for p in stage]
-    done_path = queue_done_path(plans, done)
-    try:
-        decl = queue_decl_of([_read_plan(p) for p in all_plans])
-    except DeclError as e:
-        return _not_started(str(e), max_, done_path)
-    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
-    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
-    listing = _read_listing(queue_plans_path(done_path))
+    stages, all_plans = _normalize_stages(plans, then)
+    prepared = _prepare_queue(all_plans, plans, done, max_)
+    if isinstance(prepared, dict):
+        return prepared
+    decl, done_path, seen, listing = prepared
     try:
         prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
     except durable.DurableError as e:
@@ -230,6 +159,26 @@ def cmd_queue(
         return got.value
     finally:
         durable.close()
+
+
+def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[str]], list[str]]:
+    """then（プランの並びかステージの並び）を、先頭のステージ plans に続くステージの並びとすべてのプランの並びにする。"""
+    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
+    stages = [list(plans), *then_stages]
+    return stages, [p for stage in stages for p in stage]
+
+
+def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max_: int):
+    """宣言を読み、done を消して知らせ始める位置と前の一覧を読む。宣言の形が違えば _not_started の結果を返す。"""
+    done_path = queue_done_path(plans, done)
+    try:
+        decl = queue_decl_of([_read_plan(p) for p in all_plans])
+    except DeclError as e:
+        return _not_started(str(e), max_, done_path)
+    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
+    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
+    listing = _read_listing(queue_plans_path(done_path))
+    return decl, done_path, seen, listing
 
 
 def _read_plan(plan: str) -> dict:
@@ -260,9 +209,9 @@ def start_listing(done_path: Path, all_plans: list[str], **extra) -> None:
 
 
 def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[dict], list[str]]:
-    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS を埋める。(流さないプランの items, 流すプラン) を返す。
+    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS と版の差し込みを埋める。(流さないプランの items, 流すプラン) を返す。
 
-    後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由を残す。"""
+    後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由と `unfilled` を残す（#2079）。"""
     not_done = [i for i in items if i["result"] != "完了"]
     if not first and not_done:
         ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
@@ -276,11 +225,33 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
     skipped, runnable = [], []
     for p in stage:
         err = (None if prs is None else fill_queue_prs(p, prs)) or fill_queue_pr(p, items)
+        version = None
+        if not err and _release_skipped_by_condition(p):
+            runnable.append(p)  # 版を照会せずに流す。engine が実行の条件を打ち直して完了で終える
+            continue
+        if not err:  # 版の差し込みは、ほかの差し込みを埋めた後に（差し込み前の写しに版だけを残す。#2164）
+            err, version = fill_release_version(p, items)
         if err:
-            skipped.append({"plan": p, "result": NOT_RUN, "reason": err})
+            skipped.append({"plan": p, "result": NOT_RUN, "reason": err, "unfilled": True, **({"version": version} if version else {})})
         else:
             runnable.append(p)
     return skipped, runnable
+
+
+def _release_skipped_by_condition(plan: str) -> bool:
+    """「版」と「実行の条件」を持つ配布のプランで、条件が配布不要（skip_code）を返すか。
+
+    条件で飛ぶ配布は版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
+    判定できないときと流すときは False（版を埋めてから流し、engine が条件を打ち直す）。"""
+    try:
+        info = json.loads(Path(plan).read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(info, dict) or not isinstance(info.get("版"), dict) or not isinstance(info.get("実行の条件"), dict):
+        return False
+    from supervise_lib.steps import COND_SKIP, run_condition  # 条件のあるプランだけが読み込む
+
+    return run_condition(info["実行の条件"], info, state_dir_of(str(Path(plan).absolute())))[0] == COND_SKIP
 
 
 def touched_files(body: str) -> list[str]:
@@ -366,10 +337,11 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
-    status = "stopped" if stopped else "gate" if gates else "ok"
+    unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
+    status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
     if skipped:
-        summary += f"。{skipped} 本は流さなかった"
+        summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
     nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
     return result(
         "supervise-queue",

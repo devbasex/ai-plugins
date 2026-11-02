@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SLEEP_MAX_SEC",
+  "set_by": "user",
+  "summary": "NDF_SLEEP_MAX_SEC。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/token_guard.py:139）が決める"
+}

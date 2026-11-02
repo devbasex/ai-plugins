@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/resolve.sh",
+  "summary": "NDF plugin: Skill が使うスクリプトの置き場所を 1 つに決めて、絶対パスを標準出力へ書く。",
+  "args": {
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [
+    "CLAUDECODE",
+    "CLAUDE_PLUGIN_ROOT",
+    "HOME"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/legacy_names.py",
+    "plugins/ndf/skills/backlog-refinement/SKILL.md",
+    "plugins/ndf/skills/backlog-refinement/references/ranking.md",
+    "plugins/ndf/skills/cross-refactoring/SKILL.md",
+    "plugins/ndf/skills/cross-refactoring/docs/01-state-and-propose.md"
+  ]
+}

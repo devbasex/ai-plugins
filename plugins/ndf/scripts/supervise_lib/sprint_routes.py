@@ -8,8 +8,8 @@ import delivery
 from gate_answer import GATE_1, GATE_2
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
-from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
-from supervise_lib.paths import HERE
+from supervise_lib.decl import DeclError, decl_roots, delivery_decl
+from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_gate_2, plan_promote, plan_verify
 from supervise_lib.release_templates import RELEASE_FORMS, material_path
@@ -32,10 +32,9 @@ MANUAL_RELEASE = "/ndf:release"
 
 
 def apply_routes(a) -> None:
-    """a.routes（リリースの経路）を宣言から組み、雛形で組む経路なら版数を確かめる（足りなければ DeclError）。"""
+    """a.routes（リリースの経路）を宣言から組む。雛形で組む経路でも版数は要らない（無ければ配布のステップを流す時点に決める。#2164）。"""
     a.delivery = delivery_decl(a)
     a.routes = delivery.routes(a.delivery, tuple(RELEASE_FORMS))
-    require_versions(a)
 
 
 def routes_of(a) -> list:
@@ -57,28 +56,31 @@ def has_release_template(a) -> bool:
     return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
 
 
-RECORD_NONE = "0"  # 本番の記録なし（配布なし。sprint-close.py は閉じる条件を見ずに閉じる。#1336）
-RECORD_UNKNOWN = "unknown"  # 記録の置き場が分からない（sprint-close.py は課題を開いたまま残す。#1875）
+RECORD_NONE = "0"  # 本番の記録なし（配布なし。sprint-close.py は閉じる条件 1・2 を見ない。#1336）
+RECORD_FOUND = "{queue_record}"  # まとめを流し始める時点に queue が GitHub から探すリリース記録の PR（#2230）
 
 
 def has_record(record_pr: str) -> bool:
-    """まとめの close が読む配布の記録の PR（{queue_pr:…}）があるか。"""
-    return record_pr not in (RECORD_NONE, RECORD_UNKNOWN)
+    """まとめの close が読む配布の記録の PR（番号か {queue_pr:…}・{queue_record}）があるか。"""
+    return record_pr != RECORD_NONE
 
 
 def record_pr_ref(a) -> str:
-    """まとめの close が読む配布の記録の PR: 雛形の本番の PR か、昇格の PR（#837）。昇格は route_waves が昇格の
-    プラン（計画名 promote）を置くときだけ。経路がすべて届けない経路なら RECORD_NONE、それ以外の届ける経路
-    （merge・手で届ける・検証の環境だけ・手動反映の本番系の昇格）は記録の置き場が分からず RECORD_UNKNOWN。"""
+    """まとめの close が読む配布の記録の PR。経路がすべて届けない経路なら RECORD_NONE。開発ループのまとめ（pace: auto）は
+    経路にかかわらず RECORD_FOUND（承認ゲート 2 の後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
+    雛形の本番の PR か、昇格の PR（#837。route_waves が昇格のプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
+    検証の環境だけ・手動反映の本番系）は RECORD_FOUND。"""
+    rs = routes_of(a)
+    if all(r.stage == delivery.STAGE_NONE for r in rs):
+        return RECORD_NONE
+    if getattr(a, "pace", None) == "auto":
+        return RECORD_FOUND
     if has_release_template(a):
         return "{queue_pr:release-prod}"
-    rs = routes_of(a)
     manual_prod = getattr(a, "state", None) and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION
     if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in rs):
         return "{queue_pr:promote}"
-    if all(r.stage == delivery.STAGE_NONE for r in rs):
-        return RECORD_NONE
-    return RECORD_UNKNOWN
+    return RECORD_FOUND
 
 
 def manual_release_wave(a) -> dict:
@@ -169,14 +171,19 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
     return waves
 
 
-def user_gate_cmd(a, gate: str, pr: bool) -> str:
-    """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+def user_gate_cmd(a, gate: str, pr: bool, outcomes: str = "approved|rejected") -> str:
+    """利用者の答えを状態と差し戻しの記録へ書くコマンド（覆しの記録。#1400 の AC6・#2183）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
     state = shlex.quote(sprint_state_path(a))
     return (
         f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
         + (" --pr <設計 PR>" if pr else "")
-        + " --outcome approved|rejected"
+        + f" --outcome {outcomes}"
     )
+
+
+def reject_resume(what: str) -> str:
+    """差し戻しの後の続き: 直してから計画を `--from reject` で流す（差し戻しを差し戻しの記録へ書いて再提示する。#2183）。"""
+    return f"差し戻されたら直してから `python3 {shlex.quote(str(SELF))} run <{what}> --from reject` で流す（差し戻しを記録して再提示する）"
 
 
 def normal_gate_1(a, advise: bool = True) -> str:
@@ -190,8 +197,10 @@ def normal_gate_1(a, advise: bool = True) -> str:
     return (
         "設計 Pull Request の承認を取る。"
         + ("承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を載せる。" if advise else "")
-        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, GATE_1, True)}` を打ってから「設計 PR のマージ」のステージの command を打つ"
+        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, GATE_1, True, 'approved')}` を打ってから「設計 PR のマージ」のステージの command を打つ"
         + after
+        + "。"
+        + reject_resume("その設計 PR の設計のプラン")
     )
 
 
@@ -202,18 +211,21 @@ def normal_gate_2(a) -> str:
     )
 
 
-def normal_gate_2_stage(a, repo: str | None, prod: str, advise: bool) -> str:
+def normal_gate_2_stage(a, repo: str | None, prod: str | None, advise: bool) -> str:
     """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、配布の note に重ねない（#1914 の決定 1）。
-    承認資料は本番のプランの release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）。"""
-    approval = material_path(repo, f"issues/approval-{(a.release or {}).get('plugin')}-v{prod}.md")
+    承認資料は本番のプランの release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）。
+    本番の版を明示していなければ、承認資料の版は開発版のプランの版の記録（状態ディレクトリの version.json）の base である（#2164）。"""
+    plugin = (a.release or {}).get("plugin")
+    approval = material_path(repo, f"issues/approval-{plugin}-v{prod or '<base>'}.md")
+    where = "" if prod else "。<base> は開発版のプラン release の状態ディレクトリの version.json の base"
     if getattr(a, "state", None):  # 本番のプランの先頭の approve が状態の記録を証跡に承認の記録を書く（#1426 の決定 1）
         return (
-            f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、利用者が答えたら "
+            f"開発版の配布が書いた承認資料（{approval}{where}）を示して本番への配布の承認を取り、利用者が答えたら "
             f"`{user_gate_cmd(a, GATE_2, False)}` を打ち、承認されたら「本番」のステージの command を打つ（差し戻されたら打たない）。"
             "本番のプランの先頭の approve が、開発版の facts の承認したコミットとこの記録を照らして承認資料へ承認の記録を書く"
             + ("。承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）" if advise else "")
         )
     return (
-        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら `python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval {shlex.quote(approval)} "
+        f"開発版の配布が書いた承認資料（{approval}{where}）を示して本番への配布の承認を取り、承認されたら `python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval {shlex.quote(approval)} "
         "--approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
     )

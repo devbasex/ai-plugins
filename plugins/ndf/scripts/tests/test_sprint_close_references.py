@@ -22,7 +22,7 @@ NOT_GIVEN = "--issues も無い参照"
 
 
 def run(gh, repo, *extra):
-    return call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", *extra], gh.env, repo)
+    return call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布", *extra], gh.env, repo)
 
 
 def issue_calls(gh, verb, n=None):

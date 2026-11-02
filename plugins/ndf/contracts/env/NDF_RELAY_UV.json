@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RELAY_UV",
+  "set_by": "user",
+  "summary": "NDF_RELAY_UV。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/relay_lib/runtime.py:83）が決める"
+}

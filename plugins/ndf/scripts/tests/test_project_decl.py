@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 PY = sys.executable
 SECRET = "AKIAABCDEFGHIJKLMNOP"
 DB_URL = "mysql://app:hunter2secret@db.internal:3306/app"
@@ -142,7 +145,7 @@ def plain(tmp_path):
 
 
 def run(env, *args, cwd=None):
-    p = subprocess.run([PY, str(SCRIPTS / "project-decl.py"), *args], capture_output=True, text=True, env=env, cwd=cwd)
+    p = inproc.run(SCRIPTS / "project-decl.py", *args, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     try:
         out = json.loads(lines[-1]) if lines else None
@@ -377,6 +380,24 @@ def test_hand_values_are_kept_and_mismatch_shows_both(laravel, env, tmp_path):
     assert new_wt["guard"] == wt["guard"]
 
 
+def test_delivery_rows_on_production_or_base_are_written_as_channel(laravel, env, tmp_path):
+    """#2336 の決定 7: 本番・起点の名前を写した `branch` は worktree.json の値で `channel` に直し、ほかのブランチの行は変えない。"""
+    write(laravel, ".ndf/worktree.json", json.dumps({"version": 1, "production_branch": "release"}))
+    row = {"kind": "auto", "trigger": "push", "versioned": False}
+    rows = [
+        {**row, "target": "prod", "branch": "release"},
+        {**row, "target": "stg", "branch": "main"},
+        {**row, "target": "pre", "branch": "feature/x"},
+    ]
+    code, _, text, _ = analyze(env, laravel, tmp_path, {**LARAVEL_ANSWERS, "delivery": {"value": rows}})
+    assert code == 0, text
+    assert decl(laravel)["delivery"] == [
+        {**row, "target": "prod", "channel": "production"},
+        {**row, "target": "stg", "channel": "base"},
+        {**row, "target": "pre", "branch": "feature/x"},
+    ]
+
+
 def test_hand_secret_value_is_dropped_before_keeping(laravel, env, tmp_path):
     write(laravel, ".ndf/project.json", json.dumps({"version": 1, "issues": {"primary": "redmine", "others": [TOKEN]}}))
     code, out, text, _ = analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
@@ -498,6 +519,14 @@ def test_broken_declaration_stops_with_3_and_is_not_rewritten(plain, env, tmp_pa
     code, out, _ = run(env, "write", "--root", str(plain), "--measure", str(mpath))
     assert code == 3
     assert (plain / ".ndf" / "project.json").read_text(encoding="utf-8") == text
+
+
+def test_write_reports_a_root_gitignore_that_excludes_ndf(plain, env, tmp_path):
+    write(plain, ".gitignore", ".ndf/\n")  # #2157: 書いた宣言をコミットできないことを items と要約に出す
+    code, out, _, _ = analyze(env, plain, tmp_path)
+    hits = [it for it in out["items"] if it.get("key") == "gitignore"]
+    assert code == 0 and ".ndf/project.json" in {h["name"] for h in hits}
+    assert {h["source"] for h in hits} == {".gitignore:1"} and "コミットできない" in out["summary"]
 
 
 def test_check_outside_git_is_1(tmp_path, env):

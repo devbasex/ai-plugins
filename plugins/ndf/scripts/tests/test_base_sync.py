@@ -15,6 +15,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
@@ -99,7 +102,7 @@ class Repos:
 
 
 def merged(args, cwd, env=None):
-    p = subprocess.run([PY, str(MERGED), *args], capture_output=True, text=True, cwd=cwd, env=env)
+    p = inproc.run(MERGED, *args, cwd=cwd, env=env)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines else None
     if out is not None:

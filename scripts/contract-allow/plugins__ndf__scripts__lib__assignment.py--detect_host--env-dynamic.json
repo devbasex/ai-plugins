@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/lib/assignment.py",
+  "name": "detect_host",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/scripts/lib/assignment.py の detect_host）。静的に拾えない"
+}

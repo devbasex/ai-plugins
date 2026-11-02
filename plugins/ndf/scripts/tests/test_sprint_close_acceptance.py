@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import sys
 from pathlib import Path
 
@@ -23,7 +24,15 @@ repo, gh = harness.repo, harness.gh  # fixture
 sys.path.insert(0, str(HERE.parent / "lib"))
 import acceptance  # noqa: E402
 
-CLOSE = ["--record-pr", "20", "--repo", "o/r", "--with-verification"]
+CLOSE = [
+    "--record-pr",
+    "20",
+    "--repo",
+    "o/r",
+    "--with-verification",
+    "--final-stage",
+    "配布",
+]  # 条件 2 を見る（条件 3 は test_sprint_close_final_stage.py）
 THREE = "# 課題\n\n## 受け入れ条件\n\n- [ ] 1. 一\n- [ ] 2. 二\n- [ ] 3. 三\n\n## 進行\n\nモード: standard\n"
 
 
@@ -96,6 +105,21 @@ def test_a_table_without_issue_rows_keeps_every_issue_open(repo, gh):
     assert not calls(gh, ["issue", "close"]) and not calls(gh, ["api"])
 
 
+def test_a_table_without_issue_rows_closes_an_issue_verified_before_merge(repo, gh):
+    """導入の確認だけの表でも、すべての条件をマージ前に確かめた課題は閉じる。他は対応の読めない kept_open（#2144）。"""
+    record = "\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n" + "".join(
+        f"| {i} | マージ前 | `pytest` |\n" for i in (1, 2, 3)
+    )
+    setup(gh, [("—", "導入の確認", "合格")], {"o/r#1": THREE + record, "o/r#2": THREE}, prs="Fixes #1, fixes #2")
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    assert code == 0, (out, err)
+    got = issues_of(out)
+    assert got["o/r#1"]["result"] == "closed" and got["o/r#1"]["checked"] == [1, 2, 3]
+    assert (got["o/r#2"]["result"], got["o/r#2"]["reason"]) == ("kept_open", "条件と課題の対応が読めない")
+    reads = [c for c in calls(gh, ["issue", "view"]) if "state,body" in c]
+    assert sorted(c[2] for c in reads) == ["1", "2"]  # 本文は課題ごとに 1 回だけ読む
+
+
 # --- 閉じる条件 2 と印（受け入れ条件 3〜11） ------------------------------------------
 
 
@@ -107,6 +131,16 @@ def test_a_criterion_without_a_passing_row_keeps_the_issue_open(repo, gh):
     assert code == 0 and it["result"] == "kept_open" and it["reason"] == "合格の行が無い受け入れ条件: 3"
     assert not calls(gh, ["issue", "close"]) and not calls(gh, ["api"])
     assert gh.get()["issue_bodies"]["o/r#1"] == THREE
+
+
+def test_a_pre_merge_criterion_needs_no_passing_row(repo, gh):
+    """本文の `## 受け入れ条件の確認` でマージ前に確かめたと記録した条件 3 は、合格の行が無くても閉じる（#2144）。"""
+    record = "\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 3 | マージ前 | `pytest -k three` |\n"
+    setup(gh, [("#1", "1. 一", "合格"), ("#1", "2. 二", "合格")], {"o/r#1": THREE + record})
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    it = issues_of(out)["o/r#1"]
+    assert code == 0, (out, err)
+    assert it["result"] == "closed" and it["checked"] == [1, 2, 3]
 
 
 def test_all_criteria_passed_closes_and_marks_before_closing(repo, gh):
@@ -182,7 +216,7 @@ def test_a_failed_write_does_not_close(repo, gh):
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["reason"] == "受け入れ条件の印を書けない"
-    assert it["cmd"].endswith("sprint-close.py " + " ".join(CLOSE))
+    assert it["cmd"].endswith("sprint-close.py " + shlex.join(CLOSE))
     assert not calls(gh, ["issue", "close"])
 
 
@@ -195,7 +229,13 @@ def test_issue_without_checkboxes_is_judged_by_the_rows_only(repo, gh, body):
     assert not calls(gh, ["api"])
 
 
-@pytest.mark.parametrize("args", [["--record-pr", "20", "--repo", "o/r"], ["--record-pr", "0", "--repo", "o/r", "--issues", "1"]])
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布"],
+        ["--record-pr", "0", "--repo", "o/r", "--issues", "1", "--final-stage", "配布"],
+    ],
+)
 def test_paths_without_verification_do_not_read_the_body(repo, gh, args):
     """--with-verification なし・--record-pr 0 は本文を読まず書かない（受け入れ条件 12）。"""
     setup(gh, [("#1", "1. c", "合格")], {"o/r#1": THREE})
@@ -226,7 +266,7 @@ def test_body_is_read_inside_the_issue_lock_and_a_held_lock_fails(tmp_path, monk
     """本文の読み書きは課題ごとの錠の中で行う。錠を取れなければ failed（非機能の条件）。"""
     monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path))
     mod = load_sprint_close()
-    ctx = mod.CloseContext(str(tmp_path), "o/r", "c")
+    ctx = mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布")
     seen = []
 
     def read(root, repo_, n):
@@ -256,7 +296,9 @@ def test_a_check_that_changes_more_than_the_marks_is_not_written(tmp_path, monke
     monkeypatch.setattr(mod.acceptance, "check_criteria", lambda body, nums: body.replace("# 課題", "# 変えた"))
     wrote = []
     monkeypatch.setattr(mod.gh_rest, "update_body", lambda *a: wrote.append(a) or True)
-    it = mod._close_verified(_A(), mod.CloseContext(str(tmp_path), "o/r", "c"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3})))
+    it = mod._close_verified(
+        _A(), mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3}))
+    )
     assert it["result"] == "failed" and not wrote
 
 

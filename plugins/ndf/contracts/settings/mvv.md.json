@@ -1,0 +1,10 @@
+{
+  "file": "mvv.md",
+  "summary": "プロジェクト MVV の本文",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/project_mvv.py:decl_paths"
+  ],
+  "keys": {}
+}

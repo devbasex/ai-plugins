@@ -119,6 +119,28 @@ def branch_answer(measure: dict, answers: dict, check) -> tuple[dict, str]:
     return ({} if is_unknown(value) else dict(value or {})), origin
 
 
+def delivery_channels(answers: dict, names: dict) -> dict:
+    """`delivery` の答えの行で、本番・起点のブランチ名を写した `branch` を `channel` に直す（#2336 の決定 7）。
+
+    `names` は `{"production": 名前, "base": 名前}`。両方に当たる名前は本番を採る。ほかのブランチの行は変えない。
+    """
+    ans = answers.get("delivery")
+    rows = ans.get("value") if isinstance(ans, dict) else None
+    if not isinstance(rows, list):
+        return answers
+    by_name = {}
+    for channel in ("base", "production"):
+        name = names.get(channel)
+        if isinstance(name, str) and name:
+            by_name[name] = channel
+    out = []
+    for row in rows:
+        if isinstance(row, dict) and not row.get("channel") and row.get("branch") in by_name:
+            row = {**{k: v for k, v in row.items() if k != "branch"}, "channel": by_name[row["branch"]]}
+        out.append(row)
+    return {**answers, "delivery": {**ans, "value": out}}
+
+
 def merge_worktree(existing: dict, branches: dict, origin: str, written_before: dict) -> tuple[dict, list[dict], dict]:
     """`worktree.json` に欠けた 2 キーを足す（I2）。返すのは (新しい中身, 出力の行, 書いたキーの指紋)。"""
     doc = dict(existing)

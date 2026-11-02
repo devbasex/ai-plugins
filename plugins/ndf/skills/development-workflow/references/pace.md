@@ -71,7 +71,7 @@ graph LR
 | --- | --- | --- |
 | その場で通す | 作業場所の用意 / 計画 / 実装 / 完了判定 / Pull Request / 後片付け / 配布 / リリース後テスト | 課題ごと。実装のプランが範囲テスト → Draft の Pull Request（CI と並べる）→ 全体テスト → doc-lint → マージまでを通す。リリースは開発版と verify-install まで。本番は下のゲート 2 に従う |
 | トリガーで通す | リファクタリング / コードレビュー | 検査のトリガーが立ったとき、次の開発版の前に 1 回。範囲は前回の検査からの差分 |
-| スプリントの終わりにまとめる | 確定仕様化 / 振り返り（受け入れ条件の確認と課題を閉じる作業を含む）/ 棚卸し | スプリントの終わりに 1 回ずつ |
+| スプリントの終わりにまとめる | 確定仕様化 / 振り返り / 課題を閉じる（受け入れ条件の確認を含む。`progress-tracking` の「スプリントを閉じる」）/ 棚卸し | スプリントの終わりに 1 回ずつ |
 | 省かない | 要求と受け入れ条件 / 設計 / ドキュメント再構成 / ドキュメントレビュー | モードの定めどおり。設計の承認が要る変更は設計 Pull Request を出す |
 
 | 承認ゲート | `normal` | `auto` | `fast` |
@@ -200,23 +200,47 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |
 | 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
 
-**スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版>
---state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。
-最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request → `close` 後片付け → `retro` 振り返り → `refine` 棚卸し）
+**スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。
+最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request →（配布の記録があれば `release-verify` リリース後テスト →）`retro` 振り返り → `close` 後片付け → `refine` 棚卸し）
 を `--then` のステージで流す。`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題>
---with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。`refine` は `close` が 0 で終わったときだけ届き（スプリントを閉じてから棚卸しへ進む）、棚卸しを無人で通す（承認の要る反映は
+--final-stage 振り返り --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。`refine` は `close` が 0 で終わったときだけ届き（スプリントを閉じてから棚卸しへ進む）、棚卸しを無人で通す（承認の要る反映は
 行わず、承認資料のパスと番号を報告に載せて終える）。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
-リリースの経路がテンプレートで組むものでなければ `--version`・`--prod` は要らず、開発版と本番の代わりに下の経路のステージが入り、
+リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが入り、
 `close` のステップの `--record-pr` は、昇格の経路（手動反映の本番系を除く）なら `{queue_pr:promote}`、経路がすべて届けない経路なら `0`、
-それ以外は `unknown`（記録の置き場が分からない。課題を開いたまま理由つきで残す）になる。
+それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系）は `{queue_record}` になる。開発ループのまとめ（`new close --pace auto`）は、
+届けない経路だけでなければ経路にかかわらず `{queue_record}` になる。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
+課題を閉じる PR とそれを参照する PR から、段階が本番か配布なしのリリース記録を置いた PR を探して埋め、`release-verify` と `close` が
+同じ番号を受ける。見つからない・2 つ以上のスプリントにある・GitHub を読めなければ、まとめを流さずに止まり（queue の結果は `stopped`、
+開発ループの周回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
 
 ## リリースの経路からステージを組む
 
 **`new sprint` / `new close` は、リリースの経路（`lib/delivery.py` の `routes`）から検査の後のステージを組む。**
-`.ndf/supervise.json` に `release.form` があれば経路はテンプレート（`template`）で、今の開発版と本番のステージを置き、版数
-（`--version`、`close` は `--prod` も）が要る。無ければ `.ndf/project.json` の `delivery` の行ごとに経路を決め、版数は要らない。
-選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
+`.ndf/supervise.json` に `release.form` があれば経路はテンプレート（`template`）で、今の開発版と本番のステージを置く。
+無ければ `.ndf/project.json` の `delivery` の行ごとに経路を決める。選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
+
+**テンプレートの経路の版数は、配布のプランを流す時点に決まる。** `--version`（`close` は `--prod` も）は明示の版で、
+省けばプランは具体的な版の代わりに版の差し込み（`{release_version}`・`{release_base}`）を持ち、作業場所・`branch`・承認資料の
+パスも差し込みで書く。queue が開発版のプランを流す直前に origin のベースブランチの版と最新のリリースタグから次に空いている
+版を決め（新しい系列を始めるときの上げ幅は `--level`、既定は `patch`）、プランの状態ディレクトリの版の記録（`version.json`）へ
+決めた版・読んだ値・上げ幅を書いてから差し込みを埋める。流し直しは記録の版を使い、自分の配布がベースブランチへマージされる
+前に別のスプリントがその版を出していたときだけ、次に空いている版へ決め直す（前の版・理由・前の作業場所と `branch` は
+記録の `history` に残し、前のステップの記録は状態ディレクトリの `superseded/v<前の版>/` へ移してプランを頭から流す）。
+本番のプランは開発版のプラン `release` の版の記録の `base` で出す。
+
+**次のときはプランを流さずに止まる。** queue の結果は `stopped` で、流さなかったプランの項目の `version` に `cause` と
+材料が載る。別の版で黙って進めないため、どの版で出すかは人へ戻す。
+
+| `cause` | いつ | 載る材料 |
+| --- | --- | --- |
+| `taken` | 明示の版がすでに出ている（開発版はベースブランチの版が同じか大きい、正式版は同じ版のタグがある）。本番の版のタグがすでにある | `existing`（既に出ている版）・`next_free`（次に空いている版） |
+| `unreadable` | origin のベースブランチ・本番のブランチ・タグのどれか、または自分の配布の PR の照会を読めない | `unreadable`（読めなかったもの） |
+| `no_series` | 本番が版を読む開発版のプランの版の記録が無い | — |
+| `series_changed` | 承認ゲート 2 を通った後に、開発版の記録の版が変わった | `existing`（承認した版）・`version`（新しい版） |
+
+配布の `bump` も、新しい版がベースブランチの版以下か、既にタグのある正式版なら書き換えずに止まる（終了コード 3。
+読めなければ 2）。どちらも judge を通らずにプランが止まる。版の差し込みを持たない前のプランにも、この止まり方が当たる。
 
 | `delivery` の行 | 経路 | 検査の後に置くステージ |
 | --- | --- | --- |
@@ -269,7 +293,7 @@ Pull Request の先端を「承認したコミット」として昇格の承認�
 | --- | --- |
 | 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → 設計のステージの `resume` に `--from design-<N>=approve` を足して打つ（後続のステージも続けて流れる） |
 | 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → 本番のプランを含むステージの `resume` に `--from release-prod=bump` を足して打つ（昇格のプランは `--from promote=promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from promote=verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote=promote` から流し直して新しい先端で承認ゲート 2 を取り直し、`fast` / `auto` は `--from promote=verify` から流し直す。マージの `merge-gate` で止まったプランは `--from <プラン名>=merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
-| 差し戻し | `sprint-state.py gate <状態> "関門 N" --what <要約> --by user --outcome rejected`。続きは流さない。差し戻しは状態ファイルでなく差し戻しの記録（`gate-rejections.jsonl`）へ 1 行残る。状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
+| 差し戻し | 直してから、止まったプランを `supervise.py run <プラン> --from reject` で流す。`reject` のステップが差し戻しを差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書き、再提示のステップ（設計は `mvv`、`gate-2` は `facts`、昇格は `verify`、本番は `mvv`）へ進む。`sprint-state.py gate ... --outcome rejected` は手で打たない。`reject` を持たないプラン（`pace: normal` の本番など）と状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で
 止まった後の承認は `override_pass` になる（[project-mvv.md](project-mvv.md) の「改訂の兆候」）。`handoff` で止まった後は

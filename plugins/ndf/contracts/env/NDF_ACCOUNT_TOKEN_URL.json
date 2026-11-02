@@ -1,0 +1,5 @@
+{
+  "name": "NDF_ACCOUNT_TOKEN_URL",
+  "set_by": "user",
+  "summary": "NDF_ACCOUNT_TOKEN_URL。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/claude_usage.py:288）が決める"
+}

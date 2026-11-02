@@ -11,6 +11,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -84,7 +85,9 @@ def test_without_a_board_declaration_the_issue_body_is_still_written(repo):
     out = run(repo, SYNC, "42", "stage", "設計")
     assert out.returncode == 0, out.stderr
     assert "- [x] 設計 —" in repo.body.read_text(encoding="utf-8")
-    assert "#42 進行 = 設計" in out.stdout
+    res = json.loads(out.stdout)
+    assert res["status"] == "ok" and res["summary"] == "#42 進行 = 設計"
+    assert {"kind": "board", "name": "#42 stage", "result": "not_declared"} in res["items"]
     assert "project" not in calls(repo)
 
 
@@ -94,8 +97,11 @@ def test_with_a_board_declaration_both_are_written(repo):
     assert out.returncode == 0, out.stderr
     assert "- [x] 設計 —" in repo.body.read_text(encoding="utf-8")
     assert "project item-edit" in calls(repo)
-    # issue の本文の行とボードの行の 2 つが出る
-    assert out.stdout.count("#42 進行 = 設計") == 2
+    # 標準出力は 1 行の結果 JSON で、本文とボードの両方を記録したと読める
+    assert len(out.stdout.splitlines()) == 1
+    res = json.loads(out.stdout)
+    assert res["status"] == "ok" and res["summary"].count("#42 進行 = 設計") == 2
+    assert [i["result"] for i in res["items"] if i["kind"] in ("issue-body", "board")] == ["recorded", "recorded"]
 
 
 def test_mode_changes_only_the_heading_line(repo):
@@ -154,7 +160,7 @@ def test_the_body_matches_the_two_commands_run_separately(repo, tmp_path, key, v
 
 
 def test_missing_gh_writes_nothing(repo, tmp_path):
-    """`gh` が無ければ何もせず 0 で終わる。工程を止めない。"""
+    """`gh` が無ければ本文もボードも書かず、前提の欠け（3）の結果 JSON を返す（#2227）。"""
     bin_dir = tmp_path / "nogh"
     bin_dir.mkdir()
     for name in ("bash", "git", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed", "dirname", "rm", "cp", "jq"):
@@ -169,6 +175,35 @@ def test_missing_gh_writes_nothing(repo, tmp_path):
         timeout=60,
         env={**os.environ, "PATH": str(bin_dir), "CLAUDE_PLUGIN_DATA": str(repo.data)},
     )
-    assert out.returncode == 0
-    assert out.stdout == ""
+    assert out.returncode == 3, out.stderr
+    assert json.loads(out.stdout)["status"] == "stopped"
     assert repo.body.read_text(encoding="utf-8") == BODY
+
+
+# --- 結果 JSON（#2227 の I7）---
+
+
+def test_a_failing_board_write_returns_a_gap_with_gh_stderr(repo):
+    """ボードへの書き込みの失敗は ok で返さず、gh の標準エラーの要旨を欠けに載せる。"""
+    declare(repo)
+    gh = repo.bin / "gh"
+    gh.write_text(
+        gh.read_text(encoding="utf-8").replace(
+            "#!/usr/bin/env bash\n",
+            '#!/usr/bin/env bash\nif [ "$1 $2" = "project item-edit" ]; then echo "GraphQL: 偽の書き込みの失敗" >&2; exit 1; fi\n',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    out = run(repo, SYNC, "42", "stage", "設計")
+    assert out.returncode == 6, out.stderr
+    lines = out.stdout.splitlines()
+    assert len(lines) == 1
+    res = json.loads(lines[0])
+    sys.path.insert(0, str(SYNC.parent / "lib"))
+    import step_result
+
+    assert step_result.validate_result(res, 6) == []
+    assert any(g["kind"] == "board" and "GraphQL: 偽の書き込みの失敗" in g["reason"] for g in res["gaps"])
+    # 本文は書けている
+    assert {"kind": "issue-body", "name": "#42", "result": "recorded"} in res["items"]

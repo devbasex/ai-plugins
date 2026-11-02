@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/statusline-switch.sh",
+  "summary": "NDF plugin: statusline の導入・切替・復元を行う。",
+  "args": {
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [
+    "HOME"
+  ],
+  "settings": [],
+  "stdin": "hook-json",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/scripts/lib/run_state_kinds.py",
+    "plugins/ndf/skills/statusline/SKILL.md"
+  ]
+}

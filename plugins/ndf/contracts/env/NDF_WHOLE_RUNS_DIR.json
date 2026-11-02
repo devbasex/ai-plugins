@@ -1,0 +1,5 @@
+{
+  "name": "NDF_WHOLE_RUNS_DIR",
+  "set_by": "user",
+  "summary": "NDF_WHOLE_RUNS_DIR。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/whole_runs.py:30）が決める"
+}

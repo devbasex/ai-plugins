@@ -6,14 +6,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shutil
 import subprocess
+import sys
 
 import pytest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "progress-record.sh"
+sys.path.insert(0, str(SCRIPT.parent / "lib"))
+import step_result  # noqa: E402
 
 
 @pytest.fixture()
@@ -100,8 +104,8 @@ def test_writing_the_same_stage_twice_changes_nothing(fake_gh):
     fake_gh.written.unlink()
     out = run(fake_gh, "123", "設計")
     assert out.returncode == 0
-    # 時刻が同じ分のあいだは書き込みが起きない
-    assert not fake_gh.written.exists() or fake_gh.written.read_text(encoding="utf-8") == first
+    # 済んだ工程の時刻は書き換えないため、本文が変わらず `gh issue edit` を呼ばない
+    assert not fake_gh.written.exists()
 
 
 def test_an_unknown_stage_is_rejected(fake_gh):
@@ -113,7 +117,7 @@ def test_an_unknown_stage_is_rejected(fake_gh):
 
 
 def test_missing_gh_is_not_an_error(tmp_path):
-    """`gh` が無ければ何もせず終了コード 0 で終わる。工程を止めない。
+    """`gh` が無ければ本文を書かず、前提の欠け（3）の結果 JSON を返す（#2227）。
 
     `gh` だけを隠す。**PATH を空にすると `bash` も消える**ため、必要なコマンドへの
     symlink を張った隔離したディレクトリを使う。
@@ -131,8 +135,9 @@ def test_missing_gh_is_not_an_error(tmp_path):
         timeout=60,
         env={**os.environ, "PATH": str(bin_dir), "CLAUDE_PLUGIN_DATA": str(tmp_path / "data")},
     )
-    assert out.returncode == 0
-    assert out.stdout == ""
+    assert out.returncode == 3
+    res = json.loads(out.stdout)
+    assert res["status"] == "stopped" and "gh が無い" in res["summary"]
 
 
 def test_a_similar_heading_is_not_mistaken_for_the_section(fake_gh):
@@ -234,13 +239,16 @@ def _issue_lock(number):
     return locks.exclusive(pathlib.Path(os.environ["NDF_LOCK_DIR"]) / "issue-body" / f"o--r--{number}")
 
 
-def test_progress_is_skipped_with_exit_0_when_the_lock_cannot_be_taken(fake_gh, monkeypatch):
+def test_progress_is_returned_as_a_gap_when_the_lock_cannot_be_taken(fake_gh, monkeypatch):
     fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
     monkeypatch.setenv("NDF_PROGRESS_LOCK_TIMEOUT", "1")
     with _issue_lock(123):
         out = run(fake_gh, "123", "設計", "--repo", "o/r")
-    assert out.returncode == 0, out.stderr
+    # 書けなかったことを欠け（6）で返す（通過記録は積んだ）。標準出力は 1 行の結果 JSON
+    assert out.returncode == 6, out.stderr
     assert not fake_gh.written.exists() and "NOTE:" in out.stderr
+    res = json.loads(out.stdout)
+    assert res["status"] == "stopped" and "排他" in res["gaps"][0]["reason"]
 
 
 def test_progress_waits_for_the_lock_and_then_writes(fake_gh):
@@ -307,3 +315,47 @@ def test_unrecorded_mode_keeps_every_stage_row(fake_gh):
     assert out.returncode == 0, out.stderr
     written = fake_gh.written.read_text(encoding="utf-8")
     assert "モード: —" in written and len(_rows(written)) == 19
+
+
+# --- 結果 JSON（#2227 の I7）---
+
+
+def _failing_gh(fake_gh, verb, message="HTTP 502: 偽の gh の失敗"):
+    """`issue <verb>` だけを、標準エラーへ理由を出して失敗させる。"""
+    (fake_gh.bin / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = "issue" ] && [ "$2" = "{verb}" ]; then echo "{message}" >&2; exit 1; fi\n'
+        f'if [ "$2" = "view" ]; then cat {fake_gh.body}; exit 0; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("message", ["HTTP 502: 偽の gh の失敗", "GraphQL: API rate limit exceeded (graphql_rate_limit)"])
+@pytest.mark.parametrize("verb", ["view", "edit"])
+def test_a_failing_gh_returns_a_gap_with_its_stderr(fake_gh, verb, message):
+    """gh の失敗を黙って ok にしない（#671）。理由は結果の欠けと標準エラーの両方へ出し、終了コードは 6。"""
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    _failing_gh(fake_gh, verb, message)
+    out = run(fake_gh, "660", "完了判定", "--repo", "o/r")
+    assert out.returncode == 6, out.stderr
+    lines = out.stdout.splitlines()
+    assert len(lines) == 1, out.stdout
+    res = json.loads(lines[0])
+    assert step_result.validate_result(res, out.returncode) == []
+    assert res["status"] == "stopped"
+    assert any(message in g["reason"] for g in res["gaps"])
+    assert f"gh issue {verb}" in out.stderr and message in out.stderr
+    assert "#660 進行 = 完了判定" not in out.stdout + out.stderr
+    assert not fake_gh.written.exists()
+
+
+def test_a_successful_record_is_one_ok_line(fake_gh):
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "設計", "--repo", "o/r")
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.splitlines()
+    assert len(lines) == 1
+    res = json.loads(lines[0])
+    assert step_result.validate_result(res, 0) == []
+    assert res["items"] == [{"kind": "issue-body", "name": "#123", "result": "recorded"}]

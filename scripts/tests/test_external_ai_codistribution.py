@@ -50,7 +50,7 @@ def test_some_skill_points_at_external_ai() -> None:
 
 
 def test_the_manifests_are_found() -> None:
-    assert len(MANIFESTS) == 4, [m.name for m in MANIFESTS]
+    assert len(MANIFESTS) == 2, [m.name for m in MANIFESTS]
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda p: p.name)

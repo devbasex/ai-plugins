@@ -315,7 +315,7 @@ def limits_section(limits: dict[str, Any]) -> list[str]:
                 "",
                 f"入力: 予算 {basis.get('budget_minutes')} 分 / 全体テストの所要 w {basis.get('w')}（{basis.get('w_source') or '—'}）"
                 f" / 着手前の実測 x {basis.get('x')} / CI の壁時計 c {basis.get('c')}"
-                f" / 範囲テストの所要 s {basis.get('scope_seconds')}（{basis.get('scope_source') or '—'}） / 戦略 {basis.get('strategy')}",
+                f" / 着手前のテストの所要の見込み s {basis.get('scope_seconds')}（{basis.get('scope_source') or '—'}） / 戦略 {basis.get('strategy')}",
             ]
         )
     lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの期限は持たない（実装を止めるのは実装の終わりだけ）。", ""])

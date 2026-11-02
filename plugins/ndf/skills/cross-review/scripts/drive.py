@@ -6,7 +6,7 @@
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
 同じコマンドを打ち直すと続きから進む。収束ループが終わった後に打ち直すと、終わりの時点の PR の head と今の head が
-同じで結果を変える引数も同じなら前回の結果を返し、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
+同じで結果を変える引数も同じなら前回の結果を返し（`ok` で終わったときだけ。`final` が `approved` 以外の終わりは `stopped` を返し、打ち直すとラウンドを足す）、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
 あり、耐久ワークフロー `review_drive` の 1 回が収束ループの 1 回である。`state.py init` とラウンドは耐久ステップで、
 記録のある耐久ステップは打ち直しで流れない（init は 1 回の中で 1 回だけ。#1142 の I19）。止まりはイベント `pause` を
 立てて続きを待ち、打ち直しが続き（`resume`）を送る。結果ファイルが無ければ同じ止まりを番号を増やして返す。
@@ -33,6 +33,7 @@ deps.require("durable", "waits", "procs", "schema")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
+import run_owner  # noqa: E402  持ち主の記録（#2229）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
@@ -261,16 +262,23 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return durable_identity(self.known_tmp(), self.pr)
 
     def init(self) -> dict:
-        out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args], self.env), "state.py init")
+        run = run_owner.run_args(self.init_args)  # 実行の識別子（#2229）
+        out = self.must(
+            call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args, *run], self.env), "state.py init"
+        )
         iv = parse_vars(out)
         if "TMP_DIR" not in iv:
             raise Stop("state.py init が TMP_DIR を返さない", 2)
         return iv
 
     def adopt(self, iv: dict) -> None:
-        """init の出力（耐久ステップの記録）を持つ。打ち直しでは記録から組み直し、init を打たない（I19）。"""
+        """init の出力（耐久ステップの記録）を持つ。打ち直しでは記録から組み直し、init を打たない（I19）。
+
+        起動のたびに pr<n> の持ち主の記録へ動いた時刻を書く。別の実行が引き継いでいれば止まる（#2229 の I12）。"""
         self.v.update(iv)
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
+        if why := run_owner.mark_owner(self.v.get("WORKTREE"), self.v.get("RUN"), "touch"):
+            raise Held(f"持ち主の記録を更新できない: {why}", 1)
 
     def review_round(self) -> str:
         """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ posts（投稿だけが残った）/ done。"""
@@ -368,12 +376,15 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         (rp := self.tmp / f"drive-pr{self.pr}-report.md").write_text(self.st("report", str(self.pr))[1])
         c = self.counts()
         summary = f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）"
-        res = dp.done(TOOL, summary, rp, c)
+        res = dp.done(TOOL, summary, rp, c) if c["final"] == "approved" else dp.unconverged(TOOL, f"{summary}。収束していない", rp, c)
         late = json.loads(self.path("sweep").read_text()).get("deferred") or []  # 最終スイープの見送り（#1488 の「レビュー」の材料）
         ds = [*s.get("deferred_nits", []), *({"round": c["rounds"], **d} for d in late if isinstance(d, dict))]  # 修正の見送り＋スイープ
         res["items"] += [
             {"kind": "deferred", **{k: d.get(k) for k in ("path", "line", "summary", "round")}} for d in ds if not d.get("waived")
         ]
+        res["items"] += json.loads(self.v.get("SWEPT") or "[]")  # 開始の片付けの結果（#2229）
+        if why := run_owner.mark_owner(self.v.get("WORKTREE"), self.v.get("RUN"), "finish"):
+            raise Stop(f"持ち主の記録に終わりを書けない: {why}", 1)
         return res
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---

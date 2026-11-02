@@ -246,7 +246,7 @@ def is_transient_failure(attempt: Attempt) -> bool:
 # 項目も同じく送れないため含めない。
 PERMANENT_STATUSES = (400, 404, 410, 422)
 # 飛ばさない種別。レビューの拒否は呼び出し側が退避（`is_position_unresolved`）か
-# 失敗かを決めるため、先頭で止めて返す。
+# 失敗かを決めるため、先頭で止めて返す。ただし今回分でない位置エラーは `Queue.flush` が控えへ外す（#2084）。
 _NOT_DROPPED_KINDS = ("review-post",)
 
 
@@ -500,6 +500,12 @@ def _flows() -> dict[str, Any]:
     return _FLOWS
 
 
+def _set_aside_by_position(out: dict[str, Any], keep: Any) -> bool:
+    """送りの試行の結果が、控えへ外す位置エラーの `review-post`（今回分 `keep` でないもの）か（#2084）。"""
+    item = out.get("item") or {}
+    return out.get("state") == "unsent" and item.get("kind") == "review-post" and item.get("seq") != keep and rejected_by_position(item)
+
+
 class Queue:
     """1 つの Pull Request 分の待ち行列。項目は耐久の記録（種類 `posts`・鍵の元は待ち行列のディレクトリ）に置く。
 
@@ -530,8 +536,8 @@ class Queue:
         finally:
             fl["durable"].close()
 
-    def _scan(self, fl: dict[str, Any]) -> tuple[list[tuple[str, int, dict[str, Any]]], set[str]]:
-        """終わっていない項目（名前・次の回・項目）を連番の順に並べたものと、記録のあるすべての名前。"""
+    def _records(self, fl: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+        """名前ごとの最後に終わった記録（`state` と `item`）と、名前ごとの最後の回。"""
         durable, last, done = fl["durable"], {}, {}
         for wid in durable.workflow_ids("post-"):
             if m := _ID_RE.match(wid):
@@ -539,9 +545,21 @@ class Queue:
         for wid in durable.workflow_ids("post-", ["SUCCESS"]):
             if (m := _ID_RE.match(wid)) and int(m.group(2)) >= done.get(m.group(1), (-1, ""))[0]:
                 done[m.group(1)] = (int(m.group(2)), wid)
-        records = {n: durable.output_of(wid) for n, (_, wid) in done.items()}
+        return {n: durable.output_of(wid) for n, (_, wid) in done.items()}, last
+
+    def _scan(self, fl: dict[str, Any]) -> tuple[list[tuple[str, int, dict[str, Any]]], set[str]]:
+        """終わっていない項目（名前・次の回・項目）を連番の順に並べたものと、記録のあるすべての名前。"""
+        records, last = self._records(fl)
         rows = [(n, last[n] + 1, r["item"]) for n, r in records.items() if r.get("state") in OPEN_STATES]
         return sorted(rows, key=lambda r: _seq_order(r[0])), set(last)
+
+    def outcome(self, seq: Any) -> dict[str, Any] | None:
+        """連番で指した項目の最後の記録（`state` は `queued` / `unsent` / `sent` / `skipped` / `dropped` / `withdrawn`、
+        `item` は項目）。無ければ `None`。別の実行の流しが今回分を控えへ外したかを、積んだ側が知るために使う（#2084）。"""
+        if seq is None or self._dormant():
+            return None
+        with self._session() as fl:
+            return next((r for r in self._records(fl)[0].values() if (r.get("item") or {}).get("seq") == seq), None)
 
     def _run(self, fl: dict[str, Any], func: Any, name: str, n: int, *args: Any) -> dict[str, Any]:
         wid = f"post-{name}-a{n}"
@@ -619,13 +637,17 @@ class Queue:
             self._run(fl, fl["note"], f"{item['seq']:04d}-{item['kind']}-{ident}", 0, {"state": "queued", "item": item})
             return item
 
-    def flush(self) -> FlushResult:
+    def flush(self, keep: Any = None) -> FlushResult:
         """積んだ項目を連番の順に送る。項目ごとに、次の試行を 1 つの耐久ワークフローとして同期で流す。
 
         **1 件でも送れなければそこで止める。** 先の項目を飛ばして後の項目を送ると、
         Pull Request 上での順序が入れ替わる。**ただし恒久的な失敗（`is_permanent_failure`）
         の項目は飛ばし、`dropped/` へ控えを書いて後ろを送る**（#962）。送り直しても届かない
         項目で止まると、後ろの決着とまとめが何度流しても送られない。
+
+        **位置エラーで拒まれた `review-post` は、連番が `keep`（呼び出し元の今回分）でなければ控えへ外して続ける**
+        （#2084）。位置エラーは送り直しても変わらず、今回分でない項目は誰も総評へ移さないため、先頭に残ると以降の
+        実行の review が止まり続ける。外された今回分は、積んだ側が `outcome` で知って総評へ移す。
         """
         done: dict[str, list[dict[str, Any]]] = {"sent": [], "skipped": [], "dropped": []}
         failed, rate_limited, transient, remaining = None, False, False, 0
@@ -637,6 +659,9 @@ class Queue:
                         failed = {"path": str(self.dir / fname), "last_error": f"待ち行列の項目を読めない ({fname})"}
                         break
                     out = self._run(fl, fl["attempt"], name, nxt, str(self.dir), name, item)
+                    if _set_aside_by_position(out, keep):
+                        _aside(self.dir, name, out["item"])
+                        out = self._run(fl, fl["note"], name, nxt + 1, {"state": "dropped", "item": out["item"]})
                     if out["state"] in done:
                         done[out["state"]].append(out["item"])
                         continue

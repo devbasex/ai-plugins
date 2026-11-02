@@ -8,6 +8,13 @@
   "作業場所": "<TMP>/repo/.worktrees/release/v1.2.0",
   "branch": "release/v1.2.0",
   "起点": "origin/main",
+  "版": {
+    "プラグイン": "foo",
+    "チャネル": "prod",
+    "上げ幅": "patch",
+    "明示": "1.2.0",
+    "系列": null
+  },
   "規則": "利用者は関門 2 を承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。",
   "上限": 99,
   "steps": [
@@ -17,7 +24,7 @@
       "stage": "配布",
       "timeout": 120,
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from '{queue_state:release}' --by user",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from '{queue_state?:release}' --by user",
       "next": "bump",
       "gate_next": "end"
     },
@@ -26,6 +33,10 @@
       "type": "run",
       "stage": "配布",
       "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0 --base main",
+      "on_exit": {
+        "2": "stop",
+        "3": "stop"
+      },
       "on_fail": "judge",
       "next": "bump-others"
     },
@@ -90,7 +101,7 @@
     {
       "id": "verify",
       "type": "run",
-      "stage": "リリース後テスト",
+      "stage": "配布",
       "timeout": 1500,
       "cwd": "<TMP>/repo",
       "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0 --runtimes claude'",

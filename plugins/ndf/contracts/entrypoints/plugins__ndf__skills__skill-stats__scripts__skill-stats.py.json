@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/skill-stats/scripts/skill-stats.py",
+  "summary": "NDF skill usage statistics from Claude Code transcripts.",
+  "args": {
+    "options": [
+      "--agents",
+      "--by-project",
+      "--days",
+      "--format",
+      "--from",
+      "--include-fallback",
+      "--layer",
+      "--plugin-root",
+      "--project",
+      "--session",
+      "--show-keywords",
+      "--skill",
+      "--to",
+      "--window-limit"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_PLUGIN_ROOT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "json",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/yamlio.py",
+    "plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md",
+    "plugins/ndf/skills/retrospective/SKILL.md",
+    "plugins/ndf/skills/skill-stats/SKILL.md"
+  ]
+}

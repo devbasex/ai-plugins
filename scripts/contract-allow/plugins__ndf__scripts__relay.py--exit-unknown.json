@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/relay.py",
+  "name": "",
+  "kind": "exit-unknown",
+  "reason": "終了コード 127 の意味を読み取れない（定数でない数値）。終了コードの意味を確かめたら契約の exit に書いて消す"
+}

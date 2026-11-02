@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/skills/cross-review/scripts/launch-codex.sh",
+  "name": "",
+  "kind": "args-unparsed",
+  "reason": "シェルの位置引数（$1・\"$@\"）を手で読み、静的に拾えない。引数は入口の usage を正本とする"
+}

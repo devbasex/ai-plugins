@@ -91,15 +91,8 @@ def cmd_format(root: str, commit: bool) -> tuple[dict, int]:
     return result(tool, "stopped", f"{why}: {out.failed}（{out.tail[-300:]}）", items, metrics), code
 
 
-def _ignored(root: str, paths: list[str]) -> list[str]:
-    """paths のうち .gitignore の対象のもの（git check-ignore）。"""
-    p = subprocess.run(["git", "check-ignore", "--", *paths], cwd=root, capture_output=True, text=True)
-    hit = set(p.stdout.splitlines())
-    return [c for c in paths if c in hit]
-
-
 def _commit_glossary(root: str, created: list[str], ignored: list[str]) -> str | None:
-    """起こしたファイルを add・コミットする。.gitignore の対象（`.ndf/` を追跡しないリポジトリの宣言など）は
+    """起こしたファイルを add・コミットする。.gitignore の対象（利用者が `.ndf/` を追跡から外したリポジトリの宣言など）は
     コミットせずに作業ディレクトリへ残す（後の用語チェックはそこから読む）。失敗したら巻き戻して誤りの文を返す
     （成功は None）。"""
     tracked = [c for c in created if c not in ignored]
@@ -174,8 +167,10 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
         return result(
             "supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}", [], {"initialized": 0}
         ), code
-    created = [it["name"] for it in init.get("items") or []]
-    ignored = _ignored(root, created) if created else []
+    rows = init.get("items") or []
+    created = [it["name"] for it in rows if it.get("result") == "created"]
+    # init は .gitignore の対象を ignored の行で返す（ndf_tracking。#2157）
+    ignored = [it["name"] for it in rows if it.get("result") == "ignored" and it.get("name") in created]
     if created:
         err = _commit_glossary(root, created, ignored)
         if err is not None:

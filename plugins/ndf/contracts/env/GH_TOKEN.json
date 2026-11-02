@@ -1,0 +1,5 @@
+{
+  "name": "GH_TOKEN",
+  "set_by": "runtime",
+  "summary": "GH_TOKEN。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/gh_call.py:130）が決める"
+}

@@ -610,6 +610,8 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     sl_select.cmd_select(env, "l1")
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     assert "--carry 31 32" in out["metrics"]["close_command"] and "--pace auto" in out["metrics"]["close_command"]
+    # 周回の版は出し終えているので、まとめへ明示の版として渡さない（流す時点に次に空いている版で決める。#2164）
+    assert "--version" not in out["metrics"]["close_command"] and "--prod" not in out["metrics"]["close_command"]
     assert "1-close.json" in out["metrics"]["queue"].split("--then")[-1]
     assert out["metrics"]["pipeline"].count("&&") == 2 and "wait" in out["metrics"]["pipeline"]
     rows = sl.cmd_list(env, "l1")["items"]
@@ -918,6 +920,22 @@ def test_manual_release_stage_holds_the_close_until_it_is_done(env):
     assert rest.startswith("python3 ") and "1-close.json" in rest and "loop lap l1" in rest
 
 
+def test_sprint_pipeline_chains_close_after_the_first_command_without_hands(tmp_path):
+    done, rec_ = tmp_path / "done-1.json", {"name": "l1"}
+    index = [{"name": "設計", "gate": True}, {"name": "実装", "command": "Q1"}]
+    queue, pipeline = sl.sprint_pipeline(index, ["c1", "c 2"], done, rec_)
+    assert queue == f"Q1 --then c1 'c 2' --done {done}"
+    assert pipeline == f"{queue} && {sl_gate.wait_lap(rec_, done)}"
+
+
+def test_sprint_pipeline_waits_for_hands_before_the_close(tmp_path):
+    done, rec_ = tmp_path / "done-1.json", {"name": "l1"}
+    index = [{"name": "実装", "command": "Q1"}, {"name": "ゲート 2", "command": "Q2"}, {"name": "リリース", "manual": "/ndf:release"}]
+    queue, pipeline = sl.sprint_pipeline(index, ["c1"], done, rec_)
+    assert queue == f"python3 {sl.SUPERVISE} queue c1 --max 3 --done {done}"
+    assert pipeline == f"Q1 を流し、続けて Q2 → リリース（/ndf:release で行う） を終えてから: {queue} && {sl_gate.wait_lap(rec_, done)}"
+
+
 def test_refused_continuation_after_gate_1_is_rebuilt_from_the_kept_issues(env, monkeypatch):
     lap = built_lap(env)
     real = sl_gate.continuation
@@ -931,3 +949,254 @@ def test_refused_continuation_after_gate_1_is_rebuilt_from_the_kept_issues(env, 
     assert got["status"] == "ok" and "loop lap l1" in got["metrics"]["next"]
     close = next(c for c in reversed(env.calls) if "close" in c)
     assert close[close.index("--issue") + 1 : close.index("--state")] == ["12"]
+
+
+def test_gate_2_resume_builds_the_close_without_the_check_pr_as_the_record(env):
+    """#2230 の受け入れ条件 2: 承認ゲート 2 の後のまとめへ、止まった記録の values.pr（検査のスプリント PR）を --record-pr で渡さない。"""
+    lap = built_lap(env)
+    assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]))["exit"] == 3
+    r = rec(env)
+    r["stop"]["values"]["pr"] = 2103
+    sl.write_record(env, r)
+    approve_gate_2(sl.current_lap(rec(env)))
+    env.calls.clear()
+    nxt = sl.cmd_start(env, "l1", [], {})["metrics"]["next"]
+    closes = [c for c in env.calls if "new" in c and "close" in c]
+    assert closes and all("--record-pr" not in c for c in closes) and "loop lap l1" in nxt
+
+
+def test_lap_with_an_unfilled_close_is_closed_as_failed(env):
+    """#2230 の決定 7: 差し込みを埋められずに流さなかったまとめ（記録の PR が見つからない）がある周回は完了で締めない。"""
+    lap = built_lap(env, nums=(11,))
+    set_state(env, lap)
+    items = [
+        {"plan": str(Path(lap["out"]) / "check.json"), "result": "完了"},
+        {
+            "plan": str(Path(lap["out"]) / "close" / "1-close.json"),
+            "result": "流さなかった",
+            "reason": "{queue_record}（…）",
+            "unfilled": True,
+        },
+    ]
+    sl.cmd_lap(env, "l1", False, write_done(env, items), [])
+    assert rec(env)["laps"][0]["outcome"] == sl.FAILED
+
+
+def test_lap_with_a_plan_skipped_after_a_finished_stage_is_still_done(env):
+    lap = built_lap(env, nums=(11,))
+    set_state(env, lap)
+    items = [
+        {"plan": str(Path(lap["out"]) / "check.json"), "result": "完了"},
+        {"plan": str(Path(lap["out"]) / "prod.json"), "result": "流さなかった", "reason": "前のステージを流さなかった"},
+    ]
+    sl.cmd_lap(env, "l1", False, write_done(env, items), [])
+    assert rec(env)["laps"][0]["outcome"] == sl.DONE
+
+
+# ---------------------------------------------------------------- gate2_answer の現状固定（I-004）
+
+
+def g2_lap(tmp_path, gates=None):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"gates": gates or []}))
+    return {"state_path": str(state)}, str(state.resolve())
+
+
+def g2_ledger(*rows, raw=None):
+    import gate_rejections as gr
+
+    p = gr.ledger_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(raw if raw is not None else "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+
+
+def test_gate2_answer_is_none_without_a_state_path_or_answers(tmp_path):
+    assert sl.gate2_answer({}) is None
+    assert sl.gate2_answer({}, "2026-10-01T00:00:00Z") is None
+    lap, _ = g2_lap(tmp_path)
+    assert sl.gate2_answer(lap) is None
+    assert sl.gate2_answer({"state_path": str(tmp_path / "missing.json")}) is None
+
+
+def test_gate2_answer_reads_user_approvals_of_gate_2_only_after_since(tmp_path):
+    gates = [
+        {"name": "関門 2", "by": "mvv", "at": "2026-10-05T00:00:00Z"},  # MVV の通過は数えない
+        {"name": "関門 1", "by": "user", "at": "2026-10-05T00:00:00Z"},  # 別の関門は数えない
+        {"name": "関門 2", "by": "user", "at": "2026-10-01T00:00:00Z"},  # since より前
+    ]
+    lap, _ = g2_lap(tmp_path, gates)
+    assert sl.gate2_answer(lap, "2026-10-02T00:00:00Z") is None
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"  # 同じ時刻は数える
+    assert sl.gate2_answer(lap) == "approved"
+    lap2, _ = g2_lap(tmp_path, [{"name": "関門 2", "by": "user"}])  # 時刻の無い答え
+    assert sl.gate2_answer(lap2) == "approved"
+    assert sl.gate2_answer(lap2, "2026-10-01T00:00:00Z") is None
+
+
+def test_gate2_answer_reads_rejections_of_the_same_sprint_from_the_ledger(tmp_path):
+    lap, sp = g2_lap(tmp_path)
+    g2_ledger(
+        {"gate": "関門 2", "sprint": sp, "at": "2026-10-03T00:00:00Z"},  # outcome の無い行は差し戻し
+        {"gate": "関門 2", "sprint": sp, "at": "2026-10-09T00:00:00Z", "outcome": "approved"},  # 承認の行は読まない
+        {"gate": "関門 1", "sprint": sp, "at": "2026-10-09T00:00:00Z"},
+        {"gate": "関門 2", "sprint": "/other.json", "at": "2026-10-09T00:00:00Z"},
+    )
+    assert sl.gate2_answer(lap, "2026-10-02T00:00:00Z") == "rejected"
+    assert sl.gate2_answer(lap, "2026-10-04T00:00:00Z") is None
+    assert sl.gate2_answer(lap) == "rejected"
+
+
+def test_gate2_answer_takes_the_latest_answer(tmp_path):
+    lap, sp = g2_lap(tmp_path, [{"name": "関門 2", "by": "user", "at": "2026-10-05T00:00:00Z"}])
+    g2_ledger({"gate": "関門 2", "sprint": sp, "at": "2026-10-04T00:00:00Z", "outcome": "rejected"})
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"
+    g2_ledger({"gate": "関門 2", "sprint": sp, "at": "2026-10-06T00:00:00Z", "outcome": "rejected"})
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "rejected"
+    g2_ledger({"gate": "関門 2", "sprint": sp, "at": "2026-10-05T00:00:00Z", "outcome": "rejected"})  # 同じ時刻は先の承認
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"
+
+
+def test_gate2_answer_treats_a_broken_ledger_as_empty(tmp_path):
+    lap, _ = g2_lap(tmp_path, [{"name": "関門 2", "by": "user", "at": "2026-10-05T00:00:00Z"}])
+    g2_ledger(raw="{壊れた行\n")
+    assert sl.gate2_answer(lap, "2026-10-01T00:00:00Z") == "approved"
+    (tmp_path / "x").mkdir()
+    lap2, _ = g2_lap(tmp_path / "x")
+    assert sl.gate2_answer(lap2) is None
+
+
+# ---------------- 現状固定: resume_stopped の止まった理由ごとの分岐 ----------------
+
+
+def stopped_on(env, cond, **stop):
+    """記録を cond で止まった状態にして返す（resume_stopped を直接通すため）。"""
+    r = rec(env)
+    r["status"], r["stop"] = "stopped", {"condition": cond, "at": "2026-10-25T00:00:00Z", "values": {}, **stop}
+    sl.write_record(env, r)
+    return rec(env)
+
+
+def test_resume_stopped_mvv_changed_stays_stopped_and_points_to_a_new_loop(env):
+    start(env)
+    r = stopped_on(env, "mvv_changed")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "新しい名前でループを始め直す" in out["summary"]
+    assert rec(env)["status"] == "stopped" and rec(env)["stop"]["condition"] == "mvv_changed"
+
+
+def test_resume_stopped_user_stop_removes_the_stop_file_and_resumes(env):
+    start(env)
+    sl.cmd_stop(env, "l1")
+    stop_file = env.root / ".ndf" / "loop" / "l1" / "stop"
+    assert stop_file.exists()
+    r = stopped_on(env, "user_stop")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["status"] == "ok" and out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == "user_stop"
+    assert out["metrics"]["next"] == sl.select_cmd("l1") and "user_stop が解けた" in out["summary"]
+    assert not stop_file.exists()
+    after = rec(env)
+    assert after["status"] == "running" and after["stop"] is None and after["stops"][-1]["condition"] == "user_stop"
+    assert "resumed_at" in after["stops"][-1]
+
+
+def test_resume_stopped_budget_still_exceeded_writes_the_record_and_stays_stopped(env):
+    start(env, laps=1)
+    run_lap(env)
+    r = rec(env)
+    assert r["stop"]["condition"] == "budget_laps"
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "予算（laps）を超えたまま（消費 1 / 予算 1）" in out["summary"] and "--budget-laps" in out["summary"]
+    assert rec(env)["status"] == "stopped"
+
+
+def test_resume_stopped_budget_within_the_limit_resumes(env):
+    start(env, laps=3)
+    r = stopped_on(env, "budget_laps")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == "budget_laps"
+    assert out["metrics"]["next"] == sl.select_cmd("l1") and rec(env)["status"] == "running"
+
+
+@pytest.mark.parametrize("cond", ["same_failure", "no_issue", "gate2_returned", "refused"])
+def test_resume_stopped_other_conditions_without_a_lap_resume_with_select(env, cond):
+    start(env)
+    r = stopped_on(env, cond)
+    assert sl.current_lap(r) is None
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["status"] == "ok" and out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == cond
+    assert out["metrics"]["next"] == sl.select_cmd("l1") and f"再開した（{cond} が解けた）" in out["summary"]
+    assert rec(env)["stops"][-1]["condition"] == cond
+
+
+def test_resume_stopped_gate2_without_an_answer_stays_stopped(env, monkeypatch):
+    built_lap(env)
+    monkeypatch.setattr(sl, "gate2_answer", lambda lap, since=None: None)
+    r = stopped_on(env, "gate2_returned")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "承認ゲート 2 の答え（承認か差し戻し）がまだ無い" in out["summary"]
+    assert rec(env)["status"] == "stopped"
+
+
+def test_resume_stopped_gate2_rejected_closes_the_lap_as_returned_and_selects_next(env, monkeypatch):
+    built_lap(env)
+    seen = []
+    monkeypatch.setattr(sl, "gate2_answer", lambda lap, since=None: seen.append(since) or "rejected")
+    r = stopped_on(env, "gate2_returned")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert seen == ["2026-10-25T00:00:00Z"]
+    assert out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == "gate2_returned"
+    assert out["metrics"]["next"] == sl.select_cmd("l1")
+    after = rec(env)
+    assert after["laps"][0]["outcome"] == sl.RETURNED and sl.current_lap(after) is None and after["status"] == "running"
+
+
+def test_resume_stopped_gate2_approved_runs_the_gate2_pipeline(env, monkeypatch):
+    built_lap(env)
+    monkeypatch.setattr(sl, "gate2_answer", lambda lap, since=None: "approved")
+    monkeypatch.setattr(sl, "gate2_pipeline", lambda env, rec, lap, stop: f"PIPE {lap['n']} {stop['condition']}")
+    r = stopped_on(env, "gate2_returned")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["metrics"]["next"] == "PIPE 1 gate2_returned" and out["metrics"]["status"] == "resumed"
+    assert sl.current_lap(rec(env)) is not None
+
+
+def test_resume_stopped_refused_in_a_lap_asks_to_rebuild_the_sprint(env):
+    built_lap(env)
+    r = stopped_on(env, "refused", values={"step": "new sprint"})
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    nxt = out["metrics"]["next"]
+    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード> --dev <開発版>" in nxt
+
+
+def test_resume_stopped_refused_continuation_rebuilds_the_queue_with_kept_issues(env, monkeypatch):
+    lap = built_lap(env)
+    seen = []
+
+    def cont(env_, rec_, lap_, moved, kept):
+        seen.append((lap_["n"], moved, kept))
+        return "QUEUE", Path("/tmp/done.json")
+
+    monkeypatch.setattr(sl, "continuation", cont)
+    r = rec(env)
+    r["waiting"] = [{"number": 11, "lap": lap["n"]}, {"number": 99, "lap": lap["n"] + 1}]
+    r["laps"][-1]["issues_kept"] = [12]
+    sl.write_record(env, r)
+    r = stopped_on(env, "refused", values={"step": sl.CONTINUATION_STEP})
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert seen == [(1, [11], [12])]
+    assert out["metrics"]["next"] == f"QUEUE && {sl.wait_lap(r, Path('/tmp/done.json'))}"
+    assert out["metrics"]["status"] == "resumed"
+
+
+@pytest.mark.parametrize("err", [sl.LoopError("組めない"), OSError("os"), ValueError("v"), KeyError("k"), StopIteration()])
+def test_resume_stopped_refused_continuation_failure_stays_stopped(env, monkeypatch, err):
+    built_lap(env)
+
+    def cont(*a):
+        raise err
+
+    monkeypatch.setattr(sl, "continuation", cont)
+    r = stopped_on(env, "refused", values={"step": sl.CONTINUATION_STEP})
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "承認ゲート 1 の後の続きをまだ組めない: " in out["summary"]
+    assert rec(env)["status"] == "stopped"

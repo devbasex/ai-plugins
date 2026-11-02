@@ -1,6 +1,7 @@
 """メインディレクトリを編集しようとしたときに、worktree で作業する旨を伝える guard（#1142 の決定 20）。
 
-結線先は 3 つある（`hooks/*.json`・`dev.kiro/install.sh`・`dev.agy/hooks.json`）。
+結線先は `hooks/*.json`（Claude Code・Codex）。Kiro CLI と agy の分岐は、配布を終える前（#2231）に導入した手元の hook が
+この入口を呼び続けるために残す。
 - PreToolUse（Claude Code / Codex CLI）: 編集先のパスを見た案内を `additionalContext` でモデルへ渡す
 - プロンプト送信時（Kiro CLI）: パスを見ない案内を標準出力へ書く
 - PreToolUse（agy）: 案内をセッションの状態ファイルの `pending` へ積み、次のモデル呼び出しの前に
@@ -151,9 +152,34 @@ def _save_state(path: str, data: dict[str, Any]) -> None:
         pass
 
 
+# セッションの持ち主として探すランタイムのプロセスの名前（先頭の一致）。
+_RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
+
+
+def session_owner() -> dict[str, Any] | None:
+    """hook の親をたどって最初に当たるランタイムのプロセス（`{"pid", "started"}`）。見つからなければ None（#2229）。
+
+    片付け（`lib/run_state.py`）は、この pid が開始時刻ごと生きている間は状態ファイルを消さない。記録が無ければ
+    最終更新から寿命の窓で判定する。"""
+    try:
+        import procs  # psutil を要する。無い環境では記録を書かない
+    except Exception:  # noqa: BLE001
+        return None
+    for pid in procs.ancestor_pids(os.getpid()):
+        got = procs.parent_and_name(pid)
+        if got and got[1].lower().startswith(_RUNTIME_NAMES):
+            started = procs.start_time(pid)
+            return {"pid": pid, "started": started} if started is not None else None
+    return None
+
+
 def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
     """位置と宣言の控え（Tool の呼び出しのたびに git を起動しない）。解決したときの cwd と宣言の目印が合えば使う。"""
     state = _load_state(path)
+    if state is not None and path and "owner" not in state:
+        # 持ち主の記録の無い既存のファイルには、次に読んだときに 1 度だけ足す（見つからなければ null を書く）
+        state["owner"] = session_owner()
+        _save_state(path, state)
     if state and state.get("resolved_from") == cwd and state.get("main_dir"):
         if state.get("declaration_stamp", "") == declaration_stamp(state["main_dir"]):
             allow = [x for x in state.get("allow_paths") or [] if isinstance(x, str)]
@@ -172,6 +198,7 @@ def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
         "allow_paths": [x for x in p.allow_paths if x],
         "notified": [],
         "pending": [],
+        "owner": state["owner"] if state and "owner" in state else session_owner(),
     }
     if path:
         _save_state(path, state)
@@ -204,6 +231,34 @@ def targets(ev: pl.Event) -> tuple[list[str], str, bool] | None:
     return None
 
 
+def _flagged_targets(raw: list[str], base: str, where: Place) -> list[str]:
+    """書き込み先をメインディレクトリからの相対パスにし、worktree の外で許可されていないものだけを残す。"""
+    flagged = []
+    for r in raw:
+        if not r:
+            continue
+        rel = relative_to_main(wt.normalize_path(r, base), where.main_dir)
+        if rel is None or rel == "." or rel.startswith(WORKTREE_DIR + "/"):
+            continue
+        if not is_allowed(rel, where.allow_paths):
+            flagged.append(rel)
+    return flagged
+
+
+def _dedupe_notified(path: str | None, state: dict, flagged: list[str]) -> list[str]:
+    """状態ファイルがあれば、既に案内した先を除き、残りを案内済みとして保存する。"""
+    if not (path and os.path.isfile(path)):
+        return flagged
+    seen = set(state.get("notified") or [])
+    flagged = [r for r in flagged if r not in seen]
+    if not flagged:
+        return flagged
+    state = _load_state(path) or state
+    state["notified"] = sorted(set(state.get("notified") or []) | set(flagged))
+    _save_state(path, state)
+    return flagged
+
+
 def notice(ev: pl.Event) -> dict | str | None:
     """PreToolUse とプロンプト送信時の判定。返り値は hook の出力（辞書）か、Kiro へ書く文字列か、None（何も出さない）。"""
     path = state_file(ev.session)
@@ -221,25 +276,12 @@ def notice(ev: pl.Event) -> dict | str | None:
     raw, base, unread = got
     if unread:
         return _output(ev, path, None, UNREAD)
-    flagged = []
-    for r in raw:
-        if not r:
-            continue
-        rel = relative_to_main(wt.normalize_path(r, base), where.main_dir)
-        if rel is None or rel == "." or rel.startswith(WORKTREE_DIR + "/"):
-            continue
-        if not is_allowed(rel, where.allow_paths):
-            flagged.append(rel)
+    flagged = _flagged_targets(raw, base, where)
     if not flagged:
         return None
-    if path and os.path.isfile(path):
-        seen = set(state.get("notified") or [])
-        flagged = [r for r in flagged if r not in seen]
-        if not flagged:
-            return None
-        state = _load_state(path) or state
-        state["notified"] = sorted(set(state.get("notified") or []) | set(flagged))
-        _save_state(path, state)
+    flagged = _dedupe_notified(path, state, flagged)
+    if not flagged:
+        return None
     paths = "\n".join(f"  - {r}" for r in flagged)
     return _output(ev, path, SUMMARY, CONTEXT.format(paths=paths, wdir=WORKTREE_DIR))
 

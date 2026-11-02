@@ -16,6 +16,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 REPO = SCRIPTS.parents[2]
 MVV_PY = SCRIPTS / "project-mvv.py"
 GATE_PY = SCRIPTS / "mvv-gate.py"
@@ -111,7 +114,7 @@ def calls(env: dict, what: str = "") -> int:
 
 
 def run(env: dict, *args: str, script: Path = MVV_PY) -> tuple[int, dict, str]:
-    p = subprocess.run([PY, str(script), *args], capture_output=True, text=True, env=env["env"], cwd=env["root"], timeout=60)
+    p = inproc.run(script, *args, env=env["env"], cwd=env["root"])
     lines = [ln for ln in p.stdout.splitlines() if ln.startswith("{")]
     out = json.loads(lines[-1]) if lines else {}
     if out:
@@ -658,7 +661,8 @@ def test_gate_records_overrides_only_when_the_user_disagrees(env):
     assert [r["kind"] for r in signal_rows(env)] == ["override_pass", "override_reject"]
     m = json.loads(state.read_text())
     assert "rejections" not in m  # 差し戻しは差し戻しの記録へだけ書く（#1833）
-    assert [r["gate"] for r in gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)] == ["関門 2"]
+    ledger = gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)
+    assert [r["gate"] for r in ledger if gr.is_rejection(r)] == ["関門 2"]
     assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
     sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
     assert sprint_gate(env, state, "--outcome", "approved") == 0

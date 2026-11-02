@@ -47,7 +47,7 @@
 **設計 PR の先頭の 4 行は、承認する人が問う項目である。** 欄の書き方は `design` の
 [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) にある。
 出所の節が無いか空なら、その行を「無し（<理由>）」と出して承認ゲートは止めない（差し戻すかは承認する人が決める）。
-対象を開くもののタイトルが題の付け方（`document-rebuild` の [format-markdown.md の「題と見出し」](../../document-rebuild/references/format-markdown.md#題と見出し)。`<対象>: <直すと何ができるようになるか>` の短い 1 文と末尾の課題番号の括弧）でなければ、「題: 規約の形でない」と添える。
+対象を開くもののタイトルが題の付け方（`document-rebuild` の [format-markdown.md の「題と見出し」](../../document-rebuild/references/format-markdown.md#題と見出し)。`<対象>: <何ができるようになるか>` の短い 1 文と末尾の課題番号の括弧）でなければ、「題: 規約の形でない」と添える。
 
 **決定の見出しをそのまま並べるのは、要約で判断が変わるためである。** 承認する側が読むべき
 なのは選んだ結論であり、その言い換えではない。件数だけを示す形も採らない（何を決めたのかが
@@ -204,17 +204,20 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 ## 答えを記録する
 
-**利用者が承認ゲートで差し戻したら、答えを受けた直後に差し戻しの記録へ 1 行書く。** pace と MVV 判定の有無を問わない。
-利用者へ新しい確認は求めない。記録は振り返りが `gate-rejections.py count` で承認ゲートごとに数える。
+**利用者が承認ゲートで答えたら、承認も差し戻しも差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書く。** pace と MVV 判定の
+有無を問わない。利用者へ新しい確認は求めない。記録は振り返りが `gate-rejections.py count` で承認ゲートごとに数える。
+範囲に答えの行が 1 行も無ければ、`count` は差し戻しを 0 件と書かず「未記録」（`status: stopped`・終了コード 3）を返す。
 
-| 進め方 | 打つもの |
-| --- | --- |
-| スプリントの状態ファイルがある | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome rejected [--pr <N>]` |
-| 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record` |
+| 進め方 | 承認 | 差し戻し |
+| --- | --- | --- |
+| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
+| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome rejected [--pr <N>]` |
+| 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record --outcome approved` | 下の `gate-rejections.py record` |
 
 ```bash
 python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 1" --what "<要約>" --issue <N>   # 設計の承認の差し戻し
 python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 2" --what "<要約>" --pr <N>      # 本番への配布の承認の差し戻し
+python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 1" --what "<要約>" --issue <N> --outcome approved   # 承認
 ```
 
 `--gate` には `関門 1` / `関門 2` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` がこの名前で承認ゲート 1・2 に

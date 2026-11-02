@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import approved_commit  # noqa: E402
 from step_result import validate_result  # noqa: E402
@@ -157,6 +160,8 @@ def gh(tmp_path):
     env["FAKE_GH_STATE"] = str(state)
     env["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
     env["NDF_WORKTREE_BASE"] = str(tmp_path / "wtbase")
+    env["TMPDIR"] = str((tmp_path / "systmp").resolve())  # 片付け（run_state.sweep_states）が手元の一時の置き場に触れない
+    (tmp_path / "systmp").mkdir(exist_ok=True)
     env["NDF_LOCK_DIR"] = str(tmp_path / "locks")
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_TOKEN", "GITHUB_TOKEN"):  # REST も偽の gh を通す
         env.pop(k, None)
@@ -175,7 +180,7 @@ def gh(tmp_path):
 
 
 def call(script, args, env, cwd):
-    p = subprocess.run([PY, str(SCRIPTS / script), *args], capture_output=True, text=True, env=env, cwd=cwd)
+    p = inproc.run(SCRIPTS / script, *args, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines else None
     if out is not None:
@@ -204,7 +209,9 @@ def test_sprint_close_four_outcomes(repo, gh):
         bodies={"11": "Fixes #1, closes #2", "12": "Resolves #3 and fixes other/x#4"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["CLOSED"], "o/r#3": ["OPEN"], "other/x#4": [None]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo
+    )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed" and res["o/r#1"]["cmd"] == "gh issue reopen 1 --repo o/r"
     assert res["o/r#2"]["result"] == "already_closed"
@@ -221,7 +228,7 @@ def test_sprint_close_failed_when_close_does_not_take(repo, gh):
         issues={"o/r#1": ["OPEN"]},
         close_works=False,
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["cmd"] == "gh issue close 1 --repo o/r"
 
@@ -232,7 +239,7 @@ def test_sprint_close_kept_open_before_production(repo, gh):
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 0 and out["status"] == "ok"
     assert issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert "closed" not in gh.get()
@@ -247,7 +254,9 @@ def test_sprint_close_verification_per_issue(repo, gh):
         bodies={"11": "Fixes #1", "12": "Fixes #2 fixes #3"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"], "o/r#3": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+    )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed"
     assert res["o/r#2"]["result"] == "kept_open" and "合格でない" in res["o/r#2"]["reason"]
@@ -257,13 +266,15 @@ def test_sprint_close_verification_per_issue(repo, gh):
 
 def test_sprint_close_no_verification_record_keeps_all(repo, gh):
     gh.set(records={"20": {"body": DIST_PROD, "comments": []}}, bodies={"11": "Fixes #1", "12": ""}, issues={"o/r#1": ["OPEN"]})
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+    )
     assert code == 0 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
 
 
 def test_sprint_close_empty_list_is_2(repo, gh):
     gh.set(records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}})
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
 
 
@@ -273,7 +284,9 @@ def test_sprint_close_dry_run_writes_nothing(repo, gh):
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo
+    )
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "would_close"
     assert "closed" not in gh.get()
 
@@ -717,6 +730,15 @@ def load_merged():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def test_cleanup_result_splits_own_and_swept_by_mark_not_value():
+    """同じ値の kept が自分の片付けと持ち主の終わった状態の片付けの両方にあっても、それぞれで数える。"""
+    mod = load_merged()
+    same = {"kind": "worktree", "name": "/w/pr1", "result": "kept", "reason": "r"}
+    items = [dict(same), {**same, "swept": True}]
+    _, _, _, metrics, _, _ = mod._cleanup_result(items, [1], None)
+    assert (metrics["kept"], metrics["swept_kept"]) == (1, 1)
 
 
 @pytest.mark.parametrize("change", ["modified", "staged", "deleted"])

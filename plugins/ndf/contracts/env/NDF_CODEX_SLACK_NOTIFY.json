@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CODEX_SLACK_NOTIFY",
+  "set_by": "user",
+  "summary": "NDF_CODEX_SLACK_NOTIFY。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/wait_notify.py:183）が決める"
+}
