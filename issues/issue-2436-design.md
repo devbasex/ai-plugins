@@ -344,7 +344,7 @@ pydantic のモデル `ParallelPlan` が正本の形を持つ。最初の入力�
 | `parallel.py settle <計画名> <連番> --done <D>` / `--rejected` | 本番のプランの done | 0: 止まりへ `phase: settle` を送る。`metrics.result` は `released` / `rejected` / `failed` | 4: 本番のプランが承認ゲートで止まっている（送らない）。1: その連番の配布が流れていない |
 | `parallel.py stop <計画名>` | — | 0。`stop` を送り、各レーンへ `relay.py stop <名前>` を打つ。`run` が動いていなければ耐久の記録を開き、耐久ワークフローの終わりまで流す | 1: 止まらないレーンがある（名前を返す） |
 | `parallel.py request <計画名> --lane <名> --prs <番号>... --issues <番号>... --state <パス> --out <パス>` | — | 0: `--prs` のマージのコミットがすべて `origin/main` にあり、送らずに `metrics.result: released`（版は範囲のイベントから）。10: 依頼を送った（配布待ち。`metrics.id`）。どちらも `--out` へ書く | 1: 計画が動いていない |
-| `parallel.py await <計画名> --from <パス> [--timeout 秒]` | `request` の `--out` | 0: `released`（`metrics.version`）。`--timeout 0` は待たずに読む | 10: `rejected`。1: `failed`。3: 上限に達した（`--timeout 0` なら答えがまだ無い） |
+| `parallel.py await <計画名> --from <パス> [--timeout 秒]` | `request` の `--out` | 0: `released`（`metrics.version`）。`--timeout 0` は待たずに読む。返るのは `answer-<依頼>` が立ったときだけで、知らせ `defer-<依頼>` では返らず `answer-<依頼>` を待ち続ける（I10） | 10: `rejected`。1: `failed`。3: 上限に達した（`--timeout 0` なら答えがまだ無い）。どちらも `defer-<依頼>` が立っていれば `metrics.deferred` に知らせの `{seq, reason}` を載せ、無ければ `null` |
 | `relay.py role organizer --plan <計画名>` / `relay.py role --clear` | `NDF_RELAY_DIR` | 0。作業ディレクトリへ役割のファイルを書く・消す | 1: ラッパーの外（`NDF_RELAY_DIR` が無い） |
 | `relay.py spawn --role helper --plan <計画名>`（変更） | `NDF_RELAY_DIR` | 0。起動したラッパーの作業ディレクトリへ役割のファイルを書く | 今の断りに加え、動いている `helper` があれば断る |
 | `relay.py ls --json`（変更） | — | 行に `role`、`metrics` に `hub`・`tmux` を足す | 今のまま |
