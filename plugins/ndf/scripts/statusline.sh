@@ -25,7 +25,7 @@ NOTE_COLOR='\033[0;33m'
 
 # 再起動の方針（#2262）。窓の大きさは statusline の入力にだけあるので、状態ディレクトリへ書いて hook に渡す。
 # 適用値は SessionStart と hook が書いたファイルを読むだけにする（優先順位の解決を 2 か所に持たない）。
-# 置き場の順は lib/context_decisions.py の state_dir と同じ
+# 置き場の順は lib/context_decisions.py の context_state_dir と同じ
 session_id=$(echo "$input" | jq -r '.session_id // empty' 2>/dev/null)
 [ -n "$session_id" ] || { [ -n "$transcript" ] && session_id=$(basename "$transcript" .jsonl); }
 case "$session_id" in *[!A-Za-z0-9_-]*) session_id="" ;; esac
