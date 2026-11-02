@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: NDF の配布物のエントリポイント（契約の一覧の 77 項目から、hook とランタイムが直接起動する 13 項目を除いた 64 項目）と、supervise・外部 CLI の起動・課題を閉じる処理の読み手。配布先のリポジトリでも同じ核が動く。hook・`factory/`・ほかのプラグインは含まない
+- **働く範囲**: NDF の配布物のエントリポイント 64 項目と、supervise・外部 CLI の起動・課題を閉じる処理の読み手。64 項目は、契約の一覧の 77 項目から hook とランタイムが直接起動する 13 項目を除いたもの。配布先のリポジトリでも同じ核が動く。hook・`factory/`・ほかのプラグインは含まない
 - **プロジェクトごとに違うもの**: 無い。核はプロジェクトの設定を読まない。時間切れの秒は呼ぶ側が環境変数 `NDF_RUN_TIMEOUT` で渡す（柱 P4 が上限の宣言へ移す）
 - **当たるモード**: `standard`
 
@@ -17,7 +17,7 @@
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
 | 「異常系処理とログ出力、異常時の回復処理が統一されていないから起こる不具合・課題が多い。1 件ずつ対処してもきりがない」（利用者、2026-11-01） | 利用者の指示の原文 | 終わり方の扱いを 1 か所へ集め、型ごとに無くすこと |
-| #2335 の設計（`issues/issue-2335-design.md`）の決定 1・2・11 と不変条件 I1・I2・I16 | 承認ゲート 1 を通った親の設計 | 核の形（`run_core.main` の 1 文・シェルは核の子として起こし直す）と、P1 がすべてのエントリポイントを移すこと |
+| #2335 の設計（`issues/issue-2335-design.md`）の決定 1・2・11 と不変条件 I1・I2・I16 | 承認ゲート 1 を通った親の設計 | 核の形（`run_core.main` の 1 文・シェルは核の子として再実行する）と、P1 がすべてのエントリポイントを移すこと |
 | DBOS 3.1.0 の耐久ワークフローを動かしたまま、主スレッドで `signal.setitimer` の時間切れと SIGTERM を受けた実測（2026-11-02、`/work/ai-plugins/.venv/bin/python`、Python 3.13.17）。どちらも 2.15〜2.28 秒で主スレッドの待ちが中断した。続けて DBOS を閉じると、動いていたステップのスレッドの例外の跡が標準エラーへ 2 件出た。閉じずに `durable.exit_leaving_pending` で抜けると 0 件だった | 実測 | 耐久のエントリポイントでも時間切れの仕組みは使え、中断した後は DBOS を閉じずに抜けること（決定 9） |
 | 契約の一覧の `stdout` の内訳: `step-result` 31・`text` 34・`json` 5・`none` 5・`kv` 2（2026-11-02 に `plugins/ndf/contracts/entrypoints/*.json` を数えた） | 実測 | 46 項目の標準出力を変えずに結果を返す経路が要ること（決定 2） |
 
@@ -32,7 +32,7 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | 実行の核・本体・結果 JSON・欠け・核の対象外・作業の結果ファイル・フェーズの結果・作業の報告 |
 | NDF の外部 CLI 委譲（`ndf-agent-cli`） | 結果ファイル・起動結果（語の意味は変えない） |
 
-2 つの間は **公開された言語** でやり取りする。外部 CLI の起動（`external-ai.py run`）は結果 JSON の形（`lib/step_result.py`）で起動の終わり方を返し、supervise は共通の読み手（`lib/step_read.py`）だけでそれを読む。外部 CLI の結果ファイルの中身（自由文）は、成否の判定に使わない。
+2 つの間は **公開された言語** でやり取りする。外部 CLI の起動（`external-ai.py run`）は、起動の終わり方を結果 JSON の形（`lib/step_result.py`）で返す。supervise はそれを共通の読み手（`lib/step_read.py`）だけで読む。外部 CLI の結果ファイルの中身（自由文）は、成否の判定に使わない。
 
 ### 集約
 
@@ -110,7 +110,7 @@
 | 要素 | 責務 | 新設 / 変更 | 機能 |
 | --- | --- | --- | --- |
 | 実行の核（`plugins/ndf/scripts/lib/run_core.py`） | `main(entry_id, body)` で契約を引き、シグナルと時間切れの受け手を置いて本体を呼び、結果か中断を結果 JSON と終了コードへ変える。`exec` 副命令でシェルの本体を子として動かす。`exit_early` で核に入る前の止まりを結果にする。標準ライブラリだけで書く | 新設 | F1・F2・F8 |
-| シェルの起こし直し（`plugins/ndf/scripts/lib/run-core.sh`） | `rc_enter "<id>" "$@"`。`NDF_RUN_ENTRY` が自分の id でなければ `exec python3 run_core.py exec <id> -- "$0" "$@"` で起こし直す | 新設 | F1 |
+| シェルの再実行（`plugins/ndf/scripts/lib/run-core.sh`） | `rc_enter "<id>" "$@"`。`NDF_RUN_ENTRY` が自分の id でなければ `exec python3 run_core.py exec <id> -- "$0" "$@"` で再実行する | 新設 | F1 |
 | 結果の形（`lib/step_result.py`） | 核が動いている間の `emit` を、出力せずに核へ渡す。終了コードの表の見出し（`EXIT_LABELS`）を持つ。任意の鍵 `run_id` を足す。`emit` の CLI に `--out <パス>`（同じ 1 行をファイルへも書く）を足す | 変更 | F1・F3・F4 |
 | 共通の読み手（`lib/step_read.py`） | `read_result_file(path)`（作業の結果ファイルと結果ファイルの読み）と `read_completed(completed)`（子プロセスの結果）を足す。無い・読めない・形が違うを `stopped` の理由として返す | 変更 | F4・F5・F6 |
 | 依存の確かめ（`lib/deps.py`） | 止まるときは `run_core.exit_early` を通し、`stopped`・69 と足りないグループを返す | 変更 | F8 |
@@ -128,6 +128,8 @@
 | 課題を閉じる処理（`plugins/ndf/scripts/sprint-close.py`） | 閉じなかった課題があれば `gate`・10（失敗があれば `stopped`・1）。呼び出しの誤りを 2 にする | 変更 | F7 |
 | 64 のエントリポイント | 末尾を核の 1 文にする。独自の `EXIT_` 定数を表の定数へ置き換える（`handoff.py` の 4・5 ほか） | 変更 | F1・F3 |
 | 文書（`skills/progress-tracking/SKILL.md`・`development-workflow/references/`・`plugins/ndf/scripts/lib/README.md`・用語集） | 終了コードが変わる箇所と、作業の結果ファイルの書き方を直す | 変更 | F4・F5・F7 |
+
+### 構成要素の関係
 
 ```mermaid
 graph TD
@@ -170,7 +172,15 @@ graph TD
     CK --> SB
 ```
 
-構成要素の図に描かない要素: 起動指示・work のステップ・進捗の分類・フェーズの実行（supervise の中）、エージェントの定義（supervise の外で supervisor が読む）、外部 CLI の起動と課題を閉じる処理（Python の本体の 1 つ）、契約の型・増加の判定・例外リスト（検査の部品）、文書。
+構成要素の図に描かない要素:
+
+| 要素 | 描かない理由 |
+| --- | --- |
+| 起動指示・work のステップ・進捗の分類・フェーズの実行 | supervise の中 |
+| エージェントの定義 | supervise の外で supervisor が読む |
+| 外部 CLI の起動・課題を閉じる処理 | Python の本体の 1 つ |
+| 契約の型・増加の判定・例外リスト | 検査の部品 |
+| 文書 | — |
 
 ### 文脈と配置
 
@@ -196,7 +206,12 @@ graph TD
 | `scripts/statusline-switch.sh`・`scripts/training-optout.py` | `hook` | `hooks/claude.json`（`statusline-switch.sh ensure`）・`hooks/*.json`（`training-optout.py session-start`）が起動する |
 | `scripts/relay.py` | `hook` | `hooks/claude.json` が起動する（`mark`・`notice` ほか）。ランタイムの起動を包むラッパーでもあり、子の端末の入出力をそのまま流す |
 
-`hook` の印は、hook の定義のファイル（`plugins/ndf/hooks/*.json`・Skill の frontmatter の `hooks`・`dev.kiro/`・`dev.agy/` の hook の定義）にパスが現れるか、`callers` に `hook` の印を持つエントリポイントがあるときだけ付けられる。`runtime` の印は `evidence` に理由を書き、印の数がベースブランチより増えたら検査が落とす（I5）。
+`hook` の印を付けられるのは、次のどちらかに当たるときだけである。
+
+- hook の定義のファイル（`plugins/ndf/hooks/*.json`・Skill の frontmatter の `hooks`・`dev.kiro/`・`dev.agy/` の hook の定義）にパスが現れる
+- `callers` に `hook` の印を持つエントリポイントがある
+
+`runtime` の印は `evidence` に理由を書く。印の数がベースブランチより増えたら検査が落とす（I5）。
 
 ## 構造
 
@@ -229,7 +244,7 @@ classDiagram
 - **本体の形**: `body(argv: list[str]) -> int | None`。既存の `main(argv=None)` をそのまま渡す。本体は今と同じく `step_result.emit` で結果を出してよい。核が動いている間の `emit` は標準出力へ書かずに `Emitted`（`SystemExit` の子クラス）を投げ、核が受け取って確かめてから出す。実行の文脈は `run_core.context()` で引く（決定 1）
 - **エントリポイントの形**: Python は `if __name__ == "__main__": run_core.main("<契約の path>", main)` の 1 文。副命令は本体の中の `argparse` が今のまま分ける。シェルは先頭で `. "$(dirname "$0")/<lib への相対>/run-core.sh"; rc_enter "<契約の path>" "$@"`
 - **核が受け取る値の読み替え**: `Emitted` は本体の結果 JSON と終了コード。`SystemExit`（`argparse` の `--help` と引数の誤りを含む）はその `code` を終了コードにし、`None` は 0 とする。戻り値は、契約の `stdout` が `step-result` でなければ `None` を 0、整数をその終了コードとする。`step-result` の本体が結果 JSON を出さずに返ったとき（戻り値が `None` か整数）と、戻り値が整数と `None` 以外のときは、I3 で `stopped`・1 にする
-- **終了コードから状態を決める規則**: 結果 JSON が無い終わり方では、0 を `ok`、10〜29 を `gate`、表の `stopped` の値（1・2・3・4・6・69・75）を `stopped` とし、それ以外は I3 で `stopped`・1 にする
+- **終了コードから状態を決める規則**: 結果 JSON が無い終わり方に当てる。0 は `ok`、10〜29 は `gate`、表の `stopped` の値（1・2・3・4・6・69・75）は `stopped` とする。それ以外は I3 で `stopped`・1 にする
 
 ## 入出力の契約
 
@@ -306,6 +321,8 @@ worker が進捗のファイルへ追記する行に `state`（`working` / `fail
 
 ## 処理の流れ
 
+### エントリポイントの実行
+
 ```mermaid
 sequenceDiagram
     participant C as 呼ぶ側
@@ -332,7 +349,17 @@ sequenceDiagram
     end
 ```
 
-処理の流れの図に描かない要素: シェルの起こし直し（`rc_enter` が `exec` で起こし直した後は同じ流れ）、依存の確かめ（本体より前に止まるときは `exit_early` が E5 だけを行う）、結果の形（核の確かめの中）、契約の一覧・契約の型・契約の検査・増加の判定・例外リスト（CI で動く）、64 のエントリポイント（本体として描く）。
+この図に描かない要素:
+
+| 要素 | 描かない理由 |
+| --- | --- |
+| シェルの再実行 | `rc_enter` が `exec` で再実行した後は同じ流れ |
+| 依存の確かめ | 本体より前に止まるときは `exit_early` が E5 だけを行う |
+| 結果の形 | 核の確かめの中 |
+| 契約の一覧・契約の型・契約の検査・増加の判定・例外リスト | CI で動く |
+| 64 のエントリポイント | 本体として描く |
+
+### worker の作業の成否
 
 ```mermaid
 sequenceDiagram
@@ -354,7 +381,18 @@ sequenceDiagram
     end
 ```
 
-2 つ目の図に描かない要素: 起動指示（supervise が組む起動指示の文）、共通の読み手（supervise の読みの中）、進捗の分類（worker の進捗の行を読む。成否を決めない）、フェーズの実行（E7 の後に終わり方を書く。「フェーズの結果と `supervise.py run`」）、エージェントの定義（supervisor が `ndf:worker` を起動するときの同じ流れ）、外部 CLI の起動（worker を外部 CLI で動かすときの起動の中身）、課題を閉じる処理（プランの run のステップの 1 つ）、文書。
+この図に描かない要素:
+
+| 要素 | 描かない理由 |
+| --- | --- |
+| 起動指示 | supervise が組む起動指示の文 |
+| 共通の読み手 | supervise の読みの中 |
+| 進捗の分類 | worker の進捗の行を読む。成否を決めない |
+| フェーズの実行 | E7 の後に終わり方を書く（「フェーズの結果と `supervise.py run`」） |
+| エージェントの定義 | supervisor が `ndf:worker` を起動するときの同じ流れ |
+| 外部 CLI の起動 | worker を外部 CLI で動かすときの起動の中身 |
+| 課題を閉じる処理 | プランの run のステップの 1 つ |
+| 文書 | — |
 
 ## 非機能の実現方式
 
