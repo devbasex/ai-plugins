@@ -5253,6 +5253,12 @@
       "context": "ndf-release",
       "meaning": "プラグインの導入・更新と、取得元の登録・更新（`claude plugin install` / `update` / `marketplace add` / `marketplace update`、`codex plugin add` / `marketplace add`）。リリース後テストの worker は利用者の設定ディレクトリでこれを打たない",
       "pending_source": "issues/issue-2401-requirements.md"
+    },
+    {
+      "term": "利用者の設定の控え",
+      "context": "ndf-release",
+      "meaning": "利用者の設定ディレクトリの、導入済みのプラグインと取得元の登録を鍵と値の組で書き出したもの。リリース後テストの前に取り、後で今の状態と比べる",
+      "pending_source": "issues/issue-2401-design.md"
     }
   ]
 }
