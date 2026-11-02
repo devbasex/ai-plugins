@@ -113,7 +113,7 @@ worktree は、実行したリポジトリの slug の下（`<base>/<slug>/`）�
 | 要素 | 責務 |
 | --- | --- |
 | `scripts/lib/run_state_kinds.py` | 状態の一覧 `KINDS` と、`sweep_states` が既定で見る種類 `SWEPT_KINDS`（`review-worktree`・`session-state`・`deps-work`・`fix-files`・`test-tmp`） |
-| `scripts/lib/run_owner.py` | 寿命の窓 `WINDOW`（24 時間）、持ち主の記録の読み書き（`read_owner`・`claim_owner`・`touch_owner`・`finish_owner`）、開始と `drive.py` が共有する `adopt_owner`・`mark_owner`・`run_args`、生存の判定 `alive` と理由の文 `alive_reason` |
+| `scripts/lib/run_owner.py` | 寿命の窓 `WINDOW`（24 時間）、持ち主の記録の読み書き（`read_owner`・`claim_owner`・`touch_owner`・`finish_owner`）、開始と `drive.py` が共有する `adopt_owner`・`mark_owner`・`run_args`、生存の判定 `alive`（窓は引数 `window`。既定は `WINDOW`。記録に `pid` と `host` があれば同じホストでは `owner_pid_alive` で pid の生死も見る）と理由の文 `alive_reason`。`owner_path` は `.json` で終わるパスをそのまま使う（棚卸しの見直しの持ち主の宣言 `.ndf/backlog/owner.json` が窓を `depths.owner.ttl` で渡して使う。#2315） |
 | `scripts/lib/run_state.py` | レビュー worktree の外し方（`remove_review_worktree`・`remove_pr_dir`・`remove_run_dir`）、作業の判定（`worktree_work`）、PR の照会（`view_pr`）、開始の判定（`check_start`・`begin_review`）、片付け（`sweep_states`）。`python3 run_state.py sweep` で単独でも呼べる |
 | `scripts/lib/worktree_base.py` | 一時の置き場の解決の唯一の場所。`run_state` と merged が使う |
 | `scripts/merged-steps.py` の `cleanup` | PR ごとに `pr<n>` と `rf<n>` を `run_state` で外し、最後に `sweep_states` を呼んで結果を `items` へ足す |
@@ -163,7 +163,7 @@ flowchart LR
 ### 種類ごとの判定の規則
 
 置き場・持ち主・作るスクリプトは `KINDS` を見る。ここでは `sweep_states` の判定だけを書く。寿命の窓は `run_owner.WINDOW`
-（24 時間）の 1 つで、どの種類も同じ値を使う。
+（24 時間）の 1 つで、どの種類も同じ値を使う（`sweep_states` の外で `alive` に別の窓を渡すのは、棚卸しの見直しの持ち主の宣言だけである。#2315）。
 
 | 種類 | 生存の判定 | 外すとき | 片付ける時点 |
 | --- | --- | --- | --- |

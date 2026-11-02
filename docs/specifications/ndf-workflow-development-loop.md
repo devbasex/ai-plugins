@@ -142,7 +142,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 副命令 | 主な入力 | 0 のときの `metrics` | 1 / 3 |
 | --- | --- | --- | --- |
 | `start [<名>] [--milestones] [--budget-*] [--no-goal]` | `loop` 節・`auto` 節・プロジェクト MVV・記録 | `status`（`new` / `resumed` / `in_lap`）・`next`（`in_lap` は引継ぎ文書の「次にやること」を指す。`resumed` は `loop select` か、止まった理由ごとの続き） | 1 = 使ってよい条件に当たらない（`items` に理由、`next` に `/ndf:development-workflow #<課題>`。記録を作らない）/ 3 = 止まった理由が解けていない |
-| `select <名>` | `upkeep.py rank`（その場で打つ）・マイルストーンの説明・記録 | `status: selected`・`selected`・`excluded`・`milestone`・`rank_digest` | 1 = 進行中の周回がある・`rank` が 0 と 20 以外を返した / 3 = 止まったまま・境の判定で止まった・`no_issue` / `outside_mvv` |
+| `select <名>` | `upkeep.py rank`（その場で打つ）・マイルストーンの説明・記録 | `status: selected`・`selected`・`excluded`・`milestone`・`rank_digest`（候補 0 件で見直しを挟むときは `status: review_first`・`next`） | 1 = 進行中の周回がある・`rank` が 0 と 20 以外を返した / 3 = 止まったまま・境の判定で止まった・`no_issue` / `outside_mvv` |
 | `exclude <名> <課題> --reason <文>` | 選定の後・`sprint` の前の進行中の周回 | `select` と同じ形（選定をやり直す） | 1 = スプリントを組む前の周回が無い / 3 = すべて外れた（その周回を取り下げ、除外の行は残す） |
 | `sprint <名> --mode M --dev V [--prod V] [-- <new sprint に足す引数>]` | 進行中の周回の選定・前の周回の `refine.deferred` | `status: sprint`・`state_path`・`out`・`manifest`・`close_command`・`queue`・`pipeline` | 1 = 進行中の周回が無い・承認ゲート 1 の後の周回 / 3 = `init`・`new sprint`・`new close` のどれかが断った（`refused`） |
 | `gate <名> --done <D>` | 承認ゲートで止まった done・`mvv-gate.jsonl`・スプリント状態 | `status: continue`・`gate: 1`・`waiting`・`pipeline`（残りで続く）、または周回を締めて `ndf_next` | 1 = 組んだ周回が無い・done に関門が無い / 3 = `gate2_returned`・`mvv_changed`・続きを組めない（`refused`）・締めた後の境の判定 |
@@ -178,7 +178,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
    `selection` に載せ、`rank` の `metrics.digest` を `rank_digest` に書く。スプリント MVV があれば周回のディレクトリの
    `mvv.md` に写し、`loop sprint` が `sprint-state.py init --mvv` へ渡して承認ゲート `MVV` の記録を状態へ写す
 6. どのマイルストーンでも選べず、候補が 0 件なら `no_issue`、候補があってすべて外れたなら `outside_mvv` で止まる
-   （`values` は対象のマイルストーンか理由ごとの件数）
+   （`values` は対象のマイルストーンか理由ごとの件数）。候補が 0 件のときは、前の周回を締めてから見直しを挟んでいなければ止まらずに `status: review_first` を返し、
+   `next` に見直しの起動の判定（`upkeep.py depth due review --no-issue`）・見直し・選定のやり直しを置く。見直しの後も 0 件なら `no_issue` で止まる
+   （`lib/sprint_loop_select.py` の `review_first`。#2315）
 
 `rank` の 20（段階の欠けた課題がある）は、欠けた課題が `rows` に載らないだけなので続ける。
 
