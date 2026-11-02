@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RELAY_TMUX",
+  "set_by": "user",
+  "summary": "統括役が呼ぶ tmux の実行ファイル（#2346）。無いときは PATH の tmux。見つからなければ 2 本目の claude は今の前景の起動になる（plugins/ndf/scripts/relay_lib/tmux.py）"
+}
