@@ -46,6 +46,12 @@ Serena: work のステップに `"serena": true` を書くと Serena の MCP だ
 課題の本文: work のステップに `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
 プロンプトの先頭へ入れる。
 
+届ける Skill: work・drive・pr のステップの worker には、ステップの `stage` で Skill の対応表（`lib/stage-skills.json`）を
+引いた Skill の本文が、system プロンプトの種類の文の後ろへ入る（drive は pause の worker、pr は `body` が `llm` のとき）。
+`"skills": [...]` はその一覧を置き換え（空の配列なら何も届けない）、`"skills_add": [...]` は後ろへ足す（重ねない）。
+名前は対応表の `rule_skills` に載る規則の Skill だけで、ほかの名前はステップを流す前の検査で止まる。届けた Skill は
+進捗ログの `kind: skills` の行に残る（`names`・`form`。読めなければ `error` を付け、worker を起動せずに失敗する）。
+
 worker のランタイム: work と drive のステップに `"runtime": "codex"`（`kiro` / `agy` / `claude`）を書くと、worker を
 `external-ai.py run` で起動する（起動・上限つきの待ち・回収はそのコマンドが持つ）。書かなければ最小構成の claude -p。
 
