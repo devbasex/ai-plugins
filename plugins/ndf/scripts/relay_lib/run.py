@@ -33,6 +33,7 @@ from .common import (
     STOP_FILE,
     _lock,
     _unlock,
+    _write_file,
     env_num,
     fallback_cwd,
     parse_iso,
@@ -495,8 +496,7 @@ def cmd_run(args: list[str]) -> int:
         cl.passthrough(claude, args)
     name = os.environ.get("NDF_RELAY_NAME") or ("t1" if hub is not None else None)
     if name:
-        with open(os.path.join(relay_dir, NAME_FILE), "w") as f:
-            f.write(name + "\n")
+        _write_file(os.path.join(relay_dir, NAME_FILE), (name + "\n").encode(), 0o600)
     term = Terminal()
     relay = Relay(claude, relay_dir, got.marketplace, got.version, term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない

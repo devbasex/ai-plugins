@@ -90,7 +90,10 @@
 | `NDF_RELAY_CLAUDE` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_DEPTH` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_DIR` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py` |
+| `NDF_RELAY_NAME` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_REEXEC` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
+| `NDF_RELAY_SPAWNED` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
+| `NDF_RELAY_TMUX` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_UV` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_SHARED_CONFIG_DIR` | user | `plugins/ndf/scripts/gate-rejections.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/project-mvv.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/training-optout.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/external-ai/scripts/external-ai.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `NDF_SKILL_REPO` | user | `plugins/ndf/scripts/issue-file.py` |

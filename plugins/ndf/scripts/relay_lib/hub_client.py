@@ -17,7 +17,7 @@ import time
 
 from . import hub as hb
 from . import tmux
-from .common import PID_FILE, STOP_FILE, env_num, read_text, relay_running, remove, stamp, write_json_atomic
+from .common import PID_FILE, STOP_FILE, _write_file, env_num, read_text, relay_running, remove, stamp, write_json_atomic
 
 import md  # noqa: E402,I001  common が lib/ を sys.path に置く
 
@@ -267,8 +267,7 @@ def stop_named(name: str) -> bool:
     if not running and not has:
         return False
     if running:
-        with open(os.path.join(w.dir, STOP_FILE), "w"):
-            pass
+        _write_file(os.path.join(w.dir, STOP_FILE), b"", 0o600)
     if has:
         tmux.kill_session(row.get("session", name))
     if running:

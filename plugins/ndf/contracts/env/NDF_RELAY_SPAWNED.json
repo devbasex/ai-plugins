@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RELAY_SPAWNED",
+  "set_by": "user",
+  "summary": "統括役が tmux で起動したラッパーの印（#2346）。持つ relay.py run は統括役を取りに行かず、依頼もせずに前景で動く。子の claude へは渡さない（plugins/ndf/scripts/relay_lib/run.py・claude.py）"
+}
