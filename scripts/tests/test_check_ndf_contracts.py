@@ -860,7 +860,12 @@ def test_load_ignores_non_json_files(tmp_path: Path):
         ("settings", "s.json.json", dict(SETTING_ITEM, readers=[1]), "readers は文字列の並び"),
         ("settings", "s.json.json", dict(SETTING_ITEM, keys={"k": "s"}), "keys.k は summary と"),
         ("settings", "s.json.json", dict(SETTING_ITEM, keys={"k": {"summary": "s", "x": 1}}), "keys.k は summary と"),
-        ("settings", "s.json.json", dict(SETTING_ITEM, keys={"k": {"summary": "s", "place": "tmp"}}), "keys.k.place は worktree / main のどれか"),
+        (
+            "settings",
+            "s.json.json",
+            dict(SETTING_ITEM, keys={"k": {"summary": "s", "place": "tmp"}}),
+            "keys.k.place は worktree / main のどれか",
+        ),
         ("settings", "other.json", SETTING_ITEM, "ファイル名は s.json.json にする"),
         ("env", "NDF_X.json", dict(ENV_ITEM, set_by="bad"), "set_by は"),
         ("env", "NDF_Y.json", ENV_ITEM, "ファイル名は NDF_X.json にする"),
