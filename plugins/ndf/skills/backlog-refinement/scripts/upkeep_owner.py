@@ -1,6 +1,7 @@
 """upkeep_owner.py: 見直しの持ち主の宣言（#2315 の決定 6・不変条件 I1・I2）。
 
-    upkeep.py owner claim --what research|review|overhaul [--loop L] [--pid N]
+    upkeep.py owner claim --what research|review|overhaul [--loop L] [--pid N] [--keepalive SECONDS]
+    upkeep.py owner keepalive --run R --pid N --seconds S
     upkeep.py owner touch --run R [--item ID]
     upkeep.py owner release --run R
     upkeep.py owner status
@@ -12,12 +13,18 @@
 
 終了コード: claim は 0 = 持ち主になった / 10 = 他の有効な持ち主がいる（`not_owner`）/ 3 = 錠を 5 秒で取れない。
 touch・release は 0 / 10 = 宣言が別の実行のもの（引き取られた）。
+
+`claim --keepalive S` は、持ち主になったら背景の見張り（`owner keepalive`）を切り離して起こす。見張りは `owner.beat` ごとに
+`touch` し、宣言が手放される・引き取られる・持ち主の pid が止まる・S 秒が過ぎる、のどれかで止まる。queue の work ステップ
+（見直し・大整理は最大 5400 秒）のように、作業の中で `touch` を打つ手順を持たない持ち主が寿命（`owner.ttl`）を過ぎないためである。
 """
 
 from __future__ import annotations
 
 import os
 import socket
+import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -99,6 +106,46 @@ def release_review(root, run: str) -> str | None:
     return _mark(root, run, True)
 
 
+def keepalive(root, run: str, pid: int, seconds: float, sleep=time.sleep, now=time.time) -> str:
+    """`owner.beat` ごとに宣言の最後に動いた時刻を書き続ける。止まった理由を返す。
+
+    止まるのは、宣言が `run` のものでなくなった・手放された（`released`）、持ち主の pid が止まった（`owner_gone`）、
+    `seconds` が過ぎた（`expired`）ときである。期限を持つのは、作業が `release` を打たずに終わっても宣言を持ち続けないためで、
+    期限の後は寿命の窓で無効になる。"""
+    beat = D.settings(root)["owner"]["beat"]
+    path = owner_file(root)
+    until = now() + seconds
+    while (left := until - now()) > 0:
+        sleep(min(beat, left))
+        if not run_owner.owner_pid_alive({"pid": int(pid), "host": socket.gethostname()}):
+            return "owner_gone"
+        cur, _ = run_owner.read_owner(path)
+        if cur is None or cur.get("run") != run or cur.get("finished_at"):
+            return "released"
+        try:
+            if touch(root, run):
+                return "released"
+        except locks.LockTimeout:
+            continue  # 次の拍で書く。1 回書けなくても寿命は拍より十分長い
+    return "expired"
+
+
+def spawn_keepalive(root, run: str, pid: int, seconds: float) -> int:
+    """`owner keepalive` を切り離して起こし、その pid を返す。標準の入出力を閉じ、別のセッションに置く
+    （起こしたステップの出力の読み取りを待たせず、ステップのプロセスグループの停止に巻き込まれない）。"""
+    upkeep = Path(__file__).resolve().with_name("upkeep.py")
+    cmd = [sys.executable, str(upkeep), "owner", "keepalive", "--run", run, "--pid", str(int(pid)), "--seconds", str(seconds)]
+    p = subprocess.Popen(
+        [*cmd, "--root", str(root)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+    return p.pid
+
+
 def review_owner_status(root) -> dict:
     """持ち主の有無・持ち主・生死・最後に動いた時刻（`loop status` が載せる）。"""
     path = owner_file(root)
@@ -132,7 +179,15 @@ def cmd_claim(a):
             EXIT_GATE,
         )
     who = f"（{taken['run']} から引き取った）" if taken else ""
-    emit(result(TOOL, "ok", f"見直しの持ち主になった: {run}{who}", [], {"run": run, "taken_from": taken, "what": a.what}))
+    metrics = {"run": run, "taken_from": taken, "what": a.what}
+    if a.keepalive:
+        metrics["keepalive_pid"] = spawn_keepalive(root, run, int(a.pid or os.getppid()), a.keepalive)
+    emit(result(TOOL, "ok", f"見直しの持ち主になった: {run}{who}", [], metrics))
+
+
+def cmd_keepalive(a):
+    why = keepalive(git_root(a.root), a.run, a.pid, a.seconds)
+    emit(result(TOOL, "ok", f"最後に動いた時刻の更新を止めた: {why}", [], {"run": a.run, "reason": why}))
 
 
 def _cmd_mark(a, fn, done: str):
@@ -158,7 +213,15 @@ def add_owner_parsers(sub, common) -> None:
     c.add_argument("--what", choices=WHATS, required=True)
     c.add_argument("--loop", default=None)
     c.add_argument("--pid", type=int, default=None, help="持ち主のプロセス（省くと呼び出し元。queue のステップなら supervise.py）")
+    c.add_argument(
+        "--keepalive", type=float, default=None, help="持ち主になったら、この秒数まで owner.beat ごとに touch する見張りを背景で起こす"
+    )
     c.set_defaults(func=cmd_claim)
+    k = op.add_parser("keepalive", parents=[common])
+    k.add_argument("--run", required=True)
+    k.add_argument("--pid", type=int, required=True, help="持ち主のプロセス。止まったら見張りも止まる")
+    k.add_argument("--seconds", type=float, required=True)
+    k.set_defaults(func=cmd_keepalive)
     t = op.add_parser("touch", parents=[common])
     t.add_argument("--run", required=True)
     t.add_argument("--item", default=None)

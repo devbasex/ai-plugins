@@ -48,7 +48,7 @@ python3 "$UPKEEP/upkeep.py" owner status
 
 - 宣言はメインディレクトリの `.ndf/backlog/owner.json` に置き、錠（`owner.json.lock`）の中でだけ作る・書き換える
 - 有効な宣言は、終わった時刻が無く、最後に動いた時刻から寿命（`owner.ttl` 900 秒）の内で、同じホストなら pid が生きているもの
-- 持ち主は項目を 1 つ進めるたびと `owner.beat`（120 秒）ごとに `touch` する
+- 持ち主は項目を 1 つ進めるたびと `owner.beat`（120 秒）ごとに `touch` する。作業の中で `touch` を打てない持ち主（queue の見直し・大整理の work ステップ）は `claim --keepalive <秒>` で背景の見張りに打たせる。見張りは宣言が手放される・引き取られる・持ち主の pid が止まる・秒数が過ぎるのどれかで止まる
 - 無効な宣言は次の `claim` が引き取り、`taken_from` に前の持ち主を書く。引き取った側は調査の記録に残った項目の続きから進める
 - 持ち主でないセッションの `apply --depth review|overhaul` は課題を書かない。`loop status` が持ち主を表示する
 

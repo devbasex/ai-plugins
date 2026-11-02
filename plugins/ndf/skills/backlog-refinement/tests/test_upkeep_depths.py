@@ -141,6 +141,44 @@ def test_dead_or_expired_owner_is_taken_over_with_taken_from(root):
     )  # 終わった宣言は引き取りでない
 
 
+def test_keepalive_touches_until_released_or_owner_gone(root):
+    """work ステップの間は見張りが touch し、寿命を過ぎても宣言が有効なまま残る（PR 2414 の指摘）。"""
+    run, _, _ = O.claim_review(root, "review", pid=os.getpid())
+    path = O.owner_file(root)
+    ttl = D.settings(root)["owner"]["ttl"]
+    clock = [0.0]
+    slept = []
+
+    def sleep(s):
+        slept.append(s)
+        clock[0] += s
+        if len(slept) == 1:  # 最初の拍の前に寿命を過ぎた状態にしておく
+            rec = json.loads(path.read_text())
+            rec["seen_at"] = run_owner.utc_iso(time.time() - ttl - 1)
+            path.write_text(json.dumps(rec))
+        if len(slept) == 3:
+            assert O.valid(path, json.loads(path.read_text()), ttl)  # 拍で書き直され有効のまま
+            O.release_review(root, run)
+
+    assert O.keepalive(root, run, os.getpid(), 10_000, sleep=sleep, now=lambda: clock[0]) == "released"
+    assert slept[0] == D.settings(root)["owner"]["beat"]
+    run2, _, _ = O.claim_review(root, "review", pid=os.getpid())
+    assert O.keepalive(root, run2, 2**22 + 12345, 10_000, sleep=lambda s: None, now=lambda: 0.0) == "owner_gone"
+    assert O.keepalive(root, run2, os.getpid(), 0, sleep=lambda s: None) == "expired"
+
+
+def test_claim_with_keepalive_spawns_a_detached_watcher(root, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(O, "spawn_keepalive", lambda *a: spawned.append(a) or 4321)
+    monkeypatch.setattr(O, "emit", lambda res, code=0: (_ for _ in ()).throw(SystemExit((res, code))))
+    a = type("A", (), {"root": str(root), "what": "review", "loop": None, "pid": os.getpid(), "keepalive": 5400.0})()
+    with pytest.raises(SystemExit) as e:
+        O.cmd_claim(a)
+    res, code = e.value.args[0]
+    assert code == 0 and res["metrics"]["keepalive_pid"] == 4321
+    assert spawned == [(root, res["metrics"]["run"], os.getpid(), 5400.0)]
+
+
 def test_other_host_owner_is_judged_by_the_window_only(root):
     O.claim_review(root, "research", pid=os.getpid())
     path = O.owner_file(root)

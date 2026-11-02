@@ -133,7 +133,7 @@
       "type": "run",
       "cwd": "<TMP>/repo",
       "timeout": 60,
-      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner claim --what overhaul --root <TMP>/repo --pid \"$PPID\"",
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner claim --what overhaul --keepalive 5400 --root <TMP>/repo --pid \"$PPID\"",
       "on_exit": {
         "10": "overhaul-skipped"
       },
@@ -171,7 +171,7 @@
       "type": "run",
       "cwd": "<TMP>/repo",
       "timeout": 60,
-      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner claim --what review --root <TMP>/repo --pid \"$PPID\"",
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner claim --what review --keepalive 5400 --root <TMP>/repo --pid \"$PPID\"",
       "on_exit": {
         "10": "review-skipped"
       },

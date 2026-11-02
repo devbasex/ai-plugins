@@ -103,6 +103,9 @@ def _refine_step(a, refs: str) -> dict:
     }
 
 
+DEPTH_WORK_TIMEOUT = 5400  # 見直し・大整理の work ステップの打ち切り（秒）。持ち主の見張りも同じ秒数で止まる
+
+
 def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
     """大整理か見直しの起動の判定・持ち主の宣言・本体・持ち主になれなかった記録（#2315 の決定 5）。
 
@@ -125,7 +128,8 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
             "timeout": 60,
             # 持ち主の pid は次の work ステップまで生きる supervise.py にする。run のステップは sh -c で動くため、
             # 既定（呼び出し元 = 短命なシェル）だとこのステップの終わりで宣言が無効になる。$PPID はシェルの親 = supervise.py
-            "cmd": _upkeep(repo, "owner", "claim", "--what", depth) + ' --pid "$PPID"',
+            # work のステップの中には touch を打つ手順が無いため、その打ち切り（DEPTH_WORK_TIMEOUT）まで見張りに touch させる
+            "cmd": _upkeep(repo, "owner", "claim", "--what", depth, "--keepalive", str(DEPTH_WORK_TIMEOUT)) + ' --pid "$PPID"',
             "on_exit": {"10": f"{depth}-skipped"},
             "next": depth,
         },
@@ -135,7 +139,7 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
             "full": True,
             "kind": "棚卸し",
             "stage": "棚卸し",
-            "timeout": 5400,
+            "timeout": DEPTH_WORK_TIMEOUT,
             "prompt": f"/ndf:backlog-refinement --depth {depth} スプリント {a.name}（{refs}）の後の{name}を無人で通す。"
             f"持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `{depth}` の判定にある。"
             "人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。"
