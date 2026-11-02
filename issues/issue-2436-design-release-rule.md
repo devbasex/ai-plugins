@@ -4,7 +4,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 本番の配布は `develop` → `main` の Pull Request で `develop` の先頭を出す。承認したコミットの後に配布の Pull Request の外のコミットが `develop` へ入ると、配布は承認ゲート（10）で止まる（#815）。レーンが並ぶと、承認を待つ間と本番のプランが流れる間に他のレーンのマージが入り、配布が止まる
+- **今どうなっているか**: 本番の配布は `develop` → `main` の Pull Request で `develop` の先頭を出す。承認したコミットの後に配布の Pull Request の外のコミットが `develop` へ入ると、配布は承認ゲート（プランのステップが承認ゲートとして止まったことを表す終了コード 10。`supervise_lib/plan.py` の「ステップの遷移」）で止まる（#815）。レーンが並ぶと、承認を待つ間と本番のプランが流れる間に他のレーンのマージが入り、配布が止まる
 - **変えると何が成り立つか**: 承認したコミットと版上げのコミットだけを `main` へ出す。`develop` は止めず、レーンの開発版の配布と確認は続く。承認の後に `develop` へ入った変更は次の配布になる
 
 ## 今の作りと改めた後
@@ -23,7 +23,7 @@
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | R1 | `main` 宛の Pull Request の head は `develop` か、先頭が `origin/develop` の祖先の `release/v*` である | `scripts/check-pr-base.sh` が落とす（継続的統合のジョブ `pr-base-guard`） |
-| R2 | `release/v<版>` は承認したコミットから切り、版上げのコミット（bump・changelog・説明文）だけを足す | 承認の照合が承認の外のコミットとして承認ゲート（10）で止める |
+| R2 | `release/v<版>` は承認したコミットから切り、版上げのコミット（bump・changelog・説明文）だけを足す | 承認の照合が承認の外のコミットとして承認ゲート（終了コード 10）で止める |
 | R3 | `release/v<版>` を `develop` へ取り込んでから、本番の Pull Request を作る | 取り込みが済むまで本番の Pull Request を作らない（今の順のまま） |
 | R4 | `release/v<版>` はマージのコミットで `develop` へ取り込み、先頭を `develop` の祖先に残す | squash と rebase では取り込まない（祖先にならず R1 が落ちる） |
 | R5 | `develop` へ取り込むときの衝突は、版数を持つ箇所だけを本番の版で解く。ほかの衝突は解かずに止める | 配布のステップが終了コード 1 で止まる（今の失敗の扱い） |
@@ -47,7 +47,7 @@ sequenceDiagram
 1. queue が本番のプランを流す前に、「起点」の `{queue_approved:<計画名>}` を承認したコミットで埋める。埋められなければ本番のプランを流さない（#2079 の既存の扱い）。並列の計画の外のスプリントでは `<計画名>` は開発版のプラン（`release`。`DEV_SERIES`）で、並列の計画では提示のプラン（`present`）である
 2. worktree は承認したコミットから `release/v<版>` で作られる。bump・changelog・説明文は今のステップのまま、承認したコミットの上に版上げのコミットを積む
 3. `release` のステップは `release/v<版>` を `develop` へ取り込む（`_merge_release_pr`）。衝突が無ければ今どおりマージする。衝突があれば下の「版数の衝突」で解く
-4. 承認したコミットと `origin/release/v<版>` の先頭を照合する。照合で許すコミット（`release_pr_allowed` の許す一覧）は、`release/v<版>` → `develop` の Pull Request から読む。版数の衝突を解いて `release/v<版>-sync` の Pull Request で取り込んだときも、照合には元の `release/v<版>` の Pull Request を渡す。`-sync` の head は承認の後の `develop` の変更を含むため、照合に渡すと版上げしかない `release/v<版>` でも承認ゲート（10）で止まる。外のコミットが無ければ、head を `release/v<版>` にした本番の Pull Request を作り、照合した先頭を指定してマージする。タグと GitHub Release は今どおり `main` のマージのコミットに打つ
+4. 承認したコミットと `origin/release/v<版>` の先頭を照合する。照合で許すコミット（`release_pr_allowed` の許す一覧）は、`release/v<版>` → `develop` の Pull Request から読む。版数の衝突を解いて `release/v<版>-sync` の Pull Request で取り込んだときも、照合には元の `release/v<版>` の Pull Request を渡す。`-sync` の head は承認の後の `develop` の変更を含むため、照合に渡すと版上げしかない `release/v<版>` でも承認ゲート（終了コード 10）で止まる。外のコミットが無ければ、head を `release/v<版>` にした本番の Pull Request を作り、照合した先頭を指定してマージする。タグと GitHub Release は今どおり `main` のマージのコミットに打つ
 
 `develop` が承認の後に進んでいても、照合する相手は `release/v<版>` で、配布は止まらない。昇格の経路（`merged-steps.py promote`。head は `develop`）は R1 の `develop` の場合に当たり、変えない。
 
@@ -73,7 +73,7 @@ sequenceDiagram
 
 | 場面 | 今の振る舞い | 改めた後 |
 | --- | --- | --- |
-| 承認の後に `develop` が進んだ | 本番の配布が承認ゲート（10）で止まり、承認し直す | 止まらず、承認したコミットと版上げを出す。進んだ分は次の配布 |
+| 承認の後に `develop` が進んだ | 本番の配布が承認ゲート（終了コード 10）で止まり、承認し直す | 止まらず、承認したコミットと版上げを出す。進んだ分は次の配布 |
 | 本番の Pull Request | head が `develop` | head が `release/v<版>`（衝突を解いたときも `release/v<版>`） |
 | `main` と `develop` の関係 | 本番の配布の直後、`main` の中身は `develop` の先頭と同じ | `main` は承認したコミットと版上げまで。`develop` はその先を持つ |
 
