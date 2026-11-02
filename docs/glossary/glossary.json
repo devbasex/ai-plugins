@@ -4927,6 +4927,30 @@
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "画面の地図",
+      "context": "ndf-factory",
+      "meaning": "Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "デザインのトークン",
+      "context": "ndf-factory",
+      "meaning": "色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "ダミーの API クライアント",
+      "context": "ndf-factory",
+      "meaning": "画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "翻訳のファイル",
+      "context": "ndf-factory",
+      "meaning": "言語ごとに、画面の文言のキーと文言を持つファイル",
+      "pending_source": "issues/issue-2382-requirements.md"
     }
   ]
 }
