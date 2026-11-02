@@ -224,7 +224,7 @@ Markdown の表を正本にする形は、検査のたびに表の解析が要�
 Neural Development Factory では、並行する実行が別のコンテナ（ランナー）で動く。そのため、ランナー間にも上位のオーガナイザーが要る（2026-11-02 の利用者の指摘）。この設計のオーガナイザーは 1 台の SQLite（DBOS）に閉じ、ランナー間をまたげない。ランナー間のオーガナイザーは `factory/` の側に置く。`factory/` は TypeScript と DynamoDB で書き、常駐のプロセスを持たない。そのため、ランナー間のオーガナイザーは別の課題 https://github.com/devbasex/ai-plugins/issues/2439 と別の設計 PR で作る。この設計は境界だけを持つ。
 
 - **範囲**: この設計のオーガナイザーは 1 台の中のレーンだけをまとめる。Factory のランナーの中で、ラッパーと tmux が無いときは、今の振る舞いのまま動く（決定 11）
-- **公開する形**: レーンが送る依頼（`kind`: `release`・`gate1`・`gate2`・`ask`）と、オーガナイザーが返す答え（配布の結果・範囲のイベント・問いの答え）の形を `plugins/ndf/contracts/forms/parallel-request.json` に置き、構造チェック（`contracts_lib/model.py`）が形を確かめる。ランナー間のオーガナイザーは、ランナーの翻訳でこの形を受ける（下流の腐敗防止層。`ndf-factory-dev-loops.md` の `ndf-next` のブロックと同じ扱い）
+- **公開する形**: レーンが送る依頼（`kind`: `release`・`gate1`・`gate2`・`ask`）と、オーガナイザーが返す答え（配布の結果・範囲のイベント・問いの答え）の形を `plugins/ndf/contracts/forms/parallel-request.json` に置き、構造チェック（リポジトリの根の `scripts/contracts_lib/model.py`）が形を確かめる。ランナー間のオーガナイザーは、ランナーの翻訳でこの形を受ける（下流の腐敗防止層。`ndf-factory-dev-loops.md` の `ndf-next` のブロックと同じ扱い）
 - **共有する規則**: 本番の Pull Request の規則（決定 15、I16）と、配布の中身を `develop` のコミットの範囲で決めること（決定 13・14）は、ランナー間でも同じものを使う
 
 | 比べた形 | 採否と理由 |
