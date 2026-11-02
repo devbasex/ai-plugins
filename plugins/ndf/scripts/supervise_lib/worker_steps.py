@@ -118,6 +118,19 @@ class WorkStep:
         ctx.state.progress_write({"kind": "concurrent", "step": step.get("id"), "files": files, "dirs": dirs})
         return "\n並行して別のプランが次を触る。それらは変えない: " + "、".join(files) if files else ""
 
+    def resume_full(self, ctx, step: dict, system: str, res: dict) -> dict:
+        """報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
+        続けさせていたのと同じ。3 回まで）。「判断が要る / できなかった」を報告して止まった worker は、
+        続けさせても判断が変わらないため起こし直さず、呼び手の判定で失敗にして conductor へ戻す。"""
+        cwd = step.get("cwd", ctx.cwd)
+        for _ in range(3):
+            text = res["text"] or ""
+            if REPORT_DONE.search(text) or REPORT_NOT_DONE.search(text) or not res.get("session"):
+                break
+            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
+            ctx.claude.record_usage("work", res)
+        return res
+
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()
         # 届ける Skill は最初の起動の前に 1 回だけ決める。起こし直し（resume）は同じ節を持つ system を渡す
@@ -148,15 +161,8 @@ class WorkStep:
             res = self.call_worker(ctx, step, prompt, cwd, step["id"], block)
         if not res.get("runtime"):  # runtime を指定した work は claude -p に数えない（帳簿から集める）
             ctx.claude.record_usage("work", res)
-        # 報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
-        # 続けさせていたのと同じ。3 回まで）。「判断が要る / できなかった」を報告して止まった worker は、
-        # 続けさせても判断が変わらないため起こし直さず、下の判定で失敗にして conductor へ戻す
-        for _ in range(3):
-            text = res["text"] or ""
-            if not full or REPORT_DONE.search(text) or REPORT_NOT_DONE.search(text) or not res.get("session"):
-                break
-            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
-            ctx.claude.record_usage("work", res)
+        if full:
+            res = self.resume_full(ctx, step, system, res)
         if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
             res["ok"] = False
         if res.get("runtime"):
@@ -250,6 +256,19 @@ class DriveStep:
         if not res_file.is_file():
             return f"{kind} の worker が結果ファイルを書かなかった"
         return None
+
+    def resume_full(self, ctx, step: dict, system: str, res: dict) -> dict:
+        """報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
+        続けさせていたのと同じ。3 回まで）。「判断が要る / できなかった」を報告して止まった worker は、
+        続けさせても判断が変わらないため起こし直さず、呼び手の判定で失敗にして conductor へ戻す。"""
+        cwd = step.get("cwd", ctx.cwd)
+        for _ in range(3):
+            text = res["text"] or ""
+            if REPORT_DONE.search(text) or REPORT_NOT_DONE.search(text) or not res.get("session"):
+                break
+            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
+            ctx.claude.record_usage("work", res)
+        return res
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()
