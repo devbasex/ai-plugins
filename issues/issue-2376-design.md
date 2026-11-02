@@ -5,6 +5,7 @@
 - **今どうなっているか**: プランの worker と Agent の `ndf:worker` は、ステップに要る Skill を受け取る仕組みを持たない。#2372 では `document-style` だけを 3 つの system プロンプトと worker の定義へ書き足した。そのため文書を書かないステップにも常に載り、別の Skill を届けたいときは同じ書き足しがまた要る
 - **誰に効くか**: NDF でスプリントを回す利用者（worker が書く文書とコードの質）と、NDF の保守者（Skill を届ける経路が 1 か所になる）
 - **変えると何が成り立つか**: worker が動くとき、そのステップの工程に要る Skill だけが届く。新しい Skill をある工程へ届ける変更は、対応表の 1 行の追加で済む
+- **`document-style` が届く工程は今より狭めない**: 今は #2372 の書き足し（PR #2377）で、他者が読む文書を書く worker に工程を問わず届いている。対応表には要求の初期値の 4 工程（設計・ドキュメント再構成・Pull Request・振り返り）に加え、他者が読む文書を書く 5 工程（計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸し）にも `document-style` を置く（決定 9）。要求と受け入れ条件の工程が対象から外れる点は「未確認のまま残ること」にある
 
 ## 適用範囲
 
@@ -17,10 +18,42 @@
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
 | 課題の本文「実測: `skills:` と `disallowedTools: Skill` の併用」（2026-11-02、Claude Code v2.1.316） | 実測 | `skills:` はサブエージェントとして起動したときだけ効き、効いた結果は「Skill の本文を最初から文脈に持つ」ことである。同じ効果は本文を system プロンプトへ入れれば 1 段のまま得られる |
-| 下の「非機能の実現方式」の測定（2026-11-02、Claude Code v2.1.316、`claude_cmd` の最小構成） | 実測 | 本文を system プロンプトに入れた起動は 1 ターンで答え、キャッシュが効けば増分が約 $0.001 だった。パスを渡して読ませた起動は 2 ターンで、毎回 $0.08〜0.14 だった |
+| 下の「非機能の実現方式」の測定（2026-11-02、Claude Code v2.1.316、`claude_cmd` の最小構成） | 実測 | 本文を system プロンプトに入れた起動は 1 ターンで答え、増分はキャッシュへ書き込む起動で +$0.075 だった（同じ本文の起動がキャッシュの寿命の中で続いたときだけ +$0.001）。パスを渡して読ませた起動は 2 ターンで、毎回 $0.08〜0.14 だった |
 | [Claude Code のサブエージェントの文書](https://code.claude.com/docs/en/sub-agents) の `skills` 欄 | 外部の一次情報 | 挙げた Skill の本文全体を、起動の時点で文脈へ読み込む。部分だけを読み込む仕組みは無い |
 
 要求と受け入れ条件は #2376 の本文にある（コピーは [issue-2376-requirements.md](issue-2376-requirements.md)）。この文書は「どう作るか」だけを扱う。
+
+### この文書が番号で指す項目
+
+受け入れ条件と要求の前提は要求のコピーの番号、Value はプロジェクトの MVV（`.ndf/mvv.md`、版 4）の番号である。
+
+| 番号 | 中身の要約 |
+| --- | --- |
+| 受け入れ条件 1 | 対応表はリポジトリの 1 か所にだけあり、プランの worker の起動と引くコマンドの両方がそこを読む |
+| 受け入れ条件 2 | 対応表に無い工程のステップと、`stage` の無いステップには Skill が届かない |
+| 受け入れ条件 3 | 置き換えの指定をしたステップには指定した Skill だけが届く。0 件なら何も届かない |
+| 受け入れ条件 4 | 追加の指定をしたステップには、対応表の Skill と追加した Skill が重ならずに届く |
+| 受け入れ条件 5 | 実在しない Skill 名を書いたプランは、worker を起動する前の検査で落ち、名前とステップの `id` を示す |
+| 受け入れ条件 6 | `skills` 欄の無い既存のプランは、書き換えずに今と同じく動く |
+| 受け入れ条件 7 | 通常の worker の起動に、そのステップの Skill の規則だけが届く |
+| 受け入れ条件 8 | full の worker の起動に、そのステップの Skill だけが届く |
+| 受け入れ条件 9 | PR 本文の書き手に、Pull Request の工程の Skill の規則が Tool なしで読める形で届く |
+| 受け入れ条件 10 | 工程から Skill の名前と `SKILL.md` の絶対パスを返すコマンドがあり、supervisor はそれで「読む Skill」を決める |
+| 受け入れ条件 11 | `ndf:worker` の定義は Skill の名前を持たず、`Skill` と `Agent` のツールは使えないまま |
+| 受け入れ条件 12 | `prompts.py` の #2372 の書き足しが消え、同じ規則が対応表から届く |
+| 受け入れ条件 13 | `worker.md` と `agent-layers.md` の `document-style` の例外の文が消え、設計など 4 工程には今と同じく届く |
+| 受け入れ条件 14 | 届けた Skill と渡し方が `progress.jsonl` の 1 行に残り、記録だけで答えられる |
+| 受け入れ条件 15 | 対応表か `SKILL.md` を読めないときは worker を起動せずステップを失敗にし、読めなかったものを記録する |
+| 要求の前提 2 | 対応表の初期値は、設計・ドキュメント再構成・Pull Request・振り返り → `document-style`、実装 → `logging-guidelines`。行の増減は受け入れ条件を変えない |
+| 要求の前提 4 | 届ける Skill は NDF に同梱した Skill（`plugins/ndf/skills/<名前>/SKILL.md` が実在するもの）に限る |
+| Value 1 | まず届ける（たぶん動くものを早く出し、守りは開発版・検査で持つ） |
+| Value 3 | 測って決める（効果は費用・秒・件数の実測で示す） |
+| Value 4 | 決まった手順はスクリプトに、判断と中身は AI に |
+| Value 5 | どのプロジェクトでも使える形を保つ |
+| Value 6 | 根本原因の場所で直す（同じ役割の定数・関数を分けない） |
+| Value 7 | 判断の理由を残す（正本は 1 か所に置き、写さずに指す） |
+| Value 8 | 語は 1 語 1 意味 |
+| Value 10 | 費用 > 速さ > 品質の順で決める（上限は実測で決めて見直す） |
 
 ## ドメインモデル
 
@@ -30,7 +63,7 @@
 | --- | --- |
 | NDF の開発ワークフロー（`ndf-workflow`） | 工程・ステップ・worker・Skill の対応表・Skill の渡し方・読む Skill |
 
-1 つのコンテキストに収まる。工程の名前は、同じコンテキストの工程表の行名をそのまま使う。工程表は `development-workflow` の「モードごとに起動する Skill」と `workflow-common.sh` の `WF_STAGE_MATRIX` である。
+1 つのコンテキストに収まる。工程の名前は、同じコンテキストの工程表の行名をそのまま使う。工程表は `development-workflow` の「モードごとに起動する Skill」と `workflow-common.sh` の `WF_STAGE_MATRIX` である。`WF_STAGE_MATRIX` は、工程の名前ごとにモード別の要否（必須・条件付き・対象外）を持つシェルの定数で、19 行の行名は `SKILL.md` の表の行名と同じである。同じファイルの関数 `wf_stages` は、その行名を 1 行に 1 つずつ返す。テスト設計で「工程表（`wf_stages`）」と書くのは、この関数の出力を工程の名前の正とすることである。
 
 ### 集約
 
@@ -46,7 +79,7 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | Skill の対応表 | 工程と Skill の組は対応表のファイルにだけある。ほかのコード・system プロンプト・worker の定義・規約の文書は、工程ごとの Skill の名前を持たない | テストで落ちる |
+| I1 | Skill の対応表 | 工程と Skill の組は対応表のファイルにだけある。Skill を worker へ届ける経路（`supervise_lib` の全ファイル〔system プロンプトとプランの雛形を含む〕・`lib/stage_skills.py`・`stage-skills.py`・`worker.md`・`agent-layers.md`）は、`rule_skills` に載るどの Skill の名前も持たない | テストで落ちる（`rule_skills` の名前ごとに経路のファイルを探す） |
 | I2 | Skill の対応表 | 対応表のキーはすべて工程表の工程の名前で、値の Skill はすべて対応表の `rule_skills`（規則の Skill の一覧）に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。`rule_skills` に工程 Skill（`development-workflow` の「モードごとに起動する Skill」の表に載る Skill）は載らない | テストで落ちる。実行の時点で読めなければ I6 |
 | I3 | プランのステップ | `skills`・`skills_add` 欄に書いた Skill は、すべて対応表の `rule_skills` に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。工程 Skill（`development-workflow` など）は実在しても載らないため通らない | ステップを 1 つも流す前の検査で落ち、ステップの `id` と名前と理由（規則の Skill でない・実在しない）を示して止まる |
 | I4 | プランのステップ | 届ける Skill は「`skills` があればその一覧、無ければ対応表のその工程の一覧（工程が無い・対応表に無ければ空）」に `skills_add` を足し、重ねずに並べたものである | テストで落ちる |
@@ -54,6 +87,8 @@
 | I6 | 進捗ログ | 対応表を読めない、または届ける Skill の `SKILL.md` を読めないステップは worker を起動しない。読めなかった名前かファイルを進捗ログの行に残し、ステップを失敗にする | テストで落ちる |
 | I7 | 進捗ログ | Skill を解決した work・drive・pr のステップは、起動の前に届けた Skill の行を 1 行持つ。0 件のときも空の一覧で書く | テストで落ちる |
 | I8 | — | `ndf:worker` の定義は Skill の名前を持たず、`Skill` と `Agent` のツールを外したままである | テストで落ちる |
+
+I1 の範囲の外で Skill の名前を持つファイルは、Skill を届ける経路ではないため対象にしない。2026-11-02 に `grep -rlE "document-style|logging-guidelines" plugins/ndf/scripts --include=*.py --include=*.json`（テストを除く）が返したのは `supervise_lib/prompts.py`（この変更で消す）・`doc-lint.py`・`lib/mdtable.py`・`project_lib/measure_repo.py` の 4 つで、残る 3 つは文書の検査・Markdown の表の整形・計測のコードで、どれも規則の出典としてコメントか語の一覧に名前を持つ。
 
 I8 の集約の欄が「—」なのは、worker の定義がこの変更の集約の外（配布物の定義）にあるためである。
 
@@ -93,20 +128,20 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 
 | 要素 | 責務 | 置き場 |
 | --- | --- | --- |
-| 対応表 | 規則の Skill の一覧（`rule_skills`）と、工程の名前 → Skill の名前の一覧。初期値は `rule_skills` が `document-style`・`logging-guidelines`、設計・ドキュメント再構成・Pull Request・振り返り → `document-style`、実装 → `logging-guidelines` | `plugins/ndf/scripts/lib/stage-skills.json`（新設） |
-| 届ける Skill の解決 | 対応表を読む。ステップから届ける Skill を決める（I4）。プランの欄を照合する（I3）。本文の節を組む。どれも副作用を持たず、読めないときは例外で知らせる | `plugins/ndf/scripts/lib/stage_skills.py`（新設） |
+| 対応表 | 規則の Skill の一覧（`rule_skills`）と、工程の名前 → Skill の名前の一覧。初期値は `rule_skills` が `document-style`・`logging-guidelines`、設計・ドキュメント再構成・計画・ドキュメントレビュー・完了判定・Pull Request・確定仕様化・振り返り・棚卸し → `document-style`（決定 9）、実装 → `logging-guidelines` | `plugins/ndf/scripts/lib/stage-skills.json`（新設） |
+| 届ける Skill の解決 | 対応表を読み、値に `rule_skills` に無い名前があれば読めない対応表として例外にする（決定 6）。ステップから届ける Skill を決める（I4）。プランの欄を照合する（I3）。本文の節を組む。どれも副作用を持たず、読めないときは例外で知らせる | `plugins/ndf/scripts/lib/stage_skills.py`（新設） |
 | 引くコマンド | 工程を受け、名前と絶対パスを統一 JSON レポートで返す（F1） | `plugins/ndf/scripts/stage-skills.py`（新設） |
 | 実行の入口の検査 | ステップを流す前に `skills`・`skills_add` を照合する（E2） | `supervise_lib/engine.py` の `setup` |
 | 届ける Skill の記録 | ステップの開始で解決を呼び、進捗ログへ 1 行書き、本文の節か誤りを返す（E3・E5）。進捗ログへ書くため純粋な処理ではない | `supervise_lib/steps.py`（関数を 1 つ足す） |
-| worker の起動の組み立て | work・drive のステップで本文の節を system プロンプトへ入れる（通常・full・ランタイム指定の worker、drive の pause の worker） | `supervise_lib/worker_steps.py` |
+| worker の起動の組み立て | work・drive のステップで本文の節を system プロンプトへ入れる（通常・full・ランタイム指定の worker、drive の pause の worker。drive の pause の worker は、drive のステップが回す cross-review・cross-refactoring の駆動〔`drive.py`〕が判断待ちで止まったとき、`DriveStep._delegate_pause` が `WorkStep.call_worker` で起動する worker で、止まりの指示ファイルを読んで結果ファイルを書く） | `supervise_lib/worker_steps.py` |
 | PR 本文の書き手の起動 | pr のステップで本文の節を `PR_SYSTEM` の後へ入れる | `supervise_lib/pr.py` の `_llm_body` |
 | 使用量の種類の見分け | system プロンプトの先頭で `pr`・`judge`・`slow` を見分ける（後ろに本文の節が付いても `pr` のまま） | `supervise_lib/claude.py` の `claude_kind` |
 | #2372 の応急の書き足しの撤去 | `DOCUMENT_STYLE`・`_style_rules`・`DOCUMENT_RULE` と、`FULL_SYSTEM`・`PR_SYSTEM` の `document-style` の行を消す | `supervise_lib/prompts.py` |
 | プランの形の説明 | `skills`・`skills_add` 欄を説明に足す | `supervise_lib/plan.py` の先頭の説明 |
 | worker の定義 | 「起動指示の『読む Skill』に挙がった `SKILL.md` だけを読む」へ一般化し、`document-style` の例外の段落を消す | `plugins/ndf/agents/worker.md` |
-| supervisor → worker の規約 | 起動指示の項目に「読む Skill」を足して 6 項目にし、引くコマンドでの決め方を書く。規則 6 の例外の文を一般化する | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
+| supervisor → worker の規約 | 起動指示の項目に「読む Skill」を足して 6 項目にし、引くコマンドでの決め方（工程の名前の出どころは決定 10）を書く。worker の規則 6（Skill を起動せず `SKILL.md` を読まない）の `document-style` の例外の文を一般化する | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
 | 確定仕様 | 「worker は `SKILL.md` を読まない」の 3 か所を、工程 Skill に限る形へ直す（決定 6） | `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
-| テスト | 対応表・解決・検査・記録・起動の組み立ての単体テスト。#2372 のテストを置き換える | `plugins/ndf/scripts/tests/test_stage_skills.py`（新設）、`test_supervise_document_style.py`（削除） |
+| テスト | 対応表・解決・検査・記録・起動の組み立ての単体テストと、`rule_skills` と工程 Skill が重ならないことの構造チェック（決定 6）。#2372 のテストを置き換える | `plugins/ndf/scripts/tests/test_stage_skills.py`（新設）、`test_supervise_document_style.py`（削除） |
 
 **ステップに欄を足すことと、進捗ログに行の種類を足すことは、既存の規則に当てはまる。** パートへの展開（`expand_parts`）はステップの欄を写すため `skills` もそのまま写る。進捗ログを読む部品（`slow_step.py`・`estimate_records.py`・`RunState` の数え上げ）は `kind` で行を絞り、知らない種類を読み飛ばす。当てはまらなかったのは `claude_kind` だけで、`PR_SYSTEM` との一致で種類を決めているため、後ろへ本文の節を付けると `work` に数えられる。表の「使用量の種類の見分け」の行がそれを直す。
 
@@ -228,9 +263,14 @@ classDiagram
   "stages": {
     "設計": ["document-style"],
     "ドキュメント再構成": ["document-style"],
+    "ドキュメントレビュー": ["document-style"],
+    "計画": ["document-style"],
     "実装": ["logging-guidelines"],
+    "完了判定": ["document-style"],
     "Pull Request": ["document-style"],
-    "振り返り": ["document-style"]
+    "確定仕様化": ["document-style"],
+    "振り返り": ["document-style"],
+    "棚卸し": ["document-style"]
   }
 }
 ```
@@ -242,7 +282,7 @@ classDiagram
 | `skills` | 文字列の配列 | 任意 | 対応表の値を置き換える。空の配列なら何も届けない |
 | `skills_add` | 文字列の配列 | 任意 | 対応表の値（`skills` があればその値）へ足す。重なる名前は 1 つにする |
 
-名前は `plugins/ndf/skills/` の下のディレクトリ名である（`ndf:` を付けない）。どちらの欄も、対応表の `rule_skills` に載る名前だけを受ける（I3）。`skills: ["development-workflow"]` のように工程 Skill を書いたプランは、実在しても検査で落ちる。どちらの欄も無いプランは今と同じに読み、対応表の値で動く（互換あり）。
+名前は `plugins/ndf/skills/` の下のディレクトリ名である（`ndf:` を付けない）。どちらの欄も、対応表の `rule_skills` に載る名前だけを受ける（I3）。`skills: ["development-workflow"]` のように工程 Skill を書いたプランは、実在しても検査で落ちる。落ちたときは、ステップを 1 つも流さずに `止まった` で終わり、理由に `<ステップの id>: development-workflow は規則の Skill でない（工程 Skill の手順は起動指示の「手順」へ抜粋で渡す）` の形で、該当するすべてのステップと名前を並べる。実在しない名前は `<ステップの id>: <名前> の SKILL.md が無い` と並べる。どちらの欄も無いプランは今と同じに読み、対応表の値で動く（互換あり）。
 
 ### 引くコマンド
 
@@ -316,14 +356,14 @@ sequenceDiagram
 
 **記録は起動の前に書く。** 起動が落ちても、何を渡そうとしたかが残る。
 
-`ndf:worker` の経路は `supervise.py` を通らない。supervisor が作業を 1 つ渡すとき、`stage-skills.py lookup <工程>` を打ち、`items` の名前と `path` を起動指示の「読む Skill」に並べる。終了コードが 0 以外なら欄を空にせず、supervisor が `結果: 判断が要る` で返す（E6）。
+`ndf:worker` の経路は `supervise.py` を通らない。supervisor が作業を 1 つ渡すとき、その作業が属する工程の名前で `stage-skills.py lookup <工程>` を打ち（名前の出どころは決定 10）、`items` の名前と `path` を起動指示の「読む Skill」に並べる。終了コードが 0 以外なら欄を空にせず、supervisor が `結果: 判断が要る` で返す（E6）。
 
 ## 非機能の実現方式
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
 | 性能・拡張性 | Skill を届けるステップと届けないステップのそれぞれで、worker の起動 1 回あたりの費用（USD）と秒を変更前後で同じステップについて実測し、設計文書と実装の PR に載せる | 本文を system プロンプトへ入れ、起動を 1 段のままにする。届けないステップは `DOCUMENT_RULE` が消える分だけ今より短くなる。増分の上限は決定 7 | 下の表（設計の時点の測定）。実装の PR では、実在の `claude` で設計の工程の work ステップと Skill の無い工程の work ステップを 1 回ずつ流して測り、同じ表の形で載せる |
-| 運用・保守性 | 新しい Skill をある工程の worker へ届けるのに要る変更は、対応表の 1 行の追加だけになる | 工程と Skill の組を対応表のファイルにだけ置く（I1）。届ける処理・worker の定義・規約は Skill の名前を持たない | `grep -rn "document-style" plugins/ndf/scripts/supervise_lib plugins/ndf/agents/worker.md plugins/ndf/skills/development-workflow/references/agent-layers.md` が何も返さない |
+| 運用・保守性 | 新しい Skill をある工程の worker へ届けるのに要る変更は、対応表の 1 行の追加だけになる | 工程と Skill の組を対応表のファイルにだけ置く（I1）。届ける処理・worker の定義・規約は Skill の名前を持たない | テストが `rule_skills` の名前ごとに I1 の範囲のファイルを探し、どれにも当たらないことを見る。手で見るときは `grep -rnE "document-style\|logging-guidelines" plugins/ndf/scripts/supervise_lib plugins/ndf/scripts/lib/stage_skills.py plugins/ndf/scripts/stage-skills.py plugins/ndf/agents/worker.md plugins/ndf/skills/development-workflow/references/agent-layers.md` が何も返さない（I1 と同じ範囲） |
 | 移行性 | `skills` 欄の無い既存のプラン・キューに入ったプランは、移行の手順なしでそのまま動く | 欄が無ければ対応表の値で動かす（I4）。対応表に無い工程は空 | 欄の無いプランで検査が通り、工程どおりに届くことを単体テストで見る |
 | システム環境 | Claude Code v2.1.316 以降で動く。通常の worker の起動（`--setting-sources ""`・`--disable-slash-commands`）でプラグインが読み込まれない条件の下でも届く | 本文は `supervise.py` 自身と同じプラグインの `skills/` から読み、プラグインの読み込みに頼らない | 最小構成の起動で、規則 1 の見出しを Tool を使わずに答えられる（下の測定の `本文` の行） |
 
@@ -359,7 +399,7 @@ sequenceDiagram
 
 ### 決定 2: 届け先を広げすぎないよう、対応表のキーを工程だけにする
 
-初期値の 5 行はどれも工程の中の作業（`kind`）を問わずに要る規則である。同じ工程の中で作業ごとに違う Skill が要る例は今の雛形に無く、要るときはそのステップの `skills`・`skills_add` で表せる。
+初期値の 10 行はどれも工程の中の作業（`kind`）を問わずに要る規則である。同じ工程の中で作業ごとに違う Skill が要る例は今の雛形に無く、要るときはそのステップの `skills`・`skills_add` で表せる。
 
 工程と作業の組をキーにする形は採らない。作業の名前は雛形ごとに自由に付き（`修正`・`設計との突き合わせ` など）、キーの組が増えるほど「どこにも当たらず何も届かない」ステップが黙って生まれる。
 
@@ -375,9 +415,9 @@ sequenceDiagram
 
 ### 決定 4: どのランタイムの worker にも同じ形で届けるため、プランの worker 3 種には Skill の本文を system プロンプトへ入れる
 
-`skills:` を持つサブエージェントが得る状態は「Skill の本文を最初から文脈に持つ」ことである（あるべき姿の根拠の 1 行目）。本文を system プロンプトへ入れれば、起動を 1 段のまま同じ状態になる。次の起動はすべて system プロンプト（ランタイム指定ではプロンプトのファイル）を持つ。通常の worker・ランタイム指定（`codex` など）の worker・drive の pause の worker・full の worker・PR 本文の書き手である。そのため組み立ての関数は 1 つで済む。測定では 1 ターンで答え、キャッシュが効けば増分は約 $0.001 だった。
+`skills:` を持つサブエージェントが得る状態は「Skill の本文を最初から文脈に持つ」ことである（あるべき姿の根拠の 1 行目）。本文を system プロンプトへ入れれば、起動を 1 段のまま同じ状態になる。次の起動はすべて system プロンプト（ランタイム指定ではプロンプトのファイル）を持つ。通常の worker・ランタイム指定（`codex` など）の worker・drive の pause の worker・full の worker・PR 本文の書き手である。そのため組み立ての関数は 1 つで済む。測定では 1 ターンで答え、増分はキャッシュへ書き込む起動で +$0.075 だった。プランの worker はステップごとに別の `claude -p` で起動し、ステップの間が数分空くため、実運用の起動の多くは書き込む側になる見込みである（未確認。実装の PR の測定で数える）。同じ本文の節を持つ起動がキャッシュの寿命（既定 5 分）の中で続いたときだけ、増分は +$0.001 になる。
 
-`--agents` の JSON で組んだ worker をサブエージェントとして起動する形は採らない。起動が 1 段増え、報告の受け渡し・打ち切り・使用量の帳簿・再開をサブエージェント越しに作り直すことになる。`codex` などのランタイムと Tool の無い PR 本文の書き手には使えない。`SKILL.md` のパスを渡す形は、毎回 1 ターンと $0.08〜0.14 が増え、読むかどうかが worker に委ねられる（#2372 の実測の原因と同じ）。full の worker に「Skill を読み込む」指示だけを渡す形も、読むかどうかを委ねる点で同じである。PR 本文の書き手に規則の見出しだけを渡す形は、見出しを取り出す規約が `document-style` にしか無く、ほかの Skill へ一般化できない。
+`--agents` の JSON で組んだ worker をサブエージェントとして起動する形は採らない。起動が 1 段増え、報告の受け渡し・打ち切り・使用量の帳簿・再開をサブエージェント越しに作り直すことになる。`codex` などのランタイムと Tool の無い PR 本文の書き手には使えない。`SKILL.md` のパスを渡す形は、毎回 1 ターンと $0.08〜0.14 が増え、読むかどうかが worker に委ねられる。#2372 の実測（AI が `document-style` とその前身を Skill として起動した回数が、2026-09 後半の 49 回から 10 月後半の 1 回へ落ちた）は、規則を当てるかを起動される側の判断に任せていたことと、作業が Skill のツールを外した worker へ移った時期が重なって起きた（#2372 の本文）。読むかを委ねる形は、このうち前者の条件を残す。full の worker に「Skill を読み込む」指示だけを渡す形も、読むかどうかを委ねる点で同じである。PR 本文の書き手に規則の見出しだけを渡す形は、見出しを取り出す規約が `document-style` にしか無く、ほかの Skill へ一般化できない。
 
 根拠: Value 3 / Value 5 / Value 6（MVV 版 4）
 
@@ -395,13 +435,37 @@ supervisor は `stage-skills.py lookup <工程>` を打ち、出力の名前と�
 
 規則の Skill かどうかは、対応表のファイルの `rule_skills` の一覧で決める。対応表の値（I2）とプランの `skills`・`skills_add` 欄（I3）は、どちらもこの一覧に載る名前だけを受ける。欄の照合を実在だけにすると、`skills: ["development-workflow"]` が検査を通って工程 Skill の本文が worker に届き、この決定が欄の経路で破れるためである。`SKILL.md` の frontmatter や本文から規則か工程かを推し量る形は採らない。どちらも今の Skill に区別の印が無く、判定が書き方に依存するためである。規則の Skill を足すときは、一覧へ 1 行足す。
 
-規則の Skill にも抜粋を作って渡す形は採らない。規則の Skill は本文全体が規則であり、抜粋の 3 見出し（呼び出し・結果の読み方・判断の基準）に当てはまる手順を持たない。
+この決定は次の 3 か所で守らせる。工程 Skill をプランの欄に書いたときは、黙って外さずにプラン全体を止め、理由を返す（入出力の契約の「プランのステップの欄」）。外して流すと、書き手は届いたと思ったまま worker が規則なしで動く。
+
+| 守らせる所 | 何を落とすか | いつ・どう落ちるか | 受け入れ条件・不変条件 |
+| --- | --- | --- | --- |
+| プランの検査（`plan_errors`） | `skills`・`skills_add` 欄の、`rule_skills` に無い名前（工程 Skill と実在しない名前） | ステップを流す前。`止まった` で終わり、ステップの `id`・名前・理由を並べる | 受け入れ条件 5・I3 |
+| 対応表を読む処理（`load_table`） | 値に `rule_skills` に無い名前がある対応表 | ステップの開始。読めない対応表として扱い、worker を起動せずにステップを失敗にする | 受け入れ条件 15・I2・I6 |
+| 構造チェック（`test_stage_skills.py`） | `rule_skills` に工程 Skill が載った対応表 | テスト（継続的統合）で落ちる | I2 |
+
+構造チェックが使う工程 Skill の一覧は、`development-workflow` の `SKILL.md` の「モードごとに起動する Skill」の表のセルにある、コードの記法で書いた Skill の名前から集める。照らすのは Skill の名前の参照で、文言ではないため、`.md` の文言を照合するテストに当たらない。
+
+規則の Skill にも抜粋を作って渡す形は採らない。抜粋（`references/excerpt.md`）は、工程 Skill の手順を supervisor が worker の起動指示の「手順」へコピーするための短い文書で、`plugins/ndf/skills/EXCERPTS.md` が見出しを `## 呼び出し`（打つコマンド）・`## 結果の読み方`（終了コードと次にすること）・`## 判断の基準` の 3 つに決めている。規則の Skill は本文全体が規則であり、呼び出すコマンドも読む結果も持たないため、この 3 見出しに当てはまらない。
 
 根拠: Value 6 / Value 7（MVV 版 4）
 
-### 決定 7: 費用の増分を測って見直せるよう、上限をキャッシュの書き込み 1 回分に置く
+### 決定 7: 費用の増分を測って見直せるよう、上限を規則の Skill をすべて届けたときのキャッシュの書き込み 1 回分に置く
 
-Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.10 以下・秒 +2 秒以下とする。測定では、キャッシュの書き込みが起きた起動で +$0.075、キャッシュが効いた起動で +$0.001、秒は差が測れなかった。届けないステップの増分は 0 以下である（`DOCUMENT_RULE` の分だけ短くなる）。実装の PR の測定で上限を超えたら、対応表の行を減らさずに設計へ戻す。
+Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.10 以下・秒 +2 秒以下とする。届けないステップの増分は 0 以下である（`DOCUMENT_RULE` の分だけ短くなる）。実装の PR の測定で上限を超えたら、対応表の行を減らさずに設計へ戻す。
+
+費用の上限は、1 つのステップに届きうる最大の量（`rule_skills` のすべて）を、キャッシュへ書き込む起動の値で見積もって決める。
+
+| 項目 | 値 | 出どころ |
+| --- | --- | --- |
+| `document-style` を届けたときの書き込み側の増分 | +$0.075 | 測定の 1 回目の差（$0.0868 − $0.0115） |
+| `document-style` の `SKILL.md` | 23,287 バイト | `wc -c`（2026-11-02） |
+| `rule_skills` のすべて（`document-style`・`logging-guidelines`）の `SKILL.md` | 28,578 バイト | 同上（`logging-guidelines` は 5,291 バイト） |
+| すべてを 1 ステップへ届けたときの見積り | $0.075 × 28,578 ÷ 23,287 ≒ $0.092 | 増分が本文の大きさに比例するとみた値（比例は未確認） |
+| 上限 | $0.10 | 見積りを 1 桁に切り上げた値。余白はこの切り上げの $0.008 だけで、ほかに重ねない |
+
+キャッシュが効いた起動の増分（+$0.001）は上限の根拠に使わない。実運用の起動の多くは書き込む側になる見込みのためである（決定 4）。秒は測定で差が測れなかった（届けない起動 3.1〜4.1 秒、本文を入れた起動 3.1〜3.7 秒）。
+
+`rule_skills` に Skill を足して見積りが $0.10 を超えるときは、上限を黙って上げず、その追加を設計で決める。
 
 上限を置かない形は採らない。対応表の行を足すほど本文が積み重なり、気づかないまま起動の固定費が上がる。
 
@@ -415,16 +479,44 @@ Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.1
 
 根拠: Value 3 / Value 7（MVV 版 4）
 
+### 決定 9: #2372 より `document-style` の届く範囲を狭めないよう、他者が読む文書を書く 5 工程にも対応表の行を置く
+
+対応表には、要求の初期値（要求の前提 2）の 4 工程に加え、計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸しの 5 工程にも `document-style` を置く。今は #2372 の書き足しで、他者が読む文書を書く worker には工程を問わず `document-style` が届いている。初期値の 4 工程だけにすると、次の 5 工程の worker に届かなくなる。
+
+| 工程 | worker が書く、他者が読む文書 |
+| --- | --- |
+| 計画 | 実装計画 |
+| ドキュメントレビュー | 設計 PR の指摘を受けた設計文書の修正 |
+| 完了判定 | 設計との突き合わせの節 |
+| 確定仕様化 | `docs/` の仕様書 |
+| 棚卸し | 課題の本文 |
+
+行を足すのは要求の前提 2 が認める「対応表の 1 行の変更」で、受け入れ条件を変えない。受け入れ条件 13 の「今と同じく届く（退行しない）」を、要求が挙げた 4 工程の外でも保つための追加であり、工程ごとの要否の棚卸し（要求の対象範囲の外）は行わない。費用は 5 工程の起動が 1 回ごとに決定 7 の上限の中で増える。
+
+5 工程に置かず、要求の初期値の 4 工程だけにする形は採らない。#2372 で直した「他者が読む文書に規則が当たらない」状態が、この 5 工程で戻る。
+
+根拠: Value 1 / Value 6（MVV 版 4）
+
+### 決定 10: supervisor が工程の名前を推し量らないよう、`lookup` に渡す名前は起動指示の「フェーズ」の工程の一覧から取る
+
+supervisor が `stage-skills.py lookup <工程>` に渡す名前は、conductor から受けた起動指示の「フェーズ」の項目（フェーズの名前と、通す工程の一覧。`agent-layers.md` の「conductor → supervisor」）に挙がった工程のうち、いま通している工程の名前である。同じ名前を、その工程に入ったときに進捗記録の `stage` として打つ。一覧の工程の名前はフェーズの表から写したもので、工程表の行名と同じ字である。プランの worker では、同じ役割をステップの `stage` 欄が持つ。
+
+工程に入る前の作業（フェーズの準備の調査など）では `lookup` を打たず、「読む Skill」を「無し」と書く。1 つの作業が 2 つの工程にまたがるときは、作業を工程ごとに分けて渡す（worker の作業は 1 つに絞る規約のとおり）。
+
+作業の中身から supervisor が工程を推し量る形は採らない。同じ作業でも推す工程が起動ごとに変わり、届く Skill が揺れる。`lookup` は工程表に無い名前にも空の一覧を返す（受け入れ条件 10）ため、推した名前の誤りは失敗として現れない。
+
+根拠: Value 4 / Value 8（MVV 版 4）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I1 | `supervise_lib`・`worker.md`・`agent-layers.md` のどれにも `document-style` と `logging-guidelines` の名前が無く、対応表のファイルにだけある | `prompts.py` に Skill の名前を書き戻す |
-| I2 | 対応表のキーがすべて工程表（`wf_stages`）の行名で、値の Skill がすべて `rule_skills` に載って `SKILL.md` が実在し、`rule_skills` に `development-workflow` の「モードごとに起動する Skill」の表の Skill が無い | 対応表へ工程表に無い工程か、実在しない Skill か、工程 Skill を書く |
+| 受け入れ条件 1・I1 | 対応表の `rule_skills` のどの名前も、I1 の範囲（`supervise_lib` の全ファイル・`lib/stage_skills.py`・`stage-skills.py`・`worker.md`・`agent-layers.md`）に無く、対応表のファイルにだけある | `prompts.py` か雛形に Skill の名前を書き戻す |
+| I2・決定 6 | 対応表のキーがすべて工程表（`wf_stages` の出力）の行名で、値の Skill がすべて `rule_skills` に載って `SKILL.md` が実在し、`rule_skills` に `development-workflow` の「モードごとに起動する Skill」の表の Skill が無い。値に `rule_skills` に無い名前がある対応表は、`load_table` が読めない対応表として扱う | 対応表へ工程表に無い工程か、実在しない Skill か、工程 Skill を書く。`rule_skills` に無い名前を値に書いても読める |
 | 受け入れ条件 2 | `stage` の無いステップと、対応表に無い工程のステップの解決が空の一覧になり、本文の節が入らない | 対応表に無い工程へ既定の Skill を返す |
 | 受け入れ条件 3・I4 | `skills` を書いたステップは指定した Skill だけになり、空の配列なら空になる | `skills` に対応表の値を足して返す |
 | 受け入れ条件 4・I4 | `skills_add` は対応表の値に重ならずに足される。両方を書いたステップは `skills` に足される | 重なる名前を 2 回返す、または `skills_add` で置き換える |
-| 受け入れ条件 5・I3 | 実在しない名前を書いたプランと、`skills`・`skills_add` に工程 Skill（`development-workflow`）を書いたプランは、ステップを 1 つも流さずに止まり、理由にステップの `id` と名前が出る | 照合をステップの開始まで遅らせる、または実在だけを見て工程 Skill を通す |
+| 受け入れ条件 5・I3 | 実在しない名前を書いたプランと、`skills`・`skills_add` に工程 Skill（`development-workflow`）を書いたプランは、ステップを 1 つも流さずに止まり、理由にステップの `id` と名前と理由（規則の Skill でない・実在しない）が出る | 照合をステップの開始まで遅らせる、または実在だけを見て工程 Skill を通す |
 | 受け入れ条件 6 | 欄の無い既存のプランが検査を通り、工程どおりに届く | 欄が無いプランを検査で落とす |
 | 受け入れ条件 7・I5 | 通常の worker（ランタイム指定と drive の pause を含む）の system プロンプトに、解決した Skill の本文だけが入り、対応表のほかの行の Skill の名前が入らない | 対応表のすべての Skill を入れる |
 | 受け入れ条件 8・I5 | full の worker の `--append-system-prompt` に解決した Skill の本文だけが入る。再開の起動も同じ文になる | full の起動だけ節を入れない、または再開で節が落ちる |
@@ -432,7 +524,7 @@ Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.1
 | 受け入れ条件 10 | `lookup 設計` が `document-style` の名前と実在するパスを返し、`lookup 存在しない工程` が空の `items` と終了コード 0 を返す。対応表を読めないと終了コード 1 | 対応表に無い工程で終了コード 1 を返す |
 | 受け入れ条件 11・I8 | `worker.md` の frontmatter が `disallowedTools` に `Skill` と `Agent` を持ち、本文が Skill の名前を持たない | 定義へ `skills:` か特定の Skill の名前を書く |
 | 受け入れ条件 12 | `prompts.py` に `DOCUMENT_STYLE`・`DOCUMENT_RULE`・`_style_rules` が無く、設計の工程の work ステップには `document-style` の本文が届く | 撤去だけをして対応表の行を入れない |
-| 受け入れ条件 13 | 設計・ドキュメント再構成・Pull Request・振り返りの工程のステップに `document-style` が届く | 4 つのどれかの行を対応表から落とす |
+| 受け入れ条件 13・決定 9 | 設計・ドキュメント再構成・Pull Request・振り返りの 4 工程と、計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸しの 5 工程のステップに `document-style` が届く | 9 つのどれかの行を対応表から落とす |
 | 受け入れ条件 14・I7 | work・drive・pr のステップごとに `kind: skills` の行が 1 行、起動の前に書かれ、0 件のときは空の一覧である | 0 件のときに行を省く、または起動の後に書く |
 | 受け入れ条件 15・I6 | 対応表のファイルを壊すか `SKILL.md` を消すと、worker を起動せずにステップが失敗し、行の `error` に名前かファイルが出る | 読めない Skill を飛ばして起動する |
 | JUDGE の除外（I5） | judge のステップの system プロンプトは対応表の行がある工程でも `JUDGE_SYSTEM` のままである | judge にも節を入れる |
@@ -449,7 +541,7 @@ Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.1
 
 | 項目 | 内容 |
 | --- | --- |
-| #2372 より届く範囲が狭くなる工程 | 今は工程を問わずすべての worker に `document-style` が届く。初期値の 5 行（要求の前提 2）にすると、他者が読む文書を書く次の工程の worker に届かなくなる: 計画（実装計画）・ドキュメントレビュー（設計 PR の指摘の修正）・完了判定（設計との突き合わせの節）・確定仕様化（`docs/` の仕様書）・棚卸し（課題の本文）。対応表に行を足すかは承認ゲート 1 で人が決める（足すのは 1 行ずつで、受け入れ条件は変わらない） |
+| 9 工程のほかに `document-style` が要る工程 | 決定 9 で、他者が読む文書を書く工程として 9 工程に置いた。ほかの工程の worker が他者の読む文書を書くかは、工程ごとには数えていない。要求と受け入れ条件の工程（課題の本文を書く）は当たる見込みだが、対応表に置いていない。置くかは承認ゲート 1 で人が決める（1 行の追加で、受け入れ条件は変わらない） |
 | 実装の PR の測定 | 上の測定は問い 1 つの起動である。実在のステップで上限（決定 7）に収まるかは、実装の PR の手動確認で測る |
 | full の worker での重なり | full の worker はプラグインを読み込むため、本文を持ったうえで同じ Skill を Skill のツールで読み直すことがありうる。費用への影響は実装の PR の測定で見る |
 | `ndf:worker` の手動確認 | supervisor は LLM のため、「読む Skill」の欄を引くコマンドで決めるかはリリース後テストで見る（要求の「検証手段」） |
