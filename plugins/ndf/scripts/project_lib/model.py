@@ -188,6 +188,77 @@ class Branches(schema.Shape):
     production: Optional[str] = None
 
 
+class Product(schema.Shape):
+    kind: str
+    users: Optional[str] = None
+
+
+class UsageScope(schema.Shape):
+    """利用の記録を読む範囲。`aggregate_only` が true の行だけを読む（#2315 の決定 9）。"""
+
+    aggregate_only: StrictBool
+    days: Optional[int] = None
+    mask: list[str] = []
+
+
+class Usage(schema.Shape):
+    name: str
+    command: str
+    scope: UsageScope
+
+
+class Market(schema.Shape):
+    name: str
+    url: Optional[str] = None
+    viewpoints: list[str] = []
+
+
+class Needs(schema.Shape):
+    usage: list[Usage] = []
+    market: list[Market] = []
+
+
+class Library(schema.Shape):
+    name: str
+    ecosystem: Optional[str] = None
+    alternatives: list[str] = []
+    viewpoints: list[str] = []
+
+
+class Environment(schema.Shape):
+    name: str
+    url: Optional[str] = None
+
+
+class Seeds(schema.Shape):
+    libraries: list[Library] = []
+    environment: list[Environment] = []
+
+
+class CauseType(schema.Shape):
+    id: str
+    name: str
+    defect: bool = True
+
+
+class CodeMeasure(schema.Shape):
+    name: str
+    command: str
+    types: list[str] = []
+
+
+class Materials(schema.Shape):
+    """材料の宣言（#2315）。ニーズとシーズの調査・後回しのマイルストーン・原因の型・大整理の裏付けの計測。"""
+
+    product: Optional[Product] = None
+    needs: Optional[Needs] = None
+    seeds: Optional[Seeds] = None
+    deferred_milestones: list[str] = []
+    cause_types: list[CauseType] = []
+    code_measures: list[CodeMeasure] = []
+    failures: list[str] = []
+
+
 class ProjectDecl(schema.Shape):
     """プロジェクトの宣言（`.ndf/project.json`）。"""
 
@@ -203,6 +274,7 @@ class ProjectDecl(schema.Shape):
     checks: Optional[Union[Checks, Unknown]] = None
     ndf_policies: Optional[Union[NdfPolicies, Unknown]] = None
     instructions: Optional[Union[Instructions, Unknown]] = None
+    materials: Optional[Union[Materials, Unknown]] = None
     analysis: Optional[Analysis] = None
 
     model_config = {**schema.Shape.model_config, "populate_by_name": True}

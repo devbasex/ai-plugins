@@ -88,7 +88,7 @@ def materials(root) -> dict | None:
             got = data.get("materials") if isinstance(data, dict) else None
             if got is not None and not isinstance(got, dict):
                 raise StepError(".ndf/project.json の materials はオブジェクトで書く", EXIT_UNREADABLE)
-            return got
+            return None if got is not None and set(got) == {"unknown"} else got  # 解析で決まらなかった（Unknown）は宣言なし
     return None
 
 
