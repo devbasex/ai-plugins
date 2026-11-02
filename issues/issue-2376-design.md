@@ -52,9 +52,9 @@
 | I2 | Skill の対応表 | 対応表のキーはすべて工程表の工程の名前で、値の Skill はすべて対応表の `rule_skills`（規則の Skill の一覧）に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。`rule_skills` に工程 Skill（`development-workflow` の「モードごとに起動する Skill」の表に載る Skill）は載らない | テストで落ちる。実行の時点で読めなければ I6 |
 | I3 | プランのステップ | `skills`・`skills_add` 欄に書いた Skill は、すべて対応表の `rule_skills` に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。工程 Skill（`development-workflow` など）は実在しても載らないため通らない | ステップを 1 つも流す前の検査で落ち、ステップの `id` と名前と理由（規則の Skill でない・実在しない）を示して止まる |
 | I4 | プランのステップ | 届ける Skill は「`skills` があればその一覧、無ければ対応表のその工程の一覧（工程が無い・対応表に無ければ空）」に `skills_add` を足し、重ねずに並べたものである | テストで落ちる |
-| I5 | プランのステップ | worker の起動に渡すもの（system プロンプト・プロンプト・引数）が含む Skill の本文は I4 の結果だけである。judge の起動は Skill を含まない | テストで落ちる |
-| I6 | 進捗ログ | 対応表を読めない、または届ける Skill の `SKILL.md` を読めないときは worker を起動しない。読めなかった名前かファイルを進捗ログの行に残し、ステップを失敗にする。解決する時点は I7 の単位と同じで、drive のステップは pause の worker を起動する前ごとに解決する。pause が無く worker を起動しない drive は解決せず、対応表が読めなくても失敗にしない | テストで落ちる |
-| I7 | 進捗ログ | 届けた Skill の行は worker の起動 1 回に 1 行で、起動の前に書く。0 件のときも空の一覧で書く。work・pr のステップは worker を 1 回起動するため 1 行である。drive のステップは pause の worker の起動ごとに 1 行（N 回起動すれば N 行。行の `step` は drive のステップの `id`）で、pause が無ければ行は無い | テストで落ちる |
+| I5 | プランのステップ | worker の起動に渡すもの（system プロンプト・プロンプト・引数）が含む Skill の本文は I4 の結果だけである。full の work の起こし直し（報告が無いときに同じ会話を `resume` で最大 3 回呼び直す）は、最初の解決の節を含む同じ system プロンプトを渡し、解決し直さない。judge の起動は Skill を含まない | テストで落ちる |
+| I6 | 進捗ログ | 対応表を読めない、または届ける Skill の `SKILL.md` を読めないときは worker を起動しない。読めなかった名前かファイルを進捗ログの行に残し、ステップを失敗にする。解決する時点は I7 の単位と同じで、work のステップは最初の起動の前に 1 回（起こし直しでは解決しない）、pr のステップは本文を LLM に書かせる（`body` が `llm`）ときだけ `_llm_body` の起動の前に、drive のステップは pause の worker を起動する前ごとに解決する。worker を起動しない pr（`body` が `llm` 以外）と pause の無い drive は解決せず、対応表が読めなくても失敗にしない | テストで落ちる |
+| I7 | 進捗ログ | 届けた Skill の行は worker の起動 1 回に 1 行で、起動の前に書く。0 件のときも空の一覧で書く。full の work の起こし直し（`resume`）は起動に数えないため、work のステップは起こし直しの回数によらず 1 行である。pr のステップは `body` が `llm` のとき 1 行、`llm` 以外では worker を起動しないため行は無い。drive のステップは pause の worker の起動ごとに 1 行（N 回起動すれば N 行。行の `step` は drive のステップの `id`）で、pause が無ければ行は無い | テストで落ちる |
 | I8 | — | `ndf:worker` の定義は Skill の名前を持たず、`Skill` と `Agent` のツールを外したままである | テストで落ちる |
 
 I1 の範囲の外で Skill の名前を持つファイルは、Skill を届ける経路ではないため対象にしない。2026-11-02 に次のコマンドが返したのは、テストを除いて 4 つである。
@@ -114,7 +114,7 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 | 届ける Skill の解決 | 対応表を読み、値に `rule_skills` に無い名前があれば読めない対応表として例外にする（決定 6）。ステップから届ける Skill を決める（I4）。プランの欄を照合する（I3）。本文の節を組む。どれも副作用を持たず、読めないときは例外で知らせる | `plugins/ndf/scripts/lib/stage_skills.py`（新設） |
 | 引くコマンド | 工程を受け、名前と絶対パスを統一 JSON レポートで返す（F1） | `plugins/ndf/scripts/stage-skills.py`（新設） |
 | 実行の入口の検査 | ステップを流す前に `skills`・`skills_add` を照合する（E2） | `supervise_lib/engine.py` の `setup` |
-| 届ける Skill の記録 | worker の起動の前に解決を呼び（work・pr はステップの開始、drive は pause の worker の起動ごと。I7）、進捗ログへ 1 行書き、本文の節か誤りを返す（E3・E5）。進捗ログへ書くため純粋な処理ではない | `supervise_lib/steps.py`（関数を 1 つ足す） |
+| 届ける Skill の記録 | worker の起動の前に解決を呼び（work はステップの開始で 1 回・起こし直しでは呼ばない、pr は `body` が `llm` のときだけ `_llm_body` の起動の前、drive は pause の worker の起動ごと。I7）、進捗ログへ 1 行書き、本文の節か誤りを返す（E3・E5）。進捗ログへ書くため純粋な処理ではない | `supervise_lib/steps.py`（関数を 1 つ足す） |
 | worker の起動の組み立て | work・drive のステップで本文の節を system プロンプトへ入れる（通常・full・ランタイム指定の worker、drive の pause の worker。drive の pause の worker は、drive のステップが回す cross-review・cross-refactoring の駆動〔`drive.py`〕が判断待ちで止まったとき、`DriveStep._delegate_pause` が `WorkStep.call_worker` で起動する worker で、止まりの指示ファイルを読んで結果ファイルを書く） | `supervise_lib/worker_steps.py` |
 | PR 本文の書き手の起動 | pr のステップで本文の節を `PR_SYSTEM` の後へ入れる | `supervise_lib/pr.py` の `_llm_body` |
 | 使用量の種類の見分け | system プロンプトの先頭で `pr`・`judge`・`slow` を見分ける（後ろに本文の節が付いても `pr` のまま） | `supervise_lib/claude.py` の `claude_kind` |
@@ -332,7 +332,7 @@ sequenceDiagram
         R-->>E: ステップの id と名前
         E-->>E: ステップを流さずに止まる
     end
-    H->>D: worker の起動の前（work・pr はステップの開始、drive は pause の起動ごと）
+    H->>D: worker の起動の前（work はステップの開始で 1 回、pr は body が llm のときだけ、drive は pause の起動ごと）
     D->>R: load_table・resolve・render
     alt 対応表か SKILL.md を読めない
         R-->>D: SkillsError
@@ -346,7 +346,7 @@ sequenceDiagram
     end
 ```
 
-**記録は起動の前に書く。** 起動が落ちても、何を渡そうとしたかが残る。drive のステップは pause の worker を 0〜N 回起動するため、解決と記録はステップの開始ではなく pause の起動ごとに行う（I6・I7）。pause が無ければ解決も記録もしない。
+**記録は起動の前に書く。** 起動が落ちても、何を渡そうとしたかが残る。drive のステップは pause の worker を 0〜N 回起動するため、解決と記録はステップの開始ではなく pause の起動ごとに行う（I6・I7）。pause が無ければ解決も記録もしない。full の work の起こし直し（`resume`）は同じ会話の続きであり起動に数えず、最初の解決の節を同じ system プロンプトで渡して行を足さない。pr のステップは本文を LLM に書かせないとき（`body` が `llm` 以外）worker を起動しないため、解決も記録もしない（I5・I6・I7）。
 
 `ndf:worker` の経路は `supervise.py` を通らない。supervisor は作業を 1 つ渡すとき、その作業が属する工程の名前で `stage-skills.py lookup <工程>` を打つ（名前の出どころは決定 10）。出力の `items` の名前と `path` を、起動指示の「読む Skill」に並べる。終了コードが 0 以外なら欄を空にせず、supervisor が `結果: 判断が要る` で返す（E6）。
 
@@ -402,7 +402,7 @@ sequenceDiagram
 | 受け入れ条件 12 | `prompts.py` に `DOCUMENT_STYLE`・`DOCUMENT_RULE`・`_style_rules` が無く、設計の工程の work ステップには `document-style` の本文が届く | 撤去だけをして対応表の行を入れない |
 | 受け入れ条件 13・決定 9 | 設計・ドキュメント再構成・Pull Request・振り返りの 4 工程と、要求と受け入れ条件・計画・ドキュメントレビュー・完了判定・確定仕様化・棚卸しの 6 工程のステップに `document-style` が届く | 10 のどれかの行を対応表から落とす |
 | 受け入れ条件 13・決定 9 | 雛形が作る `fix-doc` の work ステップが `stage: 完了判定` を持ち、`document-style` が届く | `fix-doc` の `stage` を消す |
-| 受け入れ条件 14・I7 | work・pr のステップは `kind: skills` の行が 1 行、起動の前に書かれ、0 件のときは空の一覧である。drive のステップは pause の worker を 2 回起動すると行が 2 行、pause が無いと行が 0 行である | 0 件のときに行を省く、起動の後に書く、または drive の行をステップの開始で 1 行だけ書く |
+| 受け入れ条件 14・I7 | work のステップは `kind: skills` の行が 1 行、起動の前に書かれ、0 件のときは空の一覧である。full の work が起こし直しを 2 回しても行は 1 行のままで、起こし直しの system プロンプトは最初の起動と同じ文である。pr のステップは `body` が `llm` のとき行が 1 行、`llm` 以外では 0 行で、対応表を壊しても失敗しない。drive のステップは pause の worker を 2 回起動すると行が 2 行、pause が無いと行が 0 行である | 0 件のときに行を省く、起動の後に書く、起こし直しごとに行を足す、`body` が `llm` 以外の pr で行を書くか失敗にする、または drive の行をステップの開始で 1 行だけ書く |
 | I6（drive） | pause の無い drive のステップは、対応表のファイルを壊しても失敗しない。pause がある drive は、壊した対応表で pause の worker を起動せずに失敗する | drive のステップの開始で解決して失敗にする |
 | 受け入れ条件 15・I6 | 対応表のファイルを壊すか `SKILL.md` を消すと、worker を起動せずにステップが失敗し、行の `error` に名前かファイルが出る | 読めない Skill を飛ばして起動する |
 | JUDGE の除外（I5） | judge のステップの system プロンプトは対応表の行がある工程でも `JUDGE_SYSTEM` のままである | judge にも節を入れる |
