@@ -82,7 +82,7 @@ def dirs(state):
 
 
 def judge_now(name, sessions=None):
-    ws = hb.scan()
+    ws = hb.scan_wrappers()
     return hb.Hub.judge(name, hb.live(ws, hb.read_registry(), sessions or {}))
 
 
@@ -151,7 +151,7 @@ def test_hub_dir_is_not_a_relay_dir(state):
     """統括役の置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
     h = hb.Hub.claim()
     try:
-        assert hb.scan() == []
+        assert hb.scan_wrappers() == []
         assert subprocess.run([sys.executable, str(RELAY), "stop"], env=_env(state), capture_output=True).returncode == 1
     finally:
         h.release()
@@ -167,7 +167,7 @@ def _env(state, **extra):
 
 def test_request_without_hub_times_out_and_withdraws(state, monkeypatch):
     monkeypatch.setenv("NDF_RELAY_HUB_WAIT", "0.2")
-    assert hc.request("spawn", "a", "/", ["--", "x"], "spawn") is None
+    assert hc.send_request("spawn", "a", "/", ["--", "x"], "spawn") is None
     assert os.listdir(hb.hub_path(hb.REQUESTS)) == []
     assert os.stat(hb.hub_path(hb.REQUESTS)).st_mode & 0o777 == 0o700
 
@@ -308,12 +308,12 @@ def test_stop_name_stops_only_that_one(dirs, capsys):
 
 def test_restart_input_uses_last_section(dirs, tmp_path):
     row = {"args": ["--model", "x", "--", "最初"], "cwd": str(tmp_path)}
-    w1 = hb.by_name(hb.scan()).get("none")
+    w1 = hb.by_name(hb.scan_wrappers()).get("none")
     assert hb.restart_input("a", row, w1) == (str(tmp_path), ["--model", "x", "--", "最初"])
     wt = tmp_path / "wt"
     wt.mkdir()
     dirs("a", name="a", running=False, section=2, command="/goal 続き", cwd=str(wt))
-    w2 = hb.by_name(hb.scan())["a"]
+    w2 = hb.by_name(hb.scan_wrappers())["a"]
     assert hb.restart_input("a", row, w2) == (str(wt), ["--model", "x", "/goal 続き"])
 
 

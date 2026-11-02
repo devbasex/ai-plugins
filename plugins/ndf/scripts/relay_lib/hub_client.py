@@ -9,6 +9,7 @@ Stop hook の起動のブロック。
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -17,7 +18,7 @@ import time
 
 from . import hub as hb
 from . import tmux
-from .common import PID_FILE, STOP_FILE, _write_file, env_num, read_text, relay_running, remove, stamp, write_json_atomic
+from .common import NAME_FILE, PID_FILE, STOP_FILE, _write_file, env_num, read_text, relay_running, remove, stamp, write_json_atomic
 
 import md  # noqa: E402,I001  common が lib/ を sys.path に置く
 
@@ -30,7 +31,7 @@ EXIT_NO_HUB = 1  # 統括役が居ない・答えない
 def put_request(kind: str, name: str | None, cwd: str, args: list[str], by: str) -> str:
     """受付箱へ依頼を置き、依頼の id を返す（ファイルは 0600。I8）。環境変数は載せない（決定 2）。"""
     hb.ensure_dirs()
-    rid = hb.new_id()
+    rid = hb.request_id()
     write_json_atomic(
         hb.hub_path(hb.REQUESTS, f"{rid}.json"),
         {"kind": kind, "name": name, "cwd": cwd, "args": args, "by": by, "at": stamp()},
@@ -51,7 +52,7 @@ def _wait_result(rid: str, seconds: float) -> dict | None:
         time.sleep(0.1)
 
 
-def request(kind: str, name: str | None, cwd: str, args: list[str], by: str) -> dict | None:
+def send_request(kind: str, name: str | None, cwd: str, args: list[str], by: str) -> dict | None:
     """依頼を置いて結果を待つ。`NDF_RELAY_HUB_WAIT` 秒で来なければ依頼を消して None。消せなければ統括役が
     受け取った後なので、もう 1 度同じ秒数だけ待つ（決定 14）。"""
     rid = put_request(kind, name, cwd, args, by)
@@ -66,7 +67,7 @@ def request(kind: str, name: str | None, cwd: str, args: list[str], by: str) -> 
         return _wait_result(rid, seconds)
 
 
-def code_of(res: dict) -> int:
+def exit_code_of(res: dict) -> int:
     code = (res.get("metrics") or {}).get("exit_code")
     return code if isinstance(code, int) else (0 if res.get("status") == "ok" else 1)
 
@@ -76,9 +77,9 @@ def first_name(res: dict) -> str | None:
     return items[0].get("name") if items and isinstance(items[0], dict) else None
 
 
-def finish(res: dict, as_json: bool) -> int:
+def print_result(res: dict, as_json: bool) -> int:
     """結果を出して終了コードを返す。"""
-    code = code_of(res)
+    code = exit_code_of(res)
     if as_json:
         print(json.dumps(res, ensure_ascii=False))
     else:
@@ -87,7 +88,7 @@ def finish(res: dict, as_json: bool) -> int:
 
 
 def no_hub(kind: str, name, why: str) -> dict:
-    return hb.outcome(kind, "stopped", why, name, "no-hub", EXIT_NO_HUB)
+    return hb.hub_result(kind, "stopped", why, name, "no-hub", EXIT_NO_HUB)
 
 
 # ---------------------------------------------------------------- 端末の 2 本目（run から呼ぶ）
@@ -96,10 +97,57 @@ def no_hub(kind: str, name, why: str) -> dict:
 def terminal_request(args: list[str]) -> tuple[str, dict | None]:
     """統括役へ端末の 2 本目の起動を頼む。(`attach` / `refused` / `timeout`, 結果)。"""
     name = os.environ.get("NDF_RELAY_NAME") or None
-    res = request("spawn", name, os.getcwd(), list(args), "terminal")
+    res = send_request("spawn", name, os.getcwd(), list(args), "terminal")
     if res is None:
         return "timeout", None
     return ("attach" if res.get("status") == "ok" else "refused"), res
+
+
+def claim_hub() -> hb.Hub | None:
+    """統括役を取る。tmux の中の名前つきのラッパーは取りに行かない（決定 1）。取れなければ None。"""
+    return None if os.environ.get("NDF_RELAY_SPAWNED") else hb.Hub.claim()
+
+
+def release_hub(hub: hb.Hub | None) -> None:
+    if hub is not None:
+        hub.release()
+
+
+def write_name(relay_dir: str, hub: hb.Hub | None) -> None:
+    """名前つきのラッパーと統括役（`t1`）の作業ディレクトリへ名前を書く。"""
+    name = os.environ.get("NDF_RELAY_NAME") or ("t1" if hub is not None else None)
+    if name:
+        _write_file(os.path.join(relay_dir, NAME_FILE), (name + "\n").encode(), 0o600)
+
+
+@contextlib.contextmanager
+def serving(hub: hb.Hub | None, relay_dir: str):
+    """統括役を兼ねるならその間だけ受付箱を回し、抜けたら `hub.lock` を放す。"""
+    if hub is not None:
+        hub.start(relay_dir, hb.read_name(relay_dir))
+    try:
+        yield
+    finally:
+        release_hub(hub)
+
+
+def ask_hub(args: list[str], say) -> int | None:
+    """統括役が居るときの端末の 2 本目（#2346）。統括役に起動を頼み、tmux のセッションへ結び付ける（戻らない）。
+    断られたら理由を 1 行出して終了コード。名前つきのラッパー・tmux が無い・統括役が答えないなら None（今の前景の起動）。"""
+    if os.environ.get("NDF_RELAY_SPAWNED"):
+        return None
+    if tmux.binary() is None:
+        say("tmux が PATH に無いため統括しない。この端末で 1 本のラッパーとして起動する")
+        return None
+    kind, res = terminal_request(args)
+    if kind == "timeout" or res is None:
+        say(f"統括役が {hb.wait_seconds():g} 秒答えないため、この端末で 1 本のラッパーとして起動する")
+        return None
+    if kind == "refused":
+        say(f"起動しない（{res.get('summary', '')}）")
+        return exit_code_of(res)
+    tmux.exec_attach(first_name(res) or "")
+    return 1
 
 
 # ---------------------------------------------------------------- 起動のブロック（Stop hook の mark から呼ぶ）
@@ -148,12 +196,14 @@ def cmd_spawn(argv: list[str]) -> int:
     if not name:
         print("usage: relay.py spawn --name <名前> [--json] -- <最初の入力>", file=sys.stderr)
         return 2
-    if not hb.valid_name(name):
-        return finish(hb.outcome("spawn", "stopped", f"名前の形が違う（{hb.NAME_RE.pattern}）: {name}", name, hb.BAD_NAME, 3), as_json)
+    if not hb.name_ok(name):
+        return print_result(
+            hb.hub_result("spawn", "stopped", f"名前の形が違う（{hb.NAME_RE.pattern}）: {name}", name, hb.BAD_NAME, 3), as_json
+        )
     if not hb.hub_running():
-        return finish(no_hub("spawn", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
-    res = request("spawn", name, os.getcwd(), hb.prompt_args(" ".join(rest)) if rest else [], "spawn")
-    return finish(res or no_hub("spawn", name, "統括役が答えない"), as_json)
+        return print_result(no_hub("spawn", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
+    res = send_request("spawn", name, os.getcwd(), hb.prompt_args(" ".join(rest)) if rest else [], "spawn")
+    return print_result(res or no_hub("spawn", name, "統括役が答えない"), as_json)
 
 
 # ---------------------------------------------------------------- ls
@@ -165,7 +215,7 @@ def _iso(epoch: float | None) -> str | None:
     return _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _item(name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None) -> dict:
+def _ls_item(name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None) -> dict:
     running = bool(w and w.running) or pending
     waiting = bool(w and w.running and w.question)
     state = "awaiting_approval" if waiting else "running" if running else "stopped"
@@ -186,7 +236,7 @@ def _item(name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, 
 
 
 def list_items() -> list[dict]:
-    ws = hb.scan()
+    ws = hb.scan_wrappers()
     registry = hb.read_registry()
     sessions = tmux.sessions()
     hub_dir = hb.hub_relay_dir()
@@ -197,8 +247,8 @@ def list_items() -> list[dict]:
         w = named.get(n)
         session = sessions.get((registry.get(n) or {}).get("session", n))
         pending = session is not None and not (w and w.running) and n in registry
-        items.append(_item(n, w, session, pending, hub_dir))
-    items += [_item("-", w, None, False, hub_dir) for w in ws if w.running and not w.name]
+        items.append(_ls_item(n, w, session, pending, hub_dir))
+    items += [_ls_item("-", w, None, False, hub_dir) for w in ws if w.running and not w.name]
     return items
 
 
@@ -215,7 +265,7 @@ COLUMNS = (
 )
 
 
-def _cell(v) -> str:
+def _ls_cell(v) -> str:
     if v is None:
         return "-"
     if isinstance(v, bool):
@@ -241,7 +291,7 @@ def cmd_ls(argv: list[str]) -> int:
         res = {"tool": "relay-ls", "status": "ok", "summary": summary, "items": items, "metrics": metrics}
         print(json.dumps(res, ensure_ascii=False))
         return 0
-    rows = [[h for _, h in COLUMNS]] + [[_cell(it[k]) for k, _ in COLUMNS] for it in items]
+    rows = [[h for _, h in COLUMNS]] + [[_ls_cell(it[k]) for k, _ in COLUMNS] for it in items]
     widths = [max(len(r[i]) for r in rows) for i in range(len(COLUMNS))]
     for r in rows:
         print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
@@ -255,7 +305,7 @@ def _target(name: str) -> tuple[hb.Wrapper | None, bool, dict]:
     """(選んだ作業ディレクトリ, tmux のセッションが在るか, 登録簿の行)。"""
     registry = hb.read_registry()
     row = registry.get(name) or {}
-    w = hb.by_name(hb.scan()).get(name)
+    w = hb.by_name(hb.scan_wrappers()).get(name)
     return w, tmux.has_session(row.get("session", name)), row
 
 
@@ -285,15 +335,15 @@ def stop_named(name: str) -> bool:
 
 
 def _not_found(kind: str, name: str) -> dict:
-    return hb.outcome(kind, "stopped", f"その名前は無い: {name}", name, hb.NOT_FOUND, 3)
+    return hb.hub_result(kind, "stopped", f"その名前は無い: {name}", name, hb.NOT_FOUND, 3)
 
 
 def cmd_stop_named(name: str, as_json: bool) -> int:
     if not stop_named(name):
-        return finish(_not_found("stop", name), as_json)
-    res = hb.outcome("stop", "ok", f"{name} を止めた", name, "stopped", 0)
+        return print_result(_not_found("stop", name), as_json)
+    res = hb.hub_result("stop", "ok", f"{name} を止めた", name, "stopped", 0)
     res["tool"] = "relay-stop"
-    return finish(res, as_json)
+    return print_result(res, as_json)
 
 
 def cmd_restart(argv: list[str]) -> int:
@@ -305,12 +355,12 @@ def cmd_restart(argv: list[str]) -> int:
     name = names[0]
     w, has, row = _target(name)
     if not row and not (w and w.running):
-        return finish(_not_found("restart", name), as_json)
+        return print_result(_not_found("restart", name), as_json)
     if not hb.hub_running():
-        return finish(no_hub("restart", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
+        return print_result(no_hub("restart", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
     stop_named(name)
-    res = request("restart", name, os.getcwd(), [], "restart")
-    return finish(res or no_hub("restart", name, "統括役が答えない"), as_json)
+    res = send_request("restart", name, os.getcwd(), [], "restart")
+    return print_result(res or no_hub("restart", name, "統括役が答えない"), as_json)
 
 
 def cmd_attach(argv: list[str]) -> int:

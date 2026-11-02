@@ -232,9 +232,7 @@ def passthrough(claude: str, args: list[str]):
 
 def child_env(relay_dir: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in DROP_ENV and k != "NDF_RELAY_SPAWNED"}
-    if not os.environ.get("NDF_RELAY_SPAWNED"):
-        # 名前（`NDF_RELAY_NAME`）を子へ渡すのは tmux の中の名前つきのラッパーだけ。待ち通知の
-        # `relay.py attach <名前>` の案内が結び付けられるラッパーだけを指すようにする（#2346）
+    if not os.environ.get("NDF_RELAY_SPAWNED"):  # 名前を子へ渡すのは tmux の中の名前つきのラッパーだけ（attach の案内。#2346）
         env.pop("NDF_RELAY_NAME", None)
     env["NDF_RELAY_DEPTH"] = str(depth() + 1)
     env["NDF_RELAY_DIR"] = relay_dir

@@ -29,7 +29,7 @@ def _env() -> dict:
     return {k: v for k, v in os.environ.items() if k != "TMUX"}
 
 
-def _run(*args: str):
+def _tmux(*args: str):
     """tmux を 1 回呼ぶ。実行ファイルが無い・起動できない・時間切れは None。"""
     exe = binary()
     if exe is None:
@@ -45,7 +45,7 @@ def _run(*args: str):
 def new_session(name: str, cwd: str, argv: list[str], env: dict[str, str]) -> str | None:
     """端末の無いセッション `name` を作り、`argv` を `cwd` で動かす。`env` は window へ足す変数。失敗の理由か None。"""
     opts = [arg for k, v in env.items() for arg in ("-e", f"{k}={v}")]
-    p = _run("new-session", "-d", "-s", name, "-c", cwd, "-x", "200", "-y", "50", *opts, "--", *argv)
+    p = _tmux("new-session", "-d", "-s", name, "-c", cwd, "-x", "200", "-y", "50", *opts, "--", *argv)
     if p is None:
         return "tmux を起動できない"
     if p.returncode != 0:
@@ -54,13 +54,13 @@ def new_session(name: str, cwd: str, argv: list[str], env: dict[str, str]) -> st
 
 
 def has_session(name: str) -> bool:
-    p = _run("has-session", "-t", f"={name}")
+    p = _tmux("has-session", "-t", f"={name}")
     return p is not None and p.returncode == 0
 
 
 def sessions() -> dict[str, dict]:
     """在るセッションの {名前: {attached, activity, pid}}。サーバが無ければ空。"""
-    p = _run("list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{window_activity}\t#{pane_pid}")
+    p = _tmux("list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{window_activity}\t#{pane_pid}")
     if p is None or p.returncode != 0:
         return {}
     out = {}
@@ -78,7 +78,7 @@ def sessions() -> dict[str, dict]:
 
 
 def kill_session(name: str) -> bool:
-    p = _run("kill-session", "-t", f"={name}")
+    p = _tmux("kill-session", "-t", f"={name}")
     return p is not None and p.returncode == 0
 
 

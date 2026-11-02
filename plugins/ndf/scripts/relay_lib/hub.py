@@ -5,7 +5,7 @@
 受付箱 `hub/requests/<id>.json` へ依頼を置き、統括役が 0.5 秒ごとに `rename` で受け取って処理し、結果を
 `hub/results/<id>.json` へ書く（決定 4）。登録簿 `registry.json` を書くのは統括役だけである（I4）。
 
-状態の読み取り（`scan`・`live`）は頼む側の一覧（`hub_client`）と共有する。読むのは作業ディレクトリの今のファイル
+状態の読み取り（`scan_wrappers`・`live`）は頼む側の一覧（`hub_client`）と共有する。読むのは作業ディレクトリの今のファイル
 （`relay.lock`・`question`・`log.jsonl`・`name`）だけで、各ラッパーの状態機械には触れない（I5・決定 8）。
 """
 
@@ -95,7 +95,7 @@ def prompt_args(text: str) -> list[str]:
     return ["--", text]
 
 
-def valid_name(name) -> bool:
+def name_ok(name) -> bool:
     return isinstance(name, str) and bool(NAME_RE.match(name))
 
 
@@ -169,7 +169,7 @@ def _last_at(d: str) -> str | None:
     return None
 
 
-def scan() -> list[Wrapper]:
+def scan_wrappers() -> list[Wrapper]:
     """状態ディレクトリの作業ディレクトリをすべて読む。統括役の置き場（`hub/`）は作業ディレクトリと読まない。"""
     root = state_root()
     out = []
@@ -192,7 +192,7 @@ def scan() -> list[Wrapper]:
     return out
 
 
-def pick(ws: list[Wrapper]) -> Wrapper | None:
+def pick_live(ws: list[Wrapper]) -> Wrapper | None:
     """同じ名前の作業ディレクトリから 1 つを選ぶ。動いているもの、無ければ最後の start が最も新しいもの。"""
     running = [w for w in ws if w.running]
     if running:
@@ -205,7 +205,7 @@ def by_name(ws: list[Wrapper]) -> dict[str, Wrapper]:
     for w in ws:
         if w.name:
             groups.setdefault(w.name, []).append(w)
-    return {n: pick(g) for n, g in groups.items()}
+    return {n: pick_live(g) for n, g in groups.items()}
 
 
 class Live(NamedTuple):
@@ -243,7 +243,7 @@ def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[st
 # ---------------------------------------------------------------- 統括役
 
 
-def new_id() -> str:
+def request_id() -> str:
     return f"{time.time_ns():020d}-{os.getpid()}-{random.randint(0, 999999):06d}"
 
 
@@ -343,7 +343,7 @@ class Hub:
     def process(self, req: dict) -> dict:
         kind = req.get("kind")
         name = req.get("name")
-        ws = scan()
+        ws = scan_wrappers()
         registry = read_registry()
         sessions = tmux.sessions()
         now = live(ws, registry, sessions)
@@ -379,7 +379,7 @@ class Hub:
     @staticmethod
     def judge(name, now: Live) -> Refusal | None:
         """名前の形（I7）・重複（I2）・上限（I3）。入口に依らず、ここだけで判定する。"""
-        if not valid_name(name):
+        if not name_ok(name):
             return Refusal(BAD_NAME, f"名前の形が違う（{NAME_RE.pattern}）: {name}", 3)
         if name in now.taken:
             return Refusal(NAME_TAKEN, f"名前が重なる: {name} は動いている", 3)
@@ -398,15 +398,15 @@ class Hub:
         registry[name] = {"session": name, "cwd": cwd, "args": args, "created_at": stamp(), "by": by}
         write_json_atomic(hub_path(REGISTRY), {"version": 1, "entries": registry})
         hub_log("started" if kind == "spawn" else "restarted", name, by or None)
-        return outcome(kind, "ok", f"{name} を起動した（relay.py attach {name} で結び付ける）", name, "started", 0)
+        return hub_result(kind, "ok", f"{name} を起動した（relay.py attach {name} で結び付ける）", name, "started", 0)
 
     @staticmethod
     def refuse(kind, name, r: Refusal) -> dict:
         hub_log("refused", name if isinstance(name, str) else None, r.reason)
-        return outcome(kind, "stopped", r.message, name, r.reason, r.code)
+        return hub_result(kind, "stopped", r.message, name, r.reason, r.code)
 
 
-def outcome(kind, status: str, summary: str, name, result: str, code: int) -> dict:
+def hub_result(kind, status: str, summary: str, name, result: str, code: int) -> dict:
     """依頼の結果（step_result の形。`metrics.exit_code` は頼む側が終える終了コード）。"""
     tool = f"relay-{kind}" if kind in ("spawn", "restart") else "relay-hub"
     item = {"name": name if isinstance(name, str) else None, "result": result}

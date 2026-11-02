@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
             return 0
     commands = {
         "run": lambda: run.cmd_run(rest),
-        "stop": lambda: _stop(rest),
+        "stop": lambda: _stop_cmd(rest),
         "spawn": lambda: hub_client.cmd_spawn(rest),
         "ls": lambda: hub_client.cmd_ls(rest),
         "attach": lambda: hub_client.cmd_attach(rest),
@@ -87,7 +87,7 @@ def main(argv: list[str]) -> int:
     return 2
 
 
-def _stop(rest: list[str]) -> int:
+def _stop_cmd(rest: list[str]) -> int:
     """名前が無ければ今のまま全部に停止の合図を置く（AC12）。名前があればその 1 本だけを止める。"""
     from . import hub_client, mark
 
