@@ -49,7 +49,7 @@ erDiagram
 | `nextSeq` | 数値 | 許さない | 次に組むまとめた配布の連番（1 から） |
 | `waitReason` | 文字列 | 許す | `external_release_open` / `legacy_run`。空は「待っていない」 |
 | `waitDetail` | 文字列 | 許す | 待ちの相手（外の Pull Request の URL・古い版の数）。`waitReason` が空なら空 |
-| `gsiOrg` | 文字列 | 許す | 疎な GSI `ORGANIZER_ACTIVE` の鍵。`currentSeq` があるときだけ持つ |
+| `gsi1pk`・`gsi1sk` | 文字列 | 許す | 実行の表の既存の GSI `gsi1` の鍵 `ORGANIZER_ACTIVE` / 行の `sk`。`currentSeq` があるときだけ持つ（見回りが流れている根を引く） |
 
 **受けた依頼（`sk=ORGREQ#<repositoryId>#<requestId>`）**: 依頼 1 件に 1 行（I59）。依頼の中身は書き換えない。
 
@@ -63,7 +63,8 @@ erDiagram
 | `ndfVersion` | 文字列 | 許さない | 依頼した実行の NDF の版 |
 | `requestedAt` | 文字列 | 許さない | 依頼のファイルの時刻 |
 | `answer` | オブジェクト | 許す | `{seq, result, version, prodPrUrl, reason, at}`。空は「未回答」。1 回だけ書く（I58） |
-| `gsiOrg` | 文字列 | 許す | `answer` が空のときだけ持つ（見回りが未回答を引く） |
+| `deliveredAt` | 文字列 | 許す | 答えを依頼元へ届け終えた時刻。依頼元の実行の進捗の記録へ `release.answered` を追記し、手動の実行なら `requestResume` が通った（か、実行がもうこの依頼を待っていない）後に書く。空は「届け終えていない」 |
+| `gsi1pk`・`gsi1sk` | 文字列 | 許す | 実行の表の既存の GSI `gsi1` の鍵 `ORGANIZER_ACTIVE` / 行の `sk`。`deliveredAt` が空の間だけ持つ（見回りが未回答の依頼と、答えを届け終えていない依頼を引く）。`deliveredAt` を書く書き込みで外す |
 
 **まとめた配布（`sk=ORGBATCH#<repositoryId>#<seq を 6 桁で 0 埋め>`）**
 
@@ -109,7 +110,7 @@ erDiagram
 | F5 結果を返す | U | U（答え） | U | C | U（手動の実行の再開） |
 | F6 一覧 | R | R | R | R | R |
 | F7 止まった配布を解く | U | U（差し戻しの答え） | U | C | U |
-| F8 見回り | R | R | R | — | R |
+| F8 見回り | R | R・U（届け終わり） | R | — | R・U（手動の実行の再開） |
 
 ### 移行
 
