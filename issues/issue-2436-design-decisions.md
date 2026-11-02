@@ -221,9 +221,9 @@ Markdown の表を正本にする形は、検査のたびに表の解析が要�
 
 ### 決定 21: 範囲を 1 台の中に閉じ、レーンとオーガナイザーの間の依頼と答えの形を NDF の契約として公開する
 
-Neural Development Factory では、同じリポジトリで並行する実行が、それぞれ別の実行ジョブ（コンテナ 1 つ。中で動くのはスプリント 1 本の conductor で、レーンは並ばない）で動く。実行ジョブ 1 本がレーン 1 本に当たるため、Factory に要るのは上位のまとめ役ではない。同じオーガナイザーの役割を、Factory の側で担う実装である（2026-11-02 の利用者の指摘。層は [issue-2436-design-hierarchy.md](issue-2436-design-hierarchy.md)）。この設計のオーガナイザーは 1 台の SQLite（DBOS）に閉じ、実行ジョブの間をまたげない。Factory のオーガナイザーは `factory/` の側に置く。`factory/` は TypeScript と DynamoDB で書き、常駐のプロセスを持たない。そのため、Factory のオーガナイザーは別の課題 https://github.com/devbasex/ai-plugins/issues/2439 と別の設計 PR で作る。この設計は境界だけを持つ。
+Neural Development Factory では、同じリポジトリで並行する実行が、それぞれ別の実行ジョブ（コンテナ 1 つ。中で動くのはスプリント 1 本の conductor で、レーンは並ばない）で動く。実行ジョブ 1 本がレーン 1 本に当たるため、Factory に要るのは上位のまとめ役ではない。同じオーガナイザーの役割を Factory の側で担う実装で、1 台の中のオーガナイザーとは排他である。Factory の実行ジョブの中では 1 台の中のオーガナイザーは動かない（2026-11-02 の利用者の指摘。層は [issue-2436-design-hierarchy.md](issue-2436-design-hierarchy.md)）。この設計のオーガナイザーは 1 台の SQLite（DBOS）に閉じ、実行ジョブの間をまたげない。Factory のオーガナイザーは `factory/` の側に置く。`factory/` は TypeScript と DynamoDB で書き、常駐のプロセスを持たない。そのため、Factory のオーガナイザーは別の課題 https://github.com/devbasex/ai-plugins/issues/2439 と別の設計 PR で作る。この設計は境界だけを持つ。
 
-- **範囲**: この設計のオーガナイザーは 1 台の中のレーンだけをまとめる。Factory のランナーの中で、ラッパーと tmux が無いときは、今の振る舞いのまま動く（決定 11）
+- **範囲**: この設計のオーガナイザーは 1 台の中のレーンだけをまとめる。ランナーが立てる `NDF_FACTORY_RUN=1` があれば、`parallel.py init`・`run` は断る（排他。手元のランナーのマシンには tmux とラッパーもあり得るため、それらの有無には頼らない）
 - **公開する形**: レーンが送る依頼（`kind`: `release`・`gate1`・`gate2`・`ask`）と、オーガナイザーが返す答え（配布の結果・範囲のイベント・問いの答え）の形を `plugins/ndf/contracts/forms/parallel-request.json` に置き、構造チェック（リポジトリの根の `scripts/contracts_lib/model.py`）が形を確かめる。Factory のオーガナイザーは、ランナー（実行ジョブの中のプログラム）の翻訳でこの形を受ける（下流の腐敗防止層。`ndf-factory-dev-loops.md` の `ndf-next` のブロックと同じ扱い）
 - **共有する規則**: 本番の Pull Request の規則（決定 15、I16）と、配布の中身を `develop` のコミットの範囲で決めること（決定 13・14）は、Factory のオーガナイザーでも同じものを使う
 
