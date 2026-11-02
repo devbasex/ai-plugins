@@ -356,6 +356,43 @@ def _median_of(values: list[float]) -> float | None:
     return float(statistics.median(values)) if values else None
 
 
+def _mark_times(marks: list[dict], event: str) -> list[float]:
+    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))))
+
+
+def _restore_sample(calls: list[dict], marks: list[dict], by_next: bool) -> tuple[int, int] | None:
+    """ndf-next で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
+    restored = _mark_times(marks, MARK_RESTORED)
+    if not (by_next and restored):
+        return None
+    before = [c for c in calls if c["ts"] is not None and c["ts"] <= restored[0]]
+    return (before[-1]["context"], len(before)) if before else None
+
+
+def _handoff_sample(calls: list[dict], marks: list[dict]) -> tuple[int, int] | None:
+    """最後の引継ぎの印から後の (呼び出し数, 出力 token の合計)。印が無ければ None。"""
+    handoffs = _mark_times(marks, MARK_HANDOFF)
+    if not handoffs:
+        return None
+    after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoffs[-1]]
+    return len(after), sum(c["out"] for c in after)
+
+
+def _stage_segments(calls: list[dict], rows: list[dict]) -> list[tuple[str, int, int]]:
+    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
+    launches = sorted(
+        ((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == "継続" and (t := parse_ts(r.get("at")))),
+    )
+    out = []
+    for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
+        seg = [c for c in calls if c["ts"] is not None and c["ts"] >= start and (nxt is None or c["ts"] < nxt)]
+        if not seg or nxt is None:
+            continue
+        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
+        out.append((stage, len(seg), gaps))
+    return out
+
+
 def calibrate(rows: list[dict], since: float | None = None) -> dict:
     """判定の記録と会話の記録から費用の見込みを作る（決定 5・6）。標本が 3 未満の値は None。"""
     rows = [r for r in fill_work(rows) if since is None or (parse_ts(r.get("at")) or 0) >= since]
@@ -374,27 +411,15 @@ def calibrate(rows: list[dict], since: float | None = None) -> dict:
     for sid, s in sessions.items():
         calls, _, by_next = cache[sid]
         marks = by_session.get(sid, [])
-        restored = sorted(t for m in marks if m.get("event") == MARK_RESTORED and (t := parse_ts(m.get("at"))))
-        if by_next and restored:
-            before = [c for c in calls if c["ts"] is not None and c["ts"] <= restored[0]]
-            if before:
-                restore_q.append(before[-1]["context"])
-                restore_n.append(len(before))
-        handoffs = sorted(t for m in marks if m.get("event") == MARK_HANDOFF and (t := parse_ts(m.get("at"))))
-        if handoffs:
-            after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoffs[-1]]
-            handoff_h.append(len(after))
-            handoff_out.append(sum(c["out"] for c in after))
-        launches = sorted(
-            ((t, r["stage"]) for r in s["rows"] if r.get("stage") and r.get("verdict") == "継続" and (t := parse_ts(r.get("at")))),
-        )
-        for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
-            seg = [c for c in calls if c["ts"] is not None and c["ts"] >= start and (nxt is None or c["ts"] < nxt)]
-            if not seg or nxt is None:
-                continue
-            gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
+        if (restore := _restore_sample(calls, marks, by_next)) is not None:
+            restore_q.append(restore[0])
+            restore_n.append(restore[1])
+        if (handoff := _handoff_sample(calls, marks)) is not None:
+            handoff_h.append(handoff[0])
+            handoff_out.append(handoff[1])
+        for stage, n, gaps in _stage_segments(calls, s["rows"]):
             for key in (stage, "*"):
-                stage_k[key].append(len(seg))
+                stage_k[key].append(n)
                 stage_m[key].append(gaps)
 
     def med(values):
