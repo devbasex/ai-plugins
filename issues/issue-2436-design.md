@@ -91,7 +91,7 @@
 | I7 | 並列の進行 | 1 本のレーンは 1 つの計画の進行の中で 1 回だけ起動する（打ち直した `run` も二重に起動しない） | 起動は耐久ステップで、成功の記録（`started`）があるレーンは対象から外す。統括役に断られた記録だけのレーンは外さない |
 | I8 | 並列の進行 | 依存のあるレーンは、依存先のレーンがすべて止まってから起動する | 依存先が止まるまで起動の対象から外す |
 | I9 | 並列の進行 | 流れている本番の配布は 1 つの計画につき 1 本まで。依頼が届いた時点で流れている配布が無ければ、他のレーンを待たずに直ちに配布を組む（まとめるための待ち時間を置かない）。配布の中身は依頼の集合ではなく、提示したコミットの範囲 `main..<SHA>` で決まる | 流れている間に届いた依頼は、範囲に入っていればその配布の答えを待ち、入っていなければ次の配布へ回る。次の配布は今の配布が終わった直後に組む（配布は 1 本ずつ直列） |
-| I10 | 並列の進行 | 配布の依頼 1 件には答えを 1 回だけ返す | 答えは耐久ワークフローの中で立てるイベントで、打ち直しは記録から同じ値を返す |
+| I10 | 並列の進行 | 配布の依頼 1 件には最終の答え（`released` / `rejected` / `failed`）を 1 回だけ返す。次の配布へ回す知らせ（`deferred`）は答えではなく、別のイベント `defer-<依頼>` で返す | 答えは耐久ワークフローの中で立てるイベント `answer-<依頼>` で、打ち直しは記録から同じ値を返す。`defer-<依頼>` は知らせのたびに上書きしてよく、`answer-<依頼>` を立てた後は読まない |
 | I11 | 並列の進行 | 耐久ワークフローが終わるのは、全レーンが止まり、答えていない依頼が無いときか、停止の指示を受けたときだけ | 条件を満たすまで終わらない |
 | I12 | 配布の依頼 | 動いている並列の進行（耐久ワークフローが終わっていない）に属さないレーンは依頼を送らず、今の本番のプランを流す | 計画に属さないと判定し、今の本番のプランを組む |
 | I13 | ラッパーの役割 | 同時に動かせる数から外すのは、オーガナイザーの印を持つ動いているラッパーのうち 1 本だけ。役割 `helper` の印を持つ動いているラッパーは 1 本だけ、上限を 1 本超えて許す | 2 本目以降のオーガナイザーの印は数に入れる。2 本目の `helper` は断る |
@@ -103,6 +103,8 @@
 
 ### ドメインイベント
 
+E1〜E13 の番号と意味は要求（[issue-2436-requirements.md](issue-2436-requirements.md)）と同じである。設計で足したイベントは、直前の要求のイベントの番号に枝番を付ける（E8a・E9a）。
+
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
 | E1 | 並列の計画を書いた | `parallel.py init` | 検査（E3） |
@@ -113,13 +115,13 @@
 | E6 | レーンが開発を始めた | レーンの conductor | — （状態は E7 で観る） |
 | E7 | レーンの状態が変わった | 耐久ステップ「観測」（`relay.py ls --json`） | 耐久ワークフロー。承認待ちになったレーンはイベント `notice` で `parallel.py wait` へ |
 | E8 | レーンが配布の依頼を送った | `parallel.py request`（話題 `inbox` のメッセージ） | 耐久ワークフロー |
-| E9 | 配布を提示した | 耐久ステップ「配布を組む」（イベント `release`） | オーガナイザーの conductor（`parallel.py wait`） |
-| E10 | 承認ゲート 2 を求めた | 本番のプランの承認ゲート 2 の判定 | 利用者（MVV 判定が通せば利用者を経ない） |
-| E11 | 承認の答えの時点のコミットを確かめた | `parallel.py confirm`（話題 `resume` のメッセージ） | 耐久ワークフロー（イベント `confirmed` か、1 回だけの出し直しの `release`） |
-| E12 | 本番を配布した | 本番のプラン | `parallel.py settle` |
-| E13 | 範囲のレーンへ配布の結果を返した | 耐久ワークフロー（`settle` の続きを受けたもの） | レーン（周回の境の `parallel.py await --timeout 0`・`request`） |
-| E14 | 計画名を指定して全レーンを止めた | `parallel.py stop` | 統括役（`relay.py stop <名前>`）・耐久ワークフロー |
-| E15 | オーガナイザーが終わった | 耐久ワークフローの終わり | オーガナイザーの conductor（要約を出して終える） |
+| E8a | 配布を提示した | 耐久ステップ「配布を組む」（イベント `release`） | オーガナイザーの conductor（`parallel.py wait`） |
+| E9 | 承認ゲート 2 を求めた | 本番のプランの承認ゲート 2 の判定 | 利用者（MVV 判定が通せば利用者を経ない） |
+| E9a | 承認の答えの時点のコミットを確かめた | `parallel.py confirm`（話題 `resume` のメッセージ） | 耐久ワークフロー（イベント `confirmed` か、1 回だけの出し直しの `release`） |
+| E10 | 本番を配布した | 本番のプラン | `parallel.py settle` |
+| E11 | 範囲のレーンへ配布の結果を返した | 耐久ワークフロー（`settle` の続きを受けたもの） | レーン（周回の境の `parallel.py await --timeout 0`・`request`） |
+| E12 | 計画名を指定して全レーンを止めた | `parallel.py stop` | 統括役（`relay.py stop <名前>`）・耐久ワークフロー |
+| E13 | オーガナイザーが終わった | 耐久ワークフローの終わり | オーガナイザーの conductor（要約を出して終える） |
 
 ### 用語
 
@@ -296,7 +298,8 @@ pydantic のモデル `ParallelPlan` が正本の形を持つ。最初の入力�
 | メッセージ | 話題 `inbox` | `request`・`request-gate1`・`request-ask`・一時レーン（`gate2`）・`stop` | 耐久ワークフロー | `{kind: request, id, lane, prs, issues, sprint_state, at}`・`{kind: gate1 / gate2 / ask, ...}`（[issue-2436-design-approvals.md](issue-2436-design-approvals.md)）・`{kind: stop}`。冪等の鍵は `<ID>:inbox:<依頼>` と `<ID>:inbox:stop` |
 | メッセージ | 話題 `resume` | `confirm`・`settle`（`durable.resume`） | 止まっている耐久ワークフロー | `{seq, phase: confirm, take}` か `{seq, phase: settle, result, version, reason}` |
 | イベント | `pause` | 耐久ワークフロー | `wait` | `{seq, action, ...}`。`action` は `running` / `notice` / `release` / `confirmed`。`wait` が返すのは `notice`・`release`・`confirmed` |
-| イベント | `answer-<依頼>` | 耐久ワークフロー | `await` | `{result, version, release, reason, at}`（I10） |
+| イベント | `answer-<依頼>` | 耐久ワークフロー | `await` | `{result, version, release, reason, at}`。`result` は `released` / `rejected` / `failed` の最終の答えだけ（I10） |
+| イベント | `defer-<依頼>` | 耐久ワークフロー | `await` | `{seq, reason, at}`。差し戻しの宛先でない依頼を次の配布へ回した知らせ。依頼は `pending` に残る（I10） |
 | イベント | `range-<連番>` | 耐久ワークフロー | `request` | 出した配布の `{sha, version, prs, lanes}`（I15） |
 | イベント | `lane-<レーン名>` | 耐久ワークフロー | オーガナイザーの状態の表示 | `{received, gate1_received, ask_received}`（受け取った依頼の数）。状態の表示にだけ使い、依頼の `id` の採番には使わない |
 | イベント | `questions` | 耐久ワークフロー | `wait` | `{seq, items}`。答えていない問いの依頼 |
