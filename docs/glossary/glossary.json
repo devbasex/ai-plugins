@@ -4929,6 +4929,48 @@
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
+      "term": "画面の地図",
+      "context": "ndf-factory",
+      "meaning": "Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "デザインのトークン",
+      "context": "ndf-factory",
+      "meaning": "色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "ダミーの API クライアント",
+      "context": "ndf-factory",
+      "meaning": "画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "翻訳のファイル",
+      "context": "ndf-factory",
+      "meaning": "言語ごとに、画面の文言のキーと文言を持つファイル",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "見本の画面",
+      "context": "ndf-factory",
+      "meaning": "土台の部品だけで組み、ダミーデータで動かす画面の 1 組（スプリントの一覧と詳細）。後続の課題が中身を置き換える出発点",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
+      "term": "つながりの状態",
+      "context": "ndf-factory",
+      "meaning": "画面が今サーバーへつながっているか・最後に受け取った時刻・つながってから確定する操作の数の組",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
+      "term": "言語と地域の設定",
+      "context": "ndf-factory",
+      "meaning": "画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
       "term": "差分の棚卸し",
       "context": "ndf-workflow",
       "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315）",
