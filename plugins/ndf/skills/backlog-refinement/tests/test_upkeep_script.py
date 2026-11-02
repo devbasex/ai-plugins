@@ -750,6 +750,11 @@ def test_reparent_writes_before_state_and_reverts(env):
     st = env.state()
     assert code == 0 and st["parents"] == {"5": 11}
     assert st["issues"]["5"]["milestone"]["title"] == "M2" and st["issues"]["7"]["milestone"]["title"] == "M2"
+    # 書き戻す先は記録したリポジトリ。別のリポジトリを --repo で指したら書かずに止まる（PR 2414 の指摘）
+    assert {b["repo"] for b in before} == {"o/r"}
+    env.set(lambda st: st.update(parents={"5": 2}))
+    code, out = env.run("revert", "--run", run, "--repo", "x/other")
+    assert code == 3 and "x/other" in out["summary"] and env.state()["parents"] == {"5": 2}
 
 
 def test_reparent_failure_reports_the_revert_command(env):

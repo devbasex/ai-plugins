@@ -3,7 +3,7 @@
     upkeep.py owner claim --what research|review|overhaul [--loop L] [--pid N] [--keepalive SECONDS]
     upkeep.py owner keepalive --run R --pid N --seconds S
     upkeep.py owner touch --run R [--item ID]
-    upkeep.py owner release --run R
+    upkeep.py owner release --run R | --pid N --what research|review|overhaul
     upkeep.py owner status
 
 宣言はメインディレクトリの `.ndf/backlog/owner.json` に置き、錠（`owner.json.lock`）の中でだけ作る・書き換える。
@@ -12,7 +12,9 @@
 部品は `run_owner`（記録・窓・pid の生死）と `locks`（錠）で、同じ役割の部品を作らない。
 
 終了コード: claim は 0 = 持ち主になった / 10 = 他の有効な持ち主がいる（`not_owner`）/ 3 = 錠を 5 秒で取れない。
-touch・release は 0 / 10 = 宣言が別の実行のもの（引き取られた）。
+touch・release は 0 / 10 = 宣言が別の実行のもの（引き取られた）。`release --pid --what` は、宣言の持ち主の pid・ホスト・
+`what` が渡した値と同じときだけ手放す（queue の work ステップの後の run ステップが、run を知らずに自分の宣言を手放すため）。
+既に手放されていれば 0、別の持ち主のものなら 10。
 
 `claim --keepalive S` は、持ち主になったら背景の見張り（`owner keepalive`）を切り離して起こす。見張りは `owner.beat` ごとに
 `touch` し、宣言が手放される・引き取られる・持ち主の pid が止まる・S 秒が過ぎる、のどれかで止まる。queue の work ステップ
@@ -106,6 +108,22 @@ def release_review(root, run: str) -> str | None:
     return _mark(root, run, True)
 
 
+def release_owned(root, pid: int, what: str) -> str | None:
+    """宣言の pid・ホスト・`what` が渡した値と同じなら手放す（既に手放されていれば何もしない）。違えば理由を返す。"""
+    path = owner_file(root)
+    with locks.exclusive(path, timeout=LOCK_WAIT):
+        cur, err = run_owner.read_owner(path)
+        mine = cur is not None and cur.get("pid") == int(pid) and cur.get("host") == socket.gethostname() and cur.get("what") == what
+        if err or not mine:
+            return err or f"宣言は別の持ち主 {(cur or {}).get('run')} のもの"
+        if cur.get("finished_at"):
+            return None
+        cur["seen_at"] = cur["finished_at"] = run_owner.utc_iso(time.time())
+        cur["item"] = None
+        run_owner.write_owner(path, cur)
+    return None
+
+
 def keepalive(root, run: str, pid: int, seconds: float, sleep=time.sleep, now=time.time) -> str:
     """`owner.beat` ごとに宣言の最後に動いた時刻を書き続ける。止まった理由を返す。
 
@@ -192,7 +210,12 @@ def cmd_keepalive(a):
 
 def _cmd_mark(a, fn, done: str):
     root = git_root(a.root)
-    why = fn(root, a.run, a.item) if fn is touch else fn(root, a.run)
+    if fn is release_review and a.run is None:
+        if a.pid is None or a.what is None:
+            emit(result(TOOL, "stopped", "release は --run か、--pid と --what の組を渡す"), EXIT_PRECONDITION)
+        why = release_owned(root, a.pid, a.what)
+    else:
+        why = fn(root, a.run, a.item) if fn is touch else fn(root, a.run)
     if why:
         emit(result(TOOL, "gate", why, [], {"reason": "not_owner"}, next="持ち主でなくなった。見直し・調査の続きをせずに終える"), EXIT_GATE)
     emit(result(TOOL, "ok", done, [], {"run": a.run}))
@@ -227,7 +250,9 @@ def add_owner_parsers(sub, common) -> None:
     t.add_argument("--item", default=None)
     t.set_defaults(func=lambda a: _cmd_mark(a, touch, "最後に動いた時刻を書いた"))
     r = op.add_parser("release", parents=[common])
-    r.add_argument("--run", required=True)
+    r.add_argument("--run", default=None)
+    r.add_argument("--pid", type=int, default=None, help="--run の代わりに、持ち主の pid と --what で自分の宣言を指す")
+    r.add_argument("--what", choices=WHATS, default=None)
     r.set_defaults(func=lambda a: _cmd_mark(a, release_review, "持ち主を解放した"))
     s = op.add_parser("status", parents=[common])
     s.set_defaults(func=cmd_status)

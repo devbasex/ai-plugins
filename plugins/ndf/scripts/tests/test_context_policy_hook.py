@@ -243,6 +243,19 @@ def test_same_message_and_ledger_are_counted_once(tmp_path):
     assert calls == 4  # m1・m2・サブエージェントの m3・帳簿の 1 行（p1 の会話の記録は読まない）
 
 
+def test_subagent_in_the_ledger_is_not_read_from_its_transcript(tmp_path):
+    # SubagentStop が帳簿へ書いたサブエージェント（session_id = agent_id）は、会話の記録からは足さない（PR 2414 の指摘）
+    m = load_cli()
+    a = call("2026-11-01T00:00:00Z", "m1")
+    tp = write_transcript(tmp_path / "s1.jsonl", [a])
+    write_transcript(tmp_path / "s1" / "subagents" / "agent-ag1.jsonl", [call("2026-11-01T00:00:30Z", "m3")])
+    ledger = [
+        {"session_id": "ag1", "parent_session_id": "s1", "agent_id": "ag1", "at": "2026-11-01T00:00:50Z", "usage": a["message"]["usage"]}
+    ]
+    out = m.report_work("#7", [hook_row("s1", tp, "2026-11-01T00:00:00Z")], ledger)
+    assert out["parts"]["ndf"]["calls"] == 1
+
+
 def test_same_message_takes_the_last_usage(tmp_path):
     # ストリーミングで後の行ほど output_tokens が増える。最初の usage で固定せず、最後の値を 1 回だけ数える
     tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m1", out=1), call("2026-11-01T00:00:05Z", "m1", out=900)])

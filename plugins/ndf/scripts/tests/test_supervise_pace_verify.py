@@ -338,7 +338,18 @@ def chain(steps) -> list[str]:
     return out
 
 
-DEPTH_TAIL = ["refine", "refine-record", "overhaul-due", "overhaul-claim", "overhaul", "review-due", "review-claim", "review"]
+DEPTH_TAIL = [
+    "refine",
+    "refine-record",
+    "overhaul-due",
+    "overhaul-claim",
+    "overhaul",
+    "overhaul-release",
+    "review-due",
+    "review-claim",
+    "review",
+    "review-release",
+]
 
 
 @pytest.mark.parametrize(

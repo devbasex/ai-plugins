@@ -109,7 +109,8 @@ DEPTH_WORK_TIMEOUT = 5400  # 見直し・大整理の work ステップの打ち
 def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
     """大整理か見直しの起動の判定・持ち主の宣言・本体・持ち主になれなかった記録（#2315 の決定 5）。
 
-    判定（`depth due`）が 3 を返したら `after` へ飛ぶ。持ち主になれない（10）ときは `skipped` の行を残して `after` へ進む。"""
+    判定（`depth due`）が 3 を返したら `after` へ飛ぶ。持ち主になれない（10）ときは `skipped` の行を残して `after` へ進む。
+    本体の後は成否によらず `release` で自分の宣言を手放してから `after` へ進む。"""
     name = {"overhaul": "大整理", "review": "見直し"}[depth]
     return [
         {
@@ -144,6 +145,19 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
             f"持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `{depth}` の判定にある。"
             "人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。"
             "最後に `depth record` と `owner release` を打つ。",
+            # 成否によらず次の release を通す。打ち切り・打ち忘れで宣言が残ると、見張りが打ち切りの秒数まで touch し続け、
+            # 続く見直しの claim と他のループの調査が not_owner で締め出される
+            "on_fail": f"{depth}-release",
+            "next": f"{depth}-release",
+        },
+        {
+            "id": f"{depth}-release",
+            "type": "run",
+            "cwd": repo,
+            "timeout": 60,
+            # claim と同じく持ち主の pid は supervise.py（$PPID）。既に手放されていれば 0、別の持ち主のものなら 10 で、どちらも先へ進む
+            "cmd": _upkeep(repo, "owner", "release", "--what", depth) + ' --pid "$PPID"',
+            "on_exit": {"10": after},
             "next": after,
         },
         {

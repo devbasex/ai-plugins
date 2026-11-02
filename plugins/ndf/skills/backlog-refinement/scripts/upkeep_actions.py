@@ -198,6 +198,7 @@ def reparent(root, gh: Gh, ms: Milestones, repo: str, plan: dict) -> dict:
             before.append(
                 {
                     "number": r["number"],
+                    "repo": repo,
                     "parent": _parent_of(gh, repo, r["number"]),
                     "milestone": (cur.get("milestone") or {}).get("title"),
                     "at": clock.now_iso("utc"),
@@ -209,6 +210,9 @@ def reparent(root, gh: Gh, ms: Milestones, repo: str, plan: dict) -> dict:
         kept = jsonio.read(run_dir / "before.json", missing=[], broken=None)
         if not isinstance(kept, list):
             raise OSError(f"前の付け直しの記録を読めない: {run_dir / 'before.json'}")
+        other = {b.get("repo") for b in kept if isinstance(b, dict) and b.get("repo") not in (None, repo)}
+        if other:
+            raise OSError(f"同じ実行の付け直しの記録は別のリポジトリ {', '.join(sorted(other))} のもの")
         seen = {b.get("number") for b in kept if isinstance(b, dict)}
         jsonio.write_atomic(run_dir / "before.json", kept + [b for b in before if b["number"] not in seen], indent=1)
     except (StepError, Partial, OSError) as e:
@@ -265,7 +269,15 @@ def cmd_revert(a):
     rows = jsonio.read(before_path(root, a.run), missing=None, broken=None)
     if not isinstance(rows, list):
         emit(result(TOOL, "stopped", f"付け直しの記録が無いか読めない: {before_path(root, a.run)}"), EXIT_PRECONDITION)
-    repo = target_repo(root, getattr(a, "repo", None))
+    # 書き戻す先は記録したリポジトリ（--repo で別のリポジトリを整理した後に、今のリポジトリの同じ番号を書き換えない）
+    recorded = {b.get("repo") for b in rows if isinstance(b, dict) and b.get("repo")}
+    given = getattr(a, "repo", None)
+    if len(recorded) > 1 or (recorded and given and given not in recorded):
+        emit(
+            result(TOOL, "stopped", f"付け直しの記録のリポジトリ {', '.join(sorted(recorded))} と書き込み先 {given or ''} が合わない"),
+            EXIT_PRECONDITION,
+        )
+    repo = next(iter(recorded)) if recorded else target_repo(root, given)
     gh = Gh(repo)
     ms = Milestones(gh)
     done, bad = [], []

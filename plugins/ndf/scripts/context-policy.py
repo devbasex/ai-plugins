@@ -157,6 +157,8 @@ def session_parts(
     if transcript:
         sub = Path(str(transcript).removesuffix(".jsonl")) / "subagents"
         for f in sorted(sub.glob("*.jsonl")) if sub.is_dir() else []:
+            if f.stem.removeprefix("agent-") in excluded:
+                continue  # SubagentStop が帳簿へ書いたサブエージェント（session_id = agent_id）は下の帳簿の行で数える
             sub_calls, _, _ = cd.read_calls(f, seen)
             sub_calls = [c for c in sub_calls if _within(c["ts"], windows)]
             for c in sub_calls:

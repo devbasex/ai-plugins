@@ -141,6 +141,18 @@ def test_dead_or_expired_owner_is_taken_over_with_taken_from(root):
     )  # 終わった宣言は引き取りでない
 
 
+def test_release_by_pid_and_what_only_releases_its_own_claim(root):
+    """queue の release ステップは run を知らずに、自分の pid と what で宣言を手放す（PR 2414 の指摘）。"""
+    O.claim_review(root, "overhaul", pid=os.getpid())
+    path = O.owner_file(root)
+    assert O.release_owned(root, os.getpid(), "review")  # what が違えば手放さない
+    assert O.release_owned(root, 2**22 + 12345, "overhaul")  # pid が違えば手放さない
+    assert not json.loads(path.read_text())["finished_at"]
+    assert O.release_owned(root, os.getpid(), "overhaul") is None and json.loads(path.read_text())["finished_at"]
+    assert O.release_owned(root, os.getpid(), "overhaul") is None  # 既に手放されていても 0
+    assert O.claim_review(root, "review", pid=os.getpid())[0]
+
+
 def test_keepalive_touches_until_released_or_owner_gone(root):
     """work ステップの間は見張りが touch し、寿命を過ぎても宣言が有効なまま残る（PR 2414 の指摘）。"""
     run, _, _ = O.claim_review(root, "review", pid=os.getpid())
