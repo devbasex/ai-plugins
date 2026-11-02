@@ -120,6 +120,21 @@ export interface LocalRunner {
 
 const RESULT_TO_RUN = { done: "done", stopped: "stopped", failed: "failed" } as const;
 
+// 取り消し・gate・local の利用上限のどれでもない終わりの、実行の状態と失敗の理由。
+// local 以外の利用上限は failed（job_failed）。failed のとき理由はジョブの停止の理由 → control が書いた終わりなら reason → job_failed の順
+function runEndOf(
+  result: keyof typeof RESULT_TO_RUN,
+  finishReason: string | null,
+  job: RunJob,
+  finished: JobFinishedEvent,
+  reason: FailureReason,
+): { state: (typeof RESULT_TO_RUN)[keyof typeof RESULT_TO_RUN]; failure: FailureReason | null } {
+  if (result === "stopped" && finishReason === "usage_limit") return { state: "failed", failure: "job_failed" };
+  const state = RESULT_TO_RUN[result];
+  if (state !== "failed") return { state, failure: null };
+  return { state, failure: job.stopReason ?? (finished.source === "control" ? reason : "job_failed") };
+}
+
 export class RunControl {
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -433,24 +448,10 @@ export class RunControl {
 
   // タスクが止まった後の処理。job.finished を読み、無ければ control で failed を書いてから結果に従って移す（I40）
   private async finalize(job: RunJob, reason: FailureReason): Promise<void> {
-    const { table, reader, platform } = this.deps;
+    const { table, platform } = this.deps;
     const run = await table.getRun(job.sprintRunId);
     if (!run) return;
-    let finished = await reader.findJobFinished(run.sprintRunId, job.jobId);
-    if (!finished) {
-      const event: JobFinishedEvent = {
-        sprint_run_id: run.sprintRunId,
-        idempotency_key: finishedKey(job.jobId),
-        type: "job.finished",
-        at: this.iso(),
-        source: "control",
-        job_id: job.jobId,
-        schema_version: 1,
-        payload: { result: "failed", summary: `実行の制御が終わりを書いた（${reason}）` },
-      };
-      const { written } = await this.deps.appendControl(event);
-      finished = written ? event : ((await reader.findJobFinished(run.sprintRunId, job.jobId)) ?? event);
-    }
+    const finished = await this.ensureFinished(run, job, reason);
     const result = finished.payload.result;
     const finishReason = finished.payload.reason ?? null;
     const now = this.iso();
@@ -465,16 +466,11 @@ export class RunControl {
         await table.awaitApproval(run.sprintRunId, job.jobId, now, { loop: lw?.write });
       } else if (result === "stopped" && finishReason === "usage_limit" && run.executionMode === "local") {
         // local の利用上限はリセット時刻の後に同じ周回を続ける（I54。ほかの形態は failed として扱う）
-        const resetsAt = finished.payload.resets_at ?? null;
-        const retry = (this.deps.config.usageLimitRetrySeconds ?? DEFAULT_USAGE_LIMIT_RETRY_SECONDS) * 1000;
-        const resumeAt = resetsAt && !Number.isNaN(Date.parse(resetsAt)) ? new Date(resetsAt).toISOString() : new Date(this.now().getTime() + retry).toISOString();
+        const resumeAt = this.resumeAtOf(finished);
         const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_reset", failureReason: null, finishReason });
         await table.awaitReset(run.sprintRunId, job.jobId, resumeAt, now, { finishReason, loop: lw?.write });
       } else {
-        const usageElsewhere = result === "stopped" && finishReason === "usage_limit";
-        const state = usageElsewhere ? "failed" : RESULT_TO_RUN[result];
-        const failure =
-          state === "failed" ? (usageElsewhere ? "job_failed" : (job.stopReason ?? (finished.source === "control" ? reason : "job_failed"))) : null;
+        const { state, failure } = runEndOf(result, finishReason, job, finished, reason);
         const lw = await this.loopWriteFor(run, job.jobId, { runState: state, failureReason: failure, finishReason });
         if (await table.finishRun(run.sprintRunId, state, failure, now, { finishReason, loop: lw?.write })) await this.afterRunMoved(run, lw?.write, true);
       }
@@ -486,6 +482,32 @@ export class RunControl {
         this.log({ event: "token_delete_failed", job_id: job.jobId, error: err.name }),
       );
     }
+  }
+
+  // job.finished を読む。無ければ control で failed を書き、書けなければ（先に書かれていれば）読み直す
+  private async ensureFinished(run: SprintRun, job: RunJob, reason: FailureReason): Promise<JobFinishedEvent> {
+    const { reader } = this.deps;
+    const found = await reader.findJobFinished(run.sprintRunId, job.jobId);
+    if (found) return found;
+    const event: JobFinishedEvent = {
+      sprint_run_id: run.sprintRunId,
+      idempotency_key: finishedKey(job.jobId),
+      type: "job.finished",
+      at: this.iso(),
+      source: "control",
+      job_id: job.jobId,
+      schema_version: 1,
+      payload: { result: "failed", summary: `実行の制御が終わりを書いた（${reason}）` },
+    };
+    const { written } = await this.deps.appendControl(event);
+    return written ? event : ((await reader.findJobFinished(run.sprintRunId, job.jobId)) ?? event);
+  }
+
+  // local の利用上限の再開の時刻。resets_at を読めなければ usageLimitRetrySeconds 後
+  private resumeAtOf(finished: JobFinishedEvent): string {
+    const resetsAt = finished.payload.resets_at ?? null;
+    const retry = (this.deps.config.usageLimitRetrySeconds ?? DEFAULT_USAGE_LIMIT_RETRY_SECONDS) * 1000;
+    return resetsAt && !Number.isNaN(Date.parse(resetsAt)) ? new Date(resetsAt).toISOString() : new Date(this.now().getTime() + retry).toISOString();
   }
 
   // 見回り（5 分ごと）。打ち切りの時間を過ぎたジョブを止め、止まったタスクと起動しないジョブを終わらせる（I8）。
