@@ -225,6 +225,25 @@ def _isolated_git_identity() -> object:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolated_context_dir() -> object:
+    """テストの実行中だけ、再起動の方針の記録と受け渡しの置き場所（#2262）を一時ディレクトリへ向ける。
+
+    statusline と hook は窓・適用値・判定の記録を書く。向けないと、実行した人の `~/.local/state/ndf/context` へ
+    偽の記録が積もる。子プロセスは環境変数を受け継ぐため、同じ向け先へ書く。
+    """
+    with tempfile.TemporaryDirectory(prefix="ndf-tests-context-") as tmp:
+        saved = os.environ.get("NDF_CONTEXT_DIR")
+        os.environ["NDF_CONTEXT_DIR"] = tmp
+        try:
+            yield Path(tmp)
+        finally:
+            if saved is None:
+                os.environ.pop("NDF_CONTEXT_DIR", None)
+            else:
+                os.environ["NDF_CONTEXT_DIR"] = saved
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _isolated_metrics_dir() -> object:
     """テストの実行中だけ、実行の要約の置き場所を一時ディレクトリへ向ける（#662）。
 
