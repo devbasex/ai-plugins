@@ -355,9 +355,10 @@ class Hub:
         elif kind == "spawn":
             cwd = req.get("cwd") if isinstance(req.get("cwd"), str) and os.path.isdir(req["cwd"]) else os.path.expanduser("~")
             args = [a for a in req.get("args") or [] if isinstance(a, str)]
-            if req.get("by") != "terminal" and args[:1] != ["--"]:
-                # 端末で利用者が打った引数のほかは、最初の入力だけを受ける（選択肢を足させない）
-                args = prompt_args(" ".join(args)) if args else []
+            if req.get("by") != "terminal" and args:
+                # 端末で利用者が打った引数のほかは、`--` の後の最初の入力 1 つだけを受ける（選択肢を足させない）。
+                # 受付箱は所有者だけが書けるため、`by` は信頼の境界でなく入口の区別である（I8）
+                args = prompt_args(" ".join(args[1:] if args[0] == "--" else args))
             if name is None:
                 name = self.auto_name(now.taken)
         else:
