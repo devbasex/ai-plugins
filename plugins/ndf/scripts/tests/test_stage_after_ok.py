@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, release_templates  # noqa: E402
 from supervise_lib.claude import UsageLimit  # noqa: E402
+from supervise_lib.slow import SlowAction  # noqa: E402
 from supervise_lib.state import STAGES_AFTER_OK  # noqa: E402
 
 VERIFY = "リリース後テスト"
@@ -90,6 +91,22 @@ def test_a_usage_limit_leaves_no_verification_mark(tmp_path, monkeypatch):
         return real(ctx, step)
 
     monkeypatch.setattr(s.run_step, "execute", limited)
+    assert "結果: 止まった" in s.run()
+    assert f"印 11 stage {VERIFY}" not in lines(log)
+
+
+def test_a_slow_abort_leaves_no_verification_mark(tmp_path, monkeypatch):
+    """受け入れ条件 7: 遅れの見張りが打ち切ると印が付かない。"""
+    rec, log = recorder(tmp_path)
+    s = engine.Engine(plan_of(tmp_path, rec, log, "true"), tmp_path / "state")
+    real = s.run_step.execute
+
+    def slow(ctx, step):
+        if step["id"] == "rv":
+            raise SlowAction("kill", "試験の遅れ")
+        return real(ctx, step)
+
+    monkeypatch.setattr(s.run_step, "execute", slow)
     assert "結果: 止まった" in s.run()
     assert f"印 11 stage {VERIFY}" not in lines(log)
 
