@@ -206,7 +206,7 @@ def last_denial(rows: list[dict], work: str, within: float = 1800, now: float | 
         at = parse_ts(r.get("at"))
         if at is None or now - at > within:
             break
-        if r.get("verdict") == "拒否" and (r.get("work") or "") == work:
+        if r.get("verdict") == cp.DENY and (r.get("work") or "") == work:
             return r
     return None
 
@@ -381,7 +381,7 @@ def _handoff_sample(calls: list[dict], marks: list[dict]) -> tuple[int, int] | N
 def _stage_segments(calls: list[dict], rows: list[dict]) -> list[tuple[str, int, int]]:
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
     launches = sorted(
-        ((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == "継続" and (t := parse_ts(r.get("at")))),
+        ((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at")))),
     )
     out = []
     for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
