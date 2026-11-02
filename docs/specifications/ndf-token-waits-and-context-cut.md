@@ -186,7 +186,7 @@ graph TB
 （`lib/context_policy.py` の `resolve_policy`。既定は現行方式）が決め、`skill-stats.py` の「割る候補」も同じ方針の
 判定の記録から上限を読む。測る側と止める側の上限を食い違わせないためである。試行方式（`.ndf/context.json` の
 `policy: trial` か `NDF_CONTEXT_POLICY=trial`）を選んだときの帯・容量・費用の判定は `context-window.md` の
-「再起動の方針」が持つ。
+「再起動の方針」が持つ（[仕様](ndf-context-restart-policy.md)）。
 10 万（目安の側）にしないのは、#827 で固定費だけで約 4 万あり、1 工程の途中で止まる回数が
 増えるためである。
 
