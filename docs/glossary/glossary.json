@@ -5018,6 +5018,48 @@
       "meaning": "大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315）",
       "source": "",
       "pending_source": "issues/issue-2315-design.md"
+    },
+    {
+      "term": "統括役",
+      "code": "relay_hub",
+      "context": "ndf-workflow",
+      "meaning": "同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "名前つきのラッパー",
+      "code": "named_relay",
+      "context": "ndf-workflow",
+      "meaning": "統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "端末の結び付け",
+      "code": "attach",
+      "context": "ndf-workflow",
+      "meaning": "利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "登録簿",
+      "code": "relay_registry",
+      "context": "ndf-workflow",
+      "meaning": "統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
+      "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "起動の依頼",
+      "code": "spawn_request",
+      "context": "ndf-workflow",
+      "meaning": "頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ",
+      "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "起動のブロック",
+      "code": "spawn_block",
+      "context": "ndf-workflow",
+      "meaning": "conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる",
+      "pending_source": "issues/issue-2346-design.md"
     }
   ]
 }
