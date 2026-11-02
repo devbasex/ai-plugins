@@ -1,16 +1,41 @@
-// テストで使う偽の実行の表。確かめと書き込みを 1 つの同期の処理で行い、条件つきの書き込みを再現する
-import { isTerminalJob, isTerminalRun, type CredentialRow, type FailureReason, type Registration, type RunJob, type RunState, type Slots, type SprintRun } from "./model.ts";
-import type { RunsTable } from "./table.ts";
+// テストで使う偽の実行の表。確かめと書き込みを 1 つの同期の処理で行い、条件つきの書き込みとトランザクションを再現する
+import {
+  isTerminalJob,
+  isTerminalLoop,
+  isTerminalRun,
+  type CreateRunGuards,
+  type CreateRunResult,
+  type CredentialRow,
+  type DevLoop,
+  type FailureReason,
+  type LoopWrite,
+  type Registration,
+  type RunJob,
+  type RunState,
+  type Slots,
+  type SprintRun,
+} from "./model.ts";
+import type { RunsTable, RunTransitionExtras } from "./table.ts";
 
 const regKey = (a: string, r: number) => `${a}#${r}`;
+const shareKey = (a: string, r: number, k: string | number) => `${a}#${r}#${k}`;
 
 export class MemoryRunsTable implements RunsTable {
   readonly registrations = new Map<string, Registration>();
   readonly credentials = new Map<string, CredentialRow>();
   readonly accountSlots = new Map<string, number>();
   readonly repositorySlots = new Map<string, number>();
+  readonly legacySlots = new Map<string, number>();
   readonly runs = new Map<string, SprintRun>();
   readonly jobs = new Map<string, RunJob>();
+  readonly loops = new Map<string, DevLoop>();
+  // <account>#<repo>#<題> → 占めるループ
+  readonly milestoneShares = new Map<string, { loopId: string; title: string }>();
+  // <account>#<repo>#<番号> → 占める実行
+  readonly issueShares = new Map<string, string>();
+  // <account>#<runnerId> → running の local のジョブの数
+  readonly runnerSlots = new Map<string, number>();
+  migrated = false;
 
   private async tick(): Promise<void> {
     await Promise.resolve();
@@ -40,6 +65,14 @@ export class MemoryRunsTable implements RunsTable {
     if (r) r.fullName = fullName;
   }
 
+  async setMaxConcurrentRuns(accountId: string, repositoryId: number, value: number | null) {
+    await this.tick();
+    const r = this.registrations.get(regKey(accountId, repositoryId));
+    if (!r) return false;
+    r.maxConcurrentRuns = value;
+    return true;
+  }
+
   async deleteRegistration(accountId: string, repositoryId: number) {
     await this.tick();
     const key = regKey(accountId, repositoryId);
@@ -66,22 +99,58 @@ export class MemoryRunsTable implements RunsTable {
 
   async getSlots(accountId: string, repositoryId: number): Promise<Slots> {
     await this.tick();
+    const key = regKey(accountId, repositoryId);
+    const legacy = this.legacySlots.get(key) ?? 0;
     return {
       account: this.accountSlots.get(accountId) ?? 0,
-      repository: this.repositorySlots.get(regKey(accountId, repositoryId)) ?? 0,
+      repository: this.repositorySlots.get(key) ?? 0,
+      ...(legacy !== 0 ? { legacy } : {}),
     };
   }
 
-  async createRun(run: SprintRun, job: RunJob, expected: Slots) {
+  // ループの書き込みの条件
+  private loopFits(write: LoopWrite): boolean {
+    const loop = this.loops.get(write.loopId);
+    if (!loop || loop.accountId !== write.accountId) return false;
+    const e = write.expect;
+    if (e.currentRunId !== undefined && loop.currentRunId !== e.currentRunId) return false;
+    if (e.lapRuns !== undefined && loop.lapRuns !== e.lapRuns) return false;
+    if (e.states && !e.states.includes(loop.state)) return false;
+    return true;
+  }
+
+  private applyLoop(write: LoopWrite): void {
+    const loop = this.loops.get(write.loopId)!;
+    Object.assign(loop, structuredClone(write.set));
+    if (write.releaseMilestones) {
+      for (const title of write.releaseMilestones.titles) {
+        const key = shareKey(write.accountId, write.releaseMilestones.repositoryId, title);
+        if (this.milestoneShares.get(key)?.loopId === write.loopId) this.milestoneShares.delete(key);
+      }
+    }
+  }
+
+  async createRun(run: SprintRun, job: RunJob, expected: Slots, guards?: CreateRunGuards): Promise<CreateRunResult> {
     await this.tick();
     const repoKey = regKey(run.accountId, run.repositoryId);
-    if ((this.accountSlots.get(run.accountId) ?? 0) !== expected.account) return false;
-    if ((this.repositorySlots.get(repoKey) ?? 0) !== expected.repository) return false;
+    if ((this.accountSlots.get(run.accountId) ?? 0) !== expected.account) return "slots";
+    if ((this.repositorySlots.get(repoKey) ?? 0) !== expected.repository) return "slots";
+    if (guards) {
+      if (!guards.legacy && (this.legacySlots.get(repoKey) ?? 0) !== 0) return "legacy";
+      if (guards.issues.some((n) => this.issueShares.has(shareKey(run.accountId, run.repositoryId, n)))) return "issue_in_use";
+      if (guards.milestoneChecks.some((t) => this.milestoneShares.has(shareKey(run.accountId, run.repositoryId, t)))) return "issue_in_loop";
+      if (guards.loop && !this.loopFits(guards.loop)) return "loop_changed";
+    }
     this.accountSlots.set(run.accountId, expected.account + 1);
     this.repositorySlots.set(repoKey, expected.repository + 1);
-    this.runs.set(run.sprintRunId, structuredClone(run));
+    if (guards) {
+      if (guards.legacy) this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) + 1);
+      for (const n of guards.issues) this.issueShares.set(shareKey(run.accountId, run.repositoryId, n), run.sprintRunId);
+      if (guards.loop) this.applyLoop(guards.loop);
+    }
+    this.runs.set(run.sprintRunId, structuredClone({ ...run, ...(guards ? { legacy: guards.legacy } : {}) }));
     this.jobs.set(job.jobId, structuredClone(job));
-    return true;
+    return "created";
   }
 
   async getRun(sprintRunId: string) {
@@ -110,31 +179,59 @@ export class MemoryRunsTable implements RunsTable {
     if (r && r.state === "starting") Object.assign(r, { state: "running", updatedAt: now });
   }
 
-  async addResumeJob(job: RunJob, now: string) {
+  async addResumeJob(job: RunJob, now: string, opts: { from?: "awaiting_approval" | "awaiting_reset"; loop?: LoopWrite } = {}) {
     await this.tick();
     const r = this.runs.get(job.sprintRunId);
-    if (!r || r.state !== "awaiting_approval" || r.currentJobId !== null) return false;
-    Object.assign(r, { state: "starting", currentJobId: job.jobId, jobCount: job.seq, updatedAt: now });
+    if (!r || r.state !== (opts.from ?? "awaiting_approval") || r.currentJobId !== null) return false;
+    if (opts.loop && !this.loopFits(opts.loop)) return false;
+    Object.assign(r, { state: "starting", currentJobId: job.jobId, jobCount: job.seq, updatedAt: now, resumeAt: null });
     this.jobs.set(job.jobId, structuredClone(job));
+    if (opts.loop) this.applyLoop(opts.loop);
     return true;
   }
 
-  async awaitApproval(sprintRunId: string, jobId: string, now: string) {
+  async awaitApproval(sprintRunId: string, jobId: string, now: string, extras: RunTransitionExtras = {}) {
     await this.tick();
     const r = this.runs.get(sprintRunId);
     if (!r || isTerminalRun(r.state) || r.currentJobId !== jobId) return false;
+    if (extras.loop && !this.loopFits(extras.loop)) return false;
     Object.assign(r, { state: "awaiting_approval", currentJobId: null, updatedAt: now });
+    if (extras.finishReason !== undefined) r.finishReason = extras.finishReason;
+    if (extras.loop) this.applyLoop(extras.loop);
     return true;
   }
 
-  async finishRun(sprintRunId: string, state: RunState, reason: FailureReason | null, now: string) {
+  async awaitReset(sprintRunId: string, jobId: string, resumeAt: string, now: string, extras: RunTransitionExtras = {}) {
+    await this.tick();
+    const r = this.runs.get(sprintRunId);
+    if (!r || isTerminalRun(r.state) || r.currentJobId !== jobId) return false;
+    if (extras.loop && !this.loopFits(extras.loop)) return false;
+    Object.assign(r, { state: "awaiting_reset", currentJobId: null, resumeAt, finishReason: extras.finishReason ?? "usage_limit", updatedAt: now });
+    if (extras.loop) this.applyLoop(extras.loop);
+    return true;
+  }
+
+  async listResetRuns(before: string) {
+    await this.tick();
+    return [...this.runs.values()]
+      .filter((r) => r.state === "awaiting_reset" && r.resumeAt && r.resumeAt <= before)
+      .sort((a, b) => ((a.resumeAt ?? "") < (b.resumeAt ?? "") ? -1 : 1))
+      .map((r) => structuredClone(r));
+  }
+
+  async finishRun(sprintRunId: string, state: RunState, reason: FailureReason | null, now: string, extras: RunTransitionExtras = {}) {
     await this.tick();
     const r = this.runs.get(sprintRunId);
     if (!r || isTerminalRun(r.state)) return false;
-    Object.assign(r, { state, failureReason: reason, currentJobId: null, updatedAt: now });
+    if (extras.loop && !this.loopFits(extras.loop)) return false;
+    Object.assign(r, { state, failureReason: reason, currentJobId: null, updatedAt: now, resumeAt: null });
+    if (extras.finishReason !== undefined) r.finishReason = extras.finishReason;
     const repoKey = regKey(r.accountId, r.repositoryId);
     this.accountSlots.set(r.accountId, (this.accountSlots.get(r.accountId) ?? 0) - 1);
     this.repositorySlots.set(repoKey, (this.repositorySlots.get(repoKey) ?? 0) - 1);
+    if (r.legacy === true) this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) - 1);
+    for (const [key, owner] of this.issueShares) if (owner === sprintRunId) this.issueShares.delete(key);
+    if (extras.loop) this.applyLoop(extras.loop);
     return true;
   }
 
@@ -155,7 +252,104 @@ export class MemoryRunsTable implements RunsTable {
     await this.tick();
     const j = this.jobs.get(jobId);
     if (!j || (from && !from.includes(j.state))) return false;
+    const leaving = patch.state !== undefined && isTerminalJob(patch.state) && !isTerminalJob(j.state);
+    if (leaving && j.runnerId && j.state === "running") {
+      const key = `${j.accountId}#${j.runnerId}`;
+      this.runnerSlots.set(key, Math.max(0, (this.runnerSlots.get(key) ?? 0) - 1));
+    }
     Object.assign(j, structuredClone(patch));
+    return true;
+  }
+
+  async claimLocalJob(jobId: string, runnerId: string, maxJobs: number, now: string) {
+    await this.tick();
+    const j = this.jobs.get(jobId);
+    if (!j || j.state !== "pending" || j.runnerKind !== "local") return false;
+    const key = `${j.accountId}#${runnerId}`;
+    const count = this.runnerSlots.get(key) ?? 0;
+    if (count >= maxJobs) return false;
+    this.runnerSlots.set(key, count + 1);
+    Object.assign(j, { state: "running", startedAt: now, runnerId });
+    return true;
+  }
+
+  async createLoop(loop: DevLoop) {
+    await this.tick();
+    for (const title of loop.milestones) {
+      if (this.milestoneShares.has(shareKey(loop.accountId, loop.repositoryId, title))) return { conflict: title };
+    }
+    for (const title of loop.milestones) this.milestoneShares.set(shareKey(loop.accountId, loop.repositoryId, title), { loopId: loop.loopId, title });
+    this.loops.set(loop.loopId, structuredClone(loop));
+    return "created" as const;
+  }
+
+  async getLoop(accountId: string, loopId: string) {
+    await this.tick();
+    const loop = this.loops.get(loopId);
+    return loop && loop.accountId === accountId ? structuredClone(loop) : null;
+  }
+
+  async listLoops(accountId: string) {
+    await this.tick();
+    return [...this.loops.values()]
+      .filter((l) => l.accountId === accountId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+      .map((l) => structuredClone(l));
+  }
+
+  async writeLoop(write: LoopWrite) {
+    await this.tick();
+    if (!this.loopFits(write)) return false;
+    this.applyLoop(write);
+    return true;
+  }
+
+  async getMilestoneShare(accountId: string, repositoryId: number, title: string) {
+    await this.tick();
+    return structuredClone(this.milestoneShares.get(shareKey(accountId, repositoryId, title)) ?? null);
+  }
+
+  async listIssueShares(accountId: string, repositoryId: number) {
+    await this.tick();
+    const prefix = `${accountId}#${repositoryId}#`;
+    return [...this.issueShares.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, sprintRunId]) => ({ number: Number(key.slice(prefix.length)), sprintRunId }))
+      .sort((a, b) => a.number - b.number);
+  }
+
+  async listWaitingLoops() {
+    await this.tick();
+    return [...this.loops.values()]
+      .filter((l) => l.state === "between_laps" && l.waitReason !== "user_start" && !isTerminalLoop(l.state))
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? -1 : 1))
+      .map((l) => structuredClone(l));
+  }
+
+  async isMigrated() {
+    await this.tick();
+    return this.migrated;
+  }
+
+  async setMigrated() {
+    await this.tick();
+    this.migrated = true;
+  }
+
+  async listUnbackfilledRuns() {
+    await this.tick();
+    return [...this.runs.values()].filter((r) => r.legacy === undefined && !isTerminalRun(r.state)).map((r) => structuredClone(r));
+  }
+
+  async backfillRun(run: SprintRun, issues: number[]) {
+    await this.tick();
+    const r = this.runs.get(run.sprintRunId);
+    if (!r || r.legacy !== undefined || isTerminalRun(r.state)) return false;
+    if (issues.some((n) => this.issueShares.has(shareKey(r.accountId, r.repositoryId, n)))) return false;
+    r.legacy = true;
+    const repoKey = regKey(r.accountId, r.repositoryId);
+    this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) + 1);
+    for (const n of issues) this.issueShares.set(shareKey(r.accountId, r.repositoryId, n), r.sprintRunId);
     return true;
   }
 }

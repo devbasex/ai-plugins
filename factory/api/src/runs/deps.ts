@@ -14,6 +14,9 @@ import { bedrockCandidateModel } from "./candidates.ts";
 import { RunControl, runControlConfig } from "./control.ts";
 import { DynamoRunsTable } from "./dynamo-table.ts";
 import { EcsRunnerPlatform } from "./ecs.ts";
+import { AccountService } from "../accounts/service.ts";
+import { DynamoAccountStore } from "../accounts/store.ts";
+import { accountContextResolver, LoopControl } from "./loops.ts";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -82,22 +85,31 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     if (!parsed.kid || !parsed.jwk) throw new Error("実行ジョブの token の発行の鍵が読めません");
     return { kid: parsed.kid, privateKey: parsed.jwk };
   };
+  const reader = new DynamoProgressReader(requireEnv("PROGRESS_EVENTS_TABLE_NAME"), requireEnv("PROGRESS_IDEMPOTENCY_TABLE_NAME"));
+  // 自動で起こすもの（周回・リセット時刻の後の再開）のたびに、始めた利用者の今のプラン・形態・席を引き直す（表の名前がある処理だけ）
+  const accountsTable = process.env.ACCOUNTS_TABLE_NAME;
+  const resolveContext = accountsTable ? accountContextResolver(new AccountService({ store: new DynamoAccountStore(accountsTable) })) : undefined;
   const control = new RunControl({
+    resolveContext,
     table,
     github,
     platform,
-    reader: new DynamoProgressReader(requireEnv("PROGRESS_EVENTS_TABLE_NAME"), requireEnv("PROGRESS_IDEMPOTENCY_TABLE_NAME")),
+    reader,
     appendControl: (e) => appendControlEventTo(progressStoreFromEnv(), e),
     signingKey,
     ndfVersion: ndfVersionFromMarketplace(),
     config: runControlConfig(process.env),
   });
+  // ループの制御は実行の制御の停止の後の処理と見回りから呼ばれる（常駐のプロセスを持たない。#2347 の決定 1）
+  const loops = new LoopControl({ table, control, reader, resolveContext });
+  control.setLoopHooks(loops.hooks());
   // 候補の証明の鍵は App のクライアントの秘密から用途を分けて作る
   const proofKey = async () => new Uint8Array(createHash("sha256").update(`ndf-factory:repositories:${await clientSecret()}`).digest());
   cached = {
     repositories: new RepositoryService({ table, github, proofKey }),
     credentials: new CredentialService(table, new AwsSecrets(sm)),
     control,
+    loops,
     table,
     github,
     candidateModel: bedrockCandidateModel(requireEnv("CANDIDATE_MODEL_ID")),

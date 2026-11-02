@@ -21,17 +21,37 @@ export type RunJobInstruction = {
    */
   NDF_VERSION: string;
   /**
-   * new は課題から始め、resume は保存した状態から続ける
+   * new は課題から始め、resume は保存した状態から続け、loop は開発ループの周回を新しく始める
    */
-  START: "new" | "resume";
+  START: "new" | "resume" | "loop";
   /**
    * スプリントへ入れる課題の番号（カンマ区切り）
    */
   ISSUES?: string;
   /**
-   * 答えの出た承認の依頼の識別子。答えの本文は載せない
+   * 答えの出た承認の依頼の識別子。答えの本文は載せない。無い resume は答えを書かずに続ける
    */
   APPROVAL_REQUEST_ID?: string;
+  /**
+   * NDF の開発ループの名前。loop と、ループの実行の resume に載せる
+   */
+  LOOP_NAME?: string;
+  /**
+   * 選定の対象のマイルストーンの題を , で結ぶ
+   */
+  LOOP_MILESTONES?: string;
+  /**
+   * 宣言した予算だけを並べる。無ければ NDF の既定
+   */
+  LOOP_BUDGET?: string;
+  /**
+   * 同じリポジトリの別の実行が持つ課題の番号（カンマ区切り）。ループの選定から外す
+   */
+  EXCLUDE_ISSUES?: string;
+  /**
+   * 人の判断待ちへの答え（<番号>=approved|rejected、承認なら #<PR の番号> を続けてよい）を , で結ぶ
+   */
+  LOOP_ANSWERS?: string;
   /**
    * 進捗の受け口の runner の経路（POST /ingest/events）の URL
    */

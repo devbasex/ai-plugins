@@ -15,6 +15,11 @@ export function createDummyApi(scenario: Scenario = "normal"): Api {
     if (!found) throw new ApiFailure(403, "forbidden", "forbidden");
     return found;
   };
+  const loopOf = (loopId: string) => {
+    const found = data.loopDetails.find((d) => d.loop.loop_id === loopId);
+    if (!found) throw new ApiFailure(404, "loop_not_found", "loop_not_found");
+    return found;
+  };
   return {
     me: () => read(() => data.me),
     account: (id) => read(() => account(id)),
@@ -38,5 +43,16 @@ export function createDummyApi(scenario: Scenario = "normal"): Api {
       read(() => ({ sprint_runs: list(data.sprintRuns).filter((r) => repositoryId === undefined || r.repository_id === repositoryId) })),
     sprintRunDetails: (_id, ids) => read(() => list(data.sprintRuns).filter((r) => ids.includes(r.sprint_run_id))),
     cancelSprintRun: () => read(() => ({ state: "cancelled" })),
+    updateRepository: (_id, repositoryId, max) =>
+      read(() => ({ ...(data.repositories.find((r) => r.repository_id === repositoryId) ?? data.repositories[0]!), max_concurrent_runs: max })),
+    // ダミーのループは最初のリポジトリにだけ属する
+    loops: (_id, repositoryId) => read(() => ({ loops: repositoryId === data.repositories[0]!.repository_id ? list(data.loopDetails).map((d) => d.loop) : [] })),
+    startLoop: () => read(() => ({ loop_id: "lp-new", state: "running" as const })),
+    loopDetails: (_id, ids) => read(() => list(data.loopDetails).filter((d) => ids.includes(d.loop.loop_id))),
+    updateLoopBudget: (_id, loopId, budget) => read(() => ({ ...loopOf(loopId).loop, budget })),
+    cancelLoop: () => read(() => ({ state: "cancelled" as const })),
+    requestNextLap: () => read(() => ({ state: "running" as const })),
+    answerLoop: (_id, loopId, issue, decision, pr) =>
+      read(() => ({ pending: loopOf(loopId).pending.map((p) => (p.number === issue ? { ...p, answer: { decision, pr: pr ?? null } } : p)) })),
   };
 }

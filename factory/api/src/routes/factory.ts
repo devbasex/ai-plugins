@@ -1,4 +1,4 @@
-// 画面向けの経路（#2186）。取り込み・キーの持ち込み・課題の候補・スプリントの実行。
+// 画面向けの経路（#2186・#2347）。取り込み・キーの持ち込み・課題の候補・スプリントの実行・開発ループ。
 // どの経路も resolveFromRequest でアカウントを解決し、他人のアカウントは #2170 の I18 と同じ 403
 import type { Context, Hono } from "hono";
 import { resolveFromRequest, type AuthEnv } from "../auth/resolve.ts";
@@ -8,6 +8,7 @@ import type { GitHubPort } from "../github/port.ts";
 import type { RepositoryService } from "../repositories/service.ts";
 import { chooseCandidates, type CandidateModel } from "../runs/candidates.ts";
 import type { RunControl } from "../runs/control.ts";
+import type { LoopControl } from "../runs/loops.ts";
 import type { RunsTable } from "../runs/table.ts";
 import { readJson } from "./body.ts";
 
@@ -15,6 +16,7 @@ export interface FactoryDeps {
   repositories: RepositoryService;
   credentials: CredentialService;
   control: RunControl;
+  loops: LoopControl;
   table: RunsTable;
   github: GitHubPort;
   candidateModel: CandidateModel;
@@ -50,6 +52,11 @@ export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): vo
   app.post("/accounts/:accountId/repositories", async (c) => {
     const ctx = await ctxOf(c);
     return c.json(await deps().repositories.register(ctx, await readJson(c)), 201);
+  });
+
+  app.patch("/accounts/:accountId/repositories/:repositoryId", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().repositories.declareConcurrency(ctx, positiveInt(c.req.param("repositoryId")), await readJson(c)));
   });
 
   app.delete("/accounts/:accountId/repositories/:repositoryId", async (c) => {
@@ -96,5 +103,41 @@ export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): vo
   app.post("/accounts/:accountId/sprint-runs/:sprintRunId/cancel", async (c) => {
     const ctx = await ctxOf(c);
     return c.json(await deps().control.cancelSprintRun(ctx, c.req.param("sprintRunId")));
+  });
+
+  // 開発ループ（openapi/loops.yaml）
+  app.post("/accounts/:accountId/repositories/:repositoryId/loops", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.startLoop(ctx, positiveInt(c.req.param("repositoryId")), await readJson(c)), 201);
+  });
+
+  app.get("/accounts/:accountId/repositories/:repositoryId/loops", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.listLoops(ctx, positiveInt(c.req.param("repositoryId"))));
+  });
+
+  app.get("/accounts/:accountId/loops/:loopId", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.getLoopDetail(ctx, c.req.param("loopId")));
+  });
+
+  app.patch("/accounts/:accountId/loops/:loopId", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.updateBudget(ctx, c.req.param("loopId"), await readJson(c)));
+  });
+
+  app.post("/accounts/:accountId/loops/:loopId/cancel", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.cancelLoop(ctx, c.req.param("loopId")));
+  });
+
+  app.post("/accounts/:accountId/loops/:loopId/next-lap", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.requestNextLap(ctx, c.req.param("loopId")), 202);
+  });
+
+  app.post("/accounts/:accountId/loops/:loopId/answers", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().loops.answer(ctx, c.req.param("loopId"), await readJson(c)));
   });
 }

@@ -63,10 +63,11 @@ export function createRunnerApiApp(deps: () => RunnerApiDeps): Hono<Env> {
     }
     const op = (body as { op?: unknown } | null)?.op;
     if (op !== "put" && op !== "get") throw new ApiError(400, "invalid_request", "op は put か get です");
-    await d.control.activeJobFor(claims.jobId, claims.sprintRunId).catch(() => {
+    const { run } = await d.control.activeJobFor(claims.jobId, claims.sprintRunId).catch(() => {
       throw new IngestForbiddenError();
     });
-    const url = await d.platform.stateUrl(claims.sprintRunId, op);
+    // 開発ループの実行は周回をまたいで同じ置き場を使う（.ndf/loop と引継ぎ文書を次の周回へ渡す。#2347）
+    const url = await d.platform.stateUrl(claims.sprintRunId, op, run.loopId ?? null);
     if (!url) throw new ApiError(404, "state_not_found", "保存した状態がありません");
     return c.json({ url: url.url, expires_at: url.expiresAt });
   });

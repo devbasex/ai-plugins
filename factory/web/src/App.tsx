@@ -17,6 +17,8 @@ import { ModelCredentialPage } from "./pages/ModelCredentialPage.tsx";
 import { NewSprintPage } from "./pages/NewSprintPage.tsx";
 import { SprintsPage } from "./pages/SprintsPage.tsx";
 import { SprintDetailPage } from "./pages/SprintDetailPage.tsx";
+import { LoopsPage } from "./pages/LoopsPage.tsx";
+import { LoopDetailPage } from "./pages/LoopDetailPage.tsx";
 
 // 地図の available の行の画面。経路は screens.ts だけが持つ
 const ELEMENTS: Partial<Record<ScreenId, ReactElement>> = {
@@ -30,6 +32,8 @@ const ELEMENTS: Partial<Record<ScreenId, ReactElement>> = {
   newSprint: <NewSprintPage />,
   sprints: <SprintsPage />,
   sprintDetail: <SprintDetailPage />,
+  loops: <LoopsPage />,
+  loopDetail: <LoopDetailPage />,
 };
 
 export interface AppProps {

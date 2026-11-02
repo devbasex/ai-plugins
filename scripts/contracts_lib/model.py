@@ -27,6 +27,7 @@ class Contracts:
     files: dict[str, dict] = field(default_factory=dict)  # name → 項目
     settings: dict[str, dict] = field(default_factory=dict)  # file → 項目
     env: dict[str, dict] = field(default_factory=dict)  # name → 項目
+    forms: dict[str, dict] = field(default_factory=dict)  # name → 項目（ファイルでなく文の形の受け渡し）
 
 
 def entry_file_name(path: str) -> str:
@@ -153,7 +154,28 @@ def load(root: Path) -> Contracts:
         if f.name != d["name"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
         c.env[d["name"]] = d
+    for f in sorted((base / "forms").glob("*.json")):
+        d = _read(f)
+        _check_form(f, d)
+        c.forms[d["name"]] = d
     return c
+
+
+def _check_form(f: Path, d: dict) -> None:
+    """受け渡しの形（`forms/`）: 規則の文と、読み手が同じ答えを返すべき例の組（#2347 の決定 8）。"""
+    _need(f, d, {"name": str, "summary": str, "rule": str, "writers": list, "readers": list, "cases": list})
+    if f.name != d["name"] + ".json":
+        raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
+    for k in ("writers", "readers"):
+        _strs(f, d, k)
+    if not d["cases"]:
+        raise ContractError(f"{f.name}: cases は 1 つ以上")
+    for i, case in enumerate(d["cases"]):
+        if not isinstance(case, dict):
+            raise ContractError(f"{f.name}: cases[{i}] はオブジェクト")
+        _need(f, case, {"text": str, "blocks": list, "launch": bool})
+        if not all(isinstance(x, str) for x in case["blocks"]):
+            raise ContractError(f"{f.name}: cases[{i}].blocks は文字列の並び")
 
 
 def flat_args(args: dict) -> set[tuple[str, str, str]]:
