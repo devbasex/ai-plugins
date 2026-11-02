@@ -166,15 +166,15 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
                 totals[b][k] += v
         compacts = None if compacts is None or summary["compacts"] is None else compacts + summary["compacts"]
         no_restore_mark += 0 if summary["restore_known"] else 1
-        restarted = any(r.get("verdict") == "再起動" for r in s["rows"])
+        restarted = any(r.get("verdict") == cp.RESTART for r in s["rows"])
         no_handoff_mark += 1 if restarted and not summary["handoff_known"] else 0
     restarts: dict[str, int] = defaultdict(int)
     for r in rows:
-        if r.get("verdict") == "再起動":
+        if r.get("verdict") == cp.RESTART:
             restarts[r.get("reason") or cd.UNKNOWN] += 1
     keep = defaultdict(int)
     for r in rows:
-        if r.get("event", cd.EVENT_DECISION) == cd.EVENT_DECISION and r.get("verdict") == "継続" and r.get("stage"):
+        if r.get("event", cd.EVENT_DECISION) == cd.EVENT_DECISION and r.get("verdict") == cp.CONTINUE and r.get("stage"):
             keep[r["stage"]] += 1
     for b in BUCKETS:
         totals[b]["cost"] = round(totals[b]["cost"])
