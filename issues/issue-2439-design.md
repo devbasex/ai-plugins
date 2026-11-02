@@ -156,7 +156,7 @@
 | --- | --- | --- |
 | `factory/api/src/organizer/control.ts`（配布のまとめ。`OrganizerControl`） | `accept`（受けた依頼）・`tick`（待ちの判定・組む・`settle` の続き）・`decide`（承認の答えと出し直し）・`settle`（結果と答え）・`resolve`（止まった配布）・`list`（一覧）・`sweep` | 新規 |
 | `factory/api/src/organizer/model.ts` | 根・受けた依頼・まとめた配布・記録の行の型と、状態の遷移の純粋な関数 | 新規 |
-| `factory/api/src/runs/table.ts`・`dynamo-table.ts`・`memory-table.ts` | オーガナイザーの進行の行の読み書きと、まとめた配布と配布の実行を 1 回で書くトランザクション（`composeRelease`。リポジトリの枠の `legacySeq` を条件にする）。古い版の実行の開始で `legacyCount` と同じトランザクションで `legacySeq` を 1 増やす | 変更 |
+| `factory/api/src/runs/table.ts`・`dynamo-table.ts`・`memory-table.ts` | オーガナイザーの進行の行の読み書きと、まとめた配布と配布の実行を 1 回で書くトランザクション（`composeRelease`。リポジトリの枠の `legacySeq` を条件にする）。古い版の実行の開始で `legacyCount` と同じトランザクションで `legacySeq` を 1 増やす。`addResumeJob` に、待っている理由と依頼の id を照らす条件を足す | 変更 |
 | `factory/api/src/runs/backfill.ts` | 実行を古い版として `legacyCount` へ写す書き込みで `legacySeq` を 1 増やす | 変更 |
 | `factory/api/src/runs/control.ts`（`RunControl`） | `finalize` が `release.*` を読んで受けた依頼の行を同じトランザクションへ入れ、後で `organizer.tick` を呼ぶ。`requestResume` が配布の実行を `organizer.decide` へ回す。`sweep` が `organizer.sweep` を呼ぶ。配布の実行を枠の外で作る | 変更 |
 | `factory/api/src/runs/model.ts` | 実行の `purpose`・`releaseSeq`・`releaseRequestId`、ジョブの `start: release`・`releaseStep` | 変更 |
@@ -307,8 +307,8 @@ sequenceDiagram
 | 止まった配布を「差し戻す」 | `resolve` が、答え（5）の差し戻しと同じ処理をする。ジョブを起こさず、範囲の依頼へ `rejected` を返す（I61）。提示の前に止まった配布では、まとめた配布が受けた依頼すべてが範囲になる |
 | 配布の実行の中の NDF が判断を求めた | 今の経路（`gate.reached` の判断 → 承認の依頼 → `requestResume`）。`decide` は `continue` で再開する。`main` のマージの後は `gate.reached` の `choices` を `continue` だけにする |
 | `settle` の後、答えを書き終える前に止まった | 見回りが `released` のまとめた配布で、範囲の依頼のうち答えの無いものを書き直す（I58 で 2 回目は書かれない） |
-| 答えを書いた後、届け終える前に止まった | 答えがあり `deliveredAt` が空の依頼は見回りの索引に残る。見回りが `release.answered` を追記し直し（冪等の鍵で 1 件）、手動の実行には `requestResume` を呼び直してから `deliveredAt` を書く |
-| 手動の実行の `requestResume` が `sprint_run_busy` | `deliveredAt` を書かずに残す。見回りが、答えのある依頼を待つ `awaiting_approval` の実行へ呼び直す。実行がもうこの依頼を待っていなければ（取り消し・終わり）呼ばずに `deliveredAt` を書く |
+| 答えを書いた後、届け終える前に止まった | 答えがあり `deliveredAt` が空の依頼は見回りの索引に残る。見回りが `release.answered` を追記し直し（冪等の鍵で 1 件）、手動の実行には `requestResume`（`releaseRequestId` つき）を呼び直してから `deliveredAt` を書く。呼び直しが再開するのは、実行が `awaiting_approval` で、`awaitingReason` が `release_requested`、`releaseRequestId` がこの依頼の id と一致するときだけである。この照らしは再開のジョブを作る条件つきの書き込み（`addResumeJob`）の条件に入れ、読んでから書くまでの間に実行の待ちが変わっても通さない。`settle` の `requestResume` が通った後で止まり、再開した実行が別の判断・承認ゲートで `awaiting_approval` に戻っていれば、条件に当たらず再開しない。このときは「実行がもうこの依頼を待っていない」として `deliveredAt` を書く |
+| 手動の実行の `requestResume` が `sprint_run_busy` | `deliveredAt` を書かずに残す。見回りが、答えのある依頼を待つ実行（`awaiting_approval`・`awaitingReason` が `release_requested`・`releaseRequestId` がこの依頼の id）へ、上の行と同じ条件つきの書き込みで呼び直す。実行がもうこの依頼を待っていなければ（取り消し・終わり・別の理由や別の依頼での `awaiting_approval`）呼ばずに `deliveredAt` を書く |
 
 見回りは実行の表の既存の GSI `gsi1` を鍵 `ORGANIZER_ACTIVE` で引き（流れているまとめた配布を持つ根と、答えを届け終えていない依頼の行だけが載る）、リポジトリごとに `tick` を呼ぶ。`tick` は根の続きに加えて、答えがあって届け終えていない依頼へ届け直す。
 
@@ -340,7 +340,7 @@ sequenceDiagram
 | 9 | 一覧が、同じリポジトリの承認待ちの実行の承認の依頼（ゲート 1・判断・配布の実行のゲート 2）と、ループの人の判断待ちを 1 つの並びで返す。別のリポジトリのものを含まない | 実行やループごとの一覧に戻すと落ちる |
 | 10・I68 | ランナーの環境に 3 つの環境変数があり、依頼のファイルが `release.requested` へ写る。契約の例の組をランナーのテストと NDF の構造チェックが読む | 環境変数を落とす・形を変えると落ちる |
 | 11・I66 | 一覧とまとめた配布の履歴の経路は GET だけで、答えを書く経路が増えない。止まった配布を解く操作は Web のセッションでない呼び出しを 403 で断る | 書く経路を足すと落ちる |
-| 12・I58・I59・I67 | `tick`・`settle` を途中で止めて呼び直しても、答えは 1 回、依頼の行は 1 行、本番の Pull Request を作る配布の実行は 1 本。答えを書いた後に止めた依頼と、`requestResume` が `sprint_run_busy` だった依頼は、見回りが `gsi1` の `ORGANIZER_ACTIVE` から引いて届け直し、`release.answered` は 1 件、届け終えた後に索引から外れる | 冪等の条件を外す・答えを書いた時点で索引から外すと落ちる |
+| 12・I58・I59・I67 | `tick`・`settle` を途中で止めて呼び直しても、答えは 1 回、依頼の行は 1 行、本番の Pull Request を作る配布の実行は 1 本。答えを書いた後に止めた依頼と、`requestResume` が `sprint_run_busy` だった依頼は、見回りが `gsi1` の `ORGANIZER_ACTIVE` から引いて届け直し、`release.answered` は 1 件、届け終えた後に索引から外れる。`settle` の `requestResume` が通った後・`deliveredAt` を書く前に止め、再開した手動の実行を別の承認ゲートで `awaiting_approval`（理由が空）に戻してから見回りを流すと、再開のジョブは作られず、その承認の依頼は人の答えを待ったまま残り、依頼の `deliveredAt` が書かれる | 冪等の条件を外す・答えを書いた時点で索引から外す・`addResumeJob` の条件から理由と依頼の id の照らしを外すと落ちる |
 | 13・I63 | `main_merged` を記録した止まった配布の選択肢は `continue` だけで、差し戻しは 409 `release_after_main`。`confirmed` から止まった配布は、`release.progress` が無くても、`mainMerged` が真か、GitHub に `release/v<提示の版>` の枝か本番の Pull Request があれば `continue` で再開し、どれも無いときだけ `confirm:<confirmedK>` で再開する | 選択肢を固定にすると落ちる |
 | 14 | 用語集に「手元のマシン」があり、廃止した語`手元のランナー`を `glossary.py check` が拾う。Factory の確定仕様・`factory/` の説明文・`ja.json` に残らない（検索 0 件） | 廃止した語の登録を外すと落ちる |
 | 15 | 用語集の `ndf-factory` に「料金プラン」があり、`ndf-workflow` の「プラン」と並ぶ。Factory の確定仕様・`factory/` の説明文・`ja.json` の「プラン」の検索の当たりが、NDF のプランを指す行だけになる | 契約の種類を指す行を 1 つ残すと、検索の当たりを NDF のプランの行と照らす確認で落ちる |

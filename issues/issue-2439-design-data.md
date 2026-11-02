@@ -63,7 +63,7 @@ erDiagram
 | `ndfVersion` | 文字列 | 許さない | 依頼した実行の NDF の版 |
 | `requestedAt` | 文字列 | 許さない | 依頼のファイルの時刻 |
 | `answer` | オブジェクト | 許す | `{seq, result, version, prodPrUrl, reason, at}`。空は「未回答」。1 回だけ書く（I58） |
-| `deliveredAt` | 文字列 | 許す | 答えを依頼元へ届け終えた時刻。依頼元の実行の進捗の記録へ `release.answered` を追記し、手動の実行なら `requestResume` が通った（か、実行がもうこの依頼を待っていない）後に書く。空は「届け終えていない」 |
+| `deliveredAt` | 文字列 | 許す | 答えを依頼元へ届け終えた時刻。依頼元の実行の進捗の記録へ `release.answered` を追記し、手動の実行なら `requestResume` が通った（か、実行がもうこの依頼を待っていない）後に書く。「この依頼を待っている」は、実行が `awaiting_approval` で `awaitingReason` が `release_requested`、`releaseRequestId` がこの依頼の id と一致することを指し、それ以外（取り消し・終わり・別の理由や別の依頼での `awaiting_approval`）は待っていないとする。空は「届け終えていない」 |
 | `gsi1pk`・`gsi1sk` | 文字列 | 許す | 実行の表の既存の GSI `gsi1` の鍵 `ORGANIZER_ACTIVE` / 行の `sk`。`deliveredAt` が空の間だけ持つ（見回りが未回答の依頼と、答えを届け終えていない依頼を引く）。`deliveredAt` を書く書き込みで外す |
 
 **まとめた配布（`sk=ORGBATCH#<repositoryId>#<seq を 6 桁で 0 埋め>`）**
@@ -186,7 +186,7 @@ erDiagram
 
 | 関数 | 変えること |
 | --- | --- |
-| `requestResume({sprintRunId, approvalRequestId?, releaseRequestId?})` | 配布の実行なら `organizer.decide` が `RELEASE_STEP` を決めてから今の書き込みで再開する。`releaseRequestId` は手動の実行の配布の答えの再開に使い、承認の依頼の答えを読まない |
+| `requestResume({sprintRunId, approvalRequestId?, releaseRequestId?})` | 配布の実行なら `organizer.decide` が `RELEASE_STEP` を決めてから今の書き込みで再開する。`releaseRequestId` は手動の実行の配布の答えの再開に使い、承認の依頼の答えを読まない。`releaseRequestId` を渡したときは、再開のジョブを作る条件つきの書き込み（`addResumeJob`）の条件に「状態が `awaiting_approval`・`awaitingReason` が `release_requested`・実行の `releaseRequestId` が渡した値と一致する」を足す。条件に当たらなければ再開せず、実行がこの依頼を待っていないことを返す（見回りは `deliveredAt` を書く）。別の承認ゲートの待ちを、その承認の依頼の答え無しに再開させないためである |
 | `finalize` | 上の「止まったときと再開」と I65 の表のとおり。`release.requested` を受けた依頼の行に、`release.settled` を `settle` へ渡す |
 | `sweep` | 最後に `organizer.sweep()` を呼ぶ |
 
