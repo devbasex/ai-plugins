@@ -212,6 +212,7 @@ erDiagram
 | `state.json` | 並列の進行 | オーガナイザーだけ | `parallel.py` |
 | `requests/<レーン名>-<連番>.json` | 配布の依頼 1 件 | 依頼したレーンだけ | オーガナイザー |
 | `results/<レーン名>-<連番>.json` | 依頼への答え 1 件 | オーガナイザーだけ | 依頼したレーン |
+| `releases/<連番>/parallel-freeze.json`・`releases/<連番>/release.json` | まとめた配布 1 つの 2 つのプラン（依頼を確定するプランと本番のプラン）。状態ディレクトリはそれぞれのプランの横にできる | `parallel.py tick` | `supervise.py queue` |
 | `stop` | 停止の指示の印 | `parallel.py stop` | `parallel.py tick`・`wait` |
 
 ### `plan.json`
@@ -331,7 +332,7 @@ sequenceDiagram
 
 1. `stop` の印があれば `status: stopped` にして `finished` 相当の要約を返す
 2. 起動に成功した記録（`started`）の無いレーンのうち、依存先がすべて止まったものを `relay.py spawn` で起動し、結果を `lanes.<名>` に書く。統括役が上限で断ったレーンは次の `tick` で起動し直す
-3. 流れている配布（`running` / `awaiting_approval`）が無く、答えていない依頼が 1 件以上あれば、まとめた配布を 1 つ組む。`parallel-freeze` のプランと本番のプランを作り、`action: release` を返す。配布に入る依頼はこの時点では確定しない（I9）
+3. 流れている配布（`running` / `awaiting_approval`）が無く、答えていない依頼が 1 件以上あれば、まとめた配布を 1 つ組む。`parallel-freeze` のプランと本番のプランを、まとめた配布の連番ごとのディレクトリ `releases/<連番>/` へ作り、`action: release` を返す。配布に入る依頼はこの時点では確定しない（I9）
 4. 全レーンが止まり、答えていない依頼が無ければ `action: finished` と要約を返し、`status: finished` にして役割の印を消す（I11）
 5. どれにも当たらなければ `action: wait`
 
@@ -339,6 +340,8 @@ sequenceDiagram
 
 1. 前のステージの `parallel-freeze` のプランは、run のステップ 1 つ（`parallel.py freeze <計画名> <連番> --out {state_dir}/work/prs.txt`）だけを持つ。答えていない依頼をすべてこの配布の依頼として `releases[]` に確定し、Pull Request の和を `work/prs.txt` へ書く
 2. 後のステージの本番のプランは `plan_mvv_release(..., version=None, channel="prod", prs=["{queue_prs:parallel-freeze}"])` で作る。queue はこのステージを流す前に、新しい差し込み `{queue_prs:<計画名>}` を、名前の一致する完了した計画の `work/prs.txt` の番号の並びで埋める。そのため、承認ゲート 2 の判定・承認資料・bump から後片付けまでのすべてのステップが、確定した Pull Request の和を受け取る。`work/prs.txt` が無ければ埋めずに、本番のプランを流さない（#2079 の既存の扱い）
+
+2 つのプランは連番ごとに別のディレクトリへ置き、前の配布のプランのパスを使い回さない。同じパスを使い回すと、queue が前の配布の完了の記録を見て `freeze` を流し直さず、`{queue_prs:parallel-freeze}` が前の配布の `work/prs.txt` で埋まり、前の配布の Pull Request で本番が組まれる。差し込みが同じディレクトリの計画の報告を読む既存の扱い（前のステージに結果が無いとき）も、連番のディレクトリの中だけを見る。
 
 既存の `{queue_pr:<計画名>}` は使わない。この差し込みは名前の一致する計画の報告の Pull Request 1 本で埋めるため、依頼の和を渡せない。同じプランの中の run のステップの結果でも埋まらない。差し込みはプランを流す前に埋まるため、確定は前のステージに置く。
 
@@ -412,7 +415,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2436 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2436 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
