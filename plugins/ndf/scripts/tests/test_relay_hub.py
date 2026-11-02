@@ -446,7 +446,9 @@ def test_killed_named_wrapper_shows_stopped(hubenv):
 
 def hb_scan(t):
     root = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
-    return [(d, (d / "name").read_text().strip() if (d / "name").exists() else None) for d in root.iterdir() if d.name != "hub" and d.is_dir()]
+    return [
+        (d, (d / "name").read_text().strip() if (d / "name").exists() else None) for d in root.iterdir() if d.name != "hub" and d.is_dir()
+    ]
 
 
 def test_no_tmux_runs_second_in_foreground(tmp_path):
