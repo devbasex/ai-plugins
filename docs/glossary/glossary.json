@@ -5259,6 +5259,12 @@
       "context": "ndf-workflow",
       "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
       "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "食い違い",
+      "context": "ndf-workflow",
+      "meaning": "同じ課題について、2 本の設計文書が違う設計の結果（扱い・取り込み先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す",
+      "pending_source": "issues/issue-2361-design.md"
     }
   ]
 }
