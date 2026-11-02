@@ -5172,7 +5172,7 @@
     {
       "term": "配布の依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために置く 1 件のファイル",
+      "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件の依頼",
       "pending_source": "issues/issue-2436-requirements.md"
     },
     {
