@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | 一時レーンのラッパーが止まり、`settle` も `gate2` の依頼も届いていない | 観測の耐久ステップが `relay.py ls --json` で一時レーンの `state: stopped` を見る | 「続きから起こし直す」「止める」。起こし直すと、新しい一時レーンが配布のプランを `supervise.py queue ... --resume` で続ける |
 | 動いているが答えが来ない | 一時レーンの `at`（最後に動いた時刻）が下の「動かないレーン」の時間より前 | 「起こし直す」「止める」「待つ」 |
-| `main` へのマージの後に止まった（タグ・GitHub Release・導入の確認・リリース記録・後片付けの前） | 本番のプランの状態ディレクトリの `state.json` の `log` で、`release` のステップが 0 で終わっている | 差し戻しの選択肢を出さず「続きから流す」だけを出す。済んだステップの一覧を添える |
+| `main` へのマージの後に止まった（タグ・GitHub Release・導入の確認・リリース記録・後片付けの前） | 本番の Pull Request（head が `release/v<版>`、base が `main`）がマージ済みか（`gh pr list --head release/v<版> --base main --state merged --json number,mergedAt` が 1 件）。`release` のステップの終了コードでは決めない（`release` のステップは `main` のマージの後にタグと GitHub Release も作るため、その途中で止まると 0 の記録が残らない） | 差し戻しの選択肢を出さず「続きから流す」だけを出す。済んだステップの一覧を添える |
 
-`main` へのマージの後は、差し戻しても `main` から取り消せないため、選択肢から外す。
+`main` へのマージの後は、差し戻しても `main` から取り消せないため、選択肢から外す。マージ済みの判定は耐久ステップ「観測」が GitHub から読み、マージ済みなら `release` のステップの記録によらず「続きから流す」だけを出す。続きの `release` のステップはタグと GitHub Release がすでにあるかを見て、無いものだけを作る。
 
 ## 異常系の一覧（受け入れ条件 6h）
 
@@ -42,15 +42,15 @@
 
 | 操作 | 置き場 | 排他を取る箇所 |
 | --- | --- | --- |
-| マージの後の後片付け（作業ツリーを外す・ブランチを消す・メインディレクトリの pull） | `plugins/ndf/scripts/merged-steps.py` の `_cleanup_pr`（`_remove_pr_worktrees`・`_delete_branch`・メインディレクトリの pull） | `_cleanup_pr` の全体 |
-| 作業ツリーを作る | `plugins/ndf/scripts/supervise_lib/paths.py` の `_add_worktree_with_retry` | `git worktree add` の 1 回ごと（今の `.git/config` の lock のやり直しは残す） |
+| マージの後の後片付け（worktree を外す・ブランチを消す・メインディレクトリの pull） | `plugins/ndf/scripts/merged-steps.py` の `_cleanup_pr`（`_remove_pr_worktrees`・`_delete_branch`・メインディレクトリの pull） | `_cleanup_pr` の全体 |
+| worktree を作る | `plugins/ndf/scripts/supervise_lib/paths.py` の `_add_worktree_with_retry` | `git worktree add` の 1 回ごと（今の `.git/config` の lock のやり直しは残す） |
 | メインディレクトリの追従（`follow_branch: true`） | `plugins/ndf/scripts/worktree-session.sh` の `git -C "$MAIN_DIR" checkout -q --detach` と `fetch` | `flock <メインディレクトリ>/.git/ndf-main.lock` で囲む |
 
 引継ぎ文書の更新（`sprint_loop_record.py` の `update_handoff`）はレーンごとに別のファイルを書き、git を動かさないため当たらない。
 
 ## 触るファイル
 
-`plugins/ndf/scripts/lib/parallel_run.py`（`start`・観測の動かないレーンと一時レーン・問い `stall`・重複の正規化・終わりの前のまとめ・`stop --force`）、`plugins/ndf/scripts/lib/parallel_plan.py`（I19・`stall_minutes`）、`plugins/ndf/scripts/lib/parallel_lane.py`（答えの印の比べ）、`plugins/ndf/scripts/lib/sprint_loop_record.py`・`sprint_loop_select.py`（止まる理由 `waiting_only`・`revise_count`）、`plugins/ndf/scripts/lib/sprint_loop.py`（`loop pending`）、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/worktree-session.sh`、`plugins/ndf/skills/development-workflow/references/parallel.md`（オーガナイザーの引継ぎ文書とカットポイント）
+`plugins/ndf/scripts/lib/parallel_run.py`（`start`・観測の動かないレーンと一時レーン・問い `stall`・重複の正規化・終わりの前のまとめ・`stop --force`）、`plugins/ndf/scripts/lib/parallel_plan.py`（I19・`stall_minutes`）、`plugins/ndf/scripts/lib/parallel_lane.py`（答えの印の比べ）、`plugins/ndf/scripts/lib/sprint_loop_record.py`・`sprint_loop_select.py`（止まる理由 `waiting_only`・`revise_count`）、`plugins/ndf/scripts/lib/sprint_loop.py`（`loop pending`）、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/release-steps.py`（本番の Pull Request がマージ済みなら、マージを飛ばし、タグと GitHub Release のうち無いものだけを作って続ける）、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/worktree-session.sh`、`plugins/ndf/skills/development-workflow/references/parallel.md`（オーガナイザーの引継ぎ文書とカットポイント）
 
 ## 未確認のまま残ること
 

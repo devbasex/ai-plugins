@@ -11,9 +11,9 @@
 
 | 点 | 今の作り（コードの位置） | 改めた後 |
 | --- | --- | --- |
-| `release/v<版>` を切る起点 | 本番のプランの「起点」が `origin/<ベースブランチ>`（`release_templates.py` の `plan_release_package_plugin`。作業ツリーは `paths.py` の `_resolve_base` が作る） | 承認したコミット。差し込み `{queue_approved:<計画名>}` を、名前の一致する完了した計画の approval-facts の `metrics.approved_sha` で埋める |
+| `release/v<版>` を切る起点 | 本番のプランの「起点」が `origin/<ベースブランチ>`（`release_templates.py` の `plan_release_package_plugin`。worktree は `paths.py` の `_resolve_base` が作る） | 承認したコミット。差し込み `{queue_approved:<計画名>}` を、名前の一致する完了した計画の approval-facts の `metrics.approved_sha` で埋める |
 | 本番の Pull Request の head | `develop`（`release-steps.py` の `_merge_prod_pr` が `create_pr(root, prod, base, ...)`） | `release/v<版>`（`create_pr(root, prod, branch, ...)`） |
-| 承認の照合 | `origin/<ベースブランチ>` の先頭と承認したコミットを比べる（`release_lib/approval.py` の `check_approved` → `lib/approved_commit.py` の `compare_approved`） | `origin/release/v<版>` の先頭と承認したコミットを比べる。許すのは配布の Pull Request のコミット（版上げ）だけ |
+| 承認の照合 | `origin/<ベースブランチ>` の先頭と承認したコミットを比べる（`release_lib/approval.py` の `check_approved` → `lib/approved_commit.py` の `compare_approved`） | `origin/release/v<版>` の先頭と承認したコミットを比べる。許すのは `release/v<版>` の Pull Request のコミット（版上げ）だけで、版数の衝突を解いたときも `release/v<版>-sync` の Pull Request からは読まない |
 | 本番の Pull Request のマージで指定する先頭 | 比べた `develop` の先頭（`wait_and_merge(..., expect=verdict.tip)`） | 比べた `release/v<版>` の先頭 |
 | 宛先の検査 | head が `develop` のときだけ通す（`scripts/check-pr-base.sh`） | head が `develop`、または先頭が `origin/develop` の祖先の `release/v*` なら通す |
 | `release/v<版>` を `develop` へマージする時期 | 本番の Pull Request の前（`_merge_release_pr`） | 同じ。版数の衝突は配布のステップが解く（下の「版数の衝突」） |
@@ -45,9 +45,9 @@ sequenceDiagram
 ```
 
 1. queue が本番のプランを流す前に、「起点」の `{queue_approved:<計画名>}` を承認したコミットで埋める。埋められなければ本番のプランを流さない（#2079 の既存の扱い）。並列の計画の外のスプリントでは `<計画名>` は開発版のプラン（`release`。`DEV_SERIES`）で、並列の計画では提示のプラン（`present`）である
-2. 作業ツリーは承認したコミットから `release/v<版>` で作られる。bump・changelog・説明文は今のステップのまま、承認したコミットの上に版上げのコミットを積む
+2. worktree は承認したコミットから `release/v<版>` で作られる。bump・changelog・説明文は今のステップのまま、承認したコミットの上に版上げのコミットを積む
 3. `release` のステップは `release/v<版>` を `develop` へ取り込む（`_merge_release_pr`）。衝突が無ければ今どおりマージする。衝突があれば下の「版数の衝突」で解く
-4. 承認したコミットと `origin/release/v<版>` の先頭を照合する。外のコミットが無ければ、head を `release/v<版>` にした本番の Pull Request を作り、照合した先頭を指定してマージする。タグと GitHub Release は今どおり `main` のマージのコミットに打つ
+4. 承認したコミットと `origin/release/v<版>` の先頭を照合する。照合で許すコミット（`release_pr_allowed` の許す一覧）は、`release/v<版>` → `develop` の Pull Request から読む。版数の衝突を解いて `release/v<版>-sync` の Pull Request で取り込んだときも、照合には元の `release/v<版>` の Pull Request を渡す。`-sync` の head は承認の後の `develop` の変更を含むため、照合に渡すと版上げしかない `release/v<版>` でも承認ゲート（10）で止まる。外のコミットが無ければ、head を `release/v<版>` にした本番の Pull Request を作り、照合した先頭を指定してマージする。タグと GitHub Release は今どおり `main` のマージのコミットに打つ
 
 `develop` が承認の後に進んでいても、照合する相手は `release/v<版>` で、配布は止まらない。昇格の経路（`merged-steps.py promote`。head は `develop`）は R1 の `develop` の場合に当たり、変えない。
 
@@ -61,7 +61,7 @@ sequenceDiagram
 | 解く枝を作る | `release/v<版>` から `release/v<版>-sync` を作り、`origin/develop` をマージする。`release/v<版>` そのものには `develop` を取り込まない（取り込むと承認の外のコミットが `main` へ出る） |
 | 解く | 衝突した箇所がすべて版数を持つ箇所なら、`release/v<版>` の側（本番の版）を取る。1 つでもほかの箇所が衝突していれば止める（R5） |
 | 取り込む | `release/v<版>-sync` → `develop` の Pull Request を作ってマージする。`release/v<版>` の先頭は `release/v<版>-sync` の親として `develop` の祖先になる（R1） |
-| 記録 | 配布の Pull Request は `release/v<版>-sync` の Pull Request になる。リリース記録（`record`）と後片付け（`cleanup`。head が `release/v<版>` で始まる）はこの Pull Request も扱う |
+| 記録 | 照合（`release_pr_allowed`・`compare_approved`）に渡す Pull Request と、取り込みに使った Pull Request を分けて持つ。照合には元の `release/v<版>` の Pull Request（マージされずに閉じても、承認したコミットの後のコミットは版上げだけ）を渡し、`release/v<版>-sync` の Pull Request は渡さない。`release/v<版>-sync` の Pull Request は `develop` への取り込みにだけ使い、リリース記録（`record`）と後片付け（`cleanup`。head が `release/v<版>` で始まる）は両方の Pull Request を扱う |
 
 並列の計画の下では、このステップを含む本番のプランは一時レーンが流し、衝突の解消と失敗の対応も一時レーンが行う（[issue-2436-design-approvals.md](issue-2436-design-approvals.md) の「責務の分け方」）。
 
@@ -83,7 +83,7 @@ sequenceDiagram
 | --- | --- |
 | `scripts/check-pr-base.sh` | 引数に head の SHA を足す（`check-pr-base.sh <分岐元> [<head の SHA>]`）。head が `release/v*` なら `origin/<起点>` を fetch し、`git merge-base --is-ancestor <head の SHA> origin/<起点>` が 0 のときだけ通す |
 | `.github/workflows/pr-base-guard.yml` | `actions/checkout` の `fetch-depth: 0`、環境変数で `github.event.pull_request.head.sha` を渡す |
-| `plugins/ndf/scripts/release-steps.py` | `_merge_prod_pr` の head と `expect` を `release/v<版>` にする。`_merge_release_pr` に衝突のときの解く枝（`release/v<版>-sync`）を足す。`cmd_release` の照合の相手を `release/v<版>` にする |
+| `plugins/ndf/scripts/release-steps.py` | `_merge_prod_pr` の head と `expect` を `release/v<版>` にする。`_merge_release_pr` に衝突のときの解く枝（`release/v<版>-sync`）を足し、照合に渡す Pull Request（元の `release/v<版>`）と取り込みの Pull Request（`-sync`）を分けて返す。`cmd_release` の照合の相手を `release/v<版>` にする |
 | `plugins/ndf/scripts/release_lib/approval.py` | `check_approved` が比べる先頭を引数の参照（`release/v<版>`）から読む。止まったときの文言の参照名 |
 | `plugins/ndf/scripts/release_lib/version_merge.py`（新規） | 衝突した箇所が版数を持つ箇所かの判定と、本番の版の側を取る解き方 |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` | 本番のプランの「起点」を `{queue_approved:<計画名>}` にする |
@@ -100,8 +100,9 @@ sequenceDiagram
 | R1（通す） | head が `develop`、または先頭が `origin/develop` の祖先の `release/v10.28.0` なら 0 | 祖先の判定を外す・`release/v*` の形を見ないと落ちる |
 | R1（落とす） | head が `feature/x`、`develop` の祖先でない `release/v10.28.0`、SHA を渡さない `release/v*` なら 1 | 名前だけで通すと落ちる |
 | R2・照合 | 承認したコミットから切った `release/v<版>` に版上げだけがあれば照合が通る。`develop` が承認の後に進んでいても止まらない。`release/v<版>` に承認の外のコミットがあれば 10 | 照合の相手を `develop` の先頭に戻すと「進んでいても止まらない」が落ちる |
-| 起点 | 本番のプランの作業ツリーが承認したコミットから作られる。`{queue_approved:<名>}` を埋められなければ流さない | 起点を `origin/develop` に戻すと落ちる |
+| 起点 | 本番のプランの worktree が承認したコミットから作られる。`{queue_approved:<名>}` を埋められなければ流さない | 起点を `origin/develop` に戻すと落ちる |
 | 版数の衝突 | `develop` で `plugin.json` の版数が `10.28.0-dev.4` に上がった後に `release/v10.28.0` を取り込むと、`release/v10.28.0-sync` で本番の版を取り、`release/v10.28.0` の先頭が `develop` の祖先になる。版数でない箇所が衝突すれば 1 で止まる | `release/v<版>` に `develop` を取り込む・版数でない衝突を解くと落ちる |
+| 版数の衝突の後の照合 | 承認の後に `develop` が進み、`release/v10.28.0-sync` で取り込んだとき、`release/v10.28.0` に版上げしか無ければ照合が通り、本番の Pull Request が作られる | 照合に `-sync` の Pull Request を渡すと、承認の後の `develop` の変更が承認の外になって 10 で止まり落ちる |
 | Pull Request 2420 の件 | レーン A の配布の後、範囲に入っていたレーン B が依頼のステップに来ても本番の Pull Request を作らない。レーン A の配布の承認の後にマージされたレーン B の変更は A の `main` に入らず、次の配布になる | B のための本番の Pull Request を作る・A の配布に承認の外の B の変更が入ると落ちる |
 
 ## 未確認のまま残ること

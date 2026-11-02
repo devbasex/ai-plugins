@@ -30,8 +30,8 @@
 
 問いの hook は PreToolUse の `AskUserQuestion` の guard（`plugins/ndf/scripts/hook_lib/ask_guard.py` の `ask_decision`。判定は `lib/ask_policy.py`、区分の正本は `skills/development-workflow/references/asking.md`）である。判定が通す（`gate`・`redline`・`allowed`）問いのとき、次を足す。
 
-1. 環境変数 `NDF_RELAY_NAME` があり、メインディレクトリの `.ndf/parallel/*/plan.json` のどれかがその名前のレーンを持つかを、ファイルだけで見る（hook の 10 秒の上限の中で DBOS を読まないため）
-2. 当たれば `parallel.py request-ask` を子プロセスで打つ（上限 8 秒）。`request-ask` は `lane_of()` で動いている計画のレーンかを確かめ、問いの中身（文面・選択肢・区分・課題・作業の場所・レーン・判定の記録の `id`）を `kind: ask` のメッセージで送る
+1. 環境変数 `NDF_RELAY_NAME` があり、メインディレクトリの `.ndf/parallel/*/plan.json` のどれかがその名前のレーンを持つか、作業ディレクトリ（`NDF_RELAY_DIR`）の役割のファイルが `helper` で計画名を持つかを、ファイルだけで見る（`lane_name_in_plans()`。hook の 10 秒の上限の中で DBOS を読まないため）
+2. 当たれば `parallel.py request-ask` を子プロセスで打つ（上限 8 秒）。`request-ask` は送り手の資格を `parallel_lane.sender_of()` で確かめる。資格は 2 つで、`lane_of()` が返す動いている計画のレーンか、役割のファイルが `helper` で、その計画名の耐久ワークフローが終わっていない（状態が `PENDING`）一時レーンである。一時レーンは `lanes` に載らず `lane_of()` に当たらないため、`lane_of()` だけでは判定しない。資格を確かめたら、問いの中身（文面・選択肢・区分・課題・作業の場所・レーン・判定の記録の `id`）を `kind: ask` のメッセージで送る
 3. 送れたら `permissionDecision: deny` で問いを止め、理由に「オーガナイザーへ送った（依頼 `<id>`）。この作業を保留し、別の作業へ進め。答えは周回の境で届く」と保留の手順（下の「レーンの保留」）を返す
 4. レーンでない・計画が動いていない・送れない・上限を越えたときは、今どおり問いを通す（I8 の「どの失敗も通す」と同じ）
 
@@ -53,13 +53,13 @@
 
 | 項目 | `kind: gate1` | `kind: ask` |
 | --- | --- | --- |
-| `id` | `<レーン名>-g<連番>` | `<レーン名>-q<連番>` |
+| `id` | `<レーン名>-g<設計 PR の番号>-<stamp の先頭 12 桁>` | `<レーン名>-q<判定の記録の id>` |
 | `lane`・`issue` | レーン名・課題 | レーン名・課題（分かれば） |
 | 中身 | `pr`（設計 PR）・`report`（承認資料のパス）・`verdict`・`reasons`（MVV 判定） | `source`（区分）・`question`・`options`・`cwd`（作業の場所）・`ledger_id` |
 | `loop`・`sprint_state` | ループ名・スプリント状態ファイル | 同じ |
 | `stamp` | 設計 PR の先頭の SHA | 作業の場所の `HEAD` |
 
-連番はイベント `lane-<レーン名>` の `gate1_received`・`ask_received` に 1 を足したもの。答えは `stamp` をそのまま付けて返し、レーンは今の印と違えば答えを使わずに問い直す。同じ原因の問いのまとめ・4 回目の「直して出し直す」の選択肢・一時レーンの失敗の問いは [issue-2436-design-failures.md](issue-2436-design-failures.md) にある。承認ゲート 2 の依頼（`kind: gate2`）の `stamp` は承認資料の承認したコミットである。
+**依頼の `id` は、論理的な依頼 1 件に 1 つの値で、送る側が依頼の中身から決める。** 受け取った依頼の数からは採番しない（数が更新される前に続けて送ると、後の依頼が前と同じ `id`・冪等の鍵になって消え、受け取った後の打ち直しでは別の `id` になって二重に問われるため）。設計の承認は、設計 PR と問いの時点の先頭の SHA の組が 1 つの依頼である。同じ先頭で打ち直すと同じ `id` になり冪等の鍵が 2 度目を数えず、「直して出し直す」で push すると先頭が変わって新しい依頼になる。承認ゲートの外の問いは、hook が問いを止めるたびに追記する判定の記録（`lib/ask_ledger.py` の行）の `id` を使う。1 回の `AskUserQuestion` が 1 つの依頼で、行は呼び出しごとに 1 つのため、同じ文面を問い直しても別の依頼になる（行の `id` は `ask_ledger.verdict_row` が作り、追記に失敗しても `ask_guard._record_verdict` が返す）。答えは `stamp` をそのまま付けて返し、レーンは今の印と違えば答えを使わずに問い直す。同じ原因の問いのまとめ・4 回目の「直して出し直す」の選択肢・一時レーンの失敗の問いは [issue-2436-design-failures.md](issue-2436-design-failures.md) にある。承認ゲート 2 の依頼（`kind: gate2`）の `stamp` は承認資料の承認したコミットで、`id` はまとめた配布の連番と提示の番号から `<計画名>-p<連番>-<提示>` とする。
 
 ## オーガナイザーがまとめて問う
 
@@ -113,7 +113,7 @@ sequenceDiagram
 | ファイル | 変えること |
 | --- | --- |
 | `plugins/ndf/scripts/hook_lib/ask_guard.py` | 通す問いのとき、レーンか一時レーンなら `parallel.py request-ask` で送って止める |
-| `plugins/ndf/scripts/lib/parallel_lane.py` | `request_gate1()`・`request_ask()`・`answers_of()`（自分の依頼の答えを待たずに読む）・レーンか一時レーンかをファイルだけで見る `lane_name_in_plans()`（計画のレーン名か、作業ディレクトリの役割のファイルが `helper`） |
+| `plugins/ndf/scripts/lib/parallel_lane.py` | `request_gate1()`・`request_ask()`・`answers_of()`（自分の依頼の答えを待たずに読む）・送り手の資格を確かめる `sender_of()`（`lane_of()` のレーンか、役割のファイルが `helper` で計画が動いている一時レーン）・レーンか一時レーンかをファイルだけで見る `lane_name_in_plans()`（計画のレーン名か、作業ディレクトリの役割のファイルが `helper`） |
 | `plugins/ndf/scripts/lib/parallel_run.py` | 依頼の受け取り・イベント `questions`・止まりの間の `inbox` の読み取り・副命令 `answer`・`request-gate1`・`request-ask`・`settle --rejected --to` |
 | `plugins/ndf/scripts/lib/durable.py` | 止まりを自分で書くための `recv(topic, timeout)` と `set_event(key, value)` の包み |
 | `plugins/ndf/scripts/lib/sprint_loop_gate.py` | `move_to_waiting` がレーンのときに依頼を送る |
@@ -126,7 +126,7 @@ sequenceDiagram
 | 名前 | 入力 | 成功 | 失敗の形 |
 | --- | --- | --- | --- |
 | `parallel.py request-gate1 <計画名> --lane <名> --issue <番号> --pr <番号> --report <パス> --state <パス> [--loop <名>] [--verdict <判定> --reason <理由>...]` | — | 0。依頼を送り `metrics.id` を返す | 1: 計画が動いていない |
-| `parallel.py request-ask <計画名> --lane <名>` | 標準入力に問いの入力（`AskUserQuestion` の `tool_input`）と作業の場所 | 0。依頼を送り `metrics.id` を返す | 4: レーンでない（hook は問いを通す）。1: 計画が動いていない |
+| `parallel.py request-ask <計画名> --lane <名>` | 標準入力に問いの入力（`AskUserQuestion` の `tool_input`）と作業の場所 | 0。依頼を送り `metrics.id` を返す。送り手が一時レーンなら `lane` は一時レーンの名前（`<計画名>-rel<連番>`） | 4: レーンでも一時レーンでもない（hook は問いを通す）。1: 計画が動いていない |
 | `parallel.py answer <計画名> <依頼> (--approved / --revise --note <パス> / --rejected / --choice <選んだ答え>...)` | 利用者の答え | 0。答えのイベントを立てる。持ち主のレーンが終わっていれば `metrics.next` に `relay.py restart <レーン>` の 1 行 | 1: 依頼が無い・答え済み |
 | `parallel.py settle <計画名> <連番> --rejected [--to <レーン>... --note <パス>]`（変更） | 差し戻しの宛先 | 0。宛先とほかのレーンへ上の表の答えを返す | 今のまま |
 | `parallel.py wait`（変更） | — | イベント `questions` の `seq` が進んだときも 0 で返す（`metrics.action: questions`、`items` に依頼） | 今のまま |
@@ -139,6 +139,8 @@ sequenceDiagram
 | 6c 答えの時点の新しい依頼を続けて問う | 3 件に答える間に 1 件届くと、答えの後の `wait` が新しい 1 件だけを返す | 答えた依頼をもう一度返す・新しい依頼を落とすと落ちる |
 | 6c レーンは待たずに残りへ進む | ループのレーンで承認ゲート 1 が判定できないと、依頼を送り、残りの課題の続きの `pipeline` を返す | 依頼を送らない・答えを待つと落ちる |
 | 6d hook の送り先（レーン） | 動いている計画のレーンで `ndf-ask:cost` の問いを出すと、`request-ask` が送り、hook が `deny` と保留の案内を返す | 送らずに通す・送ったのに通すと落ちる |
+| 6d hook の送り先（一時レーン） | 役割のファイルが `helper` で計画が動いている一時レーンで `ndf-ask:human-action` の問いを出すと、`request-ask` が 4 を返さずに送り、hook が `deny` を返す | 送り手の資格を `lane_of()` だけで見ると落ちる |
+| 依頼の `id` | 同じ設計 PR・同じ先頭で `request-gate1` を受け取りの前に 2 回打つと同じ `id` で 1 件だけ数えられ、受け取りの後に打ち直しても同じ `id` になる。同じレーンで別の設計 PR を続けて送ると別の `id` になる | 受け取った数から採番すると落ちる |
 | 6d hook の送り先（レーンでない） | `NDF_RELAY_NAME` が無い・計画に無い名前・計画が終わっているときは今どおり通す。`request-ask` が落ちても通す | レーンでないのに止める・送れないのに止めると落ちる |
 | 6d 質問待ちの再開 | ループのレーンの周回が「質問待ち」で締まり、答えの届いた境で止まったプランが続きのステップから流れ、残りとまとめの後に締め直る | 答えの前に流す・最初から流し直すと落ちる |
 | 6d human-action | オーガナイザーへの `items` に `relay.py attach <レーン>` の 1 行が付く | 案内が無いと落ちる |
@@ -151,6 +153,5 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | hook の時間 | `request-ask` の子プロセスが、`deps.require` の起動し直しを含めて 8 秒以内に終わるかは実装で測る。越えたときは問いを通す |
-| 止めた問いの記録 | hook が止めた問いの判定の記録（`ask_ledger`）に、送った依頼の `id` を足す形は実装で決める |
 | レーンの起こし方 | `relay.py restart <名前>` が、終えたセッションの引継ぎ文書の続きから起こすかは #2346 の作りを実装で確かめる。起こせなければ `relay.py spawn` で最初の入力（引継ぎ文書の続き）を渡す |
 | 承認資料の置き場 | 設計のプランの `report.md` はレーンの worktree の状態ディレクトリにある。オーガナイザーがメインディレクトリから読めるパスで送る |

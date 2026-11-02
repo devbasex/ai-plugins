@@ -164,7 +164,7 @@
 | `plugins/ndf/scripts/relay_lib/hub_client.py` | `ls` の行に役割を足し、`metrics` に統括役の有無と tmux の有無を足す。`role` の副命令。`spawn` に `--role helper --plan <計画名>`（起動するラッパーの作業ディレクトリへ役割のファイルを書く） | 変更 |
 | `plugins/ndf/scripts/relay_lib/__init__.py` | 副命令 `role` の振り分け | 変更 |
 | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 配布の依頼のプラン（`plan_release_request`。ステップは `parallel-request` の 1 つ）と、まとめた配布の 2 つのプラン（提示のプランと本番のプラン）を作る | 変更 |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` | 提示のプランが、今の開発版の承認資料のステップ（approval-facts・提示物の欄・他のプラグインの上げ幅）を版上げ無しで使えるように関数を分ける。本番のプランの承認の記録が読む状態ディレクトリを引数で受ける | 変更 |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` | 提示のプランが、今の開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで使えるように関数を分ける。本番のプランの承認の記録が読む状態ディレクトリを引数で受ける | 変更 |
 | `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 差し込み `{queue_prs:<計画名>}` を足す。名前の一致する完了した計画の状態ディレクトリの `work/prs.txt`（空白区切りの Pull Request の番号）で埋め、無ければ埋めずにそのプランを流さない | 変更 |
 | `plugins/ndf/scripts/supervise_lib/sprint.py` | 本番のステージを組む 4 か所が、レーンのときだけ配布の依頼のプランを置く（1 つの関数を通す） | 変更 |
 | `plugins/ndf/scripts/supervise.py` | `queue` の `--max` を省いたとき、レーンならプランの本数を既定にする | 変更 |
@@ -298,7 +298,7 @@ pydantic のモデル `ParallelPlan` が正本の形を持つ。最初の入力�
 | イベント | `pause` | 耐久ワークフロー | `wait` | `{seq, action, ...}`。`action` は `running` / `notice` / `release` / `confirmed`。`wait` が返すのは `notice`・`release`・`confirmed` |
 | イベント | `answer-<依頼>` | 耐久ワークフロー | `await` | `{result, version, release, reason, at}`（I10） |
 | イベント | `range-<連番>` | 耐久ワークフロー | `request` | 出した配布の `{sha, version, prs, lanes}`（I15） |
-| イベント | `lane-<レーン名>` | 耐久ワークフロー | `request`・`request-gate1`・`request-ask` | `{received, gate1_received, ask_received}`（受け取った依頼の数）。次の依頼の連番を決める |
+| イベント | `lane-<レーン名>` | 耐久ワークフロー | オーガナイザーの状態の表示 | `{received, gate1_received, ask_received}`（受け取った依頼の数）。状態の表示にだけ使い、依頼の `id` の採番には使わない |
 | イベント | `questions` | 耐久ワークフロー | `wait` | `{seq, items}`。答えていない問いの依頼 |
 | イベント | `fix-<レーン名>-<連番>` | 耐久ワークフロー | 宛先のレーン（周回の境） | 配布の差し戻しの指摘 |
 | 出力 | 耐久ワークフローの戻り値 | 耐久ワークフロー | `wait` | `{status: finished / stopped, lanes, releases}`（要約） |
@@ -426,7 +426,7 @@ sequenceDiagram
 | 点 | 決まり |
 | --- | --- |
 | 起動 | `relay.py spawn --name <計画名>-rel<連番> --role helper --plan <計画名> --json -- <最初の入力>`。最初の入力は `/goal /ndf:development-workflow --parallel-helper <計画名> <連番> <提示> -- 終わり: [ndf-parallel] helper-done <計画名> の行を出したとき` |
-| 仕事 | イベント `release` の後は `metrics.pipeline`（提示のプランと本番のプラン）を流す。MVV 判定が通せば配布まで流し、`settle --done <D>` を打つ。承認ゲート 2 で止まれば `kind: gate2` の依頼（承認資料・内訳・提示）を送って止まる。イベント `confirmed` の後は、確定した提示の本番のプランを今の承認ゲート 2 の続きの手順（承認の記録と `--from`）で流し、`settle` を打つ |
+| 仕事 | イベント `release` の後は `metrics.pipeline`（提示のプランと本番のプラン）を流す。MVV 判定が通せば配布まで流し、`settle --done <D>` を打つ。承認ゲート 2 で止まれば `kind: gate2` の依頼（承認資料・内訳・提示）を送って止まる。イベント `confirmed` の後は、確定した提示の本番のプランを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で初めて流し、`settle` を打つ |
 | 失敗したとき | CI の失敗・衝突・版数の衝突は、今の配布のプランの直しの手順（judge・fix）で一時レーンが直す。直せなければ問いとして送り（問いの hook が送る）、答えを待つ間は止まる |
 | 終わり | 結果を返したら `[ndf-parallel] helper-done` の行を出して終わる。統括役は止まったラッパーを数えない |
 | 数え方 | 同時に 1 本まで。統括役は、役割 `helper` の印を持つ動いているラッパー 1 本だけを `NDF_RELAY_MAX_NAMED` を 1 本超えて許す（I13 と同じ作業ディレクトリの役割のファイル。`hub.py` の `live` と判定）。2 本目の `helper` は断る。同時に流すプランの合計 6 本（I2）には数えない |
@@ -466,8 +466,16 @@ stateDiagram-v2
 
 1 つの提示は 2 つのプランを 2 つのステージで流す。`metrics.pipeline` は `supervise.py queue releases/<n>/<k>/present.json --then releases/<n>/<k>/release.json --done <D>` の 1 行である（`<k>` は 1 か、出し直しの 2）。
 
-1. 前のステージの**提示のプラン**は、今の開発版の承認資料のステップ（`release-steps.py approval-facts`・提示物の欄・他のプラグインの上げ幅）を版上げ無しで流す。approval-facts は `origin/develop` の先頭を承認したコミットとし、前のタグからそのコミットまでの範囲の Pull Request を「含む PR」に並べる（今の作り。#1274）。続く `parallel.py present` が承認資料を読み、範囲の Pull Request をレーンへ対応づけて承認資料へ内訳の節を足し、範囲の Pull Request を `work/prs.txt` へ書く
-2. 後のステージの**本番のプラン**は `plan_mvv_release(..., version=<出す版>, channel="prod", prs=["{queue_prs:present}"])` で作り、承認の記録が読む状態ディレクトリに提示のプランの状態ディレクトリを渡す。作業ツリーの起点は、提示のプランの approval-facts が承認したコミットにする（差し込み `{queue_approved:present}`。配布の規則の改定は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md)）。queue はこのステージを流す前に、差し込み `{queue_prs:<計画名>}` を名前の一致する完了した計画の `work/prs.txt` の番号の並びで埋める。`work/prs.txt` が無ければ埋めずに、本番のプランを流さない（#2079 の既存の扱い）
+**承認ゲート 2 は提示のプランが持ち、本番のプランは確定の後にだけ流れる。** 本番のプランは、queue がプランを流し始めるときに worktree と `release/v<版>` を作る。承認ゲート 2 を本番のプランに置くと、答えの前に提示 1 の起点で `release/v<版>` ができ、提示 2 の本番のプランが同じ名前のブランチを作り直せない。そのため次の形にする。
+
+- 提示のプランの最後に承認ゲート 2 のステップ（今の本番のプランの MVV 判定と `approve`。`_add_prod_mvv_gate`・`approve_step`）を置く。承認の記録は提示のプランの状態ディレクトリに残る
+- MVV 判定が通せば、提示のプランが完了し、queue が同じ 1 行の後のステージ（本番のプラン）を続けて流す。答え待ちが無いため提示は 1 つで、ブランチは 1 回だけ作られる
+- 承認ゲート 2 で止まれば、提示のプランは承認ゲートとして終わり、queue は本番のプランを流さない。worktree も `release/v<版>` も作られない
+- 確定（イベント `confirmed`）の後、一時レーンは確定した提示 `<k>` の本番のプランだけを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で流す。queue はこのときに `{queue_approved:present}`・`{queue_prs:present}` を同じディレクトリの提示のプランから埋め、確定したコミットから worktree と `release/v<版>` を作る。確定しなかった提示の本番のプランは流さない
+- 本番のプランは承認ゲート 2 を持たず、承認の記録を提示のプランの状態ディレクトリから読む（下の 2）。1 つのまとめた配布で流れる本番のプランは 1 つだけで、`release/v<版>` を作るのも 1 回だけである
+
+1. 前のステージの**提示のプラン**は、今の開発版の承認資料のステップ（`release-steps.py approval-facts`・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで流し、最後に承認ゲート 2 のステップを置く。approval-facts は `origin/develop` の先頭を承認したコミットとし、前のタグからそのコミットまでの範囲の Pull Request を「含む PR」に並べる（今の作り。#1274）。続く `parallel.py present` が承認資料を読み、範囲の Pull Request をレーンへ対応づけて承認資料へ内訳の節を足し、範囲の Pull Request を `work/prs.txt` へ書く
+2. 後のステージの**本番のプラン**は `plan_mvv_release(..., version=<出す版>, channel="prod", prs=["{queue_prs:present}"])` で作り、承認の記録が読む状態ディレクトリに提示のプランの状態ディレクトリを渡す。worktree と `release/v<版>` の起点は、確定した提示のプランの approval-facts が承認したコミットにする（差し込み `{queue_approved:present}`。配布の規則の改定は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md)）。queue はこのステージを流す前に、差し込み `{queue_prs:<計画名>}` を名前の一致する完了した計画の `work/prs.txt` の番号の並びで埋める。`work/prs.txt` が無ければ埋めずに、本番のプランを流さない（#2079 の既存の扱い）
 
 出す版は、耐久ステップ「配布を組む」が `origin/develop` の `plugin.json` の開発版の版数から接尾辞を外して決め、明示の版としてプランに書く。今の queue の版の差し込みは、明示の版のタグがあれば止める（`fill_release_version`）。
 
@@ -477,10 +485,10 @@ stateDiagram-v2
 
 | 場面 | 耐久ワークフローの扱い | 次の 1 手 |
 | --- | --- | --- |
-| 提示 1 への承認。先頭が同じ | 提示 1 のコミットで確定し、イベント `confirmed`（`plan` に提示 1 の本番のプラン）を立てる | オーガナイザーが一時レーンを起こし、一時レーンが本番のプランを承認ゲート 2 の続きから流す |
+| 提示 1 への承認。先頭が同じ | 提示 1 のコミットで確定し、イベント `confirmed`（`plan` に提示 1 の本番のプラン）を立てる | オーガナイザーが一時レーンを起こし、一時レーンが提示 1 の本番のプランを初めて流す |
 | 提示 1 への承認。先頭が進んでいる | 同じまとめた配布に提示 2 を組み、イベント `release`（`represent: true`）を立てる。提示 2 のプランが今の承認資料の生成を新しい先頭で呼び直し、`present` が加わった範囲（`<提示 1 のコミット>..<新しいコミット>` の Pull Request とレーン）を載せる | オーガナイザーが一時レーンを起こし、一時レーンが提示 2 のプランを流して承認ゲート 2 の依頼を送る。オーガナイザーは 3 つの選択肢で同じ承認ゲート 2 を出し直す |
-| 提示 2 への「新しい範囲で出す」 | 提示 2 のコミットで確定し、`confirmed`（提示 2 の本番のプラン）を立てる | 一時レーンが提示 2 の本番のプランを続ける |
-| 提示 2 への「最初の範囲だけ出す」 | 提示 1 のコミットで確定し、`confirmed`（提示 1 の本番のプラン）を立てる | 一時レーンが提示 1 の本番のプランを続ける |
+| 提示 2 への「新しい範囲で出す」 | 提示 2 のコミットで確定し、`confirmed`（提示 2 の本番のプラン）を立てる | 一時レーンが提示 2 の本番のプランを初めて流す（提示 1 の本番のプランは流さない） |
+| 提示 2 への「最初の範囲だけ出す」 | 提示 1 のコミットで確定し、`confirmed`（提示 1 の本番のプラン）を立てる | 一時レーンが提示 1 の本番のプランを初めて流す（提示 2 の本番のプランは流さない） |
 
 `pace: auto` と `pace: fast` で MVV 判定が承認ゲート 2 を通すときは答え待ちが無く、比べずに提示 1 つで配布になる。本番のプランは、確定したコミットから切った `release/v<版>`（確定したコミットと版を上げたコミット）を `develop` へマージした後、その先頭を `main` へ出す。確定の後に `develop` が進んでも本番のプランは止まらず、確定したコミットを出す。確定より後に `develop` へ入った変更は次の配布になる。出し直しの後に `develop` が進んでも、出し直しで承認したコミットを出すため、出し直しは連鎖しない。
 
@@ -501,7 +509,7 @@ graph TD
 
 レーンかどうかは `parallel_lane.lane_of()` が決める。環境変数 `NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない（状態が `PENDING`）計画のレーンにあればレーンである。判定はプランを組む時点に 1 度だけ行い、組んだプランに計画名を書く。
 
-配布の依頼のプランは run のステップ `parallel-request` の 1 つだけを持ち、プランの「フェーズ」は `配布の依頼` である。自分の Pull Request のマージのコミットがすべて `origin/main` にあれば依頼を送らずに `released` を `--out` へ書き、0 で終わる（I15）。版は範囲のイベントから読む。無ければ、イベント `lane-<名>` の数に 1 を足した連番で依頼を送り、10 で終わる。プランは承認ゲートとして終わり、queue は後のステージ（まとめ）を流さない。ステップの打ち直しで耐久ワークフローがまだ受け取っていなければ同じ連番になり、冪等の鍵が 2 度目を数えない。
+配布の依頼のプランは run のステップ `parallel-request` の 1 つだけを持ち、プランの「フェーズ」は `配布の依頼` である。自分の Pull Request のマージのコミットがすべて `origin/main` にあれば依頼を送らずに `released` を `--out` へ書き、0 で終わる（I15）。版は範囲のイベントから読む。無ければ依頼を送り、10 で終わる。依頼の `id` は、ステップが最初の実行で `<レーン名>-r<乱数 12 桁>` を作ってプランの状態ディレクトリの `work/request-id` へ書き、打ち直しでは同じファイルから読む。受け取った依頼の数からは採番しない（受け取りの前後で打ち直すと別の値になるため）。プランは承認ゲートとして終わり、queue は後のステージ（まとめ）を流さない。ステップを打ち直しても同じ `id` になり、冪等の鍵が 2 度目を数えない。設計の承認と承認ゲートの外の問いの `id` の決め方は [issue-2436-design-approvals.md](issue-2436-design-approvals.md) の「設計の承認の依頼」にある。
 
 ループのレーンは、プランが `配布の依頼` で承認ゲートとして終わったら、周回を「配布待ち」で締めて次の周回へ進む。答えは周回の境で待たずに読み、届いていれば残りの工程（まとめ）を流す。ループの側の設計は [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md) にある。スプリントのレーンは、conductor が `parallel.py await --from <パス>` を背景で打って答えを待ち、`released` ならまとめを流す。
 
@@ -533,7 +541,7 @@ graph TD
 | 受け入れ条件 5 | `wait` が `notice`・`release`・終わりのいずれかで 0、無ければ上限で 3 を返す。レーンの承認待ちと停止は観測の耐久ステップが拾う | 変化を見落とす・上限を待たずに返すと落ちる |
 | 受け入れ条件 6、I9 | 依頼が 1 件届き配布が流れていなければ、他のレーンの依頼を待たずに提示 1 を組む。範囲は依頼の集合でなく提示したコミットの `main..<SHA>` で、依頼していないレーンの Pull Request も内訳に載る | 依頼が揃うまで待つ・範囲を依頼の Pull Request の和で作る・依頼の無いレーンを内訳から落とすと落ちる |
 | 受け入れ条件 6、I14（変わらない） | 承認の答えの時点で `origin/develop` の先頭が提示したコミットと同じなら、`confirm` が `confirmed` を返し、そのコミットで確定する。MVV 判定が通す場合は比べずに提示 1 つで配布になる | 同じなのに出し直す・比べずに確定すると落ちる |
-| 受け入れ条件 6、I14（変わった） | 先頭が進んでいれば `confirm` が提示 2 を組み、加わった範囲（Pull Request とレーン）を載せた `release`（`represent: true`）を返す。`--take new` なら提示 2 の、`--take first` なら提示 1 のコミットで確定し、`confirmed` の本番のプランがそのコミットから `release/v<版>` を切る | 進んだのに確定する・加わった範囲を載せない・選んだのと違うコミットで確定すると落ちる |
+| 受け入れ条件 6、I14（変わった） | 先頭が進んでいれば `confirm` が提示 2 を組み、加わった範囲（Pull Request とレーン）を載せた `release`（`represent: true`）を返す。`--take new` なら提示 2 の、`--take first` なら提示 1 のコミットで確定し、`confirmed` の本番のプランがそのコミットから `release/v<版>` を切る。承認ゲート 2 で止まった提示のプランの後は、確定まで worktree も `release/v<版>` も作られず、確定の後に流れる本番のプランは 1 つだけである | 進んだのに確定する・加わった範囲を載せない・選んだのと違うコミットで確定する・答えの前に本番のプランを流して `release/v<版>` を作ると落ちる |
 | 受け入れ条件 6、I14（出し直しの後にまた変わった） | 提示 2 への `confirm` は比べずに確定し、提示 3 を組まない。出し直しで承認したコミットを出し、確定の後に入った Pull Request の依頼は `pending` に残り、配布の直後の次の配布に入る | 2 回目の出し直しを組む・後の依頼を今の配布の答えにすると落ちる |
 | 受け入れ条件 6、I15（Pull Request 2420 の件） | レーン A の配布の範囲にレーン B の Pull Request が入ると、B は依頼していなくても範囲のイベントを受け、後で `request` に来ると依頼を送らずに `released` で進む。B のための 2 本目の本番のプランは組まれない | B の依頼で 2 本目の配布を組む・すでに `main` にあるのに待つと落ちる |
 | 受け入れ条件 6、I12 | 動いている計画に属さないレーンでは今の本番のプランが組まれる | 属さないレーンに依頼のプランを組むと落ちる |
