@@ -4861,6 +4861,18 @@
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "Skill の対応表",
+      "context": "ndf-workflow",
+      "meaning": "工程（ステップの stage）から、そのステップの worker へ届ける Skill の一覧を引く表。1 か所に置き、プランの worker の起動と ndf:worker の起動指示の両方が読む（#2376）",
+      "pending_source": "issues/issue-2376-requirements.md"
+    },
+    {
+      "term": "Skill の渡し方",
+      "context": "ndf-workflow",
+      "meaning": "Skill を worker へ届ける形。worker の種類で決まる（読み込ませる・SKILL.md のパスを渡す・規則の要約を渡す など。#2376）",
+      "pending_source": "issues/issue-2376-requirements.md"
     }
   ]
 }
