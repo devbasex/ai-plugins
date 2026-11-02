@@ -112,7 +112,7 @@ API と契約のコンテキストとの関係は **順応者** である。画�
 | 要素 | 責務 |
 | --- | --- |
 | 画面の地図の定義（`src/screens.ts`、新設） | 画面ごとの `id`・経路・題のキー・役割・ナビゲーションに出すか・状態（`あり` / `予定`）。経路の定義とナビゲーションはここから作る |
-| アプリ（`src/App.tsx`） | 地図の `あり` の行から `<Route>` を作る。ログインの後の画面を枠で包む。地図に無い経路は `/account` へ |
+| アプリ（`src/App.tsx`） | 地図の `あり` の行から `<Route>` を作る。ログインの後の画面を枠で包む（`/login`・`/callback`・地図に無い経路の転送は包まない）。地図に無い経路は `/account` へ |
 | 枠（`src/ui/AppShell.tsx`、新設） | 見出しの帯・ナビゲーション・つながりの状態を置く。幅 1024 px 以上は横に並べた案内、未満はメニューのボタンで開く案内 |
 | 部品（`src/ui/`、新設） | 下の「部品の一覧」の 17 個。トークンだけで見た目を決め、文言は呼ぶ側から受けるか翻訳のキーで引く |
 | デザインのトークン（`src/ui/tokens.json`・`src/ui/tokens.ts`、新設） | Design Tokens Format Module の JSON と、それを CSS の変数の文へ写す純粋な関数。起動時に 1 度だけ `<style>` へ入れる |
@@ -244,8 +244,8 @@ classDiagram
 
 | 部品 | 何に使うか |
 | --- | --- |
-| `AppShell` | ログインの後の画面の枠（見出しの帯・ナビゲーション・つながりの状態） |
-| `NavMenu` | 地図の `nav` の行き先。今のアカウントの経路を埋める |
+| `AppShell` | ログインの後の画面の枠（見出しの帯・ナビゲーション・つながりの状態）。ログインの後の経路（`/account`・`/teams/new`・`/accounts/:accountId` 以下）だけを包む 1 つの layout route（`<Outlet>`）として置き、画面を切り替えても作り直さない。`/login`・`/callback` と `*` の転送は layout route の外に置き、枠で包まない（包むと `/callback` で枠が token の無いまま `api.me()` を呼び、401 で `/login` へ移って `completeLogin` の後の `/account` への移動に負ける）。役割と個人のアカウントの ID の取り方は「画面の地図」の節の下にある |
+| `NavMenu` | 地図の `nav` の行き先。今のアカウントの経路を埋める。DOM は `<nav aria-label>` の中にリンク（`a`）だけを並べ、`ul` / `li` を使わない（既存のチームの画面のテストの `getAllByRole("listitem")` の 2 件を変えないため。決定 13）。リンクは幅によらず常に DOM に描き、1024 px 未満では CSS のメディアクエリで隠してメニューのボタン（`aria-expanded`）で開く。幅を JavaScript（`matchMedia`）で読まない（jsdom に無く、テストの描画が幅で変わらないため） |
 | `PageHeader` | 画面の題（`h1`）と画面の操作 |
 | `DataList` | 一覧。768 px 以上は列の表、未満は 1 行を 1 枚のカードに積む。行は詳細へのリンク |
 | `DetailList` | 名前と値の組（`dl`）。狭い幅では縦に積む |
@@ -315,6 +315,15 @@ API の経路と契約（`factory/contracts/`）は変えない。
 
 ナビゲーションに出す行き先（`nav`）は、自分のアカウント・スプリントの一覧・リポジトリ・キーの持ち込み（個人と管理者だけ）の 4 つ。`:accountId` は今開いている経路のアカウント、無ければ個人のアカウントで埋める。
 
+役割と個人のアカウントの ID は、枠（`AppShell`）が `api.me()` を 1 度だけ呼んで得て、枠の中の文脈に持つ。
+
+- 呼ぶ時: 枠が最初に描かれた時の 1 回だけ。枠は layout route なので画面を切り替えても呼び直さない。token が変わった時（ログインし直した時）だけ呼び直す。画面の切り替えで API の呼び出しは増えない
+- 経路の `:accountId` が枠の持つ `Me.accounts` に無い時（チームを作った直後に `NewTeamPage` が `/accounts/:accountId` へ移った時など）: 枠はその `:accountId` につき 1 度だけ `api.me()` を呼び直し、文脈の `Me` を置き換える。こうして作成者が管理者になったチームでも、再読み込みせずに「キーの持ち込み」が出る。呼び直しても無ければ同じ `:accountId` では呼び直さず、役割の要る行き先を出さない。`NewTeamPage` の API の呼び方は変えない
+- 既存の画面の API の呼び方は変えない（`AccountPage` は今のまま自分で `api.me()` を呼ぶ）。枠の文脈を画面へ渡して呼び出しを減らすのは、この課題の範囲の外である
+- 役割の決め方: `Me.accounts` のうち今の `:accountId` の行が `kind: "personal"` なら個人、`role: "owner"` なら管理者、ほかは席。キーの持ち込みは個人と管理者のときだけ出す
+- 返るまでと失敗（403・5xx・オフライン）のとき: 枠は誤りの文を出さず、役割の要る行き先（キーの持ち込み）を出さない。`:accountId` が経路に無ければ、アカウントの要る行き先（スプリントの一覧・リポジトリ）も出さず、自分のアカウントだけを出す。誤りは画面の側が今のとおり出す（既存のテストの「このアカウントを見る権限がありません」を 2 つにしない）
+- 401 のとき: 既存の扱いと同じ（`api.ts` が token を消し、ログインの画面へ移る）。枠と画面の両方が 401 を受けても、移る先は同じ `/login` である
+
 | 役割 | 主な動線 |
 | --- | --- |
 | 個人 | ログイン → 自分のアカウント → リポジトリ → スプリントを始める → スプリントの一覧 → スプリントの詳細 |
@@ -328,7 +337,7 @@ API の経路と契約（`factory/contracts/`）は変えない。
 | `dev:dummy` | `vite --mode dummy`（ダミーで起動） | — |
 | `check:source` | `node scripts/check-source.ts` | 0 無し、1 見つけた（`<ファイル>:<行>:<列> <規則> <文>` を 1 行ずつ）、2 構文解析できない |
 | `check:bundle` | `node scripts/check-bundle.ts`（`dist/` を読む） | 0 無し、1 ダミーの印を見つけた、2 `dist/` が無い |
-| `check` | `typecheck` → `test` → `check:source` → `build` → `check:bundle` | どれかが 0 以外ならその値 |
+| `check` | `typecheck` → `test` → `check:source` → `vite build` → `check:bundle`。`build`（`tsc --noEmit && vite build`）を呼ばず `vite build` を直に呼び、型検査を 1 回に保つ。`build` は単独で使うために今のまま残す | どれかが 0 以外ならその値 |
 | `e2e` | `playwright test`（`webServer` は `vite --mode dummy`） | Playwright の終了コード |
 
 源の検査の規則（対象は `src/**/*.{ts,tsx}`。`*.test.*`・`src/dummy/`・`src/i18n/*.json` を除く。コメントは見ない）:
