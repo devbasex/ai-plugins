@@ -63,7 +63,7 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 | API の入口 | `factory/api/src/handlers/api.ts` | API Gateway の HTTP API（payload 2.0）から呼ばれる Lambda の handler。ログ・CORS・認証の中間処理・エラーの形・経路の登録 |
 | GitHub の仲立ち | `factory/api/src/handlers/github-oidc.ts`・`github-oidc/{app,keys}.ts` | Cognito から OIDC の IdP として呼ばれ、GitHub の OAuth へ取り次ぎ、署名した ID token を返す |
 | API の契約 | `factory/contracts/openapi/accounts.yaml` | 画面向けの経路の OpenAPI。Spectral で検査する |
-| CI のジョブ | `.github/workflows/factory-check.yml` の `factory-check` | `factory/` かこのワークフローを変える Pull Request で `npm ci` と `npm run check` を打つ |
+| CI のジョブ | `.github/workflows/factory-check.yml` の `factory-check` | `factory/` かこのワークフローを変える Pull Request で `npm ci` と `npm run check` を打ち、Chromium を入れて画面の E2E（`npm run e2e -w web`。#2382）を打つ |
 
 ```mermaid
 graph TD

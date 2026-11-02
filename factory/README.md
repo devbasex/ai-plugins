@@ -33,13 +33,15 @@ TypeScript のコードは npm の workspaces で束ね、どの子課題も次�
 - Node の版は [.node-version](./.node-version) の 1 行で決め、`package.json` の `engines` と CI の `setup-node` が同じ値を使う
 - ロックファイルは `factory/package-lock.json` の 1 つだけ。workspace ごとに置かない。依存は `factory/` で `npm install -w <workspace> <パッケージ>` で足す
 - 新しいディレクトリ（`runner/` など）を足すときは、根の `package.json` の `workspaces` に足し、`typecheck`（`tsc --noEmit`）・`test`（`vitest run`）・`check`（2 つを順に）の 3 つの script を置き、根の `check` に足す
-- 検査は `factory/` で次のコマンドを打つ。CI のジョブ `factory-check`（`.github/workflows/factory-check.yml`）は `npm ci` の後に `npm run check` を打つ
+- 検査は `factory/` で次のコマンドを打つ。CI のジョブ `factory-check`（`.github/workflows/factory-check.yml`）は `npm ci` の後に `npm run check` を打ち、Chromium を入れて `npm run e2e -w web` を打つ
 
 | コマンド | 中身 |
 | --- | --- |
 | `npm ci` | ロックファイルどおりに依存を入れる |
 | `npm run check` | 契約の検査と、すべての workspace の型検査とテスト |
-| `npm run check -w contracts` / `npm run check -w web` / `npm run check -w api` / `npm run check -w runner` | 1 つの workspace の型検査とテスト。`contracts` は生成した型が定義と食い違えば落ちる |
+| `npm run check -w contracts` / `npm run check -w web` / `npm run check -w api` / `npm run check -w runner` | 1 つの workspace の型検査とテスト。`contracts` は生成した型が定義と食い違えば落ちる。`web` は直に書いた文言とダミーの import の検査（`check:source`）、本番のビルドと成果物にダミーが無いことの検査（`check:bundle`）も打つ |
+| `npm run dev:dummy -w web` | API を呼ばず、ダミーの実装で画面を起動する（場面とつながりの切り替えは [docs/specifications/ndf-factory-screen-map.md](../docs/specifications/ndf-factory-screen-map.md) の「ダミーで起動する」） |
+| `npm run e2e -w web` | ダミーで起動した画面を Playwright の Chromium で 3 つの幅（360・768・1280 px）で開き、横のはみ出しとナビゲーションの手数を測る。初めて打つ前に `npx playwright install chromium`（CI は `--with-deps` つき）が要る |
 | `npm run generate -w contracts` | `contracts/schemas/` の定義から `contracts/src/generated/` の型を作り直す。定義を変えたら打ってコミットする |
 | `npm run lint:contracts` | `contracts/openapi/` の OpenAPI を Spectral（`spectral:oas`）で検査する。`contracts/schemas/` への参照切れも落とす |
 | `npm run build -w web` | 画面の資産を `web/dist/` に作る |

@@ -17,6 +17,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: { __FACTORY_CONFIG__: JSON.stringify(config) },
-    test: { environment: "jsdom" },
+    test: { environment: "jsdom", include: ["src/**/*.test.{ts,tsx}"] },
   };
 });

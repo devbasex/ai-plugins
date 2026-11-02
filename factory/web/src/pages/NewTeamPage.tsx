@@ -1,9 +1,17 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import type { SeatType } from "../api.ts";
 import { useFailureHandler, useServices } from "../context.tsx";
+import { Alert } from "../ui/Alert.tsx";
+import { Button } from "../ui/Button.tsx";
+import { PageHeader } from "../ui/PageHeader.tsx";
+import { SelectField } from "../ui/SelectField.tsx";
+import { TextField } from "../ui/TextField.tsx";
+import { SEAT_TYPES } from "./parts.tsx";
 
 export function NewTeamPage() {
+  const { t } = useTranslation();
   const { auth, api } = useServices();
   const onFailure = useFailureHandler();
   const navigate = useNavigate();
@@ -13,14 +21,15 @@ export function NewTeamPage() {
   if (auth.getToken() === null) return <Navigate to="/login" replace />;
 
   return (
-    <main>
-      <h1>チームを作る</h1>
+    <>
+      <PageHeader title={t("screens.newTeam")} />
       <form
+        className="ui-form"
         onSubmit={async (e) => {
           e.preventDefault();
           const length = [...name].length;
           if (name.trim() === "" || length > 64) {
-            setMessage("1〜64 字で入力してください");
+            setMessage(t("newTeam.nameLength"));
             return;
           }
           try {
@@ -31,20 +40,19 @@ export function NewTeamPage() {
           }
         }}
       >
-        <label>
-          チームの名前
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label>
-          自分の席の種類
-          <select value={seatType} onChange={(e) => setSeatType(e.target.value as SeatType)}>
-            <option value="standard">standard</option>
-            <option value="premium">premium</option>
-          </select>
-        </label>
-        <button type="submit">作る</button>
-        {message && <p role="alert">{message}</p>}
+        <TextField label={t("newTeam.name")} value={name} onChange={(e) => setName(e.target.value)} />
+        <SelectField label={t("newTeam.seatType")} value={seatType} onChange={(e) => setSeatType(e.target.value as SeatType)}>
+          {SEAT_TYPES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </SelectField>
+        <Button type="submit" variant="primary">
+          {t("newTeam.create")}
+        </Button>
+        {message && <Alert>{message}</Alert>}
       </form>
-    </main>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useServices } from "../context.tsx";
+import { LoadingState } from "../ui/LoadingState.tsx";
 
 // ログインの戻り。成功なら /account、IdP の拒否・取り消しは token を保存せず /login?error=… へ
 export function CallbackPage() {
@@ -17,5 +18,5 @@ export function CallbackPage() {
       else navigate(`/login?error=${encodeURIComponent(result.error)}`, { replace: true });
     });
   }, [auth, navigate, location]);
-  return <p>読み込み中</p>;
+  return <LoadingState />;
 }

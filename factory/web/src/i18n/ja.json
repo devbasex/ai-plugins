@@ -1,0 +1,171 @@
+{
+  "app": {
+    "name": "Neural Development Factory"
+  },
+  "common": {
+    "loading": "読み込み中",
+    "retry": "もう一度読む",
+    "copy": "写す",
+    "remove": "外す",
+    "add": "足す"
+  },
+  "nav": {
+    "label": "主な行き先",
+    "menu": "メニュー"
+  },
+  "screens": {
+    "login": "ログイン",
+    "callback": "ログインの戻り",
+    "account": "自分のアカウント",
+    "newTeam": "チームを作る",
+    "team": "チームのアカウント",
+    "repositories": "リポジトリ",
+    "modelCredential": "キーの持ち込み",
+    "newSprint": "スプリントを始める",
+    "sprints": "スプリントの一覧",
+    "sprintDetail": "スプリントの詳細",
+    "backlog": "バックログ",
+    "approvals": "承認",
+    "billing": "請求と使用量",
+    "runners": "手元のランナー",
+    "loops": "ループ"
+  },
+  "connection": {
+    "label": "つながりの状態",
+    "online": "オンライン",
+    "offline": "オフライン",
+    "offlineSince": "オフライン（最後に受け取った時刻: {{time}}）",
+    "pending": "つながってから確定する操作: {{count}} 件"
+  },
+  "approval": {
+    "approve": "承認する",
+    "reject": "差し戻す",
+    "whenOnline": "つながってから確定します"
+  },
+  "failure": {
+    "forbidden": "このアカウントを見る権限がありません",
+    "checkInput": "入力を確かめてください",
+    "retryLater": "時間をおいてやり直してください"
+  },
+  "login": {
+    "title": "Neural Development Factory にログイン",
+    "failed": "ログインできませんでした",
+    "google": "Google でログイン",
+    "github": "GitHub でログイン"
+  },
+  "plan": {
+    "free": "Free",
+    "pro": "個人 Pro",
+    "max": "個人 Max",
+    "team": "Team"
+  },
+  "mode": {
+    "local": "local（手元のランナー）",
+    "byok": "byok（キーの持ち込み）",
+    "managed": "managed（サービスの Bedrock）"
+  },
+  "limits": {
+    "label": "使える量",
+    "none": "使える量: 表にありません",
+    "concurrent": "同時に動かせるスプリントの実行",
+    "monthlyTokens": "月の token の上限",
+    "unlimited": "掛けない"
+  },
+  "executionMode": {
+    "current": "実行の形態: {{mode}}",
+    "change": "実行の形態を変える"
+  },
+  "account": {
+    "userId": "利用者の ID:",
+    "idp": "ログインの手段: {{idp}}",
+    "idpGoogle": "Google",
+    "idpGithub": "GitHub",
+    "personal": "個人のアカウント",
+    "plan": "プラン: {{plan}}",
+    "teams": "チーム",
+    "teamRole": "（{{role}}）",
+    "owner": "持ち主",
+    "logout": "ログアウト"
+  },
+  "newTeam": {
+    "name": "チームの名前",
+    "seatType": "自分の席の種類",
+    "nameLength": "1〜64 字で入力してください",
+    "create": "作る"
+  },
+  "team": {
+    "seatType": "自分の席の種類: {{seatType}}",
+    "seats": "席",
+    "seatList": "席の一覧",
+    "seatTypeOf": "{{userId}} の席の種類",
+    "newUser": "足す利用者の ID",
+    "newSeatType": "席の種類",
+    "badUserId": "利用者の ID の形ではありません",
+    "addSeat": "席を足す"
+  },
+  "repositories": {
+    "install": "GitHub App をリポジトリへ入れる",
+    "verify": "GitHub で確かめる",
+    "candidates": "登録の候補",
+    "registered": "（登録済み）",
+    "register": "登録する",
+    "empty": "まだリポジトリがありません",
+    "list": "登録したリポジトリ",
+    "run": "{{issues}}: {{state}}",
+    "runWithReason": "{{issues}}: {{state}}（{{reason}}）"
+  },
+  "sprintState": {
+    "starting": "起動中",
+    "running": "動いている",
+    "awaiting_approval": "承認待ち",
+    "done": "終わった",
+    "stopped": "止まった",
+    "failed": "失敗",
+    "cancelled": "取り消した"
+  },
+  "modelCredential": {
+    "registered": "登録済み（{{kind}}、{{updatedAt}}）",
+    "unregistered": "未登録",
+    "kind": "種類",
+    "anthropic": "Anthropic API キー",
+    "aws": "AWS のロール（Bedrock）",
+    "awsShort": "AWS のロール",
+    "apiKey": "API キー",
+    "roleArn": "ロールの ARN",
+    "region": "地域",
+    "externalId": "外部 ID:",
+    "trustExample": "信頼の設定の例",
+    "needApiKey": "API キーを入力してください",
+    "badRoleArn": "IAM のロールの ARN の形で入力してください",
+    "badRegion": "AWS の地域の名前で入力してください",
+    "save": "保存する",
+    "delete": "消す"
+  },
+  "newSprint": {
+    "selected": "選んだ課題",
+    "manual": "手で足した",
+    "others": "ほかの候補",
+    "addByNumber": "番号で足す",
+    "rechoose": "AI に選び直させる",
+    "start": "開始する",
+    "concurrentLimit": "同時に動かせるスプリントは {{limit}} 本までです（今 {{current}} 本）",
+    "invalidIssues": "{{numbers}} は開いている課題ではありません"
+  },
+  "sprints": {
+    "search": "課題の番号で絞る",
+    "list": "スプリントの実行",
+    "issues": "課題",
+    "repository": "リポジトリ",
+    "state": "状態",
+    "createdAt": "始めた日時",
+    "empty": "スプリントの実行はまだありません",
+    "noMatch": "絞り込みに合う実行はありません",
+    "repositoryId": "リポジトリ {{id}}"
+  },
+  "sprintDetail": {
+    "notFound": "このスプリントの実行は見つかりません",
+    "failureReason": "失敗の理由",
+    "none": "無し",
+    "back": "スプリントの一覧へ戻る"
+  }
+}

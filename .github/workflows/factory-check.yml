@@ -15,7 +15,7 @@ on:
       - "factory/**"
 
 jobs:
-  # factory/ の契約の検査（Spectral）と、web・api の型検査とテスト（#2170）
+  # factory/ の契約の検査（Spectral）と、web・api の型検査とテスト（#2170）、画面の E2E（#2382）
   factory-check:
     name: factory-check
     runs-on: ubuntu-latest
@@ -51,3 +51,10 @@ jobs:
       - if: steps.scope.outputs.run == 'true'
         working-directory: factory
         run: npm run check
+      # 画面の E2E（#2382）。ダミーで起動した画面を Chromium の 3 つの幅で開き、はみ出しとナビゲーションの手数を測る
+      - if: steps.scope.outputs.run == 'true'
+        working-directory: factory/web
+        run: npx playwright install --with-deps chromium
+      - if: steps.scope.outputs.run == 'true'
+        working-directory: factory
+        run: npm run e2e -w web
