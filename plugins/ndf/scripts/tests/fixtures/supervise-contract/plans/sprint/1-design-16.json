@@ -9,7 +9,7 @@
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
   "規則": "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
-  "上限": 15,
+  "上限": 16,
   "steps": [
     {
       "id": "glossary",
@@ -47,8 +47,19 @@
       "stage": "設計",
       "issues": true,
       "timeout": 3600,
+      "prompt": "/ndf:design #16。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。コミットする（push しない）。",
+      "next": "rebuild"
+    },
+    {
+      "id": "rebuild",
+      "type": "work",
+      "full": true,
+      "kind": "設計",
+      "stage": "ドキュメント再構成",
+      "issues": true,
+      "timeout": 3600,
       "next": "pr",
-      "prompt": "/ndf:design #16。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。コミットする（push しない）。"
+      "prompt": "/ndf:document-rebuild issues/issue-16-design.md（#16 の設計文書。同じディレクトリの issue-16-design-*.md も含む）。内容を足さずに組み直し、前後の値の表を報告に載せる。コミットする（push しない）。"
     },
     {
       "id": "pr",

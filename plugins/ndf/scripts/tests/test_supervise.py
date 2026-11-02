@@ -1621,6 +1621,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
         "requirements-check",
         "requirements",
         "design",
+        "rebuild",
         "pr",
         "sync-body",
         "review",
