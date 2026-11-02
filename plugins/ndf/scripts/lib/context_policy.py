@@ -175,7 +175,8 @@ def resolve_policy(root=None, env: Mapping | None = None, cli: Mapping | None = 
 
     `NDF_CONTEXT_LIMIT` は適用中の方針の運用上限を上書きし、判断開始の値がそれを上回れば同じ値へ下げる（決定 2）。
     モデル名と窓の大きさは方針を選ばない（I15）。"""
-    env = os.environ if env is None else env
+    if env is None:  # 読む変数を名前で書く（契約の検査が読みを拾う）
+        env = {"NDF_CONTEXT_POLICY": os.environ.get("NDF_CONTEXT_POLICY"), "NDF_CONTEXT_LIMIT": os.environ.get("NDF_CONTEXT_LIMIT")}
     cli = cli or {}
     setting, error = read_context_setting(root)
     sources = {"policy": "default", "decide_from": "default", "limit": "default", "margin": "default"}

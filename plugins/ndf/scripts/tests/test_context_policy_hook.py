@@ -320,4 +320,4 @@ def test_sprint_state_next_records_restart(tmp_path, ctx):
     assert "ndf-next" in p.stdout
     (r,) = rows(ctx)
     assert (r["work"], r["verdict"], r["reason"], r["source"]) == ("#3 #9", "再起動", "カットポイント", "sprint-state")
-    assert (ctx / "estimates" / "_local.json").is_file()
+    assert (ctx / "estimates" / "_local.cost-estimates.json").is_file()

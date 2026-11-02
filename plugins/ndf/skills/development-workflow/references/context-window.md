@@ -207,7 +207,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 hook は工程の起動ごとに 1 行（方針・値・工程・文脈の量・窓・帯・判定・理由・欠けた値・作業の識別子）を
 状態ディレクトリ（`NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context`）の
-`decisions/<owner>__<repo>.jsonl` へ追記する。作業の識別子は課題番号の昇順の並び（`#829 #830`）である。
+`decisions/<owner>__<repo>.decisions.jsonl` へ追記する。作業の識別子は課題番号の昇順の並び（`#829 #830`）である。
 `sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を書き、費用の見込みを較正し直す。
 
 conductor は、引継ぎ文書を書き始める前に「引継ぎ開始」を、再開して状態を確かめ終えた直後に「復元完了」を

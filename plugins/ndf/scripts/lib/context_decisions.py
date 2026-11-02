@@ -5,8 +5,8 @@
 
 | ファイル | 中身 | 保持 |
 | --- | --- | --- |
-| `decisions/<owner>__<repo>.jsonl` | 判定の記録（1 行 1 件、追記だけ） | 消さない |
-| `estimates/<owner>__<repo>.json` | 費用の見込み（`calibrate` が書く） | 上書き |
+| `decisions/<owner>__<repo>.decisions.jsonl` | 判定の記録（1 行 1 件、追記だけ） | 消さない |
+| `estimates/<owner>__<repo>.cost-estimates.json` | 費用の見込み（`calibrate` が書く） | 上書き |
 | `sessions/<sid>.window.json` | statusline が書く窓の大きさとモデル | 7 日 |
 | `sessions/<sid>.applied.json` | `publish` と hook が書く適用値 | 7 日 |
 
@@ -47,7 +47,12 @@ HANDOFF_PATH = re.compile(r"\.ndf/handoff/")
 
 
 def context_state_dir(env: Mapping | None = None) -> Path:
-    env = os.environ if env is None else env
+    if env is None:  # 読む変数を名前で書く（契約の検査が読みを拾う）
+        env = {
+            "NDF_CONTEXT_DIR": os.environ.get("NDF_CONTEXT_DIR"),
+            "XDG_STATE_HOME": os.environ.get("XDG_STATE_HOME"),
+            "HOME": os.environ.get("HOME"),
+        }
     if env.get("NDF_CONTEXT_DIR"):
         return Path(env["NDF_CONTEXT_DIR"])
     if env.get("XDG_STATE_HOME"):
@@ -146,15 +151,14 @@ def boundary_row(**cols) -> dict:
 
 
 def decisions_path(repo: str, env: Mapping | None = None) -> Path:
-    return context_state_dir(env) / "decisions" / f"{repo}.jsonl"
+    return context_state_dir(env) / "decisions" / f"{repo}.decisions.jsonl"
 
 
 def append_decision(row: dict, repo: str, env: Mapping | None = None) -> bool:
     """1 行を追記する。書けなければ False（判定は変えない。I9）。"""
-    path = decisions_path(repo, env)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
+        decisions_path(repo, env).parent.mkdir(parents=True, exist_ok=True)
+        with open(context_state_dir(env) / "decisions" / f"{repo}.decisions.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError:
         return False
@@ -164,7 +168,7 @@ def append_decision(row: dict, repo: str, env: Mapping | None = None) -> bool:
 def read_decisions(repo: str | None = None, env: Mapping | None = None) -> list[dict]:
     """判定の記録の行（`at` の順）。repo を省くと全リポジトリ。壊れた行は飛ばす。"""
     d = context_state_dir(env) / "decisions"
-    files = [d / f"{repo}.jsonl"] if repo else sorted(d.glob("*.jsonl")) if d.is_dir() else []
+    files = [d / f"{repo}.decisions.jsonl"] if repo else sorted(d.glob("*.decisions.jsonl")) if d.is_dir() else []
     rows = []
     for f in files:
         try:
@@ -211,7 +215,7 @@ def last_denial(rows: list[dict], work: str, within: float = 1800, now: float | 
 
 
 def estimates_path(repo: str, env: Mapping | None = None) -> Path:
-    return context_state_dir(env) / "estimates" / f"{repo}.json"
+    return context_state_dir(env) / "estimates" / f"{repo}.cost-estimates.json"
 
 
 def read_cost_estimates(repo: str, env: Mapping | None = None) -> dict:
@@ -220,7 +224,7 @@ def read_cost_estimates(repo: str, env: Mapping | None = None) -> dict:
 
 def write_cost_estimates(body: dict, repo: str, env: Mapping | None = None) -> bool:
     try:
-        jsonio.write_atomic(estimates_path(repo, env), body, indent=None)
+        jsonio.write_atomic(context_state_dir(env) / "estimates" / f"{repo}.cost-estimates.json", body, indent=None)
     except OSError:
         return False
     return True
@@ -247,7 +251,7 @@ def write_applied(sid: str, applied, env: Mapping | None = None) -> bool:
     if read_applied(sid, env) == body:
         return True
     try:
-        jsonio.write_atomic(path, body, indent=None)
+        jsonio.write_atomic(context_state_dir(env) / "sessions" / f"{sid}.applied.json", body, indent=None)
     except OSError:
         return False
     now = time.time()
