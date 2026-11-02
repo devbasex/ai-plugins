@@ -417,7 +417,7 @@ graph TD
 
 | 観点 | 縛る振る舞い |
 | --- | --- |
-| 実行ジョブの指示の定義 | 入力の名前の集合が全体の契約の 11 項目と開発ループの 5 項目（#2347）と等しいこと。`APPROVAL_REQUEST_ID` の無い `resume` が通ること。`START` が `new` で `ISSUES` が無い・`byok` で `MODEL_CREDENTIAL_SECRET_ARN` が無い・`local`・`managed` にそれがある・知らない入力・番号でない `ISSUES` がそれぞれ落ちること |
+| 実行ジョブの指示の定義 | 入力の名前の集合が全体の契約の 11 項目と開発ループの 5 項目と等しいこと。`APPROVAL_REQUEST_ID` の無い `resume` が通ること。`START` が `new` で `ISSUES` が無い・`byok` で `MODEL_CREDENTIAL_SECRET_ARN` が無い・`local`・`managed` にそれがある・知らない入力・番号でない `ISSUES` がそれぞれ落ちること |
 | 進捗の事象の定義（I29） | 種類の集合が全体の契約の 13 種類と #2347 の 3 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること。`issue.requested` の題が 257 字・本文が空・余分な鍵で落ちること。`issue.request_resolved` が `filed` で `issue` だけを、`drafted` で `reason` だけを持てること |
 | 型のずれと応答の定義 | コミットした型が定義から作り直した型と一致し、定義に項目を足して作り直さないと食い違うこと。202 と 4 つのエラーの本文が応答の定義に合い、ほかは合わないこと |
 | OpenAPI | `npm run lint:contracts` が `ingest.yaml` を含めて 0 で終わること（`$ref` の参照切れは Spectral の `invalid-ref` で落ちる） |

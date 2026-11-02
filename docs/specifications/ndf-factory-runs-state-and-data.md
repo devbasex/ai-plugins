@@ -6,7 +6,7 @@
 
 ### 状態と移り
 
-スプリントの実行の状態は `starting` / `running` / `awaiting_approval` / `awaiting_reset` / `done` / `stopped` / `failed` / `cancelled` で、後ろの 4 つが終わりの状態である。`awaiting_reset` は `local` の実行が利用上限で止まり、リセット時刻を待つ状態で、承認待ちと同じく枠を持ったまま今のジョブを空にする（#2347 の決定 7）。実行ジョブの状態は `pending` / `running` / `gate` / `stopped` / `done` / `failed` で、後ろの 4 つが終わりの状態である（ジョブの図は全体の契約の「スプリントの実行の流れ」）。
+スプリントの実行の状態は `starting` / `running` / `awaiting_approval` / `awaiting_reset` / `done` / `stopped` / `failed` / `cancelled` で、後ろの 4 つが終わりの状態である。`awaiting_reset` は `local` の実行が利用上限で止まり、リセット時刻を待つ状態で、承認待ちと同じく枠を持ったまま今のジョブを空にする。実行ジョブの状態は `pending` / `running` / `gate` / `stopped` / `done` / `failed` で、後ろの 4 つが終わりの状態である（ジョブの図は全体の契約の「スプリントの実行の流れ」）。
 
 ```mermaid
 stateDiagram-v2
@@ -77,7 +77,7 @@ sequenceDiagram
     C->>C: 実行と枠を移し、最後にジョブを終わりの状態へ、token の置き場を消す
 ```
 
-- **停止の後の処理**（`finalize`）: `job.finished` を進捗の記録から鍵 `<job_id>:finished` で読み、無ければ `appendControlEvent` で `failed` を書く（同じ鍵が先にあれば書かれず、読み直す）。そのジョブが実行の今のジョブなら、取り消しの要求があれば `cancelled`、結果が `gate` なら `awaiting_approval`（今のジョブを空にする）、`local` の実行で結果が `stopped`・理由が `usage_limit` なら `awaiting_reset`（今のジョブを空にし、`resumeAt` にリセット時刻か、読めなければ `USAGE_LIMIT_RETRY_SECONDS` 後を書く）、ほかの形態の `usage_limit` は `failed`（`job_failed`）、ほかは結果の状態へ移す。開発ループの実行なら、ループの行も同じトランザクションで移す（#2347 の決定 2・決定 4）。終わりの状態への移りは実行の行が終わりの状態でないことを条件にし、同じトランザクションで 2 つの枠を 1 ずつ減らす。**ジョブを終わりの状態にするのは最後で**、途中で止まってもジョブは見回りの対象に残り、次の見回りか知らせの再送が同じ結果でやり直す。同じ知らせの 2 回目は、ジョブが終わりの状態なので何もしない
+- **停止の後の処理**（`finalize`）: `job.finished` を進捗の記録から鍵 `<job_id>:finished` で読み、無ければ `appendControlEvent` で `failed` を書く（同じ鍵が先にあれば書かれず、読み直す）。そのジョブが実行の今のジョブなら、取り消しの要求があれば `cancelled`、結果が `gate` なら `awaiting_approval`（今のジョブを空にする）、`local` の実行で結果が `stopped`・理由が `usage_limit` なら `awaiting_reset`（今のジョブを空にし、`resumeAt` にリセット時刻か、読めなければ `USAGE_LIMIT_RETRY_SECONDS` 後を書く）、ほかの形態の `usage_limit` は `failed`（`job_failed`）、ほかは結果の状態へ移す。開発ループの実行なら、ループの行も同じトランザクションで移す。終わりの状態への移りは実行の行が終わりの状態でないことを条件にし、同じトランザクションで 2 つの枠を 1 ずつ減らす。**ジョブを終わりの状態にするのは最後で**、途中で止まってもジョブは見回りの対象に残り、次の見回りか知らせの再送が同じ結果でやり直す。同じ知らせの 2 回目は、ジョブが終わりの状態なので何もしない
 - **見回り**（`sweep`）: 終わりの状態でないジョブ（GSI の `ACTIVE_JOBS`）を最後のページまで引き、ECS のジョブは ① `pending` のまま 15 分を過ぎたら `StopTask` して `launch_failed` で停止の後の処理、② タスクが `STOPPED` か見つからなければ停止の後の処理、③ `running` で打ち切りの時間を過ぎ、まだ止めていなければ `stopReason` に `timeout` を書いて `StopTask`、④ タスクが `RUNNING` でジョブが `pending` なら `running` にする。`STOPPING`・`DEPROVISIONING` などの止まる途中は確定しない。`local` のジョブは `running` で打ち切りの時間を過ぎたら直に `timeout` で停止の後の処理をする。続けて、`resumeAt` を過ぎた `awaiting_reset` の実行に、始めた利用者の席と形態を照らしてから承認の依頼の識別子の無い `resume` のジョブを作り（照らせなければ `failed`（`seat_missing`））、次の周回を待つ開発ループを起こす
 - **再開の要求**（`requestResume`）: 実行が `awaiting_approval` で今のジョブが空のときだけ、実行を `starting`・今のジョブを新しいジョブにする書き込みと、`resume` のジョブの作成を 1 回のトランザクションで行い、起動する。実行が承認待ちでなくても、今のジョブの `job.finished` が `gate` なら（停止の知らせの前）`sprint_run_busy` を返す。再開は使える量の判定にかけず、枠を変えない
 - **取り消し**（`cancelSprintRun`）: 今のジョブが無ければその場で `cancelled` にして枠を減らす。あれば取り消しの要求を立て、ECS のタスクがあれば `StopTask` して `running` を返し、停止の後の処理で `cancelled` へ移す。`local` のジョブかタスクがまだ無いジョブは、その場で停止の後の処理をして `cancelled` を返す
@@ -168,9 +168,9 @@ erDiagram
 | `INGEST_URL` | 制御 | 指示の `INGEST_URL` に写す値。ランナー向けの経路はこの origin に置く |
 | `GITHUB_APP_SLUG`・`GITHUB_APP_CLIENT_ID`・`GITHUB_APP_CLIENT_SECRET_ARN` | 取り込み | 導入の URL と App の利用者の認可。クライアントの秘密は候補の証明の鍵の元にもなる |
 | `CANDIDATE_MODEL_ID` | 課題の候補 | 理由を作る Bedrock のモデル |
-| `NDF_PARALLEL_MIN_VERSION` | 制御 | 並行を許す NDF の版の下限（#2347 の決定 12）。無ければ並行を許さない |
+| `NDF_PARALLEL_MIN_VERSION` | 制御 | 並行を許す NDF の版の下限。無ければ並行を許さない |
 | `LOCAL_LOOP_AUTOSTART` | 制御 | `true` のとき `local` のループも自動で次の周回を起こす。既定 `false` |
-| `USAGE_LIMIT_RETRY_SECONDS` | 制御 | リセット時刻を読めないときの待ち。既定 900（#2347 の決定 9） |
+| `USAGE_LIMIT_RETRY_SECONDS` | 制御 | リセット時刻を読めないときの待ち。既定 900 |
 | `RUNNER_SECTION_LIMIT` | ランナー | 1 つのジョブで起動する区間の上限。既定 20 |
 
 API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 16 項目と `RUNNER_SECTION_LIMIT` のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のランナーの `INGEST_TOKEN` を読む。
