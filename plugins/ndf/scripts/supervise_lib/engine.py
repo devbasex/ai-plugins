@@ -343,6 +343,7 @@ class Engine:
             gnext = step.get("gate_next")
             return ((None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)), None, None
         if ok:
+            st.record_stage(step.get("stage"), self.plan, self.cwd, after_ok=True)  # 記録を投稿し終えてから付ける工程（#2288）
             if is_run and step.get("pr_from"):
                 self.take_pr(step["pr_from"])
             return self.back_or_next(sid, step), None, None
