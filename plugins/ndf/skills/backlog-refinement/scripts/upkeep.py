@@ -7,10 +7,16 @@
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py report [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
+    python3 upkeep.py depth due|record ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
+    python3 upkeep.py owner claim|touch|release|status ...（見直しの持ち主。upkeep_owner.py の冒頭）
+    python3 upkeep.py research plan|run ...（ニーズとシーズの調査。upkeep_research.py の冒頭）
+    python3 upkeep.py overhaul snapshot|count|measure ...（大整理。upkeep_overhaul.py の冒頭）
+    python3 upkeep.py revert --run <実行>（付け直しを戻す。upkeep_actions.py の冒頭）
 
 区分の決定（手順 2A / 2B）は持たない。LLM が candidates の結果を読んで区分を決め、plan.json に書く。
 
-candidates: 手順 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
+candidates: 手順 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。`--depth diff`（既定）は差分の
+  棚卸しの経路だけを、`--depth review` は no-milestone・closed-milestone と後回しを除く open の全件（all）も拾い、上限で切らない。
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
@@ -27,7 +33,7 @@ report: candidates・rank・apply の記録から完了報告の値を返す。c
 rank: 順位・切り出しの境界・前倒しと後ろ倒しの候補（算出は upkeep_rank.py）。plan の rank・rejected・reschedule は
   upkeep_rank_cmd.py の RankPlan が確かめ、承認の要る移動は「やらない」と同じく needs_approval へ回す。
 
-plan.json の形:
+plan.json の形（起票・付け直しと深さのキーは upkeep_actions.py の冒頭）:
 
     {"repo": "owner/name",
      "actions": [{"number": 12, "verdict": "追記が要る",
@@ -52,7 +58,6 @@ import datetime
 import hashlib
 import json
 import os
-import re
 import sys
 import tempfile
 import urllib.parse
@@ -66,7 +71,13 @@ from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepErro
 from step_result import emit, git, git_root, main_with, result  # noqa: E402
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
-from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, _sub_issue_kids, with_labels  # noqa: E402
+from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, with_labels  # noqa: E402
+from upkeep_routes import _Routes, _route_commits, _route_diff, _route_manual, _route_milestones, _route_review, _route_sub_issues  # noqa: E402
+import upkeep_actions as A  # noqa: E402
+import upkeep_depth as D  # noqa: E402
+import upkeep_overhaul as V  # noqa: E402
+import upkeep_owner as O  # noqa: E402
+import upkeep_research as R  # noqa: E402
 
 TOOL = "backlog-refinement"
 
@@ -77,11 +88,6 @@ NEEDS_APPROVAL = ("やらない",)
 RETURNED = ("要判断",)
 
 ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue", "commit-subject", "all", "manual", "unscored")
-
-# 削除された識別子として拾う語の形。短い語や記号を含まない語は、ありふれた単語と区別できない。
-_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*[A-Za-z0-9_]")
-_MIN_TOKEN = 6
-
 
 # ---------------- 小関数 ----------------
 
@@ -107,12 +113,6 @@ def snapshot_digest(issue: dict) -> str:
         "labels": sorted(lb.get("name", "") for lb in issue.get("labels") or []),
     }
     return hashlib.sha256(json.dumps(snap, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-
-
-def _is_identifier(tok: str) -> bool:
-    if len(tok) < _MIN_TOKEN:
-        return False
-    return any(c in tok for c in "_-.") or bool(re.search(r"[a-z][A-Z]", tok))
 
 
 def _state_dir(arg, repo: str) -> Path:
@@ -141,142 +141,12 @@ def _ref_date(root, ref: str) -> str:
     return d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def diff_terms(root, ref: str) -> tuple[list[str], list[str]]:
-    """差分のパスと、削除された行にだけ現れる識別子を返す。"""
-    paths = [p for p in git(root, "diff", "--name-only", "--no-renames", ref, "HEAD").stdout.splitlines() if p]
-    removed, added = set(), set()
-    for line in git(root, "diff", "--no-renames", "-U0", ref, "HEAD").stdout.splitlines():
-        if line.startswith(("---", "+++")):
-            continue
-        if line.startswith("-"):
-            removed.update(_TOKEN_RE.findall(line[1:]))
-        elif line.startswith("+"):
-            added.update(_TOKEN_RE.findall(line[1:]))
-    idents = sorted(t for t in removed - added if _is_identifier(t))
-    return paths, idents
-
-
-def _path_needles(root, paths: list[str]) -> dict[str, str]:
-    """検索語 → 元のパス。基名はリポジトリの中で 1 つに決まるときだけ使う。"""
-    files = git(root, "ls-files", check=False).stdout.splitlines()
-    counts: dict[str, int] = {}
-    for f in files:
-        b = f.rsplit("/", 1)[-1]
-        counts[b] = counts.get(b, 0) + 1
-    out = {}
-    for p in paths:
-        out[p] = p
-        b = p.rsplit("/", 1)[-1]
-        if len(b) >= _MIN_TOKEN and counts.get(b, 0) <= 1:
-            out.setdefault(b, p)
-    return out
-
-
-def _mentions(text: str, term: str) -> bool:
-    return re.search(r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])", text) is not None
-
-
-def _mentions_path(text: str, path: str) -> bool:
-    """パスが、より長いパスの一部としてでなく現れるか（`README.md` は `docs/README.md` に当てない）。"""
-    return re.search(r"(?<![\w/.-])" + re.escape(path) + r"(?![\w/-])", text) is not None
-
-
-def _still_present(root, term: str) -> bool:
-    return git(root, "grep", "-q", "-F", "-e", term, "HEAD", check=False).returncode == 0
-
-
-class _Routes:
-    """open の課題ごとに、拾った経路と手がかりの語を集める。"""
-
-    def __init__(self, open_issues):
-        self.by_num = {i["number"]: i for i in open_issues}
-        self.routes: dict[int, set] = {}
-        self.terms: dict[int, set] = {}
-
-    def add(self, n, route, term=None):
-        if n in self.by_num:
-            self.routes.setdefault(n, set()).add(route)
-            if term:
-                self.terms.setdefault(n, set()).add(term)
-
-
-def _route_diff(open_issues, root, since_ref, routes):
-    paths, idents = diff_terms(root, since_ref)
-    needles = _path_needles(root, paths)
-    gone: dict[str, bool] = {}
-    for i in open_issues:
-        text = f"{i.get('title') or ''}\n{i.get('body') or ''}"
-        for needle in needles:
-            if _mentions_path(text, needle):
-                routes.add(i["number"], "diff-path", needle)
-        for t in idents:
-            if _mentions(text, t):
-                if t not in gone:
-                    gone[t] = not _still_present(root, t)
-                if gone[t]:
-                    routes.add(i["number"], "diff-identifier", t)
-    return paths, idents
-
-
-def _route_milestones(gh, repo, open_issues, since, routes, notes):
-    milestones = gh.call([f"repos/{repo}/milestones?state=all&per_page=100"], paginate=True) or []
-    closed = [c for c in list_issues(gh, f"state=closed&since={since}") if (c.get("closed_at") or "") >= since]
-    empty_milestones = []
-    if milestones:
-        for i in open_issues:
-            if not i.get("milestone"):
-                routes.add(i["number"], "no-milestone")
-        touched = {c["milestone"]["title"] for c in closed if c.get("milestone")}
-        for i in open_issues:
-            if i.get("milestone") and i["milestone"]["title"] in touched:
-                routes.add(i["number"], "closed-milestone", i["milestone"]["title"])
-        open_titles = {i["milestone"]["title"] for i in open_issues if i.get("milestone")}
-        empty_milestones = sorted(t for t in touched if t not in open_titles)
-    else:
-        notes.append("マイルストーンが無いため no-milestone と closed-milestone と unscored を飛ばした")
-    return closed, empty_milestones, bool(milestones)
-
-
-def _route_sub_issues(gh, repo, closed, open_issues, routes, notes):
-    closed_nums = {c["number"] for c in closed}
-    sub_api = True
-    for c in closed:
-        if not (c.get("sub_issues_summary") or {}).get("total") or not sub_api:
-            continue
-        kids = _sub_issue_kids(gh, c["number"])
-        if kids is None:
-            sub_api = False
-            notes.append("サブイシューの API が無いため本文の参照だけで子を拾った")
-            continue
-        for k in kids:
-            if k.get("state") == "open":
-                routes.add(k["number"], "sub-issue", f"#{c['number']}")
-    for i in open_issues:
-        for m in re.finditer(r"親[^\n#]{0,20}#(\d+)\b", i.get("body") or ""):
-            if int(m.group(1)) in closed_nums:
-                routes.add(i["number"], "sub-issue", f"#{m.group(1)}")
-
-
-def _route_commits(root, since_ref, routes):
-    for line in git(root, "log", "--no-merges", "--format=%s", f"{since_ref}..HEAD").stdout.splitlines():
-        for m in re.finditer(r"#(\d+)\b", line):
-            routes.add(int(m.group(1)), "commit-subject", line)
-
-
-def _route_manual(a, routes, notes):
-    if a.all:
-        for n in routes.by_num:
-            routes.add(n, "all")
-    for n in a.add:
-        if n not in routes.by_num:
-            notes.append(f"--add の #{n} は open でないため除いた")
-        routes.add(n, "manual")
-
-
 def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
     found = routes.routes
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
     order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n] - {"unscored"}), n))
+    if a.depth == "review":  # 見直しは上限で切らず、費用と秒の上限で止めたときに古い順で持ち越す（#2315 の決定 11）
+        order = sorted(found, key=lambda n: (routes.by_num[n].get("updated_at") or "", n))
     keep = order[: a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
@@ -308,6 +178,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
         "candidates": len(keep),
         "deferred": deferred,
         "limit": a.limit,
+        "depth": a.depth,
         "by_route": by_route,
         "closed_since": len(closed),
         "paths": len(paths),
@@ -336,6 +207,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
 def cmd_candidates(a):
     root = git_root(a.root)
     a.limit = RC.candidate_limit(a.limit, RC.read_backlog_decl(root))  # 候補を集める前に決める（不正なら集めない）
+    a.limit = None if a.depth == "review" else a.limit
     repo = target_repo(root, a.repo)
     gh = Gh(repo)
     since = _ref_date(root, a.since_ref)
@@ -344,13 +216,15 @@ def cmd_candidates(a):
     notes = []
 
     paths, idents = _route_diff(open_issues, root, a.since_ref, routes)
-    closed, empty_milestones, has_milestones = _route_milestones(gh, repo, open_issues, since, routes, notes)
+    closed, empty_milestones, has_milestones = _route_milestones(gh, repo, open_issues, since, routes, notes, a.depth)
     _route_sub_issues(gh, repo, closed, open_issues, routes, notes)
     _route_commits(root, a.since_ref, routes)
     _route_manual(a, routes, notes)
     sd = _state_dir(a.state_dir, repo)
     for n in RC.unscored(sd, _read_state, open_issues, snapshot_digest) if has_milestones else []:
         routes.add(n, "unscored")
+    if a.depth == "review":
+        _route_review(open_issues, set((D.materials(root) or {}).get("deferred_milestones") or []), routes)
 
     out, deferred = _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, gh.waits)
     for f in ("apply.json", "rank.json"):  # 前の回の apply と rank を今回の報告へ混ぜない
@@ -512,7 +386,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
 
 def cmd_apply(a):
     root = git_root(a.root)
-    plan = _load_plan(a.plan)
+    plan, wrong = A.precheck(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
     repo = target_repo(root, a.repo)
     sd = _state_dir(a.state_dir, repo)
     # 記録のリポジトリ（保存した candidates.json の metrics.repo）の外へ書かない（#842 の決定 7）。
@@ -569,8 +443,10 @@ def cmd_apply(a):
     except Partial as e:
         partial, why_partial = True, str(e)
     rp.update_rejected()
+    extra = A.write_extra(root, plan, gh, ms, repo, ledger, lambda: jsonio.write_atomic(ledger_path, ledger, indent=1)) if not partial else {}
 
     status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits, rp)
+    status, code, nxt = A.merge_outcome(extra, wrong, status, code, nxt, metrics, items)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     jsonio.write_atomic(sd / "apply.json", out, indent=1)
     emit(out, code)
@@ -594,6 +470,7 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("candidates", parents=[common])
     c.add_argument("--since-ref", required=True)
+    c.add_argument("--depth", choices=("diff", "review"), default="diff", help="棚卸しの深さ（省くと差分の棚卸し。#2315 の決定 2）")
     c.add_argument("--all", action="store_true")
     c.add_argument("--add", type=_numbers, default=[], help="担当が足す課題の番号（12,34）")
     c.add_argument("--limit", type=int, default=None, help="1 回に扱う候補の上限（省くと宣言の candidate_limit、無ければ既定 10）")
@@ -607,6 +484,8 @@ def build_parser():
     r = sub.add_parser("report", parents=[common])
     r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
     RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
+    for mod in (D, O, R, V, A):  # 深さ・持ち主・調査・大整理・戻し（#2315）
+        mod.add_parsers(sub, common, _state_dir) if mod is D else mod.add_parsers(sub, common)
     return ap
 
 

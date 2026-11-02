@@ -181,9 +181,18 @@ def env(tmp_path):
             fn(st)
             sp.write_text(json.dumps(st, ensure_ascii=False))
 
+        def owner(self):
+            """見直しの持ち主の実行（テストのプロセスを持ち主にする。2 回目からは同じ実行）。"""
+            if not getattr(self, "_owner", None):
+                code, out = self.run("owner", "claim", "--what", "review", "--pid", str(os.getpid()))
+                assert code == 0, out
+                self._owner = out["metrics"]["run"]
+            return self._owner
+
         def plan(self, actions):
             f = tmp_path / "plan.json"
-            f.write_text(json.dumps({"repo": "o/r", "actions": actions}, ensure_ascii=False))
+            # マイルストーン・やらないは見直しの深さで反映する（#2315 の I12）。持ち主になってから書く
+            f.write_text(json.dumps({"repo": "o/r", "actions": actions, "depth": "review", "owner": self.owner()}, ensure_ascii=False))
             return str(f)
 
         def snapshot(self, n):
@@ -208,19 +217,31 @@ def _action(snap, verdict, changes, **kw):
 
 
 def test_candidates_collect_each_route(env):
+    # 既定は差分の棚卸し: マイルストーンの経路（no-milestone・closed-milestone）は見直しへ回す（#2315 の決定 3）
     code, out = env.run("candidates", "--since-ref", "v1")
-    assert code == 0
+    assert code == 0 and out["metrics"]["depth"] == "diff"
     routes = {i["number"]: i["routes"] for i in out["items"] if i["kind"] == "issue"}
     assert routes == {
         1: ["diff-path"],
         2: ["diff-identifier"],
-        3: ["no-milestone"],
-        4: ["closed-milestone"],
         5: ["sub-issue"],
         6: ["sub-issue"],
     }
-    assert out["metrics"]["candidates"] == 6
+    assert out["metrics"]["candidates"] == 4
     assert all(i["kind"] == "issue" for i in out["items"])  # M1 には open の #4 が残る
+
+
+def test_candidates_review_takes_all_open_but_deferred_without_limit(env):
+    # 見直しは後回しのマイルストーンを除く open の全件を上限で切らずに返す（I10・決定 11）。差分は後回しも拾う
+    (env.root / ".ndf").mkdir()
+    (env.root / ".ndf" / "project.json").write_text(json.dumps({"materials": {"deferred_milestones": ["M1"]}}))
+    code, out = env.run("candidates", "--since-ref", "v1", "--depth", "review", "--limit", "2")
+    routes = {i["number"]: i["routes"] for i in out["items"] if i["kind"] == "issue"}
+    assert code == 0 and out["metrics"]["deferred"] == []
+    assert set(routes) == {1, 2, 3, 5, 6, 7} and routes[3] == ["no-milestone", "all"]
+    env.set(lambda st: st["issues"]["1"].update(milestone={"number": 1, "title": "M1"}))
+    _, out = env.run("candidates", "--since-ref", "v1")
+    assert 1 in {i["number"] for i in out["items"] if i["kind"] == "issue"}
 
 
 def test_candidates_report_milestone_without_open_issue(env):
@@ -248,7 +269,7 @@ def test_candidates_limit_caps_one_run(env):
     assert code == 20 and out["status"] == "gate"
     kept = [i["number"] for i in out["items"] if i.get("result") == "candidate"]
     assert len(kept) == 2 and out["metrics"]["candidates"] == 2
-    assert len(out["metrics"]["deferred"]) == 4
+    assert len(out["metrics"]["deferred"]) == 2
     # 上限を超えた候補は items に載せない。載せると区分を決める対象として求められる。
     issues = [i["number"] for i in out["items"] if i["kind"] == "issue"]
     assert issues == kept
