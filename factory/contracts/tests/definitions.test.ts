@@ -5,10 +5,11 @@ import {
   progressEventSchema,
   runJobInstructionSchema,
   validateProgressEvent,
+  validateLocalRunnerDeclaration,
   validateRunJobInstruction,
 } from "../src/index.ts";
 
-// 確定仕様 docs/specifications/ndf-factory-service-boundary.md の「実行ジョブの指示」の入力（11 項目）
+// 確定仕様 docs/specifications/ndf-factory-service-boundary.md の「実行ジョブの指示」の入力（11 項目）と、開発ループの 5 項目（#2347）
 const SPEC_INSTRUCTION_INPUTS = [
   "SPRINT_RUN_ID",
   "JOB_ID",
@@ -21,9 +22,14 @@ const SPEC_INSTRUCTION_INPUTS = [
   "INGEST_TOKEN_SECRET_ARN",
   "EXECUTION_MODE",
   "MODEL_CREDENTIAL_SECRET_ARN",
+  "LOOP_NAME",
+  "LOOP_MILESTONES",
+  "LOOP_BUDGET",
+  "EXCLUDE_ISSUES",
+  "LOOP_ANSWERS",
 ];
 
-// 同じ確定仕様の「進捗の事象の種類と受け口」の種類（13 種類）
+// 同じ確定仕様の「進捗の事象の種類と受け口」の種類（13 種類）と、区間と開発ループの 3 種類（#2347）
 const SPEC_EVENT_TYPES = [
   "job.started",
   "phase.changed",
@@ -38,6 +44,9 @@ const SPEC_EVENT_TYPES = [
   "decision.delegated",
   "issue.requested",
   "issue.request_resolved",
+  "section.started",
+  "loop.lap_closed",
+  "loop.stopped",
 ];
 
 // 同じ確定仕様の「進捗の正本」の列から、受け口が作る order_key・pr_ref を除いたもの
@@ -62,6 +71,18 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     issue: { repo: "org-b/repo-b", number: 7, url: "https://github.com/org-b/repo-b/issues/7" },
     duplicate_of: null,
   },
+  "section.started": { section: 2, command: "/ndf:development-workflow #2347" },
+  "loop.lap_closed": {
+    loop: "lfactory2",
+    lap: 3,
+    issues: [2347],
+    result: "完了",
+    version: null,
+    cost_usd: 1.5,
+    seconds: 3600,
+    pending: [{ number: 2348, reason: "MVV の外の疑い", lap: 3 }],
+  },
+  "loop.stopped": { loop: "lfactory2", condition: "budget_usd", detail: '{"values":{"usd":60}}', pending: [] },
 };
 
 function event(type: string, patch: Record<string, unknown> = {}) {
@@ -95,7 +116,7 @@ const instruction = (patch: Record<string, string | undefined> = {}) =>
   );
 
 describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
-  it("入力の名前が確定仕様の 11 項目と 1 対 1 に対応する", () => {
+  it("入力の名前が確定仕様の 11 項目と開発ループの 5 項目に 1 対 1 に対応する", () => {
     expect(Object.keys(runJobInstructionSchema.properties).sort()).toEqual([...SPEC_INSTRUCTION_INPUTS].sort());
   });
 
@@ -107,8 +128,8 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
     expect(validateRunJobInstruction(instruction({ ISSUES: undefined })).ok).toBe(false);
   });
 
-  it("START が resume で APPROVAL_REQUEST_ID が無いと落ち、あれば通る", () => {
-    expect(validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined })).ok).toBe(false);
+  it("START が resume なら APPROVAL_REQUEST_ID は任意（無ければ答えを書かずに続ける。#2347 の決定 7）", () => {
+    expect(validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined })).ok).toBe(true);
     expect(validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined, APPROVAL_REQUEST_ID: "ar-1" })).ok).toBe(true);
   });
 
@@ -123,6 +144,28 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
     expect(validateRunJobInstruction(instruction({ EXECUTION_MODE: mode, MODEL_CREDENTIAL_SECRET_ARN: arn })).ok).toBe(false);
   });
 
+  it("START が loop は LOOP_NAME と LOOP_MILESTONES を要り、ISSUES を許さない（#2347）", () => {
+    const loop = { START: "loop", ISSUES: undefined, LOOP_NAME: "lfactory2", LOOP_MILESTONES: "25 Factory,26 根本" };
+    expect(validateRunJobInstruction(instruction(loop)).ok).toBe(true);
+    expect(
+      validateRunJobInstruction(
+        instruction({ ...loop, LOOP_BUDGET: "laps=3,usd=60", EXCLUDE_ISSUES: "2171,2186", LOOP_ANSWERS: "12=approved#40,13=rejected" }),
+      ).ok,
+    ).toBe(true);
+    expect(validateRunJobInstruction(instruction({ ...loop, ISSUES: "2171" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...loop, LOOP_MILESTONES: undefined })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...loop, LOOP_NAME: "-bad" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...loop, LOOP_ANSWERS: "12=maybe" })).ok).toBe(false);
+  });
+
+  it("ループの入力は new では許さず、ほかの入力は LOOP_NAME を要る（#2347）", () => {
+    expect(validateRunJobInstruction(instruction({ LOOP_NAME: "l1" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined, EXCLUDE_ISSUES: "1" })).ok).toBe(false);
+    expect(
+      validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined, LOOP_NAME: "l1", EXCLUDE_ISSUES: "1" })).ok,
+    ).toBe(true);
+  });
+
   it("知らない入力・番号でない ISSUES は落ちる", () => {
     expect(validateRunJobInstruction({ ...instruction(), EXTRA: "x" }).ok).toBe(false);
     expect(validateRunJobInstruction(instruction({ ISSUES: "2171,abc" })).ok).toBe(false);
@@ -130,7 +173,7 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
 });
 
 describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
-  it("種類が確定仕様の 13 種類と 1 対 1 に対応する", () => {
+  it("種類が確定仕様の 13 種類と #2347 の 3 種類に 1 対 1 に対応する", () => {
     expect([...EVENT_TYPES].sort()).toEqual([...SPEC_EVENT_TYPES].sort());
     expect(progressEventSchema.oneOf).toHaveLength(SPEC_EVENT_TYPES.length);
   });
@@ -211,9 +254,60 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
     expect(resolved({ ...filed, issue: undefined })).toBe(false);
   });
 
+  it("job.finished の理由は任意で、resets_at は usage_limit のときだけ持てる（#2347）", () => {
+    const finished = (payload: Record<string, unknown>) => validateProgressEvent(event("job.finished", { payload })).ok;
+    const base = { result: "stopped", summary: "止めた" };
+    expect(finished({ ...base, reason: "section_limit" })).toBe(true);
+    expect(finished({ ...base, reason: "usage_limit", resets_at: "2026-11-02T05:00:00Z" })).toBe(true);
+    expect(finished({ ...base, reason: "usage_limit", resets_at: null })).toBe(true);
+    expect(finished({ ...base, reason: "section_limit", resets_at: null })).toBe(false);
+    expect(finished({ ...base, reason: "other" })).toBe(false);
+  });
+
+  it("loop.stopped の条件は NDF の 10 個だけで、gate.reached の loop は名前と周回を持つ（#2347）", () => {
+    const stopped = (condition: string) =>
+      validateProgressEvent(event("loop.stopped", { payload: { ...PAYLOADS["loop.stopped"], condition } })).ok;
+    for (const c of [
+      "user_stop",
+      "mvv_changed",
+      "same_failure",
+      "budget_laps",
+      "budget_usd",
+      "budget_hours",
+      "no_issue",
+      "outside_mvv",
+      "gate2_returned",
+      "refused",
+    ]) {
+      expect(stopped(c)).toBe(true);
+    }
+    expect(stopped("slots")).toBe(false);
+    const gate = (loop: unknown) =>
+      validateProgressEvent(event("gate.reached", { payload: { ...PAYLOADS["gate.reached"], loop } })).ok;
+    expect(gate({ name: "lfactory2", lap: 3 })).toBe(true);
+    expect(gate({ name: "lfactory2" })).toBe(false);
+  });
+
+  it("section.started の指示は 2,000 字まで（#2347）", () => {
+    const section = (command: string) =>
+      validateProgressEvent(event("section.started", { payload: { section: 1, command } })).ok;
+    expect(section("あ".repeat(2000))).toBe(true);
+    expect(section("あ".repeat(2001))).toBe(false);
+  });
+
   it("配列や null の本文は最上位の type で落ちる", () => {
     expect(validateProgressEvent([])).toEqual({ ok: false, violation: { instancePath: "", keyword: "type" } });
     expect(validateProgressEvent(null)).toEqual({ ok: false, violation: { instancePath: "", keyword: "type" } });
+  });
+});
+
+describe("手元のランナーの申告の定義（#2347）", () => {
+  it("runner_id は 32 字の英数字で、max_jobs は 1〜16 の整数・任意", () => {
+    const id = "a".repeat(32);
+    expect(validateLocalRunnerDeclaration({ runner_id: id }).ok).toBe(true);
+    expect(validateLocalRunnerDeclaration({ runner_id: id, max_jobs: 16, capacity_hint: 6 }).ok).toBe(true);
+    expect(validateLocalRunnerDeclaration({ runner_id: id, max_jobs: 17 }).ok).toBe(false);
+    expect(validateLocalRunnerDeclaration({ runner_id: "short" }).ok).toBe(false);
   });
 });
 

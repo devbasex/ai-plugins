@@ -257,7 +257,11 @@ paths:
       tags: [sprint-runs]
       operationId: startSprintRun
       summary: スプリントの実行を始める
-      description: 確かめの順は 課題（400）→ 登録（404）→ キー（409）→ 導入（409）→ 使える量（409）。
+      description: >-
+        確かめの順は 課題（400）→ 登録（404）→ キー（409）→ 導入（409）→ 使える量（409）。
+        課題が動いているループのマイルストーンに属すると 409 issue_in_loop（details.numbers・details.loop_name）、
+        同じリポジトリの終わりの状態でない実行が持つ課題を指すと 409 issue_in_use（details.numbers）、
+        並行を許さない版どうしなら 409 parallel_unsupported_version。limits_exceeded の reasons に concurrent_repo_runs がある（#2347）。
       parameters:
         - name: accountId
           in: path
@@ -423,6 +427,41 @@ paths:
         "409":
           $ref: "#/components/responses/E409"
   /accounts/{accountId}/repositories/{repositoryId}:
+    patch:
+      tags: [repositories]
+      operationId: updateRepository
+      summary: リポジトリの同時の実行の数を宣言する
+      description: プランの同時の数より小さい値だけが効く。null は宣言を外す。持ち主だけが使える（#2347）。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repositoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepositoryUpdate"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Repository"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
     delete:
       tags: [repositories]
       operationId: removeRepository
@@ -548,6 +587,13 @@ components:
         installation_id: { type: integer }
         registered_at: { type: string, format: date-time }
         active_sprint_runs: { type: integer, minimum: 0 }
+        max_concurrent_runs: { type: ["integer", "null"], minimum: 1, maximum: 100 }
+    RepositoryUpdate:
+      type: object
+      required: [max_concurrent_runs]
+      additionalProperties: false
+      properties:
+        max_concurrent_runs: { type: ["integer", "null"], minimum: 1, maximum: 100 }
     RepositoryList:
       type: object
       required: [repositories]
@@ -631,7 +677,7 @@ components:
               sprint_run_id: { type: string }
               repository_id: { type: integer }
               issues: { type: array, items: { type: integer } }
-              state: { type: string, enum: [starting, running, awaiting_approval, done, stopped, failed, cancelled] }
+              state: { type: string, enum: [starting, running, awaiting_approval, awaiting_reset, done, stopped, failed, cancelled] }
               failure_reason: { type: ["string", "null"] }
               created_at: { type: string, format: date-time }
     CancelResult:

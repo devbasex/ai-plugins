@@ -279,6 +279,7 @@ erDiagram
 | 行 | `pk` | `sk` | `gsi1pk` / `gsi1sk` |
 | --- | --- | --- | --- |
 | 開発ループ | `ACCOUNT#<accountId>` | `LOOP#<loopId>` | `WAITING_LOOPS` / `<updatedAt>#<loopId>`（`between_laps` で `waitReason` が `user_start` でない間だけ） |
+| ループの実行（周回の開始の書き込みで足す。列は `sprintRunId`。ループの詳細がそのループの実行だけを引く） | `ACCOUNT#<accountId>` | `LOOPRUN#<loopId>#<sprintRunId>` | — |
 | マイルストーンの持ち分 | `ACCOUNT#<accountId>` | `MILESTONE#<repositoryId>#<題の sha256 の先頭 32 字>` | — |
 | 課題の持ち分 | `ACCOUNT#<accountId>` | `ISSUE#<repositoryId>#<番号>` | — |
 | 手元のランナーの枠 | `ACCOUNT#<accountId>` | `RUNNER#<runnerId>` | — |

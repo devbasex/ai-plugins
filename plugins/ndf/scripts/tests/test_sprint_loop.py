@@ -286,6 +286,34 @@ def test_exclude_redoes_the_selection_and_all_excluded_stops(env):
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "outside_mvv"
 
 
+def test_env_exclusions_drop_issues_held_by_other_runs(env, monkeypatch):
+    # #2347 の決定 3: Factory が同じリポジトリの別の実行の課題を NDF_LOOP_EXCLUDE で渡し、その周回の選定から外す
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    monkeypatch.setenv("NDF_LOOP_EXCLUDE", "11, x 13")
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 5
+    sl.write_record(env, r)
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["selected"] == [12]
+    rows = {r["number"]: r["reason"] for r in out["metrics"]["excluded"]}
+    assert rows[11] == rows[13] == "別の実行が持つ課題"
+    assert [e["number"] for e in rec(env)["excluded"]] == [11, 13]
+
+
+def test_env_exclusions_are_not_added_twice_on_reselection(env, monkeypatch):
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    monkeypatch.setenv("NDF_LOOP_EXCLUDE", "11")
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 5
+    sl.write_record(env, r)
+    sl_select.cmd_select(env, "l1")
+    out = sl_select.cmd_exclude(env, "l1", 12, "モードが対象外（operation）")
+    assert out["metrics"]["selected"] == [13]
+    assert [e["number"] for e in rec(env)["excluded"]] == [11, 12]
+
+
 # ---------------- 受け入れ条件 7・I3: 予算 ----------------
 
 

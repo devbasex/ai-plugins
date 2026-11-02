@@ -4,15 +4,18 @@ import * as formats from "ajv-formats";
 import progressEventSchema from "../schemas/progress-event.schema.json" with { type: "json" };
 import runJobInstructionSchema from "../schemas/run-job-instruction.schema.json" with { type: "json" };
 import ingestResponseSchema from "../schemas/ingest-response.schema.json" with { type: "json" };
+import localRunnerDeclarationSchema from "../schemas/local-runner-declaration.schema.json" with { type: "json" };
+import type { LocalRunnerDeclaration } from "./generated/local-runner-declaration.ts";
 import type { ProgressEvent } from "./generated/progress-event.ts";
 import type { RunJobInstruction } from "./generated/run-job-instruction.ts";
 
 export type * from "./generated/progress-event.ts";
 export type * from "./generated/run-job-instruction.ts";
 export type * from "./generated/ingest-response.ts";
-export { progressEventSchema, runJobInstructionSchema, ingestResponseSchema };
+export type * from "./generated/local-runner-declaration.ts";
+export { progressEventSchema, runJobInstructionSchema, ingestResponseSchema, localRunnerDeclarationSchema };
 
-// 進捗の事象の 13 種類と、定義の中の名前（$defs）
+// 進捗の事象の 16 種類と、定義の中の名前（$defs）
 export const EVENT_DEFINITIONS = {
   "job.started": "JobStartedEvent",
   "phase.changed": "PhaseChangedEvent",
@@ -27,6 +30,9 @@ export const EVENT_DEFINITIONS = {
   "decision.delegated": "DecisionDelegatedEvent",
   "issue.requested": "IssueRequestedEvent",
   "issue.request_resolved": "IssueRequestResolvedEvent",
+  "section.started": "SectionStartedEvent",
+  "loop.lap_closed": "LoopLapClosedEvent",
+  "loop.stopped": "LoopStoppedEvent",
 } as const satisfies Record<ProgressEvent["type"], string>;
 
 export type EventType = keyof typeof EVENT_DEFINITIONS;
@@ -51,19 +57,21 @@ addFormats(ajv);
 ajv.addSchema(progressEventSchema);
 ajv.addSchema(runJobInstructionSchema);
 ajv.addSchema(ingestResponseSchema);
+ajv.addSchema(localRunnerDeclarationSchema);
 
 const eventValidators = new Map<EventType, ValidateFunction>(
   EVENT_TYPES.map((t) => [t, ajv.getSchema(`${progressEventSchema.$id}#/$defs/${EVENT_DEFINITIONS[t]}`)!]),
 );
 const instructionValidator = ajv.getSchema(runJobInstructionSchema.$id)!;
 const responseValidator = ajv.getSchema(ingestResponseSchema.$id)!;
+const declarationValidator = ajv.getSchema(localRunnerDeclarationSchema.$id)!;
 
 function firstViolation(v: ValidateFunction): ContractViolation {
   const e = v.errors?.[0];
   return { instancePath: e?.instancePath ?? "", keyword: e?.keyword ?? "unknown" };
 }
 
-// 進捗の事象 1 件を定義で確かめる。種類が 11 種類のどれでもなければ /type の enum で落とす
+// 進捗の事象 1 件を定義で確かめる。種類が定義のどれでもなければ /type の enum で落とす
 export function validateProgressEvent(value: unknown): ContractResult<ProgressEvent> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { ok: false, violation: { instancePath: "", keyword: "type" } };
@@ -84,4 +92,11 @@ export function validateRunJobInstruction(value: unknown): ContractResult<RunJob
 // 受け口の応答の本文が定義に合うか
 export function isIngestResponse(value: unknown): boolean {
   return responseValidator(value) as boolean;
+}
+
+// 手元のランナーの申告（登録と心拍の本文の一部）を定義で確かめる
+export function validateLocalRunnerDeclaration(value: unknown): ContractResult<LocalRunnerDeclaration> {
+  return declarationValidator(value)
+    ? { ok: true, value: value as LocalRunnerDeclaration }
+    : { ok: false, violation: firstViolation(declarationValidator) };
 }

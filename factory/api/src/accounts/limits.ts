@@ -32,9 +32,12 @@ export interface CurrentUsage {
   runningSprintRuns: number;
   // その UTC の暦月に使った token の数（チームではその席の利用者の分）。managed でなければ省いてよい
   tokensThisMonth?: number;
+  // 同じリポジトリで動いているスプリントの実行の数と、登録の同時の実行の数の宣言（I49。#2347）。省けば掛けない
+  runningRepoRuns?: number;
+  repoMaxRuns?: number | null;
 }
 
-export type LimitQuantity = "concurrent_sprint_runs" | "monthly_tokens" | "not_in_limits_table";
+export type LimitQuantity = "concurrent_sprint_runs" | "concurrent_repo_runs" | "monthly_tokens" | "not_in_limits_table";
 
 export interface LimitReason {
   quantity: LimitQuantity;
@@ -84,6 +87,16 @@ export function judgeLimits(
       limit: limits.concurrentSprintRuns,
       current: current.runningSprintRuns,
     });
+  }
+  // リポジトリの同時の数は、プランの同時の数と登録の宣言の小さい方
+  if (current.runningRepoRuns !== undefined) {
+    const declared = current.repoMaxRuns ?? null;
+    const repoLimit = declared === null ? limits.concurrentSprintRuns : Math.min(limits.concurrentSprintRuns, declared);
+    // 宣言の無いリポジトリの上限はプランの値で、アカウントの上限と同時に当たる。理由を重ねない
+    const accountHit = reasons.some((r) => r.quantity === "concurrent_sprint_runs");
+    if (!(current.runningRepoRuns < repoLimit) && (!accountHit || repoLimit < limits.concurrentSprintRuns)) {
+      reasons.push({ quantity: "concurrent_repo_runs", limit: repoLimit, current: current.runningRepoRuns });
+    }
   }
   if (limits.monthlyTokens !== null) {
     const tokens = current.tokensThisMonth;
