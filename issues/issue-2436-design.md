@@ -25,13 +25,14 @@
 | DBOS の試行（2026-11-02。下の「既存の部品で作る部分」） | 実測 | 1 つのプロセスの耐久ワークフローが待つメッセージを、サーバー無しで別のプロセスから送り、答えのイベントを読める |
 
 要求と受け入れ条件は #2436 の本文にある（コピーは `issues/issue-2436-requirements.md`）。この文書は「どう作るか」だけを扱う。
-決定の記録は [issue-2436-design-decisions.md](issue-2436-design-decisions.md) に分けた。部分の設計は次の 3 つに分けた。
+決定の記録は [issue-2436-design-decisions.md](issue-2436-design-decisions.md) に分けた。部分の設計は次の 4 つに分けた。
 
 | 文書 | 扱う部分 |
 | --- | --- |
 | [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) | 本番チャネルへの Pull Request の規則の改定（受け入れ条件 6b） |
 | [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md) | レーンのループが答えを待たずに次の周回へ進み、答えの後の処理を周回の境で行う（受け入れ条件 6a・6d〜6f） |
 | [issue-2436-design-approvals.md](issue-2436-design-approvals.md) | 問いをオーガナイザーへ集め、作業を持ち主のレーンと一時レーンへ渡す（受け入れ条件 6c〜6f） |
+| [issue-2436-design-failures.md](issue-2436-design-failures.md) | 一時レーンの失敗と異常系（受け入れ条件 6g・6h） |
 
 ### 既存の部品で作る部分
 
@@ -82,6 +83,7 @@
 | I2 | 並列の計画 | レーンの数は同時に動かせる数の上限以下、プランの本数の合計は 6 以下 | 検査が誤りとして返す |
 | I3 | 並列の計画 | 依存先は同じ計画のレーンで、依存は循環しない | 検査が誤りとして返す |
 | I4 | 並列の計画 | 触る場所が重なるレーンの組は警告に留める | 検査が警告として返す（終了コード 0） |
+| I19 | 並列の計画 | レーンの間で課題とマイルストーンが重ならない（`--milestones` の無いループのレーンは、ほかのレーンと重なるものとする） | 検査が誤りとして返す（[issue-2436-design-failures.md](issue-2436-design-failures.md) の異常系 7） |
 | I5 | 並列の計画 | 作る前から在る引継ぎ文書を上書きしない | `init` が 1 つも書かずに止まり、名前を返す |
 | I6 | 並列の進行 | 検査に誤りがある計画では、レーンを 1 本も起動しない | `run` が耐久ワークフローを始めずに誤りを返す |
 | I7 | 並列の進行 | 1 本のレーンは 1 つの計画の進行の中で 1 回だけ起動する（打ち直した `run` も二重に起動しない） | 起動は耐久ステップで、成功の記録（`started`）があるレーンは対象から外す。統括役に断られた記録だけのレーンは外さない |
@@ -329,6 +331,7 @@ pydantic のモデル `ParallelPlan` が正本の形を持つ。最初の入力�
 | --- | --- | --- | --- |
 | `parallel.py init <計画名>` | 標準入力に `plan.json` の下書き（`handoff` を除く） | 0。`plan.json`・`plan.md`・引継ぎ文書を書き、パスを `items` に返す | 1: 検査の誤り・在る引継ぎ文書（名前を返し、何も書かない）・在る計画名。2: 読めない・書けない |
 | `parallel.py check <計画名>` | — | 0。警告は `items`（`level: warning`）に並べる | 1: 誤りを `items`（`level: error`、`rule` に I1〜I3 の種類）に並べる。2: 計画が無い・読めない |
+| `parallel.py start <計画名>` | 環境変数 `NDF_RELAY_DIR` | 0。`run` をセッションから切り離して起動する（動いていれば今の pid を返す）。`metrics.next` に `wait` の 1 行 | 1: 別のセッションが持ち主として動いている（持ち主を返す）。ほかは `run` と同じ |
 | `parallel.py run <計画名>` | 環境変数 `NDF_RELAY_DIR` | 0。耐久の記録を開いて耐久ワークフローを始めるか続け、終わるまで動き続ける長命のプロセス。終われば要約を返す。再開なら `metrics.resumed: true` | 1: 計画が無い（置き場を返す）・検査の誤り（耐久ワークフローを始めない）。2: 耐久の記録を開けない・形式の版が違う。3: ラッパーの外・tmux が無い（耐久ワークフローを始めず、`items` にレーンごとの手で起動する 1 行、`status: manual`）。5: 同じ計画の `run` が動いている（`metrics.next` に `wait` の 1 行） |
 | `parallel.py wait <計画名> [--after <seq>] [--timeout 秒]` | — | 0: イベント `pause` の `seq` が `--after` を超えて `action` が `notice` / `release` / `confirmed` になったか、イベント `questions` の `seq` が進んだか、耐久ワークフローが終わった（`metrics.action` が `finished` / `stopped`、`items` にレーンごとの結果）。`metrics.seq` を返す | 2: 耐久の記録が無い。3: 上限に達した（既定 3600 秒。同じ `wait` を打ち直す） |
 | `parallel.py present <計画名> <連番> <提示> --approval <承認資料> --out <パス>` | 提示のプランの approval-facts が書いた承認資料 | 0。承認資料の承認したコミットと含む Pull Request を読み、レーンへ対応づけて `presented.json` を書き、範囲の Pull Request を `--out` へ空白区切りで書く。承認資料へレーンの内訳の節を足し、出し直しの提示なら加わった範囲（レーンと Pull Request）を載せる | 1: 承認資料に承認したコミットが無い。2: 読めない |
@@ -382,7 +385,7 @@ pydantic のモデル `ParallelPlan` が正本の形を持つ。最初の入力�
 
 ### オーガナイザーの conductor の手順
 
-conductor は `run` を背景で 1 本起動し、`wait` を背景で打って完了の通知を待つ。`run` は耐久ワークフローが終わるまで動き続け、止まりの間もメッセージをすぐに読む。返った `action` ごとに次の 1 手を打つ。オーガナイザーは作業を持たない。打つのは問いと答え・一時レーンの起動・終わったレーンを起こす 1 行だけで、起動・観測・まとめは耐久ワークフローが、配布のプランの実行は一時レーンが、答えの後の処理は持ち主のレーンが行う（I17・I18）。
+conductor は `parallel.py start` で `run` をセッションから切り離して 1 本起動し、`wait` を背景で打って完了の通知を待つ。`run` は耐久ワークフローが終わるまで動き続け、止まりの間もメッセージをすぐに読む。返った `action` ごとに次の 1 手を打つ。オーガナイザーは作業を持たない。打つのは問いと答え・一時レーンの起動・終わったレーンを起こす 1 行だけで、起動・観測・まとめは耐久ワークフローが、配布のプランの実行は一時レーンが、答えの後の処理は持ち主のレーンが行う（I17・I18）。
 
 | `wait` が返したもの | conductor がすること |
 | --- | --- |
@@ -394,7 +397,7 @@ conductor は `run` を背景で 1 本起動し、`wait` を背景で打って�
 
 承認ゲート 2 の問いは、一時レーンが本番のプランの承認ゲート 2 の判定で止まったときに `kind: gate2` の依頼として届く。提示 1 なら「承認」「差し戻す（宛先のレーンを選ぶ）」で、出し直しの提示 2（`represent: true`）なら加わった範囲を添えて「新しい範囲で出す」「最初の範囲だけ出す」「差し戻す」で問い、`confirm <計画名> <n>`・`confirm --take new` / `--take first`・`settle --rejected [--to <レーン>...]` を打つ。
 
-`run` のプロセスが落ちたとき（区間の切り替えを含む）は、同じ `run` を背景で打ち直す。耐久ワークフローは記録から続き、プロセスの居ない間に届いたメッセージを読む。
+`run` のプロセスが落ちたとき・オーガナイザーのセッションが切り替わったときは、`start` を打ち直す（[issue-2436-design-failures.md](issue-2436-design-failures.md) の異常系 1）。耐久ワークフローは記録から続き、プロセスの居ない間に届いたメッセージを読む。
 
 ```mermaid
 sequenceDiagram
@@ -523,7 +526,7 @@ graph TD
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 1・2、I5 | `init` が `plan.json`・`plan.md`・レーンの数だけの引継ぎ文書を作り、引継ぎ文書は計画のパスを持ち決まりを写さない。1 本でも在れば何も書かない | 在る引継ぎ文書を上書きするように壊す・一部だけ書いて止まるように壊すと落ちる |
-| 受け入れ条件 3、I1〜I4 | 名前の形・重なり・上限・合計 6・未知の依存・循環（`CycleError`）が誤り（終了コード 1、`rule` に I1〜I3）、触る場所の重なりが警告（0） | 循環の判定を外す・重なりを誤りにする・合計の比較を「より大きい」から「以上」へずらすと落ちる |
+| 受け入れ条件 3、I1〜I4・I19 | 名前の形・重なり・上限・合計 6・未知の依存・循環（`CycleError`）が誤り（終了コード 1、`rule` に I1〜I3）、触る場所の重なりが警告（0） | 循環の判定を外す・重なりを誤りにする・合計の比較を「より大きい」から「以上」へずらすと落ちる |
 | 受け入れ条件 4、I6・I8 | 検査に誤りがあると耐久ワークフローを始めず `relay.py spawn` を 1 回も打たない。依存のあるレーンは依存先が `stopped` になった後の周で起動する | 誤りがあっても起動する・依存を無視して起動すると落ちる |
 | 受け入れ条件 5 | `wait` が `notice`・`release`・終わりのいずれかで 0、無ければ上限で 3 を返す。レーンの承認待ちと停止は観測の耐久ステップが拾う | 変化を見落とす・上限を待たずに返すと落ちる |
 | 受け入れ条件 6、I9 | 依頼が 1 件届き配布が流れていなければ、他のレーンの依頼を待たずに提示 1 を組む。範囲は依頼の集合でなく提示したコミットの `main..<SHA>` で、依頼していないレーンの Pull Request も内訳に載る | 依頼が揃うまで待つ・範囲を依頼の Pull Request の和で作る・依頼の無いレーンを内訳から落とすと落ちる |
@@ -535,6 +538,7 @@ graph TD
 | 受け入れ条件 6a | 周回を「配布待ち」で締めて次の周回へ進む・配布待ちの周回の課題を選ばない・答えの後に残りを流す・差し戻しで締める（[issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md) の「テスト設計」） | 同じ文書の表のとおり |
 | 受け入れ条件 6b、I16 | `check-pr-base.sh` の通す・落とす、承認したコミットと `release/v<版>` の先頭の照合、版数の衝突の解消、Pull Request 2420 の件が起きないこと（[issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「テスト設計」） | 同じ文書の表のとおり |
 | 受け入れ条件 6c〜6f、I17・I18 | 問いの依頼をまとめて 1 回で問う・答えの時点の新しい依頼を続けて問う・レーンは待たずに残りへ進む・hook の送り先・質問待ちの再開・設計の 3 つの答え・配布の差し戻しの宛先・持ち主のレーンが答えの後の処理を行う・終わったレーンを起こす（[issue-2436-design-approvals.md](issue-2436-design-approvals.md) の「テスト設計」） | 同じ文書の表のとおり |
+| 受け入れ条件 6g・6h、I19 | 一時レーンの失敗と異常系の各行（[issue-2436-design-failures.md](issue-2436-design-failures.md) の「テストの観点」） | 同じ文書の表のとおり |
 | 受け入れ条件 7、I13 | オーガナイザーの印を持つ動いているラッパー 1 本を除いて数え、既定の 3 でレーン 3 本が起動できる。印が 2 本あれば 1 本だけ除く | 印を数えない・印をすべて除くと落ちる |
 | 受け入れ条件 6f、I13（一時レーンの上限） | レーン 3 本が動いている既定の 3 で、`--role helper` の起動は通り、2 本目の `helper` は断られる。印の無いラッパーの 4 本目は今どおり断られる | `helper` を数えずに何本でも通す・`helper` を通さない・印の無いラッパーが通ると落ちる |
 | 受け入れ条件 6f、I18（一時レーンの結果） | `release` と `confirmed` で `metrics.spawn` が一時レーンの 1 行を返す。一時レーンの `settle` で答えが立ち、`gate2` の依頼で `questions` が立つ。オーガナイザーは配布のプランを流さない | オーガナイザーがプランを流す・一時レーンの結果を受け取れないと落ちる |
@@ -550,7 +554,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2436 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md`。ループの側の触るファイルは [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md)、承認ゲート 1 の側は [issue-2436-design-approvals.md](issue-2436-design-approvals.md)、配布の規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある |
+| #2436 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md`。ループの側の触るファイルは [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md)、異常系の側は [issue-2436-design-failures.md](issue-2436-design-failures.md)、承認ゲート 1 の側は [issue-2436-design-approvals.md](issue-2436-design-approvals.md)、配布の規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある |
 
 ## 未確認のまま残ること
 

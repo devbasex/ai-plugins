@@ -57,8 +57,9 @@
 | `lane`・`issue` | レーン名・課題 | レーン名・課題（分かれば） |
 | 中身 | `pr`（設計 PR）・`report`（承認資料のパス）・`verdict`・`reasons`（MVV 判定） | `source`（区分）・`question`・`options`・`cwd`（作業の場所）・`ledger_id` |
 | `loop`・`sprint_state` | ループ名・スプリント状態ファイル | 同じ |
+| `stamp` | 設計 PR の先頭の SHA | 作業の場所の `HEAD` |
 
-連番はイベント `lane-<レーン名>` の `gate1_received`・`ask_received` に 1 を足したもの。
+連番はイベント `lane-<レーン名>` の `gate1_received`・`ask_received` に 1 を足したもの。答えは `stamp` をそのまま付けて返し、レーンは今の印と違えば答えを使わずに問い直す。同じ原因の問いのまとめ・4 回目の「直して出し直す」の選択肢・一時レーンの失敗の問いは [issue-2436-design-failures.md](issue-2436-design-failures.md) にある。承認ゲート 2 の依頼（`kind: gate2`）の `stamp` は承認資料の承認したコミットである。
 
 ## オーガナイザーがまとめて問う
 
