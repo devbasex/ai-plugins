@@ -9,6 +9,7 @@ import { EmptyState } from "../ui/EmptyState.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { Section } from "../ui/Section.tsx";
+import { TextField } from "../ui/TextField.tsx";
 import { issueNumbers, useSprintState } from "./parts.tsx";
 
 // リポジトリの画面（#2186）。導入の案内・GitHub で確かめる・候補から登録・一覧と外す・実行の状態
@@ -110,12 +111,14 @@ export function RepositoriesPage() {
               <div className="ui-row">
                 <strong className="ui-wrap">{r.full_name}</strong>{" "}
                 <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/sprints/new`}>{t("screens.newSprint")}</Link>{" "}
+                <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/loops`}>{t("repositories.loops")}</Link>{" "}
                 {owner && (
                   <Button variant="danger" onClick={() => void act(() => api.removeRepository(accountId, r.repository_id))}>
                     {t("common.remove")}
                   </Button>
                 )}
               </div>
+              {owner && <MaxConcurrentField repository={r} onSave={(value) => act(() => api.updateRepository(accountId, r.repository_id, value))} />}
               <ul className="ui-plain-list">
                 {(runs[r.repository_id] ?? []).map((s) => {
                   const values = { issues: issueNumbers(s), state: sprintState(s.state).label, reason: s.failure_reason ?? "" };
@@ -134,5 +137,28 @@ export function RepositoriesPage() {
       )}
       {message && <Alert>{message}</Alert>}
     </>
+  );
+}
+
+// 同時の実行の数の宣言（持ち主だけ）。空は宣言を外し、プランの値だけで数える
+function MaxConcurrentField({ repository, onSave }: { repository: Repository; onSave: (value: number | null) => Promise<void> }) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState(repository.max_concurrent_runs == null ? "" : String(repository.max_concurrent_runs));
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <form
+      className="ui-row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const raw = value.trim();
+        const n = Number(raw);
+        if (raw !== "" && (!Number.isInteger(n) || n < 1 || n > 100)) return setError(t("repositories.maxConcurrentRange"));
+        setError(null);
+        void onSave(raw === "" ? null : n);
+      }}
+    >
+      <TextField label={t("repositories.maxConcurrent")} inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} error={error} />
+      <Button type="submit">{t("repositories.saveMaxConcurrent")}</Button>
+    </form>
   );
 }

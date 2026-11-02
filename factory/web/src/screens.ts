@@ -20,7 +20,8 @@ export type ScreenId =
   | "approvals"
   | "billing"
   | "runners"
-  | "loops";
+  | "loops"
+  | "loopDetail";
 
 export interface Screen {
   id: ScreenId;
@@ -49,7 +50,8 @@ export const SCREENS: readonly Screen[] = [
   { id: "approvals", path: null, roles: ALL_ROLES, nav: false, status: "planned" },
   { id: "billing", path: null, roles: OWNERS, nav: false, status: "planned" },
   { id: "runners", path: null, roles: OWNERS, nav: false, status: "planned" },
-  { id: "loops", path: null, roles: ALL_ROLES, nav: false, status: "planned" },
+  { id: "loops", path: "/accounts/:accountId/repositories/:repositoryId/loops", roles: ALL_ROLES, nav: false, status: "available" },
+  { id: "loopDetail", path: "/accounts/:accountId/loops/:loopId", roles: ALL_ROLES, nav: false, status: "available" },
 ];
 
 export type AvailableScreen = Screen & { path: string };

@@ -15,6 +15,7 @@ const SPRINT_STATE_TONES = {
   starting: "info",
   running: "info",
   awaiting_approval: "warning",
+  awaiting_reset: "warning",
   done: "success",
   stopped: "neutral",
   failed: "danger",

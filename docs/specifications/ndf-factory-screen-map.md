@@ -32,16 +32,17 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | `/account` | 自分のアカウント | 個人・管理者・席 | あり | 利用者の ID・個人のプランと実行の形態・使える量・チームの一覧・ログアウト（accounts-and-plans） |
 | `/teams/new` | チームを作る | 個人 | あり | Team を作る（accounts-and-plans） |
 | `/accounts/:accountId` | チームのアカウント | 管理者・席 | あり | 席の追加・種類の変更・削除（管理者）・実行の形態（管理者）・使える量（accounts-and-plans） |
-| `/accounts/:accountId/repositories` | リポジトリ | 個人・管理者・席 | あり | 導入の案内・登録と外す（個人・管理者）・実行の状態（[runs-and-runner](ndf-factory-runs-and-runner.md)「画面」） |
+| `/accounts/:accountId/repositories` | リポジトリ | 個人・管理者・席 | あり | 導入の案内・登録と外す（個人・管理者）・同時の実行の数の宣言（個人・管理者）・実行の状態（[runs-and-runner](ndf-factory-runs-and-runner.md)「画面」） |
 | `/accounts/:accountId/model-credential` | キーの持ち込み | 個人・管理者 | あり | キーの保存と消去・外部 ID（runs-and-runner） |
 | `/accounts/:accountId/repositories/:repositoryId/sprints/new` | スプリントを始める | 個人・管理者・席 | あり | 課題の候補・選び直し・開始（runs-and-runner） |
 | `/accounts/:accountId/sprints` | スプリントの一覧 | 個人・管理者・席 | あり（見本） | フェーズと状態・取り消し |
 | `/accounts/:accountId/sprints/:sprintRunId` | スプリントの詳細 | 個人・管理者・席 | あり（見本） | 工程・PR・CI・承認ゲート・起票の依頼（[issue-requests](ndf-factory-issue-requests.md)） |
+| `/accounts/:accountId/repositories/:repositoryId/loops` | ループ | 個人・管理者・席 | あり | 開発ループの一覧（名前・選定の対象・状態・周回の数・費用・予算の残り・最後に動いた時刻・止まった理由）・始める |
+| `/accounts/:accountId/loops/:loopId` | ループの詳細 | 個人・管理者・席 | あり | 周回・周回の実行と区間の数・利用上限の再開の時刻・人の判断待ちと答え・予算の変更・止める・次の周回を始める |
 | `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | 予定 | 順位の表と棚卸しの記録 |
 | 未定 | 承認 | 個人・管理者・席 | 予定 | 承認の依頼・Web からの承認・通知 |
 | 未定 | 請求と使用量 | 個人・管理者 | 予定 | プランの料金・使用量の台帳・決済 |
 | 未定 | 手元のランナー | 個人・管理者 | 予定 | ランナーの登録・心拍 |
-| 未定 | ループ | 個人・管理者・席 | 予定 | 開発ループと並行する実行の見え方 |
 
 ## ナビゲーション
 
@@ -52,6 +53,7 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | 役割 | 主な動線 |
 | --- | --- |
 | 個人 | ログイン → 自分のアカウント → リポジトリ → スプリントを始める → スプリントの一覧 → スプリントの詳細 |
+| 開発ループを回す人（個人・管理者・席） | リポジトリ → ループ（始める）→ ループの詳細（人の判断待ちに答える・次の周回を始める）→ スプリントの詳細 |
 | Team の管理者 | ログイン → 自分のアカウント → チームのアカウント（席の管理・実行の形態）→ キーの持ち込み・リポジトリ |
 | 席 | ログイン → 自分のアカウント → チームのアカウント → リポジトリ → スプリントを始める → スプリントの一覧 |
 
