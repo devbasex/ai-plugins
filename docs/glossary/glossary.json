@@ -4995,7 +4995,6 @@
     {
       "term": "手元のマシン",
       "context": "ndf-factory",
-      "code": "local_runner",
       "meaning": "利用者の環境に登録し、同時のジョブの数まで実行ジョブを受け取るマシン。受け取った実行ジョブごとに別のランナーが動く",
       "deprecated": [
         "手元のランナー"
