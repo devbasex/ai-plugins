@@ -24,6 +24,10 @@ export const WRITABLE_TYPES: Record<EventSource, ReadonlySet<EventType>> = {
     "job.finished",
     "decision.delegated",
     "issue.requested",
+    // 区間とループの事象（#2347）。ランナーが送り、周回・判断待ち・停止の理由として読まれる
+    "section.started",
+    "loop.lap_closed",
+    "loop.stopped",
   ]),
   api: new Set<EventType>(["gate.answered"]),
   github: new Set<EventType>(["pr.updated", "ci.updated"]),

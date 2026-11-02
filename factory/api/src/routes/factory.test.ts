@@ -4,7 +4,9 @@ import { MemoryAccountStore } from "../accounts/memory-store.ts";
 import { CredentialService, type SecretsPort } from "../credentials/service.ts";
 import { createApiApp, type LogEntry } from "../handlers/api.ts";
 import { RepositoryService } from "../repositories/service.ts";
+import { memoryProgressReader } from "../progress/read.ts";
 import { CANDIDATE_FALLBACK_NOTE, type CandidateModel } from "../runs/candidates.ts";
+import { LoopControl } from "../runs/loops.ts";
 import { createRunsHarness, type RunsHarness } from "../testing/runs.ts";
 import { createTokenKit, type TokenKit } from "../testing/tokens.ts";
 import type { TestResponse } from "../testing/app.ts";
@@ -71,6 +73,7 @@ beforeEach(async () => {
     repositories: new RepositoryService({ table: h.table, github: h.github, proofKey: async () => key }),
     credentials: new CredentialService(h.table, secrets),
     control: h.control,
+    loops: new LoopControl({ table: h.table, control: h.control, reader: memoryProgressReader(h.progress), now: () => h.clock.now }),
     table: h.table,
     github: h.github,
     candidateModel: (s: "ranking" | "recent", i: { number: number; title: string }[]) => model.fn(s, i),

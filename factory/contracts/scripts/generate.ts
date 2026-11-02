@@ -7,7 +7,7 @@ import { compile, type JSONSchema } from "json-schema-to-typescript";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-export const SCHEMAS = ["progress-event", "run-job-instruction", "ingest-response"] as const;
+export const SCHEMAS = ["progress-event", "run-job-instruction", "ingest-response", "local-runner-declaration"] as const;
 
 const BANNER = "// 生成したファイル。手で直さない。定義（schemas/）を直して `npm run generate -w contracts` で作り直す";
 

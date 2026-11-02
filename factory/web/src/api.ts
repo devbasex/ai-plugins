@@ -59,6 +59,8 @@ export interface Repository {
   installation_id: number;
   registered_at: string;
   active_sprint_runs?: number;
+  // 同時の実行の数の宣言。無いか null ならプランの値だけで数える
+  max_concurrent_runs?: number | null;
 }
 
 export interface ModelCredential {
@@ -95,6 +97,74 @@ export interface SprintRunSummary {
   created_at: string;
 }
 
+// #2347 の開発ループ（factory/contracts/openapi/loops.yaml）
+export type LoopState = "running" | "between_laps" | "awaiting_approval" | "stopped" | "cancelled";
+export type LoopWaitReason = "slots" | "legacy_version" | "user_start";
+
+export interface LoopBudget {
+  laps?: number | null;
+  usd?: number | null;
+  hours?: number | null;
+}
+
+export interface LoopRow {
+  loop_id: string;
+  name: string;
+  milestones: string[];
+  state: LoopState;
+  wait_reason: LoopWaitReason | null;
+  laps_closed: number;
+  cost_usd: number;
+  budget: LoopBudget;
+  budget_remaining: LoopBudget;
+  last_run_at: string | null;
+  stop_condition: string | null;
+  stop_detail: string | null;
+}
+
+export interface LoopStartInput {
+  name: string;
+  milestones: string[];
+  budget?: LoopBudget;
+}
+
+export type LoopDecision = "approved" | "rejected";
+
+export interface LoopPending {
+  number: number;
+  reason: string;
+  lap: number;
+  answer: { decision: LoopDecision; pr: number | null } | null;
+}
+
+export interface LoopLap {
+  lap: number;
+  issues: number[];
+  // NDF の loop.json の周回の結果の語（完了・失敗・人へ戻した）をそのまま持つ
+  result: string;
+  version: string | null;
+  cost_usd: number;
+  seconds: number;
+}
+
+export interface LoopRun {
+  sprint_run_id: string;
+  lap: number;
+  state: string;
+  failure_reason: string | null;
+  finish_reason: "section_limit" | "usage_limit" | null;
+  resume_at: string | null;
+  cost_usd: number;
+  sections: number;
+}
+
+export interface LoopDetail {
+  loop: LoopRow;
+  laps: LoopLap[];
+  runs: LoopRun[];
+  pending: LoopPending[];
+}
+
 export interface Api {
   me(): Promise<Me>;
   account(id: string): Promise<AccountDetail>;
@@ -116,14 +186,26 @@ export interface Api {
   startSprintRun(id: string, repositoryId: number, issues: number[]): Promise<{ sprint_run_id: string; state: string }>;
   // repositoryId を省くとアカウントの新しい順の 50 件（画面は 1 回だけ呼んでリポジトリごとに分ける）
   sprintRuns(id: string, repositoryId?: number): Promise<{ sprint_runs: SprintRunSummary[] }>;
+  // 実行の ID の配列で受け、見つかった要素の配列を返す（1 件のときも要素 1 個の配列）。見つからない ID の要素は返さない
+  sprintRunDetails(id: string, sprintRunIds: string[]): Promise<SprintRunSummary[]>;
   cancelSprintRun(id: string, sprintRunId: string): Promise<{ state: string }>;
+  // 同時の実行の数の宣言（持ち主だけ）。null は宣言を外す
+  updateRepository(id: string, repositoryId: number, maxConcurrentRuns: number | null): Promise<Repository>;
+  loops(id: string, repositoryId: number): Promise<{ loops: LoopRow[] }>;
+  startLoop(id: string, repositoryId: number, input: LoopStartInput): Promise<{ loop_id: string; state: LoopState }>;
+  // ループの ID の配列で受け、見つかった要素の配列を返す。見つからない ID の要素は返さない
+  loopDetails(id: string, loopIds: string[]): Promise<LoopDetail[]>;
+  updateLoopBudget(id: string, loopId: string, budget: LoopBudget): Promise<LoopRow>;
+  cancelLoop(id: string, loopId: string): Promise<{ state: LoopState }>;
+  requestNextLap(id: string, loopId: string): Promise<{ state: LoopState }>;
+  answerLoop(id: string, loopId: string, issue: number, decision: LoopDecision, pr?: number): Promise<{ pending: LoopPending[] }>;
 }
 
 // 401 では token を消す。画面は ApiFailure の status を見てログインへ移る
 export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (...a) => fetch(...a)): Api {
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = auth.getToken();
-    if (!token) throw new ApiFailure(401, "unauthorized", "ログインしてください");
+    if (!token) throw new ApiFailure(401, "unauthorized", "unauthorized");
     const res = await doFetch(`${apiUrl}${path}`, {
       method,
       headers: {
@@ -163,6 +245,32 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     startSprintRun: (id, repository_id, issues) => request("POST", `/accounts/${seg(id)}/sprint-runs`, { repository_id, issues }),
     sprintRuns: (id, repositoryId) =>
       request("GET", `/accounts/${seg(id)}/sprint-runs${repositoryId === undefined ? "" : `?repository_id=${repositoryId}`}`),
+    // 詳細の経路はまだ無いため、アカウントの新しい順の 50 件から選ぶ。#2172 が詳細の経路を足したらここだけを差し替える
+    sprintRunDetails: async (id, sprintRunIds) => {
+      const wanted = new Set(sprintRunIds);
+      const { sprint_runs } = await request<{ sprint_runs: SprintRunSummary[] }>("GET", `/accounts/${seg(id)}/sprint-runs`);
+      return sprint_runs.filter((r) => wanted.has(r.sprint_run_id));
+    },
     cancelSprintRun: (id, sprintRunId) => request("POST", `/accounts/${seg(id)}/sprint-runs/${seg(sprintRunId)}/cancel`),
+    updateRepository: (id, repositoryId, max_concurrent_runs) => request("PATCH", `/accounts/${seg(id)}/repositories/${repositoryId}`, { max_concurrent_runs }),
+    loops: (id, repositoryId) => request("GET", `/accounts/${seg(id)}/repositories/${repositoryId}/loops`),
+    startLoop: (id, repositoryId, input) => request("POST", `/accounts/${seg(id)}/repositories/${repositoryId}/loops`, input),
+    // 経路は 1 件ずつ読む。404 の ID は要素を返さない
+    loopDetails: async (id, loopIds) => {
+      const found = await Promise.all(
+        loopIds.map((loopId) =>
+          request<LoopDetail>("GET", `/accounts/${seg(id)}/loops/${seg(loopId)}`).catch((err: unknown) => {
+            if (err instanceof ApiFailure && err.status === 404) return null;
+            throw err;
+          }),
+        ),
+      );
+      return found.filter((d): d is LoopDetail => d !== null);
+    },
+    updateLoopBudget: (id, loopId, budget) => request("PATCH", `/accounts/${seg(id)}/loops/${seg(loopId)}`, { budget }),
+    cancelLoop: (id, loopId) => request("POST", `/accounts/${seg(id)}/loops/${seg(loopId)}/cancel`),
+    requestNextLap: (id, loopId) => request("POST", `/accounts/${seg(id)}/loops/${seg(loopId)}/next-lap`),
+    answerLoop: (id, loopId, issue, decision, pr) =>
+      request("POST", `/accounts/${seg(id)}/loops/${seg(loopId)}/answers`, { issue, decision, ...(pr === undefined ? {} : { pr }) }),
   };
 }

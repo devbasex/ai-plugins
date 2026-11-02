@@ -766,3 +766,129 @@ def test_imports_resolve_from_the_scripts_dir_and_relative_levels(tmp_path: Path
     (s / "pkg/other.py").write_text("import os\nQ = os.getenv('NDF_ABS')\n")
     env = PyExtractor(tmp_path, {}).facts("plugins/ndf/skills/k/scripts/e.py")["env"]
     assert {"NDF_REL", "NDF_ABS"} <= set(env), env
+
+
+FORM = {
+    "name": "f",
+    "summary": "s",
+    "rule": "r",
+    "writers": ["a"],
+    "readers": ["b"],
+    "cases": [{"text": "t", "blocks": [], "launch": False}],
+}
+
+
+def test_form_items_are_checked_and_unknown_keys_stop_with_2(tree: Path):
+    """受け渡しの形（forms/。#2347 の決定 8）は鍵と例の組の型を確かめ、知らない鍵を断る。"""
+    f = tree / "plugins/ndf/contracts/forms/f.json"
+    wj(f, FORM)
+    assert run(tree)[0] == 0
+    wj(f, dict(FORM, extra=1))
+    assert run(tree)[0] == 2
+    wj(f, dict(FORM, cases=[{"text": "t", "blocks": [1], "launch": False}]))
+    assert run(tree)[0] == 2
+
+
+# --- model.load: 区分ごとの読み込みと形の検査（現状固定） ---
+
+from contracts_lib import model as _model  # noqa: E402
+
+LOAD_ENTRY = {
+    "version": 1,
+    "path": "plugins/ndf/scripts/a.py",
+    "summary": "s",
+    "args": {"options": [], "positionals": []},
+    "env": [],
+    "settings": [],
+    "stdin": "none",
+    "stdout": "json",
+    "writes": [],
+    "reads": [],
+    "exit": {"0": "ok"},
+    "external": "x",
+}
+FILE_ITEM = {"name": "st", "pattern": "a/*.json", "kind": "state", "place": "worktree", "skill_readers": []}
+SETTING_ITEM = {"file": "s.json", "place": "main", "scope": "team", "readers": ["r"], "keys": {"k": {"summary": "s"}}, "summary": "s"}
+ENV_ITEM = {"name": "NDF_X", "set_by": "user", "summary": "s"}
+
+
+def _load_one(tmp_path: Path, kind: str, fname: str, data) -> "_model.Contracts":
+    d = tmp_path / _model.CONTRACTS / kind
+    d.mkdir(parents=True, exist_ok=True)
+    (d / fname).write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+    return _model.load(tmp_path)
+
+
+def test_load_empty_tree_returns_empty_contracts(tmp_path: Path):
+    c = _model.load(tmp_path)
+    assert (c.entrypoints, c.entry_files, c.files, c.settings, c.env, c.forms) == ({}, {}, {}, {}, {}, {})
+
+
+def test_load_reads_every_kind_into_its_map(tmp_path: Path):
+    _load_one(tmp_path, "entrypoints", _model.entry_file_name(LOAD_ENTRY["path"]), LOAD_ENTRY)
+    _load_one(tmp_path, "files", "st.json", FILE_ITEM)
+    _load_one(tmp_path, "settings", "s.json.json", SETTING_ITEM)
+    _load_one(tmp_path, "env", "NDF_X.json", ENV_ITEM)
+    c = _load_one(tmp_path, "forms", "f.json", FORM)
+    assert c.entrypoints == {LOAD_ENTRY["path"]: LOAD_ENTRY}
+    assert c.entry_files == {LOAD_ENTRY["path"]: "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__a.py.json"}
+    assert c.files == {"st": FILE_ITEM}
+    assert c.settings == {"s.json": SETTING_ITEM}
+    assert c.env == {"NDF_X": ENV_ITEM}
+    assert c.forms == {"f": FORM}
+
+
+def test_load_ignores_non_json_files(tmp_path: Path):
+    c = _load_one(tmp_path, "env", "NDF_X.txt", "not json")
+    assert c.env == {}
+
+
+@pytest.mark.parametrize(
+    "kind, fname, data, message",
+    [
+        ("env", "NDF_X.json", "{", "契約の項目を読めない"),
+        ("env", "NDF_X.json", "[]", "最上位がオブジェクトでない"),
+        ("entrypoints", "wrong.json", LOAD_ENTRY, "ファイル名は plugins__ndf__scripts__a.py.json にする"),
+        ("entrypoints", "plugins__ndf__scripts__a.py.json", dict(LOAD_ENTRY, callers=[]), "callers と external はどちらか 1 つ"),
+        ("entrypoints", "plugins__ndf__scripts__a.py.json", dict(LOAD_ENTRY, stdin="bad"), "stdin は"),
+        ("entrypoints", "plugins__ndf__scripts__a.py.json", dict(LOAD_ENTRY, exit={}), "exit は終了コード"),
+        ("files", "st.json", dict(FILE_ITEM, kind="bad"), "kind は state/record/result/report のどれか: bad"),
+        ("files", "st.json", dict(FILE_ITEM, place="bad"), "place は"),
+        ("files", "other.json", FILE_ITEM, "ファイル名は st.json にする"),
+        ("files", "st.json", {k: v for k, v in FILE_ITEM.items() if k != "pattern"}, "pattern が無い"),
+        ("settings", "s.json.json", dict(SETTING_ITEM, scope="bad"), "scope は"),
+        ("settings", "s.json.json", dict(SETTING_ITEM, readers=[1]), "readers は文字列の並び"),
+        ("settings", "s.json.json", dict(SETTING_ITEM, keys={"k": "s"}), "keys.k は summary と"),
+        ("settings", "s.json.json", dict(SETTING_ITEM, keys={"k": {"summary": "s", "x": 1}}), "keys.k は summary と"),
+        (
+            "settings",
+            "s.json.json",
+            dict(SETTING_ITEM, keys={"k": {"summary": "s", "place": "tmp"}}),
+            "keys.k.place は worktree / main のどれか",
+        ),
+        ("settings", "other.json", SETTING_ITEM, "ファイル名は s.json.json にする"),
+        ("env", "NDF_X.json", dict(ENV_ITEM, set_by="bad"), "set_by は"),
+        ("env", "NDF_Y.json", ENV_ITEM, "ファイル名は NDF_X.json にする"),
+        ("env", "NDF_X.json", dict(ENV_ITEM, summary=1), "summary の型が違う"),
+        ("forms", "g.json", FORM, "ファイル名は f.json にする"),
+        ("forms", "f.json", dict(FORM, cases=[]), "cases は 1 つ以上"),
+        ("forms", "f.json", dict(FORM, cases=["x"]), "cases[0] はオブジェクト"),
+    ],
+)
+def test_load_rejects_malformed_items_per_kind(tmp_path: Path, kind, fname, data, message):
+    with pytest.raises(_model.ContractError) as e:
+        _load_one(tmp_path, kind, fname, data)
+    assert message in str(e.value)
+
+
+def test_load_accepts_setting_key_extras_and_place(tmp_path: Path):
+    keys = {"k": {"summary": "s", "migrate_from": "o", "duplicates": [], "place": "worktree"}}
+    c = _load_one(tmp_path, "settings", "s.json.json", dict(SETTING_ITEM, keys=keys))
+    assert c.settings["s.json"]["keys"] == keys
+
+
+def test_load_stops_at_the_first_bad_item_in_name_order(tmp_path: Path):
+    _load_one(tmp_path, "env", "NDF_A.json", dict(ENV_ITEM, name="NDF_A"))
+    with pytest.raises(_model.ContractError) as e:
+        _load_one(tmp_path, "env", "NDF_B.json", dict(ENV_ITEM, name="NDF_B", set_by="bad"))
+    assert str(e.value).startswith("NDF_B.json:")

@@ -1,5 +1,6 @@
-// 実行の制御（#2186 の F5〜F8）。開始の判定・枠・token の発行・起動・停止の知らせ・見回り・取り消し・再開の要求・渡す口。
-// ジョブと実行の状態の移りは、タスクの停止の後（停止の知らせか見回り）だけで行う（決定 13）
+// 実行の制御（#2186 の F5〜F8、#2347 の F3・F7・F10）。開始の判定・枠・持ち分・token の発行・起動・停止の知らせ・見回り・
+// 取り消し・再開の要求・渡す口。ジョブと実行の状態の移りは、タスクの停止の後（停止の知らせか見回り）だけで行う（決定 13）。
+// 開発ループの行の中身はループの制御（loops.ts）の関数が組み、ここは実行と同じトランザクションへ入れるだけにする（#2347 の決定 2）
 import { randomUUID } from "node:crypto";
 import type { JobFinishedEvent, RunJobInstruction } from "@ndf-factory/contracts";
 import { judgeLimits } from "../accounts/limits.ts";
@@ -9,12 +10,28 @@ import type { GitHubPort } from "../github/port.ts";
 import { finishedKey } from "../progress/authorize.ts";
 import type { ProgressReader } from "../progress/read.ts";
 import { signRunJobToken, type RunJobSigningKey } from "../progress/run-job-token.ts";
-import { isTerminalJob, isTerminalRun, type FailureReason, type RunJob, type SprintRun } from "./model.ts";
+import { loopWriteAfterRun, loopWriteOnResume, type RunOutcome } from "./loops.ts";
+import {
+  isTerminalJob,
+  isTerminalLoop,
+  isTerminalRun,
+  type CreateRunGuards,
+  type DevLoop,
+  type FailureReason,
+  type LoopJobInput,
+  type LoopWrite,
+  type Registration,
+  type RunJob,
+  type SprintRun,
+} from "./model.ts";
 import type { RunnerPlatform } from "./platform.ts";
 import type { RunsTable } from "./table.ts";
+import { isLegacyVersion } from "./version.ts";
 
 export const DEFAULT_TIMEOUT_SECONDS = 28_800;
 export const DEFAULT_TOKEN_TTL_SECONDS = 32_400;
+// リセット時刻を読めないときの待ち（NDF の supervise の LIMIT_RETRY と同じ。#2347 の決定 9）
+export const DEFAULT_USAGE_LIMIT_RETRY_SECONDS = 900;
 // pending のまま残ってよい時間（Fargate の起動）
 export const PENDING_LIMIT_SECONDS = 15 * 60;
 export const MAX_ISSUES = 20;
@@ -24,6 +41,11 @@ export interface RunControlConfig {
   timeoutSeconds: number;
   tokenTtlSeconds: number;
   ingestUrl: string;
+  // 並行を許す NDF の版の下限（#2347 の決定 12）。無ければ並行を許さない
+  parallelMinVersion?: string | null;
+  // local のループも自動で次の周回を起こす（I52）。既定 false
+  localLoopAutostart?: boolean;
+  usageLimitRetrySeconds?: number;
 }
 
 // 設定を読む。token の期限が打ち切りの時間以下なら断る（I41）
@@ -42,7 +64,14 @@ export function runControlConfig(env: Record<string, string | undefined>): RunCo
   }
   const ingestUrl = env.INGEST_URL;
   if (!ingestUrl) throw new Error("環境変数 INGEST_URL がありません");
-  return { timeoutSeconds, tokenTtlSeconds, ingestUrl };
+  return {
+    timeoutSeconds,
+    tokenTtlSeconds,
+    ingestUrl,
+    parallelMinVersion: env.NDF_PARALLEL_MIN_VERSION || null,
+    localLoopAutostart: env.LOCAL_LOOP_AUTOSTART === "true",
+    usageLimitRetrySeconds: num("USAGE_LIMIT_RETRY_SECONDS", DEFAULT_USAGE_LIMIT_RETRY_SECONDS),
+  };
 }
 
 export interface RunControlDeps {
@@ -55,9 +84,18 @@ export interface RunControlDeps {
   // 開始の時点のマーケットプレイスの NDF の版（決定 3）
   ndfVersion: () => Promise<string>;
   config: RunControlConfig;
+  // 自動で起こすジョブ（リセット時刻の後の再開）の前に、実行を始めた利用者の今の文脈を引く。席が無ければ null
+  resolveContext?: (accountId: string, userId: string) => Promise<AccountContext | null>;
   now?: () => Date;
   newId?: () => string;
   log?: (entry: Record<string, unknown>) => void;
+}
+
+// ループの制御が渡す口（停止の後と見回りで次の周回を起こす）。循環を避けるため、組み立ての後に差し込む
+export interface LoopHooks {
+  startNextLap(accountId: string, loopId: string): Promise<void>;
+  wakeWaitingLoops(accountId: string): Promise<void>;
+  sweepLoops(): Promise<void>;
 }
 
 export type ResumeRejectedCode = "not_found" | "not_awaiting_approval" | "sprint_run_busy";
@@ -74,12 +112,34 @@ export interface StartInput {
   issues: unknown;
 }
 
+// 手元のランナーの申告（#2189 の登録と心拍。契約の local-runner-declaration）
+export interface LocalRunner {
+  runnerId: string;
+  maxJobs?: number;
+}
+
 const RESULT_TO_RUN = { done: "done", stopped: "stopped", failed: "failed" } as const;
+
+// 取り消し・gate・local の利用上限のどれでもない終わりの、実行の状態と失敗の理由。
+// local 以外の利用上限は failed（job_failed）。failed のとき理由はジョブの停止の理由 → control が書いた終わりなら reason → job_failed の順
+function runEndOf(
+  result: keyof typeof RESULT_TO_RUN,
+  finishReason: string | null,
+  job: RunJob,
+  finished: JobFinishedEvent,
+  reason: FailureReason,
+): { state: (typeof RESULT_TO_RUN)[keyof typeof RESULT_TO_RUN]; failure: FailureReason | null } {
+  if (result === "stopped" && finishReason === "usage_limit") return { state: "failed", failure: "job_failed" };
+  const state = RESULT_TO_RUN[result];
+  if (state !== "failed") return { state, failure: null };
+  return { state, failure: job.stopReason ?? (finished.source === "control" ? reason : "job_failed") };
+}
 
 export class RunControl {
   private readonly now: () => Date;
   private readonly newId: () => string;
   private readonly log: (entry: Record<string, unknown>) => void;
+  private hooks: LoopHooks | null = null;
 
   constructor(private readonly deps: RunControlDeps) {
     this.now = deps.now ?? (() => new Date());
@@ -87,11 +147,20 @@ export class RunControl {
     this.log = deps.log ?? ((entry) => console.log(JSON.stringify(entry)));
   }
 
+  setLoopHooks(hooks: LoopHooks): void {
+    this.hooks = hooks;
+  }
+
+  get config(): RunControlConfig {
+    return this.deps.config;
+  }
+
   private iso(): string {
     return this.now().toISOString();
   }
 
-  // 開始。確かめの順は 課題の形（400）→ 登録（404）→ 課題（400）→ キー（409）→ 導入（409）→ 使える量（409）
+  // 開始。確かめの順は 課題の形（400）→ 登録（404）→ 課題（400）→ ループのマイルストーン（409）→ キー（409）→ 導入（409）→
+  // 使える量（409）→ 版（409）→ 課題の持ち分（409）
   async startSprintRun(ctx: AccountContext, input: StartInput): Promise<{ sprint_run_id: string; state: "starting" }> {
     const { table, github } = this.deps;
     const repositoryId = input.repositoryId;
@@ -108,28 +177,84 @@ export class RunControl {
     }
     const registration = await table.getRegistration(ctx.accountId, repositoryId as number);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
-    const { invalid } = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues as number[]);
-    if (invalid.length > 0) throw new InvalidRequestError("開いている課題ではありません", "invalid_issues", { numbers: invalid });
+    const check = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues as number[]);
+    if (check.invalid.length > 0) throw new InvalidRequestError("開いている課題ではありません", "invalid_issues", { numbers: check.invalid });
+    // 動いているループのマイルストーンに属する課題は断る（ループの周回の選定と取り合う。決定 11）
+    const titles = [...new Set(Object.values(check.milestones ?? {}).filter((t): t is string => typeof t === "string" && t !== ""))];
+    await this.refuseIssuesInLoop(ctx.accountId, registration.repositoryId, titles, check.milestones ?? {});
 
+    const created = await this.admit(ctx, registration, {
+      issues: issues as number[],
+      milestoneTitles: titles,
+      milestonesOf: check.milestones ?? {},
+      start: "new",
+    });
+    if (created === "loop_changed") throw new ServiceUnavailableError("sprint_run_unavailable");
+    return { sprint_run_id: created.sprintRunId, state: "starting" };
+  }
+
+  private async refuseIssuesInLoop(accountId: string, repositoryId: number, titles: string[], milestonesOf: Record<number, string | null>): Promise<void> {
+    for (const title of titles) {
+      const share = await this.deps.table.getMilestoneShare(accountId, repositoryId, title);
+      if (share) await this.throwIssueInLoop(accountId, share.loopId, title, milestonesOf);
+    }
+  }
+
+  private async throwIssueInLoop(accountId: string, loopId: string, title: string, milestonesOf: Record<number, string | null>): Promise<never> {
+    const loop = await this.deps.table.getLoop(accountId, loopId);
+    const numbers = Object.entries(milestonesOf)
+      .filter(([, t]) => t === title)
+      .map(([n]) => Number(n));
+    throw new ConflictError("issue_in_loop", `課題はループ ${loop?.name ?? loopId} が選定の対象にしているマイルストーンにあります`, {
+      numbers,
+      loop_name: loop?.name ?? null,
+    });
+  }
+
+  // 並行を許さない古い版として数えるか（決定 12）。移行の済みの行が無い間は、版によらず古い版として扱う
+  private async isLegacy(ndfVersion: string): Promise<boolean> {
+    if (!(await this.deps.table.isMigrated())) return true;
+    return isLegacyVersion(ndfVersion, this.deps.config.parallelMinVersion);
+  }
+
+  // 開始と周回の開始に共通の判定と書き込み。断るときは ApiError を投げる。ループの行が変わっていれば loop_changed
+  private async admit(
+    ctx: AccountContext,
+    registration: Registration,
+    opts: {
+      issues: number[];
+      milestoneTitles: string[];
+      milestonesOf: Record<number, string | null>;
+      start: "new" | "loop";
+      loop?: { loop: DevLoop; write: (run: SprintRun) => LoopWrite };
+    },
+  ): Promise<SprintRun | "loop_changed"> {
+    const { table, github } = this.deps;
     let modelCredentialSecretArn: string | null = null;
     if (ctx.executionMode === "byok") {
       const cred = await table.getCredential(ctx.accountId);
       if (!cred) throw new ConflictError("model_credential_missing", "キーの持ち込みを先に保存してください");
       modelCredentialSecretArn = cred.secretArn;
     }
+    // 周回の開始は、枠待ちのループを見回りと実行の終わりが起こし直すたびに通る。表だけで決まる断り（同時の数と古い版）を
+    // GitHub・配布元・月の token の数えより先に判定する（断るループに外の呼び出しを走らせない）
+    if (opts.start === "loop") await this.refuseFullSlots(ctx, registration);
     const fullName = await github.repositoryName(registration.installationId, registration.repositoryId);
     if (!fullName) throw new ConflictError("installation_unreachable", "GitHub App の導入がこのリポジトリへ届きません");
     if (fullName !== registration.fullName) await table.setRegistrationName(ctx.accountId, registration.repositoryId, fullName);
     const ndfVersion = await this.deps.ndfVersion();
+    // 移行の済みの行はトランザクションの前に 1 回だけ読む（全アカウントで共有の項目を照合に入れない。決定 12）
+    const legacy = await this.isLegacy(ndfVersion);
 
     const now = this.iso();
+    const loop = opts.loop?.loop ?? null;
     const run: SprintRun = {
       sprintRunId: this.newId(),
       accountId: ctx.accountId,
       repositoryId: registration.repositoryId,
       repo: fullName,
       state: "starting",
-      issues: issues as number[],
+      issues: opts.issues,
       ndfVersion,
       executionMode: ctx.executionMode,
       modelCredentialSecretArn,
@@ -140,24 +265,76 @@ export class RunControl {
       createdBy: ctx.userId,
       createdAt: now,
       updatedAt: now,
+      ...(loop ? { loopId: loop.loopId, lap: loop.lapRuns + 1 } : {}),
     };
-    const job = this.newJob(run, 1, "new", null);
+    const job = this.newJob(run, 1, opts.start, null);
     run.currentJobId = job.jobId;
 
     // 月の token は枠の取り直しで変わらないため、1 回の開始で 1 度だけ数える
     const tokensThisMonth = ctx.executionMode === "managed" ? await this.tokensThisMonth(ctx.accountId, ctx.plan === "team" ? ctx.userId : null) : undefined;
     for (let attempt = 0; attempt < SLOT_RETRIES; attempt++) {
       const slots = await table.getSlots(ctx.accountId, registration.repositoryId);
-      const judgment = judgeLimits(ctx, { runningSprintRuns: slots.account, tokensThisMonth });
+      const judgment = judgeLimits(ctx, {
+        runningSprintRuns: slots.account,
+        tokensThisMonth,
+        runningRepoRuns: slots.repository,
+        repoMaxRuns: registration.maxConcurrentRuns ?? null,
+      });
       if (!judgment.allowed) {
         throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons: judgment.reasons });
       }
-      if (await table.createRun(run, job, slots)) {
-        await this.launch(run, job);
-        return { sprint_run_id: run.sprintRunId, state: "starting" };
+      if ((legacy && slots.repository > 0) || (!legacy && (slots.legacy ?? 0) > 0)) {
+        throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
+      }
+      if (loop && opts.loop) {
+        // EXCLUDE_ISSUES は、トランザクションの直前に強い整合で読んだ同じリポジトリの課題の持ち分（決定 11）
+        const exclude = (await table.listIssueShares(ctx.accountId, registration.repositoryId)).map((s) => s.number);
+        job.loopInput = loopInput(loop, exclude);
+      }
+      const guards: CreateRunGuards = {
+        issues: opts.loop ? [] : opts.issues,
+        milestoneChecks: opts.milestoneTitles,
+        legacy,
+        ...(opts.loop ? { loop: opts.loop.write(run) } : {}),
+      };
+      const result = await table.createRun(run, job, slots, guards);
+      if (result === "created") {
+        await this.launch({ ...run, legacy }, job);
+        return { ...run, legacy };
+      }
+      if (result === "loop_changed") return "loop_changed";
+      if (result === "issue_in_use") {
+        const held = new Set((await table.listIssueShares(ctx.accountId, registration.repositoryId)).map((s) => s.number));
+        throw new ConflictError("issue_in_use", "課題は同じリポジトリの別のスプリントの実行が持っています", { numbers: opts.issues.filter((n) => held.has(n)) });
+      }
+      if (result === "issue_in_loop") {
+        await this.refuseIssuesInLoop(ctx.accountId, registration.repositoryId, opts.milestoneTitles, opts.milestonesOf);
       }
     }
     throw new ServiceUnavailableError("sprint_run_unavailable");
+  }
+
+  // 版によらず断ると表だけで決まる場合に、admit の枠の判定と同じ断りを投げる。月の token は数えない（同時の数の理由だけを見る）。
+  // 古い版の実行がリポジトリにあるか、移行の前（版によらず古い版）で実行があれば、版を読む前に断れる
+  private async refuseFullSlots(ctx: AccountContext, registration: Registration): Promise<void> {
+    const slots = await this.deps.table.getSlots(ctx.accountId, registration.repositoryId);
+    const reasons = judgeLimits(ctx, {
+      runningSprintRuns: slots.account,
+      runningRepoRuns: slots.repository,
+      repoMaxRuns: registration.maxConcurrentRuns ?? null,
+    }).reasons.filter((r) => r.quantity.startsWith("concurrent_"));
+    if (reasons.length > 0) throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons });
+    if ((slots.legacy ?? 0) > 0 || (slots.repository > 0 && !(await this.deps.table.isMigrated()))) {
+      throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
+    }
+  }
+
+  // 開発ループの周回の実行を起こす（ループの制御が呼ぶ）。断る理由は ApiError で返す
+  async startLapRun(loop: DevLoop, write: (run: SprintRun) => LoopWrite): Promise<SprintRun | "loop_changed"> {
+    const registration = await this.deps.table.getRegistration(loop.accountId, loop.repositoryId);
+    if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
+    const ctx: AccountContext = { accountId: loop.accountId, ...loop.context };
+    return this.admit(ctx, registration, { issues: [], milestoneTitles: [], milestonesOf: {}, start: "loop", loop: { loop, write } });
   }
 
   // その UTC の暦月に、アカウントの managed の実行が使った token（形態 managed の上限の判定に使う）。
@@ -177,7 +354,7 @@ export class RunControl {
     return total;
   }
 
-  private newJob(run: SprintRun, seq: number, start: "new" | "resume", approvalRequestId: string | null): RunJob {
+  private newJob(run: SprintRun, seq: number, start: RunJob["start"], approvalRequestId: string | null): RunJob {
     return {
       jobId: this.newId(),
       sprintRunId: run.sprintRunId,
@@ -212,6 +389,17 @@ export class RunControl {
     if (job.start === "new") instruction.ISSUES = run.issues.join(",");
     if (job.approvalRequestId) instruction.APPROVAL_REQUEST_ID = job.approvalRequestId;
     if (run.executionMode === "byok" && run.modelCredentialSecretArn) instruction.MODEL_CREDENTIAL_SECRET_ARN = run.modelCredentialSecretArn;
+    const loop = job.loopInput;
+    if (loop) {
+      instruction.LOOP_NAME = loop.name;
+      if (job.start === "loop") {
+        instruction.LOOP_MILESTONES = loop.milestones.join(",");
+        const budget = (["laps", "usd", "hours"] as const).filter((k) => loop.budget[k] !== null).map((k) => `${k}=${loop.budget[k]}`);
+        if (budget.length > 0) instruction.LOOP_BUDGET = budget.join(",");
+      }
+      if (loop.exclude.length > 0) instruction.EXCLUDE_ISSUES = loop.exclude.join(",");
+      if (loop.answers.length > 0) instruction.LOOP_ANSWERS = loop.answers.map((a) => `${a.number}=${a.decision}${a.pr ? `#${a.pr}` : ""}`).join(",");
+    }
     return instruction;
   }
 
@@ -256,38 +444,53 @@ export class RunControl {
     return ok;
   }
 
+  // ループの実行なら、ジョブが送った loop.* を読み、ループの行への書き込みを組む（決定 4）
+  private async loopWriteFor(run: SprintRun, jobId: string | null, outcome: Omit<RunOutcome, "laps" | "stopped">): Promise<{ write: LoopWrite; loop: DevLoop } | null> {
+    if (!run.loopId) return null;
+    const loop = await this.deps.table.getLoop(run.accountId, run.loopId);
+    if (!loop || isTerminalLoop(loop.state)) return null;
+    const events = jobId ? await this.deps.reader.findLoopEvents(run.sprintRunId, jobId) : { laps: [], stopped: null };
+    return { loop, write: loopWriteAfterRun(loop, run, { ...outcome, ...events }, this.iso()) };
+  }
+
+  // 実行の終わりへの移り（とループの写し）の後に、次の周回と待っているループを起こす。どちらも落ちてよい（見回りが起こし直す）
+  private async afterRunMoved(run: SprintRun, loopWrite: LoopWrite | undefined, slotFreed: boolean): Promise<void> {
+    if (!this.hooks) return;
+    try {
+      if (loopWrite?.set.state === "between_laps" && run.loopId) await this.hooks.startNextLap(run.accountId, run.loopId);
+      if (slotFreed) await this.hooks.wakeWaitingLoops(run.accountId);
+    } catch (err) {
+      this.log({ event: "loop_wake_failed", sprint_run_id: run.sprintRunId, error: (err as Error).name });
+    }
+  }
+
   // タスクが止まった後の処理。job.finished を読み、無ければ control で failed を書いてから結果に従って移す（I40）
   private async finalize(job: RunJob, reason: FailureReason): Promise<void> {
-    const { table, reader, platform } = this.deps;
+    const { table, platform } = this.deps;
     const run = await table.getRun(job.sprintRunId);
     if (!run) return;
-    let finished = await reader.findJobFinished(run.sprintRunId, job.jobId);
-    if (!finished) {
-      const event: JobFinishedEvent = {
-        sprint_run_id: run.sprintRunId,
-        idempotency_key: finishedKey(job.jobId),
-        type: "job.finished",
-        at: this.iso(),
-        source: "control",
-        job_id: job.jobId,
-        schema_version: 1,
-        payload: { result: "failed", summary: `実行の制御が終わりを書いた（${reason}）` },
-      };
-      const { written } = await this.deps.appendControl(event);
-      finished = written ? event : ((await reader.findJobFinished(run.sprintRunId, job.jobId)) ?? event);
-    }
+    const finished = await this.ensureFinished(run, job, reason);
     const result = finished.payload.result;
+    const finishReason = finished.payload.reason ?? null;
     const now = this.iso();
     // 実行と枠を先に移し、ジョブを終わりの状態にするのは最後にする。途中で止まってもジョブは見回りの対象に残り、
     // 次の見回りか停止の知らせの再送が同じ結果でやり直す（実行の移し替えは条件つきで、2 度目は何もしない）
     if (run.currentJobId === job.jobId) {
       if (run.cancelRequested) {
-        await table.finishRun(run.sprintRunId, "cancelled", null, now);
+        const lw = await this.loopWriteFor(run, job.jobId, { runState: "cancelled", failureReason: null, finishReason });
+        if (await table.finishRun(run.sprintRunId, "cancelled", null, now, { finishReason, loop: lw?.write })) await this.afterRunMoved(run, lw?.write, true);
       } else if (result === "gate") {
-        await table.awaitApproval(run.sprintRunId, job.jobId, now);
+        const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_approval", failureReason: null, finishReason });
+        await table.awaitApproval(run.sprintRunId, job.jobId, now, { loop: lw?.write });
+      } else if (result === "stopped" && finishReason === "usage_limit" && run.executionMode === "local") {
+        // local の利用上限はリセット時刻の後に同じ周回を続ける（I54。ほかの形態は failed として扱う）
+        const resumeAt = this.resumeAtOf(finished);
+        const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_reset", failureReason: null, finishReason });
+        await table.awaitReset(run.sprintRunId, job.jobId, resumeAt, now, { finishReason, loop: lw?.write });
       } else {
-        const failure = result === "failed" ? (job.stopReason ?? (finished.source === "control" ? reason : "job_failed")) : null;
-        await table.finishRun(run.sprintRunId, RESULT_TO_RUN[result], failure, now);
+        const { state, failure } = runEndOf(result, finishReason, job, finished, reason);
+        const lw = await this.loopWriteFor(run, job.jobId, { runState: state, failureReason: failure, finishReason });
+        if (await table.finishRun(run.sprintRunId, state, failure, now, { finishReason, loop: lw?.write })) await this.afterRunMoved(run, lw?.write, true);
       }
     }
     const updated = await table.updateJob(job.jobId, { state: result, result, finishedAt: now }, ["pending", "running"]);
@@ -299,7 +502,34 @@ export class RunControl {
     }
   }
 
-  // 見回り（5 分ごと）。打ち切りの時間を過ぎたジョブを止め、止まったタスクと起動しないジョブを終わらせる（I8）
+  // job.finished を読む。無ければ control で failed を書き、書けなければ（先に書かれていれば）読み直す
+  private async ensureFinished(run: SprintRun, job: RunJob, reason: FailureReason): Promise<JobFinishedEvent> {
+    const { reader } = this.deps;
+    const found = await reader.findJobFinished(run.sprintRunId, job.jobId);
+    if (found) return found;
+    const event: JobFinishedEvent = {
+      sprint_run_id: run.sprintRunId,
+      idempotency_key: finishedKey(job.jobId),
+      type: "job.finished",
+      at: this.iso(),
+      source: "control",
+      job_id: job.jobId,
+      schema_version: 1,
+      payload: { result: "failed", summary: `実行の制御が終わりを書いた（${reason}）` },
+    };
+    const { written } = await this.deps.appendControl(event);
+    return written ? event : ((await reader.findJobFinished(run.sprintRunId, job.jobId)) ?? event);
+  }
+
+  // local の利用上限の再開の時刻。resets_at を読めなければ usageLimitRetrySeconds 後
+  private resumeAtOf(finished: JobFinishedEvent): string {
+    const resetsAt = finished.payload.resets_at ?? null;
+    const retry = (this.deps.config.usageLimitRetrySeconds ?? DEFAULT_USAGE_LIMIT_RETRY_SECONDS) * 1000;
+    return resetsAt && !Number.isNaN(Date.parse(resetsAt)) ? new Date(resetsAt).toISOString() : new Date(this.now().getTime() + retry).toISOString();
+  }
+
+  // 見回り（5 分ごと）。打ち切りの時間を過ぎたジョブを止め、止まったタスクと起動しないジョブを終わらせる（I8）。
+  // リセット時刻を過ぎた実行を再開し、次の周回を待つループを起こす（#2347）
   async sweep(): Promise<void> {
     const { table, platform, config } = this.deps;
     const now = this.now().getTime();
@@ -326,6 +556,37 @@ export class RunControl {
         await this.markRunning(job);
       }
     }
+    for (const run of await table.listResetRuns(this.iso())) {
+      await this.resumeAfterReset(run).catch((err: Error) => this.log({ event: "reset_resume_failed", sprint_run_id: run.sprintRunId, error: err.name }));
+    }
+    await this.hooks?.sweepLoops().catch((err: Error) => this.log({ event: "loop_sweep_failed", error: err.name }));
+  }
+
+  // リセット待ちの実行に、承認の依頼の識別子の無い resume のジョブを作る（決定 7）。時刻の前は何もしない
+  async resumeAfterReset(run: SprintRun): Promise<boolean> {
+    if (run.state !== "awaiting_reset" || !run.resumeAt || Date.parse(run.resumeAt) > this.now().getTime()) return false;
+    // 人の操作を経ずに起こすため、始めた利用者がまだ席を持ち、形態が local のままかを照らす（ループの周回の開始と同じ）
+    if (this.deps.resolveContext) {
+      const fresh = await this.deps.resolveContext(run.accountId, run.createdBy);
+      if (!fresh || fresh.executionMode !== run.executionMode) {
+        const lw = await this.loopWriteFor(run, null, { runState: "failed", failureReason: "seat_missing", finishReason: run.finishReason ?? null });
+        if (await this.deps.table.finishRun(run.sprintRunId, "failed", "seat_missing", this.iso(), { loop: lw?.write })) await this.afterRunMoved(run, lw?.write, true);
+        return false;
+      }
+    }
+    const job = this.newJob(run, run.jobCount + 1, "resume", null);
+    job.loopInput = await this.resumeLoopInput(run);
+    if (!(await this.deps.table.addResumeJob(job, this.iso(), { from: "awaiting_reset" }))) return false;
+    await this.launch(run, job);
+    return true;
+  }
+
+  private async resumeLoopInput(run: SprintRun): Promise<LoopJobInput | null> {
+    if (!run.loopId) return null;
+    const loop = await this.deps.table.getLoop(run.accountId, run.loopId);
+    if (!loop) return null;
+    const exclude = (await this.deps.table.listIssueShares(run.accountId, run.repositoryId)).map((s) => s.number);
+    return loopInput(loop, exclude);
   }
 
   // 再開の要求（#2173）。承認待ちで動くジョブが無いときだけ resume のジョブを作り起動する（I8・I9）
@@ -343,7 +604,11 @@ export class RunControl {
     if (run.currentJobId !== null) throw new ResumeRejectedError("sprint_run_busy");
     const seq = run.jobCount + 1;
     const job = this.newJob(run, seq, "resume", input.approvalRequestId);
-    if (!(await table.addResumeJob(job, this.iso()))) {
+    job.loopInput = await this.resumeLoopInput(run);
+    // ループは答えで running へ戻る（同じトランザクション）
+    const loop = run.loopId ? await table.getLoop(run.accountId, run.loopId) : null;
+    const loopWrite = loop && loop.state === "awaiting_approval" ? loopWriteOnResume(loop, run, this.iso()) : undefined;
+    if (!(await table.addResumeJob(job, this.iso(), { loop: loopWrite }))) {
       const now = await table.getRun(run.sprintRunId);
       throw new ResumeRejectedError(now?.state === "awaiting_approval" || now?.state === "starting" ? "sprint_run_busy" : "not_awaiting_approval");
     }
@@ -358,7 +623,11 @@ export class RunControl {
     if (!run || run.accountId !== ctx.accountId) throw new NotFoundError("sprint_run_not_found", "スプリントの実行が見つかりません");
     if (isTerminalRun(run.state)) throw new ConflictError("already_finished", "このスプリントの実行は終わっています");
     if (run.currentJobId === null) {
-      if (await table.finishRun(run.sprintRunId, "cancelled", null, this.iso())) return { state: "cancelled" };
+      const lw = await this.loopWriteFor(run, null, { runState: "cancelled", failureReason: null, finishReason: null });
+      if (await table.finishRun(run.sprintRunId, "cancelled", null, this.iso(), { loop: lw?.write })) {
+        await this.afterRunMoved(run, lw?.write, true);
+        return { state: "cancelled" };
+      }
       throw new ConflictError("already_finished", "このスプリントの実行は終わっています");
     }
     await table.setCancelRequested(run.sprintRunId);
@@ -387,14 +656,26 @@ export class RunControl {
       }));
   }
 
-  // 形態 local の渡す口（#2189）。最も古い pending の local のジョブを running にし、指示と token を 1 回だけ返す
-  async claimLocalRunJob(accountId: string): Promise<{ instruction: RunJobInstruction; token: string } | null> {
+  // 形態 local の渡す口（#2189）。最も古い pending の local のジョブを running にし、指示と token を 1 回だけ返す。
+  // ランナーの申告があれば、そのランナーの枠が同時のジョブの数に達している間は渡さない（I50。申告が無ければ 1）
+  async claimLocalRunJob(accountId: string, runner?: LocalRunner): Promise<{ instruction: RunJobInstruction; token: string } | null> {
     const { table } = this.deps;
     for (const job of await table.listActiveJobs()) {
       if (job.runnerKind !== "local" || job.state !== "pending" || job.accountId !== accountId) continue;
       const run = await table.getRun(job.sprintRunId);
       if (!run || run.cancelRequested) continue;
-      if (!(await this.markRunning(job))) continue;
+      if (runner) {
+        const now = this.iso();
+        if (!(await table.claimLocalJob(job.jobId, runner.runnerId, runner.maxJobs ?? 1, now))) {
+          const current = await table.getJob(job.jobId);
+          // 枠で断られた（ジョブは pending のまま）なら、ほかのジョブも渡せない
+          if (current?.state === "pending") return null;
+          continue;
+        }
+        await table.markRunRunning(job.sprintRunId, now);
+      } else if (!(await this.markRunning(job))) {
+        continue;
+      }
       const token = await this.issueToken(run, job);
       // local の token は置き場に書かない。指示の形を保つため、置き場の項目には local を表す ARN を置く
       const instruction = this.buildInstruction(run, job, `arn:aws:secretsmanager:local:000000000000:secret:ndf-factory/run-jobs/${job.jobId}`);
@@ -418,4 +699,10 @@ export class RunControl {
     if (!run) throw new ForbiddenError();
     return { run, job };
   }
+}
+
+// ループの実行のジョブの指示へ載せる値（予算・答えは周回を起こす時点の値）。答えは今の人の判断待ちに残る番号だけ
+export function loopInput(loop: DevLoop, exclude: number[]): LoopJobInput {
+  const open = new Set(loop.pending.map((p) => p.number));
+  return { name: loop.name, milestones: loop.milestones, budget: loop.budget, exclude, answers: loop.answers.filter((a) => open.has(a.number)) };
 }

@@ -196,6 +196,8 @@ describe("ジョブの流れと終了コード（受け入れ条件 24・27・30
       installNdf: async () => opts.installed ?? "10.26.1",
       restoreState: async () => undefined,
       saveState: async () => undefined,
+      readLoop: async () => null,
+      answerLoop: vi.fn(async () => undefined),
       recordAnswer: vi.fn(async () => null),
       runConductor: async (_i, _d, emit) => {
         await emit({ type: "phase.changed", payload: { phase: "impl", issues: [1] } });

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shlex
 
 import project_mvv as pm
@@ -159,7 +161,26 @@ def cmd_select(env: Env, name: str) -> dict:
         return run_selection(env, rec, before, len(rec["laps"]) + 1)
 
 
+EXCLUDE_ENV = "NDF_LOOP_EXCLUDE"
+EXCLUDE_REASON = "別の実行が持つ課題"
+
+
+def env_excluded(raw: str | None) -> list[int]:
+    """`NDF_LOOP_EXCLUDE` の課題の番号（`,` か空白で区切る。番号でない語は読まない）。Factory の実行の制御が、同じリポジトリの
+    別の実行が持つ課題を渡す（#2347 の決定 3）。"""
+    return sorted({int(x) for x in re.split(r"[\s,]+", raw or "") if x.isdigit()})
+
+
+def add_env_exclusions(rec: dict, n: int) -> None:
+    """環境変数の課題を周回 n の除外へ足す（同じ番号と周回の行が既にあれば足さない）。"""
+    have = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == n}
+    for num in env_excluded(os.environ.get(EXCLUDE_ENV)):
+        if num not in have:
+            rec.setdefault("excluded", []).append({"number": num, "reason": EXCLUDE_REASON, "lap": n})
+
+
 def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None) -> dict:
+    add_env_exclusions(rec, n)
     code, rank = env.rank(env.main_dir())
     if code not in (0, PAUSE_RANK):
         return refusal_order(f"upkeep.py rank が {code} を返した。選定を推さない: {rank.get('summary', '')}")

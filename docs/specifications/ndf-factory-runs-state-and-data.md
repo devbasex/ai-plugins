@@ -6,7 +6,7 @@
 
 ### 状態と移り
 
-スプリントの実行の状態は `starting` / `running` / `awaiting_approval` / `done` / `stopped` / `failed` / `cancelled` で、後ろの 4 つが終わりの状態である。実行ジョブの状態は `pending` / `running` / `gate` / `stopped` / `done` / `failed` で、後ろの 4 つが終わりの状態である（ジョブの図は全体の契約の「スプリントの実行の流れ」）。
+スプリントの実行の状態は `starting` / `running` / `awaiting_approval` / `awaiting_reset` / `done` / `stopped` / `failed` / `cancelled` で、後ろの 4 つが終わりの状態である。`awaiting_reset` は `local` の実行が利用上限で止まり、リセット時刻を待つ状態で、承認待ちと同じく枠を持ったまま今のジョブを空にする。実行ジョブの状態は `pending` / `running` / `gate` / `stopped` / `done` / `failed` で、後ろの 4 つが終わりの状態である（ジョブの図は全体の契約の「スプリントの実行の流れ」）。
 
 ```mermaid
 stateDiagram-v2
@@ -16,10 +16,14 @@ stateDiagram-v2
     running --> awaiting_approval: 停止の後に job.finished（gate）
     running --> done: 停止の後に job.finished（done）
     running --> stopped: 停止の後に job.finished（stopped）
+    running --> awaiting_reset: 停止の後に job.finished（stopped・usage_limit。local だけ）
     running --> failed: 停止の後に job.finished（failed）か無い
     running --> cancelled: 取り消しの後の停止
     awaiting_approval --> starting: 再開の要求
     awaiting_approval --> cancelled: 取り消し
+    awaiting_reset --> starting: 見回りがリセット時刻の後に resume
+    awaiting_reset --> failed: 始めた利用者の席か形態が変わった（seat_missing）
+    awaiting_reset --> cancelled: 取り消し
     done --> [*]
     stopped --> [*]
     failed --> [*]
@@ -35,7 +39,8 @@ stateDiagram-v2
 | `launch_failed` | token の置き場の作成か `RunTask` が失敗した。`pending` のまま 15 分を過ぎた |
 | `timeout` | 見回りが打ち切りの時間で止めた |
 | `task_stopped` | ランナーの `job.finished` が無いままタスクが止まった（手元のランナーの終わりの知らせを含む） |
-| `job_failed` | ランナーが `job.finished`（`failed`）を送った |
+| `job_failed` | ランナーが `job.finished`（`failed`）を送った。`local` 以外の形態の利用上限（`stopped`・`usage_limit`）も含む |
+| `seat_missing` | リセット時刻の後の再開で、始めた利用者が席を持たないか、形態が `local` でなくなっていた |
 
 ### 処理の流れ
 
@@ -72,8 +77,8 @@ sequenceDiagram
     C->>C: 実行と枠を移し、最後にジョブを終わりの状態へ、token の置き場を消す
 ```
 
-- **停止の後の処理**（`finalize`）: `job.finished` を進捗の記録から鍵 `<job_id>:finished` で読み、無ければ `appendControlEvent` で `failed` を書く（同じ鍵が先にあれば書かれず、読み直す）。そのジョブが実行の今のジョブなら、取り消しの要求があれば `cancelled`、結果が `gate` なら `awaiting_approval`（今のジョブを空にする）、ほかは結果の状態へ移す。終わりの状態への移りは実行の行が終わりの状態でないことを条件にし、同じトランザクションで 2 つの枠を 1 ずつ減らす。**ジョブを終わりの状態にするのは最後で**、途中で止まってもジョブは見回りの対象に残り、次の見回りか知らせの再送が同じ結果でやり直す。同じ知らせの 2 回目は、ジョブが終わりの状態なので何もしない
-- **見回り**（`sweep`）: 終わりの状態でないジョブ（GSI の `ACTIVE_JOBS`）を最後のページまで引き、ECS のジョブは ① `pending` のまま 15 分を過ぎたら `StopTask` して `launch_failed` で停止の後の処理、② タスクが `STOPPED` か見つからなければ停止の後の処理、③ `running` で打ち切りの時間を過ぎ、まだ止めていなければ `stopReason` に `timeout` を書いて `StopTask`、④ タスクが `RUNNING` でジョブが `pending` なら `running` にする。`STOPPING`・`DEPROVISIONING` などの止まる途中は確定しない。`local` のジョブは `running` で打ち切りの時間を過ぎたら直に `timeout` で停止の後の処理をする
+- **停止の後の処理**（`finalize`）: `job.finished` を進捗の記録から鍵 `<job_id>:finished` で読み、無ければ `appendControlEvent` で `failed` を書く（同じ鍵が先にあれば書かれず、読み直す）。そのジョブが実行の今のジョブなら、取り消しの要求があれば `cancelled`、結果が `gate` なら `awaiting_approval`（今のジョブを空にする）、`local` の実行で結果が `stopped`・理由が `usage_limit` なら `awaiting_reset`（今のジョブを空にし、`resumeAt` にリセット時刻か、読めなければ `USAGE_LIMIT_RETRY_SECONDS` 後を書く）、ほかの形態の `usage_limit` は `failed`（`job_failed`）、ほかは結果の状態へ移す。開発ループの実行なら、ループの行も同じトランザクションで移す。終わりの状態への移りは実行の行が終わりの状態でないことを条件にし、同じトランザクションで 2 つの枠を 1 ずつ減らす。**ジョブを終わりの状態にするのは最後で**、途中で止まってもジョブは見回りの対象に残り、次の見回りか知らせの再送が同じ結果でやり直す。同じ知らせの 2 回目は、ジョブが終わりの状態なので何もしない
+- **見回り**（`sweep`）: 終わりの状態でないジョブ（GSI の `ACTIVE_JOBS`）を最後のページまで引き、ECS のジョブは ① `pending` のまま 15 分を過ぎたら `StopTask` して `launch_failed` で停止の後の処理、② タスクが `STOPPED` か見つからなければ停止の後の処理、③ `running` で打ち切りの時間を過ぎ、まだ止めていなければ `stopReason` に `timeout` を書いて `StopTask`、④ タスクが `RUNNING` でジョブが `pending` なら `running` にする。`STOPPING`・`DEPROVISIONING` などの止まる途中は確定しない。`local` のジョブは `running` で打ち切りの時間を過ぎたら直に `timeout` で停止の後の処理をする。続けて、`resumeAt` を過ぎた `awaiting_reset` の実行に、始めた利用者の席と形態を照らしてから承認の依頼の識別子の無い `resume` のジョブを作り（照らせなければ `failed`（`seat_missing`））、次の周回を待つ開発ループを起こす
 - **再開の要求**（`requestResume`）: 実行が `awaiting_approval` で今のジョブが空のときだけ、実行を `starting`・今のジョブを新しいジョブにする書き込みと、`resume` のジョブの作成を 1 回のトランザクションで行い、起動する。実行が承認待ちでなくても、今のジョブの `job.finished` が `gate` なら（停止の知らせの前）`sprint_run_busy` を返す。再開は使える量の判定にかけず、枠を変えない
 - **取り消し**（`cancelSprintRun`）: 今のジョブが無ければその場で `cancelled` にして枠を減らす。あれば取り消しの要求を立て、ECS のタスクがあれば `StopTask` して `running` を返し、停止の後の処理で `cancelled` へ移す。`local` のジョブかタスクがまだ無いジョブは、その場で停止の後の処理をして `cancelled` を返す
 - **ランナーは止められると何も送らずに 1 で終わる**（`SIGTERM`）。打ち切りと取り消しの `job.finished` は実行の制御が `failed` で書く
@@ -103,7 +108,7 @@ erDiagram
 | スプリントの実行 | `RUN#<sprintRunId>` | `RUN` | `ACCOUNT#<accountId>` / `RUN#<createdAt>` |
 | 実行ジョブ | `JOB#<jobId>` | `JOB` | `ACTIVE_JOBS` / `<createdAt>#<jobId>`（終わりの状態でない間だけ。終わりへ移すときに外す） |
 
-列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。
+列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のランナーの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [#2347 の設計の「データ構造」](../../issues/issue-2347-design.md#データ構造) にある。
 
 | 行 | 列 | 型 | 空 | 意味 |
 | --- | --- | --- | --- | --- |
@@ -116,7 +121,7 @@ erDiagram
 | キー | `updatedAt` | 文字列 | 不可 | 最後に保存した時刻 |
 | 枠 | `count` | 数 | 不可 | 終わりの状態でないスプリントの実行の数（I34）。行が無いのは 0 |
 | 実行 | `accountId`・`repositoryId`・`repo` | 文字列・数・文字列 | 不可 | 属する先と開始の時点の `owner/name`（token の `repo` の主張に使う） |
-| 実行 | `state` | 文字列 | 不可 | 「状態と移り」の 7 つ |
+| 実行 | `state` | 文字列 | 不可 | 「状態と移り」の 8 つ |
 | 実行 | `issues` | 数の並び | 不可 | 確かめた課題の並び |
 | 実行 | `ndfVersion`・`executionMode`・`modelCredentialSecretArn` | 文字列 | `modelCredentialSecretArn` だけ可 | 開始で決めた値（I39）。キーの置き場は `byok` だけ |
 | 実行 | `currentJobId` | 文字列 | 可 | 終わりの状態でないジョブ。`null` は「動くジョブが無い」（I9） |
@@ -150,7 +155,7 @@ erDiagram
 
 ### 環境変数
 
-`factory/.env.example` に名前だけを置く（全体の契約の I6）。本書は次の 14 を足した。`GITHUB_APP_ID`・`GITHUB_APP_PRIVATE_KEY_SECRET_ARN`・`BEDROCK_REGION`・`NDF_MARKETPLACE`・`NDF_CHANNEL`・`RUNNER_TASK_DEFINITION_ARN` は全体の契約が置いた名前で、本書の構成要素が読む。
+`factory/.env.example` に名前だけを置く（全体の契約の I6）。本書は次の 14 を足し、#2347 が 4 つ（表の後ろの 4 行）を足した。`GITHUB_APP_ID`・`GITHUB_APP_PRIVATE_KEY_SECRET_ARN`・`BEDROCK_REGION`・`NDF_MARKETPLACE`・`NDF_CHANNEL`・`RUNNER_TASK_DEFINITION_ARN` は全体の契約が置いた名前で、本書の構成要素が読む。
 
 | 名前 | 使う側 | 意味 |
 | --- | --- | --- |
@@ -163,8 +168,12 @@ erDiagram
 | `INGEST_URL` | 制御 | 指示の `INGEST_URL` に写す値。ランナー向けの経路はこの origin に置く |
 | `GITHUB_APP_SLUG`・`GITHUB_APP_CLIENT_ID`・`GITHUB_APP_CLIENT_SECRET_ARN` | 取り込み | 導入の URL と App の利用者の認可。クライアントの秘密は候補の証明の鍵の元にもなる |
 | `CANDIDATE_MODEL_ID` | 課題の候補 | 理由を作る Bedrock のモデル |
+| `NDF_PARALLEL_MIN_VERSION` | 制御 | 並行を許す NDF の版の下限。無ければ並行を許さない |
+| `LOCAL_LOOP_AUTOSTART` | 制御 | `true` のとき `local` のループも自動で次の周回を起こす。既定 `false` |
+| `USAGE_LIMIT_RETRY_SECONDS` | 制御 | リセット時刻を読めないときの待ち。既定 900 |
+| `RUNNER_SECTION_LIMIT` | ランナー | 1 つのジョブで起動する区間の上限。既定 20 |
 
-API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 11 項目のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のランナーの `INGEST_TOKEN` を読む。
+API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 16 項目と `RUNNER_SECTION_LIMIT` のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のランナーの `INGEST_TOKEN` を読む。
 
 
 ## 関連リンク

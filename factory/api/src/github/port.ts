@@ -34,6 +34,8 @@ export interface RankedMilestone {
 // 課題の番号を確かめた結果。開いている課題でない番号（閉じた・Pull Request・無い）を返す
 export interface IssueCheck {
   invalid: number[];
+  // 開いている課題のマイルストーンの題（無ければ null）。開発ループの持ち分の照合に使う（#2347）。読めない口は省く
+  milestones?: Record<number, string | null>;
 }
 
 // サービスが起票した Issue の参照（#2216）

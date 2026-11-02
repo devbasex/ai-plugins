@@ -1,0 +1,66 @@
+{
+  "name": "ndf-next-block",
+  "summary": "応答の文の最後に置く、次の区間（新しい会話）で起動するコマンド。ラッパー（relay.py）と、この形を写すほかの読み手（サービスのランナーなど）が読み、中身で claude を起動し直す",
+  "rule": "CommonMark の 3 つのバッククォートの囲みのうち、情報文字列を前後の空白を除いて ndf-next と比べて一致するものを拾う。~~~ の囲みと、ほかの囲みの中の囲みは拾わない。中身は前後の改行を除く。囲みが 2 つ以上なら起動しない。応答の文の最後の「- 結果:」の行の値（前後の空白を除く）が「判断が要る」なら起動しない",
+  "writers": [
+    "plugins/ndf/scripts/sprint-state.py",
+    "plugins/ndf/scripts/handoff.py",
+    "plugins/ndf/skills/development-workflow/SKILL.md"
+  ],
+  "readers": [
+    "plugins/ndf/scripts/relay.py"
+  ],
+  "cases": [
+    {
+      "text": "作業を区切った。\n\n- 結果: 完了\n\n```ndf-next\n/ndf:development-workflow #895\n```\n",
+      "blocks": [
+        "/ndf:development-workflow #895"
+      ],
+      "launch": true
+    },
+    {
+      "text": "作業を終えた。\n\n- 結果: 完了\n",
+      "blocks": [],
+      "launch": false
+    },
+    {
+      "text": "```ndf-next\n/ndf:development-workflow #1\n```\n\n```ndf-next\n/ndf:development-workflow #2\n```\n",
+      "blocks": [
+        "/ndf:development-workflow #1",
+        "/ndf:development-workflow #2"
+      ],
+      "launch": false
+    },
+    {
+      "text": "例:\n\n````markdown\n```ndf-next\n/ndf:development-workflow #3\n```\n````\n",
+      "blocks": [],
+      "launch": false
+    },
+    {
+      "text": "~~~ndf-next\n/ndf:development-workflow #4\n~~~\n",
+      "blocks": [],
+      "launch": false
+    },
+    {
+      "text": "```  ndf-next  \n\n/ndf:development-workflow #5\n\n```\n",
+      "blocks": [
+        "/ndf:development-workflow #5"
+      ],
+      "launch": true
+    },
+    {
+      "text": "## フェーズの報告\n\n- 結果: 判断が要る\n\n```ndf-next\n/ndf:development-workflow #6\n```\n",
+      "blocks": [
+        "/ndf:development-workflow #6"
+      ],
+      "launch": false
+    },
+    {
+      "text": "- 結果: 判断が要る\n\n再開した。\n\n- 結果: 完了\n\n```ndf-next\n/ndf:development-workflow #7\n```\n",
+      "blocks": [
+        "/ndf:development-workflow #7"
+      ],
+      "launch": true
+    }
+  ]
+}
