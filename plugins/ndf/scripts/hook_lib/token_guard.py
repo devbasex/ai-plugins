@@ -5,13 +5,16 @@
 | Bash               | 前景の `sleep` で待つ（ループの本体にあるか、上限を超える）                    |
 | Bash               | 文脈が上限を超えた conductor が supervise.py queue / run でプランを起こす      |
 | Read               | 変わらないファイルの同じ範囲を続けて読み直す                                  |
-| Skill / Agent・Task | 文脈が上限を超えた conductor が工程へ入る                                    |
+| Skill / Agent・Task | 文脈が上限を超えた conductor が工程へ入る（再起動の方針で決める。下の注）       |
 | Agent・Task        | supervisor の起動に、プランで流せることを案内する（止めない）                  |
 | Skill              | 寿命 5 分の supervisor が文脈を伸ばしたまま収束ループを始める                  |
 
 拒否は `permissionDecision: deny`、案内は `additionalContext` で返す。判定が失敗したとき（記録を書けない・読めない・
 ロックを待ちの上限の内に取れない・構文を読み切れない）は通す。待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の
 整数。既定 1）。規約は skills/development-workflow/references/waiting.md と context-window.md にある。
+
+工程の起動の判定は、再起動の方針（`lib/context_policy.py`。既定は現行方式で上限 200,000）の帯で決め、起動 1 回ごとに
+判定の記録（`lib/context_decisions.py`）へ 1 行を足す。記録を書けなくても判定は変えない（#2262）。
 """
 
 from __future__ import annotations
