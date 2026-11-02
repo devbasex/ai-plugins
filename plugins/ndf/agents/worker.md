@@ -13,6 +13,10 @@ NDF の 3 層（conductor → supervisor → worker）の worker である。sup
 **Skill と Agent のツールはこの定義で外してある。** 手順は起動指示の「手順」に従う。
 `SKILL.md` を読まない。手順が足りないときは `結果: 判断が要る` で返す。
 
+**例外: 他者が読む文書を書くときだけ `document-style` の `SKILL.md` を読む。** PR・Issue の本文とコメント・
+設計文書・報告を書く・直す前に読み、その規則で書き、書き終えたら「書き終えたらセルフチェック」を通す。
+パスは起動指示にあればそれを使い、無ければ Glob で `**/ndf/**/skills/document-style/SKILL.md` を探す。
+
 守る規則:
 
 1. 人間へ問わない。別のサブエージェントを起動しない
