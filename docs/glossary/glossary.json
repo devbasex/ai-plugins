@@ -4861,6 +4861,76 @@
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "差分の棚卸し",
+      "context": "ndf-workflow",
+      "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "見直し",
+      "context": "ndf-workflow",
+      "meaning": "数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "大整理",
+      "context": "ndf-workflow",
+      "meaning": "十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "後回しの再評価",
+      "context": "ndf-workflow",
+      "meaning": "後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "ニーズの調査",
+      "context": "ndf-workflow",
+      "meaning": "宣言した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "シーズの調査",
+      "context": "ndf-workflow",
+      "meaning": "宣言した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "調査の記録",
+      "context": "ndf-workflow",
+      "meaning": "調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "材料の宣言",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "見直しの持ち主",
+      "context": "ndf-workflow",
+      "meaning": "見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "大方針",
+      "context": "ndf-workflow",
+      "meaning": "大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
     }
   ]
 }
