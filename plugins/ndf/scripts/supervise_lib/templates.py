@@ -174,6 +174,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "id": "fix-doc",
             "type": "work",
             "kind": "修正",
+            "stage": "完了判定",  # 入力の doc-lint と同じ工程。文書を直すため対応表から規則が届く（#2376）
             "inputs": ["doc-lint"],
             "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。",
             "next": "doc-lint",
