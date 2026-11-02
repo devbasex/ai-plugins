@@ -129,6 +129,17 @@ describe("ループの記録の翻訳（受け入れ条件 2・12）", () => {
     expect(advancedSince(markOf(LOOP), LOOP)).toBe(false);
   });
 
+  it("前の周回から残る答えの無い判断待ちも、後の周回の loop.lap_closed に載せる", () => {
+    const two = parseLoopFile({
+      name: "lfactory2",
+      laps: [...LOOP.laps, { n: 2, outcome: "完了", cost: 0, seconds: 0, selection: [] }],
+      waiting: [...LOOP.waiting, { number: 23, reason: "次の周回", lap: 2 }],
+      stop: null,
+    });
+    const [event] = lapClosedEvents(markOf(LOOP), two);
+    expect(event!.payload.pending.map((p) => p.number)).toEqual([21, 23]);
+  });
+
   it("新しく書かれた止まる条件だけを loop.stopped にする。知らない条件は送らない", () => {
     const stopped = { ...LOOP, stop: { condition: "budget_usd", values: { usd: 60 }, lap: 1, at: "2026-11-02T00:00:00Z" } };
     expect(loopStoppedEvent(markOf(LOOP), stopped)).toMatchObject({ type: "loop.stopped", payload: { condition: "budget_usd", loop: "lfactory2" } });

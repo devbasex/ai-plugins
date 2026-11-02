@@ -296,6 +296,11 @@ export class DynamoRunsTable implements RunsTable {
       });
       conds.push(`#ls IN (${keys.join(", ")})`);
     }
+    if (write.expect.answers !== undefined) {
+      names["#la"] = "answers";
+      conds.push("#la = :la");
+      values[":la"] = write.expect.answers;
+    }
     const items: Record<string, unknown>[] = [
       {
         Update: {

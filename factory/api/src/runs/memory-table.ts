@@ -116,6 +116,7 @@ export class MemoryRunsTable implements RunsTable {
     if (e.currentRunId !== undefined && loop.currentRunId !== e.currentRunId) return false;
     if (e.lapRuns !== undefined && loop.lapRuns !== e.lapRuns) return false;
     if (e.states && !e.states.includes(loop.state)) return false;
+    if (e.answers !== undefined && JSON.stringify(loop.answers) !== JSON.stringify(e.answers)) return false;
     return true;
   }
 

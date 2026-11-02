@@ -60,10 +60,10 @@ export function loopStateAfter(o: RunOutcome, cancelRequested: boolean): { state
 export function loopWriteAfterRun(loop: DevLoop, run: SprintRun, o: RunOutcome, now: string): LoopWrite {
   const next = loopStateAfter(o, loop.cancelRequested);
   const terminal = isTerminalLoop(next.state);
-  // 人の判断待ちは最後に届いた写し（ランナーは答えの無いものをすべて送る）。答えは写しに残る番号だけ残す
+  // 人の判断待ちは最後に届いた写し（ランナーは答えの無いものをすべて送る）。答えは書き換えない（同時に保存された答えを
+  // 古い配列で消さないため）。写しに残らない番号の答えは、指示へ載せるときと次の答えの保存のときに落とす
   const lastPending = o.stopped?.pending ?? o.laps.at(-1)?.pending ?? null;
   const pending: LoopPending[] = lastPending ? lastPending.map((p) => ({ number: p.number, reason: p.reason, lap: p.lap })) : loop.pending;
-  const keep = new Set(pending.map((p) => p.number));
   const runEnded = o.runState !== "awaiting_approval" && o.runState !== "awaiting_reset";
   const set: LoopWrite["set"] = {
     state: next.state,
@@ -72,7 +72,6 @@ export function loopWriteAfterRun(loop: DevLoop, run: SprintRun, o: RunOutcome, 
     closedCostUsd: round(loop.closedCostUsd + o.laps.reduce((s, l) => s + l.cost_usd, 0)),
     closedSeconds: round(loop.closedSeconds + o.laps.reduce((s, l) => s + l.seconds, 0)),
     pending,
-    answers: loop.answers.filter((a) => keep.has(a.number)),
     lastRunAt: now,
     updatedAt: now,
     ...(runEnded ? { currentRunId: null } : {}),
@@ -365,12 +364,14 @@ export class LoopControl {
         if (ok) return { state: "cancelled" };
         continue;
       }
-      await table.writeLoop({
+      // 周回が切り替わって今の実行が変わっていれば、読み直して新しい実行を止め直す
+      const requested = await table.writeLoop({
         accountId: loop.accountId,
         loopId: loop.loopId,
         set: { cancelRequested: true, updatedAt: now },
         expect: { currentRunId: loop.currentRunId },
       });
+      if (!requested) continue;
       await control.cancelSprintRun(ctx, loop.currentRunId).catch((err) => {
         if (!(err instanceof ApiError)) throw err;
       });
@@ -419,17 +420,24 @@ export class LoopControl {
     if (!Number.isInteger(issue) || (issue as number) < 1) throw new InvalidRequestError("課題の番号の形ではありません");
     if (decision !== "approved" && decision !== "rejected") throw new InvalidRequestError("答えは approved か rejected です");
     if (pr !== undefined && pr !== null && (!Number.isInteger(pr) || (pr as number) < 1)) throw new InvalidRequestError("Pull Request の番号の形ではありません");
-    const loop = await this.loopOf(ctx, loopId);
-    if (!loop.pending.some((p) => p.number === issue)) throw new ConflictError("not_pending", "この課題は人の判断待ちではありません");
-    const answers = [...loop.answers.filter((a) => a.number !== issue), { number: issue as number, decision: decision as LoopAnswer["decision"], pr: (pr as number | undefined) ?? null }];
-    const ok = await this.deps.table.writeLoop({
-      accountId: loop.accountId,
-      loopId: loop.loopId,
-      set: { answers, updatedAt: this.iso() },
-      expect: { states: ["running", "between_laps", "awaiting_approval"] },
-    });
-    if (!ok) throw new ConflictError("already_finished", "このループは終わっています");
-    return { pending: pendingRows((await this.loopOf(ctx, loopId))!) };
+    const answer: LoopAnswer = { number: issue as number, decision: decision as LoopAnswer["decision"], pr: (pr as number | undefined) ?? null };
+    // answers は配列を丸ごと置き換えるため、読んだときの配列のままのときだけ書き、変わっていれば読み直す。
+    // 同時に別の課題へ答えた人の答えを古い配列で消さない
+    for (let attempt = 0; attempt < START_RETRIES; attempt++) {
+      const loop = await this.loopOf(ctx, loopId);
+      if (isTerminalLoop(loop.state)) throw new ConflictError("already_finished", "このループは終わっています");
+      if (!loop.pending.some((p) => p.number === issue)) throw new ConflictError("not_pending", "この課題は人の判断待ちではありません");
+      const open = new Set(loop.pending.map((p) => p.number));
+      const answers = [...loop.answers.filter((a) => a.number !== issue && open.has(a.number)), answer];
+      const ok = await this.deps.table.writeLoop({
+        accountId: loop.accountId,
+        loopId: loop.loopId,
+        set: { answers, updatedAt: this.iso() },
+        expect: { states: ["running", "between_laps", "awaiting_approval"], answers: loop.answers },
+      });
+      if (ok) return { pending: pendingRows((await this.loopOf(ctx, loopId))!) };
+    }
+    throw new ConflictError("loop_busy", "ループの状態が変わりました。やり直してください");
   }
 
   // F5: 一覧（新しい順 50 件）

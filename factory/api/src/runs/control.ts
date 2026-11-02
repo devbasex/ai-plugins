@@ -683,7 +683,8 @@ export class RunControl {
   }
 }
 
-// ループの実行のジョブの指示へ載せる値（予算・答えは周回を起こす時点の値）
+// ループの実行のジョブの指示へ載せる値（予算・答えは周回を起こす時点の値）。答えは今の人の判断待ちに残る番号だけ
 export function loopInput(loop: DevLoop, exclude: number[]): LoopJobInput {
-  return { name: loop.name, milestones: loop.milestones, budget: loop.budget, exclude, answers: loop.answers };
+  const open = new Set(loop.pending.map((p) => p.number));
+  return { name: loop.name, milestones: loop.milestones, budget: loop.budget, exclude, answers: loop.answers.filter((a) => open.has(a.number)) };
 }

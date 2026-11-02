@@ -191,6 +191,18 @@ describe("開発ループを始め・止め・予算を変える（受け入れ�
     expect(await h.table.getMilestoneShare("acc-1", REPO, "25 Factory")).toBeNull();
     expect(await codeOf(loops.cancelLoop(accountContext(), loop_id))).toBe("already_finished");
   });
+
+  it("取り消しの要求を書けなければ読み直して止め直し、成功を返して取り逃さない", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const runId = (await loopOf(loop_id)).currentRunId!;
+    const write = h.table.writeLoop.bind(h.table);
+    let refused = 0;
+    h.table.writeLoop = async (w) => (w.set.cancelRequested && refused++ === 0 ? false : write(w));
+    await loops.cancelLoop(accountContext(), loop_id);
+    expect(refused).toBe(2);
+    expect((await loopOf(loop_id)).cancelRequested).toBe(true);
+    expect((await runOf(runId)).cancelRequested).toBe(true);
+  });
 });
 
 describe("止まる条件の写し（受け入れ条件 2）", () => {
@@ -426,6 +438,20 @@ describe("人の判断待ちと答え（受け入れ条件 12）", () => {
     await finishEcs(second, { result: "done", summary: "" }, [["loop.lap_closed", lap(2, { pending })]]);
     const third = (await loopOf(loop_id)).currentRunId!;
     expect(instructionOf((await runOf(third)).currentJobId!).LOOP_ANSWERS).toBe("2=approved#40");
+  });
+
+  it("別の課題へ同時に答えても、どちらの答えも残る", async () => {
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"]);
+    const pending = [
+      { number: 2, reason: "a", lap: 1 },
+      { number: 3, reason: "b", lap: 1 },
+    ];
+    await finishEcs((await loopOf(loop_id)).currentRunId!, { result: "done", summary: "" }, [["loop.lap_closed", lap(1, { pending })]]);
+    await Promise.all([
+      loops.answer(accountContext(), loop_id, { issue: 2, decision: "approved" }),
+      loops.answer(accountContext(), loop_id, { issue: 3, decision: "rejected" }),
+    ]);
+    expect((await loopOf(loop_id)).answers.map((a) => a.number).sort()).toEqual([2, 3]);
   });
 });
 

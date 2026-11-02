@@ -102,7 +102,8 @@ export function lapClosedEvents(mark: LoopMark, f: LoopFile | null): Pick<LoopLa
             version: version ? version.slice(0, 200) : null,
             cost_usd: num(lap.cost),
             seconds: num(lap.seconds),
-            pending: pending.filter((p) => p.lap === n),
+            // その周回までに残る答えの無い判断待ちをすべて載せる。API は届いた配列で判断待ちを置き換える（前の周回の分を消さない）
+            pending: pending.filter((p) => p.lap <= n),
           },
         },
       ];

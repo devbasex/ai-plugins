@@ -175,7 +175,8 @@ export interface LoopWrite {
   loopId: string;
   set: Partial<Omit<DevLoop, "loopId" | "accountId">>;
   // 今の値がこれと同じときだけ書く
-  expect: { currentRunId?: string | null; lapRuns?: number; states?: LoopState[] };
+  // answers は読んだときの答えの配列。配列を丸ごと置き換える書き込みが、間に保存された答えを消さないために照らす
+  expect: { currentRunId?: string | null; lapRuns?: number; states?: LoopState[]; answers?: LoopAnswer[] };
   // 持ち分を消すマイルストーン（ループが終わりの状態へ移るとき）
   releaseMilestones?: { repositoryId: number; titles: string[] };
 }
