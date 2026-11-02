@@ -285,6 +285,7 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
         "受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、"
         "マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。"
         "課題は閉じない（次の close が閉じる）。"
+        "進捗記録（progress-record.sh・projects-sync.sh）は打たない（このステップが ok で終わった後にプランが打つ）。"
         "番号が 0 なら本番へ出ていないため、何もせずに終える。",
         "next": "retro",
     }
