@@ -123,7 +123,7 @@ def place_blocks(text: str, cwd: str, relay_dir: str) -> int:
     """応答の起動のブロックごとに依頼を置く（待たない。統括役が居なければ次の統括役が処理する）。置いた数。"""
     n = 0
     for name, body in spawn_blocks(text):
-        put_request("spawn", name, cwd or os.getcwd(), [body], f"block:{relay_dir}")
+        put_request("spawn", name, cwd or os.getcwd(), hb.prompt_args(body), f"block:{relay_dir}")
         n += 1
     return n
 
@@ -152,7 +152,7 @@ def cmd_spawn(argv: list[str]) -> int:
         return finish(hb.outcome("spawn", "stopped", f"名前の形が違う（{hb.NAME_RE.pattern}）: {name}", name, hb.BAD_NAME, 3), as_json)
     if not hb.hub_running():
         return finish(no_hub("spawn", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
-    res = request("spawn", name, os.getcwd(), [" ".join(rest)] if rest else [], "spawn")
+    res = request("spawn", name, os.getcwd(), hb.prompt_args(" ".join(rest)) if rest else [], "spawn")
     return finish(res or no_hub("spawn", name, "統括役が答えない"), as_json)
 
 

@@ -33,6 +33,7 @@ from .common import (
     fallback_cwd,
     launcher_path,
     load_json,
+    lock_busy,
     parse_iso,
     read_text,
     relay_running,
@@ -89,6 +90,11 @@ def wait_seconds() -> float:
     return env_num("NDF_RELAY_HUB_WAIT", 10)
 
 
+def prompt_args(text: str) -> list[str]:
+    """最初の入力 1 つを claude の引数にする。`--` の後へ置き、`-` で始まる入力を選択肢として読ませない。"""
+    return ["--", text]
+
+
 def valid_name(name) -> bool:
     return isinstance(name, str) and bool(NAME_RE.match(name))
 
@@ -107,7 +113,7 @@ def hub_log(event: str, name: str | None = None, reason: str | None = None) -> N
 
 def hub_running() -> bool:
     """`hub.lock` が持たれていれば統括役が居る。"""
-    return relay_running(hub_dir()) if os.path.exists(hub_path(HUB_LOCK)) else False
+    return lock_busy(hub_path(HUB_LOCK))
 
 
 def hub_relay_dir() -> str | None:
@@ -349,6 +355,9 @@ class Hub:
         elif kind == "spawn":
             cwd = req.get("cwd") if isinstance(req.get("cwd"), str) and os.path.isdir(req["cwd"]) else os.path.expanduser("~")
             args = [a for a in req.get("args") or [] if isinstance(a, str)]
+            if req.get("by") != "terminal" and args[:1] != ["--"]:
+                # 端末で利用者が打った引数のほかは、最初の入力だけを受ける（選択肢を足させない）
+                args = prompt_args(" ".join(args)) if args else []
             if name is None:
                 name = self.auto_name(now.taken)
         else:

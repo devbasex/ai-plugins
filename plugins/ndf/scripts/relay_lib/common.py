@@ -112,7 +112,11 @@ def launcher_path() -> str:
 
 def relay_running(d: str) -> bool:
     """`relay.lock` の排他が取れなければラッパーが動いている。pid の生死では見ない。"""
-    path = os.path.join(d, LOCK_FILE)
+    return lock_busy(os.path.join(d, LOCK_FILE))
+
+
+def lock_busy(path: str) -> bool:
+    """`path`（`<名前>.lock`）の排他を誰かが持っていれば真。ファイルが無い・開けないときは偽。"""
     if not os.path.exists(path):
         return False
     try:
