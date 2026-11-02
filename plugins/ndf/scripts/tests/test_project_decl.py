@@ -239,6 +239,15 @@ def test_analysis_creates_the_declaration_with_all_items(laravel, env, tmp_path)
     assert d["delivery"] == {"unknown": "デプロイの設定がリポジトリに無い"}
 
 
+def test_measure_proposes_materials_from_direct_dependencies_as_a_question(laravel, env, tmp_path):
+    # 材料の宣言は案として問いで出す。調べる依存は直接の依存から候補を出し、利用の記録は人が書く（#2315）
+    _, m = measure(env, laravel, tmp_path)
+    got = m["items"]["materials"]
+    names = [lib["name"] for lib in got["candidates"]["seeds"]["libraries"]]
+    assert got["status"] == "question" and "laravel/framework" in names and "php" not in names
+    assert got["candidates"]["needs"]["usage"] == []
+
+
 def test_measure_reads_ci_junit_steps_and_required_checks(laravel, env, tmp_path):
     _, m = measure(env, laravel, tmp_path)
     got = {d["source"]: d["seconds"] for d in m["items"]["test_duration"]["value"]["measured"]}

@@ -5,13 +5,16 @@
 | Bash               | 前景の `sleep` で待つ（ループの本体にあるか、上限を超える）                    |
 | Bash               | 文脈が上限を超えた conductor が supervise.py queue / run でプランを起こす      |
 | Read               | 変わらないファイルの同じ範囲を続けて読み直す                                  |
-| Skill / Agent・Task | 文脈が上限を超えた conductor が工程へ入る                                    |
+| Skill / Agent・Task | 文脈が上限を超えた conductor が工程へ入る（再起動の方針で決める。下の注）       |
 | Agent・Task        | supervisor の起動に、プランで流せることを案内する（止めない）                  |
 | Skill              | 寿命 5 分の supervisor が文脈を伸ばしたまま収束ループを始める                  |
 
 拒否は `permissionDecision: deny`、案内は `additionalContext` で返す。判定が失敗したとき（記録を書けない・読めない・
 ロックを待ちの上限の内に取れない・構文を読み切れない）は通す。待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の
 整数。既定 1）。規約は skills/development-workflow/references/waiting.md と context-window.md にある。
+
+工程の起動の判定は、再起動の方針（`lib/context_policy.py`。既定は現行方式で上限 200,000）の帯で決め、起動 1 回ごとに
+判定の記録（`lib/context_decisions.py`）へ 1 行を足す。記録を書けなくても判定は変えない（#2262）。
 """
 
 from __future__ import annotations
@@ -233,6 +236,26 @@ def context_tokens(path: str) -> int | None:
     return totals[-1] if totals else None
 
 
+def last_context(path: str) -> tuple[int | None, str | None]:
+    """最後の assistant の行の文脈量とモデル。末尾の 200 行だけを読む。"""
+    total = context_tokens(path)
+    if total is None:
+        return None, None
+    model = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in deque(f, maxlen=TAIL_LINES):
+                if '"assistant"' in line and '"model"' in line:
+                    try:
+                        m = json.loads(line).get("message", {}).get("model")
+                    except (ValueError, AttributeError):
+                        continue
+                    model = m if isinstance(m, str) else model
+    except OSError:
+        pass
+    return total, model
+
+
 def first_context_tokens(path: str) -> int | None:
     """記録の先頭から最初の assistant の行を探し、その文脈量を読む。見つけた時点で読むのをやめる。"""
     try:
@@ -292,15 +315,42 @@ def _launch_key(raw: dict, tool: str) -> tuple[str, str] | None:
     return f"agent\t{words}", words
 
 
-def _context_deny(total: int, limit: int, nxt: str, notice: str | None) -> dict:
-    """上限を超えたときの拒否。ラッパーの下（notice がある）と外で文面が違う。"""
+def _context_deny(total: int, limit: int, nxt: str, notice: str | None, cause: str | None = None) -> dict:
+    """止めるときの拒否。ラッパーの下（notice がある）と外で文面が違う。cause は試行方式の超えた理由の句
+    （現行方式は None で、今と同じ「上限 {limit} を超えた」）。"""
+    over = cause or f"上限 {limit} を超えた"
     if notice is not None:
         return deny(
-            f"会話の文脈が {total} トークンで、上限 {limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（メインディレクトリの .ndf/handoff/<名>.md）を {HANDOFF_DOC} に従って作るか更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal {nxt} .ndf/handoff/<名>.md の続きから。同じ中身を文書の「次に実行するコマンド」にも置く）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: {notice}。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+            f"会話の文脈が {total} トークンで、{over}。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（メインディレクトリの .ndf/handoff/<名>.md）を {HANDOFF_DOC} に従って作るか更新し（承認待ちと質問待ちは「次にやること」に保留として残す）、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal {nxt} .ndf/handoff/<名>.md の続きから。同じ中身を文書の「次に実行するコマンド」にも置く）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: {notice}。承認ゲートの承認待ちなら、承認を得て取り込んだ後に出す。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
         )
     return deny(
-        f"会話の文脈が {total} トークンで、上限 {limit} を超えた。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: {nxt}（今の区間を /goal で始めていたなら /goal {nxt}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+        f"会話の文脈が {total} トークンで、{over}。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: {nxt}（今の区間を /goal で始めていたなら /goal {nxt}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
     )
+
+
+def _trial_cause(applied, verdict) -> str | None:
+    """試行方式の拒否の句。現行方式は None（文面を変えない。I1）。"""
+    if applied.policy != "trial":
+        return None
+    tag = "再起動の方針: 試行方式"
+    if verdict.reason == "容量":
+        return f"容量（窓 {verdict.effective_limit + applied.margin} − 余白 {applied.margin} = {verdict.effective_limit}）を超えた（{tag}、理由: 容量）"
+    if verdict.reason == "費用":
+        e = verdict.estimate.to_dict()
+        return f"判断開始の値 {applied.decide_from} を超え、再起動のほうが安い（{tag}、理由: 費用（続ける {e['continue']} / 再起動 {e['restart']}、入力の単価に換算））"
+    return f"上限 {applied.limit}（{tag}、理由: 運用上限）を超えた"
+
+
+def _config_notice(d: Path, sid: str, applied) -> dict | None:
+    """壊れた設定を、そのセッションで 1 度だけ知らせる。"""
+    if not applied.config_error:
+        return None
+    mark = d / f"context-config-{sid}.json"
+    if _load_record(mark).get("error") == applied.config_error:
+        return None
+    write_json(mark, {"error": applied.config_error})
+    text = f"{applied.config_error}。再起動の方針の設定を読まずに現行方式の既定で判定している。規約: {CONTEXT_DOC}"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}
 
 
 def guard_context(raw: dict, tool: str) -> dict | None:
@@ -313,29 +363,54 @@ def guard_context(raw: dict, tool: str) -> dict | None:
     if launch is None:
         return None
     key, words = launch
-    total = context_tokens(tp)
-    if total is None:
-        return None
-    limit = _env_int("NDF_CONTEXT_LIMIT", 200000)
+    import context_decisions as cd
+    import context_policy as cp
+
+    total, model = last_context(tp)
+    root = cd.toplevel(_field(raw, "cwd"))
+    applied = cp.resolve_policy(root)
+    stage = cd.stage_of(key)
+    window = cd.read_window(sid) if applied.policy == cp.TRIAL else None
+    estimate = None
+    if applied.policy == cp.TRIAL and total is not None and applied.decide_from < total <= applied.limit:
+        repo = cd.decisions_repo(root)
+        estimate = cp.estimate_cost(cp.Estimates.from_dict(cd.read_cost_estimates(repo)), total, model, stage)
+    verdict = cp.decide_boundary(applied, total, window, estimate)
+    row = dict(source="hook", session_id=sid, transcript=tp, model=model, work=cd.work_id(issue_refs(words)), stage=stage)
+    row.update(context=total, window=window, applied=applied, verdict_obj=verdict)
     d = guards_dir()
-    if d is None:
-        return None
+    out = _judge(d, sid, key, words, total, applied, verdict, row) if d is not None and total is not None else None
+    if d is None or total is None:
+        row["passed_once"] = False
+    cd.append_decision(cd.boundary_row(**row), cd.decisions_repo(root))
+    cd.write_applied(sid, applied)
+    if out is None and d is not None:
+        return _config_notice(d, sid, applied)
+    return out
+
+
+def _judge(d: Path, sid: str, key: str, words: str, total: int, applied, verdict, row: dict) -> dict | None:
+    """1 度だけ通す印とラッパーの下の止め続けを当てる（I11）。row の relay・passed_once・verdict を埋める。"""
     with session_lock(d, sid) as held:
         if not held:
             return None
         mark = d / f"context-{sid}.json"
+        over = verdict.verdict == "拒否"
         # ラッパーの直接の子の conductor では 1 度の通しをやめ、上限を超えている限り止め続ける（#895）
-        notice = relay_notice() if os.environ.get("NDF_RELAY_DIR") and total > limit else None
+        notice = relay_notice() if os.environ.get("NDF_RELAY_DIR") and over else None
+        row["relay"] = notice is not None
         if notice is None and _load_record(mark).get("key") == key:
             try:
                 mark.unlink()
             except OSError:
                 pass
+            row["passed_once"] = over
             return None
-        if total <= limit:
+        if not over:
             return None
         write_json(mark, {"key": key})
-    return _context_deny(total, limit, f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}", notice)
+    nxt = f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}"
+    return _context_deny(total, applied.limit, nxt, notice, _trial_cause(applied, verdict))
 
 
 def guard_supervisor_cut(raw: dict) -> dict | None:

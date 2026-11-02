@@ -84,11 +84,47 @@
 | 手段 | 効き目 |
 | --- | --- |
 | `python3 ~/.claude/ndf/relay.py stop`（別の端末から） | 動いているラッパーすべてに停止シグナルファイルを置く。次のシグナルファイルを受けても `/exit` を入力しない。動いているラッパーが無ければ終了コード 1 |
+| `python3 ~/.claude/ndf/relay.py stop <名前>` | 名前つきのラッパー 1 本だけを止める（停止シグナルファイルを置き、tmux のセッションを終える。下の「複数のループを並べる」） |
 | `touch <作業ディレクトリ>/stop` | 同じ（1 つのラッパーだけ） |
 | セッションの中で `/exit` か Ctrl-C を 2 回 | ラッパーも次のセッションを起動せずに終わる |
 
 作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。セッションの中では環境変数 `NDF_RELAY_DIR` が指す。
+
+## 複数のループを並べる（統括役）
+
+例: 同じコンテナで `l20261031`・`lroot`・`lflow` の 3 本の開発ループを回す。1 つ目の端末で `claude` を打つと、
+今どおり前景でラッパーが動き、そのラッパーが**統括役**を兼ねる。2 つ目の端末で `NDF_RELAY_NAME=lroot claude` を打つと、
+統括役が tmux の中に名前つきのラッパー `lroot` を起動し、その端末が結び付く。3 本目は conductor が応答に起動のブロックを置いて始める:
+
+````markdown
+```ndf-spawn lflow
+/goal .ndf/handoff/loop-lflow.md を読んで続ける
+```
+````
+
+`relay.py ls` で 3 本の状態と承認待ちが 1 つの表に出て、`relay.py stop lroot` で 1 本だけを止められる。
+
+| 操作 | 効き目 |
+| --- | --- |
+| 統括役が居るときに端末で `claude` | 統括役に起動を頼み、tmux の名前つきのラッパーへ結び付く。名前は `NDF_RELAY_NAME`、無ければ `t2`・`t3`… |
+| `relay.py spawn --name <名前> [--json] -- <最初の入力>` | 端末の結び付いていない名前つきのラッパーを起動する。最初の区間の claude が入力を受け取る |
+| 応答の起動のブロック（情報文字列 `ndf-spawn <名前>`、中身が最初の入力） | Stop hook が統括役へ依頼を置く。置いた区間は止まらない。1 つの応答に複数置ける |
+| `relay.py ls [--json]` | 名前・状態（`running` / `awaiting_approval` / `stopped`）・区間・費用（記録が無ければ空）・最後に動いた時刻・アカウント・端末の結び付き・統括役かを出す。`--json` は 1 行の JSON |
+| `relay.py attach <名前>` | 打った端末をそのラッパーへ結び付ける。端末を閉じてもラッパーは動き続ける |
+| `relay.py restart <名前> [--json]` | 1 本を止め、最後の区間の入力と作業ディレクトリで起動し直す |
+| `relay.py stop <名前> [--json]` | 1 本だけを止める。名前を付けなければ今どおり全部 |
+
+- **同時に動かす数の上限**は `NDF_RELAY_MAX_NAMED`（既定 3）。統括役・名前つき・名前の無いラッパーを合わせて数え、
+  超える起動はどの入口からでも理由（上限と動いている名前）を出して終了コード 3 で断る。名前が重なる・名前の形
+  （`^[a-z0-9][a-z0-9_-]{0,31}$`）が違うときも 3
+- **統括役が落ちても**名前つきのラッパーは止まらない（tmux のサーバが親）。次に端末で打った `claude` が統括役になる。
+  統括役が `NDF_RELAY_HUB_WAIT`（既定 10 秒）答えなければ、2 本目は 1 行出して今の前景の起動になる
+- **tmux が PATH に無い**（`NDF_RELAY_TMUX` で実行ファイルを替えられる）ときは、2 本目は 1 行出して今の前景の起動になる
+- **承認待ちの知らせ**は各ラッパーの待ち通知が出し、名前つきのラッパーなら `ラッパー: <名前>（relay.py attach <名前>）` の 1 行が付く
+- tmux は専用のソケット `-L ndf-relay` だけを使い、利用者の tmux サーバに触れない。統括役の置き場は
+  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動の依頼 `requests/`・結果 `results/`・
+  記録 `hub-log.jsonl`。所有者だけが読み書きできる）
 
 ## 好きな時点で切り替える（`/ndf:restart`）
 
@@ -351,6 +387,7 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。ゲート 1・2 の記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
 3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
+   - `context-policy.py record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの区間の起点になる。[context-window.md](context-window.md) の「判定と再起動を記録する」）
    - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
@@ -372,6 +409,8 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 ```
 
 **次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは承認ゲート 2 つだけになる。
+
+**再開したセッションの conductor は、引継ぎ文書を読み、課題・Pull Request・通過記録で状態を確かめ終えた直後（最初の工程を起動する前）に `context-policy.py record --event 復元完了 --work "<課題番号の並び>"` を打つ。** 復元の区間の終わりになる。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
 
 `sprint-state.py status <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
 節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。

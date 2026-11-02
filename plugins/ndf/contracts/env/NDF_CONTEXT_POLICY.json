@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CONTEXT_POLICY",
+  "set_by": "user",
+  "summary": "再起動の方針（current / trial）。.ndf/context.json より強い。ほかの値は無視して適用値の出所に残す（plugins/ndf/scripts/lib/context_policy.py:resolve）"
+}

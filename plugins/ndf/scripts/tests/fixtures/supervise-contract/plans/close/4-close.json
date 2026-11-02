@@ -10,7 +10,7 @@
   "リポジトリ": "<TMP>/repo",
   "規則": "",
   "進め方": "fast",
-  "上限": 9,
+  "上限": 18,
   "steps": [
     {
       "id": "spec",
@@ -108,7 +108,115 @@
       "kind": "棚卸し",
       "stage": "棚卸し",
       "timeout": 3600,
-      "prompt": "/ndf:backlog-refinement スプリント m9（#15）。棚卸しの工程として無人で通す。候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の番号）を報告の「人の判断待ち」に載せて終える。",
+      "prompt": "/ndf:backlog-refinement --depth diff スプリント m9（#15）。差分の棚卸しの工程として無人で通す。候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の番号）を報告の「人の判断待ち」に載せて終える。",
+      "next": "refine-record"
+    },
+    {
+      "id": "refine-record",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth record --depth diff --sprint m9 --root <TMP>/repo",
+      "next": "overhaul-due"
+    },
+    {
+      "id": "overhaul-due",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth due overhaul --root <TMP>/repo",
+      "skip_to": "review-due",
+      "next": "overhaul-claim"
+    },
+    {
+      "id": "overhaul-claim",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner claim --what overhaul --keepalive 5400 --root <TMP>/repo --pid \"$PPID\"",
+      "on_exit": {
+        "10": "overhaul-skipped"
+      },
+      "next": "overhaul"
+    },
+    {
+      "id": "overhaul",
+      "type": "work",
+      "full": true,
+      "kind": "棚卸し",
+      "stage": "棚卸し",
+      "timeout": 5400,
+      "prompt": "/ndf:backlog-refinement --depth overhaul スプリント m9（#15）の後の大整理を無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `overhaul` の判定にある。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
+      "on_fail": "overhaul-release",
+      "next": "overhaul-release"
+    },
+    {
+      "id": "overhaul-release",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner release --what overhaul --root <TMP>/repo --pid \"$PPID\"",
+      "on_exit": {
+        "10": "review-due"
+      },
+      "next": "review-due"
+    },
+    {
+      "id": "overhaul-skipped",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth record --depth overhaul --event skipped --root <TMP>/repo",
+      "next": "review-due"
+    },
+    {
+      "id": "review-due",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth due review --root <TMP>/repo",
+      "skip_to": "end",
+      "next": "review-claim"
+    },
+    {
+      "id": "review-claim",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner claim --what review --keepalive 5400 --root <TMP>/repo --pid \"$PPID\"",
+      "on_exit": {
+        "10": "review-skipped"
+      },
+      "next": "review"
+    },
+    {
+      "id": "review",
+      "type": "work",
+      "full": true,
+      "kind": "棚卸し",
+      "stage": "棚卸し",
+      "timeout": 5400,
+      "prompt": "/ndf:backlog-refinement --depth review スプリント m9（#15）の後の見直しを無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `review` の判定にある。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
+      "on_fail": "review-release",
+      "next": "review-release"
+    },
+    {
+      "id": "review-release",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner release --what review --root <TMP>/repo --pid \"$PPID\"",
+      "on_exit": {
+        "10": "end"
+      },
+      "next": "end"
+    },
+    {
+      "id": "review-skipped",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth record --depth review --event skipped --root <TMP>/repo",
       "next": "end"
     }
   ],

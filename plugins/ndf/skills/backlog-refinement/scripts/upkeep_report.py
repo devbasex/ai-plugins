@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import run_owner
 from step_result import EXIT_PRECONDITION, StepError, emit, git_root, result
+import upkeep_actions as A
+import upkeep_depth as D
 from upkeep_gh import target_repo
+import upkeep_owner as O
 from upkeep_rank_config import SLOT_SPLIT
+import upkeep_research as R
 
 
 def cmd_report(a, ctx):
@@ -45,10 +50,59 @@ def cmd_report(a, ctx):
     rank_items, rank_metrics = report_sections(rank, app)
     items += rank_items
     metrics.update(rank_metrics)
+    if getattr(a, "depth", None):
+        dm = depth_metrics(root, a, cand, app)
+        metrics.update(dm)
+        items.append(
+            {
+                "kind": "section",
+                "name": "材料",
+                "result": "ok",
+                "value": f"調査の項目 {len(dm['research']['items'])} 件・飛ばした側面 {len(dm['skipped_aspects'])} 件",
+            }
+        )
     summary = " / ".join(f"{i['name']}: {i['value']}" for i in items)
     if gaps:  # 足し合わせられない値を 0 件の ok と読ませない
         summary = "足し合わせられない記録がある: " + gaps[0]["reason"] + " / " + summary
     emit(result(ctx.tool, "stopped" if gaps else "ok", summary, items, metrics, gaps=gaps))
+
+
+def depth_metrics(root, a, cand, app) -> dict:
+    """`report --depth` が足す値（設計の契約の `report --depth`）。記録から取れない値は None。
+
+    出どころ: 起動した条件は深さの記録（`depths.jsonl` の `due` の行）、open の前は candidates の記録、閉じた・起票した・
+    起票しなかった・戻すコマンドは apply の記録、飛ばした側面と調べた材料は材料の宣言と調査の記録。
+    実行（`--run`）を省くと、見直しの持ち主の宣言のうち `what` が同じ深さのものの実行を使う。"""
+    depth = a.depth
+    run = a.run
+    if not run:
+        cur, _ = run_owner.read_owner(O.owner_file(root))
+        run = (cur or {}).get("run") if (cur or {}).get("what") == depth else None
+    rows = D.read_depth_rows(D.backlog_dir(root) / "depths.jsonl")
+    am = (app or {}).get("metrics") or {}
+    rnd = am.get("round") or am
+    created = [c for c in am.get("created") or [] if isinstance(c, dict)]
+    policy = next((c for c in created if c.get("kind") == "policy"), None)
+    revert = am.get("revert_command")
+    if not revert and depth == "overhaul" and run and A.before_path(root, run).exists():
+        revert = A.revert_command(run)
+    _, skipped = R.research_items(D.materials(root))
+    cm = (cand or {}).get("metrics") or {}
+    return {
+        "depth": depth,
+        "run": run,
+        "trigger": D.last_trigger(rows, depth),
+        "order": [x for x in a.order.split(",") if x] if a.order else None,
+        "open_before": cm.get("open") if isinstance(cm.get("open"), int) else None,
+        "open_after": None,
+        "closed": sorted(rnd.get("closed") or []) if app else None,
+        "created": [c.get("number") for c in created] if app else None,
+        "not_created": am.get("not_created") if app else None,
+        "skipped_aspects": skipped,
+        "research": R.consulted(root, run),
+        "root_cause": {"number": policy.get("number"), "title": policy.get("title")} if policy else None,
+        "revert_command": revert,
+    }
 
 
 def _apply_report(app) -> tuple[list, dict, list]:

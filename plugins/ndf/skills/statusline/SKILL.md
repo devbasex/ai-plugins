@@ -27,6 +27,9 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
   - ラベルは `agent-<id>.meta.json` の `description` から空白を除いた先頭 4 文字で、空白を挟んで使用量を続ける。project_dir と 3 本を並べても 80 桁に収めるため。種類名 (`agentType`) はほとんどが `general-purpose` で見分けに使えない。説明が無ければ ID の先頭を出す
 - 末尾に接続先を薄い色で出す。Anthropic のアカウントは `claude auth status` の `email` に契約の種別 `subscriptionType`（team / pro / max。同じメールアドレスに Team と個人の契約がありうるため）を括弧で添えたもの（0.4 秒かかるので `~/.claude/.ndf-statusline-auth.json` に 60 秒控える。呼び出しは 1 秒で打ち切る）。`CLAUDE_CODE_USE_BEDROCK` が空でなければ `bedrock`（`AWS_PROFILE` があれば `bedrock:<profile>`）。取れなければ何も出さない
 - メイン・サブエージェントとも、500k を超えたら使用量を赤で表示する。上限が 200K 以下のモデル (Haiku 4.5) は 150k で赤にする。メインは入力の `context_window.context_window_size`、サブエージェントは記録のモデル名で判定する
+- この色は窓に対して危険な水準を示す表示の警告で、hook が工程の起動を止める上限（現行方式の 200K）とは意味が違う
+- 再起動の方針が試行方式のセッションでは、メインの使用量を判断開始の値を超えたら黄、実効の上限（運用上限か、窓 − 容量の余白の小さいほう）を超えたら赤にする。適用値は SessionStart と hook が状態ディレクトリ（`NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context`）の `sessions/<セッション>.applied.json` へ書いたものを読むだけにする。サブエージェントの行は方針で変えない
+- 入力の窓の大きさとモデルを同じ置き場の `sessions/<セッション>.window.json` へ書く（変わったときだけ）。hook は試行方式の容量の判定にこの値を使う（`development-workflow` の `references/context-window.md` の「再起動の方針」）
   - サブエージェントの記録の置き場所と形は公式ドキュメントに無い内部の仕様で、Claude Code の更新で変わりうる。読めなければ何も出さない
 
 ## 使用方法
