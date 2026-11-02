@@ -3,7 +3,7 @@
 // 課題の選定の規則は持たない（ランナーの中の NDF の開発ループが行う）。常駐のプロセスは持たず、API と見回りの中で動く（決定 1）
 import { randomUUID } from "node:crypto";
 import type { LoopLapClosedPayload, LoopStoppedPayload } from "@ndf-factory/contracts";
-import type { AccountContext } from "../accounts/model.ts";
+import type { AccountContext, AccountRecord, SeatRecord } from "../accounts/model.ts";
 import { ApiError, ConflictError, InvalidRequestError, NotFoundError } from "../errors.ts";
 import type { ProgressReader } from "../progress/read.ts";
 import type { LoopHooks, RunControl } from "./control.ts";
@@ -99,10 +99,31 @@ export function loopWriteOnResume(loop: DevLoop, run: SprintRun, now: string): L
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
+// ループを始めた利用者の今の文脈を引く。席を外された・アカウントが無ければ null（周回を起こさない）
+export type ContextResolver = (accountId: string, userId: string) => Promise<AccountContext | null>;
+
+// アカウントの行と席から文脈を組む（resolveAccount と同じ規則。要求の無い見回りで、保存した写しを信じないため）
+export function accountContextResolver(accounts: {
+  getAccount(accountId: string): Promise<AccountRecord | null>;
+  listSeats(ctx: AccountContext): Promise<SeatRecord[]>;
+}): ContextResolver {
+  return async (accountId, userId) => {
+    const account = await accounts.getAccount(accountId);
+    if (!account) return null;
+    const base = { accountId, userId, kind: account.kind, plan: account.plan, executionMode: account.executionMode };
+    const role = account.ownerUserId === userId ? ("owner" as const) : ("member" as const);
+    if (account.kind === "personal") return account.ownerUserId === userId ? { ...base, role, seatType: null } : null;
+    const seat = (await accounts.listSeats({ ...base, role, seatType: null })).find((x) => x.userId === userId);
+    return seat ? { ...base, role, seatType: seat.seatType } : null;
+  };
+}
+
 export interface LoopControlDeps {
   table: RunsTable;
   control: RunControl;
   reader: ProgressReader;
+  // 周回を起こすたびに、始めた利用者の今の文脈を引き直す。無いときは保存した写しを使う
+  resolveContext?: ContextResolver;
   now?: () => Date;
   newId?: () => string;
   log?: (entry: Record<string, unknown>) => void;
@@ -229,6 +250,15 @@ export class LoopControl {
       const loop = await table.getLoop(accountId, loopId);
       if (!loop || loop.state !== "between_laps" || loop.currentRunId !== null || loop.cancelRequested) return;
       const now = this.iso();
+      // 保存した写しを判定に使わない（プランの変更・席の外し・形態の変更を周回ごとに照らす）
+      if (this.deps.resolveContext) {
+        const fresh = await this.deps.resolveContext(loop.accountId, loop.createdBy);
+        if (!fresh) {
+          await this.refused(loop, new ConflictError("seat_missing", "ループを始めた利用者がこのアカウントの席を持っていません"));
+          return;
+        }
+        loop.context = contextOf(fresh);
+      }
       if (loop.context.executionMode === "local" && !control.config.localLoopAutostart && !byUser) {
         if (loop.waitReason !== "user_start") {
           await this.setWaiting(loop, "user_start");
@@ -240,7 +270,15 @@ export class LoopControl {
         const result = await control.startLapRun(loop, (run) => ({
           accountId: loop.accountId,
           loopId: loop.loopId,
-          set: { state: "running", waitReason: null, currentRunId: run.sprintRunId, lapRuns: loop.lapRuns + 1, lastRunAt: now, updatedAt: now },
+          set: {
+            state: "running",
+            waitReason: null,
+            currentRunId: run.sprintRunId,
+            lapRuns: loop.lapRuns + 1,
+            context: loop.context,
+            lastRunAt: now,
+            updatedAt: now,
+          },
           expect: { currentRunId: null, lapRuns: loop.lapRuns, states: ["between_laps"] },
         }));
         if (result === "loop_changed") continue;
@@ -350,7 +388,7 @@ export class LoopControl {
     const ok = await this.deps.table.writeLoop({
       accountId: loop.accountId,
       loopId: loop.loopId,
-      set: { budget, context: contextOf(ctx), updatedAt: this.iso() },
+      set: { budget, ...(ctx.userId === loop.createdBy ? { context: contextOf(ctx) } : {}), updatedAt: this.iso() },
       expect: { states: ["running", "between_laps", "awaiting_approval"] },
     });
     if (!ok) throw new ConflictError("already_finished", "このループは終わっています");
@@ -366,7 +404,7 @@ export class LoopControl {
     await this.deps.table.writeLoop({
       accountId: loop.accountId,
       loopId: loop.loopId,
-      set: { context: contextOf(ctx), updatedAt: this.iso() },
+      set: { ...(ctx.userId === loop.createdBy ? { context: contextOf(ctx) } : {}), updatedAt: this.iso() },
       expect: { currentRunId: null, lapRuns: loop.lapRuns, states: ["between_laps"] },
     });
     await this.startNextLap(ctx.accountId, loopId, true);

@@ -14,7 +14,9 @@ import { bedrockCandidateModel } from "./candidates.ts";
 import { RunControl, runControlConfig } from "./control.ts";
 import { DynamoRunsTable } from "./dynamo-table.ts";
 import { EcsRunnerPlatform } from "./ecs.ts";
-import { LoopControl } from "./loops.ts";
+import { AccountService } from "../accounts/service.ts";
+import { DynamoAccountStore } from "../accounts/store.ts";
+import { accountContextResolver, LoopControl } from "./loops.ts";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -95,7 +97,10 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     config: runControlConfig(process.env),
   });
   // ループの制御は実行の制御の停止の後の処理と見回りから呼ばれる（常駐のプロセスを持たない。#2347 の決定 1）
-  const loops = new LoopControl({ table, control, reader });
+  // 周回のたびに、始めた利用者の今のプラン・形態・席を引き直す（表の名前がある処理だけ）
+  const accountsTable = process.env.ACCOUNTS_TABLE_NAME;
+  const resolveContext = accountsTable ? accountContextResolver(new AccountService({ store: new DynamoAccountStore(accountsTable) })) : undefined;
+  const loops = new LoopControl({ table, control, reader, resolveContext });
   control.setLoopHooks(loops.hooks());
   // 候補の証明の鍵は App のクライアントの秘密から用途を分けて作る
   const proofKey = async () => new Uint8Array(createHash("sha256").update(`ndf-factory:repositories:${await clientSecret()}`).digest());
