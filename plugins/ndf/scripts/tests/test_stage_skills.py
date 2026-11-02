@@ -30,7 +30,18 @@ NDF = SCRIPTS.parent
 WF = NDF / "skills" / "development-workflow"
 TABLE = stage_skills.load_table()
 RULES = TABLE["rule_skills"]
-DOC_STAGES = ["要求と受け入れ条件", "設計", "ドキュメント再構成", "ドキュメントレビュー", "計画", "完了判定", "Pull Request", "確定仕様化", "振り返り", "棚卸し"]
+DOC_STAGES = [
+    "要求と受け入れ条件",
+    "設計",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "計画",
+    "完了判定",
+    "Pull Request",
+    "確定仕様化",
+    "振り返り",
+    "棚卸し",
+]
 
 
 def _lookup_module():
@@ -232,7 +243,9 @@ def test_the_pr_step_without_llm_never_resolves(tmp_path, broken_table, monkeypa
     step = PrStep()
     monkeypatch.setattr(step, "design_diff", lambda c, s: (None, None))
     monkeypatch.setattr(step, "_push", lambda c: ("b", "boom"))  # push の後は見ない
-    ok, text = step.execute(SimpleNamespace(**vars(ctx), base_branch=lambda: "main"), {"id": "pr", "stage": "Pull Request", "body": "machine"})
+    ok, text = step.execute(
+        SimpleNamespace(**vars(ctx), base_branch=lambda: "main"), {"id": "pr", "stage": "Pull Request", "body": "machine"}
+    )
     assert text == "boom" and skill_rows(ctx) == []
 
 

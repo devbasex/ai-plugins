@@ -183,12 +183,10 @@ def claude_cmd(
 
 
 def claude_kind(system: str, full: bool) -> str:
-    """使用量の帳簿の `kind`（work / full / judge / slow / pr）。system プロンプトで見分ける。"""
+    """使用量の帳簿の `kind`（work / full / judge / slow / pr）。system プロンプトで見分ける（pr は後ろに Skill の節が付くため前方一致）。"""
     if full:
         return "full"
-    if system.startswith(PR_SYSTEM):  # 後ろに Skill の本文の節が付いても pr（#2376）
-        return "pr"
-    return {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow"}.get(system, "work")
+    return "pr" if system.startswith(PR_SYSTEM) else {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow"}.get(system, "work")
 
 
 def call_claude(
