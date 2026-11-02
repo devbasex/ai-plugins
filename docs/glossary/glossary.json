@@ -4684,7 +4684,7 @@
     {
       "term": "寿命の窓",
       "context": "ndf-worktree",
-      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229）",
+      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。レビュー worktree は 24 時間（#2229）、見直しの持ち主は既定 15 分（#2315）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
     },
     {
@@ -4772,7 +4772,7 @@
     {
       "term": "柱",
       "context": "ndf-workflow",
-      "meaning": "#2335 の子で、原因の型ごとの仕組みを入れる課題（P0〜P8、#2336〜#2344）",
+      "meaning": "大方針の子で、根本原因の仕組みごとに直す課題。#2335 では P0〜P8（#2336〜#2344）（#2315）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md"
     },
@@ -4931,6 +4931,27 @@
       "meaning": "大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315）",
       "source": "",
       "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "棚卸しの深さ",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff|review|overhaul`（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-design.md"
+    },
+    {
+      "term": "調査の項目",
+      "context": "ndf-issue-upkeep",
+      "meaning": "調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-design.md"
+    },
+    {
+      "term": "付け直しの記録",
+      "context": "ndf-issue-upkeep",
+      "meaning": "大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-design.md"
     }
   ]
 }
