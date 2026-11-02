@@ -5003,7 +5003,7 @@
     {
       "term": "引継ぎの区間",
       "context": "ndf-workflow",
-      "meaning": "会話を止めた判定（拒否か再起動）の時点から、そのセッションの最後の行まで",
+      "meaning": "conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで",
       "pending_source": "issues/issue-2262-design.md"
     }
   ]
