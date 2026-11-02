@@ -337,7 +337,8 @@ def hubenv(tmp_path):
     """統括役を擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
     sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
     made = []
-    env = {"NDF_RELAY_TMUX": "tmux", "TMUX_TMPDIR": sock, "NDF_RELAY_HUB_WAIT": "15"}
+    # CI には TERM が無く、tmux の attach が端末の種類を決められずに失敗する。擬似端末に実際の端末と同じく TERM を与える
+    env = {"NDF_RELAY_TMUX": "tmux", "TMUX_TMPDIR": sock, "NDF_RELAY_HUB_WAIT": "15", "TERM": "xterm-256color"}
 
     def start(**kw):
         t = Term(tmp_path, env={**env, **kw.pop("env", {})}, **kw)
