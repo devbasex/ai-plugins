@@ -119,11 +119,23 @@ def load(root: Path) -> Contracts:
     """契約の一覧を読む。形が誤っていれば `ContractError`。"""
     base = root / CONTRACTS
     c = Contracts()
+    _load_entrypoints(root, base, c)
+    _load_files(base, c)
+    _load_settings(base, c)
+    _load_env(base, c)
+    _load_forms(base, c)
+    return c
+
+
+def _load_entrypoints(root: Path, base: Path, c: Contracts) -> None:
     for f in sorted((base / "entrypoints").glob("*.json")):
         d = _read(f)
         _check_entry(f, d)
         c.entrypoints[d["path"]] = d
         c.entry_files[d["path"]] = f.relative_to(root).as_posix()
+
+
+def _load_files(base: Path, c: Contracts) -> None:
     for f in sorted((base / "files").glob("*.json")):
         d = _read(f)
         _need(f, d, {"name": str, "pattern": str, "kind": str, "place": str, "skill_readers": list})
@@ -132,21 +144,31 @@ def load(root: Path) -> Contracts:
         if f.name != d["name"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
         c.files[d["name"]] = d
+
+
+def _load_settings(base: Path, c: Contracts) -> None:
     for f in sorted((base / "settings").glob("*.json")):
         d = _read(f)
         _need(f, d, {"file": str, "place": str, "scope": str, "readers": list, "keys": dict, "summary": str})
         _one_of(f, d, "place", SETTING_PLACES)
         _one_of(f, d, "scope", SCOPES)
         _strs(f, d, "readers")
-        for k, v in d["keys"].items():
-            if not isinstance(v, dict) or "summary" not in v or set(v) - {"summary", "migrate_from", "duplicates", "place"}:
-                raise ContractError(f"{f.name}: keys.{k} は summary と任意の migrate_from・duplicates・place を持つ")
-            # キーの place はファイルの place より先に効く（認可に関わる値をメインディレクトリから読む。lib/decl.py の key_places）
-            if "place" in v and v["place"] not in SETTING_PLACES:
-                raise ContractError(f"{f.name}: keys.{k}.place は {' / '.join(SETTING_PLACES)} のどれか")
+        _check_setting_keys(f, d)
         if f.name != d["file"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['file']}.json にする")
         c.settings[d["file"]] = d
+
+
+def _check_setting_keys(f: Path, d: dict) -> None:
+    for k, v in d["keys"].items():
+        if not isinstance(v, dict) or "summary" not in v or set(v) - {"summary", "migrate_from", "duplicates", "place"}:
+            raise ContractError(f"{f.name}: keys.{k} は summary と任意の migrate_from・duplicates・place を持つ")
+        # キーの place はファイルの place より先に効く（認可に関わる値をメインディレクトリから読む。lib/decl.py の key_places）
+        if "place" in v and v["place"] not in SETTING_PLACES:
+            raise ContractError(f"{f.name}: keys.{k}.place は {' / '.join(SETTING_PLACES)} のどれか")
+
+
+def _load_env(base: Path, c: Contracts) -> None:
     for f in sorted((base / "env").glob("*.json")):
         d = _read(f)
         _need(f, d, {"name": str, "set_by": str, "summary": str})
@@ -154,11 +176,13 @@ def load(root: Path) -> Contracts:
         if f.name != d["name"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
         c.env[d["name"]] = d
+
+
+def _load_forms(base: Path, c: Contracts) -> None:
     for f in sorted((base / "forms").glob("*.json")):
         d = _read(f)
         _check_form(f, d)
         c.forms[d["name"]] = d
-    return c
 
 
 def _check_form(f: Path, d: dict) -> None:
