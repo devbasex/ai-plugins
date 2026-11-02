@@ -4880,6 +4880,24 @@
       "code": "max_jobs",
       "meaning": "手元のランナーが同時に動かす実行ジョブの数の上限。ランナーが登録と心拍で申告し、サービスはそれを超えて指示を渡さない",
       "pending_source": "issues/issue-2347-requirements.md"
+    },
+    {
+      "term": "マイルストーンの持ち分",
+      "context": "ndf-factory",
+      "meaning": "終わりの状態でない開発ループが、リポジトリのマイルストーン 1 つを選定の対象として占めていることを表す実行の枠の行。同じリポジトリのループどうしで重ならない",
+      "pending_source": "issues/issue-2347-design.md"
+    },
+    {
+      "term": "課題の持ち分",
+      "context": "ndf-factory",
+      "meaning": "終わりの状態でない手動のスプリントの実行が、リポジトリの課題 1 つを持っていることを表す実行の枠の行。同じ課題を 2 つの実行に入れない",
+      "pending_source": "issues/issue-2347-design.md"
+    },
+    {
+      "term": "手元のランナーの枠",
+      "context": "ndf-factory",
+      "meaning": "1 つの手元のランナーが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない",
+      "pending_source": "issues/issue-2347-design.md"
     }
   ]
 }
