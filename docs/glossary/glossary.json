@@ -4578,6 +4578,16 @@
       "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
+      "term": "同じ役割の写し",
+      "context": "ndf-factory",
+      "meaning": "リファクタリングの対象と同じ処理・同じ判断を、別の場所に書き写したもの。対象と同じ変更で 1 か所へ寄せる（#2199）"
+    },
+    {
+      "term": "保存の契約",
+      "context": "ndf-factory",
+      "meaning": "アカウントの保存（AccountStore）の interface と、その引数・失敗の型。DynamoDB とメモリの 2 つの実装が満たし、AWS SDK を読まない（accounts/port.ts）"
+    },
+    {
       "term": "問い合わせの区分",
       "context": "ndf-workflow",
       "meaning": "AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206）",
@@ -4684,7 +4694,7 @@
     {
       "term": "寿命の窓",
       "context": "ndf-worktree",
-      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229）",
+      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。レビュー worktree は 24 時間（#2229）、見直しの持ち主は既定 15 分（#2315）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
     },
     {
@@ -4692,6 +4702,62 @@
       "context": "ndf-worktree",
       "meaning": "状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep_states）。git が拒めば止まる操作だけで行う（#2229）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
+    },
+    {
+      "term": "スプリントの一覧",
+      "context": "ndf-factory",
+      "meaning": "アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "スプリントの詳細",
+      "context": "ndf-factory",
+      "meaning": "1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "詳細パネル",
+      "context": "ndf-factory",
+      "meaning": "スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "バックログの画面",
+      "context": "ndf-factory",
+      "meaning": "取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "フェーズの名前",
+      "context": "ndf-factory",
+      "meaning": "phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-design.md"
+    },
+    {
+      "term": "工程の記録",
+      "context": "ndf-factory",
+      "meaning": "スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-design.md"
+    },
+    {
+      "term": "工程の中身",
+      "context": "ndf-factory",
+      "meaning": "1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-design.md"
+    },
+    {
+      "term": "スプリント全体の欄",
+      "context": "ndf-factory",
+      "meaning": "スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-design.md"
     },
     {
       "term": "相手役",
@@ -4772,7 +4838,7 @@
     {
       "term": "柱",
       "context": "ndf-workflow",
-      "meaning": "#2335 の子で、原因の型ごとの仕組みを入れる課題（P0〜P8、#2336〜#2344）",
+      "meaning": "大方針の子で、根本原因の仕組みごとに直す課題。#2335 では P0〜P8（#2336〜#2344）（#2315）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md"
     },
@@ -4861,6 +4927,97 @@
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "差分の棚卸し",
+      "context": "ndf-workflow",
+      "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "見直し",
+      "context": "ndf-workflow",
+      "meaning": "数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "大整理",
+      "context": "ndf-workflow",
+      "meaning": "十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "後回しの再評価",
+      "context": "ndf-workflow",
+      "meaning": "後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "ニーズの調査",
+      "context": "ndf-workflow",
+      "meaning": "宣言した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "シーズの調査",
+      "context": "ndf-workflow",
+      "meaning": "宣言した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "調査の記録",
+      "context": "ndf-workflow",
+      "meaning": "調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "材料の宣言",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "見直しの持ち主",
+      "context": "ndf-workflow",
+      "meaning": "見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "大方針",
+      "context": "ndf-workflow",
+      "meaning": "大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "棚卸しの深さ",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff|review|overhaul`（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-design.md"
+    },
+    {
+      "term": "調査の項目",
+      "context": "ndf-issue-upkeep",
+      "meaning": "調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-design.md"
+    },
+    {
+      "term": "付け直しの記録",
+      "context": "ndf-issue-upkeep",
+      "meaning": "大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315）",
+      "source": "",
+      "pending_source": "issues/issue-2315-design.md"
     },
     {
       "term": "統括役",
