@@ -1,4 +1,4 @@
-# 並列開発の設計: レーンのループが配布の答えを待たずに次の周回へ進む（#2436 の受け入れ条件 6a）
+# 並列開発の設計: レーンのループが答えを待たずに次の周回へ進み、答えの後の処理を周回の境で行う（#2436 の受け入れ条件 6a・6d〜6f）
 
 設計文書 [issue-2436-design.md](issue-2436-design.md) から、開発ループ（`--loop`）の側の変更を分けたファイル。ループの今の手順は `plugins/ndf/skills/development-workflow/references/loop.md`、契約と不変条件は確定仕様 `docs/specifications/ndf-workflow-development-loop.md` にある。
 
@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | `進行中` | 今のまま | — |
 | `配布待ち`（新規） | 配布の依頼を送り、答えを待たずに締めた。まとめはまだ流していない | 1 回だけ、`完了` / `失敗` / `人へ戻した` へ |
+| `質問待ち`（新規） | 作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランを残して締めた | 1 回だけ、続きを流した後の結果へ |
 | `完了` / `失敗` / `人へ戻した` | 今のまま | 締め直さない |
 
 ```mermaid
@@ -27,7 +28,10 @@ stateDiagram-v2
     進行中 --> 人へ戻した
     配布待ち --> 完了: released でまとめが通った
     配布待ち --> 失敗: failed かまとめが落ちた
-    配布待ち --> 人へ戻した: rejected
+    配布待ち --> 人へ戻した: rejected（直しの周回へ）
+    進行中 --> 質問待ち: 問いを送った
+    質問待ち --> 完了: 答えの後に続きが通った
+    質問待ち --> 失敗: 続きが落ちた
 ```
 
 周回の記録（`.ndf/loop/<名>/loop.json` の `laps[]`）に `release` の項目を足す。
@@ -40,12 +44,17 @@ stateDiagram-v2
 | `release.close_plans` | まとめのプランのパス（`loop sprint` が組んだもの。流さずに残す） |
 | `release.answer` | 届いた答え（`result`・`version`・`at`）。読むまでは無い |
 | `release.finish` | まとめを流した区間（`started_at`・`ended_at`）と done のパス |
+| `question` | 質問待ちのとき: 依頼の `id`・止まったプランとステップ（`gate2_pipeline` と同じく続きのステップから流す）・done のパス |
 
 ## どこに何を足すか
 
 | 今の部品 | 足すこと |
 | --- | --- |
-| 結果の定数（`sprint_loop_record.py` の `IN_PROGRESS, DONE, FAILED, RETURNED`） | `RELEASE_PENDING = "配布待ち"` |
+| 結果の定数（`sprint_loop_record.py` の `IN_PROGRESS, DONE, FAILED, RETURNED`） | `RELEASE_PENDING = "配布待ち"`・`QUESTION_PENDING = "質問待ち"` |
+| 新しい副命令 `loop hold-question <名> --ref <依頼> --plan <止まったプラン> --step <続きのステップ>` | 問いの hook に止められた conductor が打つ。周回を `質問待ち` で締めて次の周回へ進む |
+| `loop answer`（`cmd_answer`） | `--revise --note <パス>` を足す。人の判断待ちの行に `answer: revise` と指摘を書き、課題の本文の節にも指摘を書く |
+| 人の判断待ちの答えを読む（新しい `answers_step`） | 周回の境で、自分の `gate1` の依頼の答えを `parallel_lane.answers_of()` で読む。承認ならラベル（`gh pr edit --add-label design-approved`）と `loop answer --approved --pr`、直して出し直すなら `loop answer --revise --note`、やらないなら `loop answer --rejected` を自分で打つ |
+| 選定（`choose_issues`・`exclusion_reason`） | `answer: revise` の課題は順位によらず先頭に選び、設計のステージを指摘つきで流し直す（`new sprint` の設計の課題に足し、設計のプランの `design` のステップの指示に課題の本文の指摘の節を読むことを足す。同じ `design/issue-<N>` のブランチと設計 PR を使う）。`answer: approved` で設計 PR がまだマージされていない課題は「設計 PR がマージ待ち」で外さずに選び、周回の最初のステージに設計 PR のマージのプラン（`design_merge.plan_design_merge`。番号は記録の `pr`）を置く |
 | `loop sprint`（`sprint_loop.py` の `cmd_sprint`） | `build_close` が返したまとめのプランを `lap["close_plans"]` に残す |
 | `loop lap`（`cmd_lap` → `sprint_loop_gate.py` の `handle_gate`） | 承認ゲートで終わった計画の「フェーズ」が `配布の依頼` なら、承認ゲート 2 の扱い（`handle_gate2`）へ進まず、新しい `handle_release_pending` が周回を `配布待ち` で締める（`close_lap` に `release` を渡す）。その後は今の `after_close` で次の周回へ進む |
 | `close_lap`（`sprint_loop_gate.py`） | `配布待ち` で締められる。締め直しは新しい `finish_lap` だけが行い、`配布待ち` の行の `outcome`・`ended_at`・費用と秒・振り返り・棚卸しを 1 回だけ書き換える |
@@ -57,23 +66,25 @@ stateDiagram-v2
 | 止まる条件（`boundary_stop`） | 下の「周回の境」の順で判定する |
 | `loop status`・`loop list`・`laps.md` | `配布待ち` の周回と答えの有無を出す |
 | `plugins/ndf/skills/development-workflow/references/loop.md` | 「周回ごとに打つ順」に `status: finish`・`release_wait` の 2 行、「承認ゲート」に配布の依頼の行、「記録」に `release` の項目 |
-| `.ndf/pace.json` の `loop` | `release_pending_max`（配布待ちの周回の上限。既定 2） |
+| `.ndf/pace.json` の `loop` | `release_pending_max`（配布待ちと質問待ちの周回を合わせた上限。既定 2） |
 
 確定仕様の I1（終わった周回の行は書き換えない）は、「`配布待ち` の行は `loop finish` か周回の境の差し戻しで 1 回だけ締め直す」を例外として足す。確定仕様の文書は、この課題の確定仕様化で直す。
 
 ## 周回の境
 
-`pending_step` は、選定の前と周回を締めた後の境で、`配布待ち` の周回を古い順に 1 つずつ見る。答えは `parallel_lane.answer_of(release.out)`（`durable.event_of` を `timeout 0` で読む。待たない）で読む。
+`pending_step` は、選定の前と周回を締めた後の境で、人の判断待ちの答えと、保留の周回（`配布待ち`・`質問待ち`）を古い順に 1 つずつ見る。答えは `parallel_lane.answers_of()`（`durable.event_of` を `timeout 0` で読む。待たない）で読む。
 
 | 順 | 当たる場面 | 扱い |
 | --- | --- | --- |
-| 1 | 止まる条件の `user_stop`・`mvv_changed` | 今どおりすぐ止まる。`配布待ち` の周回はそのまま残り、再開の境で続きを読む |
-| 2 | 最も古い `配布待ち` の周回に `released` が届いている | `release.answer` に版を書き、`status: finish` と `pipeline`（`supervise.py queue <まとめのプラン> --done <D> && wait <D> && loop finish <名> <周回> --done <D>`）を返す。conductor はそれを流す |
-| 3 | `rejected` が届いている | 今の承認ゲート 2 の差し戻しの扱い（`_resume_gate2` の差し戻し）と同じく、周回を `人へ戻した` で締め直す。まとめは流さない。2 へ戻って次の周回を見る |
-| 4 | `failed` が届いている | 周回を `失敗` で締め直し、`failure` に配布の失敗を書く（同じ失敗に数える）。2 へ戻る |
-| 5 | 答えの無い `配布待ち` の周回が `release_pending_max` 以上ある | 新しい周回を始めない。`status: release_wait` と、最も古い周回の `parallel.py await <計画名> --from <release.out> --timeout 3600` → `loop select <名>` の 1 行を返す。conductor はそれを背景で打って待つ |
-| 6 | 止まる条件の `same_failure`・予算・`no_issue`・`outside_mvv` に当たり、答えの無い `配布待ち` の周回がある | 止まる前に 5 と同じく答えを待ち、まとめを流してから止まる。まとめを流さないまま止まると、課題が閉じずに残るためである |
-| 7 | どれにも当たらない | 今どおり選定へ進む |
+| 1 | 止まる条件の `user_stop`・`mvv_changed` | 今どおりすぐ止まる。保留の周回はそのまま残り、再開の境で続きを読む |
+| 2 | 人の判断待ちの課題に答えが届いている | `answers_step` が答えの後の処理（ラベル・`loop answer`）を行う。選定で次の周回に効く |
+| 3 | 最も古い保留の周回（`配布待ち` か `質問待ち`）に答えが届いている | `配布待ち` に `released` なら `release.answer` に版を書き、`status: finish` と `pipeline`（`supervise.py queue <まとめのプラン> --done <D> && wait <D> && loop finish <名> <周回> --done <D>`）を返す。`質問待ち` なら、止まったプランを続きのステップから流し、残りのステージとまとめを流す `pipeline` を返す。conductor はそれを流す |
+| 4 | `配布待ち` に `rejected` が届いている（宛先のレーンとして指摘つき）か、イベント `fix-<レーン名>-<連番>` が届いている | 周回を `人へ戻した` で締め直し、まとめは流さない。指摘を `rec["fixes"]` に入れ、次の周回を直しの周回にする（周回の課題を順位によらず選び、`new sprint` に指摘を渡して直す Pull Request か revert の Pull Request を作る。どちらにするかは直しの周回の実装のステップが決める）。直しの周回は配布の依頼を送り直す |
+| 5 | `配布待ち` に `deferred` が届いている | 答えの確定ではないため、`配布待ち` のまま次の配布を待つ |
+| 6 | `failed` が届いている | 周回を `失敗` で締め直し、`failure` に配布の失敗を書く（同じ失敗に数える）。3 へ戻る |
+| 7 | 答えの無い保留の周回が `release_pending_max` 以上ある | 新しい周回を始めない。`status: release_wait` と、最も古い周回の `parallel.py await <計画名> --from <依頼> --timeout 3600` → `loop select <名>` の 1 行を返す。conductor はそれを背景で打って待つ |
+| 8 | 止まる条件の `same_failure`・予算・`no_issue`・`outside_mvv` に当たり、答えの無い保留の周回がある | 止まる前に 7 と同じく答えを待ち、続きとまとめを流してから止まる。流さないまま止まると、課題が閉じずに残るためである |
+| 9 | どれにも当たらない | 今どおり選定へ進む |
 
 **上限を 2 にする理由。** 1 回の承認ゲート 2 で範囲に入った周回はまとめて答えを受けるため、配布待ちの周回を増やしても承認の回数は減らない。配布待ちの周回は課題を選定から外し、振り返りと棚卸しを遅らせる。2 なら、承認を待つ間に次の周回を 1 本開発でき（利用者の依頼の「承認を待っているあいだ次の sprint を実行する」）、その周回も配布待ちになった時点で待つ。
 
@@ -96,14 +107,21 @@ stateDiagram-v2
 | 上限で待つ | 答えの無い `配布待ち` が 2 つあると、境が新しい周回を始めずに `release_wait` を返す | 3 つ目の周回を始めると落ちる |
 | 止まる前に流す | 予算に当たったとき、答えの無い `配布待ち` があれば `release_wait` を返し、まとめを流した後に止まる。`user_stop` はすぐ止まる | 予算で止まってまとめを残す・`user_stop` で待つと落ちる |
 | 予算と同じ失敗 | `配布待ち` を周回の数に入れ、同じ失敗の数え方では読み飛ばす | 配布待ちを数えない・失敗として数えると落ちる |
+| 6d 質問待ちの再開 | `loop hold-question` で周回が `質問待ち` で締まり、次の周回へ進む。答えの届いた境で止まったプランが続きのステップから流れ、締め直る | 答えの前に流す・最初から流し直すと落ちる |
+| 6e・6f 答えの後の処理をレーンが行う | `gate1` の答えが届いた境で、レーンが承認ならラベルと `loop answer --approved --pr`、直して出し直すなら `--revise --note`、やらないなら `--rejected` を打つ | 答えを読まない・別の答えを打つと落ちる |
+| 6e 直して出し直す | `revise` の課題が次の周回で順位によらず先頭に選ばれ、設計のプランの指示に指摘の節を読むことが入り、同じ設計 PR のブランチで流れる | 順位どおりに選ぶ・新しいブランチで設計し直すと落ちる |
+| 6e 承認の後の設計 PR のマージ | `approved` でマージされていない課題が選ばれ、周回の最初のステージに設計 PR のマージのプランが置かれる | マージ待ちで外したまま・マージのプランが無いと落ちる |
+| 6e 配布の差し戻しの宛先 | 宛先のレーンでは周回が `人へ戻した` で締まり、次の周回が直しの周回になって依頼を送り直す。宛先でないレーンでは `deferred` で `配布待ち` のまま残る | 宛先でないレーンで締め直す・宛先のレーンが直さないと落ちる |
 
 ## 触るファイル
 
-`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_select.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/loop.md`
+`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop_gate2.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_select.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`（設計のプランの指示に指摘の節）、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/loop.md`
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | まとめのプランを後で流すこと | `build_close` が組んだまとめのプランを、周回を締めた後の別の queue で流して同じ結果になるか（`{queue_record}` の差し込みが流す時点に記録の Pull Request を探す。#2230）は実装で確かめる |
+| 作業の途中の問いの止まり方 | 問いの hook に止められた時点で、周回のプランが続きのステップから流せる形で止まっているか（queue の途中で止まった計画の続き方）は、止まる場所ごとに実装で確かめる。続けられない場所は `質問待ち` にせず、今どおり人へ戻す |
+| 直しの周回の作り方 | 実装がすでに `develop` にある課題を、指摘つきでもう 1 度スプリントにする `new sprint` の引数（直しの指示の渡し方）は実装で決める |
 | 配布待ちの間のリリース後テスト | まとめのリリース後テストは配布の後に流れるため、次の周回の変更が同じ配布に入ったときは、その変更もまとめて確かめることになる。前の周回の課題に絞って確かめる形は持たない |

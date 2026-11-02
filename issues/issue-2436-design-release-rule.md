@@ -63,6 +63,8 @@ sequenceDiagram
 | 取り込む | `release/v<版>-sync` → `develop` の Pull Request を作ってマージする。`release/v<版>` の先頭は `release/v<版>-sync` の親として `develop` の祖先になる（R1） |
 | 記録 | 配布の Pull Request は `release/v<版>-sync` の Pull Request になる。リリース記録（`record`）と後片付け（`cleanup`。head が `release/v<版>` で始まる）はこの Pull Request も扱う |
 
+並列の計画の下では、このステップを含む本番のプランは一時レーンが流し、衝突の解消と失敗の対応も一時レーンが行う（[issue-2436-design-approvals.md](issue-2436-design-approvals.md) の「責務の分け方」）。
+
 **版の規則とは矛盾しない。** 解いた後の `develop` の版数は本番の版（例: `10.28.0`）になる。次の開発版の配布は、記録の版（例: `10.28.0-dev.4`）がもう出ている版以下になるため、queue が次に空いている版（`10.28.1-dev.1`）で決め直す（`queue_fill.py` の `_recheck_dev` と `release_version.taken`）。接尾辞は次に出す正式版へ付く。`CHANGELOG.md` は開発版を載せない（`CHANGELOG.md` の冒頭）ため、開発版の配布との衝突は起きない見込みで、起きたら R5 で止める。
 
 ## 互換性
