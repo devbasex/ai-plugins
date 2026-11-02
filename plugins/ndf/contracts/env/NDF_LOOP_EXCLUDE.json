@@ -1,0 +1,5 @@
+{
+  "name": "NDF_LOOP_EXCLUDE",
+  "set_by": "runtime",
+  "summary": "開発ループの選定（sprint-state.py loop select）からその周回だけ外す課題の番号を , か空白で区切って並べる。NDF Factory のランナーが、同じリポジトリの別の実行が持つ課題を渡す（plugins/ndf/scripts/lib/sprint_loop_select.py）。無ければ外さない"
+}

@@ -766,3 +766,24 @@ def test_imports_resolve_from_the_scripts_dir_and_relative_levels(tmp_path: Path
     (s / "pkg/other.py").write_text("import os\nQ = os.getenv('NDF_ABS')\n")
     env = PyExtractor(tmp_path, {}).facts("plugins/ndf/skills/k/scripts/e.py")["env"]
     assert {"NDF_REL", "NDF_ABS"} <= set(env), env
+
+
+FORM = {
+    "name": "f",
+    "summary": "s",
+    "rule": "r",
+    "writers": ["a"],
+    "readers": ["b"],
+    "cases": [{"text": "t", "blocks": [], "launch": False}],
+}
+
+
+def test_form_items_are_checked_and_unknown_keys_stop_with_2(tree: Path):
+    """受け渡しの形（forms/。#2347 の決定 8）は鍵と例の組の型を確かめ、知らない鍵を断る。"""
+    f = tree / "plugins/ndf/contracts/forms/f.json"
+    wj(f, FORM)
+    assert run(tree)[0] == 0
+    wj(f, dict(FORM, extra=1))
+    assert run(tree)[0] == 2
+    wj(f, dict(FORM, cases=[{"text": "t", "blocks": [1], "launch": False}]))
+    assert run(tree)[0] == 2
