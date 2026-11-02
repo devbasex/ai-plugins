@@ -176,7 +176,7 @@ E1〜E13 の番号と意味は要求（[issue-2436-requirements.md](issue-2436-r
 | `plugins/ndf/scripts/relay_lib/hub_client.py` | `ls` の行に役割を足し、`metrics` に統括役の有無と tmux の有無を足す。`role` の副命令。`spawn` に `--role helper --plan <計画名>`（起動するラッパーの作業ディレクトリへ役割のファイルを書く） | 変更 |
 | `plugins/ndf/scripts/relay_lib/__init__.py` | 副命令 `role` の振り分け | 変更 |
 | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 配布の依頼のプラン（`plan_release_request`。ステップは `parallel-request` の 1 つ）と、まとめた配布の 2 つのプラン（提示のプランと本番のプラン）を作る | 変更 |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` | 提示のプランが、今の開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで使えるように関数を分ける。本番のプランの承認の記録が読む状態ディレクトリを引数で受ける | 変更 |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` | 提示のプランが、今の開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで使えるように関数を分ける。提示のプランの承認ゲート 2 として、MVV 判定（`mvv`・`note`）の後に `approve` を置く組み立て関数 `present_gate_steps` を足す（今の本番のプランの、両者が排他の組み立ては変えない）。本番のプランの承認の記録が読む状態ディレクトリを引数で受ける | 変更 |
 | `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 差し込み `{queue_prs:<計画名>}` を足す。名前の一致する完了した計画の状態ディレクトリの `work/prs.txt`（空白区切りの Pull Request の番号）で埋め、無ければ埋めずにそのプランを流さない | 変更 |
 | `plugins/ndf/scripts/supervise_lib/sprint.py` | 本番のステージを組む 4 か所が、レーンのときだけ配布の依頼のプランを置く（1 つの関数を通す） | 変更 |
 | `plugins/ndf/scripts/supervise.py` | `queue` の `--max` を省いたとき、レーンならプランの本数を既定にする | 変更 |
@@ -482,12 +482,12 @@ stateDiagram-v2
 
 **承認ゲート 2 は提示のプランが持ち、本番のプランは確定の後にだけ流れる。** 本番のプランは、queue がプランを流し始めるときに worktree と `release/v<版>` を作る。承認ゲート 2 を本番のプランに置くと、答えの前に提示 1 の起点で `release/v<版>` ができ、提示 2 の本番のプランが同じ名前のブランチを作り直せない。そのため次の形にする。
 
-- 提示のプランの最後に承認ゲート 2 のステップ（今の本番のプランの MVV 判定と `approve`。`_add_prod_mvv_gate`・`approve_step`）を置く。承認の記録は提示のプランの状態ディレクトリに残る
-- MVV 判定が通せば、提示のプランが完了し、queue が同じ 1 行の後のステージ（本番のプラン）を続けて流す。答え待ちが無いため提示は 1 つで、ブランチは 1 回だけ作られる
+- 提示のプランの最後に承認ゲート 2 のステップを、MVV 判定（`mvv`・`note`）→ `approve` の順に置く。今の本番のプランでは MVV 判定（`_add_prod_mvv_gate`）と `approve_step` が排他（`plan_release_package_plugin` の `if mvv and not dev` / `elif not dev`）で、`note` の次は `bump` である。提示のプランには両方を同じプランへ並べる新しい組み立て関数（`release_templates.py` の `present_gate_steps`）を足し、`mvv_gate_steps(..., next_id="approve")` に続けて `approve_step` と同じ形の `approve` のステップ（`release-steps.py approve --approval <提示の承認資料> --facts-from <提示のプランの状態ディレクトリ> --answer-from releases/<n>/<k>/answer.json --by user`。`next` は `end`、`gate_next` は `end`）を置き、`handoff`・`reject` は今の `_add_prod_mvv_gate` と同じに置く。今の本番のプランの組み立ては変えない。承認の記録は提示のプランの状態ディレクトリに残る
+- MVV 判定が通せば、判定（`mvv-gate.py`）が承認資料へ承認の記録（`by: mvv`）を書き（今の `approved_commit.record_all`）、`note` の後の `approve` は、承認資料に承認したコミットと一致する記録が既にあるため答えの記録（`answer.json`）を読まずに通す（今の `approve_from_facts` の「記録が既にある」の分岐）。提示のプランが完了し、queue が同じ 1 行の後のステージ（本番のプラン）を続けて流す。答え待ちが無いため提示は 1 つで、ブランチは 1 回だけ作られる
 - 承認ゲート 2 で止まれば、提示のプランは承認ゲートとして終わり、queue は本番のプランを流さない。worktree も `release/v<版>` も作られない
 - 確定（イベント `confirmed`）の後、一時レーンは確定した提示 `<k>` について次の 3 手を順に打つ。確定しなかった提示のプランは承認ゲートのまま残し、その本番のプランは流さない
   1. 利用者の答えを、提示の答えの記録 `releases/<n>/<k>/answer.json`（スプリントの状態ファイルの形）へ `sprint-state.py gate releases/<n>/<k>/answer.json '関門 2' --what <要約> --by user --outcome approved` で書く（今の承認ゲート 2 の答えの書き方。`sprint_routes.py` の `user_gate_cmd`）。このファイルは、耐久ステップ「配布を組む」が提示のプランと同時に `{"gates": []}` で作る
-  2. 提示のプランを `supervise.py run releases/<n>/<k>/present.json --from approve` で続きから流す。`approve` のステップ（`release-steps.py approve --approval <提示の承認資料> --facts-from <提示のプランの状態ディレクトリ> --answer-from releases/<n>/<k>/answer.json --by user`。今の `approve_step` の形）が、提示の approval-facts の承認したコミットと 1 の記録を照らして承認資料へ承認の記録を書き、提示のプランは完了で終わる。記録が欠ければ承認ゲート（10）で終わり、一時レーンは 3 を打たずに問いとして送る
+  2. 提示のプランを `supervise.py run releases/<n>/<k>/present.json --from approve` で続きから流す。MVV 判定の後に置いた `approve` のステップ（上の `present_gate_steps` が置くもの）が、提示の approval-facts の承認したコミットと 1 の記録を照らして承認資料へ承認の記録を書き、提示のプランは完了で終わる。記録が欠ければ承認ゲート（10）で終わり、一時レーンは 3 を打たずに問いとして送る
   3. 本番のプランを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で流す。queue はこのときに `{queue_approved:present}`・`{queue_prs:present}` を、2 で完了した同じディレクトリの提示のプランから埋め、確定したコミットから worktree と `release/v<版>` を作る。本番のプランは 2 が承認資料へ書いた承認の記録を読む
 - 本番のプランは承認ゲート 2 を持たず、承認の記録を提示のプランの状態ディレクトリから読む（下の 2）。1 つのまとめた配布で流れる本番のプランは 1 つだけで、`release/v<版>` を作るのも 1 回だけである
 
