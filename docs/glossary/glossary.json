@@ -5139,6 +5139,84 @@
       "context": "ndf-workflow",
       "meaning": "conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる",
       "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "再起動の方針",
+      "context": "ndf-workflow",
+      "meaning": "conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "現行方式",
+      "context": "ndf-workflow",
+      "meaning": "運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "試行方式",
+      "context": "ndf-workflow",
+      "meaning": "カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "判断開始の値",
+      "context": "ndf-workflow",
+      "meaning": "試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K）",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "運用上限",
+      "context": "ndf-workflow",
+      "meaning": "これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "容量の余白",
+      "context": "ndf-workflow",
+      "meaning": "実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "再起動の理由",
+      "context": "ndf-workflow",
+      "meaning": "工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動と、現行方式のカットポイントの 6 つ",
+      "pending_source": "issues/issue-2262-design.md"
+    },
+    {
+      "term": "復元の区間",
+      "context": "ndf-workflow",
+      "meaning": "再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "境界の判定",
+      "context": "ndf-workflow",
+      "meaning": "工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る",
+      "pending_source": "issues/issue-2262-design.md"
+    },
+    {
+      "term": "適用値",
+      "context": "ndf-workflow",
+      "meaning": "優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所",
+      "pending_source": "issues/issue-2262-design.md"
+    },
+    {
+      "term": "作業の識別子",
+      "context": "ndf-workflow",
+      "meaning": "複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830）",
+      "pending_source": "issues/issue-2262-design.md"
+    },
+    {
+      "term": "費用の見込み",
+      "context": "ndf-workflow",
+      "meaning": "判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値",
+      "pending_source": "issues/issue-2262-design.md"
+    },
+    {
+      "term": "引継ぎの区間",
+      "context": "ndf-workflow",
+      "meaning": "conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで",
+      "pending_source": "issues/issue-2262-design.md"
     }
   ]
 }
