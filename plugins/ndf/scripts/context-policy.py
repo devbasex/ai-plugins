@@ -26,7 +26,6 @@ import argparse
 import json
 import os
 import sys
-import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -47,9 +46,9 @@ BUCKETS = ("conductor", "ndf", "handoff", "restore")
 def call_cost(c: Mapping) -> float:
     from token_rates import WEIGHTS, read_rate
 
-    return (
-        WEIGHTS["inp"] * c["inp"] + WEIGHTS["out"] * c["out"] + WEIGHTS["w5"] * c["w5"] + WEIGHTS["w1h"] * c["w1h"]
-    ) + read_rate(c.get("model")) * c["read"]
+    return (WEIGHTS["inp"] * c["inp"] + WEIGHTS["out"] * c["out"] + WEIGHTS["w5"] * c["w5"] + WEIGHTS["w1h"] * c["w1h"]) + read_rate(
+        c.get("model")
+    ) * c["read"]
 
 
 def busy_seconds(times: Iterable[float | None]) -> float:
@@ -275,11 +274,16 @@ def _ledger(root: str | None) -> list[dict]:
 
 
 def _report_table(reports: list[dict]) -> str:
-    lines = ["| 作業 | 区分 | 呼び出し | 入力 | 出力 | 読込 | 書込 5 分 | 書込 1 時間 | 秒 | 換算の費用 |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    lines = [
+        "| 作業 | 区分 | 呼び出し | 入力 | 出力 | 読込 | 書込 5 分 | 書込 1 時間 | 秒 | 換算の費用 |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
     for r in reports:
         for b in BUCKETS:
             t = r["parts"][b]
-            lines.append(f"| {r['work']} | {b} | {t['calls']} | {t['inp']} | {t['out']} | {t['read']} | {t['w5']} | {t['w1h']} | {t['seconds']} | {t['cost']} |")
+            lines.append(
+                f"| {r['work']} | {b} | {t['calls']} | {t['inp']} | {t['out']} | {t['read']} | {t['w5']} | {t['w1h']} | {t['seconds']} | {t['cost']} |"
+            )
     lines.append("")
     for r in reports:
         lines.append(
