@@ -842,3 +842,5 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 同じ役割の写し | — | リファクタリングの対象と同じ処理・同じ判断を、別の場所に書き写したもの。対象と同じ変更で 1 か所へ寄せる（#2199） | — | — | — |
+| 保存の契約 | — | アカウントの保存（AccountStore）の interface と、その引数・失敗の型。DynamoDB とメモリの 2 つの実装が満たし、AWS SDK を読まない（accounts/port.ts） | — | — | — |
