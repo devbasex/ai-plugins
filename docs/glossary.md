@@ -342,6 +342,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 例外リスト | `allow_list` | 構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。構造チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える | 許可の一覧 | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 移行の読み | `migration_read` | 1 か所へ寄せた設定の値を、新しい置き場に無いときだけ古い置き場から読むこと。契約の一覧の設定ファイルの項目に migrate_from として書く | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 設定の置き場 | `setting_place` | .ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
+| Skill の対応表 | — | 工程（ステップの stage）から、そのステップの worker へ届ける Skill の一覧を引く表。NDF の scripts/lib/stage-skills.json の 1 か所に置き、プランの worker の起動と ndf:worker の起動指示の両方が読む（#2376） | — | — | — |
+| Skill の渡し方 | — | Skill を worker へ届ける形。プランの worker には本文を system プロンプトへ入れ（本文）、ndf:worker には SKILL.md の絶対パスを起動指示の「読む Skill」に書く（パス。#2376） | — | — | — |
+| 読む Skill | — | supervisor が ndf:worker の起動指示に書く項目。その作業で読む規則の Skill の名前と SKILL.md の絶対パスを並べ、worker はここに挙がった SKILL.md だけを読む（#2376） | — | — | — |
+| 規則の Skill | — | 手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376） | — | — | — |
 | 差分の棚卸し | — | 毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315） | — | — | — |
 | 見直し | — | 数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315） | — | — | — |
 | 大整理 | — | 十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315） | — | — | — |

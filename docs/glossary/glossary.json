@@ -4929,6 +4929,30 @@
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
+      "term": "Skill の対応表",
+      "context": "ndf-workflow",
+      "meaning": "工程（ステップの stage）から、そのステップの worker へ届ける Skill の一覧を引く表。NDF の scripts/lib/stage-skills.json の 1 か所に置き、プランの worker の起動と ndf:worker の起動指示の両方が読む（#2376）",
+      "pending_source": "issues/issue-2376-design.md"
+    },
+    {
+      "term": "Skill の渡し方",
+      "context": "ndf-workflow",
+      "meaning": "Skill を worker へ届ける形。プランの worker には本文を system プロンプトへ入れ（本文）、ndf:worker には SKILL.md の絶対パスを起動指示の「読む Skill」に書く（パス。#2376）",
+      "pending_source": "issues/issue-2376-design.md"
+    },
+    {
+      "term": "読む Skill",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が ndf:worker の起動指示に書く項目。その作業で読む規則の Skill の名前と SKILL.md の絶対パスを並べ、worker はここに挙がった SKILL.md だけを読む（#2376）",
+      "pending_source": "issues/issue-2376-design.md"
+    },
+    {
+      "term": "規則の Skill",
+      "context": "ndf-workflow",
+      "meaning": "手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376）",
+      "pending_source": "issues/issue-2376-design.md"
+    },
+    {
       "term": "区間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る",
