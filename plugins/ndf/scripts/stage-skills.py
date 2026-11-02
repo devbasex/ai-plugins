@@ -39,7 +39,8 @@ def lookup(stage: str) -> tuple[dict, int]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("lookup", help="工程から Skill の名前とパスを引く").add_argument("stage", help="工程の名前")
+    lk = sub.add_parser("lookup", help="工程から Skill の名前とパスを引く")
+    lk.add_argument("stage", help="工程の名前")
     a = ap.parse_args(argv)
     out, code = lookup(a.stage)
     step_result.emit(out, code)

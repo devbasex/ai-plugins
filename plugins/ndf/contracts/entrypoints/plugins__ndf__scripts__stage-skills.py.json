@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/stage-skills.py",
+  "summary": "stage-skills.py: 工程から、worker へ届ける Skill の名前と SKILL.md の絶対パスを引く（#2376）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "lookup": {
+        "options": [],
+        "positionals": [
+          "stage"
+        ]
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok。対応表に無い工程は空の items）",
+    "1": "対応表か SKILL.md を読めない（status stopped）",
+    "2": "呼び出しの誤り（argparse）"
+  },
+  "callers": [
+    "plugins/ndf/skills/development-workflow/references/agent-layers.md"
+  ]
+}
