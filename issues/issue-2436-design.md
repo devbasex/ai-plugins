@@ -81,7 +81,7 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 並列の計画 | 計画名とレーン名は統括役の名前の形（`^[a-z0-9][a-z0-9_-]{0,31}$`）に合い、レーン名は計画の中で重ならない | 検査が誤りとして返す（終了コード 1） |
+| I1 | 並列の計画 | レーン名は統括役の名前の形（`^[a-z0-9][a-z0-9_-]{0,31}$`）に合い、計画の中で重ならず、一時レーンの名前の形（`-rel` と数字で終わる）に当たらない。計画名は 24 字まで（`^[a-z0-9][a-z0-9_-]{0,23}$`）。一時レーンの名前 `<計画名>-rel<連番>`（連番は 1〜9999）が 32 字に収まり、通常レーンと重ならないようにするため | 検査が誤りとして返す（終了コード 1） |
 | I2 | 並列の計画 | レーンの数は同時に動かせる数の上限以下、プランの本数の合計は 6 以下 | 検査が誤りとして返す |
 | I3 | 並列の計画 | 依存先は同じ計画のレーンで、依存は循環しない | 検査が誤りとして返す |
 | I4 | 並列の計画 | 触る場所が重なるレーンの組は警告に留める | 検査が警告として返す（終了コード 0） |
@@ -428,6 +428,7 @@ sequenceDiagram
     O->>W: confirm（承認の答え）
     W-->>O: confirmed か出し直しの release
     O->>H: spawn（続きから）
+    H->>H: 答えを記録し、提示のプランを approve から完了させ、本番のプランを流す
     H->>W: settle（配布の結果）
     W-->>L: answer・range
 ```
@@ -438,8 +439,8 @@ sequenceDiagram
 
 | 点 | 決まり |
 | --- | --- |
-| 起動 | `relay.py spawn --name <計画名>-rel<連番> --role helper --plan <計画名> --json -- <最初の入力>`。最初の入力は `/goal /ndf:development-workflow --parallel-helper <計画名> <連番> <提示> -- 終わり: [ndf-parallel] helper-done <計画名> の行を出したとき` |
-| 仕事 | イベント `release` の後は `metrics.pipeline`（提示のプランと本番のプラン）を流す。MVV 判定が通せば配布まで流し、`settle --done <D>` を打つ。承認ゲート 2 で止まれば `kind: gate2` の依頼（承認資料・内訳・提示）を送って止まる。イベント `confirmed` の後は、確定した提示の本番のプランを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で初めて流し、`settle` を打つ |
+| 起動 | `relay.py spawn --name <計画名>-rel<連番> --role helper --plan <計画名> --json -- <最初の入力>`。名前は I1 により 32 字に収まり（計画名 24 字・`-rel` 4 字・連番 4 桁まで）、通常レーンの名前と重ならない。連番が 9999 を超える配布は、耐久ステップ「配布を組む」が組まずに止め、要約に理由を書いて人へ戻す。最初の入力は `/goal /ndf:development-workflow --parallel-helper <計画名> <連番> <提示> -- 終わり: [ndf-parallel] helper-done <計画名> の行を出したとき` |
+| 仕事 | イベント `release` の後は `metrics.pipeline`（提示のプランと本番のプラン）を流す。MVV 判定が通せば配布まで流し、`settle --done <D>` を打つ。承認ゲート 2 で止まれば `kind: gate2` の依頼（承認資料・内訳・提示）を送って止まる。イベント `confirmed` の後は、確定した提示の答えを記録し、提示のプランを `approve` のステップから続けて完了させてから、本番のプランを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で初めて流し、`settle` を打つ（下の「まとめた配布」の確定の後の 3 手） |
 | 失敗したとき | CI の失敗・衝突・版数の衝突は、今の配布のプランの直しの手順（judge・fix）で一時レーンが直す。直せなければ問いとして送り（問いの hook が送る）、答えを待つ間は止まる |
 | 終わり | 結果を返したら `[ndf-parallel] helper-done` の行を出して終わる。統括役は止まったラッパーを数えない |
 | 数え方 | 同時に 1 本まで。統括役は、役割 `helper` の印を持つ動いているラッパー 1 本だけを `NDF_RELAY_MAX_NAMED` を 1 本超えて許す（I13 と同じ作業ディレクトリの役割のファイル。`hub.py` の `live` と判定）。2 本目の `helper` は断る。同時に流すプランの合計 6 本（I2）には数えない |
@@ -484,11 +485,14 @@ stateDiagram-v2
 - 提示のプランの最後に承認ゲート 2 のステップ（今の本番のプランの MVV 判定と `approve`。`_add_prod_mvv_gate`・`approve_step`）を置く。承認の記録は提示のプランの状態ディレクトリに残る
 - MVV 判定が通せば、提示のプランが完了し、queue が同じ 1 行の後のステージ（本番のプラン）を続けて流す。答え待ちが無いため提示は 1 つで、ブランチは 1 回だけ作られる
 - 承認ゲート 2 で止まれば、提示のプランは承認ゲートとして終わり、queue は本番のプランを流さない。worktree も `release/v<版>` も作られない
-- 確定（イベント `confirmed`）の後、一時レーンは確定した提示 `<k>` の本番のプランだけを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で流す。queue はこのときに `{queue_approved:present}`・`{queue_prs:present}` を同じディレクトリの提示のプランから埋め、確定したコミットから worktree と `release/v<版>` を作る。確定しなかった提示の本番のプランは流さない
+- 確定（イベント `confirmed`）の後、一時レーンは確定した提示 `<k>` について次の 3 手を順に打つ。確定しなかった提示のプランは承認ゲートのまま残し、その本番のプランは流さない
+  1. 利用者の答えを、提示の答えの記録 `releases/<n>/<k>/answer.json`（スプリントの状態ファイルの形）へ `sprint-state.py gate releases/<n>/<k>/answer.json '関門 2' --what <要約> --by user --outcome approved` で書く（今の承認ゲート 2 の答えの書き方。`sprint_routes.py` の `user_gate_cmd`）。このファイルは、耐久ステップ「配布を組む」が提示のプランと同時に `{"gates": []}` で作る
+  2. 提示のプランを `supervise.py run releases/<n>/<k>/present.json --from approve` で続きから流す。`approve` のステップ（`release-steps.py approve --approval <提示の承認資料> --facts-from <提示のプランの状態ディレクトリ> --answer-from releases/<n>/<k>/answer.json --by user`。今の `approve_step` の形）が、提示の approval-facts の承認したコミットと 1 の記録を照らして承認資料へ承認の記録を書き、提示のプランは完了で終わる。記録が欠ければ承認ゲート（10）で終わり、一時レーンは 3 を打たずに問いとして送る
+  3. 本番のプランを `supervise.py queue releases/<n>/<k>/release.json --done <D>` で流す。queue はこのときに `{queue_approved:present}`・`{queue_prs:present}` を、2 で完了した同じディレクトリの提示のプランから埋め、確定したコミットから worktree と `release/v<版>` を作る。本番のプランは 2 が承認資料へ書いた承認の記録を読む
 - 本番のプランは承認ゲート 2 を持たず、承認の記録を提示のプランの状態ディレクトリから読む（下の 2）。1 つのまとめた配布で流れる本番のプランは 1 つだけで、`release/v<版>` を作るのも 1 回だけである
 
 1. 前のステージの**提示のプラン**は、今の開発版の承認資料のステップ（`release-steps.py approval-facts`・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで流し、最後に承認ゲート 2 のステップを置く。approval-facts は `origin/develop` の先頭を承認したコミットとし、前のタグからそのコミットまでの範囲の Pull Request を「含む PR」に並べる（今の作り。#1274）。続く `parallel.py present` が承認資料を読み、範囲の Pull Request をレーンへ対応づけて承認資料へ内訳の節を足し、範囲の Pull Request を `work/prs.txt` へ書く
-2. 後のステージの**本番のプラン**は `plan_mvv_release(..., version=<出す版>, channel="prod", prs=["{queue_prs:present}"])` で作り、承認の記録が読む状態ディレクトリに提示のプランの状態ディレクトリを渡す。worktree と `release/v<版>` の起点は、確定した提示のプランの approval-facts が承認したコミットにする（差し込み `{queue_approved:present}`。配布の規則の改定は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md)）。queue はこのステージを流す前に、差し込み `{queue_prs:<計画名>}` を名前の一致する完了した計画の `work/prs.txt` の番号の並びで埋める。`work/prs.txt` が無ければ埋めずに、本番のプランを流さない（#2079 の既存の扱い）
+2. 後のステージの**本番のプラン**は `plan_mvv_release(..., version=<出す版>, channel="prod", prs=["{queue_prs:present}"])` で作り、承認の記録が読む状態ディレクトリに提示のプランの状態ディレクトリを渡す。worktree と `release/v<版>` の起点は、確定した提示のプランの approval-facts が承認したコミットにする（項目「起点のコミット」の差し込み `{queue_approved:present}`。版の判定が読む「起点」は `origin/develop` のまま。配布の規則の改定は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md)）。queue はこのステージを流す前に、差し込み `{queue_prs:<計画名>}` を名前の一致する完了した計画の `work/prs.txt` の番号の並びで埋める。`work/prs.txt` が無ければ埋めずに、本番のプランを流さない（#2079 の既存の扱い）
 
 出す版は、耐久ステップ「配布を組む」が `origin/develop` の `plugin.json` の開発版の版数から接尾辞を外して決め、明示の版としてプランに書く。今の queue の版の差し込みは、明示の版のタグがあれば止める（`fill_release_version`）。
 
@@ -548,7 +552,7 @@ graph TD
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 1・2、I5 | `init` が `plan.json`・`plan.md`・レーンの数だけの引継ぎ文書を作り、引継ぎ文書は計画のパスを持ち決まりを写さない。1 本でも在れば何も書かない | 在る引継ぎ文書を上書きするように壊す・一部だけ書いて止まるように壊すと落ちる |
-| 受け入れ条件 3、I1〜I4・I19 | 名前の形・重なり・上限・合計 6・未知の依存・循環（`CycleError`）が誤り（終了コード 1、`rule` に I1〜I3）、触る場所の重なりが警告（0） | 循環の判定を外す・重なりを誤りにする・合計の比較を「より大きい」から「以上」へずらすと落ちる |
+| 受け入れ条件 3、I1〜I4・I19 | 名前の形（計画名の 24 字の上限、`-rel` と数字で終わるレーン名）・重なり・上限・合計 6・未知の依存・循環（`CycleError`）が誤り（終了コード 1、`rule` に I1〜I3）、触る場所の重なりが警告（0） | 25 字の計画名か `<計画名>-rel1` のレーン名を通す・循環の判定を外す・重なりを誤りにする・合計の比較を「より大きい」から「以上」へずらすと落ちる |
 | 受け入れ条件 4、I6・I8 | 検査に誤りがあると耐久ワークフローを始めず `relay.py spawn` を 1 回も打たない。依存のあるレーンは依存先が `stopped` になった後の周で起動する | 誤りがあっても起動する・依存を無視して起動すると落ちる |
 | 受け入れ条件 5 | `wait` が `notice`・`release`・終わりのいずれかで 0、無ければ上限で 3 を返す。レーンの承認待ちと停止は観測の耐久ステップが拾う | 変化を見落とす・上限を待たずに返すと落ちる |
 | 受け入れ条件 6、I9 | 依頼が 1 件届き配布が流れていなければ、他のレーンの依頼を待たずに提示 1 を組む。範囲は依頼の集合でなく提示したコミットの `main..<SHA>` で、依頼していないレーンの Pull Request も内訳に載る | 依頼が揃うまで待つ・範囲を依頼の Pull Request の和で作る・依頼の無いレーンを内訳から落とすと落ちる |
@@ -557,7 +561,7 @@ graph TD
 | 受け入れ条件 6、I14（出し直しの後にまた変わった） | 提示 2 への `confirm` は比べずに確定し、提示 3 を組まない。出し直しで承認したコミットを出し、確定の後に入った Pull Request の依頼は `pending` に残り、配布の直後の次の配布に入る | 2 回目の出し直しを組む・後の依頼を今の配布の答えにすると落ちる |
 | 受け入れ条件 6、I15（Pull Request 2420 の件） | レーン A の配布の範囲にレーン B の Pull Request が入ると、B は依頼していなくても範囲のイベントを受け、後で `request` に来ると依頼を送らずに `released` で進む。B のための 2 本目の本番のプランは組まれない | B の依頼で 2 本目の配布を組む・すでに `main` にあるのに待つと落ちる |
 | 受け入れ条件 6、I12 | 動いている計画に属さないレーンでは今の本番のプランが組まれる | 属さないレーンに依頼のプランを組むと落ちる |
-| 受け入れ条件 6a | 周回を「配布待ち」で締めて次の周回へ進む・配布待ちの周回の課題を選ばない・答えの後に残りを流す・差し戻しで締める（[issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md) の「テスト設計」） | 同じ文書の表のとおり |
+| 受け入れ条件 6a | 周回を「配布待ち」で締めて次の周回へ進む・配布待ちと質問待ちの周回の課題を選ばない・答えの後に残りを流す・差し戻しで締める（[issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md) の「テスト設計」） | 同じ文書の表のとおり |
 | 受け入れ条件 6b、I16 | `check-pr-base.sh` の通す・落とす、承認したコミットと `release/v<版>` の先頭の照合、版数の衝突の解消、Pull Request 2420 の件が起きないこと（[issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「テスト設計」） | 同じ文書の表のとおり |
 | 受け入れ条件 6c〜6f、I17・I18 | 問いの依頼をまとめて 1 回で問う・答えの時点の新しい依頼を続けて問う・レーンは待たずに残りへ進む・hook の送り先・質問待ちの再開・設計の 3 つの答え・配布の差し戻しの宛先・持ち主のレーンが答えの後の処理を行う・終わったレーンを起こす（[issue-2436-design-approvals.md](issue-2436-design-approvals.md) の「テスト設計」） | 同じ文書の表のとおり |
 | 受け入れ条件 6g・6h、I19 | 一時レーンの失敗と異常系の各行（[issue-2436-design-failures.md](issue-2436-design-failures.md) の「テストの観点」） | 同じ文書の表のとおり |
@@ -576,12 +580,13 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2436 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/forms/parallel-request.json`、`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md`。ループの側の触るファイルは [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md)、異常系の側は [issue-2436-design-failures.md](issue-2436-design-failures.md)、承認ゲート 1 の側は [issue-2436-design-approvals.md](issue-2436-design-approvals.md)、配布の規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある |
+| #2436 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/forms/parallel-request.json`、`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md`。ループの側の触るファイルは [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md)、異常系の側は [issue-2436-design-failures.md](issue-2436-design-failures.md)、承認ゲート 1 の側は [issue-2436-design-approvals.md](issue-2436-design-approvals.md)、配布の規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
+| 提示の答えの記録 | `sprint-state.py gate` を、スプリントの状態ファイルでない提示の答えの記録（`{"gates": []}` だけを持つ）へ打ったとき、覆しの記録（`record_override`）が MVV の項目の無いファイルで通るかは未確認。通らなければ、実装で提示の答えの記録に要る項目を足す |
 | 依頼の無いレーンの対応づけ | 範囲の Pull Request をレーンへ対応づけるのは依頼の `prs` と、閉じる課題とスプリントのレーンの `input.issues` の照合だけである。ループのレーンが依頼の前に出した Pull Request は「レーンの無い Pull Request」として並ぶ。答えはレーンの名前によらず範囲のイベントで届く（I15）ため、配布の結果は欠けない |
 | 提示のプランの組み立て | 今の開発版の承認資料のステップ（`_dev_approval_steps`）を版上げ無しで流せるか、本番のプランの承認の記録（`approve` の `--facts-from`）が提示のプランの状態ディレクトリを読めるかは、実装の最初に確かめる |
 | 複数のプロセスが同じ SQLite に書くときの待ち | `run` のプロセスと、`DBOSClient` を開く `request`・`stop`・`confirm`・`settle`・`wait` のプロセスが同じファイルへ書く。試行は 3 プロセスで通ったが、ロックの待ち（busy）の長さと失敗の形は未確認。#1142 の I17（1 つの SQLite を開くプロセスは 1 つ）は DBOS を起動するプロセスに限る読み方にする（決定 12） |

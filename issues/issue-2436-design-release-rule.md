@@ -11,7 +11,7 @@
 
 | 点 | 今の作り（コードの位置） | 改めた後 |
 | --- | --- | --- |
-| `release/v<版>` を切る起点 | 本番のプランの「起点」が `origin/<ベースブランチ>`（`release_templates.py` の `plan_release_package_plugin`。worktree は `paths.py` の `_resolve_base` が作る） | 承認したコミット。差し込み `{queue_approved:<計画名>}` を、名前の一致する完了した計画の approval-facts の `metrics.approved_sha` で埋める |
+| `release/v<版>` を切る起点 | 本番のプランの「起点」が `origin/<ベースブランチ>`（`release_templates.py` の `plan_release_package_plugin`。worktree は `paths.py` の `_resolve_base` が作る） | 承認したコミット。本番のプランに新しい項目「起点のコミット」を足し、差し込み `{queue_approved:<計画名>}` を、名前の一致する完了した計画の approval-facts の `metrics.approved_sha` で埋める。「起点」は今どおり `origin/<ベースブランチ>` のまま残す（下の「起点のコミットと版の判定」） |
 | 本番の Pull Request の head | `develop`（`release-steps.py` の `_merge_prod_pr` が `create_pr(root, prod, base, ...)`） | `release/v<版>`（`create_pr(root, prod, branch, ...)`） |
 | 承認の照合 | `origin/<ベースブランチ>` の先頭と承認したコミットを比べる（`release_lib/approval.py` の `check_approved` → `lib/approved_commit.py` の `compare_approved`） | `origin/release/v<版>` の先頭と承認したコミットを比べる。許すのは `release/v<版>` の Pull Request のコミット（版上げ）だけで、版数の衝突を解いたときも `release/v<版>-sync` の Pull Request からは読まない |
 | 本番の Pull Request のマージで指定する先頭 | 比べた `develop` の先頭（`wait_and_merge(..., expect=verdict.tip)`） | 比べた `release/v<版>` の先頭 |
@@ -44,12 +44,23 @@ sequenceDiagram
     P->>M: タグと GitHub Release
 ```
 
-1. queue が本番のプランを流す前に、「起点」の `{queue_approved:<計画名>}` を承認したコミットで埋める。埋められなければ本番のプランを流さない（#2079 の既存の扱い）。並列の計画の外のスプリントでは `<計画名>` は開発版のプラン（`release`。`DEV_SERIES`）で、並列の計画では提示のプラン（`present`）である
+1. queue が本番のプランを流す前に、「起点のコミット」の `{queue_approved:<計画名>}` を承認したコミットで埋める。埋められなければ本番のプランを流さない（#2079 の既存の扱い）。並列の計画の外のスプリントでは `<計画名>` は開発版のプラン（`release`。`DEV_SERIES`）で、並列の計画では提示のプラン（`present`）である
 2. worktree は承認したコミットから `release/v<版>` で作られる。bump・changelog・説明文は今のステップのまま、承認したコミットの上に版上げのコミットを積む
 3. `release` のステップは `release/v<版>` を `develop` へ取り込む（`_merge_release_pr`）。衝突が無ければ今どおりマージする。衝突があれば下の「版数の衝突」で解く
 4. 承認したコミットと `origin/release/v<版>` の先頭を照合する。照合で許すコミット（`release_pr_allowed` の許す一覧）は、`release/v<版>` → `develop` の Pull Request から読む。版数の衝突を解いて `release/v<版>-sync` の Pull Request で取り込んだときも、照合には元の `release/v<版>` の Pull Request を渡す。`-sync` の head は承認の後の `develop` の変更を含むため、照合に渡すと版上げしかない `release/v<版>` でも承認ゲート（終了コード 10）で止まる。外のコミットが無ければ、head を `release/v<版>` にした本番の Pull Request を作り、照合した先頭を指定してマージする。タグと GitHub Release は今どおり `main` のマージのコミットに打つ
 
 `develop` が承認の後に進んでいても、照合する相手は `release/v<版>` で、配布は止まらない。昇格の経路（`merged-steps.py promote`。head は `develop`）は R1 の `develop` の場合に当たり、変えない。
+
+## 起点のコミットと版の判定
+
+本番のプランの「起点」は、worktree の起点と版の判定の両方に読まれている。worktree は `paths.py` の `_resolve_base` が「起点」から作り、版の差し込み（`queue_fill.py` の `_Fill`）は同じ「起点」から `origin/` を外したものをベースブランチとして `release_version.observe()` へ渡す。「起点」を承認したコミットに置き換えると、版の判定が `origin/<SHA>` を読もうとして `unreadable` になり、本番のプランが流れる前に止まる。そこで 2 つを別の項目に分ける。
+
+| 項目 | 値 | 読み手 |
+| --- | --- | --- |
+| 起点 | `origin/<ベースブランチ>`（今どおり） | 版の差し込み（`_Fill` → `release_version.observe()`）と、「起点のコミット」が無いときの worktree |
+| 起点のコミット（新規） | `{queue_approved:<計画名>}`。queue が承認したコミットの SHA で埋める | worktree の起点（`_resolve_base`）だけ |
+
+「起点のコミット」を持たないプラン（開発版のプラン・並列の計画の外の既存のプラン）は、今どおり「起点」から worktree を作る。
 
 ## 版数の衝突
 
@@ -86,8 +97,9 @@ sequenceDiagram
 | `plugins/ndf/scripts/release-steps.py` | `_merge_prod_pr` の head と `expect` を `release/v<版>` にする。`_merge_release_pr` に衝突のときの解く枝（`release/v<版>-sync`）を足し、照合に渡す Pull Request（元の `release/v<版>`）と取り込みの Pull Request（`-sync`）を分けて返す。`cmd_release` の照合の相手を `release/v<版>` にする |
 | `plugins/ndf/scripts/release_lib/approval.py` | `check_approved` が比べる先頭を引数の参照（`release/v<版>`）から読む。止まったときの文言の参照名 |
 | `plugins/ndf/scripts/release_lib/version_merge.py`（新規） | 衝突した箇所が版数を持つ箇所かの判定と、本番の版の側を取る解き方 |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` | 本番のプランの「起点」を `{queue_approved:<計画名>}` にする |
-| `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 差し込み `{queue_approved:<計画名>}` |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` | 本番のプランに「起点のコミット」`{queue_approved:<計画名>}` を足す。「起点」は `origin/<ベースブランチ>` のまま変えない |
+| `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 差し込み `{queue_approved:<計画名>}`。版の差し込み（`_Fill`）は今どおり「起点」のブランチ名を `release_version.observe()` へ渡し、「起点のコミット」を読まない |
+| `plugins/ndf/scripts/supervise_lib/paths.py` | `_resolve_base` が「起点のコミット」を「起点」より先に読み、あれば worktree の起点にする（`origin` を fetch してから、その SHA から `release/v<版>` を作る） |
 | `AGENTS.md` | 「Git運用ルール」の `main` 宛の Pull Request の行を「`develop` に含まれるコミットだけ（head は `develop` か `release/v<版>`）」にする |
 | `docs/versioning-and-distribution.md` | 正式版を出す手順・チャネルの説明の、本番の Pull Request の head と承認したコミットの扱い |
 | `plugins/ndf/skills/release/references/release-steps.md` | `release` の `prod` の説明（「続けて `develop` → `main` をマージ」）と #815 の照合の説明 |
@@ -100,7 +112,7 @@ sequenceDiagram
 | R1（通す） | head が `develop`、または先頭が `origin/develop` の祖先の `release/v10.28.0` なら 0 | 祖先の判定を外す・`release/v*` の形を見ないと落ちる |
 | R1（落とす） | head が `feature/x`、`develop` の祖先でない `release/v10.28.0`、SHA を渡さない `release/v*` なら 1 | 名前だけで通すと落ちる |
 | R2・照合 | 承認したコミットから切った `release/v<版>` に版上げだけがあれば照合が通る。`develop` が承認の後に進んでいても止まらない。`release/v<版>` に承認の外のコミットがあれば 10 | 照合の相手を `develop` の先頭に戻すと「進んでいても止まらない」が落ちる |
-| 起点 | 本番のプランの worktree が承認したコミットから作られる。`{queue_approved:<名>}` を埋められなければ流さない | 起点を `origin/develop` に戻すと落ちる |
+| 起点 | 本番のプランの worktree が承認したコミット（「起点のコミット」）から作られ、版の差し込みは「起点」の `develop` から版を読んで `unreadable` にならない。`{queue_approved:<名>}` を埋められなければ流さない | worktree の起点を `origin/develop` に戻す・版の判定に SHA を渡すと落ちる |
 | 版数の衝突 | `develop` で `plugin.json` の版数が `10.28.0-dev.4` に上がった後に `release/v10.28.0` を取り込むと、`release/v10.28.0-sync` で本番の版を取り、`release/v10.28.0` の先頭が `develop` の祖先になる。版数でない箇所が衝突すれば 1 で止まる | `release/v<版>` に `develop` を取り込む・版数でない衝突を解くと落ちる |
 | 版数の衝突の後の照合 | 承認の後に `develop` が進み、`release/v10.28.0-sync` で取り込んだとき、`release/v10.28.0` に版上げしか無ければ照合が通り、本番の Pull Request が作られる | 照合に `-sync` の Pull Request を渡すと、承認の後の `develop` の変更が承認の外になって 10 で止まり落ちる |
 | Pull Request 2420 の件 | レーン A の配布の後、範囲に入っていたレーン B が依頼のステップに来ても本番の Pull Request を作らない。レーン A の配布の承認の後にマージされたレーン B の変更は A の `main` に入らず、次の配布になる | B のための本番の Pull Request を作る・A の配布に承認の外の B の変更が入ると落ちる |
