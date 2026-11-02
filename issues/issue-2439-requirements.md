@@ -39,7 +39,7 @@ Factory では、実行ジョブ 1 本が #2436 のレーン 1 本に当たる�
 | # | 条件 | 推した出所 | この要求での扱い |
 | --- | --- | --- | --- |
 | S1 | #2436 へ組み込まず、別の課題と別の設計 PR にする | `plugins/` から `factory/` を参照できない（`scripts/check-service-boundary.py`）。実行の基盤（DynamoDB・見回り）が違う。#2436 の設計は 6 本で 1,445 行ある | 含む（この課題の範囲そのもの） |
-| S2 | Factory のオーガナイザーは常駐のプロセスにせず、Factory の API と 5 分ごとの見回りの中に置く | [docs/specifications/ndf-factory-dev-loops.md](docs/specifications/ndf-factory-dev-loops.md) の概要「常駐のプロセスを持たない」 | 非機能の条件（可用性・運用） |
+| S2 | Factory のオーガナイザーは常駐のプロセスにせず、Factory の API と 5 分ごとの見回りの中に置く | [docs/specifications/ndf-factory-dev-loops.md](https://github.com/devbasex/ai-plugins/blob/develop/docs/specifications/ndf-factory-dev-loops.md) の概要「常駐のプロセスを持たない」 | 非機能の条件（可用性・運用） |
 | S3 | レーンからオーガナイザーへの依頼と答えの形（配布の依頼・承認ゲート 1／2 の依頼・問いの依頼）は #2436 が NDF の契約として公開し、この課題はランナーの翻訳で同じ形を受ける | #2436 の決定 21。下流の腐敗防止層の形（`ndf-factory-dev-loops.md` のコンテキスト） | 前提 1・受け入れ条件 10 |
 | S4 | 本番の配布の中身は #2436 と同じく、承認資料を作る時点の `develop` のコミットの範囲で決める。本番の Pull Request の規則（head が `release/v<版>`、`develop` に含まれるコミットだけ）を共有する | #2436 の決定 13〜15 | 受け入れ条件 1・3・4 |
 | S5 | 本番の配布は、#2436 の一時レーンに当たる専用の実行ジョブ（配布の実行ジョブ）で流す | #2436 の決定 19。Factory では実行ジョブがレーンの単位になる | 受け入れ条件 6 |
@@ -172,7 +172,7 @@ Factory では、実行ジョブ 1 本が #2436 のレーン 1 本に当たる�
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
 | プロジェクト構造 | Factory のオーガナイザーとランナーの翻訳は `factory/` に置く。`plugins/` と `.claude-plugin/marketplace.json` は `factory/` を参照しない（`AGENTS.md` の「マーケットプレイスの構造」）。NDF の側の切り替え口は `plugins/ndf/` に置き、Factory を名指ししない |
-| コーディング規約 | `factory/` の TypeScript の既存の書き方と、確定仕様 [ndf-factory-dev-loops.md](docs/specifications/ndf-factory-dev-loops.md) の集約・トランザクションの規則（1 つの処理が書き換える集約は 1 つ） |
+| コーディング規約 | `factory/` の TypeScript の既存の書き方と、確定仕様 [ndf-factory-dev-loops.md](https://github.com/devbasex/ai-plugins/blob/develop/docs/specifications/ndf-factory-dev-loops.md) の集約・トランザクションの規則（1 つの処理が書き換える集約は 1 つ） |
 | テスト戦略 | オーガナイザーの規則は API の単体テスト（メモリの表）で、ランナーの翻訳は契約の例の組で、2 本の実行の衝突はリリース後テストで確かめる |
 
 ## 境界
