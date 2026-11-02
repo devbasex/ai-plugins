@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: プランの worker と Agent の `ndf:worker` は、ステップに要る Skill を受け取る仕組みを持たない。#2372 で `document-style` だけを 3 つの system プロンプトと worker の定義へ書き足したため、文書を書かないステップにも常に載り、別の Skill を届けたいときは同じ書き足しがまた要る
+- **今どうなっているか**: プランの worker と Agent の `ndf:worker` は、ステップに要る Skill を受け取る仕組みを持たない。#2372 では `document-style` だけを 3 つの system プロンプトと worker の定義へ書き足した。そのため文書を書かないステップにも常に載り、別の Skill を届けたいときは同じ書き足しがまた要る
 - **誰に効くか**: NDF でスプリントを回す利用者（worker が書く文書とコードの質）と、NDF の保守者（Skill を届ける経路が 1 か所になる）
 - **変えると何が成り立つか**: worker が動くとき、そのステップの工程に要る Skill だけが届く。新しい Skill をある工程へ届ける変更は、対応表の 1 行の追加で済む
 
@@ -16,9 +16,9 @@
 
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
-| 課題の本文「実測: `skills:` と `disallowedTools: Skill` の併用」（2026-11-02、Claude Code v2.1.316） | 実測 | `skills:` は subagent として起動したときだけ効き、効いた結果は「Skill の本文を最初から文脈に持つ」ことである。同じ効果は本文を system プロンプトへ入れれば 1 段のまま得られる |
+| 課題の本文「実測: `skills:` と `disallowedTools: Skill` の併用」（2026-11-02、Claude Code v2.1.316） | 実測 | `skills:` はサブエージェントとして起動したときだけ効き、効いた結果は「Skill の本文を最初から文脈に持つ」ことである。同じ効果は本文を system プロンプトへ入れれば 1 段のまま得られる |
 | 下の「非機能の実現方式」の測定（2026-11-02、Claude Code v2.1.316、`claude_cmd` の最小構成） | 実測 | 本文を system プロンプトに入れた起動は 1 ターンで答え、キャッシュが効けば増分が約 $0.001 だった。パスを渡して読ませた起動は 2 ターンで、毎回 $0.08〜0.14 だった |
-| [Claude Code の subagent の文書](https://code.claude.com/docs/en/sub-agents) の `skills` 欄 | 外部の一次情報 | 挙げた Skill の本文全体を、起動の時点で文脈へ読み込む。部分だけを読み込む仕組みは無い |
+| [Claude Code のサブエージェントの文書](https://code.claude.com/docs/en/sub-agents) の `skills` 欄 | 外部の一次情報 | 挙げた Skill の本文全体を、起動の時点で文脈へ読み込む。部分だけを読み込む仕組みは無い |
 
 要求と受け入れ条件は #2376 の本文にある（コピーは [issue-2376-requirements.md](issue-2376-requirements.md)）。この文書は「どう作るか」だけを扱う。
 
@@ -30,7 +30,7 @@
 | --- | --- |
 | NDF の開発ワークフロー（`ndf-workflow`） | 工程・ステップ・worker・Skill の対応表・Skill の渡し方・読む Skill |
 
-1 つのコンテキストに収まる。工程の名前は同じコンテキストの工程表（`development-workflow` の「モードごとに起動する Skill」と `workflow-common.sh` の `WF_STAGE_MATRIX`）の行名をそのまま使う。
+1 つのコンテキストに収まる。工程の名前は、同じコンテキストの工程表の行名をそのまま使う。工程表は `development-workflow` の「モードごとに起動する Skill」と `workflow-common.sh` の `WF_STAGE_MATRIX` である。
 
 ### 集約
 
@@ -101,7 +101,7 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 | worker の起動の組み立て | work・drive のステップで本文の節を system プロンプトへ入れる（通常・full・ランタイム指定の worker、drive の pause の worker） | `supervise_lib/worker_steps.py` |
 | PR 本文の書き手の起動 | pr のステップで本文の節を `PR_SYSTEM` の後へ入れる | `supervise_lib/pr.py` の `_llm_body` |
 | 使用量の種類の見分け | system プロンプトの先頭で `pr`・`judge`・`slow` を見分ける（後ろに本文の節が付いても `pr` のまま） | `supervise_lib/claude.py` の `claude_kind` |
-| #2372 の止血の撤去 | `DOCUMENT_STYLE`・`_style_rules`・`DOCUMENT_RULE` と、`FULL_SYSTEM`・`PR_SYSTEM` の `document-style` の行を消す | `supervise_lib/prompts.py` |
+| #2372 の応急の書き足しの撤去 | `DOCUMENT_STYLE`・`_style_rules`・`DOCUMENT_RULE` と、`FULL_SYSTEM`・`PR_SYSTEM` の `document-style` の行を消す | `supervise_lib/prompts.py` |
 | プランの形の説明 | `skills`・`skills_add` 欄を説明に足す | `supervise_lib/plan.py` の先頭の説明 |
 | worker の定義 | 「起動指示の『読む Skill』に挙がった `SKILL.md` だけを読む」へ一般化し、`document-style` の例外の段落を消す | `plugins/ndf/agents/worker.md` |
 | supervisor → worker の規約 | 起動指示の項目に「読む Skill」を足して 6 項目にし、引くコマンドでの決め方を書く。規則 6 の例外の文を一般化する | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
@@ -109,6 +109,8 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 | テスト | 対応表・解決・検査・記録・起動の組み立ての単体テスト。#2372 のテストを置き換える | `plugins/ndf/scripts/tests/test_stage_skills.py`（新設）、`test_supervise_document_style.py`（削除） |
 
 **ステップに欄を足すことと、進捗ログに行の種類を足すことは、既存の規則に当てはまる。** パートへの展開（`expand_parts`）はステップの欄を写すため `skills` もそのまま写る。進捗ログを読む部品（`slow_step.py`・`estimate_records.py`・`RunState` の数え上げ）は `kind` で行を絞り、知らない種類を読み飛ばす。当てはまらなかったのは `claude_kind` だけで、`PR_SYSTEM` との一致で種類を決めているため、後ろへ本文の節を付けると `work` に数えられる。表の「使用量の種類の見分け」の行がそれを直す。
+
+### 実行時の関係
 
 ```mermaid
 graph TD
@@ -142,7 +144,7 @@ graph TD
     S -->|読む Skill の欄| N
 ```
 
-`#2372 の止血の撤去`・`プランの形の説明`・`worker の定義`・`supervisor → worker の規約`・`確定仕様`・`テスト` は消す・書き換える対象で、実行時の関係を持たないため図に含めない。
+`#2372 の応急の書き足しの撤去`・`プランの形の説明`・`worker の定義`・`supervisor → worker の規約`・`確定仕様`・`テスト` は消す・書き換える対象である。実行時の関係を持たないため、図に含めない。
 
 ### 配置
 
@@ -153,8 +155,8 @@ graph TD
         CP[claude -p の worker]
         RT[codex などのランタイムの worker]
         HOST[Claude Code の本体のセッション]
-        SV[supervisor の subagent]
-        NW[ndf:worker の subagent]
+        SV[supervisor のサブエージェント]
+        NW[ndf:worker のサブエージェント]
     end
     SUP -->|system プロンプトに Skill の本文| CP
     SUP -->|プロンプトのファイルに Skill の本文| RT
@@ -324,7 +326,17 @@ sequenceDiagram
 | 移行性 | `skills` 欄の無い既存のプラン・キューに入ったプランは、移行の手順なしでそのまま動く | 欄が無ければ対応表の値で動かす（I4）。対応表に無い工程は空 | 欄の無いプランで検査が通り、工程どおりに届くことを単体テストで見る |
 | システム環境 | Claude Code v2.1.316 以降で動く。通常の worker の起動（`--setting-sources ""`・`--disable-slash-commands`）でプラグインが読み込まれない条件の下でも届く | 本文は `supervise.py` 自身と同じプラグインの `skills/` から読み、プラグインの読み込みに頼らない | 最小構成の起動で、規則 1 の見出しを Tool を使わずに答えられる（下の測定の `本文` の行） |
 
-設計の時点の測定（2026-11-02、Claude Code v2.1.316、`claude_cmd` の最小構成と今の `WORK_SYSTEM` から `DOCUMENT_RULE` を除いた文、問いは「`document-style` の規則 1 の見出しを答える」、既定のモデル）:
+設計の時点の測定の条件:
+
+| 項目 | 値 |
+| --- | --- |
+| 日付と版 | 2026-11-02、Claude Code v2.1.316 |
+| 起動 | `claude_cmd` の最小構成 |
+| system プロンプト | 今の `WORK_SYSTEM` から `DOCUMENT_RULE` を除いた文 |
+| 問い | `document-style` の規則 1 の見出しを答える |
+| モデル | 既定のモデル |
+
+設計の時点の測定の結果:
 
 | 条件 | 1 回目の費用 | 2 回目の費用 | 秒 | ターン | 答え |
 | --- | --- | --- | --- | --- | --- |
@@ -332,7 +344,7 @@ sequenceDiagram
 | 本文を system プロンプトへ入れる（採る形） | $0.0868（キャッシュの書き込み 10,371） | $0.0059〜0.0065 | 3.1〜3.7 | 1 | 正しい |
 | `SKILL.md` のパスを渡して読ませる | $0.0838〜0.1405 | $0.0838 | 4.6〜5.0 | 2 | 正しい |
 
-`--agents` で組んだ subagent を本体から起動する形は、決定 4 で構造の理由から退けたため測っていない。
+`--agents` で組んだサブエージェントを本体から起動する形は、決定 4 で構造の理由から退けたため測っていない。
 
 ## 決定の記録
 
@@ -362,9 +374,9 @@ sequenceDiagram
 
 ### 決定 4: どのランタイムの worker にも同じ形で届けるため、プランの worker 3 種には Skill の本文を system プロンプトへ入れる
 
-`skills:` を持つ subagent が得る状態は「Skill の本文を最初から文脈に持つ」ことであり（あるべき姿の根拠の 1 行目）、本文を system プロンプトへ入れれば起動を 1 段のまま同じ状態になる。通常の worker・ランタイム指定（`codex` など）の worker・drive の pause の worker・full の worker・PR 本文の書き手のすべてが、system プロンプト（ランタイム指定ではプロンプトのファイル）を持つため、組み立ての関数は 1 つで済む。測定では 1 ターンで答え、キャッシュが効けば増分は約 $0.001 だった。
+`skills:` を持つサブエージェントが得る状態は「Skill の本文を最初から文脈に持つ」ことである（あるべき姿の根拠の 1 行目）。本文を system プロンプトへ入れれば、起動を 1 段のまま同じ状態になる。次の起動はすべて system プロンプト（ランタイム指定ではプロンプトのファイル）を持つ。通常の worker・ランタイム指定（`codex` など）の worker・drive の pause の worker・full の worker・PR 本文の書き手である。そのため組み立ての関数は 1 つで済む。測定では 1 ターンで答え、キャッシュが効けば増分は約 $0.001 だった。
 
-`--agents` の JSON で組んだ worker を subagent として起動する形は採らない。起動が 1 段増え、報告の受け渡し・打ち切り・使用量の帳簿・再開を subagent 越しに作り直すことになり、`codex` などのランタイムと Tool の無い PR 本文の書き手には使えない。`SKILL.md` のパスを渡す形は、毎回 1 ターンと $0.08〜0.14 が増え、読むかどうかが worker に委ねられる（#2372 の実測の原因と同じ）。full の worker に「Skill を読み込む」指示だけを渡す形も、読むかどうかを委ねる点で同じである。PR 本文の書き手に規則の見出しだけを渡す形は、見出しを取り出す規約が `document-style` にしか無く、ほかの Skill へ一般化できない。
+`--agents` の JSON で組んだ worker をサブエージェントとして起動する形は採らない。起動が 1 段増え、報告の受け渡し・打ち切り・使用量の帳簿・再開をサブエージェント越しに作り直すことになる。`codex` などのランタイムと Tool の無い PR 本文の書き手には使えない。`SKILL.md` のパスを渡す形は、毎回 1 ターンと $0.08〜0.14 が増え、読むかどうかが worker に委ねられる（#2372 の実測の原因と同じ）。full の worker に「Skill を読み込む」指示だけを渡す形も、読むかどうかを委ねる点で同じである。PR 本文の書き手に規則の見出しだけを渡す形は、見出しを取り出す規約が `document-style` にしか無く、ほかの Skill へ一般化できない。
 
 根拠: Value 3 / Value 5 / Value 6（MVV 版 4）
 
@@ -372,13 +384,13 @@ sequenceDiagram
 
 supervisor は `stage-skills.py lookup <工程>` を打ち、出力の名前とパスを欄にそのまま写す。worker の定義は Skill の名前を持たず、「欄に挙がった `SKILL.md` だけを作業の前に読む」とだけ定める。パスを読ませる形は 1 ターン分の費用が増えるが、届けるのは対応表に行のある工程の作業だけである。
 
-目的ごとの定義を `skills:` つきで用意して選ぶ形は採らない。Skill の組み合わせの数だけ定義が要り、定義が Skill の名前を持つため、対応表の 1 行を足すたびに定義も増やすことになる（受け入れ条件 11 と非機能の運用・保守性に反する）。
+目的ごとの定義を `skills:` つきで用意して選ぶ形は採らない。Skill の組み合わせの数だけ定義が要る。定義が Skill の名前を持つため、対応表の 1 行を足すたびに定義も増やすことになる（受け入れ条件 11 と非機能の運用・保守性に反する）。
 
 根拠: Value 6（MVV 版 4）
 
 ### 決定 6: worker に工程の責務を持ち込ませないよう、対応表に置く Skill は規則の Skill に限る
 
-確定仕様（`docs/specifications/ndf-worker-agent-and-skill-excerpts.md`）は「worker は `SKILL.md` を読まない」と定める。工程 Skill を読ませると、進捗記録・確認・承認ゲートの判断のように worker が持たない責務が worker の文脈で動くためである。対応表に置くのは、書き方・記録の仕方のように手順を持たない規則の Skill（初期値の `document-style`・`logging-guidelines`）だけにし、確定仕様の 3 か所を「工程 Skill の `SKILL.md` を読まない。起動指示の『読む Skill』に挙がった規則の Skill だけを読む」へ直す。工程 Skill の手順は、今と同じく抜粋（`references/excerpt.md`）で渡す。
+確定仕様（`docs/specifications/ndf-worker-agent-and-skill-excerpts.md`）は「worker は `SKILL.md` を読まない」と定める。工程 Skill を読ませると、進捗記録・確認・承認ゲートの判断のように worker が持たない責務が worker の文脈で動くためである。対応表に置くのは、書き方・記録の仕方のように手順を持たない規則の Skill（初期値の `document-style`・`logging-guidelines`）だけにする。確定仕様の 3 か所は「工程 Skill の `SKILL.md` を読まない。起動指示の『読む Skill』に挙がった規則の Skill だけを読む」へ直す。工程 Skill の手順は、今と同じく抜粋（`references/excerpt.md`）で渡す。
 
 規則の Skill にも抜粋を作って渡す形は採らない。規則の Skill は本文全体が規則であり、抜粋の 3 見出し（呼び出し・結果の読み方・判断の基準）に当てはまる手順を持たない。
 
@@ -413,7 +425,7 @@ Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.1
 | 受け入れ条件 6 | 欄の無い既存のプランが検査を通り、工程どおりに届く | 欄が無いプランを検査で落とす |
 | 受け入れ条件 7・I5 | 通常の worker（ランタイム指定と drive の pause を含む）の system プロンプトに、解決した Skill の本文だけが入り、対応表のほかの行の Skill の名前が入らない | 対応表のすべての Skill を入れる |
 | 受け入れ条件 8・I5 | full の worker の `--append-system-prompt` に解決した Skill の本文だけが入る。再開の起動も同じ文になる | full の起動だけ節を入れない、または再開で節が落ちる |
-| 受け入れ条件 9 | pr のステップで LLM に渡す system プロンプトが `PR_SYSTEM` で始まり、`Pull Request` の工程 Skill の本文を含み、帳簿の種類は `pr` のままである | `claude_kind` を一致の判定のまま残す |
+| 受け入れ条件 9 | pr のステップで LLM に渡す system プロンプトが `PR_SYSTEM` で始まり、`Pull Request` の工程の Skill の本文を含み、帳簿の種類は `pr` のままである | `claude_kind` を一致の判定のまま残す |
 | 受け入れ条件 10 | `lookup 設計` が `document-style` の名前と実在するパスを返し、`lookup 存在しない工程` が空の `items` と終了コード 0 を返す。対応表を読めないと終了コード 1 | 対応表に無い工程で終了コード 1 を返す |
 | 受け入れ条件 11・I8 | `worker.md` の frontmatter が `disallowedTools` に `Skill` と `Agent` を持ち、本文が Skill の名前を持たない | 定義へ `skills:` か特定の Skill の名前を書く |
 | 受け入れ条件 12 | `prompts.py` に `DOCUMENT_STYLE`・`DOCUMENT_RULE`・`_style_rules` が無く、設計の工程の work ステップには `document-style` の本文が届く | 撤去だけをして対応表の行を入れない |
