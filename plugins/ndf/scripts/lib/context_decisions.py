@@ -435,3 +435,25 @@ def record_restart(work: str, reason: str | None = None, cwd: str | None = None,
         return ok
     except Exception:  # noqa: BLE001 — 記録の失敗で ndf-next を止めない
         return False
+
+
+def record_limits(sessions: list, cli_limit: int | None = None, env: Mapping | None = None) -> tuple:
+    """skill-stats の「割る候補」の上限を記録ごとに決める（決定 14）。(セッション → 上限の関数, meta)。
+
+    `--window-limit` を渡せば全記録へ当てる。渡さなければ、そのセッションの最後の判定の記録の運用上限を使い、
+    判定の記録が無いセッションと方針の列が無い行は現行方式の 200,000 とする（I12）。"""
+    if cli_limit:
+        return (lambda _sid: cli_limit), {"window_limit": cli_limit, "window_limit_source": "cli"}
+    limits: dict[str, int] = {}
+    for r in read_decisions(None, env):
+        sid, limit = r.get("session_id"), r.get("limit")
+        if sid and "policy" not in r:
+            limits[sid] = cp.CURRENT_LIMIT
+        elif sid and isinstance(limit, int) and not isinstance(limit, bool):
+            limits[sid] = limit
+    meta = {
+        "window_limit": cp.CURRENT_LIMIT,
+        "window_limit_source": "records",
+        "records_without_decisions": sum(1 for s in sessions if s not in limits),
+    }
+    return (lambda sid: limits.get(sid, cp.CURRENT_LIMIT)), meta
