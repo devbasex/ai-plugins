@@ -324,9 +324,10 @@ export class MemoryRunsTable implements RunsTable {
       .sort((a, b) => a.number - b.number);
   }
 
-  async listWaitingLoops() {
+  async listWaitingLoops(accountId?: string) {
     await this.tick();
     return [...this.loops.values()]
+      .filter((l) => accountId === undefined || l.accountId === accountId)
       .filter((l) => l.state === "between_laps" && l.waitReason !== "user_start" && !isTerminalLoop(l.state))
       .sort((a, b) => (a.updatedAt < b.updatedAt ? -1 : 1))
       .map((l) => structuredClone(l));

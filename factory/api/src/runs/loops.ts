@@ -247,8 +247,21 @@ export class LoopControl {
     const { table, control } = this.deps;
     for (let attempt = 0; attempt < START_RETRIES; attempt++) {
       const loop = await table.getLoop(accountId, loopId);
-      if (!loop || loop.state !== "between_laps" || loop.currentRunId !== null || loop.cancelRequested) return;
+      if (!loop || loop.state !== "between_laps" || loop.currentRunId !== null) return;
       const now = this.iso();
+      // 停止の後の処理がループを読んだ後に取り消しの要求が保存されると、between_laps のまま要求だけが残る。
+      // 周回を起こさずに cancelled へ移し、マイルストーンの持ち分を消す
+      if (loop.cancelRequested) {
+        const ok = await table.writeLoop({
+          accountId: loop.accountId,
+          loopId: loop.loopId,
+          set: { state: "cancelled", waitReason: null, updatedAt: now },
+          expect: { currentRunId: null, lapRuns: loop.lapRuns, states: ["between_laps"] },
+          releaseMilestones: { repositoryId: loop.repositoryId, titles: loop.milestones },
+        });
+        if (ok) return;
+        continue;
+      }
       // 保存した写しを判定に使わない（プランの変更・席の外し・形態の変更を周回ごとに照らす）
       if (this.deps.resolveContext) {
         const fresh = await this.deps.resolveContext(loop.accountId, loop.createdBy);
@@ -329,8 +342,8 @@ export class LoopControl {
 
   // 停止の後の処理で枠が減ったとき、同じアカウントの待っているループを古い順に起こす
   async wakeWaitingLoops(accountId: string): Promise<void> {
-    for (const loop of await this.deps.table.listWaitingLoops()) {
-      if (loop.accountId !== accountId) continue;
+    // 他のアカウントの待ちは取得の時点で除く（ループの行を読みに行かない）
+    for (const loop of await this.deps.table.listWaitingLoops(accountId)) {
       await this.startNextLap(loop.accountId, loop.loopId, false);
       const after = await this.deps.table.getLoop(loop.accountId, loop.loopId);
       if (after?.state === "between_laps" && after.waitReason === "slots") return;

@@ -766,7 +766,7 @@ export class DynamoRunsTable implements RunsTable {
     return rows.map((r) => ({ number: r.number, sprintRunId: r.sprintRunId })).sort((a, b) => a.number - b.number);
   }
 
-  async listWaitingLoops(): Promise<DevLoop[]> {
+  async listWaitingLoops(accountId?: string): Promise<DevLoop[]> {
     const out: DevLoop[] = [];
     let start: Record<string, unknown> | undefined;
     do {
@@ -775,11 +775,14 @@ export class DynamoRunsTable implements RunsTable {
           TableName: this.tableName,
           IndexName: GSI1,
           KeyConditionExpression: "gsi1pk = :pk",
-          ExpressionAttributeValues: { ":pk": WAITING_LOOPS },
+          ...(accountId !== undefined
+            ? { FilterExpression: "accountId = :a", ExpressionAttributeValues: { ":pk": WAITING_LOOPS, ":a": accountId } }
+            : { ExpressionAttributeValues: { ":pk": WAITING_LOOPS } }),
           ExclusiveStartKey: start,
         }),
       );
       for (const i of page.Items ?? []) {
+        if (accountId !== undefined && i.accountId !== accountId) continue;
         const loop = await this.getLoop(i.accountId as string, i.loopId as string);
         if (loop && waitingOf(loop.state, loop.waitReason)) out.push(loop);
       }

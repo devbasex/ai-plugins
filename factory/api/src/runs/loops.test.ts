@@ -203,6 +203,25 @@ describe("開発ループを始め・止め・予算を変える（受け入れ�
     expect((await loopOf(loop_id)).cancelRequested).toBe(true);
     expect((await runOf(runId)).cancelRequested).toBe(true);
   });
+
+  it("停止の後の処理がループを読んだ後に取り消しが保存されても、次の周回を起こさず cancelled へ移り持ち分を消す", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const runId = (await loopOf(loop_id)).currentRunId!;
+    const get = h.table.getLoop.bind(h.table);
+    let raced = false;
+    h.table.getLoop = async (a, l) => {
+      const loop = await get(a, l);
+      if (!raced && loop) {
+        raced = true;
+        await h.table.writeLoop({ accountId: a, loopId: l, set: { cancelRequested: true }, expect: { currentRunId: runId } });
+      }
+      return loop;
+    };
+    await finishEcs(runId, { result: "done", summary: "" }, [["loop.lap_closed", lap(1)]]);
+    expect(raced).toBe(true);
+    expect(await loopOf(loop_id)).toMatchObject({ state: "cancelled", currentRunId: null, lapRuns: 1 });
+    expect(await h.table.getMilestoneShare("acc-1", REPO, "25 Factory")).toBeNull();
+  });
 });
 
 describe("止まる条件の写し（受け入れ条件 2）", () => {
@@ -265,6 +284,14 @@ describe("実行の枠と待ち（受け入れ条件 3、I46）", () => {
     await loops.sweepLoops();
     expect(calls).toBe(0);
     expect(await loopOf(loop_id)).toMatchObject({ state: "between_laps", waitReason: "slots" });
+  });
+
+  it("待っているループは取得の時点でアカウントで絞る", async () => {
+    const free = accountContext({ plan: "free" });
+    await manual([4], OTHER_REPO, free);
+    const { loop_id } = await startLoop("l1", ["25 Factory"], free);
+    expect((await h.table.listWaitingLoops("acc-1")).map((l) => l.loopId)).toEqual([loop_id]);
+    expect(await h.table.listWaitingLoops("acc-other")).toEqual([]);
   });
 
   it("ループの詳細はそのループの実行だけを返す", async () => {

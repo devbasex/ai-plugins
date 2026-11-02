@@ -85,7 +85,8 @@ export interface RunsTable {
   // リポジトリの課題の持ち分（強い整合。決定 11）
   listIssueShares(accountId: string, repositoryId: number): Promise<{ number: number; sprintRunId: string }[]>;
   // 次の周回を待つループ（between_laps で、待ちの理由が user_start でないもの）の古い順
-  listWaitingLoops(): Promise<DevLoop[]>;
+  // accountId を渡すとそのアカウントの待ちだけを返す（省くとサービス全体。見回り用）
+  listWaitingLoops(accountId?: string): Promise<DevLoop[]>;
 
   // ---- 移行（決定 12） ----
   // 移行の済みの行があるか（強い整合）
