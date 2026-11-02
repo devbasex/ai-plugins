@@ -346,16 +346,16 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | Skill の渡し方 | — | Skill を worker へ届ける形。プランの worker には本文を system プロンプトへ入れ（本文）、ndf:worker には SKILL.md の絶対パスを起動指示の「読む Skill」に書く（パス。#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 読む Skill | — | supervisor が ndf:worker の起動指示に書く項目。その作業で読む規則の Skill の名前と SKILL.md の絶対パスを並べ、worker はここに挙がった SKILL.md だけを読む（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 規則の Skill | — | 手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
-| 差分の棚卸し | — | 毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315） | — | — | — |
-| 見直し | — | 数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315） | — | — | — |
-| 大整理 | — | 十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315） | — | — | — |
-| 後回しの再評価 | — | 後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315） | — | — | — |
-| ニーズの調査 | — | 宣言した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315） | — | — | — |
-| シーズの調査 | — | 宣言した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315） | — | — | — |
-| 調査の記録 | — | 調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315） | — | — | — |
-| 材料の宣言 | — | プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315） | — | — | — |
-| 見直しの持ち主 | — | 見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315） | — | — | — |
-| 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | — |
+| 差分の棚卸し | — | 毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 見直し | — | 数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 大整理 | — | 十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 後回しの再評価 | — | 後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| ニーズの調査 | — | 宣言した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| シーズの調査 | — | 宣言した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 調査の記録 | — | 調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 材料の宣言 | — | プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 見直しの持ち主 | — | 見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 統括役 | `relay_hub` | 同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 名前つきのラッパー | `named_relay` | 統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
@@ -698,9 +698,9 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 人の判断待ち | — | 着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す | — | — | — |
 | 候補の上限 | — | 1 回の棚卸しで区分を決める候補の数の上限。candidates の --limit、.ndf/backlog.json の candidate_limit、既定 10 の順に決まる | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 持ち越し | — | 候補の上限を超えたため、その回で区分を決めずに残した候補。candidates の metrics.deferred に番号だけが載る | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
-| 棚卸しの深さ | — | 1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff\|review\|overhaul`（#2315） | — | — | — |
-| 調査の項目 | — | 調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315） | — | — | — |
-| 付け直しの記録 | — | 大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315） | — | — | — |
+| 棚卸しの深さ | — | 1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff\|review\|overhaul`（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 調査の項目 | — | 調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 付け直しの記録 | — | 大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 
 ## NDF の worktree（`ndf-worktree`）
 

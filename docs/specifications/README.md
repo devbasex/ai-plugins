@@ -120,5 +120,6 @@
 | [ndf-worker-stage-skills.md](ndf-worker-stage-skills.md) | プランの worker と ndf:worker へ、ステップの工程に要る規則の Skill だけを届ける仕組み。Skill の対応表（stage-skills.json）と規則の Skill の一覧、プランの skills・skills_add 欄と流す前の検査、本文を system プロンプトへ入れる渡し方と起動指示の「読む Skill」、進捗ログの kind: skills の行、stage-skills.py lookup。規約は supervise_lib/plan.py と agent-layers.md が正 |
 | [ndf-supervise-verification-mark-after-ok.md](ndf-supervise-verification-mark-after-ok.md) | まとめのプランで「リリース後テスト」の進行の印を、記録を投稿したステップが ok で終わった後に付けること（STAGES_AFTER_OK・record_stage の after_ok・release-verify の worker は進捗記録を打たない）、ほかの工程は始めに付けること、印と記録が食い違いうる経路（#2288・#2356）。プランの外の印の時点は release-verification が正 |
 | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) | 同じコンテナで最初のラッパーが統括役を兼ね、2 本目以降の claude・`relay.py spawn`・起動のブロックで名前つきのラッパーを tmux に起動し、`ls` で一覧し、`stop` / `restart` / `attach` で 1 本ずつ扱う入出力の契約・状態の置き場所・決定と理由。手順は `development-workflow` の `references/relay.md` の「複数のループを並べる（統括役）」が正 |
+| [ndf-backlog-refinement-depths.md](ndf-backlog-refinement-depths.md) | 棚卸しの 3 つの深さ（差分の棚卸し・見直し・大整理）の起動の判定・見直しの持ち主・ニーズとシーズの調査・起票と付け直しと戻しについて、`upkeep.py` の副命令の契約、`.ndf/backlog/` の記録、`materials`・`depths` の設定と、そう決めた理由。手順は `backlog-refinement` の SKILL.md と `references/depths.md`・`review.md`・`research.md`・`overhaul.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
