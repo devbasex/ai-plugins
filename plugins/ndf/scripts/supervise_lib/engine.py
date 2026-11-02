@@ -18,6 +18,7 @@ import gh_call
 import gh_quota
 import runtime_policy
 import slow_step as ss
+import stage_skills
 from supervise_lib import decl, limits, paths
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
@@ -173,6 +174,10 @@ class Engine:
         bad = on_exit_error(self.plan["steps"]) or limits.run_error(self.plan, start)  # 行き先と上限の照合（#1909 の L3・L5）
         if bad:
             return "止まった", bad
+        # ステップの skills・skills_add 欄の名前を、ステップを 1 つも流す前に照らす（#2376 の I3）
+        bad_skills = stage_skills.plan_errors(self.plan["steps"])
+        if bad_skills:
+            return "止まった", "skills の欄に届けられない Skill がある: " + " / ".join(bad_skills)
         return self.check_runtimes()
 
     def check_runtimes(self) -> tuple[str, str] | None:

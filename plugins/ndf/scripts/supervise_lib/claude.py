@@ -186,7 +186,9 @@ def claude_kind(system: str, full: bool) -> str:
     """使用量の帳簿の `kind`（work / full / judge / slow / pr）。system プロンプトで見分ける。"""
     if full:
         return "full"
-    return {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow", PR_SYSTEM: "pr"}.get(system, "work")
+    if system.startswith(PR_SYSTEM):  # 後ろに Skill の本文の節が付いても pr（#2376）
+        return "pr"
+    return {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow"}.get(system, "work")
 
 
 def call_claude(
