@@ -13,10 +13,14 @@ export interface ProgressReader {
   sumTokensSince(sprintRunId: string, since: Date): Promise<number>;
   // ジョブが送った loop.lap_closed と loop.stopped（停止の後の処理が読む。#2347）
   findLoopEvents(sprintRunId: string, jobId: string): Promise<{ laps: LoopLapClosedPayload[]; stopped: LoopStoppedPayload | null }>;
-  // ループの実行が送った締めた周回（ループの詳細の画面）
-  listLoopLaps(sprintRunIds: string[]): Promise<LoopLapClosedPayload[]>;
-  // 実行ごとの usage.recorded の費用の和と、区間の数（section.started の数）
-  runSummary(sprintRunId: string): Promise<{ costUsd: number; sections: number }>;
+  // ループの詳細の画面: 実行が送った締めた周回と、実行ごとの usage.recorded の費用の和・区間の数（section.started の数）。
+  // 実行ごとに事象を 1 回だけ読む
+  loopRunsDetail(sprintRunIds: string[]): Promise<LoopRunsDetail>;
+}
+
+export interface LoopRunsDetail {
+  laps: LoopLapClosedPayload[];
+  summaries: Record<string, { costUsd: number; sections: number }>;
 }
 
 type Rec = ProgressEventRecord & { payload: Record<string, unknown> };
@@ -51,6 +55,11 @@ const summaryOf = (records: ProgressEventRecord[]) => {
   return { costUsd: Math.round(costUsd * 1e6) / 1e6, sections };
 };
 
+const detailOf = (perRun: [string, ProgressEventRecord[]][]): LoopRunsDetail => ({
+  laps: uniqueLaps(perRun.flatMap(([, records]) => records)),
+  summaries: Object.fromEntries(perRun.map(([id, records]) => [id, summaryOf(records)])),
+});
+
 const usageTokens = (records: ProgressEventRecord[], since: Date) =>
   records
     .filter((e): e is UsageRecordedEvent & ProgressEventRecord => e.type === "usage.recorded")
@@ -71,11 +80,8 @@ export function memoryProgressReader(store: MemoryProgressEventStore): ProgressR
     async findLoopEvents(sprintRunId, jobId) {
       return loopEventsOf(store.listRun(sprintRunId), jobId);
     },
-    async listLoopLaps(sprintRunIds) {
-      return uniqueLaps(sprintRunIds.flatMap((id) => store.listRun(id)));
-    },
-    async runSummary(sprintRunId) {
-      return summaryOf(store.listRun(sprintRunId));
+    async loopRunsDetail(sprintRunIds) {
+      return detailOf(sprintRunIds.map((id) => [id, store.listRun(id)]));
     },
   };
 }
@@ -156,12 +162,10 @@ export class DynamoProgressReader implements ProgressReader {
     return loopEventsOf(await this.listTypes(sprintRunId, ["loop.lap_closed", "loop.stopped"]), jobId);
   }
 
-  async listLoopLaps(sprintRunIds: string[]) {
-    const all = await Promise.all(sprintRunIds.map((id) => this.listTypes(id, ["loop.lap_closed"])));
-    return uniqueLaps(all.flat());
-  }
-
-  async runSummary(sprintRunId: string) {
-    return summaryOf(await this.listTypes(sprintRunId, ["usage.recorded", "section.started"]));
+  async loopRunsDetail(sprintRunIds: string[]) {
+    const perRun = await Promise.all(
+      sprintRunIds.map(async (id): Promise<[string, ProgressEventRecord[]]> => [id, await this.listTypes(id, ["loop.lap_closed", "usage.recorded", "section.started"])]),
+    );
+    return detailOf(perRun);
   }
 }

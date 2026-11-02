@@ -236,6 +236,9 @@ export class RunControl {
       if (!cred) throw new ConflictError("model_credential_missing", "キーの持ち込みを先に保存してください");
       modelCredentialSecretArn = cred.secretArn;
     }
+    // 周回の開始は、枠待ちのループを見回りと実行の終わりが起こし直すたびに通る。表だけで決まる断り（同時の数と古い版）を
+    // GitHub・配布元・月の token の数えより先に判定する（断るループに外の呼び出しを走らせない）
+    if (opts.start === "loop") await this.refuseFullSlots(ctx, registration);
     const fullName = await github.repositoryName(registration.installationId, registration.repositoryId);
     if (!fullName) throw new ConflictError("installation_unreachable", "GitHub App の導入がこのリポジトリへ届きません");
     if (fullName !== registration.fullName) await table.setRegistrationName(ctx.accountId, registration.repositoryId, fullName);
@@ -309,6 +312,21 @@ export class RunControl {
       }
     }
     throw new ServiceUnavailableError("sprint_run_unavailable");
+  }
+
+  // 版によらず断ると表だけで決まる場合に、admit の枠の判定と同じ断りを投げる。月の token は数えない（同時の数の理由だけを見る）。
+  // 古い版の実行がリポジトリにあるか、移行の前（版によらず古い版）で実行があれば、版を読む前に断れる
+  private async refuseFullSlots(ctx: AccountContext, registration: Registration): Promise<void> {
+    const slots = await this.deps.table.getSlots(ctx.accountId, registration.repositoryId);
+    const reasons = judgeLimits(ctx, {
+      runningSprintRuns: slots.account,
+      runningRepoRuns: slots.repository,
+      repoMaxRuns: registration.maxConcurrentRuns ?? null,
+    }).reasons.filter((r) => r.quantity.startsWith("concurrent_"));
+    if (reasons.length > 0) throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons });
+    if ((slots.legacy ?? 0) > 0 || (slots.repository > 0 && !(await this.deps.table.isMigrated()))) {
+      throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
+    }
   }
 
   // 開発ループの周回の実行を起こす（ループの制御が呼ぶ）。断る理由は ApiError で返す

@@ -38,6 +38,8 @@ const jobPk = (j: string) => `JOB#${j}`;
 const repoSk = (r: number) => `REPO#${r}`;
 const repoSlotSk = (r: number) => `ACTIVE#REPO#${r}`;
 const loopSk = (l: string) => `LOOP#${l}`;
+// LOOP# で始めない（listLoops の前方一致に入れない）
+const loopRunSk = (l: string, r: string) => `LOOPRUN#${l}#${r}`;
 const milestoneSk = (r: number, title: string) => `MILESTONE#${r}#${milestoneHash(title)}`;
 const issueSk = (r: number, n: number) => `ISSUE#${r}#${n}`;
 const runnerSk = (id: string) => `RUNNER#${id}`;
@@ -237,6 +239,10 @@ export class DynamoRunsTable implements RunsTable {
     }
     const loopStart = items.length;
     if (guards?.loop) items.push(...this.loopItems(guards.loop));
+    // ループの実行の行（詳細がそのループの実行だけを引く）。条件を持たないため失敗の位置を数える並びの最後に置く
+    if (run.loopId) {
+      items.push({ Put: { TableName: this.tableName, Item: { pk: accountPk(run.accountId), sk: loopRunSk(run.loopId, run.sprintRunId), sprintRunId: run.sprintRunId } } });
+    }
     try {
       await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
       return "created";
@@ -739,6 +745,12 @@ export class DynamoRunsTable implements RunsTable {
   async listLoops(accountId: string): Promise<DevLoop[]> {
     const loops = await this.queryPrefix<DevLoop>(accountPk(accountId), "LOOP#");
     return loops.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  }
+
+  async listLoopRuns(accountId: string, loopId: string): Promise<SprintRun[]> {
+    const rows = await this.queryPrefix<{ sprintRunId: string }>(accountPk(accountId), `LOOPRUN#${loopId}#`);
+    const runs = await Promise.all(rows.map((r) => this.getRun(r.sprintRunId)));
+    return runs.filter((r): r is SprintRun => r !== null);
   }
 
   writeLoop(write: LoopWrite) {

@@ -298,6 +298,11 @@ export class MemoryRunsTable implements RunsTable {
       .map((l) => structuredClone(l));
   }
 
+  async listLoopRuns(accountId: string, loopId: string) {
+    await this.tick();
+    return [...this.runs.values()].filter((r) => r.accountId === accountId && r.loopId === loopId).map((r) => structuredClone(r));
+  }
+
   async writeLoop(write: LoopWrite) {
     await this.tick();
     if (!this.loopFits(write)) return false;

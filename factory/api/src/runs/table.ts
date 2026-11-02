@@ -76,6 +76,8 @@ export interface RunsTable {
   getLoop(accountId: string, loopId: string): Promise<DevLoop | null>;
   // アカウントのループの新しい順
   listLoops(accountId: string): Promise<DevLoop[]>;
+  // ループの周回の実行（開始の書き込みで足すループの実行の行から引く。アカウントの全実行を読まない）
+  listLoopRuns(accountId: string, loopId: string): Promise<SprintRun[]>;
   // 条件つきでループの行を書く（終わりの状態へ移るときは持ち分も消す）
   writeLoop(write: LoopWrite): Promise<boolean>;
   // マイルストーンの持ち分（強い整合）。無ければ null

@@ -449,11 +449,10 @@ export class LoopControl {
   // F5: 詳細（締めた周回・周回ごとの実行・人の判断待ち）
   async getLoopDetail(ctx: AccountContext, loopId: string) {
     const loop = await this.loopOf(ctx, loopId);
-    const runs = (await this.deps.table.listRuns(ctx.accountId, 1000)).filter((r) => r.loopId === loop.loopId);
-    const laps = await this.deps.reader.listLoopLaps(runs.map((r) => r.sprintRunId));
-    const runRows = await Promise.all(
-      runs.map(async (r) => {
-        const summary = await this.deps.reader.runSummary(r.sprintRunId);
+    const runs = await this.deps.table.listLoopRuns(ctx.accountId, loop.loopId);
+    const { laps, summaries } = await this.deps.reader.loopRunsDetail(runs.map((r) => r.sprintRunId));
+    const runRows = runs.map((r) => {
+        const summary = summaries[r.sprintRunId] ?? { costUsd: 0, sections: 0 };
         return {
           sprint_run_id: r.sprintRunId,
           lap: r.lap ?? 0,
@@ -464,8 +463,7 @@ export class LoopControl {
           cost_usd: summary.costUsd,
           sections: summary.sections,
         };
-      }),
-    );
+      });
     return {
       loop: loopRow(loop),
       laps: laps

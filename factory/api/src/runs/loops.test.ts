@@ -252,6 +252,29 @@ describe("実行の枠と待ち（受け入れ条件 3、I46）", () => {
     expect((await h.table.getSlots("acc-1", REPO)).account).toBe(active);
   });
 
+  it("枠待ちのループを見回りが起こし直しても、GitHub を呼ばずに断る", async () => {
+    const free = accountContext({ plan: "free" });
+    await manual([4], OTHER_REPO, free);
+    const { loop_id } = await startLoop("l1", ["25 Factory"], free);
+    const name = h.github.repositoryName.bind(h.github);
+    let calls = 0;
+    h.github.repositoryName = async (i, r) => {
+      calls += 1;
+      return name(i, r);
+    };
+    await loops.sweepLoops();
+    expect(calls).toBe(0);
+    expect(await loopOf(loop_id)).toMatchObject({ state: "between_laps", waitReason: "slots" });
+  });
+
+  it("ループの詳細はそのループの実行だけを返す", async () => {
+    const other = await manual([4], OTHER_REPO);
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const detail = await loops.getLoopDetail(accountContext(), loop_id);
+    expect(detail.runs.map((r) => r.sprint_run_id)).toEqual([(await loopOf(loop_id)).currentRunId]);
+    expect(detail.runs.map((r) => r.sprint_run_id)).not.toContain(other.sprint_run_id);
+  });
+
   it("2 つの呼び手が同時に周回を起こしても、実行は 1 本だけ（I44）", async () => {
     const free = accountContext({ plan: "free" });
     const other = await manual([4], OTHER_REPO, free);
