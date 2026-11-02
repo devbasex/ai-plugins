@@ -1,12 +1,18 @@
 # Factory のオーガナイザーの設計: NDF の側の切り替え口と語の改名（#2439）
 
-設計文書 [issue-2439-design.md](issue-2439-design.md) から、`plugins/ndf/` に置く切り替え口と、語の改名（F9）を分けたファイル。どちらも Factory を名指ししない（`plugins/` は `factory/` を参照しない。`scripts/check-service-boundary.py`）。
+設計文書 [issue-2439-design.md](issue-2439-design.md) から分けたファイルである。`plugins/ndf/` に置く切り替え口と、語の改名（F9）を扱う。どちらも Factory を名指ししない（`plugins/` は `factory/` を参照しない。`scripts/check-service-boundary.py`）。
 
 ## 切り替え口: 外のオーガナイザーとファイルでやり取りする
 
 ### 具体例
 
-Factory のループ `l20261102` の 3 周目の実行ジョブで、ランナーは `NDF_ORGANIZER_DIR=<状態の置き場>/organizer`・`NDF_ORGANIZER_LANE=loop-l20261102` を渡す。NDF は本番のステージを組む時点で外のオーガナイザーのレーンと判定し、`requests/loop-l20261102-r3f9a1c2e4b7d.json` を書いて周回を配布待ちで締める。ランナーはそれを `release.requested` へ写す。4 周目のジョブの開始で、ランナーは `answers/loop-l20261102-r3f9a1c2e4b7d.json`（`released`・`10.28.0`）を書き、NDF は周回の境でそれを読んで残りの工程を流す。
+Factory のループ `l20261102` の 3 周目と 4 周目の実行ジョブで、次の順に進む。
+
+1. ランナーは `NDF_ORGANIZER_DIR=<状態の置き場>/organizer`・`NDF_ORGANIZER_LANE=loop-l20261102` を渡す
+2. NDF は本番のステージを組む時点で、外のオーガナイザーのレーンと判定する。`requests/loop-l20261102-r3f9a1c2e4b7d.json` を書いて周回を配布待ちで締める
+3. ランナーはそれを `release.requested` へ写す
+4. 4 周目のジョブの開始で、ランナーは `answers/loop-l20261102-r3f9a1c2e4b7d.json`（`released`・`10.28.0`）を書く
+5. NDF は周回の境でそれを読んで残りの工程を流す
 
 ### 置き場の契約（`plugins/ndf/contracts/forms/parallel-external.json`。新規）
 
@@ -31,7 +37,7 @@ Factory のループ `l20261102` の 3 周目の実行ジョブで、ランナ�
 | `results/` | `{seq, result, version, prod_pr_url, sha, prs, lanes, reason}`。`result` は `released` / `failed` |
 
 - **どちらの書き手も一時ファイルへ書いて名前を付け替える。** 読み手は名前の付いたファイルだけを読む。書きかけのファイルを読まないためである
-- 契約の例の組（依頼・答え・範囲・`batch.json`・提示・結果の 1 組ずつ）を置き、構造チェック（`scripts/contracts_lib/model.py`）とランナーのテストが同じ例を読む（`ndf-next-block.json` と同じ扱い）
+- 契約の例の組（依頼・答え・範囲・`batch.json`・提示・結果の 1 組ずつ）を置く。構造チェック（`scripts/contracts_lib/model.py`）とランナーのテストが同じ例を読む（`ndf-next-block.json` と同じ扱い）
 - 環境変数の宣言 `plugins/ndf/contracts/env/NDF_ORGANIZER_DIR.json`・`NDF_ORGANIZER_LANE.json` を足す。`NDF_FACTORY_RUN` の宣言は #2436 が足す
 
 ### レーンの側
@@ -54,7 +60,7 @@ Factory のループ `l20261102` の 3 周目の実行ジョブで、ランナ�
 | `confirm:<k>` | 確定した提示 `k` の本番のプランだけを流す（#2436 の確定の後と同じ） | `settle` |
 | `continue` | 止まったプランを今の再開の手順で続ける | `settle` か、判断で止まる |
 
-`parallel.py settle --external <連番> --done <D>` は、本番のプランの done とリリース記録から届いた段を `progress/` に、結果を `results/` に書く。配布の実行の失敗の扱い（CI の失敗・版数の衝突の直し）は #2436 の一時レーンと同じで、直せなければ問いとして止まる。
+`parallel.py settle --external <連番> --done <D>` は、本番のプランの done とリリース記録を読む。届いた段を `progress/` に、結果を `results/` に書く。配布の実行の失敗の扱い（CI の失敗・版数の衝突の直し）は #2436 の一時レーンと同じで、直せなければ問いとして止まる。
 
 `<置き場>` は、ランナーが S3 へ保存する NDF の状態の中に置く。配布の実行の再開（`confirm:k`・`continue`）は、保存した提示のプランと本番のプランから続ける。
 

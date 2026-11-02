@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: Neural Development Factory の実行は、承認ゲート 2 と本番の配布を実行ごとに出す。2026-11-02 に 1 台の tmux で起きた衝突（ndf v10.27.14 が他の 2 本の変更もまとめて出し、Pull Request https://github.com/devbasex/ai-plugins/pull/2420 を閉じた）が、同じリポジトリの実行ジョブの間でも起きる。#2436 のオーガナイザーは 1 台の SQLite に閉じ、実行ジョブの間をまたげない
+- **今どうなっているか**: Neural Development Factory の実行は、承認ゲート 2 と本番の配布を実行ごとに出す。2026-11-02 に 1 台の tmux で衝突が起きた。ndf v10.27.14 が他の 2 本の変更もまとめて出し、Pull Request https://github.com/devbasex/ai-plugins/pull/2420 を閉じた。同じ衝突が、同じリポジトリの実行ジョブの間でも起きる。#2436 のオーガナイザーは 1 台の SQLite に閉じ、実行ジョブの間をまたげない
 - **誰に効くか**: 同じリポジトリで 2 本以上の開発ループかスプリントを Factory で回す利用者
 - **変えると何が成り立つか**: 本番の配布は Factory のオーガナイザーが 1 本にまとめ、配布専用の実行ジョブが流す。承認ゲート 2 は 1 回で済み、承認と問いはリポジトリごとの 1 つの一覧に並ぶ。語の衝突 2 つ（手元の受け手・アカウントの契約の種類）が解ける
 
@@ -50,7 +50,7 @@
 | 共有の作業を一時レーンへ渡す | 配布の実行 | 新規 |
 | （Factory 固有）実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場 | 実行の制御・ランナー向けの経路 | 変えない |
 
-`ndf-workflow` が依頼と答えの形を**公開された言語**（#2436 の `plugins/ndf/contracts/forms/parallel-request.json` と、この課題が足す置き場の契約 `parallel-external.json`）として持つ。`ndf-factory` はランナーの翻訳（`factory/runner/src/organizer.ts`）を**腐敗防止層**として置き、ファイルの形を進捗の事象へ写す。API は NDF のファイルを読まない。今の `ndf-next` のブロックと `loop.json` の扱いと同じである。
+`ndf-workflow` は依頼と答えの形を**公開された言語**として持つ。形のファイルは 2 つある。#2436 の `plugins/ndf/contracts/forms/parallel-request.json` と、この課題が足す置き場の契約 `parallel-external.json` である。`ndf-factory` はランナーの翻訳（`factory/runner/src/organizer.ts`）を**腐敗防止層**として置き、ファイルの形を進捗の事象へ写す。API は NDF のファイルを読まない。今の `ndf-next` のブロックと `loop.json` の扱いと同じである。
 
 ### 集約
 
@@ -62,7 +62,7 @@
 | 承認の依頼 | 承認と通知（#2173。変えない） | 承認の依頼 | — | 種類・答え |
 
 - オーガナイザーの進行は、ほかの集約を識別子でだけ参照する（実行は `sprintRunId`、ループは `loopId`、承認の依頼は `approvalRequestId`）
-- **1 つの処理が書き換える集約は 1 つ**で、例外は 2 つである。まとめた配布を組む処理は、オーガナイザーの進行と配布の実行（実行とジョブ）を 1 つのトランザクションで書く（I57）。停止の後の処理は、ジョブの `release.requested` を受けた依頼の行として同じトランザクションへ入れる（I59）。どちらも、間で止まったときに見回りが 2 本目を起こすか依頼を取りこぼすためである。既存の 3 集約のトランザクション（[ndf-factory-dev-loops.md](../docs/specifications/ndf-factory-dev-loops.md) の「集約」）と同じ扱いにする
+- **1 つの処理が書き換える集約は 1 つ**で、例外は 2 つである。まとめた配布を組む処理は、オーガナイザーの進行と配布の実行（実行とジョブ）を 1 つのトランザクションで書く（I57）。停止の後の処理は、ジョブの `release.requested` を受けた依頼の行として同じトランザクションへ入れる（I59）。どちらも、間で止まったときに見回りが 2 本目を起こすか依頼を取りこぼすためである。扱いは既存の 3 集約のトランザクションと同じにする（[ndf-factory-dev-loops.md](../docs/specifications/ndf-factory-dev-loops.md) の「集約」）
 - 承認の依頼と開発ループの人の判断待ちは書き換えない。一覧（F6）はそれらを読んで並べるだけである
 
 ### 不変条件
@@ -265,12 +265,12 @@ sequenceDiagram
 ```
 
 1. **依頼（F1）**: NDF は本番のステージの代わりに依頼のファイルを置き場へ書く（[issue-2439-design-ndf.md](issue-2439-design-ndf.md)）。ランナーは 2 秒ごとの読みで `release.requested` を送る。ループの実行は周回を配布待ちで締めて `done` で、手動の実行は `job.finished`（`gate`・理由 `release_requested`）で終わる（I65）
-2. **受ける**: `finalize` は `release.requested` をジョブの冪等の鍵の範囲で読み、受けた依頼の行を実行の移りと同じトランザクションで書く（I59）。通った後に `organizer.tick(repositoryId)` を呼ぶ（落ちてよい。見回りが続ける）
-3. **組む（F2）**: `tick` は根を読み、まとめた配布が流れていなければ、未回答の依頼があるときだけ組む。先に I62 を照らし、当たれば待ちの理由を書いて終える。当たらなければ `composeRelease` で根（`currentSeq`・`nextSeq`・`version`）・まとめた配布（`composed`）・配布の実行・ジョブ（`START=release`、`releaseStep=present`）・記録の行を 1 回で書き、`launch` する。依頼が 1 件でも同じである（S8）
-4. **提示（F3）**: 配布の実行は、ランナー向けの経路でまとめた配布の中身（レーンの一覧と依頼）を読み、NDF の配布の手順を流す。MVV 判定が通せば本番の配布まで続ける。止まれば `release.presented`（提示の番号・コミット・範囲・加わった範囲）と `gate.reached`（`gate2`）を送って終わり、配布の実行は `awaiting_approval` になる。承認の依頼は #2173 が今の経路で作る
-5. **答え（F4）**: #2173 が答えを保存して `requestResume` を呼ぶと、実行の制御は配布の実行を `organizer.decide` へ回す。提示 1 への承認では GitHub の口で `develop` の先頭を読み、提示したコミットと比べる。同じなら `confirm:1`、進んでいれば `represent` で再開する。提示 2 への答えは比べずに `confirm:2`（新しい範囲）か `confirm:1`（最初の範囲）で再開する（I60）。差し戻しはジョブを起こさず、まとめた配布を `rejected`、配布の実行を `stopped`（`release_rejected`）にし、最後の提示の範囲の依頼へ `rejected` を返す
-6. **結果（F5）**: 配布の実行の `finalize` が `release.settled` を読み、`settle` が根を空け、まとめた配布を `released` にし、範囲に Pull Request が入る依頼へ答えを書く（I58・I61）。範囲の実行ごとに `appendControlEvent` で `release.answered`（冪等の鍵 `<seq>:<sprintRunId>`）を書く。手動の実行には `requestResume`（依頼の識別子つき）を呼ぶ。続けて `tick` を呼び、残った依頼で次のまとめた配布を組む
-7. **答えを届ける**: レーンの次のジョブ（ループの次の周回か手動の実行の再開）の開始で、ランナーは答えと範囲を読んで置き場へ書き、答えの無い依頼のファイルを再送する（I59）。NDF は周回の境で答えを読み、`released` なら残りの工程を流す（#2436 のレーンのループ）
+2. **受ける**: `finalize` は `release.requested` をジョブの冪等の鍵の範囲で読む。受けた依頼の行は、実行の移りと同じトランザクションで書く（I59）。通った後に `organizer.tick(repositoryId)` を呼ぶ（落ちてよい。見回りが続ける）
+3. **組む（F2）**: `tick` は根を読み、まとめた配布が流れていなければ、未回答の依頼があるときだけ組む。先に I62 を照らし、当たれば待ちの理由を書いて終える。当たらなければ `composeRelease` で 5 つの行を 1 回で書き、`launch` する。5 つは根（`currentSeq`・`nextSeq`・`version`）・まとめた配布（`composed`）・配布の実行・ジョブ（`START=release`、`releaseStep=present`）・記録の行である。依頼が 1 件でも同じである（S8）
+4. **提示（F3）**: 配布の実行は、ランナー向けの経路でまとめた配布の中身（レーンの一覧と依頼）を読み、NDF の配布の手順を流す。MVV 判定が通せば本番の配布まで続ける。止まれば `release.presented`（提示の番号・コミット・範囲・加わった範囲）と `gate.reached`（`gate2`）を送って終わる。配布の実行は `awaiting_approval` になる。承認の依頼は #2173 が今の経路で作る
+5. **答え（F4）**: #2173 が答えを保存して `requestResume` を呼ぶと、実行の制御は配布の実行を `organizer.decide` へ回す。提示 1 への承認では GitHub の口で `develop` の先頭を読み、提示したコミットと比べる。同じなら `confirm:1`、進んでいれば `represent` で再開する。提示 2 への答えは比べずに `confirm:2`（新しい範囲）か `confirm:1`（最初の範囲）で再開する（I60）。差し戻しはジョブを起こさない。まとめた配布を `rejected`、配布の実行を `stopped`（`release_rejected`）にし、最後の提示の範囲の依頼へ `rejected` を返す
+6. **結果（F5）**: 配布の実行の `finalize` が `release.settled` を読み、`settle` へ渡す。`settle` は根を空け、まとめた配布を `released` にし、範囲に Pull Request が入る依頼へ答えを書く（I58・I61）。範囲の実行ごとに `appendControlEvent` で `release.answered`（冪等の鍵 `<seq>:<sprintRunId>`）を書く。手動の実行には `requestResume`（依頼の識別子つき）を呼ぶ。続けて `tick` を呼び、残った依頼で次のまとめた配布を組む
+7. **答えを届ける**: レーンの次のジョブは、ループの次の周回か手動の実行の再開である。その開始で、ランナーは答えと範囲を読んで置き場へ書き、答えの無い依頼のファイルを再送する（I59）。NDF は周回の境で答えを読み、`released` なら残りの工程を流す（#2436 のレーンのループ）
 
 ### 止まったときと再開（F7・F8）
 

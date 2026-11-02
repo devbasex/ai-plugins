@@ -1,6 +1,6 @@
 # Factory のオーガナイザーの設計: データ構造と入出力の契約（#2439）
 
-設計文書 [issue-2439-design.md](issue-2439-design.md) から、DynamoDB の行と、API・進捗の事象・ランナーの指示の契約を分けたファイル。不変条件の番号（I56〜I68）は設計文書のものを指す。
+設計文書 [issue-2439-design.md](issue-2439-design.md) から分けたファイルである。DynamoDB の行と、API・進捗の事象・ランナーの指示の契約を扱う。不変条件の番号（I56〜I68）は設計文書のものを指す。
 
 ## データ構造
 
@@ -129,7 +129,7 @@ erDiagram
 | `POST /accounts/{accountId}/repositories/{repositoryId}/releases/{seq}/resolve` | `{choice: "continue" \| "reject", body?}`。Web のセッションの認証だけ | 202 `{seq, state}` | 401・403（セッションでない呼び出し。I66）・404・409 `not_stalled`・409 `release_after_main`（I63） |
 
 - 一覧の並びは作った時刻の古い順である。承認の依頼の中身（承認資料・答え）は #2173 の経路が持ち、一覧は識別子と要約だけを返す
-- 一覧の承認の依頼は「同じリポジトリの `awaiting_approval` の実行」から #2173 の読み出し（未確認のまま残ること）で引き、ループの人の判断待ちはループの行から引く
+- 一覧の承認の依頼は「同じリポジトリの `awaiting_approval` の実行」から #2173 の読み出し（未確認のまま残ること）で引く。ループの人の判断待ちはループの行から引く
 - 一覧の経路と履歴の経路は読むだけで、答えを確定する経路はこのファイルに無い（I66）。MCP は同じ GET を呼ぶ
 
 ### ランナー向けの経路（`factory/contracts/openapi/runs.yaml`。足す）
@@ -139,7 +139,14 @@ erDiagram
 | `GET /run-jobs/organizer/answers` | 実行ジョブの token | 200 `{answers: [{request_id, result, version, release, reason, at}], ranges: [{seq, sha, version, prs, lanes}]}`。そのジョブの実行のレーン（ループならループのすべての実行）の依頼の答えと、リポジトリの配布済みの範囲 | 401・403 |
 | `GET /run-jobs/organizer/batch` | 実行ジョブの token（配布の実行のジョブだけ） | 200 `{seq, step, lanes, presentations, choices}` | 401・403（配布の実行でない）・404 |
 
-答えの形は #2436 の `parallel-request.json` の答え（`answer-<依頼>` の `{result, version, release, reason, at}`）と範囲（`range-<連番>` の `{sha, version, prs, lanes}`）にそろえる。ランナーはこれを置き場のファイルへそのまま書く（[issue-2439-design-ndf.md](issue-2439-design-ndf.md)）。
+答えの形は #2436 の `parallel-request.json` の答えと範囲にそろえる。
+
+| 形 | #2436 のファイル | 項目 |
+| --- | --- | --- |
+| 答え | `answer-<依頼>` | `{result, version, release, reason, at}` |
+| 範囲 | `range-<連番>` | `{sha, version, prs, lanes}` |
+
+ランナーはこれを置き場のファイルへそのまま書く（[issue-2439-design-ndf.md](issue-2439-design-ndf.md)）。
 
 ### 進捗の事象（`factory/contracts/schemas/progress-event.schema.json`。種類を足す）
 
@@ -162,7 +169,7 @@ erDiagram
 | `RELEASE_STEP` | 文字列 | `present` / `represent` / `confirm:1` / `confirm:2` / `continue` |
 | `RELEASE_REQUEST_ID` | 文字列 | 手動の実行の再開で、答えの出た依頼の id |
 
-レーンの中身（レーンの一覧と依頼）は RunTask の `overrides` の上限（8192 字）を避けるため指示に載せず、ランナーが `GET /run-jobs/organizer/batch` で読む。
+レーンの中身（レーンの一覧と依頼）は指示に載せず、ランナーが `GET /run-jobs/organizer/batch` で読む。RunTask の `overrides` の上限（8192 字）を避けるためである。
 
 ### 実行の制御の関数（変更）
 
@@ -177,4 +184,4 @@ erDiagram
 - 足すのは経路・事象の種類・payload の任意の項目・指示の項目・行の列だけで、既存の項目の意味は変えない
 - 依頼を出さない NDF の版（`NDF_PARALLEL_MIN_VERSION` より古い版）の実行は、今どおり自分で本番の配布を流す。その実行はリポジトリで唯一になり（I48）、その間、配布のまとめは組まない（I62 の `legacy_run`）
 - `requestResume` を呼ぶ側（#2173）の引数は変わらない。足した `releaseRequestId` は配布のまとめだけが渡す
-- 検査は `npm run check` の契約の lint（`contracts`）と、構造チェック（`scripts/contracts_lib/model.py`）がランナーの翻訳と NDF の契約の例の組を照らす
+- 検査は 2 つである。`npm run check` の契約の lint（`contracts`）と、構造チェック（`scripts/contracts_lib/model.py`）が、ランナーの翻訳と NDF の契約の例の組を照らす
