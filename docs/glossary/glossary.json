@@ -4951,6 +4951,24 @@
       "context": "ndf-factory",
       "meaning": "言語ごとに、画面の文言のキーと文言を持つファイル",
       "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "見本の画面",
+      "context": "ndf-factory",
+      "meaning": "土台の部品だけで組み、ダミーデータで動かす画面の 1 組（スプリントの一覧と詳細）。後続の課題が中身を置き換える出発点",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
+      "term": "つながりの状態",
+      "context": "ndf-factory",
+      "meaning": "画面が今サーバーへつながっているか・最後に受け取った時刻・つながってから確定する操作の数の組",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
+      "term": "言語と地域の設定",
+      "context": "ndf-factory",
+      "meaning": "画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める",
+      "pending_source": "issues/issue-2382-design.md"
     }
   ]
 }
