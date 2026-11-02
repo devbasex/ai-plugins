@@ -438,7 +438,9 @@ def test_killed_named_wrapper_shows_stopped(hubenv):
     hub.wait_start(1)
     assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
     wait_state(hub, "a", "running")
-    d = next(it for it in hb_scan(hub) if it[1] == "a")[0]
+    # 一覧の running は起動した直後（ロックの前）の登録簿の行でも立つ。ラッパーが pid を書くまで待つ
+    hub.wait(lambda: any(n == "a" and (d / "relay.pid").exists() for d, n in hb_scan(hub)), 30, "a が pid を書く")
+    d = next(d for d, n in hb_scan(hub) if n == "a" and (d / "relay.pid").exists())
     os.kill(int((d / "relay.pid").read_text()), 9)
     wait_state(hub, "a", "stopped")
     assert ls_rows(hub)["t1"]["state"] == "running"
