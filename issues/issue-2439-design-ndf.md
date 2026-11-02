@@ -57,7 +57,7 @@ Factory のループ `l20261102` の 3 周目と 4 周目の実行ジョブで�
 | `step` | すること | 終わり方 |
 | --- | --- | --- |
 | `present` / `represent` | `parallel.py compose --external` が提示の番号 `k`（`present` は 1、`represent` は 2）の提示のプランと本番のプランを `<置き場>/releases/<連番>/<k>/` に作る（#2436 の「配布を組む」と同じ関数。版は `origin/develop` の `plugin.json` の開発版から接尾辞を外す）。`supervise.py queue present.json --then release.json` を流す | MVV 判定が通せば本番まで流して `settle`。承認ゲート 2 で止まれば `parallel.py present --external` が `presented/` を書き、「判断が要る」で終える |
-| `confirm:<k>` | 確定した提示 `k` の本番のプランだけを流す（#2436 の確定の後と同じ） | `settle` |
+| `confirm:<k>` | 確定した提示 `k` の本番のプランだけを流す（#2436 の確定の後と同じ）。本番のプランは `batch.json` の `presentations` の k 番目の `sha` から `release/v<版>` を切り、その後に進んだ `develop` を出さない | `settle` |
 | `continue` | 止まったプランを今の再開の手順で続ける | `settle` か、判断で止まる |
 
 `parallel.py settle --external <連番> --done <D>` は、本番のプランの done とリリース記録を読む。届いた段を `progress/` に、結果を `results/` に書く。配布の実行の失敗の扱い（CI の失敗・版数の衝突の直し）は #2436 の一時レーンと同じで、直せなければ問いとして止まる。

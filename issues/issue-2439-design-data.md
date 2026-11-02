@@ -80,7 +80,7 @@ erDiagram
 | `stallReason` | 文字列 | 許す | `stalled` の理由（ジョブの失敗の理由）。`stalled` 以外は空 |
 | `stalledFrom` | 文字列 | 許す | 止まる前の状態（`composed` / `represented` / `confirmed`）。「続きから流す」でこの状態へ戻し、再開の手（ジョブの `releaseStep`）をこの値で決める。`stalled` 以外は空 |
 
-**記録（`sk=ORGLOG#<repositoryId>#<ISO 時刻>#<種類>`）**: 追記だけで書き換えない。種類は `waited` / `composed` / `presented` / `represented` / `confirmed` / `stalled` / `resolved` / `released` / `rejected`。中身は種類ごとの値（待ちの相手・提示のコミット・確定の番号・結果）。
+**記録（`sk=ORGLOG#<repositoryId>#<ISO 時刻>#<種類>#<乱数 8 桁>`）**: 追記だけで書き換えない。末尾の乱数は、同じ時刻に同じ種類の記録を 2 件書いても上書きしないために付け、書き込みは `attribute_not_exists(sk)` を条件にする。並びは時刻で決まる。種類は `waited` / `composed` / `presented` / `represented` / `confirmed` / `stalled` / `resolved` / `released` / `rejected`。中身は種類ごとの値（待ちの相手・提示のコミット・確定の番号・結果）。
 
 **スプリントの実行・ジョブ・リポジトリの枠（変更）**: 列を足すだけで既存の列は変えない。
 
@@ -147,6 +147,15 @@ erDiagram
 | 答え | `answer-<依頼>` | `{result, version, release, reason, at}` |
 | 範囲 | `range-<連番>` | `{sha, version, prs, lanes}` |
 
+答えの項目は、受けた依頼の行の `answer` から次のように写す。#2436 の答えの `release` は、この設計では本番の Pull Request の URL を入れる。
+
+| 受けた依頼の行（`answer`） | ランナーへ返す答え・置き場の `answers/` |
+| --- | --- |
+| `result`・`version`・`reason`・`at` | 同じ名前 |
+| `prodPrUrl` | `release` |
+| `seq` | 返さない（範囲の `ranges` が連番を持つ） |
+| 行の `requestId` | `request_id`（経路の応答だけ。ファイルでは名前が依頼の id） |
+
 ランナーはこれを置き場のファイルへそのまま書く（[issue-2439-design-ndf.md](issue-2439-design-ndf.md)）。
 
 ### 進捗の事象（`factory/contracts/schemas/progress-event.schema.json`。種類を足す）
@@ -184,6 +193,6 @@ erDiagram
 
 - 足すのは経路・事象の種類・payload の任意の項目・指示の項目・行の列だけで、既存の項目の意味は変えない
 - 依頼を出さない NDF の版の実行は、今どおり自分で本番の配布を流す。Factory はその実行を、並行を許す版の下限（設定 `NDF_PARALLEL_MIN_VERSION`）より古い版の実行（`legacy` が真）として見分ける。下限が切り替え口（`parallel.py request --external`）の入った版より低いと、下限以上で依頼を出さない版の実行が I62 の待ちをすり抜けて自分で配布し、まとめた配布とぶつかる。そのため実装の配布の手順で、Factory の本番へこの課題を出す前に、下限を切り替え口の入った NDF の版以上へ上げる。古い版かどうか（`legacy`）は実行の開始で決まり、下限を変えても既に始まった実行の値は変わらない。古い下限以上として始まった切り替え口の無い版の実行は `legacy` が偽のまま自分で配布するため、下限を上げた後、上げる前に始まって終わりの状態でない実行が無くなるまで待ってから、この課題を本番へ出す
-- 古い版の実行はリポジトリで唯一になり（I48）、依頼を出していない古い版の実行がある間は配布のまとめは組まない（I62 の `legacy_run`）。まとめた配布が流れている間は、古い版の実行を始めない（I62）。下限が無い間はすべての版が古い版として数えられるが、依頼を出して待つ実行は I62 で数えないため、まとめた配布は組まれる
+- 古い版の実行はリポジトリで唯一になり（[ndf-factory-dev-loops.md](../docs/specifications/ndf-factory-dev-loops.md) の I48）、依頼を出していない古い版の実行がある間は配布のまとめは組まない（I62 の `legacy_run`）。まとめた配布が流れている間は、古い版の実行を始めない（I62）。下限が無い間はすべての版が古い版として数えられるが、依頼を出して待つ実行は I62 で数えないため、まとめた配布は組まれる
 - `requestResume` を呼ぶ側（#2173）の引数は変わらない。足した `releaseRequestId` は配布のまとめだけが渡す
 - 検査は 2 つである。`npm run check` の契約の lint（`contracts`）と、構造チェック（`scripts/contracts_lib/model.py`）が、ランナーの翻訳と NDF の契約の例の組を照らす
