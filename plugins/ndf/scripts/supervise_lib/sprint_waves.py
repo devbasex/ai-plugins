@@ -182,9 +182,23 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "stage": "設計",
                 "issues": True,
                 "timeout": 3600,
-                "next": "pr",
                 "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
                 "コミットする（push しない）。",
+                "next": "rebuild",
+            },
+            # design の Skill は組み直しを PR を出す手順の直前に置き、push しない指示の worker はその手前で止まる。
+            # 工程表の「ドキュメント再構成」をここで通す（レビューの前に構成を整える）
+            {
+                "id": "rebuild",
+                "type": "work",
+                "full": True,
+                "kind": "設計",
+                "stage": "ドキュメント再構成",
+                "issues": True,
+                "timeout": 3600,
+                "next": "pr",
+                "prompt": f"/ndf:document-rebuild {doc}（#{n} の設計文書。同じディレクトリの issue-{n}-design-*.md も含む）。"
+                "内容を足さずに組み直し、前後の値の表を報告に載せる。コミットする（push しない）。",
             },
             # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（承認ゲート 1 の材料）
             {

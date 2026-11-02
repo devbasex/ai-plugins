@@ -259,6 +259,16 @@ def test_design_plan_sets_up_glossary_and_requirements_before_design(tmp_path):
     assert any("glossary-candidates" in f for f in st["pr"]["append"])
 
 
+def test_design_plan_rebuilds_the_design_document_before_the_pr(tmp_path):
+    """設計の worker は push しない指示で組み直しの手前で止まるため、プランが組み直しのステップを持つ。"""
+    plan = design_plan(tmp_path)
+    st = {s["id"]: s for s in plan["steps"]}
+    assert st["design"]["next"] == "rebuild"
+    rb = st["rebuild"]
+    assert rb["type"] == "work" and rb["stage"] == "ドキュメント再構成" and rb["next"] == "pr"
+    assert "/ndf:document-rebuild" in rb["prompt"] and "issues/issue-216-design.md" in rb["prompt"]
+
+
 def test_design_plan_stops_when_the_review_fix_edits_only_the_requirements_copy(tmp_path, monkeypatch):
     """#1769: レビューの直しの後の requirements-recheck は、写しだけを書き換えた状態で止まる（本文に合えば先へ進む）。"""
     st = {s["id"]: s for s in design_plan(tmp_path)["steps"]}
