@@ -51,9 +51,11 @@ plan には `"depth": "review"` と、`owner claim` が返した `"owner": "<run
 ## 報告
 
 最後に統一 JSON レポート（`scripts/lib/README.md` の「手順のスクリプトの結果」の形）を作業ディレクトリに書き、
-`depth record` と `owner release` を打つ。
+`depth record` と `owner release` を打つ。報告の土台は `report --depth review` が記録から組む（記録から取れない値は `null`。
+`open_after`・`rank_changes`・`waiting` と、`--order` を省いたときの `order` は手で埋める）。
 
 ```bash
+python3 "$UPKEEP/upkeep.py" report --depth review --run <run> --order prune,rank,milestones,needs,seeds,methods,create > <報告の JSON>
 python3 "$UPKEEP/upkeep.py" depth record --depth review --run <run> --report <報告の JSON> [--cost USD] [--seconds S]
 python3 "$UPKEEP/upkeep.py" owner release --run <run>
 ```
@@ -67,4 +69,5 @@ python3 "$UPKEEP/upkeep.py" owner release --run <run>
 | `open_before` / `open_after` | 見直しの前と後の open の件数 |
 | `rank_changes` | 順位の変わった課題（番号・前・後） |
 | `skipped_aspects` | 飛ばした側面と理由 |
+| `research` | どの材料で調べたか。`items` は材料の宣言から出た調査の項目（`research plan` の `items`）、`researched` はこの実行が調べた項目と出典の数（`[{id, checked_at, sources}]`）、`sources` は出典の数の和 |
 | `waiting` | `needs-decision` を付けた課題と、承認の要る反映 |

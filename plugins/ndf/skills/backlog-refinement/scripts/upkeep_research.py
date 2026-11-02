@@ -16,6 +16,7 @@ run: 見直しの持ち主になり、完了のファイルが出るまで、並
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
@@ -74,13 +75,30 @@ def calls_path(root) -> Path:
     return D.backlog_dir(root) / "research" / "calls.jsonl"
 
 
-def _item_slug(s: str) -> str:
+def _old_slug(s: str) -> str:
+    """前の版のファイル名の部分。英数字以外を _ にするため、日本語の名前どうしが同じ名前になる。"""
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_") or "_"
+
+
+def _item_slug(s: str) -> str:
+    """名前が違えば必ず違うファイル名の部分。英数字の名前は前の版のまま、それ以外は元の名前の短いハッシュを足す。"""
+    slug = _old_slug(s)
+    return slug if slug == s else f"{slug}-{hashlib.sha256(s.encode('utf-8')).hexdigest()[:10]}"
 
 
 def item_path(root, item_id: str) -> Path:
     aspect, _, target = item_id.partition(":")
     return D.backlog_dir(root) / "research" / f"{aspect}--{_item_slug(target)}.item.json"
+
+
+def read_item(root, item_id: str) -> dict | None:
+    """項目の記録。前の版のファイル名の記録は、記録の id がその項目のときだけ読む（同じ名前に上書きされた別の項目を読まない）。"""
+    rec = jsonio.read(item_path(root, item_id), missing=None, broken=None, want=dict)
+    if rec is None:
+        aspect, _, target = item_id.partition(":")
+        old = D.backlog_dir(root) / "research" / f"{aspect}--{_old_slug(target)}.item.json"
+        rec = jsonio.read(old, missing=None, broken=None, want=dict)
+    return rec if rec is not None and rec.get("id", item_id) == item_id else None
 
 
 def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
@@ -136,7 +154,7 @@ def plan(root, since: str | None) -> dict:
     cut = _iso_epoch(since)
     todo, fresh = [], []
     for it in items:
-        rec = jsonio.read(item_path(root, it["id"]), missing=None, broken=None, want=dict)
+        rec = read_item(root, it["id"])
         checked = _iso_epoch((rec or {}).get("checked_at"))
         if checked is None or (cut is not None and checked < cut):
             todo.append(it["id"])
@@ -149,6 +167,23 @@ def plan(root, since: str | None) -> dict:
         "skipped_aspects": skipped,
         "by_id": {i["id"]: i for i in items},
     }
+
+
+def consulted(root, run: str | None) -> dict:
+    """どの材料で調べたか（報告と深さの記録の `research`）。
+
+    `items` は材料の宣言から出た項目（`research plan` の `items` と同じ）、`researched` はその実行（`run`）が調べた項目と
+    出典の数、`sources` はその出典の数の和。実行が分からなければ `researched` と `sources` は None。"""
+    items, _ = research_items(D.materials(root))
+    out = {"items": [i["id"] for i in items], "researched": None, "sources": None}
+    if run:
+        done = []
+        for it in items:
+            rec = read_item(root, it["id"]) or {}
+            if (rec.get("by") or {}).get("run") == run:
+                done.append({"id": it["id"], "checked_at": rec.get("checked_at"), "sources": len(rec.get("sources") or [])})
+        out["researched"], out["sources"] = done, sum(x["sources"] for x in done)
+    return out
 
 
 def masked_usage(row: dict, root, timeout: float) -> str:

@@ -7,7 +7,7 @@
 
 記録はメインディレクトリの `.ndf/backlog/` に置く（`depths.jsonl`・`causes.jsonl`。行を足すだけで書き換えない）。
 `depth due` は起動するとき 0、起動しないとき 3（プランの実行条件の `skip_code`）を返し、起動しない判定を
-`not_due` の行で残す。記録が読めないときも 3 で返し、理由（`unreadable`）を行に残す。
+`not_due` の行で、起動する判定を `due` の行で残す。記録が読めないときも 3 で返し、理由（`unreadable`）を行に残す。
 頻度・閾値・上限は `.ndf/backlog.json` の `depths` で上書きでき、無ければ `DEFAULTS` を使う。
 """
 
@@ -170,6 +170,18 @@ def _due_overhaul(rows: list[dict], cfg: dict, causes, types, open_numbers) -> t
     return trig, values
 
 
+def last_trigger(rows: list[dict], depth: str) -> list | None:
+    """最後の `ran` の行より後で、`depth` を起動した判定（`due` の行）の条件。無ければ None。"""
+    for r in reversed(rows):
+        if r.get("depth") != depth:
+            continue
+        if r.get("event") == "ran":
+            return None
+        if r.get("event") == "due":
+            return list(r.get("trigger") or [])
+    return None
+
+
 def due(
     depth: str, rows: list[dict], cfg: dict, *, open_now: int | None, no_issue=False, manual=False, causes=(), types=(), open_numbers=None
 ):
@@ -229,6 +241,8 @@ def cmd_due(a):
             ),
             EXIT_PRECONDITION,
         )
+    # 起動する判定も行に残す（`report --depth` と見直しの手順が、起動した条件をここから読む）
+    append_depth_row(d / "depths.jsonl", {**base, "event": "due", "trigger": trig, "values": values})
     emit(result(TOOL, "ok", f"{a.depth} を起動する（{'・'.join(trig)}）", [], {"trigger": trig, "values": values}))
 
 
@@ -281,7 +295,7 @@ def cmd_record(a):
     for k in ("open_before", "open_after", "closed", "created"):
         v = rep.get(k, st.get(k))
         row[k] = len(v) if isinstance(v, list) else v
-    for k in ("skipped_aspects", "order"):
+    for k in ("skipped_aspects", "order", "research"):
         if rep.get(k):
             row[k] = rep[k]
     row.update(cost=a.cost, seconds=a.seconds, report=a.report)

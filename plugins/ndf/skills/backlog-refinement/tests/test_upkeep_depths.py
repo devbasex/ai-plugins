@@ -330,6 +330,38 @@ def test_review_owner_researches_stale_items_without_releasing(root, monkeypatch
     assert R.run_research(root, None, None, 6, 1, owner="other")["reason"] == "not_owner"
 
 
+def test_item_paths_differ_for_names_that_differ(root):
+    # 英数字以外の名前（日本語の比べる相手など）を同じファイル名にすると、別の項目の記録が上書きされる
+    names = ["カクヨム", "小説家になろう", "a b", "a_b", "a/b"]
+    paths = {R.item_path(root, f"needs.market:{n}") for n in names}
+    assert len(paths) == len(names)
+    assert R.item_path(root, "seeds.library:pytest").name == "seeds.library--pytest.item.json"  # 英数字の名前は前のまま
+
+
+def test_research_records_of_japanese_names_do_not_overwrite_each_other(root, monkeypatch):
+    mat = {
+        "needs": {"market": [{"name": "カクヨム", "url": "https://kakuyomu.jp"}, {"name": "小説家になろう", "url": "https://syosetu.com"}]}
+    }
+    _decl(root, "project.json", {"materials": mat})
+    run, _, _ = O.claim_review(root, "review", pid=os.getpid())
+    monkeypatch.setattr(R, "call_llm", _Fake())
+    assert R.run_research(root, None, None, 6, 2, owner=run)["items"] == ["needs.market:カクヨム", "needs.market:小説家になろう"]
+    for item_id in ("needs.market:カクヨム", "needs.market:小説家になろう"):
+        assert json.loads(R.item_path(root, item_id).read_text())["id"] == item_id
+    got = R.plan(root, None)
+    assert "needs.market:カクヨム" in got["fresh"] and "needs.market:小説家になろう" in got["fresh"]
+
+
+def test_old_record_of_a_non_ascii_name_is_read_only_when_its_id_matches(root):
+    # 前の版のファイル名（英数字以外を _ にした名前）の記録は、記録の id が同じ項目のときだけ読む
+    _decl(root, "project.json", {"materials": {"needs": {"market": [{"name": "カクヨム"}, {"name": "小説家になろう"}]}}})
+    old = R.D.backlog_dir(root) / "research" / "needs.market--_.item.json"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text(json.dumps({"id": "needs.market:小説家になろう", "checked_at": "2026-11-01T00:00:00Z", "sources": [], "findings": []}))
+    got = R.plan(root, None)
+    assert got["fresh"] == ["needs.market:小説家になろう"] and "needs.market:カクヨム" in got["todo"]
+
+
 # ---------------- 大整理の集計 ----------------
 
 FIXTURE = HERE / "fixtures" / "overhaul-20261101.json"

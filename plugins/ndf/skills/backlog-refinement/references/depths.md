@@ -16,7 +16,7 @@
 
 まとめのプランは、差分の棚卸しの後に「大整理 → 見直し」の順で起動の判定を打つ。両方が起動する回は、組み直した後の
 課題で順位を付けるため大整理を先にする。判定は `upkeep.py depth due review|overhaul` が行い、起動するとき 0、
-しないとき 3 を返す。どちらの判定も `.ndf/backlog/depths.jsonl` に行を残す（起動しないときは `not_due` と判定の値）。
+しないとき 3 を返す。どちらの判定も `.ndf/backlog/depths.jsonl` に行を残す（起動するときは `due`、しないときは `not_due` と判定の値）。
 
 | 深さ | 条件（`trigger`） | 既定 |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ python3 "$UPKEEP/upkeep.py" owner status
 
 | ファイル（`.ndf/backlog/`） | 中身 |
 | --- | --- |
-| `depths.jsonl` | 深さごとの実行・判定の行（`depth`・`event`（`ran` / `not_due` / `skipped`）・`trigger`・open の前後・閉じた件数・起票した件数・飛ばした側面・順・費用・秒） |
+| `depths.jsonl` | 深さごとの実行・判定の行（`depth`・`event`（`ran` / `due` / `not_due` / `skipped`）・`trigger`・open の前後・閉じた件数・起票した件数・飛ばした側面・調べた材料（`research`）・順・費用・秒） |
 | `causes.jsonl` | 課題ごとの原因の型（見直しと大整理が `upkeep.py causes record` で足す） |
 | `owner.json` | 見直しの持ち主の宣言 |
 | `research/` | 調査の記録（項目ごとの 1 ファイル） |

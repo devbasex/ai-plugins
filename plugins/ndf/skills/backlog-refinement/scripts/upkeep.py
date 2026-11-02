@@ -5,7 +5,8 @@
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py apply --plan plan.json [--max-waits N] [--max-wait 秒]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
-    python3 upkeep.py report [--repo owner/name] [--state-dir <dir>] [--root <dir>]
+    python3 upkeep.py report [--depth diff|review|overhaul [--run R] [--order prune,rank,...]]
+                      [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
     python3 upkeep.py depth due|record ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
     python3 upkeep.py owner claim|touch|release|status ...（見直しの持ち主。upkeep_owner.py の冒頭）
@@ -30,6 +31,8 @@ apply: plan.json の変更を反映する。反映の直前に updated_at を照
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
 report: candidates・rank・apply の記録から完了報告の値を返す。candidates は前の回の apply と rank の記録を消す。
+  `--depth` を渡すと深さの値（起動した条件・open の前後・閉じた・起票した・飛ばした側面・調べた材料 `research`・
+  根本原因・戻すコマンド）を足す（upkeep_report.depth_metrics）。
 rank: 順位・切り出しの境界・前倒しと後ろ倒しの候補（算出は upkeep_rank.py）。plan の rank・rejected・reschedule は
   upkeep_rank_cmd.py の RankPlan が確かめ、承認の要る移動は「やらない」と同じく needs_approval へ回す。
 
@@ -487,6 +490,9 @@ def build_parser():
     p.set_defaults(func=cmd_apply)
     ctx = argparse.Namespace(tool=TOOL, state_dir=_state_dir, read_state=_read_state)
     r = sub.add_parser("report", parents=[common])
+    r.add_argument("--depth", choices=("diff", "review", "overhaul"), default=None, help="棚卸しの深さの値を足す（#2315）")
+    r.add_argument("--run", default=None, help="見直し・大整理の実行（省くと持ち主の宣言の実行）")
+    r.add_argument("--order", default=None, help="通した手順の並び（prune,rank,... 省くと null）")
     r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
     RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
     D.add_depth_parsers(sub, common, _state_dir)  # 深さ・持ち主・調査・大整理・戻し（#2315）
