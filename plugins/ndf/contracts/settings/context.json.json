@@ -1,0 +1,23 @@
+{
+  "file": "context.json",
+  "summary": "再起動の方針（現行方式 / 試行方式）と、試行方式の判断開始の値・運用上限・容量の余白",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/context_policy.py:read_setting"
+  ],
+  "keys": {
+    "version": {
+      "summary": "設定の形の版（1）"
+    },
+    "policy": {
+      "summary": "current（現行方式。既定）か trial（試行方式）"
+    },
+    "trial": {
+      "summary": "試行方式の decide_from（判断開始の値。既定 200000）と limit（運用上限。既定 400000）"
+    },
+    "margin": {
+      "summary": "容量の余白（token。既定 50000。試行方式だけに効く）"
+    }
+  }
+}

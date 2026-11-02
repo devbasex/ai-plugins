@@ -1,0 +1,5 @@
+{
+  "name": "CLAUDE_CODE_SESSION_ID",
+  "set_by": "runtime",
+  "summary": "Claude Code が Bash の Tool へ渡す今のセッションの ID。判定の記録の印（引継ぎ開始・復元完了）と再起動の行をセッションへ結ぶ（plugins/ndf/scripts/lib/context_decisions.py:record_restart）"
+}

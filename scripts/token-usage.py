@@ -50,14 +50,9 @@ from transcript_agents import layer_of, role_of  # フェーズの語彙は 1 �
 import usage_ledger  # 計画が起動した claude -p の使用量の帳簿（#1142）
 import release_map  # 載った版への寄せ方（#1316。claude-p-usage.py と同じ関数）
 
-# 換算費用の重み（input=1）。cache read だけはモデルで倍率が違うため READ_RATES で決める
-WEIGHTS = {"inp": 1.0, "w5": 1.25, "w1h": 2.0, "out": 5.0}
-# cache read の倍率（そのモデルの input 単価との比）。**この表を正本にする**（#893。#955 の文書はここを指す）。
-# 出典: 公式の料金表 https://platform.claude.com/docs/en/about-claude/pricing と claude-api の Skill
-# （2026-09-24 に確認。Opus 5.5 は input $4 / cache read $0.20、Fable 5.1 は $10 / $0.25）。
-# `message.model` の先頭で引き、無いモデルは READ_RATE_DEFAULT
-READ_RATES = (("claude-opus-5-5", 0.05), ("claude-fable-5-1", 0.025))
-READ_RATE_DEFAULT = 0.1
+# 換算費用の単価は配布する lib/token_rates.py が正本（#2262 の決定 10）
+from token_rates import READ_RATE_DEFAULT, READ_RATES, WEIGHTS, read_rate  # noqa: E402,F401
+
 # 全体の書き直し: 1 回の書き込みが文脈のこの割合を超え、かつ REWRITE_MIN を超える呼び出し（#954 の判定）
 REWRITE_SHARE = 0.5
 REWRITE_MIN = 20_000
@@ -105,13 +100,6 @@ def parse_ts(value) -> float | None:
 def active_seconds(times: list[float], cap: int) -> float:
     times = sorted(times)
     return sum(min(b - a, cap) for a, b in zip(times, times[1:]))  # pairwise は 3.10 から
-
-
-def read_rate(model: str | None) -> float:
-    for prefix, rate in READ_RATES:
-        if (model or "").startswith(prefix):
-            return rate
-    return READ_RATE_DEFAULT
 
 
 def is_rewrite(write: int, context: int) -> bool:
