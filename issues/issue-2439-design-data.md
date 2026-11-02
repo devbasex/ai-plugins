@@ -82,16 +82,17 @@ erDiagram
 
 **記録（`sk=ORGLOG#<repositoryId>#<ISO 時刻>#<種類>`）**: 追記だけで書き換えない。種類は `waited` / `composed` / `presented` / `represented` / `confirmed` / `stalled` / `resolved` / `released` / `rejected`。中身は種類ごとの値（待ちの相手・提示のコミット・確定の番号・結果）。
 
-**スプリントの実行とジョブ（変更）**: 列を足すだけで既存の列は変えない。
+**スプリントの実行・ジョブ・リポジトリの枠（変更）**: 列を足すだけで既存の列は変えない。
 
 | 行 | 列 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- | --- |
+| リポジトリの枠 | `legacySeq` | 数値 | 許す | 古い版の実行を `legacyCount` へ数えに入れた回数。`legacyCount` を増やす書き込み（開始・移行の埋め戻し）で同じトランザクションで 1 増やし、減らす書き込みでは変えない。まとめた配布を組む書き込みの条件に使う（I62）。空は「まだ数えに入れていない」 |
 | 実行 | `purpose` | 文字列 | 許す | `release`。空は今のスプリントの実行（`sprint`） |
 | 実行 | `releaseSeq` | 数値 | 許す | 配布の実行のまとめた配布。`purpose` が空なら空 |
 | 実行 | `awaitingReason` | 文字列 | 許す | `awaiting_approval` の理由 `release_requested` / `release_stalled`。空は今の承認の依頼の待ち |
 | 実行 | `releaseRequestId` | 文字列 | 許す | 手動の実行が待つ依頼の id。`awaitingReason` が `release_requested` のときだけ |
 | ジョブ | `start` | 文字列 | 許さない | 今の値に `release` を足す |
-| ジョブ | `releaseStep` | 文字列 | 許す | `present` / `represent` / `confirm:1` / `confirm:2` / `continue`。配布の実行のジョブだけ。「続きから流す」では `stalledFrom` が `composed` なら `present`、`represented` なら `represent`、`confirmed` なら `release.progress` があれば `continue`・無ければ `confirm:<confirmedK>`。判断の答えの再開は `continue` |
+| ジョブ | `releaseStep` | 文字列 | 許す | `present` / `represent` / `confirm:1` / `confirm:2` / `continue`。配布の実行のジョブだけ。「続きから流す」では `stalledFrom` が `composed` なら `present`、`represented` なら `represent`、`confirmed` なら `release.progress` があるか、`mainMerged` が真か、GitHub に `release/v<提示の版>` の枝か本番の Pull Request があれば `continue`・どれも無ければ `confirm:<confirmedK>`。判断の答えの再開は `continue` |
 
 ### 時系列の扱い
 
@@ -182,7 +183,7 @@ erDiagram
 ### 互換性
 
 - 足すのは経路・事象の種類・payload の任意の項目・指示の項目・行の列だけで、既存の項目の意味は変えない
-- 依頼を出さない NDF の版の実行は、今どおり自分で本番の配布を流す。Factory はその実行を、並行を許す版の下限（設定 `NDF_PARALLEL_MIN_VERSION`）より古い版の実行（`legacy` が真）として見分ける。下限が切り替え口（`parallel.py request --external`）の入った版より低いと、下限以上で依頼を出さない版の実行が I62 の待ちをすり抜けて自分で配布し、まとめた配布とぶつかる。そのため実装の配布の手順で、Factory の本番へこの課題を出す前に、下限を切り替え口の入った NDF の版以上へ上げる
+- 依頼を出さない NDF の版の実行は、今どおり自分で本番の配布を流す。Factory はその実行を、並行を許す版の下限（設定 `NDF_PARALLEL_MIN_VERSION`）より古い版の実行（`legacy` が真）として見分ける。下限が切り替え口（`parallel.py request --external`）の入った版より低いと、下限以上で依頼を出さない版の実行が I62 の待ちをすり抜けて自分で配布し、まとめた配布とぶつかる。そのため実装の配布の手順で、Factory の本番へこの課題を出す前に、下限を切り替え口の入った NDF の版以上へ上げる。古い版かどうか（`legacy`）は実行の開始で決まり、下限を変えても既に始まった実行の値は変わらない。古い下限以上として始まった切り替え口の無い版の実行は `legacy` が偽のまま自分で配布するため、下限を上げた後、上げる前に始まって終わりの状態でない実行が無くなるまで待ってから、この課題を本番へ出す
 - 古い版の実行はリポジトリで唯一になり（I48）、依頼を出していない古い版の実行がある間は配布のまとめは組まない（I62 の `legacy_run`）。まとめた配布が流れている間は、古い版の実行を始めない（I62）。下限が無い間はすべての版が古い版として数えられるが、依頼を出して待つ実行は I62 で数えないため、まとめた配布は組まれる
 - `requestResume` を呼ぶ側（#2173）の引数は変わらない。足した `releaseRequestId` は配布のまとめだけが渡す
 - 検査は 2 つである。`npm run check` の契約の lint（`contracts`）と、構造チェック（`scripts/contracts_lib/model.py`）が、ランナーの翻訳と NDF の契約の例の組を照らす
