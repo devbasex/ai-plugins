@@ -35,13 +35,13 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | `/accounts/:accountId/repositories` | リポジトリ | 個人・管理者・席 | あり | 導入の案内・登録と外す（個人・管理者）・実行の状態（[runs-and-runner](ndf-factory-runs-and-runner.md)「画面」） |
 | `/accounts/:accountId/model-credential` | キーの持ち込み | 個人・管理者 | あり | キーの保存と消去・外部 ID（runs-and-runner） |
 | `/accounts/:accountId/repositories/:repositoryId/sprints/new` | スプリントを始める | 個人・管理者・席 | あり | 課題の候補・選び直し・開始（runs-and-runner） |
-| `/accounts/:accountId/sprints` | スプリントの一覧 | 個人・管理者・席 | あり（見本。#2172 が置き換える） | フェーズと状態（#2172）・取り消し（#2186） |
-| `/accounts/:accountId/sprints/:sprintRunId` | スプリントの詳細 | 個人・管理者・席 | あり（見本。#2172 が置き換える） | 工程・PR・CI・承認ゲート（#2172）・起票の依頼（[issue-requests](ndf-factory-issue-requests.md)、#2172） |
-| `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | 予定（#2172） | 順位の表と棚卸しの記録 |
-| 未定 | 承認 | 個人・管理者・席 | 予定（#2173） | 承認の依頼・Web からの承認・通知 |
-| 未定 | 請求と使用量 | 個人・管理者 | 予定（#2174） | プランの料金・使用量の台帳・決済 |
-| 未定 | 手元のランナー | 個人・管理者 | 予定（#2189） | ランナーの登録・心拍 |
-| 未定 | ループ | 個人・管理者・席 | 予定（#2347） | 開発ループと並行する実行の見え方 |
+| `/accounts/:accountId/sprints` | スプリントの一覧 | 個人・管理者・席 | あり（見本） | フェーズと状態・取り消し |
+| `/accounts/:accountId/sprints/:sprintRunId` | スプリントの詳細 | 個人・管理者・席 | あり（見本） | 工程・PR・CI・承認ゲート・起票の依頼（[issue-requests](ndf-factory-issue-requests.md)） |
+| `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | 予定 | 順位の表と棚卸しの記録 |
+| 未定 | 承認 | 個人・管理者・席 | 予定 | 承認の依頼・Web からの承認・通知 |
+| 未定 | 請求と使用量 | 個人・管理者 | 予定 | プランの料金・使用量の台帳・決済 |
+| 未定 | 手元のランナー | 個人・管理者 | 予定 | ランナーの登録・心拍 |
+| 未定 | ループ | 個人・管理者・席 | 予定 | 開発ループと並行する実行の見え方 |
 
 ## ナビゲーション
 
