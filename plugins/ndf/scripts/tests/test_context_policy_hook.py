@@ -321,3 +321,83 @@ def test_sprint_state_next_records_restart(tmp_path, ctx):
     (r,) = rows(ctx)
     assert (r["work"], r["verdict"], r["reason"], r["source"]) == ("#3 #9", "再起動", "カットポイント", "sprint-state")
     assert (ctx / "estimates" / "_local.cost-estimates.json").is_file()
+
+
+# ---------------------------------------------------------------- calibrate の現状固定（I-001。リファクタリングの前に振る舞いを留める）
+
+
+def _calibrated(recs, since=None) -> dict:
+    body = cd.calibrate(recs, since=since)
+    assert isinstance(body.pop("at"), str)
+    return body
+
+
+def _handoff_session(tmp_path, i: int, hours: list[int], first: str = "/goal .ndf/handoff/issue-7.md") -> str:
+    lines = [{"type": "user", "message": {"content": first}}]
+    lines += [call(f"2026-11-0{i + 1}T{h:02d}:00:00Z", f"s{i}m{h}", out=10 * (h + 1), read=1_000 * (h + 1)) for h in hours]
+    return write_transcript(tmp_path / f"s{i}.jsonl", lines)
+
+
+def test_calibrate_characterizes_empty_rows():
+    assert _calibrated([]) == {
+        "restore_context": None,
+        "restore_calls": None,
+        "handoff_calls": None,
+        "handoff_output": None,
+        "stage_calls": {},
+        "stage_expiries": {},
+        "samples": {"restore": 0, "handoff": 0},
+    }
+
+
+def test_calibrate_characterizes_stages_marks_and_expiries(tmp_path):
+    recs = []
+    for i in range(3):
+        tp = _handoff_session(tmp_path, i, [0, 1, 3, 4, 5, 7])
+        day = f"2026-11-0{i + 1}"
+        recs += [
+            hook_row(f"s{i}", tp, f"{day}T00:00:00Z", stage="plan", verdict="継続"),
+            hook_row(f"s{i}", tp, f"{day}T04:30:00Z", stage="impl", verdict="継続"),
+            hook_row(f"s{i}", tp, f"{day}T06:00:00Z", stage="review", verdict="継続"),
+            hook_row(f"s{i}", tp, f"{day}T06:30:00Z", stage="test", verdict="継続"),  # 区間に呼び出しが無い
+            hook_row(f"s{i}", tp, f"{day}T06:40:00Z", stage="cut", verdict="拒否"),  # 継続でないので区間の境にならない
+            hook_row(f"s{i}", tp, f"{day}T06:50:00Z", stage="last", verdict="継続"),  # 次が無いので数えない
+            mark("復元完了", f"{day}T03:30:00Z"),  # session_id の無い印は時間の範囲で割り当てる
+            mark("引継ぎ開始", f"{day}T01:30:00Z", f"s{i}"),
+            mark("引継ぎ開始", f"{day}T04:00:00Z", f"s{i}"),  # 最後の印から数える
+        ]
+    assert _calibrated(recs) == {
+        "restore_context": 4100.0,
+        "restore_calls": 3.0,
+        "handoff_calls": 3.0,
+        "handoff_output": 190.0,
+        "stage_calls": {"plan": 4.0, "*": 2.5, "impl": 1.0},
+        "stage_expiries": {"plan": 1.0, "*": 0.5, "impl": 0.0},
+        "samples": {"restore": 3, "handoff": 3, "stage:plan": 3, "stage:*": 6, "stage:impl": 3},
+    }
+
+
+def test_calibrate_characterizes_since_and_unmatched_sessions(tmp_path):
+    recs = []
+    for i in range(3):
+        tp = _handoff_session(tmp_path, i, [1, 2], first="普通の始まり" if i == 0 else "/goal .ndf/handoff/issue-7.md")
+        day = f"2026-11-0{i + 1}"
+        recs += [
+            hook_row(f"s{i}", tp, f"{day}T00:00:00Z", stage="plan", verdict="継続", work=""),  # 作業は空でも数える
+            hook_row(f"s{i}", tp, f"{day}T02:00:00Z", stage="plan", verdict="継続"),
+            mark("復元完了", f"{day}T00:30:00Z", f"s{i}"),  # 呼び出しより前の印は数えない
+            mark("復元完了", f"{day}T09:00:00Z"),  # どのセッションにも入らない印
+        ]
+    recs.append(hook_row("s9", None, "2026-11-01T00:00:00Z", stage="plan", verdict="継続"))  # 会話の記録が無い
+    recs.append({"at": "2026-11-01T00:00:00Z", "event": "判定"})  # session_id の無い行
+    assert _calibrated(recs) == {
+        "restore_context": None,
+        "restore_calls": None,
+        "handoff_calls": None,
+        "handoff_output": None,
+        "stage_calls": {"plan": 1.0, "*": 1.0},
+        "stage_expiries": {"plan": 0.0, "*": 0.0},
+        "samples": {"restore": 0, "handoff": 0, "stage:plan": 3, "stage:*": 3},
+    }
+    since = cd.parse_ts("2026-11-02T00:00:00Z")
+    assert _calibrated(recs, since=since)["samples"] == {"restore": 0, "handoff": 0, "stage:plan": 2, "stage:*": 2}
