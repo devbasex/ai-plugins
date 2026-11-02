@@ -74,7 +74,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | [`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py) の副命令 `loop` | 入口。引数の解析と振り分けは [`lib/sprint_loop_cli.py`](../../plugins/ndf/scripts/lib/sprint_loop_cli.py)。`loop sprint` の `--` から後は解析せず `new sprint` へそのまま渡す。既存の副命令は変えない |
 | [`lib/sprint_loop.py`](../../plugins/ndf/scripts/lib/sprint_loop.py) | `start`（使ってよい条件・再開）・`sprint`・`answer`・`approve-mvv`・`stop`・`lap`・`status`・`list` |
-| [`lib/sprint_loop_select.py`](../../plugins/ndf/scripts/lib/sprint_loop_select.py) | 選定（`select` / `exclude`）。入力は `rank` の出力・記録・マイルストーンの説明だけ |
+| [`lib/sprint_loop_select.py`](../../plugins/ndf/scripts/lib/sprint_loop_select.py) | 選定（`select` / `exclude`）。入力は `rank` の出力・記録・マイルストーンの説明と、環境変数 `NDF_LOOP_EXCLUDE` だけ |
 | [`lib/sprint_loop_gate.py`](../../plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue・まとめのステージ（`new close --pace auto`）の組み立て・周回の締め |
 | [`lib/sprint_loop_record.py`](../../plugins/ndf/scripts/lib/sprint_loop_record.py) | 記録の読み書き（排他・原子的な書き込み・終わった周回の書き換えの拒否）・消費・止まる条件の判定・再開のコマンド・引継ぎ文書・`laps.md` の描画。外の世界（gh・`upkeep.py rank`・`supervise.py`）は `Env` の関数を通して呼び、テストで差し替える |
 | [`lib/pace.py`](../../plugins/ndf/scripts/lib/pace.py) の `read_loop` | `loop` 節を読み、既定（`LOOP_DEFAULTS`）を埋めて形を確かめる。`read_pace` は `loop` 節を検証しない |
@@ -94,7 +94,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | I1 | 周回は追記だけで、番号は 1 から 1 ずつ増える。終わった周回（`outcome` が `進行中` でない）の行は書き換えない | 書き込みを拒み、記録が壊れているとして `stopped`（終了コード 1） |
 | I2 | 進行中の周回は高々 1 つ | `select` が「進行中の周回がある」で 1 |
 | I3 | 予算・同じ失敗・止める指示は周回の境（選定の前と周回を締めた後）でだけ判定する。周回の途中で `stop` を書くのは `gate2_returned`・`mvv_changed`・`refused` だけで、周回は進行中のまま残す | 途中の止める指示は次の境まで効かない |
-| I4 | 選定は入力（`rank` の出力・記録の人の判断待ちと除外・`approved` の行の設計 PR の状態・ループの設定・スプリント MVV の承認）だけで決まり、同じ入力からは同じ組と並びが出る | テストで落とす |
+| I4 | 選定は入力（`rank` の出力・記録の人の判断待ちと除外・`NDF_LOOP_EXCLUDE`・`approved` の行の設計 PR の状態・ループの設定・スプリント MVV の承認）だけで決まり、同じ入力からは同じ組と並びが出る | テストで落とす |
 | I5 | 答えの無い人の判断待ちの課題と、差し戻した課題は選ばない | 選定の行に理由つきで外す |
 | I6 | ループは承認ゲートを自分で通さない。`by: mvv` の承認の記録を書くのは `mvv-gate.py` だけで、「従う」以外の判定を通過として扱わない | テストで落とす |
 | I7 | 止まったループは、`loop start` が止まった理由を判定し直して解けたと確かめるまで、周回を始めない | `select` が止まったままの結果（3）を返す |
@@ -162,7 +162,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 ### 選定（`select` / `exclude`）
 
 マイルストーンを `rank` の `order` の順（`--milestones` で絞ったときはその中だけ）に見て、1 件でも選べた最初の
-マイルストーンで決める。1 つのスプリントは 1 つのマイルストーンから組む。
+マイルストーンで決める。1 つのスプリントは 1 つのマイルストーンから組む。選定の前に、環境変数 `NDF_LOOP_EXCLUDE`（`,` か空白で区切った
+課題の番号。番号でない語は読まない）の課題を、その周回の `excluded` へ理由「別の実行が持つ課題」で足す（同じ番号と周回の行が
+あれば足さない）。Factory の実行の制御が、同じリポジトリの別の実行が持つ課題を渡す口である（#2347 の決定 3）。
 
 1. 候補は、切り出しの境界（`boundary.number`）までの行（境界が無ければ先頭から `max_issues` 件。`boundary.empty` なら
    0 件）、大きい課題の枠が当てたとき（`large_slot.status` が `当てた`）の `large_slot.slice`、品質の枠の課題（`quality_slot.issues`）である

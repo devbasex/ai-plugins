@@ -28,7 +28,7 @@ erDiagram
 | `sprint_run_id` | 文字列 | 許さない | 区分の鍵 |
 | `order_key` | 文字列 | 許さない | 並びの鍵。`<at をミリ秒の 3 桁にそろえた UTC（toISOString）>#<冪等の鍵>`。小数の桁が違う時刻を文字列のまま並べると `…:00.5Z` が `…:00Z` より前に来るため、そろえてから結ぶ |
 | `idempotency_key` | 文字列 | 許さない | 出所ごとの形（全体の契約の「進捗の正本」） |
-| `type` | 文字列 | 許さない | 13 種類のどれか |
+| `type` | 文字列 | 許さない | 16 種類のどれか（[進捗の事象の定義](ndf-factory-contracts-and-progress.md#進捗の事象の定義)） |
 | `at` | 文字列 | 許さない | 送られた値のまま（UTC、末尾 `Z`） |
 | `source` | 文字列 | 許さない | `runner` / `github` / `api` / `control` |
 | `job_id` | 文字列 | 許す | 空（`null`）は「実行ジョブの外で起きた」（`github`・`api`） |

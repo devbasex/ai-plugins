@@ -102,7 +102,7 @@ graph TD
 | `verifyRequest(authorization)` | `Authorization` の値 | `Caller`（`userId`・`idp`） | 401 の `AuthError` |
 | `resolveAccount(caller, accountId?)` | `Caller`・アカウントの ID（省くと個人のアカウント） | `AccountContext`（`accountId`・`userId`・`kind`・`plan`・`role`（`owner` / `member`）・`seatType`（チームのときだけ、ほかは `null`）・`executionMode`）。#2186・#2189・#2174 は実行の形態をここから読む | 403 の `ForbiddenError` |
 | `getLimits(ctx)` | `plan`・`seatType`・`executionMode` | `Limits`（`concurrentSprintRuns`・`monthlyTokens`）。`monthlyTokens` は `managed` のときだけ表の値で、ほかは `null`（掛けない） | 例外を投げない。表に無い組と、`managed` なのに表に月の token の値が無い組は `null` を返す |
-| `judgeLimits(ctx, current)` | 文脈・`current = {runningSprintRuns, tokensThisMonth?}` | `Judgment`（`allowed`・`limits`・`reasons`）。`reasons` は `{quantity, limit, current}` の並び | — |
+| `judgeLimits(ctx, current)` | 文脈・`current = {runningSprintRuns, tokensThisMonth?, runningRepoRuns?, repoMaxRuns?}`（後ろの 2 つは同じリポジトリで動いている実行の数と登録の同時の実行の数の宣言。省けば掛けない。#2347） | `Judgment`（`allowed`・`limits`・`reasons`）。`reasons` は `{quantity, limit, current}` の並び | — |
 | `setPlan(accountId, plan)` | アカウントの ID・プラン | 無し | `PlanError`（`unknown_plan` / `plan_kind_mismatch` / `account_not_found`）。版の競合で 3 回書けなければ `AccountUnavailableError` |
 | `createApiApp(deps)`・`requireCaller(deps)`・`resolveFromRequest(c, accountId?)` | — | API の入口の Hono のアプリ・認証の中間処理・経路の中でアカウントの文脈を得る関数 | 上と同じ |
 
@@ -210,7 +210,7 @@ sequenceDiagram
 - **月の token は入力と出力の和で、cache の読み書きを含めて数える。** Bedrock の請求と同じ単位で数えるためである。cache を除くと、NDF の実行ではほぼ全部が出力になり、同じ上限でも費用が大きく変わる
 - **値の比は依頼の「Claude.aiと類似の」に合わせた。** Pro と Max の比を保ち、Team standard を個人 Pro の少し上、Team premium を個人 Max の少し上に置く
 - **判定は「今の値が上限より小さければ許す」である。** 同時のスプリントの実行は新しい 1 つを始める前の数を渡し、上限 3 なら今が 2 で許し、3 で断る。月の token はその UTC の暦月に使った数（チームではその席の利用者の分）を渡し、上限ちょうどで断る。`managed` で `tokensThisMonth` を省くと断る
-- 断ったときの `reasons` の `quantity` は `concurrent_sprint_runs` / `monthly_tokens` / `not_in_limits_table` で、`limit` と `current` に上限と今の値を入れる。画面と #2186 は同じ値から利用者に出す文を作る
+- 断ったときの `reasons` の `quantity` は `concurrent_sprint_runs` / `concurrent_repo_runs` / `monthly_tokens` / `not_in_limits_table` で（`concurrent_repo_runs` の上限はプランの同時の数と登録の宣言の小さい方で、宣言が無くアカウントの上限と同時に当たるときは重ねない）、`limit` と `current` に上限と今の値を入れる。画面と #2186 は同じ値から利用者に出す文を作る
 
 ### API の経路
 

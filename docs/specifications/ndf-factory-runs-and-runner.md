@@ -256,9 +256,9 @@ graph TD
 | 3. NDF の導入 | `NDF_MARKETPLACE` を `NDF_VERSION` の ref（タグかコミット）で `<作業場所>/ndf-marketplace` へ clone し、`claude plugin marketplace add <そのディレクトリ>` と `claude plugin install ndf@<取得元の marketplace.json の name>` を打つ。入った `plugin.json` の版が `NDF_VERSION` と違えば失敗。NDF のスクリプトはこの写しから読む |
 | 4. `job.started` | `ndf_version` は `NDF_VERSION`、`start` は `START` |
 | 5. 状態の復元（`resume`） | `POST /run-jobs/state`（`get`）の URL から取り、`.ndf/tmp`・`.ndf/loop` の下の追跡しないパスだけを戻す（I42） |
-| 6. 答えの記録（`resume`） | 答えの経路から読む。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <関門の名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
-| 7. conductor | `claude -p <指示> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch`。指示は `new` で `/ndf:development-workflow #<番号> …`、`resume` で「前回の続きから進めてください。」に手順 6 の指示を足したもの。NDF の worktree は `NDF_WORKTREE_BASE`（`<作業場所>/worktrees`）に置く |
-| 8. 終わり | `POST /run-jobs/state`（`put`）の URL へ状態を保存 → 結果が判断が要るなら `gate.reached` → `job.finished`。手順 1〜8 のどこかが失敗すれば `gate.reached` を送らず `job.finished`（`failed`） |
+| 6. 答えの記録（`APPROVAL_REQUEST_ID` のある `resume`） | 答えの経路から読む（識別子の無い `resume` は飛ばす。利用上限の後の再開。#2347 の決定 7）。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <関門の名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
+| 7. conductor | `claude -p <指示> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch`。指示は `new` で `/ndf:development-workflow #<番号> …`、`loop` で `/ndf:development-workflow --loop <LOOP_NAME> --milestones "<LOOP_MILESTONES>"` に `LOOP_BUDGET` の `--budget-<単位> <値>` を足したもの、`resume` で「前回の続きから進めてください。」に手順 6 の指示を足したもの。`EXCLUDE_ISSUES` は `NDF_LOOP_EXCLUDE` として子へ渡す。conductor の最後の `result` の文に `ndf-next` のブロックが 1 つだけあれば、同じ作業場所でその指示の `claude -p` を起動し直す（区間。起動ごとに `section.started`。読み方は [`ndf-next-block.json`](../../plugins/ndf/contracts/forms/ndf-next-block.json)）。ループの周回が締まったか止まる条件が書かれたら次の区間を起動せず（#2347 の決定 5）、区間が `RUNNER_SECTION_LIMIT`（既定 20）に達するか、`local` で利用上限に当たれば止まる。NDF の worktree は `NDF_WORKTREE_BASE`（`<作業場所>/worktrees`）に置く |
+| 8. 終わり | `POST /run-jobs/state`（`put`）の URL へ状態を保存 → 結果が判断が要るなら `gate.reached`（利用上限で止まったときは送らない） → `job.finished`。手順 1〜8 のどこかが失敗すれば `gate.reached` を送らず `job.finished`（`failed`） |
 
 **ランナーの終了コードは 0（`job.finished` を受け口が受け取った）か 1 だけである**（I43）。`job.finished` が 4xx で断られたか、送り直しを使い切ったときも 1 である。
 
@@ -279,12 +279,13 @@ graph TD
 | --- | --- | --- |
 | `phase.changed` | 行が伸びた `progress.jsonl` の親のディレクトリの名前（計画の名前。末尾の `-state` を除く）が前と変わった | 先頭の番号を除き、残りの番号を課題、番号でない部分を `-` で結んだものをフェーズにする（`5-impl-2171` → `impl`・`[2171]`） |
 | `step.recorded` | `progress.jsonl` の `kind: step` の行 | `step`・`exit`（整数でなければ 0）・`seconds`（0 以上の数でなければ 0）・`summary`（JSON の文字列なら `summary` の値）。行の `pr`・`summary`・`report` にある Pull Request の URL のうち `REPO` のもの（大文字と小文字を問わない）だけを `pull_request` にする |
-| `attention` | `progress.jsonl` の `kind: attention` の行 | `reason`（空なら `attention`）・`summary`（`text`、無ければ `summary`） |
+| `attention` | `progress.jsonl` の `kind: attention` の行 | `reason`（`step` が `base-sync` の行は `base_conflict`。ほかは行の `reason`、空なら `attention`。#2347 の決定 10）・`summary`（`text`、無ければ `summary`） |
 | `usage.recorded` | conductor の stream-json の `result` の `modelUsage`（`step` は `conductor`）と、`progress.jsonl` の `step` の行の `models`（supervise が別のプロセスで起動したステップの分） | モデルごとに 1 件。入力の token は入力に cache の読みと書きを足す（#2170 の数え方）。`cost_usd` は `costUSD` か `cost` |
 | `decision.delegated` | `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`（[`ask_ledger.py`](../../plugins/ndf/scripts/lib/ask_ledger.py)）の `kind: decision` の行のうち、`cwd` がこのジョブの作業場所の下のもの | `question`・`answer`・`reason`（どれかが無ければ送らない。4,000 字で切る）。`category` は `ref` が指す `kind: verdict` の行の `source`、無ければ行の `category`、それも無ければ `null` |
 | `issue.requested` | `NDF_ISSUE_REQUEST_FILE` の 1 行（`{"repo", "title", "body"}` の JSON。#2216） | 値をそのまま写す。題が 256 字か本文が 50,000 字を超える行は送らず `attention`（`reason` は `issue_request_too_large`）にし、形の違う行は送らない |
 | `gate.reached` | conductor の最後の `result` の文の `- 結果: 判断が要る` | `kind` は最後の計画の名前が `design` を含めば `gate1`、`release` を含めば `gate2`、ほかは `decision`。`pr_url` は文の最初の Pull Request の URL、`material` は文そのもの |
-| `job.finished` | 終わり方 | 失敗 → `failed`、結果が `判断が要る` → `gate`、`完了` → `done`、`できなかった` → `stopped`、結果の行が無い → `failed`。`summary` は文の先頭 2,000 字か失敗の理由 |
+| `job.finished` | 終わり方 | 失敗 → `failed`、結果が `判断が要る` → `gate`、`完了` → `done`、`できなかった` → `stopped`、結果の行が無い → `failed`。区間の上限に達した → `stopped`（`reason` は `section_limit`）、`local` で利用上限に当たった → `stopped`（`reason` は `usage_limit`、`resets_at` はリセット時刻か `null`）。`summary` は文の先頭 2,000 字か失敗の理由 |
+| `loop.lap_closed`・`loop.stopped` | ループの実行で、区間の後の `.ndf/loop/<LOOP_NAME>/loop.json` の締めた周回と `stop` | 増えた周回ごとに 1 件と、`stop` が書かれたら 1 件 |
 
 - **256 KiB を超える `gate.reached` は `material` だけを切り詰める。** 末尾に `\n\n（ここから先を切り詰めた。全文は <pr_url> にある）`（`pr_url` が `null` なら `（ここから先を切り詰めた。元の大きさ <n> バイト）`）を足し、JSON にしたバイト数が 262,144 以下になる最長の位置で、文字の境目で切る
 - **送信は、送る前に契約で確かめる**（`validateProgressEvent`。合わなければ送らず標準エラーへ 1 行）。5xx と接続の失敗だけを、同じ事象のまま 1・2・4・8 秒…最大 60 秒の間を置いて 30 分まで送り直す。4xx は送り直さず標準エラーへ 1 行書いて次へ進む

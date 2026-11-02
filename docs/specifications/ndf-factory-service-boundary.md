@@ -324,14 +324,14 @@ erDiagram
 | `SPRINT_RUN_ID`・`JOB_ID` | 文字列・必須 | 事象の宛先と冪等の鍵の頭 |
 | `REPO` | `owner/name`・必須 | 取り込むリポジトリ |
 | `NDF_VERSION` | 文字列・必須 | スプリントの開始で固定した NDF の版 |
-| `START` | `new` / `resume`・必須 | `new` は課題から始め、`resume` は保存した状態から続ける |
-| `ISSUES` | 番号の並び・`new` で必須 | スプリントへ入れる課題 |
-| `APPROVAL_REQUEST_ID` | 文字列・`resume` で必須 | 答えの出た承認の依頼の識別子。答えの本文は載せない（RunTask の `overrides` は全体で 8192 字が上限で、長い差し戻しで起動が失敗するため） |
+| `START` | `new` / `resume` / `loop`・必須 | `new` は課題から始め、`resume` は保存した状態から続け、`loop` は開発ループの周回を新しく始める。開発ループの入力 `LOOP_NAME`・`LOOP_MILESTONES`（`loop` で必須）・`LOOP_BUDGET`・`EXCLUDE_ISSUES`・`LOOP_ANSWERS` の形は `run-job-instruction.schema.json` にある（#2347） |
+| `ISSUES` | 番号の並び・`new` で必須、`loop` で持たない | スプリントへ入れる課題 |
+| `APPROVAL_REQUEST_ID` | 文字列・任意 | 答えの出た承認の依頼の識別子。無い `resume` は答えを書かずに続ける（利用上限の後の再開。#2347 の決定 7）。答えの本文は載せない（RunTask の `overrides` は全体で 8192 字が上限で、長い差し戻しで起動が失敗するため） |
 | `INGEST_URL`・`INGEST_TOKEN_SECRET_ARN` | 文字列・必須 | 進捗の受け口と、このジョブだけに効く token の置き場 |
 | `EXECUTION_MODE` | `local` / `byok` / `managed`・必須 | スプリントの開始でアカウントから写した実行の形態。スプリントの実行の途中で変えない |
 | `MODEL_CREDENTIAL_SECRET_ARN` | 文字列・`byok` で必須 | 利用者の Anthropic API キーか、引き受けるロールの ARN の置き場。`local`・`managed` では渡さない |
 
-**`resume` のランナーは、答えを #2173 の API からこのジョブの token で読む。** #2173 はその token を #2171 の token の検証で確かめ、token の実行ジョブの `sprint_run_id` と依頼の属するスプリントの実行が一致し、かつ答えが保存済みのときだけ本文を返す。一致しなければ 403 を返し、本文も依頼の有無も明かさない。
+**`APPROVAL_REQUEST_ID` のある `resume` のランナーは、答えを #2173 の API からこのジョブの token で読む。** #2173 はその token を #2171 の token の検証で確かめ、token の実行ジョブの `sprint_run_id` と依頼の属するスプリントの実行が一致し、かつ答えが保存済みのときだけ本文を返す。一致しなければ 403 を返し、本文も依頼の有無も明かさない。
 
 | 種類 | 答えの形 | ランナーが NDF へ書くもの |
 | --- | --- | --- |
@@ -432,9 +432,9 @@ stateDiagram-v2
 | 打ち切りの時間 | 28,800 秒（8 時間）。`RUN_JOB_TIMEOUT_SECONDS` で変える。過去 7 本のスプリントの実行ジョブ 1 本に当たる区間の最大 18,031 秒の 1.5 倍を時間へ切り上げた値 |
 | 実行ジョブの token の期限 | 32,400 秒（9 時間）。`RUN_JOB_TOKEN_TTL_SECONDS` で変える。打ち切りの時間以下の値は起動の設定の読み込みで断る |
 | 発行の鍵 | `RUN_JOB_TOKEN_SIGNING_KEY_SECRET_ARN`（Ed25519 の秘密鍵の JWK と `kid`） |
-| 見回り | 5 分ごと。打ち切りの時間を過ぎたジョブを止め、止まったタスクのジョブを終わらせ、`pending` のまま 15 分を過ぎたジョブを `failed`（`launch_failed`）にする |
-| 実行の枠 | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた行。開始と終わりの状態への移りで、実行と同じトランザクションで増減し、`judgeLimits` へ渡す。承認待ちも数え、再開は数を変えない |
-| スプリントの実行の状態 | `starting` / `running` / `awaiting_approval` / `done` / `stopped` / `failed` / `cancelled`。後ろの 4 つが終わりの状態 |
+| 見回り | 5 分ごと。打ち切りの時間を過ぎたジョブを止め、止まったタスクのジョブを終わらせ、`pending` のまま 15 分を過ぎたジョブを `failed`（`launch_failed`）にする。リセット時刻を過ぎた `awaiting_reset` の実行を再開し、次の周回を待つ開発ループを起こす（#2347） |
+| 実行の枠 | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた行。開始と終わりの状態への移りで、実行と同じトランザクションで増減し、`judgeLimits` へ渡す。承認待ちとリセット待ちも数え、再開は数を変えない。リポジトリの行は古い版の実行の数 `legacyCount` も持つ（#2347 の決定 12） |
+| スプリントの実行の状態 | `starting` / `running` / `awaiting_approval` / `awaiting_reset` / `done` / `stopped` / `failed` / `cancelled`。後ろの 4 つが終わりの状態 |
 | NDF の版 | 開始の時点で決め、以後の実行ジョブは同じ値を持つ。正式版は `plugin.json` の版（タグ `ndf--v<版>` を入れる）、開発版は `<版>@<コミットの SHA>` |
 | ランナーで使える CLI | `claude` だけ。cross-review は、ランタイムが 1 つのとき 2 つの枠を `claude` で埋める既存の振る舞いに任せる |
 | GitHub App の権限 | Metadata（読む）・Contents（読み書き）・Pull requests（読み書き）・Issues（読み書き）・Checks（読む）・Actions（読む）。Workflows・Administration・Projects は持たない。導入の token はリポジトリ 1 つに絞る |
