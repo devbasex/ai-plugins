@@ -158,7 +158,7 @@ graph TD
 | `pr.updated` | `repo`（`owner/name`）、`number`（1 以上の整数）、`state`（`open` / `closed` / `merged`） |
 | `ci.updated` | `repo`（`owner/name`）、`pr_number`（1 以上の整数）、`name`（文字列）、`conclusion`（文字列か `null`。`null` は「まだ終わっていない」） |
 | `issue.requested` | `repo`（`owner/name`。起票先）、`title`（1〜256 字。GitHub の題の上限）、`body`（1〜50,000 字。4 バイトの文字だけでも 256 KiB に収まる長さ）。ラベルと相手の課題の番号は相手先の流儀に属するため持たない |
-| `section.started`・`loop.lap_closed`・`loop.stopped` | #2347 が足した区間の起動・周回の締め・ループの止まる条件。鍵は [#2347 の設計の「入出力の契約」](../../issues/issue-2347-design-contracts.md#入出力の契約) にある |
+| `section.started`・`loop.lap_closed`・`loop.stopped` | #2347 が足した区間の起動・周回の締め・ループの止まる条件。鍵は [開発ループの確定仕様の「進捗の事象」](ndf-factory-dev-loops-data-and-contracts.md#進捗の事象progress-eventschemajson) にある |
 | `issue.request_resolved` | `request_key`（依頼の冪等の鍵）、`outcome`（`filed` / `drafted`）、`issue`（`filed` のときだけ必須で `drafted` では持たない。`repo`（`owner/name`）・`number`（1 以上の整数）・`url`（URI））、`reason`（`drafted` のときだけ必須。[起票の依頼と起票の代行](ndf-factory-issue-requests.md) の理由の表のどれか）、`duplicate_of`（同じ中身の最初の依頼の鍵か `null`） |
 
 **大きさの上限は 256 KiB（262,144 バイト、`MAX_EVENT_BYTES`）で、定義の外で見る。** `runner`・`api` の経路は要求の本文の UTF-8 のバイト数、`github` の経路と `appendControlEvent` は作った事象を JSON にしたバイト数で見る。JSON Schema の `maxLength` は字の数でバイトを数えられないためである。
