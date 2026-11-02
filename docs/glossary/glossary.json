@@ -4887,7 +4887,7 @@
       "term": "登録簿",
       "code": "relay_registry",
       "context": "ndf-workflow",
-      "meaning": "統括役だけが書く、名前つきのラッパーの名前と作業ディレクトリ・最初の引数・tmux のセッションの表（registry.json）",
+      "meaning": "統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
       "pending_source": "issues/issue-2346-design.md"
     },
     {
