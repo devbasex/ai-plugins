@@ -86,7 +86,11 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     return { kid: parsed.kid, privateKey: parsed.jwk };
   };
   const reader = new DynamoProgressReader(requireEnv("PROGRESS_EVENTS_TABLE_NAME"), requireEnv("PROGRESS_IDEMPOTENCY_TABLE_NAME"));
+  // 自動で起こすもの（周回・リセット時刻の後の再開）のたびに、始めた利用者の今のプラン・形態・席を引き直す（表の名前がある処理だけ）
+  const accountsTable = process.env.ACCOUNTS_TABLE_NAME;
+  const resolveContext = accountsTable ? accountContextResolver(new AccountService({ store: new DynamoAccountStore(accountsTable) })) : undefined;
   const control = new RunControl({
+    resolveContext,
     table,
     github,
     platform,
@@ -97,9 +101,6 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     config: runControlConfig(process.env),
   });
   // ループの制御は実行の制御の停止の後の処理と見回りから呼ばれる（常駐のプロセスを持たない。#2347 の決定 1）
-  // 周回のたびに、始めた利用者の今のプラン・形態・席を引き直す（表の名前がある処理だけ）
-  const accountsTable = process.env.ACCOUNTS_TABLE_NAME;
-  const resolveContext = accountsTable ? accountContextResolver(new AccountService({ store: new DynamoAccountStore(accountsTable) })) : undefined;
   const loops = new LoopControl({ table, control, reader, resolveContext });
   control.setLoopHooks(loops.hooks());
   // 候補の証明の鍵は App のクライアントの秘密から用途を分けて作る

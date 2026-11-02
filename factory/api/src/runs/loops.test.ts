@@ -495,6 +495,16 @@ describe("利用上限の後の再開（受け入れ条件 18・19、I54）", ()
     expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "job_failed" });
   });
 
+  it("自動の再開の前に、始めた利用者が席を持たなければ再開せず seat_missing で終える", async () => {
+    const ins = await localRun([4]);
+    await event(ins.SPRINT_RUN_ID, ins.JOB_ID, "job.finished", { result: "stopped", summary: "", reason: "usage_limit", resets_at: null });
+    await h.control.reportLocalRunJobEnded(ins.JOB_ID);
+    (h.control as unknown as { deps: { resolveContext: () => Promise<null> } }).deps.resolveContext = async () => null;
+    h.clock.now = new Date(h.clock.now.getTime() + 901_000);
+    await h.control.sweep();
+    expect(await runOf(ins.SPRINT_RUN_ID)).toMatchObject({ state: "failed", failureReason: "seat_missing" });
+  });
+
   it("区間の上限で止まったジョブは stopped と finishReason（section_limit）", async () => {
     const run = await manual([4]);
     await finishEcs(run.sprint_run_id, { result: "stopped", summary: "", reason: "section_limit" });

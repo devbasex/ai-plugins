@@ -1,6 +1,6 @@
 {
   "name": "ndf-next-block",
-  "summary": "応答の文の最後に置く、次の区間（新しい会話）で起動するコマンド。ラッパー（relay.py）と NDF Factory のランナーが読み、中身で claude を起動し直す",
+  "summary": "応答の文の最後に置く、次の区間（新しい会話）で起動するコマンド。ラッパー（relay.py）と、この形を写すほかの読み手（サービスのランナーなど）が読み、中身で claude を起動し直す",
   "rule": "CommonMark の 3 つのバッククォートの囲みのうち、情報文字列を前後の空白を除いて ndf-next と比べて一致するものを拾う。~~~ の囲みと、ほかの囲みの中の囲みは拾わない。中身は前後の改行を除く。囲みが 2 つ以上なら起動しない。応答の文の最後の「- 結果:」の行の値（前後の空白を除く）が「判断が要る」なら起動しない",
   "writers": [
     "plugins/ndf/scripts/sprint-state.py",
@@ -8,8 +8,7 @@
     "plugins/ndf/skills/development-workflow/SKILL.md"
   ],
   "readers": [
-    "plugins/ndf/scripts/relay.py",
-    "factory/runner/src/next-block.ts"
+    "plugins/ndf/scripts/relay.py"
   ],
   "cases": [
     {

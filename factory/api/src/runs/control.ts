@@ -84,6 +84,8 @@ export interface RunControlDeps {
   // 開始の時点のマーケットプレイスの NDF の版（決定 3）
   ndfVersion: () => Promise<string>;
   config: RunControlConfig;
+  // 自動で起こすジョブ（リセット時刻の後の再開）の前に、実行を始めた利用者の今の文脈を引く。席が無ければ null
+  resolveContext?: (accountId: string, userId: string) => Promise<AccountContext | null>;
   now?: () => Date;
   newId?: () => string;
   log?: (entry: Record<string, unknown>) => void;
@@ -523,6 +525,15 @@ export class RunControl {
   // リセット待ちの実行に、承認の依頼の識別子の無い resume のジョブを作る（決定 7）。時刻の前は何もしない
   async resumeAfterReset(run: SprintRun): Promise<boolean> {
     if (run.state !== "awaiting_reset" || !run.resumeAt || Date.parse(run.resumeAt) > this.now().getTime()) return false;
+    // 人の操作を経ずに起こすため、始めた利用者がまだ席を持ち、形態が local のままかを照らす（ループの周回の開始と同じ）
+    if (this.deps.resolveContext) {
+      const fresh = await this.deps.resolveContext(run.accountId, run.createdBy);
+      if (!fresh || fresh.executionMode !== run.executionMode) {
+        const lw = await this.loopWriteFor(run, null, { runState: "failed", failureReason: "seat_missing", finishReason: run.finishReason ?? null });
+        if (await this.deps.table.finishRun(run.sprintRunId, "failed", "seat_missing", this.iso(), { loop: lw?.write })) await this.afterRunMoved(run, lw?.write, true);
+        return false;
+      }
+    }
     const job = this.newJob(run, run.jobCount + 1, "resume", null);
     job.loopInput = await this.resumeLoopInput(run);
     if (!(await this.deps.table.addResumeJob(job, this.iso(), { from: "awaiting_reset" }))) return false;

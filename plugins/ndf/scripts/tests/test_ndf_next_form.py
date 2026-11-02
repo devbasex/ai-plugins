@@ -1,6 +1,6 @@
 """`ndf-next` のブロックの読み方の宣言（contracts/forms/ndf-next-block.json。#2347 の決定 8・I55）。
 
-NDF Factory のランナー（factory/runner/src/next-block.ts）の vitest も同じ例の組を読む。どちらかの読み方が変われば片方が落ちる。"""
+この形を写すほかの読み手（サービスのランナー）のテストも同じ例の組を読む。どちらかの読み方が変われば片方が落ちる。"""
 
 from __future__ import annotations
 

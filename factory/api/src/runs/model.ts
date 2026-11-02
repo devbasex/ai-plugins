@@ -12,7 +12,8 @@ export const JOB_STATES = ["pending", "running", "gate", "stopped", "done", "fai
 export type JobState = (typeof JOB_STATES)[number];
 export const isTerminalJob = (state: JobState) => state !== "pending" && state !== "running";
 
-export type FailureReason = "launch_failed" | "timeout" | "task_stopped" | "job_failed" | "credential_unavailable";
+// seat_missing は、自動の再開の時点で実行を始めた利用者が席を持っていなかった（#2347）
+export type FailureReason = "launch_failed" | "timeout" | "task_stopped" | "job_failed" | "credential_unavailable" | "seat_missing";
 
 export interface Registration {
   accountId: string;
