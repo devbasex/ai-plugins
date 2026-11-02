@@ -243,6 +243,22 @@ def test_same_message_and_ledger_are_counted_once(tmp_path):
     assert calls == 4  # m1・m2・サブエージェントの m3・帳簿の 1 行（p1 の会話の記録は読まない）
 
 
+def test_same_message_takes_the_last_usage(tmp_path):
+    # ストリーミングで後の行ほど output_tokens が増える。最初の usage で固定せず、最後の値を 1 回だけ数える
+    tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m1", out=1), call("2026-11-01T00:00:05Z", "m1", out=900)])
+    calls, _, _ = cd.read_calls(tp)
+    assert len(calls) == 1 and calls[0]["out"] == 900 and calls[0]["ts"] == cd.parse_ts("2026-11-01T00:00:00Z")
+
+
+def test_work_report_counts_only_the_calls_while_the_work_is_current(tmp_path):
+    # 同じセッションで #7 の後に #8 を扱うと、#7 は #8 の行より前の呼び出しだけ、#8 は後の呼び出しだけを数える
+    m = load_cli()
+    tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m1"), call("2026-11-01T01:00:00Z", "m2")])
+    recs = [hook_row("s1", tp, "2026-11-01T00:00:00Z"), {**hook_row("s1", tp, "2026-11-01T00:30:00Z"), "work": "#8"}]
+    one, two = m.report_work("#7", recs), m.report_work("#8", recs)
+    assert sum(p["calls"] for p in one["parts"].values()) == 1 and sum(p["calls"] for p in two["parts"].values()) == 1
+
+
 def test_marks_split_restore_and_handoff(tmp_path):
     m = load_cli()
     first = {"type": "user", "message": {"content": "/goal /ndf:development-workflow .ndf/handoff/issue-7.md の続きから"}}

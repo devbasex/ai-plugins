@@ -742,6 +742,10 @@ def test_reparent_writes_before_state_and_reverts(env):
     before = json.loads((env.root / ".ndf" / "backlog" / "overhaul" / run / "before.json").read_text())
     assert [(b["number"], b["parent"], b["milestone"]) for b in before] == [(5, 11, "M2"), (7, None, "M2")]
     assert env.state()["parents"] == {"5": 2, "7": 2}
+    # 同じ run の打ち直しでは、変更済みの状態で最初の変更前の状態を上書きしない
+    code, out = env.run("apply", "--plan", _raw_plan(env, plan))
+    again = json.loads((env.root / ".ndf" / "backlog" / "overhaul" / run / "before.json").read_text())
+    assert again == before
     code, out = env.run("revert", "--run", run)
     st = env.state()
     assert code == 0 and st["parents"] == {"5": 11}

@@ -306,6 +306,19 @@ def test_stop_name_stops_only_that_one(dirs, capsys):
             p.wait()
 
 
+def test_restart_of_the_hub_itself_does_not_stop_it(dirs, capsys, monkeypatch):
+    # 統括役を止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
+    t1 = dirs("t1", name="t1")
+    monkeypatch.setattr(hb, "hub_running", lambda: True)
+    monkeypatch.setattr(hb, "hub_relay_dir", lambda: str(t1.path))
+    stopped = []
+    monkeypatch.setattr(hc, "stop_named", lambda name: stopped.append(name) or True)
+    assert hc.cmd_restart(["t1", "--json"]) == 3
+    res = json.loads(capsys.readouterr().out)
+    assert res["status"] == "stopped" and res["items"][0]["result"] == "hub_self" and stopped == []
+    assert not (t1.path / "stop").exists()
+
+
 def test_restart_input_uses_last_section(dirs, tmp_path):
     row = {"args": ["--model", "x", "--", "最初"], "cwd": str(tmp_path)}
     w1 = hb.by_name(hb.scan_wrappers()).get("none")

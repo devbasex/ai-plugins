@@ -97,9 +97,53 @@ def _add_call(t: dict, c: Mapping) -> None:
     t["cost"] += call_cost(c)
 
 
-def session_parts(sid: str, transcript: str | None, marks: list[dict], ledger_rows: list[dict], excluded: set, seen: set) -> dict:
-    """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる（決定 13）。"""
+ALL_TIME = [(float("-inf"), float("inf"))]
+
+
+def work_windows(rows: list[dict], work: str) -> dict[str, list[tuple[float, float]]]:
+    """セッションごとに、判定の行の作業の識別子が `work` である時間の区間（次に別の作業の行が来るまで）。
+
+    同じセッションで #1 の後に #2 を扱うと、#1 の集計は #2 の行より前の呼び出しだけを数える（作業ごとに二重に数えない）。
+    セッションの最初の行が `work` なら、それより前の呼び出しも含める。`rows` は fill_work の後で `at` の順。"""
+    out: dict[str, list[tuple[float, float]]] = {}
+    state: dict[str, tuple[str, float]] = {}  # sid → (今の作業, 始まり)
+    for r in rows:
+        sid, w, at = r.get("session_id"), r.get("work") or "", cd.parse_ts(r.get("at"))
+        if not sid or not w or at is None:
+            continue
+        if sid not in state:
+            state[sid] = (w, float("-inf"))
+            continue
+        cur, since = state[sid]
+        if w != cur:
+            if cur == work:
+                out.setdefault(sid, []).append((since, at))
+            state[sid] = (w, at)
+    for sid, (cur, since) in state.items():
+        if cur == work:
+            out.setdefault(sid, []).append((since, float("inf")))
+    return out
+
+
+def _within(ts: float | None, windows: list[tuple[float, float]]) -> bool:
+    if windows == ALL_TIME:
+        return True
+    return ts is not None and any(a <= ts < b for a, b in windows)
+
+
+def session_parts(
+    sid: str,
+    transcript: str | None,
+    marks: list[dict],
+    ledger_rows: list[dict],
+    excluded: set,
+    seen: set,
+    windows: list[tuple[float, float]] | None = None,
+) -> dict:
+    """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる（決定 13）。`windows` を渡すと、その区間の呼び出しだけを数える。"""
+    windows = ALL_TIME if windows is None else windows
     calls, compacts, by_next = cd.read_calls(transcript, seen) if transcript and sid not in excluded else ([], None, False)
+    calls = [c for c in calls if _within(c["ts"], windows)]
     restored = [cd.parse_ts(m.get("at")) for m in marks if m.get("event") == cd.MARK_RESTORED]
     handoffs = [cd.parse_ts(m.get("at")) for m in marks if m.get("event") == cd.MARK_HANDOFF]
     restore_end = min((t for t in restored if t is not None), default=None) if by_next else None
@@ -114,6 +158,7 @@ def session_parts(sid: str, transcript: str | None, marks: list[dict], ledger_ro
         sub = Path(str(transcript).removesuffix(".jsonl")) / "subagents"
         for f in sorted(sub.glob("*.jsonl")) if sub.is_dir() else []:
             sub_calls, _, _ = cd.read_calls(f, seen)
+            sub_calls = [c for c in sub_calls if _within(c["ts"], windows)]
             for c in sub_calls:
                 _add_call(parts["ndf"], c)
             parts["ndf"]["seconds"] += busy_seconds(c["ts"] for c in sub_calls)
@@ -124,7 +169,7 @@ def session_parts(sid: str, transcript: str | None, marks: list[dict], ledger_ro
             not row.get("parent_session_id") and span[0] is not None and at is not None and span[0] <= at <= span[1]
         )
         key = ("ledger", row.get("session_id"), row.get("at"), row.get("step"))
-        c = ledger_calls(row) if mine and key not in seen else None
+        c = ledger_calls(row) if mine and key not in seen and _within(at, windows) else None
         if c is not None:
             seen.add(key)
             _add_call(parts["ndf"], c)
@@ -145,13 +190,16 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
     """作業の識別子 1 つの集計（受け入れ条件 12・13、I12〜I14）。"""
     ledger_rows = ledger_rows or []
     excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
-    rows = [r for r in cd.fill_work(rows) if (r.get("work") or "") == work]
+    filled = cd.fill_work(rows)
+    windows = work_windows(filled, work)
+    rows = [r for r in filled if (r.get("work") or "") == work]
     sessions = cd.sessions_of(rows)
     seen: set = set()
     spans = {}
     marks = [r for r in rows if r.get("event") in cd.MARKS]
     for sid, s in sessions.items():
         calls, _, _ = cd.read_calls(s["transcript"], set()) if s["transcript"] and sid not in excluded else ([], None, False)
+        calls = [c for c in calls if _within(c["ts"], windows.get(sid, ALL_TIME))]
         ts = [c["ts"] for c in calls if c["ts"]] + [cd.parse_ts(r.get("at")) for r in s["rows"] if cd.parse_ts(r.get("at"))]
         if ts:
             spans[sid] = (min(ts), max(ts))
@@ -160,7 +208,7 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
     compacts: int | None = 0
     no_restore_mark = no_handoff_mark = 0
     for sid, s in sessions.items():
-        summary = session_parts(sid, s["transcript"], by_session.get(sid, []), ledger_rows, excluded, seen)
+        summary = session_parts(sid, s["transcript"], by_session.get(sid, []), ledger_rows, excluded, seen, windows.get(sid))
         for b in BUCKETS:
             for k, v in summary["parts"][b].items():
                 totals[b][k] += v

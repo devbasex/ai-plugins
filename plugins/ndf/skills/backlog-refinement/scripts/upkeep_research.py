@@ -20,6 +20,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -62,6 +63,15 @@ SYSTEM = (
 POLL = 30
 WEB_ASPECTS = ("needs.market", "seeds.library", "seeds.alternatives", "seeds.environment")
 FAIL_LIMIT = 3
+
+
+class GraceOver(Exception):
+    """待っていたプランが終わってから research.grace 秒を過ぎた（調査中の呼び出しを止める）。"""
+
+
+def calls_path(root) -> Path:
+    """呼び出しごとの費用の記録（失敗・上限超過も含む）。周回の調査費用はこれを集める（sprint_loop_gate.backlog_summary）。"""
+    return D.backlog_dir(root) / "research" / "calls.jsonl"
 
 
 def _item_slug(s: str) -> str:
@@ -191,9 +201,10 @@ def hotspots(root, limit: int = 30) -> str:
 
 def call_llm(root, prompt: str, timeout: int, tick, tools: str) -> dict:
     """claude -p を 1 回呼ぶ（読むだけの Tool）。{ok, data, cost, seconds}。テストは差し替える。"""
-    import deps
-
-    deps.require("procs", "locks")
+    # 依存（procs・locks）は upkeep.py の main が持ち主を取る前に揃える。ここで起動し直すと自分の宣言に阻まれる
+    scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")  # supervise_lib の親
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
     import supervise_lib  # noqa: F401  lib/ を sys.path へ足す
     from supervise_lib.claude import call_claude
 
@@ -239,6 +250,12 @@ def free_slot(listing: str | None, max_: int) -> bool:
     return running_plans(listing) + 1 <= max_
 
 
+def log_call(root, item_id: str, ok: bool, usage: dict, run, loop, lap) -> None:
+    """呼び出し 1 回の費用を記録する。結果を捨てた呼び出しも支払った費用は予算に数える。"""
+    row = {"id": item_id, "at": clock.now_iso("utc"), "ok": bool(ok), **usage, "lap": lap, "by": {"run": run, "loop": loop}}
+    jsonio.append_jsonl(D.backlog_dir(root) / "research" / "calls.jsonl", row)  # calls_path と同じ置き場
+
+
 def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) -> tuple[dict | None, dict]:
     """1 項目を調べる。(書いた記録か None, 使用量)。上限を超えた・出典の無い結果は書かない。"""
     lim = cfg["research"]
@@ -246,6 +263,8 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
     extra = "# 変更の多いファイル（回数・パス）\n" + hotspots(root) if it["aspect"] == "method.hotspot" else extra
     got = call_llm(root, prompt_of(it, product, extra), int(lim["item_seconds"]), tick, tools_of(it["aspect"]))
     usage = {"cost": got["cost"], "seconds": got["seconds"]}
+    ok = got["ok"] and got["cost"] <= lim["item_usd"] and got["seconds"] <= lim["item_seconds"] and valid_record(got["data"])
+    log_call(root, it["id"], ok, usage, run, loop, lap)
     if not got["ok"] or got["cost"] > lim["item_usd"] or got["seconds"] > lim["item_seconds"] or not valid_record(got["data"]):
         return None, usage
     rec = {
@@ -291,12 +310,17 @@ def run_research(
     pl = plan(root, since)
     mat = D.materials(root) or {}
     done, cost, secs, fails, why = [], 0.0, 0.0, 0, "項目が無い"
-    beat = {"at": time.time()}
+    beat = {"at": time.time(), "until_seen": None}
 
     def tick(*_):
         if time.time() - beat["at"] >= cfg["owner"]["beat"]:
             O.touch(root, run_id)
             beat["at"] = time.time()
+        # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
+        if until and Path(until).exists():
+            seen = beat["until_seen"] = beat["until_seen"] or time.time()
+            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
+                raise GraceOver
 
     try:
         for item_id in pl["todo"]:
@@ -314,6 +338,9 @@ def run_research(
                 break
             try:
                 rec, usage = research_one(root, pl["by_id"][item_id], cfg, mat.get("product"), run_id, loop, lap, tick)
+            except GraceOver:
+                why = "待っていたプランが終わり、猶予を過ぎた"
+                break
             except (StepError, OSError, subprocess.SubprocessError):
                 rec, usage = None, {"cost": 0.0, "seconds": 0.0}
             cost += usage["cost"]

@@ -429,6 +429,7 @@ def research_command(root: str, rec: dict, lap: dict, done: Path) -> str:
     """待ち（`supervise.py wait`）と並べて背景で打つ、待ち時間の調査の 1 行（#2315 の決定 7）。"""
     plans = done.with_suffix(".plans.json")
     args = ["python3", str(UPKEEP), "research", "run", "--root", root, "--until", str(done), "--queue", str(plans)]
+    args += ["--max", str(QUEUE_MAX)]  # 調査はまとめの queue と同じ並列の上限に数える
     return shlex.join([*args, "--lap", str(lap["n"]), "--loop", rec["name"]])
 
 
@@ -442,19 +443,23 @@ def owner_line(env: Env) -> tuple[str, dict | None]:
 
 
 def backlog_summary(env: Env, rec: dict, lap: dict) -> None:
-    """周回の間の棚卸しの深さの行と、この周回で調べた調査の項目の費用と秒を周回の記録へ写す（#2315）。"""
+    """周回の間の棚卸しの深さの行と、調査の費用と秒を周回の記録へ写す（#2315）。
+
+    調査の費用は呼び出しごとの記録（`research/calls.jsonl`。結果を捨てた呼び出しも含む）から集める。背景の調査は周回を
+    締めた後にも終わるため、このループのすべての周回を記録から数え直し、締め済みの周回へ後から終わった費用を精算する。"""
     d = env.main_dir() / ".ndf" / "backlog"
     since = lap.get("started_at") or ""
     rows = jsonio.read_jsonl(d / "depths.jsonl", missing=[], skip_broken=True)
     lap["depths"] = [{k: r.get(k) for k in ("depth", "event", "trigger", "cost", "seconds")} for r in rows if (r.get("at") or "") >= since]
-    items = [jsonio.read(f, missing={}, broken={}, want=dict) for f in sorted((d / "research").glob("*.json"))]
-    mine = [r for r in items if r.get("lap") == lap["n"] and (r.get("by") or {}).get("loop") == rec.get("name")]
-    if mine:
-        lap["research"] = {
-            "items": [r.get("id") for r in mine],
-            "cost": round(sum(float(r.get("cost") or 0) for r in mine), 6),
-            "seconds": round(sum(float(r.get("seconds") or 0) for r in mine), 3),
-        }
+    calls = jsonio.read_jsonl(d / "research" / "calls.jsonl", missing=[], skip_broken=True)
+    for each in {id(x): x for x in [*rec.get("laps", []), lap]}.values():
+        mine = [r for r in calls if r.get("lap") == each.get("n") and (r.get("by") or {}).get("loop") == rec.get("name")]
+        if mine:
+            each["research"] = {
+                "items": [r.get("id") for r in mine if r.get("ok")],
+                "cost": round(sum(float(r.get("cost") or 0) for r in mine), 6),
+                "seconds": round(sum(float(r.get("seconds") or 0) for r in mine), 3),
+            }
 
 
 def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None, deferred_issues=(), done_rows=()) -> None:

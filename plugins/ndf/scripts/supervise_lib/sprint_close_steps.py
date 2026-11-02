@@ -123,7 +123,9 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
             "type": "run",
             "cwd": repo,
             "timeout": 60,
-            "cmd": _upkeep(repo, "owner", "claim", "--what", depth),
+            # 持ち主の pid は次の work ステップまで生きる supervise.py にする。run のステップは sh -c で動くため、
+            # 既定（呼び出し元 = 短命なシェル）だとこのステップの終わりで宣言が無効になる。$PPID はシェルの親 = supervise.py
+            "cmd": _upkeep(repo, "owner", "claim", "--what", depth) + ' --pid "$PPID"',
             "on_exit": {"10": f"{depth}-skipped"},
             "next": depth,
         },

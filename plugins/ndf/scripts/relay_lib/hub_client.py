@@ -358,6 +358,13 @@ def cmd_restart(argv: list[str]) -> int:
         return print_result(_not_found("restart", name), as_json)
     if not hb.hub_running():
         return print_result(no_hub("restart", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
+    hub_dir = hb.hub_relay_dir()
+    if w and hub_dir and os.path.realpath(w.dir) == os.path.realpath(hub_dir):
+        # 統括役自身を止めると、起動し直す依頼を受ける者が居なくなり停止だけが起きる。止めずに、区間の切り替えへ回す
+        res = hb.hub_result(
+            "restart", "stopped", f"{name} は統括役のため止めない。その端末で /ndf:restart を打って区間を切り替える", name, "hub_self", 3
+        )
+        return print_result(res, as_json)
     stop_named(name)
     res = send_request("restart", name, os.getcwd(), [], "restart")
     return print_result(res or no_hub("restart", name, "統括役が答えない"), as_json)

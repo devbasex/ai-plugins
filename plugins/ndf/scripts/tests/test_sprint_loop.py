@@ -632,19 +632,31 @@ def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     research = out["metrics"]["research"]
     assert "research run" in research and "--until" in research and "--lap 1 --loop l1" in research
+    assert f"--max {sl_gate.QUEUE_MAX}" in research  # まとめの queue と同じ並列の上限
     b = env.root / ".ndf" / "backlog"
     (b / "research").mkdir(parents=True)
     (b / "depths.jsonl").write_text(
         json.dumps({"at": "2999-01-01T00:00:00Z", "depth": "review", "event": "ran", "trigger": ["count"]}) + "\n"
     )
-    item = {"id": "seeds.library:pytest", "cost": 0.5, "seconds": 30, "lap": 1, "by": {"run": "r", "loop": "l1"}}
-    (b / "research" / "seeds.library--pytest.json").write_text(json.dumps(item))
+    # 結果を捨てた呼び出し（ok: false）も支払った費用として数える
+    calls = [
+        {"id": "seeds.library:pytest", "ok": True, "cost": 0.5, "seconds": 30, "lap": 1, "by": {"run": "r", "loop": "l1"}},
+        {"id": "needs.market:x", "ok": False, "cost": 0.25, "seconds": 10, "lap": 1, "by": {"run": "r", "loop": "l1"}},
+    ]
+    (b / "research" / "calls.jsonl").write_text("".join(json.dumps(c) + "\n" for c in calls))
     set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)
     sl.cmd_lap(env, "l1", False, None, [])
     lap = rec(env)["laps"][0]
-    assert lap["research"] == {"items": ["seeds.library:pytest"], "cost": 0.5, "seconds": 30.0}
-    assert lap["depths"][0]["depth"] == "review" and sl.consumed(rec(env))["usd"] == 2.0
+    assert lap["research"] == {"items": ["seeds.library:pytest"], "cost": 0.75, "seconds": 40.0}
+    assert lap["depths"][0]["depth"] == "review" and sl.consumed(rec(env))["usd"] == 2.25
     assert "調査: 1 項目" in (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
+    # 周回を締めた後に終わった背景の調査の費用は、次に締めるときに締め済みの周回へ精算する
+    late = {"id": "seeds.alternatives:pytest", "ok": True, "cost": 1.0, "seconds": 5, "lap": 1, "by": {"run": "r", "loop": "l1"}}
+    with (b / "research" / "calls.jsonl").open("a") as f:
+        f.write(json.dumps(late) + "\n")
+    r = rec(env)
+    sl_gate.backlog_summary(env, r, {"n": 2, "started_at": ""})
+    assert r["laps"][0]["research"]["cost"] == 1.75 and sl.consumed(r)["usd"] == 3.25
     assert sl.cmd_status(env, "l1")["items"][-1] == "見直しの持ち主: なし"
 
 

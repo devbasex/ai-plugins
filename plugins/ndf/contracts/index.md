@@ -45,6 +45,7 @@
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `rank-json` | `rank.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `report-md` | `report.md` | report | state-dir | `plugins/ndf/scripts/supervise.py` | — |
+| `research-calls-jsonl` | `calls.jsonl` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `research-item-json` | `*--*.item.json` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `snapshot-json` | `snapshot.json` | record | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `state-json` | `state.json` | state | state-dir | `plugins/ndf/scripts/supervise.py` | — |

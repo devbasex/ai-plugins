@@ -59,6 +59,7 @@
     "estimates-json",
     "measures-json",
     "rank-json",
+    "research-calls-jsonl",
     "research-item-json",
     "snapshot-json"
   ],

@@ -270,11 +270,15 @@ def write_applied(sid: str, applied, env: Mapping | None = None) -> bool:
 def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, bool]:
     """会話の記録の API 呼び出し（同じ `message.id` は 1 回。I13）と、自動圧縮の回数と、ndf-next で始まったか。
 
+    同じ `message.id` の行は最後の usage を採る（ストリーミングで後の行ほど output_tokens が増える。scripts/token-usage.py と同じ）。
+    時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
+
     呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
     from usage_ledger import cache_writes
 
     seen = set() if seen is None else seen
     calls: list[dict] = []
+    here: dict = {}  # このファイルで数えた message.id → calls の位置
     compacts = 0
     first_user: str | None = None
     try:
@@ -300,23 +304,27 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
         if e.get("type") != "assistant" or not isinstance(usage, dict):
             continue
         mid = msg.get("id") or e.get("uuid")
-        if mid in seen:
+        if mid in seen and mid not in here:
             continue
         seen.add(mid)
         w5, w1h = cache_writes(usage)
         inp, read = int(usage.get("input_tokens") or 0), int(usage.get("cache_read_input_tokens") or 0)
-        calls.append(
-            {
-                "ts": parse_ts(e.get("timestamp")),
-                "model": msg.get("model"),
-                "inp": inp,
-                "out": int(usage.get("output_tokens") or 0),
-                "read": read,
-                "w5": w5,
-                "w1h": w1h,
-                "context": inp + read + w5 + w1h,
-            }
-        )
+        call = {
+            "ts": parse_ts(e.get("timestamp")),
+            "model": msg.get("model"),
+            "inp": inp,
+            "out": int(usage.get("output_tokens") or 0),
+            "read": read,
+            "w5": w5,
+            "w1h": w1h,
+            "context": inp + read + w5 + w1h,
+        }
+        if mid in here:
+            call["ts"] = calls[here[mid]]["ts"] or call["ts"]
+            calls[here[mid]] = call
+        else:
+            here[mid] = len(calls)
+            calls.append(call)
     return calls, compacts, bool(first_user and HANDOFF_PATH.search(first_user))
 
 

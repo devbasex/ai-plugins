@@ -496,7 +496,9 @@ def build_parser():
 
 
 def main(argv=None):
-    deps.require("durable", "schema", "waits")  # schema は見積もりの記録の形（rank が読む。#1856）
+    # schema は見積もりの記録の形（rank が読む。#1856）。procs は調査の claude -p（upkeep_research.call_llm）が読む。
+    # 起動し直し（exec）は見直しの持ち主を取る前のここで 1 回に済ませる（取った後だと自分の宣言に阻まれる）
+    deps.require("durable", "schema", "waits", "procs")
     main_with(build_parser(), lambda a: TOOL, argv)
 
 

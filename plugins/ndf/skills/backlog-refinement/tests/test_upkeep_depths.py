@@ -216,7 +216,30 @@ def test_run_discards_unsourced_or_over_budget_results(root, tmp_path, monkeypat
     assert R.run_research(root, str(tmp_path / "done.json"), None, 6, 3)["items"] == []
     monkeypatch.setattr(R, "call_llm", _Fake(cost=5))
     m = R.run_research(root, str(tmp_path / "done.json"), None, 6, 3)
-    assert m["items"] == [] and not (root / ".ndf" / "backlog" / "research").exists()
+    assert m["items"] == [] and not list((root / ".ndf" / "backlog" / "research").glob("*.item.json"))
+    # 結果を捨てた呼び出しも、支払った費用を呼び出しの記録に残す（周回の調査費用はここから集める）
+    calls = [json.loads(x) for x in R.calls_path(root).read_text().splitlines()]
+    assert calls and not any(c["ok"] for c in calls) and sum(c["cost"] for c in calls) == m["cost"] + 0.3
+
+
+def test_run_stops_a_call_after_the_grace_once_the_plan_ends(root, tmp_path, monkeypatch):
+    # 調査中の tick でも待っていたプランの完了を見て、research.grace を過ぎた呼び出しを止める
+    _decl(root, "project.json", {"materials": MATERIALS})
+    done = tmp_path / "done.json"
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(R.time, "time", lambda: clock["t"])
+
+    def slow(root_, prompt, timeout, tick, tools):
+        done.write_text("{}")
+        tick()
+        clock["t"] += 301
+        tick()
+        raise AssertionError("猶予を過ぎても止まらない")
+
+    monkeypatch.setattr(R, "call_llm", slow)
+    m = R.run_research(root, str(done), None, 6, 3)
+    assert m["items"] == [] and "猶予" in m["stopped"]
+    assert json.loads(O.owner_file(root).read_text())["finished_at"]  # 持ち主を手放す
 
 
 def test_run_starts_nothing_after_the_plan_ends_or_without_a_slot(root, tmp_path, monkeypatch):

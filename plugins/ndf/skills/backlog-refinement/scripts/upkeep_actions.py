@@ -205,7 +205,12 @@ def reparent(root, gh: Gh, ms: Milestones, repo: str, plan: dict) -> dict:
             )
         run_dir = before_path(root, run).parent
         run_dir.mkdir(parents=True, exist_ok=True)
-        jsonio.write_atomic(run_dir / "before.json", before, indent=1)
+        # 同じ run の打ち直し・対象を分けた apply では、最初に記録した変更前の状態を残す（変更済みの状態で上書きしない）
+        kept = jsonio.read(run_dir / "before.json", missing=[], broken=None)
+        if not isinstance(kept, list):
+            raise OSError(f"前の付け直しの記録を読めない: {run_dir / 'before.json'}")
+        seen = {b.get("number") for b in kept if isinstance(b, dict)}
+        jsonio.write_atomic(run_dir / "before.json", kept + [b for b in before if b["number"] not in seen], indent=1)
     except (StepError, Partial, OSError) as e:
         out["reparent_failed"] = [r.get("number") for r in rows]
         out["reason"] = f"前の状態を書けないため 1 件も付け直さない: {e}"
