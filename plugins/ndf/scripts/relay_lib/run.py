@@ -18,13 +18,15 @@ from dataclasses import replace
 
 from . import claude as cl
 from . import handover as ho
-from . import record, version_dir
+from . import hub as hb
+from . import hub_client, record, tmux, version_dir
 from .common import (
     CHILD_FILE,
     LIMIT_FILE,
     LOCK_FILE,
     LOG_FILE,
     MARK_FILE,
+    NAME_FILE,
     PID_FILE,
     QUESTION_FILE,
     QUESTION_LOCK,
@@ -443,7 +445,16 @@ class Relay(AccountSwitch, ho.Swapper):
 def cmd_run(args: list[str]) -> int:
     path = os.environ.pop(ho.HANDOVER_ENV, None)  # 入れ替えた後（#1587）。子の claude と hook へ継がせない
     if path:
-        return Relay.from_handover(path, _serve_terminal)
+        # exec で `hub.lock` は放されている。入れ替えた後の版で取り直し、取れなければ統括役を兼ねずに続ける
+        d = os.path.dirname(path)
+        hub = None if os.environ.get("NDF_RELAY_SPAWNED") else hb.Hub.claim()
+        if hub is not None:
+            hub.start(d, hb.read_name(d))
+        try:
+            return Relay.from_handover(path, _serve_terminal)
+        finally:
+            if hub is not None:
+                hub.release()
     if os.environ.get("NDF_RELAY") == "0":
         claude = cl.resolve_claude()
         if claude is None:
@@ -464,20 +475,60 @@ def cmd_run(args: list[str]) -> int:
     if not pty_available():
         cl.say("ラッパーを始めない（擬似端末を作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
+    hub = None
+    if not os.environ.get("NDF_RELAY_SPAWNED"):  # tmux の中の名前つきのラッパーは統括役を取りに行かない（決定 1）
+        hub = hb.Hub.claim()
+        if hub is None:
+            code = _ask_hub(args)
+            if code is not None:
+                return code
     got = cl.read_plugin(claude)
     if got is None:
+        _release(hub)
         cl.say("ラッパーを始めない（ndf のプラグインの名前と版を読めない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
     try:
         relay_dir = record.make_relay_dir()
     except OSError:
+        _release(hub)
         cl.say("ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
+    name = os.environ.get("NDF_RELAY_NAME") or ("t1" if hub is not None else None)
+    if name:
+        with open(os.path.join(relay_dir, NAME_FILE), "w") as f:
+            f.write(name + "\n")
     term = Terminal()
     relay = Relay(claude, relay_dir, got.marketplace, got.version, term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
-    return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))
+    if hub is not None:
+        hub.start(relay_dir, name)
+    try:
+        return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))
+    finally:
+        _release(hub)
+
+
+def _release(hub: hb.Hub | None) -> None:
+    if hub is not None:
+        hub.release()
+
+
+def _ask_hub(args: list[str]) -> int | None:
+    """統括役が居るときの端末の 2 本目（#2346）。統括役に起動を頼み、tmux のセッションへ結び付ける（戻らない）。
+    断られたら理由を 1 行出して終了コード。tmux が無い・統括役が答えないなら 1 行出して None（今の前景の起動）。"""
+    if tmux.binary() is None:
+        cl.say("tmux が PATH に無いため統括しない。この端末で 1 本のラッパーとして起動する")
+        return None
+    kind, res = hub_client.terminal_request(args)
+    if kind == "timeout" or res is None:
+        cl.say(f"統括役が {hb.wait_seconds():g} 秒答えないため、この端末で 1 本のラッパーとして起動する")
+        return None
+    if kind == "refused":
+        cl.say(f"起動しない（{res.get('summary', '')}）")
+        return hub_client.code_of(res)
+    tmux.exec_attach(hub_client.first_name(res) or "")
+    return 1
 
 
 def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body, keep_input: bool = False) -> int:

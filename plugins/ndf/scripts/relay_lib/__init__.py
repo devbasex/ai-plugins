@@ -5,7 +5,10 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 | 副命令 | 役割 |
 | --- | --- |
 | `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。合図を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
-| `stop` | 動いているラッパーすべてに停止の合図を置く |
+| `stop [<名前>] [--json]` | 名前が無ければ動いているラッパーすべてに停止の合図を置く。名前があればその 1 本だけを止める（#2346） |
+| `spawn --name <名前> [--json] -- <最初の入力>` | 統括役に頼み、tmux の中に端末の結び付いていない名前つきのラッパーを起動する（#2346） |
+| `ls [--json]` | 同じコンテナのラッパーの名前・状態・承認待ち・区間・時刻・アカウントを 1 つの表（`--json` は 1 行の JSON）で出す（#2346） |
+| `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
 | `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453・#1468。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
@@ -28,7 +31,8 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 モジュール: `runtime`（ラッパーを動かす python と環境）・`accounts`（アカウントの副命令の入口）・`ask`（値の決定）・
 `login`（OAuth の登録）・`bedrock`（Bedrock の登録と確かめ）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
-`shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）。
+`shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）・
+`hub`（統括役）・`hub_client`（統括役への依頼の口と一覧）・`tmux`（tmux の包み）。
 
 規約は skills/development-workflow/references/relay.md にある。
 """
@@ -45,11 +49,11 @@ def main(argv: list[str]) -> int:
     code = runtime.enter(argv, launcher_path())
     if code is not None:
         return code
-    from . import accounts, install, mark, proc, run  # 外部パッケージの包みを import する
+    from . import accounts, hub_client, install, mark, proc, run  # 外部パッケージの包みを import する
 
     if not argv:
         print(
-            "usage: relay.py run|stop|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove",
+            "usage: relay.py run|stop|spawn|ls|attach|restart|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove",
             file=sys.stderr,
         )
         return 2
@@ -61,7 +65,11 @@ def main(argv: list[str]) -> int:
             return 0
     commands = {
         "run": lambda: run.cmd_run(rest),
-        "stop": mark.cmd_stop,
+        "stop": lambda: _stop(rest),
+        "spawn": lambda: hub_client.cmd_spawn(rest),
+        "ls": lambda: hub_client.cmd_ls(rest),
+        "attach": lambda: hub_client.cmd_attach(rest),
+        "restart": lambda: hub_client.cmd_restart(rest),
         "install": install.cmd_install,
         "uninstall": install.cmd_uninstall,
         "status": install.cmd_status,
@@ -77,3 +85,13 @@ def main(argv: list[str]) -> int:
         return commands[sub]()
     print(f"relay.py: 未知の副命令 {sub}", file=sys.stderr)
     return 2
+
+
+def _stop(rest: list[str]) -> int:
+    """名前が無ければ今のまま全部に停止の合図を置く（AC12）。名前があればその 1 本だけを止める。"""
+    from . import hub_client, mark
+
+    names = [a for a in rest if not a.startswith("--")]
+    if not names:
+        return mark.cmd_stop()
+    return hub_client.cmd_stop_named(names[0], "--json" in rest)

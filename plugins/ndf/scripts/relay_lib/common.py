@@ -43,6 +43,8 @@ ASKED_FILE = "asked"
 HELD_FILE = "mark-held.json"
 # 承認待ちの差し戻しの状態（区間・前の Stop の時刻・差し戻したか）。差し戻した直後の Stop では差し戻さない（#1492）
 WAIT_HELD_FILE = "wait-held.json"
+# 名前つきのラッパーの名前（1 行）。登録簿の行から作業ディレクトリを引く鍵（#2346）
+NAME_FILE = "name"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
 BLOCK_CLOSE = "# <<< ndf relay <<<"
