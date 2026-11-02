@@ -24,6 +24,7 @@ const view = (r: Registration, active?: number) => ({
   installation_id: r.installationId,
   registered_at: r.registeredAt,
   ...(active === undefined ? {} : { active_sprint_runs: active }),
+  ...(typeof r.maxConcurrentRuns === "number" ? { max_concurrent_runs: r.maxConcurrentRuns } : {}),
 });
 
 export class RepositoryService {
@@ -86,6 +87,20 @@ export class RepositoryService {
     const out = [];
     for (const r of regs) out.push(view(r, (await this.deps.table.getSlots(ctx.accountId, r.repositoryId)).repository));
     return { repositories: out };
+  }
+
+  // 同時の実行の数の宣言（I49。#2347）。1〜100 の整数か null（宣言を外す）。持ち主だけ
+  async declareConcurrency(ctx: AccountContext, repositoryId: number, body: Record<string, unknown>) {
+    requireOwner(ctx);
+    const value = body.max_concurrent_runs;
+    if (!("max_concurrent_runs" in body) || (value !== null && (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 100))) {
+      throw new InvalidRequestError("同時の実行の数は 1 から 100 の整数か null にしてください");
+    }
+    if (!(await this.deps.table.setMaxConcurrentRuns(ctx.accountId, repositoryId, value as number | null))) {
+      throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
+    }
+    const r = (await this.deps.table.getRegistration(ctx.accountId, repositoryId))!;
+    return view(r, (await this.deps.table.getSlots(ctx.accountId, repositoryId)).repository);
   }
 
   async unregister(ctx: AccountContext, repositoryId: number): Promise<void> {

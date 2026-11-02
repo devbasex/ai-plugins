@@ -14,6 +14,9 @@ async function setup(harness: RunsHarness) {
   harness.github.openIssues.set("org-a/repo-a", [
     { number: 1, title: "a" },
     { number: 2, title: "b" },
+    { number: 3, title: "c" },
+    { number: 4, title: "d" },
+    { number: 5, title: "e" },
   ]);
   await harness.table.putRegistration({
     accountId: "acc-1",
@@ -56,7 +59,9 @@ async function finishJob(jobId: string, sprintRunId: string, result: "gate" | "d
 const finishedOf = (sprintRunId: string) => h.progress.listRun(sprintRunId).filter((e) => e.type === "job.finished");
 
 beforeEach(async () => {
-  h = await createRunsHarness();
+  // 同じリポジトリで並べるテストのため、移行を済ませ、並行を許す版の下限を置く（#2347 の決定 12）
+  h = await createRunsHarness({ ...TEST_CONFIG, parallelMinVersion: "10.0.0" });
+  h.table.migrated = true;
   await setup(h);
 });
 
@@ -83,10 +88,10 @@ describe("開始（受け入れ条件 11〜14、I34・I35）", () => {
     await h.control.onTaskStateChange((await h.table.getRun(first.sprint_run_id))!.currentJobId!, "RUNNING");
     await finishJob((await h.table.getRun(first.sprint_run_id))!.currentJobId!, first.sprint_run_id, "gate");
     expect((await h.table.getRun(first.sprint_run_id))!.state).toBe("awaiting_approval");
-    await start(ctx);
-    await start(ctx);
+    await start(ctx, [2]);
+    await start(ctx, [3]);
     try {
-      await start(ctx);
+      await start(ctx, [4]);
       expect.unreachable();
     } catch (err) {
       expect((err as ApiError).status).toBe(409);
@@ -100,7 +105,7 @@ describe("開始（受け入れ条件 11〜14、I34・I35）", () => {
 
   it("同時の開始でも上限を超えない（決定 5）", async () => {
     const ctx = accountContext({ plan: "pro" });
-    const results = await Promise.allSettled([start(ctx), start(ctx), start(ctx), start(ctx), start(ctx)]);
+    const results = await Promise.allSettled([start(ctx, [1]), start(ctx, [2]), start(ctx, [3]), start(ctx, [4]), start(ctx, [5])]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(3);
     expect((await h.table.getSlots("acc-1", REPO_ID)).account).toBe(3);
   });
@@ -169,8 +174,9 @@ describe("開始（受け入れ条件 11〜14、I34・I35）", () => {
 });
 
 describe("停止の知らせ・再開（受け入れ条件 15・19・20、I8・I9・I40）", () => {
+  let nextIssue = 0;
   async function runningRun() {
-    const { sprint_run_id } = await start();
+    const { sprint_run_id } = await start(accountContext(), [(nextIssue++ % 5) + 1]);
     const jobId = (await h.table.getRun(sprint_run_id))!.currentJobId!;
     await h.control.onTaskStateChange(jobId, "RUNNING");
     return { sprintRunId: sprint_run_id, jobId };

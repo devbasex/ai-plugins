@@ -7,7 +7,8 @@ import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { RunnerPlatform, SignedUrl, TaskStatus } from "./platform.ts";
 
 export const STATE_URL_SECONDS = 15 * 60;
-export const stateKey = (sprintRunId: string) => `sprint-runs/${sprintRunId}/ndf-state.tar.gz`;
+export const stateKey = (sprintRunId: string, loopId?: string | null) =>
+  loopId ? `loops/${loopId}/ndf-state.tar.gz` : `sprint-runs/${sprintRunId}/ndf-state.tar.gz`;
 
 export interface EcsPlatformConfig {
   clusterArn: string;
@@ -69,8 +70,8 @@ export class EcsRunnerPlatform implements RunnerPlatform {
     return status === "RUNNING" ? "RUNNING" : "PENDING";
   }
 
-  async stateUrl(sprintRunId: string, op: "put" | "get"): Promise<SignedUrl | null> {
-    const Key = stateKey(sprintRunId);
+  async stateUrl(sprintRunId: string, op: "put" | "get", loopId?: string | null): Promise<SignedUrl | null> {
+    const Key = stateKey(sprintRunId, loopId);
     const Bucket = this.config.stateBucket;
     if (op === "get") {
       try {
