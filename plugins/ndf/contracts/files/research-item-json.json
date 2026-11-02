@@ -1,0 +1,7 @@
+{
+  "name": "research-item-json",
+  "pattern": "*--*.item.json",
+  "kind": "record",
+  "place": "main",
+  "skill_readers": []
+}

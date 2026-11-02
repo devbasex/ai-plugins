@@ -122,30 +122,32 @@ def test_only_one_of_two_concurrent_claims_wins(root):
 
 
 def test_dead_or_expired_owner_is_taken_over_with_taken_from(root):
-    run, _, _ = O.claim(root, "research", "l1", pid=os.getpid())
+    run, _, _ = O.claim_review(root, "research", "l1", pid=os.getpid())
     path = O.owner_file(root)
-    assert O.claim(root, "review")[0] is None  # 生きていて窓の内なら引き取らない（受け入れ条件 9a）
+    assert O.claim_review(root, "review")[0] is None  # 生きていて窓の内なら引き取らない（受け入れ条件 9a）
     rec = json.loads(path.read_text())
     rec["pid"] = 2**22 + 12345  # 同じホストで生きていない pid
     path.write_text(json.dumps(rec))
-    run2, taken, _ = O.claim(root, "review", "l2", pid=os.getpid())
+    run2, taken, _ = O.claim_review(root, "review", "l2", pid=os.getpid())
     assert run2 and taken == {"run": run, "loop": "l1", "seen_at": rec["seen_at"]}
     rec = json.loads(path.read_text())
     rec["seen_at"] = run_owner.utc_iso(time.time() - 901)  # 寿命の窓（既定 900 秒）を過ぎた
     path.write_text(json.dumps(rec))
-    run3, taken, _ = O.claim(root, "review", pid=os.getpid())
+    run3, taken, _ = O.claim_review(root, "review", pid=os.getpid())
     assert run3 and taken["run"] == run2
     assert O.touch(root, run2)  # 引き取られた側は印を書けない
-    assert O.release(root, run3) is None and O.claim(root, "review", pid=os.getpid())[1] is None  # 終わった宣言は引き取りでない
+    assert (
+        O.release_review(root, run3) is None and O.claim_review(root, "review", pid=os.getpid())[1] is None
+    )  # 終わった宣言は引き取りでない
 
 
 def test_other_host_owner_is_judged_by_the_window_only(root):
-    O.claim(root, "research", pid=os.getpid())
+    O.claim_review(root, "research", pid=os.getpid())
     path = O.owner_file(root)
     rec = json.loads(path.read_text())
     rec.update(host="other-host", pid=2**22 + 12345)
     path.write_text(json.dumps(rec))
-    assert O.claim(root, "review")[0] is None
+    assert O.claim_review(root, "review")[0] is None
 
 
 # ---------------- 調査 ----------------
@@ -154,7 +156,11 @@ MATERIALS = {
     "product": {"kind": "Web サービス", "users": "業務の担当者"},
     "needs": {
         "usage": [
-            {"name": "pv", "command": "echo 'page=/report count=40 user=alice@example.com'", "scope": {"aggregate_only": True, "days": 30, "mask": [r"\S+@\S+"]}},
+            {
+                "name": "pv",
+                "command": "echo 'page=/report count=40 user=alice@example.com'",
+                "scope": {"aggregate_only": True, "days": 30, "mask": [r"\S+@\S+"]},
+            },
             {"name": "raw", "command": "echo rows", "scope": {"aggregate_only": False}},
         ]
     },
@@ -193,7 +199,7 @@ def test_run_writes_only_sourced_items_and_masks_usage(root, tmp_path, monkeypat
     _decl(root, "project.json", {"materials": MATERIALS})
     fake = _Fake()
     monkeypatch.setattr(R, "call_llm", fake)
-    m = R.run(root, str(tmp_path / "done.json"), None, 6, 2, lap=1)
+    m = R.run_research(root, str(tmp_path / "done.json"), None, 6, 2, lap=1)
     assert m["items"] == ["needs.usage:pv", "seeds.library:pytest"] and m["cost"] == 0.2
     prompt, tools = fake.calls[0]
     assert "count=40" in prompt and "alice@example.com" not in prompt and tools == "Read,Grep,Glob"
@@ -207,9 +213,9 @@ def test_run_writes_only_sourced_items_and_masks_usage(root, tmp_path, monkeypat
 def test_run_discards_unsourced_or_over_budget_results(root, tmp_path, monkeypatch):
     _decl(root, "project.json", {"materials": MATERIALS})
     monkeypatch.setattr(R, "call_llm", _Fake(data={"sources": [], "findings": []}))
-    assert R.run(root, str(tmp_path / "done.json"), None, 6, 3)["items"] == []
+    assert R.run_research(root, str(tmp_path / "done.json"), None, 6, 3)["items"] == []
     monkeypatch.setattr(R, "call_llm", _Fake(cost=5))
-    m = R.run(root, str(tmp_path / "done.json"), None, 6, 3)
+    m = R.run_research(root, str(tmp_path / "done.json"), None, 6, 3)
     assert m["items"] == [] and not (root / ".ndf" / "backlog" / "research").exists()
 
 
@@ -219,36 +225,36 @@ def test_run_starts_nothing_after_the_plan_ends_or_without_a_slot(root, tmp_path
     monkeypatch.setattr(R, "call_llm", fake)
     done = tmp_path / "done.json"
     done.write_text("{}")
-    assert R.run(root, str(done), None, 6, 3)["items"] == [] and fake.calls == []
+    assert R.run_research(root, str(done), None, 6, 3)["items"] == [] and fake.calls == []
     # 空きが無い間は始めない（受け入れ条件 6a）。待っていたプランが終わったら抜ける
     plan = tmp_path / "p1.json"
     (tmp_path / "p1-state").mkdir()
     listing = tmp_path / "q.plans.json"
     listing.write_text(json.dumps({"plans": [str(plan)]}))
     done.unlink()
-    m = R.run(root, str(done), str(listing), 1, 3, sleep=lambda s: done.write_text("{}"))
+    m = R.run_research(root, str(done), str(listing), 1, 3, sleep=lambda s: done.write_text("{}"))
     assert m["items"] == [] and fake.calls == [] and m["stopped"] == "待っていたプランが終わった"
 
 
 def test_run_does_nothing_when_another_owner_is_alive(root, tmp_path, monkeypatch):
     _decl(root, "project.json", {"materials": MATERIALS})
-    O.claim(root, "review", pid=os.getpid())
+    O.claim_review(root, "review", pid=os.getpid())
     fake = _Fake()
     monkeypatch.setattr(R, "call_llm", fake)
-    assert R.run(root, str(tmp_path / "done.json"), None, 6, 3)["reason"] == "not_owner" and fake.calls == []
+    assert R.run_research(root, str(tmp_path / "done.json"), None, 6, 3)["reason"] == "not_owner" and fake.calls == []
 
 
 def test_review_owner_researches_stale_items_without_releasing(root, monkeypatch):
     # 見直しの中では持ち主の実行のまま、前の見直しより古い項目と足りない項目だけを調べる（受け入れ条件 6）
     _decl(root, "project.json", {"materials": MATERIALS})
-    run, _, _ = O.claim(root, "review", pid=os.getpid())
+    run, _, _ = O.claim_review(root, "review", pid=os.getpid())
     fake = _Fake()
     monkeypatch.setattr(R, "call_llm", fake)
-    assert R.run(root, None, None, 6, 1, owner=run)["items"] == ["needs.usage:pv"]
-    assert R.run(root, None, None, 6, 9, owner=run, since="2000-01-01T00:00:00Z")["items"][0] == "seeds.library:pytest"
-    assert R.run(root, None, None, 6, 9, owner=run, since="2999-01-01T00:00:00Z")["items"][0] == "needs.usage:pv"  # 古い項目
+    assert R.run_research(root, None, None, 6, 1, owner=run)["items"] == ["needs.usage:pv"]
+    assert R.run_research(root, None, None, 6, 9, owner=run, since="2000-01-01T00:00:00Z")["items"][0] == "seeds.library:pytest"
+    assert R.run_research(root, None, None, 6, 9, owner=run, since="2999-01-01T00:00:00Z")["items"][0] == "needs.usage:pv"  # 古い項目
     assert not json.loads(O.owner_file(root).read_text())["finished_at"]
-    assert R.run(root, None, None, 6, 1, owner="other")["reason"] == "not_owner"
+    assert R.run_research(root, None, None, 6, 1, owner="other")["reason"] == "not_owner"
 
 
 # ---------------- 大整理の集計 ----------------
@@ -265,7 +271,7 @@ def test_count_types_components_milestones_and_months():
         ],
         "closed": [{"number": 9, "created_at": "2026-10-01T00:00:00Z", "closed_at": "2026-10-05T00:00:00Z"}],
     }
-    got = V.count(snap, [{"number": 1, "type": "A"}, {"number": 3, "type": "H"}], D.DEFAULT_CAUSE_TYPES)
+    got = V.count_types(snap, [{"number": 1, "type": "A"}, {"number": 3, "type": "H"}], D.DEFAULT_CAUSE_TYPES)
     assert got["by_type"]["A"] == 1 and got["by_type"]["I"] == 1 and got["by_type"]["H"] == 1 and got["unclassified"] == 1
     assert got["defects"] == 2 and got["components"][0] == ("supervise.py", 2)
     assert got["milestones"]["28"] == {"A": 1, "H": 1}
@@ -276,6 +282,6 @@ def test_count_types_components_milestones_and_months():
 def test_count_reads_the_20261101_snapshot():
     # 受け入れ条件 22: 2026-11-01 の未完了の一覧（固定の入力）から型ごとの件数を数える。分類は大整理の手順 1 でやり直す
     snap = json.loads(FIXTURE.read_text())
-    got = V.count(snap, [], D.DEFAULT_CAUSE_TYPES)
+    got = V.count_types(snap, [], D.DEFAULT_CAUSE_TYPES)
     assert got["issues"] == len(snap["open"]) and got["by_type"]["I"] == got["issues"]
     assert got["components"] and got["months"]

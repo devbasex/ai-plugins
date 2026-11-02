@@ -669,15 +669,25 @@ def _raw_plan(env, body):
 
 
 def _create(title, kind="needs", verdict="follow", **kw):
-    return {"kind": kind, "title": title, "body": "本文", "sources": [{"kind": "url", "value": "https://example.com"}],
-            "mvv_basis": "Value 3", "mvv_verdict": verdict, **kw}
+    return {
+        "kind": kind,
+        "title": title,
+        "body": "本文",
+        "sources": [{"kind": "url", "value": "https://example.com"}],
+        "mvv_basis": "Value 3",
+        "mvv_verdict": verdict,
+        **kw,
+    }
 
 
 def test_diff_depth_does_not_reflect_review_work(env):
     # 差分の棚卸しは順位の表・マイルストーン・やらない・起票を反映しない（I12）
     snap = env.snapshot(3)
-    plan = {"actions": [_action(snap, "追記が要る", {"milestone": "M1"}), _action(snap, "やらない", {"state": "closed"}, approved=True)],
-            "rank": "abc", "create": [_create("新しい課題")]}
+    plan = {
+        "actions": [_action(snap, "追記が要る", {"milestone": "M1"}), _action(snap, "やらない", {"state": "closed"}, approved=True)],
+        "rank": "abc",
+        "create": [_create("新しい課題")],
+    }
     code, out = env.run("apply", "--plan", _raw_plan(env, plan))
     reasons = {i["name"]: i["result"] for i in out["items"]}
     assert code == 0 and not env.writes()
@@ -721,8 +731,12 @@ def test_reparent_writes_before_state_and_reverts(env):
     env.snapshot(3)
     run = _overhaul_owner(env)
     env.set(lambda st: st.update(parents={"5": 11}))
-    plan = {"depth": "overhaul", "owner": run, "policy_verdict": "follow",
-            "reparent": [{"number": 5, "parent": 2, "milestone": "M1"}, {"number": 7, "parent": 2, "milestone": None}]}
+    plan = {
+        "depth": "overhaul",
+        "owner": run,
+        "policy_verdict": "follow",
+        "reparent": [{"number": 5, "parent": 2, "milestone": "M1"}, {"number": 7, "parent": 2, "milestone": None}],
+    }
     code, out = env.run("apply", "--plan", _raw_plan(env, plan))
     assert code == 0 and out["metrics"]["reparented"] == [5, 7]
     before = json.loads((env.root / ".ndf" / "backlog" / "overhaul" / run / "before.json").read_text())
@@ -738,8 +752,12 @@ def test_reparent_failure_reports_the_revert_command(env):
     env.snapshot(3)
     run = _overhaul_owner(env)
     env.set(lambda st: st.update(fail_parent=7))
-    plan = {"depth": "overhaul", "owner": run, "policy_verdict": "follow",
-            "reparent": [{"number": 5, "parent": 2}, {"number": 7, "parent": 2}]}
+    plan = {
+        "depth": "overhaul",
+        "owner": run,
+        "policy_verdict": "follow",
+        "reparent": [{"number": 5, "parent": 2}, {"number": 7, "parent": 2}],
+    }
     code, out = env.run("apply", "--plan", _raw_plan(env, plan))
     assert code == 1 and out["metrics"]["reparent_failed"] == [7]
     assert f"revert --run {run}" in out["metrics"]["revert_command"] and "revert" in out["next"]
@@ -749,8 +767,12 @@ def test_reparent_waits_for_a_following_policy(env):
     # 大方針の MVV 判定が従う以外なら付け直しへ進まない（受け入れ条件 21）
     env.snapshot(3)
     run = _overhaul_owner(env)
-    plan = {"depth": "overhaul", "owner": run, "create": [_create("大方針", kind="policy", verdict="suspect")],
-            "reparent": [{"number": 5, "parent": 2}]}
+    plan = {
+        "depth": "overhaul",
+        "owner": run,
+        "create": [_create("大方針", kind="policy", verdict="suspect")],
+        "reparent": [{"number": 5, "parent": 2}],
+    }
     code, out = env.run("apply", "--plan", _raw_plan(env, plan))
     assert code == 0 and out["metrics"]["not_reparented"] == [5] and not env.state().get("parents")
     pol = [i for i in env.state()["issues"].values() if i["title"] == "大方針"][0]

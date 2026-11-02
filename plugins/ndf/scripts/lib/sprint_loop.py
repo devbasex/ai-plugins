@@ -468,7 +468,13 @@ def cmd_status(env: Env, name: str) -> dict:
         lines.append("人の判断待ち: " + " ".join(f"#{n}" for n in waiting))
     line, owner = owner_line(env)
     lines.append(line)
-    metrics = {"status": rec.get("status"), "consumed": consumed(rec), "budget": rec.get("budget"), "waiting": waiting, "review_owner": owner}
+    metrics = {
+        "status": rec.get("status"),
+        "consumed": consumed(rec),
+        "budget": rec.get("budget"),
+        "waiting": waiting,
+        "review_owner": owner,
+    }
     if rec.get("stop"):
         lines.append(f"止まった理由: {rec['stop']['condition']}。再開: {resume_command(rec)}")
         metrics.update(stop=rec["stop"], stop_line=stop_line(rec, rec["stop"]["condition"]))

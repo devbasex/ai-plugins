@@ -41,7 +41,7 @@ def valid(path: Path, record: dict | None, ttl: float, now: float | None = None)
     return record is not None and run_owner.alive(path, record, time.time() if now is None else now, window=ttl)
 
 
-def claim(root, what: str, loop: str | None = None, pid: int | None = None) -> tuple[str | None, dict | None, dict | None]:
+def claim_review(root, what: str, loop: str | None = None, pid: int | None = None) -> tuple[str | None, dict | None, dict | None]:
     """(実行の識別子, 引き取り元, 今の有効な持ち主)。持ち主になれなければ識別子は None。錠を取れなければ LockTimeout。"""
     path = owner_file(root)
     ttl = D.settings(root)["owner"]["ttl"]
@@ -95,11 +95,11 @@ def touch(root, run: str, item: str | None = None) -> str | None:
     return _mark(root, run, False, item)
 
 
-def release(root, run: str) -> str | None:
+def release_review(root, run: str) -> str | None:
     return _mark(root, run, True)
 
 
-def status(root) -> dict:
+def review_owner_status(root) -> dict:
     """持ち主の有無・持ち主・生死・最後に動いた時刻（`loop status` が載せる）。"""
     path = owner_file(root)
     cur, err = run_owner.read_owner(path)
@@ -116,7 +116,7 @@ def status(root) -> dict:
 def cmd_claim(a):
     root = git_root(a.root)
     try:
-        run, taken, cur = claim(root, a.what, a.loop, a.pid)
+        run, taken, cur = claim_review(root, a.what, a.loop, a.pid)
     except locks.LockTimeout as e:
         emit(result(TOOL, "stopped", f"持ち主の宣言の錠を取れない: {e}"), EXIT_PRECONDITION)
     if run is None:
@@ -144,13 +144,15 @@ def _cmd_mark(a, fn, done: str):
 
 
 def cmd_status(a):
-    st = status(git_root(a.root))
+    st = review_owner_status(git_root(a.root))
     o = st["owner"] or {}
-    summary = f"持ち主 {o.get('run')}（{'有効' if st['alive'] else '無効'}・最後に動いた時刻 {o.get('seen_at')}）" if o else "持ち主はいない"
+    summary = (
+        f"持ち主 {o.get('run')}（{'有効' if st['alive'] else '無効'}・最後に動いた時刻 {o.get('seen_at')}）" if o else "持ち主はいない"
+    )
     emit(result(TOOL, "ok", summary, [], st))
 
 
-def add_parsers(sub, common) -> None:
+def add_owner_parsers(sub, common) -> None:
     op = sub.add_parser("owner").add_subparsers(dest="owner_cmd", required=True)
     c = op.add_parser("claim", parents=[common])
     c.add_argument("--what", choices=WHATS, required=True)
@@ -163,6 +165,6 @@ def add_parsers(sub, common) -> None:
     t.set_defaults(func=lambda a: _cmd_mark(a, touch, "最後に動いた時刻を書いた"))
     r = op.add_parser("release", parents=[common])
     r.add_argument("--run", required=True)
-    r.set_defaults(func=lambda a: _cmd_mark(a, release, "持ち主を解放した"))
+    r.set_defaults(func=lambda a: _cmd_mark(a, release_review, "持ち主を解放した"))
     s = op.add_parser("status", parents=[common])
     s.set_defaults(func=cmd_status)

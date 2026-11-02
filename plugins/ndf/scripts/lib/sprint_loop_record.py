@@ -251,7 +251,9 @@ def active_seconds(rec: dict) -> float:
 def consumed(rec: dict) -> dict:
     """予算の消費（周回の数・費用・動いていた時間）。書き込まない。"""
     closed = [lap for lap in rec.get("laps", []) if lap.get("outcome") != IN_PROGRESS]
-    usd = sum(float(lap.get("cost") or 0) + float((lap.get("research") or {}).get("cost") or 0) for lap in closed)  # 調査も予算に数える（#2315）
+    usd = sum(
+        float(lap.get("cost") or 0) + float((lap.get("research") or {}).get("cost") or 0) for lap in closed
+    )  # 調査も予算に数える（#2315）
     return {"laps": len(closed), "usd": round(usd, 6), "hours": round(active_seconds(rec) / 3600, 6)}
 
 

@@ -36,22 +36,26 @@ DECISION = "needs-decision"
 KINDS = ("needs", "seeds", "policy")
 
 
-def _stop(why: str, code: int = EXIT_PRECONDITION):
-    emit(result(TOOL, "stopped", f"{why}。1 件も書かない", [{"kind": "plan", "name": "depth", "result": "stopped", "reason": why}], {}), code)
+def _stop_apply(why: str, code: int = EXIT_PRECONDITION):
+    emit(
+        result(TOOL, "stopped", f"{why}。1 件も書かない", [{"kind": "plan", "name": "depth", "result": "stopped", "reason": why}], {}), code
+    )
 
 
-def precheck(root, plan: dict) -> tuple[dict, list[dict]]:
+def precheck_depth(root, plan: dict) -> tuple[dict, list[dict]]:
     """深さと持ち主を確かめ、差分の棚卸しで反映しない action を外す。(直した plan, wrong_depth の行)。"""
     depth = plan.get("depth") or "diff"
     if depth not in D.DEPTHS:
-        _stop(f"plan の depth は {' / '.join(D.DEPTHS)} のどれか: {depth}", EXIT_UNREADABLE)
+        _stop_apply(f"plan の depth は {' / '.join(D.DEPTHS)} のどれか: {depth}", EXIT_UNREADABLE)
     plan["depth"] = depth
     if depth != "diff":
         path = O.owner_file(root)
         cur, _ = run_owner.read_owner(path)
         ttl = D.settings(root)["owner"]["ttl"]
         if not plan.get("owner") or (cur or {}).get("run") != plan["owner"] or not O.valid(path, cur, ttl):
-            _stop(f"深さ {depth} の apply は見直しの持ち主の実行（owner）だけが書く（宣言 {(cur or {}).get('run')}・plan {plan.get('owner')}）")
+            _stop_apply(
+                f"深さ {depth} の apply は見直しの持ち主の実行（owner）だけが書く（宣言 {(cur or {}).get('run')}・plan {plan.get('owner')}）"
+            )
         return plan, []
     wrong, keep = [], []
     for act in plan["actions"]:
@@ -73,7 +77,14 @@ def precheck(root, plan: dict) -> tuple[dict, list[dict]]:
             wrong.append({"kind": "plan", "name": key, "result": "wrong_depth", "reason": why})
     for key in ("create", "reparent"):
         for x in plan.pop(key, None) or []:
-            wrong.append({"kind": key, "name": str(x.get("title") or x.get("number")), "result": "wrong_depth", "reason": "差分の棚卸しは起票・付け直しをしない"})
+            wrong.append(
+                {
+                    "kind": key,
+                    "name": str(x.get("title") or x.get("number")),
+                    "result": "wrong_depth",
+                    "reason": "差分の棚卸しは起票・付け直しをしない",
+                }
+            )
     return plan, wrong
 
 
@@ -143,7 +154,11 @@ def _set_parent(gh: Gh, repo: str, n: int, parent: int | None, cur_parent: int |
     issue = gh.call([f"repos/{repo}/issues/{n}"], target=n)
     if parent is None:
         if cur_parent is not None:
-            gh.call([f"repos/{repo}/issues/{cur_parent}/sub_issue", "-X", "DELETE", "--input", "-"], stdin=json.dumps({"sub_issue_id": issue["id"]}), target=n)
+            gh.call(
+                [f"repos/{repo}/issues/{cur_parent}/sub_issue", "-X", "DELETE", "--input", "-"],
+                stdin=json.dumps({"sub_issue_id": issue["id"]}),
+                target=n,
+            )
         return
     gh.call(
         [f"repos/{repo}/issues/{parent}/sub_issues", "-X", "POST", "--input", "-"],
@@ -188,9 +203,9 @@ def reparent(root, gh: Gh, ms: Milestones, repo: str, plan: dict) -> dict:
                     "at": clock.now_iso("utc"),
                 }
             )
-        path = before_path(root, run)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        jsonio.write_atomic(path, before, indent=1)
+        run_dir = before_path(root, run).parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        jsonio.write_atomic(run_dir / "before.json", before, indent=1)
     except (StepError, Partial, OSError) as e:
         out["reparent_failed"] = [r.get("number") for r in rows]
         out["reason"] = f"前の状態を書けないため 1 件も付け直さない: {e}"
@@ -221,7 +236,9 @@ def write_extra(root, plan: dict, gh: Gh, ms: Milestones, repo: str, ledger: dic
         write_ledger()
 
     got = create(gh, repo, plan, cfg, ledger, record)
-    got.update(reparent(root, gh, ms, repo, plan) if not got["create_failed"] else {"reparented": [], "not_reparented": [], "revert_command": None})
+    got.update(
+        reparent(root, gh, ms, repo, plan) if not got["create_failed"] else {"reparented": [], "not_reparented": [], "revert_command": None}
+    )
     got["depth"] = plan["depth"]
     return got
 
@@ -256,11 +273,20 @@ def cmd_revert(a):
         except (StepError, Partial) as e:
             bad.append({"kind": "issue", "name": f"#{n}", "result": "failed", "reason": str(e)})
     if bad:
-        emit(result(TOOL, "stopped", f"戻した {len(done)} 件・戻せなかった {len(bad)} 件", bad, {"reverted": done, "failed": [x["name"] for x in bad]}), 1)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"戻した {len(done)} 件・戻せなかった {len(bad)} 件",
+                bad,
+                {"reverted": done, "failed": [x["name"] for x in bad]},
+            ),
+            1,
+        )
     emit(result(TOOL, "ok", f"付け直しを {len(done)} 件戻した", [], {"reverted": done}))
 
 
-def add_parsers(sub, common) -> None:
+def add_revert_parser(sub, common) -> None:
     r = sub.add_parser("revert", parents=[common])
     r.add_argument("--run", required=True, help="付け直した大整理の実行（owner claim の run）")
     r.set_defaults(func=cmd_revert)

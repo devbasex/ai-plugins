@@ -59,7 +59,7 @@ python3 "$UPKEEP/upkeep.py" research run --until <done のパス> --queue <done>
 | 空き | queue の一覧で走っているプランの本数 + 調査 1 本が `--max`（既定 6）以下のときだけ項目を始める |
 | 止め方 | 完了のファイル（`--until`）が出たら新しい項目を始めない。項目の途中の結果は書かない |
 | 1 回の量 | `--max-items`（既定 3）項目まで。1 項目の費用と秒は `depths.research.item_usd`（1 ドル）・`item_seconds`（900 秒）まで。超えた結果は捨てる |
-| 記録 | 出典（`url` / `path` / `command`）と調べた日時のそろった結果だけを `<側面>--<対象>.json` に書く。費用と秒は周回の記録の `research` 行に入り、予算に数える |
+| 記録 | 出典（`url` / `path` / `command`）と調べた日時のそろった結果だけを `<側面>--<対象>.item.json` に書く。費用と秒は周回の記録の `research` 行に入り、予算に数える |
 | 外部 | Web は読み取りだけ（WebFetch・WebSearch）。外部へ書き込まない |
 
 次の待ちは、記録の無い項目から続ける。見直しの中では `research run --run <持ち主の run> --since <前の見直しの at>` で、

@@ -64,16 +64,16 @@ WEB_ASPECTS = ("needs.market", "seeds.library", "seeds.alternatives", "seeds.env
 FAIL_LIMIT = 3
 
 
-def _slug(s: str) -> str:
+def _item_slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_") or "_"
 
 
 def item_path(root, item_id: str) -> Path:
     aspect, _, target = item_id.partition(":")
-    return D.backlog_dir(root) / "research" / f"{aspect}--{_slug(target)}.json"
+    return D.backlog_dir(root) / "research" / f"{aspect}--{_item_slug(target)}.item.json"
 
 
-def items_of(mat: dict | None) -> tuple[list[dict], list[dict]]:
+def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
     """(調査の項目, 飛ばした側面)。項目は {id, aspect, target, decl}。"""
     if mat is None:
         return [], [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS]
@@ -89,7 +89,9 @@ def items_of(mat: dict | None) -> tuple[list[dict], list[dict]]:
         if scope.get("aggregate_only") is True and row.get("command"):
             usage.append(row)
         else:
-            skipped.append({"aspect": "needs.usage", "reason": f"{row.get('name')}: aggregate_only が true でない行は読まない（個票を読まない）"})
+            skipped.append(
+                {"aspect": "needs.usage", "reason": f"{row.get('name')}: aggregate_only が true でない行は読まない（個票を読まない）"}
+            )
     for row in usage:
         add("needs.usage", row.get("name") or row["command"], row)
     for row in needs.get("market") or []:
@@ -110,7 +112,7 @@ def items_of(mat: dict | None) -> tuple[list[dict], list[dict]]:
     return items, skipped
 
 
-def _epoch(value) -> float | None:
+def _iso_epoch(value) -> float | None:
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -120,17 +122,23 @@ def _epoch(value) -> float | None:
 
 
 def plan(root, since: str | None) -> dict:
-    items, skipped = items_of(D.materials(root))
-    cut = _epoch(since)
+    items, skipped = research_items(D.materials(root))
+    cut = _iso_epoch(since)
     todo, fresh = [], []
     for it in items:
         rec = jsonio.read(item_path(root, it["id"]), missing=None, broken=None, want=dict)
-        checked = _epoch((rec or {}).get("checked_at"))
+        checked = _iso_epoch((rec or {}).get("checked_at"))
         if checked is None or (cut is not None and checked < cut):
             todo.append(it["id"])
         else:
             fresh.append(it["id"])
-    return {"items": [i["id"] for i in items], "todo": todo, "fresh": fresh, "skipped_aspects": skipped, "by_id": {i["id"]: i for i in items}}
+    return {
+        "items": [i["id"] for i in items],
+        "todo": todo,
+        "fresh": fresh,
+        "skipped_aspects": skipped,
+        "by_id": {i["id"]: i for i in items},
+    }
 
 
 def masked_usage(row: dict, root, timeout: float) -> str:
@@ -170,7 +178,9 @@ def tools_of(aspect: str) -> str:
 
 def hotspots(root, limit: int = 30) -> str:
     """変更の多いファイル（直近 500 コミット）。git はスクリプトが打ち、結果だけを渡す。"""
-    p = subprocess.run(["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"], capture_output=True, text=True, timeout=120)
+    p = subprocess.run(
+        ["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"], capture_output=True, text=True, timeout=120
+    )
     counts: dict = {}
     for f in p.stdout.splitlines():
         if f.strip():
@@ -203,7 +213,11 @@ def valid_record(data) -> bool:
     if not isinstance(data, dict):
         return False
     srcs = data.get("sources")
-    ok_src = isinstance(srcs, list) and srcs and all(isinstance(s, dict) and s.get("kind") in ("url", "path", "command") and s.get("value") for s in srcs)
+    ok_src = (
+        isinstance(srcs, list)
+        and srcs
+        and all(isinstance(s, dict) and s.get("kind") in ("url", "path", "command") and s.get("value") for s in srcs)
+    )
     return bool(ok_src) and isinstance(data.get("findings"), list)
 
 
@@ -243,21 +257,35 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
         "lap": lap,
         "by": {"run": run, "loop": loop},
     }
-    jsonio.write_atomic(item_path(root, it["id"]), rec, indent=1)
+    aspect, _, target = it["id"].partition(":")
+    jsonio.write_atomic(
+        D.backlog_dir(root) / "research" / f"{aspect}--{_item_slug(target)}.item.json", rec, indent=1
+    )  # item_path と同じ置き場
     return rec, usage
 
 
-def run(root, until: str | None, listing: str | None, max_: int, max_items: int, loop=None, lap=None, pid=None, sleep=time.sleep,
-        owner: str | None = None, since: str | None = None) -> dict:
+def run_research(
+    root,
+    until: str | None,
+    listing: str | None,
+    max_: int,
+    max_items: int,
+    loop=None,
+    lap=None,
+    pid=None,
+    sleep=time.sleep,
+    owner: str | None = None,
+    since: str | None = None,
+) -> dict:
     """待ち時間の調査（E3・E4）。戻り値は metrics。
 
     `owner` を渡すと、見直し・大整理の持ち主の実行のまま調べる（宣言を取り直さず、終えても解放しない）。
     `until` が無ければ完了のファイルを待たない（見直しの中で足りない項目と古い項目を調べるとき）。"""
     cfg = D.settings(root)
     if owner:
-        run_id, taken, cur = (None, None, O.status(root)["owner"]) if O.touch(root, owner) else (owner, None, None)
+        run_id, taken, cur = (None, None, O.review_owner_status(root)["owner"]) if O.touch(root, owner) else (owner, None, None)
     else:
-        run_id, taken, cur = O.claim(root, "research", loop, pid)
+        run_id, taken, cur = O.claim_review(root, "research", loop, pid)
     if run_id is None:
         return {"reason": "not_owner", "owner": cur, "items": []}
     pl = plan(root, since)
@@ -302,26 +330,42 @@ def run(root, until: str | None, listing: str | None, max_: int, max_items: int,
             why = "調べる項目が尽きた" if pl["todo"] else why
     finally:
         if not owner:
-            O.release(root, run_id)
-    return {"run": run_id, "taken_from": taken, "items": done, "cost": round(cost, 6), "seconds": round(secs, 3), "lap": lap, "stopped": why}
+            O.release_review(root, run_id)
+    return {
+        "run": run_id,
+        "taken_from": taken,
+        "items": done,
+        "cost": round(cost, 6),
+        "seconds": round(secs, 3),
+        "lap": lap,
+        "stopped": why,
+    }
 
 
 def cmd_plan(a):
     root = git_root(a.root)
     got = plan(root, a.since)
     got.pop("by_id")
-    emit(result(TOOL, "ok", f"調べる項目 {len(got['todo'])} 件・新しい項目 {len(got['fresh'])} 件・飛ばした側面 {len(got['skipped_aspects'])} 件", [], got))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"調べる項目 {len(got['todo'])} 件・新しい項目 {len(got['fresh'])} 件・飛ばした側面 {len(got['skipped_aspects'])} 件",
+            [],
+            got,
+        )
+    )
 
 
 def cmd_run(a):
     root = git_root(a.root)
-    m = run(root, a.until, a.queue, a.max, a.max_items, a.loop, a.lap, a.pid, owner=a.run, since=a.since)
+    m = run_research(root, a.until, a.queue, a.max, a.max_items, a.loop, a.lap, a.pid, owner=a.run, since=a.since)
     if m.get("reason") == "not_owner":
         emit(result(TOOL, "gate", "見直しの持ち主が別にいるため調べない", [], m, next="何もしないで終える"), EXIT_GATE)
     emit(result(TOOL, "ok", f"調べた項目 {len(m['items'])} 件（{m['stopped']}）・{m['cost']} ドル・{m['seconds']} 秒", [], m))
 
 
-def add_parsers(sub, common) -> None:
+def add_research_parsers(sub, common) -> None:
     rp = sub.add_parser("research").add_subparsers(dest="research_cmd", required=True)
     p = rp.add_parser("plan", parents=[common])
     p.add_argument("--since", default=None, help="前の見直しの at（これより前に調べた項目を古いとみなす）")

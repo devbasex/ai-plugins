@@ -20,6 +20,7 @@ from pathlib import Path
 import clock
 import jsonio
 import locks
+import project_decl
 import repo as repo_lib
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root, result
 import upkeep_rank_cmd as RC
@@ -76,34 +77,28 @@ def settings(root) -> dict:
 
 
 def materials(root) -> dict | None:
-    """`.ndf/project.json` の `materials`（材料の宣言）。無ければ None。メインディレクトリを先に読む。"""
-    main = repo_lib.main_dir(root)
-    for base in dict.fromkeys(p for p in (main, Path(root)) if p):
-        f = Path(base) / ".ndf" / "project.json"
-        if f.is_file():
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as e:
-                raise StepError(f".ndf/project.json を読めない: {e}", EXIT_UNREADABLE)
-            got = data.get("materials") if isinstance(data, dict) else None
-            if got is not None and not isinstance(got, dict):
-                raise StepError(".ndf/project.json の materials はオブジェクトで書く", EXIT_UNREADABLE)
-            return None if got is not None and set(got) == {"unknown"} else got  # 解析で決まらなかった（Unknown）は宣言なし
-    return None
+    """`.ndf/project.json` の `materials`（材料の宣言）。無ければ None。読めない・形が違えば終了コード 2。"""
+    data, err = project_decl.read_project_decl_checked(root)
+    if err:
+        raise StepError(f".ndf/project.json を読めない: {err}", EXIT_UNREADABLE)
+    got = data.get("materials")
+    if got is not None and not isinstance(got, dict):
+        raise StepError(".ndf/project.json の materials はオブジェクトで書く", EXIT_UNREADABLE)
+    return None if got is not None and set(got) == {"unknown"} else got  # 解析で決まらなかった（Unknown）は宣言なし
 
 
 def cause_types(root) -> list[dict]:
     return (materials(root) or {}).get("cause_types") or DEFAULT_CAUSE_TYPES
 
 
-def read_rows(path: Path) -> list[dict]:
+def read_depth_rows(path: Path) -> list[dict]:
     try:
         return jsonio.read_jsonl(path, missing=[])
     except jsonio.JsonReadError as e:
         raise StepError(f"{path} を読めない: {e.detail or e}", EXIT_UNREADABLE)
 
 
-def append_row(path: Path, row: dict) -> None:
+def append_depth_row(path: Path, row: dict) -> None:
     locks.append_locked(path, json.dumps(row, ensure_ascii=False))
 
 
@@ -131,7 +126,9 @@ def cause_share(causes: list[dict], types: list[dict], open_numbers: set | None)
     return top, rows.count(top) / len(rows)
 
 
-def due(depth: str, rows: list[dict], cfg: dict, *, open_now: int | None, no_issue=False, manual=False, causes=(), types=(), open_numbers=None):
+def due(
+    depth: str, rows: list[dict], cfg: dict, *, open_now: int | None, no_issue=False, manual=False, causes=(), types=(), open_numbers=None
+):
     """(起動した条件, 判定に使った値)。条件が空なら起動しない。"""
     trig, values = [], {}
     if manual:
@@ -195,19 +192,30 @@ def cmd_due(a):
     base = {"at": clock.now_iso("utc"), "depth": a.depth, **_scope(a), "run": None}
     try:
         cfg = settings(root)
-        rows = read_rows(d / "depths.jsonl")
-        causes = read_rows(d / "causes.jsonl") if a.depth == "overhaul" else []
+        rows = read_depth_rows(d / "depths.jsonl")
+        causes = read_depth_rows(d / "causes.jsonl") if a.depth == "overhaul" else []
         types = cause_types(root) if a.depth == "overhaul" else []
         open_now, open_numbers = _open_now(root, a)
     except StepError as e:
-        append_row(d / "depths.jsonl", {**base, "event": "not_due", "trigger": [], "values": {"reason": "unreadable", "detail": str(e)}})
+        append_depth_row(
+            d / "depths.jsonl", {**base, "event": "not_due", "trigger": [], "values": {"reason": "unreadable", "detail": str(e)}}
+        )
         emit(result(TOOL, "stopped", f"記録を読めないため起動しない: {e}", [], {"reason": "unreadable"}), EXIT_PRECONDITION)
     trig, values = due(
         a.depth, rows, cfg, open_now=open_now, no_issue=a.no_issue, manual=a.manual, causes=causes, types=types, open_numbers=open_numbers
     )
     if not trig:
-        append_row(d / "depths.jsonl", {**base, "event": "not_due", "trigger": [], "values": values})
-        emit(result(TOOL, "stopped", f"{a.depth} は起動しない（{json.dumps(values, ensure_ascii=False)}）", [], {"trigger": [], "values": values}), EXIT_PRECONDITION)
+        append_depth_row(d / "depths.jsonl", {**base, "event": "not_due", "trigger": [], "values": values})
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"{a.depth} は起動しない（{json.dumps(values, ensure_ascii=False)}）",
+                [],
+                {"trigger": [], "values": values},
+            ),
+            EXIT_PRECONDITION,
+        )
     emit(result(TOOL, "ok", f"{a.depth} を起動する（{'・'.join(trig)}）", [], {"trigger": trig, "values": values}))
 
 
@@ -264,7 +272,7 @@ def cmd_record(a):
         if rep.get(k):
             row[k] = rep[k]
     row.update(cost=a.cost, seconds=a.seconds, report=a.report)
-    append_row(d / "depths.jsonl", row)
+    append_depth_row(d / "depths.jsonl", row)
     emit(result(TOOL, "ok", f"深さの記録へ {a.depth} の {a.event} を足した", [row], {"path": str(d / "depths.jsonl")}))
 
 
@@ -281,11 +289,13 @@ def cmd_causes(a):
         raise StepError(f"型が cause_types に無い行がある（{len(bad)} 件）: {json.dumps(bad[:3], ensure_ascii=False)}", EXIT_UNREADABLE)
     at = clock.now_iso("utc")
     for r in rows:
-        append_row(d / "causes.jsonl", {"number": r["number"], "type": r["type"], "sub": list(r.get("sub") or []), "at": at, "depth": a.depth})
+        append_depth_row(
+            d / "causes.jsonl", {"number": r["number"], "type": r["type"], "sub": list(r.get("sub") or []), "at": at, "depth": a.depth}
+        )
     emit(result(TOOL, "ok", f"型の記録へ {len(rows)} 行を足した", [], {"path": str(d / "causes.jsonl"), "rows": len(rows)}))
 
 
-def add_parsers(sub, common, state_dir) -> None:
+def add_depth_parsers(sub, common, state_dir) -> None:
     dp = sub.add_parser("depth").add_subparsers(dest="depth_cmd", required=True)
     du = dp.add_parser("due", parents=[common])
     du.add_argument("depth", choices=("review", "overhaul"))

@@ -14,7 +14,6 @@ from pathlib import Path
 import gh_sections
 import jsonio
 import project_mvv as pm
-import run_owner
 import step_result
 
 from sprint_loop_record import (
@@ -436,7 +435,7 @@ def research_command(root: str, rec: dict, lap: dict, done: Path) -> str:
 def owner_line(env: Env) -> tuple[str, dict | None]:
     """見直しの持ち主の行（`.ndf/backlog/owner.json`）。"""
     path = env.main_dir() / ".ndf" / "backlog" / "owner.json"
-    got, _ = run_owner.read_owner(path)
+    got = jsonio.read(path, missing=None, broken=None, want=dict)  # run_owner は耐久の記録（dbos）へ届くため読まない
     if not got or got.get("finished_at"):
         return "見直しの持ち主: なし", got
     return f"見直しの持ち主: {got.get('run')}（{got.get('what')}・最後に動いた時刻 {got.get('seen_at')}）", got

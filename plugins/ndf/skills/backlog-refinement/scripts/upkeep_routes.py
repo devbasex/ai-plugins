@@ -16,7 +16,6 @@ _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*[A-Za-z0-9_]")
 _MIN_TOKEN = 6
 
 
-
 def _is_identifier(tok: str) -> bool:
     if len(tok) < _MIN_TOKEN:
         return False

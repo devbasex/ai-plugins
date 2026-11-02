@@ -53,7 +53,12 @@ def call_llm_json(system: str, prompt: str, root: Path, kind: str) -> tuple[dict
 
 
 def vet_prompt(kind: str, body: str, mvv: pm.ProjectMvv) -> str:
-    what = {"candidate": "プロジェクト MVV の候補", "revision": "プロジェクト MVV の改訂案", "sprint": "スプリント MVV", "issue": "起票する課題の本文"}[kind]
+    what = {
+        "candidate": "プロジェクト MVV の候補",
+        "revision": "プロジェクト MVV の改訂案",
+        "sprint": "スプリント MVV",
+        "issue": "起票する課題の本文",
+    }[kind]
     parts = [pm.principles()]
     if kind in ("sprint", "revision", "issue"):  # issue: 見直しのニーズ・シーズと大整理の大方針（#2315 の決定 10）
         parts.append(pm.project_part(mvv))

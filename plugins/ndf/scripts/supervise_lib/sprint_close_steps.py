@@ -109,7 +109,15 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
     判定（`depth due`）が 3 を返したら `after` へ飛ぶ。持ち主になれない（10）ときは `skipped` の行を残して `after` へ進む。"""
     name = {"overhaul": "大整理", "review": "見直し"}[depth]
     return [
-        {"id": f"{depth}-due", "type": "run", "cwd": repo, "timeout": 300, "cmd": _upkeep(repo, "depth", "due", depth), "skip_to": after, "next": f"{depth}-claim"},
+        {
+            "id": f"{depth}-due",
+            "type": "run",
+            "cwd": repo,
+            "timeout": 300,
+            "cmd": _upkeep(repo, "depth", "due", depth),
+            "skip_to": after,
+            "next": f"{depth}-claim",
+        },
         {
             "id": f"{depth}-claim",
             "type": "run",
@@ -155,4 +163,9 @@ def refine_steps(a, refs: str, repo: str) -> list[dict]:
         "cmd": _upkeep(repo, "depth", "record", "--depth", "diff", "--sprint", a.name),
         "next": "overhaul-due",
     }
-    return [_refine_step(a, refs), record, *_depth_steps(a, refs, repo, "overhaul", "review-due"), *_depth_steps(a, refs, repo, "review", "end")]
+    return [
+        _refine_step(a, refs),
+        record,
+        *_depth_steps(a, refs, repo, "overhaul", "review-due"),
+        *_depth_steps(a, refs, repo, "review", "end"),
+    ]

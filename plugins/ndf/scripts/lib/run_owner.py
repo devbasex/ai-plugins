@@ -60,7 +60,7 @@ def read_owner(state: Path | str) -> tuple[dict[str, Any] | None, str | None]:
     return record, None
 
 
-def write_owner(state: Path | str, record: dict[str, Any]) -> None:
+def _write_owner(state: Path | str, record: dict[str, Any]) -> None:
     path = owner_path(state)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -68,12 +68,15 @@ def write_owner(state: Path | str, record: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+write_owner = _write_owner  # 見直しの持ち主の宣言（#2315）が使う公開の名前
+
+
 def claim_owner(state: Path | str, *, tool: str, pr: int, run: str | None = None) -> str:
     """持ち主の記録を新しく書き（以前の実行の記録は上書きして引き継ぐ）、実行の識別子を返す。"""
     run = run or str(uuid.uuid4())
     now = _now_iso()
     record = {"version": 1, "kind": "review-worktree", "tool": tool, "pr": int(pr), "run": run}
-    write_owner(state, {**record, "started_at": now, "seen_at": now, "finished_at": None})
+    _write_owner(state, {**record, "started_at": now, "seen_at": now, "finished_at": None})
     return run
 
 
@@ -86,7 +89,7 @@ def _update(state: Path | str, run: str | None, key: str) -> tuple[bool, str | N
     if not run or record.get("run") != run:
         return False, f"持ち主の記録は別の実行 {record.get('run')} のもの（渡した実行 {run or '無し'}）"
     record[key] = _now_iso()
-    write_owner(state, record)
+    _write_owner(state, record)
     return True, None
 
 
@@ -155,7 +158,7 @@ def last_seen_iso(state: Path, record: dict[str, Any] | None) -> str:
     return utc_iso(_last_seen(state, record))
 
 
-def pid_alive(record: dict[str, Any] | None) -> bool:
+def owner_pid_alive(record: dict[str, Any] | None) -> bool:
     """記録の `pid` が同じホスト（`host`）で生きているか。別のホストと pid の無い記録は生きているとみなす（窓だけで決める）。"""
     if not record or record.get("host") not in (None, socket.gethostname()) or not isinstance(record.get("pid"), int):
         return True
@@ -175,7 +178,7 @@ def alive(state: Path, record: dict[str, Any] | None, now: float, window: float 
     同じホストでは pid の生死も見る（#2315 の不変条件 I2）。"""
     if record is not None and record.get("finished_at"):
         return False
-    return now - _last_seen(state, record) < window and pid_alive(record)
+    return now - _last_seen(state, record) < window and owner_pid_alive(record)
 
 
 def alive_reason(state: Path, record: dict[str, Any] | None) -> str:

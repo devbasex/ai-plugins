@@ -606,7 +606,9 @@ def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
     assert "research run" in research and "--until" in research and "--lap 1 --loop l1" in research
     b = env.root / ".ndf" / "backlog"
     (b / "research").mkdir(parents=True)
-    (b / "depths.jsonl").write_text(json.dumps({"at": "2999-01-01T00:00:00Z", "depth": "review", "event": "ran", "trigger": ["count"]}) + "\n")
+    (b / "depths.jsonl").write_text(
+        json.dumps({"at": "2999-01-01T00:00:00Z", "depth": "review", "event": "ran", "trigger": ["count"]}) + "\n"
+    )
     item = {"id": "seeds.library:pytest", "cost": 0.5, "seconds": 30, "lap": 1, "by": {"run": "r", "loop": "l1"}}
     (b / "research" / "seeds.library--pytest.json").write_text(json.dumps(item))
     set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)

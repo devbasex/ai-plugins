@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import functools
 import hashlib
 import json
 import os
@@ -66,6 +67,8 @@ from pathlib import Path
 _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 import deps  # noqa: E402  外部パッケージの環境（upkeep_gh が投稿キューを読む）
+
+deps.require("locks")  # 深さの記録と見直しの持ち主の錠（upkeep_depth・upkeep_owner が最上位で読む。#2315）
 import jsonio  # noqa: E402
 from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
 from step_result import emit, git, git_root, main_with, result  # noqa: E402
@@ -386,7 +389,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
 
 def cmd_apply(a):
     root = git_root(a.root)
-    plan, wrong = A.precheck(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
+    plan, wrong = A.precheck_depth(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
     repo = target_repo(root, a.repo)
     sd = _state_dir(a.state_dir, repo)
     # 記録のリポジトリ（保存した candidates.json の metrics.repo）の外へ書かない（#842 の決定 7）。
@@ -416,16 +419,18 @@ def cmd_apply(a):
     prev = (((prev_out or {}).get("metrics") or {}).get("round") or {"runs": 1}) if prev_out is not None else {}
     rp = RC.RankPlan(plan, sd, _read_state)
     actions = [] if rp.stale else plan["actions"]  # rank.json と合わない plan は何も書かない
+
+    def record(value=None, key=None):
+        """済んだ反映を記録へ書く。key が無ければ今の記録をそのまま書く（起票・付け直しの記録）。"""
+        if key is not None:
+            ledger[key] = value
+        jsonio.write_atomic(ledger_path, ledger, indent=1)
+
     for idx, act in enumerate(actions):
         n, verdict = act["number"], act["verdict"]
         key = _ledger_key(repo, act)
-
-        def record(value, key=key):
-            ledger[key] = value
-            jsonio.write_atomic(ledger_path, ledger, indent=1)
-
         try:
-            bucket, reason = _apply_one(gh, ms, repo, act, ledger.get(key), record, rp.hold(act))
+            bucket, reason = _apply_one(gh, ms, repo, act, ledger.get(key), functools.partial(record, key=key), rp.hold(act))
         except Partial as e:
             partial, why_partial = True, str(e)
             for rest in actions[idx:]:
@@ -443,7 +448,7 @@ def cmd_apply(a):
     except Partial as e:
         partial, why_partial = True, str(e)
     rp.update_rejected()
-    extra = A.write_extra(root, plan, gh, ms, repo, ledger, lambda: jsonio.write_atomic(ledger_path, ledger, indent=1)) if not partial else {}
+    extra = A.write_extra(root, plan, gh, ms, repo, ledger, record) if not partial else {}
 
     status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits, rp)
     status, code, nxt = A.merge_outcome(extra, wrong, status, code, nxt, metrics, items)
@@ -484,8 +489,9 @@ def build_parser():
     r = sub.add_parser("report", parents=[common])
     r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
     RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
-    for mod in (D, O, R, V, A):  # 深さ・持ち主・調査・大整理・戻し（#2315）
-        mod.add_parsers(sub, common, _state_dir) if mod is D else mod.add_parsers(sub, common)
+    D.add_depth_parsers(sub, common, _state_dir)  # 深さ・持ち主・調査・大整理・戻し（#2315）
+    for add in (O.add_owner_parsers, R.add_research_parsers, V.add_overhaul_parsers, A.add_revert_parser):
+        add(sub, common)
     return ap
 
 

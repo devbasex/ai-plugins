@@ -41,7 +41,7 @@ def _shape(i: dict) -> dict:
     }
 
 
-def snapshot(root, out: Path, repo: str | None = None) -> dict:
+def snapshot_open(root, out: Path, repo: str | None = None) -> dict:
     from upkeep_gh import Gh, list_issues, target_repo
 
     gh = Gh(target_repo(root, repo))
@@ -55,20 +55,23 @@ def snapshot(root, out: Path, repo: str | None = None) -> dict:
     return data
 
 
-def _read(path, what: str):
+def _read_input(path, what: str):
     got = jsonio.read(path, missing=None, broken=None)
     if got is None:
         raise StepError(f"{what} を読めない: {path}", EXIT_UNREADABLE)
     return got
 
 
-def count(snap: dict, classes: list[dict], types: list[dict]) -> dict:
+def count_types(snap: dict, classes: list[dict], types: list[dict]) -> dict:
     """型ごとの件数・部品・マイルストーンごとの割合・月ごとの起票と完了。"""
     ids = [t["id"] for t in types]
     other = "I" if "I" in ids else ids[-1]
     by_num = {c["number"]: c for c in classes if isinstance(c, dict) and isinstance(c.get("number"), int)}
     issues = snap.get("open") or []
-    kind = {i["number"]: (by_num.get(i["number"]) or {}).get("type") if (by_num.get(i["number"]) or {}).get("type") in ids else other for i in issues}
+    kind = {
+        i["number"]: (by_num.get(i["number"]) or {}).get("type") if (by_num.get(i["number"]) or {}).get("type") in ids else other
+        for i in issues
+    }
     by_type = {t: sum(1 for v in kind.values() if v == t) for t in ids}
     defect = {t["id"] for t in types if t.get("defect", True)}
     n_defect = sum(by_type[t] for t in defect)
@@ -98,7 +101,7 @@ def count(snap: dict, classes: list[dict], types: list[dict]) -> dict:
     }
 
 
-def measure(root) -> tuple[list[dict], bool]:
+def measure_code(root) -> tuple[list[dict], bool]:
     """(宣言ごとの値, 宣言があったか)。コマンドの失敗はその行に残して次へ進む。"""
     rows = (D.materials(root) or {}).get("code_measures") or []
     out = []
@@ -113,17 +116,25 @@ def measure(root) -> tuple[list[dict], bool]:
 
 def cmd_snapshot(a):
     root = git_root(a.root)
-    data = snapshot(root, Path(a.out), getattr(a, "repo", None))
-    emit(result(TOOL, "ok", f"未完了 {len(data['open'])} 件を固定した", [], {"path": str(Path(a.out) / "snapshot.json"), "open": len(data["open"])}))
+    data = snapshot_open(root, Path(a.out), getattr(a, "repo", None))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"未完了 {len(data['open'])} 件を固定した",
+            [],
+            {"path": str(Path(a.out) / "snapshot.json"), "open": len(data["open"])},
+        )
+    )
 
 
 def cmd_count(a):
     root = git_root(a.root)
-    snap = _read(a.snapshot, "固定した一覧")
-    classes = _read(a.classes, "型の分類")
+    snap = _read_input(a.snapshot, "固定した一覧")
+    classes = _read_input(a.classes, "型の分類")
     if not isinstance(snap, dict) or not isinstance(classes, list):
         raise StepError("snapshot は {open, closed}、classes は [{number, type, sub}] の形で書く", EXIT_UNREADABLE)
-    got = count(snap, classes, D.cause_types(root))
+    got = count_types(snap, classes, D.cause_types(root))
     if a.out:
         jsonio.write_atomic(Path(a.out) / "counts.json", got, indent=1)
     top = max(got["by_type"], key=got["by_type"].get) if got["by_type"] else None
@@ -132,14 +143,14 @@ def cmd_count(a):
 
 def cmd_measure(a):
     root = git_root(a.root)
-    rows, declared = measure(root)
+    rows, declared = measure_code(root)
     if a.out:
         jsonio.write_atomic(Path(a.out) / "measures.json", rows, indent=1)
     summary = f"宣言した計測 {len(rows)} 件を打った" if declared else "code_measures の宣言が無いため裏付けを飛ばした（報告に書く）"
     emit(result(TOOL, "ok", summary, rows, {"declared": declared, "measures": len(rows)}))
 
 
-def add_parsers(sub, common) -> None:
+def add_overhaul_parsers(sub, common) -> None:
     op = sub.add_parser("overhaul").add_subparsers(dest="overhaul_cmd", required=True)
     s = op.add_parser("snapshot", parents=[common])
     s.add_argument("--out", required=True)
