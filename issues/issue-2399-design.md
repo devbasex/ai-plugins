@@ -2,9 +2,9 @@
 
 ## 目的
 
-- **今どうなっているか**: Agent の `ndf:supervisor` が `ndf:worker` を起動するとき、起動指示に「読む Skill」の欄が無い。v10.27.10 で 2 回起動し、2 回とも supervisor は正本の節（`agent-layers.md` の「supervisor → worker」）を読まず、Skill の対応表も引かなかった。設計の工程の worker に `document-style` が届いていない
+- **今どうなっているか**: Agent の `ndf:supervisor` が `ndf:worker` を起動するとき、起動指示に「読む Skill」の欄が無い。v10.27.10 で 2 回起動した。2 回とも supervisor は正本の節（`agent-layers.md` の「supervisor → worker」）を読まず、Skill の対応表も引かなかった。設計の工程の worker に `document-style` が届いていない
 - **誰に効くか**: プランのテンプレートが無いフェーズを Agent の 3 層で回す利用者（設計・確定仕様化・振り返りなど、文書を書く工程の worker の成果物を受け取る人）
-- **変えると何が成り立つか**: conductor が起動指示をどの形で書いても、supervisor が起動する `ndf:worker` の起動指示に「読む Skill」の欄が入り、対応表が挙げる Skill を worker が作業の前に読む
+- **変えると何が成り立つか**: conductor が起動指示をどの形で書いても、supervisor が起動する `ndf:worker` の起動指示に「読む Skill」の欄が入る。worker は対応表が挙げる Skill を作業の前に読む
 
 ## 適用範囲
 
@@ -105,7 +105,7 @@ graph LR
     CC --> NDF[NDF の配布物<br/>Agent の定義・hook・正本の節・対応表]
 ```
 
-外部の系は Claude Code の実行環境だけである。PreToolUse の hook の入力（呼び手の `agent_id`・`agent_type`・`transcript_path`・`tool_input`）と、拒否の返し方（`permissionDecision: deny`）は Claude Code が決め、この変更は使う側に留まる。
+外部の系は Claude Code の実行環境だけである。PreToolUse の hook の入力（呼び手の `agent_id`・`agent_type`・`transcript_path`・`tool_input`）は Claude Code が決める。拒否の返し方（`permissionDecision: deny`）も Claude Code が決める。この変更はどちらも使う側に留まる。
 
 ### 構成要素の関係
 
@@ -279,7 +279,7 @@ hook は止めるときに `agent-layers.md` から「supervisor → worker」�
 
 ### 決定 5: token の guard の責務を広げないため、読む Skill の guard を別のモジュールに置く
 
-token の guard は文脈の大きさと待ち方を見る判定の集まりで、起動指示の中身は見ていない。読む Skill の guard は起動指示の形を見るため、`hook_lib/` に新しいモジュールを置き、拒否の形と入力の取り出しは token の guard の部品をそのまま使う。
+token の guard は文脈の大きさと待ち方を見る判定の集まりで、起動指示の中身は見ていない。読む Skill の guard は起動指示の形を見るため、`hook_lib/` に新しいモジュールを置く。拒否の形と入力の取り出しは、token の guard の部品をそのまま使う。
 
 根拠: Value 6（MVV 版 4）
 
