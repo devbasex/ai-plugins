@@ -5241,6 +5241,24 @@
       "context": "ndf-workflow",
       "meaning": "conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで",
       "pending_source": "issues/issue-2262-design.md"
+    },
+    {
+      "term": "扱い",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。課題ごとに `実装する` / `取り込む` / `閉じる` のどれかを書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "取り込み先",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `取り込む` の課題を、どの課題の実装へ含めるかを課題の番号で書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "触るファイル",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
+      "pending_source": "issues/issue-2361-requirements.md"
     }
   ]
 }
