@@ -16,7 +16,10 @@ export type ProgressEvent =
   | CiUpdatedEvent
   | DecisionDelegatedEvent
   | IssueRequestedEvent
-  | IssueRequestResolvedEvent;
+  | IssueRequestResolvedEvent
+  | SectionStartedEvent
+  | LoopLapClosedEvent
+  | LoopStoppedEvent;
 export type JobStartedEvent = EventCommon & {
   type: "job.started";
   payload: JobStartedPayload;
@@ -51,6 +54,10 @@ export type GateReachedEvent = EventCommon & {
  * ゲート 1・ゲート 2・判断
  */
 export type GateKind = "gate1" | "gate2" | "decision";
+/**
+ * NDF の開発ループの名前
+ */
+export type LoopName = string;
 export type GateAnsweredEvent = EventCommon & {
   type: "gate.answered";
   payload: GateAnsweredPayload;
@@ -83,6 +90,32 @@ export type IssueRequestResolvedEvent = EventCommon & {
   type: "issue.request_resolved";
   payload: IssueRequestResolvedPayload;
 };
+export type SectionStartedEvent = EventCommon & {
+  type: "section.started";
+  payload: SectionStartedPayload;
+};
+export type LoopLapClosedEvent = EventCommon & {
+  type: "loop.lap_closed";
+  payload: LoopLapClosedPayload;
+};
+export type LoopStoppedEvent = EventCommon & {
+  type: "loop.stopped";
+  payload: LoopStoppedPayload;
+};
+/**
+ * NDF の開発ループの止まる条件
+ */
+export type LoopStopCondition =
+  | "user_stop"
+  | "mvv_changed"
+  | "same_failure"
+  | "budget_laps"
+  | "budget_usd"
+  | "budget_hours"
+  | "no_issue"
+  | "outside_mvv"
+  | "gate2_returned"
+  | "refused";
 
 /**
  * どの種類にも共通の列
@@ -108,7 +141,7 @@ export interface EventCommon {
 }
 export interface JobStartedPayload {
   ndf_version: string;
-  start: "new" | "resume";
+  start: "new" | "resume" | "loop";
 }
 export interface PhaseChangedPayload {
   /**
@@ -142,6 +175,14 @@ export interface GateReachedPayload {
    * 承認資料の本文
    */
   material: string;
+  loop?: LoopRef;
+}
+/**
+ * 開発ループの実行のとき、ループの名前と周回の番号（#2347）
+ */
+export interface LoopRef {
+  name: LoopName;
+  lap: number;
 }
 /**
  * 本文は持たない。decision は kind が decision のときは持たず、ほかでは必須
@@ -162,6 +203,14 @@ export interface UsageRecordedPayload {
 export interface JobFinishedPayload {
   result: "gate" | "stopped" | "done" | "failed";
   summary: string;
+  /**
+   * stopped の理由。section_limit は区間の上限、usage_limit は local の利用上限
+   */
+  reason?: "section_limit" | "usage_limit";
+  /**
+   * usage_limit のときだけ。利用上限のリセット時刻（読めなければ null）
+   */
+  resets_at?: string | null;
 }
 export interface PrUpdatedPayload {
   repo: RepoFullName;
@@ -230,4 +279,53 @@ export interface IssueRef {
   repo: RepoFullName;
   number: number;
   url: string;
+}
+/**
+ * 1 つの実行ジョブの中でランナーが claude -p を起動した（区間。#2347）
+ */
+export interface SectionStartedPayload {
+  /**
+   * 1 から数える
+   */
+  section: number;
+  /**
+   * 起動の指示。2,000 字で切る
+   */
+  command: string;
+}
+/**
+ * NDF の開発ループが締めた周回（.ndf/loop/<名>/loop.json の翻訳）
+ */
+export interface LoopLapClosedPayload {
+  loop: LoopName;
+  lap: number;
+  issues: number[];
+  result: "完了" | "失敗" | "人へ戻した";
+  /**
+   * 開発版と本番の版。無ければ null
+   */
+  version: string | null;
+  cost_usd: number;
+  seconds: number;
+  pending: LoopPending[];
+}
+/**
+ * 人の判断待ちの課題（承認ゲート 1 で MVV 判定が「従う」以外）
+ */
+export interface LoopPending {
+  number: number;
+  reason: string;
+  lap: number;
+}
+/**
+ * NDF の開発ループが止まる条件に当たった（loop.json の stop の翻訳）
+ */
+export interface LoopStoppedPayload {
+  loop: LoopName;
+  condition: LoopStopCondition;
+  /**
+   * stop の残りの値の JSON
+   */
+  detail: string;
+  pending: LoopPending[];
 }

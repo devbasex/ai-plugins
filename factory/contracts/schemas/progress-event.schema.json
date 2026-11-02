@@ -16,7 +16,10 @@
     { "$ref": "#/$defs/CiUpdatedEvent" },
     { "$ref": "#/$defs/DecisionDelegatedEvent" },
     { "$ref": "#/$defs/IssueRequestedEvent" },
-    { "$ref": "#/$defs/IssueRequestResolvedEvent" }
+    { "$ref": "#/$defs/IssueRequestResolvedEvent" },
+    { "$ref": "#/$defs/SectionStartedEvent" },
+    { "$ref": "#/$defs/LoopLapClosedEvent" },
+    { "$ref": "#/$defs/LoopStoppedEvent" }
   ],
   "$defs": {
     "Identifier": {
@@ -77,7 +80,7 @@
       "required": ["ndf_version", "start"],
       "properties": {
         "ndf_version": { "type": "string", "minLength": 1 },
-        "start": { "type": "string", "enum": ["new", "resume"] }
+        "start": { "type": "string", "enum": ["new", "resume", "loop"] }
       }
     },
     "PhaseChangedPayload": {
@@ -127,7 +130,88 @@
       "properties": {
         "kind": { "$ref": "#/$defs/GateKind" },
         "pr_url": { "type": ["string", "null"], "format": "uri" },
-        "material": { "description": "承認資料の本文", "type": "string" }
+        "material": { "description": "承認資料の本文", "type": "string" },
+        "loop": { "$ref": "#/$defs/LoopRef" }
+      }
+    },
+    "LoopRef": {
+      "description": "開発ループの実行のとき、ループの名前と周回の番号（#2347）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "lap"],
+      "properties": {
+        "name": { "$ref": "#/$defs/LoopName" },
+        "lap": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "LoopName": {
+      "description": "NDF の開発ループの名前",
+      "type": "string",
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$"
+    },
+    "LoopPending": {
+      "description": "人の判断待ちの課題（承認ゲート 1 で MVV 判定が「従う」以外）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "reason", "lap"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "reason": { "type": "string", "maxLength": 4000 },
+        "lap": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "SectionStartedPayload": {
+      "description": "1 つの実行ジョブの中でランナーが claude -p を起動した（区間。#2347）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["section", "command"],
+      "properties": {
+        "section": { "description": "1 から数える", "type": "integer", "minimum": 1 },
+        "command": { "description": "起動の指示。2,000 字で切る", "type": "string", "maxLength": 2000 }
+      }
+    },
+    "LoopLapClosedPayload": {
+      "description": "NDF の開発ループが締めた周回（.ndf/loop/<名>/loop.json の翻訳）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loop", "lap", "issues", "result", "version", "cost_usd", "seconds", "pending"],
+      "properties": {
+        "loop": { "$ref": "#/$defs/LoopName" },
+        "lap": { "type": "integer", "minimum": 1 },
+        "issues": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "result": { "type": "string", "enum": ["完了", "失敗", "人へ戻した"] },
+        "version": { "description": "開発版と本番の版。無ければ null", "type": ["string", "null"], "maxLength": 200 },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "seconds": { "type": "number", "minimum": 0 },
+        "pending": { "type": "array", "items": { "$ref": "#/$defs/LoopPending" } }
+      }
+    },
+    "LoopStopCondition": {
+      "description": "NDF の開発ループの止まる条件",
+      "type": "string",
+      "enum": [
+        "user_stop",
+        "mvv_changed",
+        "same_failure",
+        "budget_laps",
+        "budget_usd",
+        "budget_hours",
+        "no_issue",
+        "outside_mvv",
+        "gate2_returned",
+        "refused"
+      ]
+    },
+    "LoopStoppedPayload": {
+      "description": "NDF の開発ループが止まる条件に当たった（loop.json の stop の翻訳）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loop", "condition", "detail", "pending"],
+      "properties": {
+        "loop": { "$ref": "#/$defs/LoopName" },
+        "condition": { "$ref": "#/$defs/LoopStopCondition" },
+        "detail": { "description": "stop の残りの値の JSON", "type": "string", "maxLength": 4000 },
+        "pending": { "type": "array", "items": { "$ref": "#/$defs/LoopPending" } }
       }
     },
     "GateAnsweredPayload": {
@@ -163,8 +247,20 @@
       "required": ["result", "summary"],
       "properties": {
         "result": { "type": "string", "enum": ["gate", "stopped", "done", "failed"] },
-        "summary": { "type": "string" }
-      }
+        "summary": { "type": "string" },
+        "reason": {
+          "description": "stopped の理由。section_limit は区間の上限、usage_limit は local の利用上限",
+          "type": "string",
+          "enum": ["section_limit", "usage_limit"]
+        },
+        "resets_at": {
+          "description": "usage_limit のときだけ。利用上限のリセット時刻（読めなければ null）",
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      },
+      "if": { "required": ["resets_at"] },
+      "then": { "required": ["reason"], "properties": { "reason": { "const": "usage_limit" } } }
     },
     "PrUpdatedPayload": {
       "type": "object",
@@ -367,6 +463,36 @@
       "properties": {
         "type": { "const": "issue.request_resolved" },
         "payload": { "$ref": "#/$defs/IssueRequestResolvedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "SectionStartedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "section.started" },
+        "payload": { "$ref": "#/$defs/SectionStartedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "LoopLapClosedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "loop.lap_closed" },
+        "payload": { "$ref": "#/$defs/LoopLapClosedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "LoopStoppedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "loop.stopped" },
+        "payload": { "$ref": "#/$defs/LoopStoppedPayload" }
       },
       "unevaluatedProperties": false
     }
