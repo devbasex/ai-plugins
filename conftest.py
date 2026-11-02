@@ -18,6 +18,8 @@
    自分の分だけを残す。継続的統合がジョブを分けて回すために使う（#882）
 7. pytest が SIGTERM で止められたとき・終わったときに、テストが起こした子孫のプロセスを止める
    （`scripts/pytest_child_cleanup.py`。#2291）
+8. worker を起こす前に、プラグインの依存の環境（`~/.cache/ndf/venv/<版>`）を 1 度だけ作る。
+   版を上げた直後に並列の worker が同じ環境へ同時に入れて壊すのを防ぐ
 
 どの束のディレクトリを起点にしても読まれるよう、テストの基準のディレクトリ（rootdir）は
 根の設定ファイル（`pytest.ini`）がリポジトリの根へ固定する。
@@ -28,8 +30,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import zlib
@@ -128,6 +132,33 @@ def pytest_configure(config) -> None:
     `monkeypatch` も、別プロセスへ渡す上書きも、この後に効く。
     """
     _saved_monitor_env.update(_strip_monitor_env())
+    if not hasattr(config, "workerinput"):
+        _warm_plugin_venv()
+
+
+def _warm_plugin_venv() -> None:
+    """プラグインの依存の環境（`~/.cache/ndf/venv/<版>`）を、worker を起こす前に 1 度だけ作っておく。
+
+    `uv run --script` のスクリプト（`state.py` など）は `deps.require` でこの環境へ起動し直す。版を上げた
+    直後は環境が無く、並列の worker が同じ場所へ同時に入れて壊れる（greenlet の `*.data/headers` を
+    動かせず `uv run` が 2 で終わる。ndf v10.27.13 の CI）。全グループを先に入れておけば、後の
+    `uv run --extra` は入れ直さない。uv が無い・入れられないときは何もしない（テストの側で従来どおり作る）。
+    """
+    spec = importlib.util.spec_from_file_location("_ndf_deps_for_warmup", ROOT / "plugins" / "ndf" / "scripts" / "lib" / "deps.py")
+    if spec is None or spec.loader is None:
+        return
+    deps = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deps)
+    uv = deps.find_uv()
+    if not uv:
+        return
+    env = dict(os.environ, UV_PROJECT_ENVIRONMENT=deps.venv_dir())
+    subprocess.run(
+        [uv, "sync", "--quiet", "--frozen", "--inexact", "--project", str(deps.PLUGIN_ROOT), "--all-extras"],
+        env=env,
+        capture_output=True,
+        check=False,
+    )
 
 
 def pytest_unconfigure(config) -> None:
