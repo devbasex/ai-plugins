@@ -4927,6 +4927,54 @@
       "context": "ndf-workflow",
       "meaning": ".ndf/ の設定ファイルを読む木。worktree（呼ばれた木。チームの設定）か main（メインディレクトリ。個人の設定）で、契約の一覧の設定ファイルの項目の place が決める",
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
+    },
+    {
+      "term": "再起動の方針",
+      "context": "ndf-workflow",
+      "meaning": "conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "現行方式",
+      "context": "ndf-workflow",
+      "meaning": "運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "試行方式",
+      "context": "ndf-workflow",
+      "meaning": "カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "判断開始の値",
+      "context": "ndf-workflow",
+      "meaning": "試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K）",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "運用上限",
+      "context": "ndf-workflow",
+      "meaning": "これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "容量の余白",
+      "context": "ndf-workflow",
+      "meaning": "実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "再起動の理由",
+      "context": "ndf-workflow",
+      "meaning": "工程境界で会話を切ったときの理由。容量・運用上限・費用・独立性・手動のどれか",
+      "pending_source": "issues/issue-2262-requirements.md"
+    },
+    {
+      "term": "復元の区間",
+      "context": "ndf-workflow",
+      "meaning": "再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで",
+      "pending_source": "issues/issue-2262-requirements.md"
     }
   ]
 }
