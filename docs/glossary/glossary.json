@@ -4929,6 +4929,43 @@
       "source": "docs/specifications/ndf-entrypoint-contracts.md"
     },
     {
+      "term": "区間",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る",
+      "pending_source": "issues/issue-2347-requirements.md"
+    },
+    {
+      "term": "区間の上限",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブで起動してよい区間の数の上限（既定 20）。超えたジョブは section_limit で終わる",
+      "pending_source": "issues/issue-2347-requirements.md"
+    },
+    {
+      "term": "同時のジョブの数",
+      "context": "ndf-factory",
+      "code": "max_jobs",
+      "meaning": "手元のランナーが同時に動かす実行ジョブの数の上限。ランナーが登録と心拍で申告し、サービスはそれを超えて指示を渡さない",
+      "pending_source": "issues/issue-2347-requirements.md"
+    },
+    {
+      "term": "マイルストーンの持ち分",
+      "context": "ndf-factory",
+      "meaning": "終わりの状態でない開発ループが、リポジトリのマイルストーン 1 つを選定の対象として占めていることを表す実行の枠の行。同じリポジトリのループどうしで重ならない",
+      "pending_source": "issues/issue-2347-design.md"
+    },
+    {
+      "term": "課題の持ち分",
+      "context": "ndf-factory",
+      "meaning": "終わりの状態でない手動のスプリントの実行が、リポジトリの課題 1 つを持っていることを表す実行の枠の行。同じ課題を 2 つの実行に入れない",
+      "pending_source": "issues/issue-2347-design.md"
+    },
+    {
+      "term": "手元のランナーの枠",
+      "context": "ndf-factory",
+      "meaning": "1 つの手元のランナーが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない",
+      "pending_source": "issues/issue-2347-design.md"
+    },
+    {
       "term": "画面の地図",
       "context": "ndf-factory",
       "meaning": "Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表",
