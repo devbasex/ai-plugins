@@ -238,6 +238,19 @@ def test_run_does_nothing_when_another_owner_is_alive(root, tmp_path, monkeypatc
     assert R.run(root, str(tmp_path / "done.json"), None, 6, 3)["reason"] == "not_owner" and fake.calls == []
 
 
+def test_review_owner_researches_stale_items_without_releasing(root, monkeypatch):
+    # 見直しの中では持ち主の実行のまま、前の見直しより古い項目と足りない項目だけを調べる（受け入れ条件 6）
+    _decl(root, "project.json", {"materials": MATERIALS})
+    run, _, _ = O.claim(root, "review", pid=os.getpid())
+    fake = _Fake()
+    monkeypatch.setattr(R, "call_llm", fake)
+    assert R.run(root, None, None, 6, 1, owner=run)["items"] == ["needs.usage:pv"]
+    assert R.run(root, None, None, 6, 9, owner=run, since="2000-01-01T00:00:00Z")["items"][0] == "seeds.library:pytest"
+    assert R.run(root, None, None, 6, 9, owner=run, since="2999-01-01T00:00:00Z")["items"][0] == "needs.usage:pv"  # 古い項目
+    assert not json.loads(O.owner_file(root).read_text())["finished_at"]
+    assert R.run(root, None, None, 6, 1, owner="other")["reason"] == "not_owner"
+
+
 # ---------------- 大整理の集計 ----------------
 
 FIXTURE = HERE / "fixtures" / "overhaul-20261101.json"

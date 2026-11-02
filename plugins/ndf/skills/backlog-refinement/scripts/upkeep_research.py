@@ -2,13 +2,15 @@
 
     upkeep.py research plan [--since <前の見直しの at>]
     upkeep.py research run --until <完了のファイル> [--queue <queue の一覧>] [--max N] [--max-items N] [--lap N] [--loop L]
+    upkeep.py research run --run <持ち主の run> --since <前の見直しの at> [--max-items N]   # 見直し・大整理の中で
 
 plan: 材料の宣言（`.ndf/project.json` の `materials`）から調査の項目を並べ、記録の無い項目と `--since` より前に調べた
   古い項目を `todo` に、宣言の無い側面を `skipped_aspects`（材料なし（未宣言））に返す。宣言が無ければすべての側面を飛ばす。
 run: 見直しの持ち主になり、完了のファイルが出るまで、並列の上限に空きがあるときだけ 1 項目ずつ `claude -p` で調べる。
   出典と調べた日時がそろった結果だけを `.ndf/backlog/research/<側面>--<対象>.json` に書く（I7）。Issue は書かない。
   利用の記録は `aggregate_only: true` の宣言の行のコマンドだけをスクリプトが打ち、`mask` と `secret_redact` を通した
-  出力だけを渡す（I8。調査の supervisor は読み先へ自分でつながない）。
+  出力だけを渡す（I8。調査の supervisor は読み先へ自分でつながない）。`--run` を渡すと見直し・大整理の持ち主の実行のまま
+  調べ（宣言を取り直さず解放しない）、`--until` が無ければ待たずに `--since` より古い項目と足りない項目を調べる。
 """
 
 from __future__ import annotations
@@ -245,13 +247,20 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
     return rec, usage
 
 
-def run(root, until: str, listing: str | None, max_: int, max_items: int, loop=None, lap=None, pid=None, sleep=time.sleep) -> dict:
-    """待ち時間の調査（E3・E4）。戻り値は metrics。"""
+def run(root, until: str | None, listing: str | None, max_: int, max_items: int, loop=None, lap=None, pid=None, sleep=time.sleep,
+        owner: str | None = None, since: str | None = None) -> dict:
+    """待ち時間の調査（E3・E4）。戻り値は metrics。
+
+    `owner` を渡すと、見直し・大整理の持ち主の実行のまま調べる（宣言を取り直さず、終えても解放しない）。
+    `until` が無ければ完了のファイルを待たない（見直しの中で足りない項目と古い項目を調べるとき）。"""
     cfg = D.settings(root)
-    run_id, taken, cur = O.claim(root, "research", loop, pid)
+    if owner:
+        run_id, taken, cur = (None, None, O.status(root)["owner"]) if O.touch(root, owner) else (owner, None, None)
+    else:
+        run_id, taken, cur = O.claim(root, "research", loop, pid)
     if run_id is None:
         return {"reason": "not_owner", "owner": cur, "items": []}
-    pl = plan(root, None)
+    pl = plan(root, since)
     mat = D.materials(root) or {}
     done, cost, secs, fails, why = [], 0.0, 0.0, 0, "項目が無い"
     beat = {"at": time.time()}
@@ -266,10 +275,10 @@ def run(root, until: str, listing: str | None, max_: int, max_items: int, loop=N
             if len(done) >= max_items:
                 why = f"1 回の上限 {max_items} 項目に当たった"
                 break
-            while not Path(until).exists() and not free_slot(listing, max_):
+            while not (until and Path(until).exists()) and not free_slot(listing, max_):
                 tick()
                 sleep(POLL)
-            if Path(until).exists():  # 待っていたプランが終わったら新しい項目を始めない（I13）
+            if until and Path(until).exists():  # 待っていたプランが終わったら新しい項目を始めない（I13）
                 why = "待っていたプランが終わった"
                 break
             if O.touch(root, run_id, item_id):
@@ -292,7 +301,8 @@ def run(root, until: str, listing: str | None, max_: int, max_items: int, loop=N
         else:
             why = "調べる項目が尽きた" if pl["todo"] else why
     finally:
-        O.release(root, run_id)
+        if not owner:
+            O.release(root, run_id)
     return {"run": run_id, "taken_from": taken, "items": done, "cost": round(cost, 6), "seconds": round(secs, 3), "lap": lap, "stopped": why}
 
 
@@ -305,7 +315,7 @@ def cmd_plan(a):
 
 def cmd_run(a):
     root = git_root(a.root)
-    m = run(root, a.until, a.queue, a.max, a.max_items, a.loop, a.lap, a.pid)
+    m = run(root, a.until, a.queue, a.max, a.max_items, a.loop, a.lap, a.pid, owner=a.run, since=a.since)
     if m.get("reason") == "not_owner":
         emit(result(TOOL, "gate", "見直しの持ち主が別にいるため調べない", [], m, next="何もしないで終える"), EXIT_GATE)
     emit(result(TOOL, "ok", f"調べた項目 {len(m['items'])} 件（{m['stopped']}）・{m['cost']} ドル・{m['seconds']} 秒", [], m))
@@ -317,7 +327,9 @@ def add_parsers(sub, common) -> None:
     p.add_argument("--since", default=None, help="前の見直しの at（これより前に調べた項目を古いとみなす）")
     p.set_defaults(func=cmd_plan)
     r = rp.add_parser("run", parents=[common])
-    r.add_argument("--until", required=True, help="待っているプランの完了のファイル（出たら新しい項目を始めない）")
+    r.add_argument("--until", default=None, help="待っているプランの完了のファイル（出たら新しい項目を始めない）。無ければ待たない")
+    r.add_argument("--run", default=None, help="見直し・大整理の持ち主の実行（owner claim の run）。宣言を取り直さず解放もしない")
+    r.add_argument("--since", default=None, help="前の見直しの at（これより前に調べた項目を古いとみなして調べ直す）")
     r.add_argument("--queue", default=None, help="queue の一覧（<done>.plans.json）。走っている本数を数える")
     r.add_argument("--max", type=int, default=6, help="並列の上限（調査 1 本を含めて数える）")
     r.add_argument("--max-items", type=int, default=3)
