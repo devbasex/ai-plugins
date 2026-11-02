@@ -17,7 +17,6 @@ import datetime as _dt
 import json
 import os
 import re
-import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -310,18 +309,6 @@ def cmd_run(a):
     if m.get("reason") == "not_owner":
         emit(result(TOOL, "gate", "見直しの持ち主が別にいるため調べない", [], m, next="何もしないで終える"), EXIT_GATE)
     emit(result(TOOL, "ok", f"調べた項目 {len(m['items'])} 件（{m['stopped']}）・{m['cost']} ドル・{m['seconds']} 秒", [], m))
-
-
-def research_command(script: Path, root: str, until: str, listing: str | None, lap: int | None, loop: str | None) -> str:
-    """`loop sprint` が返す、待ちと並べて背景で打つ 1 行。"""
-    args = ["python3", str(script), "research", "run", "--root", root, "--until", until]
-    if listing:
-        args += ["--queue", listing]
-    if lap is not None:
-        args += ["--lap", str(lap)]
-    if loop:
-        args += ["--loop", loop]
-    return shlex.join(args)
 
 
 def add_parsers(sub, common) -> None:
