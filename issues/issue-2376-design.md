@@ -47,8 +47,8 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | Skill の対応表 | 工程と Skill の組は対応表のファイルにだけある。ほかのコード・system プロンプト・worker の定義・規約の文書は、工程ごとの Skill の名前を持たない | テストで落ちる |
-| I2 | Skill の対応表 | 対応表のキーはすべて工程表の工程の名前で、値の Skill はすべて `plugins/ndf/skills/<名前>/SKILL.md` が実在する | テストで落ちる。実行の時点で読めなければ I6 |
-| I3 | プランのステップ | `skills`・`skills_add` 欄に書いた Skill は、すべて `plugins/ndf/skills/<名前>/SKILL.md` が実在する | ステップを 1 つも流す前の検査で落ち、ステップの `id` と名前を示して止まる |
+| I2 | Skill の対応表 | 対応表のキーはすべて工程表の工程の名前で、値の Skill はすべて対応表の `rule_skills`（規則の Skill の一覧）に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。`rule_skills` に工程 Skill（`development-workflow` の「モードごとに起動する Skill」の表に載る Skill）は載らない | テストで落ちる。実行の時点で読めなければ I6 |
+| I3 | プランのステップ | `skills`・`skills_add` 欄に書いた Skill は、すべて対応表の `rule_skills` に載り、`plugins/ndf/skills/<名前>/SKILL.md` が実在する。工程 Skill（`development-workflow` など）は実在しても載らないため通らない | ステップを 1 つも流す前の検査で落ち、ステップの `id` と名前と理由（規則の Skill でない・実在しない）を示して止まる |
 | I4 | プランのステップ | 届ける Skill は「`skills` があればその一覧、無ければ対応表のその工程の一覧（工程が無い・対応表に無ければ空）」に `skills_add` を足し、重ねずに並べたものである | テストで落ちる |
 | I5 | プランのステップ | worker の起動に渡すもの（system プロンプト・プロンプト・引数）が含む Skill の本文は I4 の結果だけである。judge の起動は Skill を含まない | テストで落ちる |
 | I6 | 進捗ログ | 対応表を読めない、または届ける Skill の `SKILL.md` を読めないステップは worker を起動しない。読めなかった名前かファイルを進捗ログの行に残し、ステップを失敗にする | テストで落ちる |
@@ -93,7 +93,7 @@ I8 の集約の欄が「—」なのは、worker の定義がこの変更の集�
 
 | 要素 | 責務 | 置き場 |
 | --- | --- | --- |
-| 対応表 | 工程の名前 → Skill の名前の一覧。初期値は 設計・ドキュメント再構成・Pull Request・振り返り → `document-style`、実装 → `logging-guidelines` | `plugins/ndf/scripts/lib/stage-skills.json`（新設） |
+| 対応表 | 規則の Skill の一覧（`rule_skills`）と、工程の名前 → Skill の名前の一覧。初期値は `rule_skills` が `document-style`・`logging-guidelines`、設計・ドキュメント再構成・Pull Request・振り返り → `document-style`、実装 → `logging-guidelines` | `plugins/ndf/scripts/lib/stage-skills.json`（新設） |
 | 届ける Skill の解決 | 対応表を読む。ステップから届ける Skill を決める（I4）。プランの欄を照合する（I3）。本文の節を組む。どれも副作用を持たず、読めないときは例外で知らせる | `plugins/ndf/scripts/lib/stage_skills.py`（新設） |
 | 引くコマンド | 工程を受け、名前と絶対パスを統一 JSON レポートで返す（F1） | `plugins/ndf/scripts/stage-skills.py`（新設） |
 | 実行の入口の検査 | ステップを流す前に `skills`・`skills_add` を照合する（E2） | `supervise_lib/engine.py` の `setup` |
@@ -224,6 +224,7 @@ classDiagram
 ```json
 {
   "version": 1,
+  "rule_skills": ["document-style", "logging-guidelines"],
   "stages": {
     "設計": ["document-style"],
     "ドキュメント再構成": ["document-style"],
@@ -241,7 +242,7 @@ classDiagram
 | `skills` | 文字列の配列 | 任意 | 対応表の値を置き換える。空の配列なら何も届けない |
 | `skills_add` | 文字列の配列 | 任意 | 対応表の値（`skills` があればその値）へ足す。重なる名前は 1 つにする |
 
-名前は `plugins/ndf/skills/` の下のディレクトリ名である（`ndf:` を付けない）。どちらの欄も無いプランは今と同じに読み、対応表の値で動く（互換あり）。
+名前は `plugins/ndf/skills/` の下のディレクトリ名である（`ndf:` を付けない）。どちらの欄も、対応表の `rule_skills` に載る名前だけを受ける（I3）。`skills: ["development-workflow"]` のように工程 Skill を書いたプランは、実在しても検査で落ちる。どちらの欄も無いプランは今と同じに読み、対応表の値で動く（互換あり）。
 
 ### 引くコマンド
 
@@ -295,7 +296,7 @@ sequenceDiagram
     participant L as 進捗ログ
     participant W as worker
     E->>R: plan_errors(steps)
-    alt 実在しない名前がある
+    alt 規則の Skill でない・実在しない名前がある
         R-->>E: ステップの id と名前
         E-->>E: ステップを流さずに止まる
     end
@@ -392,6 +393,8 @@ supervisor は `stage-skills.py lookup <工程>` を打ち、出力の名前と�
 
 確定仕様（`docs/specifications/ndf-worker-agent-and-skill-excerpts.md`）は「worker は `SKILL.md` を読まない」と定める。工程 Skill を読ませると、進捗記録・確認・承認ゲートの判断のように worker が持たない責務が worker の文脈で動くためである。対応表に置くのは、書き方・記録の仕方のように手順を持たない規則の Skill（初期値の `document-style`・`logging-guidelines`）だけにする。確定仕様の 3 か所は「工程 Skill の `SKILL.md` を読まない。起動指示の『読む Skill』に挙がった規則の Skill だけを読む」へ直す。工程 Skill の手順は、今と同じく抜粋（`references/excerpt.md`）で渡す。
 
+規則の Skill かどうかは、対応表のファイルの `rule_skills` の一覧で決める。対応表の値（I2）とプランの `skills`・`skills_add` 欄（I3）は、どちらもこの一覧に載る名前だけを受ける。欄の照合を実在だけにすると、`skills: ["development-workflow"]` が検査を通って工程 Skill の本文が worker に届き、この決定が欄の経路で破れるためである。`SKILL.md` の frontmatter や本文から規則か工程かを推し量る形は採らない。どちらも今の Skill に区別の印が無く、判定が書き方に依存するためである。規則の Skill を足すときは、一覧へ 1 行足す。
+
 規則の Skill にも抜粋を作って渡す形は採らない。規則の Skill は本文全体が規則であり、抜粋の 3 見出し（呼び出し・結果の読み方・判断の基準）に当てはまる手順を持たない。
 
 根拠: Value 6 / Value 7（MVV 版 4）
@@ -417,15 +420,15 @@ Skill を届けるステップの起動 1 回あたりの増分は、費用 $0.1
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 1・I1 | `supervise_lib`・`worker.md`・`agent-layers.md` のどれにも `document-style` と `logging-guidelines` の名前が無く、対応表のファイルにだけある | `prompts.py` に Skill の名前を書き戻す |
-| I2 | 対応表のキーがすべて工程表（`wf_stages`）の行名で、値の Skill の `SKILL.md` がすべて実在する | 対応表へ工程表に無い工程か、実在しない Skill を書く |
+| I2 | 対応表のキーがすべて工程表（`wf_stages`）の行名で、値の Skill がすべて `rule_skills` に載って `SKILL.md` が実在し、`rule_skills` に `development-workflow` の「モードごとに起動する Skill」の表の Skill が無い | 対応表へ工程表に無い工程か、実在しない Skill か、工程 Skill を書く |
 | 受け入れ条件 2 | `stage` の無いステップと、対応表に無い工程のステップの解決が空の一覧になり、本文の節が入らない | 対応表に無い工程へ既定の Skill を返す |
 | 受け入れ条件 3・I4 | `skills` を書いたステップは指定した Skill だけになり、空の配列なら空になる | `skills` に対応表の値を足して返す |
 | 受け入れ条件 4・I4 | `skills_add` は対応表の値に重ならずに足される。両方を書いたステップは `skills` に足される | 重なる名前を 2 回返す、または `skills_add` で置き換える |
-| 受け入れ条件 5・I3 | 実在しない名前を書いたプランは、ステップを 1 つも流さずに止まり、理由にステップの `id` と名前が出る | 照合をステップの開始まで遅らせる |
+| 受け入れ条件 5・I3 | 実在しない名前を書いたプランと、`skills`・`skills_add` に工程 Skill（`development-workflow`）を書いたプランは、ステップを 1 つも流さずに止まり、理由にステップの `id` と名前が出る | 照合をステップの開始まで遅らせる、または実在だけを見て工程 Skill を通す |
 | 受け入れ条件 6 | 欄の無い既存のプランが検査を通り、工程どおりに届く | 欄が無いプランを検査で落とす |
 | 受け入れ条件 7・I5 | 通常の worker（ランタイム指定と drive の pause を含む）の system プロンプトに、解決した Skill の本文だけが入り、対応表のほかの行の Skill の名前が入らない | 対応表のすべての Skill を入れる |
 | 受け入れ条件 8・I5 | full の worker の `--append-system-prompt` に解決した Skill の本文だけが入る。再開の起動も同じ文になる | full の起動だけ節を入れない、または再開で節が落ちる |
-| 受け入れ条件 9 | pr のステップで LLM に渡す system プロンプトが `PR_SYSTEM` で始まり、`Pull Request` の工程の Skill の本文を含み、帳簿の種類は `pr` のままである | `claude_kind` を一致の判定のまま残す |
+| 受け入れ条件 9 | pr のステップで LLM に渡す system プロンプトが `PR_SYSTEM` で始まり、`Pull Request` の工程に対応表が当てた Skill の本文を含み、帳簿の種類は `pr` のままである | `claude_kind` を一致の判定のまま残す |
 | 受け入れ条件 10 | `lookup 設計` が `document-style` の名前と実在するパスを返し、`lookup 存在しない工程` が空の `items` と終了コード 0 を返す。対応表を読めないと終了コード 1 | 対応表に無い工程で終了コード 1 を返す |
 | 受け入れ条件 11・I8 | `worker.md` の frontmatter が `disallowedTools` に `Skill` と `Agent` を持ち、本文が Skill の名前を持たない | 定義へ `skills:` か特定の Skill の名前を書く |
 | 受け入れ条件 12 | `prompts.py` に `DOCUMENT_STYLE`・`DOCUMENT_RULE`・`_style_rules` が無く、設計の工程の work ステップには `document-style` の本文が届く | 撤去だけをして対応表の行を入れない |
