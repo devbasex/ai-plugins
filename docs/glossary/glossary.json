@@ -4966,6 +4966,48 @@
       "pending_source": "issues/issue-2347-design.md"
     },
     {
+      "term": "画面の地図",
+      "context": "ndf-factory",
+      "meaning": "Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "デザインのトークン",
+      "context": "ndf-factory",
+      "meaning": "色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "ダミーの API クライアント",
+      "context": "ndf-factory",
+      "meaning": "画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "翻訳のファイル",
+      "context": "ndf-factory",
+      "meaning": "言語ごとに、画面の文言のキーと文言を持つファイル",
+      "pending_source": "issues/issue-2382-requirements.md"
+    },
+    {
+      "term": "見本の画面",
+      "context": "ndf-factory",
+      "meaning": "土台の部品だけで組み、ダミーデータで動かす画面の 1 組（スプリントの一覧と詳細）。後続の課題が中身を置き換える出発点",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
+      "term": "つながりの状態",
+      "context": "ndf-factory",
+      "meaning": "画面が今サーバーへつながっているか・最後に受け取った時刻・つながってから確定する操作の数の組",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
+      "term": "言語と地域の設定",
+      "context": "ndf-factory",
+      "meaning": "画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める",
+      "pending_source": "issues/issue-2382-design.md"
+    },
+    {
       "term": "差分の棚卸し",
       "context": "ndf-workflow",
       "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315）",
@@ -5055,6 +5097,48 @@
       "meaning": "大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315）",
       "source": "",
       "pending_source": "issues/issue-2315-design.md"
+    },
+    {
+      "term": "統括役",
+      "code": "relay_hub",
+      "context": "ndf-workflow",
+      "meaning": "同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "名前つきのラッパー",
+      "code": "named_relay",
+      "context": "ndf-workflow",
+      "meaning": "統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "端末の結び付け",
+      "code": "attach",
+      "context": "ndf-workflow",
+      "meaning": "利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける",
+      "pending_source": "issues/issue-2346-requirements.md"
+    },
+    {
+      "term": "登録簿",
+      "code": "relay_registry",
+      "context": "ndf-workflow",
+      "meaning": "統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
+      "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "起動の依頼",
+      "code": "spawn_request",
+      "context": "ndf-workflow",
+      "meaning": "頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ",
+      "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "起動のブロック",
+      "code": "spawn_block",
+      "context": "ndf-workflow",
+      "meaning": "conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる",
+      "pending_source": "issues/issue-2346-design.md"
     }
   ]
 }
