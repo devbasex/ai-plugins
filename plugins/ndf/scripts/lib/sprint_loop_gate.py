@@ -20,6 +20,7 @@ from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
     SUPERVISE,
+    UPKEEP,
     EXIT_REFUSED,
     IN_PROGRESS,
     FAILED,
@@ -424,6 +425,38 @@ def refine_summary(env: Env, rec: dict) -> dict:
     }
 
 
+def research_command(root: str, rec: dict, lap: dict, done: Path) -> str:
+    """待ち（`supervise.py wait`）と並べて背景で打つ、待ち時間の調査の 1 行（#2315 の決定 7）。"""
+    plans = done.with_suffix(".plans.json")
+    args = ["python3", str(UPKEEP), "research", "run", "--root", root, "--until", str(done), "--queue", str(plans)]
+    return shlex.join([*args, "--lap", str(lap["n"]), "--loop", rec["name"]])
+
+
+def owner_line(env: Env) -> tuple[str, dict | None]:
+    """見直しの持ち主の行（`.ndf/backlog/owner.json`）。"""
+    path = env.main_dir() / ".ndf" / "backlog" / "owner.json"
+    got = jsonio.read(path, missing=None, broken=None, want=dict)  # run_owner は耐久の記録（dbos）へ届くため読まない
+    if not got or got.get("finished_at"):
+        return "見直しの持ち主: なし", got
+    return f"見直しの持ち主: {got.get('run')}（{got.get('what')}・最後に動いた時刻 {got.get('seen_at')}）", got
+
+
+def backlog_summary(env: Env, rec: dict, lap: dict) -> None:
+    """周回の間の棚卸しの深さの行と、この周回で調べた調査の項目の費用と秒を周回の記録へ写す（#2315）。"""
+    d = env.main_dir() / ".ndf" / "backlog"
+    since = lap.get("started_at") or ""
+    rows = jsonio.read_jsonl(d / "depths.jsonl", missing=[], skip_broken=True)
+    lap["depths"] = [{k: r.get(k) for k in ("depth", "event", "trigger", "cost", "seconds")} for r in rows if (r.get("at") or "") >= since]
+    items = [jsonio.read(f, missing={}, broken={}, want=dict) for f in sorted((d / "research").glob("*.json"))]
+    mine = [r for r in items if r.get("lap") == lap["n"] and (r.get("by") or {}).get("loop") == rec.get("name")]
+    if mine:
+        lap["research"] = {
+            "items": [r.get("id") for r in mine],
+            "cost": round(sum(float(r.get("cost") or 0) for r in mine), 6),
+            "seconds": round(sum(float(r.get("seconds") or 0) for r in mine), 3),
+        }
+
+
 def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None, deferred_issues=(), done_rows=()) -> None:
     """周回を締め、スプリント状態とまとめの記録から値を写して固定する。"""
     if lap.get("outcome") != IN_PROGRESS:
@@ -440,6 +473,7 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
     if close_rep:
         lap["retro"] = (close_rep.get("row") or {}).get("report", "")
     lap["refine"] = refine_summary(env, rec)
+    backlog_summary(env, rec, lap)
     lap["deferred_issues"] = sorted(set(lap.get("deferred_issues") or []) | {int(n) for n in deferred_issues})
     lap["failure"] = failure_key(state) if outcome == FAILED else None
     if outcome == FAILED and lap["failure"] is None:

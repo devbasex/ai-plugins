@@ -47,7 +47,7 @@ from supervise_lib.sprint_routes import (
     route_waves,
 )
 from supervise_lib.verify_steps import merge_steps
-from supervise_lib.sprint_close_steps import _close_step, _refine_step, _retro_step, _spec_pr_steps
+from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
 
 
 def prod_version(version: str | None) -> str | None:
@@ -162,7 +162,7 @@ def close_plan(a, repo: str) -> dict:
                 *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
                 _retro_step(a, refs, stats),
                 _close_step(a, repo, record_pr, issues),
-                _refine_step(a, refs),
+                *refine_steps(a, refs, repo),
             ],
         },
         a,

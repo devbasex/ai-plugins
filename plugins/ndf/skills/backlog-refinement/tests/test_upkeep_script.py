@@ -72,6 +72,28 @@ if target.startswith("repos/o/r/milestones"):
         st["milestones"].append(ms)
         done(ms)
     done(st["milestones"])
+if target == "repos/o/r/issues" and method == "POST":
+    body = json.loads(stdin)
+    n = max(int(k) for k in issues) + 1
+    issues[str(n)] = {{"number": n, "title": body["title"], "body": body["body"], "state": "open", "milestone": None,
+                      "labels": [{{"name": x}} for x in body.get("labels", [])], "updated_at": "2026-09-25T00:00:11Z"}}
+    done(issues[str(n)])
+m = re.match(r"repos/o/r/issues/(\d+)/parent$", target)
+if m:
+    p = st.setdefault("parents", {{}}).get(m.group(1))
+    if p is None:
+        done("", 1, stderr="Not Found (HTTP 404)")
+    done(issues[str(p)])
+m = re.match(r"repos/o/r/issues/(\d+)/sub_issues?$", target)
+if m and method in ("POST", "DELETE"):
+    kid = str(json.loads(stdin)["sub_issue_id"] - 1000)
+    if st.get("fail_parent") == int(kid):
+        done("", 1, stderr="server error (HTTP 500)")
+    if method == "POST":
+        st.setdefault("parents", {{}})[kid] = int(m.group(1))
+    else:
+        st.setdefault("parents", {{}}).pop(kid, None)
+    done({{}})
 m = re.match(r"repos/o/r/issues/(\d+)/sub_issues", target)
 if m:
     done([issues[str(k)] for k in st.get("sub_issues", {{}}).get(m.group(1), [])])
@@ -88,6 +110,7 @@ if m:
 m = re.match(r"repos/o/r/issues/(\d+)$", target)
 if m:
     i = issues[m.group(1)]
+    i.setdefault("id", int(m.group(1)) + 1000)
     if method == "PATCH":
         patch = json.loads(stdin)
         if "milestone" in patch:
@@ -181,9 +204,18 @@ def env(tmp_path):
             fn(st)
             sp.write_text(json.dumps(st, ensure_ascii=False))
 
+        def owner(self):
+            """見直しの持ち主の実行（テストのプロセスを持ち主にする。2 回目からは同じ実行）。"""
+            if not getattr(self, "_owner", None):
+                code, out = self.run("owner", "claim", "--what", "review", "--pid", str(os.getpid()))
+                assert code == 0, out
+                self._owner = out["metrics"]["run"]
+            return self._owner
+
         def plan(self, actions):
             f = tmp_path / "plan.json"
-            f.write_text(json.dumps({"repo": "o/r", "actions": actions}, ensure_ascii=False))
+            # マイルストーン・やらないは見直しの深さで反映する（#2315 の I12）。持ち主になってから書く
+            f.write_text(json.dumps({"repo": "o/r", "actions": actions, "depth": "review", "owner": self.owner()}, ensure_ascii=False))
             return str(f)
 
         def snapshot(self, n):
@@ -208,19 +240,31 @@ def _action(snap, verdict, changes, **kw):
 
 
 def test_candidates_collect_each_route(env):
+    # 既定は差分の棚卸し: マイルストーンの経路（no-milestone・closed-milestone）は見直しへ回す（#2315 の決定 3）
     code, out = env.run("candidates", "--since-ref", "v1")
-    assert code == 0
+    assert code == 0 and out["metrics"]["depth"] == "diff"
     routes = {i["number"]: i["routes"] for i in out["items"] if i["kind"] == "issue"}
     assert routes == {
         1: ["diff-path"],
         2: ["diff-identifier"],
-        3: ["no-milestone"],
-        4: ["closed-milestone"],
         5: ["sub-issue"],
         6: ["sub-issue"],
     }
-    assert out["metrics"]["candidates"] == 6
+    assert out["metrics"]["candidates"] == 4
     assert all(i["kind"] == "issue" for i in out["items"])  # M1 には open の #4 が残る
+
+
+def test_candidates_review_takes_all_open_but_deferred_without_limit(env):
+    # 見直しは後回しのマイルストーンを除く open の全件を上限で切らずに返す（I10・決定 11）。差分は後回しも拾う
+    (env.root / ".ndf").mkdir()
+    (env.root / ".ndf" / "project.json").write_text(json.dumps({"materials": {"deferred_milestones": ["M1"]}}))
+    code, out = env.run("candidates", "--since-ref", "v1", "--depth", "review", "--limit", "2")
+    routes = {i["number"]: i["routes"] for i in out["items"] if i["kind"] == "issue"}
+    assert code == 0 and out["metrics"]["deferred"] == []
+    assert set(routes) == {1, 2, 3, 5, 6, 7} and routes[3] == ["no-milestone", "all"]
+    env.set(lambda st: st["issues"]["1"].update(milestone={"number": 1, "title": "M1"}))
+    _, out = env.run("candidates", "--since-ref", "v1")
+    assert 1 in {i["number"] for i in out["items"] if i["kind"] == "issue"}
 
 
 def test_candidates_report_milestone_without_open_issue(env):
@@ -248,7 +292,7 @@ def test_candidates_limit_caps_one_run(env):
     assert code == 20 and out["status"] == "gate"
     kept = [i["number"] for i in out["items"] if i.get("result") == "candidate"]
     assert len(kept) == 2 and out["metrics"]["candidates"] == 2
-    assert len(out["metrics"]["deferred"]) == 4
+    assert len(out["metrics"]["deferred"]) == 2
     # 上限を超えた候補は items に載せない。載せると区分を決める対象として求められる。
     issues = [i["number"] for i in out["items"] if i["kind"] == "issue"]
     assert issues == kept
@@ -613,3 +657,123 @@ def test_candidates_pick_issues_named_in_commit_subjects(env):
     assert first["number"] == 7 and first["routes"] == ["commit-subject"]
     assert any(t.startswith("Fix: 落ちる所を直す") for t in first["terms"])
     assert out["metrics"]["by_route"]["commit-subject"] == 1  # 閉じた #10 は数えない
+
+
+# ---------------- 深さ・起票・付け直し（#2315） ----------------
+
+
+def _raw_plan(env, body):
+    f = env.path / "plan-raw.json"
+    f.write_text(json.dumps({"repo": "o/r", "actions": [], **body}, ensure_ascii=False))
+    return str(f)
+
+
+def _create(title, kind="needs", verdict="follow", **kw):
+    return {
+        "kind": kind,
+        "title": title,
+        "body": "本文",
+        "sources": [{"kind": "url", "value": "https://example.com"}],
+        "mvv_basis": "Value 3",
+        "mvv_verdict": verdict,
+        **kw,
+    }
+
+
+def test_diff_depth_does_not_reflect_review_work(env):
+    # 差分の棚卸しは順位の表・マイルストーン・やらない・起票を反映しない（I12）
+    snap = env.snapshot(3)
+    plan = {
+        "actions": [_action(snap, "追記が要る", {"milestone": "M1"}), _action(snap, "やらない", {"state": "closed"}, approved=True)],
+        "rank": "abc",
+        "create": [_create("新しい課題")],
+    }
+    code, out = env.run("apply", "--plan", _raw_plan(env, plan))
+    reasons = {i["name"]: i["result"] for i in out["items"]}
+    assert code == 0 and not env.writes()
+    assert out["metrics"]["depth"] == "diff" and len(out["metrics"]["wrong_depth"]) == 4
+    assert set(reasons.values()) == {"wrong_depth"}
+
+
+def test_review_apply_needs_the_owner(env):
+    # 持ち主でない apply --depth review は 1 件も書かない（I3・受け入れ条件 23）
+    env.snapshot(3)
+    code, out = env.run("apply", "--plan", _raw_plan(env, {"depth": "review", "owner": "someone", "create": [_create("x")]}))
+    assert code == 3 and out["status"] == "stopped" and not env.writes()
+
+
+def test_review_creates_up_to_the_limit_with_labels_and_decision(env):
+    # 上限（既定 5）・出典の無い起票・従う以外の needs-decision（I4・I5・I6）
+    env.snapshot(3)
+    creates = [_create(f"ニーズ {k}") for k in range(6)]
+    creates[1]["mvv_verdict"] = "suspect"
+    creates.append(_create("出典なし", sources=[]))
+    code, out = env.run("apply", "--plan", _raw_plan(env, {"depth": "review", "owner": env.owner(), "create": creates}))
+    m = out["metrics"]
+    assert code == 0 and len(m["created"]) == 5 and len(m["not_created"]) == 1 and len(m["rejected_create"]) == 1
+    made = {i["title"]: i for i in env.state()["issues"].values()}
+    assert [x["name"] for x in made["ニーズ 0"]["labels"]] == ["needs"]
+    assert [x["name"] for x in made["ニーズ 1"]["labels"]] == ["needs", "needs-decision"]
+    assert "## 出典" in made["ニーズ 0"]["body"] and "Value 3" in made["ニーズ 0"]["body"]
+    code, out = env.run("apply", "--plan", _raw_plan(env, {"depth": "review", "owner": env.owner(), "create": creates}))
+    assert len([i for i in env.state()["issues"].values() if i["title"].startswith("ニーズ")]) == 5  # 打ち直しで 2 度作らない
+
+
+def _overhaul_owner(env):
+    code, out = env.run("owner", "claim", "--what", "overhaul", "--pid", str(os.getpid()))
+    if code == 10:  # 見直しの持ち主が残っていれば同じ実行を使う
+        return env.owner()
+    return out["metrics"]["run"]
+
+
+def test_reparent_writes_before_state_and_reverts(env):
+    # 付け直しの前に全件の前の状態を書き、1 つのコマンドで戻す（I9・E16・受け入れ条件 20）
+    env.snapshot(3)
+    run = _overhaul_owner(env)
+    env.set(lambda st: st.update(parents={"5": 11}))
+    plan = {
+        "depth": "overhaul",
+        "owner": run,
+        "policy_verdict": "follow",
+        "reparent": [{"number": 5, "parent": 2, "milestone": "M1"}, {"number": 7, "parent": 2, "milestone": None}],
+    }
+    code, out = env.run("apply", "--plan", _raw_plan(env, plan))
+    assert code == 0 and out["metrics"]["reparented"] == [5, 7]
+    before = json.loads((env.root / ".ndf" / "backlog" / "overhaul" / run / "before.json").read_text())
+    assert [(b["number"], b["parent"], b["milestone"]) for b in before] == [(5, 11, "M2"), (7, None, "M2")]
+    assert env.state()["parents"] == {"5": 2, "7": 2}
+    code, out = env.run("revert", "--run", run)
+    st = env.state()
+    assert code == 0 and st["parents"] == {"5": 11}
+    assert st["issues"]["5"]["milestone"]["title"] == "M2" and st["issues"]["7"]["milestone"]["title"] == "M2"
+
+
+def test_reparent_failure_reports_the_revert_command(env):
+    env.snapshot(3)
+    run = _overhaul_owner(env)
+    env.set(lambda st: st.update(fail_parent=7))
+    plan = {
+        "depth": "overhaul",
+        "owner": run,
+        "policy_verdict": "follow",
+        "reparent": [{"number": 5, "parent": 2}, {"number": 7, "parent": 2}],
+    }
+    code, out = env.run("apply", "--plan", _raw_plan(env, plan))
+    assert code == 1 and out["metrics"]["reparent_failed"] == [7]
+    assert f"revert --run {run}" in out["metrics"]["revert_command"] and "revert" in out["next"]
+
+
+def test_reparent_waits_for_a_following_policy(env):
+    # 大方針の MVV 判定が従う以外なら付け直しへ進まない（受け入れ条件 21）
+    env.snapshot(3)
+    run = _overhaul_owner(env)
+    plan = {
+        "depth": "overhaul",
+        "owner": run,
+        "create": [_create("大方針", kind="policy", verdict="suspect")],
+        "reparent": [{"number": 5, "parent": 2}],
+    }
+    code, out = env.run("apply", "--plan", _raw_plan(env, plan))
+    assert code == 0 and out["metrics"]["not_reparented"] == [5] and not env.state().get("parents")
+    pol = [i for i in env.state()["issues"].values() if i["title"] == "大方針"][0]
+    assert {x["name"] for x in pol["labels"]} == {"policy", "needs-decision"}

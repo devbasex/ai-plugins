@@ -1,7 +1,7 @@
 ---
 name: backlog-refinement
 description: "Bring the issue list back in line with reality: fix stale bodies, set milestones, close what is not worth doing, rank what to start. Use when a change is finished and the issue list has drifted（課題の棚卸しをするとき・issueの整理・やらないと決める・着手の順位を決める）."
-argument-hint: "[--all] [--repo owner/repo]"
+argument-hint: "[--depth diff|review|overhaul] [--all] [--repo owner/repo]"
 allowed-tools:
   - Bash
   - Read
@@ -24,6 +24,20 @@ allowed-tools:
 **工程表（`development-workflow` の「モードごとに起動する Skill」）の最後の行 `棚卸し` として、スプリントを閉じた後に通す。**
 順序の正本は `progress-tracking` の「スプリントを閉じる」、どのフェーズで通すかは `development-workflow` の
 `references/agent-layers.md` のフェーズの表にある。1 回に区分を決める件数は候補の上限で切る（手順 1）。
+
+## 深さ
+
+**棚卸しは遅れたときの害の出方で 3 つの深さに分ける。** 引数 `--depth` を省くと差分の棚卸しである。
+
+| 深さ | 頻度（既定） | 行うこと | 読む参照 |
+| --- | --- | --- | --- |
+| `diff`（差分の棚卸し） | 毎スプリント | 扱う 5 つのうち 1（誤りの訂正）と、そのスプリントで起票した課題への見積の段階の付与だけ | この文書 |
+| `review`（見直し） | 3 回に 1 回 | 後回しを除く open の全件に 5 つすべてと、ニーズ・シーズの調査からの起票 | [references/review.md](references/review.md)・[references/research.md](references/research.md) |
+| `overhaul`（大整理） | 12 回に 1 回 | 未完了の全件を原因の型で分けて根本原因を探し、組み直す。後回しの再評価を含む | [references/overhaul.md](references/overhaul.md) |
+
+起動の条件（回数と溜まり具合）・見直しの持ち主・記録の置き場は [references/depths.md](references/depths.md) にある。
+まとめのプランは差分の棚卸しの後に、大整理と見直しを起動の判定つきで流す。`--loop` を使わないときは人が
+`--depth review` か `--depth overhaul` で呼べ、`depth due ... --manual` が起動の条件を `manual` で残す。
 
 **着手の直前は判断が歪む場所である。** 実装を担う側には締め切りがあり、そこで「この課題は
 成り立たない」と気づいても、止める判断は自分の作業を遅らせる。判断を下す人が、その判断で
@@ -58,9 +72,10 @@ allowed-tools:
 語の正本は用語集（`ndf-issue-upkeep` の文脈）にある。段階の付け方と、式・判定の置き場は
 [references/ranking.md](references/ranking.md) にある。
 
-**「棚卸し」は起票を含まない**（新しい課題を作るのは `out-of-scope` の役目である）。
+**差分の棚卸しは起票を含まない**（作業中に見つけた課題を作るのは `out-of-scope` の役目である）。
 **例外は親 issue の起票 1 つだけである。** 親 issue は新しい発見ではなく、既存の課題から
 導かれる。課題を見つけたその場の起票は発見の瞬間しか見ないため、クラスタを作れない。
+見直しはニーズとシーズの調査から、大整理は根本原因から起票する（上限・出典・MVV 判定つき。参照の各文書）。
 
 ## 扱う 5 つ
 
@@ -118,7 +133,8 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
 
 ### 手順 1: 対象を選ぶ
 
-5 つの経路で集め、重複を除く。**対象は open の課題だけである。**
+5 つの経路で集め、重複を除く。**対象は open の課題だけである。** 差分の棚卸し（`--depth diff`）はマイルストーンの経路を
+通らない（`no-milestone`・`closed-milestone` は見直しで拾う）。見直し（`--depth review`）は後回しを除く open の全件を上限で切らずに拾う。
 
 | 経路 | 取り方 | 拾えるもの |
 | --- | --- | --- |
@@ -139,7 +155,7 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
 **起票者は問わない。** 絞ると、未設定のまま溜まる課題を誰も見ないことになる。
 
 ```bash
-python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> [--all] [--add 12,34] [--limit N]
+python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> [--depth diff|review] [--all] [--add 12,34] [--limit N]
 ```
 
 機械の候補・マイルストーン・親 issue・コミットの件名の 4 経路は `candidates` が集める（`items[].routes` が

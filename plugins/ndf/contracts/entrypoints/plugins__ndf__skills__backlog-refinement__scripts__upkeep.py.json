@@ -6,12 +6,24 @@
     "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
     "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL",
     "NDF_UPKEEP_NO_SLEEP",
     "NDF_UPKEEP_STATE_DIR",
     "XDG_STATE_HOME"
@@ -21,6 +33,13 @@
       "file": "estimate.json",
       "keys": [
         "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "materials",
+        "ndf_policies"
       ]
     },
     {
@@ -34,9 +53,14 @@
   "stdout": "step-result",
   "writes": [
     "apply-json",
+    "before-json",
     "candidates-json",
+    "counts-json",
     "estimates-json",
-    "rank-json"
+    "measures-json",
+    "rank-json",
+    "research-item-json",
+    "snapshot-json"
   ],
   "reads": [],
   "exit": {

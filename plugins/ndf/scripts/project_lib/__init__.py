@@ -14,7 +14,7 @@ if _LIB not in sys.path:
 import project_decl  # noqa: E402
 import repo  # noqa: E402
 
-ANALYZER = 2  # 解析器の版。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する）
+ANALYZER = 3  # 解析器の版。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する）
 ITEM_KEYS = (
     "languages",
     "test",
@@ -26,6 +26,7 @@ ITEM_KEYS = (
     "checks",
     "ndf_policies",
     "instructions",
+    "materials",
 )
 BRANCHES = "branches"  # P6。宣言では worktree.json の base_branch・production_branch へ書く
 DECL_FILE = project_decl.DECL

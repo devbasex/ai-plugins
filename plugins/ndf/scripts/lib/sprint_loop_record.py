@@ -251,7 +251,9 @@ def active_seconds(rec: dict) -> float:
 def consumed(rec: dict) -> dict:
     """予算の消費（周回の数・費用・動いていた時間）。書き込まない。"""
     closed = [lap for lap in rec.get("laps", []) if lap.get("outcome") != IN_PROGRESS]
-    usd = sum(float(lap.get("cost") or 0) for lap in closed)
+    usd = sum(
+        float(lap.get("cost") or 0) + float((lap.get("research") or {}).get("cost") or 0) for lap in closed
+    )  # 調査も予算に数える（#2315）
     return {"laps": len(closed), "usd": round(usd, 6), "hours": round(active_seconds(rec) / 3600, 6)}
 
 
@@ -440,6 +442,11 @@ def render_lap_detail(lap: dict) -> list[str]:
         lines.append(
             f"- 棚卸し: 持ち越し {_md_cell(lap['refine'].get('deferred'))}・順位の変化 {len(lap['refine'].get('rank_changes') or [])} 件"
         )
+    for d in lap.get("depths") or []:
+        lines.append(f"- 棚卸しの深さ: {d.get('depth')} {d.get('event')}（{_md_cell('・'.join(d.get('trigger') or []))}）")
+    if lap.get("research"):
+        r = lap["research"]
+        lines.append(f"- 調査: {len(r.get('items') or [])} 項目・{_md_cell(r.get('cost'))} ドル・{_md_cell(r.get('seconds'))} 秒")
     if lap.get("retro"):
         lines.append(f"- 振り返り: {lap['retro']}")
     return lines

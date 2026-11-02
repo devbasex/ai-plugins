@@ -43,7 +43,7 @@
 | 1 | `$SS loop start <名> [--milestones ...] [--budget-* ...]` | 1 なら断った理由と 1 スプリントの起動の形（`metrics.next`）を示して終える。3 なら下の「止まったとき」。`in_lap` なら引継ぎ文書 `loop-<名>` の「次にやること」から続ける |
 | 2 | `$SS loop select <名>` | 選んだ課題（`metrics.selected`）のモードを判定し（手順 2）、版を決める（`release` の規則）。`auto` が許さないモード・MVV に反する疑いの課題は `$SS loop exclude <名> <課題> --reason <理由>` で外す（選定をやり直す） |
 | 3 | `$SS loop sprint <名> --mode <モード> --dev <開発版> [--prod <本番の版>] [-- <new sprint に足す引数>]` | 判断は無い。返った `metrics.pipeline` をそのまま流す |
-| 4 | `metrics.pipeline`（`supervise.py queue ... --done <D>` → `wait <D>` → `loop lap <名> --done <D>`） | `wait` が attention を返したら、今の `supervise.py` の手順で扱う |
+| 4 | `metrics.pipeline`（`supervise.py queue ... --done <D>` → `wait <D>` → `loop lap <名> --done <D>`）。`wait` と並べて `metrics.research`（待ち時間の調査）を背景で打つ | `wait` が attention を返したら、今の `supervise.py` の手順で扱う。調査の結果は読まない（見直しが読む） |
 | 5 | `loop lap` の結果 | 0 で `metrics.ndf_next` があれば、それを出してセッションを切る。0 で `metrics.pipeline` があれば（承認ゲート 1 で課題を外した続き）それを流す。3 なら下の「止まったとき」 |
 
 **品質を上げる工程は今の上限で打ち切る。** クロスレビュー・クロスリファクタリング・検査が上限（ラウンド・時間の予算・
@@ -83,7 +83,7 @@
 | 2 | `mvv_changed` | プロジェクト MVV が開始時と違う・承認と一致しない | 解けない。新しい名前でループを始め直す |
 | 3 | `same_failure` | 直近の失敗の周回が同じ鍵で `loop.same_failure` 回続く（完了の周回で数え直す） | 再開の起動で解け、数え直す |
 | 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わった周回の数・費用の和・動いていた時間が予算以上 | `--budget-*` で上書きした予算で判定し直す |
-| 5 | `no_issue` / `outside_mvv` | 選定の候補が 0 件 / 候補がすべて外れた | 再開で選定をやり直す |
+| 5 | `no_issue` / `outside_mvv` | 選定の候補が 0 件 / 候補がすべて外れた。`no_issue` は止まる前に 1 回だけ見直しを挟む（`loop select` が `status: review_first` と `metrics.next` を返す。見直しの後も 0 件なら止まる） | 再開で選定をやり直す |
 
 周回の途中で止まるのは `gate2_returned`・`mvv_changed`・`refused`（`new sprint` などが断った）だけで、周回は進行中のまま残る。
 `gate2_returned` は利用者が承認すれば `loop start` の `metrics.next` の `pipeline`（承認ゲート 2 で止まった計画を経路に合う
@@ -110,9 +110,10 @@
 
 | 置き場 | 中身 |
 | --- | --- |
-| `.ndf/loop/<名>/loop.json` | 正本。周回（選定と理由・承認ゲートの判定の写し・版・振り返りの置き場・棚卸しの持ち越しと順位の変化・費用と秒・後へ回した Issue・結果）・人の判断待ち・除外・止まった理由 |
+| `.ndf/loop/<名>/loop.json` | 正本。周回（選定と理由・承認ゲートの判定の写し・版・振り返りの置き場・棚卸しの持ち越しと順位の変化・棚卸しの深さの行（`depths`）・待ち時間の調査の項目と費用と秒（`research`。予算に数える）・費用と秒・後へ回した Issue・結果）・人の判断待ち・除外・止まった理由 |
 | `.ndf/loop/<名>/laps.md` | 人が読む描画。書き換えるたびに作り直す |
 | `.ndf/handoff/loop-<名>.md` | 引継ぎ文書。現在地と次に実行するコマンドだけ |
 
-どれもメインディレクトリに置き、コミットしない。周回の一覧は `$SS loop list <名>`、今の状態は `$SS loop status <名>` で出す。
+どれもメインディレクトリに置き、コミットしない。周回の一覧は `$SS loop list <名>`、今の状態（見直しの持ち主を含む）は `$SS loop status <名>` で出す。
+まとめの棚卸しは差分の棚卸しの後に、大整理と見直しを起動の判定つきで流す（`backlog-refinement` の `references/depths.md`）。
 前の周回の棚卸しの持ち越し（`metrics.deferred`）は、次の周回のまとめの棚卸しへ `new close --carry` で渡る。
