@@ -10,7 +10,7 @@
   "リポジトリ": "<TMP>/repo",
   "規則": "",
   "進め方": "fast",
-  "上限": 16,
+  "上限": 18,
   "steps": [
     {
       "id": "spec",
@@ -147,6 +147,18 @@
       "stage": "棚卸し",
       "timeout": 5400,
       "prompt": "/ndf:backlog-refinement --depth overhaul スプリント m9（#15）の後の大整理を無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `overhaul` の判定にある。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
+      "on_fail": "overhaul-release",
+      "next": "overhaul-release"
+    },
+    {
+      "id": "overhaul-release",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner release --what overhaul --root <TMP>/repo --pid \"$PPID\"",
+      "on_exit": {
+        "10": "review-due"
+      },
       "next": "review-due"
     },
     {
@@ -185,6 +197,18 @@
       "stage": "棚卸し",
       "timeout": 5400,
       "prompt": "/ndf:backlog-refinement --depth review スプリント m9（#15）の後の見直しを無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `review` の判定にある。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
+      "on_fail": "review-release",
+      "next": "review-release"
+    },
+    {
+      "id": "review-release",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 60,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner release --what review --root <TMP>/repo --pid \"$PPID\"",
+      "on_exit": {
+        "10": "end"
+      },
       "next": "end"
     },
     {
