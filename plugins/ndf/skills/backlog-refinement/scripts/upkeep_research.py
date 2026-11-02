@@ -59,6 +59,7 @@ SYSTEM = (
     "人へ問わない。秘密と個人情報を書かない。"
 )
 POLL = 30
+WEB_ASPECTS = ("needs.market", "seeds.library", "seeds.alternatives", "seeds.environment")
 FAIL_LIMIT = 3
 
 
@@ -156,12 +157,28 @@ def prompt_of(it: dict, product: dict | None, extra: str = "") -> str:
     if product:
         parts.append(f"プロダクト: {json.dumps(product, ensure_ascii=False)}")
     if extra:
-        parts.append("# 宣言のコマンドの出力（集計値・マスク済み）\n" + extra)
+        parts.append("# スクリプトが集めた材料（利用の記録は集計値・マスク済み）\n" + extra)
     parts.append(RESULT_CONTRACT)
     return "\n\n".join(parts) + "\n"
 
 
-def call_llm(root, prompt: str, timeout: int, tick) -> dict:
+def tools_of(aspect: str) -> str:
+    """Web を読む項目にはファイルを読む Tool を、手元を読む項目には Web の Tool を渡さない（読んだ中身を外へ出させない）。"""
+    return "WebFetch,WebSearch" if aspect in WEB_ASPECTS else "Read,Grep,Glob"
+
+
+def hotspots(root, limit: int = 30) -> str:
+    """変更の多いファイル（直近 500 コミット）。git はスクリプトが打ち、結果だけを渡す。"""
+    p = subprocess.run(["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"], capture_output=True, text=True, timeout=120)
+    counts: dict = {}
+    for f in p.stdout.splitlines():
+        if f.strip():
+            counts[f] = counts.get(f, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    return "\n".join(f"{n}\t{f}" for f, n in top)
+
+
+def call_llm(root, prompt: str, timeout: int, tick, tools: str) -> dict:
     """claude -p を 1 回呼ぶ（読むだけの Tool）。{ok, data, cost, seconds}。テストは差し替える。"""
     import deps
 
@@ -169,7 +186,7 @@ def call_llm(root, prompt: str, timeout: int, tick) -> dict:
     import supervise_lib  # noqa: F401  lib/ を sys.path へ足す
     from supervise_lib.claude import call_claude
 
-    res = call_claude(SYSTEM, prompt, "Read,Grep,Glob,WebFetch,WebSearch,Bash(git log:*)", str(root), timeout, tick=tick, caller={"source": TOOL, "kind": "research"})
+    res = call_claude(SYSTEM, prompt, tools, str(root), timeout, tick=tick, caller={"source": TOOL, "kind": "research"})
     data = None
     m = re.search(r"\{.*\}", str(res.get("text") or ""), re.S)
     if m:
@@ -211,7 +228,8 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
     """1 項目を調べる。(書いた記録か None, 使用量)。上限を超えた・出典の無い結果は書かない。"""
     lim = cfg["research"]
     extra = masked_usage(it["decl"], root, lim["item_seconds"]) if it["aspect"] == "needs.usage" else ""
-    got = call_llm(root, prompt_of(it, product, extra), int(lim["item_seconds"]), tick)
+    extra = "# 変更の多いファイル（回数・パス）\n" + hotspots(root) if it["aspect"] == "method.hotspot" else extra
+    got = call_llm(root, prompt_of(it, product, extra), int(lim["item_seconds"]), tick, tools_of(it["aspect"]))
     usage = {"cost": got["cost"], "seconds": got["seconds"]}
     if not got["ok"] or got["cost"] > lim["item_usd"] or got["seconds"] > lim["item_seconds"] or not valid_record(got["data"]):
         return None, usage
