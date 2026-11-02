@@ -324,7 +324,7 @@ class Swapper:
     @classmethod
     def from_handover(cls, path: str, serve) -> int:
         """入れ替えた後の `run`。起動の判定と `claude plugin list` を通さず、申し送りから組み立てて `serve` で続ける
-        （決定 4）。読めなければ止めて終了コード（I6）。`serve` は run の `_serve_terminal`。"""
+        （決定 4）。読めなければ止めて終了コード（I6）。`serve` は terminal の `serve_terminal`。"""
         d = os.path.dirname(path)
         h, shown = read_handover(path)
         if h is None:

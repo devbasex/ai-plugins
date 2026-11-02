@@ -77,9 +77,12 @@ class Locator:
     cwd: str
     url: str | None = None
     resume: str | None = None
+    relay: str | None = None  # 名前つきのラッパーの名前（`NDF_RELAY_NAME`。#2346 の決定 7）
 
     def lines(self) -> list[str]:
         out = []
+        if self.relay:
+            out.append(f"ラッパー: {self.relay}（relay.py attach {self.relay}）")
         if self.url:
             out.append(f"セッション: {self.url}")
         elif self.resume:
@@ -337,10 +340,12 @@ def session_url(session_id: str) -> str:
 def build_locator(runtime: str, hook_input: dict, env: dict, host: str, cwd: str) -> Locator:
     sid = str(hook_input.get("session_id") or "")
     if runtime == "claude":
+        # 名前つきのラッパーの子なら、名前と結び付けの案内を足す（端末の結び付きは見ない。#2346 の決定 7）
+        relay = env.get("NDF_RELAY_NAME") or None
         remote = env.get("CLAUDE_CODE_BRIDGE_SESSION_ID") or env.get("CLAUDE_CODE_REMOTE_SESSION_ID")
         if remote:
-            return Locator(host, cwd, url=session_url(remote))
-        return Locator(host, cwd, resume=f"claude --resume {sid}" if sid else None)
+            return Locator(host, cwd, url=session_url(remote), relay=relay)
+        return Locator(host, cwd, resume=f"claude --resume {sid}" if sid else None, relay=relay)
     if runtime == "codex":
         return Locator(host, cwd, resume=f"codex resume {sid}" if sid else None)
     if runtime == "kiro":

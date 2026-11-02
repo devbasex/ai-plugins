@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RELAY_NAME",
+  "set_by": "user",
+  "summary": "名前つきのラッパーの名前（#2346）。端末から打つ claude の名前の指定と、統括役が tmux で起動したラッパーとその子の claude が持つ名前。無いときは統括役が t1（統括役自身）・t2… を付ける（plugins/ndf/scripts/relay_lib/run.py・hub_client.py）"
+}

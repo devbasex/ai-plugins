@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import os
 import shlex
-import signal
 import time
 from dataclasses import replace
 
 from . import claude as cl
 from . import handover as ho
-from . import record, version_dir
+from . import hub_client, record, version_dir
 from .common import (
     CHILD_FILE,
     LIMIT_FILE,
@@ -41,7 +40,7 @@ from .common import (
 from .mark import asked_after
 from .record import RelayRecord, StartLimit
 from .switch import REASON_AUTH, AccountSwitch, UsageWatch
-from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
+from .terminal import StartFailed, Terminal, pty_available, serve_terminal, wait_exit_code
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
 
@@ -442,8 +441,9 @@ class Relay(AccountSwitch, ho.Swapper):
 
 def cmd_run(args: list[str]) -> int:
     path = os.environ.pop(ho.HANDOVER_ENV, None)  # 入れ替えた後（#1587）。子の claude と hook へ継がせない
-    if path:
-        return Relay.from_handover(path, _serve_terminal)
+    if path:  # exec で `hub.lock` は放されている。入れ替えた後の版で取り直し、取れなければ統括役を兼ねずに続ける
+        with hub_client.serving(hub_client.claim_hub(), os.path.dirname(path)):
+            return Relay.from_handover(path, serve_terminal)
     if os.environ.get("NDF_RELAY") == "0":
         claude = cl.resolve_claude()
         if claude is None:
@@ -464,37 +464,24 @@ def cmd_run(args: list[str]) -> int:
     if not pty_available():
         cl.say("ラッパーを始めない（擬似端末を作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
+    hub = hub_client.claim_hub()
+    if hub is None and (code := hub_client.ask_hub(args, cl.say)) is not None:
+        return code
     got = cl.read_plugin(claude)
     if got is None:
+        hub_client.release_hub(hub)
         cl.say("ラッパーを始めない（ndf のプラグインの名前と版を読めない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
     try:
         relay_dir = record.make_relay_dir()
     except OSError:
+        hub_client.release_hub(hub)
         cl.say("ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
+    hub_client.write_name(relay_dir, hub)
     term = Terminal()
     relay = Relay(claude, relay_dir, got.marketplace, got.version, term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
-    return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))
-
-
-def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body, keep_input: bool = False) -> int:
-    """端末を raw にして `body` を動かし、終わったら端末・ラッパー・使用中の印を片づける。
-    `keep_input` は入れ替えた後で、旧版が残した入力を捨てずに raw にする（#1587 の決定 6）。"""
-
-    def on_signal(signum, _frame):
-        term.restore()
-        raise SystemExit(128 + signum)
-
-    signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGHUP, on_signal)
-    signal.signal(signal.SIGWINCH, lambda *_: term.copy_winsize())
-    try:
-        term.set_raw(keep_input=keep_input)
-        return body()
-    finally:
-        term.restore()
-        relay.close()
-        version_dir.release_inuse(inuse)
+    with hub_client.serving(hub, relay_dir):
+        return serve_terminal(relay, term, inuse, lambda: relay.loop(args))

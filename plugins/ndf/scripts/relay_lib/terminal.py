@@ -12,10 +12,15 @@ import os
 import select
 import signal
 import time
+from typing import TYPE_CHECKING
 
 from ptyprocess import PtyProcess
 
+from . import version_dir
 from .common import env_num
+
+if TYPE_CHECKING:
+    from .run import Relay
 
 
 class StartFailed(Exception):
@@ -240,3 +245,23 @@ class Terminal:
             except OSError:
                 return
             data = data[n:]
+
+
+def serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body, keep_input: bool = False) -> int:
+    """端末を raw にして `body` を動かし、終わったら端末・ラッパー・使用中の印を片づける。
+    `keep_input` は入れ替えた後で、旧版が残した入力を捨てずに raw にする（#1587 の決定 6）。"""
+
+    def on_signal(signum, _frame):
+        term.restore()
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGHUP, on_signal)
+    signal.signal(signal.SIGWINCH, lambda *_: term.copy_winsize())
+    try:
+        term.set_raw(keep_input=keep_input)
+        return body()
+    finally:
+        term.restore()
+        relay.close()
+        version_dir.release_inuse(inuse)

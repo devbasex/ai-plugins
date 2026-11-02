@@ -63,7 +63,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問シグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、コンテキスト量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、複数のラッパーを統括役から扱う `spawn` / `ls` / `attach` / `restart`（#2346）、導入の `install` / `uninstall` / `status` / `startup`、質問シグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、コンテキスト量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
 | `plugins/ndf/hooks/claude.json` の `UserPromptSubmit` | `hook.py goal-skill` を呼ぶ（`timeout` 5 秒、`continueOnError: true`）。ラッパーの有無に依らず、`/goal /<プラグイン>:<Skill>` の入力に条件の Skill を読み込む案内を足す（付則「`/goal` を付けた場合」） |
 | `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | コピーか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
@@ -106,7 +106,7 @@ graph TB
 
 | 決定 | 理由 |
 | --- | --- |
-| ラッパーは端末のフォアグラウンドに常駐し、claude を擬似端末の子として起動する形だけにする。tmux を前提にしない | 前提が端末と Python 3 だけになり、tmux や VS Code の設定を確かめて入れる処理が要らない。2 つの形を持つと使われない側が古くなる。tmux の中で使うなら、ペインの中で `claude` と打てば同じに動く |
+| ラッパーは端末のフォアグラウンドに常駐し、claude を擬似端末の子として起動する形だけにする。tmux を前提にしない | 前提が端末と Python 3 だけになり、tmux や VS Code の設定を確かめて入れる処理が要らない。2 つの形を持つと使われない側が古くなる。tmux の中で使うなら、ペインの中で `claude` と打てば同じに動く。1 本目は今もこの形で、2 本目以降と `spawn` だけが tmux を使い、tmux が無ければ 1 本ずつの起動に戻る（#2346） |
 | 始められない・止まると決めたときは、終了コード 1 で止めずに今までどおりの運用へ落ちる | 止めると、利用者は前提をそろえるまで claude を起動できない。conductor はラッパーがあってもなくてもブロックを出すので、人は貼り付けて続けられる |
 | セッションの終わりは、最後の応答の `ndf-next` のブロック 1 つで決める | Stop hook に `last_assistant_message` が来る。情報文字列を `text` にしないのは説明の例と取り違えないためで、外側の囲みの中も数えない。引継ぎ文書の見出しは置き場所も名前も決まっていない |
 | 承認ゲートはセッションの中で `AskUserQuestion` のまま受け、ブロックは承認と取り込みの後に出す | 答えを待つあいだは Stop が起きないので、ラッパーは承認ゲートを知らなくてよい。画面の文言から承認ゲートを読むと、Claude Code の版で文言が変わったときに承認ゲートの前で切る |
@@ -163,8 +163,9 @@ graph TB
 
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
-| `run` | `[claude の引数 ...]`。ラッパーは解釈しない | パススルーでは claude の終了コードそのもの（exec で置き換わる）。ラッパーでは最後のセッションの claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次のセッションの更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目のセッションの exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。シグナルファイルなしで終わるときは何も出さない |
-| `stop` | 無し | 0: 動いているラッパーに停止シグナルファイルを置いた（1 つ以上）/ 1: 動いているラッパーが無い | 置いたラッパーの pid を 1 行ずつ |
+| `run` | `[claude の引数 ...]`。ラッパーは解釈しない | パススルーでは claude の終了コードそのもの（exec で置き換わる）。ラッパーでは最後のセッションの claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次のセッションの更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目のセッションの exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。シグナルファイルなしで終わるときは何も出さない。統括役が既に居る端末の 2 本目は、統括役に起動を頼んで tmux のセッションへ結び付き、断られたら理由を 1 行出して 3（#2346。[設計](../../issues/issue-2346-design.md)の「入出力の契約」） |
+| `stop` | `[<名前>] [--json]` | 名前なし: 0: 動いているラッパーに停止シグナルファイルを置いた（1 つ以上）/ 1: 動いているラッパーが無い。名前あり: 0: その 1 本を止めた / 3: その名前が無い（#2346） | 名前なし: 置いたラッパーの pid を 1 行ずつ。名前あり: 結果の 1 行（`--json` は `relay-stop` の 1 行の JSON） |
+| `spawn` / `ls` / `attach` / `restart` | [#2346 の設計](../../issues/issue-2346-design.md)の「入出力の契約」 | 同左 | 同左 |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | Stop を止めるときだけ `{"decision": "block", "reason": …}` の 1 行（「`mark` の判定」の 5a と 9）。それ以外は無し |
 | `install` / `uninstall` / `status` / `startup` / `question` | [導入の仕様](ndf-relay-install-and-restart.md)の副命令の表 | 同左 | 同左 |
 | `is-child` | 無し（内部用。`relay.md` に載せない） | 0: ラッパーが動いていて、呼んだ claude がラッパーの直接の子 / 1: それ以外 | 無し |
