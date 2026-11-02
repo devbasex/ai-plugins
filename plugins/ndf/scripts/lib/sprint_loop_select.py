@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shlex
 
 import project_mvv as pm
@@ -9,6 +11,7 @@ import sprint_mvv
 
 from sprint_loop_record import (
     SPRINT_STATE,
+    UPKEEP,
     IN_PROGRESS,
     SELECTED,
     DROPPED,
@@ -31,7 +34,22 @@ from sprint_loop_record import (
 from sprint_loop_gate import (
     loop_ok,
     refusal_order,
+    select_cmd,
 )
+
+
+def review_first(env: Env, rec: dict, before: dict, got: dict) -> dict:
+    """選べる課題が尽きたとき、止まる前に見直しを 1 回だけ挟む（#2315 の決定 12）。
+
+    前の周回を締めてから挟んでいなければ `review_first` を返し、見直しを流して選定をやり直すコマンドを `next` に置く。
+    見直しの後も 0 件なら、次の選定は今までどおり `no_issue` で止まる。"""
+    rec["review_first"] = len(rec["laps"])
+    write_record(env, rec, before)
+    root = shlex.quote(str(env.main_dir()))
+    due = f"python3 {shlex.quote(str(UPKEEP))} depth due review --no-issue --loop {rec['name']} --root {root}"
+    nxt = f"{due} を打ち、0 なら /ndf:backlog-refinement --depth review を無人で通す。終えたら {select_cmd(rec['name'])} を打ち直す"
+    update_handoff(env, rec, "選べる課題が尽きた。止まる前に見直しを 1 回挟む", resume_command(rec), nxt)
+    return loop_ok("選べる課題が尽きた。止まる前に見直しを 1 回挟む", rec, got["selection"], status="review_first", next_=nxt)
 
 
 def candidates_of(ms: dict, max_issues: int) -> list[dict]:
@@ -143,7 +161,26 @@ def cmd_select(env: Env, name: str) -> dict:
         return run_selection(env, rec, before, len(rec["laps"]) + 1)
 
 
+EXCLUDE_ENV = "NDF_LOOP_EXCLUDE"
+EXCLUDE_REASON = "別の実行が持つ課題"
+
+
+def env_excluded(raw: str | None) -> list[int]:
+    """`NDF_LOOP_EXCLUDE` の課題の番号（`,` か空白で区切る。番号でない語は読まない）。Factory の実行の制御が、同じリポジトリの
+    別の実行が持つ課題を渡す（#2347 の決定 3）。"""
+    return sorted({int(x) for x in re.split(r"[\s,]+", raw or "") if x.isdigit()})
+
+
+def add_env_exclusions(rec: dict, n: int) -> None:
+    """環境変数の課題を周回 n の除外へ足す（同じ番号と周回の行が既にあれば足さない）。"""
+    have = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == n}
+    for num in env_excluded(os.environ.get(EXCLUDE_ENV)):
+        if num not in have:
+            rec.setdefault("excluded", []).append({"number": num, "reason": EXCLUDE_REASON, "lap": n})
+
+
 def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None) -> dict:
+    add_env_exclusions(rec, n)
     code, rank = env.rank(env.main_dir())
     if code not in (0, PAUSE_RANK):
         return refusal_order(f"upkeep.py rank が {code} を返した。選定を推さない: {rank.get('summary', '')}")
@@ -156,6 +193,8 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         if lap is not None:
             rec["laps"].remove(lap)  # スプリントを組む前の周回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
         cond = "no_issue" if got["candidates"] == 0 else "outside_mvv"
+        if cond == "no_issue" and rec.get("review_first") != len(rec["laps"]):
+            return review_first(env, rec, before, got)
         reasons: dict = {}
         for r in got["selection"]:
             reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1

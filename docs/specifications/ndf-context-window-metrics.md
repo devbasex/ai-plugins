@@ -181,7 +181,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 | `--agents` | 3 層の測定を出す。付けないと従来の Skill の統計だけを出す | 付けない |
 | `--session <ID>` | セッションに絞る。繰り返し可。`--agents` を付けないと、Skill の統計をそのセッションの conductor の記録だけで数える | 絞らない（`--agents` では全セッションを読み、`--days` / `--from` / `--to` は効かない） |
 | `--layer <層>` | `--agents` の出力を 1 つの層に絞る | 全層 |
-| `--window-limit <トークン>` | `割る候補` のマーカーを付けるピーク使用量の目安 | 200000（`context-window.md` の「遅くとも切る」値。一致をテストが固定する） |
+| `--window-limit <トークン>` | `割る候補` のマーカーを付けるピーク使用量の目安。渡せば全記録へ当てる | 渡さない（記録ごとに、親のセッションの最後の判定の記録の運用上限。判定の記録が無いか方針の列が無ければ現行方式の 200000 で、`context-window.md` の「遅くとも切る」値。#2262） |
 
 出力（`md`）は 4 つの表である。
 
@@ -197,7 +197,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 | マーカー（列 `目印`） | 条件 |
 | --- | --- |
 | `束ねる候補` | 層が `supervisor` の行にだけ付く。`実作業 < 固定費` の件数 > 件数の半分。フェーズが `設計` の行には付けない（設計のフェーズはどのモードでも承認ゲートを返すため作る） |
-| `割る候補` | ピーク使用量の最大 > `--window-limit`。両方付くときは `・` で連結する |
+| `割る候補` | 行のいずれかの記録のピーク使用量 > その記録の上限（`--window-limit`、渡さなければ記録ごとの再起動の方針の運用上限）。両方付くときは `・` で連結する |
 | `worker を使いすぎ` | supervisor と配下の worker の固定費の合計 > その supervisor の実作業 |
 
 **フェーズごとの worker の使い方の行は、親エージェント（`parent_agent_id`）ごとに 1 つで、配下の worker を
@@ -207,8 +207,8 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 どの行にも入らない。
 
 `json` は `agents`（記録ごとの行、`agent_id` を除く）/ `agent_summary` / `layer_totals` / `totals`
-（`records` / `fixed_sum` / `work_sum` / `total_spend`）/ `role_usage` / `excluded` / `unphased_supervisors` / `meta.window_limit`
-を持つ。`markdown` は `層・フェーズ・モデルごとの束ね` の表の下に、フェーズが読めなかった（`その他` に落ちた）supervisor の件数を
+（`records` / `fixed_sum` / `work_sum` / `total_spend`）/ `role_usage` / `excluded` / `unphased_supervisors` / `meta.window_limit`・`meta.window_limit_source`（`cli` / `records`）・
+`meta.records_without_decisions`（判定の記録が無かった記録の数。`--window-limit` を渡さないときだけ）を持つ。`markdown` は `層・フェーズ・モデルごとの束ね` の表の下に、フェーズが読めなかった（`その他` に落ちた）supervisor の件数を
 1 行出す（`json` の `unphased_supervisors`）。
 
 ### 振り返りの記録へ貼る表

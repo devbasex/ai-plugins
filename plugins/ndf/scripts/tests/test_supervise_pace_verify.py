@@ -338,6 +338,20 @@ def chain(steps) -> list[str]:
     return out
 
 
+DEPTH_TAIL = [
+    "refine",
+    "refine-record",
+    "overhaul-due",
+    "overhaul-claim",
+    "overhaul",
+    "overhaul-release",
+    "review-due",
+    "review-claim",
+    "review",
+    "review-release",
+]
+
+
 @pytest.mark.parametrize(
     "rows, want",
     [
@@ -351,7 +365,9 @@ def test_close_comes_after_the_retro_and_before_the_refine(tmp_path, rows, want)
     """#2228 の受け入れ条件 5・6（I6）: next のつながりで リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。
     振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を振り返りとして渡す。"""
     steps = close_steps(tmp_path, rows)
-    assert chain(steps)[-len(want) :] == want and chain(steps)[0] == "merge"
+    got = chain(steps)
+    assert got[: got.index("refine") + 1][-len(want) :] == want and got[0] == "merge"
+    assert got[got.index("refine") :] == DEPTH_TAIL  # 差分の棚卸しの後に大整理と見直し（#2315 の決定 5）
     by = {s["id"]: s for s in steps}
     assert "--final-stage 振り返り" in by["close"]["cmd"]
     for sid in ("retro", "release-verify"):
@@ -369,4 +385,5 @@ def test_close_comes_after_the_retro_in_every_mode(tmp_path, mode):
     p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 0, p.stdout + p.stderr
     close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
-    assert chain(close["steps"])[-3:] == ["retro", "close", "refine"]
+    got = chain(close["steps"])
+    assert got[got.index("refine") - 2 :] == ["retro", "close", *DEPTH_TAIL]

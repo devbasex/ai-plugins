@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/context-policy.py",
+  "summary": "再起動の方針の適用値・判定の記録・費用の見込み・作業ごとの集計（#2262）。LLM を呼ばない。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "calibrate": {
+        "options": [
+          "--days"
+        ],
+        "positionals": []
+      },
+      "record": {
+        "options": [
+          "--context",
+          "--event",
+          "--reason",
+          "--runtime",
+          "--verdict",
+          "--work"
+        ],
+        "positionals": []
+      },
+      "report": {
+        "options": [
+          "--all",
+          "--format",
+          "--since",
+          "--work"
+        ],
+        "positionals": []
+      },
+      "resolve": {
+        "options": [
+          "--policy",
+          "--root"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CODE_SESSION_ID",
+    "HOME",
+    "NDF_CONTEXT_DIR",
+    "NDF_CONTEXT_LIMIT",
+    "NDF_CONTEXT_POLICY",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [],
+  "stdin": "hook-json",
+  "stdout": "step-result",
+  "writes": [
+    "applied-json",
+    "cost-estimates-json",
+    "decisions-jsonl"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok。publish は常に 0）",
+    "1": "記録か見込みのファイルへ書けない（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/scripts/lib/context_decisions.py",
+    "plugins/ndf/skills/development-workflow/SKILL.md",
+    "plugins/ndf/skills/development-workflow/references/context-window.md",
+    "plugins/ndf/skills/development-workflow/references/relay.md"
+  ]
+}

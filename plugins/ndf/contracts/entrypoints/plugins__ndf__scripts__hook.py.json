@@ -7,6 +7,7 @@
   },
   "env": [
     "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_PLUGIN_DATA",
     "DEBUG_SLACK_NOTIFY",
@@ -18,6 +19,9 @@
     "NDF_ACCOUNT_USAGE_URL",
     "NDF_CLAUDE_ACCOUNT",
     "NDF_CODEX_SLACK_NOTIFY",
+    "NDF_CONTEXT_DIR",
+    "NDF_CONTEXT_LIMIT",
+    "NDF_CONTEXT_POLICY",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_MVV_STATE_DIR",
@@ -25,7 +29,10 @@
     "NDF_RELAY_CLAUDE",
     "NDF_RELAY_DEPTH",
     "NDF_RELAY_DIR",
+    "NDF_RELAY_NAME",
     "NDF_RELAY_REEXEC",
+    "NDF_RELAY_SPAWNED",
+    "NDF_RELAY_TMUX",
     "NDF_RELAY_UV",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_SLACK_API_BASE",
@@ -64,7 +71,11 @@
   ],
   "stdin": "hook-json",
   "stdout": "json",
-  "writes": [],
+  "writes": [
+    "applied-json",
+    "cost-estimates-json",
+    "decisions-jsonl"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",

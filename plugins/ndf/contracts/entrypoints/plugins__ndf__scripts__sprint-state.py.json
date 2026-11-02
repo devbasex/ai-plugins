@@ -6,16 +6,22 @@
     "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
+    "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
     "NDF_CLAUDE_ACCOUNT",
+    "NDF_CONTEXT_DIR",
+    "NDF_CONTEXT_LIMIT",
+    "NDF_CONTEXT_POLICY",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_LOOP_EXCLUDE",
     "NDF_MVV_STATE_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_RELAY_DIR",
@@ -66,6 +72,9 @@
   "stdin": "none",
   "stdout": "json",
   "writes": [
+    "applied-json",
+    "cost-estimates-json",
+    "decisions-jsonl",
     "laps-md",
     "loop-json"
   ],

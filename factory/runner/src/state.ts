@@ -4,6 +4,11 @@ import { execFileSync } from "node:child_process";
 
 export const STATE_PATHS = [".ndf/tmp", ".ndf/loop"];
 
+// 保存するパス。開発ループの実行は、そのループの引継ぎ文書（.ndf/handoff/loop-<名>.md）を 1 つ足す（#2347）
+export function statePaths(loopName?: string | null): string[] {
+  return loopName ? [...STATE_PATHS, `.ndf/handoff/loop-${loopName}.md`] : STATE_PATHS;
+}
+
 export type Exec = (cmd: string, args: string[], cwd: string) => string;
 export const exec: Exec = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
@@ -12,8 +17,8 @@ export function trackedFiles(repoDir: string, run: Exec = exec): Set<string> {
 }
 
 // 保存の中のパスのうち、追跡するパスか、状態ディレクトリの外に当たるもの
-export function trackedEntries(entries: string[], tracked: Set<string>): string[] {
-  const inState = (e: string) => STATE_PATHS.some((s) => e === s || e.startsWith(`${s}/`));
+export function trackedEntries(entries: string[], tracked: Set<string>, paths: string[] = STATE_PATHS): string[] {
+  const inState = (e: string) => paths.some((s) => e === s || e.startsWith(`${s}/`));
   return entries
     .map((e) => e.replace(/^\.\//, "").replace(/\/$/, ""))
     .filter((e) => e !== "" && (tracked.has(e) || !inState(e)));
@@ -30,8 +35,8 @@ export class StateRejectedError extends Error {
 }
 
 // 保存する。追跡しない状態ディレクトリだけを tar にする
-export function packState(repoDir: string, archive: string, run: Exec = exec): void {
-  const present = STATE_PATHS.filter((p) => {
+export function packState(repoDir: string, archive: string, run: Exec = exec, paths: string[] = STATE_PATHS): void {
+  const present = paths.filter((p) => {
     try {
       run("test", ["-e", p], repoDir);
       return true;
@@ -43,9 +48,9 @@ export function packState(repoDir: string, archive: string, run: Exec = exec): v
 }
 
 // 戻す。追跡するパスを含めば何も書かずに StateRejectedError
-export function unpackState(repoDir: string, archive: string, run: Exec = exec): void {
+export function unpackState(repoDir: string, archive: string, run: Exec = exec, paths: string[] = STATE_PATHS): void {
   const entries = run("tar", ["-tzf", archive], repoDir).split("\n").filter(Boolean);
-  const bad = trackedEntries(entries, trackedFiles(repoDir, run));
+  const bad = trackedEntries(entries, trackedFiles(repoDir, run), paths);
   const outside = entries.filter((e) => e.startsWith("/") || e.split("/").includes(".."));
   if (bad.length > 0 || outside.length > 0) throw new StateRejectedError([...bad, ...outside]);
   run("tar", ["-xzf", archive], repoDir);

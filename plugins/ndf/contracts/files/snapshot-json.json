@@ -1,0 +1,7 @@
+{
+  "name": "snapshot-json",
+  "pattern": "snapshot.json",
+  "kind": "record",
+  "place": "tmp",
+  "skill_readers": []
+}

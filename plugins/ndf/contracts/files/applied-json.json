@@ -1,0 +1,7 @@
+{
+  "name": "applied-json",
+  "pattern": "*.applied.json",
+  "kind": "state",
+  "place": "state-dir",
+  "skill_readers": []
+}

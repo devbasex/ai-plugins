@@ -82,7 +82,9 @@ export function translateProgressLine(line: Line, repo: string): Pick<StepRecord
     return { type: "step.recorded", payload };
   }
   if (line.kind === "attention") {
-    const reason = typeof line.reason === "string" && line.reason !== "" ? line.reason : "attention";
+    // 取り込み（base-sync）で解けずに止まった行は Factory の語 base_conflict へ写す（#2347 の決定 10）。ほかの行の理由は変えない
+    const reason =
+      line.step === "base-sync" ? "base_conflict" : typeof line.reason === "string" && line.reason !== "" ? line.reason : "attention";
     const summary = typeof line.text === "string" ? line.text : typeof line.summary === "string" ? line.summary : "";
     return { type: "attention", payload: { reason, summary } };
   }

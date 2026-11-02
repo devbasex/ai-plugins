@@ -1,0 +1,7 @@
+{
+  "name": "counts-json",
+  "pattern": "counts.json",
+  "kind": "result",
+  "place": "tmp",
+  "skill_readers": []
+}

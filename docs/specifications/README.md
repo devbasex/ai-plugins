@@ -117,5 +117,7 @@
 | [ndf-sprint-close-record-pr-at-run-time.md](ndf-sprint-close-record-pr-at-run-time.md) | まとめの close が、まとめを流し始める時点にリリース記録の PR を見つけて課題を閉じる（差し込み {queue_record}・find_record の規則・止まる条件。#2230 #2044 #2121） |
 | [ndf-release-version-at-run-time.md](ndf-release-version-at-run-time.md) | スプリントの配布の版を配布のプランを流す時点に決めること（版の差し込み・版の記録・決め直し・本番の系列・bump の止まり方。#2164） |
 | [ndf-entrypoint-contracts.md](ndf-entrypoint-contracts.md) | NDF のエントリポイントの契約（plugins/ndf/contracts/ の契約の一覧・構造チェック check-ndf-contracts.py と例外リストのラチェット・.ndf/ の設定を読む木を lib/decl.py で解くこと・本番のブランチとテストのコマンドの 1 か所化と移行の読み。#2336） |
+| [ndf-worker-stage-skills.md](ndf-worker-stage-skills.md) | プランの worker と ndf:worker へ、ステップの工程に要る規則の Skill だけを届ける仕組み。Skill の対応表（stage-skills.json）と規則の Skill の一覧、プランの skills・skills_add 欄と流す前の検査、本文を system プロンプトへ入れる渡し方と起動指示の「読む Skill」、進捗ログの kind: skills の行、stage-skills.py lookup。規約は supervise_lib/plan.py と agent-layers.md が正 |
+| [ndf-supervise-verification-mark-after-ok.md](ndf-supervise-verification-mark-after-ok.md) | まとめのプランで「リリース後テスト」の進行の印を、記録を投稿したステップが ok で終わった後に付けること（STAGES_AFTER_OK・record_stage の after_ok・release-verify の worker は進捗記録を打たない）、ほかの工程は始めに付けること、印と記録が食い違いうる経路（#2288・#2356）。プランの外の印の時点は release-verification が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

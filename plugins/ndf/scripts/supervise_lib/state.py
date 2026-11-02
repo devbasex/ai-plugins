@@ -31,6 +31,7 @@ PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められな
 PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
 PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
 DICT_LISTS = ("gates", "process", "slow_events", "attention_log")  # ステップをまたいで積むオブジェクトの列（snapshot / replay）
+STAGES_AFTER_OK = ("リリース後テスト",)  # 印を ok の後に付ける工程（工程表の行名）。記録より先に付けない（#2288 の決定 1）
 
 
 def counts_text(counts: dict) -> str:
@@ -285,9 +286,10 @@ class RunState:
     def out_path(self, n: int, sid: str) -> Path:
         return self.dir / f"{n:02d}-{sid}.out"
 
-    def record_stage(self, stage: str | None, plan: dict, cwd: str) -> None:
-        """工程が変わったら、計画の `記録` のスクリプトで課題ごとに通過を記録する。記録した工程へ戻っても打ち直さない。"""
-        if not stage or stage == self.last_stage:
+    def record_stage(self, stage: str | None, plan: dict, cwd: str, after_ok: bool = False) -> None:
+        """工程が変わったら、計画の `記録` のスクリプトで課題ごとに通過を記録する。記録した工程へ戻っても打ち直さない。
+        `STAGES_AFTER_OK` の工程は ok の後の呼び出し（`after_ok`）でだけ、ほかは始めの呼び出しでだけ記録する（#2288）。"""
+        if not stage or (stage in STAGES_AFTER_OK) != after_ok or stage == self.last_stage:
             return
         self.last_stage = stage
         rec = plan.get("記録")

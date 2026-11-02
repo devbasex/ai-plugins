@@ -130,11 +130,13 @@ export class GitHubApp implements GitHubPort {
   async checkOpenIssues(installationId: number, repositoryId: number, fullName: string, numbers: number[]) {
     const token = await this.tokenFor(installationId, repositoryId);
     const invalid: number[] = [];
+    const milestones: Record<number, string | null> = {};
     for (const n of numbers) {
       const issue = token ? await this.get(`/repos/${fullName}/issues/${n}`, token) : null;
       if (!issue || issue.state !== "open" || issue.pull_request !== undefined) invalid.push(n);
+      else milestones[n] = ((issue.milestone as { title?: unknown } | null | undefined)?.title as string | undefined) ?? null;
     }
-    return { invalid };
+    return { invalid, milestones };
   }
 
   async listRecentOpenIssues(installationId: number, repositoryId: number, fullName: string, limit: number): Promise<IssueSummary[]> {

@@ -41,10 +41,7 @@ deps.require("mdtable", "yamlio")  # 表は tabulate、frontmatter は ruamel.ya
 import mdtable  # noqa: E402
 import transcript_agents  # noqa: E402
 import yamlio  # noqa: E402
-
-# 割る候補の目印を付ける目安。`development-workflow/references/context-window.md` の
-# 「遅くとも切る」値と揃える。**モデルに依る値であり、あの文書が書き換わったら揃え直す。**
-DEFAULT_WINDOW_LIMIT = 200000
+import context_decisions  # noqa: E402  割る候補の上限は記録ごとの再起動の方針で決める（#2262 の決定 14）
 
 
 def plugin_root_default() -> pathlib.Path:
@@ -538,8 +535,8 @@ def measured_records(records: list) -> list:
     return [r for r in records if r.responses >= 3 and r.fixed is not None]
 
 
-def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]:
-    """層とフェーズ（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
+def summarize_agents(records: list, window_limit) -> tuple[list[dict], int]:
+    """層とフェーズ（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。window_limit はセッション → 上限。"""
     kept = measured_records(records)
     groups: dict[tuple[str, str, str], list] = defaultdict(list)
     for r in kept:
@@ -554,7 +551,7 @@ def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]
         # モードでも必ず関門を返すため対象にしない（契約の目印の表）。
         if layer == "supervisor" and role != "設計" and below > len(items) / 2:
             marks.append("束ねる候補")
-        if peak_max > window_limit:
+        if any(r.peak > window_limit(r.session) for r in items):
             marks.append("割る候補")
         rows.append(
             {
@@ -790,7 +787,7 @@ def emit_json(
         "projects": projects_json,
     }
     if args.agents:
-        out["meta"]["window_limit"] = args.window_limit
+        out["meta"].update(args.limit_meta)  # 割る候補の上限と出所（main が記録から決めた値）
         out.update(
             {
                 "agents": [r.as_row() for r in agents],
@@ -874,8 +871,8 @@ def main() -> int:
     ap.add_argument(
         "--window-limit",
         type=int,
-        default=DEFAULT_WINDOW_LIMIT,
-        help=f"割る候補の目印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})",
+        default=None,
+        help="割る候補の目印を付ける最大充填の目安。渡せば全記録へ当てる (default: 記録ごとの再起動の方針の運用上限。記録が無ければ 200000)",
     )
     args = ap.parse_args()
 
@@ -908,7 +905,8 @@ def main() -> int:
         agents, skipped = collect_agents(args.session, args.layer)
         if skipped:
             print(f"[skill-stats] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
-        agent_summary, excluded = summarize_agents(agents, args.window_limit)
+        limit_of, args.limit_meta = context_decisions.record_limits([r.session for r in agents], args.window_limit)
+        agent_summary, excluded = summarize_agents(agents, limit_of)
         totals_rows, totals = layer_totals(agents)
         usage = role_usage(agents) if args.session else []
 

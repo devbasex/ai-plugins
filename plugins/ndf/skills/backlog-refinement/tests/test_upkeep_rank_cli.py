@@ -151,8 +151,18 @@ def env(tmp_path):
             f.write_text(json.dumps({"version": 1, "issues": specs}, ensure_ascii=False))
             return str(f)
 
+        def owner(self):
+            """見直しの持ち主の実行（テストのプロセスを持ち主にする。2 回目からは同じ実行）。"""
+            if not getattr(self, "_owner", None):
+                code, out = self.run("owner", "claim", "--what", "review", "--pid", str(os.getpid()))
+                assert code == 0, out
+                self._owner = out["metrics"]["run"]
+            return self._owner
+
         def plan(self, actions, **kw):
             f = tmp_path / "plan.json"
+            # 順位の表・移動・マイルストーン・やらないは見直しの深さで反映する（#2315 の I12）。持ち主になってから書く
+            kw = {"depth": "review", "owner": self.owner(), **kw}
             f.write_text(json.dumps({"repo": "o/r", "actions": actions, **kw}, ensure_ascii=False))
             return str(f)
 

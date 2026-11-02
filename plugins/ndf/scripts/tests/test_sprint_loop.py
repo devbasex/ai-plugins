@@ -263,6 +263,9 @@ def test_select_refuses_while_a_lap_is_in_progress(env):
 def test_no_candidates_is_no_issue_and_all_excluded_is_outside_mvv(env):
     env.rank_box["out"] = rank_out(ms("01 近い", []))
     start(env)
+    # 尽きた最初の選定は止まらず、見直しを 1 回挟む（#2315 の決定 12）。見直しの後も 0 件なら止まる
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["status"] == "review_first" and "depth due review --no-issue" in out["next"]
     out = sl_select.cmd_select(env, "l1")
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "no_issue" and rec(env)["laps"] == []
     assert out["metrics"]["stop_line"] == "[ndf-loop] stopped l1 no_issue"
@@ -284,6 +287,34 @@ def test_exclude_redoes_the_selection_and_all_excluded_stops(env):
     assert out["metrics"]["selected"] == [12]
     out = sl_select.cmd_exclude(env, "l1", 12, "MVV に反する疑い")
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "outside_mvv"
+
+
+def test_env_exclusions_drop_issues_held_by_other_runs(env, monkeypatch):
+    # #2347 の決定 3: Factory が同じリポジトリの別の実行の課題を NDF_LOOP_EXCLUDE で渡し、その周回の選定から外す
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    monkeypatch.setenv("NDF_LOOP_EXCLUDE", "11, x 13")
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 5
+    sl.write_record(env, r)
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["selected"] == [12]
+    rows = {r["number"]: r["reason"] for r in out["metrics"]["excluded"]}
+    assert rows[11] == rows[13] == "別の実行が持つ課題"
+    assert [e["number"] for e in rec(env)["excluded"]] == [11, 13]
+
+
+def test_env_exclusions_are_not_added_twice_on_reselection(env, monkeypatch):
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    monkeypatch.setenv("NDF_LOOP_EXCLUDE", "11")
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 5
+    sl.write_record(env, r)
+    sl_select.cmd_select(env, "l1")
+    out = sl_select.cmd_exclude(env, "l1", 12, "モードが対象外（operation）")
+    assert out["metrics"]["selected"] == [13]
+    assert [e["number"] for e in rec(env)["excluded"]] == [11, 12]
 
 
 # ---------------- 受け入れ条件 7・I3: 予算 ----------------
@@ -592,6 +623,41 @@ def test_created_issues_are_not_selected_in_the_same_lap(env):
 
 
 # ---------------- 受け入れ条件 14・15・16・21 ----------------
+
+
+def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
+    # 周回の記録に深さの行と調査の費用・秒が別の行で残り、予算に数える（#2315 の受け入れ条件 7）
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    research = out["metrics"]["research"]
+    assert "research run" in research and "--until" in research and "--lap 1 --loop l1" in research
+    assert f"--max {sl_gate.QUEUE_MAX}" in research  # まとめの queue と同じ並列の上限
+    b = env.root / ".ndf" / "backlog"
+    (b / "research").mkdir(parents=True)
+    (b / "depths.jsonl").write_text(
+        json.dumps({"at": "2999-01-01T00:00:00Z", "depth": "review", "event": "ran", "trigger": ["count"]}) + "\n"
+    )
+    # 結果を捨てた呼び出し（ok: false）も支払った費用として数える
+    calls = [
+        {"id": "seeds.library:pytest", "ok": True, "cost": 0.5, "seconds": 30, "lap": 1, "by": {"run": "r", "loop": "l1"}},
+        {"id": "needs.market:x", "ok": False, "cost": 0.25, "seconds": 10, "lap": 1, "by": {"run": "r", "loop": "l1"}},
+    ]
+    (b / "research" / "calls.jsonl").write_text("".join(json.dumps(c) + "\n" for c in calls))
+    set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)
+    sl.cmd_lap(env, "l1", False, None, [])
+    lap = rec(env)["laps"][0]
+    assert lap["research"] == {"items": ["seeds.library:pytest"], "cost": 0.75, "seconds": 40.0}
+    assert lap["depths"][0]["depth"] == "review" and sl.consumed(rec(env))["usd"] == 2.25
+    assert "調査: 1 項目" in (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
+    # 周回を締めた後に終わった背景の調査の費用は、次に締めるときに締め済みの周回へ精算する
+    late = {"id": "seeds.alternatives:pytest", "ok": True, "cost": 1.0, "seconds": 5, "lap": 1, "by": {"run": "r", "loop": "l1"}}
+    with (b / "research" / "calls.jsonl").open("a") as f:
+        f.write(json.dumps(late) + "\n")
+    r = rec(env)
+    sl_gate.backlog_summary(env, r, {"n": 2, "started_at": ""})
+    assert r["laps"][0]["research"]["cost"] == 1.75 and sl.consumed(r)["usd"] == 3.25
+    assert sl.cmd_status(env, "l1")["items"][-1] == "見直しの持ち主: なし"
 
 
 def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env):
