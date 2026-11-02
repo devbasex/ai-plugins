@@ -119,7 +119,8 @@
 | `plugins/ndf/scripts/relay_lib/hub.py` | `live()` が、オーガナイザーの印を持つ動いているラッパー 1 本を数から外す（I13） | 変更 |
 | `plugins/ndf/scripts/relay_lib/hub_client.py` | `ls` の行に役割を足し、`metrics` に統括役の有無と tmux の有無を足す。`role` の副命令 | 変更 |
 | `plugins/ndf/scripts/relay_lib/__init__.py` | 副命令 `role` の振り分け | 変更 |
-| `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 配布の依頼のプラン（`plan_release_request`）と、まとめた配布の本番のプラン（先頭の mvv のステップの直前に `parallel-freeze` を置く）を作る | 変更 |
+| `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 配布の依頼のプラン（`plan_release_request`）と、まとめた配布の 2 つのプラン（依頼を確定する `parallel-freeze` のプランと、その確定した Pull Request の和を受ける本番のプラン）を作る | 変更 |
+| `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 差し込み `{queue_prs:<計画名>}` を足す。名前の一致する完了した計画の状態ディレクトリの `work/prs.txt`（空白区切りの Pull Request の番号）で埋め、無ければ埋めずにそのプランを流さない | 変更 |
 | `plugins/ndf/scripts/supervise_lib/sprint.py` | 本番のステージを組む 4 か所が、レーンのときだけ配布の依頼のプランを置く（1 つの関数を通す） | 変更 |
 | `plugins/ndf/scripts/supervise.py` | `queue` の `--max` を省いたとき、レーンならプランの本数を既定にする | 変更 |
 | `plugins/ndf/scripts/lib/sprint_loop_gate.py` | 承認ゲート 2 の後に続けるステップの候補へ、配布の依頼のプランの `parallel-request` を足す | 変更 |
@@ -271,7 +272,7 @@ erDiagram
 | `parallel.py tick <計画名>` | — | 0。`metrics.action` が `wait`（`metrics.next` に待ちのコマンド）/ `release`（`metrics.pipeline` に本番のプランを流す 1 行）/ `finished`（`items` にレーンごとの結果） | 1: オーガナイザーでないセッションから打った。2: 記録が読めない |
 | `parallel.py wait <計画名> [--timeout 秒]` | — | 0: 変化があった（`items` に変化: 状態の変わったレーン・新しい依頼・止まったレーン・本番のプランの done） | 3: 上限に達した（既定 3600 秒。同じ `wait` を打ち直す） |
 | `parallel.py settle <計画名> --done <D>` / `--rejected` | 本番のプランの done | 0: 依頼ごとに答えを書いた。`metrics.result` は `released` / `rejected` / `failed` | 4: 本番のプランが承認ゲート 2 を返した（`awaiting_approval` にして答えを書かない） |
-| `parallel.py freeze <計画名> <連番>` | — | 0。答えていない依頼をすべてこの配布の依頼として確定し、`items` に依頼・`metrics.prs` に Pull Request の和を返す。`plan.md` の「配布」の節へ内訳を書く | 1: 連番の配布が流れていない・確定済み |
+| `parallel.py freeze <計画名> <連番> --out <パス>` | — | 0。答えていない依頼をすべてこの配布の依頼として確定し、`items` に依頼・`metrics.prs` に Pull Request の和を返す。和を `--out <パス>` へ空白区切りで書く。`plan.md` の「配布」の節へ内訳を書く | 1: 連番の配布が流れていない・確定済み |
 | `parallel.py stop <計画名>` | — | 0。`stop` の印を置き、各レーンへ `relay.py stop <名前>` を打つ | 1: 止まらないレーンがある（名前を返す） |
 | `parallel.py request <計画名> --lane <名> --prs <番号>... --issues <番号>... --state <パス>` | — | 0。`metrics.id` に依頼の識別子 | 1: 計画が動いていない |
 | `parallel.py await <計画名> <依頼>` `[--timeout 秒]` | — | 0: `released`（`metrics.version`） | 10: `rejected`（承認ゲートを返す終了コード）。1: `failed`。3: 上限に達した |
@@ -330,11 +331,18 @@ sequenceDiagram
 
 1. `stop` の印があれば `status: stopped` にして `finished` 相当の要約を返す
 2. 起動に成功した記録（`started`）の無いレーンのうち、依存先がすべて止まったものを `relay.py spawn` で起動し、結果を `lanes.<名>` に書く。統括役が上限で断ったレーンは次の `tick` で起動し直す
-3. 流れている配布（`running` / `awaiting_approval`）が無く、答えていない依頼が 1 件以上あれば、まとめた配布を 1 つ組む。本番のプランを作り、`action: release` を返す。配布に入る依頼はこの時点では確定しない（I9）
+3. 流れている配布（`running` / `awaiting_approval`）が無く、答えていない依頼が 1 件以上あれば、まとめた配布を 1 つ組む。`parallel-freeze` のプランと本番のプランを作り、`action: release` を返す。配布に入る依頼はこの時点では確定しない（I9）
 4. 全レーンが止まり、答えていない依頼が無ければ `action: finished` と要約を返し、`status: finished` にして役割の印を消す（I11）
 5. どれにも当たらなければ `action: wait`
 
-まとめた配布の本番のプランは `plan_mvv_release(..., version=None, channel="prod", prs=["{queue_pr:parallel-freeze}"])` で作り、承認ゲート 2 を判定する先頭の mvv のステップの直前に、run のステップ `parallel-freeze`（`parallel.py freeze <計画名> <連番>`）を置く。このステップが承認ゲート 2 を求める時点の依頼の締切である。答えていない依頼をすべてこの配布の依頼として `releases[]` に確定し、Pull Request の和を報告に出す。`tick` が配布を組んでから承認ゲート 2 を求めるまでに届いた依頼も、この配布に入る。確定の後に届いた依頼は次の配布へ回る（I9）。版は流す時点に決まり、承認ゲート 2 の判定と承認資料は今の本番のプランのままである。依頼ごとのレーン名・Pull Request・課題の内訳は、`freeze` が `plan.md` の「配布」の節へ書く。承認を求めるときは、この内訳を承認資料に示す。
+まとめた配布は 2 つのプランを 2 つのステージで流す。`metrics.pipeline` は `supervise.py queue <parallel-freeze のプラン> --then <本番のプラン> --done <D>` の 1 行である。
+
+1. 前のステージの `parallel-freeze` のプランは、run のステップ 1 つ（`parallel.py freeze <計画名> <連番> --out {state_dir}/work/prs.txt`）だけを持つ。答えていない依頼をすべてこの配布の依頼として `releases[]` に確定し、Pull Request の和を `work/prs.txt` へ書く
+2. 後のステージの本番のプランは `plan_mvv_release(..., version=None, channel="prod", prs=["{queue_prs:parallel-freeze}"])` で作る。queue はこのステージを流す前に、新しい差し込み `{queue_prs:<計画名>}` を、名前の一致する完了した計画の `work/prs.txt` の番号の並びで埋める。そのため、承認ゲート 2 の判定・承認資料・bump から後片付けまでのすべてのステップが、確定した Pull Request の和を受け取る。`work/prs.txt` が無ければ埋めずに、本番のプランを流さない（#2079 の既存の扱い）
+
+既存の `{queue_pr:<計画名>}` は使わない。この差し込みは名前の一致する計画の報告の Pull Request 1 本で埋めるため、依頼の和を渡せない。同じプランの中の run のステップの結果でも埋まらない。差し込みはプランを流す前に埋まるため、確定は前のステージに置く。
+
+本番のプランは先頭のステップで承認ゲート 2 を判定し、queue は前のステージが完了するとすぐ次のステージを流す。そのため `freeze` を打つ時点が、承認ゲート 2 を求める時点の依頼の締切になる。`tick` が配布を組んでから `freeze` を打つまでに届いた依頼も、この配布に入る。確定の後に届いた依頼は次の配布へ回る（I9）。版は流す時点に決まり、承認ゲート 2 の判定と承認資料は今の本番のプランのままである。依頼ごとのレーン名・Pull Request・課題の内訳は、`freeze` が `plan.md` の「配布」の節へ書く。承認を求めるときは、この内訳を承認資料に示す。
 
 ### レーンの本番のステージ
 
