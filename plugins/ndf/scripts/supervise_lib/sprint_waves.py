@@ -14,7 +14,7 @@ from gate_answer import GATE_1
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
-from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
+from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
@@ -186,20 +186,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "コミットする（push しない）。",
                 "next": "rebuild",
             },
-            # design の Skill は組み直しを PR を出す手順の直前に置き、push しない指示の worker はその手前で止まる。
-            # 工程表の「ドキュメント再構成」をここで通す（レビューの前に構成を整える）
-            {
-                "id": "rebuild",
-                "type": "work",
-                "full": True,
-                "kind": "設計",
-                "stage": "ドキュメント再構成",
-                "issues": True,
-                "timeout": 3600,
-                "next": "pr",
-                "prompt": f"/ndf:document-rebuild {doc}（#{n} の設計文書。同じディレクトリの issue-{n}-design-*.md も含む）。"
-                "内容を足さずに組み直し、前後の値の表を報告に載せる。コミットする（push しない）。",
-            },
+            rebuild_step(n, doc),
             # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（承認ゲート 1 の材料）
             {
                 "id": "pr",
