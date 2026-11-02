@@ -122,13 +122,13 @@ def test_a_table_value_that_is_not_a_rule_skill_is_unreadable(tmp_path):
 @pytest.mark.parametrize("stage", DOC_STAGES)
 def test_document_writing_stages_get_document_style(stage):
     """受け入れ条件 13・決定 9: 他者が読む文書を書く 10 工程に document-style が届く。"""
-    assert "document-style" in stage_skills.resolve({"stage": stage}, TABLE)
+    assert "document-style" in stage_skills.skills_for_step({"stage": stage}, TABLE)
 
 
 @pytest.mark.parametrize("step", [{}, {"stage": None}, {"stage": "無い工程"}, {"stage": "配布"}])
 def test_steps_without_a_table_row_get_nothing(step, tmp_path):
     """受け入れ条件 2: stage が無い・対応表に無い工程は空で、本文の節が入らない。"""
-    assert stage_skills.resolve(step, TABLE) == []
+    assert stage_skills.skills_for_step(step, TABLE) == []
     ctx = ctx_of(tmp_path)
     worker_steps.WorkStep().execute(ctx, {"id": "w", "prompt": "直す", **step})
     assert ctx.claude.calls[-1]["system"] == WORK_SYSTEM
@@ -138,17 +138,17 @@ def test_steps_without_a_table_row_get_nothing(step, tmp_path):
 
 
 def test_skills_replaces_and_an_empty_list_delivers_nothing():
-    assert stage_skills.resolve({"stage": "設計", "skills": ["logging-guidelines"]}, TABLE) == ["logging-guidelines"]
-    assert stage_skills.resolve({"stage": "設計", "skills": []}, TABLE) == []
+    assert stage_skills.skills_for_step({"stage": "設計", "skills": ["logging-guidelines"]}, TABLE) == ["logging-guidelines"]
+    assert stage_skills.skills_for_step({"stage": "設計", "skills": []}, TABLE) == []
 
 
 def test_skills_add_appends_without_duplicates():
-    assert stage_skills.resolve({"stage": "設計", "skills_add": ["logging-guidelines", "document-style"]}, TABLE) == [
+    assert stage_skills.skills_for_step({"stage": "設計", "skills_add": ["logging-guidelines", "document-style"]}, TABLE) == [
         "document-style",
         "logging-guidelines",
     ]
     step = {"stage": "設計", "skills": ["logging-guidelines"], "skills_add": ["document-style", "logging-guidelines"]}
-    assert stage_skills.resolve(step, TABLE) == ["logging-guidelines", "document-style"]
+    assert stage_skills.skills_for_step(step, TABLE) == ["logging-guidelines", "document-style"]
 
 
 def test_plan_errors_name_the_step_the_skill_and_the_reason():
@@ -260,7 +260,7 @@ def test_the_fix_doc_step_of_the_template_gets_document_style():
     src = (SCRIPTS / "supervise_lib" / "templates.py").read_text(encoding="utf-8")
     block = src.split('"id": "fix-doc"', 1)[1].split("}", 1)[0]
     stage = re.search(r'"stage": "([^"]+)"', block).group(1)
-    assert stage == "完了判定" and "document-style" in stage_skills.resolve({"stage": stage}, TABLE)
+    assert stage == "完了判定" and "document-style" in stage_skills.skills_for_step({"stage": stage}, TABLE)
 
 
 # ---------------------------------------------------------------- drive の pause（I6・I7）
@@ -335,7 +335,7 @@ def test_lookup_of_an_unreadable_table_exits_1(tmp_path, monkeypatch):
     bad = tmp_path / "x.json"
     bad.write_text("[]")
     monkeypatch.setattr(mod.stage_skills, "TABLE", bad)
-    out, code = mod.lookup("設計")
+    out, code = mod.lookup_stage("設計")
     assert code == 1 and out["status"] == "stopped"
 
 

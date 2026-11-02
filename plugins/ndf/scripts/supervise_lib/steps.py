@@ -61,7 +61,7 @@ def deliver_skills(ctx, step: dict) -> tuple[str, str | None]:
     読めなければ、行に `error` を付けて書き、誤りを返す（呼び手は worker を起動せずにステップを失敗にする）。"""
     rec = {"kind": "skills", "step": step.get("id"), "stage": step.get("stage"), "names": [], "form": SKILLS_FORM}
     try:
-        names = stage_skills.resolve(step, stage_skills.load_table())
+        names = stage_skills.skills_for_step(step, stage_skills.load_table())
         section = stage_skills.render(names)
     except stage_skills.SkillsError as e:
         ctx.state.progress_write({**rec, "error": e.what})

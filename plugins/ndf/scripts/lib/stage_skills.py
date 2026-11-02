@@ -34,7 +34,7 @@ def skill_path(name: str, skills: Path | None = None) -> Path:
     return (skills or SKILLS) / name / "SKILL.md"
 
 
-def _names(value) -> bool:
+def _is_name_list(value) -> bool:
     return isinstance(value, list) and all(isinstance(n, str) and n for n in value)
 
 
@@ -46,7 +46,7 @@ def load_table(path: Path | None = None) -> dict:
     except (OSError, ValueError) as e:
         raise SkillsError(f"対応表を読めない: {path}（{e}）") from e
     rules, stages = (data.get("rule_skills"), data.get("stages")) if isinstance(data, dict) else (None, None)
-    if not _names(rules) or not isinstance(stages, dict) or not all(_names(v) for v in stages.values()):
+    if not _is_name_list(rules) or not isinstance(stages, dict) or not all(_is_name_list(v) for v in stages.values()):
         raise SkillsError(f"対応表の形が誤っている: {path}")
     bad = sorted({n for v in stages.values() for n in v if n not in rules})
     if bad:
@@ -54,7 +54,7 @@ def load_table(path: Path | None = None) -> dict:
     return data
 
 
-def resolve(step: dict, table: dict) -> list[str]:
+def skills_for_step(step: dict, table: dict) -> list[str]:
     """ステップへ届ける Skill の名前（I4）。`skills` があればそれ、無ければ工程の行（無ければ空）に `skills_add` を足す。"""
     base = step.get("skills")
     if base is None:
@@ -78,7 +78,7 @@ def plan_errors(steps, table_path: Path | None = None, skills: Path | None = Non
     errs = []
     for step, field in found:
         sid, value = step.get("id"), step[field]
-        if not _names(value):
+        if not _is_name_list(value):
             errs.append(f"{sid}: {field} は Skill の名前の配列でない")
             continue
         for n in value:

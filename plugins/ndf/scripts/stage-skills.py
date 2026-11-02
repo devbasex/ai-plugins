@@ -23,12 +23,12 @@ import step_result  # noqa: E402
 TOOL = "stage-skills"
 
 
-def lookup(stage: str) -> tuple[dict, int]:
+def lookup_stage(stage: str) -> tuple[dict, int]:
     try:
         table = stage_skills.load_table()
     except stage_skills.SkillsError as e:
         return step_result.result(TOOL, "stopped", e.what, [{"name": None, "path": str(stage_skills.TABLE)}]), step_result.EXIT_VIOLATION
-    names = stage_skills.resolve({"stage": stage}, table)
+    names = stage_skills.skills_for_step({"stage": stage}, table)
     items = [{"name": n, "path": str(stage_skills.skill_path(n))} for n in names]
     missing = [i for i in items if not Path(i["path"]).is_file()]
     if missing:
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     lk = sub.add_parser("lookup", help="工程から Skill の名前とパスを引く")
     lk.add_argument("stage", help="工程の名前")
     a = ap.parse_args(argv)
-    out, code = lookup(a.stage)
+    out, code = lookup_stage(a.stage)
     step_result.emit(out, code)
 
 
