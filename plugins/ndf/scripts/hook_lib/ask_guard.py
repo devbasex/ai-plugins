@@ -122,10 +122,10 @@ def forward_to_organizer(ev, row_id: str) -> dict | None:
     if not name:
         return None
     import decl
-    import parallel_lane
+    import parallel_files
 
     main = decl.main_dir(ev.cwd) or Path(ev.cwd)
-    plan = parallel_lane.lane_name_in_plans(main, name, os.environ.get("NDF_RELAY_DIR"))
+    plan = parallel_files.lane_name_in_plans(main, name, os.environ.get("NDF_RELAY_DIR"))
     if not plan:
         return None
     code, got = run_request_ask(main, plan, name, {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id})

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_plan as pp
+from parallel_files import helper_plan_of, lane_name_in_plans, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
 RUNNING = ("PENDING", "ENQUEUED")
@@ -45,11 +46,6 @@ def run_status(main: Path, name: str) -> Optional[str]:
     import durable
 
     return durable.status_from(KIND, record_identity(main, name), workflow_id(name))
-
-
-def plans_in(main: Path) -> list[str]:
-    root = Path(main) / pp.PARALLEL_DIR
-    return sorted(p.name for p in root.iterdir() if (p / "plan.json").is_file()) if root.is_dir() else []
 
 
 def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Optional[tuple[str, pp.Lane]]:
@@ -207,34 +203,6 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
 
 
 # ---- 問いの依頼と答え（#2436 の 6c・6d・6f。設計 issue-2436-design-approvals.md） ----
-
-ROLE_FILE = "role.json"  # relay_lib.hub.ROLE_FILE（統括役の作業ディレクトリの役割のファイル。統括役を import しない）
-
-
-def helper_plan_of(relay_dir: Optional[str]) -> Optional[str]:
-    """作業ディレクトリ（`NDF_RELAY_DIR`）の役割のファイルが `helper` なら、その計画名。"""
-    if not relay_dir:
-        return None
-    try:
-        got = json.loads((Path(relay_dir) / ROLE_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return got.get("plan") if isinstance(got, dict) and got.get("role") == "helper" and got.get("plan") else None
-
-
-def lane_name_in_plans(main: Path, name: Optional[str], relay_dir: Optional[str]) -> Optional[str]:
-    """レーンか一時レーンかをファイルだけで見る（問いの hook の 10 秒の上限の中で DBOS を読まない）。計画名か None。"""
-    if not name:
-        return None
-    for plan in plans_in(main):
-        try:
-            lanes = json.loads((pp.plan_dir(main, plan) / "plan.json").read_text(encoding="utf-8")).get("lanes") or []
-        except (OSError, ValueError, AttributeError):
-            continue
-        if any(isinstance(ln, dict) and ln.get("name") == name for ln in lanes):
-            return plan
-    return helper_plan_of(relay_dir)
-
 
 def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
     """問いを送ってよい送り手か: 動いている計画のレーン（`lane_of`）か、役割のファイルが `helper` で、その計画の
