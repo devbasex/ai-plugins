@@ -822,14 +822,14 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   d.text(s, [{ text: "本番の配布 1 本\n", options: { fontSize: 15, bold: true } }, { text: "承認ゲート 2 は 1 回で済む", options: { fontSize: 12 } }], { x: 6.4, y: 1.42, w: 3.2, h: 1.68, color: "background", valign: "middle" });
   d.text(s, "取り合いは機械が防ぐ（配布済み）", { x: X0, y: 3.3, w: W, h: 0.3, fontSize: 11.5, bold: true, color: "text", valign: "middle" });
   [
-    "同じ Issue を 2 つの実行に入れない",
-    "マイルストーンが重なるループは同時に動かさない",
-    "古い版の NDF では 1 本に絞る",
-    "同時に動かす数をリポジトリごとに宣言",
+    "同じ Issue を\n2 つの実行に入れない",
+    "マイルストーンが重なる\nループは同時に動かさない",
+    "古い版の NDF は\n1 本だけで動かす",
+    "同時に動かす数を\nリポジトリごとに宣言",
   ].forEach((t, i) => {
     const c = cols(4, 0.12)[i];
     rr(s, c.x, 3.66, c.w, 0.86, "panel1");
-    d.text(s, t, { x: c.x + 0.12, y: 3.66, w: c.w - 0.24, h: 0.86, fontSize: 11, bold: true, color: "ink", valign: "middle" });
+    d.text(s, t, { x: c.x + 0.12, y: 3.66, w: c.w - 0.24, h: 0.86, fontSize: 10.5, bold: true, color: "ink", valign: "middle" });
   });
   d.note(s, "取り合いの防ぎ方は v10.27.14 で配布（#2347）。配布をまとめるオーガナイザーは #2439 で設計を承認し、これから実装する。手元の 1 台で並べるときのまとめ役とは排他");
 
