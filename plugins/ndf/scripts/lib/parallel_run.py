@@ -355,18 +355,13 @@ def parallel_workflow(main: str, name: str) -> dict:
     wait = poll_seconds()
     while True:
         if run.stop:
-            left = step_stop_lanes(main, [n for n, st in run.lanes.items() if st.get("started")])
-            step_finish(main, name, run.progress())
-            return {**run.summary("stopped"), "not_stopped": left}
-        ready = pp.ready_lanes(_plan_view(run), {n for n, st in run.lanes.items() if st.get("started")}, run.stopped())
-        if ready:
-            for n, got in step_spawn(main, name, [ln.name for ln in ready]).items():
-                run.lanes[n].update(got)
+            return _handle_stop(run, main)
+        _spawn_ready(run, main)
         if run.current is None and run.pending:
             run.answer_from_ranges()
             if run.pending:
                 run.open_release()
-        if run.current is None and not run.pending and len(run.stopped()) == len(run.order):
+        if _finished(run):
             step_finish(main, name, run.progress())
             return run.summary("finished")
         run.take(durable.recv("inbox", wait if run.current is None else min(wait, 30)))
@@ -374,18 +369,47 @@ def parallel_workflow(main: str, name: str) -> dict:
             msg = durable.recv("resume", min(wait, 30))
             if isinstance(msg, dict):
                 run.resume(msg)
-        states = step_observe(main)
-        noticed = []
-        for n in run.order:
-            st = states.get(n)
-            if st is None and run.lanes[n].get("started"):
-                st = "stopped"
-            if st and st != run.lanes[n].get("state"):
-                run.lanes[n]["state"] = st
-                if st == "awaiting_approval":
-                    noticed.append(n)
-        if noticed:
-            run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
+        _observe(run, main)
+
+
+def _started(run: _Run) -> list[str]:
+    return [n for n, st in run.lanes.items() if st.get("started")]
+
+
+def _handle_stop(run: _Run, main: str) -> dict:
+    """止める依頼を受けた後: 起動済みのレーンを止め、記録を閉じて要約を返す。"""
+    left = step_stop_lanes(main, _started(run))
+    step_finish(main, run.name, run.progress())
+    return {**run.summary("stopped"), "not_stopped": left}
+
+
+def _spawn_ready(run: _Run, main: str) -> None:
+    """起動の条件がそろったレーンを起動し、結果をレーンの状態へ反映する。"""
+    ready = pp.ready_lanes(_plan_view(run), set(_started(run)), run.stopped())
+    if ready:
+        for n, got in step_spawn(main, run.name, [ln.name for ln in ready]).items():
+            run.lanes[n].update(got)
+
+
+def _finished(run: _Run) -> bool:
+    """配布の途中でも残りでもなく、全レーンが止まっている。"""
+    return run.current is None and not run.pending and len(run.stopped()) == len(run.order)
+
+
+def _observe(run: _Run, main: str) -> None:
+    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。"""
+    states = step_observe(main)
+    noticed = []
+    for n in run.order:
+        st = states.get(n)
+        if st is None and run.lanes[n].get("started"):
+            st = "stopped"
+        if st and st != run.lanes[n].get("state"):
+            run.lanes[n]["state"] = st
+            if st == "awaiting_approval":
+                noticed.append(n)
+    if noticed:
+        run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
 
 
 def _plan_view(run: _Run) -> pp.ParallelPlan:
