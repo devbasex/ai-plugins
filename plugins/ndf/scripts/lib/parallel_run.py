@@ -287,6 +287,8 @@ class _Run:
         self.wake: list[str] = []
         self.sprint = {ln["name"] for ln in lanes if (ln.get("input") or {}).get("kind") == "sprint"}
         self.revive: list[str] = []  # 問いへ答えた後、まだ動き出していない止まった 1 スプリントのレーン（6f）
+        self.revive_at: dict[str, float] = {}  # revive に入れたときの最後の観測の時刻（エポック秒）。最後に動いた時刻と比べる
+        self.seen_at = 0.0  # 最後に観測した時刻（エポック秒）
 
     def bump(self) -> int:
         self.seq += 1
@@ -362,6 +364,7 @@ class _Run:
         self.publish_questions()
         owners = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))} & self.sprint & self.stopped()
         self.revive = sorted({*self.revive, *owners})  # 止まった持ち主を起こして答えを当てるまで計画を終えない
+        self.revive_at.update({o: self.seen_at for o in owners})  # 止まったと観た時刻。これより後に動いたら起きたと数える
         if owners - set(self.wake):  # 保留中の持ち主の後に依存先を起こさないため、全レーンが止まるのを待たずに起こす 1 行を添える
             self.wake = sorted({*self.wake, *owners})
             self.pause("notice", lanes=[], attach=[])
@@ -661,7 +664,9 @@ def _observe_run(run: _Run, main: str) -> None:
     seen = step_observe(main)
     rows = seen.get("rows") or {}
     states = {n: r.get("state") for n, r in rows.items()}
-    _ask_stalls(run, rows, float(seen.get("now") or 0))
+    run.seen_at = float(seen.get("now") or 0)
+    _clear_revived(run, rows)
+    _ask_stalls(run, rows, run.seen_at)
     _ask_helper(run, rows)
     noticed = []
     for n in run.order:
@@ -670,11 +675,26 @@ def _observe_run(run: _Run, main: str) -> None:
             st = "stopped"
         if st and st != run.lanes[n].get("state"):
             run.lanes[n]["state"] = st
-            run.revive = [x for x in run.revive if x != n or st == "stopped"]  # 起こしたレーンが動き出したら待ちを外す
+            if st != "stopped" and n in run.revive:  # 起こしたレーンが動き出したら待ちを外す
+                run.revive = [x for x in run.revive if x != n]
+                run.revive_at.pop(n, None)
             if st == "awaiting_approval":
                 noticed.append(n)
     if noticed:
         run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
+
+
+def _clear_revived(run: _Run, rows: dict) -> None:
+    """起こしたレーンの最後に動いた時刻（`relay.py ls` の `at`）が、答えたときの観測の時刻より後へ進んだら `revive` から外す。
+    答えを当ててすぐ止まるレーンは観測の間隔の中で stopped → running → stopped と動き、状態の変化として見えないためである。"""
+    import clock
+
+    for n in list(run.revive):
+        at = (rows.get(n) or {}).get("at")
+        t = clock.parse(at, naive="utc") if at else None
+        if t is not None and t.timestamp() > run.revive_at.get(n, float("inf")):
+            run.revive = [x for x in run.revive if x != n]
+            run.revive_at.pop(n, None)
 
 
 def _ask_stalls(run: _Run, rows: dict, now: float) -> None:

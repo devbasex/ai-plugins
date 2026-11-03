@@ -744,6 +744,26 @@ def test_a_held_lane_does_not_release_its_dependents(monkeypatch):
     assert spawned == ["lb"]
 
 
+def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatch):
+    """起こしたレーンが観測の間隔の中で stopped → running → stopped と動いても、最後に動いた時刻が答えたときの観測より
+    後へ進めば revive から外す。外さないと _finish_or_hold が設計の承認待ちを空にできず、計画が終わらない。"""
+    run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}])
+    seen = {"now": 1_000_000.0, "rows": {"la": {"state": "stopped", "at": "1970-01-12T13:40:00Z"}}}  # 999_600
+    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    run.lanes["la"].update(started=True)
+    prun._observe_run(run, "/m")
+    run.questions = [{"id": "q1", "kind": "ask", "lane": "la"}]
+    run.reply({"id": "q1", "result": "answered"})
+    assert run.revive == ["la"]
+    seen["now"] = 1_000_060.0
+    prun._observe_run(run, "/m")
+    assert run.revive == ["la"]  # まだ動いていない
+    seen["rows"]["la"]["at"] = "1970-01-12T13:46:50Z"  # 1_000_010。答えの後に動いて、また止まった
+    seen["now"] = 1_000_120.0
+    prun._observe_run(run, "/m")
+    assert run.revive == []
+
+
 def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     """一時レーンが ask を送って自分のラッパーを止めたときは、「配布の途中で止まった」を問わない（6g）。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
