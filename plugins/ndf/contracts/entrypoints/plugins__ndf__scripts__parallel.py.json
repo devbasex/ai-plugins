@@ -155,6 +155,7 @@
     "prs-txt",
     "request-id-txt",
     "request-txt",
+    "requests-json",
     "run-log",
     "run-pid"
   ],

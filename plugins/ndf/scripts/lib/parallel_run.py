@@ -134,8 +134,10 @@ def step_observe(main: str) -> dict:
 
 
 @durable.step(name="parallel.build")
-def step_build(main: str, name: str, seq: int, k: int) -> dict:
-    """まとめた配布の提示のプランと本番のプランを書く。"""
+def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None) -> dict:
+    """まとめた配布の提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
+    （`parallel.py present` が耐久ワークフローの外からレーンの内訳に読む）。"""
+    pr.write_requests(Path(main), name, list(requests or []))
     if seq > pr.MAX_HELPER_SEQ:
         return {"error": f"配布の連番 {seq} が一時レーンの名前の上限 {pr.MAX_HELPER_SEQ} を超える"}
     version = dev_version(Path(main))
@@ -252,7 +254,7 @@ class _Run:
     def open_release(self) -> None:
         """流れている配布が無く依頼があれば、他のレーンを待たずに提示 1 を組む（I9）。"""
         n = len(self.releases) + 1
-        built = step_build(self.main, self.name, n, 1)
+        built = step_build(self.main, self.name, n, 1, self.pending)
         if built.get("error"):
             self.stop = True
             self.releases.append({"n": n, "state": "failed", "reason": built["error"]})
@@ -295,7 +297,7 @@ class _Run:
             first = step_presented(rel["dirs"][0])
             head = step_head(self.main)
             if pr.moved(first.get("sha") or "", head):
-                built = step_build(self.main, self.name, rel["n"], 2)
+                built = step_build(self.main, self.name, rel["n"], 2, self.pending)
                 rel["dirs"].append(built["dir"])
                 self.emit_release(rel, 2, represent=True)
                 return

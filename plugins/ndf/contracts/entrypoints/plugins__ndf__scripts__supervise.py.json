@@ -78,6 +78,7 @@
     "report-md",
     "request-id-txt",
     "request-txt",
+    "requests-json",
     "state-json"
   ],
   "reads": [],

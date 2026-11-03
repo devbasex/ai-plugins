@@ -32,7 +32,7 @@ from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
 from supervise_lib.release_templates import release_verify_step, strip_suffix
-from supervise_lib.plan import sprint_state_path
+from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
     normal_gate_2,
@@ -66,7 +66,8 @@ def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
     if lane:
         from parallel_release import plan_release_request
 
-        return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs)}
+        # prs を省いた呼び出しは、前のステージの Pull Request のすべて（{queue_prs}）を依頼に載せる
+        return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])}
     return {"release-prod": build()}
 
 

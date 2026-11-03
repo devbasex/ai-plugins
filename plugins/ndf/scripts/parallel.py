@@ -192,7 +192,7 @@ def cmd_wait(a) -> None:
     if got.kind == "event":
         ev = dict(got.value)
         key = ev.pop("key")
-        action = ev.get("action") if key == "pause" else "questions"
+        action = ev.pop("action", None) if key == "pause" else "questions"  # reply の action と重ねない
         if action == "running":
             reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"))
         items = ev.pop("items", None) or []
@@ -231,7 +231,7 @@ def cmd_present(a) -> None:
 
 
 def _requests_for(main: Path, name: str) -> list[dict]:
-    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローの外からは依頼の一覧を読めないため、無ければ空）。"""
+    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローが配布を組むたびに書く。無ければ空）。"""
     p = pp.plan_dir(main, name) / "releases" / "requests.json"
     try:
         return json.loads(p.read_text(encoding="utf-8"))

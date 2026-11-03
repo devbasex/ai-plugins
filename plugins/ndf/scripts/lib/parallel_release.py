@@ -73,8 +73,16 @@ def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run) -> dict[int, list[int]]:
-    """Pull Request が閉じる課題（`closingIssuesReferences`）。読めないものは空にする。"""
+def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bulk: Optional[Callable] = None) -> dict[int, list[int]]:
+    """Pull Request が閉じる課題（`closingIssuesReferences`）。読めないものは空にする。
+
+    まとめて読む（`release_lib.included.pr_fields`。100 本ごとに 1 回）。読めなければ Pull Request ごとの `gh pr view` へ倒す。"""
+    if prs:
+        if bulk is None:
+            from release_lib.included import pr_fields as bulk
+        got, _ = bulk(prs, cwd=str(root))
+        if got is not None:
+            return {n: [int(i["number"]) for i in (got.get(n) or {}).get("closingIssuesReferences") or [] if "number" in i] for n in prs}
     out: dict[int, list[int]] = {}
     for n in prs:
         got = run(
@@ -102,7 +110,7 @@ def present(
     """承認資料から提示したコミットと含む Pull Request を読み、レーンへ対応づける。
 
     書くのは提示の置き場 `d`（`releases/<連番>/<提示>/`）の決まった名前だけである: `presented.json`、承認資料へ足す
-    内訳 `breakdown.md`、提示のプランの状態ディレクトリの `present/work/prs.txt`・`present/work/approved.txt`
+    内訳 `breakdown.md`、提示のプランの状態ディレクトリ（`present_state_dir`）の `work/prs.txt`・`work/approved.txt`
     （本番のプランが `{queue_prs:present}`・`{queue_approved:present}` で読む）。承認資料へ内訳を足すのはプランのコマンドである。
     `first` は出し直しのときの提示 1 の `presented.json`（加わった範囲を載せる）。承認資料に承認したコミットが無ければ ValueError。"""
     import approved_commit
@@ -118,12 +126,27 @@ def present(
         added = map_lanes(plan, extra, closes, requests)
     data = {"sha": sha, "prs": prs, "lanes": mapped["lanes"], "orphans": mapped["orphans"], "added": added}
     d = Path(d)
-    (d / "present" / "work").mkdir(parents=True, exist_ok=True)
+    work = present_state_dir(d) / "work"
+    work.mkdir(parents=True, exist_ok=True)
     (d / "presented.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (d / "breakdown.md").write_text(breakdown_md(mapped, added), encoding="utf-8")
-    (d / "present" / "work" / "prs.txt").write_text(" ".join(str(n) for n in prs) + "\n", encoding="utf-8")
-    (d / "present" / "work" / "approved.txt").write_text(sha + "\n", encoding="utf-8")
+    (work / "prs.txt").write_text(" ".join(str(n) for n in prs) + "\n", encoding="utf-8")
+    (work / "approved.txt").write_text(sha + "\n", encoding="utf-8")
     return data
+
+
+def present_state_dir(d: Path) -> Path:
+    """提示のプラン `<d>/present.json` の状態ディレクトリ（queue と `{queue_prs:present}` が読む `state_dir_of` の置き場）。"""
+    from supervise_lib.paths import state_dir_of
+
+    return state_dir_of(str(Path(d).absolute() / "present.json"))
+
+
+def write_requests(main: Path, name: str, requests: list[dict]) -> None:
+    """耐久ワークフローが受けた配布の依頼を `releases/requests.json` へ書く（`parallel.py present` が内訳に使う）。"""
+    rel = pp.plan_dir(main, name) / "releases"
+    rel.mkdir(parents=True, exist_ok=True)
+    (rel / "requests.json").write_text(json.dumps(requests, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def release_dir(main: Path, name: str, seq: int, k: int) -> Path:
@@ -234,17 +257,19 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
 
     提示のプランは開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで
     流し、`parallel.py present` でレーンの内訳を足し、最後に承認ゲート 2（MVV 判定 → approve）を置く。本番のプランは
-    承認ゲート 2 を持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。"""
-    from supervise_lib.decl import apply_decls
+    承認ゲート 2 を持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。
+    本番のプランの承認資料はこの提示の承認資料で、先頭の approve は提示のプランの facts と答えの記録を読む。"""
+    from supervise_lib.decl import apply_decls, decl_fields
     from supervise_lib.paths import PARALLEL_PY
     from supervise_lib.procedures import with_record
-    from supervise_lib.release_templates import _dev_approval_steps
-    from supervise_lib.sprint_waves import plan_mvv_release
+    from supervise_lib.release_templates import _dev_approval_steps, plan_release, release_names
 
     repo = str(main)
     d = Path(d)
     seq, k = d.parent.name, d.name
     ns = argparse.Namespace(
+        kind="release",
+        state=None,
         worktree=repo,
         repo=repo,
         base=None,
@@ -278,7 +303,7 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     plugin = (ns.release or {}).get("plugin", "ndf")
     approval = f"issues/approval-{plugin}-v{version}-parallel-{seq}-{k}.md"
     state = d / "answer.json"
-    present_state = d / "present"  # 提示のプランの状態ディレクトリ（`state_dir_of` の置き場と同じ）
+    present_state = present_state_dir(d)  # 提示のプランの状態ディレクトリ（queue の `state_dir_of` と同じ置き場）
     facts = _dev_approval_steps(ns, repo, approval, "0", ",".join((ns.release or {}).get("runtimes") or []))
     facts[-1]["next"] = "present"
     present = {
@@ -303,7 +328,28 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
             "steps": [*facts, present, *gate],
         }
     )
-    release_plan = plan_mvv_release(ns, repo, version, "prod", prs=["{queue_prs:present}"])
+    wt, branch = release_names(version)
+    release_plan = plan_release(
+        argparse.Namespace(
+            **decl_fields(ns),
+            version=version,
+            level=None,
+            series=None,
+            prs=["{queue_prs:present}"],
+            prs_from_queue=False,
+            channel="prod",
+            repo=repo,
+            prev_tag=None,
+            worktree=f"{repo}/{wt}",
+            branch=branch,
+            issue=[],
+            mode="standard",
+            mvv=None,
+            state=str(state),
+            dev_state=str(present_state),
+            approval_path=approval,
+        )
+    )
     release_plan["起点"] = "{queue_approved:present}"
     release_plan["並列の計画"] = name
     return present_plan, release_plan

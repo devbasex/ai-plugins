@@ -55,6 +55,7 @@
 | `report-md` | `report.md` | report | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `request-id-txt` | `request-id.txt` | state | state-dir | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `request-txt` | `request.txt` | result | state-dir | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `requests-json` | `requests.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `research-calls-jsonl` | `calls.jsonl` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `research-item-json` | `*--*.item.json` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `run-log` | `run.log` | report | main | `plugins/ndf/scripts/parallel.py` | — |

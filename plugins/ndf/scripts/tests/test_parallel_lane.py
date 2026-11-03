@@ -80,3 +80,48 @@ def test_present_gate_puts_approve_after_mvv(tmp_path):
     steps = parallel_release.present_gate_steps(str(tmp_path / "a.json"), "/r", "issues/x.md", "1 2", "standard", "/f", "/a")
     ids = [s["id"] for s in steps]
     assert ids[:3] == ["mvv", "note", "approve"] and steps[1]["next"] == "approve" and steps[2]["next"] == "end"
+
+
+def test_lane_request_without_prs_uses_previous_stage_prs(monkeypatch):
+    from supervise_lib import sprint
+
+    import parallel_release
+
+    seen = {}
+    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
+    monkeypatch.setattr(parallel_release, "plan_release_request", lambda a, repo, plan, lane, prs=None: seen.setdefault("prs", prs))
+    sprint.prod_plans(None, "/r", lambda: {})
+    assert seen["prs"] == ["{queue_prs}"]
+
+
+def test_closes_by_pr_reads_in_bulk(tmp_path):
+    import supervise_lib  # noqa: F401
+    import parallel_release
+
+    calls = []
+
+    def bulk(prs, cwd=None):
+        calls.append(list(prs))
+        return {1: {"closingIssuesReferences": [{"number": 7}]}, 2: None}, ""
+
+    def per_pr(*a, **k):
+        raise AssertionError("PR ごとに gh を起動しない")
+
+    assert parallel_release.closes_by_pr(tmp_path, [1, 2], run=per_pr, bulk=bulk) == {1: [7], 2: []}
+    assert calls == [[1, 2]]
+
+
+def test_present_writes_to_present_plan_state_dir(tmp_path, monkeypatch):
+    import supervise_lib  # noqa: F401
+    import approved_commit
+    import parallel_release
+    from release_lib import included
+    from supervise_lib.paths import state_dir_of
+
+    monkeypatch.setattr(approved_commit, "material_sha", lambda p: "abc")
+    monkeypatch.setattr(included, "read_included", lambda p: [5])
+    plan = pp.ParallelPlan.model_validate(PLAN, context={"max_plans": 10, "max_named": 10})
+    d = tmp_path / "releases" / "1" / "1"
+    parallel_release.present(tmp_path, plan, tmp_path / "a.md", [], d, closes_of=lambda r, prs: {})
+    work = state_dir_of(str(d / "present.json")) / "work"
+    assert (work / "prs.txt").read_text().strip() == "5" and (work / "approved.txt").read_text().strip() == "abc"

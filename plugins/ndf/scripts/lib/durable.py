@@ -435,8 +435,9 @@ def wait_from(
     names = list(keys)
     marks = {k: (after.get(k, 0) if isinstance(after, Mapping) else after) for k in names}
     deadline = None if timeout is None else time.monotonic() + timeout
-    while True:
-        with open_client(kind, identity) as c:
+    # 接続は待ちの間 1 つを使い回す（ポーリングごとに DBOSClient を作り直さない）
+    with open_client(kind, identity) as c:
+        while True:
             rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
             if not rows:
                 return Outcome("error", f"耐久ワークフロー {wid} が無い")
@@ -449,9 +450,9 @@ def wait_from(
                 ev = c.get_event(wid, k, timeout_seconds=0)
                 if isinstance(ev, dict) and int(ev.get("seq", 0)) > marks[k]:
                     return Outcome("event", {"key": k, **ev})
-        if deadline is not None and time.monotonic() >= deadline:
-            return Outcome("timeout")
-        time.sleep(poll)
+            if deadline is not None and time.monotonic() >= deadline:
+                return Outcome("timeout")
+            time.sleep(poll)
 
 
 def wait(wid: str, key: Optional[str] = None, after: int = 0, poll: float = POLL_SECONDS, timeout: Optional[float] = None) -> Outcome:

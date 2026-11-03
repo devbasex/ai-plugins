@@ -90,19 +90,26 @@ def merged_on_main(root: Path, prs: list[int], run=subprocess.run) -> bool:
 
 
 def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
-    """`prs` を含む範囲のイベント `range-<連番>` の版（無ければ None）。"""
+    """`prs` を含む範囲のイベント `range-<連番>` の版（無ければ None）。
+
+    `range-<連番>` は出せた配布にだけあり、差し戻し・失敗の配布の連番は欠ける。欠番で打ち切らず、配布の置き場
+    `releases/<連番>/` のある連番をすべて読む。"""
     import durable
 
-    ident, wid = record_identity(main, name), workflow_id(name)
-    n = 1
+    rel = pp.plan_dir(main, name) / "releases"
+    try:
+        seqs = sorted(int(d.name) for d in rel.iterdir() if d.is_dir() and d.name.isdigit())
+    except OSError:
+        seqs = []
+    if not seqs:
+        return None
     found = None
-    while True:
-        ev = durable.event_from(KIND, ident, wid, f"range-{n}", 0)
-        if not isinstance(ev, dict):
-            return found
-        if set(prs) & set(ev.get("prs") or []):
-            found = ev.get("version")
-        n += 1
+    with durable.open_client(KIND, record_identity(main, name)) as c:
+        for n in seqs:
+            ev = c.get_event(workflow_id(name), f"range-{n}", timeout_seconds=0)
+            if isinstance(ev, dict) and set(prs) & set(ev.get("prs") or []):
+                found = ev.get("version")
+    return found
 
 
 def lane_request_id(state: Path, lane: str) -> str:

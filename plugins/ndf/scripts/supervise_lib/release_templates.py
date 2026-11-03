@@ -359,7 +359,8 @@ def plan_release_package_plugin(a) -> dict:
         + ["release", "verify"]
         + (["facts", "explain", "others"] if dev else [])
     )
-    approval = f"issues/approval-{plugin}-v{base}.md"
+    # まとめた配布（#2436）の本番は、提示で作って承認した資料を渡す
+    approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
     ref = a.base if dev else a.production_branch
     if sync:
