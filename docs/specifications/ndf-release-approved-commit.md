@@ -18,9 +18,9 @@
 | --- | --- |
 | 1 | 開発版のリリースプランの `approval-facts` が、打った時点の `origin/<ベースブランチ>` の 40 桁を承認資料の「承認したコミット」の行と `metrics.approved_sha` に書く。`next` は `release ... --channel prod --approved-sha <40 桁>` |
 | 2 | 利用者が承認資料を見て承認する。conductor が `approve --approval <承認資料> --approved-sha <1 の metrics.approved_sha> --by user` で「承認の記録」を書く（MVV 判定で通したときは `mvv-gate.py` が `by: mvv` で書く）。`--state` を渡した `pace: normal` では、conductor は `sprint-state.py gate <状態> "関門 2" --by user --outcome approved` だけを打ち、本番のプランの先頭の `approve --facts-from` が書く |
-| 3 | 別の PR がベースブランチへマージされる |
+| 3 | 本番のリリースプランが `release/v<版>` を切る前に、別の PR がベースブランチへマージされる |
 | 4 | 本番のリリースプランの `release --channel prod --approval <承認資料>` が、承認の記録と承認したコミットが等しいことを確かめ、配布の PR（`release/v<版>` → ベースブランチ）をマージする |
-| 5 | 承認したコミットから `origin/<ベースブランチ>` の先端までに、配布の PR の外のコミット（3 の PR のもの）があるので、本番チャネルの PR を作らずに `gate`・終了コード 10 で止まる。`items[]` に外のコミットの SHA・件名・PR 番号が並ぶ |
+| 5 | `release/v<版>` はベースブランチの先頭から切ったため、承認したコミットから `origin/release/v<版>` の先端までに配布の PR の外のコミット（3 の PR のもの）があり、本番チャネルの PR を作らずに `gate`・終了コード 10 で止まる。`items[]` に外のコミットの SHA・件名・PR 番号が並ぶ |
 | 6 | 人が外のコミットを見て、`approval-facts` で承認資料を作り直し、承認を取り直して打ち直す |
 
 **打ち方・`status` の読み方・止まったときの次の手は Skill が正である。** ここに書き写さない。
@@ -44,7 +44,7 @@
 | 語 | 指すもの |
 | --- | --- |
 | 配布の PR | この版の `release/v<版>` → ベースブランチの Pull Request（開発版の接尾辞を外す bump・changelog・他のプラグインの bump を含む） |
-| 本番チャネルの PR | ベースブランチ → 本番チャネルの Pull Request |
+| 本番チャネルの PR | `release/v<版>` → 本番チャネルの Pull Request。`release/v<版>` は先にベースブランチへ取り込み、先頭をベースブランチの祖先にしてから出す |
 | 承認資料 | `issues/approval-<プラグイン>-v<版>.md`。`approval-facts` が書く |
 | 導入の確認の承認資料 | 昇格のプランの `verify` ステップ（`release-steps.py verify-facts`）が書く `approval-verify.md`。確かめたコミットの行を 1 行持つ |
 | 昇格の Pull Request | ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作ってマージするもの。head はベースブランチそのもの |
@@ -52,6 +52,11 @@
 
 ベースブランチ・本番チャネル・プラグイン名は宣言（`.ndf/worktree.json` の `base_branch`・`production_branch` と `.ndf/supervise.json` の `release.plugin`）と引数から読み、
 `develop` / `main` を埋め込まない。
+
+**比べた先端は `origin/release/v<版>` の先端で、ベースブランチの先端ではない。** 本番のリリースプランは、「起点のコミット」が
+あればそのコミット（並列の計画のまとめた配布では承認したコミット）から、無ければ `origin/<ベースブランチ>` から `release/v<版>` を切り、
+版上げのコミットを積む。`release/v<版>` を切った後にベースブランチへ入った変更は比べる相手に入らず、本番チャネルにも入らない。
+その変更は次の配布で出る。
 
 ## 対象範囲
 
@@ -72,8 +77,8 @@
 ミッションの外の PR #806 がベースブランチへマージされた。仕上げのフェーズが配布物の差分（119 → 124 ファイル）の
 食い違いに気づいて止まり、再承認を経て配布したが、気づいたのは差分の数を数え直したからである（PR #810 の振り返り）。
 
-**承認したコミットとマージの直前のベースブランチの先端は、正しく進めても一致しない。** 本番のリリースプランは承認の後に
-配布の PR をベースブランチへマージしてから本番チャネルの PR をマージするためである。比べるのは「承認したコミットから
+**承認したコミットと比べた先端は、正しく進めても一致しない。** 本番のリリースプランは承認の後に
+`release/v<版>` へ版上げのコミットを積み、配布の PR をベースブランチへマージしてから本番チャネルの PR をマージするためである。比べるのは「承認したコミットから
 先端までに、配布の PR の外のコミットや中身が無いか」である。
 
 **承認資料にコミットを書いて本番の範囲を縛る形は、手で反映する経路（`release-steps.py deploy-facts`）で既に使っていた。**
@@ -137,7 +142,7 @@ sequenceDiagram
   R->>A: from_material（無い・形が違う → 3。承認の記録が無い・違う → 10）
   R->>G: 配布の PR をマージ（マージ済みなら続きから）
   R->>G: 配布の PR の先端・コミット・mergeCommit を読む
-  R->>A: compare_approved(承認したコミット, origin/<base>, 配布の PR)
+  R->>A: compare_approved(承認したコミット, origin/release/v<版>, 配布の PR)
   alt 一致しない・判定できない
     A-->>R: Verdict(ok=false)
     R-->>P: gate（10）と承認の外のコミット
@@ -163,8 +168,8 @@ sequenceDiagram
 | --- | --- | --- |
 | 承認資料を書いた（承認したコミットを含む） | `approval-facts` | 承認する人・MVV 判定・本番のリリースプラン |
 | ゲート 2 を承認した（承認の記録を書いた） | 人（conductor が `approve --by user`。`--state` の `normal` では本番のプランの先頭の `approve --facts-from` が利用者の承認の記録から書く）か MVV 判定（`mvv-gate.py check --gate release`。`--advise` では書かない） | conductor・本番の配布 |
-| ほかの変更がベースブランチへマージされた | 利用者か別のプラン | 本番の配布（比較で見つける） |
-| 承認したコミットからベースブランチの先端までを比べた | `lib/approved_commit.py` の `compare_approved` | `release --channel prod`（一致なら本番チャネルへ、違えば承認ゲート） |
+| ほかの変更がベースブランチへマージされた | 利用者か別のプラン | 本番の配布（`release/v<版>` を切る前なら比較で見つける。切った後なら比べる相手に入らない） |
+| 承認したコミットから `release/v<版>` の先端までを比べた | `lib/approved_commit.py` の `compare_approved` | `release --channel prod`（一致なら本番チャネルへ、違えば承認ゲート） |
 | 比べた先端を本番チャネルへマージした | `merged-steps.py merge-when-green --expect-head` | `release --channel prod`（タグと GitHub Release へ） |
 
 ### 比較の順序（`compare_approved`）
