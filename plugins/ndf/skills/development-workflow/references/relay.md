@@ -88,6 +88,8 @@
 | `touch <作業ディレクトリ>/stop` | 同じ（1 つのラッパーだけ） |
 | セッションの中で `/exit` か Ctrl-C を 2 回 | ラッパーも次のセッションを起動せずに終わる |
 
+副命令の一覧は `relay.py --help` が、1 つの副命令の書式と役割は `relay.py <副命令> --help` が出す（副命令は動かさない。`run --help` は claude の help）。
+
 作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。セッションの中では環境変数 `NDF_RELAY_DIR` が指す。
 
