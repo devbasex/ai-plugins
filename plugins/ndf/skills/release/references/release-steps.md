@@ -181,7 +181,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
   配布の PR をマージした後、承認したコミットから `origin/release/v<版>` の先端（比べた先端）までに `release/v<版>` の
   Pull Request の外のコミットか中身があれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。
-  承認の後に `develop` が進んでいても比べる相手ではないため止まらず、進んだ分は次の配布で出る。ただし差分がすべて許可リスト
+  承認の後に `develop` が進んでいても、`develop` は比べる相手に入らないため止まらず、進んだ分は次の配布で出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
   マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が

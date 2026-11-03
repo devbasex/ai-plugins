@@ -140,7 +140,7 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 `develop` か、先頭が `origin/develop` の祖先の `release/v<版>`。`scripts/check-pr-base.sh`）。
 
 **承認の後に `develop` が進んでも、配布は止まらない。** 本番の配布（`release-steps.py release --channel prod`）が
-承認したコミットと比べる相手は `origin/release/v<版>` の先端で、`develop` の先端ではない。`release/v<版>` に
+承認したコミットと比べる相手は `origin/release/v<版>` の先端とし、`develop` の先端は比べる相手に入れない。`release/v<版>` に
 承認したコミットと版上げの外のコミットがあれば、承認ゲート（終了コード 10）で止まる。承認の後に `develop` へ
 入った変更は、この版の `main` には入らず次の配布で出る。
 
@@ -171,8 +171,8 @@ remote:
 `N-1 of N` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
-`develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端で
-あって、両者が同じコミットを指していることではない。中身が出した `release/v<版>` と一致していることは
+`develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端である。
+`main` と `develop` が同じコミットを指すことは求めない。中身が出した `release/v<版>` と一致していることは
 差分で確かめる（承認の後に `develop` が進んでいれば、`develop` とは一致しない）。
 
 ```bash
