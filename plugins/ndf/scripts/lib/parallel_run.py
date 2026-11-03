@@ -127,11 +127,55 @@ def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
     return out
 
 
+STALL_MINUTES = 60  # 動かないレーンを問うまでの分（設計の失敗の 3 番の既定）
+SPAWN_REFUSALS = 3  # 起動の断りがこの回数続いたら問う（設計の失敗の 17 番）
+
+
+def stall_seconds() -> float:
+    """動かないレーンを問うまでの秒（`NDF_PARALLEL_STALL_MINUTES` で変えられる。既定 60 分）。"""
+    try:
+        return max(1.0, float(os.environ.get("NDF_PARALLEL_STALL_MINUTES") or STALL_MINUTES)) * 60
+    except ValueError:
+        return STALL_MINUTES * 60.0
+
+
 @durable.step(name="parallel.observe")
 def step_observe(main: str) -> dict:
-    """`relay.py ls --json` のレーンの状態（名前 → running / awaiting_approval / stopped）。"""
+    """`relay.py ls --json` の行（名前 → {state, at, role}）と、観た時刻（エポック秒）。"""
     _, res = relay(Path(main), "ls", "--json")
-    return {it["name"]: it.get("state") for it in res.get("items") or [] if isinstance(it, dict) and it.get("name")}
+    rows = {
+        it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
+        for it in res.get("items") or []
+        if isinstance(it, dict) and it.get("name")
+    }
+    return {"now": time.time(), "rows": rows}
+
+
+@durable.step(name="parallel.held-loops")
+def step_held_loops(main: str, name: str, answered: list[str]) -> list[str]:
+    return held_loops(Path(main), name, answered)
+
+
+def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
+    """答えを受けたのに残りを流していない保留の周回を持つ、計画のループのレーンのループ名（異常系 11）。"""
+    try:
+        plan = pp.ParallelPlan.model_validate(pp.load_plan(main, name), context={"max_plans": 10**6, "max_named": 10**6})
+    except (OSError, ValueError):
+        return []
+    out = []
+    for ln in plan.lanes:
+        if ln.input.kind != "loop":
+            continue
+        try:
+            rec = json.loads((Path(main) / ".ndf" / "loop" / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for lap in rec.get("laps") or []:
+            part = (lap.get("release") or lap.get("question") or {}) if lap.get("outcome") in ("配布待ち", "質問待ち") else {}
+            if part.get("request") in answered:
+                out.append(ln.input.loop)
+                break
+    return out
 
 
 @durable.step(name="parallel.build")
@@ -205,6 +249,11 @@ class _Run:
         self.launch: Optional[dict] = None
         self.received: dict[str, int] = {}
         self.answered: set[str] = set()
+        self.force = False
+        self.refusals: dict[str, int] = {}
+        self.stall_until: dict[str, float] = {}
+        self.helper_asked: Optional[int] = None
+        self.held_spawned: list[str] = []
 
     def bump(self) -> int:
         self.seq += 1
@@ -237,6 +286,7 @@ class _Run:
         kind = msg.get("kind")
         if kind == "stop":
             self.stop = True
+            self.force = self.force or bool(msg.get("force"))
         elif kind == "request":
             if all(r["id"] != msg.get("id") for r in self.pending):
                 self.pending.append(msg)
@@ -245,9 +295,15 @@ class _Run:
         elif kind in ("gate1", "gate2", "ask"):
             if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
                 return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
+            same = next((q for q in self.questions if msg.get("kind") == "ask" and q.get("cause") == cause_of(msg)), None)
+            if same is not None:  # 同じ原因の問いは 1 つにまとめ、答えを依頼してきた全レーンへ配る（異常系 5）
+                same["also"] = [*same.get("also", []), msg.get("id")]
+                same["lanes"] = [*same.get("lanes", [same.get("lane")]), msg.get("lane")]
+                self.publish_questions()
+                return
             if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
                 msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
-            self.questions.append(msg)
+            self.questions.append({**msg, "cause": cause_of(msg)} if msg.get("kind") == "ask" else msg)
             self.publish_questions()
         elif kind == "answer":
             self.reply(msg)
@@ -260,12 +316,23 @@ class _Run:
         rid = msg.get("id")
         if rid in self.answered or all(q.get("id") != rid for q in self.questions):
             return
-        self.answered.add(rid)
-        durable.set_event(f"answer-{rid}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "at")})
+        q = next(q for q in self.questions if q.get("id") == rid)
+        for each in [rid, *q.get("also", [])]:
+            self.answered.add(each)
+            durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "at")})
         self.questions = [q for q in self.questions if q.get("id") != rid]
         self.publish_questions()
 
+    def ask(self, kind: str, rid: str, lane: str, question: str, options: list[str], **extra) -> None:
+        """耐久ワークフローが自分で立てる問い（動かないレーン・一時レーンの停止・起動の断り）。同じ id は 1 回だけ。"""
+        if rid in self.answered or any(q.get("id") == rid for q in self.questions):
+            return
+        item = {"kind": kind, "id": rid, "lane": lane, "source": "ndf-ask:human-action", "question": question, "options": options}
+        self.questions.append({**item, "attach": f"python3 {RELAY} attach {lane}", **extra})
+        self.publish_questions()
+
     def answer(self, rid: str, result: str, version: Optional[str], n: Optional[int], reason: Optional[str] = None) -> None:
+        self.answered.add(rid)
         durable.set_event(f"answer-{rid}", {"result": result, "version": version, "release": n, "reason": reason, "at": None})
 
     # -- 配布 --
@@ -371,11 +438,10 @@ class _Run:
         self.current = None
 
 
-def helper_spawn(name: str, n: int, k: int) -> str:
-    """一時レーンを起こす 1 行（`metrics.spawn`）。"""
-    first = (
-        f"/goal /ndf:development-workflow --parallel-helper {name} {n} {k} -- 終わり: [ndf-parallel] helper-done {name} の行を出したとき"
-    )
+def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None) -> str:
+    """一時レーンを起こす 1 行（`metrics.spawn`）。pending はループ名で、保留の周回の残りを流す一時レーン（異常系 11）。"""
+    what = f"pending {pending}" if pending else f"{n} {k}"
+    first = f"/goal /ndf:development-workflow --parallel-helper {name} {what} -- 終わり: [ndf-parallel] helper-done {name} の行を出したとき"
     return f"python3 {RELAY} spawn --name {pr.helper_name(name, n)} --role helper --plan {name} --json -- '{first}'"
 
 
@@ -412,7 +478,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.pause("running")
     wait = poll_seconds()
     while True:
-        if run.stop and run.current is None:
+        if run.stop and (run.current is None or run.force):  # --force は配布の settle を待たず、一時レーンも止める
             return _handle_stop(run, main)
         if run.stop:  # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、
             # settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
@@ -426,8 +492,16 @@ def parallel_workflow(main: str, name: str) -> dict:
             if run.pending:
                 run.open_release()
         if _run_finished(run):
-            step_finish(main, name, run.progress())
-            return run.summary("finished")
+            held = step_held_loops(main, name, sorted(run.answered))
+            if not held:
+                step_finish(main, name, run.progress())
+                return run.summary("finished")
+            # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
+            todo = [x for x in held if x not in run.held_spawned]
+            if todo and not set(run.held_spawned) & set(held):
+                run.held_spawned.append(todo[0])
+                seq = len(run.releases) + len(run.held_spawned)
+                run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
         run.take(durable.recv("inbox", wait if run.current is None else min(wait, 30)))
         if run.current is not None:
             msg = durable.recv("resume", min(wait, 30))
@@ -442,7 +516,8 @@ def _started(run: _Run) -> list[str]:
 
 def _handle_stop(run: _Run, main: str) -> dict:
     """止める依頼を受けた後: 起動済みのレーンを止め、記録を閉じて要約を返す。"""
-    left = step_stop_lanes(main, _started(run))
+    helper = [pr.helper_name(run.name, run.current["n"])] if run.force and run.current is not None else []
+    left = step_stop_lanes(main, _started(run) + helper)
     step_finish(main, run.name, run.progress())
     return {**run.summary("stopped"), "not_stopped": left}
 
@@ -453,16 +528,24 @@ def _spawn_ready(run: _Run, main: str) -> None:
     if ready:
         for n, got in step_spawn(main, run.name, [ln.name for ln in ready]).items():
             run.lanes[n].update(got)
+            if got.get("refused"):
+                run.refusals[n] = run.refusals.get(n, 0) + 1
+                if run.refusals[n] == SPAWN_REFUSALS:  # 3 回続けて断られたら理由を添えて問う（異常系 17）
+                    run.ask("spawn", f"{run.name}-spawn-{n}", n, f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）", ["起こし直す", "止める"])
 
 
 def _run_finished(run: _Run) -> bool:
-    """配布の途中でも残りでもなく、全レーンが止まっている。"""
-    return run.current is None and not run.pending and len(run.stopped()) == len(run.order)
+    """配布の途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
+    return run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
 
 
 def _observe_run(run: _Run, main: str) -> None:
     """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。"""
-    states = step_observe(main)
+    seen = step_observe(main)
+    rows = seen.get("rows") or {}
+    states = {n: r.get("state") for n, r in rows.items()}
+    _ask_stalls(run, rows, float(seen.get("now") or 0))
+    _ask_helper(run, rows)
     noticed = []
     for n in run.order:
         st = states.get(n)
@@ -474,6 +557,51 @@ def _observe_run(run: _Run, main: str) -> None:
                 noticed.append(n)
     if noticed:
         run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
+
+
+def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
+    """承認待ちでも止まってもいないのに最後に動いた時刻が区切りより前のレーンを、区切りごとに 1 回だけ問う（異常系 3）。"""
+    import clock
+
+    limit = stall_seconds()
+    for n in run.order:
+        r = rows.get(n) or {}
+        at = clock.parse(r.get("at"), naive="utc") if r.get("at") else None
+        if r.get("state") != "running" or at is None or now - at.timestamp() < limit or now < run.stall_until.get(n, 0):
+            continue
+        run.stall_until[n] = now + limit
+        mins = int((now - at.timestamp()) // 60)
+        run.ask(
+            "stall", f"{n}-s{int(now)}", n, f"レーン {n} が {mins} 分動いていない", ["起こし直す", "止める", "待つ"],
+            commands={"起こし直す": f"python3 {RELAY} restart {n}", "止める": f"python3 {RELAY} stop {n}"},
+        )  # fmt: skip
+
+
+def _ask_helper(run: _Run, rows: dict) -> None:
+    """配布の途中で一時レーンが止まり、settle も承認ゲート 2 の依頼も届いていなければ問う（受け入れ条件 6g）。"""
+    rel = run.current
+    if rel is None or not run.launch or run.helper_asked == run.launch["seq"]:
+        return
+    name = pr.helper_name(run.name, rel["n"])
+    if (rows.get(name) or {}).get("state") != "stopped" or any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in run.questions):
+        return
+    run.helper_asked = run.launch["seq"]
+    run.ask(
+        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} が配布 {rel['n']} の途中で止まった（settle も承認ゲート 2 の依頼も無い）",
+        ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")},
+    )  # fmt: skip
+
+
+def cause_of(msg: dict) -> str:
+    """同じ原因の問いの鍵: 区分と、空白をまとめてレーン名・パス・番号を伏せた問いの文面（異常系 5）。"""
+    import re
+
+    text = str(msg.get("question") or "")
+    if msg.get("lane"):
+        text = text.replace(str(msg["lane"]), "<lane>")
+    text = re.sub(r"(/[^\s（）()]+)+", "<path>", text)
+    text = re.sub(r"\d+", "<n>", text)
+    return f"{msg.get('source')}|{' '.join(text.split())}"
 
 
 def _plan_view(run: _Run) -> pp.ParallelPlan:

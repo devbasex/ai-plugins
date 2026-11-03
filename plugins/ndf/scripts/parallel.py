@@ -11,7 +11,7 @@
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | 承認ゲート 2 の承認を送る |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | 本番の配布の結果を送る |
-| `stop <計画名>` | 計画の全レーンを止め、耐久ワークフローを終える |
+| `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（配布の途中は settle を待つ。`--force` は待たない） |
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
@@ -291,7 +291,8 @@ def cmd_stop(a) -> None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある", items, 1)
     if pl.run_status(main, a.name) in pl.RUNNING:
         wid = pl.workflow_id(a.name)
-        durable.send_to(pl.KIND, pl.record_identity(main, a.name), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
+        msg, key = ({"kind": "stop", "force": True}, f"{wid}:inbox:stop:force") if a.force else ({"kind": "stop"}, f"{wid}:inbox:stop")
+        durable.send_to(pl.KIND, pl.record_identity(main, a.name), wid, msg, "inbox", key)
     left = [ln.name for ln in plan.lanes if pr_run.relay(main, "stop", ln.name, "--json")[0] not in (0, 3)]
     if left:
         reply("stopped", f"止まらないレーンがある: {', '.join(left)}", [{"lane": n} for n in left], 1, not_stopped=left)
@@ -421,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_.add_argument("name")
     stp = sub.add_parser("stop")
     stp.add_argument("name")
+    stp.add_argument("--force", action="store_true", help="配布の途中でも settle を待たずに終え、一時レーンも止める")
     w = sub.add_parser("wait")
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
