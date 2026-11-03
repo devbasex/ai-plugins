@@ -664,3 +664,51 @@ def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_p
     monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": [item]})
     assert cli._owner_restart(tmp_path, "p1", "h1", ["続きから起こし直す"]) == "SPAWN"
     assert cli._owner_restart(tmp_path, "p1", "h1", ["止める"]) is None
+
+
+def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
+    """持ち主を起こす要否はラッパーの状態でなくレーンの側の待ちの記録で決める。ループは記録が waiting_only で止まっている、
+    1 スプリントのレーンは引継ぎ文書に依頼の id がある。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("parallel_cli", Path(prun.__file__).resolve().parents[1] / "parallel.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    data = {
+        "version": 1,
+        "name": "p1",
+        "rules": [],
+        "lanes": [
+            {"name": "la", "input": {"kind": "loop", "loop": "l1", "args": ["--milestones", "01 a"]}, "plans": 1, "touches": ["a/"]},
+            {"name": "lb", "input": {"kind": "sprint", "issues": [7]}, "plans": 1, "touches": ["b/"]},
+        ],
+    }
+    pp.plan_dir(tmp_path, "p1").mkdir(parents=True)
+    (pp.plan_dir(tmp_path, "p1") / "plan.json").write_text(json.dumps(data))
+    items = [{"id": "qa", "kind": "ask", "lane": "la"}, {"id": "qb", "kind": "ask", "lane": "lb"}]
+    monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": items})
+    monkeypatch.setattr(
+        prun, "relay", lambda *_a, **_k: (0, {"items": [{"name": "la", "state": "running"}, {"name": "lb", "state": "running"}]})
+    )
+    loop = tmp_path / ".ndf" / "loop" / "l1"
+    loop.mkdir(parents=True)
+    handoff = tmp_path / ".ndf" / "handoff"
+    handoff.mkdir(parents=True)
+    assert cli._owner_restart(tmp_path, "p1", "qa") is None and cli._owner_restart(tmp_path, "p1", "qb") is None
+    (loop / "loop.json").write_text(json.dumps({"status": "running"}))
+    (handoff / "issue-7.md").write_text("## 次にやること\n- 別の作業\n")
+    assert cli._owner_restart(tmp_path, "p1", "qa") is None and cli._owner_restart(tmp_path, "p1", "qb") is None
+    (loop / "loop.json").write_text(json.dumps({"status": "stopped", "stop": {"condition": "waiting_only"}}))
+    (handoff / "issue-7.md").write_text("## 次にやること\n- 依頼 qb の答えを読んで続ける\n")
+    assert cli._owner_restart(tmp_path, "p1", "qa") == f"python3 {prun.RELAY} restart la"
+    assert cli._owner_restart(tmp_path, "p1", "qb") == f"python3 {prun.RELAY} restart lb"
+    items.append({"id": "qh", "kind": "ask", "lane": "p1-rel1"})  # 記録を持たない一時レーンはラッパーが止まっているかで決める
+    assert cli._owner_restart(tmp_path, "p1", "qh") == f"python3 {prun.RELAY} restart p1-rel1"
+
+
+def test_a_helper_ends_by_stopping_its_own_wrapper():
+    """一時レーンは helper-done の後に自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。止めないと対話の claude が
+    入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。配布と保留の周回のどちらの起動も同じ。"""
+    for line in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
+        name = line.split("--name ", 1)[1].split()[0]
+        assert f"{prun.RELAY} stop {name}" in line.split(" -- ", 1)[1]

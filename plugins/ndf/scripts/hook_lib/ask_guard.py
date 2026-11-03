@@ -105,12 +105,16 @@ def run_request_ask(main: Path, plan: str, lane: str, payload: dict) -> tuple[in
 
 def hold_text(rid: str, plan: str) -> str:
     """オーガナイザーへ送った問いの理由と保留の手順（正本: asking.md の「並列の計画のレーン」）。"""
+    import parallel_files
+
+    stop = parallel_files.stop_self() or f'python3 {parallel_files.RELAY} stop "$NDF_RELAY_NAME"'
     loop = f'python3 "{Path(__file__).resolve().parent.parent / "sprint-state.py"}" loop hold-question <ループ> --ref {rid} --plan <止まったプラン> --step <続きのステップ> --parallel {plan}'
     return "\n".join(
         [
             f"ndf: 並列の計画 {plan} のレーンの問いをオーガナイザーへ送った（依頼 {rid}）。この作業を保留し、別の作業へ進め。答えは周回の境で届く。",
             f"開発ループのレーン: {loop} を打ち、周回を質問待ちで締めて次の周回へ進む。",
-            f"1 スプリントのレーン・一時レーン: 引継ぎ文書の「次にやること」に続きのコマンドと依頼 {rid} を書き、ndf-next を出さずにセッションを終える（オーガナイザーが起こす）。",
+            f"1 スプリントのレーン・一時レーン: 引継ぎ文書の「次にやること」に続きのコマンドと依頼 {rid} を書き、ndf-next を出さずに、"
+            f"最後に {stop} を打って自分のラッパーを止めてセッションを終える（オーガナイザーが起こす）。",
             f"正本: {ASKING_MD}",
         ]
     )

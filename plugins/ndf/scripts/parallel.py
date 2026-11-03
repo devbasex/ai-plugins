@@ -365,7 +365,8 @@ def cmd_request_gate2(a) -> None:
 
 
 def _owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None) -> str | None:
-    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn）は選んだ答えの commands、ほかは止まった持ち主の restart。"""
+    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
+    restart。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。"""
     import durable
     import parallel_run as pr_run
 
@@ -373,9 +374,8 @@ def _owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = N
     q = next((q for q in items if q.get("id") == rid), {})
     if q.get("kind") in ("stall", "helper", "spawn") or not (lane := q.get("lane")):
         return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
-    code, got = pr_run.relay(main, "ls", "--json")
-    state = next((i.get("state") for i in got.get("items") or [] if i.get("name") == lane), None) if code == 0 else None
-    return None if state in ("running", "awaiting_approval") else f"python3 {pr_run.RELAY} restart {lane}"
+    waits = pl.lane_waits(main, name, lane, rid, lambda: pr_run.relay(main, "ls", "--json"))
+    return f"python3 {pr_run.RELAY} restart {lane}" if waits else None
 
 
 def cmd_answer(a) -> None:

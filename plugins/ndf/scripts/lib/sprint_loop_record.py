@@ -34,6 +34,7 @@ import clock
 import handoff_doc
 import jsonio
 import locks
+import parallel_files
 import project_mvv as pm
 import repo as repo_lib
 import step_result
@@ -382,13 +383,9 @@ def stopped_result(env: Env, rec: dict, summary: str, extra_metrics: dict | None
     resume = resume_command(rec)
     update_handoff(env, rec, f"止まった（{stop['condition']}）。理由が解けたら再開のコマンドで続ける", resume, resume)
     items = [{"condition": stop["condition"], "values": stop["values"], "resume": resume}]
-    metrics = {
-        "status": "stopped",
-        "stop": stop,
-        "stop_line": stop_line(rec, stop["condition"]),
-        "consumed": consumed(rec),
-        **(extra_metrics or {}),
-    }
+    metrics = {"status": "stopped", "stop": stop, "stop_line": stop_line(rec, stop["condition"]), "consumed": consumed(rec)}
+    # 待ちだけで止まったレーンは、自分のラッパーを止める 1 行（stop_self）を打って終える（判断 fca6fe464619 の (a)）
+    metrics.update(extra_metrics or {}, stop_self=parallel_files.stop_self(env.main_dir()) if stop["condition"] == "waiting_only" else None)
     return {**step_result.result(TOOL, "stopped", summary, items, metrics), "exit": EXIT_STOPPED}
 
 

@@ -353,6 +353,16 @@ def test_a_lane_question_is_sent_to_the_organizer_and_denied(proj, monkeypatch, 
     assert (plan, lane) == ("p1", "la") and sent["tool_input"]["metadata"]["source"] == "ndf-ask:cost" and sent["ledger_id"]
 
 
+def test_the_hold_steps_end_by_stopping_the_own_wrapper(proj, monkeypatch, forwarded):
+    """保留の手順は自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。ndf-next を出さずに終えても対話の claude が残るためである。"""
+    import parallel_files
+
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    out = json.dumps(decide(proj, "ndf-ask:cost"), ensure_ascii=False)
+    assert parallel_files.stop_self() and json.dumps(parallel_files.stop_self(), ensure_ascii=False)[1:-1] in out
+
+
 def test_a_helper_question_is_sent_by_the_role_file(proj, monkeypatch, forwarded, tmp_path):
     lane_plan(proj)
     relay = tmp_path / "relay"
