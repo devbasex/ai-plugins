@@ -142,6 +142,7 @@ class Wrapper(NamedTuple):
     question: bool
     start: dict | None  # 最後の start の行
     last_at: str | None  # log.jsonl の最後の行の時刻
+    role: str | None = None  # 役割のファイルの役割（`organizer` / `helper`。#2436 の I13）
 
     @property
     def started(self) -> float:
@@ -151,6 +152,16 @@ class Wrapper(NamedTuple):
 def read_name(d: str) -> str | None:
     s = (read_text(os.path.join(d, NAME_FILE)) or "").strip()
     return s or None
+
+
+ROLE_FILE = "role.json"  # 作業ディレクトリの役割（`relay.py role`・`spawn --role`。#2436）
+ROLES = ("organizer", "helper")
+
+
+def read_role(d: str) -> dict | None:
+    """作業ディレクトリの役割のファイル（`{"role", "plan"}`）。無い・形が違えば None。"""
+    row = load_json(os.path.join(d, ROLE_FILE))
+    return row if isinstance(row, dict) and row.get("role") in ROLES else None
 
 
 def _last_at(d: str) -> str | None:
@@ -187,6 +198,7 @@ def scan_wrappers() -> list[Wrapper]:
                 os.path.exists(os.path.join(d, QUESTION_FILE)),
                 next(_start_rows(d), None),
                 _last_at(d),
+                (read_role(d) or {}).get("role"),
             )
         )
     return out
@@ -214,17 +226,32 @@ class Live(NamedTuple):
     count: int
     names: list[str]
     taken: set[str]  # 名前つきで動いている・起動した直後の名前
+    helpers: int = 0  # 役割 `helper` の動いているラッパーの数（#2436 の I13）
+
+
+def _role_of(w: Wrapper, registry: dict[str, dict]) -> str | None:
+    """役割のファイルの役割。無ければ登録簿の行の役割（`spawn --role` で起動した直後の分）。"""
+    if w.role:
+        return w.role
+    row = registry.get(w.name or "") or {}
+    return row.get("role") if row.get("role") in ROLES else None
 
 
 def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]) -> Live:
     """`relay.lock` が取られている作業ディレクトリと、登録簿の行のうち tmux のセッションが在るのに同じ名前の
-    作業ディレクトリがまだ `relay.lock` を取っていないもの（起動した直後）の和。重複は名前で除く。"""
+    作業ディレクトリがまだ `relay.lock` を取っていないもの（起動した直後）の和。重複は名前で除く。
+
+    数（`count`）からは、オーガナイザーの印を持つ動いているラッパーを 1 本だけ外し、役割 `helper` のラッパーも
+    外して `helpers` に数える（#2436 の I13。`helper` の上限は `Hub.judge` が見る）。"""
     running = [w for w in ws if w.running]
     taken = {w.name for w in running if w.name}
     pending = sorted(n for n, row in registry.items() if n not in taken and row.get("session", n) in sessions)
     names = [w.name or "-" for w in running] + pending
+    roles = [_role_of(w, registry) for w in running] + [registry[n].get("role") for n in pending]
+    helpers = roles.count("helper")
+    organizer = 1 if "organizer" in roles else 0
     # tmux のセッションの名前も重ねない（tmux が `duplicate session` で断る）
-    return Live(len(running) + len(pending), names, taken | set(sessions))
+    return Live(len(running) + len(pending) - helpers - organizer, names, taken | set(sessions), helpers)
 
 
 def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[str]]:
@@ -352,6 +379,7 @@ class Hub:
             if row is None:
                 return self.refuse(kind, name, Refusal(NOT_FOUND, f"その名前は無い: {name}", 3))
             cwd, args = restart_input(name, row, by_name(ws).get(name))
+            role = row.get("role") if row.get("role") == "helper" else None
         elif kind == "spawn":
             cwd = req.get("cwd") if isinstance(req.get("cwd"), str) and os.path.isdir(req["cwd"]) else os.path.expanduser("~")
             args = [a for a in req.get("args") or [] if isinstance(a, str)]
@@ -361,12 +389,14 @@ class Hub:
                 args = prompt_args(" ".join(args[1:] if args[0] == "--" else args))
             if name is None:
                 name = self.auto_name(now.taken)
+            role = req.get("role") if req.get("role") == "helper" else None
         else:
             return self.refuse(kind, name, Refusal("bad-request", f"知らない依頼の種類: {kind}", 2))
-        refusal = self.judge(name, now)
+        refusal = self.judge(name, now, role)
         if refusal:
             return self.refuse(kind, name, refusal)
-        return self.launch(kind, name, cwd, args, str(req.get("by") or ""), registry)
+        plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
+        return self.launch(kind, name, cwd, args, str(req.get("by") or ""), registry, role, plan)
 
     @staticmethod
     def auto_name(taken: set[str]) -> str:
@@ -377,25 +407,37 @@ class Hub:
         return f"t{n}"
 
     @staticmethod
-    def judge(name, now: Live) -> Refusal | None:
-        """名前の形（I7）・重複（I2）・上限（I3）。入口に依らず、ここだけで判定する。"""
+    def judge(name, now: Live, role: str | None = None) -> Refusal | None:
+        """名前の形（I7）・重複（I2）・上限（I3）。入口に依らず、ここだけで判定する。
+
+        役割 `helper` は動いている `helper` が無いときだけ、上限を 1 本超えて通す（#2436 の I13）。"""
         if not name_ok(name):
             return Refusal(BAD_NAME, f"名前の形が違う（{NAME_RE.pattern}）: {name}", 3)
         if name in now.taken:
             return Refusal(NAME_TAKEN, f"名前が重なる: {name} は動いている", 3)
         cap = max_named()
-        if now.count >= cap:
+        if role == "helper":
+            if now.helpers >= 1:
+                return Refusal(LIMIT, "一時レーン（役割 helper）は同時に 1 本まで", 3)
+        elif now.count >= cap:
             return Refusal(LIMIT, f"同時に動かすラッパーの上限 {cap} に達した（動いている: {', '.join(now.names)}）", 3)
         if tmux.binary() is None:
             return Refusal(NO_TMUX, "tmux が PATH に無い", 3)
         return None
 
-    def launch(self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict) -> dict:
+    def launch(
+        self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role: str | None = None, plan: str | None = None
+    ) -> dict:
         argv = [sys.executable, launcher_path(), "run", *args]
-        why = tmux.new_session(name, cwd, argv, {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1"})
+        env = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1"}
+        if role:
+            env.update(NDF_RELAY_ROLE=role, NDF_RELAY_PLAN=plan or "")
+        why = tmux.new_session(name, cwd, argv, env)
         if why:
             return self.refuse(kind, name, Refusal(TMUX_FAILED, why, 1))
         registry[name] = {"session": name, "cwd": cwd, "args": args, "created_at": stamp(), "by": by}
+        if role:
+            registry[name].update(role=role, plan=plan)
         write_json_atomic(hub_path(REGISTRY), {"version": 1, "entries": registry})
         hub_log("started" if kind == "spawn" else "restarted", name, by or None)
         return hub_result(kind, "ok", f"{name} を起動した（relay.py attach {name} で結び付ける）", name, "started", 0)

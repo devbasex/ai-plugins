@@ -1,0 +1,7 @@
+{
+  "name": "answer-json",
+  "pattern": "answer.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": []
+}

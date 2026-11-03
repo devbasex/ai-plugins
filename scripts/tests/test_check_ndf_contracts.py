@@ -787,6 +787,10 @@ def test_form_items_are_checked_and_unknown_keys_stop_with_2(tree: Path):
     assert run(tree)[0] == 2
     wj(f, dict(FORM, cases=[{"text": "t", "blocks": [1], "launch": False}]))
     assert run(tree)[0] == 2
+    wj(f, dict(FORM, cases=[{"message": {"kind": "request"}, "valid": True}]))
+    assert run(tree)[0] == 0
+    wj(f, dict(FORM, cases=[{"message": "m", "valid": True}]))
+    assert run(tree)[0] == 2
 
 
 # --- model.load: 区分ごとの読み込みと形の検査（現状固定） ---

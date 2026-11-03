@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PARALLEL_POLL",
+  "set_by": "user",
+  "summary": "並列の計画の run が inbox と resume を待つ秒（既定 60。テストが縮める。plugins/ndf/scripts/lib/parallel_run.py）"
+}

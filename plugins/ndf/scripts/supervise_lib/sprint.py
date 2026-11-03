@@ -50,6 +50,26 @@ from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
 
 
+def parallel_lane(repo: str) -> tuple[str, str] | None:
+    """動いている並列の計画のレーンなら (計画名, レーン名)。プランを組む時点に 1 度だけ判定する（#2436 の I12）。"""
+    import decl
+    import parallel_lane as pl
+
+    main = decl.main_dir(repo) or Path(repo)
+    got = pl.lane_of(main)
+    return (got[0], got[1].name) if got else None
+
+
+def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
+    """本番のステージのプラン。並列の計画のレーンなら配布の依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+    lane = parallel_lane(repo)
+    if lane:
+        from parallel_release import plan_release_request
+
+        return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs)}
+    return {"release-prod": build()}
+
+
 def prod_version(version: str | None) -> str | None:
     """明示の開発版から本番の明示の版を作る。開発版が無ければ None（本番は開発版のプランの版の記録から読む。#2164）。"""
     return strip_suffix(version) if version else None
@@ -98,7 +118,11 @@ def fast_sprint_plans(a) -> list[dict]:
         return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": first},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod")}, "then_of": first},
+        {
+            "name": "本番",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod")),
+            "then_of": first,
+        },
     ]
     return waves
 
@@ -134,7 +158,11 @@ def auto_sprint_plans(a) -> list[dict]:
     prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（関門 2 の判定のコメントの宛先）
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs)}, "then_of": first},
+        {
+            "name": "本番",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs), prs),
+            "then_of": first,
+        },
     ]
 
 
@@ -187,7 +215,7 @@ def close_waves(a) -> list[dict]:
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
         {
             "name": "本番",
-            "plans": {"release-prod": plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)},
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)),
             "then_of": "最終の検査",
         },
         close,
@@ -284,6 +312,8 @@ def sprint_plans(a) -> list[dict]:
             release["note"] = normal_gate_2(a)
         return waves + [release]
     prod = prod_version(a.version)
+    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
+        return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {})}]
     return waves + [
         release,
         {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
