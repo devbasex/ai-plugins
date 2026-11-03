@@ -628,3 +628,20 @@ def test_process_restart_of_running_name_is_taken(launched, dirs, tmp_path):
     _write_registry({"a": {"session": "a", "cwd": str(tmp_path), "args": [], "created_at": "x", "by": "spawn"}})
     res = hb.Hub(None).process({"kind": "restart", "name": "a"})
     assert res["items"][0]["result"] == hb.NAME_TAKEN and launched == []
+
+
+def test_write_name_keeps_the_spawned_role(tmp_path, monkeypatch):
+    """`spawn --role helper --plan <計画名>` で起動したラッパーは、役割のファイルを作業ディレクトリへ書く（#2436）。"""
+    import parallel_files
+
+    monkeypatch.setenv("NDF_RELAY_NAME", "ph-p1-1")
+    monkeypatch.setenv("NDF_RELAY_ROLE", "helper")
+    monkeypatch.setenv("NDF_RELAY_PLAN", "p1")
+    hc.write_name(str(tmp_path), None)
+    assert hb.read_role(str(tmp_path))["plan"] == "p1"
+    assert parallel_files.helper_plan_of(str(tmp_path)) == "p1"
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.delenv("NDF_RELAY_ROLE")
+    hc.write_name(str(other), None)
+    assert hb.read_role(str(other)) is None

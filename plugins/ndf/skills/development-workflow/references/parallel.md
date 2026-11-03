@@ -39,7 +39,7 @@
 2. 依頼 1 件を問い 1 つにし、5 件以上の区分は届いた順に 4 件ずつ続けて呼ぶ。各問いにはレーン名・課題・設計 PR の URL か作業の場所を添える
 3. `ndf-ask:human-action` の依頼は `attach`（`relay.py attach <レーン>`）の 1 行を添えて「済んだ」「まだ」で問う。
    `merged` があれば、同じ原因でまとめた各レーンの元の文面を並べる（答えは全レーンへ届く）
-4. 耐久ワークフローが自分で立てる問い（`kind` が `stall`・`helper`・`spawn`）は `options` で問い、選んだ答えの `commands` の 1 行があれば打つ
+4. 耐久ワークフローが自分で立てる問い（`kind` が `stall`・`helper`・`spawn`）は `options` で問う。選んだ答えの `commands` の 1 行は、答えを送った `answer` が `metrics.next` に返す
 5. 答えを送り、`wait` を打ち直す。答えの間に新しい依頼が届いていれば `questions` が続けて返る
 
 | 依頼の `kind` | 問いの答え | 送るコマンド |
@@ -49,7 +49,8 @@
 | `ask`・`stall`・`helper`・`spawn` | 依頼の選択肢 | `parallel.py answer p1 <id> --choice <選んだ答え>` |
 
 `answer` は答えのイベントを立てるだけで、ラベル・記録・直しは持ち主のレーンが周回の境で行う。持ち主のレーンが止まっていれば
-`metrics.next` に `relay.py restart <レーン>` の 1 行が返るので、それを打つ。
+`metrics.next` に `relay.py restart <レーン>` の 1 行が返るので、それを打つ（耐久ワークフローが自分で立てた問いでは、選んだ答えの
+`commands` の 1 行が返る）。
 
 承認ゲート 2 は、提示 1 なら「承認」「差し戻す」で問い、`parallel.py confirm p1 <連番>` か
 `parallel.py settle p1 <連番> --rejected` を打つ。出し直しの提示（`represent: true`）なら加わった範囲を添えて

@@ -124,7 +124,9 @@
 | `NDF_RELAY_DIR` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py` |
 | `NDF_RELAY_MAX_NAMED` | user | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_RELAY_NAME` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
+| `NDF_RELAY_PLAN` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_REEXEC` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
+| `NDF_RELAY_ROLE` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_SPAWNED` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_TMUX` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_UV` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |

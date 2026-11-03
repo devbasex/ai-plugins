@@ -516,6 +516,52 @@ def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
     assert item["options"] == ["続きから起こし直す", "止める"] and "p1-rel1" in item["question"]
 
 
+def test_stop_answer_to_a_stopped_helper_fails_the_release(env, tmp_path):
+    """一時レーンの問いへ「止める」と答えると、配布を失敗として締め、依頼へ failed を答える。"""
+    main, states = env["main"], env["states"]
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper"}}))
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "helper"])[0]
+    pl.send_answer(main, "p1", item["id"], "answered", choice=["止める"])
+    ans = until(lambda: pl.read_answer(main, "p1", rid)[0])
+    assert ans["result"] == "failed"
+
+
+def test_stop_answer_to_spawn_refusals_gives_up_the_lane(env, monkeypatch):
+    """起動できないレーンの問いへ「止める」と答えると、起こし直しをやめて止まったものと数える。"""
+    monkeypatch.setenv("FAKE_REFUSE", "la")
+    main, log = env["main"], env["log"]
+    start(main)
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "spawn"])[0]
+    pl.send_answer(main, "p1", item["id"], "answered", choice=["止める"])
+    until(lambda: not questions(main)["items"])
+    time.sleep(1.0)
+    before = len([c for c in calls(log, "spawn") if c[2] == "la"])
+    time.sleep(1.0)
+    assert len([c for c in calls(log, "spawn") if c[2] == "la"]) == before
+
+
+def test_the_plan_waits_until_the_owner_applies_a_design_answer(env, monkeypatch, tmp_path):
+    """全レーンが止まった後に設計の承認へ答えても、持ち主が答えを当てるまで計画を終えず、起こす 1 行を添える（6f）。"""
+    main, states = env["main"], env["states"]
+    applied = {"v": False}
+    monkeypatch.setattr(prun, "design_held", lambda m, n, answered: ["la"] if answered and not applied["v"] else [])
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "d1")
+    until(lambda: questions(main)["items"])
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    until(lambda: "lb" in spawned(env["log"]))
+    pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)
+    assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    applied["v"] = True
+    assert durable.output_of(pl.workflow_id("p1"))["status"] == "finished"
+
+
 def test_stop_force_does_not_wait_for_settle_and_stops_the_helper(env, tmp_path):
     main, log = env["main"], env["log"]
     start(main)
@@ -596,3 +642,16 @@ def test_irreversible_questions_with_different_numbers_are_not_merged(env, tmp_p
     pl.request_ask(main, "p1", "la", q(12), str(tmp_path), "y1")
     pl.request_ask(main, "p1", "lb", q(34), str(tmp_path), "y2")
     until(lambda: len(questions(main)["items"]) == 2)
+
+
+def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_path):
+    """耐久ワークフローが立てた問いの答えの後の 1 行は、選んだ答えの commands で、持ち主を起こす restart ではない。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("parallel_cli", Path(prun.__file__).resolve().parents[1] / "parallel.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    item = {"id": "h1", "kind": "helper", "lane": "p1-rel1", "commands": {"続きから起こし直す": "SPAWN"}}
+    monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": [item]})
+    assert cli._owner_restart(tmp_path, "p1", "h1", ["続きから起こし直す"]) == "SPAWN"
+    assert cli._owner_restart(tmp_path, "p1", "h1", ["止める"]) is None

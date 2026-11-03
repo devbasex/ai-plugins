@@ -194,6 +194,8 @@ def test_range_maps_unrequested_lane_and_orphans():
 def test_answerable_and_moved():
     pending = [{"id": "a", "prs": [1]}, {"id": "b", "prs": [5]}]
     assert prl.answerable(pending, [1, 2]) == ["a"]
+    # 一部だけが範囲に入る依頼は答えない（残りを出さずに配布済みと答えない）
+    assert prl.answerable([{"id": "c", "prs": [1, 3]}, {"id": "d", "prs": []}], [1, 2]) == []
     assert prl.moved("abc", "abc") is False and prl.moved("abc", "def") is True
 
 

@@ -178,6 +178,33 @@ def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
     return out
 
 
+@durable.step(name="parallel.design-held")
+def step_design_held(main: str, name: str, answered: list[str]) -> list[str]:
+    return design_held(Path(main), name, answered)
+
+
+def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
+    """設計の承認の依頼に答えたのに、持ち主のループのレーンが答えをまだ当てていないレーンの名前（#2436 の 6f）。
+
+    答え（`answer-<依頼>`）は持ち主が周回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後の配布の
+    依頼を送れないため、当てるまで計画を終えない。"""
+    try:
+        plan = pp.ParallelPlan.model_validate(pp.load_plan(main, name), context={"max_plans": 10**6, "max_named": 10**6})
+    except (OSError, ValueError):
+        return []
+    out = []
+    for ln in plan.lanes:
+        if ln.input.kind != "loop":
+            continue
+        try:
+            rec = json.loads((Path(main) / ".ndf" / "loop" / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or []):
+            out.append(ln.name)
+    return out
+
+
 @durable.step(name="parallel.build")
 def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None) -> dict:
     """まとめた配布の提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
@@ -328,6 +355,20 @@ class _Run:
             durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "at")})
         self.questions = [q for q in self.questions if q.get("id") != rid]
         self.publish_questions()
+        self.apply_own(q, list(msg.get("choice") or []))
+
+    def apply_own(self, q: dict, choice: list[str]) -> None:
+        """耐久ワークフローが自分で立てた問いへの答えを当てる。「止める」は、起動できないレーンなら起こし直しをやめて
+        止まったものと数え、配布の途中で止まった一時レーンなら配布を失敗として締める（依頼へ failed を答える）。"""
+        if "止める" not in choice:
+            return
+        if q.get("kind") == "spawn" and q.get("lane") in self.lanes:
+            self.lanes[q["lane"]].update(started=True, state="stopped", given_up=True)
+        elif q.get("kind") == "helper" and (rel := self.current) is not None and q.get("n") == rel["n"]:
+            if not rel.get("prs"):  # 提示の前に止まったなら、この配布へ入れた依頼の Pull Request を範囲として締める
+                own = {n for r in self.pending if r["id"] in rel.get("requests", []) for n in r.get("prs") or []}
+                rel["prs"] = step_presented(rel["dirs"][-1]).get("prs") or sorted(own)
+            self.settle(rel, {"result": "failed", "reason": "配布の途中で止まった一時レーンを、人が止めると答えた"})
 
     def ask(self, kind: str, rid: str, lane: str, question: str, options: list[str], **extra) -> None:
         """耐久ワークフローが自分で立てる問い（動かないレーン・一時レーンの停止・起動の断り）。同じ id は 1 回だけ。"""
@@ -516,17 +557,8 @@ def parallel_workflow(main: str, name: str) -> dict:
             run.answer_from_ranges()
             if run.pending:
                 run.open_release()
-        if not run.stop and _run_finished(run):
-            held = step_held_loops(main, name, sorted(run.answered))
-            if not held:
-                step_finish(main, name, run.progress())
-                return run.summary("finished")
-            # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
-            todo = [x for x in held if x not in run.held_spawned]
-            if todo and not set(run.held_spawned) & set(held):
-                run.held_spawned.append(todo[0])
-                seq = len(run.releases) + len(run.held_spawned)
-                run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
+        if not run.stop and _run_finished(run) and (out := _finish_or_hold(run, main, name)) is not None:
+            return out
         run.take(durable.recv("inbox", wait if run.current is None else min(wait, 30)))
         if run.current is not None:
             msg = durable.recv("resume", min(wait, 30))
@@ -534,6 +566,27 @@ def parallel_workflow(main: str, name: str) -> dict:
                 run.resume(msg)
         if not run.stop:
             _observe_run(run, main)
+
+
+def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
+    """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留の周回があれば None。"""
+    designs = step_design_held(main, name, sorted(run.answered))
+    if designs:  # 持ち主が設計の承認の答えを当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
+        if set(designs) - set(run.wake):
+            run.wake = sorted({*run.wake, *designs})
+            run.pause("notice", lanes=[], attach=[])
+        return None
+    held = step_held_loops(main, name, sorted(run.answered))
+    if not held:
+        step_finish(main, name, run.progress())
+        return run.summary("finished")
+    # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
+    todo = [x for x in held if x not in run.held_spawned]
+    if todo and not set(run.held_spawned) & set(held):
+        run.held_spawned.append(todo[0])
+        seq = len(run.releases) + len(run.held_spawned)
+        run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
+    return None
 
 
 def _started(run: _Run) -> list[str]:
@@ -556,10 +609,10 @@ def _spawn_ready(run: _Run, main: str) -> None:
             run.lanes[n].update(got)
             if got.get("refused"):
                 run.refusals[n] = run.refusals.get(n, 0) + 1
-                if run.refusals[n] == SPAWN_REFUSALS:  # 3 回続けて断られたら理由を添えて問う（異常系 17）
+                if run.refusals[n] % SPAWN_REFUSALS == 0:  # 3 回続けて断られるたびに理由を添えて問う（異常系 17）
                     run.ask(
                         "spawn",
-                        f"{run.name}-spawn-{n}",
+                        f"{run.name}-spawn-{n}-{run.refusals[n]}",
                         n,
                         f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）",
                         ["起こし直す", "止める"],
@@ -620,7 +673,7 @@ def _ask_helper(run: _Run, rows: dict) -> None:
     run.helper_asked = run.launch["seq"]
     run.ask(
         "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} が配布 {rel['n']} の途中で止まった（settle も承認ゲート 2 の依頼も無い）",
-        ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")},
+        ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")}, n=rel["n"],
     )  # fmt: skip
 
 

@@ -180,3 +180,23 @@ def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
     a = argparse.Namespace(worktree=str(tmp_path), design=[], issue=[1], version=None, pace="normal")
     waves = sprint.sprint_plans(a)
     assert waves[-1]["name"] == "本番" and waves[-1]["then_of"] == waves[0]["name"]  # 先頭の command へ --then でつなぐ
+
+
+def test_merged_on_production_checks_the_production_branch(tmp_path, monkeypatch):
+    """配布済みの照合は origin/main 固定でなく、本番チャネル（repo.production_branch）の先を見る。"""
+    import subprocess
+
+    import repo
+
+    monkeypatch.setattr(repo, "production_branch", lambda _root, decl=None: ("live", "宣言"))
+    seen = []
+
+    def run(cmd, **_kw):
+        seen.append(cmd)
+        out = "abc\n" if cmd[:2] == ["gh", "pr"] else ""
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    assert pl.merged_on_production(tmp_path, [7], run=run) is True
+    assert seen[-1][-1] == "origin/live"
+    monkeypatch.setattr(repo, "production_branch", lambda _root, decl=None: (None, "無い"))
+    assert pl.merged_on_production(tmp_path, [7], run=run) is False

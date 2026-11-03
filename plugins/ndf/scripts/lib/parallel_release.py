@@ -52,9 +52,11 @@ def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]
 
 
 def answerable(pending: Iterable[dict], prs: Iterable[int]) -> list[str]:
-    """範囲 `prs` に Pull Request が入る依頼の ID（その配布の答えを受ける。I9・I15）。"""
+    """依頼の Pull Request がすべて範囲 `prs` に入る依頼の ID（その配布の答えを受ける。I9・I15）。
+
+    一部だけが入る依頼は答えず、次の配布へ回す（残りを本番へ出さずに配布済みと答えない）。"""
     got = set(prs)
-    return [r["id"] for r in pending if set(r.get("prs") or []) & got]
+    return [r["id"] for r in pending if (want := set(r.get("prs") or [])) and want <= got]
 
 
 def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:

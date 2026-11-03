@@ -303,10 +303,10 @@ def cmd_request(a) -> None:
     main = main_of()
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
-    if a.prs and pl.merged_on_main(main, a.prs):
+    if a.prs and pl.merged_on_production(main, a.prs):
         version = pl.released_version(main, a.name, a.prs)
         pl.write_request(Path(a.state), {"result": "released", "version": version, "prs": a.prs})
-        reply("ok", "自分の Pull Request はすでに main にある。依頼を送らずに続きへ進む", result="released", version=version)
+        reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     reply("gate", f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む", code=10, id=rid, result="requested")
@@ -364,15 +364,15 @@ def cmd_request_gate2(a) -> None:
     reply("ok", f"承認ゲート 2 の依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
 
 
-def _owner_restart(main: Path, name: str, rid: str) -> str | None:
-    """答えた依頼の持ち主のレーンが止まっていれば、起こす 1 行（`relay.py restart <レーン>`）。動いていれば None。"""
+def _owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None) -> str | None:
+    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn）は選んだ答えの commands、ほかは止まった持ち主の restart。"""
     import durable
     import parallel_run as pr_run
 
     items = (durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0) or {}).get("items") or []
-    lane = next((q.get("lane") for q in items if q.get("id") == rid), None)
-    if not lane:
-        return None
+    q = next((q for q in items if q.get("id") == rid), {})
+    if q.get("kind") in ("stall", "helper", "spawn") or not (lane := q.get("lane")):
+        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
     code, got = pr_run.relay(main, "ls", "--json")
     state = next((i.get("state") for i in got.get("items") or [] if i.get("name") == lane), None) if code == 0 else None
     return None if state in ("running", "awaiting_approval") else f"python3 {pr_run.RELAY} restart {lane}"
@@ -391,7 +391,7 @@ def cmd_answer(a) -> None:
         except OSError as exc:
             reply("stopped", f"指摘ファイルを読めない: {exc}", code=2)
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
-    nxt = _owner_restart(main, a.name, a.id)
+    nxt = _owner_restart(main, a.name, a.id, a.choice)
     pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice)
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った", id=a.id, result=result, next=nxt)
 

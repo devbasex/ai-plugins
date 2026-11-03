@@ -70,16 +70,23 @@ def lane_plans(main: Path, lane: Optional[str] = None) -> Optional[int]:
     return got[1].plans if got else None
 
 
-def merged_on_main(root: Path, prs: list[int], run=subprocess.run) -> bool:
-    """`prs` のマージのコミットがすべて `origin/main` にあるか（I15）。1 本でも分からなければ False。"""
+def merged_on_production(root: Path, prs: list[int], run=subprocess.run) -> bool:
+    """`prs` のマージのコミットがすべて本番チャネル（`repo.production_branch`）の `origin/<本番>` にあるか（I15）。
+
+    本番チャネルが決まらないか、1 本でも分からなければ False。"""
+    import repo
+
     if not prs:
+        return False
+    prod = repo.production_branch(root)[0]
+    if not prod:
         return False
     for n in prs:
         got = run(["gh", "pr", "view", str(n), "--json", "mergeCommit", "-q", ".mergeCommit.oid"], cwd=root, capture_output=True, text=True)
         sha = (got.stdout or "").strip()
         if got.returncode != 0 or not sha:
             return False
-        anc = run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], cwd=root, capture_output=True, text=True)
+        anc = run(["git", "merge-base", "--is-ancestor", sha, f"origin/{prod}"], cwd=root, capture_output=True, text=True)
         if anc.returncode != 0:
             return False
     return True

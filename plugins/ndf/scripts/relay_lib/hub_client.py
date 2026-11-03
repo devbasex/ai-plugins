@@ -116,10 +116,16 @@ def release_hub(hub: hb.Hub | None) -> None:
 
 
 def write_name(relay_dir: str, hub: hb.Hub | None) -> None:
-    """名前つきのラッパーと統括役（`t1`）の作業ディレクトリへ名前を書く。"""
+    """名前つきのラッパーと統括役（`t1`）の作業ディレクトリへ名前を書く。
+
+    `spawn --role <役割> --plan <計画名>` で起動したラッパー（`NDF_RELAY_ROLE`・`NDF_RELAY_PLAN`）は、役割のファイルも
+    書く（問いの転送と `helper` の数えが読む。#2436）。"""
     name = os.environ.get("NDF_RELAY_NAME") or ("t1" if hub is not None else None)
     if name:
         _write_file(os.path.join(relay_dir, NAME_FILE), (name + "\n").encode(), 0o600)
+    role, plan = os.environ.get("NDF_RELAY_ROLE"), os.environ.get("NDF_RELAY_PLAN")
+    if role in hb.ROLES and plan:
+        write_json_atomic(os.path.join(relay_dir, hb.ROLE_FILE), {"role": role, "plan": plan, "at": stamp()})
 
 
 @contextlib.contextmanager
