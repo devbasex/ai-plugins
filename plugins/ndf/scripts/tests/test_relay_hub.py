@@ -37,6 +37,7 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("NDF_RELAY_TMUX", "ndf-no-tmux")
     monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "accounts"))  # 利用者の置き場（`account use` の指定）を読まない
     root = tmp_path / "state" / "ndf" / "relay"
     root.mkdir(parents=True)
     return root
@@ -262,7 +263,15 @@ def test_ls_json_lists_state_from_files(dirs, capsys):
             "role",
         }
         assert it["cost_usd"] is None and "最初" not in json.dumps(it, ensure_ascii=False)
-    assert res["metrics"] == {"running": 2, "awaiting_approval": 1, "stopped": 0, "limit": 3, "hub": False, "tmux": False}
+    assert res["metrics"] == {
+        "running": 2,
+        "awaiting_approval": 1,
+        "stopped": 0,
+        "limit": 3,
+        "hub": False,
+        "tmux": False,
+        "pinned_account": None,
+    }
     assert hc.cmd_ls([]) == 0
     table = capsys.readouterr().out.splitlines()
     assert table[0].split()[0] == "名前" and len(table) == 4

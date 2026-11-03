@@ -1,6 +1,6 @@
 r"""NDF のラッパー: カットポイントで claude を起動し直す（#895）。中身は #1142 の C6 でこのパッケージへ分けた。
 
-副命令:
+副命令（`relay.py --help` が端末向けに記号を外してこの表を出す。表を持つのはここだけ）:
 
 | 副命令 | 役割 |
 | --- | --- |
@@ -12,7 +12,7 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 | `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
-| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453・#1468。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
+| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` / `account use <名前>\|--clear` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す・次の区間から使うアカウントを指定する（#1389・#1453・#1468・#2460。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
@@ -40,24 +40,28 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 
 from __future__ import annotations
 
+import re
 import sys
 
 from . import runtime
 from .common import launcher_path
 
+HELP = ("--help", "-h")
+
 
 def main(argv: list[str]) -> int:
+    # 一覧は環境を選ぶ前に出す（標準ライブラリだけで足り、素の python3 でも出る）。`run` の引数は claude のもの
+    if not argv:
+        return _help([], sys.stderr) or 2
+    if argv[0] in HELP or argv[0] == "help":
+        return _help(argv[1:2] if argv[0] == "help" else [])
+    if argv[0] != "run" and any(a in HELP for a in _before_separator(argv[1:])):
+        return _help(argv[:1])
     code = runtime.enter(argv, launcher_path())
     if code is not None:
         return code
     from . import accounts, hub_client, install, mark, proc, run  # 外部パッケージの包みを import する
 
-    if not argv:
-        print(
-            "usage: relay.py run|stop|spawn|ls|role|attach|restart|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove",
-            file=sys.stderr,
-        )
-        return 2
     sub, rest = argv[0], argv[1:]
     if sub in ("mark", "limit"):
         try:
@@ -85,8 +89,43 @@ def main(argv: list[str]) -> int:
     }
     if sub in commands:
         return commands[sub]()
-    print(f"relay.py: 未知の副命令 {sub}", file=sys.stderr)
+    return _unknown(sub)
+
+
+def _unknown(sub: str) -> int:
+    print(f"relay.py: 未知の副命令 {sub}（一覧は relay.py --help）", file=sys.stderr)
     return 2
+
+
+def _before_separator(args: list[str]) -> list[str]:
+    """`--` より前の引数（`spawn ... -- <最初の入力>` の入力の中の `--help` は副命令の help ではない）。"""
+    return args[: args.index("--")] if "--" in args else args
+
+
+def _help_rows() -> list[tuple[list[str], str]]:
+    """docstring の副命令の表を、行ごとに（Markdown の記号を外した書式の並び, 役割）にする。"""
+    rows = []
+    for line in (__doc__ or "").splitlines():
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        rows.append((re.findall(r"`([^`]*)`", cells[0]), cells[1].replace("`", "")))
+    return rows
+
+
+def _help(subs: list[str], out=sys.stdout) -> int:
+    """副命令の一覧（`subs` が空のとき）か、その副命令の書式と役割を出す。未知の副命令なら 2。"""
+    lines = []
+    for forms, role in _help_rows():
+        hit = [f for f in forms if not subs or f.split()[0] == subs[0]]
+        if hit:
+            lines += [f"  {f}" for f in hit] + [f"      {role}"]
+    if subs and not lines:
+        return _unknown(subs[0])
+    if not subs:
+        lines = ["usage: relay.py <副命令> [引数 ...]", ""] + lines + ["", "relay.py <副命令> --help でその副命令だけを出す"]
+    print("\n".join(lines), file=out)
+    return 0
 
 
 def _stop_cmd(rest: list[str]) -> int:

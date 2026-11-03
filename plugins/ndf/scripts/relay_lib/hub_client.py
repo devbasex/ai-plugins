@@ -17,7 +17,7 @@ import sys
 import time
 
 from . import hub as hb
-from . import tmux
+from . import pin, tmux
 from .common import NAME_FILE, PID_FILE, STOP_FILE, _write_file, env_num, read_text, relay_running, remove, stamp, write_json_atomic
 
 import md  # noqa: E402,I001  common が lib/ を sys.path に置く
@@ -326,6 +326,7 @@ def cmd_ls(argv: list[str]) -> int:
         "limit": hb.max_named(),
         "hub": hb.hub_running(),
         "tmux": tmux.binary() is not None,
+        "pinned_account": pin.pinned(),  # `account use` の指定（次の区間の起動から効く。#2460）
     }
     if "--json" in argv:
         summary = f"ラッパー {len(items)} 本（動いている {metrics['running']}・承認待ち {metrics['awaiting_approval']}・止まった {metrics['stopped']}）"
@@ -336,6 +337,8 @@ def cmd_ls(argv: list[str]) -> int:
     widths = [max(len(r[i]) for r in rows) for i in range(len(COLUMNS))]
     for r in rows:
         print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
+    if metrics["pinned_account"]:
+        print(f"次の区間から使うアカウントの指定: {metrics['pinned_account']}（account use --clear で外す）")
     return 0
 
 

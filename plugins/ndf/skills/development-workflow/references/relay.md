@@ -88,6 +88,8 @@
 | `touch <作業ディレクトリ>/stop` | 同じ（1 つのラッパーだけ） |
 | セッションの中で `/exit` か Ctrl-C を 2 回 | ラッパーも次のセッションを起動せずに終わる |
 
+副命令の一覧は `relay.py --help` が、1 つの副命令の書式と役割は `relay.py <副命令> --help` が出す（副命令は動かさない。`run --help` は claude の help）。
+
 作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。セッションの中では環境変数 `NDF_RELAY_DIR` が指す。
 
@@ -226,6 +228,10 @@ python3 ~/.claude/ndf/relay.py account capacity work2 - 900   # 週の枠の大�
 python3 ~/.claude/ndf/relay.py account remove work2
 ```
 
+**`account use <名前>` で、動いているラッパーでも次の区間の起動（`ndf-next` の再起動・起動の直後）から使うアカウントを指定できる**（`python3 ~/.claude/ndf/relay.py account use work1`）。
+指定は置き場の `pinned.json` に書き、区間の起動のたびに読む。指定が使えれば閾値や残りの量に依らずそれで起動し（`account` の行の`reason` は `pinned`）、使えない（上限・認証の失敗・再登録が要る）間は今の選び方で替えて続け、使えるようになった後の区間の起動で
+戻る。`--clear` で外すと今の選び方へ戻る。登録に無い名前と `再登録が要る` 名前は終了コード 1（`reason` は `not_registered`・`needs_relogin`）で断る。同じ置き場を使うラッパーすべてに効く。`account list` は名前に `（指定）`（`--json` は `pinned`）、`relay.py ls` は表の下の 1 行と `metrics.pinned_account` で示す。動いているラッパーは「ラッパーの入れ替え」で新しい版へ替わった後の区間から読む。
+
 **`account` の副命令はすべて `--yes`（確認を飛ばす）と `--json`（結果を JSON 1 つで標準出力へ返す）を受ける。**
 対話で聞く値（名前・プロファイル・地域・モデル・確認）はすべて引数でも渡せ、揃っていれば何も聞かない。標準入力が
 端末でなければ入力を待たず、足りない引数の名前（`--json` なら `missing` と `candidates`）を示して終了コード 2 で終わる。
@@ -331,7 +337,7 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 
 | いつ | ラッパー | `supervise.py`（プランの claude -p） |
 | --- | --- | --- |
-| 起動 | 区間ごとに、上限に達していないアカウントのうち残りの量の最も大きいものを選ぶ。今のアカウントが閾値未満なら替えず、閾値を超えていても候補の残りの量が今以下なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
+| 起動 | `account use` の指定が使えればそれを使う。無ければ区間ごとに、上限に達していないアカウントのうち残りの量の最も大きいものを選ぶ。今のアカウントが閾値未満なら替えず、閾値を超えていても候補の残りの量が今以下なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
 | 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ切り替えの理由に合う定型の文（例: `利用上限でアカウントを替えた。中断したところから続ける`）。**バックグラウンドの作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
 | 認証が通らなかった（401） | 子の応答が認証の失敗で終わると、登録済みアカウントならそのアカウントを 1 時間候補から外し、上限のときと同じ順（使える登録済みアカウント → 従量の接続の宣言）で次の区間を起動する（最初の入力は `認証が通らなかったためアカウントを替えた。中断したところから続ける`）。既定のログインでも同じく替え、登録が 1 つ以下でも替えた先を以後の区間で使い続ける。従量の接続の 401 では替えない。替え先が無ければ、ログインの形に合う直し方を 1 行出して子を残す（既定のログイン: claude の中で `/login`。登録済みアカウント: `relay.py account add <名前>`。従量の接続: `relay.py account check metered` で宣言を確かめる）。1 つの区間につき 1 度だけ | 結果が認証の失敗なら、そのアカウントを外して同じ呼び出しをやり直す |
 | 使用率が閾値を超えた | 定期の確認（推論なし）が 1 行を出し、**次のカットポイントで**替える | — |
@@ -471,7 +477,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 | `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続）・`relay_version_dir`（動いているラッパーのバージョンディレクトリ。プラグインのキャッシュから起動したら null。キーが無ければ入れ替えの仕組みを持たない版） |
 | `reexec` | ラッパーが更新後の版へ入れ替わった（入れ替えた後の版が、次の `start` の前に書く） | `section`（終わったセッション）・`from`・`to`（バージョンディレクトリの名前）・`prepare_seconds`（用意に掛かった秒）・`seconds`（申し送りを書いてから入れ替わるまで） |
 | `reexec_skipped` | 版が違ったが入れ替えなかった | `section`・`reason`（`startup-failed` / `not-placed` / `unreadable` / `no-env` / `no-handover` / `handover-write` / `exec-failed`）・`from`・`to`（分かれば）・`detail`・`seconds` |
-| `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
+| `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` / `pinned` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
 | `metered_invalid` | 区間 1 の起動で、保存した従量の接続の宣言が壊れていた（宣言なしとして扱う） | `section`・`detail`（理由の 1 行） |
 | `end` | セッションが終わった | `seconds`（起動からシグナルファイルを書くまで。シグナルファイルなしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
 | `prose_wait` | 本文で承認を待って終えた応答の Stop を止めた（「承認ゲートを越えない守り」） | `section`・`kind`（`承認待ち` / `回答待ち`）。本文と抜粋は書かない |
