@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 
 import clock
@@ -13,6 +14,7 @@ import gate_rejections as gr
 import jsonio
 
 from sprint_loop_record import (
+    GATE_1,
     GATE_2,
     SPRINT_STATE,
     SUPERVISE,
@@ -31,6 +33,7 @@ from sprint_loop_gate import (
     finish_lap,
     gate2_resume_step,
     loop_ok,
+    mark_issue,
     plan_info,
     queue_command,
     stages_after,
@@ -187,11 +190,62 @@ def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
     lap["failure"] = {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "配布", "step": "配布の失敗"}
 
 
-def pending_step(env: Env, rec: dict, before: dict, apply_gate1=None) -> dict | None:
+def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note: str | None = None) -> list[str]:
+    """人の判断待ちの行へ答えを書き、スプリント状態の承認の記録と課題の本文の節を更新する。書けなかった理由を返す。
+    直して出し直す（revise）は答えの確定でないため承認の記録を書かず、指摘と回数を行と本文に書く（#2436 の 6e）。"""
+    w.update(answer=answer, answered_at=env.now())
+    if pr:
+        w["pr"] = pr
+    notes: list[str] = []
+    if answer == "revise":
+        w["note"] = note or ""
+        w["revise_count"] = sum(1 for x in rec.get("waiting", []) if x["number"] == w["number"] and x.get("answer") == "revise")
+        if err := mark_issue(env, rec, w):
+            notes.append(err)
+        return notes
+    lap = rec["laps"][w["lap"] - 1]
+    state = lap.get("state_path")
+    if state:
+        cmd = [
+            sys.executable,
+            str(SPRINT_STATE),
+            "gate",
+            state,
+            GATE_1,
+            "--by",
+            "user",
+            "--what",
+            f"開発ループ {rec['name']} の #{w['number']} の設計",
+        ]
+        cmd += ["--outcome", w["answer"], "--root", str(env.main_dir())] + (["--pr", str(w["pr"])] if w.get("pr") else [])
+        code, so, se = env.run(cmd, cwd=str(env.main_dir()))
+        if code != 0:
+            notes.append(f"承認の記録を書けない（{code}）: {(se or so).strip()[:200]}")
+    if err := mark_issue(env, rec, w):
+        notes.append(err)
+    return notes
+
+
+def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
+    """オーガナイザーへ送った設計の承認の答えを、持ち主のレーンが周回の境で処理する（#2436 の 6e・6f）。
+    承認ならラベル design-approved を付けて承認を書き、直して出し直すなら指摘を、やらないなら差し戻しを書く。"""
+    for w in [w for w in rec.get("waiting", []) if w.get("request") and not w.get("answer")]:
+        a = (answers.get(w["request"]) or {}).get("answer")
+        if not isinstance(a, dict):
+            continue
+        result = a.get("result")
+        if result == "approved" and w.get("pr"):
+            code, so, se = env.run(["gh", "pr", "edit", str(w["pr"]), "--add-label", "design-approved"], cwd=str(env.main_dir()))
+            if code != 0:
+                w["label_error"] = (se or so).strip()[:200]
+        if result in ("approved", "rejected", "revise"):
+            apply_answer(env, rec, w, result, w.get("pr"), a.get("note"))
+
+
+def pending_step(env: Env, rec: dict, before: dict) -> dict | None:
     """周回の境で、答えの届いた依頼を古い順に扱う（境の 2〜6）。まとめを流す周回があればその結果を返し、無ければ None。"""
     answers = read_answers(env, rec)
-    if apply_gate1 is not None:
-        apply_gate1(env, rec, answers)
+    apply_gate1_answers(env, rec, answers)
     for lap in pending_laps(rec):
         a = answer_of(answers, (lap.get("release") or {}).get("request")) if lap["outcome"] == RELEASE_PENDING else None
         if a and a.get("result") != "released":

@@ -194,9 +194,7 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     stop = boundary_stop(env, rec)
     if stop and stop["condition"] in IMMEDIATE_STOPS:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
-    import sprint_loop
-
-    got = pending_step(env, rec, before, sprint_loop.apply_gate1_answers)
+    got = pending_step(env, rec, before)
     if got is not None:
         return got
     if len(pending_laps(rec)) >= rec.get("release_pending_max", RELEASE_PENDING_MAX):
