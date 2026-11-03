@@ -284,3 +284,34 @@ def test_char_request_outside_range_is_deferred_to_next_release(env, tmp_path):
     out = stop(main)
     assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "released"), (2, "presented")]
     assert out["releases"][1]["requests"] == [r2] and out["pending"] == [r2]
+
+
+def test_stop_during_release_waits_for_settle(env, tmp_path):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    wid = pl.workflow_id("p1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
+    time.sleep(0.8)
+    assert durable.status(wid) not in ("SUCCESS",)  # 配布の途中の stop は settle まで終わらない
+    resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
+    out = durable.output_of(wid)
+    assert out["status"] == "stopped" and out["releases"][0]["state"] == "released"
+    assert pl.read_answer(main, "p1", rid)[0]["result"] == "released"
+
+
+def test_notice_during_release_carries_launch(env, tmp_path):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    rel = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e)
+    states.write_text(json.dumps({"la": "awaiting_approval"}))
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
+    assert ev["release"]["seq"] == rel["seq"] and ev["release"]["spawn"] == rel["spawn"]
+    assert ev["release"]["pipeline"] == rel["pipeline"]

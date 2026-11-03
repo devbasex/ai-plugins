@@ -21,7 +21,7 @@
 
 | `wait` が返したもの | すること |
 | --- | --- |
-| `notice` | 承認待ちのレーンの `metrics.attach` の 1 行を出す |
+| `notice` | 承認待ちのレーンの `metrics.attach` の 1 行を出す。`metrics.release` があり、その `seq` の起動をまだ打っていなければ、`metrics.release.spawn` の 1 行も打つ（知らせが重なって `release` / `confirmed` を読み逃しても起動を失わない） |
 | `questions` | 届いている依頼（設計の承認・承認ゲート 2・承認ゲートの外の問い）を区分ごとにまとめて 1 回で問う |
 | `release` / `confirmed` | `metrics.spawn` の 1 行（一時レーンの起動）を打つ。一時レーンが `metrics.pipeline` を流し、結果を返す |
 | `finished` / `stopped` | レーンごとの結果（配布した版・止まった理由）を要約し、`[ndf-parallel] finished p1` の行を出して終える |

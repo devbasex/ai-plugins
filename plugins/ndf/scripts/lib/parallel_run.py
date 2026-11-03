@@ -5,7 +5,8 @@
 
 - メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | stop, ...}`（レーン・一時レーン・`stop`）
 - メッセージ `resume`: `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}`（`confirm`・`settle`）
-- イベント `pause`: `{seq, action}`（`running` / `notice` / `release` / `confirmed`）、`questions`: `{seq, items}`
+- イベント `pause`: `{seq, action}`（`running` / `notice` / `release` / `confirmed`。配布の途中の `notice` は
+  最後の起動の指示を `release` に添える）、`questions`: `{seq, items}`
 - イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次の配布へ回した知らせ）・`range-<連番>`・`lane-<名>`
 
 統括役の CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
@@ -201,6 +202,7 @@ class _Run:
         self.current: Optional[dict] = None
         self.stop = False
         self.seq = 0
+        self.launch: Optional[dict] = None
         self.received: dict[str, int] = {}
 
     def bump(self) -> int:
@@ -208,7 +210,14 @@ class _Run:
         return self.seq
 
     def pause(self, action: str, **fields) -> None:
-        durable.set_event("pause", {"seq": self.bump(), "action": action, **fields})
+        """イベント `pause` は上書きされるため、流れている配布の最後の起動の指示（release / confirmed）を
+        他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。"""
+        seq = self.bump()
+        if action in ("release", "confirmed"):
+            self.launch = {"seq": seq, "action": action, **fields}
+        elif self.current is not None and self.launch:
+            fields = {**fields, "release": self.launch}
+        durable.set_event("pause", {"seq": seq, "action": action, **fields})
 
     def progress(self) -> dict:
         return {"lanes": self.lanes, "releases": [{k: v for k, v in r.items() if k != "presented"} for r in self.releases]}
@@ -356,8 +365,14 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.pause("running")
     wait = poll_seconds()
     while True:
-        if run.stop:
+        releasing = run.current is not None and run.current.get("state") == "confirmed"
+        if run.stop and not releasing:
             return _handle_stop(run, main)
+        if run.stop:  # 本番の配布の途中の stop は settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
+            msg = durable.recv("resume", min(wait, 30))
+            if isinstance(msg, dict):
+                run.resume(msg)
+            continue
         _spawn_ready(run, main)
         if run.current is None and run.pending:
             run.answer_from_ranges()

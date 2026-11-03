@@ -125,3 +125,21 @@ def test_present_writes_to_present_plan_state_dir(tmp_path, monkeypatch):
     parallel_release.present(tmp_path, plan, tmp_path / "a.md", [], d, closes_of=lambda r, prs: {})
     work = state_dir_of(str(d / "present.json")) / "work"
     assert (work / "prs.txt").read_text().strip() == "5" and (work / "approved.txt").read_text().strip() == "abc"
+
+
+def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
+    import argparse
+
+    from supervise_lib import sprint
+
+    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
+    monkeypatch.setattr(sprint, "has_release_template", lambda a: True)
+    monkeypatch.setattr(sprint, "has_prod_branch", lambda a: True)
+    monkeypatch.setattr(sprint, "design_read", lambda a: False)
+    monkeypatch.setattr(sprint, "advises", lambda a: False)
+    for f in ("plan_sprint_branch", "plan_sprint_impl", "plan_sprint_check", "plan_sprint_release"):
+        monkeypatch.setattr(sprint, f, lambda *a, **k: {})
+    monkeypatch.setattr(sprint, "prod_plans", lambda a, repo, build, prs=None: {"release-request": {}})
+    a = argparse.Namespace(worktree=str(tmp_path), design=[], issue=[1], version=None, pace="normal")
+    waves = sprint.sprint_plans(a)
+    assert waves[-1]["name"] == "本番" and waves[-1]["then_of"] == waves[0]["name"]  # 先頭の command へ --then でつなぐ

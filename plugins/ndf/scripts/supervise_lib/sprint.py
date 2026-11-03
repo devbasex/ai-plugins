@@ -314,7 +314,8 @@ def sprint_plans(a) -> list[dict]:
         return waves + [release]
     prod = prod_version(a.version)
     if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
-        return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {})}]
+        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
+        return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
     return waves + [
         release,
         {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
