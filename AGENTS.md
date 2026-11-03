@@ -20,8 +20,9 @@
     宛先のチェックがこの設定を読む（`follow_branch: true` のときはメインディレクトリの追従先にも
     なる）。設定が無いリポジトリは既定ブランチのまま動く
   - **`--base develop` の付け忘れは継続的統合が塞ぐ。** `main` 宛の Pull Request は
-    `develop` から出たものだけを通す（`scripts/check-pr-base.sh`）。判定は設定に起点が
-    書かれていて、そのブランチが origin にあるときだけ働く
+    `develop` に含まれるコミットだけを通す（head は `develop` か、先頭が `origin/develop` の祖先の
+    `release/v<版>`。`scripts/check-pr-base.sh`）。判定は設定に起点が書かれていて、そのブランチが
+    origin にあるときだけ働く
 - **開発の変更は `.worktrees/<ブランチ名>` の worktree の中で行う**（`/ndf:worktree`）。clone したディレクトリ（メインディレクトリ）は編集対象から外す
   - `issues/` `docs/` と各ランタイムの設定はメインディレクトリで編集してよい
   - メインディレクトリの編集は拒否されない。案内が出ても操作は成立する

@@ -185,6 +185,13 @@ def _load_forms(base: Path, c: Contracts) -> None:
         c.forms[d["name"]] = d
 
 
+# 例の組の形。ndf-next のブロック（文 → 拾うブロックと起動の有無）と、メッセージの形（メッセージ → 正しいか。#2436 の配布の依頼）
+CASE_SHAPES: tuple[dict[str, type], ...] = (
+    {"text": str, "blocks": list, "launch": bool},
+    {"message": dict, "valid": bool},
+)
+
+
 def _check_form(f: Path, d: dict) -> None:
     """受け渡しの形（`forms/`）: 規則の文と、読み手が同じ答えを返すべき例の組（#2347 の決定 8）。"""
     _need(f, d, {"name": str, "summary": str, "rule": str, "writers": list, "readers": list, "cases": list})
@@ -197,8 +204,9 @@ def _check_form(f: Path, d: dict) -> None:
     for i, case in enumerate(d["cases"]):
         if not isinstance(case, dict):
             raise ContractError(f"{f.name}: cases[{i}] はオブジェクト")
-        _need(f, case, {"text": str, "blocks": list, "launch": bool})
-        if not all(isinstance(x, str) for x in case["blocks"]):
+        shape = next((sh for sh in CASE_SHAPES if set(case) == set(sh)), CASE_SHAPES[0])
+        _need(f, case, shape)
+        if "blocks" in shape and not all(isinstance(x, str) for x in case["blocks"]):
             raise ContractError(f"{f.name}: cases[{i}].blocks は文字列の並び")
 
 

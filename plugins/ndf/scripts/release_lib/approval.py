@@ -96,11 +96,11 @@ def release_pr_allowed(root, n, pr_view):
     return ac.AllowedPR(n, head, commits, (d.get("mergeCommit") or {}).get("oid"))
 
 
-def check_approved(root, approved, base, allowed):
-    """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
+def check_approved(root, approved, ref, allowed):
+    """origin/<ref>（本番の配布では release/v<版>。#2436 の R2）の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
     差分がすべて許可リスト（UNGATED）の下に収まる承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
-    git(root, "fetch", "-q", "origin", base)
-    tip = git(root, "rev-parse", f"origin/{base}").stdout.strip()
+    git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+    tip = git(root, "rev-parse", f"origin/{ref}").stdout.strip()
     if allowed is None:
         return ac.Verdict(False, approved, tip, ac.UNDECIDABLE)
     return ac.compare_approved(root, approved, tip, [allowed], UNGATED)
@@ -121,7 +121,7 @@ GATE_LEADS = {
     ac.UNKNOWN_COMMIT: "承認したコミット {a} を読めない",
     ac.NOT_ANCESTOR: "承認したコミット {a} が {base} の先端 {t} の祖先でない",
     ac.OUTSIDE_COMMITS: "承認したコミット {a} の後に承認の外のコミットが {n} 件ある",
-    ac.TREE_DIFFERS: "{base} の先端 {t} の中身が、承認したコミット {a} に配布の PR を足したものと違う",
+    ac.TREE_DIFFERS: "{base} の先端 {t} の中身が、承認したコミット {a} に版上げの PR を足したものと違う",
     ac.UNDECIDABLE: "承認したコミット {a} の後に承認の外の変更が無いかを判定できない",
     "head_moved": "{base} の先端が比べた後に {t} へ進んだ",
 }
@@ -133,7 +133,8 @@ def tolerated_items(verdict) -> list[dict]:
 
 
 def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
-    """承認の外の変更で本番への配布を止める結果（status: gate。出すのは呼び手で終了コード 10。#815 の I2〜I6）。"""
+    """承認の外の変更で本番への配布を止める結果（status: gate。出すのは呼び手で終了コード 10。#815 の I2〜I6）。
+    base は比べた参照（本番の配布では release/v<版>）の名前で、文言にだけ使う。"""
     reason = "head_moved" if moved and verdict.ok else verdict.reason
     out = []
     for o in verdict.outside:

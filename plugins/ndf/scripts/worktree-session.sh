@@ -151,9 +151,21 @@ fi
 
 # --- ブランチ追従 -----------------------------------------------------------
 
+# 主ディレクトリの index か HEAD を動かす git の操作は、`<主ディレクトリ>/.git/ndf-main.lock` の排他で
+# 1 本ずつにする（並列の計画のレーンが同時に動かすと `.git/index.lock` が衝突する。#2436 の異常系 8）。
+# Python の側（`lib/locks.py` の `exclusive(<主ディレクトリ>/.git/ndf-main)`）と同じファイルで互いを待つ。
+# flock が無い・主ディレクトリの .git がディレクトリでないときは排他を取らずに打つ。
+main_git() {
+  if command -v flock >/dev/null 2>&1 && [ -d "$MAIN_DIR/.git" ]; then
+    flock -w 60 "$MAIN_DIR/.git/ndf-main.lock" git -C "$MAIN_DIR" "$@"
+  else
+    git -C "$MAIN_DIR" "$@"
+  fi
+}
+
 follow_to() {
   local target="$1" label="$2"
-  if git -C "$MAIN_DIR" checkout -q --detach "$target" 2>/dev/null; then
+  if main_git checkout -q --detach "$target" 2>/dev/null; then
     MESSAGES+=("主ディレクトリを ${label} が指すコミットへ detached HEAD で合わせました。")
   else
     MESSAGES+=("主ディレクトリを ${label} へ合わせられませんでした。作業は続けられます。")
@@ -188,7 +200,7 @@ resolve_commit() {
 resolve_base_commit() {
   local name="$1" sha
   sha=$(resolve_commit "$name") && { printf '%s\n' "$sha"; return 0; }
-  GIT_TERMINAL_PROMPT=0 git -C "$MAIN_DIR" fetch -q --no-tags origin \
+  GIT_TERMINAL_PROMPT=0 main_git fetch -q --no-tags origin \
     "refs/heads/$name" >/dev/null 2>&1 || return 1
   sha=$(git -C "$MAIN_DIR" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null) || return 1
   [ -n "$sha" ] || return 1

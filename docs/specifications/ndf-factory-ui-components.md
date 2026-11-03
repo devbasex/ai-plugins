@@ -76,11 +76,63 @@ Neural Development Factory の Web の画面を組む部品の一覧と使い分
 | `non-ascii` | ASCII の外の文字を含む文字列・テンプレート（JSX の外も） |
 | `dummy-import` | `src/main.tsx` 以外から `dummy/` を import する |
 
+- API が 400・409・422 で返す `message` は API が日本語で持ち、画面はそのまま出す。翻訳のファイルの対象ではない
+
 ## API クライアントとダミー
 
 - 画面は `useServices()` の `api`（`Api` のインタフェース）だけを通してデータを読む。足す操作は配列で受け渡す（1 件のときも要素 1 個の配列）
+- 画面は API の応答の形（`factory/contracts/openapi/`）をそのまま受け、自分の語へ翻訳する層を置かない
 - ダミーの実装は `src/dummy/` にあり、`Api`・`Auth`・つながりの元のダミーとダミーデータを持つ。操作を足したらダミーにも同じ名前の関数を足す
-- 起動の組み立て（`src/main.tsx`）が Vite の mode `dummy` のときだけダミーを動的に読む。本番のビルドでは分岐ごと落ち、`npm run check:bundle -w web` が成果物にダミーデータの印 `ndf-factory-dummy-data` が無いことを確かめる
+- 起動の組み立て（`src/main.tsx`）が Vite の mode `dummy` のときだけダミーを動的に読む。本番のビルドでは `import.meta.env.MODE` が `"production"` に置き換わって分岐ごと落ち、`npm run check:bundle -w web` が成果物にダミーデータの印 `ndf-factory-dummy-data` が無いことを確かめる（終了コードは 0 無し・1 印を見つけた・2 `dist/` が無い）
+- ダミーデータに秘密と実在の個人情報を書かない。利用者の ID は `00000000-…` の形、名前は架空のものにする
+
+| 操作 | 入力 | 出力 | 失敗の形 |
+| --- | --- | --- | --- |
+| `sprintRunDetails(accountId, sprintRunIds)` | アカウントの ID と実行の ID の配列 | `SprintRunSummary[]`。見つからない ID の要素は返さない | `ApiFailure`（401・403・5xx） |
+
+`sprintRunDetails` の本物の実装は、詳細の経路がまだ無いため `GET /accounts/{a}/sprint-runs` の新しい順 50 件から ID で選ぶ。それより古い実行は見つからない扱いになる。詳細の経路ができたら本物の実装だけを差し替え、画面は変えない。
+
+## つながりの状態
+
+`src/connection.ts` の `ConnectionSource`（`current()` と `subscribe(listener)`）が `ConnectionState` を渡し、枠の `ConnectionStatus` と承認の操作の `ApprovalActions` が `useSyncExternalStore` で読む。
+
+| 値 | 型 | 意味 |
+| --- | --- | --- |
+| `online` | 真偽 | 今サーバーへつながっているか |
+| `lastReceivedAt` | UTC の ISO 8601 か `null` | 最後に受け取った時刻 |
+| `pendingOperations` | 数 | つながってから確定する操作の数 |
+
+- 3 つは独立した値で、オフラインで確定待ちがある場面も表せる。`ConnectionStatus` はオンライン・オフライン（最後に受け取った時刻つき）・確定待ちの操作がある、を見分けて出す
+- ブラウザの実装は `navigator.onLine` と `online` / `offline` の事象だけを読み、`lastReceivedAt` は `null`、`pendingOperations` は 0 を返す。時刻と確定待ちの数を作る実装は、同じ `ConnectionSource` を差し替えて足す
+- `App` は `services` に `connection` が無いときブラウザの実装を、`settings` が無いときブラウザから決めた言語と地域の設定を、`resources` が無いとき日本語の翻訳のファイルを使う
+
+## 常に成り立つ条件
+
+| 条件 | 破れたときに落ちるもの |
+| --- | --- |
+| 画面のコード（テスト・ダミー・翻訳のファイルを除く）に表示の文言が無い | `check:source`（`npm run check`） |
+| 画面のコードが使う翻訳のキーは日本語の翻訳のファイルにある | 型検査 |
+| ブラウザの言語に翻訳のファイルが無いとき、文言は日本語で出る | Vitest |
+| 日時は UTC の ISO 8601 で受け、設定の時刻帯で整形する | Vitest |
+| 金額は通貨と組（`Money`）でだけ整形の関数へ渡せる | 型検査 |
+| 部品の見た目の値はトークンの名前で引く | トークンの写しのテスト |
+| `src/ui/` の部品は「部品の一覧」に 1 つずつ載る | `docs.test.ts` |
+| ログインの後の画面は 360・768・1280 px のどの幅でも横にはみ出さない | E2E |
+| 画面は `Api` だけを通してデータを読み、ダミーを import するのは `src/main.tsx` だけ | `check:source` の `dummy-import` |
+| 本番のビルドの成果物にダミーの実装とダミーデータが入らない | `check:bundle` |
+| 0 件は `EmptyState`、失敗は `ErrorState` を出し、画面は白くならない | 部品のテスト |
+
+## 設計の判断
+
+- **国際化は i18next と react-i18next で行う。** 日本語の翻訳のファイルを `CustomTypeOptions` の `resources` に渡してキーの型を作り、埋め込み・複数形・既定の言語への戻りを i18next に任せる。言語の判定は追加のパッケージを使わず、`navigator.languages` から翻訳のある言語を選ぶ
+- **日時・数・金額は `Intl` で整形する。** 必要な整形を `Intl.DateTimeFormat`（`timeZone` を渡す）と `Intl.NumberFormat`（`style: "currency"`）が持ち、日時のライブラリを足すと依存の費用だけが増えるためである
+- **直に書いた文言の検査は `oxc-parser` で源を読む自前のスクリプト（`web/scripts/check-source.ts`）にする。** ESLint の TypeScript の構文解析（`typescript-eslint`）は `factory/` の TypeScript 7 と組めず、`oxc-parser` は TypeScript に依存しないためである
+- **ダミーと本物の切り替えは Vite の mode `dummy` で `src/main.tsx` の 1 か所が行う。** 画面の設定へ環境変数を足すと画面へ埋め込む変数が増え、mode なら本番のビルドで値が定数になって分岐ごと落とせるためである
+- **経路は `screens.ts` の画面の地図から作り、確定仕様の表と識別子の集合を照らす。** 役割ごとの動線と機能との対応はコードに持たない情報のため、文書を生成せず、経路と部品の名前の集合だけをテストで照らす
+- **トークンは Design Tokens Format Module の JSON に置き、起動時に CSS の変数へ写す。** ビルドの手順（Style Dictionary など）を足さず、Tailwind CSS や CSS-in-JS のように正を設定ファイルへ移したり実行時の依存を足したりしないためである
+- **配置は Playwright の Chromium で測り、E2E は `npm run check` の外の CI の手順にする。** jsdom は配置を計算せず、ブラウザの導入が要るためである。iOS の Safari と Android の Chrome での描かれ方は、リリース後テストで人が見る
+- **境は 768 px と 1024 px の 2 つにし、同じ部品が CSS だけで形を変える。** 画面のコードが幅を知らずに済むためである
+- **`NavMenu` は `<nav aria-label>` の中にリンクだけを並べ、`ul` / `li` を使わない。** リンクは幅によらず常に DOM に描き、1024 px 未満ではメディアクエリで隠してメニューのボタン（`aria-expanded`）で開く。幅を `matchMedia` で読まない（jsdom に無く、テストの描画が幅で変わらないため）
 
 ## 検査
 
@@ -88,6 +140,19 @@ Neural Development Factory の Web の画面を組む部品の一覧と使い分
 | --- | --- |
 | `npm run check -w web` | 型検査 → Vitest → `check:source` → `vite build` → `check:bundle` |
 | `npm run e2e -w web` | ダミーで起動した画面を Playwright の Chromium で 360×740・768×1024・1280×800 の 3 つの幅で開き、横のはみ出しとナビゲーションの手数を測る。初めて打つ前に `npx playwright install chromium` が要る |
+
+`check` は `build`（`tsc --noEmit && vite build`）を呼ばずに `vite build` を直に呼び、型検査を 1 回に保つ。CI のジョブ `factory-check`（`.github/workflows/factory-check.yml`）は `npm run check` の後に `npx playwright install --with-deps chromium` と `npm run e2e -w web` を打つ。
+
+## テスト観点
+
+- 確定仕様の表の識別子（画面の地図の経路・部品の名前）の集合がコードの集合と一致すること（`src/docs.test.ts`）
+- 規則ごとに、文言を直に書いた源で `check:source` が 1、キーで引いた源で 0 になること。コメントの中を拾わないこと
+- 無いキーを使うコードと、通貨の無い金額を渡すコードが型検査で落ちること（`@ts-expect-error`）
+- テストで 2 つ目の言語の翻訳のファイルを `resources` に差し込むと、画面のコードを変えずにその文言で出ること
+- `2026-11-02T00:00:00Z` が `ja-JP`・`Asia/Tokyo` で 9 時、`en-US`・`America/New_York` で前日の 19 時に整形され、`JPY` は小数が無く `USD` は 2 桁で出ること
+- ダミーの場面 `empty` で `EmptyState`、`error` で `ErrorState` が出て、つながり `offline` で枠に最後に受け取った時刻つきのオフラインが出ること
+- 360 px で `/account` から、メニューと行き先の 2 回の押下でナビゲーションの行き先へ届くこと（E2E）
+- 本番のビルドの後 `check:bundle` が 0 で終わること
 
 ## 関連リンク
 

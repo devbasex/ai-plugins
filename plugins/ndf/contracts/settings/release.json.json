@@ -4,7 +4,7 @@
   "place": "worktree",
   "scope": "team",
   "readers": [
-    "plugins/ndf/scripts/release-steps.py:load_steps"
+    "plugins/ndf/scripts/release_lib/declared_steps.py:load_steps"
   ],
   "keys": {
     "$schema": {

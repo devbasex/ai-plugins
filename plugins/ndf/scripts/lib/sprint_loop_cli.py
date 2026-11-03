@@ -28,13 +28,18 @@ def run_loop_command(a, update) -> dict | None:
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
             "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra)),
             "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done, update=update),
-            "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr),
+            "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr, revise=a.revise, note=a.note),
             "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
             "lap": lambda: sl.cmd_lap(env, a.loop_name, a.failed, a.done, a.deferred_issues or [], update=update),
+            "finish": lambda: sl.cmd_finish(env, a.loop_name, a.lap, a.done, update=update),
+            "pending": lambda: sl.cmd_pending(env, a.loop_name),
+            "hold-question": lambda: sl.cmd_hold_question(env, a.loop_name, a.ref, a.plan, a.step, a.parallel),
             "stop": lambda: sl.cmd_stop(env, a.loop_name),
             "status": lambda: sl.cmd_status(env, a.loop_name),
             "list": lambda: sl.cmd_list(env, a.loop_name),
         }
+        if a.loop_cmd == "answer" and a.revise and not a.note:
+            return step_result.result(sl.TOOL, "stopped", "--revise には --note <指摘ファイル> が要る", [], {"status": "refused"})
         out = handlers[a.loop_cmd]()
         if a.loop_cmd in ("status", "list") and not a.json:
             print(
@@ -99,13 +104,24 @@ def add_loop_parser(sub, cmd_update) -> None:
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--approved", action="store_true")
     g.add_argument("--rejected", action="store_true")
+    g.add_argument("--revise", action="store_true", help="直して出し直す（--note の指摘を課題の本文に書き、次の周回で先頭に選ぶ）")
     s.add_argument("--pr", type=int)
+    s.add_argument("--note", help="--revise: 指摘を書いたファイル")
     s = name(ls.add_parser("approve-mvv"))
     s.add_argument("--milestone", required=True)
     s = name(ls.add_parser("lap"))
     s.add_argument("--failed", action="store_true", help="その周回を先へ進められない（失敗で締める）")
     s.add_argument("--done", help="周回の queue の done（承認ゲートで止まっていれば loop gate と同じに扱う）")
     s.add_argument("--deferred-issues", type=int, nargs="+", help="上限に達して Issue へ回した指摘の Issue 番号（決定 13）")
+    s = name(ls.add_parser("finish"))
+    s.add_argument("lap", type=int, help="締め直す保留の周回（配布待ち・質問待ち）")
+    s.add_argument("--done", required=True, help="残りの工程（まとめ）の queue の done")
+    name(ls.add_parser("pending"))
+    s = name(ls.add_parser("hold-question"))
+    s.add_argument("--ref", required=True, help="オーガナイザーへ送った問いの依頼の id")
+    s.add_argument("--plan", required=True, help="問いで止まったプラン")
+    s.add_argument("--step", required=True, help="答えの後に続けるステップ")
+    s.add_argument("--parallel", help="並列の計画名（省くと NDF_RELAY_NAME のレーンが属する計画）")
     name(ls.add_parser("stop"))
     for k in ("status", "list"):
         name(ls.add_parser(k)).add_argument("--json", action="store_true")

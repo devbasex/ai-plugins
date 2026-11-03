@@ -1,0 +1,7 @@
+{
+  "name": "requests-json",
+  "pattern": "requests.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": []
+}

@@ -10,6 +10,8 @@
 - **`pace: normal` のスプリントでも、`new sprint` が承認ゲート 2 と本番のステージ（計画名 `release-prod`）まで目録へ書き出す。**
   承認ゲート 2 の後に conductor が組み立てるコマンドは無く、目録の「本番」のステージの `command`（`--done` を含む。#1426）を打つだけで
   本番の配布が流れる（#1914。「`pace: normal` のスプリントの本番のステージ」）
+- **並列の計画のレーンでは、本番のステージを配布の依頼のプランに置き換える。** レーンは承認ゲート 2 を置かず、本番の配布を
+  オーガナイザーへ頼む（#2436。下の「並列の計画のレーンの本番のステージ」）
 
 例: 版 `10.17.30`（本番のリリースの PR は #1268。記録が無く、課題を手で閉じた版である）を今のプランで出したとき。
 直前の正式版は `10.17.29`。スプリントの PR は実際には 13 本あるが、説明のため #1260 と #1262 の 2 本に絞る。
@@ -135,7 +137,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 | 項目 | 内容 |
 | --- | --- |
-| 前提（この順に確かめる） | タグ `<plugin>--v<版>` が origin にある（`git ls-remote --exit-code --tags`）。同じタグの GitHub Release がある（`gh release view <タグ>` が 0）。`release/v<版>` → ベースブランチの PR が MERGED で見つかる |
+| 前提（この順に確かめる） | タグ `<plugin>--v<版>` が origin にある（`git ls-remote --exit-code --tags`）。同じタグの GitHub Release がある（`gh release view <タグ>` が 0）。`release/v<版>` → ベースブランチの PR が MERGED で見つかる。無ければ、版数の衝突を解いて取り込んだ `release/v<版>-sync` → ベースブランチの PR を MERGED で探し、その PR へ書く |
 | 書くもの | その PR へコメント 1 件（`gh pr comment <番号> --body-file <一時ファイル>`）。`--repo` を渡さず、作業場所のリポジトリへ書く |
 | 書かないとき | PR の本文とコメントを投稿の順に並べた最後の記録が、`stage` が `本番` で始まり `version` と `sprint_prs` が同じとき |
 | 結果 JSON | `lib/step_result.py` の形。`items` は `{kind: "comment", name: "#<番号>", result: "posted" / "exists"}`。`metrics` は `release_pr`・`release_pr_url`・`version`・`prev_version`・`sprint_prs` |
@@ -238,6 +240,16 @@ stateDiagram-v2
 `--version` を省いたときは `version` が空で、worktree・ブランチ・承認資料のパスは版の差し込み（`{release_version}`・`{release_base}`）で書き、
 プランの「版」の欄の `系列` に開発版のプランの名前 `release` を入れる。キューが本番のプランを流す直前に、開発版のプランの版の記録（`version.json`）の
 `base` で埋める（#2164）。
+
+### 並列の計画のレーンの本番のステージ
+
+プランを組む時点に、ラッパーの名前（`NDF_RELAY_NAME`）が動いている並列の計画のレーンに当たれば（`supervise_lib/sprint.py` の `parallel_lane`）、
+本番のステージを組む 4 か所（`fast_sprint_plans`・`auto_sprint_plans`・`close_waves`・`sprint_plans`）はどれも `prod_plans` を通り、
+計画名 `release-prod` の本番のリリースプランの代わりに計画名 `release-request` の配布の依頼のプラン（`parallel_release.plan_release_request`）を置く。
+`pace: normal` の `sprint_plans` は、レーンのとき `関門 2` のステージも置かない。承認ゲート 2 はオーガナイザーがまとめた配布で出す。
+配布の依頼のプランはステップ `parallel-request`（`parallel.py request`）の 1 つだけを持ち、依頼を送れば承認ゲート（終了コード 10）で終わり、
+自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。手順は `development-workflow` の
+[references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 雛形（`release_templates.plan_release`）が組んだステップを目録の側で書き換えず、`new release --version <正式版> --prs {queue_pr:check} --channel prod`
 と同じ出力に `課題` が入る（スプリントの工程は雛形に対して順応者の関係にある）。
 

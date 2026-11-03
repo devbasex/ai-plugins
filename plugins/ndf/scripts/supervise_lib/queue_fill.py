@@ -20,6 +20,10 @@ FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（
 QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の Pull Request 1 本
 QUEUE_RECORD = "{queue_record}"  # 計画の `課題` のリリース記録を置いた PR（#2230）
 QUEUE_STATE = re.compile(r"\{queue_state(\??):([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）。`?` 付きは無ければ空
+# 名前の一致する完了した計画の状態ディレクトリの `work/prs.txt`（空白区切りの Pull Request）・`work/approved.txt`（承認したコミット）。
+# まとめた配布の本番のプランが、提示のプランの結果を読む（#2436）
+QUEUE_WORK = re.compile(r"\{queue_(prs|approved):([A-Za-z0-9._-]+)\}")
+WORK_FILES = {"prs": "prs.txt", "approved": "approved.txt"}
 
 
 def plan_pr(item: dict) -> str:
@@ -79,6 +83,22 @@ def _fill_states(text: str, states: list[tuple[str, str]], items: list[dict], pl
     return text, missing
 
 
+def _fill_work(text: str, works: list[tuple[str, str]], items: list[dict], plan: str) -> tuple[str, list[str]]:
+    """{queue_prs:<名>}・{queue_approved:<名>} を、名前の一致する完了した計画の `work/` のファイルの中身で置き換える。
+    完了した計画が無い・ファイルが無い・空なら埋めずに欠けの文で返す（#2079 の扱い。そのプランは流さない）。"""
+    missing = []
+    for kind, name in works:
+        done = [i for i in results_named(name, items, plan) if i.get("result") == "完了" and i.get("plan")]
+        files = [state_dir_of(str(Path(i["plan"]).absolute())) / "work" / WORK_FILES[kind] for i in done]
+        got = [f.read_text(encoding="utf-8").strip() for f in files if f.is_file()]
+        got = [g for g in got if g]
+        if not got:
+            missing.append(f"{{queue_{kind}:{name}}}（名前の一致する完了した計画の work/{WORK_FILES[kind]} が無い）")
+            continue
+        text = text.replace(f"{{queue_{kind}:{name}}}", got[-1])
+    return text, missing
+
+
 def _fill_record(text: str, plan: str) -> tuple[str, list[str]]:
     """{queue_record} を、計画の `課題` のリリース記録を置いた PR の番号で置き換える。見つからなければ理由の文で返す。"""
     from sprint_close_lib.record_find import find_record  # GitHub を読む差し込みを持つ計画だけが読み込む
@@ -108,12 +128,14 @@ def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
         return f"計画を読めない: {e}"
     names, states = sorted(set(QUEUE_PR.findall(text))), sorted(set(QUEUE_STATE.findall(text)))
     record = QUEUE_RECORD in text
-    if not names and not states and not record:
+    works = sorted(set(QUEUE_WORK.findall(text)))
+    if not names and not states and not record and not works:
         return None
     text, missing_prs = _fill_prs(text, names, items, plan)
     text, missing_states = _fill_states(text, states, items, plan)
+    text, missing_works = _fill_work(text, works, items, plan)
     text, missing_record = _fill_record(text, plan) if record else (text, [])
-    missing = missing_prs + missing_states + missing_record
+    missing = missing_prs + missing_states + missing_works + missing_record
     if missing:
         return "差し込みを埋める前の計画の結果が見つからない: " + "、".join(missing)
     write_text_atomic(Path(plan), text)
