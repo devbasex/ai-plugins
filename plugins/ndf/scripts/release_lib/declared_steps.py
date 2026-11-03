@@ -20,7 +20,6 @@ from step_result import StepError
 DECLARATION = ".ndf/release.json"
 
 SUPPORTED_VERSIONS = (1,)
-STAGES = ("production", "verification", "any")
 DEFAULT_TIMEOUT = 600
 
 
