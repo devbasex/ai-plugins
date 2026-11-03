@@ -270,6 +270,15 @@ def load_plan(main: Path, name: str) -> object:
     return json.loads((plan_dir(main, name) / "plan.json").read_text(encoding="utf-8"))
 
 
+# 上限を外して読む（上限は計画を作るときに見る。読むときは書かれた計画をそのまま受ける）
+_NO_LIMIT = {"max_plans": 10**6, "max_named": 10**6}
+
+
+def load_valid_plan(main: Path, name: str) -> ParallelPlan:
+    """`plan.json` を上限を外して検証した計画。例外は `load_plan` と検証のものをそのまま投げる。"""
+    return ParallelPlan.model_validate(load_plan(main, name), context=_NO_LIMIT)
+
+
 def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態と配布の内訳。"""
     lines = [f"# 並列の計画 {plan.name}", "", "`plan.json` から描画した。正本は `plan.json` である。", "", "## レーン", ""]

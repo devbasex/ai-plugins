@@ -55,7 +55,7 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
         return None
     for name in plans_in(main):
         try:
-            plan = pp.ParallelPlan.model_validate(pp.load_plan(main, name), context={"max_plans": 10**6, "max_named": 10**6})
+            plan = pp.load_valid_plan(main, name)
         except (OSError, ValueError):
             continue
         hit = plan.lane(lane)

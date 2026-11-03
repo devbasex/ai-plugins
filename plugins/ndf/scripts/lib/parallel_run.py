@@ -114,7 +114,7 @@ def step_init(main: str, name: str) -> dict:
 @durable.step(name="parallel.spawn")
 def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
     """`lanes` を起動する。成功（同じ名前の 2 本目の断りも成功とする）は `started`、断りは `refused`（I7）。"""
-    plan = pp.ParallelPlan.model_validate(pp.load_plan(Path(main), name), context={"max_plans": 10**6, "max_named": 10**6})
+    plan = pp.load_valid_plan(Path(main), name)
     out = {}
     for n in lanes:
         ln = plan.lane(n)
@@ -159,7 +159,7 @@ def step_held_loops(main: str, name: str, answered: list[str]) -> list[str]:
 def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
     """答えを受けたのに残りを流していない保留の周回を持つ、計画のループのレーンのループ名（異常系 11）。"""
     try:
-        plan = pp.ParallelPlan.model_validate(pp.load_plan(main, name), context={"max_plans": 10**6, "max_named": 10**6})
+        plan = pp.load_valid_plan(main, name)
     except (OSError, ValueError):
         return []
     out = []
@@ -189,7 +189,7 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
     答え（`answer-<依頼>`）は持ち主が周回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後の配布の
     依頼を送れないため、当てるまで計画を終えない。"""
     try:
-        plan = pp.ParallelPlan.model_validate(pp.load_plan(main, name), context={"max_plans": 10**6, "max_named": 10**6})
+        plan = pp.load_valid_plan(main, name)
     except (OSError, ValueError):
         return []
     out = []
@@ -250,7 +250,7 @@ def step_render(main: str, name: str, progress: dict) -> None:
 
 def render_progress(main: str, name: str, progress: dict) -> None:
     try:
-        plan = pp.ParallelPlan.model_validate(pp.load_plan(Path(main), name), context={"max_plans": 10**6, "max_named": 10**6})
+        plan = pp.load_valid_plan(Path(main), name)
     except (OSError, ValueError):
         return
     (pp.plan_dir(Path(main), name) / "plan.md").write_text(pp.render_md(plan, progress), encoding="utf-8")
