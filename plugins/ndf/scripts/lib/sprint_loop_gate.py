@@ -15,6 +15,7 @@ import gh_sections
 import jsonio
 import project_mvv as pm
 import step_result
+from parallel_files import RELEASE_REQUEST_PHASE
 
 from sprint_loop_record import (
     TOOL,
@@ -295,8 +296,6 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None 
     stop = {"condition": "gate2_returned", "values": values}
     return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
 
-
-RELEASE_REQUEST_PHASE = "配布の依頼"  # parallel_release.RELEASE_REQUEST_PHASE（配布の依頼のプランの「フェーズ」）
 
 
 def request_record(plan: str) -> tuple[Path, dict]:

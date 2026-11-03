@@ -12,6 +12,7 @@ from typing import Optional
 
 PARALLEL_DIR = Path(".ndf") / "parallel"
 ROLE_FILE = "role.json"  # 統括役の作業ディレクトリの役割のファイル（relay_lib.hub.ROLE_FILE と同じ公開の形。統括役を import しない）
+RELEASE_REQUEST_PHASE = "配布の依頼"  # 配布の依頼のプランの「フェーズ」（書く parallel_release と読む sprint_loop_gate が共有する）
 
 
 def plans_in(main: Path) -> list[str]:
