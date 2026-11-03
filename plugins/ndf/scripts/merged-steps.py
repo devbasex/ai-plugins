@@ -46,7 +46,6 @@ production-merge）か、`git branch -D` が要るブランチがある（同意
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import sys
 import time
@@ -69,7 +68,6 @@ from step_result import (
     run,
 )
 import gh_parts  # noqa: E402
-import locks  # noqa: E402
 import repo  # noqa: E402
 import run_owner  # noqa: E402
 import run_state  # noqa: E402
@@ -79,24 +77,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.main_lock import main_dir_lock  # noqa: E402
 from merged_lib.pr_info import merged_pr_info  # noqa: E402
 from merged_lib.probe_table import PROBE_ACTIONS, PROBE_CLASSES, PROBE_REMEDIED_SUMMARY, PROBE_TABLE  # noqa: E402
 from merged_lib.reading import read_checks  # noqa: E402
 
 TOOL = "merged"
-MAIN_LOCK_WAIT = 600.0  # メインディレクトリの排他を待つ上限（秒）。後片付け 1 件と pull は数十秒で終わる
-
-
-@contextlib.contextmanager
-def main_dir_lock(main_dir):
-    """メインディレクトリの index か HEAD を動かす操作を、レーンの間で 1 本ずつにする（`<git の共通ディレクトリ>/ndf-main.lock`。
-    #2436 の異常系 8）。取れなければ StepError（1）。"""
-    common = git(main_dir, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
-    try:
-        with locks.exclusive(Path(common) / "ndf-main", timeout=MAIN_LOCK_WAIT):
-            yield
-    except locks.LockTimeout as e:
-        raise StepError(f"メインディレクトリの排他を取れない: {e}") from None
 
 
 def list_worktrees(root):
