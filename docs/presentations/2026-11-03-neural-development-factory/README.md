@@ -1,6 +1,6 @@
 # AI が回すソフトウェア工場 — NDF から Neural Development Factory へ
 
-社外の勉強会・登壇で話すスライド（台本の 36 ページと、章扉 3 つ・中締めの扉 1 つの 40 ページ）。Software Factory の考え方を冒頭に置き、
+社外の勉強会・登壇で話すスライド（台本の 30 ページと、章扉 3 つ・中締めの扉 1 つの 34 ページ）。Software Factory の考え方を冒頭に置き、
 前半で NDF（工場のラインをプラグインにしたもの）を、後半で Neural Development Factory（そのラインを Web から回す
 サービス）の構想と画面モックを紹介する。前身は [2026-10-31-neural-development-factory](../2026-10-31-neural-development-factory/README.md)
 で、NDF は 2026-11-03 時点の実装、Neural Development Factory は同じ時点の Issue の構想で更新した（足したページは [notes.md](notes.md)）。`release` の `form-slide.md` の生成スクリプトの経路で作った。
@@ -33,10 +33,10 @@ Google Slides を成果物にする。2026-10-31 の資料の Google Slides を�
 | ロゴ | なし |
 | 写した時点の `lib/` の内容のハッシュ | `e1fbac1642aef0fe49a57b00d7a2575eaf363bbfd5c55b324d53aa778f632800`（`cat slides/lib/*.js \| sha256sum`） |
 
-## 画面モック（31〜35・36 ページ）
+## 画面モック（23〜27 ページ）
 
 Neural Development Factory の画面モック（claude.ai の Design のキャンバス「Neural Development Factory 画面モック」。
-#2172・#2173 の本文から辿れる）のうち、スプリント一覧・スプリント詳細・承認ゲート・判断・スプリントを始めるの 5 画面と、開発ループの画面（#2347 で実装した画面を元にした）を、
+#2172・#2173 の本文から辿れる）のうち、スプリント一覧・スプリント詳細・承認ゲート・スプリントを始めるの 4 画面と、開発ループの画面（#2347 で実装した画面を元にした）を、
 スライドの図形で描き直した。スクリーンショットにしないのは、スライドの大きさで文字が読めるように要素を絞るためと、
 Google Slides の上で直せるようにするためである。出ている数値・リポジトリ名は例。
 
@@ -45,7 +45,7 @@ Google Slides の上で直せるようにするためである。出ている数
 ```bash
 cd docs/presentations/2026-10-31-neural-development-factory
 (cd slides && npm ci)
-node slides/lib/script-time.js script.md --limit 50   # 尺（約 26 分の読み上げ）
+node slides/lib/script-time.js script.md --limit 50   # 尺（約 24 分の読み上げ）
 node slides/build-deck.js /tmp/ndf-factory.pptx
 ```
 

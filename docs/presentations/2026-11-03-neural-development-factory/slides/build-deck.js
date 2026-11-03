@@ -1,12 +1,12 @@
 // 発表資料「AI が回すソフトウェア工場 — NDF から Neural Development Factory へ」の生成スクリプト
-// （台本の 36 ページと、章扉 3 つ・中締めの扉 1 つの 40 ページ）。
+// （台本の 30 ページと、章扉 3 つ・中締めの扉 1 つの 34 ページ）。
 //
 //   node build-deck.js <出力>.pptx [<theme.json>]
 //
 // 枠組みは lib/（NDF の release の assets/slides/lib/ の写し。書き換えない）、
 // トーン＆マナーは theme.json（暗い地にシアンとバイオレット）、スピーカーノートは ../script.md（台本）から入る。
 // 色は theme.json の項目名で指す。図形を直接置くときは d.color(<項目名>) で値を引く。
-// 後半の画面（27〜31・32）は Factory の画面モックを、スライドの図形で描き直したもの。
+// 後半の画面（23〜27）は Factory の画面モックを、スライドの図形で描き直したもの。
 const path = require("path");
 const { run } = require("./lib/deck-frame");
 
@@ -216,17 +216,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     { text: "Dan Shapiro “The Five Levels”(2026-01)", options: { hyperlink: { url: "https://www.danshapiro.com/blog/2026/01/the-five-levels-from-spicy-autocomplete-to-the-software-factory/" }, color: "accent" } },
   ]);
 
-  // 4. 職人型から工場型へ
-  s = pg("職人型から工場型へ", "人の仕事は「書く」から「判断する」へ");
-  d.tbl(s, [
-    [d.H(""), d.H("職人型（いまの AI コーディング）"), d.H("工場型（Software Factory）")],
-    [d.B("品質を守るもの", { color: "text" }), "人が読んで直す", { text: "工程と検査のゲート", options: { bold: true, color: "accent" } }],
-    [d.B("速さを決めるもの", { color: "text" }), "人の手の数", { text: "並列のラインの数", options: { bold: true, color: "accent" } }],
-    [d.B("知識の置き場", { color: "text" }), "人の頭の中", { text: "ルールと手順のファイル", options: { bold: true, color: "accent" } }],
-    [d.B("人の居場所", { color: "text" }), "AI の隣に座る", { text: "判断が要るときだけ", options: { bold: true, color: "accent" } }],
-  ], { x: X0, y: 1.42, w: W, colW: [2.3, 3.59, 3.59], rowH: [0.42, 0.66, 0.66, 0.66, 0.66], fontSize: 14 });
-
-  // 5. 工場に必要な 4 つの部品
+  // 4. 工場に必要な 4 つの部品
   s = pg("工場に必要な 4 つの部品", "NDF は、この 4 つを Skill・スクリプト・hook にした");
   [
     ["01", "標準工程", "どの順に何をするか", "ライン"],
@@ -245,7 +235,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   // ==== 章 2 ====
   sec("NDF — 工場のラインをプラグインに", "Claude Code・Codex で動く開発ワークフロー");
 
-  // 6. 指示書だけでは、ラインは回らない
+  // 5. 指示書だけでは、ラインは回らない
   s = pg("指示書だけでは、ラインは回らない", "CLAUDE.md への追記は、すぐに 4 つの壁に当たる");
   [
     ["コンテキスト", "毎回全部読む。書くほど埋もれる"],
@@ -257,66 +247,64 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     card(s, c.x, 1.45 + Math.floor(i / 2) * 1.6, c.w, 1.4, r[0], r[1], "panel1", { band: "warn", headSize: 18, bodySize: 15, headH: 0.5 });
   });
 
-  // 7. 実務はスクリプト、AI は規定と監視
+  // 6. 実務はスクリプト、AI は規定と監視（2026-10-31 の 8 の数値と URL をここへ移した）
   s = pg("実務はスクリプト、AI は規定と監視", "Skill が手順を決めて結果を見張り、スクリプトが毎回同じに実行する");
-  rr(s, X0, 1.4, 5.5, 2.3, "accentSoft", "accent");
+  rr(s, X0, 1.4, 5.5, 1.5, "accentSoft", "accent");
   d.text(s, [
     { text: "スクリプト", options: { fontSize: 20, bold: true, color: "accent" } },
     { text: "  ＝ 実務を担う", options: { fontSize: 14, bold: true, color: "text" } },
-  ], { x: X0 + 0.2, y: 1.5, w: 5.1, h: 0.5, valign: "middle" });
-  d.text(s, bullets(["実行・待ち・マージ・リリース", "決まった処理を、毎回同じ結果で", "結果は JSON で返す"], 12.5, "text"), { x: X0 + 0.2, y: 2.04, w: 3.4, h: 1.5, valign: "top", paraSpaceAfter: 4 });
+  ], { x: X0 + 0.2, y: 1.48, w: 5.1, h: 0.46, valign: "middle" });
+  d.text(s, bullets(["実行・待ち・マージ・リリース", "決まった処理を、毎回同じ結果で", "結果は JSON で返す"], 12.5, "text"), { x: X0 + 0.2, y: 1.98, w: 5.1, h: 0.86, valign: "top", paraSpaceAfter: 2 });
+  rr(s, 6.0, 1.4, 3.74, 0.94, "panel1", "header");
+  d.text(s, "Skill（AI エージェント）", { x: 6.18, y: 1.44, w: 3.4, h: 0.34, fontSize: 13, bold: true, color: "header", valign: "middle" });
+  d.text(s, bullets(["規定: いつ・何を・どの順で", "監視: 結果を見て、異常なら止める"], 11), { x: 6.18, y: 1.8, w: 3.45, h: 0.5, valign: "top", paraSpaceAfter: 1 });
+  rr(s, 6.0, 2.44, 3.74, 0.46, "panel1");
   d.text(s, [
-    { text: "196", options: { fontSize: 34, bold: true, color: "accent" } },
-    { text: " 本", options: { fontSize: 13, bold: true, color: "text" } },
-  ], { x: X0 + 3.7, y: 2.1, w: 1.7, h: 0.7, align: "center", valign: "middle" });
-  d.text(s, "NDF のスクリプト", { x: X0 + 3.7, y: 2.8, w: 1.7, h: 0.3, fontSize: 10, align: "center", valign: "middle" });
-  rr(s, 6.0, 1.4, 3.74, 1.42, "panel1", "header");
-  d.text(s, "Skill（AI エージェント）", { x: 6.18, y: 1.48, w: 3.4, h: 0.4, fontSize: 14, bold: true, color: "header", valign: "middle" });
-  d.text(s, bullets(["規定: いつ・何を・どの順で", "監視: 結果を見て、異常なら止める"], 11.5), { x: 6.18, y: 1.9, w: 3.45, h: 0.86, valign: "top", paraSpaceAfter: 3 });
-  rr(s, 6.0, 2.96, 3.74, 0.74, "panel1");
+    { text: "hook", options: { fontSize: 13, bold: true, color: "caution" } },
+    { text: "  ルールを強制する", options: { fontSize: 11, color: "ink" } },
+  ], { x: 6.18, y: 2.44, w: 3.45, h: 0.46, valign: "middle" });
+  // 数値と URL（GitHub で公開。NDF 自身も NDF のラインで開発）
+  [
+    ["196", "本", "スクリプト", "accent"],
+    ["49", "個", "Skill", "header"],
+    ["168", "回", "リリース（2026-04〜11）", "accent"],
+    ["10+", "", "自分以外の導入リポジトリ", "header"],
+  ].forEach((r, i) => {
+    const c = cols(5, 0.12)[i];
+    rr(s, c.x, 3.04, c.w, 0.74, "panel1");
+    d.text(s, [
+      { text: r[0], options: { fontSize: 22, bold: true, color: r[3] } },
+      { text: r[1] ? " " + r[1] : "", options: { fontSize: 11, bold: true, color: "text" } },
+    ], { x: c.x + 0.12, y: 3.06, w: c.w - 0.2, h: 0.42, valign: "middle" });
+    d.text(s, r[2], { x: c.x + 0.12, y: 3.48, w: c.w - 0.16, h: 0.26, fontSize: 9, valign: "middle" });
+  });
+  const uc = cols(5, 0.12)[4];
+  rr(s, uc.x, 3.04, uc.w, 0.74, "panel2", "accent");
   d.text(s, [
-    { text: "hook", options: { fontSize: 14, bold: true, color: "caution" } },
-    { text: "  ルールを強制する", options: { fontSize: 11.5, color: "ink" } },
-  ], { x: 6.18, y: 2.96, w: 3.45, h: 0.74, valign: "middle" });
-  rr(s, X0, 3.88, W, 0.68, "panel2");
+    { text: "GitHub で公開\n", options: { fontSize: 9, bold: true, color: "text" } },
+    { text: "github.com/\ndevbasex/ai-plugins", options: { fontSize: 10, bold: true, hyperlink: { url: REPO }, color: "accent" } },
+  ], { x: uc.x + 0.12, y: 3.04, w: uc.w - 0.16, h: 0.74, valign: "middle" });
+  rr(s, X0, 3.92, W, 0.62, "panel2");
   d.text(s, [
     { text: "プラグイン", options: { fontSize: 14, bold: true, color: "text" } },
     { text: "  まとめて配る", options: { fontSize: 11.5, color: "ink" } },
-  ], { x: X0 + 0.2, y: 3.88, w: 2.9, h: 0.68, valign: "middle" });
+  ], { x: X0 + 0.2, y: 3.92, w: 2.9, h: 0.62, valign: "middle" });
   // 配る先は 2 つ。Kiro・agy には配らず、クロスレビュー・リファクタの相手役として起動するだけ
   ["Claude Code", "Codex"].forEach((r, i) => {
-    pill(s, 3.1 + i * 1.5, 4.04, 1.38, 0.36, r, i % 2 ? "header" : "accent", "background", 11);
+    pill(s, 3.1 + i * 1.5, 4.05, 1.38, 0.36, r, i % 2 ? "header" : "accent", "background", 11);
   });
-  d.text(s, "相手役", { x: 6.2, y: 4.04, w: 0.8, h: 0.36, fontSize: 10, bold: true, color: "mute", align: "right", valign: "middle" });
+  d.text(s, "相手役", { x: 6.2, y: 4.05, w: 0.8, h: 0.36, fontSize: 10, bold: true, color: "mute", align: "right", valign: "middle" });
   ["Kiro", "agy"].forEach((r, i) => {
-    pill(s, 7.1 + i * 1.32, 4.04, 1.2, 0.36, r, "panel1", "ink", 11);
+    pill(s, 7.1 + i * 1.32, 4.05, 1.2, 0.36, r, "panel1", "ink", 11);
   });
   d.note(s, [
-    { text: "196 本は plugins/ndf の scripts 直下と skills の .py・.sh（テストを除く、2026-11-03）。公式: " },
+    { text: "2026-11-03 時点。スクリプトは plugins/ndf の scripts 直下と skills の .py・.sh（テストを除く）、リリースは正式版の版数の数、Skill は Claude Code 版のマニフェストの行数、導入先は 2026-10-17 時点。公式: " },
     { text: "Claude Code プラグイン", options: { hyperlink: { url: "https://code.claude.com/docs/ja/plugins" }, color: "accent" } },
     { text: " / " },
-    { text: "Claude Code Skills", options: { hyperlink: { url: "https://code.claude.com/docs/ja/skills" }, color: "accent" } },
-    { text: " / " },
     { text: "Codex Skills", options: { hyperlink: { url: "https://developers.openai.com/codex/skills" }, color: "accent" } },
-    { text: " / " },
-    { text: "Agent Skills（agentskills.io）", options: { hyperlink: { url: "https://agentskills.io" }, color: "accent" } },
   ]);
 
-  // 8. NDF: 工場のラインをプラグインに
-  s = pg("NDF: 工場のラインをプラグインに", "GitHub で公開。NDF 自身も NDF のラインで開発");
-  [
-    ["168", "回", "リリース（2026-04〜11）", "accent"],
-    ["49", "個", "Skill", "header"],
-    ["2", "つ", "配布先", "accent"],
-    ["10+", "リポジトリ", "自分以外へ導入", "header"],
-  ].forEach((r, i) => {
-    const c = cols(4)[i];
-    stat(s, c.x, 1.5, c.w, 1.75, r[0], r[1], r[2], r[3]);
-  });
-  d.text(s, [{ text: REPO, options: { hyperlink: { url: REPO }, color: "accent" } }], { x: X0, y: 3.62, w: W, h: 0.4, fontSize: 16, bold: true, align: "center", valign: "middle" });
-  d.note(s, "リリースは正式版の版数の数（git の履歴）、Skill は Claude Code 版のマニフェストの行数。2026-11-03 時点。Kiro・agy は配布先から外し、相手役として起動する。導入先は 2026-10-17 時点");
-
-  // 9. Issue をまとめて渡せば、並列に進む
+  // 7. Issue をまとめて渡せば、並列に進む
   s = pg("Issue をまとめて渡せば、並列に進む", "人が判断するのは 2 回の承認だけ");
   rr(s, X0, 1.62, 1.55, 0.9, "panel2");
   d.text(s, "マイルストーン\n（複数の Issue）", { x: X0, y: 1.62, w: 1.55, h: 0.9, fontSize: 10, bold: true, color: "text", align: "center", valign: "middle" });
@@ -340,34 +328,29 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   });
   d.note(s, "判断の材料（決めたこと・未検証の点・根拠）はそろって届く");
 
-  // 10. 変更の大きさで、踏む工程を変える
-  s = pg("変更の大きさで、踏む工程を変える", "/ndf:development-workflow — 変更を 5 つのモードに分ける");
-  d.tbl(s, [
-    [d.H("モード"), d.H("対象"), d.H("通る工程")],
-    [d.B("light", { color: "accent" }), "文言・設定の小さな変更", "受け入れ条件 → 実装 → クロスレビュー"],
-    [d.B("operation", { color: "accent" }), "コードを変えない外部の作業", "範囲と戻し方を書く → 承認 → 実行と記録"],
-    [d.B("standard", { color: "accent" }), "機能追加・バグ修正", "要件定義 → 設計 → TDD → … → 振り返り"],
-    [d.B("legacy-refactor", { color: "accent" }), "テストの薄いコードの整理", "現状固定テスト → 整理 → リリース後テスト"],
-    [d.B("documentation", { color: "accent" }), "提案書・報告書などの文書", "構成案 → 執筆 → 再構成 → 体裁レビュー"],
-  ], { x: X0, y: 1.42, w: W, colW: [2.2, 3.4, 3.88], rowH: 0.52, fontSize: 12.5 });
-
-  // 11. 機能追加は、この流れで 1 周
-  s = pg("機能追加は、この流れで 1 周", "standard モード: スプリントごとに 1 周、中はグループごとに並列");
+  // 8. 機能追加は、この流れで 1 周
+  s = pg("機能追加は、この流れで 1 周", "/ndf:development-workflow — 変更を 5 つのモードに分け、軽い変更は工程を省く");
   [
     ["設計", [{ hi: "要件定義" }, "作業用の\nworktree", "設計", { hi: "構成の\n見直し" }, { hi: "クロス\nレビュー" }, { text: "承認 1\n設計" }]],
     ["実装", ["実装計画", { hi: "テスト\nファースト" }, { hi: "クロス\nリファクタ" }, { hi: "クロス\nレビュー" }, { hi: "完了判定\n（証跡）" }, "マージ"]],
     ["リリース", ["仕様書\n確定", "開発版\nリリース", { text: "承認 2\n本番" }, "本番\nリリース", "リリース後\nテスト", { hi: "振り返り" }, { hi: "Issue の\n棚卸し" }]],
   ].forEach((row, i) => {
-    const y = 1.48 + i * 1.08;
+    const y = 1.4 + i * 0.98;
     d.text(s, row[0], { x: X0, y, w: 0.8, h: 0.7, fontSize: 11, bold: true, color: "accent", valign: "middle" });
     const n = row[1].length;
     const g = 0.2;
     flow(s, 1.06, y, (8.68 * n + g * (n - 7)) / 7, 0.7, row[1], { gap: g, size: 9.5 });
-    if (i < 2) d.arrow(s, X0 + 0.3, y + 0.76, 0, 0.26, "accent");
+    if (i < 2) d.arrow(s, X0 + 0.3, y + 0.72, 0, 0.24, "accent");
+  });
+  [["light", "小さな変更"], ["operation", "外部の作業"], ["standard", "機能追加"], ["legacy-refactor", "整理"], ["documentation", "文書"]].forEach((m, i) => {
+    const c = cols(5, 0.1)[i];
+    const on = i === 2;
+    rr(s, c.x, 4.3, c.w, 0.4, on ? "accentSoft" : "panel1", on ? "accent" : null, 0.06);
+    d.text(s, [{ text: m[0] + "  ", options: { bold: true, color: on ? "accent" : "text", fontSize: 9.5 } }, { text: m[1], options: { fontSize: 9, color: "ink" } }], { x: c.x + 0.08, y: 4.3, w: c.w - 0.12, h: 0.4, align: "center", valign: "middle" });
   });
   d.note(s, "淡いシアンの工程は、次のページ以降で紹介する。レビューの指摘は直して繰り返す。開発版は自分で使って確かめてから承認 2 へ");
 
-  // 12. 要件定義・テストファースト: 実績のある技法を組み込む
+  // 9. 要件定義・テストファースト: 実績のある技法を組み込む
   s = pg("要件定義・テストファースト: 実績のある技法を組み込む", "新しい発明ではない。AI が毎回守れる手順にした");
   [
     ["DDD", "ユビキタス言語とドメインモデル", ["要件定義の前に用語集", "1 語 1 意味を CI が検査", "設計はドメインモデルから", "モデルを先にレビュー"]],
@@ -381,7 +364,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     d.text(s, bullets(r[2], 12.5), { x: c.x + 0.2, y: 2.7, w: c.w - 0.4, h: 1.7, valign: "top", paraSpaceAfter: 4 });
   });
 
-  // 13. 構成の見直し: コードの可読性から、日本語の可読性の時代へ
+  // 10. 構成の見直し: コードの可読性から、日本語の可読性の時代へ
   s = pg("構成の見直し: コードの可読性から、日本語の可読性の時代へ", "/ndf:document-rebuild — 「読みやすさの研究」の成果を取り入れて文章を組み直す", 19.5);
   d.box(s, 0.6, 1.98, 8.8, 0.03, "rule", false);
   [
@@ -419,7 +402,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     { text: "・Carroll『The Nurnberg Funnel』）" },
   ]);
 
-  // 14. クロスレビュー・リファクタ: 複数の AI で見て直す
+  // 11. クロスレビュー・リファクタ: 複数の AI で見て直す
   s = pg("クロスレビュー・リファクタ: 複数の AI で見て直す", "見落としは別の AI が拾い、直すのは時間内に");
   [
     ["/ndf:cross-review — 指摘が尽きるまで", ["2 つの AI が\nレビュー", "指摘を修正", "組み替えて\n繰り返す"], "新しい指摘が出なくなったら終了", "観点は PR の中身で切り替え"],
@@ -433,7 +416,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     d.text(s, bullets([r[2], r[3]], 13.5), { x: c.x + 0.16, y: 3.2, w: c.w - 0.32, h: 1.1, valign: "middle", paraSpaceAfter: 8 });
   });
 
-  // 15. 完了判定: 「完了」も「無い」も証拠で
+  // 12. 完了判定: 「完了」も「無い」も証拠で
   s = pg("完了判定: 「完了」も「無い」も証拠で", "工場の検査工程。AI の言葉を、そのままは信じない");
   [
     ["「完了しました」", "/ndf:quality-gates — 完了の判定", "4 点がそろって完了\nコマンド・終了コード・時刻・範囲"],
@@ -446,7 +429,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     card(s, c.x, 2.62, c.w, 1.6, r[1], r[2], "panel1", { band: "accent", headSize: 12.5, bodySize: 13 });
   });
 
-  // 16. 3 層のエージェントで止まらない進行
+  // 13. 3 層のエージェントで止まらない進行
   s = pg("3 層のエージェントで止まらない進行", "長い作業も、止まったら続きから");
   [
     ["conductor", "指揮役。人と話し全体を進める", "accent"],
@@ -469,18 +452,18 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     { text: "）。落ちた後に同じコマンドを打ち直すと、流れていたステップから続く" },
   ]);
 
-  // 17. NDF Relay: コンテキストを溜めずに走り続ける
+  // 14. NDF Relay: コンテキストを溜めずに走り続ける
   s = pg("NDF Relay: コンテキストを溜めずに走り続ける", "会話が膨らむと判断が鈍る。区切りで新しいセッションへ移す（relay.py）");
   rr(s, X0, 1.36, 5.9, 1.5, "panel1", "warn");
   d.text(s, "会話が長くなると", { x: X0 + 0.2, y: 1.42, w: 5.5, h: 0.32, fontSize: 12.5, bold: true, color: "warn", valign: "middle" });
-  d.text(s, bullets(["判断の質が落ちる（目安 100k Token、遅くとも 200k で切る）", "応答のたびに会話を丸ごと読み直し、費用が増える", "自動の要約は情報を落とし、落ちたことに気づけない"], 11.5), { x: X0 + 0.2, y: 1.76, w: 5.55, h: 1.04, valign: "top", paraSpaceAfter: 3 });
+  d.text(s, bullets(["判断の質が落ちる", "応答のたびに会話を丸ごと読み直し、費用が増える", "自動の要約は情報を落とし、落ちたことに気づけない"], 11.5), { x: X0 + 0.2, y: 1.76, w: 5.55, h: 1.04, valign: "top", paraSpaceAfter: 3 });
   rr(s, 6.32, 1.36, 3.42, 1.5, "panel1");
   d.text(s, [
     { text: "410k", options: { fontSize: 32, bold: true, color: "warn" } },
     { text: " Token", options: { fontSize: 12.5, bold: true, color: "text" } },
   ], { x: 6.48, y: 1.42, w: 3.1, h: 0.66, valign: "middle" });
   d.text(s, "conductor の会話の平均。200k を超えた会話は 45 件中 37 件", { x: 6.48, y: 2.1, w: 3.14, h: 0.7, fontSize: 10.5, valign: "top" });
-  flow(s, X0, 3.04, W, 0.72, ["200k Token か\n工程の区切り", "引継ぎ文書と\n次のコマンドを残す", "NDF Relay が\n/exit・更新・起動", "新しいセッションで\n続きから"], { size: 11.5, gap: 0.3 });
+  flow(s, X0, 3.04, W, 0.72, ["工程の区切りで\n続けるか切るか決める", "引継ぎ文書と\n次のコマンドを残す", "NDF Relay が\n/exit・更新・起動", "新しいセッションで\n続きから"], { size: 11.5, gap: 0.3 });
   [
     ["承認は代わりに答えない", "caution"],
     ["利用上限は別のアカウントで続ける", "panel2"],
@@ -489,9 +472,9 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     const c = cols(3)[i];
     pill(s, c.x, 3.96, c.w, 0.5, r[0], r[1], r[1] === "caution" ? "background" : "text", 11.5);
   });
-  d.note(s, "410k は NDF 自身の開発の 30 日間の実測（#827）。導入は /ndf:install-wrapper を 1 回、Claude Code だけが対象");
+  d.note(s, "切る基準は、決まった上限から、続けた場合と切り替えた場合の費用の比べ合いへ移す（既定はまだ 200k で切る。費用で決める方式は試行中）。410k は NDF 自身の開発の 30 日間の実測（#827）");
 
-  // 18. 迷ったら MVV で判断する
+  // 15. 迷ったら MVV で判断する
   s = pg("迷ったら MVV で判断する", "判断の根拠の番号をログに残す");
   [["Mission", "何のためにやるか"], ["Vision", "目指す姿"], ["Value", "判断の基準"]].forEach((r, i) => {
     const c = cols(3, 0.16, X0, 5.9)[i];
@@ -504,7 +487,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   d.text(s, "Value の例:「まず届ける」「処理の改善に寄与しない指摘は直さない」", { x: X0 + 0.2, y: 3.1, w: W - 0.4, h: 0.62, fontSize: 13, color: "text", valign: "middle" });
   d.text(s, "AI に任せる範囲は、事前に設定で選ぶ", { x: X0, y: 3.95, w: W, h: 0.4, fontSize: 12, bold: true, color: "accent", align: "center", valign: "middle" });
 
-  // 19. 振り返り・棚卸し: 詰まりを工程へ戻して直す
+  // 16. 振り返り・棚卸し: 詰まりを工程へ戻して直す
   s = pg("振り返り・棚卸し: 詰まりを工程へ戻して直す", "工場の改善。Issue の一覧を、いつも現状に");
   [
     ["/ndf:out-of-scope — 見つけたら起票", "範囲外の問題を即 Issue に"],
@@ -519,7 +502,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   stat(s, 5.4, 3.0, 4.34, 1.5, "49", "件", "本文が古かった Issue（71 件を調査）", "caution");
   d.note(s, "56% はある時点の棚卸し、49 件は 2026-10-17 の調査。放っておくと、直った Issue を直すことになる");
 
-  // 20. 開発ループ: 終わったら次のスプリントを自分で選ぶ
+  // 17. 開発ループ: 終わったら次のスプリントを自分で選ぶ
   s = pg("開発ループ: 終わったら次のスプリントを自分で選ぶ", "/ndf:development-workflow --loop — 棚卸しの順位から選び、予算の内で周回を続ける");
   flow(s, X0, 1.45, W, 0.8, ["棚卸しの順位\nから選ぶ", "スプリント\n設計〜本番", "まとめ\n振り返り・棚卸し", "周回を締める", "次のセッションで\n次の周回"], { size: 11.5, gap: 0.3 });
   d.text(s, "1 周ごとに NDF Relay がセッションを切り替え、最初の「選ぶ」へ戻る", { x: X0, y: 2.3, w: W, h: 0.3, fontSize: 10.5, color: "mute", align: "center", valign: "middle" });
@@ -527,40 +510,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   card(s, 5.08, 2.75, 4.66, 1.8, "止まる条件", bullets(["予算: 周回の数・費用・時間", "同じ失敗が続いた・MVV が変わった", "選べる Issue が尽きた（1 回見直してから）"], 12), "panel1", { band: "accent", headSize: 14, headH: 0.36 });
   d.note(s, "NDF 自身の開発では 5 本のループが計 17 周した（手元の .ndf/loop の記録、2026-11-03 時点）。手順は development-workflow の references/loop.md");
 
-  // 21. 複数のループを並べて、1 か所で見張る
-  s = pg("複数のループを並べて、1 か所で見張る", "relay.py spawn — 名前を付けたループを tmux の中で並べる（既定 3 本まで）");
-  rr(s, X0, 1.4, 4.9, 2.4, "background", "rule", 0.05);
-  d.text(s, "$ relay.py ls", { x: X0 + 0.16, y: 1.48, w: 4.6, h: 0.3, fontSize: 11, bold: true, color: "accent", fontFace: "Courier New", valign: "middle" });
-  [["名前", "状態", "区間"], ["lroot2", "running", "5"], ["lfactory2", "awaiting_approval", "4"], ["lflow", "running", "1"]].forEach((r, i) => {
-    const y = 1.86 + i * 0.44;
-    const head = i === 0;
-    const waiting = r[1] === "awaiting_approval";
-    [[0, 1.3], [1.4, 2.2], [3.7, 0.9]].forEach((cx, j) => {
-      d.text(s, r[j], { x: X0 + 0.16 + cx[0], y, w: cx[1], h: 0.36, fontSize: head ? 9.5 : 11.5, bold: !head, color: head ? "mute" : j === 1 && waiting ? "caution" : "text", ...(head ? {} : { fontFace: "Courier New" }), valign: "middle" });
-    });
-  });
-  [
-    ["spawn", "名前を付けて起動する"],
-    ["ls", "状態・承認待ち・費用を一覧"],
-    ["attach", "端末を結び付ける"],
-    ["stop / restart", "1 本だけ止める・起動し直す"],
-  ].forEach((r, i) => {
-    const y = 1.4 + i * 0.62;
-    rr(s, 5.4, y, 4.34, 0.52, "panel1");
-    d.text(s, r[0], { x: 5.52, y, w: 1.66, h: 0.52, fontSize: 11.5, bold: true, color: "accent", fontFace: "Courier New", valign: "middle" });
-    d.text(s, r[1], { x: 7.2, y, w: 2.5, h: 0.52, fontSize: 11, valign: "middle" });
-  });
-  [
-    ["承認待ちは名前つきで知らせる", "caution"],
-    ["統括役が落ちてもループは動き続ける", "panel2"],
-    ["tmux が無ければ今どおり 1 本", "panel2"],
-  ].forEach((r, i) => {
-    const c = cols(3)[i];
-    pill(s, c.x, 4.04, c.w, 0.5, r[0], r[1], r[1] === "caution" ? "background" : "text", 11.5);
-  });
-  d.note(s, "表の 3 本は、NDF 自身の開発で 2026-11-02 に並べて回したループ（区間の数は例）。上限は NDF_RELAY_MAX_NAMED で変えられる");
-
-  // 22. 事例: ほかのプロジェクトでも動く
+  // 18. 事例: ほかのプロジェクトでも動く
   s = pg("事例: ほかのプロジェクトでも動く", "言語もチームも違うプロジェクト。詰まりは次の版で直る");
   d.tbl(s, [
     [d.H("プロジェクトの種類"), d.H("結果")],
@@ -590,7 +540,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   // ==== 章 3 ====
   sec("Neural Development Factory", "工場を Web へ。CLI の前にいなくても回る");
 
-  // 23. CLI の工場には、人が張り付く
+  // 19. CLI の工場には、人が張り付く
   s = pg("CLI の工場には、人が張り付く", "ラインは自動なのに、人がラインの横から離れられない");
   d.text(s, "いま（CLI の NDF）", { x: X0, y: 1.4, w: 4.3, h: 0.34, fontSize: 12, bold: true, color: "warn", valign: "middle" });
   d.text(s, "Neural Development Factory", { x: 5.44, y: 1.4, w: 4.3, h: 0.34, fontSize: 12, bold: true, color: "accent", valign: "middle" });
@@ -608,7 +558,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   });
   d.note(s, "セッションの切り替えは NDF Relay で自動になった。残るのは、人が判断する場面");
 
-  // 24. Neural Development Factory の構想
+  // 20. Neural Development Factory の構想
   s = pg("Neural Development Factory の構想", "NDF を Web から操作できる Software Factory のサービスに");
   [
     ["01", "登録する", "GitHub の\nリポジトリを取り込む"],
@@ -625,8 +575,8 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   });
   cols(3).forEach((c, i) => pill(s, c.x, 3.9, c.w, 0.5, ["承認ゲートは 2 つのまま", "プラグインの NDF は OSS のまま", "並べても配布は 1 本"][i], "panel2", i === 0 ? "caution" : "accent", 12));
 
-  // 25. 仕組み: 待つ間はラインを止める
-  s = pg("仕組み: 待つ間はラインを止める", "進捗は 1 本の事象の列。常駐の指揮役は置かず、見回りが起こす");
+  // 21. 仕組み: 待つ間はラインを止める
+  s = pg("仕組み: 承認を待つ間も、ラインは次の周回へ進む", "進捗は 1 本の事象の列。常駐の指揮役は置かず、見回りが起こす");
   rr(s, X0, 1.45, 1.9, 0.86, "panel2");
   d.text(s, "画面\nWeb・Slack", { x: X0, y: 1.45, w: 1.9, h: 0.86, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
   d.arrow(s, 2.2, 1.88, 0.36, 0, "accent");
@@ -646,10 +596,10 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   rr(s, X0, 3.38, 4.1, 0.62, "panel2");
   d.text(s, "一覧・詳細・通知・課金", { x: X0, y: 3.38, w: 4.1, h: 0.62, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
   d.arrow(s, 1.2, 3.34, 0, -0.98, "accent");
-  flow(s, X0, 4.22, W, 0.5, [{ text: "承認待ち・利用上限" }, "コンテナを止める（費用 0）", "答え・リセット時刻が来る", "新しいジョブが続きから"], { size: 10.5, gap: 0.3 });
-  d.note(s, "実行をまたぐ制御は、呼ばれたときだけ動く API と 5 分ごとの見回りが受け持つ。1 つのジョブの区間は既定 20 まで、打ち切りは 8 時間（#2347）");
+  flow(s, X0, 4.22, W, 0.5, [{ text: "承認の依頼を出す" }, "ジョブを終える（費用 0）", "次の周回は待たずに始まる", "答えは持ち主か次の周回へ"], { size: 10.5, gap: 0.3 });
+  d.note(s, "#2439 の受け入れ条件 7・#2347 の E6。利用上限に当たったジョブも止めて待ち、リセット時刻の後に続ける。実行をまたぐ制御は API と 5 分ごとの見回り");
 
-  // 26. AI をどう動かすかは 3 つから選ぶ
+  // 22. AI をどう動かすかは 3 つから選ぶ
   s = pg("AI をどう動かすかは 3 つから選ぶ", "アカウントごとに選ぶ。どれでもスプリントは同じに流れる");
   d.tbl(s, [
     [d.H("実行の形態"), d.H("Claude をどう呼ぶか"), d.H("Token の費用")],
@@ -660,7 +610,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   d.text(s, "料金プラン", { x: X0, y: 3.96, w: 1.1, h: 0.44, fontSize: 12, bold: true, color: "text", valign: "middle" });
   cols(4, 0.14, 1.4, 8.34).forEach((c, i) => pill(s, c.x, 3.96, c.w, 0.44, ["Free（①・②）", "Pro", "Max", "Team（席: standard / premium）"][i], i ? "panel2" : "accentSoft", "text", i === 3 ? 9.5 : 11));
 
-  // 27. 画面: スプリント一覧
+  // 23. 画面: スプリント一覧
   s = pg("画面: スプリント一覧", "どのスプリントが、いまどのフェーズにいるかが一目で");
   let a = screen(s, X0, 1.3, 6.5, 3.5, "sprints", "スプリント");
   [["同時に動いている", "2 / 3"], ["あなたの対応待ち", "3"], ["今月の Token", "8.4M / 20M"]].forEach((k, i) => {
@@ -693,7 +643,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     ["使える量も見える", "同時に流せる数と、今月の Token"],
   ]);
 
-  // 28. 画面: スプリント詳細
+  // 24. 画面: スプリント詳細
   s = pg("画面: スプリント詳細", "AI がどこで何を決めたかを、工程ごとに辿れる");
   a = screen(s, X0, 1.3, 6.5, 3.5, "sprints/m2171", "スプリント");
   tx(s, "m2171", a.x, a.y, 0.8, 0.24, 11, { bold: true, color: "text" });
@@ -737,7 +687,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     ["秒と費用まで", "終了コード・所要時間・費用を工程ごとに"],
   ]);
 
-  // 29. 画面: 承認ゲート
+  // 25. 画面: 承認ゲート
   s = pg("画面: 承認ゲート", "判断の材料は、設計文書・仕様・コードまで辿れる");
   a = screen(s, X0, 1.3, 6.5, 3.5, "inbox/m2186", "対応待ち");
   pill(s, a.x, a.y, 1.9, 0.2, "承認 · ゲート 1 設計 PR のマージ", "caution", "background", 6);
@@ -773,42 +723,9 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     ["そろった材料で 1 回", "受け入れ条件・未確認の点・レビューの収束"],
     ["承認か差し戻し", "差し戻しは理由が必須。Slack から開いても同じ画面"],
   ]);
+  d.note(s, "承認ゲートの外の問いは hook が止めて AI に判断させ、費用がかかる・取り消せない操作だけが、理由と推奨の選択肢つきで同じ対応待ちに並ぶ");
 
-  // 30. 画面: 判断（AI が決められない問い）
-  s = pg("画面: 判断（AI が決められない問い）", "費用がかかる・取り消せない問いだけが、人に届く");
-  a = screen(s, X0, 1.3, 6.5, 3.5, "inbox/s0412", "対応待ち");
-  pill(s, a.x, a.y, 0.9, 0.2, "判断 · 費用", "warn", "text", 6);
-  tx(s, "s0412 · acme/web-shop · 検査のフェーズ", a.x + 1.0, a.y, 3.0, 0.2, 6, { color: "mute" });
-  tx(s, "e2e テストのために有料の検証環境を起動しますか", a.x, a.y + 0.24, a.w, 0.26, 9, { bold: true, color: "text" });
-  rr(s, a.x, a.y + 0.56, a.w, 0.42, "panel2", "warn", 0.04);
-  tx(s, "AI が判断しなかった理由", a.x + 0.08, a.y + 0.58, a.w - 0.16, 0.16, 6, { bold: true, color: "warn" });
-  tx(s, "費用が発生するため。費用の発生は AI が決めてよい範囲の外にある", a.x + 0.08, a.y + 0.75, a.w - 0.16, 0.2, 6.5, { color: "text" });
-  [["見込みの費用", "1 日 $38"], ["使う時間", "約 3 時間"]].forEach((k, i) => {
-    const c = cols(2, 0.08, a.x, a.w)[i];
-    rr(s, c.x, a.y + 1.06, c.w, 0.42, "panel2", null, 0.04);
-    tx(s, k[0], c.x + 0.08, a.y + 1.07, c.w - 0.16, 0.14, 5.5, { color: "mute" });
-    tx(s, k[1], c.x + 0.08, a.y + 1.21, c.w - 0.16, 0.24, 10, { bold: true, color: "text" });
-  });
-  [
-    ["unit だけで完了判定して進める", "費用 0。e2e は本番の前の検査で拾う", true],
-    ["検証環境を起動して e2e も回す", "約 $5（3 時間分）", false],
-    ["ここで止める", "環境を足してから始め直す", false],
-  ].forEach((r, i) => {
-    const y = a.y + 1.58 + i * 0.36;
-    rr(s, a.x, y, a.w, 0.32, r[2] ? "accentSoft" : "panel2", r[2] ? "accent" : null, 0.04);
-    dot(s, a.x + 0.08, y + 0.1, 0.12, r[2] ? "accent" : "rule");
-    tx(s, r[0], a.x + 0.28, y + 0.01, 2.6, 0.16, 6.8, { bold: true, color: "text" });
-    tx(s, r[1], a.x + 0.28, y + 0.16, 3.4, 0.14, 5.5, { color: "mute" });
-    if (r[2]) pill(s, a.x + a.w - 0.62, y + 0.07, 0.54, 0.18, "推奨", "accent", "background", 6);
-  });
-  pill(s, a.x + a.w - 1.7, a.y + 2.7 - 0.36, 1.7, 0.26, "指示を送って再開する", "accent", "background", 7);
-  notes(s, 7.0, 1.4, 2.74, [
-    ["承認ゲートとは別", "ゲート外の問いは hook が止め、AI に判断させる"],
-    ["人に回すのは一部だけ", "費用・取り消せない操作・人にしかできない操作"],
-    ["理由と費用を先に", "推奨の選択肢つき。答えは AI への指示になる"],
-  ]);
-
-  // 31. 画面: スプリントを始める
+  // 26. 画面: スプリントを始める
   s = pg("画面: スプリントを始める", "AI が棚卸しの順位から、1 版に収まる Issue を選ぶ");
   a = screen(s, X0, 1.3, 6.5, 3.5, "sprints/new", "スプリントを始める");
   const nw = a.w - 1.62;
@@ -849,7 +766,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     ["上限を見てから開始", "同時の数・Token・NDF の版を確認"],
   ]);
 
-  // 32. 画面: 開発ループ
+  // 27. 画面: 開発ループ
   s = pg("画面: 開発ループ", "予算を決めて始めれば、周回は止まるまで続く");
   a = screen(s, X0, 1.3, 6.5, 3.5, "loops", "ループ");
   [["動いているループ", "2 / 3"], ["あなたの対応待ち", "1"], ["今月の Token", "8.4M / 20M"]].forEach((k, i) => {
@@ -881,7 +798,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
     ["人に戻った課題だけ届く", "判断待ちは対応待ちに並ぶ"],
   ]);
 
-  // 33. 並べても、本番の配布は 1 本にまとめる
+  // 28. 並べても、本番の配布は 1 本にまとめる
   s = pg("並べても、本番の配布は 1 本にまとめる", "同じリポジトリの実行の間を、Factory のオーガナイザーが取り持つ");
   ["スプリント A", "ループ B", "ループ C"].forEach((t, i) => {
     const y = 1.42 + i * 0.6;
@@ -908,29 +825,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   });
   d.note(s, "取り合いの防ぎ方は v10.27.14 で配布（#2347）。配布をまとめるオーガナイザーは #2439 で設計を承認し、これから実装する。手元の 1 台で並べるときのまとめ役とは排他");
 
-  // 34. 画面を先に作り、AI からも同じ操作ができる
-  s = pg("画面を先に作り、AI からも同じ操作ができる", "#2168 に足した UX の方針。どこからでも、誰からでも使える");
-  [
-    ["操作性を優先", "迷わず答えられる\n画面を先に決める"],
-    ["画面を先に", "UX の土台 → ダミー\nデータの画面 → API"],
-    ["オフラインで読める", "承認の確定は\nオンラインのときだけ"],
-    ["AI からも同じ操作", "API と MCP。\n承認は人だけ"],
-    ["国や地域を越えて", "文言の国際化・UTC・\n通貨つきの金額"],
-  ].forEach((r, i) => {
-    const c = cols(5, 0.12)[i];
-    rr(s, c.x, 1.45, c.w, 1.8, "panel1");
-    d.text(s, String(i + 1).padStart(2, "0"), { x: c.x + 0.14, y: 1.52, w: c.w - 0.28, h: 0.4, fontSize: 18, bold: true, color: i % 2 ? "header" : "accent", valign: "middle" });
-    d.text(s, r[0], { x: c.x + 0.14, y: 1.94, w: c.w - 0.28, h: 0.5, fontSize: 11.5, bold: true, color: "text", valign: "middle" });
-    d.text(s, r[1], { x: c.x + 0.14, y: 2.46, w: c.w - 0.28, h: 0.72, fontSize: 10.5, valign: "top" });
-  });
-  rr(s, X0, 3.45, 3.0, 1.1, "panel1");
-  d.text(s, [{ text: "12", options: { fontSize: 30, bold: true, color: "accent" } }, { text: " 画面が実装済み", options: { fontSize: 12.5, bold: true, color: "text" } }], { x: X0 + 0.18, y: 3.5, w: 2.7, h: 0.56, valign: "middle" });
-  d.text(s, "ログイン・アカウント・リポジトリ・スプリント・ループなど", { x: X0 + 0.18, y: 4.06, w: 2.7, h: 0.44, fontSize: 9.5, valign: "top" });
-  rr(s, 3.42, 3.45, 6.32, 1.1, "panel2");
-  d.text(s, [{ text: "予定の 4 画面\n", options: { fontSize: 12.5, bold: true, color: "text" } }, { text: "バックログ・承認・請求と使用量・手元のマシン", options: { fontSize: 12 } }], { x: 3.6, y: 3.45, w: 6.0, h: 1.1, valign: "middle" });
-  d.note(s, "方針は #2168（2026-11-02 に追加）・#2382・#2383・#2384。画面の数は factory/web/src/screens.ts の available と planned（2026-11-03）。一覧と詳細はダミーデータで動く");
-
-  // 35. 現在地: 子 Issue で順に作っている
+  // 29. 現在地: 子 Issue で順に作っている
   s = pg("現在地: 子 Issue で順に作っている", "このサービス自体も、NDF の開発ループで開発中");
   const ST = { done: ["完了", "header", "text"], ship: ["配布済み", "header", "text"], design: ["設計を承認", "caution", "background"], sample: ["見本が動く", "accent", "background"], next: ["次", "panel2", "mute"] };
   [
@@ -959,7 +854,7 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   });
   d.note(s, "親 Issue: #2168。2026-11-03 時点。配布済みの #2170・#2171 は実環境での確認を待って開いている");
 
-  // 36. まとめ: 人は 2 つだけ決める
+  // 30. まとめ: 人は 2 つだけ決める
   s = pg("まとめ: 人は 2 つだけ決める", "あとは工場が回す");
   // Software Factory + NDF = Neural Development Factory の式
   const BW = 2.7, OW = (W - BW * 3) / 2;
