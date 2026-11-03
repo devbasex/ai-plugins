@@ -348,6 +348,13 @@ class _Run:
                 self.answer(r["id"], "released", rel.get("version"), rel["n"])
             self.pending = [r for r in self.pending if r["id"] not in hit]
 
+    def release_pending(self) -> None:
+        """配布が流れていなければ、出した範囲で答えてから残りの依頼で配布を開く。"""
+        if self.current is None and self.pending:
+            self.answer_from_ranges()
+            if self.pending:
+                self.open_release()
+
     def open_release(self) -> None:
         """流れている配布が無く依頼があれば、他のレーンを待たずに提示 1 を組む（I9）。"""
         n = len(self.releases) + 1
@@ -500,32 +507,40 @@ def parallel_workflow(main: str, name: str) -> dict:
             return _handle_stop(run, main)
         if run.stop:  # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、
             # settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
-            msg = durable.recv("resume", min(wait, 30))
-            if isinstance(msg, dict):
-                run.resume(msg)
+            _recv_resume(run, wait)
             continue
         _spawn_ready(run, main)
-        if run.current is None and run.pending:
-            run.answer_from_ranges()
-            if run.pending:
-                run.open_release()
+        run.release_pending()
         if _run_finished(run):
-            held = step_held_loops(main, name, sorted(run.answered))
-            if not held:
-                step_finish(main, name, run.progress())
-                return run.summary("finished")
-            # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
-            todo = [x for x in held if x not in run.held_spawned]
-            if todo and not set(run.held_spawned) & set(held):
-                run.held_spawned.append(todo[0])
-                seq = len(run.releases) + len(run.held_spawned)
-                run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
+            done = _finish_or_flush_held(run, main, name)
+            if done is not None:
+                return done
         run.take(durable.recv("inbox", wait if run.current is None else min(wait, 30)))
         if run.current is not None:
-            msg = durable.recv("resume", min(wait, 30))
-            if isinstance(msg, dict):
-                run.resume(msg)
+            _recv_resume(run, wait)
         _observe_run(run, main)
+
+
+def _recv_resume(run: _Run, wait: float) -> None:
+    """一時レーンからの再開の知らせを最大 30 秒待ち、届いたら反映する。"""
+    msg = durable.recv("resume", min(wait, 30))
+    if isinstance(msg, dict):
+        run.resume(msg)
+
+
+def _finish_or_flush_held(run: _Run, main: str, name: str) -> Optional[dict]:
+    """保留の周回が無ければ記録を閉じて要約を返す。あれば一時レーンを 1 本起こして None を返す。"""
+    held = step_held_loops(main, name, sorted(run.answered))
+    if not held:
+        step_finish(main, name, run.progress())
+        return run.summary("finished")
+    # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
+    todo = [x for x in held if x not in run.held_spawned]
+    if todo and not set(run.held_spawned) & set(held):
+        run.held_spawned.append(todo[0])
+        seq = len(run.releases) + len(run.held_spawned)
+        run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
+    return None
 
 
 def _started(run: _Run) -> list[str]:
