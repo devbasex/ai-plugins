@@ -241,7 +241,7 @@ stateDiagram-v2
 プランの「版」の欄の `系列` に開発版のプランの名前 `release` を入れる。キューが本番のプランを流す直前に、開発版のプランの版の記録（`version.json`）の
 `base` で埋める（#2164）。
 
-### 並列の計画のレーンの本番のステージ（#2436）
+### 並列の計画のレーンの本番のステージ
 
 プランを組む時点に、ラッパーの名前（`NDF_RELAY_NAME`）が動いている並列の計画のレーンに当たれば（`supervise_lib/sprint.py` の `parallel_lane`）、
 本番のステージを組む 4 か所（`fast_sprint_plans`・`auto_sprint_plans`・`close_waves`・`sprint_plans`）はどれも `prod_plans` を通り、
