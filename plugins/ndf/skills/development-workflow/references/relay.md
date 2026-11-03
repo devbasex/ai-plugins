@@ -88,6 +88,8 @@
 | `touch <作業ディレクトリ>/stop` | 同じ（1 つのラッパーだけ） |
 | セッションの中で `/exit` か Ctrl-C を 2 回 | ラッパーも次のセッションを起動せずに終わる |
 
+副命令の一覧は `relay.py --help` が、1 つの副命令の書式と役割は `relay.py <副命令> --help` が出す（副命令は動かさない。`run --help` は claude の help）。
+
 作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。セッションの中では環境変数 `NDF_RELAY_DIR` が指す。
 
@@ -224,10 +226,8 @@ python3 ~/.claude/ndf/relay.py account remove work2
 ```
 
 **`account use <名前>` で、動いているラッパーでも次の区間の起動（`ndf-next` の再起動・起動の直後）から使うアカウントを指定できる**（`python3 ~/.claude/ndf/relay.py account use work1`）。
-指定は置き場の `pinned.json` に書き、区間の起動のたびに読む。指定が使えれば閾値や残りの量に依らずそれで起動し（`account` の行の
-`reason` は `pinned`）、使えない（上限・認証の失敗・再登録が要る）間は今の選び方で替えて続け、使えるようになった後の区間の起動で
-戻る。`--clear` で外すと今の選び方へ戻る。登録に無い名前と `再登録が要る` 名前は終了コード 1（`reason` は `not_registered`・
-`needs_relogin`）で断る。同じ置き場を使うラッパーすべてに効く。`account list` は名前に `（指定）`（`--json` は `pinned`）、`relay.py ls` は表の下の 1 行と `metrics.pinned_account` で示す。動いているラッパーは「ラッパーの入れ替え」で新しい版へ替わった後の区間から読む。
+指定は置き場の `pinned.json` に書き、区間の起動のたびに読む。指定が使えれば閾値や残りの量に依らずそれで起動し（`account` の行の`reason` は `pinned`）、使えない（上限・認証の失敗・再登録が要る）間は今の選び方で替えて続け、使えるようになった後の区間の起動で
+戻る。`--clear` で外すと今の選び方へ戻る。登録に無い名前と `再登録が要る` 名前は終了コード 1（`reason` は `not_registered`・`needs_relogin`）で断る。同じ置き場を使うラッパーすべてに効く。`account list` は名前に `（指定）`（`--json` は `pinned`）、`relay.py ls` は表の下の 1 行と `metrics.pinned_account` で示す。動いているラッパーは「ラッパーの入れ替え」で新しい版へ替わった後の区間から読む。
 
 **`account` の副命令はすべて `--yes`（確認を飛ばす）と `--json`（結果を JSON 1 つで標準出力へ返す）を受ける。**
 対話で聞く値（名前・プロファイル・地域・モデル・確認）はすべて引数でも渡せ、揃っていれば何も聞かない。標準入力が

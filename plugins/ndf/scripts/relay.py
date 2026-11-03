@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """NDF のラッパー relay.py のランチャー（#895・#1142 の C6）。
 
-副命令: `run` / `stop` / `mark` / `install` / `uninstall` / `status` / `startup` / `question open|close` /
-`is-child` / `notice`。役割の表と中身は `relay_lib/` にある（表は relay_lib/__init__.py）。プラグインの `scripts/relay.py` と、
+副命令の一覧は `relay.py --help` が出す。役割の表と中身は `relay_lib/` にある（表は relay_lib/__init__.py）。プラグインの `scripts/relay.py` と、
 `/ndf:install-wrapper` が `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py` へ置く複製は同じバイト列である。
 ランチャーは使う `relay_lib/` を次の順に 1 つ選んで `sys.path` の先頭に置き、`relay_lib.main` を呼ぶ:
 
