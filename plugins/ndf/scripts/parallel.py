@@ -480,23 +480,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     a = build_parser().parse_args(argv)
-    {
-        "init": cmd_init,
-        "check": cmd_check,
-        "start": cmd_start,
-        "run": cmd_run,
-        "wait": cmd_wait,
-        "present": cmd_present,
-        "confirm": cmd_confirm,
-        "settle": cmd_settle,
-        "stop": cmd_stop,
-        "request": cmd_request,
-        "await": cmd_await,
-        "request-ask": cmd_request_ask,
-        "request-gate2": cmd_request_gate2,
-        "answer": cmd_answer,
-        "helper": cmd_helper,
-    }[a.cmd](a)
+    globals()["cmd_" + a.cmd.replace("-", "_")](a)
 
 
 if __name__ == "__main__":
