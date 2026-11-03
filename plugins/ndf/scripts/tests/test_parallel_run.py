@@ -466,7 +466,7 @@ def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypat
     assert got.returncode == 4 and json.loads(got.stdout)["status"] == "stopped"
 
 
-# ---- 異常系（設計 issue-2436-design-failures.md の 3・5・11・12・17 と一時レーンの停止） ----
+# ---- 異常系（確定仕様 docs/specifications/ndf-parallel-organizer.md のエラー処理と一時レーンの停止） ----
 
 OLD = "2000-01-01T00:00:00Z"
 
