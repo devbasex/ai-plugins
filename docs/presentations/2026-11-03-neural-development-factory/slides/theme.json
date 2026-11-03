@@ -1,0 +1,26 @@
+{
+  "colors": {
+    "background": "0A0E1A",
+    "panel1": "131A2B",
+    "panel2": "1E2740",
+    "rule": "2A3550",
+    "text": "FFFFFF",
+    "ink": "CBD5E1",
+    "mute": "8391A7",
+    "accent": "22D3EE",
+    "accentSoft": "113A4A",
+    "warn": "FF4F8B",
+    "caution": "FFB547",
+    "header": "7C5CFF",
+    "onHeader": "FFFFFF"
+  },
+  "sizes": {
+    "title": 22,
+    "lead": 12.5,
+    "sectionTitle": 36,
+    "sectionSub": 15,
+    "coverTitle": 34,
+    "coverSub": 15
+  },
+  "copyright": "NDF — github.com/devbasex/ai-plugins"
+}
