@@ -163,8 +163,14 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   資料の `## 版を上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` は承認ゲート 2 で決めた
   上げ幅へ行を書き直す（表に無い名前・知らない上げ幅は 2）。`--decided` は表の上げ幅で `to` を決め、表が無い・
   上げ幅を読めない・版や集合が差分と合わないときは PATCH へ倒さずに 1 で止まる。他のプラグインが 0 件なら表を読まない
-- `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
-  `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
+- `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージのコミットで取り込む。
+  取り込みが版数を持つ箇所だけで衝突すれば、`release/v<版>-sync` に `origin/develop` を取り込んで本番の版の側を取り、
+  `release/v<版>-sync` → `develop` の Pull Request で取り込む（`release/v<版>` そのものへは `develop` を取り込まない）。
+  版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
+  `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
+  `prod` は続けて `release/v<版>` を head にした `main` 宛の Pull Request をマージし、タグと GitHub Release を作る。
+  `main` 宛の Pull Request がマージ済みなら（途中で止まった配布の再開）、比較とマージを飛ばし、タグと GitHub Release のうち
+  無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
   （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
   `metrics.sweep_candidates` に載せる。消すのは人の承認（`ndf-ask:redline:C4`）を得た後である（下の節）。
@@ -173,11 +179,12 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 - `release --channel prod` の承認したコミット: `--approved-sha <SHA>` か `--approval <承認資料>` のどちらかが要る
   （どちらも無い・形の誤りは 2、資料・欄が無いと 3。どれも何もマージしない）。`--approval` は承認の記録の SHA が
   承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
-  配布の PR をマージした後、`origin/<ベースブランチ>` の先端（比べた先端）までに配布の PR の外のコミットか中身が
-  あれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。ただし差分がすべて許可リスト
+  配布の PR をマージした後、承認したコミットから `origin/release/v<版>` の先端（比べた先端）までに `release/v<版>` の
+  Pull Request の外のコミットか中身があれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。
+  承認の後に `develop` が進んでいても比べる相手ではないため止まらず、進んだ分は次の配布で出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
-  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に先端が進んだときは比べ直す。進んだ分が
+  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
   配布物に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
   `--channel dev` には渡さない（2）
 
