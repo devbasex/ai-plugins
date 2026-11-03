@@ -3,7 +3,7 @@
 耐久ワークフローの中の分岐は耐久ステップの結果とメッセージだけで決まる。時刻・外のコマンド・ファイルを読むのは
 すべて耐久ステップである（打ち直しで同じ道を通るため。#1142 の I18）。外へ見せるのはイベントと出力だけである。
 
-- メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | stop, ...}`（レーン・一時レーン・`stop`）
+- メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | answer | stop, ...}`（レーン・一時レーン・オーガナイザーの答え・`stop`）
 - メッセージ `resume`: `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}`（`confirm`・`settle`）
 - イベント `pause`: `{seq, action}`（`running` / `notice` / `release` / `confirmed`。配布の途中の `notice` は
   最後の起動の指示を `release` に添える）、`questions`: `{seq, items}`
@@ -204,6 +204,7 @@ class _Run:
         self.seq = 0
         self.launch: Optional[dict] = None
         self.received: dict[str, int] = {}
+        self.answered: set[str] = set()
 
     def bump(self) -> int:
         self.seq += 1
@@ -242,8 +243,27 @@ class _Run:
                 self.received[msg.get("lane", "")] = self.received.get(msg.get("lane", ""), 0) + 1
                 durable.set_event(f"lane-{msg.get('lane')}", {"received": self.received[msg.get("lane", "")]})
         elif kind in ("gate1", "gate2", "ask"):
+            if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
+                return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
+            if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
+                msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
             self.questions.append(msg)
-            durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
+            self.publish_questions()
+        elif kind == "answer":
+            self.reply(msg)
+
+    def publish_questions(self) -> None:
+        durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
+
+    def reply(self, msg: dict) -> None:
+        """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。"""
+        rid = msg.get("id")
+        if rid in self.answered or all(q.get("id") != rid for q in self.questions):
+            return
+        self.answered.add(rid)
+        durable.set_event(f"answer-{rid}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "at")})
+        self.questions = [q for q in self.questions if q.get("id") != rid]
+        self.publish_questions()
 
     def answer(self, rid: str, result: str, version: Optional[str], n: Optional[int], reason: Optional[str] = None) -> None:
         durable.set_event(f"answer-{rid}", {"result": result, "version": version, "release": n, "reason": reason, "at": None})
@@ -295,6 +315,9 @@ class _Run:
         rel = self.current
         if rel is None or msg.get("n") != rel["n"]:
             return
+        if any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in self.questions):  # 承認ゲート 2 の答えが届いた
+            self.questions = [q for q in self.questions if not (q.get("kind") == "gate2" and q.get("n") == rel["n"])]
+            self.publish_questions()
         if msg.get("phase") == "confirm":
             self.confirm(rel, msg.get("take"))
         elif msg.get("phase") == "settle":
@@ -354,6 +377,30 @@ def helper_spawn(name: str, n: int, k: int) -> str:
         f"/goal /ndf:development-workflow --parallel-helper {name} {n} {k} -- 終わり: [ndf-parallel] helper-done {name} の行を出したとき"
     )
     return f"python3 {RELAY} spawn --name {pr.helper_name(name, n)} --role helper --plan {name} --json -- '{first}'"
+
+
+def helper_task(main: Path, name: str, n: int, k: int) -> dict:
+    """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
+    配布の途中の知らせに添えた `release`）が同じ連番と提示の `confirmed` なら確定の後の 3 手、そうでなければ提示。
+
+    - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランが承認ゲート 2 で
+      止まったかを見て、止まっていれば `gate2`（承認ゲート 2 の依頼を送る）、流れ切れば `settle` を打つ
+    - 確定の後（`phase: confirmed`）: `pipeline` は答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。
+      終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る"""
+    ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0) or {}
+    launch = ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
+    d = pr.release_dir(main, name, n, k)
+    py = f"python3 {HERE / 'parallel.py'}"
+    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {d / 'present-state' / 'report.md'}"}
+    if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k:
+        done = d / "release-done.json"
+        gate = f"python3 {HERE / 'sprint-state.py'} gate {d / 'answer.json'} '関門 2' --what 'まとめた配布 {n} の提示 {k}' --by user --outcome approved"
+        steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
+        return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
+                "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
+    done = d / "done.json"
+    return {**out, "phase": "present", "pipeline": f"{pr.pipeline_cmd(SUPERVISE, d)} && {SUPERVISE} wait {done}",
+            "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
 
 
 @durable.workflow(name="parallel")

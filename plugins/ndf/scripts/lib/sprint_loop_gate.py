@@ -356,6 +356,8 @@ def move_to_waiting(
                 "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
                 "basis": row.get("basis") or [], "gate": 1, "pr": pr, "lap": lap["n"], "at": env.now(),
             }  # fmt: skip
+            if pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
+                w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えは周回の境で読む（#2436 の 6c）
             rec["waiting"].append(w)
             lap.setdefault("gates", []).append(gate_copy(GATE_1, row))
             moved.append(int(n))
@@ -364,6 +366,26 @@ def move_to_waiting(
     kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved and n not in unfinished]
     lap["issues_kept"] = kept
     return moved, kept, notes
+
+
+def lane_gate1(env: Env, w: dict, report: str, state: str) -> dict | None:
+    """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan} を返す。
+    レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。"""
+    try:
+        import parallel_lane
+
+        got = parallel_lane.lane_of(env.main_dir())
+        if not got:
+            return None
+        code, so, _ = env.run(["gh", "pr", "view", str(w["pr"]), "--json", "headRefOid", "-q", ".headRefOid"], cwd=str(env.main_dir()))
+        stamp = so.strip() if code == 0 else ""
+        rid = parallel_lane.request_gate1(
+            env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
+            verdict=w.get("verdict"), reasons=[w.get("reason")] if w.get("reason") else [],
+        )  # fmt: skip
+    except Exception:  # noqa: BLE001 — 送れなければ今どおり人の判断待ち（loop answer で答える）
+        return None
+    return {"request": rid, "plan": got[0]}
 
 
 def drop_issues(plan: str, moved: list[int]) -> None:

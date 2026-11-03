@@ -1467,3 +1467,14 @@ def test_gate1_answers_are_applied_by_the_lane_at_the_boundary(env):
     w = rec(env)["waiting"][0]
     assert w["answer"] == "approved" and w["pr"] == 501
     assert any(c[:3] == ["gh", "pr", "edit"] and "design-approved" in c for c in env.calls)
+
+
+def test_gate_1_of_a_lane_sends_the_request_to_the_organizer(env, monkeypatch):
+    lap = built_lap(env)
+    report = design_report(env, "design-11", "https://github.com/o/r/pull/501")
+    sent = []
+    monkeypatch.setattr(sl_gate, "lane_gate1", lambda e, w, report, state: sent.append(w["number"]) or {"request": "lroot-g501-x", "plan": "p1"})
+    item = {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門", "report": report}
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    w = rec(env)["waiting"][0]
+    assert out["metrics"]["waiting"] == [11] and sent == [11] and w["request"] == "lroot-g501-x" and w["plan"] == "p1"

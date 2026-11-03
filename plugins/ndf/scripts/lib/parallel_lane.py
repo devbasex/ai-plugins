@@ -204,3 +204,114 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
             dfr = c.get_event(workflow_id(name), f"defer-{i}", timeout_seconds=0)
             out[i] = {"answer": ans if isinstance(ans, dict) else None, "defer": dfr if isinstance(dfr, dict) else None}
     return out
+
+
+# ---- 問いの依頼と答え（#2436 の 6c・6d・6f。設計 issue-2436-design-approvals.md） ----
+
+ROLE_FILE = "role.json"  # relay_lib.hub.ROLE_FILE（統括役の作業ディレクトリの役割のファイル。統括役を import しない）
+
+
+def helper_plan_of(relay_dir: Optional[str]) -> Optional[str]:
+    """作業ディレクトリ（`NDF_RELAY_DIR`）の役割のファイルが `helper` なら、その計画名。"""
+    if not relay_dir:
+        return None
+    try:
+        got = json.loads((Path(relay_dir) / ROLE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return got.get("plan") if isinstance(got, dict) and got.get("role") == "helper" and got.get("plan") else None
+
+
+def lane_name_in_plans(main: Path, name: Optional[str], relay_dir: Optional[str]) -> Optional[str]:
+    """レーンか一時レーンかをファイルだけで見る（問いの hook の 10 秒の上限の中で DBOS を読まない）。計画名か None。"""
+    if not name:
+        return None
+    for plan in plans_in(main):
+        try:
+            lanes = json.loads((pp.plan_dir(main, plan) / "plan.json").read_text(encoding="utf-8")).get("lanes") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        if any(isinstance(ln, dict) and ln.get("name") == name for ln in lanes):
+            return plan
+    return helper_plan_of(relay_dir)
+
+
+def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
+    """問いを送ってよい送り手か: 動いている計画のレーン（`lane_of`）か、役割のファイルが `helper` で、その計画の
+    耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。"""
+    got = lane_of(main, name, status) if name else None
+    if got:
+        return got[0], name
+    plan = helper_plan_of(relay_dir)
+    if name and plan and status(main, plan) in RUNNING:
+        return plan, name
+    return None
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
+    import durable
+
+    wid = workflow_id(name)
+    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{key}")
+
+
+def _head(cwd: str) -> str:
+    got = subprocess.run(["git", "-C", cwd, "rev-parse", "HEAD"], capture_output=True, text=True)
+    return got.stdout.strip() if got.returncode == 0 else ""
+
+
+def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str) -> str:
+    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。"""
+    qs = (tool_input or {}).get("questions") or []
+    first = qs[0] if qs and isinstance(qs[0], dict) else {}
+    rid = f"{lane}-q{ledger_id}"
+    msg = {
+        "kind": "ask",
+        "id": rid,
+        "lane": lane,
+        "source": ((tool_input or {}).get("metadata") or {}).get("source"),
+        "question": first.get("question"),
+        "options": [o.get("label") for o in first.get("options") or [] if isinstance(o, dict)],
+        "questions": qs,
+        "cwd": cwd,
+        "ledger_id": ledger_id,
+        "stamp": _head(cwd),
+        "at": _now(),
+    }
+    _send_inbox(main, name, msg, rid)
+    return rid
+
+
+def request_gate1(main: Path, name: str, lane: str, issue: int, pr: int, report: str, state: str, stamp: str, **extra) -> str:
+    """設計の承認の依頼（`kind: gate1`）。id は `<レーン>-g<設計 PR>-<先頭の SHA の 12 桁>`（同じ先頭の打ち直しは同じ id）。"""
+    rid = f"{lane}-g{pr}-{stamp[:12]}"
+    msg = {"kind": "gate1", "id": rid, "lane": lane, "issue": issue, "pr": pr, "report": report, "sprint_state": state, "stamp": stamp}
+    _send_inbox(main, name, {**msg, **extra, "at": _now()}, rid)
+    return rid
+
+
+def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
+    """一時レーンが提示のプランの承認ゲート 2 で止まったときの依頼（`kind: gate2`）。id は `<計画名>-p<連番>-<提示>`、
+    stamp は提示したコミット（`presented.json`）。"""
+    import parallel_release as prl
+
+    try:
+        sha = json.loads((prl.release_dir(main, name, n, k) / "presented.json").read_text(encoding="utf-8")).get("sha") or ""
+    except (OSError, ValueError):
+        sha = ""
+    rid = f"{name}-p{n}-{k}"
+    lane = prl.helper_name(name, n)
+    _send_inbox(main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": _now()}, rid)
+    return rid
+
+
+def send_answer(
+    main: Path, name: str, rid: str, result: str, note: Optional[str] = None, choice: Optional[list[str]] = None, stamp: Optional[str] = None
+) -> None:
+    """オーガナイザーの答えを送る。耐久ワークフローが `answer-<依頼>` を 1 回だけ立て、問いの一覧から外す。"""
+    msg = {"kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp, "at": _now()}
+    _send_inbox(main, name, msg, f"answer:{rid}")

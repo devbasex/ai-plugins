@@ -14,6 +14,10 @@
 | `stop <計画名>` | 計画の全レーンを止め、耐久ワークフローを終える |
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
+| `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
+| `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンが承認ゲート 2 の依頼を送る |
+| `answer <計画名> <依頼> (--approved \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行） |
+| `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。正本の手順は
 `skills/development-workflow/references/parallel.md` と `skills/issue-plan-strategy/references/parallel-plan.md` にある。
@@ -336,6 +340,74 @@ def cmd_await(a) -> None:
     )
 
 
+# ---- 問いと一時レーン（#2436 の 6c・6d・6f） ----
+
+
+def cmd_request_ask(a) -> None:
+    main = main_of()
+    try:
+        got = json.loads(sys.stdin.read() or "{}")
+    except ValueError as exc:
+        reply("stopped", f"標準入力の問いを読めない: {exc}", code=2)
+    who = pl.sender_of(main, a.lane, os.environ.get("NDF_RELAY_DIR"))
+    if who is None:
+        reply("stopped", f"{a.lane} は動いている計画のレーンでも一時レーンでもない（問いは通す）", code=4)
+    if who[0] != a.name:
+        reply("stopped", f"{a.lane} は計画 {who[0]} の送り手で、{a.name} の送り手でない", code=4)
+    rid = pl.request_ask(main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or ""))
+    reply("ok", f"問いの依頼 {rid} をオーガナイザーへ送った", id=rid)
+
+
+def cmd_request_gate2(a) -> None:
+    main = main_of()
+    if pl.run_status(main, a.name) not in pl.RUNNING:
+        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
+    rid = pl.request_gate2(main, a.name, a.n, a.k, a.report)
+    reply("ok", f"承認ゲート 2 の依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
+
+
+def _owner_restart(main: Path, name: str, rid: str) -> str | None:
+    """答えた依頼の持ち主のレーンが止まっていれば、起こす 1 行（`relay.py restart <レーン>`）。動いていれば None。"""
+    import durable
+    import parallel_run as pr_run
+
+    items = (durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0) or {}).get("items") or []
+    lane = next((q.get("lane") for q in items if q.get("id") == rid), None)
+    if not lane:
+        return None
+    code, got = pr_run.relay(main, "ls", "--json")
+    state = next((i.get("state") for i in got.get("items") or [] if i.get("name") == lane), None) if code == 0 else None
+    return None if state in ("running", "awaiting_approval") else f"python3 {pr_run.RELAY} restart {lane}"
+
+
+def cmd_answer(a) -> None:
+    main = main_of()
+    if pl.run_status(main, a.name) not in pl.RUNNING:
+        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
+    note = None
+    if a.revise:
+        if not a.note:
+            reply("stopped", "--revise には --note <指摘のファイル> が要る", code=1)
+        try:
+            note = Path(a.note).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            reply("stopped", f"指摘のファイルを読めない: {exc}", code=2)
+    result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
+    nxt = _owner_restart(main, a.name, a.id)
+    pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice)
+    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った", id=a.id, result=result, next=nxt)
+
+
+def cmd_helper(a) -> None:
+    import parallel_run as pr_run
+
+    main = main_of()
+    if pl.run_status(main, a.name) not in pl.RUNNING:
+        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
+    task = pr_run.helper_task(main, a.name, a.n, a.k)
+    reply("ok", f"一時レーンの仕事: 配布 {a.n} の提示 {a.k}（{task['phase']}）", **task)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="parallel.py", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -379,6 +451,27 @@ def build_parser() -> argparse.ArgumentParser:
     aw.add_argument("name")
     aw.add_argument("--from", required=True)
     aw.add_argument("--timeout", type=float, default=0)
+    ra = sub.add_parser("request-ask")
+    ra.add_argument("name")
+    ra.add_argument("--lane", required=True)
+    rg = sub.add_parser("request-gate2")
+    rg.add_argument("name")
+    rg.add_argument("n", type=int)
+    rg.add_argument("k", type=int)
+    rg.add_argument("--report", required=True)
+    an = sub.add_parser("answer")
+    an.add_argument("name")
+    an.add_argument("id")
+    ag = an.add_mutually_exclusive_group(required=True)
+    ag.add_argument("--approved", action="store_true")
+    ag.add_argument("--revise", action="store_true")
+    ag.add_argument("--rejected", action="store_true")
+    ag.add_argument("--choice", nargs="+")
+    an.add_argument("--note")
+    hp = sub.add_parser("helper")
+    hp.add_argument("name")
+    hp.add_argument("n", type=int)
+    hp.add_argument("k", type=int)
     return ap
 
 
@@ -396,6 +489,10 @@ def main(argv=None) -> None:
         "stop": cmd_stop,
         "request": cmd_request,
         "await": cmd_await,
+        "request-ask": cmd_request_ask,
+        "request-gate2": cmd_request_gate2,
+        "answer": cmd_answer,
+        "helper": cmd_helper,
     }[a.cmd](a)
 
 

@@ -338,3 +338,87 @@ def test_notice_during_release_carries_launch(env, tmp_path):
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
     assert ev["release"]["seq"] == rel["seq"] and ev["release"]["spawn"] == rel["spawn"]
     assert ev["release"]["pipeline"] == rel["pipeline"]
+
+
+# ---- 問いをオーガナイザーへ集める（受け入れ条件 6c・6d・6f）と一時レーン ----
+
+ASK = {"questions": [{"question": "gh の認証を直してよいか", "options": [{"label": "済んだ"}, {"label": "まだ"}]}],
+       "metadata": {"source": "ndf-ask:human-action"}}  # fmt: skip
+
+
+def questions(main):
+    return event(main, "p1", "questions") or {"items": []}
+
+
+def test_ask_request_raises_questions_and_the_answer_reaches_the_lane(env, tmp_path):
+    main = env["main"]
+    start(main)
+    rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led1")
+    assert rid == "la-qled1"
+    got = until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    assert got[0]["kind"] == "ask" and got[0]["source"] == "ndf-ask:human-action" and "attach la" in got[0]["attach"]
+    pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
+    ans = until(lambda: pl.answers_of(main, "p1", [rid])[rid]["answer"])
+    assert ans["result"] == "answered" and ans["choice"] == ["済んだ"]
+    until(lambda: not [i for i in questions(main)["items"] if i["id"] == rid])  # 答えた問いはもう返さない
+
+
+def test_the_same_ask_id_is_counted_once(env, tmp_path):
+    main = env["main"]
+    start(main)
+    pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led1")
+    pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led1")
+    until(lambda: questions(main)["items"])
+    time.sleep(0.6)
+    assert len(questions(main)["items"]) == 1
+
+
+def test_sender_is_a_running_lane_or_a_helper_with_the_role_file(env, tmp_path):
+    main = env["main"]
+    helper = tmp_path / "helper"
+    helper.mkdir()
+    (helper / "role.json").write_text(json.dumps({"role": "helper", "plan": "p1"}))
+    other = tmp_path / "other"
+    other.mkdir()
+    assert pl.lane_name_in_plans(main, "la", None) == "p1"  # ファイルだけで見る
+    assert pl.lane_name_in_plans(main, "p1-rel1", str(helper)) == "p1"
+    assert pl.lane_name_in_plans(main, "zz", str(other)) is None
+    assert pl.sender_of(main, "la", None) is None  # 計画が動いていない
+    start(main)
+    until(lambda: pl.run_status(main, "p1") in pl.RUNNING)
+    assert pl.sender_of(main, "la", None) == ("p1", "la")
+    assert pl.sender_of(main, "p1-rel1", str(helper)) == ("p1", "p1-rel1")  # lanes に載らない一時レーンも送れる
+    assert pl.sender_of(main, "zz", str(other)) is None
+
+
+def test_helper_task_follows_the_last_launch(env, tmp_path):
+    main = env["main"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    task = prun.helper_task(main, "p1", 1, 1)
+    d = prl.release_dir(main, "p1", 1, 1)
+    assert task["phase"] == "present" and f"queue {d / 'present.json'}" in task["pipeline"]
+    assert "request-gate2 p1 1 1" in task["gate2"] and "settle p1 1 --done" in task["settle"]
+    (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]
+    assert item["id"] == "p1-p1-1" and item["stamp"] == "sha1"
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # 承認ゲート 2 の問いは答えで消える
+    task = prun.helper_task(main, "p1", 1, 1)
+    assert task["phase"] == "confirmed"
+    assert "'関門 2'" in task["pipeline"] and "--from approve" in task["pipeline"] and f"queue {d / 'release.json'}" in task["pipeline"]
+
+
+def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypatch):
+    monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+    got = subprocess.run(
+        [sys.executable, str(SCRIPTS / "parallel.py"), "request-ask", "p1", "--lane", "zz"],
+        input=json.dumps({"tool_input": ASK, "cwd": str(env["main"]), "ledger_id": "x"}),
+        capture_output=True,
+        text=True,
+        cwd=str(env["main"]),
+    )
+    assert got.returncode == 4 and json.loads(got.stdout)["status"] == "stopped"
