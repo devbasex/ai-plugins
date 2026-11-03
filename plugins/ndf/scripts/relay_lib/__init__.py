@@ -11,7 +11,7 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 | `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
-| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453・#1468。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
+| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` / `account use <名前>\|--clear` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す・次の区間から使うアカウントを指定する（#1389・#1453・#1468・#2460。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
@@ -53,7 +53,7 @@ def main(argv: list[str]) -> int:
 
     if not argv:
         print(
-            "usage: relay.py run|stop|spawn|ls|attach|restart|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove",
+            "usage: relay.py run|stop|spawn|ls|attach|restart|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove|use",
             file=sys.stderr,
         )
         return 2
