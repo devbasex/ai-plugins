@@ -586,20 +586,22 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   rr(s, 3.56, 1.32, 2.1, 1.7, "accentSoft", "accent");
   d.text(s, "オーケストレーター", { x: 3.68, y: 1.36, w: 1.9, h: 0.3, fontSize: 11, bold: true, color: "accent", valign: "middle" });
   pill(s, 3.68, 1.68, 1.0, 0.22, "常駐しない", "accent", "background", 8);
-  d.text(s, bullets(["開始・停止・見回り", "ループの周回を起こす", "オーガナイザー（配布を 1 本に）"], 9), { x: 3.68, y: 1.96, w: 1.92, h: 1.02, valign: "top", paraSpaceAfter: 2 });
+  d.text(s, bullets(["開始・停止・見回り", "ループの周回を起こす", "配布をまとめるオーガナイザー"], 9), { x: 3.68, y: 1.96, w: 1.92, h: 1.02, valign: "top", paraSpaceAfter: 2 });
   d.arrow(s, 5.68, 1.83, 0.26, 0, "accent");
   rr(s, 5.96, 1.32, 2.38, 1.7, "panel1", "accent");
   d.text(s, "実行ジョブ（コンテナ 1 つ）", { x: 6.08, y: 1.36, w: 2.2, h: 0.3, fontSize: 10.5, bold: true, color: "accent", valign: "middle" });
   d.text(s, bullets(["conductor → supervisor → worker", "区間はランナーがつなぐ", "版はスプリントの開始で固定"], 9), { x: 6.08, y: 1.7, w: 2.2, h: 1.28, valign: "top", paraSpaceAfter: 2 });
   d.arrow(s, 8.36, 1.83, 0.26, 0, "accent");
   bx(8.64, 1.1, "GitHub\nPR・CI");
-  // 中段: 進捗の事象 → 一覧・詳細・通知・課金 → 画面
+  // 中段: 進捗の受け口（#2171）→ API が事象から作るもの。見回り（オーケストレーター）も受け口の記録を読む
   d.arrow(s, 7.15, 3.06, 0, 0.28, "accent");
-  rr(s, 5.96, 3.38, 2.38, 0.6, "header");
-  d.text(s, "進捗の事象（追記だけ）", { x: 5.96, y: 3.38, w: 2.38, h: 0.6, fontSize: 11.5, bold: true, color: "onHeader", align: "center", valign: "middle" });
-  d.arrow(s, 5.92, 3.68, -0.34, 0, "accent");
-  rr(s, X0, 3.38, 5.3, 0.6, "panel2");
-  d.text(s, "一覧・詳細・通知・課金・見回りの判断", { x: X0, y: 3.38, w: 5.3, h: 0.6, fontSize: 11.5, bold: true, color: "text", align: "center", valign: "middle" });
+  rr(s, 4.9, 3.38, 3.44, 0.62, "header");
+  d.text(s, [{ text: "進捗の受け口\n", options: { fontSize: 11.5, bold: true } }, { text: "ランナー・GitHub・承認の事象を追記だけで残す", options: { fontSize: 8.5 } }], { x: 5.0, y: 3.38, w: 3.24, h: 0.62, color: "onHeader", align: "center", valign: "middle" });
+  d.arrow(s, 5.3, 3.36, 0, -0.3, "accent");
+  d.text(s, "見回りが読む", { x: 5.36, y: 3.08, w: 0.6, h: 0.26, fontSize: 7, color: "accent", valign: "middle" });
+  d.arrow(s, 4.88, 3.69, -0.3, 0, "accent");
+  rr(s, X0, 3.38, 4.3, 0.62, "panel2");
+  d.text(s, [{ text: "API が事象から作る\n", options: { fontSize: 9, color: "mute" } }, { text: "一覧・詳細 ／ 承認と通知 ／ 課金", options: { fontSize: 11.5, bold: true, color: "text" } }], { x: X0, y: 3.38, w: 4.3, h: 0.62, align: "center", valign: "middle" });
   d.arrow(s, 0.9, 3.34, 0, -1.04, "accent");
   // 下段: 承認を待つ間もラインは止まらない
   flow(s, X0, 4.22, W, 0.5, [{ text: "承認の依頼を出す" }, "ジョブを終える（費用 0）", "次の周回は待たずに始まる", "答えは持ち主か次の周回へ"], { size: 10.5, gap: 0.3 });
