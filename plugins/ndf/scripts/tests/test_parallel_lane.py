@@ -54,7 +54,29 @@ def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
     import parallel_release
 
     monkeypatch.setattr(
-        parallel_release, "plan_release_request", lambda a, repo, plan, lane, prs=None: {"フェーズ": "配布の依頼", "plan": plan, "lane": lane}
+        parallel_release,
+        "plan_release_request",
+        lambda a, repo, plan, lane, prs=None: {"フェーズ": "配布の依頼", "plan": plan, "lane": lane},
     )
     got = sprint.prod_plans(None, "/r", lambda: {"x": 1})
     assert got == {"release-request": {"フェーズ": "配布の依頼", "plan": "p1", "lane": "la"}}
+
+
+def test_release_request_plan_has_one_gate_step():
+    import argparse
+
+    import supervise_lib  # noqa: F401  lib/ と supervise_lib を読めるようにする
+    import parallel_release
+
+    plan = parallel_release.plan_release_request(argparse.Namespace(issue=[2436], mode="standard"), "/r", "p1", "la", ["{queue_pr:check}"])
+    assert plan["フェーズ"] == "配布の依頼" and [s["id"] for s in plan["steps"]] == ["parallel-request"]
+    assert "request p1 --lane la --prs {queue_pr:check} --issues 2436" in plan["steps"][0]["cmd"]
+
+
+def test_present_gate_puts_approve_after_mvv(tmp_path):
+    import supervise_lib  # noqa: F401
+    import parallel_release
+
+    steps = parallel_release.present_gate_steps(str(tmp_path / "a.json"), "/r", "issues/x.md", "1 2", "standard", "/f", "/a")
+    ids = [s["id"] for s in steps]
+    assert ids[:3] == ["mvv", "note", "approve"] and steps[1]["next"] == "approve" and steps[2]["next"] == "end"
