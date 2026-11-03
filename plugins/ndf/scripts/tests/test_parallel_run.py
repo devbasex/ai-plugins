@@ -451,7 +451,7 @@ def test_questions_of_the_same_cause_are_asked_once_and_answered_to_each(env, tm
     a = pl.request_ask(main, "p1", "la", {**ASK, "questions": [{"question": "gh の認証が切れた（/work/la の #12）", "options": []}]}, str(tmp_path), "x1")
     b = pl.request_ask(main, "p1", "lb", {**ASK, "questions": [{"question": "gh の認証が切れた（/work/lb の #34）", "options": []}]}, str(tmp_path), "x2")
     item = until(lambda: [i for i in questions(main)["items"] if b in (i.get("also") or [])])[0]
-    assert item["id"] == a and len(questions(main)["items"]) == 1
+    assert item["id"] == a and len(questions(main)["items"]) == 1 and "/work/lb の #34" in item["merged"][0]["question"]
     pl.send_answer(main, "p1", a, "answered", choice=["済んだ"])
     until(lambda: all(pl.answers_of(main, "p1", [a, b])[r]["answer"] for r in (a, b)))
 
@@ -514,3 +514,13 @@ def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
     assert durable.output_of(pl.workflow_id("p1"))["status"] == "finished"
+
+
+def test_irreversible_questions_with_different_numbers_are_not_merged(env, tmp_path):
+    main = env["main"]
+    env["states"].write_text(json.dumps({"la": "running", "lb": "running"}))
+    start(main)
+    q = lambda n: {"questions": [{"question": f"PR #{n} を消してよいか", "options": [{"label": "はい"}]}], "metadata": {"source": "ndf-ask:irreversible"}}  # noqa: E731
+    pl.request_ask(main, "p1", "la", q(12), str(tmp_path), "y1")
+    pl.request_ask(main, "p1", "lb", q(34), str(tmp_path), "y2")
+    until(lambda: len(questions(main)["items"]) == 2)

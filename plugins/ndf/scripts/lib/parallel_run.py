@@ -295,15 +295,16 @@ class _Run:
         elif kind in ("gate1", "gate2", "ask"):
             if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
                 return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
-            same = next((q for q in self.questions if msg.get("kind") == "ask" and q.get("cause") == cause_of(msg)), None)
+            key = cause_of(msg)
+            same = next((q for q in self.questions if key and q.get("cause") == key), None)
             if same is not None:  # 同じ原因の問いは 1 つにまとめ、答えを依頼してきた全レーンへ配る（異常系 5）
                 same["also"] = [*same.get("also", []), msg.get("id")]
-                same["lanes"] = [*same.get("lanes", [same.get("lane")]), msg.get("lane")]
+                same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
                 self.publish_questions()
                 return
             if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
                 msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
-            self.questions.append({**msg, "cause": cause_of(msg)} if msg.get("kind") == "ask" else msg)
+            self.questions.append({**msg, "cause": key} if key else msg)
             self.publish_questions()
         elif kind == "answer":
             self.reply(msg)
@@ -593,15 +594,21 @@ def _ask_helper(run: _Run, rows: dict) -> None:
 
 
 def cause_of(msg: dict) -> str:
-    """同じ原因の問いの鍵: 区分と、空白をまとめてレーン名・パス・番号を伏せた問いの文面（異常系 5）。"""
+    """同じ原因の問いの鍵（異常系 5）: 区分と選択肢と、空白をまとめてレーン名・パス・番号を伏せた問いの文面。
+
+    まとめるのは人にしかできない操作（`ndf-ask:human-action`。認証切れ・ディスク不足・ネットワークなど環境の問題）だけで、
+    取り消せない操作・レッドライン・費用の問いは番号の違いで別の対象になり得るため、まとめない（空の鍵を返す）。
+    まとめた問いには各レーンの元の文面（`merged`）を残し、オーガナイザーが問いに並べる。"""
     import re
 
+    if msg.get("kind") != "ask" or msg.get("source") != "ndf-ask:human-action":
+        return ""
     text = str(msg.get("question") or "")
     if msg.get("lane"):
         text = text.replace(str(msg["lane"]), "<lane>")
     text = re.sub(r"(/[^\s（）()]+)+", "<path>", text)
     text = re.sub(r"\d+", "<n>", text)
-    return f"{msg.get('source')}|{' '.join(text.split())}"
+    return f"{msg.get('source')}|{json.dumps(msg.get('options') or [], ensure_ascii=False)}|{' '.join(text.split())}"
 
 
 def _plan_view(run: _Run) -> pp.ParallelPlan:
