@@ -8,11 +8,11 @@
 | `start <計画名>` | `run` をセッションから切り離して起動する（動いていれば今の pid を返す） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
 | `wait <計画名> [--after <seq>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions）か終わりまで待つ。上限なら 3 |
-| `present <計画名> <連番> <提示> --approval <承認資料> --out <パス> [--first <presented.json>]` | 範囲の Pull Request をレーンへ対応づける |
+| `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | 承認ゲート 2 の承認を送る |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | 本番の配布の結果を送る |
 | `stop <計画名>` | 計画の全レーンを止め、耐久ワークフローを終える |
-| `request <計画名> --lane <名> --state <パス> --out <パス> [--prs ...] [--issues ...]` | 配布の依頼を送る（10）か、すでに `main` にあれば送らない（0） |
+| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。正本の手順は
@@ -78,8 +78,12 @@ def cmd_init(a) -> None:
     plan, items, metrics = pp.check_data(raw)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
+    import handoff
+
     try:
         written = pp.write_all(main, plan, raw)
+    except handoff.Failure as exc:
+        reply("stopped", f"引継ぎ文書の置き場が無い: {exc}", items, exc.code)
     except FileExistsError as exc:
         reply("stopped", f"在る文書を上書きしないため何も書いていない: {exc}", items, 1, existing=str(exc).split(", "))
     except OSError as exc:
@@ -164,9 +168,9 @@ def cmd_start(a) -> None:
     if pl.run_status(main, a.name) is None:
         _manual_or_none(main, plan)
     log = pp.plan_dir(main, a.name) / "run.log"
-    with open(log, "ab") as f:
+    with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
         p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
-    pidfile.write_text(f"{p.pid}\n")
+    (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
     reply("ok", f"run を切り離して起動した（pid {p.pid}）", pid=p.pid, log=str(log), next=_wait_line(a.name))
 
 
@@ -208,15 +212,15 @@ def cmd_present(a) -> None:
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある", items, 1)
     d = pr.release_dir(main, a.name, a.n, a.k)
-    first = json.loads(Path(a.first).read_text(encoding="utf-8")) if a.first and Path(a.first).is_file() else None
+    p1 = pr.release_dir(main, a.name, a.n, 1) / "presented.json"
+    first = json.loads(p1.read_text(encoding="utf-8")) if a.k != 1 and p1.is_file() else None
     reqs = _requests_for(main, a.name)
     try:
-        got = pr.present(main, plan, Path(a.approval), reqs, Path(a.out), d / "presented.json", first)
+        got = pr.present(main, plan, Path(a.approval), reqs, d, first)
     except ValueError as exc:
         reply("stopped", f"承認資料に承認したコミットが無い: {exc}", code=1)
     except OSError as exc:
         reply("stopped", f"読めない: {exc}", code=2)
-    Path(a.out).with_name("approved.txt").write_text(got["sha"] + "\n", encoding="utf-8")
     reply(
         "ok",
         f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）",
@@ -299,10 +303,10 @@ def cmd_request(a) -> None:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     if a.prs and pl.merged_on_main(main, a.prs):
         version = pl.released_version(main, a.name, a.prs)
-        pl.write_out(Path(a.out), {"result": "released", "version": version, "prs": a.prs})
+        pl.write_request(Path(a.state), {"result": "released", "version": version, "prs": a.prs})
         reply("ok", "自分の Pull Request はすでに main にある。依頼を送らずに続きへ進む", result="released", version=version)
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
-    pl.write_out(Path(a.out), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
+    pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     reply("gate", f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む", code=10, id=rid, result="requested")
 
 
@@ -335,8 +339,16 @@ def cmd_await(a) -> None:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="parallel.py", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n in ("init", "check", "start", "run", "stop"):
-        sub.add_parser(n).add_argument("name")
+    ini = sub.add_parser("init")
+    ini.add_argument("name")
+    chk = sub.add_parser("check")
+    chk.add_argument("name")
+    sta = sub.add_parser("start")
+    sta.add_argument("name")
+    run_ = sub.add_parser("run")
+    run_.add_argument("name")
+    stp = sub.add_parser("stop")
+    stp.add_argument("name")
     w = sub.add_parser("wait")
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
@@ -346,8 +358,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("n", type=int)
     p.add_argument("k", type=int)
     p.add_argument("--approval", required=True)
-    p.add_argument("--out", required=True)
-    p.add_argument("--first")
     c = sub.add_parser("confirm")
     c.add_argument("name")
     c.add_argument("n", type=int)
@@ -365,7 +375,6 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--prs", type=int, nargs="*", default=[])
     r.add_argument("--issues", type=int, nargs="*", default=[])
     r.add_argument("--state", required=True)
-    r.add_argument("--out", required=True)
     aw = sub.add_parser("await")
     aw.add_argument("name")
     aw.add_argument("--from", required=True)

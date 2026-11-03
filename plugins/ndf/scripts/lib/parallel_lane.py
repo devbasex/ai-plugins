@@ -106,13 +106,13 @@ def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
 
 
 def lane_request_id(state: Path, lane: str) -> str:
-    """依頼の ID。最初の実行で `<レーン名>-r<乱数 12 桁>` を作って `work/request-id` へ書き、打ち直しでは読む。"""
-    p = Path(state) / "work" / "request-id"
+    """依頼の ID。最初の実行で `<レーン名>-r<乱数 12 桁>` を作って `work/request-id.txt` へ書き、打ち直しでは読む。"""
+    p = Path(state) / "work" / "request-id.txt"
     if p.is_file() and p.read_text(encoding="utf-8").strip():
         return p.read_text(encoding="utf-8").strip()
     p.parent.mkdir(parents=True, exist_ok=True)
     rid = f"{lane}-r{secrets.randbelow(10**12):012d}"
-    p.write_text(rid + "\n", encoding="utf-8")
+    (Path(state) / "work" / "request-id.txt").write_text(rid + "\n", encoding="utf-8")
     return rid
 
 
@@ -176,6 +176,8 @@ def read_answer(main: Path, name: str, rid: str, timeout: float = 0) -> tuple[Op
         time.sleep(min(5.0, max(0.2, deadline - time.monotonic())))
 
 
-def write_out(out: Path, data: dict) -> None:
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    Path(out).write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+def write_request(state: Path, data: dict) -> Path:
+    """依頼の記録をプランの状態ディレクトリの `work/request.txt` へ書き、そのパスを返す（`parallel.py await --from` が読む）。"""
+    (Path(state) / "work").mkdir(parents=True, exist_ok=True)
+    (Path(state) / "work" / "request.txt").write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+    return Path(state) / "work" / "request.txt"

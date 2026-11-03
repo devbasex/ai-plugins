@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/parallel.py",
+  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめた配布の提示と確定・レーンの配布の依頼と答え（#2436）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "await": {
+        "options": [
+          "--from",
+          "--timeout"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
+      "check": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
+      "confirm": {
+        "options": [
+          "--take"
+        ],
+        "positionals": [
+          "name",
+          "n"
+        ]
+      },
+      "init": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
+      "present": {
+        "options": [
+          "--approval"
+        ],
+        "positionals": [
+          "name",
+          "n",
+          "k"
+        ]
+      },
+      "request": {
+        "options": [
+          "--issues",
+          "--lane",
+          "--prs",
+          "--state"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
+      "run": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
+      "settle": {
+        "options": [
+          "--done",
+          "--reason",
+          "--rejected"
+        ],
+        "positionals": [
+          "name",
+          "n"
+        ]
+      },
+      "start": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
+      "stop": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
+      "wait": {
+        "options": [
+          "--after",
+          "--timeout"
+        ],
+        "positionals": [
+          "name"
+        ]
+      }
+    }
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_PARALLEL_MAX_PLANS",
+    "NDF_PARALLEL_POLL",
+    "NDF_PARALLEL_RELAY",
+    "NDF_PRESENTATION_DIR",
+    "NDF_RELAY_DIR",
+    "NDF_RELAY_MAX_NAMED",
+    "NDF_RELAY_NAME",
+    "NDF_SV_STATE_DIR",
+    "NDF_WHOLE_RUNS_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "min_samples",
+        "records_dir",
+        "window"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "text",
+  "stdout": "step-result",
+  "writes": [
+    "answer-json",
+    "approved-txt",
+    "breakdown-md",
+    "plan-json",
+    "plan-md",
+    "present-json",
+    "presented-json",
+    "prs-txt",
+    "request-id-txt",
+    "request-txt",
+    "run-log",
+    "run-pid"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "計画が無い・検査に誤り・動いていない・承認したコミットが無い（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "まだ変化が無い・答えがまだ無い（status stopped）",
+    "4": "本番のプランが承認ゲートで止まっている（status stopped）",
+    "10": "配布の依頼を送った・依頼が退けられた（status gate）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/parallel_lane.py",
+    "plugins/ndf/scripts/lib/parallel_plan.py",
+    "plugins/ndf/scripts/lib/parallel_release.py",
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/skills/development-workflow/references/parallel.md"
+  ]
+}

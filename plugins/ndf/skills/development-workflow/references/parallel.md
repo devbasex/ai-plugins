@@ -42,7 +42,7 @@
 
 並列の計画の下のレーン（`NDF_RELAY_NAME` が動いている計画のレーンにある）では、スプリントの本番のステージが
 配布の依頼のプラン（ステップ `parallel-request` の 1 つ）になる。依頼を送ったら承認ゲートとして終わり、レーンは答えを待たずに
-次の周回へ進む。答えは `parallel.py await p1 --from <依頼の記録> --timeout 0` で待たずに読む。自分の Pull Request が
+次の周回へ進む。答えは `parallel.py await p1 --from <プランの状態ディレクトリ>/work/request.txt --timeout 0` で待たずに読む。自分の Pull Request が
 すでに `main` にあれば、依頼を送らずに配布済みとして続きへ進む。レーンで `supervise.py queue` の `--max` を省くと、
 並列の計画のそのレーンのプランの本数で流す。
 

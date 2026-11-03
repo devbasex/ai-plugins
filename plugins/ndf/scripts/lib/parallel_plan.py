@@ -28,9 +28,12 @@ DEFAULT_MAX_NAMED = 3  # relay_lib/hub.py の max_named の既定
 PARALLEL_DIR = Path(".ndf") / "parallel"
 
 
-def _positive_env(name: str, default: int) -> tuple[int, Optional[str]]:
-    """環境変数の正の整数。正の整数でなければ既定と、そのことを書いた 1 文を返す（I2）。"""
-    raw = os.environ.get(name)
+MAX_PLANS_ENV = "NDF_PARALLEL_MAX_PLANS"
+MAX_NAMED_ENV = "NDF_RELAY_MAX_NAMED"
+
+
+def _positive_count(name: str, raw: Optional[str], default: int) -> tuple[int, Optional[str]]:
+    """環境変数の値の正の整数。正の整数でなければ既定と、そのことを書いた 1 文を返す（I2）。"""
     if raw is None or raw == "":
         return default, None
     try:
@@ -43,11 +46,11 @@ def _positive_env(name: str, default: int) -> tuple[int, Optional[str]]:
 
 
 def max_plans() -> tuple[int, Optional[str]]:
-    return _positive_env("NDF_PARALLEL_MAX_PLANS", DEFAULT_MAX_PLANS)
+    return _positive_count(MAX_PLANS_ENV, os.environ.get(MAX_PLANS_ENV), DEFAULT_MAX_PLANS)
 
 
 def named_limit() -> tuple[int, Optional[str]]:
-    return _positive_env("NDF_RELAY_MAX_NAMED", DEFAULT_MAX_NAMED)
+    return _positive_count(MAX_NAMED_ENV, os.environ.get(MAX_NAMED_ENV), DEFAULT_MAX_NAMED)
 
 
 class LoopInput(BaseModel):
@@ -83,6 +86,17 @@ class Lane(BaseModel):
             raise PydanticCustomError("I1", "レーン名の形が違う（{pattern}）: {name}", {"pattern": LANE_RE.pattern, "name": v})
         if HELPER_RE.search(v):
             raise PydanticCustomError("I1", "レーン名が一時レーンの名前の形（-rel と数字で終わる）に当たる: {name}", {"name": v})
+        return v
+
+    @field_validator("handoff")
+    @classmethod
+    def _handoff(cls, v: Optional[str]) -> Optional[str]:
+        import handoff  # 引継ぎ文書の名の規則は handoff.py が持つ
+
+        if v is not None and (not handoff.NAME_RE.match(v) or v.endswith(handoff.HISTORY_SUFFIX)):
+            raise PydanticCustomError(
+                "I5", "引継ぎ文書の名の形が違う（{pattern}）: {name}", {"pattern": handoff.NAME_RE.pattern, "name": v}
+            )
         return v
 
     def handoff_name(self) -> str:
@@ -315,26 +329,26 @@ def render_handoff(plan: ParallelPlan, lane: Lane, plan_md: Path) -> str:
 
 
 def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
-    """`plan.json`・`plan.md`・引継ぎ文書を書く。在る引継ぎ文書・在る計画があれば 1 つも書かずに FileExistsError（I5）。"""
+    """`plan.json`・`plan.md`・引継ぎ文書を書く。在る引継ぎ文書・在る計画があれば 1 つも書かずに FileExistsError（I5）。
+
+    引継ぎ文書の置き場と書き込みは handoff.py（`paths_of`・`write_doc`）に任せる。"""
     import json
 
+    import handoff
+
     d = plan_dir(main, plan.name)
-    handoffs = Path(main) / ".ndf" / "handoff"
-    targets = {ln.name: handoffs / f"{ln.handoff_name()}.md" for ln in plan.lanes}
+    targets = {ln.name: handoff.paths_of(main, ln.handoff_name())[0] for ln in plan.lanes}
     existing = [str(p) for p in [d / "plan.json", *targets.values()] if p.exists()]
     if existing:
         raise FileExistsError(", ".join(existing))
     d.mkdir(parents=True, exist_ok=True)
-    handoffs.mkdir(parents=True, exist_ok=True)
     data = dict(raw)
     data["lanes"] = [{**dict(r), "handoff": ln.handoff_name()} for r, ln in zip(raw["lanes"], plan.lanes)]
-    written = [d / "plan.json", d / "plan.md"]
     (d / "plan.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (d / "plan.md").write_text(render_md(plan), encoding="utf-8")
     for ln in plan.lanes:
-        targets[ln.name].write_text(render_handoff(plan, ln, d / "plan.md"), encoding="utf-8")
-        written.append(targets[ln.name])
-    return written
+        handoff.write_doc(targets[ln.name], render_handoff(plan, ln, d / "plan.md"))
+    return [d / "plan.json", d / "plan.md", *targets.values()]
 
 
 def manual_commands(plan: ParallelPlan) -> list[str]:

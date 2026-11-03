@@ -14,7 +14,7 @@ python3 "$NDF_SCRIPTS/parallel.py" init p1 <<'EOF'
  "lanes": [
   {"name": "lroot", "input": {"kind": "loop", "loop": "lroot", "args": ["--milestones", "26"]}, "plans": 2, "touches": ["plugins/ndf/"]},
   {"name": "lflow", "input": {"kind": "loop", "loop": "lflow", "args": ["--milestones", "23"]}, "plans": 2, "touches": ["docs/"]},
-  {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["factory/"], "after": ["lflow"]}
+  {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["web/"], "after": ["lflow"]}
  ]}
 EOF
 ```
@@ -32,6 +32,7 @@ EOF
 | `plans` | 同時に流すプランの本数（1 以上） |
 | `touches` | 触る場所（パスか glob） |
 | `after` | 始める条件。ここに並べたレーンがすべて止まってから起動する |
+| `handoff` | 任意。引継ぎ文書の名（既定はループなら `loop-<ループ名>`、スプリントなら `issue-<最初の番号>`）。名の形は `handoff.py` と同じ `loop-`・`sprint-`・`milestone-`・`issue-` で始まるものだけで、在る文書と重なるときに別の名を与える（例: `loop-lroot2-lane`） |
 
 計画名は 24 字まで。レーンに共通の決まり（プランの本数の配分・触る場所・配布の担当）は `plan.md` の 1 箇所に置き、
 引継ぎ文書へは写さない。引継ぎ文書は計画名・レーン名・`plan.md` のパスと、レーンの開始のコマンドだけを持つ。

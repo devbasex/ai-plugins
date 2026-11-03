@@ -29,7 +29,7 @@ BASE = {
             "touches": ["plugins/ndf/"],
         },
         {"name": "lflow", "input": {"kind": "loop", "loop": "lflow", "args": ["--milestones", "23"]}, "plans": 2, "touches": ["docs/"]},
-        {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["factory/"], "after": ["lflow"]},
+        {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["web/"], "after": ["lflow"]},
     ],
 }
 
@@ -101,6 +101,7 @@ def test_ready_lanes_waits_for_dependency():
 
 def _git_main(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".ndf").mkdir()  # 引継ぎ文書の置き場（development-workflow の手順 0 が作る）
     return tmp_path
 
 
@@ -139,7 +140,7 @@ def test_init_with_error_writes_nothing(tmp_path):
     main = _git_main(tmp_path)
     code, res = _cli(main, "init", "p1", stdin=json.dumps(variant(x=lambda d: d["lanes"][1].__setitem__("after", ["lfac"]))))
     assert code == 1 and any(i["rule"] == "I3" for i in res["items"])
-    assert not (main / ".ndf").exists()
+    assert not (main / ".ndf" / "parallel").exists() and not (main / ".ndf" / "handoff").exists()
 
 
 def test_run_outside_wrapper_returns_manual_lines(tmp_path, monkeypatch):
@@ -194,3 +195,11 @@ def test_answerable_and_moved():
     pending = [{"id": "a", "prs": [1]}, {"id": "b", "prs": [5]}]
     assert prl.answerable(pending, [1, 2]) == ["a"]
     assert prl.moved("abc", "abc") is False and prl.moved("abc", "def") is True
+
+
+@pytest.mark.parametrize("name,ok", [("loop-lroot-lane", True), ("sprint-p3", True), ("lane-lroot", False), ("loop-lroot-history", False)])
+def test_handoff_name_follows_handoff_py(name, ok):
+    """レーンの引継ぎ文書の名は handoff.py の名の形だけを受ける（handoff.py の副命令で扱えない名を作らない）。"""
+    plan, _, metrics = pp.check_data(variant(x=lambda d: d["lanes"][0].__setitem__("handoff", name)))
+    assert (plan is not None) is ok
+    assert (metrics["errors"] == 0) is ok

@@ -20,7 +20,7 @@ MAX_HELPER_SEQ = 9999  # 一時レーンの名前 `<計画名>-rel<連番>` を 
 
 
 def moved(presented: str, head: str) -> bool:
-    """承認の答えの時点の `origin/develop` の先頭が、提示したコミットから進んでいるか（I14）。"""
+    """承認の答えの時点のベースブランチの先頭が、提示したコミットから進んでいるか（I14）。"""
     return bool(head) and head.strip() != presented.strip()
 
 
@@ -95,13 +95,15 @@ def present(
     plan: pp.ParallelPlan,
     approval: Path,
     requests: list[dict],
-    out_prs: Path,
-    presented_json: Path,
+    d: Path,
     first: Optional[dict] = None,
     closes_of: Callable = closes_by_pr,
 ) -> dict:
-    """承認資料から提示したコミットと含む Pull Request を読み、レーンへ対応づけて `presented.json` と `--out` を書く。
+    """承認資料から提示したコミットと含む Pull Request を読み、レーンへ対応づける。
 
+    書くのは提示の置き場 `d`（`releases/<連番>/<提示>/`）の決まった名前だけである: `presented.json`、承認資料へ足す
+    内訳 `breakdown.md`、提示のプランの状態ディレクトリの `present/work/prs.txt`・`present/work/approved.txt`
+    （本番のプランが `{queue_prs:present}`・`{queue_approved:present}` で読む）。承認資料へ内訳を足すのはプランのコマンドである。
     `first` は出し直しのときの提示 1 の `presented.json`（加わった範囲を載せる）。承認資料に承認したコミットが無ければ ValueError。"""
     import approved_commit
     from release_lib import included
@@ -115,12 +117,12 @@ def present(
         extra = [n for n in prs if n not in set(first.get("prs") or [])]
         added = map_lanes(plan, extra, closes, requests)
     data = {"sha": sha, "prs": prs, "lanes": mapped["lanes"], "orphans": mapped["orphans"], "added": added}
-    Path(presented_json).parent.mkdir(parents=True, exist_ok=True)
-    Path(presented_json).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    Path(out_prs).parent.mkdir(parents=True, exist_ok=True)
-    Path(out_prs).write_text(" ".join(str(n) for n in prs) + "\n", encoding="utf-8")
-    with open(approval, "a", encoding="utf-8") as f:
-        f.write(breakdown_md(mapped, added))
+    d = Path(d)
+    (d / "present" / "work").mkdir(parents=True, exist_ok=True)
+    (d / "presented.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (d / "breakdown.md").write_text(breakdown_md(mapped, added), encoding="utf-8")
+    (d / "present" / "work" / "prs.txt").write_text(" ".join(str(n) for n in prs) + "\n", encoding="utf-8")
+    (d / "present" / "work" / "approved.txt").write_text(sha + "\n", encoding="utf-8")
     return data
 
 
@@ -149,9 +151,8 @@ def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: 
     present_plan, release_plan = builder(main, name, d, version)
     (d / "present.json").write_text(json.dumps(present_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (d / "release.json").write_text(json.dumps(release_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    answer = d / "answer.json"
-    if not answer.exists():
-        answer.write_text(json.dumps({"gates": []}) + "\n", encoding="utf-8")
+    if not (d / "answer.json").exists():
+        (d / "answer.json").write_text(json.dumps({"gates": []}) + "\n", encoding="utf-8")
     return d
 
 
@@ -213,7 +214,7 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
         f"{PARALLEL_PY} request {shlex.quote(plan_name)} --lane {shlex.quote(lane)}"
         + (f" --prs {pr_args}" if pr_args else "")
         + (f" --issues {issues}" if issues else "")
-        + " --state {state_dir} --out {state_dir}/work/request.txt"
+        + " --state {state_dir}"
     )
     return with_record(
         {
@@ -280,15 +281,14 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     present_state = d / "present"  # 提示のプランの状態ディレクトリ（`state_dir_of` の置き場と同じ）
     facts = _dev_approval_steps(ns, repo, approval, "0", ",".join((ns.release or {}).get("runtimes") or []))
     facts[-1]["next"] = "present"
-    first = d.parent / "1" / "presented.json"
     present = {
         "id": "present",
         "type": "run",
         "stage": "配布",
         "timeout": 300,
         "cwd": repo,
-        "cmd": f"{PARALLEL_PY} present {shlex.quote(name)} {seq} {k} --approval {approval} --out {{state_dir}}/work/prs.txt"
-        + (f" --first {shlex.quote(str(first))}" if k != "1" else ""),
+        "cmd": f"{PARALLEL_PY} present {shlex.quote(name)} {seq} {k} --approval {approval}"
+        + f" && cat {shlex.quote(str(d / 'breakdown.md'))} >> {approval}",
         "next": "mvv",
     }
     gate = present_gate_steps(str(state), repo, approval, "$(cat {state_dir}/work/prs.txt)", "standard", str(present_state), str(state))

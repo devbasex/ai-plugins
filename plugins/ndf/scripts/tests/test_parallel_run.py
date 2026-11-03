@@ -8,6 +8,7 @@ monkeypatch で差し替える。
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import textwrap
 import time
@@ -54,7 +55,8 @@ FAKE = textwrap.dedent(
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     main = tmp_path / "repo"
-    main.mkdir()
+    (main / ".ndf").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(main)], check=True)
     plan = pp.check_data(PLAN)[0]
     pp.write_all(main, plan, PLAN)
     fake = tmp_path / "fake_relay.py"
@@ -65,7 +67,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_STATES", str(states))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
     heads = {"v": "sha1"}
-    monkeypatch.setattr(prun, "git_head", lambda _m, ref="origin/develop": heads["v"])
+    monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
     monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
 
     def builder(_main, _name, d, _v):
@@ -178,7 +180,7 @@ def test_send_request_is_idempotent(env, tmp_path):
     st = tmp_path / "st"
     a = pl.send_release_request(main, "p1", "la", [10], [1], st)
     b = pl.send_release_request(main, "p1", "la", [10], [1], st)
-    assert a == b and (st / "work" / "request-id").read_text().strip() == a
+    assert a == b and (st / "work" / "request-id.txt").read_text().strip() == a
     until(lambda: (event(main, "p1", "lane-la") or {}).get("received") == 1)
     time.sleep(0.6)
     assert event(main, "p1", "lane-la")["received"] == 1
