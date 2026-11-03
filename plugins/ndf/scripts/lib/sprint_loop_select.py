@@ -143,23 +143,6 @@ def _select_candidate_rows(
     return picked, here
 
 
-def _candidates_with_first(ms: dict, max_issues: int, held: set[int], first: set[int]) -> list[dict]:
-    """マイルストーンの候補（candidates_of）に、候補に無い先頭に選ぶ課題（first）を順位の順に後ろへ足す。"""
-    cands = candidates_of(ms, max_issues, held)
-    have = {r["number"] for r in cands}
-    return cands + [r for r in sorted(ms.get("rows", []), key=lambda r: r["rank"]) if r["number"] in first and r["number"] not in have]
-
-
-def _outside_boundary_rows(ms: dict, cands: list[dict], title: str) -> list[dict]:
-    """候補に入らなかった行（切り出しの境界の外）を、順位の順に DROPPED の選定の行にする。"""
-    cand_nums = {r["number"] for r in cands}
-    rest = [r for r in sorted(ms.get("rows", []), key=lambda r: r["rank"]) if r["number"] not in cand_nums]
-    return [
-        {"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": "順位（切り出しの境界の外）"}
-        for r in rest
-    ]
-
-
 def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dict, lap_created: set = frozenset()) -> dict:
     """選定（決定 2）。入力は rank の出力・記録・マイルストーンの説明だけ。戻り値は
     {"milestone", "selection", "candidates"}。選べたマイルストーンが無ければ milestone は None。"""
@@ -171,7 +154,9 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
     first = first_issues(rec)
     for title in order:
         ms = by_title[title]
-        cands = _candidates_with_first(ms, rec["max_issues"], pending_issues(rec), first)
+        cands = candidates_of(ms, rec["max_issues"], pending_issues(rec))
+        have = {r["number"] for r in cands}
+        cands += [r for r in sorted(ms.get("rows", []), key=lambda r: r["rank"]) if r["number"] in first and r["number"] not in have]
         total += len(cands)
         text = sprint_mvv.mvv_sections(descriptions.get(title) or "")
         unapproved = text is not None and (title, pm.sha256_text(text)) not in approvals
@@ -184,7 +169,12 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
         )
         rows_out += here
         if picked:
-            rows_out += _outside_boundary_rows(ms, cands, title)
+            cand_nums = {r["number"] for r in cands}
+            rest = [r for r in sorted(ms.get("rows", []), key=lambda r: r["rank"]) if r["number"] not in cand_nums]
+            rows_out += [
+                {"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": "順位（切り出しの境界の外）"}
+                for r in rest
+            ]
             return {"milestone": title, "selection": rows_out, "candidates": total, "sprint_mvv": text}
     return {"milestone": None, "selection": rows_out, "candidates": total, "sprint_mvv": None}
 
@@ -204,7 +194,9 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     stop = boundary_stop(env, rec)
     if stop and stop["condition"] in IMMEDIATE_STOPS:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
-    got = pending_step(env, rec, before)
+    import sprint_loop
+
+    got = pending_step(env, rec, before, sprint_loop.apply_gate1_answers)
     if got is not None:
         return got
     if len(pending_laps(rec)) >= rec.get("release_pending_max", RELEASE_PENDING_MAX):

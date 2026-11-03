@@ -288,32 +288,26 @@ class _Run:
             self.stop = True
             self.force = self.force or bool(msg.get("force"))
         elif kind == "request":
-            self.take_release_request(msg)
+            if all(r["id"] != msg.get("id") for r in self.pending):
+                self.pending.append(msg)
+                self.received[msg.get("lane", "")] = self.received.get(msg.get("lane", ""), 0) + 1
+                durable.set_event(f"lane-{msg.get('lane')}", {"received": self.received[msg.get("lane", "")]})
         elif kind in ("gate1", "gate2", "ask"):
-            self.take_question(msg)
+            if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
+                return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
+            key = cause_of(msg)
+            same = next((q for q in self.questions if key and q.get("cause") == key), None)
+            if same is not None:  # 同じ原因の問いは 1 つにまとめ、答えを依頼してきた全レーンへ配る（異常系 5）
+                same["also"] = [*same.get("also", []), msg.get("id")]
+                same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
+                self.publish_questions()
+                return
+            if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
+                msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
+            self.questions.append({**msg, "cause": key} if key else msg)
+            self.publish_questions()
         elif kind == "answer":
             self.reply(msg)
-
-    def take_release_request(self, msg: dict) -> None:
-        if all(r["id"] != msg.get("id") for r in self.pending):
-            self.pending.append(msg)
-            self.received[msg.get("lane", "")] = self.received.get(msg.get("lane", ""), 0) + 1
-            durable.set_event(f"lane-{msg.get('lane')}", {"received": self.received[msg.get("lane", "")]})
-
-    def take_question(self, msg: dict) -> None:
-        if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
-            return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
-        key = cause_of(msg)
-        same = next((q for q in self.questions if key and q.get("cause") == key), None)
-        if same is not None:  # 同じ原因の問いは 1 つにまとめ、答えを依頼してきた全レーンへ配る（異常系 5）
-            same["also"] = [*same.get("also", []), msg.get("id")]
-            same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
-            self.publish_questions()
-            return
-        if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
-            msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
-        self.questions.append({**msg, "cause": key} if key else msg)
-        self.publish_questions()
 
     def publish_questions(self) -> None:
         durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
@@ -353,13 +347,6 @@ class _Run:
             for r in [r for r in self.pending if r["id"] in hit]:
                 self.answer(r["id"], "released", rel.get("version"), rel["n"])
             self.pending = [r for r in self.pending if r["id"] not in hit]
-
-    def release_pending(self) -> None:
-        """配布が流れていなければ、出した範囲で答えてから残りの依頼で配布を開く。"""
-        if self.current is None and self.pending:
-            self.answer_from_ranges()
-            if self.pending:
-                self.open_release()
 
     def open_release(self) -> None:
         """流れている配布が無く依頼があれば、他のレーンを待たずに提示 1 を組む（I9）。"""
@@ -513,40 +500,32 @@ def parallel_workflow(main: str, name: str) -> dict:
             return _handle_stop(run, main)
         if run.stop:  # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、
             # settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
-            _recv_resume(run, wait)
+            msg = durable.recv("resume", min(wait, 30))
+            if isinstance(msg, dict):
+                run.resume(msg)
             continue
         _spawn_ready(run, main)
-        run.release_pending()
+        if run.current is None and run.pending:
+            run.answer_from_ranges()
+            if run.pending:
+                run.open_release()
         if _run_finished(run):
-            done = _finish_or_flush_held(run, main, name)
-            if done is not None:
-                return done
+            held = step_held_loops(main, name, sorted(run.answered))
+            if not held:
+                step_finish(main, name, run.progress())
+                return run.summary("finished")
+            # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
+            todo = [x for x in held if x not in run.held_spawned]
+            if todo and not set(run.held_spawned) & set(held):
+                run.held_spawned.append(todo[0])
+                seq = len(run.releases) + len(run.held_spawned)
+                run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
         run.take(durable.recv("inbox", wait if run.current is None else min(wait, 30)))
         if run.current is not None:
-            _recv_resume(run, wait)
+            msg = durable.recv("resume", min(wait, 30))
+            if isinstance(msg, dict):
+                run.resume(msg)
         _observe_run(run, main)
-
-
-def _recv_resume(run: _Run, wait: float) -> None:
-    """一時レーンからの再開の知らせを最大 30 秒待ち、届いたら反映する。"""
-    msg = durable.recv("resume", min(wait, 30))
-    if isinstance(msg, dict):
-        run.resume(msg)
-
-
-def _finish_or_flush_held(run: _Run, main: str, name: str) -> Optional[dict]:
-    """保留の周回が無ければ記録を閉じて要約を返す。あれば一時レーンを 1 本起こして None を返す。"""
-    held = step_held_loops(main, name, sorted(run.answered))
-    if not held:
-        step_finish(main, name, run.progress())
-        return run.summary("finished")
-    # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
-    todo = [x for x in held if x not in run.held_spawned]
-    if todo and not set(run.held_spawned) & set(held):
-        run.held_spawned.append(todo[0])
-        seq = len(run.releases) + len(run.held_spawned)
-        run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
-    return None
 
 
 def _started(run: _Run) -> list[str]:

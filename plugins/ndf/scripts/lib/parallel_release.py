@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 import parallel_plan as pp
-from parallel_files import RELEASE_REQUEST_PHASE
 
 MAX_HELPER_SEQ = 9999  # 一時レーンの名前 `<計画名>-rel<連番>` を 32 字に収める（I1）
 
@@ -231,6 +230,9 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
     steps.append(handoff_step(str(Path(state).resolve()), GATE_2, "判定のコメント"))
     steps.append(reject_step(str(Path(state).resolve()), GATE_2, "mvv", root=repo or "."))
     return steps
+
+
+RELEASE_REQUEST_PHASE = "配布の依頼"
 
 
 def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str] | None = None) -> dict:

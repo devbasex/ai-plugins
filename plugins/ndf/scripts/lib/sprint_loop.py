@@ -33,6 +33,7 @@ from sprint_loop_record import (
     RETURNED,
     QUESTION_PENDING,
     PENDING,
+    GATE_1,
     FINISHED,
     NOT_RUN,
     LoopError,
@@ -68,6 +69,7 @@ from sprint_loop_gate import (
     read_done_items,
     continuation,
     CONTINUATION_STEP,
+    mark_issue,
     refresh_state,
     handle_gate,
     failure_key,
@@ -77,7 +79,7 @@ from sprint_loop_gate import (
     owner_line,
 )
 
-from sprint_loop_gate2 import apply_answer, finish_held, gate2_answer, gate2_pipeline, pending_pipeline
+from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
 
 
 # ---------------------------------------------------------------- start
@@ -375,6 +377,58 @@ def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None,
         else:
             after = "設計 PR のマージの後の周回で選定の対象に戻る" if approved else "選定の対象に戻さない（差し戻し）"
         return loop_ok(f"#{number} の答え（{w['answer']}）を書いた。{after}", rec, [w, *({"note": n} for n in notes)], status="answered")
+
+
+def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note: str | None = None) -> list[str]:
+    """人の判断待ちの行へ答えを書き、スプリント状態の承認の記録と課題の本文の節を更新する。書けなかった理由を返す。
+    直して出し直す（revise）は答えの確定でないため承認の記録を書かず、指摘と回数を行と本文に書く（#2436 の 6e）。"""
+    w.update(answer=answer, answered_at=env.now())
+    if pr:
+        w["pr"] = pr
+    notes: list[str] = []
+    if answer == "revise":
+        w["note"] = note or ""
+        w["revise_count"] = sum(1 for x in rec.get("waiting", []) if x["number"] == w["number"] and x.get("answer") == "revise")
+        if err := mark_issue(env, rec, w):
+            notes.append(err)
+        return notes
+    lap = rec["laps"][w["lap"] - 1]
+    state = lap.get("state_path")
+    if state:
+        cmd = [
+            sys.executable,
+            str(SPRINT_STATE),
+            "gate",
+            state,
+            GATE_1,
+            "--by",
+            "user",
+            "--what",
+            f"開発ループ {rec['name']} の #{w['number']} の設計",
+        ]
+        cmd += ["--outcome", w["answer"], "--root", str(env.main_dir())] + (["--pr", str(w["pr"])] if w.get("pr") else [])
+        code, so, se = env.run(cmd, cwd=str(env.main_dir()))
+        if code != 0:
+            notes.append(f"承認の記録を書けない（{code}）: {(se or so).strip()[:200]}")
+    if err := mark_issue(env, rec, w):
+        notes.append(err)
+    return notes
+
+
+def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
+    """オーガナイザーへ送った設計の承認の答えを、持ち主のレーンが周回の境で処理する（#2436 の 6e・6f）。
+    承認ならラベル design-approved を付けて承認を書き、直して出し直すなら指摘を、やらないなら差し戻しを書く。"""
+    for w in [w for w in rec.get("waiting", []) if w.get("request") and not w.get("answer")]:
+        a = (answers.get(w["request"]) or {}).get("answer")
+        if not isinstance(a, dict):
+            continue
+        result = a.get("result")
+        if result == "approved" and w.get("pr"):
+            code, so, se = env.run(["gh", "pr", "edit", str(w["pr"]), "--add-label", "design-approved"], cwd=str(env.main_dir()))
+            if code != 0:
+                w["label_error"] = (se or so).strip()[:200]
+        if result in ("approved", "rejected", "revise"):
+            apply_answer(env, rec, w, result, w.get("pr"), a.get("note"))
 
 
 def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
