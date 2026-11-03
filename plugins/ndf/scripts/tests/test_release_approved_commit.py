@@ -49,7 +49,7 @@ def clone(origin: Path, dest: Path) -> Path:
 
 @pytest.fixture
 def world(tmp_path: Path):
-    """origin（bare）・作業場所（release/v1.2.3）・別の clone（ほかの人のマージ）と、承認したコミット。"""
+    """origin（bare）・作業場所（承認したコミットから切った release/v1.2.3）・別の clone（ほかの人のマージ）と、承認したコミット。"""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
     seed = tmp_path / "seed"
@@ -66,33 +66,69 @@ def world(tmp_path: Path):
     approved = commit(seed, "feature.txt", "f\n", "feature (#10)")
     git(seed, "push", "-q", "origin", "HEAD:trunk")
     work = clone(origin, tmp_path / "work")
-    git(work, "checkout", "-q", "-b", f"release/v{VER}", "origin/trunk")
-    commit(work, "version.txt", f"{VER}\n", f"bump {VER}")
     other = clone(origin, tmp_path / "other")
     git(other, "checkout", "-q", "trunk")
-    return {"origin": origin, "work": work, "other": other, "approved": approved}
+    w = {"origin": origin, "work": work, "other": other, "approved": approved}
+    cut_release(w)
+    return w
+
+
+def cut_release(w):
+    """作業場所に release/v1.2.3 を origin/trunk の先頭から切り（切り直し）、版上げを積む。先頭を返す。"""
+    work = w["work"]
+    git(work, "fetch", "-q", "origin")
+    git(work, "checkout", "-q", "-B", f"release/v{VER}", "origin/trunk")
+    return commit(work, "version.txt", f"{VER}\n", f"bump {VER}")
 
 
 SHIPPED_FILE = "plugins/foo/statusline.txt"
 DOC_FILE = "docs/design.md"
+SYNC = f"release/v{VER}-sync"
 
 
-def run_release(monkeypatch, w, *, outside_after=None, move_head=None, **extra):
+def run_release(monkeypatch, w, *, outside_after=None, move_head=None, dev_bump=None, prod_merged=False, published=(), **extra):
     """release --channel prod を流し、(結果, 終了コード, マージした PR と expect, gh の呼び出し) を返す。
-    outside_after は配布の PR の後に、move_head は本番チャネルへのマージを待つ間に（1 回だけ）別の人が入れるファイルのパス。"""
+    outside_after は配布の PR の後に起点のブランチへ、move_head は本番チャネルへのマージを待つ間に（1 回だけ）
+    release/v<版> へ別の人が入れるファイルのパス。dev_bump は承認の後に起点のブランチへ入る version.txt の中身
+    （配布の PR と衝突する）。prod_merged は本番の PR がマージ済みの再開、published はすでにある tag / release。
+    PR の番号は 1 = release/v<版> → trunk、2 = release/v<版> → live、3 = release/v<版>-sync → trunk。"""
     mod = load(monkeypatch)
     work, other = w["work"], w["other"]
-    merged, ghcalls, state = [], [], {}
+    if dev_bump:
+        commit(other, "version.txt", dev_bump, "dev bump (#700)")
+        git(other, "push", "-q", "origin", "HEAD:trunk")
+    merged, ghcalls, created, state = [], [], [], {}
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
-    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: None)
-    monkeypatch.setattr(mod, "run_checks", lambda r: [])
-    monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: 1 if base == "trunk" else 2)
+    if prod_merged:
+        state["live"] = git(work, "rev-parse", "HEAD")
+        git(work, "push", "-q", "origin", f"HEAD:release/v{VER}", "HEAD:live")
+        git(other, "fetch", "-q", "origin")
+        git(other, "merge", "-q", "--no-ff", "-m", "Merge pull request #1", f"origin/release/v{VER}")
+        git(other, "push", "-q", "origin", "HEAD:trunk")
+        for name in published:
+            if name == "tag":
+                git(work, "tag", "-a", f"foo--v{VER}", state["live"], "-m", "t")
+                git(work, "push", "-q", "origin", f"foo--v{VER}")
+                git(work, "tag", "-d", f"foo--v{VER}")
+
+    def find_pr(r, head, base, states):
+        if prod_merged and head == f"release/v{VER}":
+            return {"number": 1 if base == "trunk" else 2, "state": "MERGED"}
+        return None
+
+    def create_pr(r, base, head, title, body):
+        created.append((base, head))
+        return {("trunk", f"release/v{VER}"): 1, ("live", f"release/v{VER}"): 2, ("trunk", SYNC): 3}[(base, head)]
 
     def wait_and_merge(r, n, expect=None, ci_wait=3600.0):
         merged.append((n, expect))
-        if n == 1:
+        if n in (1, 3):
             git(other, "fetch", "-q", "origin")
-            git(other, "merge", "-q", "--no-ff", "-m", "Merge pull request #1", f"origin/release/v{VER}")
+            git(other, "reset", "-q", "--hard", "origin/trunk")
+            src = f"origin/release/v{VER}" if n == 1 else f"origin/{SYNC}"
+            if subprocess.run(["git", "-C", str(other), "merge", "-q", "--no-ff", "-m", f"Merge pull request #{n}", src]).returncode:
+                git(other, "merge", "--abort")
+                raise mod.Conflicted(f"PR #{n} がベースブランチと衝突している")
             state["merge"] = git(other, "rev-parse", "HEAD")
             if outside_after:
                 commit(other, outside_after, "x\n", "statusline (#806)")
@@ -100,24 +136,34 @@ def run_release(monkeypatch, w, *, outside_after=None, move_head=None, **extra):
             return state["merge"]
         if move_head and not state.get("moved"):
             state["moved"] = True
+            git(other, "fetch", "-q", "origin")
+            git(other, "checkout", "-q", "-B", "rel", f"origin/release/v{VER}")
             commit(other, move_head, "x\n", "late (#900)")
-            git(other, "push", "-q", "origin", "HEAD:trunk")
+            git(other, "push", "-q", "origin", f"HEAD:release/v{VER}")
+            git(other, "checkout", "-q", "trunk")
             raise mod.HeadMoved("moved")
-        git(other, "push", "-q", "origin", f"{expect}:live")
+        assert expect == git(w["origin"], "rev-parse", f"release/v{VER}")  # 比べた release/v<版> の先頭だけを出す
+        git(w["origin"], "update-ref", "refs/heads/live", expect)
+        state["live"] = expect
         return expect
 
     def pr_view(r, n, fields):
         head = git(work, "rev-parse", "HEAD")
-        return {"headRefOid": head, "commits": [{"oid": head}], "mergeCommit": {"oid": state.get("merge")}}
+        return {"headRefOid": head, "commits": [{"oid": head}], "mergeCommit": {"oid": state.get("live" if n == 2 else "merge")}}
 
+    def gh(args, cwd=None):
+        ghcalls.append(args)
+        if args[:2] == ["release", "view"]:
+            return subprocess.CompletedProcess(args, 0 if "release" in published else 1, "", "")
+        return subprocess.CompletedProcess(args, 0, '[{"number": 806}]', "")
+
+    monkeypatch.setattr(mod, "find_pr", find_pr)
+    monkeypatch.setattr(mod, "run_checks", lambda r: [])
+    monkeypatch.setattr(mod, "create_pr", create_pr)
     monkeypatch.setattr(mod, "wait_and_merge", wait_and_merge)
     monkeypatch.setattr(mod, "pr_view", pr_view)
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
-    monkeypatch.setattr(
-        mod.gh_parts,
-        "gh",
-        lambda args, cwd=None: ghcalls.append(args) or subprocess.CompletedProcess(args, 0, '[{"number": 806}]', ""),
-    )
+    monkeypatch.setattr(mod.gh_parts, "gh", gh)
     monkeypatch.setattr(mod.trash, "sweep", lambda r, m: ([], {}))
     ns = {
         "root": str(work),
@@ -132,71 +178,120 @@ def run_release(monkeypatch, w, *, outside_after=None, move_head=None, **extra):
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(argparse.Namespace(**ns))
     out, code = e.value.code
-    return out, code, merged, ghcalls
+    return out, code, merged, ghcalls, created
 
 
 def tags(origin: Path) -> str:
     return git(origin, "tag")
 
 
+def shipped(w, path: str) -> bool:
+    return subprocess.run(["git", "-C", str(w["origin"]), "cat-file", "-e", f"live:{path}"]).returncode == 0
+
+
 def test_release_after_only_the_release_pr_is_ok(monkeypatch, world):
-    """受け入れ条件 3: 承認の後が配布の PR だけなら、比べた先端を本番チャネルへ入れてタグと Release を作る。"""
-    out, code, merged, ghcalls = run_release(monkeypatch, world, approved_sha=world["approved"])
-    tip = git(world["origin"], "rev-parse", "trunk")
+    """受け入れ条件 3・#2436 の R2: 承認したコミットと版上げだけの release/v<版> を head に本番チャネルへ入れ、タグと Release を作る。"""
+    out, code, merged, ghcalls, created = run_release(monkeypatch, world, approved_sha=world["approved"])
+    tip = git(world["origin"], "rev-parse", f"release/v{VER}")
     assert (out["status"], code) == ("ok", None)
     assert out["metrics"]["approved_sha"] == world["approved"] and out["metrics"]["compared_head"] == tip
     assert merged == [(1, None), (2, tip)]  # 比べた先端だけをマージさせる（受け入れ条件 6）
+    assert created == [("trunk", f"release/v{VER}"), ("live", f"release/v{VER}")]  # 本番の PR の head は release/v<版>
+    assert git(world["origin"], "merge-base", "--is-ancestor", tip, "trunk") == ""  # R3・R4: 先に起点へ取り込んである
     assert tags(world["origin"]) == f"foo--v{VER}"
     assert any(a[:2] == ["release", "create"] for a in ghcalls)
 
 
-def test_release_with_an_outside_pr_after_approval_stops_at_the_gate(monkeypatch, world):
-    """受け入れ条件 5: 配布の PR の外の変更があれば、本番チャネルの PR・タグ・Release を作らずに 10。"""
-    out, code, merged, ghcalls = run_release(monkeypatch, world, outside_after=SHIPPED_FILE, approved_sha=world["approved"])
+def test_release_after_the_base_moved_ships_only_the_approved_commit(monkeypatch, world):
+    """#2436 の R2: 承認の後に起点のブランチが進んでも止まらず、進んだ分は本番チャネルへ入れない（次の配布）。"""
+    out, code, merged, _, _ = run_release(monkeypatch, world, outside_after=SHIPPED_FILE, approved_sha=world["approved"])
+    assert (out["status"], code) == ("ok", None)
+    assert not shipped(world, SHIPPED_FILE) and shipped(world, "version.txt")
+    assert tags(world["origin"]) == f"foo--v{VER}"
+
+
+def test_release_cut_after_the_approved_commit_stops_at_the_gate(monkeypatch, world):
+    """#2436 の R2: release/v<版> に承認の外のコミットがあれば、本番チャネルの PR・タグ・Release を作らずに 10。"""
+    late = commit(world["other"], SHIPPED_FILE, "x\n", "statusline (#806)")
+    git(world["other"], "push", "-q", "origin", "HEAD:trunk")
+    cut_release(world)
+    out, code, merged, ghcalls, created = run_release(monkeypatch, world, approved_sha=world["approved"])
     assert (out["status"], code) == ("gate", 10)
-    assert merged == [(1, None)] and tags(world["origin"]) == ""
+    assert merged == [(1, None)] and tags(world["origin"]) == "" and len(created) == 1
     assert not any(a[:2] == ["release", "create"] for a in ghcalls)
     bad = [i for i in out["items"] if i.get("result") == "unapproved"]
-    assert [(i["subject"], i["pr"]) for i in bad] == [("statusline (#806)", 806)] and len(bad[0]["name"]) == 40
+    assert [(i["name"], i["subject"], i["pr"]) for i in bad] == [(late, "statusline (#806)", 806)]
     m = out["metrics"]
     assert (m["approved_sha"], m["reason"], m["outside"], m["main_pr"], m["tag"]) == (world["approved"], "outside_commits", 1, None, None)
-    assert m["compared_head"] == git(world["origin"], "rev-parse", "trunk")
+    assert m["compared_head"] == git(world["origin"], "rev-parse", f"release/v{VER}")
     assert "approval-facts" in out["next"] and "--approved-sha" in out["next"]
 
 
 def test_release_stops_when_the_head_moves_while_waiting(monkeypatch, world):
-    """受け入れ条件 6: 比べた後に先端が進めば、本番チャネルへマージせず 10。"""
-    out, code, merged, _ = run_release(monkeypatch, world, move_head=SHIPPED_FILE, approved_sha=world["approved"])
+    """受け入れ条件 6: 比べた後に release/v<版> の先頭が進めば、本番チャネルへマージせず 10。"""
+    out, code, merged, _, _ = run_release(monkeypatch, world, move_head=SHIPPED_FILE, approved_sha=world["approved"])
     assert (out["status"], code) == ("gate", 10)
-    assert git(world["origin"], "rev-parse", "live") != git(world["origin"], "rev-parse", "trunk")
+    assert git(world["origin"], "rev-parse", "live") != git(world["origin"], "rev-parse", f"release/v{VER}")
     assert tags(world["origin"]) == "" and out["metrics"]["reason"] == "outside_commits"
 
 
-def test_release_after_an_outside_pr_that_ships_nothing_is_ok(monkeypatch, world):
-    """#2221: 承認の後に入ったのが配布物に触れない PR だけなら、承認を取り直さずに本番チャネルへ入れ、通したコミットを残す。"""
-    out, code, merged, _ = run_release(monkeypatch, world, outside_after=DOC_FILE, approved_sha=world["approved"])
-    tip = git(world["origin"], "rev-parse", "trunk")
-    assert (out["status"], code) == ("ok", None)
-    assert merged == [(1, None), (2, tip)] and tags(world["origin"]) == f"foo--v{VER}"
-    assert [i["subject"] for i in out["items"] if i.get("result") == "outside_unshipped"] == ["statusline (#806)"]
-    assert out["metrics"]["tolerated"] == 1
-
-
 def test_release_retries_when_the_head_moves_by_a_change_that_ships_nothing(monkeypatch, world):
-    """#2221: 待つ間に配布物に触れないコミットで先端が進めば、比べ直した先端で入れ直す。"""
-    out, code, merged, _ = run_release(monkeypatch, world, move_head=DOC_FILE, approved_sha=world["approved"])
-    tip = git(world["origin"], "rev-parse", "trunk")
+    """#2221: 待つ間に配布物に触れないコミットで先端が進めば、比べ直した先端で入れ直し、通したコミットを残す。"""
+    out, code, merged, _, _ = run_release(monkeypatch, world, move_head=DOC_FILE, approved_sha=world["approved"])
+    tip = git(world["origin"], "rev-parse", f"release/v{VER}")
     assert (out["status"], code) == ("ok", None)
     assert merged[-1] == (2, tip) and len(merged) == 3
     assert git(world["origin"], "rev-parse", "live") == tip and out["metrics"]["compared_head"] == tip
+    assert [i["subject"] for i in out["items"] if i.get("result") == "outside_unshipped"] == ["late (#900)"]
 
 
 def test_release_with_a_commit_that_is_not_an_ancestor_stops_at_the_gate(monkeypatch, world):
     """受け入れ条件 7: 先端の祖先でない・無い SHA は 10。"""
-    out, code, merged, _ = run_release(monkeypatch, world, approved_sha="f" * 40)
+    out, code, merged, _, _ = run_release(monkeypatch, world, approved_sha="f" * 40)
     assert (out["status"], code, out["metrics"]["reason"]) == ("gate", 10, "unknown_commit")
     assert merged == [(1, None)] and tags(world["origin"]) == ""
     assert {"kind": "commit", "name": "f" * 40, "result": "unknown"} in out["items"]
+
+
+def test_release_with_a_version_conflict_merges_through_the_sync_branch(monkeypatch, world):
+    """#2436 の版数の衝突: 起点の版数が上がっていれば release/v<版>-sync で本番の版を取って取り込み、
+    照合には元の release/v<版> の PR を使い、本番の PR の head は release/v<版> のまま。"""
+    out, code, merged, _, created = run_release(monkeypatch, world, dev_bump="1.2.4-dev.1\n", approved_sha=world["approved"])
+    tip = git(world["origin"], "rev-parse", f"release/v{VER}")
+    assert (out["status"], code) == ("ok", None)
+    assert merged == [(1, None), (3, None), (2, tip)]
+    assert created == [("trunk", f"release/v{VER}"), ("trunk", SYNC), ("live", f"release/v{VER}")]
+    assert (out["metrics"]["release_pr"], out["metrics"]["sync_pr"]) == (1, 3)
+    assert git(world["origin"], "merge-base", "--is-ancestor", tip, "trunk") == ""  # R1: release/v<版> の先頭は起点の祖先
+    assert git(world["origin"], "show", "trunk:version.txt") == VER  # 本番の版を取った
+    assert git(world["origin"], "rev-parse", f"{SYNC}^1") == tip  # release/v<版> そのものへは起点を取り込まない
+    assert git(world["origin"], "show", "live:version.txt") == VER
+
+
+def test_release_with_a_conflict_outside_the_versions_stops(monkeypatch, world):
+    """#2436 の R5: 版数の外が衝突すれば解かずに 1 で止め、本番の PR を作らない。"""
+    mod_err = None
+    try:
+        run_release(monkeypatch, world, dev_bump="something else\n", approved_sha=world["approved"])
+    except Exception as e:  # noqa: BLE001
+        mod_err = e
+    assert mod_err is not None and getattr(mod_err, "code", None) == 1 and "version.txt" in str(mod_err)
+    assert git(world["origin"], "rev-parse", "live") != git(world["origin"], "rev-parse", f"release/v{VER}")
+    assert tags(world["origin"]) == ""
+
+
+@pytest.mark.parametrize("published", [(), ("tag",), ("tag", "release")])
+def test_release_after_the_production_pr_merged_makes_only_what_is_missing(monkeypatch, world, published):
+    """#2436 の再開: 本番の PR がマージ済みなら照合とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る。"""
+    out, code, merged, ghcalls, created = run_release(
+        monkeypatch, world, prod_merged=True, published=published, approved_sha=world["approved"]
+    )
+    assert (out["status"], code) == ("ok", None)
+    assert merged == [] and created == []
+    assert tags(world["origin"]) == f"foo--v{VER}"
+    assert git(world["origin"], "rev-parse", f"foo--v{VER}^{{commit}}") == git(world["origin"], "rev-parse", "live")
+    assert any(a[:2] == ["release", "create"] for a in ghcalls) == ("release" not in published)
+    assert out["metrics"]["main_pr"] == 2
 
 
 @pytest.mark.parametrize(
@@ -244,7 +339,7 @@ def test_approve_then_release_with_the_material(monkeypatch, world, tmp_path):
     """I10: --approval は承認の記録があり SHA が同じときだけ受け取る。記録が無ければ何もマージせずに 10。"""
     path = tmp_path / "approval.md"
     path.write_text(MATERIAL.format(sha=world["approved"]))
-    out, code, merged, _ = run_release(monkeypatch, world, approval=str(path))
+    out, code, merged, _, _ = run_release(monkeypatch, world, approval=str(path))
     assert (out["status"], code, merged) == ("gate", 10, [])
     assert out["items"] == [{"kind": "commit", "name": world["approved"], "result": "not_approved", "recorded": None}]
 
@@ -255,7 +350,7 @@ def test_approve_then_release_with_the_material(monkeypatch, world, tmp_path):
     with pytest.raises(SystemExit) as ok:
         mod.cmd_approve(argparse.Namespace(root=str(world["work"]), approval=str(path), approved_sha=world["approved"], by="user"))
     assert ok.value.code[0]["status"] == "ok"
-    out, code, merged, _ = run_release(monkeypatch, world, approval=str(path))
+    out, code, merged, _, _ = run_release(monkeypatch, world, approval=str(path))
     assert (out["status"], out["metrics"]["approved_sha"]) == ("ok", world["approved"])
 
 
@@ -317,7 +412,7 @@ def test_approve_from_facts_needs_the_users_answer_after_facts(monkeypatch, worl
     for answer in (None, answer_state(tmp_path, "2000-01-01T00:00:00Z")):
         out, code = approve_facts(mod, world, path, facts, answer)
         assert (out["status"], code) == ("gate", 10)
-    out, code, merged, _ = run_release(monkeypatch, world, approval=str(path))
+    out, code, merged, _, _ = run_release(monkeypatch, world, approval=str(path))
     assert (out["status"], merged) == ("gate", [])  # release へ進んでも承認の記録が無いため止まる
     mod = load(monkeypatch)
     out, code = approve_facts(mod, world, path, facts, answer_state(tmp_path, "2999-01-01T00:00:00Z"))
@@ -325,7 +420,7 @@ def test_approve_from_facts_needs_the_users_answer_after_facts(monkeypatch, worl
     # 記録が既にあれば、証跡を渡さなくても書かずに通す（--state の無いスプリントで conductor が approve を打った後）
     out, code = approve_facts(mod, world, path, facts)
     assert (out["status"], out["items"][0]["result"]) == ("ok", "kept")
-    out, code, merged, _ = run_release(monkeypatch, world, approval=str(path))
+    out, code, merged, _, _ = run_release(monkeypatch, world, approval=str(path))
     assert (out["status"], out["metrics"]["approved_sha"]) == ("ok", world["approved"])
 
 

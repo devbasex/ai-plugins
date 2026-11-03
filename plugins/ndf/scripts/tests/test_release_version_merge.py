@@ -61,7 +61,7 @@ def branch_release(root: Path, files: dict) -> str:
 
 
 def test_hunks_that_differ_only_in_versions_take_the_release_side():
-    text = "x\n<<<<<<< ours\n  \"version\": \"10.28.0\",\n=======\n  \"version\": \"10.28.0-dev.4\",\n>>>>>>> theirs\ny\n"
+    text = 'x\n<<<<<<< ours\n  "version": "10.28.0",\n=======\n  "version": "10.28.0-dev.4",\n>>>>>>> theirs\ny\n'
     assert version_merge.resolve_text(text) == 'x\n  "version": "10.28.0",\ny\n'
 
 

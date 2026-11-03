@@ -37,10 +37,15 @@
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
 
-release --channel prod は承認したコミットを受け取り、配布の PR をマージした後の `origin/<ベースブランチ>` の先端と比べ、
-承認の外の変更があれば本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。
+release は release/v<版> をベースブランチへマージのコミットで取り込む。版数を持つ箇所だけが衝突すれば
+release/v<版>-sync で本番の版を取って取り込み、ほかが衝突すれば 1 で止まる（release_lib/version_merge.py。#2436 の R5）。
+release --channel prod は承認したコミットを受け取り、`origin/release/v<版>` の先端と比べ、承認の外の変更があれば
+本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。承認の後にベースブランチが
+進んでも止まらず、本番チャネルの PR は head を release/v<版> にして比べた先端だけを出す（#2436 の R2）。本番チャネルの
+PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る（途中で止まった配布の再開）。
 
-record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録
+record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ。マージ済みが無ければ
+release/v<版>-sync → ベースブランチ）へリリース記録
 （`## 配布の記録`。形は lib/dist_record.py）をコメントで 1 件書く。タグと GitHub Release が無ければ書かずに 3 で止まり、
 同じ記録が既にあれば書かずに ok を返す。投稿の失敗は 1、PR を読めなければ 2。metrics.release_pr_url を
 プランの `pr_from` が報告の Pull Request へ移す（#1273）。
@@ -88,6 +93,7 @@ import schema  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, changed, deploy, included, instructions, materials, others, record, replaced, step_run  # noqa: E402
+from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
@@ -660,9 +666,21 @@ def wait_and_merge(root, n, expect=None, ci_wait=3600.0):
     if p.returncode != 0:
         if any(isinstance(i, dict) and i.get("result") == "head_moved" for i in out.get("items") or []):
             raise HeadMoved(out.get("summary") or "")
+        if p.returncode == EXIT_CONFLICT:
+            raise Conflicted(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}")
         code = EXIT_INFRA_WAIT if p.returncode == EXIT_INFRA_WAIT else 1
         raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}", code)
     return merge_commit_of(root, n)
+
+
+EXIT_CONFLICT = 4  # merge-when-green: PR がベースブランチと衝突している
+
+
+class Conflicted(StepError):
+    """PR がベースブランチと衝突してマージできない（merge-when-green の 4）。呼び手が扱わなければ 1 で止まる。"""
+
+    def __init__(self, msg: str):
+        super().__init__(msg, 1)
 
 
 def merge_commit_of(root, n):
@@ -703,30 +721,80 @@ def _release_pr_body(root, a, plugin, plugins):
 
 
 def _merge_release_pr(root, a, plugin, plugins, branch, base):
-    """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、PR 番号とマージコミットを返す。"""
+    """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、(照合に渡す PR, 取り込んだ PR, マージコミット)
+    を返す。衝突すれば release/v<版>-sync で取り込み（_merge_sync_pr）、照合に渡す PR は元の release/v<版> の PR のまま。"""
     pr = _reusable_release_pr(root, branch, base)
     if pr is None:
         body = _release_pr_body(root, a, plugin, plugins)
-        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{a.version}", body), "state": "OPEN"}
+        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{a.version}", body), "state": "OPEN", "new": True}
     n = pr["number"]
-    return n, (wait_and_merge(root, n, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, n))
+    if pr["state"] != "OPEN":
+        return n, n, merge_commit_of(root, n)
+    if not pr.get("new") and (synced := _merged_sync_pr(root, branch, base)):
+        return n, synced, merge_commit_of(root, synced)  # 再開: 前の回が -sync で取り込み済み
+    try:
+        return n, n, wait_and_merge(root, n, ci_wait=a.ci_wait)
+    except Conflicted:
+        sync_n, commit = _merge_sync_pr(root, a, plugin, branch, base, n)
+        return n, sync_n, commit
 
 
-def _merge_prod_pr(root, a, plugin, base, prod, release_pr, approved, allowed, verdict, items, metrics):
-    """本番の PR を使い回すか作り、承認と比べた先端を指定してマージする。先端が動いたら比べ直し、許可リストの下に
-    収まる限り HEAD_MOVED_RETRIES 回まで入れ直し、それ以外は承認ゲートで止める。(PR 番号, マージコミット, 判定) を返す。"""
-    mp = find_pr(root, base, prod, states=("OPEN",))
+def _merged_sync_pr(root, branch, base):
+    """release/v<版>-sync → ベースブランチのマージ済みの PR があり、release/v<版> の先頭がベースブランチの祖先ならその番号。"""
+    pr = find_pr(root, f"{branch}-sync", base, states=("MERGED",))
+    if pr is None:
+        return None
+    git(root, "fetch", "-q", "origin", base)
+    return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+
+
+def _merge_sync_pr(root, a, plugin, branch, base, release_pr):
+    """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、
+    release/v<版>-sync → ベースブランチの PR でマージする。release/v<版> そのものへはベースブランチを取り込まない。
+    待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。"""
+    sync = f"{branch}-sync"
+    for left in range(HEAD_MOVED_RETRIES, -1, -1):
+        git(root, "fetch", "-q", "origin", base)
+        have = git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{sync}", check=False)
+        ours = "HEAD"
+        if have.returncode == 0:
+            git(root, "fetch", "-q", "origin", sync)
+            ours = f"origin/{sync}"
+        resolved = []
+        if git(root, "merge-base", "--is-ancestor", f"origin/{base}", ours, check=False).returncode != 0:
+            msg = f"Merge {base} into {sync}（{plugin} v{a.version} の版数の衝突を本番の版で解く）"
+            commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg)
+            git(root, "push", "-q", "origin", f"{commit}:refs/heads/{sync}")
+        found = find_pr(root, sync, base, states=("OPEN",))
+        body = (
+            f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため、"
+            f"本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n"
+            "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        )
+        n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
+        try:
+            return n, wait_and_merge(root, n, ci_wait=a.ci_wait)
+        except Conflicted:
+            if not left:
+                raise
+
+
+def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics):
+    """本番の PR（head は release/v<版>）を使い回すか作り、承認と比べた release/v<版> の先端を指定してマージする。
+    先端が動いたら比べ直し、許可リストの下に収まる限り HEAD_MOVED_RETRIES 回まで入れ直し、それ以外は承認ゲートで止める。
+    (PR 番号, マージコミット, 判定) を返す。"""
+    mp = find_pr(root, branch, prod, states=("OPEN",))
     title = f"Release: {plugin} v{a.version} を {prod} へ"
     body = f"{plugin} v{a.version} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
-    main_pr = mp["number"] if mp else create_pr(root, prod, base, title, body)
+    main_pr = mp["number"] if mp else create_pr(root, prod, branch, title, body)
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
         try:
             merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
             break
         except HeadMoved:
-            moved = approval.check_approved(root, approved, base, allowed)
+            moved = approval.check_approved(root, approved, branch, allowed)
             if not moved.ok or not left:
-                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
+                emit(approval.gate(root, a, plugin, branch, moved, items, metrics, moved=not left), EXIT_GATE)
             verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
     return main_pr, merge, verdict
 
@@ -747,44 +815,53 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
-    release_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
+    release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
         "version": ver,
         "release_pr": release_pr,
+        "sync_pr": merged_pr if merged_pr != release_pr else None,
         "main_pr": None,
         "tag": None,
         "merge_commit": release_commit,
         "plugins": ",".join(plugins),
     }
     items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
+    if metrics["sync_pr"]:
+        items[0]["result"] = "compared"  # 取り込みは -sync の PR が行い、元の PR は照合にだけ使う
+        items.append({"kind": "pr", "name": f"#{merged_pr}", "result": "merged", "base": base, "head": f"{branch}-sync"})
     if a.channel == "dev":
         emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
-    # 本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
+    # 本番: release/v<版> → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
     tag = f"{plugin}--v{ver}"
     git(root, "fetch", "-q", "origin", "--tags")
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
-        raise StepError(f"タグ {tag} は既にある")
-    # 承認したコミットの後に、配布の PR の外の変更がベースブランチへ入っていないか（#815）
-    allowed = approval.release_pr_allowed(root, release_pr, pr_view)
-    verdict = approval.check_approved(root, approved, base, allowed)
-    if not verdict.ok:
-        emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
-    metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-    main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, base, prod, release_pr, approved, allowed, verdict, items, metrics)
-    metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-    items += approval.tolerated_items(verdict)
-    git(root, "fetch", "-q", "origin")
-    merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-    _publish_tag_and_release(root, plugin, ver, tag, merge)
-
+    done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
+    if done and done["state"] == "MERGED":
+        # 再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける
+        main_pr = done["number"]
+        git(root, "fetch", "-q", "origin")
+        merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        metrics["approved_sha"] = approved
+        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
+    else:
+        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+            raise StepError(f"タグ {tag} は既にある")
+        # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
+        # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
+        allowed = approval.release_pr_allowed(root, release_pr, pr_view)
+        verdict = approval.check_approved(root, approved, branch, allowed)
+        if not verdict.ok:
+            emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
+        metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+        main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics)
+        metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+        items += approval.tolerated_items(verdict)
+        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
+        git(root, "fetch", "-q", "origin")
+        merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    items += _publish_tag_and_release(root, plugin, ver, tag, merge)
     metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
-    items += [
-        {"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod},
-        {"kind": "tag", "name": tag, "result": "pushed"},
-        {"kind": "release", "name": tag, "result": "created"},
-    ]
     swept, sweep_metrics, nxt = _sweep_candidates(root, merge)
     items += swept
     metrics.update(sweep_metrics)
@@ -792,10 +869,19 @@ def cmd_release(a):
 
 
 def _publish_tag_and_release(root, plugin, ver, tag, merge):
-    """本番チャネルへ入ったコミットにタグを打って push し、CHANGELOG.md の節を本文に GitHub Release を作る。"""
-    git(root, "tag", "-a", tag, merge, "-m", f"{plugin} v{ver}")
-    git(root, "push", "-q", "origin", tag)
+    """本番チャネルへ入ったコミットにタグを打って push し、CHANGELOG.md の節を本文に GitHub Release を作る。
+    origin にあるタグと GitHub Release は作り直さない（再開）。items（tag・release の 1 件ずつ）を返す。"""
+    items = []
+    if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode == 0:
+        items.append({"kind": "tag", "name": tag, "result": "exists"})
+    else:
+        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode != 0:
+            git(root, "tag", "-a", tag, merge, "-m", f"{plugin} v{ver}")
+        git(root, "push", "-q", "origin", tag)
+        items.append({"kind": "tag", "name": tag, "result": "pushed"})
 
+    if gh_parts.gh(["release", "view", tag, "--json", "tagName"], cwd=root).returncode == 0:
+        return items + [{"kind": "release", "name": tag, "result": "exists"}]
     notes = changelog_section(root, ver, plugin) or f"{plugin} v{ver}"
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(notes + "\n")
@@ -806,6 +892,7 @@ def _publish_tag_and_release(root, plugin, ver, tag, merge):
         os.unlink(notes_file)
     if p.returncode != 0:
         raise StepError(f"gh release create {tag} が失敗: {p.stderr.strip()[:300]}")
+    return items + [{"kind": "release", "name": tag, "result": "created"}]
 
 
 def _sweep_candidates(root, merge):
@@ -838,9 +925,10 @@ def cmd_record(a):
     git(root, "fetch", "-q", "origin", "--tags", check=False)  # 直前の正式版とタグの時刻を読む
     if gh_parts.gh(["release", "view", tag, "--json", "tagName"], cwd=root).returncode != 0:
         raise StepError(f"GitHub Release {tag} が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
-    pr = find_pr(root, f"release/v{ver}", base, states=("MERGED",))
+    # 版数の衝突を -sync で取り込んだときは、元の PR がマージされずに閉じていることがある（#2436）
+    pr = find_pr(root, f"release/v{ver}", base, states=("MERGED",)) or find_pr(root, f"release/v{ver}-sync", base, states=("MERGED",))
     if pr is None:
-        raise StepError(f"release/v{ver} → {base} のマージ済みの PR が無い", EXIT_PRECONDITION)
+        raise StepError(f"release/v{ver}（か release/v{ver}-sync）→ {base} のマージ済みの PR が無い", EXIT_PRECONDITION)
     n = pr["number"]
     prev_tag = release_tag_before(root, plugin, current=tag)
     prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
