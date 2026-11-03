@@ -842,6 +842,8 @@ def cmd_release(a):
         main_pr = done["number"]
         git(root, "fetch", "-q", "origin")
         merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
+            raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
         metrics["approved_sha"] = approved
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
     else:
@@ -873,6 +875,9 @@ def _publish_tag_and_release(root, plugin, ver, tag, merge):
     origin にあるタグと GitHub Release は作り直さない（再開）。items（tag・release の 1 件ずつ）を返す。"""
     items = []
     if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode == 0:
+        git(root, "fetch", "-q", "origin", f"+refs/tags/{tag}:refs/tags/{tag}")
+        if (at := git(root, "rev-parse", f"refs/tags/{tag}^{{commit}}").stdout.strip()) != merge:
+            raise StepError(f"origin のタグ {tag} が本番チャネルのコミット {merge[:8]} でなく {at[:8]} を指す")
         items.append({"kind": "tag", "name": tag, "result": "exists"})
     else:
         if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode != 0:

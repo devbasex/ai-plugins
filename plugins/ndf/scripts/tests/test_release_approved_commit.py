@@ -294,6 +294,24 @@ def test_release_after_the_production_pr_merged_makes_only_what_is_missing(monke
     assert out["metrics"]["main_pr"] == 2
 
 
+def test_release_resume_stops_when_the_tag_points_elsewhere(monkeypatch, world):
+    """再開でも、origin にあるタグが本番チャネルのコミットを指していなければ作ったものとみなさず止める。"""
+    git(world["work"], "tag", "-a", f"foo--v{VER}", world["approved"], "-m", "t")
+    git(world["work"], "push", "-q", "origin", f"foo--v{VER}")
+    git(world["work"], "tag", "-d", f"foo--v{VER}")
+    with pytest.raises(Exception) as e:
+        run_release(monkeypatch, world, prod_merged=True, approved_sha=world["approved"])
+    assert getattr(e.value, "code", None) == 1 and f"foo--v{VER}" in str(e.value)
+
+
+def test_release_resume_stops_when_the_merged_pr_lacks_the_approved_commit(monkeypatch, world):
+    """再開でも、マージ済みの本番の PR が承認したコミットを含まなければ続けない。"""
+    side = git(world["work"], "commit-tree", "HEAD^{tree}", "-m", "side")  # 本番チャネルに無いコミット
+    with pytest.raises(Exception) as e:
+        run_release(monkeypatch, world, prod_merged=True, approved_sha=side)
+    assert getattr(e.value, "code", None) == 1 and side[:8] in str(e.value)
+
+
 @pytest.mark.parametrize(
     "extra, code, text",
     [
