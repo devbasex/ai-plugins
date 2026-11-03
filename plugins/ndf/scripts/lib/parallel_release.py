@@ -164,7 +164,7 @@ def pipeline_cmd(supervise: str, d: Path) -> str:
 
 
 def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: Optional[Callable] = None) -> Path:
-    """`releases/<連番>/<提示>/` に提示のプランと本番のプランと答えの記録（`{"gates": []}`）を書き、置き場を返す。
+    """`releases/<連番>/<提示>/` に提示のプランと本番のプランと答えの記録（`answer_state`）を書き、置き場を返す。
 
     `builder(d, version)` が (提示のプラン, 本番のプラン) を返す。省けば `supervise_lib.parallel_plans` を使う。"""
     d = release_dir(main, name, seq, k)
@@ -175,8 +175,20 @@ def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: 
     (d / "present.json").write_text(json.dumps(present_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (d / "release.json").write_text(json.dumps(release_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if not (d / "answer.json").exists():
-        (d / "answer.json").write_text(json.dumps({"gates": []}) + "\n", encoding="utf-8")
+        (d / "answer.json").write_text(json.dumps(answer_state(main)) + "\n", encoding="utf-8")
     return d
+
+
+def answer_state(main: Path) -> dict:
+    """答えの記録の初期値（スプリントの状態ファイルの形）。MVV 判定は承認済みのプロジェクト MVV の参照を状態から読むため、
+    承認済みなら `sprint-state.py init` と同じ `project_mvv`（版と sha256）を足す。無ければ判定が人の承認へ戻す。"""
+    import project_mvv
+
+    state: dict = {"gates": []}
+    mvv = project_mvv.load_mvv(main)
+    if mvv.approved:
+        state["project_mvv"] = {"version": mvv.version, "sha256": mvv.sha256}
+    return state
 
 
 # ---- プランの組み立て（supervise_lib の部品を使う。supervise_lib は呼ぶときに読む） ----
@@ -354,6 +366,7 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
             approval_path=approval,
         )
     )
-    release_plan["起点"] = "{queue_approved:present}"
+    # 「起点」は origin/<ベースブランチ> のまま（版の判定が読む）。承認したコミットは作業ツリーだけが読む項目へ入れる
+    release_plan["起点のコミット"] = "{queue_approved:present}"
     release_plan["並列の計画"] = name
     return present_plan, release_plan

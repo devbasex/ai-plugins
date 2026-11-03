@@ -125,6 +125,29 @@ def test_present_plan_starts_and_collects_range_only(tmp_path):
     assert "--prs 0" not in json.dumps(present) and "--prs  --approval" in by["facts"]["cmd"]
 
 
+def test_release_plan_keeps_base_branch_and_takes_approved_commit_for_worktree(tmp_path):
+    import supervise_lib  # noqa: F401
+    import parallel_release
+    from supervise_lib import paths
+
+    d = tmp_path / "releases" / "1" / "1"
+    _, release = parallel_release.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3")
+    assert release["起点"].startswith("origin/") and release["起点のコミット"] == "{queue_approved:present}"
+    plan = {**release, "起点のコミット": "abc123"}
+    assert paths._resolve_base(plan, str(tmp_path)) == ("abc123", None)  # 作業ツリーは承認したコミットから
+
+
+def test_answer_state_carries_approved_project_mvv(tmp_path, monkeypatch):
+    import parallel_release
+    import project_mvv
+
+    approved = project_mvv.ProjectMvv(status="approved", version=4, sha256="s")
+    monkeypatch.setattr(project_mvv, "load_mvv", lambda root: approved)
+    assert parallel_release.answer_state(tmp_path) == {"gates": [], "project_mvv": {"version": 4, "sha256": "s"}}
+    monkeypatch.setattr(project_mvv, "load_mvv", lambda root: project_mvv.ProjectMvv(status="none"))
+    assert parallel_release.answer_state(tmp_path) == {"gates": []}
+
+
 def test_present_writes_to_present_plan_state_dir(tmp_path, monkeypatch):
     import supervise_lib  # noqa: F401
     import approved_commit
