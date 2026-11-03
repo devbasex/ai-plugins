@@ -233,7 +233,6 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
     return steps
 
 
-
 def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str] | None = None) -> dict:
     """並列の計画のレーンの本番のステージ（#2436 の F6）。本番を流さず、オーガナイザーへ配布の依頼を送る。
 

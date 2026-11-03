@@ -297,7 +297,6 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None 
     return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
 
 
-
 def request_record(plan: str) -> tuple[Path, dict]:
     """配布の依頼のプランの状態ディレクトリの `work/request.txt`（`parallel.py request` が書く）のパスと中身。"""
     out = Path(plan).with_name(Path(plan).stem + "-state") / "work" / "request.txt"
