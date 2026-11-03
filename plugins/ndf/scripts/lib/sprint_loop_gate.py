@@ -369,23 +369,41 @@ def move_to_waiting(
 
 
 def lane_gate1(env: Env, w: dict, report: str, state: str) -> dict | None:
-    """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan} を返す。
-    レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。"""
+    """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan, stamp, report, state}
+    を返す。レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。"""
     try:
         import parallel_lane
 
         got = parallel_lane.lane_of(env.main_dir())
         if not got:
             return None
-        code, so, _ = env.run(["gh", "pr", "view", str(w["pr"]), "--json", "headRefOid", "-q", ".headRefOid"], cwd=str(env.main_dir()))
-        stamp = so.strip() if code == 0 else ""
+        stamp = design_head(env, w)
         rid = parallel_lane.request_gate1(
             env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
             verdict=w.get("verdict"), reasons=[w.get("reason")] if w.get("reason") else [],
         )  # fmt: skip
     except Exception:  # noqa: BLE001 — 送れなければ今どおり人の判断待ち（loop answer で答える）
         return None
-    return {"request": rid, "plan": got[0]}
+    return {"request": rid, "plan": got[0], "stamp": stamp, "report": report, "state": state}
+
+
+def design_head(env: Env, w: dict) -> str:
+    code, so, _ = env.run(["gh", "pr", "view", str(w["pr"]), "--json", "headRefOid", "-q", ".headRefOid"], cwd=str(env.main_dir()))
+    return so.strip() if code == 0 else ""
+
+
+def regate1(env: Env, w: dict) -> bool:
+    """承認の答えを当てる前に、問いの時点の設計 PR の先端（stamp）と今の先端を比べる。動いていれば新しい先端で問い直し、
+    読めなければ次の境で読み直す（どちらも True。古い範囲への答えで承認を書かない）。印の無い古い依頼は比べない。"""
+    stamp = w.get("stamp") or ""
+    if not stamp.strip("0"):
+        return False
+    head = design_head(env, w)
+    if head == stamp:
+        return False
+    if head and (sent := lane_gate1(env, w, w.get("report") or "", w.get("state") or "")):
+        w.update(sent, restamped=stamp)
+    return True
 
 
 def drop_issues(plan: str, moved: list[int]) -> None:

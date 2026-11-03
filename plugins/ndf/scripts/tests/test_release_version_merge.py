@@ -62,12 +62,18 @@ def branch_release(root: Path, files: dict) -> str:
 
 def test_hunks_that_differ_only_in_versions_take_the_release_side():
     text = 'x\n<<<<<<< ours\n  "version": "10.28.0",\n=======\n  "version": "10.28.0-dev.4",\n>>>>>>> theirs\ny\n'
-    assert version_merge.resolve_text(text) == 'x\n  "version": "10.28.0",\ny\n'
+    assert version_merge.resolve_text(text, {"10.28.0"}) == 'x\n  "version": "10.28.0",\ny\n'
 
 
 def test_hunks_that_differ_beyond_versions_are_not_resolved():
     text = "<<<<<<< ours\nv 10.28.0 a\n=======\nv 10.28.0-dev.4 b\n>>>>>>> theirs\n"
-    assert version_merge.resolve_text(text) is None
+    assert version_merge.resolve_text(text, {"10.28.0"}) is None
+
+
+def test_hunks_with_other_versions_than_the_release_wrote_are_not_resolved():
+    """同じ塊にある依存ライブラリの版数の更新を、本番の側の古い値へ戻さない。"""
+    text = '<<<<<<< ours\n  "version": "10.28.0",\n  "dep": "1.2.3",\n=======\n  "version": "10.28.0-dev.4",\n  "dep": "1.2.4",\n>>>>>>> theirs\n'
+    assert version_merge.resolve_text(text, {"10.28.0"}) is None
 
 
 def test_sync_takes_the_release_version_and_keeps_the_release_tip_as_a_parent(repo):
@@ -89,6 +95,17 @@ def test_sync_stops_when_a_place_without_versions_conflicts(repo):
     with pytest.raises(version_merge.VersionConflict) as e:
         version_merge.sync_commit(repo, tip, dev, "sync")
     assert e.value.code == 1 and e.value.paths == ["src/a.py"]
+
+
+def test_sync_stops_when_a_dependency_version_shares_the_hunk(repo):
+    """版数の衝突と同じ塊にある依存の版数の更新は、本番の側の古い値へ戻さずに止める。"""
+    dep = lambda v, d: f'{{\n  "version": "{v}",\n  "dep": "{d}"\n}}\n'  # noqa: E731
+    commit(repo, {"pkg.json": dep("10.27.14", "1.2.3")}, "pkg")
+    tip = branch_release(repo, {"pkg.json": dep("10.28.0", "1.2.3")})
+    dev = commit(repo, {"pkg.json": dep("10.28.0-dev.4", "1.2.4")}, "dev")
+    with pytest.raises(version_merge.VersionConflict) as e:
+        version_merge.sync_commit(repo, tip, dev, "sync")
+    assert e.value.paths == ["pkg.json"]
 
 
 def test_sync_without_conflicts_is_a_plain_merge(repo):

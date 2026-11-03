@@ -350,6 +350,22 @@ def test_stop_during_release_waits_for_settle(env, tmp_path):
     assert pl.read_answer(main, "p1", rid)[0]["result"] == "released"
 
 
+def test_stop_force_after_a_pending_stop_stops_the_helper(env, tmp_path):
+    """settle を待って停止を保留している間も inbox を読み、後から届いた --force で一時レーンも止めて終える。"""
+    main, log, states = env["main"], env["log"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    wid = pl.workflow_id("p1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
+    time.sleep(0.6)
+    assert durable.status(wid) in pl.RUNNING
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
+    out = durable.output_of(wid)
+    assert out["status"] == "stopped" and ["stop", "p1-rel1", "--json"] in calls(log, "stop")
+
+
 def test_notice_during_release_carries_launch(env, tmp_path):
     main, states = env["main"], env["states"]
     states.write_text(json.dumps({"la": "running"}))
@@ -543,6 +559,13 @@ def test_settle_wakes_a_stopped_lane_of_the_range(env, tmp_path):
     until(lambda: pl.read_answer(main, "p1", rid)[0])
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)
     assert ev["action"] == "notice" and ev["wake"] == [f"python3 {prun.RELAY} restart la"]
+    states.write_text(json.dumps({"la": "stopped", "lb": "awaiting_approval"}))  # 後の知らせが pause を上書きしても
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("lanes") == ["lb"] and e)
+    assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]  # レーンが動き出すまで起こす行を添え続ける
+    states.write_text(json.dumps({"la": "running", "lb": "running"}))
+    pl.send_release_request(main, "p1", "lb", [11], [2], tmp_path / "st2")
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e.get("n") == 2 and e)
+    assert "wake" not in ev
 
 
 def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):

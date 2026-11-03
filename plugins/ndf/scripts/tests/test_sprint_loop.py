@@ -1411,6 +1411,15 @@ def test_loop_pending_returns_only_the_answered_close(env):
     assert out["metrics"]["status"] == "finish" and "loop finish l1 1" in out["metrics"]["pipeline"]
 
 
+def test_loop_pending_settles_a_rejected_answer_and_keeps_the_record(env):
+    """全レーンが止まった後の入口（loop pending）でも、差し戻しの答えで保留の周回を締め直して記録へ残す。"""
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "rejected", "reason": "直す"}, "defer": None}
+    assert sl.cmd_pending(env, "l1")["metrics"]["status"] == "none"
+    lap = rec(env)["laps"][0]
+    assert lap["outcome"] == "人へ戻した" and lap["release"]["answer"]["result"] == "rejected"
+
+
 def test_hold_question_closes_the_lap_and_the_answer_resumes_the_stopped_plan(env):
     lap = lane_lap(env)
     impl = str(Path(lap["out"]) / "impl-11.json")
@@ -1467,6 +1476,37 @@ def test_gate1_answers_are_applied_by_the_lane_at_the_boundary(env):
     w = rec(env)["waiting"][0]
     assert w["answer"] == "approved" and w["pr"] == 501
     assert any(c[:3] == ["gh", "pr", "edit"] and "design-approved" in c for c in env.calls)
+
+
+def test_gate1_approval_for_a_moved_design_pr_is_asked_again(env, monkeypatch):
+    """問いの後に設計 PR へ push があれば、古い範囲への承認で design-approved と承認の記録を書かず、新しい先端で問い直す。"""
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    env.answer_box = {}
+    env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    lap = sl.current_lap(rec(env))
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    r = rec(env)
+    r["waiting"][0].update(request="lroot-g501-aaaaaaaaaaaa", plan="p1", pr=501, stamp="a" * 40, report="r.md", state="s.json")
+    sl.write_record(env, r)
+    set_state(env, sl.current_lap(r))
+    sl.cmd_lap(env, "l1", False, None, [])
+    base = env.run
+    env.run = lambda cmd, cwd=None, stdin=None: (0, "b" * 40, "") if cmd[:3] == ["gh", "pr", "view"] else base(cmd, cwd=cwd, stdin=stdin)
+    sent = []
+    monkeypatch.setattr(
+        sl_gate,
+        "lane_gate1",
+        lambda e, w, report, state: sent.append((report, state)) or {"request": "lroot-g501-bbbbbbbbbbbb", "stamp": "b" * 40},
+    )
+    env.answer_box["lroot-g501-aaaaaaaaaaaa"] = {"answer": {"result": "approved"}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    w = rec(env)["waiting"][0]
+    assert not w.get("answer") and w["request"] == "lroot-g501-bbbbbbbbbbbb" and w["restamped"] == "a" * 40
+    assert sent == [("r.md", "s.json")]
+    assert not any(c[:3] == ["gh", "pr", "edit"] for c in env.calls)
 
 
 def test_gate_1_of_a_lane_sends_the_request_to_the_organizer(env, monkeypatch):

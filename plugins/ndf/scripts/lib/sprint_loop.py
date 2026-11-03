@@ -15,6 +15,7 @@ from typing import Callable
 import jsonio
 import project_mvv as pm
 import repo as repo_lib
+import sprint_loop_gate
 import sprint_mvv
 import step_result
 from pace import PaceError, read_loop, read_pace
@@ -424,6 +425,8 @@ def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
             continue
         result = a.get("result")
         if result == "approved" and w.get("pr"):
+            if sprint_loop_gate.regate1(env, w):  # 問いの後に設計 PR が動いた: 新しい先端で問い直す
+                continue
             code, so, se = env.run(["gh", "pr", "edit", str(w["pr"]), "--add-label", "design-approved"], cwd=str(env.main_dir()))
             if code != 0:
                 w["label_error"] = (se or so).strip()[:200]

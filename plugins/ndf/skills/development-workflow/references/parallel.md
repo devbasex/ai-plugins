@@ -17,11 +17,13 @@
    ラッパーの外・tmux が無い・統括役が居ないときは 3 で終わり、`items` にレーンごとの手で起動する 1 行が並ぶ。
    その 1 行を示して終える
 2. `metrics.next` の `parallel.py wait p1` を背景で打ち、完了の通知を待つ（[waiting.md](waiting.md) の形。前景の sleep で待たない）
-3. 返った `metrics.action` ごとに次の 1 手を打ち、`wait p1 --after <metrics.seq>` を背景で打ち直す
+3. 返った `metrics.action` ごとに次の 1 手を打ち、`wait p1 --after <metrics.seq>` を背景で打ち直す。どの `action` でも、
+   `metrics.wake` があれば、まだ打っていない各行（配布の答えを受けた止まっているレーンを起こす `relay.py restart <レーン>`）を打つ
+   （そのレーンが動き出すまで後の知らせにも添えて届く）
 
 | `wait` が返したもの | すること |
 | --- | --- |
-| `notice` | 承認待ちのレーンの `metrics.attach` の 1 行を出す。`metrics.release` があり、その `seq` の起動をまだ打っていなければ、`metrics.release.spawn` の 1 行も打つ（知らせが重なって `release` / `confirmed` を読み逃しても起動を失わない）。`metrics.wake` があれば、その各行（配布の答えを受けた止まっているレーンを起こす `relay.py restart <レーン>`）を打つ |
+| `notice` | 承認待ちのレーンの `metrics.attach` の 1 行を出す。`metrics.release` があり、その `seq` の起動をまだ打っていなければ、`metrics.release.spawn` の 1 行も打つ（知らせが重なって `release` / `confirmed` を読み逃しても起動を失わない） |
 | `questions` | 届いている依頼（`items`）を下の「問い方」で問い、依頼ごとに答えを送る |
 | `release` / `confirmed` | `metrics.spawn` の 1 行（一時レーンの起動）を打つ。一時レーンが配布のプランを流し、結果を返す |
 | `held` | `metrics.spawn` の 1 行を打つ。一時レーンが、止まったループのレーンの答えを受けた保留の周回の残りを流す（終える前の後片付け） |

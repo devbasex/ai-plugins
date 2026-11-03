@@ -187,15 +187,23 @@ def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
     lap["failure"] = {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "配布", "step": "配布の失敗"}
 
 
+def settle_refused(env: Env, rec: dict, answers: dict) -> bool:
+    """配布待ちの周回へ届いた差し戻し・失敗の答えを書いて締め直す（まとめは流さない）。1 つでも書いたら True。"""
+    settled = False
+    for lap in pending_laps(rec):
+        a = answer_of(answers, (lap.get("release") or {}).get("request")) if lap["outcome"] == RELEASE_PENDING else None
+        if a and a.get("result") != "released":
+            settle_release(env, rec, lap, a)
+            settled = True
+    return settled
+
+
 def pending_step(env: Env, rec: dict, before: dict, apply_gate1=None) -> dict | None:
     """周回の境で、答えの届いた依頼を古い順に扱う（境の 2〜6）。まとめを流す周回があればその結果を返し、無ければ None。"""
     answers = read_answers(env, rec)
     if apply_gate1 is not None:
         apply_gate1(env, rec, answers)
-    for lap in pending_laps(rec):
-        a = answer_of(answers, (lap.get("release") or {}).get("request")) if lap["outcome"] == RELEASE_PENDING else None
-        if a and a.get("result") != "released":
-            settle_release(env, rec, lap, a)
+    settle_refused(env, rec, answers)
     lap = answered_lap(rec, answers)
     if lap is None:
         return None
@@ -207,9 +215,12 @@ def pending_step(env: Env, rec: dict, before: dict, apply_gate1=None) -> dict | 
 def pending_pipeline(env: Env, rec: dict, before: dict) -> dict:
     """`loop pending`: 答えの届いた保留の周回のまとめの pipeline だけを返す（止まったレーンの残りを一時レーンが流す。異常系 11）。"""
     answers = read_answers(env, rec)
+    settled = settle_refused(env, rec, answers)  # 差し戻し・失敗も締め直して残さない（全レーンが止まった後の入口でも）
     lap = answered_lap(rec, answers)
     if lap is None:
-        return loop_ok("答えの届いた保留の周回は無い", rec, status="none")
+        if settled:
+            write_record(env, rec, before)
+        return loop_ok("答えの届いた保留の周回は無い" + ("（差し戻し・失敗は締め直した）" if settled else ""), rec, status="none")
     if lap["outcome"] == RELEASE_PENDING and not (lap["release"].get("answer") or {}).get("result"):
         settle_release(env, rec, lap, answer_of(answers, lap["release"]["request"]))
     return finish_result(env, rec, before, lap)

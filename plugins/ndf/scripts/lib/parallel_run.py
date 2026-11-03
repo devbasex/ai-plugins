@@ -254,6 +254,7 @@ class _Run:
         self.stall_until: dict[str, float] = {}
         self.helper_asked: Optional[int] = None
         self.held_spawned: list[str] = []
+        self.wake: list[str] = []
 
     def bump(self) -> int:
         self.seq += 1
@@ -261,13 +262,17 @@ class _Run:
 
     def pause(self, action: str, **fields) -> None:
         """イベント `pause` は上書きされるため、流れている配布の最後の起動の指示（release / confirmed）を
-        他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。"""
+        他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。配布の答えを受けた止まっている
+        レーンを起こす行（`wake`）も、そのレーンが動き出すまでどの知らせにも添える。"""
         seq = self.bump()
         if action in ("release", "confirmed"):
             self.launch = {"seq": seq, "action": action, **fields}
         elif self.current is not None and self.launch:
             fields = {**fields, "release": self.launch}
-        durable.set_event("pause", {"seq": seq, "action": action, **fields})
+        stopped = self.stopped()
+        self.wake = [n for n in self.wake if n in stopped]
+        wake = {"wake": [f"python3 {RELAY} restart {n}" for n in self.wake]} if self.wake else {}
+        durable.set_event("pause", {"seq": seq, "action": action, **fields, **wake})
 
     def progress(self) -> dict:
         return {"lanes": self.lanes, "releases": [{k: v for k, v in r.items() if k != "presented"} for r in self.releases]}
@@ -440,7 +445,8 @@ class _Run:
         self.current = None
         stopped = self.stopped()  # 止まった宛先を起こす 1 行を知らせへ（異常系 6）。全レーンが止まれば異常系 11 に任せる
         if (wake := sorted({r["lane"] for r in answered if r.get("lane") in stopped})) and len(stopped) < len(self.order):
-            self.pause("notice", lanes=[], attach=[], wake=[f"python3 {RELAY} restart {n}" for n in wake])
+            self.wake = sorted({*self.wake, *wake})
+            self.pause("notice", lanes=[], attach=[])
 
 
 def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None) -> str:
@@ -502,18 +508,15 @@ def parallel_workflow(main: str, name: str) -> dict:
     while True:
         if run.stop and (run.current is None or run.force):  # --force は配布の settle を待たず、一時レーンも止める
             return _handle_stop(run, main)
-        if run.stop:  # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、
-            # settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
-            msg = durable.recv("resume", min(wait, 30))
-            if isinstance(msg, dict):
-                run.resume(msg)
-            continue
-        _spawn_ready(run, main)
-        if run.current is None and run.pending:
+        # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、settle が届くまで
+        # 待ってから終える（設計の失敗の 12 番。作りかけを残さない）。待つ間も inbox を読み、--force と問いを受ける
+        if not run.stop:
+            _spawn_ready(run, main)
+        if not run.stop and run.current is None and run.pending:
             run.answer_from_ranges()
             if run.pending:
                 run.open_release()
-        if _run_finished(run):
+        if not run.stop and _run_finished(run):
             held = step_held_loops(main, name, sorted(run.answered))
             if not held:
                 step_finish(main, name, run.progress())
@@ -529,7 +532,8 @@ def parallel_workflow(main: str, name: str) -> dict:
             msg = durable.recv("resume", min(wait, 30))
             if isinstance(msg, dict):
                 run.resume(msg)
-        _observe_run(run, main)
+        if not run.stop:
+            _observe_run(run, main)
 
 
 def _started(run: _Run) -> list[str]:
