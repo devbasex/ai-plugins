@@ -485,36 +485,3 @@ def material_path(repo, approval):
 
 # 配布の形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
 RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}
-
-
-def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mode: str, facts_from: str, answer_from: str) -> list[dict]:
-    """まとめた配布（#2436）の提示のプランの承認ゲート 2: MVV 判定（mvv・note）→ approve の順に置く。
-
-    今の本番のプランでは MVV 判定と approve が排他だが、提示のプランは両方を並べる。MVV 判定が通せば承認の記録が
-    既にあるため approve は答えの記録を読まずに通り、関門（10）なら提示のプランは承認ゲートで終わる。確定の後は
-    一時レーンが答えを `answer_from` へ書いて `--from approve` で続ける。"""
-    material = material_path(repo, approval)
-    st = shlex.quote(str(Path(state).resolve()))
-    steps = mvv_gate_steps(
-        f"{MVV_PY} check --sprint {st} --gate release --material {shlex.quote(material)} --pr {prs} --mode {mode}"
-        + (f" --root {shlex.quote(repo)}" if repo else "")
-        + f" --note {MVV_NOTE}",
-        f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
-        "approve",
-    )
-    steps.append(
-        {
-            "id": "approve",
-            "type": "run",
-            "stage": "配布",
-            "timeout": 120,
-            **({"cwd": repo} if repo else {}),
-            "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {shlex.quote(facts_from)}"
-            f" --answer-from {shlex.quote(answer_from)} --by user",
-            "next": "end",
-            "gate_next": "end",
-        }
-    )
-    steps.append(handoff_step(str(Path(state).resolve()), GATE_2, "判定のコメント"))
-    steps.append(reject_step(str(Path(state).resolve()), GATE_2, "mvv", root=repo or "."))
-    return steps

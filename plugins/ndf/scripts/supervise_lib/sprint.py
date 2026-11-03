@@ -14,7 +14,6 @@ from supervise_lib import absorb, limits, sprint_inputs
 from supervise_lib.decl import decl_roots, with_decls
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_waves import (
-    plan_release_request,
     sprint_branch,
     plan_fast_check,
     plan_fast_impl,
@@ -65,6 +64,8 @@ def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
     """本番のステージのプラン。並列の計画のレーンなら配布の依頼のプラン、そうでなければ `build()` の本番のプラン。"""
     lane = parallel_lane(repo)
     if lane:
+        from parallel_release import plan_release_request
+
         return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs)}
     return {"release-prod": build()}
 
