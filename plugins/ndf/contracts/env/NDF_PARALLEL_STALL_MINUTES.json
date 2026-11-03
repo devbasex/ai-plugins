@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PARALLEL_STALL_MINUTES",
+  "set_by": "user",
+  "summary": "並列の計画の run が動かないレーンを問うまでの分（既定 60。plugins/ndf/scripts/lib/parallel_run.py）"
+}

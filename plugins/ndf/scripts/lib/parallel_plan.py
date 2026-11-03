@@ -19,13 +19,14 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
+from parallel_files import PARALLEL_DIR  # noqa: F401  置き場の正本（問いの hook も読む）
+
 VERSION = 1
 PLAN_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")  # 計画名は 24 字まで（一時レーンの名前を 32 字に収める。I1）
 LANE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")  # 統括役の名前の形（relay_lib/common.py の NAME_RE と同じ）
 HELPER_RE = re.compile(r"-rel\d+$")  # 一時レーンの名前の形（`<計画名>-rel<連番>`）
 DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（2026-09-25 の実測。8 コア・30 GB）
 DEFAULT_MAX_NAMED = 3  # relay_lib/hub.py の max_named の既定
-PARALLEL_DIR = Path(".ndf") / "parallel"
 
 
 MAX_PLANS_ENV = "NDF_PARALLEL_MAX_PLANS"

@@ -8,13 +8,23 @@
 | `off` | 何も出さず、記録も書かない |
 
 判定のたびに `lib/ask_ledger.py` へ 1 行を追記する。追記の失敗は飲む。どの失敗も None（通す）を返す（I8）。
+
+並列の計画（#2436 の 6d）: 判定が通す問いを、動いている計画のレーンか一時レーン（作業ディレクトリの役割のファイルが
+`helper`）が出したときは、`parallel.py request-ask` でオーガナイザーへ送り、`deny` で止めて保留の手順を返す。
+レーンでない・送れない・上限を越えたときは今どおり通す。
 """
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 ASK_PY = Path(__file__).resolve().parent.parent / "ask.py"
+PARALLEL_PY = Path(__file__).resolve().parent.parent / "parallel.py"
+FORWARD_TIMEOUT = 8  # 秒。hook の 10 秒の上限の中に収める
 ASKING_MD = Path(__file__).resolve().parent.parent.parent / "skills" / "development-workflow" / "references" / "asking.md"
 
 STOP_REASONS = {
@@ -77,6 +87,56 @@ def _record_verdict(ev, verdict, decl) -> str:
     return row["id"]
 
 
+def run_request_ask(main: Path, plan: str, lane: str, payload: dict) -> tuple[int, dict]:
+    """`parallel.py request-ask` を子プロセスで打つ（上限 FORWARD_TIMEOUT 秒）。(終了コード, 統一 JSON レポート)。"""
+    got = subprocess.run(
+        [sys.executable, str(PARALLEL_PY), "request-ask", plan, "--lane", lane],
+        input=json.dumps(payload, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        cwd=str(main),
+        timeout=FORWARD_TIMEOUT,
+    )
+    try:
+        return got.returncode, json.loads(got.stdout.strip().splitlines()[-1]) if got.stdout.strip() else {}
+    except ValueError:
+        return got.returncode or 2, {}
+
+
+def hold_text(rid: str, plan: str) -> str:
+    """オーガナイザーへ送った問いの理由と保留の手順（正本: asking.md の「並列の計画のレーン」）。"""
+    loop = f'python3 "{Path(__file__).resolve().parent.parent / "sprint-state.py"}" loop hold-question <ループ> --ref {rid} --plan <止まったプラン> --step <続きのステップ> --parallel {plan}'
+    return "\n".join(
+        [
+            f"ndf: 並列の計画 {plan} のレーンの問いをオーガナイザーへ送った（依頼 {rid}）。この作業を保留し、別の作業へ進め。答えは周回の境で届く。",
+            f"開発ループのレーン: {loop} を打ち、周回を質問待ちで締めて次の周回へ進む。",
+            f"1 スプリントのレーン・一時レーン: 引継ぎ文書の「次にやること」に続きのコマンドと依頼 {rid} を書き、ndf-next を出さずにセッションを終える（オーガナイザーが起こす）。",
+            f"正本: {ASKING_MD}",
+        ]
+    )
+
+
+def forward_to_organizer(ev, row_id: str) -> dict | None:
+    """レーンか一時レーンの通す問いをオーガナイザーへ送り、送れたら deny を返す。当たらない・送れなければ None（通す）。"""
+    name = os.environ.get("NDF_RELAY_NAME")
+    if not name:
+        return None
+    import decl
+    import parallel_files
+
+    main = decl.main_dir(ev.cwd) or Path(ev.cwd)
+    plan = parallel_files.lane_name_in_plans(main, name, os.environ.get("NDF_RELAY_DIR"))
+    if not plan:
+        return None
+    code, got = run_request_ask(main, plan, name, {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id})
+    rid = (got.get("metrics") or {}).get("id")
+    if code != 0 or not rid:
+        return None
+    from hook_lib.token_guard import deny
+
+    return deny(hold_text(rid, plan))
+
+
 def _context(text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}
 
@@ -95,6 +155,10 @@ def ask_decision(ev) -> dict | None:
             return deny(ask_stop_text(verdict, decl, row_id))
         if verdict.decision == "advise":
             return _context("ndf: mode が advise のため止めていない。\n" + ask_stop_text(verdict, decl, row_id))
-        return _context(pass_text(verdict, decl))
+        try:
+            held = forward_to_organizer(ev, row_id)
+        except Exception:  # noqa: BLE001 — 送れない・上限を越えたときは今どおり通す（I8）
+            held = None
+        return held or _context(pass_text(verdict, decl))
     except Exception:  # noqa: BLE001 — 宣言・判定・記録のどの失敗も通す（I8）
         return None

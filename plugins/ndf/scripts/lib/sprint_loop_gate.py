@@ -25,6 +25,8 @@ from sprint_loop_record import (
     IN_PROGRESS,
     FAILED,
     RETURNED,
+    RELEASE_PENDING,
+    PENDING,
     GATE_1,
     GATE_2,
     DESIGN_PHASE,
@@ -37,6 +39,7 @@ from sprint_loop_record import (
     current_lap,
     consumed,
     boundary_stop,
+    held_stop,
     mvv_change_stop,
     resume_command,
     stop_and_report,
@@ -64,6 +67,7 @@ def select_cmd(name: str) -> str:
 
 
 QUEUE_MAX = 3  # まとめの queue の同時に流す計画の上限（supervise.py queue --max）
+DONE_RESULTS = ("完了", NOT_RUN)  # 周回を完了で締められる done の結果（流さなかった計画は前のステージの結果に従う）
 
 
 def queue_command(stages: list[list[str]], done: Path) -> str:
@@ -198,7 +202,7 @@ def gate_copy(name: str, row: dict) -> dict:
 
 
 def waiting_section(rec: dict, w: dict) -> str:
-    how = f"python3 {SPRINT_STATE} loop answer {rec['name']} {w['number']} --approved|--rejected"
+    how = f"python3 {SPRINT_STATE} loop answer {rec['name']} {w['number']} --approved|--rejected|--revise --note <指摘ファイル>"
     pr = f"#{w['pr']}" if w.get("pr") else "—"
     lines = [
         f"- 判定: {w.get('verdict', 'unknown')}（承認ゲート {w['gate']}）",
@@ -208,6 +212,8 @@ def waiting_section(rec: dict, w: dict) -> str:
         f"- 答え: {w.get('answer') or 'まだ'}",
         f"- 答え方: `{how}`",
     ]
+    if w.get("note"):  # 直して出し直す（#2436 の 6e）: 次の周回の設計がこの指摘を読む
+        lines += ["", "### 直して出し直す指摘", "", w["note"]]
     return "\n".join(lines)
 
 
@@ -243,6 +249,9 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
         return refusal_order("done に承認ゲートで止まった計画が無い")
     if stop := mvv_change_stop(env, rec):
         return stop_and_report(env, rec, before, stop, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
+    request = next((i["plan"] for i in gated if plan_info(i["plan"]).get("フェーズ") == RELEASE_REQUEST_PHASE), None)
+    if request:  # 並列の計画のレーンが配布の依頼を送った: 承認ゲート 2 として止まらず、配布待ちで締めて次の周回へ（#2436 の 6a）
+        return handle_release_pending(env, rec, before, lap, request)
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
         return handle_gate2(env, rec, before, lap, next(i["plan"] for i in gated if i not in gate1))
@@ -287,6 +296,41 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None 
     return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
 
 
+RELEASE_REQUEST_PHASE = "配布の依頼"  # parallel_release.RELEASE_REQUEST_PHASE（配布の依頼のプランの「フェーズ」）
+
+
+def request_record(plan: str) -> tuple[Path, dict]:
+    """配布の依頼のプランの状態ディレクトリの `work/request.txt`（`parallel.py request` が書く）のパスと中身。"""
+    out = Path(plan).with_name(Path(plan).stem + "-state") / "work" / "request.txt"
+    return out, jsonio.read(out, missing={}, broken={}, want=dict)
+
+
+def handle_release_pending(env: Env, rec: dict, before: dict, lap: dict, plan: str) -> dict:
+    """配布の依頼を送った周回を「配布待ち」で締める。まとめ（同じ queue の残りのステージと close）は流さずに記録へ残し、
+    答えを待たずに次の周回へ進む。答えは周回の境（`pending_step`）で読む。"""
+    out, sent = request_record(plan)
+    rest = [s for s in stages_after(lap, plan) if s and s != lap.get("close_plans")]
+    lap["release"] = {
+        "plan": plan,
+        "out": str(out),
+        "plan_name": sent.get("plan") or plan_info(plan).get("並列の計画"),
+        "request": sent.get("id"),
+        "stages": rest,
+        "close_plans": lap.get("close_plans") or [],
+    }
+    close_lap(env, rec, lap, RELEASE_PENDING)
+    lap["held_at"] = lap["ended_at"]
+    return after_close(env, rec, before, f"周回 {lap['n']} の配布の依頼（{sent.get('id') or '識別子なし'}）を送り、配布待ちで締めた")
+
+
+def finish_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None) -> None:
+    """保留の周回（配布待ち・質問待ち）を 1 回だけ締め直す（I1 の例外）。結果・終わった時刻・費用と秒・振り返り・棚卸しを書き換える。"""
+    if lap.get("outcome") not in PENDING:
+        raise LoopError(f"周回 {lap['n']} は保留の周回でない（締め直しは 1 回だけ）")
+    lap["outcome"] = IN_PROGRESS
+    close_lap(env, rec, lap, outcome, state)
+
+
 def unfinished_design_issues(items: list[dict]) -> list[int]:
     """done のうち、設計のプランが完了も関門もしなかった（失敗・流さなかった）課題。設計と承認を経ていないため続きに入れない。"""
     out: set[int] = set()
@@ -312,6 +356,8 @@ def move_to_waiting(
                 "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
                 "basis": row.get("basis") or [], "gate": 1, "pr": pr, "lap": lap["n"], "at": env.now(),
             }  # fmt: skip
+            if pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
+                w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えは周回の境で読む（#2436 の 6c）
             rec["waiting"].append(w)
             lap.setdefault("gates", []).append(gate_copy(GATE_1, row))
             moved.append(int(n))
@@ -320,6 +366,26 @@ def move_to_waiting(
     kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved and n not in unfinished]
     lap["issues_kept"] = kept
     return moved, kept, notes
+
+
+def lane_gate1(env: Env, w: dict, report: str, state: str) -> dict | None:
+    """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan} を返す。
+    レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。"""
+    try:
+        import parallel_lane
+
+        got = parallel_lane.lane_of(env.main_dir())
+        if not got:
+            return None
+        code, so, _ = env.run(["gh", "pr", "view", str(w["pr"]), "--json", "headRefOid", "-q", ".headRefOid"], cwd=str(env.main_dir()))
+        stamp = so.strip() if code == 0 else ""
+        rid = parallel_lane.request_gate1(
+            env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
+            verdict=w.get("verdict"), reasons=[w.get("reason")] if w.get("reason") else [],
+        )  # fmt: skip
+    except Exception:  # noqa: BLE001 — 送れなければ今どおり人の判断待ち（loop answer で答える）
+        return None
+    return {"request": rid, "plan": got[0]}
 
 
 def drop_issues(plan: str, moved: list[int]) -> None:
@@ -489,7 +555,7 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
 
 def after_close(env: Env, rec: dict, before: dict, summary: str) -> dict:
     """周回を締めた後の境の判定。止まれば 3、続けば ndf_next を返す。"""
-    stop = boundary_stop(env, rec)
+    stop = held_stop(rec, boundary_stop(env, rec))
     if stop:
         return stop_and_report(env, rec, before, stop, f"{summary}。止まる条件に当たった（{stop['condition']}）")
     write_record(env, rec, before)

@@ -45,7 +45,11 @@ FAKE = textwrap.dedent(
     sub = sys.argv[1]
     if sub == "ls":
         st = json.load(open(states)) if os.path.exists(states) else {}
-        print(json.dumps({"items": [{"name": n, "state": s} for n, s in st.items()], "metrics": {"hub": True, "tmux": True}}))
+        rows = [{"name": n, **(s if isinstance(s, dict) else {"state": s})} for n, s in st.items()]
+        print(json.dumps({"items": rows, "metrics": {"hub": True, "tmux": True}}))
+    elif sub == "spawn" and sys.argv[3] in os.environ.get("FAKE_REFUSE", "").split():
+        print(json.dumps({"items": [{"result": "limit"}], "metrics": {}}))
+        sys.exit(1)
     else:
         print(json.dumps({"items": [{"result": "started"}], "metrics": {}}))
     """
@@ -75,7 +79,25 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None: _build(m, n, s, k, v, builder))
     yield {"main": main, "log": log, "states": states, "heads": heads}
+    _stop_running(main)
     durable.close()
+
+
+def _stop_running(main):
+    """テストが残した耐久ワークフローを止め、スレッドが抜けるのを待つ。
+
+    close() は DBOS を止めてもワークフローのスレッドを止めない。残すと次のテストの同じ ID（parallel-p1）の起動が
+    重複として打ち切られ、前のテストのスレッドが次のテストの記録を読み書きする。"""
+    wid = pl.workflow_id("p1")
+    try:
+        if durable.status(wid) not in pl.RUNNING:
+            return
+        durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
+        end = time.monotonic() + 15
+        while time.monotonic() < end and durable.status(wid) in pl.RUNNING:
+            time.sleep(0.1)
+    except Exception:  # 後片付けの失敗でテストの結果を変えない
+        pass
 
 
 def _build(m, n, s, k, v, builder):
@@ -338,3 +360,199 @@ def test_notice_during_release_carries_launch(env, tmp_path):
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
     assert ev["release"]["seq"] == rel["seq"] and ev["release"]["spawn"] == rel["spawn"]
     assert ev["release"]["pipeline"] == rel["pipeline"]
+
+
+# ---- 問いをオーガナイザーへ集める（受け入れ条件 6c・6d・6f）と一時レーン ----
+
+ASK = {"questions": [{"question": "gh の認証を直してよいか", "options": [{"label": "済んだ"}, {"label": "まだ"}]}],
+       "metadata": {"source": "ndf-ask:human-action"}}  # fmt: skip
+
+
+def questions(main):
+    return event(main, "p1", "questions") or {"items": []}
+
+
+def test_ask_request_raises_questions_and_the_answer_reaches_the_lane(env, tmp_path):
+    main = env["main"]
+    start(main)
+    rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led1")
+    assert rid == "la-qled1"
+    got = until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    assert got[0]["kind"] == "ask" and got[0]["source"] == "ndf-ask:human-action" and "attach la" in got[0]["attach"]
+    pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
+    ans = until(lambda: pl.answers_of(main, "p1", [rid])[rid]["answer"])
+    assert ans["result"] == "answered" and ans["choice"] == ["済んだ"]
+    until(lambda: not [i for i in questions(main)["items"] if i["id"] == rid])  # 答えた問いはもう返さない
+
+
+def test_the_same_ask_id_is_counted_once(env, tmp_path):
+    main = env["main"]
+    start(main)
+    pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led1")
+    pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led1")
+    until(lambda: questions(main)["items"])
+    time.sleep(0.6)
+    assert len(questions(main)["items"]) == 1
+
+
+def test_sender_is_a_running_lane_or_a_helper_with_the_role_file(env, tmp_path):
+    main = env["main"]
+    helper = tmp_path / "helper"
+    helper.mkdir()
+    (helper / "role.json").write_text(json.dumps({"role": "helper", "plan": "p1"}))
+    other = tmp_path / "other"
+    other.mkdir()
+    assert pl.lane_name_in_plans(main, "la", None) == "p1"  # ファイルだけで見る
+    assert pl.lane_name_in_plans(main, "p1-rel1", str(helper)) == "p1"
+    assert pl.lane_name_in_plans(main, "zz", str(other)) is None
+    assert pl.sender_of(main, "la", None) is None  # 計画が動いていない
+    start(main)
+    until(lambda: pl.run_status(main, "p1") in pl.RUNNING)
+    assert pl.sender_of(main, "la", None) == ("p1", "la")
+    assert pl.sender_of(main, "p1-rel1", str(helper)) == ("p1", "p1-rel1")  # lanes に載らない一時レーンも送れる
+    assert pl.sender_of(main, "zz", str(other)) is None
+
+
+def test_helper_task_follows_the_last_launch(env, tmp_path):
+    main = env["main"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    task = prun.helper_task(main, "p1", 1, 1)
+    d = prl.release_dir(main, "p1", 1, 1)
+    assert task["phase"] == "present" and f"queue {d / 'present.json'}" in task["pipeline"]
+    assert "request-gate2 p1 1 1" in task["gate2"] and "settle p1 1 --done" in task["settle"]
+    (d / "present.json").write_text(
+        json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "parallel.py present p1 1 1 --approval issues/a.md && cat x"}]})
+    )
+    assert prun.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
+    (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]
+    assert item["id"] == "p1-p1-1" and item["stamp"] == "sha1"
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # 承認ゲート 2 の問いは答えで消える
+    task = prun.helper_task(main, "p1", 1, 1)
+    assert task["phase"] == "confirmed"
+    assert "'関門 2'" in task["pipeline"] and "--from approve" in task["pipeline"] and f"queue {d / 'release.json'}" in task["pipeline"]
+
+
+def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypatch):
+    monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+    got = subprocess.run(
+        [sys.executable, str(SCRIPTS / "parallel.py"), "request-ask", "p1", "--lane", "zz"],
+        input=json.dumps({"tool_input": ASK, "cwd": str(env["main"]), "ledger_id": "x"}),
+        capture_output=True,
+        text=True,
+        cwd=str(env["main"]),
+    )
+    assert got.returncode == 4 and json.loads(got.stdout)["status"] == "stopped"
+
+
+# ---- 異常系（設計 issue-2436-design-failures.md の 3・5・11・12・17 と一時レーンの停止） ----
+
+OLD = "2000-01-01T00:00:00Z"
+
+
+def test_a_stalled_lane_is_asked_once(env):
+    main, states = env["main"], env["states"]
+    start(main)
+    until(lambda: spawned(env["log"]) == ["la"])
+    states.write_text(json.dumps({"la": {"state": "running", "at": OLD}}))
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "stall"])[0]
+    assert item["lane"] == "la" and item["options"] == ["起こし直す", "止める", "待つ"] and "restart la" in item["commands"]["起こし直す"]
+    time.sleep(0.8)
+    assert len([i for i in questions(main)["items"] if i["kind"] == "stall"]) == 1  # 次の区切りまで立てない
+
+
+def test_questions_of_the_same_cause_are_asked_once_and_answered_to_each(env, tmp_path):
+    main = env["main"]
+    env["states"].write_text(json.dumps({"la": "running", "lb": "running"}))
+    start(main)
+    a = pl.request_ask(
+        main, "p1", "la", {**ASK, "questions": [{"question": "gh の認証が切れた（/work/la の #12）", "options": []}]}, str(tmp_path), "x1"
+    )
+    b = pl.request_ask(
+        main, "p1", "lb", {**ASK, "questions": [{"question": "gh の認証が切れた（/work/lb の #34）", "options": []}]}, str(tmp_path), "x2"
+    )
+    item = until(lambda: [i for i in questions(main)["items"] if b in (i.get("also") or [])])[0]
+    assert item["id"] == a and len(questions(main)["items"]) == 1 and "/work/lb の #34" in item["merged"][0]["question"]
+    pl.send_answer(main, "p1", a, "answered", choice=["済んだ"])
+    until(lambda: all(pl.answers_of(main, "p1", [a, b])[r]["answer"] for r in (a, b)))
+
+
+def test_three_spawn_refusals_raise_a_question(env, monkeypatch):
+    monkeypatch.setenv("FAKE_REFUSE", "la")
+    main = env["main"]
+    start(main)
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "spawn"])[0]
+    assert item["lane"] == "la" and "limit" in item["question"] and len(calls(env["log"], "spawn")) >= 3
+
+
+def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
+    main, states = env["main"], env["states"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper"}}))
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "helper"])[0]
+    assert item["options"] == ["続きから起こし直す", "止める"] and "p1-rel1" in item["question"]
+
+
+def test_stop_force_does_not_wait_for_settle_and_stops_the_helper(env, tmp_path):
+    main, log = env["main"], env["log"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    wid = pl.workflow_id("p1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
+    out = durable.output_of(wid)
+    assert out["status"] == "stopped" and ["stop", "p1-rel1", "--json"] in calls(log, "stop")
+
+
+def test_answered_pending_laps_of_stopped_loop_lanes_are_closed_by_a_helper_before_finishing(env, monkeypatch, tmp_path):
+    main, states = env["main"], env["states"]
+    monkeypatch.setattr(prun, "held_loops", lambda m, n, answered: ["lroot"] if answered else [])
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
+    until(lambda: pl.read_answer(main, "p1", rid)[0])
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "held" and e)
+    assert ev["loops"] == ["lroot"] and "--parallel-helper p1 pending lroot" in ev["spawn"]
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING  # 流し終えるまで finished にしない
+
+
+def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led9")
+    until(lambda: questions(main)["items"])
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    until(lambda: "lb" in spawned(env["log"]))
+    time.sleep(1.0)
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
+    assert durable.output_of(pl.workflow_id("p1"))["status"] == "finished"
+
+
+def test_irreversible_questions_with_different_numbers_are_not_merged(env, tmp_path):
+    main = env["main"]
+    env["states"].write_text(json.dumps({"la": "running", "lb": "running"}))
+    start(main)
+
+    def q(n):
+        return {
+            "questions": [{"question": f"PR #{n} を消してよいか", "options": [{"label": "はい"}]}],
+            "metadata": {"source": "ndf-ask:irreversible"},
+        }
+
+    pl.request_ask(main, "p1", "la", q(12), str(tmp_path), "y1")
+    pl.request_ask(main, "p1", "lb", q(34), str(tmp_path), "y2")
+    until(lambda: len(questions(main)["items"]) == 2)

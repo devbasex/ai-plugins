@@ -63,7 +63,7 @@
 | 利用の記録は、スクリプトが宣言のコマンドを打ち、マスクと `secret_redact` を通した集計値だけを LLM へ渡す。宣言が無ければ何も読まない | 範囲の外を読まないことを、手順の文ではなくコードで守る。何を集計値とみなすかは、プロジェクトごとに機械で決められない |
 | 1 回の見直しの起票は既定 5 件まで。MVV 判定が「従う」でない課題には既存の `needs-decision` を付ける | 見直しの間の 3 周回で着手するのは 6〜9 件なので、起票が着手を上回らない。順位付けと選定は `needs-decision` をすでに外すので、新しい除外は要らない |
 | 見直しの候補は上限で切らず、更新の古い順に並べる | 持ち越しが約 160 件あり、10 件ずつでは追いつかない |
-| 選べる課題が尽きたら、止まる前に見直しを 1 回だけ挟む（`review_first`） | 調査からの起票を試してから止まる。1 回に限るのは、起票が `needs-decision` に回り続けると見直しと選定の間を回り続けるため |
+| 選べる課題が尽きたら、止まる前に見直しを 1 回だけ挟む（`review_first`）。答えを待つ作業（保留の周回か、オーガナイザーへ送って答えの無い設計の承認）が残るときは挟まず `waiting_only` で止まる | 調査からの起票を試してから止まる。1 回に限るのは、起票が `needs-decision` に回り続けると見直しと選定の間を回り続けるため |
 | 溜まり具合の閾値は open の増加 30%・持ち越しが上限の 10 倍・型の割合 30%・3 回の連続 | 1 本のループ（4 周回）と 2026-11-01 の分類（最多の型 A が不具合の 31%）から置いた値で、最初の 3 回の見直しの `depths.jsonl` で見直す |
 | 材料は `.ndf/project.json` の `materials`、頻度と上限は `.ndf/backlog.json` の `depths` に置く | 材料の宣言は解析の 3 手（measure → 答え → write）と「手で書いた値を変えない」規則を使える。頻度は `candidate_limit` と同じ棚卸しの調整の値である |
 | ライブラリは `seeds.libraries` に宣言したものだけを調べ、1 行を「変化」と「競合」の 2 つの項目にする | すべての依存を調べると、費用が依存の数に比例して増える |
@@ -338,7 +338,7 @@ classDiagram
 | 差分の棚卸しは見直しの作業を反映しない。見直しの `apply` は持ち主が要る | `tests/test_upkeep_script.py`（`test_diff_depth_does_not_reflect_review_work` / `test_review_apply_needs_the_owner`） |
 | 起票は上限まで、ラベルと `needs-decision` つき | 同上の `test_review_creates_up_to_the_limit_with_labels_and_decision` |
 | 付け直しの前に前の状態を書き、戻せる。途中で失敗したら戻すコマンドを返す。大方針が従うまで付け直さない | 同上の `test_reparent_writes_before_state_and_reverts` / `test_reparent_failure_reports_the_revert_command` / `test_reparent_waits_for_a_following_policy` |
-| 選べる課題が尽きた最初の選定は `review_first`、見直しの後も 0 件なら `no_issue` で止まる | `plugins/ndf/scripts/tests/test_sprint_loop.py`（`test_no_candidates_is_no_issue_and_all_excluded_is_outside_mvv`） |
+| 選べる課題が尽きた最初の選定は `review_first`、見直しの後も 0 件なら `no_issue` で止まる。答えを待つ作業が残れば `waiting_only` で止まる | `plugins/ndf/scripts/tests/test_sprint_loop.py`（`test_no_candidates_is_no_issue_and_all_excluded_is_outside_mvv`） |
 | 周回の記録に深さの行と調査の費用が入り、調査の費用が予算に数えられる | 同上の `test_lap_records_depths_and_research_and_counts_research_in_the_budget` |
 | まとめのプランで、`refine` の次が `refine-record`、大整理 → 見直しの判定は 3 で飛び、持ち主になれないと `skipped`、本体の成否によらず `release` を通る | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_retro_and_close_once_each_in_order`）・`test_supervise_pace_verify.py` |
 | `vet --kind issue` が課題の本文をプロジェクト MVV と照合する | `plugins/ndf/scripts/tests/test_project_mvv.py`（`test_vet_issue_judges_an_issue_body_against_the_project_mvv`） |

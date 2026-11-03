@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/sprint_loop.py", "name": "", "kind": "lines", "reason": "492 行だったところへ #2436（レーンの配布待ち・質問待ち・保留の周回の CLI）で増えて 584 行。500 行以下にしたら消す", "lines": 584}
