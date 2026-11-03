@@ -430,6 +430,7 @@ def wait_from(
     poll: float = 1.0,
 ) -> Outcome:
     """`wait` と同じ判定を外から行う。終わりか、`keys` のどれかのイベントの `seq` が `after` を超えるまで待つ。
+    超えたイベントが複数あれば `seq` の最も小さいものを返す（`keys` の `seq` は同じ連番を共有する前提）。
 
     `Outcome("event", {"key": <イベント名>, **値})`・`Outcome("done", 出力)`・`Outcome("timeout")` などを返す。"""
     names = list(keys)
@@ -446,10 +447,15 @@ def wait_from(
                 return Outcome("done", rows[0].output)
             if st in FINISHED:
                 return Outcome("cancelled" if st == "CANCELLED" else "error", st)
+            # 超えたイベントが複数あれば seq の小さいものから返す（`--after <seq>` の打ち直しで先のイベントを読み飛ばさない）
+            hits = []
             for k in names:
                 ev = c.get_event(wid, k, timeout_seconds=0)
                 if isinstance(ev, dict) and int(ev.get("seq", 0)) > marks[k]:
-                    return Outcome("event", {"key": k, **ev})
+                    hits.append((int(ev.get("seq", 0)), k, ev))
+            if hits:
+                _, k, ev = min(hits, key=lambda h: h[0])
+                return Outcome("event", {"key": k, **ev})
             if deadline is not None and time.monotonic() >= deadline:
                 return Outcome("timeout")
             time.sleep(poll)

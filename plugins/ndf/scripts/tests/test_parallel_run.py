@@ -281,9 +281,32 @@ def test_char_request_outside_range_is_deferred_to_next_release(env, tmp_path):
     assert dfr == {"seq": 1, "reason": "範囲に入らないため次の配布へ回した", "at": None}
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e.get("n") == 2 and e)
     assert ev["k"] == 1 and ev["represent"] is False
-    out = stop(main)
-    assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "released"), (2, "presented")]
+    wid = pl.workflow_id("p1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
+    time.sleep(0.8)
+    assert durable.status(wid) not in ("SUCCESS",)  # 提示のまま流れている配布の途中の stop も settle まで終わらない
+    resume(main, {"n": 2, "phase": "settle", "result": "rejected", "reason": "stop"}, "s2")
+    out = durable.output_of(wid)
+    assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "released"), (2, "rejected")]
     assert out["releases"][1]["requests"] == [r2] and out["pending"] == [r2]
+
+
+def test_wait_returns_smaller_seq_first(env):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    first = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "running" and e)
+    wid = pl.workflow_id("p1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "ask", "lane": "la", "q": "?"}, "inbox", f"{wid}:inbox:q1")
+    q = until(lambda: event(main, "p1", "questions"))
+    states.write_text(json.dumps({"la": "awaiting_approval"}))
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice")
+    ident = pl.record_identity(main, "p1")
+    got = durable.wait_from(pl.KIND, ident, wid, ["pause", "questions"], first["seq"], 5)
+    assert got.kind == "event" and got.value["key"] == "questions" and got.value["seq"] == q["seq"]
+    got = durable.wait_from(pl.KIND, ident, wid, ["pause", "questions"], q["seq"], 5)
+    assert got.kind == "event" and got.value["key"] == "pause" and got.value["action"] == "notice"
+    stop(main)
 
 
 def test_stop_during_release_waits_for_settle(env, tmp_path):

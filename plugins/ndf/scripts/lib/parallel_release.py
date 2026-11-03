@@ -304,7 +304,11 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     approval = f"issues/approval-{plugin}-v{version}-parallel-{seq}-{k}.md"
     state = d / "answer.json"
     present_state = present_state_dir(d)  # 提示のプランの状態ディレクトリ（queue の `state_dir_of` と同じ置き場）
-    facts = _dev_approval_steps(ns, repo, approval, "0", ",".join((ns.release or {}).get("runtimes") or []))
+    # 足す PR は無い（範囲の PR だけを集める。`--prs` を値なしで渡す）
+    facts = _dev_approval_steps(ns, repo, approval, "", ",".join((ns.release or {}).get("runtimes") or []))
+    for s in facts:
+        s.pop("on_fail", None)  # 提示のプランに judge は無い。落ちたらそのステップで止まる
+    facts[0]["gate_as_ok"] = True  # facts の 10 は関門にせず、承認の成否は後段の mvv・approve が決める
     facts[-1]["next"] = "present"
     present = {
         "id": "present",

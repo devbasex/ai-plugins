@@ -365,10 +365,10 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.pause("running")
     wait = poll_seconds()
     while True:
-        releasing = run.current is not None and run.current.get("state") == "confirmed"
-        if run.stop and not releasing:
+        if run.stop and run.current is None:
             return _handle_stop(run, main)
-        if run.stop:  # 本番の配布の途中の stop は settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
+        if run.stop:  # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、
+            # settle が届くまで待ってから終える（設計の失敗の 12 番。作りかけを残さない）
             msg = durable.recv("resume", min(wait, 30))
             if isinstance(msg, dict):
                 run.resume(msg)

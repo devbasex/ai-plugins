@@ -484,7 +484,7 @@ def cmd_changed_plugins(a):
     if a.decided and pending:
         decided = changed.approval_path(root, a.decided)
         rows = changed.decided_rows(decided, pending, already)
-    elif a.prs:  # 候補は範囲の PR と --prs の和の本文から出す（#1885。develop へ直接入った互換の無い変更を拾う）
+    elif a.prs is not None:  # 候補は範囲の PR と --prs の和の本文から出す（#1885。develop へ直接入った互換の無い変更を拾う）
         prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", "HEAD"), a.prs)
         data = included.pr_fields(prs, cwd=str(root))[0] or {}
         view = lambda n: data[n] if isinstance(data.get(n), dict) else pr_view(root, n, "body,state,mergeCommit")  # noqa: E731  読めない PR は根拠に書く（I4）
@@ -1154,7 +1154,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("changed-plugins", parents=[common], help="前のタグからの差分にある他のプラグインと上げる版")
     p.add_argument("--since", help="前のタグ（省略時は <--plugin>--v の接尾辞の無い最も新しいタグ）")
     p.add_argument("--plugin", help="除くプラグイン（既定は宣言の release.plugin）")
-    p.add_argument("--prs", nargs="+", type=int, metavar="PR番号", help="版に含む PR（本文と閉じる課題から上げ幅の候補を出す）")
+    p.add_argument("--prs", nargs="*", type=int, metavar="PR番号", help="版に含む PR（本文と閉じる課題から上げ幅の候補。値なしは範囲だけ）")
     p.add_argument("--approval", help="承認資料。「版を上げる他のプラグイン」の節を書く")
     p.add_argument("--set", action="append", metavar="名前=上げ幅", help="--approval: 承認ゲート 2 で決めた上げ幅へ行を書き直す")
     p.add_argument("--decided", help="承認資料の表の上げ幅で上げた版を返す（本番の bump-others）")
@@ -1202,11 +1202,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument(
         "--prs",
-        nargs="+",
+        nargs="*",
         required=True,
         type=int,
         metavar="PR番号",
-        help="前のタグからベースブランチへ入った PR に足す PR（マージ前の PR など）",
+        help="前のタグからベースブランチへ入った PR に足す PR（マージ前の PR など。値なしなら範囲の PR だけ）",
     )
     p.add_argument("--prev-tag")
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
@@ -1218,7 +1218,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument(
-        "--prs", nargs="+", required=True, type=int, metavar="PR番号", help="--approval なら提示物の「含む PR」にあることを確かめるだけ"
+        "--prs", nargs="*", required=True, type=int, metavar="PR番号", help="--approval なら提示物の「含む PR」にあることを確かめるだけ"
     )
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin）")
     p.add_argument("--approval", help="本番承認の提示物。渡すと「配る中身」「検証への配布で確かめたこと」の欄を書く")

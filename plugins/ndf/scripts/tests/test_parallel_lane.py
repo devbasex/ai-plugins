@@ -111,6 +111,20 @@ def test_closes_by_pr_reads_in_bulk(tmp_path):
     assert calls == [[1, 2]]
 
 
+def test_present_plan_starts_and_collects_range_only(tmp_path):
+    import supervise_lib  # noqa: F401
+    import parallel_release
+    from supervise_lib import limits
+
+    d = tmp_path / "releases" / "1" / "1"
+    present, _ = parallel_release.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3")
+    by = {s["id"]: s for s in present["steps"]}
+    assert limits.run_error(present) is None  # on_fail が無いステップを指さない
+    assert not any(by[i].get("on_fail") for i in ("facts", "explain", "others"))
+    assert by["facts"].get("gate_as_ok") is True  # facts の 10 を関門で残さない
+    assert "--prs 0" not in json.dumps(present) and "--prs  --approval" in by["facts"]["cmd"]
+
+
 def test_present_writes_to_present_plan_state_dir(tmp_path, monkeypatch):
     import supervise_lib  # noqa: F401
     import approved_commit
