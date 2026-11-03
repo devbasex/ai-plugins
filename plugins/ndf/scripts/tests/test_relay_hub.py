@@ -503,7 +503,9 @@ def launched(state, monkeypatch):
     seen = []
     monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true")
     monkeypatch.setattr(hb.tmux, "sessions", lambda: {})
-    monkeypatch.setattr(hb.tmux, "new_session", lambda name, cwd, argv, env: seen.append({"name": name, "cwd": cwd, "argv": argv, "env": env}))
+    monkeypatch.setattr(
+        hb.tmux, "new_session", lambda name, cwd, argv, env: seen.append({"name": name, "cwd": cwd, "argv": argv, "env": env})
+    )
     hb.ensure_dirs()
     return seen
 
@@ -535,7 +537,9 @@ def test_process_restart_of_unknown_name_is_not_found(launched, name):
 
 
 def test_process_spawn_by_terminal_keeps_args_and_cwd(launched, tmp_path):
-    res = hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": str(tmp_path), "args": ["--model", "x", 3, "--", "y"], "by": "terminal"})
+    res = hb.Hub(None).process(
+        {"kind": "spawn", "name": "a", "cwd": str(tmp_path), "args": ["--model", "x", 3, "--", "y"], "by": "terminal"}
+    )
     assert res["tool"] == "relay-spawn" and res["status"] == "ok" and res["metrics"]["exit_code"] == 0
     assert res["items"] == [{"name": "a", "result": "started"}]
     (call,) = launched
