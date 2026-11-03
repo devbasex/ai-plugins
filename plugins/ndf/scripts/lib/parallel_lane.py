@@ -274,7 +274,9 @@ def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
         sha = ""
     rid = f"{name}-p{n}-{k}"
     lane = prl.helper_name(name, n)
-    _send_inbox(main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": _utc_stamp()}, rid)
+    _send_inbox(
+        main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": _utc_stamp()}, rid
+    )
     return rid
 
 
