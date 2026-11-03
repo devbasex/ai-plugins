@@ -143,6 +143,27 @@ def _select_candidate_rows(
     return picked, here
 
 
+def _rows_by_rank(ms: dict) -> list[dict]:
+    return sorted(ms.get("rows", []), key=lambda r: r["rank"])
+
+
+def milestone_candidates(ms: dict, rec: dict, first: set) -> list[dict]:
+    """マイルストーンの候補（切り出しの境界の内）に、境界の外にある先に選ぶ課題を順位の順で足す。"""
+    cands = candidates_of(ms, rec["max_issues"], pending_issues(rec))
+    have = {r["number"] for r in cands}
+    return cands + [r for r in _rows_by_rank(ms) if r["number"] in first and r["number"] not in have]
+
+
+def outside_boundary_rows(ms: dict, cands: list[dict], title: str) -> list[dict]:
+    """選ばれたマイルストーンで候補に入らなかった行（切り出しの境界の外）の落選行。"""
+    cand_nums = {r["number"] for r in cands}
+    return [
+        {"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": "順位（切り出しの境界の外）"}
+        for r in _rows_by_rank(ms)
+        if r["number"] not in cand_nums
+    ]
+
+
 def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dict, lap_created: set = frozenset()) -> dict:
     """選定（決定 2）。入力は rank の出力・記録・マイルストーンの説明だけ。戻り値は
     {"milestone", "selection", "candidates"}。選べたマイルストーンが無ければ milestone は None。"""
@@ -154,9 +175,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
     first = first_issues(rec)
     for title in order:
         ms = by_title[title]
-        cands = candidates_of(ms, rec["max_issues"], pending_issues(rec))
-        have = {r["number"] for r in cands}
-        cands += [r for r in sorted(ms.get("rows", []), key=lambda r: r["rank"]) if r["number"] in first and r["number"] not in have]
+        cands = milestone_candidates(ms, rec, first)
         total += len(cands)
         text = sprint_mvv.mvv_sections(descriptions.get(title) or "")
         unapproved = text is not None and (title, pm.sha256_text(text)) not in approvals
@@ -169,12 +188,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
         )
         rows_out += here
         if picked:
-            cand_nums = {r["number"] for r in cands}
-            rest = [r for r in sorted(ms.get("rows", []), key=lambda r: r["rank"]) if r["number"] not in cand_nums]
-            rows_out += [
-                {"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": "順位（切り出しの境界の外）"}
-                for r in rest
-            ]
+            rows_out += outside_boundary_rows(ms, cands, title)
             return {"milestone": title, "selection": rows_out, "candidates": total, "sprint_mvv": text}
     return {"milestone": None, "selection": rows_out, "candidates": total, "sprint_mvv": None}
 
