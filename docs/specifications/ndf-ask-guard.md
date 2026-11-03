@@ -15,6 +15,7 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 | 5 | AI は A を選び、`ask.py decide --ref ae1533b36fcd --answer A --reason "…"` で代わりの判断の行を足して作業を続ける |
 
 設計 Pull Request のマージの承認は、入力に `"metadata": {"source": "ndf-gate:1"}` を付ければ、どの宣言でも利用者へ出る。
+並列の計画のレーンと一時レーンでは、判定が通す問いを hook がオーガナイザーへ送り、オーガナイザーがまとめて利用者へ出す（下の「並列の計画のレーンの問い」）。
 
 **手順・区分の当てはめ方・宣言の書き方は Skill が正である。** ここに書き写さない。
 
@@ -103,7 +104,7 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 | --- | --- |
 | `plugins/ndf/scripts/lib/ask_policy.py` | 宣言の読み取りと検証（`load_ask_declaration`・`parse_declaration`）、根の決定（`project_root`）、区分の取り出しと解析（`source_of`・`parse_source`）、判定（`judge_ask`）、hook の入力からの判定（`judge_input`）、人へ回してよい区分の一覧（`passing_sources`）。標準ライブラリだけで書き、ファイルを読む以外の副作用を持たない |
 | `plugins/ndf/scripts/lib/ask_ledger.py` | 記録の置き場（`ask_ledger_path`）、行の組み立て（`verdict_row`・`decision_row`）、1 行の追記（`append_ask_row`）、読み出し（`read_ask_rows`）、判定の行の引き当て（`find_row`）、集計（`summarize_asks`）。標準ライブラリだけで書く |
-| `plugins/ndf/scripts/hook_lib/ask_guard.py` | `ask_decision(ev)` が判定から hook の出力（`deny` の理由・`additionalContext` の案内）を作り、判定の行を追記する。追記の失敗は飲み、どの失敗も `None`（通す）を返す |
+| `plugins/ndf/scripts/hook_lib/ask_guard.py` | `ask_decision(ev)` が判定から hook の出力（`deny` の理由・`additionalContext` の案内）を作り、判定の行を追記する。判定が通す問いを並列の計画のレーンか一時レーンが出したときは、`forward_to_organizer` が `parallel.py request-ask` でオーガナイザーへ送り、送れたら保留の手順を添えた `deny` を返す。追記と送りの失敗は飲み、どの失敗も `None`（通す）を返す |
 | `plugins/ndf/scripts/hook.py` の `_guards`・`dispatch` | `--runtime claude`・PreToolUse・`AskUserQuestion` のときだけ、締め切りの中で `ask_guard.ask_decision` を打つ（`Deadline.current` は `ask-guard`）。出力に `deny` があれば待ちの通知（`wait_notify.hook`）を打たない |
 | `plugins/ndf/scripts/ask.py` | 副命令 `decide`（代わりの判断の行を書く）と `summary`（数える）。出力は統一の JSON レポート（`lib/step_result.py`） |
 | `plugins/ndf/scripts/relay_lib/mark.py` | `question_denied(raw)` が入力を `judge_input` に掛け、`cmd_question("open")` は `deny` の問いにシグナルファイル（`question`）と時刻（`asked.json`）を書かない。差し戻しの文 `WAIT_REASON` が区分の付け方を案内する |
@@ -215,8 +216,8 @@ classDiagram
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 問い合わせの判定 | 区分が `ndf-gate:1`・`ndf-gate:2` なら、どの宣言でも `deny` にならない | テストが落ちる |
-| I2 | 問い合わせの判定 | 区分が `ndf-ask:redline:<番号>`（`C1`〜`C8`・`P<数>`・`R<数>`）なら、どの宣言でも `deny` にならない | テストが落ちる |
+| I1 | 問い合わせの判定 | 区分が `ndf-gate:1`・`ndf-gate:2` なら、どの宣言でも `deny` にならない。例外は並列の計画のレーンか一時レーンの問いをオーガナイザーへ送れたときで、`deny` は利用者へ出さない理由ではなく保留の案内である | テストが落ちる |
+| I2 | 問い合わせの判定 | 区分が `ndf-ask:redline:<番号>`（`C1`〜`C8`・`P<数>`・`R<数>`）なら、どの宣言でも `deny` にならない。例外は I1 と同じく、オーガナイザーへ送れたときである | テストが落ちる |
 | I3 | 問い合わせの判定 | `mode` が `enforce` のとき、区分が無い・形に合わない・許す区分（`allow` と `extra[].name`）に無い問いは `deny`、ある問いは `allow` になる | テストが落ちる |
 | I4 | 問い合わせの宣言 | 宣言が無い・読めない・形が誤っているとき、`enforce`・組み込みの 4 区分・しきい値 `0` で判定し、読めなかったときはその箇所（`problem`）を判定の出力と記録に添える | テストが落ちる |
 | I5 | 問い合わせの判定 | `mode` が `off` なら hook は何も出さず記録も書かない。`advise` なら `deny` を出さない | テストが落ちる |
@@ -236,7 +237,7 @@ classDiagram
 | E1 | AI が `AskUserQuestion` を呼んだ | AI（Claude Code のセッション） | `hook.py` と relay の `question open`（PreToolUse） | — |
 | E2 | hook が宣言を読んだ | `ask_policy.load_ask_declaration` | `judge_ask` | 無い: 既定。読めない・誤り: 既定と箇所（I4） |
 | E3 | hook が問い合わせを通した（`allow`・`advise`） | `ask_guard.ask_decision` | Claude Code（問いを出す）・待ちの通知・relay（シグナルファイルを作る） | — |
-| E4 | hook が問い合わせを止めた（`deny`） | `ask_guard.ask_decision` | AI（理由と案内を受け取る） | 内部の失敗は通す側へ倒す（I8） |
+| E4 | hook が問い合わせを止めた（`deny`） | `ask_guard.ask_decision` | AI（理由と案内を受け取る。オーガナイザーへ送ったときは保留の手順） | 内部の失敗は通す側へ倒す（I8） |
 | E5 | hook が判定を記録に書いた | `ask_ledger.append_ask_row` | 振り返り・Factory のランナー | 書けなくても判定は変えない |
 | E6 | AI が止めた理由を受け取り、自分で判断した | AI | （E7 で記録に残る） | 区分を付け替えて出し直したら、hook は区分だけを見て判定する |
 | E7 | AI が判断と理由を記録した | `ask.py decide` | 振り返り・Factory のランナー | 記録しないまま進むと、E5 の止めた行だけが残り `unanswered` に数えられる |
@@ -266,6 +267,18 @@ classDiagram
 `advise` の案内は、先頭に `ndf: mode が advise のため止めていない。` を足した `deny` の理由と同じ文である。
 `allow` の案内は 5 と 6 で、`kind` が `allowed`（宣言が許した区分）のときだけ先頭に「区分 `<source>` で人へ回した。区分の
 当てはめが誤っていれば取り下げて自分で決める」を足す。承認ゲートとレッドラインにはこの 1 行を付けない。
+
+### 並列の計画のレーンの問い
+
+判定が通す問い（`gate`・`redline`・`allowed`）のとき、hook は次の順で問いをオーガナイザーへ送るかを決める。
+
+| 順 | 見ること | 当たったとき |
+| --- | --- | --- |
+| 1 | 環境変数 `NDF_RELAY_NAME` があり、メインディレクトリの `.ndf/parallel/*/plan.json` のどれかがその名前のレーンを持つか、作業ディレクトリ（`NDF_RELAY_DIR`）の役割のファイルが `helper` で計画名を持つか（`parallel_files.lane_name_in_plans`。ファイルだけを読み、耐久の記録は読まない） | 2 へ進む。当たらなければ今どおり通す |
+| 2 | `parallel.py request-ask <計画名> --lane <名>` を子プロセスで打つ（上限 8 秒）。標準入力に問いの入力・作業の場所・判定の行の `id` を渡す | 終了コード 0 で依頼の `id` が返れば 3 へ。それ以外（レーンでも一時レーンでもない・計画が動いていない・上限を越えた）は今どおり通す |
+| 3 | — | `deny` を返す。理由は「オーガナイザーへ送った（依頼 `<id>`）。この作業を保留し、別の作業へ進め」と、開発ループのレーン（`sprint-state.py loop hold-question`）と 1 スプリントのレーン・一時レーン（引継ぎ文書に続きを書いてセッションを終える）の保留の手順、正本 `asking.md` の絶対パス |
+
+判定が止める問い（`deny`・`advise`）は送らない。保留の手順の正本は `asking.md` の「並列の計画のレーン」にある。
 
 ### `ask.py`
 

@@ -185,7 +185,8 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 6. どのマイルストーンでも選べず、候補が 0 件なら `no_issue`、候補があってすべて外れたなら `outside_mvv` で止まる
    （`values` は対象のマイルストーンか理由ごとの件数）。候補が 0 件のときは、前の周回を締めてから見直しを挟んでいなければ止まらずに `status: review_first` を返し、
    `next` に見直しの起動の判定（`upkeep.py depth due review --no-issue`）・見直し・選定のやり直しを置く。見直しの後も 0 件なら `no_issue` で止まる
-   （`lib/sprint_loop_select.py` の `review_first`。#2315）
+   （`lib/sprint_loop_select.py` の `review_first`。#2315）。答えを待つ作業（保留の周回か、オーガナイザーへ送った答えの無い設計の承認）が
+   残るときは、見直しを挟まず `waiting_only` で止まる（下の「保留の周回（並列の計画のレーン）があるときの境の順」）
 
 `rank` の 20（段階の欠けた課題がある）は、欠けた課題が `rows` に載らないだけなので続ける。
 
