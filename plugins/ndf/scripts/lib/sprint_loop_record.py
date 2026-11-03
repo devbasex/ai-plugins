@@ -37,6 +37,7 @@ import locks
 import project_mvv as pm
 import repo as repo_lib
 import step_result
+from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
 TOOL = "sprint-state"
@@ -45,7 +46,6 @@ SPRINT_STATE = SCRIPTS / "sprint-state.py"
 SUPERVISE = SCRIPTS / "supervise.py"
 UPKEEP = SCRIPTS.parent / "skills" / "backlog-refinement" / "scripts" / "upkeep.py"
 HANDOFF_TEMPLATE = SCRIPTS / "data" / "handoff-template.md"
-LOOP_DIR = Path(".ndf") / "loop"
 HANDOFF_DIR = Path(".ndf") / "handoff"
 NEXT_STEP_SECTION = "次にやること"  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
@@ -58,8 +58,6 @@ EXIT_REFUSED = step_result.EXIT_VIOLATION  # 1: 断った・呼び出しの順�
 EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たった（失敗ではない）
 
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
-RELEASE_PENDING, QUESTION_PENDING = "配布待ち", "質問待ち"  # 答えを待たずに締めた保留の周回（#2436 の受け入れ条件 6a・6d）
-PENDING = (RELEASE_PENDING, QUESTION_PENDING)
 RELEASE_PENDING_MAX = 2  # 保留の周回の上限の既定（.ndf/pace.json の loop.release_pending_max）
 SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")

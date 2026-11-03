@@ -26,7 +26,7 @@ import durable
 import parallel_lane as pl
 import parallel_plan as pp
 import parallel_release as pr
-from sprint_loop_record import LOOP_DIR, PENDING, RECORD
+from sprint_loop_names import LOOP_DIR, PENDING
 
 HERE = Path(__file__).resolve().parent.parent
 RELAY = HERE / "relay.py"
@@ -168,7 +168,7 @@ def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
         if ln.input.kind != "loop":
             continue
         try:
-            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / RECORD).read_text(encoding="utf-8"))
+            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         for lap in rec.get("laps") or []:
@@ -198,7 +198,7 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
         if ln.input.kind != "loop":
             continue
         try:
-            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / RECORD).read_text(encoding="utf-8"))
+            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or []):
