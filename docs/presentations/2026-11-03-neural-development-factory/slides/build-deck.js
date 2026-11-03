@@ -575,29 +575,40 @@ run(__dirname, { script: SCRIPT, title: "AI が回すソフトウェア工場", 
   });
   cols(3).forEach((c, i) => pill(s, c.x, 3.9, c.w, 0.5, ["承認ゲートは 2 つのまま", "プラグインの NDF は OSS のまま", "並べても配布は 1 本"][i], "panel2", i === 0 ? "caution" : "accent", 12));
 
-  // 21. 仕組み: 待つ間はラインを止める
-  s = pg("仕組み: 承認を待つ間も、ラインは次の周回へ進む", "進捗は 1 本の事象の列。常駐の指揮役は置かず、見回りが起こす");
-  rr(s, X0, 1.45, 1.9, 0.86, "panel2");
-  d.text(s, "画面\nWeb・Slack", { x: X0, y: 1.45, w: 1.9, h: 0.86, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
-  d.arrow(s, 2.2, 1.88, 0.36, 0, "accent");
-  rr(s, 2.6, 1.45, 1.8, 0.86, "panel2");
-  d.text(s, "API\n認証・アカウント", { x: 2.6, y: 1.45, w: 1.8, h: 0.86, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
-  d.arrow(s, 4.44, 1.88, 0.36, 0, "accent");
-  rr(s, 4.84, 1.36, 2.84, 1.64, "panel1", "accent");
-  d.text(s, "実行ジョブ（コンテナ 1 つ）", { x: 4.98, y: 1.42, w: 2.6, h: 0.3, fontSize: 10.5, bold: true, color: "accent", valign: "middle" });
-  d.text(s, bullets(["NDF をマーケットプレイスから導入", "conductor → supervisor → worker", "ndf-next の区切りで区間をつなぐ", "版はスプリントの開始で固定"], 9.5), { x: 4.98, y: 1.76, w: 2.62, h: 1.18, valign: "top", paraSpaceAfter: 3 });
-  d.arrow(s, 7.72, 1.88, 0.36, 0, "accent");
-  rr(s, 8.12, 1.45, 1.62, 0.86, "panel2");
-  d.text(s, "GitHub\nPR・CI", { x: 8.12, y: 1.45, w: 1.62, h: 0.86, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
-  d.arrow(s, 6.26, 3.04, 0, 0.3, "accent");
-  rr(s, 4.84, 3.38, 2.84, 0.62, "header");
-  d.text(s, "進捗の事象（追記だけ）", { x: 4.84, y: 3.38, w: 2.84, h: 0.62, fontSize: 12, bold: true, color: "onHeader", align: "center", valign: "middle" });
-  d.arrow(s, 4.8, 3.69, -0.4, 0, "accent");
-  rr(s, X0, 3.38, 4.1, 0.62, "panel2");
-  d.text(s, "一覧・詳細・通知・課金", { x: X0, y: 3.38, w: 4.1, h: 0.62, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
-  d.arrow(s, 1.2, 3.34, 0, -0.98, "accent");
-  flow(s, X0, 4.22, W, 0.5, [{ text: "承認の依頼を出す" }, "ジョブを終える（費用 0）", "次の周回は待たずに始まる", "答えは持ち主か次の周回へ"], { size: 10.5, gap: 0.3 });
-  d.note(s, "#2439 の受け入れ条件 7・#2347 の E6。利用上限に当たったジョブも止めて待ち、リセット時刻の後に続ける。実行をまたぐ制御は API と 5 分ごとの見回り");
+  // 21. 仕組み: オーケストレーターを 2 層に分け、ラインを止めない（#2347 の定義 6・#2439）
+  s = pg("仕組み: オーケストレーターは 2 層、常駐しない", "実行をまたぐ制御は呼ばれたときだけ動き、ジョブの中はランナーが区間をつなぐ");
+  // 最上段: 画面と進捗の事象
+  rr(s, X0, 1.36, W, 0.56, "panel2");
+  d.text(s, "画面・Slack・API", { x: X0 + 0.16, y: 1.36, w: 2.0, h: 0.56, fontSize: 12, bold: true, color: "text", valign: "middle" });
+  d.text(s, [{ text: "進捗は 1 本の事象の列（追記だけ）。", options: { bold: true, color: "text" } }, { text: "一覧・詳細・通知・課金はそこから作る" }], { x: 2.5, y: 1.36, w: 7.1, h: 0.56, fontSize: 11, valign: "middle" });
+  // 上の層: 実行をまたぐ制御とオーガナイザー
+  const LX = 2.5, LW = 9.74 - 2.5;
+  rr(s, X0, 2.04, W, 1.06, "panel1", "accent");
+  d.text(s, "オーケストレーター", { x: X0 + 0.16, y: 2.08, w: 2.0, h: 0.32, fontSize: 12.5, bold: true, color: "accent", valign: "middle" });
+  d.text(s, "上の層: 実行をまたぐ", { x: X0 + 0.16, y: 2.4, w: 2.0, h: 0.26, fontSize: 9.5, valign: "middle" });
+  pill(s, X0 + 0.16, 2.72, 1.3, 0.26, "常駐しない", "accentSoft", "accent", 9);
+  [
+    ["開始・停止の知らせ", "呼ばれたときだけ動く"],
+    ["5 分ごとの見回り", "止まった実行を起こし直す"],
+    ["周回を起こす", "ループの次の周回を始める"],
+    ["オーガナイザー", "配布を 1 本に・承認と問いを集める"],
+  ].forEach((r, k) => {
+    const c = cols(4, 0.1, LX, LW)[k];
+    rr(s, c.x, 2.14, c.w, 0.86, k === 3 ? "accentSoft" : "panel2", k === 3 ? "accent" : null, 0.06);
+    d.text(s, r[0], { x: c.x + 0.1, y: 2.18, w: c.w - 0.2, h: 0.32, fontSize: 11, bold: true, color: k === 3 ? "accent" : "text", valign: "middle" });
+    d.text(s, r[1], { x: c.x + 0.1, y: 2.5, w: c.w - 0.2, h: 0.46, fontSize: 9, valign: "top" });
+  });
+  // 下の層: ジョブの中のランナー
+  rr(s, X0, 3.22, W, 0.98, "panel1", "header");
+  d.text(s, "ランナー", { x: X0 + 0.16, y: 3.26, w: 2.0, h: 0.32, fontSize: 12.5, bold: true, color: "header", valign: "middle" });
+  d.text(s, "下の層: ジョブの中\n手元の relay.py の役割", { x: X0 + 0.16, y: 3.58, w: 2.1, h: 0.56, fontSize: 9.5, valign: "top" });
+  flow(s, LX, 3.32, 4.5, 0.46, ["区間 1", "区間 2", "区間 3", "… 最大 20"], { size: 10, gap: 0.2 });
+  d.text(s, "ndf-next の区切りで次の区間を起動。打ち切りは 8 時間", { x: LX, y: 3.82, w: 4.5, h: 0.3, fontSize: 9, color: "mute", valign: "middle" });
+  rr(s, 7.16, 3.32, 2.48, 0.78, "panel2", null, 0.06);
+  d.text(s, [{ text: "実行ジョブ（コンテナ 1 つ）\n", options: { fontSize: 10, bold: true, color: "text" } }, { text: "conductor → supervisor → worker", options: { fontSize: 9 } }], { x: 7.26, y: 3.32, w: 2.34, h: 0.78, valign: "middle" });
+  // 承認を待つ間もラインは止まらない
+  flow(s, X0, 4.32, W, 0.44, [{ text: "承認の依頼を出す" }, "ジョブを終える（費用 0）", "次の周回は待たずに始まる", "答えは持ち主か次の周回へ"], { size: 10.5, gap: 0.3 });
+  d.note(s, "#2347 の定義 6（オーケストレーターを 2 層に分け、常駐のプロセスを持たない）・#2439（Factory のオーガナイザーは API と見回りの中で動く。受け入れ条件 7）。利用上限に当たったジョブも止めて待ち、リセット時刻の後に続ける");
 
   // 22. AI をどう動かすかは 3 つから選ぶ
   s = pg("AI をどう動かすかは 3 つから選ぶ", "アカウントごとに選ぶ。どれでもスプリントは同じに流れる");
