@@ -21,5 +21,5 @@ def test_cases(case):
 
 
 def test_request_id_is_stable_and_well_formed(tmp_path):
-    rid = pl.request_id(tmp_path, "lroot")
-    assert pl.request_id(tmp_path, "lroot") == rid and pl.REQUEST_ID_RE.match(rid)
+    rid = pl.lane_request_id(tmp_path, "lroot")
+    assert pl.lane_request_id(tmp_path, "lroot") == rid and pl.REQUEST_ID_RE.match(rid)

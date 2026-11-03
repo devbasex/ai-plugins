@@ -46,7 +46,7 @@ def max_plans() -> tuple[int, Optional[str]]:
     return _positive_env("NDF_PARALLEL_MAX_PLANS", DEFAULT_MAX_PLANS)
 
 
-def max_named() -> tuple[int, Optional[str]]:
+def named_limit() -> tuple[int, Optional[str]]:
     return _positive_env("NDF_RELAY_MAX_NAMED", DEFAULT_MAX_NAMED)
 
 
@@ -209,7 +209,7 @@ def _touch_hit(x: str, y: str) -> bool:
 def check_data(data: object) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。"""
     plans_cap, plans_note = max_plans()
-    named_cap, named_note = max_named()
+    named_cap, named_note = named_limit()
     items: list[dict] = []
     notes = [n for n in (plans_note, named_note) if n]
     try:
@@ -248,7 +248,7 @@ def plan_dir(main: Path, name: str) -> Path:
     return Path(main) / PARALLEL_DIR / name
 
 
-def load(main: Path, name: str) -> object:
+def load_plan(main: Path, name: str) -> object:
     """`plan.json` の中身（JSON の値）。無ければ FileNotFoundError、読めなければ ValueError。"""
     import json
 

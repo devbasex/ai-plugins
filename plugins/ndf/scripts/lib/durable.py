@@ -380,7 +380,7 @@ def set_event(key: str, value: Any) -> None:
 
 
 @contextlib.contextmanager
-def client(kind: str, identity: str) -> Any:
+def open_client(kind: str, identity: str) -> Any:
     """`record_path(kind, identity)` の SQLite を開いた `DBOSClient`。ファイルが無ければ `DurableError`。"""
     path = record_path(kind, identity)
     if not path.exists():
@@ -394,28 +394,28 @@ def client(kind: str, identity: str) -> Any:
 
 def send_to(kind: str, identity: str, wid: str, msg: Any, topic: str, key: str) -> None:
     """外から耐久ワークフロー `wid` へメッセージを送る。同じ `key` の 2 度目は数えない。"""
-    with client(kind, identity) as c:
+    with open_client(kind, identity) as c:
         c.send(wid, msg, topic, idempotency_key=key)
 
 
-def event_of(kind: str, identity: str, wid: str, key: str, timeout: float = 0) -> Any:
+def event_from(kind: str, identity: str, wid: str, key: str, timeout: float = 0) -> Any:
     """外から耐久ワークフロー `wid` のイベント `key` を読む。`timeout` 秒待ち、無ければ None。"""
-    with client(kind, identity) as c:
+    with open_client(kind, identity) as c:
         return c.get_event(wid, key, timeout_seconds=timeout)
 
 
-def status_of(kind: str, identity: str, wid: str) -> Optional[str]:
+def status_from(kind: str, identity: str, wid: str) -> Optional[str]:
     """外から耐久ワークフロー `wid` の状態を読む（記録が無い・耐久ワークフローが無いときは None）。"""
     if not record_path(kind, identity).exists():
         return None
-    with client(kind, identity) as c:
+    with open_client(kind, identity) as c:
         rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=False)
         return rows[0].status if rows else None
 
 
 def output_from(kind: str, identity: str, wid: str) -> Any:
     """外から、終わった耐久ワークフロー `wid` の出力を読む（無ければ None）。"""
-    with client(kind, identity) as c:
+    with open_client(kind, identity) as c:
         rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
         return rows[0].output if rows else None
 
@@ -436,7 +436,7 @@ def wait_from(
     marks = {k: (after.get(k, 0) if isinstance(after, Mapping) else after) for k in names}
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
-        with client(kind, identity) as c:
+        with open_client(kind, identity) as c:
             rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
             if not rows:
                 return Outcome("error", f"耐久ワークフロー {wid} が無い")

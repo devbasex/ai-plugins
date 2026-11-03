@@ -27,7 +27,7 @@ def workflow_id(name: str) -> str:
     return f"parallel-{name}"
 
 
-def identity(main: Path, name: str) -> str:
+def record_identity(main: Path, name: str) -> str:
     """耐久の記録の識別（計画の置き場の絶対パス）。"""
     return str(pp.plan_dir(main, name).resolve())
 
@@ -35,7 +35,7 @@ def identity(main: Path, name: str) -> str:
 def record_exists(main: Path, name: str) -> bool:
     from durable_keys import record_path
 
-    return record_path(KIND, identity(main, name)).exists()
+    return record_path(KIND, record_identity(main, name)).exists()
 
 
 def run_status(main: Path, name: str) -> Optional[str]:
@@ -44,7 +44,7 @@ def run_status(main: Path, name: str) -> Optional[str]:
         return None
     import durable
 
-    return durable.status_of(KIND, identity(main, name), workflow_id(name))
+    return durable.status_from(KIND, record_identity(main, name), workflow_id(name))
 
 
 def plans_in(main: Path) -> list[str]:
@@ -59,7 +59,7 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
         return None
     for name in plans_in(main):
         try:
-            plan = pp.ParallelPlan.model_validate(pp.load(main, name), context={"max_plans": 10**6, "max_named": 10**6})
+            plan = pp.ParallelPlan.model_validate(pp.load_plan(main, name), context={"max_plans": 10**6, "max_named": 10**6})
         except (OSError, ValueError):
             continue
         hit = plan.lane(lane)
@@ -93,11 +93,11 @@ def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
     """`prs` を含む範囲のイベント `range-<連番>` の版（無ければ None）。"""
     import durable
 
-    ident, wid = identity(main, name), workflow_id(name)
+    ident, wid = record_identity(main, name), workflow_id(name)
     n = 1
     found = None
     while True:
-        ev = durable.event_of(KIND, ident, wid, f"range-{n}", 0)
+        ev = durable.event_from(KIND, ident, wid, f"range-{n}", 0)
         if not isinstance(ev, dict):
             return found
         if set(prs) & set(ev.get("prs") or []):
@@ -105,7 +105,7 @@ def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
         n += 1
 
 
-def request_id(state: Path, lane: str) -> str:
+def lane_request_id(state: Path, lane: str) -> str:
     """依頼の ID。最初の実行で `<レーン名>-r<乱数 12 桁>` を作って `work/request-id` へ書き、打ち直しでは読む。"""
     p = Path(state) / "work" / "request-id"
     if p.is_file() and p.read_text(encoding="utf-8").strip():
@@ -141,11 +141,11 @@ def request_errors(msg: object) -> list[str]:
     return errs
 
 
-def send_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
+def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
     """配布の依頼を話題 `inbox` へ送る。冪等の鍵は `<ID>:inbox:<依頼>`。依頼の ID を返す。"""
     import durable
 
-    rid = request_id(state, lane)
+    rid = lane_request_id(state, lane)
     wid = workflow_id(name)
     msg = {
         "kind": "request",
@@ -156,7 +156,7 @@ def send_request(main: Path, name: str, lane: str, prs: list[int], issues: list[
         "sprint_state": str(state),
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    durable.send_to(KIND, identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{rid}")
+    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{rid}")
     return rid
 
 
@@ -164,14 +164,14 @@ def read_answer(main: Path, name: str, rid: str, timeout: float = 0) -> tuple[Op
     """(答え `answer-<依頼>`, 知らせ `defer-<依頼>`)。`timeout` 秒まで答えを待つ（0 は待たない）。知らせでは返らない（I10）。"""
     import durable
 
-    ident, wid = identity(main, name), workflow_id(name)
+    ident, wid = record_identity(main, name), workflow_id(name)
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        ans = durable.event_of(KIND, ident, wid, f"answer-{rid}", 0)
+        ans = durable.event_from(KIND, ident, wid, f"answer-{rid}", 0)
         if isinstance(ans, dict):
             return ans, None
         if time.monotonic() >= deadline:
-            dfr = durable.event_of(KIND, ident, wid, f"defer-{rid}", 0)
+            dfr = durable.event_from(KIND, ident, wid, f"defer-{rid}", 0)
             return None, dfr if isinstance(dfr, dict) else None
         time.sleep(min(5.0, max(0.2, deadline - time.monotonic())))
 

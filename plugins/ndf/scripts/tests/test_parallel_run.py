@@ -102,7 +102,7 @@ def until(pred, timeout=30):
 
 
 def start(main):
-    prun.open_record(main, "p1")
+    prun.open_parallel_record(main, "p1")
     durable.start(durable.WorkflowRef(pl.workflow_id("p1"), 1, "start"), prun.parallel_workflow, str(main), "p1")
 
 
@@ -116,17 +116,17 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
     until(lambda: spawned(log) == ["la"])  # lb は la が止まるまで起動しない（I8）
     states.write_text(json.dumps({"la": "running"}))
     # la の依頼 1 件で、他のレーンを待たずに提示 1 を組む（I9）
-    rid = pl.send_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e)
     assert ev["n"] == 1 and ev["k"] == 1 and "--role helper" in ev["spawn"]
     d = prl.release_dir(main, "p1", 1, 1)
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10, 11]}))
     # 先頭が同じなら確定（I14）
-    durable.send_to(pl.KIND, pl.identity(main, "p1"), pl.workflow_id("p1"), {"n": 1, "phase": "confirm"}, "resume", "c1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), pl.workflow_id("p1"), {"n": 1, "phase": "confirm"}, "resume", "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
     durable.send_to(
         pl.KIND,
-        pl.identity(main, "p1"),
+        pl.record_identity(main, "p1"),
         pl.workflow_id("p1"),
         {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"},
         "resume",
@@ -147,11 +147,11 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
 def test_moved_head_represents_once(env, tmp_path):
     main, heads = env["main"], env["heads"]
     start(main)
-    pl.send_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
     (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
     heads["v"] = "sha2"
-    send = lambda msg, key: durable.send_to(pl.KIND, pl.identity(main, "p1"), pl.workflow_id("p1"), msg, "resume", key)  # noqa: E731
+    send = lambda msg, key: durable.send_to(pl.KIND, pl.record_identity(main, "p1"), pl.workflow_id("p1"), msg, "resume", key)  # noqa: E731
     send({"n": 1, "phase": "confirm"}, "c1")
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("represent") and e)
     assert ev["k"] == 2
@@ -167,7 +167,7 @@ def test_stop_ends_workflow_and_stops_lanes(env):
     start(main)
     until(lambda: spawned(log) == ["la"])
     wid = pl.workflow_id("p1")
-    durable.send_to(pl.KIND, pl.identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
     out = durable.output_of(wid)
     assert out["status"] == "stopped" and ["stop", "la", "--json"] in calls(log, "stop")
 
@@ -176,8 +176,8 @@ def test_send_request_is_idempotent(env, tmp_path):
     main = env["main"]
     start(main)
     st = tmp_path / "st"
-    a = pl.send_request(main, "p1", "la", [10], [1], st)
-    b = pl.send_request(main, "p1", "la", [10], [1], st)
+    a = pl.send_release_request(main, "p1", "la", [10], [1], st)
+    b = pl.send_release_request(main, "p1", "la", [10], [1], st)
     assert a == b and (st / "work" / "request-id").read_text().strip() == a
     until(lambda: (event(main, "p1", "lane-la") or {}).get("received") == 1)
     time.sleep(0.6)

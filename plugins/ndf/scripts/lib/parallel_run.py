@@ -81,7 +81,7 @@ def dev_version(main: Path) -> str:
 @durable.step(name="parallel.init")
 def step_init(main: str, name: str) -> dict:
     """計画を読み、検査し、オーガナイザーの印を書く。"""
-    plan, items, _ = pp.check_data(pp.load(Path(main), name))
+    plan, items, _ = pp.check_data(pp.load_plan(Path(main), name))
     if plan is None:
         return {"ok": False, "items": items}
     relay(Path(main), "role", "organizer", "--plan", name)
@@ -91,7 +91,7 @@ def step_init(main: str, name: str) -> dict:
 @durable.step(name="parallel.spawn")
 def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
     """`lanes` を起動する。成功（同じ名前の 2 本目の断りも成功とする）は `started`、断りは `refused`（I7）。"""
-    plan = pp.ParallelPlan.model_validate(pp.load(Path(main), name), context={"max_plans": 10**6, "max_named": 10**6})
+    plan = pp.ParallelPlan.model_validate(pp.load_plan(Path(main), name), context={"max_plans": 10**6, "max_named": 10**6})
     out = {}
     for n in lanes:
         ln = plan.lane(n)
@@ -142,17 +142,17 @@ def step_stop_lanes(main: str, names: list[str]) -> list[str]:
 def step_finish(main: str, name: str, progress: dict) -> None:
     """役割の印を消し、`plan.md` を描画し直す。"""
     relay(Path(main), "role", "--clear")
-    render(main, name, progress)
+    render_progress(main, name, progress)
 
 
 @durable.step(name="parallel.render")
 def step_render(main: str, name: str, progress: dict) -> None:
-    render(main, name, progress)
+    render_progress(main, name, progress)
 
 
-def render(main: str, name: str, progress: dict) -> None:
+def render_progress(main: str, name: str, progress: dict) -> None:
     try:
-        plan = pp.ParallelPlan.model_validate(pp.load(Path(main), name), context={"max_plans": 10**6, "max_named": 10**6})
+        plan = pp.ParallelPlan.model_validate(pp.load_plan(Path(main), name), context={"max_plans": 10**6, "max_named": 10**6})
     except (OSError, ValueError):
         return
     (pp.plan_dir(Path(main), name) / "plan.md").write_text(pp.render_md(plan, progress), encoding="utf-8")
@@ -376,14 +376,14 @@ def _plan_view(run: _Run) -> pp.ParallelPlan:
 # ---- 外の入口 ----
 
 
-def open_record(main: Path, name: str, lock_timeout: Optional[float] = 0) -> None:
-    durable.launch(pl.KIND, pl.identity(main, name), keep=pl.workflow_id(name), lock_timeout=lock_timeout)
+def open_parallel_record(main: Path, name: str, lock_timeout: Optional[float] = 0) -> None:
+    durable.launch(pl.KIND, pl.record_identity(main, name), keep=pl.workflow_id(name), lock_timeout=lock_timeout)
 
 
-def run(main: Path, name: str) -> tuple[dict, bool]:
+def run_plan(main: Path, name: str) -> tuple[dict, bool]:
     """耐久ワークフローを始めるか続け、終わるまで待つ。(出力, 再開か) を返す。"""
     wid = pl.workflow_id(name)
-    open_record(main, name)
+    open_parallel_record(main, name)
     st = durable.status(wid)
     resumed = st is not None
     if st is None:

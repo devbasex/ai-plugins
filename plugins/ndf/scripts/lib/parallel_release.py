@@ -73,7 +73,7 @@ def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def closing_issues(root: Path, prs: list[int], run: Callable = subprocess.run) -> dict[int, list[int]]:
+def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run) -> dict[int, list[int]]:
     """Pull Request が閉じる課題（`closingIssuesReferences`）。読めないものは空にする。"""
     out: dict[int, list[int]] = {}
     for n in prs:
@@ -98,7 +98,7 @@ def present(
     out_prs: Path,
     presented_json: Path,
     first: Optional[dict] = None,
-    closes_of: Callable = closing_issues,
+    closes_of: Callable = closes_by_pr,
 ) -> dict:
     """承認資料から提示したコミットと含む Pull Request を読み、レーンへ対応づけて `presented.json` と `--out` を書く。
 

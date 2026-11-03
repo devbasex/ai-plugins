@@ -188,7 +188,7 @@ def _split_dashdash(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv, []
 
 
-def _opt(opts: list[str], flag: str) -> str | None:
+def _flag_value(opts: list[str], flag: str) -> str | None:
     if flag not in opts:
         return None
     i = opts.index(flag)
@@ -198,8 +198,8 @@ def _opt(opts: list[str], flag: str) -> str | None:
 def cmd_spawn(argv: list[str]) -> int:
     opts, rest = _split_dashdash(argv)
     as_json = "--json" in opts
-    name = _opt(opts, "--name")
-    role, plan = _opt(opts, "--role"), _opt(opts, "--plan")
+    name = _flag_value(opts, "--name")
+    role, plan = _flag_value(opts, "--role"), _flag_value(opts, "--plan")
     if not name or (role is not None and (role != "helper" or not plan)):
         print("usage: relay.py spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>", file=sys.stderr)
         return 2
@@ -218,8 +218,8 @@ def cmd_role(argv: list[str]) -> int:
     """`relay.py role organizer --plan <計画名>` / `relay.py role --clear`。作業ディレクトリの役割のファイルを書く・消す（#2436）。"""
     relay_dir = os.environ.get("NDF_RELAY_DIR")
     clear = "--clear" in argv
-    role = next((a for a in argv if not a.startswith("-") and a != _opt(argv, "--plan")), None)
-    plan = _opt(argv, "--plan")
+    role = next((a for a in argv if not a.startswith("-") and a != _flag_value(argv, "--plan")), None)
+    plan = _flag_value(argv, "--plan")
     if not clear and (role not in hb.ROLES or not plan):
         print("usage: relay.py role organizer|helper --plan <計画名> | relay.py role --clear", file=sys.stderr)
         return 2
