@@ -184,3 +184,103 @@ def test_send_request_is_idempotent(env, tmp_path):
     until(lambda: (event(main, "p1", "lane-la") or {}).get("received") == 1)
     time.sleep(0.6)
     assert event(main, "p1", "lane-la")["received"] == 1
+
+
+# ---- 現状固定（parallel_workflow の分岐。リファクタリングの前に今の振る舞いを記録する） ----
+
+
+def resume(main, msg, key):
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), pl.workflow_id("p1"), msg, "resume", key)
+
+
+def stop(main):
+    wid = pl.workflow_id("p1")
+    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
+    return durable.output_of(wid)
+
+
+def test_char_invalid_plan_stops_without_spawning(env):
+    main, log = env["main"], env["log"]
+    (pp.plan_dir(main, "p1") / "plan.json").write_text(json.dumps({"version": 1}))
+    start(main)
+    out = durable.output_of(pl.workflow_id("p1"))
+    assert out["status"] == "stopped" and out["lanes"] == {} and out["releases"] == [] and out["pending"] == []
+    assert isinstance(out["errors"], list) and out["errors"]
+    assert spawned(log) == [] and calls(log, "role") == []
+
+
+def test_char_lane_missing_from_ls_counts_as_stopped_and_finishes(env):
+    main, log = env["main"], env["log"]
+    start(main)  # ls が何も返さないと、起動済みのレーンは止まったものとして扱う
+    out = durable.output_of(pl.workflow_id("p1"))
+    assert out["status"] == "finished" and spawned(log) == ["la", "lb"]
+    assert {n: st["state"] for n, st in out["lanes"].items()} == {"la": "stopped", "lb": "stopped"}
+    assert out["releases"] == [] and out["pending"] == []
+    assert calls(log, "role")[0] == ["role", "organizer", "--plan", "p1"] and ["role", "--clear"] in calls(log, "role")
+
+
+def test_char_awaiting_approval_pauses_with_notice(env):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "running")
+    states.write_text(json.dumps({"la": "awaiting_approval"}))
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
+    assert ev["lanes"] == ["la"] and ev["attach"] == [f"python3 {prun.RELAY} attach la"]
+    out = stop(main)
+    assert out["status"] == "stopped" and out["not_stopped"] == [] and out["lanes"]["la"]["state"] == "awaiting_approval"
+
+
+def test_char_build_error_fails_release_and_stops(env, tmp_path, monkeypatch):
+    main, log, states = env["main"], env["log"], env["states"]
+    monkeypatch.setattr(prun, "dev_version", lambda _m: "")
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    out = durable.output_of(pl.workflow_id("p1"))
+    assert out["status"] == "stopped" and out["not_stopped"] == [] and out["pending"] == [rid]
+    assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "failed")] and "出す版を決められない" in out["releases"][0]["reason"]
+    assert ["stop", "la", "--json"] in calls(log, "stop") and pl.read_answer(main, "p1", rid) == (None, None)
+
+
+def test_char_rejected_settle_answers_with_reason(env, tmp_path):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and e)
+    assert ev["n"] == 1 and ev["k"] == 1 and "--role helper" in ev["spawn"]
+    resume(main, {"n": 1, "phase": "settle", "result": "rejected", "reason": "no"}, "s1")
+    ans, _ = until(lambda: pl.read_answer(main, "p1", rid)[0] and pl.read_answer(main, "p1", rid))
+    assert ans == {"result": "rejected", "version": None, "release": 1, "reason": "no", "at": None}
+    out = stop(main)
+    rel = out["releases"][0]
+    assert (rel["state"], rel["reason"], rel["k"], rel["sha"], rel["prs"]) == ("rejected", "no", 1, "sha1", [10])
+    assert out["pending"] == [] and event(main, "p1", "range-1") is None
+
+
+def test_char_request_outside_range_is_deferred_to_next_release(env, tmp_path):
+    main, states = env["main"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
+    until(lambda: (event(main, "p1", "lane-la") or {}).get("received") == 2)
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.4"}, "s1")
+    ans, _ = until(lambda: pl.read_answer(main, "p1", r1)[0] and pl.read_answer(main, "p1", r1))
+    assert (ans["result"], ans["version"], ans["release"]) == ("released", "1.2.4", 1)
+    assert event(main, "p1", "range-1") == {"sha": "sha1", "version": "1.2.4", "prs": [10], "lanes": ["la"]}
+    dfr = until(lambda: event(main, "p1", f"defer-{r2}"))
+    assert dfr == {"seq": 1, "reason": "範囲に入らないため次の配布へ回した", "at": None}
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e.get("n") == 2 and e)
+    assert ev["k"] == 1 and ev["represent"] is False
+    out = stop(main)
+    assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "released"), (2, "presented")]
+    assert out["releases"][1]["requests"] == [r2] and out["pending"] == [r2]
