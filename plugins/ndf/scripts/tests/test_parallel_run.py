@@ -79,7 +79,25 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None: _build(m, n, s, k, v, builder))
     yield {"main": main, "log": log, "states": states, "heads": heads}
+    _stop_running(main)
     durable.close()
+
+
+def _stop_running(main):
+    """テストが残した耐久ワークフローを止め、スレッドが抜けるのを待つ。
+
+    close() は DBOS を止めてもワークフローのスレッドを止めない。残すと次のテストの同じ ID（parallel-p1）の起動が
+    重複として打ち切られ、前のテストのスレッドが次のテストの記録を読み書きする。"""
+    wid = pl.workflow_id("p1")
+    try:
+        if durable.status(wid) not in pl.RUNNING:
+            return
+        durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
+        end = time.monotonic() + 15
+        while time.monotonic() < end and durable.status(wid) in pl.RUNNING:
+            time.sleep(0.1)
+    except Exception:  # 後片付けの失敗でテストの結果を変えない
+        pass
 
 
 def _build(m, n, s, k, v, builder):
