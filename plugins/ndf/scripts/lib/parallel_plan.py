@@ -153,6 +153,10 @@ class ParallelPlan(BaseModel):
         dup = sorted({n for n in names if names.count(n) > 1})
         if dup:
             raise PydanticCustomError("I1", "レーン名が重なる: {names}", {"names": ", ".join(dup)})
+        docs = [ln.handoff_name() for ln in self.lanes]
+        dup = sorted({d for d in docs if docs.count(d) > 1})
+        if dup:  # 同じ引継ぎ文書へ書くと、後のレーンの文書が先のレーンの文書を上書きする
+            raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
         cap = int(ctx.get("max_named") or DEFAULT_MAX_NAMED)
         if len(self.lanes) > cap:
             raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(self.lanes), "cap": cap})

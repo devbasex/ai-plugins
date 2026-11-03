@@ -66,13 +66,14 @@ def select_cmd(name: str) -> str:
     return f"python3 {shlex.quote(str(SPRINT_STATE))} loop select {name}"
 
 
-QUEUE_MAX = 3  # まとめの queue の同時に流す計画の上限（supervise.py queue --max）
 DONE_RESULTS = ("完了", NOT_RUN)  # 周回を完了で締められる done の結果（流さなかった計画は前のステージの結果に従う）
 
 
 def queue_command(stages: list[list[str]], done: Path) -> str:
-    """まとめの queue の 1 行: 先頭のステージを --max で流し、残りのステージを --then でつなぎ、--done で終わる。"""
-    head = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + f" --max {QUEUE_MAX}"
+    """まとめの queue の 1 行: 先頭のステージを --max（レーンならレーンのプランの本数）で流し、残りのステージを --then でつなぎ、--done で終わる。"""
+    import parallel_lane
+
+    head = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + f" --max {parallel_lane.queue_max()}"
     return head + "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}"
 
 
@@ -511,9 +512,11 @@ def refine_summary(env: Env, rec: dict) -> dict:
 
 def research_command(root: str, rec: dict, lap: dict, done: Path) -> str:
     """待ち（`supervise.py wait`）と並べて背景で打つ、待ち時間の調査の 1 行（#2315 の決定 7）。"""
+    import parallel_lane
+
     plans = done.with_suffix(".plans.json")
     args = ["python3", str(UPKEEP), "research", "run", "--root", root, "--until", str(done), "--queue", str(plans)]
-    args += ["--max", str(QUEUE_MAX)]  # 調査はまとめの queue と同じ並列の上限に数える
+    args += ["--max", str(parallel_lane.queue_max(root))]  # 調査はまとめの queue と同じ並列の上限に数える
     return shlex.join([*args, "--lap", str(lap["n"]), "--loop", rec["name"]])
 
 

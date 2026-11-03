@@ -94,6 +94,26 @@ def lane_plans(main: Path, lane: Optional[str] = None) -> Optional[int]:
     return got[1].plans if got else None
 
 
+QUEUE_MAX = 3  # 並列の計画のレーンでないときの `queue --max` の既定
+
+
+def queue_max(cwd: Optional[str] = None) -> int:
+    """`queue` の同時に流す本数。並列の計画のレーンならレーンのプランの本数、そうでなければ 3（#2436）。
+
+    `queue` の `--max` の既定と、スプリント・周回の続きが組む queue の 1 行が同じ値を使う（レーンの本数を超えない）。"""
+    import sys
+
+    import decl
+
+    root = cwd or os.getcwd()
+    try:
+        n = lane_plans(decl.main_dir(root) or Path(root))
+    except Exception as exc:  # noqa: BLE001  判定できなければ今どおりの 3 で流す（理由は標準エラーへ）
+        print(f"[supervise] レーンの判定に失敗したため --max の既定 {QUEUE_MAX} で流す: {exc}", file=sys.stderr)
+        n = None
+    return n or QUEUE_MAX
+
+
 def merged_on_production(root: Path, prs: list[int], run=subprocess.run) -> bool:
     """`prs` のマージのコミットがすべて本番チャネル（`repo.production_branch`）の `origin/<本番>` にあるか（I15）。
 

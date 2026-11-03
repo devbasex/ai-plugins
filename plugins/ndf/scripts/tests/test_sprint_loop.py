@@ -632,7 +632,7 @@ def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     research = out["metrics"]["research"]
     assert "research run" in research and "--until" in research and "--lap 1 --loop l1" in research
-    assert f"--max {sl_gate.QUEUE_MAX}" in research  # まとめの queue と同じ並列の上限
+    assert "--max 3" in research  # まとめの queue と同じ並列の上限
     b = env.root / ".ndf" / "backlog"
     (b / "research").mkdir(parents=True)
     (b / "depths.jsonl").write_text(

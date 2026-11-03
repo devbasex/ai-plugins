@@ -409,6 +409,8 @@ def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
 
 def _stage_entry(wave: dict, i: int, out: Path) -> dict:
     """ステージ 1 件の一覧の項目。then_of のステージは command を持たず、前のステージへ連結される。"""
+    import parallel_lane
+
     entry = {"wave": i, "name": wave["name"]}
     if "gate" in wave:
         entry["gate"] = wave["gate"]
@@ -426,7 +428,7 @@ def _stage_entry(wave: dict, i: int, out: Path) -> dict:
             entry["command"] = (
                 f"python3 {shlex.quote(str(SELF))} queue "
                 + " ".join(map(shlex.quote, paths))
-                + f" --max 3 --done {shlex.quote(entry['done'])}"
+                + f" --max {parallel_lane.queue_max()} --done {shlex.quote(entry['done'])}"
             )
     return entry
 

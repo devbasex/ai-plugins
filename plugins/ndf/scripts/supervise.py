@@ -79,7 +79,6 @@ new / queue / wait / note / sync-check / format / sync-title の結果は lib/st
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -288,16 +287,9 @@ COMMANDS = {
 
 def default_max(cwd: str | None = None) -> int:
     """`queue` の `--max` を省いたときの本数。並列の計画のレーンならレーンのプランの本数、そうでなければ 3（#2436）。"""
-    import decl
     import parallel_lane
 
-    root = cwd or os.getcwd()
-    try:
-        n = parallel_lane.lane_plans(decl.main_dir(root) or Path(root))
-    except Exception as exc:  # noqa: BLE001  判定できなければ今どおりの 3 で流す（理由は標準エラーへ）
-        print(f"[supervise] レーンの判定に失敗したため --max の既定 3 で流す: {exc}", file=sys.stderr)
-        n = None
-    return n or 3
+    return parallel_lane.queue_max(cwd)
 
 
 def main() -> int:

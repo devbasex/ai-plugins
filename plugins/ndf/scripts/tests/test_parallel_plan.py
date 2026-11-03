@@ -57,6 +57,7 @@ def test_valid_plan_passes():
         (variant(name="a" * 25), "I1"),
         (variant(x=lambda d: d["lanes"][0].__setitem__("name", "p1-rel1")), "I1"),
         (variant(x=lambda d: d["lanes"][1].__setitem__("name", "lroot")), "I1"),
+        (variant(x=lambda d: d["lanes"][2].__setitem__("handoff", "loop-lflow")), "I1"),
         (variant(x=lambda d: d["lanes"][0].__setitem__("plans", 3)), "I2"),
         (variant(x=lambda d: d["lanes"].append({**d["lanes"][0], "name": "l4", "plans": 0})), "form"),
         (variant(x=lambda d: d["lanes"][2].__setitem__("after", ["nope"])), "I3"),
