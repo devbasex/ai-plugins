@@ -446,6 +446,23 @@ def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None) -> st
     return f"python3 {RELAY} spawn --name {pr.helper_name(name, n)} --role helper --plan {name} --json -- '{first}'"
 
 
+def present_approval(d: Path) -> str:
+    """提示のプランの承認資料の絶対パス（ステップ `present` の `--approval` と `cwd` から読む）。読めなければ空。"""
+    import re
+    import shlex
+
+    try:
+        steps = json.loads((Path(d) / "present.json").read_text(encoding="utf-8")).get("steps") or []
+    except (OSError, ValueError):
+        return ""
+    step = next((x for x in steps if isinstance(x, dict) and x.get("id") == "present"), {})
+    m = re.search(r"--approval (\S+)", step.get("cmd") or "")
+    if not m:
+        return ""
+    path = Path(shlex.split(m.group(1))[0])
+    return shlex.quote(str(path if path.is_absolute() else Path(step.get("cwd") or ".") / path))
+
+
 def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
     配布の途中の知らせに添えた `release`）が同じ連番と提示の `confirmed` なら確定の後の 3 手、そうでなければ提示。
@@ -458,7 +475,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     launch = ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
     d = pr.release_dir(main, name, n, k)
     py = f"python3 {HERE / 'parallel.py'}"
-    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {d / 'present-state' / 'report.md'}"}
+    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
     if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k:
         done = d / "release-done.json"
         gate = f"python3 {HERE / 'sprint-state.py'} gate {d / 'answer.json'} '関門 2' --what 'まとめた配布 {n} の提示 {k}' --by user --outcome approved"

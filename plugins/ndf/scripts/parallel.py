@@ -388,11 +388,11 @@ def cmd_answer(a) -> None:
     note = None
     if a.revise:
         if not a.note:
-            reply("stopped", "--revise には --note <指摘のファイル> が要る", code=1)
+            reply("stopped", "--revise には --note <指摘ファイル> が要る", code=1)
         try:
             note = Path(a.note).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            reply("stopped", f"指摘のファイルを読めない: {exc}", code=2)
+            reply("stopped", f"指摘ファイルを読めない: {exc}", code=2)
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
     nxt = _owner_restart(main, a.name, a.id)
     pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice)

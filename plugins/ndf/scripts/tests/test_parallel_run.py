@@ -404,6 +404,8 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     d = prl.release_dir(main, "p1", 1, 1)
     assert task["phase"] == "present" and f"queue {d / 'present.json'}" in task["pipeline"]
     assert "request-gate2 p1 1 1" in task["gate2"] and "settle p1 1 --done" in task["settle"]
+    (d / "present.json").write_text(json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "parallel.py present p1 1 1 --approval issues/a.md && cat x"}]}))
+    assert prun.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
     pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]

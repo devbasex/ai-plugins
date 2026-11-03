@@ -225,6 +225,10 @@ pace: fast
 このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、本番の配布を 1 本にまとめる。
 並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
 
+**引数に `--parallel-helper <計画名> <連番> <提示>` か `--parallel-helper <計画名> pending <ループ名>` があれば、このセッションは
+オーガナイザーが起こした一時レーンである。** 判定の手順へ進まず、[references/parallel.md](references/parallel.md) の「一時レーン」の手順で
+`parallel.py helper` が返す pipeline（まとめた配布の提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
+
 ## 開発ループ（`--loop`）
 
 **引数に `--loop [<ループ名>]` があれば、判定の手順へ進まず [references/loop.md](references/loop.md) の手順で進める。**

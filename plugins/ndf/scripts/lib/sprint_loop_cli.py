@@ -39,7 +39,7 @@ def run_loop_command(a, update) -> dict | None:
             "list": lambda: sl.cmd_list(env, a.loop_name),
         }
         if a.loop_cmd == "answer" and a.revise and not a.note:
-            return step_result.result(sl.TOOL, "stopped", "--revise には --note <指摘のファイル> が要る", [], {"status": "refused"})
+            return step_result.result(sl.TOOL, "stopped", "--revise には --note <指摘ファイル> が要る", [], {"status": "refused"})
         out = handlers[a.loop_cmd]()
         if a.loop_cmd in ("status", "list") and not a.json:
             print(

@@ -371,7 +371,7 @@ def cmd_answer(
             try:
                 text = Path(note or "").read_text(encoding="utf-8").strip()
             except OSError as e:
-                return refusal_order(f"指摘のファイルを読めない: {e}")
+                return refusal_order(f"指摘ファイルを読めない: {e}")
         notes = apply_answer(env, rec, w, "revise" if revise else ("approved" if approved else "rejected"), pr, text if revise else None)
         write_record(env, rec, before)
         if revise:

@@ -202,7 +202,7 @@ def gate_copy(name: str, row: dict) -> dict:
 
 
 def waiting_section(rec: dict, w: dict) -> str:
-    how = f"python3 {SPRINT_STATE} loop answer {rec['name']} {w['number']} --approved|--rejected|--revise --note <指摘のファイル>"
+    how = f"python3 {SPRINT_STATE} loop answer {rec['name']} {w['number']} --approved|--rejected|--revise --note <指摘ファイル>"
     pr = f"#{w['pr']}" if w.get("pr") else "—"
     lines = [
         f"- 判定: {w.get('verdict', 'unknown')}（承認ゲート {w['gate']}）",
