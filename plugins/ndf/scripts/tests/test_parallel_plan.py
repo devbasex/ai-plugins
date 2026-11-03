@@ -196,6 +196,8 @@ def test_answerable_and_moved():
     assert prl.answerable(pending, [1, 2]) == ["a"]
     # 一部だけが範囲に入る依頼は答えない（残りを出さずに配布済みと答えない）
     assert prl.answerable([{"id": "c", "prs": [1, 3]}, {"id": "d", "prs": []}], [1, 2]) == []
+    # 先の PR が前の配布で出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこの配布で答えない
+    assert prl.answerable([{"id": "e", "prs": [1, 3]}, {"id": "f", "prs": [3]}], [1, 2], done=[3]) == ["e"]
     assert prl.moved("abc", "abc") is False and prl.moved("abc", "def") is True
 
 

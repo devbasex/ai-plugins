@@ -559,6 +559,9 @@ def test_the_plan_waits_until_the_owner_applies_a_design_answer(env, monkeypatch
     assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
     applied["v"] = True
+    states.write_text(json.dumps({"la": "running", "lb": "stopped"}))  # 起こした la が動き出し、答えを当てて止まる
+    time.sleep(1.0)  # 動き出した la を観測させる
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
     assert durable.output_of(pl.workflow_id("p1"))["status"] == "finished"
 
 
@@ -625,6 +628,12 @@ def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
     time.sleep(1.0)
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)  # 止まった持ち主が答えを当てるまで終えない
+    assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    states.write_text(json.dumps({"la": "running", "lb": "stopped"}))
+    time.sleep(1.0)  # 動き出した la を観測させる
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
     assert durable.output_of(pl.workflow_id("p1"))["status"] == "finished"
 
 

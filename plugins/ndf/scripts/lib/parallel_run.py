@@ -159,23 +159,22 @@ def step_held_loops(main: str, name: str, answered: list[str]) -> list[str]:
 
 def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
     """答えを受けたのに残りを流していない保留の周回を持つ、計画のループのレーンのループ名（異常系 11）。"""
+    asked = lambda lap: (lap.get("release") or lap.get("question") or {}).get("request") if lap.get("outcome") in PENDING else None  # noqa: E731
+    return [ln.input.loop for ln, rec in _loop_records(main, name) if any(asked(lap) in answered for lap in rec.get("laps") or [])]
+
+
+def _loop_records(main: Path, name: str) -> list[tuple]:
+    """計画のループのレーンと、読めたループの記録（loop.json）の組。計画を読めなければ空。"""
     try:
         plan = pp.load_valid_plan(main, name)
     except (OSError, ValueError):
         return []
     out = []
-    for ln in plan.lanes:
-        if ln.input.kind != "loop":
-            continue
+    for ln in (ln for ln in plan.lanes if ln.input.kind == "loop"):
         try:
-            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
+            out.append((ln, json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))))
         except (OSError, ValueError):
             continue
-        for lap in rec.get("laps") or []:
-            part = (lap.get("release") or lap.get("question") or {}) if lap.get("outcome") in PENDING else {}
-            if part.get("request") in answered:
-                out.append(ln.input.loop)
-                break
     return out
 
 
@@ -189,21 +188,8 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
 
     答え（`answer-<依頼>`）は持ち主が周回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後の配布の
     依頼を送れないため、当てるまで計画を終えない。"""
-    try:
-        plan = pp.load_valid_plan(main, name)
-    except (OSError, ValueError):
-        return []
-    out = []
-    for ln in plan.lanes:
-        if ln.input.kind != "loop":
-            continue
-        try:
-            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or []):
-            out.append(ln.name)
-    return out
+    held = lambda rec: any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or [])  # noqa: E731
+    return [ln.name for ln, rec in _loop_records(main, name) if held(rec)]
 
 
 @durable.step(name="parallel.build")
@@ -283,6 +269,8 @@ class _Run:
         self.helper_asked: Optional[int] = None
         self.held_spawned: list[str] = []
         self.wake: list[str] = []
+        self.sprint = {ln["name"] for ln in lanes if (ln.get("input") or {}).get("kind") == "sprint"}
+        self.revive: list[str] = []  # 問いへ答えた後、まだ動き出していない止まった 1 スプリントのレーン（6f）
 
     def bump(self) -> int:
         self.seq += 1
@@ -356,6 +344,8 @@ class _Run:
             durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "at")})
         self.questions = [q for q in self.questions if q.get("id") != rid]
         self.publish_questions()
+        owners = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))} & self.sprint & self.stopped()
+        self.revive = sorted({*self.revive, *owners})  # 止まった持ち主を起こして答えを当てるまで計画を終えない
         self.apply_own(q, list(msg.get("choice") or []))
 
     def apply_own(self, q: dict, choice: list[str]) -> None:
@@ -386,11 +376,12 @@ class _Run:
     # -- 配布 --
 
     def answer_from_ranges(self) -> None:
-        """出した配布の範囲で答えられる依頼に答えて外す（I15）。"""
+        """出した配布の範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。"""
+        done = {n for r in self.releases if r.get("state") == "released" for n in r.get("prs") or []}
         for rel in self.releases:
             if rel.get("state") != "released":
                 continue
-            hit = set(pr.answerable(self.pending, rel.get("prs") or []))
+            hit = set(pr.answerable(self.pending, rel.get("prs") or [], done))
             for r in [r for r in self.pending if r["id"] in hit]:
                 self.answer(r["id"], "released", rel.get("version"), rel["n"])
             self.pending = [r for r in self.pending if r["id"] not in hit]
@@ -462,7 +453,8 @@ class _Run:
         if not rel.get("prs"):
             got = step_presented(rel["dirs"][-1])
             rel["prs"] = got.get("prs") or []
-        hit = set(pr.answerable(self.pending, rel["prs"]))
+        done = {n for r in self.releases if r is not rel and r.get("state") == "released" for n in r.get("prs") or []}
+        hit = set(pr.answerable(self.pending, rel["prs"], done))  # 前の配布で出た PR と合わせて全部が入る依頼に答える
         answered = [r for r in self.pending if r["id"] in hit]
         if result == "released":
             rel.update(state="released", version=msg.get("version") or rel.get("version"))
@@ -571,8 +563,8 @@ def parallel_workflow(main: str, name: str) -> dict:
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留の周回があれば None。"""
-    designs = step_design_held(main, name, sorted(run.answered))
-    if designs:  # 持ち主が設計の承認の答えを当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
+    designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())})
+    if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
         if set(designs) - set(run.wake):
             run.wake = sorted({*run.wake, *designs})
             run.pause("notice", lanes=[], attach=[])
@@ -639,6 +631,7 @@ def _observe_run(run: _Run, main: str) -> None:
             st = "stopped"
         if st and st != run.lanes[n].get("state"):
             run.lanes[n]["state"] = st
+            run.revive = [x for x in run.revive if x != n or st == "stopped"]  # 起こしたレーンが動き出したら待ちを外す
             if st == "awaiting_approval":
                 noticed.append(n)
     if noticed:
