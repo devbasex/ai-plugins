@@ -102,7 +102,8 @@ def test_pinned_limited_e2e(term, accounts, tmp_path):  # noqa: F811
     accounts.add("a", util5=10)
     tb = accounts.add("b", util5=20)
     pin.set_pinned("b")
-    t = account_term(term, accounts)
+    # 保存した残量を使わず毎回読む。1 秒の間隔だと、上限の直後の区間の起動が上限の残量を読み直さずに使う（CI で落ちた）
+    t = account_term(term, accounts, NDF_ACCOUNT_CHECK_INTERVAL="0")
     t.wait_start(1)
     assert t.starts()[0]["account"] == "b"
     accounts.fake.set_usage(tb, window(100, 3600), window(5))
