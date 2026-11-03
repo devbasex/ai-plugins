@@ -1386,6 +1386,32 @@ def test_waiting_only_instead_of_no_issue_when_only_pending_work_is_left(env):
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "waiting_only"
 
 
+def test_a_waiting_only_lane_stops_its_own_wrapper(env, monkeypatch):
+    """待ちだけで止まったレーンは自分のラッパーを止める 1 行を返す（判断 fca6fe464619 の (a)）。ラッパーの外と、並列の計画の
+    レーンでないラッパーでは返さない。"""
+    import parallel_files
+
+    request_lap(env)
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
+    monkeypatch.delenv("NDF_RELAY_NAME", raising=False)
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["stop"]["condition"] == "waiting_only" and out["metrics"].get("stop_self") is None
+    sl.cmd_start(env, "l1", [], {})
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    out = sl_select.cmd_select(env, "l1")  # 並列の計画のレーンでないラッパー（利用者の端末）は止めない
+    assert out["metrics"]["stop"]["condition"] == "waiting_only" and out["metrics"].get("stop_self") is None
+    plan = env.root / ".ndf" / "parallel" / "p1"
+    plan.mkdir(parents=True)
+    (plan / "plan.json").write_text(json.dumps({"name": "p1", "lanes": [{"name": "la"}]}))
+    sl.cmd_start(env, "l1", [], {})
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["stop"]["condition"] == "waiting_only" and out["metrics"]["stop_self"] == parallel_files.stop_self(env.root)
+    assert out["metrics"]["stop_self"]
+    sl.cmd_start(env, "l1", [], {})
+    sl.cmd_stop(env, "l1")
+    assert sl_select.cmd_select(env, "l1")["metrics"].get("stop_self") is None  # 待ちでない止まり方はラッパーを残す
+
+
 def test_budget_waits_first_but_user_stop_stops_at_once(env):
     request_lap(env)
     r = rec(env)

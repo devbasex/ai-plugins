@@ -64,6 +64,30 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
     return None
 
 
+def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
+    """答えの後に持ち主のレーンを起こすかを、レーンの側の待ちの記録で決める（6f）。ラッパーの状態では決めない（止め方の
+    食い違いで running が残っても起こし損ねないため）。ループのレーンは記録が `waiting_only` で止まっている、1 スプリントの
+    レーンは引継ぎ文書に依頼の id がある（保留の手順が書く）。記録を持たない一時レーンは、ラッパーが止まっているか
+    （`relay_ls()` の統一 JSON レポートで running / awaiting_approval でない）で決める（保留の手順の最後に自分で止める）。"""
+    from sprint_loop_names import LOOP_DIR
+
+    try:
+        hit = pp.load_valid_plan(main, name).lane(lane)
+    except (OSError, ValueError):
+        hit = None
+    if hit is None:
+        code, got = relay_ls()
+        state = next((i.get("state") for i in got.get("items") or [] if i.get("name") == lane), None) if code == 0 else None
+        return state not in ("running", "awaiting_approval")
+    try:
+        if isinstance(hit.input, pp.LoopInput):
+            rec = json.loads((Path(main) / LOOP_DIR / hit.input.loop / "loop.json").read_text(encoding="utf-8"))
+            return rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") == "waiting_only"
+        return rid in (Path(main) / ".ndf" / "handoff" / f"{hit.handoff_name()}.md").read_text(encoding="utf-8")
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def lane_plans(main: Path, lane: Optional[str] = None) -> Optional[int]:
     """レーンなら、そのレーンの同時に流すプランの本数。レーンでなければ None（`queue --max` の既定）。"""
     got = lane_of(main, lane)

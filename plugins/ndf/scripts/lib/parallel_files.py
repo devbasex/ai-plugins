@@ -7,11 +7,25 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 from pathlib import Path
 from typing import Optional
 
 PARALLEL_DIR = Path(".ndf") / "parallel"
 ROLE_FILE = "role.json"  # 統括役の作業ディレクトリの役割のファイル（relay_lib.hub.ROLE_FILE と同じ公開の形。統括役を import しない）
+RELAY = Path(__file__).resolve().parent.parent / "relay.py"
+
+
+def stop_self(main: Optional[Path] = None, env=None) -> Optional[str]:
+    """セッションの最後に自分のラッパーを止める 1 行（判断 fca6fe464619 の (a)）。`ndf-next` を出さずに終えても対話の claude が
+    入力待ちで残り、ラッパーが止まらないためである。ラッパーの外（`NDF_RELAY_NAME` が無い）では None（打たない）。
+    `main` を渡すと、並列の計画のレーンか一時レーンのときだけ返す（利用者の端末のラッパーを止めない）。"""
+    env = os.environ if env is None else env
+    name = env.get("NDF_RELAY_NAME")
+    if not name or (main is not None and lane_name_in_plans(Path(main), name, env.get("NDF_RELAY_DIR")) is None):
+        return None
+    return f'python3 {shlex.quote(str(RELAY))} stop "$NDF_RELAY_NAME"'
 
 
 def plans_in(main: Path) -> list[str]:

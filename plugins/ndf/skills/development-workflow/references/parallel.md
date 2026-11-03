@@ -74,8 +74,8 @@
 最初の入力は次のどちらかで、`development-workflow` は判定の手順へ進まずこの節の手順で進める。
 
 ```text
-/goal /ndf:development-workflow --parallel-helper p1 <連番> <提示> -- 終わり: [ndf-parallel] helper-done p1 の行を出したとき
-/goal /ndf:development-workflow --parallel-helper p1 pending <ループ名> -- 終わり: [ndf-parallel] helper-done p1 の行を出したとき
+/goal /ndf:development-workflow --parallel-helper p1 <連番> <提示> -- 終わり: [ndf-parallel] helper-done p1 の行を出し、python3 <relay.py> stop p1-rel<連番> で自分のラッパーを止めたとき
+/goal /ndf:development-workflow --parallel-helper p1 pending <ループ名> -- 終わり: [ndf-parallel] helper-done p1 の行を出し、python3 <relay.py> stop p1-rel<連番> で自分のラッパーを止めたとき
 ```
 
 **配布（`<連番> <提示>`）:**
@@ -87,7 +87,9 @@
    - `phase: confirmed`: 答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。`approve` が承認ゲート（終了コード 10）で
      終われば本番のプランを流さず、問いとして送って手順 4 へ進む
 3. `metrics.settle` の 1 行（`parallel.py settle p1 <連番> --done <D>`）を打つ。結果は耐久ワークフローが範囲のレーンへ返す
-4. `[ndf-parallel] helper-done p1` の行を出して終える。答えの後は、オーガナイザーが続きの一時レーンを起こす
+4. `[ndf-parallel] helper-done p1` の行を出し、最後に最初の入力の「終わり」にある `relay.py stop <自分の名前>` の 1 行を打って
+   自分のラッパーを止めて終える。止めないと対話の claude が入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。
+   答えの後は、オーガナイザーが続きの一時レーンを起こす
 
 CI の失敗・衝突・版数の衝突は、配布のプランの直しの手順（judge・fix）で直す。直せない失敗は問いにする（区分つきの `AskUserQuestion` を
 出すと、問いの hook がオーガナイザーへ送り、拒否の理由に保留の手順が返る）。保留したら手順 4 で終える。
