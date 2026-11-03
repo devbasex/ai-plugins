@@ -162,6 +162,7 @@ SYNC_DESIGN_BODY = f"bash {DECISIONS_SH} sync {{pr}}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
+PARALLEL_PY = f"python3 {HERE / 'parallel.py'}"  # 並列の計画と進行（#2436）
 WORKTREE_SETUP = SELF.parent / "worktree-setup.sh"
 
 

@@ -13,7 +13,7 @@ import legacy_names
 from gate_answer import GATE_1
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
+from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PARALLEL_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.plan import sprint_state_path
@@ -496,3 +496,88 @@ def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition:
     if condition:
         plan["実行の条件"] = condition
     return plan
+
+
+RELEASE_REQUEST_PHASE = "配布の依頼"
+
+
+def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str] | None = None) -> dict:
+    """並列の計画のレーンの本番のステージ（#2436 の F6）。本番を流さず、オーガナイザーへ配布の依頼を送る。
+
+    ステップは `parallel-request` の 1 つで、依頼を送れば 10（承認ゲート）で終わり、自分の Pull Request が
+    すでに `main` にあれば送らずに 0 で終わる（I15）。`prs` は出す版の Pull Request（`{queue_pr:<名>}` でもよい）。"""
+    issues = " ".join(str(n) for n in (a.issue or []))
+    pr_args = " ".join(prs or [])
+    cmd = (
+        f"{PARALLEL_PY} request {shlex.quote(plan_name)} --lane {shlex.quote(lane)}"
+        + (f" --prs {pr_args}" if pr_args else "")
+        + (f" --issues {issues}" if issues else "")
+        + " --state {state_dir} --out {state_dir}/work/request.txt"
+    )
+    return with_record(
+        {
+            "フェーズ": RELEASE_REQUEST_PHASE,
+            "課題": a.issue,
+            "モード": a.mode,
+            "作業場所": repo,
+            "規則": "",
+            "並列の計画": plan_name,
+            "steps": [
+                {"id": "parallel-request", "type": "run", "stage": "配布", "timeout": 300, "cmd": cmd, "next": "end"}
+            ],
+        }
+    )
+
+
+def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]:
+    """まとめた配布（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
+
+    提示のプランは開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで
+    流し、`parallel.py present` でレーンの内訳を足し、最後に承認ゲート 2（MVV 判定 → approve）を置く。本番のプランは
+    承認ゲート 2 を持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。"""
+    from supervise_lib.decl import apply_decls
+    from supervise_lib.release_templates import _dev_approval_steps, present_gate_steps
+
+    repo = str(main)
+    d = Path(d)
+    seq, k = d.parent.name, d.name
+    ns = argparse.Namespace(
+        worktree=repo, repo=repo, base=None, production_branch=None, release=None, issue=[], mode="standard",
+        version=version, prev_tag=None, mvv=None, advise=None, channel="dev", prs=[], prs_from_queue=False,
+        test_cmd=None, test_kind=None, test_paths=None, test_all=None, no_reports=None, sync_checks=None, format=None,
+        glossary_ready=None, strategy=None, test_limits=None, template="sprint", level=None, series=None, branch=None,
+    )
+    apply_decls(ns)
+    plugin = (ns.release or {}).get("plugin", "ndf")
+    approval = f"issues/approval-{plugin}-v{version}-parallel-{seq}-{k}.md"
+    state = d / "answer.json"
+    present_state = d / "present"  # 提示のプランの状態ディレクトリ（`state_dir_of` の置き場と同じ）
+    facts = _dev_approval_steps(ns, repo, approval, "0", ",".join((ns.release or {}).get("runtimes") or []))
+    facts[-1]["next"] = "present"
+    first = d.parent / "1" / "presented.json"
+    present = {
+        "id": "present",
+        "type": "run",
+        "stage": "配布",
+        "timeout": 300,
+        "cwd": repo,
+        "cmd": f"{PARALLEL_PY} present {shlex.quote(name)} {seq} {k} --approval {approval} --out {{state_dir}}/work/prs.txt"
+        + (f" --first {shlex.quote(str(first))}" if k != "1" else ""),
+        "next": "mvv",
+    }
+    gate = present_gate_steps(str(state), repo, approval, "$(cat {state_dir}/work/prs.txt)", "standard", str(present_state), str(state))
+    present_plan = with_record(
+        {
+            "フェーズ": "配布（提示）",
+            "課題": [],
+            "モード": "standard",
+            "作業場所": repo,
+            "規則": "",
+            "並列の計画": name,
+            "steps": [*facts, present, *gate],
+        }
+    )
+    release_plan = plan_mvv_release(ns, repo, version, "prod", prs=["{queue_prs:present}"])
+    release_plan["起点"] = "{queue_approved:present}"
+    release_plan["並列の計画"] = name
+    return present_plan, release_plan

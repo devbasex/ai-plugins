@@ -248,7 +248,7 @@ def test_ls_json_lists_state_from_files(dirs, capsys):
     assert rows["lflow"]["state"] == "awaiting_approval" and rows["lflow"]["awaiting_approval"] is True
     assert rows["lflow"]["sections"] == 3
     for it in res["items"]:
-        assert set(it) == {"name", "state", "awaiting_approval", "sections", "cost_usd", "at", "account", "ndf_version", "attached", "hub"}
+        assert set(it) == {"name", "state", "awaiting_approval", "sections", "cost_usd", "at", "account", "ndf_version", "attached", "hub", "role"}
         assert it["cost_usd"] is None and "最初" not in json.dumps(it, ensure_ascii=False)
     assert res["metrics"] == {"running": 2, "awaiting_approval": 1, "stopped": 0, "limit": 3}
     assert hc.cmd_ls([]) == 0

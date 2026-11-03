@@ -28,13 +28,15 @@ EXIT_NO_HUB = 1  # 統括役が居ない・答えない
 # ---------------------------------------------------------------- 依頼
 
 
-def put_request(kind: str, name: str | None, cwd: str, args: list[str], by: str) -> str:
-    """受付箱へ依頼を置き、依頼の id を返す（ファイルは 0600。I8）。環境変数は載せない（決定 2）。"""
+def put_request(kind: str, name: str | None, cwd: str, args: list[str], by: str, extra: dict | None = None) -> str:
+    """受付箱へ依頼を置き、依頼の id を返す（ファイルは 0600。I8）。環境変数は載せない（決定 2）。
+
+    `extra` は役割（`role`・`plan`。#2436）のように依頼へ足す項目。"""
     hb.ensure_dirs()
     rid = hb.request_id()
     write_json_atomic(
         hb.hub_path(hb.REQUESTS, f"{rid}.json"),
-        {"kind": kind, "name": name, "cwd": cwd, "args": args, "by": by, "at": stamp()},
+        {"kind": kind, "name": name, "cwd": cwd, "args": args, "by": by, "at": stamp(), **(extra or {})},
     )
     return rid
 
@@ -52,10 +54,10 @@ def _wait_result(rid: str, seconds: float) -> dict | None:
         time.sleep(0.1)
 
 
-def send_request(kind: str, name: str | None, cwd: str, args: list[str], by: str) -> dict | None:
+def send_request(kind: str, name: str | None, cwd: str, args: list[str], by: str, extra: dict | None = None) -> dict | None:
     """依頼を置いて結果を待つ。`NDF_RELAY_HUB_WAIT` 秒で来なければ依頼を消して None。消せなければ統括役が
     受け取った後なので、もう 1 度同じ秒数だけ待つ（決定 14）。"""
-    rid = put_request(kind, name, cwd, args, by)
+    rid = put_request(kind, name, cwd, args, by, extra)
     seconds = hb.wait_seconds()
     got = _wait_result(rid, seconds)
     if got is not None:
@@ -186,15 +188,20 @@ def _split_dashdash(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv, []
 
 
+def _opt(opts: list[str], flag: str) -> str | None:
+    if flag not in opts:
+        return None
+    i = opts.index(flag)
+    return opts[i + 1] if i + 1 < len(opts) else None
+
+
 def cmd_spawn(argv: list[str]) -> int:
     opts, rest = _split_dashdash(argv)
     as_json = "--json" in opts
-    name = None
-    if "--name" in opts:
-        i = opts.index("--name")
-        name = opts[i + 1] if i + 1 < len(opts) else None
-    if not name:
-        print("usage: relay.py spawn --name <名前> [--json] -- <最初の入力>", file=sys.stderr)
+    name = _opt(opts, "--name")
+    role, plan = _opt(opts, "--role"), _opt(opts, "--plan")
+    if not name or (role is not None and (role != "helper" or not plan)):
+        print("usage: relay.py spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>", file=sys.stderr)
         return 2
     if not hb.name_ok(name):
         return print_result(
@@ -202,8 +209,33 @@ def cmd_spawn(argv: list[str]) -> int:
         )
     if not hb.hub_running():
         return print_result(no_hub("spawn", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
-    res = send_request("spawn", name, os.getcwd(), hb.prompt_args(" ".join(rest)) if rest else [], "spawn")
+    extra = {"role": role, "plan": plan} if role else None
+    res = send_request("spawn", name, os.getcwd(), hb.prompt_args(" ".join(rest)) if rest else [], "spawn", extra)
     return print_result(res or no_hub("spawn", name, "統括役が答えない"), as_json)
+
+
+def cmd_role(argv: list[str]) -> int:
+    """`relay.py role organizer --plan <計画名>` / `relay.py role --clear`。作業ディレクトリの役割のファイルを書く・消す（#2436）。"""
+    relay_dir = os.environ.get("NDF_RELAY_DIR")
+    clear = "--clear" in argv
+    role = next((a for a in argv if not a.startswith("-") and a != _opt(argv, "--plan")), None)
+    plan = _opt(argv, "--plan")
+    if not clear and (role not in hb.ROLES or not plan):
+        print("usage: relay.py role organizer|helper --plan <計画名> | relay.py role --clear", file=sys.stderr)
+        return 2
+    if not relay_dir or not os.path.isdir(relay_dir):
+        res = {"tool": "relay-role", "status": "stopped", "summary": "ラッパーの外（NDF_RELAY_DIR が無い）", "items": [], "metrics": {}}
+        print(json.dumps(res, ensure_ascii=False))
+        return 1
+    path = os.path.join(relay_dir, hb.ROLE_FILE)
+    if clear:
+        remove(path)
+        summary, item = "役割の印を消した", {"role": None, "plan": None}
+    else:
+        write_json_atomic(path, {"role": role, "plan": plan, "at": stamp()})
+        summary, item = f"役割 {role}（計画 {plan}）の印を書いた", {"role": role, "plan": plan}
+    print(json.dumps({"tool": "relay-role", "status": "ok", "summary": summary, "items": [item], "metrics": {}}, ensure_ascii=False))
+    return 0
 
 
 # ---------------------------------------------------------------- ls
@@ -215,7 +247,9 @@ def _iso(epoch: float | None) -> str | None:
     return _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _ls_item(name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None) -> dict:
+def _ls_item(
+    name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None, role: str | None = None
+) -> dict:
     running = bool(w and w.running) or pending
     waiting = bool(w and w.running and w.question)
     state = "awaiting_approval" if waiting else "running" if running else "stopped"
@@ -232,6 +266,7 @@ def _ls_item(name: str, w: hb.Wrapper | None, session: dict | None, pending: boo
         "ndf_version": start.get("plugin_version") if isinstance(start.get("plugin_version"), str) else None,
         "attached": session["attached"] if session else None,
         "hub": bool(w and w.running and hub_dir and w.dir == hub_dir),
+        "role": (w.role if w else None) or role,
     }
 
 
@@ -247,7 +282,7 @@ def list_items() -> list[dict]:
         w = named.get(n)
         session = sessions.get((registry.get(n) or {}).get("session", n))
         pending = session is not None and not (w and w.running) and n in registry
-        items.append(_ls_item(n, w, session, pending, hub_dir))
+        items.append(_ls_item(n, w, session, pending, hub_dir, (registry.get(n) or {}).get("role")))
     items += [_ls_item("-", w, None, False, hub_dir) for w in ws if w.running and not w.name]
     return items
 
@@ -285,6 +320,8 @@ def cmd_ls(argv: list[str]) -> int:
         "awaiting_approval": states.count("awaiting_approval"),
         "stopped": states.count("stopped"),
         "limit": hb.max_named(),
+        "hub": hb.hub_running(),
+        "tmux": tmux.binary() is not None,
     }
     if "--json" in argv:
         summary = f"ラッパー {len(items)} 本（動いている {metrics['running']}・承認待ち {metrics['awaiting_approval']}・止まった {metrics['stopped']}）"

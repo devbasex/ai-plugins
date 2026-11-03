@@ -79,6 +79,7 @@ new / queue / wait / note / sync-check / format / sync-title の結果は lib/st
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -146,7 +147,7 @@ def build_parser(sub) -> None:
         "一覧を <done>.plans.json へ書く",
     )
     q.add_argument("plans", nargs="*", help="流すプランの JSON（--resume と併せて渡さない）")
-    q.add_argument("--max", type=int, help="同時に流す本数（既定 3。--resume は前の起動の値）")
+    q.add_argument("--max", type=int, help="同時に流す本数（既定 3。並列の計画のレーンならレーンのプランの本数。--resume は前の起動の値）")
     q.add_argument("--resume", metavar="DONE", help="前の起動の done。止まったプランを終えたステップから続け、後続のステージも流す")
     q.add_argument("--from", dest="from_", action="append", default=[], metavar="PLAN=STEP", help="--resume: 続けるプランの開始のステップ")
     q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
@@ -252,7 +253,7 @@ def _cmd_queue(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn"
         emit(queue_resume.cmd_queue_resume(a.resume, a.from_, a.max and max(1, a.max), a.poll, queue.cmd_queue))
     if not a.plans or a.from_:
         ap.error("queue にはプランが要る（--from は --resume と使う）")
-    emit(queue.cmd_queue(a.plans, max(1, a.max or 3), a.poll, a.then, a.done))
+    emit(queue.cmd_queue(a.plans, max(1, a.max or default_max()), a.poll, a.then, a.done))
 
 
 def _cmd_wait(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
@@ -284,6 +285,20 @@ COMMANDS = {
     "sync-title": lambda ap, a: emit(pr_step.sync_title(".", a.pr, a.doc)),
 }
 
+
+
+def default_max(cwd: str | None = None) -> int:
+    """`queue` の `--max` を省いたときの本数。並列の計画のレーンならレーンのプランの本数、そうでなければ 3（#2436）。"""
+    import decl
+    import parallel_lane
+
+    root = cwd or os.getcwd()
+    try:
+        n = parallel_lane.lane_plans(decl.main_dir(root) or Path(root))
+    except Exception as exc:  # noqa: BLE001  判定できなければ今どおりの 3 で流す（理由は標準エラーへ）
+        print(f"[supervise] レーンの判定に失敗したため --max の既定 3 で流す: {exc}", file=sys.stderr)
+        n = None
+    return n or 3
 
 def main() -> int:
     ap = argparse.ArgumentParser(
