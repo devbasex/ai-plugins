@@ -105,7 +105,7 @@ def run_request_ask(main: Path, plan: str, lane: str, payload: dict) -> tuple[in
 
 def hold_text(rid: str, plan: str) -> str:
     """オーガナイザーへ送った問いの理由と保留の手順（正本: asking.md の「並列の計画のレーン」）。"""
-    loop = f"python3 \"{Path(__file__).resolve().parent.parent / 'sprint-state.py'}\" loop hold-question <ループ> --ref {rid} --plan <止まったプラン> --step <続きのステップ> --parallel {plan}"
+    loop = f'python3 "{Path(__file__).resolve().parent.parent / "sprint-state.py"}" loop hold-question <ループ> --ref {rid} --plan <止まったプラン> --step <続きのステップ> --parallel {plan}'
     return "\n".join(
         [
             f"ndf: 並列の計画 {plan} のレーンの問いをオーガナイザーへ送った（依頼 {rid}）。この作業を保留し、別の作業へ進め。答えは周回の境で届く。",

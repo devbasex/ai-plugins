@@ -204,6 +204,7 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
 
 # ---- 問いの依頼と答え（#2436 の 6c・6d・6f。設計 issue-2436-design-approvals.md） ----
 
+
 def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
     """問いを送ってよい送り手か: 動いている計画のレーン（`lane_of`）か、役割のファイルが `helper` で、その計画の
     耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。"""
@@ -278,7 +279,13 @@ def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
 
 
 def send_answer(
-    main: Path, name: str, rid: str, result: str, note: Optional[str] = None, choice: Optional[list[str]] = None, stamp: Optional[str] = None
+    main: Path,
+    name: str,
+    rid: str,
+    result: str,
+    note: Optional[str] = None,
+    choice: Optional[list[str]] = None,
+    stamp: Optional[str] = None,
 ) -> None:
     """オーガナイザーの答えを送る。耐久ワークフローが `answer-<依頼>` を 1 回だけ立て、問いの一覧から外す。"""
     msg = {"kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp, "at": _now()}

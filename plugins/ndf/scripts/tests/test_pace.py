@@ -107,7 +107,13 @@ def test_the_loop_section_is_read_with_defaults(tmp_path):
     assert pace.read_loop(write(tmp_path, DECL)) == pace.LOOP_DEFAULTS
     assert pace.read_loop(write(tmp_path, {**DECL, "loop": None})) == pace.LOOP_DEFAULTS
     d = pace.read_loop(write(tmp_path, {**DECL, "loop": {"enabled": True, "budget": {"laps": 5}, "max_issues": 1}}))
-    assert d == {"enabled": True, "budget": {"laps": 5, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 1, "release_pending_max": 2}
+    assert d == {
+        "enabled": True,
+        "budget": {"laps": 5, "usd": 60, "hours": 24},
+        "same_failure": 2,
+        "max_issues": 1,
+        "release_pending_max": 2,
+    }
     assert pace.read_loop(write(tmp_path, {**DECL, "loop": {"enabled": "yes"}}))["enabled"] is False
 
 

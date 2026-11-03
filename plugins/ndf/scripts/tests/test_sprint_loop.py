@@ -1473,7 +1473,9 @@ def test_gate_1_of_a_lane_sends_the_request_to_the_organizer(env, monkeypatch):
     lap = built_lap(env)
     report = design_report(env, "design-11", "https://github.com/o/r/pull/501")
     sent = []
-    monkeypatch.setattr(sl_gate, "lane_gate1", lambda e, w, report, state: sent.append(w["number"]) or {"request": "lroot-g501-x", "plan": "p1"})
+    monkeypatch.setattr(
+        sl_gate, "lane_gate1", lambda e, w, report, state: sent.append(w["number"]) or {"request": "lroot-g501-x", "plan": "p1"}
+    )
     item = {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門", "report": report}
     out = sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
     w = rec(env)["waiting"][0]

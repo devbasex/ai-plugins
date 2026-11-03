@@ -244,7 +244,9 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         if lap is not None:
             rec["laps"].remove(lap)  # スプリントを組む前の周回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
         if has_held_work(rec):  # 選べる課題が無く答えを待つ作業だけが残る: no_issue で止まらず、見直しも挟まない（異常系 6）
-            return stop_and_report(env, rec, before, waiting_only(rec, "no_selectable"), "手元の作業が待ちだけになった", {"selection": got["selection"]})
+            return stop_and_report(
+                env, rec, before, waiting_only(rec, "no_selectable"), "手元の作業が待ちだけになった", {"selection": got["selection"]}
+            )
         cond = "no_issue" if got["candidates"] == 0 else "outside_mvv"
         if cond == "no_issue" and rec.get("review_first") != len(rec["laps"]):
             return review_first(env, rec, before, got)

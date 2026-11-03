@@ -549,7 +549,13 @@ def _spawn_ready(run: _Run, main: str) -> None:
             if got.get("refused"):
                 run.refusals[n] = run.refusals.get(n, 0) + 1
                 if run.refusals[n] == SPAWN_REFUSALS:  # 3 回続けて断られたら理由を添えて問う（異常系 17）
-                    run.ask("spawn", f"{run.name}-spawn-{n}", n, f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）", ["起こし直す", "止める"])
+                    run.ask(
+                        "spawn",
+                        f"{run.name}-spawn-{n}",
+                        n,
+                        f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）",
+                        ["起こし直す", "止める"],
+                    )
 
 
 def _run_finished(run: _Run) -> bool:

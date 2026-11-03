@@ -360,9 +360,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
 # ---------------------------------------------------------------- answer / approve-mvv / stop
 
 
-def cmd_answer(
-    env: Env, name: str, number: int, approved: bool, pr: int | None, revise: bool = False, note: str | None = None
-) -> dict:
+def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None, revise: bool = False, note: str | None = None) -> dict:
     with open_record(env, name) as (rec, before):
         w = next((w for w in reversed(rec.get("waiting", [])) if w["number"] == number and not w.get("answer")), None)
         if w is None:
