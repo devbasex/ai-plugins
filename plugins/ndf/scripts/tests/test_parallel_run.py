@@ -755,3 +755,36 @@ def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     run.questions = []
     prun._ask_helper(run, {helper: {"state": "stopped"}})
     assert [q["kind"] for q in run.questions] == ["helper"]
+
+
+def test_settle_answers_with_the_version_of_the_chosen_presentation(env, tmp_path, monkeypatch):
+    """出し直しの提示 2 を選んだら、提示 2 を組んだ時点の版で依頼へ答える（settle に版が無くても提示 1 の版にしない）。"""
+    main, heads = env["main"], env["heads"]
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    heads["v"] = "sha2"
+    monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.4")  # 提示 1 の後に別レーンの開発版が進んだ
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("represent"))
+    (prl.release_dir(main, "p1", 1, 2) / "presented.json").write_text(json.dumps({"sha": "sha2", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm", "take": "new"}, "c2")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    resume(main, {"n": 1, "phase": "settle", "result": "released"}, "s1")
+    ans, _ = until(lambda: pl.read_answer(main, "p1", rid)[0] and pl.read_answer(main, "p1", rid))
+    assert ans["version"] == "1.2.4"
+
+
+def test_a_late_request_is_answered_by_the_release_that_completed_it(monkeypatch):
+    """配布 1 と配布 2 の PR を両方含む遅れた依頼には、配布 2 の版と連番で答える（I15）。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    got = []
+    monkeypatch.setattr(run, "answer", lambda rid, result, version, n, reason=None: got.append((rid, version, n)))
+    run.releases = [
+        {"n": 1, "state": "released", "version": "1.2.3", "prs": [10]},
+        {"n": 2, "state": "released", "version": "1.2.4", "prs": [20]},
+    ]
+    run.pending = [{"id": "r1", "lane": "la", "prs": [10, 20]}, {"id": "r0", "lane": "la", "prs": [10]}]
+    run.answer_from_ranges()
+    assert sorted(got) == [("r0", "1.2.3", 1), ("r1", "1.2.4", 2)] and run.pending == []

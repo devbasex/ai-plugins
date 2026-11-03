@@ -395,11 +395,13 @@ class _Run:
     # -- 配布 --
 
     def answer_from_ranges(self) -> None:
-        """出した配布の範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。"""
-        done = {n for r in self.releases if r.get("state") == "released" for n in r.get("prs") or []}
+        """出した配布の範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
+        和は古い配布から順に足し、依頼の最後の PR が出た配布の版と連番で答える（後の配布の PR を前の配布の版で答えない）。"""
+        done: set[int] = set()
         for rel in self.releases:
             if rel.get("state") != "released":
                 continue
+            done |= set(rel.get("prs") or [])
             hit = set(pr.answerable(self.pending, rel.get("prs") or [], done))
             for r in [r for r in self.pending if r["id"] in hit]:
                 self.answer(r["id"], "released", rel.get("version"), rel["n"])
@@ -456,13 +458,15 @@ class _Run:
             if pr.moved(first.get("sha") or "", head):
                 built = step_build(self.main, self.name, rel["n"], 2, self.pending)
                 rel["dirs"].append(built["dir"])
+                rel["versions"] = [rel.get("version"), built.get("version")]  # 提示ごとの版。選ばれた提示の版を配布の答えへ渡す
                 self.emit_release(rel, 2, represent=True)
                 return
             k = 1
         else:
             k = 2 if take == "new" else 1
         got = step_presented(rel["dirs"][k - 1])
-        rel.update(state="confirmed", k=k, sha=got.get("sha"), prs=got.get("prs") or [])
+        versions = rel.get("versions") or [rel.get("version")]
+        rel.update(state="confirmed", k=k, sha=got.get("sha"), prs=got.get("prs") or [], version=versions[min(k, len(versions)) - 1])
         self.pause(
             "confirmed", n=rel["n"], k=k, plan=str(Path(rel["dirs"][k - 1]) / "release.json"), spawn=helper_spawn(self.name, rel["n"], k)
         )
