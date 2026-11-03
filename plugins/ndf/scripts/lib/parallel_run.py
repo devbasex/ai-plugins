@@ -361,7 +361,7 @@ def parallel_workflow(main: str, name: str) -> dict:
             run.answer_from_ranges()
             if run.pending:
                 run.open_release()
-        if _finished(run):
+        if _run_finished(run):
             step_finish(main, name, run.progress())
             return run.summary("finished")
         run.take(durable.recv("inbox", wait if run.current is None else min(wait, 30)))
@@ -369,7 +369,7 @@ def parallel_workflow(main: str, name: str) -> dict:
             msg = durable.recv("resume", min(wait, 30))
             if isinstance(msg, dict):
                 run.resume(msg)
-        _observe(run, main)
+        _observe_run(run, main)
 
 
 def _started(run: _Run) -> list[str]:
@@ -391,12 +391,12 @@ def _spawn_ready(run: _Run, main: str) -> None:
             run.lanes[n].update(got)
 
 
-def _finished(run: _Run) -> bool:
+def _run_finished(run: _Run) -> bool:
     """配布の途中でも残りでもなく、全レーンが止まっている。"""
     return run.current is None and not run.pending and len(run.stopped()) == len(run.order)
 
 
-def _observe(run: _Run, main: str) -> None:
+def _observe_run(run: _Run, main: str) -> None:
     """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。"""
     states = step_observe(main)
     noticed = []
