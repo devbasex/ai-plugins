@@ -5152,6 +5152,30 @@
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
+      "term": "並列の計画",
+      "context": "ndf-workflow",
+      "meaning": "1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ",
+      "pending_source": "issues/issue-2436-requirements.md"
+    },
+    {
+      "term": "レーン",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ",
+      "pending_source": "issues/issue-2436-requirements.md"
+    },
+    {
+      "term": "オーガナイザー",
+      "context": "ndf-workflow",
+      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
+      "pending_source": "issues/issue-2436-requirements.md"
+    },
+    {
+      "term": "配布の依頼",
+      "context": "ndf-workflow",
+      "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件の依頼",
+      "pending_source": "issues/issue-2436-requirements.md"
+    },
+    {
       "term": "再起動の方針",
       "context": "ndf-workflow",
       "meaning": "conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ",
