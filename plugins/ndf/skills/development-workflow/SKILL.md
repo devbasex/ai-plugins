@@ -350,7 +350,7 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと alias がラッパーを挟む。
 ラッパーは conductor が出した `ndf-next` のブロックを拾い、`/exit`・プラグインの更新・次のセッションの起動を行う。
-始め方・止め方・上限は [references/relay.md](references/relay.md) にある。
+始め方・止め方・上限は [references/relay.md](references/relay.md)、利用上限でのアカウントの切り替えは [references/relay-accounts.md](references/relay-accounts.md) にある。
 **ブロックの前に次の Bash を 1 回実行し、2 行目（アナウンス）をブロックの直前へそのままコピーする。**
 1 行目が `outside` か失敗ならラッパーの外である（書き方は `context-window.md` の「新しい会話で戻す」）。
 
