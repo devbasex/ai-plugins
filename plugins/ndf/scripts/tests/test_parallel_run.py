@@ -528,6 +528,23 @@ def test_answered_pending_laps_of_stopped_loop_lanes_are_closed_by_a_helper_befo
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING  # 流し終えるまで finished にしない
 
 
+def test_settle_wakes_a_stopped_lane_of_the_range(env, tmp_path):
+    main, log, states = env["main"], env["log"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    states.write_text(json.dumps({"la": "stopped", "lb": "running"}))  # la は待ちだけで止まった（異常系 6）
+    until(lambda: "lb" in spawned(log))
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
+    until(lambda: pl.read_answer(main, "p1", rid)[0])
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)
+    assert ev["action"] == "notice" and ev["wake"] == [f"python3 {prun.RELAY} restart la"]
+
+
 def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
     main, states = env["main"], env["states"]
     states.write_text(json.dumps({"la": "running"}))

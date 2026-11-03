@@ -416,6 +416,7 @@ class _Run:
             got = step_presented(rel["dirs"][-1])
             rel["prs"] = got.get("prs") or []
         hit = set(pr.answerable(self.pending, rel["prs"]))
+        answered = [r for r in self.pending if r["id"] in hit]
         if result == "released":
             rel.update(state="released", version=msg.get("version") or rel.get("version"))
             durable.set_event(
@@ -424,19 +425,22 @@ class _Run:
                     "sha": rel.get("sha"),
                     "version": rel["version"],
                     "prs": rel["prs"],
-                    "lanes": sorted({r["lane"] for r in self.pending if r["id"] in hit}),
+                    "lanes": sorted({r["lane"] for r in answered}),
                 },
             )
-            for r in [r for r in self.pending if r["id"] in hit]:
+            for r in answered:
                 self.answer(r["id"], "released", rel["version"], rel["n"])
         else:
             rel.update(state="rejected" if result == "rejected" else "failed", reason=msg.get("reason"))
-            for r in [r for r in self.pending if r["id"] in hit]:
+            for r in answered:
                 self.answer(r["id"], rel["state"], None, rel["n"], msg.get("reason"))
         self.pending = [r for r in self.pending if r["id"] not in hit]
         for r in self.pending:
             durable.set_event(f"defer-{r['id']}", {"seq": rel["n"], "reason": "範囲に入らないため次の配布へ回した", "at": None})
         self.current = None
+        stopped = self.stopped()  # 止まった宛先を起こす 1 行を知らせへ（異常系 6）。全レーンが止まれば異常系 11 に任せる
+        if (wake := sorted({r["lane"] for r in answered if r.get("lane") in stopped})) and len(stopped) < len(self.order):
+            self.pause("notice", lanes=[], attach=[], wake=[f"python3 {RELAY} restart {n}" for n in wake])
 
 
 def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None) -> str:

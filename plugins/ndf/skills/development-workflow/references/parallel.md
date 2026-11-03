@@ -21,7 +21,7 @@
 
 | `wait` が返したもの | すること |
 | --- | --- |
-| `notice` | 承認待ちのレーンの `metrics.attach` の 1 行を出す。`metrics.release` があり、その `seq` の起動をまだ打っていなければ、`metrics.release.spawn` の 1 行も打つ（知らせが重なって `release` / `confirmed` を読み逃しても起動を失わない） |
+| `notice` | 承認待ちのレーンの `metrics.attach` の 1 行を出す。`metrics.release` があり、その `seq` の起動をまだ打っていなければ、`metrics.release.spawn` の 1 行も打つ（知らせが重なって `release` / `confirmed` を読み逃しても起動を失わない）。`metrics.wake` があれば、その各行（配布の答えを受けた止まっているレーンを起こす `relay.py restart <レーン>`）を打つ |
 | `questions` | 届いている依頼（`items`）を下の「問い方」で問い、依頼ごとに答えを送る |
 | `release` / `confirmed` | `metrics.spawn` の 1 行（一時レーンの起動）を打つ。一時レーンが配布のプランを流し、結果を返す |
 | `held` | `metrics.spawn` の 1 行を打つ。一時レーンが、止まったループのレーンの答えを受けた保留の周回の残りを流す（終える前の後片付け） |

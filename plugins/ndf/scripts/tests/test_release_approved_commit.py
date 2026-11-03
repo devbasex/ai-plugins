@@ -86,7 +86,9 @@ DOC_FILE = "docs/design.md"
 SYNC = f"release/v{VER}-sync"
 
 
-def run_release(monkeypatch, w, *, outside_after=None, move_head=None, dev_bump=None, prod_merged=False, published=(), **extra):
+def run_release(
+    monkeypatch, w, *, outside_after=None, move_head=None, dev_bump=None, prod_merged=False, published=(), delete_on_merge=False, **extra
+):
     """release --channel prod を流し、(結果, 終了コード, マージした PR と expect, gh の呼び出し) を返す。
     outside_after は配布の PR の後に起点のブランチへ、move_head は本番チャネルへのマージを待つ間に（1 回だけ）
     release/v<版> へ別の人が入れるファイルのパス。dev_bump は承認の後に起点のブランチへ入る version.txt の中身
@@ -133,6 +135,8 @@ def run_release(monkeypatch, w, *, outside_after=None, move_head=None, dev_bump=
             if outside_after:
                 commit(other, outside_after, "x\n", "statusline (#806)")
             git(other, "push", "-q", "origin", "HEAD:trunk")
+            if delete_on_merge:  # delete_branch_on_merge: GitHub がマージした head のブランチを消す
+                git(w["origin"], "update-ref", "-d", f"refs/heads/{src.removeprefix('origin/')}")
             return state["merge"]
         if move_head and not state.get("moved"):
             state["moved"] = True
@@ -200,6 +204,14 @@ def test_release_after_only_the_release_pr_is_ok(monkeypatch, world):
     assert git(world["origin"], "merge-base", "--is-ancestor", tip, "trunk") == ""  # R3・R4: 先に起点へ取り込んである
     assert tags(world["origin"]) == f"foo--v{VER}"
     assert any(a[:2] == ["release", "create"] for a in ghcalls)
+
+
+def test_release_restores_the_release_branch_deleted_by_the_merge(monkeypatch, world):
+    """開発版の PR のマージで origin の release/v<版> が消えても（delete_branch_on_merge）、push し直して本番へ出す。"""
+    out, code, merged, _, created = run_release(monkeypatch, world, approved_sha=world["approved"], delete_on_merge=True)
+    tip = git(world["origin"], "rev-parse", f"release/v{VER}")
+    assert (out["status"], code) == ("ok", None)
+    assert merged == [(1, None), (2, tip)] and created[-1] == ("live", f"release/v{VER}")
 
 
 def test_release_after_the_base_moved_ships_only_the_approved_commit(monkeypatch, world):
