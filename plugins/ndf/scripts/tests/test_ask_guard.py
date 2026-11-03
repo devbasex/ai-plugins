@@ -330,9 +330,10 @@ def forwarded(monkeypatch):
 
     box = {"code": 0, "calls": []}
 
-    def fake(main, plan, lane, payload):
+    def fake(main, plan, lane, payload, timeout=None):
         box["calls"].append((plan, lane, payload))
-        return box["code"], {"metrics": {"id": f"{lane}-q{payload['ledger_id']}"}}
+        code = box.get("codes", {}).get(plan, box["code"])
+        return code, {"metrics": {"id": f"{lane}-q{payload['ledger_id']}"}}
 
     monkeypatch.setattr(ask_guard, "run_request_ask", fake)
     return box
@@ -351,6 +352,19 @@ def test_a_lane_question_is_sent_to_the_organizer_and_denied(proj, monkeypatch, 
     assert is_deny(out) and "オーガナイザーへ送った" in json.dumps(out, ensure_ascii=False)
     plan, lane, sent = forwarded["calls"][0]
     assert (plan, lane) == ("p1", "la") and sent["tool_input"]["metadata"]["source"] == "ndf-ask:cost" and sent["ledger_id"]
+
+
+def test_a_finished_plan_with_the_same_lane_name_is_skipped(proj, monkeypatch, forwarded):
+    """終わった計画 a と動いている計画 b が同じレーン名を持つと、a の送り手の判定（4）を飛ばして b へ送る。"""
+    for p in ("a", "b"):
+        d = proj / ".ndf" / "parallel" / p
+        d.mkdir(parents=True)
+        (d / "plan.json").write_text(json.dumps({"version": 1, "name": p, "rules": [], "lanes": [{"name": "la"}]}))
+    forwarded["codes"] = {"a": 4}
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    out = decide(proj, "ndf-ask:cost")
+    assert is_deny(out) and "並列の計画 b のレーン" in json.dumps(out, ensure_ascii=False)
+    assert [c[0] for c in forwarded["calls"]] == ["a", "b"]
 
 
 def test_the_hold_steps_end_by_stopping_the_own_wrapper(proj, monkeypatch, forwarded):

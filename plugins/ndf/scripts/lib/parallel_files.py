@@ -47,13 +47,24 @@ def helper_plan_of(relay_dir: Optional[str]) -> Optional[str]:
 
 def lane_name_in_plans(main: Path, name: Optional[str], relay_dir: Optional[str]) -> Optional[str]:
     """レーンか一時レーンかをファイルだけで見る（DBOS を読まない）。計画名か None。"""
+    got = lane_plans_in(main, name, relay_dir)
+    return got[0] if got else None
+
+
+def lane_plans_in(main: Path, name: Optional[str], relay_dir: Optional[str]) -> list[str]:
+    """`name` をレーンに持つ計画の名前（並ぶ順）と、役割のファイルが示す一時レーンの計画。ファイルだけで見る（DBOS を読まない）。
+
+    終わった計画と動いている計画が同じレーン名を持つことがあるため、どれが動いているかは送る側（`request-ask` の送り手の
+    判定）が決める。問いの hook は候補を順に試す。"""
     if not name:
-        return None
+        return []
+    out = []
     for plan in plans_in(main):
         try:
             lanes = json.loads((Path(main) / PARALLEL_DIR / plan / "plan.json").read_text(encoding="utf-8")).get("lanes") or []
         except (OSError, ValueError, AttributeError):
             continue
         if any(isinstance(ln, dict) and ln.get("name") == name for ln in lanes):
-            return plan
-    return helper_plan_of(relay_dir)
+            out.append(plan)
+    helper = helper_plan_of(relay_dir)
+    return [*out, helper] if helper and helper not in out else out

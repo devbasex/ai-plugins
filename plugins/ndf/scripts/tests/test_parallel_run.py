@@ -553,7 +553,8 @@ def test_the_plan_waits_until_the_owner_applies_a_design_answer(env, monkeypatch
     rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "d1")
     until(lambda: questions(main)["items"])
     states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
-    until(lambda: "lb" in spawned(env["log"]))
+    time.sleep(1.0)
+    assert "lb" not in spawned(env["log"])  # 保留中の la は依存の判定で止まったと数えない（I8）
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)
     assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
@@ -623,17 +624,18 @@ def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
     start(main)
     rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "led9")
     until(lambda: questions(main)["items"])
-    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
-    until(lambda: "lb" in spawned(env["log"]))
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))  # la が問いを保留して自分のラッパーを止めた
     time.sleep(1.0)
+    assert "lb" not in spawned(env["log"])  # 保留中の la は依存の判定で止まったと数えない（I8）
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)  # 止まった持ち主が答えを当てるまで終えない
     assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
-    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    assert "lb" not in spawned(env["log"])
     states.write_text(json.dumps({"la": "running", "lb": "stopped"}))
     time.sleep(1.0)  # 動き出した la を観測させる
     states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    until(lambda: "lb" in spawned(env["log"]))  # 答えを当てて止まった la の後に lb を起こす
     assert durable.output_of(pl.workflow_id("p1"))["status"] == "finished"
 
 
@@ -704,6 +706,9 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     assert cli._owner_restart(tmp_path, "p1", "qb") == f"python3 {prun.RELAY} restart lb"
     items.append({"id": "qh", "kind": "ask", "lane": "p1-rel1"})  # 記録を持たない一時レーンはラッパーが止まっているかで決める
     assert cli._owner_restart(tmp_path, "p1", "qh") == f"python3 {prun.RELAY} restart p1-rel1"
+    # 同じ原因としてまとめた問いは、merged の持ち主もそれぞれの依頼の id で調べて起こす（異常系 5）
+    items.append({"id": "qm", "kind": "ask", "lane": "la", "merged": [{"id": "qb", "lane": "lb"}]})
+    assert cli._owner_restart(tmp_path, "p1", "qm") == f"python3 {prun.RELAY} restart la; python3 {prun.RELAY} restart lb"
 
 
 def test_a_helper_ends_by_stopping_its_own_wrapper():
@@ -712,3 +717,41 @@ def test_a_helper_ends_by_stopping_its_own_wrapper():
     for line in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
         name = line.split("--name ", 1)[1].split()[0]
         assert f"{prun.RELAY} stop {name}" in line.split(" -- ", 1)[1]
+
+
+def _bare_run(monkeypatch, lanes):
+    """耐久ワークフローの外で _Run を組む（知らせは捨てる）。"""
+    monkeypatch.setattr(durable, "set_event", lambda *_a, **_k: None)
+    return prun._Run("/m", "p1", lanes)
+
+
+def test_a_held_lane_does_not_release_its_dependents(monkeypatch):
+    """問いを保留して止まったレーン・答えを当てていない revive・waiting_only で待つループは、依存の判定で止まったと数えない（I8）。"""
+    run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb", "after": ["la"]}])
+    run.lanes["la"].update(started=True, state="stopped")
+    spawned, waiting = [], []
+    monkeypatch.setattr(prun, "step_spawn", lambda _m, _n, names: spawned.extend(names) or {n: {"started": True} for n in names})
+    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: list(waiting))
+    run.questions = [{"id": "q1", "kind": "ask", "lane": "la"}]
+    prun._spawn_ready(run, "/m")
+    run.questions, run.revive = [], ["la"]
+    prun._spawn_ready(run, "/m")
+    run.revive, waiting[:] = [], ["la"]
+    prun._spawn_ready(run, "/m")
+    assert spawned == []
+    waiting.clear()
+    prun._spawn_ready(run, "/m")
+    assert spawned == ["lb"]
+
+
+def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
+    """一時レーンが ask を送って自分のラッパーを止めたときは、「配布の途中で止まった」を問わない（6g）。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    run.current, run.launch = {"n": 1}, {"seq": 3, "spawn": "SPAWN"}
+    helper = prl.helper_name("p1", 1)
+    run.questions = [{"id": "qa", "kind": "ask", "lane": helper}]
+    prun._ask_helper(run, {helper: {"state": "stopped"}})
+    assert [q["kind"] for q in run.questions] == ["ask"]
+    run.questions = []
+    prun._ask_helper(run, {helper: {"state": "stopped"}})
+    assert [q["kind"] for q in run.questions] == ["helper"]

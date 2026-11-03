@@ -192,6 +192,22 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
     return [ln.name for ln, rec in _loop_records(main, name) if held(rec)]
 
 
+@durable.step(name="parallel.waiting-lanes")
+def step_waiting_lanes(main: str, name: str) -> list[str]:
+    return waiting_lanes(Path(main), name)
+
+
+def waiting_lanes(main: Path, name: str) -> list[str]:
+    """記録が `waiting_only` で止まり、答えをまだ当てていない待ちを持つループのレーンの名前（保留中。依存の判定で止まったと数えない）。"""
+
+    def held(rec: dict) -> bool:
+        if rec.get("status") != "stopped" or (rec.get("stop") or {}).get("condition") != "waiting_only":
+            return False
+        return any(not w.get("answer") for w in rec.get("waiting") or [])
+
+    return [ln.name for ln, rec in _loop_records(main, name) if held(rec)]
+
+
 @durable.step(name="parallel.build")
 def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None) -> dict:
     """まとめた配布の提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
@@ -346,6 +362,9 @@ class _Run:
         self.publish_questions()
         owners = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))} & self.sprint & self.stopped()
         self.revive = sorted({*self.revive, *owners})  # 止まった持ち主を起こして答えを当てるまで計画を終えない
+        if owners - set(self.wake):  # 保留中の持ち主の後に依存先を起こさないため、全レーンが止まるのを待たずに起こす 1 行を添える
+            self.wake = sorted({*self.wake, *owners})
+            self.pause("notice", lanes=[], attach=[])
         self.apply_own(q, list(msg.get("choice") or []))
 
     def apply_own(self, q: dict, choice: list[str]) -> None:
@@ -597,9 +616,22 @@ def _handle_stop(run: _Run, main: str) -> dict:
     return {**run.summary("stopped"), "not_stopped": left}
 
 
+def _asking_lanes(run: _Run) -> set[str]:
+    """答えていない問い（まとめた問いの `merged` も含む）を送ったレーンの名前。"""
+    return {x for q in run.questions for x in (q.get("lane"), *(m.get("lane") for m in q.get("merged") or [])) if x}
+
+
 def _spawn_ready(run: _Run, main: str) -> None:
-    """起動の条件がそろったレーンを起動し、結果をレーンの状態へ反映する。"""
-    ready = pp.ready_lanes(_plan_view(run), set(_started(run)), run.stopped())
+    """起動の条件がそろったレーンを起動し、結果をレーンの状態へ反映する。
+
+    保留中のレーン（答えていない問いを持つ・答えをまだ当てていない `revive`・記録が `waiting_only` で答えを待つループ）は、
+    ラッパーが止まっていても依存の判定では止まったと数えない（I8）。問いを保留して自分のラッパーを止めたレーンの後に、
+    依存先のレーンが起動して答えの後の再開と同時に動かないためである。"""
+    view, started = _plan_view(run), set(_started(run))
+    stopped = run.stopped() - _asking_lanes(run) - set(run.revive)
+    ready = pp.ready_lanes(view, started, stopped)
+    if ready and any(a in stopped for ln in ready for a in ln.after):  # 依存で起こすときだけループの記録を読む
+        ready = pp.ready_lanes(view, started, stopped - set(step_waiting_lanes(main, run.name)))
     if ready:
         for n, got in step_spawn(main, run.name, [ln.name for ln in ready]).items():
             run.lanes[n].update(got)
@@ -660,12 +692,15 @@ def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
 
 
 def _ask_helper(run: _Run, rows: dict) -> None:
-    """配布の途中で一時レーンが止まり、settle も承認ゲート 2 の依頼も届いていなければ問う（受け入れ条件 6g）。"""
+    """配布の途中で一時レーンが止まり、settle も承認ゲート 2 の依頼も、その一時レーンが送った答えていない問い（ask も含む）も
+    無ければ問う（受け入れ条件 6g）。一時レーンは問いを保留すると自分のラッパーを止めるため、問いを送って止まったものは問わない。"""
     rel = run.current
     if rel is None or not run.launch or run.helper_asked == run.launch["seq"]:
         return
     name = pr.helper_name(run.name, rel["n"])
     if (rows.get(name) or {}).get("state") != "stopped" or any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in run.questions):
+        return
+    if name in _asking_lanes(run):
         return
     run.helper_asked = run.launch["seq"]
     run.ask(

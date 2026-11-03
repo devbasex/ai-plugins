@@ -87,15 +87,15 @@ def _record_verdict(ev, verdict, decl) -> str:
     return row["id"]
 
 
-def run_request_ask(main: Path, plan: str, lane: str, payload: dict) -> tuple[int, dict]:
-    """`parallel.py request-ask` を子プロセスで打つ（上限 FORWARD_TIMEOUT 秒）。(終了コード, 統一 JSON レポート)。"""
+def run_request_ask(main: Path, plan: str, lane: str, payload: dict, timeout: float = FORWARD_TIMEOUT) -> tuple[int, dict]:
+    """`parallel.py request-ask` を子プロセスで打つ（上限 `timeout` 秒）。(終了コード, 統一 JSON レポート)。"""
     got = subprocess.run(
         [sys.executable, str(PARALLEL_PY), "request-ask", plan, "--lane", lane],
         input=json.dumps(payload, ensure_ascii=False),
         capture_output=True,
         text=True,
         cwd=str(main),
-        timeout=FORWARD_TIMEOUT,
+        timeout=timeout,
     )
     try:
         return got.returncode, json.loads(got.stdout.strip().splitlines()[-1]) if got.stdout.strip() else {}
@@ -128,17 +128,26 @@ def forward_to_organizer(ev, row_id: str) -> dict | None:
     import decl
     import parallel_files
 
-    main = decl.main_dir(ev.cwd) or Path(ev.cwd)
-    plan = parallel_files.lane_name_in_plans(main, name, os.environ.get("NDF_RELAY_DIR"))
-    if not plan:
-        return None
-    code, got = run_request_ask(main, plan, name, {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id})
-    rid = (got.get("metrics") or {}).get("id")
-    if code != 0 or not rid:
-        return None
-    from hook_lib.token_guard import deny
+    import time
 
-    return deny(hold_text(rid, plan))
+    main = decl.main_dir(ev.cwd) or Path(ev.cwd)
+    payload = {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id}
+    deadline = time.monotonic() + FORWARD_TIMEOUT
+    # 同じレーン名を持つ終わった計画を飛ばす: 送り手でない計画（終了コード 4）なら次の候補へ（全体で FORWARD_TIMEOUT 秒まで）
+    for plan in parallel_files.lane_plans_in(main, name, os.environ.get("NDF_RELAY_DIR")):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return None
+        code, got = run_request_ask(main, plan, name, payload, timeout=left)
+        if code == 4:
+            continue
+        rid = (got.get("metrics") or {}).get("id")
+        if code != 0 or not rid:
+            return None
+        from hook_lib.token_guard import deny
+
+        return deny(hold_text(rid, plan))
+    return None
 
 
 def _context(text: str) -> dict:
