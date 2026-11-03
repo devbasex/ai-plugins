@@ -1,0 +1,7 @@
+{
+  "name": "approved-txt",
+  "pattern": "approved.txt",
+  "kind": "result",
+  "place": "state-dir",
+  "skill_readers": []
+}

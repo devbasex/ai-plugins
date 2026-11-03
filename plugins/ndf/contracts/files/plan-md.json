@@ -1,0 +1,7 @@
+{
+  "name": "plan-md",
+  "pattern": "plan.md",
+  "kind": "report",
+  "place": "main",
+  "skill_readers": []
+}

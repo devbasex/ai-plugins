@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 既定ブランチ宛の Pull Request が、開発の起点ブランチから出ていることを確かめる。
+# 既定ブランチ宛の Pull Request が、開発の起点ブランチに含まれるコミットだけを出すことを確かめる。
+#
+# 通すのは head が起点ブランチのときと、head が `release/v*` で先頭のコミットが `origin/<起点>` の
+# 祖先のとき（承認したコミットに版上げを積み、先に起点へ取り込んだ本番の配布のブランチ）である。
 #
 # 配布のチャネルを分けるリポジトリでは、正式版のブランチへ直に Pull Request を出さない。
 # 既定ブランチは正式版のままにするため、`gh pr create` の宛先の既定も正式版のままになる。
@@ -9,12 +12,13 @@
 # 作る前は成功で通す。有効にする時期を人の手で合わせずに済ませるためである。
 set -uo pipefail
 
-if [ "$#" -ne 1 ]; then
-  echo "使い方: check-pr-base.sh <Pull Request の分岐元のブランチ名>" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  echo "使い方: check-pr-base.sh <Pull Request の分岐元のブランチ名> [<分岐元の先頭の SHA>]" >&2
   exit 2
 fi
 
 head_ref="$1"
+head_sha="${2:-}"
 
 dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
   .ndf/worktree.json 2>/dev/null)
@@ -36,6 +40,18 @@ done <<<"$listing"
 [ "$found" -eq 1 ] || exit 0
 
 [ "$head_ref" = "$dev_base" ] && exit 0
+
+case "$head_ref" in
+release/v*)
+  if [ -n "$head_sha" ] &&
+    GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$dev_base:refs/remotes/origin/$dev_base" 2>/dev/null &&
+    git merge-base --is-ancestor "$head_sha" "refs/remotes/origin/$dev_base" 2>/dev/null; then
+    exit 0
+  fi
+  echo "::error::${head_ref} の先頭（${head_sha:-SHA の指定なし}）が origin/${dev_base} に含まれていません。${dev_base} へ取り込んでから既定ブランチへ出してください"
+  exit 1
+  ;;
+esac
 
 echo "::error::既定ブランチ宛の Pull Request は ${dev_base} からのみです。--base ${dev_base} を付けてください（分岐元: ${head_ref}）"
 exit 1

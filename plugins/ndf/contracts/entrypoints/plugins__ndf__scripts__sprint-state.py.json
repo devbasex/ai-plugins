@@ -9,6 +9,8 @@
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
     "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
@@ -23,8 +25,11 @@
     "NDF_ESTIMATE_DIR",
     "NDF_LOOP_EXCLUDE",
     "NDF_MVV_STATE_DIR",
+    "NDF_PARALLEL_MAX_PLANS",
     "NDF_PRESENTATION_DIR",
     "NDF_RELAY_DIR",
+    "NDF_RELAY_MAX_NAMED",
+    "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
@@ -39,7 +44,9 @@
     {
       "file": "estimate.json",
       "keys": [
-        "records_dir"
+        "min_samples",
+        "records_dir",
+        "window"
       ]
     },
     {
@@ -72,11 +79,22 @@
   "stdin": "none",
   "stdout": "json",
   "writes": [
+    "answer-json",
     "applied-json",
+    "approved-txt",
+    "breakdown-md",
     "cost-estimates-json",
     "decisions-jsonl",
     "laps-md",
-    "loop-json"
+    "loop-json",
+    "plan-json",
+    "plan-md",
+    "present-json",
+    "presented-json",
+    "prs-txt",
+    "request-id-txt",
+    "request-txt",
+    "requests-json"
   ],
   "reads": [],
   "exit": {

@@ -142,6 +142,35 @@ def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
     assert out["metrics"]["removed_worktrees"] == 1 and out["metrics"]["deleted_branches"] == 1
 
 
+def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
+    """#2436 の異常系 8: 別のレーンがメインディレクトリの排他（.git/ndf-main.lock）を持つ間は、後片付けは待ってから進む。"""
+    import threading
+    import time
+
+    sys.path.insert(0, str(SCRIPTS / "lib"))
+    import locks
+
+    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
+    held, hold = threading.Event(), 3.0
+
+    def holder():
+        with locks.exclusive(repo / ".git" / "ndf-main"):
+            held.set()
+            time.sleep(hold)
+
+    t = threading.Thread(target=holder)
+    t.start()
+    held.wait(5)
+    start = time.monotonic()
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env, proc=True)
+    waited = time.monotonic() - start
+    t.join()
+    assert code == 0, err
+    assert waited >= hold - 0.5 and out["metrics"]["deleted_branches"] == 1
+
+
 def test_cleanup_from_inside_the_worktree_it_removes(repo, env, tmp_path):
     # 計画の merge のステップは作業場所（消す作業ツリー）で打つ。消した後も主ディレクトリから続ける
     write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))

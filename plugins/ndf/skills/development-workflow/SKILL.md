@@ -219,6 +219,16 @@ pace: fast
 そのときは `normal` で進める。進め方ごとのフロー・`fast` の工程の区分・条件・設定・トリガー・記録の読み方は
 [references/pace.md](references/pace.md) にある。
 
+## 並列開発（`--parallel`）
+
+**引数に `--parallel <計画名>` があれば、判定の手順へ進まず [references/parallel.md](references/parallel.md) の手順で進める。**
+このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、本番の配布を 1 本にまとめる。
+並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
+
+**引数に `--parallel-helper <計画名> <連番> <提示>` か `--parallel-helper <計画名> pending <ループ名>` があれば、このセッションは
+オーガナイザーが起こした一時レーンである。** 判定の手順へ進まず、[references/parallel.md](references/parallel.md) の「一時レーン」の手順で
+`parallel.py helper` が返す pipeline（まとめた配布の提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
+
 ## 開発ループ（`--loop`）
 
 **引数に `--loop [<ループ名>]` があれば、判定の手順へ進まず [references/loop.md](references/loop.md) の手順で進める。**
@@ -340,7 +350,7 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと alias がラッパーを挟む。
 ラッパーは conductor が出した `ndf-next` のブロックを拾い、`/exit`・プラグインの更新・次のセッションの起動を行う。
-始め方・止め方・上限は [references/relay.md](references/relay.md) にある。
+始め方・止め方・上限は [references/relay.md](references/relay.md)、利用上限でのアカウントの切り替えは [references/relay-accounts.md](references/relay-accounts.md) にある。
 **ブロックの前に次の Bash を 1 回実行し、2 行目（アナウンス）をブロックの直前へそのままコピーする。**
 1 行目が `outside` か失敗ならラッパーの外である（書き方は `context-window.md` の「新しい会話で戻す」）。
 

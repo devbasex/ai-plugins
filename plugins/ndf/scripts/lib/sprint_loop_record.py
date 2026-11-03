@@ -6,6 +6,9 @@
 承認ゲート 2 を人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
 （`refused`）の 3 つだけで、周回は進行中のまま残す。
 
+並列の計画のレーン（#2436）では、配布の依頼を送った周回を「配布待ち」、作業の途中の問いをオーガナイザーへ送った周回を
+「質問待ち」で締め、答えを待たずに次の周回へ進む。保留の周回は、周回の境で答えを読んで 1 回だけ締め直す（I1 の例外）。
+
 外の世界（gh・`upkeep.py rank`・`supervise.py`・`sprint-state.py` の別の副命令）は `Env` の関数を通して呼び、テストで
 差し替える。
 
@@ -31,9 +34,11 @@ import clock
 import handoff_doc
 import jsonio
 import locks
+import parallel_files
 import project_mvv as pm
 import repo as repo_lib
 import step_result
+from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
 TOOL = "sprint-state"
@@ -42,7 +47,6 @@ SPRINT_STATE = SCRIPTS / "sprint-state.py"
 SUPERVISE = SCRIPTS / "supervise.py"
 UPKEEP = SCRIPTS.parent / "skills" / "backlog-refinement" / "scripts" / "upkeep.py"
 HANDOFF_TEMPLATE = SCRIPTS / "data" / "handoff-template.md"
-LOOP_DIR = Path(".ndf") / "loop"
 HANDOFF_DIR = Path(".ndf") / "handoff"
 NEXT_STEP_SECTION = "次にやること"  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
@@ -55,8 +59,9 @@ EXIT_REFUSED = step_result.EXIT_VIOLATION  # 1: 断った・呼び出しの順�
 EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たった（失敗ではない）
 
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
+RELEASE_PENDING_MAX = 2  # 保留の周回の上限の既定（.ndf/pace.json の loop.release_pending_max）
 SELECTED, DROPPED = "選んだ", "外した"
-BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours")
+BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
 SLOT_FIT = "当てた"  # upkeep_rank_config.SLOT_FIT（rank の出力をそのまま読む）
 OVER_SCALE = "尺度を超える"  # upkeep_rank_estimate.OVER_SCALE
 GATE_1, GATE_2 = "関門 1", "関門 2"
@@ -139,6 +144,18 @@ class Env:
     upkeep_dir: Callable = _upkeep_state_dir
     now: Callable = field(default=lambda: clock.now_iso("utc"))
     main: Path | None = None
+    answers: Callable | None = None  # (計画名, 依頼の id の並び) → {id: {"answer", "defer"}}。None は parallel_lane.answers_of
+
+    def lane_answers(self, plan: str, ids: list[str]) -> dict:
+        """並列の計画の依頼の答えを待たずに読む（#2436）。読めなければ答えの無いものとして返す。"""
+        if self.answers is not None:
+            return self.answers(plan, ids)
+        try:
+            import parallel_lane
+
+            return parallel_lane.answers_of(self.main_dir(), plan, ids)
+        except Exception:  # noqa: BLE001 — 耐久の記録が無い・読めないときは答えがまだ無いものとして続ける
+            return {i: {"answer": None, "defer": None} for i in ids}
 
     def __post_init__(self) -> None:
         # gh は cwd の git remote から対象リポジトリを決める。既定の入口は root で動かし、--root の別リポジトリの
@@ -186,10 +203,11 @@ def check_laps(rec: dict) -> None:
 
 
 def write_record(env: Env, rec: dict, before: dict | None = None) -> None:
-    """記録を書く。終わった周回の行を書き換える書き込みは拒む（I1）。`laps.md` も描き直す。"""
+    """記録を書く。終わった周回の行を書き換える書き込みは拒む（I1）。`laps.md` も描き直す。
+    保留の周回（配布待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
     check_laps(rec)
     if before is not None:
-        old = {lap["n"]: lap for lap in before.get("laps", []) if lap.get("outcome") != IN_PROGRESS}
+        old = {lap["n"]: lap for lap in before.get("laps", []) if lap.get("outcome") not in (IN_PROGRESS, *PENDING)}
         new = {lap["n"]: lap for lap in rec.get("laps", [])}
         changed = [n for n, lap in old.items() if new.get(n) != lap]
         if changed:
@@ -219,6 +237,16 @@ def current_lap(rec: dict) -> dict | None:
     return next((lap for lap in rec.get("laps", []) if lap.get("outcome") == IN_PROGRESS), None)
 
 
+def pending_laps(rec: dict) -> list[dict]:
+    """保留の周回（配布待ち・質問待ち）を古い順に。"""
+    return [lap for lap in rec.get("laps", []) if lap.get("outcome") in PENDING]
+
+
+def pending_issues(rec: dict) -> set[int]:
+    """保留の周回の課題（締め直すまで選定から外す）。"""
+    return {n for lap in pending_laps(rec) for n in (lap.get("issues_kept") or selected_issues(lap))}
+
+
 # ---------------------------------------------------------------- 消費と止まる条件
 
 
@@ -237,14 +265,20 @@ def active_seconds(rec: dict) -> float:
     total = 0.0
     stops = [(_loop_time(s.get("at")), _loop_time(s.get("resumed_at"))) for s in rec.get("stops", [])]
     for lap in rec.get("laps", []):
-        s, e = _loop_time(lap.get("started_at")), _loop_time(lap.get("ended_at"))
-        if not s or not e:
-            continue
-        span = max(0.0, (e - s).total_seconds())
-        for a, b in stops:
-            if a and b:
-                span -= _overlap(s, e, a, b)
-        total += max(0.0, span)
+        # 保留の周回は、締めるまでの区間（held_at まで）と、答えの後に残りを流した区間（release.finish）を足す。
+        # 周回の境で答えを待つ時間は数えない（#2436）
+        spans = [(lap.get("started_at"), lap.get("held_at") or lap.get("ended_at"))]
+        if lap.get("held_at"):
+            fin = (lap.get("release") or {}).get("finish") or (lap.get("question") or {}).get("finish") or {}
+            spans.append((fin.get("started_at"), fin.get("ended_at")))
+        for s, e in ((_loop_time(a), _loop_time(b)) for a, b in spans):
+            if not s or not e:
+                continue
+            span = max(0.0, (e - s).total_seconds())
+            for a, b in stops:
+                if a and b:
+                    span -= _overlap(s, e, a, b)
+            total += max(0.0, span)
     return total
 
 
@@ -270,7 +304,7 @@ def failure_streak(rec: dict) -> tuple[dict | None, int]:
             break
         if lap.get("outcome") == DONE:
             break
-        if lap.get("outcome") != FAILED:
+        if lap.get("outcome") != FAILED:  # 保留の周回（配布待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
             continue
         k = lap.get("failure")
         if key is None:
@@ -308,6 +342,24 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     return None
 
 
+IMMEDIATE_STOPS = ("user_stop", "mvv_changed")  # 保留の周回があっても待たずに止まる条件（#2436 の境の 1）
+
+
+def waiting_only(rec: dict, why: str) -> dict:
+    """止まる理由 `waiting_only`（手元の作業が待ちだけ）。答えが届くとオーガナイザーが起こし、起こされた境で続きを流す。"""
+    laps = [{"lap": lap["n"], "outcome": lap["outcome"]} for lap in pending_laps(rec)]
+    asked = [w["number"] for w in rec.get("waiting", []) if w.get("request") and not w.get("answer")]
+    return {"condition": "waiting_only", "values": {"why": why, "pending": laps, "waiting": asked}}
+
+
+def held_stop(rec: dict, stop: dict | None) -> dict | None:
+    """止まる条件（same_failure・予算）に当たっても、答えの無い保留の周回があれば先に waiting_only で止まる（境の 8）。
+    保留の周回のまとめを流さないまま止まると、課題が閉じずに残るためである。"""
+    if stop and stop["condition"] not in IMMEDIATE_STOPS and pending_laps(rec):
+        return waiting_only(rec, stop["condition"])
+    return stop
+
+
 def resume_command(rec: dict) -> str:
     """再開のコマンド（ndf-next の中身。名前を必ず含め、終わりの条件の節を末尾に足す。決定 12 の B）。"""
     head = "/goal " if rec.get("goal", True) else ""
@@ -331,13 +383,9 @@ def stopped_result(env: Env, rec: dict, summary: str, extra_metrics: dict | None
     resume = resume_command(rec)
     update_handoff(env, rec, f"止まった（{stop['condition']}）。理由が解けたら再開のコマンドで続ける", resume, resume)
     items = [{"condition": stop["condition"], "values": stop["values"], "resume": resume}]
-    metrics = {
-        "status": "stopped",
-        "stop": stop,
-        "stop_line": stop_line(rec, stop["condition"]),
-        "consumed": consumed(rec),
-        **(extra_metrics or {}),
-    }
+    metrics = {"status": "stopped", "stop": stop, "stop_line": stop_line(rec, stop["condition"]), "consumed": consumed(rec)}
+    # 待ちだけで止まったレーンは、自分のラッパーを止める 1 行（stop_self）を打って終える（判断 fca6fe464619 の (a)）
+    metrics.update(extra_metrics or {}, stop_self=parallel_files.stop_self(env.main_dir()) if stop["condition"] == "waiting_only" else None)
     return {**step_result.result(TOOL, "stopped", summary, items, metrics), "exit": EXIT_STOPPED}
 
 

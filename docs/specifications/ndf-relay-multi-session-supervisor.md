@@ -59,6 +59,7 @@ tmux が PATH に無い環境では、2 本目は `ndf-relay: tmux が PATH に�
 | 依頼はファイルの受付箱で渡し、登録簿を書くのは統括役だけにする。Unix ドメインソケットは使わない | 名前の重複と上限の判定が入口ごとに分かれない。統括役が居ない間に置かれた依頼が残り、次の統括役が処理できる |
 | 同時に動かす数の上限は環境変数 `NDF_RELAY_MAX_NAMED`（既定 3）で受け、`.ndf/` に置かない | 上限が守るのは同じコンテナ・同じアカウントの資源で、リポジトリごとの値ではない。`NDF_RELAY_MAX_STARTS` と同じく統括役の環境から 1 つに決まる |
 | 上限は統括役・名前つき・名前の無い今のラッパーを合わせて数え、起動した直後でロックの前のものも数える | 1 回の応答に上限を超える数の起動のブロックを置いても、先に起動したものがロックを取る前に次を通さない |
+| 並列の計画のオーガナイザーの印（役割 `organizer`）を持つ動いているラッパーは 1 本だけ数から外し、一時レーン（役割 `helper`）は数から外して同時に 1 本までに限る | オーガナイザーが上限の 1 本を使うと、既定の 3 でレーンを 3 本起動できない。外す経路を 1 本ずつに限り、印を置けば上限を越えられる道を増やさない |
 | 起動のブロックは情報文字列 `ndf-spawn <名前>` の囲みにし、`ndf-next` と同じ包み（`lib/md.py`）で拾う | 拾う規則が 1 つに残り、conductor の書き方も分かれない。区間を終えないので `next.json` を書かず、Stop hook の 5 秒の上限の中で依頼を置くだけにする |
 | 承認待ち通知は各ラッパーの待ち通知が名前を付けて出し、統括役は見回さない | 統括役が落ちて次の `claude` が来るまでの間も通知が出る。統括役が見回すと今の通知と 2 重になる。端末の結び付きは見ずに常に付ける（hook の中で tmux を呼ばない） |
 | 一覧の状態は作業ディレクトリの今のファイルから導き、語は Factory の `awaiting_approval` に揃える | ラッパーの状態機械に書き込みを足さずに済み、kill された後も正しく止まったと出る。Factory の実行の状態と同じ名前になる |
@@ -78,7 +79,7 @@ tmux が PATH に無い環境では、2 本目は `ndf-relay: tmux が PATH に�
 
 - **同じコンテナで統括役は高々 1 つである。** `hub.lock` の排他を持つプロセスだけが統括役で、取れなかった `run` は依頼する側になる
 - **動いている名前つきのラッパーの名前は重ならない。** tmux のセッションが在る名前も取られているものとして扱う
-- **動いているラッパーの数は上限以下である。** 数えるのは「`relay.lock` が取られている作業ディレクトリ（名前の無いものを含む）」と「登録簿の行のうち、tmux のセッションが在るのに同じ名前の作業ディレクトリがまだ `relay.lock` を取っていないもの」の和で、重複は名前で除く（`hub.py` の `live`）
+- **動いているラッパーの数は上限以下である。** 数えるのは「`relay.lock` が取られている作業ディレクトリ（名前の無いものを含む）」と「登録簿の行のうち、tmux のセッションが在るのに同じ名前の作業ディレクトリがまだ `relay.lock` を取っていないもの」の和で、重複は名前で除く（`hub.py` の `live`）。この和から、役割 `organizer` のものを 1 本だけと、役割 `helper` のものすべてを外す。役割 `helper` の動いているラッパーは 1 本以下である
 - **登録簿（`registry.json`）を書くのは統括役だけである。** 頼む側（`hub_client.py`）は受付箱へ依頼を置くだけにする
 - **統括役は名前つきのラッパーの区間の切り替え・`ndf-next` の拾い方・アカウントの選び方に触れない。** tmux の中で動くのは今の `Relay` である
 - **統括役が終わっても名前つきのラッパーは止まらない。** window の親は tmux のサーバで、統括役の終了は届かない
@@ -213,8 +214,9 @@ stateDiagram-v2
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
 | `run`（2 本目） | `[claude の引数 ...]`。名前は `NDF_RELAY_NAME` | 統括役が起動したら `attach-session` へ exec し、その終了コード。断られたら結果の `metrics.exit_code`（`bad-name`・`name-taken`・`limit`・`no-tmux` は 3、`tmux-failed` は 1）。tmux が無い・統括役が答えないときは前景の起動になり、1 本のラッパーと同じ | 断り: `ndf-relay: 起動しない（<summary>）`。tmux が無い: `ndf-relay: tmux が PATH に無いため統括しない。…`。答えない: `ndf-relay: 統括役が <秒> 秒答えないため、…` |
-| `spawn` | `--name <名前> [--json] -- <最初の入力>` | 0: 起動した / 2: `--name` が無い（使い方を出す）/ 3: 名前の形が違う（統括役に頼まずに断る）・名前が重なる・上限・統括役の側で tmux が無い / 1: 統括役が居ない・答えない（`no-hub`）・tmux のセッションを作れない | 結果（`tool: relay-spawn`）。成功の `summary` は `<名前> を起動した（relay.py attach <名前> で結び付ける）` |
+| `spawn` | `--name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | 0: 起動した / 2: `--name` が無い・`--role` が `helper` でない・`--role` に `--plan` が無い（使い方を出す）/ 3: 名前の形が違う（統括役に頼まずに断る）・名前が重なる・上限（`--role helper` は上限を見ず、動いている `helper` があれば断る）・統括役の側で tmux が無い / 1: 統括役が居ない・答えない（`no-hub`）・tmux のセッションを作れない | 結果（`tool: relay-spawn`）。成功の `summary` は `<名前> を起動した（relay.py attach <名前> で結び付ける）` |
 | `ls` | `[--json]` | 0 / 2: 状態ディレクトリを読めない | `--json` は 1 行の JSON（`tool: relay-ls`・`status: ok`・`summary`・`items`・`metrics`）。無ければ見出しつきの表（列: 名前・状態・承認待ち・区間・費用・時刻・アカウント・結び付き・統括役。空は `-`、真偽は `yes` / `no`） |
+| `role` | `organizer\|helper --plan <計画名>` / `--clear` | 0: 作業ディレクトリ（`NDF_RELAY_DIR`）へ役割のファイル `role.json`（`role`・`plan`・`at`）を書いた・消した / 2: 役割か `--plan` が無い / 1: ラッパーの外（`NDF_RELAY_DIR` が無い） | 1 行の JSON（`tool: relay-role`） |
 | `attach` | `<名前>` | 名前の tmux のセッションへ `attach-session` で exec する / 3: セッションが無い / 2: 名前が 1 つでない・標準入力か標準出力が端末でない | 失敗の理由を `relay.py:` の 1 行で標準エラーへ |
 | `stop` | `[<名前>] [--json]` | 名前なし: 1 本のラッパーの仕様のまま。名前あり: 0: 止めた / 3: 動いているものも tmux のセッションも無い（`not-found`） | 名前あり: 結果（`tool: relay-stop`） |
 | `restart` | `<名前> [--json]` | 0: 起動し直した / 2: 名前が 1 つでない / 3: 登録簿の行も動いているものも無い（`not-found`）・統括役自身（`hub_self`。止めない）・起動の判定で断られた / 1: 統括役が居ない・答えない・tmux のセッションを作れない | 結果（`tool: relay-restart`） |
@@ -245,8 +247,9 @@ stateDiagram-v2
 | `ndf_version` | str か null | 最後の start の行の `plugin_version` |
 | `attached` | bool か null | 端末が結び付いているか。tmux のセッションが無ければ null |
 | `hub` | bool | 統括役を兼ねるラッパー（動いていて、作業ディレクトリが `hub.json` の `dir`）か |
+| `role` | str か null | 役割（`organizer` / `helper`）。作業ディレクトリの `role.json`、無ければ登録簿の行の `role` |
 
-`metrics` は `running`・`awaiting_approval`・`stopped` の数と `limit`（`NDF_RELAY_MAX_NAMED` の値）を持つ。
+`metrics` は `running`・`awaiting_approval`・`stopped` の数と `limit`（`NDF_RELAY_MAX_NAMED` の値）、`hub`（統括役が動いているか）・`tmux`（tmux が PATH にあるか）を持つ。
 
 ## データ・設定
 
@@ -258,8 +261,8 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | `hub.lock` | 統括役の排他 | 統括役（`claim`） | —（OS がプロセスの終了で放す） |
 | `hub.json` | `pid`・`dir`（統括役のラッパーの作業ディレクトリ）・`claimed_at` | 統括役（`start`） | — |
-| `registry.json` | `version`（1）と `entries.<名前>`（`session`・`cwd`・`args`・`created_at`・`by`） | 統括役だけ | —（名前ごとの行を上書きする。止まった行は同じ名前で起動し直すまで残る） |
-| `requests/<id>.json` | `kind`（`spawn` / `restart`）・`name`（null は自動で付ける）・`cwd`・`args`・`by`・`at`。環境変数は載せない | 頼む側（0600） | 統括役が `<id>.taken` へ `rename` して受け取った時点。待ちを切った頼む側 |
+| `registry.json` | `version`（1）と `entries.<名前>`（`session`・`cwd`・`args`・`created_at`・`by`。`spawn --role helper` で起動した行は `role`・`plan` も持つ） | 統括役だけ | —（名前ごとの行を上書きする。止まった行は同じ名前で起動し直すまで残る） |
+| `requests/<id>.json` | `kind`（`spawn` / `restart`）・`name`（null は自動で付ける）・`cwd`・`args`・`by`・`at`、`spawn --role helper` なら `role`・`plan`。環境変数は載せない | 頼む側（0600） | 統括役が `<id>.taken` へ `rename` して受け取った時点。待ちを切った頼む側 |
 | `results/<id>.json` | 結果（上の「結果の形」） | 統括役 | 頼む側が読んで消す。読まれずに 10 分を過ぎたものは次の統括役が消す |
 | `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed`）・`name`・`reason` を 1 行ずつ | 統括役・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
 
@@ -354,5 +357,5 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — 1 本のラッパーの入出力と区間の切り替え
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — 導入・`/ndf:restart`
 - [#1587](https://github.com/devbasex/ai-plugins/issues/1587) — ラッパーの入れ替え（入れ替えた後に統括役を取り直す）
-- [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のランナー。起動・一覧・停止の名前と形を揃える相手
+- [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のマシンで動くランナー。起動・一覧・停止の名前と形を揃える相手
 - [ndf-factory-runs-and-runner.md](ndf-factory-runs-and-runner.md) — Factory の実行ジョブと実行の枠

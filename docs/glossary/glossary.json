@@ -3533,7 +3533,7 @@
     {
       "term": "比べた先端",
       "context": "ndf-release",
-      "meaning": "本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである",
+      "meaning": "本番の配布が承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（本番の配布では `release/v<版>`、昇格の経路ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
@@ -5182,25 +5182,49 @@
       "term": "並列の計画",
       "context": "ndf-workflow",
       "meaning": "1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ",
-      "pending_source": "issues/issue-2436-requirements.md"
+      "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md"
     },
     {
       "term": "レーン",
       "context": "ndf-workflow",
       "meaning": "並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ",
-      "pending_source": "issues/issue-2436-requirements.md"
+      "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md"
     },
     {
       "term": "オーガナイザー",
       "context": "ndf-workflow",
       "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
-      "pending_source": "issues/issue-2436-requirements.md"
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "配布の依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件の依頼",
-      "pending_source": "issues/issue-2436-requirements.md"
+      "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+    },
+    {
+      "term": "一時レーン",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+    },
+    {
+      "term": "保留の周回",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（配布待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
+      "source": "plugins/ndf/skills/development-workflow/references/loop.md"
+    },
+    {
+      "term": "配布待ち",
+      "context": "ndf-workflow",
+      "meaning": "配布の依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない",
+      "source": "plugins/ndf/skills/development-workflow/references/loop.md"
+    },
+    {
+      "term": "質問待ち",
+      "context": "ndf-workflow",
+      "meaning": "作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めた周回の結果",
+      "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
       "term": "再起動の方針",

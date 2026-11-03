@@ -249,9 +249,29 @@ def test_ls_json_lists_state_from_files(dirs, capsys):
     assert rows["lflow"]["state"] == "awaiting_approval" and rows["lflow"]["awaiting_approval"] is True
     assert rows["lflow"]["sections"] == 3
     for it in res["items"]:
-        assert set(it) == {"name", "state", "awaiting_approval", "sections", "cost_usd", "at", "account", "ndf_version", "attached", "hub"}
+        assert set(it) == {
+            "name",
+            "state",
+            "awaiting_approval",
+            "sections",
+            "cost_usd",
+            "at",
+            "account",
+            "ndf_version",
+            "attached",
+            "hub",
+            "role",
+        }
         assert it["cost_usd"] is None and "最初" not in json.dumps(it, ensure_ascii=False)
-    assert res["metrics"] == {"running": 2, "awaiting_approval": 1, "stopped": 0, "limit": 3, "pinned_account": None}
+    assert res["metrics"] == {
+        "running": 2,
+        "awaiting_approval": 1,
+        "stopped": 0,
+        "limit": 3,
+        "hub": False,
+        "tmux": False,
+        "pinned_account": None,
+    }
     assert hc.cmd_ls([]) == 0
     table = capsys.readouterr().out.splitlines()
     assert table[0].split()[0] == "名前" and len(table) == 4
@@ -481,3 +501,156 @@ def test_no_tmux_runs_second_in_foreground(tmp_path):
         for t in (hub, second):
             if t is not None:
                 t.close()
+
+
+# ---------------------------------------------------------------- Hub.process の分岐（現状固定）
+
+
+@pytest.fixture()
+def launched(state, monkeypatch):
+    """tmux があるものとし、起動の呼び出しを記録する（起動は成功する）。"""
+    seen = []
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hb.tmux, "sessions", lambda: {})
+    monkeypatch.setattr(
+        hb.tmux, "new_session", lambda name, cwd, argv, env: seen.append({"name": name, "cwd": cwd, "argv": argv, "env": env})
+    )
+    hb.ensure_dirs()
+    return seen
+
+
+def _write_registry(entries):
+    pathlib.Path(hb.hub_path(hb.REGISTRY)).write_text(json.dumps({"version": 1, "entries": entries}))
+
+
+def test_process_unknown_kind_is_bad_request(launched):
+    res = hb.Hub(None).process({"kind": "nope", "name": "a"})
+    assert res["tool"] == "relay-hub" and res["status"] == "stopped"
+    assert res["items"] == [{"name": "a", "result": "bad-request"}] and res["metrics"] == {"exit_code": 2}
+    assert "知らない依頼の種類: nope" in res["summary"]
+    assert launched == []
+
+
+def test_process_non_dict_request_shape_is_bad_request(launched):
+    res = hb.Hub(None).process({})
+    assert res["items"] == [{"name": None, "result": "bad-request"}] and res["metrics"]["exit_code"] == 2
+
+
+@pytest.mark.parametrize("name", ["missing", None, 5])
+def test_process_restart_of_unknown_name_is_not_found(launched, name):
+    res = hb.Hub(None).process({"kind": "restart", "name": name})
+    assert res["tool"] == "relay-restart" and res["status"] == "stopped"
+    assert res["items"][0]["result"] == hb.NOT_FOUND and res["metrics"]["exit_code"] == 3
+    assert f"その名前は無い: {name}" in res["summary"]
+    assert launched == []
+
+
+def test_process_spawn_by_terminal_keeps_args_and_cwd(launched, tmp_path):
+    res = hb.Hub(None).process(
+        {"kind": "spawn", "name": "a", "cwd": str(tmp_path), "args": ["--model", "x", 3, "--", "y"], "by": "terminal"}
+    )
+    assert res["tool"] == "relay-spawn" and res["status"] == "ok" and res["metrics"]["exit_code"] == 0
+    assert res["items"] == [{"name": "a", "result": "started"}]
+    (call,) = launched
+    assert call["cwd"] == str(tmp_path)
+    assert call["argv"][-5:] == ["run", "--model", "x", "--", "y"]
+    assert call["env"] == {"NDF_RELAY_NAME": "a", "NDF_RELAY_SPAWNED": "1"}
+    row = hb.read_registry()["a"]
+    assert row["args"] == ["--model", "x", "--", "y"] and row["by"] == "terminal" and row["cwd"] == str(tmp_path)
+    assert "role" not in row and "plan" not in row
+
+
+def test_process_spawn_joins_args_into_one_prompt(launched):
+    hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": "/", "args": ["--", "x", "y"], "by": "spawn"})
+    hb.Hub(None).process({"kind": "spawn", "name": "b", "cwd": "/", "args": ["x", "y"], "by": "spawn"})
+    assert [c["argv"][-2:] for c in launched] == [["--", "x y"], ["--", "x y"]]
+
+
+def test_process_spawn_missing_cwd_falls_back_to_home(launched, tmp_path):
+    hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": str(tmp_path / "nope"), "args": [], "by": "spawn"})
+    hb.Hub(None).process({"kind": "spawn", "name": "b", "cwd": 7, "by": "spawn"})
+    assert [c["cwd"] for c in launched] == [os.path.expanduser("~")] * 2
+    assert launched[0]["argv"][-1] == "run"
+
+
+def test_process_spawn_without_name_takes_auto_name(launched, dirs):
+    dirs("front", name="t2")
+    res = hb.Hub(None).process({"kind": "spawn", "cwd": "/", "args": [], "by": "terminal"})
+    assert res["items"] == [{"name": "t3", "result": "started"}]
+    assert launched[0]["name"] == "t3"
+
+
+def test_process_spawn_helper_role_and_plan(launched):
+    res = hb.Hub(None).process({"kind": "spawn", "name": "h", "cwd": "/", "args": [], "by": "spawn", "role": "helper", "plan": "p1"})
+    assert res["status"] == "ok"
+    assert launched[0]["env"] == {"NDF_RELAY_NAME": "h", "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": "p1"}
+    row = hb.read_registry()["h"]
+    assert row["role"] == "helper" and row["plan"] == "p1"
+
+
+def test_process_spawn_other_role_is_ignored(launched):
+    hb.Hub(None).process({"kind": "spawn", "name": "o", "cwd": "/", "args": [], "by": "spawn", "role": "organizer", "plan": "p1"})
+    assert launched[0]["env"] == {"NDF_RELAY_NAME": "o", "NDF_RELAY_SPAWNED": "1"}
+    assert "role" not in hb.read_registry()["o"]
+
+
+def test_process_spawn_refusal_from_judge_does_not_launch(launched):
+    res = hb.Hub(None).process({"kind": "spawn", "name": "Bad.Name", "cwd": "/", "args": [], "by": "spawn"})
+    assert res["status"] == "stopped" and res["items"][0]["result"] == hb.BAD_NAME and res["metrics"]["exit_code"] == 3
+    assert launched == [] and not os.path.exists(hb.hub_path(hb.REGISTRY))
+
+
+def test_process_tmux_failure_is_refused_and_registry_untouched(launched, monkeypatch):
+    monkeypatch.setattr(hb.tmux, "new_session", lambda name, cwd, argv, env: "duplicate session")
+    res = hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": "/", "args": [], "by": "spawn"})
+    assert res["status"] == "stopped" and res["items"][0]["result"] == hb.TMUX_FAILED
+    assert res["metrics"]["exit_code"] == 1 and res["summary"] == "duplicate session"
+    assert not os.path.exists(hb.hub_path(hb.REGISTRY))
+
+
+def test_process_restart_uses_registry_row(launched, tmp_path):
+    row = {"session": "a", "cwd": str(tmp_path), "args": ["--", "最初"], "created_at": "x", "by": "spawn"}
+    _write_registry({"a": row})
+    res = hb.Hub(None).process({"kind": "restart", "name": "a", "by": "restart"})
+    assert res["tool"] == "relay-restart" and res["status"] == "ok" and res["items"] == [{"name": "a", "result": "started"}]
+    (call,) = launched
+    assert call["cwd"] == str(tmp_path) and call["argv"][-2:] == ["--", "最初"]
+    assert call["env"] == {"NDF_RELAY_NAME": "a", "NDF_RELAY_SPAWNED": "1"}
+    assert hb.read_registry()["a"]["by"] == "restart"
+    log = [json.loads(x) for x in pathlib.Path(hb.hub_path(hb.HUB_LOG)).read_text().splitlines()]
+    assert log[-1]["event"] == "restarted" and log[-1]["name"] == "a"
+
+
+def test_process_restart_keeps_helper_role_and_registry_plan(launched, tmp_path):
+    row = {"session": "h", "cwd": str(tmp_path), "args": [], "created_at": "x", "by": "spawn", "role": "helper", "plan": "p9"}
+    _write_registry({"h": row})
+    hb.Hub(None).process({"kind": "restart", "name": "h", "by": "restart"})
+    assert launched[0]["env"]["NDF_RELAY_ROLE"] == "helper" and launched[0]["env"]["NDF_RELAY_PLAN"] == "p9"
+    # 依頼の plan は登録簿の plan より先に使う
+    hb.Hub(None).process({"kind": "restart", "name": "h", "by": "restart", "plan": "p10"})
+    assert launched[1]["env"]["NDF_RELAY_PLAN"] == "p10"
+    assert hb.read_registry()["h"]["plan"] == "p10"
+
+
+def test_process_restart_of_running_name_is_taken(launched, dirs, tmp_path):
+    dirs("d1", name="a")
+    _write_registry({"a": {"session": "a", "cwd": str(tmp_path), "args": [], "created_at": "x", "by": "spawn"}})
+    res = hb.Hub(None).process({"kind": "restart", "name": "a"})
+    assert res["items"][0]["result"] == hb.NAME_TAKEN and launched == []
+
+
+def test_write_name_keeps_the_spawned_role(tmp_path, monkeypatch):
+    """`spawn --role helper --plan <計画名>` で起動したラッパーは、役割のファイルを作業ディレクトリへ書く（#2436）。"""
+    import parallel_files
+
+    monkeypatch.setenv("NDF_RELAY_NAME", "ph-p1-1")
+    monkeypatch.setenv("NDF_RELAY_ROLE", "helper")
+    monkeypatch.setenv("NDF_RELAY_PLAN", "p1")
+    hc.write_name(str(tmp_path), None)
+    assert hb.read_role(str(tmp_path))["plan"] == "p1"
+    assert parallel_files.helper_plan_of(str(tmp_path)) == "p1"
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.delenv("NDF_RELAY_ROLE")
+    hc.write_name(str(other), None)
+    assert hb.read_role(str(other)) is None
