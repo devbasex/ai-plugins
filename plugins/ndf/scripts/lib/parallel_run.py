@@ -233,7 +233,14 @@ class _Run:
             self.stop = True
             self.releases.append({"n": n, "state": "failed", "reason": built["error"]})
             return
-        rel = {"n": n, "state": "presented", "version": built["version"], "dirs": [built["dir"]], "presented": [], "requests": [r["id"] for r in self.pending]}
+        rel = {
+            "n": n,
+            "state": "presented",
+            "version": built["version"],
+            "dirs": [built["dir"]],
+            "presented": [],
+            "requests": [r["id"] for r in self.pending],
+        }
         self.releases.append(rel)
         self.current = rel
         self.emit_release(rel, 1, represent=False)
@@ -273,7 +280,9 @@ class _Run:
             k = 2 if take == "new" else 1
         got = step_presented(rel["dirs"][k - 1])
         rel.update(state="confirmed", k=k, sha=got.get("sha"), prs=got.get("prs") or [])
-        self.pause("confirmed", n=rel["n"], k=k, plan=str(Path(rel["dirs"][k - 1]) / "release.json"), spawn=helper_spawn(self.name, rel["n"], k))
+        self.pause(
+            "confirmed", n=rel["n"], k=k, plan=str(Path(rel["dirs"][k - 1]) / "release.json"), spawn=helper_spawn(self.name, rel["n"], k)
+        )
 
     def settle(self, rel: dict, msg: dict) -> None:
         result = msg.get("result")
@@ -283,7 +292,15 @@ class _Run:
         hit = set(pr.answerable(self.pending, rel["prs"]))
         if result == "released":
             rel.update(state="released", version=msg.get("version") or rel.get("version"))
-            durable.set_event(f"range-{rel['n']}", {"sha": rel.get("sha"), "version": rel["version"], "prs": rel["prs"], "lanes": sorted({r["lane"] for r in self.pending if r["id"] in hit})})
+            durable.set_event(
+                f"range-{rel['n']}",
+                {
+                    "sha": rel.get("sha"),
+                    "version": rel["version"],
+                    "prs": rel["prs"],
+                    "lanes": sorted({r["lane"] for r in self.pending if r["id"] in hit}),
+                },
+            )
             for r in [r for r in self.pending if r["id"] in hit]:
                 self.answer(r["id"], "released", rel["version"], rel["n"])
         else:
@@ -298,7 +315,9 @@ class _Run:
 
 def helper_spawn(name: str, n: int, k: int) -> str:
     """一時レーンを起こす 1 行（`metrics.spawn`）。"""
-    first = f"/goal /ndf:development-workflow --parallel-helper {name} {n} {k} -- 終わり: [ndf-parallel] helper-done {name} の行を出したとき"
+    first = (
+        f"/goal /ndf:development-workflow --parallel-helper {name} {n} {k} -- 終わり: [ndf-parallel] helper-done {name} の行を出したとき"
+    )
     return f"python3 {RELAY} spawn --name {pr.helper_name(name, n)} --role helper --plan {name} --json -- '{first}'"
 
 
@@ -347,7 +366,10 @@ def parallel_workflow(main: str, name: str) -> dict:
 
 def _plan_view(run: _Run) -> pp.ParallelPlan:
     """起動の判定に使う計画の形（耐久ワークフローの入力から作る。ファイルを読まない）。"""
-    lanes = [{"name": n, "input": {"kind": "loop", "loop": n, "args": ["--milestones", n]}, "plans": 1, "touches": [], "after": run.after[n]} for n in run.order]
+    lanes = [
+        {"name": n, "input": {"kind": "loop", "loop": n, "args": ["--milestones", n]}, "plans": 1, "touches": [], "after": run.after[n]}
+        for n in run.order
+    ]
     return pp.ParallelPlan.model_construct(version=1, name=run.name, rules=[], lanes=[pp.Lane.model_construct(**ln) for ln in lanes])
 
 

@@ -117,7 +117,11 @@ def fast_sprint_plans(a) -> list[dict]:
         return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": first},
-        {"name": "本番", "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod")), "then_of": first},
+        {
+            "name": "本番",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod")),
+            "then_of": first,
+        },
     ]
     return waves
 
@@ -153,7 +157,11 @@ def auto_sprint_plans(a) -> list[dict]:
     prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（関門 2 の判定のコメントの宛先）
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
-        {"name": "本番", "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs), prs), "then_of": first},
+        {
+            "name": "本番",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs), prs),
+            "then_of": first,
+        },
     ]
 
 

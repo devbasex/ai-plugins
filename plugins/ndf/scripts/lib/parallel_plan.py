@@ -222,7 +222,15 @@ def check_data(data: object) -> tuple[Optional[ParallelPlan], list[dict], dict]:
             items.append({"level": "error", "rule": rule, "at": loc or None, "message": e["msg"]})
     if plan is not None:
         for ov in touch_overlaps(plan):
-            items.append({"level": "warning", "rule": "I4", "at": "lanes", "message": f"触る場所が重なる: {'・'.join(ov['lanes'])}（{', '.join(ov['touches'])}）", **ov})
+            items.append(
+                {
+                    "level": "warning",
+                    "rule": "I4",
+                    "at": "lanes",
+                    "message": f"触る場所が重なる: {'・'.join(ov['lanes'])}（{', '.join(ov['touches'])}）",
+                    **ov,
+                }
+            )
     metrics = {
         "errors": sum(1 for it in items if it["level"] == "error"),
         "warnings": sum(1 for it in items if it["level"] == "warning"),
@@ -252,7 +260,9 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     lines = [f"# 並列の計画 {plan.name}", "", "`plan.json` から描画した。正本は `plan.json` である。", "", "## レーン", ""]
     lines += ["| レーン | 最初の入力 | プランの本数 | 触る場所 | 依存先 | 引継ぎ文書 |", "| --- | --- | --- | --- | --- | --- |"]
     for ln in plan.lanes:
-        first = f"ループ `{ln.input.loop}`" if isinstance(ln.input, LoopInput) else "スプリント " + " ".join(f"#{n}" for n in ln.input.issues)
+        first = (
+            f"ループ `{ln.input.loop}`" if isinstance(ln.input, LoopInput) else "スプリント " + " ".join(f"#{n}" for n in ln.input.issues)
+        )
         if ln.input.args:
             first += " `" + " ".join(ln.input.args) + "`"
         lines.append(

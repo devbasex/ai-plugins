@@ -247,9 +247,7 @@ def _iso(epoch: float | None) -> str | None:
     return _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _ls_item(
-    name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None, role: str | None = None
-) -> dict:
+def _ls_item(name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None, role: str | None = None) -> dict:
     running = bool(w and w.running) or pending
     waiting = bool(w and w.running and w.question)
     state = "awaiting_approval" if waiting else "running" if running else "stopped"

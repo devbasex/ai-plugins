@@ -124,7 +124,14 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
     # 先頭が同じなら確定（I14）
     durable.send_to(pl.KIND, pl.identity(main, "p1"), pl.workflow_id("p1"), {"n": 1, "phase": "confirm"}, "resume", "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
-    durable.send_to(pl.KIND, pl.identity(main, "p1"), pl.workflow_id("p1"), {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "resume", "s1")
+    durable.send_to(
+        pl.KIND,
+        pl.identity(main, "p1"),
+        pl.workflow_id("p1"),
+        {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"},
+        "resume",
+        "s1",
+    )
     ans, _ = until(lambda: pl.read_answer(main, "p1", rid)[0] and pl.read_answer(main, "p1", rid))
     assert ans["result"] == "released" and ans["version"] == "1.2.3"
     assert event(main, "p1", "range-1")["prs"] == [10, 11]

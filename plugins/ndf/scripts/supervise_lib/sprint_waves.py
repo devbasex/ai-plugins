@@ -13,7 +13,17 @@ import legacy_names
 from gate_answer import GATE_1
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PARALLEL_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
+from supervise_lib.paths import (
+    DESIGN_READY,
+    GLOSSARY_PY,
+    MVV_PY,
+    PARALLEL_PY,
+    PUSH_DESIGN,
+    SELF,
+    SPEC_COPY_PY,
+    SYNC_DESIGN_BODY,
+    WORKTREE_SETUP,
+)
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.plan import sprint_state_path
@@ -522,9 +532,7 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
             "作業場所": repo,
             "規則": "",
             "並列の計画": plan_name,
-            "steps": [
-                {"id": "parallel-request", "type": "run", "stage": "配布", "timeout": 300, "cmd": cmd, "next": "end"}
-            ],
+            "steps": [{"id": "parallel-request", "type": "run", "stage": "配布", "timeout": 300, "cmd": cmd, "next": "end"}],
         }
     )
 
@@ -542,10 +550,34 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     d = Path(d)
     seq, k = d.parent.name, d.name
     ns = argparse.Namespace(
-        worktree=repo, repo=repo, base=None, production_branch=None, release=None, issue=[], mode="standard",
-        version=version, prev_tag=None, mvv=None, advise=None, channel="dev", prs=[], prs_from_queue=False,
-        test_cmd=None, test_kind=None, test_paths=None, test_all=None, no_reports=None, sync_checks=None, format=None,
-        glossary_ready=None, strategy=None, test_limits=None, template="sprint", level=None, series=None, branch=None,
+        worktree=repo,
+        repo=repo,
+        base=None,
+        production_branch=None,
+        release=None,
+        issue=[],
+        mode="standard",
+        version=version,
+        prev_tag=None,
+        mvv=None,
+        advise=None,
+        channel="dev",
+        prs=[],
+        prs_from_queue=False,
+        test_cmd=None,
+        test_kind=None,
+        test_paths=None,
+        test_all=None,
+        no_reports=None,
+        sync_checks=None,
+        format=None,
+        glossary_ready=None,
+        strategy=None,
+        test_limits=None,
+        template="sprint",
+        level=None,
+        series=None,
+        branch=None,
     )
     apply_decls(ns)
     plugin = (ns.release or {}).get("plugin", "ndf")

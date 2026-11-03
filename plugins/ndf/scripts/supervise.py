@@ -286,7 +286,6 @@ COMMANDS = {
 }
 
 
-
 def default_max(cwd: str | None = None) -> int:
     """`queue` の `--max` を省いたときの本数。並列の計画のレーンならレーンのプランの本数、そうでなければ 3（#2436）。"""
     import decl
@@ -299,6 +298,7 @@ def default_max(cwd: str | None = None) -> int:
         print(f"[supervise] レーンの判定に失敗したため --max の既定 3 で流す: {exc}", file=sys.stderr)
         n = None
     return n or 3
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(

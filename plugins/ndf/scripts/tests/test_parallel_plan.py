@@ -22,7 +22,12 @@ BASE = {
     "name": "p1",
     "rules": ["取り込みの衝突は base-sync で解く"],
     "lanes": [
-        {"name": "lroot", "input": {"kind": "loop", "loop": "lroot", "args": ["--milestones", "26"]}, "plans": 2, "touches": ["plugins/ndf/"]},
+        {
+            "name": "lroot",
+            "input": {"kind": "loop", "loop": "lroot", "args": ["--milestones", "26"]},
+            "plans": 2,
+            "touches": ["plugins/ndf/"],
+        },
         {"name": "lflow", "input": {"kind": "loop", "loop": "lflow", "args": ["--milestones", "23"]}, "plans": 2, "touches": ["docs/"]},
         {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["factory/"], "after": ["lflow"]},
     ],
@@ -55,7 +60,7 @@ def test_valid_plan_passes():
         (variant(x=lambda d: d["lanes"][0].__setitem__("plans", 3)), "I2"),
         (variant(x=lambda d: d["lanes"].append({**d["lanes"][0], "name": "l4", "plans": 0})), "form"),
         (variant(x=lambda d: d["lanes"][2].__setitem__("after", ["nope"])), "I3"),
-        (variant(x=lambda d: (d["lanes"][1].__setitem__("after", ["lfac"]))), "I3"),
+        (variant(x=lambda d: d["lanes"][1].__setitem__("after", ["lfac"])), "I3"),
         (variant(x=lambda d: d["lanes"][1]["input"].__setitem__("args", [])), "I19"),
         (variant(x=lambda d: d["lanes"][1]["input"].__setitem__("args", ["--milestones", "26"])), "I19"),
     ],

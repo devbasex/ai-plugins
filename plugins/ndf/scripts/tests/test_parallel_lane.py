@@ -51,6 +51,8 @@ def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
     monkeypatch.setattr(sprint, "parallel_lane", lambda repo: None)
     assert list(sprint.prod_plans(None, "/r", lambda: {"x": 1})) == ["release-prod"]
     monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
-    monkeypatch.setattr(sprint, "plan_release_request", lambda a, repo, plan, lane, prs=None: {"フェーズ": "配布の依頼", "plan": plan, "lane": lane})
+    monkeypatch.setattr(
+        sprint, "plan_release_request", lambda a, repo, plan, lane, prs=None: {"フェーズ": "配布の依頼", "plan": plan, "lane": lane}
+    )
     got = sprint.prod_plans(None, "/r", lambda: {"x": 1})
     assert got == {"release-request": {"フェーズ": "配布の依頼", "plan": "p1", "lane": "la"}}

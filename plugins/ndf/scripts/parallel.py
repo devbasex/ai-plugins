@@ -113,7 +113,13 @@ def _manual_or_none(main: Path, plan: pp.ParallelPlan) -> None:
             why = "統括役が居ない"
     if why:
         lines = pp.manual_commands(plan)
-        out("stopped", f"{why}ため、レーンを起動しない。手で起動する 1 行を items に並べた", [{"lane": ln.name, "command": c} for ln, c in zip(plan.lanes, lines)], 3, manual=True)
+        out(
+            "stopped",
+            f"{why}ため、レーンを起動しない。手で起動する 1 行を items に並べた",
+            [{"lane": ln.name, "command": c} for ln, c in zip(plan.lanes, lines)],
+            3,
+            manual=True,
+        )
 
 
 def _wait_line(name: str) -> str:
@@ -172,7 +178,13 @@ def cmd_wait(a) -> None:
         out("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
     got = durable.wait_from(pl.KIND, pl.identity(main, a.name), pl.workflow_id(a.name), ["pause", "questions"], a.after, a.timeout)
     if got.kind == "timeout":
-        out("stopped", f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す", code=3, seq=a.after, next=_wait_line(a.name) + f" --after {a.after}")
+        out(
+            "stopped",
+            f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
+            code=3,
+            seq=a.after,
+            next=_wait_line(a.name) + f" --after {a.after}",
+        )
     if got.kind == "event":
         ev = dict(got.value)
         key = ev.pop("key")
@@ -205,7 +217,13 @@ def cmd_present(a) -> None:
     except OSError as exc:
         out("stopped", f"読めない: {exc}", code=2)
     Path(a.out).with_name("approved.txt").write_text(got["sha"] + "\n", encoding="utf-8")
-    out("ok", f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）", [{"lane": n, **r} for n, r in got["lanes"].items()], sha=got["sha"], orphans=got["orphans"])
+    out(
+        "ok",
+        f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）",
+        [{"lane": n, **r} for n, r in got["lanes"].items()],
+        sha=got["sha"],
+        orphans=got["orphans"],
+    )
 
 
 def _requests_for(main: Path, name: str) -> list[dict]:
@@ -249,7 +267,9 @@ def cmd_settle(a) -> None:
         res = "released" if results and all(r == "完了" for r in results) else "failed"
         version = done.get("version") or (done.get("metrics") or {}).get("version")
     wid = pl.workflow_id(a.name)
-    _resume(main, a.name, {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}, f"{wid}:resume:settle:{a.n}")
+    _resume(
+        main, a.name, {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}, f"{wid}:resume:settle:{a.n}"
+    )
     out("ok", f"配布 {a.n} の結果 {res} を送った", result=res, version=version)
 
 
@@ -300,7 +320,16 @@ def cmd_await(a) -> None:
     res = ans.get("result")
     code = {"released": 0, "rejected": 10}.get(res, 1)
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
-    out(status, f"配布の依頼 {sent['id']} の答え: {res}", code=code, result=res, version=ans.get("version"), release=ans.get("release"), reason=ans.get("reason"), deferred=dfr)
+    out(
+        status,
+        f"配布の依頼 {sent['id']} の答え: {res}",
+        code=code,
+        result=res,
+        version=ans.get("version"),
+        release=ans.get("release"),
+        reason=ans.get("reason"),
+        deferred=dfr,
+    )
 
 
 def parser() -> argparse.ArgumentParser:
