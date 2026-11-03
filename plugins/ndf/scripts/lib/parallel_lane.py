@@ -217,7 +217,7 @@ def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=
     return None
 
 
-def _now() -> str:
+def _utc_stamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
@@ -228,7 +228,7 @@ def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
     durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{key}")
 
 
-def _head(cwd: str) -> str:
+def _head_sha(cwd: str) -> str:
     got = subprocess.run(["git", "-C", cwd, "rev-parse", "HEAD"], capture_output=True, text=True)
     return got.stdout.strip() if got.returncode == 0 else ""
 
@@ -248,8 +248,8 @@ def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, le
         "questions": qs,
         "cwd": cwd,
         "ledger_id": ledger_id,
-        "stamp": _head(cwd),
-        "at": _now(),
+        "stamp": _head_sha(cwd),
+        "at": _utc_stamp(),
     }
     _send_inbox(main, name, msg, rid)
     return rid
@@ -259,7 +259,7 @@ def request_gate1(main: Path, name: str, lane: str, issue: int, pr: int, report:
     """設計の承認の依頼（`kind: gate1`）。id は `<レーン>-g<設計 PR>-<先頭の SHA の 12 桁>`（同じ先頭の打ち直しは同じ id）。"""
     rid = f"{lane}-g{pr}-{stamp[:12]}"
     msg = {"kind": "gate1", "id": rid, "lane": lane, "issue": issue, "pr": pr, "report": report, "sprint_state": state, "stamp": stamp}
-    _send_inbox(main, name, {**msg, **extra, "at": _now()}, rid)
+    _send_inbox(main, name, {**msg, **extra, "at": _utc_stamp()}, rid)
     return rid
 
 
@@ -274,7 +274,7 @@ def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
         sha = ""
     rid = f"{name}-p{n}-{k}"
     lane = prl.helper_name(name, n)
-    _send_inbox(main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": _now()}, rid)
+    _send_inbox(main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": _utc_stamp()}, rid)
     return rid
 
 
@@ -288,5 +288,5 @@ def send_answer(
     stamp: Optional[str] = None,
 ) -> None:
     """オーガナイザーの答えを送る。耐久ワークフローが `answer-<依頼>` を 1 回だけ立て、問いの一覧から外す。"""
-    msg = {"kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp, "at": _now()}
+    msg = {"kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp, "at": _utc_stamp()}
     _send_inbox(main, name, msg, f"answer:{rid}")

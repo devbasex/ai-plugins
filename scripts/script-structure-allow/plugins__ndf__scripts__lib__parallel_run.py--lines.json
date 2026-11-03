@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/parallel_run.py", "name": "", "kind": "lines", "reason": "#2436 で並列の計画の耐久ワークフロー（耐久ステップ・_Run の周回・一時レーンの起動・外の入口）を 1 モジュールに置いて 661 行。500 行以下にしたら消す。分けるなら、外の世界の読み出し（relay・base_tracking_ref・release_plugin・git_head・dev_version）と一時レーンの組み立て（helper_spawn・present_approval・helper_task）を別のモジュールへ移す", "lines": 661}

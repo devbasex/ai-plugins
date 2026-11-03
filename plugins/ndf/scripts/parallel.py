@@ -67,9 +67,6 @@ def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[di
     return pp.check_data(data)
 
 
-# ---- 計画 ----
-
-
 def cmd_init(a) -> None:
     main = main_of()
     try:
