@@ -181,6 +181,19 @@ def test_record_before_the_production_release_posts_nothing(repo, gh, missing):
     assert not any(c[:2] == ["pr", "comment"] for c in gh.get().get("calls", []))
 
 
+def test_record_goes_to_the_sync_pr_when_the_release_pr_was_not_merged(repo, gh):
+    """#2436 の版数の衝突: release/v<版> の PR が閉じたまま -sync の PR で取り込んだときは、-sync の PR へ書く。"""
+    gh.set(
+        prs=[
+            {"number": 39, "state": "CLOSED", "head": "release/v1.2.3", "base": "develop"},
+            {"number": 40, "state": "MERGED", "head": "release/v1.2.3-sync", "base": "develop"},
+        ]
+    )
+    code, out, err = record(repo, gh.env)
+    assert code == 0, (out, err)
+    assert out["metrics"]["release_pr"] == 40 and len(gh.comments()) == 1
+
+
 def test_record_failure_to_post_is_one(repo, gh):
     """AC4: gh pr comment が非 0 なら 1 で止まる（プランは record の失敗として judge-record へ進む）。"""
     gh.set(comment_code=1)
