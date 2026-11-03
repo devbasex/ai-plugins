@@ -1,0 +1,55 @@
+# 並列の計画を作る
+
+1 つのリポジトリで複数の開発ループかスプリントを同時に進めるときに、**並列の計画**を 1 度書く。並列の計画は
+レーンの一覧と、レーンに共通の決まりを 1 つの文書に持つ。オーガナイザー（`--parallel <計画名>` で起動した conductor）が
+これを読んでレーンを起動する。起動の手順は [development-workflow の parallel.md](../../development-workflow/references/parallel.md) にある。
+
+## 例
+
+3 本の開発ループ `lroot`・`lflow` と、`lflow` が終わってから始めるスプリント 1 本（課題 2400）を同時に進める。
+
+```bash
+python3 "$NDF_SCRIPTS/parallel.py" init p1 <<'EOF'
+{"version": 1, "rules": ["取り込みの衝突は base-sync で解く"],
+ "lanes": [
+  {"name": "lroot", "input": {"kind": "loop", "loop": "lroot", "args": ["--milestones", "26"]}, "plans": 2, "touches": ["plugins/ndf/"]},
+  {"name": "lflow", "input": {"kind": "loop", "loop": "lflow", "args": ["--milestones", "23"]}, "plans": 2, "touches": ["docs/"]},
+  {"name": "lfac", "input": {"kind": "sprint", "issues": [2400]}, "plans": 2, "touches": ["factory/"], "after": ["lflow"]}
+ ]}
+EOF
+```
+
+`init` は検査を通った下書きから、メインディレクトリの `.ndf/parallel/p1/plan.json`（正本）・`plan.md`（人が読む描画）と、
+レーンの数だけの引継ぎ文書（`.ndf/handoff/loop-lroot.md`・`loop-lflow.md`・`issue-2400.md`）を書く。
+どれもコミットしない。
+
+## レーンごとに決めること
+
+| 項目 | 意味 |
+| --- | --- |
+| `name` | レーン名。ラッパーの名前になる（英小文字・数字・`-`・`_`、32 字まで。`-rel` と数字で終わる名前は一時レーンの名前のため使えない） |
+| `input` | 最初の入力。`{"kind": "loop", "loop": <ループ名>, "args": [...]}` か `{"kind": "sprint", "issues": [<番号>...]}` |
+| `plans` | 同時に流すプランの本数（1 以上） |
+| `touches` | 触る場所（パスか glob） |
+| `after` | 始める条件。ここに並べたレーンがすべて止まってから起動する |
+
+計画名は 24 字まで。レーンに共通の決まり（プランの本数の配分・触る場所・配布の担当）は `plan.md` の 1 箇所に置き、
+引継ぎ文書へは写さない。引継ぎ文書は計画名・レーン名・`plan.md` のパスと、レーンの開始のコマンドだけを持つ。
+
+## 検査
+
+`init` は書く前に、`parallel.py check <計画名>` は書いた後に、同じ検査を行う。結果は統一 JSON レポートで、
+`items[].rule` に誤りの種類を持つ。
+
+| 種類 | 誤りになるもの |
+| --- | --- |
+| `I1` | 計画名・レーン名の形、レーン名の重なり、一時レーンの名前の形 |
+| `I2` | レーンの数が `NDF_RELAY_MAX_NAMED`（既定 3）を超える、プランの本数の合計が `NDF_PARALLEL_MAX_PLANS`（既定 6）を超える |
+| `I3` | 依存先が計画に無い、依存が循環する |
+| `I19` | レーンの間で課題かマイルストーンが重なる（`--milestones` の無いループのレーンは、ほかのレーンと重なるものとする） |
+| `I4`（警告） | 触る場所が重なるレーンの組。終了コードは 0 のまま |
+
+誤りがあれば終了コードは 1 で、`init` は 1 つも書かない。同じ名前の引継ぎ文書か計画が既にあれば、
+`init` は上書きせずに名前を返して止まる。名前を変えるか、在る文書を片付けてから打ち直す。
+
+起動の前なら `plan.json` を手で直してよい。直したら `parallel.py check <計画名>` を打ち直す。

@@ -219,6 +219,12 @@ pace: fast
 そのときは `normal` で進める。進め方ごとのフロー・`fast` の工程の区分・条件・設定・トリガー・記録の読み方は
 [references/pace.md](references/pace.md) にある。
 
+## 並列開発（`--parallel`）
+
+**引数に `--parallel <計画名>` があれば、判定の手順へ進まず [references/parallel.md](references/parallel.md) の手順で進める。**
+このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、本番の配布を 1 本にまとめる。
+並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
+
 ## 開発ループ（`--loop`）
 
 **引数に `--loop [<ループ名>]` があれば、判定の手順へ進まず [references/loop.md](references/loop.md) の手順で進める。**
