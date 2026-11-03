@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 
 from account_fake import accounts, window  # noqa: F401
 from aws_fake import FakeAws
@@ -102,14 +103,15 @@ def test_pinned_limited_e2e(term, accounts, tmp_path):  # noqa: F811
     accounts.add("a", util5=10)
     tb = accounts.add("b", util5=20)
     pin.set_pinned("b")
-    # 保存した残量を使わず毎回読む。1 秒の間隔だと、上限の直後の区間の起動が上限の残量を読み直さずに使う（CI で落ちた）
-    t = account_term(term, accounts, NDF_ACCOUNT_CHECK_INTERVAL="0")
+    t = account_term(term, accounts)
     t.wait_start(1)
     assert t.starts()[0]["account"] == "b"
     accounts.fake.set_usage(tb, window(100, 3600), window(5))
     hit_limit(t, 0)
     t.wait_start(2)
     assert t.starts()[1]["account"] == "a"
+    # 上限の観測と残量の取得の時刻は秒で残る。同じ秒の取得は「観測の後」と読まれず上限が効き続けるので、秒を跨ぐ（CI で落ちた）
+    time.sleep(1.1)
     accounts.fake.set_usage(tb, window(10), window(5))
     t.type("mark 次\r")
     t.wait_start(3)
