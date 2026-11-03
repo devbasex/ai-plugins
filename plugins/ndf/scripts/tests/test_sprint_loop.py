@@ -1266,3 +1266,204 @@ def test_resume_stopped_refused_continuation_failure_stays_stopped(env, monkeypa
     out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
     assert out["exit"] == 3 and "承認ゲート 1 の後の続きをまだ組めない: " in out["summary"]
     assert rec(env)["status"] == "stopped"
+
+
+# ---------------- #2436 の受け入れ条件 6a・6d・6e: レーンの配布待ちと質問待ち ----------------
+
+REQ = "lroot-r000000000001"
+
+
+def lane_lap(env, nums=(11, 12), rid=REQ, rank=None):
+    """並列の計画のレーンの周回: 本番のステージが配布の依頼のプラン（フェーズ「配布の依頼」）で、依頼の記録がある。"""
+    env.rank_box["out"] = rank or rank_out(ms("01 近い", [11, 12, 13]))
+    env.answer_box = {}
+    env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
+    if not (env.root / ".ndf/loop/l1/loop.json").exists():
+        start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    lap = sl.current_lap(rec(env))
+    prod = Path(lap["out"]) / "prod.json"
+    prod.write_text(json.dumps({"フェーズ": "配布の依頼", "課題": list(nums), "並列の計画": "p1"}, ensure_ascii=False))
+    work = prod.with_name("prod-state") / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "request.txt").write_text(json.dumps({"id": rid, "plan": "p1", "lane": "lroot", "prs": [5]}))
+    return lap
+
+
+def request_lap(env, rid=REQ):
+    lap = lane_lap(env, rid=rid)
+    set_state(env, lap)
+    out = sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
+    return lap, out
+
+
+def test_release_request_closes_the_lap_as_release_pending_and_goes_on(env):
+    lap, out = request_lap(env)
+    assert out["status"] == "ok" and "ndf_next" in out["metrics"]  # gate2_returned で止まらない
+    r = rec(env)
+    done = r["laps"][0]
+    assert done["outcome"] == "配布待ち" and r["status"] == "running"
+    assert done["release"]["plan_name"] == "p1" and done["release"]["request"] == REQ
+    assert done["release"]["close_plans"]  # まとめは流さずに残す
+    assert sl.current_lap(r) is None
+
+
+def test_issues_of_a_pending_lap_are_not_selected(env):
+    request_lap(env)
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["selected"] == [13]
+    why = {x["number"]: x["reason"] for x in out["items"]}
+    assert why[11] == why[12] == "保留の周回の課題"
+
+
+def test_released_answer_runs_the_close_and_finish_closes_the_lap_with_the_version(env):
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": "10.28.0"}, "defer": None}
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["status"] == "finish" and out["metrics"]["lap"] == 1
+    pipe = out["metrics"]["pipeline"]
+    assert "1-close.json" in pipe and "loop finish l1 1 --done" in pipe
+    r = rec(env)
+    assert r["laps"][0]["release"]["answer"]["version"] == "10.28.0" and len(r["laps"]) == 1  # 新しい周回を先に始めない
+    d = r["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
+    fin = sl.cmd_finish(env, "l1", 1, d)
+    lap = rec(env)["laps"][0]
+    assert fin["status"] == "ok" and lap["outcome"] == "完了" and lap["versions"]["prod"] == "10.28.0"
+    assert sl.cmd_finish(env, "l1", 1, d)["exit"] == 1  # 締め直しは 1 回だけ
+
+
+def test_two_answered_pending_laps_are_finished_oldest_first(env):
+    request_lap(env, rid="lroot-r000000000001")
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 14]))
+    lap2 = lane_lap(env, nums=(13,), rid="lroot-r000000000002", rank=rank_out(ms("01 近い", [13, 14])))
+    set_state(env, lap2)
+    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap2["out"]) / "prod.json"), "result": "関門"}]), [])
+    for rid in ("lroot-r000000000001", "lroot-r000000000002"):
+        env.answer_box[rid] = {"answer": {"result": "released", "version": "10.28.0"}, "defer": None}
+    assert sl_select.cmd_select(env, "l1")["metrics"]["lap"] == 1
+
+
+def test_rejected_answer_returns_the_lap_without_the_close(env):
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "rejected", "reason": "直す"}, "defer": None}
+    out = sl_select.cmd_select(env, "l1")
+    r = rec(env)
+    assert r["laps"][0]["outcome"] == "人へ戻した" and "finish" not in r["laps"][0]["release"]
+    assert r["fixes"][0]["lap"] == 1 and r["fixes"][0]["reason"] == "直す"
+    assert out["metrics"]["status"] == "selected" and out["metrics"]["selected"][0] in (11, 12)  # 直しの周回が先頭に選ぶ
+
+
+def test_failed_answer_closes_the_lap_as_failed(env):
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "failed", "reason": "CI"}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    lap = rec(env)["laps"][0]
+    assert lap["outcome"] == "失敗" and lap["failure"]["kind"] == "配布"
+
+
+def test_defer_keeps_the_lap_pending(env):
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": None, "defer": {"seq": 1, "reason": "次の配布へ"}}
+    out = sl_select.cmd_select(env, "l1")
+    assert rec(env)["laps"][0]["outcome"] == "配布待ち" and out["metrics"]["selected"] == [13]
+
+
+def test_waiting_only_when_pending_laps_reach_the_limit(env):
+    request_lap(env, rid="lroot-r000000000001")
+    lap2 = lane_lap(env, nums=(13,), rid="lroot-r000000000002", rank=rank_out(ms("01 近い", [13, 14])))
+    set_state(env, lap2)
+    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap2["out"]) / "prod.json"), "result": "関門"}]), [])
+    out = sl_select.cmd_select(env, "l1")
+    assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "waiting_only" and len(rec(env)["laps"]) == 2
+
+
+def test_waiting_only_instead_of_no_issue_when_only_pending_work_is_left(env):
+    request_lap(env)
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
+    out = sl_select.cmd_select(env, "l1")
+    assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "waiting_only"
+
+
+def test_budget_waits_first_but_user_stop_stops_at_once(env):
+    request_lap(env)
+    r = rec(env)
+    r["budget"]["laps"] = 1
+    sl.write_record(env, r)
+    assert sl_select.cmd_select(env, "l1")["metrics"]["stop"]["condition"] == "waiting_only"
+    sl.cmd_start(env, "l1", [], {})
+    sl.cmd_stop(env, "l1")
+    assert sl_select.cmd_select(env, "l1")["metrics"]["stop"]["condition"] == "user_stop"
+
+
+def test_pending_counts_as_a_lap_in_the_budget_but_not_as_a_failure(env):
+    request_lap(env)
+    r = rec(env)
+    assert sl.consumed(r)["laps"] == 1 and sl_record.failure_streak(r) == (None, 0)
+
+
+def test_loop_pending_returns_only_the_answered_close(env):
+    request_lap(env)
+    assert sl.cmd_pending(env, "l1")["metrics"]["status"] == "none"
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": "10.28.0"}, "defer": None}
+    out = sl.cmd_pending(env, "l1")
+    assert out["metrics"]["status"] == "finish" and "loop finish l1 1" in out["metrics"]["pipeline"]
+
+
+def test_hold_question_closes_the_lap_and_the_answer_resumes_the_stopped_plan(env):
+    lap = lane_lap(env)
+    impl = str(Path(lap["out"]) / "impl-11.json")
+    out = sl.cmd_hold_question(env, "l1", "lroot-q1", impl, "fix")
+    r = rec(env)
+    assert out["status"] == "ok" and r["laps"][0]["outcome"] == "質問待ち" and r["laps"][0]["question"]["request"] == "lroot-q1"
+    assert sl_select.cmd_select(env, "l1")["metrics"]["selected"] == [13]  # 答えの前は流さない
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    set_state(env, sl.current_lap(rec(env)))
+    sl.cmd_lap(env, "l1", False, None, [])
+    env.answer_box["lroot-q1"] = {"answer": {"result": "answered", "choice": ["A"]}, "defer": None}
+    got = sl_select.cmd_select(env, "l1")
+    pipe = got["metrics"]["pipeline"]
+    assert got["metrics"]["status"] == "finish" and f"run {impl} --from fix" in pipe and "loop finish l1 1" in pipe
+
+
+def test_answer_revise_keeps_the_note_and_selects_the_issue_first(env, tmp_path):
+    env.rank_box["out"] = rank_out(ms("01 近い", [12, 11]))
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    lap = sl.current_lap(rec(env))
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
+    sl.cmd_answer(env, "l1", 12, True, 501)
+    note = tmp_path / "note.md"
+    note.write_text("API の形を変える")
+    out = sl.cmd_answer(env, "l1", 11, False, None, revise=True, note=str(note))
+    w = next(w for w in rec(env)["waiting"] if w["number"] == 11)
+    assert out["status"] == "ok" and w["answer"] == "revise" and w["note"] == "API の形を変える" and w["revise_count"] == 1
+    assert "API の形を変える" in env.bodies[11]
+    r = rec(env)
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) is None
+    assert sl.current_lap(r) is None  # 両方の課題を人の判断待ちへ移した周回は締まっている
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 14, 11]))
+    assert sl_select.cmd_select(env, "l1")["metrics"]["selected"][0] == 11
+
+
+def test_gate1_answers_are_applied_by_the_lane_at_the_boundary(env):
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    env.answer_box = {}
+    env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    lap = sl.current_lap(rec(env))
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    r = rec(env)
+    r["waiting"][0].update(request="lroot-g501-abc", plan="p1", pr=501)
+    sl.write_record(env, r)
+    set_state(env, sl.current_lap(r))
+    sl.cmd_lap(env, "l1", False, None, [])
+    env.answer_box["lroot-g501-abc"] = {"answer": {"result": "approved"}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    w = rec(env)["waiting"][0]
+    assert w["answer"] == "approved" and w["pr"] == 501
+    assert any(c[:3] == ["gh", "pr", "edit"] and "design-approved" in c for c in env.calls)

@@ -188,3 +188,19 @@ def write_request(state: Path, data: dict) -> Path:
     (Path(state) / "work").mkdir(parents=True, exist_ok=True)
     (Path(state) / "work" / "request.txt").write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
     return Path(state) / "work" / "request.txt"
+
+
+def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
+    """依頼ごとの {"answer": `answer-<依頼>`, "defer": `defer-<依頼>`} を待たずに読む（周回の境で読む。#2436 の 6a・6e）。
+    耐久の記録が無ければ、どれも答えの無いものとして返す（DBOS を import しない）。"""
+    out = {i: {"answer": None, "defer": None} for i in ids}
+    if not ids or not record_exists(main, name):
+        return out
+    import durable
+
+    with durable.open_client(KIND, record_identity(main, name)) as c:
+        for i in ids:
+            ans = c.get_event(workflow_id(name), f"answer-{i}", timeout_seconds=0)
+            dfr = c.get_event(workflow_id(name), f"defer-{i}", timeout_seconds=0)
+            out[i] = {"answer": ans if isinstance(ans, dict) else None, "defer": dfr if isinstance(dfr, dict) else None}
+    return out

@@ -31,6 +31,8 @@ from sprint_loop_record import (
     DONE,
     FAILED,
     RETURNED,
+    QUESTION_PENDING,
+    PENDING,
     GATE_1,
     FINISHED,
     NOT_RUN,
@@ -51,6 +53,7 @@ from sprint_loop_record import (
     handoff_path,
     update_handoff,
     lap_rows,
+    pending_laps,
     selected_issues,
 )
 
@@ -76,7 +79,7 @@ from sprint_loop_gate import (
     owner_line,
 )
 
-from sprint_loop_gate2 import gate2_answer, gate2_pipeline
+from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
 
 
 # ---------------------------------------------------------------- start
@@ -152,6 +155,7 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "budget_history": [],
         "same_failure": decl["same_failure"],
         "max_issues": decl["max_issues"],
+        "release_pending_max": decl.get("release_pending_max", 2),
         "milestones": list(milestones or []),
         "goal": goal,
         "status": "running",
@@ -325,6 +329,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             close = build_close(env, rec, lap, issues)
         except (LoopError, OSError, ValueError) as e:
             return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
+        lap["close_plans"] = close  # 配布待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)
@@ -355,38 +360,77 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
 # ---------------------------------------------------------------- answer / approve-mvv / stop
 
 
-def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None) -> dict:
+def cmd_answer(
+    env: Env, name: str, number: int, approved: bool, pr: int | None, revise: bool = False, note: str | None = None
+) -> dict:
     with open_record(env, name) as (rec, before):
         w = next((w for w in reversed(rec.get("waiting", [])) if w["number"] == number and not w.get("answer")), None)
         if w is None:
             return refusal_order(f"#{number} は人の判断待ちでない")
-        w.update(answer="approved" if approved else "rejected", answered_at=env.now())
-        if pr:
-            w["pr"] = pr
-        lap = rec["laps"][w["lap"] - 1]
-        state = lap.get("state_path")
-        notes = []
-        if state:
-            cmd = [
-                sys.executable,
-                str(SPRINT_STATE),
-                "gate",
-                state,
-                GATE_1,
-                "--by",
-                "user",
-                "--what",
-                f"開発ループ {name} の #{number} の設計",
-            ]
-            cmd += ["--outcome", w["answer"], "--root", str(env.main_dir())] + (["--pr", str(w["pr"])] if w.get("pr") else [])
-            code, so, se = env.run(cmd, cwd=str(env.main_dir()))
-            if code != 0:
-                notes.append(f"承認の記録を書けない（{code}）: {(se or so).strip()[:200]}")
+        if revise:
+            try:
+                text = Path(note or "").read_text(encoding="utf-8").strip()
+            except OSError as e:
+                return refusal_order(f"指摘のファイルを読めない: {e}")
+        notes = apply_answer(env, rec, w, "revise" if revise else ("approved" if approved else "rejected"), pr, text if revise else None)
+        write_record(env, rec, before)
+        if revise:
+            after = "次の周回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
+        else:
+            after = "設計 PR のマージの後の周回で選定の対象に戻る" if approved else "選定の対象に戻さない（差し戻し）"
+        return loop_ok(f"#{number} の答え（{w['answer']}）を書いた。{after}", rec, [w, *({"note": n} for n in notes)], status="answered")
+
+
+def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note: str | None = None) -> list[str]:
+    """人の判断待ちの行へ答えを書き、スプリント状態の承認の記録と課題の本文の節を更新する。書けなかった理由を返す。
+    直して出し直す（revise）は答えの確定でないため承認の記録を書かず、指摘と回数を行と本文に書く（#2436 の 6e）。"""
+    w.update(answer=answer, answered_at=env.now())
+    if pr:
+        w["pr"] = pr
+    notes: list[str] = []
+    if answer == "revise":
+        w["note"] = note or ""
+        w["revise_count"] = sum(1 for x in rec.get("waiting", []) if x["number"] == w["number"] and x.get("answer") == "revise")
         if err := mark_issue(env, rec, w):
             notes.append(err)
-        write_record(env, rec, before)
-        after = "設計 PR のマージの後の周回で選定の対象に戻る" if approved else "選定の対象に戻さない（差し戻し）"
-        return loop_ok(f"#{number} の答え（{w['answer']}）を書いた。{after}", rec, [w, *({"note": n} for n in notes)], status="answered")
+        return notes
+    lap = rec["laps"][w["lap"] - 1]
+    state = lap.get("state_path")
+    if state:
+        cmd = [
+            sys.executable,
+            str(SPRINT_STATE),
+            "gate",
+            state,
+            GATE_1,
+            "--by",
+            "user",
+            "--what",
+            f"開発ループ {rec['name']} の #{w['number']} の設計",
+        ]
+        cmd += ["--outcome", w["answer"], "--root", str(env.main_dir())] + (["--pr", str(w["pr"])] if w.get("pr") else [])
+        code, so, se = env.run(cmd, cwd=str(env.main_dir()))
+        if code != 0:
+            notes.append(f"承認の記録を書けない（{code}）: {(se or so).strip()[:200]}")
+    if err := mark_issue(env, rec, w):
+        notes.append(err)
+    return notes
+
+
+def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
+    """オーガナイザーへ送った設計の承認の答えを、持ち主のレーンが周回の境で処理する（#2436 の 6e・6f）。
+    承認ならラベル design-approved を付けて承認を書き、直して出し直すなら指摘を、やらないなら差し戻しを書く。"""
+    for w in [w for w in rec.get("waiting", []) if w.get("request") and not w.get("answer")]:
+        a = (answers.get(w["request"]) or {}).get("answer")
+        if not isinstance(a, dict):
+            continue
+        result = a.get("result")
+        if result == "approved" and w.get("pr"):
+            code, so, se = env.run(["gh", "pr", "edit", str(w["pr"]), "--add-label", "design-approved"], cwd=str(env.main_dir()))
+            if code != 0:
+                w["label_error"] = (se or so).strip()[:200]
+        if result in ("approved", "rejected", "revise"):
+            apply_answer(env, rec, w, result, w.get("pr"), a.get("note"))
 
 
 def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
@@ -439,6 +483,49 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
         return after_close(env, rec, before, f"周回 {lap['n']} を {outcome} で締めた")
 
 
+def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None = None) -> dict:
+    """保留の周回（配布待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
+    with open_record(env, name) as (rec, before):
+        lap = rec["laps"][n - 1] if 1 <= n <= len(rec.get("laps", [])) else None
+        if not lap or lap.get("outcome") not in PENDING:
+            return refusal_order(f"周回 {n} は保留の周回でない（締め直しは 1 回だけ）")
+        if done not in lap.setdefault("dones", []):
+            lap["dones"].append(done)
+        refresh_state(lap, update)
+        state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
+        return finish_held(env, rec, before, lap, read_done_items(done), state)
+
+
+def cmd_pending(env: Env, name: str) -> dict:
+    """答えの届いた保留の周回のまとめの pipeline だけを返す（止まったレーンの残りを一時レーンが流す。異常系 11）。"""
+    with open_record(env, name) as (rec, before):
+        return pending_pipeline(env, rec, before)
+
+
+def cmd_hold_question(env: Env, name: str, ref: str, plan: str, step: str, parallel: str | None = None) -> dict:
+    """作業の途中の問いを問いの hook がオーガナイザーへ送った周回を「質問待ち」で締め、止まったプランとステップを残して
+    次の周回へ進む（#2436 の 6d）。答えは周回の境で読み、止まったプランを続きのステップから流す。"""
+    with open_record(env, name) as (rec, before):
+        lap = current_lap(rec)
+        if not lap:
+            return refusal_order("進行中の周回が無い")
+        lap["question"] = {"request": ref, "plan": plan, "step": step, "plan_name": parallel or lane_plan_name(env)}
+        close_lap(env, rec, lap, QUESTION_PENDING)
+        lap["held_at"] = lap["ended_at"]
+        return after_close(env, rec, before, f"周回 {lap['n']} の問い（{ref}）をオーガナイザーへ送り、質問待ちで締めた")
+
+
+def lane_plan_name(env: Env) -> str | None:
+    """自分（NDF_RELAY_NAME）が属する動いている並列の計画の名前（無ければ None）。"""
+    try:
+        import parallel_lane
+
+        got = parallel_lane.lane_of(env.main_dir())
+    except Exception:  # noqa: BLE001 — 計画を読めないときはレーンでないものとして扱う
+        return None
+    return got[0] if got else None
+
+
 # ---------------------------------------------------------------- status / list
 
 
@@ -466,6 +553,12 @@ def cmd_status(env: Env, name: str) -> dict:
     waiting = [w["number"] for w in rec.get("waiting", []) if not w.get("answer")]
     if waiting:
         lines.append("人の判断待ち: " + " ".join(f"#{n}" for n in waiting))
+    held = [
+        {"lap": x["n"], "outcome": x["outcome"], "answer": ((x.get("release") or {}).get("answer") or {}).get("result")}
+        for x in pending_laps(rec)
+    ]
+    for h in held:
+        lines.append(f"周回 {h['lap']}: {h['outcome']}（答え: {h['answer'] or 'まだ'}）")
     line, owner = owner_line(env)
     lines.append(line)
     metrics = {
@@ -473,6 +566,7 @@ def cmd_status(env: Env, name: str) -> dict:
         "consumed": consumed(rec),
         "budget": rec.get("budget"),
         "waiting": waiting,
+        "held": held,
         "review_owner": owner,
     }
     if rec.get("stop"):
