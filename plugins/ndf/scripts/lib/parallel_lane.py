@@ -253,7 +253,7 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
     return out
 
 
-# ---- 問いの依頼と答え（#2436 の 6c・6d・6f。設計 issue-2436-design-approvals.md） ----
+# ---- 問いの依頼と答え（#2436 の 6c・6d・6f。確定仕様 docs/specifications/ndf-parallel-organizer.md） ----
 
 
 def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
