@@ -297,9 +297,9 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
     extra = "# 変更の多いファイル（回数・パス）\n" + hotspots(root) if it["aspect"] == "method.hotspot" else extra
     got = call_llm(root, prompt_of(it, product, extra), int(lim["item_seconds"]), tick, tools_of(it["aspect"]))
     usage = {"cost": got["cost"], "seconds": got["seconds"]}
-    ok = got["ok"] and got["cost"] <= lim["item_usd"] and got["seconds"] <= lim["item_seconds"] and valid_record(got["data"])
-    log_call(root, it["id"], ok, usage, run, loop, lap)
-    if not got["ok"] or got["cost"] > lim["item_usd"] or got["seconds"] > lim["item_seconds"] or not valid_record(got["data"]):
+    accepted = got["ok"] and got["cost"] <= lim["item_usd"] and got["seconds"] <= lim["item_seconds"] and valid_record(got["data"])
+    log_call(root, it["id"], accepted, usage, run, loop, lap)
+    if not accepted:
         return None, usage
     rec = {
         "id": it["id"],
