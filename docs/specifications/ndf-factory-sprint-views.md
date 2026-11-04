@@ -105,7 +105,7 @@ graph TD
 
 ### 経路（`factory/contracts/openapi/runs.yaml`）
 
-入力と成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。「値」は一覧の 1 件か、成功の要素の `value` である。
+入力と成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。「値」は一覧の 1 件か、成功の要素の `value` である。
 
 | 経路 | 値 / 失敗 |
 | --- | --- |

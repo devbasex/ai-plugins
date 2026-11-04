@@ -150,7 +150,7 @@ erDiagram
 
 ### 画面向けの経路（`openapi/loops.yaml`・`openapi/runs.yaml`）
 
-どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。ループの要素はループの `accountId` が一致しなければ 403、無ければ 404 `loop_not_found` の要素の結果になる。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力と成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
+どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。ループの要素はループの `accountId` が一致しなければ 403、無ければ 404 `loop_not_found` の要素の結果になる。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力と成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
 
 | 経路 | 誰が | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- | --- |

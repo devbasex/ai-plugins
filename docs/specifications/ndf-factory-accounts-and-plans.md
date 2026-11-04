@@ -214,7 +214,7 @@ sequenceDiagram
 
 ### API の経路
 
-経路はすべて `Authorization: Bearer <access token>`（または委任の資格情報）を要る。エラーの本文は `{"error": {"code": "<機械の値>", "message": "<利用者に出す文>"}}` に揃える。機械可読な正は `factory/contracts/openapi/accounts.yaml` である。入力と成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。「要素・条件」は要素 1 個の項目、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である（401 は要求全体）。チームの作成と席の追加・変更・削除は人だけが確定でき、委任の資格情報では要求全体を 403 `human_only` で断る。
+経路はすべて `Authorization: Bearer <access token>`（または委任の資格情報）を要る。エラーの本文は `{"error": {"code": "<機械の値>", "message": "<利用者に出す文>"}}` に揃える。機械可読な正は `factory/contracts/openapi/accounts.yaml` である。入力と成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。「要素・条件」は要素 1 個の項目、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である（401 は要求全体）。チームの作成と席の追加・変更・削除は人だけが確定でき、委任の資格情報では要求全体を 403 `human_only` で断る。
 
 | 経路 | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- |

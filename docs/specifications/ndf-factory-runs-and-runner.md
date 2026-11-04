@@ -149,7 +149,7 @@ graph TD
 
 ### 画面向けの経路
 
-機械可読な正は [`factory/contracts/openapi/runs.yaml`](../../factory/contracts/openapi/runs.yaml) である。どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403 である（[認証とアカウント・席・料金プランごとの使える量](ndf-factory-accounts-and-plans.md)）。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力・成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。下の表の「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
+機械可読な正は [`factory/contracts/openapi/runs.yaml`](../../factory/contracts/openapi/runs.yaml) である。どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403 である（[認証とアカウント・席・料金プランごとの使える量](ndf-factory-accounts-and-plans.md)）。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力・成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。下の表の「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
 
 | 経路 | 誰が | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- | --- |

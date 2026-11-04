@@ -90,7 +90,7 @@ Neural Development Factory の Web の画面を組む部品の一覧と使い分
 | --- | --- | --- | --- |
 | `sprintRunDetails(accountId, sprintRunIds)` | アカウントの ID と実行の ID の配列 | `SprintRunDetail[]`（入力と同じ順） | `ApiFailure`（401・要求全体か最初に失敗した要素の 403・5xx。無い実行も 403） |
 
-`sprintRunDetails` の本物の実装は、実行の ID を鍵の query に繰り返して `GET /accounts/{a}/sprint-runs/detail` を 1 回呼び、要素の結果をほどく（[利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形)）。
+`sprintRunDetails` の本物の実装は、実行の ID を鍵の query に繰り返して `GET /accounts/{a}/sprint-runs/detail` を 1 回呼び、要素の結果をほどく（[利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形)）。
 
 ## つながりの状態
 

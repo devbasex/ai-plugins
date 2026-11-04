@@ -101,7 +101,7 @@ erDiagram
 
 ### 画面向けの経路（`factory/contracts/openapi/organizer.yaml`）
 
-入力と成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗の形」は要素の結果の状態である（401 は要求全体）。
+入力と成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗の形」は要素の結果の状態である（401 は要求全体）。
 
 | 経路 | 要素・条件 | 値 | 失敗の形 |
 | --- | --- | --- | --- |
