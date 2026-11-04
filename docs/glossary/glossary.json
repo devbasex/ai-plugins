@@ -4548,6 +4548,30 @@
       "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
+      "term": "再開のジョブ",
+      "context": "ndf-factory",
+      "meaning": "`START=resume` の実行ジョブ。承認の答えで起こすものと、利用上限のリセット時刻の後に起こすものがある。保存した状態を復元して前回の続きから進める",
+      "pending_source": "issues/issue-2405-requirements.md"
+    },
+    {
+      "term": "予算の反映",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
+      "term": "予算の履歴",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
+      "term": "人の判断待ちの行",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
       "term": "打ち切りの時間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
