@@ -39,7 +39,7 @@
 | --- | --- | --- | --- | --- |
 | 開発ループ（Factory） | サービスのループの制御（`updateBudget`。この変更では変えない） | ループの行 | — | ループの予算（周回の数・費用・時間。単位ごとに空を許す） |
 | 実行ジョブ（Factory） | サービスの実行の制御（`control.ts`） | ジョブ | — | ループの実行の入力（名前・マイルストーン・予算・除く課題・答え） |
-| ループの記録（NDF） | NDF の `sprint-state.py loop` の副命令（`sprint_loop.py`） | ループの記録 | 周回・人の判断待ち | ループの予算・予算の履歴の行（時刻・前・後） |
+| ループの記録（NDF） | NDF の `sprint-state.py loop` の副命令（`sprint_loop.py`） | ループの記録 | 周回・人の判断待ちの行 | ループの予算・予算の履歴の行（時刻・前・後） |
 
 ランナーはループの記録を書き換える持ち主ではない。NDF の副命令を打つ呼び出し側である。
 
@@ -47,10 +47,13 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 実行ジョブ | ループに属する再開のジョブの指示は、宣言した単位があればジョブを作った時点のループの予算を `LOOP_BUDGET` に持つ。ループに属さない実行のジョブは `LOOP_BUDGET` を持たない | 契約の検査（`validateRunJobInstruction`）と単体テストで落とす |
-| I2 | ループの記録 | 予算の反映は、予算と予算の履歴のほかを変えない（止まった記録・周回・人の判断待ちは前と同じ） | NDF の単体テストで落とす |
+| I1a | 実行ジョブ | ループに属する再開のジョブの指示は、宣言した単位があればジョブを作った時点のループの予算を `LOOP_BUDGET` に持つ | 契約の検査（`validateRunJobInstruction`）と単体テストで落とす |
+| I1b | 実行ジョブ | ループに属さない実行のジョブの指示は `LOOP_BUDGET` を持たない | 単体テストで落とす |
+| I2 | ループの記録 | 予算の反映は、予算と予算の履歴のほかを変えない（止まった記録・周回・人の判断待ちの行は前と同じ） | NDF の単体テストで落とす |
 | I3 | ループの記録 | 予算の履歴の行は、予算が変わったときだけ 1 行足す。同じ値の反映では足さない | NDF の単体テストで落とす |
-| I4 | 実行ジョブ | `LOOP_BUDGET` を持つ再開のジョブでは、予算の反映が成功するまで conductor を起こさない。失敗したらジョブを失敗で終え、理由をジョブの出力に残す。例外は、導入した NDF に副命令が無い（終了コード 2）ときだけで、反映せずに今の振る舞いで続ける（決定 6） | ランナーの単体テストで落とす |
+| I4a | 実行ジョブ | `LOOP_BUDGET` を持つ再開のジョブでは、予算の反映が成功するまで conductor を起こさない（I4c の場合を除く） | ランナーの単体テストで落とす |
+| I4b | 実行ジョブ | 予算の反映が失敗したら、ジョブを失敗で終え、理由をジョブの出力に残す | ランナーの単体テストで落とす |
+| I4c | 実行ジョブ | 導入した NDF に副命令が無い（終了コード 2）ときは、反映せずに今の振る舞いで続ける（決定 6） | ランナーの単体テストで落とす |
 
 ### ドメインイベント
 
@@ -69,6 +72,8 @@
 | --- | --- | --- |
 | 再開のジョブ | `START=resume` の実行ジョブ。承認の答えで起こすものと、利用上限のリセット時刻の後に起こすものがある。保存した状態を復元して前回の続きから進める | 意味の変更なし（要求で追加済み） |
 | 予算の反映 | ループの記録の予算を、渡した単位の値で上書きすること。止まった記録の解除・周回の締めを伴わない | 追加（`ndf-workflow`） |
+| 予算の履歴 | ループの記録が持つ、予算の上書きの記録。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す | 追加（`ndf-workflow`） |
+| 人の判断待ちの行 | ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行。`loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」（`ndf-issue-upkeep`）とは別の語にする | 追加（`ndf-workflow`） |
 
 ## 機能一覧
 
@@ -83,10 +88,10 @@
 | 要素 | 責務 |
 | --- | --- |
 | サービスの実行ジョブの指示の組み立て（`factory/api/src/runs/control.ts` の `buildInstruction`） | ループの実行の入力があれば、`START=loop` と `START=resume` の両方で宣言した予算を `LOOP_BUDGET` に載せる。マイルストーンは `START=loop` だけのまま |
-| ランナーの手順（`factory/runner/src/main.ts` の `runJob`） | `START=resume` で `LOOP_NAME` と `LOOP_BUDGET` があれば、状態の復元と承認の答えの記録の後、人の判断待ちへの答えの前に、予算の反映を呼ぶ。失敗したら conductor を起こさない |
+| ランナーの手順（`factory/runner/src/main.ts` の `runJob`） | `START=resume` で `LOOP_NAME` と `LOOP_BUDGET` があれば、状態の復元と承認の答えの記録の後、人の判断待ちの行への答えの前に、予算の反映を呼ぶ。失敗したら conductor を起こさない |
 | ランナーの実行の部品（`factory/runner/src/runtime.ts` の `JobRuntime` の実装） | 新しいメソッド `applyLoopBudget(name, budget)` で `sprint-state.py loop budget <名> --budget-<単位> <値>…` を打つ。終了コードが 0 なら `"applied"`、2 なら `"unsupported"` を返し、ほかは例外を投げる。引数の並べ方は `loopPrompt` と同じ関数で作る |
 | NDF の副命令の引数（`plugins/ndf/scripts/lib/sprint_loop_cli.py`） | `loop budget <名> [--budget-laps N] [--budget-usd X] [--budget-hours H] [--root]` を足し、`cmd_budget` へ振り分ける |
-| NDF の予算の反映（`plugins/ndf/scripts/lib/sprint_loop.py` の `cmd_budget`） | 排他の中で記録を読み、既存の `apply_budget` で上書きし、記録を書く。止まった記録・周回・人の判断待ちに触れない |
+| NDF の予算の反映（`plugins/ndf/scripts/lib/sprint_loop.py` の `cmd_budget`） | 排他の中で記録を読み、既存の `apply_budget` で上書きし、記録を書く。止まった記録・周回・人の判断待ちの行に触れない |
 | 確定仕様（`docs/specifications/ndf-factory-dev-loops.md`・`docs/specifications/ndf-workflow-development-loop.md`）と NDF の手順（`plugins/ndf/skills/development-workflow/references/loop.md`） | 再開のジョブにも予算が届くこと、ランナーの手順、`loop budget` の副命令の契約を書く |
 
 ```mermaid
@@ -165,7 +170,7 @@ classDiagram
 | 1. 状態の復元 | `POST /run-jobs/state`（`get`）で保存した状態を戻す | ジョブを失敗で終える（既存） |
 | 2. 承認の答えの記録 | `APPROVAL_REQUEST_ID` があれば `sprint-state.py gate` で書く | 同上（既存） |
 | **3. 予算の反映** | `LOOP_NAME` と `LOOP_BUDGET` があれば `sprint-state.py loop budget <名> --budget-*` を打つ | 終了コード 2（導入した NDF に副命令が無い）は、標準エラーへ 1 行残して手順 4 へ進む。ほかの 0 以外は conductor を起こさずジョブを失敗で終え、「ループの記録へ予算を反映できない（終了コード N）」を出力の要約へ残す |
-| 4. 人の判断待ちへの答え | `LOOP_ANSWERS` のうち答えの無い番号へ `loop answer` を打つ | 同上（既存） |
+| 4. 人の判断待ちの行への答え | `LOOP_ANSWERS` のうち答えの無い番号へ `loop answer` を打つ | 同上（既存） |
 | 5. conductor | 「前回の続きから進めてください」で起こす。conductor が `loop start <名>`（予算なし）で止まった記録を解き、続きを進める | 既存 |
 
 ```mermaid
@@ -213,9 +218,9 @@ sequenceDiagram
 
 根拠: Value 7 / Value 8（MVV 版 5）
 
-### 決定 3: 書き込みの対象が重ならないため、予算の反映は承認の答えの記録の後、人の判断待ちへの答えの前に置く
+### 決定 3: 書き込みの対象が重ならないため、予算の反映は承認の答えの記録の後、人の判断待ちの行への答えの前に置く
 
-予算の反映が変えるのは記録の予算と予算の履歴だけで、人の判断待ちへの答え（`loop answer`）が変えるのは人の判断待ちの行と周回のスプリント状態である。どちらも同じ排他の中で記録を読み直して書くため、どちらを先にしても記録は同じになる。そのうえで反映を先に置くのは、反映が失敗したときにループの記録へ何も書かずにジョブを終えられるためである。承認の答えの記録（`sprint-state.py gate`）は周回のスプリント状態を書き、ループの記録には触れない。
+予算の反映が変えるのは記録の予算と予算の履歴だけで、人の判断待ちの行への答え（`loop answer`）が変えるのは人の判断待ちの行と周回のスプリント状態である。どちらも同じ排他の中で記録を読み直して書くため、どちらを先にしても記録は同じになる。そのうえで反映を先に置くのは、反映が失敗したときにループの記録へ何も書かずにジョブを終えられるためである。承認の答えの記録（`sprint-state.py gate`）は周回のスプリント状態を書き、ループの記録には触れない。
 
 根拠: Value 5（MVV 版 5）
 
@@ -243,17 +248,17 @@ Factory の実行は作った時点の NDF の版を固定し、再開のジョ�
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I4 | ランナー: 承認の依頼の識別子のある再開のジョブで、偽の実行の部品の `applyLoopBudget` が書いた予算を、`runConductor` の偽物が起動の時点で読むと新しい値である。呼ぶ順は状態の復元 → 承認の答えの記録 → 予算の反映 → 人の判断待ちへの答え → conductor | 反映の呼び出しを conductor の後へ移す、または消すと落ちる |
+| 受け入れ条件 1・I4a | ランナー: 承認の依頼の識別子のある再開のジョブで、偽の実行の部品の `applyLoopBudget` が書いた予算を、`runConductor` の偽物が起動の時点で読むと新しい値である。呼ぶ順は状態の復元 → 承認の答えの記録 → 予算の反映 → 人の判断待ちの行への答え → conductor | 反映の呼び出しを conductor の後へ移す、または消すと落ちる |
 | 受け入れ条件 2 | ランナー: 承認の依頼の識別子の無い再開のジョブでも、受け入れ条件 1 と同じ順で反映を呼ぶ | 反映を `APPROVAL_REQUEST_ID` の有無の条件の中へ入れると落ちる |
 | 受け入れ条件 3 | NDF: 費用の予算 60 のループへ `loop budget --budget-usd 40` を打ち、消費の和 50 で周回を締めると `budget_usd` で止まる | `cmd_budget` が記録を書かない、または別の鍵へ書くと落ちる |
 | 受け入れ条件 4 | NDF: 費用の予算 40 のループへ `loop budget --budget-usd 100` を打ち、消費の和 50 で周回を締めると止まる条件を書かない | 同上 |
-| 受け入れ条件 5・I1 | サービス: 予算を変えた後の `requestResume` と `resumeAfterReset` の指示に、変えた予算の `LOOP_BUDGET` が載り、`validateRunJobInstruction` を通る | 予算の並べ方を `START=loop` の条件の中へ戻すと落ちる |
+| 受け入れ条件 5・I1a | サービス: 予算を変えた後の `requestResume` と `resumeAfterReset` の指示に、変えた予算の `LOOP_BUDGET` が載り、`validateRunJobInstruction` を通る | 予算の並べ方を `START=loop` の条件の中へ戻すと落ちる |
 | 受け入れ条件 6・I3 | NDF: 同じ値の `loop budget` では予算の履歴の行数が変わらず `unchanged`、違う値では 1 行増えて `changed` | 比べずに毎回足すと落ちる |
-| 受け入れ条件 7・I2 | NDF: `gate2_returned` で止まった記録へ `loop budget` を打つと、予算と予算の履歴のほか（`status`・`stop`・`stops`・周回・人の判断待ち）が前と同じである。その後の `loop start <名>` で止まった記録の解除が 1 回起きる | `cmd_budget` から `resume_stopped` を呼ぶと落ちる |
+| 受け入れ条件 7・I2 | NDF: `gate2_returned` で止まった記録へ `loop budget` を打つと、予算と予算の履歴のほか（`status`・`stop`・`stops`・周回・人の判断待ちの行）が前と同じである。その後の `loop start <名>` で止まった記録の解除が 1 回起きる | `cmd_budget` から `resume_stopped` を呼ぶと落ちる |
 | 受け入れ条件 8 | ランナー: `LOOP_BUDGET` の無い再開のジョブでは `applyLoopBudget` を呼ばない | 条件を `LOOP_NAME` だけにすると落ちる |
-| 受け入れ条件 9・I1 | サービス: ループに属さない実行の再開のジョブの指示に `LOOP_BUDGET` が無い。ランナー: `LOOP_NAME` の無いジョブでは反映を呼ばない | ループの入力の有無を見ずに載せると落ちる |
-| 受け入れ条件 10・I4 | ランナー: `applyLoopBudget` が例外を投げると `runConductor` を呼ばず、`job.finished` が失敗で要約に理由を持つ。NDF: 記録の無いループ名と `--budget-*` の無い呼び出しで終了コード 1 | 例外を握りつぶして進めると落ちる |
-| I4 の例外（決定 6） | ランナー: `applyLoopBudget` が `"unsupported"` を返すと conductor を起こし、ジョブは今の振る舞いで終わる。実行の部品: 終了コード 2 を `"unsupported"`、1 を例外へ写す | 2 を例外にする、または 1 を `"unsupported"` にすると落ちる |
+| 受け入れ条件 9・I1b | サービス: ループに属さない実行の再開のジョブの指示に `LOOP_BUDGET` が無い。ランナー: `LOOP_NAME` の無いジョブでは反映を呼ばない | ループの入力の有無を見ずに載せると落ちる |
+| 受け入れ条件 10・I4b | ランナー: `applyLoopBudget` が例外を投げると `runConductor` を呼ばず、`job.finished` が失敗で要約に理由を持つ。NDF: 記録の無いループ名と `--budget-*` の無い呼び出しで終了コード 1 | 例外を握りつぶして進めると落ちる |
+| I4c（決定 6） | ランナー: `applyLoopBudget` が `"unsupported"` を返すと conductor を起こし、ジョブは今の振る舞いで終わる。実行の部品: 終了コード 2 を `"unsupported"`、1 を例外へ写す | 2 を例外にする、または 1 を `"unsupported"` にすると落ちる |
 | 引数の並べ方 | ランナー: `laps=3,usd=60` から `--budget-laps 3 --budget-usd 60` を作る関数を、`loopPrompt` と `applyLoopBudget` が共有する | 片方だけ並べ方を変えると、既存の `loopPrompt` のテストか新しいテストが落ちる |
 
 ## 設計の結果
