@@ -23,7 +23,16 @@
 | #1983 の記録: `release` のステップが同じ run の同じ失敗で 7 回流され、ステップの上限（366 秒）で止まった | 実測（スプリント m1953 の本番の配布の記録） | 同じ原因の打ち直しを回数で止める仕組みが、呼び出しの再試行だけでなくステップの打ち直しにも要ること |
 | 上限の宣言の読み込みの費用: 120 の方針を持つ 18.9 KB の JSON を `json.load` で読む起動と読まない起動の中央値（10 回）は、どちらも 21.5 ms で、差は 1 ms 未満。`supervise.py --help` の中央値は 262 ms | 実測（2026-11-04、`/work/ai-plugins/.venv/bin/python -I`） | 宣言の読み込みが #2335 の起動の増分の上限 150 ms の内訳で 1 ms 未満に収まること |
 
-数え方: `git ls-files 'plugins/ndf/*.py'` からテストと実験版を除き、構文木で (1) 名前が大文字で `TIMEOUT`・`RETRY`・`RETRIES`・`WAIT`・`INTERVAL`・`BUDGET`・`DEADLINE`・`POLL`・`STALL`・`MARGIN`・`GRACE`・`ATTEMPTS` のどれかを含む定数への 0 でない数字の代入、(2) 呼び出しのキーワード引数、(3) 関数の引数の既定値、(4) `.get("<キー>", <数字>)` の 2 つ目の引数を数えた。(2)〜(4) のキーは「構造チェックの新しい種類」の表にある 12 個である。
+数え方（構文木で数えた）:
+
+| 項目 | 中身 |
+| --- | --- |
+| 対象のファイル | `git ls-files 'plugins/ndf/*.py'` から、テストと実験版を除いたもの |
+| (1) 定数 | 名前が大文字で `TIMEOUT`・`RETRY`・`RETRIES`・`WAIT`・`INTERVAL`・`BUDGET`・`DEADLINE`・`POLL`・`STALL`・`MARGIN`・`GRACE`・`ATTEMPTS` のどれかを含む定数への、0 でない数字の代入 |
+| (2) キーワード引数 | 呼び出しのキーワード引数 |
+| (3) 既定値 | 関数の引数の既定値 |
+| (4) `.get` | `.get("<キー>", <数字>)` の 2 つ目の引数 |
+| (2)〜(4) のキー | 「構造チェックの新しい種類」の表にある 12 個 |
 
 要求と受け入れ条件は #2343 の本文にある（コピーは [issue-2343-requirements.md](issue-2343-requirements.md) ）。
 この文書は「どう作るか」だけを扱う。決定の記録は [issue-2343-design-decisions.md](issue-2343-design-decisions.md) にある。
@@ -118,6 +127,8 @@
 | 契約の検査（`scripts/check-ndf-contracts.py`・`scripts/contracts_lib/`） | 宣言の形（I1）と方針の名前の対応（I4）を確かめ、契約の一覧（`plugins/ndf/contracts/index.md`）に「上限の宣言」の表を描く | 変更 |
 | 上限の値を持つ各部品（69 ファイル） | 数字のリテラルを `limits.seconds("<方針の名前>")` などの呼び出しへ置き換える | 変更 |
 | 例外リスト（`scripts/script-structure-allow/`） | 待ちのループ 24 か所と、上限でない数字 3 か所（割合 2・見直しの周期 1）の行を持つ | 変更 |
+
+### 要素の間の関係
 
 ```mermaid
 graph TD
@@ -228,8 +239,14 @@ classDiagram
     RunState ..> cause_key : 鍵を作る
 ```
 
+### 値の扱い
+
 - `Policy` は値オブジェクト（`NamedTuple`）で、方針に無い値は `None`。計算で上限を縮める呼び出し元（設計の結果の読み取りの残りの予算など）は `policy._replace(seconds=<計算した値>)` で渡す。リテラルを渡す経路は I3 が落とす
-- `Waited` の今の 5 つの値（`value`・`attempts`・`waited`・`done`・`error`）は位置も意味も変えず、後ろに `stop`（`done` / `deadline` / `same-cause` / `attempts`）・`cause`（最後の失敗の原因の鍵）・`same`（その鍵の回数）・`reason`（I10 の理由の文）を既定値つきで足す。今の呼び出し元は書き換えずに動く
+- `Waited` の今の 5 つの値（`value`・`attempts`・`waited`・`done`・`error`）は、位置も意味も変えない。後ろに次の 4 つの値を既定値つきで足す。今の呼び出し元は書き換えずに動く
+  - `stop`: 止まり方（`done` / `deadline` / `same-cause` / `attempts`）
+  - `cause`: 最後の失敗の原因の鍵
+  - `same`: その鍵の回数
+  - `reason`: I10 の理由の文
 - `RunState.cause_counts` は `{ステップの id: {原因の鍵: 回数}}` で、`fail_counts` と同じく `snapshot` と `replay` が運ぶ。`state.json` には書かない（`durable-boundary` の検査が `state.json` の鍵を `log`・`llm`・`project_mvv` に限るため）
 
 ## データ構造
@@ -280,11 +297,11 @@ classDiagram
 | `phases()` / `stalls()` / `cli_margin()` | — | 工程 → 秒、担当 → 秒、秒 | 宣言の誤り → `LimitsError` |
 | CLI `cli-timeout` / `monitor-timeout` / `check` | 今と同じ | 今と同じ | 今の失敗に加え、宣言の誤りは理由を標準エラーへ 1 行出して終了コード 1 |
 
-`PHASE_TIMEOUT`・`AGENT_STALL`・`DEFAULT_STALL`・`CLI_MARGIN` の定数は消し、読む側（`lib/monitor.py`・`skills/external-ai/scripts/external-ai.py`）は
-`phases()`・`stalls()`・`cli_margin()` を同じ Pull Request で呼ぶ。`DEFAULT_PHASE`（工程の名前）は数字でないため残す。
+`PHASE_TIMEOUT`・`AGENT_STALL`・`DEFAULT_STALL`・`CLI_MARGIN` の定数は消す。読む側は `lib/monitor.py` と `skills/external-ai/scripts/external-ai.py` である。
+どちらも同じ Pull Request で `phases()`・`stalls()`・`cli_margin()` を呼ぶ。`DEFAULT_PHASE`（工程の名前）は数字でないため残す。
 
-**`LimitsError` はエントリポイントで終了コード 1 になる。** 実行の核（#2337）が入る前は、各エントリポイントの今の例外の扱い（捕まえないエントリポイントは Python の既定で終了コード 1）
-のままにし、`LimitsError` を捕まえて組み込みの値へ戻す処理を書かない。核が入った後は、核が `stopped` と理由に変える。
+**`LimitsError` はエントリポイントで終了コード 1 になる。** 実行の核（#2337）が入る前は、各エントリポイントの今の例外の扱いのままにする
+（捕まえないエントリポイントは Python の既定で終了コード 1）。`LimitsError` を捕まえて組み込みの値へ戻す処理は書かない。核が入った後は、核が `stopped` と理由に変える。
 
 ### 待ちの部品（`lib/waits.py`）
 
