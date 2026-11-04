@@ -1,25 +1,31 @@
-// 画面向けの経路（#2186・#2347）。取り込み・キーの持ち込み・課題の候補・スプリントの実行・開発ループ。
+// 画面向けの経路（#2186・#2347・#2172）。取り込み・キーの持ち込み・課題の候補・スプリントの実行・開発ループ。
 // どの経路も resolveFromRequest でアカウントを解決し、他人のアカウントは #2170 の I18 と同じ 403
 import type { Context, Hono } from "hono";
 import { resolveFromRequest, type AuthEnv } from "../auth/resolve.ts";
 import type { CredentialService } from "../credentials/service.ts";
 import { InvalidRequestError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
+import type { OrganizerControl } from "../organizer/control.ts";
+import type { ProgressReader } from "../progress/read.ts";
 import type { RepositoryService } from "../repositories/service.ts";
 import { chooseCandidates, type CandidateModel } from "../runs/candidates.ts";
 import type { RunControl } from "../runs/control.ts";
 import type { LoopControl } from "../runs/loops.ts";
 import type { RunsTable } from "../runs/table.ts";
 import { readJson } from "./body.ts";
+import { registerSprintViews, sprintRunList } from "./sprint-views.ts";
 
 export interface FactoryDeps {
   repositories: RepositoryService;
   credentials: CredentialService;
   control: RunControl;
   loops: LoopControl;
+  organizer: OrganizerControl;
   table: RunsTable;
   github: GitHubPort;
   candidateModel: CandidateModel;
+  // 進捗の記録の読み出し（スプリントの一覧と詳細。#2172）
+  reader: ProgressReader;
 }
 
 function positiveInt(raw: string | undefined): number {
@@ -97,8 +103,11 @@ export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): vo
   app.get("/accounts/:accountId/sprint-runs", async (c) => {
     const ctx = await ctxOf(c);
     const raw = c.req.query("repository_id");
-    return c.json({ sprint_runs: await deps().control.listSprintRuns(ctx, raw === undefined ? null : positiveInt(raw)) });
+    return c.json({ sprint_runs: await sprintRunList(deps(), ctx, raw === undefined ? null : positiveInt(raw)) });
   });
+
+  // スプリントの詳細・工程の中身・バックログ（#2172）
+  registerSprintViews(app, deps);
 
   app.post("/accounts/:accountId/sprint-runs/:sprintRunId/cancel", async (c) => {
     const ctx = await ctxOf(c);
@@ -139,5 +148,27 @@ export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): vo
   app.post("/accounts/:accountId/loops/:loopId/answers", async (c) => {
     const ctx = await ctxOf(c);
     return c.json(await deps().loops.answer(ctx, c.req.param("loopId"), await readJson(c)));
+  });
+
+  // Factory のオーガナイザー（openapi/organizer.yaml。#2439）。一覧と履歴は読むだけで、承認を確定する経路は持たない（I66）
+  app.get("/accounts/:accountId/repositories/:repositoryId/approval-requests", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().organizer.list(ctx, positiveInt(c.req.param("repositoryId"))));
+  });
+
+  app.get("/accounts/:accountId/repositories/:repositoryId/releases", async (c) => {
+    const ctx = await ctxOf(c);
+    const raw = c.req.query("limit");
+    const limit = raw === undefined ? 20 : Number(raw);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new InvalidRequestError("limit は 1〜100 の整数です");
+    return c.json(await deps().organizer.history(ctx, positiveInt(c.req.param("repositoryId")), limit));
+  });
+
+  // 止まった配布を解く。画面の経路は Cognito の利用者の token だけを受ける（承認ゲートではなく失敗の扱い。決定 11）
+  app.post("/accounts/:accountId/repositories/:repositoryId/releases/:seq/resolve", async (c) => {
+    const ctx = await ctxOf(c);
+    const seq = Number(c.req.param("seq"));
+    if (!Number.isInteger(seq) || seq < 1) throw new InvalidRequestError("まとめた配布の連番の形ではありません");
+    return c.json(await deps().organizer.resolve(ctx, positiveInt(c.req.param("repositoryId")), seq, await readJson(c)), 202);
   });
 }

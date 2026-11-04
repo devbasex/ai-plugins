@@ -88,11 +88,11 @@ export function judgeLimits(
       current: current.runningSprintRuns,
     });
   }
-  // リポジトリの同時の数は、プランの同時の数と登録の宣言の小さい方
+  // リポジトリの同時の数は、料金プランの同時の数と登録の宣言の小さい方
   if (current.runningRepoRuns !== undefined) {
     const declared = current.repoMaxRuns ?? null;
     const repoLimit = declared === null ? limits.concurrentSprintRuns : Math.min(limits.concurrentSprintRuns, declared);
-    // 宣言の無いリポジトリの上限はプランの値で、アカウントの上限と同時に当たる。理由を重ねない
+    // 宣言の無いリポジトリの上限は料金プランの値で、アカウントの上限と同時に当たる。理由を重ねない
     const accountHit = reasons.some((r) => r.quantity === "concurrent_sprint_runs");
     if (!(current.runningRepoRuns < repoLimit) && (!accountHit || repoLimit < limits.concurrentSprintRuns)) {
       reasons.push({ quantity: "concurrent_repo_runs", limit: repoLimit, current: current.runningRepoRuns });

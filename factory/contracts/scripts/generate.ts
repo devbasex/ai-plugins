@@ -23,6 +23,8 @@ export function generateFromSchema(schema: JSONSchema, name: string): Promise<st
   return compile(schema, schema.title ?? name, {
     bannerComment: BANNER,
     additionalProperties: false,
+    // 上限つきの配列を組の和に展開しない（上限は定義の検査が縛る）
+    maxItems: 1,
     cwd: `${root}schemas`,
     style: { singleQuote: false, printWidth: 120 },
   });

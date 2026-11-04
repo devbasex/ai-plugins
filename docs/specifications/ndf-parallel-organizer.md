@@ -56,7 +56,9 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 - **1 台の中に閉じる**: まとめるのは 1 台の中のレーンだけである。進行は 1 つの SQLite（DBOS）に閉じる。
   Neural Development Factory の実行をまとめるのは Factory のオーガナイザー（https://github.com/devbasex/ai-plugins/issues/2439）で、
   同じ層の別の実装として互いに排他にする。依頼の形は契約 `parallel-request.json` として公開してある。
-  なお今の `parallel.py` は Factory の実行ジョブ（`NDF_FACTORY_RUN`）を見分けず、排他の検査は持たない
+  Factory の実行ジョブ（環境変数 `NDF_FACTORY_RUN`）では、`parallel.py` の `init`・`start`・`run` が終了コード 1 で断る。
+  外のオーガナイザーのレーン（環境変数 `NDF_ORGANIZER_DIR`）は、計画名の代わりに `--external` を付けて依頼と答えを置き場のファイルで受け渡す。
+  置き場の形は契約 `parallel-external.json`、手順は parallel.md の「外のオーガナイザーのレーン」にある
 - **モード**: オーガナイザーはモードを持たない。レーンの中のスプリントは今どおりモードを判定する
 - **扱わないもの**: `main` へのホットフィックス、動いている計画へのレーンの追加（新しい計画名で `init` し直す）、GitHub API の同時本数の枠
 
@@ -264,10 +266,13 @@ stateDiagram-v2
 | `NDF_PARALLEL_POLL` | 60 | `inbox` と `resume` を待つ秒（テストで縮める） |
 | `NDF_PARALLEL_RELAY` | — | 統括役の CLI の打ち方の差し替え（テスト用） |
 | `NDF_RELAY_NAME`・`NDF_RELAY_DIR` | — | レーンの判定と役割のファイルの置き場（ラッパーが立てる） |
+| `NDF_FACTORY_RUN` | — | Factory の実行ジョブの印。あれば `init`・`start`・`run` を断る |
+| `NDF_ORGANIZER_DIR`・`NDF_ORGANIZER_LANE` | — | 外のオーガナイザーの置き場とレーンの名前。あれば副命令は `--external` で置き場のファイルを読み書きする |
 
 ### 副命令の終了コード
 
 各副命令の意味と打つ場面は parallel.md と `parallel.py` の冒頭の表にある。ここでは終了コードだけを挙げる。
+`NDF_FACTORY_RUN` があるときの `init`・`start`・`run` は 1 で終わる。`--external` の副命令の終了コードは `lib/parallel_external_cli.py` の冒頭の表にある。
 
 | 副命令 | 0 | 1 | 2 | 3 | ほか |
 | --- | --- | --- | --- | --- | --- |

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "path": "plugins/ndf/scripts/parallel.py",
-  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめた配布の提示と確定・レーンの配布の依頼と答え（#2436）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
+  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめた配布の提示と確定・レーンの配布の依頼と答え（#2436）。外のオーガナイザーのレーンと配布の実行は `--external` で置き場のファイルとやり取りする（#2439）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
   "args": {
     "options": [],
     "positionals": [],
@@ -21,6 +21,7 @@
       },
       "await": {
         "options": [
+          "--external",
           "--from",
           "--timeout"
         ],
@@ -33,6 +34,12 @@
         "positionals": [
           "name"
         ]
+      },
+      "compose": {
+        "options": [
+          "--external"
+        ],
+        "positionals": []
       },
       "confirm": {
         "options": [
@@ -59,7 +66,9 @@
       },
       "present": {
         "options": [
-          "--approval"
+          "--approval",
+          "--external",
+          "--record"
         ],
         "positionals": [
           "name",
@@ -69,6 +78,7 @@
       },
       "request": {
         "options": [
+          "--external",
           "--issues",
           "--lane",
           "--prs",
@@ -105,6 +115,7 @@
       "settle": {
         "options": [
           "--done",
+          "--external",
           "--reason",
           "--rejected"
         ],
@@ -151,7 +162,10 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_FACTORY_RUN",
     "NDF_MVV_STATE_DIR",
+    "NDF_ORGANIZER_DIR",
+    "NDF_ORGANIZER_LANE",
     "NDF_PARALLEL_MAX_PLANS",
     "NDF_PARALLEL_POLL",
     "NDF_PARALLEL_RELAY",
@@ -166,6 +180,7 @@
     "NDF_SUPERVISE_LIMIT_SLEEP",
     "NDF_SUPERVISE_MODEL",
     "NDF_SV_STATE_DIR",
+    "NDF_VERSION",
     "NDF_WHOLE_RUNS_DIR",
     "XDG_STATE_HOME"
   ],

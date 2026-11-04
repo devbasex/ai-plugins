@@ -76,7 +76,7 @@ export interface AccountContext {
   executionMode: ExecutionMode;
 }
 
-// I13: 種類とプランの組
+// I13: 種類と料金プランの組
 export function planFitsKind(kind: AccountKind, plan: Plan): boolean {
   return kind === "team" ? plan === "team" : PERSONAL_PLANS.includes(plan);
 }

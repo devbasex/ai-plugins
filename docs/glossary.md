@@ -892,10 +892,10 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | スプリントの詳細 | — | 1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172） | — | — | — |
 | 詳細パネル | — | スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172） | — | — | — |
 | バックログの画面 | — | 取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172） | — | — | — |
-| フェーズの名前 | — | phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172） | — | — | — |
-| 工程の記録 | — | スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172） | — | — | — |
-| 工程の中身 | — | 1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172） | — | — | — |
-| スプリント全体の欄 | — | スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172） | — | — | — |
+| フェーズの名前 | — | phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 工程の記録 | — | スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 工程の中身 | — | 1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| スプリント全体の欄 | — | スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
 | 区間 | — | 1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | 区間の上限 | — | 1 つの実行ジョブで起動してよい区間の数の上限（既定 20）。超えたジョブは section_limit で終わる | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | 同時のジョブの数 | `max_jobs` | 手元のマシンが同時に動かす実行ジョブの数の上限。手元のマシンが登録と心拍で申告し、サービスはそれを超えて指示を渡さない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |

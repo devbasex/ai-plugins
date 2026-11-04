@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { ApiError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
+import type { OrganizerControl } from "../organizer/control.ts";
 import { IngestForbiddenError, IngestUnauthorizedError, IngestUnavailableError } from "../progress/errors.ts";
 import { RunJobTokenError, type RunJobTokenVerifier, type VerifiedRunJob } from "../progress/run-job-token.ts";
 import type { RunControl } from "./control.ts";
@@ -15,6 +16,7 @@ export interface RunnerApiDeps {
   table: RunsTable;
   github: GitHubPort;
   platform: RunnerPlatform;
+  organizer?: OrganizerControl;
 }
 
 type Env = { Variables: { job: VerifiedRunJob } };
@@ -70,6 +72,31 @@ export function createRunnerApiApp(deps: () => RunnerApiDeps): Hono<Env> {
     const url = await d.platform.stateUrl(claims.sprintRunId, op, run.loopId ?? null);
     if (!url) throw new ApiError(404, "state_not_found", "保存した状態がありません");
     return c.json({ url: url.url, expires_at: url.expiresAt });
+  });
+
+  // 配布の依頼の答えと配布済みの範囲（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へ書く
+  app.get("/run-jobs/organizer/answers", async (c) => {
+    const d = deps();
+    const claims = c.get("job");
+    const { run } = await d.control.activeJobFor(claims.jobId, claims.sprintRunId).catch(() => {
+      throw new IngestForbiddenError();
+    });
+    if (!d.organizer) throw new IngestUnavailableError();
+    return c.json(await d.organizer.answersFor(run));
+  });
+
+  // 配布の実行のまとめた配布の中身（batch.json）。配布の実行のジョブだけが読める
+  app.get("/run-jobs/organizer/batch", async (c) => {
+    const d = deps();
+    const claims = c.get("job");
+    const { run, job } = await d.control.activeJobFor(claims.jobId, claims.sprintRunId).catch(() => {
+      throw new IngestForbiddenError();
+    });
+    if (run.purpose !== "release") throw new IngestForbiddenError();
+    if (!d.organizer) throw new IngestUnavailableError();
+    const batch = await d.organizer.batchFor(run, job.releaseStep ?? null);
+    if (!batch) throw new ApiError(404, "release_not_found", "まとめた配布が見つかりません");
+    return c.json(batch);
   });
 
   return app;

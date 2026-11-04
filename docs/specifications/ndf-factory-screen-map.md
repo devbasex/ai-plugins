@@ -29,20 +29,20 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | --- | --- | --- | --- | --- |
 | `/login` | ログイン | ログイン前 | あり | Google・GitHub でログイン（[accounts-and-plans](ndf-factory-accounts-and-plans.md)「ログインの流れ」） |
 | `/callback` | ログインの戻り | ログイン前 | あり | code を token に換える（accounts-and-plans「ログインの流れ」） |
-| `/account` | 自分のアカウント | 個人・管理者・席 | あり | 利用者の ID・個人のプランと実行の形態・使える量・チームの一覧・ログアウト（accounts-and-plans） |
+| `/account` | 自分のアカウント | 個人・管理者・席 | あり | 利用者の ID・個人の料金プランと実行の形態・使える量・チームの一覧・ログアウト（accounts-and-plans） |
 | `/teams/new` | チームを作る | 個人 | あり | Team を作る（accounts-and-plans） |
 | `/accounts/:accountId` | チームのアカウント | 管理者・席 | あり | 席の追加・種類の変更・削除（管理者）・実行の形態（管理者）・使える量（accounts-and-plans） |
 | `/accounts/:accountId/repositories` | リポジトリ | 個人・管理者・席 | あり | 導入の案内・登録と外す（個人・管理者）・同時の実行の数の宣言（個人・管理者）・実行の状態（[runs-and-runner](ndf-factory-runs-and-runner.md)「画面」） |
 | `/accounts/:accountId/model-credential` | キーの持ち込み | 個人・管理者 | あり | キーの保存と消去・外部 ID（runs-and-runner） |
 | `/accounts/:accountId/repositories/:repositoryId/sprints/new` | スプリントを始める | 個人・管理者・席 | あり | 課題の候補・選び直し・開始（runs-and-runner） |
-| `/accounts/:accountId/sprints` | スプリントの一覧 | 個人・管理者・席 | あり（見本） | フェーズと状態・取り消し |
-| `/accounts/:accountId/sprints/:sprintRunId` | スプリントの詳細 | 個人・管理者・席 | あり（見本） | 工程・PR・CI・承認ゲート・起票の依頼（[issue-requests](ndf-factory-issue-requests.md)） |
+| `/accounts/:accountId/sprints` | スプリントの一覧 | 個人・管理者・席 | あり | 今のフェーズ（5 つの棒）と今の工程・状態・状態の絞り込み・最後の動き（[contracts-and-progress](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)） |
+| `/accounts/:accountId/sprints/:sprintRunId` | スプリントの詳細 | 個人・管理者・席 | あり | フェーズの欄（仕上げに振り返りと棚卸し）・課題ごとの工程の記録・工程の詳細パネル・Pull Request と CI・承認ゲート・使用量（contracts-and-progress「スプリントの一覧と詳細の読み出し」）・起票の依頼（[issue-requests](ndf-factory-issue-requests.md)） |
 | `/accounts/:accountId/repositories/:repositoryId/loops` | ループ | 個人・管理者・席 | あり | 開発ループの一覧（名前・選定の対象・状態・周回の数・費用・予算の残り・最後に動いた時刻・止まった理由）・始める |
 | `/accounts/:accountId/loops/:loopId` | ループの詳細 | 個人・管理者・席 | あり | 周回・周回の実行と区間の数・利用上限の再開の時刻・人の判断待ちと答え・予算の変更・止める・次の周回を始める |
-| `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | 予定 | 順位の表と棚卸しの記録 |
+| `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | あり | 順位の表と棚卸しの記録（読むだけ） |
 | 未定 | 承認 | 個人・管理者・席 | 予定 | 承認の依頼・Web からの承認・通知 |
-| 未定 | 請求と使用量 | 個人・管理者 | 予定 | プランの料金・使用量の台帳・決済 |
-| 未定 | 手元のランナー | 個人・管理者 | 予定 | ランナーの登録・心拍 |
+| 未定 | 請求と使用量 | 個人・管理者 | 予定 | 料金プランの料金・使用量の台帳・決済 |
+| 未定 | 手元のマシン | 個人・管理者 | 予定 | 手元のマシンの登録・心拍 |
 
 ## ナビゲーション
 
@@ -59,18 +59,19 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 
 ## 見本の画面
 
-スプリントの一覧と詳細は、部品だけで組み、ダミーデータで動く見本である。並べる項目・フェーズの集合・工程の詳細パネルは #2172 が置き換え、経路は変えない。
+スプリントの一覧と詳細とバックログは、部品だけで組み、ダミーデータでも動く。一覧と詳細は開いている間、画面の設定の間隔（環境変数 `FACTORY_POLL_INTERVAL_MS`、既定 30 秒）で読み直し、読み直しが失敗しても前の表示を残して失敗の時刻を出す。
 
 | 状態 | 一覧 | 詳細 |
 | --- | --- | --- |
 | 読み込み中 | `LoadingState` | 同じ |
-| 0 件・見つからない | `EmptyState`「スプリントの実行はまだありません」 | `EmptyState`「このスプリントの実行は見つかりません」 |
+| 0 件 | `EmptyState`「スプリントの実行はまだありません」 | 工程が 0 件なら `EmptyState`「工程の記録はまだありません」 |
 | 失敗（5xx など） | `ErrorState` と「もう一度読む」 | 同じ |
 | 401 | token を消してログインへ | 同じ |
-| 403 | 「このアカウントを見る権限がありません」 | 同じ |
+| 403（無い実行も同じ） | 「このアカウントを見る権限がありません」 | 同じ |
+| 読み直しの失敗 | 前の表示を残し、上に「読み直せませんでした（<時刻>）」 | 同じ |
 | オフライン | 枠の `ConnectionStatus` が出し、画面は最後の表示を残す | 同じ |
 
-詳細は `Api` の `sprintRunDetails`（実行の ID の配列を受け、要素の配列を返す）で読む。本物の実装は詳細の経路がまだ無いため、アカウントの新しい順の 50 件から選ぶ。
+詳細は `Api` の `sprintRunDetails`、工程の中身は `stepDetails`、バックログは `backlogs` で読む（どれも ID の配列を受け、要素の配列を返す）。本物の実装は経路を 1 件ずつ読む。
 
 ## ダミーで起動する
 
@@ -86,6 +87,6 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 ## 関連リンク
 
 - [画面の部品](ndf-factory-ui-components.md)
-- [認証とアカウント・席・プラン](ndf-factory-accounts-and-plans.md)
+- [認証とアカウント・席・料金プラン](ndf-factory-accounts-and-plans.md)
 - [リポジトリの登録・スプリントの実行の制御・ランナー](ndf-factory-runs-and-runner.md)
 - [起票の依頼と起票の代行](ndf-factory-issue-requests.md)

@@ -65,9 +65,9 @@ describe("見本の画面（受け入れ条件 7・8）", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("スプリントの一覧");
   });
 
-  it("見つからない実行の詳細は空の状態を出す", async () => {
+  it("見つからない実行の詳細は、他人の実行と同じく権限が無い旨を出す（有無を明かさない）", async () => {
     show(`${sprints}/sr-none`);
-    expect(await screen.findByText("このスプリントの実行は見つかりません")).toBeTruthy();
+    expect(await screen.findByText("このアカウントを見る権限がありません")).toBeTruthy();
   });
 });
 
@@ -112,7 +112,7 @@ describe("言語を足す（受け入れ条件 13・I6）", () => {
     expect(within(table).getByRole("columnheader", { name: "Issues" })).toBeTruthy();
     // 訳の無いキーは日本語で出る
     expect(within(table).getByRole("columnheader", { name: "状態" })).toBeTruthy();
-    expect(within(table).getByText(/11\/1\/2026/)).toBeTruthy();
+    expect(within(table).getAllByText(/11\/1\/2026/).length).toBeGreaterThan(0);
   });
 
   it("ブラウザの言語に翻訳が無ければ日本語で出る", async () => {

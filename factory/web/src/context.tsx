@@ -10,6 +10,8 @@ export interface Services {
   auth: Auth;
   api: Api;
   connection: ConnectionSource;
+  // 一覧と詳細を読み直す間隔（ミリ秒）。無ければ既定の 30 秒
+  pollIntervalMs?: number;
 }
 
 export const ServicesContext = createContext<Services | null>(null);
