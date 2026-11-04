@@ -129,5 +129,6 @@
 | [ndf-factory-organizer-data-and-contracts.md](ndf-factory-organizer-data-and-contracts.md) | Neural Development Factory: Factory のオーガナイザーの実行の表の行（根・受けた依頼・まとめた配布・記録）と足した列、画面向けとランナー向けの経路・release.* の進捗の事象と冪等の鍵・ジョブの指示・NDF の置き場の契約（ndf-factory-organizer.md から分けた）。#2439 |
 | [ndf-parallel-organizer.md](ndf-parallel-organizer.md) | 並列の計画（plan.json）を 1 度書き、--parallel のオーガナイザーが耐久ワークフローでレーンを起動・観測し、本番の配布を develop のコミットの範囲で 1 本にまとめ、区分つきの問いを集める設計判断・常に成り立つ条件・メッセージとイベントの形・置き場。手順は development-workflow の references/parallel.md と issue-plan-strategy の references/parallel-plan.md が正 |
 | [ndf-factory-organizer.md](ndf-factory-organizer.md) | Neural Development Factory: Factory のオーガナイザー（同じリポジトリで並行する実行の本番の配布を配布の実行 1 本にまとめる・待ちの判定・止まった配布と再開・承認と問いのリポジトリごとの一覧・NDF の切り替え口・手元のマシンと料金プランの語）。#2439 |
+| [ndf-factory-sprint-views.md](ndf-factory-sprint-views.md) | Neural Development Factory: スプリントの一覧と詳細・工程の中身・バックログの読み出し（事象から導く派生・フェーズの名前の対応づけ・ランナーが送る工程の中身と伏せ字・経路の形・読み出しの口・画面と読み直し・常に成り立つ条件）。#2172 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
