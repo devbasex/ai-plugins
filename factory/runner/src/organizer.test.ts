@@ -55,16 +55,17 @@ describe("置き場の翻訳（受け入れ条件 10、I59・I68）", () => {
     expect(await releaseBodies(files, { SPRINT_RUN_ID: "sr1", START: "loop" })).toEqual([]);
   });
 
-  it("レーンの名前は #2436 のレーン名の形に収まり、NDF へ 3 つの環境変数を渡す", () => {
+  it("レーンの名前は #2436 のレーン名の形に収まり、NDF へ 4 つの環境変数を渡す", () => {
     const loop = laneName({ SPRINT_RUN_ID: "x", LOOP_NAME: "LFactory3-very-long-loop-name-over-limit" });
     const run = laneName({ SPRINT_RUN_ID: "0123456789abcdef0123456789abcdef" });
     for (const name of [loop, run]) expect(name).toMatch(/^[a-z0-9][a-z0-9_-]{0,31}$/);
     expect(run).toBe("run-0123456789abcdef");
     expect(loop).toBe("loop-lfactory3-very-long-loop-na");
-    expect(organizerEnv({ SPRINT_RUN_ID: "sr1" }, "/w/repo/.ndf/organizer")).toEqual({
+    expect(organizerEnv({ SPRINT_RUN_ID: "sr1", NDF_VERSION: "10.28.0@0123abcd" }, "/w/repo/.ndf/organizer")).toEqual({
       NDF_FACTORY_RUN: "1",
       NDF_ORGANIZER_DIR: "/w/repo/.ndf/organizer",
       NDF_ORGANIZER_LANE: "run-sr1",
+      NDF_VERSION: "10.28.0@0123abcd",
     });
   });
 });
@@ -140,5 +141,13 @@ describe("配布の依頼と配布の実行のジョブ（受け入れ条件 7�
     expect(t.events.find((e) => e.type === "release.presented")!.idempotency_key).toBe("sr1:presented:1");
     expect(t.events.find((e) => e.type === "gate.reached")!.payload).toMatchObject({ kind: "gate2" });
     for (const e of t.events) expect(validateProgressEvent(e).ok, e.type).toBe(true);
+  });
+
+  it("配布の実行が提示を書かずに本番のプランの中で止まれば、conductor が gate2 と言っても判断（decision）で送る", async () => {
+    const files = memoryFiles();
+    const inst = { ...base, START: "release" as const, ISSUES: undefined, RELEASE_SEQ: "1", RELEASE_STEP: "confirm:1" as const };
+    const t = harness(files, async () => ({ report: "判断が要る", summary: "本番のプランが止まった", gate: { kind: "gate2", pr_url: null, material: "資料" } }));
+    await t.run(inst);
+    expect(t.events.find((e) => e.type === "gate.reached")!.payload).toMatchObject({ kind: "decision" });
   });
 });

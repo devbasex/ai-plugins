@@ -120,7 +120,10 @@ describe("配布の事象の出所と鍵（#2439）", () => {
     const requested = { request_id: "run-sr-1-r1", lane: "run-sr-1", prs: [1], issues: [], ndf_version: "10.27.16", requested_at: "2026-11-02T02:00:00Z" };
     expect(authorizeRunner(ev("release.requested", "run-sr-1-r1", requested), job)).toBe(true);
     expect(authorizeRunner(ev("release.requested", "job-1:3", requested), job)).toBe(false);
-    expect(authorizeRunner(ev("release.settled", "sr-1:settled", { seq: 1, result: "failed", prs: [], lanes: [] }), job)).toBe(true);
+    expect(authorizeRunner(ev("release.settled", "sr-1:settled:failed", { seq: 1, result: "failed", prs: [], lanes: [] }), job)).toBe(true);
+    // 失敗の後の再開の成功は別の鍵（同じ実行の failed の鍵では受けない）
+    expect(authorizeRunner(ev("release.settled", "sr-1:settled:released", { seq: 1, result: "released", prs: [], lanes: [] }), job)).toBe(true);
+    expect(authorizeRunner(ev("release.settled", "sr-1:settled:failed", { seq: 1, result: "released", prs: [], lanes: [] }), job)).toBe(false);
     expect(authorizeRunner(ev("release.settled", "1:settled", { seq: 1, result: "failed", prs: [], lanes: [] }), job)).toBe(false);
     expect(authorizeRunner(ev("release.progress", "sr-1:progress:tagged", { seq: 1, stage: "tagged" }), job)).toBe(true);
     expect(authorizeRunner(ev("release.answered", "1:sr-1", { seq: 1, result: "released" }), job)).toBe(false);

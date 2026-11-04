@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -135,6 +135,22 @@ describe("工程の中身の収集（決定 3〜6）", () => {
     mkdirSync(stateDir);
     const details = await collectStepDetails({ git: async () => ({ code: 0, stdout: "" }), ledgerRows: async () => [], secrets: async () => [] }, "6-check", stateDir, line);
     expect(details).toEqual({ phase: "check" });
+  });
+
+  it("出力の参照が状態のディレクトリの外（../・絶対パス・外を指すシンボリックリンク）なら出力を省く", async () => {
+    const root = mkdtempSync(join(tmpdir(), "step-details-"));
+    const stateDir = join(root, "6-check-state");
+    mkdirSync(stateDir);
+    writeFileSync(join(root, "secret.pem"), "PRIVATE KEY");
+    symlinkSync(join(root, "secret.pem"), join(stateDir, "01-link.out"));
+    writeFileSync(join(stateDir, "02-check.out"), "通った");
+    const deps = { git: async () => ({ code: 0, stdout: "" }), ledgerRows: async () => [], secrets: async () => [] };
+    for (const out of ["../secret.pem", join(root, "secret.pem"), "01-link.out"]) {
+      const details = await collectStepDetails(deps, "6-check", stateDir, { ...line, out });
+      expect(details.output).toBeUndefined();
+    }
+    const inside = await collectStepDetails(deps, "6-check", stateDir, { ...line, out: "02-check.out" });
+    expect(inside.output!.text).toBe("通った");
   });
 
   it("コミットの無い工程は空の配列で、コミットの範囲を持たない", () => {

@@ -92,7 +92,7 @@ async function settle(releaseRunId: string, prs: number[], sha = "aaaa111") {
   const jobId = run.currentJobId!;
   const seq = run.releaseSeq!;
   await event(releaseRunId, jobId, "release.progress", { seq, stage: "main_merged" }, `${releaseRunId}:progress:main_merged`);
-  await event(releaseRunId, jobId, "release.settled", { seq, result: "released", version: "10.28.0", prod_pr_url: `https://github.com/${REPO}/pull/900`, sha, prs, lanes: [] }, `${releaseRunId}:settled`);
+  await event(releaseRunId, jobId, "release.settled", { seq, result: "released", version: "10.28.0", prod_pr_url: `https://github.com/${REPO}/pull/900`, sha, prs, lanes: [] }, `${releaseRunId}:settled:released`);
   await finish(releaseRunId, jobId, "done");
 }
 
@@ -242,6 +242,30 @@ describe("答えと出し直し（受け入れ条件 4、I60）", () => {
     expect(answeredOf(b)).toHaveLength(0);
     expect((await currentBatch())!.seq).toBe(2);
   });
+
+  it("提示 1 への承認の再送は、提示 2 の承認にしない", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    await present(1, "aaaa111", [11]);
+    h.github.heads.set(`${REPO}#develop`, "bbbb222");
+    await answer(batch.releaseRunId, "approved", "ar-first");
+    await present(2, "bbbb222", [11, 13]);
+    expect(await codeOf(h.control.requestResume({ sprintRunId: batch.releaseRunId, approvalRequestId: "ar-first" }))).toBe("not_presented");
+    expect((await currentBatch())!).toMatchObject({ state: "presented", confirmedK: null });
+  });
+
+  it("提示の前の判断への答えは、続き（continue）でなく提示のプランから流し直す", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    const run = await runOf(batch.releaseRunId);
+    await event(run.sprintRunId, run.currentJobId, "gate.reached", { kind: "decision", pr_url: null, material: "判断" });
+    await finish(run.sprintRunId, run.currentJobId!, "gate");
+    await event(run.sprintRunId, null, "gate.answered", { approval_request_id: "ar-d", kind: "decision", answered_by_account_id: "acc-1" }, "api:ar-d", "api");
+    const r = await h.control.requestResume({ sprintRunId: run.sprintRunId, approvalRequestId: "ar-d" });
+    expect(instructionOf(r.jobId!)).toMatchObject({ RELEASE_STEP: "present" });
+  });
 });
 
 describe("待ち（受け入れ条件 8、I62）", () => {
@@ -257,6 +281,17 @@ describe("待ち（受け入れ条件 8、I62）", () => {
     await h.control.sweep();
     expect((await currentBatch())!.seq).toBe(1);
     expect((await h.table.getOrganizer("acc-1", REPO_ID))!.waitReason).toBeNull();
+  });
+
+  it("差し戻したまとめた配布が自分で開いた release/v<版> は外の本番と見なさず、次の配布を組む", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    await present(1, "aaaa111", [11]);
+    await answer(batch.releaseRunId, "rejected");
+    h.github.pulls.set(REPO, [{ head: "release/v10.28.0", base: "main", state: "open", url: `https://github.com/${REPO}/pull/90` }]);
+    await requestRelease(await startRun(2), [12]);
+    expect((await currentBatch())!.seq).toBe(2);
   });
 
   it("head が develop の main 宛ての Pull Request でも待つ", async () => {
@@ -319,6 +354,19 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     const resumed = await runOf(run.sprintRunId);
     expect(instructionOf(resumed.currentJobId!)).toMatchObject({ START: "release", RELEASE_STEP: "continue" });
     expect(await codeOf(h.organizer.resolve(accountContext(), REPO_ID, 1, { choice: "continue" }))).toBe("not_stalled");
+  });
+
+  it("配布の実行が取り消されても、GitHub で main へマージ済みなら差し戻さない", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    await present(1, "aaaa111", [11]);
+    await answer(batch.releaseRunId, "approved");
+    h.github.pulls.set(REPO, [{ head: "release/v10.28.0", base: "main", state: "merged", url: `https://github.com/${REPO}/pull/91` }]);
+    await h.table.finishRun(batch.releaseRunId, "cancelled", null, at());
+    await h.organizer.tick("acc-1", REPO_ID);
+    expect(await h.table.getBatch("acc-1", REPO_ID, 1)).toMatchObject({ state: "confirmed", mainMerged: true });
+    expect(answeredOf(a)).toHaveLength(0);
   });
 
   it("確定の後に止まり本番に手を付けた跡が無ければ confirm:<k>、GitHub に枝があれば continue", async () => {

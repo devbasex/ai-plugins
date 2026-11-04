@@ -151,6 +151,7 @@
 | `NDF_UPKEEP_STATE_DIR` | user | `plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` |
 | `NDF_USAGE_KIND` | user | `plugins/ndf/skills/external-ai/scripts/external-ai.py` |
 | `NDF_USAGE_SOURCE` | user | `plugins/ndf/skills/external-ai/scripts/external-ai.py` |
+| `NDF_VERSION` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_WHOLE_RUNS_DIR` | user | `plugins/ndf/scripts/estimate.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/release-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/test-run.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py` |
 | `NDF_WORKTREE_BASE` | user | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` |
 | `PATH` | runtime | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/release-verification-steps.py` |

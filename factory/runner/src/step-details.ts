@@ -1,6 +1,6 @@
 // 工程の中身の収集（#2172 の決定 3〜7）。NDF のプランの JSON・作業場所の git・判断の台帳（ask.jsonl）・ステップの出力（.out）から、
 // step.recorded に添える項目を集める。外のファイルとコマンドに触るのはここだけで、集められなかった項目は省く（工程の送信を止めない）
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { redact } from "./redact.ts";
 import { cutUtf8, phaseNameOf, phaseOf, type StepDetails } from "./translate.ts";
@@ -124,10 +124,19 @@ async function changesOf(deps: StepDetailsDeps, workdir: string, window: { since
   return out;
 }
 
+// 状態のディレクトリの中の出力ファイルの実パス。../ や絶対パス、外を指すシンボリックリンクは null（外のファイルを送らない）
+async function outputPath(stateDir: string, out: string): Promise<string | null> {
+  if (out.startsWith("/") || out.split("/").includes("..")) return null;
+  const [dir, file] = await Promise.all([realpath(stateDir).catch(() => null), realpath(join(stateDir, out)).catch(() => null)]);
+  return dir && file && file !== dir && isUnder(file, dir) ? file : null;
+}
+
 // ステップの出力（.out）。伏せてから上限のバイト数で切る。読めなければ undefined（項目を省く）
 async function outputOf(stateDir: string, line: Line, clean: (text: string) => string): Promise<StepDetails["output"] | undefined> {
   if (typeof line.out !== "string" || line.out === "") return undefined;
-  const text = await readFile(join(stateDir, line.out), "utf8").catch(() => null);
+  const path = await outputPath(stateDir, line.out);
+  if (path === null) return undefined;
+  const text = await readFile(path, "utf8").catch(() => null);
   if (text === null) return undefined;
   const cut = cutUtf8(clean(text), MAX_OUTPUT_BYTES);
   return { kind: line.type === "run" ? "log" : "report", text: cut.text, truncated: cut.cut };

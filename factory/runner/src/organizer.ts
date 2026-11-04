@@ -26,8 +26,9 @@ export function laneName(inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "LOOP_N
 }
 
 // NDF へ渡す環境変数（I68）。Factory の実行ジョブでは 1 台の中のオーガナイザーを起動せず、本番の配布は依頼として出す
-export function organizerEnv(inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "LOOP_NAME">, dir: string): Record<string, string> {
-  return { NDF_FACTORY_RUN: "1", NDF_ORGANIZER_DIR: dir, NDF_ORGANIZER_LANE: laneName(inst) };
+// NDF_VERSION は入れた NDF の版（開発版は <version>@<SHA>）。配布の依頼の ndf_version が固定したコミットを落とさないように渡す
+export function organizerEnv(inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "LOOP_NAME" | "NDF_VERSION">, dir: string): Record<string, string> {
+  return { NDF_FACTORY_RUN: "1", NDF_ORGANIZER_DIR: dir, NDF_ORGANIZER_LANE: laneName(inst), NDF_VERSION: inst.NDF_VERSION };
 }
 
 // 置き場の読み書き。テストはメモリに替える
@@ -152,7 +153,7 @@ export async function releaseBodies(files: OrganizerFiles, inst: Pick<RunJobInst
   }
   for (const f of await files.list("results")) {
     const p = settledFrom(f.value);
-    if (p) out.push({ key: releaseSettledKey(run), event: { type: "release.settled", payload: p } });
+    if (p) out.push({ key: releaseSettledKey(run, p.result), event: { type: "release.settled", payload: p } });
   }
   return out;
 }

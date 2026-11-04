@@ -20,6 +20,7 @@ import {
   requestsToAnswer,
   resumeStepOf,
   stalledFromOf,
+  stepFrom,
   type BatchLane,
   type OrganizerRoot,
   type OrgLog,
@@ -43,6 +44,9 @@ export interface OrganizerDeps {
   now?: () => Date;
   log?: (entry: Record<string, unknown>) => void;
 }
+
+// 自分で開いた本番の枝を探す、差し戻したまとめた配布の件数（新しい方から）
+const OWN_RELEASE_LOOKBACK = 20;
 
 const isExternalRelease = (head: string) => head.startsWith("release/v") || head === "develop";
 
@@ -159,7 +163,9 @@ export class OrganizerControl {
       }
     }
 
-    // 配布の実行が取り消しなどで終わった。main へのマージの前なら差し戻す（I63）
+    // 配布の実行が取り消しなどで終わった。main へのマージの前なら差し戻す（I63）。ランナーが段を送る前に取り消されても
+    // 公開済みの配布を差し戻さないよう、GitHub の main へのマージを照らしてから決める
+    if (isTerminalRun(run.state) && !isTerminalBatch(next.state) && !next.mainMerged) next.mainMerged = await this.mergedOnGitHub(run, next);
     if (isTerminalRun(run.state) && !isTerminalBatch(next.state) && !next.mainMerged) {
       next.state = "rejected";
       const ok = await this.end(root, batch, next, "rejected", [], this.logRow(root, "rejected", batch.seq, { reason: `release_run_${run.state}` }));
@@ -194,6 +200,19 @@ export class OrganizerControl {
       }
     }
     return "same";
+  }
+
+  // 本番のプランに手を付けた跡（届いた段の事象か、確定した提示の release/v<版> の枝・main 宛ての Pull Request）
+  private async releaseStarted(run: SprintRun, batch: ReleaseBatch, reg: Registration, checkGitHub = true): Promise<boolean> {
+    const { reader, github } = this.deps;
+    if ((await reader.findReleaseEvents(run.sprintRunId)).progress.length > 0) return true;
+    const version = checkGitHub ? presentedVersion(batch) : null;
+    if (!version) return false;
+    const branch = `release/v${version}`;
+    return (
+      (await github.branchHead(reg.installationId, reg.repositoryId, reg.fullName, branch)) !== null ||
+      (await github.findPullByHead(reg.installationId, reg.repositoryId, reg.fullName, branch, "main")) !== null
+    );
   }
 
   // main へのマージを GitHub で照らす（ジョブが段を書く前に落ちても分かるように。決定 11）
@@ -298,8 +317,11 @@ export class OrganizerControl {
     const reg = await table.getRegistration(root.accountId, root.repositoryId);
     if (!reg) return "done";
 
-    // Factory の外の本番の Pull Request（I62・決定 8）
-    const external = (await github.listOpenPullHeads(reg.installationId, reg.repositoryId, reg.fullName, "main")).find((p) => isExternalRelease(p.head));
+    // Factory の外の本番の Pull Request（I62・決定 8）。差し戻したまとめた配布が自分で開いた release/v<版> は外のものと見なさない
+    // （本番の Pull Request を開いた後に止まって差し戻すと開いたまま残り、数えると人が閉じるまで次の配布が待ち続ける）
+    const candidates = (await github.listOpenPullHeads(reg.installationId, reg.repositoryId, reg.fullName, "main")).filter((p) => isExternalRelease(p.head));
+    const own = candidates.length > 0 ? await this.rejectedReleaseHeads(root) : new Set<string>();
+    const external = candidates.find((p) => !own.has(p.head));
     if (external) return this.wait(stored, root, "external_release_open", external.url);
 
     // 依頼を出していない古い版の実行（依頼を出して待つ実行は自分で配布しないため数えない）
@@ -368,6 +390,13 @@ export class OrganizerControl {
     return "done";
   }
 
+  // 差し戻したまとめた配布の本番の枝（release/v<版>）。新しい方から OWN_RELEASE_LOOKBACK 件を見る
+  private async rejectedReleaseHeads(root: Pick<OrganizerRoot, "accountId" | "repositoryId">): Promise<Set<string>> {
+    const batches = await this.deps.table.listBatches(root.accountId, root.repositoryId, OWN_RELEASE_LOOKBACK);
+    const versions = batches.filter((b) => b.state === "rejected").map((b) => presentedVersion(b));
+    return new Set(versions.filter((v): v is string => v !== null).map((v) => `release/v${v}`));
+  }
+
   private async wait(stored: OrganizerRoot | null, root: OrganizerRoot, reason: "external_release_open" | "legacy_run", detail: string): Promise<"done" | "retry"> {
     if (stored && stored.waitReason === reason && stored.waitDetail === detail) return "done";
     const ok = await this.deps.table.writeOrganizer({
@@ -391,12 +420,23 @@ export class OrganizerControl {
       const root = await table.getOrganizer(run.accountId, run.repositoryId);
       const batch = run.releaseSeq ? await table.getBatch(run.accountId, run.repositoryId, run.releaseSeq) : null;
       if (!root || !batch) throw new ConflictError("release_not_found", "まとめた配布が見つかりません");
-      // 判断（承認ゲートの外の問い）は止まったプランを続ける
-      if (answer.kind !== "gate2") return "continue";
+      // 判断（承認ゲートの外の問い）は、止まったプランをまとめた配布の状態から流し直す（止まった配布の「続ける」と同じ規則）。
+      // 常に continue だと、提示のプランの中で止まった配布が承認ゲート 2 を通らずに本番のプランへ進む
+      if (answer.kind !== "gate2") {
+        const from = stalledFromOf(batch.state);
+        if (!from) throw new ConflictError("not_presented", "まとめた配布は判断の答えで続けられる状態にありません");
+        const reg = from === "confirmed" ? await table.getRegistration(run.accountId, run.repositoryId) : null;
+        const started = from === "confirmed" && (batch.mainMerged || (reg !== null && (await this.releaseStarted(run, batch, reg))));
+        return stepFrom(from, batch, started);
+      }
       // 同じ答えの再送（ジョブを作る前に止まった）は、書いた状態から同じ手を返す
       if (batch.state === "represented") return "represent";
       if (batch.state === "confirmed") return batch.confirmedK === 2 ? "confirm:2" : "confirm:1";
       if (batch.state !== "presented") throw new ConflictError("not_presented", "まとめた配布は承認を待っていません");
+      // 前の提示へ答えた承認の再送は、今待っている提示の承認にしない
+      if (batch.presentations.some((p) => p.approvalRequestId === approvalRequestId)) {
+        throw new ConflictError("not_presented", "この承認は前の提示への答えです。今の提示は承認を待っています");
+      }
       if (answer.decision === "rejected") {
         const next: ReleaseBatch = { ...structuredClone(batch), state: "rejected" };
         if (await this.end(root, batch, next, "rejected", [], this.logRow(root, "rejected", batch.seq, { approval_request_id: approvalRequestId }))) {
@@ -409,6 +449,7 @@ export class OrganizerControl {
       if (!last) throw new ConflictError("not_presented", "まとめた配布は承認を待っていません");
       let step: ReleaseStep;
       const next: ReleaseBatch = { ...structuredClone(batch), updatedAt: this.iso() };
+      next.presentations.at(-1)!.approvalRequestId = approvalRequestId;
       let log: OrgLog;
       if (last.k === 1) {
         // 提示 1 への承認だけ develop の先頭を比べる（I60・決定 7）
@@ -548,16 +589,7 @@ export class OrganizerControl {
       }
       const run = await table.getRun(batch.releaseRunId);
       if (!run) throw new NotFoundError("release_not_found", "まとめた配布が見つかりません");
-      let started = batch.mainMerged || (await reader.findReleaseEvents(run.sprintRunId)).progress.length > 0;
-      if (!started && batch.stalledFrom === "confirmed") {
-        const version = presentedVersion(batch);
-        if (version) {
-          const branch = `release/v${version}`;
-          started =
-            (await github.branchHead(reg.installationId, reg.repositoryId, reg.fullName, branch)) !== null ||
-            (await github.findPullByHead(reg.installationId, reg.repositoryId, reg.fullName, branch, "main")) !== null;
-        }
-      }
+      const started = batch.mainMerged || (await this.releaseStarted(run, batch, reg, batch.stalledFrom === "confirmed"));
       const step = resumeStepOf(batch, started);
       const next: ReleaseBatch = { ...structuredClone(batch), state: batch.stalledFrom, stalledFrom: null, stallReason: null, updatedAt: this.iso() };
       const ok = await table.writeOrganizer({

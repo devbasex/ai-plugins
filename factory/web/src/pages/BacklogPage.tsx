@@ -1,10 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { Backlog } from "../api.ts";
 import { useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { usePolled } from "../poll.ts";
+import { Button } from "../ui/Button.tsx";
 import { DataList } from "../ui/DataList.tsx";
 import { DetailList } from "../ui/DetailList.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -24,15 +25,16 @@ export function BacklogPage() {
   const { auth, api } = useServices();
   const hasToken = auth.getToken() !== null;
   const read = useCallback(async () => (await api.backlogs(accountId, [Number(repositoryId)]))[0] ?? null, [api, accountId, repositoryId]);
-  const { data: backlog, error, reload } = usePolled(read, hasToken);
+  // 1 回の読み出しが GitHub の全ページと実行ごとの事象を読むため、間隔では読み直さない（開いたときと「もう一度読む」だけ）
+  const { data: backlog, error, reload } = usePolled(read, hasToken, { poll: false });
 
   if (!hasToken) return <Navigate to="/login" replace />;
-  const header = (title: string) => (
+  const header = (title: string, actions?: ReactNode) => (
     <>
       <Link to={`/accounts/${accountId}/repositories`} className="ui-back">
         {t("backlog.back")}
       </Link>
-      <PageHeader title={title} />
+      <PageHeader title={title} actions={actions} />
     </>
   );
   if (error) {
@@ -54,7 +56,7 @@ export function BacklogPage() {
   const last = backlog.refinements[0];
   return (
     <>
-      {header(backlog.repo)}
+      {header(backlog.repo, <Button onClick={reload}>{t("common.retry")}</Button>)}
       <DetailList
         items={[
           { term: t("backlog.lastRefinement"), value: last ? format.dateTime(last.at) : t("backlog.none") },

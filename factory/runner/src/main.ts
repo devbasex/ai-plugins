@@ -172,7 +172,9 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     await runtime.saveState((await callApi("/run-jobs/state", { op: "put" }))!.url!);
     if (report === "判断が要る" && end?.kind !== "usage_limit" && !(releaseRequested && !loopName)) {
       // 配布の実行が承認資料をそろえて止まったら承認ゲート 2。main へのマージの後の判断は続けるだけを選べる（I63）
-      const kind = releaseGate ? "gate2" : (out.gate?.kind ?? "decision");
+      // 配布の実行の中の止まりは、承認資料をそろえた提示のときだけ gate2。本番のプランの中の「判断が要る」を
+      // gate2 にすると、確定済みの配布への答えが差し戻しでも本番のプランを流し直す
+      const kind = releaseGate ? "gate2" : instruction.START === "release" ? "decision" : (out.gate?.kind ?? "decision");
       gate = { kind, pr_url: out.gate?.pr_url ?? null, material: out.gate?.material ?? summary };
       if (loopName) gate.loop = { name: loopName, lap: currentLapOf(loopAfter) };
       if (instruction.START === "release" && kind === "decision" && mainMerged) gate.choices = ["continue"];

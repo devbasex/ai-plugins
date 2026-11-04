@@ -56,6 +56,11 @@ const PARENT_ONLY = ["INGEST_TOKEN", "INGEST_TOKEN_SECRET_ARN", "MODEL_CREDENTIA
 // モデルの資格。managed と byok では Factory が決めた資格だけを子へ置く。local は利用者が手元で設定した資格をそのまま渡す
 const MODEL_CREDENTIALS = ["ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];
 
+// 子へそのまま渡すモデルの資格の値（local だけ）。外へ送る工程の中身から伏せる値に足す
+export function passedModelSecrets(base: Record<string, string | undefined>, mode: "local" | "byok" | "managed"): string[] {
+  return mode === "local" ? MODEL_CREDENTIALS.map((k) => base[k] ?? "").filter(Boolean) : [];
+}
+
 export async function claudeEnv(
   base: Record<string, string | undefined>,
   mode: "local" | "byok" | "managed",

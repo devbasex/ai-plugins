@@ -72,9 +72,16 @@ def utc_stamp() -> str:
 
 
 def session_ndf_version() -> str:
-    """このセッションの NDF の版（plugin.json）。読めなければ空。"""
+    """このセッションの NDF の版（plugin.json）。読めなければ空。
+
+    サービスの実行ジョブは入れた版を `NDF_VERSION` で渡す。開発版は `<version>@<コミットの SHA>` で、plugin.json の
+    version だけでは固定したコミットが落ち、配布の実行が無い開発版のタグを取りに行くため、version が同じならそちらを返す。"""
     got = read_json(Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json", {}) or {}
-    return str(got.get("version") or "")
+    version = str(got.get("version") or "")
+    pinned = os.environ.get("NDF_VERSION") or ""
+    if version and "@" in pinned and pinned.split("@", 1)[0] == version:
+        return pinned
+    return version
 
 
 # ---- レーンの側 ----
@@ -211,7 +218,7 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
         }
     return {
         **out,
-        "pipeline": f"{supervise} queue {rd / 'release.json'} --done {done} --resume && {supervise} wait {done}",
+        "pipeline": f"{supervise} queue --resume {done} && {supervise} wait {done}",
         "settle": f"{parallel} settle --external {seq} --done {done}",
     }
 
@@ -282,6 +289,16 @@ def prod_pr_url(root: Path, version: str, run=subprocess.run) -> Optional[str]:
     return url if got.returncode == 0 and url else None
 
 
+def mvv_passed(rd: Path) -> bool:
+    """提示の答えの記録（`answer.json`）に、MVV 判定が承認ゲート 2 を通した記録（by: mvv）があるか。
+
+    presented.json を書いた後に MVV 判定そのものが落ちた提示を、自動で承認したと書き返さないために見る。"""
+    from gate_answer import GATE_2
+
+    gates = (read_json(Path(rd) / "answer.json", {}) or {}).get("gates") or []
+    return any(isinstance(g, dict) and g.get("name") == GATE_2 and g.get("by") == "mvv" for g in gates)
+
+
 def settle_batch(main: Path, d: Path, batch: dict, seq: int, done: dict, reason: Optional[str] = None, run=subprocess.run) -> dict:
     """本番のプランの done とリリース記録から、届いた段 `progress/<連番>.json` と結果 `results/<連番>.json` を書く。
 
@@ -293,7 +310,7 @@ def settle_batch(main: Path, d: Path, batch: dict, seq: int, done: dict, reason:
     k = step_k(batch.get("step") or "continue", batch)
     rd = batch_release_dir(d, seq, k)
     version = (read_json(rd / "version.json", {}) or {}).get("version") or done.get("version") or ""
-    if not (Path(d) / "presented" / f"{seq}-{k}.json").exists() and (rd / "presented.json").exists():
+    if not (Path(d) / "presented" / f"{seq}-{k}.json").exists() and (rd / "presented.json").exists() and mvv_passed(rd):
         record_presented(d, seq, k, auto=True)
     presented = read_json(rd / "presented.json", {}) or {}
     stages = stages_of(main, version, run)

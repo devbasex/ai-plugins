@@ -117,6 +117,12 @@ def test_compose_present_represent_and_confirm(tmp_path):
     task3 = pe.compose(tmp_path, d, {**BATCH, "step": "confirm:1"}, "SV", "PAR", lambda _m: "10.28.0", builder=_builder)
     assert str(pe.batch_release_dir(d, 3, 1) / "release.json") in task3["pipeline"]
     assert str(pe.batch_release_dir(d, 3, 2)) not in task3["pipeline"]
+    # 続きは前の done を値に取る `queue --resume <done>` だけで流す（位置引数・--done と併せない）
+    task4 = pe.compose(
+        tmp_path, d, {**BATCH, "step": "continue", "presentations": [{"k": 1}]}, "SV", "PAR", lambda _m: "", builder=_builder
+    )
+    done4 = pe.batch_release_dir(d, 3, 1) / "release-done.json"
+    assert task4["pipeline"] == f"SV queue --resume {done4} && SV wait {done4}"
     with pytest.raises(ValueError):
         pe.compose(tmp_path, d, BATCH, "SV", "PAR", lambda _m: "", builder=_builder)
 
@@ -150,6 +156,7 @@ def _presented(d: Path, k: int = 1) -> None:
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):
     d = tmp_path / "org"
     _presented(d)
+    pe.put_json(pe.batch_release_dir(d, 3, 1) / "answer.json", {"gates": [{"name": "関門 2", "by": "mvv", "verdict": "approve"}]})
     got = pe.settle_batch(tmp_path, d, BATCH, 3, {"items": [{"result": "完了"}]}, run=_fake_run(True))
     assert got["result"] == "released" and got["prod_pr_url"] == "https://github.com/o/r/pull/900"
     assert "main_merged" in pe.read_json(d / "progress" / "3.json")["stages"]
@@ -157,6 +164,15 @@ def test_settle_writes_main_merged_and_auto_presented(tmp_path):
     assert pe.read_json(d / "presented" / "3-1.json")["auto"] is True
     for f in ("progress/3.json", "results/3.json", "presented/3-1.json"):
         assert pe.file_errors({"file": f, "body": pe.read_json(d / f)}) == []
+
+
+def test_settle_does_not_write_auto_without_mvv_pass(tmp_path):
+    """presented.json の後に MVV 判定そのものが落ちた提示は、自動の承認と書き返さない（再開で人の承認を記録させない）。"""
+    d = tmp_path / "org"
+    _presented(d)
+    got = pe.settle_batch(tmp_path, d, BATCH, 3, {"items": [{"result": "失敗"}]}, run=_fake_run(False))
+    assert got["result"] == "failed"
+    assert not (d / "presented" / "3-1.json").exists()
 
 
 def test_settle_refuses_when_release_plan_stopped_at_gate(tmp_path):
@@ -250,3 +266,14 @@ def test_file_errors_pins_messages_per_kind(message, expected):
 def test_file_errors_delegates_requests_to_request_errors():
     body = {"anything": 1}
     assert pe.file_errors({"file": "requests/r1.json", "body": body}) == pe._request_errors("r1.json", body)
+
+
+def test_session_ndf_version_keeps_pinned_dev_commit(monkeypatch):
+    """開発版の実行ジョブが渡す `<version>@<SHA>` を落とさない。plugin.json と版が違う値は使わない。"""
+    monkeypatch.delenv("NDF_VERSION", raising=False)
+    version = pe.session_ndf_version()
+    assert version and "@" not in version
+    monkeypatch.setenv("NDF_VERSION", f"{version}@0123abcd")
+    assert pe.session_ndf_version() == f"{version}@0123abcd"
+    monkeypatch.setenv("NDF_VERSION", "0.0.1@0123abcd")
+    assert pe.session_ndf_version() == version

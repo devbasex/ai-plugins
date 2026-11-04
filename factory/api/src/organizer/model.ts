@@ -65,6 +65,8 @@ export interface Presentation {
   lanes: { lane: string; requested: boolean }[];
   addedPrs: number[];
   at: string;
+  // この提示へ答えた承認の依頼（承認ゲート 2）。古い承認の再送を次の提示の承認と取り違えないために残す。前の記録には無い
+  approvalRequestId?: string | null;
 }
 
 export interface BatchResult {
@@ -162,8 +164,13 @@ export function stalledFromOf(state: BatchState): StalledFrom | null {
 
 // 「続きから流す」の再開の手（#2439 の設計の「止まったときと再開」）。confirmed は本番のプランに手を付けた跡があれば continue
 export function resumeStepOf(batch: ReleaseBatch, startedRelease: boolean): ReleaseStep {
-  if (batch.stalledFrom === "composed") return "present";
-  if (batch.stalledFrom === "represented") return "represent";
+  return stepFrom(batch.stalledFrom, batch, startedRelease);
+}
+
+// 止まる前（か今）の状態から流し直す手。判断（承認ゲートの外の問い）への答えの再開も同じ規則で決める
+export function stepFrom(state: StalledFrom | null, batch: Pick<ReleaseBatch, "mainMerged" | "confirmedK">, startedRelease: boolean): ReleaseStep {
+  if (state === "composed") return "present";
+  if (state === "represented") return "represent";
   if (startedRelease || batch.mainMerged) return "continue";
   return batch.confirmedK === 2 ? "confirm:2" : "confirm:1";
 }

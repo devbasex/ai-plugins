@@ -117,4 +117,5 @@ export const organizerLaneName = (sprintRunId: string, loopName: string | null |
 // 連番だけを鍵にしない）。ランナーの送信と API の受け口の照合が同じ式を使うための唯一の定義
 export const releasePresentedKey = (sprintRunId: string, k: number) => `${sprintRunId}:presented:${k}`;
 export const releaseProgressKey = (sprintRunId: string, stage: string) => `${sprintRunId}:progress:${stage}`;
-export const releaseSettledKey = (sprintRunId: string) => `${sprintRunId}:settled`;
+// 結果は種類ごとに鍵を分ける。同じ実行が failed を送った後に再開して released を送れるように（鍵が 1 つだと重複として捨てられる）
+export const releaseSettledKey = (sprintRunId: string, result: string) => `${sprintRunId}:settled:${result}`;

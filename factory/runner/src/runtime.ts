@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
-import { claudeEnv, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
+import { claudeEnv, passedModelSecrets, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
 import { parseLoopFile } from "./loop-file.ts";
 import { fsOrganizerFiles, ORGANIZER_DIR, organizerEnv, RELEASE_PROMPT } from "./organizer.ts";
 import { runSections, sectionLimitOf, type SectionRun } from "./sections.ts";
@@ -128,6 +128,8 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   const githubTokens: string[] = [];
   const secretValues = async (): Promise<string[]> => {
     const out = [token, ...githubTokens, jobEnv.INGEST_TOKEN ?? ""];
+    // local は利用者が手元で設定したモデルの資格をそのまま子へ渡すため、その値も伏せる
+    out.push(...passedModelSecrets(jobEnv, instruction.EXECUTION_MODE));
     if (credential?.kind === "anthropic_api_key") out.push(credential.api_key);
     if (credential?.kind === "aws_role") {
       const assumed = await readFile(join(credentialDir, "credentials.json"), "utf8").then((t) => JSON.parse(t) as Record<string, unknown>).catch(() => ({}) as Record<string, unknown>);
@@ -237,8 +239,9 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       // このジョブの記録だけを送る（ask.jsonl は利用者の全プロジェクトで共有される）。cwd は realpath で書かれる
       const root = await realpath(work);
       const ownRow = (row: Record<string, unknown>) => typeof row.cwd === "string" && (row.cwd === root || row.cwd.startsWith(`${root}/`));
-      // 再開では復元したログの末尾から読む。前のジョブが送った行を新しい job_id で送り直さない
-      if (inst.START === "resume") {
+      // 再開と配布の実行（承認・出し直し・続きも START は release のまま）では復元したログの末尾から読む。
+      // 前のジョブが送った工程と使用量を新しい job_id で送り直さない
+      if (inst.START === "resume" || inst.START === "release") {
         for (const file of [...(await findFiles(join(repoDir, ".ndf"), "progress.jsonl")), askLedger]) {
           offsets.set(file, (await readFile(file, "utf8").catch(() => "")).length);
         }

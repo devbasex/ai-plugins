@@ -227,6 +227,28 @@ describe("読み直し（受け入れ条件 10）", () => {
     expect(screen.getByText("今の工程: base-sync")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toMatch(/^読み直せませんでした（/);
   });
+
+  it("バックログは間隔では読み直さず、開いたときと「もう一度読む」だけで読む", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = createDummyApi();
+    const backlogs = api.backlogs.bind(api);
+    let calls = 0;
+    api.backlogs = async (...args: Parameters<Api["backlogs"]>) => {
+      calls += 1;
+      return backlogs(...args);
+    };
+    show(`/accounts/${PERSONAL_ID}/repositories/101/backlog`, api, createDummyAuth(), 1000);
+    expect(await screen.findByRole("table", { name: "着手の順位" })).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(calls).toBe(1);
+    await act(async () => {
+      screen.getByRole("button", { name: "もう一度読む" }).click();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(calls).toBe(2);
+  });
 });
 
 describe("401 の扱い（受け入れ条件 12）", () => {

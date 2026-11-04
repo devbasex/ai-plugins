@@ -765,19 +765,10 @@ export class RunControl {
     return { state: "running" };
   }
 
-  async listSprintRuns(ctx: AccountContext, repositoryId: number | null) {
+  // 一覧に載せる実行（絞り込みと並び）。行の形は一覧の経路（routes/sprint-views.ts）が作る
+  async listSprintRuns(ctx: AccountContext, repositoryId: number | null): Promise<SprintRun[]> {
     const runs = await this.deps.table.listRuns(ctx.accountId, repositoryId === null ? 50 : 1000);
-    return runs
-      .filter((r) => repositoryId === null || r.repositoryId === repositoryId)
-      .slice(0, 50)
-      .map((r) => ({
-        sprint_run_id: r.sprintRunId,
-        repository_id: r.repositoryId,
-        issues: r.issues,
-        state: r.state,
-        failure_reason: r.failureReason,
-        created_at: r.createdAt,
-      }));
+    return runs.filter((r) => repositoryId === null || r.repositoryId === repositoryId).slice(0, 50);
   }
 
   // 形態 local の渡す口（#2189）。最も古い pending の local のジョブを running にし、指示と token を 1 回だけ返す。

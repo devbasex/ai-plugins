@@ -50,12 +50,21 @@ async function ownRun(deps: FactoryDeps, ctx: AccountContext, sprintRunId: strin
   return run;
 }
 
-// 一覧の行（既存の 6 項目に 4 項目を足す）。既存の経路の絞り込みと並びは実行の制御が持つ
+// 一覧の行（既存の 6 項目に 4 項目を足す）。既存の経路の絞り込みと並びは実行の制御が持つ。repo は一覧で読んだ実行から取り、
+// 行ごとに実行を読み直さない
 export async function sprintRunList(deps: FactoryDeps, ctx: AccountContext, repositoryId: number | null) {
-  const rows = await deps.control.listSprintRuns(ctx, repositoryId);
-  return mapLimit(rows, LIST_CONCURRENCY, async (row) => {
-    const [run, latest] = await Promise.all([deps.table.getRun(row.sprint_run_id), readOrUnavailable(() => deps.reader.latestOfRun(row.sprint_run_id))]);
-    return { ...row, ...listRowExtras({ repo: run?.repo ?? "" }, latest) };
+  const runs = await deps.control.listSprintRuns(ctx, repositoryId);
+  return mapLimit(runs, LIST_CONCURRENCY, async (run) => {
+    const latest = await readOrUnavailable(() => deps.reader.latestOfRun(run.sprintRunId));
+    return {
+      sprint_run_id: run.sprintRunId,
+      repository_id: run.repositoryId,
+      issues: run.issues,
+      state: run.state,
+      failure_reason: run.failureReason,
+      created_at: run.createdAt,
+      ...listRowExtras({ repo: run.repo }, latest),
+    };
   });
 }
 

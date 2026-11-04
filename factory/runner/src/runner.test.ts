@@ -4,7 +4,7 @@ import { GITHUB_TOKEN_REFRESH_MS, runJob, type JobRuntime } from "./main.ts";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeEnv, ROLE_PROFILE, type AssumeRole } from "./model.ts";
+import { claudeEnv, passedModelSecrets, ROLE_PROFILE, type AssumeRole } from "./model.ts";
 import { createSender } from "./send.ts";
 import { trackedEntries } from "./state.ts";
 import {
@@ -150,6 +150,10 @@ describe("claude の呼び方（受け入れ条件 8・29）", () => {
     expect(env).toMatchObject({ ANTHROPIC_API_KEY: "mine", AWS_ACCESS_KEY_ID: "AK" });
     expect(env.INGEST_TOKEN).toBeUndefined();
     expect(env.MODEL_CREDENTIAL_SECRET_ARN).toBeUndefined();
+    // 子へそのまま渡した資格は、外へ送る工程の中身から伏せる値に入る
+    const creds = { ...base, ANTHROPIC_API_KEY: "mine", AWS_SECRET_ACCESS_KEY: "SK" };
+    expect(passedModelSecrets(creds, "local")).toEqual(["mine", "SK"]);
+    expect(passedModelSecrets(creds, "managed")).toEqual([]);
   });
 
   it("byok の API キーは子の環境にだけ置き、ロールは外部 ID つきで引き受ける。外部 ID が違えば失敗する", async () => {

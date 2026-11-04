@@ -10,6 +10,7 @@ import type {
   ReleasePresentedEvent,
   ReleaseProgressEvent,
   ReleaseRequestedEvent,
+  ReleaseSettledEvent,
   StepRecordedEvent,
 } from "@ndf-factory/contracts";
 import { releasePresentedKey, releaseProgressKey, releaseSettledKey } from "@ndf-factory/contracts";
@@ -65,7 +66,7 @@ function releaseKeyOf(event: ProgressEvent): string | null {
     case "release.progress":
       return releaseProgressKey(event.sprint_run_id, (event as ReleaseProgressEvent).payload.stage);
     case "release.settled":
-      return releaseSettledKey(event.sprint_run_id);
+      return releaseSettledKey(event.sprint_run_id, (event as ReleaseSettledEvent).payload.result);
     default:
       return null;
   }

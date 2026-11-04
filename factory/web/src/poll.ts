@@ -14,8 +14,9 @@ export interface Polled<T> {
   reload: () => void;
 }
 
-// read が変わると最初から読み直す。enabled が偽の間は読まない
-export function usePolled<T>(read: () => Promise<T>, enabled: boolean): Polled<T> {
+// read が変わると最初から読み直す。enabled が偽の間は読まない。poll が偽なら間隔では読み直さず、開いたときと reload だけで読む
+// （変わることの少ない画面で、1 回の読み出しが重いもの。バックログなど）
+export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = true }: { poll?: boolean } = {}): Polled<T> {
   const { pollIntervalMs } = useServices();
   const interval = pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const onFailure = useFailureHandler();
@@ -54,6 +55,11 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean): Polled<T
       }
     };
     void tick();
+    if (!poll) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const timer = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       void tick();
@@ -62,7 +68,7 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean): Polled<T
       cancelled = true;
       clearInterval(timer);
     };
-  }, [read, enabled, interval, onFailure, generation]);
+  }, [read, enabled, interval, onFailure, generation, poll]);
 
   const reload = useCallback(() => setGeneration((g) => g + 1), []);
   return { data, error, staleSince, reload };
