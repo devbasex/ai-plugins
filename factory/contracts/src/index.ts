@@ -107,3 +107,8 @@ export function validateLocalRunnerDeclaration(value: unknown): ContractResult<L
 }
 
 export { PHASE_NAMES, CLOSING_STEPS, isPhaseName, type PhaseName } from "./phases.ts";
+
+// 実行のレーンの名前。ループはループ 1 つ、手動の実行は実行 1 つがレーンになる。#2436 のレーン名の形（小文字・32 字まで）に
+// 収めるため、ループの名前と実行の識別子を切り詰める。ランナーの laneName と API の laneOf が同じ名前を出すための唯一の式
+export const organizerLaneName = (sprintRunId: string, loopName: string | null | undefined): string =>
+  loopName ? `loop-${loopName.toLowerCase().slice(0, 27)}` : `run-${sprintRunId.toLowerCase().slice(0, 16)}`;

@@ -1,5 +1,6 @@
 // 集約「オーガナイザーの進行」（#2439 の設計の「データ構造」）。根・受けた依頼・まとめた配布・記録の行の型と、
 // 状態の移りを決める純粋な関数。表への読み書きは実行の表（runs/table.ts）が持つ
+import { organizerLaneName } from "@ndf-factory/contracts";
 import type { ReleaseStep } from "../runs/model.ts";
 
 export type OrganizerWaitReason = "external_release_open" | "legacy_run";
@@ -126,10 +127,8 @@ export const emptyRoot = (accountId: string, repositoryId: number, now: string):
   updatedAt: now,
 });
 
-// Factory の実行のレーンの名前。ループはループ 1 つ、手動の実行は実行 1 つがレーンになる。#2436 のレーン名の形（小文字・32 字まで）に
-// 収めるため、ループの名前と実行の識別子を切り詰める。ランナー（factory/runner/src/organizer.ts の laneName）と同じ式
-export const laneOf = (run: { sprintRunId: string }, loopName: string | null) =>
-  loopName ? `loop-${loopName.toLowerCase().slice(0, 27)}` : `run-${run.sprintRunId.toLowerCase().slice(0, 16)}`;
+// Factory の実行のレーンの名前。式は契約の organizerLaneName（ランナーの laneName と共有）
+export const laneOf = (run: { sprintRunId: string }, loopName: string | null) => organizerLaneName(run.sprintRunId, loopName);
 
 const overlaps = (a: number[], b: number[]) => a.some((n) => b.includes(n));
 

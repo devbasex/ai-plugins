@@ -3,22 +3,23 @@
 // plugins/ndf/contracts/forms/parallel-external.json。API は NDF のファイルを読まない
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type {
-  ProgressEvent,
-  ReleasePresentedPayload,
-  ReleaseProgressPayload,
-  ReleaseRequestedPayload,
-  ReleaseSettledPayload,
-  RunJobInstruction,
+import {
+  organizerLaneName,
+  type ProgressEvent,
+  type ReleasePresentedPayload,
+  type ReleaseProgressPayload,
+  type ReleaseRequestedPayload,
+  type ReleaseSettledPayload,
+  type RunJobInstruction,
 } from "@ndf-factory/contracts";
 
 // 置き場（取り込んだリポジトリの .ndf の下。状態の保存に入れ、周回と再開をまたいで残す）
 export const ORGANIZER_DIR = ".ndf/organizer";
 const STAGES = new Set(["release_branch", "develop_merged", "prod_pr_opened", "main_merged", "tagged"]);
 
-// レーンの名前。#2436 のレーン名の形（小文字・32 字まで）に収める。API の Factory のオーガナイザーが同じ式で依頼の無いレーンを名付ける
+// レーンの名前。式は契約の organizerLaneName で、API の Factory のオーガナイザーが同じ式で依頼の無いレーンを名付ける
 export function laneName(inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "LOOP_NAME">): string {
-  return inst.LOOP_NAME ? `loop-${inst.LOOP_NAME.toLowerCase().slice(0, 27)}` : `run-${inst.SPRINT_RUN_ID.toLowerCase().slice(0, 16)}`;
+  return organizerLaneName(inst.SPRINT_RUN_ID, inst.LOOP_NAME);
 }
 
 // NDF へ渡す環境変数（I68）。Factory の実行ジョブでは 1 台の中のオーガナイザーを起動せず、本番の配布は依頼として出す
