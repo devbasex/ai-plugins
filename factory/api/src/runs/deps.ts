@@ -118,6 +118,7 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     table,
     github,
     candidateModel: bedrockCandidateModel(requireEnv("CANDIDATE_MODEL_ID")),
+    reader,
     platform,
   };
   return cached;

@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
@@ -12,6 +12,7 @@ import { parseLoopFile } from "./loop-file.ts";
 import { fsOrganizerFiles, ORGANIZER_DIR, organizerEnv, RELEASE_PROMPT } from "./organizer.ts";
 import { runSections, sectionLimitOf, type SectionRun } from "./sections.ts";
 import { exec, packState, statePaths, unpackState } from "./state.ts";
+import { collectStepDetails, readPlan, type GitExec } from "./step-details.ts";
 import {
   delegatedFromRecord,
   issueRequestFromLine,
@@ -123,10 +124,38 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   // Factory のオーガナイザーの置き場（#2439 の I68）。1 台の中のオーガナイザーを起動させず、本番の配布は依頼として出させる
   const organizerDir = join(repoDir, ORGANIZER_DIR);
   Object.assign(jobEnv, organizerEnv(instruction, organizerDir));
+  // 外へ送る工程の中身から伏せる秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールの資格。#2172 の決定 7）
+  const githubTokens: string[] = [];
+  const secretValues = async (): Promise<string[]> => {
+    const out = [token, ...githubTokens, jobEnv.INGEST_TOKEN ?? ""];
+    if (credential?.kind === "anthropic_api_key") out.push(credential.api_key);
+    if (credential?.kind === "aws_role") {
+      const assumed = await readFile(join(credentialDir, "credentials.json"), "utf8").then((t) => JSON.parse(t) as Record<string, unknown>).catch(() => ({}) as Record<string, unknown>);
+      for (const k of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) if (typeof assumed[k] === "string") out.push(assumed[k]);
+    }
+    return out.filter(Boolean);
+  };
+  const git: GitExec = async (args, cwd) => {
+    let stdout = "";
+    const code = await run("git", args, { cwd, env: jobEnv, onLine: (line) => (stdout += `${line}\n`), onStderr: () => undefined });
+    return { code, stdout };
+  };
+  const ledgerRows = async () =>
+    (await readFile(askLedger, "utf8").catch(() => ""))
+      .split("\n")
+      .filter(Boolean)
+      .flatMap((raw) => {
+        try {
+          return [JSON.parse(raw) as Record<string, unknown>];
+        } catch {
+          return [];
+        }
+      });
 
   return {
     organizer: fsOrganizerFiles(organizerDir),
     async writeGitHubToken(token) {
+      githubTokens.push(token);
       const dir = jobEnv.GH_CONFIG_DIR!;
       await mkdir(dir, { recursive: true, mode: 0o700 });
       await writeFile(join(dir, "hosts.yml"), `github.com:\n    oauth_token: ${token}\n    git_protocol: https\n`, { mode: 0o600 });
@@ -225,17 +254,22 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
           const content = await readFile(file, "utf8").catch(() => "");
           const from = offsets.get(file) ?? 0;
           offsets.set(file, content.length);
+          const stateDir = dirname(file);
+          const name = basename(stateDir).replace(/-state$/, "");
+          const info = await readPlan(stateDir);
           for (const raw of content.slice(from).split("\n").filter(Boolean)) {
             const line = JSON.parse(raw) as Record<string, unknown>;
-            const name = file.split("/").slice(-2, -1)[0]!.replace(/-state$/, "");
             if (name !== plan) {
               plan = name;
-              await emit(phaseChanged(name));
+              await emit(phaseChanged(name, info.phase));
             }
-            const body = translateProgressLine(line, inst.REPO);
-            if (body) await emit(body);
+            const details = line.kind === "step" ? await collectStepDetails({ git, ledgerRows, secrets: secretValues }, name, stateDir, line, info) : {};
+            const body = translateProgressLine(line, inst.REPO, details);
+            // 同じ行の step.recorded と usage.recorded は同じ at で送り、工程の費用を結ぶ（決定 8）
+            const at = new Date().toISOString();
+            if (body) await emit(body, at);
             // supervise が別のプロセスで起動したステップの使用量（conductor の result には入らない）
-            for (const u of usageFromStepLine(line)) await emit(u);
+            for (const u of usageFromStepLine(line)) await emit(u, at);
           }
         }
         // 代わりの判断の記録（ask_ledger.py の ask.jsonl の kind: decision の行）

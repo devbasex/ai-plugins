@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EVENT_TYPES,
+  PHASE_NAMES,
+  isPhaseName,
   isIngestResponse,
   progressEventSchema,
   runJobInstructionSchema,
@@ -278,6 +280,42 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
     expect(step({ repo: "Owner/Name", number: 3 })).toBe(true);
     expect(step({ repo: "owner", number: 3 })).toBe(false);
     expect(step({ repo: "o/r", number: 0 })).toBe(false);
+  });
+
+  it("step.recorded の工程の中身（#2172）はどれも任意で、足す前の形も足した形も通り、上限と形の違いで落ちる", () => {
+    const step = (patch: Record<string, unknown>) =>
+      validateProgressEvent(event("step.recorded", { payload: { ...PAYLOADS["step.recorded"], ...patch } })).ok;
+    const sha = "a".repeat(40);
+    const full = {
+      phase: "実装",
+      issues: [2172],
+      files: [{ path: "factory/a.ts", added: 3, deleted: 1 }, { path: "img.png", added: null, deleted: null }],
+      files_omitted: 0,
+      commit_range: { from: sha, to: "b".repeat(40) },
+      decisions: [{ question: "どちらにする", answer: "A", by: "ai" }],
+      output: { kind: "report", text: "## 作業の報告", truncated: false },
+    };
+    expect(step({})).toBe(true);
+    expect(step(full)).toBe(true);
+    // 列挙で縛らない（NDF の版がフェーズを足しても残る）
+    expect(step({ phase: "準備" })).toBe(true);
+    expect(step({ issues: [], files: [], decisions: [] })).toBe(true);
+    expect(step({ phase: "" })).toBe(false);
+    expect(step({ issues: Array.from({ length: 51 }, (_, i) => i + 1) })).toBe(false);
+    expect(step({ files: Array.from({ length: 101 }, (_, i) => ({ path: `f${i}`, added: 0, deleted: 0 })) })).toBe(false);
+    expect(step({ files: [{ path: "x".repeat(513), added: 0, deleted: 0 }] })).toBe(false);
+    expect(step({ commit_range: { from: "abc", to: sha } })).toBe(false);
+    expect(step({ decisions: [{ question: "q", answer: "a", by: "someone" }] })).toBe(false);
+    expect(step({ decisions: Array.from({ length: 21 }, () => ({ question: "q", answer: "a", by: "ai" })) })).toBe(false);
+    expect(step({ output: { kind: "diff", text: "", truncated: false } })).toBe(false);
+    expect(step({ output: { kind: "log", text: "x".repeat(32_769), truncated: true } })).toBe(false);
+  });
+
+  it("フェーズの名前は 5 つで、isPhaseName は列挙の外を偽にする（#2172）", () => {
+    expect(PHASE_NAMES).toEqual(["設計", "実装", "検査", "取り込み", "仕上げ"]);
+    expect(PHASE_NAMES.every(isPhaseName)).toBe(true);
+    expect(isPhaseName("配布（本番）")).toBe(false);
+    expect(isPhaseName(null)).toBe(false);
   });
 
   it("issue.requested は起票先・題・本文の 3 つで、題は 256 字まで・本文は空にできない（#2216）", () => {

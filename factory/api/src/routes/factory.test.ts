@@ -78,6 +78,7 @@ beforeEach(async () => {
     table: h.table,
     github: h.github,
     candidateModel: (s: "ranking" | "recent", i: { number: number; title: string }[]) => model.fn(s, i),
+    reader: memoryProgressReader(h.progress),
   };
   app = createApiApp(() => ({ verifier: tokens.verifier, accounts }), (e) => logs.push(e), () => null, () => factory);
   h.github.installations.set(9, new Map([[101, "org-a/repo-a"], [102, "org-a/repo-b"]]));

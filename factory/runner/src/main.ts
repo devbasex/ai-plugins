@@ -33,7 +33,8 @@ export interface JobRuntime {
   runConductor(
     instruction: RunJobInstruction,
     directive: string | null,
-    emit: (body: Pick<ProgressEvent, "type" | "payload">) => Promise<void>,
+    // at を渡すとその時刻で送る（同じ行から作る事象の時刻を揃える）
+    emit: (body: Pick<ProgressEvent, "type" | "payload">, at?: string) => Promise<void>,
     lapClosed?: () => Promise<boolean>,
   ): Promise<ConductorOutcome>;
 }
@@ -67,8 +68,8 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
   const id: JobIdentity = { sprintRunId: instruction.SPRINT_RUN_ID, jobId: instruction.JOB_ID, repo: instruction.REPO };
   const send = createSender({ url: instruction.INGEST_URL, token: () => token, fetch: http, sleep: deps.sleep, stderr });
   let seq = 0;
-  const emit = async (body: Pick<ProgressEvent, "type" | "payload">): Promise<SendResult> =>
-    send({ ...common(id, ++seq, now().toISOString()), ...body } as ProgressEvent);
+  const emit = async (body: Pick<ProgressEvent, "type" | "payload">, at?: string): Promise<SendResult> =>
+    send({ ...common(id, ++seq, at ?? now().toISOString()), ...body } as ProgressEvent);
 
   const callApi = async (path: string, body: unknown = {}, missingOk = false) => {
     const res = await http(apiUrl(instruction.INGEST_URL, path), {
@@ -141,8 +142,8 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     const out = await runtime.runConductor(
       instruction,
       directive,
-      async (body) => {
-        await emit(body);
+      async (body, at) => {
+        await emit(body, at);
       },
       lapClosed,
     );

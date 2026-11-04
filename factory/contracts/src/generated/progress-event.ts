@@ -181,7 +181,7 @@ export interface JobStartedPayload {
 }
 export interface PhaseChangedPayload {
   /**
-   * フェーズの名前。集合は #2172 が決めるまで列挙にしない
+   * フェーズの名前。5 つの名前（設計・実装・検査・取り込み・仕上げ）は src/phases.ts が持ち、ここでは列挙で縛らない
    */
   phase: string;
   issues: number[];
@@ -192,6 +192,34 @@ export interface StepRecordedPayload {
   seconds: number;
   summary: string;
   pull_request?: PullRequestRef;
+  /**
+   * その工程が属するフェーズの名前。省いたときは同じ実行ジョブの直前の phase.changed から導く
+   */
+  phase?: string;
+  /**
+   * その工程が受け持つ課題。省いたときも空のときもスプリント全体の工程
+   *
+   * @maxItems 50
+   */
+  issues?: number[];
+  /**
+   * その工程の時間の窓のコミットが触ったファイル。省いたときは記録なし、空の配列は触らなかった
+   *
+   * @maxItems 100
+   */
+  files?: StepFile[];
+  /**
+   * 上限で files から外した数
+   */
+  files_omitted?: number;
+  commit_range?: CommitRange;
+  /**
+   * その工程の間に決めたこと。省いたときは記録なし、空の配列は決めたことが無かった
+   *
+   * @maxItems 20
+   */
+  decisions?: StepDecision[];
+  output?: StepOutput;
 }
 /**
  * このステップが作った・更新した Pull Request
@@ -199,6 +227,37 @@ export interface StepRecordedPayload {
 export interface PullRequestRef {
   repo: RepoFullName;
   number: PullRequestNumber;
+}
+export interface StepFile {
+  path: string;
+  /**
+   * null はバイナリ（行数が無い）
+   */
+  added: number | null;
+  /**
+   * null はバイナリ（行数が無い）
+   */
+  deleted: number | null;
+}
+/**
+ * 時間の窓のコミットの最初の親と最後のコミット
+ */
+export interface CommitRange {
+  from: string;
+  to: string;
+}
+export interface StepDecision {
+  question: string;
+  answer: string;
+  by: "ai" | "user";
+}
+/**
+ * 作業の報告（report）かログ（log）。text は UTF-8 で 32,768 バイト以下で、truncated は上限で切ったこと
+ */
+export interface StepOutput {
+  kind: "report" | "log";
+  text: string;
+  truncated: boolean;
 }
 export interface AttentionPayload {
   reason: string;

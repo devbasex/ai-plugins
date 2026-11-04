@@ -46,7 +46,7 @@ export const SCREENS: readonly Screen[] = [
   { id: "repositories", path: "/accounts/:accountId/repositories", roles: ALL_ROLES, nav: true, status: "available" },
   { id: "modelCredential", path: "/accounts/:accountId/model-credential", roles: OWNERS, nav: true, status: "available" },
   { id: "newSprint", path: "/accounts/:accountId/repositories/:repositoryId/sprints/new", roles: ALL_ROLES, nav: false, status: "available" },
-  { id: "backlog", path: "/accounts/:accountId/repositories/:repositoryId/backlog", roles: ALL_ROLES, nav: false, status: "planned" },
+  { id: "backlog", path: "/accounts/:accountId/repositories/:repositoryId/backlog", roles: ALL_ROLES, nav: false, status: "available" },
   { id: "approvals", path: null, roles: ALL_ROLES, nav: false, status: "planned" },
   { id: "billing", path: null, roles: OWNERS, nav: false, status: "planned" },
   { id: "runners", path: null, roles: OWNERS, nav: false, status: "planned" },

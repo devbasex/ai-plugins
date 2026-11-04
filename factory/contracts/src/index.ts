@@ -105,3 +105,5 @@ export function validateLocalRunnerDeclaration(value: unknown): ContractResult<L
     ? { ok: true, value: value as LocalRunnerDeclaration }
     : { ok: false, violation: firstViolation(declarationValidator) };
 }
+
+export { PHASE_NAMES, CLOSING_STEPS, isPhaseName, type PhaseName } from "./phases.ts";

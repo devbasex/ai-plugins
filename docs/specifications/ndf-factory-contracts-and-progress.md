@@ -147,8 +147,8 @@ graph TD
 | 種類 | 鍵（型。任意のものは「任意」） |
 | --- | --- |
 | `job.started` | `ndf_version`（文字列）、`start`（`new` / `resume` / `loop`） |
-| `phase.changed` | `phase`（文字列。フェーズの名前の集合は #2172 が決めるため列挙にしない）、`issues`（1 以上の整数の並び） |
-| `step.recorded` | `step`（文字列）、`exit_code`（整数）、`seconds`（0 以上の数）、`summary`（文字列）、`pull_request`（任意。`repo`（`owner/name`）・`number`（1 以上の整数）） |
+| `phase.changed` | `phase`（1 字以上の文字列。5 つの名前は `src/phases.ts` の列挙が正で、定義では列挙で縛らない）、`issues`（1 以上の整数の並び） |
+| `step.recorded` | `step`（文字列）、`exit_code`（整数）、`seconds`（0 以上の数）、`summary`（文字列）、`pull_request`（任意。`repo`（`owner/name`）・`number`（1 以上の整数））。工程の中身はどれも任意: `phase`（1 字以上の文字列）、`issues`（1 以上の整数の並び、最大 50）、`files`（`path`（1〜512 字）・`added`・`deleted`（0 以上の整数か、バイナリなら `null`）の並び、最大 100）、`files_omitted`（0 以上の整数）、`commit_range`（`from`・`to`。どちらも 40 桁の 16 進）、`decisions`（`question`・`answer`（1〜1,000 字）・`by`（`ai` / `user`）の並び、最大 20）、`output`（`kind`（`report` / `log`）・`text`（32,768 字以下）・`truncated`（真偽）） |
 | `attention` | `reason`（文字列）、`summary`（文字列） |
 | `gate.reached` | `kind`（`gate1` / `gate2` / `decision`）、`pr_url`（URI か `null`）、`material`（文字列。承認資料の本文）、`loop`（任意。開発ループの実行のとき `name`（ループの名前）・`lap`（1 以上の整数）） |
 | `gate.answered` | `approval_request_id`（文字列）、`kind`（`gate1` / `gate2` / `decision`）、`decision`（`approved` / `rejected`。`kind` が `decision` のときは持たず、ほかでは必須）、`answered_by_account_id`（文字列。#2170 の解決の結果の `accountId`）。本文は持たない |
@@ -162,6 +162,34 @@ graph TD
 | `issue.request_resolved` | `request_key`（依頼の冪等の鍵）、`outcome`（`filed` / `drafted`）、`issue`（`filed` のときだけ必須で `drafted` では持たない。`repo`（`owner/name`）・`number`（1 以上の整数）・`url`（URI））、`reason`（`drafted` のときだけ必須。[起票の依頼と起票の代行](ndf-factory-issue-requests.md) の理由の表のどれか）、`duplicate_of`（同じ中身の最初の依頼の鍵か `null`） |
 
 **大きさの上限は 256 KiB（262,144 バイト、`MAX_EVENT_BYTES`）で、定義の外で見る。** `runner`・`api` の経路は要求の本文の UTF-8 のバイト数、`github` の経路と `appendControlEvent` は作った事象を JSON にしたバイト数で見る。JSON Schema の `maxLength` は字の数でバイトを数えられないためである。
+
+### スプリントの一覧と詳細の読み出し
+
+一覧・詳細・工程の中身・バックログは、進捗の事象の列とスプリントの実行の行から読み出しのたびに導く派生で、表に保存しない。派生は課題の本文・ボード・GitHub の API を読まない（バックログの順位の表だけは GitHub の口の `findRankingTable` で読む）。派生の関数は `factory/api/src/views/derive.ts`、経路は `factory/api/src/routes/sprint-views.ts`、形は `factory/contracts/openapi/runs.yaml` にある。
+
+**フェーズの名前は `設計`・`実装`・`検査`・`取り込み`・`仕上げ` の 5 つで、`factory/contracts/src/phases.ts` の列挙が正である。** 定義（`progress-event.schema.json`）では `phase` を文字列のまま受け、列挙で縛らない。NDF の版がフェーズを足しても事象を 400 にせず残すためで、画面は 5 つに無い名前を「その他（<名前>）」と出す。画面も同じ列挙を `@ndf-factory/contracts/phases`（依存を持たない入口）から読む。ランナーの翻訳は NDF のプランの JSON の `"フェーズ"` の値を次のとおり写す。プランの JSON が読めない・表に無い値は計画の名前の断片（`5-impl-2172` なら `impl`）を送る。
+
+| プランの `"フェーズ"` | 写すフェーズの名前 |
+| --- | --- |
+| `設計`・`実装`・`検査` | 同じ名前 |
+| `配布（開発版）` | `取り込み` |
+| `配布（本番）`・`まとめ` | `仕上げ` |
+
+**ランナーは `step.recorded` に工程の中身を任意の項目として添える（`schema_version` は 1 のまま）。** 項目は `phase`（プランの `"フェーズ"` を写した名前）・`issues`（計画の名前の課題の番号。スプリントで 1 つの計画は持たない）・`files`（その工程の時間の窓 `at − seconds` 〜 `at` に作業場所の git で作られたコミットが触ったファイルと増減の行数。最大 100 件で、外した数を `files_omitted`）・`commit_range`（窓の最初のコミットの親と最後のコミット）・`decisions`（判断の台帳の `decision` の行のうち、`cwd` が作業場所の下で `at` が窓の中のもの。最大 20 件）・`output`（ステップの出力。`work` のステップは作業の報告、`run` のステップはログ。UTF-8 で 32 KiB まで）である。集められない項目は省き、工程の送信は止めない。`output.text`・`decisions` の文・`files` のパスは、送る前に NDF の `secret_redact.py` の 4 つの形の規則と、ランナーが持つ秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールの資格）の置き換えで伏せる。事象 1 件が 256 KiB を超えるときは `output.text` → `files` → `decisions` の順に削り、それでも超えれば工程の中身をすべて外す。同じステップの行から作る `step.recorded` と `usage.recorded` は同じ `at` で送る。
+
+| 派生の値 | 導き方 |
+| --- | --- |
+| 一覧の今のフェーズ | その実行の最後の `phase.changed`（`order_key` の順）の `phase`。0 件なら `null`（画面は「始まる前」） |
+| 工程のフェーズ | `step.recorded` の `phase`。無ければ同じ実行ジョブの直前の `phase.changed` の `phase` |
+| 課題の欄 | `step.recorded` の `issues` の課題ごとに 1 回ずつ。`issues` が無いか空なら「スプリント全体」の欄 |
+| 課題の欄の Pull Request | 欄の工程の `pull_request` を重複なく。状態は最後の `pr.updated`（無ければ `unknown`）、チェックは名前ごとの最後の `ci.updated` の結論（`null` は実行中） |
+| 工程の費用 | 同じ `job_id`・`payload.step`・`at` の `usage.recorded` の `cost_usd` の和。無ければ `null` |
+| 承認の欄 | ゲート 1・ゲート 2・判断の 3 つ。その種類の最後の `gate.reached` で待ちになり、その後の同じ種類の `gate.answered` で承認・差し戻し（判断は答えた）になる。`gate.reached` の前の答えは状態を変えない |
+| 仕上げの欄 | 振り返り（`step` が `retro`）と棚卸し（`refine`）の行を常に持ち、記録が無ければ「まだ」 |
+| 詳細の件数の上限 | `step.recorded` は新しい方から 2,000 件までで、省いた数を `omitted_steps` に返す。ほかの種類はすべて読み、承認の欄と使用量の和から欠かさない |
+| バックログの棚卸しの記録 | そのリポジトリの実行（新しい順に 50 件まで）の、`step` が `refine` の `step.recorded` を新しい順に |
+
+詳細の応答は工程の中身の本文を持たず（`has_details` で有無だけを示す）、画面は工程を押したときに工程の中身の経路で 1 件ずつ読む。一覧・詳細・工程の中身・バックログは、他人のアカウント・無いアカウント・アカウントに属さない実行・無い実行・無い工程・登録の無いリポジトリのどれでも、同じ本文の 403 を返す。読み出しは事象の表・実行の表・GitHub へ書かない。画面は一覧と詳細を開いている間、画面の設定の間隔（環境変数 `FACTORY_POLL_INTERVAL_MS`、既定 30 秒）で読み直し、押し出しの通知は使わない。
 
 ### 実行ジョブの指示の定義
 
