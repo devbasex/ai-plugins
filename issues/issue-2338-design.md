@@ -107,7 +107,8 @@
 | プランの状態の記録（`supervise_lib/state.py`） | `progress_write` が書く行に、環境変数 `NDF_RUN_ID` があれば `run_id` を足す | 変更 | 核の拡張 |
 | 環境変数の契約（`plugins/ndf/contracts/env/`） | `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_STATE_DIR` の行を足す。秘密を持つ環境変数（`GH_TOKEN`・`GITHUB_TOKEN`・`AI_GATEWAY_API_KEY`・`SLACK_BOT_TOKEN`）の行へ `secret: true` を足す | 変更 | 核の拡張 |
 | 契約の読み手（`scripts/contracts_lib/model.py`） | 環境変数の行の任意の鍵 `secret`（bool）を受けて確かめる | 変更 | 核の拡張 |
-| テストの状態の置き場（ルートの `conftest.py`） | session の autouse の fixture で、テストの実行中だけ `NDF_STATE_DIR` を一時ディレクトリへ向ける。全体テストが実行した人の置き場へ記録を書かず、寿命の掃除も本物の置き場で動かさない（`NDF_CONTEXT_DIR`・`NDF_METRICS_DIR` と同じ形） | 変更 | 核の拡張 |
+| テストの状態の置き場（ルートの `conftest.py`） | session の autouse の fixture で、テストの実行中だけ `NDF_STATE_DIR` を一時ディレクトリへ向ける。全体テストが実行した人の置き場へ記録を書かず、寿命の掃除も本物の置き場で動かさない（`NDF_CONTEXT_DIR`・`NDF_METRICS_DIR` と同じ形）。プラグインの外のテスト（`scripts/tests/` など）に効く | 変更 | 核の拡張 |
+| テストの状態の置き場（`plugins/ndf/conftest.py`） | テストごとの autouse の fixture（`_isolated_usage_dirs`）で、`NDF_USAGE_DIR` などと並べて `NDF_STATE_DIR` をテストごとの一時ディレクトリへ向ける。ルートの `conftest.py` はプラグインのキャッシュへ配られないため、配布先でプラグインのテストを実行しても本物の `runs/` へ書かず、寿命の掃除も本物の置き場で動かさない | 変更 | 核の拡張 |
 | 構造チェック（`scripts/check-script-structure.py`） | 検査の種類 `stderr-direct` を足す。例外リストの増加は既存の検査（#2335 の `allow-grow`）で落とす | 変更 | 核の拡張 |
 | 例外リスト（`scripts/script-structure-allow/`） | 直書きを持つ 60 ファイルを `stderr-direct` の行として載せ、移した Pull Request が消す | 変更 | 核の拡張 → 移す 6 本 |
 | 理由を切る 10 か所 | 下の「止まった理由を切る箇所の扱い」の表どおりに直す | 変更 | 核の拡張 |
@@ -357,9 +358,11 @@ sequenceDiagram
 
 **SIGTERM と時間切れ**: CPython の Python で書いたシグナルの受け手は、どのスレッドがシグナルを受けても主スレッドで動く。`signal.pthread_sigmask` は呼んだスレッドにしか効かないため、受け手が主スレッドの排他の区間の中で動くことを防げない。核の `exec` の読み手のスレッドと、G4 で移す監視・中継のスレッドがこの条件を満たす。`flock` は同じプロセスでも開き直したファイル記述子どうしで排他になるため、受け手が排他の区間の中で `end` を書きにいくと、自分自身を待って止まる。そこで次の形にする。
 
-1. 書き口はプロセスに 1 つの `threading.Lock` でスレッドどうしの書き込みを順に並べ、その中で `flock` を取る。主スレッドが排他の区間にいる間は、スレッドごとの印（`threading.local`）を立てる
-2. 核の受け手（SIGTERM と時間切れのシグナル SIGALRM）は、主スレッドが排他の区間にいなければ、その場で E9 を呼んで `end` を書く
-3. 主スレッドが排他の区間にいれば、受け手は `end` を書かずに、終わり方（`sigterm` / `timeout`）を保留の印として残して戻る。`write` は排他を返した直後に保留の印を見て、印があれば E9 を呼ぶ
+1. 書き口はプロセスに 1 つの `threading.Lock` でスレッドどうしの書き込みを順に並べ、その中で `flock` を取る。主スレッドが排他の区間にいる間は、スレッドごとの印（`threading.local`）を立てる。印は `Lock` を取る前に立て、`Lock` を返した後に下ろす。`Lock` を取ってから印を立てるまでと、印を下ろしてから `Lock` を返すまでの隙間を作らないためである（隙間で受け手が動くと、印が無いと見て項目 2 の経路で同じ `Lock` を取りにいき、主スレッドが自分を待って止まる）
+2. 核の受け手（SIGTERM と時間切れのシグナル SIGALRM）は、主スレッドが排他の区間にいなければ、その場で E9 を呼んで `end` を書き、続けて終わらせ方の関数を呼ぶ
+3. 主スレッドが排他の区間にいれば、受け手は `end` を書かずに、終わり方（`sigterm` / `timeout`）を保留の印として残して戻る。`write` は排他を返して印を下ろした後に保留の印を見て、印があれば E9 を呼び、続けて項目 2 と同じ終わらせ方の関数を呼ぶ。`write` は本体へ戻らない
+   - **終わらせ方の関数**: 項目 2 と 3 が共有する 1 つの関数にする。結果を #2335 の失敗の形（`stopped`・終了コード 1・`gaps` に `interrupted` か `timeout`）にし、核だけが捕まえる例外（`BaseException` から派生させ、本体の `except Exception` に捕まらない）を投げる。核の `main` がこの例外を捕まえ、`end` の `result`・`code` と同じ結果 JSON を標準出力へ出し、同じ終了コードで終わる。`end` の `how` が `sigterm` / `timeout` のときに、標準出力と終了コードが本体の値にならない（1c）
+   - E9 はプロセスで 1 回だけ `end` を書く。2 回目の呼び出しは何も書かずに戻る（保留の印を残した後に項目 2 の経路でも呼ばれる場合を含む）
 4. ほかのスレッドが排他を持つ間に受け手が動いたときは、そのスレッドが排他を返すのを待ってから書く（待つ相手が別のスレッドのため止まらない）
 5. `close` が `end` を書いた後の `write` は、記録へ書かずに捨てる。読み手のスレッドが後から書いても、`end` の行は最後に並ぶ
 
@@ -419,6 +422,7 @@ hook の入口の 6 か所は、次のとおり数から除いた。
 | --- | --- | --- |
 | 1・I1 | 核を通る入口を正常・例外・SIGTERM・時間切れで終わらせると、1 ファイルに同じ `run_id` で `start` から `end` までが並び、すべての行が 5 つの鍵を持つ | SIGTERM の受け手から E9 を外す／`at` を地方時で書く |
 | 1・I1 | 読み手のスレッドが書き続ける間に、主スレッドが排他の区間にいる時点で SIGTERM と SIGALRM を送っても、入口が時間内に終わり、`end` の行が最後に並ぶ | 受け手が排他の区間の中で `end` を書きにいく／`end` の後の `write` を記録へ書く |
+| 1・1c・I1 | 主スレッドが排他の区間に入る直前と出た直後に SIGTERM を送っても止まらずに終わる。保留の経路で終わったときも、本体は `write` の後の処理へ進まず、標準出力の結果 JSON（`stopped`・`gaps` に `interrupted`）と終了コード 1 が `end` の `result`・`code` に一致する | 印を `Lock` を取った後に立てる／保留の経路で E9 の後に `write` から本体へ戻る |
 | 1a・I3 | 入口が別の入口を子プロセスで起こすと、子の行が親のファイルに入り、`parent_id` が親の `run_id` | 子へ `NDF_RUN_LOG` を渡さない／子が自分の識別子を `parent_id` に書く |
 | 1b・I2 | 子の実行を並行に複数起こし、64 KiB 近い行を書かせても、全行が JSON として読める | 排他を外して 2 回の `write` に分ける |
 | 1c | 本体の `decision` と止まった理由が行に残り、`end` の `fields` が標準出力の結果 JSON と終了コードに一致する | `end` に `summary` だけを書く |
@@ -434,13 +438,14 @@ hook の入口の 6 か所は、次のとおり数から除いた。
 | 5・I5 | `secret: true` の環境変数に値を入れ、本体がその値を診断・例外の理由・`summary` へ入れても、記録と全文ファイルに値が無い。トークンの形の文字列も無い。空文字列の値で他の文字列が壊れない | 伏せる処理を全文ファイルに通さない／空の値で置き換える |
 | 6・I6 | 移す前と後で、同じ入力に対する標準エラーの文が一致する。記録の置き場を書けないときも同じ文が出る | 記録へ書いた後でしか標準エラーへ書かない |
 | 1e | 全体テストの後に、テストの外の `NDF_STATE_DIR`（未設定なら `~/.local/state/ndf`）の `runs/` の中身が増えも減りもしない | ルートの `conftest.py` から `NDF_STATE_DIR` の fixture を外す |
+| 1e | `plugins/ndf/` だけを根にして（ルートの `conftest.py` が読まれない、プラグインのキャッシュと同じ条件で）核を通すテストを実行した後も、テストの外の `NDF_STATE_DIR` の `runs/` の中身が増えも減りもしない | `plugins/ndf/conftest.py` から `NDF_STATE_DIR` の行を外す |
 | 7 | 柱の Pull Request ごとに `uv run --frozen --project . --all-extras pytest . -q -n 4` が前後で通る | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2338 | 実装する | — | `conftest.py`、`plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/contracts/env/`、`scripts/contracts_lib/model.py`、`scripts/check-script-structure.py`、`scripts/script-structure-allow/`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/scripts/project-mvv.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/phase-steps.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/lib/loop_drive.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/refactor-scope.py`、`plugins/ndf/scripts/lib/result_posts.py`、`plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/skills/cross-refactoring/scripts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2338 | 実装する | — | `conftest.py`、`plugins/ndf/conftest.py`、`plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/contracts/env/`、`scripts/contracts_lib/model.py`、`scripts/check-script-structure.py`、`scripts/script-structure-allow/`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/scripts/project-mvv.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/phase-steps.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/lib/loop_drive.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/refactor-scope.py`、`plugins/ndf/scripts/lib/result_posts.py`、`plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/skills/cross-refactoring/scripts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 触るファイルはスプリント 1（核の拡張・G1・G2）の分である。G3〜G6 は同じ柱の次のスプリントの設計の結果へ載せる。
 
