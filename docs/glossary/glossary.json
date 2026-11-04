@@ -5078,6 +5078,30 @@
       "pending_source": "issues/issue-2384-requirements.md"
     },
     {
+      "term": "操作の扱い",
+      "context": "ndf-factory",
+      "meaning": "Factory の利用者向けの操作が要る範囲。読み取り（read）・書き込み（write）・人だけ（human）の 3 つで、契約の各操作に x-ndf-access として持つ（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
+      "term": "操作の表",
+      "context": "ndf-factory",
+      "meaning": "Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
+      "term": "要素の結果",
+      "context": "ndf-factory",
+      "meaning": "Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
+      "term": "作成の冪等の鍵",
+      "context": "ndf-factory",
+      "meaning": "Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
       "term": "差分の棚卸し",
       "context": "ndf-workflow",
       "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315）",
