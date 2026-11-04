@@ -110,6 +110,29 @@ export function decisionsOf(
   return out;
 }
 
+type Changes = Pick<StepDetails, "files" | "files_omitted" | "commit_range">;
+
+// 工程の窓に作業場所で作られたコミットの差分（決定 3・4）。git log が失敗したら空（項目を省く）
+async function changesOf(deps: StepDetailsDeps, workdir: string, window: { since: Date; until: Date }, clean: (text: string) => string): Promise<Changes> {
+  const args = ["log", "--no-merges", `--since=${gitTime(window.since, "floor")}`, `--until=${gitTime(window.until, "ceil")}`, "--numstat", "--format=@%H %P"];
+  const res = await deps.git(args, workdir).catch(() => null);
+  if (!res || res.code !== 0) return {};
+  const parsed = parseNumstat(res.stdout);
+  const out: Changes = { files: parsed.files!.map((f) => ({ ...f, path: Array.from(clean(f.path)).slice(0, MAX_PATH_CHARS).join("") })) };
+  if (parsed.files_omitted) out.files_omitted = parsed.files_omitted;
+  if (parsed.commit_range) out.commit_range = parsed.commit_range;
+  return out;
+}
+
+// ステップの出力（.out）。伏せてから上限のバイト数で切る。読めなければ undefined（項目を省く）
+async function outputOf(stateDir: string, line: Line, clean: (text: string) => string): Promise<StepDetails["output"] | undefined> {
+  if (typeof line.out !== "string" || line.out === "") return undefined;
+  const text = await readFile(join(stateDir, line.out), "utf8").catch(() => null);
+  if (text === null) return undefined;
+  const cut = cutUtf8(clean(text), MAX_OUTPUT_BYTES);
+  return { kind: line.type === "run" ? "log" : "report", text: cut.text, truncated: cut.cut };
+}
+
 // 1 つのステップの行の工程の中身。plan は計画の名前（5-impl-2172）、stateDir はその状態のディレクトリ
 export async function collectStepDetails(deps: StepDetailsDeps, plan: string, stateDir: string, line: Line, info?: PlanInfo): Promise<StepDetails> {
   const { phase, workdir } = info ?? (await readPlan(stateDir));
@@ -120,23 +143,11 @@ export async function collectStepDetails(deps: StepDetailsDeps, plan: string, st
   if (issues.length > 0) details.issues = issues;
   const window = stepWindow(line);
   if (workdir && window) {
-    const args = ["log", "--no-merges", `--since=${gitTime(window.since, "floor")}`, `--until=${gitTime(window.until, "ceil")}`, "--numstat", "--format=@%H %P"];
-    const res = await deps.git(args, workdir).catch(() => null);
-    if (res && res.code === 0) {
-      const parsed = parseNumstat(res.stdout);
-      details.files = parsed.files!.map((f) => ({ ...f, path: Array.from(clean(f.path)).slice(0, MAX_PATH_CHARS).join("") }));
-      if (parsed.files_omitted) details.files_omitted = parsed.files_omitted;
-      if (parsed.commit_range) details.commit_range = parsed.commit_range;
-    }
+    Object.assign(details, await changesOf(deps, workdir, window, clean));
     const rows = await deps.ledgerRows().catch(() => null);
     if (rows) details.decisions = decisionsOf(rows, workdir, window, clean);
   }
-  if (typeof line.out === "string" && line.out !== "") {
-    const text = await readFile(join(stateDir, line.out), "utf8").catch(() => null);
-    if (text !== null) {
-      const cut = cutUtf8(clean(text), MAX_OUTPUT_BYTES);
-      details.output = { kind: line.type === "run" ? "log" : "report", text: cut.text, truncated: cut.cut };
-    }
-  }
+  const output = await outputOf(stateDir, line, clean);
+  if (output) details.output = output;
   return details;
 }
