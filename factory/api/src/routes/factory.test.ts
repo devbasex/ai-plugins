@@ -74,6 +74,7 @@ beforeEach(async () => {
     credentials: new CredentialService(h.table, secrets),
     control: h.control,
     loops: new LoopControl({ table: h.table, control: h.control, reader: memoryProgressReader(h.progress), now: () => h.clock.now }),
+    organizer: h.organizer,
     table: h.table,
     github: h.github,
     candidateModel: (s: "ranking" | "recent", i: { number: number; title: string }[]) => model.fn(s, i),

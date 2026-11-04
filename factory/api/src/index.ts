@@ -84,8 +84,9 @@ export type { ResumeRejectedCode, RunControlConfig, RunControlDeps } from "./run
 export type { RunJob, SprintRun, RunState, JobState } from "./runs/model.ts";
 export { repoKey } from "./progress/github.ts";
 
-// 承認待ちのスプリントの実行に resume の実行ジョブを作り起動する。承認待ちでない・動くジョブがある → ResumeRejectedError
-export function requestResume(input: { sprintRunId: string; approvalRequestId: string }): Promise<{ jobId: string }> {
+// 承認待ちのスプリントの実行に resume の実行ジョブを作り起動する。承認待ちでない・動くジョブがある → ResumeRejectedError。
+// 配布の実行（#2439）への差し戻しはジョブを起こさず jobId が null
+export function requestResume(input: { sprintRunId: string; approvalRequestId: string }): Promise<{ jobId: string | null }> {
   return factoryDepsFromEnv().control.requestResume(input);
 }
 

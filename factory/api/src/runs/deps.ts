@@ -4,7 +4,8 @@ import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-sec
 import type { JWK } from "jose";
 import { CredentialService, AwsSecrets } from "../credentials/service.ts";
 import { GitHubApp } from "../github/app.ts";
-import { appendControlEventTo } from "../progress/append.ts";
+import { OrganizerControl } from "../organizer/control.ts";
+import { appendControlEventTo, appendReleaseAnsweredTo } from "../progress/append.ts";
 import { DynamoProgressReader } from "../progress/read.ts";
 import type { RunJobSigningKey } from "../progress/run-job-token.ts";
 import { progressStoreFromEnv } from "../handlers/ingest.ts";
@@ -103,6 +104,9 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
   // ループの制御は実行の制御の停止の後の処理と見回りから呼ばれる（常駐のプロセスを持たない。#2347 の決定 1）
   const loops = new LoopControl({ table, control, reader, resolveContext });
   control.setLoopHooks(loops.hooks());
+  // Factory のオーガナイザーも同じく、停止の後の処理・再開の要求・見回りから呼ばれる（#2439 の決定 2）
+  const organizer = new OrganizerControl({ table, github, reader, control, appendAnswered: (e) => appendReleaseAnsweredTo(progressStoreFromEnv(), e) });
+  control.setOrganizer(organizer);
   // 候補の証明の鍵は App のクライアントの秘密から用途を分けて作る
   const proofKey = async () => new Uint8Array(createHash("sha256").update(`ndf-factory:repositories:${await clientSecret()}`).digest());
   cached = {
@@ -110,6 +114,7 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     credentials: new CredentialService(table, new AwsSecrets(sm)),
     control,
     loops,
+    organizer,
     table,
     github,
     candidateModel: bedrockCandidateModel(requireEnv("CANDIDATE_MODEL_ID")),
