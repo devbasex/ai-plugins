@@ -93,7 +93,7 @@
       "additionalProperties": false,
       "required": ["phase", "issues"],
       "properties": {
-        "phase": { "description": "フェーズの名前。集合は #2172 が決めるまで列挙にしない", "type": "string", "minLength": 1 },
+        "phase": { "description": "フェーズの名前。5 つの名前（設計・実装・検査・取り込み・仕上げ）は src/phases.ts が持ち、ここでは列挙で縛らない", "type": "string", "minLength": 1 },
         "issues": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
       }
     },
@@ -116,7 +116,74 @@
         "exit_code": { "type": "integer" },
         "seconds": { "type": "number", "minimum": 0 },
         "summary": { "type": "string" },
-        "pull_request": { "$ref": "#/$defs/PullRequestRef" }
+        "pull_request": { "$ref": "#/$defs/PullRequestRef" },
+        "phase": {
+          "description": "その工程が属するフェーズの名前。省いたときは同じ実行ジョブの直前の phase.changed から導く",
+          "type": "string",
+          "minLength": 1
+        },
+        "issues": {
+          "description": "その工程が受け持つ課題。省いたときも空のときもスプリント全体の工程",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "maxItems": 50
+        },
+        "files": {
+          "description": "その工程の時間の窓のコミットが触ったファイル。省いたときは記録なし、空の配列は触らなかった",
+          "type": "array",
+          "items": { "$ref": "#/$defs/StepFile" },
+          "maxItems": 100
+        },
+        "files_omitted": { "description": "上限で files から外した数", "type": "integer", "minimum": 0 },
+        "commit_range": { "$ref": "#/$defs/CommitRange" },
+        "decisions": {
+          "description": "その工程の間に決めたこと。省いたときは記録なし、空の配列は決めたことが無かった",
+          "type": "array",
+          "items": { "$ref": "#/$defs/StepDecision" },
+          "maxItems": 20
+        },
+        "output": { "$ref": "#/$defs/StepOutput" }
+      }
+    },
+    "StepFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "added", "deleted"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "added": { "description": "null はバイナリ（行数が無い）", "type": ["integer", "null"], "minimum": 0 },
+        "deleted": { "description": "null はバイナリ（行数が無い）", "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "CommitRange": {
+      "description": "時間の窓のコミットの最初の親と最後のコミット",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "to": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "StepDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "answer", "by"],
+      "properties": {
+        "question": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "by": { "type": "string", "enum": ["ai", "user"] }
+      }
+    },
+    "StepOutput": {
+      "description": "作業の報告（report）かログ（log）。text は UTF-8 で 32,768 バイト以下で、truncated は上限で切ったこと",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text", "truncated"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["report", "log"] },
+        "text": { "type": "string", "maxLength": 32768 },
+        "truncated": { "type": "boolean" }
       }
     },
     "AttentionPayload": {
