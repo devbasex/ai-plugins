@@ -59,18 +59,25 @@ def _run(args, cwd, env_extra=None):
 
 def test_request_and_await_through_files(tmp_path, org):
     state = tmp_path / "plan-state"
-    code, out = _run(["request", "--external", "--lane", "loop-l20261102", "--state", str(state), "--prs", "2440", "--issues", "2439"], tmp_path)
+    code, out = _run(
+        ["request", "--external", "--lane", "loop-l20261102", "--state", str(state), "--prs", "2440", "--issues", "2439"], tmp_path
+    )
     assert code == 10, out
     rid = out["metrics"]["id"]
     body = json.loads((org / "requests" / f"{rid}.json").read_text())
     assert pe.file_errors({"file": f"requests/{rid}.json", "body": body}) == []
     # 打ち直しても同じ id
-    code, again = _run(["request", "--external", "--lane", "loop-l20261102", "--state", str(state), "--prs", "2440", "--issues", "2439"], tmp_path)
+    code, again = _run(
+        ["request", "--external", "--lane", "loop-l20261102", "--state", str(state), "--prs", "2440", "--issues", "2439"], tmp_path
+    )
     assert again["metrics"]["id"] == rid
     sent = state / "work" / "request.txt"
     code, out = _run(["await", "--external", "--from", str(sent)], tmp_path)
     assert code == 3
-    pe.write_json(org / "answers" / f"{rid}.json", {"result": "released", "version": "10.28.0", "release": "https://x/pull/1", "reason": None, "at": "t"})
+    pe.write_json(
+        org / "answers" / f"{rid}.json",
+        {"result": "released", "version": "10.28.0", "release": "https://x/pull/1", "reason": None, "at": "t"},
+    )
     code, out = _run(["await", "--external", "--from", str(sent)], tmp_path)
     assert code == 0 and out["metrics"]["version"] == "10.28.0"
     # ループの周回の境は計画名 --external で答えを読む
@@ -86,7 +93,10 @@ def test_factory_run_refuses_local_organizer(tmp_path, cmd):
 BATCH = {
     "seq": 3,
     "step": "present",
-    "lanes": [{"lane": "loop-l1", "requests": [{"id": "loop-l1-r000000000001", "prs": [11]}], "issues": [1]}, {"lane": "run-ab", "requests": [], "issues": [2]}],
+    "lanes": [
+        {"lane": "loop-l1", "requests": [{"id": "loop-l1-r000000000001", "prs": [11]}], "issues": [1]},
+        {"lane": "run-ab", "requests": [], "issues": [2]},
+    ],
     "presentations": [],
     "choices": ["continue", "reject"],
 }
@@ -125,7 +135,16 @@ def _fake_run(merged: bool):
 def _presented(d: Path, k: int = 1) -> None:
     rd = pe.release_dir(d, 3, k)
     pe.write_json(rd / "version.json", {"version": "10.28.0"})
-    pe.write_json(rd / "presented.json", {"sha": "0123abcd", "prs": [11, 12], "lanes": {"loop-l1": {"prs": [11], "requested": True}, "run-ab": {"prs": [12], "requested": False}}, "orphans": [], "added": None})
+    pe.write_json(
+        rd / "presented.json",
+        {
+            "sha": "0123abcd",
+            "prs": [11, 12],
+            "lanes": {"loop-l1": {"prs": [11], "requested": True}, "run-ab": {"prs": [12], "requested": False}},
+            "orphans": [],
+            "added": None,
+        },
+    )
 
 
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):

@@ -75,7 +75,9 @@ def reply(status: str, summary: str, items=None, code: int | None = None, next_s
 def refuse_in_factory_run() -> None:
     """サービスの実行ジョブ（`NDF_FACTORY_RUN`）の中では 1 台の中のオーガナイザーを起動しない（#2439 の I68。2 つのオーガナイザーは排他）。"""
     if os.environ.get("NDF_FACTORY_RUN"):
-        reply("stopped", "サービスの実行ジョブの中では並列の計画を起動しない（外のオーガナイザーが配布をまとめる）", code=1, factory_run=True)
+        reply(
+            "stopped", "サービスの実行ジョブの中では並列の計画を起動しない（外のオーガナイザーが配布をまとめる）", code=1, factory_run=True
+        )
 
 
 def external_dir() -> Path:
@@ -406,7 +408,14 @@ def _request_external(main: Path, a) -> None:
     pe.write_request(d, rid, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": pe.EXTERNAL, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await --external --from {Path(a.state) / 'work' / 'request.txt'}"
-    reply("gate", f"配布の依頼 {rid} を外のオーガナイザーへ書いた（配布待ち）。答えは parallel.py await --external で読む", code=10, next_step=nxt, id=rid, result="requested")
+    reply(
+        "gate",
+        f"配布の依頼 {rid} を外のオーガナイザーへ書いた（配布待ち）。答えは parallel.py await --external で読む",
+        code=10,
+        next_step=nxt,
+        id=rid,
+        result="requested",
+    )
 
 
 def cmd_request(a) -> None:
@@ -423,7 +432,14 @@ def cmd_request(a) -> None:
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    reply("gate", f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む", code=10, next_step=nxt, id=rid, result="requested")
+    reply(
+        "gate",
+        f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む",
+        code=10,
+        next_step=nxt,
+        id=rid,
+        result="requested",
+    )
 
 
 def cmd_await(a) -> None:

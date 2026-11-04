@@ -58,7 +58,9 @@ def external_lane() -> Optional[tuple[str, pp.Lane]]:
     if pe.organizer_dir() is None:
         return None
     name = pe.organizer_lane() or "external"
-    lane = pp.Lane.model_construct(name=name, input=pp.SprintInput.model_construct(kind="sprint", issues=[], args=[]), plans=QUEUE_MAX, touches=[])
+    lane = pp.Lane.model_construct(
+        name=name, input=pp.SprintInput.model_construct(kind="sprint", issues=[], args=[]), plans=QUEUE_MAX, touches=[]
+    )
     return pe.EXTERNAL, lane
 
 

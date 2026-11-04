@@ -132,7 +132,11 @@ def read_batch(d: Path) -> dict:
 
 def requests_of(batch: dict) -> list[dict]:
     """まとめた配布の依頼（`parallel_release.map_lanes` が読む形 {id, lane, prs}）。"""
-    return [{"id": r["id"], "lane": ln["lane"], "prs": list(r.get("prs") or [])} for ln in batch.get("lanes") or [] for r in ln.get("requests") or []]
+    return [
+        {"id": r["id"], "lane": ln["lane"], "prs": list(r.get("prs") or [])}
+        for ln in batch.get("lanes") or []
+        for r in ln.get("requests") or []
+    ]
 
 
 def plan_of(batch: dict):
@@ -141,7 +145,10 @@ def plan_of(batch: dict):
 
     lanes = [
         pp.Lane.model_construct(
-            name=ln["lane"], input=pp.SprintInput.model_construct(kind="sprint", issues=list(ln.get("issues") or []), args=[]), plans=1, touches=[]
+            name=ln["lane"],
+            input=pp.SprintInput.model_construct(kind="sprint", issues=list(ln.get("issues") or []), args=[]),
+            plans=1,
+            touches=[],
         )
         for ln in batch.get("lanes") or []
     ]
@@ -188,12 +195,20 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
         if not (rd / "answer.json").exists():
             write_json(rd / "answer.json", pr.answer_state(Path(main)))
         done = rd / "done.json"
-        return {**out, "pipeline": f"{pr.pipeline_cmd(supervise, rd)} && {supervise} wait {done}", "settle": f"{parallel} settle --external {seq} --done {done}"}
+        return {
+            **out,
+            "pipeline": f"{pr.pipeline_cmd(supervise, rd)} && {supervise} wait {done}",
+            "settle": f"{parallel} settle --external {seq} --done {done}",
+        }
     done = rd / "release-done.json"
     if step.startswith("confirm:"):
         gate = f"python3 {Path(__file__).resolve().parents[1] / 'sprint-state.py'} gate {rd / 'answer.json'} '関門 2' --what 'まとめた配布 {seq} の提示 {k}' --by user --outcome approved"
         steps = [gate, f"{supervise} run {rd / 'present.json'} --from approve", f"{supervise} queue {rd / 'release.json'} --done {done}"]
-        return {**out, "pipeline": " && ".join([*steps, f"{supervise} wait {done}"]), "settle": f"{parallel} settle --external {seq} --done {done}"}
+        return {
+            **out,
+            "pipeline": " && ".join([*steps, f"{supervise} wait {done}"]),
+            "settle": f"{parallel} settle --external {seq} --done {done}",
+        }
     return {
         **out,
         "pipeline": f"{supervise} queue {rd / 'release.json'} --done {done} --resume && {supervise} wait {done}",
@@ -238,7 +253,12 @@ def stages_of(root: Path, version: str, run=subprocess.run) -> list[str]:
     if not version:
         return []
     head = f"release/v{version}"
-    got = run(["gh", "pr", "list", "--head", head, "--base", "main", "--state", "all", "--json", "state,url"], cwd=root, capture_output=True, text=True)
+    got = run(
+        ["gh", "pr", "list", "--head", head, "--base", "main", "--state", "all", "--json", "state,url"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
     try:
         pulls = json.loads(got.stdout or "[]") if got.returncode == 0 else []
     except ValueError:
@@ -332,7 +352,11 @@ def file_errors(message: object) -> list[str]:
         if body.get("step") not in STEPS or not isinstance(body.get("seq"), int):
             errs.append("step か seq の形が違う")
         for ln in body.get("lanes") or []:
-            if not isinstance(ln.get("lane"), str) or not _INTS(ln.get("issues")) or not all(_INTS(r.get("prs")) for r in ln.get("requests") or []):
+            if (
+                not isinstance(ln.get("lane"), str)
+                or not _INTS(ln.get("issues"))
+                or not all(_INTS(r.get("prs")) for r in ln.get("requests") or [])
+            ):
                 errs.append("lanes の形が違う")
     elif top == "presented":
         if body.get("k") not in (1, 2) or not isinstance(body.get("auto"), bool) or not _INTS(body.get("prs")):
