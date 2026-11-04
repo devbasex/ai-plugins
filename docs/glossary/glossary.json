@@ -4554,6 +4554,12 @@
       "pending_source": "issues/issue-2405-requirements.md"
     },
     {
+      "term": "予算の反映",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
       "term": "打ち切りの時間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
