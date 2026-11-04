@@ -4887,6 +4887,13 @@
       "pending_source": "issues/issue-2338-requirements.md"
     },
     {
+      "term": "全文ファイル",
+      "context": "ndf-workflow",
+      "meaning": "実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-design.md"
+    },
+    {
       "term": "上限の宣言",
       "context": "ndf-workflow",
       "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335）",
