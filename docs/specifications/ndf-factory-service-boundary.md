@@ -229,7 +229,7 @@ graph TD
 
 | 集約 | 持ち主 | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| アカウント | 認証と料金プラン（#2170） | アカウント | 席 | 料金プラン・使える量 |
+| アカウント | 認証と料金プラン | アカウント | 席 | 料金プラン・使える量 |
 | リポジトリの登録 | 取り込み（#2186） | 登録 | — | GitHub のリポジトリの識別子・GitHub App の導入の識別子 |
 | スプリントの実行 | 実行の制御（#2186） | スプリントの実行 | 実行ジョブ | NDF の版・スプリントの状態・ジョブの結果 |
 | 実行の枠 | 実行の制御（#2186） | アカウントの枠 | — | 終わりの状態でない数（アカウント全体・リポジトリごと） |
@@ -317,7 +317,7 @@ erDiagram
 
 ### 実行ジョブの指示
 
-実行の制御からランナーへ、コンテナの環境変数で渡す。形態 ① では、手元のマシンが受け取りの応答で同じ項目を受け取る（#2189）。
+実行の制御からランナーへ、コンテナの環境変数で渡す。形態 ① では、手元のマシンが受け取りの応答で同じ項目を受け取る。
 
 | 入力 | 型・必須 | 意味 |
 | --- | --- | --- |
@@ -493,7 +493,7 @@ stateDiagram-v2
 - 子課題: [#2170](https://github.com/devbasex/ai-plugins/issues/2170)・[#2171](https://github.com/devbasex/ai-plugins/issues/2171)・[#2172](https://github.com/devbasex/ai-plugins/issues/2172)・[#2173](https://github.com/devbasex/ai-plugins/issues/2173)・[#2174](https://github.com/devbasex/ai-plugins/issues/2174)・[#2186](https://github.com/devbasex/ai-plugins/issues/2186)・[#2189](https://github.com/devbasex/ai-plugins/issues/2189)
 - 設計 Pull Request: [#2175](https://github.com/devbasex/ai-plugins/pull/2175)、実装: [#2177](https://github.com/devbasex/ai-plugins/pull/2177)
 - サービスのディレクトリ: [factory/README.md](../../factory/README.md)
-- 認証とアカウント・席・料金プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 認証とアカウント・席・料金プランの使える量: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
 - 契約の定義と型・進捗の受け口・実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
 - 境界の検査: [scripts/check-service-boundary.py](../../scripts/check-service-boundary.py)、許可の一覧: [scripts/service-boundary-allow.json](../../scripts/service-boundary-allow.json)
 - 追加待ちの扱い: [必須のチェックの突き合わせ](ci-required-checks-reconcile.md)

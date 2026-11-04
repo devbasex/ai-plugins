@@ -44,7 +44,7 @@ Neural Development Factory の利用者が自分の GitHub のリポジトリを
 ## 対象範囲
 
 - **含む**: `factory/api/src/` の取り込み（`repositories/`）・キーの持ち込み（`credentials/`）・GitHub の口（`github/`）・実行の制御（`runs/`）・進捗の記録の読み出し（`progress/read.ts`）・画面向けの経路（`routes/factory.ts`）・ランナー向けの経路と停止の知らせと見回りの handler（`handlers/run-jobs.ts`・`handlers/run-control.ts`）・`index.ts` への export、`factory/runner/`（ランナーとイメージ）、`factory/web/src/pages/` の 3 画面（リポジトリ・キーの持ち込み・スプリントを始める）、`factory/contracts/openapi/runs.yaml`、`factory/.env.example` の 14 の変数の名前
-- **含まない**: 承認の依頼の保存と答えを返す経路の実装（#2173。経路の形だけを `runs.yaml` に置く）、手元のマシン（形態 ①）の登録・心拍・受け取りの経路（#2189。本書は渡す口の関数だけを持つ）、一覧と詳細の画面（#2172）、料金と台帳（#2174）、承認ゲートの外の問い合わせを止める hook と `ask.jsonl` の書き手（#2206）、ECS・S3・Secrets Manager・DynamoDB・EventBridge・GitHub App の作成などインフラの定義（private リポジトリ）
+- **含まない**: 承認の依頼の保存と答えを返す経路の実装（経路の形だけを `runs.yaml` に置く）、手元のマシン（形態 ①）の登録・心拍・受け取りの経路（本書は渡す口の関数だけを持つ）、一覧と詳細の画面、料金と台帳、承認ゲートの外の問い合わせを止める hook と `ask.jsonl` の書き手、ECS・S3・Secrets Manager・DynamoDB・EventBridge・GitHub App の作成などインフラの定義（private リポジトリ）
 - **取り込むリポジトリの起点・テスト・配布・進め方の入力欄は持たない。** ランナーの中の NDF がそのリポジトリの `.ndf/` から読む（全体の契約の決定 8）
 - **止まった・失敗したスプリントの実行を同じ実行のまま続け直さない。** 新しいスプリントの実行として始める
 - プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
@@ -463,7 +463,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 - 実装: [#2248](https://github.com/devbasex/ai-plugins/pull/2248)・[#2250](https://github.com/devbasex/ai-plugins/pull/2250)
 - サービス全体の契約: [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md)
 - 受け口と実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
-- 認証とアカウント・席・料金プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 認証とアカウント・席・料金プランの使える量: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
 - 経路の契約: [factory/contracts/openapi/runs.yaml](../../factory/contracts/openapi/runs.yaml)
 - サービスのディレクトリと API の入口: [factory/README.md](../../factory/README.md)
 - 代わりの判断を残す問い合わせの guard（#2206）: [ndf-ask-guard.md](ndf-ask-guard.md)、記録の形: [plugins/ndf/scripts/lib/ask_ledger.py](../../plugins/ndf/scripts/lib/ask_ledger.py)
