@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import context_calibrate  # noqa: E402
 import context_decisions as cd  # noqa: E402
 import context_policy as cp  # noqa: E402
 import step_result as sr  # noqa: E402
@@ -315,7 +316,7 @@ def cmd_record(a) -> None:
 
 
 def cmd_calibrate(a) -> None:
-    body, ok = cd.calibrate_repo(cd.toplevel(None), a.days)
+    body, ok = context_calibrate.calibrate_repo(cd.toplevel(None), a.days)
     if not ok:
         sr.emit(sr.result(TOOL, "stopped", "見込みのファイルへ書けない"), sr.EXIT_VIOLATION)
     sr.emit(sr.result(TOOL, "ok", f"見込みを較正した（標本 {body['samples']}）", [body], {"samples": body["samples"]}))

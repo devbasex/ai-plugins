@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import statistics
 import time
 from collections import defaultdict
 import subprocess
@@ -35,7 +34,6 @@ from usage_ledger import cache_writes, now_utc
 SCHEMA = 1
 SESSION_DAYS = 7
 LOCAL = "_local"
-CACHE_1H = 3600  # 呼び出しの間隔がこれを超えたら、1 時間のキャッシュが切れたとみなす
 MARK_HANDOFF, MARK_RESTORED = "引継ぎ開始", "復元完了"
 MARKS = (MARK_HANDOFF, MARK_RESTORED)
 EVENT_DECISION = "判定"
@@ -357,101 +355,6 @@ def attach_marks(marks: list[dict], spans: dict[str, tuple[float, float]]) -> di
     return out
 
 
-# --- 較正 ---------------------------------------------------------------------------------------------
-
-
-def _median_of(values: list[float]) -> float | None:
-    return float(statistics.median(values)) if values else None
-
-
-def _mark_times(marks: list[dict], event: str) -> list[float]:
-    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))))
-
-
-def _restore_sample(calls: list[dict], marks: list[dict], by_next: bool) -> tuple[int, int] | None:
-    """ndf-next で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
-    restored = _mark_times(marks, MARK_RESTORED)
-    if not (by_next and restored):
-        return None
-    before = [c for c in calls if c["ts"] is not None and c["ts"] <= restored[0]]
-    return (before[-1]["context"], len(before)) if before else None
-
-
-def _handoff_sample(calls: list[dict], marks: list[dict]) -> tuple[int, int] | None:
-    """最後の引継ぎの印から後の (呼び出し数, 出力 token の合計)。印が無ければ None。"""
-    handoffs = _mark_times(marks, MARK_HANDOFF)
-    if not handoffs:
-        return None
-    after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoffs[-1]]
-    return len(after), sum(c["out"] for c in after)
-
-
-def _stage_segments(calls: list[dict], rows: list[dict]) -> list[tuple[str, int, int]]:
-    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
-    launches = sorted(
-        ((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at")))),
-    )
-    out = []
-    for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
-        seg = [c for c in calls if c["ts"] is not None and c["ts"] >= start and (nxt is None or c["ts"] < nxt)]
-        if not seg or nxt is None:
-            continue
-        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
-        out.append((stage, len(seg), gaps))
-    return out
-
-
-def calibrate(rows: list[dict], since: float | None = None) -> dict:
-    """判定の記録と会話の記録から費用の見込みを作る（決定 5・6）。標本が 3 未満の値は None。"""
-    rows = [r for r in fill_work(rows) if since is None or (parse_ts(r.get("at")) or 0) >= since]
-    sessions = sessions_of(rows)
-    restore_q, restore_n, handoff_h, handoff_out = [], [], [], []
-    stage_k: dict[str, list] = defaultdict(list)
-    stage_m: dict[str, list] = defaultdict(list)
-    spans = {}
-    cache: dict[str, tuple] = {}
-    for sid, s in sessions.items():
-        cache[sid] = read_calls(s["transcript"], set()) if s["transcript"] else ([], None, False)
-        ts = [c["ts"] for c in cache[sid][0] if c["ts"]]
-        if ts:
-            spans[sid] = (min(ts), max(ts))
-    by_session = attach_marks([r for r in rows if r.get("event") in MARKS], spans)
-    for sid, s in sessions.items():
-        calls, _, by_next = cache[sid]
-        marks = by_session.get(sid, [])
-        if (restore := _restore_sample(calls, marks, by_next)) is not None:
-            restore_q.append(restore[0])
-            restore_n.append(restore[1])
-        if (handoff := _handoff_sample(calls, marks)) is not None:
-            handoff_h.append(handoff[0])
-            handoff_out.append(handoff[1])
-        for stage, n, gaps in _stage_segments(calls, s["rows"]):
-            for key in (stage, "*"):
-                stage_k[key].append(n)
-                stage_m[key].append(gaps)
-
-    def med(values):
-        return _median_of(values) if len(values) >= cp.MIN_SAMPLES else None
-
-    return {
-        "restore_context": med(restore_q),
-        "restore_calls": med(restore_n),
-        "handoff_calls": med(handoff_h),
-        "handoff_output": med(handoff_out),
-        "stage_calls": {k: _median_of(v) for k, v in stage_k.items()},
-        "stage_expiries": {k: _median_of(v) for k, v in stage_m.items()},
-        "samples": {"restore": len(restore_q), "handoff": len(handoff_h)} | {f"stage:{k}": len(v) for k, v in stage_k.items()},
-        "at": now_utc(),
-    }
-
-
-def calibrate_repo(root: str | None, days: int = 30) -> tuple[dict, bool]:
-    """そのリポジトリの直近 `days` 日の記録から見込みを較正して書く。(見込み, 書けたか)。"""
-    repo = decisions_repo(root)
-    body = calibrate(read_decisions(repo), since=time.time() - days * 86400)
-    return body, write_cost_estimates(body, repo)
-
-
 def record_row(runtime: str, source: str, work: str, applied, context: int | None = None, event: str | None = None, reason=None) -> dict:
     """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。"""
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
@@ -472,7 +375,9 @@ def record_restart(work: str, reason: str | None = None, cwd: str | None = None,
             prev = last_denial(read_decisions(repo), work)
             reason = (prev or {}).get("reason") or (cp.REASON_CUTPOINT if applied.policy == cp.CURRENT else cp.REASON_MANUAL)
         ok = append_decision(record_row(runtime, "sprint-state", work, applied, reason=reason), repo)
-        calibrate_repo(root)
+        import context_calibrate  # 較正は会話の記録の全体を読む重い側。循環を避けて関数の中で読む
+
+        context_calibrate.calibrate_repo(root)
         return ok
     except Exception:  # noqa: BLE001 — 記録の失敗で ndf-next を止めない
         return False

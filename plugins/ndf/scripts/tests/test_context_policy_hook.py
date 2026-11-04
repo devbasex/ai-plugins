@@ -15,6 +15,7 @@ from test_token_guard import agent, denied, relay_dir, run, skill, transcript  #
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
+import context_calibrate  # noqa: E402
 import context_decisions as cd  # noqa: E402
 
 CLI = SCRIPTS / "context-policy.py"
@@ -372,10 +373,10 @@ def test_calibrate_needs_three_samples(tmp_path):
             mark("復元完了", f"2026-11-0{i + 1}T00:00:30Z", f"s{i}"),
             mark("引継ぎ開始", f"2026-11-0{i + 1}T00:02:30Z", f"s{i}"),
         ]
-    body = cd.calibrate(recs)
+    body = context_calibrate.calibrate(recs)
     assert body["samples"]["restore"] == 3 and body["restore_calls"] == 1.0
     assert body["handoff_calls"] == 1.0 and body["handoff_output"] == 50.0
-    assert cd.calibrate(recs[:8])["restore_context"] is None
+    assert context_calibrate.calibrate(recs[:8])["restore_context"] is None
 
 
 def test_sprint_state_next_records_restart(tmp_path, ctx):
@@ -395,7 +396,7 @@ def test_sprint_state_next_records_restart(tmp_path, ctx):
 
 
 def _calibrated(recs, since=None) -> dict:
-    body = cd.calibrate(recs, since=since)
+    body = context_calibrate.calibrate(recs, since=since)
     assert isinstance(body.pop("at"), str)
     return body
 
