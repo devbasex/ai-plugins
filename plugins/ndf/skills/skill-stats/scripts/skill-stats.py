@@ -748,7 +748,7 @@ def filter_projects(
 
 
 class AgentReport(NamedTuple):
-    """`--agents` の報告（記録の行・要約・層ごとの合計・総計・役割ごとの使用量・要約から除いた数）。"""
+    """`--agents` の報告（記録の行・要約・層ごとの合計・総計・役割ごとの使用量・要約から除いた数・割る候補の上限と出所）。"""
 
     agents: list
     summary: list[dict]
@@ -756,20 +756,21 @@ class AgentReport(NamedTuple):
     totals: dict
     usage: list[dict]
     excluded: int
+    limit_meta: dict
 
 
 def agent_report(args: argparse.Namespace) -> AgentReport:
-    """`--agents` のときだけ記録を読んで報告を作る。割る候補の上限と出所は `args.limit_meta` に置く。"""
+    """`--agents` のときだけ記録を読んで報告を作る。割る候補の上限と出所は `limit_meta` に返す。"""
     if not args.agents:
-        return AgentReport([], [], [], {}, [], 0)
+        return AgentReport([], [], [], {}, [], 0, {})
     agents, skipped = collect_agents(args.session, args.layer)
     if skipped:
         print(f"[skill-stats] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
-    limit_of, args.limit_meta = context_decisions.record_limits([r.session for r in agents], args.window_limit)
+    limit_of, limit_meta = context_decisions.record_limits([r.session for r in agents], args.window_limit)
     summary, excluded = summarize_agents(agents, limit_of)
     totals_rows, totals = layer_totals(agents)
     usage = role_usage(agents) if args.session else []
-    return AgentReport(agents, summary, totals_rows, totals, usage, excluded)
+    return AgentReport(agents, summary, totals_rows, totals, usage, excluded, limit_meta)
 
 
 def emit_json(
@@ -807,7 +808,7 @@ def emit_json(
         "projects": projects_json,
     }
     if args.agents:
-        out["meta"].update(args.limit_meta)  # 割る候補の上限と出所（agent_report が記録から決めた値）
+        out["meta"].update(report.limit_meta)  # 割る候補の上限と出所（agent_report が記録から決めた値）
         out.update(
             {
                 "agents": [r.as_row() for r in report.agents],
