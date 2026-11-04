@@ -102,14 +102,23 @@ def append_depth_row(path: Path, row: dict) -> None:
     locks.append_locked(path, json.dumps(row, ensure_ascii=False))
 
 
+def _is_ran(row: dict, depth: str) -> bool:
+    """`depth` を実行した（`event` が `ran` の）行か。"""
+    return row.get("depth") == depth and row.get("event") == "ran"
+
+
+def _last_ran(rows: list[dict], depth: str) -> int:
+    """最後に `depth` を実行した行の位置。無ければ -1。"""
+    return max((i for i, r in enumerate(rows) if _is_ran(r, depth)), default=-1)
+
+
 def _ran(rows: list[dict], depth: str) -> list[dict]:
-    return [r for r in rows if r.get("depth") == depth and r.get("event") == "ran"]
+    return [r for r in rows if _is_ran(r, depth)]
 
 
 def diffs_since(rows: list[dict], depth: str) -> int:
     """最後の `depth` の `ran` の行より後の差分の棚卸しの `ran` の行の数（前提 1 の数え方）。"""
-    last = max((i for i, r in enumerate(rows) if r.get("depth") == depth and r.get("event") == "ran"), default=-1)
-    return sum(1 for r in rows[last + 1 :] if r.get("depth") == "diff" and r.get("event") == "ran")
+    return len(_ran(rows[_last_ran(rows, depth) + 1 :], "diff"))
 
 
 def cause_share(causes: list[dict], types: list[dict], open_numbers: set | None) -> tuple[str | None, float]:
@@ -156,8 +165,7 @@ def _due_overhaul(rows: list[dict], cfg: dict, causes, types, open_numbers) -> t
     values["count"] = diffs_since(rows, "overhaul")
     if values["count"] >= c["every"]:
         trig.append("count")
-    last_ov = max((i for i, r in enumerate(rows) if r.get("depth") == "overhaul" and r.get("event") == "ran"), default=-1)
-    reviews = _ran(rows[last_ov + 1 :], "review")[-c["streak"] :]
+    reviews = _ran(rows[_last_ran(rows, "overhaul") + 1 :], "review")[-c["streak"] :]
     if len(reviews) >= c["streak"]:
         if all((r.get("created") or 0) > (r.get("closed") or 0) for r in reviews):
             trig.append("created_over_closed")

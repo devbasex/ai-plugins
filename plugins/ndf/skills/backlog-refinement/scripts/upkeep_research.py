@@ -15,7 +15,6 @@ run: 見直しの持ち主になり、完了のファイルが出るまで、並
 
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import json
 import os
@@ -141,12 +140,8 @@ def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
 
 
 def _iso_epoch(value) -> float | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return _dt.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+    """記録の時刻の文字列を UNIX 時刻（秒）にする。文字列でないか読めなければ None。"""
+    return clock.epoch(value) if isinstance(value, str) else None
 
 
 def plan(root, since: str | None) -> dict:
@@ -318,6 +313,35 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
     return rec, usage
 
 
+def _ticker(root, run_id, until: str | None, cfg: dict):
+    """呼び出しの間に呼ぶ関数。持ち主の印を `owner.beat` 秒ごとに書き、待っていたプランの完了から `research.grace` 秒を過ぎたら GraceOver を投げる。"""
+    beat = {"at": time.time(), "until_seen": None}
+
+    def tick(*_):
+        if time.time() - beat["at"] >= cfg["owner"]["beat"]:
+            O.touch(root, run_id)
+            beat["at"] = time.time()
+        # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
+        if until and Path(until).exists():
+            seen = beat["until_seen"] = beat["until_seen"] or time.time()
+            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
+                raise GraceOver
+
+    return tick
+
+
+def _wait_turn(root, run_id, item_id: str, until: str | None, listing: str | None, max_: int, tick, sleep) -> str | None:
+    """並列の空きを待ち、次の項目を始めてよければ None、止めるなら止まる理由を返す。"""
+    while not (until and Path(until).exists()) and not free_slot(listing, max_):
+        tick()
+        sleep(POLL)
+    if until and Path(until).exists():  # 待っていたプランが終わったら新しい項目を始めない（I13）
+        return "待っていたプランが終わった"
+    if O.touch(root, run_id, item_id):
+        return "持ち主でなくなった"
+    return None
+
+
 def run_research(
     root,
     until: str | None,
@@ -345,31 +369,14 @@ def run_research(
     pl = plan(root, since)
     mat = D.materials(root) or {}
     done, cost, secs, fails, why = [], 0.0, 0.0, 0, "項目が無い"
-    beat = {"at": time.time(), "until_seen": None}
-
-    def tick(*_):
-        if time.time() - beat["at"] >= cfg["owner"]["beat"]:
-            O.touch(root, run_id)
-            beat["at"] = time.time()
-        # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
-        if until and Path(until).exists():
-            seen = beat["until_seen"] = beat["until_seen"] or time.time()
-            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
-                raise GraceOver
-
+    tick = _ticker(root, run_id, until, cfg)
     try:
         for item_id in pl["todo"]:
             if len(done) >= max_items:
                 why = f"1 回の上限 {max_items} 項目に当たった"
                 break
-            while not (until and Path(until).exists()) and not free_slot(listing, max_):
-                tick()
-                sleep(POLL)
-            if until and Path(until).exists():  # 待っていたプランが終わったら新しい項目を始めない（I13）
-                why = "待っていたプランが終わった"
-                break
-            if O.touch(root, run_id, item_id):
-                why = "持ち主でなくなった"
+            if stop := _wait_turn(root, run_id, item_id, until, listing, max_, tick, sleep):
+                why = stop
                 break
             try:
                 rec, usage = research_one(root, pl["by_id"][item_id], cfg, mat.get("product"), run_id, loop, lap, tick)
