@@ -139,18 +139,13 @@ def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
     return items, skipped
 
 
-def _iso_epoch(value) -> float | None:
-    """記録の時刻の文字列を UNIX 時刻（秒）にする。文字列でないか読めなければ None。"""
-    return clock.epoch(value) if isinstance(value, str) else None
-
-
 def plan(root, since: str | None) -> dict:
     items, skipped = research_items(D.materials(root))
-    cut = _iso_epoch(since)
+    cut = clock.epoch_seconds(since)
     todo, fresh = [], []
     for it in items:
         rec = read_research_item(root, it["id"])
-        checked = _iso_epoch((rec or {}).get("checked_at"))
+        checked = clock.epoch_seconds((rec or {}).get("checked_at"))
         if checked is None or (cut is not None and checked < cut):
             todo.append(it["id"])
         else:

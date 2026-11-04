@@ -78,11 +78,11 @@ def test_seconds_between():
     assert clock.seconds_between("x", "2026-09-26T07:00:00Z") is None
 
 
-def test_epoch_reads_the_same_instant_as_parse():
-    assert clock.epoch("2026-09-26T07:00:00Z") == T.replace(microsecond=0).timestamp()
-    assert clock.epoch("2026-09-26T16:00:00+09:00") == clock.epoch("2026-09-26T07:00:00+00:00")
+def test_epoch_seconds_reads_the_same_instant_as_parse():
+    assert clock.epoch_seconds("2026-09-26T07:00:00Z") == T.replace(microsecond=0).timestamp()
+    assert clock.epoch_seconds("2026-09-26T16:00:00+09:00") == clock.epoch_seconds("2026-09-26T07:00:00+00:00")
 
 
 @pytest.mark.parametrize("value", [None, "", "not a time", 12])
-def test_epoch_returns_none_for_unreadable(value):
-    assert clock.epoch(value) is None
+def test_epoch_seconds_returns_none_for_unreadable(value):
+    assert clock.epoch_seconds(value) is None

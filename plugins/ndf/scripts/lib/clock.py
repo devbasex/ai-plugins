@@ -73,7 +73,7 @@ def parse(value: Any, naive: str = "local") -> Optional[_dt.datetime]:
     return None
 
 
-def epoch(value: Any, naive: str = "local") -> Optional[float]:
+def epoch_seconds(value: Any, naive: str = "local") -> Optional[float]:
     """`parse` で読んだ時刻の UNIX 時刻（秒）。読めなければ `None`。"""
     parsed = parse(value, naive)
     return None if parsed is None else parsed.timestamp()

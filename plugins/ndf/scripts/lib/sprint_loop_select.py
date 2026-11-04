@@ -259,7 +259,9 @@ def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict
     for r in got["selection"]:
         reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
     values = (
-        {"milestones": rec.get("milestones") or (rank.get("metrics") or {}).get("order", [])} if cond == "no_issue" else {"reasons": reasons}
+        {"milestones": rec.get("milestones") or (rank.get("metrics") or {}).get("order", [])}
+        if cond == "no_issue"
+        else {"reasons": reasons}
     )
     return stop_and_report(
         env,

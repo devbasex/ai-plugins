@@ -205,10 +205,25 @@ def test_record_marks_and_restart(tmp_path, ctx):
 
 def test_record_row_columns_and_stdout(tmp_path, ctx):
     # CLI の記録の行の列（現状固定。#2422）。標準出力の行と記録の行は同じ
-    out = cli("record", "--verdict", "再起動", "--reason", "独立性", "--work", "#7", "--context", "1234", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    out = cli(
+        "record",
+        "--verdict",
+        "再起動",
+        "--reason",
+        "独立性",
+        "--work",
+        "#7",
+        "--context",
+        "1234",
+        ctx=ctx,
+        cwd=str(tmp_path),
+        CLAUDE_CODE_SESSION_ID="s9",
+    )
     (row,) = rows(ctx)
     assert json.loads(out.stdout)["items"] == [row]
-    picked = {k: row[k] for k in ("runtime", "source", "session_id", "work", "context", "stage", "verdict", "reason", "band", "event", "policy")}
+    picked = {
+        k: row[k] for k in ("runtime", "source", "session_id", "work", "context", "stage", "verdict", "reason", "band", "event", "policy")
+    }
     assert picked == {
         "runtime": "claude",
         "source": "record",
@@ -470,7 +485,16 @@ def test_transcript_and_ledger_build_the_same_call(tmp_path):
     m = load_cli()
     a = _cached("2026-11-01T00:00:00Z", "m1")
     calls, compacts, by_next = cd.read_calls(write_transcript(tmp_path / "s1.jsonl", [a]))
-    want = {"ts": cd.parse_ts("2026-11-01T00:00:00Z"), "model": "claude-opus-5-5", "inp": 100, "out": 10, "read": 1000, "w5": 30, "w1h": 40, "context": 1170}
+    want = {
+        "ts": cd.parse_ts("2026-11-01T00:00:00Z"),
+        "model": "claude-opus-5-5",
+        "inp": 100,
+        "out": 10,
+        "read": 1000,
+        "w5": 30,
+        "w1h": 40,
+        "context": 1170,
+    }
     assert (calls, compacts, by_next) == ([want], 0, False)
     row = {"at": "2026-11-01T00:00:00Z", "model": "claude-opus-5-5", "usage": a["message"]["usage"], "seconds": 4}
     assert m.ledger_calls(row) == want | {"seconds": 4}
@@ -496,10 +520,26 @@ def test_work_report_pins_every_part(tmp_path):
     first = {"type": "user", "message": {"content": "続き .ndf/handoff/a.md"}}
     tp = write_transcript(
         tmp_path / "s1.jsonl",
-        [first, _cached("2026-11-01T00:00:00Z", "m1"), call("2026-11-01T00:10:00Z", "m2"), call("2026-11-01T00:20:00Z", "m3"), call("2026-11-01T01:30:00Z", "m4")],
+        [
+            first,
+            _cached("2026-11-01T00:00:00Z", "m1"),
+            call("2026-11-01T00:10:00Z", "m2"),
+            call("2026-11-01T00:20:00Z", "m3"),
+            call("2026-11-01T01:30:00Z", "m4"),
+        ],
     )
-    write_transcript(tmp_path / "s1" / "subagents" / "agent-x.jsonl", [call("2026-11-01T00:11:00Z", "m5"), call("2026-11-01T00:12:00Z", "m6")])
-    ledger = [{"session_id": "ag9", "parent_session_id": "s1", "at": "2026-11-01T00:15:00Z", "usage": call("t", "m7")["message"]["usage"], "seconds": 12}]
+    write_transcript(
+        tmp_path / "s1" / "subagents" / "agent-x.jsonl", [call("2026-11-01T00:11:00Z", "m5"), call("2026-11-01T00:12:00Z", "m6")]
+    )
+    ledger = [
+        {
+            "session_id": "ag9",
+            "parent_session_id": "s1",
+            "at": "2026-11-01T00:15:00Z",
+            "usage": call("t", "m7")["message"]["usage"],
+            "seconds": 12,
+        }
+    ]
     recs = [
         hook_row("s1", tp, "2026-11-01T00:00:00Z", verdict="継続", stage="skill:a"),
         mark("復元完了", "2026-11-01T00:05:00Z"),

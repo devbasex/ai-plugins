@@ -30,7 +30,7 @@ import clock
 import context_policy as cp
 import jsonio
 from context_policy import REASONS  # noqa: F401  sprint-state.py の --reason の選択肢
-from usage_ledger import now_utc
+from usage_ledger import cache_writes, now_utc
 
 SCHEMA = 1
 SESSION_DAYS = 7
@@ -94,9 +94,7 @@ def stage_of(key: str) -> str:
     return "plan"
 
 
-def parse_ts(value) -> float | None:
-    """記録の時刻の文字列を UNIX 時刻（秒）にする。文字列でないか読めなければ None。"""
-    return clock.epoch(value) if isinstance(value, str) else None
+parse_ts = clock.epoch_seconds  # 記録の時刻（ISO 8601）を UNIX 時刻（秒）にする。読めなければ None
 
 
 # --- 判定の記録 ----------------------------------------------------------------------------------------
@@ -233,7 +231,7 @@ def session_file(sid: str, kind: str, env: Mapping | None = None) -> Path:
 def read_window(sid: str, env: Mapping | None = None) -> int | None:
     """statusline が書いた窓の大きさ。無い・形が違えば None（推測で埋めない。I7）。"""
     w = jsonio.read(session_file(sid, "window", env), missing={}, broken={}, want=dict).get("window")
-    return w if cp.positive_int(w) else None
+    return w if cp.is_positive_int(w) else None
 
 
 def read_applied(sid: str, env: Mapping | None = None) -> dict:
@@ -265,46 +263,22 @@ def write_applied(sid: str, applied, env: Mapping | None = None) -> bool:
 
 def usage_call(usage: Mapping, ts: float | None, model) -> dict:
     """API 呼び出し 1 回の usage を {ts, model, inp, out, read, w5, w1h, context} にする（会話の記録と使用量の帳簿で共通）。"""
-    from usage_ledger import cache_writes
-
     w5, w1h = cache_writes(usage)
-    inp, read = int(usage.get("input_tokens") or 0), int(usage.get("cache_read_input_tokens") or 0)
-    return {
-        "ts": ts,
-        "model": model,
-        "inp": inp,
-        "out": int(usage.get("output_tokens") or 0),
-        "read": read,
-        "w5": w5,
-        "w1h": w1h,
-        "context": inp + read + w5 + w1h,
-    }
+    inp, out, read = (int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"))
+    return {"ts": ts, "model": model, "inp": inp, "out": out, "read": read, "w5": w5, "w1h": w1h, "context": inp + read + w5 + w1h}
 
 
-def _auto_compact(e: dict) -> int | None:
-    """自動圧縮の境目の行なら 1、手動の圧縮なら 0、境目の行でなければ None。"""
-    if e.get("type") != "system" or e.get("subtype") != "compact_boundary":
-        return None
+def _is_auto_compact(e: dict) -> bool:
     meta = e.get("compactMetadata")
-    return 1 if isinstance(meta, dict) and meta.get("trigger") == "auto" else 0
+    return e.get("type") == "system" and e.get("subtype") == "compact_boundary" and isinstance(meta, dict) and meta.get("trigger") == "auto"
 
 
-def _user_text(e: dict, msg: dict) -> str | None:
+def _user_text(e: dict) -> str | None:
     """利用者の発言（メタの行を除く）の本文。文字列でなければ JSON にする。発言でなければ None。"""
     if e.get("type") != "user" or e.get("isMeta"):
         return None
-    content = msg.get("content")
+    content = (e.get("message") if isinstance(e.get("message"), dict) else {}).get("content")
     return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-
-
-def _put_call(calls: list[dict], here: dict, mid, call: dict) -> None:
-    """同じ `message.id` が前にあれば、時刻を前のものに保って置き換える。無ければ足す。"""
-    if mid in here:
-        call["ts"] = calls[here[mid]]["ts"] or call["ts"]
-        calls[here[mid]] = call
-    else:
-        here[mid] = len(calls)
-        calls.append(call)
 
 
 def _json_lines(path) -> list[dict] | None:
@@ -326,26 +300,16 @@ def _json_lines(path) -> list[dict] | None:
 
 def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, bool]:
     """会話の記録の API 呼び出し（同じ `message.id` は 1 回。I13）と、自動圧縮の回数と、ndf-next で始まったか。
-
     同じ `message.id` の行は最後の usage を採る（ストリーミングで後の行ほど output_tokens が増える。scripts/token-usage.py と同じ）。
     時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
-
     呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
     seen = set() if seen is None else seen
     entries = _json_lines(path)
     if entries is None:
         return [], None, False
-    calls: list[dict] = []
-    here: dict = {}  # このファイルで数えた message.id → calls の位置
-    compacts = 0
-    first_user: str | None = None
+    calls, here = [], {}  # here はこのファイルで数えた message.id → calls の位置
     for e in entries:
-        if (auto := _auto_compact(e)) is not None:
-            compacts += auto
-            continue
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
-        if first_user is None:
-            first_user = _user_text(e, msg)
         usage = msg.get("usage")
         if e.get("type") != "assistant" or not isinstance(usage, dict):
             continue
@@ -353,8 +317,15 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
         if mid in seen and mid not in here:
             continue
         seen.add(mid)
-        _put_call(calls, here, mid, usage_call(usage, parse_ts(e.get("timestamp")), msg.get("model")))
-    return calls, compacts, bool(first_user and HANDOFF_PATH.search(first_user))
+        call = usage_call(usage, parse_ts(e.get("timestamp")), msg.get("model"))
+        if mid in here:
+            call["ts"] = calls[here[mid]]["ts"] or call["ts"]
+            calls[here[mid]] = call
+        else:
+            here[mid] = len(calls)
+            calls.append(call)
+    first_user = next((t for e in entries if (t := _user_text(e)) is not None), None)
+    return calls, sum(1 for e in entries if _is_auto_compact(e)), bool(first_user and HANDOFF_PATH.search(first_user))
 
 
 # --- セッションと印 ---------------------------------------------------------------------------------
@@ -482,16 +453,10 @@ def calibrate_repo(root: str | None, days: int = 30) -> tuple[dict, bool]:
 
 
 def record_row(runtime: str, source: str, work: str, applied, context: int | None = None, event: str | None = None, reason=None) -> dict:
-    """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。
-
-    セッション ID は Claude Code のときだけ `CLAUDE_CODE_SESSION_ID` から取る。"""
+    """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。"""
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
     row = boundary_row(runtime=runtime, source=source, session_id=sid or None, work=work, context=context, applied=applied)
-    if event:
-        row.update(event=event)
-    else:
-        row.update(stage="cut", verdict=cp.RESTART, reason=reason)
-    return row
+    return row | ({"event": event} if event else {"stage": "cut", "verdict": cp.RESTART, "reason": reason})
 
 
 def record_restart(work: str, reason: str | None = None, cwd: str | None = None, runtime: str = "claude") -> bool:
