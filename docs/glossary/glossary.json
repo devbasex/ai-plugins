@@ -4548,6 +4548,12 @@
       "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
+      "term": "再開のジョブ",
+      "context": "ndf-factory",
+      "meaning": "`START=resume` の実行ジョブ。承認の答えで起こすものと、利用上限のリセット時刻の後に起こすものがある。保存した状態を復元して前回の続きから進める",
+      "pending_source": "issues/issue-2405-requirements.md"
+    },
+    {
       "term": "打ち切りの時間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
