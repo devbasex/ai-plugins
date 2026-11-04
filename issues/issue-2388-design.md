@@ -54,7 +54,7 @@ cross-review が供給者、開発ワークフローが順応者の関係（順�
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 設計のプラン | レビューのステップが上限到達で終わり、未解決の件数が 0 なら、`sync-review` → `requirements-recheck` → 用語チェック → `push-glossary` を通ってから、MVV 判定（`fast` / `auto` は `mvv`、`normal` は助言の `mvv`）へ進む | テストが落ちる |
+| I1 | 設計のプラン | レビューのステップが上限到達で終わり、未解決の件数が 0 なら、`sync-review` → `requirements-recheck` → 用語チェック → `push-glossary` を通る。その後は、`fast` / `auto` は `mvv` へ進む。`normal` と `--state` は `ready` → 助言の `mvv` → `mvv-note` → `gate` へ進む。`normal` で `--state` が無いときは `ready` → `gate` へ進み、`mvv` を流さない | テストが落ちる |
 | I2 | 設計のプラン | レビューのステップが上限到達で終わり、未解決の件数が 1 以上か読めないときは、`ready` → 承認ゲート 1 の判断（`gate`）へ進み、`fast` / `auto` では `mvv` を流さない | テストが落ちる |
 | I3 | 設計のプラン | 駆動の失敗は `ready` → 承認ゲート 1 の判断（`gate`）へ進む（`fast` / `auto` で `mvv` を流さない） | テストが落ちる |
 | I4 | 設計のプラン | 収束（終了コード 0）の経路は変わらない | 既存のテストが落ちる |
@@ -70,7 +70,7 @@ cross-review が供給者、開発ワークフローが順応者の関係（順�
 | E3 | レビューの直しを PR のブランチから取り込んだ | `sync-review` | `requirements-recheck` |
 | E4 | 仕様のコピーと課題の本文の一致を確かめた | `requirements-recheck` | `glossary-check` |
 | E5 | 用語チェックを通し、PR のブランチへ送った | `push-glossary` | `fast` / `auto`: `mvv`。`normal`: `ready` |
-| E6 | MVV 判定が承認ゲート 1 を判定した | `mvv` | `approve`（従う）・プランの終わり（従わない・判定できない） |
+| E6 | MVV 判定が承認ゲート 1 を判定した | `mvv` | `fast` / `auto`: `approve`（従う）・プランの終わり（従わない・判定できない）。`normal` と `--state` の助言の `mvv`: 判定の結果によらず `mvv-note` → `gate`（承認は利用者が行う） |
 | E7 | 承認ゲート 1 の判断（`gate`）へ回した | `ready` | 利用者（`gate` の判断のステップ） |
 
 E1〜E7 は要求の番号を引き継ぐ。E8 はこの設計で足す。
