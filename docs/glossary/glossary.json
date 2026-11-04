@@ -5012,6 +5012,18 @@
       "source": "docs/specifications/ndf-factory-ui-components.md"
     },
     {
+      "term": "予定の画面",
+      "context": "ndf-factory",
+      "meaning": "画面の地図で状態が「予定」の行。経路がまだ無く、載る機能だけが決まっている画面",
+      "pending_source": "issues/issue-2431-requirements.md"
+    },
+    {
+      "term": "作る課題",
+      "context": "ndf-factory",
+      "meaning": "予定の画面を作り、画面の地図のその行を「あり」へ変える GitHub の課題。#2382 は「持ち主の課題」と書く",
+      "pending_source": "issues/issue-2431-requirements.md"
+    },
+    {
       "term": "デザインのトークン",
       "context": "ndf-factory",
       "meaning": "色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合",
