@@ -9,8 +9,8 @@
 ## 適用範囲
 
 - **働く範囲**: NDF の配布物（`plugins/ndf/scripts` と `plugins/ndf/skills/*/scripts`。テスト・`experimental/`・hook の入口を除く）。配布先のリポジトリでも同じ書き口が動く
-- **プロジェクトごとに違うもの**: 記録の置き場の根は環境変数 `NDF_STATE_DIR` で受ける（既定 `~/.local/state/ndf`）。リポジトリごとの値は置き場のパスの 1 段（`<owner>__<repo>`）にだけ現れ、書き口の中に ai-plugins の値を置かない
-- **当たるモード**: `standard`。柱 P1（#2337）の核のスケルトンに段を足す柱で、実装は核の段の Pull Request 1 本と入口を移す Pull Request 6 本（3 スプリント）に分かれる
+- **プロジェクトごとに違うもの**: 記録の置き場の根は環境変数 `NDF_STATE_DIR` で受ける（既定 `~/.local/state/ndf`）。リポジトリごとの値は置き場のパスの 1 階層（`<owner>__<repo>`）にだけ現れ、書き口の中に ai-plugins の値を置かない
+- **当たるモード**: `standard`。柱 P1（#2337）の核のスケルトンを拡張する柱で、実装は核の拡張の Pull Request 1 本と入口を移す Pull Request 6 本（3 スプリント）に分かれる
 
 ## あるべき姿の根拠
 
@@ -21,8 +21,9 @@
 | `NDF_RUN_ID=20261104T000000-test-123456 claude -p ... --settings <UserPromptSubmit の hook>` を起動し、hook が書いたファイルに `run=20261104T000000-test-123456` が出た（Claude Code 2.1.318） | 実測（2026-11-04） | 核が起動した claude の hook は環境変数 `NDF_RUN_ID` を受け取れること（要求の未決 3。決定 4） |
 | `plugins/ndf/scripts` で `grep -rn "isatty\|\[ -t [012] \]"` の結果は 6 件で、すべて標準入力か標準出力の判定。標準エラー（2 番）を端末か判定する箇所は 0 件 | 実測（2026-11-04） | シェルの本体の標準エラーを核がパイプで受けても、本体の振る舞いが変わらないこと（決定 7） |
 
-要求と受け入れ条件は #2338 の本文にある（写しは [issue-2338-requirements.md](issue-2338-requirements.md) ）。この文書は「どう作るか」だけを扱う。
-決定の記録は [issue-2338-design-decisions.md](issue-2338-design-decisions.md) にある。実行の記録の行の形・置き場・寿命は #2335 の設計（[issue-2335-design.md](issue-2335-design.md) ）が決めたものを前提にし、この文書は書き込みの方式と移し方を決める。
+要求と受け入れ条件は #2338 の本文にある（コピーは [issue-2338-requirements.md](issue-2338-requirements.md) ）。この文書は「どう作るか」だけを扱う。
+決定の記録は [issue-2338-design-decisions.md](issue-2338-design-decisions.md) にある。
+実行の記録の行の形・置き場・寿命は、#2335 の設計（[issue-2335-design.md](issue-2335-design.md) ）が決めたものを前提にする。この文書は書き込みの方式と移し方を決める。
 
 ## ドメインモデル
 
@@ -97,18 +98,18 @@
 
 | 要素 | 責務 | 新設 / 変更 | Pull Request |
 | --- | --- | --- | --- |
-| 書き口（`lib/run_log.py`） | 置き場を決め、行を伏せて排他の中で 1 回で書く。全文ファイルへ逃がす。診断を標準エラーと記録の両方へ出す。寿命の掃除。標準ライブラリだけを使う | 新設 | 核の段 |
-| 実行の核（`lib/run_core.py`） | E1 で識別子を振って書き口を開き、`ctx.log` を書き口へつなぐ。E8 で理由を受け、E9 を `finally` と SIGTERM の受け手から呼ぶ。書けなかったら結果を `stopped` にする | 変更（P1 が作るスケルトンへ段を足す） | 核の段 |
-| シェルの起こし直し（`run_core.py exec`） | シェルの本体の標準エラーをパイプで受け、1 行ずつ標準エラーへ出してから記録へ `diag` で書く | 変更（P1 が作る `exec` へ足す） | 核の段 |
-| 秘密を伏せる部品（`lib/secret_redact.py`） | 伏せる処理（`redact`）と短く縮める処理（`shorten`）を分ける。`redact_output` は 2 つを順に呼ぶ形で残す | 変更 | 核の段 |
-| 寿命の値（`lib/durable_keys.py`） | `KEEP_DAYS = 30` を持つ。`durable.py` と書き口がここから引く（`durable.py` は DBOS を読むため、書き口から import しない） | 変更（`durable.py` から移す） | 核の段 |
-| 使用量の帳簿（`lib/usage_ledger.py`） | `UsageRecord` に任意の `run_id` を足し、既定値を環境変数 `NDF_RUN_ID` から取る | 変更 | 核の段 |
-| プランの状態の記録（`supervise_lib/state.py`） | `progress_write` が書く行に、環境変数 `NDF_RUN_ID` があれば `run_id` を足す | 変更 | 核の段 |
-| 環境変数の契約（`plugins/ndf/contracts/env/`） | `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_STATE_DIR` の行を足す。秘密を持つ環境変数（`GH_TOKEN`・`GITHUB_TOKEN`・`AI_GATEWAY_API_KEY`・`SLACK_BOT_TOKEN`）の行へ `secret: true` を足す | 変更 | 核の段 |
-| 契約の読み手（`scripts/contracts_lib/model.py`） | 環境変数の行の任意の鍵 `secret`（bool）を受けて確かめる | 変更 | 核の段 |
-| 構造チェック（`scripts/check-script-structure.py`） | 検査の種類 `stderr-direct` を足す。例外リストの増加は既存の検査（#2335 の `allow-grow`）で落とす | 変更 | 核の段 |
-| 例外リスト（`scripts/script-structure-allow/`） | 直書きを持つ 60 ファイルを `stderr-direct` の行として載せ、移した Pull Request が消す | 変更 | 核の段 → 移す 6 本 |
-| 理由を切る 10 か所 | 下の「止まった理由を切る箇所の扱い」の表どおりに直す | 変更 | 核の段 |
+| 書き口（`lib/run_log.py`） | 置き場を決め、行を伏せて排他の中で 1 回で書く。全文ファイルへ逃がす。診断を標準エラーと記録の両方へ出す。寿命の掃除。標準ライブラリだけを使う | 新設 | 核の拡張 |
+| 実行の核（`lib/run_core.py`） | E1 で識別子を振って書き口を開き、`ctx.log` を書き口へつなぐ。E8 で理由を受け、E9 を `finally` と SIGTERM の受け手から呼ぶ。書けなかったら結果を `stopped` にする | 変更（P1 が作るスケルトンを拡張する） | 核の拡張 |
+| シェルの起こし直し（`run_core.py exec`） | シェルの本体の標準エラーをパイプで受け、1 行ずつ標準エラーへ出してから記録へ `diag` で書く | 変更（P1 が作る `exec` へ足す） | 核の拡張 |
+| 秘密を伏せる部品（`lib/secret_redact.py`） | 伏せる処理（`redact`）と短く縮める処理（`shorten`）を分ける。`redact_output` は 2 つを順に呼ぶ形で残す | 変更 | 核の拡張 |
+| 寿命の値（`lib/durable_keys.py`） | `KEEP_DAYS = 30` を持つ。`durable.py` と書き口がここから引く（`durable.py` は DBOS を読むため、書き口から import しない） | 変更（`durable.py` から移す） | 核の拡張 |
+| 使用量の帳簿（`lib/usage_ledger.py`） | `UsageRecord` に任意の `run_id` を足し、既定値を環境変数 `NDF_RUN_ID` から取る | 変更 | 核の拡張 |
+| プランの状態の記録（`supervise_lib/state.py`） | `progress_write` が書く行に、環境変数 `NDF_RUN_ID` があれば `run_id` を足す | 変更 | 核の拡張 |
+| 環境変数の契約（`plugins/ndf/contracts/env/`） | `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_STATE_DIR` の行を足す。秘密を持つ環境変数（`GH_TOKEN`・`GITHUB_TOKEN`・`AI_GATEWAY_API_KEY`・`SLACK_BOT_TOKEN`）の行へ `secret: true` を足す | 変更 | 核の拡張 |
+| 契約の読み手（`scripts/contracts_lib/model.py`） | 環境変数の行の任意の鍵 `secret`（bool）を受けて確かめる | 変更 | 核の拡張 |
+| 構造チェック（`scripts/check-script-structure.py`） | 検査の種類 `stderr-direct` を足す。例外リストの増加は既存の検査（#2335 の `allow-grow`）で落とす | 変更 | 核の拡張 |
+| 例外リスト（`scripts/script-structure-allow/`） | 直書きを持つ 60 ファイルを `stderr-direct` の行として載せ、移した Pull Request が消す | 変更 | 核の拡張 → 移す 6 本 |
+| 理由を切る 10 か所 | 下の「止まった理由を切る箇所の扱い」の表どおりに直す | 変更 | 核の拡張 |
 | 直書きを持つ 60 ファイル | `print(..., file=sys.stderr)`・`sys.stderr.write` を `ctx.log("diag", ...)` か `run_log.diag(...)` へ置き換える | 変更 | 移す 6 本（下の「移す順序」） |
 
 ```mermaid
@@ -179,7 +180,7 @@ plugins/ndf/
 └── scripts/
     ├── lib/
     │   ├── run_log.py              # 新設
-    │   ├── run_core.py             # 変更（P1 が新設したものへ段を足す）
+    │   ├── run_core.py             # 変更（P1 が新設したものを拡張する）
     │   ├── secret_redact.py        # 変更
     │   ├── durable_keys.py         # 変更（KEEP_DAYS）
     │   ├── durable.py              # 変更（KEEP_DAYS を引く）
@@ -221,8 +222,8 @@ classDiagram
 ```
 
 - **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・核へ移す前の入口）では `None` で、`diag` は標準エラーへ書くだけになる
-- **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種（`start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end`）だけを受け、ほかは `ValueError`
-- **`run_log.diag(text, short=None, **fields)`**: 標準エラーへ `short` があれば `short`、無ければ `text` を 1 行で書き、記録へは `{"text": text, **fields}` を書く（`short` があれば `"display": short` も）。ライブラリの関数は実行の文脈を受け取らないため、この関数を呼ぶ
+- **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種だけを受け、ほかは `ValueError`。8 種は `start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end` である
+- **`run_log.diag(text, short=None, **fields)`**: 標準エラーへは `short` があれば `short`、無ければ `text` を 1 行で書く。記録へは `{"text": text, **fields}` を書き、`short` があれば `"display": short` も書く。ライブラリの関数は実行の文脈を受け取らないため、この関数を呼ぶ
 - **`write` が書けなかったとき**: 例外を投げず、`failed` に理由を持ち、標準エラーへ理由を 1 回だけ出す。以後の `write` は記録へ書かない。核は E9 の前に `failed` を見て結果を `stopped` にする（I7）
 
 ## データ構造
@@ -240,7 +241,13 @@ classDiagram
 
 `input`・`lease`・`ref`・`retry` の中身はそれぞれの柱（P8・P3・P5・P4）が決める。この柱は書き口だけを用意する。
 
-**全文ファイルの参照**: 行の中の文字列を置き換える値は `{"$text": "<記録のファイルからの相対パス>", "chars": <文字数>, "sha256": "<全文の sha256>"}` である。全文ファイルの名前は `<起点の実行の識別子>/<実行の識別子>-<行の通し番号>-<鍵のパス>.txt` で、記録と同じ日付のディレクトリに置く。寿命の掃除で日付のディレクトリごと消える。
+**全文ファイルの参照**: 行の中の文字列を置き換える値は次の形である。
+
+```json
+{"$text": "<記録のファイルからの相対パス>", "chars": <文字数>, "sha256": "<全文の sha256>"}
+```
+
+全文ファイルの名前は `<起点の実行の識別子>/<実行の識別子>-<行の通し番号>-<鍵のパス>.txt` で、記録と同じ日付のディレクトリに置く。寿命の掃除で日付のディレクトリごと消える。
 
 ### 使用量の帳簿とプランの状態の記録
 
@@ -325,9 +332,26 @@ sequenceDiagram
     K-->>C: 結果 JSON 1 行（failed なら stopped）
 ```
 
-図に描かない要素: シェルの起こし直し（E5。`exec` の子の標準エラーを 1 行ずつ `diag` へ渡す読み手のスレッドで、本体の位置に入る）・秘密を伏せる部品と寿命の値（書き口の中で使う）・使用量の帳簿とプランの状態の記録（E7。本体の中で書かれ、環境変数を読むだけ）・環境変数の契約と契約の読み手（E1 の前に核が秘密の名前を読む）・構造チェックと例外リスト（CI で動く）・理由を切る 10 か所と直書きを持つ 60 ファイル（本体の中身）。
+図に描かない要素は次のとおりである。
 
-**1 行の書き方**: 伏せる → JSON にする → 64 KiB を超えたら長い文字列から全文ファイルへ移す → 記録のファイルを `O_APPEND` で開き、`fcntl.flock(LOCK_EX)` を取り、`os.write` を 1 回呼び、排他を返す。全文ファイルは記録の行より先に書く（行が全文ファイルを指した時点で、全文ファイルが在る）。
+| 要素 | 図のどこで動くか |
+| --- | --- |
+| シェルの起こし直し（E5） | 本体の位置に入る。`exec` の子の標準エラーを 1 行ずつ `diag` へ渡す読み手のスレッド |
+| 秘密を伏せる部品・寿命の値 | 書き口の中で使う |
+| 使用量の帳簿・プランの状態の記録（E7） | 本体の中で書かれ、環境変数を読むだけ |
+| 環境変数の契約・契約の読み手 | E1 の前に、核が秘密の名前を読む |
+| 構造チェック・例外リスト | CI で動く |
+| 理由を切る 10 か所・直書きを持つ 60 ファイル | 本体の中身 |
+
+**1 行の書き方**: 次の順で書く。
+
+1. 伏せる
+2. JSON にする
+3. 64 KiB を超えたら、長い文字列から全文ファイルへ移す
+4. 記録のファイルを `O_APPEND` で開き、`fcntl.flock(LOCK_EX)` を取る
+5. `os.write` を 1 回呼び、排他を返す
+
+全文ファイルは記録の行より先に書く。行が全文ファイルを指した時点で、全文ファイルが在る。
 
 **SIGTERM と時間切れ**: 核の受け手が E9 を呼ぶ。`flock` は同じプロセスでも開き直したファイル記述子どうしで排他になるため、排他を持つ間に受け手が割り込んで同じ排他を取りにいくと止まる。そこで `write` は排他を取る前に `signal.pthread_sigmask` で SIGTERM と時間切れのシグナル（SIGALRM）を止め、排他を返した後に戻す。受け手は書きかけの行が書き終わってから動き、`end` の行は最後に並ぶ。
 
@@ -348,11 +372,17 @@ stateDiagram-v2
 
 ## 移す順序
 
-直書きを持つ対象のファイルは 60（125 か所）である。数は 2026-11-04 の develop（729dcbe40）で、要求の「調べ方」のコマンドからファイルごとの数を取り、hook の入口（`hooks/*.json` が呼ぶ `context-policy.py`・`hook.py`・`relay.py`・`usage-subagent.py`・`training-optout.py` と、SessionStart が呼ぶ `hook-env.py`。計 6 か所）を除いて数えた。順は #2335 の部品の順で、1 スプリントに 3 本までとする（要求の前提 8）。
+直書きを持つ対象のファイルは 60（125 か所）である。数は 2026-11-04 の develop（729dcbe40）で、要求の「調べ方」のコマンドからファイルごとに取った。
+hook の入口の 6 か所は、次のとおり数から除いた。
+
+- `hooks/*.json` が呼ぶ 5 つ: `context-policy.py`・`hook.py`・`relay.py`・`usage-subagent.py`・`training-optout.py`
+- SessionStart が呼ぶ 1 つ: `hook-env.py`
+
+順は #2335 の部品の順で、1 スプリントに 3 本までとする（要求の前提 8）。
 
 | スプリント | Pull Request | 対象（`plugins/ndf/scripts/` の下。`skills/` は `plugins/ndf/skills/` の下） | ファイル | か所 |
 | --- | --- | --- | --- | --- |
-| 1 | 核の段 | 書き口・核・帳簿・状態の記録・契約・構造チェック・例外リスト（60 行）・理由を切る 10 か所 | — | — |
+| 1 | 核の拡張 | 書き口・核・帳簿・状態の記録・契約・構造チェック・例外リスト（60 行）・理由を切る 10 か所 | — | — |
 | 1 | G1 supervise のプラン・判定・キュー | `supervise_lib/` の 10 ファイル・`phase-steps.py`・`sprint-close.py`・`lib/loop_drive.py`・`lib/post_queue.py` | 14 | 29 |
 | 1 | G2 cross-refactoring と review | `skills/cross-refactoring/scripts/` の 3 ファイル・`refactor-scope.py`・`lib/result_posts.py`・`lib/review_criteria.py`・`lib/parallel_lane.py` | 7 | 16 |
 | 2 | G3 課題を閉じる処理・リリース | `release-steps.py`・`release_lib/declared_steps.py`・`merged_lib/checks.py`・`lib/body_findings.py`・`lib/gh_parts.py`・`skills/fix/scripts/fix-steps.py`・`skills/backlog-refinement/scripts/upkeep_gh.py` | 7 | 8 |
@@ -367,7 +397,7 @@ stateDiagram-v2
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
 | 運用・保守性 | 1 回の起動を実行の識別子 1 つで、1 ファイルから追う。寿命 30 日 | 起点の実行ごとに 1 ファイル。子は `NDF_RUN_LOG` で同じファイルへ書く。寿命は `durable_keys.KEEP_DAYS` を引き、起点の実行の起動で `runs/*/<日付>` のうち日付が 30 日より前のディレクトリを消す（ディレクトリの名前の日付で判定し、更新時刻を見ない） | 終わり方ごとのテスト・子の実行のテスト・寿命のテスト（テスト設計） |
-| 移行性 | 部品の順・例外リストで並走・Pull Request ごとの revert で戻る・識別子の無い行も読める | 書き口は核の外では標準エラーへ書くだけになるため、移した入口と移す前の入口が並んで動く。核の段の Pull Request を revert すると、移した入口の `run_log.diag` も標準エラーだけへ書く | 柱の Pull Request ごとに全体テストと構造チェックを通す |
+| 移行性 | 部品の順・例外リストで並走・Pull Request ごとの revert で戻る・識別子の無い行も読める | 書き口は核の外では標準エラーへ書くだけになるため、移した入口と移す前の入口が並んで動く。核の拡張の Pull Request を revert すると、移した入口の `run_log.diag` も標準エラーだけへ書く | 柱の Pull Request ごとに全体テストと構造チェックを通す |
 | セキュリティ | 受け入れ条件 5。C1・C2 は変えない | 書く前に `secret_redact.redact`（トークンの形）と、秘密と宣言した環境変数の空でない値の置き換えを通す。全文ファイルにも同じ処理を通す。秘密の値そのものは記録にも契約にも書かない（契約には `secret: true` だけ） | 秘密を入れた環境変数で起動するテスト |
 | システム環境 | Claude Code と Codex の両方で同じ核。シェルは bash | 書き口は標準ライブラリ（`json`・`os`・`fcntl`・`hashlib`）だけを使い、extras の無い環境でも動く | extras を外した環境で診断が出るテスト |
 
@@ -402,13 +432,13 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | #2338 | 実装する | — | `plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/contracts/env/`、`scripts/contracts_lib/model.py`、`scripts/check-script-structure.py`、`scripts/script-structure-allow/`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/scripts/project-mvv.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/phase-steps.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/lib/loop_drive.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/refactor-scope.py`、`plugins/ndf/scripts/lib/result_posts.py`、`plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/skills/cross-refactoring/scripts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
-触るファイルはスプリント 1（核の段・G1・G2）の分である。G3〜G6 は同じ柱の次のスプリントの設計の結果へ載せる。
+触るファイルはスプリント 1（核の拡張・G1・G2）の分である。G3〜G6 は同じ柱の次のスプリントの設計の結果へ載せる。
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| P1 の核の形 | `run_core.py` は 2026-11-04 の時点で無い（#2337 は OPEN）。この設計は #2335 の設計の `RunContext`・`main`・`exec`・SIGTERM の受け手の形を前提にした。P1 の実装で形が変わったときは、核の段の Pull Request で呼ぶ位置だけを合わせる |
+| P1 の核の形 | `run_core.py` は 2026-11-04 の時点で無い（#2337 は OPEN）。この設計は #2335 の設計の `RunContext`・`main`・`exec`・SIGTERM の受け手の形を前提にした。P1 の実装で形が変わったときは、核の拡張の Pull Request で呼ぶ位置だけを合わせる |
 | Codex の hook と Bash の子 | `NDF_RUN_ID` が hook へ届くことは Claude Code の hook で確かめた。Codex の hook と、エージェントの Bash ツールが起こす子プロセスへ届くかは未確認。届かないときも、子は起点の実行として自分のファイルを作るだけで、記録は失われない |
 | 直書きの別の形 | 検査は `print` の `file` の式に `sys.stderr` を含むものと `sys.stderr.write` を落とす。変数へ入れてから書く形（`err = sys.stderr`）と、`sys.stderr` を参照するほかの 11 か所（`flush`・`argparse` の `print_usage`・`subprocess` の出力先・DBOS のハンドラ）は対象にしない |
 | 正規表現に当たらない切る箇所 | 要求の「調べ方」の正規表現に当たらない書き方（`textwrap.shorten`・変数名の違い）で切る箇所は数えていない |
