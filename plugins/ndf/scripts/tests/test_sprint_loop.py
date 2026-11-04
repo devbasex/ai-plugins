@@ -55,9 +55,7 @@ def ms(title, nums, boundary=None, sizes=None, **extra):
 
 
 @pytest.fixture
-def env(tmp_path, mvv, monkeypatch):
-    # 中継の下で起動したシェルの値を受け継ぐと、周回がその中継の記録を指し、状態の表示が変わる
-    monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+def env(tmp_path, mvv):
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "pace.json").write_text(json.dumps(DECL))
     e = sl.Env(tmp_path, main=tmp_path, now=Clock(), upkeep_dir=lambda repo: tmp_path / "upkeep")
