@@ -39,7 +39,7 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | プラン・ステップ・MVV 判定・承認ゲート・欠け |
 | NDF の cross-review（`ndf-cross-review`） | 収束・上限到達・未解決の件数 |
 
-cross-review が供給者、開発ワークフローが順応者の関係（順応者）。開発ワークフローは、cross-review の駆動の終了コードと結果の件数（`metrics.unresolved`）をそのまま読む。cross-review の契約は変えない（要求の対象範囲の「含まない」）。
+cross-review が供給者、開発ワークフローが順応者の関係である。開発ワークフローは、cross-review の駆動の終了コードと結果の件数（`metrics.unresolved`）をそのまま読む。cross-review の契約は変えない（要求の対象範囲の「含まない」）。
 
 ### 集約
 
@@ -96,8 +96,6 @@ E1〜E7 は要求の番号を引き継ぐ。E8 はこの設計で足す。
 | 規則の文（`sprint_waves.py` の `RULE_DESIGN` と `plan_mvv_design` の `規則`。変更） | 「上限到達で未解決 0 件なら通常の経路、未解決が残るか駆動が失敗したら承認ゲート 1 の判断」に書き直す |
 | 契約テストの見本のプラン（`plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`。変更） | 書き出しのプランの変化（`review` の `on_exit`・`review-settled`・規則の文・ステップの上限）を見本へ反映する。見本は `new sprint` の出力と突き合わせる比較元である |
 
-確定仕様 `docs/specifications/ndf-ubiquitous-language.md` の「設計のフェーズのステップ」の表は、`plan-to-spec` で新しい経路へ書き直す。この実装の Pull Request では触らない。
-
 ```mermaid
 graph TD
     W[プランの組み立て<br/>sprint_waves.py] -->|プランの JSON| E[実行器<br/>engine.py]
@@ -105,6 +103,8 @@ graph TD
     S -->|読む| R[(実行の記録<br/>state.json)]
     E -->|書く| R
 ```
+
+確定仕様 `docs/specifications/ndf-ubiquitous-language.md` の「設計のフェーズのステップ」の表は、`plan-to-spec` で新しい経路へ書き直す。この実装の Pull Request では触らない。
 
 ## 入出力の契約
 
@@ -169,7 +169,7 @@ graph TD
 
 ### 決定 1: 実行器と cross-review の契約を変えずに分けるため、上限到達の未解決の件数を後続の run のステップで確かめる
 
-`review` の `on_exit` で終了コード 6 を `review-settled` へ回し、そのステップが実行の記録から未解決の件数を読んで 0 件かを終了コードで返す。実行器の既存の行き先（`on_exit` と `on_fail`）だけで 4 つの終わりを分けられ、`engine.py` にも cross-review の終了コードにも手を入れない。
+`review` の `on_exit` で終了コード 6 を `review-settled` へ回す。このステップは実行の記録から未解決の件数を読み、0 件かを終了コードで返す。実行器の既存の行き先（`on_exit` と `on_fail`）だけで 4 つの終わりを分けられるため、`engine.py` にも cross-review の終了コードにも手を入れない。
 
 cross-review の駆動が未解決 0 件の上限到達を別の終了コードで返す形は採らない。終了コードの契約は実装のプランのレビュー（#2143）とリファクタリングの欠け（#2047）も読んでおり、要求で「確認してから行う」に置いた変更である。実行器に「結果の件数で行き先を分ける」鍵を足す形も採らない。1 つの経路のために実行器の契約が増え、既存の `on_exit` と run のステップで足りる。
 
@@ -185,7 +185,7 @@ cross-review の駆動が未解決 0 件の上限到達を別の終了コード�
 
 ### 決定 3: ペースごとに経路を分けないため、レビューのまとまりの共有の定義だけを直す
 
-`_review_steps` は `normal` / `fast` / `auto` の設計のプランが共有している（要求の前提 3）。ここだけを直せば、3 つのプランの組み立て（`plan_sprint_design`・`plan_advise_design`・`plan_mvv_design`）は変えずに新しい経路を持つ。`normal` で変わるのは、上限到達・未解決 0 件のときに直しの取り込みから用語チェックまでが流れることだけで、最後は承認ゲート 1 の判断で止まる（要求の前提 4）。
+`_review_steps` は `normal` / `fast` / `auto` の設計のプランが共有している（要求の前提 3）。ここだけを直せば、3 つのプランの組み立て（`plan_sprint_design`・`plan_advise_design`・`plan_mvv_design`）は変えずに新しい経路を持つ。`normal` で変わるのは、上限到達・未解決 0 件のときに直しの取り込みから用語チェックまでが流れることだけである。最後は承認ゲート 1 の判断で止まる（要求の前提 4）。
 
 `fast` / `auto` のプランにだけ `on_exit` を足す形は採らない。同じ終わりがペースによって別の経路を通り、規則の文と経路の対応がペースごとに分かれる。
 
