@@ -18,7 +18,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import slack_sdk  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import dotenv  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
-import httpx  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import notify  # noqa: E402
 
 
@@ -62,16 +61,6 @@ def test_slack_call_posts_json_with_the_token(server, monkeypatch):
     assert notify.slack_call("chat.postMessage", {"channel": "C9"}, on_error=lambda m, e: errors.append((m, e))) is None
     assert errors == [("chat.postMessage", "channel_not_found")]
     assert notify.slack_call("x", {}, base_url="http://127.0.0.1:1", on_error=lambda m, e: errors.append(e)) is None
-
-
-def test_http_results_carry_the_reason(server):
-    base, _ = server
-    ok = notify._send("GET", base + "/a", 10.0)
-    assert ok.ok and ok.status == 200 and json.loads(ok.text) == {"path": "/a"}
-    miss = notify._send("GET", base + "/missing", 10.0)
-    assert (miss.status, miss.error, miss.ok) == (404, "HTTP 404", False)
-    assert notify._send("GET", "http://127.0.0.1:1/", 10.0).error.startswith("接続できない")
-    assert notify._send("POST", base + "/api/x", 10.0, json={"channel": "C1"}).ok
 
 
 def test_env_file_is_found_up_to_the_git_top_and_does_not_override(tmp_path: Path, monkeypatch):

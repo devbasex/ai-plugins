@@ -316,5 +316,3 @@ def swap_io_pages(path: Path = PROC_VMSTAT) -> int | None:
     if pages_in is None or pages_out is None:
         return None
     return pages_in + pages_out
-
-

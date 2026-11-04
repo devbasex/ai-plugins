@@ -312,8 +312,16 @@ def _round_state(findings, rounds=1):
 
 
 def counted(state_mod, findings, round_no=1):
+    """新規性が数える指摘の `finding_id`（#156）。数えるのは `COUNTED_CLASSIFICATIONS` の 3 つの分類だけ。"""
+    from classifications import COUNTED_CLASSIFICATIONS
+
+    f = review_lib.findings
     st = _round_state(findings, rounds=round_no)
-    return review_lib.findings._counted_finding_ids(st, round_no)
+    return [
+        str(x.get("finding_id"))
+        for x in st["review_findings"]
+        if x.get("round") == round_no and not x.get("merged_into") and f._apply_classification(x) in COUNTED_CLASSIFICATIONS
+    ]
 
 
 def test_only_three_classifications_are_counted(state_mod):

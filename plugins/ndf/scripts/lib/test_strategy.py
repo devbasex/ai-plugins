@@ -14,7 +14,6 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import math
-import posixpath
 import shlex
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -287,28 +286,6 @@ def suite_for(strategy: Strategy, path: str, kind: str = TEST) -> Optional[Suite
         if n is not None and n > best_len:
             best, best_len = suite, n
     return best
-
-
-def covers_whole(strategy: Strategy, locations: list[str], kind: str = TEST) -> bool:
-    """テストの置き場所（`locations`）が、`kind` の suite の `paths` の全要素を覆うか（#1555 の前提 3）。
-
-    要素は置き場所のどれかが同じか祖先なら覆う。glob の要素と `.` は置き場所 `.` だけが覆う。`kind` の suite が
-    無いか、置き場所が無ければ覆わない。"""
-    suites = [s for s in strategy.suites if s.kind == kind]
-    locs = [posixpath.normpath(str(p).split("::", 1)[0]) for p in locations or [] if str(p).strip()]
-    if not suites or not locs:
-        return False
-    whole = "." in locs
-    for suite in suites:
-        for root in suite.paths or ["."]:
-            r = posixpath.normpath(str(root)) if str(root).strip() else "."
-            if whole:
-                continue
-            if r == "." or any(c in r for c in _GLOB_CHARS):
-                return False
-            if not any(r == loc or r.startswith(loc + "/") for loc in locs):
-                return False
-    return True
 
 
 def suite_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:

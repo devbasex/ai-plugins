@@ -601,30 +601,6 @@ def test_supervise_limits_stay_the_same():
     assert "scope_seconds" not in plain["basis"]
 
 
-@pytest.mark.parametrize(
-    "paths, locations, expected",
-    [
-        (["plugins/ndf"], ["plugins/ndf"], True),
-        (["plugins/ndf/scripts", "plugins/ndf/skills"], ["plugins/ndf"], True),  # 祖先が覆う
-        (["plugins/ndf/scripts", "plugins/ndf/skills"], ["plugins/ndf/scripts"], False),  # 片方だけ
-        (["plugins/ndf"], ["plugins/ndf/scripts"], False),  # 子は親を覆わない
-        (["plugins/ndf"], ["./plugins/ndf/"], True),  # 正規化して比べる
-        (["."], ["plugins/ndf"], False),  # 全体は . の置き場所だけが覆う
-        (["."], ["."], True),
-        (["tests/*_test.py"], ["tests"], False),  # glob は接頭辞として読まない
-        (["tests/*_test.py"], ["."], True),
-        (["plugins/ndf"], [], False),
-    ],
-)
-def test_covers_whole(paths, locations, expected):
-    assert ts.covers_whole(_ci_strategy(paths), locations) is expected
-
-
-def test_covers_whole_needs_a_test_suite():
-    lint_only = ts.Strategy(ts.LOCAL_SCOPED_CI_WHOLE, "args", [ts.Suite("lint", "ruff .", paths=["."], kind=ts.LINT)])
-    assert ts.covers_whole(lint_only, ["."]) is False
-
-
 # ---------- #1630: 範囲テストのテンプレートの試走（probe_paths・template_verdict） ----------
 
 

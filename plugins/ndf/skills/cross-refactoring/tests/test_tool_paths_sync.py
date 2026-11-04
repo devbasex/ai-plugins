@@ -136,9 +136,8 @@ def test_fast_forward_to_a_head_that_changes_a_tool_path(repo, cmd_setup, tp):
     assert tp.hidden(str(work), SERENA) == SERENA
 
 
-def test_push_stops_when_a_tool_path_is_committed(repo, publish, patch_lib, tmp_path):
+def test_push_stops_when_a_tool_path_is_committed(repo, publish, tmp_path):
     """I4: 追跡対象外のツールのパスがコミットに入っていたら push しない。"""
-    patch_lib("publish_plan_comment", lambda state: None)
     work = repo.make(tracked=SERENA[:1])
     before = git(repo.origin, "rev-parse", HEAD)
     _rewrite(work, SERENA[1:])
@@ -151,8 +150,7 @@ def test_push_stops_when_a_tool_path_is_committed(repo, publish, patch_lib, tmp_
     assert git(repo.origin, "rev-parse", HEAD) == before
 
 
-def test_push_goes_on_without_tool_paths(repo, publish, patch_lib, tmp_path):
-    patch_lib("publish_plan_comment", lambda state: None)
+def test_push_goes_on_without_tool_paths(repo, publish, tmp_path):
     work = repo.make()
     _rewrite(work)
     write(work, "src.py", "new\n")

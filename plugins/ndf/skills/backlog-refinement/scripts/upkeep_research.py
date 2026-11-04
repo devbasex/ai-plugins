@@ -287,7 +287,7 @@ def free_slot(listing: str | None, max_: int) -> bool:
 def log_call(root, item_id: str, ok: bool, usage: dict, run, loop, lap) -> None:
     """呼び出し 1 回の費用を記録する。結果を捨てた呼び出しも支払った費用は予算に数える。"""
     row = {"id": item_id, "at": clock.now_iso("utc"), "ok": bool(ok), **usage, "lap": lap, "by": {"run": run, "loop": loop}}
-    jsonio.append_jsonl(D.backlog_dir(root) / "research" / "calls.jsonl", row)  # calls_path と同じ置き場
+    jsonio.append_jsonl(calls_path(root), row)
 
 
 def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) -> tuple[dict | None, dict]:

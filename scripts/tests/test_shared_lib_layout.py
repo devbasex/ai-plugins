@@ -35,7 +35,6 @@ SKILLS = NDF / "skills"
 # `projects-common.sh` / `lock-common.sh`）は移動の対象ではないため数えない。
 MOVED = (
     "monitor.py",
-    "metrics.py",
     "models.py",
     "launch-cli.sh",
     "assignment.py",
