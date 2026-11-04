@@ -413,13 +413,6 @@ def status_from(kind: str, identity: str, wid: str) -> Optional[str]:
         return rows[0].status if rows else None
 
 
-def output_from(kind: str, identity: str, wid: str) -> Any:
-    """外から、終わった耐久ワークフロー `wid` の出力を読む（無ければ None）。"""
-    with open_client(kind, identity) as c:
-        rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
-        return rows[0].output if rows else None
-
-
 def wait_from(
     kind: str,
     identity: str,

@@ -43,7 +43,7 @@ def test_star_no_longer_crosses_a_slash():
     assert pathmatch.path_matches("./docs/a.md", ["docs/*.md"])
 
 
-def test_negation_comments_and_filter():
+def test_negation_and_comments():
     pats = ["docs/**", "!docs/private/**", "# 注記", ""]
-    assert pathmatch.filter_paths(["docs/a.md", "docs/private/b.md", "src/c.py"], pats) == ["docs/a.md"]
+    assert [p for p in ["docs/a.md", "docs/private/b.md", "src/c.py"] if pathmatch.path_matches(p, pats)] == ["docs/a.md"]
     assert not pathmatch.path_matches("a.md", [])

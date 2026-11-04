@@ -78,22 +78,6 @@ def fenced_lines(text: str) -> list[bool]:
     return mask
 
 
-def fences(text: str) -> list[tuple[str, int, int]]:
-    """コードの囲みの `(情報文字列, 開きの行, 閉じの次の行)` の並び。"""
-    return [(t.info.strip(), t.map[0], t.map[1]) for t in _tokens(text) if t.type == "fence" and t.map]
-
-
-def prose_lines(text: str) -> list[tuple[int, str]]:
-    """コードの囲み・コードブロック・HTML のブロックの外の行を `(行番号, 行)` で返す。"""
-    lines = text.splitlines()
-    skip = fenced_lines(text)
-    for t in _tokens(text):
-        if t.type == "html_block" and t.map:
-            for i in range(t.map[0], min(t.map[1], len(skip))):
-                skip[i] = True
-    return [(i, ln) for i, ln in enumerate(lines) if not skip[i]]
-
-
 def plain_text(inline: Token) -> str:
     """インラインのトークンから記法を外した字面を返す（リンクは文字列、`code` は中身）。"""
     out = []

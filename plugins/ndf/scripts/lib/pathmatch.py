@@ -50,7 +50,3 @@ def path_matches(path: str, patterns: Iterable[str]) -> bool:
     return _spec(tuple(patterns)).match_file(rel)
 
 
-def filter_paths(paths: Iterable[str], patterns: Iterable[str]) -> list[str]:
-    """パターンに当たるパスだけを、渡した順のまま返す。"""
-    spec = tuple(patterns)
-    return [p for p in paths if path_matches(p, spec)]
