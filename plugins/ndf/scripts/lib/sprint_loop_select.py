@@ -244,42 +244,35 @@ def add_env_exclusions(rec: dict, n: int) -> None:
             rec.setdefault("excluded", []).append({"number": num, "reason": EXCLUDE_REASON, "lap": n})
 
 
-def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None) -> dict:
-    add_env_exclusions(rec, n)
-    code, rank = env.rank(env.main_dir())
-    if code not in (0, PAUSE_RANK):
-        return refusal_order(f"upkeep.py rank が {code} を返した。選定を推さない: {rank.get('summary', '')}")
-    try:
-        descriptions = env.milestones(rec.get("repo") or "")
-    except OSError as e:
-        return refusal_order(str(e))
-    got = choose_issues(env, rec, rank, n, descriptions, set((lap or {}).get("created") or []))
-    if got["milestone"] is None:
-        if lap is not None:
-            rec["laps"].remove(lap)  # スプリントを組む前の周回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
-        if has_held_work(rec):  # 選べる課題が無く答えを待つ作業だけが残る: no_issue で止まらず、見直しも挟まない（異常系 6）
-            return stop_and_report(
-                env, rec, before, waiting_only(rec, "no_selectable"), "手元の作業が待ちだけになった", {"selection": got["selection"]}
-            )
-        cond = "no_issue" if got["candidates"] == 0 else "outside_mvv"
-        if cond == "no_issue" and rec.get("review_first") != len(rec["laps"]):
-            return review_first(env, rec, before, got)
-        reasons: dict = {}
-        for r in got["selection"]:
-            reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
-        values = (
-            {"milestones": rec.get("milestones") or (rank.get("metrics") or {}).get("order", [])}
-            if cond == "no_issue"
-            else {"reasons": reasons}
-        )
+def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict, lap: dict | None) -> dict:
+    """選べる課題が無いときの止まり方（待ちだけ・見直しを先に・no_issue・outside_mvv）。"""
+    if lap is not None:
+        rec["laps"].remove(lap)  # スプリントを組む前の周回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
+    if has_held_work(rec):  # 選べる課題が無く答えを待つ作業だけが残る: no_issue で止まらず、見直しも挟まない（異常系 6）
         return stop_and_report(
-            env,
-            rec,
-            before,
-            {"condition": cond, "values": values},
-            "着手できる課題が無い" if cond == "no_issue" else "候補がすべて MVV の外・人の判断待ちとして外れた",
-            {"selection": got["selection"]},
+            env, rec, before, waiting_only(rec, "no_selectable"), "手元の作業が待ちだけになった", {"selection": got["selection"]}
         )
+    cond = "no_issue" if got["candidates"] == 0 else "outside_mvv"
+    if cond == "no_issue" and rec.get("review_first") != len(rec["laps"]):
+        return review_first(env, rec, before, got)
+    reasons: dict = {}
+    for r in got["selection"]:
+        reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
+    values = (
+        {"milestones": rec.get("milestones") or (rank.get("metrics") or {}).get("order", [])} if cond == "no_issue" else {"reasons": reasons}
+    )
+    return stop_and_report(
+        env,
+        rec,
+        before,
+        {"condition": cond, "values": values},
+        "着手できる課題が無い" if cond == "no_issue" else "候補がすべて MVV の外・人の判断待ちとして外れた",
+        {"selection": got["selection"]},
+    )
+
+
+def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, lap: dict | None) -> dict:
+    """周回 n の行を作って（または取り直した周回を書き換えて）記録する。選んだ課題の直しを済みにし、スプリントの MVV を置く。"""
     d = loop_dir(env, rec["name"]) / f"lap-{n}"
     new = lap or {"n": n, "outcome": IN_PROGRESS, "started_at": env.now(), "created": [], "gates": [], "deferred_issues": []}
     new.update(
@@ -300,6 +293,22 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         d.mkdir(parents=True, exist_ok=True)
         (d / "mvv.md").write_text(got["sprint_mvv"], encoding="utf-8")
     write_record(env, rec, before)
+    return new
+
+
+def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None) -> dict:
+    add_env_exclusions(rec, n)
+    code, rank = env.rank(env.main_dir())
+    if code not in (0, PAUSE_RANK):
+        return refusal_order(f"upkeep.py rank が {code} を返した。選定を推さない: {rank.get('summary', '')}")
+    try:
+        descriptions = env.milestones(rec.get("repo") or "")
+    except OSError as e:
+        return refusal_order(str(e))
+    got = choose_issues(env, rec, rank, n, descriptions, set((lap or {}).get("created") or []))
+    if got["milestone"] is None:
+        return _stop_without_issue(env, rec, before, got, rank, lap)
+    new = _open_lap(env, rec, before, got, rank, n, lap)
     chosen = selected_issues(new)
     nxt = f"モードと版を決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版> を打つ"
     update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
