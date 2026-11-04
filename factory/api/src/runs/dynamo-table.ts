@@ -448,7 +448,7 @@ export class DynamoRunsTable implements RunsTable {
           Key: { pk: runPk(sprintRunId), sk: "RUN" },
           UpdateExpression: `SET #s = :awaiting, currentJobId = :null, updatedAt = :now, awaitingReason = :ar, releaseRequestId = :rr${
             extras.finishReason !== undefined ? ", finishReason = :fr" : ""
-          }`,
+          }${extras.clearCancel ? ", cancelRequested = :false" : ""}`,
           ConditionExpression: "currentJobId = :j AND NOT #s IN (:t1, :t2, :t3, :t4)",
           ExpressionAttributeNames: { "#s": "state" },
           ExpressionAttributeValues: {
@@ -460,6 +460,7 @@ export class DynamoRunsTable implements RunsTable {
             ":rr": extras.releaseRequestId ?? null,
             ...this.terminalValues(),
             ...(extras.finishReason !== undefined ? { ":fr": extras.finishReason } : {}),
+            ...(extras.clearCancel ? { ":false": false } : {}),
           },
         },
       },

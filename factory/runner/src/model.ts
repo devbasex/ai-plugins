@@ -1,6 +1,6 @@
 // 形態ごとの claude の呼び方（受け入れ条件 29）。アクセスキーをイメージと環境変数に置かず、
 // 子の環境にだけ必要な値を置く。managed はタスクの役割の権限、byok は利用者のキーかロール
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AssumeRoleCommand, STSClient } from "@aws-sdk/client-sts";
 
@@ -68,6 +68,30 @@ const MODEL_CREDENTIALS = [
 // 子へそのまま渡すモデルの資格の値（local だけ）。外へ送る工程の中身から伏せる値に足す
 export function passedModelSecrets(base: Record<string, string | undefined>, mode: "local" | "byok" | "managed"): string[] {
   return mode === "local" ? MODEL_CREDENTIALS.map((k) => base[k] ?? "").filter(Boolean) : [];
+}
+
+// managed で子が使うタスクの役割の資格。子と同じコンテナの資格の口（ECS の credential endpoint）から読む。
+// 口が無い（手元・byok）か読めなければ空。値は更新されるため、呼ぶ側が読んだ値を控えて伏せる値に足す
+export async function containerRoleSecrets(
+  base: Record<string, string | undefined>,
+  mode: "local" | "byok" | "managed",
+  get: typeof fetch = fetch,
+  readToken: (path: string) => Promise<string> = (p) => readFile(p, "utf8"),
+): Promise<string[]> {
+  if (mode !== "managed") return [];
+  const url = base.AWS_CONTAINER_CREDENTIALS_FULL_URI ?? (base.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? `http://169.254.170.2${base.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}` : null);
+  if (!url) return [];
+  try {
+    const auth = base.AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
+      ? (await readToken(base.AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)).trim()
+      : base.AWS_CONTAINER_AUTHORIZATION_TOKEN;
+    const res = await get(url, auth ? { headers: { Authorization: auth } } : {});
+    if (!res.ok) return [];
+    const c = (await res.json()) as { AccessKeyId?: unknown; SecretAccessKey?: unknown; Token?: unknown };
+    return [c.AccessKeyId, c.SecretAccessKey, c.Token].filter((v): v is string => typeof v === "string" && v !== "");
+  } catch {
+    return [];
+  }
 }
 
 export async function claudeEnv(

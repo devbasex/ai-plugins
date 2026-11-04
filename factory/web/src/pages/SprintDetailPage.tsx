@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { SprintRunDetail, StepDetail, StepRow } from "../api.ts";
+import { isFinishedRun, type SprintRunDetail, type StepDetail, type StepRow } from "../api.ts";
 import { useFailureHandler, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { usePolled } from "../poll.ts";
@@ -277,7 +277,7 @@ function PhasesView({ detail }: { detail: SprintRunDetail }) {
   );
 }
 
-// スプリントの詳細（#2172）。開いている間は読み直し、工程を押すと右が詳細パネルに切り替わる
+// スプリントの詳細（#2172）。開いている間は読み直し（終わった実行は除く）、工程を押すと右が詳細パネルに切り替わる
 export function SprintDetailPage() {
   const { t } = useTranslation();
   const format = useFormat();
@@ -288,7 +288,8 @@ export function SprintDetailPage() {
   const hasToken = auth.getToken() !== null;
 
   const read = useCallback(async () => (await api.sprintRunDetails(accountId, [sprintRunId]))[0] ?? null, [api, accountId, sprintRunId]);
-  const { data: detail, error, staleSince, reload } = usePolled(read, hasToken);
+  // 終わった実行は変わらないため、間隔では読み直さない（開いたときと手動の読み直しだけ。1 回の読み出しが事象の全件を読む）
+  const { data: detail, error, staleSince, reload } = usePolled(read, hasToken, { poll: (d) => d === null || !isFinishedRun(d.state) });
 
   if (!hasToken) return <Navigate to="/login" replace />;
   const back = (

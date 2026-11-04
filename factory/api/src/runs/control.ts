@@ -107,6 +107,8 @@ export interface OrganizerHooks {
   newRequestRows(run: SprintRun, events: ReleaseEvents): Promise<OrgRequest[]>;
   tick(accountId: string, repositoryId: number): Promise<void>;
   decide(run: SprintRun, approvalRequestId: string): Promise<ReleaseStep | null>;
+  // 配布の実行のまとめた配布が main へマージ済みか（取り消しを受けても止まった配布として残すかを決める。I63）
+  releaseMerged(run: SprintRun): Promise<boolean>;
   sweep(): Promise<void>;
 }
 
@@ -543,18 +545,21 @@ export class RunControl {
     const lastRequest = releaseEvents?.requested.at(-1)?.request_id ?? null;
     // 実行と枠を先に移し、ジョブを終わりの状態にするのは最後にする。途中で止まってもジョブは見回りの対象に残り、
     // 次の見回りか停止の知らせの再送が同じ結果でやり直す（実行の移し替えは条件つきで、2 度目は何もしない）
+    // main へマージした後の配布の実行は取り消しを受けても終わらせず、止まった配布として「続きから流す」で仕上げられるようにする（I63）
+    const keepRelease = run.cancelRequested && isReleaseRun(run) && this.organizer !== null && (await this.organizer.releaseMerged(run));
     if (run.currentJobId === job.jobId) {
-      if (run.cancelRequested) {
+      if (run.cancelRequested && !keepRelease) {
         const lw = await this.loopWriteFor(run, job.jobId, { runState: "cancelled", failureReason: null, finishReason });
         if (await table.finishRun(run.sprintRunId, "cancelled", null, now, { finishReason, loop: lw?.write, requests })) await this.afterRunMoved(run, lw?.write, true);
       } else if (isReleaseRun(run)) {
         // 配布の実行は、配布済みで done、承認ゲートか判断で承認待ち、それ以外は止まった配布として承認待ち（I65・決定 11）
         if (releaseEvents?.settled?.result === "released") {
           await table.finishRun(run.sprintRunId, "done", null, now);
-        } else if (result === "gate") {
+        } else if (result === "gate" && !keepRelease) {
           await table.awaitApproval(run.sprintRunId, job.jobId, now);
         } else {
-          await table.awaitApproval(run.sprintRunId, job.jobId, now, { awaitingReason: "release_stalled" });
+          // 取り消しを受けた実行は取り消しの印を外す（続けたジョブの終わりで取り消しにしない）
+          await table.awaitApproval(run.sprintRunId, job.jobId, now, { awaitingReason: "release_stalled", ...(keepRelease ? { clearCancel: true } : {}) });
         }
       } else if (result === "gate") {
         const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_approval", failureReason: null, finishReason });
@@ -747,6 +752,10 @@ export class RunControl {
     const run = await table.getRun(sprintRunId);
     if (!run || run.accountId !== ctx.accountId) throw new NotFoundError("sprint_run_not_found", "スプリントの実行が見つかりません");
     if (isTerminalRun(run.state)) throw new ConflictError("already_finished", "このスプリントの実行は終わっています");
+    // main へマージした後の配布の実行は取り消さない（取り消すと配布の仕上げも次の配布も進まない。I63）
+    if (run.currentJobId === null && isReleaseRun(run) && this.organizer && (await this.organizer.releaseMerged(run))) {
+      throw new ConflictError("release_after_main", "main へマージした配布は取り消せません。止まった配布は続きから流してください");
+    }
     if (run.currentJobId === null) {
       const lw = await this.loopWriteFor(run, null, { runState: "cancelled", failureReason: null, finishReason: null });
       if (await table.finishRun(run.sprintRunId, "cancelled", null, this.iso(), { loop: lw?.write })) {

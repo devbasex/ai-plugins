@@ -25,6 +25,8 @@ export interface RunTransitionExtras {
   // 承認待ちの理由と、手動の実行が待つ配布の依頼（I65。awaitApproval だけが読む）
   awaitingReason?: AwaitingReason | null;
   releaseRequestId?: string | null;
+  // 取り消しの印を外す（main へマージした後に取り消しを受けた配布の実行を、止まった配布として残すとき。awaitApproval だけが読む）
+  clearCancel?: boolean;
 }
 
 // 再開のジョブを作る条件（#2439）。expectAwaiting を省くと、承認待ちの理由が空のときだけ書く

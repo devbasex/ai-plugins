@@ -15,8 +15,9 @@ export interface Polled<T> {
 }
 
 // read が変わると最初から読み直す。enabled が偽の間は読まない。poll が偽なら間隔では読み直さず、開いたときと reload だけで読む
-// （変わることの少ない画面で、1 回の読み出しが重いもの。バックログなど）
-export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = true }: { poll?: boolean } = {}): Polled<T> {
+// （変わることの少ない画面で、1 回の読み出しが重いもの。バックログなど）。poll が関数なら、間隔のたびに今の data で決める
+// （終わった実行の詳細など、data がもう変わらないと分かったら読み直さない）
+export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = true }: { poll?: boolean | ((data: T | null) => boolean) } = {}): Polled<T> {
   const { pollIntervalMs } = useServices();
   const interval = pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const onFailure = useFailureHandler();
@@ -25,12 +26,18 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = 
   const [staleSince, setStaleSince] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const hasData = useRef(false);
+  const latest = useRef<T | null>(null);
+  // 関数の poll は描画のたびに作り直されるため、読み直しの effect を起こし直さないよう ref で読む
+  const pollOf = useRef(poll);
+  pollOf.current = poll;
+  const polling = poll !== false;
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     let running = false;
     hasData.current = false;
+    latest.current = null;
     setData(null);
     setError(null);
     setStaleSince(null);
@@ -41,6 +48,7 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = 
         const value = await read();
         if (cancelled) return;
         hasData.current = true;
+        latest.current = value;
         setData(value);
         setError(null);
         setStaleSince(null);
@@ -55,20 +63,22 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = 
       }
     };
     void tick();
-    if (!poll) {
+    if (!polling) {
       return () => {
         cancelled = true;
       };
     }
     const timer = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const p = pollOf.current;
+      if (typeof p === "function" && !p(latest.current)) return;
       void tick();
     }, interval);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [read, enabled, interval, onFailure, generation, poll]);
+  }, [read, enabled, interval, onFailure, generation, polling]);
 
   const reload = useCallback(() => setGeneration((g) => g + 1), []);
   return { data, error, staleSince, reload };

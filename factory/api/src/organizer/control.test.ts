@@ -383,6 +383,64 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(answeredOf(a)).toHaveLength(0);
   });
 
+  it("main へのマージの後に取り消された配布の実行は、止まった配布として残り、続きから流せる。ジョブの無いときの取り消しは 409", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    await present(1, "aaaa111", [11]);
+    await answer(batch.releaseRunId, "approved");
+    let run = await runOf(batch.releaseRunId);
+    await event(run.sprintRunId, run.currentJobId, "release.progress", { seq: 1, stage: "main_merged" }, `${run.sprintRunId}:progress:main_merged`);
+    await h.control.cancelSprintRun(accountContext(), run.sprintRunId);
+    await finish(run.sprintRunId, run.currentJobId!, "failed");
+    expect(await runOf(run.sprintRunId)).toMatchObject({ state: "awaiting_approval", awaitingReason: "release_stalled", cancelRequested: false });
+    expect((await currentBatch())!).toMatchObject({ state: "stalled", stalledFrom: "confirmed", mainMerged: true });
+    expect(await codeOf(h.control.cancelSprintRun(accountContext(), run.sprintRunId))).toBe("release_after_main");
+    await h.organizer.resolve(accountContext(), REPO_ID, 1, { choice: "continue" });
+    run = await runOf(batch.releaseRunId);
+    expect(instructionOf(run.currentJobId!)).toMatchObject({ RELEASE_STEP: "continue" });
+  });
+
+  it("main へのマージの前に取り消された配布の実行は、今のとおり差し戻す", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    await present(1, "aaaa111", [11]);
+    await answer(batch.releaseRunId, "approved");
+    const run = await runOf(batch.releaseRunId);
+    await h.control.cancelSprintRun(accountContext(), run.sprintRunId);
+    await finish(run.sprintRunId, run.currentJobId!, "failed");
+    expect((await runOf(run.sprintRunId)).state).toBe("cancelled");
+    expect(await h.table.getBatch("acc-1", REPO_ID, 1)).toMatchObject({ state: "rejected" });
+  });
+
+  it("提示を受けた後に承認ゲート 2 へ届かずに落ちた配布は止まった配布になり、続きは提示のプランを流し直して承認を待つ", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    let run = await runOf(batch.releaseRunId);
+    await event(run.sprintRunId, run.currentJobId, "release.presented", { seq: 1, k: 1, sha: "aaaa111", version: "10.28.0", prs: [11], lanes: [], added_prs: [], auto: false }, `${run.sprintRunId}:presented:1`);
+    await finish(run.sprintRunId, run.currentJobId!, "failed");
+    expect((await currentBatch())!).toMatchObject({ state: "stalled", stalledFrom: "presented" });
+    expect(await h.organizer.resolve(accountContext(), REPO_ID, 1, { choice: "continue" })).toEqual({ seq: 1, state: "presented" });
+    run = await runOf(batch.releaseRunId);
+    expect(instructionOf(run.currentJobId!)).toMatchObject({ RELEASE_STEP: "present" });
+    await event(run.sprintRunId, run.currentJobId, "gate.reached", { kind: "gate2", pr_url: null, material: "資料" });
+    await finish(run.sprintRunId, run.currentJobId!, "gate");
+    const r = await answer(batch.releaseRunId, "approved");
+    expect(instructionOf(r.jobId!)).toMatchObject({ RELEASE_STEP: "confirm:1" });
+  });
+
+  it("提示を受けた後に落ちた配布は差し戻せる", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    const run = await runOf(batch.releaseRunId);
+    await event(run.sprintRunId, run.currentJobId, "release.presented", { seq: 1, k: 1, sha: "aaaa111", version: "10.28.0", prs: [11], lanes: [], added_prs: [], auto: false }, `${run.sprintRunId}:presented:1`);
+    await finish(run.sprintRunId, run.currentJobId!, "failed");
+    expect(await h.organizer.resolve(accountContext(), REPO_ID, 1, { choice: "reject" })).toEqual({ seq: 1, state: "rejected" });
+  });
+
   it("確定の後に止まり本番に手を付けた跡が無ければ confirm:<k>、GitHub に枝があれば continue", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);

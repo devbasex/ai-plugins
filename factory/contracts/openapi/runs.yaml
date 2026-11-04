@@ -423,7 +423,7 @@ paths:
       tags: [sprint-runs]
       operationId: cancelSprintRun
       summary: スプリントの実行を取り消す
-      description: 動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。
+      description: 動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後の配布の実行は取り消さず、止まった配布（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。
       parameters:
         - name: accountId
           in: path

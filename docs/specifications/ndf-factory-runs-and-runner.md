@@ -140,7 +140,7 @@ graph TD
 | `requestResume({sprintRunId, approvalRequestId})` | #2173（答えを保存した後） | 実行と依頼の識別子 | `Promise<{jobId}>`。`START=resume` のジョブを作り起動する | `ResumeRejectedError`（`code` が `not_found` / `not_awaiting_approval` / `sprint_run_busy`）。`sprint_run_busy` は前のジョブの停止を待っている間か、別の再開が先に通ったときで、呼ぶ側は時間をおいて呼び直す |
 | `claimLocalRunJob(accountId)` | #2189（手元のマシンの受け取り） | アカウント | `Promise<{instruction: RunJobInstruction, token} \| null>`。そのアカウントの最も古い `pending` の `local` のジョブ（取り消しの要求の無い実行のもの）を `running` にし、指示と token を 1 回だけ返す | 保存の失敗は投げる |
 | `reportLocalRunJobEnded(jobId)` | #2189（終わりか心拍の切れ） | ジョブ | `Promise<void>`。停止の知らせと同じ処理 | 知らないジョブ・`local` でないジョブ・終わったジョブは何もしない |
-| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`） |
+| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`。main へマージした後の配布の実行をジョブの無いときに取り消すと `release_after_main`） |
 | `getSprintRun(sprintRunId)`・`getRegistration(accountId, repositoryId)` | 実行と登録を読む側 | 識別子 | 行か `null` | — |
 
 あわせて `RunControl`・`ResumeRejectedError`・`repoKey`（`owner/name` を小文字にした比較の鍵）と、`ResumeRejectedCode`・`RunControlConfig`・`RunControlDeps`・`RunJob`・`SprintRun`・`RunState`・`JobState` の型を export する。
@@ -165,7 +165,7 @@ graph TD
 | `POST /accounts/{a}/repositories/{r}/issue-candidates` | 席を持つ人 | `{exclude?: [番号]}`（選び直しで外す番号） | 200 `{source: "ranking" \| "recent", milestone, candidates: [{number, title, selected, reason}], note}` | 400（ID の形）・403・404 `repository_not_found` |
 | `POST /accounts/{a}/sprint-runs` | 席を持つ人 | `{repository_id, issues}`（1〜20 件の重なりの無い番号） | 201 `{sprint_run_id, state: "starting"}` | 400・403・404・409・503（下の表） |
 | `GET /accounts/{a}/sprint-runs?repository_id=` | 席を持つ人 | — | 200 `{sprint_runs: [{sprint_run_id, repository_id, issues, state, failure_reason, created_at, repo, current_phase, current_step, last_event_at}]}`（新しい順 50 件。後ろの 4 項目は進捗の事象から導く。規則は [スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)） | 400（ID の形）・403・503 `progress_unavailable` |
-| `POST /accounts/{a}/sprint-runs/{id}/cancel` | 席を持つ人 | — | 200 `{state}`（`cancelled` か、停止を待つ `running`） | 403・404 `sprint_run_not_found`・409 `already_finished` |
+| `POST /accounts/{a}/sprint-runs/{id}/cancel` | 席を持つ人 | — | 200 `{state}`（`cancelled` か、停止を待つ `running`） | 403・404 `sprint_run_not_found`・409 `already_finished`・`release_after_main` |
 
 **持ち主だけの経路は、席を持つだけの利用者に他人のアカウントと同じ 403 `forbidden` を返す**（`requireOwner`）。チームのアカウントでは、リポジトリの登録と外し・認可・候補・キーの 3 つの操作は持ち主（`role` が `owner`）だけが、スプリントの開始・一覧・取り消しと課題の候補は席を持つ人が行う。
 

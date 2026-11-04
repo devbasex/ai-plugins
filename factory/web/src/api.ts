@@ -89,6 +89,10 @@ export interface IssueCandidates {
   note: string | null;
 }
 
+// 実行の終わりの状態（API の TERMINAL_RUN_STATES と同じ）。終わった実行の中身はもう変わらない
+const FINISHED_RUN_STATES: ReadonlySet<string> = new Set(["done", "stopped", "failed", "cancelled"]);
+export const isFinishedRun = (state: string) => FINISHED_RUN_STATES.has(state);
+
 export interface SprintRunSummary {
   sprint_run_id: string;
   repository_id: number;

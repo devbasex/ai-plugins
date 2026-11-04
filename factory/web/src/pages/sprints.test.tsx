@@ -228,6 +228,33 @@ describe("読み直し（受け入れ条件 10）", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/^読み直せませんでした（/);
   });
 
+  it("詳細は動いている実行だけを間隔で読み直し、終わった実行は開いたときと「もう一度読む」だけで読む", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = createDummyApi();
+    const details = api.sprintRunDetails.bind(api);
+    let calls = 0;
+    let state = "running";
+    api.sprintRunDetails = async (...args: Parameters<Api["sprintRunDetails"]>) => {
+      calls += 1;
+      return (await details(...args)).map((d) => ({ ...d, state }));
+    };
+    show(detail, api, createDummyAuth(), 1000);
+    await screen.findAllByText(/sr-0003/);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(calls).toBe(2);
+    state = "done";
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(calls).toBe(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(calls).toBe(3);
+  });
+
   it("バックログは間隔では読み直さず、開いたときと「もう一度読む」だけで読む", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const api = createDummyApi();

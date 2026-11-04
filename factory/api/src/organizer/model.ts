@@ -47,7 +47,7 @@ export interface OrgRequest {
 export const BATCH_STATES = ["composed", "presented", "represented", "confirmed", "stalled", "released", "rejected"] as const;
 export type BatchState = (typeof BATCH_STATES)[number];
 export const isTerminalBatch = (state: BatchState) => state === "released" || state === "rejected";
-export type StalledFrom = "composed" | "represented" | "confirmed";
+export type StalledFrom = "composed" | "presented" | "represented" | "confirmed";
 
 export interface BatchLane {
   lane: string;
@@ -156,9 +156,10 @@ export function requestsToAnswer(batch: ReleaseBatch, requests: OrgRequest[], en
 // 止まった配布の選択肢（I63）。main へのマージの後は continue だけ
 export const choicesOf = (batch: Pick<ReleaseBatch, "mainMerged">): ("continue" | "reject")[] => (batch.mainMerged ? ["continue"] : ["continue", "reject"]);
 
-// 止まる前の状態（ジョブが失敗した時点の state から）。presented で止まることは無い（ジョブは gate で終わる）
+// 止まる前の状態（ジョブが失敗した時点の state から）。presented は提示を受けた後にジョブが落ちたとき
+// （ランナーが release.presented を送った後の状態の保存に失敗したなど）で、承認ゲート 2 に届いていない
 export function stalledFromOf(state: BatchState): StalledFrom | null {
-  if (state === "composed" || state === "represented" || state === "confirmed") return state;
+  if (state === "composed" || state === "presented" || state === "represented" || state === "confirmed") return state;
   return null;
 }
 
@@ -168,9 +169,11 @@ export function resumeStepOf(batch: ReleaseBatch, startedRelease: boolean): Rele
 }
 
 // 止まる前（か今）の状態から流し直す手。判断（承認ゲートの外の問い）への答えの再開も同じ規則で決める
-export function stepFrom(state: StalledFrom | null, batch: Pick<ReleaseBatch, "mainMerged" | "confirmedK">, startedRelease: boolean): ReleaseStep {
+// presented は受けた最後の提示のプランを流し直す（提示 1 なら present、提示 2 なら represent。状態は presented のまま承認ゲート 2 を待つ）
+export function stepFrom(state: StalledFrom | null, batch: Pick<ReleaseBatch, "mainMerged" | "confirmedK" | "presentations">, startedRelease: boolean): ReleaseStep {
   if (state === "composed") return "present";
   if (state === "represented") return "represent";
+  if (state === "presented") return batch.presentations.at(-1)?.k === 2 ? "represent" : "present";
   if (startedRelease || batch.mainMerged) return "continue";
   return batch.confirmedK === 2 ? "confirm:2" : "confirm:1";
 }

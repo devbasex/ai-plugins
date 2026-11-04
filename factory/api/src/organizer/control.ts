@@ -217,6 +217,17 @@ export class OrganizerControl {
     );
   }
 
+  // 配布の実行のまとめた配布が main へマージ済みか（記録・届いた段・GitHub の順に照らす）。終わったまとめた配布は偽
+  async releaseMerged(run: SprintRun): Promise<boolean> {
+    if (!run.releaseSeq) return false;
+    const batch = await this.deps.table.getBatch(run.accountId, run.repositoryId, run.releaseSeq);
+    if (!batch || isTerminalBatch(batch.state)) return false;
+    if (batch.mainMerged) return true;
+    const { progress } = await this.deps.reader.findReleaseEvents(run.sprintRunId);
+    if (progress.some((p) => p.seq === batch.seq && p.stage === "main_merged")) return true;
+    return this.mergedOnGitHub(run, batch);
+  }
+
   // main へのマージを GitHub で照らす（ジョブが段を書く前に落ちても分かるように。決定 11）
   private async mergedOnGitHub(run: SprintRun, batch: ReleaseBatch): Promise<boolean> {
     const version = presentedVersion(batch);

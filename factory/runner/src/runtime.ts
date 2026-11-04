@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
-import { claudeEnv, passedModelSecrets, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type AssumeRole, type ModelCredential } from "./model.ts";
+import { claudeEnv, containerRoleSecrets, passedModelSecrets, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type AssumeRole, type ModelCredential } from "./model.ts";
 import { parseLoopFile } from "./loop-file.ts";
 import { fsOrganizerFiles, ORGANIZER_DIR, organizerEnv, RELEASE_PROMPT } from "./organizer.ts";
 import { runSections, sectionLimitOf, type SectionRun } from "./sections.ts";
@@ -119,7 +119,14 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
     assumedSecrets.push(c.accessKeyId, c.secretAccessKey, c.sessionToken);
     return c;
   };
-  const childEnv = () => claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, assumeRole, sessionName, credentialDir);
+  // managed で子が使うタスクの役割の資格も、読んだ値を控える。更新の前の値も期限まで有効なため外さない
+  const noteContainerRole = async () => {
+    for (const v of await containerRoleSecrets(jobEnv, instruction.EXECUTION_MODE)) if (!assumedSecrets.includes(v)) assumedSecrets.push(v);
+  };
+  const childEnv = async () => {
+    await noteContainerRole();
+    return claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, assumeRole, sessionName, credentialDir);
+  };
   // 版を固定して取った取得元。スクリプトは入れた版と同じこの写しから読む
   const ndfSource = join(work, "ndf-marketplace");
   const ndfScripts = () => join(ndfSource, "plugins/ndf/scripts");
@@ -132,13 +139,14 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   // Factory のオーガナイザーの置き場（#2439 の I68）。1 台の中のオーガナイザーを起動させず、本番の配布は依頼として出させる
   const organizerDir = join(repoDir, ORGANIZER_DIR);
   Object.assign(jobEnv, organizerEnv(instruction, organizerDir));
-  // 外へ送る工程の中身から伏せる秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールの資格。#2172 の決定 7）
+  // 外へ送る工程の中身から伏せる秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールとタスクの役割の資格。#2172 の決定 7）
   const githubTokens: string[] = [];
   const secretValues = async (): Promise<string[]> => {
     const out = [token, ...githubTokens, jobEnv.INGEST_TOKEN ?? ""];
     // local は利用者が手元で設定したモデルの資格をそのまま子へ渡すため、その値も伏せる
     out.push(...passedModelSecrets(jobEnv, instruction.EXECUTION_MODE));
     if (credential?.kind === "anthropic_api_key") out.push(credential.api_key);
+    await noteContainerRole();
     out.push(...assumedSecrets);
     return out.filter(Boolean);
   };

@@ -229,6 +229,7 @@ export class MemoryRunsTable implements RunsTable {
       awaitingReason: extras.awaitingReason ?? null,
       releaseRequestId: extras.releaseRequestId ?? null,
     });
+    if (extras.clearCancel) r.cancelRequested = false;
     if (extras.finishReason !== undefined) r.finishReason = extras.finishReason;
     if (extras.loop) this.applyLoop(extras.loop);
     this.putRequests(extras.requests);
