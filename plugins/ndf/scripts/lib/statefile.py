@@ -40,11 +40,6 @@ def register_after_save(hook: AfterSave) -> None:
         _AFTER_SAVE.append(hook)
 
 
-def unregister_after_save(hook: AfterSave) -> None:
-    if hook in _AFTER_SAVE:
-        _AFTER_SAVE.remove(hook)
-
-
 def load(path: pathlib.Path) -> dict[str, Any]:
     """状態ファイルを読む。存在しなければ FileNotFoundError を上げる。"""
     return json.loads(path.read_text(encoding="utf-8"))

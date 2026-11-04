@@ -96,11 +96,6 @@ def adoption_confirmed(state: dict[str, Any]) -> bool:
     return (state.get("final_gate") or {}).get("status") == "passed"
 
 
-def remaining_count(state: dict[str, Any]) -> int:
-    """取り消されずに残った改善項目の数。"""
-    return sum(1 for i in state.get("items") or [] if is_live(i))
-
-
 # ---------- 表示の状態と件数（#1692 の決定 2。コメント・結果 JSON・報告がここを呼ぶ） ----------
 
 ADOPTED = "adopted"

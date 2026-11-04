@@ -62,34 +62,6 @@ def test_claude_and_codex_report_the_model_that_actually_ran(models):
     assert models.OBSERVABLE_RUNTIMES == ("claude", "codex")
 
 
-def test_kiro_default_is_not_measurable(models):
-    """kiro の既定 auto は実際に選ばれたモデルを取得できない。"""
-    assert models.is_measurable("kiro", None) is False
-    assert models.is_measurable("kiro", "auto") is False
-    assert models.is_measurable("kiro", "claude-opus-5") is True
-
-
-@pytest.mark.parametrize(
-    ("runtime", "model", "measurable"),
-    [
-        # 指定も実測値も無ければ、claude も何が動いたか分からない
-        ("claude", None, False),
-        ("claude", "opus-5", True),
-        # 指定値で代用する。実測はできないが、何を渡したかは分かる
-        ("codex", "gpt-5.5", True),
-        ("agy", "gemini-3.8", True),
-        ("kiro", "claude-opus-5", True),
-        # 何が動いたか分からない。指定が無く、実測もできない
-        ("codex", None, False),
-        ("agy", None, False),
-        ("kiro", None, False),
-        ("kiro", "auto", False),
-    ],
-)
-def test_measurability_covers_every_participant(models, runtime, model, measurable):
-    assert models.is_measurable(runtime, model) is measurable
-
-
 def test_separation_reason_differs_by_runtime(models):
     """分離の理由は「既定モデル（auto）」に固定せず、ランタイムごとに書き分ける。"""
     assert models.separation_reason("kiro", None) == ("kiro の auto はラウンドごとに違うモデルが動きうる")
@@ -101,14 +73,6 @@ def test_separation_reason_differs_by_runtime(models):
     # 実測値があれば、指定が無くても分離しない
     assert models.separation_reason("codex", None, "gpt-6.1-sol") is None
     assert models.separation_reason("kiro", None, "x") is None
-
-
-def test_assumption_note_marks_rounds_counted_on_trust(models):
-    """指定があり実測できないラウンドは分離しないが、前提を報告へ残す。"""
-    assert models.assumption_note("codex", "gpt-5.5") == ("codex は指定した gpt-5.5 で動いた前提で数える（実測不可）")
-    assert models.assumption_note("claude", "opus-5") == ("claude は指定した opus-5 で動いた前提で数える（実測不可）")
-    assert models.assumption_note("claude", "opus-5", "claude-opus-5") is None
-    assert models.assumption_note("codex", None) is None
 
 
 def test_foreseen_separation_warns_only_runtimes_that_cannot_be_observed(models):

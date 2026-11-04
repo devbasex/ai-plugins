@@ -1,4 +1,4 @@
-"""モデル指定の解析・フラグ生成・実測値の突き合わせ（収束ループ共通層）。
+"""モデル指定の解析・実測値の突き合わせ（収束ループ共通層）。
 
 「どのランタイムのどのモデルが優れているか」を測るために、**指定値を固定し、
 実際に動いたモデルを可能な限り記録する**。指定値は初期化時に確定して以後変えない
@@ -128,24 +128,6 @@ def foreseen_separation(runtime: str, model: Optional[str]) -> Optional[str]:
     if runtime in OBSERVABLE_RUNTIMES:
         return None
     return separation_reason(runtime, model)
-
-
-def assumption_note(runtime: str, model: Optional[str], observed: Optional[str] = None) -> Optional[str]:
-    """指定値で代用したことを報告へ残す注記。代用でないなら `None`。
-
-    分離ではない。指定があれば何を渡したかは分かるため集計へ入れるが、
-    実測で裏付けたわけではないことを読み手が知る必要がある。
-    """
-    if observed or not model:
-        return None
-    if separation_reason(runtime, model, observed):
-        return None
-    return f"{runtime} は指定した {model} で動いた前提で数える（実測不可）"
-
-
-def is_measurable(runtime: str, model: Optional[str], observed: Optional[str] = None) -> bool:
-    """その実行を計測に使えるか。分離の理由が無いことと同じである。"""
-    return separation_reason(runtime, model, observed) is None
 
 
 _CLAUDE_MODEL_USAGE = re.compile(r'"modelUsage"\s*:\s*\{')
@@ -339,7 +321,7 @@ def mismatch_warning(runtime: str, requested: Optional[str], observed: Optional[
     """指定値と実測値の食い違いを警告文にする。食い違いが無ければ `None`。
 
     実測値が無ければ常に `None` になる。「取れない」ことと「一致した」ことを
-    混同しないよう、呼び出し側は分離を `is_measurable()` で別に区別する。
+    混同しないよう、呼び出し側は分離を `separation_reason()` で別に区別する。
     """
     if not observed or not requested:
         return None

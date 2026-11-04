@@ -156,7 +156,7 @@ def test_plan_a_reverts_only_the_culprit_and_the_rechecked_gate_passes(flow, cmd
     assert (code, verdict) == (0, "passed")
     ledger = sys.modules["refactor_lib.ledger"]
     state = read_state(flow["path"])
-    assert ledger.adoption_confirmed(state) and ledger.remaining_count(state) == 1
+    assert ledger.adoption_confirmed(state) and sum(1 for i in state["items"] if ledger.is_live(i)) == 1
     _descends(work, flow["pushed"])
 
 
