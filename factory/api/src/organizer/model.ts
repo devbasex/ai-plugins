@@ -126,8 +126,10 @@ export const emptyRoot = (accountId: string, repositoryId: number, now: string):
   updatedAt: now,
 });
 
-// Factory の実行のレーンの名前（#2436 の名前の形に収める）。ループはループ 1 つ、手動の実行は実行 1 つがレーンになる
-export const laneOf = (run: { sprintRunId: string; loopId?: string | null }) => (run.loopId ? `loop-${run.loopId}` : `run-${run.sprintRunId}`);
+// Factory の実行のレーンの名前。ループはループ 1 つ、手動の実行は実行 1 つがレーンになる。#2436 のレーン名の形（小文字・32 字まで）に
+// 収めるため、ループの名前と実行の識別子を切り詰める。ランナー（factory/runner/src/organizer.ts の laneName）と同じ式
+export const laneOf = (run: { sprintRunId: string }, loopName: string | null) =>
+  loopName ? `loop-${loopName.toLowerCase().slice(0, 27)}` : `run-${run.sprintRunId.toLowerCase().slice(0, 16)}`;
 
 const overlaps = (a: number[], b: number[]) => a.some((n) => b.includes(n));
 

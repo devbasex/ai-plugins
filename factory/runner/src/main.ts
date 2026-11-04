@@ -3,6 +3,7 @@
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { validateRunJobInstruction, type GateReachedEvent, type JobFinishedEvent, type ProgressEvent, type RunJobInstruction } from "@ndf-factory/contracts";
 import { advancedSince, answersToWrite, currentLapOf, lapClosedEvents, loopStoppedEvent, markOf, type LoopFile } from "./loop-file.ts";
+import { openRequests, releaseAnswerDirective, releaseBodies, writeAnswers, type OrganizerAnswers, type OrganizerFiles } from "./organizer.ts";
 import type { SectionEnd } from "./sections.ts";
 import { createSender, type SendResult } from "./send.ts";
 import { common, finishedResult, truncateGate, type JobIdentity, type ReportResult } from "./translate.ts";
@@ -21,6 +22,8 @@ export interface JobRuntime {
   saveState(url: string): Promise<void>;
   // 開発ループの記録（.ndf/loop/<名>/loop.json）を読む。無ければ null
   readLoop(name: string): Promise<LoopFile | null>;
+  // Factory のオーガナイザーとの置き場（#2439）。無ければ置き場の翻訳をしない
+  organizer?: OrganizerFiles;
   // 人の判断待ちへの答えを NDF の loop answer で書く
   answerLoop(name: string, answer: { number: number; decision: "approved" | "rejected"; pr: number | null }): Promise<void>;
   // 承認の依頼の答えを NDF へ記録する（ゲートは sprint-state.py gate --by user、判断は conductor への指示を返す）
@@ -78,6 +81,15 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     return (await res.json()) as Record<string, string>;
   };
 
+  const getApi = async <T>(path: string): Promise<T> => {
+    const res = await http(apiUrl(instruction.INGEST_URL, path), { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`${path} が ${res.status} を返した`);
+    return (await res.json()) as T;
+  };
+  // 置き場の事象は受け口の照合と同じ鍵で送る（送り直しでも 1 件。I59）
+  const sendRelease = async (key: string, body: Pick<ProgressEvent, "type" | "payload">) =>
+    send({ ...common(id, "finished", now().toISOString()), idempotency_key: key, ...body } as ProgressEvent);
+
   const refreshGitHubToken = async () => runtime.writeGitHubToken((await callApi("/run-jobs/github-token"))!.token!);
 
   let failed = false;
@@ -86,7 +98,11 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
   let report: ReportResult = null;
   let end: SectionEnd | undefined;
   let lapAdvanced = false;
+  // このジョブで新しく出た配布の依頼があり、答えがまだ無い（手動の実行は答えを待って gate で終える。I65）
+  let releaseRequested = false;
+  let releaseGate = false;
   const loopName = instruction.LOOP_NAME ?? null;
+  const organizer = runtime.organizer ?? null;
   const timer = (deps.setInterval ?? setInterval)(() => {
     refreshGitHubToken().catch((err: Error) => stderr(`導入の token を取り直せない: ${err.message}`));
   }, GITHUB_TOKEN_REFRESH_MS);
@@ -97,13 +113,24 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     if (installed !== instruction.NDF_VERSION) throw new Error(`入った NDF の版が違う（${installed}）`);
     await emit({ type: "job.started", payload: { ndf_version: instruction.NDF_VERSION, start: instruction.START } });
     let directive: string | null = null;
-    if (instruction.START === "resume" || instruction.START === "loop") {
-      // ループの最初の周回は保存した状態が無い（404）。空から始める
-      const state = await callApi("/run-jobs/state", { op: "get" }, instruction.START === "loop");
+    if (instruction.START === "resume" || instruction.START === "loop" || instruction.START === "release") {
+      // ループの最初の周回と配布の実行の最初のジョブは保存した状態が無い（404）。空から始める
+      const state = await callApi("/run-jobs/state", { op: "get" }, instruction.START !== "resume");
       if (state) await runtime.restoreState(state.url!);
       // 承認の依頼の識別子の無い resume（利用上限の後）は答えを書かずに続ける（決定 7）
       if (instruction.START === "resume" && instruction.APPROVAL_REQUEST_ID) directive = await runtime.recordAnswer(instruction.APPROVAL_REQUEST_ID);
     }
+    // 配布の依頼の答えと範囲、配布の実行ならまとめた配布の中身を置き場へ書き、答えの無い依頼を送り直す（#2439）
+    let requestsBefore = new Set<string>();
+    if (organizer) {
+      await writeAnswers(organizer, await getApi<OrganizerAnswers>("/run-jobs/organizer/answers"));
+      if (instruction.START === "release") await organizer.write("batch.json", await getApi<unknown>("/run-jobs/organizer/batch"));
+      const open = await openRequests(organizer);
+      requestsBefore = new Set(open.map((p) => p.request_id));
+      for (const p of open) await sendRelease(p.request_id, { type: "release.requested", payload: p });
+      if (instruction.RELEASE_REQUEST_ID) directive = releaseAnswerDirective(instruction.RELEASE_REQUEST_ID);
+    }
+    const presentedBefore = organizer ? new Set((await organizer.list("presented")).map((f) => f.name)) : new Set<string>();
     let lapClosed: (() => Promise<boolean>) | undefined;
     let mark = markOf(null);
     if (loopName) {
@@ -131,10 +158,23 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
       if (stopped) await emit(stopped);
       lapAdvanced = advancedSince(mark, loopAfter);
     }
+    // 置き場の事象は job.finished より前に送る（実行の制御は停止の後に同じ実行の事象として読む）
+    let mainMerged = false;
+    if (organizer) {
+      for (const body of await releaseBodies(organizer, instruction)) {
+        await sendRelease(body.key, body.event);
+        if (body.event.type === "release.requested" && !requestsBefore.has(body.key)) releaseRequested = true;
+        if (body.event.type === "release.progress" && (body.event.payload as { stage: string }).stage === "main_merged") mainMerged = true;
+      }
+      releaseGate = (await organizer.list("presented")).some((f) => !presentedBefore.has(f.name) && f.value.auto === false);
+    }
     await runtime.saveState((await callApi("/run-jobs/state", { op: "put" }))!.url!);
-    if (report === "判断が要る" && end?.kind !== "usage_limit") {
-      gate = { kind: out.gate?.kind ?? "decision", pr_url: out.gate?.pr_url ?? null, material: out.gate?.material ?? summary };
+    if (report === "判断が要る" && end?.kind !== "usage_limit" && !(releaseRequested && !loopName)) {
+      // 配布の実行が承認資料をそろえて止まったら承認ゲート 2。main へのマージの後の判断は続けるだけを選べる（I63）
+      const kind = releaseGate ? "gate2" : (out.gate?.kind ?? "decision");
+      gate = { kind, pr_url: out.gate?.pr_url ?? null, material: out.gate?.material ?? summary };
       if (loopName) gate.loop = { name: loopName, lap: currentLapOf(loopAfter) };
+      if (instruction.START === "release" && kind === "decision" && mainMerged) gate.choices = ["continue"];
     }
   } catch (err) {
     failed = true;
@@ -151,7 +191,7 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
   const finished: JobFinishedEvent = {
     ...common(id, "finished", now().toISOString()),
     type: "job.finished",
-    payload: finishedPayload(report, failed, end, lapAdvanced, summary),
+    payload: !failed && releaseRequested && !loopName ? { result: "gate", summary, reason: "release_requested" } : finishedPayload(report, failed, end, lapAdvanced, summary),
   } as JobFinishedEvent;
   return (await send(finished)) === "sent" ? 0 : 1;
 }
@@ -171,7 +211,7 @@ export function finishedPayload(
   return { result: finishedResult(report, failed), summary };
 }
 
-// 環境変数から指示を読む。手元のランナー（#2189）は INGEST_TOKEN で token を直に渡す
+// 環境変数から指示を読む。手元のマシン（#2189）は INGEST_TOKEN で token を直に渡す
 export async function loadInstruction(env: Record<string, string | undefined>): Promise<{ instruction: RunJobInstruction; token: string }> {
   const keys = [
     "SPRINT_RUN_ID",
@@ -190,6 +230,9 @@ export async function loadInstruction(env: Record<string, string | undefined>): 
     "LOOP_BUDGET",
     "EXCLUDE_ISSUES",
     "LOOP_ANSWERS",
+    "RELEASE_SEQ",
+    "RELEASE_STEP",
+    "RELEASE_REQUEST_ID",
   ];
   const raw = Object.fromEntries(keys.filter((k) => env[k] !== undefined).map((k) => [k, env[k]]));
   const checked = validateRunJobInstruction(raw);

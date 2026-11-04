@@ -325,7 +325,8 @@ export class OrganizerControl {
     }
     for (const run of await table.listRuns(root.accountId, 1000)) {
       if (run.repositoryId !== root.repositoryId || run.purpose === "release" || isTerminalRun(run.state)) continue;
-      const name = laneOf(run);
+      const loopName = run.loopId ? ((await table.getLoop(run.accountId, run.loopId))?.name ?? null) : null;
+      const name = laneOf(run, loopName);
       if (!lanes.has(name)) lanes.set(name, { lane: name, sprintRunId: run.sprintRunId, loopId: run.loopId ?? null, requestIds: [], issues: run.issues });
     }
 
