@@ -622,13 +622,6 @@ class Queue:
             return False
         return self._close_item(lambda _n, item: item.get("seq") == seq, "withdrawn") is not None
 
-    def set_aside(self, path: pathlib.Path) -> pathlib.Path:
-        """送れない項目を待ち行列から外し、控えを `dropped/` へ残す。`path` は `paths()` の 1 つ。"""
-        got = self._close_item(lambda n, _item: n == pathlib.Path(path).stem, "dropped")
-        if got is None:
-            raise FileNotFoundError(str(path))
-        return _aside(self.dir, got.pop("name"), got)
-
     def add(self, item: dict[str, Any], ident: str | int) -> dict[str, Any]:
         """項目を 1 件足し、連番を入れた項目を返す。連番は記録のある名前の最大 + 1（実行の鍵の排他の中で決める）。"""
         with self._session() as fl:

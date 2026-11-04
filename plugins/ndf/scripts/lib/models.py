@@ -21,15 +21,6 @@ from typing import Any, Iterable, Optional
 import clock
 from assignment import ALL_RUNTIMES
 
-# モデルを渡すフラグ。4 CLI すべてで実在を確認済み
-# （codex は `-m` の別名も持つが、長い方で統一する）。
-MODEL_FLAGS: dict[str, str] = {
-    "claude": "--model",
-    "codex": "--model",
-    "agy": "--model",
-    "kiro": "--model",
-}
-
 # 既定モデルで走ったラウンドを報告で区別するための表示名。
 DEFAULT_MODEL_LABEL = "default"
 
@@ -98,16 +89,6 @@ def parse_model_args(pairs: Optional[Iterable[str]]) -> dict[str, Optional[str]]
         seen.add(runtime)
         parsed[runtime] = model
     return parsed
-
-
-def model_flag(runtime: str, model: Optional[str]) -> list[str]:
-    """CLI へ渡すモデル指定フラグ。未指定なら空リスト（CLI の既定へ委ねる）。"""
-    if not model:
-        return []
-    flag = MODEL_FLAGS.get(runtime)
-    if flag is None:
-        raise ModelSpecError(f"モデル指定に対応していないランタイムです: {runtime}")
-    return [flag, model]
 
 
 def label(model: Optional[str]) -> str:

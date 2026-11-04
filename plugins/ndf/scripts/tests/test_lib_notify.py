@@ -66,12 +66,12 @@ def test_slack_call_posts_json_with_the_token(server, monkeypatch):
 
 def test_http_results_carry_the_reason(server):
     base, _ = server
-    ok = notify.http_get(base + "/a")
+    ok = notify._send("GET", base + "/a", 10.0)
     assert ok.ok and ok.status == 200 and json.loads(ok.text) == {"path": "/a"}
-    miss = notify.http_get(base + "/missing")
+    miss = notify._send("GET", base + "/missing", 10.0)
     assert (miss.status, miss.error, miss.ok) == (404, "HTTP 404", False)
-    assert notify.http_get("http://127.0.0.1:1/").error.startswith("接続できない")
-    assert notify.http_post_json(base + "/api/x", {"channel": "C1"}).ok
+    assert notify._send("GET", "http://127.0.0.1:1/", 10.0).error.startswith("接続できない")
+    assert notify._send("POST", base + "/api/x", 10.0, json={"channel": "C1"}).ok
 
 
 def test_env_file_is_found_up_to_the_git_top_and_does_not_override(tmp_path: Path, monkeypatch):

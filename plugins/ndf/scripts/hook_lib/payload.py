@@ -29,10 +29,6 @@ PATCH_TOOLS = ("apply_patch",)
 SHELL_TOOLS = ("Bash", "shell", "execute_bash", "local_shell", "run_command", "run_shell_command")
 
 
-def tool_matcher() -> str:
-    return "|".join((*EDIT_TOOLS, *PATCH_TOOLS, *SHELL_TOOLS))
-
-
 def _as_str(v: Any) -> str:
     return v if isinstance(v, str) else ""
 

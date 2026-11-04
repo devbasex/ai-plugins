@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 from dotenv import dotenv_values
 
@@ -57,16 +57,6 @@ def _send(method: str, url: str, timeout: float, **kw: Any) -> HttpResult:
     headers = {k.lower(): v for k, v in r.headers.items()}
     error = "" if r.is_success else f"HTTP {r.status_code}"
     return HttpResult(r.status_code, r.text, headers, error)
-
-
-def http_get(url: str, timeout: float = 10.0, headers: Mapping[str, str] | None = None) -> HttpResult:
-    """GET を 1 回送る（転送は追う）。"""
-    return _send("GET", url, timeout, headers=dict(headers or {}))
-
-
-def http_post_json(url: str, body: Any, timeout: float = 10.0, headers: Mapping[str, str] | None = None) -> HttpResult:
-    """JSON の本文で POST を 1 回送る。"""
-    return _send("POST", url, timeout, json=body, headers=dict(headers or {}))
 
 
 def slack_call(
