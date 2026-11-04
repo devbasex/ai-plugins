@@ -70,11 +70,6 @@ class GraceOver(Exception):
     """待っていたプランが終わってから research.grace 秒を過ぎた（調査中の呼び出しを止める）。"""
 
 
-def calls_path(root) -> Path:
-    """呼び出しごとの費用の記録（失敗・上限超過も含む）。周回の調査費用はこれを集める（sprint_loop_gate.backlog_summary）。"""
-    return D.backlog_dir(root) / "research" / "calls.jsonl"
-
-
 def _old_slug(s: str) -> str:
     """前の版のファイル名の部分。英数字以外を _ にするため、日本語の名前どうしが同じ名前になる。"""
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", s).strip("_") or "_"
@@ -288,7 +283,7 @@ def free_slot(listing: str | None, max_: int) -> bool:
 def log_call(root, item_id: str, ok: bool, usage: dict, run, loop, lap) -> None:
     """呼び出し 1 回の費用を記録する。結果を捨てた呼び出しも支払った費用は予算に数える。"""
     row = {"id": item_id, "at": clock.now_iso("utc"), "ok": bool(ok), **usage, "lap": lap, "by": {"run": run, "loop": loop}}
-    jsonio.append_jsonl(calls_path(root), row)
+    jsonio.append_jsonl(D.backlog_dir(root) / "research" / "calls.jsonl", row)
 
 
 def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) -> tuple[dict | None, dict]:
