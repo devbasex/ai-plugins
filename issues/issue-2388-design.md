@@ -1,4 +1,4 @@
-# 設計のプラン: cross-review が上限のラウンドで終わっても、未解決 0 件なら MVV 判定まで進める（#2388）
+# 設計のプラン: 上限で終わった cross-review も、未解決 0 件なら MVV 判定へ進める（#2388）
 
 ## 目的
 
@@ -54,7 +54,7 @@ cross-review が供給者、開発ワークフローが順応者の関係（順�
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 設計のプラン | レビューのステップが上限到達で終わり、未解決の件数が 0 なら、`sync-review` → `requirements-recheck` → 用語チェック → `push-glossary` を通る。その後は、`fast` / `auto` は `mvv` へ進む。`normal` と `--state` は `ready` → 助言の `mvv` → `mvv-note` → `gate` へ進む。`normal` で `--state` が無いときは `ready` → `gate` へ進み、`mvv` を流さない | テストが落ちる |
+| I1 | 設計のプラン | レビューのステップが上限到達で終わり、未解決の件数が 0 なら、`sync-review` → `requirements-recheck` → 用語チェック → `push-glossary` を通る。その後は、`fast` / `auto` は `mvv` へ進む。`--state` 付きの `normal` は `ready` → 助言の `mvv` → `mvv-note` → `gate` へ進む。`normal` で `--state` が無いときは `ready` → `gate` へ進み、`mvv` を流さない | テストが落ちる |
 | I2 | 設計のプラン | レビューのステップが上限到達で終わり、未解決の件数が 1 以上か読めないときは、`ready` → 承認ゲート 1 の判断（`gate`）へ進み、`fast` / `auto` では `mvv` を流さない | テストが落ちる |
 | I3 | 設計のプラン | 駆動の失敗は `ready` → 承認ゲート 1 の判断（`gate`）へ進む（`fast` / `auto` で `mvv` を流さない） | テストが落ちる |
 | I4 | 設計のプラン | 収束（終了コード 0）の経路は変わらない | 既存のテストが落ちる |
@@ -70,7 +70,7 @@ cross-review が供給者、開発ワークフローが順応者の関係（順�
 | E3 | レビューの直しを PR のブランチから取り込んだ | `sync-review` | `requirements-recheck` |
 | E4 | 仕様のコピーと課題の本文の一致を確かめた | `requirements-recheck` | `glossary-check` |
 | E5 | 用語チェックを通し、PR のブランチへ送った | `push-glossary` | `fast` / `auto`: `mvv`。`normal`: `ready` |
-| E6 | MVV 判定が承認ゲート 1 を判定した | `mvv` | `fast` / `auto`: `approve`（従う）・プランの終わり（従わない・判定できない）。`normal` と `--state` の助言の `mvv`: 判定の結果によらず `mvv-note` → `gate`（承認は利用者が行う） |
+| E6 | MVV 判定が承認ゲート 1 を判定した | `mvv` | `fast` / `auto`: `approve`（従う）・プランの終わり（従わない・判定できない）。`--state` 付きの `normal` の助言の `mvv`: 判定の結果によらず `mvv-note` → `gate`（承認は利用者が行う） |
 | E7 | 承認ゲート 1 の判断（`gate`）へ回した | `ready` | 利用者（`gate` の判断のステップ） |
 
 E1〜E7 は要求の番号を引き継ぐ。E8 はこの設計で足す。
@@ -94,7 +94,7 @@ E1〜E7 は要求の番号を引き継ぐ。E8 はこの設計で足す。
 | レビューのまとまり（`sprint_waves.py` の `_review_steps`。変更） | `review` に `"on_exit": {"6": "review-settled"}` を足す。`review` の直後に `review-settled` のステップ（run・工程「ドキュメントレビュー」・`next` は `sync-review`・`on_fail` は `ready`）を置く。全ペースの設計のプランがこの定義を共有する（要求の前提 3） |
 | 未解決の件数の確かめ（`supervise.py review-settled`。新設） | 実行の記録（`<状態ディレクトリ>/state.json`）の `log` から、指定したステップの最後の結果を読み、終了コード 6 かつ `counts.unresolved` が整数の 0 なら終了コード 0、それ以外（1 件以上・件数が無い・記録が読めない・ステップの結果が無い）は終了コード 1 を返す。結果 JSON を 1 行出す。LLM を呼ばない |
 | 規則の文（`sprint_waves.py` の `RULE_DESIGN` と `plan_mvv_design` の `規則`。変更） | 「上限到達で未解決 0 件なら通常の経路、未解決が残るか駆動が失敗したら承認ゲート 1 の判断」に書き直す |
-| 契約テストの見本のプラン（`tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`。変更） | 書き出しのプランの変化（`review` の `on_exit`・`review-settled`・規則の文・ステップの上限）を見本へ反映する。見本は `new sprint` の出力と突き合わせる比較元である |
+| 契約テストの見本のプラン（`plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`。変更） | 書き出しのプランの変化（`review` の `on_exit`・`review-settled`・規則の文・ステップの上限）を見本へ反映する。見本は `new sprint` の出力と突き合わせる比較元である |
 
 確定仕様 `docs/specifications/ndf-ubiquitous-language.md` の「設計のフェーズのステップ」の表は、`plan-to-spec` で新しい経路へ書き直す。この実装の Pull Request では触らない。
 
@@ -153,7 +153,7 @@ graph TD
 | ペース | `push-glossary` の次 | `ready` の次 | 上限到達・未解決 0 件のときに流れるもの |
 | --- | --- | --- | --- |
 | `fast` / `auto`（`plan_mvv_design`） | `mvv` | `gate` | `mvv`（従えば `approve` → マージ。`gate` は流れない） |
-| `normal` と `--state`（`plan_advise_design`） | `ready` | `mvv`（助言）→ `gate` | 用語チェックと助言の `mvv` の後に `gate` で止まる |
+| `--state` 付きの `normal`（`plan_advise_design`） | `ready` | `mvv`（助言）→ `gate` | 用語チェックと助言の `mvv` の後に `gate` で止まる |
 | `normal`（`--state` 無し。`plan_sprint_design`） | `ready` | `gate` | 用語チェックの後に `gate` で止まる |
 
 `review-settled` は実行の記録を読む。実行器はステップを終えるたびに `state.json` を書き直し、その後で次のステップを流す（`engine.py` の `run` が `RunState.record` を呼んでから次へ進む）。そのため、`review-settled` が流れる時点で `review` の結果は記録にある。
@@ -185,7 +185,7 @@ cross-review の駆動が未解決 0 件の上限到達を別の終了コード�
 
 ### 決定 3: ペースごとに経路を分けないため、レビューのまとまりの共有の定義だけを直す
 
-`_review_steps` は `normal` / `fast` / `auto` の設計のプランが共有している（要求の前提 3）。ここだけを直せば、3 つのプランの組み立て（`plan_sprint_design`・`plan_advise_design`・`plan_mvv_design`）は変えずに新しい経路を持つ。`normal` で変わるのは、上限到達・未解決 0 件のときに用語チェックが流れることだけで、最後は承認ゲート 1 の判断で止まる（要求の前提 4）。
+`_review_steps` は `normal` / `fast` / `auto` の設計のプランが共有している（要求の前提 3）。ここだけを直せば、3 つのプランの組み立て（`plan_sprint_design`・`plan_advise_design`・`plan_mvv_design`）は変えずに新しい経路を持つ。`normal` で変わるのは、上限到達・未解決 0 件のときに直しの取り込みから用語チェックまでが流れることだけで、最後は承認ゲート 1 の判断で止まる（要求の前提 4）。
 
 `fast` / `auto` のプランにだけ `on_exit` を足す形は採らない。同じ終わりがペースによって別の経路を通り、規則の文と経路の対応がペースごとに分かれる。
 
@@ -201,7 +201,7 @@ cross-review の駆動が未解決 0 件の上限到達を別の終了コード�
 | 受け入れ条件 2・I1 | `review-settled` を `exit` 6・`counts.unresolved` 0 の記録で打つと、最終状態が `max_rounds` でも `oscillation` でも終了コード 0 を返す（最終状態を見ない） | 判定に最終状態の値を加える |
 | 受け入れ条件 3・I2 | `fast` / `auto` の設計のプランで `review` が 6・`review-settled` が 1 のとき、`ready` → `gate` へ進み `mvv` を通らない。`review-settled` は `counts.unresolved` が 1 以上・無い・`null` の記録で終了コード 1 を返す | `review-settled` の `on_fail` を `sync-review` にする、件数が無いときに 0 を返す |
 | 受け入れ条件 4・I3 | `fast` / `auto` の設計のプランで `review` が 1 のとき、`review-settled` を通らずに `ready` → `gate` へ進み `mvv` を通らない | `on_exit` に `"1"` を足して `review-settled` へ回す |
-| 受け入れ条件 5 | `normal` と `--state` の設計のプランで `review` が 6・`review-settled` が 0 のとき、`sync-review` 以降を通って助言の `mvv` を流し、`gate` で止まる | 共有の定義でなく `plan_mvv_design` だけに `on_exit` を足す |
+| 受け入れ条件 5 | `--state` 付きの `normal` の設計のプランで `review` が 6・`review-settled` が 0 のとき、`sync-review` 以降を通って助言の `mvv` を流し、`gate` で止まる | 共有の定義でなく `plan_mvv_design` だけに `on_exit` を足す |
 | 受け入れ条件 6・I4 | 既存の経路のテスト（`DESIGN_ROUTE`）が、`review` が 0 のとき `review-settled` を通らずに通る | `review` の `next` を `review-settled` にする |
 | 受け入れ条件 7 | 全体テスト `uv run --frozen --project . --all-extras pytest . -q -n 4` が終了コード 0。契約テストの見本のプランを書き出しの出力に合わせる | 見本を更新しない |
 | I5 | `engine.py` に差分が無い（実装の Pull Request の差分で確かめる。テストは書かない） | — |
