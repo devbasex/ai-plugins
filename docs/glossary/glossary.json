@@ -4707,29 +4707,25 @@
       "term": "スプリントの一覧",
       "context": "ndf-factory",
       "meaning": "アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "スプリントの詳細",
       "context": "ndf-factory",
       "meaning": "1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "詳細パネル",
       "context": "ndf-factory",
       "meaning": "スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "バックログの画面",
       "context": "ndf-factory",
       "meaning": "取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "フェーズの名前",
@@ -4995,22 +4991,19 @@
       "deprecated": [
         "手元のランナー"
       ],
-      "source": "",
-      "pending_source": "issues/issue-2439-design.md"
+      "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
       "term": "Factory のオーガナイザー",
       "context": "ndf-factory",
       "meaning": "同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（配布を 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他",
-      "source": "",
-      "pending_source": "issues/issue-2439-design.md"
+      "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
       "term": "配布の実行",
       "context": "ndf-factory",
       "meaning": "Factory のオーガナイザーが、まとめた配布 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、本番の配布を流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
-      "source": "",
-      "pending_source": "issues/issue-2439-design.md"
+      "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
       "term": "画面の地図",
