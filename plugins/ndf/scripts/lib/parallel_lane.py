@@ -1,6 +1,10 @@
 """並列の計画のレーンの側（#2436）: 自分が属する計画の判定（I12）・すでに配布済みかの判定（I15）・配布の依頼を送る・
 答えを読む（待たずに読むのと待つのの両方）・プランの本数を返す。
 
+環境変数 `NDF_ORGANIZER_DIR` があれば、外のオーガナイザーのレーンとして判定し、計画名の代わりに `--external` を返す
+（#2439。依頼と答えは置き場のファイルで受け渡す。`parallel_external.py`）。外のレーンは設計の承認と承認ゲートの外の問いを
+依頼にせず、今どおり止まって人へ戻す。
+
 耐久の記録は外のプロセスとして `durable.py` の `send_to`・`event_of`・`status_of` で開く（DBOS を起動しない）。
 DBOS を読まずに済む判定（計画の有無・本数）は、耐久の記録のファイルが無ければ DBOS を import しない。
 """
@@ -16,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import parallel_external as pe
 import parallel_plan as pp
 from parallel_files import helper_plan_of, lane_name_in_plans, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
@@ -48,8 +53,20 @@ def run_status(main: Path, name: str) -> Optional[str]:
     return durable.status_from(KIND, record_identity(main, name), workflow_id(name))
 
 
+def external_lane() -> Optional[tuple[str, pp.Lane]]:
+    """外のオーガナイザーのレーンなら (`--external`, レーン)。名前は `NDF_ORGANIZER_LANE`（#2439）。"""
+    if pe.organizer_dir() is None:
+        return None
+    name = pe.organizer_lane() or "external"
+    lane = pp.Lane.model_construct(name=name, input=pp.SprintInput.model_construct(kind="sprint", issues=[], args=[]), plans=QUEUE_MAX, touches=[])
+    return pe.EXTERNAL, lane
+
+
 def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Optional[tuple[str, pp.Lane]]:
-    """`NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない計画のレーンにあれば (計画名, レーン)。無ければ None（I12）。"""
+    """`NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない計画のレーンにあれば (計画名, レーン)。無ければ None（I12）。
+    外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）なら、名前を渡さない判定で (`--external`, レーン) を返す（#2439）。"""
+    if lane is None and (ext := external_lane()):
+        return ext
     lane = lane if lane is not None else os.environ.get("NDF_RELAY_NAME")
     if not lane:
         return None
@@ -240,6 +257,9 @@ def write_request(state: Path, data: dict) -> Path:
 def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
     """依頼ごとの {"answer": `answer-<依頼>`, "defer": `defer-<依頼>`} を待たずに読む（周回の境で読む。#2436 の 6a・6e）。
     耐久の記録が無ければ、どれも答えの無いものとして返す（DBOS を import しない）。"""
+    if pe.is_external(name):
+        d = pe.organizer_dir()
+        return pe.answers_of(d, ids) if d else {i: {"answer": None, "defer": None} for i in ids}
     out = {i: {"answer": None, "defer": None} for i in ids}
     if not ids or not record_exists(main, name):
         return out
@@ -258,7 +278,9 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
 
 def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
     """問いを送ってよい送り手か: 動いている計画のレーン（`lane_of`）か、役割のファイルが `helper` で、その計画の
-    耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。"""
+    耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。外のオーガナイザーのレーンは問いを送らない（#2439）。"""
+    if pe.organizer_dir() is not None:
+        return None
     got = lane_of(main, name, status) if name else None
     if got:
         return got[0], name
@@ -273,6 +295,9 @@ def _utc_stamp() -> str:
 
 
 def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
+    if pe.is_external(name):
+        # 外のオーガナイザーのレーンは設計の承認と問いを依頼にしない（今どおり止まって人へ戻す。#2439）
+        raise ValueError("外のオーガナイザーのレーンは問いを依頼にしない")
     import durable
 
     wid = workflow_id(name)
