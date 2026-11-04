@@ -329,6 +329,29 @@ def _request_errors(name: str, body: dict) -> list[str]:
     return errs
 
 
+def _answer_errors(body: dict) -> list[str]:
+    errs: list[str] = []
+    if body.get("result") not in ("released", "rejected"):
+        errs.append("result が released / rejected でない")
+    if not isinstance(body.get("at"), str):
+        errs.append("at が文字列でない")
+    return errs
+
+
+def _batch_errors(body: dict) -> list[str]:
+    errs: list[str] = []
+    if body.get("step") not in STEPS or not isinstance(body.get("seq"), int):
+        errs.append("step か seq の形が違う")
+    for ln in body.get("lanes") or []:
+        if (
+            not isinstance(ln.get("lane"), str)
+            or not _INTS(ln.get("issues"))
+            or not all(_INTS(r.get("prs")) for r in ln.get("requests") or [])
+        ):
+            errs.append("lanes の形が違う")
+    return errs
+
+
 def file_errors(message: object) -> list[str]:
     """置き場のファイル 1 つ（{file, body}）の形の誤り。空なら形に合う。"""
     if not isinstance(message, dict) or not isinstance(message.get("body"), dict) or not isinstance(message.get("file"), str):
@@ -339,23 +362,12 @@ def file_errors(message: object) -> list[str]:
     if top == "requests":
         return _request_errors(name, body)
     if top == "answers":
-        if body.get("result") not in ("released", "rejected"):
-            errs.append("result が released / rejected でない")
-        if not isinstance(body.get("at"), str):
-            errs.append("at が文字列でない")
+        errs.extend(_answer_errors(body))
     elif top == "ranges":
         if not _INTS(body.get("prs")) or not isinstance(body.get("lanes"), list):
             errs.append("prs が整数の配列でないか lanes が配列でない")
     elif path == "batch.json":
-        if body.get("step") not in STEPS or not isinstance(body.get("seq"), int):
-            errs.append("step か seq の形が違う")
-        for ln in body.get("lanes") or []:
-            if (
-                not isinstance(ln.get("lane"), str)
-                or not _INTS(ln.get("issues"))
-                or not all(_INTS(r.get("prs")) for r in ln.get("requests") or [])
-            ):
-                errs.append("lanes の形が違う")
+        errs.extend(_batch_errors(body))
     elif top == "presented":
         if body.get("k") not in (1, 2) or not isinstance(body.get("auto"), bool) or not _INTS(body.get("prs")):
             errs.append("k・auto・prs の形が違う")
