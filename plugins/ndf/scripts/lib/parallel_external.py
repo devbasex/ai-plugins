@@ -49,7 +49,7 @@ def is_external(name: Optional[str]) -> bool:
     return name == EXTERNAL
 
 
-def write_json(path: Path, data) -> Path:
+def put_json(path: Path, data) -> Path:
     """一時ファイルへ書いて名前を付け替える（読み手が書きかけを読まない）。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,11 +67,11 @@ def read_json(path: Path, default=None):
         return default
 
 
-def _stamp() -> str:
+def utc_stamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def ndf_version() -> str:
+def session_ndf_version() -> str:
     """このセッションの NDF の版（plugin.json）。読めなければ空。"""
     got = read_json(Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json", {}) or {}
     return str(got.get("version") or "")
@@ -80,7 +80,7 @@ def ndf_version() -> str:
 # ---- レーンの側 ----
 
 
-def write_request(d: Path, rid: str, lane: str, prs: list[int], issues: list[int], state: Path) -> dict:
+def write_request_file(d: Path, rid: str, lane: str, prs: list[int], issues: list[int], state: Path) -> dict:
     """配布の依頼 `requests/<id>.json`（#2436 の依頼の形に `ndf_version` を足す）。同じ id の打ち直しは上書きで同じ中身。"""
     msg = {
         "kind": "request",
@@ -89,27 +89,27 @@ def write_request(d: Path, rid: str, lane: str, prs: list[int], issues: list[int
         "prs": list(prs),
         "issues": list(issues),
         "sprint_state": str(state),
-        "at": _stamp(),
-        "ndf_version": ndf_version(),
+        "at": utc_stamp(),
+        "ndf_version": session_ndf_version(),
     }
     old = read_json(Path(d) / "requests" / f"{rid}.json")
     if isinstance(old, dict) and old.get("prs") == msg["prs"]:
         return old  # 打ち直しでは時刻を変えない（送り直しで同じ依頼になる）
-    write_json(Path(d) / "requests" / f"{rid}.json", msg)
+    put_json(Path(d) / "requests" / f"{rid}.json", msg)
     return msg
 
 
-def read_answer(d: Path, rid: str) -> Optional[dict]:
+def read_answer_file(d: Path, rid: str) -> Optional[dict]:
     got = read_json(Path(d) / "answers" / f"{rid}.json")
     return got if isinstance(got, dict) else None
 
 
-def answers_of(d: Path, ids: list[str]) -> dict[str, dict]:
+def answer_files_of(d: Path, ids: list[str]) -> dict[str, dict]:
     """`parallel_lane.answers_of` と同じ形（{id: {"answer", "defer"}}）。外のオーガナイザーは知らせを書かない。"""
-    return {i: {"answer": read_answer(d, i), "defer": None} for i in ids}
+    return {i: {"answer": read_answer_file(d, i), "defer": None} for i in ids}
 
 
-def released_version(d: Path, prs: list[int]) -> Optional[str]:
+def range_version(d: Path, prs: list[int]) -> Optional[str]:
     """`prs` を含む配布済みの範囲 `ranges/<連番>.json` の版（無ければ None）。"""
     found = None
     rd = Path(d) / "ranges"
@@ -155,7 +155,7 @@ def plan_of(batch: dict):
     return pp.ParallelPlan.model_construct(version=1, name=EXTERNAL, rules=[], lanes=lanes)
 
 
-def release_dir(d: Path, seq: int, k: int) -> Path:
+def batch_release_dir(d: Path, seq: int, k: int) -> Path:
     return Path(d) / "releases" / str(seq) / str(k)
 
 
@@ -181,19 +181,19 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
 
     step, seq = batch["step"], batch["seq"]
     k = step_k(step, batch)
-    rd = release_dir(d, seq, k)
+    rd = batch_release_dir(d, seq, k)
     out = {"seq": seq, "k": k, "step": step, "dir": str(rd), "record": f"{parallel} present --external {seq} {k} --record"}
     if step in ("present", "represent"):
         version = version_of(Path(main))
         if not version:
             raise ValueError("出す版を決められない（ベースブランチの配るプラグインの plugin.json の版を読めない）")
         rd.mkdir(parents=True, exist_ok=True)
-        write_json(rd / "version.json", {"version": version})
+        put_json(rd / "version.json", {"version": version})
         present_plan, release_plan = (builder or pr.plan_parallel_release)(main, EXTERNAL, rd, version)
-        write_json(rd / "present.json", present_plan)
-        write_json(rd / "release.json", release_plan)
+        put_json(rd / "present.json", present_plan)
+        put_json(rd / "release.json", release_plan)
         if not (rd / "answer.json").exists():
-            write_json(rd / "answer.json", pr.answer_state(Path(main)))
+            put_json(rd / "answer.json", pr.answer_state(Path(main)))
         done = rd / "done.json"
         return {
             **out,
@@ -216,19 +216,19 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
     }
 
 
-def present(main: Path, d: Path, batch: dict, seq: int, k: int, approval: Path, closes_of=None) -> dict:
+def present_batch(main: Path, d: Path, batch: dict, seq: int, k: int, approval: Path, closes_of=None) -> dict:
     """提示のプランの中で、範囲の Pull Request をレーンへ対応づけて `releases/<連番>/<k>/presented.json` を書く（#2436 と同じ関数）。"""
     import parallel_release as pr
 
-    rd = release_dir(d, seq, k)
-    first = read_json(release_dir(d, seq, 1) / "presented.json") if k != 1 else None
+    rd = batch_release_dir(d, seq, k)
+    first = read_json(batch_release_dir(d, seq, 1) / "presented.json") if k != 1 else None
     kwargs = {"closes_of": closes_of} if closes_of else {}
     return pr.present(main, plan_of(batch), approval, requests_of(batch), rd, first, **kwargs)
 
 
 def record_presented(d: Path, seq: int, k: int, auto: bool) -> dict:
     """提示を外のオーガナイザーへ書き返す `presented/<連番>-<k>.json`。承認ゲート 2 で止まったら auto は偽、MVV 判定が通したら真。"""
-    rd = release_dir(d, seq, k)
+    rd = batch_release_dir(d, seq, k)
     got = read_json(rd / "presented.json")
     if not isinstance(got, dict) or not got.get("sha"):
         raise ValueError(f"提示 {seq}-{k} の presented.json が無い")
@@ -244,7 +244,7 @@ def record_presented(d: Path, seq: int, k: int, auto: bool) -> dict:
         "added_prs": sorted({n for r in added.values() for n in r.get("prs") or []} | set((got.get("added") or {}).get("orphans") or [])),
         "auto": bool(auto),
     }
-    write_json(Path(d) / "presented" / f"{seq}-{k}.json", data)
+    put_json(Path(d) / "presented" / f"{seq}-{k}.json", data)
     return data
 
 
@@ -282,7 +282,7 @@ def prod_pr_url(root: Path, version: str, run=subprocess.run) -> Optional[str]:
     return url if got.returncode == 0 and url else None
 
 
-def settle(main: Path, d: Path, batch: dict, seq: int, done: dict, reason: Optional[str] = None, run=subprocess.run) -> dict:
+def settle_batch(main: Path, d: Path, batch: dict, seq: int, done: dict, reason: Optional[str] = None, run=subprocess.run) -> dict:
     """本番のプランの done とリリース記録から、届いた段 `progress/<連番>.json` と結果 `results/<連番>.json` を書く。
 
     結果は done の全項目が完了なら released、承認ゲートで止まっていれば ValueError（書かない）、ほかは failed。
@@ -293,13 +293,13 @@ def settle(main: Path, d: Path, batch: dict, seq: int, done: dict, reason: Optio
     k = step_k(batch.get("step") or "continue", batch)
     if batch.get("step") in ("present", "represent"):
         k = 1 if batch["step"] == "present" else 2
-    rd = release_dir(d, seq, k)
+    rd = batch_release_dir(d, seq, k)
     version = (read_json(rd / "version.json", {}) or {}).get("version") or done.get("version") or ""
     if not (Path(d) / "presented" / f"{seq}-{k}.json").exists() and (rd / "presented.json").exists():
         record_presented(d, seq, k, auto=True)
     presented = read_json(rd / "presented.json", {}) or {}
     stages = stages_of(main, version, run)
-    write_json(Path(d) / "progress" / f"{seq}.json", {"seq": seq, "stages": stages})
+    put_json(Path(d) / "progress" / f"{seq}.json", {"seq": seq, "stages": stages})
     released = bool(results) and all(r == "完了" for r in results)
     data = {
         "seq": seq,
@@ -311,7 +311,7 @@ def settle(main: Path, d: Path, batch: dict, seq: int, done: dict, reason: Optio
         "lanes": sorted((presented.get("lanes") or {}).keys()),
         "reason": None if released else (reason or "本番のプランが完了しなかった"),
     }
-    write_json(Path(d) / "results" / f"{seq}.json", data)
+    put_json(Path(d) / "results" / f"{seq}.json", data)
     return data
 
 

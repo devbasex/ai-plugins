@@ -74,7 +74,7 @@ def test_request_and_await_through_files(tmp_path, org):
     sent = state / "work" / "request.txt"
     code, out = _run(["await", "--external", "--from", str(sent)], tmp_path)
     assert code == 3
-    pe.write_json(
+    pe.put_json(
         org / "answers" / f"{rid}.json",
         {"result": "released", "version": "10.28.0", "release": "https://x/pull/1", "reason": None, "at": "t"},
     )
@@ -115,8 +115,8 @@ def test_compose_present_represent_and_confirm(tmp_path):
     assert task2["k"] == 2 and Path(task2["dir"]).name == "2"
     # 確定した提示 1 の本番のプランだけを流す（提示 2 の本番のプランを流さない）
     task3 = pe.compose(tmp_path, d, {**BATCH, "step": "confirm:1"}, "SV", "PAR", lambda _m: "10.28.0", builder=_builder)
-    assert str(pe.release_dir(d, 3, 1) / "release.json") in task3["pipeline"]
-    assert str(pe.release_dir(d, 3, 2)) not in task3["pipeline"]
+    assert str(pe.batch_release_dir(d, 3, 1) / "release.json") in task3["pipeline"]
+    assert str(pe.batch_release_dir(d, 3, 2)) not in task3["pipeline"]
     with pytest.raises(ValueError):
         pe.compose(tmp_path, d, BATCH, "SV", "PAR", lambda _m: "", builder=_builder)
 
@@ -133,9 +133,9 @@ def _fake_run(merged: bool):
 
 
 def _presented(d: Path, k: int = 1) -> None:
-    rd = pe.release_dir(d, 3, k)
-    pe.write_json(rd / "version.json", {"version": "10.28.0"})
-    pe.write_json(
+    rd = pe.batch_release_dir(d, 3, k)
+    pe.put_json(rd / "version.json", {"version": "10.28.0"})
+    pe.put_json(
         rd / "presented.json",
         {
             "sha": "0123abcd",
@@ -150,7 +150,7 @@ def _presented(d: Path, k: int = 1) -> None:
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):
     d = tmp_path / "org"
     _presented(d)
-    got = pe.settle(tmp_path, d, BATCH, 3, {"items": [{"result": "完了"}]}, run=_fake_run(True))
+    got = pe.settle_batch(tmp_path, d, BATCH, 3, {"items": [{"result": "完了"}]}, run=_fake_run(True))
     assert got["result"] == "released" and got["prod_pr_url"] == "https://github.com/o/r/pull/900"
     assert "main_merged" in pe.read_json(d / "progress" / "3.json")["stages"]
     # MVV 判定が通して承認ゲート 2 で止まらなかった提示は auto 真で書き返す
@@ -163,7 +163,7 @@ def test_settle_refuses_when_release_plan_stopped_at_gate(tmp_path):
     d = tmp_path / "org"
     _presented(d)
     with pytest.raises(ValueError):
-        pe.settle(tmp_path, d, BATCH, 3, {"items": [{"result": "関門"}]}, run=_fake_run(False))
+        pe.settle_batch(tmp_path, d, BATCH, 3, {"items": [{"result": "関門"}]}, run=_fake_run(False))
     assert not (d / "results" / "3.json").exists()
 
 
@@ -175,7 +175,7 @@ def test_record_presented_on_gate_stop(tmp_path):
 
 
 def test_released_version_reads_ranges(tmp_path):
-    pe.write_json(tmp_path / "ranges" / "1.json", {"sha": "a", "version": "10.27.0", "prs": [5], "lanes": []})
-    pe.write_json(tmp_path / "ranges" / "2.json", {"sha": "b", "version": "10.28.0", "prs": [11], "lanes": []})
-    assert pe.released_version(tmp_path, [11]) == "10.28.0"
-    assert pe.released_version(tmp_path, [99]) is None
+    pe.put_json(tmp_path / "ranges" / "1.json", {"sha": "a", "version": "10.27.0", "prs": [5], "lanes": []})
+    pe.put_json(tmp_path / "ranges" / "2.json", {"sha": "b", "version": "10.28.0", "prs": [11], "lanes": []})
+    assert pe.range_version(tmp_path, [11]) == "10.28.0"
+    assert pe.range_version(tmp_path, [99]) is None

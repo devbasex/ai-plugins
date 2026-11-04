@@ -19,18 +19,7 @@
 | `answer <計画名> <依頼> (--approved \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行） |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
-外のオーガナイザーのレーンと配布の実行（環境変数 `NDF_ORGANIZER_DIR`。#2439）は、計画名の代わりに `--external` を付けて
-置き場のファイルでやり取りする。
-
-| 副命令 | 役割 |
-| --- | --- |
-| `request --external --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を `requests/<id>.json` へ書く（10）か、すでに `main` にあれば書かない（0） |
-| `await --external --from <パス>` | `answers/<id>.json` を読む（released 0・rejected 10・まだ無い 3） |
-| `compose --external` | `batch.json` の手（`step`）ごとに流すもの（`pipeline`・`record`・`settle`）を返す |
-| `present --external <連番> <提示> (--approval <承認資料> \\| --record)` | 範囲をレーンへ対応づける。`--record` は承認ゲート 2 で止まった提示を `presented/` へ書く |
-| `settle --external <連番> --done <D>` | 届いた段を `progress/`、結果を `results/` へ書く |
-
-サービスの実行ジョブ（環境変数 `NDF_FACTORY_RUN`）では `init`・`start`・`run` を断る（1 台の中のオーガナイザーを起動しない）。
+外のオーガナイザーとの `--external` の副命令（#2439）は `lib/parallel_external_cli.py` にある。
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。正本の手順は
 `skills/development-workflow/references/parallel.md` と `skills/issue-plan-strategy/references/parallel-plan.md` にある。
@@ -53,7 +42,9 @@ import deps  # noqa: E402
 deps.require("durable", "schema", "md", "mdtable", "versions")
 
 import decl  # noqa: E402
+import parallel_answer as pa  # noqa: E402
 import parallel_external as pe  # noqa: E402
+import parallel_external_cli as px  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 from step_result import emit, result  # noqa: E402
@@ -72,21 +63,6 @@ def reply(status: str, summary: str, items=None, code: int | None = None, next_s
     emit(result(TOOL, status, summary, items, metrics, next=next_step), code)
 
 
-def refuse_in_factory_run() -> None:
-    """サービスの実行ジョブ（`NDF_FACTORY_RUN`）の中では 1 台の中のオーガナイザーを起動しない（#2439 の I68。2 つのオーガナイザーは排他）。"""
-    if os.environ.get("NDF_FACTORY_RUN"):
-        reply(
-            "stopped", "サービスの実行ジョブの中では並列の計画を起動しない（外のオーガナイザーが配布をまとめる）", code=1, factory_run=True
-        )
-
-
-def external_dir() -> Path:
-    d = pe.organizer_dir()
-    if d is None:
-        reply("stopped", f"--external には環境変数 {pe.DIR_ENV} が要る", code=1)
-    return d
-
-
 def require_name(a) -> None:
     if not a.external and not a.name:
         reply("stopped", "計画名か --external が要る", code=1)
@@ -103,7 +79,7 @@ def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[di
 
 
 def cmd_init(a) -> None:
-    refuse_in_factory_run()
+    px.refuse_in_factory_run(reply)
     main = main_of()
     try:
         raw = json.loads(sys.stdin.read())
@@ -168,7 +144,7 @@ def _wait_line(name: str) -> str:
 
 
 def cmd_run(a) -> None:
-    refuse_in_factory_run()
+    px.refuse_in_factory_run(reply)
     main = main_of()
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
@@ -192,7 +168,7 @@ def cmd_run(a) -> None:
 
 
 def cmd_start(a) -> None:
-    refuse_in_factory_run()
+    px.refuse_in_factory_run(reply)
     main = main_of()
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
@@ -249,7 +225,7 @@ def cmd_present(a) -> None:
     require_name(a)
     main = main_of()
     if a.external:
-        _present_external(main, a)
+        px.present_external(main, a, reply)
     if not a.approval:
         reply("stopped", "--approval が要る", code=1)
     plan, items, metrics = checked_plan(main, a.name)
@@ -258,7 +234,7 @@ def cmd_present(a) -> None:
     d = pr.release_dir(main, a.name, a.n, a.k)
     p1 = pr.release_dir(main, a.name, a.n, 1) / "presented.json"
     first = json.loads(p1.read_text(encoding="utf-8")) if a.k != 1 and p1.is_file() else None
-    reqs = _requests_for(main, a.name)
+    reqs = pl.requests_for(main, a.name)
     try:
         got = pr.present(main, plan, Path(a.approval), reqs, d, first)
     except ValueError as exc:
@@ -274,58 +250,8 @@ def cmd_present(a) -> None:
     )
 
 
-def _present_external(main: Path, a) -> None:
-    d = external_dir()
-    try:
-        batch = pe.read_batch(d)
-        if a.record:
-            got = pe.record_presented(d, a.n, a.k, auto=False)
-            reply("ok", f"提示 {a.n}-{a.k} を外のオーガナイザーへ書いた（{got['sha'][:12]} まで）", sha=got["sha"], prs=got["prs"])
-        if not a.approval:
-            reply("stopped", "--approval か --record が要る", code=1)
-        got = pe.present(main, d, batch, a.n, a.k, Path(a.approval))
-    except ValueError as exc:
-        reply("stopped", f"提示を作れない: {exc}", code=1)
-    except OSError as exc:
-        reply("stopped", f"読めない: {exc}", code=2)
-    reply(
-        "ok",
-        f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）",
-        [{"lane": n, **r} for n, r in got["lanes"].items()],
-        sha=got["sha"],
-        orphans=got["orphans"],
-    )
-
-
 def cmd_compose(a) -> None:
-    """配布の実行（`--parallel-helper --external`）が `batch.json` の手で流すもの（#2439）。"""
-    from parallel_run import dev_version
-    from supervise_lib.paths import PARALLEL_PY, SELF
-
-    main = main_of()
-    d = external_dir()
-    try:
-        task = pe.compose(main, d, pe.read_batch(d), f"python3 {SELF}", PARALLEL_PY, dev_version)
-    except ValueError as exc:
-        reply("stopped", f"まとめた配布を組めない: {exc}", code=1)
-    except OSError as exc:
-        reply("stopped", f"書けない: {exc}", code=2)
-    reply("ok", f"まとめた配布 {task['seq']} の手 {task['step']}（提示 {task['k']}）", **task)
-
-
-def _requests_for(main: Path, name: str) -> list[dict]:
-    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローが配布を組むたびに書く。無ければ空）。"""
-    p = pp.plan_dir(main, name) / "releases" / "requests.json"
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-
-
-def _resume_plan(main: Path, name: str, msg: dict, key: str) -> None:
-    import durable
-
-    durable.send_to(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), msg, "resume", key)
+    px.compose_external(main_of(), reply)
 
 
 def cmd_confirm(a) -> None:
@@ -333,29 +259,15 @@ def cmd_confirm(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     wid = pl.workflow_id(a.name)
-    _resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
+    pl.resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
     reply("ok", f"配布 {a.n} の承認を送った", n=a.n, take=a.take)
-
-
-def _settle_external(main: Path, a) -> None:
-    d = external_dir()
-    if a.rejected or not a.done:
-        reply("stopped", "--external の settle は --done が要る（差し戻しは外のオーガナイザーが決める）", code=1)
-    try:
-        done = json.loads(Path(a.done).read_text(encoding="utf-8"))
-        got = pe.settle(main, d, pe.read_batch(d), a.n, done, a.reason)
-    except ValueError as exc:
-        reply("stopped", f"結果を書かない: {exc}", code=4)
-    except OSError as exc:
-        reply("stopped", f"done を読めない: {exc}", code=2)
-    reply("ok", f"配布 {a.n} の結果 {got['result']} を外のオーガナイザーへ書いた", result=got["result"], version=got["version"])
 
 
 def cmd_settle(a) -> None:
     require_name(a)
     main = main_of()
     if a.external:
-        _settle_external(main, a)
+        px.settle_external(main, a, reply)
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     if a.rejected:
@@ -371,9 +283,8 @@ def cmd_settle(a) -> None:
         res = "released" if results and all(r == "完了" for r in results) else "failed"
         version = done.get("version") or (done.get("metrics") or {}).get("version")
     wid = pl.workflow_id(a.name)
-    _resume_plan(
-        main, a.name, {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}, f"{wid}:resume:settle:{a.n}"
-    )
+    msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
+    pl.resume_plan(main, a.name, msg, f"{wid}:resume:settle:{a.n}")
     reply("ok", f"配布 {a.n} の結果 {res} を送った", result=res, version=version)
 
 
@@ -398,31 +309,11 @@ def cmd_stop(a) -> None:
 # ---- レーンの側 ----
 
 
-def _request_external(main: Path, a) -> None:
-    d = external_dir()
-    if a.prs and pl.merged_on_production(main, a.prs):
-        version = pe.released_version(d, a.prs)
-        pl.write_request(Path(a.state), {"result": "released", "version": version, "prs": a.prs})
-        reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を書かずに続きへ進む", result="released", version=version)
-    rid = pl.lane_request_id(Path(a.state), a.lane)
-    pe.write_request(d, rid, a.lane, a.prs, a.issues, Path(a.state))
-    pl.write_request(Path(a.state), {"id": rid, "plan": pe.EXTERNAL, "lane": a.lane, "prs": a.prs})
-    nxt = f"python3 {SELF} await --external --from {Path(a.state) / 'work' / 'request.txt'}"
-    reply(
-        "gate",
-        f"配布の依頼 {rid} を外のオーガナイザーへ書いた（配布待ち）。答えは parallel.py await --external で読む",
-        code=10,
-        next_step=nxt,
-        id=rid,
-        result="requested",
-    )
-
-
 def cmd_request(a) -> None:
     require_name(a)
     main = main_of()
     if a.external:
-        _request_external(main, a)
+        px.request_external(main, a, reply, SELF)
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     if a.prs and pl.merged_on_production(main, a.prs):
@@ -432,14 +323,8 @@ def cmd_request(a) -> None:
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    reply(
-        "gate",
-        f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む",
-        code=10,
-        next_step=nxt,
-        id=rid,
-        result="requested",
-    )
+    summary = f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む"
+    reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested")
 
 
 def cmd_await(a) -> None:
@@ -451,7 +336,7 @@ def cmd_await(a) -> None:
     if sent.get("result") == "released" and not sent.get("id"):
         reply("ok", "配布済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
     if a.external or pe.is_external(sent.get("plan")):
-        ans, dfr = pe.read_answer(external_dir(), sent["id"]), None
+        ans, dfr = pe.read_answer_file(px.external_dir(reply), sent["id"]), None
     else:
         require_name(a)
         ans, dfr = pl.read_answer(main, a.name, sent["id"], a.timeout)
@@ -499,24 +384,6 @@ def cmd_request_gate2(a) -> None:
     reply("ok", f"承認ゲート 2 の依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
 
 
-def _owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None) -> str | None:
-    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
-    restart。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた問い（`merged`）は、
-    代表だけでなく全持ち主をそれぞれの依頼の id で調べ、起こす行を `; ` でつなぐ（異常系 5）。"""
-    import durable
-    import parallel_run as pr_run
-
-    items = (durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0) or {}).get("items") or []
-    q = next((q for q in items if q.get("id") == rid), {})
-    if q.get("kind") in ("stall", "helper", "spawn") or not q.get("lane"):
-        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
-    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
-    owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
-    lanes = [lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)]
-    lanes = list(dict.fromkeys(lanes))
-    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
-
-
 def cmd_answer(a) -> None:
     main = main_of()
     if pl.run_status(main, a.name) not in pl.RUNNING:
@@ -530,7 +397,7 @@ def cmd_answer(a) -> None:
         except OSError as exc:
             reply("stopped", f"指摘ファイルを読めない: {exc}", code=2)
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
-    nxt = _owner_restart(main, a.name, a.id, a.choice)
+    nxt = pa.owner_restart(main, a.name, a.id, a.choice)
     pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice)
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った", id=a.id, result=result, next=nxt)
 

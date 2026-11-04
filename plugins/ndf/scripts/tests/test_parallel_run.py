@@ -21,6 +21,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import dbos  # noqa: E402,F401
 import durable  # noqa: E402
+import parallel_answer as pa  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
@@ -664,8 +665,8 @@ def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_p
     spec.loader.exec_module(cli)
     item = {"id": "h1", "kind": "helper", "lane": "p1-rel1", "commands": {"続きから起こし直す": "SPAWN"}}
     monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": [item]})
-    assert cli._owner_restart(tmp_path, "p1", "h1", ["続きから起こし直す"]) == "SPAWN"
-    assert cli._owner_restart(tmp_path, "p1", "h1", ["止める"]) is None
+    assert pa.owner_restart(tmp_path, "p1", "h1", ["続きから起こし直す"]) == "SPAWN"
+    assert pa.owner_restart(tmp_path, "p1", "h1", ["止める"]) is None
 
 
 def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
@@ -696,19 +697,19 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     loop.mkdir(parents=True)
     handoff = tmp_path / ".ndf" / "handoff"
     handoff.mkdir(parents=True)
-    assert cli._owner_restart(tmp_path, "p1", "qa") is None and cli._owner_restart(tmp_path, "p1", "qb") is None
+    assert pa.owner_restart(tmp_path, "p1", "qa") is None and pa.owner_restart(tmp_path, "p1", "qb") is None
     (loop / "loop.json").write_text(json.dumps({"status": "running"}))
     (handoff / "issue-7.md").write_text("## 次にやること\n- 別の作業\n")
-    assert cli._owner_restart(tmp_path, "p1", "qa") is None and cli._owner_restart(tmp_path, "p1", "qb") is None
+    assert pa.owner_restart(tmp_path, "p1", "qa") is None and pa.owner_restart(tmp_path, "p1", "qb") is None
     (loop / "loop.json").write_text(json.dumps({"status": "stopped", "stop": {"condition": "waiting_only"}}))
     (handoff / "issue-7.md").write_text("## 次にやること\n- 依頼 qb の答えを読んで続ける\n")
-    assert cli._owner_restart(tmp_path, "p1", "qa") == f"python3 {prun.RELAY} restart la"
-    assert cli._owner_restart(tmp_path, "p1", "qb") == f"python3 {prun.RELAY} restart lb"
+    assert pa.owner_restart(tmp_path, "p1", "qa") == f"python3 {prun.RELAY} restart la"
+    assert pa.owner_restart(tmp_path, "p1", "qb") == f"python3 {prun.RELAY} restart lb"
     items.append({"id": "qh", "kind": "ask", "lane": "p1-rel1"})  # 記録を持たない一時レーンはラッパーが止まっているかで決める
-    assert cli._owner_restart(tmp_path, "p1", "qh") == f"python3 {prun.RELAY} restart p1-rel1"
+    assert pa.owner_restart(tmp_path, "p1", "qh") == f"python3 {prun.RELAY} restart p1-rel1"
     # 同じ原因としてまとめた問いは、merged の持ち主もそれぞれの依頼の id で調べて起こす（異常系 5）
     items.append({"id": "qm", "kind": "ask", "lane": "la", "merged": [{"id": "qb", "lane": "lb"}]})
-    assert cli._owner_restart(tmp_path, "p1", "qm") == f"python3 {prun.RELAY} restart la; python3 {prun.RELAY} restart lb"
+    assert pa.owner_restart(tmp_path, "p1", "qm") == f"python3 {prun.RELAY} restart la; python3 {prun.RELAY} restart lb"
 
 
 def test_a_helper_ends_by_stopping_its_own_wrapper():
