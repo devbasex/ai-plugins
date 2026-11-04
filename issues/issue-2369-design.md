@@ -44,7 +44,7 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | エントリポイント・契約の一覧・構造チェック・呼び手・残す関数の一覧 |
 | NDF の課題の棚卸し（`ndf-issue-upkeep`） | 子の課題・判定・再現の手順 |
 
-開発ワークフローが供給者、課題の棚卸しが顧客の関係（顧客 / 供給者）である。課題の棚卸しは、開発ワークフローの片付けを終えた変更の木で再現の手順を通し、その結果だけを受け取る。契約の一覧の形と構造チェックの規則は変えない（要求の対象範囲の「含まない」）。
+開発ワークフローが供給者、課題の棚卸しが顧客の関係（顧客 / 供給者）である。課題の棚卸しは、開発ワークフローの片付けを終えた作業ツリーで再現の手順を通し、その結果だけを受け取る。契約の一覧の形と構造チェックの規則は変えない（要求の対象範囲の「含まない」）。
 
 ### 集約
 
@@ -76,7 +76,7 @@
 | E2 | 候補ごとに呼び手を確かめた | 実装の担当（候補の名前の検索） | E3・E4 |
 | E3 | 呼び手の無い関数を消し、参照を直した | 実装の担当 | 全体テスト・参照切れのチェック・構造チェック |
 | E4 | 残す関数を残す関数の一覧へ理由つきで載せた | 実装の担当 | 棚卸しのコマンド（I1） |
-| E5 | 子の課題の再現の手順を通した | 実装の担当（E3・E4 の後の変更の木） | E6 |
+| E5 | 子の課題の再現の手順を通した | 実装の担当（E3・E4 の後の作業ツリー） | E6 |
 | E6 | 子の課題を閉じたか残したかを記録した | 実装の担当（判定の節） | 承認ゲート 2 の承認資料 |
 | E7 | 判定が「閉じた」の子の課題を閉じた | リリース後テストの担当（本番の配布の後） | GitHub の課題の一覧 |
 
@@ -103,7 +103,7 @@ E1〜E6 は要求のドメインイベントを引き継ぐ。E7 は、閉じる
 | 要素 | 責務 |
 | --- | --- |
 | 残す関数の一覧（`scripts/ndf-vulture-keep.txt`、新規） | 呼び手が vulture に見えない関数の名前を 1 行に 1 つ持ち、行ごとに理由の種類・理由・定義のあるファイルを持つ |
-| 呼び手の無い関数の定義（`plugins/ndf/scripts/**`・`plugins/ndf/skills/*/scripts/**` の該当の `.py`） | 消す。消した関数だけを使う定数と補助の関数、再輸出の `import`（例: `plugins/ndf/scripts/lib/monitor.py` の 137・161 行目）も一緒に消す |
+| 呼び手の無い関数の定義（`plugins/ndf/scripts/**`・`plugins/ndf/skills/*/scripts/**` の該当の `.py`） | 消す。消した関数だけを使う定数と補助の関数、再エクスポートの `import`（例: `plugins/ndf/scripts/lib/monitor.py` の 137・161 行目）も一緒に消す |
 | 消した関数だけを確かめるテスト（`plugins/ndf/scripts/tests/`・`plugins/ndf/skills/*/tests/` の該当の関数・ファイル） | 消す。ほかの関数も確かめるテストは、消した関数を確かめる部分だけを消す |
 | 消した関数を名前で指す文書（`docs/specifications/*.md`・`plugins/ndf/scripts/lib/README.md`・Skill の本文・モジュールの docstring） | 消した名前の記述を消すか、残る関数の名前へ直す。`issues/old/`・`CHANGELOG.md`・`docs/archive/` は書いた時点の記録なので直さない |
 | 確定仕様の「呼び手の無いもの」（`docs/specifications/ndf-entrypoint-contracts.md`） | 棚卸しのコマンド・残す関数の一覧の置き場・理由の種類・I3 の確かめ方を書き足す（非機能の条件「運用・保守性」） |
@@ -133,27 +133,11 @@ graph TD
   body -->|1 行ずつ指す| child
 ```
 
-### 候補の分類（試行）
-
-2026-11-04 の 70 件の候補を、名前の検索（テストを除くリポジトリ全体の `git grep -lw <名前>` と、定義のあるファイルの中の名前の出現）で分けた結果である。件数は参考値で、実装で同じ手順を打ち直して決める。
-
-| 理由の種類（残すとき） | 呼ばれ方 | 件数 | 例 |
-| --- | --- | --- | --- |
-| 名前で呼ばれる | `getattr`・`globals()`・名前の辞書で関数を引く | 23 | `plugins/ndf/scripts/hook_lib/write_target.py` の `_stmt_*` 8 件と `andor`（`STMT_HANDLERS` を `getattr` で引く）、`plugins/ndf/scripts/parallel.py` の `cmd_*` 9 件（`globals()["cmd_" + …]`）、`plugins/ndf/skills/cross-review/scripts/drive.py` の 5 件（`act(d, "review_round")` などの `getattr`） |
-| 枠組みが呼ぶ | ライブラリが上書きのメソッドや検証の関数を呼ぶ | 4 | `plugins/ndf/scripts/lib/claude_usage.py` の `redirect_request`（urllib の `HTTPRedirectHandler`）、`plugins/ndf/scripts/lib/parallel_plan.py` の `_name` 2 件と `_handoff`（pydantic の `field_validator`） |
-| 範囲の外から呼ばれる | 棚卸しの対象の外（リポジトリ直下の `scripts/`）が `import` して呼ぶ | 1 | `plugins/ndf/scripts/lib/yamlio.py` の `front_matter_text`（`scripts/check-skill-frontmatter.py` の 287・329 行目） |
-| テストの基盤が呼ぶ | `conftest.py` が全テストの後始末で呼ぶ | 1 | `plugins/ndf/scripts/lib/usage_ledger.py` の `marked_rows`（`plugins/ndf/conftest.py` の 51 行目） |
-| （消す） | 呼び手が無いか、テストだけが呼ぶ | 41 | `plugins/ndf/scripts/lib/metrics.py` の `aggregate`・`format_report`（#1601）、`plugins/ndf/scripts/lib/md.py` の `fences`・`prose_lines` |
-
-`md.fences` は `scripts/check-markdown-links.py` に語として出るが、出現は docstring の英文（9・134 行目）で、`md.fences` の呼び出しは無い。名前の検索の当たりは、呼び出しの形かを読んで決める。
-
-残す理由の種類は、上の 4 つに「利用者が手で打つ」（試行では 0 件）と「呼び手を確かめられない」（要求の E2 の失敗の扱い）を足した 6 つにする。
-
 ## データ構造
 
 ### 残す関数の一覧の形
 
-vulture の許可リストの形（`--make-whitelist` が出す形）で書く。vulture は渡されたファイルを拡張子に関わらず Python として読むため、`.txt` で置く。`.py` にすると、lint（`scripts/check-lint.sh`。git が追跡するすべての `.py` を ruff で検査する）が名前の行を未定義の名前（F821）として落とす（2026-11-04、`uvx ruff check` で 2 行とも F821 を確かめた）。
+vulture の許可リストの形（`--make-whitelist` が出す形）で書く。vulture は渡されたファイルを拡張子に関わらず Python として読むため、`.txt` で置く。`.py` にすると、lint（`scripts/check-lint.sh`）が名前の行を未定義の名前（F821）として落とす。lint は git が追跡するすべての `.py` を ruff で検査する（2026-11-04、`uvx ruff check` で 2 行とも F821 を確かめた）。
 
 ```text
 # 残す関数の一覧（vulture の許可リスト）。棚卸しのコマンドの対象の後ろに渡す。
@@ -171,7 +155,7 @@ cmd_present  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で
 | 同じ名前が 2 つのファイルにある | ファイルごとに 1 行ずつ書く（例: `parallel_plan.py` の `_name` は同じファイルに 2 件あるので 1 行） |
 | 先頭の `#` の行 | 一覧の説明。名前の行として数えない |
 
-vulture 2.16 で、この形の行を `.txt` と `.py` のどちらで渡しても `redirect_request` が候補から消えることを確かめた（2026-11-04、`uvx vulture plugins/ndf/scripts/lib/claude_usage.py <一覧> --min-confidence 60`）。
+この形の行は、`.txt` と `.py` のどちらで渡しても効く。vulture 2.16 で `redirect_request` が候補から消えることを確かめた（2026-11-04、`uvx vulture plugins/ndf/scripts/lib/claude_usage.py <一覧> --min-confidence 60`）。
 
 ### 判定の節の形
 
@@ -212,18 +196,34 @@ graph TD
 4. 見つからなければ消す（E3）。テストだけが呼ぶ関数も消す（要求の前提 3）
 5. 名前を組み立てて呼ぶ形（`"cmd_" + …` のような前置きの連結）は名前の全体では当たらない。定義のあるファイルの `getattr` と `globals()` を先に見る
 
+### 候補の分類（試行）
+
+2026-11-04 の 70 件の候補を、名前の検索（テストを除くリポジトリ全体の `git grep -lw <名前>` と、定義のあるファイルの中の名前の出現）で分けた結果である。件数は参考値で、実装で同じ手順を打ち直して決める。
+
+| 理由の種類（残すとき） | 呼ばれ方 | 件数 | 例 |
+| --- | --- | --- | --- |
+| 名前で呼ばれる | `getattr`・`globals()`・名前の辞書で関数を引く | 23 | `plugins/ndf/scripts/hook_lib/write_target.py` の `_stmt_*` 8 件と `andor`（`STMT_HANDLERS` を `getattr` で引く）、`plugins/ndf/scripts/parallel.py` の `cmd_*` 9 件（`globals()["cmd_" + …]`）、`plugins/ndf/skills/cross-review/scripts/drive.py` の 5 件（`act(d, "review_round")` などの `getattr`） |
+| 枠組みが呼ぶ | ライブラリが上書きのメソッドや検証の関数を呼ぶ | 4 | `plugins/ndf/scripts/lib/claude_usage.py` の `redirect_request`（urllib の `HTTPRedirectHandler`）、`plugins/ndf/scripts/lib/parallel_plan.py` の `_name` 2 件と `_handoff`（pydantic の `field_validator`） |
+| 範囲の外から呼ばれる | 棚卸しの対象の外（リポジトリ直下の `scripts/`）が `import` して呼ぶ | 1 | `plugins/ndf/scripts/lib/yamlio.py` の `front_matter_text`（`scripts/check-skill-frontmatter.py` の 287・329 行目） |
+| テストの基盤が呼ぶ | `conftest.py` が全テストの後始末で呼ぶ | 1 | `plugins/ndf/scripts/lib/usage_ledger.py` の `marked_rows`（`plugins/ndf/conftest.py` の 51 行目） |
+| （消す） | 呼び手が無いか、テストだけが呼ぶ | 41 | `plugins/ndf/scripts/lib/metrics.py` の `aggregate`・`format_report`（#1601）、`plugins/ndf/scripts/lib/md.py` の `fences`・`prose_lines` |
+
+`md.fences` は `scripts/check-markdown-links.py` に語として出る。出現は docstring の英文（9・134 行目）で、`md.fences` の呼び出しは無い。名前の検索の当たりは、呼び出しの形かを読んで決める。
+
+残す理由の種類は、上の 4 つに「利用者が手で打つ」（試行では 0 件）と「呼び手を確かめられない」（要求の E2 の失敗の扱い）を足した 6 つにする。
+
 ### E3 の手順（消す関数 1 件ごと）
 
 1. 関数の定義を消す。消した関数だけが使っていた定数・補助の関数・`import` が新しく棚卸しに出たら、同じ手順で扱う
-2. 再輸出の `import` と `__all__` の名前を消す
+2. 再エクスポートの `import` と `__all__` の名前を消す
 3. その関数だけを確かめるテストの関数を消す。ファイルの全部がその関数のテストなら、ファイルを消す
 4. 文書の名前の参照を直す（構成要素の表の「消した関数を名前で指す文書」）
-5. 例外リスト（`scripts/script-structure-allow/`・`scripts/contract-allow/`）がその名前を持っていれば項目を消す。2026-11-04 の候補 70 件の名前では、`grep -rlw <名前> scripts/script-structure-allow scripts/contract-allow plugins/ndf/contracts` の当たりは 0 件だった
+5. 例外リスト（`scripts/script-structure-allow/`・`scripts/contract-allow/`）がその名前を持っていれば項目を消す。2026-11-04 の候補 70 件の名前では、次の検索の当たりは 0 件だった: `grep -rlw <名前> scripts/script-structure-allow scripts/contract-allow plugins/ndf/contracts`
 
 ### E5 の手順（子の課題 1 件ごと）
 
 1. 課題の本文を読み、再現の手順を取り出す。本文に手順が無ければ、本文の「何を見つけたか」の現象を起こすコマンドを組む（要求の前提 5）
-2. E3・E4 を終えた変更の木（実装の worktree）で 1 回打つ
+2. E3・E4 を終えた作業ツリー（実装の worktree）で 1 回打つ
 3. 現象が起きなければ「閉じた」、起きれば「残した（再現した）」。コマンドを組めなければ「残した（手順を起こせない）」と、組めない理由を書く
 4. #1512・#1968 は、手順の結果だけを書いて「残した（判断待ち）」にし、待っている判断を理由に書く（要求の前提 6）
 5. #1709 は既に閉じている。手順を通して現象が起きなければ判定を「閉じた」にし、E7 でコメントだけを足す。起きれば「残した（再現した）」にし、E7 で開き直す（要求の前提 7）
@@ -250,7 +250,7 @@ graph TD
 | #2235 | 開 | 無し | require-groups の例外リストに残した 11 本 |
 | #2317 | 開 | 無し | 全体テストの CI 待ちが外したチェックを待ち続ける |
 
-#1601 は、本文の「直し方」が E3 で消す関数（`metrics.aggregate`・`format_report`）と一致する。E3 の後の変更の木では、本文の確かめ方（`import metrics` の検索が 0 件であること）が成り立たなくなる（関数が無い）ため、手順は「`metrics.aggregate` の定義とテストが無いこと」を確かめる形で組む。
+#1601 は、本文の「直し方」が E3 で消す関数（`metrics.aggregate`・`format_report`）と一致する。E3 の後の作業ツリーでは関数が無いため、本文の確かめ方（`import metrics` の検索が 0 件であること）は成り立たなくなる。そのため手順は「`metrics.aggregate` の定義とテストが無いこと」を確かめる形で組む。
 
 ## 非機能の実現方式
 
@@ -262,7 +262,7 @@ graph TD
 
 ### 決定 1: 配布物に開発用のツールを混ぜないため、残す関数の一覧をリポジトリ直下の `scripts/ndf-vulture-keep.txt` に置く
 
-残す関数の一覧は、このリポジトリで棚卸しをする開発者だけが使い、CI も配布先のリポジトリも読まない（確定仕様の「呼び手の無いもの」）。`plugins/ndf/contracts/` は配布物に含まれ、エントリポイント・受け渡しのファイル・設定・環境変数の項目だけを持つ形として構造チェックが読む。関数の項目を足すと、契約の一覧の形と配布物の両方が変わる。リポジトリ直下の `scripts/` には、構造チェックと `check-script-structure.py` の例外リスト（`scripts/contract-allow/`・`scripts/script-structure-allow/`）が既にあり、開発用のツールの置き場として揃う。
+残す関数の一覧は、このリポジトリで棚卸しをする開発者だけが使い、CI も配布先のリポジトリも読まない（確定仕様の「呼び手の無いもの」）。`plugins/ndf/contracts/` は配布物に含まれ、エントリポイント・受け渡しのファイル・設定・環境変数の項目だけを持つ形として構造チェックが読む。関数の項目を足すと、契約の一覧の形と配布物の両方が変わる。リポジトリ直下の `scripts/` には、構造チェックと `check-script-structure.py` の例外リストが既にある（`scripts/contract-allow/`・`scripts/script-structure-allow/`）。開発用のツールの置き場として揃う。
 
 `plugins/ndf/contracts/` の下に置く形は、上の理由で採らない。拡張子は `.txt` にする。`.py` は lint（`scripts/check-lint.sh`）が名前の行を未定義の名前（F821）として落とすため採らない。
 
@@ -288,7 +288,7 @@ vulture の許可リストは名前だけで照らすため、行は同じ名前
 
 ### 決定 4: 呼ばれ方の判断を候補ごとに 1 回で済ませるため、残す理由を 6 つの種類に固定する
 
-理由を自由な文にすると、受け入れ条件 3（理由の無い行が 0 件）を機械で確かめられず、似た理由が別の言い方で並ぶ。試行で見つかった呼ばれ方（名前で呼ばれる・枠組みが呼ぶ・範囲の外から呼ばれる・テストの基盤が呼ぶ）に、要求が挙げる「利用者が手で打つ」と、要求の E2 の失敗の扱いの「呼び手を確かめられない」を足して 6 つにする。種類の後ろに、呼び出しの場所を示す本文を添える。
+理由を自由な文にすると、受け入れ条件 3（理由の無い行が 0 件）を機械で確かめられず、似た理由が別の言い方で並ぶ。試行で見つかった呼ばれ方は 4 つある（名前で呼ばれる・枠組みが呼ぶ・範囲の外から呼ばれる・テストの基盤が呼ぶ）。これに、要求が挙げる「利用者が手で打つ」と、要求の E2 の失敗の扱いの「呼び手を確かめられない」を足して 6 つにする。種類の後ろに、呼び出しの場所を示す本文を添える。
 
 当たらない呼ばれ方が見つかったら、種類を足して確定仕様の一覧を直す。
 
