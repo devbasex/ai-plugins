@@ -15,6 +15,7 @@ import { DynamoDelegationStore } from "../delegations/store.ts";
 import { recordOperations, requestIdOf } from "../audit/middleware.ts";
 import { DynamoAuditLog } from "../audit/dynamo-log.ts";
 import { StructuredLogAudit } from "../audit/structured-log.ts";
+import { registerMcp } from "../mcp/server.ts";
 import { registerFactory, type FactoryDeps } from "../routes/factory.ts";
 import { factoryDepsFromEnv } from "../runs/deps.ts";
 
@@ -83,6 +84,8 @@ export function createApiApp(
   registerAccounts(app);
   registerDelegations(app);
   if (factory) registerFactory(app, factory);
+  // MCP の受け口。依存は同じアプリへの内部の要求だけ（#2384 の I15）
+  registerMcp(app, (path, init, env) => app.request(path, init, env), webOrigin);
   return app;
 }
 
