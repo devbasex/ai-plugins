@@ -326,8 +326,3 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
     if not decl.rows:
         return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、配布しない")]
     return [_row_route(row, decl) for row in decl.rows]
-
-
-def needs_version(rs: list[Route]) -> bool:
-    """版数を要するのは経路が雛形（template）で組むときだけ。"""
-    return any(r.route == TEMPLATE and r.stage == STAGE_TEMPLATE for r in rs)

@@ -148,11 +148,6 @@ def ended_at(state: dict) -> Optional[str]:
     return _iso_seconds(state.get("ended_at")) if state.get("final") is not None else None
 
 
-def round_spans(state: dict) -> list[dict]:
-    """ラウンドの開始と終了。終了はそのラウンドの値、次のラウンドの開始、全体の終了の順。"""
-    return _round_rows(state, ended_at(state))
-
-
 def _round_rows(state: dict, run_end: Optional[str]) -> list[dict]:
     rounds = [r for r in state.get("rounds") or [] if isinstance(r, dict)]
     out: list[dict] = []

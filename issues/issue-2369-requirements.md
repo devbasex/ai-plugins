@@ -158,6 +158,23 @@
 
 | 課題 | 再現の手順の結果 | 判定 | 理由 |
 | --- | --- | --- | --- |
+| #715 hook と Skill が別の版を選ぶ | `grep -c 'CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT' plugins/ndf/hooks/claude.json` → 8 行、`grep -c 'PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT'` → 8 行。2 つの順序が今も混ざっている | 残した | 再現した: hook の 16 行で実体を選ぶ順序が 2 通りあり、完了条件の「同じ規則で選ぶ」に届かない |
+| #1142 スクリプト全体の設計のやり直し | テストと実験版を除く `plugins/ndf` のスクリプトで 500 行を超えるファイルを `wc -l` で数えた → 26 本（最大は `release-steps.py` の 1168 行）。例外リストの行数の項目（`scripts/script-structure-allow/*--lines.json`）は 24 件 | 残した | 再現した: 本文の進み具合のとおりスプリント 3（語・撤去・測り直し）が残り、500 行を超えるファイルも残る |
+| #1512 `.ndf/` の定義ファイルに作成・更新の定義が無い | `plugins/ndf/contracts/settings/` の 18 項目を読んだ → どれも `place`・`scope`（team など）・`readers` を持つが、作る・更新する工程の項目を持たない | 残した | 判断待ち: `needs-decision` の課題で、チーム単位と個人単位の分け方と作成・更新の定義を誰がどこに置くかの判断を待つ（#2336 で範囲（`scope`）の宣言は入った） |
+| #1601 `metrics.aggregate` が本番から呼ばれない | `git ls-files plugins/ndf/scripts/lib/metrics.py` → 0 件。`git grep -nE '\bmetrics\.aggregate\(\|\bformat_report\b' -- plugins` → 0 件 | 閉じた | この課題の片付けで `metrics.py`（`aggregate`・`format_report` と補助の関数）とそのテストを消し、本文の「直し方」のとおりになった。閉じるのは本番の配布の後（設計の決定 3） |
+| #1694 CI のジョブがテストの宣言に無い | `refactor_lib.ci_coverage.compare_jobs` をこのリポジトリの宣言で打った → ジョブ 24 件のうち宣言に無いもの 11 件（`runtime-plugin-validate.yml` の 10 件と `runtime-smoke-latest`） | 残した | 再現した: 本文の 11 件がそのまま宣言の外にある |
+| #1709 戦略の宣言をメインディレクトリから読む | 一時の git リポジトリで、メインに suite 1 本・作業ツリーに `pytest` と `script-structure` の 2 本を置き、作業ツリーから `project_decl.read_project_decl_checked` を打った → 作業ツリーの 2 本が返る | 閉じた | 解消を確かめた: #2336 で読み順を `lib/decl.py` に集め、作業ツリーの宣言を先に読む。既に閉じている課題なので、本番の配布の後に閉じた理由のコメントだけを足す |
+| #1756 プラグインの置き場を名前で決め打つ | `grep -n 'playwright-kit' plugins/ndf/scripts/lib/step_result.py plugins/ndf/scripts/release-steps.py` → `step_result.py:334`・`release-steps.py:184`・`release-steps.py:287` に名前の決め打ちが残る | 残した | 再現した: `plugin_dir` と `other_plugins` の 2 か所に決め打ちが残る |
+| #1774 CI の失敗の集合が別々にある | `grep -rn 'FAILED_CONCLUSIONS =\|FAIL_CONCLUSIONS =' plugins/ndf` → `lib/gh_checks.py:13`・`review_lib/ci.py:30`・`merged_lib/reading.py:18` の 3 か所で、`reading.py` だけが CANCELLED と STALE を含む | 残した | 再現した: 集合が 3 か所にあり、中身が食い違う |
+| #1787 基盤待ち（75）と merge-when-green の引数が正本に無い | `grep -cE 'infra\|75\|基盤待ち' plugins/ndf/skills/merged/SKILL.md` → 0 件（`lib/README.md` の終了コードの表には 75 がある） | 残した | 再現した: `merged` の SKILL.md から基盤待ちの止まり方と引数を読めない |
+| #1968 宣言の無いリポジトリで指示書の既定が食い違う | `instructions_lib/declaration.py:18` の `DEFAULT_FILES` は `AGENTS.md`・`CLAUDE.md`・`KIRO.md`、`release_lib/instructions.py:20` の `UNDECLARED_FILES` は `AGENTS.md`・`CLAUDE.md` | 残した | 判断待ち: どちらの既定へそろえるか（承認資料を 3 つへ広げるか）の判断を待つ（本文の「起票者の推定」）。食い違いは再現した |
+| #2010 `.ndf/project.json` の計測値が書き戻される | 追跡している `.ndf/project.json` を読んだ → `languages[].files`（python 960 ほか）と `test_duration.measured` を持つ。書き手は `project_lib/measure_ci.py:165` | 残した | 再現した: 宣言と計測値が同じ追跡ファイルにあり、分かれていない |
+| #2011 テストのコマンドを 2 か所が持つ | `.ndf/supervise.json` の `test.command` → `uv run --frozen --project . --all-extras pytest {paths} -q -n 4` が残る（`.ndf/project.json` の `test.suites` にも同じコマンドがある） | 残した | 再現した: テストのコマンドが 2 か所にある |
+| #2054 サブモジュールでメインディレクトリを取り違える | 一時の親リポジトリにサブモジュールを置き、その直下で `supervise_lib.templates.fix_worktree('fix/x')` を打った → `<親>/.git/modules/.worktrees/fix/x` が返る | 残した | 再現した: 本文の残り（`fix_worktree` が共通の git ディレクトリの親を使う）がそのまま起きる |
+| #2060 release-steps.md に範囲の PR と承認の材料の打ち方が無い | `grep -n 'check-state' plugins/ndf/skills/release/references/release-steps.md` → 0 件 | 残した | 再現した: `notes --approval --check-state` の打ち方が無い |
+| #2097 本番のブランチを既定ブランチへ後退させない | 一時のリポジトリ（origin/HEAD は main、`.ndf/worktree.json` は `{"base_branch":"main"}` だけ、`release.form` は `package-plugin`）で `supervise.py new release --version 1.0.0 --prs 1 --channel prod --worktree … --out …` → 「本番の配布に要る本番のブランチが無い」で終了コード 2 | 残した | 再現した: 本文の手順と同じエラーで止まる |
+| #2235 require-groups の例外リストに残した 11 本 | `ls scripts/script-structure-allow/ \| grep -c -- '--require-groups.json'` → 21 件（本文の 11 本・21 件と同じ） | 残した | 再現した: 例外リストの項目が 1 件も減っていない |
+| #2317 CI 待ちが外したチェックを待ち続ける | `gh_checks.checks_outcome([{"name": "a", "status": "completed", "conclusion": "success"}], ["a", "gone"])` → `pending` | 残した | 再現した: 本文の残り（原因 2）のとおり、一覧に現れないチェックを `pending` とみなし待ち続ける |
 
 ## 参照
 
