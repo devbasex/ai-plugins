@@ -152,10 +152,11 @@ describe("範囲と人だけが確定できる操作（受け入れ条件 13・1
     const human = OPERATIONS.filter((op) => op.access === "human");
     expect(human).toHaveLength(10);
     for (const op of human) {
-      const query = Object.fromEntries(op.keys.length && (op.kind === "select" || op.kind === "delete") ? [[op.keys[0]!, ["x"]]] : []);
+      const byQuery = ["select", "delete"].includes(op.kind);
+      const query = Object.fromEntries(op.keys.length && byQuery ? [[op.keys[0]!, ["x"]]] : []);
       if (op.operationId === "revokeDelegation") query.credential_id = [delegation.credential_id];
       const item = { user_id: "u-2", seat_type: "premium", name: "t", kind: "anthropic_api_key", api_key: "sk-SECRET", loop_id: "l", issue: 1, decision: "approved", repository_id: 1, seq: 1, choice: "reject", client_name: "c", scope: "read", expires_in_seconds: 600, idempotency_key: "h" };
-      const hasBody = !["select", "delete"].includes(op.kind);
+      const hasBody = !byQuery;
       const res = await api.call(op.method, operationUrl(op, own, query), { ...as(credential), body: hasBody ? [item] : undefined });
       expect(res.status, op.operationId).toBe(403);
       expect((await res.json()).error.code, op.operationId).toBe("human_only");
