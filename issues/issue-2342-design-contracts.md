@@ -42,10 +42,12 @@
 | cross-refactoring の `drive.py` と `refactor.py init` | `cross-refactoring:pr={pr}` | `run` | 86400（24 時間） |
 | cross-review の `drive.py` と `state.py init` | `cross-review:pr={pr}` | `run` | 86400（24 時間） |
 | `supervise.py queue`（`--resume` を含む） | `supervise.queue:done={done}` | `run` | 86400（24 時間） |
-| `supervise.py loop` の副命令のうち、読むだけのもの（`status`・`pending`）を除くすべて | `supervise.loop:name={name}` | `session` | 86400（24 時間） |
+| `supervise.py loop` の副命令のうち、利用者が答える副命令（`answer`・`approve-mvv`）と読むだけの副命令（`status`・`list`）を除くすべて（`pending` を含む） | `supervise.loop:name={name}` | `session` | 86400（24 時間） |
 
 `{done}` はリポジトリの根からの相対パスに正規化する。`loop stop` と `loop finish` は `release: true` を持つ。
-読むだけの副命令（`loop status`・`loop pending`）は `lease` に載せず、持ち主の段を通らない。
+利用者が答える副命令（`loop answer`・`loop approve-mvv`）と読むだけの副命令（`loop status`・`loop list`）は `lease` に載せず、持ち主の段を通らない。
+利用者が答える副命令は、人の判断待ちの課題への承認を利用者が自分の端末や別のセッションから記録する手段であり、鍵を取らせると `no_session` や `refused` で止まって承認を記録できなくなる。記録の書き換えどうしの排他は、開発ループの記録を開く排他（`open_record`）が守る。
+`loop pending` は、差し戻し・失敗の答えで周回を締め直し、再開時に周回の結果を記録するため、読むだけの副命令に含めず鍵を取る。呼ぶのは conductor のセッションの中の一時レーンなので、同じランタイムのセッションとして持ち主の確認を通る。
 `release: true` の副命令は、ランタイムのセッションが見つからなくても（`no_session`）本体を走らせる（記録は書かない。断るときの案内を参照）。
 
 ### 状態の一覧に足す行
