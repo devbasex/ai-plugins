@@ -127,6 +127,21 @@ def test_compose_present_represent_and_confirm(tmp_path):
         pe.compose(tmp_path, d, BATCH, "SV", "PAR", lambda _m: "", builder=_builder)
 
 
+def test_compose_continue_uses_done_of_launched_queue(tmp_path):
+    # MVV 判定が通した提示のまま本番まで流れて止まったときは、記録が done.json にしか無い
+    d = tmp_path / "org"
+    rd = pe.batch_release_dir(d, 3, 1)
+    rd.mkdir(parents=True)
+    (rd / "done.json").write_text("{}")
+    batch = {**BATCH, "step": "continue", "presentations": [{"k": 1}]}
+    task = pe.compose(tmp_path, d, batch, "SV", "PAR", lambda _m: "", builder=_builder)
+    assert task["pipeline"] == f"SV queue --resume {rd / 'done.json'} && SV wait {rd / 'done.json'}"
+    # confirm が起動した後は release-done.json から続ける
+    (rd / "release-done.json").write_text("{}")
+    task = pe.compose(tmp_path, d, batch, "SV", "PAR", lambda _m: "", builder=_builder)
+    assert task["settle"] == f"PAR settle --external 3 --done {rd / 'release-done.json'}"
+
+
 def _fake_run(merged: bool):
     def run(args, **_kw):
         if args[:3] == ["gh", "pr", "list"]:

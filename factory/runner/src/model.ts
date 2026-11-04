@@ -53,8 +53,17 @@ export async function writeRoleCredentials(
 
 // 子へ渡さない環境変数（秘密の置き場の ARN と、受け口の token。手元のマシンの INGEST_TOKEN も含む）
 const PARENT_ONLY = ["INGEST_TOKEN", "INGEST_TOKEN_SECRET_ARN", "MODEL_CREDENTIAL_SECRET_ARN"];
-// モデルの資格。managed と byok では Factory が決めた資格だけを子へ置く。local は利用者が手元で設定した資格をそのまま渡す
-const MODEL_CREDENTIALS = ["ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];
+// モデルの資格。managed と byok では Factory が決めた資格だけを子へ置く。local は利用者が手元で設定した資格をそのまま渡す。
+// claude が読む資格（API キー・OAuth の token・認証の token・Bedrock の bearer token・AWS の鍵）をすべて並べる
+const MODEL_CREDENTIALS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+];
 
 // 子へそのまま渡すモデルの資格の値（local だけ）。外へ送る工程の中身から伏せる値に足す
 export function passedModelSecrets(base: Record<string, string | undefined>, mode: "local" | "byok" | "managed"): string[] {

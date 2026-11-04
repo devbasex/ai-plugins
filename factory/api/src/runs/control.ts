@@ -7,7 +7,7 @@ import { judgeLimits } from "../accounts/limits.ts";
 import type { AccountContext } from "../accounts/model.ts";
 import { ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, ServiceUnavailableError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
-import type { OrgRequest } from "../organizer/model.ts";
+import type { OrganizerWrite, OrgRequest } from "../organizer/model.ts";
 import { finishedKey } from "../progress/authorize.ts";
 import type { ProgressReader, ReleaseEvents } from "../progress/read.ts";
 import { signRunJobToken, type RunJobSigningKey } from "../progress/run-job-token.ts";
@@ -732,10 +732,11 @@ export class RunControl {
   }
 
   // 止まった配布の実行を「続きから流す」（#2439 の F7）。止まった配布の承認待ちのときだけ書く。配布の実行は作り直さない（I57）
-  async resumeRelease(run: SprintRun, step: ReleaseStep): Promise<boolean> {
+  // organizer を渡すと、まとめた配布の状態の戻しを同じトランザクションで書く（間に見回りが止まった印を書き戻さない）
+  async resumeRelease(run: SprintRun, step: ReleaseStep, organizer?: OrganizerWrite): Promise<boolean> {
     const job = this.newJob(run, run.jobCount + 1, "release", null);
     job.releaseStep = step;
-    if (!(await this.deps.table.addResumeJob(job, this.iso(), { expectAwaiting: { reason: "release_stalled" } }))) return false;
+    if (!(await this.deps.table.addResumeJob(job, this.iso(), { expectAwaiting: { reason: "release_stalled" }, ...(organizer ? { organizer } : {}) }))) return false;
     await this.launch(run, job);
     return true;
   }

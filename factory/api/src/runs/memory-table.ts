@@ -209,9 +209,11 @@ export class MemoryRunsTable implements RunsTable {
       return false;
     }
     if (opts.loop && !this.loopFits(opts.loop)) return false;
+    if (opts.organizer && !this.organizerFits(opts.organizer)) return false;
     Object.assign(r, { state: "starting", currentJobId: job.jobId, jobCount: job.seq, updatedAt: now, resumeAt: null, awaitingReason: null, releaseRequestId: null });
     this.jobs.set(job.jobId, structuredClone(job));
     if (opts.loop) this.applyLoop(opts.loop);
+    if (opts.organizer) this.applyOrganizer(opts.organizer);
     return true;
   }
 

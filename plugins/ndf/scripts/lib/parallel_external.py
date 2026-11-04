@@ -216,6 +216,10 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
             "pipeline": " && ".join([*steps, f"{supervise} wait {done}"]),
             "settle": f"{parallel} settle --external {seq} --done {done}",
         }
+    # continue は前に実際に起動したキューの記録から続ける。confirm は release-done.json に書き、present / represent を
+    # MVV 判定が通して本番まで流れたときは done.json にしか無い（confirm は present の後なので release-done.json を先に見る）
+    if not done.exists() and (rd / "done.json").exists():
+        done = rd / "done.json"
     return {
         **out,
         "pipeline": f"{supervise} queue --resume {done} && {supervise} wait {done}",

@@ -432,6 +432,7 @@ export class DynamoRunsTable implements RunsTable {
     ];
     if (from === "awaiting_reset") items.push({ Delete: { TableName: this.tableName, Key: { pk: runPk(job.sprintRunId), sk: "RESET" } } });
     if (opts.loop) items.push(...this.loopItems(opts.loop));
+    if (opts.organizer) items.push(...this.organizerItems(opts.organizer));
     return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
   }
 

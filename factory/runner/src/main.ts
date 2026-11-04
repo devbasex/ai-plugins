@@ -120,6 +120,11 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
       if (state) await runtime.restoreState(state.url!);
       // 承認の依頼の識別子の無い resume（利用上限の後）は答えを書かずに続ける（決定 7）
       if (instruction.START === "resume" && instruction.APPROVAL_REQUEST_ID) directive = await runtime.recordAnswer(instruction.APPROVAL_REQUEST_ID);
+      // 配布の実行の判断（承認ゲートの外の問い）への答えは本文を最初の指示へ渡す。承認ゲート 2 の答えは配布のまとめが手（step）にする
+      if (instruction.START === "release" && instruction.APPROVAL_REQUEST_ID) {
+        const answer = await getApi<{ kind: string; body?: string | null }>(`/run-jobs/approval-requests/${instruction.APPROVAL_REQUEST_ID}/answer`);
+        if (answer.kind === "decision") directive = answer.body ?? null;
+      }
     }
     // 配布の依頼の答えと範囲、配布の実行ならまとめた配布の中身を置き場へ書き、答えの無い依頼を送り直す（#2439）
     let requestsBefore = new Set<string>();

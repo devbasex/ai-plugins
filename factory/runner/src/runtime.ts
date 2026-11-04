@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
-import { claudeEnv, passedModelSecrets, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
+import { claudeEnv, passedModelSecrets, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type AssumeRole, type ModelCredential } from "./model.ts";
 import { parseLoopFile } from "./loop-file.ts";
 import { fsOrganizerFiles, ORGANIZER_DIR, organizerEnv, RELEASE_PROMPT } from "./organizer.ts";
 import { runSections, sectionLimitOf, type SectionRun } from "./sections.ts";
@@ -82,7 +82,8 @@ export function loopPrompt(inst: RunJobInstruction): string {
 export function firstPrompt(inst: RunJobInstruction, directive: string | null): string {
   if (inst.START === "new") return `/ndf:development-workflow ${inst.ISSUES!.split(",").map((n) => `#${n}`).join(" ")}`;
   if (inst.START === "loop") return loopPrompt(inst);
-  if (inst.START === "release") return RELEASE_PROMPT;
+  // 配布の実行を判断への答えで再開したときは、答えの本文を添える（添えないと同じプランを答え無しで流し直して同じ問いで止まる）
+  if (inst.START === "release") return directive ? `${RELEASE_PROMPT}\n\n利用者の判断: ${directive}` : RELEASE_PROMPT;
   return `前回の続きから進めてください。${directive ? `利用者の判断: ${directive}` : ""}`;
 }
 
@@ -111,7 +112,14 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   const issueRequests = join(jobHome, "issue-requests.jsonl");
   jobEnv.NDF_ISSUE_REQUEST_FILE = issueRequests;
   const sh = (cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string> }) => run(cmd, args, { env: jobEnv, ...opts });
-  const childEnv = () => claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, stsAssumeRole, sessionName, credentialDir);
+  // 引き受けたロールの資格は発行のたびに控える。更新の前の値も期限まで有効なため、伏せる値から外さない
+  const assumedSecrets: string[] = [];
+  const assumeRole: AssumeRole = async (cred, name) => {
+    const c = await stsAssumeRole(cred, name);
+    assumedSecrets.push(c.accessKeyId, c.secretAccessKey, c.sessionToken);
+    return c;
+  };
+  const childEnv = () => claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, assumeRole, sessionName, credentialDir);
   // 版を固定して取った取得元。スクリプトは入れた版と同じこの写しから読む
   const ndfSource = join(work, "ndf-marketplace");
   const ndfScripts = () => join(ndfSource, "plugins/ndf/scripts");
@@ -131,10 +139,7 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
     // local は利用者が手元で設定したモデルの資格をそのまま子へ渡すため、その値も伏せる
     out.push(...passedModelSecrets(jobEnv, instruction.EXECUTION_MODE));
     if (credential?.kind === "anthropic_api_key") out.push(credential.api_key);
-    if (credential?.kind === "aws_role") {
-      const assumed = await readFile(join(credentialDir, "credentials.json"), "utf8").then((t) => JSON.parse(t) as Record<string, unknown>).catch(() => ({}) as Record<string, unknown>);
-      for (const k of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) if (typeof assumed[k] === "string") out.push(assumed[k]);
-    }
+    out.push(...assumedSecrets);
     return out.filter(Boolean);
   };
   const git: GitExec = async (args, cwd) => {
@@ -314,7 +319,7 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       // ロールの資格は 1 時間で切れるため、動いている間は置き直す（子は credential_process で読み直す）
       const role = credential?.kind === "aws_role" ? credential : null;
       const refresher = role
-        ? setInterval(() => void writeRoleCredentials(role, stsAssumeRole, sessionName, credentialDir).catch(() => undefined), ROLE_REFRESH_MS)
+        ? setInterval(() => void writeRoleCredentials(role, assumeRole, sessionName, credentialDir).catch(() => undefined), ROLE_REFRESH_MS)
         : null;
       // 区間ごとに claude -p を 1 回起動する。使用量（usage.recorded）は区間ごとに今のとおり送る
       const launch = async (prompt: string): Promise<SectionRun> => {

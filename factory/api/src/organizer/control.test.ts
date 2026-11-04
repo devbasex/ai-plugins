@@ -255,6 +255,20 @@ describe("答えと出し直し（受け入れ条件 4、I60）", () => {
     expect((await currentBatch())!).toMatchObject({ state: "presented", confirmedK: null });
   });
 
+  it("確定した後に本番のプランの中の判断で止まったら、承認ゲート 2 の答えの再送で本番のプランを流し直さない", async () => {
+    const a = await startRun(1);
+    await requestRelease(a, [11]);
+    const batch = (await currentBatch())!;
+    h.github.heads.set(`${REPO}#develop`, "aaaa111");
+    await present(1, "aaaa111", [11]);
+    const r = await answer(batch.releaseRunId, "approved", "ar-ok");
+    expect(instructionOf(r.jobId!)).toMatchObject({ RELEASE_STEP: "confirm:1" });
+    const run = await runOf(batch.releaseRunId);
+    await event(run.sprintRunId, run.currentJobId, "gate.reached", { kind: "decision", pr_url: null, material: "判断" });
+    await finish(run.sprintRunId, run.currentJobId!, "gate");
+    expect(await codeOf(h.control.requestResume({ sprintRunId: batch.releaseRunId, approvalRequestId: "ar-ok" }))).toBe("not_presented");
+  });
+
   it("提示の前の判断への答えは、続き（continue）でなく提示のプランから流し直す", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);

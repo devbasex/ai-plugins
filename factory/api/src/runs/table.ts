@@ -32,6 +32,8 @@ export interface ResumeOptions {
   from?: "awaiting_approval" | "awaiting_reset";
   loop?: LoopWrite;
   expectAwaiting?: { reason: AwaitingReason; releaseRequestId?: string };
+  // まとめた配布の根と配布の書き込み（止まった配布を続けるとき。状態の戻しとジョブの作成を同じトランザクションで書く）
+  organizer?: OrganizerWrite;
 }
 
 // まとめた配布と配布の実行を 1 回で書く（I57）。legacySeq はリポジトリの枠の legacySeq を照らした値（無ければ null。I62）

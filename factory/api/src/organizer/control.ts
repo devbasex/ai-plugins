@@ -202,13 +202,15 @@ export class OrganizerControl {
     return "same";
   }
 
-  // 本番のプランに手を付けた跡（届いた段の事象か、確定した提示の release/v<版> の枝・main 宛ての Pull Request）
+  // 本番のプランに手を付けた跡（届いた段の事象か、確定した提示の release/v<版> の枝・main 宛ての Pull Request）。
+  // 差し戻したまとめた配布が残した同じ版の枝は跡に数えない（出していないので次の配布は同じ版を提示する）
   private async releaseStarted(run: SprintRun, batch: ReleaseBatch, reg: Registration, checkGitHub = true): Promise<boolean> {
     const { reader, github } = this.deps;
     if ((await reader.findReleaseEvents(run.sprintRunId)).progress.length > 0) return true;
     const version = checkGitHub ? presentedVersion(batch) : null;
     if (!version) return false;
     const branch = `release/v${version}`;
+    if ((await this.rejectedReleaseHeads(batch)).has(branch)) return false;
     return (
       (await github.branchHead(reg.installationId, reg.repositoryId, reg.fullName, branch)) !== null ||
       (await github.findPullByHead(reg.installationId, reg.repositoryId, reg.fullName, branch, "main")) !== null
@@ -247,11 +249,13 @@ export class OrganizerControl {
 
   // 範囲の依頼へ答えを書く。終わった後に止まっても、見回りが同じ規則で書き直す（2 回目は I58 で書かれない）
   // before を渡すと、その時刻までに出した依頼だけを照らす（終わった後に出し直した依頼を古い配布で答えない）
-  private async answerRange(batch: ReleaseBatch, end: "released" | "rejected", settledPrs: number[], before?: string): Promise<void> {
-    const requests = (await this.deps.table.listOrgRequests(batch.accountId, batch.repositoryId)).filter(
+  // known を渡すと読み直さずにそれを照らし、書けた答えをその行へ写す。別の書き手と取り合ったら false（呼び手が読み直す）
+  private async answerRange(batch: ReleaseBatch, end: "released" | "rejected", settledPrs: number[], before?: string, known?: OrgRequest[]): Promise<boolean> {
+    const requests = (known ?? (await this.deps.table.listOrgRequests(batch.accountId, batch.repositoryId))).filter(
       (r) => before === undefined || Date.parse(r.requestedAt) <= Date.parse(before),
     );
     const targets = requestsToAnswer(batch, requests, end, settledPrs);
+    let fresh = true;
     for (const r of targets) {
       const answer: ReleaseAnswer = {
         seq: batch.seq,
@@ -261,22 +265,27 @@ export class OrganizerControl {
         reason: end === "rejected" ? "release_rejected" : null,
         at: this.iso(),
       };
-      await this.deps.table.answerRequest(r.accountId, r.repositoryId, r.requestId, answer);
+      if (await this.deps.table.answerRequest(r.accountId, r.repositoryId, r.requestId, answer)) r.answer = answer;
+      else fresh = false;
     }
+    return fresh;
   }
 
   // 答えがあって届け終えていない依頼を届ける（E8）。release.answered を追記し、手動の実行は再開する。
   // 実行がまだ別のジョブで動いている（busy）ときは届け終えたことにせず、次の tick で届け直す
   private async deliverAll(accountId: string, repositoryId: number): Promise<void> {
     const { table, control } = this.deps;
-    // 終わった配布の答えを書き終える前に止まっていたら、ここで書き直す
+    // 終わった配布の答えを書き終える前に止まっていたら、ここで書き直す。依頼の一覧は 1 回だけ読み、書いた答えはその行へ写す
+    let requests = await table.listOrgRequests(accountId, repositoryId);
+    let fresh = true;
     for (const batch of await table.listBatches(accountId, repositoryId, 5)) {
       if (batch.state === "released" || batch.state === "rejected") {
-        const open = (await table.listOrgRequests(accountId, repositoryId)).filter((r) => r.answer === null);
-        if (open.length > 0) await this.answerRange(batch, batch.state, batch.result?.prs ?? [], batch.updatedAt);
+        if (!requests.some((r) => r.answer === null)) break;
+        if (!(await this.answerRange(batch, batch.state, batch.result?.prs ?? [], batch.updatedAt, requests))) fresh = false;
       }
     }
-    for (const r of await table.listOrgRequests(accountId, repositoryId)) {
+    if (!fresh) requests = await table.listOrgRequests(accountId, repositoryId);
+    for (const r of requests) {
       if (!r.answer || r.deliveredAt !== null) continue;
       const event: ReleaseAnsweredEvent = {
         sprint_run_id: r.sprintRunId,
@@ -429,9 +438,18 @@ export class OrganizerControl {
         const started = from === "confirmed" && (batch.mainMerged || (reg !== null && (await this.releaseStarted(run, batch, reg))));
         return stepFrom(from, batch, started);
       }
-      // 同じ答えの再送（ジョブを作る前に止まった）は、書いた状態から同じ手を返す
-      if (batch.state === "represented") return "represent";
-      if (batch.state === "confirmed") return batch.confirmedK === 2 ? "confirm:2" : "confirm:1";
+      // 同じ答えの再送（ジョブを作る前に止まった）は、書いた状態から同じ手を返す。その提示に記録した承認の依頼と一致し、
+      // 実行が今も承認ゲート 2 で止まっているときだけにする（本番のプランの中の判断で止まった後の古い答えで流し直さない）
+      if (batch.state === "represented" || batch.state === "confirmed") {
+        const k = batch.state === "represented" ? 1 : batch.confirmedK;
+        const answered = batch.presentations.find((p) => p.k === k);
+        const gate = await reader.findLastGate(run.sprintRunId);
+        if (!answered?.approvalRequestId || answered.approvalRequestId !== approvalRequestId || gate?.payload.kind !== "gate2") {
+          throw new ConflictError("not_presented", "この承認は今待っている提示への答えではありません");
+        }
+        if (batch.state === "represented") return "represent";
+        return k === 2 ? "confirm:2" : "confirm:1";
+      }
       if (batch.state !== "presented") throw new ConflictError("not_presented", "まとめた配布は承認を待っていません");
       // 前の提示へ答えた承認の再送は、今待っている提示の承認にしない
       if (batch.presentations.some((p) => p.approvalRequestId === approvalRequestId)) {
@@ -592,16 +610,19 @@ export class OrganizerControl {
       const started = batch.mainMerged || (await this.releaseStarted(run, batch, reg, batch.stalledFrom === "confirmed"));
       const step = resumeStepOf(batch, started);
       const next: ReleaseBatch = { ...structuredClone(batch), state: batch.stalledFrom, stalledFrom: null, stallReason: null, updatedAt: this.iso() };
-      const ok = await table.writeOrganizer({
+      // 状態の戻しと再開のジョブの作成を同じトランザクションで書く（間に見回りが止まった印を書き戻さない）
+      const ok = await control.resumeRelease(run, step, {
         root: { ...root, version: root.version + 1, updatedAt: this.iso() },
         expectVersion: root.version,
         batch: next,
         expectBatchState: ["stalled"],
         log: this.logRow(root, "resolved", seq, { choice, step }),
       });
-      if (!ok) continue;
-      if (!(await control.resumeRelease(run, step))) throw new ConflictError("not_stalled", "配布の実行は止まっていません");
-      return { seq, state: next.state };
+      if (ok) return { seq, state: next.state };
+      const now = await table.getRun(batch.releaseRunId);
+      if (!now || now.state !== "awaiting_approval" || now.awaitingReason !== "release_stalled" || now.currentJobId !== null) {
+        throw new ConflictError("not_stalled", "配布の実行は止まっていません");
+      }
     }
     throw new ServiceUnavailableError("organizer_busy");
   }
