@@ -115,7 +115,7 @@ CI の失敗・衝突・版数の衝突は、配布のプランの直しの手�
 
 ## 外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）
 
-環境変数 `NDF_ORGANIZER_DIR` があるセッションは、外のオーガナイザー（Factory のオーガナイザーなど）のレーンである。
+環境変数 `NDF_ORGANIZER_DIR` があるセッションは、外のオーガナイザー（サービスが実行ジョブの間で動かすまとめ役など）のレーンである。
 名前は `NDF_ORGANIZER_LANE` で、依頼と答えは置き場のファイルで受け渡す（形は `contracts/forms/parallel-external.json`）。
 並列の計画（`.ndf/parallel/`）は使わず、計画名の代わりに `--external` を付ける。
 

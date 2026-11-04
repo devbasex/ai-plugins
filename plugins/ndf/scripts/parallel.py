@@ -30,7 +30,7 @@
 | `present --external <連番> <提示> (--approval <承認資料> \\| --record)` | 範囲をレーンへ対応づける。`--record` は承認ゲート 2 で止まった提示を `presented/` へ書く |
 | `settle --external <連番> --done <D>` | 届いた段を `progress/`、結果を `results/` へ書く |
 
-Factory の実行ジョブ（環境変数 `NDF_FACTORY_RUN`）では `init`・`start`・`run` を断る（1 台の中のオーガナイザーを起動しない）。
+サービスの実行ジョブ（環境変数 `NDF_FACTORY_RUN`）では `init`・`start`・`run` を断る（1 台の中のオーガナイザーを起動しない）。
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。正本の手順は
 `skills/development-workflow/references/parallel.md` と `skills/issue-plan-strategy/references/parallel-plan.md` にある。
@@ -73,9 +73,9 @@ def reply(status: str, summary: str, items=None, code: int | None = None, next_s
 
 
 def refuse_in_factory_run() -> None:
-    """Factory の実行ジョブの中では 1 台の中のオーガナイザーを起動しない（#2439 の I68。2 つのオーガナイザーは排他）。"""
+    """サービスの実行ジョブ（`NDF_FACTORY_RUN`）の中では 1 台の中のオーガナイザーを起動しない（#2439 の I68。2 つのオーガナイザーは排他）。"""
     if os.environ.get("NDF_FACTORY_RUN"):
-        reply("stopped", "Factory の実行ジョブの中では並列の計画を起動しない（Factory のオーガナイザーが配布をまとめる）", code=1, factory_run=True)
+        reply("stopped", "サービスの実行ジョブの中では並列の計画を起動しない（外のオーガナイザーが配布をまとめる）", code=1, factory_run=True)
 
 
 def external_dir() -> Path:
