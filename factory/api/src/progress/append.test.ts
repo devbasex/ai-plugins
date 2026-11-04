@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { IssueRequestResolvedEvent, JobFinishedEvent } from "@ndf-factory/contracts";
-import { appendControlEventTo, appendIssueRequestResolvedTo, orderKey } from "./append.ts";
+import type { IssueRequestResolvedEvent, JobFinishedEvent, ProgressEvent, ReleaseAnsweredEvent } from "@ndf-factory/contracts";
+import { appendControlEventTo, appendIssueRequestResolvedTo, appendReleaseAnsweredTo, orderKey } from "./append.ts";
 import { ProgressEventError } from "./errors.ts";
 import { MemoryProgressEventStore } from "./memory-store.ts";
-import { isCallerRole } from "./authorize.ts";
+import { authorizeRunner, isCallerRole } from "./authorize.ts";
 import { verifyWebhookSignature } from "./github.ts";
 
 let store: MemoryProgressEventStore;
@@ -90,6 +90,40 @@ describe("appendIssueRequestResolved（#2216 の決定 10、I48）", () => {
 
   it("appendControlEvent は issue.request_resolved を受けない", async () => {
     expect(await errorOf(appendControlEventTo(store, resolved() as unknown as JobFinishedEvent))).toBe("forbidden");
+  });
+});
+
+describe("配布の事象の出所と鍵（#2439）", () => {
+  const answered = (patch: Partial<ReleaseAnsweredEvent> = {}): ReleaseAnsweredEvent => ({
+    sprint_run_id: "sr-1",
+    idempotency_key: "3:sr-1",
+    type: "release.answered",
+    at: "2026-11-02T02:00:00Z",
+    source: "control",
+    job_id: null,
+    schema_version: 1,
+    payload: { seq: 3, request_id: "run-sr-1-r1", result: "released", version: "10.28.0" },
+    ...patch,
+  });
+
+  it("release.answered は範囲の実行 1 本に 1 件だけ残り、鍵が <seq>:<sprint_run_id> でなければ forbidden", async () => {
+    expect(await appendReleaseAnsweredTo(store, answered())).toEqual({ written: true });
+    expect(await appendReleaseAnsweredTo(store, answered())).toEqual({ written: false });
+    expect(await errorOf(appendReleaseAnsweredTo(store, answered({ idempotency_key: "3:sr-2" })))).toBe("forbidden");
+    expect(await errorOf(appendReleaseAnsweredTo(store, answered({ job_id: "job-1" })))).toBe("forbidden");
+  });
+
+  it("ランナーは配布の事象を決まった鍵で書け、release.answered は書けない", () => {
+    const job = { jobId: "job-1", sprintRunId: "sr-1", repo: "o/r" } as never;
+    const ev = (type: string, key: string, payload: Record<string, unknown>) =>
+      ({ sprint_run_id: "sr-1", idempotency_key: key, type, at: "2026-11-02T02:00:00Z", source: "runner", job_id: "job-1", schema_version: 1, payload }) as unknown as ProgressEvent;
+    const requested = { request_id: "run-sr-1-r1", lane: "run-sr-1", prs: [1], issues: [], ndf_version: "10.27.16", requested_at: "2026-11-02T02:00:00Z" };
+    expect(authorizeRunner(ev("release.requested", "run-sr-1-r1", requested), job)).toBe(true);
+    expect(authorizeRunner(ev("release.requested", "job-1:3", requested), job)).toBe(false);
+    expect(authorizeRunner(ev("release.settled", "sr-1:settled", { seq: 1, result: "failed", prs: [], lanes: [] }), job)).toBe(true);
+    expect(authorizeRunner(ev("release.settled", "1:settled", { seq: 1, result: "failed", prs: [], lanes: [] }), job)).toBe(false);
+    expect(authorizeRunner(ev("release.progress", "sr-1:progress:tagged", { seq: 1, stage: "tagged" }), job)).toBe(true);
+    expect(authorizeRunner(ev("release.answered", "1:sr-1", { seq: 1, result: "released" }), job)).toBe(false);
   });
 });
 

@@ -227,3 +227,26 @@ describe("課題の候補（受け入れ条件 9・10）", () => {
     expect(res.candidates.map((c: { number: number }) => c.number)).toEqual([9, 8]);
   });
 });
+
+describe("Factory のオーガナイザーの経路（#2439 の AC 9・11、I66）", () => {
+  it("一覧と履歴は GET で読め、止まっていない配布を解く操作は 409、承認の依頼へ答える経路は無い", async () => {
+    const acc = await personal("u-1");
+    await register(acc);
+    const list = await call("GET", `/accounts/${acc}/repositories/101/approval-requests`, "u-1");
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ organizer: { current_seq: null, wait_reason: null, wait_detail: null }, items: [] });
+    const history = await call("GET", `/accounts/${acc}/repositories/101/releases?limit=5`, "u-1");
+    expect(await history.json()).toEqual({ items: [] });
+    expect((await call("GET", `/accounts/${acc}/repositories/101/releases?limit=0`, "u-1")).status).toBe(400);
+    expect((await call("POST", `/accounts/${acc}/repositories/101/releases/1/resolve`, "u-1", { choice: "reject" })).status).toBe(404);
+    expect((await call("POST", `/accounts/${acc}/repositories/101/releases/1/resolve`, "u-1", { choice: "maybe" })).status).toBe(400);
+    expect([404, 405]).toContain((await call("POST", `/accounts/${acc}/repositories/101/approval-requests`, "u-1", {})).status);
+  });
+
+  it("他人のアカウントのリポジトリは 403", async () => {
+    const acc = await personal("u-1");
+    await register(acc);
+    await personal("u-2");
+    expect((await call("GET", `/accounts/${acc}/repositories/101/approval-requests`, "u-2")).status).toBe(403);
+  });
+});
