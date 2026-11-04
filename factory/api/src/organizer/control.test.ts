@@ -5,6 +5,7 @@ import { ApiError } from "../errors.ts";
 import { appendEvent } from "../progress/append.ts";
 import { accountContext, createRunsHarness, TEST_CONFIG, type RunsHarness } from "../testing/runs.ts";
 import { ResumeRejectedError } from "../runs/control.ts";
+import { laneOf } from "./model.ts";
 
 const REPO_ID = 101;
 const REPO = "org-a/repo-a";
@@ -425,5 +426,13 @@ describe("一覧と履歴（受け入れ条件 9・11、I66）", () => {
 
   it("別のアカウントのリポジトリは 404", async () => {
     expect(await codeOf(h.organizer.list(accountContext({ accountId: "acc-2" }), REPO_ID))).toBe("repository_not_found");
+  });
+});
+
+describe("laneOf", () => {
+  it("ループはループの名前、手動の実行は実行の識別子を切り詰めてレーンの名前にする", () => {
+    expect(laneOf({ sprintRunId: "x" }, "LFactory3-very-long-loop-name-over-limit")).toBe("loop-lfactory3-very-long-loop-na");
+    expect(laneOf({ sprintRunId: "0123456789ABCDEF0123456789abcdef" }, null)).toBe("run-0123456789abcdef");
+    expect(laneOf({ sprintRunId: "sr1" }, null)).toBe("run-sr1");
   });
 });

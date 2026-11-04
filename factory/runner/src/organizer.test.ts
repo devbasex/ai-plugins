@@ -60,6 +60,7 @@ describe("置き場の翻訳（受け入れ条件 10、I59・I68）", () => {
     const run = laneName({ SPRINT_RUN_ID: "0123456789abcdef0123456789abcdef" });
     for (const name of [loop, run]) expect(name).toMatch(/^[a-z0-9][a-z0-9_-]{0,31}$/);
     expect(run).toBe("run-0123456789abcdef");
+    expect(loop).toBe("loop-lfactory3-very-long-loop-na");
     expect(organizerEnv({ SPRINT_RUN_ID: "sr1" }, "/w/repo/.ndf/organizer")).toEqual({
       NDF_FACTORY_RUN: "1",
       NDF_ORGANIZER_DIR: "/w/repo/.ndf/organizer",
