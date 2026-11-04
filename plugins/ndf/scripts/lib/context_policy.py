@@ -130,7 +130,7 @@ class Estimates:
 # --- 適用値の解決 ------------------------------------------------------------------------------------
 
 
-def _positive_int(v) -> bool:
+def positive_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and v > 0
 
 
@@ -147,7 +147,7 @@ def parse_context_setting(data: dict) -> tuple[dict, str | None]:
     if not isinstance(trial, dict):
         return {}, f".ndf/{SETTING}: trial がオブジェクトでない"
     decide_from, limit = trial.get("decide_from", TRIAL_DECIDE_FROM), trial.get("limit", TRIAL_LIMIT)
-    if not (_positive_int(decide_from) and _positive_int(limit)):
+    if not (positive_int(decide_from) and positive_int(limit)):
         return {}, f".ndf/{SETTING}: trial.decide_from / trial.limit が正の整数でない"
     if decide_from > limit:
         return {}, f".ndf/{SETTING}: trial.decide_from（{decide_from}）が trial.limit（{limit}）より大きい"
@@ -203,7 +203,7 @@ def resolve_policy(root=None, env: Mapping | None = None, cli: Mapping | None = 
     env_limit = env.get("NDF_CONTEXT_LIMIT") or ""
     if env_limit.isdigit() and int(env_limit) > 0:
         limit, sources["limit"] = int(env_limit), "env"
-    if _positive_int(cli.get("limit")):
+    if positive_int(cli.get("limit")):
         limit, sources["limit"] = cli["limit"], "cli"
     if policy == CURRENT or decide_from > limit:
         decide_from = limit

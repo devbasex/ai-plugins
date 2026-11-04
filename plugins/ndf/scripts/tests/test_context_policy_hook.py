@@ -203,6 +203,30 @@ def test_record_marks_and_restart(tmp_path, ctx):
     assert (restart["verdict"], restart["reason"]) == ("再起動", "独立性")
 
 
+def test_record_row_columns_and_stdout(tmp_path, ctx):
+    # CLI の記録の行の列（現状固定。#2422）。標準出力の行と記録の行は同じ
+    out = cli("record", "--verdict", "再起動", "--reason", "独立性", "--work", "#7", "--context", "1234", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    (row,) = rows(ctx)
+    assert json.loads(out.stdout)["items"] == [row]
+    picked = {k: row[k] for k in ("runtime", "source", "session_id", "work", "context", "stage", "verdict", "reason", "band", "event", "policy")}
+    assert picked == {
+        "runtime": "claude",
+        "source": "record",
+        "session_id": "s9",
+        "work": "#7",
+        "context": 1234,
+        "stage": "cut",
+        "verdict": "再起動",
+        "reason": "独立性",
+        "band": None,
+        "event": "判定",
+        "policy": "current",
+    }
+    cli("record", "--event", "復元完了", "--work", "#7", "--runtime", "codex", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    mark = rows(ctx)[-1]
+    assert (mark["runtime"], mark["session_id"], mark["event"], mark["stage"], mark["reason"]) == ("codex", None, "復元完了", None, None)
+
+
 def call(ts: str, mid: str, out: int = 10, read: int = 1_000, model: str = "claude-opus-5-5") -> dict:
     usage = {"input_tokens": 100, "output_tokens": out, "cache_read_input_tokens": read, "cache_creation_input_tokens": 0}
     return {"type": "assistant", "timestamp": ts, "message": {"id": mid, "model": model, "usage": usage, "content": []}}
@@ -430,3 +454,80 @@ def test_calibrate_characterizes_since_and_unmatched_sessions(tmp_path):
     }
     since = cd.parse_ts("2026-11-02T00:00:00Z")
     assert _calibrated(recs, since=since)["samples"] == {"restore": 0, "handoff": 0, "stage:plan": 2, "stage:*": 2}
+
+
+def _cached(ts: str, mid: str, **over) -> dict:
+    """キャッシュの書き込みを 5 分と 1 時間に分けた usage を持つ呼び出し。"""
+    c = call(ts, mid)
+    c["message"]["usage"].update(
+        {"cache_creation_input_tokens": 70, "cache_creation": {"ephemeral_5m_input_tokens": 30, "ephemeral_1h_input_tokens": 40}}, **over
+    )
+    return c
+
+
+def test_transcript_and_ledger_build_the_same_call(tmp_path):
+    # 会話の記録と使用量の帳簿は、同じ usage から同じキーと値の呼び出しを作る（現状固定。#2422）
+    m = load_cli()
+    a = _cached("2026-11-01T00:00:00Z", "m1")
+    calls, compacts, by_next = cd.read_calls(write_transcript(tmp_path / "s1.jsonl", [a]))
+    want = {"ts": cd.parse_ts("2026-11-01T00:00:00Z"), "model": "claude-opus-5-5", "inp": 100, "out": 10, "read": 1000, "w5": 30, "w1h": 40, "context": 1170}
+    assert (calls, compacts, by_next) == ([want], 0, False)
+    row = {"at": "2026-11-01T00:00:00Z", "model": "claude-opus-5-5", "usage": a["message"]["usage"], "seconds": 4}
+    assert m.ledger_calls(row) == want | {"seconds": 4}
+    assert m.ledger_calls({**row, "model": "", "seconds": "x"}) == want | {"model": None, "seconds": None}
+
+
+def test_transcript_counts_auto_compacts_and_the_handoff_start(tmp_path):
+    lines = [
+        {"type": "user", "isMeta": True, "message": {"content": "meta"}},
+        {"type": "user", "message": {"content": [{"type": "text", "text": "cat .ndf/handoff/x.md"}]}},
+        {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}},
+        {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "manual"}},
+        _cached("2026-11-01T00:00:00Z", "m1"),
+    ]
+    calls, compacts, by_next = cd.read_calls(write_transcript(tmp_path / "s1.jsonl", lines))
+    assert (len(calls), compacts, by_next) == (1, 1, True)
+    assert cd.read_calls(tmp_path / "missing.jsonl") == ([], None, False)
+
+
+def test_work_report_pins_every_part(tmp_path):
+    # 作業の報告の区分ごとの token・秒・費用・再起動・やり直しの数（現状固定。#2422）
+    m = load_cli()
+    first = {"type": "user", "message": {"content": "続き .ndf/handoff/a.md"}}
+    tp = write_transcript(
+        tmp_path / "s1.jsonl",
+        [first, _cached("2026-11-01T00:00:00Z", "m1"), call("2026-11-01T00:10:00Z", "m2"), call("2026-11-01T00:20:00Z", "m3"), call("2026-11-01T01:30:00Z", "m4")],
+    )
+    write_transcript(tmp_path / "s1" / "subagents" / "agent-x.jsonl", [call("2026-11-01T00:11:00Z", "m5"), call("2026-11-01T00:12:00Z", "m6")])
+    ledger = [{"session_id": "ag9", "parent_session_id": "s1", "at": "2026-11-01T00:15:00Z", "usage": call("t", "m7")["message"]["usage"], "seconds": 12}]
+    recs = [
+        hook_row("s1", tp, "2026-11-01T00:00:00Z", verdict="継続", stage="skill:a"),
+        mark("復元完了", "2026-11-01T00:05:00Z"),
+        hook_row("s1", tp, "2026-11-01T00:06:00Z", verdict="継続", stage="skill:a"),
+        mark("引継ぎ開始", "2026-11-01T01:00:00Z", sid="s1"),
+        hook_row("s1", tp, "2026-11-01T01:40:00Z", verdict="再起動", reason="容量", stage="cut"),
+        hook_row("s2", None, "2026-11-01T02:00:00Z", verdict="再起動"),
+    ]
+    out = m.report_work("#7", recs, ledger)
+    parts = {b: (t["calls"], t["inp"], t["out"], t["read"], t["w5"], t["w1h"], t["seconds"], t["cost"]) for b, t in out["parts"].items()}
+    assert parts == PINNED_PARTS
+    rest = {k: v for k, v in out.items() if k != "parts"}
+    assert rest == PINNED_REST
+
+
+PINNED_PARTS = {
+    "conductor": (2, 200, 20, 2000, 0, 0, 600, 400),
+    "ndf": (3, 300, 30, 3000, 0, 0, 72, 650),
+    "handoff": (1, 100, 10, 1000, 0, 0, 0, 200),
+    "restore": (1, 100, 10, 1000, 30, 40, 0, 318),
+}
+PINNED_REST = {
+    "work": "#7",
+    "sessions": 2,
+    "unknown_parts": {"restore": 0, "handoff": 1},
+    "restarts": {"容量": 1, "不明": 1},
+    "restart_count": 2,
+    "auto_compacts": "不明",
+    "quality": {"rework": 1, "review_fixes": "不明", "missed_requirements": "不明"},
+    "no_policy_rows": 0,
+}

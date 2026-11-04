@@ -23,10 +23,10 @@ import statistics
 import time
 from collections import defaultdict
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
+import clock
 import context_policy as cp
 import jsonio
 from context_policy import REASONS  # noqa: F401  sprint-state.py の --reason の選択肢
@@ -95,12 +95,8 @@ def stage_of(key: str) -> str:
 
 
 def parse_ts(value) -> float | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+    """記録の時刻の文字列を UNIX 時刻（秒）にする。文字列でないか読めなければ None。"""
+    return clock.epoch(value) if isinstance(value, str) else None
 
 
 # --- 判定の記録 ----------------------------------------------------------------------------------------
@@ -237,7 +233,7 @@ def session_file(sid: str, kind: str, env: Mapping | None = None) -> Path:
 def read_window(sid: str, env: Mapping | None = None) -> int | None:
     """statusline が書いた窓の大きさ。無い・形が違えば None（推測で埋めない。I7）。"""
     w = jsonio.read(session_file(sid, "window", env), missing={}, broken={}, want=dict).get("window")
-    return w if isinstance(w, int) and not isinstance(w, bool) and w > 0 else None
+    return w if cp.positive_int(w) else None
 
 
 def read_applied(sid: str, env: Mapping | None = None) -> dict:
@@ -267,6 +263,67 @@ def write_applied(sid: str, applied, env: Mapping | None = None) -> bool:
 # --- 会話の記録 ---------------------------------------------------------------------------------------
 
 
+def usage_call(usage: Mapping, ts: float | None, model) -> dict:
+    """API 呼び出し 1 回の usage を {ts, model, inp, out, read, w5, w1h, context} にする（会話の記録と使用量の帳簿で共通）。"""
+    from usage_ledger import cache_writes
+
+    w5, w1h = cache_writes(usage)
+    inp, read = int(usage.get("input_tokens") or 0), int(usage.get("cache_read_input_tokens") or 0)
+    return {
+        "ts": ts,
+        "model": model,
+        "inp": inp,
+        "out": int(usage.get("output_tokens") or 0),
+        "read": read,
+        "w5": w5,
+        "w1h": w1h,
+        "context": inp + read + w5 + w1h,
+    }
+
+
+def _auto_compact(e: dict) -> int | None:
+    """自動圧縮の境目の行なら 1、手動の圧縮なら 0、境目の行でなければ None。"""
+    if e.get("type") != "system" or e.get("subtype") != "compact_boundary":
+        return None
+    meta = e.get("compactMetadata")
+    return 1 if isinstance(meta, dict) and meta.get("trigger") == "auto" else 0
+
+
+def _user_text(e: dict, msg: dict) -> str | None:
+    """利用者の発言（メタの行を除く）の本文。文字列でなければ JSON にする。発言でなければ None。"""
+    if e.get("type") != "user" or e.get("isMeta"):
+        return None
+    content = msg.get("content")
+    return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+
+
+def _put_call(calls: list[dict], here: dict, mid, call: dict) -> None:
+    """同じ `message.id` が前にあれば、時刻を前のものに保って置き換える。無ければ足す。"""
+    if mid in here:
+        call["ts"] = calls[here[mid]]["ts"] or call["ts"]
+        calls[here[mid]] = call
+    else:
+        here[mid] = len(calls)
+        calls.append(call)
+
+
+def _json_lines(path) -> list[dict] | None:
+    """JSONL の辞書の行。読めなければ None。壊れた行と辞書でない行は飛ばす。"""
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    out = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            out.append(e)
+    return out
+
+
 def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, bool]:
     """会話の記録の API 呼び出し（同じ `message.id` は 1 回。I13）と、自動圧縮の回数と、ndf-next で始まったか。
 
@@ -274,32 +331,21 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
     時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
 
     呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
-    from usage_ledger import cache_writes
-
     seen = set() if seen is None else seen
+    entries = _json_lines(path)
+    if entries is None:
+        return [], None, False
     calls: list[dict] = []
     here: dict = {}  # このファイルで数えた message.id → calls の位置
     compacts = 0
     first_user: str | None = None
-    try:
-        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return [], None, False
-    for line in lines:
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(e, dict):
-            continue
-        if e.get("type") == "system" and e.get("subtype") == "compact_boundary":
-            meta = e.get("compactMetadata")
-            compacts += 1 if isinstance(meta, dict) and meta.get("trigger") == "auto" else 0
+    for e in entries:
+        if (auto := _auto_compact(e)) is not None:
+            compacts += auto
             continue
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
-        if e.get("type") == "user" and first_user is None and not e.get("isMeta"):
-            content = msg.get("content")
-            first_user = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+        if first_user is None:
+            first_user = _user_text(e, msg)
         usage = msg.get("usage")
         if e.get("type") != "assistant" or not isinstance(usage, dict):
             continue
@@ -307,24 +353,7 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
         if mid in seen and mid not in here:
             continue
         seen.add(mid)
-        w5, w1h = cache_writes(usage)
-        inp, read = int(usage.get("input_tokens") or 0), int(usage.get("cache_read_input_tokens") or 0)
-        call = {
-            "ts": parse_ts(e.get("timestamp")),
-            "model": msg.get("model"),
-            "inp": inp,
-            "out": int(usage.get("output_tokens") or 0),
-            "read": read,
-            "w5": w5,
-            "w1h": w1h,
-            "context": inp + read + w5 + w1h,
-        }
-        if mid in here:
-            call["ts"] = calls[here[mid]]["ts"] or call["ts"]
-            calls[here[mid]] = call
-        else:
-            here[mid] = len(calls)
-            calls.append(call)
+        _put_call(calls, here, mid, usage_call(usage, parse_ts(e.get("timestamp")), msg.get("model")))
     return calls, compacts, bool(first_user and HANDOFF_PATH.search(first_user))
 
 
@@ -452,6 +481,19 @@ def calibrate_repo(root: str | None, days: int = 30) -> tuple[dict, bool]:
     return body, write_cost_estimates(body, repo)
 
 
+def record_row(runtime: str, source: str, work: str, applied, context: int | None = None, event: str | None = None, reason=None) -> dict:
+    """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。
+
+    セッション ID は Claude Code のときだけ `CLAUDE_CODE_SESSION_ID` から取る。"""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
+    row = boundary_row(runtime=runtime, source=source, session_id=sid or None, work=work, context=context, applied=applied)
+    if event:
+        row.update(event=event)
+    else:
+        row.update(stage="cut", verdict=cp.RESTART, reason=reason)
+    return row
+
+
 def record_restart(work: str, reason: str | None = None, cwd: str | None = None, runtime: str = "claude") -> bool:
     """`ndf-next` を出すときの判定「再起動」を書き、見込みを較正し直す（`sprint-state.py next`。決定 6・11）。
 
@@ -464,10 +506,7 @@ def record_restart(work: str, reason: str | None = None, cwd: str | None = None,
         if reason is None:
             prev = last_denial(read_decisions(repo), work)
             reason = (prev or {}).get("reason") or (cp.REASON_CUTPOINT if applied.policy == cp.CURRENT else cp.REASON_MANUAL)
-        sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
-        row = boundary_row(source="sprint-state", runtime=runtime, session_id=sid or None, work=work, applied=applied)
-        row.update(stage="cut", verdict=cp.RESTART, reason=reason)
-        ok = append_decision(row, repo)
+        ok = append_decision(record_row(runtime, "sprint-state", work, applied, reason=reason), repo)
         calibrate_repo(root)
         return ok
     except Exception:  # noqa: BLE001 — 記録の失敗で ndf-next を止めない
