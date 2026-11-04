@@ -62,6 +62,9 @@ const CALLS: { [K in keyof Api]: (api: Api) => Promise<unknown> } = {
   cancelLoop: (a) => a.cancelLoop("p-1", "l1"),
   requestNextLap: (a) => a.requestNextLap("p-1", "l1"),
   answerLoop: (a) => a.answerLoop("p-1", "l1", 3, "approved"),
+  delegations: (a) => a.delegations(),
+  createDelegation: (a) => a.createDelegation({ client_name: "c", scope: "read", expires_in_seconds: 900 }),
+  revokeDelegation: (a) => a.revokeDelegation("d1"),
 };
 
 describe("画面の API クライアントと契約（受け入れ条件 1）", () => {

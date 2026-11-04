@@ -1,4 +1,4 @@
-import type { AccountDetail, Backlog, IssueCandidates, LoopDetail, Me, ModelCredential, Repository, SprintRunDetail, SprintRunRow, StepDetail, StepRow } from "../api.ts";
+import type { AccountDetail, Backlog, Delegation, IssueCandidates, LoopDetail, Me, ModelCredential, Repository, SprintRunDetail, SprintRunRow, StepDetail, StepRow } from "../api.ts";
 
 // ダミーデータ。本番の成果物にこの印が出たら check:bundle が落とす。実在の人・秘密を書かない
 export const DUMMY_MARKER = "ndf-factory-dummy-data";
@@ -279,5 +279,18 @@ export const loopDetails: LoopDetail[] = [
     laps: [],
     runs: [],
     pending: [],
+  },
+];
+
+// 委任の資格情報の一覧（値は持たない）
+export const delegations: Delegation[] = [
+  {
+    credential_id: "dummy000000000000000000001",
+    client_name: "見本の Claude Code",
+    scope: "read",
+    created_at: "2026-11-04T00:00:00.000Z",
+    expires_at: "2026-11-04T01:00:00.000Z",
+    revoked_at: null,
+    state: "expired",
   },
 ];

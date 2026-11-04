@@ -231,6 +231,25 @@ export interface LoopDetail {
   pending: LoopPending[];
 }
 
+// エージェントへの委任（factory/contracts/openapi/delegations.yaml。#2384）
+export type DelegationScope = "read" | "read_write";
+
+export interface Delegation {
+  credential_id: string;
+  client_name: string;
+  scope: DelegationScope;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+  state: "active" | "expired" | "revoked";
+}
+
+export interface DelegationInput {
+  client_name: string;
+  scope: DelegationScope;
+  expires_in_seconds: number;
+}
+
 export interface Api {
   me(): Promise<Me>;
   account(id: string): Promise<AccountDetail>;
@@ -269,6 +288,11 @@ export interface Api {
   cancelLoop(id: string, loopId: string): Promise<{ state: LoopState }>;
   requestNextLap(id: string, loopId: string): Promise<{ state: LoopState }>;
   answerLoop(id: string, loopId: string, issue: number, decision: LoopDecision, pr?: number): Promise<{ pending: LoopPending[] }>;
+  // 自分が発行した委任の資格情報（新しい順）
+  delegations(): Promise<Delegation[]>;
+  // 値（credential）は発行の結果で 1 度だけ返る
+  createDelegation(input: DelegationInput): Promise<{ delegation: Delegation; credential: string | null }>;
+  revokeDelegation(credentialId: string): Promise<Delegation>;
 }
 
 // 要素の結果（#2384）。入力と同じ順・同じ数で返る
@@ -372,5 +396,8 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     cancelLoop: (id, loop_id) => one("cancelLoop", id, { loop_id }),
     requestNextLap: (id, loop_id) => one("startNextLap", id, { loop_id }),
     answerLoop: (id, loop_id, issue, decision, pr) => one("answerLoopPending", id, { loop_id, issue, decision, ...(pr === undefined ? {} : { pr }) }),
+    delegations: () => list<Delegation>("listDelegations", null),
+    createDelegation: (input) => one("createDelegation", null, { ...input, idempotency_key: newKey() }),
+    revokeDelegation: async (credentialId) => (await values<Delegation>("revokeDelegation", null, "credential_id", [credentialId]))[0]!,
   };
 }

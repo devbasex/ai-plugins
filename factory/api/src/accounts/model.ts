@@ -17,9 +17,15 @@ export const PERSONAL_PLANS: readonly Plan[] = ["free", "pro", "max"];
 // 新しいアカウントの実行の形態（I24）
 export const INITIAL_EXECUTION_MODE: ExecutionMode = "local";
 
+// 呼び出し元の種類（#2384）。Cognito の token は screen、委任の資格情報の直の要求は api、MCP の受け口の内部の要求は mcp
+export type Via = "screen" | "api" | "mcp";
+
 export interface Caller {
   userId: string;
   idp: Idp;
+  // 委任の資格情報で呼んだときだけ。認可は持たず、人の直の操作と同じ解決を通す（I6）
+  delegation?: { credentialId: string; scope: "read" | "read_write" } | null;
+  via?: Via;
 }
 
 export interface UserRecord {

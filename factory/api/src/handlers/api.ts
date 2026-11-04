@@ -9,6 +9,9 @@ import { requireCaller, type AuthDeps, type AuthEnv } from "../auth/resolve.ts";
 import { registerMe } from "../routes/me.ts";
 import { registerTeams } from "../routes/teams.ts";
 import { registerAccounts } from "../routes/accounts.ts";
+import { registerDelegations } from "../routes/delegations.ts";
+import { DelegationService } from "../delegations/service.ts";
+import { DynamoDelegationStore } from "../delegations/store.ts";
 import { registerFactory, type FactoryDeps } from "../routes/factory.ts";
 import { factoryDepsFromEnv } from "../runs/deps.ts";
 
@@ -69,6 +72,7 @@ export function createApiApp(
   registerMe(app);
   registerTeams(app);
   registerAccounts(app);
+  registerDelegations(app);
   if (factory) registerFactory(app, factory);
   return app;
 }
@@ -89,6 +93,8 @@ export function depsFromEnv(): AuthDeps {
       clientId: requireEnv("COGNITO_CLIENT_ID"),
     }),
     accounts: new AccountService({ store: new DynamoAccountStore(requireEnv("ACCOUNTS_TABLE_NAME")) }),
+    // 委任の資格情報の表（インフラが DELEGATIONS_TABLE_NAME で渡す）。無い間は委任の資格情報を 401 にし、委任の操作を 503 にする
+    delegations: process.env.DELEGATIONS_TABLE_NAME ? new DelegationService({ store: new DynamoDelegationStore(process.env.DELEGATIONS_TABLE_NAME) }) : null,
   };
   return cached;
 }

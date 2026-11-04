@@ -4,7 +4,7 @@ import type { Context, Hono } from "hono";
 import { MAX_ITEMS, operation, type Operation, type OperationId } from "@ndf-factory/contracts/operations";
 import type { AccountContext } from "../accounts/model.ts";
 import { resolveFromRequest, type AuthEnv, type OperationTrace } from "../auth/resolve.ts";
-import { InvalidRequestError } from "../errors.ts";
+import { HumanOnlyError, InvalidRequestError, ScopeError } from "../errors.ts";
 import { runElements, type ElementResult } from "./elements.ts";
 
 export type Element = Record<string, unknown>;
@@ -25,9 +25,18 @@ async function contextOf(c: Context<AuthEnv>, op: Operation): Promise<AccountCon
   return resolveFromRequest(c, c.req.param("accountId"));
 }
 
+// 委任の資格情報の範囲と、操作の扱いを照らす（E3・E5、I4・I5）。人だけが確定できる操作は範囲によらず断る
+function guard(c: Context<AuthEnv>, op: Operation): void {
+  const delegation = c.get("caller").delegation;
+  if (!delegation) return;
+  if (op.access === "human") throw new HumanOnlyError();
+  if (op.access === "write" && delegation.scope !== "read_write") throw new ScopeError();
+}
+
 function trace(c: Context<AuthEnv>, op: Operation): OperationTrace {
   const t: OperationTrace = { operationId: op.operationId, accountId: op.path.includes("{accountId}") ? (c.req.param("accountId") ?? null) : null, targetIds: [], reasons: [] };
   c.set("operation", t);
+  guard(c, op);
   return t;
 }
 
