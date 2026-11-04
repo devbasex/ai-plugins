@@ -315,6 +315,8 @@ paths:
                 $ref: "#/components/schemas/SprintRunList"
         "403":
           $ref: "#/components/responses/E403"
+        "503":
+          $ref: "#/components/responses/E503"
   /accounts/{accountId}/sprint-runs/{sprintRunId}:
     get:
       tags: [sprint-runs]
