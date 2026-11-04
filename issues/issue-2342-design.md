@@ -113,7 +113,7 @@
 | プロセスの部品（`lib/procs.py`） | `runtime_session()`（祖先のランタイムのプロセスの pid と開始時刻）と `ancestors()`（自分の祖先の pid と開始時刻の並び）を足す | 変更（`hook_lib/worktree.session_owner` の探し方を移す） |
 | 実行の核の持ち主の段（`lib/run_core.py`） | E1 の後に `lease.acquire`、終わり（`finally`・SIGTERM の受け手）に `lease.release`。結果 JSON に `lease` を足す | 変更（柱 P1 #2337 の実行の核に段を足す） |
 | 契約の読み手（`scripts/contracts_lib/model.py`） | 入口の行の任意のキー `lease` の形を確かめる | 変更 |
-| 契約の一覧（`plugins/ndf/contracts/entrypoints/`） | 前提 3 の入口の行に `lease` を書く | 変更 |
+| 契約の一覧（`plugins/ndf/contracts/entrypoints/`） | 持ち主の鍵を宣言する 4 つの入口の行に `lease` を書く | 変更 |
 | 状態の一覧（`lib/run_state_kinds.py`） | 種類 `lease-record`（`leases/` の記録と錠）の行を足す。`review-worktree` の行の記録の置き場を `leases/` に直す | 変更 |
 | 片付け（`lib/run_state.py`・`merged-steps.py`） | レビュー worktree（`pr<n>`・`rf<n>`）の持ち主を、鍵 `cross-review:pr=<n>`・`cross-refactoring:pr=<n>` の `lease.read` で判定する。種類 `lease-record` は `lease.prune` を呼ぶ | 変更 |
 | cross-refactoring と cross-review の入口（`drive.py`・`refactor.py init`・`state.py init`） | 自前の持ち主の扱い（`adopt_owner`・`mark_owner`・`--run` の受け渡し）を消し、長く動く間は `ctx.touch()` で最後に動いた時刻を書く | 変更 |
@@ -151,7 +151,14 @@ graph TD
 ```
 
 キューの入口は持ち主の鍵を宣言した入口の 1 つで、耐久の記録の開き方だけを別に描く。
-処理の流れの図に描かない要素は、契約の読み手（核が契約の一覧を読むときに通る）・状態の一覧（片付けが読む宣言）・持ち主の記録の旧い読み手（見直しの持ち主だけが使う）・入口ごとの変更（持ち主の鍵を宣言した入口の一部）である。
+処理の流れの図に描かない要素は次の 4 つである。
+
+| 描かない要素 | 理由 |
+| --- | --- |
+| 契約の読み手 | 核が契約の一覧を読むときに通る |
+| 状態の一覧 | 片付けが読む宣言である |
+| 持ち主の記録の旧い読み手 | 見直しの持ち主だけが使う |
+| 入口ごとの変更 | 持ち主の鍵を宣言した入口の一部である |
 
 ### 配置
 
@@ -248,7 +255,7 @@ classDiagram
 
 - 持ち主の記録の形
 - 入口の契約に足すキー
-- 前提 3 の入口の宣言
+- 持ち主の鍵を宣言する入口
 - 状態の一覧に足す行
 - 移行
 
@@ -318,14 +325,15 @@ sequenceDiagram
     K-->>K: 結果 JSON の lease に書く
 ```
 
-- **返すのは `finally` と SIGTERM の受け手の両方から 1 回だけ**（2 回目は何もしない）。時間切れは本体の中の打ち切りが例外か終了コードで戻る経路で、`finally` を通る（#2321 の着手前のテストの打ち切りは `refactor.py init` が終了コード 4 で戻る経路である）
+- **返すのは `finally` と SIGTERM の受け手の両方から 1 回だけ**（2 回目は何もしない）。時間切れは、本体の中の打ち切りが例外か終了コードで戻る経路で、`finally` を通る。#2321 の着手前のテストの打ち切りは、`refactor.py init` が終了コード 4 で戻る経路である
 - `release` は、記録の持ち主のプロセス（pid と開始時刻）が自分の持ち主のプロセスと同じときだけ `finished_at` を書く。
   `inherited` で使った実行は返さない（祖先の持ち主が返す）。祖先が持っていない鍵を子の実行が取ったときは、その子が持ち主で、子の終わりで返す（I6）
 - **単位 `session` の記録は、`release: true` の副命令でだけ返す。** ほかの副命令の終わりでは `seen_at` だけを書く。`loop start` と `loop finish` は別の実行だが、持ち主のプロセスが同じランタイムのセッションなので `loop finish` が返せる。セッションが終われば、次の取る側が I4 で死を判定する
 
 ### 片付ける（F6）
 
-片付け（`run_state` の `review-worktree`・`merged-steps.py`）は、今 `<base>/<slug>/{pr,rf}<n>.owner.json` を読んで判定している箇所を、鍵 `cross-review:pr=<n>`・`cross-refactoring:pr=<n>` の `lease.read` と I4 の判定に置き換える。
+片付け（`run_state` の `review-worktree`・`merged-steps.py`）は、今 `<base>/<slug>/{pr,rf}<n>.owner.json` を読んで判定している。
+この判定を、鍵 `cross-review:pr=<n>`・`cross-refactoring:pr=<n>` の `lease.read` と I4 の判定に置き換える。
 判定の結果の扱い（生きていれば `kept`、終わっていれば今の条件で外す）は変えない。種類 `lease-record` は、片付けが `lease.prune(30)` を呼んで外す。
 
 ### キューを `--from` つきで再開する（E8）
