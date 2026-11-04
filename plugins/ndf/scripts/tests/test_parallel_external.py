@@ -179,3 +179,74 @@ def test_released_version_reads_ranges(tmp_path):
     pe.put_json(tmp_path / "ranges" / "2.json", {"sha": "b", "version": "10.28.0", "prs": [11], "lanes": []})
     assert pe.range_version(tmp_path, [11]) == "10.28.0"
     assert pe.range_version(tmp_path, [99]) is None
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        (None, ["{file, body} の形でない"]),
+        ({"file": "answers/a.json"}, ["{file, body} の形でない"]),
+        ({"file": 1, "body": {}}, ["{file, body} の形でない"]),
+        ({"file": "answers/a.json", "body": {"result": "released", "at": "t"}}, []),
+        (
+            {"file": "answers/a.json", "body": {"result": "x", "at": 1}},
+            ["result が released / rejected でない", "at が文字列でない"],
+        ),
+        ({"file": "answers/a.json", "body": {"result": "rejected"}}, ["at が文字列でない"]),
+        ({"file": "ranges/r.json", "body": {"prs": [1], "lanes": []}}, []),
+        (
+            {"file": "ranges/r.json", "body": {"prs": [True], "lanes": []}},
+            ["prs が整数の配列でないか lanes が配列でない"],
+        ),
+        (
+            {"file": "ranges/r.json", "body": {"prs": [1], "lanes": {}}},
+            ["prs が整数の配列でないか lanes が配列でない"],
+        ),
+        ({"file": "batch.json", "body": {"step": "present", "seq": 1}}, []),
+        ({"file": "batch.json", "body": {"step": "x", "seq": 1}}, ["step か seq の形が違う"]),
+        (
+            {
+                "file": "batch.json",
+                "body": {
+                    "step": "confirm:1",
+                    "seq": 2,
+                    "lanes": [{"lane": "a", "issues": [1], "requests": [{"prs": [3]}]}],
+                },
+            },
+            [],
+        ),
+        (
+            {
+                "file": "batch.json",
+                "body": {
+                    "step": "x",
+                    "seq": "1",
+                    "lanes": [
+                        {"lane": 1, "issues": [1]},
+                        {"lane": "b", "issues": [1], "requests": [{"prs": ["x"]}]},
+                    ],
+                },
+            },
+            ["step か seq の形が違う", "lanes の形が違う", "lanes の形が違う"],
+        ),
+        ({"file": "presented/p.json", "body": {"k": 1, "auto": False, "prs": [1]}}, []),
+        (
+            {"file": "presented/p.json", "body": {"k": 3, "auto": False, "prs": [1]}},
+            ["k・auto・prs の形が違う"],
+        ),
+        ({"file": "progress/p.json", "body": {"stages": ["tagged"]}}, []),
+        ({"file": "progress/p.json", "body": {"stages": ["x"]}}, ["stages に知らない段がある"]),
+        ({"file": "progress/p.json", "body": {}}, ["stages に知らない段がある"]),
+        ({"file": "results/r.json", "body": {"result": "failed", "prs": []}}, []),
+        ({"file": "results/r.json", "body": {"result": "rejected", "prs": []}}, ["result か prs の形が違う"]),
+        ({"file": "other/x.json", "body": {}}, ["知らないファイル: other/x.json"]),
+        ({"file": "batch2.json", "body": {}}, ["知らないファイル: batch2.json"]),
+    ],
+)
+def test_file_errors_pins_messages_per_kind(message, expected):
+    assert pe.file_errors(message) == expected
+
+
+def test_file_errors_delegates_requests_to_request_errors():
+    body = {"anything": 1}
+    assert pe.file_errors({"file": "requests/r1.json", "body": body}) == pe._request_errors("r1.json", body)
