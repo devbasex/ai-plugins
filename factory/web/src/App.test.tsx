@@ -11,6 +11,7 @@ const config = {
   cognitoClientId: "web-client",
   webUrl: "https://factory.example.test",
   apiUrl: "https://api.example.test",
+  pollIntervalMs: 30_000,
 };
 
 const me: Me = {

@@ -97,6 +97,73 @@ export interface SprintRunSummary {
   created_at: string;
 }
 
+// 一覧の行（#2172）。今のフェーズは最後の phase.changed の名前で、null は始まる前。5 つの名前に無い値もそのまま来る
+export interface SprintRunRow extends SprintRunSummary {
+  repo: string;
+  current_phase: string | null;
+  current_step: string | null;
+  last_event_at: string | null;
+}
+
+export interface PullRequestLink {
+  repo: string;
+  number: number;
+  url: string;
+}
+
+export interface StepRow {
+  key: string;
+  at: string;
+  job_id: string | null;
+  step: string;
+  phase: string | null;
+  issues: number[];
+  exit_code: number;
+  seconds: number;
+  cost_usd: number | null;
+  summary: string;
+  pull_request: PullRequestLink | null;
+  has_details: boolean;
+}
+
+export type GateState = "not_reached" | "waiting" | "approved" | "rejected";
+export type DecisionState = "none" | "waiting" | "answered";
+
+export interface SprintRunDetail extends SprintRunSummary {
+  repo: string;
+  ndf_version: string;
+  execution_mode: ExecutionMode;
+  job_count: number;
+  current_phase: string | null;
+  phases: { name: string; step_keys: string[]; required: { label: string; step: string; record: { key: string; exit_code: number; seconds: number } | null }[] }[];
+  columns: {
+    issue: number | null;
+    step_keys: string[];
+    pull_requests: (PullRequestLink & { state: "open" | "closed" | "merged" | "unknown"; checks: { name: string; conclusion: string | null }[] })[];
+  }[];
+  steps: StepRow[];
+  gates: { gate1: { state: GateState; at: string | null }; gate2: { state: GateState; at: string | null }; decision: { state: DecisionState; at: string | null } };
+  delegated_decisions: number;
+  usage: { input_tokens: number; output_tokens: number; cost_usd: number };
+  omitted_steps: number;
+}
+
+export interface StepDetail extends StepRow {
+  files: { path: string; added: number | null; deleted: number | null; url: string | null }[] | null;
+  files_omitted: number | null;
+  commit_range: { from: string; to: string } | null;
+  decisions: { question: string; answer: string; by: "ai" | "user" }[] | null;
+  output: { kind: "report" | "log"; text: string; truncated: boolean } | null;
+  diff_url: string | null;
+}
+
+export interface Backlog {
+  repository_id: number;
+  repo: string;
+  ranking: { milestone: string; rows: { rank: number; number: number; title: string }[] } | null;
+  refinements: { sprint_run_id: string; key: string; at: string; exit_code: number; summary: string; pull_request: PullRequestLink | null }[];
+}
+
 // #2347 の開発ループ（factory/contracts/openapi/loops.yaml）
 export type LoopState = "running" | "between_laps" | "awaiting_approval" | "stopped" | "cancelled";
 export type LoopWaitReason = "slots" | "legacy_version" | "user_start";
@@ -185,9 +252,13 @@ export interface Api {
   issueCandidates(id: string, repositoryId: number, exclude: number[]): Promise<IssueCandidates>;
   startSprintRun(id: string, repositoryId: number, issues: number[]): Promise<{ sprint_run_id: string; state: string }>;
   // repositoryId を省くとアカウントの新しい順の 50 件（画面は 1 回だけ呼んでリポジトリごとに分ける）
-  sprintRuns(id: string, repositoryId?: number): Promise<{ sprint_runs: SprintRunSummary[] }>;
-  // 実行の ID の配列で受け、見つかった要素の配列を返す（1 件のときも要素 1 個の配列）。見つからない ID の要素は返さない
-  sprintRunDetails(id: string, sprintRunIds: string[]): Promise<SprintRunSummary[]>;
+  sprintRuns(id: string, repositoryId?: number): Promise<{ sprint_runs: SprintRunRow[] }>;
+  // 実行の ID の配列で受け、要素の配列を返す（1 件のときも要素 1 個の配列）。無い実行は API が他人の実行と同じ 403 を返し、そのまま投げる
+  sprintRunDetails(id: string, sprintRunIds: string[]): Promise<SprintRunDetail[]>;
+  // 工程の中身。工程の鍵（事象の idempotency_key）の配列で受ける
+  stepDetails(id: string, sprintRunId: string, stepKeys: string[]): Promise<StepDetail[]>;
+  // バックログ（順位の表と棚卸しの記録）。リポジトリの ID の配列で受ける
+  backlogs(id: string, repositoryIds: number[]): Promise<Backlog[]>;
   cancelSprintRun(id: string, sprintRunId: string): Promise<{ state: string }>;
   // 同時の実行の数の宣言（持ち主だけ）。null は宣言を外す
   updateRepository(id: string, repositoryId: number, maxConcurrentRuns: number | null): Promise<Repository>;
@@ -245,12 +316,12 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     startSprintRun: (id, repository_id, issues) => request("POST", `/accounts/${seg(id)}/sprint-runs`, { repository_id, issues }),
     sprintRuns: (id, repositoryId) =>
       request("GET", `/accounts/${seg(id)}/sprint-runs${repositoryId === undefined ? "" : `?repository_id=${repositoryId}`}`),
-    // 詳細の経路はまだ無いため、アカウントの新しい順の 50 件から選ぶ。#2172 が詳細の経路を足したらここだけを差し替える
-    sprintRunDetails: async (id, sprintRunIds) => {
-      const wanted = new Set(sprintRunIds);
-      const { sprint_runs } = await request<{ sprint_runs: SprintRunSummary[] }>("GET", `/accounts/${seg(id)}/sprint-runs`);
-      return sprint_runs.filter((r) => wanted.has(r.sprint_run_id));
-    },
+    // 経路は 1 件ずつ読む
+    sprintRunDetails: (id, sprintRunIds) =>
+      Promise.all(sprintRunIds.map((sprintRunId) => request<SprintRunDetail>("GET", `/accounts/${seg(id)}/sprint-runs/${seg(sprintRunId)}`))),
+    stepDetails: (id, sprintRunId, stepKeys) =>
+      Promise.all(stepKeys.map((key) => request<StepDetail>("GET", `/accounts/${seg(id)}/sprint-runs/${seg(sprintRunId)}/steps/${seg(key)}`))),
+    backlogs: (id, repositoryIds) => Promise.all(repositoryIds.map((repositoryId) => request<Backlog>("GET", `/accounts/${seg(id)}/repositories/${repositoryId}/backlog`))),
     cancelSprintRun: (id, sprintRunId) => request("POST", `/accounts/${seg(id)}/sprint-runs/${seg(sprintRunId)}/cancel`),
     updateRepository: (id, repositoryId, max_concurrent_runs) => request("PATCH", `/accounts/${seg(id)}/repositories/${repositoryId}`, { max_concurrent_runs }),
     loops: (id, repositoryId) => request("GET", `/accounts/${seg(id)}/repositories/${repositoryId}/loops`),

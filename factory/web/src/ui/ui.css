@@ -489,3 +489,76 @@ ul {
     content: none;
   }
 }
+
+/* スプリントの一覧と詳細（#2172） */
+.ui-muted {
+  display: block;
+  font-size: 0.875em;
+}
+
+.phase-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.phase-bars__bar {
+  display: inline-block;
+  width: 1.25rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  border: 1px solid var(--color-primary);
+}
+
+.phase-bars__bar--passed {
+  background: var(--color-primary);
+}
+
+.phase-bars__bar--current {
+  background: var(--color-info-bg);
+}
+
+.phase-text {
+  margin-inline-start: 0.5rem;
+}
+
+.sprint-phases {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+}
+
+.sprint-detail {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .sprint-detail {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+.sprint-steps__row {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem;
+  text-align: start;
+  background: var(--color-base);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sprint-steps__row--selected {
+  border-color: var(--color-primary);
+}
+
+.sprint-panel__output {
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

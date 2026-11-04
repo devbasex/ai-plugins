@@ -117,16 +117,17 @@
     "loops": "ループ",
     "maxConcurrent": "同時の実行の数（空なら料金プランの値）",
     "maxConcurrentRange": "1 から 100 の整数を入れてください",
-    "saveMaxConcurrent": "宣言する"
+    "saveMaxConcurrent": "宣言する",
+    "backlog": "バックログ"
   },
   "sprintState": {
     "starting": "起動中",
-    "running": "動いている",
+    "running": "実行中",
     "awaiting_approval": "承認待ち",
     "done": "終わった",
     "stopped": "止まった",
     "failed": "失敗",
-    "cancelled": "取り消した",
+    "cancelled": "取り消し",
     "awaiting_reset": "利用上限の待ち"
   },
   "modelCredential": {
@@ -166,13 +167,104 @@
     "createdAt": "始めた日時",
     "empty": "スプリントの実行はまだありません",
     "noMatch": "絞り込みに合う実行はありません",
-    "repositoryId": "リポジトリ {{id}}"
+    "repositoryId": "リポジトリ {{id}}",
+    "phase": "フェーズ",
+    "currentStep": "今の工程: {{step}}",
+    "lastEventAt": "最後の動き",
+    "noEvent": "—",
+    "summary": "件数",
+    "activeCount": "動いている",
+    "waitingCount": "対応待ち",
+    "tabs": "状態で絞る",
+    "tabAll": "すべて",
+    "tabActive": "動いている",
+    "tabWaiting": "対応待ち",
+    "tabFinished": "終わった"
   },
   "sprintDetail": {
-    "notFound": "このスプリントの実行は見つかりません",
     "failureReason": "失敗の理由",
     "none": "無し",
-    "back": "スプリントの一覧へ戻る"
+    "back": "スプリントの一覧へ戻る",
+    "openGitHub": "GitHub で開く",
+    "overview": "概要",
+    "ndfVersion": "NDF の版",
+    "executionMode": "実行の形態",
+    "jobCount": "実行ジョブの数",
+    "phases": "フェーズ",
+    "phaseSteps": "{{count}} 件の工程",
+    "required": "必須の工程",
+    "notYet": "まだ",
+    "recordResult": "終了コード {{code}}・{{seconds}} 秒",
+    "steps": "工程の記録",
+    "stepsEmpty": "工程の記録はまだありません",
+    "columns": "課題で絞る",
+    "columnAll": "すべて",
+    "columnSprint": "スプリント全体",
+    "columnIssue": "#{{issue}}",
+    "omitted": "古い工程 {{count}} 件は省きました",
+    "stepLine": "{{step}}（{{phase}}）",
+    "stepMeta": "終了コード {{code}}・{{seconds}} 秒・{{at}}",
+    "gates": "承認ゲート",
+    "gate1": "ゲート 1",
+    "gate2": "ゲート 2",
+    "decision": "判断",
+    "gateState": {
+      "not_reached": "まだ",
+      "waiting": "承認待ち",
+      "approved": "承認された",
+      "rejected": "差し戻された"
+    },
+    "decisionState": {
+      "none": "無し",
+      "waiting": "判断を待っている",
+      "answered": "判断に答えた"
+    },
+    "pullRequests": "Pull Request と CI",
+    "pullRequestsEmpty": "Pull Request はまだありません",
+    "prLabel": "#{{number}}",
+    "prState": {
+      "open": "open",
+      "closed": "closed",
+      "merged": "merged",
+      "unknown": "不明"
+    },
+    "checkRunning": "実行中",
+    "checkLine": "{{name}}: {{conclusion}}",
+    "delegated": "AI が代わりに判断した問い合わせ",
+    "usage": "使用量",
+    "inputTokens": "入力の token",
+    "outputTokens": "出力の token",
+    "cost": "費用",
+    "panel": "工程の詳細",
+    "backToOverview": "概要に戻る",
+    "stepName": "ステップ",
+    "exitCode": "終了コード",
+    "seconds": "秒",
+    "stepCost": "費用",
+    "summaryLabel": "要約",
+    "noCost": "—",
+    "files": "触ったファイル",
+    "filesOmitted": "ほか {{count}} 件",
+    "fileChange": "+{{added}} −{{deleted}}",
+    "binary": "バイナリ",
+    "decisions": "この工程で決めたこと",
+    "decisionLine": "{{question}} → {{answer}}",
+    "decidedBy": {
+      "ai": "AI",
+      "user": "利用者"
+    },
+    "noDecisions": "決めたことはありません",
+    "noFiles": "触ったファイルはありません",
+    "diff": "差分を GitHub で見る",
+    "openReport": "作業の報告を開く",
+    "openLog": "ログを開く",
+    "closeOutput": "閉じる",
+    "truncated": "長いため途中で切りました",
+    "noRecord": "記録なし",
+    "requiredStep": {
+      "retro": "振り返り",
+      "refine": "棚卸し"
+    }
   },
   "loopState": {
     "running": "動いている",
@@ -265,5 +357,38 @@
     "cancel": "ループを止める",
     "nextLap": "次の周回を始める",
     "minutes": "{{value}} 分"
+  },
+  "phase": {
+    "design": "設計",
+    "impl": "実装",
+    "check": "検査",
+    "integrate": "取り込み",
+    "finish": "仕上げ",
+    "notStarted": "始まる前",
+    "other": "その他（{{name}}）",
+    "bars": "フェーズの進み",
+    "passed": "{{name}}（通った）",
+    "current": "{{name}}（今）",
+    "ahead": "{{name}}（まだ）"
+  },
+  "poll": {
+    "stale": "読み直せませんでした（{{time}}）"
+  },
+  "backlog": {
+    "lastRefinement": "最後の棚卸し",
+    "milestone": "順位の表のマイルストーン",
+    "none": "—",
+    "ranking": "着手の順位",
+    "rankingEmpty": "順位の表がありません",
+    "rank": "順位",
+    "issue": "課題",
+    "refinements": "棚卸しの記録",
+    "refinementsEmpty": "棚卸しの記録はまだありません",
+    "at": "日時",
+    "summary": "要約",
+    "pullRequest": "Pull Request",
+    "exitCode": "終了コード",
+    "back": "リポジトリへ戻る",
+    "issueLine": "#{{number}} {{title}}"
   }
 }

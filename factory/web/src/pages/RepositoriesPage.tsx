@@ -112,6 +112,7 @@ export function RepositoriesPage() {
                 <strong className="ui-wrap">{r.full_name}</strong>{" "}
                 <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/sprints/new`}>{t("screens.newSprint")}</Link>{" "}
                 <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/loops`}>{t("repositories.loops")}</Link>{" "}
+                <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/backlog`}>{t("repositories.backlog")}</Link>{" "}
                 {owner && (
                   <Button variant="danger" onClick={() => void act(() => api.removeRepository(accountId, r.repository_id))}>
                     {t("common.remove")}
