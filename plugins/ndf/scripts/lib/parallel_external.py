@@ -291,8 +291,6 @@ def settle_batch(main: Path, d: Path, batch: dict, seq: int, done: dict, reason:
     if "関門" in results:
         raise ValueError("本番のプランが承認ゲートで止まっている")
     k = step_k(batch.get("step") or "continue", batch)
-    if batch.get("step") in ("present", "represent"):
-        k = 1 if batch["step"] == "present" else 2
     rd = batch_release_dir(d, seq, k)
     version = (read_json(rd / "version.json", {}) or {}).get("version") or done.get("version") or ""
     if not (Path(d) / "presented" / f"{seq}-{k}.json").exists() and (rd / "presented.json").exists():
