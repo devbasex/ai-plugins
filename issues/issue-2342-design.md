@@ -132,6 +132,7 @@
 | 耐久の部品（`lib/durable.py`） | `resume_ref(prefix, resume)`: `--from` があれば途中を子ごと止めて新しい実行の回、無ければ `resolve` のとおり。`launch` の `lock_timeout` の既定を 0 にする | 変更 |
 | 再開する入口の本体（`supervise_lib/flow.py`・`queue.py`・`queue_resume.py`・cross-review と cross-refactoring の `drive.py`） | 再開の位置を `ctx.resume` と耐久の記録だけから決める。キューの止まったプランの位置を前の実行の回の出力から読み、`progress.jsonl` を読まない | 変更 |
 | 旧い再開の形（`supervise.py run --from`・`queue --resume`・cross-review の `drive.py --reopen`） | 持ち主の記録の `last_run` で前の実行を引き、再開の入口と同じ処理へ渡し、標準エラーに新しい形を出す | 変更（別名） |
+| 見直しの持ち主の設定と判定（backlog-refinement の `upkeep_depth.py`・`upkeep_actions.py`・`upkeep_owner.py`） | 設定の既定値から `owner.ttl` を外す。利用者の `.ndf/backlog.json` に `depths.owner.ttl` があれば、読まずに無視したと標準エラーへ警告する（決定 15）。`apply` が持ち主の一致と生死を確かめる判定（今は ttl で判定する）を、持ち主の部品の `lease.read` へ移す。`owner release` は契約の `release: true` で返す | 変更 |
 | 開発ループ（`lib/sprint_loop.py`） | `loop` の副命令は持ち主の単位 `session` の鍵 `supervise.loop:name={name}` を取る。`stop`・`finish` が返す | 変更 |
 | 打ち切りの実装（`refactor_lib/process.py`・`lib/test_triage.py`・`lib/worktree_deps.py`） | 打ち切りを `procs.stop_run_tree` へ寄せる | 変更 |
 | 配布のプランの後片付け（`supervise_lib/release_templates.py`） | 後片付けのステップが、そのプランの配布の承認資料を `run_state` の種類 `approval-doc` として外す | 変更 |
@@ -325,9 +326,16 @@ sequenceDiagram
         L-->>K: 読めない（核が stopped・1 に変え、理由に記録のパス）
     end
     L->>L: 生死の判定（下の表）
-    alt 死んでいる・終わっている・無い
+    alt 終わっている・無い
         L->>F: 記録を書く（E3・E6）
-        L-->>K: acquired / reclaimed
+        L-->>K: acquired
+    else 死んでいる
+        L->>F: 記録を書かずに自分の鍵の排他を外す
+        L->>F: 結び付く鍵すべての排他を名前の順に取り直す
+        L->>L: 生死の判定を引き直す
+        L->>L: まだ死んでいれば sweep_bound（held）で結び付いた状態を片付ける
+        L->>F: 記録を書き、排他をすべて外す（E3・E6）
+        L-->>K: reclaimed（引き直して変わっていれば、その結果）
     else 持ち主のプロセスが自分の祖先
         L->>F: 最後に動いた時刻を書く
         L-->>K: inherited
@@ -380,7 +388,7 @@ sequenceDiagram
   `inherited` で使った実行は返さない（祖先の持ち主が返す）。祖先が持っていない鍵を子の実行が取ったときは、その子が持ち主で、子の終わりで返す（I6）
 - **単位 `session` の記録は、`release: true` の副命令でだけ返す。** ほかの副命令の終わりでは `seen_at` だけを書く。`loop start` と `loop finish` は別の実行だが、持ち主のプロセスが同じランタイムのセッションなので `loop finish` が返せる。セッションが終われば、次の取る側が I4 で死を判定する
 - **片付けは返した世代だけを外す。** `sweep_bound` は結び付く鍵すべての排他の中で記録を読み直し、どれかの鍵を次の実行が取っていれば外さない（I8）
-- **排他は 1 つの順序でだけ取る。** 複数の鍵の排他を持つときは、必ず鍵の名前の順に取る。1 つの鍵の排他を持ったまま、別の鍵の排他を取りに行かない。
+- **排他は 1 つの順序でだけ取る。** 複数の鍵の排他を持つときは、必ず鍵の名前の順に取る。名前の順で後の鍵の排他を持ったまま、前の鍵の排他を取りに行かない。順を守れないときは、持っている排他をすべて外してから名前の順に取り直す。
   `release` は自分の鍵の排他を外してから戻り、核はその後に `sweep_bound` を呼ぶ
 - **死んだ持ち主を `reclaimed` で取るときは、次の順に進む。** 自分の鍵だけの排他の中で死んだ持ち主を見つけたら、記録を書かずに排他を外す。
   結び付く鍵すべて（自分の鍵を含む）の排他を名前の順に取り直し、その中で上の表を引き直す。まだ死んでいれば結び付いた状態を片付け、自分の記録を書いてから、排他をすべて外す。
@@ -498,7 +506,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2342 | 実装する | — | `plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/hook_lib/worktree.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/scripts/`、`plugins/ndf/skills/cross-refactoring/scripts/`、`plugins/ndf/skills/backlog-refinement/scripts/`、`plugins/ndf/contracts/`、`scripts/contracts_lib/model.py`、`scripts/check-script-structure.py`、`scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2342 | 実装する | — | `plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/hook_lib/worktree.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/scripts/`、`plugins/ndf/skills/cross-refactoring/scripts/`、`plugins/ndf/skills/backlog-refinement/scripts/`、`plugins/ndf/contracts/`、`scripts/contracts_lib/model.py`、`scripts/check-script-structure.py`、`scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/specifications/ndf-backlog-refinement-depths.md` |
 
 子の課題は表に載せない。表の行はスプリントの Pull Request の `Closes` になるが、子の課題は本番へ出した版で再現の手順を通してから閉じるためである（受け入れ条件 10）。
 

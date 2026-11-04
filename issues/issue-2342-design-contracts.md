@@ -58,7 +58,7 @@
 
 `{done}` と `{plan}` はリポジトリの根からの相対パスに正規化する。旧い置き場の `{review_base}` は入力ではない。
 片付けと同じ `run_state.review_base(<リポジトリの根>)` が返す、レビュー worktree の置き場（`<base>/<slug>`）で埋める。
-`loop stop` と `loop finish` は `release: true` を持つ。
+`loop stop` と `loop finish`、backlog-refinement の `upkeep.py owner release` は `release: true` を持つ（`owner release` は見直し・大整理の成否によらず通すステップで、見直しを 1 回終えた conductor はここで鍵を返す）。
 見直しの持ち主の寿命の窓は契約の 900 秒に固定し、`.ndf/backlog.json` の `depths.owner.ttl` を読まない（適用範囲のとおり、持ち主の部品はプロジェクトの `.ndf/` を読まない）。
 同じホストの見直しの持ち主は、窓を過ぎても pid と開始時刻が一致する間は生きているとみなす（I4・決定 15）。どれも `stop` にする理由は決定 2 にある。
 
@@ -87,6 +87,7 @@
 | `refactor.py init` と `state.py init` の `--run` | 受けて捨て、標準エラーに「実行の識別子は核が振る」と出す（内部の入口で `public: false`） | 同じ Pull Request で呼ぶ側（drive）から外す |
 | 旧い再開の形（前提 7） | 別名として再開の入口へ渡す（入出力の契約の表） | この柱を含む正式版の次の正式版（#2335 の決定 8） |
 | `.ndf/backlog/owner.json` | 上の旧い置き場として読む。書かない・消さない | 同上 |
+| 設定 `depths.owner.ttl`（`.ndf/backlog.json`） | 読まない。値があれば無視したと標準エラーへ警告する（決定 15） | この柱の実装の Pull Request で、`upkeep_depth.py` の既定値と確定仕様（`docs/specifications/ndf-backlog-refinement-depths.md` の持ち主の寿命の窓の行と宣言の有効性の規則）から外す |
 
 ## 入出力の契約
 
@@ -103,7 +104,8 @@
 | `lease.cleanup` | list | 返した後の片付けの結果（`run_state` の `items` と同じ形。`removed` / `kept` と理由） |
 
 `refused` と `wait-timeout` は `status: stopped`・終了コード 3 で、`summary` に持ち主の実行の識別子・pid・最後に動いた時刻を書く。
-案内（`next`）は打てる手段だけを書く: 持ち主が終わるのを待つ、または `kill <pid>` の後に同じコマンドを打ち直す（#2321 の受け入れ条件 3）。
+案内（`next`）は打てる手段だけを書く: 持ち主が終わるのを待ってから同じコマンドを打ち直す（#2321 の受け入れ条件 3）。
+持ち主のプロセスは別の実行か利用者のランタイムのセッション（Claude Code・Codex）なので、案内に `kill` を書かない。待てないときは、conductor は止まった理由と持ち主の pid を添えて人へ戻す。持ち主を止めるかどうかは人が決める（共通原則の C4）。
 
 ### 再開の入口
 
