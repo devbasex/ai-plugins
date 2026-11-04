@@ -170,27 +170,24 @@ def read_context_setting(root) -> tuple[dict, str | None]:
     return (({}, why) if why else parse_context_setting(data)) if data or why else ({}, None)
 
 
-def resolve_policy(root=None, env: Mapping | None = None, cli: Mapping | None = None) -> AppliedPolicy:
-    """適用値を解決する（I2・I3）。cli は {"policy": ..., "limit": ...}（値が None のキーは無視）。
-
-    `NDF_CONTEXT_LIMIT` は適用中の方針の運用上限を上書きし、判断開始の値がそれを上回れば同じ値へ下げる（決定 2）。
-    モデル名と窓の大きさは方針を選ばない（I15）。"""
-    if env is None:  # 読む変数を名前で書く（契約の検査が読みを拾う）
-        env = {"NDF_CONTEXT_POLICY": os.environ.get("NDF_CONTEXT_POLICY"), "NDF_CONTEXT_LIMIT": os.environ.get("NDF_CONTEXT_LIMIT")}
-    cli = cli or {}
-    setting, error = read_context_setting(root)
-    sources = {"policy": "default", "decide_from": "default", "limit": "default", "margin": "default"}
-    policy = CURRENT
+def _resolve_policy_name(setting: dict, env: Mapping, cli: Mapping) -> tuple[str, str, str | None]:
+    """方針名を 既定 < config < env < CLI で重ね、(方針名, 出所, 無視した環境変数の記述) を返す。"""
+    policy, source, ignored = CURRENT, "default", None
     if setting:
-        policy = setting["policy"]
-        sources["policy"] = "config"
+        policy, source = setting["policy"], "config"
     env_policy = (env.get("NDF_CONTEXT_POLICY") or "").strip()
     if env_policy in POLICIES:
-        policy, sources["policy"] = env_policy, "env"
+        policy, source = env_policy, "env"
     elif env_policy:
-        sources["ignored"] = f"NDF_CONTEXT_POLICY={env_policy}"
+        ignored = f"NDF_CONTEXT_POLICY={env_policy}"
     if cli.get("policy") in POLICIES:
-        policy, sources["policy"] = cli["policy"], "cli"
+        policy, source = cli["policy"], "cli"
+    return policy, source, ignored
+
+
+def _resolve_thresholds(policy: str, setting: dict, env: Mapping, cli: Mapping) -> tuple[int, int, int, dict]:
+    """方針に応じた判断開始・運用上限・余白を重ね、(decide_from, limit, margin, 出所) を返す。"""
+    sources = {"decide_from": "default", "limit": "default", "margin": "default"}
     margin = setting.get("margin", MARGIN)
     if "margin" in setting and policy == TRIAL:
         sources["margin"] = "config"
@@ -208,6 +205,23 @@ def resolve_policy(root=None, env: Mapping | None = None, cli: Mapping | None = 
     if policy == CURRENT or decide_from > limit:
         decide_from = limit
         sources["decide_from"] = sources["limit"]
+    return decide_from, limit, margin, sources
+
+
+def resolve_policy(root=None, env: Mapping | None = None, cli: Mapping | None = None) -> AppliedPolicy:
+    """適用値を解決する（I2・I3）。cli は {"policy": ..., "limit": ...}（値が None のキーは無視）。
+
+    `NDF_CONTEXT_LIMIT` は適用中の方針の運用上限を上書きし、判断開始の値がそれを上回れば同じ値へ下げる（決定 2）。
+    モデル名と窓の大きさは方針を選ばない（I15）。"""
+    if env is None:  # 読む変数を名前で書く（契約の検査が読みを拾う）
+        env = {"NDF_CONTEXT_POLICY": os.environ.get("NDF_CONTEXT_POLICY"), "NDF_CONTEXT_LIMIT": os.environ.get("NDF_CONTEXT_LIMIT")}
+    cli = cli or {}
+    setting, error = read_context_setting(root)
+    policy, policy_source, ignored = _resolve_policy_name(setting, env, cli)
+    decide_from, limit, margin, threshold_sources = _resolve_thresholds(policy, setting, env, cli)
+    sources = {"policy": policy_source, **threshold_sources}
+    if ignored:
+        sources["ignored"] = ignored
     return AppliedPolicy(policy, decide_from, limit, margin, sources, error)
 
 
