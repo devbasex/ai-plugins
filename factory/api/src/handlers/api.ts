@@ -12,10 +12,15 @@ import { registerAccounts } from "../routes/accounts.ts";
 import { registerDelegations } from "../routes/delegations.ts";
 import { DelegationService } from "../delegations/service.ts";
 import { DynamoDelegationStore } from "../delegations/store.ts";
+import { recordOperations, requestIdOf } from "../audit/middleware.ts";
+import { DynamoAuditLog } from "../audit/dynamo-log.ts";
+import { StructuredLogAudit } from "../audit/structured-log.ts";
 import { registerFactory, type FactoryDeps } from "../routes/factory.ts";
 import { factoryDepsFromEnv } from "../runs/deps.ts";
 
 export interface LogEntry {
+  // 操作の記録の record_id と同じ値（同じ要求の記録とログの行をたどる）
+  request_id: string;
   user_id: string | null;
   method: string;
   path: string;
@@ -47,8 +52,10 @@ export function createApiApp(
 ): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
   app.use("*", async (c, next) => {
+    c.set("requestId", requestIdOf(c));
     await next();
     log({
+      request_id: c.get("requestId")!,
       user_id: c.get("caller")?.userId ?? null,
       method: c.req.method,
       path: c.req.path,
@@ -64,6 +71,8 @@ export function createApiApp(
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     }),
   );
+  // 操作の記録は認証より外に置き、401 で断った要求も記録する（I7）
+  app.use("*", recordOperations(() => deps().audit, (line) => console.log(JSON.stringify(line))));
   app.use("*", requireCaller(deps));
   app.onError((err, c) => {
     const known = err instanceof ApiError ? err : new AccountUnavailableError();
@@ -95,6 +104,8 @@ export function depsFromEnv(): AuthDeps {
     accounts: new AccountService({ store: new DynamoAccountStore(requireEnv("ACCOUNTS_TABLE_NAME")) }),
     // 委任の資格情報の表（インフラが DELEGATIONS_TABLE_NAME で渡す）。無い間は委任の資格情報を 401 にし、委任の操作を 503 にする
     delegations: process.env.DELEGATIONS_TABLE_NAME ? new DelegationService({ store: new DynamoDelegationStore(process.env.DELEGATIONS_TABLE_NAME) }) : null,
+    // 操作の記録の表（インフラが AUDIT_TABLE_NAME で渡す）。無い間は記録を構造化ログへ出す
+    audit: process.env.AUDIT_TABLE_NAME ? new DynamoAuditLog(process.env.AUDIT_TABLE_NAME) : new StructuredLogAudit(),
   };
   return cached;
 }

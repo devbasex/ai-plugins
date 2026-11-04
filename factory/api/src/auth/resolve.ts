@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { AccountService } from "../accounts/service.ts";
 import type { AccountContext, Caller } from "../accounts/model.ts";
+import type { AuditLog } from "../audit/log.ts";
 import type { DelegationService } from "../delegations/service.ts";
 import { AuthError } from "../errors.ts";
 import { verifyAuthorization, type AccessTokenVerifier } from "./verify.ts";
@@ -10,6 +11,8 @@ export interface AuthDeps {
   accounts: AccountService;
   // 委任の資格情報の照合（#2384）。無ければ委任の資格情報は 401
   delegations?: DelegationService | null;
+  // 操作の記録の書き手（#2384）。無ければ記録しない（テストで記録を見ないとき）
+  audit?: AuditLog | null;
 }
 
 // MCP の受け口が内部の要求に付ける印（app.request の第 3 引数の環境に置く）。外から届くヘッダーでは決めない（決定 13・I16）
@@ -47,7 +50,7 @@ export interface OperationTrace {
   reasons: string[];
 }
 
-export type AuthEnv = { Variables: { caller: Caller; auth: AuthDeps; operation?: OperationTrace } };
+export type AuthEnv = { Variables: { caller: Caller; auth: AuthDeps; operation?: OperationTrace; requestId?: string } };
 
 // 経路の前に token を毎回検証し、利用者を文脈に置く中間処理（E3）。
 // #2171・#2186・#2174 の経路も同じ中間処理を通す

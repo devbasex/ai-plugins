@@ -2,6 +2,7 @@ import { operation, operationUrl, type OperationId } from "@ndf-factory/contract
 import { AccountService } from "../accounts/service.ts";
 import { MemoryAccountStore } from "../accounts/memory-store.ts";
 import { MemoryDelegationStore } from "../delegations/memory-store.ts";
+import { MemoryAuditLog } from "../audit/memory-log.ts";
 import { DelegationService } from "../delegations/service.ts";
 import { createApiApp, type LogEntry } from "../handlers/api.ts";
 import { createTokenKit, type TokenKit } from "./tokens.ts";
@@ -61,6 +62,7 @@ export interface TestApi {
   store: MemoryAccountStore;
   service: AccountService;
   delegationStore: MemoryDelegationStore;
+  audit: MemoryAuditLog;
   delegations: DelegationService;
   // 時刻を進められる時計（委任の期限の確かめ）
   clock: { now: Date };
@@ -81,6 +83,7 @@ export async function createTestApi(opts: { factory?: boolean } = {}): Promise<T
   const logs: LogEntry[] = [];
   const clock = { now: new Date("2026-11-04T00:00:00.000Z") };
   const delegationStore = new MemoryDelegationStore();
+  const audit = new MemoryAuditLog();
   const delegations = new DelegationService({ store: delegationStore, now: () => clock.now });
   const secrets = new FakeSecrets();
   const h = opts.factory ? await createRunsHarness() : null;
@@ -100,7 +103,7 @@ export async function createTestApi(opts: { factory?: boolean } = {}): Promise<T
     };
   }
   const app = createApiApp(
-    () => ({ verifier: tokens.verifier, accounts: service, delegations }),
+    () => ({ verifier: tokens.verifier, accounts: service, delegations, audit }),
     (e) => logs.push(e),
     () => null,
     factory && (() => factory!),
@@ -110,6 +113,7 @@ export async function createTestApi(opts: { factory?: boolean } = {}): Promise<T
     store,
     service,
     delegationStore,
+    audit,
     delegations,
     clock,
     h,
