@@ -42,9 +42,11 @@
 | cross-refactoring の `drive.py` と `refactor.py init` | `cross-refactoring:pr={pr}` | `run` | 86400（24 時間） |
 | cross-review の `drive.py` と `state.py init` | `cross-review:pr={pr}` | `run` | 86400（24 時間） |
 | `supervise.py queue`（`--resume` を含む） | `supervise.queue:done={done}` | `run` | 86400（24 時間） |
-| `supervise.py loop` の副命令すべて | `supervise.loop:name={name}` | `session` | 86400（24 時間） |
+| `supervise.py loop` の副命令のうち、読むだけのもの（`status`・`pending`）を除くすべて | `supervise.loop:name={name}` | `session` | 86400（24 時間） |
 
 `{done}` はリポジトリの根からの相対パスに正規化する。`loop stop` と `loop finish` は `release: true` を持つ。
+読むだけの副命令（`loop status`・`loop pending`）は `lease` に載せず、持ち主の段を通らない。
+`release: true` の副命令は、ランタイムのセッションが見つからなくても（`no_session`）本体を走らせる（記録は書かない。断るときの案内を参照）。
 
 ### 状態の一覧に足す行
 
@@ -69,7 +71,7 @@
 | 鍵 | 型 | 意味 |
 | --- | --- | --- |
 | `lease.key` | str | 持ち主の鍵 |
-| `lease.outcome` | str | `acquired`（いなかった・終わっていた）/ `reclaimed`（死んだ持ち主を引き取った）/ `inherited`（祖先のプロセスが持っていた）/ `refused`（生きた持ち主がいて止まった）/ `no_session`（単位 `session` でランタイムのセッションが見つからず止まった） |
+| `lease.outcome` | str | `acquired`（いなかった・終わっていた）/ `reclaimed`（死んだ持ち主を引き取った）/ `inherited`（祖先のプロセスが持っていた）/ `refused`（生きた持ち主がいて止まった）/ `no_session`（単位 `session` でランタイムのセッションが見つからず、記録を読み書きしなかった。鍵を取る副命令は止まり、返す副命令は本体を走らせた） |
 | `lease.holder_run` | str | 生きた持ち主・引き取った持ち主の実行の識別子。いなければ省く |
 | `lease.holder_pid` | int | 同上の pid。いなければ省く |
 | `lease.holder_seen_at` | str | 同上の最後に動いた時刻。いなければ省く |
@@ -77,7 +79,8 @@
 ### 断るときの案内
 
 `refused` は `status: stopped`・終了コード 3 で、`summary` に持ち主の実行の識別子・pid・最後に動いた時刻を書く。値は `acquire` が返す `LeaseOutcome` から核が写す。
-`no_session` は `status: stopped`・終了コード 1 で、`summary` に「ランタイムのセッション（Claude Code・Codex）の外では、セッション単位の鍵を取れない」と書く。記録は書かず、本体を走らせない。
+`no_session` は、鍵を取る副命令（`release` が偽）では `status: stopped`・終了コード 1 で、`summary` に「ランタイムのセッション（Claude Code・Codex）の外では、セッション単位の鍵を取れない」と書く。記録は書かず、本体を走らせない。
+`release: true` の副命令（`loop stop`・`loop finish`）では止めずに本体を走らせ、記録は書かない。`status` と終了コードは本体の結果のままで、`lease.outcome` に `no_session` を出す。利用者が Claude Code・Codex の外の端末からループを止められるようにするためである。
 案内（`next`）は打てる手段だけを書く: 持ち主が終わるのを待ってから同じコマンドを打ち直す（#2321 の受け入れ条件 3）。
 `--run` を渡す・`finish` の後に開始する、という今の案内は消す（どちらもプランから打てない）。
 持ち主のプロセスは別の実行か利用者のランタイムのセッション（Claude Code・Codex）なので、案内に `kill` を書かない。待てないときは、conductor は止まった理由と持ち主の pid を添えて人へ戻す。持ち主を止めるかどうかは人が決める（共通原則の C4）。

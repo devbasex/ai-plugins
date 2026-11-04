@@ -110,14 +110,14 @@
 | --- | --- | --- |
 | 持ち主の部品（`lib/lease.py`） | `acquire` / `touch` / `release` / `read` / `prune`（30 日を過ぎた記録の `.json` の削除。錠の `.lock` は残す）。鍵ごとの排他（`locks.exclusive`）の中で記録を読み書きし、生死を判定する。外部コマンドを起こさない | 新設（`run_owner.py` のうちレビュー worktree の記録の読み書きと、`run_state._process_alive` の判定を移す） |
 | 持ち主の記録の旧い読み手（`lib/run_owner.py`） | レビュー worktree の持ち主の関数（`adopt_owner`・`mark_owner`・`run_args`・`claim_owner`・`touch_owner`・`finish_owner`）を消す。backlog-refinement の見直しの持ち主が使う関数（`read_owner`・`write_owner`・`alive` など）は残す（決定 8） | 変更 |
-| プロセスの部品（`lib/procs.py`） | `runtime_session()`（祖先のランタイムのプロセスの pid と開始時刻）と `ancestors()`（自分の祖先の pid と開始時刻の並び）を足す | 変更（`hook_lib/worktree.session_owner` の探し方を移す） |
+| プロセスの部品（`lib/procs.py`） | `runtime_session()`（祖先のランタイムのプロセスの pid と開始時刻。環境変数 `NDF_RUNTIME_SESSION` があればそれを先に返す）と `ancestors()`（自分の祖先の pid と開始時刻の並び）を足す | 変更（`hook_lib/worktree.session_owner` の探し方を移す） |
 | 実行の核の持ち主の段（`lib/run_core.py`） | E1 の後に `lease.acquire`、終わり（`finally`・SIGTERM の受け手）に `lease.release`。結果 JSON に `lease` を足す | 変更（柱 P1 #2337 の実行の核に段を足す） |
 | 契約の読み手（`scripts/contracts_lib/model.py`） | 入口の行の任意のキー `lease` の形を確かめる | 変更 |
 | 契約の一覧（`plugins/ndf/contracts/entrypoints/`） | 持ち主の鍵を宣言する 4 つの入口の行に `lease` を書く | 変更 |
 | 状態の一覧（`lib/run_state_kinds.py`） | 種類 `lease-record`（`leases/` の記録と錠）の行を足す。`review-worktree` の行の記録の置き場を `leases/` に直す | 変更 |
 | 片付け（`lib/run_state.py`・`merged-steps.py`） | レビュー worktree（`pr<n>`・`rf<n>`）の持ち主を、鍵 `cross-review:pr=<n>`・`cross-refactoring:pr=<n>` の `lease.read` で判定する。種類 `lease-record` は `lease.prune` を呼ぶ | 変更 |
 | cross-refactoring と cross-review の入口（`drive.py`・`refactor.py init`・`state.py init`） | 自前の持ち主の扱い（`adopt_owner`・`mark_owner`・`--run` の受け渡し）を消し、長く動く間は `ctx.touch()` で最後に動いた時刻を書く | 変更 |
-| 開発ループ（`lib/sprint_loop.py`） | `loop` の副命令は持ち主の単位 `session` の鍵 `supervise.loop:name={name}` を宣言する。`stop`・`finish` が返す | 変更 |
+| 開発ループ（`lib/sprint_loop.py`） | `loop` の副命令は、読むだけのもの（`status`・`pending`）を除き、持ち主の単位 `session` の鍵 `supervise.loop:name={name}` を宣言する。`stop`・`finish` が返し、ランタイムのセッションの外でも本体を走らせる | 変更 |
 | キューの耐久の記録の開き方（`supervise_lib/flow.py` の `launch_queue`・`supervise_lib/queue.py`） | `--from` があれば `fresh` と同じく途中の耐久ワークフローを子ごと止めてから開く | 変更 |
 
 ```mermaid
@@ -247,8 +247,19 @@ classDiagram
 
   `holder` は持ち主のプロセス（pid と開始時刻）で、単位 `run` では自分の入口のプロセス、単位 `session` では自分のランタイムのセッション（`procs.runtime_session()`）である。
   単位 `session` で `runtime_session()` が `None`（祖先に Claude Code・Codex のプロセスが無い。ランタイムの外のシェル・CI・テストの起動）のときは、入口のプロセスへ退避せず、記録を読み書きせずに `outcome` が `no_session` の `LeaseOutcome` を返す。
-  核は `no_session` を `stopped`・1 に変え、`summary` に「ランタイムのセッションの外では、セッション単位の鍵を取れない」と書く。鍵を取らずに本体を走らせない。
-  `release` と `touch` は `holder` が `None` なら何も書かない（`acquire` が記録を書いていないため）。テストはランタイムのセッションを `procs.runtime_session` の差し替えで与える。
+  核が `no_session` をどう扱うかは、副命令の宣言で決まる。
+
+  | 副命令の宣言 | 例 | `no_session` のときの核 |
+  | --- | --- | --- |
+  | 鍵を取る（`release` が偽） | `loop start`・`loop sprint`・`loop lap` | `stopped`・1 に変え、`summary` に「ランタイムのセッションの外では、セッション単位の鍵を取れない」と書く。鍵を取らずに本体を走らせない |
+  | 返す（`release: true`） | `loop stop`・`loop finish` | 記録を読み書きせずに本体を走らせる。結果 JSON の `lease.outcome` は `no_session` のまま出す。利用者が自分の端末からループを止める手段を残すためである |
+  | 宣言しない（読むだけ） | `loop status`・`loop pending` | 持ち主の段を通らない（`acquire` を呼ばない） |
+
+  `release` と `touch` は `holder` が `None` なら何も書かない（`acquire` が記録を書いていないため）。
+  ランタイムのセッションは、環境変数 `NDF_RUNTIME_SESSION`（`<pid>:<開始時刻>`）があれば `runtime_session()` がそれを祖先の探索より先に返す。
+  テストはこの環境変数と `NDF_STATE_DIR` を、全テストに効く自動の fixture（`tests/conftest.py`）で与える。値は pytest のプロセスの pid と開始時刻、置き場はテストの一時ディレクトリである。
+  サブプロセスで入口を起動するテスト（`test_sprint_loop.py` の CLI のテストなど）にも環境変数で届くため、ランタイムのいない CI でも `no_session` にならず、本物の `~/.local/state/ndf/leases/` に記録を書かない。
+  関数の中だけのテストは `procs.runtime_session` の差し替えでもよい。
   `release` と `touch` は、記録の `pid` と `pid_started` が `holder` と一致するときだけ書き、一致しなければ何も書かない。
   実行の識別子（`run`）は照合に使わない
 
@@ -283,7 +294,7 @@ sequenceDiagram
     participant F as 持ち主の記録
     K->>L: acquire（鍵・単位・実行）
     alt 単位 session でランタイムのセッションが無い
-        L-->>K: no_session（記録を読み書きしない。核が stopped・1 に変える）
+        L-->>K: no_session（記録を読み書きしない。鍵を取る副命令なら核が stopped・1 に変え、返す副命令なら本体を走らせる）
     end
     L->>F: 鍵の排他を取り、記録を読む（E2）
     alt 記録が壊れている
@@ -410,6 +421,8 @@ stateDiagram-v2
 | 9 | （手動）子の課題 3 件の再現の手順を本番へ出した版で通し、課題の本文の表を埋める | — |
 | 10 | `lease` の無い入口の振る舞いが変わらず、全体テストが前後で通る | 鍵の無い入口でも記録を書く |
 | 6・I1 | ランタイムのセッションが見つからない（`procs.runtime_session` が `None` を返す）ときの `loop start` が、記録を書かずに `no_session`・`stopped`・1 で止まり、本体を走らせない | 入口のプロセスを持ち主にする／鍵を取らずに本体を走らせる |
+| 6 | ランタイムのセッションが見つからないときも、`loop stop` と `loop finish` は本体を走らせ（記録は書かない）、`loop status` は持ち主の段を通らずに今の結果を返す | `no_session` を副命令の宣言によらず `stopped`・1 にする／読むだけの副命令に鍵を宣言する |
+| 6・10 | ランタイムのいない CI で、自動の fixture が与えた `NDF_RUNTIME_SESSION` によりサブプロセスで起動した `loop start` が `no_session` にならず、記録が `NDF_STATE_DIR` の一時ディレクトリにだけ書かれる | `runtime_session()` が環境変数を読まない／置き場を `NDF_STATE_DIR` で変えられない |
 | 4 | 生きた持ち主がいるとき、`acquire` が例外でなく `refused` の `LeaseOutcome` を返し、結果 JSON の `lease` に持ち主の 3 項目が入る | `refused` を例外で投げ、持ち主の項目を結果へ写さない |
 | 8・I1 | `lease.prune` が 30 日を過ぎた `.json` だけを消し、`.lock` が残る | `.lock` も消す |
 | 11・I5 | 秘密を入れた環境変数で起動しても記録に値が無い。余分な鍵を持つ記録を書こうとすると `stopped`・1 | 記録に引数の並びを書く |
