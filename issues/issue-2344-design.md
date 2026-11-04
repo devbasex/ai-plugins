@@ -8,7 +8,10 @@
 
 ## 適用範囲
 
-- **働く範囲**: NDF の配布物のうち、プランを組む入口（`supervise.py new sprint` / `new close`、`sprint-state.py loop sprint`）、プランを流す処理（キュー・プランの実行・再開の入口）、配布の本番の入口。配布先のリポジトリでも同じに働く。`factory/` のプランは含まない
+- **働く範囲**: NDF の配布物のうち次の 3 つ。配布先のリポジトリでも同じに働く。`factory/` のプランは含まない
+  - プランを組む入口（`supervise.py new sprint` / `new close`、`sprint-state.py loop sprint`）
+  - プランを流す処理（キュー・プランの実行・再開の入口）
+  - 配布の本番の入口
 - **プロジェクトごとに違うもの**: 参照の値は各リポジトリの `.ndf/` の設定・origin の版とタグ・GitHub の Pull Request から読む。どの設定のキーを参照にするかは設定の契約（`plugins/ndf/contracts/settings/`）の行が持ち、ai-plugins の値を部品に置かない
 - **当たるモード**: `standard`。#2335 の柱 P5 で、柱 P6（#2339 データの契約）・P8（#2341 入力の契約）・P3（#2342 持ち主の記録）のマージの後に実装する
 
@@ -21,9 +24,9 @@
 | `supervise_lib/engine.py:219` の `if self.plan.get("実行の条件") and not start:` | 実測（同上） | 開始のステップを渡すと実行条件が評価されないこと（#2349 の 1 つ目の原因） |
 | `lib/sprint_loop_cli.py:97` の `s.add_argument("--dev", required=True)` と `lib/sprint_loop.py:294` の `"--version", dev` | 実測（同上） | 開発ループが版を参照にできないこと（#2354 の原因） |
 
-要求と受け入れ条件は #2344 の本文にある（コピーは [issue-2344-requirements.md](issue-2344-requirements.md) ）。
+要求と受け入れ条件は #2344 の本文にある。コピーは [issue-2344-requirements.md](issue-2344-requirements.md) にある。
 この文書は「どう作るか」だけを扱う。決定の記録は [issue-2344-design-decisions.md](issue-2344-design-decisions.md) にある。
-上位の設計は [issue-2335-design.md](issue-2335-design.md) で、実行の核・参照の部品（`lib/refs.py`）・不変条件 I14・ドメインイベント E5 はそれに従う。
+上位の設計は [issue-2335-design.md](issue-2335-design.md) である。実行の核・参照の部品（`lib/refs.py`）・不変条件 I14・ドメインイベント E5 はそれに従う。
 
 ## ドメインモデル
 
@@ -123,6 +126,8 @@
 | 設定の契約（`plugins/ndf/contracts/settings/`）と読み手（`scripts/contracts_lib/model.py`） | キーの行に `plan`（`ref` / `budget` / `shape`）と `secret` を足す。`supervise.json` の `impl_timeout`・`refactor_budget_minutes` の行を足す | 変更 |
 | 入口の契約（`plugins/ndf/contracts/entrypoints/`） | 配布の本番の入口の行に `refs`（`tip` の参照）を足す | 変更 |
 
+### 要素の関係
+
 ```mermaid
 graph TD
     NEW[プランを組む入口] -->|参照と形を書く| PL[プランのファイル]
@@ -141,7 +146,13 @@ graph TD
     PROD[配布の本番の入口] --> RF
 ```
 
-図に描かない要素: プランの型と解決の控えの型（参照の部品とプランの実行が読み書きに使う）、入口の契約（核が配布の本番の入口の `refs` を読む）、差し込みの解決（消す）。
+図に描かない要素は次のとおりである。
+
+| 要素 | 図に描かない理由 |
+| --- | --- |
+| プランの型と解決の控えの型 | 参照の部品とプランの実行が読み書きに使う |
+| 入口の契約 | 核が配布の本番の入口の `refs` を読む |
+| 差し込みの解決 | 消す |
 
 ### 置き場所
 
@@ -209,8 +220,12 @@ classDiagram
 
 ### 参照の宣言（プランの `refs`）
 
-プランの型の欄 `refs` は、参照の名前 → 宣言の対応である。ステップの文字列の中では `{ref:<名前>}`（版の起点は `{ref:<名前>.base}`）、
-数の欄（`timeout`）では `{"ref": "<名前>"}` で指す。
+プランの型の欄 `refs` は、参照の名前 → 宣言の対応である。ステップからは次の形で指す。
+
+| 指す場所 | 書き方 |
+| --- | --- |
+| ステップの文字列の中 | `{ref:<名前>}`（版の起点は `{ref:<名前>.base}`） |
+| 数の欄（`timeout`） | `{"ref": "<名前>"}` |
 
 | 種類 | `params` | 解決した値 | `sticky` | 解決できないとき |
 | --- | --- | --- | --- | --- |
@@ -224,12 +239,13 @@ classDiagram
 `approved`（任意）は承認時の値を持つ参照に付け、`gate-2` を書く。`version` では承認資料の「承認した版」と、`tip` では承認したコミットと
 `compare_approved` で照らす。承認資料に「承認した版」の行が無い旧い資料では、#2164 の `series_changed`（承認ゲート 2 の通過の後に系列の版の記録が変わった）で照らす。
 
-**引数で明示した値は参照にしない。** `--version`・`--impl-timeout`・`--refactor-budget-minutes`・`--base`・`--production-branch` を渡したときは
-値のまま書き、解決の記録の出所は「プランの値（明示）」になる（決定 5）。
+**引数で明示した値は参照にしない。** 次の引数を渡したときは値のまま書く。解決の記録の出所は「プランの値（明示）」になる（決定 5）。
+対象の引数は `--version`・`--impl-timeout`・`--refactor-budget-minutes`・`--base`・`--production-branch` である。
 
 ### 参照にする設定のキー
 
-設定の契約のキーの行の `plan` が、この表を正として持つ（設計の表は契約からコピーした一覧で、食い違えば契約が正）。表は `supervise_lib/decl.py` の `apply_decls` と `sprint_routes.py` が読む項目から作った（2026-11-04 の develop）。
+設定の契約のキーの行の `plan` が、この表を正として持つ。設計の表は契約からコピーした一覧で、食い違えば契約が正である。
+表は `supervise_lib/decl.py` の `apply_decls` と `sprint_routes.py` が読む項目から作った（2026-11-04 の develop）。
 
 | 設定 | キー | ステップのどこに入るか | `plan` |
 | --- | --- | --- | --- |
@@ -250,7 +266,7 @@ classDiagram
 
 ### 解決の控え（`<状態ディレクトリ>/refs.json`）
 
-| 鍵 | 型 | 空を許すか | 意味 |
+| キー | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
 | `kind` / `version` | str / int | 許さない | `refs-store` / 1（柱 P6 の型の版） |
 | `rows.<名前>.value` | object | 許さない | 解決した値（版なら `{version, base}`） |
@@ -266,17 +282,17 @@ classDiagram
 
 #2335 の実行の記録の行（`event: "ref"`）の `fields` は次の形である。1 つの参照の解決ごとに 1 行。
 
-| 鍵 | 型 | 空を許すか | 意味 |
+| キー | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
 | `step` | str | 許さない | ステップの id。形を決めた設定の照合は `pins` |
 | `name` / `kind` | str | 許さない | 参照の名前と種類。プランの値は `kind: "literal"` |
 | `source` | str | 許さない | `ref`（解決した）/ `store`（控えの値）/ `plan:explicit` / `plan:legacy` |
-| `value` | any | 許す | 解決した値。秘密の設定は鍵ごと書かない（I9） |
+| `value` | any | 許す | 解決した値。秘密の設定はキーごと書かない（I9） |
 | `outcome` | str | 許さない | `resolved` / `redecided` / `unresolved` / `mismatch` / `match` |
 | `approved` | object | 許す | 承認時の値（照らしたときだけ） |
 | `reason` | str | 許す | 解決できない・食い違う・決め直した理由 |
 
-実行の記録の `start` 行の `fields` に `plan` と `plan_digest` を足す。キューの done の項目にも `plan_digest` を足す（鍵は足すだけ）。
+実行の記録の `start` 行の `fields` に `plan` と `plan_digest` を足す。キューの done の項目にも `plan_digest` を足す（キーは足すだけ）。
 
 ### CRUD
 
@@ -290,7 +306,8 @@ classDiagram
 | F6 流し直し | R | — | R（`start`） | — | R・C |
 | F7 旧い形 | R | R（`version.json`） | C | — | — |
 
-書く相手が 2 つ以上ある機能は F3（控えと記録）で、記録は追記だけのため、控えを書いてから記録を書く順にする（落ちたら次の解決が控えを読み、同じ版の `ref` 行を書き直す）。
+書く相手が 2 つ以上ある機能は F3（控えと記録）である。記録は追記だけのため、控えを書いてから記録を書く順にする。
+落ちたら次の解決が控えを読み、同じ版の `ref` 行を書き直す。
 
 ## 入出力の契約
 
@@ -306,6 +323,8 @@ classDiagram
 | 旧い形のプラン | `{release_version}`・`{release_base}`・`{queue_record}`・`{queue_pr:<名>}`・`{queue_state(?):<名>}`・`{queue_prs:<名>}`・`{queue_approved:<名>}`・`QUEUE_PRS` は、プランの型の移行関数が参照へ読み替える。受けるのは次の正式版まで |
 
 ## 処理の流れ
+
+### プランを流す順
 
 ```mermaid
 sequenceDiagram
@@ -337,6 +356,8 @@ sequenceDiagram
     E-->>C: 結果
 ```
 
+### 参照を解決する中身
+
 `resolve` の中（E5〜E7）は次のとおりである。
 
 ```mermaid
@@ -353,11 +374,21 @@ sequenceDiagram
     F->>R: ref 行を書く（E7）
 ```
 
-図に描かない要素: 版の判定と承認したコミット（参照の種類の中で呼ぶ）、プランの型と解決の控えの型（読み書きの型）、プランを組む入口・開発ループ・設定の契約（流す前の E1 で働く）、
-承認資料を書く入口（E2 で働く）、入口の契約と配布の本番の入口（下の 2 つ目の項目）、差し込みの解決（消す）。
+図に描かない要素は次のとおりである。
 
-- **実行条件は E4 で 1 回だけ評価する。** 今の `engine.py` の `and not start` を外し、`queue._release_skipped_by_condition`（版を照会する前に条件を打つ手当て）を消す。実行条件が版の参照より先に評価されるため、配布不要のプランは版を照会しない
-- **配布の本番の入口は、入口の契約の `refs` で同じ参照の部品を通る。** プランから呼ばれても手動で呼ばれても、核の E5 で `tip` の参照を解決して承認したコミットと照らす。`release_lib/approval.py` から `lib/approved_commit.py` へ移した `check_approved` を呼ぶ箇所はこの 1 つになる
+| 要素 | 図に描かない理由 |
+| --- | --- |
+| 版の判定と承認したコミット | 参照の種類の中で呼ぶ |
+| プランの型と解決の控えの型 | 読み書きの型 |
+| プランを組む入口・開発ループ・設定の契約 | 流す前の E1 で働く |
+| 承認資料を書く入口 | E2 で働く |
+| 入口の契約と配布の本番の入口 | 下の「流れの決まり」の 2 つ目の項目 |
+| 差し込みの解決 | 消す |
+
+### 流れの決まり
+
+- **実行条件は E4 で 1 回だけ評価する。** 今の `engine.py` の `and not start` を外す。`queue._release_skipped_by_condition`（版を照会する前に条件を打つ手当て）を消す。実行条件が版の参照より先に評価されるため、配布不要のプランは版を照会しない
+- **配布の本番の入口は、入口の契約の `refs` で同じ参照の部品を通る。** プランから呼ばれても手動で呼ばれても、核の E5 で `tip` の参照を解決して承認したコミットと照らす。`check_approved` を呼ぶ箇所はこの 1 つになる（`release_lib/approval.py` から `lib/approved_commit.py` へ移す）
 - **前のプランの結果は、キューが渡す結果でなく状態ディレクトリから読む。** 今の `results_named` が承認ゲートの後に単独で流すときに使う経路（同じディレクトリのプランの `report.md` と `work/`）を唯一の経路にする。`plans: "earlier"` はキューが done の隣に書く一覧（`<done>.plans.json` の `stages`）から前のステージのプランを引く
 - **版の参照の解決は #2164 の判定を順に呼ぶ。** 控えが無ければ `release_version.observe` → `decide_dev` か `taken` で決めて控えを書く。控えがあれば `taken` → `own_released` で確かめ、当たれば `decide_dev` で決め直す（明示の版は止める）。本番は明示の版か系列の開発版の控えの `base` を使う
 
@@ -418,8 +449,10 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | #2344 | 実装する | — | `plugins/ndf/scripts/lib/refs.py`、`plugins/ndf/scripts/lib/ref_kinds/`、`plugins/ndf/scripts/lib/model/`、`plugins/ndf/scripts/lib/approved_commit.py`、`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/scripts/release_lib/approval.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/settings/`、`plugins/ndf/contracts/entrypoints/`、`scripts/contracts_lib/model.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
-子の課題 4 件（#2230・#2164・#2349・#2354）は表に載せない。表の行はスプリントの Pull Request で閉じるが、子の課題は本番へ出した版で再現の手順を通してから、
-閉じるか残すかを決める（受け入れ条件 12）。#2349 の 3 つ目の事象（差分の無い実装のプランで `pr` が終了コード 1）は柱 P1（#2337）の結果の契約の問題で、この柱では直さない（要求の「含まない」）。
+子の課題 4 件（#2230・#2164・#2349・#2354）は表に載せない。表の行はスプリントの Pull Request で閉じる。
+子の課題は、本番へ出した版で再現の手順を通してから、閉じるか残すかを決める（受け入れ条件 12）。
+#2349 の 3 つ目の事象は、差分の無い実装のプランで `pr` が終了コード 1 になることである。
+これは柱 P1（#2337）の結果の契約の問題で、この柱では直さない（要求の「含まない」）。
 
 ## 未確認のまま残ること
 
