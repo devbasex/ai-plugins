@@ -12,14 +12,14 @@
 | `version` | int | 許さない | 記録の形の版（1） |
 | `key` | str | 許さない | 持ち主の鍵（例 `cross-refactoring:pr=2318`） |
 | `entry` | str | 許さない | 取った入口（契約の一覧の入口のパスと副命令） |
-| `run` | str | 許さない | 取った実行の識別子。子の実行が使うときも根の実行の識別子のまま |
+| `run` | str | 許さない | 取った実行の識別子。`inherited` で使う子の実行は書き換えない。生死と返す権限の判定には使わず、旧い再開の形の索引（決定 5）にだけ使う |
 | `started_at` / `seen_at` | str | 許さない | 取った時刻 / 最後に動いた時刻（UTC の ISO 8601） |
 | `finished_at` | str | 許す | 返した時刻。空は「返していない」 |
 | `pid` / `pid_started` | int / float | 許さない | 持ち主のプロセス（単位 `run` は入口のプロセス、`session` はランタイムのセッションのプロセス）と、その開始時刻（epoch 秒） |
 | `host` | str | 許さない | 持ち主のプロセスが動くホスト名 |
 
 **返しても記録を消さない。** 終わった記録は、鍵ごとの最後の実行の索引として旧い再開の形が引く（決定 5）。
-片付けが、終わった時刻から 30 日を過ぎた記録を外す（`durable.KEEP_DAYS` と同じ値）。
+終わった時刻から 30 日を過ぎた記録は、持ち主の部品の `lease.prune` が外す（`durable.KEEP_DAYS` と同じ値）。片付けは `lease.prune` を呼ぶだけで、記録を自分で書き換えない。
 
 ### 入口の契約に足すキー
 
@@ -33,6 +33,7 @@
 | `unit` | str | 許さない | 持ち主の単位（`run` / `session`） |
 | `on_busy` | str | 許さない | 使用中のときの扱い（`wait` / `stop`） |
 | `wait_seconds` | int | `on_busy` が `wait` のときだけ要る | 待つ上限の秒（前提 5。柱 P4 が上限の宣言へ移す） |
+| `window_seconds` | int | 許さない | 寿命の窓の秒。別のホストの記録と旧い置き場の記録の生死の判定にだけ使う（I4） |
 | `legacy` | str | 許す | 旧い置き場の記録の形（例 `{review_base}/rf{pr}.owner.json`）。次の正式版で消す |
 | `release` | bool | 許す | 真なら、この副命令の終わりで単位 `session` の記録を返す |
 
@@ -46,19 +47,19 @@
 
 ### 前提 3 の入口の宣言
 
-| 入口 | 鍵の形 | 単位 | 使用中のとき | 旧い置き場 |
-| --- | --- | --- | --- | --- |
-| cross-refactoring の `drive.py` と `refactor.py init` | `cross-refactoring:pr={pr}` | `run` | `stop` | `{review_base}/rf{pr}.owner.json` |
-| cross-review の `drive.py` と `state.py init` | `cross-review:pr={pr}` | `run` | `stop` | `{review_base}/pr{pr}.owner.json` |
-| backlog-refinement の `upkeep.py` の見直しの持ち主の副命令 | `backlog-refinement:repo` | `session` | `stop` | `.ndf/backlog/owner.json` |
-| `supervise.py queue`（`--resume` を含む） | `supervise.queue:done={done}` | `run` | `stop` | — |
-| `supervise.py run` | `supervise.run:plan={plan}` | `run` | `stop` | — |
-| `supervise.py loop` の副命令すべて | `supervise.loop:name={name}` | `session` | `stop` | — |
+| 入口 | 鍵の形 | 単位 | 使用中のとき | 寿命の窓 | 旧い置き場 |
+| --- | --- | --- | --- | --- | --- |
+| cross-refactoring の `drive.py` と `refactor.py init` | `cross-refactoring:pr={pr}` | `run` | `stop` | 86400（24 時間） | `{review_base}/rf{pr}.owner.json` |
+| cross-review の `drive.py` と `state.py init` | `cross-review:pr={pr}` | `run` | `stop` | 86400（24 時間） | `{review_base}/pr{pr}.owner.json` |
+| backlog-refinement の `upkeep.py` の見直しの持ち主の副命令 | `backlog-refinement:repo` | `session` | `stop` | 900（15 分） | `.ndf/backlog/owner.json` |
+| `supervise.py queue`（`--resume` を含む） | `supervise.queue:done={done}` | `run` | `stop` | 86400（24 時間） | — |
+| `supervise.py run` | `supervise.run:plan={plan}` | `run` | `stop` | 86400（24 時間） | — |
+| `supervise.py loop` の副命令すべて | `supervise.loop:name={name}` | `session` | `stop` | 86400（24 時間） | — |
 
 `{done}` と `{plan}` はリポジトリの根からの相対パスに正規化する。旧い置き場の `{review_base}` は入力ではない。
 片付けと同じ `run_state.review_base(<リポジトリの根>)` が返す、レビュー worktree の置き場（`<base>/<slug>`）で埋める。
 `loop stop` と `loop finish` は `release: true` を持つ。
-見直しの持ち主の寿命の窓は今の `.ndf/backlog.json` の `depths.owner.ttl` を引き継ぐ。どれも `stop` にする理由は決定 2 にある。
+見直しの持ち主の寿命の窓は、契約の 900 秒を既定にし、今の `.ndf/backlog.json` の `depths.owner.ttl` があればその値を使う（今の振る舞いを引き継ぐ）。どれも `stop` にする理由は決定 2 にある。
 
 ### 状態の一覧に足す列と行
 
@@ -66,8 +67,8 @@
 
 | 種類 | 置き場 | `lease` | 寿命 / 残す理由 | 片付ける時点 |
 | --- | --- | --- | --- | --- |
-| `review-worktree`（既存） | 既存のまま。記録は `leases/` へ移る | `cross-review:pr={pr}`・`cross-refactoring:pr={pr}` | 既存のまま（持ち主が終わり、PR が open でなく、作業が無い） | 返した後（E8）・既存の時点 |
-| `lease-record` | `leases/<リポジトリ>/*.json` と `.lock` | — | 終わった時刻から 30 日 | sweep |
+| `review-worktree`（既存） | 既存のまま。記録は `leases/` へ移る | `cross-review:pr={pr}`・`cross-refactoring:pr={pr}` | 既存のまま（結び付く 2 つの鍵の持ち主がどちらも終わり、PR が open でなく、作業が無い） | 返した後（E8）・既存の時点 |
+| `lease-record` | `leases/<リポジトリ>/*.json` と `.lock` | — | 終わった時刻から 30 日 | sweep が `lease.prune` を呼ぶ |
 | `approval-doc` | `issues/approval-<plugin>-v<版>.md`（メインディレクトリ） | — | 書いた配布のプランが後片付けのステップに達した | 配布のプランの後片付けのステップ（#2009） |
 | `presentation` | `<tmp>/ndf/` | — | 残す。承認ゲートで人が読む資料（`step_result.presentation_dir`。答えを待つ間に読まれる）と Skill の出力が同じ置き場にあり、最終更新だけでは読み終えたかを決められない | — |
 | `stage-fallback` | `${TMPDIR:-/tmp}/ndf-stages` | — | 残す。状態の置き場が書けないときの通過記録の退避先で、中身は記録である | — |
@@ -95,7 +96,7 @@
 | 鍵 | 型 | 意味 |
 | --- | --- | --- |
 | `lease.key` | str | 持ち主の鍵 |
-| `lease.outcome` | str | `acquired`（いなかった）/ `reclaimed`（死んだ持ち主を片付けた）/ `inherited`（根の実行が持っていた）/ `waited`（待ってから取った）/ `refused`（止まった）/ `wait-timeout`（待つ上限に達した） |
+| `lease.outcome` | str | `acquired`（いなかった）/ `reclaimed`（死んだ持ち主を片付けた）/ `inherited`（祖先のプロセスが持っていた）/ `waited`（待ってから取った）/ `refused`（止まった）/ `wait-timeout`（待つ上限に達した） |
 | `lease.holder_run` | str | 生きた持ち主・片付けた持ち主の実行の識別子。いなければ省く |
 | `lease.waited_seconds` | number | 待った秒（待たなければ 0） |
 | `lease.cleanup` | list | 返した後の片付けの結果（`run_state` の `items` と同じ形。`removed` / `kept` と理由） |
@@ -130,7 +131,7 @@ supervise.py resume <実行の識別子> [--from <位置>]
 
 | 名前 | 誰が設定するか | 意味 |
 | --- | --- | --- |
-| `NDF_RUN_ROOT` | 根の実行の核 | 根の実行の識別子。子孫はそのまま受け継ぐ。子の核は I6 の判定と、打ち切りで止めるプロセスの印に使う |
+| `NDF_RUN_ROOT` | 根の実行の核 | 根の実行の識別子。子孫はそのまま受け継ぐ。子の核は打ち切りで止めるプロセスの印に使う（I6 の判定には使わない） |
 | `NDF_RESUME` | 再開の入口 | 引き継ぐ実行の識別子。核はこの値を自分の実行の識別子にする（#2335 の E13） |
 | `NDF_RESUME_FROM` | 再開の入口 | `--from` の値（`plan-step` の並びは改行で区切る）。核が `ctx.resume.from_` として本体へ渡す |
 

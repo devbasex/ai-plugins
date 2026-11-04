@@ -4694,7 +4694,7 @@
     {
       "term": "寿命の窓",
       "context": "ndf-worktree",
-      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。レビュー worktree は 24 時間（#2229）、見直しの持ち主は既定 15 分（#2315）",
+      "meaning": "別のホストの記録と旧い置き場の記録について、最後に動いた時刻からこの長さを過ぎた持ち主を死んでいるとみなす長さ。同じホストの生死は pid と開始時刻で決め、窓を使わない。値は持ち主の契約の window_seconds に置く（レビュー worktree は 24 時間・見直しの持ち主は既定 15 分。#2229・#2315・#2342）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
     },
     {
@@ -5303,6 +5303,13 @@
       "context": "ndf-workflow",
       "meaning": "conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで",
       "source": "docs/specifications/ndf-context-restart-policy.md"
+    },
+    {
+      "term": "持ち主の契約",
+      "context": "ndf-worktree",
+      "meaning": "入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・使用中のときの扱い・待つ上限・寿命の窓・旧い置き場の形を決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342）",
+      "source": "",
+      "pending_source": "issues/issue-2342-design.md"
     },
     {
       "term": "持ち主の単位",
