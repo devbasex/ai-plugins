@@ -83,6 +83,50 @@ function OverviewPanel({ detail }: { detail: SprintRunDetail }) {
   );
 }
 
+// 工程で変更したファイル。null は記録なし、空は 0 件
+function StepFiles({ files, omitted }: { files: StepDetail["files"]; omitted: StepDetail["files_omitted"] }) {
+  const { t } = useTranslation();
+  return files === null ? (
+    <p>{t("sprintDetail.noRecord")}</p>
+  ) : files.length === 0 ? (
+    <p>{t("sprintDetail.noFiles")}</p>
+  ) : (
+    <ul className="ui-plain-list">
+      {files.map((f) => (
+        <li key={f.path}>
+          {f.url ? (
+            <a href={f.url} target="_blank" rel="noreferrer" className="ui-wrap">
+              {f.path}
+            </a>
+          ) : (
+            <span className="ui-wrap">{f.path}</span>
+          )}{" "}
+          <span>{f.added === null || f.deleted === null ? t("sprintDetail.binary") : t("sprintDetail.fileChange", { added: f.added, deleted: f.deleted })}</span>
+        </li>
+      ))}
+      {omitted ? <li>{t("sprintDetail.filesOmitted", { count: omitted })}</li> : null}
+    </ul>
+  );
+}
+
+// 工程で下した判断。null は記録なし、空は 0 件
+function StepDecisions({ decisions }: { decisions: StepDetail["decisions"] }) {
+  const { t } = useTranslation();
+  return decisions === null ? (
+    <p>{t("sprintDetail.noRecord")}</p>
+  ) : decisions.length === 0 ? (
+    <p>{t("sprintDetail.noDecisions")}</p>
+  ) : (
+    <ul className="ui-plain-list">
+      {decisions.map((d, i) => (
+        <li key={i}>
+          {t("sprintDetail.decisionLine", { question: d.question, answer: d.answer })} <StatusBadge tone="neutral" label={t(`sprintDetail.decidedBy.${d.by}`)} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // 工程の詳細パネル。開いたときに 1 件だけ読む（読み直さない）
 function StepPanel({ accountId, sprintRunId, stepKey, onBack }: { accountId: string; sprintRunId: string; stepKey: string; onBack: () => void }) {
   const { t } = useTranslation();
@@ -137,41 +181,9 @@ function StepPanel({ accountId, sprintRunId, stepKey, onBack }: { accountId: str
             ]}
           />
           <h3>{t("sprintDetail.files")}</h3>
-          {step.files === null ? (
-            <p>{noRecord}</p>
-          ) : step.files.length === 0 ? (
-            <p>{t("sprintDetail.noFiles")}</p>
-          ) : (
-            <ul className="ui-plain-list">
-              {step.files.map((f) => (
-                <li key={f.path}>
-                  {f.url ? (
-                    <a href={f.url} target="_blank" rel="noreferrer" className="ui-wrap">
-                      {f.path}
-                    </a>
-                  ) : (
-                    <span className="ui-wrap">{f.path}</span>
-                  )}{" "}
-                  <span>{f.added === null || f.deleted === null ? t("sprintDetail.binary") : t("sprintDetail.fileChange", { added: f.added, deleted: f.deleted })}</span>
-                </li>
-              ))}
-              {step.files_omitted ? <li>{t("sprintDetail.filesOmitted", { count: step.files_omitted })}</li> : null}
-            </ul>
-          )}
+          <StepFiles files={step.files} omitted={step.files_omitted} />
           <h3>{t("sprintDetail.decisions")}</h3>
-          {step.decisions === null ? (
-            <p>{noRecord}</p>
-          ) : step.decisions.length === 0 ? (
-            <p>{t("sprintDetail.noDecisions")}</p>
-          ) : (
-            <ul className="ui-plain-list">
-              {step.decisions.map((d, i) => (
-                <li key={i}>
-                  {t("sprintDetail.decisionLine", { question: d.question, answer: d.answer })} <StatusBadge tone="neutral" label={t(`sprintDetail.decidedBy.${d.by}`)} />
-                </li>
-              ))}
-            </ul>
-          )}
+          <StepDecisions decisions={step.decisions} />
           <div className="ui-row">
             {step.diff_url && (
               <a href={step.diff_url} target="_blank" rel="noreferrer">
