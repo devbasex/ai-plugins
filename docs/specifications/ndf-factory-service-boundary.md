@@ -443,6 +443,22 @@ stateDiagram-v2
 
 `factory/api/src/index.ts` は `requestResume`・`claimLocalRunJob`・`reportLocalRunJobEnded`・`cancelSprintRun` を公開する。
 
+### 利用者向けの操作の形
+
+画面・委任を受けたエージェント・MCP のクライアントが呼ぶ利用者向けの操作（契約の操作に `x-ndf-access` を持つもの）は、どれも次の形で受け渡す。形の正は `factory/contracts/openapi/*.yaml` の拡張（`x-ndf-access`・`x-ndf-keys`・`x-ndf-id`）と、そこから生成する操作の表 `factory/contracts/src/generated/operations.ts`（`npm run generate -w contracts -- --check` で食い違いを落とす）である。ランナー向けの経路（`/run-jobs/*`）と進捗の受け口（`/ingest/*`）はこの形に入らない。
+
+| 種類 | メソッド | 入力 | 成功 |
+| --- | --- | --- | --- |
+| 一覧 | `GET` | 条件の query | 200 と値の配列（要素の結果で包まない） |
+| 指定の取得・削除 | `GET`・`DELETE` | 鍵の query を繰り返す（`?sprint_run_id=a&sprint_run_id=b`）。鍵を持たない操作は query 無しで要素 1 個 | 200 と要素の結果の配列 |
+| 作成・更新・操作 | `POST`・`PATCH`・`PUT` | 本文の要素の配列（1 件でも要素 1 個の配列） | 200 と要素の結果の配列 |
+
+- **経路の変数はアカウントの ID だけ**である。実行・ループ・リポジトリなどの識別子は鍵の query か要素の項目で渡し、要素ごとにそのアカウントに属するかを照らす
+- **要素の結果**は入力と同じ順・同じ数で、成功は `{ok: true, value}`、失敗は `{ok: false, status, error: {code, message, details?}}` である。失敗の `status` と `code` は、各操作の確定仕様の表にある誤りのまま（400・403・404・409・422・503）。要素がすべて失敗しても応答は 200 である
+- **要求全体を断るのは次だけ**である。本文が配列でない（400 `invalid_request`）・要素が 0 個（400 `empty_items`）・101 個以上（400 `too_many_items`）・同じ鍵の要素が 2 つ（400 `duplicate_key`）・資格情報が無効（401）・経路のアカウントを解決できない（403 `forbidden`）・委任の資格情報で人だけが確定できる操作を呼んだ（403 `human_only`）・読み取りだけの委任で書き込みの操作を呼んだ（403 `scope_insufficient`）・操作の記録を追記できない（503 `audit_unavailable`）
+- **新しい識別子を作る作成**（スプリントの実行・開発ループ・チーム・委任の資格情報）は、要素ごとに冪等の鍵 `idempotency_key`（1〜64 字の英数字とハイフン）を受ける。同じ利用者・同じ操作・同じ鍵の 24 時間以内の 2 回目は、1 回目に作ったものを返す
+- 画面の API クライアント（`factory/web/src/api.ts`）は要求を操作の表から組み、要素の結果をほどいて 1 件の値か `ApiFailure` を返す
+
 ### 常に成り立つ条件（サービス全体）
 
 | # | 集約 | 条件 | 破れたときの扱い | 縛る課題 |

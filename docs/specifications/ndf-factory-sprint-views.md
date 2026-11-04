@@ -105,14 +105,16 @@ graph TD
 
 ### 経路（`factory/contracts/openapi/runs.yaml`）
 
-| 経路 | 応答 |
-| --- | --- |
-| `GET /accounts/{accountId}/sprint-runs` | 200 `SprintRunList`。各行に `repo`・`current_phase`・`current_step`・`last_event_at` を足す。既存の 6 項目の名前と型は変えない / 403 |
-| `GET /accounts/{accountId}/sprint-runs/{sprintRunId}` | 200 `SprintRunDetail` / 403 / 503 |
-| `GET /accounts/{accountId}/sprint-runs/{sprintRunId}/steps/{stepKey}` | 200 `StepDetail`。`stepKey` は事象の `idempotency_key` を URL で符号化したもの / 403 / 503 |
-| `GET /accounts/{accountId}/repositories/{repositoryId}/backlog` | 200 `Backlog` / 403 / 503（保存か GitHub の口の失敗） |
+入力と成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。「値」は一覧の 1 件か、成功の要素の `value` である。
 
-403 はどれも `{"error": {"code": "forbidden", "message": "このアカウントを見る権限がありません"}}` である。無い実行と他人の実行で、同じ回数の読み出しの後に返す。登録の無いリポジトリも 404 にしない。404 を返すと、アカウントがそのリポジトリを取り込んでいるかが分かるためである。保存の失敗は 503 で、応答に中身を出さない。
+| 経路 | 値 / 失敗 |
+| --- | --- |
+| `GET /accounts/{accountId}/sprint-runs` | 一覧。`SprintRunRow` の配列。各行に `repo`・`current_phase`・`current_step`・`last_event_at` を足す。既存の 6 項目の名前と型は変えない / 要求全体の 403 |
+| `GET /accounts/{accountId}/sprint-runs/detail?sprint_run_id=` | 指定の取得。`SprintRunDetail` / 要素の 403 / 要素の 503 |
+| `GET /accounts/{accountId}/sprint-runs/steps?sprint_run_id=&step_key=` | 指定の取得。実行の ID は 1 つの条件で、鍵は工程の `step_key`（事象の `idempotency_key`）を繰り返す。`StepDetail` / 他人の実行は要求全体の 403、要素の 403 / 503 |
+| `GET /accounts/{accountId}/backlogs?repository_id=` | 指定の取得。`Backlog` / 要素の 403 / 要素の 503（保存か GitHub の口の失敗） |
+
+403 はどれも `{"error": {"code": "forbidden", "message": "このアカウントを見る権限がありません"}}`（要素の結果では `{ok: false, status: 403, error}`）である。無い実行と他人の実行で、同じ回数の読み出しの後に返す。登録の無いリポジトリも 404 にしない。404 を返すと、アカウントがそのリポジトリを取り込んでいるかが分かるためである。保存の失敗は 503 で、応答に中身を出さない。
 
 `SprintRunDetail`:
 

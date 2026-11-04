@@ -149,23 +149,23 @@ graph TD
 
 ### 画面向けの経路
 
-機械可読な正は [`factory/contracts/openapi/runs.yaml`](../../factory/contracts/openapi/runs.yaml) である。どの経路も Cognito の access token を要り、`resolveFromRequest` でアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403 である（[認証とアカウント・席・料金プランごとの使える量](ndf-factory-accounts-and-plans.md)）。エラーの本文は `{"error": {"code", "message", "details"?}}`。
+機械可読な正は [`factory/contracts/openapi/runs.yaml`](../../factory/contracts/openapi/runs.yaml) である。どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403 である（[認証とアカウント・席・料金プランごとの使える量](ndf-factory-accounts-and-plans.md)）。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力・成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。下の表の「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
 
-| 経路 | 誰が | 入力 | 成功 | 失敗 |
+| 経路 | 誰が | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- | --- |
-| `GET /accounts/{a}/github/install-url` | 席を持つ人 | — | 200 `{url}`（`https://github.com/apps/<GITHUB_APP_SLUG>/installations/new`） | 403 |
-| `GET /accounts/{a}/github/authorize-url` | 持ち主 | — | 200 `{url}`（`https://github.com/login/oauth/authorize?client_id=<GITHUB_APP_CLIENT_ID>&state=<state>`） | 403 |
-| `POST /accounts/{a}/github/candidates` | 持ち主 | `{code, state}`（認可の戻り） | 200 `{proof, candidates: [{repository_id, full_name, installation_id, registered}]}` | 400 `invalid_request`（`state` が合わない・`code` が無いか換えられない）・403 |
-| `GET /accounts/{a}/repositories` | 席を持つ人 | — | 200 `{repositories: [{repository_id, full_name, installation_id, registered_at, active_sprint_runs}]}` | 403 |
-| `POST /accounts/{a}/repositories` | 持ち主 | `{proof, repository_id}` | 201 登録の 1 行（`active_sprint_runs` を除く） | 400（証明の署名・期限・利用者・アカウントの違い）・403（証明に無い ID、登録の直前に導入の token を作れない。I33）・409 `repository_exists`（I32） |
-| `DELETE /accounts/{a}/repositories/{repositoryId}` | 持ち主 | — | 204 | 400（ID の形）・403・404 `repository_not_found`・409 `repository_in_use`（I36） |
-| `GET /accounts/{a}/model-credential` | 持ち主 | — | 200 `{registered, kind, updated_at, external_id}`。未登録なら `kind`・`updated_at` は `null`。`external_id` は常に返す（秘密でない） | 403 |
-| `PUT /accounts/{a}/model-credential` | 持ち主 | `{kind: "anthropic_api_key", api_key}`（1〜512 字）か `{kind: "aws_role", role_arn, region}`（`^arn:aws[a-z-]*:iam::\d{12}:role/.+$` で 2,048 字まで、`^[a-z]{2}(-[a-z]+)+-\d$` で 32 字まで） | 200 上と同じ形（値も ARN も返さない） | 400・403・503 `credential_unavailable` |
-| `DELETE /accounts/{a}/model-credential` | 持ち主 | — | 204（無くても 204） | 403・503 `credential_unavailable` |
-| `POST /accounts/{a}/repositories/{r}/issue-candidates` | 席を持つ人 | `{exclude?: [番号]}`（選び直しで外す番号） | 200 `{source: "ranking" \| "recent", milestone, candidates: [{number, title, selected, reason}], note}` | 400（ID の形）・403・404 `repository_not_found` |
-| `POST /accounts/{a}/sprint-runs` | 席を持つ人 | `{repository_id, issues}`（1〜20 件の重なりの無い番号） | 201 `{sprint_run_id, state: "starting"}` | 400・403・404・409・503（下の表） |
-| `GET /accounts/{a}/sprint-runs?repository_id=` | 席を持つ人 | — | 200 `{sprint_runs: [{sprint_run_id, repository_id, issues, state, failure_reason, created_at, repo, current_phase, current_step, last_event_at}]}`（新しい順 50 件。後ろの 4 項目は進捗の事象から導く。規則は [スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)） | 400（ID の形）・403・503 `progress_unavailable` |
-| `POST /accounts/{a}/sprint-runs/{id}/cancel` | 席を持つ人 | — | 200 `{state}`（`cancelled` か、停止を待つ `running`） | 403・404 `sprint_run_not_found`・409 `already_finished`・`release_after_main` |
+| `GET /accounts/{a}/github/install-url` | 席を持つ人 | — | `[{url}]`（`https://github.com/apps/<GITHUB_APP_SLUG>/installations/new`） | 403 |
+| `GET /accounts/{a}/github/authorize-url` | 持ち主 | — | `[{url}]`（`https://github.com/login/oauth/authorize?client_id=<GITHUB_APP_CLIENT_ID>&state=<state>`） | 403 |
+| `POST /accounts/{a}/github/candidates` | 持ち主 | `{code, state}`（認可の戻り。要素は 1 個） | `{proof, candidates: [{repository_id, full_name, installation_id, registered}]}` | 400 `invalid_request`（`state` が合わない・`code` が無いか換えられない）・403 |
+| `GET /accounts/{a}/repositories` | 席を持つ人 | — | `[{repository_id, full_name, installation_id, registered_at, active_sprint_runs, max_concurrent_runs}]` | 403 |
+| `POST /accounts/{a}/repositories` | 持ち主 | `{proof, repository_id}` | 登録の 1 行（`active_sprint_runs` を除く） | 400（証明の署名・期限・利用者・アカウントの違い）・403（証明に無い ID、登録の直前に導入の token を作れない。I33）・409 `repository_exists`（I32） |
+| `DELETE /accounts/{a}/repositories?repository_id=` | 持ち主 | 鍵 `repository_id` | `{removed: true}` | 400（ID の形）・403・404 `repository_not_found`・409 `repository_in_use`（I36） |
+| `GET /accounts/{a}/model-credential` | 持ち主 | — | `[{registered, kind, updated_at, external_id}]`。未登録なら `kind`・`updated_at` は `null`。`external_id` は常に返す（秘密でない） | 403 |
+| `PUT /accounts/{a}/model-credential` | 持ち主 | `{kind: "anthropic_api_key", api_key}`（1〜512 字）か `{kind: "aws_role", role_arn, region}`（`^arn:aws[a-z-]*:iam::\d{12}:role/.+$` で 2,048 字まで、`^[a-z]{2}(-[a-z]+)+-\d$` で 32 字まで）。要素は 1 個 | 取得と同じ形（値も ARN も返さない） | 400・403・503 `credential_unavailable` |
+| `DELETE /accounts/{a}/model-credential` | 持ち主 | 鍵なし（要素は 1 個） | `{removed: true}`（無くても成功） | 403・503 `credential_unavailable` |
+| `POST /accounts/{a}/issue-candidates` | 席を持つ人 | `{repository_id, exclude?: [番号]}`（選び直しで外す番号） | `{source: "ranking" \| "recent", milestone, candidates: [{number, title, selected, reason}], note}` | 400（ID の形）・403・404 `repository_not_found` |
+| `POST /accounts/{a}/sprint-runs` | 席を持つ人 | `{repository_id, issues, idempotency_key}`（`issues` は 1〜20 件の重なりの無い番号） | `{sprint_run_id, state: "starting"}` | 400・403・404・409・503（下の表） |
+| `GET /accounts/{a}/sprint-runs?repository_id=` | 席を持つ人 | 条件 `repository_id`（省くとアカウント全体） | `[{sprint_run_id, repository_id, issues, state, failure_reason, created_at, repo, current_phase, current_step, last_event_at}]`（新しい順 50 件。後ろの 4 項目は進捗の事象から導く。規則は [スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)） | 要求全体の 400（ID の形）・403・503 `progress_unavailable` |
+| `POST /accounts/{a}/sprint-runs/cancel` | 席を持つ人 | `{sprint_run_id}` | `{state}`（`cancelled` か、停止を待つ `running`） | 403・404 `sprint_run_not_found`・409 `already_finished`・`release_after_main` |
 
 **持ち主だけの経路は、席を持つだけの利用者に他人のアカウントと同じ 403 `forbidden` を返す**（`requireOwner`）。チームのアカウントでは、リポジトリの登録と外し・認可・候補・キーの 3 つの操作は持ち主（`role` が `owner`）だけが、スプリントの開始・一覧・取り消しと課題の候補は席を持つ人が行う。
 
@@ -430,7 +430,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 | 観点 | 縛る振る舞い |
 | --- | --- |
 | 候補と登録（I32・I33） | 偽の GitHub が返した導入の対象のうち、利用者の届くものだけが候補に出ること。証明に無い ID・届かない導入の登録が 403 で行が増えないこと。同じ ID の 2 回目と同時の 2 本が 409 で 1 行であること |
-| 外し（I36） | 終わりの状態でない実行があると 409、終われば 204 であること |
+| 外し（I36） | 終わりの状態でない実行があると要素の 409、終われば成功の要素（`{removed: true}`）であること |
 | 他人のアカウント | 他人のアカウントへの経路が #2170 と同じ 403 の本文を返し、持ち主でない席の人の持ち主だけの操作も同じ 403 であること |
 | キーの持ち込み（I38） | 2 種類の保存・差し替え・消去が通り、応答が 4 項目だけであること。テストのキーの値が、応答・ログ・事象・`RunTask` の環境変数のどこにも無く、ARN は自分のアカウントの `byok` のジョブにだけ載ること |
 | 外部 ID | 外部 ID がアカウントごとに違い、`AssumeRole` に付くこと。偽の STS が断ると `failed` になること |

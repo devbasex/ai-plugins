@@ -108,7 +108,7 @@ graph TD
 
 あわせて `LIMITS_TABLE`・`AccountService`・エラーの型（`ApiError`・`AuthError`・`ForbiddenError`・`PlanError`）と、`AccountContext`・`Caller`・`ExecutionMode`・`Plan`・`SeatType`・`Limits`・`Judgment`・`CurrentUsage`・`LimitReason`・`AuthEnv`・`ApiApp` の型を export する。
 
-**使える量は HTTP の経路にしない。** #2186・#2174 の処理は同じ `factory/api/` の中で上の関数を呼ぶ。画面は `GET /accounts/{account_id}` の `limits` で上限を出す。
+**使える量は HTTP の経路にしない。** #2186・#2174 の処理は同じ `factory/api/` の中で上の関数を呼ぶ。画面は `GET /accounts?account_id=` の `limits` で上限を出す。
 
 ### token の検証とアカウントの解決
 
@@ -214,22 +214,22 @@ sequenceDiagram
 
 ### API の経路
 
-経路はすべて `Authorization: Bearer <access token>` を要る。エラーの本文は `{"error": {"code": "<機械の値>", "message": "<利用者に出す文>"}}` に揃える。機械可読な正は `factory/contracts/openapi/accounts.yaml` である。
+経路はすべて `Authorization: Bearer <access token>`（または委任の資格情報）を要る。エラーの本文は `{"error": {"code": "<機械の値>", "message": "<利用者に出す文>"}}` に揃える。機械可読な正は `factory/contracts/openapi/accounts.yaml` である。入力と成功の形は [利用者向けの操作の形](ndf-factory-service-boundary.md#利用者向けの操作の形) に従う。「要素・条件」は要素 1 個の項目、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である（401 は要求全体）。チームの作成と席の追加・変更・削除は人だけが確定でき、委任の資格情報では要求全体を 403 `human_only` で断る。
 
-| 経路 | 入力 | 成功 | 失敗 |
+| 経路 | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- |
-| `GET /me` | — | 200 `{user_id, idp, personal_account_id, accounts: [{account_id, kind, name, plan, role, seat_type, execution_mode}]}`。先頭は個人のアカウント。初回は個人のアカウントを作る | 401・503 `account_unavailable` |
-| `GET /accounts/{account_id}` | — | 200 `{account_id, kind, name, plan, role, seat_type, execution_mode, limits: {concurrent_sprint_runs, monthly_tokens}, seats}`。`monthly_tokens` は `managed` のときだけ数で、ほかは `null`。`seats` はチームだけで `[{user_id, idp, seat_type, added_at}]`、個人では `null` | 401・403 `forbidden` |
-| `POST /teams` | `{name: 1〜64 字（空白だけは不可）, seat_type}` | 201 アカウントの本文（上と同じ形）。作った利用者が持ち主で、その席が 1 つある | 400 `invalid_request` |
-| `PUT /accounts/{account_id}/execution-mode` | `{execution_mode: "local" \| "byok" \| "managed"}` | 200 アカウントの本文。今と同じ値なら履歴の行を足さずに 200 | 400 `invalid_request`・403 `forbidden`（I22・I18）・409 `managed_not_allowed_on_free`（`message` は「Free の料金プランでは managed（サービスの Bedrock）を選べません」）・503 `account_unavailable` |
-| `POST /accounts/{account_id}/seats` | `{user_id: 1〜128 字, seat_type}` | 201 席 `{user_id, idp, seat_type, added_at}` | 400・403・409 `not_a_team`・422 `user_not_found`・409 `seat_exists` |
-| `PATCH /accounts/{account_id}/seats/{user_id}` | `{seat_type}` | 200 席 | 400・403・409 `not_a_team`・404 `seat_not_found`・503 |
-| `DELETE /accounts/{account_id}/seats/{user_id}` | — | 204 | 403・409 `not_a_team`・409 `owner_seat_protected`・404 `seat_not_found`・503 |
+| `GET /me` | — | `{user_id, idp, personal_account_id, accounts: [{account_id, kind, name, plan, role, seat_type, execution_mode}]}`。先頭は個人のアカウント。初回は個人のアカウントを作る | 401・503 `account_unavailable` |
+| `GET /accounts?account_id=` | 鍵 `account_id`（要素ごとにアカウントを解決する） | `{account_id, kind, name, plan, role, seat_type, execution_mode, limits: {concurrent_sprint_runs, monthly_tokens}, seats}`。`monthly_tokens` は `managed` のときだけ数で、ほかは `null`。`seats` はチームだけで `[{user_id, idp, seat_type, added_at}]`、個人では `null` | 401・403 `forbidden` |
+| `POST /teams` | `{name: 1〜64 字（空白だけは不可）, seat_type, idempotency_key}` | アカウントの本文（上と同じ形）。作った利用者が持ち主で、その席が 1 つある | 400 `invalid_request` |
+| `PATCH /accounts` | `{account_id, execution_mode: "local" \| "byok" \| "managed"}`（要素ごとにアカウントを解決する） | アカウントの本文。今と同じ値なら履歴の行を足さずに成功 | 400 `invalid_request`・403 `forbidden`（I22・I18）・409 `managed_not_allowed_on_free`（`message` は「Free の料金プランでは managed（サービスの Bedrock）を選べません」）・503 `account_unavailable` |
+| `POST /accounts/{account_id}/seats` | `{user_id: 1〜128 字, seat_type}` | 席 `{user_id, idp, seat_type, added_at}` | 400・403・409 `not_a_team`・422 `user_not_found`・409 `seat_exists` |
+| `PATCH /accounts/{account_id}/seats` | `{user_id, seat_type}` | 席 | 400・403・409 `not_a_team`・404 `seat_not_found`・503 |
+| `DELETE /accounts/{account_id}/seats?user_id=` | 鍵 `user_id` | `{removed: true}` | 403・409 `not_a_team`・409 `owner_seat_protected`・404 `seat_not_found`・503 |
 
 - **持ち主の確かめは、席の有無と料金プランの照合より先に行う。** 404 `seat_not_found` と 409 `managed_not_allowed_on_free` は、要求した者が持ち主と確かめた後だけ返す
 - **`byok` を選んでもキーの登録はこの経路で求めない。** キーの保存は #2186 が持つ
 - **`GET /me` のチームの一覧は GSI を候補として引き、元の席を強い整合で確かめる。** 外した席が GSI に残る間に、そのチームの名前や料金プランを返さないためである
-- 本文が JSON のオブジェクトでなければ 400 `invalid_request`。経路の中で起きた想定外の失敗は 503 `account_unavailable` に揃える
+- 本文が配列でなければ要求全体を、要素がオブジェクトでなければその要素を 400 `invalid_request` にする。経路の中で起きた想定外の失敗は 503 `account_unavailable` に揃える
 
 ### GitHub の仲立ち
 
@@ -434,7 +434,7 @@ graph TD
 | 他人のアカウント（I18） | 利用者 A の token で、他人の個人のアカウント・入っていないチーム・存在しない ID の 3 つに読む・書くを送ると、すべて 403 で本文が同じであること |
 | 料金プランの組（I13） | 個人のアカウントへの席の操作は 409、`setPlan` で個人に `team`・チームに `pro` は失敗で、行が変わらないこと |
 | 履歴（I20） | 席・料金プラン・実行の形態の変更のたびに履歴の行が 1 つ増え、変更が失敗したときは増えないこと |
-| 実行の形態の読み出し | `GET /me`・`GET /accounts/{account_id}` の応答と `resolveAccount` の文脈に保存した形態が出ること |
+| 実行の形態の読み出し | `GET /me`・`GET /accounts?account_id=` の応答と `resolveAccount` の文脈に保存した形態が出ること |
 | 実行の形態の変更（I21・I22） | 持ち主の変更は 200 で形態が変わり、持ち主でない者は 403、Free で `managed` は 409 `managed_not_allowed_on_free` で、どちらも形態と履歴が変わらないこと |
 | Free へ下げる（I21） | `managed` のプロのアカウントへ `setPlan(…, "free")` を呼ぶと、料金プランが `free`・形態が `local` になり、2 つの履歴の行が同じトランザクションで増えること。形態の書き込みが失敗すれば料金プランも変わらないこと |
 | 版の競合（I21） | `setPlan` の書き込みの前に別の要求が `managed` を保存して版を進めても、`setPlan` が読み直して、終わったとき料金プランが `free`・形態が `local` であること |
