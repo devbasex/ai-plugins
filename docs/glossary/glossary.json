@@ -2018,6 +2018,12 @@
       ]
     },
     {
+      "term": "現状固定テスト",
+      "context": "ndf-workflow",
+      "meaning": "構造を変える前の出力をそのまま期待値にしたテスト。構造を変える前後で同じ出力が出ることを縛る（英語の characterization test）",
+      "source": "plugins/ndf/skills/refactoring/references/characterization-tests.md"
+    },
+    {
       "term": "コメントのスナップショット",
       "context": "ndf-workflow",
       "meaning": "cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す",
