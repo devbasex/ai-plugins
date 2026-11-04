@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router";
 import { App } from "../App.tsx";
-import { ApiFailure, createApi, type Api, type SprintRunRow } from "../api.ts";
+import { ApiFailure, createApi, type Api, type SprintRunRow, type StepDetail } from "../api.ts";
 import type { Auth } from "../auth.ts";
 import { fixedConnection } from "../connection.ts";
 import { createDummyApi, createDummyAuth } from "../dummy/index.ts";
@@ -121,6 +121,85 @@ describe("スプリントの詳細（受け入れ条件 5〜9）", () => {
     await userEvent.click(within(log).getByRole("button", { name: /^sprint-branch/ }));
     const panel = await screen.findByRole("region", { name: "工程の詳細" });
     expect(await within(panel).findAllByText("記録なし")).toHaveLength(3);
+  });
+});
+
+// 現状固定テスト（I-007: StepPanel の分割の前に、詳細パネルの分岐を固定する）
+describe("工程の詳細パネルの分岐（現状固定）", () => {
+  function withStep(patch: Partial<StepDetail>): Api {
+    const api = createDummyApi();
+    const original = api.stepDetails.bind(api);
+    api.stepDetails = async (id, sprintRunId, keys) => (await original(id, sprintRunId, keys)).map((s) => ({ ...s, ...patch }));
+    return api;
+  }
+
+  async function openImpl(api: Api) {
+    show(detail, api);
+    const log = await screen.findByRole("region", { name: "工程の記録" });
+    await userEvent.click(within(log).getByRole("button", { name: /^impl（実装）/ }));
+    return screen.findByRole("region", { name: "工程の詳細" });
+  }
+
+  it("読み込みに失敗すると、戻るボタンと失敗の知らせだけを出す", async () => {
+    const api = createDummyApi();
+    api.stepDetails = async () => {
+      throw new ApiFailure(503, "unavailable", "x");
+    };
+    const panel = await openImpl(api);
+    expect(await within(panel).findByRole("alert")).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: "概要に戻る" })).toBeTruthy();
+    expect(within(panel).queryByText("触ったファイル")).toBeNull();
+  });
+
+  it("見出しの欄にステップ・終了コード・秒・費用・要約を並べ、費用が無いときは「—」", async () => {
+    const panel = await openImpl(withStep({ cost_usd: null, summary: "要約の見本", exit_code: 3, seconds: 1234 }));
+    await within(panel).findByText("要約の見本");
+    expect(within(panel).getAllByRole("term").map((x) => x.textContent)).toEqual(["ステップ", "終了コード", "秒", "費用", "要約"]);
+    expect(within(panel).getAllByRole("definition").map((x) => x.textContent)).toEqual(["impl（実装）", "3", "1,234", "—", "要約の見本"]);
+  });
+
+  it("ファイルと決めたことが空のときは「ありません」を出し、差分のリンクが無ければ出さない", async () => {
+    const panel = await openImpl(withStep({ files: [], decisions: [], diff_url: null, output: null }));
+    expect(await within(panel).findByText("触ったファイルはありません")).toBeTruthy();
+    expect(within(panel).getByText("決めたことはありません")).toBeTruthy();
+    expect(within(panel).queryByRole("link")).toBeNull();
+    expect(within(panel).getAllByText("記録なし")).toHaveLength(1);
+  });
+
+  it("URL の無いファイルは文字だけ、行数の無いファイルは「バイナリ」、省いた件数は「ほか N 件」", async () => {
+    const panel = await openImpl(
+      withStep({
+        files: [
+          { path: "a.bin", added: null, deleted: 1, url: null },
+          { path: "b.ts", added: 1, deleted: 2, url: "https://example.test/b.ts" },
+        ],
+        files_omitted: 5,
+        decisions: [{ question: "Q", answer: "A", by: "user" }],
+      }),
+    );
+    expect(await within(panel).findByText("a.bin")).toBeTruthy();
+    expect(within(panel).queryByRole("link", { name: "a.bin" })).toBeNull();
+    expect(within(panel).getByText("バイナリ")).toBeTruthy();
+    expect(within(panel).getByRole("link", { name: "b.ts" }).getAttribute("href")).toBe("https://example.test/b.ts");
+    expect(within(panel).getByText("+1 −2")).toBeTruthy();
+    expect(within(panel).getByText("ほか 5 件")).toBeTruthy();
+    expect(within(panel).getByText(/Q → A/)).toBeTruthy();
+    expect(within(panel).getByText("利用者")).toBeTruthy();
+  });
+
+  it("ログの出力は「ログを開く」で開き、切った知らせを出し、「閉じる」で畳む", async () => {
+    const panel = await openImpl(withStep({ output: { kind: "log", text: "ログの本文", truncated: true } }));
+    const toggle = await within(panel).findByRole("button", { name: "ログを開く" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(panel).queryByText("ログの本文")).toBeNull();
+    await userEvent.click(toggle);
+    expect(within(panel).getByText("ログの本文")).toBeTruthy();
+    expect(within(panel).getByText("長いため途中で切りました")).toBeTruthy();
+    const close = within(panel).getByRole("button", { name: "閉じる" });
+    expect(close.getAttribute("aria-expanded")).toBe("true");
+    await userEvent.click(close);
+    expect(within(panel).queryByText("ログの本文")).toBeNull();
+    expect(within(panel).getByRole("button", { name: "ログを開く" })).toBeTruthy();
   });
 });
 
