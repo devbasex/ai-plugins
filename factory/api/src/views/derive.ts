@@ -1,6 +1,7 @@
 // スプリントの一覧・詳細・工程の中身・棚卸しの記録の派生（#2172）。進捗の事象の列とスプリントの実行の行から作る純粋な関数で、
 // 時刻も外の世界も読まず、どちらの集約も書き換えない。リンクは GitHub を呼ばずに文字列で作る（I13）
 import { CLOSING_STEPS, PHASE_NAMES } from "@ndf-factory/contracts/phases";
+import type { StepDetailBody } from "@ndf-factory/contracts/views";
 import type { CiUpdatedPayload, GateAnsweredPayload, GateReachedPayload, PrUpdatedPayload, StepRecordedPayload, UsageRecordedPayload } from "@ndf-factory/contracts";
 import type { RunLatest, StepRecord } from "../progress/read.ts";
 import type { ProgressEventRecord } from "../progress/store.ts";
@@ -92,14 +93,7 @@ export interface SprintRunDetail extends SprintRunSummaryView {
   omitted_steps: number;
 }
 
-export interface StepDetail extends StepRow {
-  files: { path: string; added: number | null; deleted: number | null; url: string | null }[] | null;
-  files_omitted: number | null;
-  commit_range: { from: string; to: string } | null;
-  decisions: { question: string; answer: string; by: "ai" | "user" }[] | null;
-  output: { kind: "report" | "log"; text: string; truncated: boolean } | null;
-  diff_url: string | null;
-}
+export type StepDetail = StepRow & StepDetailBody;
 
 export interface RefinementRecord {
   sprint_run_id: string;

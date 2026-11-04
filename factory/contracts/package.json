@@ -5,7 +5,8 @@
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./phases": "./src/phases.ts"
+    "./phases": "./src/phases.ts",
+    "./views": "./src/views.ts"
   },
   "scripts": {
     "generate": "node scripts/generate.ts",

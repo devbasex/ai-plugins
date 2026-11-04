@@ -1,4 +1,5 @@
 import type { Auth } from "./auth.ts";
+import type { StepDetailBody } from "@ndf-factory/contracts/views";
 
 // API の応答の形（factory/contracts/openapi/accounts.yaml）
 export type Plan = "free" | "pro" | "max" | "team";
@@ -148,14 +149,7 @@ export interface SprintRunDetail extends SprintRunSummary {
   omitted_steps: number;
 }
 
-export interface StepDetail extends StepRow {
-  files: { path: string; added: number | null; deleted: number | null; url: string | null }[] | null;
-  files_omitted: number | null;
-  commit_range: { from: string; to: string } | null;
-  decisions: { question: string; answer: string; by: "ai" | "user" }[] | null;
-  output: { kind: "report" | "log"; text: string; truncated: boolean } | null;
-  diff_url: string | null;
-}
+export type StepDetail = StepRow & StepDetailBody;
 
 export interface Backlog {
   repository_id: number;
