@@ -24,8 +24,10 @@
 | 契約の一覧の入口の行のキー（`scripts/contracts_lib/model.py:_check_entry` の必須 11 個と任意の `callers`・`external`）に持ち主の鍵も再開も無い | コードの読み取り | 持ち主と再開の宣言を契約の一覧へ足す必要があること |
 
 要求と受け入れ条件は #2342 の本文にある（コピーは [issue-2342-requirements.md](issue-2342-requirements.md) ）。この文書は「どう作るか」だけを扱う。
-上位の設計は #2335 の [issue-2335-design.md](issue-2335-design.md) と [issue-2335-design-decisions.md](issue-2335-design-decisions.md) で、
-この文書はその決定 7・14・15 を正として、柱 P3 の範囲を詳しくする。決定の記録は [issue-2342-design-decisions.md](issue-2342-design-decisions.md) 、データ構造と入出力の契約は [issue-2342-design-contracts.md](issue-2342-design-contracts.md) にある。
+上位の設計は #2335 の [issue-2335-design.md](issue-2335-design.md) と [issue-2335-design-decisions.md](issue-2335-design-decisions.md) である。
+この文書はその決定 7・14・15 を正として、柱 P3 の範囲を詳しくする。
+決定の記録は [issue-2342-design-decisions.md](issue-2342-design-decisions.md) にある。
+データ構造と入出力の契約は [issue-2342-design-contracts.md](issue-2342-design-contracts.md) にある。
 
 **前提にする柱は未完了である。** 実行の核（`run_core`。柱 P1 #2337）・実行の記録（`run_log`。柱 P2 #2338）・入力の部品（`inputs`。柱 P8 #2341）は
 2026-11-04 の時点でマージされていない。この文書はそれらの #2335 での形（`RunContext`・`NDF_RUN_ID`・実行の記録の行）を前提に書く。
@@ -172,9 +174,16 @@ graph TD
     CK[構造の検査] --> EN
 ```
 
-処理の流れの図に描かない要素: 契約の一覧と状態の一覧（核と片付けが読む宣言）・契約の読み手（核が契約の一覧を読むときに通る）・
-持ち主の記録の旧い読み手（削除）・旧い再開の形（再開の入口へ渡す前段）・開発ループと打ち切りの実装と配布のプランの後片付け
-（持ち主の鍵を宣言した入口とその本体の一部）・構造の検査（CI で動く）。
+処理の流れの図に描かない要素は次のとおりである。
+
+| 要素 | 描かない理由 |
+| --- | --- |
+| 契約の一覧と状態の一覧 | 核と片付けが読む宣言 |
+| 契約の読み手 | 核が契約の一覧を読むときに通る |
+| 持ち主の記録の旧い読み手 | 削除 |
+| 旧い再開の形 | 再開の入口へ渡す前段 |
+| 開発ループと打ち切りの実装と配布のプランの後片付け | 持ち主の鍵を宣言した入口とその本体の一部 |
+| 構造の検査 | CI で動く |
 
 ### 配置
 
@@ -190,7 +199,8 @@ graph TD
     end
 ```
 
-置き場は `${NDF_STATE_DIR:-~/.local/state/ndf}/leases/<owner>--<repo>/<鍵をファイル名にしたもの>.json` で、排他の錠は同じ名前に `.lock` を付けたファイルである。
+置き場は `${NDF_STATE_DIR:-~/.local/state/ndf}/leases/<owner>--<repo>/<鍵をファイル名にしたもの>.json` である。
+排他の錠は、同じ名前に `.lock` を付けたファイルである。
 `<owner>--<repo>` は origin の URL から作り、同じリポジトリの別の clone と worktree の実行どうしが取り合う（#2335 の決定 15）。
 鍵のうち `/` と `:` と `=` は `%2F`・`%3A`・`%3D` に置き換えてファイル名にする。
 
@@ -262,17 +272,35 @@ classDiagram
     Kind ..> LeaseRecord : 鍵の形で指す
 ```
 
-- **部品の形**: `lease.acquire(decl, inputs, run, root_run) -> LeaseOutcome`、`lease.release(key, run) -> None`、`lease.touch(key, run) -> None`、
-  `lease.last_run(key) -> str | None`。待ちの上限に達したら `LeaseBusy` を投げ、核が `stopped`・3 に変える
+- **部品の形**: 次の 4 つの関数を持つ。待ちの上限に達したら `LeaseBusy` を投げ、核が `stopped`・3 に変える
+
+  ```python
+  lease.acquire(decl, inputs, run, root_run) -> LeaseOutcome
+  lease.release(key, run) -> None
+  lease.touch(key, run) -> None
+  lease.last_run(key) -> str | None
+  ```
+
 - **核の形**: 本体は持ち主の記録を触らない。長く動く本体は `ctx.touch()` で最後に動いた時刻を書く（drive の `mark_owner(..., "touch")` を置き換える）
 
 ## データ構造
 
-持ち主の記録の形・入口の契約に足すキー・前提 3 の入口の宣言・状態の一覧に足す列と行・移行は [issue-2342-design-contracts.md の「データ構造」](issue-2342-design-contracts.md#データ構造) にある。
+[issue-2342-design-contracts.md の「データ構造」](issue-2342-design-contracts.md#データ構造) に次のものがある。
+
+- 持ち主の記録の形
+- 入口の契約に足すキー
+- 前提 3 の入口の宣言
+- 状態の一覧に足す列と行
+- 移行
 
 ## 入出力の契約
 
-結果 JSON に足す鍵・再開の入口・旧い再開の形・環境変数は [issue-2342-design-contracts.md の「入出力の契約」](issue-2342-design-contracts.md#入出力の契約) にある。
+[issue-2342-design-contracts.md の「入出力の契約」](issue-2342-design-contracts.md#入出力の契約) に次のものがある。
+
+- 結果 JSON に足す鍵
+- 再開の入口
+- 旧い再開の形
+- 環境変数
 
 ## 処理の流れ
 
@@ -341,8 +369,13 @@ sequenceDiagram
 - **返すのは `finally` と SIGTERM の受け手の両方から 1 回だけ**（2 回目は何もしない）。`release` は記録の `run` が自分の根の実行と同じときだけ `finished_at` を書く。
   子の実行は返さない（I6。根の実行が返す）
 - **単位 `session` の記録は、`release: true` の副命令でだけ返す。** ほかの副命令の終わりでは `seen_at` だけを書く。セッションが終われば、次の取る側が I4 で死を判定する
-- **打ち切りで止めるのは 2 種類のプロセスである。** 本体のプロセスの子孫（`psutil` の `children(recursive=True)` を止める直前に読む）と、
-  同じユーザーのプロセスのうち環境変数 `NDF_RUN_ROOT` が自分の根の実行と同じもの（プロセスグループを抜けて親を失った子孫を拾う）。どちらも SIGTERM、猶予の後に SIGKILL（`procs.stop_tree` と同じ順）
+- **打ち切りで止めるのは 2 種類のプロセスである。** どちらも SIGTERM、猶予の後に SIGKILL（`procs.stop_tree` と同じ順）
+
+  | 止めるプロセス | 補足 |
+  | --- | --- |
+  | 本体のプロセスの子孫 | `psutil` の `children(recursive=True)` を止める直前に読む |
+  | 同じユーザーのプロセスのうち、環境変数 `NDF_RUN_ROOT` が自分の根の実行と同じもの | プロセスグループを抜けて親を失った子孫を拾う |
+
 - **テストの打ち切り（本体の中の打ち切り）も同じ部品を使う。** `run_with_timeout` などはプロセスグループを止めた後に `stop_run_tree` を呼ぶ
 
 ### 再開する（E9）

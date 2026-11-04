@@ -1,6 +1,7 @@
 # #2342 の設計: データ構造と入出力の契約
 
-設計文書の本体は [issue-2342-design.md](issue-2342-design.md) 、決定の記録は [issue-2342-design-decisions.md](issue-2342-design-decisions.md) にある。
+設計文書の本体は [issue-2342-design.md](issue-2342-design.md) にある。
+決定の記録は [issue-2342-design-decisions.md](issue-2342-design-decisions.md) にある。
 
 ## データ構造
 
@@ -35,8 +36,13 @@
 | `legacy` | str | 許す | 旧い置き場の記録の形（例 `{review_base}/rf{pr}.owner.json`）。次の正式版で消す |
 | `release` | bool | 許す | 真なら、この副命令の終わりで単位 `session` の記録を返す |
 
-**`resume`**: 再開できる入口だけが持つ。`{"from": "<位置の形>"}` で、位置の形は `step`（ステップの id）・`plan-step`（`<プラン名>=<ステップ>` を 1 つ以上）・
-`round`（値は `round` だけで、新しい実行の回でラウンドを足す）のどれか。
+**`resume`**: 再開できる入口だけが持つ。形は `{"from": "<位置の形>"}` で、位置の形は次のどれかである。
+
+| 位置の形 | `--from` に渡す値 |
+| --- | --- |
+| `step` | ステップの id |
+| `plan-step` | `<プラン名>=<ステップ>` を 1 つ以上 |
+| `round` | `round` だけ。新しい実行の回でラウンドを足す |
 
 ### 前提 3 の入口の宣言
 
@@ -49,8 +55,9 @@
 | `supervise.py run` | `supervise.run:plan={plan}` | `run` | `stop` | — |
 | `supervise.py loop` の副命令すべて | `supervise.loop:name={name}` | `session` | `stop` | — |
 
-`{done}` と `{plan}` はリポジトリの根からの相対パスに正規化する。旧い置き場の `{review_base}` は入力ではなく、
-片付けと同じ `run_state.review_base(<リポジトリの根>)` が返すレビュー worktree の置き場（`<base>/<slug>`）で埋める。`loop stop` と `loop finish` は `release: true` を持つ。
+`{done}` と `{plan}` はリポジトリの根からの相対パスに正規化する。旧い置き場の `{review_base}` は入力ではない。
+片付けと同じ `run_state.review_base(<リポジトリの根>)` が返す、レビュー worktree の置き場（`<base>/<slug>`）で埋める。
+`loop stop` と `loop finish` は `release: true` を持つ。
 見直しの持ち主の寿命の窓は今の `.ndf/backlog.json` の `depths.owner.ttl` を引き継ぐ。どれも `stop` にする理由は決定 2 にある。
 
 ### 状態の一覧に足す列と行
