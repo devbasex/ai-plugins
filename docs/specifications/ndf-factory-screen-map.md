@@ -29,7 +29,7 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | --- | --- | --- | --- | --- |
 | `/login` | ログイン | ログイン前 | あり | Google・GitHub でログイン（[accounts-and-plans](ndf-factory-accounts-and-plans.md)「ログインの流れ」） |
 | `/callback` | ログインの戻り | ログイン前 | あり | code を token に換える（accounts-and-plans「ログインの流れ」） |
-| `/account` | 自分のアカウント | 個人・管理者・席 | あり | 利用者の ID・個人のプランと実行の形態・使える量・チームの一覧・ログアウト（accounts-and-plans） |
+| `/account` | 自分のアカウント | 個人・管理者・席 | あり | 利用者の ID・個人の料金プランと実行の形態・使える量・チームの一覧・ログアウト（accounts-and-plans） |
 | `/teams/new` | チームを作る | 個人 | あり | Team を作る（accounts-and-plans） |
 | `/accounts/:accountId` | チームのアカウント | 管理者・席 | あり | 席の追加・種類の変更・削除（管理者）・実行の形態（管理者）・使える量（accounts-and-plans） |
 | `/accounts/:accountId/repositories` | リポジトリ | 個人・管理者・席 | あり | 導入の案内・登録と外す（個人・管理者）・同時の実行の数の宣言（個人・管理者）・実行の状態（[runs-and-runner](ndf-factory-runs-and-runner.md)「画面」） |
@@ -41,8 +41,8 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | `/accounts/:accountId/loops/:loopId` | ループの詳細 | 個人・管理者・席 | あり | 周回・周回の実行と区間の数・利用上限の再開の時刻・人の判断待ちと答え・予算の変更・止める・次の周回を始める |
 | `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | 予定 | 順位の表と棚卸しの記録 |
 | 未定 | 承認 | 個人・管理者・席 | 予定 | 承認の依頼・Web からの承認・通知 |
-| 未定 | 請求と使用量 | 個人・管理者 | 予定 | プランの料金・使用量の台帳・決済 |
-| 未定 | 手元のランナー | 個人・管理者 | 予定 | ランナーの登録・心拍 |
+| 未定 | 請求と使用量 | 個人・管理者 | 予定 | 料金プランの料金・使用量の台帳・決済 |
+| 未定 | 手元のマシン | 個人・管理者 | 予定 | 手元のマシンの登録・心拍 |
 
 ## ナビゲーション
 
@@ -86,6 +86,6 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 ## 関連リンク
 
 - [画面の部品](ndf-factory-ui-components.md)
-- [認証とアカウント・席・プラン](ndf-factory-accounts-and-plans.md)
+- [認証とアカウント・席・料金プラン](ndf-factory-accounts-and-plans.md)
 - [リポジトリの登録・スプリントの実行の制御・ランナー](ndf-factory-runs-and-runner.md)
 - [起票の依頼と起票の代行](ndf-factory-issue-requests.md)

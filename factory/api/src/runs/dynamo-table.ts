@@ -1,5 +1,5 @@
 // 実行の表の本物（DynamoDB の 1 つの表 RUNS_TABLE_NAME）。行の形は #2186・#2347 の設計の「データ構造」。
-// 枠と実行の増減は 1 回のトランザクションで書き、条件で失敗したら書かない（I34）。開発ループ・持ち分・手元のランナーの枠も
+// 枠と実行の増減は 1 回のトランザクションで書き、条件で失敗したら書かない（I34）。開発ループ・持ち分・手元のマシンの枠も
 // 同じトランザクションで書く（#2347 の決定 2・11・12）
 import { DynamoDBClient, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import {
@@ -615,7 +615,7 @@ export class DynamoRunsTable implements RunsTable {
     });
     // 終わりの状態へ移すときは見回りの GSI から外す
     const leaving = patch.state !== undefined && isTerminalJob(patch.state);
-    // 手元のランナーが受け取ったジョブは、ランナーの枠を同じ書き込みで減らす（I50）
+    // 手元のマシンが受け取ったジョブは、そのマシンの枠を同じ書き込みで減らす（I50）
     const current = leaving ? await this.getJob(jobId) : null;
     if (current?.runnerId && current.state === "running") return this.finishLocalJob(current, patch, from);
     let condition = "attribute_exists(pk)";

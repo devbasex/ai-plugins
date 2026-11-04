@@ -59,7 +59,7 @@ export interface Repository {
   installation_id: number;
   registered_at: string;
   active_sprint_runs?: number;
-  // 同時の実行の数の宣言。無いか null ならプランの値だけで数える
+  // 同時の実行の数の宣言。無いか null なら料金プランの値だけで数える
   max_concurrent_runs?: number | null;
 }
 

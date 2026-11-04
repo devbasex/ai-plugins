@@ -90,10 +90,10 @@ describe("ログインの画面（受け入れ条件 1・2）", () => {
     expect(auth.getToken()).toBeNull();
   });
 
-  it("戻りの後に自分のアカウントの画面へ移り、プランが出る", async () => {
+  it("戻りの後に自分のアカウントの画面へ移り、料金プランが出る", async () => {
     const stub: Auth = { ...auth, completeLogin: async () => (sessionStorage.setItem("ndf-factory.access_token", "t"), { ok: true }) };
     show("/callback?code=c&state=s", { "GET /me": ok(me), "GET /accounts/p-1": ok(personal) }, stub);
-    expect(await screen.findByText("プラン: Free")).toBeTruthy();
+    expect(await screen.findByText("料金プラン: Free")).toBeTruthy();
     expect(where()).toBe("/account");
   });
 });
@@ -106,7 +106,7 @@ describe("自分のアカウント（受け入れ条件 3・8）", () => {
     expect(await screen.findByText("同時に動かせるスプリントの実行")).toBeTruthy();
     expect(screen.getByText("1")).toBeTruthy();
     expect(screen.getByText("掛けない")).toBeTruthy();
-    expect(screen.getByText("実行の形態: local（手元のランナー）")).toBeTruthy();
+    expect(screen.getByText("実行の形態: local（手元のマシン）")).toBeTruthy();
     expect(screen.getByRole("link", { name: "開発" })).toBeTruthy();
     expect((screen.getByRole("option", { name: "managed（サービスの Bedrock）" }) as HTMLOptionElement).disabled).toBe(true);
   });

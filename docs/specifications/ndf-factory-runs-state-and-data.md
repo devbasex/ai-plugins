@@ -38,7 +38,7 @@ stateDiagram-v2
 | --- | --- |
 | `launch_failed` | token の置き場の作成か `RunTask` が失敗した。`pending` のまま 15 分を過ぎた |
 | `timeout` | 見回りが打ち切りの時間で止めた |
-| `task_stopped` | ランナーの `job.finished` が無いままタスクが止まった（手元のランナーの終わりの知らせを含む） |
+| `task_stopped` | ランナーの `job.finished` が無いままタスクが止まった（手元のマシンの終わりの知らせを含む） |
 | `job_failed` | ランナーが `job.finished`（`failed`）を送った。`local` 以外の形態の利用上限（`stopped`・`usage_limit`）も含む |
 | `seat_missing` | リセット時刻の後の再開で、始めた利用者が席を持たないか、形態が `local` でなくなっていた |
 
@@ -108,7 +108,7 @@ erDiagram
 | スプリントの実行 | `RUN#<sprintRunId>` | `RUN` | `ACCOUNT#<accountId>` / `RUN#<createdAt>` |
 | 実行ジョブ | `JOB#<jobId>` | `JOB` | `ACTIVE_JOBS` / `<createdAt>#<jobId>`（終わりの状態でない間だけ。終わりへ移すときに外す） |
 
-列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のランナーの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [開発ループの確定仕様の「実行の表の行」](ndf-factory-dev-loops-data-and-contracts.md#実行の表の行) にある。
+列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のマシンの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [開発ループの確定仕様の「実行の表の行」](ndf-factory-dev-loops-data-and-contracts.md#実行の表の行) にある。
 
 | 行 | 列 | 型 | 空 | 意味 |
 | --- | --- | --- | --- | --- |
@@ -173,7 +173,7 @@ erDiagram
 | `USAGE_LIMIT_RETRY_SECONDS` | 制御 | リセット時刻を読めないときの待ち。既定 900 |
 | `RUNNER_SECTION_LIMIT` | ランナー | 1 つのジョブで起動する区間の上限。既定 20 |
 
-API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 16 項目と `RUNNER_SECTION_LIMIT` のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のランナーの `INGEST_TOKEN` を読む。
+API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 16 項目と `RUNNER_SECTION_LIMIT` のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のマシンの `INGEST_TOKEN` を読む。
 
 
 ## 関連リンク

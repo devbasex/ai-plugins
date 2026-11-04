@@ -443,7 +443,7 @@ graph TD
 - 課題: [#2171](https://github.com/devbasex/ai-plugins/issues/2171)（要求と受け入れ条件の正本）、親の [#2168](https://github.com/devbasex/ai-plugins/issues/2168)、照合と起票の依頼の [#2216](https://github.com/devbasex/ai-plugins/issues/2216)（設計 Pull Request [#2233](https://github.com/devbasex/ai-plugins/pull/2233)）、相手先の流儀の判定の [#2239](https://github.com/devbasex/ai-plugins/issues/2239)
 - 設計 Pull Request: [#2201](https://github.com/devbasex/ai-plugins/pull/2201)、実装: [#2207](https://github.com/devbasex/ai-plugins/pull/2207)・[#2209](https://github.com/devbasex/ai-plugins/pull/2209)
 - サービス全体の契約: [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md)
-- 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 認証とアカウント・席・料金プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
 - サービスのディレクトリとパッケージの管理: [factory/README.md](../../factory/README.md)
 - 受け口の契約: [factory/contracts/openapi/ingest.yaml](../../factory/contracts/openapi/ingest.yaml)、定義: [factory/contracts/schemas/](../../factory/contracts/schemas/)
 - 用語: [用語集](../glossary.md)

@@ -227,7 +227,7 @@ describe("実行の形態（受け入れ条件 18・19、I21・I22）", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toEqual({
       code: "managed_not_allowed_on_free",
-      message: "Free のプランでは managed（サービスの Bedrock）を選べません",
+      message: "Free の料金プランでは managed（サービスの Bedrock）を選べません",
     });
     expect(api.store.accounts.get(id)?.executionMode).toBe("local");
     expect(api.store.history.length).toBe(before);

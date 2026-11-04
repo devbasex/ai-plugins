@@ -87,7 +87,7 @@ export function factoryDepsFromEnv(): FactoryDeps & { platform: EcsRunnerPlatfor
     return { kid: parsed.kid, privateKey: parsed.jwk };
   };
   const reader = new DynamoProgressReader(requireEnv("PROGRESS_EVENTS_TABLE_NAME"), requireEnv("PROGRESS_IDEMPOTENCY_TABLE_NAME"));
-  // 自動で起こすもの（周回・リセット時刻の後の再開）のたびに、始めた利用者の今のプラン・形態・席を引き直す（表の名前がある処理だけ）
+  // 自動で起こすもの（周回・リセット時刻の後の再開）のたびに、始めた利用者の今の料金プラン・形態・席を引き直す（表の名前がある処理だけ）
   const accountsTable = process.env.ACCOUNTS_TABLE_NAME;
   const resolveContext = accountsTable ? accountContextResolver(new AccountService({ store: new DynamoAccountStore(accountsTable) })) : undefined;
   const control = new RunControl({

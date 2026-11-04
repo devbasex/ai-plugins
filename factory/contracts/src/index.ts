@@ -99,7 +99,7 @@ export function isIngestResponse(value: unknown): boolean {
   return responseValidator(value) as boolean;
 }
 
-// 手元のランナーの申告（登録と心拍の本文の一部）を定義で確かめる
+// 手元のマシンの申告（登録と心拍の本文の一部）を定義で確かめる
 export function validateLocalRunnerDeclaration(value: unknown): ContractResult<LocalRunnerDeclaration> {
   return declarationValidator(value)
     ? { ok: true, value: value as LocalRunnerDeclaration }

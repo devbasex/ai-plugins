@@ -781,7 +781,7 @@ export class RunControl {
   }
 
   // 形態 local の渡す口（#2189）。最も古い pending の local のジョブを running にし、指示と token を 1 回だけ返す。
-  // ランナーの申告があれば、そのランナーの枠が同時のジョブの数に達している間は渡さない（I50。申告が無ければ 1）
+  // 手元のマシンの申告があれば、そのマシンの枠が同時のジョブの数に達している間は渡さない（I50。申告が無ければ 1）
   async claimLocalRunJob(accountId: string, runner?: LocalRunner): Promise<{ instruction: RunJobInstruction; token: string } | null> {
     const { table } = this.deps;
     for (const job of await table.listActiveJobs()) {

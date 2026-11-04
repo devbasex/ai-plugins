@@ -21,7 +21,7 @@ CDK のスタック・ネットワーク・秘密の管理は別の private リ�
 | ディレクトリ | 中身 | 作る Issue |
 | --- | --- | --- |
 | `contracts/` | 進捗の事象・実行ジョブの指示・受け口の応答の JSON Schema（`contracts/schemas/`）と、そこから生成した型（workspace `@ndf-factory/contracts`）。API の経路の形は `contracts/openapi/`（アカウントは `accounts.yaml`、進捗の受け口は `ingest.yaml`、スプリントの実行とランナー向けの経路は `runs.yaml`） | #2170・#2171 |
-| `web/` | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・プランと請求の画面 | #2170・#2172〜#2174・#2186 |
+| `web/` | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・料金プランと請求の画面 | #2170・#2172〜#2174・#2186 |
 | `api/` | 画面からの要求を受け、アカウントで認可して各集約の持ち主へ渡す処理 | #2170〜#2174・#2186 |
 | `runner/` | 実行ジョブのコンテナ。リポジトリの取り込み・NDF の導入・conductor の起動・進捗の事象の送信 | #2186 |
 
@@ -67,6 +67,6 @@ TypeScript のコードは npm の workspaces で束ね、どの子課題も次�
 
 進捗の事象の表（`PROGRESS_EVENTS_TABLE_NAME`）は区分の鍵 `sprint_run_id`・並びの鍵 `order_key` と、区分の鍵 `pr_ref` の GSI `pr_ref-index`（射影に `sprint_run_id` を含める）を持つ。冪等の鍵の表（`PROGRESS_IDEMPOTENCY_TABLE_NAME`）は区分の鍵 `idempotency_key` だけを持ち、TTL を置かない。
 
-ほかの子課題は `api/src/index.ts` から export したものだけを使う。要求の利用者は `requireCaller`、アカウントの文脈は `resolveFromRequest`（関数としては `resolveAccount`）、使える量は `getLimits`・`judgeLimits`、プランの変更は `setPlan` で得る。実行ジョブの token は `signRunJobToken` で作り、受け口で `verifyRunJobToken` で確かめる。テストでは `createRunJobTokenKit` で鍵の組をメモリの中に作る。実行の制御は `job.finished` を `appendControlEvent` で直に書く。契約の型は `@ndf-factory/contracts` か `api/src/index.ts` から import する。
+ほかの子課題は `api/src/index.ts` から export したものだけを使う。要求の利用者は `requireCaller`、アカウントの文脈は `resolveFromRequest`（関数としては `resolveAccount`）、使える量は `getLimits`・`judgeLimits`、料金プランの変更は `setPlan` で得る。実行ジョブの token は `signRunJobToken` で作り、受け口で `verifyRunJobToken` で確かめる。テストでは `createRunJobTokenKit` で鍵の組をメモリの中に作る。実行の制御は `job.finished` を `appendControlEvent` で直に書く。契約の型は `@ndf-factory/contracts` か `api/src/index.ts` から import する。
 
 全体の設計（構成要素・実行基盤・進捗の正本・構成要素の間の契約）は [docs/specifications/ndf-factory-service-boundary.md](../docs/specifications/ndf-factory-service-boundary.md) にある。

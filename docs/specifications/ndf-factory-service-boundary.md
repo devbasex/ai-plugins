@@ -137,13 +137,13 @@ graph TD
 
 | 課題 | 受け持つ範囲 | 提供する契約 | 使う契約 |
 | --- | --- | --- | --- |
-| #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・プランと使える量・実行の形態の値の画面と API | `resolveAccount(caller, accountId?)` が返す `account_id`（token には載せず、検証した token の利用者と経路 `/accounts/{account_id}/…` から解決する。経路に無ければ個人のアカウント）、使える量の問い合わせ（同時のスプリントの数・月の token の上限）、アカウントの実行の形態 | 無し |
+| #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・料金プランと使える量・実行の形態の値の画面と API | `resolveAccount(caller, accountId?)` が返す `account_id`（token には載せず、検証した token の利用者と経路 `/accounts/{account_id}/…` から解決する。経路に無ければ個人のアカウント）、使える量の問い合わせ（同時のスプリントの数・月の token の上限）、アカウントの実行の形態 | 無し |
 | #2171 | `factory/contracts/`・進捗の受け口・実行ジョブの token の検証 | 実行ジョブの指示・進捗の事象の種類と形・受け口の認証と応答・実行ジョブの token の検証（token から実行ジョブと `sprint_run_id`・`repo` を返し、無効なら拒む） | #2170 の `resolveAccount` が返す `account_id`、#2173 の保存済みの答え（`gate.answered` の照合） |
 | #2186 | GitHub App・リポジトリの登録・スプリントの実行と実行ジョブ・クラウドのランナー（形態 ② と ③）・持ち込んだキーの保存・実行ジョブの token の発行 | 実行の制御への再開の要求の受け口、実行ジョブを渡す口（#2189 が使う） | #2171 の `factory/contracts/`・進捗の受け口・token の検証、#2170 の `resolveAccount` が返す `account_id` と使える量と実行の形態、#2173 の承認の依頼の答えを読む経路 |
 | #2172 | 一覧と詳細の画面・派生の形・フェーズの名前の集合 | 無し | 進捗の事象（`phase.changed`・`step.recorded`・`pr.updated`・`ci.updated`） |
 | #2173 | 承認の依頼・Web と Slack の通知・Web からの承認 | `gate.answered`、承認の依頼の答えを読む経路、実行の制御への再開の要求 | `gate.reached`・`attention`、#2171 の実行ジョブの token の検証 |
-| #2174 | プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 のプランと実行の形態 |
-| #2189 | 手元のランナー（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
+| #2174 | 料金プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 の料金プランと実行の形態 |
+| #2189 | 手元のマシン（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
 
 各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI と実行ジョブの打ち切りの時間は #2186 が決めた（「実行の制御」）。`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
 
@@ -153,16 +153,16 @@ graph TD
 
 | 要素 | 責務 | 課題 |
 | --- | --- | --- |
-| 画面 | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・プランと請求 | 各課題が各画面 |
+| 画面 | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・料金プランと請求 | 各課題が各画面 |
 | API | 画面からの要求を受け、アカウントで認可して各集約の持ち主へ渡す | 各課題が自分の経路 |
-| 認証とプラン | 利用者プールとアカウント・席・プランの使える量 | #2170 |
+| 認証と料金プラン | 利用者プールとアカウント・席・料金プランの使える量 | #2170 |
 | 取り込み | GitHub App の導入とリポジトリの登録 | #2186 |
-| 実行の制御 | スプリントの実行と実行ジョブの状態を持ち、ジョブを起動し終了を受ける。同時の数をプランの使える量で抑える。実行ジョブの token を発行する | #2186 |
+| 実行の制御 | スプリントの実行と実行ジョブの状態を持ち、ジョブを起動し終了を受ける。同時の数を料金プランの使える量で抑える。実行ジョブの token を発行する | #2186 |
 | ランナー | 実行ジョブの中身。取り込み・NDF の導入・conductor の起動・翻訳・送信・状態の保存 | #2186 |
 | 進捗の受け口 | ランナー・GitHub の通知・API から進捗の事象を受け、出所ごとに認証して冪等に追記する。実行ジョブの token を検証する | #2171 |
 | 一覧と詳細 | 進捗の事象から一覧と詳細の読み出しの形を導く | #2172 |
 | 承認と通知 | 承認の依頼を作って知らせ（Web・Slack）、答えを実行の制御へ渡す | #2173 |
-| 課金 | 使用量の事象を台帳へ積み、プランの料金に上乗せして請求する | #2174 |
+| 課金 | 使用量の事象を台帳へ積み、料金プランの料金に上乗せして請求する | #2174 |
 
 ```mermaid
 graph TD
@@ -180,7 +180,7 @@ graph TD
         APR[承認と通知]
         BILL[課金]
     end
-    AUTH[認証とプラン]
+    AUTH[認証と料金プラン]
     REPO[取り込み]
     WEB --> API
     API --> AUTH
@@ -229,7 +229,7 @@ graph TD
 
 | 集約 | 持ち主 | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| アカウント | 認証とプラン（#2170） | アカウント | 席 | プラン・使える量 |
+| アカウント | 認証と料金プラン（#2170） | アカウント | 席 | 料金プラン・使える量 |
 | リポジトリの登録 | 取り込み（#2186） | 登録 | — | GitHub のリポジトリの識別子・GitHub App の導入の識別子 |
 | スプリントの実行 | 実行の制御（#2186） | スプリントの実行 | 実行ジョブ | NDF の版・スプリントの状態・ジョブの結果 |
 | 実行の枠 | 実行の制御（#2186） | アカウントの枠 | — | 終わりの状態でない数（アカウント全体・リポジトリごと） |
@@ -246,7 +246,7 @@ graph TD
 
 | 形態 | 値 | ランナーの場所 | Claude をどう呼ぶか | サービスが持つ Claude の認証情報 | 月の token の上限 | token の課金 | 受け持つ課題 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ① 手元のランナー | `local` | 利用者の環境 | 利用者がログインした `claude` | 無し | 掛けない | しない | #2189 |
+| ① 手元のマシン | `local` | 利用者の環境 | 利用者がログインした `claude` | 無し | 掛けない | しない | #2189 |
 | ② キーの持ち込み | `byok` | ECS Fargate | 利用者の Anthropic API キーか、利用者の AWS アカウントの Bedrock（ロールを引き受ける） | 利用者のキーかロールの ARN（Secrets Manager） | 掛けない | しない | #2186 |
 | ③ サービスの Bedrock | `managed` | ECS Fargate | サービスの AWS アカウントの Bedrock（タスクの役割の権限） | 無し（役割の権限） | 掛ける | する（#2174） | #2186・#2174 |
 
@@ -317,7 +317,7 @@ erDiagram
 
 ### 実行ジョブの指示
 
-実行の制御からランナーへ、コンテナの環境変数で渡す。形態 ① では、手元のランナーが受け取りの応答で同じ項目を受け取る（#2189）。
+実行の制御からランナーへ、コンテナの環境変数で渡す。形態 ① では、手元のマシンが受け取りの応答で同じ項目を受け取る（#2189）。
 
 | 入力 | 型・必須 | 意味 |
 | --- | --- | --- |
@@ -493,7 +493,7 @@ stateDiagram-v2
 - 子課題: [#2170](https://github.com/devbasex/ai-plugins/issues/2170)・[#2171](https://github.com/devbasex/ai-plugins/issues/2171)・[#2172](https://github.com/devbasex/ai-plugins/issues/2172)・[#2173](https://github.com/devbasex/ai-plugins/issues/2173)・[#2174](https://github.com/devbasex/ai-plugins/issues/2174)・[#2186](https://github.com/devbasex/ai-plugins/issues/2186)・[#2189](https://github.com/devbasex/ai-plugins/issues/2189)
 - 設計 Pull Request: [#2175](https://github.com/devbasex/ai-plugins/pull/2175)、実装: [#2177](https://github.com/devbasex/ai-plugins/pull/2177)
 - サービスのディレクトリ: [factory/README.md](../../factory/README.md)
-- 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 認証とアカウント・席・料金プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
 - 契約の定義と型・進捗の受け口・実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
 - 境界の検査: [scripts/check-service-boundary.py](../../scripts/check-service-boundary.py)、許可の一覧: [scripts/service-boundary-allow.json](../../scripts/service-boundary-allow.json)
 - 追加待ちの扱い: [必須のチェックの突き合わせ](ci-required-checks-reconcile.md)

@@ -262,7 +262,7 @@ export class LoopControl {
         if (ok) return;
         continue;
       }
-      // 保存した写しを判定に使わない（プランの変更・席の外し・形態の変更を周回ごとに照らす）
+      // 保存した写しを判定に使わない（料金プランの変更・席の外し・形態の変更を周回ごとに照らす）
       if (this.deps.resolveContext) {
         const fresh = await this.deps.resolveContext(loop.accountId, loop.createdBy);
         if (!fresh) {

@@ -348,7 +348,7 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
   });
 });
 
-describe("手元のランナーの申告の定義（#2347）", () => {
+describe("手元のマシンの申告の定義（#2347）", () => {
   it("runner_id は 32 字の英数字で、max_jobs は 1〜16 の整数・任意", () => {
     const id = "a".repeat(32);
     expect(validateLocalRunnerDeclaration({ runner_id: id }).ok).toBe(true);

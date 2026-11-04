@@ -431,7 +431,7 @@ paths:
       tags: [repositories]
       operationId: updateRepository
       summary: リポジトリの同時の実行の数を宣言する
-      description: プランの同時の数より小さい値だけが効く。null は宣言を外す。持ち主だけが使える（#2347）。
+      description: 料金プランの同時の数より小さい値だけが効く。null は宣言を外す。持ち主だけが使える（#2347）。
       parameters:
         - name: accountId
           in: path
