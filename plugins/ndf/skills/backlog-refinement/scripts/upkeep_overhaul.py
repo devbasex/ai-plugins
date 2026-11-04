@@ -62,42 +62,57 @@ def _read_input(path, what: str):
     return got
 
 
-def count_types(snap: dict, classes: list[dict], types: list[dict]) -> dict:
-    """型ごとの件数・部品・マイルストーンごとの割合・月ごとの起票と完了。"""
-    ids = [t["id"] for t in types]
+def _issue_types(issues: list[dict], by_num: dict, ids: list[str]) -> dict[int, str]:
+    """課題の番号 → 型。分類が無いか型の一覧に無ければ `I`（無ければ最後の型）。"""
     other = "I" if "I" in ids else ids[-1]
-    by_num = {c["number"]: c for c in classes if isinstance(c, dict) and isinstance(c.get("number"), int)}
-    issues = snap.get("open") or []
-    kind = {
-        i["number"]: (by_num.get(i["number"]) or {}).get("type") if (by_num.get(i["number"]) or {}).get("type") in ids else other
-        for i in issues
-    }
-    by_type = {t: sum(1 for v in kind.values() if v == t) for t in ids}
-    defect = {t["id"] for t in types if t.get("defect", True)}
-    n_defect = sum(by_type[t] for t in defect)
+    kind = {}
+    for i in issues:
+        t = (by_num.get(i["number"]) or {}).get("type")
+        kind[i["number"]] = t if t in ids else other
+    return kind
+
+
+def _components(issues: list[dict]) -> Counter:
+    """題と本文に現れる部品の名前ごとの、課題の数（1 つの課題で 1 回）。"""
     comps = Counter()
     for i in issues:
         comps.update(set(_COMPONENT.findall(f"{i.get('title')}\n{i.get('body')}")))
-    per_ms: dict = {}
-    for i in issues:
-        row = per_ms.setdefault(i.get("milestone") or "（なし）", Counter())
-        row[kind[i["number"]]] += 1
+    return comps
+
+
+def _months(issues: list[dict], closed: list[dict]) -> dict:
+    """月（`YYYY-MM`）→ {起票の数, 完了の数}。月の順。"""
     months: dict = {}
-    for i in list(issues) + list(snap.get("closed") or []):
+    for i in list(issues) + list(closed):
         if i.get("created_at"):
             months.setdefault(i["created_at"][:7], {"created": 0, "closed": 0})["created"] += 1
-    for c in snap.get("closed") or []:
+    for c in closed:
         if c.get("closed_at"):
             months.setdefault(c["closed_at"][:7], {"created": 0, "closed": 0})["closed"] += 1
+    return dict(sorted(months.items()))
+
+
+def count_types(snap: dict, classes: list[dict], types: list[dict]) -> dict:
+    """型ごとの件数・部品・マイルストーンごとの割合・月ごとの起票と完了。"""
+    ids = [t["id"] for t in types]
+    by_num = {c["number"]: c for c in classes if isinstance(c, dict) and isinstance(c.get("number"), int)}
+    issues = snap.get("open") or []
+    kind = _issue_types(issues, by_num, ids)
+    by_type = {t: sum(1 for v in kind.values() if v == t) for t in ids}
+    defect = {t["id"] for t in types if t.get("defect", True)}
+    n_defect = sum(by_type[t] for t in defect)
+    per_ms: dict = {}
+    for i in issues:
+        per_ms.setdefault(i.get("milestone") or "（なし）", Counter())[kind[i["number"]]] += 1
     return {
         "issues": len(issues),
         "unclassified": sum(1 for i in issues if i["number"] not in by_num),
         "by_type": by_type,
         "defects": n_defect,
         "defect_share": {t: round(by_type[t] / n_defect, 4) for t in ids if t in defect and n_defect},
-        "components": comps.most_common(10),
+        "components": _components(issues).most_common(10),
         "milestones": {m: dict(c) for m, c in sorted(per_ms.items())},
-        "months": dict(sorted(months.items())),
+        "months": _months(issues, snap.get("closed") or []),
     }
 
 
