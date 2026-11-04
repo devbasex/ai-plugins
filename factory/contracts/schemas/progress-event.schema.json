@@ -19,7 +19,12 @@
     { "$ref": "#/$defs/IssueRequestResolvedEvent" },
     { "$ref": "#/$defs/SectionStartedEvent" },
     { "$ref": "#/$defs/LoopLapClosedEvent" },
-    { "$ref": "#/$defs/LoopStoppedEvent" }
+    { "$ref": "#/$defs/LoopStoppedEvent" },
+    { "$ref": "#/$defs/ReleaseRequestedEvent" },
+    { "$ref": "#/$defs/ReleasePresentedEvent" },
+    { "$ref": "#/$defs/ReleaseProgressEvent" },
+    { "$ref": "#/$defs/ReleaseSettledEvent" },
+    { "$ref": "#/$defs/ReleaseAnsweredEvent" }
   ],
   "$defs": {
     "Identifier": {
@@ -80,7 +85,7 @@
       "required": ["ndf_version", "start"],
       "properties": {
         "ndf_version": { "type": "string", "minLength": 1 },
-        "start": { "type": "string", "enum": ["new", "resume", "loop"] }
+        "start": { "type": "string", "enum": ["new", "resume", "loop", "release"] }
       }
     },
     "PhaseChangedPayload": {
@@ -131,7 +136,14 @@
         "kind": { "$ref": "#/$defs/GateKind" },
         "pr_url": { "type": ["string", "null"], "format": "uri" },
         "material": { "description": "承認資料の本文", "type": "string" },
-        "loop": { "$ref": "#/$defs/LoopRef" }
+        "loop": { "$ref": "#/$defs/LoopRef" },
+        "choices": {
+          "description": "答えの選択肢の制限。配布の実行が main へのマージの後に判断で止まったときは continue だけを載せる（#2439 の I63）",
+          "type": "array",
+          "items": { "type": "string", "enum": ["continue", "reject"] },
+          "minItems": 1,
+          "uniqueItems": true
+        }
       }
     },
     "LoopRef": {
@@ -249,9 +261,9 @@
         "result": { "type": "string", "enum": ["gate", "stopped", "done", "failed"] },
         "summary": { "type": "string" },
         "reason": {
-          "description": "stopped の理由。section_limit は区間の上限、usage_limit は local の利用上限",
+          "description": "stopped の理由。section_limit は区間の上限、usage_limit は local の利用上限。release_requested は gate の理由で、手動の実行が配布の依頼を出して答えを待つ（#2439）",
           "type": "string",
-          "enum": ["section_limit", "usage_limit"]
+          "enum": ["section_limit", "usage_limit", "release_requested"]
         },
         "resets_at": {
           "description": "usage_limit のときだけ。利用上限のリセット時刻（読めなければ null）",
@@ -335,6 +347,107 @@
       "if": { "properties": { "outcome": { "const": "filed" } } },
       "then": { "required": ["issue"], "not": { "required": ["reason"] } },
       "else": { "required": ["reason"], "not": { "required": ["issue"] } }
+    },
+    "ReleaseLaneName": {
+      "description": "並列のレーンの名前（Factory では loop-<ループの ID> / run-<実行の ID>。#2439）",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,140}$"
+    },
+    "ReleaseRequestId": {
+      "description": "NDF が作る配布の依頼の id（<レーンの名前>-r<乱数>）",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,160}$"
+    },
+    "ReleaseCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "ReleaseVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "NumberList": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "ReleaseRequestedPayload": {
+      "description": "実行が本番の配布の代わりに出した配布の依頼（#2439）。NDF の置き場の requests/ の写し",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "lane", "prs", "issues", "ndf_version", "requested_at"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/ReleaseRequestId" },
+        "lane": { "$ref": "#/$defs/ReleaseLaneName" },
+        "prs": { "$ref": "#/$defs/NumberList" },
+        "issues": { "$ref": "#/$defs/NumberList" },
+        "ndf_version": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "requested_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ReleasePresentedLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lane", "requested"],
+      "properties": {
+        "lane": { "$ref": "#/$defs/ReleaseLaneName" },
+        "requested": { "description": "そのレーンが配布の依頼を出したか", "type": "boolean" }
+      }
+    },
+    "ReleasePresentedPayload": {
+      "description": "配布の実行が承認資料をそろえた提示（#2439）。auto は MVV 判定が承認ゲート 2 を通したとき真",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "k", "sha", "version", "prs", "lanes", "added_prs", "auto"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "k": { "description": "提示の番号。出し直しは 2", "type": "integer", "enum": [1, 2] },
+        "sha": { "$ref": "#/$defs/ReleaseCommit" },
+        "version": { "$ref": "#/$defs/ReleaseVersion" },
+        "prs": { "$ref": "#/$defs/NumberList" },
+        "lanes": { "type": "array", "items": { "$ref": "#/$defs/ReleasePresentedLane" } },
+        "added_prs": { "$ref": "#/$defs/NumberList" },
+        "auto": { "type": "boolean" }
+      }
+    },
+    "ReleaseProgressPayload": {
+      "description": "配布の実行の本番の配布が届いた段（#2439）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "stage"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "stage": { "type": "string", "enum": ["release_branch", "develop_merged", "prod_pr_opened", "main_merged", "tagged"] }
+      }
+    },
+    "ReleaseSettledPayload": {
+      "description": "配布の実行の結果（#2439）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "result", "prs", "lanes"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "result": { "type": "string", "enum": ["released", "failed"] },
+        "version": { "$ref": "#/$defs/ReleaseVersion" },
+        "prod_pr_url": { "type": "string", "format": "uri" },
+        "sha": { "$ref": "#/$defs/ReleaseCommit" },
+        "prs": { "$ref": "#/$defs/NumberList" },
+        "lanes": { "type": "array", "items": { "$ref": "#/$defs/ReleaseLaneName" } },
+        "reason": { "type": "string", "maxLength": 4000 }
+      }
+    },
+    "ReleaseAnsweredPayload": {
+      "description": "Factory のオーガナイザーが範囲の実行へ返した配布の答え（#2439）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "result"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "request_id": { "$ref": "#/$defs/ReleaseRequestId" },
+        "result": { "type": "string", "enum": ["released", "rejected"] },
+        "version": { "$ref": "#/$defs/ReleaseVersion" },
+        "prod_pr_url": { "type": "string", "format": "uri" }
+      }
     },
     "JobStartedEvent": {
       "allOf": [{ "$ref": "#/$defs/EventCommon" }],
@@ -493,6 +606,56 @@
       "properties": {
         "type": { "const": "loop.stopped" },
         "payload": { "$ref": "#/$defs/LoopStoppedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "ReleaseRequestedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "release.requested" },
+        "payload": { "$ref": "#/$defs/ReleaseRequestedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "ReleasePresentedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "release.presented" },
+        "payload": { "$ref": "#/$defs/ReleasePresentedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "ReleaseProgressEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "release.progress" },
+        "payload": { "$ref": "#/$defs/ReleaseProgressPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "ReleaseSettledEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "release.settled" },
+        "payload": { "$ref": "#/$defs/ReleaseSettledPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "ReleaseAnsweredEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "release.answered" },
+        "payload": { "$ref": "#/$defs/ReleaseAnsweredPayload" }
       },
       "unevaluatedProperties": false
     }

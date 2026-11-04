@@ -27,6 +27,9 @@ const SPEC_INSTRUCTION_INPUTS = [
   "LOOP_BUDGET",
   "EXCLUDE_ISSUES",
   "LOOP_ANSWERS",
+  "RELEASE_SEQ",
+  "RELEASE_STEP",
+  "RELEASE_REQUEST_ID",
 ];
 
 // 同じ確定仕様の「進捗の事象の種類と受け口」の種類（13 種類）と、区間と開発ループの 3 種類（#2347）
@@ -47,6 +50,11 @@ const SPEC_EVENT_TYPES = [
   "section.started",
   "loop.lap_closed",
   "loop.stopped",
+  "release.requested",
+  "release.presented",
+  "release.progress",
+  "release.settled",
+  "release.answered",
 ];
 
 // 同じ確定仕様の「進捗の正本」の列から、受け口が作る order_key・pr_ref を除いたもの
@@ -83,6 +91,35 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     pending: [{ number: 2348, reason: "MVV の外の疑い", lap: 3 }],
   },
   "loop.stopped": { loop: "lfactory2", condition: "budget_usd", detail: '{"values":{"usd":60}}', pending: [] },
+  "release.requested": {
+    request_id: "loop-l1-r3f9a1c2e4b7d",
+    lane: "loop-l1",
+    prs: [2440],
+    issues: [2439],
+    ndf_version: "10.27.16",
+    requested_at: "2026-11-02T12:00:00Z",
+  },
+  "release.presented": {
+    seq: 1,
+    k: 1,
+    sha: "0123abcd",
+    version: "10.28.0",
+    prs: [2440],
+    lanes: [{ lane: "loop-l1", requested: true }],
+    added_prs: [],
+    auto: false,
+  },
+  "release.progress": { seq: 1, stage: "main_merged" },
+  "release.settled": {
+    seq: 1,
+    result: "released",
+    version: "10.28.0",
+    prod_pr_url: "https://github.com/o/r/pull/9",
+    sha: "0123abcd",
+    prs: [2440],
+    lanes: ["loop-l1"],
+  },
+  "release.answered": { seq: 1, request_id: "loop-l1-r3f9a1c2e4b7d", result: "released", version: "10.28.0" },
 };
 
 function event(type: string, patch: Record<string, unknown> = {}) {
@@ -166,6 +203,16 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
     ).toBe(true);
   });
 
+  it("START が release は RELEASE_SEQ と RELEASE_STEP を要り、ほかの START は配布の手を許さない（#2439）", () => {
+    const release = { START: "release", ISSUES: undefined, RELEASE_SEQ: "3", RELEASE_STEP: "confirm:1" };
+    expect(validateRunJobInstruction(instruction(release)).ok).toBe(true);
+    expect(validateRunJobInstruction(instruction({ ...release, RELEASE_STEP: undefined })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...release, RELEASE_STEP: "confirm:3" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...release, ISSUES: "1" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ RELEASE_SEQ: "3", RELEASE_STEP: "present" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined, RELEASE_REQUEST_ID: "run-sr1-rabc" })).ok).toBe(true);
+  });
+
   it("知らない入力・番号でない ISSUES は落ちる", () => {
     expect(validateRunJobInstruction({ ...instruction(), EXTRA: "x" }).ok).toBe(false);
     expect(validateRunJobInstruction(instruction({ ISSUES: "2171,abc" })).ok).toBe(false);
@@ -173,7 +220,7 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
 });
 
 describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
-  it("種類が確定仕様の 13 種類と #2347 の 3 種類に 1 対 1 に対応する", () => {
+  it("種類が確定仕様の 13 種類と #2347 の 3 種類と #2439 の 5 種類に 1 対 1 に対応する", () => {
     expect([...EVENT_TYPES].sort()).toEqual([...SPEC_EVENT_TYPES].sort());
     expect(progressEventSchema.oneOf).toHaveLength(SPEC_EVENT_TYPES.length);
   });

@@ -487,6 +487,50 @@ paths:
           $ref: "#/components/responses/E404"
         "409":
           $ref: "#/components/responses/E409"
+  /run-jobs/organizer/answers:
+    get:
+      tags: [run-jobs]
+      operationId: getRunJobOrganizerAnswers
+      summary: 配布の依頼の答えと配布済みの範囲
+      description: >-
+        実行ジョブの token で認証し、そのジョブの実行のレーン（ループならループのすべての実行）の配布の依頼の答えと、
+        リポジトリの配布済みの範囲を返す（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へそのまま書く。
+      security:
+        - runJob: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizerAnswers"
+        "401":
+          $ref: "#/components/responses/E401"
+        "403":
+          $ref: "#/components/responses/E403"
+  /run-jobs/organizer/batch:
+    get:
+      tags: [run-jobs]
+      operationId: getRunJobOrganizerBatch
+      summary: 配布の実行のまとめた配布の中身
+      description: >-
+        配布の実行のジョブの token だけが読める（ほかの実行は 403）。レーンの一覧と依頼、提示、選択肢と、
+        このジョブの手（step）を返す。ランナーは NDF の置き場の batch.json へそのまま書く（#2439）。
+      security:
+        - runJob: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizerBatch"
+        "401":
+          $ref: "#/components/responses/E401"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
 components:
   securitySchemes:
     cognito:
@@ -714,3 +758,51 @@ components:
       properties:
         url: { type: string, format: uri }
         expires_at: { type: string, format: date-time }
+    OrganizerAnswer:
+      type: object
+      required: [request_id, result, version, release, reason, at]
+      properties:
+        request_id: { type: string }
+        result: { type: string, enum: [released, rejected] }
+        version: { type: ["string", "null"] }
+        release: { type: ["string", "null"], description: 本番の Pull Request の URL }
+        reason: { type: ["string", "null"] }
+        at: { type: string, format: date-time }
+    OrganizerRange:
+      type: object
+      required: [seq, sha, version, prs, lanes]
+      properties:
+        seq: { type: integer }
+        sha: { type: ["string", "null"] }
+        version: { type: ["string", "null"] }
+        prs: { type: array, items: { type: integer } }
+        lanes: { type: array, items: { type: string } }
+    OrganizerAnswers:
+      type: object
+      required: [answers, ranges]
+      properties:
+        answers: { type: array, items: { $ref: "#/components/schemas/OrganizerAnswer" } }
+        ranges: { type: array, items: { $ref: "#/components/schemas/OrganizerRange" } }
+    OrganizerBatchLane:
+      type: object
+      required: [lane, requests, issues]
+      properties:
+        lane: { type: string }
+        requests:
+          type: array
+          items:
+            type: object
+            required: [id, prs]
+            properties:
+              id: { type: string }
+              prs: { type: array, items: { type: integer } }
+        issues: { type: array, items: { type: integer } }
+    OrganizerBatch:
+      type: object
+      required: [seq, step, lanes, presentations, choices]
+      properties:
+        seq: { type: integer }
+        step: { type: string, enum: [present, represent, "confirm:1", "confirm:2", continue] }
+        lanes: { type: array, items: { $ref: "#/components/schemas/OrganizerBatchLane" } }
+        presentations: { type: array, items: { type: object } }
+        choices: { type: array, items: { type: string, enum: [continue, reject] } }
