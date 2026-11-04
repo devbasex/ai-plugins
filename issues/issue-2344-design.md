@@ -57,12 +57,12 @@
 | --- | --- | --- | --- |
 | I1 | プラン | プランのファイルは参照の解決で書き換わらない。解決した値はメモリ上のステップにだけ入る | 書き込みの経路が無い（解決の部品はプランのパスを書き口として受け取らない） |
 | I2 | 実行 | ステップに入る値は、解決した参照・プランの値（明示）・プランの値（旧い形）のどれかの出所を持ち、1 値 1 行で解決の記録に残る | 記録へ書けなければ `stopped`（#2335 の I3） |
-| I3 | 実行 | 参照の解決は、持ち主の記録を取った後・実行条件の評価の後・ステップを流す直前に行う。開始のステップ（`--from`）によらず実行条件を先に評価する | 順序はプランの実行の 1 つの関数が持つ（下の処理の流れ） |
+| I3 | 実行 | 参照の解決は、持ち主の記録を取った後・実行条件の評価の後に行う。プランの上位の欄（`作業場所`・`branch`）の参照は、形を決めた設定の照合の後・作業ツリーを作る前に 1 回だけ解決する。ステップの参照は、ステップを流す直前に解決する。開始のステップ（`--from`）によらず実行条件を先に評価する | 順序はプランの実行の 1 つの関数が持つ（下の処理の流れ） |
 | I4 | 実行 | 解決できない参照を使うステップは流れない。推定の値・空・`0`・`unknown` で埋めない | `stopped`・終了コード 6、`gaps` に `ref:<名前>` と理由 |
-| I5 | 実行 | 承認時の値を持つ参照は、解決した値と承認時の値が食い違えば流れない。承認したコミットの後に許したもの（この版の配布の Pull Request）だけが入ったときは食い違いとみなさない | `gate`・終了コード 3、`items` に承認時の値と実行時の値 |
+| I5 | 実行 | 承認時の値を持つ参照は、解決した値と承認時の値が食い違えば流れない。承認したコミットの後に許したもの（この版の配布の Pull Request）だけが入ったときは食い違いとみなさない | `gate`・終了コード 10（`EXIT_GATE`）、`items` に承認時の値と実行時の値 |
 | I6 | 解決の控え | 版の参照は控えがあれば控えの版を使う。決め直すのは #2164 の規則に当たるときだけで、前の版と理由を控えの `history` と解決の記録に残す | 規則に当たらない決め直しの経路が無い（決め直しは `release_version` の判定だけが起こす） |
 | I7 | プラン | 形を決めた設定の今の値が、プランが控えた値と違えば、プランの最初のステップから流さない | `stopped`・終了コード 2、`gaps` に設定の名前と、`next` に組み直すコマンド |
-| I8 | 実行 | 完了したプランを `--from` なしに流し直さない。完了した実行の記録のプランのハッシュと今のハッシュが違えば流さない | `gate`・終了コード 3、`next` に `--from` で流し直すコマンド |
+| I8 | 実行 | 完了したプランを `--from` なしに流し直さない。完了した実行の記録のプランのハッシュと今のハッシュが違えば流さない | `gate`・終了コード 10（`EXIT_GATE`）、`next` に `--from` で流し直すコマンド |
 | I9 | 実行 | 秘密と宣言された設定の値は、解決の記録と結果に書かれず、出所の名前だけが残る | 書く前に値を落とす（#2335 の I9 と同じ経路） |
 
 ### ドメインイベント
@@ -121,7 +121,7 @@
 | キュー（`supervise_lib/queue.py`） | 差し込みを埋めない。done の項目にプランのハッシュを書き、参照で止まったプランに `unfilled: true` を付ける | 変更（`fill_stage` の埋める処理と `_release_skipped_by_condition`・`fill_queue_prs` を消す） |
 | 差し込みの解決（`supervise_lib/queue_fill.py`） | — | 削除（`FINISHED`・`named`・`results_named` は `ref_kinds/plan_result.py` へ移す） |
 | 再開（`supervise_lib/queue_resume.py`・柱 P3 の `supervise.py resume`） | 完了したプランをプランのハッシュで照らし、違えば `gate` で返す | 変更 |
-| プランを組むエントリポイント（`supervise_lib/templates.py`・`release_templates.py`・`delivery_templates.py`・`sprint_routes.py`・`verify_steps.py`・`decl.py`） | 値の代わりに参照と形を決めた設定を書く。引数で明示した値は値のまま書く | 変更 |
+| プランを組むエントリポイント（`supervise_lib/templates.py`・`release_templates.py`・`delivery_templates.py`・`sprint_routes.py`・`verify_steps.py`・`decl.py`） | 値の代わりに参照と形を決めた設定を書く。引数で明示した上限とブランチは値のまま、明示した版は版の参照の `explicit` に書く | 変更 |
 | 開発ループ（`lib/sprint_loop_cli.py`・`lib/sprint_loop.py`） | `--dev` を任意にし、省いたら `new sprint` に `--version` を、`sprint-state.py init` に `--dev` / `--prod` を渡さない | 変更 |
 | 設定の契約（`plugins/ndf/contracts/settings/`）と読み手（`scripts/contracts_lib/model.py`） | キーの行に `plan`（`ref` / `budget` / `shape`）と `secret` を足す。`supervise.json` の `impl_timeout`・`refactor_budget_minutes` の行を足す | 変更 |
 | エントリポイントの契約（`plugins/ndf/contracts/entrypoints/`） | 配布の本番のエントリポイントの行に `refs`（`tip` の参照）を足す | 変更 |
@@ -211,7 +211,8 @@ classDiagram
     RefSpec ..> StoreRow : sticky なら読み書き
 ```
 
-- **`resolve(ctx, plan, step) -> (step, list[Resolution]) | RefFailure`**: ステップが使う参照だけを解決し、値を入れたステップのコピーを返す。`RefFailure.status` は `stopped` か `gate`
+- **`resolve_head(ctx, plan) -> (plan, list[Resolution]) | RefFailure`**: プランの上位の欄（`作業場所`・`branch`）が使う参照を解決し、値を入れたプランのコピーをメモリ上で返す。形を決めた設定の照合の後、作業ツリーを作る前（`ensure_worktree` の前）に 1 回だけ呼ぶ。作業ツリーの準備とその後のステップは、このコピーを使う。版の参照の決め直しを確かめるのはこの解決だけである（下の「流れの決まり」）
+- **`resolve(ctx, plan, step) -> (step, list[Resolution]) | RefFailure`**: ステップが使う参照だけを解決し、値を入れたステップのコピーを返す。`plan` は `resolve_head` が返したコピーである。`RefFailure.status` は `stopped` か `gate`
 - **`check_pins(ctx, plan) -> RefFailure | None`**: 形を決めた設定を今の値と照らす。プランの最初に流すステップの前に 1 回だけ呼ぶ
 - **`plan_digest(plan) -> str`**: プランのハッシュ。プランの型で読んだ値を `json.dumps(sort_keys=True, ensure_ascii=False, separators=(",", ":"))` にして sha256 を取る
 - **種類のモジュールの形**: `resolve(ctx, spec, plan) -> Resolution | RefFailure`。GitHub と origin を読む種類は、その種類を使うステップでだけ読み込まれる
@@ -225,6 +226,7 @@ classDiagram
 | 指す場所 | 書き方 |
 | --- | --- |
 | ステップの文字列の中 | `{ref:<名前>}`（版の起点は `{ref:<名前>.base}`） |
+| プランの上位の欄（`作業場所`・`branch`） | `{ref:<名前>}`。版を省いた配布のプランは `branch` に `release/v{ref:version}` を、`作業場所` に版を含むパスを持つ |
 | 数の欄（`timeout`） | `{"ref": "<名前>"}` |
 
 | 種類 | `params` | 解決した値 | `sticky` | 解決できないとき |
@@ -239,8 +241,10 @@ classDiagram
 `approved`（任意）は承認時の値を持つ参照に付け、`gate-2` を書く。`version` では承認資料の「承認した版」と、`tip` では承認したコミットと
 `compare_approved` で照らす。承認資料に「承認した版」の行が無い旧い資料では、#2164 の `series_changed`（承認ゲート 2 の通過の後に系列の版の記録が変わった）で照らす。
 
-**引数で明示した値は参照にしない。** 次の引数を渡したときは値のまま書く。解決の記録の出所は「プランの値（明示）」になる（決定 5）。
-対象の引数は `--version`・`--impl-timeout`・`--refactor-budget-minutes`・`--base`・`--production-branch` である。
+**引数で明示した上限とブランチは参照にしない。** 次の引数を渡したときは値のまま書く。解決の記録の出所は「プランの値（明示）」になる（決定 5）。
+対象の引数は `--impl-timeout`・`--refactor-budget-minutes`・`--base`・`--production-branch` である。
+
+**`--version` で明示した版は、版の参照の `params.explicit` に値のまま入れる。** 参照の部品は明示の版を置き換えず、版の参照の解決で既出の判定（#2164 の `taken`。既出なら `stopped`・終了コード 6）と、`approved` を付けた参照では承認した版との照合を必ず通す。解決の記録の出所は `plan:explicit`、控えの `how` は `explicit` になる（決定 5）。
 
 ### 参照にする設定のキー
 
@@ -316,8 +320,8 @@ classDiagram
 | `sprint-state.py loop sprint` | `--dev` を任意にする。渡せば今と同じく `new sprint --version <開発版>` を組む。省けば `--version` を渡さず、周回の `versions` は配布の答え（`settle_release`）で埋まる |
 | 解決できないときの結果 | ステップを流さず、プランの結果は「止まった」、結果 JSON は `status: "stopped"`・終了コード 6、`gaps` に `ref:<名前>`、`summary` に参照の名前と理由 |
 | 形を決めた設定が違うときの結果 | `status: "stopped"`・終了コード 2、`gaps` に `pin:<設定>`、`next` に同じ引数で組み直す `supervise.py new` のコマンド |
-| 承認時の値と食い違うときの結果 | `status: "gate"`・終了コード 3、`items` に `{kind: "ref-mismatch", name, approved, actual, reason}` |
-| 完了したプランが変わったときの結果 | 再開とキューの `--resume` は `status: "gate"`・終了コード 3、`items` に `{kind: "plan-changed", plan, digest_done, digest_now}`、`next` に `supervise.py resume <実行の識別子> --from <プラン>=<ステップ>` |
+| 承認時の値と食い違うときの結果 | `status: "gate"`・終了コード 10（`EXIT_GATE`）、`items` に `{kind: "ref-mismatch", name, approved, actual, reason}` |
+| 完了したプランが変わったときの結果 | 再開とキューの `--resume` は `status: "gate"`・終了コード 10（`EXIT_GATE`）、`items` に `{kind: "plan-changed", plan, digest_done, digest_now}`、`next` に `supervise.py resume <実行の識別子> --from <プラン>=<ステップ>` |
 | キューの done | 参照で止まったプランの項目は `result: "止まった"`・`unfilled: true`・`reason`。旧い版の `result: "流さなかった"`・`unfilled: true` の項目も読む |
 | 承認資料 | 「2. 承認の判断に使うもの」の表に `| 承認した版 | <版> |` の行を足す。承認の記録（`record_approval`）は今と同じ |
 | 旧い形のプラン | `{release_version}`・`{release_base}`・`{queue_record}`・`{queue_pr:<名>}`・`{queue_state(?):<名>}`・`{queue_prs:<名>}`・`{queue_approved:<名>}`・`QUEUE_PRS` は、プランの型の移行関数が参照へ読み替える。受けるのは次の正式版まで |
@@ -341,6 +345,13 @@ sequenceDiagram
     alt 形を決めた設定が違う
         E-->>C: stopped・2
     end
+    E->>F: resolve_head（作業場所・branch）
+    alt 解決できない・食い違う
+        F-->>E: RefFailure
+        E-->>C: stopped・6 か gate・10
+    end
+    F-->>E: 値を入れたプランのコピー
+    E->>E: 作業ツリーを作る（コピーの作業場所・branch）
     loop ステップごと
         E->>F: resolve（ステップ）
         alt 解決できない
@@ -348,7 +359,7 @@ sequenceDiagram
             E-->>C: stopped・6
         else 食い違う
             F-->>E: RefFailure（gate）
-            E-->>C: gate・3
+            E-->>C: gate・10
         end
         F-->>E: 値を入れたステップ
         E->>E: ステップを流す（E8）
@@ -391,6 +402,14 @@ sequenceDiagram
 - **配布の本番のエントリポイントは、エントリポイントの契約の `refs` で同じ参照の部品を通る。** プランから呼ばれても手動で呼ばれても、核の E5 で `tip` の参照を解決して承認したコミットと照らす。`check_approved` を呼ぶ箇所はこの 1 つになる（`release_lib/approval.py` から `lib/approved_commit.py` へ移す）
 - **前のプランの結果は、キューが渡す結果でなく状態ディレクトリから読む。** 今の `results_named` が承認ゲートの後に単独で流すときに使う経路（同じディレクトリのプランの `report.md` と `work/`）を唯一の経路にする。`plans: "earlier"` はキューが done の隣に書く一覧（`<done>.plans.json` の `stages`）から前のステージのプランを引く
 - **版の参照の解決は #2164 の判定を順に呼ぶ。** 控えが無ければ `release_version.observe` → `decide_dev` か `taken` で決めて控えを書く。控えがあれば `taken` → `own_released` で確かめ、当たれば `decide_dev` で決め直す（明示の版は止める）。本番は明示の版か系列の開発版の控えの `base` を使う
+- **版の決め直しを確かめるのは、1 回の起動で最初の解決（`resolve_head`。上位の欄に版の参照が無ければ最初に版を使うステップの解決）だけである。** その後のステップは、その起動で決めた版をそのまま使う。1 回の起動の中で旧版と新版が混ざらない
+- **決め直したら、旧版の成果物を退避して新版の先頭から流す。** 次の順で行い、プランのファイルは書き換えない
+  1. 状態ディレクトリのうち、解決の控え（`refs.json`）・退避先（`superseded/`）・状態の実体のコピー（`plan.json`）を除くファイル（ステップの記録・結果・`work/`）を `superseded/v<旧版>/` へ移す
+  2. 解決の控えの `rows.version` を新版で上書きし、`history` に `{from, to, reason, existing, observed, left, at}` を追記する。`left` は旧版の `作業場所`・`branch`・退避先である。旧版の作業ツリーとブランチは消さずに残す（消すのは戻せない操作のため）
+  3. `ref` 行を `outcome: "redecided"` で書く
+  4. 上位の欄を新版で解決し直し、新しい作業場所と `branch` で作業ツリーを作り、最初のステップから流す。旧版の済んだステップの記録は 1 で退避したため、再利用されない
+
+  1 の後で落ちても、済んだステップの記録が無いため、次の起動は最初のステップから流れる。控えを書く前に落ちれば控えの判定で同じ決め直しへ戻り、書いた後に落ちれば新版で流れる。開始のステップ（`--from`）を渡した起動で決め直しが要るときは、旧版の済んだステップを前提にできないため流さず、`stopped`・終了コード 6、`gaps` に `ref:version`、`next` に `--from` を外したコマンドを出す
 
 ### 流し直しの判定（E9）
 
@@ -432,11 +451,11 @@ stateDiagram-v2
 | 2・I1・I2 | 流す前と後でプランのファイルの sha256 が同じ。ステップに入った値ごとに `ref` 行がある | 解決した値をプランへ書き戻す／`ref` 行を書かずに流す |
 | 3・I4 | 記録の PR が無い・origin を読めない・設定のキーが無い・前のプランの完了した結果が無い、のそれぞれでステップが流れず、`stopped` と `gaps` の `ref:<名前>` と理由が出る | 見つからない PR を `0` で埋める／読めない版を前の版で埋める |
 | 4・I5 | 承認したコミットの後に許していないコミットがある・承認した版と解決した版が違う、で本番のステップが流れず `gate` と両方の値。許した配布の PR だけのときは流れる | 照合を飛ばして流す／許した PR まで食い違いとする |
-| 5・I6 | 同じプランを流し直すと控えの版を使う。#2164 の決め直しに当たるときだけ版が変わり、`history` と `ref` 行に前の版と理由が残る | 流し直しのたびに次に空いている版を決める／決め直しで `history` を上書きする |
-| 6・I3 | #2349 の再現の手順: 実行条件で飛ぶプランを `--from <プラン>=<ステップ>` で始めても飛ばされ、結果に飛ばした旨。実行条件は参照より先に評価され、飛ぶプランは版を照会しない | `and not start` を戻す／参照を実行条件より先に解決する |
+| 5・I6 | 同じプランを流し直すと控えの版を使う。#2164 の決め直しに当たるときだけ版が変わり、`history` と `ref` 行に前の版と理由が残る。決め直すと旧版のステップの記録が `superseded/v<旧版>/` へ移り、新版の作業場所で最初のステップから流れる | 流し直しのたびに次に空いている版を決める／決め直しで `history` を上書きする／旧版の済んだステップの記録を新版で再利用する |
+| 6・I3 | #2349 の再現の手順: 実行条件で飛ぶプランを `--from <プラン>=<ステップ>` で始めても飛ばされ、結果に飛ばした旨。実行条件は参照より先に評価され、飛ぶプランは版を照会しない。版を省いた配布のプランは、作業ツリーを版の入った `branch` と作業場所で作る | `and not start` を戻す／参照を実行条件より先に解決する／上位の欄を解決せずに作業ツリーを作る |
 | 7・I8 | #2349 の再現の手順: 完了したプランを含む done を `--resume` しても流れない。完了の後にプランを書き足すと `gate` と `--from` のコマンド。キーの並びだけを変えたプランは同じハッシュ | ハッシュを見ずに流し直す／ファイルのバイト列でハッシュを取る |
 | I7 | 組んだ後に `production_branch` か `release` を変えると最初のステップが流れず、`stopped`・2 と組み直すコマンド | 形を決めた設定を照らさない |
-| 8 | #2354 の再現の手順: `loop sprint` を `--dev` なしで起動でき、組んだスプリントのプランが版の参照を持つ。`--dev` を渡せば明示の版 | `--dev` を省いたときに既定の版を入れる |
+| 8 | #2354 の再現の手順: `loop sprint` を `--dev` なしで起動でき、組んだスプリントのプランが版の参照を持つ。`--dev` を渡せば版の参照の `explicit` に入り、既出の版なら `stopped`・6 | `--dev` を省いたときに既定の版を入れる／明示の版をリテラルで書いて既出の判定を飛ばす |
 | 9 | #2164 の受け入れ条件 1〜10 と #2230 の受け入れ条件の既存のテストが通る。`supervise_lib/queue_fill.py` が無く、`queue.py` に `fill_` で始まる関数が無い | 差し込みの関数をキューに残して二重に解決する |
 | 10・F7 | 前の版が組んだプラン（差し込みのもの・値を書き込んだもの）と `version.json` を持つ状態ディレクトリで流れ、`ref` 行の `source` が `plan:legacy` / `store` | 移行関数を外す／旧い差し込みを文字のまま流す |
 | 11・I9 | 秘密と宣言したキーを参照にすると、記録と結果に値が無く出所の名前だけがある | `secret` を見ずに `value` を書く |
