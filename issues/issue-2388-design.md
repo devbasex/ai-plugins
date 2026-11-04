@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 設計のプランで cross-review が上限のラウンド（3 ラウンド）に達して終わると、未解決の指摘が 0 件でも、駆動が失敗したときと同じ経路（`ready` → 承認ゲート 1 の判断）へ進む。`pace: fast` / `pace: auto` と開発ループでは MVV 判定が一度も流れず、承認ゲート 1 が「判定できない」として人の判断待ちになる
+- **今どうなっているか**: 設計のプランで cross-review が上限のラウンド（3 ラウンド）に達して終わると、駆動が失敗したときと同じ経路（`ready` → 承認ゲート 1 の判断）へ進む。未解決の指摘が 0 件でも同じである。`pace: fast` / `pace: auto` と開発ループでは MVV 判定が一度も流れず、承認ゲート 1 が「判定できない」として人の判断待ちになる
 - **誰に効くか**: `pace: fast` / `pace: auto` と開発ループで設計のプランを流す利用者。1 回あたり約 $1.5・27 分の周回の無駄が無くなる
 - **変えると何が成り立つか**: 上限に達して未解決 0 件で終わったレビューは、収束したときと同じ経路（直しの取り込み → 仕様のコピーの照合 → 用語チェック → MVV 判定）を通る。未解決が残ったときと駆動の失敗だけが承認ゲート 1 の判断へ回る
 
@@ -39,7 +39,7 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | プラン・ステップ・MVV 判定・承認ゲート・欠け |
 | NDF の cross-review（`ndf-cross-review`） | 収束・上限到達・未解決の件数 |
 
-cross-review が供給者、開発ワークフローが順応者の関係（順応者）。開発ワークフローは、cross-review の駆動の終了コードと結果の件数（`metrics.unresolved`）をそのまま読み、cross-review の契約を変えない（要求の対象範囲の「含まない」）。
+cross-review が供給者、開発ワークフローが順応者の関係（順応者）。開発ワークフローは、cross-review の駆動の終了コードと結果の件数（`metrics.unresolved`）をそのまま読む。cross-review の契約は変えない（要求の対象範囲の「含まない」）。
 
 ### 集約
 
@@ -96,7 +96,7 @@ E1〜E7 は要求の番号を引き継ぐ。E8 はこの設計で足す。
 | 規則の文（`sprint_waves.py` の `RULE_DESIGN` と `plan_mvv_design` の `規則`。変更） | 「上限到達で未解決 0 件なら通常の経路、未解決が残るか駆動が失敗したら承認ゲート 1 の判断」に書き直す |
 | 契約テストの見本のプラン（`tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`。変更） | 書き出しのプランの変化（`review` の `on_exit`・`review-settled`・規則の文・ステップの上限）を見本へ反映する。見本は `new sprint` の出力と突き合わせる比較元である |
 
-確定仕様 `docs/specifications/ndf-ubiquitous-language.md` の「設計のフェーズのステップ」の表は、`plan-to-spec` で新しい経路へ書き直す（この実装の Pull Request では触らない）。
+確定仕様 `docs/specifications/ndf-ubiquitous-language.md` の「設計のフェーズのステップ」の表は、`plan-to-spec` で新しい経路へ書き直す。この実装の Pull Request では触らない。
 
 ```mermaid
 graph TD
@@ -105,6 +105,32 @@ graph TD
     S -->|読む| R[(実行の記録<br/>state.json)]
     E -->|書く| R
 ```
+
+## 入出力の契約
+
+`supervise.py` に副命令を 1 つ足す。既存の副命令と引数は変えない。
+
+```text
+supervise.py review-settled --state <state.json のパス> --step <ステップの id>
+```
+
+| 引数 | 意味 |
+| --- | --- |
+| `--state` | 実行の記録のファイル。設計のプランは `{state_dir}/state.json` を渡す（`{state_dir}` は実行器が run のステップの `cmd` で置き換える） |
+| `--step` | 未解決の件数を読むステップの id。設計のプランは `review` を渡す |
+
+| 終了コード | 条件 | 結果 JSON の `status` |
+| --- | --- | --- |
+| 0 | 記録の `log` のうち `id` が `--step` の最後の 1 件が、`exit` 6 かつ `counts.unresolved` が整数の 0 | `ok` |
+| 1 | 上以外（未解決 1 件以上・`counts` か `unresolved` が無い・`exit` が 6 でない・該当のステップの結果が無い・ファイルが読めない） | `stopped` |
+
+結果 JSON は共通の形（`step_result.result`）で、次の値を持つ。
+
+| 項目 | 値 |
+| --- | --- |
+| `tool` | `review-settled` |
+| `summary` | 読んだ件数か、読めなかった理由 |
+| `metrics.unresolved` | 読んだ件数（読めなければ `null`） |
 
 ## 処理の流れ
 
@@ -130,27 +156,7 @@ graph TD
 | `normal` と `--state`（`plan_advise_design`） | `ready` | `mvv`（助言）→ `gate` | 用語チェックと助言の `mvv` の後に `gate` で止まる |
 | `normal`（`--state` 無し。`plan_sprint_design`） | `ready` | `gate` | 用語チェックの後に `gate` で止まる |
 
-`review-settled` は実行の記録を読む。実行器はステップを終えるたびに `state.json` を書き直してから次のステップを流す（`engine.py` の `run` が `RunState.record` を呼んだ後に次のステップへ進む）ため、`review-settled` が流れる時点で `review` の結果は記録にある。
-
-## 入出力の契約
-
-`supervise.py` に副命令を 1 つ足す。既存の副命令と引数は変えない。
-
-```text
-supervise.py review-settled --state <state.json のパス> --step <ステップの id>
-```
-
-| 引数 | 意味 |
-| --- | --- |
-| `--state` | 実行の記録のファイル。設計のプランは `{state_dir}/state.json` を渡す（`{state_dir}` は実行器が run のステップの `cmd` で置き換える） |
-| `--step` | 未解決の件数を読むステップの id。設計のプランは `review` を渡す |
-
-| 終了コード | 条件 | 結果 JSON の `status` |
-| --- | --- | --- |
-| 0 | 記録の `log` のうち `id` が `--step` の最後の 1 件が、`exit` 6 かつ `counts.unresolved` が整数の 0 | `ok` |
-| 1 | 上以外（未解決 1 件以上・`counts` か `unresolved` が無い・`exit` が 6 でない・該当のステップの結果が無い・ファイルが読めない） | `stopped` |
-
-結果 JSON は共通の形（`step_result.result`）で、`tool` は `review-settled`、`summary` に読んだ件数か読めなかった理由、`metrics` に `unresolved`（読めなければ `null`）を持つ。
+`review-settled` は実行の記録を読む。実行器はステップを終えるたびに `state.json` を書き直し、その後で次のステップを流す（`engine.py` の `run` が `RunState.record` を呼んでから次へ進む）。そのため、`review-settled` が流れる時点で `review` の結果は記録にある。
 
 ## 非機能の実現方式
 
@@ -167,7 +173,7 @@ supervise.py review-settled --state <state.json のパス> --step <ステップ�
 
 cross-review の駆動が未解決 0 件の上限到達を別の終了コードで返す形は採らない。終了コードの契約は実装のプランのレビュー（#2143）とリファクタリングの欠け（#2047）も読んでおり、要求で「確認してから行う」に置いた変更である。実行器に「結果の件数で行き先を分ける」鍵を足す形も採らない。1 つの経路のために実行器の契約が増え、既存の `on_exit` と run のステップで足りる。
 
-根拠: Value 5 / Value 7（MVV 版 5）
+根拠: Value 5（決まった手順はスクリプトに、判断と中身は AI に）/ Value 7（根本原因の場所で直す）（MVV 版 5）
 
 ### 決定 2: 人が見ないまま設計がマージされないよう、未解決の件数が読めない上限到達は未解決が残ったときと同じに扱う
 
@@ -175,7 +181,7 @@ cross-review の駆動が未解決 0 件の上限到達を別の終了コード�
 
 読めないときに 0 件として扱う形は採らない。取り違えたときに戻すのが、承認ゲート 1 で人が止める側より難しい（マージ済みの設計を差し戻すことになる）。
 
-根拠: 共通原則の上位の原則（人を守る）/ Value 2（MVV 版 5）
+根拠: 共通原則の上位の原則（人を守る）/ Value 2（人が判断できる量に収める）（MVV 版 5）
 
 ### 決定 3: ペースごとに経路を分けないため、レビューのまとまりの共有の定義だけを直す
 
@@ -183,7 +189,7 @@ cross-review の駆動が未解決 0 件の上限到達を別の終了コード�
 
 `fast` / `auto` のプランにだけ `on_exit` を足す形は採らない。同じ終わりがペースによって別の経路を通り、規則の文と経路の対応がペースごとに分かれる。
 
-根拠: Value 7（MVV 版 5）
+根拠: Value 7（根本原因の場所で直す）（MVV 版 5）
 
 ## テスト設計
 
