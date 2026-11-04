@@ -1,7 +1,18 @@
 // 進捗の記録の読み出し（#2186 の実行の制御が使う）。読むだけで、保存の型に書き換えを足さない
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import type { JobFinishedEvent, LoopLapClosedPayload, LoopStoppedPayload, UsageRecordedEvent } from "@ndf-factory/contracts";
+import type {
+  GateAnsweredPayload,
+  GateReachedPayload,
+  JobFinishedEvent,
+  LoopLapClosedPayload,
+  LoopStoppedPayload,
+  ReleasePresentedPayload,
+  ReleaseProgressPayload,
+  ReleaseRequestedPayload,
+  ReleaseSettledPayload,
+  UsageRecordedEvent,
+} from "@ndf-factory/contracts";
 import { finishedKey } from "./authorize.ts";
 import type { MemoryProgressEventStore } from "./memory-store.ts";
 import type { ProgressEventRecord } from "./store.ts";
@@ -16,7 +27,44 @@ export interface ProgressReader {
   // ループの詳細の画面: 実行が送った締めた周回と、実行ごとの usage.recorded の費用の和・区間の数（section.started の数）。
   // 実行ごとに事象を 1 回だけ読む
   loopRunsDetail(sprintRunIds: string[]): Promise<LoopRunsDetail>;
+  // 実行が送った配布の事象（#2439）。jobId を渡すとそのジョブの分だけ
+  findReleaseEvents(sprintRunId: string, jobId?: string): Promise<ReleaseEvents>;
+  // 実行の最後の gate.reached（一覧の承認の依頼の要約。#2439）。無ければ null
+  findLastGate(sprintRunId: string): Promise<{ at: string; jobId: string | null; payload: GateReachedPayload } | null>;
+  // 承認の依頼への答え（gate.answered。#2439 の配布のまとめが読む）。無ければ null
+  findGateAnswer(sprintRunId: string, approvalRequestId: string): Promise<GateAnsweredPayload | null>;
 }
+
+export interface ReleaseEvents {
+  requested: ReleaseRequestedPayload[];
+  presented: ReleasePresentedPayload[];
+  progress: ReleaseProgressPayload[];
+  settled: ReleaseSettledPayload | null;
+}
+
+const RELEASE_TYPES = ["release.requested", "release.presented", "release.progress", "release.settled"];
+const GATE_TYPES = ["gate.reached", "gate.answered"];
+
+const releaseEventsOf = (records: ProgressEventRecord[], jobId?: string): ReleaseEvents => {
+  const own = (records as Rec[]).filter((e) => jobId === undefined || e.job_id === jobId);
+  const of = <T>(type: string) => own.filter((e) => e.type === type).map((e) => e.payload as unknown as T);
+  return {
+    requested: of<ReleaseRequestedPayload>("release.requested"),
+    presented: of<ReleasePresentedPayload>("release.presented"),
+    progress: of<ReleaseProgressPayload>("release.progress"),
+    settled: of<ReleaseSettledPayload>("release.settled").at(-1) ?? null,
+  };
+};
+
+const lastGateOf = (records: ProgressEventRecord[]) => {
+  const e = (records as Rec[]).filter((x) => x.type === "gate.reached").at(-1);
+  return e ? { at: e.at, jobId: e.job_id, payload: e.payload as unknown as GateReachedPayload } : null;
+};
+
+const gateAnswerOf = (records: ProgressEventRecord[], approvalRequestId: string) => {
+  const e = (records as Rec[]).filter((x) => x.type === "gate.answered" && x.payload.approval_request_id === approvalRequestId).at(-1);
+  return e ? (e.payload as unknown as GateAnsweredPayload) : null;
+};
 
 export interface LoopRunsDetail {
   laps: LoopLapClosedPayload[];
@@ -82,6 +130,15 @@ export function memoryProgressReader(store: MemoryProgressEventStore): ProgressR
     },
     async loopRunsDetail(sprintRunIds) {
       return detailOf(sprintRunIds.map((id) => [id, store.listRun(id)]));
+    },
+    async findReleaseEvents(sprintRunId, jobId) {
+      return releaseEventsOf(store.listRun(sprintRunId), jobId);
+    },
+    async findLastGate(sprintRunId) {
+      return lastGateOf(store.listRun(sprintRunId));
+    },
+    async findGateAnswer(sprintRunId, approvalRequestId) {
+      return gateAnswerOf(store.listRun(sprintRunId), approvalRequestId);
     },
   };
 }
@@ -167,5 +224,17 @@ export class DynamoProgressReader implements ProgressReader {
       sprintRunIds.map(async (id): Promise<[string, ProgressEventRecord[]]> => [id, await this.listTypes(id, ["loop.lap_closed", "usage.recorded", "section.started"])]),
     );
     return detailOf(perRun);
+  }
+
+  async findReleaseEvents(sprintRunId: string, jobId?: string) {
+    return releaseEventsOf(await this.listTypes(sprintRunId, RELEASE_TYPES), jobId);
+  }
+
+  async findLastGate(sprintRunId: string) {
+    return lastGateOf(await this.listTypes(sprintRunId, ["gate.reached"]));
+  }
+
+  async findGateAnswer(sprintRunId: string, approvalRequestId: string) {
+    return gateAnswerOf(await this.listTypes(sprintRunId, GATE_TYPES), approvalRequestId);
   }
 }

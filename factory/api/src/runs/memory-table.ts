@@ -1,4 +1,5 @@
 // テストで使う偽の実行の表。確かめと書き込みを 1 つの同期の処理で行い、条件つきの書き込みとトランザクションを再現する
+import type { OrganizerRoot, OrganizerWrite, OrgLog, OrgRequest, ReleaseAnswer, ReleaseBatch } from "../organizer/model.ts";
 import {
   isTerminalJob,
   isTerminalLoop,
@@ -15,7 +16,7 @@ import {
   type Slots,
   type SprintRun,
 } from "./model.ts";
-import type { RunsTable, RunTransitionExtras } from "./table.ts";
+import type { ComposeRelease, ResumeOptions, RunsTable, RunTransitionExtras } from "./table.ts";
 
 const regKey = (a: string, r: number) => `${a}#${r}`;
 const shareKey = (a: string, r: number, k: string | number) => `${a}#${r}#${k}`;
@@ -35,6 +36,15 @@ export class MemoryRunsTable implements RunsTable {
   readonly issueShares = new Map<string, string>();
   // <account>#<runnerId> → running の local のジョブの数
   readonly runnerSlots = new Map<string, number>();
+  // <account>#<repo> → 古い版の実行を数えに入れた回数（#2439 の I62）
+  readonly legacySeqs = new Map<string, number>();
+  // Factory のオーガナイザー（#2439）。<account>#<repo>（#<id|seq>）→ 行
+  readonly organizers = new Map<string, OrganizerRoot>();
+  readonly orgRequests = new Map<string, OrgRequest>();
+  readonly batches = new Map<string, ReleaseBatch>();
+  readonly orgLogs: OrgLog[] = [];
+  // テストで、次の composeRelease のトランザクションを落とす
+  failNextCompose = false;
   migrated = false;
 
   private async tick(): Promise<void> {
@@ -101,10 +111,12 @@ export class MemoryRunsTable implements RunsTable {
     await this.tick();
     const key = regKey(accountId, repositoryId);
     const legacy = this.legacySlots.get(key) ?? 0;
+    const legacySeq = this.legacySeqs.get(key);
     return {
       account: this.accountSlots.get(accountId) ?? 0,
       repository: this.repositorySlots.get(key) ?? 0,
       ...(legacy !== 0 ? { legacy } : {}),
+      ...(legacySeq !== undefined ? { legacySeq } : {}),
     };
   }
 
@@ -138,6 +150,8 @@ export class MemoryRunsTable implements RunsTable {
     if ((this.repositorySlots.get(repoKey) ?? 0) !== expected.repository) return "slots";
     if (guards) {
       if (!guards.legacy && (this.legacySlots.get(repoKey) ?? 0) !== 0) return "legacy";
+      // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62）
+      if (guards.legacy && (this.organizers.get(repoKey)?.currentSeq ?? null) !== null) return "release_running";
       if (guards.issues.some((n) => this.issueShares.has(shareKey(run.accountId, run.repositoryId, n)))) return "issue_in_use";
       if (guards.milestoneChecks.some((t) => this.milestoneShares.has(shareKey(run.accountId, run.repositoryId, t)))) return "issue_in_loop";
       if (guards.loop && !this.loopFits(guards.loop)) return "loop_changed";
@@ -145,7 +159,10 @@ export class MemoryRunsTable implements RunsTable {
     this.accountSlots.set(run.accountId, expected.account + 1);
     this.repositorySlots.set(repoKey, expected.repository + 1);
     if (guards) {
-      if (guards.legacy) this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) + 1);
+      if (guards.legacy) {
+        this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) + 1);
+        this.legacySeqs.set(repoKey, (this.legacySeqs.get(repoKey) ?? 0) + 1);
+      }
       for (const n of guards.issues) this.issueShares.set(shareKey(run.accountId, run.repositoryId, n), run.sprintRunId);
       if (guards.loop) this.applyLoop(guards.loop);
     }
@@ -180,12 +197,19 @@ export class MemoryRunsTable implements RunsTable {
     if (r && r.state === "starting") Object.assign(r, { state: "running", updatedAt: now });
   }
 
-  async addResumeJob(job: RunJob, now: string, opts: { from?: "awaiting_approval" | "awaiting_reset"; loop?: LoopWrite } = {}) {
+  async addResumeJob(job: RunJob, now: string, opts: ResumeOptions = {}) {
     await this.tick();
     const r = this.runs.get(job.sprintRunId);
     if (!r || r.state !== (opts.from ?? "awaiting_approval") || r.currentJobId !== null) return false;
+    const expect = opts.expectAwaiting;
+    if (expect) {
+      if (r.awaitingReason !== expect.reason) return false;
+      if (expect.releaseRequestId !== undefined && r.releaseRequestId !== expect.releaseRequestId) return false;
+    } else if ((r.awaitingReason ?? null) !== null) {
+      return false;
+    }
     if (opts.loop && !this.loopFits(opts.loop)) return false;
-    Object.assign(r, { state: "starting", currentJobId: job.jobId, jobCount: job.seq, updatedAt: now, resumeAt: null });
+    Object.assign(r, { state: "starting", currentJobId: job.jobId, jobCount: job.seq, updatedAt: now, resumeAt: null, awaitingReason: null, releaseRequestId: null });
     this.jobs.set(job.jobId, structuredClone(job));
     if (opts.loop) this.applyLoop(opts.loop);
     return true;
@@ -196,9 +220,16 @@ export class MemoryRunsTable implements RunsTable {
     const r = this.runs.get(sprintRunId);
     if (!r || isTerminalRun(r.state) || r.currentJobId !== jobId) return false;
     if (extras.loop && !this.loopFits(extras.loop)) return false;
-    Object.assign(r, { state: "awaiting_approval", currentJobId: null, updatedAt: now });
+    Object.assign(r, {
+      state: "awaiting_approval",
+      currentJobId: null,
+      updatedAt: now,
+      awaitingReason: extras.awaitingReason ?? null,
+      releaseRequestId: extras.releaseRequestId ?? null,
+    });
     if (extras.finishReason !== undefined) r.finishReason = extras.finishReason;
     if (extras.loop) this.applyLoop(extras.loop);
+    this.putRequests(extras.requests);
     return true;
   }
 
@@ -225,14 +256,18 @@ export class MemoryRunsTable implements RunsTable {
     const r = this.runs.get(sprintRunId);
     if (!r || isTerminalRun(r.state)) return false;
     if (extras.loop && !this.loopFits(extras.loop)) return false;
-    Object.assign(r, { state, failureReason: reason, currentJobId: null, updatedAt: now, resumeAt: null });
+    Object.assign(r, { state, failureReason: reason, currentJobId: null, updatedAt: now, resumeAt: null, awaitingReason: null, releaseRequestId: null });
     if (extras.finishReason !== undefined) r.finishReason = extras.finishReason;
     const repoKey = regKey(r.accountId, r.repositoryId);
-    this.accountSlots.set(r.accountId, (this.accountSlots.get(r.accountId) ?? 0) - 1);
-    this.repositorySlots.set(repoKey, (this.repositorySlots.get(repoKey) ?? 0) - 1);
-    if (r.legacy === true) this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) - 1);
+    // 配布の実行は枠を持たない（#2439 の I64）
+    if (r.purpose !== "release") {
+      this.accountSlots.set(r.accountId, (this.accountSlots.get(r.accountId) ?? 0) - 1);
+      this.repositorySlots.set(repoKey, (this.repositorySlots.get(repoKey) ?? 0) - 1);
+      if (r.legacy === true) this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) - 1);
+    }
     for (const [key, owner] of this.issueShares) if (owner === sprintRunId) this.issueShares.delete(key);
     if (extras.loop) this.applyLoop(extras.loop);
+    this.putRequests(extras.requests);
     return true;
   }
 
@@ -356,7 +391,123 @@ export class MemoryRunsTable implements RunsTable {
     r.legacy = true;
     const repoKey = regKey(r.accountId, r.repositoryId);
     this.legacySlots.set(repoKey, (this.legacySlots.get(repoKey) ?? 0) + 1);
+    this.legacySeqs.set(repoKey, (this.legacySeqs.get(repoKey) ?? 0) + 1);
     for (const n of issues) this.issueShares.set(shareKey(r.accountId, r.repositoryId, n), r.sprintRunId);
     return true;
+  }
+
+  // ---- Factory のオーガナイザー（#2439） ----
+
+  private putRequests(requests: OrgRequest[] | undefined): void {
+    for (const req of requests ?? []) {
+      const key = shareKey(req.accountId, req.repositoryId, req.requestId);
+      if (!this.orgRequests.has(key)) this.orgRequests.set(key, structuredClone(req));
+    }
+  }
+
+  private organizerFits(write: OrganizerWrite): boolean {
+    const key = regKey(write.root.accountId, write.root.repositoryId);
+    const current = this.organizers.get(key);
+    if (write.expectVersion === null ? current !== undefined : current?.version !== write.expectVersion) return false;
+    if (write.expectBatchState && write.batch) {
+      const b = this.batches.get(shareKey(write.batch.accountId, write.batch.repositoryId, write.batch.seq));
+      if (!b || !write.expectBatchState.includes(b.state)) return false;
+    }
+    return true;
+  }
+
+  private applyOrganizer(write: OrganizerWrite): void {
+    this.organizers.set(regKey(write.root.accountId, write.root.repositoryId), structuredClone(write.root));
+    if (write.batch) this.batches.set(shareKey(write.batch.accountId, write.batch.repositoryId, write.batch.seq), structuredClone(write.batch));
+    if (write.log) this.orgLogs.push(structuredClone(write.log));
+  }
+
+  async getOrganizer(accountId: string, repositoryId: number) {
+    await this.tick();
+    return structuredClone(this.organizers.get(regKey(accountId, repositoryId)) ?? null);
+  }
+
+  async writeOrganizer(write: OrganizerWrite) {
+    await this.tick();
+    if (!this.organizerFits(write)) return false;
+    this.applyOrganizer(write);
+    return true;
+  }
+
+  async composeRelease(input: ComposeRelease) {
+    await this.tick();
+    if (this.failNextCompose) {
+      this.failNextCompose = false;
+      throw new Error("TransactionCanceled");
+    }
+    const { write, run, job } = input;
+    const key = regKey(write.root.accountId, write.root.repositoryId);
+    if (!this.organizerFits(write)) return false;
+    const current = this.organizers.get(key);
+    if (current && current.currentSeq !== null) return false;
+    if ((this.legacySeqs.get(key) ?? null) !== input.legacySeq) return false;
+    if (this.batches.has(shareKey(write.batch.accountId, write.batch.repositoryId, write.batch.seq))) return false;
+    this.applyOrganizer(write);
+    this.runs.set(run.sprintRunId, structuredClone(run));
+    this.jobs.set(job.jobId, structuredClone(job));
+    return true;
+  }
+
+  async listOrgRequests(accountId: string, repositoryId: number) {
+    await this.tick();
+    return [...this.orgRequests.values()]
+      .filter((r) => r.accountId === accountId && r.repositoryId === repositoryId)
+      .sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0))
+      .map((r) => structuredClone(r));
+  }
+
+  async answerRequest(accountId: string, repositoryId: number, requestId: string, answer: ReleaseAnswer) {
+    await this.tick();
+    const r = this.orgRequests.get(shareKey(accountId, repositoryId, requestId));
+    if (!r || r.answer !== null) return false;
+    r.answer = structuredClone(answer);
+    return true;
+  }
+
+  async markDelivered(accountId: string, repositoryId: number, requestId: string, at: string) {
+    await this.tick();
+    const r = this.orgRequests.get(shareKey(accountId, repositoryId, requestId));
+    if (r && r.deliveredAt === null) r.deliveredAt = at;
+  }
+
+  async getBatch(accountId: string, repositoryId: number, seq: number) {
+    await this.tick();
+    return structuredClone(this.batches.get(shareKey(accountId, repositoryId, seq)) ?? null);
+  }
+
+  async listBatches(accountId: string, repositoryId: number, limit: number) {
+    await this.tick();
+    return [...this.batches.values()]
+      .filter((b) => b.accountId === accountId && b.repositoryId === repositoryId)
+      .sort((a, b) => b.seq - a.seq)
+      .slice(0, limit)
+      .map((b) => structuredClone(b));
+  }
+
+  async appendOrgLog(log: OrgLog) {
+    await this.tick();
+    this.orgLogs.push(structuredClone(log));
+  }
+
+  async listOrgLogs(accountId: string, repositoryId: number) {
+    await this.tick();
+    return this.orgLogs.filter((l) => l.accountId === accountId && l.repositoryId === repositoryId).map((l) => structuredClone(l));
+  }
+
+  async listOrganizerActive() {
+    await this.tick();
+    const out = new Map<string, { accountId: string; repositoryId: number }>();
+    for (const root of this.organizers.values()) {
+      if (root.currentSeq !== null) out.set(regKey(root.accountId, root.repositoryId), { accountId: root.accountId, repositoryId: root.repositoryId });
+    }
+    for (const req of this.orgRequests.values()) {
+      if (req.deliveredAt === null) out.set(regKey(req.accountId, req.repositoryId), { accountId: req.accountId, repositoryId: req.repositoryId });
+    }
+    return [...out.values()];
   }
 }

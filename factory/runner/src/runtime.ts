@@ -9,6 +9,7 @@ import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
 import { claudeEnv, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
 import { parseLoopFile } from "./loop-file.ts";
+import { fsOrganizerFiles, ORGANIZER_DIR, organizerEnv, RELEASE_PROMPT } from "./organizer.ts";
 import { runSections, sectionLimitOf, type SectionRun } from "./sections.ts";
 import { exec, packState, statePaths, unpackState } from "./state.ts";
 import {
@@ -80,6 +81,7 @@ export function loopPrompt(inst: RunJobInstruction): string {
 export function firstPrompt(inst: RunJobInstruction, directive: string | null): string {
   if (inst.START === "new") return `/ndf:development-workflow ${inst.ISSUES!.split(",").map((n) => `#${n}`).join(" ")}`;
   if (inst.START === "loop") return loopPrompt(inst);
+  if (inst.START === "release") return RELEASE_PROMPT;
   return `前回の続きから進めてください。${directive ? `利用者の判断: ${directive}` : ""}`;
 }
 
@@ -118,8 +120,12 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   const paths = statePaths(instruction.LOOP_NAME);
   // 同じリポジトリの別の実行が持つ課題を、NDF の loop select がその周回の選定から外す（決定 3）
   if (instruction.EXCLUDE_ISSUES) jobEnv.NDF_LOOP_EXCLUDE = instruction.EXCLUDE_ISSUES;
+  // Factory のオーガナイザーの置き場（#2439 の I68）。1 台の中のオーガナイザーを起動させず、本番の配布は依頼として出させる
+  const organizerDir = join(repoDir, ORGANIZER_DIR);
+  Object.assign(jobEnv, organizerEnv(instruction, organizerDir));
 
   return {
+    organizer: fsOrganizerFiles(organizerDir),
     async writeGitHubToken(token) {
       const dir = jobEnv.GH_CONFIG_DIR!;
       await mkdir(dir, { recursive: true, mode: 0o700 });

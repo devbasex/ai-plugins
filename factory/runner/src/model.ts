@@ -51,7 +51,7 @@ export async function writeRoleCredentials(
   return { configFile };
 }
 
-// 子へ渡さない環境変数（秘密の置き場の ARN と、受け口の token。手元のランナーの INGEST_TOKEN も含む）
+// 子へ渡さない環境変数（秘密の置き場の ARN と、受け口の token。手元のマシンの INGEST_TOKEN も含む）
 const PARENT_ONLY = ["INGEST_TOKEN", "INGEST_TOKEN_SECRET_ARN", "MODEL_CREDENTIAL_SECRET_ARN"];
 // モデルの資格。managed と byok では Factory が決めた資格だけを子へ置く。local は利用者が手元で設定した資格をそのまま渡す
 const MODEL_CREDENTIALS = ["ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];

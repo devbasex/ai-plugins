@@ -19,6 +19,8 @@
 | `answer <計画名> <依頼> (--approved \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行） |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
+外のオーガナイザーとの `--external` の副命令（#2439）は `lib/parallel_external_cli.py` にある。
+
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。正本の手順は
 `skills/development-workflow/references/parallel.md` と `skills/issue-plan-strategy/references/parallel-plan.md` にある。
 """
@@ -40,6 +42,9 @@ import deps  # noqa: E402
 deps.require("durable", "schema", "md", "mdtable", "versions")
 
 import decl  # noqa: E402
+import parallel_answer as pa  # noqa: E402
+import parallel_external as pe  # noqa: E402
+import parallel_external_cli as px  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 from step_result import emit, result  # noqa: E402
@@ -53,8 +58,14 @@ def main_of() -> Path:
     return decl.main_dir(cwd) or Path(cwd)
 
 
-def reply(status: str, summary: str, items=None, code: int | None = None, **metrics):
-    emit(result(TOOL, status, summary, items, metrics), code)
+def reply(status: str, summary: str, items=None, code: int | None = None, next_step: str | None = None, **metrics):
+    """結果を出して終える。gate は次の 1 手（next_step）を添える（統一 JSON レポートの形）。"""
+    emit(result(TOOL, status, summary, items, metrics, next=next_step), code)
+
+
+def require_name(a) -> None:
+    if not a.external and not a.name:
+        reply("stopped", "計画名か --external が要る", code=1)
 
 
 def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[dict], dict]:
@@ -68,6 +79,7 @@ def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[di
 
 
 def cmd_init(a) -> None:
+    px.refuse_in_factory_run(reply)
     main = main_of()
     try:
         raw = json.loads(sys.stdin.read())
@@ -132,6 +144,7 @@ def _wait_line(name: str) -> str:
 
 
 def cmd_run(a) -> None:
+    px.refuse_in_factory_run(reply)
     main = main_of()
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
@@ -155,6 +168,7 @@ def cmd_run(a) -> None:
 
 
 def cmd_start(a) -> None:
+    px.refuse_in_factory_run(reply)
     main = main_of()
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
@@ -208,14 +222,19 @@ def cmd_wait(a) -> None:
 def cmd_present(a) -> None:
     import parallel_release as pr
 
+    require_name(a)
     main = main_of()
+    if a.external:
+        px.present_external(main, a, reply)
+    if not a.approval:
+        reply("stopped", "--approval が要る", code=1)
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある", items, 1)
     d = pr.release_dir(main, a.name, a.n, a.k)
     p1 = pr.release_dir(main, a.name, a.n, 1) / "presented.json"
     first = json.loads(p1.read_text(encoding="utf-8")) if a.k != 1 and p1.is_file() else None
-    reqs = _requests_for(main, a.name)
+    reqs = pl.requests_for(main, a.name)
     try:
         got = pr.present(main, plan, Path(a.approval), reqs, d, first)
     except ValueError as exc:
@@ -231,19 +250,8 @@ def cmd_present(a) -> None:
     )
 
 
-def _requests_for(main: Path, name: str) -> list[dict]:
-    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローが配布を組むたびに書く。無ければ空）。"""
-    p = pp.plan_dir(main, name) / "releases" / "requests.json"
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-
-
-def _resume_plan(main: Path, name: str, msg: dict, key: str) -> None:
-    import durable
-
-    durable.send_to(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), msg, "resume", key)
+def cmd_compose(a) -> None:
+    px.compose_external(main_of(), reply)
 
 
 def cmd_confirm(a) -> None:
@@ -251,12 +259,15 @@ def cmd_confirm(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     wid = pl.workflow_id(a.name)
-    _resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
+    pl.resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
     reply("ok", f"配布 {a.n} の承認を送った", n=a.n, take=a.take)
 
 
 def cmd_settle(a) -> None:
+    require_name(a)
     main = main_of()
+    if a.external:
+        px.settle_external(main, a, reply)
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     if a.rejected:
@@ -272,9 +283,8 @@ def cmd_settle(a) -> None:
         res = "released" if results and all(r == "完了" for r in results) else "failed"
         version = done.get("version") or (done.get("metrics") or {}).get("version")
     wid = pl.workflow_id(a.name)
-    _resume_plan(
-        main, a.name, {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}, f"{wid}:resume:settle:{a.n}"
-    )
+    msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
+    pl.resume_plan(main, a.name, msg, f"{wid}:resume:settle:{a.n}")
     reply("ok", f"配布 {a.n} の結果 {res} を送った", result=res, version=version)
 
 
@@ -300,7 +310,10 @@ def cmd_stop(a) -> None:
 
 
 def cmd_request(a) -> None:
+    require_name(a)
     main = main_of()
+    if a.external:
+        px.request_external(main, a, reply, SELF)
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     if a.prs and pl.merged_on_production(main, a.prs):
@@ -309,7 +322,9 @@ def cmd_request(a) -> None:
         reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
-    reply("gate", f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む", code=10, id=rid, result="requested")
+    nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
+    summary = f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む"
+    reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested")
 
 
 def cmd_await(a) -> None:
@@ -320,7 +335,11 @@ def cmd_await(a) -> None:
         reply("stopped", f"依頼の記録を読めない: {exc}", code=2)
     if sent.get("result") == "released" and not sent.get("id"):
         reply("ok", "配布済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
-    ans, dfr = pl.read_answer(main, a.name, sent["id"], a.timeout)
+    if a.external or pe.is_external(sent.get("plan")):
+        ans, dfr = pe.read_answer_file(px.external_dir(reply), sent["id"]), None
+    else:
+        require_name(a)
+        ans, dfr = pl.read_answer(main, a.name, sent["id"], a.timeout)
     if ans is None:
         reply("stopped", "答えがまだ無い", code=3, deferred=dfr)
     res = ans.get("result")
@@ -330,6 +349,7 @@ def cmd_await(a) -> None:
         status,
         f"配布の依頼 {sent['id']} の答え: {res}",
         code=code,
+        next_step="今の承認ゲート 2 の差し戻しと同じに扱う" if code == 10 else None,
         result=res,
         version=ans.get("version"),
         release=ans.get("release"),
@@ -364,24 +384,6 @@ def cmd_request_gate2(a) -> None:
     reply("ok", f"承認ゲート 2 の依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
 
 
-def _owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None) -> str | None:
-    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
-    restart。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた問い（`merged`）は、
-    代表だけでなく全持ち主をそれぞれの依頼の id で調べ、起こす行を `; ` でつなぐ（異常系 5）。"""
-    import durable
-    import parallel_run as pr_run
-
-    items = (durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0) or {}).get("items") or []
-    q = next((q for q in items if q.get("id") == rid), {})
-    if q.get("kind") in ("stall", "helper", "spawn") or not q.get("lane"):
-        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
-    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
-    owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
-    lanes = [lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)]
-    lanes = list(dict.fromkeys(lanes))
-    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
-
-
 def cmd_answer(a) -> None:
     main = main_of()
     if pl.run_status(main, a.name) not in pl.RUNNING:
@@ -395,7 +397,7 @@ def cmd_answer(a) -> None:
         except OSError as exc:
             reply("stopped", f"指摘ファイルを読めない: {exc}", code=2)
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
-    nxt = _owner_restart(main, a.name, a.id, a.choice)
+    nxt = pa.owner_restart(main, a.name, a.id, a.choice)
     pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice)
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った", id=a.id, result=result, next=nxt)
 
@@ -419,6 +421,8 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("name")
     sta = sub.add_parser("start")
     sta.add_argument("name")
+    cp = sub.add_parser("compose")
+    cp.add_argument("--external", action="store_true", required=True)
     run_ = sub.add_parser("run")
     run_.add_argument("name")
     stp = sub.add_parser("stop")
@@ -429,29 +433,34 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--after", type=int, default=0)
     w.add_argument("--timeout", type=float, default=3600)
     p = sub.add_parser("present")
-    p.add_argument("name")
+    p.add_argument("name", nargs="?")
     p.add_argument("n", type=int)
     p.add_argument("k", type=int)
-    p.add_argument("--approval", required=True)
+    p.add_argument("--approval")
+    p.add_argument("--external", action="store_true")
+    p.add_argument("--record", action="store_true", help="--external で、承認ゲート 2 で止まった提示を presented/ へ書く")
     c = sub.add_parser("confirm")
     c.add_argument("name")
     c.add_argument("n", type=int)
     c.add_argument("--take", choices=("new", "first"))
     s = sub.add_parser("settle")
-    s.add_argument("name")
+    s.add_argument("name", nargs="?")
     s.add_argument("n", type=int)
+    s.add_argument("--external", action="store_true")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--done")
     g.add_argument("--rejected", action="store_true")
     s.add_argument("--reason")
     r = sub.add_parser("request")
-    r.add_argument("name")
+    r.add_argument("name", nargs="?")
+    r.add_argument("--external", action="store_true")
     r.add_argument("--lane", required=True)
     r.add_argument("--prs", type=int, nargs="*", default=[])
     r.add_argument("--issues", type=int, nargs="*", default=[])
     r.add_argument("--state", required=True)
     aw = sub.add_parser("await")
-    aw.add_argument("name")
+    aw.add_argument("name", nargs="?")
+    aw.add_argument("--external", action="store_true")
     aw.add_argument("--from", required=True)
     aw.add_argument("--timeout", type=float, default=0)
     ra = sub.add_parser("request-ask")

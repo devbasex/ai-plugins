@@ -140,7 +140,7 @@ export function RepositoriesPage() {
   );
 }
 
-// 同時の実行の数の宣言（持ち主だけ）。空は宣言を外し、プランの値だけで数える
+// 同時の実行の数の宣言（持ち主だけ）。空は宣言を外し、料金プランの値だけで数える
 function MaxConcurrentField({ repository, onSave }: { repository: Repository; onSave: (value: number | null) => Promise<void> }) {
   const { t } = useTranslation();
   const [value, setValue] = useState(repository.max_concurrent_runs == null ? "" : String(repository.max_concurrent_runs));

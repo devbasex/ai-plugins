@@ -27,7 +27,7 @@
     "backlog": "バックログ",
     "approvals": "承認",
     "billing": "請求と使用量",
-    "runners": "手元のランナー",
+    "runners": "手元のマシン",
     "loops": "ループ",
     "loopDetail": "ループの詳細"
   },
@@ -61,7 +61,7 @@
     "team": "Team"
   },
   "mode": {
-    "local": "local（手元のランナー）",
+    "local": "local（手元のマシン）",
     "byok": "byok（キーの持ち込み）",
     "managed": "managed（サービスの Bedrock）"
   },
@@ -82,7 +82,7 @@
     "idpGoogle": "Google",
     "idpGithub": "GitHub",
     "personal": "個人のアカウント",
-    "plan": "プラン: {{plan}}",
+    "plan": "料金プラン: {{plan}}",
     "teams": "チーム",
     "teamRole": "（{{role}}）",
     "owner": "持ち主",
@@ -115,7 +115,7 @@
     "run": "{{issues}}: {{state}}",
     "runWithReason": "{{issues}}: {{state}}（{{reason}}）",
     "loops": "ループ",
-    "maxConcurrent": "同時の実行の数（空ならプランの値）",
+    "maxConcurrent": "同時の実行の数（空なら料金プランの値）",
     "maxConcurrentRange": "1 から 100 の整数を入れてください",
     "saveMaxConcurrent": "宣言する"
   },

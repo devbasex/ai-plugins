@@ -2,7 +2,8 @@
 // 復元は追跡するパスを 1 つでも含む保存を捨てる。取り込んだリポジトリの .ndf/ を上書きしない
 import { execFileSync } from "node:child_process";
 
-export const STATE_PATHS = [".ndf/tmp", ".ndf/loop"];
+// .ndf/organizer は Factory のオーガナイザーとの置き場（#2439）。依頼と答えを周回と再開をまたいで残す
+export const STATE_PATHS = [".ndf/tmp", ".ndf/loop", ".ndf/organizer"];
 
 // 保存するパス。開発ループの実行は、そのループの引継ぎ文書（.ndf/handoff/loop-<名>.md）を 1 つ足す（#2347）
 export function statePaths(loopName?: string | null): string[] {

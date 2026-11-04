@@ -70,7 +70,7 @@ paths:
     get:
       tags: [accounts]
       operationId: getAccount
-      summary: アカウントのプラン・実行の形態・使える量・席
+      summary: アカウントの料金プラン・実行の形態・使える量・席
       description: 個人のアカウントの持ち主か、チームの席を持つ利用者だけが読める。
       responses:
         "200":
@@ -271,7 +271,7 @@ components:
       enum: [standard, premium]
     ExecutionMode:
       type: string
-      description: local（手元のランナー）・byok（キーの持ち込み）・managed（サービスの Bedrock）
+      description: local（手元のマシン）・byok（キーの持ち込み）・managed（サービスの Bedrock）
       enum: [local, byok, managed]
     Idp:
       type: string

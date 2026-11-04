@@ -6,11 +6,14 @@ import type {
   GitHubPort,
   InstallationToken,
   IssueSummary,
+  PullByHead,
+  PullHead,
   RankingTable,
   ReachableRepository,
   RepositoryVisibility,
 } from "../github/port.ts";
-import { appendControlEventTo } from "../progress/append.ts";
+import { OrganizerControl } from "../organizer/control.ts";
+import { appendControlEventTo, appendReleaseAnsweredTo } from "../progress/append.ts";
 import { MemoryProgressEventStore } from "../progress/memory-store.ts";
 import { memoryProgressReader } from "../progress/read.ts";
 import { RunControl, type RunControlConfig } from "../runs/control.ts";
@@ -78,6 +81,24 @@ export class FakeGitHub implements GitHubPort {
     if (!this.installations.get(installationId)?.has(repositoryId)) return null;
     return this.visibilities.get(repositoryId) ?? "private";
   }
+
+  // Factory のオーガナイザー（#2439）。<リポジトリの名前>#<枝> → 先頭、名前 → Pull Request
+  readonly heads = new Map<string, string>();
+  readonly pulls = new Map<string, { head: string; base: string; state: "open" | "merged" | "closed"; url: string }[]>();
+  readonly headReads: string[] = [];
+
+  async branchHead(_installationId: number, _repositoryId: number, fullName: string, branch: string) {
+    this.headReads.push(`${fullName}#${branch}`);
+    return this.heads.get(`${fullName}#${branch}`) ?? null;
+  }
+  async listOpenPullHeads(_installationId: number, _repositoryId: number, fullName: string, base: string): Promise<PullHead[]> {
+    return (this.pulls.get(fullName) ?? []).filter((p) => p.state === "open" && p.base === base).map((p) => ({ head: p.head, url: p.url }));
+  }
+  async findPullByHead(_installationId: number, _repositoryId: number, fullName: string, head: string, base: string): Promise<PullByHead | null> {
+    const found = (this.pulls.get(fullName) ?? []).filter((p) => p.head === head && p.base === base);
+    const pick = found.find((p) => p.state === "merged") ?? found.find((p) => p.state === "open") ?? found[0];
+    return pick ? { state: pick.state, url: pick.url } : null;
+  }
 }
 
 export class FakePlatform implements RunnerPlatform {
@@ -141,6 +162,7 @@ export interface RunsHarness {
   progress: MemoryProgressEventStore;
   tokens: RunJobTokenKit;
   control: RunControl;
+  organizer: OrganizerControl;
   clock: { now: Date };
   logs: Record<string, unknown>[];
 }
@@ -168,5 +190,15 @@ export async function createRunsHarness(config: RunControlConfig = TEST_CONFIG):
     newId: () => `id${String(++id).padStart(4, "0")}`,
     log: (e) => logs.push(e),
   });
-  return { table, github, platform, progress, tokens, control, clock, logs };
+  const organizer = new OrganizerControl({
+    table,
+    github,
+    reader: memoryProgressReader(progress),
+    control,
+    appendAnswered: (e) => appendReleaseAnsweredTo(progress, e),
+    now: () => clock.now,
+    log: (e) => logs.push(e),
+  });
+  control.setOrganizer(organizer);
+  return { table, github, platform, progress, tokens, control, organizer, clock, logs };
 }

@@ -5,6 +5,7 @@ import { resolveFromRequest, type AuthEnv } from "../auth/resolve.ts";
 import type { CredentialService } from "../credentials/service.ts";
 import { InvalidRequestError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
+import type { OrganizerControl } from "../organizer/control.ts";
 import type { RepositoryService } from "../repositories/service.ts";
 import { chooseCandidates, type CandidateModel } from "../runs/candidates.ts";
 import type { RunControl } from "../runs/control.ts";
@@ -17,6 +18,7 @@ export interface FactoryDeps {
   credentials: CredentialService;
   control: RunControl;
   loops: LoopControl;
+  organizer: OrganizerControl;
   table: RunsTable;
   github: GitHubPort;
   candidateModel: CandidateModel;
@@ -139,5 +141,27 @@ export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): vo
   app.post("/accounts/:accountId/loops/:loopId/answers", async (c) => {
     const ctx = await ctxOf(c);
     return c.json(await deps().loops.answer(ctx, c.req.param("loopId"), await readJson(c)));
+  });
+
+  // Factory のオーガナイザー（openapi/organizer.yaml。#2439）。一覧と履歴は読むだけで、承認を確定する経路は持たない（I66）
+  app.get("/accounts/:accountId/repositories/:repositoryId/approval-requests", async (c) => {
+    const ctx = await ctxOf(c);
+    return c.json(await deps().organizer.list(ctx, positiveInt(c.req.param("repositoryId"))));
+  });
+
+  app.get("/accounts/:accountId/repositories/:repositoryId/releases", async (c) => {
+    const ctx = await ctxOf(c);
+    const raw = c.req.query("limit");
+    const limit = raw === undefined ? 20 : Number(raw);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new InvalidRequestError("limit は 1〜100 の整数です");
+    return c.json(await deps().organizer.history(ctx, positiveInt(c.req.param("repositoryId")), limit));
+  });
+
+  // 止まった配布を解く。画面の経路は Cognito の利用者の token だけを受ける（承認ゲートではなく失敗の扱い。決定 11）
+  app.post("/accounts/:accountId/repositories/:repositoryId/releases/:seq/resolve", async (c) => {
+    const ctx = await ctxOf(c);
+    const seq = Number(c.req.param("seq"));
+    if (!Number.isInteger(seq) || seq < 1) throw new InvalidRequestError("まとめた配布の連番の形ではありません");
+    return c.json(await deps().organizer.resolve(ctx, positiveInt(c.req.param("repositoryId")), seq, await readJson(c)), 202);
   });
 }

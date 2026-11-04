@@ -15,7 +15,7 @@ export type * from "./generated/ingest-response.ts";
 export type * from "./generated/local-runner-declaration.ts";
 export { progressEventSchema, runJobInstructionSchema, ingestResponseSchema, localRunnerDeclarationSchema };
 
-// 進捗の事象の 16 種類と、定義の中の名前（$defs）
+// 進捗の事象の 21 種類と、定義の中の名前（$defs）
 export const EVENT_DEFINITIONS = {
   "job.started": "JobStartedEvent",
   "phase.changed": "PhaseChangedEvent",
@@ -33,6 +33,11 @@ export const EVENT_DEFINITIONS = {
   "section.started": "SectionStartedEvent",
   "loop.lap_closed": "LoopLapClosedEvent",
   "loop.stopped": "LoopStoppedEvent",
+  "release.requested": "ReleaseRequestedEvent",
+  "release.presented": "ReleasePresentedEvent",
+  "release.progress": "ReleaseProgressEvent",
+  "release.settled": "ReleaseSettledEvent",
+  "release.answered": "ReleaseAnsweredEvent",
 } as const satisfies Record<ProgressEvent["type"], string>;
 
 export type EventType = keyof typeof EVENT_DEFINITIONS;
@@ -94,7 +99,7 @@ export function isIngestResponse(value: unknown): boolean {
   return responseValidator(value) as boolean;
 }
 
-// 手元のランナーの申告（登録と心拍の本文の一部）を定義で確かめる
+// 手元のマシンの申告（登録と心拍の本文の一部）を定義で確かめる
 export function validateLocalRunnerDeclaration(value: unknown): ContractResult<LocalRunnerDeclaration> {
   return declarationValidator(value)
     ? { ok: true, value: value as LocalRunnerDeclaration }
