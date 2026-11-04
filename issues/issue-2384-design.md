@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: Factory には MCP（Model Context Protocol）の受け口が無く、API を呼べるのは人のログインの token だけである。契約の 34 の利用者向けの操作は、画面の 1 枚に合わせた単一のレコードの入出力が混ざり、画面はスプリントの詳細・工程の中身・バックログ・ループの詳細を要素の数だけ別々に取っている。だれが・どの経路で何をしたかの記録も無い
+- **今どうなっているか**: Factory には MCP（Model Context Protocol）の受け口が無く、API を呼べるのは人のログインの token だけである。契約の 34 の利用者向けの操作は、画面の 1 枚に合わせた単一のレコードの入出力が混ざっている。画面はスプリントの詳細・工程の中身・バックログ・ループの詳細を、要素の数だけ別々に取っている。だれが・どの経路で何をしたかの記録も無い
 - **誰に効くか**: Factory を使う人（承認と判断に集中できる）と、その人が任せる AI のエージェント・連携するシステム
 - **変えると何が成り立つか**: 人が画面で発行した委任の資格情報で、エージェントが画面と同じ操作を API と MCP から行える。認可は人の操作と同じで、人だけが確定できる 10 の操作は委任から断る。すべての利用者向けの操作が配列で受け渡され、1 回ごとに操作の記録が 1 件残る
 
@@ -23,7 +23,12 @@
 | `factory/web/src/api.ts` の `sprintRunDetails`・`stepDetails`・`backlogs`・`loopDetails` が `Promise.all` で要素ごとに経路を呼んでいる（2026-11-04） | 実測 | 配列で受ける契約にすると、画面の要求の回数が要素の数から 1 回へ減る |
 
 要求と受け入れ条件は #2384 の本文にある（コピーは `issues/issue-2384-requirements.md`）。この文書は「どう作るか」だけを扱う。
-契約の操作ごとの経路・要素・応答・扱いは [issue-2384-design-contracts.md](issue-2384-design-contracts.md)、決定の記録は [issue-2384-design-decisions.md](issue-2384-design-decisions.md) にある。
+次の 2 つは分けた文書にある。
+
+| 中身 | 文書 |
+| --- | --- |
+| 契約の操作ごとの経路・要素・応答・扱い | [issue-2384-design-contracts.md](issue-2384-design-contracts.md) |
+| 決定の記録 | [issue-2384-design-decisions.md](issue-2384-design-decisions.md) |
 
 ## ドメインモデル
 
@@ -128,6 +133,8 @@
 | 画面の API クライアント | 要求を操作の表から組み、配列の応答をほどいて今の `Api` の形で返す。委任の 3 操作を足す | `factory/web/src/api.ts` |
 | ダミーの API クライアント | 同じ `Api` の形で委任の 3 操作を足す | `factory/web/src/dummy/` |
 | 委任の画面 | 委任の資格情報を発行・一覧・取り消す | `factory/web/src/pages/DelegationsPage.tsx`・`screens.ts`・`i18n/ja.json` |
+
+### 構成要素の関係
 
 ```mermaid
 graph TD
@@ -246,7 +253,7 @@ classDiagram
 ```
 
 `Caller` は既存の型に 2 項目を足す。`AccountContext` は変えない（I6 の認可は今の解決の関数のまま）。
-`Operation` の `kind` は契約の経路の形から生成の時点で決め、要素の検査と応答の形を選ぶ（[契約の表](issue-2384-design-contracts.md#操作の種類と形)）。
+`Operation` の `kind` は、契約の経路の形から生成の時点で決める。要素の検査と応答の形は `kind` で選ぶ（[契約の表](issue-2384-design-contracts.md#操作の種類と形)）。
 
 ## データ構造
 

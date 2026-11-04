@@ -15,7 +15,7 @@
 | 削除（`delete`） | `DELETE` | 鍵の query を繰り返す | 200 と要素の結果の配列 | 鍵の値の数 |
 | 操作（`action`） | `POST`（経路の末尾が動詞） | 本文の配列 | 200 と要素の結果の配列 | 本文の要素の数 |
 
-- **経路の変数はアカウントの ID（`{accountId}`）だけ**である。アカウントに属するものは `/accounts/{accountId}/<もの>` に、アカウントそのものと利用者に属するもの（`/me`・`/accounts`・`/teams`・`/delegations`）は頭に置く
+- **経路の変数はアカウントの ID（`{accountId}`）だけ**である。アカウントに属するものは `/accounts/{accountId}/<もの>` に置く。アカウントそのものと利用者に属するもの（`/me`・`/accounts`・`/teams`・`/delegations`）は頭に置く
 - **鍵の query の名前は、要素の鍵の項目の名前と同じ**にする。本文の要素と query の鍵が同じ語で読める
 - **鍵を持たない操作**（アカウントにつき 1 つしか無いもの。キーの持ち込み・取り込みの候補）は、要素が必ず 1 個である。2 個以上は同じ鍵の重複として 400 になる
 - **一覧の応答を要素の結果で包まない。** 条件で集めた値は、すべて読める値だけで組むためである。条件が指すアカウントを解決できなければ、要求全体が 403 になる
@@ -41,7 +41,7 @@
 
 - 応答の配列は、入力（鍵の query の並び・本文の要素の並び）と同じ順・同じ数である
 - 失敗の要素は、今の誤りの状態（400・403・404・409・422・503）と本文（`code`・`message`・`details`）をそのまま持つ。画面は状態で文言を分けているため、状態を要素の結果に残す
-- 認可の無い要素は `forbidden` だけを持ち、その要素のデータを含めない。無い実行と他人の実行を同じ本文にする今の規則（I12 の 403）は、要素の単位でも変えない
+- 認可の無い要素は `forbidden` だけを持ち、その要素のデータを含めない。無い実行と他人の実行を同じ本文の 403 にする今の規則は、要素の単位でも変えない。この規則は、スプリントの画面の確定仕様（ [ndf-factory-sprint-views.md](../docs/specifications/ndf-factory-sprint-views.md) ）の I12 である
 - 要素の形の誤り（席の種類が知らない値など）は、その要素だけを 400 の結果にする
 
 ## 要求全体の誤り
@@ -63,6 +63,16 @@
 ## 操作の一覧
 
 鍵の列の `+` は複合の鍵、`—` は鍵を持たない操作を表す。画面の列は `factory/web/src/api.ts` の `Api` のメソッドで、`—` は画面に無い操作である。
+
+### 扱いごとの数
+
+| 扱い | 操作 | 数 |
+| --- | --- | --- |
+| read | 1・3・8・9・11・15・20・21・22・23・26・27・32・33・35 | 15 |
+| write | 4・10・12・13・14・18・19・24・25・28・29・30 | 12 |
+| human | 2・5・6・7・16・17・31・34・36・37 | 10 |
+
+画面の `Api` のメソッドは 34（今の 31 と委任の 3）で、画面に無い操作は 32〜34 の 3 つである。
 
 ### アカウント（`accounts.yaml`）
 
@@ -138,19 +148,9 @@
 | 36 | `createDelegation` | 作成 | `POST /delegations` | `{client_name, scope, expires_in_seconds, idempotency_key}` | `idempotency_key` | human | `createDelegation` |
 | 37 | `revokeDelegation` | 削除 | `DELETE /delegations` | `?credential_id=` | `credential_id` | human | `revokeDelegation` |
 
-- `listDelegations` の値は `{credential_id, client_name, scope, created_at, expires_at, revoked_at, state}` の配列（自分が発行したものだけ。新しい順で 100 件まで）。`state` は `active` / `expired` / `revoked` である
+- `listDelegations` の値は `{credential_id, client_name, scope, created_at, expires_at, revoked_at, state}` の配列である。自分が発行したものだけを、新しい順で 100 件まで返す。`state` は `active` / `expired` / `revoked` である
 - `createDelegation` の成功の値は `{delegation, credential}` で、`credential` は値（`ndfd_<資格情報の ID>_<秘密>`）である。同じ冪等の鍵の 2 回目は `credential` を `null` にする。`x-ndf-id` は `delegation.credential_id` である
 - `revokeDelegation` は、期限切れと取り消し済みの資格情報でも何も変えずに成功を返す。他人の資格情報は `forbidden` の結果になる
-
-### 数
-
-| 扱い | 操作 | 数 |
-| --- | --- | --- |
-| read | 1・3・8・9・11・15・20・21・22・23・26・27・32・33・35 | 15 |
-| write | 4・10・12・13・14・18・19・24・25・28・29・30 | 12 |
-| human | 2・5・6・7・16・17・31・34・36・37 | 10 |
-
-画面の `Api` のメソッドは 34（今の 31 と委任の 3）で、画面に無い操作は 32〜34 の 3 つである。
 
 ## 操作の記録へ写す鍵
 
