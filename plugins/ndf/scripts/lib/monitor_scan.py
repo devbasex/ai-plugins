@@ -178,11 +178,6 @@ def _claude_denials_warning(path: pathlib.Path) -> Optional[str]:
     return f"permission_denials {len(denials)} 件（subtype: success で終わったため致命にしない）"
 
 
-def _scan_claude_stdout_usage_limit(path: pathlib.Path) -> Optional[str]:
-    """claude の JSON 出力から利用上限（`"api_error_status":429`）を検出する。"""
-    return _scan_claude_stdout(path, monitor_patterns.CLAUDE_STDOUT_USAGE_LIMIT)
-
-
 def _scan_codex_sentinel(path: pathlib.Path) -> bool:
     tail = _read_tail(path, 64 * 1024)
     if tail is None:

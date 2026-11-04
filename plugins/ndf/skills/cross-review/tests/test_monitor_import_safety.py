@@ -3,14 +3,14 @@
 codex round 5 指摘: `DEFAULT_TIMEOUT` / `DEFAULT_STALL` / `DEFAULT_POLL` を
 `int(os.environ.get(name, ...))` で **import 時** に評価していると、
 `MONITOR_STALL=abc` のような非数値 env が設定されているだけで
-`_agent_stall_default()` に到達する前に `int()` の `ValueError` で
+`limits.stall_timeout()` に到達する前に `int()` の `ValueError` で
 monitor.py の import そのものが落ち、監視プロセスが起動できなくなる。
 
 修正方針:
   - `DEFAULT_TIMEOUT` / `DEFAULT_STALL` / `DEFAULT_POLL` は import 時に
     **固定数値** で保持する。監視の上限と許容は上限の表（`lib/limits.py`）の値
     （review の 1200 / 表に無い担当の 180）を指す別名である（#598 / #537）
-  - env の解釈は `_agent_stall_default()` / `_safe_int_env()` 内で
+  - env の解釈は `limits.stall_timeout()` / `_safe_int_env()` 内で
     try/except 付きで行う (既に round 4 で実装済み)
 
 本テストは fixture 経由ではなく **毎回 fresh に source loader で import** し、
@@ -51,8 +51,8 @@ def test_import_succeeds_with_non_numeric_monitor_stall(monkeypatch):
     # 固定 default が保たれる
     assert mod.DEFAULT_STALL == 180
     # 呼び出し時の解決も builtin にフォールバック (既存 round 4 挙動と同じ)
-    assert mod._agent_stall_default("codex") == 180
-    assert mod._agent_stall_default("agy") == 480
+    assert mod.limits.stall_timeout(mod._agent_runtime("codex")) == 180
+    assert mod.limits.stall_timeout(mod._agent_runtime("agy")) == 480
 
 
 def test_import_succeeds_with_non_numeric_monitor_timeout(monkeypatch):

@@ -1,16 +1,14 @@
-"""HTTP と Slack の呼び出し・`.env` の読み取りの包み（#1142 の決定 19・種類 15・16）。
+"""Slack の呼び出し・`.env` の読み取りの包み（#1142 の決定 19・種類 15・16）。
 
-httpx・slack_sdk・python-dotenv を呼ぶのはこのモジュールだけである。`urllib.request` を import するのも
+slack_sdk・python-dotenv を呼ぶのはこのモジュールだけである。`urllib.request` を import するのも
 このモジュールだけにする（構造チェックの I14）。
 
-- `http_get` / `http_post_json`: 1 回の要求。失敗は例外にせず `HttpResult` の `error` に理由を入れる
-  （`HTTP 404`・`接続できない（…）`・`待ちの上限（…秒）`）
 - `slack_call(method, payload)`: Slack の Web API を 1 回呼ぶ。`ok` が偽・通信の失敗は None を返し、理由を
   `on_error` へ渡す。宛先は `NDF_SLACK_API_BASE`（既定 `https://slack.com`）、鍵は `SLACK_BOT_TOKEN`
 - `load_env_upward(cwd, fallback)`: `.env` を `cwd` から git のトップ（`.git` のあるディレクトリ）まで上へ探し、
   無ければ `fallback` から探す。見つけた 1 本を読み、**すでにある環境変数は上書きしない**
 
-使う側は `deps.require("notify")` を先に呼ぶ。httpx と slack_sdk は呼ぶときに import する（hook の経路の `.env` の読み取りに
+使う側は `deps.require("notify")` を先に呼ぶ。slack_sdk は呼ぶときに import する（hook の経路の `.env` の読み取りに
 載せない。#1142 の決定 20）。
 """
 
@@ -18,55 +16,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple
+from typing import Callable
 
 from dotenv import dotenv_values
 
 SLACK_TIMEOUT = 10
-
-
-class HttpResult(NamedTuple):
-    status: int  # 状態コード（届かなければ 0）
-    text: str
-    headers: dict[str, str]
-    error: str = ""  # 成功（2xx）は空
-
-    @property
-    def ok(self) -> bool:
-        return not self.error
-
-
-def _http_reason(exc: BaseException, timeout: float) -> str:
-    import httpx
-
-    if isinstance(exc, httpx.TimeoutException):
-        return f"待ちの上限（{timeout:g} 秒）"
-    if isinstance(exc, httpx.TransportError):
-        return f"接続できない（{exc}）"
-    return f"{type(exc).__name__}: {exc}"
-
-
-def _send(method: str, url: str, timeout: float, **kw: Any) -> HttpResult:
-    import httpx
-
-    try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            r = client.request(method, url, **kw)
-    except httpx.HTTPError as exc:
-        return HttpResult(0, "", {}, _http_reason(exc, timeout))
-    headers = {k.lower(): v for k, v in r.headers.items()}
-    error = "" if r.is_success else f"HTTP {r.status_code}"
-    return HttpResult(r.status_code, r.text, headers, error)
-
-
-def http_get(url: str, timeout: float = 10.0, headers: Mapping[str, str] | None = None) -> HttpResult:
-    """GET を 1 回送る（転送は追う）。"""
-    return _send("GET", url, timeout, headers=dict(headers or {}))
-
-
-def http_post_json(url: str, body: Any, timeout: float = 10.0, headers: Mapping[str, str] | None = None) -> HttpResult:
-    """JSON の本文で POST を 1 回送る。"""
-    return _send("POST", url, timeout, json=body, headers=dict(headers or {}))
 
 
 def slack_call(

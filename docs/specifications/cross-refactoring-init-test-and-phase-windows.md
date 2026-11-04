@@ -110,8 +110,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 - **実行の行の `whole_test.init` は全体テストを走らせたときだけ書く。** `measure_ci.ndf_record` はこの値を全体テストの所要 w
   （`ndf-record`）として読むため、範囲テストの秒が入ると w を取り違える
 - **範囲テストの所要は cross-refactoring が求めて `test_strategy.limits` へ数値で渡す。** `test_strategy` は supervise と共有の層で、
-  cross-refactoring の履歴の置き場所を知らない。置き場所が suite を覆うかの判定（`covers_whole`）は suite の `paths` の読み方と
-  同じ層に置くため `test_strategy` に持たせる
+  cross-refactoring の履歴の置き場所を知らない
 
 ## 仕様
 
@@ -136,7 +135,6 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | 関数 | 契約 |
 | --- | --- |
 | `limits(strategy, budget_minutes, ..., scope_seconds=None, scope_source=None)` | キーワード引数 2 つを足した（既定 `None` で、今の呼び出しはそのまま通る）。`scope_seconds` は戦略を問わず着手前の上限に効く。予算があるときだけ `basis` に `scope_seconds` / `scope_source` を書く（`scope_seconds` が `None` なら両方 `None`）。予算が無いとき（supervise）は表も `basis` の形も変えない。`test_timeout` と `whole_timeout` の代わりの値（x・w が無いとき）は s を入れない着手前の上限のまま |
-| `covers_whole(strategy, locations, kind=TEST)` | `kind` の suite の `paths` の全要素を、置き場所のどれかが同じか祖先として覆えば真（純粋）。置き場所は正規化して比べる。`.` と glob の要素は置き場所 `.` だけが覆う。`kind` の suite が無いか置き場所が無ければ偽。s の決め方には使わない |
 
 ### 手順の枠（`refactor_lib/timeline.py`）
 
@@ -249,8 +247,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
   （`test_the_scope_test_does_not_change_the_other_limits`）
 - `local-full` / `round-only` も s を渡せば `max(0.10·B, 3·s)`、渡さなければ `max(0.10·B, 3·w)`（`test_other_strategies_take_the_init_test_estimate`。#2047）。予算なしの表は
   s を渡しても変わらず、`basis` に `scope_seconds` を持たない（`test_supervise_limits_stay_the_same`）
-- `covers_whole` が祖先・正規化・片方だけ・子・`.`・glob・空の置き場所・テストの suite が無いときを区別する
-  （`test_covers_whole`・`test_covers_whole_needs_a_test_suite`）（以上 `plugins/ndf/scripts/tests/test_lib_test_strategy.py`）
+  （以上 `plugins/ndf/scripts/tests/test_lib_test_strategy.py`）
 - 状態から組み直した `limits` が s を運び、予算 60 分・s 不明なら 360。計画のコメントの「入力:」の行に `s 320.0（history）` が出る
   （`test_timeline.py` の `test_the_rebuilt_limits_carry_the_scope_test`・`test_the_plan_comment_shows_the_scope_test`）
 - `init_test` 行が上の列を持ち、置き場所を並べ替えた集合で残す。`scope_seconds` は 11 行前・戦略違い・置き場所違いを使わず、

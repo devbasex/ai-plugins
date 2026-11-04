@@ -1,0 +1,33 @@
+# 残す関数の一覧（vulture の許可リスト）。棚卸しのコマンドの対象の後ろに渡す。
+# 棚卸しのコマンドと決まりの正本: docs/specifications/ndf-entrypoint-contracts.md の「呼び手の無いもの」
+# 行の形: <名前の式>  # <理由の種類>: <理由の本文>（<定義のあるファイル>）
+# 理由の種類: 名前で呼ばれる / 枠組みが呼ぶ / 範囲の外から呼ばれる / テストの基盤が呼ぶ / 利用者が手で打つ / 呼び手を確かめられない
+_._stmt_redirected  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_pipeline  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_subshell  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_negated  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_list  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_loop  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_function  # 名前で呼ばれる: stmt が STMT_HANDLERS の値を getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_._stmt_other  # 名前で呼ばれる: stmt が STMT_HANDLERS に無い種類の既定として getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_.andor  # 名前で呼ばれる: STMT_HANDLERS の "list" の値として getattr で引く（plugins/ndf/scripts/hook_lib/write_target.py）
+_.redirect_request  # 枠組みが呼ぶ: urllib の HTTPRedirectHandler が 3xx の応答で呼ぶ（plugins/ndf/scripts/lib/claude_usage.py）
+_._name  # 枠組みが呼ぶ: pydantic の field_validator("name") が検証で呼ぶ。同じファイルに 2 件ある（plugins/ndf/scripts/lib/parallel_plan.py）
+_._handoff  # 枠組みが呼ぶ: pydantic の field_validator("handoff") が検証で呼ぶ（plugins/ndf/scripts/lib/parallel_plan.py）
+file_errors  # テストの基盤が呼ぶ: 契約の例の組（plugins/ndf/contracts/forms/parallel-external.json の cases）を NDF の側で確かめる検査が呼ぶ。確定仕様 ndf-factory-organizer-data-and-contracts.md の「NDF の置き場の契約」が定める（plugins/ndf/scripts/lib/parallel_external.py）
+marked_rows  # テストの基盤が呼ぶ: plugins/ndf/conftest.py が全テストの後始末で本物の台帳への書き込みを調べる（plugins/ndf/scripts/lib/usage_ledger.py）
+front_matter_text  # 範囲の外から呼ばれる: scripts/check-skill-frontmatter.py が import して呼ぶ（plugins/ndf/scripts/lib/yamlio.py）
+cmd_present  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_compose  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_confirm  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_settle  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_request  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_await  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_request_ask  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_request_gate2  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+cmd_helper  # 名前で呼ばれる: main が globals()["cmd_" + 副命令] で引く（plugins/ndf/scripts/parallel.py）
+_.review_round  # 名前で呼ばれる: drive が act(d, "review_round") で getattr して呼ぶ（plugins/ndf/skills/cross-review/scripts/drive.py）
+_.flush_posts  # 名前で呼ばれる: drive が act(d, "flush_posts") で getattr して呼ぶ（plugins/ndf/skills/cross-review/scripts/drive.py）
+_.rotate_prepare  # 名前で呼ばれる: drive が act(d, "rotate_prepare") で getattr して呼ぶ（plugins/ndf/skills/cross-review/scripts/drive.py）
+_.rotate_execute  # 名前で呼ばれる: drive が act(d, "rotate_execute") で getattr して呼ぶ（plugins/ndf/skills/cross-review/scripts/drive.py）
+_.set_current  # 名前で呼ばれる: drive が act(d, "set_current", ...) で getattr して呼ぶ（plugins/ndf/skills/cross-review/scripts/drive.py）

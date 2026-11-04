@@ -246,11 +246,6 @@ def step_finish(main: str, name: str, progress: dict) -> None:
     render_progress(main, name, progress)
 
 
-@durable.step(name="parallel.render")
-def step_render(main: str, name: str, progress: dict) -> None:
-    render_progress(main, name, progress)
-
-
 def render_progress(main: str, name: str, progress: dict) -> None:
     try:
         plan = pp.load_valid_plan(Path(main), name)

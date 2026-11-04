@@ -225,7 +225,9 @@ def test_the_orphan_group_of_the_killed_step_is_stopped_before_the_step_runs_aga
     p = plan.run()
     assert p.returncode == 0, p.stderr
     assert "子のプロセスグループ" in p.stderr
-    procs.wait_gone(orphan, 10)
+    deadline = time.monotonic() + 10
+    while procs.pid_alive(orphan) and time.monotonic() < deadline:
+        time.sleep(0.1)
     assert not procs.pid_alive(orphan)
     assert not (plan.state / "step.pid").exists()
     logged = plan.logged()

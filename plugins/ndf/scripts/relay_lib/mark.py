@@ -66,10 +66,6 @@ def running_tasks(tasks) -> list[dict]:
     ]
 
 
-def background_running(tasks) -> bool:
-    return bool(running_tasks(tasks))
-
-
 def hold_reason(tasks: list[dict]) -> str:
     """背景の作業が残っていて合図を書けないときに、Stop を止めて conductor へ渡す文。"""
     rows = [f"- {t['id'] or '(id 不明)'}: {t['command'] or '(コマンド不明)'}" for t in tasks]

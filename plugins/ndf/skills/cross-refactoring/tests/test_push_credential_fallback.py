@@ -104,7 +104,6 @@ def failing_first_push(patch_lib, monkeypatch, gitfacts, publish):
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("_require_no_tool_paths", lambda state: None)
     patch_lib("_require_publishable", lambda state: None)
-    patch_lib("publish_plan_comment", lambda state: None)
     monkeypatch.setattr(publish, "gh_available", lambda: True, raising=False)
     return calls
 
@@ -145,7 +144,6 @@ def test_a_working_helper_is_not_retried(gitfacts, patch_lib, tmp_path):
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("_require_no_tool_paths", lambda state: None)
     patch_lib("_require_publishable", lambda state: None)
-    patch_lib("publish_plan_comment", lambda state: None)
 
     gitfacts.push_head(_state(tmp_path))
 
@@ -166,7 +164,6 @@ def test_the_retry_happens_only_once(gitfacts, publish, patch_lib, monkeypatch, 
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("_require_no_tool_paths", lambda state: None)
     patch_lib("_require_publishable", lambda state: None)
-    patch_lib("publish_plan_comment", lambda state: None)
     monkeypatch.setattr(publish, "gh_available", lambda: True, raising=False)
 
     with pytest.raises(RuntimeError):
@@ -189,7 +186,6 @@ def test_without_gh_the_failure_is_returned_as_is(gitfacts, publish, patch_lib, 
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("_require_no_tool_paths", lambda state: None)
     patch_lib("_require_publishable", lambda state: None)
-    patch_lib("publish_plan_comment", lambda state: None)
     monkeypatch.setattr(publish, "gh_available", lambda: False, raising=False)
 
     with pytest.raises(RuntimeError):

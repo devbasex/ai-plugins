@@ -2811,14 +2811,22 @@ def test_full_without_report_resumes_up_to_three_times(tmp_path, seq, replies, r
     assert _resumes(calls) == resumes and s.state.results["design"]["exit"] == code
 
 
-def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
-    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
+def _gone(pid: int, timeout: float) -> bool:
+    """pid が終わる（ゾンビを含む）まで最大 timeout 秒待つ。"""
     import procs
 
+    deadline = time.monotonic() + timeout
+    while procs.pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return not procs.pid_alive(pid)
+
+
+def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
+    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
     pidfile = tmp_path / "pid"
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; exit 0", shell=True, timeout=1)
-    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+    assert _gone(int(pidfile.read_text()), timeout=3)
 
 
 def _pidfd_einval(procs_, timeout=None):
@@ -2834,7 +2842,7 @@ def test_run_ticking_timeout_stays_a_timeout_when_waiting_raises_einval(tmp_path
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; wait", shell=True, timeout=1)
     monkeypatch.undo()
-    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+    assert _gone(int(pidfile.read_text()), timeout=3)
 
 
 def test_run_ticking_stall_cut_keeps_its_own_error_when_waiting_raises_einval(monkeypatch):

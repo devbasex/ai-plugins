@@ -148,8 +148,6 @@ def test_routes_fallbacks(tmp_path):
     assert unknown[0].stage == "manual" and "不明" in unknown[0].note
     other = delivery.routes(delivery.load_delivery(make_repo(tmp_path / "o", {}, [], {"form": "service"})), FORMS)
     assert [(r.route, r.stage) for r in other] == [("template", "manual")]
-    assert delivery.needs_version(other) is False
-    assert delivery.needs_version(delivery.routes(sample(tmp_path, "ai-plugins"), FORMS)) is True
 
 
 # ---------- 手動反映の本番系（#1454） ----------

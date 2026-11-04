@@ -22,8 +22,8 @@ origin のベースブランチ・本番のブランチ・リリースタグを�
 古いプランのまま流すと、開発版の `bump` は版を戻したまま進み、本番の `release` がタグの重複に気づく時点では
 開発版の PR がすでにベースブランチへ入っていた。
 
-適用範囲は、`.ndf/supervise.json` の `release.form` が `package-plugin`（雛形で配る形）で、`delivery.needs_version` が
-真の経路である。ベースブランチと本番のブランチは `.ndf/worktree.json`、配るプラグインは `release.plugin` から読む。
+適用範囲は、`.ndf/supervise.json` の `release.form` が `package-plugin`（雛形で配る形）で、`delivery.routes` が雛形（`template`）で組む
+経路である。ベースブランチと本番のブランチは `.ndf/worktree.json`、配るプラグインは `release.plugin` から読む。
 
 ## 用語
 
