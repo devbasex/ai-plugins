@@ -1,4 +1,4 @@
-"""run・sync-check・format・design-glossary・note・history・expected の副命令（#1142 の C1）。
+"""run・sync-check・format・design-glossary・review-settled・note・history・expected の副命令（#1142 の C1）。
 
 `engine` を import するのはこのモジュールだけである。
 """
@@ -89,6 +89,72 @@ def cmd_format(root: str, commit: bool) -> tuple[dict, int]:
     code = 1 if out.status == formatting.VIOLATIONS else 2
     why = "整形で直らない違反が残る" if code == 1 else "整形を当てられない"
     return result(tool, "stopped", f"{why}: {out.failed}（{out.tail[-300:]}）", items, metrics), code
+
+
+def _count(entry: dict) -> int | None:
+    """結果の `counts.unresolved`（整数でなければ None）。"""
+    v = (entry.get("counts") or {}).get("unresolved")
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _settled_verdict(
+    log: list[dict], step: str, fix_step: str, max_attempts: int, max_cost: float, max_seconds: float
+) -> tuple[int, str | None, dict]:
+    """解決できないの判定（#2388 の U1〜U5）。(終了コード, 当たった条件, 数えた値)。上から順に照らす。"""
+    reviews = [e for e in log if e.get("id") == step]
+    fixes = [e for e in log if e.get("id") == fix_step]
+    first = next((i for i, e in enumerate(log) if e.get("id") == fix_step), None)
+    after = log[first:] if first is not None else []
+    seconds = sum(float(e.get("seconds") or 0) for e in after if e.get("id") in (step, fix_step))
+    cost = round(sum(float((e.get("llm") or {}).get("cost") or 0) for e in fixes), 4)
+    attempts = sum(1 for e in fixes if e.get("exit") == 0)
+    n = _count(reviews[-1]) if reviews else None
+    seen = {"unresolved": n, "attempts": attempts, "cost": cost, "seconds": round(seconds, 1)}
+    if not reviews or reviews[-1].get("exit") != 6 or n is None:
+        return 2, "U1", seen
+    if n == 0:
+        return 0, None, seen
+    if attempts >= max_attempts:
+        return 2, "U2", seen
+    if fixes and len(reviews) >= 2:
+        prev = _count(reviews[-2])
+        if prev is None or n >= prev:
+            return 2, "U3", seen
+    if cost > max_cost or any((e.get("llm") or {}).get("cost_unknown") for e in fixes):
+        return 2, "U4", seen
+    if seconds > max_seconds:
+        return 2, "U5", seen
+    return 1, None, seen
+
+
+SETTLED_WHY = {
+    "U1": "未解決の件数を読めない",
+    "U2": "解決のフローの回数が上限に達した",
+    "U3": "直しの後も未解決の件数が減らない",
+    "U4": "直しの費用が上限を超えた",
+    "U5": "解決のフローの時間が上限を超えた",
+}
+
+
+def cmd_review_settled(state: str, step: str, fix_step: str, max_attempts: int, max_cost: float, max_seconds: float) -> tuple[dict, int]:
+    """上限到達で終わったレビューの未解決の件数を実行の記録から読み、行き先を終了コードで返す（#2388 の決定 1・3）。
+
+    0 = 未解決 0 件 / 1 = 解決を続ける / 2 = 解決できない（記録が読めないときも 2）。LLM を呼ばない。"""
+    tool = "review-settled"
+    try:
+        log = json.loads(Path(state).read_text()).get("log")
+    except (OSError, ValueError, AttributeError):
+        log = None
+    if not isinstance(log, list):
+        log = []
+    log = [e for e in log if isinstance(e, dict)]
+    code, reason, seen = _settled_verdict(log, step, fix_step, max_attempts, max_cost, max_seconds)
+    metrics = {**seen, "reason": reason}
+    counted = f"{step} の未解決 {seen['unresolved'] if seen['unresolved'] is not None else '不明'} 件"
+    if code == 0:
+        return result(tool, "ok", f"{counted}。通常の経路へ進む", [], metrics), 0
+    why = f"{reason}: {SETTLED_WHY[reason]}" if reason else "解決を続ける"
+    return result(tool, "stopped", f"{counted}。{why}", [], metrics), code
 
 
 def _commit_glossary(root: str, created: list[str], ignored: list[str]) -> str | None:

@@ -64,10 +64,12 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
     supervise.py format [--root DIR] [--commit]       # 宣言した整形（.ndf/supervise.json の format）。0 = 通った / 1 = 直らない違反 / 2 = 宣言なし・仕組みの失敗
     supervise.py sync-title --pr N --doc <設計文書>   # 設計 PR の題を設計文書の H1 に合わせ直す（違うときだけ。常に 0）
+    supervise.py review-settled --state <state.json> --step <id> --fix-step <id> --max-attempts N --max-cost USD --max-seconds S
+        # 上限到達で終わったレビューの未解決の件数を実行の記録から読む。0 = 未解決 0 件 / 1 = 解決を続ける / 2 = 解決できない
     supervise.py example            # 計画の例を出す
 
 new <種別> --help は、その種別の書き出すステップの並び・要る宣言・引数だけを出す。
-new / queue / wait / note / sync-check / format / sync-title の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
+new / queue / wait / note / sync-check / format / sync-title / review-settled の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 
 プランの形と実行の決まり（ステップの型ごとの鍵・承認ゲート・遅れの見張り）は supervise_lib/plan.py の docstring にある。
@@ -222,6 +224,17 @@ def build_parser(sub) -> None:
     )
     st.add_argument("--pr", type=int, required=True, help="題を合わせる Pull Request")
     st.add_argument("--doc", required=True, help="題を読む設計文書（作業ディレクトリからの相対パス）")
+    rs = sub.add_parser(
+        "review-settled",
+        help="上限到達で終わったレビューの未解決の件数を実行の記録から読み、行き先を終了コードで返す",
+        epilog="終了コード: 未解決 0 件 = 0 / 解決を続ける = 1 / 解決できない（件数を読めない・回数・繰り返し・費用・時間の上限）= 2",
+    )
+    rs.add_argument("--state", required=True, help="実行の記録（<状態ディレクトリ>/state.json）")
+    rs.add_argument("--step", required=True, help="未解決の件数を読むステップの id")
+    rs.add_argument("--fix-step", required=True, help="解決のフローの直しのステップの id（回数・費用を数える）")
+    rs.add_argument("--max-attempts", type=int, required=True, help="直しの成功の回数の上限")
+    rs.add_argument("--max-cost", type=float, required=True, help="直しの費用の合計の上限（ドル）")
+    rs.add_argument("--max-seconds", type=float, required=True, help="最初の直しから後の秒の合計の上限")
 
 
 def _cmd_new(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
@@ -282,6 +295,9 @@ COMMANDS = {
     "sync-check": lambda ap, a: emit(commands.sync_check(a.root, a.commit)),
     "format": lambda ap, a: emit(*commands.cmd_format(a.root, a.commit)),
     "sync-title": lambda ap, a: emit(pr_step.sync_title(".", a.pr, a.doc)),
+    "review-settled": lambda ap, a: emit(
+        *commands.cmd_review_settled(a.state, a.step, a.fix_step, a.max_attempts, a.max_cost, a.max_seconds)
+    ),
 }
 
 
