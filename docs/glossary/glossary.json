@@ -4910,6 +4910,20 @@
       "pending_source": "issues/issue-2343-requirements.md"
     },
     {
+      "term": "眠りのループ",
+      "context": "ndf-workflow",
+      "meaning": "本体（入れ子の関数を除く）で sleep を呼ぶ for / while のループ。再試行と待ちの両方が当たり、lib/waits.py の外では構造チェックが落とす（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-design.md"
+    },
+    {
+      "term": "最後の照会",
+      "context": "ndf-workflow",
+      "meaning": "待ちの次の眠りが上限を超えるとき、残りの秒だけ眠った後に上限の時刻に打つ 1 回の照会（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-design.md"
+    },
+    {
       "term": "名前の対応表",
       "context": "ndf-workflow",
       "meaning": "同じ意味の値の正しい名前と、読むだけ受ける旧い名前の対応（plugins/ndf/contracts/names.json。#2335）",
