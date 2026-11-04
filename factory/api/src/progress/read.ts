@@ -11,6 +11,7 @@ import type {
   ReleaseProgressPayload,
   ReleaseRequestedPayload,
   ReleaseSettledPayload,
+  StepRecordedEvent,
   UsageRecordedEvent,
 } from "@ndf-factory/contracts";
 import { finishedKey } from "./authorize.ts";
@@ -33,7 +34,72 @@ export interface ProgressReader {
   findLastGate(sprintRunId: string): Promise<{ at: string; jobId: string | null; payload: GateReachedPayload } | null>;
   // 承認の依頼への答え（gate.answered。#2439 の配布のまとめが読む）。無ければ null
   findGateAnswer(sprintRunId: string, approvalRequestId: string): Promise<GateAnsweredPayload | null>;
+  // ---- スプリントの一覧と詳細（#2172）。どれも本文（step.recorded の files・decisions・output）を返さない ----
+  // 実行の事象を order_key の順に。step.recorded は新しい方から stepLimit 件までで、ほかの種類はすべて（I11）
+  listRunEvents(sprintRunId: string, stepLimit: number): Promise<RunEvents>;
+  // 最後の phase.changed・最後の step.recorded・最後の事象（一覧の行に足す 4 項目のもと）
+  latestOfRun(sprintRunId: string): Promise<RunLatest>;
+  // 冪等の鍵が指す、その実行の step.recorded（本文を含む）。別の実行の鍵・別の種類は null
+  getStep(sprintRunId: string, idempotencyKey: string): Promise<StepRecord | null>;
+  // payload.step が step の step.recorded（order_key の順）
+  listStepsNamed(sprintRunId: string, step: string): Promise<StepRecord[]>;
 }
+
+export type StepRecord = StepRecordedEvent & ProgressEventRecord;
+
+export interface RunEvents {
+  events: ProgressEventRecord[];
+  // 上限で読まなかった step.recorded の数
+  omittedSteps: number;
+}
+
+export interface RunLatest {
+  phase: ProgressEventRecord | null;
+  step: StepRecord | null;
+  last: ProgressEventRecord | null;
+}
+
+// 工程の中身の本文。詳細の読み直しで返さない（決定 10）
+const STEP_BODY = ["files", "files_omitted", "commit_range", "decisions", "output"] as const;
+
+const isStep = (e: ProgressEventRecord): e is StepRecord => e.type === "step.recorded";
+
+// 本文を外した写し。外したことは has_details で分かるよう、持っていた項目の名前を残す
+export function withoutBody<T extends ProgressEventRecord>(e: T): T & { body_fields?: string[] } {
+  if (!isStep(e)) return e;
+  const payload = { ...e.payload } as Record<string, unknown>;
+  const present = STEP_BODY.filter((k) => payload[k] !== undefined);
+  for (const k of STEP_BODY) delete payload[k];
+  return { ...e, payload, ...(present.length > 0 ? { body_fields: present } : {}) } as T & { body_fields?: string[] };
+}
+
+// order_key の順の列から、古い step.recorded を上限の外として捨てる
+export function capSteps(ordered: ProgressEventRecord[], stepLimit: number): RunEvents {
+  const total = ordered.filter(isStep).length;
+  let skip = Math.max(0, total - stepLimit);
+  const omittedSteps = skip;
+  const events: ProgressEventRecord[] = [];
+  for (const e of ordered) {
+    if (isStep(e) && skip > 0) {
+      skip -= 1;
+      continue;
+    }
+    events.push(withoutBody(e));
+  }
+  return { events, omittedSteps };
+}
+
+// order_key の順の列の最後の phase.changed・step.recorded・事象
+export function latestOf(ordered: ProgressEventRecord[]): RunLatest {
+  const step = ordered.filter(isStep).at(-1);
+  return {
+    phase: ordered.filter((e) => e.type === "phase.changed").at(-1) ?? null,
+    step: step ? withoutBody(step) : null,
+    last: ordered.at(-1) ?? null,
+  };
+}
+
+const byOrderKey = (a: ProgressEventRecord, b: ProgressEventRecord) => (a.order_key < b.order_key ? -1 : a.order_key > b.order_key ? 1 : 0);
 
 export interface ReleaseEvents {
   requested: ReleaseRequestedPayload[];
@@ -140,6 +206,23 @@ export function memoryProgressReader(store: MemoryProgressEventStore): ProgressR
     async findGateAnswer(sprintRunId, approvalRequestId) {
       return gateAnswerOf(store.listRun(sprintRunId), approvalRequestId);
     },
+    async listRunEvents(sprintRunId, stepLimit) {
+      return capSteps(store.listRun(sprintRunId), stepLimit);
+    },
+    async latestOfRun(sprintRunId) {
+      return latestOf(store.listRun(sprintRunId));
+    },
+    async getStep(sprintRunId, idempotencyKey) {
+      const found = store.listRun(sprintRunId).find((e) => e.idempotency_key === idempotencyKey);
+      return found && isStep(found) ? structuredClone(found) : null;
+    },
+    async listStepsNamed(sprintRunId, step) {
+      return store
+        .listRun(sprintRunId)
+        .filter(isStep)
+        .filter((e) => e.payload.step === step)
+        .map(withoutBody);
+    },
   };
 }
 
@@ -236,5 +319,71 @@ export class DynamoProgressReader implements ProgressReader {
 
   async findGateAnswer(sprintRunId: string, approvalRequestId: string) {
     return gateAnswerOf(await this.listTypes(sprintRunId, GATE_TYPES), approvalRequestId);
+  }
+
+  // 表に type の索引が無いため、実行の事象を全ページ読んでから手元で古い step.recorded を捨てる。
+  // ScanIndexForward=false と Limit で切ると古い gate.reached・usage.recorded を落とすため、その読み方はしない（決定 9）
+  async listRunEvents(sprintRunId: string, stepLimit: number): Promise<RunEvents> {
+    const out: ProgressEventRecord[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new QueryCommand({
+          TableName: this.eventsTable,
+          KeyConditionExpression: "sprint_run_id = :r",
+          ExpressionAttributeValues: { ":r": sprintRunId },
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      // 本文はページごとに外し、手元に持つ量を抑える
+      out.push(...((page.Items ?? []) as ProgressEventRecord[]).map(withoutBody));
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return capSteps(out.sort(byOrderKey), stepLimit);
+  }
+
+  // 新しい方から読み、最後の phase.changed と step.recorded がそろったら止める
+  async latestOfRun(sprintRunId: string): Promise<RunLatest> {
+    const latest: RunLatest = { phase: null, step: null, last: null };
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new QueryCommand({
+          TableName: this.eventsTable,
+          KeyConditionExpression: "sprint_run_id = :r",
+          ExpressionAttributeValues: { ":r": sprintRunId },
+          ScanIndexForward: false,
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      for (const e of (page.Items ?? []) as ProgressEventRecord[]) {
+        latest.last ??= e;
+        if (!latest.phase && e.type === "phase.changed") latest.phase = e;
+        if (!latest.step && isStep(e)) latest.step = withoutBody(e);
+      }
+      start = latest.phase && latest.step ? undefined : page.LastEvaluatedKey;
+    } while (start);
+    return latest;
+  }
+
+  async getStep(sprintRunId: string, idempotencyKey: string): Promise<StepRecord | null> {
+    const key = await this.doc.send(new GetCommand({ TableName: this.idempotencyTable, Key: { idempotency_key: idempotencyKey }, ConsistentRead: true }));
+    const orderKey = key.Item?.order_key as string | undefined;
+    if (!orderKey || key.Item?.sprint_run_id !== sprintRunId) return null;
+    const out = await this.doc.send(
+      new GetCommand({ TableName: this.eventsTable, Key: { sprint_run_id: sprintRunId, order_key: orderKey }, ConsistentRead: true }),
+    );
+    const item = out.Item as ProgressEventRecord | undefined;
+    return item && isStep(item) ? item : null;
+  }
+
+  async listStepsNamed(sprintRunId: string, step: string): Promise<StepRecord[]> {
+    return (await this.listTypes(sprintRunId, ["step.recorded"]))
+      .filter(isStep)
+      .filter((e) => e.payload.step === step)
+      .sort(byOrderKey)
+      .map(withoutBody);
   }
 }

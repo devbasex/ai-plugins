@@ -293,7 +293,7 @@ paths:
       tags: [sprint-runs]
       operationId: listSprintRuns
       summary: スプリントの実行の一覧
-      description: 新しい順に 50 件。repository_id で絞れる。
+      description: 新しい順に 50 件。repository_id で絞れる。各行の今のフェーズ・今の工程・最後の動きは進捗の事象から導く。
       parameters:
         - name: accountId
           in: path
@@ -315,6 +315,107 @@ paths:
                 $ref: "#/components/schemas/SprintRunList"
         "403":
           $ref: "#/components/responses/E403"
+  /accounts/{accountId}/sprint-runs/{sprintRunId}:
+    get:
+      tags: [sprint-runs]
+      operationId: getSprintRunDetail
+      summary: スプリントの詳細
+      description: >-
+        フェーズの欄・課題ごとの工程の記録と Pull Request と CI・承認の欄・使用量。進捗の事象から導き、課題の本文・ボード・GitHub を読まない。
+        工程の中身の本文（触ったファイル・決めたこと・出力）は返さず、工程の中身の経路で 1 件ずつ読む。
+        step.recorded は新しい方から 2,000 件までで、省いた数を omitted_steps に返す。
+        無い実行・アカウントに属さない実行も、他人のアカウントと同じ本文の 403。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sprintRunId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SprintRunDetail"
+        "403":
+          $ref: "#/components/responses/E403"
+        "503":
+          $ref: "#/components/responses/E503"
+  /accounts/{accountId}/sprint-runs/{sprintRunId}/steps/{stepKey}:
+    get:
+      tags: [sprint-runs]
+      operationId: getStepDetail
+      summary: 工程の中身
+      description: >-
+        1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）と、差分とファイルのリンク。
+        stepKey は事象の idempotency_key（URL の符号化をする）。記録の無い項目は null。
+        無い工程・別の実行の工程も、他人のアカウントと同じ本文の 403。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sprintRunId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stepKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepDetail"
+        "403":
+          $ref: "#/components/responses/E403"
+        "503":
+          $ref: "#/components/responses/E503"
+  /accounts/{accountId}/repositories/{repositoryId}/backlog:
+    get:
+      tags: [repositories]
+      operationId: getBacklog
+      summary: バックログ
+      description: >-
+        リポジトリの着手の順位の表（マイルストーンの説明の表）と、そのリポジトリの実行（新しい順に 50 件まで）の棚卸しの工程の記録。
+        読むだけで、課題・マイルストーン・ボードへ書かない。登録の無いリポジトリも、他人のアカウントと同じ本文の 403。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repositoryId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Backlog"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "503":
+          $ref: "#/components/responses/E503"
   /accounts/{accountId}/sprint-runs/{sprintRunId}/cancel:
     post:
       tags: [sprint-runs]
@@ -724,6 +825,235 @@ components:
               state: { type: string, enum: [starting, running, awaiting_approval, awaiting_reset, done, stopped, failed, cancelled] }
               failure_reason: { type: ["string", "null"] }
               created_at: { type: string, format: date-time }
+              repo: { type: string, description: owner/name }
+              current_phase:
+                type: ["string", "null"]
+                description: 最後の phase.changed のフェーズの名前。null は始まる前。5 つの名前に無い値もそのまま返す
+              current_step: { type: ["string", "null"], description: 最後の step.recorded のステップ }
+              last_event_at: { type: ["string", "null"], format: date-time, description: 最後の事象の時刻 }
+    PullRequestLink:
+      type: object
+      required: [repo, number, url]
+      properties:
+        repo: { type: string }
+        number: { type: integer }
+        url: { type: string, format: uri }
+    StepRow:
+      type: object
+      required: [key, at, job_id, step, phase, issues, exit_code, seconds, cost_usd, summary, pull_request, has_details]
+      properties:
+        key: { type: string, description: 事象の idempotency_key }
+        at: { type: string, format: date-time }
+        job_id: { type: ["string", "null"] }
+        step: { type: string }
+        phase: { type: ["string", "null"], description: 工程のフェーズ。無ければ同じ実行ジョブの直前の phase.changed から導く }
+        issues: { type: array, items: { type: integer }, description: 空はスプリント全体の工程 }
+        exit_code: { type: integer }
+        seconds: { type: number }
+        cost_usd: { type: ["number", "null"], description: 同じ実行ジョブ・ステップ・時刻の usage.recorded の和。結べなければ null }
+        summary: { type: string }
+        pull_request:
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestLink"
+            - type: "null"
+        has_details: { type: boolean, description: 工程の中身の本文を持つか }
+    RequiredStep:
+      type: object
+      required: [label, step, record]
+      properties:
+        label: { type: string }
+        step: { type: string }
+        record:
+          oneOf:
+            - type: object
+              required: [key, exit_code, seconds]
+              properties:
+                key: { type: string }
+                exit_code: { type: integer }
+                seconds: { type: number }
+            - type: "null"
+    GateView:
+      type: object
+      required: [state, at]
+      properties:
+        state: { type: string, enum: [not_reached, waiting, approved, rejected] }
+        at: { type: ["string", "null"], format: date-time }
+    SprintRunDetail:
+      type: object
+      required:
+        - sprint_run_id
+        - repository_id
+        - issues
+        - state
+        - failure_reason
+        - created_at
+        - repo
+        - ndf_version
+        - execution_mode
+        - job_count
+        - current_phase
+        - phases
+        - columns
+        - steps
+        - gates
+        - delegated_decisions
+        - usage
+        - omitted_steps
+      properties:
+        sprint_run_id: { type: string }
+        repository_id: { type: integer }
+        issues: { type: array, items: { type: integer } }
+        state: { type: string, enum: [starting, running, awaiting_approval, awaiting_reset, done, stopped, failed, cancelled] }
+        failure_reason: { type: ["string", "null"] }
+        created_at: { type: string, format: date-time }
+        repo: { type: string }
+        ndf_version: { type: string }
+        execution_mode: { type: string, enum: [local, byok, managed] }
+        job_count: { type: integer }
+        current_phase: { type: ["string", "null"] }
+        phases:
+          type: array
+          description: 5 つの名前（設計・実装・検査・取り込み・仕上げ）の順に、続いて現れた順に 5 つに無い名前。仕上げだけが required（振り返り・棚卸し）を持つ
+          items:
+            type: object
+            required: [name, step_keys, required]
+            properties:
+              name: { type: string }
+              step_keys: { type: array, items: { type: string } }
+              required: { type: array, items: { $ref: "#/components/schemas/RequiredStep" } }
+        columns:
+          type: array
+          description: 実行の課題の順に課題の欄、最後にスプリント全体の欄（issue が null）
+          items:
+            type: object
+            required: [issue, step_keys, pull_requests]
+            properties:
+              issue: { type: ["integer", "null"] }
+              step_keys: { type: array, items: { type: string } }
+              pull_requests:
+                type: array
+                items:
+                  type: object
+                  required: [repo, number, url, state, checks]
+                  properties:
+                    repo: { type: string }
+                    number: { type: integer }
+                    url: { type: string, format: uri }
+                    state: { type: string, enum: [open, closed, merged, unknown] }
+                    checks:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, conclusion]
+                        properties:
+                          name: { type: string }
+                          conclusion: { type: ["string", "null"], description: null は実行中 }
+        steps: { type: array, items: { $ref: "#/components/schemas/StepRow" } }
+        gates:
+          type: object
+          required: [gate1, gate2, decision]
+          properties:
+            gate1: { $ref: "#/components/schemas/GateView" }
+            gate2: { $ref: "#/components/schemas/GateView" }
+            decision:
+              type: object
+              required: [state, at]
+              properties:
+                state: { type: string, enum: [none, waiting, answered] }
+                at: { type: ["string", "null"], format: date-time }
+        delegated_decisions: { type: integer, description: AI が代わりに判断した問い合わせの数 }
+        usage:
+          type: object
+          required: [input_tokens, output_tokens, cost_usd]
+          properties:
+            input_tokens: { type: integer }
+            output_tokens: { type: integer }
+            cost_usd: { type: number }
+        omitted_steps: { type: integer, description: 上限で省いた古い工程の数 }
+    StepDetail:
+      allOf:
+        - $ref: "#/components/schemas/StepRow"
+        - type: object
+          required: [files, files_omitted, commit_range, decisions, output, diff_url]
+          properties:
+            files:
+              type: ["array", "null"]
+              description: null は記録なし、空の配列は触らなかった
+              items:
+                type: object
+                required: [path, added, deleted, url]
+                properties:
+                  path: { type: string }
+                  added: { type: ["integer", "null"], description: null はバイナリ }
+                  deleted: { type: ["integer", "null"], description: null はバイナリ }
+                  url: { type: ["string", "null"], format: uri, description: コミットの範囲が無ければ null }
+            files_omitted: { type: ["integer", "null"] }
+            commit_range:
+              oneOf:
+                - type: object
+                  required: [from, to]
+                  properties:
+                    from: { type: string }
+                    to: { type: string }
+                - type: "null"
+            decisions:
+              type: ["array", "null"]
+              items:
+                type: object
+                required: [question, answer, by]
+                properties:
+                  question: { type: string }
+                  answer: { type: string }
+                  by: { type: string, enum: [ai, user] }
+            output:
+              oneOf:
+                - type: object
+                  required: [kind, text, truncated]
+                  properties:
+                    kind: { type: string, enum: [report, log] }
+                    text: { type: string }
+                    truncated: { type: boolean }
+                - type: "null"
+            diff_url: { type: ["string", "null"], format: uri }
+    Backlog:
+      type: object
+      required: [repository_id, repo, ranking, refinements]
+      properties:
+        repository_id: { type: integer }
+        repo: { type: string }
+        ranking:
+          description: null は順位の表が無い
+          oneOf:
+            - type: object
+              required: [milestone, rows]
+              properties:
+                milestone: { type: string }
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    required: [rank, number, title]
+                    properties:
+                      rank: { type: integer, minimum: 1 }
+                      number: { type: integer }
+                      title: { type: string }
+            - type: "null"
+        refinements:
+          type: array
+          description: 棚卸しの工程（step が refine）の記録を新しい順に
+          items:
+            type: object
+            required: [sprint_run_id, key, at, exit_code, summary, pull_request]
+            properties:
+              sprint_run_id: { type: string }
+              key: { type: string }
+              at: { type: string, format: date-time }
+              exit_code: { type: integer }
+              summary: { type: string }
+              pull_request:
+                oneOf:
+                  - $ref: "#/components/schemas/PullRequestLink"
+                  - type: "null"
     CancelResult:
       type: object
       required: [state]
