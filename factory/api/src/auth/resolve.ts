@@ -8,7 +8,16 @@ export interface AuthDeps {
   accounts: AccountService;
 }
 
-export type AuthEnv = { Variables: { caller: Caller; auth: AuthDeps } };
+// 操作の登録の層が、操作の記録へ渡すために置く値（#2384）。対象の ID は許可した鍵の値だけ
+export interface OperationTrace {
+  operationId: string;
+  accountId: string | null;
+  targetIds: string[];
+  // 失敗した要素の誤りの code（重ねない）
+  reasons: string[];
+}
+
+export type AuthEnv = { Variables: { caller: Caller; auth: AuthDeps; operation?: OperationTrace } };
 
 // 経路の前に token を毎回検証し、利用者を文脈に置く中間処理（E3）。
 // #2171・#2186・#2174 の経路も同じ中間処理を通す

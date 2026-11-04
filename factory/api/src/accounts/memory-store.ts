@@ -1,5 +1,6 @@
 import { ConditionFailedError, type AccountPatch, type AccountStore } from "./store.ts";
 import type { AccountRecord, HistoryRecord, SeatRecord, UserRecord } from "./model.ts";
+import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
 // DynamoAccountStore と同じ条件で書く、メモリの上の保存。テストと手元の確かめに使う
 // beforeWrite は書き込みの直前に呼ばれる。投げると書き込みは何も残さない（トランザクションの失敗）
@@ -8,6 +9,8 @@ export class MemoryAccountStore implements AccountStore {
   readonly accounts = new Map<string, AccountRecord>();
   readonly seats = new Map<string, SeatRecord>();
   readonly history: HistoryRecord[] = [];
+  // 作成の冪等の鍵の行（TTL で消さない）
+  readonly idempotency = new Map<string, IdempotencyClaim>();
   beforeWrite: ((op: string) => void | Promise<void>) | null = null;
 
   private static seatKey(accountId: string, userId: string) {
@@ -56,12 +59,21 @@ export class MemoryAccountStore implements AccountStore {
     return [...this.seats.values()].filter((s) => s.userId === userId).map((s) => s.accountId);
   }
 
-  async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]) {
+  async getIdempotent(ref: IdempotencyRef, now: string) {
+    return liveCreatedId(this.idempotency.get(idempotencyPk(ref)) ?? null, now);
+  }
+
+  async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[], idempotency?: IdempotencyClaim) {
     const key = MemoryAccountStore.seatKey(ownerSeat.accountId, ownerSeat.userId);
+    const idemFree = () => {
+      const row = idempotency && this.idempotency.get(idempotencyPk(idempotency));
+      return !row || row.ttl < epochSeconds(idempotency!.createdAt);
+    };
     await this.write(
       "createTeam",
-      () => !this.accounts.has(account.accountId) && !this.seats.has(key),
+      () => !this.accounts.has(account.accountId) && !this.seats.has(key) && idemFree(),
       () => {
+        if (idempotency) this.idempotency.set(idempotencyPk(idempotency), { ...idempotency });
         this.accounts.set(account.accountId, { ...account });
         this.seats.set(key, { ...ownerSeat });
       },

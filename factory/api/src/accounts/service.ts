@@ -25,6 +25,7 @@ import {
   type UserRecord,
 } from "./model.ts";
 import { ConditionFailedError, type AccountPatch, type AccountStore } from "./store.ts";
+import { claimOf, type IdempotencyRef } from "../idempotency.ts";
 
 // 版の競合で読み直して書き直す回数の上限（docs/specifications/ndf-factory-accounts-and-plans.md の「常に成り立つ条件」）
 const VERSION_RETRIES = 3;
@@ -161,17 +162,29 @@ export class AccountService {
   }
 
   // チームを作り、作った利用者を持ち主にして持ち主の席を 1 つ作る（受け入れ条件 9、E4）
-  async createTeam(caller: Caller, name: string, seatType: SeatType): Promise<AccountContext> {
+  // idempotencyKey があれば、同じ利用者の同じ鍵の 24 時間以内の作成を 1 件にし、2 回目は 1 回目のチームを返す（#2384 の I14）
+  async createTeam(caller: Caller, name: string, seatType: SeatType, idempotencyKey?: string): Promise<AccountContext> {
     await this.ensureUser(caller);
     const at = this.stamp();
+    const ref: IdempotencyRef | undefined = idempotencyKey === undefined ? undefined : { userId: caller.userId, operationId: "createTeam", key: idempotencyKey };
+    const replayed = ref ? await this.store.getIdempotent(ref, at) : null;
+    if (replayed) return this.resolveAccount(caller, replayed);
     const account = this.newAccount("team", "team", caller.userId, name, at);
     const seat: SeatRecord = { accountId: account.accountId, userId: caller.userId, seatType, addedAt: at };
     try {
-      await this.store.createTeam(account, seat, [
-        this.accountCreated(account, caller.userId, { name }),
-        this.hist(account.accountId, "seat.added", at, caller.userId, null, { user_id: caller.userId, seat_type: seatType }),
-      ]);
-    } catch {
+      await this.store.createTeam(
+        account,
+        seat,
+        [
+          this.accountCreated(account, caller.userId, { name }),
+          this.hist(account.accountId, "seat.added", at, caller.userId, null, { user_id: caller.userId, seat_type: seatType }),
+        ],
+        ref && claimOf(ref, account.accountId, at),
+      );
+    } catch (err) {
+      // 同じ鍵の作成が同時に走り、先に書いた方が勝った
+      const won = ref && err instanceof ConditionFailedError ? await this.store.getIdempotent(ref, at) : null;
+      if (won) return this.resolveAccount(caller, won);
       throw new AccountUnavailableError();
     }
     return this.context(account, caller.userId, seatType);

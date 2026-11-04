@@ -17,6 +17,7 @@ import {
   type SprintRun,
 } from "./model.ts";
 import type { ComposeRelease, ResumeOptions, RunsTable, RunTransitionExtras } from "./table.ts";
+import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
 const regKey = (a: string, r: number) => `${a}#${r}`;
 const shareKey = (a: string, r: number, k: string | number) => `${a}#${r}#${k}`;
@@ -38,6 +39,8 @@ export class MemoryRunsTable implements RunsTable {
   readonly runnerSlots = new Map<string, number>();
   // <account>#<repo> → 古い版の実行を数えに入れた回数（#2439 の I62）
   readonly legacySeqs = new Map<string, number>();
+  // 作成の冪等の鍵の行（IDEMP#<利用者>#<操作>#<鍵>）。TTL で消さない
+  readonly idempotency = new Map<string, IdempotencyClaim>();
   // Factory のオーガナイザー（#2439）。<account>#<repo>（#<id|seq>）→ 行
   readonly organizers = new Map<string, OrganizerRoot>();
   readonly orgRequests = new Map<string, OrgRequest>();
@@ -155,6 +158,7 @@ export class MemoryRunsTable implements RunsTable {
       if (guards.issues.some((n) => this.issueShares.has(shareKey(run.accountId, run.repositoryId, n)))) return "issue_in_use";
       if (guards.milestoneChecks.some((t) => this.milestoneShares.has(shareKey(run.accountId, run.repositoryId, t)))) return "issue_in_loop";
       if (guards.loop && !this.loopFits(guards.loop)) return "loop_changed";
+      if (guards.idempotency && !this.idempotencyFree(guards.idempotency)) return "duplicate";
     }
     this.accountSlots.set(run.accountId, expected.account + 1);
     this.repositorySlots.set(repoKey, expected.repository + 1);
@@ -165,6 +169,7 @@ export class MemoryRunsTable implements RunsTable {
       }
       for (const n of guards.issues) this.issueShares.set(shareKey(run.accountId, run.repositoryId, n), run.sprintRunId);
       if (guards.loop) this.applyLoop(guards.loop);
+      if (guards.idempotency) this.idempotency.set(idempotencyPk(guards.idempotency), { ...guards.idempotency });
     }
     this.runs.set(run.sprintRunId, structuredClone({ ...run, ...(guards ? { legacy: guards.legacy } : {}) }));
     this.jobs.set(job.jobId, structuredClone(job));
@@ -312,11 +317,24 @@ export class MemoryRunsTable implements RunsTable {
     return true;
   }
 
-  async createLoop(loop: DevLoop) {
+  // 期限の中の同じ鍵の行が無い（DynamoDB の attribute_not_exists(pk) OR ttl < :now と同じ）
+  private idempotencyFree(claim: IdempotencyClaim): boolean {
+    const row = this.idempotency.get(idempotencyPk(claim));
+    return !row || row.ttl < epochSeconds(claim.createdAt);
+  }
+
+  async getIdempotent(ref: IdempotencyRef, now: string) {
+    await this.tick();
+    return liveCreatedId(this.idempotency.get(idempotencyPk(ref)) ?? null, now);
+  }
+
+  async createLoop(loop: DevLoop, idempotency?: IdempotencyClaim) {
     await this.tick();
     for (const title of loop.milestones) {
       if (this.milestoneShares.has(shareKey(loop.accountId, loop.repositoryId, title))) return { conflict: title };
     }
+    if (idempotency && !this.idempotencyFree(idempotency)) return "duplicate" as const;
+    if (idempotency) this.idempotency.set(idempotencyPk(idempotency), { ...idempotency });
     for (const title of loop.milestones) this.milestoneShares.set(shareKey(loop.accountId, loop.repositoryId, title), { loopId: loop.loopId, title });
     this.loops.set(loop.loopId, structuredClone(loop));
     return "created" as const;
