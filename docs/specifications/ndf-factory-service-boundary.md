@@ -140,12 +140,12 @@ graph TD
 | #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・料金プランと使える量・実行の形態の値の画面と API | `resolveAccount(caller, accountId?)` が返す `account_id`（token には載せず、検証した token の利用者と経路 `/accounts/{account_id}/…` から解決する。経路に無ければ個人のアカウント）、使える量の問い合わせ（同時のスプリントの数・月の token の上限）、アカウントの実行の形態 | 無し |
 | #2171 | `factory/contracts/`・進捗の受け口・実行ジョブの token の検証 | 実行ジョブの指示・進捗の事象の種類と形・受け口の認証と応答・実行ジョブの token の検証（token から実行ジョブと `sprint_run_id`・`repo` を返し、無効なら拒む） | #2170 の `resolveAccount` が返す `account_id`、#2173 の保存済みの答え（`gate.answered` の照合） |
 | #2186 | GitHub App・リポジトリの登録・スプリントの実行と実行ジョブ・クラウドのランナー（形態 ② と ③）・持ち込んだキーの保存・実行ジョブの token の発行 | 実行の制御への再開の要求の受け口、実行ジョブを渡す口（#2189 が使う） | #2171 の `factory/contracts/`・進捗の受け口・token の検証、#2170 の `resolveAccount` が返す `account_id` と使える量と実行の形態、#2173 の承認の依頼の答えを読む経路 |
-| #2172 | 一覧と詳細の画面・派生の形・フェーズの名前の集合 | 無し | 進捗の事象（`phase.changed`・`step.recorded`・`pr.updated`・`ci.updated`） |
+| #2172 | 一覧・詳細・バックログの画面と読み出しの経路・派生の形・フェーズの名前の集合・ランナーの工程の中身の翻訳 | フェーズの名前の列挙（`factory/contracts/src/phases.ts`）、`step.recorded` の工程の中身の任意の項目 | 進捗の事象（`phase.changed`・`step.recorded`・`gate.reached`・`gate.answered`・`usage.recorded`・`decision.delegated`・`pr.updated`・`ci.updated`）、#2186 のスプリントの実行の行と GitHub の口の順位の表、#2170 の `resolveAccount` が返す `account_id` |
 | #2173 | 承認の依頼・Web と Slack の通知・Web からの承認 | `gate.answered`、承認の依頼の答えを読む経路、実行の制御への再開の要求 | `gate.reached`・`attention`、#2171 の実行ジョブの token の検証 |
 | #2174 | 料金プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 の料金プランと実行の形態 |
 | #2189 | 手元のマシン（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
 
-各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI と実行ジョブの打ち切りの時間は #2186 が決めた（「実行の制御」）。`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
+各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI と実行ジョブの打ち切りの時間は #2186 が決めた（「実行の制御」）。`phase.changed` が運ぶフェーズの名前の集合は #2172 が 5 つに決め、一覧と詳細の派生の規則とともに [スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し) にある。決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
 
 ### 構成と言語
 
@@ -345,8 +345,8 @@ erDiagram
 | 種類 | 出所 | `payload` | 主な受け手 |
 | --- | --- | --- | --- |
 | `job.started` | ランナー | NDF の版・`START` | #2172 |
-| `phase.changed` | ランナー（`sprint.json` の計画と `progress.jsonl` の `step` の行） | フェーズの名前・課題 | #2172 |
-| `step.recorded` | ランナー（`progress.jsonl` の `step`） | ステップ・終了コード・秒・要約・このステップが作った・更新した Pull Request（リポジトリと番号。任意） | #2172 |
+| `phase.changed` | ランナー（`sprint.json` の計画と `progress.jsonl` の `step` の行） | フェーズの名前（[スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し) の 5 つ）・課題 | #2172 |
+| `step.recorded` | ランナー（`progress.jsonl` の `step`） | ステップ・終了コード・秒・要約・このステップが作った・更新した Pull Request（リポジトリと番号。任意）・工程の中身（フェーズ・課題・触ったファイル・コミットの範囲・決めたこと・出力。どれも任意） | #2172 |
 | `attention` | ランナー（`progress.jsonl` の `attention`） | 理由・要約 | #2172・#2173 |
 | `gate.reached` | ランナー（作業の報告の `判断が要る` と承認資料） | 種類（ゲート 1・ゲート 2・判断）・Pull Request の URL・承認資料の本文 | #2173 |
 | `gate.answered` | API（#2173） | 承認の依頼の識別子・種類・承認か差し戻しか（判断では無し）・答えた人のアカウント。本文は事象に載せない | #2171・#2172 |

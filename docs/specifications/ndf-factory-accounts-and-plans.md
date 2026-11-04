@@ -338,12 +338,13 @@ GSI `gsi1` は利用者が席を持つチームの一覧を引くためにあり
 | `COGNITO_DOMAIN` | 画面・GitHub の仲立ち | Cognito の管理されたログインのドメイン。仲立ちは `/authorize` で受ける `redirect_uri` をこのドメインの `/oauth2/idpresponse` と照らす |
 | `FACTORY_WEB_URL` | 画面・API | 画面の URL。画面はログインとログアウトの戻りに、API は CORS で許すオリジンに使う |
 | `FACTORY_API_URL` | 画面 | API の入口の URL |
+| `FACTORY_POLL_INTERVAL_MS` | 画面 | スプリントの一覧と詳細を読み直す間隔（ミリ秒）。正の整数でなければ既定の 30,000 |
 | `ACCOUNTS_TABLE_NAME` | API | アカウントの表の名前 |
 | `GITHUB_OIDC_ISSUER` | GitHub の仲立ち | 仲立ちの発行元の URL |
 | `GITHUB_OAUTH_CLIENT_ID` | GitHub の仲立ち | GitHub の OAuth App のクライアントの ID（秘密でない）。`/authorize` で受ける `client_id` と照らす |
 | `GITHUB_OIDC_SIGNING_KEY_SECRET_ARN` | GitHub の仲立ち | ID token を署名する RSA の秘密鍵の置き場 |
 
-画面へは `vite.config.ts` が `COGNITO_DOMAIN`・`COGNITO_CLIENT_ID`・`FACTORY_WEB_URL`・`FACTORY_API_URL` の 4 つだけを名前で選んで埋め込む。ほかの変数を画面へ入れない。API と仲立ちは、要る変数が無ければ最初の要求の処理で失敗する。
+画面へは `vite.config.ts` が `COGNITO_DOMAIN`・`COGNITO_CLIENT_ID`・`FACTORY_WEB_URL`・`FACTORY_API_URL`・`FACTORY_POLL_INTERVAL_MS` の 5 つだけを名前で選んで埋め込む。ほかの変数を画面へ入れない。API と仲立ちは、要る変数が無ければ最初の要求の処理で失敗する。
 
 ### パッケージの管理
 
