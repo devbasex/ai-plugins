@@ -23,9 +23,12 @@ from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
 RULE_DESIGN = (
-    "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、"
-    "上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。"
+    "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。上限到達で未解決 0 件なら通常の経路へ進む。"
+    "未解決が残れば解決のフロー（直し → 再レビュー）を回し、解決できないか駆動そのものが失敗したら関門 1 の判断（gate）。"
 )
+# 解決のフローの「解決できない」の上限（#2388 の決定 3）。値は実測で見直す
+RESOLVE_ATTEMPTS, RESOLVE_COST, RESOLVE_SECONDS = 2, 1.5, 3600
+FIX_STEP = {"type": "work", "kind": "修正", "stage": "ドキュメントレビュー", "timeout": 1800}
 
 
 @functools.cache
@@ -47,8 +50,26 @@ def sprint_branch(a) -> str:
     return _branch_of(str(Path(a.worktree).resolve()), a.name)
 
 
-def _review_steps(n: int, copy: str) -> list:
-    """設計のプランのレビューのまとまり（review / sync-review / requirements-recheck）。"""
+def _run(sid: str, cmd: str, timeout: int = 120, **edges) -> dict:
+    """設計のプランのドキュメントレビューの工程の run のステップ。`edges` は on_exit / on_fail / next。"""
+    return {"id": sid, "type": "run", "stage": "ドキュメントレビュー", "timeout": timeout, "cmd": cmd, **edges}
+
+
+def _fix(sid: str, inputs: str, prompt: str, **edges) -> dict:
+    """設計のプランのドキュメントレビューの工程の修正の work（inputs の結果を読んで直す）。"""
+    return {"id": sid, **FIX_STEP, "inputs": [inputs], **edges, "prompt": prompt}
+
+
+SYNC_PR_BRANCH = "git fetch -q && git merge -q --ff-only '@{u}'"
+REVIEW_SETTLED = (
+    f"python3 {shlex.quote(str(SELF))} review-settled --state {{state_dir}}/state.json --step review --fix-step resolve "
+    f"--max-attempts {RESOLVE_ATTEMPTS} --max-cost {RESOLVE_COST} --max-seconds {RESOLVE_SECONDS}"
+)
+
+
+def _review_steps(n: int, copy: str, push: str) -> list:
+    """設計のプランのレビューのまとまり。全ペースの設計のプランが共有する（#2388 の決定 4）。上限到達（終了コード 6）は
+    review-settled が未解決の件数を見て、0 件なら通常の経路、残れば解決のフロー、解決できなければ ready へ回す。"""
     return [
         # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
         {
@@ -59,28 +80,28 @@ def _review_steps(n: int, copy: str) -> list:
             "stage": "ドキュメントレビュー",
             "timeout": 3600,
             "args": "{pr}",
+            "on_exit": {"6": "review-settled"},
             "on_fail": "ready",
             "next": "sync-review",
         },
+        _run("review-settled", REVIEW_SETTLED, 60, on_exit={"1": "resolve-sync", "2": "ready"}, on_fail="ready", next="sync-review"),
+        # cross-review の直しに追いついてから、残った指摘を直す
+        _run("resolve-sync", SYNC_PR_BRANCH, on_fail="ready", next="resolve"),
+        _fix(
+            "resolve",
+            "review",
+            "cross-review が上限のラウンドで終わり、未解決の指摘が残った。review の結果の items[0].report が示す"
+            "報告を読み、未解決の指摘を直してコミットする（push しない）。直せない指摘は、理由を PR のスレッドへ返信する。",
+            on_fail="ready",
+            next="push-resolve",
+        ),
+        # 送った後に review を打ち直す。head が変わり、cross-review は前のラウンドを残したまま次のラウンドから続ける
+        _run("push-resolve", push, 300, on_fail="ready", next="review"),
         # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
-        {
-            "id": "sync-review",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
-            "next": "requirements-recheck",
-        },
+        _run("sync-review", SYNC_PR_BRANCH, next="requirements-recheck"),
         # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
         # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
-        {
-            "id": "requirements-recheck",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
-            "next": "glossary-check",
-        },
+        _run("requirements-recheck", f"{SPEC_COPY_PY} check {n} {copy}", next="glossary-check"),
     ]
 
 
@@ -88,38 +109,18 @@ def _glossary_steps(glossary_check: str, push: str) -> list:
     """設計のプランの用語チェックのまとまり（glossary-check / fix-glossary / glossary-recheck / push-glossary）。"""
     return [
         # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
-        {
-            "id": "glossary-check",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": glossary_check,
-            "on_fail": "fix-glossary",
-            "next": "push-glossary",
-        },
-        {
-            "id": "fix-glossary",
-            "type": "work",
-            "kind": "修正",
-            "stage": "ドキュメントレビュー",
-            "inputs": ["glossary-check"],
-            "timeout": 1800,
-            "next": "glossary-recheck",
-            "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
+        _run("glossary-check", glossary_check, on_fail="fix-glossary", next="push-glossary"),
+        _fix(
+            "fix-glossary",
+            "glossary-check",
+            "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
             "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
             "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
             "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。",
-        },
-        {
-            "id": "glossary-recheck",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": glossary_check,
-            "on_fail": "push-glossary",
-            "next": "push-glossary",
-        },
-        {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
+            next="glossary-recheck",
+        ),
+        _run("glossary-recheck", glossary_check, on_fail="push-glossary", next="push-glossary"),
+        _run("push-glossary", push, 300, next="ready"),
     ]
 
 
@@ -212,7 +213,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "cmd": SYNC_DESIGN_BODY,
                 "next": "review",
             },
-            *_review_steps(n, copy),
+            *_review_steps(n, copy, push),
             *_glossary_steps(glossary_check, push),
             # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
@@ -429,7 +430,8 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
         reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}"),
     ]
     plan["規則"] = (
-        "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
+        "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。上限到達で未解決 0 件なら"
+        "通常の経路へ進む。未解決が残れば解決のフロー（直し → 再レビュー）を回し、解決できないか駆動そのものが失敗したら gate。"
     )
     return plan
 
