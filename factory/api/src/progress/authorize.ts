@@ -12,6 +12,7 @@ import type {
   ReleaseRequestedEvent,
   StepRecordedEvent,
 } from "@ndf-factory/contracts";
+import { releasePresentedKey, releaseProgressKey, releaseSettledKey } from "@ndf-factory/contracts";
 import { repoKey } from "./github.ts";
 import type { VerifiedRunJob } from "./run-job-token.ts";
 import type { SavedAnswerReader } from "./saved-answers.ts";
@@ -49,12 +50,10 @@ const canWrite = (source: EventSource, event: ProgressEvent) =>
 // 実行ジョブの終わりの冪等の鍵。ランナーと実行の制御が同じ鍵を使い、先の 1 つだけが残る
 export const finishedKey = (jobId: string) => `${jobId}:finished`;
 
-// 配布の事象の冪等の鍵（#2439）。依頼は依頼の id、配布の実行の事象は実行の識別子を頭にする（冪等の鍵の表は
-// サービス全体で 1 つのため、リポジトリごとの連番だけを鍵にしない）。ランナーが送り直しても 1 件になる
+// 配布の事象の冪等の鍵（#2439）。依頼は依頼の id、配布の実行の事象は実行の識別子を頭にする（式は契約が持ち、
+// ランナーの送信と同じ式で照らす）。ランナーが送り直しても 1 件になる
 export const releaseRequestedKey = (requestId: string) => requestId;
-export const releasePresentedKey = (sprintRunId: string, k: number) => `${sprintRunId}:presented:${k}`;
-export const releaseProgressKey = (sprintRunId: string, stage: string) => `${sprintRunId}:progress:${stage}`;
-export const releaseSettledKey = (sprintRunId: string) => `${sprintRunId}:settled`;
+export { releasePresentedKey, releaseProgressKey, releaseSettledKey };
 export const releaseAnsweredKey = (seq: number, sprintRunId: string) => `${seq}:${sprintRunId}`;
 
 function releaseKeyOf(event: ProgressEvent): string | null {

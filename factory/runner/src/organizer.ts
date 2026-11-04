@@ -10,6 +10,9 @@ import {
   type ReleaseProgressPayload,
   type ReleaseRequestedPayload,
   type ReleaseSettledPayload,
+  releasePresentedKey,
+  releaseProgressKey,
+  releaseSettledKey,
   type RunJobInstruction,
 } from "@ndf-factory/contracts";
 
@@ -142,14 +145,14 @@ export async function releaseBodies(files: OrganizerFiles, inst: Pick<RunJobInst
   const run = inst.SPRINT_RUN_ID;
   for (const f of await files.list("presented")) {
     const p = presentedFrom(f.value);
-    if (p) out.push({ key: `${run}:presented:${p.k}`, event: { type: "release.presented", payload: p } });
+    if (p) out.push({ key: releasePresentedKey(run, p.k), event: { type: "release.presented", payload: p } });
   }
   for (const f of await files.list("progress")) {
-    for (const p of progressFrom(f.value)) out.push({ key: `${run}:progress:${p.stage}`, event: { type: "release.progress", payload: p } });
+    for (const p of progressFrom(f.value)) out.push({ key: releaseProgressKey(run, p.stage), event: { type: "release.progress", payload: p } });
   }
   for (const f of await files.list("results")) {
     const p = settledFrom(f.value);
-    if (p) out.push({ key: `${run}:settled`, event: { type: "release.settled", payload: p } });
+    if (p) out.push({ key: releaseSettledKey(run), event: { type: "release.settled", payload: p } });
   }
   return out;
 }
