@@ -100,17 +100,9 @@ def read_research_item(root, item_id: str) -> dict | None:
     return rec if rec is not None and rec.get("id", item_id) == item_id else None
 
 
-def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
-    """(調査の項目, 飛ばした側面)。項目は {id, aspect, target, decl}。"""
-    if mat is None:
-        return [], [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS]
-    items, skipped = [], []
-    needs, seeds = mat.get("needs") or {}, mat.get("seeds") or {}
-
-    def add(aspect, target, decl):
-        items.append({"id": f"{aspect}:{target}", "aspect": aspect, "target": target, "decl": decl})
-
-    usage = []
+def _usage_rows(needs: dict) -> tuple[list[dict], list[dict]]:
+    """needs.usage の行を (使える行, 飛ばした側面) に分ける。集計だけを返す行に限って読む。"""
+    usage, skipped = [], []
     for row in needs.get("usage") or []:
         scope = row.get("scope") or {}
         if scope.get("aggregate_only") is True and row.get("command"):
@@ -119,6 +111,26 @@ def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
             skipped.append(
                 {"aspect": "needs.usage", "reason": f"{row.get('name')}: aggregate_only が true でない行は読まない（個票を読まない）"}
             )
+    return usage, skipped
+
+
+def _undeclared(items: list[dict], skipped: list[dict]) -> list[dict]:
+    """項目にも飛ばした側面にも現れない側面を、宣言の無い側面として返す。"""
+    have = {i["aspect"] for i in items} | {s["aspect"] for s in skipped}
+    return [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS if a not in have]
+
+
+def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
+    """(調査の項目, 飛ばした側面)。項目は {id, aspect, target, decl}。"""
+    if mat is None:
+        return [], [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS]
+    items = []
+    needs, seeds = mat.get("needs") or {}, mat.get("seeds") or {}
+
+    def add(aspect, target, decl):
+        items.append({"id": f"{aspect}:{target}", "aspect": aspect, "target": target, "decl": decl})
+
+    usage, skipped = _usage_rows(needs)
     for row in usage:
         add("needs.usage", row.get("name") or row["command"], row)
     for row in needs.get("market") or []:
@@ -132,10 +144,7 @@ def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
         add("method.unused", "usage", {"usage": [u.get("name") for u in usage]})
     add("method.hotspot", "git", {})
     add("method.failures", "loop", {"failures": mat.get("failures")})
-    have = {i["aspect"] for i in items} | {s["aspect"] for s in skipped}
-    for a in ASPECTS:
-        if a not in have:
-            skipped.append({"aspect": a, "reason": UNDECLARED})
+    skipped.extend(_undeclared(items, skipped))
     return items, skipped
 
 
