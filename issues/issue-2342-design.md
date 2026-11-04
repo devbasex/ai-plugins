@@ -108,7 +108,7 @@
 
 | 要素 | 責務 | 新設 / 変更 |
 | --- | --- | --- |
-| 持ち主の部品（`lib/lease.py`） | `acquire` / `touch` / `release` / `read` / `prune`（30 日を過ぎた記録の削除）。鍵ごとの排他（`locks.exclusive`）の中で記録を読み書きし、生死を判定する。外部コマンドを起こさない | 新設（`run_owner.py` のうちレビュー worktree の記録の読み書きと、`run_state._process_alive` の判定を移す） |
+| 持ち主の部品（`lib/lease.py`） | `acquire` / `touch` / `release` / `read` / `prune`（30 日を過ぎた記録の `.json` の削除。錠の `.lock` は残す）。鍵ごとの排他（`locks.exclusive`）の中で記録を読み書きし、生死を判定する。外部コマンドを起こさない | 新設（`run_owner.py` のうちレビュー worktree の記録の読み書きと、`run_state._process_alive` の判定を移す） |
 | 持ち主の記録の旧い読み手（`lib/run_owner.py`） | レビュー worktree の持ち主の関数（`adopt_owner`・`mark_owner`・`run_args`・`claim_owner`・`touch_owner`・`finish_owner`）を消す。backlog-refinement の見直しの持ち主が使う関数（`read_owner`・`write_owner`・`alive` など）は残す（決定 8） | 変更 |
 | プロセスの部品（`lib/procs.py`） | `runtime_session()`（祖先のランタイムのプロセスの pid と開始時刻）と `ancestors()`（自分の祖先の pid と開始時刻の並び）を足す | 変更（`hook_lib/worktree.session_owner` の探し方を移す） |
 | 実行の核の持ち主の段（`lib/run_core.py`） | E1 の後に `lease.acquire`、終わり（`finally`・SIGTERM の受け手）に `lease.release`。結果 JSON に `lease` を足す | 変更（柱 P1 #2337 の実行の核に段を足す） |
@@ -175,7 +175,7 @@ graph TD
 ```
 
 置き場は `${NDF_STATE_DIR:-~/.local/state/ndf}/leases/<owner>--<repo>/<鍵をファイル名にしたもの>.json` である。
-排他の錠は、同じ名前に `.lock` を付けたファイルである。
+排他の錠は、同じ名前に `.lock` を付けたファイルである。錠のファイルは `lease.prune` でも消さない（`locks.py` の規則。消すと別のプロセスが別の inode で同じ鍵の排他を取れてしまう）。
 `<owner>--<repo>` は origin の URL から作り、同じリポジトリの別の clone と worktree の実行どうしが取り合う（#2335 の決定 15）。
 鍵のうち `/` と `:` と `=` は `%2F`・`%3A`・`%3D` に置き換えてファイル名にする。
 
@@ -233,7 +233,9 @@ classDiagram
     LeaseRecord ..> LeaseOutcome : 核が結果へ写す
 ```
 
-- **部品の形**: 次の 5 つの関数を持つ。生きた持ち主がいれば `LeaseBusy` を投げ、核が `stopped`・3 に変える
+- **部品の形**: 次の 5 つの関数を持つ。生きた持ち主がいても例外を投げず、`acquire` は `outcome` が `refused` の `LeaseOutcome` を返す。
+  `refused` のときも持ち主の実行の識別子・pid・最後に動いた時刻を `holder_run`・`holder_pid`・`holder_seen_at` に入れる。
+  核は `refused` を `stopped`・3 に変え、`LeaseOutcome` の 5 項目を結果 JSON の `lease` へ写す（写すのは核だけ）
 
   ```python
   lease.acquire(decl, inputs, run) -> LeaseOutcome
@@ -243,7 +245,10 @@ classDiagram
   lease.prune(days) -> list[str]
   ```
 
-  `holder` は持ち主のプロセス（pid と開始時刻）で、単位 `run` では自分の入口のプロセス、単位 `session` では自分のランタイムのセッションである。
+  `holder` は持ち主のプロセス（pid と開始時刻）で、単位 `run` では自分の入口のプロセス、単位 `session` では自分のランタイムのセッション（`procs.runtime_session()`）である。
+  単位 `session` で `runtime_session()` が `None`（祖先に Claude Code・Codex のプロセスが無い。ランタイムの外のシェル・CI・テストの起動）のときは、入口のプロセスへ退避せず、記録を読み書きせずに `outcome` が `no_session` の `LeaseOutcome` を返す。
+  核は `no_session` を `stopped`・1 に変え、`summary` に「ランタイムのセッションの外では、セッション単位の鍵を取れない」と書く。鍵を取らずに本体を走らせない。
+  `release` と `touch` は `holder` が `None` なら何も書かない（`acquire` が記録を書いていないため）。テストはランタイムのセッションを `procs.runtime_session` の差し替えで与える。
   `release` と `touch` は、記録の `pid` と `pid_started` が `holder` と一致するときだけ書き、一致しなければ何も書かない。
   実行の識別子（`run`）は照合に使わない
 
@@ -277,6 +282,9 @@ sequenceDiagram
     participant L as 持ち主の部品
     participant F as 持ち主の記録
     K->>L: acquire（鍵・単位・実行）
+    alt 単位 session でランタイムのセッションが無い
+        L-->>K: no_session（記録を読み書きしない。核が stopped・1 に変える）
+    end
     L->>F: 鍵の排他を取り、記録を読む（E2）
     alt 記録が壊れている
         L-->>K: 読めない（核が stopped・1 に変え、理由に記録のパス）
@@ -292,7 +300,7 @@ sequenceDiagram
         L->>F: 最後に動いた時刻を書く
         L-->>K: inherited
     else 生きている
-        L-->>K: refused（E4）
+        L-->>K: refused（E4。持ち主の 3 項目を添えて返す）
     end
     L->>F: 排他を外す
 ```
@@ -307,7 +315,8 @@ sequenceDiagram
 | 別のホストで、最後に動いた時刻が寿命の窓（`window_seconds`）の外 | 死んでいる | `reclaimed` |
 | 別のホストで、最後に動いた時刻が寿命の窓の中 | 生きている | `refused` |
 
-**記録の `run` の一致では `inherited` にしない。** 祖先のプロセスかどうかは、生きた記録があるときだけ `psutil` で自分の親をたどって確かめる（決定 4）。
+**記録の `run` の一致では `inherited` にしない。** 祖先のプロセスかどうかは `psutil` で自分の親をたどって確かめる（決定 4）。
+**`acquire` は記録の有無によらず、毎回 `procs`（`psutil`）を読む。** `acquired`・`reclaimed` で記録へ自分の開始時刻（`pid_started`）を書き、`inherited` の判定で祖先をたどるためである。読み込みを遅らせてよいのは、別のホストの記録の判定だけである（`psutil` を使わない）。
 
 **引き取りは記録を書き直すだけにする。** 死んだ持ち主が残したレビュー worktree は、入口が今と同じく作り直すか使い直す。引き取りの中で片付けを呼ばない（決定 6）。
 
@@ -375,12 +384,12 @@ stateDiagram-v2
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 持ち主の段の増分が #2335 の上限 150 ms の内側 | 取る・返すは `filelock` と JSON の 1 ファイルの読み書きで、外部コマンドを起こさない。`psutil` は生きた記録があるときだけ遅れて読む | 柱の Pull Request で、持ち主の鍵を宣言した入口（`refactor.py init --help` ではなく、PR を渡して鍵を取る起動）を前後で 10 回ずつ測り、差の中央値を本文に書く |
+| 性能・拡張性 | 持ち主の段の増分が #2335 の上限 150 ms の内側 | 取る・返すは `filelock` と JSON の 1 ファイルの読み書きで、外部コマンドを起こさない。`psutil`（`procs`）は `acquire` のたびに読む（自分の開始時刻を書き、祖先をたどるため） | 柱の Pull Request で、持ち主の鍵を宣言した入口（`refactor.py init --help` ではなく、PR を渡して鍵を取る起動）を前後で 10 回ずつ測り、差の中央値を本文に書く |
 | 可用性 | 生きた持ち主がいれば待たずに返る | `refused` で `stopped`・3 | 2 つのプロセスで同じ鍵を取り合うテスト |
 | 運用・保守性 | 取った・引き取った・断った・返したを結果に出す | 結果 JSON の `lease`（入出力の契約） | 終わり方ごとのテストで `lease.outcome` を見る |
 | 移行性 | 置き場を移す。revert で戻る | 移行の表のとおり。持ち主の段の Pull Request と入口を移す Pull Request を分け、段は契約の行に `lease` が無ければ何もしない | それぞれの Pull Request の revert の後に全体テストが通る |
 | セキュリティ | 記録に秘密が無い | 記録の型が I5 の鍵だけを許す。鍵の形に `secret: true` の入力を使う宣言を契約の検査が落とす | 秘密を入れた環境変数で起動し、`leases/` の下に値が無いことを見る |
-| システム環境 | extras が無ければ 69 | 持ち主の部品は `deps.require("locks")` を先に呼ぶ。`psutil`（`procs`）が無い環境は、同じホストの生死を判定できないため `stopped`・69 と足りないグループ名を返す | extras を外した環境で鍵を宣言した入口を起動するテスト |
+| システム環境 | extras が無ければ 69 | 持ち主の部品は `acquire` の先頭で `deps.require("locks")` と `procs` の読み込みを行う。`psutil`（`procs`）が無い環境は、記録を読む前に、どの入口でも同じ時点で `stopped`・69 と足りないグループ名を返す | extras を外した環境で鍵を宣言した入口を起動するテスト |
 
 ## 決定の記録
 
@@ -400,6 +409,9 @@ stateDiagram-v2
 | 8 | 終わった記録のレビュー worktree が今の条件で外れ、生きた記録のものは `kept`。30 日を過ぎた記録が消える | 片付けが旧い置き場を読む |
 | 9 | （手動）子の課題 3 件の再現の手順を本番へ出した版で通し、課題の本文の表を埋める | — |
 | 10 | `lease` の無い入口の振る舞いが変わらず、全体テストが前後で通る | 鍵の無い入口でも記録を書く |
+| 6・I1 | ランタイムのセッションが見つからない（`procs.runtime_session` が `None` を返す）ときの `loop start` が、記録を書かずに `no_session`・`stopped`・1 で止まり、本体を走らせない | 入口のプロセスを持ち主にする／鍵を取らずに本体を走らせる |
+| 4 | 生きた持ち主がいるとき、`acquire` が例外でなく `refused` の `LeaseOutcome` を返し、結果 JSON の `lease` に持ち主の 3 項目が入る | `refused` を例外で投げ、持ち主の項目を結果へ写さない |
+| 8・I1 | `lease.prune` が 30 日を過ぎた `.json` だけを消し、`.lock` が残る | `.lock` も消す |
 | 11・I5 | 秘密を入れた環境変数で起動しても記録に値が無い。余分な鍵を持つ記録を書こうとすると `stopped`・1 | 記録に引数の並びを書く |
 | I6 | 祖先が持つ鍵を子の実行が `inherited` で使い、子の終わりで記録が返らない。祖先が持たない鍵を子が取ったときは子の終わりで返る | 子の終わりで `release` する／`run` の一致で `inherited` にする |
 
@@ -441,4 +453,4 @@ stateDiagram-v2
 | 中継の切り替えとセッションの持ち主 | 中継の再起動で新しいセッションが前のセッションの終わりより先に `loop` を打つと、前のセッションが生きている間は `refused` になる。切り替えの順を再現の手順で確かめる |
 | 旧い版との並走 | 新しい版は旧い置き場の記録を読まない（決定 3）。旧い版と新しい版が同じ鍵を同時に取ると排他が効かない。利用者が両方を同時に動かす運用は確認していない |
 | 旧い置き場の残り | 旧い置き場の `*.owner.json` は、今の片付けがレビュー worktree を外すときに一緒に消す（`run_state.py:157`・`run_state.py:167`）。worktree が残る間は記録も残るが、新しい版は読まない |
-| 増分の実測 | 持ち主の段の増分は柱の Pull Request で測る。150 ms に収まらなければ、`psutil` の読み込みを生きた記録があるときに限る範囲を見直す |
+| 増分の実測 | 持ち主の段の増分は柱の Pull Request で測る。`psutil` は `acquire` のたびに読む。150 ms に収まらなければ、内訳（`psutil` の読み込み・排他・読み書き）を測って本文に書き、設計へ戻す |

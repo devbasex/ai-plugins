@@ -19,7 +19,7 @@
 | `host` | str | 許さない | 持ち主のプロセスが動くホスト名 |
 
 **返しても記録を消さない。** 片付けがレビュー worktree の持ち主が終わったかを読むためである。
-終わった時刻から 30 日を過ぎた記録は、持ち主の部品の `lease.prune` が外す（`durable.KEEP_DAYS` と同じ値）。片付けは `lease.prune` を呼ぶだけで、記録を自分で書き換えない。
+終わった時刻から 30 日を過ぎた記録（`.json`）は、持ち主の部品の `lease.prune` が外す（`durable.KEEP_DAYS` と同じ値）。錠のファイル（`.lock`）は消さずに残す（`locks.py` の規則。消すと別のプロセスが別の inode で同じ鍵の排他を取れてしまう）。片付けは `lease.prune` を呼ぶだけで、記録を自分で書き換えない。
 
 ### 入口の契約に足すキー
 
@@ -51,7 +51,7 @@
 | 種類 | 置き場 | 寿命 | 片付ける時点 |
 | --- | --- | --- | --- |
 | `review-worktree`（既存） | 既存のまま。持ち主の記録は `leases/` の鍵 `cross-review:pr=<n>`・`cross-refactoring:pr=<n>` へ移る | 既存のまま（持ち主が終わり、PR が open でなく、作業が無い） | 既存のまま |
-| `lease-record`（新設） | `leases/<リポジトリ>/*.json` と `.lock` | 終わった時刻から 30 日 | 片付けが `lease.prune` を呼ぶ |
+| `lease-record`（新設） | `leases/<リポジトリ>/*.json`（錠の `.lock` は対象外で、消さずに残す） | 終わった時刻から 30 日 | 片付けが `lease.prune` を呼ぶ。`lease.prune` は `.json` だけを外す |
 
 ### 移行
 
@@ -69,14 +69,15 @@
 | 鍵 | 型 | 意味 |
 | --- | --- | --- |
 | `lease.key` | str | 持ち主の鍵 |
-| `lease.outcome` | str | `acquired`（いなかった・終わっていた）/ `reclaimed`（死んだ持ち主を引き取った）/ `inherited`（祖先のプロセスが持っていた）/ `refused`（生きた持ち主がいて止まった） |
+| `lease.outcome` | str | `acquired`（いなかった・終わっていた）/ `reclaimed`（死んだ持ち主を引き取った）/ `inherited`（祖先のプロセスが持っていた）/ `refused`（生きた持ち主がいて止まった）/ `no_session`（単位 `session` でランタイムのセッションが見つからず止まった） |
 | `lease.holder_run` | str | 生きた持ち主・引き取った持ち主の実行の識別子。いなければ省く |
 | `lease.holder_pid` | int | 同上の pid。いなければ省く |
 | `lease.holder_seen_at` | str | 同上の最後に動いた時刻。いなければ省く |
 
 ### 断るときの案内
 
-`refused` は `status: stopped`・終了コード 3 で、`summary` に持ち主の実行の識別子・pid・最後に動いた時刻を書く。
+`refused` は `status: stopped`・終了コード 3 で、`summary` に持ち主の実行の識別子・pid・最後に動いた時刻を書く。値は `acquire` が返す `LeaseOutcome` から核が写す。
+`no_session` は `status: stopped`・終了コード 1 で、`summary` に「ランタイムのセッション（Claude Code・Codex）の外では、セッション単位の鍵を取れない」と書く。記録は書かず、本体を走らせない。
 案内（`next`）は打てる手段だけを書く: 持ち主が終わるのを待ってから同じコマンドを打ち直す（#2321 の受け入れ条件 3）。
 `--run` を渡す・`finish` の後に開始する、という今の案内は消す（どちらもプランから打てない）。
 持ち主のプロセスは別の実行か利用者のランタイムのセッション（Claude Code・Codex）なので、案内に `kill` を書かない。待てないときは、conductor は止まった理由と持ち主の pid を添えて人へ戻す。持ち主を止めるかどうかは人が決める（共通原則の C4）。
