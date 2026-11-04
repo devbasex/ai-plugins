@@ -7,11 +7,11 @@
 開発ループ lfactory2 の周回 2（スプリント lfactory2-2、#2382 UX の土台）で、設計のプラン `1-design-2382.json` を流した（2026-11-02 11:15〜11:45 JST）。
 
 - 設計の cross-review（ステップ `review`）は上限の 3 ラウンドに達し、指摘 3 件・修正 3 件・**未解決 0 件**、最終状態 `oscillation` で `exit=6` を返した
-- プランは `review` の失敗の経路（`ready` → 判断のステップ `gate`）へ進み、判断が `gate` を選んでプランが「関門」で終わった
+- プランは `review` の失敗の経路（`ready` → 判断のステップ `gate`）へ進み、判断が `gate` を選んでプランが「承認ゲート」で終わった
 - **MVV 判定のステップ `mvv`（`mvv-gate.py check --gate design`）は一度も流れなかった**
 - `sprint-state.py loop gate lfactory2` は承認ゲート 1 の判定を `unknown`（根拠なし）として読み、#2382 を人の判断待ちへ移して周回を「人へ戻した」で締めた
 
-プランの「規則」は「設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate」と書いている。上限に達しただけの `exit=6` は駆動の失敗ではないのに、駆動の失敗と同じ経路を通った。
+プランの「規則」は「設計の cross-review は上限 3 ラウンドで承認ゲート 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate」と書いている。上限に達しただけの `exit=6` は駆動の失敗ではないのに、駆動の失敗と同じ経路を通った。
 
 記録: `/work/ai-plugins/.ndf/loop/lfactory2/lap-2/sprint/1-design-2382-state/report.md`（ローカル）、設計 PR https://github.com/devbasex/ai-plugins/pull/2387
 
