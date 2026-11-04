@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | #2439 の「依頼（原文）」（2026-11-02） | 利用者の指示の原文 | Factory にもまとめ役が要る。「上位のオーガナイザー」ではなく、同じ役割を Factory の側で担う実装として定義する |
 | Pull Request 2420 を閉じた件 | 実測 | 本番の配布が `develop` の先頭を出すため、先に出した実行が他の実行の変更も出す |
-| #2436 の設計（`design/issue-2436` の `issues/issue-2436-design*.md`。決定 13〜15・19・21） | 設計の正本 | 配布の中身を `develop` のコミットの範囲で決める。本番の Pull Request の head は `release/v<版>`。依頼と答えの形は NDF の契約 |
+| #2436 の設計（確定仕様 `docs/specifications/ndf-parallel-organizer.md`） | 設計の正本 | 配布の中身を `develop` のコミットの範囲で決める。本番の Pull Request の head は `release/v<版>`。依頼と答えの形は NDF の契約 |
 | Factory の確定仕様 [ndf-factory-dev-loops.md](../docs/specifications/ndf-factory-dev-loops.md) の概要 | 設計の正本 | 常駐のプロセスを持たない。実行をまたぐ制御は API の handler と 5 分ごとの見回りに置く |
 | `factory/` の調査（2026-11-02） | 実測 | 承認の依頼の保存と一覧（#2173）、手元の受け手の登録の経路（#2189）はまだ無い。本番の配布はランナーの中の NDF が流し、Factory は関わらない |
 
@@ -123,7 +123,7 @@
 | --- | --- | --- |
 | 切り替え口 | NDF が本番の配布を自分で組まずに、外のオーガナイザーへ配布の依頼をファイルで出す経路。環境変数 `NDF_ORGANIZER_DIR` があるときだけ働く | この設計（[issue-2439-design-ndf.md](issue-2439-design-ndf.md)）。要求の「前提 2」 |
 | レーン | 並列の計画の下で 1 本のセッションが進める開発の流れ。Factory では、ループ 1 つか手動の実行 1 つが 1 つのレーンになる（名前は `loop-<loopId>` / `run-<sprintRunId>`） | #2436 の設計の「用語」 |
-| 一時レーン | #2436 で、持ち主のいない共有の作業（まとめた配布のプランの実行と、その失敗の対応）を受け持つ短命のレーン。この設計では配布の実行がその役を受け持つ | #2436 の `issue-2436-design-approvals.md` |
+| 一時レーン | #2436 で、持ち主のいない共有の作業（まとめた配布のプランの実行と、その失敗の対応）を受け持つ短命のレーン。この設計では配布の実行がその役を受け持つ | #2436 の確定仕様 `docs/specifications/ndf-parallel-organizer.md` |
 | 1 台の中のオーガナイザー | #2436 の、1 台のマシンの中でレーンを起動・監視し、配布の依頼をまとめる conductor の役割 | #2436 の設計の「用語」（語は「オーガナイザー」） |
 | 承認ゲート 1・承認ゲート 2 | 人の承認を求める 2 つの点。1 は設計 Pull Request のマージ、2 は本番系へ届く操作（本番の配布） | 用語集 `ndf-workflow` の「承認ゲート」「ゲート 1」「ゲート 2」 |
 | MVV 判定 | 承認ゲートの資料がプロジェクトの MVV（Mission / Vision / Value）に従うかの判定。`.ndf/pace.json` が許すときは、従うと判定した承認ゲートを人の答えなしで通す | 用語集 `ndf-workflow` の「MVV 判定」 |
@@ -292,7 +292,7 @@ sequenceDiagram
 2. **受ける**: `finalize` は `release.requested` をジョブの冪等の鍵の範囲で読む。受けた依頼の行は、実行の移りと同じトランザクションで書く（I59）。通った後に `organizer.tick(repositoryId)` を呼ぶ（落ちてよい。見回りが続ける）
 3. **組む（F2）**: `tick` は根を読み、まとめた配布が流れていなければ、未回答の依頼があるときだけ組む。先に I62 を照らし、当たれば待ちの理由を書いて終える。当たらなければ `composeRelease` で 5 つの行を 1 回で書き、`launch` する。5 つは根（`currentSeq`・`nextSeq`・`version`）・まとめた配布（`composed`）・配布の実行・ジョブ（`START=release`、`releaseStep=present`）・記録の行である。依頼が 1 件でも同じである（S8）
 4. **提示（F3）**: 配布の実行は、ランナー向けの経路でまとめた配布の中身（レーンの一覧と依頼）を読み、NDF の配布の手順を流す。MVV 判定が通せば、`release.presented`（`auto` が真）を送って本番の配布まで続ける。このとき承認の依頼は作らず、配布のまとめは `decide` を通さずにまとめた配布を `confirmed`（`confirmedK=1`）にする（E12）。止まれば `release.presented`（提示の番号・コミット・範囲・加わった範囲）と `gate.reached`（`gate2`）を送って終わる。配布の実行は `awaiting_approval` になる。承認の依頼は #2173 が今の経路で作る
-5. **答え（F4）**: #2173 が答えを保存して `requestResume` を呼ぶと、実行の制御は配布の実行を `organizer.decide` へ回す。提示 1 への承認では GitHub の口で `develop` の先頭を読み、提示したコミットと比べる。同じなら `confirm:1`、進んでいれば `represent` で再開する。提示 2 への答えは比べずに `confirm:2`（新しい範囲）か `confirm:1`（最初の範囲）で再開する（I60）。`confirm:<k>` で出すのは提示 k のコミット（まとめた配布の `presentations` の k 番目の `sha`）で、本番のプランはそのコミットから `release/v<版>` を切る。答えの後に `develop` が進んでも、出すコミットは変わらない（#2436 の設計の「まとめた配布」と `issue-2436-design-release-rule.md` の「`release/v<版>` を切る起点」）。差し戻しはジョブを起こさない。まとめた配布を `rejected`、配布の実行を `stopped`（`release_rejected`）にし、最後の提示の範囲の依頼へ `rejected` を返す（I61）。範囲の実行ごとに `release.answered` を書き、手動の実行には `requestResume`（依頼の識別子つき）を呼ぶ。届け方は 6 の配布済みと同じである。続けて `tick` を呼び、範囲に入らない依頼で次のまとめた配布を組む
+5. **答え（F4）**: #2173 が答えを保存して `requestResume` を呼ぶと、実行の制御は配布の実行を `organizer.decide` へ回す。提示 1 への承認では GitHub の口で `develop` の先頭を読み、提示したコミットと比べる。同じなら `confirm:1`、進んでいれば `represent` で再開する。提示 2 への答えは比べずに `confirm:2`（新しい範囲）か `confirm:1`（最初の範囲）で再開する（I60）。`confirm:<k>` で出すのは提示 k のコミット（まとめた配布の `presentations` の k 番目の `sha`）で、本番のプランはそのコミットから `release/v<版>` を切る。答えの後に `develop` が進んでも、出すコミットは変わらない（#2436 の設計の「まとめた配布」（確定仕様 `docs/specifications/ndf-parallel-organizer.md`））。差し戻しはジョブを起こさない。まとめた配布を `rejected`、配布の実行を `stopped`（`release_rejected`）にし、最後の提示の範囲の依頼へ `rejected` を返す（I61）。範囲の実行ごとに `release.answered` を書き、手動の実行には `requestResume`（依頼の識別子つき）を呼ぶ。届け方は 6 の配布済みと同じである。続けて `tick` を呼び、範囲に入らない依頼で次のまとめた配布を組む
 6. **結果（F5）**: 配布の実行の `finalize` が `release.settled` を読み、`settle` へ渡す。`settle` は根を空け、まとめた配布を `released` にし、範囲に Pull Request が入る依頼へ答えを書く（I58・I61）。範囲の実行ごとに `appendControlEvent` で `release.answered`（冪等の鍵 `<seq>:<sprintRunId>`）を書く。手動の実行には `requestResume`（依頼の識別子つき）を呼ぶ。依頼ごとに、この 2 つが通った後に `deliveredAt` を書いて見回りの索引から外す（答えを書いただけでは外さない。途中で止まっても見回りが届け直す）。続けて `tick` を呼び、残った依頼で次のまとめた配布を組む
 7. **答えを届ける**: レーンの次のジョブは、ループの次の周回か手動の実行の再開である。その開始で、ランナーは答えと範囲を読んで置き場へ書き、答えの無い依頼のファイルを再送する（I59）。NDF は周回の境で答えを読み、`released` なら残りの工程を流す（#2436 のレーンのループ）
 

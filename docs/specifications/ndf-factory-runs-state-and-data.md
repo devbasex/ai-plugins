@@ -32,13 +32,15 @@ stateDiagram-v2
 
 `RUNNING` の知らせを取りこぼしたときは `starting` から終わりの状態や `awaiting_approval` へ直に移る。`running` への移りは `starting` のときだけ書く。
 
+Factory のオーガナイザーの配布の依頼と配布の実行では、`awaiting_approval` に理由（`awaitingReason`）が付く。手動の実行が配布の依頼を出して終わると、理由 `release_requested` の `awaiting_approval` で枠を持ったまま依頼の答えを待つ（ループの実行は `done` で終わる）。配布の実行（目的 `release`）は枠を持たず、配布済みなら `done`、承認ゲートか判断なら理由の無い `awaiting_approval`、それ以外の終わり方（失敗・打ち切り）でも終わりの状態にせず理由 `release_stalled` の `awaiting_approval` へ移る。配布の実行が終わりの状態の `stopped` になるのは、まとめた配布が差し戻されたときである。取り消しも、まとめた配布が main へマージした後なら終わりの状態にせず、取り消しの印を外して理由 `release_stalled` の `awaiting_approval` へ移す（続きから流して配布を仕上げる）。ジョブの無いときの取り消しは `release_after_main` で断る。
+
 **失敗の理由**（実行の `failureReason`）:
 
 | 値 | いつ |
 | --- | --- |
 | `launch_failed` | token の置き場の作成か `RunTask` が失敗した。`pending` のまま 15 分を過ぎた |
 | `timeout` | 見回りが打ち切りの時間で止めた |
-| `task_stopped` | ランナーの `job.finished` が無いままタスクが止まった（手元のランナーの終わりの知らせを含む） |
+| `task_stopped` | ランナーの `job.finished` が無いままタスクが止まった（手元のマシンの終わりの知らせを含む） |
 | `job_failed` | ランナーが `job.finished`（`failed`）を送った。`local` 以外の形態の利用上限（`stopped`・`usage_limit`）も含む |
 | `seat_missing` | リセット時刻の後の再開で、始めた利用者が席を持たないか、形態が `local` でなくなっていた |
 
@@ -108,7 +110,7 @@ erDiagram
 | スプリントの実行 | `RUN#<sprintRunId>` | `RUN` | `ACCOUNT#<accountId>` / `RUN#<createdAt>` |
 | 実行ジョブ | `JOB#<jobId>` | `JOB` | `ACTIVE_JOBS` / `<createdAt>#<jobId>`（終わりの状態でない間だけ。終わりへ移すときに外す） |
 
-列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のランナーの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [開発ループの確定仕様の「実行の表の行」](ndf-factory-dev-loops-data-and-contracts.md#実行の表の行) にある。
+列の名前は `factory/api/src/runs/model.ts` の型の名前のまま（camelCase）である。#2347 が足した行（開発ループ・課題とマイルストーンの持ち分・手元のマシンの枠・移行の済みの行）と列（実行の枠の `legacyCount`、実行の `legacy`・`resumeAt`・`loopId` など）は [開発ループの確定仕様の「実行の表の行」](ndf-factory-dev-loops-data-and-contracts.md#実行の表の行) にある。
 
 | 行 | 列 | 型 | 空 | 意味 |
 | --- | --- | --- | --- | --- |
@@ -173,7 +175,7 @@ erDiagram
 | `USAGE_LIMIT_RETRY_SECONDS` | 制御 | リセット時刻を読めないときの待ち。既定 900 |
 | `RUNNER_SECTION_LIMIT` | ランナー | 1 つのジョブで起動する区間の上限。既定 20 |
 
-API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 16 項目と `RUNNER_SECTION_LIMIT` のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のランナーの `INGEST_TOKEN` を読む。
+API は要る変数が無ければ最初の要求の処理で失敗する。ランナーは指示の 16 項目と `RUNNER_SECTION_LIMIT` のほかに `NDF_MARKETPLACE`・`BEDROCK_REGION`・`RUNNER_WORK_DIR`・`NDF_MVV_STATE_DIR`（`ask.jsonl` の置き場）と、手元のマシンの `INGEST_TOKEN` を読む。
 
 
 ## 関連リンク

@@ -188,7 +188,7 @@ describe("停止の知らせ・再開（受け入れ条件 15・19・20、I8・I
     await finishJob(jobId, sprintRunId, "gate");
     expect((await h.table.getRun(sprintRunId))!).toMatchObject({ state: "awaiting_approval", currentJobId: null });
     expect(h.platform.tokens.size).toBe(0);
-    const { jobId: next } = await h.control.requestResume({ sprintRunId, approvalRequestId: "ar-1" });
+    const next = (await h.control.requestResume({ sprintRunId, approvalRequestId: "ar-1" })).jobId!;
     const instruction = h.platform.taskOf(next)![1].instruction;
     expect(instruction).toMatchObject({ START: "resume", APPROVAL_REQUEST_ID: "ar-1", NDF_VERSION: "10.26.1" });
     expect(instruction.ISSUES).toBeUndefined();

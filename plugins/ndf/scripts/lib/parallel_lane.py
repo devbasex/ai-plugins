@@ -1,6 +1,10 @@
 """並列の計画のレーンの側（#2436）: 自分が属する計画の判定（I12）・すでに配布済みかの判定（I15）・配布の依頼を送る・
 答えを読む（待たずに読むのと待つのの両方）・プランの本数を返す。
 
+環境変数 `NDF_ORGANIZER_DIR` があれば、外のオーガナイザーのレーンとして判定し、計画名の代わりに `--external` を返す
+（#2439。依頼と答えは置き場のファイルで受け渡す。`parallel_external.py`）。外のレーンは設計の承認と承認ゲートの外の問いを
+依頼にせず、今どおり止まって人へ戻す。
+
 耐久の記録は外のプロセスとして `durable.py` の `send_to`・`event_of`・`status_of` で開く（DBOS を起動しない）。
 DBOS を読まずに済む判定（計画の有無・本数）は、耐久の記録のファイルが無ければ DBOS を import しない。
 """
@@ -16,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import parallel_external as pe
 import parallel_plan as pp
 from parallel_files import helper_plan_of, lane_name_in_plans, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
@@ -48,8 +53,22 @@ def run_status(main: Path, name: str) -> Optional[str]:
     return durable.status_from(KIND, record_identity(main, name), workflow_id(name))
 
 
+def external_lane() -> Optional[tuple[str, pp.Lane]]:
+    """外のオーガナイザーのレーンなら (`--external`, レーン)。名前は `NDF_ORGANIZER_LANE`（#2439）。"""
+    if pe.organizer_dir() is None:
+        return None
+    name = pe.organizer_lane() or "external"
+    lane = pp.Lane.model_construct(
+        name=name, input=pp.SprintInput.model_construct(kind="sprint", issues=[], args=[]), plans=QUEUE_MAX, touches=[]
+    )
+    return pe.EXTERNAL, lane
+
+
 def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Optional[tuple[str, pp.Lane]]:
-    """`NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない計画のレーンにあれば (計画名, レーン)。無ければ None（I12）。"""
+    """`NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない計画のレーンにあれば (計画名, レーン)。無ければ None（I12）。
+    外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）なら、名前を渡さない判定で (`--external`, レーン) を返す（#2439）。"""
+    if lane is None and (ext := external_lane()):
+        return ext
     lane = lane if lane is not None else os.environ.get("NDF_RELAY_NAME")
     if not lane:
         return None
@@ -208,7 +227,7 @@ def send_release_request(main: Path, name: str, lane: str, prs: list[int], issue
         "prs": list(prs),
         "issues": list(issues),
         "sprint_state": str(state),
-        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "at": pe.utc_stamp(),
     }
     durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{rid}")
     return rid
@@ -240,6 +259,9 @@ def write_request(state: Path, data: dict) -> Path:
 def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
     """依頼ごとの {"answer": `answer-<依頼>`, "defer": `defer-<依頼>`} を待たずに読む（周回の境で読む。#2436 の 6a・6e）。
     耐久の記録が無ければ、どれも答えの無いものとして返す（DBOS を import しない）。"""
+    if pe.is_external(name):
+        d = pe.organizer_dir()
+        return pe.answer_files_of(d, ids) if d else {i: {"answer": None, "defer": None} for i in ids}
     out = {i: {"answer": None, "defer": None} for i in ids}
     if not ids or not record_exists(main, name):
         return out
@@ -253,12 +275,14 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
     return out
 
 
-# ---- 問いの依頼と答え（#2436 の 6c・6d・6f。設計 issue-2436-design-approvals.md） ----
+# ---- 問いの依頼と答え（#2436 の 6c・6d・6f。確定仕様 docs/specifications/ndf-parallel-organizer.md） ----
 
 
 def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
     """問いを送ってよい送り手か: 動いている計画のレーン（`lane_of`）か、役割のファイルが `helper` で、その計画の
-    耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。"""
+    耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。外のオーガナイザーのレーンは問いを送らない（#2439）。"""
+    if pe.organizer_dir() is not None:
+        return None
     got = lane_of(main, name, status) if name else None
     if got:
         return got[0], name
@@ -268,11 +292,10 @@ def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=
     return None
 
 
-def _utc_stamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
 def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
+    if pe.is_external(name):
+        # 外のオーガナイザーのレーンは設計の承認と問いを依頼にしない（今どおり止まって人へ戻す。#2439）
+        raise ValueError("外のオーガナイザーのレーンは問いを依頼にしない")
     import durable
 
     wid = workflow_id(name)
@@ -300,7 +323,7 @@ def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, le
         "cwd": cwd,
         "ledger_id": ledger_id,
         "stamp": _head_sha(cwd),
-        "at": _utc_stamp(),
+        "at": pe.utc_stamp(),
     }
     _send_inbox(main, name, msg, rid)
     return rid
@@ -310,7 +333,7 @@ def request_gate1(main: Path, name: str, lane: str, issue: int, pr: int, report:
     """設計の承認の依頼（`kind: gate1`）。id は `<レーン>-g<設計 PR>-<先頭の SHA の 12 桁>`（同じ先頭の打ち直しは同じ id）。"""
     rid = f"{lane}-g{pr}-{stamp[:12]}"
     msg = {"kind": "gate1", "id": rid, "lane": lane, "issue": issue, "pr": pr, "report": report, "sprint_state": state, "stamp": stamp}
-    _send_inbox(main, name, {**msg, **extra, "at": _utc_stamp()}, rid)
+    _send_inbox(main, name, {**msg, **extra, "at": pe.utc_stamp()}, rid)
     return rid
 
 
@@ -326,7 +349,7 @@ def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
     rid = f"{name}-p{n}-{k}"
     lane = prl.helper_name(name, n)
     _send_inbox(
-        main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": _utc_stamp()}, rid
+        main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": pe.utc_stamp()}, rid
     )
     return rid
 
@@ -341,5 +364,20 @@ def send_answer(
     stamp: Optional[str] = None,
 ) -> None:
     """オーガナイザーの答えを送る。耐久ワークフローが `answer-<依頼>` を 1 回だけ立て、問いの一覧から外す。"""
-    msg = {"kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp, "at": _utc_stamp()}
+    msg = {"kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp, "at": pe.utc_stamp()}
     _send_inbox(main, name, msg, f"answer:{rid}")
+
+
+def requests_for(main: Path, name: str) -> list[dict]:
+    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローが配布を組むたびに書く。無ければ空）。"""
+    p = pp.plan_dir(main, name) / "releases" / "requests.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+def resume_plan(main: Path, name: str, msg: dict, key: str) -> None:
+    import durable
+
+    durable.send_to(KIND, record_identity(main, name), workflow_id(name), msg, "resume", key)

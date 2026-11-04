@@ -137,7 +137,7 @@ export class AccountService {
     const user = await this.ensureUser(caller);
     const personal = await this.resolveFor(user, caller);
     const out: (AccountContext & { name: string | null })[] = [{ ...personal, name: null }];
-    // GSI の行は候補。外した席が GSI に残る間に名前やプランを返さないよう、元の席を強い整合で確かめる（I18）
+    // GSI の行は候補。外した席が GSI に残る間に名前や料金プランを返さないよう、元の席を強い整合で確かめる（I18）
     for (const accountId of await this.store.listMemberships(caller.userId)) {
       const seat = await this.store.getSeat(accountId, caller.userId);
       if (!seat) continue;
@@ -256,7 +256,7 @@ export class AccountService {
       if (!account) throw new ForbiddenError();
       if (account.executionMode === mode) return account;
       if (mode === "managed" && account.plan === "free") {
-        throw new ConflictError("managed_not_allowed_on_free", "Free のプランでは managed（サービスの Bedrock）を選べません");
+        throw new ConflictError("managed_not_allowed_on_free", "Free の料金プランでは managed（サービスの Bedrock）を選べません");
       }
       const at = this.stamp();
       try {
@@ -271,10 +271,10 @@ export class AccountService {
     throw new AccountUnavailableError();
   }
 
-  // アカウントのプランを変える。#2174 が決済の後に呼ぶ内側の関数（前提 8、E6）
+  // アカウントの料金プランを変える。#2174 が決済の後に呼ぶ内側の関数（前提 8、E6）
   // free へ下げるとき形態が managed なら、同じトランザクションで local へ変える（I21）
   async setPlan(accountId: string, plan: Plan): Promise<void> {
-    if (!isPlan(plan)) throw new PlanError("unknown_plan", `知らないプランです: ${String(plan)}`);
+    if (!isPlan(plan)) throw new PlanError("unknown_plan", `知らない料金プランです: ${String(plan)}`);
     for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
       const account = await this.store.getAccount(accountId);
       if (!account) throw new PlanError("account_not_found", "アカウントがありません");

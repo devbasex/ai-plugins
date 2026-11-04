@@ -21,7 +21,7 @@ CDK のスタック・ネットワーク・秘密の管理は別の private リ�
 | ディレクトリ | 中身 | 作る Issue |
 | --- | --- | --- |
 | `contracts/` | 進捗の事象・実行ジョブの指示・受け口の応答の JSON Schema（`contracts/schemas/`）と、そこから生成した型（workspace `@ndf-factory/contracts`）。API の経路の形は `contracts/openapi/`（アカウントは `accounts.yaml`、進捗の受け口は `ingest.yaml`、スプリントの実行とランナー向けの経路は `runs.yaml`） | #2170・#2171 |
-| `web/` | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・プランと請求の画面 | #2170・#2172〜#2174・#2186 |
+| `web/` | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・料金プランと請求の画面 | #2170・#2172〜#2174・#2186 |
 | `api/` | 画面からの要求を受け、アカウントで認可して各集約の持ち主へ渡す処理 | #2170〜#2174・#2186 |
 | `runner/` | 実行ジョブのコンテナ。リポジトリの取り込み・NDF の導入・conductor の起動・進捗の事象の送信 | #2186 |
 
@@ -60,13 +60,15 @@ TypeScript のコードは npm の workspaces で束ね、どの子課題も次�
 | `POST /ingest/api/events` | `api` | API Gateway の IAM 認可（SigV4）。Lambda が呼び出し元のロールを `INGEST_API_CALLER_ROLE_ARN` と照らす |
 | `POST /ingest/github` | `github` | `X-Hub-Signature-256`。Lambda が GitHub App の Webhook の秘密で確かめる。API Gateway の認可は付けない |
 
-- `api/src/handlers/run-jobs.ts` の `handler`: ランナー向けの API（`/run-jobs/*`、`INGEST_URL` と同じ origin）。実行ジョブの token で認証し、導入の token の渡し直しと状態の置き場の署名つき URL を返す。API Gateway の認可は付けない
+- `api/src/handlers/run-jobs.ts` の `handler`: ランナー向けの API（`/run-jobs/*`、`INGEST_URL` と同じ origin）。実行ジョブの token で認証し、導入の token の渡し直しと状態の置き場の署名つき URL と、配布の依頼の答え・まとめた配布の中身（`/run-jobs/organizer/*`）を返す。API Gateway の認可は付けない
 - `api/src/handlers/run-control.ts` の `handler`: HTTP を持たない。EventBridge の「ECS Task State Change」（ランナーのクラスタ）と 5 分ごとの起動（見回り）を受ける
+
+Factory のオーガナイザー（`api/src/organizer/`）は新しい handler もインフラの部品も持たない。同じリポジトリで並行する実行の配布の依頼をまとめ、配布の実行を起こし、答えを範囲の実行へ返す処理を、実行の制御の停止の後の処理・再開の要求・見回りと画面向けの API の中で進める。状態は実行の表の行（`ORG#`・`ORGREQ#`・`ORGBATCH#`・`ORGLOG#`）で、見回りは GSI `gsi1` の鍵 `ORGANIZER_ACTIVE` で引く。
 
 実行の表（`RUNS_TABLE_NAME`）は区分の鍵 `pk`・並びの鍵 `sk` と、GSI `gsi1`（区分の鍵 `gsi1pk`・並びの鍵 `gsi1sk`、射影は全部）を持つ。ランナーのイメージは `runner/Dockerfile` で、`factory/` を文脈にして作る。タスク定義は形態ごとに 2 つで、`managed`（`RUNNER_TASK_DEFINITION_ARN`）の役割だけが Bedrock を呼べ、`byok`（`RUNNER_BYOK_TASK_DEFINITION_ARN`）の役割はキーの置き場の読み出しと `AssumeRole` だけを持つ。どちらの役割も S3 の権限を持たない。
 
 進捗の事象の表（`PROGRESS_EVENTS_TABLE_NAME`）は区分の鍵 `sprint_run_id`・並びの鍵 `order_key` と、区分の鍵 `pr_ref` の GSI `pr_ref-index`（射影に `sprint_run_id` を含める）を持つ。冪等の鍵の表（`PROGRESS_IDEMPOTENCY_TABLE_NAME`）は区分の鍵 `idempotency_key` だけを持ち、TTL を置かない。
 
-ほかの子課題は `api/src/index.ts` から export したものだけを使う。要求の利用者は `requireCaller`、アカウントの文脈は `resolveFromRequest`（関数としては `resolveAccount`）、使える量は `getLimits`・`judgeLimits`、プランの変更は `setPlan` で得る。実行ジョブの token は `signRunJobToken` で作り、受け口で `verifyRunJobToken` で確かめる。テストでは `createRunJobTokenKit` で鍵の組をメモリの中に作る。実行の制御は `job.finished` を `appendControlEvent` で直に書く。契約の型は `@ndf-factory/contracts` か `api/src/index.ts` から import する。
+ほかの子課題は `api/src/index.ts` から export したものだけを使う。要求の利用者は `requireCaller`、アカウントの文脈は `resolveFromRequest`（関数としては `resolveAccount`）、使える量は `getLimits`・`judgeLimits`、料金プランの変更は `setPlan` で得る。実行ジョブの token は `signRunJobToken` で作り、受け口で `verifyRunJobToken` で確かめる。テストでは `createRunJobTokenKit` で鍵の組をメモリの中に作る。実行の制御は `job.finished` を `appendControlEvent` で直に書く。契約の型は `@ndf-factory/contracts` か `api/src/index.ts` から import する。
 
 全体の設計（構成要素・実行基盤・進捗の正本・構成要素の間の契約）は [docs/specifications/ndf-factory-service-boundary.md](../docs/specifications/ndf-factory-service-boundary.md) にある。

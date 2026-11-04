@@ -41,7 +41,31 @@ export function createDummyApi(scenario: Scenario = "normal"): Api {
     startSprintRun: () => read(() => ({ sprint_run_id: "sr-new", state: "starting" })),
     sprintRuns: (_id, repositoryId) =>
       read(() => ({ sprint_runs: list(data.sprintRuns).filter((r) => repositoryId === undefined || r.repository_id === repositoryId) })),
-    sprintRunDetails: (_id, ids) => read(() => list(data.sprintRuns).filter((r) => ids.includes(r.sprint_run_id))),
+    // 無い実行は API と同じく 403
+    sprintRunDetails: (_id, ids) =>
+      read(() =>
+        ids.map((id) => {
+          const found = list(data.sprintRunDetails).find((d) => d.sprint_run_id === id);
+          if (!found) throw new ApiFailure(403, "forbidden", "forbidden");
+          return found;
+        }),
+      ),
+    stepDetails: (_id, sprintRunId, keys) =>
+      read(() =>
+        keys.map((key) => {
+          const found = data.stepDetailOf(sprintRunId, key);
+          if (!found) throw new ApiFailure(403, "forbidden", "forbidden");
+          return found;
+        }),
+      ),
+    backlogs: (_id, repositoryIds) =>
+      read(() =>
+        repositoryIds.map((repositoryId) => {
+          const found = data.backlogs.find((b) => b.repository_id === repositoryId);
+          if (!found) throw new ApiFailure(403, "forbidden", "forbidden");
+          return scenario === "empty" ? { ...found, ranking: null, refinements: [] } : found;
+        }),
+      ),
     cancelSprintRun: () => read(() => ({ state: "cancelled" })),
     updateRepository: (_id, repositoryId, max) =>
       read(() => ({ ...(data.repositories.find((r) => r.repository_id === repositoryId) ?? data.repositories[0]!), max_concurrent_runs: max })),

@@ -144,7 +144,7 @@ describe("リポジトリの同時の実行の数（受け入れ条件 8）", ()
     const update = vi.spyOn(api, "updateRepository");
     const cards = await screen.findByRole("list", { name: "登録したリポジトリ" });
     const first = within(cards).getAllByRole("listitem")[0]!;
-    const field = within(first).getByRole("textbox", { name: "同時の実行の数（空ならプランの値）" });
+    const field = within(first).getByRole("textbox", { name: "同時の実行の数（空なら料金プランの値）" });
     await userEvent.type(field, "101");
     await userEvent.click(within(first).getByRole("button", { name: "宣言する" }));
     expect(within(first).getByText("1 から 100 の整数を入れてください")).toBeTruthy();

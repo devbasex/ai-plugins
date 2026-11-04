@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/devbasex/ai-plugins/blob/develop/factory/contracts/schemas/local-runner-declaration.schema.json",
   "title": "LocalRunnerDeclaration",
-  "description": "手元のランナーが登録と心拍で申告する、同時に動かす実行ジョブの数（#2347）。登録と心拍の本文はこの形を含む",
+  "description": "手元のマシンが登録と心拍で申告する、同時に動かす実行ジョブの数（#2347）。登録と心拍の本文はこの形を含む",
   "type": "object",
   "additionalProperties": false,
   "required": ["runner_id"],

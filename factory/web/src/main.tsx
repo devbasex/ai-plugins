@@ -20,7 +20,7 @@ async function buildServices(): Promise<Services> {
   }
   const config = embeddedConfig();
   const auth = createAuth(config);
-  return { auth, api: createApi(config.apiUrl, auth), connection: browserConnection() };
+  return { auth, api: createApi(config.apiUrl, auth), connection: browserConnection(), pollIntervalMs: config.pollIntervalMs };
 }
 
 const style = document.createElement("style");

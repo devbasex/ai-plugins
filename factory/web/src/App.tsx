@@ -17,6 +17,7 @@ import { ModelCredentialPage } from "./pages/ModelCredentialPage.tsx";
 import { NewSprintPage } from "./pages/NewSprintPage.tsx";
 import { SprintsPage } from "./pages/SprintsPage.tsx";
 import { SprintDetailPage } from "./pages/SprintDetailPage.tsx";
+import { BacklogPage } from "./pages/BacklogPage.tsx";
 import { LoopsPage } from "./pages/LoopsPage.tsx";
 import { LoopDetailPage } from "./pages/LoopDetailPage.tsx";
 
@@ -32,6 +33,7 @@ const ELEMENTS: Partial<Record<ScreenId, ReactElement>> = {
   newSprint: <NewSprintPage />,
   sprints: <SprintsPage />,
   sprintDetail: <SprintDetailPage />,
+  backlog: <BacklogPage />,
   loops: <LoopsPage />,
   loopDetail: <LoopDetailPage />,
 };

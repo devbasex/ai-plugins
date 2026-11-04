@@ -112,6 +112,7 @@ export function RepositoriesPage() {
                 <strong className="ui-wrap">{r.full_name}</strong>{" "}
                 <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/sprints/new`}>{t("screens.newSprint")}</Link>{" "}
                 <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/loops`}>{t("repositories.loops")}</Link>{" "}
+                <Link to={`/accounts/${accountId}/repositories/${r.repository_id}/backlog`}>{t("repositories.backlog")}</Link>{" "}
                 {owner && (
                   <Button variant="danger" onClick={() => void act(() => api.removeRepository(accountId, r.repository_id))}>
                     {t("common.remove")}
@@ -140,7 +141,7 @@ export function RepositoriesPage() {
   );
 }
 
-// 同時の実行の数の宣言（持ち主だけ）。空は宣言を外し、プランの値だけで数える
+// 同時の実行の数の宣言（持ち主だけ）。空は宣言を外し、料金プランの値だけで数える
 function MaxConcurrentField({ repository, onSave }: { repository: Repository; onSave: (value: number | null) => Promise<void> }) {
   const { t } = useTranslation();
   const [value, setValue] = useState(repository.max_concurrent_runs == null ? "" : String(repository.max_concurrent_runs));

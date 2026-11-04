@@ -8,6 +8,6 @@ import { runJobTokenVerifierFromEnv } from "../progress/run-job-token.ts";
 export const handler = handle(
   createRunnerApiApp(() => {
     const d = factoryDepsFromEnv();
-    return { verifier: runJobTokenVerifierFromEnv(), control: d.control, table: d.table, github: d.github, platform: d.platform };
+    return { verifier: runJobTokenVerifierFromEnv(), control: d.control, table: d.table, github: d.github, platform: d.platform, organizer: d.organizer };
   }),
 );
