@@ -5303,6 +5303,24 @@
       "context": "ndf-workflow",
       "meaning": "conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで",
       "source": "docs/specifications/ndf-context-restart-policy.md"
+    },
+    {
+      "term": "プランの参照",
+      "context": "ndf-workflow",
+      "meaning": "プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・`.ndf/` の設定の 1 つのキー・上限の宣言の 1 つの方針など）。流す直前に実行の核が値へ解決する（#2344）",
+      "source": ""
+    },
+    {
+      "term": "解決の記録",
+      "context": "ndf-workflow",
+      "meaning": "1 回の実行がプランの参照ごとに解決した値と出所。実行の記録の行として残り、プランのファイルへは書き戻さない（#2344）",
+      "source": ""
+    },
+    {
+      "term": "承認時の値",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで人か MVV 判定が承認資料で見た値（承認したコミット・版）。流す直前に解決した値と照らし、食い違えば流さずに人へ戻す（#2344）",
+      "source": ""
     }
   ]
 }
