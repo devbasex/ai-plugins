@@ -258,26 +258,34 @@ def _overlap(a0, a1, b0, b1) -> float:
     return max(0.0, (hi - lo).total_seconds())
 
 
+def lap_spans(lap: dict) -> list[tuple]:
+    """周回の動いていた区間（開始と終了の組。時刻は文字列のまま）。保留の周回は、締めるまでの区間（held_at まで）と、
+    答えの後に残りを流した区間（release.finish、無ければ question.finish）を返す。周回の境で答えを待つ時間は数えない（#2436）"""
+    spans = [(lap.get("started_at"), lap.get("held_at") or lap.get("ended_at"))]
+    if lap.get("held_at"):
+        fin = (lap.get("release") or {}).get("finish") or (lap.get("question") or {}).get("finish") or {}
+        spans.append((fin.get("started_at"), fin.get("ended_at")))
+    return spans
+
+
+def span_active_seconds(start, end, stops: list[tuple]) -> float:
+    """解析済みの 1 区間から、止まっていた区間との重なりを引いた秒数（0 未満にしない）。"""
+    span = max(0.0, (end - start).total_seconds())
+    for a, b in stops:
+        if a and b:
+            span -= _overlap(start, end, a, b)
+    return max(0.0, span)
+
+
 def active_seconds(rec: dict) -> float:
     """動いていた時間（I8）: 終わった周回の区間の和から、周回の途中で止まっていた時間（stops の at〜resumed_at と
     周回の区間の重なり）を引く。周回の境で止まった時間は周回の区間の外にあるため引かない。"""
-    total = 0.0
     stops = [(_loop_time(s.get("at")), _loop_time(s.get("resumed_at"))) for s in rec.get("stops", [])]
+    total = 0.0
     for lap in rec.get("laps", []):
-        # 保留の周回は、締めるまでの区間（held_at まで）と、答えの後に残りを流した区間（release.finish）を足す。
-        # 周回の境で答えを待つ時間は数えない（#2436）
-        spans = [(lap.get("started_at"), lap.get("held_at") or lap.get("ended_at"))]
-        if lap.get("held_at"):
-            fin = (lap.get("release") or {}).get("finish") or (lap.get("question") or {}).get("finish") or {}
-            spans.append((fin.get("started_at"), fin.get("ended_at")))
-        for s, e in ((_loop_time(a), _loop_time(b)) for a, b in spans):
-            if not s or not e:
-                continue
-            span = max(0.0, (e - s).total_seconds())
-            for a, b in stops:
-                if a and b:
-                    span -= _overlap(s, e, a, b)
-            total += max(0.0, span)
+        for s, e in ((_loop_time(a), _loop_time(b)) for a, b in lap_spans(lap)):
+            if s and e:
+                total += span_active_seconds(s, e, stops)
     return total
 
 
