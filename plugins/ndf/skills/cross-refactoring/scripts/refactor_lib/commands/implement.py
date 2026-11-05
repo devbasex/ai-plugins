@@ -53,8 +53,8 @@ from ..items import (
     item_label,
     live_items,
 )
-from ..paths import work_dir
-from ..paths import git_out, load_state
+from ..pathkinds import is_test_path
+from ..paths import git_out, load_state, work_dir
 from ..phases import finish_phase, phase_record
 from ..scope_check import judge_commits
 from ..undo import drop, resume_pending_drop
@@ -319,8 +319,6 @@ def _test_commit_problem(
     state: dict[str, Any],
 ) -> Optional[str]:
     """テストの追加のコミットが手順を満たすか。**テスト以外のファイルを触らない。** テストの追加は 1 項目 1 コミット。"""
-    from ..gitfacts import is_test_path
-
     if len(commits) > 1:
         return f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）"
     commit = commits[0]
