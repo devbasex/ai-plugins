@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { Repository, SprintRunRow } from "../api.ts";
+import type { SprintRunRow } from "../api.ts";
 import { useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { usePolled } from "../poll.ts";
@@ -16,15 +16,6 @@ import { SearchField } from "../ui/SearchField.tsx";
 import { StatusBadge } from "../ui/StatusBadge.tsx";
 import { issueNumbers, useSprintState } from "./parts.tsx";
 import { PhaseBars, StaleNotice } from "./sprintParts.tsx";
-
-// リポジトリの ID から名前を引く表。名前が読めなくても一覧は出す
-export async function repositoryNames(list: () => Promise<{ repositories: Repository[] }>): Promise<Map<number, string>> {
-  try {
-    return new Map((await list()).repositories.map((r) => [r.repository_id, r.full_name]));
-  } catch {
-    return new Map();
-  }
-}
 
 type Tab = "all" | "active" | "waiting" | "finished";
 const TABS: readonly Tab[] = ["all", "active", "waiting", "finished"];
