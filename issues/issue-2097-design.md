@@ -50,7 +50,7 @@
 | I2 | 雛形の引数 | 既定ブランチは、宣言を探す木の並び（`decl_roots`）のうち、最初に存在する git の木から解く。worktree のパスが存在しないことで結果が変わらない | 結合のテストで落ちる |
 | I3 | 雛形の引数・配布の判定の宣言 | 同じ起動の中で、雛形の引数の本番チャネルと、配布の判定の宣言の本番チャネルは同じ値である | 結合のテストで落ちる |
 | I4 | 雛形の引数 | `production_branch` の宣言か引数があるときは、既定ブランチを解く git を起動しない | 単体のテストで落ちる |
-| I5 | 雛形の引数 | 3 つの出所のどれでも決まらないとき、本番を使う雛形は止まり、エラーの文面が 3 つの出所を挙げる | 結合のテストで落ちる |
+| I5 | 雛形の引数 | 3 つの出所のどれでも決まらないとき、止まるのは本番チャネルが必須の経路（`new release --channel prod` と昇格のプラン）だけで、エラーの文面が 3 つの出所を挙げる。開発版のリリース（`--channel dev`）は本番チャネルを使わずにプランを書き、`new sprint`（normal を含む）と `new close` は承認ゲート 2 と本番のステージを置かずに、本番を置かない案内を出してプランを書く（どちらも終了コード 0） | 結合のテストで落ちる |
 
 ### ドメインイベント
 
@@ -168,8 +168,10 @@ sequenceDiagram
         R-->>A: 本番チャネル、または None
     end
     A-->>N: 埋めた引数
-    alt 本番チャネルが None で、本番を使う雛形
+    alt 本番チャネルが None で、本番チャネルが必須の経路（release --channel prod・昇格）
         N-->>N: 3 つの出所を挙げたエラーで止まる（終了コード 2）
+    else 本番チャネルが None で、sprint・close
+        N-->>N: 本番のステージを置かない案内を出し、プランを書く
     else
         N-->>N: プランを書く
     end
@@ -219,7 +221,7 @@ sequenceDiagram
 | 受け入れ条件 1・I2 | 存在しない worktree のパスで `new release --channel prod` が終了コード 0・`status: ok` で、`approve`・`snapshot`・`release`・`verify` を含むプランを書く | `apply_decls` が `roots[0]` から既定ブランチを解く形に戻すと落ちる |
 | 受け入れ条件 2・I1 | 上のプランで、本番の配布の確認が参照する ref が `main` である。origin の HEAD を `main` 以外にした組では、その名前になる | 既定ブランチの代わりにベースブランチか固定の `main` を入れると落ちる |
 | 受け入れ条件 3 | worktree を作った後の同じコマンドのステップの並びが、受け入れ条件 1 と一致する | worktree の有無で別の規則を使う（存在しないときだけ固定の名前を入れる）ように壊すと、origin の HEAD を `main` 以外にした組で落ちる |
-| 受け入れ条件 4・I5 | origin の HEAD もローカルの `main` / `master` も無いリポジトリで、終了コード 2 と、文面に 3 つの出所が現れる | `PRODUCTION_SOURCES` から既定ブランチを外すと落ちる |
+| 受け入れ条件 4・I5 | origin の HEAD もローカルの `main` / `master` も無いリポジトリで、`new release --channel prod` が終了コード 2 と、文面に 3 つの出所が現れる。同じリポジトリで `new release --channel dev` と `new sprint`（normal）は終了コード 0 でプランを書き、sprint は本番を置かない案内を出す | `PRODUCTION_SOURCES` から既定ブランチを外すと落ちる。本番チャネルが無いことを `release`・`sprint`・`close` の全体で止めると落ちる |
 | 受け入れ条件 5 | 存在しない worktree のパスで `new sprint` の normal・fast・auto が、承認ゲート 2 と本番のステージを置き、本番を置かない案内を出さない | `delivery_decl` か `apply_decls` の片方だけを `roots[0]` に戻すと落ちる |
 | 受け入れ条件 6 | `production_branch` を宣言した組（既定ブランチと違う値を含む）と `--production-branch` を渡した組で、宣言か引数の値が本番チャネルになる。ai-plugins のメインディレクトリで打った `new release --channel prod` のプランが、変更の前後で同じ JSON になる | 既定ブランチを宣言より先に使うと落ちる |
 | 受け入れ条件 6（昇格） | `base_branch` が既定ブランチと違い `production_branch` の無い組で、存在しない worktree と存在する worktree の `new sprint` が、同じ昇格のステージを持つ | `delivery_decl` だけを `roots[0]` に戻すと落ちる |
