@@ -84,11 +84,11 @@ E1・E3・E5・E6 は要求のとおりで、振る舞いを変えない。E7・
 
 | 要素 | 責務 |
 | --- | --- |
-| プロダクションコードとテストのパスの判定（`refactor_lib/pathkinds.py`） | **変える。** F1 の中身の判定 `python_text_lacks_tests(text)` と、作業ディレクトリのファイルを読んでそれを呼ぶ `lacks_python_tests(path, work)` を足す。`is_test_path(path, work=None)` は `work` を受けたとき、ディレクトリの印が無く名前の形で当たった `.py` に F1 を当てる。コミットの版で見分ける `is_test_path_at_commit(path, work, sha)` を足す |
+| プロダクションコードとテストのパスの判定（`refactor_lib/pathkinds.py`） | **変える。** F1 の中身の判定 `python_text_lacks_tests(text)` と、作業ディレクトリのファイルを読んでそれを呼ぶ `lacks_python_tests(path, work)` を足す。`is_test_path(path, work=None)` は `work` を受けたとき、ディレクトリの印が無く名前の形で当たった `.py` に F1 を当てる。コミットの前後の版の中身（読んだ文字列。読めなければ `None`）を受けて見分ける `is_test_path_in_versions(path, before, after)` を足す。この関数は git を起動しない |
 | `--scope` とテストの置き場所の検査（`refactor_lib/scope.py`） | **変える。** `test_files_under` は名前の形で当たったファイルから F1 で当たるものを外す。`_matches_by_name` のファイル名の形の判定は、作業ディレクトリで F1 に当たるファイルを置き場所とみなさない。ディレクトリの名前の判定（`TEST_PATH_SEGMENTS`）は変えない |
 | 危険フラグ（`refactor_lib/danger.py`） | **変える。** D3 と D4 でテストのファイルを外す箇所で `is_test_path` に `work` を渡す |
 | 行数の判定（`pathkinds.production_code_changes`） | **変える。** `is_test_path` に `work` を渡す |
-| コミットの事実（`refactor_lib/gitfacts.py` の `commit_touches_tests`・`commit_test_changes`） | **変える。** `is_test_path` の代わりに `is_test_path_at_commit(path, work, sha)` を呼ぶ。作業ディレクトリの中身は読まない（決定 3） |
+| コミットの事実（`refactor_lib/gitfacts.py` の `commit_touches_tests`・`commit_test_changes`） | **変える。** `commit_test_changes` は、名前の形で当たったファイルの前後の版を今と同じく 1 回ずつ読み（`git show <sha>^:<path>` と `<sha>:<path>`）、その文字列を `is_test_path_in_versions` に渡して判定し、テストと判定したものだけを前後の行として返す。`commit_touches_tests` は git を起動せず、`commit_test_changes` の結果を受けて、空でなければ真を返す（引数をその結果に変える）。1 コミットのテストの名前の `.py` 1 本につき、git の起動は今と同じ 2 本のままである。作業ディレクトリの中身は読まない（決定 3） |
 | テストの追加のコミットの検査（`commands/implement.py` の `_test_commit_problem`） | **変える。** `is_test_path` に作業ディレクトリ（`work_dir(state)`）を渡す |
 | 試走（`refactor_lib/template_check.py`） | 変えない。`test_files_under` と `test_locations` の答えが変わることで候補が変わる |
 | 着手前のテスト・対象の組み立て（`baseline.py`・`targets.py`） | 変えない。`test_locations` の答えが変わることで、置き場所の並びが変わる |
@@ -110,7 +110,7 @@ graph TD
     DG -->|test_locations| SC
     DG -->|is_test_path work| PK
     AS -->|production_code_changes| PK
-    GF -->|is_test_path_at_commit| PK
+    GF -->|is_test_path_in_versions| PK
     IM -->|is_test_path work| PK
 ```
 
@@ -131,10 +131,10 @@ graph TD
 
 ```text
 plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/
-├── pathkinds.py        # python_text_lacks_tests・lacks_python_tests・is_test_path_at_commit を足す。is_test_path(path, work=None)
+├── pathkinds.py        # python_text_lacks_tests・lacks_python_tests・is_test_path_in_versions を足す。is_test_path(path, work=None)
 ├── scope.py            # _matches_by_name・test_files_under が lacks_python_tests を呼ぶ
 ├── danger.py           # is_test_path に work を渡す
-├── gitfacts.py         # is_test_path_at_commit を呼ぶ
+├── gitfacts.py         # commit_test_changes が前後の版を 1 回読み is_test_path_in_versions を呼ぶ。commit_touches_tests はその結果から出す
 └── commands/
     └── implement.py    # is_test_path に作業ディレクトリを渡す
 ```
@@ -150,13 +150,14 @@ plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/
 | 中身に、行頭の空白に続く `def test` か `async def test` の行がある | 偽 |
 | 上のどれにも当たらない | 真 |
 
-名前の形は見ない。呼ぶ側が名前の形で当たったファイルにだけ呼ぶ（I5）。3 行目の正規表現の判定は `python_text_lacks_tests(text)` が持ち、`lacks_python_tests` は読めた中身をそれへ渡す。コミットの版の中身も同じ関数へ渡す（I1）。
+名前の形は見ない。呼ぶ側が名前の形で当たったファイルにだけ呼ぶ（I5）。3 行目の正規表現の判定は `python_text_lacks_tests(text)` が持ち、`lacks_python_tests` は読めた中身をそれへ渡す。コミットの前後の版の中身も、`commit_test_changes` が読んだ文字列のまま同じ関数へ渡す（I1）。
 
 | 判定 | 今 | 変えた後 |
 | --- | --- | --- |
 | `is_test_path(path)` | ディレクトリの印かファイル名の印があれば真 | 同じ（`work` を渡さない呼び出し元） |
 | `is_test_path(path, work)` | — | ディレクトリの印があれば真。ファイル名の印があり、`lacks_python_tests` が偽なら真 |
-| `is_test_path_at_commit(path, work, sha)` | — | ディレクトリの印があれば真。ファイル名の印がある `.py` は、`git show <sha>^:<path>` と `git show <sha>:<path>` で読めた版のどちらかで `python_text_lacks_tests` が偽なら真。どちらの版も読めなければ名前の形のまま真。`.py` 以外は名前の形のまま |
+| `is_test_path_in_versions(path, before, after)` | — | ディレクトリの印があれば真。ファイル名の印がある `.py` は、読めた版（`None` でない `before` か `after`）のどちらかで `python_text_lacks_tests` が偽なら真。どちらの版も読めなければ名前の形のまま真。`.py` 以外は名前の形のまま。git は起動せず、前後の版は `commit_test_changes` が 1 回ずつ読んで渡す |
+| `commit_touches_tests(test_changes)` | `is_test_path` が真のファイルを触れば真（git でファイルの並びを読む） | `commit_test_changes` の結果が空でなければ真。git を起動しない |
 | `test_files_under(path, work)` | 名前の形で当たる追跡ファイル | 名前の形で当たり、`lacks_python_tests` が偽のもの |
 | `_matches_by_name(path, work)` | ディレクトリの名前かファイル名の形で当たれば真 | ディレクトリの名前で当たれば真。ファイル名の形で当たり、`lacks_python_tests` が偽なら真 |
 
@@ -209,7 +210,7 @@ pytest の収集（`--collect-only`）は採らない。採ると、候補ごと
 
 ### 決定 3: 中身を読む手段を持つ呼び出し元だけが中身で見分けるよう、`is_test_path` は作業ディレクトリを任意の引数で受け、渡されなければ名前の形のまま判定する
 
-作業ディレクトリを持つ呼び出し元（行数の判定・危険フラグ・テストの追加のコミットの検査）は渡す。コミットの事実（`commit_touches_tests`・`commit_test_changes`）は作業ディレクトリの中身を読まず、そのコミットの前後の版（`git show <sha>^:<path>` と `<sha>:<path>`）を読み、どちらかにテストの関数があればテストとする（`is_test_path_at_commit`）。作業ディレクトリの中身で見分けると、本体と同じ場所の `lib/test_z.py` からテストの関数をすべて消すコミットが、その後の作業ディレクトリではプロダクションコードと読まれる。するとそのコミットは `test_changes` から外れ、`verify.verify_test_changes` によるテストの期待値の変更の取り消しを通り抜ける。テストの関数が版の間で消える場面は、この検査が捕まえる場面そのものである。中身の判定は `python_text_lacks_tests` を共有し、I1 を保つ。コードの計測（`codemetrics`）は、計測ツールの出力を読む関数の並びで、作業ディレクトリを受けない。そのため名前の形のまま残す。計測の表示でテスト側に並ぶ誤りは、範囲外の課題 #2557 に置く。
+作業ディレクトリを持つ呼び出し元（行数の判定・危険フラグ・テストの追加のコミットの検査）は渡す。コミットの事実（`commit_touches_tests`・`commit_test_changes`）は作業ディレクトリの中身を読まず、そのコミットの前後の版（`git show <sha>^:<path>` と `<sha>:<path>`）を読み、どちらかにテストの関数があればテストとする（`is_test_path_in_versions`）。前後の版を読むのは `commit_test_changes` の 1 か所で、ファイルごとに 1 回ずつである。判定はその文字列を受け、`commit_touches_tests` は `commit_test_changes` の結果から出す。判定と前後の行の取得で同じ版を読み直すと、1 コミットのテストの名前の `.py` 1 本につき git の起動が今の 2 本から 6 本へ増える。作業ディレクトリの中身で見分けると、本体と同じ場所の `lib/test_z.py` からテストの関数をすべて消すコミットが、その後の作業ディレクトリではプロダクションコードと読まれる。するとそのコミットは `test_changes` から外れ、`verify.verify_test_changes` によるテストの期待値の変更の取り消しを通り抜ける。テストの関数が版の間で消える場面は、この検査が捕まえる場面そのものである。中身の判定は `python_text_lacks_tests` を共有し、I1 を保つ。コードの計測（`codemetrics`）は、計測ツールの出力を読む関数の並びで、作業ディレクトリを受けない。そのため名前の形のまま残す。計測の表示でテスト側に並ぶ誤りは、範囲外の課題 #2557 に置く。
 
 `is_test_path` を必須の引数にして全呼び出し元を変える形は採らない。必須にすると、コードの計測の読み取りの関数へ作業ディレクトリを通す変更が要る。当たる関数は `parse_ruff`・`parse_lizard`・`file_metrics`・`parse_symilar`・`parse_jscpd` である。その変更は、この課題の受け入れ条件（行数と危険度）の外へ広がる。
 
@@ -255,6 +256,7 @@ pytest の収集（`--collect-only`）は採らない。採ると、候補ごと
 | I3 | 作業ディレクトリに無い `.py`（削除済み）は名前の形のままテストとみなされる | 読めないファイルを「テストの関数なし」と読むと落ちる |
 | I4 | `tests/test_helpers.py`（テストの関数なし）は試走の候補に入らないが、`tests` は置き場所のままで、`is_test_path` は真を返す。その変更はリファクタリングの要否でプロダクションコードの変更に数えられず、危険フラグの D3・D4 の対象に入らない | ディレクトリの印より先に中身を見るように壊すと落ちる |
 | 決定 3 / I2 | 本体と同じ場所の `lib/test_z.py` から全テストの関数を消す実装のコミットが、コミットの事実の `touches_tests` で真になり、`test_changes` に入って、テストの期待値の変更として検出される | `commit_test_changes` か `commit_touches_tests` が作業ディレクトリの中身で見分けるように戻すと落ちる |
+| 決定 3 | テストの名前の `.py` 1 本を変えるコミットで `collect_commit_facts` を打つと、`<sha>^:<path>` と `<sha>:<path>` を読む `git show` はそれぞれ 1 回だけ起動される | 判定と前後の行の取得で版を読み直すか、`commit_touches_tests` が自分で版を読むように壊すと落ちる |
 | I5 | 名前がテストの形でない `.py` とテストの形の `.ts` では、ファイルを読まない | 名前の判定の前に中身を読むように壊すと落ちる |
 
 ## 設計の結果
