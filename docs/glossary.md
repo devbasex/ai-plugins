@@ -306,13 +306,15 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
-| 作業の報告 | `work_report` | worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
-| 起こし直し | `resume_prompt` | supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
+| 作業の報告 | `work_report` | worker が応答の最後に書く「## 作業の報告」の節。人と conductor が読む。成否は作業の結果ファイルで決め、この節の文からは決めない（#2337） | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
+| 起こし直し | `resume_prompt` | supervise の full のステップで、作業の結果ファイルが無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで（#2337） | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
 | 所要の記録 | — | `.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 予算の反映 | — | 開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない | — | — | — |
+| 予算の既定 | — | 開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は NDF の組み込みの値（周回 3・費用 60 USD・時間 24 時間）。Factory の画面で予算の欄を空にした単位はこの値へ戻る | — | — | — |
+| 既定へ戻す指示 | — | 開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする。Factory は予算の欄が空の単位をこの指示として実行ジョブの指示に載せる | — | — | — |
 | 予算の履歴 | — | 開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す | — | — | — |
 | 人の判断待ちの行 | — | 開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語 | — | — | — |
 | 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
@@ -355,6 +357,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | Skill の対応表 | — | 工程（ステップの stage）から、そのステップの worker へ届ける Skill の一覧を引く表。NDF の scripts/lib/stage-skills.json の 1 か所に置き、プランの worker の起動と ndf:worker の起動指示の両方が読む（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | Skill の渡し方 | — | Skill を worker へ届ける形。プランの worker には本文を system プロンプトへ入れ（本文）、ndf:worker には SKILL.md の絶対パスを起動指示の「読む Skill」に書く（パス。#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 読む Skill | — | supervisor が ndf:worker の起動指示に書く項目。その作業で読む規則の Skill の名前と SKILL.md の絶対パスを並べ、worker はここに挙がった SKILL.md だけを読む（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
+| 読む Skill の guard | — | supervisor が ndf:worker を起動する Agent の呼び出しを PreToolUse の hook で見て、「読む Skill」の欄が無い起動と、Skill の対応表を引かずに Skill を挙げた起動を止める判定。止めた理由に正本の「supervisor → worker」の節を添える（#2399） | — | — | — |
 | 規則の Skill | — | 手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 差分の棚卸し | — | 毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題（起点のタグの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 見直し | — | 数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
@@ -400,10 +403,19 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | プランのハッシュ | — | プランの型で読んだ中身を、キーを並べ替えた JSON にして取った sha256。完了したプランが変わったかを測る（#2344） | — | — | — |
 | 呼び手 | — | 関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・雛形・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える | — | — | — |
 | 残す関数の一覧 | — | 関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。置き場は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの | — | — | — |
+| 外部の調査 | — | 設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの | — | — | — |
+| 自前で作る決定 | — | 既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519） | — | — | — |
+| 確かめられなかったこと | — | 外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519） | — | — | — |
+| 作り方 | — | 設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519） | — | — | — |
+| 比べた候補 | — | 設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519） | — | — | — |
 | プランの進行の記録 | — | supervise のプランのステップごとの終了コード・秒・ドルを 1 行ずつ残す記録（`<状態のディレクトリ>/progress.jsonl`）。開発ループのまとめのプランでは `.ndf/loop/<名>/lap-<番号>/close*/` の下にある（#2315） | — | — | — |
 | 承認した先端 | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの先端のときだけ行う | — | — | — |
 | マージの結果 | — | 承認した設計 Pull Request を宛先へマージする 1 回の試みの結果。マージした・マージ済み・先端が動いた・印が無い・検査が緑でない・衝突・宛先が本番・失敗のどれか | — | — | — |
 | 答えの後の整理 | — | オーガナイザーが答えを送った後、待つ間に届いた依頼を取り直し、除くものを除いて残りをまとめて問う手順 | — | — | — |
+| 本体 | — | エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337） | — | — | — |
+| 核の対象外 | — | 実行の核を通さないエントリポイントの印。hook の定義から起動されるか、ランタイムが直接起動して標準出力をそのまま使うもの。契約の一覧の core に理由と根拠を書く（#2337） | — | — | — |
+| 作業の結果ファイル | — | worker が報告を終える前に書く、結果 JSON の形の 1 行のファイル。supervise と supervisor はこのファイルの status だけで作業の成否を決める（#2337） | — | — | — |
+| フェーズの結果 | — | supervise の 1 つのプランの実行の終わり方を結果 JSON の形で書いたファイル（状態ディレクトリの phase-result.json）。supervise.py run の終了コードはこの status から決まる（#2337） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
