@@ -332,21 +332,25 @@ class _Run:
                 self.received[msg.get("lane", "")] = self.received.get(msg.get("lane", ""), 0) + 1
                 durable.set_event(f"lane-{msg.get('lane')}", {"received": self.received[msg.get("lane", "")]})
         elif kind in ("gate1", "gate2", "ask"):
-            if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
-                return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
-            key = cause_of(msg)
-            same = next((q for q in self.questions if key and q.get("cause") == key), None)
-            if same is not None:  # 同じ原因の問いは 1 つにまとめ、答えを依頼してきた全レーンへ配る（異常系 5）
-                same["also"] = [*same.get("also", []), msg.get("id")]
-                same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
-                self.publish_questions()
-                return
-            if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
-                msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
-            self.questions.append({**msg, "cause": key} if key else msg)
-            self.publish_questions()
+            self.receive_question(msg)
         elif kind == "answer":
             self.reply(msg)
+
+    def receive_question(self, msg: dict) -> None:
+        """レーンからの問い（gate1 / gate2 / ask）を一覧へ受け付ける。打ち直しは数えず、同じ原因の問いは 1 つにまとめる。"""
+        if any(q.get("id") == msg.get("id") for q in self.questions) or msg.get("id") in self.answered:
+            return  # 同じ依頼の打ち直しは数えない（id は送る側が依頼の中身から決める）
+        key = cause_of(msg)
+        same = next((q for q in self.questions if key and q.get("cause") == key), None)
+        if same is not None:  # 同じ原因の問いは 1 つにまとめ、答えを依頼してきた全レーンへ配る（異常系 5）
+            same["also"] = [*same.get("also", []), msg.get("id")]
+            same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
+            self.publish_questions()
+            return
+        if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
+            msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
+        self.questions.append({**msg, "cause": key} if key else msg)
+        self.publish_questions()
 
     def publish_questions(self) -> None:
         durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
