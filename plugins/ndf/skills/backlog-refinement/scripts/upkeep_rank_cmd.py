@@ -170,16 +170,12 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
         f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues
     )
     subs = sub_issues(gh, [i["number"] for i in open_issues if (i.get("sub_issues_summary") or {}).get("total")], notes)
-    edges = R.merge_edges(
-        [
-            R.sub_issue_edges(subs),
-            [(n, d) for n, e in ests.items() for d in e.depends_on],
-            [e for r in rows for e in R.parallel_group_edges(r.get("description") or "")],
-        ],
-        set(issues),
-    )
+    recorded = [(n, d) for n, e in ests.items() for d in e.depends_on]
+    grouped = [e for r in rows for e in R.parallel_group_edges(r.get("description") or "")]
+    edges = R.merge_edges([R.sub_issue_edges(subs), recorded, grouped], set(issues))
     rejected = ctx.read_state(sd / "rejected.json") or []
-    board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded, sizes)
+    prereq = edges & set(recorded + grouped)  # 前提の辺: 合成後に残った、記録と並列の組が宣言した辺（#2604）
+    board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded, sizes, prereq)
     return board, issues, ests, excluded, left
 
 

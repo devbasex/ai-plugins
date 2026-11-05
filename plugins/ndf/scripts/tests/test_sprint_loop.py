@@ -236,6 +236,58 @@ def test_waiting_rows_do_not_use_up_max_issues_without_a_boundary(env):
     assert rows[11] == rows[12] == "人の判断待ち（棚卸し）" and rows[15].startswith("順位")
 
 
+# ---------------- #2604: 前提の課題の実装待ち ----------------
+
+
+def with_prereqs(m, prereqs):
+    for row in m["rows"]:
+        if row["number"] in prereqs:
+            row["prerequisites"] = prereqs[row["number"]]
+    return m
+
+
+def test_rows_with_open_prerequisites_are_dropped_and_do_not_use_up_max_issues(env):
+    # 受け入れ条件 1・2・6: 境界が無く max_issues が 1。前提で外れた 1 位・2 位は枠を使わず、3 位が選ばれる
+    env.rank_box["out"] = rank_out(with_prereqs(ms("01 近い", [11, 12, 13, 14]), {11: [90], 12: [91, 95]}))
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 1
+    sl.write_record(env, r)
+    got = sl_select.cmd_select(env, "l1")
+    assert got["metrics"]["selected"] == [13]
+    rows = {x["number"]: x for x in got["metrics"]["excluded"]}
+    assert rows[11]["reason"] == "前提の課題の実装待ち（#90）" and rows[11]["decision"] == sl_select.DROPPED
+    assert rows[12]["reason"] == "前提の課題の実装待ち（#91 #95）"
+    assert rows[14]["reason"].startswith("順位")  # 枠の外
+
+
+def test_first_issues_with_prerequisites_are_dropped_and_earlier_reasons_are_kept(env):
+    # 受け入れ条件 7 と I3: 先頭に選ぶ課題（承認とマージが済んだ設計・revise）も外れる。手の除外・差し戻しの理由は残す
+    m = with_prereqs(ms("01 近い", [11, 12, 13, 14, 15]), {n: [90] for n in (11, 12, 13, 14)})
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 5
+    r["waiting"] = [
+        {"number": 11, "answer": "approved", "merged_at": "t", "lap": 0},
+        {"number": 12, "answer": "revise"},
+        {"number": 13, "answer": "rejected"},
+    ]
+    r["excluded"] = [{"number": 14, "lap": 1, "reason": "モードが対象外（operation）"}]
+    got = sl_select.choose_issues(env, r, rank_out(m), 1, {})
+    reasons = {x["number"]: x["reason"] for x in got["selection"]}
+    assert reasons[11] == reasons[12] == "前提の課題の実装待ち（#90）"
+    assert reasons[13] == "差し戻し" and reasons[14] == "モードが対象外（operation）" and reasons[15] == "順位"
+
+
+def test_all_rows_waiting_for_prerequisites_stop_outside_mvv_with_counts(env):
+    # 受け入れ条件 10
+    env.rank_box["out"] = rank_out(with_prereqs(ms("01 近い", [11, 12]), {11: [90], 12: [90]}))
+    start(env)
+    out = sl_select.cmd_select(env, "l1")
+    assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "outside_mvv"
+    assert out["metrics"]["stop"]["values"]["reasons"] == {"前提の課題の実装待ち（#90）": 2}
+
+
 def test_select_falls_through_to_the_next_milestone_and_marks_unapproved_sprint_mvv(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11]), ms("02 次", [21]))
     env.descs = {"01 近い": MVV_TEXT}

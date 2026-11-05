@@ -301,6 +301,7 @@ class Board:
     approved: tuple = ()
     excluded: list = field(default_factory=list)
     sizes: dict = field(default_factory=dict)  # 見積もりの記録から決めた Size と追加の列（upkeep_rank_estimate。#1856）
+    prerequisites: set = field(default_factory=set)  # 前提の辺（a は b の閉じるのを待つ）。edges の部分集合（#2604）
 
 
 def _milestone_rows(board, rows, place, title):
@@ -430,6 +431,11 @@ def _candidates(board, rows, place):
     return forward, backward, dropped, _stale_rejections(board.rejected, seen)
 
 
+def prerequisites_of(board, n) -> list:
+    """n が閉じるのを待つ open の前提の課題の番号（昇順）。"""
+    return sorted({b for a, b in board.prerequisites if a == n})
+
+
 def _milestone_out(board, rows, place, title, idx):
     cfg = board.cfg
     ranked = _milestone_rows(board, rows, place, title)
@@ -448,6 +454,7 @@ def _milestone_out(board, rows, place, title, idx):
             "released": r.released,
             "sources": r.sources,
             **({"quality_slot": r.number in marked} if quality is not None else {}),
+            **({"prerequisites": pre} if (pre := prerequisites_of(board, r.number)) else {}),
         }  # fmt: skip
         for k, r in enumerate(ranked, 1)
     ]

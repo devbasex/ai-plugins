@@ -76,8 +76,9 @@ def candidates_of(ms: dict, max_issues: int, held: set[int] = frozenset()) -> li
     elif b:
         idx = next((i for i, r in enumerate(rows) if r["number"] == b["number"]), len(rows) - 1)
         nums = {r["number"] for r in rows[: idx + 1]}
-    else:  # 判断待ちと保留の周回（held）の行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
-        open_rows = [r for r in rows if not r.get("waiting_decision") and r["number"] not in held][:max_issues]
+    else:  # 判断待ち・保留の周回（held）・前提の課題の実装待ちの行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
+        free = [r for r in rows if not r.get("waiting_decision") and not r.get("prerequisites") and r["number"] not in held]
+        open_rows = free[:max_issues]
         last = rows.index(open_rows[-1]) if open_rows else len(rows) - 1
         nums = {r["number"] for r in rows[: last + 1]}
     slot = ms.get("large_slot") or {}
@@ -116,6 +117,11 @@ def first_issues(rec: dict) -> set[int]:
     return revise | fixes | approved_designs(rec)
 
 
+def prerequisite_reason(row: dict) -> str:
+    """前提の課題の実装待ちの理由。open の前提の課題の番号を昇順で載せる。"""
+    return "前提の課題の実装待ち（" + " ".join(f"#{b}" for b in sorted(row["prerequisites"])) + "）"
+
+
 def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
     n = row["number"]
     if row.get("waiting_decision"):
@@ -137,6 +143,8 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
     for e in rec.get("excluded", []):
         if e["number"] == n and e.get("lap") == lap_n:
             return e["reason"]
+    if row.get("prerequisites"):  # 前提の課題が閉じるまで選ばない（同じ周回に選ばれていても外す。#2604）
+        return prerequisite_reason(row)
     if n in lap_created:
         return "周回の中で起票された（次の周回の棚卸しの後に選ぶ）"
     if row.get("size") == OVER_SCALE:
