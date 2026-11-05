@@ -1,4 +1,4 @@
-import { ApiFailure, type Api } from "../api.ts";
+import { ApiFailure, type Api, type Delegation } from "../api.ts";
 import * as data from "./data.ts";
 
 // 場面: normal は決まったデータ、empty は一覧が 0 件、error は読み込みがすべて失敗する
@@ -15,6 +15,8 @@ export function createDummyApi(scenario: Scenario = "normal"): Api {
     if (!found) throw new ApiFailure(403, "forbidden", "forbidden");
     return found;
   };
+  // 発行した委任はこの画面の間だけ持つ（値はダミーで、本物の API へは届かない）
+  const delegations: Delegation[] = scenario === "empty" ? [] : structuredClone(data.delegations);
   const loopOf = (loopId: string) => {
     const found = data.loopDetails.find((d) => d.loop.loop_id === loopId);
     if (!found) throw new ApiFailure(404, "loop_not_found", "loop_not_found");
@@ -78,5 +80,26 @@ export function createDummyApi(scenario: Scenario = "normal"): Api {
     requestNextLap: () => read(() => ({ state: "running" as const })),
     answerLoop: (_id, loopId, issue, decision, pr) =>
       read(() => ({ pending: loopOf(loopId).pending.map((p) => (p.number === issue ? { ...p, answer: { decision, pr: pr ?? null } } : p)) })),
+    delegations: () => read(() => delegations),
+    createDelegation: async (input) => {
+      const now = new Date();
+      const delegation: Delegation = {
+        credential_id: `dummy${String(delegations.length + 1).padStart(21, "0")}`,
+        client_name: input.client_name,
+        scope: input.scope,
+        created_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + input.expires_in_seconds * 1000).toISOString(),
+        revoked_at: null,
+        state: "active",
+      };
+      delegations.unshift(delegation);
+      return read(() => ({ delegation, credential: `ndfd_${delegation.credential_id}_${data.DUMMY_MARKER}` }));
+    },
+    revokeDelegation: async (credentialId) => {
+      const found = delegations.find((d) => d.credential_id === credentialId);
+      if (!found) throw new ApiFailure(403, "forbidden", "forbidden");
+      if (found.state === "active") Object.assign(found, { state: "revoked", revoked_at: new Date().toISOString() });
+      return read(() => found);
+    },
   };
 }

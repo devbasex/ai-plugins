@@ -30,6 +30,20 @@ export class ForbiddenError extends ApiError {
   }
 }
 
+// 委任の資格情報で、人だけが確定できる操作を呼んだ（#2384 の I4）
+export class HumanOnlyError extends ApiError {
+  constructor() {
+    super(403, "human_only", "この操作は人が画面で確定します。委任の資格情報からは行えません");
+  }
+}
+
+// 範囲が読み取りだけの委任の資格情報で、書き込みの操作を呼んだ（#2384 の I5）
+export class ScopeError extends ApiError {
+  constructor() {
+    super(403, "scope_insufficient", "読み取りだけの委任では、この操作を行えません");
+  }
+}
+
 export class InvalidRequestError extends ApiError {
   constructor(message = "要求の形が正しくありません", code = "invalid_request", details?: Record<string, unknown>) {
     super(400, code, message, details);

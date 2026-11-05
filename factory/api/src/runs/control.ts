@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { JobFinishedEvent, RunJobInstruction } from "@ndf-factory/contracts";
 import { judgeLimits } from "../accounts/limits.ts";
 import type { AccountContext } from "../accounts/model.ts";
-import { ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, ServiceUnavailableError } from "../errors.ts";
+import { ApiError, ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, ServiceUnavailableError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
 import type { OrganizerWrite, OrgRequest } from "../organizer/model.ts";
 import { finishedKey } from "../progress/authorize.ts";
@@ -31,6 +31,7 @@ import {
 import type { RunnerPlatform } from "./platform.ts";
 import type { RunsTable } from "./table.ts";
 import { isLegacyVersion } from "./version.ts";
+import { claimOf, type IdempotencyRef } from "../idempotency.ts";
 
 export const DEFAULT_TIMEOUT_SECONDS = 28_800;
 export const DEFAULT_TOKEN_TTL_SECONDS = 32_400;
@@ -124,6 +125,8 @@ export class ResumeRejectedError extends Error {
 export interface StartInput {
   repositoryId: unknown;
   issues: unknown;
+  // 作成の冪等の鍵（経路が形を確かめて渡す。#2384 の I14）。無ければ鍵の行を書かない
+  idempotencyKey?: string;
 }
 
 // 手元のマシンの申告（#2189 の登録と心拍。契約の local-runner-declaration）
@@ -181,7 +184,6 @@ export class RunControl {
   // 開始。確かめの順は 課題の形（400）→ 登録（404）→ 課題（400）→ ループのマイルストーン（409）→ キー（409）→ 導入（409）→
   // 使える量（409）→ 版（409）→ 課題の持ち分（409）
   async startSprintRun(ctx: AccountContext, input: StartInput): Promise<{ sprint_run_id: string; state: "starting" }> {
-    const { table, github } = this.deps;
     const repositoryId = input.repositoryId;
     if (!Number.isInteger(repositoryId) || (repositoryId as number) < 1) throw new InvalidRequestError("リポジトリの ID の形ではありません");
     const issues = input.issues;
@@ -194,21 +196,54 @@ export class RunControl {
     ) {
       throw new InvalidRequestError(`課題は 1〜${MAX_ISSUES} 件の番号で選んでください`, "invalid_issues", { numbers: [] });
     }
-    const registration = await table.getRegistration(ctx.accountId, repositoryId as number);
+    const idempotency: IdempotencyRef | undefined =
+      input.idempotencyKey === undefined ? undefined : { userId: ctx.userId, operationId: "startSprintRun", key: input.idempotencyKey };
+    // 同じ鍵の 2 回目は 1 回目の結果を返し、何も確かめず何も書かない
+    const replayed = idempotency ? await this.replayRun(ctx, idempotency) : null;
+    if (replayed) return replayed;
+    try {
+      return await this.createSprintRun(ctx, repositoryId as number, issues as number[], idempotency);
+    } catch (err) {
+      // 同じ鍵の先行の要求が途中で作り終えていれば、枠・持ち分の断りより先にその実行を返す
+      const won = idempotency && err instanceof ApiError ? await this.replayRun(ctx, idempotency) : null;
+      if (won) return won;
+      throw err;
+    }
+  }
+
+  // 期限の中の同じ鍵が作った実行。別のアカウントの実行なら返さずに forbidden（鍵は利用者ごとで、アカウントをまたぐ）
+  private async replayRun(ctx: AccountContext, ref: IdempotencyRef): Promise<{ sprint_run_id: string; state: "starting" } | null> {
+    const runId = await this.deps.table.getIdempotent(ref, this.iso());
+    if (!runId) return null;
+    const run = await this.deps.table.getRun(runId);
+    if (!run || run.accountId !== ctx.accountId) throw new ForbiddenError();
+    return { sprint_run_id: runId, state: "starting" };
+  }
+
+  private async createSprintRun(
+    ctx: AccountContext,
+    repositoryId: number,
+    issues: number[],
+    idempotency: IdempotencyRef | undefined,
+  ): Promise<{ sprint_run_id: string; state: "starting" }> {
+    const { table, github } = this.deps;
+    const registration = await table.getRegistration(ctx.accountId, repositoryId);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
-    const check = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues as number[]);
+    const check = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues);
     if (check.invalid.length > 0) throw new InvalidRequestError("開いている課題ではありません", "invalid_issues", { numbers: check.invalid });
     // 動いているループのマイルストーンに属する課題は断る（ループの周回の選定と取り合う。決定 11）
     const titles = [...new Set(Object.values(check.milestones ?? {}).filter((t): t is string => typeof t === "string" && t !== ""))];
     await this.refuseIssuesInLoop(ctx.accountId, registration.repositoryId, titles, check.milestones ?? {});
 
     const created = await this.admit(ctx, registration, {
-      issues: issues as number[],
+      issues: issues,
       milestoneTitles: titles,
       milestonesOf: check.milestones ?? {},
       start: "new",
+      ...(idempotency ? { idempotency } : {}),
     });
-    if (created === "loop_changed") throw new ServiceUnavailableError("sprint_run_unavailable");
+    // duplicate は同じ鍵の作成が同時に走り、先に書いた方が勝った。勝った実行は呼び出し元が鍵から引き直す
+    if (created === "duplicate" || created === "loop_changed") throw new ServiceUnavailableError("sprint_run_unavailable");
     return { sprint_run_id: created.sprintRunId, state: "starting" };
   }
 
@@ -246,8 +281,9 @@ export class RunControl {
       milestonesOf: Record<number, string | null>;
       start: "new" | "loop";
       loop?: { loop: DevLoop; write: (run: SprintRun) => LoopWrite };
+      idempotency?: IdempotencyRef;
     },
-  ): Promise<SprintRun | "loop_changed"> {
+  ): Promise<SprintRun | "loop_changed" | "duplicate"> {
     const { table, github } = this.deps;
     let modelCredentialSecretArn: string | null = null;
     if (ctx.executionMode === "byok") {
@@ -315,13 +351,14 @@ export class RunControl {
         milestoneChecks: opts.milestoneTitles,
         legacy,
         ...(opts.loop ? { loop: opts.loop.write(run) } : {}),
+        ...(opts.idempotency ? { idempotency: claimOf(opts.idempotency, run.sprintRunId, now) } : {}),
       };
       const result = await table.createRun(run, job, slots, guards);
       if (result === "created") {
         await this.launch({ ...run, legacy }, job);
         return { ...run, legacy };
       }
-      if (result === "loop_changed") return "loop_changed";
+      if (result === "loop_changed" || result === "duplicate") return result;
       // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62）
       if (result === "release_running") {
         throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
@@ -357,7 +394,9 @@ export class RunControl {
     const registration = await this.deps.table.getRegistration(loop.accountId, loop.repositoryId);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
     const ctx: AccountContext = { accountId: loop.accountId, ...loop.context };
-    return this.admit(ctx, registration, { issues: [], milestoneTitles: [], milestonesOf: {}, start: "loop", loop: { loop, write } });
+    const created = await this.admit(ctx, registration, { issues: [], milestoneTitles: [], milestonesOf: {}, start: "loop", loop: { loop, write } });
+    // 周回の開始は冪等の鍵の行を書かないため duplicate にならない
+    return created === "duplicate" ? "loop_changed" : created;
   }
 
   // その UTC の暦月に、アカウントの managed の実行が使った token（形態 managed の上限の判定に使う）。
