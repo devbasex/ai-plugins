@@ -1,0 +1,7 @@
+{
+  "name": "answers-sent-json",
+  "pattern": "answers-sent.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": []
+}

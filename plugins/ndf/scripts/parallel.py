@@ -16,7 +16,7 @@
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンが承認ゲート 2 の依頼を送る |
-| `answer <計画名> <依頼> (--approved \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行） |
+| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
 外のオーガナイザーとの `--external` の副命令（#2439）は `lib/parallel_external_cli.py` にある。
@@ -389,17 +389,20 @@ def cmd_answer(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     note = None
+    if err := pa.answer_arg_error(a.revise, a.note, a.approved, a.by):
+        reply("stopped", err, code=1)
     if a.revise:
-        if not a.note:
-            reply("stopped", "--revise には --note <指摘ファイル> が要る", code=1)
         try:
             note = Path(a.note).read_text(encoding="utf-8").strip()
         except OSError as exc:
             reply("stopped", f"指摘ファイルを読めない: {exc}", code=2)
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
-    nxt = pa.owner_restart(main, a.name, a.id, a.choice)
-    pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice)
-    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った", id=a.id, result=result, next=nxt)
+    seq, items = pa.questions(main, a.name)
+    q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
+    nxt = pa.owner_restart(main, a.name, a.id, a.choice, items)
+    tail, extra = pa.answer_with_merge(main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
+    extra.update(id=a.id, result=result, next=nxt, seq=seq)
+    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
 
 
 def cmd_helper(a) -> None:
@@ -480,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--rejected", action="store_true")
     ag.add_argument("--choice", nargs="+")
     an.add_argument("--note")
+    an.add_argument("--by", choices=("user", "mvv"), default="user", help="--approved の担い手（MVV 判定で自分で答えたら mvv）")
     hp = sub.add_parser("helper")
     hp.add_argument("name")
     hp.add_argument("n", type=int)

@@ -15,6 +15,7 @@ import gh_sections
 import jsonio
 import project_mvv as pm
 import step_result
+from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
 
 from sprint_loop_record import (
     TOOL,
@@ -211,6 +212,8 @@ def waiting_section(rec: dict, w: dict) -> str:
         f"- 根拠の項目: {', '.join(w.get('basis') or []) or '—'}",
         f"- 設計 Pull Request: {pr}",
         f"- 答え: {w.get('answer') or 'まだ'}",
+        *([f"- 設計 PR のマージ: {w['merge'].get('result')}（{w['merge'].get('reason') or '—'}）"] if w.get("merge") else []),
+        *([f"- 利用者へ戻した理由: {w['returned']}"] if w.get("returned") and not w.get("answer") else []),
         f"- 答え方: `{how}`",
     ]
     if w.get("note"):  # 直して出し直す（#2436 の 6e）: 次の周回の設計がこの指摘を読む
@@ -355,8 +358,11 @@ def move_to_waiting(
             reasons = row.get("reasons") or []
             w = {
                 "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
-                "basis": row.get("basis") or [], "gate": 1, "pr": pr, "lap": lap["n"], "at": env.now(),
+                "basis": row.get("basis") or [], "boundary": row.get("boundary") or [], "gate": 1, "pr": pr, "lap": lap["n"],
+                "at": env.now(), "report": i.get("report") or "", "state": lap["state_path"],
             }  # fmt: skip
+            if pr is not None:  # 承認した先端（#2507）: 並列の計画の外でも書き、答えの時点の先端と比べる
+                w["stamp"] = design_head(env, w)
             if pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
                 w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えは周回の境で読む（#2436 の 6c）
             rec["waiting"].append(w)
@@ -369,19 +375,24 @@ def move_to_waiting(
     return moved, kept, notes
 
 
-def lane_gate1(env: Env, w: dict, report: str, state: str) -> dict | None:
+def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", stamp: str | None = None) -> dict | None:
     """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan, stamp, report, state}
-    を返す。レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。"""
+    を返す。レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。
+    同じ承認した先端で利用者へ戻すとき（#2507）は、`stamp` に承認した先端を、`suffix` に依頼の id の接尾辞を渡す
+    （同じ id の依頼は答え済みとして受け取られないため）。依頼の理由にはマージの結果の理由（`w.returned`）も載せ、
+    利用者へ戻した依頼には印 `returned` を付ける（MVV 判定でオーガナイザーが自分で承認しないため。#2507 の決定 9）。"""
     try:
         import parallel_lane
 
         got = parallel_lane.lane_of(env.main_dir())
         if not got:
             return None
-        stamp = design_head(env, w)
+        stamp = stamp or design_head(env, w)
+        reasons = [x for x in (w.get("reason"), w.get("returned")) if x]
         rid = parallel_lane.request_gate1(
             env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
-            verdict=w.get("verdict"), reasons=[w.get("reason")] if w.get("reason") else [],
+            verdict=w.get("verdict"), reasons=reasons, boundary=list(w.get("boundary") or []), suffix=suffix,
+            **({"returned": True} if w.get("returned") else {}),
         )  # fmt: skip
     except Exception:  # noqa: BLE001 — 送れなければ今どおり人の判断待ち（loop answer で答える）
         return None
@@ -402,8 +413,70 @@ def regate1(env: Env, w: dict) -> bool:
     head = design_head(env, w)
     if head == stamp:
         return False
-    if head and (sent := lane_gate1(env, w, w.get("report") or "", w.get("state") or "")):
+    if head and (sent := lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")):
+        w.pop("returned", None)  # 前に利用者へ戻した印と理由は新しい先端の問いに当てはまらない
         w.update(sent, restamped=stamp)
+    return True
+
+
+def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:
+    """承認した設計のマージの結果（`design_pr_merge.merge_approved` の出力）を人の判断待ちの行の `merge` へ書く（#2507）。
+    同じ承認した先端で同じ result と class が続いた周回の数（streak）と、基盤待ちのための再実行の累計（infra_reruns）を数える。
+    infra_reruns は分類が変わっても 0 に戻さない（基盤待ちと実行中が交互に現れても再実行を上限なく増やさない）。
+    足すのは実際に打った再実行の回数（`infra_rerun`。1 回の merge-when-green の中の複数回も数える）。"""
+    prev = w.get("merge") or {}
+    stamp = w.get("stamp") or ""
+    same = prev.get("stamp") == stamp
+    streak = prev.get("streak", 0) + 1 if same and (prev.get("result"), prev.get("class")) == (out.get("result"), out.get("class")) else 1
+    reruns = (prev.get("infra_reruns", 0) if same else 0) + int(out.get("infra_rerun") or 0)
+    w["merge"] = {**out, "lap": lap, "streak": streak, "infra_reruns": reruns, "stamp": stamp}
+    if out.get("result") in MERGED_RESULTS and not w.get("merged_at"):
+        w["merged_at"] = now
+    return w["merge"]
+
+
+def _reopen_waiting(w: dict) -> None:  # 前の回答者 by と利用者へ戻した印 returned も外す（残すと次の問いを読み違える）
+    for k in ("answer", "answered_at", "by", "merge", "merged_at", "returned"):
+        w.pop(k, None)
+
+
+def reask_design(env: Env, rec: dict, w: dict, head: str) -> bool:
+    """承認した設計 PR の先端が承認の後に動いた（または承認した先端が記録に無い）: 新しい先端で問い直す（#2507）。
+    レーンは新しい先端で依頼を送り直し、送れなければ何も変えずに次の周回の境で打ち直す（古い答えを当てないため）。
+    1 本のループは行の承認した先端を書き換え、答えを外して人の判断待ちへ戻す。問い直したら True。"""
+    if not head:
+        return False
+    old = w.get("stamp") or ""
+    if w.get("request"):
+        sent = lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")
+        if not sent:
+            return False
+        _reopen_waiting(w)
+        w.update(sent, restamped=old)
+    else:
+        _reopen_waiting(w)
+        w.update(stamp=head, restamped=old)
+    mark_issue(env, rec, w)
+    return True
+
+
+def giveback_design(env: Env, rec: dict, w: dict, reason: str, lap: int) -> bool:
+    """時間で解けないマージの結果を、承認した先端のまま利用者へ戻す（#2507 の決定 9）。依頼にマージの結果の理由を載せる。
+    利用者は「直して出し直す」「やらない」か、手を打ってから「承認」を選ぶ。戻した行のマージの結果（streak・infra_reruns）は消す。
+    レーンは同じ先端でも別の依頼にするため id に `-m<周回>-<戻した回数 givebacks。消さない>` を足す。送れなければ何も変えずに次の周回の境で打ち直す。"""
+    w["returned"] = reason
+    if w.get("request"):
+        n = w.get("givebacks", 0) + 1
+        sent = lane_gate1(env, w, w.get("report") or "", w.get("state") or "", suffix=f"-m{lap}-{n}", stamp=w.get("stamp") or "")
+        if not sent:
+            w.pop("returned", None)
+            return False
+        _reopen_waiting(w)
+        w.update(sent, givebacks=n)
+    else:
+        _reopen_waiting(w)
+    w["returned"] = reason  # _reopen_waiting が外すため書き直す
+    mark_issue(env, rec, w)
     return True
 
 

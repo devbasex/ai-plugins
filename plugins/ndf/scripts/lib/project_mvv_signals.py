@@ -39,9 +39,11 @@ def _after(row: dict, since: datetime.datetime | None) -> bool:
 
 
 def unknown_streak(gate_rows: list[dict], sha: str | None) -> int:
-    """同じプロジェクト MVV の sha256 のもとで、末尾から続いた「判定できない」の回数（I13）。"""
-    n = 0
-    for r in reversed(gate_rows):
+    """同じプロジェクト MVV の sha256 のもとで、末尾から続いた「判定できない」の回数（I13）。
+    スプリント状態・承認ゲート・PR の組ごとに 1 件と数える（#2507）。オーガナイザーが同じ依頼の判定を打ち直した行は、
+    隣り合っていなくても同じ組として 1 件にまとめる（閾値は判定できなかった依頼の数で届く）。"""
+    seen: set[tuple] = set()
+    for i, r in enumerate(reversed(gate_rows)):
         ref = r.get("project_mvv") or {}
         if ref.get("sha256") != sha:
             break
@@ -49,8 +51,10 @@ def unknown_streak(gate_rows: list[dict], sha: str | None) -> int:
             continue  # 機械の検査で戻したものは判定ではない
         if r.get("verdict") != "unknown":
             break
-        n += 1
-    return n
+        pr = r.get("pr")
+        # スプリント状態の無い行は組を決められないため、1 行を 1 件と数える
+        seen.add((r.get("sprint"), r.get("gate"), tuple(pr) if isinstance(pr, list) else pr) if r.get("sprint") else ("row", i))
+    return len(seen)
 
 
 def _collect_signals(key, since, sha, approved, log) -> list[dict]:

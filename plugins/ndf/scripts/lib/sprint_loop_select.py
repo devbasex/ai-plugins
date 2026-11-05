@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import sys
 
+import design_pr_merge
 import project_mvv as pm
 import sprint_mvv
 
@@ -38,7 +40,12 @@ from sprint_loop_record import (
 )
 
 from sprint_loop_gate import (
+    MERGED_RESULTS,
+    design_head,
+    giveback_design,
     loop_ok,
+    note_merge,
+    reask_design,
     refusal_order,
     select_cmd,
 )
@@ -83,11 +90,30 @@ def candidates_of(ms: dict, max_issues: int, held: set[int] = frozenset()) -> li
 PENDING_REASON = "保留の周回の課題"
 
 
+APPROVED_REASON = "承認した設計"
+PRODUCTION_REASON = "設計 PR の宛先が本番（承認ゲート 2 で人がマージする）"
+
+
+def approved_designs(rec: dict) -> set[int]:
+    """承認し、設計 PR のマージが済み、その後の周回でまだ選ばれていない課題（#2507 の I7）。"""
+    out = set()
+    for w in rec.get("waiting", []):
+        if w.get("answer") != "approved" or not w.get("merged_at"):
+            continue
+        n = w["number"]
+        later = [lap for lap in rec.get("laps", []) if lap.get("n", 0) > (w.get("lap") or 0)]
+        if not any(r.get("number") == n and r.get("decision") == SELECTED for lap in later for r in lap.get("selection") or []):
+            out.add(n)
+    return out
+
+
 def first_issues(rec: dict) -> set[int]:
-    """順位によらず先頭に選ぶ課題（#2436 の 6e）: 設計を直して出し直す課題と、配布を差し戻された周回の直し。"""
+    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・配布を差し戻された周回の直し・
+    承認とマージが済んだ設計の課題。"""
     last = {w["number"]: w for w in rec.get("waiting", [])}
     revise = {n for n, w in last.items() if w.get("answer") == "revise"}
-    return revise | {n for f in rec.get("fixes", []) if not f.get("fixed_by") for n in f.get("issues") or []}
+    fixes = {n for f in rec.get("fixes", []) if not f.get("fixed_by") for n in f.get("issues") or []}
+    return revise | fixes | approved_designs(rec)
 
 
 def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
@@ -107,7 +133,7 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
             if w.get("pr") and env.pr_state(int(w["pr"])) == "MERGED":
                 w["merged_at"] = env.now()
             else:
-                return "設計 PR がマージ待ち"
+                return merge_wait_reason(w)
     for e in rec.get("excluded", []):
         if e["number"] == n and e.get("lap") == lap_n:
             return e["reason"]
@@ -118,8 +144,105 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
     return None
 
 
+def merge_wait_reason(w: dict) -> str:
+    """承認済みで未マージの課題を外す理由。マージの結果の理由を添える（#2507）。"""
+    m = w.get("merge") or {}
+    if m.get("result") == "production":
+        return PRODUCTION_REASON
+    return f"設計 PR がマージ待ち（{m['reason']}）" if m.get("reason") else "設計 PR がマージ待ち"
+
+
+# ---------------------------------------------------------------- 承認した設計のマージし直し（#2507 の I6）
+
+STREAK_LIMIT = 3  # 同じ分類の not_green がこの周回の数だけ続いたら利用者へ戻す（既定。測っていない）
+UNSOLVABLE = ("stale_again",)  # 時間で解けない not_green の分類
+
+
+def settle_approved_designs(env: Env, rec: dict) -> list[str]:
+    """周回の境（選定の前）で、承認済みで未マージの設計 PR ごとに、前のマージの結果に応じた手を 1 回だけ打つ。
+    マージ済みになった設計 PR は後片付けを打つ。失敗はその課題を外す理由にとどめ、周回は止めない。打った手の 1 行を返す。"""
+    lap_n = len(rec.get("laps", [])) + 1
+    notes = []
+    for w in rec.get("waiting", []):
+        if w.get("answer") != "approved" or not w.get("pr"):
+            continue
+        if not w.get("merged_at"):
+            if line := _settle_one(env, rec, w, lap_n):
+                notes.append(line)
+        if w.get("answer") == "approved" and w.get("merged_at") and not w.get("cleaned"):
+            code, so, se = env.run([sys.executable, str(design_pr_merge.MERGED_STEPS), "cleanup", str(w["pr"])], cwd=str(env.main_dir()))
+            w["cleaned"] = env.now() if code == 0 else None
+            if code != 0:
+                w["cleanup_error"] = (se or so).strip()[:200]
+    return notes
+
+
+def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
+    """「周回の境が結果ごとに打つ手」の表（設計 #2507）の 1 行を打つ。"""
+    m = w.get("merge") or {}
+    res, cls, pr = m.get("result"), m.get("class"), int(w["pr"])
+    if res in MERGED_RESULTS:
+        w["merged_at"] = env.now()
+        return None
+    if res in ("head_moved", "no_stamp"):
+        return f"#{w['number']} の設計 PR #{pr} を新しい先端で問い直した" if reask_design(env, rec, w, design_head(env, w)) else None
+    if res == "production":  # 宛先は周回を重ねても変わらない。人が承認ゲート 2 でマージしたかだけを読む
+        if env.pr_state(pr) == "MERGED":
+            w["merged_at"] = env.now()
+        return None
+    if res == "failed":
+        return _giveback(env, rec, w, m.get("reason") or "マージできない", lap_n)
+    if res == "conflict":
+        return _settle_conflict(env, rec, w, m, lap_n)
+    if res == "not_green" and (cls in UNSOLVABLE or m.get("streak", 0) >= STREAK_LIMIT):
+        return _giveback(env, rec, w, m.get("reason") or "検査が緑にならない", lap_n)
+    used = m.get("infra_reruns", 0) if m.get("stamp") == (w.get("stamp") or "") else 0
+    if res == "not_green" and cls == "infra" and used >= design_pr_merge.INFRA_RERUNS:
+        return _giveback(env, rec, w, f"CI の基盤待ちが再実行 {design_pr_merge.INFRA_RERUNS} 回で解けない", lap_n)
+    budget = design_pr_merge.INFRA_RERUNS - used  # 残りを再実行する層へ渡す（前の分類が基盤待ちでなくても累計で上限を守る）
+    out = design_pr_merge.merge_approved(env.main_dir(), pr, w.get("stamp"), run=env.run, infra_budget=budget)
+    got = note_merge(w, out, lap_n, env.now())
+    return f"#{w['number']} の設計 PR #{pr} をマージし直した（{got['result']}）"
+
+
+def _giveback(env: Env, rec: dict, w: dict, reason: str, lap_n: int) -> str | None:
+    if giveback_design(env, rec, w, reason, lap_n):
+        return f"#{w['number']} の設計 PR #{w['pr']} をマージできず、利用者へ戻した（{reason}）"
+    return None
+
+
+def design_worktree(env: Env, branch: str) -> str | None:
+    """設計のブランチを持つ worktree のパス。無ければ None。"""
+    if not branch:
+        return None
+    code, so, _ = env.run(["git", "worktree", "list", "--porcelain"], cwd=str(env.main_dir()))
+    path = None
+    for line in (so or "").splitlines() if code == 0 else []:
+        if line.startswith("worktree "):
+            path = line.split(" ", 1)[1]
+        elif line == f"branch refs/heads/{branch}":
+            return path
+    return None
+
+
+def _settle_conflict(env: Env, rec: dict, w: dict, m: dict, lap_n: int) -> str | None:
+    """宛先と衝突した設計 PR: 設計の worktree でベースブランチを取り込んで push する。先端が進めば新しい先端で問い直し、
+    衝突が残れば取り込みを閉じて利用者へ戻す。"""
+    wt = design_worktree(env, m.get("branch") or "")
+    if not wt:
+        return _giveback(env, rec, w, f"宛先と衝突している（設計の worktree が無い）: {m.get('reason') or ''}", lap_n)
+    code, so, se = env.run([sys.executable, str(design_pr_merge.MERGED_STEPS), "base-sync", "--pr", str(w["pr"]), "--push"], cwd=wt)
+    if code == 0:
+        head = design_head(env, w)
+        if head and head != (w.get("stamp") or "") and reask_design(env, rec, w, head):
+            return f"#{w['number']} の設計 PR #{w['pr']} にベースブランチを取り込み、新しい先端で問い直した"
+    if code == 1:
+        env.run(["git", "merge", "--abort"], cwd=wt)
+    return _giveback(env, rec, w, f"宛先と衝突し、ベースブランチを取り込めない（{code}）: {(se or so).strip()[:160]}", lap_n)
+
+
 def _select_candidate_rows(
-    cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset()
+    cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset(), approved: set[int] = frozenset()
 ) -> tuple[list[int], list[dict]]:
     """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。
     max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・配布の直し）→ 品質の枠の課題 → 順位の順に割り当てる
@@ -136,7 +259,12 @@ def _select_candidate_rows(
         why = whys[i] if whys[i] is not None or i in take else "容量"
         if why is None:
             picked.append(r["number"])
-            reason = "直しの先頭" if r["number"] in first else "品質の枠" if r.get("quality_slot") else "順位"
+            reason = (
+                APPROVED_REASON if r["number"] in approved
+                else "直しの先頭" if r["number"] in first
+                else "品質の枠" if r.get("quality_slot")
+                else "順位"
+            )  # fmt: skip
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
         else:
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})
@@ -173,6 +301,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
     approvals = {(a["milestone"], a["sha256"]) for a in rec.get("sprint_mvv_approvals", [])}
     rows_out, total = [], 0
     first = first_issues(rec)
+    approved = approved_designs(rec)
     for title in order:
         ms = by_title[title]
         cands = milestone_candidates(ms, rec, first)
@@ -185,6 +314,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
             rec["max_issues"],
             (lambda r: "スプリント MVV が未承認") if unapproved else (lambda r: exclusion_reason(env, rec, r, lap_n, lap_created)),
             first,
+            approved,
         )
         rows_out += here
         if picked:
@@ -213,6 +343,7 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     got = pending_step(env, rec, before, sprint_loop.apply_gate1_answers)
     if got is not None:
         return got
+    settle_approved_designs(env, rec)  # 選定の前に、承認済みで未マージの設計 PR をマージし直す（#2507）
     if len(pending_laps(rec)) >= rec.get("release_pending_max", RELEASE_PENDING_MAX):
         return stop_and_report(env, rec, before, waiting_only(rec, "release_pending_max"), "答えの無い保留の周回が上限に達した（待ちだけ）")
     stop = held_stop(rec, boundary_stop(env, rec))
