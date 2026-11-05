@@ -78,7 +78,7 @@ def candidates_of(ms: dict, max_issues: int, held: set[int] = frozenset()) -> li
         nums = {r["number"] for r in rows[: idx + 1]}
     else:  # 判断待ちと保留の周回（held）の行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
         open_rows = [r for r in rows if not r.get("waiting_decision") and r["number"] not in held][:max_issues]
-        last = rows.index(open_rows[-1]) if open_rows else len(rows) - 1
+        last = rows.index(open_rows[-1]) if len(open_rows) == max_issues else len(rows) - 1  # 枠が埋まらなければ末尾まで
         nums = {r["number"] for r in rows[: last + 1]}
     slot = ms.get("large_slot") or {}
     if slot.get("status") == SLOT_FIT and slot.get("slice"):
@@ -275,9 +275,11 @@ def _rows_by_rank(ms: dict) -> list[dict]:
     return sorted(ms.get("rows", []), key=lambda r: r["rank"])
 
 
-def milestone_candidates(ms: dict, rec: dict, first: set) -> list[dict]:
-    """マイルストーンの候補（切り出しの境界の内）に、境界の外にある先に選ぶ課題を順位の順で足す。"""
-    cands = candidates_of(ms, rec["max_issues"], pending_issues(rec))
+def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int) -> list[dict]:
+    """マイルストーンの候補（切り出しの境界の内）に、境界の外にある先に選ぶ課題を順位の順で足す。
+    保留の周回の課題と今の周回で外した課題（loop exclude）は、境界が無いときの枠を使わない（#2627）。"""
+    lap_excluded = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == lap_n}
+    cands = candidates_of(ms, rec["max_issues"], pending_issues(rec) | lap_excluded)
     have = {r["number"] for r in cands}
     return cands + [r for r in _rows_by_rank(ms) if r["number"] in first and r["number"] not in have]
 
@@ -304,7 +306,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
     approved = approved_designs(rec)
     for title in order:
         ms = by_title[title]
-        cands = milestone_candidates(ms, rec, first)
+        cands = milestone_candidates(ms, rec, first, lap_n)
         total += len(cands)
         text = sprint_mvv.mvv_sections(descriptions.get(title) or "")
         unapproved = text is not None and (title, pm.sha256_text(text)) not in approvals
