@@ -32,6 +32,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `actuals-run-json` | `actuals-run.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `answer-json` | `answer.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `answers-sent-json` | `answers-sent.json` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `applied-json` | `*.applied.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `apply-json` | `apply.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `approved-txt` | `approved.txt` | result | state-dir | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |

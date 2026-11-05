@@ -81,7 +81,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | 承認ゲート 2 は提示のプランが持ち、本番のプランは確定の後にだけ流す | 本番のプランは流し始めるときに worktree と `release/v<版>` を作る。答えの前に作ると、提示 2 の本番のプランが同じ名前のブランチを作り直せない |
 | 本番チャネルへの Pull Request の head を、承認したコミットから切った `release/v<版>` にする | `develop` を止めずに、承認したコミットと版上げだけを `main` へ出せる。`main` へ出るコミットはすべて `develop` に含まれる。並列の計画の外の配布にも同じ規則が効く |
 | 並列の計画の下では、区分つきの問いはオーガナイザーだけが出す。レーンの問いは問いの hook が送る | レーンは問いで止まらず別の作業へ進める。conductor の手順だけで送ると、手順に書いていない場所の問いが漏れる。送れなければ今どおり通すので、DBOS が読めないときも今の振る舞いに戻る |
-| オーガナイザーは作業を持たない。答えの後の処理は持ち主のレーンが、持ち主のいない共有の作業は一時レーン（同時に 1 本）が行う | オーガナイザーに作業を積むと、その間は問いと配布の取りまとめが止まる。空いているレーンへ移す形は、空きの判定と他のレーンの周回への割り込みが要る |
+| オーガナイザーは、設計の承認の答えで設計 PR をマージするほかは作業を持たない。答えの後の処理は持ち主のレーンが、持ち主のいない共有の作業は一時レーン（同時に 1 本）が行う | オーガナイザーに作業を積むと、その間は問いと配布の取りまとめが止まる。空いているレーンへ移す形は、空きの判定と他のレーンの周回への割り込みが要る |
 | 計画名での停止は `relay.py` ではなく `parallel.py stop` に置く | 統括役はリポジトリをまたぐ層で、並列の計画を知らない。統括役が知る語を役割の印だけに留める |
 | レーンの数の上限は `NDF_RELAY_MAX_NAMED` から読み、依存のあるレーンも数える | 統括役が実際に断る値と同じにする。同時に動く本数を依存から求めると、起動の前に確かめられない |
 | プランの本数の合計の上限は `NDF_PARALLEL_MAX_PLANS`（既定 6） | 2026-09-25 の実測（8 コア・30 GB で 6 本）。マシンごとに違うため環境変数で変える（2026-11-03 の承認ゲート 1 で利用者が決めた） |
@@ -108,7 +108,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | I15 | 範囲に入ったレーンは、依頼していなくても配布の結果を受ける。自分の Pull Request のマージのコミットがすべて `origin/<本番チャネル>` にあれば、依頼を送らずに `released` で進む | 出せた配布ごとに範囲のイベント `range-<連番>` を立てる。`request` は送る前に本番チャネルを照らし、版は `range-<連番>` から読む |
 | I16 | 本番チャネルへ出すコミットは、すべて `develop` に含まれる | `scripts/check-pr-base.sh`（継続的統合の `pr-base-guard`）が落とす |
 | I17 | 並列の計画の下で区分つきの問いを出すのはオーガナイザーだけである | レーンと一時レーンの問いは依頼（`kind: gate1` / `gate2` / `ask`）としてオーガナイザーへ届く |
-| I18 | オーガナイザーは作業を持たない。一時レーンは同時に 1 本まで | `answer` は答えのメッセージを送るだけで、ラベル・記録・直しは持ち主のレーンが周回の境で行う |
+| I18 | オーガナイザーは、設計の承認で設計 PR をマージするほかは作業を持たない。一時レーンは同時に 1 本まで | `answer --approved` は設計の承認の依頼なら、承認した先端のままで必須の検査が緑の設計 PR を待たずにマージしてから答えのメッセージを送り、ほかの答えはメッセージを送るだけである。ラベル・記録・直し・マージし直し・後片付けは持ち主のレーンが周回の境で行う |
 | I20 | 依頼の `id` は送る側が依頼の中身から決め、受け取った数から採番しない | 打ち直しで同じ `id` になり、冪等の鍵（`<ID>:inbox:<依頼>`）が 2 度目を数えない。受け取りの前後で打ち直しても `id` が変わらない |
 
 ### 構成要素
@@ -124,6 +124,8 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/lib/durable.py` | 外のプロセスから記録を開く関数（`open_client`・`send_to`・`event_from`・`status_from`・`output_from`・`wait_from`）と、耐久ワークフローの中の `recv`・`set_event`。DBOS を import するのはこのファイルだけである |
 | `plugins/ndf/scripts/relay_lib/hub.py`・`hub_client.py` | 役割のファイルの読み書き（`relay.py role`・`spawn --role helper --plan`）と数え方（I13）。`ls --json` の `metrics.hub`・`metrics.tmux` |
 | `plugins/ndf/scripts/lib/sprint_loop_gate.py` | ループのレーンが設計の承認を「人の判断待ち」へ移すときに、`kind: gate1` の依頼を送る。答えを当てる前に設計 PR の先頭を比べる |
+| `plugins/ndf/scripts/lib/design_pr_merge.py` | 承認した設計のマージ（`merge_approved`）。`parallel.py answer --approved`・`loop answer --approved`・周回の境が呼ぶ |
+| `plugins/ndf/scripts/lib/parallel_answer.py` | 答えの後に起こす 1 行（`owner_restart`）と、答えの後に残る依頼の一覧と除外の印（`after_items`・`mvv_mark`） |
 | `plugins/ndf/scripts/hook_lib/ask_guard.py` | 判定が通す問いを、レーンか一時レーンなら `parallel.py request-ask` で送って止める |
 
 ```mermaid
@@ -250,7 +252,7 @@ stateDiagram-v2
 | メッセージ | 話題 `resume` | `confirm`・`settle` | 配布の途中の耐久ワークフロー | `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}` |
 | イベント | `pause` | 耐久ワークフロー | `wait` | `{seq, action, …}`。`action` は `running` / `notice` / `release` / `confirmed` / `held`。`running` では `wait` は返らない。起こす 1 行（`wake`）を添える |
 | イベント | `questions` | 耐久ワークフロー | `wait` | `{seq, items}`。答えていない問いの依頼の全件 |
-| イベント | `answer-<依頼>` | 耐久ワークフロー | `await`・周回の境（`answers_of`） | 配布: `{result, version, release, reason, at}`。問い: `{result, note, choice, stamp, at}` |
+| イベント | `answer-<依頼>` | 耐久ワークフロー | `await`・周回の境（`answers_of`） | 配布: `{result, version, release, reason, at}`。問い: `{result, note, choice, stamp, merge, by, at}`（`merge` は設計の承認で試みたマージの結果、`by` は `user` か `mvv`） |
 | イベント | `defer-<依頼>` | 耐久ワークフロー | `await` | `{seq, reason, at}`。知らせのたびに上書きしてよい |
 | イベント | `range-<連番>` | 耐久ワークフロー | `request`（`released_version`） | 出せた配布の `{sha, version, prs, lanes}`。差し戻し・失敗の配布の連番は欠ける |
 | イベント | `lane-<レーン名>` | 耐久ワークフロー | 状態の表示 | `{received}`。依頼の `id` の採番には使わない |
