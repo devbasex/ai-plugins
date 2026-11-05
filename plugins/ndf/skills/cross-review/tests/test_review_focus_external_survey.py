@@ -84,4 +84,3 @@ def test_docs_only_pr_does_not_read_the_skill(monkeypatch, tmp_path):
     """観点を載せない PR は SKILL.md を読まず、無くても止まらない。"""
     monkeypatch.setattr(rf, "PR_REVIEW_SKILL", tmp_path / "missing" / "SKILL.md")
     assert "ドキュメントのみ PR" in _auto("docs/a.md")
-
