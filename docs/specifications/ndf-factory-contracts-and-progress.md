@@ -208,7 +208,7 @@ graph TD
 | `EXECUTION_MODE` | 必須。`local` / `byok` / `managed` |
 | `MODEL_CREDENTIAL_SECRET_ARN` | `EXECUTION_MODE` が `byok` のとき必須、`local`・`managed` のとき持たない。形は `INGEST_TOKEN_SECRET_ARN` と同じ |
 | `LOOP_NAME`・`LOOP_MILESTONES` | `START` が `loop` のとき必須。ほかの開発ループの入力があれば `LOOP_NAME` も必須 |
-| `LOOP_BUDGET` | 任意。宣言した予算（`laps=`・`usd=`・`hours=`）だけをカンマで並べる |
+| `LOOP_BUDGET` | 任意。予算の単位（`laps=`・`usd=`・`hours=`）をカンマで並べる。値は数か `default`（その単位をリポジトリの既定へ戻す） |
 | `EXCLUDE_ISSUES` | 任意。選定から外す課題の番号（ランナーが NDF の `NDF_LOOP_EXCLUDE` へ渡す） |
 | `LOOP_ANSWERS` | 任意。人の判断待ちの課題への答え |
 

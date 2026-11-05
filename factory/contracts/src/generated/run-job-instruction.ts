@@ -41,7 +41,7 @@ export type RunJobInstruction = {
    */
   LOOP_MILESTONES?: string;
   /**
-   * 宣言した予算だけを並べる。無ければ NDF の既定
+   * 単位ごとに数か default（その単位をリポジトリの既定へ戻す）を並べる。並べない単位と、LOOP_BUDGET が無いときは NDF の記録の値のまま（新しいループでは NDF の既定）
    */
   LOOP_BUDGET?: string;
   /**

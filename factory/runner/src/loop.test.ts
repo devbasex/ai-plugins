@@ -274,6 +274,12 @@ describe("START=loop の手順（受け入れ条件 1・12・13・18）", () => 
     expect(firstPrompt(base, null)).toBe('/ndf:development-workflow --loop lfactory2 --milestones "25 Factory,26 根本" --budget-laps 3 --budget-usd 60');
   });
 
+  it("既定へ戻す指示 default もそのまま --budget-<単位> default で渡す（#2406）", () => {
+    expect(firstPrompt({ ...base, LOOP_BUDGET: "laps=default,usd=default,hours=24" }, null)).toBe(
+      '/ndf:development-workflow --loop lfactory2 --milestones "25 Factory,26 根本" --budget-laps default --budget-usd default --budget-hours 24',
+    );
+  });
+
   it("job.finished の冪等の鍵は今の形のまま", () => {
     expect(common({ sprintRunId: "sr1", jobId: "job1", repo: "o/r" }, "finished", "2026-11-02T00:00:00.000Z").idempotency_key).toBe("job1:finished");
   });

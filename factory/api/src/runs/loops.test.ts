@@ -10,7 +10,7 @@ import { accountContext, createRunsHarness, TEST_CONFIG, type RunsHarness } from
 import { backfill } from "./backfill.ts";
 import type { RunControlConfig } from "./control.ts";
 import { LoopControl, loopStateAfter, type RunOutcome } from "./loops.ts";
-import { compareVersions, isLegacyVersion } from "./version.ts";
+import { compareVersions, isLegacyVersion, supportsBudgetReset } from "./version.ts";
 
 const REPO = 101;
 const OTHER_REPO = 102;
@@ -144,6 +144,15 @@ describe("版の比べ方（決定 12）", () => {
     expect(isLegacyVersion("10.27.0", null)).toBe(true);
     expect(isLegacyVersion("10.27.0", "10.27.0-dev.1")).toBe(false);
   });
+
+  it("予算を既定へ戻せる版は下限と同じか新しい版。開発版の接尾辞の付いた同じ版・下限が無い・読めない版は戻せない（#2406）", () => {
+    expect(supportsBudgetReset("10.27.0", "10.27.0")).toBe(true);
+    expect(supportsBudgetReset("10.27.1@abc", "10.27.0")).toBe(true);
+    expect(supportsBudgetReset("10.26.9", "10.27.0")).toBe(false);
+    expect(supportsBudgetReset("10.27.0-dev.1", "10.27.0")).toBe(false);
+    expect(supportsBudgetReset("10.27.0", null)).toBe(false);
+    expect(supportsBudgetReset("unknown", "10.27.0")).toBe(false);
+  });
 });
 
 describe("開発ループを始め・止め・予算を変える（受け入れ条件 1・11）", () => {
@@ -171,6 +180,40 @@ describe("開発ループを始め・止め・予算を変える（受け入れ�
     expect(instructionOf((await runOf(loop.currentRunId!)).currentJobId!).LOOP_BUDGET).toBe("laps=4,usd=50");
     const row = (await loops.listLoops(accountContext(), REPO)).loops[0]!;
     expect(row).toMatchObject({ name: "lfactory2", laps_closed: 1, cost_usd: 2, budget_remaining: { laps: 3, usd: 48, hours: null } });
+  });
+
+  it("既定へ戻せる版では、空にした単位を次の周回の指示へ default として載せる（#2406）", async () => {
+    await setup({ budgetResetMinVersion: "10.26.1" });
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"], accountContext(), { usd: 10 });
+    expect(instructionOf((await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!).LOOP_BUDGET).toBe("laps=default,usd=10,hours=default");
+    await loops.updateBudget(accountContext(), loop_id, { budget: { usd: null } });
+    await finishEcs((await loopOf(loop_id)).currentRunId!, { result: "done", summary: "" }, [["loop.lap_closed", lap(1)]]);
+    const ins = instructionOf((await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!);
+    expect(ins.LOOP_BUDGET).toBe("laps=default,usd=default,hours=default");
+    expect(validateRunJobInstruction(ins).ok).toBe(true);
+  });
+
+  it("既定へ戻せない版では、値のある単位を空にする変更を 409 で断り、値の変更と空のままの単位は受ける（#2406）", async () => {
+    await setup({ budgetResetMinVersion: "10.27.0" });
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"], accountContext(), { usd: 10 });
+    expect(instructionOf((await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!).LOOP_BUDGET).toBe("usd=10");
+    const cleared = loops.updateBudget(accountContext(), loop_id, { budget: { usd: null } });
+    expect(await detailsOf(cleared)).toEqual({ ndf_version: "10.26.1", units: ["usd"] });
+    expect(await codeOf(loops.updateBudget(accountContext(), loop_id, { budget: {} }))).toBe("budget_reset_unsupported");
+    expect((await loopOf(loop_id)).budget).toEqual({ laps: null, usd: 10, hours: null });
+    expect(await codeOf(loops.updateBudget(accountContext(), loop_id, { budget: { usd: 20 } }))).toBe("ok");
+    expect((await loopOf(loop_id)).budget).toEqual({ laps: null, usd: 20, hours: null });
+  });
+
+  it("判定に使う版は今の実行の版で、今の実行が無ければマーケットプレイスの版。下限が無ければ戻せない（#2406）", async () => {
+    await setup({ budgetResetMinVersion: "10.27.0" });
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"], accountContext(), { usd: 10 });
+    const loop = await loopOf(loop_id);
+    h.table.runs.get(loop.currentRunId!)!.ndfVersion = "10.27.0";
+    expect(await h.control.budgetResetSupportedFor(loop)).toEqual({ supported: true, ndfVersion: "10.27.0" });
+    expect(await h.control.budgetResetSupportedFor({ ...loop, currentRunId: null })).toEqual({ supported: false, ndfVersion: "10.26.1" });
+    await setup();
+    expect((await h.control.budgetResetSupportedFor({ ...loop, currentRunId: null })).supported).toBe(false);
   });
 
   it("形の違う名前・マイルストーン・予算は 400、同じ名前の終わっていないループは 409", async () => {
@@ -606,5 +649,88 @@ describe("選定の規則を持たない（受け入れ条件 1）", () => {
       const text = readFileSync(new URL(f, dir), "utf8");
       expect(text).not.toMatch(/upkeep|rank_digest|max_issues|candidates_of/);
     }
+  });
+});
+
+// 現状固定テスト（cross-refactoring の I-001。RunControl.finalize の分岐ごとの今の振る舞いを固定する）
+describe("タスクが止まった後の処理（RunControl.finalize の現状）", () => {
+  beforeEach(() => setup());
+
+  const jobOf = async (jobId: string) => (await h.table.getJob(jobId))!;
+
+  it("job.finished の無いまま止まると、control が failed を書き、実行は task_stopped で failed、ジョブは failed で token を消す", async () => {
+    const run = await manual([4]);
+    const jobId = (await runOf(run.sprint_run_id)).currentJobId!;
+    await h.control.onTaskStateChange(jobId, "RUNNING");
+    const arn = (await jobOf(jobId)).tokenSecretArn!;
+    expect(h.platform.tokens.has(arn)).toBe(true);
+    await h.control.onTaskStateChange(jobId, "STOPPED");
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "task_stopped" });
+    expect(await jobOf(jobId)).toMatchObject({ state: "failed", result: "failed", finishedAt: h.clock.now.toISOString() });
+    expect(h.platform.tokens.has(arn)).toBe(false);
+    const finished = await memoryProgressReader(h.progress).findJobFinished(run.sprint_run_id, jobId);
+    expect(finished).toMatchObject({ source: "control", payload: { result: "failed", summary: "実行の制御が終わりを書いた（task_stopped）" } });
+  });
+
+  it("ランナーが failed を書いたジョブは job_failed で failed になる", async () => {
+    const run = await manual([4]);
+    await finishEcs(run.sprint_run_id, { result: "failed", summary: "" });
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "job_failed" });
+  });
+
+  it("done で終わると実行は done、枠を返し、2 度目の停止の知らせでは何も変えない", async () => {
+    const run = await manual([4]);
+    const jobId = await finishEcs(run.sprint_run_id, { result: "done", summary: "" });
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "done", failureReason: null });
+    expect(await jobOf(jobId)).toMatchObject({ state: "done", result: "done" });
+    expect((await h.table.getSlots("acc-1", REPO)).account).toBe(0);
+    const before = structuredClone(await runOf(run.sprint_run_id));
+    await h.control.onTaskStateChange(jobId, "STOPPED");
+    expect(await runOf(run.sprint_run_id)).toEqual(before);
+  });
+
+  it("起動に失敗したジョブは launch_failed で failed になる", async () => {
+    h.platform.failRunTask = true;
+    const run = await manual([4]);
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "launch_failed" });
+  });
+
+  it("打ち切りの時間を過ぎた local のジョブは見回りが timeout で終える", async () => {
+    await manual([4], REPO, accountContext({ executionMode: "local" }));
+    const ins = (await h.control.claimLocalRunJob("acc-1"))!.instruction;
+    h.clock.now = new Date(h.clock.now.getTime() + (TEST_CONFIG.timeoutSeconds + 1) * 1000);
+    await h.control.sweep();
+    expect(await runOf(ins.SPRINT_RUN_ID)).toMatchObject({ state: "failed", failureReason: "timeout" });
+    expect((await jobOf(ins.JOB_ID)).state).toBe("failed");
+  });
+
+  it("手動の実行の gate は承認待ちになり、配布の依頼が無ければ release_requested の理由でも依頼を待たない", async () => {
+    const run = await manual([4]);
+    await finishEcs(run.sprint_run_id, { result: "gate", summary: "", reason: "release_requested" });
+    const r = await runOf(run.sprint_run_id);
+    expect(r.state).toBe("awaiting_approval");
+    expect(r.awaitingReason ?? null).toBeNull();
+    expect(r.releaseRequestId ?? null).toBeNull();
+  });
+
+  it("ループの周回の gate は release_requested の理由を終わりの理由へ写さず、ループも承認待ちになる", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const runId = (await loopOf(loop_id)).currentRunId!;
+    await finishEcs(runId, { result: "gate", summary: "", reason: "release_requested" });
+    const r = await runOf(runId);
+    expect(r.state).toBe("awaiting_approval");
+    expect(r.finishReason ?? null).toBeNull();
+    expect(r.awaitingReason ?? null).toBeNull();
+    expect((await loopOf(loop_id)).state).toBe("awaiting_approval");
+  });
+
+  it("ループの周回が done で終わると、次の周回が起きる", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const runId = (await loopOf(loop_id)).currentRunId!;
+    await finishEcs(runId, { result: "done", summary: "" }, [["loop.lap_closed", lap(1)]]);
+    expect((await runOf(runId)).state).toBe("done");
+    const loop = await loopOf(loop_id);
+    expect(loop).toMatchObject({ state: "running", lapRuns: 2 });
+    expect(loop.currentRunId).not.toBe(runId);
   });
 });

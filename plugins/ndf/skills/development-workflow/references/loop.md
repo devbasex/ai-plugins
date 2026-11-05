@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | `<ループ名>` | 記録の名前（英数字・`-`・`_`）。同じ名前の記録があれば再開する | `l<UTC の YYYYMMDD>` |
 | `--milestones` | 選定の対象を絞る | 開いているマイルストーンすべて |
-| `--budget-*` | 予算を上書きする（記録の `budget_history` に残る） | `.ndf/pace.json` の `loop.budget` |
+| `--budget-*` | 予算を上書きする（記録の `budget_history` に残る）。値は数か `default`（その単位を反映の時点の `.ndf/pace.json` の `loop.budget` へ戻す。宣言が無い単位は組み込みの既定）。値が変わらなければ履歴に行を足さない | `.ndf/pace.json` の `loop.budget` |
 
 `ndf-next` と再開のコマンドは `/goal /ndf:development-workflow --loop <ループ名> -- 終わり: [ndf-loop] stopped <ループ名> の行を出したとき`
 の形で、`sprint-state.py loop` の結果の `resume` をそのまま使う。`/goal` で始めていなければ `loop start --no-goal` を打つ。
