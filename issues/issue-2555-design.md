@@ -130,11 +130,13 @@ E5 と E1 の順序は保証されない。E4 の後もベースブランチへ�
 
 | 要素 | 責務 | 変える内容 |
 | --- | --- | --- |
-| `release_lib/included.py` の `section_range` | 前のリリースタグと範囲の終点から範囲の PR を求め、`--prs` との和を返す。範囲を求めるのはここだけ。読むのは git だけで、GitHub を読まない | 終点を引数 `to`（コミット）で受ける。中で `origin/<ベースブランチ>` を読まず、`fetch` もしない |
-| `release_lib/included.py` に足す `drop_outside` | `--prs` の番号のうち、マージコミットが範囲の終点の祖先でない番号を範囲の PR から外す | 新設。引数は範囲の PR・PR の読み出し結果（`pr_many` の戻り値）・終点・`--prs`・呼び手が渡す列 `outside`。GitHub を読まず、マージコミットは読み出し結果の `mergeCommit` を使う（`pr_fields` の 1 回のまとめ読みが既に `mergeCommit { oid }` を含む）。`--prs` の番号ごとに `git merge-base --is-ancestor <マージコミット> <終点>` を打ち、失敗した番号を外して `outside` へ足す（`titles_of` の `skipped` と同じ渡し方）。マージされていない番号（`mergeCommit` が無い）は外さず、今のとおり `titles_of`・`notes_of` が `skipped` で外す |
-| `release-steps.py` の `pr_titles`・`pr_notes` | 範囲の PR を読み、版の節の箇条と配る中身を組む | `pr_many` の直後、`titles_of`・`notes_of` の前に `drop_outside` を呼ぶ。`pr_many` に渡す欄へ `mergeCommit` を足す（まとめ読みが失敗して PR ごとの `gh pr view` へ倒れたときも、マージコミットを同じ 1 回の読みで得るため） |
-| `release-steps.py` の `section_prs` | `changelog`・`notes`（`--approval` なし）の範囲の PR と前のリリースタグを決める | タグを `fetch` してから前のリリースタグを決め、終点に worktree の先頭（`git rev-parse HEAD`）を渡す。`drop_outside` が外した番号を結果の `items` に出す |
-| `release-steps.py` の `cmd_approval_facts` | 承認に出すコミットを決め、承認資料を書く | 範囲の PR を `section_range` で求め、終点に承認に出すコミット（今のコードの変数 `dev`）を渡す。今の `pr_many`（`mergeCommit` を既に読む）の直後に、同じ終点で `drop_outside` を呼ぶ。差分の行数も `origin/<本番チャネル>...<承認に出すコミット>` から数える |
+| `release_lib/included.py` の `section_range` | 前のリリースタグと範囲の終点から範囲の PR を求め、`--prs` との和と、範囲の PR に無い `--prs` の番号（以下「範囲の外の `--prs`」）を返す。範囲を求めるのはここだけ | 終点を引数 `to`（コミット）で受ける。中で `origin/<ベースブランチ>` を読まず、`fetch` もしない。戻り値を「和」と「範囲の外の `--prs`」の 2 つにする（`with_extra` で和にした後は、範囲の PR と `--prs` を区別できないため）。範囲を求める今の読み出し（`release_range` → `merged_range.with_heads` が squash merge の head のブランチ名を GitHub から補い、`release/` の PR と PR でない番号を除く）はそのまま残す。この関数で GitHub の読み出しを足さない |
+| `release_lib/included.py` に足す `drop_outside` | 範囲の外の `--prs` のうち、マージコミットが範囲の終点の祖先でない番号を和から外す | 新設。引数は和・PR の読み出し結果（`pr_many` の戻り値）・終点・範囲の外の `--prs`・呼び手が渡す列 `outside`。GitHub を読まず、マージコミットは読み出し結果の `mergeCommit` を使う（`pr_fields` の 1 回のまとめ読みが既に `mergeCommit { oid }` を含む）。`git merge-base --is-ancestor <マージコミット> <終点>` を打つのは範囲の外の `--prs` の番号だけで、範囲の PR に入っている番号には打たない。失敗した番号を外して `outside` へ足す（`titles_of` の `skipped` と同じ渡し方）。マージされていない番号（`mergeCommit` が無い）は外さず、今のとおり `titles_of`・`notes_of` が `skipped` で外す |
+| `release-steps.py` の `pr_titles`・`pr_notes` | 範囲の PR を読み、版の節の箇条と配る中身を組む | 引数に終点・範囲の外の `--prs`・列 `outside` を足す（既定は終点なし）。終点を受けたときだけ、`pr_many` の直後、`titles_of`・`notes_of` の前に `drop_outside` を呼ぶ。`pr_many` に渡す欄へ `mergeCommit` を足す（まとめ読みが失敗して PR ごとの `gh pr view` へ倒れたときも、マージコミットを同じ 1 回の読みで得るため） |
+| `release-steps.py` の `section_prs` | `changelog`・`notes`（`--approval` なし）の範囲の PR・前のリリースタグ・終点・範囲の外の `--prs` を決める | タグを `fetch` してから前のリリースタグを決め、終点に worktree の先頭（`git rev-parse HEAD`）を渡す。終点と範囲の外の `--prs` も返す。`drop_outside` は呼ばない |
+| `release-steps.py` の `cmd_changelog`・`cmd_notes` | `changelog`・`notes` を打つ | `drop_outside` を呼ぶかを決める呼び手である。`cmd_changelog` と `--approval` なしの `cmd_notes` は、`section_prs` の終点・範囲の外の `--prs`・列 `outside` を `pr_titles`・`pr_notes` へ渡す。`--approval` の `cmd_notes` は終点を渡さず、`drop_outside` を呼ばない（読む「含む PR」は `approval-facts` が承認に出すコミットを終点にして絞り込み済みで、HEAD で確かめ直すと承認したコミットと違う終点で判定するため）。外した番号は `outside_items` の行として `items` に、`outside` として `metrics` に、`outside_note` の文言として `summary` に出す（下の行） |
+| `release-steps.py` に足す `outside_items`・`outside_note` | 外した番号の出し方を 1 か所に置く | 新設。`unmerged_items`・`unmerged_note` と同じ形で、マージされていない番号とは混ぜない。`items` の行は `{"kind": "pr", "name": "#<番号>", "result": "skipped", "reason": "範囲の終点に入っていない"}`。`metrics` は `unmerged` と別の鍵 `outside`（外した番号の列。無ければ空の列）。`summary` の末尾に「（範囲の終点に入っていない #<番号> は載せない）」を足す（無ければ足さない） |
+| `release-steps.py` の `cmd_approval_facts` | 承認に出すコミットを決め、承認資料を書く | 範囲の PR を `section_range` で求め、終点に承認に出すコミット（今のコードの変数 `dev`）を渡す。今の `pr_many`（`mergeCommit` を既に読む）の直後に、同じ終点と範囲の外の `--prs` で `drop_outside` を呼ぶ。外した番号は `outside_items`・`outside_note` で `changelog` と同じ形で出す。差分の行数も `origin/<本番チャネル>...<承認に出すコミット>` から数える |
 | `release_lib/names.py` に足す `require_untagged` | 版の節を書く前に、その基底の版のリリースタグが無いことを確かめる | 新設。タグがあれば `StepError`（3）を投げる |
 | `release_lib/names.py` に足す `drop_untagged_sections` | 前のリリースタグの版と出す正式版の間にある、タグの無い版の節を行の列から消し、消した見出しを返す | 新設 |
 | `release-steps.py` の `_update_changelog`・`write_notes` | 版の節を足す・挿す・差し替える | 書く前に `require_untagged` を呼ぶ。`_update_changelog` は正式版（接尾辞の無い版）のときだけ `drop_untagged_sections` を呼ぶ |
@@ -148,6 +150,7 @@ graph TD
         NT[notes]
         AF[approval-facts]
         SP[section_prs]
+        PT[pr_titles・pr_notes]
     end
     subgraph lib[release_lib]
         SR[included.section_range]
@@ -159,7 +162,9 @@ graph TD
     NT --> SP
     SP --> SR
     AF --> SR
-    SP --> DO
+    CL --> PT
+    NT -->|"--approval なしのときだけ終点を渡す"| PT
+    PT --> DO
     AF --> DO
     CL --> RU
     NT --> RU
@@ -170,11 +175,11 @@ graph TD
 
 ## 構造
 
-型を足さず、変えない。範囲の PR の型（`IncludedPr`）と結果 JSON の形は今のままである。変わるのは関数の引数（`section_range` の終点）と、`release_lib/included.py` に足す `drop_outside` と、`release_lib/names.py` に足す 2 つの関数だけである。
+型を足さず、変えない。範囲の PR の型（`IncludedPr`）は今のままで、結果 JSON は `metrics` に鍵 `outside` が増えるだけである。変わるのは関数の引数と戻り値（`section_range` の終点と範囲の外の `--prs`、`pr_titles`・`pr_notes` の終点）と、`release_lib/included.py` に足す `drop_outside` と、`release-steps.py` に足す `outside_items`・`outside_note` と、`release_lib/names.py` に足す 2 つの関数だけである。
 
 ```text
 plugins/ndf/scripts/
-├── release-steps.py          # section_prs・pr_titles・pr_notes・cmd_approval_facts・_update_changelog・write_notes を変える
+├── release-steps.py          # section_prs・pr_titles・pr_notes・cmd_changelog・cmd_notes・cmd_approval_facts・_update_changelog・write_notes を変え、outside_items・outside_note を足す
 └── release_lib/
     ├── included.py           # section_range の終点を引数にし、drop_outside を足す
     └── names.py              # require_untagged・drop_untagged_sections を足す
@@ -182,15 +187,15 @@ plugins/ndf/scripts/
 
 ## 入出力の契約
 
-引数と結果 JSON の形は変わらない。変わるのは次の 3 つである。
+引数は変わらず、結果 JSON は `metrics.outside` が増えるだけである。振る舞いが変わるのは次の 3 つである。
 
 | コマンド | 条件 | 結果 |
 | --- | --- | --- |
 | `changelog`・`notes`（`--approval` なし） | `refs/tags/<プラグイン>--v<基底の版>` がある | 書き込まずに終了コード 3。`summary` は「<版> はリリースタグ <タグ> があるため版の節へ書かない」。`CHANGELOG.md` は変わらない |
-| `changelog`・`notes`・`approval-facts` | `--prs` の番号のマージコミットが範囲の終点の祖先でない | その番号を版の節と「含む PR」に載せない。`items` に `{"kind": "pr", "name": "#<番号>", "result": "skipped", "reason": "範囲の終点に入っていない"}` を外した番号ごとに足す。終了コードは 0 のまま |
+| `changelog`・`notes`（`--approval` なし）・`approval-facts` | 範囲の PR に無い `--prs` の番号のマージコミットが範囲の終点の祖先でない | その番号を版の節と「含む PR」に載せない。`items` に `{"kind": "pr", "name": "#<番号>", "result": "skipped", "reason": "範囲の終点に入っていない"}` を外した番号ごとに足し、`metrics.outside` に番号を並べる（`metrics.unmerged` には混ぜない）。`summary` の末尾に「（範囲の終点に入っていない #<番号> は載せない）」を足す。終了コードは 0 のまま |
 | `changelog`（正式版） | 前のリリースタグの版より新しく、出す版より古いタグの無い版の節がある | その節を消す。`items` に `{"kind": "section", "name": "CHANGELOG.md", "result": "removed", "heading": "<見出し>"}` を消した節ごとに足す |
 
-`notes --approval` は `CHANGELOG.md` を書かないため、タグの確かめを通らない。
+`notes --approval` は `CHANGELOG.md` を書かないため、タグの確かめを通らない。範囲の終点の確かめ（`drop_outside`）も通らない。読む「含む PR」は、`approval-facts` が承認に出すコミットを終点にして絞り込んだものである。
 
 ## 処理の流れ
 
@@ -212,17 +217,18 @@ sequenceDiagram
     else タグが無い
         R->>I: section_range(前のタグ, HEAD, --prs)
         I->>G: git log --first-parent 前のタグ..HEAD
-        I-->>R: 範囲の PR と --prs の和
+        I->>H: squash merge の head のブランチ名を補う（今のまま）
+        I-->>R: 範囲の PR と --prs の和、範囲の外の --prs
         R->>H: PR をまとめて 1 回読む（mergeCommit を含む）
-        R->>I: drop_outside(範囲の PR, 読み出し結果, HEAD, --prs)
-        I->>G: --prs の番号ごとに merge-base --is-ancestor マージコミット HEAD
+        R->>I: drop_outside(和, 読み出し結果, HEAD, 範囲の外の --prs)
+        I->>G: 範囲の外の --prs の番号ごとに merge-base --is-ancestor マージコミット HEAD
         I-->>R: 終点に入った PR と外した番号
         R->>G: 版の節を足す・挿す。タグの無い途中の版の節を消す
     end
     P->>R: notes --version <版> --prs <PR>
     R->>I: section_range(前のタグ, HEAD, --prs)
     R->>H: PR をまとめて 1 回読む（mergeCommit を含む）
-    R->>I: drop_outside(範囲の PR, 読み出し結果, HEAD, --prs)
+    R->>I: drop_outside(和, 読み出し結果, HEAD, 範囲の外の --prs)
     R->>G: 版の節を差し替える
     P->>R: release（本番チャネルへ入れ、タグと GitHub Release を作る）
 ```
@@ -281,7 +287,8 @@ GitHub の REST API を直接呼ぶ形は採らない。このリポジトリの
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 5・I1 | 承認したコミットからリリースのブランチを作り、その後にベースブランチへ PR をマージする。`changelog`・`notes` の版の節に後の PR が無い | `section_prs` の終点を `origin/<ベースブランチ>` へ戻すと落ちる |
-| I1（`--prs`） | 範囲の終点より後にマージした PR を `--prs` で渡すと、版の節と「含む PR」に無く、`items` に `skipped` の行がある。終点より前にマージした PR を `--prs` で渡すと載る | `drop_outside` を呼ばずに和をそのまま使うと落ちる |
+| I1（`--prs`） | 範囲の終点より後にマージした PR を `--prs` で渡すと、版の節と「含む PR」に無く、`items` に `result` が `skipped`・`reason` が「範囲の終点に入っていない」の行があり、`metrics.outside` にその番号があって `metrics.unmerged` には無い。終点より前にマージした PR を `--prs` で渡すと載る。範囲の PR に入っている番号を `--prs` で渡しても `git merge-base` を打たない | `drop_outside` を呼ばずに和をそのまま使う、外した番号を `unmerged` に混ぜる、または範囲の PR の番号にも祖先の確かめを打つと落ちる |
+| `notes --approval` | 承認資料の「含む PR」にある番号は、HEAD がその PR のマージより前でも外さない | `--approval` のときも `drop_outside` を呼ぶと落ちる |
 | 受け入れ条件 5・I2 | 承認に出すコミットより後にマージされた PR が、`approval-facts` の「含む PR」に無く、「承認したコミット」が範囲の終点と同じ SHA である | `approval-facts` で終点と承認したコミットを別々に `origin/<ベースブランチ>` から読み、その間にマージが入ると落ちる |
 | 受け入れ条件 6・I3 | タグ `<プラグイン>--v<版>` がある版を基底にした開発版で `changelog` と `notes` を打つと、終了コード 3 で止まり、`summary` にタグの名前があり、`CHANGELOG.md` の中身が打つ前と同じである | タグの確かめを外す、または書き込みの後に確かめると落ちる |
 | 受け入れ条件 7・I4 | 前のリリースタグ 1.0.0、タグの無い 1.0.1・1.0.2 の節があるとき、正式版 1.0.3 の `changelog` の後に 1.0.1・1.0.2 の節が無く、その節にあった PR が 1.0.3 の節にある。`items` に `removed` が 2 件ある | 消す条件の下限を外して前のリリースタグの節まで消す、またはタグのある節を消すと落ちる |
