@@ -78,7 +78,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | [`lib/sprint_loop_gate.py`](../../plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue・まとめのステージ（`new close --pace auto`）の組み立て・周回の締め |
 | [`lib/sprint_loop_record.py`](../../plugins/ndf/scripts/lib/sprint_loop_record.py) | 記録の読み書き（排他・原子的な書き込み・終わった周回の書き換えの拒否）・消費・止まる条件の判定・再開のコマンド・引継ぎ文書・`laps.md` の描画。外の世界（gh・`upkeep.py rank`・`supervise.py`）は `Env` の関数を通して呼び、テストで差し替える |
 | [`lib/pace.py`](../../plugins/ndf/scripts/lib/pace.py) の `read_loop` | `loop` 節を読み、既定（`LOOP_DEFAULTS`）を埋めて形を確かめる。`read_pace` は `loop` 節を検証しない |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`、`new sprint --designed` |
+| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`・`--loop`・`--lap`、`new sprint --designed` |
 | [`handoff.py`](../../plugins/ndf/scripts/handoff.py) | 名の形（`NAME_RE`）に `loop-<名>` を持つ |
 | `backlog-refinement` の [`upkeep_rank.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `quality_slot`・[`upkeep_rank_config.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_config.py) の `_parse_quality` | 品質の枠を取り、切り出しの境界から枠の分を除く |
 | 既存のまま使うもの | `relay.py`（セッションの切り替え）・`mvv-gate.py`（判定とレッドライン）・`supervise.py new sprint --pace auto` / `queue` / `wait` / `run` |
@@ -199,7 +199,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | `sprint-state.py init <state> --name <名>-<n> --pace auto --issue ... --dev V --prod V --goal <再開のコマンド> [--mvv mvv.md --milestone M]` | `--prod` を省けば開発版の接尾辞を外した版 |
 | `supervise.py new sprint --pace auto --issue <選んだ課題> --design <承認済みでない課題> [--designed <approved の課題>] ... [<-- の後の引数>]` | `loop answer --approved` で答えた課題は設計のプランを作らず、設計の結果のステージが設計 PR の設計の結果を読む |
-| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> [--carry <前の周回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 振り返り → 課題を閉じる → 棚卸し。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
+| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> --loop <名> --lap <n> [--carry <前の周回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 振り返り → 課題を閉じる → 棚卸し。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
 
 `pipeline` は、最初のステージの queue の最後に `--then <まとめのプラン>` をつなぎ、`supervise.py wait <D>` →
 `loop lap <名> --done <D>` を続けた 1 行である。手で行うステージか別の queue のステージが残るときは、それを終えてから
@@ -211,6 +211,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- | --- |
 | `--pace auto` | まとめのステージだけを組む（上の表） | 今の形（`fast` のスプリントの終わり）。出力は変わらない |
 | `--carry N...` | 棚卸しのステップの指示へ前の周回の持ち越しを `--add` で渡す | 指示は今のまま |
+| `--loop <名>`・`--lap <n>` | 棚卸しの深さの記録のステップ（`depth record --depth diff`）へ開発ループの名前と周回の番号を渡す。開発ループのまとめの組み立て（`build_close`）は常に渡す（#2315） | 深さの記録の行の `loop`・`lap` は空 |
 | `--record-pr N` | 課題を閉じるステップ（`sprint-close.py --record-pr`）へ本番の記録の Pull Request を渡す | 経路がすべて届けない経路なら `0`、それ以外は経路にかかわらず `{queue_record}` を残し、queue がまとめを流し始める時点に GitHub の参照からリリース記録の PR を探して埋める（#2230） |
 
 ループは `--record-pr` を渡さない。承認ゲート 2 の承認の後にまとめを組み直すときも渡さない（`stop.values.pr` は検査のスプリント PR で、記録の PR ではない。#2230）。

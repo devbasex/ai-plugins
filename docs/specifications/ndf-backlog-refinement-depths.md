@@ -125,9 +125,10 @@
 
 | 副命令 | 引数 | 成功 | 失敗・否定 |
 | --- | --- | --- | --- |
-| `candidates` | 既存の引数に `--depth diff\|review`（既定 `diff`） | `diff`: 経路 `diff-path`・`diff-identifier`・`sub-issue`・`commit-subject`・`manual`・`unscored`（と `--all`）。`review`: 上の経路に `no-milestone`・`closed-milestone` と、後回しを除く open の全件（`all`）を足す。上限で切らず、`updated_at` の古い順に並べる（`metrics.limit` は `null`、`metrics.depth` に深さ） | 既存 |
+| `candidates` | 既存の引数に `--depth diff\|review`（既定 `diff`） | `diff`: 経路 `diff-path`・`diff-identifier`・`sub-issue`・`commit-subject`・`manual`・`unscored`（と `--all`。`unscored` は `--since-ref` のコミットの時刻（`metrics.since`）より後に作られた課題だけ）。`review`: 上の経路に `no-milestone`・`closed-milestone` と、後回しを除く open の全件（`all`）を足す。上限で切らず、`updated_at` の古い順に並べる（`metrics.limit` は `null`、`metrics.depth` に深さ） | 既存 |
 | `depth due review\|overhaul` | `--loop`・`--lap`・`--no-issue`・`--manual`・`--open N`（省くと GitHub から数える） | 0。`metrics.trigger` と `values`。`due` の行を足す | 3。起動しない（`not_due` の行と判定の値）。記録や設定が読めないときも 3 で、`values.reason: unreadable` の行を残す |
-| `depth record` | `--depth diff\|review\|overhaul`（必須）・`--event ran\|not_due\|skipped`（既定 `ran`）・`--trigger a,b`・`--run`・`--report <統一 JSON レポート>`・`--loop`・`--lap`・`--sprint`・`--cost`・`--seconds` | 0。1 行を足す | 2 = `--trigger` の値が条件の一覧に無い |
+| `depth record` | `--depth diff\|review\|overhaul`（必須）・`--event ran\|not_due\|skipped`（既定 `ran`）・`--trigger a,b`・`--run`・`--report <統一 JSON レポート>`・`--loop`・`--lap`・`--sprint`・`--cost`・`--seconds`・`--progress <プランの進行の記録>`・`--step <ステップの id>`（既定 `refine`） | 0。1 行を足す。`--progress` を渡すと、そのステップの最後の `kind: step` の行から秒・ドル・言語モデルの名前を写す（`--cost`・`--seconds` を渡せばその値を優先）。読めなければ空のまま 0 | 2 = `--trigger` の値が条件の一覧に無い |
+| `depth compare` | `--since-ref <ref>`・`--seconds-under`・`--cost-under`（必須）・`--count`（既定 3）・`--model`・`--depth`（既定 `diff`） | 0。`<ref>` のコミットの時刻より後の `ran` の行のうち、秒とドルがそろい（外す理由 `no_usage`）、`--model` を渡せば `values.models` がその 1 つだけの（`model`）行を、同じ開発ループ・周回（ループの外では同じスプリント）では最後の 1 行にして（`duplicate`）、古い順に `--count` 件の秒とドルの中央値が両方とも基準を下回る。`metrics` に `count`・`needed`・`median_seconds`・`median_cost`・`baseline`・`delta`・`judged` | 1 = 中央値のどちらかが基準を下回らない / 3 = 件数に満たない（判定の保留）/ 2 = 記録か ref を読めない |
 | `causes record` | `--classes <[{number, type, sub}]>`（必須）・`--depth review\|overhaul`（既定 `review`） | 0。行を足す | 2 = 配列でない・型が `cause_types` に無い |
 | `owner claim` | `--what research\|review\|overhaul`（必須）・`--loop`・`--pid`（省くと呼び出し元）・`--keepalive <秒>` | 0（`run`・`taken_from`・`what`、見張りを起こしたら `keepalive_pid`） | 10 = 他の有効な持ち主がいる（`reason: not_owner`・`owner`）/ 3 = 錠を 5 秒で取れない |
 | `owner keepalive` | `--run`・`--pid`・`--seconds`（すべて必須） | 0（止まった理由 `released` / `owner_gone` / `expired`） | — |
@@ -167,7 +168,7 @@
 
 | `id` | 種類 | 中身 | 遷移 |
 | --- | --- | --- | --- |
-| `refine-record` | run | `depth record --depth diff --sprint <名前>` | → `overhaul-due` |
+| `refine-record` | run | `depth record --depth diff --sprint <名前> --progress {state_dir}/progress.jsonl`（`new close` に `--loop`・`--lap` を渡したときは、それも足す。開発ループのまとめの組み立てが渡す） | → `overhaul-due` |
 | `<深さ>-due` | run | `depth due <深さ>` | 3 なら `skip_to` で後へ。0 なら → `<深さ>-claim` |
 | `<深さ>-claim` | run | `owner claim --what <深さ> --keepalive 5400 --pid "$PPID"` | 10 なら → `<深さ>-skipped`。0 なら → `<深さ>` |
 | `<深さ>` | work（`full: true`、`stage` は `棚卸し`、`timeout` 5400） | `/ndf:backlog-refinement --depth <深さ>` を無人で通す。持ち主の実行は `owner status`、起動した条件は `depths.jsonl` から読む。最後に `depth record` と `owner release` を打つ | 成否によらず（`on_fail` も）→ `<深さ>-release` |
@@ -199,12 +200,12 @@
 | `depth` | `diff` / `review` / `overhaul` |
 | `event` | `ran`（行った）/ `due`（起動を判定した）/ `not_due`（起動しない）/ `skipped`（持ち主になれず飛ばした） |
 | `trigger` | 起動した条件の配列（`count`・`open_growth`・`carry`・`no_issue`・`manual`・`created_over_closed`・`open_rising`・`cause_share`）。`not_due` は空 |
-| `values` | 判定の行は判定に使った値（`count`・`open`・`open_growth`・`carry`・`cause_share: {type, share}`、読めなければ `reason`・`detail`）。`diff` の `ran` の行は `carry`（`candidates.json` の `deferred` の件数） |
+| `values` | 判定の行は判定に使った値（`count`・`open`・`open_growth`・`carry`・`cause_share: {type, share}`、読めなければ `reason`・`detail`）。`diff` の `ran` の行は `carry`（`candidates.json` の `deferred` の件数）と、プランの進行の記録から読めたときの `models`（棚卸しのステップで使った言語モデルの名前を名前の順に並べた配列） |
 | `loop`・`lap`・`sprint` | 空は `--loop` の外 |
 | `run` | 持ち主の実行。差分の棚卸しと判定の行は空 |
 | `open_before`・`open_after`・`closed`・`created` | `--report` の `metrics` から写す。`diff` の `ran` は `candidates.json` の `open` と `apply.json` の `closed` から写す |
 | `skipped_aspects`・`order`・`research` | `--report` の `metrics` にあれば写す |
-| `cost`・`seconds`・`report` | 引数の値 |
+| `cost`・`seconds`・`report` | 引数の値。`--cost`・`--seconds` が無く `--progress` を渡したときは、プランの進行の記録の棚卸しのステップの値（読めなければ空） |
 
 回数は「最後のその深さの `ran` の行より後にある、`diff` の `ran` の行の数」で数える。`open_growth` は、前の見直しの `ran` の行の `open_after` と比べる。
 `carry` は、最後の `diff` の `ran` の行の `values.carry` と、候補の上限 × `carry_factor` を比べる。`created_over_closed` / `open_rising` は、
@@ -343,7 +344,7 @@ classDiagram
 | まとめのプランで、`refine` の次が `refine-record`、大整理 → 見直しの判定は 3 で飛び、持ち主になれないと `skipped`、本体の成否によらず `release` を通る | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_retro_and_close_once_each_in_order`）・`test_supervise_pace_verify.py` |
 | `vet --kind issue` が課題の本文をプロジェクト MVV と照合する | `plugins/ndf/scripts/tests/test_project_mvv.py`（`test_vet_issue_judges_an_issue_body_against_the_project_mvv`） |
 | `measure` が直接の依存から材料の案を問いで出す | `plugins/ndf/scripts/tests/test_project_decl.py`（`test_measure_proposes_materials_from_direct_dependencies_as_a_question`） |
-| 毎スプリントの棚卸しの所要（秒・ドル）が、206〜224 秒・1.41〜1.61 ドルより短い | 手動確認（リリース後テスト）。変更の後の周回の `depths.jsonl` の `diff` の行の `cost`・`seconds` と比べる |
+| 毎スプリントの棚卸しの所要（秒・ドル）が、206〜224 秒・1.41〜1.61 ドルより短い | 手動確認（リリース後テスト）。配布の後、`depth compare --since-ref <配布した版のタグ> --seconds-under 206 --cost-under 1.41 --model <言語モデル>` が 0 を返す |
 | 大整理の分類・柱・付け直しの一覧が #2335 と同じ形になる | 手動確認。固定の入力で大整理の手順 1 をやり直し、件数の差を報告に書く |
 
 ## 運用
