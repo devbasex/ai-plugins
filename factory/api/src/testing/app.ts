@@ -4,7 +4,7 @@ import { MemoryAccountStore } from "../accounts/memory-store.ts";
 import { MemoryDelegationStore } from "../delegations/memory-store.ts";
 import { MemoryAuditLog } from "../audit/memory-log.ts";
 import { DelegationService } from "../delegations/service.ts";
-import { createApiApp, type LogEntry } from "../handlers/api.ts";
+import { createApiApp, type LogEntry } from "../app.ts";
 import { createTokenKit, type TokenKit } from "./tokens.ts";
 import type { FactoryDeps } from "../routes/factory.ts";
 import { CredentialService, type SecretsPort } from "../credentials/service.ts";

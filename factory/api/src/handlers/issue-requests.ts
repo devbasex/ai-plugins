@@ -4,18 +4,13 @@ import type { AttributeValue } from "@aws-sdk/client-dynamodb";
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { DynamoDBBatchResponse, DynamoDBStreamEvent } from "aws-lambda";
 import type { IssueRequestedEvent } from "@ndf-factory/contracts";
+import { requireEnv } from "../env.ts";
 import { DynamoIssueLedger } from "../issue-requests/ledger.ts";
 import { DEFAULT_ISSUE_REQUEST_LIMIT_PER_RUN, resolveIssueRequest, type IssueRequestDeps } from "../issue-requests/resolve.ts";
 import { defaultFilingStyle } from "../issue-requests/style.ts";
 import { appendIssueRequestResolvedTo } from "../progress/append.ts";
 import { factoryDepsFromEnv } from "../runs/deps.ts";
-import { progressStoreFromEnv } from "./ingest.ts";
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`環境変数 ${name} がありません`);
-  return value;
-}
+import { progressStoreFromEnv } from "../progress/deps.ts";
 
 // 上限は ISSUE_REQUEST_LIMIT_PER_RUN（1 以上の整数）。無い・形が違えば既定の 10
 export function issueRequestLimit(env: Record<string, string | undefined>): number {

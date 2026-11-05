@@ -3,7 +3,7 @@ import type { ProgressEvent } from "@ndf-factory/contracts";
 import { AccountService } from "../accounts/service.ts";
 import { MemoryAccountStore } from "../accounts/memory-store.ts";
 import { CredentialService, type SecretsPort } from "../credentials/service.ts";
-import { createApiApp } from "../handlers/api.ts";
+import { createApiApp } from "../app.ts";
 import type { GitHubPort } from "../github/port.ts";
 import { appendEvent } from "../progress/append.ts";
 import { memoryProgressReader } from "../progress/read.ts";

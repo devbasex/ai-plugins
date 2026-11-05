@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestApi, firstResult, type TestApi } from "../testing/app.ts";
-import { createApiApp } from "./api.ts";
+import { createApiApp } from "../app.ts";
 
 let api: TestApi;
 let keys = 0;
