@@ -148,6 +148,14 @@ export class MemoryRunsTable implements RunsTable {
 
   async createRun(run: SprintRun, job: RunJob, expected: Slots, guards?: CreateRunGuards): Promise<CreateRunResult> {
     await this.tick();
+    const refused = this.refuseCreate(run, expected, guards);
+    if (refused) return refused;
+    this.commitCreate(run, job, expected, guards);
+    return "created";
+  }
+
+  // 作成を拒む理由。条件はこの順で確かめ、どれか 1 つでも当たれば何も書かない
+  private refuseCreate(run: SprintRun, expected: Slots, guards?: CreateRunGuards): CreateRunResult | null {
     const repoKey = regKey(run.accountId, run.repositoryId);
     if ((this.accountSlots.get(run.accountId) ?? 0) !== expected.account) return "slots";
     if ((this.repositorySlots.get(repoKey) ?? 0) !== expected.repository) return "slots";
@@ -160,6 +168,12 @@ export class MemoryRunsTable implements RunsTable {
       if (guards.loop && !this.loopFits(guards.loop)) return "loop_changed";
       if (guards.idempotency && !this.idempotencyFree(guards.idempotency)) return "duplicate";
     }
+    return null;
+  }
+
+  // 全条件が通った後の書き込み
+  private commitCreate(run: SprintRun, job: RunJob, expected: Slots, guards?: CreateRunGuards): void {
+    const repoKey = regKey(run.accountId, run.repositoryId);
     this.accountSlots.set(run.accountId, expected.account + 1);
     this.repositorySlots.set(repoKey, expected.repository + 1);
     if (guards) {
@@ -173,7 +187,6 @@ export class MemoryRunsTable implements RunsTable {
     }
     this.runs.set(run.sprintRunId, structuredClone({ ...run, ...(guards ? { legacy: guards.legacy } : {}) }));
     this.jobs.set(job.jobId, structuredClone(job));
-    return "created";
   }
 
   async getRun(sprintRunId: string) {
