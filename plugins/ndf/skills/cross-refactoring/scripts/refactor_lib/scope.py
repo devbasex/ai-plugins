@@ -17,6 +17,7 @@ import subprocess
 from typing import Iterable, Optional
 
 from . import die
+from .pathkinds import lacks_python_tests
 
 # テストの置き場所とみなすディレクトリの名前。**言語をまたいで使われるものだけ**を
 # 並べる。増やすほど「テストの置き場所がある」と誤って判定して関門が素通りする。
@@ -40,10 +41,11 @@ TEST_NAME_PATTERNS: tuple[str, ...] = (
 )
 
 
-def _matches_by_name(path: str) -> bool:
-    """名前だけで置き場所と読めるか。**実在は見ない。**
+def _matches_by_name(path: str, work: str) -> bool:
+    """名前で置き場所と読めるか。**実在は見ない。**
 
-    `--scope` は提案の範囲の宣言であり、まだ存在しないディレクトリを指すことがある。
+    `--scope` は提案の範囲の宣言であり、まだ存在しないディレクトリを指すことがある。ファイル名の形で
+    当たっても、作業ディレクトリでテストの関数を持たない `.py` なら置き場所とみなさない（#2516）。
     """
     parts = [p.lower() for p in pathlib.PurePosixPath(str(path).strip()).parts]
     parts = [p for p in parts if p not in (".", "/")]
@@ -51,7 +53,7 @@ def _matches_by_name(path: str) -> bool:
         return False
     if any(p in TEST_PATH_SEGMENTS for p in parts):
         return True
-    return any(fnmatch.fnmatch(parts[-1], pat) for pat in TEST_NAME_PATTERNS)
+    return any(fnmatch.fnmatch(parts[-1], pat) for pat in TEST_NAME_PATTERNS) and not lacks_python_tests(path, work)
 
 
 def _child_test_location(path: str, work: str) -> Optional[str]:
@@ -83,9 +85,15 @@ def tracked_files_under(path: str, work: str) -> list[str]:
 
 
 def test_files_under(path: str, work: str) -> list[str]:
-    """`path` の配下の追跡ファイルのうち、名前がテストの形（`TEST_NAME_PATTERNS`）のもの。"""
+    """`path` の配下の追跡ファイルのうち、名前がテストの形（`TEST_NAME_PATTERNS`）のもの。
+
+    テストの関数を持たない `.py`（`lib/test_strategy.py` のような本番のモジュールや `tests/test_helpers.py`）は
+    外す。試走に入れるとテストを 1 件も集めずに落ちる（#2516 決定 5）。
+    """
     return [
-        f for f in tracked_files_under(path, work) if any(fnmatch.fnmatch(pathlib.PurePosixPath(f).name, pat) for pat in TEST_NAME_PATTERNS)
+        f
+        for f in tracked_files_under(path, work)
+        if any(fnmatch.fnmatch(pathlib.PurePosixPath(f).name, pat) for pat in TEST_NAME_PATTERNS) and not lacks_python_tests(f, work)
     ]
 
 
@@ -95,7 +103,7 @@ def is_test_location(path: str, work: str) -> bool:
     名前で当たる → 配下の 1 階層にテストの名前のディレクトリがある → 配下の追跡ファイルにテストの名前の形が
     ある（テストを本体と同じ場所に置く構成。決定 12）の順に見る。
     """
-    if _matches_by_name(path):
+    if _matches_by_name(path, work):
         return True
     if _child_test_location(path, work) is not None:
         return True
@@ -110,7 +118,7 @@ def test_locations(scope: Iterable[str], work: str) -> list[str]:
     """
     found: list[str] = []
     for item in scope:
-        if _matches_by_name(item):
+        if _matches_by_name(item, work):
             found.append(item)
             continue
         child = _child_test_location(item, work)

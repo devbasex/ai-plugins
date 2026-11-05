@@ -328,7 +328,7 @@ def _test_commit_problem(
     problem = problem or judge_commits(state, [commit["sha"]]).problem
     if problem:
         return problem
-    others = [f for f in commit.get("files") or [] if not is_test_path(f)]
+    others = [f for f in commit.get("files") or [] if not is_test_path(f, work_dir(state))]
     if others:
         return f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）"
     hits = _wording_hits(commits, tracked, state)
