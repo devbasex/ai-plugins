@@ -1812,3 +1812,102 @@ def test_lane_gives_back_with_a_new_request_id_for_the_same_head(env, monkeypatc
     sl_select.cmd_select(env, "l1")
     w = row(env, 11)
     assert not w.get("answer") and w["request"] == f"la-g501-{HEAD[:12]}-m2" and sent[-1]["returned"] == "権限が無い"
+
+
+# ---------------------------------------------------------------- 現状固定: cmd_answer の分岐ごとの出力
+
+
+@pytest.mark.parametrize(
+    "box, after, merged",
+    [
+        ({"result": "merged", "class": "passed", "reason": ""}, "設計 PR をマージした。次の周回で先頭に選ぶ", True),
+        ({"result": "already_merged", "class": "passed", "reason": ""}, "設計 PR をマージした。次の周回で先頭に選ぶ", True),
+        (
+            {"result": "production", "class": None, "reason": "宛先 main が本番"},
+            "設計 PR をマージしない（宛先 main が本番）。承認ゲート 2 で人がマージするまで実装に選ばない",
+            False,
+        ),
+        (
+            {"result": "not_green", "class": "running", "reason": "走っている"},
+            "設計 PR をマージできない（not_green: 走っている）。次の周回の境でマージし直す",
+            False,
+        ),
+    ],
+)
+def test_characterize_answer_approved_with_a_design_pr_by_merge_result(env, box, after, merged):
+    gated_both(env)
+    env.merge_box = box
+    out = sl.cmd_answer(env, "l1", 11, True, None)
+    w = row(env, 11)
+    assert out["status"] == "ok" and out["metrics"]["status"] == "answered" and "exit" not in out
+    assert out["summary"] == f"#11 の答え（approved）を書いた。{after}"
+    assert out["items"] == [w] and w["answer"] == "approved" and env.merges == [(501, HEAD)]
+    assert {k: w["merge"][k] for k in ("result", "class", "reason", "lap", "streak", "infra_reruns", "stamp")} == {
+        **{k: box[k] for k in ("result", "class", "reason")},
+        "lap": 1,
+        "streak": 1,
+        "infra_reruns": 0,
+        "stamp": HEAD,
+    }
+    assert bool(w.get("merged_at")) is merged
+    assert any(c[2:4] == ["gate", w["state"]] and c[-2:] == ["--pr", "501"] and "approved" in c for c in env.calls)
+
+
+def test_characterize_answer_approved_without_a_design_pr_does_not_merge(env):
+    lap = built_lap(env)
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
+    out = sl.cmd_answer(env, "l1", 11, True, None)
+    w = row(env, 11)
+    assert out["status"] == "ok" and out["metrics"]["status"] == "answered"
+    assert out["summary"] == "#11 の答え（approved）を書いた。設計 PR のマージの後の周回で選定の対象に戻る"
+    assert out["items"] == [w] and w["answer"] == "approved" and w["pr"] is None and "merge" not in w and env.merges == []
+    gate = [c for c in env.calls if c[2:3] == ["gate"]]
+    assert len(gate) == 1 and "--pr" not in gate[0] and gate[0][gate[0].index("--outcome") + 1] == "approved"
+
+
+def test_characterize_answer_rejected_and_revise_summaries(env, tmp_path):
+    gated_both(env)
+    out = sl.cmd_answer(env, "l1", 12, False, None)
+    assert out["status"] == "ok" and out["metrics"]["status"] == "answered"
+    assert out["summary"] == "#12 の答え（rejected）を書いた。選定の対象に戻さない（差し戻し）"
+    assert out["items"] == [row(env, 12)] and row(env, 12)["answer"] == "rejected"
+    note = tmp_path / "n.md"
+    note.write_text("  直す\n")
+    out = sl.cmd_answer(env, "l1", 11, False, None, revise=True, note=str(note))
+    w = row(env, 11)
+    assert out["summary"] == "#11 の答え（revise）を書いた。次の周回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
+    assert out["items"] == [w] and w["note"] == "直す" and w["revise_count"] == 1 and env.merges == []
+
+
+def test_characterize_answer_refusals_write_nothing(env, tmp_path):
+    gated_both(env)
+    before = rec(env)
+    out = sl.cmd_answer(env, "l1", 99, True, None)
+    assert out["status"] == "stopped" and out["exit"] == 1 and out["metrics"] == {"status": "refused"} and out["items"] == []
+    assert out["summary"] == "#99 は人の判断待ちでない"
+    missing = tmp_path / "none.md"
+    out = sl.cmd_answer(env, "l1", 11, False, 777, revise=True, note=str(missing))
+    assert out["status"] == "stopped" and out["exit"] == 1 and out["metrics"] == {"status": "refused"}
+    assert out["summary"].startswith("指摘ファイルを読めない: ") and str(missing) in out["summary"]
+    assert rec(env) == before and env.merges == []
+
+
+def test_characterize_answer_pr_argument_is_written_to_the_row(env):
+    gated_both(env)
+    out = sl.cmd_answer(env, "l1", 12, False, 777)
+    assert out["status"] == "ok" and row(env, 12)["pr"] == 777 and env.merges == []
+
+
+def test_characterize_answer_appends_notes_after_the_row(env):
+    gated_both(env)
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        if cmd[2:3] == ["gate"]:
+            env.calls.append(cmd)
+            return 2, "", "書けない理由\n"
+        return base(cmd, cwd=cwd, stdin=stdin)
+
+    env.run = run
+    out = sl.cmd_answer(env, "l1", 12, False, None)
+    assert out["status"] == "ok" and out["items"] == [row(env, 12), {"note": "承認の記録を書けない（2）: 書けない理由"}]
