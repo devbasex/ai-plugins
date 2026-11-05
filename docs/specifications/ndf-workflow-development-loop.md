@@ -310,7 +310,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `laps[]` | 周回（追記だけ。I1） |
 | `waiting[]` | 人の判断待ち。答えは行を消さずに `answer`（`approved` / `rejected` / `revise`）・`answered_at` を足す。`approved` の行はマージを確かめた時刻 `merged_at`、だれが承認したか `by`（`user` / `mvv`）、最後の承認した設計のマージの結果 `merge`
 （`{result, class, reason, pr, head, at, branch, infra_rerun, lap, streak, infra_reruns, stamp}`）、後片付けの時刻 `cleaned` を足す。
-利用者へ問い直した行は理由 `returned` を持つ。並列の計画のレーンは、オーガナイザーへ送った設計の承認の依頼の `request` と計画名 `plan` を持つ。`revise` の行は指摘 `note` と回数 `revise_count` を持つ |
+利用者へ問い直した行は理由 `returned` を持つ（問い直すときは `answer`・`answered_at`・`by`・`merge`・`merged_at` を外す。`infra_rerun` は 1 回のマージで実際に打った再実行の回数、`infra_reruns` はその累計）。マージできずに利用者へ戻した回数 `givebacks` は消さず、レーンの依頼の id の接尾辞 `-m<周回>-<回数>` に使う。並列の計画のレーンは、オーガナイザーへ送った設計の承認の依頼の `request` と計画名 `plan` を持つ。`revise` の行は指摘 `note` と回数 `revise_count` を持つ |
 | `fixes[]` | 配布を差し戻された周回の直し `{lap, issues, reason, at}`。直しの周回で課題を選ぶと `fixed_by` に周回の番号を書く |
 | `excluded[]` | `{number, reason, lap}`（`loop exclude`） |
 | `sprint_mvv_approvals[]` | `{milestone, sha256, at, by}` |

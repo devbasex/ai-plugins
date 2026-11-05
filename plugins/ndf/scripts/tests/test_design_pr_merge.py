@@ -99,11 +99,19 @@ def test_checks_that_are_not_green_do_not_call_merge_when_green(cls):
     assert (out["result"], out["class"]) == ("not_green", cls) and not gh.called("merge-when-green")
 
 
-def test_infra_wait_reruns_with_no_gap_and_marks_the_rerun():
-    gh = Gh(probe="infra")
-    out = merge(gh)
+def test_infra_wait_reruns_with_no_gap_and_counts_the_reruns_it_made():
+    rerun = {"kind": "check", "name": "ci", "result": "infra_rerun", "run": "1"}
+    gh = Gh(probe="infra", mwg=(0, json.dumps({"status": "ok", "items": [rerun, {**rerun, "run": "2"}]}), ""))
+    out = dm.merge_approved("/r", 501, STAMP, run=gh, infra_budget=2)
     argv = gh.called("merge-when-green")[0]
-    assert out["result"] == "merged" and out["infra_rerun"] is True and argv[argv.index("--infra-gap") + 1] == "0"
+    assert out["result"] == "merged" and out["infra_rerun"] == 2
+    assert argv[argv.index("--infra-gap") + 1] == "0" and argv[argv.index("--infra-reruns") + 1] == "2"
+
+
+def test_infra_wait_without_budget_does_not_call_merge_when_green():
+    gh = Gh(probe="infra")
+    out = dm.merge_approved("/r", 501, STAMP, run=gh, infra_budget=0)
+    assert (out["result"], out["class"], out["infra_rerun"]) == ("not_green", "infra", 0) and not gh.called("merge-when-green")
 
 
 def test_unregistered_required_check_does_not_merge():

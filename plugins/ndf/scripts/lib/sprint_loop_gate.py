@@ -419,20 +419,21 @@ def regate1(env: Env, w: dict) -> bool:
 def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:
     """承認した設計のマージの結果（`design_pr_merge.merge_approved` の出力）を人の判断待ちの行の `merge` へ書く（#2507）。
     同じ承認した先端で同じ result と class が続いた周回の数（streak）と、基盤待ちのための再実行の累計（infra_reruns）を数える。
-    infra_reruns は分類が変わっても 0 に戻さない（基盤待ちと実行中が交互に現れても再実行を上限なく増やさない）。"""
+    infra_reruns は分類が変わっても 0 に戻さない（基盤待ちと実行中が交互に現れても再実行を上限なく増やさない）。
+    足すのは実際に打った再実行の回数（`infra_rerun`。1 回の merge-when-green の中の複数回も数える）。"""
     prev = w.get("merge") or {}
     stamp = w.get("stamp") or ""
     same = prev.get("stamp") == stamp
     streak = prev.get("streak", 0) + 1 if same and (prev.get("result"), prev.get("class")) == (out.get("result"), out.get("class")) else 1
-    reruns = (prev.get("infra_reruns", 0) if same else 0) + (1 if out.get("infra_rerun") else 0)
+    reruns = (prev.get("infra_reruns", 0) if same else 0) + int(out.get("infra_rerun") or 0)
     w["merge"] = {**out, "lap": lap, "streak": streak, "infra_reruns": reruns, "stamp": stamp}
     if out.get("result") in MERGED_RESULTS and not w.get("merged_at"):
         w["merged_at"] = now
     return w["merge"]
 
 
-def _reopen_waiting(w: dict) -> None:
-    for k in ("answer", "answered_at", "merge", "merged_at"):
+def _reopen_waiting(w: dict) -> None:  # 前の回答者 by も外す（残すと次の答えを MVV の承認と読み違える）
+    for k in ("answer", "answered_at", "by", "merge", "merged_at"):
         w.pop(k, None)
 
 
@@ -459,15 +460,16 @@ def reask_design(env: Env, rec: dict, w: dict, head: str) -> bool:
 def giveback_design(env: Env, rec: dict, w: dict, reason: str, lap: int) -> bool:
     """時間で解けないマージの結果を、承認した先端のまま利用者へ戻す（#2507 の決定 9）。依頼にマージの結果の理由を載せる。
     利用者は「直して出し直す」「やらない」か、手を打ってから「承認」を選ぶ。戻した行のマージの結果（streak・infra_reruns）は消す。
-    レーンは同じ先端でも別の依頼にするため id に `-m<周回>` を足す。送れなければ何も変えずに次の周回の境で打ち直す。"""
+    レーンは同じ先端でも別の依頼にするため id に `-m<周回>-<戻した回数 givebacks。消さない>` を足す。送れなければ何も変えずに次の周回の境で打ち直す。"""
     w["returned"] = reason
     if w.get("request"):
-        sent = lane_gate1(env, w, w.get("report") or "", w.get("state") or "", suffix=f"-m{lap}", stamp=w.get("stamp") or "")
+        n = w.get("givebacks", 0) + 1
+        sent = lane_gate1(env, w, w.get("report") or "", w.get("state") or "", suffix=f"-m{lap}-{n}", stamp=w.get("stamp") or "")
         if not sent:
             w.pop("returned", None)
             return False
         _reopen_waiting(w)
-        w.update(sent)
+        w.update(sent, givebacks=n)
     else:
         _reopen_waiting(w)
     mark_issue(env, rec, w)

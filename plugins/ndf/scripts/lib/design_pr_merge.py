@@ -27,6 +27,7 @@ RESULTS = ("merged", "already_merged", "head_moved", "no_stamp", "not_green", "c
 MERGED_RESULTS = ("merged", "already_merged")  # マージ済みに当たる結果
 # 答えの待ちの上限（非機能の実現方式）。緑なら 1 回目の読みから 5 秒後の確かめ直しでマージし、10 秒を過ぎた最初の読みで切れる
 WAIT_ARGS = ["--timeout", "10", "--interval", "5", "--recheck", "5", "--no-checks-after", "5"]
+INFRA_RERUNS = 3  # 同じ承認した先端で基盤待ちのために再実行する回数の上限（merge-when-green の --infra-reruns の既定と同じ）
 UNREGISTERED = "unregistered"  # 必須の検査がまだ検査の一覧に載っていない・検査が無いと確かめられない
 
 Run = Callable[..., tuple]
@@ -81,20 +82,22 @@ def _checks_registered(root: str, base: str, stamp: str, rollup: list, run: Run)
     return f"ワークフローの有無を読めない: {(se or so).strip()[:200]}"
 
 
-def merge_approved(root, pr: int, stamp: str | None, run: Run | None = None) -> dict:
+def merge_approved(root, pr: int, stamp: str | None, run: Run | None = None, infra_budget: int = INFRA_RERUNS) -> dict:
     """設計 PR `pr` を、承認した先端 `stamp` のままで検査が緑なら宛先へマージする。結果は `RESULTS` の値の 1 つ。
 
-    出力: {result, class, reason, pr, head, at, branch, infra_rerun}。`infra_rerun` は基盤待ちのジョブの再実行を頼んだか
-    （`merge-when-green --infra-gap 0` を呼んだか）。周回の境が同じ承認した先端での累計に足す。"""
+    出力: {result, class, reason, pr, head, at, branch, infra_rerun}。`infra_rerun` は基盤待ちのジョブを実際に再実行した
+    回数（merge-when-green の items の `infra_rerun` の数）。周回の境が同じ承認した先端での累計に足す。
+    `infra_budget` は再実行の残りの回数で、merge-when-green の `--infra-reruns` に渡す。0 以下で基盤待ちなら
+    merge-when-green を呼ばずに not_green（infra）を返す。"""
     run = run or run_cmd
     root = str(root)
     try:
-        return _try_merge(root, int(pr), (stamp or "").strip(), run)
+        return _try_merge(root, int(pr), (stamp or "").strip(), run, int(infra_budget))
     except Exception as e:  # noqa: BLE001 — 例外を投げない（I4）。読めない出力も failed に写す
         return _res("failed", int(pr), reason=f"マージを試せない: {e}"[:300])
 
 
-def _try_merge(root: str, pr: int, stamp: str, run: Run) -> dict:
+def _try_merge(root: str, pr: int, stamp: str, run: Run, budget: int) -> dict:
     code, so, se = run(["gh", "pr", "view", str(pr), "--json", "state,headRefOid,baseRefName,headRefName,statusCheckRollup"], cwd=root)
     try:
         info = json.loads(so) if code == 0 else None
@@ -103,7 +106,7 @@ def _try_merge(root: str, pr: int, stamp: str, run: Run) -> dict:
     if not isinstance(info, dict) or not info.get("state"):
         return _res("failed", pr, reason=f"設計 PR を読めない: {(se or so).strip()[:200]}")
     head, base, branch = info.get("headRefOid") or "", info.get("baseRefName") or "", info.get("headRefName") or ""
-    ctx = {"branch": branch, "infra_rerun": False}
+    ctx = {"branch": branch, "infra_rerun": 0}
     if info["state"] == "MERGED":
         return _res("already_merged", pr, head, **ctx)
     if info["state"] != "OPEN":
@@ -125,10 +128,13 @@ def _try_merge(root: str, pr: int, stamp: str, run: Run) -> dict:
         return _res("not_green", pr, head, f"検査が緑でない（{cls}）", cls, **ctx)
     argv = [sys.executable, str(MERGED_STEPS), "merge-when-green", str(pr), "--expect-head", stamp, "--no-cleanup", *WAIT_ARGS]
     if cls == "infra":
-        argv += ["--infra-gap", "0"]
-        ctx["infra_rerun"] = True
+        if budget <= 0:
+            return _res("not_green", pr, head, f"CI の基盤待ちが再実行 {INFRA_RERUNS} 回で解けない", cls, **ctx)
+        argv += ["--infra-gap", "0", "--infra-reruns", str(budget)]
     code, so, se = run(argv, cwd=root)
-    return _from_merge(pr, head, cls, code, _last_json(so), se, ctx)
+    got = _last_json(so)
+    ctx["infra_rerun"] = sum(1 for i in got.get("items") or [] if isinstance(i, dict) and i.get("result") == "infra_rerun")
+    return _from_merge(pr, head, cls, code, got, se, ctx)
 
 
 def _from_merge(pr: int, head: str, cls: str, code: int, got: dict, se: str, ctx: dict) -> dict:

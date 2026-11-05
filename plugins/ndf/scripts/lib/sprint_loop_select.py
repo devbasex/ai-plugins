@@ -155,7 +155,6 @@ def merge_wait_reason(w: dict) -> str:
 # ---------------------------------------------------------------- 承認した設計のマージし直し（#2507 の I6）
 
 STREAK_LIMIT = 3  # 同じ分類の not_green がこの周回の数だけ続いたら利用者へ戻す（既定。測っていない）
-INFRA_RERUNS = 3  # 同じ承認した先端で基盤待ちのために再実行する回数の上限（merge-when-green の --infra-reruns の既定と同じ）
 UNSOLVABLE = ("stale_again",)  # 時間で解けない not_green の分類
 
 
@@ -197,9 +196,11 @@ def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
         return _settle_conflict(env, rec, w, m, lap_n)
     if res == "not_green" and (cls in UNSOLVABLE or m.get("streak", 0) >= STREAK_LIMIT):
         return _giveback(env, rec, w, m.get("reason") or "検査が緑にならない", lap_n)
-    if res == "not_green" and cls == "infra" and m.get("infra_reruns", 0) >= INFRA_RERUNS:
-        return _giveback(env, rec, w, f"CI の基盤待ちが再実行 {INFRA_RERUNS} 回で解けない", lap_n)
-    out = design_pr_merge.merge_approved(env.main_dir(), pr, w.get("stamp"), run=env.run)
+    used = m.get("infra_reruns", 0) if m.get("stamp") == (w.get("stamp") or "") else 0
+    if res == "not_green" and cls == "infra" and used >= design_pr_merge.INFRA_RERUNS:
+        return _giveback(env, rec, w, f"CI の基盤待ちが再実行 {design_pr_merge.INFRA_RERUNS} 回で解けない", lap_n)
+    budget = design_pr_merge.INFRA_RERUNS - used  # 残りを再実行する層へ渡す（前の分類が基盤待ちでなくても累計で上限を守る）
+    out = design_pr_merge.merge_approved(env.main_dir(), pr, w.get("stamp"), run=env.run, infra_budget=budget)
     got = note_merge(w, out, lap_n, env.now())
     return f"#{w['number']} の設計 PR #{pr} をマージし直した（{got['result']}）"
 

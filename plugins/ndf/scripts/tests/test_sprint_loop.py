@@ -74,11 +74,14 @@ def env(tmp_path, mvv, monkeypatch):
     e.heads = {}  # 設計 PR の先端（gh pr view --json headRefOid）。無ければ HEAD
     e.run = fake_run(e)
     e.merges = []  # 承認した設計のマージの呼び出し (pr, stamp)。結果は merge_box（#2507）
+    e.budgets = []  # マージの呼び出しへ渡した基盤待ちの再実行の残り
     e.merge_box = {"result": "merged", "class": "passed", "reason": ""}
     monkeypatch.setattr(
         sl.design_pr_merge,
         "merge_approved",
-        lambda root, pr, stamp, run=None: e.merges.append((pr, stamp)) or {"pr": pr, "head": stamp, "at": "t", **e.merge_box},
+        lambda root, pr, stamp, run=None, infra_budget=3: (
+            e.merges.append((pr, stamp)) or e.budgets.append(infra_budget) or {"pr": pr, "head": stamp, "at": "t", **e.merge_box}
+        ),
     )
     return e
 
@@ -1708,6 +1711,22 @@ def test_infra_reruns_are_counted_across_classes_and_capped(env):
     assert len(env.merges) == 4 and not w.get("answer") and "基盤待ち" in w["returned"]
 
 
+def test_the_rerun_budget_is_passed_down_even_after_a_running_lap(env):
+    gated_both(env)
+    env.merge_box = {"result": "not_green", "class": "running", "reason": "走っている", "infra_rerun": 3}  # 1 回で 3 回打った
+    sl.cmd_answer(env, "l1", 11, True, None)
+    env.merge_box = {"result": "not_green", "class": "running", "reason": "走っている"}
+    boundary(env, 2)  # 前の分類が実行中でも、残りの 0 を再実行する層へ渡す
+    assert row(env, 11)["merge"]["infra_reruns"] == 3 and env.budgets[1:] == [0, 0]
+
+
+def test_reopening_drops_the_previous_answerer(env):
+    gated_both(env)
+    w = {"answer": "approved", "answered_at": "t", "by": "mvv", "merge": {}, "merged_at": "t"}
+    sl_gate._reopen_waiting(w)
+    assert w == {}
+
+
 def test_production_target_is_not_retried_and_waits_for_gate_2(env):
     gated_both(env)
     env.merge_box = {"result": "production", "class": None, "reason": "宛先 main が本番"}
@@ -1811,7 +1830,18 @@ def test_lane_gives_back_with_a_new_request_id_for_the_same_head(env, monkeypatc
     env.rank_box["out"] = rank_out(ms("01 近い", [13, 14]))
     sl_select.cmd_select(env, "l1")
     w = row(env, 11)
-    assert not w.get("answer") and w["request"] == f"la-g501-{HEAD[:12]}-m2" and sent[-1]["returned"] == "権限が無い"
+    assert not w.get("answer") and w["request"] == f"la-g501-{HEAD[:12]}-m2-1" and sent[-1]["returned"] == "権限が無い"
+
+
+def test_lane_gives_back_twice_in_the_same_lap_with_different_request_ids(env, monkeypatch):
+    lane_env(env, monkeypatch)
+    w = {"number": 11, "pr": 501, "request": "x", "stamp": HEAD, "answer": "approved", "by": "mvv"}
+    monkeypatch.setattr(sl_gate, "mark_issue", lambda e, rec, w: None)
+    assert sl_gate.giveback_design(env, {}, w, "権限が無い", 2)
+    first = w["request"]
+    w.update(answer="approved", by="user")
+    assert sl_gate.giveback_design(env, {}, w, "権限が無い", 2)
+    assert (first, w["request"]) == (f"la-g501-{HEAD[:12]}-m2-1", f"la-g501-{HEAD[:12]}-m2-2") and "by" not in w
 
 
 # ---------------------------------------------------------------- 現状固定: cmd_answer の分岐ごとの出力
