@@ -116,30 +116,39 @@ def _terms(value: str) -> list[str]:
     return [t.strip("`*_ 。") for t in SPLIT.split(value.strip()) if t.strip("`*_ 。")]
 
 
+def judge_decision(path: str, decision, known: set, skipped: bool) -> tuple[list[dict], dict]:
+    """決定 1 件の指摘と件数を返す。候補の未知を作り方の有無より先に見る。"""
+    n, head, method, cands = decision
+    items: list[dict] = []
+    counts = {"decisions": 1, "with_method": 0, "self_built": 0}
+    ids = CANDIDATE_ID.findall(cands[2]) if cands else []
+    if any(i not in known for i in ids):
+        items.append({"name": f"{path}:{cands[0] + 1} 決定 {n}", "rule": "unknown_candidate", "text": cands[1].strip()})
+    if method is None:
+        return items, counts
+    counts["with_method"] = 1
+    line, text, value = method
+    terms = _terms(value)
+    if not terms or any(t not in METHODS for t in terms):
+        items.append({"name": f"{path}:{line + 1} 決定 {n}", "rule": "unknown_method", "text": text.strip()})
+    if SELF_BUILT in terms:
+        counts["self_built"] = 1
+        if not ids and not skipped:
+            items.append({"name": f"{path}:{line + 1} 決定 {n}", "rule": "no_candidates", "text": text.strip()})
+    return items, counts
+
+
 def judge_group(group: list[Doc]) -> tuple[list[dict], dict]:
     skipped = any(d.skipped for d in group)
     known = set().union(*(d.candidates for d in group))
     items: list[dict] = []
     counts = {"decisions": 0, "with_method": 0, "self_built": 0}
     for d in group:
-        for n, head, method, cands in d.decisions:
-            counts["decisions"] += 1
-            ids = CANDIDATE_ID.findall(cands[2]) if cands else []
-            unknown = [i for i in ids if i not in known]
-            if unknown:
-                items.append({"name": f"{d.path}:{cands[0] + 1} 決定 {n}", "rule": "unknown_candidate",
-                              "text": cands[1].strip()})  # fmt: skip
-            if method is None:
-                continue
-            counts["with_method"] += 1
-            line, text, value = method
-            terms = _terms(value)
-            if not terms or any(t not in METHODS for t in terms):
-                items.append({"name": f"{d.path}:{line + 1} 決定 {n}", "rule": "unknown_method", "text": text.strip()})
-            if SELF_BUILT in terms:
-                counts["self_built"] += 1
-                if not ids and not skipped:
-                    items.append({"name": f"{d.path}:{line + 1} 決定 {n}", "rule": "no_candidates", "text": text.strip()})
+        for decision in d.decisions:
+            got, c = judge_decision(d.path, decision, known, skipped)
+            items += got
+            for k, v in c.items():
+                counts[k] += v
     return items, {**counts, "skipped": int(skipped)}
 
 
