@@ -9,6 +9,7 @@
       "answer": {
         "options": [
           "--approved",
+          "--by",
           "--choice",
           "--note",
           "--rejected",

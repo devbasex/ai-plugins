@@ -77,7 +77,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 契機 | 出どころ |
 | --- | --- |
 | 振り返りの問い「MVV を見直すか」 | `retrospective` が `project-mvv.py signals` の集計を示して問う |
-| 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じ版のもとで「判定できない」が `settings.unknown_streak` 回続いた、または `signals` の閾値を超えた） |
+| 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じ版のもとで「判定できない」が `settings.unknown_streak` 件続いた。スプリント状態・承認ゲート・PR の組ごとに 1 件と数え、同じ依頼の判定の打ち直しは 1 件にまとめる。または `signals` の閾値を超えた） |
 | 利用者の指示 | — |
 
 | 順 | 打つもの・すること |
