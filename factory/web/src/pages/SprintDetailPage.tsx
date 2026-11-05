@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { isFinishedRun, type SprintRunDetail, type StepDetail, type StepRow } from "../api.ts";
 import { useFailureHandler, useServices } from "../context.tsx";
@@ -283,15 +283,13 @@ export function SprintDetailPage() {
   const format = useFormat();
   const sprintState = useSprintState();
   const { accountId = "", sprintRunId = "" } = useParams();
-  const { auth, api } = useServices();
+  const { api } = useServices();
   const [selected, setSelected] = useState<string | null>(null);
-  const hasToken = auth.getToken() !== null;
 
   const read = useCallback(async () => (await api.sprintRunDetails(accountId, [sprintRunId]))[0] ?? null, [api, accountId, sprintRunId]);
   // 終わった実行は変わらないため、間隔では読み直さない（開いたときと手動の読み直しだけ。1 回の読み出しが事象の全件を読む）
-  const { data: detail, error, staleSince, reload } = usePolled(read, hasToken, { poll: (d) => d === null || !isFinishedRun(d.state) });
+  const { data: detail, error, staleSince, reload } = usePolled(read, { poll: (d) => d === null || !isFinishedRun(d.state) });
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   const back = (
     <Link to={`/accounts/${accountId}/sprints`} className="ui-back">
       {t("sprintDetail.back")}

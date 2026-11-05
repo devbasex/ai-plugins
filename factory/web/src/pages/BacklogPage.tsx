@@ -1,5 +1,5 @@
 import { useCallback, type ReactNode } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { Backlog } from "../api.ts";
 import { useServices } from "../context.tsx";
@@ -22,13 +22,11 @@ export function BacklogPage() {
   const { t } = useTranslation();
   const format = useFormat();
   const { accountId = "", repositoryId = "" } = useParams();
-  const { auth, api } = useServices();
-  const hasToken = auth.getToken() !== null;
+  const { api } = useServices();
   const read = useCallback(async () => (await api.backlogs(accountId, [Number(repositoryId)]))[0] ?? null, [api, accountId, repositoryId]);
   // 1 回の読み出しが GitHub の全ページと実行ごとの事象を読むため、間隔では読み直さない（開いたときと「もう一度読む」だけ）
-  const { data: backlog, error, reload } = usePolled(read, hasToken, { poll: false });
+  const { data: backlog, error, reload } = usePolled(read, { poll: false });
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   const header = (title: string, actions?: ReactNode) => (
     <>
       <Link to={`/accounts/${accountId}/repositories`} className="ui-back">

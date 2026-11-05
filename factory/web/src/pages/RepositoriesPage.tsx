@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { AccountDetail, Repository, RepositoryCandidate, SprintRunSummary } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useServices } from "../context.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -18,8 +18,8 @@ export function RepositoriesPage() {
   const sprintState = useSprintState();
   const { accountId = "" } = useParams();
   const [params] = useSearchParams();
-  const { auth, api } = useServices();
-  const onFailure = useFailureHandler();
+  const { api } = useServices();
+  const attempt = useAttempt();
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [repos, setRepos] = useState<Repository[] | null>(null);
   const [runs, setRuns] = useState<Record<number, SprintRunSummary[]>>({});
@@ -27,7 +27,6 @@ export function RepositoriesPage() {
   const [candidates, setCandidates] = useState<{ proof: string; list: RepositoryCandidate[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const hasToken = auth.getToken() !== null;
 
   const reload = useCallback(async () => {
     const list = (await api.repositories(accountId)).repositories;
@@ -39,36 +38,28 @@ export function RepositoriesPage() {
   }, [api, accountId]);
 
   useEffect(() => {
-    if (!hasToken) return;
-    void (async () => {
-      try {
-        setAccount(await api.account(accountId));
-        setInstallUrl((await api.installUrl(accountId)).url);
-        await reload();
-        const code = params.get("code");
-        const state = params.get("state");
-        if (code && state) {
-          const out = await api.repositoryCandidates(accountId, code, state);
-          setCandidates({ proof: out.proof, list: out.candidates });
-        }
-      } catch (err) {
-        setError(onFailure(err));
+    void attempt(async () => {
+      setAccount(await api.account(accountId));
+      setInstallUrl((await api.installUrl(accountId)).url);
+      await reload();
+      const code = params.get("code");
+      const state = params.get("state");
+      if (code && state) {
+        const out = await api.repositoryCandidates(accountId, code, state);
+        setCandidates({ proof: out.proof, list: out.candidates });
       }
-    })();
-  }, [api, accountId, hasToken, onFailure, params, reload]);
+    }, setError);
+  }, [api, accountId, attempt, params, reload]);
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   if (error) return <Alert>{error}</Alert>;
   if (!account || !repos) return <LoadingState />;
   const owner = account.role === "owner";
   const act = async (fn: () => Promise<unknown>) => {
     setMessage(null);
-    try {
+    await attempt(async () => {
       await fn();
       await reload();
-    } catch (err) {
-      setMessage(onFailure(err));
-    }
+    }, setMessage);
   };
 
   return (
