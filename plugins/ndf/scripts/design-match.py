@@ -147,10 +147,8 @@ def _path_present(path: str, files: set[str], dirs: set[str]) -> bool:
     return "/" not in path and any(f.rsplit("/", 1)[-1] == path for f in files)
 
 
-def judge_names(root, items: list[dict]) -> None:
-    """各名前の `result` を present / missing / unverified に決める。"""
-    files = set(git_list(root, "ls-tree", "-r", "--name-only", "HEAD"))
-    dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
+def partition_test_names(items: list[dict], files: set[str], dirs: set[str]) -> tuple[dict[str, list[dict]], list[dict]]:
+    """テストのファイルと HEAD に無いパスの項目へ `result` を付け、残りをパスごとの組とパスなしに分ける。"""
     by_path: dict[str, list[dict]] = {}
     bare: list[dict] = []
     for it in items:
@@ -162,13 +160,29 @@ def judge_names(root, items: list[dict]) -> None:
             it["result"] = "missing"
         else:
             by_path.setdefault(it["_path"], []).append(it)
+    return by_path, bare
+
+
+def _found_result(found: set[str] | None, names) -> str:
+    """検索で見つかった名前の集合から結果を決める。検索できなかった（None）なら unverified。"""
+    if found is None:
+        return "unverified"
+    return "present" if set(names) <= found else "missing"
+
+
+def judge_names(root, items: list[dict]) -> None:
+    """各名前の `result` を present / missing / unverified に決める。"""
+    files = set(git_list(root, "ls-tree", "-r", "--name-only", "HEAD"))
+    dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
+    by_path, bare = partition_test_names(items, files, dirs)
+    # パスつきはその項目の全ての名前を、パスなしは先頭の名前だけを判定する
     for path, group in by_path.items():
         found = _grep_words(root, sorted({n for it in group for n in it["_names"]}), [path])
         for it in group:
-            it["result"] = "unverified" if found is None else ("present" if set(it["_names"]) <= found else "missing")
+            it["result"] = _found_result(found, it["_names"])
     found = _grep_words(root, sorted({it["_names"][0] for it in bare}), [".", ":(exclude)*.md"])
     for it in bare:
-        it["result"] = "unverified" if found is None else ("present" if it["_names"][0] in found else "missing")
+        it["result"] = _found_result(found, it["_names"][:1])
 
 
 def tests_outcome(items: list[dict]) -> tuple[str, int, str]:
