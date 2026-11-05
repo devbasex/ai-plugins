@@ -68,4 +68,30 @@ describe("listAwaitingRuns（#2430 の決定 2）", () => {
       { pk: "RUN#sr-w3", sk: "RUN" },
     ]);
   });
+
+  it("1 MB で区切られた続きを ExclusiveStartKey で読み、評価した行の合計が 1,000 件に届いたら止める", async () => {
+    const rows = new Map<string, SprintRun>([
+      ["sr-w1", runOf("sr-w1", "awaiting_approval")],
+      ["sr-w2", runOf("sr-w2", "awaiting_approval")],
+    ]);
+    // 先頭のページは終わった実行だけで、状態の条件で 0 件になる
+    ddb
+      .on(QueryCommand)
+      .resolvesOnce({ Items: [], Count: 0, ScannedCount: 400, LastEvaluatedKey: { k: "p1" } })
+      .resolvesOnce({ Items: [{ sprintRunId: "sr-w1" }], Count: 1, ScannedCount: 500, LastEvaluatedKey: { k: "p2" } })
+      .resolvesOnce({ Items: [{ sprintRunId: "sr-w2" }], Count: 1, ScannedCount: 100, LastEvaluatedKey: { k: "p3" } });
+    ddb.on(GetCommand).callsFake((input: { Key: { pk: string } }) => {
+      const run = rows.get(input.Key.pk.replace(/^RUN#/, ""));
+      return { Item: run ? { pk: input.Key.pk, sk: "RUN", ...run } : undefined };
+    });
+    const runs = await table.listAwaitingRuns("acc-1");
+    expect(runs.map((r) => r.sprintRunId)).toEqual(["sr-w1", "sr-w2"]);
+    const queries = ddb.commandCalls(QueryCommand).map((c) => c.args[0].input);
+    expect(queries).toHaveLength(3);
+    expect(queries.map((q) => [q.Limit, q.ExclusiveStartKey])).toEqual([
+      [1000, undefined],
+      [600, { k: "p1" }],
+      [100, { k: "p2" }],
+    ]);
+  });
 });
