@@ -459,7 +459,7 @@ class Term:
             if pred():
                 return
             time.sleep(0.05)
-        raise AssertionError(f"待ちが切れた: {what}\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
+        raise AssertionError(f"待ちが切れた: {what}\n画面: {self.text[-2000:]}\n記録: {self.rows()}\n{self.state_report()}")
 
     def starts(self):
         p = self.fake_dir / "starts.jsonl"
@@ -473,6 +473,25 @@ class Term:
         root = pathlib.Path(self.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
         # 統括役の置き場（hub/。#2346）は作業ディレクトリでない
         return sorted(p for p in root.iterdir() if p.is_dir() and p.name != "hub") if root.exists() else []
+
+    def state_report(self):
+        """状態の置き場の作業ディレクトリ（統括役の hub/ を含む）ごとに、名前・区間の起動の引数・ファイルの名前を並べる。
+
+        待ちが切れたときに、どの区間が起動し、どのシグナルファイルが置かれていたかを失敗の出力から読むため（#2346）。
+        ファイルは決め打ちの一覧で調べず、ある分をすべて出す。
+        """
+        root = pathlib.Path(self.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
+        dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.exists() else []
+        starts = self.starts()
+        lines = [f"状態の置き場: {root}（作業ディレクトリ {len(dirs)} 個）"]
+        for d in dirs:
+            name = (d / "name").read_text(errors="replace").strip() if (d / "name").is_file() else ""
+            lines.append(f"- {d.name}（名前: {name}）")
+            for s in starts:
+                if s.get("relay_dir") and pathlib.Path(s["relay_dir"]).name == d.name:
+                    lines.append(f"  起動: {s.get('argv')}")
+            lines.append(f"  ファイル: {sorted(f.name for f in d.iterdir() if f.is_file())}")
+        return "\n".join(lines)
 
     def rows(self):
         out = []
@@ -498,7 +517,7 @@ class Term:
         try:
             return self.proc.wait(timeout)
         except subprocess.TimeoutExpired:
-            raise AssertionError(f"ラッパーが終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
+            raise AssertionError(f"ラッパーが終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}\n{self.state_report()}")
 
     def close(self):
         if self.proc.poll() is None:
@@ -4632,3 +4651,30 @@ def test_prose_wait_passes_when_the_judgement_fails(relay, monkeypatch):
     monkeypatch.setattr(relay_mark.wait_notice, "classify_reply_wait", boom)
     record = relay_record.RelayRecord(str(relay.dir))
     assert relay_mark.prose_wait_reason(str(relay.dir), record, {"last_assistant_message": WAIT_MSG}, False) is None
+
+
+def test_wait_timeout_reports_each_relay_dir(tmp_path):
+    """待ちが切れたら、作業ディレクトリごとに区間の起動の引数とファイルの名前が失敗の文に載る（#2346）。"""
+    t = Term(tmp_path, cmd=[sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        root = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
+        a, b = root / "d-a", root / "d-b"
+        for d, files in ((a, {"name": "lroot", "next.json": "{}"}), (b, {"stop": "", "zz-unlisted": ""})):
+            d.mkdir(parents=True)
+            for f, body in files.items():
+                (d / f).write_text(body)
+        rows = [
+            {"relay_dir": str(a), "argv": ["claude", "--", "mark /goal 次"]},
+            {"relay_dir": str(b), "argv": ["claude", "--", "b の区間"]},
+        ]
+        (t.fake_dir / "starts.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+        with pytest.raises(AssertionError) as e:
+            t.wait(lambda: False, 0.1, "来ない")
+        msg = str(e.value)
+    finally:
+        t.close()
+
+    assert "- d-a（名前: lroot）" in msg and "- d-b（名前: ）" in msg
+    assert "['claude', '--', 'mark /goal 次']" in msg and "['claude', '--', 'b の区間']" in msg
+    assert "['name', 'next.json']" in msg and "['stop', 'zz-unlisted']" in msg

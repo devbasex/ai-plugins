@@ -322,6 +322,8 @@ NEW_ARGS = [
         "close",
     ),
     ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
+    ("--loop", {"help": "まとめを組む開発ループの名前（差分の棚卸しの深さの記録の行に残す。#2315）"}, "close"),
+    ("--lap", {"type": int, "help": "まとめを組む開発ループの周回の番号（--loop と組）"}, "close"),
 ]
 NEW_REQUIRED = {
     "impl": "--issue・--tests・--title",

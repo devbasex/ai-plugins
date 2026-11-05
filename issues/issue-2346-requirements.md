@@ -194,7 +194,9 @@
 - [ ] 29. develop 宛の Pull Request の CI のテストのジョブ（`pytest.yml` の分割の 2 本）で、tmux を使う 4 件（`test_spawn_ls_stop_and_hub_handover`・`test_second_claude_attaches_and_survives_terminal_close`・`test_limit_refuses_from_terminal_and_spawn`・`test_killed_named_wrapper_shows_stopped`）が実行されて通り、どれも skipped に数えられない。CI のログか成果物から、4 件の結果を名前で読める
 - [ ] 30. 開発コンテナ（tmux 3.6）で `test_spawn_ls_stop_and_hub_handover` を 10 回続けて実行し、10 回とも通る。`pytest plugins/ndf/scripts/tests -n 4` の全体の実行でも通る
 - [ ] 31. 結合テストが名前つきのラッパーの区間の待ちで切れて落ちるとき、失敗の出力に、そのラッパーの区間ごとの起動の引数と、作業ディレクトリのシグナルファイル（`next.json`・`stop` など）の有無が載る
-- [ ] 32. `relay.py` と `relay_lib/` の振る舞いを変えない（変更は `plugins/ndf/scripts/tests/`・根の `conftest.py`・`.github/workflows/` に限る。`git diff --stat origin/develop` で確かめる）
+- ~~32. `relay.py` と `relay_lib/` の振る舞いを変えない（変更は `plugins/ndf/scripts/tests/`・根の `conftest.py`・`.github/workflows/` に限る。`git diff --stat origin/develop` で確かめる）~~ → 変更の範囲に、根の `conftest.py` のテストの置き場 `scripts/tests/test_root_conftest.py` を加える（2026-11-05、承認ゲート 1 で利用者が設計を承認）
+- [ ] 32. `relay.py` と `relay_lib/` の振る舞いを変えない（変更は `plugins/ndf/scripts/tests/`・根の `conftest.py`・`scripts/tests/test_root_conftest.py`・`.github/workflows/` に限る。`git diff --stat origin/develop` で確かめる）
+<!-- ndf:section-end -->
 
 ## 非機能の条件
 
