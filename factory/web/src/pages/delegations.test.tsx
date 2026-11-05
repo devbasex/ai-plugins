@@ -10,10 +10,10 @@ afterEach(cleanup);
 
 const tokyo: LocaleSettings = { language: "ja", locale: "ja-JP", timeZone: "Asia/Tokyo" };
 
-function show(search = "") {
+function show(search = "", services = createDummyServices(search)) {
   render(
     <MemoryRouter initialEntries={["/delegations"]}>
-      <App services={createDummyServices(search)} settings={tokyo} />
+      <App services={services} settings={tokyo} />
     </MemoryRouter>,
   );
 }
@@ -33,6 +33,17 @@ describe("エージェントへの委任（#2384）", () => {
     expect(within(rows[1]!).queryByRole("button", { name: "取り消す" })).toBeNull();
     await userEvent.click(within(rows[0]!).getByRole("button", { name: "取り消す" }));
     expect(await within(rows[0]!).findByText("取り消し済み")).toBeTruthy();
+  });
+
+  it("送り直しで前の発行が値なしで返ったら、値を出せないことと取り消して発行し直すことを知らせる", async () => {
+    const services = createDummyServices("");
+    const create = services.api.createDelegation;
+    services.api.createDelegation = async (input) => ({ ...(await create(input)), credential: null });
+    show("", services);
+    await userEvent.type(await screen.findByLabelText("クライアントの名前"), "手元の Claude Code");
+    await userEvent.click(screen.getByRole("button", { name: "発行する" }));
+    expect(await screen.findByText("値はもう表示できません。この資格情報を取り消して発行し直してください")).toBeTruthy();
+    expect(screen.queryByText(/^ndfd_/)).toBeNull();
   });
 
   it("名前が無ければ発行しない", async () => {

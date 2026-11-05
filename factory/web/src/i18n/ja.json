@@ -408,6 +408,7 @@
     "value": "資格情報の値",
     "registerExample": "MCP のクライアントへの登録の例",
     "close": "閉じる",
+    "valueUnavailable": "値はもう表示できません。この資格情報を取り消して発行し直してください",
     "list": "発行した資格情報",
     "empty": "まだ委任していません",
     "createdAt": "発行",

@@ -63,6 +63,9 @@ export function DelegationsPage() {
       const { delegation, credential } = await api.createDelegation({ client_name: name, scope, expires_in_seconds: expires });
       setIssued(credential);
       setName("");
+      // 結果が分からない失敗の後の送り直しは、同じ鍵で前の発行を返し、値を返さない（値は発行の 1 度だけ）。
+      // 黙って受けると、使えない有効な資格情報が残るため、取り消して発行し直すよう知らせる
+      if (credential === null) setMessage(t("delegations.valueUnavailable"));
       setRows((prev) => [delegation, ...(prev ?? []).filter((d) => d.credential_id !== delegation.credential_id)]);
     } catch (err) {
       setMessage(onFailure(err));
