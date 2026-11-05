@@ -155,6 +155,22 @@ function runEndOf(
   return { state, failure: job.stopReason ?? (finished.source === "control" ? reason : "job_failed") };
 }
 
+// 実行の終わりの状態を決めるのに、finalize が読み集めたもの
+interface RunEndContext {
+  finished: JobFinishedEvent;
+  reason: FailureReason;
+  finishReason: FinishReason | null;
+  rawReason: JobFinishedEvent["payload"]["reason"] | null;
+  now: string;
+  releaseEvents: ReleaseEvents | null;
+  requests: OrgRequest[];
+  lastRequest: string | null;
+  keepRelease: boolean;
+}
+
+// 実行を終わりへ移し、次の周回と待っているループを起こす必要があるときのループの書き込み。起こさないときは null
+type RunMoved = { loopWrite: LoopWrite | undefined } | null;
+
 export class RunControl {
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -597,37 +613,8 @@ export class RunControl {
     // main へマージした後の配布の実行は取り消しを受けても終わらせず、止まった配布として「続きから流す」で仕上げられるようにする（I63）
     const keepRelease = run.cancelRequested && isReleaseRun(run) && this.organizer !== null && (await this.organizer.releaseMerged(run));
     if (run.currentJobId === job.jobId) {
-      if (run.cancelRequested && !keepRelease) {
-        const lw = await this.loopWriteFor(run, job.jobId, { runState: "cancelled", failureReason: null, finishReason });
-        if (await table.finishRun(run.sprintRunId, "cancelled", null, now, { finishReason, loop: lw?.write, requests })) await this.afterRunMoved(run, lw?.write, true);
-      } else if (isReleaseRun(run)) {
-        // 配布の実行は、配布済みで done、承認ゲートか判断で承認待ち、それ以外は止まった配布として承認待ち（I65・決定 11）
-        if (releaseEvents?.settled?.result === "released") {
-          await table.finishRun(run.sprintRunId, "done", null, now);
-        } else if (result === "gate" && !keepRelease) {
-          await table.awaitApproval(run.sprintRunId, job.jobId, now);
-        } else {
-          // 取り消しを受けた実行は取り消しの印を外す（続けたジョブの終わりで取り消しにしない）
-          await table.awaitApproval(run.sprintRunId, job.jobId, now, { awaitingReason: "release_stalled", ...(keepRelease ? { clearCancel: true } : {}) });
-        }
-      } else if (result === "gate") {
-        const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_approval", failureReason: null, finishReason });
-        const waitsRelease = rawReason === "release_requested" && !run.loopId && lastRequest !== null;
-        await table.awaitApproval(run.sprintRunId, job.jobId, now, {
-          loop: lw?.write,
-          requests,
-          ...(waitsRelease ? { awaitingReason: "release_requested" as const, releaseRequestId: lastRequest } : {}),
-        });
-      } else if (result === "stopped" && finishReason === "usage_limit" && run.executionMode === "local") {
-        // local の利用上限はリセット時刻の後に同じ周回を続ける（I54。ほかの形態は failed として扱う）
-        const resumeAt = this.resumeAtOf(finished);
-        const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_reset", failureReason: null, finishReason });
-        await table.awaitReset(run.sprintRunId, job.jobId, resumeAt, now, { finishReason, loop: lw?.write });
-      } else {
-        const { state, failure } = runEndOf(result, finishReason, job, finished, reason);
-        const lw = await this.loopWriteFor(run, job.jobId, { runState: state, failureReason: failure, finishReason });
-        if (await table.finishRun(run.sprintRunId, state, failure, now, { finishReason, loop: lw?.write, requests })) await this.afterRunMoved(run, lw?.write, true);
-      }
+      const moved = await this.resolveRunEnd(run, job, { finished, reason, finishReason, rawReason, now, releaseEvents, requests, lastRequest, keepRelease });
+      if (moved) await this.afterRunMoved(run, moved.loopWrite, true);
     }
     // 依頼を受けたか配布の実行が動いたら、配布のまとめを進める。落ちてよい（見回りが続ける）
     if (this.organizer && (isReleaseRun(run) || requests.length > 0)) {
@@ -642,6 +629,61 @@ export class RunControl {
         this.log({ event: "token_delete_failed", job_id: job.jobId, error: err.name }),
       );
     }
+  }
+
+  // 実行の終わりの状態を決めて書く。取り消し・配布の実行・それ以外（ジョブの結果）の順に分ける
+  private async resolveRunEnd(run: SprintRun, job: RunJob, ctx: RunEndContext): Promise<RunMoved> {
+    const { finishReason, now, requests } = ctx;
+    if (run.cancelRequested && !ctx.keepRelease) {
+      const lw = await this.loopWriteFor(run, job.jobId, { runState: "cancelled", failureReason: null, finishReason });
+      return (await this.deps.table.finishRun(run.sprintRunId, "cancelled", null, now, { finishReason, loop: lw?.write, requests })) ? { loopWrite: lw?.write } : null;
+    }
+    if (isReleaseRun(run)) {
+      await this.finalizeReleaseRun(run, job, ctx);
+      return null;
+    }
+    return this.finalizeJobResult(run, job, ctx);
+  }
+
+  // 配布の実行は、配布済みで done、承認ゲートか判断で承認待ち、それ以外は止まった配布として承認待ち（I65・決定 11）
+  private async finalizeReleaseRun(run: SprintRun, job: RunJob, ctx: RunEndContext): Promise<void> {
+    const { table } = this.deps;
+    const { now, keepRelease } = ctx;
+    if (ctx.releaseEvents?.settled?.result === "released") {
+      await table.finishRun(run.sprintRunId, "done", null, now);
+    } else if (ctx.finished.payload.result === "gate" && !keepRelease) {
+      await table.awaitApproval(run.sprintRunId, job.jobId, now);
+    } else {
+      // 取り消しを受けた実行は取り消しの印を外す（続けたジョブの終わりで取り消しにしない）
+      await table.awaitApproval(run.sprintRunId, job.jobId, now, { awaitingReason: "release_stalled", ...(keepRelease ? { clearCancel: true } : {}) });
+    }
+  }
+
+  // ループの実行と手動の実行の、ジョブの結果に従う終わり（gate・local の利用上限・それ以外）
+  private async finalizeJobResult(run: SprintRun, job: RunJob, ctx: RunEndContext): Promise<RunMoved> {
+    const { table } = this.deps;
+    const { finished, finishReason, now, requests, lastRequest } = ctx;
+    const result = finished.payload.result;
+    if (result === "gate") {
+      const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_approval", failureReason: null, finishReason });
+      const waitsRelease = ctx.rawReason === "release_requested" && !run.loopId && lastRequest !== null;
+      await table.awaitApproval(run.sprintRunId, job.jobId, now, {
+        loop: lw?.write,
+        requests,
+        ...(waitsRelease ? { awaitingReason: "release_requested" as const, releaseRequestId: lastRequest } : {}),
+      });
+      return null;
+    }
+    if (result === "stopped" && finishReason === "usage_limit" && run.executionMode === "local") {
+      // local の利用上限はリセット時刻の後に同じ周回を続ける（I54。ほかの形態は failed として扱う）
+      const resumeAt = this.resumeAtOf(finished);
+      const lw = await this.loopWriteFor(run, job.jobId, { runState: "awaiting_reset", failureReason: null, finishReason });
+      await table.awaitReset(run.sprintRunId, job.jobId, resumeAt, now, { finishReason, loop: lw?.write });
+      return null;
+    }
+    const { state, failure } = runEndOf(result, finishReason, job, finished, ctx.reason);
+    const lw = await this.loopWriteFor(run, job.jobId, { runState: state, failureReason: failure, finishReason });
+    return (await table.finishRun(run.sprintRunId, state, failure, now, { finishReason, loop: lw?.write, requests })) ? { loopWrite: lw?.write } : null;
   }
 
   // job.finished を読む。無ければ control で failed を書き、書けなければ（先に書かれていれば）読み直す
