@@ -214,6 +214,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 開発ループ | — | スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 周回 | — | 開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| 選定 | — | 開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す | — | — | — |
+| 前提の課題 | — | ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない | — | — | — |
 | ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 止まる条件 | — | 開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | ループの記録 | — | 開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
