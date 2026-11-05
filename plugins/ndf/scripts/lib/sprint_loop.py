@@ -383,19 +383,23 @@ def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None,
             out = design_pr_merge.merge_approved(env.main_dir(), int(w["pr"]), w.get("stamp"), run=env.run)
             merge = sprint_loop_gate.note_merge(w, out, w.get("lap") or len(rec["laps"]), env.now())
         write_record(env, rec, before)
-        if revise:
-            after = "次の周回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
-        elif not approved:
-            after = "選定の対象に戻さない（差し戻し）"
-        elif merge and merge["result"] in sprint_loop_gate.MERGED_RESULTS:
-            after = "設計 PR をマージした。次の周回で先頭に選ぶ"
-        elif merge and merge["result"] == "production":
-            after = f"設計 PR をマージしない（{merge['reason']}）。承認ゲート 2 で人がマージするまで実装に選ばない"
-        elif merge:
-            after = f"設計 PR をマージできない（{merge['result']}: {merge['reason']}）。次の周回の境でマージし直す"
-        else:
-            after = "設計 PR のマージの後の周回で選定の対象に戻る"
+        after = answer_after(approved, revise, merge)
         return loop_ok(f"#{number} の答え（{w['answer']}）を書いた。{after}", rec, [w, *({"note": n} for n in notes)], status="answered")
+
+
+def answer_after(approved: bool, revise: bool, merge: dict | None) -> str:
+    """答えを書いた後に人へ示す、この後の扱いの文面を返す（答えの種別と設計 PR のマージの結果から決める）。"""
+    if revise:
+        return "次の周回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
+    if not approved:
+        return "選定の対象に戻さない（差し戻し）"
+    if merge and merge["result"] in sprint_loop_gate.MERGED_RESULTS:
+        return "設計 PR をマージした。次の周回で先頭に選ぶ"
+    if merge and merge["result"] == "production":
+        return f"設計 PR をマージしない（{merge['reason']}）。承認ゲート 2 で人がマージするまで実装に選ばない"
+    if merge:
+        return f"設計 PR をマージできない（{merge['result']}: {merge['reason']}）。次の周回の境でマージし直す"
+    return "設計 PR のマージの後の周回で選定の対象に戻る"
 
 
 def regated_answer(env: Env, w: dict) -> str | None:
