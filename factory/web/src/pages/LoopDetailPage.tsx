@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { LoopDecision, LoopDetail, LoopPending } from "../api.ts";
+import { ApiFailure, type LoopDecision, type LoopDetail, type LoopPending } from "../api.ts";
 import { useAttempt, useConnection, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { Alert } from "../ui/Alert.tsx";
@@ -205,7 +205,16 @@ export function LoopDetailPage() {
               e.preventDefault();
               const parsed = parseBudget(budget);
               setBudgetError(parsed ? null : t("loops.badBudget"));
-              if (parsed) void act(() => api.updateLoopBudget(accountId, loopId, parsed));
+              if (!parsed) return;
+              void act(async () => {
+                try {
+                  await api.updateLoopBudget(accountId, loopId, parsed);
+                } catch (err) {
+                  // 既定へ戻せない版のループで空にした（#2406）。理由は翻訳の文で予算の欄の誤りとして出す
+                  if (!(err instanceof ApiFailure && err.code === "budget_reset_unsupported")) throw err;
+                  setBudgetError(t("loopDetail.budgetResetUnsupported", { version: String(err.details?.ndf_version ?? "") }));
+                }
+              });
             }}
           >
             <BudgetFields value={budget} onChange={setBudget} error={budgetError} />
