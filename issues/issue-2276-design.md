@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: Secrets Manager の秘密を「1 回だけ読み、読めなければ次の要求で読み直す」処理が、実行の制御の依存・進捗の受け口・GitHub の仲立ちの 3 か所に別々に書かれている。読み直しの規則を変えるときは 3 か所を直す必要があり、実行の制御の依存のコピーには、古い失敗の後始末が新しい読み込みの保持を消しうる順序の穴がある（「決定 3」）
+- **今どうなっているか**: Secrets Manager の秘密を「1 回だけ読み、読めなければ次の要求で読み直す」処理が、3 か所に別々に書かれている。実行の制御の依存・進捗の受け口・GitHub の仲立ちである。読み直しの規則を変えるときは 3 か所を直す必要がある。実行の制御の依存のコピーには、古い失敗の後始末が新しい読み込みの保持を消しうる順序の穴がある（「決定 3」）
 - **誰に効くか**: Factory の API（`factory/api`）を直す開発者と、秘密を読む Lambda を足す子課題（#2173 の通知・#2174 の決済）
 - **変えると何が成り立つか**: 保持と読み直しの規則が 1 か所にだけあり、3 か所と今後の Lambda はそれを呼ぶだけで同じ規則が効く
 
@@ -139,6 +139,8 @@ graph TD
     K --> SM
 ```
 
+### ファイルの置き場
+
 配置は変わらない。3 つの呼ぶ側は今と同じ Lambda で動き、共通の仕組みは各 Lambda のバンドルへ一緒に入る。
 
 ```text
@@ -174,7 +176,11 @@ classDiagram
 | `webhookSecretFromEnv` とモジュールの変数（`handlers/ingest.ts`） | 削除 | 依存の `webhookSecret` に `secretStringFromEnv("GITHUB_APP_WEBHOOK_SECRET_ARN")` を渡す |
 | 署名の鍵の組のモジュールの変数（`handlers/github-oidc.ts`） | 削除 | 依存の `keys` に `cacheUntilFailure(() => loadSigningKeys(requireEnv("GITHUB_OIDC_SIGNING_KEY_SECRET_ARN")))` を渡す |
 
-呼ぶ側の型（GitHub App の設定の `clientSecret`・`privateKeyPem`、受け口の依存の `webhookSecret`、仲立ちの依存の `keys`）は、どれも `() => Promise<…>` のままで変わらない。
+呼ぶ側の次の型は、どれも `() => Promise<…>` のままで変わらない。
+
+- GitHub App の設定の `clientSecret`・`privateKeyPem`
+- 進捗の受け口の依存の `webhookSecret`
+- GitHub の仲立ちの依存の `keys`
 
 ## 処理の流れ
 
@@ -259,7 +265,9 @@ GitHub の仲立ちは文字列でなく鍵の組を保持するため、型を�
 
 ### 決定 5: コピーごとに違う文言をやめるため、秘密の文字列が空のときの例外の文言を `<環境変数の名前> の秘密が読めません` にそろえる
 
-進捗の受け口の今の文言「Webhook の秘密が読めません」は `GITHUB_APP_WEBHOOK_SECRET_ARN の秘密が読めません` に変わる。受け口はこの例外を 503 の誤りに置き換え、文言を応答に出さない（`src/progress/app.ts:136`、要求の前提 3）。文言を検査する既存のテストは無い（`grep -rn "秘密が読めません" factory/api/src` の結果は `runs/deps.ts:30` と `handlers/ingest.ts:18` の 2 件で、どちらもこの変更で書き換える箇所である。テストのファイルには現れない）。
+進捗の受け口の今の文言「Webhook の秘密が読めません」は `GITHUB_APP_WEBHOOK_SECRET_ARN の秘密が読めません` に変わる。受け口はこの例外を 503 のエラーに置き換え、文言を応答に出さない（`src/progress/app.ts:136`、要求の前提 3）。
+
+文言を検査する既存のテストは無い。`grep -rn "秘密が読めません" factory/api/src` の結果は 2 件（`runs/deps.ts:30`・`handlers/ingest.ts:18`）である。どちらもこの変更で書き換える箇所で、テストのファイルには現れない。
 
 根拠: Value 7（MVV 版 5）
 
