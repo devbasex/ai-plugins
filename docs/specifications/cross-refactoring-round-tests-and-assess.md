@@ -225,7 +225,8 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 **プロダクションコードの数え方:** `git diff --numstat -z --no-renames <REF>...HEAD` の各行を見る。rename は
 旧パスの削除と新パスの追加に分かれ、両方のパスで判定する。拡張子が `CODE_EXTENSIONS`（`.py .sh
 .bash .js .mjs .cjs .ts .tsx .jsx .php .rb .go .rs .java .kt .swift .c .h .cc .cpp .cs`）のどれかで、
-`is_test_path` が偽のファイルを数える。行数は追加と削除の和で、削除だけのファイルも入る。バイナリ
+`is_test_path` が偽のファイルを数える。名前がテストの形でも、`tests/` などのテスト用ディレクトリの配下になく、作業ディレクトリでテストの
+関数を持たない `.py` は数える。行数は追加と削除の和で、削除だけのファイルも入る。バイナリ
 （`numstat` が `-`）は 0 行と数える。`.md`・`.json`・`.yml`・`.toml`・画像・テストの置き場所は数えない。
 
 **`assess` は判定の材料を出すだけで、退避の 3 条件（テストが無い・CLI が使えない・範囲を絞れない）は
