@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
-import { useNavigate } from "react-router";
+import { createContext, useCallback, useContext, useSyncExternalStore, type ReactNode } from "react";
+import { Navigate, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ApiFailure, type Api } from "./api.ts";
@@ -12,6 +12,8 @@ export interface Services {
   connection: ConnectionSource;
   // 一覧と詳細を読み直す間隔（ミリ秒）。無ければ既定の 30 秒
   pollIntervalMs?: number;
+  // API の入口。委任の画面が MCP のクライアントへの登録の例に出す
+  apiUrl?: string;
 }
 
 export const ServicesContext = createContext<Services | null>(null);
@@ -51,4 +53,29 @@ export function useFailureHandler(): (err: unknown) => string | null {
     },
     [navigate, t],
   );
+}
+
+// ログインの後の画面の枠を包む。token が無ければ枠も画面も描かずにログインの画面へ移る
+export function RequireLogin({ children }: { children: ReactNode }) {
+  const { auth } = useServices();
+  if (auth.getToken() === null) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+export type Attempt = <T>(op: () => Promise<T>, show: (message: string | null) => void) => Promise<void>;
+
+// op を呼び、失敗したら画面の文を show へ渡す（401 ならログインの画面へ移って null）。attempt は投げない。
+// 描くたびに同じ関数を返す（useEffect の依存に入れても読み込みを繰り返さない）
+export function useAttempt(): Attempt {
+  const onFailure = useFailureHandler();
+  return useCallback(
+    async (op, show) => {
+      try {
+        await op();
+      } catch (err) {
+        show(onFailure(err));
+      }
+    },
+    [onFailure],
+  ) as Attempt;
 }

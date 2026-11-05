@@ -14,10 +14,10 @@ export interface Polled<T> {
   reload: () => void;
 }
 
-// read が変わると最初から読み直す。enabled が偽の間は読まない。poll が偽なら間隔では読み直さず、開いたときと reload だけで読む
+// read が変わると最初から読み直す。poll が偽なら間隔では読み直さず、開いたときと reload だけで読む
 // （変わることの少ない画面で、1 回の読み出しが重いもの。バックログなど）。poll が関数なら、間隔のたびに今の data で決める
 // （終わった実行の詳細など、data がもう変わらないと分かったら読み直さない）
-export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = true }: { poll?: boolean | ((data: T | null) => boolean) } = {}): Polled<T> {
+export function usePolled<T>(read: () => Promise<T>, { poll = true }: { poll?: boolean | ((data: T | null) => boolean) } = {}): Polled<T> {
   const { pollIntervalMs } = useServices();
   const interval = pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const onFailure = useFailureHandler();
@@ -33,7 +33,6 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = 
   const polling = poll !== false;
 
   useEffect(() => {
-    if (!enabled) return;
     let cancelled = false;
     let running = false;
     hasData.current = false;
@@ -78,7 +77,7 @@ export function usePolled<T>(read: () => Promise<T>, enabled: boolean, { poll = 
       cancelled = true;
       clearInterval(timer);
     };
-  }, [read, enabled, interval, onFailure, generation, polling]);
+  }, [read, interval, onFailure, generation, polling]);
 
   const reload = useCallback(() => setGeneration((g) => g + 1), []);
   return { data, error, staleSince, reload };

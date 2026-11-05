@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ApiFailure, type IssueCandidate } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useFailureHandler, useServices } from "../context.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -23,8 +23,9 @@ export function NewSprintPage() {
   const { t } = useTranslation();
   const { accountId = "", repositoryId = "" } = useParams();
   const repoId = Number(repositoryId);
-  const { auth, api } = useServices();
+  const { api } = useServices();
   const onFailure = useFailureHandler();
+  const attempt = useAttempt();
   const navigate = useNavigate();
   const [candidates, setCandidates] = useState<IssueCandidate[] | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
@@ -32,7 +33,6 @@ export function NewSprintPage() {
   const [extra, setExtra] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const hasToken = auth.getToken() !== null;
 
   const choose = useCallback(
     async (exclude: number[]) => {
@@ -45,11 +45,9 @@ export function NewSprintPage() {
   );
 
   useEffect(() => {
-    if (!hasToken) return;
-    choose([]).catch((err: unknown) => setError(onFailure(err)));
-  }, [choose, hasToken, onFailure]);
+    void attempt(() => choose([]), setError);
+  }, [attempt, choose]);
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   if (error) return <Alert>{error}</Alert>;
   if (!candidates) return <LoadingState />;
   const titles = new Map(candidates.map((c) => [c.number, c]));
@@ -112,7 +110,7 @@ export function NewSprintPage() {
       </div>
       <div className="ui-row">
         <Button
-          onClick={() => void choose(candidates.filter((c) => !selected.includes(c.number)).map((c) => c.number)).catch((err: unknown) => setMessage(onFailure(err)))}
+          onClick={() => void attempt(() => choose(candidates.filter((c) => !selected.includes(c.number)).map((c) => c.number)), setMessage)}
         >
           {t("newSprint.rechoose")}
         </Button>

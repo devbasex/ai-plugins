@@ -4814,19 +4814,19 @@
     {
       "term": "版の差し込み",
       "context": "ndf-workflow",
-      "meaning": "配布のプランが具体的な版の代わりに持つ `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）。キューがステージを流す直前に版の記録の値で埋める",
+      "meaning": "前の版の NDF が組んだ配布のプランが、具体的な版の代わりに持つ `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）。プランの型の移行関数が版の参照へ読み替える（#2344）",
       "source": ""
     },
     {
       "term": "版の記録",
       "context": "ndf-workflow",
-      "meaning": "配布のプランの状態ディレクトリの `version.json`。キューが決めた、または確かめた版と、決めた根拠と、決め直しの履歴を持つ。流し直しはこれを読む",
+      "meaning": "解決の控えのうち、版の参照の行。決めた・確かめた版と、決めた根拠と、決め直しの履歴を持ち、流し直しはこれを読む。前の版の NDF が書いた `version.json` は移行関数でこの行へ読み替える（#2344）",
       "source": ""
     },
     {
       "term": "版の決め直し",
       "context": "ndf-workflow",
-      "meaning": "開発版の流し直しで、版の記録の版が自分の配布のマージより前に別のスプリントに出ていたとき、キューが次に空いている版を決め、差し込み前のプランの写しから埋め直すこと。明示の版と、自分の配布のマージの後には行わない",
+      "meaning": "開発版の流し直しで、版の記録の版が自分の配布のマージより前に別のスプリントに出ていたとき、次に空いている版を決め、解決の控えの版の行をその版へ上書きし、前の版と理由を控えの履歴に残すこと。プランのファイルは書き換えない。明示の版と、自分の配布のマージの後には行わない（#2344）",
       "source": ""
     },
     {
@@ -5087,13 +5087,13 @@
       "term": "予定の画面",
       "context": "ndf-factory",
       "meaning": "画面の地図で状態が「予定」の行。経路がまだ無く、載る機能だけが決まっている画面",
-      "pending_source": "issues/issue-2431-requirements.md"
+      "source": "docs/specifications/ndf-factory-screen-map.md"
     },
     {
       "term": "作る課題",
       "context": "ndf-factory",
       "meaning": "予定の画面を作り、画面の地図のその行を「あり」へ変える GitHub の課題。#2382 は「持ち主の課題」と書く",
-      "pending_source": "issues/issue-2431-requirements.md"
+      "source": "docs/specifications/ndf-factory-screen-map.md"
     },
     {
       "term": "デザインのトークン",
@@ -5135,60 +5135,60 @@
       "term": "委任の資格情報",
       "context": "ndf-factory",
       "meaning": "人が画面で発行し、エージェントかクライアントに渡す、期限と範囲つきの資格情報。だれの委任か（利用者）と、どのクライアントかを持ち、人が取り消せる（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "人だけが確定できる操作",
       "context": "ndf-factory",
       "meaning": "承認ゲートの承認・判断の依頼への答えと、共通原則の C1〜C8・プロジェクト MVV の P に当たる Factory の操作。契約に印を持ち、委任の資格情報からは断る（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "操作の記録",
       "context": "ndf-factory",
       "meaning": "Factory の利用者向けの操作 1 回ごとに 1 件追記する記録。だれが・いつ・どの呼び出し元から・何を行ったかを持ち、書き換えと削除の経路を持たない（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "呼び出し元の種類",
       "context": "ndf-factory",
       "meaning": "操作の記録に残す、操作がどこから来たかの区分。画面・API・MCP の 3 つ（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "機能から起こした契約",
       "context": "ndf-factory",
       "meaning": "経路と入出力を、画面の 1 枚でなくエンティティと操作から決めた API の契約。取得・作成・更新・削除とも配列で受け渡す（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "操作の扱い",
       "context": "ndf-factory",
       "meaning": "Factory の利用者向けの操作が要る範囲。読み取り（read）・書き込み（write）・人だけ（human）の 3 つで、契約の各操作に x-ndf-access として持つ（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "操作の表",
       "context": "ndf-factory",
       "meaning": "Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "要素の結果",
       "context": "ndf-factory",
       "meaning": "Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "作成の冪等の鍵",
       "context": "ndf-factory",
       "meaning": "Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "差分の棚卸し",
       "context": "ndf-workflow",
-      "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315）",
+      "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題（起点のタグの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
@@ -5320,7 +5320,7 @@
     {
       "term": "オーガナイザー",
       "context": "ndf-workflow",
-      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
+      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
@@ -5432,6 +5432,36 @@
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
+      "term": "プランの参照",
+      "context": "ndf-workflow",
+      "meaning": "プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・前のプランが出した PR・承認したコミットと照らすブランチの先端）。流す直前に実行の核が値へ解決する（#2344）",
+      "source": ""
+    },
+    {
+      "term": "解決の記録",
+      "context": "ndf-workflow",
+      "meaning": "1 回の実行がプランの参照ごとに解決した値と出所。実行の記録の行として残り、プランのファイルへは書き戻さない（#2344）",
+      "source": ""
+    },
+    {
+      "term": "承認時の値",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで人か MVV 判定が承認資料で見た値（承認したコミット・版）。流す直前に解決した値と照らし、食い違えば流さずに人へ戻す（#2344）",
+      "source": ""
+    },
+    {
+      "term": "解決の控え",
+      "context": "ndf-workflow",
+      "meaning": "流し直しでも同じ値を使う参照（版）の解決した値と決め直しの履歴を、プランの状態ディレクトリに残すファイル（`refs.json`）（#2344）",
+      "source": ""
+    },
+    {
+      "term": "プランのハッシュ",
+      "context": "ndf-workflow",
+      "meaning": "プランの型で読んだ中身を、キーを並べ替えた JSON にして取った sha256。完了したプランが変わったかを測る（#2344）",
+      "source": ""
+    },
+    {
       "term": "持ち主の契約",
       "context": "ndf-worktree",
       "meaning": "入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342）",
@@ -5486,6 +5516,43 @@
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519）",
       "pending_source": "issues/issue-2519-design.md"
+    },
+    {
+      "term": "深さの記録",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しの深さごとの起動の判定と実行を 1 行ずつ残す記録。メインディレクトリの `.ndf/backlog/depths.jsonl` で、コミットしない。差分の棚卸しの行は、棚卸しのステップの秒・ドル・言語モデルの名前を持つ（#2315）",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "プランの進行の記録",
+      "context": "ndf-workflow",
+      "meaning": "supervise のプランのステップごとの終了コード・秒・ドルを 1 行ずつ残す記録（`<状態のディレクトリ>/progress.jsonl`）。開発ループのまとめのプランでは `.ndf/loop/<名>/lap-<番号>/close*/` の下にある（#2315）",
+      "pending_source": "issues/issue-2315-requirements.md"
+    },
+    {
+      "term": "前提のコマンドの一覧",
+      "code": "required_commands",
+      "context": "repo-dev-checks",
+      "meaning": "根の conftest.py が持つ、テストの置き場所（パス、またはパスに :: でつないだファイルの中のクラス）ごとに要る外部コマンドの表。収集した項目に当たるコマンドが PATH に無ければ、読み飛ばしの指定が無い限り収集を失敗させる",
+      "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "承認した先端",
+      "context": "ndf-workflow",
+      "meaning": "設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの先端のときだけ行う",
+      "pending_source": "issues/issue-2507-design.md"
+    },
+    {
+      "term": "マージの結果",
+      "context": "ndf-workflow",
+      "meaning": "承認した設計 Pull Request を宛先へマージする 1 回の試みの結果。マージした・マージ済み・先端が動いた・印が無い・検査が緑でない・衝突・宛先が本番・失敗のどれか",
+      "pending_source": "issues/issue-2507-design.md"
+    },
+    {
+      "term": "答えの後の整理",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが答えを送った後、待つ間に届いた依頼を取り直し、除くものを除いて残りをまとめて問う手順",
+      "pending_source": "issues/issue-2507-design.md"
     }
   ]
 }

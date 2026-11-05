@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { LoopDecision, LoopDetail, LoopPending } from "../api.ts";
-import { useConnection, useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useConnection, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { ApprovalActions } from "../ui/ApprovalActions.tsx";
@@ -28,45 +28,37 @@ export function LoopDetailPage() {
   const view = useLoopView();
   const sprintState = useSprintState();
   const { accountId = "", loopId = "" } = useParams();
-  const { auth, api } = useServices();
+  const { api } = useServices();
   const { online } = useConnection();
-  const onFailure = useFailureHandler();
+  const attempt = useAttempt();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [budget, setBudget] = useState(budgetText());
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const hasToken = auth.getToken() !== null;
 
   const load = useCallback(async () => {
     setError(null);
-    try {
+    await attempt(async () => {
       const detail = (await api.loopDetails(accountId, [loopId]))[0] ?? null;
       setLoaded({ detail });
       if (detail) setBudget(budgetText(detail.loop.budget));
-    } catch (err) {
-      setError(onFailure(err));
-    }
-  }, [api, accountId, loopId, onFailure]);
+    }, setError);
+  }, [api, accountId, loopId, attempt]);
 
   useEffect(() => {
-    if (hasToken) void load();
-  }, [hasToken, load]);
-
-  if (!hasToken) return <Navigate to="/login" replace />;
+    void load();
+  }, [load]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setMessage(null);
     setBusy(true);
-    try {
+    await attempt(async () => {
       await fn();
       await load();
-    } catch (err) {
-      setMessage(onFailure(err));
-    } finally {
-      setBusy(false);
-    }
+    }, setMessage);
+    setBusy(false);
   };
 
   // ループの行はリポジトリの ID を持たないため、戻り先はリポジトリの画面にする

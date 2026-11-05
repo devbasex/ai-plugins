@@ -101,11 +101,13 @@ erDiagram
 
 ### 画面向けの経路（`factory/contracts/openapi/organizer.yaml`）
 
-| 経路 | 入力 | 成功 | 失敗の形 |
+入力と成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗の形」は要素の結果の状態である（401 は要求全体）。
+
+| 経路 | 要素・条件 | 値 | 失敗の形 |
 | --- | --- | --- | --- |
-| `GET /accounts/{accountId}/repositories/{repositoryId}/approval-requests` | — | 200 `{organizer: {current_seq, wait_reason, wait_detail}, items}`。`items` の 1 件は `{kind, sprint_run_id?, loop_id?, pr_url?, number?, reason?, created_at, release?}`。`kind` は `gate1` / `gate2` / `decision` / `loop_pending` / `release_stalled`。`release` は配布の実行のものだけが持つ `{seq, k, sha, lanes:[{lane, requested, prs}], added_prs, choices}` | 401・403・404 |
-| `GET /accounts/{accountId}/repositories/{repositoryId}/releases` | `?limit`（1〜100、既定 20） | 200 `{items: [{seq, state, release_run_id, presentations, confirmed_k, result, log}]}`（新しい順） | 400・401・403・404 |
-| `POST /accounts/{accountId}/repositories/{repositoryId}/releases/{seq}/resolve` | `{choice: "continue" \| "reject", body?}` | 202 `{seq, state}`。`state` は戻した状態（`composed` / `presented` / `represented` / `confirmed`）か `rejected` | 400・401・403・404・409（`not_stalled` / `release_after_main`） |
+| `GET /accounts/{accountId}/approval-requests?repository_id=` | 鍵 `repository_id` | `{repository_id, organizer: {current_seq, wait_reason, wait_detail}, items}`。`items` の 1 件は `{kind, sprint_run_id?, loop_id?, pr_url?, number?, reason?, created_at, release?}`。`kind` は `gate1` / `gate2` / `decision` / `loop_pending` / `release_stalled`。`release` は配布の実行のものだけが持つ `{seq, k, sha, lanes:[{lane, requested, prs}], added_prs, choices}` | 401・403・404 |
+| `GET /accounts/{accountId}/releases?repository_id=` | 条件 `repository_id`（1 つ）と `limit`（1〜100、既定 20） | `{seq, state, release_run_id, presentations, confirmed_k, result, log}`（新しい順） | 要求全体の 400・401・403・404 |
+| `POST /accounts/{accountId}/releases/resolve` | `{repository_id, seq, choice: "continue" \| "reject", body?}`（委任の資格情報では要求全体を 403 `human_only` で断る） | `{seq, state}`。`state` は戻した状態（`composed` / `presented` / `represented` / `confirmed`）か `rejected` | 400・401・403・404・409（`not_stalled` / `release_after_main`） |
 
 一覧と履歴の経路は読むだけで、承認を確定する経路はこのファイルに無い（I66）。
 

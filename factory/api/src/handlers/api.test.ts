@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTestApi, type TestApi } from "../testing/app.ts";
-import { createApiApp } from "./api.ts";
+import { createTestApi, firstResult, type TestApi } from "../testing/app.ts";
+import { createApiApp } from "../app.ts";
 
 let api: TestApi;
+let keys = 0;
 beforeEach(async () => {
   api = await createTestApi();
 });
 
 async function me(user: string) {
-  return (await (await api.call("GET", "/me", { user })).json()) as {
+  return (await (await api.op("getMe", { user })).json())[0] as {
     user_id: string;
     personal_account_id: string;
     accounts: { account_id: string; kind: string; plan: string; role: string; seat_type: string | null; execution_mode: string }[];
@@ -17,14 +18,20 @@ async function me(user: string) {
 
 async function team(owner: string, seat_type = "standard") {
   await me(owner);
-  const res = await api.call("POST", "/teams", { user: owner, body: { name: "チーム", seat_type } });
-  expect(res.status).toBe(201);
-  return (await res.json()) as { account_id: string; seats: { user_id: string; seat_type: string }[] };
+  const { status, body } = await firstResult(await api.op("createTeam", { user: owner, items: [{ name: "チーム", seat_type, idempotency_key: `k-${++keys}` }] }));
+  expect(status).toBe(200);
+  return body as { account_id: string; seats: { user_id: string; seat_type: string }[] };
 }
 
 const seatsOf = (accountId: string) => api.store.listSeats(accountId);
+const addSeat = (user: string, accountId: string, user_id: string, seat_type: string) =>
+  api.op("addSeat", { user, accountId, items: [{ user_id, seat_type }] }).then(firstResult);
+const changeSeat = (user: string, accountId: string, user_id: string, seat_type: string) =>
+  api.op("changeSeat", { user, accountId, items: [{ user_id, seat_type }] }).then(firstResult);
+const removeSeat = (user: string, accountId: string, user_id: string) => api.op("removeSeat", { user, accountId, query: { user_id: [user_id] } }).then(firstResult);
+const getAccount = (user: string, id: string) => api.op("getAccount", { user, query: { account_id: [id] } }).then(firstResult);
 
-describe("GET /me（E2、受け入れ条件 12・18、I24）", () => {
+describe("getMe（E2、受け入れ条件 12・18、I24）", () => {
   it("初回は Free・local の個人のアカウントを 1 つ作る", async () => {
     const body = await me("u-1");
     expect(body.accounts).toEqual([
@@ -43,27 +50,26 @@ describe("GET /me（E2、受け入れ条件 12・18、I24）", () => {
     api.store.beforeWrite = () => {
       throw new Error("down");
     };
-    const res = await api.call("GET", "/me", { user: "u-1" });
+    const res = await api.op("getMe", { user: "u-1" });
     expect(res.status).toBe(503);
     expect((await res.json()).error.code).toBe("account_unavailable");
     api.store.beforeWrite = null;
-    expect((await api.call("GET", "/me", { user: "u-1" })).status).toBe(200);
+    expect((await api.op("getMe", { user: "u-1" })).status).toBe(200);
   });
 
   it("席を持つチームが一覧に出る", async () => {
     const t = await team("owner");
     await me("u-1");
-    await api.call("POST", `/accounts/${t.account_id}/seats`, { user: "owner", body: { user_id: "u-1", seat_type: "premium" } });
+    await addSeat("owner", t.account_id, "u-1", "premium");
     const body = await me("u-1");
     expect(body.accounts[1]).toMatchObject({ account_id: t.account_id, kind: "team", plan: "team", role: "member", seat_type: "premium" });
   });
 });
 
-describe("GET /accounts/{account_id}（受け入れ条件 5・6・8・18）", () => {
+describe("getAccount（受け入れ条件 5・6・8・18）", () => {
   it("個人のアカウントは上限と形態を返し、席を返さない", async () => {
     const { personal_account_id } = await me("u-1");
-    const res = await api.call("GET", `/accounts/${personal_account_id}`, { user: "u-1" });
-    expect(await res.json()).toEqual({
+    expect((await getAccount("u-1", personal_account_id)).body).toEqual({
       account_id: personal_account_id,
       kind: "personal",
       name: null,
@@ -78,11 +84,9 @@ describe("GET /accounts/{account_id}（受け入れ条件 5・6・8・18）", ()
 
   it("チームは席の種類で上限が決まり、managed のときだけ月の token を返す", async () => {
     const t = await team("owner", "premium");
-    let res = await api.call("GET", `/accounts/${t.account_id}`, { user: "owner" });
-    expect((await res.json()).limits).toEqual({ concurrent_sprint_runs: 10, monthly_tokens: null });
-    await api.call("PUT", `/accounts/${t.account_id}/execution-mode`, { user: "owner", body: { execution_mode: "managed" } });
-    res = await api.call("GET", `/accounts/${t.account_id}`, { user: "owner" });
-    const body = await res.json();
+    expect((await getAccount("owner", t.account_id)).body.limits).toEqual({ concurrent_sprint_runs: 10, monthly_tokens: null });
+    await api.op("setExecutionMode", { user: "owner", items: [{ account_id: t.account_id, execution_mode: "managed" }] });
+    const { body } = await getAccount("owner", t.account_id);
     expect(body.limits).toEqual({ concurrent_sprint_runs: 10, monthly_tokens: 125_000_000 });
     expect(body.seats).toEqual([{ user_id: "owner", idp: "google", seat_type: "premium", added_at: expect.any(String) }]);
   });
@@ -96,16 +100,17 @@ describe("他人のアカウント（受け入れ条件 13、I18）", () => {
     const targets = [other.personal_account_id, t.account_id, "00000000-0000-4000-8000-999999999999"];
     const bodies = new Set<string>();
     for (const id of targets) {
-      for (const [method, path, body] of [
-        ["GET", `/accounts/${id}`, undefined],
-        ["PUT", `/accounts/${id}/execution-mode`, { execution_mode: "byok" }],
-        ["POST", `/accounts/${id}/seats`, { user_id: "a", seat_type: "standard" }],
-        ["PATCH", `/accounts/${id}/seats/owner`, { seat_type: "premium" }],
-        ["DELETE", `/accounts/${id}/seats/owner`, undefined],
+      // アカウントそのものの操作は要素の forbidden、アカウントに属するものの操作は要求全体の 403。本文は同じ
+      for (const [name, call] of [
+        ["getAccount", () => getAccount("a", id)],
+        ["setExecutionMode", () => api.op("setExecutionMode", { user: "a", items: [{ account_id: id, execution_mode: "byok" }] }).then(firstResult)],
+        ["addSeat", () => addSeat("a", id, "a", "standard")],
+        ["changeSeat", () => changeSeat("a", id, "owner", "premium")],
+        ["removeSeat", () => removeSeat("a", id, "owner")],
       ] as const) {
-        const res = await api.call(method, path, { user: "a", body });
-        expect(res.status, `${method} ${path}`).toBe(403);
-        bodies.add(await res.text());
+        const { status, body } = await call();
+        expect(status, name).toBe(403);
+        bodies.add(JSON.stringify(body));
       }
     }
     expect(bodies.size).toBe(1);
@@ -120,25 +125,31 @@ describe("チームと席（受け入れ条件 9〜11、I13〜I17・I20）", () 
     expect(t.seats).toEqual([expect.objectContaining({ user_id: "owner", seat_type: "premium" })]);
   });
 
+  it("同じ冪等の鍵の 2 回目は 1 回目のチームを返し、チームは 1 つだけ（#2384 の I14）", async () => {
+    await me("owner");
+    const create = () => api.op("createTeam", { user: "owner", items: [{ name: "チーム", seat_type: "standard", idempotency_key: "same" }] }).then(firstResult);
+    const first = await create();
+    const second = await create();
+    expect(second.body.account_id).toBe(first.body.account_id);
+    expect([...api.store.accounts.values()].filter((a) => a.kind === "team")).toHaveLength(1);
+  });
+
   it.each([
     [{ name: "", seat_type: "standard" }],
     [{ name: "あ".repeat(65), seat_type: "standard" }],
     [{ name: "x", seat_type: "gold" }],
   ])("名前か席の種類が違えば 400: %j", async (body) => {
     await me("owner");
-    expect((await api.call("POST", "/teams", { user: "owner", body })).status).toBe(400);
+    expect((await firstResult(await api.op("createTeam", { user: "owner", items: [{ ...body, idempotency_key: "k-400" }] }))).status).toBe(400);
   });
 
   it("持ち主は席を足し、種類を変え、外せる。そのたびに履歴が 1 つ増える", async () => {
     const t = await team("owner");
     await me("u-1");
     const before = api.store.history.length;
-    let res = await api.call("POST", `/accounts/${t.account_id}/seats`, { user: "owner", body: { user_id: "u-1", seat_type: "standard" } });
-    expect(res.status).toBe(201);
-    res = await api.call("PATCH", `/accounts/${t.account_id}/seats/u-1`, { user: "owner", body: { seat_type: "premium" } });
-    expect(await res.json()).toMatchObject({ user_id: "u-1", seat_type: "premium" });
-    res = await api.call("DELETE", `/accounts/${t.account_id}/seats/u-1`, { user: "owner" });
-    expect(res.status).toBe(204);
+    expect((await addSeat("owner", t.account_id, "u-1", "standard")).status).toBe(200);
+    expect((await changeSeat("owner", t.account_id, "u-1", "premium")).body).toMatchObject({ user_id: "u-1", seat_type: "premium" });
+    expect(await removeSeat("owner", t.account_id, "u-1")).toEqual({ status: 200, body: { removed: true } });
     expect(api.store.history.slice(before).map((h) => h.type)).toEqual(["seat.added", "seat.changed", "seat.removed"]);
     expect(await seatsOf(t.account_id)).toHaveLength(1);
   });
@@ -147,16 +158,16 @@ describe("チームと席（受け入れ条件 9〜11、I13〜I17・I20）", () 
     const t = await team("owner");
     await me("member");
     await me("u-2");
-    await api.call("POST", `/accounts/${t.account_id}/seats`, { user: "owner", body: { user_id: "member", seat_type: "standard" } });
+    await addSeat("owner", t.account_id, "member", "standard");
     const seats = await seatsOf(t.account_id);
     const before = api.store.history.length;
-    for (const [method, path, body] of [
-      ["POST", `/accounts/${t.account_id}/seats`, { user_id: "u-2", seat_type: "standard" }],
-      ["PATCH", `/accounts/${t.account_id}/seats/owner`, { seat_type: "premium" }],
-      ["DELETE", `/accounts/${t.account_id}/seats/owner`, undefined],
-      ["PATCH", `/accounts/${t.account_id}/seats/nobody`, { seat_type: "premium" }],
-    ] as const) {
-      expect((await api.call(method, path, { user: "member", body })).status).toBe(403);
+    for (const result of [
+      await addSeat("member", t.account_id, "u-2", "standard"),
+      await changeSeat("member", t.account_id, "owner", "premium"),
+      await removeSeat("member", t.account_id, "owner"),
+      await changeSeat("member", t.account_id, "nobody", "premium"),
+    ]) {
+      expect(result.status).toBe(403);
     }
     expect(await seatsOf(t.account_id)).toEqual(seats);
     expect(api.store.history.length).toBe(before);
@@ -165,20 +176,20 @@ describe("チームと席（受け入れ条件 9〜11、I13〜I17・I20）", () 
   it("未ログイン → 422、既に席がある → 409、持ち主の席を外す → 409。席も履歴も変わらない", async () => {
     const t = await team("owner");
     await me("u-1");
-    await api.call("POST", `/accounts/${t.account_id}/seats`, { user: "owner", body: { user_id: "u-1", seat_type: "standard" } });
+    await addSeat("owner", t.account_id, "u-1", "standard");
     const seats = await seatsOf(t.account_id);
     const before = api.store.history.length;
     const cases = [
-      ["POST", `/accounts/${t.account_id}/seats`, { user_id: "never", seat_type: "standard" }, 422, "user_not_found"],
-      ["POST", `/accounts/${t.account_id}/seats`, { user_id: "u-1", seat_type: "premium" }, 409, "seat_exists"],
-      ["DELETE", `/accounts/${t.account_id}/seats/owner`, undefined, 409, "owner_seat_protected"],
-      ["PATCH", `/accounts/${t.account_id}/seats/nobody`, { seat_type: "premium" }, 404, "seat_not_found"],
-      ["DELETE", `/accounts/${t.account_id}/seats/nobody`, undefined, 404, "seat_not_found"],
+      [() => addSeat("owner", t.account_id, "never", "standard"), 422, "user_not_found"],
+      [() => addSeat("owner", t.account_id, "u-1", "premium"), 409, "seat_exists"],
+      [() => removeSeat("owner", t.account_id, "owner"), 409, "owner_seat_protected"],
+      [() => changeSeat("owner", t.account_id, "nobody", "premium"), 404, "seat_not_found"],
+      [() => removeSeat("owner", t.account_id, "nobody"), 404, "seat_not_found"],
     ] as const;
-    for (const [method, path, body, status, code] of cases) {
-      const res = await api.call(method, path, { user: "owner", body });
+    for (const [call, status, code] of cases) {
+      const res = await call();
       expect(res.status, code).toBe(status);
-      expect((await res.json()).error).toEqual({ code, message: expect.any(String) });
+      expect(res.body.error).toEqual({ code, message: expect.any(String) });
     }
     expect(await seatsOf(t.account_id)).toEqual(seats);
     expect(api.store.history.length).toBe(before);
@@ -187,9 +198,9 @@ describe("チームと席（受け入れ条件 9〜11、I13〜I17・I20）", () 
   it("個人のアカウントへの席の操作は 409 not_a_team", async () => {
     const { personal_account_id } = await me("u-1");
     await me("u-2");
-    const res = await api.call("POST", `/accounts/${personal_account_id}/seats`, { user: "u-1", body: { user_id: "u-2", seat_type: "standard" } });
+    const res = await addSeat("u-1", personal_account_id, "u-2", "standard");
     expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe("not_a_team");
+    expect(res.body.error.code).toBe("not_a_team");
   });
 
   it("書き込みが失敗したら席も履歴も増えない", async () => {
@@ -199,7 +210,7 @@ describe("チームと席（受け入れ条件 9〜11、I13〜I17・I20）", () 
     api.store.beforeWrite = () => {
       throw new Error("down");
     };
-    const res = await api.call("POST", `/accounts/${t.account_id}/seats`, { user: "owner", body: { user_id: "u-1", seat_type: "standard" } });
+    const res = await addSeat("owner", t.account_id, "u-1", "standard");
     expect(res.status).toBe(503);
     expect(api.store.history.length).toBe(before);
     expect(await seatsOf(t.account_id)).toHaveLength(1);
@@ -208,14 +219,14 @@ describe("チームと席（受け入れ条件 9〜11、I13〜I17・I20）", () 
 
 describe("実行の形態（受け入れ条件 18・19、I21・I22）", () => {
   const put = (user: string, id: string, execution_mode: unknown) =>
-    api.call("PUT", `/accounts/${id}/execution-mode`, { user, body: { execution_mode } });
+    api.op("setExecutionMode", { user, items: [{ account_id: id, execution_mode }] }).then(firstResult);
 
   it("持ち主は形態を変えられ、履歴が 1 つ増える。同じ値なら増えない", async () => {
     const { personal_account_id: id } = await me("u-1");
     const before = api.store.history.length;
     const res = await put("u-1", id, "byok");
     expect(res.status).toBe(200);
-    expect((await res.json()).execution_mode).toBe("byok");
+    expect(res.body.execution_mode).toBe("byok");
     expect((await put("u-1", id, "byok")).status).toBe(200);
     expect(api.store.history.slice(before).map((h) => [h.type, h.before, h.after])).toEqual([["execution_mode.changed", "local", "byok"]]);
   });
@@ -225,7 +236,7 @@ describe("実行の形態（受け入れ条件 18・19、I21・I22）", () => {
     const before = api.store.history.length;
     const res = await put("u-1", id, "managed");
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toEqual({
+    expect(res.body.error).toEqual({
       code: "managed_not_allowed_on_free",
       message: "Free の料金プランでは managed（サービスの Bedrock）を選べません",
     });
@@ -236,16 +247,16 @@ describe("実行の形態（受け入れ条件 18・19、I21・I22）", () => {
   it("Pro なら managed を選べる", async () => {
     const { personal_account_id: id } = await me("u-1");
     await api.service.setPlan(id, "pro");
-    expect((await (await put("u-1", id, "managed")).json()).limits).toEqual({ concurrent_sprint_runs: 3, monthly_tokens: 20_000_000 });
+    expect((await put("u-1", id, "managed")).body.limits).toEqual({ concurrent_sprint_runs: 3, monthly_tokens: 20_000_000 });
   });
 
   it("チームの持ち主でない席の利用者は 403 で、形態は変わらない", async () => {
     const t = await team("owner");
     await me("member");
-    await api.call("POST", `/accounts/${t.account_id}/seats`, { user: "owner", body: { user_id: "member", seat_type: "standard" } });
+    await addSeat("owner", t.account_id, "member", "standard");
     const res = await put("member", t.account_id, "byok");
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: { code: "forbidden", message: "このアカウントを見る権限がありません" } });
+    expect(res.body).toEqual({ error: { code: "forbidden", message: "このアカウントを見る権限がありません" } });
     expect(api.store.accounts.get(t.account_id)?.executionMode).toBe("local");
   });
 

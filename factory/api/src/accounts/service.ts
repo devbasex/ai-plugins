@@ -1,16 +1,9 @@
 import { randomUUID } from "node:crypto";
-import {
-  AccountUnavailableError,
-  ConflictError,
-  ForbiddenError,
-  InvalidRequestError,
-  NotFoundError,
-  PlanError,
-  UnprocessableError,
-} from "../errors.ts";
+import { AccountUnavailableError, ConflictError, ForbiddenError, InvalidRequestError, PlanError } from "../errors.ts";
 import {
   INITIAL_EXECUTION_MODE,
   isPlan,
+  isSeatType,
   planFitsKind,
   type AccountContext,
   type AccountKind,
@@ -18,16 +11,15 @@ import {
   type Caller,
   type ExecutionMode,
   type HistoryRecord,
-  type HistoryType,
   type Plan,
   type SeatRecord,
   type SeatType,
   type UserRecord,
 } from "./model.ts";
-import { ConditionFailedError, type AccountPatch, type AccountStore } from "./store.ts";
-
-// 版の競合で読み直して書き直す回数の上限（docs/specifications/ndf-factory-accounts-and-plans.md の「常に成り立つ条件」）
-const VERSION_RETRIES = 3;
+import type { AccountPatch, AccountStore } from "./port.ts";
+import { retryOnConflict, writeOr } from "./conflict.ts";
+import { SeatService, seatHistory } from "./seat-service.ts";
+import { claimOf, type IdempotencyRef } from "../idempotency.ts";
 
 export interface ServiceDeps {
   store: AccountStore;
@@ -39,19 +31,17 @@ export class AccountService {
   private readonly store: AccountStore;
   private readonly now: () => Date;
   private readonly newId: () => string;
+  private readonly seats: SeatService;
 
   constructor(deps: ServiceDeps) {
     this.store = deps.store;
     this.now = deps.now ?? (() => new Date());
     this.newId = deps.newId ?? randomUUID;
+    this.seats = new SeatService(this.store, this.now);
   }
 
   private stamp(): string {
     return this.now().toISOString();
-  }
-
-  private hist(accountId: string, type: HistoryType, at: string, actor: string, before: unknown, after: unknown): HistoryRecord {
-    return { accountId, type, at, actor, before, after };
   }
 
   // 新しいアカウントの初期値（I24）。形態は INITIAL_EXECUTION_MODE、版は 1 から始める
@@ -70,12 +60,14 @@ export class AccountService {
   }
 
   private accountCreated(account: AccountRecord, actor: string, extra?: object): HistoryRecord {
-    return this.hist(account.accountId, "account.created", account.createdAt, actor, null, {
-      kind: account.kind,
-      plan: account.plan,
-      execution_mode: account.executionMode,
-      ...extra,
-    });
+    return {
+      accountId: account.accountId,
+      type: "account.created",
+      at: account.createdAt,
+      actor,
+      before: null,
+      after: { kind: account.kind, plan: account.plan, execution_mode: account.executionMode, ...extra },
+    };
   }
 
   // 利用者の行を読み、無ければ利用者と個人のアカウント（Free・local）を 1 つのトランザクションで作る（I12・I24、E2）
@@ -90,16 +82,15 @@ export class AccountService {
       personalAccountId: account.accountId,
       createdAt: at,
     };
-    try {
-      await this.store.createUserWithPersonalAccount(user, account, [this.accountCreated(account, caller.userId)]);
-      return user;
-    } catch (err) {
-      if (err instanceof ConditionFailedError) {
-        const raced = await this.store.getUser(caller.userId);
-        if (raced) return raced;
-      }
-      throw new AccountUnavailableError();
-    }
+    const raced = await writeOr(
+      () => this.store.createUserWithPersonalAccount(user, account, [this.accountCreated(account, caller.userId)]),
+      async () => {
+        const found = await this.store.getUser(caller.userId);
+        if (!found) throw new AccountUnavailableError();
+        return found;
+      },
+    );
+    return raced ?? user;
   }
 
   // 要求の利用者と経路のアカウントの ID から、権限つきの文脈を返す（決定 4、I18）
@@ -161,151 +152,115 @@ export class AccountService {
   }
 
   // チームを作り、作った利用者を持ち主にして持ち主の席を 1 つ作る（受け入れ条件 9、E4）
-  async createTeam(caller: Caller, name: string, seatType: SeatType): Promise<AccountContext> {
+  // idempotencyKey があれば、同じ利用者の同じ鍵の 24 時間以内の作成を 1 件にし、2 回目は 1 回目のチームを返す（#2384 の I14）
+  async createTeam(caller: Caller, name: string, seatType: SeatType, idempotencyKey?: string): Promise<AccountContext> {
     await this.ensureUser(caller);
     const at = this.stamp();
+    const ref: IdempotencyRef | undefined = idempotencyKey === undefined ? undefined : { userId: caller.userId, operationId: "createTeam", key: idempotencyKey };
+    const replayed = ref ? await this.store.getIdempotent(ref, at) : null;
+    if (replayed) return this.resolveAccount(caller, replayed);
     const account = this.newAccount("team", "team", caller.userId, name, at);
     const seat: SeatRecord = { accountId: account.accountId, userId: caller.userId, seatType, addedAt: at };
-    try {
-      await this.store.createTeam(account, seat, [
-        this.accountCreated(account, caller.userId, { name }),
-        this.hist(account.accountId, "seat.added", at, caller.userId, null, { user_id: caller.userId, seat_type: seatType }),
-      ]);
-    } catch {
-      throw new AccountUnavailableError();
-    }
-    return this.context(account, caller.userId, seatType);
+    const won = await writeOr(
+      () =>
+        this.store.createTeam(
+          account,
+          seat,
+          [
+            this.accountCreated(account, caller.userId, { name }),
+            seatHistory("seat.added", account.accountId, at, caller.userId, caller.userId, null, seatType),
+          ],
+          ref && claimOf(ref, account.accountId, at),
+        ),
+      async () => {
+        // 同じ鍵の作成が同時に走り、先に書いた方が勝った
+        const id = ref ? await this.store.getIdempotent(ref, at) : null;
+        if (!id) throw new AccountUnavailableError();
+        return this.resolveAccount(caller, id);
+      },
+    );
+    return won ?? this.context(account, caller.userId, seatType);
   }
 
-  // 席の操作は持ち主だけ（I17）。持ち主でなければ席の有無にかかわらず先に 403
-  private requireTeamOwner(ctx: AccountContext): void {
-    if (ctx.role !== "owner") throw new ForbiddenError();
-    if (ctx.kind !== "team") throw new ConflictError("not_a_team", "チームのアカウントではありません");
+  // 席の操作は SeatService が持つ
+  addSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
+    return this.seats.addSeat(ctx, userId, seatType);
   }
 
-  async addSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
-    this.requireTeamOwner(ctx);
-    if (!(await this.store.getUser(userId))) {
-      throw new UnprocessableError("user_not_found", "その利用者はまだログインしていません");
-    }
-    const at = this.stamp();
-    const seat: SeatRecord = { accountId: ctx.accountId, userId, seatType, addedAt: at };
-    try {
-      await this.store.addSeat(seat, [
-        this.hist(ctx.accountId, "seat.added", at, ctx.userId, null, { user_id: userId, seat_type: seatType }),
-      ]);
-    } catch (err) {
-      if (err instanceof ConditionFailedError) {
-        throw new ConflictError("seat_exists", "その利用者は既にこのチームの席を持っています");
-      }
-      throw new AccountUnavailableError();
-    }
-    return seat;
+  changeSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
+    return this.seats.changeSeat(ctx, userId, seatType);
   }
 
-  async changeSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
-    this.requireTeamOwner(ctx);
-    // 読んだ席のままのときだけ書く。競合したら読み直し、履歴の before を作り直す
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
-      const current = await this.store.getSeat(ctx.accountId, userId);
-      if (!current) throw seatNotFound();
-      const at = this.stamp();
-      try {
-        await this.store.updateSeat(current, seatType, [
-          this.hist(ctx.accountId, "seat.changed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, {
-            user_id: userId,
-            seat_type: seatType,
-          }),
-        ]);
-        return { ...current, seatType };
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-      }
-    }
-    throw new AccountUnavailableError();
-  }
-
-  async removeSeat(ctx: AccountContext, userId: string): Promise<void> {
-    this.requireTeamOwner(ctx);
-    const account = await this.store.getAccount(ctx.accountId);
-    if (account?.ownerUserId === userId) {
-      throw new ConflictError("owner_seat_protected", "チームの持ち主の席は外せません");
-    }
-    // 読んだ席のままのときだけ外す。外して足し直した新しい席を古い要求で消さない
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
-      const current = await this.store.getSeat(ctx.accountId, userId);
-      if (!current) throw seatNotFound();
-      const at = this.stamp();
-      try {
-        await this.store.removeSeat(current, [
-          this.hist(ctx.accountId, "seat.removed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, null),
-        ]);
-        return;
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-      }
-    }
-    throw new AccountUnavailableError();
+  removeSeat(ctx: AccountContext, userId: string): Promise<void> {
+    return this.seats.removeSeat(ctx, userId);
   }
 
   // 実行の形態を変える。持ち主だけ（I22）。Free で managed は断る（I21）
   async setExecutionMode(ctx: AccountContext, mode: ExecutionMode): Promise<AccountRecord> {
     if (ctx.role !== "owner") throw new ForbiddenError();
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+    return retryOnConflict<AccountRecord>(async () => {
       const account = await this.store.getAccount(ctx.accountId);
       if (!account) throw new ForbiddenError();
-      if (account.executionMode === mode) return account;
+      if (account.executionMode === mode) return { done: account };
       if (mode === "managed" && account.plan === "free") {
         throw new ConflictError("managed_not_allowed_on_free", "Free の料金プランでは managed（サービスの Bedrock）を選べません");
       }
       const at = this.stamp();
-      try {
-        await this.store.updateAccount(account.accountId, account.version, { executionMode: mode }, at, [
-          this.hist(account.accountId, "execution_mode.changed", at, ctx.userId, account.executionMode, mode),
-        ]);
-        return { ...account, executionMode: mode, version: account.version + 1, updatedAt: at };
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-      }
-    }
-    throw new AccountUnavailableError();
+      const history: HistoryRecord = {
+        accountId: account.accountId,
+        type: "execution_mode.changed",
+        at,
+        actor: ctx.userId,
+        before: account.executionMode,
+        after: mode,
+      };
+      return {
+        write: () =>
+          this.store.updateAccount({ accountId: account.accountId, expectedVersion: account.version, patch: { executionMode: mode }, updatedAt: at, history: [history] }),
+        result: { ...account, executionMode: mode, version: account.version + 1, updatedAt: at },
+      };
+    });
   }
 
   // アカウントの料金プランを変える。#2174 が決済の後に呼ぶ内側の関数（前提 8、E6）
   // free へ下げるとき形態が managed なら、同じトランザクションで local へ変える（I21）
   async setPlan(accountId: string, plan: Plan): Promise<void> {
     if (!isPlan(plan)) throw new PlanError("unknown_plan", `知らない料金プランです: ${String(plan)}`);
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
-      const account = await this.store.getAccount(accountId);
-      if (!account) throw new PlanError("account_not_found", "アカウントがありません");
-      if (!planFitsKind(account.kind, plan)) {
-        throw new PlanError("plan_kind_mismatch", `${account.kind} のアカウントに ${plan} は置けません`);
-      }
-      if (account.plan === plan) return;
-      const at = this.stamp();
-      const patch: AccountPatch = { plan };
-      const history = [this.hist(accountId, "plan.changed", at, "system", account.plan, plan)];
-      if (plan === "free" && account.executionMode === "managed") {
-        patch.executionMode = "local";
-        history.push(this.hist(accountId, "execution_mode.changed", at, "system", "managed", "local"));
-      }
-      try {
-        await this.store.updateAccount(accountId, account.version, patch, at, history);
-        return;
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw err;
-      }
-    }
-    throw new AccountUnavailableError();
+    // 条件以外の書き込みの失敗は包まずにそのまま返す（呼ぶ側の #2174 が受ける）
+    await retryOnConflict<void>(
+      async () => {
+        const account = await this.store.getAccount(accountId);
+        if (!account) throw new PlanError("account_not_found", "アカウントがありません");
+        if (!planFitsKind(account.kind, plan)) {
+          throw new PlanError("plan_kind_mismatch", `${account.kind} のアカウントに ${plan} は置けません`);
+        }
+        if (account.plan === plan) return { done: undefined };
+        const at = this.stamp();
+        const patch: AccountPatch = { plan };
+        const history: HistoryRecord[] = [{ accountId, type: "plan.changed", at, actor: "system", before: account.plan, after: plan }];
+        if (plan === "free" && account.executionMode === "managed") {
+          patch.executionMode = "local";
+          history.push({ accountId, type: "execution_mode.changed", at, actor: "system", before: "managed", after: "local" });
+        }
+        return {
+          write: () => this.store.updateAccount({ accountId, expectedVersion: account.version, patch, updatedAt: at, history }),
+          result: undefined,
+        };
+      },
+      (err) => err,
+    );
   }
-}
-
-function seatNotFound(): NotFoundError {
-  return new NotFoundError("seat_not_found", "その席はありません");
 }
 
 const TEAM_NAME_MAX_LENGTH = 64;
 const TEAM_NAME_MESSAGE = `1〜${TEAM_NAME_MAX_LENGTH} 字で入力してください`;
+
+const SEAT_TYPE_MESSAGE = "席の種類は standard か premium です";
+
+export function validateSeatType(value: unknown): SeatType {
+  if (!isSeatType(value)) throw new InvalidRequestError(SEAT_TYPE_MESSAGE);
+  return value;
+}
 
 export function validateTeamName(name: unknown): string {
   if (typeof name !== "string") throw new InvalidRequestError(TEAM_NAME_MESSAGE);

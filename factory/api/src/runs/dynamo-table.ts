@@ -28,6 +28,7 @@ import type {
 } from "./model.ts";
 import { isTerminalJob, milestoneHash } from "./model.ts";
 import type { ComposeRelease, ResumeOptions, RunsTable, RunTransitionExtras } from "./table.ts";
+import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
 export const GSI1 = "gsi1";
 const ACTIVE_JOBS = "ACTIVE_JOBS";
@@ -256,6 +257,9 @@ export class DynamoRunsTable implements RunsTable {
       items.push({ Put: { TableName: this.tableName, Item: { pk: accountPk(run.accountId), sk: loopRunSk(run.loopId, run.sprintRunId), sprintRunId: run.sprintRunId } } });
     }
     // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62。オーガナイザーの根を読むだけ）
+    // 作成の冪等の鍵の行（#2384 の I14）。期限を過ぎた行は上書きする
+    const idempotencyAt = items.length;
+    if (guards?.idempotency) items.push(this.idempotencyPut(guards.idempotency));
     const organizerAt = items.length;
     if (guards?.legacy) {
       items.push({
@@ -273,6 +277,7 @@ export class DynamoRunsTable implements RunsTable {
     } catch (err) {
       const failed = failedIndexes(err);
       if (failed.length === 0 && !isConditionFailure(err)) throw err;
+      if (guards?.idempotency && failed.includes(idempotencyAt)) return "duplicate";
       if (guards?.legacy && failed.includes(organizerAt)) return "release_running";
       if (failed.some((i) => i >= loopStart)) return "loop_changed";
       if (failed.some((i) => i >= milestoneStart)) return "issue_in_loop";
@@ -732,8 +737,24 @@ export class DynamoRunsTable implements RunsTable {
     );
   }
 
-  async createLoop(loop: DevLoop): Promise<"created" | { conflict: string }> {
-    const items = [
+  private idempotencyPut(claim: IdempotencyClaim): Record<string, unknown> {
+    return {
+      Put: {
+        TableName: this.tableName,
+        Item: { pk: idempotencyPk(claim), sk: "IDEMP", createdId: claim.createdId, createdAt: claim.createdAt, ttl: claim.ttl },
+        ConditionExpression: "attribute_not_exists(pk) OR #ttl < :now",
+        ExpressionAttributeNames: { "#ttl": "ttl" },
+        ExpressionAttributeValues: { ":now": epochSeconds(claim.createdAt) },
+      },
+    };
+  }
+
+  async getIdempotent(ref: IdempotencyRef, now: string): Promise<string | null> {
+    return liveCreatedId(await this.get<{ createdId: string; ttl: number }>(idempotencyPk(ref), "IDEMP"), now);
+  }
+
+  async createLoop(loop: DevLoop, idempotency?: IdempotencyClaim): Promise<"created" | "duplicate" | { conflict: string }> {
+    const items: Record<string, unknown>[] = [
       ...loop.milestones.map((title) => ({
         Put: {
           TableName: this.tableName,
@@ -754,11 +775,15 @@ export class DynamoRunsTable implements RunsTable {
         },
       },
     ];
+    const idempotencyAt = items.length;
+    if (idempotency) items.push(this.idempotencyPut(idempotency));
     try {
       await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
       return "created";
     } catch (err) {
-      const failed = failedIndexes(err).filter((i) => i < loop.milestones.length);
+      const all = failedIndexes(err);
+      if (idempotency && all.includes(idempotencyAt)) return "duplicate";
+      const failed = all.filter((i) => i < loop.milestones.length);
       if (failed.length === 0 && !isConditionFailure(err)) throw err;
       return { conflict: loop.milestones[failed[0] ?? 0]! };
     }

@@ -150,19 +150,19 @@ erDiagram
 
 ### 画面向けの経路（`openapi/loops.yaml`・`openapi/runs.yaml`）
 
-どの経路も Cognito の access token を要り、`resolveFromRequest` でアカウントを解決する。ループの経路はループの `accountId` が一致しなければ 403、無ければ 404 `loop_not_found`。エラーの本文は `{"error": {"code", "message", "details"?}}`。
+どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。ループの要素はループの `accountId` が一致しなければ 403、無ければ 404 `loop_not_found` の要素の結果になる。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力と成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
 
-| 経路 | 誰が | 入力 | 成功 | 失敗 |
+| 経路 | 誰が | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- | --- |
-| `POST /accounts/{a}/repositories/{r}/loops` | 席を持つ人 | `{name, milestones, budget?: {laps?, usd?, hours?}}` | 201 `{loop_id, state}`（`running` か `between_laps`） | 400 `invalid_request`（名前・題の形、1〜10 件、予算が正の数でない）・403・404 `repository_not_found`・409 `milestone_in_use`（`details.milestones`・`details.loop_name`）・409 `loop_name_in_use`（同じ登録の終わりの状態でないループ） |
-| `GET /accounts/{a}/repositories/{r}/loops` | 席を持つ人 | — | 200 `{loops: [{loop_id, name, milestones, state, wait_reason, laps_closed, cost_usd, budget, budget_remaining, last_run_at, stop_condition, stop_detail}]}`（新しい順 50 件） | 400・403 |
-| `GET /accounts/{a}/loops/{id}` | 席を持つ人 | — | 200 `{loop, laps: [{lap, issues, result, version, cost_usd, seconds}], runs: [{sprint_run_id, lap, state, failure_reason, finish_reason, resume_at, cost_usd, sections}], pending: [{number, reason, lap, answer}]}` | 403・404 |
-| `PATCH /accounts/{a}/loops/{id}` | 席を持つ人 | `{budget}` | 200 ループの 1 行 | 400・403・404・409 `already_finished` |
-| `POST /accounts/{a}/loops/{id}/cancel` | 席を持つ人 | — | 200 `{state}`（`cancelled` か、実行の停止を待つ `running`） | 403・404・409 `already_finished` |
-| `POST /accounts/{a}/loops/{id}/next-lap` | 席を持つ人 | — | 202 `{state}` | 403・404・409 `not_awaiting_user_start` |
-| `POST /accounts/{a}/loops/{id}/answers` | 席を持つ人 | `{issue, decision: approved \| rejected, pr?}` | 200 `{pending}` | 400・403・404・409 `not_pending`（`pending` に無い番号） |
-| `PATCH /accounts/{a}/repositories/{r}`（`runs.yaml`） | 持ち主 | `{max_concurrent_runs: 1〜100 の整数か null}` | 200 登録の 1 行 | 400・403・404 |
-| `POST /accounts/{a}/sprint-runs`（`runs.yaml`） | 席を持つ人 | 既存のまま | 既存のまま | 既存の失敗に加えて 409 `issue_in_use`（`details.numbers`）・409 `issue_in_loop`（`details.numbers`・`details.loop_name`）・409 `parallel_unsupported_version`、`limits_exceeded` の `reasons` に `concurrent_repo_runs` |
+| `POST /accounts/{a}/loops` | 席を持つ人 | `{repository_id, name, milestones, budget?: {laps?, usd?, hours?}, idempotency_key}` | `{loop_id, state}`（`running` か `between_laps`） | 400 `invalid_request`（名前・題の形、1〜10 件、予算が正の数でない）・403・404 `repository_not_found`・409 `milestone_in_use`（`details.milestones`・`details.loop_name`）・409 `loop_name_in_use`（同じ登録の終わりの状態でないループ） |
+| `GET /accounts/{a}/loops?repository_id=` | 席を持つ人 | 条件 `repository_id` | `{loop_id, name, milestones, state, wait_reason, laps_closed, cost_usd, budget, budget_remaining, last_run_at, stop_condition, stop_detail}`（新しい順 50 件） | 要求全体の 400・403 |
+| `GET /accounts/{a}/loops/detail?loop_id=` | 席を持つ人 | 鍵 `loop_id` | `{loop, laps: [{lap, issues, result, version, cost_usd, seconds}], runs: [{sprint_run_id, lap, state, failure_reason, finish_reason, resume_at, cost_usd, sections}], pending: [{number, reason, lap, answer}]}` | 403・404 |
+| `PATCH /accounts/{a}/loops` | 席を持つ人 | `{loop_id, budget}` | ループの 1 行 | 400・403・404・409 `already_finished` |
+| `POST /accounts/{a}/loops/cancel` | 席を持つ人 | `{loop_id}` | `{state}`（`cancelled` か、実行の停止を待つ `running`） | 403・404・409 `already_finished` |
+| `POST /accounts/{a}/loops/next-lap` | 席を持つ人 | `{loop_id}` | `{state}` | 403・404・409 `not_awaiting_user_start` |
+| `POST /accounts/{a}/loops/answers` | 席を持つ人（委任の資格情報では断る） | `{loop_id, issue, decision: approved \| rejected, pr?}` | `{loop_id, pending}` | 400・403・404・409 `not_pending`（`pending` に無い番号） |
+| `PATCH /accounts/{a}/repositories`（`runs.yaml`） | 持ち主 | `{repository_id, max_concurrent_runs: 1〜100 の整数か null}` | 登録の 1 行 | 400・403・404 |
+| `POST /accounts/{a}/sprint-runs`（`runs.yaml`） | 席を持つ人 | [スプリントの実行の経路](ndf-factory-runs-and-runner.md#画面向けの経路) のまま | 同じ | 既存の失敗に加えて 409 `issue_in_use`（`details.numbers`）・409 `issue_in_loop`（`details.numbers`・`details.loop_name`）・409 `parallel_unsupported_version`、`limits_exceeded` の `reasons` に `concurrent_repo_runs` |
 
 ## 関連リンク
 

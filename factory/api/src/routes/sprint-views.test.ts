@@ -3,7 +3,7 @@ import type { ProgressEvent } from "@ndf-factory/contracts";
 import { AccountService } from "../accounts/service.ts";
 import { MemoryAccountStore } from "../accounts/memory-store.ts";
 import { CredentialService, type SecretsPort } from "../credentials/service.ts";
-import { createApiApp } from "../handlers/api.ts";
+import { createApiApp } from "../app.ts";
 import type { GitHubPort } from "../github/port.ts";
 import { appendEvent } from "../progress/append.ts";
 import { memoryProgressReader } from "../progress/read.ts";
@@ -12,7 +12,7 @@ import { LoopControl } from "../runs/loops.ts";
 import type { SprintRun } from "../runs/model.ts";
 import { createRunsHarness, type RunsHarness } from "../testing/runs.ts";
 import { createTokenKit, type TokenKit } from "../testing/tokens.ts";
-import type { TestResponse } from "../testing/app.ts";
+import { firstResult, type TestResponse } from "../testing/app.ts";
 import type { FactoryDeps } from "./factory.ts";
 
 const noSecrets: SecretsPort = { create: async () => "arn", put: async () => undefined, delete: async () => undefined };
@@ -27,8 +27,14 @@ async function call(path: string, user = "u-1"): Promise<TestResponse> {
   return (await app.request(path, { headers: { Authorization: await tokens.bearer(user) } })) as TestResponse;
 }
 
+// 要素 1 個の結果を状態と本文で読む（#2384）
+const read = async (path: string, user = "u-1") => firstResult(await call(path, user));
+const detailPath = (acc: string, id: string) => `/accounts/${acc}/sprint-runs/detail?sprint_run_id=${encodeURIComponent(id)}`;
+const stepPath = (acc: string, id: string, key: string) => `/accounts/${acc}/sprint-runs/steps?sprint_run_id=${encodeURIComponent(id)}&step_key=${encodeURIComponent(key)}`;
+const backlogPath = (acc: string, repositoryId: number) => `/accounts/${acc}/backlogs?repository_id=${repositoryId}`;
+
 async function personal(user: string): Promise<string> {
-  return ((await (await call("/me", user)).json()) as { personal_account_id: string }).personal_account_id;
+  return ((await (await call("/me", user)).json())[0] as { personal_account_id: string }).personal_account_id;
 }
 
 function runOf(accountId: string, patch: Partial<SprintRun> = {}): SprintRun {
@@ -128,7 +134,7 @@ describe("一覧の経路（受け入れ条件 1〜3・18）", () => {
     const { acc } = await seed();
     const res = await call(`/accounts/${acc}/sprint-runs`);
     expect(res.status).toBe(200);
-    const { sprint_runs } = await res.json();
+    const sprint_runs = await res.json();
     expect(sprint_runs.map((r: { sprint_run_id: string }) => r.sprint_run_id)).toEqual(["sr-2", "sr-1"]);
     const row = sprint_runs[1];
     expect(row).toEqual({
@@ -150,15 +156,15 @@ describe("一覧の経路（受け入れ条件 1〜3・18）", () => {
 describe("詳細と工程の中身の経路（受け入れ条件 7・13・14）", () => {
   it("詳細は本文を返さず、工程の中身は 1 件ずつ本文を返す。どちらも GitHub の口を呼ばない", async () => {
     const { acc, step } = await seed();
-    const detail = await call(`/accounts/${acc}/sprint-runs/sr-1`);
+    const detail = await read(detailPath(acc, "sr-1"));
     expect(detail.status).toBe(200);
-    const body = await detail.json();
+    const body = detail.body;
     expect(body).toMatchObject({ sprint_run_id: "sr-1", repo: "org-a/repo-a", current_phase: "実装", ndf_version: "10.27.15", job_count: 1, omitted_steps: 0 });
     expect(body.steps[0]).toMatchObject({ key: step, phase: "実装", issues: [11], has_details: true });
     expect(JSON.stringify(body)).not.toContain("## 作業の報告");
-    const one = await call(`/accounts/${acc}/sprint-runs/sr-1/steps/${encodeURIComponent(step)}`);
+    const one = await read(stepPath(acc, "sr-1", step));
     expect(one.status).toBe(200);
-    expect((await one.json()).output).toEqual({ kind: "report", text: "## 作業の報告", truncated: false });
+    expect(one.body.output).toEqual({ kind: "report", text: "## 作業の報告", truncated: false });
     await call(`/accounts/${acc}/sprint-runs`);
     expect(githubCalls).toEqual([]);
   });
@@ -166,9 +172,9 @@ describe("詳細と工程の中身の経路（受け入れ条件 7・13・14）"
   it("足す前の形の step.recorded（schema_version 1 のまま）も詳細に出て、本文の欄は null", async () => {
     const { acc } = await seed();
     const key = await emit("sr-1", "step.recorded", { step: "pr", exit_code: 0, seconds: 1, summary: "作った" });
-    const body = await (await call(`/accounts/${acc}/sprint-runs/sr-1`)).json();
+    const body = (await read(detailPath(acc, "sr-1"))).body;
     expect(body.steps.map((s: { key: string }) => s.key)).toContain(key);
-    const one = await (await call(`/accounts/${acc}/sprint-runs/sr-1/steps/${encodeURIComponent(key)}`)).json();
+    const one = (await read(stepPath(acc, "sr-1", key))).body;
     expect([one.files, one.decisions, one.output]).toEqual([null, null, null]);
   });
 
@@ -176,9 +182,9 @@ describe("詳細と工程の中身の経路（受け入れ条件 7・13・14）"
     const { acc, step } = await seed();
     const before = JSON.stringify([h.progress.events, [...h.table.runs.values()]]);
     await call(`/accounts/${acc}/sprint-runs`);
-    await call(`/accounts/${acc}/sprint-runs/sr-1`);
-    await call(`/accounts/${acc}/sprint-runs/sr-1/steps/${encodeURIComponent(step)}`);
-    await call(`/accounts/${acc}/repositories/101/backlog`);
+    await call(detailPath(acc, "sr-1"));
+    await call(stepPath(acc, "sr-1", step));
+    await call(backlogPath(acc, 101));
     expect(JSON.stringify([h.progress.events, [...h.table.runs.values()]])).toBe(before);
   });
 });
@@ -188,28 +194,24 @@ describe("認可（受け入れ条件 11・I12）", () => {
     const { acc, step } = await seed();
     const other = await personal("u-2");
     h.table.runs.set("sr-other", runOf(other, { sprintRunId: "sr-other" }));
-    const paths = [
-      `/accounts/${acc}/sprint-runs`,
-      `/accounts/${acc}/sprint-runs/sr-1`,
-      `/accounts/${acc}/sprint-runs/sr-1/steps/${encodeURIComponent(step)}`,
-      `/accounts/${acc}/repositories/101/backlog`,
-    ];
+    const paths = [`/accounts/${acc}/sprint-runs`, detailPath(acc, "sr-1"), stepPath(acc, "sr-1", step), backlogPath(acc, 101)];
     const missing = "00000000-0000-4000-8000-0000000000ff";
     const cases = [
       ...paths.map((p) => [p, "u-2"] as const),
       ...paths.map((p) => [p.replace(acc, missing), "u-1"] as const),
-      [`/accounts/${acc}/sprint-runs/sr-other`, "u-1"],
-      [`/accounts/${acc}/sprint-runs/sr-none`, "u-1"],
-      [`/accounts/${acc}/sprint-runs/sr-other/steps/${encodeURIComponent(step)}`, "u-1"],
-      [`/accounts/${acc}/sprint-runs/sr-1/steps/job-1%3A999`, "u-1"],
-      [`/accounts/${acc}/sprint-runs/sr-2/steps/${encodeURIComponent(step)}`, "u-1"],
-      [`/accounts/${acc}/repositories/999/backlog`, "u-1"],
+      [detailPath(acc, "sr-other"), "u-1"],
+      [detailPath(acc, "sr-none"), "u-1"],
+      [stepPath(acc, "sr-other", step), "u-1"],
+      [stepPath(acc, "sr-1", "job-1:999"), "u-1"],
+      [stepPath(acc, "sr-2", step), "u-1"],
+      [backlogPath(acc, 999), "u-1"],
     ] as const;
+    // 要求全体の 403 と要素の forbidden は、同じ本文を持つ
     const bodies = new Set<string>();
     for (const [path, user] of cases) {
-      const res = await call(path, user);
+      const res = await read(path, user);
       expect(res.status, path).toBe(403);
-      bodies.add(await res.text());
+      bodies.add(JSON.stringify(res.body));
     }
     expect([...bodies]).toEqual([JSON.stringify({ error: { code: "forbidden", message: "このアカウントを見る権限がありません" } })]);
   });
@@ -221,9 +223,9 @@ describe("バックログの経路（受け入れ条件 15・16・I13）", () =>
     h.github.rankings.set("org-a/repo-a", { milestone: "25 見本", rows: [{ number: 5, title: "先に" }, { number: 3, title: "後に" }] });
     await emit("sr-1", "step.recorded", { step: "refine", exit_code: 0, seconds: 3, summary: "古い棚卸し" }, "2026-11-02T00:00:00.000Z");
     await emit("sr-2", "step.recorded", { step: "refine", exit_code: 1, seconds: 3, summary: "新しい棚卸し" }, "2026-11-03T00:00:00.000Z");
-    const res = await call(`/accounts/${acc}/repositories/101/backlog`);
+    const res = await read(backlogPath(acc, 101));
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = res.body;
     expect(body.repo).toBe("org-a/repo-a");
     expect(body.ranking).toEqual({
       milestone: "25 見本",
@@ -238,12 +240,54 @@ describe("バックログの経路（受け入れ条件 15・16・I13）", () =>
 
   it("順位の表が無ければ ranking は null、GitHub の口が失敗すれば 503", async () => {
     const { acc } = await seed();
-    const none = await (await call(`/accounts/${acc}/repositories/101/backlog`)).json();
+    const none = (await read(backlogPath(acc, 101))).body;
     expect(none.ranking).toBeNull();
     expect(none.refinements).toEqual([]);
     h.github.findRankingTable = async () => {
       throw new Error("GitHub 502");
     };
-    expect((await call(`/accounts/${acc}/repositories/101/backlog`)).status).toBe(503);
+    expect((await read(backlogPath(acc, 101))).status).toBe(503);
+  });
+});
+
+describe("配列の受け渡し（#2384 の受け入れ条件 6〜8・15、I12・I13）", () => {
+  it("3 個の要素のうち他人の 1 個だけが forbidden で、順と数は入力と同じ。他人のデータは応答に無い", async () => {
+    const { acc } = await seed();
+    const other = await personal("u-2");
+    h.table.runs.set("sr-other", runOf(other, { sprintRunId: "sr-other", repo: "org-x/secret-repo" }));
+    const res = await call(`/accounts/${acc}/sprint-runs/detail?sprint_run_id=sr-1&sprint_run_id=sr-other&sprint_run_id=sr-2`);
+    expect(res.status).toBe(200);
+    const results = await res.json();
+    expect(results.map((r: { ok: boolean; value?: { sprint_run_id: string }; error?: { code: string } }) => (r.ok ? r.value!.sprint_run_id : r.error!.code))).toEqual([
+      "sr-1",
+      "forbidden",
+      "sr-2",
+    ]);
+    expect(JSON.stringify(results)).not.toContain("secret-repo");
+  });
+
+  it("101 個の要素は、どれも処理せずに 400 と上限 100、0 個は 400", async () => {
+    const { acc } = await seed();
+    const reads: string[] = [];
+    const getRun = h.table.getRun.bind(h.table);
+    h.table.getRun = async (id: string) => {
+      reads.push(id);
+      return getRun(id);
+    };
+    const many = Array.from({ length: 101 }, (_, i) => `sprint_run_id=sr-${i}`).join("&");
+    const res = await call(`/accounts/${acc}/sprint-runs/detail?${many}`);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatchObject({ code: "too_many_items", details: { limit: 100 } });
+    const empty = await call(`/accounts/${acc}/sprint-runs/detail`);
+    expect(empty.status).toBe(400);
+    expect((await empty.json()).error.code).toBe("empty_items");
+    expect(reads).toEqual([]);
+  });
+
+  it("同じ鍵の要素が 2 つあれば 400 duplicate_key", async () => {
+    const { acc } = await seed();
+    const res = await call(`/accounts/${acc}/sprint-runs/detail?sprint_run_id=sr-1&sprint_run_id=sr-1`);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatchObject({ code: "duplicate_key", details: { key: "sprint_run_id" } });
   });
 });
