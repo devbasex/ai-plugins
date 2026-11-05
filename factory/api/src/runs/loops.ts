@@ -22,6 +22,7 @@ import {
   type WaitReason,
 } from "./model.ts";
 import type { RunsTable } from "./table.ts";
+import { claimOf, parseIdempotencyKey, type IdempotencyRef } from "../idempotency.ts";
 
 export const LOOP_NAME = /^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$/;
 export const MAX_MILESTONES = 10;
@@ -196,6 +197,11 @@ export class LoopControl {
       throw new InvalidRequestError(`マイルストーンは 1〜${MAX_MILESTONES} 件、各 ${MAX_MILESTONE_LENGTH} 字までで , を含めずに選んでください`);
     }
     const budget = parseBudget(body.budget);
+    // 作成の冪等の鍵（#2384 の I14）。経路は必ず渡す。同じ鍵の 2 回目は 1 回目のループを返す
+    const idempotency: IdempotencyRef | undefined =
+      body.idempotency_key === undefined ? undefined : { userId: ctx.userId, operationId: "startLoop", key: parseIdempotencyKey(body.idempotency_key) };
+    const replayed = idempotency ? await this.replayLoop(ctx, idempotency) : null;
+    if (replayed) return replayed;
     const registration = await table.getRegistration(ctx.accountId, repositoryId);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
     const same = (await table.listLoops(ctx.accountId)).find((l) => l.repositoryId === repositoryId && l.name === name && !isTerminalLoop(l.state));
@@ -226,7 +232,12 @@ export class LoopControl {
       updatedAt: now,
       lastRunAt: null,
     };
-    const created = await table.createLoop(loop);
+    const created = await table.createLoop(loop, idempotency && claimOf(idempotency, loop.loopId, now));
+    if (created === "duplicate") {
+      const won = await this.replayLoop(ctx, idempotency!);
+      if (!won) throw new ConflictError("loop_busy", "ループの状態が変わりました。やり直してください");
+      return won;
+    }
     if (created !== "created") {
       const share = await table.getMilestoneShare(ctx.accountId, repositoryId, created.conflict);
       const other = share ? await table.getLoop(ctx.accountId, share.loopId) : null;
@@ -240,6 +251,14 @@ export class LoopControl {
     await this.startNextLap(ctx.accountId, loop.loopId, true);
     const after = await table.getLoop(ctx.accountId, loop.loopId);
     return { loop_id: loop.loopId, state: after?.state ?? loop.state };
+  }
+
+  // 期限の中の同じ鍵が作ったループの今の状態
+  private async replayLoop(ctx: AccountContext, ref: IdempotencyRef): Promise<{ loop_id: string; state: DevLoop["state"] } | null> {
+    const loopId = await this.deps.table.getIdempotent(ref, this.iso());
+    if (!loopId) return null;
+    const loop = await this.deps.table.getLoop(ctx.accountId, loopId);
+    return { loop_id: loopId, state: loop?.state ?? "between_laps" };
   }
 
   // 周回の開始（決定 2、I44・I52）。between_laps で今の実行が無いループだけを起こす。条件で落ちれば読み直して 3 回まで

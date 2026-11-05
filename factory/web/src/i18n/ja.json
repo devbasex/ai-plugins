@@ -29,7 +29,8 @@
     "billing": "請求と使用量",
     "runners": "手元のマシン",
     "loops": "ループ",
-    "loopDetail": "ループの詳細"
+    "loopDetail": "ループの詳細",
+    "delegations": "エージェントへの委任"
   },
   "connection": {
     "label": "つながりの状態",
@@ -390,5 +391,32 @@
     "exitCode": "終了コード",
     "back": "リポジトリへ戻る",
     "issueLine": "#{{number}} {{title}}"
+  },
+  "delegations": {
+    "intro": "手元の Claude Code などのエージェントに、あなたの代わりに Factory を操作させる資格情報を発行します。承認と、キー・席・チーム・委任そのものの操作は、委任からは行えません。",
+    "clientName": "クライアントの名前",
+    "needClientName": "名前を入力してください",
+    "scope": "範囲",
+    "scopeRead": "読み取りだけ",
+    "scopeReadWrite": "読み書き",
+    "expires": "期限",
+    "minutes": "{{count}} 分",
+    "hours": "{{count}} 時間",
+    "issue": "発行する",
+    "issuedTitle": "発行した資格情報",
+    "issuedNote": "この値は今だけ表示します。閉じると二度と表示しません。",
+    "value": "資格情報の値",
+    "registerExample": "MCP のクライアントへの登録の例",
+    "close": "閉じる",
+    "list": "発行した資格情報",
+    "empty": "まだ委任していません",
+    "createdAt": "発行",
+    "expiresAt": "期限",
+    "state": "状態",
+    "stateActive": "有効",
+    "stateExpired": "期限切れ",
+    "stateRevoked": "取り消し済み",
+    "revoke": "取り消す",
+    "offline": "オフラインの間は発行と取り消しができません"
   }
 }

@@ -57,6 +57,9 @@ export function AccountPage() {
         <Button onClick={() => void navigator.clipboard?.writeText(me.user_id)}>{t("common.copy")}</Button>
       </p>
       <p>{t("account.idp", { idp: me.idp === "google" ? t("account.idpGoogle") : t("account.idpGithub") })}</p>
+      <p className="ui-links">
+        <Link to="/delegations">{t("screens.delegations")}</Link>
+      </p>
       <Section title={t("account.personal")}>
         <p>{t("account.plan", { plan: t(`plan.${personal.plan}`) })}</p>
         <ExecutionModeView account={personal} onChanged={setPersonal} />

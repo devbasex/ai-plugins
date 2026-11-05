@@ -12,6 +12,8 @@ export interface Services {
   connection: ConnectionSource;
   // 一覧と詳細を読み直す間隔（ミリ秒）。無ければ既定の 30 秒
   pollIntervalMs?: number;
+  // API の入口。委任の画面が MCP のクライアントへの登録の例に出す
+  apiUrl?: string;
 }
 
 export const ServicesContext = createContext<Services | null>(null);

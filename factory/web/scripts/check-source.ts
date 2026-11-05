@@ -1,4 +1,5 @@
-// 画面・部品・文脈のコードに表示の文言を直に書いていないか、画面がダミーの実装を import していないかを見る
+// 画面・部品・文脈のコードに表示の文言を直に書いていないか、画面がダミーの実装を import していないか、
+// API への要求の経路を文字列で直に組んでいないか（要求は操作の表から組む。#2384 の受け入れ条件 1）を見る
 // 対象は src/**/*.{ts,tsx}。*.test.*・src/dummy/・翻訳のファイル（JSON）は見ない。コメントは見ない
 // 終了コード: 0 無し / 1 見つけた / 2 構文解析できない
 import { readFileSync, readdirSync } from "node:fs";
@@ -10,13 +11,15 @@ export interface Finding {
   file: string;
   line: number;
   column: number;
-  rule: "jsx-text" | "jsx-attr" | "jsx-expr" | "non-ascii" | "dummy-import";
+  rule: "jsx-text" | "jsx-attr" | "jsx-expr" | "non-ascii" | "dummy-import" | "api-path";
   text: string;
 }
 
 const LETTER = /\p{L}/u;
 const NON_ASCII = /[^\x00-\x7f]/;
 const TEXT_ATTRS = new Set(["aria-label", "title", "placeholder", "alt", "label"]);
+// 要求を送る関数の名前（fetch・doFetch・request など）
+const REQUEST_CALLEE = /fetch|request/i;
 
 interface Node {
   type: string;
@@ -97,6 +100,21 @@ export function checkSource(file: string, code: string): Finding[] {
           if (text !== null && LETTER.test(text)) {
             report(expression, "jsx-expr", text);
             reported.add(expression);
+          }
+        }
+        break;
+      }
+      case "CallExpression": {
+        const callee = node.callee as Node;
+        const name = callee.type === "Identifier" ? (callee.name as string) : callee.type === "MemberExpression" ? ((callee.property as Node).name as string | undefined) : undefined;
+        if (name && REQUEST_CALLEE.test(name)) {
+          for (const arg of node.arguments as Node[]) {
+            // 先頭が / の文字列か、先頭の固定の部分が / のテンプレート
+            const head = arg.type === "Literal" ? stringOf(arg) : arg.type === "TemplateLiteral" ? ((arg.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked ?? "") : null;
+            if (head !== null && head.startsWith("/")) {
+              report(arg, "api-path", stringOf(arg) ?? head);
+              reported.add(arg);
+            }
           }
         }
         break;
