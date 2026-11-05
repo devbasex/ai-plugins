@@ -132,5 +132,6 @@
 | [ndf-factory-sprint-views.md](ndf-factory-sprint-views.md) | Neural Development Factory: スプリントの一覧と詳細・工程の中身・バックログの読み出し（事象から導く派生・フェーズの名前の対応づけ・ランナーが送る工程の中身と伏せ字・経路の形・読み出しの口・画面と読み直し・常に成り立つ条件）。#2172 |
 | [ndf-script-shared-helpers.md](ndf-script-shared-helpers.md) | NDF のスクリプトの共通処理の置き場（使用量の行・時刻の読み取り・git の根・再起動の行・正の整数の判定）と、契約の抽出・パッケージ内の揃い・呼び出し元の数を理由に寄せない重複、長い関数の分け方。手順は `refactoring` の SKILL.md が正 |
 | [ndf-factory-agent-access.md](ndf-factory-agent-access.md) | Neural Development Factory: エージェントからの操作（委任の資格情報の発行・照合・取り消しと表・人だけが確定できる 10 の操作・要求の検査の順・MCP の受け口とツールの定義・呼び出し元の種類・追記だけの操作の記録と許可した鍵・作成の冪等の鍵の行・環境変数）。#2384 |
+| [ndf-factory-shared-code-placement.md](ndf-factory-shared-code-placement.md) | Neural Development Factory: API と画面で同じ役割の処理を 1 か所に置く規則と置き場の一覧（handlers/ を handler の配線だけにする・保存の契約の port.ts・版の競合の再試行・ログインの確認と失敗の表示）。#2199 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
