@@ -112,7 +112,7 @@
 | 構造チェック（`scripts/check-script-structure.py`） | 検査の種類 `stderr-direct` を足す。例外リストの増加は既存の検査（#2335 の `allow-grow`）で落とす | 変更 | 核の拡張 |
 | 例外リスト（`scripts/script-structure-allow/`） | 直書きを持つ 60 ファイルを `stderr-direct` の行として載せ、移した Pull Request が消す | 変更 | 核の拡張 → 移す 6 本 |
 | 理由を切る 10 か所 | 下の「止まった理由を切る箇所の扱い」の表どおりに直す | 変更 | 核の拡張 |
-| 直書きを持つ 60 ファイル | `print(..., file=sys.stderr)`・`sys.stderr.write` を `ctx.log("diag", ...)` か `run_log.diag(...)` へ置き換える | 変更 | 移す 6 本（下の「移す順序」） |
+| 直書きを持つ 60 ファイル | `print(..., file=sys.stderr)`・`sys.stderr.write` を `ctx.log("diag", ...)` か `run_log.diag(...)` へ置き換える。`print(*args, sep=s, end=e, file=sys.stderr)` は `s.join(map(str, args)) + e` を文として渡し（既定では末尾に `\n` を含む）、`sys.stderr.write(x)` は `x` をそのまま渡す | 変更 | 移す 6 本（下の「移す順序」） |
 
 ### 呼ぶ向き
 
@@ -227,7 +227,7 @@ classDiagram
 
 - **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・核へ移す前のエントリポイント）では `None` で、`diag` は標準エラーへ書くだけになる
 - **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種だけを受け、ほかは `ValueError`。8 種は `start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end` である。`event` が `diag` のときだけは `current().write` を直に呼ばない。`run_log.diag(fields["text"], short=fields.get("display"), **残りの鍵)` へ渡す。標準エラーへ先に出してから記録へ書く経路を 1 つにするためである。Python の直書きを `ctx.log("diag", ...)` へ置き換えても、端末に出ていた警告や進捗が消えない（受け入れ条件 6・I6）
-- **`run_log.diag(text, short=None, **fields)`**: 標準エラーへは `short` があれば `short`、無ければ `text` を、改行の有無も含めて渡された文のまま書き、書くたびに flush する。行末の改行は呼ぶ側が決め、`diag` は改行を足さず、潰さない。子プロセスの複数行の標準エラーを流す箇所（G1 の `lib/loop_drive.py:125`・`lib/post_queue.py:808`）は複数行のまま出る。改行を付けずに入力を促す箇所（G4 の `relay_lib/ask.py:47`）は改行の無いまま、すぐに出る（受け入れ条件 6）。記録へは `{"text": text, **fields}` を書き、`short` があれば `"display": short` も書く。ライブラリの関数は実行の文脈を受け取らないため、この関数を呼ぶ
+- **`run_log.diag(text, short=None, **fields)`**: 標準エラーへは `short` があれば `short`、無ければ `text` を、改行の有無も含めて渡された文のまま書き、書くたびに flush する。行末の改行は呼ぶ側が決め、`diag` は改行を足さず、潰さない。`short` の行末の改行も呼ぶ側が付ける。`print` を置き換える箇所は `print` が書いていた行末の改行（`end`。既定は `\n`）を文に含めて渡し、核の `exec` の読み手は子の標準エラーの各行を行末の改行を残したまま渡す。子プロセスの複数行の標準エラーを流す箇所（G1 の `lib/loop_drive.py:125`・`lib/post_queue.py:808`）は複数行のまま出る。改行を付けずに入力を促す箇所（G4 の `relay_lib/ask.py:47`）は改行の無いまま、すぐに出る（受け入れ条件 6）。記録へは `{"text": text, **fields}` を書き、`short` があれば `"display": short` も書く。ライブラリの関数は実行の文脈を受け取らないため、この関数を呼ぶ
 - **`write` が書けなかったとき**: 例外を投げず、`failed` に理由を持ち、標準エラーへ理由を 1 回だけ出す。以後の `write` は記録へ書かない。核は E9 の前と E9 の完了後の 2 回 `failed` を見る。E9 の前に `failed` なら、結果を `stopped` にしてから `end` を書きにいく。E9 で初めて失敗することもある（`end` の行やその全文ファイルを書けなかった）。そのときは E9 の完了後の確認で、結果を `stopped`・終了コード 1 へ置き換え、本体の結果を `original_result` に入れる。核は 2 回目の確認を終えてから標準出力と終了コードを確定する（I7）
 
 ## データ構造
@@ -309,7 +309,7 @@ classDiagram
 | `merged_lib/merge.py:317` | 例外の理由（結果の `summary` になる） | 切らない |
 | `lib/sprint_loop_gate.py:127` | 周回の記録の止まった理由 | 全文を `decision` で記録へ書き、周回の記録は 300 字のまま |
 | `lib/sprint_loop_gate.py:128` | 結果の `summary` | 切らない |
-| `lib/monitor_loop.py:120` | 端末の監視の行 | `run_log.diag(全文, short=先頭 200 字)` |
+| `lib/monitor_loop.py:120` | 端末の監視の行 | `run_log.diag(全文, short=表示)`。表示は全文の行末の改行を除いた先頭 200 字に、全文と同じ行末の改行を付けたもの |
 | `lib/monitor_loop.py:240` | 端末の監視の行 | 同上 |
 | `release-steps.py:141` | ステップの結果の文（結果の `summary` になる） | 切らない |
 
@@ -458,7 +458,7 @@ hook のエントリポイントの 6 か所は、次のとおり数から除い
 | 3a・I4 | 64 KiB を超える理由は全文ファイルへ移り、行のパス・文字数・sha256 が全文と一致する。全文ファイルが行より先に在る | 全文ファイルを書かずに参照だけ残す／長い文字列を切る |
 | 4 | （手動）G6 の後に子の課題 8 件の再現の手順を 1 回ずつ通し、本文の「子の課題の判定」へ書く | — |
 | 5・I5 | `secret: true` の環境変数に値を入れ、本体がその値を診断・例外の理由・`summary` へ入れても、記録と全文ファイルに値が無い。トークンの形の文字列も無い。空文字列の値で他の文字列が壊れない | 伏せる処理を全文ファイルに通さない／空の値で置き換える |
-| 6・I6 | 移す前と後で、同じ入力に対する標準エラーの文が一致する。直書きを `ctx.log("diag", ...)` へ置き換えたエントリポイントと `run_log.diag` へ置き換えたエントリポイントの両方で確かめる。記録の置き場を書けないときも同じ文が出る。子プロセスの複数行の標準エラーは複数行のまま、改行の無い入力の促しは改行の無いまま、入力を待つ前に出る | 記録へ書いた後でしか標準エラーへ書かない／`diag` が改行を足すか潰す／flush しない |
+| 6・I6 | 移す前と後で、同じ入力に対する標準エラーの文が一致する。直書きを `ctx.log("diag", ...)` へ置き換えたエントリポイントと `run_log.diag` へ置き換えたエントリポイントの両方で確かめる。記録の置き場を書けないときも同じ文が出る。子プロセスの複数行の標準エラーは複数行のまま、改行の無い入力の促しは改行の無いまま、入力を待つ前に出る。`print` を置き換えた行と、200 字に切った監視の行は行末の改行を持ち、次の出力とつながらない | 記録へ書いた後でしか標準エラーへ書かない／`diag` が改行を足すか潰す／`print` の `end` や切った表示の改行を落とす／flush しない |
 | 1e | 全体テストの後に、テストの外の `NDF_STATE_DIR`（未設定なら `~/.local/state/ndf`）の `runs/` の中身が増えも減りもしない | ルートの `conftest.py` から `NDF_STATE_DIR` の fixture を外す |
 | 1e | `plugins/ndf/` だけを根にして（ルートの `conftest.py` が読まれない、プラグインのキャッシュと同じ条件で）核を通すテストを実行した後も、テストの外の `NDF_STATE_DIR` の `runs/` の中身が増えも減りもしない | `plugins/ndf/conftest.py` から `NDF_STATE_DIR` の行を外す |
 | 7 | 柱の Pull Request ごとに `uv run --frozen --project . --all-extras pytest . -q -n 4` が前後で通る | — |
