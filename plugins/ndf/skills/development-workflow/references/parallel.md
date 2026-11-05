@@ -40,17 +40,36 @@
 3. `ndf-ask:human-action` の依頼は `attach`（`relay.py attach <レーン>`）の 1 行を添えて「済んだ」「まだ」で問う。
    `merged` があれば、同じ原因でまとめた各レーンの元の文面を並べる（答えは全レーンへ届く）
 4. 耐久ワークフローが自分で立てる問い（`kind` が `stall`・`helper`・`spawn`）は `options` で問う。選んだ答えの `commands` の 1 行は、答えを送った `answer` が `metrics.next` に返す
-5. 答えを送り、`wait` を打ち直す。答えの間に新しい依頼が届いていれば `questions` が続けて返る
+5. 答えを送り、下の「答えの後の整理」を通す
 
 | 依頼の `kind` | 問いの答え | 送るコマンド |
 | --- | --- | --- |
-| `gate1`（設計の承認） | 承認 / 直して出し直す（指摘を書く） / やらない | `parallel.py answer p1 <id> --approved` / `--revise --note <指摘ファイル>` / `--rejected` |
+| `gate1`（設計の承認） | 承認 / 直して出し直す（指摘を書く） / やらない | `parallel.py answer p1 <id> --approved` / `--revise --note <指摘ファイル>` / `--rejected`。`reasons` にマージできなかった理由があれば添えて問う（利用者へ戻した依頼） |
 | `gate2`（承認ゲート 2） | 下の「承認ゲート 2」 | `confirm` / `settle --rejected` |
 | `ask`・`stall`・`helper`・`spawn` | 依頼の選択肢 | `parallel.py answer p1 <id> --choice <選んだ答え>` |
 
-`answer` は答えのイベントを立てるだけで、ラベル・記録・直しは持ち主のレーンが周回の境で行う。持ち主のレーンが止まっていれば
+`gate1` の `--approved` では、`answer` が答えを送る前に設計 PR を宛先へマージしてみる（[loop.md](loop.md) の「承認した設計のマージ」）。
+結果は `metrics.merge` に載り、答えにも載ってレーンへ届く。マージできなくても答えは送られ、終了コードは 0 である。`answer` はほかに、
+答えのイベントを立てるだけで、ラベル・記録・直し・マージし直し・後片付けは持ち主のレーンが周回の境で行う。持ち主のレーンが止まっていれば
 `metrics.next` に `relay.py restart <レーン>` の 1 行が返るので、それを打つ（耐久ワークフローが自分で立てた問いでは、選んだ答えの
 `commands` の 1 行が返る）。
+
+### 答えの後の整理
+
+出した `AskUserQuestion` は取り下げられず、答えを待つ間に届いた依頼は答えの後まで表に出ない。答えを受けたら、溜まった依頼を
+整理してまとめて問い直す。
+
+1. 依頼ごとに答えを送る（`parallel.py answer`）。`metrics.merge.result` が `merged`・`already_merged` 以外なら、理由（`reason`）を
+   1 行で利用者へ伝える（問いにしない。次の周回の境でレーンが結果に応じた手を打つ）。`production` なら、承認ゲート 2 で人が
+   マージするまで実装に選ばれないことを添える
+2. 最後の `answer` の `metrics.after`（答えの後に残る依頼）から、`drop` が付いた依頼を除く。`settled` は今送った答えと同じ設計 PR の依頼、
+   `resend` は同じレーンの同じ設計 PR に、より新しい先端の依頼がある古い依頼である
+3. `mvv.eligible` が `true` の依頼（設計の承認で、レーンの判定が「判定できない」「判定を読めない」で、レッドラインが空の依頼）ごとに、
+   `mvv-gate.py check --sprint <依頼の sprint_state> --gate design --pr <依頼の pr>` を 1 回だけ打つ。「従う」（終了コード 0）なら
+   `parallel.py answer p1 <id> --approved --by mvv` を送る（判定の記録は `mvv-gate.py` が書く）。ほかの結果なら、打ち直さずに残す。
+   「従わない」・レッドライン・承認ゲート 2・区分つきの問いは自分で答えない
+4. 残りがあれば、上の「問い方」の区分の順と 4 件ずつで、まとめて `AskUserQuestion` を出す。残りが無ければ
+   `wait p1 --after <metrics.seq>` を背景で打ち直す
 
 承認ゲート 2 は、提示 1 なら「承認」「差し戻す」で問い、`parallel.py confirm p1 <連番>` か
 `parallel.py settle p1 <連番> --rejected` を打つ。出し直しの提示（`represent: true`）なら加わった範囲を添えて
