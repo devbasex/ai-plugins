@@ -42,7 +42,7 @@
 | 範囲の PR | `release_lib/included.py` | 範囲（前のリリースタグ・範囲の終点） | 範囲の PR（`IncludedPr`） | PR の番号・スプリント経由の印 |
 | 承認資料 | `release-steps.py` の `approval-facts`・`notes --approval` | 承認資料のファイル | 「含む PR」の行 | 承認したコミット |
 
-変更履歴と承認資料は、範囲の PR を `included.section_range` の戻り値だけから受け取る。範囲を自分で求め直さない。
+変更履歴と承認資料は、範囲の PR を `included.section_range` の戻り値から受け取り、`--prs` の番号の終点の確かめは `included.drop_outside` だけが行う。範囲を自分で求め直さない。
 
 ### 不変条件
 
@@ -130,9 +130,11 @@ E5 と E1 の順序は保証されない。E4 の後もベースブランチへ�
 
 | 要素 | 責務 | 変える内容 |
 | --- | --- | --- |
-| `release_lib/included.py` の `section_range` | 前のリリースタグと範囲の終点から範囲の PR を求め、`--prs` のうち終点に入った番号との和を返す。範囲を求めるのはここだけ | 終点を引数 `to`（コミット）で受ける。中で `origin/<ベースブランチ>` を読まず、`fetch` もしない。`--prs` のうち範囲の PR に無い番号だけ、マージコミット（`gh pr view` の `mergeCommit`）を読み、`git merge-base --is-ancestor <マージコミット> <終点>` が失敗する番号を外す。外した番号は呼び手が渡す列 `outside` へ足す（`titles_of` の `skipped` と同じ渡し方）。マージされていない番号（`mergeCommit` が無い）は外さず、今のとおり箇条を組むときに `skipped` で外す |
-| `release-steps.py` の `section_prs` | `changelog`・`notes`（`--approval` なし）の範囲の PR と前のリリースタグを決める | タグを `fetch` してから前のリリースタグを決め、終点に worktree の先頭（`git rev-parse HEAD`）を渡す。`section_range` が外した番号を結果の `items` に出す |
-| `release-steps.py` の `cmd_approval_facts` | 承認に出すコミットを決め、承認資料を書く | 範囲の PR を `section_range` で求め、終点に承認に出すコミット（今のコードの変数 `dev`）を渡す。差分の行数も `origin/<本番チャネル>...<承認に出すコミット>` から数える |
+| `release_lib/included.py` の `section_range` | 前のリリースタグと範囲の終点から範囲の PR を求め、`--prs` との和を返す。範囲を求めるのはここだけ。読むのは git だけで、GitHub を読まない | 終点を引数 `to`（コミット）で受ける。中で `origin/<ベースブランチ>` を読まず、`fetch` もしない |
+| `release_lib/included.py` に足す `drop_outside` | `--prs` の番号のうち、マージコミットが範囲の終点の祖先でない番号を範囲の PR から外す | 新設。引数は範囲の PR・PR の読み出し結果（`pr_many` の戻り値）・終点・`--prs`・呼び手が渡す列 `outside`。GitHub を読まず、マージコミットは読み出し結果の `mergeCommit` を使う（`pr_fields` の 1 回のまとめ読みが既に `mergeCommit { oid }` を含む）。`--prs` の番号ごとに `git merge-base --is-ancestor <マージコミット> <終点>` を打ち、失敗した番号を外して `outside` へ足す（`titles_of` の `skipped` と同じ渡し方）。マージされていない番号（`mergeCommit` が無い）は外さず、今のとおり `titles_of`・`notes_of` が `skipped` で外す |
+| `release-steps.py` の `pr_titles`・`pr_notes` | 範囲の PR を読み、版の節の箇条と配る中身を組む | `pr_many` の直後、`titles_of`・`notes_of` の前に `drop_outside` を呼ぶ。`pr_many` に渡す欄へ `mergeCommit` を足す（まとめ読みが失敗して PR ごとの `gh pr view` へ倒れたときも、マージコミットを同じ 1 回の読みで得るため） |
+| `release-steps.py` の `section_prs` | `changelog`・`notes`（`--approval` なし）の範囲の PR と前のリリースタグを決める | タグを `fetch` してから前のリリースタグを決め、終点に worktree の先頭（`git rev-parse HEAD`）を渡す。`drop_outside` が外した番号を結果の `items` に出す |
+| `release-steps.py` の `cmd_approval_facts` | 承認に出すコミットを決め、承認資料を書く | 範囲の PR を `section_range` で求め、終点に承認に出すコミット（今のコードの変数 `dev`）を渡す。今の `pr_many`（`mergeCommit` を既に読む）の直後に、同じ終点で `drop_outside` を呼ぶ。差分の行数も `origin/<本番チャネル>...<承認に出すコミット>` から数える |
 | `release_lib/names.py` に足す `require_untagged` | 版の節を書く前に、その基底の版のリリースタグが無いことを確かめる | 新設。タグがあれば `StepError`（3）を投げる |
 | `release_lib/names.py` に足す `drop_untagged_sections` | 前のリリースタグの版と出す正式版の間にある、タグの無い版の節を行の列から消し、消した見出しを返す | 新設 |
 | `release-steps.py` の `_update_changelog`・`write_notes` | 版の節を足す・挿す・差し替える | 書く前に `require_untagged` を呼ぶ。`_update_changelog` は正式版（接尾辞の無い版）のときだけ `drop_untagged_sections` を呼ぶ |
@@ -149,6 +151,7 @@ graph TD
     end
     subgraph lib[release_lib]
         SR[included.section_range]
+        DO[included.drop_outside]
         RU[names.require_untagged]
         DU[names.drop_untagged_sections]
     end
@@ -156,6 +159,8 @@ graph TD
     NT --> SP
     SP --> SR
     AF --> SR
+    SP --> DO
+    AF --> DO
     CL --> RU
     NT --> RU
     CL --> DU
@@ -165,13 +170,13 @@ graph TD
 
 ## 構造
 
-型を足さず、変えない。範囲の PR の型（`IncludedPr`）と結果 JSON の形は今のままである。変わるのは関数の引数（`section_range` の終点）と、`release_lib/names.py` に足す 2 つの関数だけである。
+型を足さず、変えない。範囲の PR の型（`IncludedPr`）と結果 JSON の形は今のままである。変わるのは関数の引数（`section_range` の終点）と、`release_lib/included.py` に足す `drop_outside` と、`release_lib/names.py` に足す 2 つの関数だけである。
 
 ```text
 plugins/ndf/scripts/
-├── release-steps.py          # section_prs・cmd_approval_facts・_update_changelog・write_notes を変える
+├── release-steps.py          # section_prs・pr_titles・pr_notes・cmd_approval_facts・_update_changelog・write_notes を変える
 └── release_lib/
-    ├── included.py           # section_range の終点を引数にする
+    ├── included.py           # section_range の終点を引数にし、drop_outside を足す
     └── names.py              # require_untagged・drop_untagged_sections を足す
 ```
 
@@ -197,6 +202,7 @@ sequenceDiagram
     participant R as release-steps.py
     participant I as included.py
     participant G as git と CHANGELOG
+    participant H as GitHub
     P->>G: 承認したコミットから release/v<版> の worktree を作る
     P->>R: changelog --version <版> --prs <PR>
     R->>G: fetch --tags・前のリリースタグを決める
@@ -206,11 +212,17 @@ sequenceDiagram
     else タグが無い
         R->>I: section_range(前のタグ, HEAD, --prs)
         I->>G: git log --first-parent 前のタグ..HEAD
-        I-->>R: 範囲の PR
+        I-->>R: 範囲の PR と --prs の和
+        R->>H: PR をまとめて 1 回読む（mergeCommit を含む）
+        R->>I: drop_outside(範囲の PR, 読み出し結果, HEAD, --prs)
+        I->>G: --prs の番号ごとに merge-base --is-ancestor マージコミット HEAD
+        I-->>R: 終点に入った PR と外した番号
         R->>G: 版の節を足す・挿す。タグの無い途中の版の節を消す
     end
     P->>R: notes --version <版> --prs <PR>
     R->>I: section_range(前のタグ, HEAD, --prs)
+    R->>H: PR をまとめて 1 回読む（mergeCommit を含む）
+    R->>I: drop_outside(範囲の PR, 読み出し結果, HEAD, --prs)
     R->>G: 版の節を差し替える
     P->>R: release（本番チャネルへ入れ、タグと GitHub Release を作る）
 ```
@@ -269,7 +281,7 @@ GitHub の REST API を直接呼ぶ形は採らない。このリポジトリの
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 5・I1 | 承認したコミットからリリースのブランチを作り、その後にベースブランチへ PR をマージする。`changelog`・`notes` の版の節に後の PR が無い | `section_prs` の終点を `origin/<ベースブランチ>` へ戻すと落ちる |
-| I1（`--prs`） | 範囲の終点より後にマージした PR を `--prs` で渡すと、版の節と「含む PR」に無く、`items` に `skipped` の行がある。終点より前にマージした PR を `--prs` で渡すと載る | `section_range` が `--prs` を確かめずに和を返すと落ちる |
+| I1（`--prs`） | 範囲の終点より後にマージした PR を `--prs` で渡すと、版の節と「含む PR」に無く、`items` に `skipped` の行がある。終点より前にマージした PR を `--prs` で渡すと載る | `drop_outside` を呼ばずに和をそのまま使うと落ちる |
 | 受け入れ条件 5・I2 | 承認に出すコミットより後にマージされた PR が、`approval-facts` の「含む PR」に無く、「承認したコミット」が範囲の終点と同じ SHA である | `approval-facts` で終点と承認したコミットを別々に `origin/<ベースブランチ>` から読み、その間にマージが入ると落ちる |
 | 受け入れ条件 6・I3 | タグ `<プラグイン>--v<版>` がある版を基底にした開発版で `changelog` と `notes` を打つと、終了コード 3 で止まり、`summary` にタグの名前があり、`CHANGELOG.md` の中身が打つ前と同じである | タグの確かめを外す、または書き込みの後に確かめると落ちる |
 | 受け入れ条件 7・I4 | 前のリリースタグ 1.0.0、タグの無い 1.0.1・1.0.2 の節があるとき、正式版 1.0.3 の `changelog` の後に 1.0.1・1.0.2 の節が無く、その節にあった PR が 1.0.3 の節にある。`items` に `removed` が 2 件ある | 消す条件の下限を外して前のリリースタグの節まで消す、またはタグのある節を消すと落ちる |
