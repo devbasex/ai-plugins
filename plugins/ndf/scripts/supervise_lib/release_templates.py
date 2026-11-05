@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 
 from gate_answer import GATE_2
-from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
+from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, reject_step, with_margin
@@ -84,7 +84,7 @@ def _validate_release_decl(rel: dict, dev: bool, a) -> tuple[str, list[str]]:
     if not isinstance(runtimes, list) or not runtimes or not all(isinstance(r, str) for r in runtimes):
         raise DeclError("supervise.json: release.runtimes（導入を確かめるランタイムの並び）が要る")
     if not dev and not a.production_branch:
-        raise DeclError(f"本番の配布に要る本番のブランチが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
+        raise DeclError(f"本番の配布に要る本番のブランチが無い（{PRODUCTION_SOURCES}）")
     return plugin, runtimes
 
 
