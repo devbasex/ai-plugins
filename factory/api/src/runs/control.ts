@@ -30,7 +30,7 @@ import {
 } from "./model.ts";
 import type { RunnerPlatform } from "./platform.ts";
 import type { RunsTable } from "./table.ts";
-import { isLegacyVersion } from "./version.ts";
+import { isLegacyVersion, supportsBudgetReset } from "./version.ts";
 import { claimOf, type IdempotencyRef } from "../idempotency.ts";
 
 export const DEFAULT_TIMEOUT_SECONDS = 28_800;
@@ -48,6 +48,8 @@ export interface RunControlConfig {
   ingestUrl: string;
   // 並行を許す NDF の版の下限（#2347 の決定 12）。無ければ並行を許さない
   parallelMinVersion?: string | null;
+  // 予算の単位を既定へ戻せる（default を受ける）NDF の版の下限（#2406 の決定 4）。無ければ戻せない
+  budgetResetMinVersion?: string | null;
   // local のループも自動で次の周回を起こす（I52）。既定 false
   localLoopAutostart?: boolean;
   usageLimitRetrySeconds?: number;
@@ -74,6 +76,7 @@ export function runControlConfig(env: Record<string, string | undefined>): RunCo
     tokenTtlSeconds,
     ingestUrl,
     parallelMinVersion: env.NDF_PARALLEL_MIN_VERSION || null,
+    budgetResetMinVersion: env.NDF_BUDGET_RESET_MIN_VERSION || null,
     localLoopAutostart: env.LOCAL_LOOP_AUTOSTART === "true",
     usageLimitRetrySeconds: num("USAGE_LIMIT_RETRY_SECONDS", DEFAULT_USAGE_LIMIT_RETRY_SECONDS),
   };
@@ -461,13 +464,20 @@ export class RunControl {
       instruction.LOOP_NAME = loop.name;
       if (job.start === "loop") {
         instruction.LOOP_MILESTONES = loop.milestones.join(",");
-        const budget = (["laps", "usd", "hours"] as const).filter((k) => loop.budget[k] !== null).map((k) => `${k}=${loop.budget[k]}`);
-        if (budget.length > 0) instruction.LOOP_BUDGET = budget.join(",");
+        const budget = loopBudgetArg(loop.budget, supportsBudgetReset(run.ndfVersion, this.deps.config.budgetResetMinVersion));
+        if (budget) instruction.LOOP_BUDGET = budget;
       }
       if (loop.exclude.length > 0) instruction.EXCLUDE_ISSUES = loop.exclude.join(",");
       if (loop.answers.length > 0) instruction.LOOP_ANSWERS = loop.answers.map((a) => `${a.number}=${a.decision}${a.pr ? `#${a.pr}` : ""}`).join(",");
     }
     return instruction;
+  }
+
+  // ループの次のジョブが使う NDF の版が予算を既定へ戻せるか（#2406 の決定 5）。今の実行があればその版、無ければ今のマーケットプレイスの版
+  async budgetResetSupportedFor(loop: DevLoop): Promise<{ supported: boolean; ndfVersion: string }> {
+    const run = loop.currentRunId ? await this.deps.table.getRun(loop.currentRunId) : null;
+    const ndfVersion = run ? run.ndfVersion : await this.deps.ndfVersion();
+    return { supported: supportsBudgetReset(ndfVersion, this.deps.config.budgetResetMinVersion), ndfVersion };
   }
 
   // ジョブの token を発行する。期限は打ち切りの時間より長い（I41）
@@ -863,6 +873,14 @@ export class RunControl {
     if (!run) throw new ForbiddenError();
     return { run, job };
   }
+}
+
+// 指示の LOOP_BUDGET。既定へ戻せる版では空の単位を default（リポジトリの既定へ戻す）で並べ、戻せない版では値のある単位だけを並べる
+export function loopBudgetArg(budget: LoopJobInput["budget"], reset: boolean): string | null {
+  const parts = (["laps", "usd", "hours"] as const).flatMap((k) =>
+    budget[k] !== null ? [`${k}=${budget[k]}`] : reset ? [`${k}=default`] : [],
+  );
+  return parts.length > 0 ? parts.join(",") : null;
 }
 
 // ループの実行のジョブの指示へ載せる値（予算・答えは周回を起こす時点の値）。答えは今の人の判断待ちに残る番号だけ

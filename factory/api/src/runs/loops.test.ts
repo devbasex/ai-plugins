@@ -10,7 +10,7 @@ import { accountContext, createRunsHarness, TEST_CONFIG, type RunsHarness } from
 import { backfill } from "./backfill.ts";
 import type { RunControlConfig } from "./control.ts";
 import { LoopControl, loopStateAfter, type RunOutcome } from "./loops.ts";
-import { compareVersions, isLegacyVersion } from "./version.ts";
+import { compareVersions, isLegacyVersion, supportsBudgetReset } from "./version.ts";
 
 const REPO = 101;
 const OTHER_REPO = 102;
@@ -144,6 +144,15 @@ describe("版の比べ方（決定 12）", () => {
     expect(isLegacyVersion("10.27.0", null)).toBe(true);
     expect(isLegacyVersion("10.27.0", "10.27.0-dev.1")).toBe(false);
   });
+
+  it("予算を既定へ戻せる版は下限と同じか新しい版。開発版の接尾辞の付いた同じ版・下限が無い・読めない版は戻せない（#2406）", () => {
+    expect(supportsBudgetReset("10.27.0", "10.27.0")).toBe(true);
+    expect(supportsBudgetReset("10.27.1@abc", "10.27.0")).toBe(true);
+    expect(supportsBudgetReset("10.26.9", "10.27.0")).toBe(false);
+    expect(supportsBudgetReset("10.27.0-dev.1", "10.27.0")).toBe(false);
+    expect(supportsBudgetReset("10.27.0", null)).toBe(false);
+    expect(supportsBudgetReset("unknown", "10.27.0")).toBe(false);
+  });
 });
 
 describe("開発ループを始め・止め・予算を変える（受け入れ条件 1・11）", () => {
@@ -171,6 +180,40 @@ describe("開発ループを始め・止め・予算を変える（受け入れ�
     expect(instructionOf((await runOf(loop.currentRunId!)).currentJobId!).LOOP_BUDGET).toBe("laps=4,usd=50");
     const row = (await loops.listLoops(accountContext(), REPO)).loops[0]!;
     expect(row).toMatchObject({ name: "lfactory2", laps_closed: 1, cost_usd: 2, budget_remaining: { laps: 3, usd: 48, hours: null } });
+  });
+
+  it("既定へ戻せる版では、空にした単位を次の周回の指示へ default として載せる（#2406）", async () => {
+    await setup({ budgetResetMinVersion: "10.26.1" });
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"], accountContext(), { usd: 10 });
+    expect(instructionOf((await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!).LOOP_BUDGET).toBe("laps=default,usd=10,hours=default");
+    await loops.updateBudget(accountContext(), loop_id, { budget: { usd: null } });
+    await finishEcs((await loopOf(loop_id)).currentRunId!, { result: "done", summary: "" }, [["loop.lap_closed", lap(1)]]);
+    const ins = instructionOf((await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!);
+    expect(ins.LOOP_BUDGET).toBe("laps=default,usd=default,hours=default");
+    expect(validateRunJobInstruction(ins).ok).toBe(true);
+  });
+
+  it("既定へ戻せない版では、値のある単位を空にする変更を 409 で断り、値の変更と空のままの単位は受ける（#2406）", async () => {
+    await setup({ budgetResetMinVersion: "10.27.0" });
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"], accountContext(), { usd: 10 });
+    expect(instructionOf((await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!).LOOP_BUDGET).toBe("usd=10");
+    const cleared = loops.updateBudget(accountContext(), loop_id, { budget: { usd: null } });
+    expect(await detailsOf(cleared)).toEqual({ ndf_version: "10.26.1", units: ["usd"] });
+    expect(await codeOf(loops.updateBudget(accountContext(), loop_id, { budget: {} }))).toBe("budget_reset_unsupported");
+    expect((await loopOf(loop_id)).budget).toEqual({ laps: null, usd: 10, hours: null });
+    expect(await codeOf(loops.updateBudget(accountContext(), loop_id, { budget: { usd: 20 } }))).toBe("ok");
+    expect((await loopOf(loop_id)).budget).toEqual({ laps: null, usd: 20, hours: null });
+  });
+
+  it("判定に使う版は今の実行の版で、今の実行が無ければマーケットプレイスの版。下限が無ければ戻せない（#2406）", async () => {
+    await setup({ budgetResetMinVersion: "10.27.0" });
+    const { loop_id } = await startLoop("lfactory2", ["25 Factory"], accountContext(), { usd: 10 });
+    const loop = await loopOf(loop_id);
+    h.table.runs.get(loop.currentRunId!)!.ndfVersion = "10.27.0";
+    expect(await h.control.budgetResetSupportedFor(loop)).toEqual({ supported: true, ndfVersion: "10.27.0" });
+    expect(await h.control.budgetResetSupportedFor({ ...loop, currentRunId: null })).toEqual({ supported: false, ndfVersion: "10.26.1" });
+    await setup();
+    expect((await h.control.budgetResetSupportedFor({ ...loop, currentRunId: null })).supported).toBe(false);
   });
 
   it("形の違う名前・マイルストーン・予算は 400、同じ名前の終わっていないループは 409", async () => {

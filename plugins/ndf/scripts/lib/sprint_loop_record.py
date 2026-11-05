@@ -59,6 +59,7 @@ EXIT_REFUSED = step_result.EXIT_VIOLATION  # 1: 断った・呼び出しの順�
 EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たった（失敗ではない）
 
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
+BUDGET_DEFAULT = "default"  # 予算の単位を既定（.ndf/pace.json の loop.budget）へ戻す指示。値が変わったときだけ予算の履歴に 1 行足す
 RELEASE_PENDING_MAX = 2  # 保留の周回の上限の既定（.ndf/pace.json の loop.release_pending_max）
 SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")

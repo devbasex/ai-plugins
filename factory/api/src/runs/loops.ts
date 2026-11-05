@@ -438,6 +438,18 @@ export class LoopControl {
     const budget = parseBudget(body.budget ?? {});
     const loop = await this.loopOf(ctx, loopId);
     if (isTerminalLoop(loop.state)) throw new ConflictError("already_finished", "このループは終わっています");
+    // 値のある単位を空にする変更は、次のジョブの NDF が既定へ戻せる版のときだけ受ける（#2406 の I7）
+    const units = (["laps", "usd", "hours"] as const).filter((k) => loop.budget[k] !== null && budget[k] === null);
+    if (units.length > 0) {
+      const { supported, ndfVersion } = await this.deps.control.budgetResetSupportedFor(loop);
+      if (!supported) {
+        throw new ConflictError(
+          "budget_reset_unsupported",
+          `このループの次のジョブが使う NDF（版 ${ndfVersion}）は予算をリポジトリの既定へ戻せません。値を入れるか、次の周回が新しい版で始まってから空にしてください`,
+          { ndf_version: ndfVersion, units },
+        );
+      }
+    }
     const ok = await this.deps.table.writeLoop({
       accountId: loop.accountId,
       loopId: loop.loopId,
