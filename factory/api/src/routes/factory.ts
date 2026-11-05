@@ -14,7 +14,7 @@ import type { RunControl } from "../runs/control.ts";
 import type { LoopControl } from "../runs/loops.ts";
 import type { RunsTable } from "../runs/table.ts";
 import { parseIdempotencyKey } from "../idempotency.ts";
-import { registerList, registerOperation } from "./operation.ts";
+import { positiveInt, registerList, registerOperation } from "./operation.ts";
 import { registerSprintViews, sprintRunList } from "./sprint-views.ts";
 
 export interface FactoryDeps {
@@ -28,12 +28,6 @@ export interface FactoryDeps {
   candidateModel: CandidateModel;
   // 進捗の記録の読み出し（スプリントの一覧と詳細。#2172）
   reader: ProgressReader;
-}
-
-export function positiveInt(raw: unknown, message = "リポジトリの ID の形ではありません"): number {
-  const n = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : raw;
-  if (!Number.isInteger(n) || (n as number) < 1) throw new InvalidRequestError(message);
-  return n as number;
 }
 
 function idOf(raw: unknown, message: string): string {

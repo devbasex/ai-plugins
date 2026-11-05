@@ -9,6 +9,12 @@ import { runElements, type ElementResult } from "./elements.ts";
 
 export type Element = Record<string, unknown>;
 
+export function positiveInt(raw: unknown, message = "リポジトリの ID の形ではありません"): number {
+  const n = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : raw;
+  if (!Number.isInteger(n) || (n as number) < 1) throw new InvalidRequestError(message);
+  return n as number;
+}
+
 export interface ElementHandler<S> {
   // 要求全体の前に 1 度だけ行う（条件の照合など）。投げると要求全体を断る
   prepare?: (c: Context<AuthEnv>, ctx: AccountContext | null) => Promise<S>;

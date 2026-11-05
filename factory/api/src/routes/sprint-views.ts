@@ -9,8 +9,8 @@ import type { RankingTable } from "../github/port.ts";
 import type { SprintRun } from "../runs/model.ts";
 import { DETAIL_STEP_LIMIT, deriveDetail, deriveRefinements, deriveStepDetail, listRowExtras, stepRows } from "../views/derive.ts";
 import { mapLimit } from "./elements.ts";
-import { positiveInt, type FactoryDeps } from "./factory.ts";
-import { registerOperation } from "./operation.ts";
+import type { FactoryDeps } from "./factory.ts";
+import { positiveInt, registerOperation } from "./operation.ts";
 
 // 一覧の行ごとの読み出しを並べる数の上限
 const LIST_CONCURRENCY = 10;
