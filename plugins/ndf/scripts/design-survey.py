@@ -86,7 +86,7 @@ class Doc:
             self.decisions.append((m.group("n"), s.heading.line, method, cands))
 
 
-def groups(docs: list[Doc]) -> list[list[Doc]]:
+def survey_groups(docs: list[Doc]) -> list[list[Doc]]:
     """課題の番号を 1 つでも共有する文書どうしを、つながりをたどって 1 つのまとまりにする。番号の無い文書は 1 つで 1 まとまり。"""
     out: list[tuple[set[str], list[Doc]]] = []
     for d in docs:
@@ -101,7 +101,7 @@ def _terms(value: str) -> list[str]:
     return [t.strip("`*_ 。") for t in SPLIT.split(value.strip()) if t.strip("`*_ 。")]
 
 
-def judge(group: list[Doc]) -> tuple[list[dict], dict]:
+def judge_group(group: list[Doc]) -> tuple[list[dict], dict]:
     skipped = any(d.skipped for d in group)
     known = set().union(*(d.candidates for d in group))
     items: list[dict] = []
@@ -141,8 +141,8 @@ def cmd_check(a):
     docs = [Doc(p, t) for p, t in texts]
     items: list[dict] = []
     metrics = {"docs": len(docs), "decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
-    for g in groups(docs):
-        got, counts = judge(g)
+    for g in survey_groups(docs):
+        got, counts = judge_group(g)
         items += got
         for k, v in counts.items():
             metrics[k] += v
