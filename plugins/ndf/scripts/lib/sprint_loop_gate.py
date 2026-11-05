@@ -413,7 +413,8 @@ def regate1(env: Env, w: dict) -> bool:
     head = design_head(env, w)
     if head == stamp:
         return False
-    if head and (sent := lane_gate1(env, w, w.get("report") or "", w.get("state") or "")):
+    if head and (sent := lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")):
+        w.pop("returned", None)  # 前に利用者へ戻した印と理由は新しい先端の問いに当てはまらない
         w.update(sent, restamped=stamp)
     return True
 
@@ -434,8 +435,8 @@ def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:
     return w["merge"]
 
 
-def _reopen_waiting(w: dict) -> None:  # 前の回答者 by も外す（残すと次の答えを MVV の承認と読み違える）
-    for k in ("answer", "answered_at", "by", "merge", "merged_at"):
+def _reopen_waiting(w: dict) -> None:  # 前の回答者 by と利用者へ戻した印 returned も外す（残すと次の問いを読み違える）
+    for k in ("answer", "answered_at", "by", "merge", "merged_at", "returned"):
         w.pop(k, None)
 
 
@@ -447,7 +448,7 @@ def reask_design(env: Env, rec: dict, w: dict, head: str) -> bool:
         return False
     old = w.get("stamp") or ""
     if w.get("request"):
-        sent = lane_gate1(env, w, w.get("report") or "", w.get("state") or "")
+        sent = lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")
         if not sent:
             return False
         _reopen_waiting(w)
@@ -474,6 +475,7 @@ def giveback_design(env: Env, rec: dict, w: dict, reason: str, lap: int) -> bool
         w.update(sent, givebacks=n)
     else:
         _reopen_waiting(w)
+    w["returned"] = reason  # _reopen_waiting が外すため書き直す
     mark_issue(env, rec, w)
     return True
 

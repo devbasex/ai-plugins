@@ -1844,6 +1844,22 @@ def test_lane_gives_back_twice_in_the_same_lap_with_different_request_ids(env, m
     assert (first, w["request"]) == (f"la-g501-{HEAD[:12]}-m2-1", f"la-g501-{HEAD[:12]}-m2-2") and "by" not in w
 
 
+@pytest.mark.parametrize("rid", ["x", None])
+def test_reasking_on_a_moved_head_drops_the_given_back_mark(env, monkeypatch, rid):
+    sent = lane_env(env, monkeypatch)
+    w = {"number": 11, "pr": 501, "request": rid, "stamp": "old", "returned": "権限が無い", "answer": "approved"}
+    monkeypatch.setattr(sl_gate, "mark_issue", lambda e, rec, w: None)
+    assert sl_gate.reask_design(env, {}, w, HEAD)
+    assert "returned" not in w and all(s["returned"] is None for s in sent)
+
+
+def test_regating_on_a_moved_head_drops_the_given_back_mark(env, monkeypatch):
+    sent = lane_env(env, monkeypatch)
+    w = {"number": 11, "pr": 501, "request": "x", "stamp": "0ld" * 4, "returned": "権限が無い"}
+    assert sl_gate.regate1(env, w)
+    assert "returned" not in w and sent[-1]["returned"] is None and w["restamped"] == "0ld" * 4
+
+
 @pytest.mark.parametrize("returned, mark", [("権限が無い", True), (None, None)])
 def test_lane_gate1_marks_a_given_back_request_so_the_organizer_does_not_self_approve(env, monkeypatch, returned, mark):
     import parallel_lane

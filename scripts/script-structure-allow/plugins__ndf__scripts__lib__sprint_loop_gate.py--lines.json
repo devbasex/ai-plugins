@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/scripts/lib/sprint_loop_gate.py", "name": "", "kind": "lines", "reason": "498 行だったところへ #2436（承認ゲートの問いをオーガナイザーへ送る経路・レーンの配布待ち）で増えて 585 行、#2507（人の判断待ちの行へマージの結果を書く・答えの後の整理）で 654 行。500 行以下にしたら消す。保留の周回は sprint_loop_gate2.py へ分けてある", "lines": 654}
+{"path": "plugins/ndf/scripts/lib/sprint_loop_gate.py", "name": "", "kind": "lines", "reason": "498 行だったところへ #2436（承認ゲートの問いをオーガナイザーへ送る経路・レーンの配布待ち）で増えて 585 行、#2507（人の判断待ちの行へマージの結果を書く・答えの後の整理）で 658 行（問い直しで利用者へ戻した印を外す分を含む）。500 行以下にしたら消す。保留の周回は sprint_loop_gate2.py へ分けてある", "lines": 658}
