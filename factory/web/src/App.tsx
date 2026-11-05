@@ -1,7 +1,7 @@
 import { useMemo, type ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { I18nextProvider } from "react-i18next";
-import { ServicesContext, type Services } from "./context.tsx";
+import { RequireLogin, ServicesContext, type Services } from "./context.tsx";
 import { browserConnection, type ConnectionSource } from "./connection.ts";
 import { bundledResources, createI18n, type TranslationResources } from "./i18n/index.ts";
 import { LocaleSettingsContext, detectSettings, type LocaleSettings } from "./i18n/settings.ts";
@@ -50,7 +50,7 @@ export interface AppProps {
 }
 
 // ルーターは呼ぶ側が包む（main.tsx は BrowserRouter、テストは MemoryRouter）
-// ログインの前の画面（/login・/callback）と地図に無い経路の転送は枠で包まない
+// ログインの前の画面（/login・/callback）と地図に無い経路の転送は枠で包まない。枠の下の画面は token があるときだけ描く
 export function App({ services, settings, resources }: AppProps) {
   const full = useMemo<Services>(() => ({ ...services, connection: services.connection ?? browserConnection() }), [services]);
   const allResources = useMemo(() => ({ ...bundledResources, ...resources }), [resources]);
@@ -64,7 +64,13 @@ export function App({ services, settings, resources }: AppProps) {
         <ServicesContext.Provider value={full}>
           <Routes>
             {screens.filter((s) => s.roles.length === 0).map(route)}
-            <Route element={<AppShell />}>{screens.filter((s) => s.roles.length > 0).map(route)}</Route>
+            <Route
+              element={
+                <RequireLogin>
+                  <AppShell />
+                </RequireLogin>
+              }
+            >{screens.filter((s) => s.roles.length > 0).map(route)}</Route>
             <Route path="*" element={<Navigate to={FALLBACK_PATH} replace />} />
           </Routes>
         </ServicesContext.Provider>

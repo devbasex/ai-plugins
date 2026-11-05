@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Navigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { Repository, SprintRunRow } from "../api.ts";
 import { useServices } from "../context.tsx";
@@ -44,18 +44,16 @@ export function SprintsPage() {
   const format = useFormat();
   const sprintState = useSprintState();
   const { accountId = "" } = useParams();
-  const { auth, api } = useServices();
+  const { api } = useServices();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("all");
-  const hasToken = auth.getToken() !== null;
 
   const read = useCallback(async () => {
     const runs = await api.sprintRuns(accountId);
     return [...runs.sprint_runs].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [api, accountId]);
-  const { data: runs, error, staleSince, reload } = usePolled(read, hasToken);
+  const { data: runs, error, staleSince, reload } = usePolled(read);
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   const header = <PageHeader title={t("screens.sprints")} />;
   if (error) {
     return (

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Navigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { ModelCredential } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -19,8 +19,8 @@ export function ModelCredentialPage() {
   const { t } = useTranslation();
   const format = useFormat();
   const { accountId = "" } = useParams();
-  const { auth, api } = useServices();
-  const onFailure = useFailureHandler();
+  const { api } = useServices();
+  const attempt = useAttempt();
   const [current, setCurrent] = useState<ModelCredential | null>(null);
   const [kind, setKind] = useState<"anthropic_api_key" | "aws_role">("anthropic_api_key");
   const [apiKey, setApiKey] = useState("");
@@ -28,20 +28,11 @@ export function ModelCredentialPage() {
   const [region, setRegion] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const hasToken = auth.getToken() !== null;
 
   useEffect(() => {
-    if (!hasToken) return;
-    void (async () => {
-      try {
-        setCurrent(await api.modelCredential(accountId));
-      } catch (err) {
-        setError(onFailure(err));
-      }
-    })();
-  }, [api, accountId, hasToken, onFailure]);
+    void attempt(async () => setCurrent(await api.modelCredential(accountId)), setError);
+  }, [api, accountId, attempt]);
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   if (error) return <Alert>{error}</Alert>;
   if (!current) return <LoadingState />;
 
@@ -50,14 +41,12 @@ export function ModelCredentialPage() {
     if (kind === "anthropic_api_key" && (apiKey.length < 1 || apiKey.length > 512)) return setMessage(t("modelCredential.needApiKey"));
     if (kind === "aws_role" && (!ROLE_ARN.test(roleArn) || roleArn.length > 2048)) return setMessage(t("modelCredential.badRoleArn"));
     if (kind === "aws_role" && (!REGION.test(region) || region.length > 32)) return setMessage(t("modelCredential.badRegion"));
-    try {
+    await attempt(async () => {
       setCurrent(
         await api.saveModelCredential(accountId, kind === "anthropic_api_key" ? { kind, api_key: apiKey } : { kind, role_arn: roleArn, region }),
       );
       setApiKey("");
-    } catch (err) {
-      setMessage(onFailure(err));
-    }
+    }, setMessage);
   };
 
   return (
@@ -98,14 +87,12 @@ export function ModelCredentialPage() {
           {current.registered && (
             <Button
               variant="danger"
-              onClick={async () => {
-                try {
+              onClick={() =>
+                void attempt(async () => {
                   await api.deleteModelCredential(accountId);
                   setCurrent({ ...current, registered: false, kind: null, updated_at: null });
-                } catch (err) {
-                  setMessage(onFailure(err));
-                }
-              }}
+                }, setMessage)
+              }
             >
               {t("modelCredential.delete")}
             </Button>

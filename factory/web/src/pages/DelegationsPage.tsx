@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { Delegation, DelegationScope } from "../api.ts";
-import { useConnection, useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useConnection, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -27,9 +26,9 @@ const STATE_KEY = { active: "delegations.stateActive", expired: "delegations.sta
 export function DelegationsPage() {
   const { t } = useTranslation();
   const format = useFormat();
-  const { auth, api, apiUrl } = useServices();
+  const { api, apiUrl } = useServices();
   const { online } = useConnection();
-  const onFailure = useFailureHandler();
+  const attempt = useAttempt();
   const [rows, setRows] = useState<Delegation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -38,28 +37,21 @@ export function DelegationsPage() {
   const [issued, setIssued] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const hasToken = auth.getToken() !== null;
 
   const load = useCallback(async () => {
     setLoadError(null);
-    try {
-      setRows(await api.delegations());
-    } catch (err) {
-      setLoadError(onFailure(err));
-    }
-  }, [api, onFailure]);
+    await attempt(async () => setRows(await api.delegations()), setLoadError);
+  }, [api, attempt]);
 
   useEffect(() => {
-    if (hasToken) void load();
-  }, [hasToken, load]);
-
-  if (!hasToken) return <Navigate to="/login" replace />;
+    void load();
+  }, [load]);
 
   const issue = async () => {
     setMessage(null);
     if (name.trim() === "") return setMessage(t("delegations.needClientName"));
     setBusy(true);
-    try {
+    await attempt(async () => {
       const { delegation, credential } = await api.createDelegation({ client_name: name, scope, expires_in_seconds: expires });
       setIssued(credential);
       setName("");
@@ -67,24 +59,18 @@ export function DelegationsPage() {
       // 黙って受けると、使えない有効な資格情報が残るため、取り消して発行し直すよう知らせる
       if (credential === null) setMessage(t("delegations.valueUnavailable"));
       setRows((prev) => [delegation, ...(prev ?? []).filter((d) => d.credential_id !== delegation.credential_id)]);
-    } catch (err) {
-      setMessage(onFailure(err));
-    } finally {
-      setBusy(false);
-    }
+    }, setMessage);
+    setBusy(false);
   };
 
   const revoke = async (credentialId: string) => {
     setMessage(null);
     setBusy(true);
-    try {
+    await attempt(async () => {
       const next = await api.revokeDelegation(credentialId);
       setRows((prev) => (prev ?? []).map((d) => (d.credential_id === credentialId ? next : d)));
-    } catch (err) {
-      setMessage(onFailure(err));
-    } finally {
-      setBusy(false);
-    }
+    }, setMessage);
+    setBusy(false);
   };
 
   const example = issued && JSON.stringify({ url: `${apiUrl ?? ""}/mcp`, headers: { Authorization: `Bearer ${issued}` } }, null, 2);

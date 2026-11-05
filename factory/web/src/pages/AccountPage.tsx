@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { AccountDetail, Me } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useServices } from "../context.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -13,27 +13,20 @@ import { ExecutionModeView, LimitsView } from "./parts.tsx";
 export function AccountPage() {
   const { t } = useTranslation();
   const { auth, api } = useServices();
-  const onFailure = useFailureHandler();
+  const attempt = useAttempt();
   const navigate = useNavigate();
   const [me, setMe] = useState<Me | null>(null);
   const [personal, setPersonal] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const hasToken = auth.getToken() !== null;
 
   useEffect(() => {
-    if (!hasToken) return;
-    void (async () => {
-      try {
-        const m = await api.me();
-        setMe(m);
-        setPersonal(await api.account(m.personal_account_id));
-      } catch (err) {
-        setError(onFailure(err));
-      }
-    })();
-  }, [api, hasToken, onFailure]);
+    void attempt(async () => {
+      const m = await api.me();
+      setMe(m);
+      setPersonal(await api.account(m.personal_account_id));
+    }, setError);
+  }, [api, attempt]);
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   if (error) return <Alert>{error}</Alert>;
   if (!me || !personal) return <LoadingState />;
   const teams = me.accounts.filter((a) => a.kind === "team");
