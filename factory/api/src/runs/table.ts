@@ -73,6 +73,8 @@ export interface RunsTable {
   getRun(sprintRunId: string): Promise<SprintRun | null>;
   // アカウントの実行の新しい順
   listRuns(accountId: string, limit: number): Promise<SprintRun[]>;
+  // アカウントの実行のうち状態が awaiting_approval のもの（新しい順。listRuns と同じ新しい方から 1,000 件の範囲。#2430 の決定 2）
+  listAwaitingRuns(accountId: string): Promise<SprintRun[]>;
   setCancelRequested(sprintRunId: string): Promise<void>;
   // 終わりの状態でない実行を running にする（starting のときだけ）
   markRunRunning(sprintRunId: string, now: string): Promise<void>;

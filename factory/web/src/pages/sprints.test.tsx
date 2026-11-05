@@ -304,3 +304,46 @@ describe("バックログ（受け入れ条件 15・16）", () => {
     expect(screen.getByText("棚卸しの記録はまだありません")).toBeTruthy();
   });
 });
+
+describe("詳細の注意の欄（#2430 の受け入れ条件 1〜4）", () => {
+  const withAttention = (attention: { key: string; at: string; reason: string; summary: string }[]) => {
+    const api = createDummyApi();
+    const details = api.sprintRunDetails.bind(api);
+    api.sprintRunDetails = async (...args: Parameters<Api["sprintRunDetails"]>) => (await details(...args)).map((d) => ({ ...d, attention }));
+    return api;
+  };
+
+  it("base_conflict は「取り込みで解けない衝突」、ほかの理由は値そのものを、要約と利用者の時刻帯の日時とともに記録された順に出す", async () => {
+    show(
+      detail,
+      withAttention([
+        { key: "a1", at: "2026-11-02T00:20:00Z", reason: "base_conflict", summary: "src/a.ts で衝突" },
+        { key: "a2", at: "2026-11-02T00:10:00Z", reason: "stopped", summary: "止まった" },
+        { key: "a3", at: "2026-11-02T00:30:00Z", reason: "toString", summary: "名前の衝突しない値" },
+      ]),
+    );
+    const region = await screen.findByRole("region", { name: "注意" });
+    const items = within(region).getAllByRole("listitem");
+    expect(items.map((li) => li.querySelector("strong")!.textContent)).toEqual(["取り込みで解けない衝突", "stopped", "toString"]);
+    expect(items[0]!.textContent).toContain("src/a.ts で衝突");
+    expect(items[0]!.textContent).toContain("2026/11/2 9:20:00");
+    expect(items[1]!.textContent).toContain("止まった");
+  });
+
+  it("注意が 0 件なら欄に「ありません」を出す", async () => {
+    show(detail, withAttention([]));
+    const region = await screen.findByRole("region", { name: "注意" });
+    expect(within(region).getByText("ありません")).toBeTruthy();
+    expect(within(region).queryAllByRole("listitem")).toHaveLength(0);
+  });
+
+  it("欄は詳細の読み出しだけで描き、ほかの読み出しを打たない", async () => {
+    const api = createDummyApi();
+    const approvals = vi.fn(api.approvalRequests);
+    api.approvalRequests = approvals;
+    show(`${sprints}/sr-0002`, api);
+    const region = await screen.findByRole("region", { name: "注意" });
+    expect(within(region).getByText("取り込みで解けない衝突")).toBeTruthy();
+    expect(approvals).not.toHaveBeenCalled();
+  });
+});

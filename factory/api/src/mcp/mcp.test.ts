@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { OPERATIONS } from "@ndf-factory/contracts/operations";
 import type { AuthEnv } from "../auth/resolve.ts";
+import { appendEvent } from "../progress/append.ts";
 import { createTestApi, firstResult, type TestApi } from "../testing/app.ts";
 import { registerMcp, tools, type AppRequest } from "./server.ts";
 
@@ -72,6 +73,43 @@ describe("ツールの呼び出し（受け入れ条件 3・17・18、I15・I16�
     const r = await callTool("getSprintRunDetail", { account_id: account, sprint_run_id: ["sr-none"] });
     expect(r.structuredContent.status).toBe(200);
     expect(r.structuredContent.body[0]).toMatchObject({ ok: false, error: { code: "forbidden" } });
+  });
+
+  it("承認待ちの一覧（#2430）は API の経路と同じ行の配列を返し、扱いは read で、人だけが確定できる旨を付けない", async () => {
+    api.h!.table.runs.set("sr-w", {
+      sprintRunId: "sr-w",
+      accountId: account,
+      repositoryId: 101,
+      repo: "org-a/repo-a",
+      state: "awaiting_approval",
+      issues: [7],
+      ndfVersion: "10.27.15",
+      executionMode: "byok",
+      modelCredentialSecretArn: null,
+      currentJobId: null,
+      jobCount: 1,
+      cancelRequested: false,
+      failureReason: null,
+      createdBy: "u-1",
+      createdAt: "2026-11-04T00:00:00.000Z",
+      updatedAt: "2026-11-04T00:00:00.000Z",
+    });
+    await appendEvent(api.h!.progress, {
+      sprint_run_id: "sr-w",
+      idempotency_key: "job-1:1",
+      type: "gate.reached",
+      at: "2026-11-04T00:00:01.000Z",
+      source: "runner",
+      job_id: "job-1",
+      schema_version: 1,
+      payload: { kind: "gate1", pr_url: null, material: "資料", loop: { name: "lfactory3", lap: 1 } },
+    } as never);
+    const direct = await (await api.op("listApprovalRequests", { authorization: `Bearer ${credential}`, accountId: account })).json();
+    expect(direct).toEqual([expect.objectContaining({ sprint_run_id: "sr-w", kind: "gate1", loop: { name: "lfactory3", lap: 1 } })]);
+    const r = await callTool("listApprovalRequests", { account_id: account });
+    expect(r.structuredContent).toEqual({ status: 200, body: direct });
+    expect(OPERATIONS.find((o) => o.operationId === "listApprovalRequests")!.access).toBe("read");
+    expect(tools().find((t) => t.name === "listApprovalRequests")!.description).not.toMatch(/^人だけが確定できる/);
   });
 
   it("アカウントが要るツールに account_id が無ければ 400 で、アプリへ送らない", async () => {

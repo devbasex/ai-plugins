@@ -25,7 +25,7 @@
     "sprints": "スプリントの一覧",
     "sprintDetail": "スプリントの詳細",
     "backlog": "バックログ",
-    "approvals": "承認",
+    "approvals": "承認待ちの一覧",
     "billing": "請求と使用量",
     "runners": "手元のマシン",
     "loops": "ループ",
@@ -265,7 +265,23 @@
     "requiredStep": {
       "retro": "振り返り",
       "refine": "棚卸し"
+    },
+    "attention": "注意",
+    "attentionEmpty": "ありません",
+    "attentionReason": {
+      "base_conflict": "取り込みで解けない衝突"
     }
+  },
+  "approvals": {
+    "list": "承認を待つ依頼",
+    "empty": "承認を待っているものはありません",
+    "kind": "種類",
+    "loop": "ループ",
+    "lap": "周回",
+    "repository": "リポジトリ",
+    "issues": "課題",
+    "waitingSince": "待ち始めた日時",
+    "noLoop": "—"
   },
   "loopState": {
     "running": "動いている",
