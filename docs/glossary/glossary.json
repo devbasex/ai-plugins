@@ -2572,6 +2572,20 @@
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
+      "term": "選定",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す",
+      "source": "",
+      "pending_source": "issues/issue-2604-requirements.md"
+    },
+    {
+      "term": "前提の課題",
+      "context": "ndf-workflow",
+      "meaning": "ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない",
+      "source": "",
+      "pending_source": "issues/issue-2604-requirements.md"
+    },
+    {
       "term": "ループの予算",
       "context": "ndf-workflow",
       "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる",
