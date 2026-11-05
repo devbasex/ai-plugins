@@ -1,13 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  AccountUnavailableError,
-  ConflictError,
-  ForbiddenError,
-  InvalidRequestError,
-  NotFoundError,
-  PlanError,
-  UnprocessableError,
-} from "../errors.ts";
+import { AccountUnavailableError, ConflictError, ForbiddenError, InvalidRequestError, PlanError } from "../errors.ts";
 import {
   INITIAL_EXECUTION_MODE,
   isPlan,
@@ -24,11 +16,10 @@ import {
   type SeatType,
   type UserRecord,
 } from "./model.ts";
-import { ConditionFailedError, type AccountPatch, type AccountStore } from "./port.ts";
+import type { AccountPatch, AccountStore } from "./port.ts";
+import { retryOnConflict, writeOr } from "./conflict.ts";
+import { SeatService, seatHistory } from "./seat-service.ts";
 import { claimOf, type IdempotencyRef } from "../idempotency.ts";
-
-// 版の競合で読み直して書き直す回数の上限（docs/specifications/ndf-factory-accounts-and-plans.md の「常に成り立つ条件」）
-const VERSION_RETRIES = 3;
 
 export interface ServiceDeps {
   store: AccountStore;
@@ -40,11 +31,13 @@ export class AccountService {
   private readonly store: AccountStore;
   private readonly now: () => Date;
   private readonly newId: () => string;
+  private readonly seats: SeatService;
 
   constructor(deps: ServiceDeps) {
     this.store = deps.store;
     this.now = deps.now ?? (() => new Date());
     this.newId = deps.newId ?? randomUUID;
+    this.seats = new SeatService(this.store, this.now);
   }
 
   private stamp(): string {
@@ -74,26 +67,6 @@ export class AccountService {
       actor,
       before: null,
       after: { kind: account.kind, plan: account.plan, execution_mode: account.executionMode, ...extra },
-    };
-  }
-
-  // 席の履歴の行。null の側は席が無いことを表す
-  private seatHistory(
-    type: "seat.added" | "seat.changed" | "seat.removed",
-    accountId: string,
-    at: string,
-    actor: string,
-    userId: string,
-    before: SeatType | null,
-    after: SeatType | null,
-  ): HistoryRecord {
-    return {
-      accountId,
-      type,
-      at,
-      actor,
-      before: before === null ? null : { user_id: userId, seat_type: before },
-      after: after === null ? null : { user_id: userId, seat_type: after },
     };
   }
 
@@ -195,7 +168,7 @@ export class AccountService {
           seat,
           [
             this.accountCreated(account, caller.userId, { name }),
-            this.seatHistory("seat.added", account.accountId, at, caller.userId, caller.userId, null, seatType),
+            seatHistory("seat.added", account.accountId, at, caller.userId, caller.userId, null, seatType),
           ],
           ref && claimOf(ref, account.accountId, at),
         ),
@@ -209,55 +182,17 @@ export class AccountService {
     return won ?? this.context(account, caller.userId, seatType);
   }
 
-  // 席の操作は持ち主だけ（I17）。持ち主でなければ席の有無にかかわらず先に 403
-  private requireTeamOwner(ctx: AccountContext): void {
-    if (ctx.role !== "owner") throw new ForbiddenError();
-    if (ctx.kind !== "team") throw new ConflictError("not_a_team", "チームのアカウントではありません");
+  // 席の操作は SeatService が持つ
+  addSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
+    return this.seats.addSeat(ctx, userId, seatType);
   }
 
-  async addSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
-    this.requireTeamOwner(ctx);
-    if (!(await this.store.getUser(userId))) {
-      throw new UnprocessableError("user_not_found", "その利用者はまだログインしていません");
-    }
-    const at = this.stamp();
-    const seat: SeatRecord = { accountId: ctx.accountId, userId, seatType, addedAt: at };
-    await writeOr(
-      () =>
-        this.store.addSeat(seat, [this.seatHistory("seat.added", ctx.accountId, at, ctx.userId, userId, null, seatType)]),
-      () => {
-        throw new ConflictError("seat_exists", "その利用者は既にこのチームの席を持っています");
-      },
-    );
-    return seat;
+  changeSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
+    return this.seats.changeSeat(ctx, userId, seatType);
   }
 
-  async changeSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
-    this.requireTeamOwner(ctx);
-    // 読んだ席のままのときだけ書く。競合したら読み直し、履歴の before を作り直す
-    return retryOnConflict<SeatRecord>(async () => {
-      const current = await this.store.getSeat(ctx.accountId, userId);
-      if (!current) throw seatNotFound();
-      const at = this.stamp();
-      const history = this.seatHistory("seat.changed", ctx.accountId, at, ctx.userId, userId, current.seatType, seatType);
-      return { write: () => this.store.updateSeat(current, seatType, [history]), result: { ...current, seatType } };
-    });
-  }
-
-  async removeSeat(ctx: AccountContext, userId: string): Promise<void> {
-    this.requireTeamOwner(ctx);
-    const account = await this.store.getAccount(ctx.accountId);
-    if (account?.ownerUserId === userId) {
-      throw new ConflictError("owner_seat_protected", "チームの持ち主の席は外せません");
-    }
-    // 読んだ席のままのときだけ外す。外して足し直した新しい席を古い要求で消さない
-    await retryOnConflict<void>(async () => {
-      const current = await this.store.getSeat(ctx.accountId, userId);
-      if (!current) throw seatNotFound();
-      const at = this.stamp();
-      const history = this.seatHistory("seat.removed", ctx.accountId, at, ctx.userId, userId, current.seatType, null);
-      return { write: () => this.store.removeSeat(current, [history]), result: undefined };
-    });
+  removeSeat(ctx: AccountContext, userId: string): Promise<void> {
+    return this.seats.removeSeat(ctx, userId);
   }
 
   // 実行の形態を変える。持ち主だけ（I22）。Free で managed は断る（I21）
@@ -315,44 +250,6 @@ export class AccountService {
       (err) => err,
     );
   }
-}
-
-// 読み直しと判定の 1 回分の結果。書かずに終わる（done）か、書いて終わる（write が成功したら result）
-type ConflictStep<T> = { done: T } | { write: () => Promise<void>; result: T };
-
-// 版の競合（条件の失敗）なら step から読み直して上限の回数まで書き直す。step の中で投げた誤りはそのまま届く。
-// 条件以外の書き込みの失敗は onOther の結果を投げる（既定は AccountUnavailableError）
-async function retryOnConflict<T>(
-  step: () => Promise<ConflictStep<T>>,
-  onOther: (err: unknown) => unknown = () => new AccountUnavailableError(),
-): Promise<T> {
-  for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
-    const next = await step();
-    if ("done" in next) return next.done;
-    try {
-      await next.write();
-      return next.result;
-    } catch (err) {
-      if (!(err instanceof ConditionFailedError)) throw onOther(err);
-    }
-  }
-  throw new AccountUnavailableError();
-}
-
-// 再試行しない書き込み。成功なら undefined、条件の失敗なら onCondition の結果を返す（onCondition は投げてもよい）。
-// 条件以外の失敗は AccountUnavailableError
-async function writeOr<T>(write: () => Promise<void>, onCondition: () => T | Promise<T>): Promise<T | undefined> {
-  try {
-    await write();
-    return undefined;
-  } catch (err) {
-    if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-  }
-  return onCondition();
-}
-
-function seatNotFound(): NotFoundError {
-  return new NotFoundError("seat_not_found", "その席はありません");
 }
 
 const TEAM_NAME_MAX_LENGTH = 64;
