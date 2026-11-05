@@ -1,27 +1,17 @@
-"""スプリントのステージごとのプランをファイルへ書き、ステージの一覧を組む。"""
+"""スプリントのステージの一覧を組む（プランの書き出しは sprint._write_plans）。"""
 
 from __future__ import annotations
 
-import json
 import shlex
 from pathlib import Path
 
 from supervise_lib.paths import SELF
 
 
-def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
-    """ステージのプランを 1 つずつファイルへ書き、パスの一覧を返す。"""
-    paths = []
-    for key, plan in wave["plans"].items():
-        p = out / f"{i}-{key}.json"
-        p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
-        paths.append(str(p))
-    return paths
-
-
 def _stage_entry(wave: dict, i: int, out: Path) -> dict:
     """ステージ 1 件の一覧の項目。then_of のステージは command を持たず、前のステージへ連結される。"""
     import parallel_lane
+    from supervise_lib.sprint import _write_plans  # 書き先の契約の例外が sprint の _write_plans に付く
 
     entry = {"wave": i, "name": wave["name"]}
     if "gate" in wave:

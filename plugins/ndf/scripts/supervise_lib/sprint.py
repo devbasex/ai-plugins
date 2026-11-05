@@ -410,6 +410,16 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     )
 
 
+def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
+    """ステージのプランを 1 つずつファイルへ書き、パスの一覧を返す。"""
+    paths = []
+    for key, plan in wave["plans"].items():
+        p = out / f"{i}-{key}.json"
+        p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+        paths.append(str(p))
+    return paths
+
+
 def manifest_head(a, pace: str, closing: bool = False) -> dict:
     """manifest の見出し（スプリント / 進め方 / 状態 / ブランチ）。"""
     head = {"スプリント": a.name}
