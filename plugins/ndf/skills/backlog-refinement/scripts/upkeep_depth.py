@@ -342,10 +342,6 @@ def cmd_record(a):
     emit(result(TOOL, "ok", f"深さの記録へ {a.depth} の {a.event} を足した", [row], {"path": str(d / "depths.jsonl")}))
 
 
-def _is_num(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-
 def _period_key(r: dict, k: int):
     """同じ周回を 1 回と数える鍵。開発ループの外ではスプリント、どちらも無ければ行ごとに別。"""
     if r.get("loop") is not None:
@@ -362,7 +358,7 @@ def compare_rows(rows: list[dict], since, *, depth: str, model: str | None) -> t
         at = clock.parse(r.get("at"), naive="utc")
         if not _is_ran(r, depth) or at is None or at <= since:
             continue
-        if not (_is_num(r.get("seconds")) and _is_num(r.get("cost"))):
+        if not all(isinstance(r.get(x), (int, float)) and not isinstance(r.get(x), bool) for x in ("seconds", "cost")):
             excluded.append((r, "no_usage"))
         elif model is not None and ((r.get("values") or {}).get("models")) != [model]:
             excluded.append((r, "model"))

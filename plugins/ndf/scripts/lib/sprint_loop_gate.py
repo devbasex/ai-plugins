@@ -112,9 +112,7 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "c
     out = Path(lap["dir"]) / tag
     cmd = [sys.executable, str(SUPERVISE), "new", "close", "--pace", "auto", "--name", lap["sprint"], "--worktree", str(env.main_dir())]
     cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", lap.get("mode") or "standard"]
-    cmd += ["--loop", rec["name"], "--lap", str(lap["n"])]  # 差分の棚卸しの深さの記録の行に残す（#2315 の決定 3）
-    if carry:
-        cmd += ["--carry", *map(str, carry)]
+    cmd += ["--loop", rec["name"], "--lap", str(lap["n"]), *(["--carry", *map(str, carry)] if carry else [])]  # loop・lap は #2315 の決定 3
     if lap.get("milestone"):
         cmd += ["--milestone", lap["milestone"]]
     code, so, se = env.run(cmd, cwd=str(env.main_dir()))
