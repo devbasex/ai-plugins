@@ -127,7 +127,7 @@ graph TD
 
 ### 進捗の事象の定義
 
-`factory/contracts/schemas/progress-event.schema.json`。最上位は 13 種類の `oneOf` で、各種類（`$defs` の `JobStartedEvent` など）は共通の列を `allOf` で取り込み、`unevaluatedProperties: false` で余分な列を落とす。`payload` は種類ごとに `additionalProperties: false`。生成した型は `ProgressEvent`（13 種類の共用）と種類ごとの型である。
+`factory/contracts/schemas/progress-event.schema.json`。最上位は 16 種類の `oneOf` で、各種類（`$defs` の `JobStartedEvent` など）は共通の列を `allOf` で取り込み、`unevaluatedProperties: false` で余分な列を落とす。`payload` は種類ごとに `additionalProperties: false`。生成した型は `ProgressEvent`（16 種類の共用）と種類ごとの型である。
 
 **共通の列**（全体の契約の「進捗の正本」の列から、受け口が作る `order_key` と `pr_ref` を除いた 8 列）:
 
@@ -135,7 +135,7 @@ graph TD
 | --- | --- | --- | --- |
 | `sprint_run_id` | 文字列 | 必須 | `^[A-Za-z0-9_-]{1,128}$`（`order_key` の区切りの `#` と冪等の鍵の区切りの `:` を含めない） |
 | `idempotency_key` | 文字列 | 必須 | 1〜300 字。出所ごとの形は「出所ごとの照合」が見る |
-| `type` | 文字列 | 必須 | 13 種類のどれか（種類ごとの `const`） |
+| `type` | 文字列 | 必須 | 16 種類のどれか（種類ごとの `const`） |
 | `at` | 文字列 | 必須 | `format: date-time` かつ末尾 `Z`（UTC） |
 | `source` | 文字列 | 必須 | `runner` / `github` / `api` / `control` |
 | `job_id` | 文字列か `null` | 必須（値は `null` を許す） | `^[A-Za-z0-9_-]{1,128}$`。`github`・`api` は `null` |
@@ -146,38 +146,71 @@ graph TD
 
 | 種類 | 鍵（型。任意のものは「任意」） |
 | --- | --- |
-| `job.started` | `ndf_version`（文字列）、`start`（`new` / `resume`） |
-| `phase.changed` | `phase`（文字列。フェーズの名前の集合は #2172 が決めるため列挙にしない）、`issues`（1 以上の整数の並び） |
-| `step.recorded` | `step`（文字列）、`exit_code`（整数）、`seconds`（0 以上の数）、`summary`（文字列）、`pull_request`（任意。`repo`（`owner/name`）・`number`（1 以上の整数）） |
+| `job.started` | `ndf_version`（文字列）、`start`（`new` / `resume` / `loop`） |
+| `phase.changed` | `phase`（1 字以上の文字列。5 つの名前は `src/phases.ts` の列挙が正で、定義では列挙で縛らない）、`issues`（1 以上の整数の並び） |
+| `step.recorded` | `step`（文字列）、`exit_code`（整数）、`seconds`（0 以上の数）、`summary`（文字列）、`pull_request`（任意。`repo`（`owner/name`）・`number`（1 以上の整数））。工程の中身はどれも任意: `phase`（1 字以上の文字列）、`issues`（1 以上の整数の並び、最大 50）、`files`（`path`（1〜512 字）・`added`・`deleted`（0 以上の整数か、バイナリなら `null`）の並び、最大 100）、`files_omitted`（0 以上の整数）、`commit_range`（`from`・`to`。どちらも 40 桁の 16 進）、`decisions`（`question`・`answer`（1〜1,000 字）・`by`（`ai` / `user`）の並び、最大 20）、`output`（`kind`（`report` / `log`）・`text`（32,768 字以下）・`truncated`（真偽）） |
 | `attention` | `reason`（文字列）、`summary`（文字列） |
-| `gate.reached` | `kind`（`gate1` / `gate2` / `decision`）、`pr_url`（URI か `null`）、`material`（文字列。承認資料の本文） |
+| `gate.reached` | `kind`（`gate1` / `gate2` / `decision`）、`pr_url`（URI か `null`）、`material`（文字列。承認資料の本文）、`loop`（任意。開発ループの実行のとき `name`（ループの名前）・`lap`（1 以上の整数）） |
 | `gate.answered` | `approval_request_id`（文字列）、`kind`（`gate1` / `gate2` / `decision`）、`decision`（`approved` / `rejected`。`kind` が `decision` のときは持たず、ほかでは必須）、`answered_by_account_id`（文字列。#2170 の解決の結果の `accountId`）。本文は持たない |
 | `usage.recorded` | `model`（文字列）、`input_tokens`・`output_tokens`（0 以上の整数）、`cost_usd`（0 以上の数）、`step`（文字列） |
 | `decision.delegated` | `question`・`answer`・`reason`（どれも 1〜4,000 字の文字列）、`category`（文字列か `null`。hook が止めたときの `metadata.source`） |
-| `job.finished` | `result`（`gate` / `stopped` / `done` / `failed`）、`summary`（文字列） |
+| `job.finished` | `result`（`gate` / `stopped` / `done` / `failed`）、`summary`（文字列）、`reason`（任意。`stopped` の理由の `section_limit`（区間の上限）/ `usage_limit`（`local` の利用上限））、`resets_at`（任意。`usage_limit` のときだけ。リセット時刻か `null`） |
 | `pr.updated` | `repo`（`owner/name`）、`number`（1 以上の整数）、`state`（`open` / `closed` / `merged`） |
 | `ci.updated` | `repo`（`owner/name`）、`pr_number`（1 以上の整数）、`name`（文字列）、`conclusion`（文字列か `null`。`null` は「まだ終わっていない」） |
 | `issue.requested` | `repo`（`owner/name`。起票先）、`title`（1〜256 字。GitHub の題の上限）、`body`（1〜50,000 字。4 バイトの文字だけでも 256 KiB に収まる長さ）。ラベルと相手の課題の番号は相手先の流儀に属するため持たない |
+| `section.started`・`loop.lap_closed`・`loop.stopped` | #2347 が足した区間の起動・周回の締め・ループの止まる条件。鍵は [開発ループの確定仕様の「進捗の事象」](ndf-factory-dev-loops-data-and-contracts.md#進捗の事象progress-eventschemajson) にある |
 | `issue.request_resolved` | `request_key`（依頼の冪等の鍵）、`outcome`（`filed` / `drafted`）、`issue`（`filed` のときだけ必須で `drafted` では持たない。`repo`（`owner/name`）・`number`（1 以上の整数）・`url`（URI））、`reason`（`drafted` のときだけ必須。[起票の依頼と起票の代行](ndf-factory-issue-requests.md) の理由の表のどれか）、`duplicate_of`（同じ中身の最初の依頼の鍵か `null`） |
 
 **大きさの上限は 256 KiB（262,144 バイト、`MAX_EVENT_BYTES`）で、定義の外で見る。** `runner`・`api` の経路は要求の本文の UTF-8 のバイト数、`github` の経路と `appendControlEvent` は作った事象を JSON にしたバイト数で見る。JSON Schema の `maxLength` は字の数でバイトを数えられないためである。
 
+### スプリントの一覧と詳細の読み出し
+
+一覧・詳細・工程の中身・バックログは、進捗の事象の列とスプリントの実行の行から読み出しのたびに導く派生で、表に保存しない。派生は課題の本文・ボード・GitHub の API を読まない（バックログの順位の表だけは GitHub の口の `findRankingTable` で読む）。派生の関数は `factory/api/src/views/derive.ts`、経路は `factory/api/src/routes/sprint-views.ts`、形は `factory/contracts/openapi/runs.yaml` にある。
+
+**フェーズの名前は `設計`・`実装`・`検査`・`取り込み`・`仕上げ` の 5 つで、`factory/contracts/src/phases.ts` の列挙が正である。** 定義（`progress-event.schema.json`）では `phase` を文字列のまま受け、列挙で縛らない。NDF の版がフェーズを足しても事象を 400 にせず残すためで、画面は 5 つに無い名前を「その他（<名前>）」と出す。画面も同じ列挙を `@ndf-factory/contracts/phases`（依存を持たない入口）から読む。ランナーの翻訳は NDF のプランの JSON の `"フェーズ"` の値を次のとおり写す。プランの JSON が読めない・表に無い値は計画の名前の断片（`5-impl-2172` なら `impl`）を送る。
+
+| プランの `"フェーズ"` | 写すフェーズの名前 |
+| --- | --- |
+| `設計`・`実装`・`検査` | 同じ名前 |
+| `配布（開発版）` | `取り込み` |
+| `配布（本番）`・`まとめ` | `仕上げ` |
+
+**ランナーは `step.recorded` に工程の中身を任意の項目として添える（`schema_version` は 1 のまま）。** 項目は `phase`（プランの `"フェーズ"` を写した名前）・`issues`（計画の名前の課題の番号。スプリントで 1 つの計画は持たない）・`files`（その工程の時間の窓 `at − seconds` 〜 `at` に作業場所の git で作られたコミットが触ったファイルと増減の行数。最大 100 件で、外した数を `files_omitted`）・`commit_range`（窓の最初のコミットの親と最後のコミット）・`decisions`（判断の台帳の `decision` の行のうち、`cwd` が作業場所の下で `at` が窓の中のもの。最大 20 件）・`output`（ステップの出力。`work` のステップは作業の報告、`run` のステップはログ。UTF-8 で 32 KiB まで）である。集められない項目は省き、工程の送信は止めない。`output.text`・`decisions` の文・`files` のパスは、送る前に NDF の `secret_redact.py` の 4 つの形の規則と、ランナーが持つ秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールの資格）の置き換えで伏せる。事象 1 件が 256 KiB を超えるときは `output.text` → `files` → `decisions` の順に削り、それでも超えれば工程の中身をすべて外す。同じステップの行から作る `step.recorded` と `usage.recorded` は同じ `at` で送る。
+
+| 派生の値 | 導き方 |
+| --- | --- |
+| 一覧の今のフェーズ | その実行の最後の `phase.changed`（`order_key` の順）の `phase`。0 件なら `null`（画面は「始まる前」） |
+| 工程のフェーズ | `step.recorded` の `phase`。無ければ同じ実行ジョブの直前の `phase.changed` の `phase` |
+| 課題の欄 | `step.recorded` の `issues` の課題ごとに 1 回ずつ。`issues` が無いか空なら「スプリント全体」の欄 |
+| 課題の欄の Pull Request | 欄の工程の `pull_request` を重複なく。状態は最後の `pr.updated`（無ければ `unknown`）、チェックは名前ごとの最後の `ci.updated` の結論（`null` は実行中） |
+| 工程の費用 | 同じ `job_id`・`payload.step`・`at` の `usage.recorded` の `cost_usd` の和。無ければ `null` |
+| 承認の欄 | ゲート 1・ゲート 2・判断の 3 つ。その種類の最後の `gate.reached` で待ちになり、その後の同じ種類の `gate.answered` で承認・差し戻し（判断は答えた）になる。`gate.reached` の前の答えは状態を変えない |
+| 仕上げの欄 | 振り返り（`step` が `retro`）と棚卸し（`refine`）の行を常に持ち、記録が無ければ「まだ」 |
+| 詳細の件数の上限 | `step.recorded` は新しい方から 2,000 件までで、省いた数を `omitted_steps` に返す。ほかの種類はすべて読み、承認の欄と使用量の和から欠かさない |
+| バックログの棚卸しの記録 | そのリポジトリの実行（新しい順に 50 件まで）の、`step` が `refine` の `step.recorded` を新しい順に |
+
+詳細の応答は工程の中身の本文を持たず（`has_details` で有無だけを示す）、画面は工程を押したときに工程の中身の経路で 1 件ずつ読む。一覧・詳細・工程の中身・バックログは、他人のアカウント・無いアカウント・アカウントに属さない実行・無い実行・無い工程・登録の無いリポジトリのどれでも、同じ本文の 403 を返す。読み出しは事象の表・実行の表・GitHub へ書かない。画面は一覧と詳細を開いている間、画面の設定の間隔（環境変数 `FACTORY_POLL_INTERVAL_MS`、既定 30 秒）で読み直し、押し出しの通知は使わない。
+
 ### 実行ジョブの指示の定義
 
-`factory/contracts/schemas/run-job-instruction.schema.json`。全体の契約の「実行ジョブの指示」の 11 の入力を、環境変数の名前のまま `properties` に置く。値はどれも文字列で（環境変数と、#2189 の受け取りの応答で同じ形にするため）、`additionalProperties: false`。生成した型は `RunJobInstruction`。
+`factory/contracts/schemas/run-job-instruction.schema.json`。全体の契約の「実行ジョブの指示」の 11 の入力と、#2347 が足した開発ループの 5 つの入力（下の表の後ろの 5 行）を、環境変数の名前のまま `properties` に置く。値はどれも文字列で（環境変数と、#2189 の受け取りの応答で同じ形にするため）、`additionalProperties: false`。生成した型は `RunJobInstruction`。
 
 | 入力 | 規則 |
 | --- | --- |
 | `SPRINT_RUN_ID`・`JOB_ID` | 必須。事象の共通の列と同じ形 |
 | `REPO` | 必須。`owner/name` の形 |
 | `NDF_VERSION` | 必須。1 字以上 |
-| `START` | 必須。`new` / `resume` |
-| `ISSUES` | `START` が `new` のとき必須。`^[1-9][0-9]*(,[1-9][0-9]*)*$`（カンマで区切った番号） |
-| `APPROVAL_REQUEST_ID` | `START` が `resume` のとき必須。1 字以上 |
+| `START` | 必須。`new` / `resume` / `loop` |
+| `ISSUES` | `START` が `new` のとき必須、`loop` のとき持たない。`^[1-9][0-9]*(,[1-9][0-9]*)*$`（カンマで区切った番号） |
+| `APPROVAL_REQUEST_ID` | 任意。1 字以上。`resume` で答えの出た承認の依頼を指す。無い `resume` は答えを書かずに続ける（利用上限の後の再開。#2347 の決定 7） |
 | `INGEST_URL` | 必須。`format: uri`。`runner` の経路（`POST /ingest/events`）の URL そのもの |
 | `INGEST_TOKEN_SECRET_ARN` | 必須。`^arn:aws[a-z-]*:secretsmanager:` |
 | `EXECUTION_MODE` | 必須。`local` / `byok` / `managed` |
 | `MODEL_CREDENTIAL_SECRET_ARN` | `EXECUTION_MODE` が `byok` のとき必須、`local`・`managed` のとき持たない。形は `INGEST_TOKEN_SECRET_ARN` と同じ |
+| `LOOP_NAME`・`LOOP_MILESTONES` | `START` が `loop` のとき必須。ほかの開発ループの入力があれば `LOOP_NAME` も必須 |
+| `LOOP_BUDGET` | 任意。宣言した予算（`laps=`・`usd=`・`hours=`）だけをカンマで並べる |
+| `EXCLUDE_ISSUES` | 任意。選定から外す課題の番号（ランナーが NDF の `NDF_LOOP_EXCLUDE` へ渡す） |
+| `LOOP_ANSWERS` | 任意。人の判断待ちの課題への答え |
 
 必須の違いは `allOf` の中の `if`/`then` で書く。生成した型は条件を表せず任意の鍵になるため、条件は `validateRunJobInstruction` で縛る。
 
@@ -329,6 +362,22 @@ sequenceDiagram
 - **`SavedAnswerReader` は `(approvalRequestId) => Promise<SavedAnswer | null>` である。** `SavedAnswer` は `{ approvalRequestId; sprintRunId; kind; decision?; answeredByAccountId }` で、`decision` は判断（`kind` が `decision`）では持たない。`null` は未保存、読めないときは投げる（受け口が 503 にする）
 - **handler は `savedAnswers` に `saved-answers.ts` の `savedAnswersFromEnv()` を渡す。** 今は常に `SavedAnswersUnavailableError` を投げる既定で、`api` の経路は 503 を返す。#2173 が同じファイルの中身を本物の読み出しに替え、受け口のほかのファイルは変えずに済む
 
+### 利用者向けの操作の形
+
+画面・委任を受けたエージェント・MCP のクライアントが呼ぶ利用者向けの操作（契約の操作に `x-ndf-access` を持つもの）は、どれも次の形で受け渡す。形の正は `factory/contracts/openapi/*.yaml` の拡張（`x-ndf-access`・`x-ndf-keys`・`x-ndf-id`）と、そこから生成する操作の表 `factory/contracts/src/generated/operations.ts`（`npm run generate -w contracts -- --check` で食い違いを落とす）である。ランナー向けの経路（`/run-jobs/*`）と進捗の受け口（`/ingest/*`）はこの形に入らない。
+
+| 種類 | メソッド | 入力 | 成功 |
+| --- | --- | --- | --- |
+| 一覧 | `GET` | 条件の query | 200 と値の配列（要素の結果で包まない） |
+| 指定の取得・削除 | `GET`・`DELETE` | 鍵の query を繰り返す（`?sprint_run_id=a&sprint_run_id=b`）。鍵を持たない操作は query 無しで要素 1 個 | 200 と要素の結果の配列 |
+| 作成・更新・操作 | `POST`・`PATCH`・`PUT` | 本文の要素の配列（1 件でも要素 1 個の配列） | 200 と要素の結果の配列 |
+
+- **経路の変数はアカウントの ID だけ**である。実行・ループ・リポジトリなどの識別子は鍵の query か要素の項目で渡し、要素ごとにそのアカウントに属するかを照らす
+- **要素の結果**は入力と同じ順・同じ数で、成功は `{ok: true, value}`、失敗は `{ok: false, status, error: {code, message, details?}}` である。失敗の `status` と `code` は、各操作の確定仕様の表にある誤りのまま（400・403・404・409・422・503）。要素がすべて失敗しても応答は 200 である
+- **要求全体を断るのは次だけ**である。本文が配列でない（400 `invalid_request`）・要素が 0 個（400 `empty_items`）・101 個以上（400 `too_many_items`）・同じ鍵の要素が 2 つ（400 `duplicate_key`）・資格情報が無効（401）・経路のアカウントを解決できない（403 `forbidden`）・委任の資格情報で人だけが確定できる操作を呼んだ（403 `human_only`）・読み取りだけの委任で書き込みの操作を呼んだ（403 `scope_insufficient`）・操作の記録を追記できない（503 `audit_unavailable`）
+- **新しい識別子を作る作成**（スプリントの実行・開発ループ・チーム・委任の資格情報）は、要素ごとに冪等の鍵 `idempotency_key`（1〜64 字の英数字とハイフン）を受ける。同じ利用者・同じ操作・同じ鍵の 24 時間以内の 2 回目は、1 回目に作ったものを返す
+- 画面の API クライアント（`factory/web/src/api.ts`）は要求を操作の表から組み、要素の結果をほどいて 1 件の値か `ApiFailure` を返す
+
 ### 常に成り立つ条件
 
 I10 は全体の契約のもの。#2170 の I24 に続けて番号を振る。I37 は #2186 が #2216 の照合として足し、I44・I45・I50 は #2216 が足した（I32〜I36・I38〜I43 は #2186 のほかの集約の条件、I46〜I49 は [起票の依頼と起票の代行](ndf-factory-issue-requests.md) の台帳の条件）。
@@ -412,8 +461,8 @@ graph TD
 
 | 観点 | 縛る振る舞い |
 | --- | --- |
-| 実行ジョブの指示の定義 | 入力の名前の集合が全体の契約の 11 項目と等しいこと。`START` が `new` で `ISSUES` が無い・`resume` で `APPROVAL_REQUEST_ID` が無い・`byok` で `MODEL_CREDENTIAL_SECRET_ARN` が無い・`local`・`managed` にそれがある・知らない入力・番号でない `ISSUES` がそれぞれ落ちること |
-| 進捗の事象の定義（I29） | 種類の集合が全体の契約の 13 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること。`issue.requested` の題が 257 字・本文が空・余分な鍵で落ちること。`issue.request_resolved` が `filed` で `issue` だけを、`drafted` で `reason` だけを持てること |
+| 実行ジョブの指示の定義 | 入力の名前の集合が全体の契約の 11 項目と開発ループの 5 項目と等しいこと。`APPROVAL_REQUEST_ID` の無い `resume` が通ること。`START` が `new` で `ISSUES` が無い・`byok` で `MODEL_CREDENTIAL_SECRET_ARN` が無い・`local`・`managed` にそれがある・知らない入力・番号でない `ISSUES` がそれぞれ落ちること |
+| 進捗の事象の定義（I29） | 種類の集合が全体の契約の 13 種類と #2347 の 3 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること。`issue.requested` の題が 257 字・本文が空・余分な鍵で落ちること。`issue.request_resolved` が `filed` で `issue` だけを、`drafted` で `reason` だけを持てること |
 | 型のずれと応答の定義 | コミットした型が定義から作り直した型と一致し、定義に項目を足して作り直さないと食い違うこと。202 と 4 つのエラーの本文が応答の定義に合い、ほかは合わないこと |
 | OpenAPI | `npm run lint:contracts` が `ingest.yaml` を含めて 0 で終わること（`$ref` の参照切れは Spectral の `invalid-ref` で落ちる） |
 | `runner` の認証 | token が無い・`Bearer` でない・形が違う・署名が合わない・期限切れ・知らない鍵がどれも 401 で、保存 0 件、本文が同じであること |
@@ -438,7 +487,7 @@ graph TD
 - 課題: [#2171](https://github.com/devbasex/ai-plugins/issues/2171)（要求と受け入れ条件の正本）、親の [#2168](https://github.com/devbasex/ai-plugins/issues/2168)、照合と起票の依頼の [#2216](https://github.com/devbasex/ai-plugins/issues/2216)（設計 Pull Request [#2233](https://github.com/devbasex/ai-plugins/pull/2233)）、相手先の流儀の判定の [#2239](https://github.com/devbasex/ai-plugins/issues/2239)
 - 設計 Pull Request: [#2201](https://github.com/devbasex/ai-plugins/pull/2201)、実装: [#2207](https://github.com/devbasex/ai-plugins/pull/2207)・[#2209](https://github.com/devbasex/ai-plugins/pull/2209)
 - サービス全体の契約: [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md)
-- 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 認証とアカウント・席・料金プランの使える量: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
 - サービスのディレクトリとパッケージの管理: [factory/README.md](../../factory/README.md)
 - 受け口の契約: [factory/contracts/openapi/ingest.yaml](../../factory/contracts/openapi/ingest.yaml)、定義: [factory/contracts/schemas/](../../factory/contracts/schemas/)
 - 用語: [用語集](../glossary.md)

@@ -107,6 +107,16 @@ describe("runner の照合（受け入れ条件 5・6・7、I26・I27）", () =>
     expect(res.status).toBe(202);
     expect(t.store.events).toHaveLength(1);
   });
+
+  it.each([
+    ["section.started", { section: 1, command: "/ndf:loop" }],
+    ["loop.lap_closed", { loop: "main", lap: 1, issues: [1], result: "完了", version: null, cost_usd: 0, seconds: 0, pending: [] }],
+    ["loop.stopped", { loop: "main", condition: "budget_usd", detail: "{}", pending: [] }],
+  ])("%s は runner から書けて残る（#2347）", async (type, payload) => {
+    const res = await t.runner(runnerEvent({ type, payload }));
+    expect(res.status).toBe(202);
+    expect(t.store.events).toHaveLength(1);
+  });
 });
 
 describe("api の認証と照合（受け入れ条件 8・9・10、I28）", () => {

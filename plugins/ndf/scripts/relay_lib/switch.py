@@ -16,6 +16,7 @@ import threading
 import time
 
 from . import claude as cl
+from . import pin
 from .common import LIMIT_FILE, QUESTION_FILE, load_json, parse_iso, remove, stamp
 from .mark import asked_after
 
@@ -32,6 +33,7 @@ REASON_UNUSABLE = "unusable"  # 今のアカウントが使えない
 REASON_RECOVERED = "recovered"  # 従量の接続からアカウントへ戻す
 REASON_LIMITED = "limited"  # すべて上限で従量の接続へ
 REASON_AUTH = "auth"  # 認証が通らなかった
+REASON_PINNED = "pinned"  # `account use` で指定したアカウントへ（#2460）
 
 
 _RECOVERED, _LIMIT = object(), object()  # 理由の文字列と重ならない表の鍵
@@ -54,6 +56,10 @@ def _msg_auth(sw, prev, to, reason) -> tuple[str, dict]:
     return f"認証が通らなかったため、アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替えて続ける", {}
 
 
+def _msg_pinned(sw, prev, to, reason) -> tuple[str, dict]:
+    return f"指定に従い、アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える", {}
+
+
 def _msg_default(sw, prev, to, reason) -> tuple[str, dict]:
     return f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える", {}
 
@@ -64,6 +70,7 @@ _SWITCH_MESSAGES = {
     REASON_THRESHOLD: _msg_threshold,
     _LIMIT: _msg_limit,
     REASON_AUTH: _msg_auth,
+    REASON_PINNED: _msg_pinned,
 }
 
 
@@ -145,8 +152,8 @@ class UsageWatch:
             else:
                 self.recover = None
             return
-        if not cur or thr >= 100 or self.due is not None:
-            return
+        if not cur or thr >= 100 or self.due is not None or pin.pinned() == cur:
+            return  # 指定したアカウントは閾値で替えない（#2460）
         u = ca.usage(cur, False)  # 動いているセッションのトークンは claude が更新する（#1576 の I8）
         score = u.score() if u else None
         if score is not None and score >= thr:
@@ -162,14 +169,32 @@ class AccountSwitch:
         """次の区間のアカウントを決める。(名前か `metered` か None, 理由, 選んだ結果)。
 
         `kind` は上限の種類（上限の後。None が返れば切り替えずに子を残す）か None（区間の起動。None は今と同じ環境）。
-        区間の起動では、今のアカウントが使えて閾値未満なら替えない（使用率の小さな差で区間ごとに行き来しない）。"""
+        区間の起動では、`account use` の指定が使えればそれを、無ければ今のアカウントが使えて閾値未満なら替えない
+        （使用率の小さな差で区間ごとに行き来しない）。"""
         cur, thr = self.account, ca.switch_at()
         declared = bool(ca.fallback_env(self.env))
         if kind is not None:
             return self._pick_after_limit(kind, cur, declared)
+        pinned = self._pick_pinned(cur)
+        if pinned is not None:
+            return pinned
         if cur == ca.METERED:
             return self._pick_from_metered(thr)
         return self._pick_for_section(cur, thr, declared)
+
+    def _pick_pinned(self, cur: str | None) -> tuple[str | None, str | None, ca.Choice | None] | None:
+        """区間の起動で、`account use` の指定が使えればそれを選ぶ（閾値と残りの量に依らない）。使えなければ None
+        （今の選び方へ。指定は外さない。#2460）。指定は区間の起動のたびにファイルから読む。"""
+        p = pin.pinned()
+        if p is None:
+            return None
+        if p == cur:
+            return (cur, None, None) if self._current_standing(cur)[0] else None
+        ca.usage(p, p not in self.keep())
+        acc, now = ca.load_account(p), time.time()
+        if acc is None or acc.needs_relogin or acc.auth_held(now) or acc.limited_until(now) is not None or not ca.usable(p, now):
+            return None
+        return p, REASON_PINNED, ca.Choice(p, acc.score(), None, acc.remaining())
 
     def _pick_for_section(self, cur: str | None, thr: float, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
         """区間の起動で、今のアカウント（か既定のログイン）から次を選ぶ。"""
@@ -195,7 +220,9 @@ class AccountSwitch:
         登録が 1 つ以下なら今のアカウントを引き継ぐ（#1727 の I7）。"""
         if plan:
             return plan
-        return self.pick(None) if self.multi else (prev, None, None)
+        if self.multi:
+            return self.pick(None)
+        return self._pick_pinned(prev) or (prev, None, None)
 
     def stop_accounts(self) -> None:
         """ラッパーの終了時: 定期の確認を止め、今のアカウントの .claude.json の共有する部分を書き戻す（E12）。"""
@@ -289,7 +316,7 @@ class AccountSwitch:
     def _switch_message(self, prev: str | None, to: str, reason: str | None) -> tuple[str, dict]:
         """2 つ目以降の区間でアカウントを替えたときの (画面の 1 行, 記録の行へ足す項目)。理由ごとに決まる。"""
         # 従量の接続から戻すときは理由に依らず先に効く。上限の種類はどれも同じ文にまとめる
-        key = _RECOVERED if prev == ca.METERED else _LIMIT if reason in cu.KINDS else reason
+        key = REASON_PINNED if reason == REASON_PINNED else _RECOVERED if prev == ca.METERED else _LIMIT if reason in cu.KINDS else reason
         return _SWITCH_MESSAGES.get(key, _msg_default)(self, prev, to, reason)
 
     @staticmethod

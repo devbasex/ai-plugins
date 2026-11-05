@@ -12,6 +12,7 @@ import type {
   StepRecordedEvent,
   UsageRecordedEvent,
 } from "@ndf-factory/contracts";
+import type { PhaseName } from "@ndf-factory/contracts/phases";
 
 export interface JobIdentity {
   sprintRunId: string;
@@ -52,6 +53,22 @@ export function phaseOf(planName: string): { phase: string; issues: number[] } {
   return { phase, issues };
 }
 
+// プランの JSON の "フェーズ" の値からフェーズの名前への写し（#2172 の決定 1）。まとめ（pace: fast / auto の close）は振り返りと棚卸しを持つため仕上げ
+const PLAN_PHASES: Readonly<Record<string, PhaseName>> = {
+  設計: "設計",
+  実装: "実装",
+  検査: "検査",
+  "配布（開発版）": "取り込み",
+  "配布（本番）": "仕上げ",
+  まとめ: "仕上げ",
+};
+
+// フェーズの名前。プランの JSON が読めない（null）・表に無い値は、計画の名前の断片をそのまま返す（画面は「その他」と出す）
+export function phaseNameOf(planName: string, planPhase: string | null): string {
+  if (planPhase !== null && Object.hasOwn(PLAN_PHASES, planPhase)) return PLAN_PHASES[planPhase]!;
+  return phaseOf(planName).phase;
+}
+
 // summary が JSON の文字列なら summary の値を使う
 function summaryOf(raw: unknown): string {
   if (typeof raw !== "string") return "";
@@ -66,8 +83,16 @@ function summaryOf(raw: unknown): string {
 
 type Line = Record<string, unknown>;
 
-// progress.jsonl の 1 行から事象の本体（common を除く）を作る。扱わない行は null
-export function translateProgressLine(line: Line, repo: string): Pick<StepRecordedEvent, "type" | "payload"> | Pick<AttentionEvent, "type" | "payload"> | null {
+// 工程の中身（#2172）。どれも任意で、集められなかった項目は持たない
+export type StepDetails = Pick<StepRecordedEvent["payload"], "phase" | "issues" | "files" | "files_omitted" | "commit_range" | "decisions" | "output">;
+
+// progress.jsonl の 1 行から事象の本体（common を除く）を作る。扱わない行は null。
+// step の行には工程の中身を添え、事象 1 件の上限に収める
+export function translateProgressLine(
+  line: Line,
+  repo: string,
+  details: StepDetails = {},
+): Pick<StepRecordedEvent, "type" | "payload"> | Pick<AttentionEvent, "type" | "payload"> | null {
   if (line.kind === "step" && typeof line.step === "string") {
     const summary = summaryOf(line.summary);
     const payload: StepRecordedEvent["payload"] = {
@@ -79,18 +104,22 @@ export function translateProgressLine(line: Line, repo: string): Pick<StepRecord
     // supervise は pr のステップの URL を step 行の pr へ書く（summary は末尾の要約で切れる）
     const pr = findPullRequest([line.pr, line.summary, line.report].map((v) => String(v ?? "")).join("\n"), repo);
     if (pr) payload.pull_request = pr;
-    return { type: "step.recorded", payload };
+    Object.assign(payload, Object.fromEntries(Object.entries(details).filter(([, v]) => v !== undefined)));
+    return { type: "step.recorded", payload: fitStep(payload) };
   }
   if (line.kind === "attention") {
-    const reason = typeof line.reason === "string" && line.reason !== "" ? line.reason : "attention";
+    // 取り込み（base-sync）で解けずに止まった行は Factory の語 base_conflict へ写す（#2347 の決定 10）。ほかの行の理由は変えない
+    const reason =
+      line.step === "base-sync" ? "base_conflict" : typeof line.reason === "string" && line.reason !== "" ? line.reason : "attention";
     const summary = typeof line.text === "string" ? line.text : typeof line.summary === "string" ? line.summary : "";
     return { type: "attention", payload: { reason, summary } };
   }
   return null;
 }
 
-export function phaseChanged(planName: string): Pick<PhaseChangedEvent, "type" | "payload"> {
-  return { type: "phase.changed", payload: phaseOf(planName) };
+// planPhase はプランの JSON の "フェーズ" の値（読めなければ null）
+export function phaseChanged(planName: string, planPhase: string | null = null): Pick<PhaseChangedEvent, "type" | "payload"> {
+  return { type: "phase.changed", payload: { phase: phaseNameOf(planName, planPhase), issues: phaseOf(planName).issues } };
 }
 
 // claude の stream-json の result の modelUsage から、モデルごとに 1 件（#2170 の数え方: cache の読み書きを入力に足す）
@@ -174,6 +203,40 @@ export function truncateGate(event: GateReachedEvent): GateReachedEvent {
     else hi = mid - 1;
   }
   return build(lo);
+}
+
+// 共通の列（common）に見込む大きさ。step.recorded の本体はこれを除いた分に収める
+const COMMON_BUDGET = 1024;
+
+// UTF-8 で max バイト以下になるよう、文字の境目で切る
+export function cutUtf8(text: string, max: number): { text: string; cut: boolean } {
+  if (Buffer.byteLength(text, "utf8") <= max) return { text, cut: false };
+  let out = Buffer.from(text, "utf8").subarray(0, max).toString("utf8");
+  // 途中で切れた文字は U+FFFD になるため落とす
+  while (out.endsWith("\uFFFD") || Buffer.byteLength(out, "utf8") > max) out = out.slice(0, -1);
+  return { text: out, cut: true };
+}
+
+// 事象 1 件の上限（256 KiB）を超える step.recorded を output.text → files → decisions の順に削る（I2）。
+// 削っても超えるなら工程の中身をすべて外す（足す前の形に戻る）
+export function fitStep(payload: StepRecordedEvent["payload"]): StepRecordedEvent["payload"] {
+  const limit = MAX_EVENT_BYTES - COMMON_BUDGET;
+  const size = (p: StepRecordedEvent["payload"]) => bytes({ type: "step.recorded", payload: p });
+  if (size(payload) <= limit) return payload;
+  let p: StepRecordedEvent["payload"] = { ...payload };
+  if (p.output) {
+    const over = size(p) - limit;
+    const keep = Math.max(0, Buffer.byteLength(p.output.text, "utf8") - over);
+    p = { ...p, output: { ...p.output, text: cutUtf8(p.output.text, keep).text, truncated: true } };
+  }
+  while (size(p) > limit && p.files && p.files.length > 0) {
+    const drop = Math.max(1, Math.ceil(p.files.length / 2));
+    p = { ...p, files: p.files.slice(0, p.files.length - drop), files_omitted: (p.files_omitted ?? 0) + drop };
+  }
+  while (size(p) > limit && p.decisions && p.decisions.length > 0) p = { ...p, decisions: p.decisions.slice(0, -1) };
+  if (size(p) <= limit) return p;
+  const { step, exit_code, seconds, summary, pull_request } = payload;
+  return { step, exit_code, seconds, summary, ...(pull_request ? { pull_request } : {}) };
 }
 
 // #2206 の代わりの判断の記録（1 行 1 件）から decision.delegated を作る。形が違う行は送らない。

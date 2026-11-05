@@ -125,6 +125,9 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 | 上限（`--timeout`、既定 10800 秒）に達した | 3 | 流れているプランの `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
 
 - 出力は要約の 1 行と結果の JSON の 1 行だけである
+- 開発ループでは `loop sprint` の `metrics.research`（`upkeep.py research run --until <done> ...`）も `wait` と並べて背景で起動する。
+  並列の上限に空きがあるときだけ調査の項目を 1 つずつ調べ、done が出たら新しい項目を始めずに終わる。結果を待たない
+  （`backlog-refinement` の `references/research.md`）
 - キューは始めに流すプランの一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
   wait はそれを読む。知らせた `attention` の続きは `<done>.wait.json` に残る
 

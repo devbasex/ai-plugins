@@ -45,7 +45,7 @@ Pull Request の本文には GitHub がマージで課題を閉じる closing ke
 | `plugins/ndf/scripts/lib/closing-issues.sh` | シェルの読み手。閉じる予定の参照も取り出す。出力の形（`<リポジトリ>\t<番号>`）は変わらない |
 | `plugins/ndf/scripts/lib/repo.py` | `merge_closes_issues(root, base)`（宛先のマージで GitHub が閉じるか）と `defer_for_base(root, base, text)`（当たるときだけ `defer_closing` に通す） |
 | `plugins/ndf/scripts/pr-steps.py`・`plugins/ndf/scripts/supervise_lib/pr.py` | 本文を送る前に `defer_for_base` を通す |
-| `plugins/ndf/scripts/supervise_lib/sprint.py`・`sprint_close_steps.py`・`release_templates.py` | まとめのプランを `merge →（release-verify）→ retro → close → refine` の順に組む |
+| `plugins/ndf/scripts/supervise_lib/sprint.py`・`sprint_close_steps.py`・`release_templates.py` | まとめのプランを `merge →（release-verify）→ retro → close → refine` の順に組む（`refine` の後ろに深さの記録と、起動するときだけの大整理・見直しが続く。#2315） |
 
 ```mermaid
 graph LR

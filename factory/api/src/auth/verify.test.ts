@@ -37,7 +37,7 @@ describe("token の検証（受け入れ条件 4）", () => {
   it("正しい token は通り、IdP を username の頭から決める", async () => {
     const res = await api.call("GET", "/me", { user: "u-2", idp: "GitHub" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ user_id: "u-2", idp: "github" });
+    expect((await res.json())[0]).toMatchObject({ user_id: "u-2", idp: "github" });
   });
 
   it("ログには利用者の ID・経路・状態コードだけを出し、token を出さない", async () => {
@@ -45,6 +45,6 @@ describe("token の検証（受け入れ条件 4）", () => {
     await api.call("GET", "/me", { authorization: auth });
     const text = JSON.stringify(api.logs);
     expect(text).not.toContain(auth.slice("Bearer ".length));
-    expect(api.logs.at(-1)).toEqual({ user_id: "u-3", method: "GET", path: "/me", status: 200 });
+    expect(api.logs.at(-1)).toEqual({ request_id: expect.any(String), user_id: "u-3", method: "GET", path: "/me", status: 200 });
   });
 });

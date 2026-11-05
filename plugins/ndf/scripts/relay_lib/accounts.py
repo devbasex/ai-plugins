@@ -1,4 +1,5 @@
-"""`relay.py account`: 切り替えに使う claude アカウントと従量の接続の登録・一覧・確かめ・枠の大きさの宣言・削除（#1389・#1453・#1468）。
+"""`relay.py account`: 切り替えに使う claude アカウントと従量の接続の登録・一覧・確かめ・枠の大きさの宣言・削除と、
+次の区間から使うアカウントの指定（#1389・#1453・#1468・#2460）。
 
 置き場を書くのは `lib/claude_accounts.py` である。ここは副命令の入口（引数の読み取り・登録の途中の状態の掃除・
 結果を文か JSON で出す）と、`list`・`remove`・`capacity`・`check` の中身を持つ（推論は呼ばない）。OAuth の登録は
@@ -16,7 +17,7 @@ import os
 import sys
 
 from . import bedrock as bd
-from . import login
+from . import login, pin
 from .ask import Asker, Fail, MissingArgs
 from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
 from .login import owner_of  # noqa: F401  公開の名前（テストが使う）
@@ -25,7 +26,8 @@ import claude_accounts as ca  # noqa: E402,I001
 
 USAGE = (
     "usage: relay.py account add [<名前>] [--code <コード>|-] | add-bedrock [--profile <名前>] [--region <地域>] [--model <ID>]"
-    " | check metered | list | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>|metered  （共通: [--yes] [--json]）"
+    " | check metered | list | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>|metered | use <名前>|--clear"
+    "  （共通: [--yes] [--json]）"
 )
 AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
 
@@ -112,11 +114,12 @@ def _metered_label(m: dict) -> str:
 
 def _list_rows() -> dict:
     try:
-        rows = [{**r, "kind": "oauth"} for r in ca.rows()]
+        pinned = pin.pinned()
+        rows = [{**r, "kind": "oauth", "pinned": r["name"] == pinned} for r in ca.rows()]
     except OSError as e:
         raise Fail("write_failed", f"置き場を読めない（{e}）") from e
     m = _metered_row()
-    rows += [m] if m else []
+    rows += [m] if m else []  # 従量の接続は指定できないので `pinned` を持たない
     if not rows:
         return {"rows": rows, "text": "登録済みのアカウントは無い"}
     return {"rows": rows, "text": "\n".join(_table_lines(rows))}
@@ -135,7 +138,7 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
     # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
     ident = f"{r['email']}（{_org_label(r)}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
     return (
-        r["name"],
+        r["name"] + ("（指定）" if r.get("pinned") else ""),
         ident,
         _window(r["five_hour"]),
         _window(r["seven_day"]),
@@ -207,6 +210,27 @@ def _remove(asker: Asker, name: str | None) -> dict:
         print("claude auth logout が通らなかった（登録は外す）", file=sys.stderr)
     ca.unregister(name)
     return {"name": name, "text": f"外した: {name}"}
+
+
+def _use(asker: Asker, name: str | None, clear: bool) -> dict:
+    """次の区間から使うアカウントを指定する（`--clear` で外す。#2460）。登録に無い・再登録が要る名前は断る。"""
+    if clear:
+        if name is not None:
+            raise Fail("invalid_name", USAGE, 2)
+        cleared = pin.clear()
+        return {"pinned": None, "cleared": cleared, "text": "指定を外した" if cleared else "指定は無い"}
+    name = asker.value("<名前>", "使うアカウントの名前", name)
+    if name not in ca.names():
+        raise Fail("not_registered", f"登録されていない: {name}")
+    ca.usable(name)  # 認証ファイルを確かめ、使えなければ「再登録が要る」の印を付ける
+    acc = ca.load_account(name)
+    if acc is None or acc.needs_relogin:
+        raise Fail("needs_relogin", f"再登録が要る: {name}（python3 ~/.claude/ndf/relay.py account add {name} で登録し直す）")
+    try:
+        pin.set_pinned(name)
+    except OSError as e:
+        raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
+    return {"name": name, "pinned": name, "text": f"指定した: {name}（次の区間の起動から使う）"}
 
 
 def _verify_or_fail(t: bd.Target) -> None:
@@ -291,6 +315,9 @@ def _account_parser() -> argparse.ArgumentParser:
     sub.add_parser("check", parents=[common], add_help=False).add_argument("name", nargs="?")
     sub.add_parser("list", parents=[common], add_help=False)
     sub.add_parser("remove", parents=[common], add_help=False).add_argument("name", nargs="?")
+    u = sub.add_parser("use", parents=[common], add_help=False)
+    u.add_argument("name", nargs="?")
+    u.add_argument("--clear", action="store_true")
     c = sub.add_parser("capacity", parents=[common], add_help=False)
     for k in ("name", "five", "seven"):
         c.add_argument(k, nargs="?")
@@ -350,5 +377,6 @@ def cmd_account(args: list[str]) -> int:
         "list": _list_rows,
         "remove": lambda: _remove(asker, a.name),
         "capacity": lambda: _capacity_cmd(asker, a.name, a.five, a.seven),
+        "use": lambda: _use(asker, a.name, a.clear),
     }
     return _respond(a.sub, a.json, handlers[a.sub])

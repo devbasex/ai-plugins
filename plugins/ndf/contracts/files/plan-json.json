@@ -1,0 +1,7 @@
+{
+  "name": "plan-json",
+  "pattern": "plan.json",
+  "kind": "record",
+  "place": "main",
+  "skill_readers": []
+}

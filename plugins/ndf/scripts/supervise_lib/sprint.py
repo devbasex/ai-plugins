@@ -32,7 +32,7 @@ from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
 from supervise_lib.release_templates import release_verify_step, strip_suffix
-from supervise_lib.plan import sprint_state_path
+from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
     normal_gate_2,
@@ -47,7 +47,28 @@ from supervise_lib.sprint_routes import (
     route_waves,
 )
 from supervise_lib.verify_steps import merge_steps
-from supervise_lib.sprint_close_steps import _close_step, _refine_step, _retro_step, _spec_pr_steps
+from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
+
+
+def parallel_lane(repo: str) -> tuple[str, str] | None:
+    """動いている並列の計画のレーンなら (計画名, レーン名)。プランを組む時点に 1 度だけ判定する（#2436 の I12）。"""
+    import decl
+    import parallel_lane as pl
+
+    main = decl.main_dir(repo) or Path(repo)
+    got = pl.lane_of(main)
+    return (got[0], got[1].name) if got else None
+
+
+def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
+    """本番のステージのプラン。並列の計画のレーンなら配布の依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+    lane = parallel_lane(repo)
+    if lane:
+        from parallel_release import plan_release_request
+
+        # prs を省いた呼び出しは、前のステージの Pull Request のすべて（{queue_prs}）を依頼に載せる
+        return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])}
+    return {"release-prod": build()}
 
 
 def prod_version(version: str | None) -> str | None:
@@ -98,7 +119,11 @@ def fast_sprint_plans(a) -> list[dict]:
         return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": first},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod")}, "then_of": first},
+        {
+            "name": "本番",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod")),
+            "then_of": first,
+        },
     ]
     return waves
 
@@ -134,7 +159,11 @@ def auto_sprint_plans(a) -> list[dict]:
     prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（関門 2 の判定のコメントの宛先）
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs)}, "then_of": first},
+        {
+            "name": "本番",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs), prs),
+            "then_of": first,
+        },
     ]
 
 
@@ -162,7 +191,7 @@ def close_plan(a, repo: str) -> dict:
                 *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
                 _retro_step(a, refs, stats),
                 _close_step(a, repo, record_pr, issues),
-                _refine_step(a, refs),
+                *refine_steps(a, refs, repo),
             ],
         },
         a,
@@ -187,7 +216,7 @@ def close_waves(a) -> list[dict]:
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
         {
             "name": "本番",
-            "plans": {"release-prod": plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)},
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)),
             "then_of": "最終の検査",
         },
         close,
@@ -284,6 +313,9 @@ def sprint_plans(a) -> list[dict]:
             release["note"] = normal_gate_2(a)
         return waves + [release]
     prod = prod_version(a.version)
+    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
+        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
+        return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
     return waves + [
         release,
         {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
@@ -377,6 +409,8 @@ def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
 
 def _stage_entry(wave: dict, i: int, out: Path) -> dict:
     """ステージ 1 件の一覧の項目。then_of のステージは command を持たず、前のステージへ連結される。"""
+    import parallel_lane
+
     entry = {"wave": i, "name": wave["name"]}
     if "gate" in wave:
         entry["gate"] = wave["gate"]
@@ -394,7 +428,7 @@ def _stage_entry(wave: dict, i: int, out: Path) -> dict:
             entry["command"] = (
                 f"python3 {shlex.quote(str(SELF))} queue "
                 + " ".join(map(shlex.quote, paths))
-                + f" --max 3 --done {shlex.quote(entry['done'])}"
+                + f" --max {parallel_lane.queue_max()} --done {shlex.quote(entry['done'])}"
             )
     return entry
 

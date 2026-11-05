@@ -11,7 +11,7 @@ LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.
 | `gate <sprint.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず、差し戻しを差し戻しの記録（`gate-rejections.jsonl`。`lib/gate_rejections.py`）へ 1 行書く（状態ファイルは変えない）。`--by user` の `関門 1` / `関門 2` の承認も差し戻しの記録へ 1 行書く（差し戻しの件数の 0 と未記録を分ける）。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
 | `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
-| `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
+| `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>] [--reason <再起動の理由>]` | ndf-next の囲みを出し、判定「再起動」を記録する（`lib/context_decisions.py`。#2262）。`--replace` なら引継ぎ文書のその節も置き換える |
 | `loop <副命令> <ループ名> ...` | 開発ループ（#2089）。`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `list`。中身は `lib/sprint_loop_cli.py` と `lib/sprint_loop.py`。0 = 進める / 1 = 断った / 3 = 止まる条件に当たった |
 
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "schema", "locks")  # schema は supervise_lib.paths → decl が使う
+deps.require("md", "mdtable", "schema", "locks", "durable", "versions")  # schema は supervise_lib.paths → decl が使う
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
@@ -50,6 +50,7 @@ import project_mvv_signals as pms  # noqa: E402
 import gate_rejections as gr  # noqa: E402
 import sprint_mvv  # noqa: E402
 import sprint_loop_cli  # noqa: E402
+import context_decisions  # noqa: E402  ndf-next を出すときに判定「再起動」を記録する（#2262）
 
 TOOL = "sprint-state"
 SECTION_DEFAULT = PROGRESS_SECTION
@@ -496,6 +497,7 @@ def cmd_next(a) -> dict | None:
     if not (m.get("goal_template") or "").strip():
         return outcome("stopped", "sprint.json に /goal の雛形（goal_template）が無い")
     block = next_block(m, heading)
+    context_decisions.record_restart(context_decisions.work_id(" ".join(f"#{i}" for i in m.get("issues", []))), a.reason)
     if not a.replace:
         if a.json:
             return outcome("ok", "ndf-next の囲みを作った", [block], {"heading": heading})
@@ -576,6 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--replace", nargs="?", const=NEXT_SECTION_DEFAULT, help=f"引継ぎ文書のこの語の節を置き換える（既定 {NEXT_SECTION_DEFAULT}）"
     )
     s.add_argument("--json", action="store_true")
+    s.add_argument("--reason", choices=context_decisions.REASONS, help="再起動の理由（#2262）")
     sprint_loop_cli.add_loop_parser(sub, cmd_update)  # loop（開発ループ。#2089）
     return ap
 

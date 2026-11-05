@@ -85,6 +85,15 @@ def _isolated_issue_locks(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_context_state(tmp_path_factory, monkeypatch):
+    """再起動の方針の判定の記録（#2262）を利用者の `~/.local/state/ndf/context` へ書かない。
+
+    hook のテストは子プロセスの環境から `NDF_` の変数を除くため、`NDF_CONTEXT_DIR` でなく `XDG_STATE_HOME` で向ける。"""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("xdg-state")))
+    monkeypatch.setenv("NDF_CONTEXT_DIR", str(tmp_path_factory.mktemp("context-state")))
+
+
+@pytest.fixture(autouse=True)
 def _isolated_mvv_state(tmp_path_factory, monkeypatch):
     """差し戻し・覆し・MVV 判定の記録（`NDF_MVV_STATE_DIR`）を利用者の `~/.local/state/ndf` へ書かない（#1833）。"""
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path_factory.mktemp("mvv-state")))

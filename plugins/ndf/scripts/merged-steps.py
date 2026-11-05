@@ -11,7 +11,8 @@
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。一時の置き場のレビュー worktree
 （`pr<n>`・`rf<n>`）は lib/run_state.py が `--force` を使わずに外し、続けて持ち主の終わった残る状態を片付ける（`run_state.sweep_states`。
 items に足し、metrics の swept_removed・swept_kept で数える。#2229）。開発の作業ツリーで `git worktree remove` が拒否したものは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
-（`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
+（`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。PR 1 件の片付けと主ディレクトリの
+取り込みは、主ディレクトリの排他（`<git の共通ディレクトリ>/ndf-main.lock`）を取ってから行う（並列のレーンの間で 1 本ずつ。#2436）。
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
 承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち（push で先頭のコミットが
@@ -53,7 +54,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("waits", "durable", "md", "procs")
+deps.require("waits", "durable", "md", "procs", "locks")
 from step_result import (
     StepError,
     approval_present,
@@ -76,6 +77,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.main_lock import main_dir_lock  # noqa: E402
 from merged_lib.pr_info import merged_pr_info  # noqa: E402
 from merged_lib.probe_table import PROBE_ACTIONS, PROBE_CLASSES, PROBE_REMEDIED_SUMMARY, PROBE_TABLE  # noqa: E402
 from merged_lib.reading import read_checks  # noqa: E402
@@ -282,7 +284,8 @@ def cleanup(root, prs):
     wt_base = worktree_base.worktree_parent()
 
     for n in prs:
-        _cleanup_pr(root, main_dir, slug, wt_base, n, add)
+        with main_dir_lock(main_dir):
+            _cleanup_pr(root, main_dir, slug, wt_base, n, add)
 
     # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
     # 上で扱った pr<n>・rf<n> は見直さない（同じものを 2 度数えない）
@@ -290,7 +293,8 @@ def cleanup(root, prs):
     swept = run_state.sweep_states(root, skip=done)
     items.extend({**i, "swept": True} for i in swept)
     git(root, "worktree", "prune", check=False)
-    pull_err = _update_main_dir(main_dir, add)
+    with main_dir_lock(main_dir):
+        pull_err = _update_main_dir(main_dir, add)
     return _cleanup_result(items, prs, pull_err)
 
 

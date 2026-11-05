@@ -21,17 +21,49 @@ export type RunJobInstruction = {
    */
   NDF_VERSION: string;
   /**
-   * new は課題から始め、resume は保存した状態から続ける
+   * new は課題から始め、resume は保存した状態から続け、loop は開発ループの周回を新しく始め、release は配布の実行の手（RELEASE_STEP）を流す
    */
-  START: "new" | "resume";
+  START: "new" | "resume" | "loop" | "release";
   /**
    * スプリントへ入れる課題の番号（カンマ区切り）
    */
   ISSUES?: string;
   /**
-   * 答えの出た承認の依頼の識別子。答えの本文は載せない
+   * 答えの出た承認の依頼の識別子。答えの本文は載せない。無い resume は答えを書かずに続ける
    */
   APPROVAL_REQUEST_ID?: string;
+  /**
+   * NDF の開発ループの名前。loop と、ループの実行の resume に載せる
+   */
+  LOOP_NAME?: string;
+  /**
+   * 選定の対象のマイルストーンの題を , で結ぶ
+   */
+  LOOP_MILESTONES?: string;
+  /**
+   * 宣言した予算だけを並べる。無ければ NDF の既定
+   */
+  LOOP_BUDGET?: string;
+  /**
+   * 同じリポジトリの別の実行が持つ課題の番号（カンマ区切り）。ループの選定から外す
+   */
+  EXCLUDE_ISSUES?: string;
+  /**
+   * 人の判断待ちへの答え（<番号>=approved|rejected、承認なら #<PR の番号> を続けてよい）を , で結ぶ
+   */
+  LOOP_ANSWERS?: string;
+  /**
+   * 配布の実行のまとめた配布の連番（#2439）
+   */
+  RELEASE_SEQ?: string;
+  /**
+   * 配布の実行の手。present / represent は提示を作り、confirm:<k> は確定した提示 k の本番の配布を流し、continue は止まったプランを続ける
+   */
+  RELEASE_STEP?: "present" | "represent" | "confirm:1" | "confirm:2" | "continue";
+  /**
+   * 手動の実行の再開で、答えの出た配布の依頼の id
+   */
+  RELEASE_REQUEST_ID?: string;
   /**
    * 進捗の受け口の runner の経路（POST /ingest/events）の URL
    */

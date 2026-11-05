@@ -322,7 +322,7 @@ sequenceDiagram
   RS->>RS: process_if_not_ok で process に積み、次のステップへ進む
 ```
 
-`record_stage` は工程が変わったときだけ、プランの `課題` の Issue ごとに `記録` のスクリプトを打つ（`pace: fast` / `auto` の最初の記録では
+`record_stage` は工程が変わったときだけ、プランの `課題` の Issue ごとに `記録` のスクリプトを打つ。打つのはステップの始めで、`リリース後テスト` だけはそのステップが ok で終わった後である（`STAGES_AFTER_OK`。記録より先に印を付けないため）（`pace: fast` / `auto` の最初の記録では
 先に `pace` を書く）。積んだ過程の項目はステップをまたいで保たれ（`DICT_LISTS`）、フェーズレポート（`write_report`）の
 「進行の記録で書けなかったもの: <run> → <result>」の行になる。`sprint-close.py` の `close_one` は同じ読み方で
 `{kind: "board_note", name: "<repo>#<N>", result: "note", reason: <not_ok_reason>}` を溜める。

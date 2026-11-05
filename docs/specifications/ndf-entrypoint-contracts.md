@@ -159,6 +159,7 @@ import と source で読まれるライブラリである。構造チェック�
 | 受け渡しのファイル | `files/<name>.json` | `name`・`pattern`（glob）・`kind`・`place`・`skill_readers` |
 | 設定ファイル | `settings/<.ndf/ の下の名前>.json` | `file`・`summary`・`place`・`scope`・`readers`・`keys` |
 | 環境変数 | `env/<名前>.json` | `name`・`set_by`・`summary` |
+| 受け渡しの形 | `forms/<name>.json` | `name`・`summary`・`rule`（規則の文）・`writers`・`readers`・`cases`（1 つ以上の `{text, blocks, launch}`。読み手のテストが同じ例の組を読む。#2347 の決定 8） |
 
 | キー | 取りうる値 |
 | --- | --- |

@@ -146,7 +146,7 @@ def build_parser(sub) -> None:
         "一覧を <done>.plans.json へ書く",
     )
     q.add_argument("plans", nargs="*", help="流すプランの JSON（--resume と併せて渡さない）")
-    q.add_argument("--max", type=int, help="同時に流す本数（既定 3。--resume は前の起動の値）")
+    q.add_argument("--max", type=int, help="同時に流す本数（既定 3。並列の計画のレーンならレーンのプランの本数。--resume は前の起動の値）")
     q.add_argument("--resume", metavar="DONE", help="前の起動の done。止まったプランを終えたステップから続け、後続のステージも流す")
     q.add_argument("--from", dest="from_", action="append", default=[], metavar="PLAN=STEP", help="--resume: 続けるプランの開始のステップ")
     q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
@@ -252,7 +252,7 @@ def _cmd_queue(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn"
         emit(queue_resume.cmd_queue_resume(a.resume, a.from_, a.max and max(1, a.max), a.poll, queue.cmd_queue))
     if not a.plans or a.from_:
         ap.error("queue にはプランが要る（--from は --resume と使う）")
-    emit(queue.cmd_queue(a.plans, max(1, a.max or 3), a.poll, a.then, a.done))
+    emit(queue.cmd_queue(a.plans, max(1, a.max or default_max()), a.poll, a.then, a.done))
 
 
 def _cmd_wait(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
@@ -283,6 +283,13 @@ COMMANDS = {
     "format": lambda ap, a: emit(*commands.cmd_format(a.root, a.commit)),
     "sync-title": lambda ap, a: emit(pr_step.sync_title(".", a.pr, a.doc)),
 }
+
+
+def default_max(cwd: str | None = None) -> int:
+    """`queue` の `--max` を省いたときの本数。並列の計画のレーンならレーンのプランの本数、そうでなければ 3（#2436）。"""
+    import parallel_lane
+
+    return parallel_lane.queue_max(cwd)
 
 
 def main() -> int:

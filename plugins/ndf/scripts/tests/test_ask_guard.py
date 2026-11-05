@@ -313,3 +313,93 @@ def test_summary_counts(proj):
     assert m["verdict"] == {"deny": 2, "allow": 1, "advise": 0}
     assert m["source"] == {"": 2, "ndf-gate:1": 1}
     assert m["decision"] == {"ref": 1, "no_ref": 1} and m["unanswered"] == 1
+
+
+# ---------------------------------------------------------------- #2436 の 6d: 並列の計画のレーンの問いをオーガナイザーへ送る
+
+
+def lane_plan(proj, lanes=("la",)):
+    d = proj / ".ndf" / "parallel" / "p1"
+    d.mkdir(parents=True)
+    (d / "plan.json").write_text(json.dumps({"version": 1, "name": "p1", "rules": [], "lanes": [{"name": n} for n in lanes]}))
+
+
+@pytest.fixture()
+def forwarded(monkeypatch):
+    from hook_lib import ask_guard
+
+    box = {"code": 0, "calls": []}
+
+    def fake(main, plan, lane, payload, timeout=None):
+        box["calls"].append((plan, lane, payload))
+        code = box.get("codes", {}).get(plan, box["code"])
+        return code, {"metrics": {"id": f"{lane}-q{payload['ledger_id']}"}}
+
+    monkeypatch.setattr(ask_guard, "run_request_ask", fake)
+    return box
+
+
+def decide(proj, source):
+    from hook_lib import ask_guard, payload
+
+    return ask_guard.ask_decision(payload.event_of(ask_input(proj, source)))
+
+
+def test_a_lane_question_is_sent_to_the_organizer_and_denied(proj, monkeypatch, forwarded):
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    out = decide(proj, "ndf-ask:cost")
+    assert is_deny(out) and "オーガナイザーへ送った" in json.dumps(out, ensure_ascii=False)
+    plan, lane, sent = forwarded["calls"][0]
+    assert (plan, lane) == ("p1", "la") and sent["tool_input"]["metadata"]["source"] == "ndf-ask:cost" and sent["ledger_id"]
+
+
+def test_a_finished_plan_with_the_same_lane_name_is_skipped(proj, monkeypatch, forwarded):
+    """終わった計画 a と動いている計画 b が同じレーン名を持つと、a の送り手の判定（4）を飛ばして b へ送る。"""
+    for p in ("a", "b"):
+        d = proj / ".ndf" / "parallel" / p
+        d.mkdir(parents=True)
+        (d / "plan.json").write_text(json.dumps({"version": 1, "name": p, "rules": [], "lanes": [{"name": "la"}]}))
+    forwarded["codes"] = {"a": 4}
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    out = decide(proj, "ndf-ask:cost")
+    assert is_deny(out) and "並列の計画 b のレーン" in json.dumps(out, ensure_ascii=False)
+    assert [c[0] for c in forwarded["calls"]] == ["a", "b"]
+
+
+def test_the_hold_steps_end_by_stopping_the_own_wrapper(proj, monkeypatch, forwarded):
+    """保留の手順は自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。ndf-next を出さずに終えても対話の claude が残るためである。"""
+    import parallel_files
+
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    out = json.dumps(decide(proj, "ndf-ask:cost"), ensure_ascii=False)
+    assert parallel_files.stop_self() and json.dumps(parallel_files.stop_self(), ensure_ascii=False)[1:-1] in out
+
+
+def test_a_helper_question_is_sent_by_the_role_file(proj, monkeypatch, forwarded, tmp_path):
+    lane_plan(proj)
+    relay = tmp_path / "relay"
+    relay.mkdir()
+    (relay / "role.json").write_text(json.dumps({"role": "helper", "plan": "p1"}))
+    monkeypatch.setenv("NDF_RELAY_NAME", "p1-rel1")
+    monkeypatch.setenv("NDF_RELAY_DIR", str(relay))
+    assert is_deny(decide(proj, "ndf-ask:human-action")) and forwarded["calls"][0][:2] == ("p1", "p1-rel1")
+
+
+@pytest.mark.parametrize("name, code", [(None, 0), ("zz", 0), ("la", 4), ("la", 1)])
+def test_not_a_lane_or_not_sent_passes_as_before(proj, monkeypatch, forwarded, name, code):
+    lane_plan(proj)
+    monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+    if name:
+        monkeypatch.setenv("NDF_RELAY_NAME", name)
+    else:
+        monkeypatch.delenv("NDF_RELAY_NAME", raising=False)
+    forwarded["code"] = code
+    assert not is_deny(decide(proj, "ndf-ask:cost"))
+
+
+def test_a_denied_question_is_not_sent(proj, monkeypatch, forwarded):
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    assert is_deny(decide(proj, None)) and forwarded["calls"] == []

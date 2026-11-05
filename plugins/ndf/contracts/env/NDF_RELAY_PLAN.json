@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RELAY_PLAN",
+  "set_by": "user",
+  "summary": "統括役が `spawn --role <役割> --plan <計画名>` で起動したラッパーの並列の計画の名前（#2436）。NDF_RELAY_ROLE と一緒に役割のファイル（role.json）へ書く（plugins/ndf/scripts/relay_lib/hub.py・hub_client.py）"
+}

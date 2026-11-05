@@ -1,5 +1,6 @@
-// 実行の表の本物（DynamoDB の 1 つの表 RUNS_TABLE_NAME）。行の形は #2186 の設計の「データ構造」。
-// 枠と実行の増減は 1 回のトランザクションで書き、条件で失敗したら書かない（I34）
+// 実行の表の本物（DynamoDB の 1 つの表 RUNS_TABLE_NAME）。行の形は #2186・#2347 の設計の「データ構造」。
+// 枠と実行の増減は 1 回のトランザクションで書き、条件で失敗したら書かない（I34）。開発ループ・持ち分・手元のマシンの枠も
+// 同じトランザクションで書く（#2347 の決定 2・11・12）
 import { DynamoDBClient, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import {
   DeleteCommand,
@@ -7,12 +8,27 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  ScanCommand,
   TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import type { CredentialRow, FailureReason, Registration, RunJob, RunState, Slots, SprintRun } from "./model.ts";
-import { isTerminalJob } from "./model.ts";
-import type { RunsTable } from "./table.ts";
+import type { OrganizerRoot, OrganizerWrite, OrgLog, OrgRequest, ReleaseAnswer, ReleaseBatch } from "../organizer/model.ts";
+import type {
+  CreateRunGuards,
+  CreateRunResult,
+  CredentialRow,
+  DevLoop,
+  FailureReason,
+  LoopWrite,
+  Registration,
+  RunJob,
+  RunState,
+  Slots,
+  SprintRun,
+} from "./model.ts";
+import { isTerminalJob, milestoneHash } from "./model.ts";
+import type { ComposeRelease, ResumeOptions, RunsTable, RunTransitionExtras } from "./table.ts";
+import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
 export const GSI1 = "gsi1";
 const ACTIVE_JOBS = "ACTIVE_JOBS";
@@ -23,6 +39,30 @@ const runPk = (r: string) => `RUN#${r}`;
 const jobPk = (j: string) => `JOB#${j}`;
 const repoSk = (r: number) => `REPO#${r}`;
 const repoSlotSk = (r: number) => `ACTIVE#REPO#${r}`;
+const loopSk = (l: string) => `LOOP#${l}`;
+// LOOP# で始めない（listLoops の前方一致に入れない）
+const loopRunSk = (l: string, r: string) => `LOOPRUN#${l}#${r}`;
+const milestoneSk = (r: number, title: string) => `MILESTONE#${r}#${milestoneHash(title)}`;
+const issueSk = (r: number, n: number) => `ISSUE#${r}#${n}`;
+const runnerSk = (id: string) => `RUNNER#${id}`;
+const WAITING_LOOPS = "WAITING_LOOPS";
+const AWAITING_RESET = "AWAITING_RESET";
+const MIGRATION = { pk: "MIGRATION", sk: "MIGRATED#2347" };
+// Factory のオーガナイザー（#2439）。ORGANIZER_ACTIVE は流れている根と届け終えていない依頼だけが載る gsi1 の疎な鍵
+const orgSk = (r: number) => `ORG#${r}`;
+const orgReqSk = (r: number, id: string) => `ORGREQ#${r}#${id}`;
+const orgBatchSk = (r: number, seq: number) => `ORGBATCH#${r}#${String(seq).padStart(6, "0")}`;
+const orgLogSk = (log: OrgLog) => `ORGLOG#${log.repositoryId}#${log.at}#${log.kind}#${Math.random().toString(16).slice(2, 10).padEnd(8, "0")}`;
+const ORGANIZER_ACTIVE = "ORGANIZER_ACTIVE";
+const SLOT_RETRIES = 3;
+
+// トランザクションの何番目の項目が条件で落ちたか
+const failedIndexes = (err: unknown): number[] =>
+  err instanceof TransactionCanceledException
+    ? (err.CancellationReasons ?? []).flatMap((r, i) => (r.Code === "ConditionalCheckFailed" ? [i] : []))
+    : [];
+
+const waitingOf = (state: unknown, waitReason: unknown) => state === "between_laps" && waitReason !== "user_start";
 
 type Item = Record<string, unknown>;
 const strip = <T>(item: Item | undefined): T | null => {
@@ -139,8 +179,13 @@ export class DynamoRunsTable implements RunsTable {
 
   async getSlots(accountId: string, repositoryId: number): Promise<Slots> {
     const account = await this.get<{ count: number }>(accountPk(accountId), "ACTIVE");
-    const repository = await this.get<{ count: number }>(accountPk(accountId), repoSlotSk(repositoryId));
-    return { account: account?.count ?? 0, repository: repository?.count ?? 0 };
+    const repository = await this.get<{ count: number; legacyCount?: number; legacySeq?: number }>(accountPk(accountId), repoSlotSk(repositoryId));
+    return {
+      account: account?.count ?? 0,
+      repository: repository?.count ?? 0,
+      legacy: repository?.legacyCount ?? 0,
+      ...(repository?.legacySeq !== undefined ? { legacySeq: repository.legacySeq } : {}),
+    };
   }
 
   private slotPut(pk: string, sk: string, expected: number) {
@@ -166,25 +211,155 @@ export class DynamoRunsTable implements RunsTable {
     };
   }
 
-  createRun(run: SprintRun, job: RunJob, expected: Slots) {
-    return this.attempt(() =>
-      this.doc.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            this.slotPut(accountPk(run.accountId), "ACTIVE", expected.account),
-            this.slotPut(accountPk(run.accountId), repoSlotSk(run.repositoryId), expected.repository),
-            {
-              Put: {
-                TableName: this.tableName,
-                Item: { pk: runPk(run.sprintRunId), sk: "RUN", gsi1pk: accountPk(run.accountId), gsi1sk: `RUN#${run.createdAt}`, ...run },
-                ConditionExpression: "attribute_not_exists(pk)",
-              },
-            },
-            { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
-          ],
-        }),
-      ),
-    );
+  async createRun(run: SprintRun, job: RunJob, expected: Slots, guards?: CreateRunGuards): Promise<CreateRunResult> {
+    const repoSlot = this.slotPut(accountPk(run.accountId), repoSlotSk(run.repositoryId), expected.repository);
+    if (guards?.legacy) {
+      // 古い版の実行は legacyCount を数え、数えに入れた回数 legacySeq を 1 増やす（I48・#2439 の I62）
+      repoSlot.Update.UpdateExpression += ", legacyCount = if_not_exists(legacyCount, :lz) + :lone, legacySeq = if_not_exists(legacySeq, :lz) + :lone";
+      Object.assign(repoSlot.Update.ExpressionAttributeValues, { ":lz": 0, ":lone": 1 });
+    } else if (guards) {
+      // 新しい版の実行は、古い版の実行がリポジトリに無いときだけ書く
+      repoSlot.Update.ConditionExpression = `(${repoSlot.Update.ConditionExpression}) AND (attribute_not_exists(legacyCount) OR legacyCount = :lz)`;
+      Object.assign(repoSlot.Update.ExpressionAttributeValues, { ":lz": 0 });
+    }
+    const runItem = { pk: runPk(run.sprintRunId), sk: "RUN", gsi1pk: accountPk(run.accountId), gsi1sk: `RUN#${run.createdAt}`, ...run };
+    if (guards) runItem.legacy = guards.legacy;
+    const items: Record<string, unknown>[] = [
+      this.slotPut(accountPk(run.accountId), "ACTIVE", expected.account),
+      repoSlot,
+      { Put: { TableName: this.tableName, Item: runItem, ConditionExpression: "attribute_not_exists(pk)" } },
+      { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
+    ];
+    const issueStart = items.length;
+    for (const n of guards?.issues ?? []) {
+      items.push({
+        Put: {
+          TableName: this.tableName,
+          Item: { pk: accountPk(run.accountId), sk: issueSk(run.repositoryId, n), number: n, sprintRunId: run.sprintRunId },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      });
+    }
+    const milestoneStart = items.length;
+    for (const title of guards?.milestoneChecks ?? []) {
+      items.push({
+        ConditionCheck: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(run.accountId), sk: milestoneSk(run.repositoryId, title) },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      });
+    }
+    const loopStart = items.length;
+    if (guards?.loop) items.push(...this.loopItems(guards.loop));
+    // ループの実行の行（詳細がそのループの実行だけを引く）。条件を持たないため失敗の位置を数える並びの最後に置く
+    if (run.loopId) {
+      items.push({ Put: { TableName: this.tableName, Item: { pk: accountPk(run.accountId), sk: loopRunSk(run.loopId, run.sprintRunId), sprintRunId: run.sprintRunId } } });
+    }
+    // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62。オーガナイザーの根を読むだけ）
+    // 作成の冪等の鍵の行（#2384 の I14）。期限を過ぎた行は上書きする
+    const idempotencyAt = items.length;
+    if (guards?.idempotency) items.push(this.idempotencyPut(guards.idempotency));
+    const organizerAt = items.length;
+    if (guards?.legacy) {
+      items.push({
+        ConditionCheck: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(run.accountId), sk: orgSk(run.repositoryId) },
+          ConditionExpression: "attribute_not_exists(currentSeq) OR attribute_type(currentSeq, :nul)",
+          ExpressionAttributeValues: { ":nul": "NULL" },
+        },
+      });
+    }
+    try {
+      await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
+      return "created";
+    } catch (err) {
+      const failed = failedIndexes(err);
+      if (failed.length === 0 && !isConditionFailure(err)) throw err;
+      if (guards?.idempotency && failed.includes(idempotencyAt)) return "duplicate";
+      if (guards?.legacy && failed.includes(organizerAt)) return "release_running";
+      if (failed.some((i) => i >= loopStart)) return "loop_changed";
+      if (failed.some((i) => i >= milestoneStart)) return "issue_in_loop";
+      if (failed.some((i) => i >= issueStart)) return "issue_in_use";
+      return "slots";
+    }
+  }
+
+  // ループの行の条件つきの書き込み（と終わりの状態への移りで消す持ち分）
+  private loopItems(write: LoopWrite): Record<string, unknown>[] {
+    const names: Record<string, string> = {};
+    const values: Record<string, unknown> = {};
+    const sets: string[] = [];
+    let i = 0;
+    for (const [k, v] of Object.entries(write.set)) {
+      names[`#l${i}`] = k;
+      values[`:l${i}`] = v ?? null;
+      sets.push(`#l${i} = :l${i}`);
+      i += 1;
+    }
+    let tail = "";
+    if ("state" in write.set) {
+      if (waitingOf(write.set.state, write.set.waitReason)) {
+        sets.push("gsi1pk = :wpk", "gsi1sk = :wsk");
+        values[":wpk"] = WAITING_LOOPS;
+        values[":wsk"] = `${write.set.updatedAt ?? ""}#${write.loopId}`;
+      } else {
+        tail = " REMOVE gsi1pk, gsi1sk";
+      }
+    }
+    const conds = ["attribute_exists(pk)"];
+    if (write.expect.currentRunId !== undefined) {
+      names["#cr"] = "currentRunId";
+      if (write.expect.currentRunId === null) {
+        conds.push("(attribute_not_exists(#cr) OR attribute_type(#cr, :nul))");
+        values[":nul"] = "NULL";
+      } else {
+        conds.push("#cr = :cr");
+        values[":cr"] = write.expect.currentRunId;
+      }
+    }
+    if (write.expect.lapRuns !== undefined) {
+      names["#lr"] = "lapRuns";
+      conds.push("#lr = :lr");
+      values[":lr"] = write.expect.lapRuns;
+    }
+    if (write.expect.states) {
+      names["#ls"] = "state";
+      const keys = write.expect.states.map((st, j) => {
+        values[`:ls${j}`] = st;
+        return `:ls${j}`;
+      });
+      conds.push(`#ls IN (${keys.join(", ")})`);
+    }
+    if (write.expect.answers !== undefined) {
+      names["#la"] = "answers";
+      conds.push("#la = :la");
+      values[":la"] = write.expect.answers;
+    }
+    const items: Record<string, unknown>[] = [
+      {
+        Update: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(write.accountId), sk: loopSk(write.loopId) },
+          UpdateExpression: `SET ${sets.length > 0 ? sets.join(", ") : "#l_u = :l_u"}${tail}`,
+          ConditionExpression: conds.join(" AND "),
+          ExpressionAttributeNames: sets.length > 0 ? names : { ...names, "#l_u": "updatedAt" },
+          ExpressionAttributeValues: sets.length > 0 ? values : { ...values, ":l_u": new Date().toISOString() },
+        },
+      },
+    ];
+    for (const title of write.releaseMilestones?.titles ?? []) {
+      items.push({
+        Delete: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(write.accountId), sk: milestoneSk(write.releaseMilestones!.repositoryId, title) },
+          ConditionExpression: "attribute_not_exists(pk) OR loopId = :lid",
+          ExpressionAttributeValues: { ":lid": write.loopId },
+        },
+      });
+    }
+    return items;
   }
 
   getRun(sprintRunId: string) {
@@ -234,35 +409,51 @@ export class DynamoRunsTable implements RunsTable {
     );
   }
 
-  addResumeJob(job: RunJob, now: string) {
-    return this.attempt(() =>
-      this.doc.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Update: {
-                TableName: this.tableName,
-                Key: { pk: runPk(job.sprintRunId), sk: "RUN" },
-                UpdateExpression: "SET #s = :starting, currentJobId = :j, jobCount = :seq, updatedAt = :now",
-                ConditionExpression: "#s = :awaiting AND attribute_type(currentJobId, :null)",
-                ExpressionAttributeNames: { "#s": "state" },
-                ExpressionAttributeValues: { ":starting": "starting", ":awaiting": "awaiting_approval", ":j": job.jobId, ":seq": job.seq, ":now": now, ":null": "NULL" },
-              },
-            },
-            { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
-          ],
-        }),
-      ),
-    );
+  addResumeJob(job: RunJob, now: string, opts: ResumeOptions = {}) {
+    const from = opts.from ?? "awaiting_approval";
+    // 承認待ちの理由（#2439）。照らす理由が無ければ理由が空のときだけ書く
+    const values: Record<string, unknown> = { ":starting": "starting", ":awaiting": from, ":j": job.jobId, ":seq": job.seq, ":now": now, ":null": "NULL", ":nul": null };
+    let reasonCond = "(attribute_not_exists(awaitingReason) OR attribute_type(awaitingReason, :null))";
+    if (opts.expectAwaiting) {
+      reasonCond = "awaitingReason = :ar";
+      values[":ar"] = opts.expectAwaiting.reason;
+      if (opts.expectAwaiting.releaseRequestId !== undefined) {
+        reasonCond += " AND releaseRequestId = :rr";
+        values[":rr"] = opts.expectAwaiting.releaseRequestId;
+      }
+    }
+    const items: Record<string, unknown>[] = [
+      {
+        Update: {
+          TableName: this.tableName,
+          Key: { pk: runPk(job.sprintRunId), sk: "RUN" },
+          UpdateExpression: "SET #s = :starting, currentJobId = :j, jobCount = :seq, updatedAt = :now, resumeAt = :nul, awaitingReason = :nul, releaseRequestId = :nul",
+          ConditionExpression: `#s = :awaiting AND attribute_type(currentJobId, :null) AND ${reasonCond}`,
+          ExpressionAttributeNames: { "#s": "state" },
+          ExpressionAttributeValues: values,
+        },
+      },
+      { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
+    ];
+    if (from === "awaiting_reset") items.push({ Delete: { TableName: this.tableName, Key: { pk: runPk(job.sprintRunId), sk: "RESET" } } });
+    if (opts.loop) items.push(...this.loopItems(opts.loop));
+    if (opts.organizer) items.push(...this.organizerItems(opts.organizer));
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
   }
 
-  awaitApproval(sprintRunId: string, jobId: string, now: string) {
-    return this.attempt(() =>
-      this.doc.send(
-        new UpdateCommand({
+  private terminalValues() {
+    return { ":t1": TERMINAL[0], ":t2": TERMINAL[1], ":t3": TERMINAL[2], ":t4": TERMINAL[3] };
+  }
+
+  awaitApproval(sprintRunId: string, jobId: string, now: string, extras: RunTransitionExtras = {}) {
+    const items: Record<string, unknown>[] = [
+      {
+        Update: {
           TableName: this.tableName,
           Key: { pk: runPk(sprintRunId), sk: "RUN" },
-          UpdateExpression: "SET #s = :awaiting, currentJobId = :null, updatedAt = :now",
+          UpdateExpression: `SET #s = :awaiting, currentJobId = :null, updatedAt = :now, awaitingReason = :ar, releaseRequestId = :rr${
+            extras.finishReason !== undefined ? ", finishReason = :fr" : ""
+          }${extras.clearCancel ? ", cancelRequested = :false" : ""}`,
           ConditionExpression: "currentJobId = :j AND NOT #s IN (:t1, :t2, :t3, :t4)",
           ExpressionAttributeNames: { "#s": "state" },
           ExpressionAttributeValues: {
@@ -270,58 +461,127 @@ export class DynamoRunsTable implements RunsTable {
             ":null": null,
             ":now": now,
             ":j": jobId,
-            ":t1": TERMINAL[0],
-            ":t2": TERMINAL[1],
-            ":t3": TERMINAL[2],
-            ":t4": TERMINAL[3],
+            ":ar": extras.awaitingReason ?? null,
+            ":rr": extras.releaseRequestId ?? null,
+            ...this.terminalValues(),
+            ...(extras.finishReason !== undefined ? { ":fr": extras.finishReason } : {}),
+            ...(extras.clearCancel ? { ":false": false } : {}),
           },
-        }),
-      ),
-    );
+        },
+      },
+      ...(extras.loop ? this.loopItems(extras.loop) : []),
+      ...this.requestItems(extras.requests),
+    ];
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
   }
 
-  async finishRun(sprintRunId: string, state: RunState, reason: FailureReason | null, now: string) {
-    const run = await this.getRun(sprintRunId);
-    if (!run) return false;
-    const decrement = (sk: string) => ({
-      Update: {
-        TableName: this.tableName,
-        Key: { pk: accountPk(run.accountId), sk },
-        UpdateExpression: "SET #c = #c - :one",
-        ConditionExpression: "#c > :zero",
-        ExpressionAttributeNames: { "#c": "count" },
-        ExpressionAttributeValues: { ":one": 1, ":zero": 0 },
+  awaitReset(sprintRunId: string, jobId: string, resumeAt: string, now: string, extras: RunTransitionExtras = {}) {
+    const items: Record<string, unknown>[] = [
+      {
+        Update: {
+          TableName: this.tableName,
+          Key: { pk: runPk(sprintRunId), sk: "RUN" },
+          UpdateExpression: "SET #s = :reset, currentJobId = :null, updatedAt = :now, resumeAt = :at, finishReason = :fr",
+          ConditionExpression: "currentJobId = :j AND NOT #s IN (:t1, :t2, :t3, :t4)",
+          ExpressionAttributeNames: { "#s": "state" },
+          ExpressionAttributeValues: {
+            ":reset": "awaiting_reset",
+            ":null": null,
+            ":now": now,
+            ":at": resumeAt,
+            ":fr": extras.finishReason ?? "usage_limit",
+            ":j": jobId,
+            ...this.terminalValues(),
+          },
+        },
       },
-    });
-    return this.attempt(() =>
-      this.doc.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Update: {
-                TableName: this.tableName,
-                Key: { pk: runPk(sprintRunId), sk: "RUN" },
-                UpdateExpression: "SET #s = :state, failureReason = :reason, currentJobId = :null, updatedAt = :now",
-                ConditionExpression: "NOT #s IN (:t1, :t2, :t3, :t4)",
-                ExpressionAttributeNames: { "#s": "state" },
-                ExpressionAttributeValues: {
-                  ":state": state,
-                  ":reason": reason,
-                  ":null": null,
-                  ":now": now,
-                  ":t1": TERMINAL[0],
-                  ":t2": TERMINAL[1],
-                  ":t3": TERMINAL[2],
-                  ":t4": TERMINAL[3],
-                },
-              },
-            },
-            decrement("ACTIVE"),
-            decrement(repoSlotSk(run.repositoryId)),
-          ],
-        }),
-      ),
+      // 見回りがリセット時刻で引く印
+      { Put: { TableName: this.tableName, Item: { pk: runPk(sprintRunId), sk: "RESET", sprintRunId, gsi1pk: AWAITING_RESET, gsi1sk: `${resumeAt}#${sprintRunId}` } } },
+      ...(extras.loop ? this.loopItems(extras.loop) : []),
+    ];
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
+  }
+
+  async listResetRuns(before: string): Promise<SprintRun[]> {
+    const out = await this.doc.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        IndexName: GSI1,
+        KeyConditionExpression: "gsi1pk = :pk AND gsi1sk <= :b",
+        ExpressionAttributeValues: { ":pk": AWAITING_RESET, ":b": `${before}#~` },
+      }),
     );
+    const runs = await Promise.all((out.Items ?? []).map((i) => this.getRun(i.sprintRunId as string)));
+    return runs.filter((r): r is SprintRun => r !== null && r.state === "awaiting_reset");
+  }
+
+  async finishRun(sprintRunId: string, state: RunState, reason: FailureReason | null, now: string, extras: RunTransitionExtras = {}) {
+    // 読んだ後に埋め戻しが legacy を書いたときは条件で落ちる。読み直してやり直す（減算と持ち分の削除を漏らさない）
+    for (let attempt = 0; attempt < SLOT_RETRIES; attempt++) {
+      const run = await this.getRun(sprintRunId);
+      if (!run) return false;
+      const shares = (await this.listIssueShares(run.accountId, run.repositoryId)).filter((x) => x.sprintRunId === sprintRunId);
+      const decrement = (sk: string, legacy = false) => ({
+        Update: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(run.accountId), sk },
+          UpdateExpression: legacy ? "SET #c = #c - :one, legacyCount = legacyCount - :one" : "SET #c = #c - :one",
+          ConditionExpression: legacy ? "#c > :zero AND legacyCount > :zero" : "#c > :zero",
+          ExpressionAttributeNames: { "#c": "count" },
+          ExpressionAttributeValues: { ":one": 1, ":zero": 0 },
+        },
+      });
+      const legacyCond = run.legacy === true ? "legacy = :lt" : run.legacy === false ? "legacy = :lf" : "attribute_not_exists(legacy)";
+      const items: Record<string, unknown>[] = [
+        {
+          Update: {
+            TableName: this.tableName,
+            Key: { pk: runPk(sprintRunId), sk: "RUN" },
+            UpdateExpression: `SET #s = :state, failureReason = :reason, currentJobId = :null, updatedAt = :now, resumeAt = :null, awaitingReason = :null, releaseRequestId = :null${
+              extras.finishReason !== undefined ? ", finishReason = :fr" : ""
+            }`,
+            ConditionExpression: `NOT #s IN (:t1, :t2, :t3, :t4) AND ${legacyCond}`,
+            ExpressionAttributeNames: { "#s": "state" },
+            ExpressionAttributeValues: {
+              ":state": state,
+              ":reason": reason,
+              ":null": null,
+              ":now": now,
+              ...this.terminalValues(),
+              ...(run.legacy === true ? { ":lt": true } : run.legacy === false ? { ":lf": false } : {}),
+              ...(extras.finishReason !== undefined ? { ":fr": extras.finishReason } : {}),
+            },
+          },
+        },
+        // 配布の実行は枠を持たない（#2439 の I64）
+        ...(run.purpose === "release" ? [] : [decrement("ACTIVE"), decrement(repoSlotSk(run.repositoryId), run.legacy === true)]),
+        ...shares.map((x) => ({
+          Delete: {
+            TableName: this.tableName,
+            Key: { pk: accountPk(run.accountId), sk: issueSk(run.repositoryId, x.number) },
+            ConditionExpression: "sprintRunId = :sr",
+            ExpressionAttributeValues: { ":sr": sprintRunId },
+          },
+        })),
+        ...(run.state === "awaiting_reset" ? [{ Delete: { TableName: this.tableName, Key: { pk: runPk(sprintRunId), sk: "RESET" } } }] : []),
+        ...(extras.loop ? this.loopItems(extras.loop) : []),
+        ...this.requestItems(extras.requests),
+      ];
+      try {
+        await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
+        return true;
+      } catch (err) {
+        const failed = failedIndexes(err);
+        if (failed.length === 0 && !isConditionFailure(err)) throw err;
+        // 実行の行の条件で落ち、読み直して終わりの状態なら 2 度目の移しで何もしない
+        const now2 = await this.getRun(sprintRunId);
+        if (!now2 || TERMINAL.includes(now2.state)) return false;
+        const shareStart = run.purpose === "release" ? 1 : 3;
+        if (failed.some((i) => i >= shareStart && i < shareStart + shares.length) || now2.legacy !== run.legacy) continue;
+        return false;
+      }
+    }
+    return false;
   }
 
   getJob(jobId: string) {
@@ -362,6 +622,9 @@ export class DynamoRunsTable implements RunsTable {
     });
     // 終わりの状態へ移すときは見回りの GSI から外す
     const leaving = patch.state !== undefined && isTerminalJob(patch.state);
+    // 手元のマシンが受け取ったジョブは、そのマシンの枠を同じ書き込みで減らす（I50）
+    const current = leaving ? await this.getJob(jobId) : null;
+    if (current?.runnerId && current.state === "running") return this.finishLocalJob(current, patch, from);
     let condition = "attribute_exists(pk)";
     if (from) {
       names["#st"] = "state";
@@ -383,5 +646,469 @@ export class DynamoRunsTable implements RunsTable {
         }),
       ),
     );
+  }
+
+  private async finishLocalJob(job: RunJob, patch: Partial<RunJob>, from?: RunJob["state"][]): Promise<boolean> {
+    const entries = Object.entries(patch).filter(([k]) => k !== "jobId");
+    const names: Record<string, string> = { "#st": "state" };
+    const values: Record<string, unknown> = {};
+    const sets = entries.map(([k, v], i) => {
+      names[`#k${i}`] = k;
+      values[`:v${i}`] = v;
+      return `#k${i} = :v${i}`;
+    });
+    const keys = (from ?? ["running"]).map((st, i) => {
+      values[`:f${i}`] = st;
+      return `:f${i}`;
+    });
+    return this.attempt(() =>
+      this.doc.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: this.tableName,
+                Key: { pk: jobPk(job.jobId), sk: "JOB" },
+                UpdateExpression: `SET ${sets.join(", ")} REMOVE gsi1pk, gsi1sk`,
+                ConditionExpression: `attribute_exists(pk) AND #st IN (${keys.join(", ")})`,
+                ExpressionAttributeNames: names,
+                ExpressionAttributeValues: values,
+              },
+            },
+            {
+              Update: {
+                TableName: this.tableName,
+                Key: { pk: accountPk(job.accountId), sk: runnerSk(job.runnerId!) },
+                UpdateExpression: "ADD #c :minus",
+                ExpressionAttributeNames: { "#c": "count" },
+                ExpressionAttributeValues: { ":minus": -1 },
+              },
+            },
+          ],
+        }),
+      ),
+    );
+  }
+
+  claimLocalJob(jobId: string, runnerId: string, maxJobs: number, now: string) {
+    return this.attempt(async () => {
+      const job = await this.getJob(jobId);
+      if (!job) throw Object.assign(new Error("no job"), { name: "ConditionalCheckFailedException" });
+      await this.doc.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: this.tableName,
+                Key: { pk: jobPk(jobId), sk: "JOB" },
+                UpdateExpression: "SET #st = :running, startedAt = :now, runnerId = :rid",
+                ConditionExpression: "#st = :pending AND runnerKind = :local",
+                ExpressionAttributeNames: { "#st": "state" },
+                ExpressionAttributeValues: { ":running": "running", ":pending": "pending", ":local": "local", ":now": now, ":rid": runnerId },
+              },
+            },
+            {
+              Update: {
+                TableName: this.tableName,
+                Key: { pk: accountPk(job.accountId), sk: runnerSk(runnerId) },
+                UpdateExpression: "SET #c = if_not_exists(#c, :zero) + :one",
+                ConditionExpression: "attribute_not_exists(pk) OR #c < :max",
+                ExpressionAttributeNames: { "#c": "count" },
+                ExpressionAttributeValues: { ":zero": 0, ":one": 1, ":max": maxJobs },
+              },
+            },
+          ],
+        }),
+      );
+    });
+  }
+
+  async setMaxConcurrentRuns(accountId: string, repositoryId: number, value: number | null) {
+    return this.attempt(() =>
+      this.doc.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { pk: accountPk(accountId), sk: repoSk(repositoryId) },
+          UpdateExpression: "SET maxConcurrentRuns = :v",
+          ConditionExpression: "attribute_exists(pk)",
+          ExpressionAttributeValues: { ":v": value },
+        }),
+      ),
+    );
+  }
+
+  private idempotencyPut(claim: IdempotencyClaim): Record<string, unknown> {
+    return {
+      Put: {
+        TableName: this.tableName,
+        Item: { pk: idempotencyPk(claim), sk: "IDEMP", createdId: claim.createdId, createdAt: claim.createdAt, ttl: claim.ttl },
+        ConditionExpression: "attribute_not_exists(pk) OR #ttl < :now",
+        ExpressionAttributeNames: { "#ttl": "ttl" },
+        ExpressionAttributeValues: { ":now": epochSeconds(claim.createdAt) },
+      },
+    };
+  }
+
+  async getIdempotent(ref: IdempotencyRef, now: string): Promise<string | null> {
+    return liveCreatedId(await this.get<{ createdId: string; ttl: number }>(idempotencyPk(ref), "IDEMP"), now);
+  }
+
+  async createLoop(loop: DevLoop, idempotency?: IdempotencyClaim): Promise<"created" | "duplicate" | { conflict: string }> {
+    const items: Record<string, unknown>[] = [
+      ...loop.milestones.map((title) => ({
+        Put: {
+          TableName: this.tableName,
+          Item: { pk: accountPk(loop.accountId), sk: milestoneSk(loop.repositoryId, title), loopId: loop.loopId, title },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      })),
+      {
+        Put: {
+          TableName: this.tableName,
+          Item: {
+            pk: accountPk(loop.accountId),
+            sk: loopSk(loop.loopId),
+            ...loop,
+            ...(waitingOf(loop.state, loop.waitReason) ? { gsi1pk: WAITING_LOOPS, gsi1sk: `${loop.updatedAt}#${loop.loopId}` } : {}),
+          },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      },
+    ];
+    const idempotencyAt = items.length;
+    if (idempotency) items.push(this.idempotencyPut(idempotency));
+    try {
+      await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
+      return "created";
+    } catch (err) {
+      const all = failedIndexes(err);
+      if (idempotency && all.includes(idempotencyAt)) return "duplicate";
+      const failed = all.filter((i) => i < loop.milestones.length);
+      if (failed.length === 0 && !isConditionFailure(err)) throw err;
+      return { conflict: loop.milestones[failed[0] ?? 0]! };
+    }
+  }
+
+  getLoop(accountId: string, loopId: string) {
+    return this.get<DevLoop>(accountPk(accountId), loopSk(loopId));
+  }
+
+  private async queryPrefix<T>(pk: string, prefix: string): Promise<T[]> {
+    const out: T[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :p)",
+          ExpressionAttributeValues: { ":pk": pk, ":p": prefix },
+          ConsistentRead: true,
+          ExclusiveStartKey: start,
+        }),
+      );
+      for (const i of page.Items ?? []) out.push(strip<T>(i)!);
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return out;
+  }
+
+  async listLoops(accountId: string): Promise<DevLoop[]> {
+    const loops = await this.queryPrefix<DevLoop>(accountPk(accountId), "LOOP#");
+    return loops.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  }
+
+  async listLoopRuns(accountId: string, loopId: string): Promise<SprintRun[]> {
+    const rows = await this.queryPrefix<{ sprintRunId: string }>(accountPk(accountId), `LOOPRUN#${loopId}#`);
+    const runs = await Promise.all(rows.map((r) => this.getRun(r.sprintRunId)));
+    return runs.filter((r): r is SprintRun => r !== null);
+  }
+
+  writeLoop(write: LoopWrite) {
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: this.loopItems(write) as never })));
+  }
+
+  getMilestoneShare(accountId: string, repositoryId: number, title: string) {
+    return this.get<{ loopId: string; title: string }>(accountPk(accountId), milestoneSk(repositoryId, title));
+  }
+
+  async listIssueShares(accountId: string, repositoryId: number) {
+    const rows = await this.queryPrefix<{ number: number; sprintRunId: string }>(accountPk(accountId), `ISSUE#${repositoryId}#`);
+    return rows.map((r) => ({ number: r.number, sprintRunId: r.sprintRunId })).sort((a, b) => a.number - b.number);
+  }
+
+  async listWaitingLoops(accountId?: string): Promise<DevLoop[]> {
+    const out: DevLoop[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          IndexName: GSI1,
+          KeyConditionExpression: "gsi1pk = :pk",
+          ...(accountId !== undefined
+            ? { FilterExpression: "accountId = :a", ExpressionAttributeValues: { ":pk": WAITING_LOOPS, ":a": accountId } }
+            : { ExpressionAttributeValues: { ":pk": WAITING_LOOPS } }),
+          ExclusiveStartKey: start,
+        }),
+      );
+      for (const i of page.Items ?? []) {
+        if (accountId !== undefined && i.accountId !== accountId) continue;
+        const loop = await this.getLoop(i.accountId as string, i.loopId as string);
+        if (loop && waitingOf(loop.state, loop.waitReason)) out.push(loop);
+      }
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return out;
+  }
+
+  async isMigrated() {
+    return (await this.get<Item>(MIGRATION.pk, MIGRATION.sk)) !== null;
+  }
+
+  async setMigrated() {
+    await this.doc.send(new PutCommand({ TableName: this.tableName, Item: { ...MIGRATION, migratedAt: new Date().toISOString() } }));
+  }
+
+  async listUnbackfilledRuns(): Promise<SprintRun[]> {
+    const out: SprintRun[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new ScanCommand({
+          TableName: this.tableName,
+          FilterExpression: "sk = :run AND attribute_not_exists(legacy) AND NOT #s IN (:t1, :t2, :t3, :t4)",
+          ExpressionAttributeNames: { "#s": "state" },
+          ExpressionAttributeValues: { ":run": "RUN", ...this.terminalValues() },
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+        }),
+      );
+      for (const i of page.Items ?? []) out.push(strip<SprintRun>(i)!);
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return out;
+  }
+
+  backfillRun(run: SprintRun, issues: number[]) {
+    return this.attempt(() =>
+      this.doc.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: this.tableName,
+                Key: { pk: runPk(run.sprintRunId), sk: "RUN" },
+                UpdateExpression: "SET legacy = :t",
+                ConditionExpression: "attribute_not_exists(legacy) AND NOT #s IN (:t1, :t2, :t3, :t4)",
+                ExpressionAttributeNames: { "#s": "state" },
+                ExpressionAttributeValues: { ":t": true, ...this.terminalValues() },
+              },
+            },
+            {
+              Update: {
+                TableName: this.tableName,
+                Key: { pk: accountPk(run.accountId), sk: repoSlotSk(run.repositoryId) },
+                UpdateExpression: "SET legacyCount = if_not_exists(legacyCount, :zero) + :one, legacySeq = if_not_exists(legacySeq, :zero) + :one",
+                ExpressionAttributeValues: { ":zero": 0, ":one": 1 },
+              },
+            },
+            ...issues.map((n) => ({
+              Put: {
+                TableName: this.tableName,
+                Item: { pk: accountPk(run.accountId), sk: issueSk(run.repositoryId, n), number: n, sprintRunId: run.sprintRunId },
+                ConditionExpression: "attribute_not_exists(pk)",
+              },
+            })),
+          ] as never,
+        }),
+      ),
+    );
+  }
+
+  // ---- Factory のオーガナイザー（#2439） ----
+
+  private rootItem(root: OrganizerRoot): Item {
+    const sk = orgSk(root.repositoryId);
+    return { pk: accountPk(root.accountId), sk, ...root, ...(root.currentSeq !== null ? { gsi1pk: ORGANIZER_ACTIVE, gsi1sk: `${root.accountId}#${sk}` } : {}) };
+  }
+
+  // 受けた依頼の行。在る行は書かない（呼ぶ側が読んで無い行だけを渡す。I59）
+  private requestItems(requests: OrgRequest[] | undefined): Record<string, unknown>[] {
+    return (requests ?? []).map((req) => {
+      const sk = orgReqSk(req.repositoryId, req.requestId);
+      return {
+        Put: {
+          TableName: this.tableName,
+          Item: { pk: accountPk(req.accountId), sk, ...req, ...(req.deliveredAt === null ? { gsi1pk: ORGANIZER_ACTIVE, gsi1sk: `${req.accountId}#${sk}` } : {}) },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      };
+    });
+  }
+
+  private logItem(log: OrgLog): Record<string, unknown> {
+    return { Put: { TableName: this.tableName, Item: { pk: accountPk(log.accountId), sk: orgLogSk(log), ...log }, ConditionExpression: "attribute_not_exists(sk)" } };
+  }
+
+  // 根（と渡されたまとめた配布・記録）の条件つきの書き込み（I56・I67）
+  private organizerItems(write: OrganizerWrite, extraRootCond?: string): Record<string, unknown>[] {
+    const rootValues: Record<string, unknown> = {};
+    const rootNames: Record<string, string> = {};
+    let rootCond = "attribute_not_exists(pk)";
+    if (write.expectVersion !== null) {
+      rootCond = "#ver = :v";
+      rootNames["#ver"] = "version";
+      rootValues[":v"] = write.expectVersion;
+    }
+    if (extraRootCond) {
+      rootCond = `(${rootCond}) AND ${extraRootCond}`;
+      rootValues[":nul"] = "NULL";
+    }
+    const items: Record<string, unknown>[] = [
+      {
+        Put: {
+          TableName: this.tableName,
+          Item: this.rootItem(write.root),
+          ConditionExpression: rootCond,
+          ...(Object.keys(rootNames).length > 0 ? { ExpressionAttributeNames: rootNames } : {}),
+          ...(Object.keys(rootValues).length > 0 ? { ExpressionAttributeValues: rootValues } : {}),
+        },
+      },
+    ];
+    if (write.batch) {
+      const batchItem = { pk: accountPk(write.batch.accountId), sk: orgBatchSk(write.batch.repositoryId, write.batch.seq), ...write.batch };
+      if (write.expectBatchState) {
+        const values: Record<string, unknown> = {};
+        const keys = write.expectBatchState.map((s, i) => {
+          values[`:b${i}`] = s;
+          return `:b${i}`;
+        });
+        items.push({
+          Put: {
+            TableName: this.tableName,
+            Item: batchItem,
+            ConditionExpression: `#bs IN (${keys.join(", ")})`,
+            ExpressionAttributeNames: { "#bs": "state" },
+            ExpressionAttributeValues: values,
+          },
+        });
+      } else {
+        items.push({ Put: { TableName: this.tableName, Item: batchItem, ConditionExpression: "attribute_not_exists(pk)" } });
+      }
+    }
+    if (write.log) items.push(this.logItem(write.log));
+    return items;
+  }
+
+  getOrganizer(accountId: string, repositoryId: number) {
+    return this.get<OrganizerRoot>(accountPk(accountId), orgSk(repositoryId));
+  }
+
+  writeOrganizer(write: OrganizerWrite) {
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: this.organizerItems(write) as never })));
+  }
+
+  composeRelease(input: ComposeRelease) {
+    const { write, run, job } = input;
+    const runItem = { pk: runPk(run.sprintRunId), sk: "RUN", gsi1pk: accountPk(run.accountId), gsi1sk: `RUN#${run.createdAt}`, ...run };
+    const items: Record<string, unknown>[] = [
+      // 根は流れている配布が無いときだけ（I56）
+      ...this.organizerItems(write, "(attribute_not_exists(currentSeq) OR attribute_type(currentSeq, :nul))"),
+      { Put: { TableName: this.tableName, Item: runItem, ConditionExpression: "attribute_not_exists(pk)" } },
+      { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
+      // 照らした後に古い版の実行が数えに入っていない（I62）
+      {
+        ConditionCheck: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(run.accountId), sk: repoSlotSk(run.repositoryId) },
+          ConditionExpression: input.legacySeq === null ? "attribute_not_exists(legacySeq)" : "legacySeq = :ls",
+          ...(input.legacySeq === null ? {} : { ExpressionAttributeValues: { ":ls": input.legacySeq } }),
+        },
+      },
+    ];
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
+  }
+
+  async listOrgRequests(accountId: string, repositoryId: number): Promise<OrgRequest[]> {
+    const rows = await this.queryPrefix<OrgRequest>(accountPk(accountId), `ORGREQ#${repositoryId}#`);
+    return rows.sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0));
+  }
+
+  answerRequest(accountId: string, repositoryId: number, requestId: string, answer: ReleaseAnswer) {
+    return this.attempt(() =>
+      this.doc.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { pk: accountPk(accountId), sk: orgReqSk(repositoryId, requestId) },
+          UpdateExpression: "SET #ans = :a",
+          ConditionExpression: "attribute_exists(pk) AND (attribute_not_exists(#ans) OR attribute_type(#ans, :nul))",
+          ExpressionAttributeNames: { "#ans": "answer" },
+          ExpressionAttributeValues: { ":a": answer, ":nul": "NULL" },
+        }),
+      ),
+    );
+  }
+
+  async markDelivered(accountId: string, repositoryId: number, requestId: string, at: string) {
+    await this.attempt(() =>
+      this.doc.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { pk: accountPk(accountId), sk: orgReqSk(repositoryId, requestId) },
+          UpdateExpression: "SET deliveredAt = :at REMOVE gsi1pk, gsi1sk",
+          ConditionExpression: "attribute_exists(pk) AND (attribute_not_exists(deliveredAt) OR attribute_type(deliveredAt, :nul))",
+          ExpressionAttributeValues: { ":at": at, ":nul": "NULL" },
+        }),
+      ),
+    );
+  }
+
+  getBatch(accountId: string, repositoryId: number, seq: number) {
+    return this.get<ReleaseBatch>(accountPk(accountId), orgBatchSk(repositoryId, seq));
+  }
+
+  async listBatches(accountId: string, repositoryId: number, limit: number): Promise<ReleaseBatch[]> {
+    const out = await this.doc.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :p)",
+        ExpressionAttributeValues: { ":pk": accountPk(accountId), ":p": `ORGBATCH#${repositoryId}#` },
+        ScanIndexForward: false,
+        Limit: limit,
+        ConsistentRead: true,
+      }),
+    );
+    return (out.Items ?? []).map((i) => strip<ReleaseBatch>(i)!);
+  }
+
+  async appendOrgLog(log: OrgLog) {
+    await this.doc.send(new TransactWriteCommand({ TransactItems: [this.logItem(log)] as never }));
+  }
+
+  listOrgLogs(accountId: string, repositoryId: number) {
+    return this.queryPrefix<OrgLog>(accountPk(accountId), `ORGLOG#${repositoryId}#`);
+  }
+
+  async listOrganizerActive(): Promise<{ accountId: string; repositoryId: number }[]> {
+    const out = new Map<string, { accountId: string; repositoryId: number }>();
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          IndexName: GSI1,
+          KeyConditionExpression: "gsi1pk = :pk",
+          ExpressionAttributeValues: { ":pk": ORGANIZER_ACTIVE },
+          ExclusiveStartKey: start,
+        }),
+      );
+      for (const i of page.Items ?? []) {
+        const accountId = i.accountId as string;
+        const repositoryId = i.repositoryId as number;
+        out.set(`${accountId}#${repositoryId}`, { accountId, repositoryId });
+      }
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return [...out.values()];
   }
 }

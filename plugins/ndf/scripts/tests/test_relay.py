@@ -93,6 +93,8 @@ def isolated_env(tmp_path, **extra):
     e = {k: v for k, v in os.environ.items() if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
     e["HOME"] = str(home)
     e["NDF_RELAY_UV"] = str(fake_uv(tmp_path))
+    # 統括役の tmux（#2346）は既定で無いものとして扱う。使うテストは使い捨ての TMUX_TMPDIR と一緒に上書きする
+    e["NDF_RELAY_TMUX"] = "ndf-no-tmux"
     e.update({k: str(v) for k, v in extra.items()})
     real_home = os.path.expanduser("~")
     assert e["HOME"] != real_home
@@ -469,7 +471,8 @@ class Term:
 
     def relay_dirs(self):
         root = pathlib.Path(self.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
-        return sorted(p for p in root.iterdir() if p.is_dir()) if root.exists() else []
+        # 統括役の置き場（hub/。#2346）は作業ディレクトリでない
+        return sorted(p for p in root.iterdir() if p.is_dir() and p.name != "hub") if root.exists() else []
 
     def rows(self):
         out = []
@@ -1214,6 +1217,57 @@ def test_stop_marks_running_relays_only(term, tmp_path):
     t.finish()
     p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True, env=t.env, timeout=20)
     assert p.returncode == 1
+
+
+def test_help_lists_subcommands(tmp_path):
+    """`--help` / `-h` / `help` は副命令の表を Markdown の記号を外して標準出力へ出し、0 で終わる。"""
+    for arg in ("--help", "-h", "help"):
+        p = relay_cmd(tmp_path, arg)
+        assert (p.returncode, p.stderr) == (0, ""), arg
+        for sub in ("run", "stop", "ls", "restart", "account add", "uninstall", "notice"):
+            assert f"\n  {sub}" in p.stdout, (arg, sub)
+        assert "`" not in p.stdout and "\\|" not in p.stdout
+
+
+def test_help_without_environment(tmp_path):
+    """ラッパーの環境が無い素の python（site-packages 無し）でも、一覧は環境を選ぶ前に出る。"""
+    e = isolated_env(tmp_path, SHELL="/bin/bash")
+    p = subprocess.run([sys.executable, "-S", str(RELAY), "--help"], capture_output=True, text=True, env=e, timeout=30)
+    assert (p.returncode, p.stderr) == (0, "") and "\n  stop" in p.stdout
+
+
+def test_subcommand_help_does_not_run_it(tmp_path):
+    """`<副命令> --help` はその副命令の行だけを出し、副命令を動かさない。名前無しの stop にならない。"""
+    state = tmp_path / "state"
+    d = state / "ndf" / "relay" / "alive"
+    d.mkdir(parents=True)
+    with open(d / "relay.lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for arg in ("--help", "-h"):
+            p = relay_cmd(tmp_path, f"stop {arg}", XDG_STATE_HOME=state)
+            assert (p.returncode, p.stderr) == (0, ""), arg
+            assert p.stdout.startswith("  stop [<名前>] [--json]\n") and "spawn" not in p.stdout
+            assert not (d / "stop").exists()
+    for sub, want in (("restart", "restart <名前>"), ("uninstall", "uninstall"), ("account", "account remove")):
+        p = relay_cmd(tmp_path, f"{sub} --help")
+        assert p.returncode == 0 and want in p.stdout and "notice" not in p.stdout, sub
+    p = relay_cmd(tmp_path, "account remove work1 --help")
+    assert (p.returncode, p.stderr) == (0, "") and p.stdout.startswith("  account add")
+
+
+def test_unknown_subcommand_points_to_help(tmp_path):
+    p = relay_cmd(tmp_path, "bogus")
+    assert p.returncode == 2 and "未知の副命令 bogus" in p.stderr and "--help" in p.stderr
+
+
+def test_run_help_passes_through_to_claude(tmp_path):
+    """`run --help` は一覧を出さず、本物の claude の help へ素通しする。"""
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "args:$*"\n')
+    claude.chmod(0o755)
+    p = relay_cmd(tmp_path, "run --help", NDF_RELAY_CLAUDE=claude)
+    assert (p.returncode, p.stdout) == (0, "args:--help\n")
 
 
 def test_stop_without_root_exits_1(tmp_path):
