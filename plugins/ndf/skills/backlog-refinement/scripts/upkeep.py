@@ -8,7 +8,7 @@
     python3 upkeep.py report [--depth diff|review|overhaul [--run R] [--order prune,rank,...]]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
-    python3 upkeep.py depth due|record ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
+    python3 upkeep.py depth due|record|compare ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
     python3 upkeep.py owner claim|touch|release|status ...（見直しの持ち主。upkeep_owner.py の冒頭）
     python3 upkeep.py research plan|run ...（ニーズとシーズの調査。upkeep_research.py の冒頭）
     python3 upkeep.py overhaul snapshot|count|measure ...（大整理。upkeep_overhaul.py の冒頭）

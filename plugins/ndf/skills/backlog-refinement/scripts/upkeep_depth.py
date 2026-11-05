@@ -3,18 +3,28 @@
     upkeep.py depth due review|overhaul [--loop L] [--lap N] [--no-issue] [--manual] [--open N]
     upkeep.py depth record --depth diff|review|overhaul [--event ran|not_due|skipped] [--trigger a,b] [--run R]
                            [--report <統一 JSON レポート>] [--loop L] [--lap N] [--sprint S] [--cost USD] [--seconds S]
+                           [--progress <プランの進行の記録> [--step <ステップの id>]]
+    upkeep.py depth compare --since-ref <ref> --seconds-under S --cost-under USD [--count N] [--model M] [--depth D]
     upkeep.py causes record --classes <[{number, type, sub}] の JSON>
 
 記録はメインディレクトリの `.ndf/backlog/` に置く（`depths.jsonl`・`causes.jsonl`。行を足すだけで書き換えない）。
 `depth due` は起動するとき 0、起動しないとき 3（プランの実行条件の `skip_code`）を返し、起動しない判定を
 `not_due` の行で、起動する判定を `due` の行で残す。記録が読めないときも 3 で返し、理由（`unreadable`）を行に残す。
 頻度・閾値・上限は `.ndf/backlog.json` の `depths` で上書きでき、無ければ `DEFAULTS` を使う。
+`depth record --progress` はプランの進行の記録（supervise の `progress.jsonl`）の `--step`（既定 `refine`）の最後の
+`kind: step` の行から秒・ドル・言語モデルの名前（`values.models`）を写す。読めなければ空のまま行を書く。`--seconds`・
+`--cost` を渡せばその値を優先する。
+`depth compare` は `<ref>` のコミットの時刻より後の実行の行のうち、秒とドルがそろい（`no_usage`）、`--model` を渡せば
+言語モデルがその 1 つだけの（`model`）行を、同じ開発ループ・周回（ループの外では同じスプリント）では最後の 1 行に
+して（`duplicate`）、古い順に `--count` 件の中央値を基準と比べる。0 = 秒とドルの両方が基準を下回る / 1 = 下回らない /
+3 = 件数に満たない（保留）/ 2 = 記録か ref を読めない。
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import statistics
 from pathlib import Path
 
 import clock
@@ -22,7 +32,7 @@ import jsonio
 import locks
 import project_decl
 import repo as repo_lib
-from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root, result
+from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, git, git_root, result
 import upkeep_rank_cmd as RC
 
 TOOL = "backlog-refinement"
@@ -282,6 +292,20 @@ def _state_values(a, root) -> dict:
     return out
 
 
+def _step_usage(path: str | None, step: str) -> dict:
+    """プランの進行の記録の `step` の最後の `kind: step` の行の秒・ドル・言語モデル（#2315 の決定 2・決定 4）。読めなければ空。"""
+    if not path:
+        return {}
+    rows = jsonio.read_jsonl(path, missing=[], broken=[], skip_broken=True)
+    last = next((r for r in reversed(rows) if r.get("kind") == "step" and r.get("step") == step), None)
+    if last is None:
+        return {}
+    out = {k: last[k] for k in ("seconds", "cost") if isinstance(last.get(k), (int, float)) and not isinstance(last[k], bool)}
+    if isinstance(last.get("models"), dict):
+        out["models"] = sorted(last["models"])
+    return out
+
+
 def cmd_record(a):
     root = git_root(a.root)
     d = backlog_dir(root)
@@ -306,9 +330,75 @@ def cmd_record(a):
     for k in ("skipped_aspects", "order", "research"):
         if rep.get(k):
             row[k] = rep[k]
-    row.update(cost=a.cost, seconds=a.seconds, report=a.report)
+    usage = _step_usage(getattr(a, "progress", None), getattr(a, "step", None) or "refine")
+    if "models" in usage:
+        row["values"]["models"] = usage["models"]
+    row.update(
+        cost=a.cost if a.cost is not None else usage.get("cost"),
+        seconds=a.seconds if a.seconds is not None else usage.get("seconds"),
+        report=a.report,
+    )
     append_depth_row(d / "depths.jsonl", row)
     emit(result(TOOL, "ok", f"深さの記録へ {a.depth} の {a.event} を足した", [row], {"path": str(d / "depths.jsonl")}))
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _period_key(r: dict, k: int):
+    """同じ周回を 1 回と数える鍵。開発ループの外ではスプリント、どちらも無ければ行ごとに別。"""
+    if r.get("loop") is not None:
+        return ("loop", r["loop"], r.get("lap"))
+    if r.get("sprint") is not None:
+        return ("sprint", r["sprint"])
+    return ("row", k)
+
+
+def compare_rows(rows: list[dict], since, *, depth: str, model: str | None) -> tuple[list[dict], list[dict]]:
+    """(使える行を古い順, 外した行と理由)。秒・ドル・言語モデルで絞ってから同じ周回の重複を除く（#2315 の決定 5）。"""
+    picked, excluded = [], []
+    for k, r in enumerate(rows):
+        at = clock.parse(r.get("at"), naive="utc")
+        if not _is_ran(r, depth) or at is None or at <= since:
+            continue
+        if not (_is_num(r.get("seconds")) and _is_num(r.get("cost"))):
+            excluded.append((r, "no_usage"))
+        elif model is not None and ((r.get("values") or {}).get("models")) != [model]:
+            excluded.append((r, "model"))
+        else:
+            picked.append((k, r))
+    last = {_period_key(r, k): k for k, r in picked}
+    kept = [r for k, r in picked if last[_period_key(r, k)] == k]
+    excluded += [(r, "duplicate") for k, r in picked if last[_period_key(r, k)] != k]
+    return kept, [{**_brief(r), "result": "excluded", "reason": why} for r, why in excluded]
+
+
+def _brief(r: dict) -> dict:
+    return {k: r.get(k) for k in ("at", "sprint", "loop", "lap", "seconds", "cost")}
+
+
+def cmd_compare(a):
+    root = git_root(a.root)
+    p = git(root, "log", "-1", "--format=%cI", a.since_ref, check=False)
+    since = clock.parse(p.stdout.strip(), naive="utc") if p.returncode == 0 else None
+    if since is None:
+        raise StepError(f"ref を読めない: {a.since_ref}", EXIT_UNREADABLE)
+    kept, excluded = compare_rows(read_depth_rows(backlog_dir(root) / "depths.jsonl"), since, depth=a.depth, model=a.model)
+    used = kept[: a.count]
+    baseline = {"seconds": a.seconds_under, "cost": a.cost_under}
+    m = {"count": len(used), "needed": a.count, "median_seconds": None, "median_cost": None, "baseline": baseline, "delta": None}
+    items = [{**_brief(r), "result": "used"} for r in used] + excluded
+    if len(used) < a.count:
+        out = result(TOOL, "stopped", f"{a.depth} の行が {len(used)} / {a.count} 件で、判定を保留する", items, {**m, "judged": False})
+        emit(out, EXIT_PRECONDITION)
+    med = {"seconds": statistics.median(r["seconds"] for r in used), "cost": statistics.median(r["cost"] for r in used)}
+    m.update(median_seconds=med["seconds"], median_cost=med["cost"], judged=True)
+    m["delta"] = {k: round(med[k] - baseline[k], 4) for k in baseline}
+    under = all(med[k] < baseline[k] for k in baseline)
+    summary = f"{a.depth} の中央値 {med['seconds']} 秒・{med['cost']} ドル（基準 {a.seconds_under} 秒・{a.cost_under} ドル）"
+    emit(result(TOOL, "ok" if under else "stopped", summary + ("は基準を下回る" if under else "は基準を下回らない"), items, m),
+         None if under else EXIT_VIOLATION)  # fmt: skip
 
 
 def cmd_causes(a):
@@ -351,7 +441,19 @@ def add_depth_parsers(sub, common, state_dir) -> None:
     dr.add_argument("--sprint", default=None)
     dr.add_argument("--cost", type=float, default=None)
     dr.add_argument("--seconds", type=float, default=None)
+    dr.add_argument(
+        "--progress", default=None, help="プランの進行の記録（progress.jsonl）。--step の最後の行から秒・ドル・言語モデルを写す"
+    )
+    dr.add_argument("--step", default="refine", help="--progress で読むステップの id")
     dr.set_defaults(func=cmd_record, state_dir_of=state_dir)
+    dc = dp.add_parser("compare", parents=[common])
+    dc.add_argument("--since-ref", required=True, help="この ref のコミットの時刻より後の行だけを使う（配布した正式版のタグ）")
+    dc.add_argument("--seconds-under", type=float, required=True)
+    dc.add_argument("--cost-under", type=float, required=True)
+    dc.add_argument("--count", type=int, default=3)
+    dc.add_argument("--model", default=None, help="values.models がこの 1 つだけの行に限る")
+    dc.add_argument("--depth", choices=DEPTHS, default="diff")
+    dc.set_defaults(func=cmd_compare)
     cp = sub.add_parser("causes").add_subparsers(dest="causes_cmd", required=True)
     cr = cp.add_parser("record", parents=[common])
     cr.add_argument("--classes", required=True)
