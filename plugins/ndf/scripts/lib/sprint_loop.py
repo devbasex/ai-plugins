@@ -28,6 +28,7 @@ from sprint_loop_record import (
     LAPS_MD,
     STOP_FILE,
     VERSION,
+    BUDGET_DEFAULT,
     EXIT_REFUSED,
     EXIT_STOPPED,
     DONE,
@@ -116,15 +117,8 @@ def permission(env: Env) -> tuple[dict | None, list[str], object]:
     return decl, why, project
 
 
-BUDGET_DEFAULT = "default"  # 既定へ戻す指示: その単位をリポジトリの予算の既定（.ndf/pace.json の loop.budget）へ戻す
-
-
 def apply_budget(env: Env, rec: dict, given: dict, defaults: dict) -> None:
-    """渡された単位だけを上書きする。BUDGET_DEFAULT の単位は defaults（予算の既定）の値にする。
-    値が変わったときだけ予算の履歴に 1 行足す。"""
     over = {k: (defaults[k] if v == BUDGET_DEFAULT else v) for k, v in given.items() if v is not None}
-    if not over:
-        return
     new = {**rec["budget"], **over}
     if new != rec["budget"]:
         rec.setdefault("budget_history", []).append({"at": env.now(), "from": dict(rec["budget"]), "to": new})
