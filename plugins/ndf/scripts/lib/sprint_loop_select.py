@@ -249,6 +249,24 @@ def _settle_conflict(env: Env, rec: dict, w: dict, m: dict, lap_n: int) -> str |
     return _giveback(env, rec, w, f"宛先と衝突し、ベースブランチを取り込めない（{code}）: {(se or so).strip()[:160]}", lap_n)
 
 
+def selected_reason(row: dict, first: set[int], approved: set[int]) -> str:
+    """選んだ課題の理由。承認した設計 → 直しの先頭 → 品質の枠 → 順位 の順に当てる。"""
+    return (
+        APPROVED_REASON if row["number"] in approved
+        else "直しの先頭" if row["number"] in first
+        else "品質の枠" if row.get("quality_slot")
+        else "順位"
+    )  # fmt: skip
+
+
+def _take_order(cands: list[dict], open_: list[int], first: set[int]) -> tuple[list[int], list[int]]:
+    """枠を割り当てる順（先頭に選ぶ課題 → 品質の枠 → 残り）と、先頭に選ぶ課題の添字を返す。"""
+    head = [i for i in open_ if cands[i]["number"] in first]
+    rest = [i for i in open_ if i not in head]
+    take_order = head + [i for i in rest if cands[i].get("quality_slot")] + [i for i in rest if not cands[i].get("quality_slot")]
+    return take_order, head
+
+
 def _select_candidate_rows(
     cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset(), approved: set[int] = frozenset()
 ) -> tuple[list[int], list[dict]]:
@@ -257,9 +275,7 @@ def _select_candidate_rows(
     （品質の枠の最低件数を容量で削らない）。"""
     whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
     open_ = [i for i, w in enumerate(whys) if w is None]
-    head = [i for i in open_ if cands[i]["number"] in first]
-    rest = [i for i in open_ if i not in head]
-    take_order = head + [i for i in rest if cands[i].get("quality_slot")] + [i for i in rest if not cands[i].get("quality_slot")]
+    take_order, head = _take_order(cands, open_, first)
     take = take_order[:max_issues]
     picked, here = [], []
     for i in sorted(range(len(cands)), key=lambda i: (i not in head, i)):  # 先頭に選ぶ課題だけを前へ。ほかは順位の順
@@ -267,12 +283,7 @@ def _select_candidate_rows(
         why = whys[i] if whys[i] is not None or i in take else "容量"
         if why is None:
             picked.append(r["number"])
-            reason = (
-                APPROVED_REASON if r["number"] in approved
-                else "直しの先頭" if r["number"] in first
-                else "品質の枠" if r.get("quality_slot")
-                else "順位"
-            )  # fmt: skip
+            reason = selected_reason(r, first, approved)
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
         else:
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})
