@@ -205,7 +205,7 @@ def sprint_out(a) -> Path:
     return Path(a.out or f"sprint-{a.name}")
 
 
-def survey_steps(n: int) -> list:
+def survey_steps(n: int, next_id: str) -> list:
     """設計のプランの外部の調査の検査（survey-check / fix-survey / survey-recheck。#2519 の決定 7）。
 
     レビューの直しで決定が変わった後に確かめる。直しは 1 回だけ試み、残れば `on_fail` を置かずにプランを止める。"""
@@ -218,7 +218,7 @@ def survey_steps(n: int) -> list:
             "timeout": 120,
             "cmd": check,
             "on_fail": "fix-survey",
-            "next": "glossary-check",
+            "next": next_id,
         },
         {
             "id": "fix-survey",
@@ -232,5 +232,5 @@ def survey_steps(n: int) -> list:
             "直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘"
             "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。",
         },
-        {"id": "survey-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120, "cmd": check, "next": "glossary-check"},
+        {"id": "survey-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120, "cmd": check, "next": next_id},
     ]

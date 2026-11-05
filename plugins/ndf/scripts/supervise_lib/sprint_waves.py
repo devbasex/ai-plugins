@@ -214,7 +214,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "next": "review",
             },
             *_review_steps(n, copy),
-            *survey_steps(n),
+            *survey_steps(n, next_id="glossary-check"),
             *_glossary_steps(glossary_check, push),
             # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
