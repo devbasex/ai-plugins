@@ -56,6 +56,37 @@ CANDIDATE_ID = re.compile(r"(?<![A-Za-z0-9])(?:STD|PRD|LIB)\d+(?![0-9])")
 SPLIT = re.compile(r"\s*[・/]\s*")
 
 
+def _first_match(body: list[tuple[int, str]], pattern: re.Pattern[str]) -> tuple[int, str, str] | None:
+    """本文の行のうち pattern に最初に合う行の（行番号, 行, 値）。無ければ None。"""
+    return next(((i, ln, m.group("v")) for i, ln in body if (m := pattern.match(ln))), None)
+
+
+def _read_survey(text: str, sections: list, prose: list[tuple[int, str]]) -> tuple[bool, set[str]]:
+    """外部の調査の節から、`省く:` の行があるかと、表の 1 列目の候補の番号を読む。"""
+    surveys = [s for s in sections if s.heading.title.startswith(SURVEY_TITLE)]
+    skipped = any(s.start <= i < s.end and SKIP_LINE.match(ln) for s in surveys for i, ln in prose)
+    candidates: set[str] = set()
+    for t in md.tables(text):
+        if any(s.start <= t.start < s.end for s in surveys):
+            for row in t.rows:
+                cell = row[0].strip().strip("`*_ ") if row else ""
+                if CANDIDATE_ID.fullmatch(cell):
+                    candidates.add(cell)
+    return skipped, candidates
+
+
+def _read_decisions(sections: list, prose: list[tuple[int, str]]) -> list:
+    """決定の節ごとに（番号, 見出しの行, `作り方:` の行, `比べた候補:` の行）を読む。"""
+    decisions = []
+    for s in sections:
+        m = DECISION_TITLE.match(s.heading.title)
+        if not m:
+            continue
+        body = [(i, ln) for i, ln in prose if s.start <= i < s.end]
+        decisions.append((m.group("n"), s.heading.line, _first_match(body, METHOD_LINE), _first_match(body, CANDIDATES_LINE)))
+    return decisions
+
+
 class Doc:
     """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行を読んだもの。"""
 
@@ -66,24 +97,8 @@ class Doc:
         fenced = md.fenced_lines(text)
         prose = [(i, ln) for i, ln in enumerate(lines) if not fenced[i]]
         sections = md.md_sections(text)
-        surveys = [s for s in sections if s.heading.title.startswith(SURVEY_TITLE)]
-        self.skipped = any(s.start <= i < s.end and SKIP_LINE.match(ln) for s in surveys for i, ln in prose)
-        self.candidates: set[str] = set()
-        for t in md.tables(text):
-            if any(s.start <= t.start < s.end for s in surveys):
-                for row in t.rows:
-                    cell = row[0].strip().strip("`*_ ") if row else ""
-                    if CANDIDATE_ID.fullmatch(cell):
-                        self.candidates.add(cell)
-        self.decisions = []
-        for s in sections:
-            m = DECISION_TITLE.match(s.heading.title)
-            if not m:
-                continue
-            body = [(i, ln) for i, ln in prose if s.start <= i < s.end]
-            method = next(((i, ln, mm.group("v")) for i, ln in body if (mm := METHOD_LINE.match(ln))), None)
-            cands = next(((i, ln, mm.group("v")) for i, ln in body if (mm := CANDIDATES_LINE.match(ln))), None)
-            self.decisions.append((m.group("n"), s.heading.line, method, cands))
+        self.skipped, self.candidates = _read_survey(text, sections, prose)
+        self.decisions = _read_decisions(sections, prose)
 
 
 def survey_groups(docs: list[Doc]) -> list[list[Doc]]:
