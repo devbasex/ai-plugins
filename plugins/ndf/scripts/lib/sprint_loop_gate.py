@@ -433,7 +433,7 @@ def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:
     return w["merge"]
 
 
-def _reopen(w: dict) -> None:
+def _reopen_waiting(w: dict) -> None:
     for k in ("answer", "answered_at", "merge", "merged_at"):
         w.pop(k, None)
 
@@ -449,10 +449,10 @@ def reask_design(env: Env, rec: dict, w: dict, head: str) -> bool:
         sent = lane_gate1(env, w, w.get("report") or "", w.get("state") or "")
         if not sent:
             return False
-        _reopen(w)
+        _reopen_waiting(w)
         w.update(sent, restamped=old)
     else:
-        _reopen(w)
+        _reopen_waiting(w)
         w.update(stamp=head, restamped=old)
     mark_issue(env, rec, w)
     return True
@@ -468,10 +468,10 @@ def giveback_design(env: Env, rec: dict, w: dict, reason: str, lap: int) -> bool
         if not sent:
             w.pop("returned", None)
             return False
-        _reopen(w)
+        _reopen_waiting(w)
         w.update(sent)
     else:
-        _reopen(w)
+        _reopen_waiting(w)
     mark_issue(env, rec, w)
     return True
 

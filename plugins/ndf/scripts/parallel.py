@@ -389,34 +389,20 @@ def cmd_answer(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     note = None
+    if err := pa.answer_arg_error(a.revise, a.note, a.approved, a.by):
+        reply("stopped", err, code=1)
     if a.revise:
-        if not a.note:
-            reply("stopped", "--revise には --note <指摘ファイル> が要る", code=1)
         try:
             note = Path(a.note).read_text(encoding="utf-8").strip()
         except OSError as exc:
             reply("stopped", f"指摘ファイルを読めない: {exc}", code=2)
-    if a.by == "mvv" and not a.approved:
-        reply("stopped", "--by mvv は --approved とだけ組む", code=1)
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
     seq, items = pa.questions(main, a.name)
-    q = next((q for q in items if q.get("id") == a.id), {})
+    q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
     nxt = pa.owner_restart(main, a.name, a.id, a.choice, items)
-    merge = None
-    if a.approved and q.get("kind") == "gate1" and q.get("pr"):  # 承認した設計のマージ（#2507）。成否によらず答えを送り 0 で返る
-        import design_pr_merge
-
-        merge = design_pr_merge.merge_approved(main, int(q["pr"]), q.get("stamp"))
-    pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice, merge=merge, by=a.by)
-    summary = f"依頼 {a.id} へ答え（{result}）を送った"
-    if merge:
-        summary += (
-            "。設計 PR をマージした"
-            if merge["result"] in ("merged", "already_merged")
-            else f"。設計 PR をマージできない（{merge['result']}: {merge['reason']}）"
-        )
-    extra = {"merge": merge} if merge is not None else {}
-    reply("ok", summary, id=a.id, result=result, next=nxt, seq=seq, after=pa.after_items(items, q or {"id": a.id}), **extra)
+    tail, extra = pa.answer_with_merge(main, a.name, q, result, note=note, choice=a.choice, by=a.by)
+    extra.update(id=a.id, result=result, next=nxt, seq=seq, after=pa.after_items(items, q))
+    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
 
 
 def cmd_helper(a) -> None:

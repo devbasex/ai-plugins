@@ -73,3 +73,38 @@ def owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = No
     lanes = [lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)]
     lanes = list(dict.fromkeys(lanes))
     return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+
+
+def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:
+    """`parallel.py answer` の引数の組み合わせの誤り。誤りが無ければ None。"""
+    if revise and not note:
+        return "--revise には --note <指摘ファイル> が要る"
+    if by == "mvv" and not approved:
+        return "--by mvv は --approved とだけ組む"
+    return None
+
+
+def merge_design(main: Path, q: dict) -> dict | None:
+    """設計の承認（gate1）の問いなら、承認した設計 PR をマージしてみる（#2507）。それ以外の問いは None。"""
+    if q.get("kind") != "gate1" or not q.get("pr"):
+        return None
+    import design_pr_merge
+
+    return design_pr_merge.merge_approved(main, int(q["pr"]), q.get("stamp"))
+
+
+def answer_with_merge(main: Path, name: str, q: dict, result: str, **kw) -> tuple[str, dict]:
+    """依頼 `q` へ答えを送る。設計の承認なら、承認した設計 PR をマージしてから送る（成否によらず送る。#2507）。
+    返すのは `merge_note` の (要約へ足す 1 文, 出力へ足す `merge`)。"""
+    merge = merge_design(main, q) if result == "approved" else None
+    pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
+    return merge_note(merge)
+
+
+def merge_note(merge: dict | None) -> tuple[str, dict]:
+    """答えの要約へ足すマージの結果の 1 文と、出力へ足す `merge`。マージを試していなければ ("", {})。"""
+    if not merge:
+        return "", {}
+    if merge["result"] in ("merged", "already_merged"):
+        return "。設計 PR をマージした", {"merge": merge}
+    return f"。設計 PR をマージできない（{merge['result']}: {merge['reason']}）", {"merge": merge}
