@@ -9,7 +9,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
+from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.release_templates import MVV_NOTE, judge_record_step, mvv_gate_steps
@@ -79,7 +79,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
     mvv, verify = params.mvv, params.verify
     head, base = a.base, params.production or a.production_branch
     if not base:
-        raise DeclError(f"昇格に要る本番チャネルが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
+        raise DeclError(f"昇格に要る本番チャネルが無い（{PRODUCTION_SOURCES}）")
     promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"
     wait = f" --timeout {ci_wait}"
     timeout = ci_wait + max(MARGIN_FLOOR, ci_wait // 10)

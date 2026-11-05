@@ -215,6 +215,8 @@ NEEDS = {
     "sprint": ("base", "test"),
     "close": ("base", "test"),
 }
+# 本番のブランチの出所（決め方の順。決め方の正本は `repo.production_of`）。エラーと案内の文面に使う（#2097 の決定 3）
+PRODUCTION_SOURCES = f"--production-branch・.ndf/{WORKTREE_DECL} の production_branch・既定ブランチ（origin/HEAD → main / master）"
 # 本番のブランチを使う雛形（`--production-branch` を受ける種別と同じ）。ほかの種別では既定ブランチを問い合わせない（git の起動を増やさない）
 USES_PRODUCTION = ("release", "sprint", "close")
 
@@ -253,7 +255,8 @@ def apply_decls(a) -> None:
     sv = read_decl(roots, SUPERVISE_DECL)
     _apply_simple_decls(a, wt, sv)
     if not a.production_branch and roots and a.kind in USES_PRODUCTION:
-        a.production_branch = repo.production_branch(roots[0], wt)[0]
+        # 既定ブランチは、まだ作っていない worktree ではなく存在する木から解く（#2097 の決定 1）
+        a.production_branch = repo.production_branch(repo.first_git_tree(roots), wt)[0]
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
     if getattr(a, "glossary_ready", None) is None:
@@ -319,8 +322,6 @@ def _require_declared(a) -> None:
 def delivery_decl(a) -> "delivery.DeliveryDecl":
     """配布の判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production_branch）が
     宣言より先に効く。読めない宣言は `problems` に書き、例外を上げない。"""
-    import repo
-
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     problems = []
     try:
@@ -335,11 +336,17 @@ def delivery_decl(a) -> "delivery.DeliveryDecl":
         wt,
         project,
         a.release,
-        default_branch=repo.default_branch(roots[0]),
+        default_branch=_default_branch_of(roots),
         problems=problems,
         base=a.base,
         production=a.production_branch,
     )
+
+
+def _default_branch_of(roots) -> str | None:
+    """宣言を探す木の並びのうち、最初に存在する git の木から解いた既定ブランチ（`apply_decls` と同じ木。#2097 の決定 2）。"""
+    tree = repo.first_git_tree(roots)
+    return repo.default_branch(tree) if tree is not None else None
 
 
 def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
