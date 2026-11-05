@@ -2167,3 +2167,89 @@ def test_characterize_active_seconds_held_lap_subtracts_stops_from_each_span():
 def test_characterize_active_seconds_without_held_at_ignores_finish():
     lap = _lap("2026-10-25T00:00:00Z", "2026-10-25T00:30:00Z", release={"finish": _FIN_R})
     assert sl_record.active_seconds({"laps": [lap]}) == pytest.approx(1800.0)
+
+
+# ---------------------------------------------------------------- 現状固定: _select_candidate_rows（1 マイルストーンの候補の採否）
+
+
+def _cand(number, rank, **extra):
+    return {"number": number, "rank": rank, **extra}
+
+
+def _rows(here):
+    return [(r["number"], r["decision"], r["reason"]) for r in here]
+
+
+def test_characterize_select_candidate_rows_fills_max_issues_by_rank_and_drops_the_rest_as_capacity():
+    cands = [_cand(10, 1), _cand(11, 2), _cand(12, 3)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 2, lambda r: None)
+    assert picked == [10, 11]
+    assert _rows(here) == [(10, sl_select.SELECTED, "順位"), (11, sl_select.SELECTED, "順位"), (12, sl_select.DROPPED, "容量")]
+    assert here[0] == {"number": 10, "milestone": "M", "rank": 1, "decision": sl_select.SELECTED, "reason": "順位"}
+
+
+def test_characterize_select_candidate_rows_excluded_rows_keep_their_reason_and_do_not_use_capacity():
+    cands = [_cand(10, 1), _cand(11, 2), _cand(12, 3)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 1, lambda r: "差し戻し" if r["number"] == 10 else None)
+    assert picked == [11]
+    assert _rows(here) == [(10, sl_select.DROPPED, "差し戻し"), (11, sl_select.SELECTED, "順位"), (12, sl_select.DROPPED, "容量")]
+
+
+def test_characterize_select_candidate_rows_calls_reason_for_once_per_candidate_in_order():
+    seen = []
+    cands = [_cand(10, 1), _cand(11, 2), _cand(12, 3)]
+    sl_select._select_candidate_rows(cands, "M", 0, lambda r: seen.append(r["number"]))
+    assert seen == [10, 11, 12]
+
+
+def test_characterize_select_candidate_rows_zero_max_issues_drops_every_open_row_as_capacity():
+    cands = [_cand(10, 1), _cand(11, 2)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 0, lambda r: None, first={11})
+    assert picked == []
+    assert _rows(here) == [(11, sl_select.DROPPED, "容量"), (10, sl_select.DROPPED, "容量")]
+
+
+def test_characterize_select_candidate_rows_first_issues_take_capacity_first_and_move_to_the_front():
+    cands = [_cand(10, 1), _cand(11, 2), _cand(12, 3)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 2, lambda r: None, first={12})
+    assert picked == [12, 10]
+    assert _rows(here) == [(12, sl_select.SELECTED, "直しの先頭"), (10, sl_select.SELECTED, "順位"), (11, sl_select.DROPPED, "容量")]
+
+
+def test_characterize_select_candidate_rows_excluded_first_issue_keeps_its_rank_position_and_reason():
+    cands = [_cand(10, 1), _cand(11, 2)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 1, lambda r: "人の判断待ち" if r["number"] == 11 else None, first={11})
+    assert picked == [10]
+    assert _rows(here) == [
+        (10, sl_select.SELECTED, "順位"),
+        (11, sl_select.DROPPED, "人の判断待ち"),
+    ]  # 前へ移るのは外されなかった先頭の課題だけ
+
+
+def test_characterize_select_candidate_rows_quality_slot_takes_capacity_before_rank_but_keeps_rank_order():
+    cands = [_cand(10, 1), _cand(11, 2), _cand(12, 3, quality_slot=True)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 2, lambda r: None, first={11})
+    assert picked == [11, 12]
+    assert _rows(here) == [(11, sl_select.SELECTED, "直しの先頭"), (10, sl_select.DROPPED, "容量"), (12, sl_select.SELECTED, "品質の枠")]
+
+
+def test_characterize_select_candidate_rows_approved_reason_wins_over_first_and_quality_slot():
+    cands = [_cand(10, 1, quality_slot=True), _cand(11, 2), _cand(12, 3)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 3, lambda r: None, first={11}, approved={10, 11})
+    assert picked == [11, 10, 12]
+    assert _rows(here) == [
+        (11, sl_select.SELECTED, sl_select.APPROVED_REASON),
+        (10, sl_select.SELECTED, sl_select.APPROVED_REASON),
+        (12, sl_select.SELECTED, "順位"),
+    ]
+
+
+def test_characterize_select_candidate_rows_approved_alone_does_not_take_capacity_first():
+    cands = [_cand(10, 1), _cand(11, 2)]
+    picked, here = sl_select._select_candidate_rows(cands, "M", 1, lambda r: None, approved={11})
+    assert picked == [10]
+    assert _rows(here) == [(10, sl_select.SELECTED, "順位"), (11, sl_select.DROPPED, "容量")]
+
+
+def test_characterize_select_candidate_rows_empty_candidates():
+    assert sl_select._select_candidate_rows([], "M", 2, lambda r: None) == ([], [])
