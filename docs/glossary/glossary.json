@@ -5444,6 +5444,18 @@
       "meaning": "持ち主の記録を誰が持つか。run は入口の 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返す入口が呼ばれるかセッションが終わるまで持つ（#2342）",
       "source": "",
       "pending_source": "issues/issue-2342-design.md"
+    },
+    {
+      "term": "呼び手",
+      "context": "ndf-workflow",
+      "meaning": "関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・雛形・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える",
+      "pending_source": "issues/issue-2369-requirements.md"
+    },
+    {
+      "term": "残す関数の一覧",
+      "context": "ndf-workflow",
+      "meaning": "関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。置き場は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの",
+      "pending_source": "issues/issue-2369-design.md"
     }
   ]
 }
