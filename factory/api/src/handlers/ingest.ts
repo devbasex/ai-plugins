@@ -5,24 +5,8 @@ import { handle } from "hono/aws-lambda";
 import { createIngestApp, type IngestDeps } from "../progress/app.ts";
 import { runJobTokenVerifierFromEnv } from "../progress/run-job-token.ts";
 import { savedAnswersFromEnv } from "../progress/saved-answers.ts";
-import { DynamoProgressEventStore, type ProgressEventStore } from "../progress/store.ts";
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`環境変数 ${name} がありません`);
-  return value;
-}
-
-let store: ProgressEventStore | null = null;
-
-// 進捗の記録の保存。受け口と appendControlEvent が同じものを使う
-export function progressStoreFromEnv(): ProgressEventStore {
-  store ??= new DynamoProgressEventStore(
-    requireEnv("PROGRESS_EVENTS_TABLE_NAME"),
-    requireEnv("PROGRESS_IDEMPOTENCY_TABLE_NAME"),
-  );
-  return store;
-}
+import { requireEnv } from "../env.ts";
+import { progressStoreFromEnv } from "../progress/deps.ts";
 
 let webhookSecret: Promise<string> | null = null;
 

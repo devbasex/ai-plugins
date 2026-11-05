@@ -1,11 +1,10 @@
 import type { Context, Hono } from "hono";
 import { ForbiddenError, InvalidRequestError } from "../errors.ts";
-import { isExecutionMode, isSeatType, type AccountContext } from "../accounts/model.ts";
+import { isExecutionMode, type AccountContext } from "../accounts/model.ts";
+import { validateSeatType } from "../accounts/service.ts";
 import { resolveFromRequest, type AuthEnv } from "../auth/resolve.ts";
 import { registerOperation } from "./operation.ts";
-import { accountDetail, seatView } from "./views.ts";
-
-const SEAT_TYPE_MESSAGE = "席の種類は standard か premium です";
+import { accountDetailBody, seatView } from "./views.ts";
 
 function userIdOf(raw: unknown): string {
   if (typeof raw !== "string" || raw === "" || raw.length > 128) throw new InvalidRequestError("利用者の ID の形ではありません");
@@ -25,8 +24,7 @@ export function registerAccounts(app: Hono<AuthEnv>): void {
       const accounts = c.get("auth").accounts;
       const account = await accounts.getAccount(ctx.accountId);
       if (!account) throw new ForbiddenError();
-      const seats = ctx.kind === "team" ? await accounts.listSeats(ctx) : null;
-      return accountDetail(ctx, account, seats);
+      return accountDetailBody(accounts, ctx, account);
     },
   });
 
@@ -38,25 +36,23 @@ export function registerAccounts(app: Hono<AuthEnv>): void {
       }
       const accounts = c.get("auth").accounts;
       const account = await accounts.setExecutionMode(ctx, e.execution_mode);
-      const next = { ...ctx, executionMode: account.executionMode, plan: account.plan };
-      const seats = next.kind === "team" ? await accounts.listSeats(next) : null;
-      return accountDetail(next, account, seats);
+      return accountDetailBody(accounts, { ...ctx, executionMode: account.executionMode, plan: account.plan }, account);
     },
   });
 
   registerOperation(app, "addSeat", {
     run: async (e, ctx, _s, c) => {
       const userId = userIdOf(e.user_id);
-      if (!isSeatType(e.seat_type)) throw new InvalidRequestError(SEAT_TYPE_MESSAGE);
-      return seatView(await c.get("auth").accounts.addSeat(ctx!, userId, e.seat_type));
+      const seatType = validateSeatType(e.seat_type);
+      return seatView(await c.get("auth").accounts.addSeat(ctx!, userId, seatType));
     },
   });
 
   registerOperation(app, "changeSeat", {
     run: async (e, ctx, _s, c) => {
       const userId = userIdOf(e.user_id);
-      if (!isSeatType(e.seat_type)) throw new InvalidRequestError(SEAT_TYPE_MESSAGE);
-      return seatView(await c.get("auth").accounts.changeSeat(ctx!, userId, e.seat_type));
+      const seatType = validateSeatType(e.seat_type);
+      return seatView(await c.get("auth").accounts.changeSeat(ctx!, userId, seatType));
     },
   });
 

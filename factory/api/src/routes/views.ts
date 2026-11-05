@@ -1,5 +1,6 @@
 import { getLimits } from "../accounts/limits.ts";
 import type { AccountContext, AccountRecord, SeatRecord, UserRecord } from "../accounts/model.ts";
+import type { AccountService } from "../accounts/service.ts";
 
 // 応答の本文の形（factory/contracts/openapi/accounts.yaml）
 export function accountSummary(ctx: AccountContext, name: string | null) {
@@ -29,4 +30,10 @@ export function accountDetail(
     limits: limits && { concurrent_sprint_runs: limits.concurrentSprintRuns, monthly_tokens: limits.monthlyTokens },
     seats: seats && seats.map(seatView),
   };
+}
+
+// アカウントの詳細の本文。チームなら席を読んで載せ、個人なら seats を null にする
+export async function accountDetailBody(accounts: AccountService, ctx: AccountContext, account: Pick<AccountRecord, "name">) {
+  const seats = ctx.kind === "team" ? await accounts.listSeats(ctx) : null;
+  return accountDetail(ctx, account, seats);
 }
