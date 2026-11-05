@@ -206,3 +206,69 @@ def test_existing_issue_documents_pass():
     assert files
     code, out = run(REPO, "--file", *files)
     assert code == 0, out["items"][:5]
+
+
+def _load_survey():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("design_survey_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_judge_group_items_and_counts_are_fixed():
+    """judge_group の指摘の名前・規則・行の文と、数えた値を固定する（I-004 の現状固定）。"""
+    mod = _load_survey()
+    doc = mod.Doc(
+        "issues/issue-1-design.md",
+        design(
+            SURVEY,
+            decisions(
+                decision(1, "自前で作る", None),
+                decision(2, "自前で作る", "LIB1・LIB9"),
+                decision(3, "手で書く", None),
+                decision(4, None, "PRD2"),
+                decision(5, "ライブラリやサービスを使う", "LIB1"),
+            ),
+        ),
+    )
+    items, counts = mod.judge_group([doc])
+    assert counts == {"decisions": 5, "with_method": 4, "self_built": 2, "skipped": 0}
+    got = [(it["rule"], it["name"].split(" 決定 ")[1], it["text"]) for it in items]
+    assert got == [
+        ("no_candidates", "1", "- 作り方: 自前で作る"),
+        ("unknown_candidate", "2", "- 比べた候補: LIB1・LIB9"),
+        ("unknown_method", "3", "- 作り方: 手で書く"),
+        ("unknown_candidate", "4", "- 比べた候補: PRD2"),
+    ]
+    doc_lines = design(SURVEY, decisions(decision(1, "自前で作る", None))).splitlines()
+    first = items[0]["name"]
+    path, rest = first.split(":", 1)
+    assert path == "issues/issue-1-design.md"
+    line_no = int(rest.split(" ")[0])
+    assert doc_lines[line_no - 1] == "- 作り方: 自前で作る"
+
+
+def test_judge_group_skip_and_group_wide_candidates_are_fixed():
+    """省いたまとまりは no_candidates を出さず、候補は同じまとまりの別の文書から解決する。"""
+    mod = _load_survey()
+    skip_doc = mod.Doc("issues/issue-2-design.md", design(SKIP))
+    dec_doc = mod.Doc("issues/issue-2-design-decisions.md", design(decisions(decision(1, "自前で作る", None))))
+    items, counts = mod.judge_group([skip_doc, dec_doc])
+    assert items == []
+    assert counts == {"decisions": 1, "with_method": 1, "self_built": 1, "skipped": 1}
+
+    survey_doc = mod.Doc("issues/issue-3-design.md", design(SURVEY))
+    other = mod.Doc("issues/issue-3-design-decisions.md", design(decisions(decision(1, "自前で作る / 標準に倣う", "LIB1"))))
+    items, counts = mod.judge_group([survey_doc, other])
+    assert items == []
+    assert counts == {"decisions": 1, "with_method": 1, "self_built": 1, "skipped": 0}
+
+
+def test_judge_group_empty_method_value_is_unknown_method():
+    mod = _load_survey()
+    doc = mod.Doc("x.md", design(SURVEY, decisions(decision(1, "", None))))
+    items, counts = mod.judge_group([doc])
+    assert [it["rule"] for it in items] == ["unknown_method"]
+    assert counts == {"decisions": 1, "with_method": 1, "self_built": 0, "skipped": 0}
