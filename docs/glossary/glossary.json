@@ -5535,6 +5535,18 @@
       "context": "ndf-workflow",
       "meaning": "人が承認ゲートや問いに返す答えの区分。承認・直して出し直す・やらない・予算・止めるの 5 つ",
       "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "自動の出し直し",
+      "context": "ndf-workflow",
+      "meaning": "出し直しの設計が出し直しの指摘の項目を指摘への対応の表に示していないとき、人へ問わずに開発ループが自分で付ける「直して出し直す」の答え。届いていない項目を名指しする。人の出し直しの 1 回につき 1 回まで",
+      "pending_source": "issues/issue-2510-design.md"
+    },
+    {
+      "term": "出し直しの指摘の入力",
+      "context": "ndf-workflow",
+      "meaning": "開発ループが周回ごとに、課題の全回の出し直しの指摘をループの記録から書き出したファイル。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
+      "pending_source": "issues/issue-2510-design.md"
     }
   ]
 }
