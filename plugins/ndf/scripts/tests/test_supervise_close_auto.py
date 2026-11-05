@@ -35,6 +35,14 @@ def test_carry_reaches_the_refinement_prompt_and_record_pr_overrides(tmp_path):
     assert "--record-pr 77 " in steps["close"]["cmd"]
 
 
+def test_refine_record_reads_the_plan_progress_and_takes_loop_and_lap(tmp_path):
+    """#2315 の 17b-1・17b-2: 記録のステップは同じプランの進行の記録を読み、開発ループと周回は渡したときだけ入る。"""
+    cmd = steps_of(load(close(tmp_path, "--pace", "auto", "--loop", "l1", "--lap", "3")["ステージ"][0]["plans"][0]))["refine-record"]["cmd"]
+    assert "--progress '{state_dir}/progress.jsonl'" in cmd and "--loop l1 --lap 3" in cmd
+    cmd = steps_of(load(close(tmp_path, "--pace", "auto")["ステージ"][0]["plans"][0]))["refine-record"]["cmd"]
+    assert "--progress" in cmd and "--loop" not in cmd and "--lap" not in cmd
+
+
 def test_without_pace_the_close_is_unchanged(tmp_path):
     manifest = close(tmp_path)
     assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "開発版", "本番", "まとめ"]

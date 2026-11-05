@@ -116,7 +116,7 @@
       "type": "run",
       "cwd": "<TMP>/repo",
       "timeout": 120,
-      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth record --depth diff --sprint m9 --root <TMP>/repo",
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth record --depth diff --sprint m9 --progress '{state_dir}/progress.jsonl' --root <TMP>/repo",
       "next": "overhaul-due"
     },
     {

@@ -49,7 +49,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
 | 再起動の行と印の行を組む（セッションの読み取り・境目の行・`cut` と再起動の付与） | `lib/context_decisions.py` の `record_row` | `context-policy.py` の `cmd_record`、同じモジュールの `record_restart`（`sprint-state.py next`） |
 | 正の整数（`bool` を除く）か判定する | `lib/context_policy.py` の `is_positive_int` | 同じモジュールの方針の解決、`lib/context_decisions.py` の `read_window` |
 | 試行方式の拒否の句で使う方針と理由の語 | `lib/context_policy.py` の既存の定数 `TRIAL`・`REASON_CAPACITY`・`REASON_COST` | `hook_lib/token_guard.py` の `_trial_cause` |
-| 「その深さを実行した」行の判定と、最後に実行した行の位置 | `backlog-refinement/scripts/upkeep_depth.py` の `_is_ran`・`_last_ran` | 同じファイルの `diffs_since`・`_ran`・`_due_overhaul` |
+| 「その深さを実行した」行の判定と、最後に実行した行の位置 | `backlog-refinement/scripts/upkeep_depth.py` の `_is_ran`・`_last_ran` | 同じファイルの `diffs_since`・`_ran`・`_due_overhaul`・`compare_rows` |
 
 **`clock.parse` は前後の空白と小文字の `z` も読む。** NDF の記録の時刻は `clock.now_iso` が書くため、
 この 2 つを含む時刻は記録に現れず、記録を読む結果は変わらない。形の違う時刻の読み取り

@@ -363,8 +363,6 @@ def test_wait_notice_names_wrapper_and_attach():
 
 # ---------------------------------------------------------------- tmux を通す振る舞い（AC2〜AC4・AC6・AC7・AC11・AC16・AC20・AC21・AC23）
 
-needs_tmux = pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
-
 
 @pytest.fixture()
 def hubenv(tmp_path):
@@ -400,40 +398,6 @@ def wait_state(t, name, state, timeout=30):
     t.wait(lambda: (ls_rows(t).get(name) or {}).get("state") == state, timeout, f"{name} が {state}")
 
 
-@needs_tmux
-def test_spawn_ls_stop_and_hub_handover(hubenv):
-    hub = hubenv()
-    hub.wait_start(1)
-    p = relay_cli(hub, "spawn", "--name", "lroot", "--json", "--", "mark", "/goal 次")
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert json.loads(p.stdout)["status"] == "ok"
-    wait_state(hub, "lroot", "running")
-    # 最初の入力を受けた区間 1 と、ndf-next で起動した区間 2（端末の結び付いていないラッパーの切り替え。AC3・AC8）
-    hub.wait(lambda: any(s["argv"][-1:] == ["/goal 次"] for s in hub.starts()), 40, "lroot の区間 2")
-    first = next(s for s in hub.starts() if s["argv"][-2:] == ["--", "mark /goal 次"])
-    rows = ls_rows(hub)
-    assert rows["t1"]["hub"] is True and rows["t1"]["attached"] is None
-    assert rows["lroot"]["hub"] is False and rows["lroot"]["attached"] is False
-    assert first["relay_dir"] != hub.starts()[0]["relay_dir"]
-
-    dup = relay_cli(hub, "spawn", "--name", "lroot", "--", "x")
-    assert dup.returncode == 3 and "名前が重なる" in dup.stderr
-
-    # 統括役を kill しても名前つきは動き続け、次の claude が統括役になる（AC21）
-    hub.proc.kill()
-    hub.proc.wait(5)
-    hub.wait(lambda: "t1" not in ls_rows(hub), 20, "統括役のラッパーが一覧から消える")
-    assert ls_rows(hub)["lroot"]["state"] == "running"
-    nxt = hubenv()
-    nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude が統括役になる")
-    assert "lroot" in ls_rows(nxt)
-
-    st = relay_cli(nxt, "stop", "lroot")
-    assert st.returncode == 0, st.stderr
-    wait_state(nxt, "lroot", "stopped")
-    assert ls_rows(nxt)["t1"]["state"] == "running"
-
-
 def hb_pid(t):
     p = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "hub" / "hub.json"
     try:
@@ -442,50 +406,87 @@ def hb_pid(t):
         return None
 
 
-@needs_tmux
-def test_second_claude_attaches_and_survives_terminal_close(hubenv):
-    hub = hubenv()
-    hub.wait_start(1)
-    second = hubenv()
-    hub.wait(lambda: (ls_rows(hub).get("t2") or {}).get("attached") is True, 40, "2 本目が t2 へ結び付く")
-    assert ls_rows(hub)["t2"]["state"] == "running"
-    second.close()  # 端末を閉じる（AC7）
-    hub.wait(lambda: ls_rows(hub)["t2"]["attached"] is False, 20, "端末が外れる")
-    assert ls_rows(hub)["t2"]["state"] == "running"
-
-
-@needs_tmux
-def test_limit_refuses_from_terminal_and_spawn(hubenv):
-    hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
-    hub.wait_start(1)
-    assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
-    p = relay_cli(hub, "spawn", "--name", "b", "--json", "--", "x")
-    res = json.loads(p.stdout)
-    assert p.returncode == 3 and res["items"][0]["result"] == "limit" and "上限 2" in res["summary"]
-    third = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
-    assert third.finish() == 3
-    assert "上限 2" in third.text
-
-
-@needs_tmux
-def test_killed_named_wrapper_shows_stopped(hubenv):
-    hub = hubenv()
-    hub.wait_start(1)
-    assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
-    wait_state(hub, "a", "running")
-    # 一覧の running は起動した直後（ロックの前）の登録簿の行でも立つ。ラッパーが pid を書くまで待つ
-    hub.wait(lambda: any(n == "a" and (d / "relay.pid").exists() for d, n in hb_scan(hub)), 30, "a が pid を書く")
-    d = next(d for d, n in hb_scan(hub) if n == "a" and (d / "relay.pid").exists())
-    os.kill(int((d / "relay.pid").read_text()), 9)
-    wait_state(hub, "a", "stopped")
-    assert ls_rows(hub)["t1"]["state"] == "running"
-
-
 def hb_scan(t):
     root = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
     return [
         (d, (d / "name").read_text().strip() if (d / "name").exists() else None) for d in root.iterdir() if d.name != "hub" and d.is_dir()
     ]
+
+
+class TestWithTmux:
+    """tmux を使う 4 件。tmux の有無は根の `conftest.py` の前提のコマンドの一覧がこのクラスの単位で決める。"""
+
+    def test_spawn_ls_stop_and_hub_handover(self, hubenv):
+        hub = hubenv()
+        hub.wait_start(1)
+        p = relay_cli(hub, "spawn", "--name", "lroot", "--json", "--", "mark", "/goal 次")
+        assert p.returncode == 0, p.stdout + p.stderr
+        assert json.loads(p.stdout)["status"] == "ok"
+        wait_state(hub, "lroot", "running")
+        # 最初の入力を受けた区間 1 と、ndf-next で起動した区間 2（端末の結び付いていないラッパーの切り替え。AC3・AC8）
+        hub.wait(lambda: any(s["argv"][-1:] == ["/goal 次"] for s in hub.starts()), 40, "lroot の区間 2")
+        first = next(s for s in hub.starts() if s["argv"][-2:] == ["--", "mark /goal 次"])
+        rows = ls_rows(hub)
+        assert rows["t1"]["hub"] is True and rows["t1"]["attached"] is None
+        assert rows["lroot"]["hub"] is False and rows["lroot"]["attached"] is False
+        assert first["relay_dir"] != hub.starts()[0]["relay_dir"]
+
+        dup = relay_cli(hub, "spawn", "--name", "lroot", "--", "x")
+        assert dup.returncode == 3 and "名前が重なる" in dup.stderr
+
+        # 統括役を kill しても名前つきは動き続け、次の claude が統括役になる（AC21）
+        hub.proc.kill()
+        hub.proc.wait(5)
+        hub.wait(lambda: "t1" not in ls_rows(hub), 20, "統括役のラッパーが一覧から消える")
+        assert ls_rows(hub)["lroot"]["state"] == "running"
+        nxt = hubenv()
+        nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude が統括役になる")
+        assert "lroot" in ls_rows(nxt)
+
+        st = relay_cli(nxt, "stop", "lroot")
+        assert st.returncode == 0, st.stderr
+        wait_state(nxt, "lroot", "stopped")
+        assert ls_rows(nxt)["t1"]["state"] == "running"
+
+    def test_second_claude_attaches_and_survives_terminal_close(self, hubenv):
+        hub = hubenv()
+        hub.wait_start(1)
+        second = hubenv()
+        hub.wait(lambda: (ls_rows(hub).get("t2") or {}).get("attached") is True, 40, "2 本目が t2 へ結び付く")
+        assert ls_rows(hub)["t2"]["state"] == "running"
+        second.close()  # 端末を閉じる（AC7）
+        hub.wait(lambda: ls_rows(hub)["t2"]["attached"] is False, 20, "端末が外れる")
+        assert ls_rows(hub)["t2"]["state"] == "running"
+
+    def test_limit_refuses_from_terminal_and_spawn(self, hubenv):
+        hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
+        hub.wait_start(1)
+        assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
+        p = relay_cli(hub, "spawn", "--name", "b", "--json", "--", "x")
+        res = json.loads(p.stdout)
+        assert p.returncode == 3 and res["items"][0]["result"] == "limit" and "上限 2" in res["summary"]
+        third = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
+        assert third.finish() == 3
+        assert "上限 2" in third.text
+
+    def test_killed_named_wrapper_shows_stopped(self, hubenv):
+        hub = hubenv()
+        hub.wait_start(1)
+        assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
+        wait_state(hub, "a", "running")
+        # 一覧の running は起動した直後（ロックの前）の登録簿の行でも立つ。ラッパーが pid を書くまで待つ
+        hub.wait(lambda: any(n == "a" and (d / "relay.pid").exists() for d, n in hb_scan(hub)), 30, "a が pid を書く")
+        d = next(d for d, n in hb_scan(hub) if n == "a" and (d / "relay.pid").exists())
+        os.kill(int((d / "relay.pid").read_text()), 9)
+        wait_state(hub, "a", "stopped")
+        assert ls_rows(hub)["t1"]["state"] == "running"
+
+
+def test_tmux_class_has_no_skip_of_its_own():
+    """tmux の有無は根の前提のコマンドの一覧だけが決め、4 件は自分で読み飛ばさない（#2346）。"""
+    holders = [sys.modules[__name__], TestWithTmux, *(v for k, v in vars(TestWithTmux).items() if k.startswith("test_"))]
+    names = [m.name for h in holders for m in getattr(h, "pytestmark", [])]
+    assert not {"skip", "skipif"} & set(names), names
 
 
 def test_no_tmux_runs_second_in_foreground(tmp_path):

@@ -175,12 +175,14 @@ def refine_steps(a, refs: str, repo: str) -> list[dict]:
     """棚卸し: 差分の棚卸し → 深さの記録 → 大整理（起動するときだけ）→ 見直し（起動するときだけ）。
 
     大整理を見直しより先に置く。両方が起動する周回では、組み直した後の課題で順位を付けるため。"""
+    # 秒・ドル・言語モデルは同じプランの進行の記録の refine の行から写す（#2315 の決定 2）。開発ループと周回は引数で受ける（決定 3）
+    scope = [x for k in ("loop", "lap") if getattr(a, k, None) is not None for x in (f"--{k}", str(getattr(a, k)))]
     record = {
         "id": "refine-record",
         "type": "run",
         "cwd": repo,
         "timeout": 120,
-        "cmd": _upkeep(repo, "depth", "record", "--depth", "diff", "--sprint", a.name),
+        "cmd": _upkeep(repo, "depth", "record", "--depth", "diff", "--sprint", a.name, "--progress", "{state_dir}/progress.jsonl", *scope),
         "next": "overhaul-due",
     }
     return [
