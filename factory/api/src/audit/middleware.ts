@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { OPERATIONS, findOperation, type Operation } from "@ndf-factory/contracts/operations";
-import { isMcpInternal, type AuthEnv } from "../auth/resolve.ts";
+import { isDelegationAuthorization, isMcpInternal, type AuthEnv } from "../auth/resolve.ts";
 import { ServiceUnavailableError } from "../errors.ts";
 import { toItem, type AuditLog, type AuditOutcome, type AuditRecord } from "./log.ts";
 
@@ -36,7 +36,7 @@ async function recordOf(c: Context<AuthEnv>, at: string): Promise<AuditRecord> {
   const caller = c.get("caller");
   const trace = c.get("operation");
   // 呼び出し元の種類は資格情報の種類と内部の印だけで決め、外から届くほかのヘッダーを見ない（I16）
-  const delegated = (c.req.header("Authorization") ?? "").startsWith("Bearer ndfd_");
+  const delegated = isDelegationAuthorization(c.req.header("Authorization"));
   const via = caller?.via ?? (isMcpInternal(c.env) ? "mcp" : delegated ? "api" : "screen");
   const matched = trace ? { op: findOperation(trace.operationId), accountId: trace.accountId } : match(c.req.method, c.req.path);
   const status = c.res.status;

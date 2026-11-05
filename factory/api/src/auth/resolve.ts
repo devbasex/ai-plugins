@@ -3,6 +3,7 @@ import type { AccountService } from "../accounts/service.ts";
 import type { AccountContext, Caller } from "../accounts/model.ts";
 import type { AuditLog } from "../audit/log.ts";
 import type { DelegationService } from "../delegations/service.ts";
+import { CREDENTIAL_PREFIX } from "../delegations/model.ts";
 import { AuthError } from "../errors.ts";
 import { verifyAuthorization, type AccessTokenVerifier } from "./verify.ts";
 
@@ -22,12 +23,17 @@ export function isMcpInternal(env: unknown): boolean {
   return typeof env === "object" && env !== null && (env as Record<symbol, unknown>)[MCP_INTERNAL] === true;
 }
 
-const DELEGATION_PREFIX = "Bearer ndfd_";
+const DELEGATION_PREFIX = `Bearer ${CREDENTIAL_PREFIX}`;
+
+// Authorization の値が委任の資格情報か（頭で決める）。認証の分岐（E2）と記録の via（I16）が同じ判定を使う
+export function isDelegationAuthorization(header: string | undefined): boolean {
+  return header?.startsWith(DELEGATION_PREFIX) ?? false;
+}
 
 // Authorization の値を、委任の資格情報（頭が ndfd_）か Cognito の access token として検証する（E2）。どの失敗も 401
 export async function verifyCaller(deps: AuthDeps, authorization: string | undefined, mcp: boolean): Promise<Caller> {
-  if (authorization?.startsWith(DELEGATION_PREFIX)) {
-    const verified = deps.delegations ? await deps.delegations.verify(authorization.slice("Bearer ".length)) : null;
+  if (isDelegationAuthorization(authorization)) {
+    const verified = deps.delegations ? await deps.delegations.verify(authorization!.slice("Bearer ".length)) : null;
     if (!verified) throw new AuthError();
     return {
       userId: verified.userId,

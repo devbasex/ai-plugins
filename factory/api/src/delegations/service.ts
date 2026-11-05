@@ -36,7 +36,7 @@ function base32(bytes: Buffer): string {
   return out;
 }
 
-const VALUE = /^ndfd_([a-z2-7]{26})_([A-Za-z0-9_-]{43})$/;
+const VALUE = new RegExp(`^${CREDENTIAL_PREFIX}([a-z2-7]{26})_([A-Za-z0-9_-]{43})$`);
 const sha256 = (secret: string) => createHash("sha256").update(secret, "utf8").digest("hex");
 
 // 照合が通った委任の資格情報。人の直の操作と同じ Caller を組むための値と、範囲を持つ
