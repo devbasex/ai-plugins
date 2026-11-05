@@ -789,7 +789,12 @@ def test_mvv_gate_suggests_revision_after_the_unknown_streak(env):
     assert approve(env) == 0
     state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "unknown", "reasons": ["決められない"], "boundary": []}')
-    outs = [gate_check(env, state)[1] for _ in range(3)]
+    # 判定できなかった依頼の数で数える（#2507）: 同じスプリント状態の打ち直しは 1 件、別のスプリント状態なら別の件
+    assert not any(i.get("kind") == "revise" for i in [gate_check(env, state)[1] for _ in range(3)][-1]["items"])
+    states = [state] + [state.with_name(f"m{k}.json") for k in (2, 3)]
+    for s in states[1:]:
+        s.write_text(state.read_text())
+    outs = [gate_check(env, s)[1] for s in states]
     assert [any(i.get("kind") == "revise" for i in o["items"]) for o in outs] == [False, False, True]
     assert gate_check(env, state)[2][-1]["basis"] == [pm.NO_BASIS]
 

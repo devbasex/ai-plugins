@@ -71,8 +71,19 @@ def env(tmp_path, mvv, monkeypatch):
     e.issue_body = lambda n: e.bodies.get(n, "本文\n")
     e.edit_issue = lambda n, b: e.bodies.__setitem__(n, b)
     e.calls = []
+    e.heads = {}  # 設計 PR の先端（gh pr view --json headRefOid）。無ければ HEAD
     e.run = fake_run(e)
+    e.merges = []  # 承認した設計のマージの呼び出し (pr, stamp)。結果は merge_box（#2507）
+    e.merge_box = {"result": "merged", "class": "passed", "reason": ""}
+    monkeypatch.setattr(
+        sl.design_pr_merge,
+        "merge_approved",
+        lambda root, pr, stamp, run=None: e.merges.append((pr, stamp)) or {"pr": pr, "head": stamp, "at": "t", **e.merge_box},
+    )
     return e
+
+
+HEAD = "h" * 40
 
 
 def fake_run(e):
@@ -80,6 +91,8 @@ def fake_run(e):
 
     def run(cmd, cwd=None, stdin=None):
         e.calls.append(cmd)
+        if cmd[:3] == ["gh", "pr", "view"] and "headRefOid" in cmd:
+            return 0, e.heads.get(int(cmd[3]), HEAD), ""
         if "init" in cmd:
             Path(cmd[cmd.index("init") + 1]).write_text(
                 json.dumps({"plans": [], "done": [], "gates": [], "goal_template": "", "versions": {}})
@@ -604,11 +617,14 @@ def test_answers_control_reselection(env):
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
-    assert sl.cmd_answer(env, "l1", 11, True, 501)["status"] == "ok"
+    env.merge_box = {"result": "not_green", "class": "running", "reason": "検査が緑でない（running）"}
+    # 行に承認した先端が無い（設計 PR を答えで渡した）: 答えを当てずに今の先端を記録し、答え直しを求める（#2507）
+    assert sl.cmd_answer(env, "l1", 11, True, 501)["metrics"]["status"] == "regated" and rec(env)["waiting"][0]["stamp"] == HEAD
+    assert sl.cmd_answer(env, "l1", 11, True, None)["status"] == "ok" and env.merges == [(501, HEAD)]
     assert sl.cmd_answer(env, "l1", 12, False, None)["status"] == "ok"
     assert sl.cmd_answer(env, "l1", 12, True, None)["exit"] == 1  # もう待っていない
     r = rec(env)
-    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "設計 PR がマージ待ち"
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "設計 PR がマージ待ち（検査が緑でない（running））"
     assert sl_select.exclusion_reason(env, r, {"number": 12}, 2, set()) == "差し戻し"
     env.prs[501] = "MERGED"
     assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) is None and r["waiting"][0]["merged_at"]
@@ -874,10 +890,11 @@ def test_gate_1_takes_the_verdict_of_the_plan_design_pr_and_saves_the_pr_as_a_nu
     w = rec(env)["waiting"][0]
     assert (w["number"], w["pr"], w["reason"], w["verdict"]) == (11, 501, "11 の理由", "従わない")
     env.calls.clear()
+    env.merge_box = {"result": "conflict", "class": "passed", "reason": "宛先と衝突している"}
     sl.cmd_answer(env, "l1", 11, True, None)
     gate = next(c for c in env.calls if "gate" in c)
     assert gate[gate.index("--pr") + 1] == "501"
-    assert sl_select.exclusion_reason(env, rec(env), {"number": 11}, 2, set()) == "設計 PR がマージ待ち"
+    assert sl_select.exclusion_reason(env, rec(env), {"number": 11}, 2, set()) == "設計 PR がマージ待ち（宛先と衝突している）"
 
 
 def approve_gate_2(lap):

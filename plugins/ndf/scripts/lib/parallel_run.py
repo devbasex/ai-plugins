@@ -359,7 +359,7 @@ class _Run:
         q = next(q for q in self.questions if q.get("id") == rid)
         for each in [rid, *q.get("also", [])]:
             self.answered.add(each)
-            durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "at")})
+            durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "merge", "by", "at")})
         self.questions = [q for q in self.questions if q.get("id") != rid]
         self.publish_questions()
         owners = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))} & self.sprint & self.stopped()

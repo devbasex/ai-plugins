@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+import design_pr_merge
 import jsonio
 import project_mvv as pm
 import repo as repo_lib
@@ -371,13 +372,43 @@ def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None,
                 text = Path(note or "").read_text(encoding="utf-8").strip()
             except OSError as e:
                 return refusal_order(f"指摘ファイルを読めない: {e}")
+        if pr:
+            w["pr"] = pr
+        if approved and w.get("pr") and (moved := regated_answer(env, w)):
+            write_record(env, rec, before)
+            return loop_ok(moved, rec, [w], status="regated")
         notes = apply_answer(env, rec, w, "revise" if revise else ("approved" if approved else "rejected"), pr, text if revise else None)
+        merge = None
+        if approved and w.get("pr"):  # 承認した設計のマージ（#2507）。成否によらず答えは書き、0 で返る（I4）
+            out = design_pr_merge.merge_approved(env.main_dir(), int(w["pr"]), w.get("stamp"), run=env.run)
+            merge = sprint_loop_gate.note_merge(w, out, w.get("lap") or len(rec["laps"]), env.now())
         write_record(env, rec, before)
         if revise:
             after = "次の周回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
+        elif not approved:
+            after = "選定の対象に戻さない（差し戻し）"
+        elif merge and merge["result"] in sprint_loop_gate.MERGED_RESULTS:
+            after = "設計 PR をマージした。次の周回で先頭に選ぶ"
+        elif merge and merge["result"] == "production":
+            after = f"設計 PR をマージしない（{merge['reason']}）。承認ゲート 2 で人がマージするまで実装に選ばない"
+        elif merge:
+            after = f"設計 PR をマージできない（{merge['result']}: {merge['reason']}）。次の周回の境でマージし直す"
         else:
-            after = "設計 PR のマージの後の周回で選定の対象に戻る" if approved else "選定の対象に戻さない（差し戻し）"
+            after = "設計 PR のマージの後の周回で選定の対象に戻る"
         return loop_ok(f"#{number} の答え（{w['answer']}）を書いた。{after}", rec, [w, *({"note": n} for n in notes)], status="answered")
+
+
+def regated_answer(env: Env, w: dict) -> str | None:
+    """1 本のループの承認の答えの前に、承認した先端と今の先端を比べる（#2507）。違えば（または行に承認した先端が無ければ）、
+    答えを当てずに行の承認した先端を今の先端へ書き換え、答え直しを促す 1 行を返す。読めなければ比べない（マージの部品が読み直す）。"""
+    head = sprint_loop_gate.design_head(env, w)
+    stamp = w.get("stamp") or ""
+    if not head or head == stamp:
+        return None
+    w.update(stamp=head, restamped=stamp)
+    if not stamp.strip("0"):
+        return f"#{w['number']} の設計 PR #{w['pr']} の承認した先端が記録に無い。今の先端 {head[:12]} を記録した。この先端を見てから答え直す"
+    return f"#{w['number']} の設計 PR #{w['pr']} の先端が問いの後に動いた（{stamp[:12]} → {head[:12]}）。新しい先端を見てから答え直す"
 
 
 def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note: str | None = None) -> list[str]:
@@ -395,7 +426,7 @@ def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note
         return notes
     lap = rec["laps"][w["lap"] - 1]
     state = lap.get("state_path")
-    if state:
+    if state and w.get("by") != "mvv":  # MVV 判定で承認した答え（#2507）は mvv-gate.py が承認の記録を書いた。書き直さない
         cmd = [
             sys.executable,
             str(SPRINT_STATE),
@@ -430,8 +461,11 @@ def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
             code, so, se = env.run(["gh", "pr", "edit", str(w["pr"]), "--add-label", "design-approved"], cwd=str(env.main_dir()))
             if code != 0:
                 w["label_error"] = (se or so).strip()[:200]
+            w["by"] = "mvv" if a.get("by") == "mvv" else "user"
         if result in ("approved", "rejected", "revise"):
             apply_answer(env, rec, w, result, w.get("pr"), a.get("note"))
+        if result == "approved" and isinstance(a.get("merge"), dict):  # オーガナイザーが答えの前に試みたマージの結果を写す（#2507）
+            sprint_loop_gate.note_merge(w, a["merge"], w.get("lap") or len(rec["laps"]), env.now())
 
 
 def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
