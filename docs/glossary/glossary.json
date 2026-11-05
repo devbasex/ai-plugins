@@ -5023,6 +5023,12 @@
       "source": "docs/specifications/ndf-worker-stage-skills.md"
     },
     {
+      "term": "読む Skill の guard",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が ndf:worker を起動する Agent の呼び出しを PreToolUse の hook で見て、「読む Skill」の欄が無い起動と、Skill の対応表を引かずに Skill を挙げた起動を止める判定。止めた理由に正本の「supervisor → worker」の節を添える（#2399）",
+      "pending_source": "issues/issue-2399-design.md"
+    },
+    {
       "term": "規則の Skill",
       "context": "ndf-workflow",
       "meaning": "手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376）",
