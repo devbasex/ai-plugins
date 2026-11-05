@@ -15,6 +15,7 @@ import gh_sections
 import jsonio
 import project_mvv as pm
 import step_result
+from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
 
 from sprint_loop_record import (
     TOOL,
@@ -413,9 +414,6 @@ def regate1(env: Env, w: dict) -> bool:
     if head and (sent := lane_gate1(env, w, w.get("report") or "", w.get("state") or "")):
         w.update(sent, restamped=stamp)
     return True
-
-
-MERGED_RESULTS = ("merged", "already_merged")
 
 
 def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:

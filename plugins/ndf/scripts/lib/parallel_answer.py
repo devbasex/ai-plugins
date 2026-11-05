@@ -105,6 +105,8 @@ def merge_note(merge: dict | None) -> tuple[str, dict]:
     """答えの要約へ足すマージの結果の 1 文と、出力へ足す `merge`。マージを試していなければ ("", {})。"""
     if not merge:
         return "", {}
-    if merge["result"] in ("merged", "already_merged"):
+    import design_pr_merge
+
+    if merge["result"] in design_pr_merge.MERGED_RESULTS:
         return "。設計 PR をマージした", {"merge": merge}
     return f"。設計 PR をマージできない（{merge['result']}: {merge['reason']}）", {"merge": merge}

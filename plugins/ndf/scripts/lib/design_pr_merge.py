@@ -24,6 +24,7 @@ import delivery
 
 MERGED_STEPS = Path(__file__).resolve().parents[1] / "merged-steps.py"
 RESULTS = ("merged", "already_merged", "head_moved", "no_stamp", "not_green", "conflict", "production", "failed")
+MERGED_RESULTS = ("merged", "already_merged")  # マージ済みに当たる結果
 # 答えの待ちの上限（非機能の実現方式）。緑なら 1 回目の読みから 5 秒後の確かめ直しでマージし、10 秒を過ぎた最初の読みで切れる
 WAIT_ARGS = ["--timeout", "10", "--interval", "5", "--recheck", "5", "--no-checks-after", "5"]
 UNREGISTERED = "unregistered"  # 必須の検査がまだ検査の一覧に載っていない・検査が無いと確かめられない
