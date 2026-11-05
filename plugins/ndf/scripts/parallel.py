@@ -400,8 +400,8 @@ def cmd_answer(a) -> None:
     seq, items = pa.questions(main, a.name)
     q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
     nxt = pa.owner_restart(main, a.name, a.id, a.choice, items)
-    tail, extra = pa.answer_with_merge(main, a.name, q, result, note=note, choice=a.choice, by=a.by)
-    extra.update(id=a.id, result=result, next=nxt, seq=seq, after=pa.after_items(items, q))
+    tail, extra = pa.answer_with_merge(main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
+    extra.update(id=a.id, result=result, next=nxt, seq=seq)
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
 
 

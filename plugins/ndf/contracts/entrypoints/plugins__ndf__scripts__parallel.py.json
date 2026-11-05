@@ -217,6 +217,7 @@
   "stdout": "step-result",
   "writes": [
     "answer-json",
+    "answers-sent-json",
     "approved-txt",
     "breakdown-md",
     "plan-json",

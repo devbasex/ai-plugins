@@ -39,17 +39,41 @@ def mvv_mark(q: dict) -> dict:
     return {"eligible": True, "why": f"レーンの判定が決まらなかった（{q.get('verdict')}）"}
 
 
-def after_items(items: list[dict], answered: dict) -> list[dict]:
-    """答えの後に残る依頼の一覧（`metrics.after`）。今答えた依頼を除き、機械で決まる除外の印（drop）と MVV 判定の印（mvv）を付ける。
-    drop: settled（今送った答えと同じ設計 PR の依頼）/ resend（同じレーンの同じ設計 PR に、より新しい先端の依頼がある）/ None。"""
-    rid = answered.get("id")
-    rest = [q for q in items if q.get("id") != rid and rid not in (q.get("also") or [])]
+SENT = "answers-sent.json"  # 送ったが耐久ワークフローがまだ一覧から外していない答え（計画のディレクトリに置く）
+
+
+def sent_answers(main: Path, name: str, items: list[dict]) -> list[dict]:
+    """前に送った答えのうち、今の一覧にまだ残る依頼への答え。`send_answer` は受け手の処理を待たないため、続けて答えると
+    一覧に答え済みの依頼が残る。一覧から消えた依頼（受け手が処理した）の答えは落とす。"""
+    import jsonio
+
+    live = {i for q in items for i in (q.get("id"), *(q.get("also") or []))}
+    got = jsonio.read(pl.pp.plan_dir(main, name) / SENT, missing=[], broken=[], want=list)
+    return [s for s in got if isinstance(s, dict) and s.get("id") in live]
+
+
+def remember_answers(main: Path, name: str, sent: list[dict]) -> None:
+    """送った答えの依頼（id・kind・lane・pr）を書き残す。次の `answer` の `metrics.after` から除くため。"""
+    import jsonio
+
+    keep = [{k: s.get(k) for k in ("id", "kind", "lane", "pr")} for s in sent]
+    jsonio.write_atomic(pl.pp.plan_dir(main, name) / SENT, keep)
+
+
+def after_items(items: list[dict], answered: dict, earlier: list[dict] | None = None) -> list[dict]:
+    """答えの後に残る依頼の一覧（`metrics.after`）。今答えた依頼と、前に送ったが受け手がまだ外していない答えの依頼（`earlier`）を除き、
+    機械で決まる除外の印（drop）と MVV 判定の印（mvv）を付ける。
+    drop: settled（送った答えと同じ設計 PR の依頼）/ resend（同じレーンの同じ設計 PR に、より新しい先端の依頼がある）/ None。"""
+    done = [answered, *(earlier or [])]
+    ids = {d.get("id") for d in done}
+    rest = [q for q in items if q.get("id") not in ids and not ids & set(q.get("also") or [])]
     key = lambda q: (q.get("lane"), q.get("pr"))  # noqa: E731
+    settled = {key(d) for d in done if d.get("kind") == "gate1"}
 
     def drop(q: dict) -> str | None:
         if q.get("kind") != "gate1":
             return None
-        if answered.get("kind") == "gate1" and key(q) == key(answered):
+        if key(q) in settled:
             return "settled"
         if any(
             o is not q and o.get("kind") == "gate1" and key(o) == key(q) and str(o.get("at") or "") > str(q.get("at") or "") for o in rest
@@ -95,12 +119,16 @@ def merge_design(main: Path, q: dict) -> dict | None:
     return design_pr_merge.merge_approved(main, int(q["pr"]), q.get("stamp"))
 
 
-def answer_with_merge(main: Path, name: str, q: dict, result: str, **kw) -> tuple[str, dict]:
+def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[dict], **kw) -> tuple[str, dict]:
     """依頼 `q` へ答えを送る。設計の承認なら、承認した設計 PR をマージしてから送る（成否によらず送る。#2507）。
-    返すのは `merge_note` の (要約へ足す 1 文, 出力へ足す `merge`)。"""
+    返すのは (要約へ足す 1 文, 出力へ足す `merge`（`merge_note`）と `after`)。`after` は今の一覧 `items` から、今の答えと、
+    前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）。"""
+    earlier = sent_answers(main, name, items)
     merge = merge_design(main, q) if result == "approved" else None
     pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
-    return merge_note(merge)
+    remember_answers(main, name, [*earlier, q])
+    tail, extra = merge_note(merge)
+    return tail, {**extra, "after": after_items(items, q, earlier)}
 
 
 def merge_note(merge: dict | None) -> tuple[str, dict]:

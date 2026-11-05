@@ -113,3 +113,20 @@ def test_revise_does_not_merge(cli, capsys, tmp_path):
 def test_by_mvv_needs_approved(cli, capsys):
     code, _ = answer(cli, capsys, "la-g501-a", "--rejected", "--by", "mvv")
     assert code == 1 and cli["sent"] == []
+
+
+def test_after_items_also_drop_answers_sent_before_the_workflow_took_them():
+    a, b = gate1("la-g501-a"), gate1("lb-g601-b", lane="lb", pr=601)
+    items = [a, b, gate1("la-g501-old", at="2026-11-04T00:00:00Z"), {"kind": "ask", "id": "lc-q1", "lane": "lc"}]
+    after = {q["id"]: q for q in pa.after_items(items, b, earlier=[a])}
+    assert set(after) == {"la-g501-old", "lc-q1"} and after["la-g501-old"]["drop"] == "settled"
+
+
+def test_answers_in_a_row_leave_the_earlier_one_out_of_after(cli, capsys):
+    cli["items"] = [gate1("la-g501-a"), gate1("lb-g601-b", lane="lb", pr=601)]
+    answer(cli, capsys, "la-g501-a", "--rejected")
+    _, out = answer(cli, capsys, "lb-g601-b", "--rejected")  # 受け手はまだ a を一覧から外していない
+    assert out["metrics"]["after"] == []
+    cli["items"] = [gate1("lc-g701-c", lane="lc", pr=701)]  # 受け手が a・b を処理した
+    _, out = answer(cli, capsys, "lc-g701-c", "--rejected")
+    assert pa.sent_answers(cli["mod"].main_of(), "p1", cli["items"]) == [{"id": "lc-g701-c", "kind": "gate1", "lane": "lc", "pr": 701}]
