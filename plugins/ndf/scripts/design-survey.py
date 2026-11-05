@@ -76,14 +76,14 @@ def _read_survey(text: str, sections: list, prose: list[tuple[int, str]]) -> tup
 
 
 def _read_decisions(sections: list, prose: list[tuple[int, str]]) -> list:
-    """決定の節ごとに（番号, 見出しの行, `作り方:` の行, `比べた候補:` の行）を読む。"""
+    """決定の節ごとに（番号, `作り方:` の行, `比べた候補:` の行）を読む。"""
     decisions = []
     for s in sections:
         m = DECISION_TITLE.match(s.heading.title)
         if not m:
             continue
         body = [(i, ln) for i, ln in prose if s.start <= i < s.end]
-        decisions.append((m.group("n"), s.heading.line, _first_match(body, METHOD_LINE), _first_match(body, CANDIDATES_LINE)))
+        decisions.append((m.group("n"), _first_match(body, METHOD_LINE), _first_match(body, CANDIDATES_LINE)))
     return decisions
 
 
@@ -118,7 +118,7 @@ def _terms(value: str) -> list[str]:
 
 def judge_decision(path: str, decision, known: set, skipped: bool) -> tuple[list[dict], dict]:
     """決定 1 件の指摘と件数を返す。候補の未知を作り方の有無より先に見る。"""
-    n, head, method, cands = decision
+    n, method, cands = decision
     items: list[dict] = []
     counts = {"decisions": 1, "with_method": 0, "self_built": 0}
     ids = CANDIDATE_ID.findall(cands[2]) if cands else []
