@@ -76,8 +76,9 @@ def candidates_of(ms: dict, max_issues: int, held: set[int] = frozenset()) -> li
     elif b:
         idx = next((i for i, r in enumerate(rows) if r["number"] == b["number"]), len(rows) - 1)
         nums = {r["number"] for r in rows[: idx + 1]}
-    else:  # 判断待ちと保留の周回（held）の行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
-        open_rows = [r for r in rows if not r.get("waiting_decision") and r["number"] not in held][:max_issues]
+    else:  # 判断待ち・保留の周回（held）・前提の課題の実装待ちの行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
+        free = [r for r in rows if not r.get("waiting_decision") and not r.get("prerequisites") and r["number"] not in held]
+        open_rows = free[:max_issues]
         last = rows.index(open_rows[-1]) if len(open_rows) == max_issues else len(rows) - 1  # 枠が埋まらなければ末尾まで
         nums = {r["number"] for r in rows[: last + 1]}
     slot = ms.get("large_slot") or {}
@@ -116,6 +117,11 @@ def first_issues(rec: dict) -> set[int]:
     return revise | fixes | approved_designs(rec)
 
 
+def prerequisite_reason(row: dict) -> str:
+    """前提の課題の実装待ちの理由。open の前提の課題の番号を昇順で載せる。"""
+    return "前提の課題の実装待ち（" + " ".join(f"#{b}" for b in sorted(row["prerequisites"])) + "）"
+
+
 def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
     n = row["number"]
     if row.get("waiting_decision"):
@@ -137,6 +143,8 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
     for e in rec.get("excluded", []):
         if e["number"] == n and e.get("lap") == lap_n:
             return e["reason"]
+    if row.get("prerequisites"):  # 前提の課題が閉じるまで選ばない（同じ周回に選ばれていても外す。#2604）
+        return prerequisite_reason(row)
     if n in lap_created:
         return "周回の中で起票された（次の周回の棚卸しの後に選ぶ）"
     if row.get("size") == OVER_SCALE:
@@ -241,6 +249,24 @@ def _settle_conflict(env: Env, rec: dict, w: dict, m: dict, lap_n: int) -> str |
     return _giveback(env, rec, w, f"宛先と衝突し、ベースブランチを取り込めない（{code}）: {(se or so).strip()[:160]}", lap_n)
 
 
+def selected_reason(row: dict, first: set[int], approved: set[int]) -> str:
+    """選んだ課題の理由。承認した設計 → 直しの先頭 → 品質の枠 → 順位 の順に当てる。"""
+    return (
+        APPROVED_REASON if row["number"] in approved
+        else "直しの先頭" if row["number"] in first
+        else "品質の枠" if row.get("quality_slot")
+        else "順位"
+    )  # fmt: skip
+
+
+def _take_order(cands: list[dict], open_: list[int], first: set[int]) -> tuple[list[int], list[int]]:
+    """枠を割り当てる順（先頭に選ぶ課題 → 品質の枠 → 残り）と、先頭に選ぶ課題の添字を返す。"""
+    head = [i for i in open_ if cands[i]["number"] in first]
+    rest = [i for i in open_ if i not in head]
+    take_order = head + [i for i in rest if cands[i].get("quality_slot")] + [i for i in rest if not cands[i].get("quality_slot")]
+    return take_order, head
+
+
 def _select_candidate_rows(
     cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset(), approved: set[int] = frozenset()
 ) -> tuple[list[int], list[dict]]:
@@ -249,9 +275,7 @@ def _select_candidate_rows(
     （品質の枠の最低件数を容量で削らない）。"""
     whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
     open_ = [i for i, w in enumerate(whys) if w is None]
-    head = [i for i in open_ if cands[i]["number"] in first]
-    rest = [i for i in open_ if i not in head]
-    take_order = head + [i for i in rest if cands[i].get("quality_slot")] + [i for i in rest if not cands[i].get("quality_slot")]
+    take_order, head = _take_order(cands, open_, first)
     take = take_order[:max_issues]
     picked, here = [], []
     for i in sorted(range(len(cands)), key=lambda i: (i not in head, i)):  # 先頭に選ぶ課題だけを前へ。ほかは順位の順
@@ -259,12 +283,7 @@ def _select_candidate_rows(
         why = whys[i] if whys[i] is not None or i in take else "容量"
         if why is None:
             picked.append(r["number"])
-            reason = (
-                APPROVED_REASON if r["number"] in approved
-                else "直しの先頭" if r["number"] in first
-                else "品質の枠" if r.get("quality_slot")
-                else "順位"
-            )  # fmt: skip
+            reason = selected_reason(r, first, approved)
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
         else:
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})

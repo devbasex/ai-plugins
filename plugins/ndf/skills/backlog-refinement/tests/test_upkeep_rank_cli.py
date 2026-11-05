@@ -250,6 +250,35 @@ def test_rank_without_sub_issue_api_uses_other_sources(env):
     assert code == 0 and any("サブイシューの API" in n for n in out["metrics"]["notes"])
 
 
+def _rows(out):
+    return {r["number"]: r for m in out["metrics"]["milestones"] for r in m["rows"]}
+
+
+def test_rows_carry_open_prerequisites_from_records_and_parallel_groups_only(env):
+    # #2604 受け入れ条件 3・4・5・8: 記録の depends_on と並列の組の依存の先にある open の課題だけを、昇順で載せる
+    def setup(st):
+        st["issues"]["5"] = _issue(5, "01 近い")
+        st["issues"]["6"] = {**_issue(6, "01 近い"), "state": "closed"}
+        st["issues"]["1"]["sub_issues_summary"] = {"total": 1}
+        st["sub_issues"] = {"1": [5]}  # 子の #5 は親の #1 に依存する（サブイシューの辺だけ）
+        st["milestones"][0]["description"] = M1_DESC.replace("| 1 | #1 #2 | a | なし |", "| 1 | #1 | a | なし |\n| 2 | #2 | b | 1 |")
+
+    env.set(setup)
+    specs = [sc(1, depends_on=[4, 6]), sc(2, depends_on=[3]), sc(3), sc(4), sc(5)]
+    code, out = env.run("rank", "--scores", env.scores(specs))
+    assert code == 0, out
+    rows = _rows(out)
+    assert rows[1]["prerequisites"] == [4]  # 閉じた #6 は載らない。#4 はマイルストーン未設定
+    assert rows[2]["prerequisites"] == [1, 3]  # 並列の組の #1 と、別のマイルストーンの #3
+    assert "prerequisites" not in rows[5] and "prerequisites" not in rows[3]
+
+
+def test_rows_without_dependencies_have_no_prerequisites(env):
+    # #2604 受け入れ条件 9: 依存の記録が無ければ行に項目を出さない
+    _, out = env.run("rank", "--scores", env.scores(BASE))
+    assert all("prerequisites" not in r for r in _rows(out).values())
+
+
 # ---------------- apply ----------------
 
 
