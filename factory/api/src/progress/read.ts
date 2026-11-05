@@ -34,6 +34,8 @@ export interface ProgressReader {
   findLastGate(sprintRunId: string): Promise<{ at: string; jobId: string | null; payload: GateReachedPayload } | null>;
   // 承認の依頼への答え（gate.answered。#2439 の配布のまとめが読む）。無ければ null
   findGateAnswer(sprintRunId: string, approvalRequestId: string): Promise<GateAnsweredPayload | null>;
+  // 実行の gate.reached と gate.answered を order_key の順に（承認待ちの一覧の判定 awaitingGateOf が読む。#2430）
+  listGateEvents(sprintRunId: string): Promise<ProgressEventRecord[]>;
   // ---- スプリントの一覧と詳細（#2172）。どれも本文（step.recorded の files・decisions・output）を返さない ----
   // 実行の事象を order_key の順に。step.recorded は新しい方から stepLimit 件までで、ほかの種類はすべて（I11）
   listRunEvents(sprintRunId: string, stepLimit: number): Promise<RunEvents>;
@@ -206,6 +208,9 @@ export function memoryProgressReader(store: MemoryProgressEventStore): ProgressR
     async findGateAnswer(sprintRunId, approvalRequestId) {
       return gateAnswerOf(store.listRun(sprintRunId), approvalRequestId);
     },
+    async listGateEvents(sprintRunId) {
+      return store.listRun(sprintRunId).filter((e) => GATE_TYPES.includes(e.type));
+    },
     async listRunEvents(sprintRunId, stepLimit) {
       return capSteps(store.listRun(sprintRunId), stepLimit);
     },
@@ -319,6 +324,10 @@ export class DynamoProgressReader implements ProgressReader {
 
   async findGateAnswer(sprintRunId: string, approvalRequestId: string) {
     return gateAnswerOf(await this.listTypes(sprintRunId, GATE_TYPES), approvalRequestId);
+  }
+
+  async listGateEvents(sprintRunId: string): Promise<ProgressEventRecord[]> {
+    return (await this.listTypes(sprintRunId, GATE_TYPES)).sort(byOrderKey);
   }
 
   // 表に type の索引が無いため、実行の事象を全ページ読んでから手元で古い step.recorded を捨てる。

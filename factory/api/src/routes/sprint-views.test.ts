@@ -22,6 +22,7 @@ let tokens: TokenKit;
 let app: ReturnType<typeof createApiApp>;
 let githubCalls: string[];
 let factory: FactoryDeps;
+let accounts: AccountService;
 
 async function call(path: string, user = "u-1"): Promise<TestResponse> {
   return (await app.request(path, { headers: { Authorization: await tokens.bearer(user) } })) as TestResponse;
@@ -32,6 +33,7 @@ const read = async (path: string, user = "u-1") => firstResult(await call(path, 
 const detailPath = (acc: string, id: string) => `/accounts/${acc}/sprint-runs/detail?sprint_run_id=${encodeURIComponent(id)}`;
 const stepPath = (acc: string, id: string, key: string) => `/accounts/${acc}/sprint-runs/steps?sprint_run_id=${encodeURIComponent(id)}&step_key=${encodeURIComponent(key)}`;
 const backlogPath = (acc: string, repositoryId: number) => `/accounts/${acc}/backlogs?repository_id=${repositoryId}`;
+const approvalsPath = (acc: string) => `/accounts/${acc}/sprint-runs/approval-requests`;
 
 async function personal(user: string): Promise<string> {
   return ((await (await call("/me", user)).json())[0] as { personal_account_id: string }).personal_account_id;
@@ -95,7 +97,7 @@ beforeEach(async () => {
   }) as GitHubPort;
   const store = new MemoryAccountStore();
   let n = 0;
-  const accounts = new AccountService({ store, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}` });
+  accounts = new AccountService({ store, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}` });
   const reader = memoryProgressReader(h.progress);
   factory = {
     repositories: new RepositoryService({ table: h.table, github, proofKey: async () => new Uint8Array(32) }),
@@ -289,5 +291,99 @@ describe("配列の受け渡し（#2384 の受け入れ条件 6〜8・15、I12�
     const res = await call(`/accounts/${acc}/sprint-runs/detail?sprint_run_id=sr-1&sprint_run_id=sr-1`);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatchObject({ code: "duplicate_key", details: { key: "sprint_run_id" } });
+  });
+});
+
+describe("詳細の注意の欄（#2430 の受け入れ条件 1〜4）", () => {
+  it("詳細の応答に attention が記録された順に入り、base_conflict 以外の理由も値のまま 200 で返す。0 件は空の配列", async () => {
+    const { acc } = await seed();
+    const conflict = await emit("sr-1", "attention", { reason: "base_conflict", summary: "src/a.ts で衝突" });
+    await emit("sr-1", "attention", { reason: "stopped", summary: "止まった" });
+    const res = await read(detailPath(acc, "sr-1"));
+    expect(res.status).toBe(200);
+    expect(res.body.attention).toEqual([
+      { key: conflict, at: "2026-11-04T00:00:04.000Z", reason: "base_conflict", summary: "src/a.ts で衝突" },
+      { key: "job-1:5", at: "2026-11-04T00:00:05.000Z", reason: "stopped", summary: "止まった" },
+    ]);
+    expect((await read(detailPath(acc, "sr-2"))).body.attention).toEqual([]);
+  });
+});
+
+describe("承認待ちの一覧の経路（#2430 の受け入れ条件 5・6・8・10・I3〜I7）", () => {
+  const gate = (kind: string, loop?: { name: string; lap: number }) => ({ kind, pr_url: null, material: "資料", ...(loop ? { loop } : {}) });
+
+  async function seedWaiting(acc: string) {
+    const waiting = (id: string, patch: Partial<SprintRun> = {}) =>
+      h.table.runs.set(id, runOf(acc, { sprintRunId: id, state: "awaiting_approval", currentJobId: null, ...patch }));
+    waiting("sr-a", { issues: [1] });
+    waiting("sr-b", { issues: [2], repo: "org-a/repo-b", repositoryId: 102 });
+    waiting("sr-c", { issues: [3] });
+    waiting("sr-d", { issues: [4] });
+    waiting("sr-rel", { issues: [5], awaitingReason: "release_requested" });
+    h.table.runs.set("sr-run", runOf(acc, { sprintRunId: "sr-run", issues: [6] }));
+    await emit("sr-b", "gate.reached", gate("gate2", { name: "lfactory3", lap: 1 }), "2026-11-04T00:00:02.000Z");
+    // (a) は材料を直して出し直した。行は 1 つで、日時は後のもの
+    await emit("sr-a", "gate.reached", gate("gate1", { name: "lfactory2", lap: 3 }), "2026-11-04T00:00:01.000Z");
+    await emit("sr-a", "gate.reached", gate("gate1", { name: "lfactory2", lap: 3 }), "2026-11-04T00:00:03.000Z");
+    await emit("sr-c", "gate.reached", gate("decision"), "2026-11-04T00:00:04.000Z");
+    await emit("sr-d", "gate.reached", gate("gate1"), "2026-11-04T00:00:00.500Z");
+    await emit("sr-d", "gate.answered", { approval_request_id: "ar-d", kind: "gate1", decision: "approved", answered_by_account_id: acc });
+    await emit("sr-rel", "gate.reached", gate("gate2"), "2026-11-04T00:00:00.100Z");
+    await emit("sr-run", "gate.reached", gate("gate1"), "2026-11-04T00:00:00.200Z");
+  }
+
+  it("答えの無い承認の依頼だけが、種類・ループ・周回・リポジトリ・課題・待ち始めた日時とともに古い順に並ぶ", async () => {
+    const acc = await personal("u-1");
+    await seedWaiting(acc);
+    const res = await call(approvalsPath(acc));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { sprint_run_id: "sr-b", repository_id: 102, repo: "org-a/repo-b", issues: [2], kind: "gate2", loop: { name: "lfactory3", lap: 1 }, waiting_since: "2026-11-04T00:00:02.000Z" },
+      { sprint_run_id: "sr-a", repository_id: 101, repo: "org-a/repo-a", issues: [1], kind: "gate1", loop: { name: "lfactory2", lap: 3 }, waiting_since: "2026-11-04T00:00:03.000Z" },
+      { sprint_run_id: "sr-c", repository_id: 101, repo: "org-a/repo-a", issues: [3], kind: "decision", loop: null, waiting_since: "2026-11-04T00:00:04.000Z" },
+    ]);
+  });
+
+  it("承認の依頼が 0 件なら 200 と空の配列。読み出しは事象の表と実行の表を書き換えない", async () => {
+    const { acc } = await seed();
+    const before = JSON.stringify([h.progress.events, [...h.table.runs.values()]]);
+    const res = await call(approvalsPath(acc));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+    expect(JSON.stringify([h.progress.events, [...h.table.runs.values()]])).toBe(before);
+  });
+
+  it("他人のアカウントの一覧は 403 で、スプリントの一覧と同じ本文。他人の実行は自分の一覧に出ない", async () => {
+    const acc = await personal("u-1");
+    const other = await personal("u-2");
+    h.table.runs.set("sr-other", runOf(other, { sprintRunId: "sr-other", state: "awaiting_approval" }));
+    await emit("sr-other", "gate.reached", gate("gate1"));
+    const denied = await call(approvalsPath(other), "u-1");
+    const list = await call(`/accounts/${other}/sprint-runs`, "u-1");
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual(await list.json());
+    expect(await (await call(approvalsPath(acc))).json()).toEqual([]);
+  });
+
+  it("チームのアカウントは席を持つ人が読める", async () => {
+    await personal("u-1");
+    await personal("u-2");
+    const team = await accounts.createTeam({ userId: "u-1", idp: "google" }, "t", "standard");
+    const ctx = await accounts.resolveAccount({ userId: "u-1", idp: "google" }, team.accountId);
+    await accounts.addSeat(ctx, "u-2", "standard");
+    h.table.runs.set("sr-team", runOf(team.accountId, { sprintRunId: "sr-team", state: "awaiting_approval" }));
+    await emit("sr-team", "gate.reached", gate("gate1"));
+    const res = await call(approvalsPath(team.accountId), "u-2");
+    expect(res.status).toBe(200);
+    expect((await res.json()).map((r: { sprint_run_id: string }) => r.sprint_run_id)).toEqual(["sr-team"]);
+  });
+
+  it("実行の表か事象の表を読めなければ 503 progress_unavailable", async () => {
+    const acc = await personal("u-1");
+    await seedWaiting(acc);
+    factory.reader = { ...factory.reader, listGateEvents: async () => Promise.reject(new Error("throttled")) };
+    const res = await call(approvalsPath(acc));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("progress_unavailable");
   });
 });
