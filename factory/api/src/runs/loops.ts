@@ -4,7 +4,7 @@
 import { randomUUID } from "node:crypto";
 import type { LoopLapClosedPayload, LoopStoppedPayload } from "@ndf-factory/contracts";
 import type { AccountContext, AccountRecord, SeatRecord } from "../accounts/model.ts";
-import { ApiError, ConflictError, InvalidRequestError, NotFoundError } from "../errors.ts";
+import { ApiError, ConflictError, ForbiddenError, InvalidRequestError, NotFoundError } from "../errors.ts";
 import type { ProgressReader } from "../progress/read.ts";
 import type { LoopHooks, RunControl } from "./control.ts";
 import {
@@ -22,6 +22,7 @@ import {
   type WaitReason,
 } from "./model.ts";
 import type { RunsTable } from "./table.ts";
+import { claimOf, parseIdempotencyKey, type IdempotencyRef } from "../idempotency.ts";
 
 export const LOOP_NAME = /^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$/;
 export const MAX_MILESTONES = 10;
@@ -182,7 +183,6 @@ export class LoopControl {
 
   // F1: 始める。マイルストーンの持ち分とループの行を 1 回で書き、続けて最初の周回を起こす（枠で待つときも 201）
   async startLoop(ctx: AccountContext, repositoryId: number, body: Record<string, unknown>): Promise<{ loop_id: string; state: DevLoop["state"] }> {
-    const { table } = this.deps;
     const name = body.name;
     if (typeof name !== "string" || !LOOP_NAME.test(name)) throw new InvalidRequestError("ループの名前は英数字と - _ で 64 字までにしてください");
     const milestones = body.milestones;
@@ -196,6 +196,36 @@ export class LoopControl {
       throw new InvalidRequestError(`マイルストーンは 1〜${MAX_MILESTONES} 件、各 ${MAX_MILESTONE_LENGTH} 字までで , を含めずに選んでください`);
     }
     const budget = parseBudget(body.budget);
+    // 作成の冪等の鍵（#2384 の I14）。経路は必ず渡す。同じ鍵の 2 回目は 1 回目のループを返す
+    const idempotency: IdempotencyRef | undefined =
+      body.idempotency_key === undefined ? undefined : { userId: ctx.userId, operationId: "startLoop", key: parseIdempotencyKey(body.idempotency_key) };
+    const replayed = idempotency ? await this.replayLoop(ctx, idempotency) : null;
+    if (replayed) return replayed;
+    let loop: DevLoop;
+    try {
+      loop = await this.insertLoop(ctx, repositoryId, name, milestones as string[], budget, idempotency);
+    } catch (err) {
+      // 同じ鍵の先行の要求が途中で作り終えていれば、名前・持ち分の断りより先にそのループを返す
+      const won = idempotency && err instanceof ApiError ? await this.replayLoop(ctx, idempotency) : null;
+      if (won) return won;
+      throw err;
+    }
+    // 始めるのは利用者の操作のため、local でも最初の周回を起こす（I52）
+    await this.startNextLap(ctx.accountId, loop.loopId, true);
+    const after = await this.deps.table.getLoop(ctx.accountId, loop.loopId);
+    return { loop_id: loop.loopId, state: after?.state ?? loop.state };
+  }
+
+  // ループの行とマイルストーンの持ち分を 1 回で書く。断るときは ApiError を投げる
+  private async insertLoop(
+    ctx: AccountContext,
+    repositoryId: number,
+    name: string,
+    milestones: string[],
+    budget: LoopBudget,
+    idempotency: IdempotencyRef | undefined,
+  ): Promise<DevLoop> {
+    const { table } = this.deps;
     const registration = await table.getRegistration(ctx.accountId, repositoryId);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
     const same = (await table.listLoops(ctx.accountId)).find((l) => l.repositoryId === repositoryId && l.name === name && !isTerminalLoop(l.state));
@@ -206,7 +236,7 @@ export class LoopControl {
       accountId: ctx.accountId,
       repositoryId,
       name,
-      milestones: milestones as string[],
+      milestones,
       budget,
       state: "between_laps",
       waitReason: null,
@@ -226,7 +256,9 @@ export class LoopControl {
       updatedAt: now,
       lastRunAt: null,
     };
-    const created = await table.createLoop(loop);
+    const created = await table.createLoop(loop, idempotency && claimOf(idempotency, loop.loopId, now));
+    // 同じ鍵の作成が同時に走り、先に書いた方が勝った。勝ったループは呼び出し元が鍵から引き直す
+    if (created === "duplicate") throw new ConflictError("loop_busy", "ループの状態が変わりました。やり直してください");
     if (created !== "created") {
       const share = await table.getMilestoneShare(ctx.accountId, repositoryId, created.conflict);
       const other = share ? await table.getLoop(ctx.accountId, share.loopId) : null;
@@ -236,10 +268,17 @@ export class LoopControl {
         loop_name: other?.name ?? null,
       });
     }
-    // 始めるのは利用者の操作のため、local でも最初の周回を起こす（I52）
-    await this.startNextLap(ctx.accountId, loop.loopId, true);
-    const after = await table.getLoop(ctx.accountId, loop.loopId);
-    return { loop_id: loop.loopId, state: after?.state ?? loop.state };
+    return loop;
+  }
+
+  // 期限の中の同じ鍵が作ったループの今の状態
+  private async replayLoop(ctx: AccountContext, ref: IdempotencyRef): Promise<{ loop_id: string; state: DevLoop["state"] } | null> {
+    const loopId = await this.deps.table.getIdempotent(ref, this.iso());
+    if (!loopId) return null;
+    // 鍵は利用者ごとでアカウントをまたぐ。別のアカウントのループなら返さずに forbidden
+    const loop = await this.deps.table.getLoop(ctx.accountId, loopId);
+    if (!loop) throw new ForbiddenError();
+    return { loop_id: loopId, state: loop.state };
   }
 
   // 周回の開始（決定 2、I44・I52）。between_laps で今の実行が無いループだけを起こす。条件で落ちれば読み直して 3 回まで

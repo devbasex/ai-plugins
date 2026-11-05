@@ -88,9 +88,9 @@ Neural Development Factory の Web の画面を組む部品の一覧と使い分
 
 | 操作 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `sprintRunDetails(accountId, sprintRunIds)` | アカウントの ID と実行の ID の配列 | `SprintRunSummary[]`。見つからない ID の要素は返さない | `ApiFailure`（401・403・5xx） |
+| `sprintRunDetails(accountId, sprintRunIds)` | アカウントの ID と実行の ID の配列 | `SprintRunDetail[]`（入力と同じ順） | `ApiFailure`（401・要求全体か最初に失敗した要素の 403・5xx。無い実行も 403） |
 
-`sprintRunDetails` の本物の実装は、詳細の経路がまだ無いため `GET /accounts/{a}/sprint-runs` の新しい順 50 件から ID で選ぶ。それより古い実行は見つからない扱いになる。詳細の経路ができたら本物の実装だけを差し替え、画面は変えない。
+`sprintRunDetails` の本物の実装は、実行の ID を鍵の query に繰り返して `GET /accounts/{a}/sprint-runs/detail` を 1 回呼び、要素の結果をほどく（[利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形)）。
 
 ## つながりの状態
 

@@ -15,6 +15,7 @@ import type {
   Slots,
   SprintRun,
 } from "./model.ts";
+import type { IdempotencyClaim, IdempotencyRef } from "../idempotency.ts";
 
 // 終わりへの移り・承認待ち・リセット待ちに添える書き込み（決定 2。ループは実行と同じトランザクションで書く）
 export interface RunTransitionExtras {
@@ -98,7 +99,10 @@ export interface RunsTable {
 
   // ---- 開発ループ（#2347） ----
   // ループの行とマイルストーンの持ち分を 1 回で書く。持ち分が既にあれば、重なった題を返して書かない（I45）
-  createLoop(loop: DevLoop): Promise<"created" | { conflict: string }>;
+  // idempotency があれば作成の冪等の鍵の行も同じトランザクションで書き、期限の中の同じ鍵があれば duplicate（#2384 の I14）
+  createLoop(loop: DevLoop, idempotency?: IdempotencyClaim): Promise<"created" | "duplicate" | { conflict: string }>;
+  // 作成の冪等の鍵の行が作った識別子。期限（ttl）を過ぎた行は、残っていても無いものとして扱う
+  getIdempotent(ref: IdempotencyRef, now: string): Promise<string | null>;
   getLoop(accountId: string, loopId: string): Promise<DevLoop | null>;
   // アカウントのループの新しい順
   listLoops(accountId: string): Promise<DevLoop[]>;
