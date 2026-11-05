@@ -9,7 +9,7 @@
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
   "規則": "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
-  "上限": 16,
+  "上限": 19,
   "steps": [
     {
       "id": "glossary",
@@ -108,6 +108,35 @@
       "stage": "ドキュメントレビュー",
       "timeout": 120,
       "cmd": "python3 <NDF>/scripts/spec-copy.py check 16 issues/issue-16-requirements.md",
+      "next": "survey-check"
+    },
+    {
+      "id": "survey-check",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16",
+      "on_fail": "fix-survey",
+      "next": "glossary-check"
+    },
+    {
+      "id": "fix-survey",
+      "type": "work",
+      "kind": "修正",
+      "stage": "ドキュメントレビュー",
+      "inputs": [
+        "survey-check"
+      ],
+      "timeout": 1800,
+      "next": "survey-recheck",
+      "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。"
+    },
+    {
+      "id": "survey-recheck",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16",
       "next": "glossary-check"
     },
     {
