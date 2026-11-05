@@ -281,12 +281,8 @@ def active_seconds(rec: dict) -> float:
     """動いていた時間（I8）: 終わった周回の区間の和から、周回の途中で止まっていた時間（stops の at〜resumed_at と
     周回の区間の重なり）を引く。周回の境で止まった時間は周回の区間の外にあるため引かない。"""
     stops = [(_loop_time(s.get("at")), _loop_time(s.get("resumed_at"))) for s in rec.get("stops", [])]
-    total = 0.0
-    for lap in rec.get("laps", []):
-        for s, e in ((_loop_time(a), _loop_time(b)) for a, b in lap_spans(lap)):
-            if s and e:
-                total += span_active_seconds(s, e, stops)
-    return total
+    spans = ((_loop_time(a), _loop_time(b)) for lap in rec.get("laps", []) for a, b in lap_spans(lap))
+    return sum((span_active_seconds(s, e, stops) for s, e in spans if s and e), 0.0)
 
 
 def consumed(rec: dict) -> dict:
