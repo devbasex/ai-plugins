@@ -2,14 +2,14 @@
 
 ## 目的
 
-- **今どうなっているか**: `.ndf/worktree.json` に `production_branch` が無いリポジトリで、まだ作っていない worktree のパスを `--worktree` に渡すと、`supervise.py new release --channel prod` が「本番の配布に要る本番のブランチが無い」で止まる（終了コード 2）。既定ブランチを、存在しない worktree のパスから解こうとして失敗するためである。`new sprint` も本番のステージを置かない
+- **今どうなっているか**: `.ndf/worktree.json` に `production_branch` が無いリポジトリで、まだ作っていない worktree のパスを `--worktree` に渡す。すると `supervise.py new release --channel prod` が止まる（終了コード 2）。文面は「本番の配布に要る本番のブランチが無い」である。既定ブランチを、存在しない worktree のパスから解こうとして失敗するためである。`new sprint` も本番のステージを置かない
 - **誰に効くか**: `production_branch` を書かず、既定ブランチを本番にしている NDF の利用先のリポジトリと、そこでスプリントとリリースを回す conductor
-- **変えると何が成り立つか**: worktree の有無にかかわらず、本番のブランチが既定ブランチに決まり、リリースプランと承認ゲート 2・本番のステージが組まれる。リリースの経路の判定とプランが同じ本番のブランチを使う
+- **変えると何が成り立つか**: worktree の有無にかかわらず、本番チャネルが既定ブランチに決まり、リリースプランと承認ゲート 2・本番のステージが組まれる。リリースの経路の判定とプランが同じ本番チャネルを使う
 
 ## 適用範囲
 
 - **働く範囲**: NDF を使うすべてのリポジトリ（`supervise.py new` の `release`・`sprint`・`close`）。ai-plugins は `production_branch` を宣言しているため、振る舞いは変わらない
-- **プロジェクトごとに違うもの**: 本番のブランチは、引数（`--production-branch`）と設定（`.ndf/worktree.json` の `production_branch`）で受け、どちらも無ければ origin の既定ブランチを使う。受け方は変えない
+- **プロジェクトごとに違うもの**: 本番チャネルは、引数（`--production-branch`）と設定（`.ndf/worktree.json` の `production_branch`）で受ける。どちらも無ければ origin の既定ブランチを使う。受け方は変えない
 - **当たるモード**: `standard`
 
 ## あるべき姿の根拠
@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | 2026-11-05 に一時のリポジトリ（bare の origin と clone、`git remote set-head origin main`、`{"base_branch":"main"}` と `release` の `form: package-plugin`）で `new release --channel prod` を打った結果 | 実測 | worktree を作る前は終了コード 2 で止まり、`git worktree add` の後は同じコマンドが 13 ステップ（`approve` … `judge-record`）のプランを書く。違いは worktree の有無だけである |
 | 同じ日に `git -C <存在しないパス> symbolic-ref --short refs/remotes/origin/HEAD` を打った結果 | 実測 | `fatal: cannot change to '…': No such file or directory` と終了コード 128。存在する worktree からは `origin/main` が返る。既定ブランチを解けない原因は、問い合わせる木が存在しないことである |
-| `plugins/ndf/scripts/lib/repo.py` の `production_of` の docstring（「本番チャネルの決め方の正本」）と、用語集の「本番チャネル」の行 | 既存の形 | 本番のブランチの決め方は `production_branch` → 既定ブランチの順と決まっている。この変更は順序を変えず、既定ブランチを解く木だけを直す |
+| `plugins/ndf/scripts/lib/repo.py` の `production_of` の docstring（「本番チャネルの決め方の正本」）と、用語集の「本番チャネル」の行 | 既存の形 | 本番チャネルの決め方は `production_branch` → 既定ブランチの順と決まっている。この変更は順序を変えず、既定ブランチを解く木だけを直す |
 
 要求と受け入れ条件は #2097 の本文にある（コピーは [issues/issue-2097-requirements.md](issue-2097-requirements.md) ）。この文書は「どう作るか」だけを扱う。
 
@@ -77,6 +77,10 @@
 
 ## 構成要素
 
+パッケージの構成は変えない。新しいファイルを作らない。
+
+### 変える要素
+
 | 要素 | 責務 |
 | --- | --- |
 | `lib/repo.py` の `first_git_tree`（新設） | 木の並びから、存在するディレクトリで、かつメインディレクトリ（`decl.main_dir`）を解ける最初の木を返す。無ければ `None`。存在しないパスには git を起動しない |
@@ -91,6 +95,8 @@
 
 `lib/delivery.py` の `load_delivery` は存在する木（呼び手の `root`）だけを受けるため変えない。`release_lib/names.py` の本番チャネルの文面は、`release-steps.py` が存在するリリースの worktree の中で読むもので、この変更の対象に含めない。
 
+### 本番チャネルの値が決まるまでの呼び出し
+
 ```mermaid
 graph TD
     N[supervise.py new] --> A[decl.apply_decls]
@@ -104,9 +110,9 @@ graph TD
     DB --> O
 ```
 
-図は本番チャネルの値が決まるまでの呼び出しだけを描く。文面の要素（`PRODUCTION_SOURCES` と、それを使う `_validate_release_decl`・`plan_promote`・`sprint.py` の案内・`new_args.py` の help）は値を決めないため、図に含めない。
+図は本番チャネルの値が決まるまでの呼び出しだけを描く。文面の要素は値を決めないため、図に含めない。文面の要素は `PRODUCTION_SOURCES` である。それを使う `_validate_release_decl`・`plan_promote`・`sprint.py` の案内・`new_args.py` の help も文面の要素に当たる。
 
-パッケージの構成は変えない。新しいファイルを作らない。
+### 変えるファイルの配置
 
 ```
 plugins/ndf/scripts/
@@ -190,7 +196,9 @@ sequenceDiagram
 
 ### 決定 2: リリースの経路の判定と同じ値にするため、配布の判定の宣言も同じ木から既定ブランチを解く
 
-`delivery_decl` は今、`roots[0]` から既定ブランチを解く。雛形の側だけを直すと、存在しない worktree ではリリースの経路の判定が本番チャネルを持たないまま残り、受け入れ条件 7 が成り立たない。両方が `first_git_tree` を呼べば、同じ起動の中で同じ木を使う。この結果、昇格のプラン（`plan_promote`）も同じ補完を受ける。`production_branch` を宣言せず `base_branch` が既定ブランチと違うリポジトリでは、存在しない worktree を渡した `new sprint` に昇格のステージが現れる。これは worktree を作った後の今の振る舞いと同じ形であり、退行の確認（受け入れ条件 6）に含める。
+`delivery_decl` は今、`roots[0]` から既定ブランチを解く。雛形の側だけを直すと、存在しない worktree ではリリースの経路の判定が本番チャネルを持たないまま残り、受け入れ条件 7 が成り立たない。両方が `first_git_tree` を呼べば、同じ起動の中で同じ木を使う。
+
+この結果、昇格のプラン（`plan_promote`）も同じ補完を受ける。`production_branch` を宣言せず `base_branch` が既定ブランチと違うリポジトリでは、存在しない worktree を渡した `new sprint` に昇格のステージが現れる。これは worktree を作った後の今の振る舞いと同じ形であり、退行の確認（受け入れ条件 6）に含める。
 
 昇格だけを今の振る舞いに留める形は採らない。worktree の有無で昇格の有無が変わる食い違いが残る。
 
@@ -204,7 +212,7 @@ sequenceDiagram
 
 ## テスト設計
 
-テストは `plugins/ndf/scripts/tests/` に置き、一時の git リポジトリ（bare の origin と clone、origin の HEAD を `main` に設定）を作って `supervise.py new` を通す。
+テストは `plugins/ndf/scripts/tests/` に置く。一時の git リポジトリ（bare の origin と clone、origin の HEAD を `main` に設定）を作って `supervise.py new` を通す。
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
