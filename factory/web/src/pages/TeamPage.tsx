@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { AccountDetail, SeatType } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useServices } from "../context.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -10,54 +10,40 @@ import { PageHeader } from "../ui/PageHeader.tsx";
 import { Section } from "../ui/Section.tsx";
 import { SelectField } from "../ui/SelectField.tsx";
 import { TextField } from "../ui/TextField.tsx";
-import { ExecutionModeView, LimitsView, SEAT_TYPES } from "./parts.tsx";
+import { ExecutionModeView, LimitsView, SeatTypeOptions } from "./parts.tsx";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function TeamPage() {
   const { t } = useTranslation();
-  const { auth, api } = useServices();
-  const onFailure = useFailureHandler();
+  const { api } = useServices();
+  const attempt = useAttempt();
   const accountId = useParams().accountId ?? "";
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newUser, setNewUser] = useState("");
   const [newSeatType, setNewSeatType] = useState<SeatType>("standard");
-  const hasToken = auth.getToken() !== null;
 
-  const load = useCallback(async () => {
-    try {
-      setAccount(await api.account(accountId));
-    } catch (err) {
-      setError(onFailure(err));
-    }
-  }, [api, accountId, onFailure]);
+  const load = useCallback(() => attempt(async () => setAccount(await api.account(accountId)), setError), [api, accountId, attempt]);
 
   useEffect(() => {
-    if (hasToken) void load();
-  }, [hasToken, load]);
+    void load();
+  }, [load]);
 
   // 席の操作の 409・422 は操作の下に API の文を出し、一覧は読み直さない
   async function act(op: () => Promise<unknown>) {
     setMessage(null);
-    try {
+    await attempt(async () => {
       await op();
       await load();
-    } catch (err) {
-      setMessage(onFailure(err));
-    }
+    }, setMessage);
   }
 
-  if (!hasToken) return <Navigate to="/login" replace />;
   if (error) return <Alert>{error}</Alert>;
   if (!account) return <LoadingState />;
   const owner = account.role === "owner";
-  const seatOptions = SEAT_TYPES.map((s) => (
-    <option key={s} value={s}>
-      {s}
-    </option>
-  ));
+  const seatOptions = <SeatTypeOptions />;
   return (
     <>
       <PageHeader title={account.name} />

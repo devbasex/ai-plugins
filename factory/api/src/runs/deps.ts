@@ -8,7 +8,8 @@ import { OrganizerControl } from "../organizer/control.ts";
 import { appendControlEventTo, appendReleaseAnsweredTo } from "../progress/append.ts";
 import { DynamoProgressReader } from "../progress/read.ts";
 import type { RunJobSigningKey } from "../progress/run-job-token.ts";
-import { progressStoreFromEnv } from "../handlers/ingest.ts";
+import { progressStoreFromEnv } from "../progress/deps.ts";
+import { requireEnv } from "../env.ts";
 import { RepositoryService } from "../repositories/service.ts";
 import type { FactoryDeps } from "../routes/factory.ts";
 import { bedrockCandidateModel } from "./candidates.ts";
@@ -18,12 +19,6 @@ import { EcsRunnerPlatform } from "./ecs.ts";
 import { AccountService } from "../accounts/service.ts";
 import { DynamoAccountStore } from "../accounts/store.ts";
 import { accountContextResolver, LoopControl } from "./loops.ts";
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`環境変数 ${name} がありません`);
-  return value;
-}
 
 const list = (name: string) => requireEnv(name).split(",").map((s) => s.trim()).filter(Boolean);
 

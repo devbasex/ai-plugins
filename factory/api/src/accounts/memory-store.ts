@@ -1,4 +1,4 @@
-import { ConditionFailedError, type AccountPatch, type AccountStore } from "./store.ts";
+import { ConditionFailedError, type AccountStore, type AccountUpdate } from "./port.ts";
 import type { AccountRecord, HistoryRecord, SeatRecord, UserRecord } from "./model.ts";
 import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
@@ -109,13 +109,7 @@ export class MemoryAccountStore implements AccountStore {
     await this.write("removeSeat", () => this.seatUnchanged(expected), () => this.seats.delete(key), history);
   }
 
-  async updateAccount(
-    accountId: string,
-    expectedVersion: number,
-    patch: AccountPatch,
-    updatedAt: string,
-    history: HistoryRecord[],
-  ) {
+  async updateAccount({ accountId, expectedVersion, patch, updatedAt, history }: AccountUpdate) {
     await this.write(
       "updateAccount",
       () => this.accounts.get(accountId)?.version === expectedVersion,

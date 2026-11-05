@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { AccountService } from "../accounts/service.ts";
 import { MemoryAccountStore } from "../accounts/memory-store.ts";
 import { CredentialService, type SecretsPort } from "../credentials/service.ts";
-import { createApiApp, type LogEntry } from "../handlers/api.ts";
+import { createApiApp, type LogEntry } from "../app.ts";
 import { RepositoryService } from "../repositories/service.ts";
 import { memoryProgressReader } from "../progress/read.ts";
 import { CANDIDATE_FALLBACK_NOTE, type CandidateModel } from "../runs/candidates.ts";

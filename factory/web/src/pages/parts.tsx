@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AccountDetail, ExecutionMode, SeatType, SprintRunSummary } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { SelectField } from "../ui/SelectField.tsx";
@@ -9,6 +9,19 @@ import type { StatusTone } from "../ui/StatusBadge.tsx";
 
 export const EXECUTION_MODES: readonly ExecutionMode[] = ["local", "byok", "managed"];
 export const SEAT_TYPES: readonly SeatType[] = ["standard", "premium"];
+
+// 席の種類の選択肢。select の属性（名前・値・変えたときの処理）は画面が持つ
+export function SeatTypeOptions() {
+  return (
+    <>
+      {SEAT_TYPES.map((s) => (
+        <option key={s} value={s}>
+          {s}
+        </option>
+      ))}
+    </>
+  );
+}
 
 // スプリントの実行の状態と札の色の調子。知らない状態は値をそのまま出す
 const SPRINT_STATE_TONES = {
@@ -60,7 +73,7 @@ export function LimitsView({ limits }: { limits: AccountDetail["limits"] }) {
 export function ExecutionModeView({ account, onChanged }: { account: AccountDetail; onChanged: (a: AccountDetail) => void }) {
   const { t } = useTranslation();
   const { api } = useServices();
-  const onFailure = useFailureHandler();
+  const attempt = useAttempt();
   const [message, setMessage] = useState<string | null>(null);
   const canChange = account.role === "owner";
   return (
@@ -72,11 +85,7 @@ export function ExecutionModeView({ account, onChanged }: { account: AccountDeta
           value={account.execution_mode}
           onChange={async (e) => {
             setMessage(null);
-            try {
-              onChanged(await api.setExecutionMode(account.account_id, e.target.value as ExecutionMode));
-            } catch (err) {
-              setMessage(onFailure(err));
-            }
+            await attempt(async () => onChanged(await api.setExecutionMode(account.account_id, e.target.value as ExecutionMode)), setMessage);
           }}
         >
           {EXECUTION_MODES.map((m) => (

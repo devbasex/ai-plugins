@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ApiFailure, type LoopRow } from "../api.ts";
-import { useFailureHandler, useServices } from "../context.tsx";
+import { useAttempt, useFailureHandler, useServices } from "../context.tsx";
 import { useFormat } from "../i18n/index.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -27,8 +27,9 @@ export function LoopsPage() {
   const navigate = useNavigate();
   const { accountId = "", repositoryId = "" } = useParams();
   const repoId = Number(repositoryId);
-  const { auth, api } = useServices();
+  const { api } = useServices();
   const onFailure = useFailureHandler();
+  const attempt = useAttempt();
   const [loops, setLoops] = useState<LoopRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -36,23 +37,16 @@ export function LoopsPage() {
   const [budget, setBudget] = useState(budgetText());
   const [fieldErrors, setFieldErrors] = useState<{ name?: string; milestones?: string; budget?: string }>({});
   const [message, setMessage] = useState<string | null>(null);
-  const hasToken = auth.getToken() !== null;
 
   const load = useCallback(async () => {
     setError(null);
     setLoops(null);
-    try {
-      setLoops((await api.loops(accountId, repoId)).loops);
-    } catch (err) {
-      setError(onFailure(err));
-    }
-  }, [api, accountId, repoId, onFailure]);
+    await attempt(async () => setLoops((await api.loops(accountId, repoId)).loops), setError);
+  }, [api, accountId, repoId, attempt]);
 
   useEffect(() => {
-    if (hasToken) void load();
-  }, [hasToken, load]);
-
-  if (!hasToken) return <Navigate to="/login" replace />;
+    void load();
+  }, [load]);
 
   const start = async () => {
     setMessage(null);
