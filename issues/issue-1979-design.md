@@ -102,6 +102,8 @@ E3 は NDF のどの部品も受けない。E4 の「続けた後の停止」が
 | ステップの集め直し（`step_totals`） | `plugins/ndf/scripts/lib/usage_aggregate.py` | ステップの帳簿の行をランタイムごとに合計する。`source=supervise` の Claude の行を除く | 変えない。I4 が成り立つことで、claude の work の行が入る |
 | 確定仕様 | `docs/specifications/ndf-usage-ledger-by-runtime.md` | 帳簿の仕様の正本 | 取り出し・期間・集め直し・呼び出し元の名乗りの記述を、F1〜F4 の振る舞いへ合わせる |
 
+### 要素のつながり
+
 ```mermaid
 graph TD
   subgraph write["書く側"]
@@ -159,7 +161,7 @@ classDiagram
 | 関数 | 引数・戻り値の変更 |
 | --- | --- |
 | `transcript_usage(path, within=None)` | `within` は応答の時刻（`timestamp` の文字列。無ければ None）を受けて真偽を返す関数。None なら絞らない。絞った結果の応答が 0 件なら今と同じく `"unknown"` を返す |
-| `subagent_delta(total, rows)`（新設） | 会話の記録の合計と、同じ `agent_id` の既存の行の一覧から、鍵ごとの差（0 未満は 0）を返す純粋な関数。`usage` が `"unknown"` の行は 0 として扱う |
+| `subagent_delta(total, rows)`（新設） | 会話の記録の合計と、同じ `agent_id` の既存の行の一覧から、キーごとの差（0 未満は 0）を返す純粋な関数。`usage` が `"unknown"` の行は 0 として扱う |
 | `record_subagent(hook)` | 引数と戻り値は変えない。既存の行は、追記先と同じファイル（`UsageLedger(cwd).records()`）から読む（決定 6） |
 | `transcripts(...)` | 引数と戻り値の形は変えない |
 
@@ -167,10 +169,14 @@ classDiagram
 
 帳簿の行の項目は足さず、消さない（版 2 のまま）。値の意味が変わるのはサブエージェントの行の `usage` だけである。
 
-| 鍵 | 変わる前の意味 | 変わった後の意味 |
+### 値の意味が変わるキー
+
+| キー | 変わる前の意味 | 変わった後の意味 |
 | --- | --- | --- |
 | `usage`（`kind=subagent` の行） | 停止の時点の会話の記録の累計（応答ごとに最初の行の使用量） | 停止の時点の会話の記録の合計（応答ごとに最後の行の使用量）から、同じ `agent_id` の既存の行の `usage` の和を引いた差。1 回だけ止まったサブエージェントでは合計そのもの |
 | `source`（supervise の `runtime` を指定した work が起動した行） | `supervise` | `external-ai` |
+
+### サブエージェントの行を足す読み手
 
 **時系列の扱いは事象の記録のまま。** 行は停止 1 回・呼び出し 1 回の事象で、合計は読む側が和として導く。差を書く形は、同じ `agent_id` の行の和がいつでもその時点の合計になるため、和を取る既存の集計を変えずに済む。サブエージェントの行を足す読み手は 3 つで、どれも行ごとに足す。
 
@@ -180,7 +186,9 @@ classDiagram
 | `claude_views` | `usage_aggregate.py:202` | `kind=subagent` の行ごとに足す |
 | `_add_ledger` | `plugins/ndf/scripts/context-policy.py:144` | 行の識別（`session_id`・`at`・`step`）ごとに 1 回足す。同じ `agent_id` の行は `at` が違うため、どれも足す |
 
-**移行は行わない。** 配布の前に書かれた行（2 回数えた行・最初の行の使用量の行・`supervise:work` の claude の行）はそのまま残る（要求の前提 2）。配布の前の行を持つサブエージェントが配布の後に止まったときの値は、次のとおりになる（鍵ごと）。
+### 配布の前に書かれた行
+
+**移行は行わない。** 配布の前に書かれた行（2 回数えた行・最初の行の使用量の行・`supervise:work` の claude の行）はそのまま残る（要求の前提 2）。配布の前の行を持つサブエージェントが配布の後に止まったときの値は、次のとおりになる（キーごと）。
 
 | 配布の前の行の和（P）と、配布の後の停止の時点の会話の記録の合計（T） | 配布の後に書く差 | 行の和 | 会話の記録との一致 |
 | --- | --- | --- | --- |
@@ -188,6 +196,8 @@ classDiagram
 | P ＞ T（続けたサブエージェントを 2 回数えていた） | 0 | P | 一致しない。多い分は戻らない |
 
 期間を指定した集計は、行の時刻（`at`）で行を選ぶ（要求の前提 4）。期間が配布の前後をまたぐと、配布の前の行の値がそのまま入るため、会話の記録と一致しない。一致を約束する範囲は決定 7 に書く。
+
+### 新しい `source` の値が通る規則
 
 **新しい値が通る規則を判定した結果。** `source` の値の集合へ、Claude の帳簿の `external-ai`（`kind=work`）が加わる。
 
@@ -199,6 +209,8 @@ classDiagram
 | `claude_views` の `claude -p` の行（`kind≠subagent`）とセッション ID の突き合わせ | `usage_aggregate.py:206-209` | 当てはまる（`source` を見ない） |
 | 確定仕様の「呼び出し元の名乗り」の表と、冒頭の例の `supervise:work`（codex の行） | 確定仕様 | 当てはまらない。構成要素の表の「確定仕様」で書き直す |
 
+### 規則を洗い出した検索
+
 検索は 2 回に分けて行った（テストを除く）。1 回目で帳簿の行を読むファイルを洗い出し、2 回目でそのファイルの `source` の読み方を、`row["source"]` と `.get("source")` の両方の形で拾う。
 
 ```bash
@@ -206,18 +218,28 @@ grep -rlnE "read_usage_ledger|read_rows|ledger_files|UsageLedger|usage_ledger|le
 grep -rnE "\[[\"']source[\"']\]|get\([\"']source[\"']|\"source\"|'source'|\.source\b|NDF_USAGE_SOURCE" plugins scripts --include=*.py --include=*.sh | grep -v /tests/
 ```
 
-1 回目に当たった 15 本のうち、帳簿の行を読むか置き場所を使うのは次の 7 本（8 か所）である。残りの 8 本は、書き手（`usage_capture.py`）、帳簿の部品の関数（`cache_writes`・`now_utc`・`repo_key`）だけを使うもの（`context_calibrate.py`・`context_decisions.py`・`supervise_lib/state.py`）、集計を呼ぶだけのもの（`usage-report.py`）、パスを文字列で持つもの（`run_state_kinds.py`・`scripts/contract-allow/` の許可の一覧）、名前だけが同じ関数（`estimate_records.py` の `_read_rows`）だった。
+1 回目に当たった 15 本のうち、帳簿の行を読むか置き場所を使うのは次の 7 本（8 か所）である。
 
 | 帳簿の行を読む箇所 | 帳簿の行の `source` を読むか |
 | --- | --- |
-| `usage_aggregate.py:108`（`usage_group_key`） | 読む。`--by caller` の見出しにする（上の表の 2 行目） |
-| `usage_aggregate.py:343`（`step_totals`） | 読む。値が `supervise` の Claude の行を除く（上の表の 1 行目） |
+| `usage_aggregate.py:108`（`usage_group_key`） | 読む。`--by caller` の見出しにする（規則の表の 2 行目） |
+| `usage_aggregate.py:343`（`step_totals`） | 読む。値が `supervise` の Claude の行を除く（規則の表の 1 行目） |
 | `usage_ledger.py:303`（`marked_rows`） | 読む。テストの印の一覧へ写すだけで、値で分岐しない |
 | `plugins/ndf/conftest.py:49-53` | 読まない（`marked_rows` を呼ぶ） |
 | `plugins/ndf/scripts/context-policy.py:329` | 読まない（`parent_session_id`・`at` で選ぶ） |
 | `scripts/token-usage.py:608` | 読まない（`kind` で層を決める） |
 | `scripts/measure/claude-p-usage.py:245` | 読まない（`kind` で選ぶ）。同じファイルの `r["source"]`（543・553・651・701 行目）は、行の出所（`ledger`・`report`）を表す自分の記録の項目である |
 | `scripts/token-usage-snapshot.py:368` | 読まない（置き場所の既定値だけを使う） |
+
+残りの 8 本は次のとおりだった。
+
+| 帳簿の行を読まないもの | ファイル |
+| --- | --- |
+| 書き手 | `usage_capture.py` |
+| 帳簿の部品の関数（`cache_writes`・`now_utc`・`repo_key`）だけを使うもの | `context_calibrate.py`・`context_decisions.py`・`supervise_lib/state.py` |
+| 集計を呼ぶだけのもの | `usage-report.py` |
+| パスを文字列で持つもの | `run_state_kinds.py`・`scripts/contract-allow/` の許可の一覧 |
+| 名前だけが同じ関数 | `estimate_records.py` の `_read_rows` |
 
 2 回目で当たった名乗りを書く箇所は 2 つである。
 
@@ -226,7 +248,7 @@ grep -rnE "\[[\"']source[\"']\]|get\([\"']source[\"']|\"source\"|'source'|\.sour
 | `supervise_lib/claude.py:332` | 名乗りを書く（supervise 自身） |
 | `worker_steps.py:91` | 名乗りを書く（直す箇所）。`external-ai.py:256` は呼び出し元が名乗っていなければ `external-ai` を入れるため、ここで `external-ai` を名乗っても、名乗りを外しても行の値は同じになる。設計は明示する方を採る |
 
-帳簿の行の `source` を読むのは、上の表の 3 か所だけだった。値で振る舞いを変えるのは `step_totals` と `usage_group_key` の 2 か所で、どちらも規則の表で判定した。`factory/` は帳簿を読まない（1 回目の検索で 0 件）。
+帳簿の行の `source` を読むのは、読む箇所の表の 3 か所だけだった。値で振る舞いを変えるのは `step_totals` と `usage_group_key` の 2 か所で、どちらも規則の表で判定した。`factory/` は帳簿を読まない（1 回目の検索で 0 件）。
 
 ## 処理の流れ
 
@@ -243,7 +265,7 @@ sequenceDiagram
   T-->>C: 応答ごとの最後の使用量の合計
   C->>L: 同じ agent_id の行を読む
   L-->>C: 既存の行（無ければ空）
-  C->>C: 合計 − 既存の行の和（鍵ごと、0 未満は 0）
+  C->>C: 合計 − 既存の行の和（キーごと、0 未満は 0）
   C->>L: 差を 1 行追記
   alt 会話の記録を読めない
     C->>L: usage = "unknown" の 1 行（差を取らない）
@@ -304,7 +326,7 @@ work の結果の使用量は今どおり空で、「LLM の使用量」の欄�
 | 運用・保守性 | hook と起動の共有処理は、帳簿へ書けないとき・会話の記録を読めないときに落ちない（帳簿の契約の I5 を保つ） | 既存の行を読む処理は例外を捕まえて空の一覧にし、追記は今どおり `append_safely` を通す。hook の本体（`usage-subagent.py`）の処理は変えない（docstring の数え方の記述だけ直す） | 帳簿のファイルをモード 0200 にして hook を 1 回動かし、終了コード 0 と、合計の 1 行の追記を見る。会話の記録を消して `"unknown"` の行を見る |
 | 移行性 | 帳簿の行の既存の項目を消さず、意味を変えない。項目を足すときは、足す前の行を読んでも集計が落ちない | 項目を足さない。`usage` の意味の変化はサブエージェントの行の差に限り、和を取る集計はそのまま読める | 既存の集計のテスト（`test_usage_aggregate.py`）がすべて通る |
 
-hook の時間の上限は 10 秒である（`plugins/ndf/hooks/claude.json` の SubagentStop の `timeout`）。既存の行を読む処理は、そのリポジトリの帳簿 1 本を読み、同じ `agent_id` の行を足すだけである。行が増えたときの時間を、手元のサブエージェントの帳簿の行（1 行あたり約 500 バイト）を繰り返して作った帳簿で測った（2026-11-05、Python 3.14.4、Python の起動から終わりまで、3 回の最短）。
+hook の時間の上限は 10 秒である（`plugins/ndf/hooks/claude.json` の SubagentStop の `timeout`）。既存の行を読む処理は、そのリポジトリの帳簿 1 本を読み、同じ `agent_id` の行を足すだけである。行が増えたときの時間を、手元のサブエージェントの帳簿の行（1 行あたり約 500 バイト）を繰り返して作った帳簿で測った。測った日は 2026-11-05、処理系は Python 3.14.4 で、Python の起動から終わりまでの 3 回の最短を採った。
 
 | 帳簿の行数 | 大きさ | 時間 |
 | ---: | ---: | ---: |
@@ -322,7 +344,7 @@ hook の時間の上限は 10 秒である（`plugins/ndf/hooks/claude.json` の
 
 ストリーミングの途中の行は、出力のトークン数がまだ少ない。最後の行が応答の確定した使用量で、既存の集計（`scripts/token-usage.py` の `scan_file`）とも一致する。主なモデルの数え方も応答ごとに 1 回とし、最後の行のモデルで数える。
 
-応答の行ごとに鍵の最大値を取る形は採らない。正しさの基準が既存の集計の「最後の行」であり、別の基準を足すと 2 つの集計が一致しなくなる。
+応答の行ごとにキーの最大値を取る形は採らない。正しさの基準が既存の集計の「最後の行」であり、別の基準を足すと 2 つの集計が一致しなくなる。
 
 根拠: Value 4 / Value 7（MVV 版 5）
 
@@ -403,7 +425,7 @@ hook の時間の上限は 10 秒である（`plugins/ndf/hooks/claude.json` の
 | 受け入れ条件 1・I1 | 同じ `message.id` の行が 2 行ある会話の記録（下の表の入力 1）を取り出すと、帳簿の使用量の 5 つの項目（入力・cache read・cache write の 5 分と 1 時間・出力）が最後の行の値になり、`scripts/token-usage.py` の `scan_file` の同じ 5 つの値（`inp`・`read`・`w5`・`w1h`・`out`）と一致する。受け入れ条件の「4 つの値」は cache write を 1 つに数えたもので、cache write の合計（`cache_creation_input_tokens`）が 5 分と 1 時間の和になることも見る | 最初の行を取る（今のコード）と落ちる |
 | 受け入れ条件 2・I2 | 同じ `agent_id` で hook を 2 回動かし（2 回目の前に会話の記録へ応答を足す）、その `agent_id` の行の使用量の和が 2 回目の時点の会話の記録の合計に等しい | 会話の記録の累計を毎回書く（今のコード）と落ちる |
 | 受け入れ条件 3・I2 | 1 回目の行を帳簿に置かずに、複数行の応答を含む会話の記録（下の表の入力 3）で 2 回目の hook を動かすと、行の和が会話の記録の合計に等しい | 前回の値を帳簿以外から取る、前回の停止を前提に差を取る、または最初の行を取る（今のコード）と落ちる |
-| I2（0 未満の扱い） | 既存の行の和が会話の記録の合計より大きいとき、差の鍵は 0 になり負の値を書かない | 0 で切らないと落ちる |
+| I2（0 未満の扱い） | 既存の行の和が会話の記録の合計より大きいとき、差のキーの値は 0 になり負の値を書かない | 0 で切らないと落ちる |
 | 受け入れ条件 4・I3 | 期間の境界をまたぐ `claude -p` の会話と、境界の前に始まった親の会話の下のサブエージェント（下の表の入力 4）で、期間を前日にすると前日の分だけ、翌日にすると翌日の分だけが会話の記録の分に入る | 最初の行の時刻で会話を選ぶ（今のコード）、または応答の最初の行の時刻で比べると落ちる |
 | 受け入れ条件 5 | 期間を指定しない集計の 3 つの値が、同じ `message.id` の行が 1 行ずつの記録で今と同じ値になる | 期間を指定しないときにも時刻で絞ると落ちる |
 | 受け入れ条件 6・I4 | `runtime: claude` の work のステップを偽の claude で動かすと、フェーズレポートの「CLI（drive・work の中）」に claude 1 回が載り、「LLM の使用量」は 0 のまま | work の環境変数の `source` を `supervise` に戻すと落ちる |
