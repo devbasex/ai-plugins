@@ -307,6 +307,30 @@ def test_exclude_redoes_the_selection_and_all_excluded_stops(env):
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "outside_mvv"
 
 
+def test_excluded_rows_of_the_lap_do_not_use_up_max_issues_without_a_boundary(env):
+    # #2627: 容量の宣言が無いとき、今の周回で loop exclude した行で枠を埋めない（埋めると後ろの課題が候補に上がらず outside_mvv で止まった）
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13, 14]))
+    start(env)
+    assert sl_select.cmd_select(env, "l1")["metrics"]["selected"] == [11, 12]
+    out = sl_select.cmd_exclude(env, "l1", 11, "モードが対象外（operation）")
+    assert out["metrics"]["selected"] == [12, 13]
+    out = sl_select.cmd_exclude(env, "l1", 12, "MVV に反する疑い")
+    assert out["metrics"]["selected"] == [13, 14]
+    rows = {r["number"]: r["reason"] for r in out["metrics"]["excluded"]}
+    assert rows[11] == "モードが対象外（operation）" and rows[12] == "MVV に反する疑い"
+
+
+def test_exclusions_of_an_earlier_lap_still_use_max_issues(env):
+    # 前の周回の除外は今の周回の選定に効かない（候補の枠も、外す理由も）
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
+    start(env)
+    r = rec(env)
+    r["excluded"] = [{"number": 11, "reason": "モードが対象外（operation）", "lap": 1}]
+    got = sl_select.choose_issues(env, r, env.rank_box["out"], 2, {})
+    assert [x["number"] for x in got["selection"] if x["decision"] == sl_select.SELECTED] == [11, 12]
+    assert {x["number"]: x["reason"] for x in got["selection"]}[13].startswith("順位")
+
+
 def test_env_exclusions_drop_issues_held_by_other_runs(env, monkeypatch):
     # #2347 の決定 3: Factory が同じリポジトリの別の実行の課題を NDF_LOOP_EXCLUDE で渡し、その周回の選定から外す
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
