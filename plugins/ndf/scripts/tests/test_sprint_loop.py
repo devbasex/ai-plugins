@@ -1844,6 +1844,18 @@ def test_lane_gives_back_twice_in_the_same_lap_with_different_request_ids(env, m
     assert (first, w["request"]) == (f"la-g501-{HEAD[:12]}-m2-1", f"la-g501-{HEAD[:12]}-m2-2") and "by" not in w
 
 
+@pytest.mark.parametrize("returned, mark", [("権限が無い", True), (None, None)])
+def test_lane_gate1_marks_a_given_back_request_so_the_organizer_does_not_self_approve(env, monkeypatch, returned, mark):
+    import parallel_lane
+
+    got = []
+    monkeypatch.setattr(parallel_lane, "lane_of", lambda main: ("p1", Path("la")))
+    monkeypatch.setattr(parallel_lane, "request_gate1", lambda *a, **kw: got.append(kw) or "rid")
+    w = {"number": 11, "pr": 501, "verdict": "unknown", **({"returned": returned} if returned else {})}
+    assert sl_gate.lane_gate1(env, w, "r.md", "s.json", stamp=HEAD)["request"] == "rid"
+    assert got[0].get("returned") is mark
+
+
 # ---------------------------------------------------------------- 現状固定: cmd_answer の分岐ごとの出力
 
 

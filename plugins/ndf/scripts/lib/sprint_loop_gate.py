@@ -379,7 +379,8 @@ def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", sta
     """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan, stamp, report, state}
     を返す。レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。
     同じ承認した先端で利用者へ戻すとき（#2507）は、`stamp` に承認した先端を、`suffix` に依頼の id の接尾辞を渡す
-    （同じ id の依頼は答え済みとして受け取られないため）。依頼の理由にはマージの結果の理由（`w.returned`）も載せる。"""
+    （同じ id の依頼は答え済みとして受け取られないため）。依頼の理由にはマージの結果の理由（`w.returned`）も載せ、
+    利用者へ戻した依頼には印 `returned` を付ける（MVV 判定でオーガナイザーが自分で承認しないため。#2507 の決定 9）。"""
     try:
         import parallel_lane
 
@@ -391,6 +392,7 @@ def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", sta
         rid = parallel_lane.request_gate1(
             env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
             verdict=w.get("verdict"), reasons=reasons, boundary=list(w.get("boundary") or []), suffix=suffix,
+            **({"returned": True} if w.get("returned") else {}),
         )  # fmt: skip
     except Exception:  # noqa: BLE001 — 送れなければ今どおり人の判断待ち（loop answer で答える）
         return None

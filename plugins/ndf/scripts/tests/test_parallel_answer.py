@@ -48,6 +48,7 @@ def test_after_items_drop_the_answered_request_and_mark_resends_and_settled(tmp_
         (dict(verdict="unknown", boundary=["C1 に当たる"]), False),
         (dict(verdict="unknown", sprint_state="/無い/s.json"), False),
         (dict(verdict="unknown", kind="gate2"), False),
+        (dict(verdict="unknown", returned=True), False),
     ],
 )
 def test_mvv_mark_only_for_undecided_design_approvals_without_redlines(tmp_path, q, eligible):
