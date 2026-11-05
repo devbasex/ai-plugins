@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 使用量の帳簿の Claude の値が、4 つの経路で会話の記録の合計とずれる。同じ応答の最後の使用量を捨てて少なく数える、続けたサブエージェントを 2 回数える、期間を指定した集計で日をまたぐ会話を丸ごと採るか落とす、supervise の work で起動した claude の使用量が報告のどの欄にも載らない。手元の帳簿では、902 件のサブエージェントのうち 35 件が同じ識別子で 2 行以上を持つ（2026-11-05 の実測）
+- **今どうなっているか**: 使用量の帳簿の Claude の値が、次の 4 つの経路で会話の記録の合計とずれる。同じ応答の最後の使用量を捨てて少なく数える。続けたサブエージェントを 2 回数える。期間を指定した集計で、日をまたぐ会話を丸ごと採るか落とす。supervise の work で起動した claude の使用量が、報告のどの欄にも載らない。手元の帳簿では、902 件のサブエージェントのうち 35 件が同じ識別子で 2 行以上を持つ（2026-11-05 の実測）
 - **誰に効くか**: トークン削減の効果を帳簿で測る人と、スプリントの振り返りで使用量を読む人
 - **変えると何が成り立つか**: 帳簿・`usage-report.py`・supervise のフェーズレポートの Claude の値が、会話の記録を応答ごとに数えた値と一致する
 
@@ -184,7 +184,21 @@ classDiagram
 | `claude_views` の `claude -p` の行（`kind≠subagent`）とセッション ID の突き合わせ | `usage_aggregate.py:206-209` | 当てはまる（`source` を見ない） |
 | 確定仕様の「呼び出し元の名乗り」の表と、冒頭の例の `supervise:work`（codex の行） | 確定仕様 | 当てはまらない。構成要素の表の「確定仕様」で書き直す |
 
-検索は `grep -rn '"supervise"\|supervise:work\|get("source")' plugins scripts docs/specifications`（テストを除く）で行った。帳簿の行の `source` を読むのは、上の表の `usage_aggregate.py:343` と、テストの印の一覧を作る `usage_ledger.py:303`（値で分岐しない）だけだった。ほかの当たり（`whole_runs.py:81`・`check-service-boundary.py:200`・`validate_manifests.py:252`・cross-refactoring と ask の部品）は別の記録の `source` を読む。名乗りを書く側は `supervise_lib/claude.py:332`（supervise 自身）と `worker_steps.py:91`（直す箇所）である。
+検索は次のコマンドで行った（テストを除く）。
+
+```bash
+grep -rn '"supervise"\|supervise:work\|get("source")' plugins scripts docs/specifications
+```
+
+| 当たり | 何をしているか |
+| --- | --- |
+| `usage_aggregate.py:343` | 帳簿の行の `source` を読む（上の表の 1 行目） |
+| `usage_ledger.py:303` | 帳簿の行の `source` を読み、テストの印の一覧を作る（値で分岐しない） |
+| `whole_runs.py:81`・`check-service-boundary.py:200`・`validate_manifests.py:252`・cross-refactoring と ask の部品 | 別の記録の `source` を読む |
+| `supervise_lib/claude.py:332` | 名乗りを書く（supervise 自身） |
+| `worker_steps.py:91` | 名乗りを書く（直す箇所） |
+
+帳簿の行の `source` を読むのは、この表の上の 2 か所だけだった。
 
 ## 処理の流れ
 
@@ -285,7 +299,7 @@ hook の時間の上限は 10 秒である。既存の行を読む処理は帳�
 
 ### 決定 4: supervise 自身の呼び出しと work の CLI を見分けるため、`runtime` を指定した work の行の呼び出し元を `external-ai:work` にする
 
-`source` は「呼び出しを起動したスクリプト」を表し、`runtime` を指定した work で claude を起動するのは external-ai.py である。`source=supervise` を supervise 自身の `call_claude` の行だけにすれば、ステップの集め直しの規則（`source=supervise` の Claude の行を除く）がそのまま正しくなる。supervise の中の起動であることは `plan`・`step` が持つ。`kind` は `work` のまま残し、`scripts/token-usage.py` の層の割り当てを変えない。codex・kiro・agy の work の行も同じく `external-ai:work` にし、ランタイムで名乗りを変えない。
+`source` は「呼び出しを起動したスクリプト」を表し、`runtime` を指定した work で claude を起動するのは external-ai.py である。`source=supervise` を supervise 自身の `call_claude` の行だけにする。そうすれば、ステップの集め直しの規則（`source=supervise` の Claude の行を除く）がそのまま正しくなる。supervise の中の起動であることは `plan`・`step` が持つ。`kind` は `work` のまま残し、`scripts/token-usage.py` の層の割り当てを変えない。codex・kiro・agy の work の行も同じく `external-ai:work` にし、ランタイムで名乗りを変えない。
 
 帳簿の行に起動の経路を表す項目を足す形は採らない。書き手 5 か所すべてに値を足すことになり、既存の項目で見分けられるものに項目を増やすことになる。`kind` を分ける形も採らない。`scripts/token-usage.py` の層の割り当て（`kind` で決まる）が変わり、要求の対象範囲（`token-usage.py` を変えない）を外れる。
 
@@ -313,7 +327,7 @@ hook の時間の上限は 10 秒である。既存の行を読む処理は帳�
 | 受け入れ条件 8 | 上の 1・2・3・4・6 のテストは今の develop（d51159151）で失敗し、7 は通る | — |
 | 受け入れ条件 9 | 確定仕様の「使用量の取り出し」のサブエージェントの行・「集計」の 3 つの値・「supervise の報告」・「呼び出し元の名乗り」の記述を、実装の後に F1〜F4 と突き合わせる（文言のテストは書かない） | — |
 
-既存のテストのうち、`runtime` を指定した work の行を `("supervise", "work", …)` と見るもの（`plugins/ndf/scripts/tests/test_usage_ledger.py:245`）は、決定 4 に合わせて `external-ai` を見る形へ直す。
+`plugins/ndf/scripts/tests/test_usage_ledger.py:245` の既存のテストは、`runtime` を指定した work の行を `("supervise", "work", …)` と見る。このテストは、決定 4 に合わせて `external-ai` を見る形へ直す。
 
 ## 設計の結果
 
