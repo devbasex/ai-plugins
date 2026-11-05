@@ -286,7 +286,7 @@ Pull Request の変更だけで承認ゲート 2 の判定やランタイムの�
 
 **本番のブランチは `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）だけが持つ。** 決め方は
 `lib/repo.py` の `production_of`・`production_branch` の 1 か所で、`supervise_lib/decl.py` と `lib/delivery.py` は
-独自に後退しない（#2097）。既定ブランチを解く木も `lib/repo.py` の `first_git_tree` 1 つで選び（宣言を探す木の並びのうち、
+独自に後退しない。既定ブランチを解く木も `lib/repo.py` の `first_git_tree` 1 つで選び（宣言を探す木の並びのうち、
 最初に存在する git の木）、まだ作っていない worktree のパスを渡しても既定ブランチへ後退する。`worktree.json` に寄せるのは、ベースブランチと並ぶ値であり、シェル
 （`lib/worktree-branch.sh`）と `project-decl.py write` も既にここを読み書きするためである。
 
