@@ -30,10 +30,7 @@ import deps  # noqa: E402
 deps.require("md")
 import md  # noqa: E402
 import repo  # noqa: E402
-from design_docs import find_designs  # noqa: E402
-from design_docs import git_list as _git_list  # noqa: E402
-from design_docs import read_files as read_designs  # noqa: E402
-from design_docs import require_repo as _require_repo  # noqa: E402
+from design_docs import find_designs, git_list, read_files, require_repo  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_OK,
     EXIT_PRECONDITION,
@@ -152,7 +149,7 @@ def _path_present(path: str, files: set[str], dirs: set[str]) -> bool:
 
 def judge_names(root, items: list[dict]) -> None:
     """各名前の `result` を present / missing / unverified に決める。"""
-    files = set(_git_list(root, "ls-tree", "-r", "--name-only", "HEAD"))
+    files = set(git_list(root, "ls-tree", "-r", "--name-only", "HEAD"))
     dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
     by_path: dict[str, list[dict]] = {}
     bare: list[dict] = []
@@ -186,8 +183,8 @@ def tests_outcome(items: list[dict]) -> tuple[str, int, str]:
 
 def cmd_tests(a):
     root = git_root(a.root)
-    _require_repo(root)
-    designs = find_designs(root, a.issue) if a.issue else read_designs(root, a.design)
+    require_repo(root)
+    designs = find_designs(root, a.issue) if a.issue else read_files(root, a.design)
     if not designs:
         nums = ", ".join(f"#{n}" for n in a.issue or [])
         emit(result(TOOL, "stopped", f"設計文書が無い（{nums}）。3 つの確認は該当なし（設計文書が無い）",
@@ -221,7 +218,7 @@ def cmd_tests(a):
 
 def diff_paths(root, mb: str) -> list[str]:
     out: list[str] = []
-    for ln in _git_list(root, "diff", "--name-status", "-M", mb, "HEAD"):
+    for ln in git_list(root, "diff", "--name-status", "-M", mb, "HEAD"):
         out += ln.split("\t")[1:]
     return list(dict.fromkeys(out))
 
@@ -247,9 +244,9 @@ def diff_symbols(root, mb: str) -> list[str]:
 
 def target_docs(root, mb: str) -> list[str]:
     """HEAD の確定仕様の置き場の `.md` と `CHANGELOG.md` のうち、merge-base にもあったもの。"""
-    old = set(_git_list(root, "ls-tree", "-r", "--name-only", mb))
+    old = set(git_list(root, "ls-tree", "-r", "--name-only", mb))
     out = []
-    for rel in _git_list(root, "ls-tree", "-r", "--name-only", "HEAD"):
+    for rel in git_list(root, "ls-tree", "-r", "--name-only", "HEAD"):
         is_spec = rel.startswith(repo.SPEC_DIR + "/") and rel.endswith(".md")
         if (is_spec or PurePosixPath(rel).name == "CHANGELOG.md") and rel in old:
             out.append(rel)
@@ -305,8 +302,8 @@ def scan_doc(text: str, pat: re.Pattern, max_lines: int) -> tuple[list[str], lis
 
 def cmd_specs(a):
     root = git_root(a.root)
-    _require_repo(root)
-    mb_lines = _git_list(root, "merge-base", a.base, "HEAD")
+    require_repo(root)
+    mb_lines = git_list(root, "merge-base", a.base, "HEAD")
     mb = mb_lines[0]
     paths = diff_paths(root, mb)
     symbols = diff_symbols(root, mb)
