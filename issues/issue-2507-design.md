@@ -109,7 +109,7 @@
 
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
-| 承認した設計のマージ（`lib/design_pr_merge.py`） | 設計 PR 1 本について、状態・先端・宛先を読み、宛先を `delivery.judge_target` で判定し、検査の分類を `merged-steps.py probe --act` で読み、緑なら `merged-steps.py merge-when-green --expect-head <承認した先端> --no-cleanup` でマージする（待ちの上限は「非機能の実現方式」）。結果を「マージの結果」の 1 つにして返す。例外を投げず、終了コードを持たない（呼ぶ側が記録する） | 新設 |
+| 承認した設計のマージ（`lib/design_pr_merge.py`） | 設計 PR 1 本について、状態・先端・宛先を読み、宛先を `delivery.judge_target` で判定し、必須の検査が登録済みか（検査が無いなら、無いこと）を確かめ、検査の分類を `merged-steps.py probe --act` で読み、緑なら `merged-steps.py merge-when-green --expect-head <承認した先端> --no-cleanup` でマージする（待ちの上限は「非機能の実現方式」）。結果を「マージの結果」の 1 つにして返す。例外を投げず、終了コードを持たない（呼ぶ側が記録する） | 新設 |
 | 並列の計画の答え（`parallel.py` の `answer`・`lib/parallel_answer.py`） | `--approved` の答えが `gate1` の依頼に当たるとき、答えを送る前に承認した設計のマージを呼ぶ。結果を `metrics.merge` と答えのメッセージ（`merge`）に載せる。答えの後の今の依頼の一覧を `metrics.after` に載せ、機械で決まる除外の印を付ける | 変更 |
 | 答えのメッセージ（`lib/parallel_lane.py` の `send_answer`） | 答えのメッセージに `merge`（マージの結果）と `by`（`user` か `mvv`）を載せる | 変更 |
 | 耐久ワークフロー（`lib/parallel_run.py`） | 答えのメッセージから `answer-<依頼>` のイベントを立てるとき、`merge` と `by` も写す | 変更 |
@@ -117,7 +117,7 @@
 | 人の判断待ちへ移す（`lib/sprint_loop_gate.py` の `move_to_waiting`・`lane_gate1`・`regate1`） | 並列の計画の外でも、行へ承認した先端（`stamp`）を書く。先端の照合を 1 本のループの答えにも使う。設計の承認の依頼に、判定の行のレッドライン（`boundary`）を足す | 変更 |
 | 周回の境と選定（`lib/sprint_loop_select.py`） | 選定の前に、承認済みで未マージの行ごとに、前のマージの結果に応じた手を 1 回打つ（`settle_approved_designs`。「周回の境が結果ごとに打つ手」）。マージ済みになった設計 PR は後片付け（`merged-steps.py cleanup`）を打つ。承認とマージが済んだ課題を先頭に選ぶ。外す理由にマージの結果を添える | 変更 |
 | 手順書（`references/parallel.md`・`references/loop.md`） | オーガナイザーの「問い方」に、答えの後の整理と MVV 判定で自分で答える手順を足す。`answer` がマージすることと、1 本のループの答えがマージすることを書く | 変更 |
-| 改訂の兆候の数え方（`lib/project_mvv_signals.py` の `unknown_streak`） | 同じスプリント状態・承認ゲート・PR の判定の行が続いたら、最後の 1 行だけを数える | 変更 |
+| 改訂の兆候の数え方（`lib/project_mvv_signals.py` の `unknown_streak`） | 末尾から続いた「判定できない」の行を、スプリント状態・承認ゲート・PR の組ごとに 1 件と数える。同じ組の行が隣り合っていなくても 1 件にまとめる | 変更 |
 | 確定仕様（`docs/specifications/ndf-parallel-organizer.md`） | 不変条件 I18 を「オーガナイザーは設計の承認で設計 PR をマージするほかは作業を持たない」へ書き換える | 変更 |
 
 ```mermaid
@@ -185,17 +185,18 @@ plugins/ndf/scripts/
 | `already_merged` | 読んだ時点で `MERGED` | `gh pr view` の `state` |
 | `head_moved` | 今の先端が承認した先端と違う | `gh pr view` の `headRefOid`。`merge-when-green` の `items[].result` が `head_moved` のときも |
 | `no_stamp` | 承認した先端が記録に無い | 入力の `stamp` |
-| `not_green` | 検査が緑でない（走っている・待っている・失敗・取り残し・基盤待ち） | `probe` の `metrics.class` が `passed` と `infra` 以外。`infra` で `merge-when-green` を呼んで緑にならなかったとき。`merge-when-green` が 75 か、待ちの上限で 1 |
+| `not_green` | 検査が緑でない（走っている・待っている・失敗・取り残し・基盤待ち・未登録） | 検査が未登録（分類 `unregistered`。下の手順 3）。`probe` の `metrics.class` が `passed` と `infra` 以外。`infra` で `merge-when-green` を呼んで緑にならなかったとき。`merge-when-green` が 75 か、待ちの上限で 1 |
 | `conflict` | 宛先と衝突している | `merge-when-green` が 4 |
 | `production` | 宛先が本番チャネルに当たるか、決められない | `gh pr view` の `baseRefName` を `delivery.judge_target(delivery.load_delivery(root), <宛先>)` で判定し、`stops` が真。`probe` と `merge-when-green` を呼ばないため、承認資料は書かれない。`merge-when-green` が 10 を返したときも（判定の後に宛先が変わった場合） |
 | `failed` | 上のどれでもない失敗（権限が無い・PR が閉じている・読めない） | `gh` の非 0・`merge-when-green` の 1・2 |
 
 呼ぶ順は次のとおりで、どこかで結果が決まればそこで返す。
 
-1. `gh pr view <pr> --json state,headRefOid,baseRefName` を 1 回読む（`already_merged`・`no_stamp`・`head_moved`・`failed`）
+1. `gh pr view <pr> --json state,headRefOid,baseRefName,statusCheckRollup` を 1 回読む（`already_merged`・`no_stamp`・`head_moved`・`failed`）
 2. 宛先を `delivery.judge_target` で判定する（`production`）
-3. `merged-steps.py probe --pr <pr> --act` で検査を分類する。取り残し（`stale`）のジョブは、この 1 回で再実行される
-4. 分類が `passed` なら `merge-when-green` を呼ぶ。分類が基盤待ち（`infra`）なら `--infra-gap 0` を足して呼ぶ。Runner が付かずに取り消されたジョブが最初の読みで再実行され、待ちの上限までに緑になればマージする。ほかの分類は呼ばずに `not_green` で返す
+3. 検査が登録済みかを確かめる。`gh api repos/<repo>/rules/branches/<宛先>` を読み、`ci_workflows.required_contexts` で必須の検査の名前を取る。必須の検査のどれかが 1 の検査の一覧（`statusCheckRollup`）に無ければ、`not_green`（分類 `unregistered`）で返す。検査の一覧が空なら、さらに `gh api repos/<repo>/contents/.github/workflows?ref=<承認した先端>` を読む。必須の検査が無く（`required_contexts` が `None`）、ワークフローのディレクトリも無い（404）ときだけ、検査が無いと確かめたことにして次へ進む。どちらかがある・どちらかを読めないときは `not_green`（分類 `unregistered`）で返す
+4. `merged-steps.py probe --pr <pr> --act` で検査を分類する。取り残し（`stale`）のジョブは、この 1 回で再実行される
+5. 分類が `passed` なら `merge-when-green` を呼ぶ。分類が基盤待ち（`infra`）なら `--infra-gap 0` を足して呼ぶ。Runner が付かずに取り消されたジョブが最初の読みで再実行され、待ちの上限までに緑になればマージする。ほかの分類は呼ばずに `not_green` で返す。手順 3 を通った後は、検査の一覧が空でないか、検査が無いと確かめたかのどちらかである。検査の一覧は空に戻らないため、`merge-when-green` が検査の載らないまま `no_checks` としてマージするのは、検査が無いと確かめた場合に限られる
 
 ### `parallel.py answer`
 
@@ -235,7 +236,7 @@ plugins/ndf/scripts/
 | 項目 | 型 | 中身 |
 | --- | --- | --- |
 | `stamp` | 文字列 | 承認した先端。並列の計画の外でも書く（今はレーンだけが書く） |
-| `merge` | オブジェクト | 最後の承認した設計のマージの出力に、試みた周回の番号 `lap` と、同じ `result` と `class` が同じ承認した先端で続いた周回の数 `streak` を足したもの |
+| `merge` | オブジェクト | 最後の承認した設計のマージの出力に、試みた周回の番号 `lap`、同じ `result` と `class` が同じ承認した先端で続いた周回の数 `streak`、同じ承認した先端で基盤待ちのために再実行した回数の累計 `infra_reruns` を足したもの |
 | `merged_at` | 文字列 | 既存。マージを確かめた時刻 |
 | `by` | 文字列 | `user` か `mvv`。誰が承認したか |
 
@@ -283,17 +284,18 @@ graph TD
 
 | 前の結果 | 時間で解けるか | 周回の境で打つ手 |
 | --- | --- | --- |
-| 無い・`not_green`（走っている・待っている・表示だけが待ち） | 解ける | 承認した設計のマージを呼ぶ |
+| 無い・`not_green`（走っている・待っている・表示だけが待ち・未登録 `unregistered`） | 解ける | 承認した設計のマージを呼ぶ |
 | `not_green`（取り残し `stale`） | 再実行すれば解ける | 承認した設計のマージを呼ぶ。中の `probe --act` がジョブを再実行する |
-| `not_green`（基盤待ち `infra`） | 再実行すれば解ける | 承認した設計のマージを呼ぶ。中の `merge-when-green --infra-gap 0` が取り消されたジョブを再実行する |
-| `not_green` が同じ分類で 3 周回続いた・`not_green`（再び取り残し `stale_again`） | 解けない | 利用者へ戻す |
+| `not_green`（基盤待ち `infra`）で `merge.infra_reruns` が 3 未満 | 再実行すれば解ける | 承認した設計のマージを呼ぶ。中の `merge-when-green --infra-gap 0` が取り消されたジョブを再実行する。呼んだら `merge.infra_reruns` に 1 を足す |
+| `not_green` が同じ分類で 3 周回続いた・`not_green`（再び取り残し `stale_again`）・`not_green`（基盤待ち `infra`）で `merge.infra_reruns` が 3 | 解けない | 利用者へ戻す。基盤待ちでは承認した設計のマージを呼ばない |
 | `conflict` | 解けない | 設計の worktree で `merged-steps.py base-sync --pr <pr> --push` を打つ。0 で先端が進めば、新しい先端で問い直す。1（衝突が残る）なら `git merge --abort` で取り込みを閉じて利用者へ戻す。2・3 と、設計の worktree が無いときも利用者へ戻す |
 | `failed` | 解けない | 利用者へ戻す |
 | `production` | 解けない | マージを呼ばず、承認資料も書かない。`gh pr view <pr> --json state` を 1 回だけ読み、`MERGED`（人が承認ゲート 2 でマージした）なら `already_merged` と同じに扱う。ほかは外す理由を `設計 PR の宛先が本番（承認ゲート 2 で人がマージする）` にする |
 | `head_moved`・`no_stamp` | — | 新しい先端で問い直す |
 
 - 問い直しは、レーンなら今の `regate1` と同じく新しい先端で依頼を送り直す。1 本のループでは、行の `stamp` を新しい先端へ書き換え、答えを外して人の判断待ちへ戻す
-- 利用者へ戻すは、問い直しと同じ経路で依頼を送り直す。承認した先端は変えず、依頼にマージの結果の理由を載せる。利用者は「直して出し直す」「やらない」か、手を打ってから「承認」を選ぶ。戻した行の `merge.streak` は 0 に戻る
+- 利用者へ戻すは、問い直しと同じ経路で依頼を送り直す。承認した先端は変えず、依頼にマージの結果の理由を載せる。利用者は「直して出し直す」「やらない」か、手を打ってから「承認」を選ぶ。戻した行の `merge.streak` と `merge.infra_reruns` は 0 に戻る
+- `merge.infra_reruns` は、`merge.streak` と違って分類が変わっても 0 に戻さない。再実行したジョブが Runner を待つ周回は分類が `running`・`queued` に変わり、`streak` は 0 に戻る。累計で数えないと、GitHub Actions の障害が続く間は基盤待ちと実行中が交互に現れ、CI の再実行が上限なく増える。上限の 3 は `merge-when-green` の `--infra-reruns` の既定と同じ値にする。答えの側（`answer`・`loop answer`）が基盤待ちで呼んだ 1 回も累計に足す。承認した先端が変わったら 0 から数え直す
 - `production` は戻さない。宛先は周回を重ねても変わらず、問い直しても同じ結果になるためである。利用者には、答えの時点で `metrics.merge` の理由として伝わる（「オーガナイザー: 答えの後の整理」の 1、1 本のループでは `loop answer` の `summary`）
 - 外す理由は `設計 PR がマージ待ち（<マージの結果の理由>）` にする
 - 「まだ選ばれていない」は、行の周回より後の周回の選定に、その課題を選んだ行が無いことで見る。選定の理由は `承認した設計` とする
@@ -302,17 +304,17 @@ graph TD
 
 1. 依頼ごとに答えを送る（`parallel.py answer`）。`metrics.merge` が `merged` 以外なら、理由を 1 行で利用者へ伝える（問いにしない。次の周回の境でレーンが結果に応じた手を打つ）。`production` なら、承認ゲート 2 で人がマージするまで実装に選ばれないことを添える
 2. 最後の `answer` の `metrics.after` から、`drop` が付いた依頼を除く
-3. `mvv.eligible` が `true` の依頼ごとに、依頼の `sprint_state` と `pr` を渡して `mvv-gate.py check` を打つ。打つ形は `mvv-gate.py check --sprint <sprint_state> --gate design --pr <pr>` である。「従う」（終了コード 0）なら `parallel.py answer <依頼> --approved --by mvv` を送る。判定の記録は `mvv-gate.py` が書く（判定・理由・根拠の項目）。打ち直しは 1 つの依頼に 1 回だけで、言語モデルの判定は 1 回（数分）増える。「判定できない」がまた返っても打たない。打ち直しで判定の記録（`mvv-gate.jsonl`）に同じ依頼の行が 2 つ並んでも、改訂の兆候（`unknown_streak`）は、続いた行のうち同じスプリント状態・承認ゲート・PR のものを最後の 1 行だけ数える。そのため閾値（既定 3）は、判定できなかった依頼の数で届く
+3. `mvv.eligible` が `true` の依頼ごとに、依頼の `sprint_state` と `pr` を渡して `mvv-gate.py check` を打つ。打つ形は `mvv-gate.py check --sprint <sprint_state> --gate design --pr <pr>` である。「従う」（終了コード 0）なら `parallel.py answer <依頼> --approved --by mvv` を送る。判定の記録は `mvv-gate.py` が書く（判定・理由・根拠の項目）。打ち直しは 1 つの依頼に 1 回だけで、言語モデルの判定は 1 回（数分）増える。「判定できない」がまた返っても打たない。打ち直しで判定の記録（`mvv-gate.jsonl`）に同じ依頼の行が 2 つ入っても、改訂の兆候（`unknown_streak`）は、末尾から続いた「判定できない」の行をスプリント状態・承認ゲート・PR の組ごとに 1 件と数える。並列のレーンの判定が A、B の順に入り、その後に A の打ち直しが入る（A・B・A の順）ように、同じ組の行が隣り合っていなくても 1 件にまとめる。そのため閾値（既定 3）は、判定できなかった依頼の数で届く
 4. 残りがあれば、今の「問い方」の区分の順と 4 件ずつで、まとめて `AskUserQuestion` を出す。残りが無ければ `wait --after <metrics.seq>` を打ち直す
 
 ## 非機能の実現方式
 
 | 大項目 | 実現方式 |
 | --- | --- |
-| 性能・拡張性 | 検査を `probe` で 1 回だけ分類し、`passed` と `infra` のときだけ `merge-when-green` を呼ぶ。`probe` が走っている検査を見たら、`merge-when-green` を呼ばずに `not_green` で返す。`merge-when-green` には `--timeout 10 --interval 5 --recheck 5 --no-checks-after 5` を渡す。`probe` の後に検査が走り始めても、上限の 10 秒を過ぎた最初の読みで切れ、`not_green`（終了コード 1）で返る。緑なら 1 回目の読みから 5 秒後の確かめ直しでマージし、検査の無いリポジトリでも 5 秒後の読みでマージする。読み直しの間隔は、読んだ中身が変わらないと 1.5 倍に伸びる（5 秒の次は 7.5 秒）。そのため、1 件の答えでマージが待つ時間は最悪で約 12.5 秒（読み直し 3 回の `gh` の時間とマージの呼び出しを除く）である（I5）。検査の無いリポジトリの待ちを 60 秒から 5 秒へ縮めてよいのは、承認した先端が問いを出した時点から変わっておらず、検査が載るまでの時間が過ぎているためである |
+| 性能・拡張性 | 検査を `probe` で 1 回だけ分類し、`passed` と `infra` のときだけ `merge-when-green` を呼ぶ。`probe` が走っている検査を見たら、`merge-when-green` を呼ばずに `not_green` で返す。`merge-when-green` には `--timeout 10 --interval 5 --recheck 5 --no-checks-after 5` を渡す。`probe` の後に検査が走り始めても、上限の 10 秒を過ぎた最初の読みで切れ、`not_green`（終了コード 1）で返る。緑なら 1 回目の読みから 5 秒後の確かめ直しでマージし、検査が無いと確かめたリポジトリでも 5 秒後の読みでマージする。読み直しの間隔は、読んだ中身が変わらないと 1.5 倍に伸びる（5 秒の次は 7.5 秒）。そのため、1 件の答えでマージが待つ時間は最悪で約 12.5 秒（読み直し 3 回の `gh` の時間とマージの呼び出しを除く）である（I5）。検査の無いリポジトリの待ちを 60 秒から 5 秒へ縮めてよいのは、`merge-when-green` を呼ぶ前に、必須の検査の規則とワークフローのファイルが無いことを読んで確かめているためである。確かめられないときは呼ばずに `not_green` で返す。確かめに足す `gh api` は 1 回の試みで最大 2 回である |
 | 可用性 | 承認した設計のマージは例外を投げず、`answer` と `loop answer` は結果を載せて 0 で返る。周回の境のマージし直しの失敗は、その課題を外す理由にとどめる（I4・I6） |
 | 運用・保守性 | マージの結果は `answer` の `metrics.merge`、答えのイベント、ループの記録の行の `merge` の 3 か所から読める。行の `merge.lap` で、どの周回で試みたかを辿れる |
-| セキュリティ | マージは `merge-when-green --expect-head <承認した先端>` で行い、`gh pr merge --match-head-commit` が承認した先端だけをマージする（I1）。宛先が本番チャネルに当たるか決められない設計 PR は、`merge-when-green` を呼ぶ前に `delivery.judge_target` の判定で `production` として返す（I3）。`merge-when-green` には `--gate-approved` を渡さないため、判定の後に宛先が変わっても承認ゲート 2 で止まる。必須の検査は `merge-when-green` が緑を確かめてからマージする（I2） |
+| セキュリティ | マージは `merge-when-green --expect-head <承認した先端>` で行い、`gh pr merge --match-head-commit` が承認した先端だけをマージする（I1）。宛先が本番チャネルに当たるか決められない設計 PR は、`merge-when-green` を呼ぶ前に `delivery.judge_target` の判定で `production` として返す（I3）。`merge-when-green` には `--gate-approved` を渡さないため、判定の後に宛先が変わっても承認ゲート 2 で止まる。必須の検査は `merge-when-green` が緑を確かめてからマージする（I2）。必須の検査が検査の一覧にまだ載っていないとき、または検査の一覧が空で検査が無いと確かめられないときは、`merge-when-green` を呼ばずに `not_green` で返す。`merge-when-green` が検査の載らないまま `gh pr merge --admin` を打つのは、検査が無いと確かめた場合だけである（I2） |
 
 ## 決定の記録
 
@@ -394,7 +396,7 @@ MVV 判定は数分かかるため `answer` の中では打たず、印（`mvv.e
 ### 決定 9: 時間で解けないマージの結果は、周回の境で繰り返さずに利用者へ戻す
 
 周回の境が毎回同じ試みを打つだけだと、衝突・権限の不足・再び取り残された検査のように時間で解けない結果では、承認した設計が周回のたびに
-外され続ける。取り残しと基盤待ちは再実行で解けるため、境が `probe --act` と `--infra-gap 0` で再実行する。衝突は、レーンが持つ設計の
+外され続ける。取り残しと基盤待ちは再実行で解けるため、境が `probe --act` と `--infra-gap 0` で再実行する。基盤待ちの再実行は同じ承認した先端で 3 回までとし、周回をまたいで累計で数える。`--infra-reruns` の上限は 1 回の `merge-when-green` の中だけで効くため、周回の境が上限を持たないと、障害が続く間に再実行が増え続ける。衝突は、レーンが持つ設計の
 worktree で `base-sync` を打てば解けることがあり、解ければ新しい先端で問い直す。どれでも解けない結果は、同じ依頼の経路で利用者へ戻し、
 「直して出し直す」「やらない」を選べるようにする。宛先が本番の設計 PR は、承認ゲート 2 で人がマージするまで実装に選ばない。問い直しても
 同じ結果になるため、戻さずに状態だけを読む。
@@ -410,14 +412,15 @@ worktree で `base-sync` を打てば解けることがあり、解ければ新�
 | 受け入れ条件 3 | `loop answer --approved` で 1・2 と同じ。先端が違えば `regated` で答えを当てず、`stamp` を書き換える | 1 本のループでマージを呼ばない・先端を比べない |
 | 受け入れ条件 4 / I4 / I5 | `merge-when-green` が 4・10・1・75 を返す、または `probe` が `running` を返すとき、`answer` は 0 で返り、答えのメッセージが送られ、行の `merge.reason` に理由が残る。`probe` が `running` のとき `merge-when-green` を呼ばない。`merge-when-green` に `--timeout 10 --interval 5 --recheck 5 --no-checks-after 5` を渡す | 失敗で非 0 を返す・答えを送らない・検査が走っている間に待つ・待ちの上限を渡さない |
 | 受け入れ条件 5 / I7 | 承認済みで `merged_at` がある行の課題は、順位が最後でも選定の先頭に選ばれ、理由が `承認した設計` になる | `first_issues` に足さない |
-| 受け入れ条件 6 / I6 | 承認済みで未マージの行があると、周回の境で前の結果に応じた手が 1 回打たれる。`not_green` では承認した設計のマージが呼ばれ、`stale` では `probe --act`、`infra` では `--infra-gap 0` で呼ばれる。失敗ならその課題だけが理由つきで外れ、ほかの課題が選ばれる。`failed`・同じ分類の `not_green` の 3 周回目・`base-sync` で解けない `conflict` では依頼が送り直される。`production` ではマージを呼ばず、`gh pr view` の `state` だけを読む | 境でマージし直さない・失敗で周回を止める・同じ境で 2 回呼ぶ・`production` でマージし直す・時間で解けない結果を戻さずに繰り返す |
+| 受け入れ条件 6 / I6 | 承認済みで未マージの行があると、周回の境で前の結果に応じた手が 1 回打たれる。`not_green` では承認した設計のマージが呼ばれ、`stale` では `probe --act`、`infra` では `--infra-gap 0` で呼ばれる。失敗ならその課題だけが理由つきで外れ、ほかの課題が選ばれる。`failed`・同じ分類の `not_green` の 3 周回目・`base-sync` で解けない `conflict` では依頼が送り直される。基盤待ちと実行中が交互に現れても、同じ承認した先端で `--infra-gap 0` の呼び出しは 3 回までで、4 回目の基盤待ちではマージを呼ばずに依頼が送り直される。`production` ではマージを呼ばず、`gh pr view` の `state` だけを読む | 境でマージし直さない・失敗で周回を止める・同じ境で 2 回呼ぶ・`production` でマージし直す・時間で解けない結果を戻さずに繰り返す・分類が変わったときに再実行の累計を 0 に戻す |
 | 受け入れ条件 7 | 承認済みでマージ可能な設計 PR があるとき、次の周回の選定にその課題が含まれる | 境のマージし直しを選定の後に置く |
 | 受け入れ条件 8 | `metrics.after` から今答えた依頼が除かれ、同じ設計 PR の古い先端の依頼に `drop: resend`、同じ設計 PR の依頼に `drop: settled` が付く | 印を付けない・答えた依頼を残す |
 | 受け入れ条件 9 / I9 | `mvv.eligible` は、依頼の `verdict` が `unknown`・`unreadable` で `boundary` が空の `gate1` だけ `true`。`--by mvv` の答えを受けたレーンは承認の記録を `by: user` で書き直さない | 「従わない」やレッドラインに `true` を付ける・`by` を落とす |
 | 受け入れ条件 10 / I8 | `--revise`・`--rejected` では、`answer` も `loop answer` も承認した設計のマージを呼ばない | 答えの種類によらずマージを呼ぶ |
 | 受け入れ条件 11 | `confirm`・`settle` の既存のテストが通る | 既存のテストが落ちる |
+| I2（検査の未登録） | 必須の検査が検査の一覧に無いとき、および検査の一覧が空でワークフローのディレクトリがある・規則を読めないときは、`probe` と `merge-when-green` を呼ばずに `not_green`（分類 `unregistered`）を返す。必須の検査もワークフローのディレクトリも無いときだけ `merge-when-green` を呼ぶ | 検査の一覧が空のまま確かめずに `merge-when-green` を呼ぶ・規則を読めないときにマージへ進む |
 | I3 | `delivery.judge_target` が止める宛先では `probe` と `merge-when-green` を呼ばずに `production` を返す。`merge-when-green` が 10 を返しても `production` になり、`--gate-approved` を渡していない | 判定せずに `merge-when-green` を呼ぶ・`--gate-approved` を渡す |
-| 「判定できない」の数え方 | 同じスプリント状態・承認ゲート・PR の「判定できない」の行が 2 つ続いても、`unknown_streak` は 1 と数える | 打ち直しの行を 2 と数える |
+| 「判定できない」の数え方 | 同じスプリント状態・承認ゲート・PR の「判定できない」の行が 2 つ続いても、`unknown_streak` は 1 と数える。組 A・組 B・組 A の順に並んだ「判定できない」の 3 行は 2 と数える | 打ち直しの行を 2 と数える・隣り合わない打ち直しの行を別に数える |
 | 承認した設計のマージの結果の値 | `gh` と `merged-steps.py` の終了コードと出力の組ごとに、上の表の `result` へ写る。例外を投げない | 読めない出力で例外が上がる |
 
 `gh` と `merged-steps.py` は偽のコマンドで置き換える（今の `test_sprint_loop.py`・`test_parallel_lane.py` と同じ）。偽のコマンドの組み方は実装で決める。
@@ -433,7 +436,7 @@ worktree で `base-sync` を打てば解けることがあり、解ければ新�
 | 項目 | 内容 |
 | --- | --- |
 | 承認から時間がたった設計 PR の検査の状態 | 承認の時点で検査が終わっていることが多い、という見込みは実測していない。外れても周回の境でマージし直すため、受け入れ条件は満たす。リリース後の手動確認で、1 回目の試みの結果の内訳をループの記録の行の `merge` から数える |
-| 検査の無いリポジトリでの待ち | 承認した設計のマージは、検査が載らないまま 5 秒たつとマージする（`--no-checks-after 5`）。承認した先端は問いを出した時点から変わっていない前提で縮めたが、問いから答えまでの間に検査が載らなかったリポジトリで後から載る場合を確かめていない。スプリントのプランのマージは 60 秒のまま変えない |
+| 検査が無いことの確かめ方 | 必須の検査はルールセットの規則（`rules/branches`）から読む。旧来のブランチ保護だけで、GitHub Actions 以外のアプリの検査を必須にしているリポジトリでは、その検査が未登録のまま「検査が無い」と判定しうる。そうしたリポジトリで走らせて確かめていない。スプリントのプランのマージは 60 秒の待ちのまま変えない |
 | 答えの待ちの最悪の時間 | 約 12.5 秒は `GreenWatch` の読み直しの間隔から求めた値で、測っていない。実装のテストで、走っている検査を偽のコマンドで返し続けたときの経過を確かめる |
 | 時間で解けない結果の上限 | 同じ分類の `not_green` を 3 周回で利用者へ戻す値は既定で、測っていない。リリース後にループの記録の行の `merge.streak` から内訳を数えて見直す |
 | 後片付けを周回の境へ回したときの worktree | 設計の worktree がレーンの周回の境まで残る。次の周回の実装の worktree は別のブランチ名で作るため重ならない見込みだが、走らせて確かめていない。実装のテストで確かめる |
