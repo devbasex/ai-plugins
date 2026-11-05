@@ -1,7 +1,8 @@
 // 画面向けの経路（#2186・#2347・#2172）。取り込み・キーの持ち込み・課題の候補・スプリントの実行・開発ループ。
-// どの経路も resolveFromRequest でアカウントを解決し、他人のアカウントは #2170 の I18 と同じ 403
-import type { Context, Hono } from "hono";
-import { resolveFromRequest, type AuthEnv } from "../auth/resolve.ts";
+// どの操作も操作の登録の層（operation.ts）で登録し、経路のアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403。
+// 要素の形は機能から起こした契約（#2384）で、要素ごとの失敗は要素の結果になる
+import type { Hono } from "hono";
+import type { AuthEnv } from "../auth/resolve.ts";
 import type { CredentialService } from "../credentials/service.ts";
 import { InvalidRequestError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
@@ -12,7 +13,8 @@ import { chooseCandidates, type CandidateModel } from "../runs/candidates.ts";
 import type { RunControl } from "../runs/control.ts";
 import type { LoopControl } from "../runs/loops.ts";
 import type { RunsTable } from "../runs/table.ts";
-import { readJson } from "./body.ts";
+import { parseIdempotencyKey } from "../idempotency.ts";
+import { positiveInt, registerList, registerOperation } from "./operation.ts";
 import { registerSprintViews, sprintRunList } from "./sprint-views.ts";
 
 export interface FactoryDeps {
@@ -28,147 +30,115 @@ export interface FactoryDeps {
   reader: ProgressReader;
 }
 
-function positiveInt(raw: string | undefined): number {
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1) throw new InvalidRequestError("リポジトリの ID の形ではありません");
-  return n;
+function idOf(raw: unknown, message: string): string {
+  if (typeof raw !== "string" || raw === "") throw new InvalidRequestError(message);
+  return raw;
 }
 
+const removed = { removed: true } as const;
+
 export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): void {
-  const ctxOf = (c: Context<AuthEnv>) => resolveFromRequest(c, c.req.param("accountId"));
+  registerList(app, "getInstallUrl", async () => [deps().repositories.installUrl()]);
 
-  app.get("/accounts/:accountId/github/install-url", async (c) => {
-    await ctxOf(c);
-    return c.json(deps().repositories.installUrl());
+  registerList(app, "getAuthorizeUrl", async (_c, ctx) => [await deps().repositories.authorizeUrl(ctx!)]);
+
+  registerOperation(app, "postRepositoryCandidates", { run: (e, ctx) => deps().repositories.candidates(ctx!, e) });
+
+  registerList(app, "listRepositories", async (_c, ctx) => (await deps().repositories.list(ctx!)).repositories);
+
+  registerOperation(app, "registerRepository", { run: (e, ctx) => deps().repositories.register(ctx!, e) });
+
+  registerOperation(app, "updateRepository", {
+    run: (e, ctx) => deps().repositories.declareConcurrency(ctx!, positiveInt(e.repository_id), e),
   });
 
-  app.get("/accounts/:accountId/github/authorize-url", async (c) => {
-    return c.json(await deps().repositories.authorizeUrl(await ctxOf(c)));
+  registerOperation(app, "removeRepository", {
+    run: async (e, ctx) => {
+      await deps().repositories.unregister(ctx!, positiveInt(e.repository_id));
+      return removed;
+    },
   });
 
-  app.post("/accounts/:accountId/github/candidates", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().repositories.candidates(ctx, await readJson(c)));
+  registerList(app, "getModelCredential", async (_c, ctx) => [await deps().credentials.get(ctx!)]);
+
+  registerOperation(app, "putModelCredential", { run: (e, ctx) => deps().credentials.put(ctx!, e) });
+
+  registerOperation(app, "deleteModelCredential", {
+    run: async (_e, ctx) => {
+      await deps().credentials.delete(ctx!);
+      return removed;
+    },
   });
 
-  app.get("/accounts/:accountId/repositories", async (c) => {
-    return c.json(await deps().repositories.list(await ctxOf(c)));
+  registerOperation(app, "postIssueCandidates", {
+    run: (e, ctx) => {
+      const exclude = Array.isArray(e.exclude) ? e.exclude.filter((n): n is number => Number.isInteger(n)) : [];
+      const d = deps();
+      return chooseCandidates({ table: d.table, github: d.github, model: d.candidateModel }, ctx!, positiveInt(e.repository_id), exclude);
+    },
   });
 
-  app.post("/accounts/:accountId/repositories", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().repositories.register(ctx, await readJson(c)), 201);
+  // 同じ冪等の鍵の 2 回目は 1 回目の実行の識別子を返す（#2384 の I14）
+  registerOperation(app, "startSprintRun", {
+    run: (e, ctx) =>
+      deps().control.startSprintRun(ctx!, { repositoryId: e.repository_id, issues: e.issues, idempotencyKey: parseIdempotencyKey(e.idempotency_key) }),
   });
 
-  app.patch("/accounts/:accountId/repositories/:repositoryId", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().repositories.declareConcurrency(ctx, positiveInt(c.req.param("repositoryId")), await readJson(c)));
-  });
-
-  app.delete("/accounts/:accountId/repositories/:repositoryId", async (c) => {
-    const ctx = await ctxOf(c);
-    await deps().repositories.unregister(ctx, positiveInt(c.req.param("repositoryId")));
-    return c.body(null, 204);
-  });
-
-  app.get("/accounts/:accountId/model-credential", async (c) => {
-    return c.json(await deps().credentials.get(await ctxOf(c)));
-  });
-
-  app.put("/accounts/:accountId/model-credential", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().credentials.put(ctx, await readJson(c)));
-  });
-
-  app.delete("/accounts/:accountId/model-credential", async (c) => {
-    await deps().credentials.delete(await ctxOf(c));
-    return c.body(null, 204);
-  });
-
-  app.post("/accounts/:accountId/repositories/:repositoryId/issue-candidates", async (c) => {
-    const ctx = await ctxOf(c);
-    const body = await readJson(c);
-    const exclude = Array.isArray(body.exclude) ? body.exclude.filter((n): n is number => Number.isInteger(n)) : [];
-    const d = deps();
-    const list = await chooseCandidates({ table: d.table, github: d.github, model: d.candidateModel }, ctx, positiveInt(c.req.param("repositoryId")), exclude);
-    return c.json(list);
-  });
-
-  app.post("/accounts/:accountId/sprint-runs", async (c) => {
-    const ctx = await ctxOf(c);
-    const body = await readJson(c);
-    return c.json(await deps().control.startSprintRun(ctx, { repositoryId: body.repository_id, issues: body.issues }), 201);
-  });
-
-  app.get("/accounts/:accountId/sprint-runs", async (c) => {
-    const ctx = await ctxOf(c);
+  registerList(app, "listSprintRuns", async (c, ctx) => {
     const raw = c.req.query("repository_id");
-    return c.json({ sprint_runs: await sprintRunList(deps(), ctx, raw === undefined ? null : positiveInt(raw)) });
+    return sprintRunList(deps(), ctx!, raw === undefined ? null : positiveInt(raw));
   });
 
   // スプリントの詳細・工程の中身・バックログ（#2172）
   registerSprintViews(app, deps);
 
-  app.post("/accounts/:accountId/sprint-runs/:sprintRunId/cancel", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().control.cancelSprintRun(ctx, c.req.param("sprintRunId")));
+  registerOperation(app, "cancelSprintRun", {
+    run: (e, ctx) => deps().control.cancelSprintRun(ctx!, idOf(e.sprint_run_id, "実行の ID の形ではありません")),
   });
 
   // 開発ループ（openapi/loops.yaml）
-  app.post("/accounts/:accountId/repositories/:repositoryId/loops", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.startLoop(ctx, positiveInt(c.req.param("repositoryId")), await readJson(c)), 201);
+  registerOperation(app, "startLoop", { run: (e, ctx) => deps().loops.startLoop(ctx!, positiveInt(e.repository_id), { ...e, idempotency_key: parseIdempotencyKey(e.idempotency_key) }) });
+
+  registerList(app, "listLoops", async (c, ctx) => (await deps().loops.listLoops(ctx!, positiveInt(c.req.query("repository_id")))).loops);
+
+  // 無いループは今の 404（loop_not_found）のまま要素の結果になる
+  registerOperation(app, "getLoop", { run: (e, ctx) => deps().loops.getLoopDetail(ctx!, idOf(e.loop_id, "ループの ID の形ではありません")) });
+
+  registerOperation(app, "updateLoopBudget", {
+    run: (e, ctx) => deps().loops.updateBudget(ctx!, idOf(e.loop_id, "ループの ID の形ではありません"), { budget: e.budget }),
   });
 
-  app.get("/accounts/:accountId/repositories/:repositoryId/loops", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.listLoops(ctx, positiveInt(c.req.param("repositoryId"))));
+  registerOperation(app, "cancelLoop", { run: (e, ctx) => deps().loops.cancelLoop(ctx!, idOf(e.loop_id, "ループの ID の形ではありません")) });
+
+  registerOperation(app, "startNextLap", { run: (e, ctx) => deps().loops.requestNextLap(ctx!, idOf(e.loop_id, "ループの ID の形ではありません")) });
+
+  // 人の判断待ちへの答え。人だけが確定できる（扱い human）
+  registerOperation(app, "answerLoopPending", {
+    run: async (e, ctx) => {
+      const loopId = idOf(e.loop_id, "ループの ID の形ではありません");
+      const { pending } = await deps().loops.answer(ctx!, loopId, { issue: e.issue, decision: e.decision, pr: e.pr });
+      return { loop_id: loopId, pending };
+    },
   });
 
-  app.get("/accounts/:accountId/loops/:loopId", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.getLoopDetail(ctx, c.req.param("loopId")));
+  // Factory のオーガナイザー（openapi/organizer.yaml。#2439）
+  registerOperation(app, "listRepositoryApprovalRequests", {
+    run: async (e, ctx) => {
+      const repositoryId = positiveInt(e.repository_id);
+      return { repository_id: repositoryId, ...(await deps().organizer.list(ctx!, repositoryId)) };
+    },
   });
 
-  app.patch("/accounts/:accountId/loops/:loopId", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.updateBudget(ctx, c.req.param("loopId"), await readJson(c)));
-  });
-
-  app.post("/accounts/:accountId/loops/:loopId/cancel", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.cancelLoop(ctx, c.req.param("loopId")));
-  });
-
-  app.post("/accounts/:accountId/loops/:loopId/next-lap", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.requestNextLap(ctx, c.req.param("loopId")), 202);
-  });
-
-  app.post("/accounts/:accountId/loops/:loopId/answers", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().loops.answer(ctx, c.req.param("loopId"), await readJson(c)));
-  });
-
-  // Factory のオーガナイザー（openapi/organizer.yaml。#2439）。一覧と履歴は読むだけで、承認を確定する経路は持たない（I66）
-  app.get("/accounts/:accountId/repositories/:repositoryId/approval-requests", async (c) => {
-    const ctx = await ctxOf(c);
-    return c.json(await deps().organizer.list(ctx, positiveInt(c.req.param("repositoryId"))));
-  });
-
-  app.get("/accounts/:accountId/repositories/:repositoryId/releases", async (c) => {
-    const ctx = await ctxOf(c);
+  registerList(app, "listRepositoryReleases", async (c, ctx) => {
     const raw = c.req.query("limit");
     const limit = raw === undefined ? 20 : Number(raw);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new InvalidRequestError("limit は 1〜100 の整数です");
-    return c.json(await deps().organizer.history(ctx, positiveInt(c.req.param("repositoryId")), limit));
+    return (await deps().organizer.history(ctx!, positiveInt(c.req.query("repository_id")), limit)).items;
   });
 
-  // 止まった配布を解く。画面の経路は Cognito の利用者の token だけを受ける（承認ゲートではなく失敗の扱い。決定 11）
-  app.post("/accounts/:accountId/repositories/:repositoryId/releases/:seq/resolve", async (c) => {
-    const ctx = await ctxOf(c);
-    const seq = Number(c.req.param("seq"));
-    if (!Number.isInteger(seq) || seq < 1) throw new InvalidRequestError("まとめた配布の連番の形ではありません");
-    return c.json(await deps().organizer.resolve(ctx, positiveInt(c.req.param("repositoryId")), seq, await readJson(c)), 202);
+  // 止まった配布を解く。人だけが確定できる（扱い human。オーガナイザーの I66）
+  registerOperation(app, "resolveStalledRelease", {
+    run: (e, ctx) =>
+      deps().organizer.resolve(ctx!, positiveInt(e.repository_id), positiveInt(e.seq, "まとめた配布の連番の形ではありません"), { choice: e.choice }),
   });
 }

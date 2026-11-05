@@ -8,6 +8,7 @@ import {
   type TransactWriteCommandInput,
 } from "@aws-sdk/lib-dynamodb";
 import type { AccountRecord, HistoryRecord, SeatRecord, UserRecord } from "./model.ts";
+import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
 // 条件つきの書き込みが条件で失敗した。呼ぶ側が意味（I12・I15・版の競合など）へ読み替える
 export class ConditionFailedError extends Error {
@@ -33,7 +34,10 @@ export interface AccountStore {
   // 利用者が席を持つチームのアカウントの ID（GSI gsi1）。GSI は結果整合のため、
   // 返すのは候補であり、呼ぶ側は getSeat で元の席を確かめてから使う
   listMemberships(userId: string): Promise<string[]>;
-  createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]): Promise<void>;
+  // idempotency があれば作成の冪等の鍵の行も同じトランザクションで書く。期限の中の同じ鍵があれば ConditionFailedError（#2384 の I14）
+  createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[], idempotency?: IdempotencyClaim): Promise<void>;
+  // 作成の冪等の鍵の行が作った識別子。期限（ttl）を過ぎた行は、残っていても無いものとして扱う
+  getIdempotent(ref: IdempotencyRef, now: string): Promise<string | null>;
   // 席が無いときだけ足す（I15）
   addSeat(seat: SeatRecord, history: HistoryRecord[]): Promise<void>;
   // 席が読んだときのまま（種類と足した時刻が expected と等しい）のときだけ変える
@@ -232,12 +236,30 @@ export class DynamoAccountStore implements AccountStore {
     return out;
   }
 
-  async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]) {
+  async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[], idempotency?: IdempotencyClaim) {
     await this.transact([
       this.put(accountItem(account), NOT_EXISTS),
       this.put(seatItem(ownerSeat), NOT_EXISTS),
       ...history.map((h) => this.put(historyItem(h))),
+      ...(idempotency
+        ? [
+            {
+              Put: {
+                TableName: this.tableName,
+                Item: { pk: idempotencyPk(idempotency), sk: "IDEMP", createdId: idempotency.createdId, createdAt: idempotency.createdAt, ttl: idempotency.ttl },
+                ConditionExpression: "attribute_not_exists(pk) OR #ttl < :now",
+                ExpressionAttributeNames: { "#ttl": "ttl" },
+                ExpressionAttributeValues: { ":now": epochSeconds(idempotency.createdAt) },
+              },
+            },
+          ]
+        : []),
     ]);
+  }
+
+  async getIdempotent(ref: IdempotencyRef, now: string) {
+    const item = await this.get({ pk: idempotencyPk(ref), sk: "IDEMP" });
+    return liveCreatedId(item && { createdId: String(item.createdId), ttl: Number(item.ttl) }, now);
   }
 
   async addSeat(seat: SeatRecord, history: HistoryRecord[]) {

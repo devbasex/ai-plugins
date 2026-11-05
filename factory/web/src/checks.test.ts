@@ -46,6 +46,15 @@ describe("ダミーの import の検査（受け入れ条件 17）", () => {
   });
 });
 
+describe("API への要求の経路の検査（#2384 の受け入れ条件 1）", () => {
+  it("要求の関数へ経路の文字列を直に渡すと落とし、操作の表から組んだ経路は通す", () => {
+    expect(rules("api.ts", `request("GET", "/me");`)).toEqual(["api-path"]);
+    expect(rules("api.ts", "doFetch(`/accounts/${id}/sprint-runs`);")).toEqual(["api-path"]);
+    expect(rules("api.ts", "doFetch(`${apiUrl}${operationUrl(op, id)}`);")).toEqual([]);
+    expect(rules("pages/A.tsx", `navigate("/accounts/a/sprints");`)).toEqual([]);
+  });
+});
+
 describe("今の源", () => {
   it("検査で何も見つからない", () => {
     expect(checkTree(fileURLToPath(new URL(".", import.meta.url)))).toEqual([]);

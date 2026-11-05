@@ -1,6 +1,7 @@
 // 集約「スプリントの実行」「実行の枠」「開発ループ」と、同じ表に置くリポジトリの登録・持ち込んだキーの行（#2186・#2347 の設計の「データ構造」）
 import { createHash } from "node:crypto";
 import type { AccountContext, ExecutionMode } from "../accounts/model.ts";
+import type { IdempotencyClaim } from "../idempotency.ts";
 
 // awaiting_reset は local の利用上限のリセット時刻を待つ（終わりの状態でない。枠を数え、今のジョブは空。#2347 の決定 7）
 export const RUN_STATES = ["starting", "running", "awaiting_approval", "awaiting_reset", "done", "stopped", "failed", "cancelled"] as const;
@@ -213,10 +214,12 @@ export interface CreateRunGuards {
   legacy: boolean;
   // ループの周回の開始。ループの行を条件つきで書く
   loop?: LoopWrite;
+  // 作成の冪等の鍵の行（手動の開始。#2384 の I14）。期限の中の同じ鍵の行があれば duplicate
+  idempotency?: IdempotencyClaim;
 }
 
 // release_running は、古い版の実行の開始で、リポジトリのまとめた配布が流れていた（#2439 の I62）
-export type CreateRunResult = "created" | "slots" | "issue_in_use" | "issue_in_loop" | "legacy" | "loop_changed" | "release_running";
+export type CreateRunResult = "created" | "slots" | "issue_in_use" | "issue_in_loop" | "legacy" | "loop_changed" | "release_running" | "duplicate";
 
 // マイルストーンの持ち分の行の鍵に使う、題の sha256 の先頭 32 字
 export const milestoneHash = (title: string) => createHash("sha256").update(title, "utf8").digest("hex").slice(0, 32);
