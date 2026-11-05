@@ -116,8 +116,13 @@ def permission(env: Env) -> tuple[dict | None, list[str], object]:
     return decl, why, project
 
 
-def apply_budget(env: Env, rec: dict, given: dict) -> None:
-    over = {k: v for k, v in given.items() if v is not None}
+BUDGET_DEFAULT = "default"  # 既定へ戻す指示: その単位をリポジトリの予算の既定（.ndf/pace.json の loop.budget）へ戻す
+
+
+def apply_budget(env: Env, rec: dict, given: dict, defaults: dict) -> None:
+    """渡された単位だけを上書きする。BUDGET_DEFAULT の単位は defaults（予算の既定）の値にする。
+    値が変わったときだけ予算の履歴に 1 行足す。"""
+    over = {k: (defaults[k] if v == BUDGET_DEFAULT else v) for k, v in given.items() if v is not None}
     if not over:
         return
     new = {**rec["budget"], **over}
@@ -136,7 +141,7 @@ def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bo
             return start_new(env, name, decl, project, milestones, budget, goal)
         rec = read_loop_record(env, name)
         before = json.loads(json.dumps(rec))
-        apply_budget(env, rec, budget)
+        apply_budget(env, rec, budget, decl["budget"])
         if rec.get("status") == "stopped":
             return resume_stopped(env, rec, before)
         write_record(env, rec, before)
@@ -168,7 +173,7 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "excluded": [],
         "sprint_mvv_approvals": [],
     }
-    apply_budget(env, rec, budget)
+    apply_budget(env, rec, budget, decl["budget"])
     write_record(env, rec)
     update_handoff(env, rec, "始めた。次は選定", resume_command(rec), select_cmd(name))
     return loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name))

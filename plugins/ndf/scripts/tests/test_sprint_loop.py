@@ -415,6 +415,45 @@ def test_stop_file_works_at_the_next_boundary_and_resume_removes_it(env):
     assert [lap["n"] for lap in r["laps"]] == [1, 2] and sl.consumed(r)["laps"] == 2
 
 
+def test_budget_default_returns_the_unit_to_the_repository_default_and_judges_with_it(env):
+    start(env, usd=10)
+    n = len(rec(env)["budget_history"])
+    assert sl.cmd_start(env, "l1", [], {"usd": sl.BUDGET_DEFAULT})["status"] == "ok"
+    r = rec(env)
+    assert r["budget"] == {"laps": 3, "usd": 60, "hours": 24}
+    assert len(r["budget_history"]) == n + 1 and r["budget_history"][-1]["to"]["usd"] == 60
+    out = run_lap(env, cost=15.0)
+    assert out["status"] == "ok" and rec(env)["stop"] is None
+
+
+def test_budget_default_on_a_default_record_or_a_new_loop_adds_no_history(env):
+    start(env, laps=sl.BUDGET_DEFAULT, usd=sl.BUDGET_DEFAULT, hours=sl.BUDGET_DEFAULT)
+    assert rec(env)["budget"] == {"laps": 3, "usd": 60, "hours": 24} and rec(env)["budget_history"] == []
+    sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT, "usd": sl.BUDGET_DEFAULT, "hours": sl.BUDGET_DEFAULT})
+    assert rec(env)["budget_history"] == []
+
+
+def test_budget_default_uses_builtin_defaults_for_undeclared_units(env):
+    (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {"enabled": True, "budget": {"usd": 80}}}))
+    start(env, laps=1, usd=1, hours=1)
+    sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT, "usd": sl.BUDGET_DEFAULT, "hours": sl.BUDGET_DEFAULT})
+    assert rec(env)["budget"] == {"laps": 3, "usd": 80, "hours": 24}
+
+
+def test_cli_budget_takes_a_number_or_default_and_refuses_anything_else():
+    import argparse
+
+    import sprint_loop_cli
+
+    ap = argparse.ArgumentParser()
+    sprint_loop_cli.add_loop_parser(ap.add_subparsers(dest="cmd"), lambda a: None)
+    a = ap.parse_args(["loop", "start", "l1", "--budget-usd", "default", "--budget-laps", "2"])
+    assert (a.budget_usd, a.budget_laps, a.budget_hours) == (sl.BUDGET_DEFAULT, 2.0, None)
+    with pytest.raises(SystemExit) as e:
+        ap.parse_args(["loop", "start", "l1", "--budget-usd", "abc"])
+    assert e.value.code == 2
+
+
 def test_budget_resume_needs_an_override(env):
     start(env, laps=1)
     run_lap(env)
