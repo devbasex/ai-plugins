@@ -5732,6 +5732,24 @@
       "context": "ndf-factory",
       "meaning": "ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く",
       "pending_source": "issues/issue-2430-requirements.md"
+    },
+    {
+      "term": "共有の環境",
+      "context": "ndf-workflow",
+      "meaning": "NDF のスクリプトとラッパーが使う Python の環境。置き場は ~/.cache/ndf/venv/<版>（NDF_DEPS_VENV で変えられる）。プラグインの版ごとに 1 つで、同じ版のスクリプトとラッパーが共に使う",
+      "pending_source": "issues/issue-2509-requirements.md"
+    },
+    {
+      "term": "一覧の失敗の問い",
+      "context": "ndf-workflow",
+      "meaning": "状態の一覧の失敗が停滞の区切りより長く続いたときに、並列の計画のオーガナイザーの耐久ワークフローが自分で立てる問い（kind は observe）。一覧の終了コードと標準エラーの末尾 1 行を持ち、一覧が成功に戻れば外れる",
+      "pending_source": "issues/issue-2509-design.md"
+    },
+    {
+      "term": "状態の一覧",
+      "context": "ndf-workflow",
+      "meaning": "ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する",
+      "pending_source": "issues/issue-2509-requirements.md"
     }
   ]
 }
