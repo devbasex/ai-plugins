@@ -5785,6 +5785,13 @@
       "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
       "source": "",
       "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "秘密のキャッシュ",
+      "context": "ndf-factory",
+      "meaning": "Secrets Manager から読んだ値を Lambda の実行環境の中で保持する `factory/api/` の仕組み。成功した値は以後も同じ値を返し、失敗した読み込みは捨てて次の要求で読み直す",
+      "source": "",
+      "pending_source": "issues/issue-2276-requirements.md"
     }
   ]
 }

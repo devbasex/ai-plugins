@@ -991,3 +991,4 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 作成の冪等の鍵 | — | Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
 | 承認待ちの一覧 | — | アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
 | 取り込みの衝突 | — | ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
+| 秘密のキャッシュ | — | Secrets Manager から読んだ値を Lambda の実行環境の中で保持する `factory/api/` の仕組み。成功した値は以後も同じ値を返し、失敗した読み込みは捨てて次の要求で読み直す | — | — | — |
