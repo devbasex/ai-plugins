@@ -234,7 +234,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 `sprint-state.py gate <その周回の状態> 関門 1 --by user --outcome approved [--pr N]` を内で打ち、続けて承認した設計のマージ
 （`design_pr_merge.merge_approved`。承認した先端のままで必須の検査が緑の設計 PR を、検査の完了を待たずに `--no-cleanup` で宛先へマージする。
 宛先が本番チャネルに当たるか決められない設計 PR はマージしない）を 1 回試み、結果を行の `merge` に、マージできたら `merged_at` を書く。
-マージの成否によらず終了コードは 0 で、`summary` に結果を添える。`--rejected` は `--outcome rejected` で差し戻しの記録を残し、マージを呼ばない。
+終了コードは、マージできたときもできなかったときも 0 で、`summary` に結果を添える。`--rejected` は `--outcome rejected` で差し戻しの記録を残し、マージを呼ばない。
 どちらも課題の本文の節を書き直す。
 
 ### 止まる条件と再開
