@@ -18,13 +18,12 @@ import {
   type Caller,
   type ExecutionMode,
   type HistoryRecord,
-  type HistoryType,
   type Plan,
   type SeatRecord,
   type SeatType,
   type UserRecord,
 } from "./model.ts";
-import { ConditionFailedError, type AccountPatch, type AccountStore } from "./store.ts";
+import { ConditionFailedError, type AccountPatch, type AccountStore } from "./port.ts";
 import { claimOf, type IdempotencyRef } from "../idempotency.ts";
 
 // 版の競合で読み直して書き直す回数の上限（docs/specifications/ndf-factory-accounts-and-plans.md の「常に成り立つ条件」）
@@ -51,10 +50,6 @@ export class AccountService {
     return this.now().toISOString();
   }
 
-  private hist(accountId: string, type: HistoryType, at: string, actor: string, before: unknown, after: unknown): HistoryRecord {
-    return { accountId, type, at, actor, before, after };
-  }
-
   // 新しいアカウントの初期値（I24）。形態は INITIAL_EXECUTION_MODE、版は 1 から始める
   private newAccount(kind: AccountKind, plan: Plan, ownerUserId: string, name: string | null, at: string): AccountRecord {
     return {
@@ -71,12 +66,14 @@ export class AccountService {
   }
 
   private accountCreated(account: AccountRecord, actor: string, extra?: object): HistoryRecord {
-    return this.hist(account.accountId, "account.created", account.createdAt, actor, null, {
-      kind: account.kind,
-      plan: account.plan,
-      execution_mode: account.executionMode,
-      ...extra,
-    });
+    return {
+      accountId: account.accountId,
+      type: "account.created",
+      at: account.createdAt,
+      actor,
+      before: null,
+      after: { kind: account.kind, plan: account.plan, execution_mode: account.executionMode, ...extra },
+    };
   }
 
   // 利用者の行を読み、無ければ利用者と個人のアカウント（Free・local）を 1 つのトランザクションで作る（I12・I24、E2）
@@ -91,16 +88,15 @@ export class AccountService {
       personalAccountId: account.accountId,
       createdAt: at,
     };
-    try {
-      await this.store.createUserWithPersonalAccount(user, account, [this.accountCreated(account, caller.userId)]);
-      return user;
-    } catch (err) {
-      if (err instanceof ConditionFailedError) {
-        const raced = await this.store.getUser(caller.userId);
-        if (raced) return raced;
-      }
-      throw new AccountUnavailableError();
-    }
+    const raced = await writeOr(
+      () => this.store.createUserWithPersonalAccount(user, account, [this.accountCreated(account, caller.userId)]),
+      async () => {
+        const found = await this.store.getUser(caller.userId);
+        if (!found) throw new AccountUnavailableError();
+        return found;
+      },
+    );
+    return raced ?? user;
   }
 
   // 要求の利用者と経路のアカウントの ID から、権限つきの文脈を返す（決定 4、I18）
@@ -171,23 +167,25 @@ export class AccountService {
     if (replayed) return this.resolveAccount(caller, replayed);
     const account = this.newAccount("team", "team", caller.userId, name, at);
     const seat: SeatRecord = { accountId: account.accountId, userId: caller.userId, seatType, addedAt: at };
-    try {
-      await this.store.createTeam(
-        account,
-        seat,
-        [
-          this.accountCreated(account, caller.userId, { name }),
-          this.hist(account.accountId, "seat.added", at, caller.userId, null, { user_id: caller.userId, seat_type: seatType }),
-        ],
-        ref && claimOf(ref, account.accountId, at),
-      );
-    } catch (err) {
-      // 同じ鍵の作成が同時に走り、先に書いた方が勝った
-      const won = ref && err instanceof ConditionFailedError ? await this.store.getIdempotent(ref, at) : null;
-      if (won) return this.resolveAccount(caller, won);
-      throw new AccountUnavailableError();
-    }
-    return this.context(account, caller.userId, seatType);
+    const won = await writeOr(
+      () =>
+        this.store.createTeam(
+          account,
+          seat,
+          [
+            this.accountCreated(account, caller.userId, { name }),
+            { accountId: account.accountId, type: "seat.added", at, actor: caller.userId, before: null, after: { user_id: caller.userId, seat_type: seatType } },
+          ],
+          ref && claimOf(ref, account.accountId, at),
+        ),
+      async () => {
+        // 同じ鍵の作成が同時に走り、先に書いた方が勝った
+        const id = ref ? await this.store.getIdempotent(ref, at) : null;
+        if (!id) throw new AccountUnavailableError();
+        return this.resolveAccount(caller, id);
+      },
+    );
+    return won ?? this.context(account, caller.userId, seatType);
   }
 
   // 席の操作は持ち主だけ（I17）。持ち主でなければ席の有無にかかわらず先に 403
@@ -203,39 +201,35 @@ export class AccountService {
     }
     const at = this.stamp();
     const seat: SeatRecord = { accountId: ctx.accountId, userId, seatType, addedAt: at };
-    try {
-      await this.store.addSeat(seat, [
-        this.hist(ctx.accountId, "seat.added", at, ctx.userId, null, { user_id: userId, seat_type: seatType }),
-      ]);
-    } catch (err) {
-      if (err instanceof ConditionFailedError) {
+    await writeOr(
+      () =>
+        this.store.addSeat(seat, [
+          { accountId: ctx.accountId, type: "seat.added", at, actor: ctx.userId, before: null, after: { user_id: userId, seat_type: seatType } },
+        ]),
+      () => {
         throw new ConflictError("seat_exists", "その利用者は既にこのチームの席を持っています");
-      }
-      throw new AccountUnavailableError();
-    }
+      },
+    );
     return seat;
   }
 
   async changeSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
     this.requireTeamOwner(ctx);
     // 読んだ席のままのときだけ書く。競合したら読み直し、履歴の before を作り直す
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+    return retryOnConflict<SeatRecord>(async () => {
       const current = await this.store.getSeat(ctx.accountId, userId);
       if (!current) throw seatNotFound();
       const at = this.stamp();
-      try {
-        await this.store.updateSeat(current, seatType, [
-          this.hist(ctx.accountId, "seat.changed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, {
-            user_id: userId,
-            seat_type: seatType,
-          }),
-        ]);
-        return { ...current, seatType };
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-      }
-    }
-    throw new AccountUnavailableError();
+      const history: HistoryRecord = {
+        accountId: ctx.accountId,
+        type: "seat.changed",
+        at,
+        actor: ctx.userId,
+        before: { user_id: userId, seat_type: current.seatType },
+        after: { user_id: userId, seat_type: seatType },
+      };
+      return { write: () => this.store.updateSeat(current, seatType, [history]), result: { ...current, seatType } };
+    });
   }
 
   async removeSeat(ctx: AccountContext, userId: string): Promise<void> {
@@ -245,72 +239,111 @@ export class AccountService {
       throw new ConflictError("owner_seat_protected", "チームの持ち主の席は外せません");
     }
     // 読んだ席のままのときだけ外す。外して足し直した新しい席を古い要求で消さない
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+    await retryOnConflict<void>(async () => {
       const current = await this.store.getSeat(ctx.accountId, userId);
       if (!current) throw seatNotFound();
       const at = this.stamp();
-      try {
-        await this.store.removeSeat(current, [
-          this.hist(ctx.accountId, "seat.removed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, null),
-        ]);
-        return;
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-      }
-    }
-    throw new AccountUnavailableError();
+      const history: HistoryRecord = {
+        accountId: ctx.accountId,
+        type: "seat.removed",
+        at,
+        actor: ctx.userId,
+        before: { user_id: userId, seat_type: current.seatType },
+        after: null,
+      };
+      return { write: () => this.store.removeSeat(current, [history]), result: undefined };
+    });
   }
 
   // 実行の形態を変える。持ち主だけ（I22）。Free で managed は断る（I21）
   async setExecutionMode(ctx: AccountContext, mode: ExecutionMode): Promise<AccountRecord> {
     if (ctx.role !== "owner") throw new ForbiddenError();
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+    return retryOnConflict<AccountRecord>(async () => {
       const account = await this.store.getAccount(ctx.accountId);
       if (!account) throw new ForbiddenError();
-      if (account.executionMode === mode) return account;
+      if (account.executionMode === mode) return { done: account };
       if (mode === "managed" && account.plan === "free") {
         throw new ConflictError("managed_not_allowed_on_free", "Free の料金プランでは managed（サービスの Bedrock）を選べません");
       }
       const at = this.stamp();
-      try {
-        await this.store.updateAccount(account.accountId, account.version, { executionMode: mode }, at, [
-          this.hist(account.accountId, "execution_mode.changed", at, ctx.userId, account.executionMode, mode),
-        ]);
-        return { ...account, executionMode: mode, version: account.version + 1, updatedAt: at };
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
-      }
-    }
-    throw new AccountUnavailableError();
+      const history: HistoryRecord = {
+        accountId: account.accountId,
+        type: "execution_mode.changed",
+        at,
+        actor: ctx.userId,
+        before: account.executionMode,
+        after: mode,
+      };
+      return {
+        write: () =>
+          this.store.updateAccount({ accountId: account.accountId, expectedVersion: account.version, patch: { executionMode: mode }, updatedAt: at, history: [history] }),
+        result: { ...account, executionMode: mode, version: account.version + 1, updatedAt: at },
+      };
+    });
   }
 
   // アカウントの料金プランを変える。#2174 が決済の後に呼ぶ内側の関数（前提 8、E6）
   // free へ下げるとき形態が managed なら、同じトランザクションで local へ変える（I21）
   async setPlan(accountId: string, plan: Plan): Promise<void> {
     if (!isPlan(plan)) throw new PlanError("unknown_plan", `知らない料金プランです: ${String(plan)}`);
-    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
-      const account = await this.store.getAccount(accountId);
-      if (!account) throw new PlanError("account_not_found", "アカウントがありません");
-      if (!planFitsKind(account.kind, plan)) {
-        throw new PlanError("plan_kind_mismatch", `${account.kind} のアカウントに ${plan} は置けません`);
-      }
-      if (account.plan === plan) return;
-      const at = this.stamp();
-      const patch: AccountPatch = { plan };
-      const history = [this.hist(accountId, "plan.changed", at, "system", account.plan, plan)];
-      if (plan === "free" && account.executionMode === "managed") {
-        patch.executionMode = "local";
-        history.push(this.hist(accountId, "execution_mode.changed", at, "system", "managed", "local"));
-      }
-      try {
-        await this.store.updateAccount(accountId, account.version, patch, at, history);
-        return;
-      } catch (err) {
-        if (!(err instanceof ConditionFailedError)) throw err;
-      }
-    }
-    throw new AccountUnavailableError();
+    // 条件以外の書き込みの失敗は包まずにそのまま返す（呼ぶ側の #2174 が受ける）
+    await retryOnConflict<void>(
+      async () => {
+        const account = await this.store.getAccount(accountId);
+        if (!account) throw new PlanError("account_not_found", "アカウントがありません");
+        if (!planFitsKind(account.kind, plan)) {
+          throw new PlanError("plan_kind_mismatch", `${account.kind} のアカウントに ${plan} は置けません`);
+        }
+        if (account.plan === plan) return { done: undefined };
+        const at = this.stamp();
+        const patch: AccountPatch = { plan };
+        const history: HistoryRecord[] = [{ accountId, type: "plan.changed", at, actor: "system", before: account.plan, after: plan }];
+        if (plan === "free" && account.executionMode === "managed") {
+          patch.executionMode = "local";
+          history.push({ accountId, type: "execution_mode.changed", at, actor: "system", before: "managed", after: "local" });
+        }
+        return {
+          write: () => this.store.updateAccount({ accountId, expectedVersion: account.version, patch, updatedAt: at, history }),
+          result: undefined,
+        };
+      },
+      (err) => err,
+    );
   }
+}
+
+// 読み直しと判定の 1 回分の結果。書かずに終わる（done）か、書いて終わる（write が成功したら result）
+type ConflictStep<T> = { done: T } | { write: () => Promise<void>; result: T };
+
+// 版の競合（条件の失敗）なら step から読み直して上限の回数まで書き直す。step の中で投げた誤りはそのまま届く。
+// 条件以外の書き込みの失敗は onOther の結果を投げる（既定は AccountUnavailableError）
+async function retryOnConflict<T>(
+  step: () => Promise<ConflictStep<T>>,
+  onOther: (err: unknown) => unknown = () => new AccountUnavailableError(),
+): Promise<T> {
+  for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+    const next = await step();
+    if ("done" in next) return next.done;
+    try {
+      await next.write();
+      return next.result;
+    } catch (err) {
+      if (!(err instanceof ConditionFailedError)) throw onOther(err);
+    }
+  }
+  throw new AccountUnavailableError();
+}
+
+// 再試行しない書き込み。成功なら undefined、条件の失敗なら onCondition の結果を返す（onCondition は投げてもよい）。
+// 条件以外の失敗は AccountUnavailableError
+async function writeOr<T>(write: () => Promise<void>, onCondition: () => T | Promise<T>): Promise<T | undefined> {
+  try {
+    await write();
+    return undefined;
+  } catch (err) {
+    if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
+  }
+  return onCondition();
 }
 
 function seatNotFound(): NotFoundError {
