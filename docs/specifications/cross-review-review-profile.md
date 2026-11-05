@@ -136,7 +136,7 @@ graph TD
   3 を含め、重点が無いときの 3 は `fix-steps.py` の `_criterion_problems` が別に拒む（重点の検査を 1 か所に残す）
 - **`--focus` と `--extra-instructions-file` は、プロファイルがあっても自動レビュー観点の後ろに足される。**
 - **プロファイルの分類の名前が既定の自動カテゴリの名前と同じときは**、`auto_review_categories` では 1 つにまとめ、
-  観点の文は既定の後ろにプロファイルの文を足す（決定 5）
+  観点の文は既定の後ろにプロファイルの文を足す（決定 5）。既定の分類が `design` か `code` を持てば、その後ろに外部の調査の確認の観点が付く
 - **`version: 2`・`3` の宣言を、それを知らない古い NDF が読むと**、宣言全体を読めないとして基準 1・2・4 で続ける（止まらない）
 - **プロファイルを選ぶ手がかりは PR の変更ファイルのパスだけである。** PR の題・本文・ラベル・ブランチ名では選ばない
 - **レビューの重点（`focus`）はリポジトリに 1 つのまま**で、どのプロファイルを選んでも効く
@@ -176,7 +176,7 @@ PR の作り手が変えられるのは、基準の追加と、基準 1・4・�
 - `waive_kinds` と `reply` を書いた振り分けで、`finalize` の返信が `{inner}` に種類の名前を入れた文になり、重点があっても重点の句が無いこと。既定の雛形では重点の句が付くこと（I8）
 - 写しを持つ振り分けで、プロファイルに無い `wording` と `criteria` に無い番号を `finalize` が `invalid` で止め、`criterion: 2` と（重点があるとき）`3` は通すこと（I5）
 - `works/*/chapters/*/text.md` の分類が `works/novel-a/chapters/011/text.md` に当たり、`works/novel-a/x/chapters/011/text.md` には当たらないこと
-- `replace_auto_categories` が真なら観点の列に `common` / `docs_only` が無く文はプロファイルの分だけ、偽か無ければ既定の文の後ろにプロファイルの文が付くこと
+- `replace_auto_categories` が真なら観点の列に `common` / `docs_only` が無く文はプロファイルの分だけ、偽か無ければ既定の文の後ろにプロファイルの文が付くこと。どちらでも、既定の分類が `design` か `code` を持てば、最後に外部の調査の確認の観点が付くこと
 - プロファイルがある根の `fixer` 出力と `context` の文脈のファイルに「コードを変え」が無く「対象のファイルを変えずに」があること
 - `reply` に `{inner}` が無い宣言・知らない鍵のある宣言で、`review_criteria.py` が終了コード 0・既定の節・標準エラーに理由を出し、`init` の状態ファイルが `profile_status: unreadable` と既定の `reviewer_block` を持ち、`report` が理由を出し、同じ宣言の `focus` は効くこと（I4）
 - 再開の前にプロファイルを書き換えると `reviewer_block` と `review_instructions` が新しい値になり、書き換えなければ状態ファイルが書き直されないこと（I7）

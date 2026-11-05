@@ -221,3 +221,121 @@ def test_specs_finishes_within_10_seconds_on_70_specs_and_2500_terms(tmp_path):
     code, out = run(root, "specs", "--base", "base")
     assert code == 0 and out["metrics"]["symbols"] == 2500
     assert time.monotonic() - start < 10
+
+
+# --- judge_names の現状固定（I-003） ------------------------------------------------
+
+
+def _load_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("design_match_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _item(kind: str, name: str, path: str | None, names: list[str]) -> dict:
+    return {"kind": kind, "name": name, "result": None, "_path": path, "_names": names}
+
+
+JUDGE_FILES = {
+    "tests/test_app.py": "def test_runs():\n    pass\n\ndef test_runs_more():\n    pass\n",
+    "tests/sub/test_b.py": "def test_b():\n    pass\n",
+    "src/test_lib.py": "def test_from_src():\n    pass\n",
+    "docs/note.md": "test_only_in_md\n",
+}
+
+
+def _judge(tmp_path, items: list[dict], mod=None) -> dict:
+    mod = mod or _load_module()
+    root = repo(tmp_path, JUDGE_FILES)
+    write(root, "tests/test_worktree_only.py", "def test_worktree_only():\n    pass\n")  # HEAD に無い
+    mod.judge_names(root, items)
+    return {it["name"]: it["result"] for it in items}
+
+
+def test_judge_names_test_file_by_path_dir_and_basename(tmp_path):
+    items = [
+        _item("test_file", "tests/test_app.py", "tests/test_app.py", []),
+        _item("test_file", "tests/sub", "tests/sub", []),
+        _item("test_file", "test_b.py", "test_b.py", []),  # ファイル名だけなら名前の一致で探す
+        _item("test_file", "sub/test_b.py", "sub/test_b.py", []),  # 根からでないパスは一致しない
+        _item("test_file", "tests/test_none.py", "tests/test_none.py", []),
+        _item("test_file", "tests/test_worktree_only.py", "tests/test_worktree_only.py", []),
+    ]
+    assert _judge(tmp_path, items) == {
+        "tests/test_app.py": "present",
+        "tests/sub": "present",
+        "test_b.py": "present",
+        "sub/test_b.py": "missing",
+        "tests/test_none.py": "missing",
+        "tests/test_worktree_only.py": "missing",
+    }
+
+
+def test_judge_names_test_function_with_path(tmp_path):
+    items = [
+        _item("test_function", "tests/test_app.py::test_runs", "tests/test_app.py", ["test_runs"]),
+        _item("test_function", "tests/test_app.py::test_run", "tests/test_app.py", ["test_run"]),  # 語として一致させる
+        _item("test_function", "tests/test_app.py::A::test_runs", "tests/test_app.py", ["A", "test_runs"]),
+        _item("test_function", "tests/test_app.py::test_b", "tests/test_app.py", ["test_b"]),  # 別のファイルにある名前
+        _item("test_function", "tests/sub/test_b.py::test_b", "tests/sub/test_b.py", ["test_b"]),
+        _item("test_function", "test_app.py::test_runs", "test_app.py", ["test_runs"]),  # ファイル名だけのパスは無い扱い
+        _item("test_function", "tests/test_none.py::test_runs", "tests/test_none.py", ["test_runs"]),
+    ]
+    assert _judge(tmp_path, items) == {
+        "tests/test_app.py::test_runs": "present",
+        "tests/test_app.py::test_run": "missing",
+        "tests/test_app.py::A::test_runs": "missing",
+        "tests/test_app.py::test_b": "missing",
+        "tests/sub/test_b.py::test_b": "present",
+        "test_app.py::test_runs": "missing",
+        "tests/test_none.py::test_runs": "missing",
+    }
+
+
+def test_judge_names_bare_names_search_head_outside_md(tmp_path):
+    items = [
+        _item("test_function", "test_runs_more", None, ["test_runs_more"]),
+        _item("test_function", "test_from_src", None, ["test_from_src"]),  # テストの置き場の外でも拾う
+        _item("test_function", "test_only_in_md", None, ["test_only_in_md"]),
+        _item("test_function", "test_worktree_only", None, ["test_worktree_only"]),
+        _item("test_function", "test_nowhere", None, ["test_nowhere"]),
+    ]
+    assert _judge(tmp_path, items) == {
+        "test_runs_more": "present",
+        "test_from_src": "present",
+        "test_only_in_md": "missing",
+        "test_worktree_only": "missing",
+        "test_nowhere": "missing",
+    }
+
+
+def test_judge_names_marks_unverified_when_git_grep_fails(tmp_path):
+    mod = _load_module()
+    real = mod.git
+
+    def failing_grep(root, *args, **kw):
+        if args and args[0] == "grep":
+            return subprocess.CompletedProcess(["git", *args], 2, "", "boom")
+        return real(root, *args, **kw)
+
+    mod.git = failing_grep
+    items = [
+        _item("test_file", "tests/test_app.py", "tests/test_app.py", []),
+        _item("test_function", "tests/test_app.py::test_runs", "tests/test_app.py", ["test_runs"]),
+        _item("test_function", "tests/test_none.py::test_runs", "tests/test_none.py", ["test_runs"]),
+        _item("test_function", "test_runs_more", None, ["test_runs_more"]),
+    ]
+    assert _judge(tmp_path, items, mod) == {
+        "tests/test_app.py": "present",  # ファイルの判定は grep を使わない
+        "tests/test_app.py::test_runs": "unverified",
+        "tests/test_none.py::test_runs": "missing",  # ファイルが無ければ grep の前に決まる
+        "test_runs_more": "unverified",
+    }
+
+
+def test_judge_names_with_no_items_does_nothing(tmp_path):
+    items: list[dict] = []
+    assert _judge(tmp_path, items) == {} and items == []

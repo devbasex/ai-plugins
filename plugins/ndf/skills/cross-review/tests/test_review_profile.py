@@ -80,7 +80,7 @@ def test_profile_category_does_not_cross_directories():
 def test_same_name_as_a_default_category_is_listed_once():
     profile = _profile(categories={"code": {"paths": ["**/*.py"], "instructions": "追加の観点"}}, replace_auto_categories=False)
     names, text = rf._auto_review(["common", "code"], _files("a/b.py"), profile)
-    assert names == ["common", "code"] and text.endswith(rf.CODE_REVIEW_TEMPLATE + "\n\n追加の観点")
+    assert names == ["common", "code"] and rf.CODE_REVIEW_TEMPLATE + "\n\n追加の観点\n\n" + rf.EXTERNAL_SURVEY_TITLE in text
 
 
 # ---------------- 新規の init ----------------
@@ -156,7 +156,8 @@ def test_review_kind_comes_from_the_default_categories(init_env):
     st = run("issues/1-design.md")
     assert st["auto_review_categories"] == ["doc"] and "design" not in st["auto_review_categories"]
     assert st["review_kind"] == "design" and st["max_rounds"] == 3
-    assert st["review_instructions_by_stage"]["detail"] == "文書の観点"
+    # 外部の調査の確認の観点は、既定の分類 design から足し、プロファイルの後ろに付く（#2519 の決定 11）
+    assert st["review_instructions_by_stage"]["detail"].startswith("文書の観点\n\n" + rf.EXTERNAL_SURVEY_TITLE)
 
 
 def test_new_init_with_a_broken_profile_continues_with_defaults(init_env, capsys):

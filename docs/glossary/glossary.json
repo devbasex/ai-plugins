@@ -701,11 +701,17 @@
     {
       "term": "プロダクションコード",
       "context": "ndf-cross-refactoring",
-      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）",
+      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）。名前がテストの形でもテストの関数を持たない .py は、tests/ などのテスト用ディレクトリの配下になければ含む",
       "source": "docs/specifications/cross-refactoring-round-tests-and-assess.md",
       "deprecated": [
         "本番コード"
       ]
+    },
+    {
+      "term": "テストの関数",
+      "context": "ndf-cross-refactoring",
+      "meaning": "Python のファイルで、名前が test で始まる関数かメソッドの定義（async def を含む）。pytest が既定で集める形。名前がテストの形の .py は、これを持つときだけテストのファイルになる",
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md"
     },
     {
       "term": "文言固定テスト",
@@ -5516,31 +5522,31 @@
       "term": "外部の調査",
       "context": "ndf-workflow",
       "meaning": "設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの",
-      "pending_source": "issues/issue-2519-requirements.md"
+      "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "自前で作る決定",
       "context": "ndf-workflow",
       "meaning": "既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "確かめられなかったこと",
       "context": "ndf-workflow",
       "meaning": "外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "作り方",
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "比べた候補",
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "深さの記録",
@@ -5714,6 +5720,18 @@
       "context": "ndf-workflow",
       "meaning": "オーガナイザーの答えのうち、持ち主のループの記録の行へ当てられなかったもの。答えは耐久の記録に残し、区分 unmatched の問いとしてオーガナイザーの問いの一覧に出す",
       "pending_source": "issues/issue-2510-design.md"
+    },
+    {
+      "term": "承認待ちの一覧",
+      "context": "ndf-factory",
+      "meaning": "アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し",
+      "pending_source": "issues/issue-2430-requirements.md"
+    },
+    {
+      "term": "取り込みの衝突",
+      "context": "ndf-factory",
+      "meaning": "ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く",
+      "pending_source": "issues/issue-2430-requirements.md"
     },
     {
       "term": "共有の環境",

@@ -15,6 +15,7 @@ from gate_answer import GATE_1
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
+from supervise_lib.procedures import survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
@@ -79,7 +80,7 @@ def _review_steps(n: int, copy: str) -> list:
             "stage": "ドキュメントレビュー",
             "timeout": 120,
             "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
-            "next": "glossary-check",
+            "next": "survey-check",
         },
     ]
 
@@ -213,6 +214,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "next": "review",
             },
             *_review_steps(n, copy),
+            *survey_steps(n, next_id="glossary-check"),
             *_glossary_steps(glossary_check, push),
             # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない

@@ -404,11 +404,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | プランのハッシュ | — | プランの型で読んだ中身を、キーを並べ替えた JSON にして取った sha256。完了したプランが変わったかを測る（#2344） | — | — | — |
 | 呼び手 | — | 関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・雛形・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える | — | — | — |
 | 残す関数の一覧 | — | 関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。置き場は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの | — | — | — |
-| 外部の調査 | — | 設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの | — | — | — |
-| 自前で作る決定 | — | 既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519） | — | — | — |
-| 確かめられなかったこと | — | 外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519） | — | — | — |
-| 作り方 | — | 設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519） | — | — | — |
-| 比べた候補 | — | 設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519） | — | — | — |
+| 外部の調査 | — | 設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの | — | — | `plugins/ndf/skills/design/references/external-survey.md` |
+| 自前で作る決定 | — | 既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
+| 確かめられなかったこと | — | 外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519） | — | — | `plugins/ndf/skills/design/references/external-survey.md` |
+| 作り方 | — | 設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
+| 比べた候補 | — | 設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
 | プランの進行の記録 | — | supervise のプランのステップごとの終了コード・秒・ドルを 1 行ずつ残す記録（`<状態のディレクトリ>/progress.jsonl`）。開発ループのまとめのプランでは `.ndf/loop/<名>/lap-<番号>/close*/` の下にある（#2315） | — | — | — |
 | 承認した先端 | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの先端のときだけ行う | — | — | — |
 | マージの結果 | — | 承認した設計 Pull Request を宛先へマージする 1 回の試みの結果。マージした・マージ済み・先端が動いた・印が無い・検査が緑でない・衝突・宛先が本番・失敗のどれか | — | — | — |
@@ -544,7 +544,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 最終ゲート修正 | — | 最終ゲートの失敗を直す起動と、そのマージ処理（final-fix / merge-final-fix）。改善項目に属さない | 最終ゲートの修正 | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 必須トレーラー | — | 担当がコミットメッセージのトレーラーとして書く Item-Id / Impl-Runtime / Impl-Model。最終ゲート修正は Item-Id を除く 2 つ | 必須の記名 | — | `docs/specifications/cross-refactoring-apply-intake.md` |
 | 帰属トレーラー | — | 実行環境がコミットメッセージの末尾へ足すトレーラー（Co-Authored-By: / Claude-Session:） | 帰属の段落 | — | `docs/specifications/cross-refactoring-apply-intake.md` |
-| プロダクションコード | — | コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes） | 本番コード | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
+| プロダクションコード | — | コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）。名前がテストの形でもテストの関数を持たない .py は、tests/ などのテスト用ディレクトリの配下になければ含む | 本番コード | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
+| テストの関数 | — | Python のファイルで、名前が test で始まる関数かメソッドの定義（async def を含む）。pytest が既定で集める形。名前がテストの形の .py は、これを持つときだけテストのファイルになる | — | — | `docs/specifications/cross-refactoring-scope-template-probe.md` |
 | 想定最大時間 | — | 利用者が与える所要の上限（分、--budget-minutes）。1 回の実行の子プロセスは、最終ゲートの確かめ・最終ゲート修正・打ち切りの後の取り消しも含めて、すべて想定最大時間の終わりまでに止まる | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 実装担当 | — | リファクタリング計画・テスト追加・実装・修正・最終ゲート修正を通して担う 1 ランタイム（--implementer） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 改善候補 | — | 提案を path + symbol + smell のキーで集約したもの。リファクタリング計画へ渡す（candidates[]） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
@@ -983,3 +984,5 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 操作の表 | — | Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
 | 要素の結果 | — | Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
 | 作成の冪等の鍵 | — | Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 承認待ちの一覧 | — | アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し | — | — | — |
+| 取り込みの衝突 | — | ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く | — | — | — |
