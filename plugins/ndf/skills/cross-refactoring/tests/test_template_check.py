@@ -136,6 +136,22 @@ def test_a_pytest_template_continues(verify):
     assert (row["verdict"], row["source"], row["paths"]) == ("ok", "scope", ["tests/test_x.py", "tests/test_y.py"])
 
 
+def test_production_modules_named_like_tests_are_not_probed(verify, repo, capsys):
+    """#2516 受け入れ条件 3: 本体の `test_*.py`（テストの関数なし）の配下を `--scope` に入れても、試走は止まらない。"""
+    for name in ("test_strategy.py", "test_triage.py"):
+        (repo / "scripts" / "storylib" / name).write_text("def choose():\n    return 'test'\n", encoding="utf-8")
+    _git("add", "-A", cwd=repo)
+    _git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-qm", "lib", cwd=repo)
+    pytest_suite = _suite(
+        scope_command=f"{PY} -m pytest -q -p no:cacheprovider {{paths}}", command=f"{PY} -m pytest -q -p no:cacheprovider tests"
+    )
+    code, prep, _ = verify.call(pytest_suite, scope=("scripts/storylib", "tests"))
+    assert code is None
+    row = prep.template_checks[0]
+    assert (row["verdict"], row["paths"]) == ("ok", ["tests/test_x.py", "tests/test_y.py"])
+    assert "scope_command" not in capsys.readouterr().err
+
+
 def test_lint_and_unscoped_suites_are_not_probed(verify, monkeypatch):
     """受け入れ条件 7・I7: 静的解析の suite と scope_command の無い suite は試走しない。試走は suite ごとに 1 回（I2）。"""
     template_check = sys.modules["refactor_lib.template_check"]

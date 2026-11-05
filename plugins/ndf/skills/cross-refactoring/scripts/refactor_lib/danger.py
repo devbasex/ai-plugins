@@ -133,7 +133,7 @@ def d3(work: str, files: list[str], symbol: str, scope: list[str]) -> list[str]:
     hits: list[str] = []
     excludes = [f":(exclude){os.path.normpath(s)}" for s in scope or [] if str(s).strip()]
     for path in files:
-        if is_test_path(path):
+        if is_test_path(path, work):
             continue
         for hit, unique in _references_to(work, path, symbol, excludes):
             if not unique or hit not in hits:
@@ -234,7 +234,7 @@ def item_flags(
     hits = d3(work, files, symbol, scope)
     if hits:
         flags.append("D3")
-    touched = [f for f in files if not is_test_path(f)]
+    touched = [f for f in files if not is_test_path(f, work)]
     if any(d4(work, test_files, path, symbol) for path in touched):
         flags.append("D4")
     if d5:

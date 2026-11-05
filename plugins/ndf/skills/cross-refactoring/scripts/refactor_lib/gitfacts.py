@@ -29,6 +29,9 @@ TEST_PATH_MARKERS = pathkinds.TEST_PATH_MARKERS
 _has_shebang = pathkinds._has_shebang
 _is_code_path = pathkinds._is_code_path
 is_test_path = pathkinds.is_test_path
+is_test_path_in_versions = pathkinds.is_test_path_in_versions
+lacks_python_tests = pathkinds.lacks_python_tests
+python_text_lacks_tests = pathkinds.python_text_lacks_tests
 production_code_changes = pathkinds.production_code_changes
 
 _kill_process_group = process._kill_process_group
@@ -234,16 +237,20 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
     """コミットが触ったテストの、変更前後の行をファイルごとに返す。
 
     **検証がテストの期待値を見るために要る**（#443）。差分ではなく前後の行を返すのは、
-    判定が `assert` の行の集合を突き合わせる形だからである。
+    判定が `assert` の行の集合を突き合わせる形だからである。テストかどうかは名前の形と、読んだ前後の版の
+    中身で決める（`is_test_path_in_versions`）。作業ディレクトリの中身は読まない。テストの関数を消すコミットを
+    取りこぼさないためである（#2516 決定 3）。版はファイルごとに 1 回ずつだけ読む。
     """
     out = git_out(work, ["show", "--name-only", "--format=", sha])
     changes: dict[str, tuple[list[str], list[str]]] = {}
     for path in (out or "").splitlines():
         if not path.strip() or not is_test_path(path):
             continue
-        before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
-        after = git_out(work, ["show", f"{sha}:{path}"]) or ""
-        changes[path] = (before.splitlines(keepends=True), after.splitlines(keepends=True))
+        before = git_out(work, ["show", f"{sha}^:{path}"])
+        after = git_out(work, ["show", f"{sha}:{path}"])
+        if not is_test_path_in_versions(path, before, after):
+            continue
+        changes[path] = ((before or "").splitlines(keepends=True), (after or "").splitlines(keepends=True))
     return changes
 
 
@@ -257,9 +264,9 @@ def tracked_markdown(work: str) -> list[str]:
     return [p for p in (out or "").split("\0") if p]
 
 
-def commit_touches_tests(work: str, sha: str) -> bool:
-    """コミットがテストの置き場所を触っているか。"""
-    return any(is_test_path(p) for p in commit_files(work, sha))
+def commit_touches_tests(test_changes: dict[str, tuple[list[str], list[str]]]) -> bool:
+    """コミットがテストを触っているか。`commit_test_changes` の結果から出し、git を起動しない（#2516 決定 3）。"""
+    return bool(test_changes)
 
 
 def commit_time(work: str, sha: str) -> Optional[str]:
@@ -293,6 +300,7 @@ def collect_commit_facts(
         if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue
+        test_changes = commit_test_changes(work, full)
         facts.append(
             {
                 "sha": sha,
@@ -300,9 +308,9 @@ def collect_commit_facts(
                 "trailers": commit_trailers(work, full),
                 "diff_lines": commit_diff_lines(work, full),
                 "files": commit_files(work, full),
-                "touches_tests": commit_touches_tests(work, full),
+                "touches_tests": commit_touches_tests(test_changes),
                 # **テストの期待値が変わっていないかを検証が見る**（#443）。
-                "test_changes": commit_test_changes(work, full),
+                "test_changes": test_changes,
                 # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
                 # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
                 # `verify-round` が 1 度だけ実行する（決定 3）。
