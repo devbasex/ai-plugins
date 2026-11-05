@@ -193,10 +193,11 @@ function phasesOf(rows: StepRow[], events: Rec[]): PhaseView[] {
   }));
 }
 
-// 課題の欄。実行の課題の順に、続いて実行に無い課題を現れた順に、最後にスプリント全体の欄（I6）
-function columnsOf(run: SprintRun, rows: StepRow[], events: Rec[]): IssueColumn[] {
-  const issues = [...run.issues];
-  for (const r of rows) for (const n of r.issues) if (!issues.includes(n)) issues.push(n);
+// PR ごとの最新の状態と、チェックの名前ごとの最新の結論。どちらも後の更新が勝つ
+function pullRequestIndexes(events: Rec[]): {
+  prState: Map<string, PullRequestView["state"]>;
+  checks: Map<string, Map<string, string | null>>;
+} {
   const prState = new Map<string, PullRequestView["state"]>();
   const checks = new Map<string, Map<string, string | null>>();
   for (const e of events) {
@@ -211,6 +212,14 @@ function columnsOf(run: SprintRun, rows: StepRow[], events: Rec[]): IssueColumn[
       checks.get(k)!.set(p.name, p.conclusion);
     }
   }
+  return { prState, checks };
+}
+
+// 課題の欄。実行の課題の順に、続いて実行に無い課題を現れた順に、最後にスプリント全体の欄（I6）
+function columnsOf(run: SprintRun, rows: StepRow[], events: Rec[]): IssueColumn[] {
+  const issues = [...run.issues];
+  for (const r of rows) for (const n of r.issues) if (!issues.includes(n)) issues.push(n);
+  const { prState, checks } = pullRequestIndexes(events);
   const column = (issue: number | null): IssueColumn => {
     const own = rows.filter((r) => (issue === null ? r.issues.length === 0 : r.issues.includes(issue)));
     const prs = new Map<string, PullRequestView>();
