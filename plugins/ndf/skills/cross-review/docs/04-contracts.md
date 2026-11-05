@@ -469,7 +469,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 `state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
 そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
-`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる（レビューのプロファイルの観点があっても同じ）。レビューのプロファイルの分類（[02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」）に当たる変更ファイルがあれば、その観点を既定の観点の後ろに足し、`replace_auto_categories` が真なら既定の自動カテゴリ（`common` / `docs_only` を含むすべて）の観点を渡さない。
+`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる（レビューのプロファイルの観点があっても同じ）。レビューのプロファイルの分類（[02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」）に当たる変更ファイルがあれば、その観点を既定の観点の後ろに足し、`replace_auto_categories` が真なら既定の自動カテゴリ（`common` / `docs_only` を含むすべて）の観点を渡さない（外部の調査の確認の観点は外さない。下の `code`）。
 
 自動カテゴリ:
 
