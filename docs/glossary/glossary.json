@@ -599,6 +599,11 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "宣言を探す木",
+      "context": "ndf-workflow",
+      "meaning": "supervise.py new が .ndf/ の宣言を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く"
+    },
+    {
       "term": "ベースブランチ",
       "context": "ndf-workflow",
       "meaning": "worktree の分岐元と Pull Request の宛先",
@@ -696,11 +701,17 @@
     {
       "term": "プロダクションコード",
       "context": "ndf-cross-refactoring",
-      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）",
+      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）。名前がテストの形でもテストの関数を持たない .py は、tests/ などのテスト用ディレクトリの配下になければ含む",
       "source": "docs/specifications/cross-refactoring-round-tests-and-assess.md",
       "deprecated": [
         "本番コード"
       ]
+    },
+    {
+      "term": "テストの関数",
+      "context": "ndf-cross-refactoring",
+      "meaning": "Python のファイルで、名前が test で始まる関数かメソッドの定義（async def を含む）。pytest が既定で集める形。名前がテストの形の .py は、これを持つときだけテストのファイルになる",
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md"
     },
     {
       "term": "文言固定テスト",
@@ -4468,16 +4479,18 @@
     {
       "term": "作業の報告",
       "context": "ndf-workflow",
-      "meaning": "worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める",
+      "meaning": "worker が応答の最後に書く「## 作業の報告」の節。人と conductor が読む。成否は作業の結果ファイルで決め、この節の文からは決めない（#2337）",
       "code": "work_report",
-      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md",
+      "pending_source": "issues/issue-2337-design.md"
     },
     {
       "term": "起こし直し",
       "context": "ndf-workflow",
-      "meaning": "supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで",
+      "meaning": "supervise の full のステップで、作業の結果ファイルが無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで（#2337）",
       "code": "resume_prompt",
-      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md",
+      "pending_source": "issues/issue-2337-design.md"
     },
     {
       "term": "所要の記録",
@@ -5023,6 +5036,12 @@
       "source": "docs/specifications/ndf-worker-stage-skills.md"
     },
     {
+      "term": "読む Skill の guard",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が ndf:worker を起動する Agent の呼び出しを PreToolUse の hook で見て、「読む Skill」の欄が無い起動と、Skill の対応表を引かずに Skill を挙げた起動を止める判定。止めた理由に正本の「supervisor → worker」の節を添える（#2399）",
+      "pending_source": "issues/issue-2399-design.md"
+    },
+    {
       "term": "規則の Skill",
       "context": "ndf-workflow",
       "meaning": "手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376）",
@@ -5503,31 +5522,31 @@
       "term": "外部の調査",
       "context": "ndf-workflow",
       "meaning": "設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの",
-      "pending_source": "issues/issue-2519-requirements.md"
+      "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "自前で作る決定",
       "context": "ndf-workflow",
       "meaning": "既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "確かめられなかったこと",
       "context": "ndf-workflow",
       "meaning": "外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "作り方",
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "比べた候補",
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "深さの記録",
@@ -5565,6 +5584,154 @@
       "context": "ndf-workflow",
       "meaning": "オーガナイザーが答えを送った後、待つ間に届いた依頼を取り直し、除くものを除いて残りをまとめて問う手順",
       "pending_source": "issues/issue-2507-design.md"
+    },
+    {
+      "term": "本体",
+      "context": "ndf-workflow",
+      "meaning": "エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "核の対象外",
+      "context": "ndf-workflow",
+      "meaning": "実行の核を通さないエントリポイントの印。hook の定義から起動されるか、ランタイムが直接起動して標準出力をそのまま使うもの。契約の一覧の core に理由と根拠を書く（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "作業の結果ファイル",
+      "context": "ndf-workflow",
+      "meaning": "worker が報告を終える前に書く、結果 JSON の形の 1 行のファイル。supervise と supervisor はこのファイルの status だけで作業の成否を決める（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "フェーズの結果",
+      "context": "ndf-workflow",
+      "meaning": "supervise の 1 つのプランの実行の終わり方を結果 JSON の形で書いたファイル（状態ディレクトリの phase-result.json）。supervise.py run の終了コードはこの status から決まる（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "利用者の設定ディレクトリ",
+      "context": "ndf-release",
+      "meaning": "利用者の Claude Code の設定ディレクトリ（`CLAUDE_CONFIG_DIR`、無ければ `~/.claude`）と Codex の設定ディレクトリ（`CODEX_HOME`、無ければ `~/.codex`）。リリース後テストはこの中の導入済みのプラグインと取得元の登録を変えない",
+      "pending_source": "issues/issue-2401-requirements.md"
+    },
+    {
+      "term": "導入の操作",
+      "context": "ndf-release",
+      "meaning": "プラグインの導入・更新と、取得元の登録・更新（`claude plugin install` / `update` / `marketplace add` / `marketplace update`、`codex plugin add` / `marketplace add`）。リリース後テストの worker は利用者の設定ディレクトリでこれを打たない",
+      "pending_source": "issues/issue-2401-requirements.md"
+    },
+    {
+      "term": "利用者の設定の控え",
+      "context": "ndf-release",
+      "meaning": "利用者の設定ディレクトリの、導入済みのプラグインと取得元の登録を鍵と値の組で書き出したもの。リリース後テストの前に取り、後で今の状態と比べる",
+      "pending_source": "issues/issue-2401-design.md"
+    },
+    {
+      "term": "扱い",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。課題ごとに `実装する` / `取り込む` / `閉じる` のどれかを書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "取り込み先",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `取り込む` の課題を、どの課題の実装へ含めるかを課題の番号で書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "触るファイル",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "食い違い",
+      "context": "ndf-workflow",
+      "meaning": "同じ課題について、2 本の設計文書が違う設計の結果（扱い・取り込み先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す",
+      "pending_source": "issues/issue-2361-design.md"
+    },
+    {
+      "term": "出し直しの指摘",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲート 1 で人が「直して出し直す」と答えたときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "出し直しの指摘の履歴",
+      "context": "ndf-workflow",
+      "meaning": "課題の本文に置く、出し直しの指摘を回ごとに追記する節。人の判断待ちの節を書き直しても消えない",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "指摘への対応の表",
+      "context": "ndf-workflow",
+      "meaning": "出し直しの設計 PR の本文に置く表。出し直しの指摘の項目ごとに、直した / 直せない、直した箇所か直せない理由を 1 行で持つ",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "設計のプラン",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・承認ゲート 1 のステップを持つ",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "答えの種類",
+      "context": "ndf-workflow",
+      "meaning": "人が承認ゲートや問いに返す答えの区分。承認・直して出し直す・やらない・予算・止めるの 5 つ",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "自動の出し直し",
+      "context": "ndf-workflow",
+      "meaning": "出し直しの設計が出し直しの指摘の項目を指摘への対応の表に示していないとき、人へ問わずに開発ループが自分で付ける「直して出し直す」の答え。届いていない項目を名指しする。人の出し直しの 1 回につき 1 回まで",
+      "pending_source": "issues/issue-2510-design.md"
+    },
+    {
+      "term": "出し直しの指摘の入力",
+      "context": "ndf-workflow",
+      "meaning": "開発ループが周回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
+      "pending_source": "issues/issue-2510-design.md"
+    },
+    {
+      "term": "設計の承認の依頼",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のレーンが、承認ゲート 1 の判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "取り込みのコミット",
+      "context": "ndf-workflow",
+      "meaning": "起点ブランチを設計 PR のブランチへ取り込むマージコミット。これだけで先頭が動いた設計 PR は、承認の依頼を送り直さない",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "前のループ",
+      "context": "ndf-workflow",
+      "meaning": "同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その答えがまだの人の判断待ちは、オーガナイザーの問いの一覧に出す",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "当たらなかった答え",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーの答えのうち、持ち主のループの記録の行へ当てられなかったもの。答えは耐久の記録に残し、区分 unmatched の問いとしてオーガナイザーの問いの一覧に出す",
+      "pending_source": "issues/issue-2510-design.md"
+    },
+    {
+      "term": "承認待ちの一覧",
+      "context": "ndf-factory",
+      "meaning": "アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し",
+      "pending_source": "issues/issue-2430-requirements.md"
+    },
+    {
+      "term": "取り込みの衝突",
+      "context": "ndf-factory",
+      "meaning": "ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く",
+      "pending_source": "issues/issue-2430-requirements.md"
     }
   ]
 }

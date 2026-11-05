@@ -789,7 +789,12 @@ def test_mvv_gate_suggests_revision_after_the_unknown_streak(env):
     assert approve(env) == 0
     state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "unknown", "reasons": ["決められない"], "boundary": []}')
-    outs = [gate_check(env, state)[1] for _ in range(3)]
+    # 判定できなかった依頼の数で数える（#2507）: 同じスプリント状態の打ち直しは 1 件、別のスプリント状態なら別の件
+    assert not any(i.get("kind") == "revise" for i in [gate_check(env, state)[1] for _ in range(3)][-1]["items"])
+    states = [state] + [state.with_name(f"m{k}.json") for k in (2, 3)]
+    for s in states[1:]:
+        s.write_text(state.read_text())
+    outs = [gate_check(env, s)[1] for s in states]
     assert [any(i.get("kind") == "revise" for i in o["items"]) for o in outs] == [False, False, True]
     assert gate_check(env, state)[2][-1]["basis"] == [pm.NO_BASIS]
 
@@ -880,3 +885,13 @@ def test_judge_gets_the_block_and_records_the_basis(env, monkeypatch):
     assert state["project_mvv"] == {"status": "approved", "version": 1, "sha256": sha(BODY)}
     assert state["log"][-1]["basis"] == ["Value 2"]
     assert (env["tmp"] / "judge-prompt.txt").read_text().startswith(pm.principles())
+
+
+def test_unknown_streak_counts_each_sprint_gate_and_pr_once():
+    # オーガナイザーの打ち直しの行（#2507）は、隣り合っていなくても同じ組を 1 件と数える
+    ref = {"project_mvv": {"sha256": "s"}, "verdict": "unknown", "gate": "design"}
+    a, b = {**ref, "sprint": "/a.json", "pr": [5]}, {**ref, "sprint": "/b.json", "pr": [6]}
+    assert pms.unknown_streak([a, a], "s") == 1
+    assert pms.unknown_streak([a, b, a], "s") == 2
+    assert pms.unknown_streak([a, {**b, "verdict": "follow"}, b, a], "s") == 2
+    assert pms.unknown_streak([{**ref}, {**ref}], "s") == 2  # スプリント状態の無い行は 1 行を 1 件と数える

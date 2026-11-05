@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/design-survey.py",
+  "summary": "design-survey.py: 設計文書の自前で作る決定に、外部の調査で比べた候補があるかを確かめる（#2519）。LLM を呼ばず、読むだけ。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [
+          "--file",
+          "--issue"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "自前で作る決定に比べた候補が無い・番号が表に無い・作り方の語が違う（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "--issue で文書が 1 つも見つからない（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/design_docs.py",
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/scripts/supervise_lib/procedures.py",
+    "plugins/ndf/skills/design/SKILL.md",
+    "plugins/ndf/skills/design/references/decisions.md"
+  ]
+}

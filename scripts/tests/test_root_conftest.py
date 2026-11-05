@@ -290,3 +290,56 @@ def test_the_shards_cover_every_item_exactly_once_without_splitting_a_file() -> 
 
     files = [{nodeid.split("::", 1)[0] for nodeid in ids} for ids in shards]
     assert not set.intersection(*files), "同じファイルが複数の shard に割れた"
+
+
+# 前提のコマンドの一覧のキーをファイルの中のクラスまで絞る（#2346）。tmux を使う結合テストの組だけに
+# tmux を課し、同じファイルのほかのテストは tmux の無い実行環境でも走ることを確かめる。
+TMUX_FILE = "plugins/ndf/scripts/tests/test_relay_hub.py"
+TMUX_KEY = f"{TMUX_FILE}::TestWithTmux"
+TMUX_TESTS = (
+    "test_spawn_ls_stop_and_hub_handover",
+    "test_second_claude_attaches_and_survives_terminal_close",
+    "test_limit_refuses_from_terminal_and_spawn",
+    "test_killed_named_wrapper_shows_stopped",
+)
+
+
+def test_a_missing_tmux_fails_the_relay_hub_tests(tmp_path: Path) -> None:
+    """tmux が PATH に無ければ、`test_relay_hub.py` の実行が 0 以外で終わり、キーと tmux を名指しする。"""
+    result = _run_pytest(TMUX_FILE, path=_path_without(tmp_path, "tmux"))
+    out = result.stdout + result.stderr
+
+    assert result.returncode != 0, out
+    assert f"{TMUX_KEY}: tmux" in out
+
+
+def test_the_opt_in_skips_only_the_tmux_class(tmp_path: Path) -> None:
+    """読み飛ばしの指定があれば、飛ぶのはクラスの 4 件だけで、キーの外の項目は走る。"""
+    outside = f"{TMUX_FILE}::test_bad_name_is_refused[A]"
+    result = _run_pytest(
+        TMUX_KEY,
+        outside,
+        "-vv",
+        path=_path_without(tmp_path, "tmux"),
+        env_extra={"NDF_TESTS_ALLOW_MISSING_COMMANDS": "1"},
+    )
+    out = result.stdout + result.stderr
+
+    assert result.returncode == 0, out
+    assert "1 passed, 4 skipped" in out, out
+    for name in TMUX_TESTS:
+        assert f"{TMUX_KEY}::{name} SKIPPED" in out, name
+    assert f"{outside} PASSED" in out
+
+
+def test_a_key_matches_only_at_a_path_or_class_boundary() -> None:
+    """キーが当たるのは、一致するか直後が `/` か `::` のときだけである。"""
+    mod = _root_conftest_module()
+
+    assert TMUX_KEY in mod._bundles_of(f"{TMUX_KEY}::test_x")
+    assert TMUX_KEY in mod._bundles_of(TMUX_KEY)
+    assert mod._bundles_of(f"{TMUX_FILE}::TestWithTmuxOld::test_x") == []
+    assert mod._bundles_of(f"{TMUX_FILE}::test_bad_name_is_refused[A]") == []
+    assert "scripts/tests" in mod._bundles_of("scripts/tests/test_x.py::test_y")
+    assert mod._bundles_of("scripts/testsuite/test_x.py::test_y") == []
+    assert mod._bundles_of(None) == []

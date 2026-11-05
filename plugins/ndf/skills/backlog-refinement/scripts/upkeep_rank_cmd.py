@@ -3,12 +3,13 @@
     python3 upkeep.py rank [--scores <見積の入力>] [--approved 12,34] [--capacity N] [--scale 1,2,3,5,8,13,20]
                            [--margin-steps N] [--auto-threshold N] [--dependents-steps 0:1,1:5,2:8,3:13,5:20]
                            [--size-exponent X] [--large-slot-ratio X] [--large-min-size N]
-                           [--label-floor "<ラベル>=8"]... [--repo owner/name] [--state-dir <dir>] [--root <dir>]
+                           [--label-floor "<ラベル>=8"]... [--since-ref <ref>] [--repo owner/name] [--state-dir <dir>] [--root <dir>]
 
 rank: GitHub から open の課題・マイルストーン（説明）・サブイシューを読み、見積（--scores → 記録の estimates.json →
   説明の `### 順位` の表の順に採る）から、マイルストーンごとの順位・大きい課題の枠・切り出しの境界・前倒しと後ろ倒しの
   候補・前回の表からの変化を 1 行の JSON で返す。算出は upkeep_rank.py が持つ。設定は 引数 → `.ndf/backlog.json` →
-  既定値 の順に採る。終了コード: 0 = 算出した（マイルストーンが無ければ飛ばす）/ 20 = 段階の欠けた課題がある /
+  既定値 の順に採る。--since-ref（差分の棚卸し）を渡すと、見積がどこにも無い課題のうち <ref> のコミットの時刻以前に
+  作られたものは excluded にせず metrics.left_for_review に番号だけを返す（見直しで段階を付ける）。終了コード: 0 = 算出した（マイルストーンが無ければ飛ばす）/ 20 = 段階の欠けた課題がある /
   2 = 入力・宣言が読めない・依存が循環した / 3 = gh が使えない。
 
 記録（$NDF_UPKEEP_STATE_DIR/<repo>/）: estimates.json（課題ごとの最新の見積。rank が書く）・rejected.json（却下した移動。
@@ -17,6 +18,7 @@ apply だけが書く）・rank.json（その回の rank の出力。candidates 
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
@@ -24,7 +26,8 @@ import jsonio
 import repo as repo_lib
 import upkeep_rank as R
 from upkeep_rank_estimate import apply_overlay, estimate_overlay
-from step_result import EXIT_PAUSE, EXIT_UNREADABLE, StepError, emit, git_root, result
+from upkeep_rank_inputs import estimates, read_scores
+from step_result import EXIT_PAUSE, EXIT_UNREADABLE, StepError, emit, git, git_root, result
 from upkeep_gh import Gh, Milestones, issue_facts, list_issues, target_repo, sub_issues
 
 DECL = Path(".ndf") / "backlog.json"
@@ -32,6 +35,15 @@ NO_WORK_ROLLBACK = "閉じた課題を reopen し、wontfix を外す（本文�
 
 
 # ---------------- 設定 ----------------
+
+
+def ref_date(root, ref: str) -> str:
+    """ref のコミットの時刻（UTC の `...Z`。GitHub の created_at と文字列で比べられる形）。"""
+    p = git(root, "log", "-1", "--format=%cI", ref, check=False)
+    if p.returncode != 0 or not p.stdout.strip():
+        raise StepError(f"ref を読めない: {ref}", EXIT_UNREADABLE)
+    d = datetime.datetime.fromisoformat(p.stdout.strip())
+    return d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def read_backlog_decl(root) -> dict | None:
@@ -98,54 +110,11 @@ def add_parser(sub, common, numbers, func):
     k.add_argument("--large-slot-ratio", type=float, default=None)
     k.add_argument("--large-min-size", type=int, default=None)
     k.add_argument("--label-floor", action="append", default=[], help="ラベル=段階（何度でも）")
+    k.add_argument("--since-ref", default=None, help="差分の棚卸しの起点。これ以前に作られた見積の無い課題は外さず見直しへ回す（#2315）")
     k.set_defaults(func=func)
 
 
 # ---------------- rank ----------------
-
-
-def _read_scores(path, read_state) -> dict:
-    if not path:
-        return {}
-    got = read_state(Path(path))
-    if got is None:
-        raise StepError(f"見積の入力が無い: {path}", EXIT_UNREADABLE)
-    if not isinstance(got, dict) or not isinstance(got.get("issues", []), list):
-        raise StepError('見積の入力は {"version": 1, "issues": [...]} の形で書く', EXIT_UNREADABLE)
-    ms = got.get("milestones")
-    if ms is not None and (not isinstance(ms, list) or not all(isinstance(t, str) for t in ms)):
-        raise StepError("見積の入力の milestones は題名の列で書く", EXIT_UNREADABLE)
-    return got
-
-
-def estimates(issues, scores, stored, previous, cfg):
-    """open の課題ごとの見積。--scores → 記録 → 前回の表 の順に採る。どれにも無い・検証に落ちた課題は外す（I1・I10）。"""
-    given = {i.get("number"): i for i in scores.get("issues", []) if isinstance(i, dict)}
-    prev_rows = {}
-    for tab in previous.values():
-        for r in tab["rows"]:
-            prev_rows.setdefault(r["number"], r)
-    ests, excluded = {}, []
-    for n in sorted(issues):
-        if n in given:
-            raw, band = given[n], True
-            if not raw.get("digest"):
-                excluded.append({"number": n, "reason": "digest が無い（candidates の値を写す）"})
-                continue
-        elif str(n) in stored:
-            raw = stored[str(n)]
-            band = not raw.get("restored") and (raw.get("ubv") or {}).get("impact") is not None
-        elif n in prev_rows:
-            raw, band = R.restore_from_row(prev_rows[n], cfg), False
-        else:
-            excluded.append({"number": n, "reason": "段階が無い（手順 2B で付ける）"})
-            continue
-        est, why = R.validate_estimate(raw, cfg, check_band=band)
-        if est is None:
-            excluded.append({"number": n, "reason": why})
-        else:
-            ests[n] = est
-    return ests, excluded
 
 
 def _items(issues, got, excluded):
@@ -183,11 +152,12 @@ def _write_rank_result(sd, out, code=None):
 
 
 def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
-    """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded)。"""
+    """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded, left)。"""
     open_issues = list_issues(gh, "state=open")
     issues = {i["number"]: issue_facts(i) for i in open_issues}
     previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
-    ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
+    since = ref_date(git_root(a.root), a.since_ref) if a.since_ref else None
+    ests, excluded, left = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg, since)
     jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
     import estimate_records as er  # lib は upkeep.py が sys.path へ載せる
 
@@ -210,7 +180,7 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     )
     rejected = ctx.read_state(sd / "rejected.json") or []
     board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded, sizes)
-    return board, issues, ests, excluded
+    return board, issues, ests, excluded, left
 
 
 def _rank_metrics(repo, order, cfg, got, ests, excluded) -> dict:
@@ -235,7 +205,7 @@ def cmd_rank(a, ctx):
         cfg = R.build_config(config_args(a), read_backlog_decl(root))
     except R.RankError as e:
         raise StepError(f"宣言か引数の誤り: {e}", EXIT_UNREADABLE)
-    scores = _read_scores(a.scores, ctx.read_state)
+    scores = read_scores(a.scores, ctx.read_state)
     rows = Milestones(gh).open_rows()
     if not rows:
         return _write_rank_result(
@@ -243,7 +213,7 @@ def cmd_rank(a, ctx):
         )
     order = R.milestone_order([r["title"] for r in rows], scores.get("milestones"))
     notes = []
-    board, issues, ests, excluded = _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes)
+    board, issues, ests, excluded, left = _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes)
     try:
         got = R.compute_ranking(board)
     except R.CycleError as e:
@@ -259,6 +229,8 @@ def cmd_rank(a, ctx):
         return _write_rank_result(sd, out, EXIT_UNREADABLE)
     metrics = _rank_metrics(repo, order, cfg, got, ests, excluded)
     metrics["digest"] = R.stable_digest(metrics)
+    if a.since_ref:  # 順位の算出の結果ではないため digest に入れない
+        metrics["left_for_review"] = left
     metrics.update(notes=notes, waits=gh.waits)
     nxt = None
     if excluded:

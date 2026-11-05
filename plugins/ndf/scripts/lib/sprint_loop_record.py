@@ -22,7 +22,6 @@ import functools
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -31,6 +30,7 @@ from pathlib import Path
 from typing import Callable
 
 import clock
+import design_pr_merge
 import handoff_doc
 import jsonio
 import locks
@@ -59,6 +59,7 @@ EXIT_REFUSED = step_result.EXIT_VIOLATION  # 1: 断った・呼び出しの順�
 EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たった（失敗ではない）
 
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
+BUDGET_DEFAULT = "default"  # 予算の単位を既定（.ndf/pace.json の loop.budget）へ戻す指示。値が変わったときだけ予算の履歴に 1 行足す
 RELEASE_PENDING_MAX = 2  # 保留の周回の上限の既定（.ndf/pace.json の loop.release_pending_max）
 SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
@@ -83,9 +84,7 @@ class LoopError(Exception):
 # ---------------------------------------------------------------- 外の世界
 
 
-def _run_loop_cmd(cmd: list[str], cwd: str | None = None, stdin: str | None = None) -> tuple[int, str, str]:
-    p = subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, text=True)
-    return p.returncode, p.stdout, p.stderr
+_run_loop_cmd = design_pr_merge.run_cmd  # 起動の本体は 1 つ（#2507）
 
 
 def _upkeep_rank(root: Path) -> tuple[int, dict]:
@@ -259,27 +258,31 @@ def _overlap(a0, a1, b0, b1) -> float:
     return max(0.0, (hi - lo).total_seconds())
 
 
+def lap_spans(lap: dict) -> list[tuple]:
+    """周回の動いていた区間（開始と終了の組。時刻は文字列のまま）。保留の周回は、締めるまでの区間（held_at まで）と、
+    答えの後に残りを流した区間（release.finish、無ければ question.finish）を返す。周回の境で答えを待つ時間は数えない（#2436）"""
+    spans = [(lap.get("started_at"), lap.get("held_at") or lap.get("ended_at"))]
+    if lap.get("held_at"):
+        fin = (lap.get("release") or {}).get("finish") or (lap.get("question") or {}).get("finish") or {}
+        spans.append((fin.get("started_at"), fin.get("ended_at")))
+    return spans
+
+
+def span_active_seconds(start, end, stops: list[tuple]) -> float:
+    """解析済みの 1 区間から、止まっていた区間との重なりを引いた秒数（0 未満にしない）。"""
+    span = max(0.0, (end - start).total_seconds())
+    for a, b in stops:
+        if a and b:
+            span -= _overlap(start, end, a, b)
+    return max(0.0, span)
+
+
 def active_seconds(rec: dict) -> float:
     """動いていた時間（I8）: 終わった周回の区間の和から、周回の途中で止まっていた時間（stops の at〜resumed_at と
     周回の区間の重なり）を引く。周回の境で止まった時間は周回の区間の外にあるため引かない。"""
-    total = 0.0
     stops = [(_loop_time(s.get("at")), _loop_time(s.get("resumed_at"))) for s in rec.get("stops", [])]
-    for lap in rec.get("laps", []):
-        # 保留の周回は、締めるまでの区間（held_at まで）と、答えの後に残りを流した区間（release.finish）を足す。
-        # 周回の境で答えを待つ時間は数えない（#2436）
-        spans = [(lap.get("started_at"), lap.get("held_at") or lap.get("ended_at"))]
-        if lap.get("held_at"):
-            fin = (lap.get("release") or {}).get("finish") or (lap.get("question") or {}).get("finish") or {}
-            spans.append((fin.get("started_at"), fin.get("ended_at")))
-        for s, e in ((_loop_time(a), _loop_time(b)) for a, b in spans):
-            if not s or not e:
-                continue
-            span = max(0.0, (e - s).total_seconds())
-            for a, b in stops:
-                if a and b:
-                    span -= _overlap(s, e, a, b)
-            total += max(0.0, span)
-    return total
+    spans = ((_loop_time(a), _loop_time(b)) for lap in rec.get("laps", []) for a, b in lap_spans(lap))
+    return sum((span_active_seconds(s, e, stops) for s, e in spans if s and e), 0.0)
 
 
 def consumed(rec: dict) -> dict:

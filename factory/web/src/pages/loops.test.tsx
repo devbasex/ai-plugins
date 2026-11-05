@@ -37,7 +37,9 @@ describe("ループの一覧（受け入れ条件 11）", () => {
     const table = await screen.findByRole("table", { name: "開発ループ" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows.map((r) => within(r).getAllByRole("cell")[0]!.textContent)).toEqual(["lfactory", "lroot", "lflow"]);
-    expect(within(rows[0]!).getByText("8 周 / $87.50")).toBeTruthy();
+    expect(within(rows[0]!).getByText("8 周 / $87.50 / 時間はリポジトリの既定")).toBeTruthy();
+    expect(within(rows[1]!).getByText("周回の数・費用・時間はリポジトリの既定")).toBeTruthy();
+    expect(within(table).queryByText(/掛けない/)).toBeNull();
     expect(within(rows[0]!).getByText("2026/11/2 8:30:00")).toBeTruthy();
     expect(within(rows[1]!).getByText("次の周回を始める操作を待っています")).toBeTruthy();
     expect(within(rows[2]!).getByText(/費用の予算に達した.*新しいループで続けられます/)).toBeTruthy();
@@ -131,10 +133,21 @@ describe("ループの詳細（受け入れ条件 12）", () => {
     await userEvent.type(laps, "12");
     await userEvent.click(screen.getByRole("button", { name: "予算を保存する" }));
     expect(update).toHaveBeenCalledWith(PERSONAL_ID, "lp-0001", { laps: 12, usd: 100, hours: null });
+    expect((laps as HTMLInputElement).placeholder).toBe("空ならリポジトリの既定");
     cleanup();
     show(detail("lp-0003"));
     await screen.findByRole("heading", { level: 1, name: "lflow" });
     expect(screen.queryByRole("button", { name: "ループを止める" })).toBeNull();
+  });
+});
+
+describe("予算をリポジトリの既定へ戻す（#2406）", () => {
+  it("既定へ戻せない版で断られると、版を差し込んだ理由を予算の欄に出す", async () => {
+    const api = show(detail("lp-0001"));
+    vi.spyOn(api, "updateLoopBudget").mockRejectedValue(new ApiFailure(409, "budget_reset_unsupported", "", { ndf_version: "10.26.1", units: ["usd"] }));
+    await userEvent.clear(await screen.findByRole("textbox", { name: "費用の予算（USD）" }));
+    await userEvent.click(screen.getByRole("button", { name: "予算を保存する" }));
+    expect(await screen.findByText(/NDF（版 10.26.1）は予算をリポジトリの既定へ戻せません/)).toBeTruthy();
   });
 });
 

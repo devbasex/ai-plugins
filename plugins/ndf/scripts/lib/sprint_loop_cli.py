@@ -10,6 +10,18 @@ import clock
 import step_result
 
 
+def budget_value(text: str) -> float | str:
+    """`--budget-*` の値: 数か既定へ戻す指示 `default`（#2406）。どちらでもなければ引数の誤り（終了コード 2）。"""
+    from sprint_loop_record import BUDGET_DEFAULT  # loop のときだけ読む
+
+    if text == BUDGET_DEFAULT:
+        return BUDGET_DEFAULT
+    try:
+        return float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"数か {BUDGET_DEFAULT} を渡す: {text!r}") from None
+
+
 def run_loop_command(a, update) -> dict | None:
     """`sprint-state.py loop` の副命令を振り分ける。update は周回を締める前にスプリント状態を埋める関数（`update` と同じ）。"""
     import sprint_loop as sl  # loop のときだけ読む
@@ -84,9 +96,9 @@ def add_loop_parser(sub, cmd_update) -> None:
 
     s = name(ls.add_parser("start"), optional=True)
     s.add_argument("--milestones", help="選定の対象を絞るマイルストーン（, 区切り）")
-    s.add_argument("--budget-laps", type=float)
-    s.add_argument("--budget-usd", type=float)
-    s.add_argument("--budget-hours", type=float)
+    s.add_argument("--budget-laps", type=budget_value, help="数か default（リポジトリの予算の既定へ戻す）")
+    s.add_argument("--budget-usd", type=budget_value)
+    s.add_argument("--budget-hours", type=budget_value)
     s.add_argument("--no-goal", action="store_true", help="/goal で始めていない（再開のコマンドに /goal を付けない）")
     name(ls.add_parser("select"))
     s = name(ls.add_parser("exclude"))

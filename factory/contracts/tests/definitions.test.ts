@@ -191,6 +191,8 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
         instruction({ ...loop, LOOP_BUDGET: "laps=3,usd=60", EXCLUDE_ISSUES: "2171,2186", LOOP_ANSWERS: "12=approved#40,13=rejected" }),
       ).ok,
     ).toBe(true);
+    expect(validateRunJobInstruction(instruction({ ...loop, LOOP_BUDGET: "laps=default,usd=10,hours=default" })).ok).toBe(true);
+    expect(validateRunJobInstruction(instruction({ ...loop, LOOP_BUDGET: "usd=reset" })).ok).toBe(false);
     expect(validateRunJobInstruction(instruction({ ...loop, ISSUES: "2171" })).ok).toBe(false);
     expect(validateRunJobInstruction(instruction({ ...loop, LOOP_MILESTONES: undefined })).ok).toBe(false);
     expect(validateRunJobInstruction(instruction({ ...loop, LOOP_NAME: "-bad" })).ok).toBe(false);

@@ -11,7 +11,7 @@ from gate_answer import GATE_1, GATE_2
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
-from supervise_lib.decl import decl_roots, with_decls
+from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, with_decls
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_waves import (
     sprint_branch,
@@ -268,7 +268,7 @@ def advises(a, closing: bool = False) -> bool:
 
 
 def has_prod_branch(a) -> bool:
-    """本番のブランチ（--production-branch か .ndf/worktree.json の production_branch）があるか。"""
+    """本番のブランチ（`PRODUCTION_SOURCES` の順で決まる値）があるか。"""
     return bool(getattr(a, "production_branch", None))
 
 
@@ -491,7 +491,7 @@ def next_text(pace: str, index: list[dict], advise: bool = False, no_prod: bool 
             "根拠の項目を添えて承認を取り、関門のステージの説明に沿って続きのステージの resume を打つ"
         )
     if no_prod:
-        nxt += "。本番のブランチ（--production-branch か .ndf/worktree.json の production_branch）が無いため、承認ゲート 2 と本番は置いていない"
+        nxt += f"。本番のブランチ（{PRODUCTION_SOURCES}）が無いため、承認ゲート 2 と本番は置いていない"
     for manual in (e for e in index if "manual" in e):
         nxt += f"。{manual['name']}は {manual['manual']} で行う（{manual['note']}）"
     return nxt

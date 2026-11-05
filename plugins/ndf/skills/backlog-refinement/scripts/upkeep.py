@@ -8,7 +8,7 @@
     python3 upkeep.py report [--depth diff|review|overhaul [--run R] [--order prune,rank,...]]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
-    python3 upkeep.py depth due|record ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
+    python3 upkeep.py depth due|record|compare ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
     python3 upkeep.py owner claim|touch|release|status ...（見直しの持ち主。upkeep_owner.py の冒頭）
     python3 upkeep.py research plan|run ...（ニーズとシーズの調査。upkeep_research.py の冒頭）
     python3 upkeep.py overhaul snapshot|count|measure ...（大整理。upkeep_overhaul.py の冒頭）
@@ -22,7 +22,7 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
   manual（--add で担当が足したもの）/ unscored（記録の見積が無いか、付けた後に要約値が変わった課題。rank を打った
-  リポジトリだけ。上限で切るときは数えない）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
+  リポジトリだけ。`--depth diff` では <ref> のコミットの時刻（metrics.since）より後に作られた課題だけ。上限で切るときは数えない）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
   課題の要約値（題名・本文・状態・マイルストーン・ラベル）を返す。
   上限（--limit → .ndf/backlog.json の candidate_limit → 既定 10）を超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば課題の
@@ -57,7 +57,6 @@ plan.json の形（起票・付け直しと深さのキーは upkeep_actions.py 
 from __future__ import annotations
 
 import argparse
-import datetime
 import functools
 import hashlib
 import json
@@ -74,7 +73,7 @@ import deps  # noqa: E402  外部パッケージの環境（upkeep_gh が投稿�
 deps.require("locks")  # 深さの記録と見直しの持ち主の錠（upkeep_depth・upkeep_owner が最上位で読む。#2315）
 import jsonio  # noqa: E402
 from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
-from step_result import emit, git, git_root, main_with, result  # noqa: E402
+from step_result import emit, git_root, main_with, result  # noqa: E402
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
 from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, with_labels  # noqa: E402
@@ -137,14 +136,6 @@ def _read_state(path: Path):
 
 
 # ---------------- candidates ----------------
-
-
-def _ref_date(root, ref: str) -> str:
-    p = git(root, "log", "-1", "--format=%cI", ref, check=False)
-    if p.returncode != 0 or not p.stdout.strip():
-        raise StepError(f"ref を読めない: {ref}", EXIT_UNREADABLE)
-    d = datetime.datetime.fromisoformat(p.stdout.strip())
-    return d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
@@ -216,7 +207,7 @@ def cmd_candidates(a):
     a.limit = None if a.depth == "review" else a.limit
     repo = target_repo(root, a.repo)
     gh = Gh(repo)
-    since = _ref_date(root, a.since_ref)
+    since = RC.ref_date(root, a.since_ref)
     open_issues = list_issues(gh, "state=open")
     routes = _Routes(open_issues)
     notes = []
@@ -227,7 +218,9 @@ def cmd_candidates(a):
     _route_commits(root, a.since_ref, routes)
     _route_manual(a, routes, notes)
     sd = _state_dir(a.state_dir, repo)
-    for n in RC.unscored(sd, _read_state, open_issues, snapshot_digest) if has_milestones else []:
+    # 差分の棚卸しが見積の段階を付けるのは起点より後に作られた課題だけ（#2315 の決定 1・決定 6）。見直しは絞らない
+    pool = open_issues if a.depth == "review" else [i for i in open_issues if (i.get("created_at") or "") > since]
+    for n in RC.unscored(sd, _read_state, pool, snapshot_digest) if has_milestones else []:
         routes.add(n, "unscored")
     if a.depth == "review":
         _route_review(open_issues, set((D.materials(root) or {}).get("deferred_milestones") or []), routes)

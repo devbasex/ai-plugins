@@ -1030,6 +1030,7 @@ export const OPERATIONS = [
         },
         "budget": {
           "type": "object",
+          "description": "単位ごとに数か null。null の単位はリポジトリの予算の既定（.ndf/pace.json の loop.budget）に従う",
           "additionalProperties": false,
           "properties": {
             "laps": {
@@ -1142,7 +1143,7 @@ export const OPERATIONS = [
     ],
     "idField": null,
     "summary": "開発ループの予算を変える",
-    "description": "終わりの状態でないループにだけ効き、次のジョブの指示から NDF の予算へ渡る。",
+    "description": "終わりの状態でないループにだけ効き、次のジョブの指示から NDF の予算へ渡る。3 つの単位をまとめて置き換え、送らない単位と null の単位は空（リポジトリの既定）として扱う。 値のある単位を空にする変更は、次のジョブが使う NDF の版（ループの今の実行の版、無ければ今のマーケットプレイスの版）が予算を既定へ戻せないとき 409 budget_reset_unsupported（details.ndf_version・details.units）で断る。値を入れる・変える・空のままにする変更は版によらず受ける。",
     "parameters": [],
     "itemSchema": {
       "type": "object",
@@ -1158,6 +1159,7 @@ export const OPERATIONS = [
         },
         "budget": {
           "type": "object",
+          "description": "単位ごとに数か null。null の単位はリポジトリの予算の既定（.ndf/pace.json の loop.budget）に従う",
           "additionalProperties": false,
           "properties": {
             "laps": {

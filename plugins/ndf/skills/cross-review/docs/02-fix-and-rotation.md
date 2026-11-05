@@ -416,7 +416,7 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 | `profile.waive_kinds` | オブジェクト（種類 → 名前） | 1 件以上。種類は英小文字・数字・`_`。既定の見送りの種類と置き換わる |
 | `profile.reply` | 文字列 | 見送りの返信の雛形。`{inner}` をちょうど 1 回含み、そこへ見送りの種類の名前が入る。重点の句は足さない |
 | `profile.categories` | オブジェクト（名前 → `{paths, instructions}`） | `paths` は glob の配列で、`.ndf/pace.json` の `areas` と同じ規則（`*` と `?` は `/` をまたがず、`**` はまたぐ）。当たった分類の名前が `auto_review_categories` に、`instructions` が自動レビュー観点に入る |
-| `profile.replace_auto_categories` | 真偽値 | 真なら既定の自動カテゴリの観点を渡さない。既定は偽 |
+| `profile.replace_auto_categories` | 真偽値 | 真なら既定の自動カテゴリの観点を渡さない（外部の調査の確認の観点は外さない。[04-contracts.md](04-contracts.md) の `code`）。既定は偽 |
 | `profiles` | 配列 | `version: 3` だけで読む、名前つきのプロファイルの列。無いか `[]` ならどれも選ばない。`version: 3` で `profile` を書くと壊れている |
 | `profiles[].name` | 文字列 | 必須。英小文字・数字・`_`。宣言の中で重複しない |
 | `profiles[].paths` | 文字列の配列 | 任意。空でない glob の配列で、`profile.categories` の `paths` と同じ規則。書かないプロファイルはどの PR にも当たり、高々 1 つを末尾に置く |
