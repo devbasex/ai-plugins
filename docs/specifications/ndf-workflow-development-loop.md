@@ -174,11 +174,12 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 2. 説明にスプリント MVV（`## Mission` / `## Vision` / `## Value`）があり、その sha256 が `sprint_mvv_approvals` に無い
    マイルストーンは、候補をすべて「スプリント MVV が未承認」で外す
 3. 候補ごとに外す理由を順に見る: 「人の判断待ち（棚卸し）」（`waiting_decision`）→「人の判断待ち」（答えの無い行）→
-   「差し戻し」（`rejected`）→「設計 PR がマージ待ち」（`approved` で `merged_at` が無く、`gh pr view` が `MERGED` でない。
-   `MERGED` なら `merged_at` を足して以後打たない）→ この周回の `excluded` の理由 →
+   「差し戻し」（`rejected`）→「設計 PR がマージ待ち（<マージの結果の理由>）」（`approved` で `merged_at` が無く、`gh pr view` が `MERGED` でない。
+   `MERGED` なら `merged_at` を足して以後打たない。宛先が本番の設計 PR は「設計 PR の宛先が本番（承認ゲート 2 で人がマージする）」）→ この周回の `excluded` の理由 →
    「周回の中で起票された」（周回の `created`）→「容量（尺度を超える）」
-4. 外れなかった候補に `max_issues` 件の枠を、品質の枠の課題から先に、残りを順位の順に割り当てる。選んだ行の理由は
-   「品質の枠」か「順位」、枠からあふれた行は「容量」で外す
+4. 外れなかった候補に `max_issues` 件の枠を、先頭に選ぶ課題（直して出し直す課題・配布の直し・承認とマージが済み、その後の周回でまだ
+   選ばれていない設計の課題）、品質の枠の課題、順位の順に割り当てる。選んだ行の理由は「承認した設計」「直しの先頭」「品質の枠」「順位」の
+   どれか、枠からあふれた行は「容量」で外す
 5. 選べたら、そのマイルストーンの候補でない行を「順位（切り出しの境界の外）」で外した行として足す。外した行も
    `selection` に載せ、`rank` の `metrics.digest` を `rank_digest` に書く。スプリント MVV があれば周回のディレクトリの
    `mvv.md` に写し、`loop sprint` が `sprint-state.py init --mvv` へ渡して承認ゲート `MVV` の記録を状態へ写す
@@ -219,7 +220,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 止まった所 | 扱い |
 | --- | --- |
 | どこでも、プロジェクト MVV が開始時と違う・未承認 | `mvv_changed` で止まる |
-| 設計のプラン（承認ゲート 1）。判定が「従う」以外・`boundary` が空でない・機械のチェック・判定を読めない | 計画の課題を `waiting` へ移し（`{number, reason, verdict, basis, gate: 1, pr, lap, at}`。`pr` は報告の設計 PR、判定は `mvv-gate.jsonl` のその PR の最後の行）、課題の本文の節 `## 人の判断待ち（開発ループ <名>）` を書き直す。設計が完了も関門もしなかった課題は続きから外す。残った課題（`issues_kept`）で、関門 1 の後のステージから外した課題だけの計画を除き、共通の計画の `課題` と `closes` からも外し、まとめを組み直して最後の `--then` につなぐ |
+| 設計のプラン（承認ゲート 1）。判定が「従う」以外・`boundary` が空でない・機械のチェック・判定を読めない | 計画の課題を `waiting` へ移し（`{number, reason, verdict, basis, boundary, gate: 1, pr, lap, at, report, state, stamp}`。`pr` は報告の設計 PR、判定は `mvv-gate.jsonl` のその PR の最後の行、`stamp` は問いの時点の設計 PR の先頭のコミット（承認した先端））、課題の本文の節 `## 人の判断待ち（開発ループ <名>）` を書き直す。設計が完了も関門もしなかった課題は続きから外す。残った課題（`issues_kept`）で、関門 1 の後のステージから外した課題だけの計画を除き、共通の計画の `課題` と `closes` からも外し、まとめを組み直して最後の `--then` につなぐ |
 | 同上で残りが無い | 周回を `人へ戻した`（設計が完了しなかった課題があれば `失敗`）で締め、境の判定へ進む |
 | 同上で続きを組めない | `refused`（`step: 続きの queue`）で止まる |
 | 承認ゲート 1 以外（承認ゲート 2） | 判定の写しを周回へ足し、止まった計画を `gate2_plan` に控え、`gate2_returned`（`values: {pr, verdict, reasons}`）で止まる。本番は出さない |
@@ -228,8 +229,13 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 承認ゲート 2 の答えは、止まった時刻より後の、周回の状態の `関門 2` の利用者の記録（`by` が `mvv` でない）と
 `gate-rejections.jsonl` の差し戻しのうち最新のもので決める。
 
-`loop answer --approved` は `sprint-state.py gate <その周回の状態> 関門 1 --by user --outcome approved [--pr N]` を内で打つ。
-`--rejected` は `--outcome rejected` で差し戻しの記録を残す。どちらも課題の本文の節を書き直す。
+`loop answer --approved` は、まず行の承認した先端（`stamp`）と設計 PR の今の先端を比べる。違う・行に承認した先端が無いときは、答えを当てずに
+`stamp` を今の先端へ書き換え、`status: regated` で返す（新しい先端を見てから答え直す）。同じなら
+`sprint-state.py gate <その周回の状態> 関門 1 --by user --outcome approved [--pr N]` を内で打ち、続けて承認した設計のマージ
+（`design_pr_merge.merge_approved`。承認した先端のままで必須の検査が緑の設計 PR を、検査の完了を待たずに `--no-cleanup` で宛先へマージする。
+宛先が本番チャネルに当たるか決められない設計 PR はマージしない）を 1 回試み、結果を行の `merge` に、マージできたら `merged_at` を書く。
+マージの成否によらず終了コードは 0 で、`summary` に結果を添える。`--rejected` は `--outcome rejected` で差し戻しの記録を残し、マージを呼ばない。
+どちらも課題の本文の節を書き直す。
 
 ### 止まる条件と再開
 
@@ -247,6 +253,11 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 やらないなら差し戻し）→ `配布待ち` の `rejected`（`人へ戻した` で締め、`fixes` に課題と理由を足し、次の周回で先頭に選ぶ）・`failed`
 （`失敗` で締め、鍵は `{issues, kind: 配布, step: 配布の失敗}`）→ 最も古い `released` の `配布待ち` か答えの届いた `質問待ち`
 （`status: finish` と残りの `pipeline` を返し、新しい周回を始めない）。次の配布へ回した知らせ（`defer-<依頼>`）だけなら `配布待ち` のまま。
+続けて、承認済みで未マージの設計 PR ごとに、前のマージの結果に応じた手を 1 回だけ打つ（未試行・検査が緑でない・取り残し・基盤待ちは承認した設計のマージを呼び直す。
+先端が動いた・承認した先端が無いは新しい先端で問い直す。衝突は設計の worktree で `merged-steps.py base-sync --pr <PR> --push` を打ち、
+先端が進めば問い直す。権限の不足など時間で解けない結果・同じ分類の未緑が 3 周回続いた・基盤待ちの再実行が同じ承認した先端で 3 回に達した
+ときは、承認した先端のまま理由を添えて利用者へ問い直す。宛先が本番の設計 PR はマージせず、`gh pr view` の状態だけを読む）。
+マージ済みになった設計 PR には `merged-steps.py cleanup <PR>` を打つ。この手は保留の周回が無いときも選定の前に打つ（`settle_approved_designs`）。
 その後、答えの無い保留の周回が `release_pending_max` 以上あれば `waiting_only`、3・4 に当たって答えの無い保留の周回があれば
 先に `waiting_only` で止まる。選べる課題が無く、保留の周回かオーガナイザーへ送った答えの無い設計の承認があれば、`no_issue` /
 `outside_mvv` と見直しの代わりに `waiting_only` で止まる（`values: {why, pending, waiting}`）。
@@ -297,7 +308,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `same_failure` / `max_issues` / `release_pending_max` / `milestones` | 開始時に設定と引数から写した値 |
 | `status` / `stop` / `stops` | `running` / `stopped`・今の止まった理由・過去の止まった理由（追記だけ） |
 | `laps[]` | 周回（追記だけ。I1） |
-| `waiting[]` | 人の判断待ち。答えは行を消さずに `answer`（`approved` / `rejected` / `revise`）・`answered_at` を足す。`approved` の行はマージを確かめた時刻 `merged_at` を足す。並列の計画のレーンは、オーガナイザーへ送った設計の承認の依頼の `request` と計画名 `plan` を持つ。`revise` の行は指摘 `note` と回数 `revise_count` を持つ |
+| `waiting[]` | 人の判断待ち。答えは行を消さずに `answer`（`approved` / `rejected` / `revise`）・`answered_at` を足す。`approved` の行はマージを確かめた時刻 `merged_at`、だれが承認したか `by`（`user` / `mvv`）、最後の承認した設計のマージの結果 `merge`
+（`{result, class, reason, pr, head, at, branch, infra_rerun, lap, streak, infra_reruns, stamp}`）、後片付けの時刻 `cleaned` を足す。
+利用者へ問い直した行は理由 `returned` を持つ。並列の計画のレーンは、オーガナイザーへ送った設計の承認の依頼の `request` と計画名 `plan` を持つ。`revise` の行は指摘 `note` と回数 `revise_count` を持つ |
 | `fixes[]` | 配布を差し戻された周回の直し `{lap, issues, reason, at}`。直しの周回で課題を選ぶと `fixed_by` に周回の番号を書く |
 | `excluded[]` | `{number, reason, lap}`（`loop exclude`） |
 | `sprint_mvv_approvals[]` | `{milestone, sha256, at, by}` |
