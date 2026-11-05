@@ -5785,6 +5785,18 @@
       "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
       "source": "",
       "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "端末の控え",
+      "context": "ndf-factory",
+      "meaning": "画面が最後に受け取った読み出しの応答を、暗号化して端末に残したもの。受け取った時刻と保存の期限を持つ",
+      "pending_source": "issues/issue-2383-requirements.md"
+    },
+    {
+      "term": "確定待ちの操作",
+      "context": "ndf-factory",
+      "meaning": "オフラインの間に押した取り消せない操作で、つながったときに今の状態と照らしてから確定するもの",
+      "pending_source": "issues/issue-2383-requirements.md"
     }
   ]
 }
