@@ -82,3 +82,31 @@ def test_the_skill_table_uses_spaced_rules_and_an_empty_total_cell(ss):
         "| ndf:fix | explicit | 11 | 3 | 8 | 8 | 3 | 37.5% |",
         "| **合計** |  | **23** | **5** | **18** | **8** | **3** | **37.5%** |",
     ]
+
+
+def test_aggregate_counts_auto_explicit_triggers_and_hits(ss, monkeypatch):
+    """発言 1 件ごとのトリガーとヒットの数（現状固定。#2422）。ヒットは次の発言・スラッシュより前に同じ Skill が呼ばれたとき。"""
+    tl = [
+        ("user", "Please REVIEW this"),
+        ("skill", "ndf:review"),
+        ("user", "review again and plan"),
+        ("slash", "ndf:review"),
+        ("skill", "ndf:review"),
+        ("user", "nothing here"),
+        ("skill", "ndf:plan"),
+        ("user", "plan it"),
+        ("assistant", "x"),
+        ("skill", "ndf:plan"),
+    ]
+    monkeypatch.setattr(ss, "build_timeline", lambda path, names: (tl, "proj"))
+    skills = [
+        {"name": "review", "qualified": "ndf:review", "triggers": ["review", ""]},
+        {"name": "plan", "qualified": "ndf:plan", "triggers": ["plan"]},
+        {"name": "quiet", "qualified": "ndf:quiet", "triggers": []},
+    ]
+    got = ss.aggregate_by_project([pathlib.Path("a.jsonl"), pathlib.Path("b.jsonl")], skills)
+    auto, explicit, trig, hits = got["proj"]
+    assert (dict(auto), dict(explicit)) == ({"ndf:review": 4, "ndf:plan": 4}, {"ndf:review": 2})
+    assert (dict(trig), dict(hits)) == ({"ndf:review": 4, "ndf:plan": 4}, {"ndf:review": 2, "ndf:plan": 2})
+    capped = ss.aggregate_by_project([pathlib.Path("a.jsonl")], skills, lookahead_cap=1)["proj"]
+    assert dict(capped[3]) == {"ndf:review": 1}

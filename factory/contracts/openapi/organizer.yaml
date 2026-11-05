@@ -1,0 +1,267 @@
+openapi: 3.1.0
+info:
+  title: Neural Development Factory のオーガナイザーの API
+  version: 0.1.0
+  description: >-
+    同じリポジトリで並行する実行の承認と問いの一覧、まとめた配布の履歴、止まった配布を解く操作（#2439）。
+    どの経路も Cognito の access token を Authorization: Bearer で要る。アカウントのリポジトリでなければ 403、登録が無ければ 404。
+    一覧と履歴は読むだけで、承認の依頼の答えを確定する経路はこのファイルに無い（I66）。
+  contact:
+    name: devbasex/ai-plugins
+    url: https://github.com/devbasex/ai-plugins
+  license:
+    name: MIT
+    url: https://github.com/devbasex/ai-plugins/blob/main/factory/LICENSE
+servers:
+  - url: https://api.example.com
+    description: API の入口（値はインフラが FACTORY_API_URL で渡す）
+tags:
+  - name: organizer
+    description: Factory のオーガナイザー
+security:
+  - cognito: []
+paths:
+  /accounts/{accountId}/repositories/{repositoryId}/approval-requests:
+    get:
+      tags: [organizer]
+      operationId: listRepositoryApprovalRequests
+      summary: リポジトリの承認と問いの一覧
+      description: >-
+        同じリポジトリの承認待ちの実行の承認の依頼（ゲート 1・ゲート 2・判断）、止まった配布、開発ループの人の判断待ちを、
+        作った時刻の古い順に 1 つの並びで返す。承認の依頼の中身（承認資料・答え）は承認の依頼の経路が持ち、ここは識別子と要約だけを返す。
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - $ref: "#/components/parameters/RepositoryId"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequestList"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+  /accounts/{accountId}/repositories/{repositoryId}/releases:
+    get:
+      tags: [organizer]
+      operationId: listRepositoryReleases
+      summary: まとめた配布の履歴
+      description: 新しい順に limit 件（既定 20、最大 100）。提示・確定・結果と、待ち・組む・出し直し・確定・結果の記録を返す。
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - $ref: "#/components/parameters/RepositoryId"
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseHistory"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+  /accounts/{accountId}/repositories/{repositoryId}/releases/{seq}/resolve:
+    post:
+      tags: [organizer]
+      operationId: resolveStalledRelease
+      summary: 止まった配布を解く
+      description: >-
+        配布の実行が失敗して止まったまとめた配布を「続きから流す」（continue）か「差し戻す」（reject）で解く。
+        止まっていなければ 409 not_stalled、main へのマージの後の差し戻しは 409 release_after_main（I63）。
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - $ref: "#/components/parameters/RepositoryId"
+        - name: seq
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveRequest"
+      responses:
+        "202":
+          description: 受けた
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveResult"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+        "409":
+          $ref: "#/components/responses/E409"
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      description: Cognito の access token
+  parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+    RepositoryId:
+      name: repositoryId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    E400:
+      description: 要求の形が違う
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E403:
+      description: 権限が無い（他人のアカウントと同じ本文）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E404:
+      description: 見つからない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E409:
+      description: 状態が合わない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+    OrganizerSummary:
+      type: object
+      required: [current_seq, wait_reason, wait_detail]
+      properties:
+        current_seq: { type: ["integer", "null"], description: 流れているまとめた配布の連番。null は流れていない }
+        wait_reason: { type: ["string", "null"], enum: [external_release_open, legacy_run, null] }
+        wait_detail: { type: ["string", "null"], description: 待ちの相手（外の Pull Request の URL・古い版の実行の数） }
+    ReleaseLane:
+      type: object
+      required: [lane, requested, prs]
+      properties:
+        lane: { type: string }
+        requested: { type: boolean }
+        prs: { type: array, items: { type: integer } }
+    ReleaseSummary:
+      type: object
+      required: [seq, k, sha, lanes, added_prs, choices]
+      properties:
+        seq: { type: integer }
+        k: { type: ["integer", "null"], description: 最後の提示の番号。提示の前に止まった配布は null }
+        sha: { type: ["string", "null"] }
+        lanes: { type: array, items: { $ref: "#/components/schemas/ReleaseLane" } }
+        added_prs: { type: array, items: { type: integer } }
+        choices: { type: array, items: { type: string, enum: [continue, reject] } }
+    ApprovalRequestItem:
+      type: object
+      required: [kind, created_at]
+      properties:
+        kind: { type: string, enum: [gate1, gate2, decision, loop_pending, release_stalled] }
+        sprint_run_id: { type: string }
+        loop_id: { type: string }
+        approval_request_id: { type: string }
+        pr_url: { type: ["string", "null"] }
+        number: { type: integer, description: ループの人の判断待ちの課題の番号 }
+        reason: { type: string }
+        created_at: { type: string, format: date-time }
+        release: { $ref: "#/components/schemas/ReleaseSummary" }
+    ApprovalRequestList:
+      type: object
+      required: [organizer, items]
+      properties:
+        organizer: { $ref: "#/components/schemas/OrganizerSummary" }
+        items: { type: array, items: { $ref: "#/components/schemas/ApprovalRequestItem" } }
+    Presentation:
+      type: object
+      required: [k, sha, version, prs, lanes, added_prs, at]
+      properties:
+        k: { type: integer }
+        sha: { type: string }
+        version: { type: string }
+        prs: { type: array, items: { type: integer } }
+        lanes:
+          type: array
+          items:
+            type: object
+            required: [lane, requested]
+            properties:
+              lane: { type: string }
+              requested: { type: boolean }
+        added_prs: { type: array, items: { type: integer } }
+        at: { type: string, format: date-time }
+    ReleaseResult:
+      type: object
+      required: [version, prod_pr_url, sha, prs]
+      properties:
+        version: { type: ["string", "null"] }
+        prod_pr_url: { type: ["string", "null"] }
+        sha: { type: ["string", "null"] }
+        prs: { type: array, items: { type: integer } }
+    ReleaseLogEntry:
+      type: object
+      required: [at, kind, detail]
+      properties:
+        at: { type: string, format: date-time }
+        kind: { type: string, enum: [waited, composed, presented, represented, confirmed, stalled, resolved, released, rejected] }
+        detail: { type: object }
+    ReleaseBatch:
+      type: object
+      required: [seq, state, release_run_id, presentations, confirmed_k, result, log]
+      properties:
+        seq: { type: integer }
+        state: { type: string, enum: [composed, presented, represented, confirmed, stalled, released, rejected] }
+        release_run_id: { type: string }
+        presentations: { type: array, items: { $ref: "#/components/schemas/Presentation" } }
+        confirmed_k: { type: ["integer", "null"] }
+        result: { oneOf: [{ $ref: "#/components/schemas/ReleaseResult" }, { type: "null" }] }
+        log: { type: array, items: { $ref: "#/components/schemas/ReleaseLogEntry" } }
+    ReleaseHistory:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ReleaseBatch" } }
+    ResolveRequest:
+      type: object
+      required: [choice]
+      properties:
+        choice: { type: string, enum: [continue, reject] }
+        body: { type: string, maxLength: 4000 }
+    ResolveResult:
+      type: object
+      required: [seq, state]
+      properties:
+        seq: { type: integer }
+        state: { type: string, enum: [composed, represented, confirmed, rejected] }

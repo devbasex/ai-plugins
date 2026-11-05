@@ -1,5 +1,5 @@
 // 実行の表の本物（DynamoDB の 1 つの表 RUNS_TABLE_NAME）。行の形は #2186・#2347 の設計の「データ構造」。
-// 枠と実行の増減は 1 回のトランザクションで書き、条件で失敗したら書かない（I34）。開発ループ・持ち分・手元のランナーの枠も
+// 枠と実行の増減は 1 回のトランザクションで書き、条件で失敗したら書かない（I34）。開発ループ・持ち分・手元のマシンの枠も
 // 同じトランザクションで書く（#2347 の決定 2・11・12）
 import { DynamoDBClient, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import {
@@ -12,6 +12,7 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import type { OrganizerRoot, OrganizerWrite, OrgLog, OrgRequest, ReleaseAnswer, ReleaseBatch } from "../organizer/model.ts";
 import type {
   CreateRunGuards,
   CreateRunResult,
@@ -26,7 +27,7 @@ import type {
   SprintRun,
 } from "./model.ts";
 import { isTerminalJob, milestoneHash } from "./model.ts";
-import type { RunsTable, RunTransitionExtras } from "./table.ts";
+import type { ComposeRelease, ResumeOptions, RunsTable, RunTransitionExtras } from "./table.ts";
 
 export const GSI1 = "gsi1";
 const ACTIVE_JOBS = "ACTIVE_JOBS";
@@ -46,6 +47,12 @@ const runnerSk = (id: string) => `RUNNER#${id}`;
 const WAITING_LOOPS = "WAITING_LOOPS";
 const AWAITING_RESET = "AWAITING_RESET";
 const MIGRATION = { pk: "MIGRATION", sk: "MIGRATED#2347" };
+// Factory のオーガナイザー（#2439）。ORGANIZER_ACTIVE は流れている根と届け終えていない依頼だけが載る gsi1 の疎な鍵
+const orgSk = (r: number) => `ORG#${r}`;
+const orgReqSk = (r: number, id: string) => `ORGREQ#${r}#${id}`;
+const orgBatchSk = (r: number, seq: number) => `ORGBATCH#${r}#${String(seq).padStart(6, "0")}`;
+const orgLogSk = (log: OrgLog) => `ORGLOG#${log.repositoryId}#${log.at}#${log.kind}#${Math.random().toString(16).slice(2, 10).padEnd(8, "0")}`;
+const ORGANIZER_ACTIVE = "ORGANIZER_ACTIVE";
 const SLOT_RETRIES = 3;
 
 // トランザクションの何番目の項目が条件で落ちたか
@@ -171,8 +178,13 @@ export class DynamoRunsTable implements RunsTable {
 
   async getSlots(accountId: string, repositoryId: number): Promise<Slots> {
     const account = await this.get<{ count: number }>(accountPk(accountId), "ACTIVE");
-    const repository = await this.get<{ count: number; legacyCount?: number }>(accountPk(accountId), repoSlotSk(repositoryId));
-    return { account: account?.count ?? 0, repository: repository?.count ?? 0, legacy: repository?.legacyCount ?? 0 };
+    const repository = await this.get<{ count: number; legacyCount?: number; legacySeq?: number }>(accountPk(accountId), repoSlotSk(repositoryId));
+    return {
+      account: account?.count ?? 0,
+      repository: repository?.count ?? 0,
+      legacy: repository?.legacyCount ?? 0,
+      ...(repository?.legacySeq !== undefined ? { legacySeq: repository.legacySeq } : {}),
+    };
   }
 
   private slotPut(pk: string, sk: string, expected: number) {
@@ -201,8 +213,8 @@ export class DynamoRunsTable implements RunsTable {
   async createRun(run: SprintRun, job: RunJob, expected: Slots, guards?: CreateRunGuards): Promise<CreateRunResult> {
     const repoSlot = this.slotPut(accountPk(run.accountId), repoSlotSk(run.repositoryId), expected.repository);
     if (guards?.legacy) {
-      // 古い版の実行は legacyCount を数える（I48）
-      repoSlot.Update.UpdateExpression += ", legacyCount = if_not_exists(legacyCount, :lz) + :lone";
+      // 古い版の実行は legacyCount を数え、数えに入れた回数 legacySeq を 1 増やす（I48・#2439 の I62）
+      repoSlot.Update.UpdateExpression += ", legacyCount = if_not_exists(legacyCount, :lz) + :lone, legacySeq = if_not_exists(legacySeq, :lz) + :lone";
       Object.assign(repoSlot.Update.ExpressionAttributeValues, { ":lz": 0, ":lone": 1 });
     } else if (guards) {
       // 新しい版の実行は、古い版の実行がリポジトリに無いときだけ書く
@@ -243,12 +255,25 @@ export class DynamoRunsTable implements RunsTable {
     if (run.loopId) {
       items.push({ Put: { TableName: this.tableName, Item: { pk: accountPk(run.accountId), sk: loopRunSk(run.loopId, run.sprintRunId), sprintRunId: run.sprintRunId } } });
     }
+    // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62。オーガナイザーの根を読むだけ）
+    const organizerAt = items.length;
+    if (guards?.legacy) {
+      items.push({
+        ConditionCheck: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(run.accountId), sk: orgSk(run.repositoryId) },
+          ConditionExpression: "attribute_not_exists(currentSeq) OR attribute_type(currentSeq, :nul)",
+          ExpressionAttributeValues: { ":nul": "NULL" },
+        },
+      });
+    }
     try {
       await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
       return "created";
     } catch (err) {
       const failed = failedIndexes(err);
       if (failed.length === 0 && !isConditionFailure(err)) throw err;
+      if (guards?.legacy && failed.includes(organizerAt)) return "release_running";
       if (failed.some((i) => i >= loopStart)) return "loop_changed";
       if (failed.some((i) => i >= milestoneStart)) return "issue_in_loop";
       if (failed.some((i) => i >= issueStart)) return "issue_in_use";
@@ -379,23 +404,35 @@ export class DynamoRunsTable implements RunsTable {
     );
   }
 
-  addResumeJob(job: RunJob, now: string, opts: { from?: "awaiting_approval" | "awaiting_reset"; loop?: LoopWrite } = {}) {
+  addResumeJob(job: RunJob, now: string, opts: ResumeOptions = {}) {
     const from = opts.from ?? "awaiting_approval";
+    // 承認待ちの理由（#2439）。照らす理由が無ければ理由が空のときだけ書く
+    const values: Record<string, unknown> = { ":starting": "starting", ":awaiting": from, ":j": job.jobId, ":seq": job.seq, ":now": now, ":null": "NULL", ":nul": null };
+    let reasonCond = "(attribute_not_exists(awaitingReason) OR attribute_type(awaitingReason, :null))";
+    if (opts.expectAwaiting) {
+      reasonCond = "awaitingReason = :ar";
+      values[":ar"] = opts.expectAwaiting.reason;
+      if (opts.expectAwaiting.releaseRequestId !== undefined) {
+        reasonCond += " AND releaseRequestId = :rr";
+        values[":rr"] = opts.expectAwaiting.releaseRequestId;
+      }
+    }
     const items: Record<string, unknown>[] = [
       {
         Update: {
           TableName: this.tableName,
           Key: { pk: runPk(job.sprintRunId), sk: "RUN" },
-          UpdateExpression: "SET #s = :starting, currentJobId = :j, jobCount = :seq, updatedAt = :now, resumeAt = :nul",
-          ConditionExpression: "#s = :awaiting AND attribute_type(currentJobId, :null)",
+          UpdateExpression: "SET #s = :starting, currentJobId = :j, jobCount = :seq, updatedAt = :now, resumeAt = :nul, awaitingReason = :nul, releaseRequestId = :nul",
+          ConditionExpression: `#s = :awaiting AND attribute_type(currentJobId, :null) AND ${reasonCond}`,
           ExpressionAttributeNames: { "#s": "state" },
-          ExpressionAttributeValues: { ":starting": "starting", ":awaiting": from, ":j": job.jobId, ":seq": job.seq, ":now": now, ":null": "NULL", ":nul": null },
+          ExpressionAttributeValues: values,
         },
       },
       { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
     ];
     if (from === "awaiting_reset") items.push({ Delete: { TableName: this.tableName, Key: { pk: runPk(job.sprintRunId), sk: "RESET" } } });
     if (opts.loop) items.push(...this.loopItems(opts.loop));
+    if (opts.organizer) items.push(...this.organizerItems(opts.organizer));
     return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
   }
 
@@ -409,7 +446,9 @@ export class DynamoRunsTable implements RunsTable {
         Update: {
           TableName: this.tableName,
           Key: { pk: runPk(sprintRunId), sk: "RUN" },
-          UpdateExpression: `SET #s = :awaiting, currentJobId = :null, updatedAt = :now${extras.finishReason !== undefined ? ", finishReason = :fr" : ""}`,
+          UpdateExpression: `SET #s = :awaiting, currentJobId = :null, updatedAt = :now, awaitingReason = :ar, releaseRequestId = :rr${
+            extras.finishReason !== undefined ? ", finishReason = :fr" : ""
+          }${extras.clearCancel ? ", cancelRequested = :false" : ""}`,
           ConditionExpression: "currentJobId = :j AND NOT #s IN (:t1, :t2, :t3, :t4)",
           ExpressionAttributeNames: { "#s": "state" },
           ExpressionAttributeValues: {
@@ -417,12 +456,16 @@ export class DynamoRunsTable implements RunsTable {
             ":null": null,
             ":now": now,
             ":j": jobId,
+            ":ar": extras.awaitingReason ?? null,
+            ":rr": extras.releaseRequestId ?? null,
             ...this.terminalValues(),
             ...(extras.finishReason !== undefined ? { ":fr": extras.finishReason } : {}),
+            ...(extras.clearCancel ? { ":false": false } : {}),
           },
         },
       },
       ...(extras.loop ? this.loopItems(extras.loop) : []),
+      ...this.requestItems(extras.requests),
     ];
     return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
   }
@@ -489,7 +532,7 @@ export class DynamoRunsTable implements RunsTable {
           Update: {
             TableName: this.tableName,
             Key: { pk: runPk(sprintRunId), sk: "RUN" },
-            UpdateExpression: `SET #s = :state, failureReason = :reason, currentJobId = :null, updatedAt = :now, resumeAt = :null${
+            UpdateExpression: `SET #s = :state, failureReason = :reason, currentJobId = :null, updatedAt = :now, resumeAt = :null, awaitingReason = :null, releaseRequestId = :null${
               extras.finishReason !== undefined ? ", finishReason = :fr" : ""
             }`,
             ConditionExpression: `NOT #s IN (:t1, :t2, :t3, :t4) AND ${legacyCond}`,
@@ -505,8 +548,8 @@ export class DynamoRunsTable implements RunsTable {
             },
           },
         },
-        decrement("ACTIVE"),
-        decrement(repoSlotSk(run.repositoryId), run.legacy === true),
+        // 配布の実行は枠を持たない（#2439 の I64）
+        ...(run.purpose === "release" ? [] : [decrement("ACTIVE"), decrement(repoSlotSk(run.repositoryId), run.legacy === true)]),
         ...shares.map((x) => ({
           Delete: {
             TableName: this.tableName,
@@ -517,6 +560,7 @@ export class DynamoRunsTable implements RunsTable {
         })),
         ...(run.state === "awaiting_reset" ? [{ Delete: { TableName: this.tableName, Key: { pk: runPk(sprintRunId), sk: "RESET" } } }] : []),
         ...(extras.loop ? this.loopItems(extras.loop) : []),
+        ...this.requestItems(extras.requests),
       ];
       try {
         await this.doc.send(new TransactWriteCommand({ TransactItems: items as never }));
@@ -527,7 +571,8 @@ export class DynamoRunsTable implements RunsTable {
         // 実行の行の条件で落ち、読み直して終わりの状態なら 2 度目の移しで何もしない
         const now2 = await this.getRun(sprintRunId);
         if (!now2 || TERMINAL.includes(now2.state)) return false;
-        if (failed.some((i) => i >= 3 && i < 3 + shares.length) || (now2.legacy !== run.legacy)) continue;
+        const shareStart = run.purpose === "release" ? 1 : 3;
+        if (failed.some((i) => i >= shareStart && i < shareStart + shares.length) || now2.legacy !== run.legacy) continue;
         return false;
       }
     }
@@ -572,7 +617,7 @@ export class DynamoRunsTable implements RunsTable {
     });
     // 終わりの状態へ移すときは見回りの GSI から外す
     const leaving = patch.state !== undefined && isTerminalJob(patch.state);
-    // 手元のランナーが受け取ったジョブは、ランナーの枠を同じ書き込みで減らす（I50）
+    // 手元のマシンが受け取ったジョブは、そのマシンの枠を同じ書き込みで減らす（I50）
     const current = leaving ? await this.getJob(jobId) : null;
     if (current?.runnerId && current.state === "running") return this.finishLocalJob(current, patch, from);
     let condition = "attribute_exists(pk)";
@@ -838,7 +883,7 @@ export class DynamoRunsTable implements RunsTable {
               Update: {
                 TableName: this.tableName,
                 Key: { pk: accountPk(run.accountId), sk: repoSlotSk(run.repositoryId) },
-                UpdateExpression: "SET legacyCount = if_not_exists(legacyCount, :zero) + :one",
+                UpdateExpression: "SET legacyCount = if_not_exists(legacyCount, :zero) + :one, legacySeq = if_not_exists(legacySeq, :zero) + :one",
                 ExpressionAttributeValues: { ":zero": 0, ":one": 1 },
               },
             },
@@ -853,5 +898,192 @@ export class DynamoRunsTable implements RunsTable {
         }),
       ),
     );
+  }
+
+  // ---- Factory のオーガナイザー（#2439） ----
+
+  private rootItem(root: OrganizerRoot): Item {
+    const sk = orgSk(root.repositoryId);
+    return { pk: accountPk(root.accountId), sk, ...root, ...(root.currentSeq !== null ? { gsi1pk: ORGANIZER_ACTIVE, gsi1sk: `${root.accountId}#${sk}` } : {}) };
+  }
+
+  // 受けた依頼の行。在る行は書かない（呼ぶ側が読んで無い行だけを渡す。I59）
+  private requestItems(requests: OrgRequest[] | undefined): Record<string, unknown>[] {
+    return (requests ?? []).map((req) => {
+      const sk = orgReqSk(req.repositoryId, req.requestId);
+      return {
+        Put: {
+          TableName: this.tableName,
+          Item: { pk: accountPk(req.accountId), sk, ...req, ...(req.deliveredAt === null ? { gsi1pk: ORGANIZER_ACTIVE, gsi1sk: `${req.accountId}#${sk}` } : {}) },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      };
+    });
+  }
+
+  private logItem(log: OrgLog): Record<string, unknown> {
+    return { Put: { TableName: this.tableName, Item: { pk: accountPk(log.accountId), sk: orgLogSk(log), ...log }, ConditionExpression: "attribute_not_exists(sk)" } };
+  }
+
+  // 根（と渡されたまとめた配布・記録）の条件つきの書き込み（I56・I67）
+  private organizerItems(write: OrganizerWrite, extraRootCond?: string): Record<string, unknown>[] {
+    const rootValues: Record<string, unknown> = {};
+    const rootNames: Record<string, string> = {};
+    let rootCond = "attribute_not_exists(pk)";
+    if (write.expectVersion !== null) {
+      rootCond = "#ver = :v";
+      rootNames["#ver"] = "version";
+      rootValues[":v"] = write.expectVersion;
+    }
+    if (extraRootCond) {
+      rootCond = `(${rootCond}) AND ${extraRootCond}`;
+      rootValues[":nul"] = "NULL";
+    }
+    const items: Record<string, unknown>[] = [
+      {
+        Put: {
+          TableName: this.tableName,
+          Item: this.rootItem(write.root),
+          ConditionExpression: rootCond,
+          ...(Object.keys(rootNames).length > 0 ? { ExpressionAttributeNames: rootNames } : {}),
+          ...(Object.keys(rootValues).length > 0 ? { ExpressionAttributeValues: rootValues } : {}),
+        },
+      },
+    ];
+    if (write.batch) {
+      const batchItem = { pk: accountPk(write.batch.accountId), sk: orgBatchSk(write.batch.repositoryId, write.batch.seq), ...write.batch };
+      if (write.expectBatchState) {
+        const values: Record<string, unknown> = {};
+        const keys = write.expectBatchState.map((s, i) => {
+          values[`:b${i}`] = s;
+          return `:b${i}`;
+        });
+        items.push({
+          Put: {
+            TableName: this.tableName,
+            Item: batchItem,
+            ConditionExpression: `#bs IN (${keys.join(", ")})`,
+            ExpressionAttributeNames: { "#bs": "state" },
+            ExpressionAttributeValues: values,
+          },
+        });
+      } else {
+        items.push({ Put: { TableName: this.tableName, Item: batchItem, ConditionExpression: "attribute_not_exists(pk)" } });
+      }
+    }
+    if (write.log) items.push(this.logItem(write.log));
+    return items;
+  }
+
+  getOrganizer(accountId: string, repositoryId: number) {
+    return this.get<OrganizerRoot>(accountPk(accountId), orgSk(repositoryId));
+  }
+
+  writeOrganizer(write: OrganizerWrite) {
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: this.organizerItems(write) as never })));
+  }
+
+  composeRelease(input: ComposeRelease) {
+    const { write, run, job } = input;
+    const runItem = { pk: runPk(run.sprintRunId), sk: "RUN", gsi1pk: accountPk(run.accountId), gsi1sk: `RUN#${run.createdAt}`, ...run };
+    const items: Record<string, unknown>[] = [
+      // 根は流れている配布が無いときだけ（I56）
+      ...this.organizerItems(write, "(attribute_not_exists(currentSeq) OR attribute_type(currentSeq, :nul))"),
+      { Put: { TableName: this.tableName, Item: runItem, ConditionExpression: "attribute_not_exists(pk)" } },
+      { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },
+      // 照らした後に古い版の実行が数えに入っていない（I62）
+      {
+        ConditionCheck: {
+          TableName: this.tableName,
+          Key: { pk: accountPk(run.accountId), sk: repoSlotSk(run.repositoryId) },
+          ConditionExpression: input.legacySeq === null ? "attribute_not_exists(legacySeq)" : "legacySeq = :ls",
+          ...(input.legacySeq === null ? {} : { ExpressionAttributeValues: { ":ls": input.legacySeq } }),
+        },
+      },
+    ];
+    return this.attempt(() => this.doc.send(new TransactWriteCommand({ TransactItems: items as never })));
+  }
+
+  async listOrgRequests(accountId: string, repositoryId: number): Promise<OrgRequest[]> {
+    const rows = await this.queryPrefix<OrgRequest>(accountPk(accountId), `ORGREQ#${repositoryId}#`);
+    return rows.sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0));
+  }
+
+  answerRequest(accountId: string, repositoryId: number, requestId: string, answer: ReleaseAnswer) {
+    return this.attempt(() =>
+      this.doc.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { pk: accountPk(accountId), sk: orgReqSk(repositoryId, requestId) },
+          UpdateExpression: "SET #ans = :a",
+          ConditionExpression: "attribute_exists(pk) AND (attribute_not_exists(#ans) OR attribute_type(#ans, :nul))",
+          ExpressionAttributeNames: { "#ans": "answer" },
+          ExpressionAttributeValues: { ":a": answer, ":nul": "NULL" },
+        }),
+      ),
+    );
+  }
+
+  async markDelivered(accountId: string, repositoryId: number, requestId: string, at: string) {
+    await this.attempt(() =>
+      this.doc.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { pk: accountPk(accountId), sk: orgReqSk(repositoryId, requestId) },
+          UpdateExpression: "SET deliveredAt = :at REMOVE gsi1pk, gsi1sk",
+          ConditionExpression: "attribute_exists(pk) AND (attribute_not_exists(deliveredAt) OR attribute_type(deliveredAt, :nul))",
+          ExpressionAttributeValues: { ":at": at, ":nul": "NULL" },
+        }),
+      ),
+    );
+  }
+
+  getBatch(accountId: string, repositoryId: number, seq: number) {
+    return this.get<ReleaseBatch>(accountPk(accountId), orgBatchSk(repositoryId, seq));
+  }
+
+  async listBatches(accountId: string, repositoryId: number, limit: number): Promise<ReleaseBatch[]> {
+    const out = await this.doc.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :p)",
+        ExpressionAttributeValues: { ":pk": accountPk(accountId), ":p": `ORGBATCH#${repositoryId}#` },
+        ScanIndexForward: false,
+        Limit: limit,
+        ConsistentRead: true,
+      }),
+    );
+    return (out.Items ?? []).map((i) => strip<ReleaseBatch>(i)!);
+  }
+
+  async appendOrgLog(log: OrgLog) {
+    await this.doc.send(new TransactWriteCommand({ TransactItems: [this.logItem(log)] as never }));
+  }
+
+  listOrgLogs(accountId: string, repositoryId: number) {
+    return this.queryPrefix<OrgLog>(accountPk(accountId), `ORGLOG#${repositoryId}#`);
+  }
+
+  async listOrganizerActive(): Promise<{ accountId: string; repositoryId: number }[]> {
+    const out = new Map<string, { accountId: string; repositoryId: number }>();
+    let start: Record<string, unknown> | undefined;
+    do {
+      const page = await this.doc.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          IndexName: GSI1,
+          KeyConditionExpression: "gsi1pk = :pk",
+          ExpressionAttributeValues: { ":pk": ORGANIZER_ACTIVE },
+          ExclusiveStartKey: start,
+        }),
+      );
+      for (const i of page.Items ?? []) {
+        const accountId = i.accountId as string;
+        const repositoryId = i.repositoryId as number;
+        out.set(`${accountId}#${repositoryId}`, { accountId, repositoryId });
+      }
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return [...out.values()];
   }
 }

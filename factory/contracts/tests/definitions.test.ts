@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EVENT_TYPES,
+  PHASE_NAMES,
+  isPhaseName,
   isIngestResponse,
   progressEventSchema,
   runJobInstructionSchema,
@@ -27,6 +29,9 @@ const SPEC_INSTRUCTION_INPUTS = [
   "LOOP_BUDGET",
   "EXCLUDE_ISSUES",
   "LOOP_ANSWERS",
+  "RELEASE_SEQ",
+  "RELEASE_STEP",
+  "RELEASE_REQUEST_ID",
 ];
 
 // 同じ確定仕様の「進捗の事象の種類と受け口」の種類（13 種類）と、区間と開発ループの 3 種類（#2347）
@@ -47,6 +52,11 @@ const SPEC_EVENT_TYPES = [
   "section.started",
   "loop.lap_closed",
   "loop.stopped",
+  "release.requested",
+  "release.presented",
+  "release.progress",
+  "release.settled",
+  "release.answered",
 ];
 
 // 同じ確定仕様の「進捗の正本」の列から、受け口が作る order_key・pr_ref を除いたもの
@@ -83,6 +93,35 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     pending: [{ number: 2348, reason: "MVV の外の疑い", lap: 3 }],
   },
   "loop.stopped": { loop: "lfactory2", condition: "budget_usd", detail: '{"values":{"usd":60}}', pending: [] },
+  "release.requested": {
+    request_id: "loop-l1-r3f9a1c2e4b7d",
+    lane: "loop-l1",
+    prs: [2440],
+    issues: [2439],
+    ndf_version: "10.27.16",
+    requested_at: "2026-11-02T12:00:00Z",
+  },
+  "release.presented": {
+    seq: 1,
+    k: 1,
+    sha: "0123abcd",
+    version: "10.28.0",
+    prs: [2440],
+    lanes: [{ lane: "loop-l1", requested: true }],
+    added_prs: [],
+    auto: false,
+  },
+  "release.progress": { seq: 1, stage: "main_merged" },
+  "release.settled": {
+    seq: 1,
+    result: "released",
+    version: "10.28.0",
+    prod_pr_url: "https://github.com/o/r/pull/9",
+    sha: "0123abcd",
+    prs: [2440],
+    lanes: ["loop-l1"],
+  },
+  "release.answered": { seq: 1, request_id: "loop-l1-r3f9a1c2e4b7d", result: "released", version: "10.28.0" },
 };
 
 function event(type: string, patch: Record<string, unknown> = {}) {
@@ -166,6 +205,16 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
     ).toBe(true);
   });
 
+  it("START が release は RELEASE_SEQ と RELEASE_STEP を要り、ほかの START は配布の手を許さない（#2439）", () => {
+    const release = { START: "release", ISSUES: undefined, RELEASE_SEQ: "3", RELEASE_STEP: "confirm:1" };
+    expect(validateRunJobInstruction(instruction(release)).ok).toBe(true);
+    expect(validateRunJobInstruction(instruction({ ...release, RELEASE_STEP: undefined })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...release, RELEASE_STEP: "confirm:3" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ ...release, ISSUES: "1" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ RELEASE_SEQ: "3", RELEASE_STEP: "present" })).ok).toBe(false);
+    expect(validateRunJobInstruction(instruction({ START: "resume", ISSUES: undefined, RELEASE_REQUEST_ID: "run-sr1-rabc" })).ok).toBe(true);
+  });
+
   it("知らない入力・番号でない ISSUES は落ちる", () => {
     expect(validateRunJobInstruction({ ...instruction(), EXTRA: "x" }).ok).toBe(false);
     expect(validateRunJobInstruction(instruction({ ISSUES: "2171,abc" })).ok).toBe(false);
@@ -173,7 +222,7 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
 });
 
 describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
-  it("種類が確定仕様の 13 種類と #2347 の 3 種類に 1 対 1 に対応する", () => {
+  it("種類が確定仕様の 13 種類と #2347 の 3 種類と #2439 の 5 種類に 1 対 1 に対応する", () => {
     expect([...EVENT_TYPES].sort()).toEqual([...SPEC_EVENT_TYPES].sort());
     expect(progressEventSchema.oneOf).toHaveLength(SPEC_EVENT_TYPES.length);
   });
@@ -231,6 +280,42 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
     expect(step({ repo: "Owner/Name", number: 3 })).toBe(true);
     expect(step({ repo: "owner", number: 3 })).toBe(false);
     expect(step({ repo: "o/r", number: 0 })).toBe(false);
+  });
+
+  it("step.recorded の工程の中身（#2172）はどれも任意で、足す前の形も足した形も通り、上限と形の違いで落ちる", () => {
+    const step = (patch: Record<string, unknown>) =>
+      validateProgressEvent(event("step.recorded", { payload: { ...PAYLOADS["step.recorded"], ...patch } })).ok;
+    const sha = "a".repeat(40);
+    const full = {
+      phase: "実装",
+      issues: [2172],
+      files: [{ path: "factory/a.ts", added: 3, deleted: 1 }, { path: "img.png", added: null, deleted: null }],
+      files_omitted: 0,
+      commit_range: { from: sha, to: "b".repeat(40) },
+      decisions: [{ question: "どちらにする", answer: "A", by: "ai" }],
+      output: { kind: "report", text: "## 作業の報告", truncated: false },
+    };
+    expect(step({})).toBe(true);
+    expect(step(full)).toBe(true);
+    // 列挙で縛らない（NDF の版がフェーズを足しても残る）
+    expect(step({ phase: "準備" })).toBe(true);
+    expect(step({ issues: [], files: [], decisions: [] })).toBe(true);
+    expect(step({ phase: "" })).toBe(false);
+    expect(step({ issues: Array.from({ length: 51 }, (_, i) => i + 1) })).toBe(false);
+    expect(step({ files: Array.from({ length: 101 }, (_, i) => ({ path: `f${i}`, added: 0, deleted: 0 })) })).toBe(false);
+    expect(step({ files: [{ path: "x".repeat(513), added: 0, deleted: 0 }] })).toBe(false);
+    expect(step({ commit_range: { from: "abc", to: sha } })).toBe(false);
+    expect(step({ decisions: [{ question: "q", answer: "a", by: "someone" }] })).toBe(false);
+    expect(step({ decisions: Array.from({ length: 21 }, () => ({ question: "q", answer: "a", by: "ai" })) })).toBe(false);
+    expect(step({ output: { kind: "diff", text: "", truncated: false } })).toBe(false);
+    expect(step({ output: { kind: "log", text: "x".repeat(32_769), truncated: true } })).toBe(false);
+  });
+
+  it("フェーズの名前は 5 つで、isPhaseName は列挙の外を偽にする（#2172）", () => {
+    expect(PHASE_NAMES).toEqual(["設計", "実装", "検査", "取り込み", "仕上げ"]);
+    expect(PHASE_NAMES.every(isPhaseName)).toBe(true);
+    expect(isPhaseName("配布（本番）")).toBe(false);
+    expect(isPhaseName(null)).toBe(false);
   });
 
   it("issue.requested は起票先・題・本文の 3 つで、題は 256 字まで・本文は空にできない（#2216）", () => {
@@ -301,7 +386,7 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
   });
 });
 
-describe("手元のランナーの申告の定義（#2347）", () => {
+describe("手元のマシンの申告の定義（#2347）", () => {
   it("runner_id は 32 字の英数字で、max_jobs は 1〜16 の整数・任意", () => {
     const id = "a".repeat(32);
     expect(validateLocalRunnerDeclaration({ runner_id: id }).ok).toBe(true);

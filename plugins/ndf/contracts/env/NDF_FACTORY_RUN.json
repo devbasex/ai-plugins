@@ -1,0 +1,5 @@
+{
+  "name": "NDF_FACTORY_RUN",
+  "set_by": "runtime",
+  "summary": "サービスの実行ジョブの中で 1 を立てる（#2439 の I68）。あるとき parallel.py init・start・run は 1 台の中のオーガナイザーを起動せずに断る（plugins/ndf/scripts/parallel.py）"
+}

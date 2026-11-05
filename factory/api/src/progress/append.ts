@@ -1,5 +1,5 @@
 // 追記。受け口と appendControlEvent が同じ関数を通り、同じ重複の拒否で 1 件を残す（I10）
-import type { IssueRequestResolvedEvent, JobFinishedEvent, ProgressEvent } from "@ndf-factory/contracts";
+import type { IssueRequestResolvedEvent, JobFinishedEvent, ProgressEvent, ReleaseAnsweredEvent } from "@ndf-factory/contracts";
 import { authorizeControl } from "./authorize.ts";
 import { ProgressEventError } from "./errors.ts";
 import { prRef } from "./github.ts";
@@ -43,6 +43,17 @@ export async function appendIssueRequestResolvedTo(
   if (!checked.ok) throw new ProgressEventError("invalid_event", checked.message);
   if (checked.event.type !== "issue.request_resolved" || !authorizeControl(checked.event)) {
     throw new ProgressEventError("forbidden", "ここで書けるのは <依頼の鍵>:resolved の issue.request_resolved だけです");
+  }
+  return appendEvent(store, checked.event);
+}
+
+// Factory のオーガナイザー（#2439）が範囲の実行の進捗の記録へ release.answered（source は control、鍵は <seq>:<sprint_run_id>）を
+// 直に追記する。appendControlEventTo と同じ 3 つを通る。false は同じ答えが既にある
+export async function appendReleaseAnsweredTo(store: ProgressEventStore, event: ReleaseAnsweredEvent): Promise<{ written: boolean }> {
+  const checked = checkBuiltEvent(event);
+  if (!checked.ok) throw new ProgressEventError("invalid_event", checked.message);
+  if (checked.event.type !== "release.answered" || !authorizeControl(checked.event)) {
+    throw new ProgressEventError("forbidden", "ここで書けるのは <seq>:<sprint_run_id> の release.answered だけです");
   }
   return appendEvent(store, checked.event);
 }

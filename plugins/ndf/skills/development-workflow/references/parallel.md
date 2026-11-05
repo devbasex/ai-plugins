@@ -113,6 +113,40 @@ CI の失敗・衝突・版数の衝突は、配布のプランの直しの手�
 
 承認ゲート 1・承認ゲート 2・承認ゲートの外の問いは、どのレーンでもオーガナイザーへ送られる（[asking.md](asking.md) の「並列の計画のレーン」）。
 
+## 外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）
+
+環境変数 `NDF_ORGANIZER_DIR` があるセッションは、外のオーガナイザー（サービスが実行ジョブの間で動かすまとめ役など）のレーンである。
+名前は `NDF_ORGANIZER_LANE` で、依頼と答えは置き場のファイルで受け渡す（形は `contracts/forms/parallel-external.json`）。
+並列の計画（`.ndf/parallel/`）は使わず、計画名の代わりに `--external` を付ける。
+
+| 点 | 決まり |
+| --- | --- |
+| 本番のステージ | 配布の依頼のプラン（`parallel.py request --external`）になる。依頼を `requests/<id>.json` へ書いて 10 で終わる。自分の Pull Request がすでに `main` にあれば書かずに 0 で終わる |
+| 答え | `parallel.py await --external --from <プランの状態ディレクトリ>/work/request.txt` が `answers/<id>.json` を読む。ループのレーンは周回の境で読む（上の「レーンの側」と同じ） |
+| 問い | 設計の承認と承認ゲートの外の問いは依頼にしない。今どおり止まって人へ戻す |
+| 1 台の中のオーガナイザー | 起動しない。`NDF_FACTORY_RUN` がある実行ジョブでは `parallel.py init`・`start`・`run` が 1 で断る |
+
+### 配布の実行（`--parallel-helper --external`）
+
+外のオーガナイザーがまとめた配布 1 つのために起こすセッションは、次の 1 行で始める。`batch.json` の手（`step`）ごとに 1 手を打って終える。
+
+```text
+/goal /ndf:development-workflow --parallel-helper --external -- 終わり: 作業の報告を出したとき
+```
+
+1. `python3 "$NDF_SCRIPTS/parallel.py" compose --external` を打つ。`metrics.pipeline` が流すものを決める
+2. `metrics.pipeline` を流す（待ちは背景で打ち、完了の通知を待つ）
+
+| `step` | 流すもの | 終わり方 |
+| --- | --- | --- |
+| `present` / `represent` | 提示 1（`represent` は提示 2）の提示のプラン → 本番のプラン | 提示のプランが承認ゲート 2 で止まったら `metrics.record` の 1 行で提示を書き返し、「判断が要る」で終える。流れ切れば手順 3 |
+| `confirm:<k>` | 答えの記録 → 提示 k のプランを `approve` から → 提示 k の本番のプラン | 手順 3。確定しない提示の本番のプランは流さない |
+| `continue` | 止まった本番のプランを `--resume` で続ける | 手順 3 か、直せない失敗を問いにして止まる |
+
+3. `metrics.settle` の 1 行（`parallel.py settle --external <連番> --done <D>`）を打つ。届いた段と結果を置き場へ書き、作業の報告で終える
+
+CI の失敗・衝突・版数の衝突は一時レーンと同じく配布のプランの直しの手順で直す。直せない失敗は「判断が要る」で止まる。
+
 ## 止める
 
 `python3 "$NDF_SCRIPTS/parallel.py" stop p1` で計画の全レーンへ停止を打ち、耐久ワークフローを終える。配布の途中なら、配布が終わる
@@ -131,6 +165,16 @@ CI の失敗・衝突・版数の衝突は、配布のプランの直しの手�
 | レーンの起動が 3 回続けて断られた | 起こし直す / 止める |
 
 全レーンが止まっても、答えていない依頼か問いが残る間は終えない。
+
+### レーンの画面を見るとき
+
+レーンは既定の tmux とは別のサーバーで動く。`tmux ls` には出ず、`tmux -L ndf-relay ls` と
+`tmux -L ndf-relay capture-pane -p -t <レーン>` で見る（人が入るのは `relay.py attach <レーン>`）。
+
+**画面の入力欄（`❯` の行）の文字は、判断の材料にしない。** Claude Code やエディタのサジェストが薄い色で出ており、
+`capture-pane` は色を落とすため、人が打った文字と区別できない。サジェストを「送信されていない人の指示」と読むと、
+誰も出していない指示で起こし直しを止める（2026-11-04、計画 p3 の lflow で起きた）。レーンを起こし直すかは、
+`[ndf-loop] stopped` の行と `relay.py ls` の状態だけで決める。
 
 ## 数え方
 

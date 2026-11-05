@@ -2018,6 +2018,12 @@
       ]
     },
     {
+      "term": "現状固定テスト",
+      "context": "ndf-workflow",
+      "meaning": "構造を変える前の出力をそのまま期待値にしたテスト。構造を変える前後で同じ出力が出ることを縛る（英語の characterization test）",
+      "source": "plugins/ndf/skills/refactoring/references/characterization-tests.md"
+    },
+    {
       "term": "コメントのスナップショット",
       "context": "ndf-workflow",
       "meaning": "cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す",
@@ -4548,6 +4554,30 @@
       "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
+      "term": "再開のジョブ",
+      "context": "ndf-factory",
+      "meaning": "`START=resume` の実行ジョブ。承認の答えで起こすものと、利用上限のリセット時刻の後に起こすものがある。保存した状態を復元して前回の続きから進める",
+      "pending_source": "issues/issue-2405-requirements.md"
+    },
+    {
+      "term": "予算の反映",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
+      "term": "予算の履歴",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
+      "term": "人の判断待ちの行",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語",
+      "pending_source": "issues/issue-2405-design.md"
+    },
+    {
       "term": "打ち切りの時間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
@@ -4688,13 +4718,13 @@
     {
       "term": "持ち主の記録",
       "context": "ndf-worktree",
-      "meaning": "残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229）",
+      "meaning": "持ち主の鍵ごとに 1 つ、状態の置き場の leases/<リポジトリ>/ に置く記録。実行の識別子・入口・開始・最後に動いた時刻・終わった時刻・持ち主のプロセス（pid・開始時刻・ホスト名）を持つ。片付けが持ち主の生存を判定するときに読む（#2229・#2342）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
     },
     {
       "term": "寿命の窓",
       "context": "ndf-worktree",
-      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。レビュー worktree は 24 時間（#2229）、見直しの持ち主は既定 15 分（#2315）",
+      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの長さを過ぎた持ち主を死んでいるとみなす長さ。持ち主の部品（leases/）の記録では別のホストの記録にだけ使い、同じホストの生死は pid と開始時刻で決める。値は持ち主の契約の window_seconds に置く。レビュー worktree は 24 時間（#2229・#2342）、見直しの持ち主は既定 15 分（#2315）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
     },
     {
@@ -4707,57 +4737,49 @@
       "term": "スプリントの一覧",
       "context": "ndf-factory",
       "meaning": "アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "スプリントの詳細",
       "context": "ndf-factory",
       "meaning": "1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "詳細パネル",
       "context": "ndf-factory",
       "meaning": "スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "バックログの画面",
       "context": "ndf-factory",
       "meaning": "取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "フェーズの名前",
       "context": "ndf-factory",
       "meaning": "phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-design.md"
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
       "term": "工程の記録",
       "context": "ndf-factory",
       "meaning": "スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-design.md"
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
       "term": "工程の中身",
       "context": "ndf-factory",
       "meaning": "1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-design.md"
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
       "term": "スプリント全体の欄",
       "context": "ndf-factory",
       "meaning": "スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172）",
-      "source": "",
-      "pending_source": "issues/issue-2172-design.md"
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
       "term": "相手役",
@@ -4882,6 +4904,48 @@
       "code": "limits_declaration"
     },
     {
+      "term": "方針の名前",
+      "context": "ndf-workflow",
+      "meaning": "上限の宣言の 1 行を指す名前。入口の契約と部品の呼び出しが、値でなくこの名前で上限を引く（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-requirements.md"
+    },
+    {
+      "term": "原因の鍵",
+      "context": "ndf-workflow",
+      "meaning": "失敗が前回と同じ原因かを見る値。例外の型と、数字・時刻・パスを伏せた失敗の理由の文から作る（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-requirements.md"
+    },
+    {
+      "term": "再試行",
+      "context": "ndf-workflow",
+      "meaning": "失敗した同じ呼び出しを、同じプロセスの中で間隔を置いて打ち直すこと。条件が揃うまで問い合わせる待ちとは別である（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-requirements.md"
+    },
+    {
+      "term": "ステップの打ち直し",
+      "context": "ndf-workflow",
+      "meaning": "プランの判定役（judge）が、失敗したステップを同じステップのまま流し直すと返すこと（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-requirements.md"
+    },
+    {
+      "term": "眠りのループ",
+      "context": "ndf-workflow",
+      "meaning": "本体（入れ子の関数を除く）で sleep を呼ぶ for / while のループ。再試行と待ちの両方が当たり、lib/waits.py の外では構造チェックが落とす（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-design.md"
+    },
+    {
+      "term": "最後の照会",
+      "context": "ndf-workflow",
+      "meaning": "待ちの次の眠りが上限を超えるとき、残りの秒だけ眠った後に上限の時刻に打つ 1 回の照会（#2343）",
+      "source": "",
+      "pending_source": "issues/issue-2343-design.md"
+    },
+    {
       "term": "名前の対応表",
       "context": "ndf-workflow",
       "meaning": "同じ意味の値の正しい名前と、読むだけ受ける旧い名前の対応（plugins/ndf/contracts/names.json。#2335）",
@@ -4999,28 +5063,37 @@
       "deprecated": [
         "手元のランナー"
       ],
-      "source": "",
-      "pending_source": "issues/issue-2439-design.md"
+      "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
       "term": "Factory のオーガナイザー",
       "context": "ndf-factory",
       "meaning": "同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（配布を 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他",
-      "source": "",
-      "pending_source": "issues/issue-2439-design.md"
+      "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
       "term": "配布の実行",
       "context": "ndf-factory",
       "meaning": "Factory のオーガナイザーが、まとめた配布 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、本番の配布を流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
-      "source": "",
-      "pending_source": "issues/issue-2439-design.md"
+      "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
       "term": "画面の地図",
       "context": "ndf-factory",
       "meaning": "Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表",
       "source": "docs/specifications/ndf-factory-ui-components.md"
+    },
+    {
+      "term": "予定の画面",
+      "context": "ndf-factory",
+      "meaning": "画面の地図で状態が「予定」の行。経路がまだ無く、載る機能だけが決まっている画面",
+      "pending_source": "issues/issue-2431-requirements.md"
+    },
+    {
+      "term": "作る課題",
+      "context": "ndf-factory",
+      "meaning": "予定の画面を作り、画面の地図のその行を「あり」へ変える GitHub の課題。#2382 は「持ち主の課題」と書く",
+      "pending_source": "issues/issue-2431-requirements.md"
     },
     {
       "term": "デザインのトークン",
@@ -5057,6 +5130,60 @@
       "context": "ndf-factory",
       "meaning": "画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める",
       "source": "docs/specifications/ndf-factory-ui-components.md"
+    },
+    {
+      "term": "委任の資格情報",
+      "context": "ndf-factory",
+      "meaning": "人が画面で発行し、エージェントかクライアントに渡す、期限と範囲つきの資格情報。だれの委任か（利用者）と、どのクライアントかを持ち、人が取り消せる（#2384）",
+      "pending_source": "issues/issue-2384-requirements.md"
+    },
+    {
+      "term": "人だけが確定できる操作",
+      "context": "ndf-factory",
+      "meaning": "承認ゲートの承認・判断の依頼への答えと、共通原則の C1〜C8・プロジェクト MVV の P に当たる Factory の操作。契約に印を持ち、委任の資格情報からは断る（#2384）",
+      "pending_source": "issues/issue-2384-requirements.md"
+    },
+    {
+      "term": "操作の記録",
+      "context": "ndf-factory",
+      "meaning": "Factory の利用者向けの操作 1 回ごとに 1 件追記する記録。だれが・いつ・どの呼び出し元から・何を行ったかを持ち、書き換えと削除の経路を持たない（#2384）",
+      "pending_source": "issues/issue-2384-requirements.md"
+    },
+    {
+      "term": "呼び出し元の種類",
+      "context": "ndf-factory",
+      "meaning": "操作の記録に残す、操作がどこから来たかの区分。画面・API・MCP の 3 つ（#2384）",
+      "pending_source": "issues/issue-2384-requirements.md"
+    },
+    {
+      "term": "機能から起こした契約",
+      "context": "ndf-factory",
+      "meaning": "経路と入出力を、画面の 1 枚でなくエンティティと操作から決めた API の契約。取得・作成・更新・削除とも配列で受け渡す（#2384）",
+      "pending_source": "issues/issue-2384-requirements.md"
+    },
+    {
+      "term": "操作の扱い",
+      "context": "ndf-factory",
+      "meaning": "Factory の利用者向けの操作が要る範囲。読み取り（read）・書き込み（write）・人だけ（human）の 3 つで、契約の各操作に x-ndf-access として持つ（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
+      "term": "操作の表",
+      "context": "ndf-factory",
+      "meaning": "Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
+      "term": "要素の結果",
+      "context": "ndf-factory",
+      "meaning": "Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
+    },
+    {
+      "term": "作成の冪等の鍵",
+      "context": "ndf-factory",
+      "meaning": "Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384）",
+      "pending_source": "issues/issue-2384-design.md"
     },
     {
       "term": "差分の棚卸し",
@@ -5333,6 +5460,32 @@
       "context": "ndf-workflow",
       "meaning": "プランの型で読んだ中身を、キーを並べ替えた JSON にして取った sha256。完了したプランが変わったかを測る（#2344）",
       "source": ""
+    },
+    {
+      "term": "持ち主の契約",
+      "context": "ndf-worktree",
+      "meaning": "入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342）",
+      "source": "",
+      "pending_source": "issues/issue-2342-design.md"
+    },
+    {
+      "term": "持ち主の単位",
+      "context": "ndf-worktree",
+      "meaning": "持ち主の記録を誰が持つか。run は入口の 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返す入口が呼ばれるかセッションが終わるまで持つ（#2342）",
+      "source": "",
+      "pending_source": "issues/issue-2342-design.md"
+    },
+    {
+      "term": "呼び手",
+      "context": "ndf-workflow",
+      "meaning": "関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・雛形・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える",
+      "pending_source": "issues/issue-2369-requirements.md"
+    },
+    {
+      "term": "残す関数の一覧",
+      "context": "ndf-workflow",
+      "meaning": "関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。置き場は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの",
+      "pending_source": "issues/issue-2369-design.md"
     }
   ]
 }

@@ -1,6 +1,6 @@
-# Neural Development Factory: 認証（Google・GitHub）とアカウント・席・プランごとの使える量
+# Neural Development Factory: 認証（Google・GitHub）とアカウント・席・料金プランごとの使える量
 
-Neural Development Factory の利用者が Google か GitHub のアカウントで Cognito を経てログインし、要求 1 つから「どの利用者が、どのアカウントとして操作しているか」を決め、プランと席の種類ごとの使える量を 1 か所で問い合わせて判定する仕組みを定める。あわせて、`factory/` の TypeScript のパッケージの管理と検査の形を定める。サービス全体の構成・集約の持ち主・実行の形態の意味は [サービスのディレクトリと境界の検査、サービス全体の契約](ndf-factory-service-boundary.md)（以下「全体の契約」）にあり、本書はそこで集約「アカウント」の持ち主とされた部分（#2170）の確定形である。
+Neural Development Factory の利用者が Google か GitHub のアカウントで Cognito を経てログインし、要求 1 つから「どの利用者が、どのアカウントとして操作しているか」を決め、料金プランと席の種類ごとの使える量を 1 か所で問い合わせて判定する仕組みを定める。あわせて、`factory/` の TypeScript のパッケージの管理と検査の形を定める。サービス全体の構成・集約の持ち主・実行の形態の意味は [サービスのディレクトリと境界の検査、サービス全体の契約](ndf-factory-service-boundary.md)（以下「全体の契約」）にあり、本書はそこで集約「アカウント」の持ち主とされた部分の確定形である。
 
 ## 概要
 
@@ -12,7 +12,7 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 
 ## 用語
 
-定義は [用語集](../glossary.md) が正である（文脈 `ndf-factory`）。この文書で使う語は「利用者」「アカウント」「席」「プラン」「使える量」「使える量の判定」「チームの持ち主」「実行の形態」「GitHub の仲立ち」である。
+定義は [用語集](../glossary.md) が正である（文脈 `ndf-factory`）。この文書で使う語は「利用者」「アカウント」「席」「料金プラン」「使える量」「使える量の判定」「チームの持ち主」「実行の形態」「GitHub の仲立ち」である。
 
 ## コンテキスト
 
@@ -33,8 +33,8 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 
 ## 対象範囲
 
-- **含む**: `factory/web/` のログイン・ログアウトとアカウントの画面、`factory/api/` の token の検証・アカウントの解決・アカウントと席とプランと実行の形態の読み書き・使える量の問い合わせと判定・GitHub の仲立ち、`factory/contracts/openapi/accounts.yaml`、`factory/` のパッケージの管理と CI のジョブ `factory-check`
-- **含まない**: Cognito の利用者プール・DynamoDB の表・Lambda の束ね方などインフラの定義（private リポジトリが作る）、決済・料金・請求とプランを有料へ変える経路（#2174）、使用量の台帳とその月の token の集計（#2174）、スプリントの開始を断る処理そのもの（#2186。本書は判定を返す）、実行の形態ごとのランナー・持ち込んだキーの保存（#2186・#2189）、2 つの IdP の利用者をまとめる機能、招待のメール
+- **含む**: `factory/web/` のログイン・ログアウトとアカウントの画面、`factory/api/` の token の検証・アカウントの解決・アカウントと席と料金プランと実行の形態の読み書き・使える量の問い合わせと判定・GitHub の仲立ち、`factory/contracts/openapi/accounts.yaml`、`factory/` のパッケージの管理と CI のジョブ `factory-check`
+- **含まない**: Cognito の利用者プール・DynamoDB の表・Lambda の束ね方などインフラの定義（private リポジトリが作る）、決済・料金・請求と料金プランを有料へ変える経路、使用量の台帳とその月の token の集計、スプリントの開始を断る処理そのもの（本書は判定を返す）、実行の形態ごとのランナー・持ち込んだキーの保存、2 つの IdP の利用者をまとめる機能、招待のメール
 - プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
 
 ## 仕様
@@ -43,8 +43,8 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 
 | 集約 | 持ち主 | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 利用者 | 認証とプラン（`factory/api/`） | 利用者 | — | 利用者の ID（Cognito の `sub`）・IdP の種類 |
-| アカウント | 認証とプラン（`factory/api/`） | アカウント | 席 | 種類（個人・チーム）・プラン・席の種類・使える量・実行の形態・履歴の行 |
+| 利用者 | 認証と料金プラン（`factory/api/`） | 利用者 | — | 利用者の ID（Cognito の `sub`）・IdP の種類 |
+| アカウント | 認証と料金プラン（`factory/api/`） | アカウント | 席 | 種類（個人・チーム）・料金プラン・席の種類・使える量・実行の形態・履歴の行 |
 
 初めてのログインは「利用者」と「個人のアカウント」の 2 つを 1 つのトランザクションで作る。2 つは同じ利用者の作成でしか生まれず、片方だけがある状態を作らないためで、「1 つの処理が書き換える集約は 1 つ」（全体の契約の「集約」）の例外はこの作成の時だけである。
 
@@ -57,8 +57,8 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 | アカウントの画面 | `factory/web/src/pages/AccountPage.tsx`・`NewTeamPage.tsx`・`TeamPage.tsx` | 自分のアカウント・チームを作る・チームのアカウントの 3 画面。API の 401 で token を消してログインへ戻す |
 | token の検証 | `factory/api/src/auth/verify.ts` | `Authorization: Bearer` の access token を検証し、利用者を返す。失敗は 401 |
 | アカウントの解決 | `factory/api/src/auth/resolve.ts`・`accounts/service.ts` | 経路の前に token を検証する中間処理と、利用者とアカウントの ID から権限つきの文脈を返す処理。利用者が無ければ作る |
-| アカウントの操作 | `factory/api/src/accounts/service.ts` | チームの作成・席の追加と種類の変更と削除・プランの変更・実行の形態の変更 |
-| 使える量の表と判定 | `factory/api/src/accounts/limits.ts` | プランと席の種類ごとの上限の表と、実行の形態に合わせた問い合わせと判定 |
+| アカウントの操作 | `factory/api/src/accounts/service.ts` | チームの作成・席の追加と種類の変更と削除・料金プランの変更・実行の形態の変更 |
+| 使える量の表と判定 | `factory/api/src/accounts/limits.ts` | 料金プランと席の種類ごとの上限の表と、実行の形態に合わせた問い合わせと判定 |
 | アカウントの保存 | `factory/api/src/accounts/store.ts` | DynamoDB の 1 つの表への読み書き。条件つきの書き込みとトランザクション |
 | API の入口 | `factory/api/src/handlers/api.ts` | API Gateway の HTTP API（payload 2.0）から呼ばれる Lambda の handler。ログ・CORS・認証の中間処理・エラーの形・経路の登録 |
 | GitHub の仲立ち | `factory/api/src/handlers/github-oidc.ts`・`github-oidc/{app,keys}.ts` | Cognito から OIDC の IdP として呼ばれ、GitHub の OAuth へ取り次ぎ、署名した ID token を返す |
@@ -103,7 +103,7 @@ graph TD
 | `resolveAccount(caller, accountId?)` | `Caller`・アカウントの ID（省くと個人のアカウント） | `AccountContext`（`accountId`・`userId`・`kind`・`plan`・`role`（`owner` / `member`）・`seatType`（チームのときだけ、ほかは `null`）・`executionMode`）。#2186・#2189・#2174 は実行の形態をここから読む | 403 の `ForbiddenError` |
 | `getLimits(ctx)` | `plan`・`seatType`・`executionMode` | `Limits`（`concurrentSprintRuns`・`monthlyTokens`）。`monthlyTokens` は `managed` のときだけ表の値で、ほかは `null`（掛けない） | 例外を投げない。表に無い組と、`managed` なのに表に月の token の値が無い組は `null` を返す |
 | `judgeLimits(ctx, current)` | 文脈・`current = {runningSprintRuns, tokensThisMonth?, runningRepoRuns?, repoMaxRuns?}`（後ろの 2 つは同じリポジトリで動いている実行の数と登録の同時の実行の数の宣言。省けば掛けない。#2347） | `Judgment`（`allowed`・`limits`・`reasons`）。`reasons` は `{quantity, limit, current}` の並び | — |
-| `setPlan(accountId, plan)` | アカウントの ID・プラン | 無し | `PlanError`（`unknown_plan` / `plan_kind_mismatch` / `account_not_found`）。版の競合で 3 回書けなければ `AccountUnavailableError` |
+| `setPlan(accountId, plan)` | アカウントの ID・料金プラン | 無し | `PlanError`（`unknown_plan` / `plan_kind_mismatch` / `account_not_found`）。版の競合で 3 回書けなければ `AccountUnavailableError` |
 | `createApiApp(deps)`・`requireCaller(deps)`・`resolveFromRequest(c, accountId?)` | — | API の入口の Hono のアプリ・認証の中間処理・経路の中でアカウントの文脈を得る関数 | 上と同じ |
 
 あわせて `LIMITS_TABLE`・`AccountService`・エラーの型（`ApiError`・`AuthError`・`ForbiddenError`・`PlanError`）と、`AccountContext`・`Caller`・`ExecutionMode`・`Plan`・`SeatType`・`Limits`・`Judgment`・`CurrentUsage`・`LimitReason`・`AuthEnv`・`ApiApp` の型を export する。
@@ -133,7 +133,7 @@ graph TD
     CTX --> H
 ```
 
-**初回の作成は「利用者の行が無いこと」を条件にしたトランザクションで書く。** 利用者・個人のアカウント（プラン `free`・形態 `local`・版 1）・`account.created` の履歴の行を一緒に書く。並べて 2 回来ても条件で片方だけが通り、失敗した側は利用者を読み直して先にできた方を返す。読み直しても無いか、条件以外で失敗したときは 503 `account_unavailable` で、次の要求で作り直す。
+**初回の作成は「利用者の行が無いこと」を条件にしたトランザクションで書く。** 利用者・個人のアカウント（料金プラン `free`・形態 `local`・版 1）・`account.created` の履歴の行を一緒に書く。並べて 2 回来ても条件で片方だけが通り、失敗した側は利用者を読み直して先にできた方を返す。読み直しても無いか、条件以外で失敗したときは 503 `account_unavailable` で、次の要求で作り直す。
 
 ### ログインの流れ
 
@@ -181,24 +181,24 @@ sequenceDiagram
 | # | 集約 | 条件 | 破れそうなときの扱い |
 | --- | --- | --- | --- |
 | I12 | 利用者 | 1 人の利用者の個人のアカウントは 1 つだけ | 2 つ目の作成は条件つきの書き込みで失敗し、先にできた方を読み直して返す |
-| I13 | アカウント | 個人のアカウントは席を持たず、プランは `free`・`pro`・`max` のどれか。チームのアカウントのプランは `team` | 個人のアカウントへの席の操作は 409 `not_a_team`。合わない組の `setPlan` は `plan_kind_mismatch` で変えない |
+| I13 | アカウント | 個人のアカウントは席を持たず、料金プランは `free`・`pro`・`max` のどれか。チームのアカウントの料金プランは `team` | 個人のアカウントへの席の操作は 409 `not_a_team`。合わない組の `setPlan` は `plan_kind_mismatch` で変えない |
 | I14 | アカウント | チームのアカウントでは、持ち主が必ず席を 1 つ持つ | 持ち主の席を外す要求は 409 `owner_seat_protected` |
 | I15 | アカウント | 1 人の利用者は 1 つのチームに席を 1 つまで持つ | 2 つ目の追加は 409 `seat_exists` |
 | I16 | アカウント | 席が指す利用者は、既に 1 度ログインした利用者である | 422 `user_not_found` |
 | I17 | アカウント | 席を足す・種類を変える・外すのは、チームの持ち主だけ | 403 `forbidden`。席の有無を確かめる前に返す |
 | I18 | アカウント | 個人のアカウントの持ち主でもチームの席を持つ利用者でもない者には、アカウントの有無も中身も応答に出ない | 存在しないアカウントと同じ 403 と同じ本文 |
 | I19 | アカウント | 使える量の値は使える量の表 1 か所からだけ決まる | 表に無い組は判定を断る側へ倒し、理由に `not_in_limits_table` を返す |
-| I20 | アカウント | プラン・席・実行の形態を変えるたびに、同じトランザクションで履歴の行を 1 つ足し、履歴の行は書き換えない | 履歴を書けなければ変更ごと書かない |
-| I21 | アカウント | プランが `free` のアカウントの実行の形態は `managed` でない | 形態を `managed` へ変える要求は 409 `managed_not_allowed_on_free`。`setPlan` で `free` へ下げるとき形態が `managed` なら、同じ更新で `local` へ変え、`plan.changed` と `execution_mode.changed` の 2 つの履歴の行を足す |
+| I20 | アカウント | 料金プラン・席・実行の形態を変えるたびに、同じトランザクションで履歴の行を 1 つ足し、履歴の行は書き換えない | 履歴を書けなければ変更ごと書かない |
+| I21 | アカウント | 料金プランが `free` のアカウントの実行の形態は `managed` でない | 形態を `managed` へ変える要求は 409 `managed_not_allowed_on_free`。`setPlan` で `free` へ下げるとき形態が `managed` なら、同じ更新で `local` へ変え、`plan.changed` と `execution_mode.changed` の 2 つの履歴の行を足す |
 | I22 | アカウント | 実行の形態を変えるのは、アカウントの持ち主（個人は本人、チームはチームの持ち主）だけ | 403 `forbidden` |
 | I23 | アカウント | 月の token の上限を照らすのは、実行の形態が `managed` のときだけ。同時に動かせるスプリントの実行の数は 3 つの形態すべてで照らす | `local`・`byok` の判定は月の token の今の値を見ない |
 | I24 | アカウント | 新しいアカウント（個人もチームも）の実行の形態は `local` で始まる | 作成はいつも `local` で書く |
 
-**プランと形態の更新は、読んだアカウントの行の版が変わっていないことを条件に書く。** アカウントの行は数の `version` を持ち、`setPlan` と形態の変更はどちらも「行があり、`version` が読んだ値と等しいこと」を条件にして、同じ更新で `version` を 1 増やす。条件で失敗したら読み直して I13・I21 を判定し直し、もう一度書く（3 回まで）。これが無いと、プロ・`local` を読んだ `setPlan` が形態を変えないと決めた後に別の要求が `managed` を保存し、続けて `setPlan` が `free` を保存して、`free`・`managed` が残る。席の種類の変更と削除も同じく、読んだ席の種類と足した時刻が変わっていないことを条件にし、競合したら読み直す（3 回まで）。外して足し直した新しい席を古い要求で消さないためである。3 回で書けなければ 503 `account_unavailable` を返す。
+**料金プランと形態の更新は、読んだアカウントの行の版が変わっていないことを条件に書く。** アカウントの行は数の `version` を持ち、`setPlan` と形態の変更はどちらも「行があり、`version` が読んだ値と等しいこと」を条件にして、同じ更新で `version` を 1 増やす。条件で失敗したら読み直して I13・I21 を判定し直し、もう一度書く（3 回まで）。これが無いと、プロ・`local` を読んだ `setPlan` が形態を変えないと決めた後に別の要求が `managed` を保存し、続けて `setPlan` が `free` を保存して、`free`・`managed` が残る。席の種類の変更と削除も同じく、読んだ席の種類と足した時刻が変わっていないことを条件にし、競合したら読み直す（3 回まで）。外して足し直した新しい席を古い要求で消さないためである。3 回で書けなければ 503 `account_unavailable` を返す。
 
 ### 使える量の表と判定
 
-| プラン・席の種類（表の鍵） | 同時に動かせるスプリントの実行 | 月の token の上限（`managed` だけ） |
+| 料金プラン・席の種類（表の鍵） | 同時に動かせるスプリントの実行 | 月の token の上限（`managed` だけ） |
 | --- | --- | --- |
 | Free（`free`） | 1 | 掛けない（`managed` を選べない） |
 | 個人 Pro（`pro`） | 3 | 20,000,000 |
@@ -206,11 +206,11 @@ sequenceDiagram
 | Team standard（`team:standard`） | 3 | 25,000,000 |
 | Team premium（`team:premium`） | 10 | 125,000,000 |
 
-- **鍵は個人のアカウントではプラン、チームでは `team:<席の種類>` である。** チームの使える量は、要求した利用者の席の種類で決まる
+- **鍵は個人のアカウントでは料金プラン、チームでは `team:<席の種類>` である。** チームの使える量は、要求した利用者の席の種類で決まる
 - **月の token は入力と出力の和で、cache の読み書きを含めて数える。** Bedrock の請求と同じ単位で数えるためである。cache を除くと、NDF の実行ではほぼ全部が出力になり、同じ上限でも費用が大きく変わる
 - **値の比は依頼の「Claude.aiと類似の」に合わせた。** Pro と Max の比を保ち、Team standard を個人 Pro の少し上、Team premium を個人 Max の少し上に置く
 - **判定は「今の値が上限より小さければ許す」である。** 同時のスプリントの実行は新しい 1 つを始める前の数を渡し、上限 3 なら今が 2 で許し、3 で断る。月の token はその UTC の暦月に使った数（チームではその席の利用者の分）を渡し、上限ちょうどで断る。`managed` で `tokensThisMonth` を省くと断る
-- 断ったときの `reasons` の `quantity` は `concurrent_sprint_runs` / `concurrent_repo_runs` / `monthly_tokens` / `not_in_limits_table` で（`concurrent_repo_runs` の上限はプランの同時の数と登録の宣言の小さい方で、宣言が無くアカウントの上限と同時に当たるときは重ねない）、`limit` と `current` に上限と今の値を入れる。画面と #2186 は同じ値から利用者に出す文を作る
+- 断ったときの `reasons` の `quantity` は `concurrent_sprint_runs` / `concurrent_repo_runs` / `monthly_tokens` / `not_in_limits_table` で（`concurrent_repo_runs` の上限は料金プランの同時の数と登録の宣言の小さい方で、宣言が無くアカウントの上限と同時に当たるときは重ねない）、`limit` と `current` に上限と今の値を入れる。画面と #2186 は同じ値から利用者に出す文を作る
 
 ### API の経路
 
@@ -221,14 +221,14 @@ sequenceDiagram
 | `GET /me` | — | 200 `{user_id, idp, personal_account_id, accounts: [{account_id, kind, name, plan, role, seat_type, execution_mode}]}`。先頭は個人のアカウント。初回は個人のアカウントを作る | 401・503 `account_unavailable` |
 | `GET /accounts/{account_id}` | — | 200 `{account_id, kind, name, plan, role, seat_type, execution_mode, limits: {concurrent_sprint_runs, monthly_tokens}, seats}`。`monthly_tokens` は `managed` のときだけ数で、ほかは `null`。`seats` はチームだけで `[{user_id, idp, seat_type, added_at}]`、個人では `null` | 401・403 `forbidden` |
 | `POST /teams` | `{name: 1〜64 字（空白だけは不可）, seat_type}` | 201 アカウントの本文（上と同じ形）。作った利用者が持ち主で、その席が 1 つある | 400 `invalid_request` |
-| `PUT /accounts/{account_id}/execution-mode` | `{execution_mode: "local" \| "byok" \| "managed"}` | 200 アカウントの本文。今と同じ値なら履歴の行を足さずに 200 | 400 `invalid_request`・403 `forbidden`（I22・I18）・409 `managed_not_allowed_on_free`（`message` は「Free のプランでは managed（サービスの Bedrock）を選べません」）・503 `account_unavailable` |
+| `PUT /accounts/{account_id}/execution-mode` | `{execution_mode: "local" \| "byok" \| "managed"}` | 200 アカウントの本文。今と同じ値なら履歴の行を足さずに 200 | 400 `invalid_request`・403 `forbidden`（I22・I18）・409 `managed_not_allowed_on_free`（`message` は「Free の料金プランでは managed（サービスの Bedrock）を選べません」）・503 `account_unavailable` |
 | `POST /accounts/{account_id}/seats` | `{user_id: 1〜128 字, seat_type}` | 201 席 `{user_id, idp, seat_type, added_at}` | 400・403・409 `not_a_team`・422 `user_not_found`・409 `seat_exists` |
 | `PATCH /accounts/{account_id}/seats/{user_id}` | `{seat_type}` | 200 席 | 400・403・409 `not_a_team`・404 `seat_not_found`・503 |
 | `DELETE /accounts/{account_id}/seats/{user_id}` | — | 204 | 403・409 `not_a_team`・409 `owner_seat_protected`・404 `seat_not_found`・503 |
 
-- **持ち主の確かめは、席の有無とプランの照合より先に行う。** 404 `seat_not_found` と 409 `managed_not_allowed_on_free` は、要求した者が持ち主と確かめた後だけ返す
+- **持ち主の確かめは、席の有無と料金プランの照合より先に行う。** 404 `seat_not_found` と 409 `managed_not_allowed_on_free` は、要求した者が持ち主と確かめた後だけ返す
 - **`byok` を選んでもキーの登録はこの経路で求めない。** キーの保存は #2186 が持つ
-- **`GET /me` のチームの一覧は GSI を候補として引き、元の席を強い整合で確かめる。** 外した席が GSI に残る間に、そのチームの名前やプランを返さないためである
+- **`GET /me` のチームの一覧は GSI を候補として引き、元の席を強い整合で確かめる。** 外した席が GSI に残る間に、そのチームの名前や料金プランを返さないためである
 - 本文が JSON のオブジェクトでなければ 400 `invalid_request`。経路の中で起きた想定外の失敗は 503 `account_unavailable` に揃える
 
 ### GitHub の仲立ち
@@ -255,9 +255,9 @@ sequenceDiagram
 | --- | --- | --- |
 | ログイン | `/login` | Google と GitHub の 2 つのボタン。`?error=` があれば「ログインできませんでした」を出す |
 | ログインの戻り | `/callback` | code を token に換え、`/account` へ移る。`error` つきの戻りは token を保存せず `/login?error=…` へ移る |
-| 自分のアカウント | `/account` | 利用者の ID（写すボタン）・IdP・個人のプランと実行の形態と 2 つの上限（`managed` でなければ月の token は「掛けない」）・形態を変える操作・席を持つチームの一覧・チームを作る・ログアウト |
+| 自分のアカウント | `/account` | 利用者の ID（写すボタン）・IdP・個人の料金プランと実行の形態と 2 つの上限（`managed` でなければ月の token は「掛けない」）・形態を変える操作・席を持つチームの一覧・チームを作る・ログアウト |
 | チームを作る | `/teams/new` | 名前（1〜64 字）と自分の席の種類（既定は standard）を入れて作る |
-| チームのアカウント | `/accounts/:accountId` | プラン・実行の形態・自分の席の種類と 2 つの上限・席の一覧。持ち主には席の追加（利用者の ID は UUID の形で 36 字まで）・種類の変更・削除と形態を変える操作が出る |
+| チームのアカウント | `/accounts/:accountId` | 料金プラン・実行の形態・自分の席の種類と 2 つの上限・席の一覧。持ち主には席の追加（利用者の ID は UUID の形で 36 字まで）・種類の変更・削除と形態を変える操作が出る |
 
 それ以外の経路は `/account` へ移る。Free では形態の選択肢の `managed` を選べない。
 
@@ -305,7 +305,7 @@ GSI `gsi1` は利用者が席を持つチームの一覧を引くためにあり
 | アカウント | `kind` | 文字列 | 許さない | `personal` / `team` |
 | アカウント | `plan` | 文字列 | 許さない | `free` / `pro` / `max` / `team`（I13） |
 | アカウント | `execution_mode` | 文字列 | 許さない | `local` / `byok` / `managed`（I21・I24） |
-| アカウント | `version` | 数 | 許さない | 作成のときは 1。プランと形態を変えるたびに 1 増やす |
+| アカウント | `version` | 数 | 許さない | 作成のときは 1。料金プランと形態を変えるたびに 1 増やす |
 | アカウント | `owner_user_id` | 文字列 | 許さない | 個人は本人、チームはチームの持ち主 |
 | アカウント | `name` | 文字列 | 許す | チームの名前。空は「個人のアカウント」 |
 | アカウント | `created_at`・`updated_at` | 文字列（ISO 8601、UTC） | 許さない | 作成と最後の変更の時刻 |
@@ -326,7 +326,7 @@ GSI `gsi1` は利用者が席を持つチームの一覧を引くためにあり
 | 席を操作する | R（相手） | R | C・U・D | C |
 | 解決する | C（初回）・R | C（初回）・R | R | C（初回） |
 | 使える量 | — | R | R | — |
-| プランを変える（`setPlan`） | — | U（`free` へ下げるときは形態も） | — | C |
+| 料金プランを変える（`setPlan`） | — | U（`free` へ下げるときは形態も） | — | C |
 | 実行の形態を変える | — | R・U | R | C |
 
 ### 環境変数
@@ -338,12 +338,13 @@ GSI `gsi1` は利用者が席を持つチームの一覧を引くためにあり
 | `COGNITO_DOMAIN` | 画面・GitHub の仲立ち | Cognito の管理されたログインのドメイン。仲立ちは `/authorize` で受ける `redirect_uri` をこのドメインの `/oauth2/idpresponse` と照らす |
 | `FACTORY_WEB_URL` | 画面・API | 画面の URL。画面はログインとログアウトの戻りに、API は CORS で許すオリジンに使う |
 | `FACTORY_API_URL` | 画面 | API の入口の URL |
+| `FACTORY_POLL_INTERVAL_MS` | 画面 | スプリントの一覧と詳細を読み直す間隔（ミリ秒）。正の整数でなければ既定の 30,000 |
 | `ACCOUNTS_TABLE_NAME` | API | アカウントの表の名前 |
 | `GITHUB_OIDC_ISSUER` | GitHub の仲立ち | 仲立ちの発行元の URL |
 | `GITHUB_OAUTH_CLIENT_ID` | GitHub の仲立ち | GitHub の OAuth App のクライアントの ID（秘密でない）。`/authorize` で受ける `client_id` と照らす |
 | `GITHUB_OIDC_SIGNING_KEY_SECRET_ARN` | GitHub の仲立ち | ID token を署名する RSA の秘密鍵の置き場 |
 
-画面へは `vite.config.ts` が `COGNITO_DOMAIN`・`COGNITO_CLIENT_ID`・`FACTORY_WEB_URL`・`FACTORY_API_URL` の 4 つだけを名前で選んで埋め込む。ほかの変数を画面へ入れない。API と仲立ちは、要る変数が無ければ最初の要求の処理で失敗する。
+画面へは `vite.config.ts` が `COGNITO_DOMAIN`・`COGNITO_CLIENT_ID`・`FACTORY_WEB_URL`・`FACTORY_API_URL`・`FACTORY_POLL_INTERVAL_MS` の 5 つだけを名前で選んで埋め込む。ほかの変数を画面へ入れない。API と仲立ちは、要る変数が無ければ最初の要求の処理で失敗する。
 
 ### パッケージの管理
 
@@ -417,7 +418,7 @@ graph TD
 
 | 観点 | 縛る振る舞い |
 | --- | --- |
-| ログイン | 2 つのボタンがそれぞれ `identity_provider=Google` / `GitHub` を付けて Cognito へ送り、戻りの後に `/account` がプランを出すこと |
+| ログイン | 2 つのボタンがそれぞれ `identity_provider=Google` / `GitHub` を付けて Cognito へ送り、戻りの後に `/account` が料金プランを出すこと |
 | ログインの失敗 | `error` つきの戻りで `/login` に「ログインできませんでした」が出て、保存先に token が無いこと |
 | ログアウト | 保存先の token が消え、`/account` を開くと `/login` へ移ること。API の 401 でも同じであること |
 | token の検証 | token が無い・署名が違う・期限切れ・別の利用者プール・別のクライアント・ID token のそれぞれで 401 になり、本文にアカウントの中身が無いこと |
@@ -431,17 +432,17 @@ graph TD
 | 席の条件（I14・I15・I16） | 未ログインの利用者 → 422、既に席がある → 409、持ち主の席を外す → 409 で、どれも席の一覧と履歴が変わらないこと |
 | 個人のアカウントは 1 つ（I12） | 同じ利用者で `GET /me` を並べて 2 回呼んでも個人のアカウントは 1 つで、2 回とも同じ ID を返すこと |
 | 他人のアカウント（I18） | 利用者 A の token で、他人の個人のアカウント・入っていないチーム・存在しない ID の 3 つに読む・書くを送ると、すべて 403 で本文が同じであること |
-| プランの組（I13） | 個人のアカウントへの席の操作は 409、`setPlan` で個人に `team`・チームに `pro` は失敗で、行が変わらないこと |
-| 履歴（I20） | 席・プラン・実行の形態の変更のたびに履歴の行が 1 つ増え、変更が失敗したときは増えないこと |
+| 料金プランの組（I13） | 個人のアカウントへの席の操作は 409、`setPlan` で個人に `team`・チームに `pro` は失敗で、行が変わらないこと |
+| 履歴（I20） | 席・料金プラン・実行の形態の変更のたびに履歴の行が 1 つ増え、変更が失敗したときは増えないこと |
 | 実行の形態の読み出し | `GET /me`・`GET /accounts/{account_id}` の応答と `resolveAccount` の文脈に保存した形態が出ること |
 | 実行の形態の変更（I21・I22） | 持ち主の変更は 200 で形態が変わり、持ち主でない者は 403、Free で `managed` は 409 `managed_not_allowed_on_free` で、どちらも形態と履歴が変わらないこと |
-| Free へ下げる（I21） | `managed` のプロのアカウントへ `setPlan(…, "free")` を呼ぶと、プランが `free`・形態が `local` になり、2 つの履歴の行が同じトランザクションで増えること。形態の書き込みが失敗すればプランも変わらないこと |
-| 版の競合（I21） | `setPlan` の書き込みの前に別の要求が `managed` を保存して版を進めても、`setPlan` が読み直して、終わったときプランが `free`・形態が `local` であること |
+| Free へ下げる（I21） | `managed` のプロのアカウントへ `setPlan(…, "free")` を呼ぶと、料金プランが `free`・形態が `local` になり、2 つの履歴の行が同じトランザクションで増えること。形態の書き込みが失敗すれば料金プランも変わらないこと |
+| 版の競合（I21） | `setPlan` の書き込みの前に別の要求が `managed` を保存して版を進めても、`setPlan` が読み直して、終わったとき料金プランが `free`・形態が `local` であること |
 | GitHub の仲立ち | ID token の `sub` が GitHub の数の利用者 ID、`aud` が `client_id` で、公開した鍵で検証できること。検証済みでないメールを返さないこと。`/authorize` の `nonce` が ID token に同じ値で出ること。署名の壊れた・期限の切れた・`client_id` か `redirect_uri` の違う `state` と `code` を断ること。`/authorize` に違う `redirect_uri` か `client_id` が来たら GitHub へ送らずに 400 を返すこと |
 | 秘密を出さない | ログの出力に token・`client_secret`・鍵の形が無いこと。`python3 scripts/check-service-boundary.py` が 0 で終わること |
 | パッケージの管理と CI | `npm ci` がロックファイルどおりに入り、`npm run check -w web`・`npm run check -w api` が手元と CI の両方で走り、型の誤りかテストの失敗で 1 になること。`factory/` を変えない Pull Request ではジョブが成功で終わること |
 | 既存への影響 | `uv run --frozen --project . --all-extras pytest . -q -n 4`・`claude plugin validate .`・既存の必須のチェックが変わらず通り、プラグインの配布物と CLI だけで使う人の振る舞いが変わらないこと |
-| 実環境のログイン | private リポジトリのインフラが利用者プールを作った後、実際の Google と GitHub のアカウントでログインし、プラン Free・形態 `local` の個人のアカウントができること |
+| 実環境のログイン | private リポジトリのインフラが利用者プールを作った後、実際の Google と GitHub のアカウントでログインし、料金プラン Free・形態 `local` の個人のアカウントができること |
 
 ## 関連リンク
 

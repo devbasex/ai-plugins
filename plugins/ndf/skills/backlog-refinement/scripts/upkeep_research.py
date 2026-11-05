@@ -15,7 +15,6 @@ run: 見直しの持ち主になり、完了のファイルが出るまで、並
 
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import json
 import os
@@ -101,17 +100,9 @@ def read_research_item(root, item_id: str) -> dict | None:
     return rec if rec is not None and rec.get("id", item_id) == item_id else None
 
 
-def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
-    """(調査の項目, 飛ばした側面)。項目は {id, aspect, target, decl}。"""
-    if mat is None:
-        return [], [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS]
-    items, skipped = [], []
-    needs, seeds = mat.get("needs") or {}, mat.get("seeds") or {}
-
-    def add(aspect, target, decl):
-        items.append({"id": f"{aspect}:{target}", "aspect": aspect, "target": target, "decl": decl})
-
-    usage = []
+def _usage_rows(needs: dict) -> tuple[list[dict], list[dict]]:
+    """needs.usage の行を (使える行, 飛ばした側面) に分ける。集計だけを返す行に限って読む。"""
+    usage, skipped = [], []
     for row in needs.get("usage") or []:
         scope = row.get("scope") or {}
         if scope.get("aggregate_only") is True and row.get("command"):
@@ -120,6 +111,26 @@ def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
             skipped.append(
                 {"aspect": "needs.usage", "reason": f"{row.get('name')}: aggregate_only が true でない行は読まない（個票を読まない）"}
             )
+    return usage, skipped
+
+
+def _undeclared(items: list[dict], skipped: list[dict]) -> list[dict]:
+    """項目にも飛ばした側面にも現れない側面を、宣言の無い側面として返す。"""
+    have = {i["aspect"] for i in items} | {s["aspect"] for s in skipped}
+    return [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS if a not in have]
+
+
+def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
+    """(調査の項目, 飛ばした側面)。項目は {id, aspect, target, decl}。"""
+    if mat is None:
+        return [], [{"aspect": a, "reason": UNDECLARED} for a in ASPECTS]
+    items = []
+    needs, seeds = mat.get("needs") or {}, mat.get("seeds") or {}
+
+    def add(aspect, target, decl):
+        items.append({"id": f"{aspect}:{target}", "aspect": aspect, "target": target, "decl": decl})
+
+    usage, skipped = _usage_rows(needs)
     for row in usage:
         add("needs.usage", row.get("name") or row["command"], row)
     for row in needs.get("market") or []:
@@ -133,29 +144,17 @@ def research_items(mat: dict | None) -> tuple[list[dict], list[dict]]:
         add("method.unused", "usage", {"usage": [u.get("name") for u in usage]})
     add("method.hotspot", "git", {})
     add("method.failures", "loop", {"failures": mat.get("failures")})
-    have = {i["aspect"] for i in items} | {s["aspect"] for s in skipped}
-    for a in ASPECTS:
-        if a not in have:
-            skipped.append({"aspect": a, "reason": UNDECLARED})
+    skipped.extend(_undeclared(items, skipped))
     return items, skipped
-
-
-def _iso_epoch(value) -> float | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return _dt.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
 
 
 def plan(root, since: str | None) -> dict:
     items, skipped = research_items(D.materials(root))
-    cut = _iso_epoch(since)
+    cut = clock.epoch_seconds(since)
     todo, fresh = [], []
     for it in items:
         rec = read_research_item(root, it["id"])
-        checked = _iso_epoch((rec or {}).get("checked_at"))
+        checked = clock.epoch_seconds((rec or {}).get("checked_at"))
         if checked is None or (cut is not None and checked < cut):
             todo.append(it["id"])
         else:
@@ -298,9 +297,9 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
     extra = "# 変更の多いファイル（回数・パス）\n" + hotspots(root) if it["aspect"] == "method.hotspot" else extra
     got = call_llm(root, prompt_of(it, product, extra), int(lim["item_seconds"]), tick, tools_of(it["aspect"]))
     usage = {"cost": got["cost"], "seconds": got["seconds"]}
-    ok = got["ok"] and got["cost"] <= lim["item_usd"] and got["seconds"] <= lim["item_seconds"] and valid_record(got["data"])
-    log_call(root, it["id"], ok, usage, run, loop, lap)
-    if not got["ok"] or got["cost"] > lim["item_usd"] or got["seconds"] > lim["item_seconds"] or not valid_record(got["data"]):
+    accepted = got["ok"] and got["cost"] <= lim["item_usd"] and got["seconds"] <= lim["item_seconds"] and valid_record(got["data"])
+    log_call(root, it["id"], accepted, usage, run, loop, lap)
+    if not accepted:
         return None, usage
     rec = {
         "id": it["id"],
@@ -316,6 +315,35 @@ def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) 
         D.backlog_dir(root) / "research" / f"{aspect}--{_item_slug(target)}.item.json", rec, indent=1
     )  # item_path と同じ置き場
     return rec, usage
+
+
+def _ticker(root, run_id, until: str | None, cfg: dict):
+    """呼び出しの間に呼ぶ関数。持ち主の印を `owner.beat` 秒ごとに書き、待っていたプランの完了から `research.grace` 秒を過ぎたら GraceOver を投げる。"""
+    beat = {"at": time.time(), "until_seen": None}
+
+    def tick(*_):
+        if time.time() - beat["at"] >= cfg["owner"]["beat"]:
+            O.touch(root, run_id)
+            beat["at"] = time.time()
+        # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
+        if until and Path(until).exists():
+            seen = beat["until_seen"] = beat["until_seen"] or time.time()
+            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
+                raise GraceOver
+
+    return tick
+
+
+def _wait_turn(root, run_id, item_id: str, until: str | None, listing: str | None, max_: int, tick, sleep) -> str | None:
+    """並列の空きを待ち、次の項目を始めてよければ None、止めるなら止まる理由を返す。"""
+    while not (until and Path(until).exists()) and not free_slot(listing, max_):
+        tick()
+        sleep(POLL)
+    if until and Path(until).exists():  # 待っていたプランが終わったら新しい項目を始めない（I13）
+        return "待っていたプランが終わった"
+    if O.touch(root, run_id, item_id):
+        return "持ち主でなくなった"
+    return None
 
 
 def run_research(
@@ -345,31 +373,14 @@ def run_research(
     pl = plan(root, since)
     mat = D.materials(root) or {}
     done, cost, secs, fails, why = [], 0.0, 0.0, 0, "項目が無い"
-    beat = {"at": time.time(), "until_seen": None}
-
-    def tick(*_):
-        if time.time() - beat["at"] >= cfg["owner"]["beat"]:
-            O.touch(root, run_id)
-            beat["at"] = time.time()
-        # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
-        if until and Path(until).exists():
-            seen = beat["until_seen"] = beat["until_seen"] or time.time()
-            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
-                raise GraceOver
-
+    tick = _ticker(root, run_id, until, cfg)
     try:
         for item_id in pl["todo"]:
             if len(done) >= max_items:
                 why = f"1 回の上限 {max_items} 項目に当たった"
                 break
-            while not (until and Path(until).exists()) and not free_slot(listing, max_):
-                tick()
-                sleep(POLL)
-            if until and Path(until).exists():  # 待っていたプランが終わったら新しい項目を始めない（I13）
-                why = "待っていたプランが終わった"
-                break
-            if O.touch(root, run_id, item_id):
-                why = "持ち主でなくなった"
+            if stop := _wait_turn(root, run_id, item_id, until, listing, max_, tick, sleep):
+                why = stop
                 break
             try:
                 rec, usage = research_one(root, pl["by_id"][item_id], cfg, mat.get("product"), run_id, loop, lap, tick)

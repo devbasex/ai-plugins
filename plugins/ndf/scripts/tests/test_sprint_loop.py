@@ -55,7 +55,9 @@ def ms(title, nums, boundary=None, sizes=None, **extra):
 
 
 @pytest.fixture
-def env(tmp_path, mvv):
+def env(tmp_path, mvv, monkeypatch):
+    # 中継の下で起動したシェルの値を受け継ぐと、周回がその中継の記録を指し、状態の表示が変わる
+    monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "pace.json").write_text(json.dumps(DECL))
     e = sl.Env(tmp_path, main=tmp_path, now=Clock(), upkeep_dir=lambda repo: tmp_path / "upkeep")
@@ -1546,3 +1548,16 @@ def test_gate_1_of_a_lane_sends_the_request_to_the_organizer(env, monkeypatch):
     out = sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
     w = rec(env)["waiting"][0]
     assert out["metrics"]["waiting"] == [11] and sent == [11] and w["request"] == "lroot-g501-x" and w["plan"] == "p1"
+
+
+def test_selecting_a_returned_issue_marks_its_fix(env):
+    # 直しの周回: 差し戻された周回の課題を選ぶと、その直しを済みにする。選ばなかった直しと済みの直しは変えない（現状固定。#2422）
+    start(env)
+    with sl_record.open_record(env, "l1") as (r, before):
+        r["fixes"] = [{"lap": 0, "issues": [12]}, {"lap": 0, "issues": [99]}, {"lap": 0, "issues": [11], "fixed_by": 7}]
+        sl_record.write_record(env, r, before)
+    got = sl_select.cmd_select(env, "l1")
+    lap = rec(env)["laps"][-1]
+    assert got["metrics"]["selected"] == [12, 11]
+    assert (lap["sprint"], lap["milestone"], lap["rank_digest"], lap["state_path"]) == (f"l1-{lap['n']}", "01 近い", "dg", None)
+    assert [f.get("fixed_by") for f in rec(env)["fixes"]] == [lap["n"], None, 7]

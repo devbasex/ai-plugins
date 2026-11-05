@@ -1,6 +1,6 @@
 # Neural Development Factory: 開発ループのデータと契約
 
-[開発ループと並行する実行の調整](ndf-factory-dev-loops.md) の実行の表の行・移行の埋め戻し・環境変数と、実行ジョブの指示・進捗の事象・NDF の受け渡しの形・手元のランナーの申告・画面向けの経路の契約を定める（ndf-factory-dev-loops.md から分けた）。機械可読な正は `factory/contracts/` にある。
+[開発ループと並行する実行の調整](ndf-factory-dev-loops.md) の実行の表の行・移行の埋め戻し・環境変数と、実行ジョブの指示・進捗の事象・NDF の受け渡しの形・手元のマシンの申告・画面向けの経路の契約を定める（ndf-factory-dev-loops.md から分けた）。機械可読な正は `factory/contracts/` にある。
 
 ## データ・設定
 
@@ -14,7 +14,7 @@ erDiagram
     "開発ループ" ||--o{ "スプリントの実行" : "周回ごとに起こす"
     "開発ループ" ||--|{ "マイルストーンの持ち分" : "占める"
     "スプリントの実行" ||--o{ "課題の持ち分" : "占める"
-    "手元のランナーの枠" ||--o{ "実行ジョブ" : "数える"
+    "手元のマシンの枠" ||--o{ "実行ジョブ" : "数える"
 ```
 
 | 行 | `pk` | `sk` | `gsi1pk` / `gsi1sk` |
@@ -23,7 +23,7 @@ erDiagram
 | ループの実行（周回の開始の書き込みで足す。列は `sprintRunId`） | `ACCOUNT#<accountId>` | `LOOPRUN#<loopId>#<sprintRunId>` | — |
 | マイルストーンの持ち分 | `ACCOUNT#<accountId>` | `MILESTONE#<repositoryId>#<題の sha256 の先頭 32 字>` | — |
 | 課題の持ち分 | `ACCOUNT#<accountId>` | `ISSUE#<repositoryId>#<番号>` | — |
-| 手元のランナーの枠 | `ACCOUNT#<accountId>` | `RUNNER#<runnerId>` | — |
+| 手元のマシンの枠 | `ACCOUNT#<accountId>` | `RUNNER#<runnerId>` | — |
 | 移行の済み（表に 1 つ） | `MIGRATION` | `MIGRATED#2347` | — |
 
 | 行 | 列 | 型 | 空 | 意味 |
@@ -42,18 +42,18 @@ erDiagram
 | ループ | `answers` | `{number, decision, pr}` の並び | 不可 | 画面の答え。次のジョブの `LOOP_ANSWERS` に載り、`pending` から消えた番号は外す |
 | ループ | `cancelRequested`・`createdBy`・`createdAt`・`updatedAt`・`lastRunAt` | — | `lastRunAt` だけ可 | 取り消しの要求と時刻（`lastRunAt` は最後の実行の `updatedAt`） |
 | 持ち分 | `loopId`・`title` / `sprintRunId` | 文字列 | 不可 | 占めるループと題 / 占める実行 |
-| ランナーの枠 | `count` | 数 | 不可 | `running` の `local` のジョブの数（I50） |
+| 手元のマシンの枠 | `count` | 数 | 不可 | `running` の `local` のジョブの数（I50） |
 | 実行 | `loopId`・`lap` | 文字列・数 | 可 | 空は手動の実行 |
 | 実行 | `legacy` | 真偽 | 可 | 古い版として `legacyCount` に数えた実行。作成と移行の埋め戻しで書き、終わりへの移りで真のときだけ `legacyCount` を減らす。空は「埋め戻していない既存の実行」 |
 | 実行 | `finishReason` | 文字列 | 可 | `job.finished` の `reason`（`section_limit` / `usage_limit`） |
 | 実行 | `resumeAt` | 文字列 | 可 | `awaiting_reset` の間だけ。リセット時刻（読めなければ `USAGE_LIMIT_RETRY_SECONDS` 後） |
-| ジョブ | `runnerId` | 文字列 | 可 | `local` で受け取ったランナー。手元のランナーの枠を減らす先 |
+| ジョブ | `runnerId` | 文字列 | 可 | `local` で受け取った手元のマシン。手元のマシンの枠を減らす先 |
 | リポジトリの枠 | `legacyCount` | 数 | 不可 | 並行を許す版の下限より古い版の、終わりの状態でない実行の数（I48）。無いのは 0 |
-| 登録 | `maxConcurrentRuns` | 数 | 可 | 空は「宣言しない（プランの値）」 |
+| 登録 | `maxConcurrentRuns` | 数 | 可 | 空は「宣言しない（料金プランの値）」 |
 
 実行の状態には `awaiting_reset` がある（終わりの状態でない）。`maxConcurrentRuns`・`loopId` などの無い行は空として読む。
 
-| 機能 | ループ | 実行 | ジョブ | 枠・持ち分・ランナーの枠 | 登録 | 進捗の記録 |
+| 機能 | ループ | 実行 | ジョブ | 枠・持ち分・手元のマシンの枠 | 登録 | 進捗の記録 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 始める | C | C | C | C・U | R | — |
 | 止める | U | U | — | U・D | — | R |
@@ -138,7 +138,7 @@ erDiagram
 - 規則の持ち主は NDF で、NDF の変更が例を直す。ランナーは実行時に NDF をマーケットプレイスから入れ、`plugins/` を参照しないため、規則を写す。写した規則が古くなるのを、NDF の pytest（`next_blocks`・`_mark_action`）と Factory の vitest（`next-block.ts`）が同じ例の組を読むことで防ぐ（I55）
 - `scripts/contracts_lib/model.py` は `forms/*.json` を読み、上の鍵の型を確かめる（知らない鍵は断る）。Factory はテストだけが `../plugins/ndf/contracts/forms/ndf-next-block.json` を読む。区分 `forms/` は [NDF の入口の契約](ndf-entrypoint-contracts.md) の一覧にある
 
-### 手元のランナーの申告（`local-runner-declaration.schema.json`）
+### 手元のマシンの申告（`local-runner-declaration.schema.json`）
 
 | 鍵 | 型・必須 | 意味 |
 | --- | --- | --- |
@@ -146,7 +146,7 @@ erDiagram
 | `max_jobs` | 1〜16 の整数・任意（無ければ 1） | 同時のジョブの数 |
 | `capacity_hint` | 1 以上の整数・任意 | 目安。表示だけに使う |
 
-手元のランナーの登録と心拍の本文はこの形を含む。
+手元のマシンの登録と心拍の本文はこの形を含む。
 
 ### 画面向けの経路（`openapi/loops.yaml`・`openapi/runs.yaml`）
 

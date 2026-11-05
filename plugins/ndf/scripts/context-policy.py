@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import context_calibrate  # noqa: E402
 import context_decisions as cd  # noqa: E402
 import context_policy as cp  # noqa: E402
 import step_result as sr  # noqa: E402
@@ -58,24 +59,11 @@ def busy_seconds(times: Iterable[float | None]) -> float:
 
 def ledger_calls(row: Mapping) -> dict | None:
     """使用量の帳簿の 1 行を 1 つの呼び出しの形にする。usage が取れなければ None。"""
-    from usage_ledger import cache_writes
-
     u = row.get("usage")
     if not isinstance(u, dict):
         return None
-    w5, w1h = cache_writes(u)
-    inp, read = int(u.get("input_tokens") or 0), int(u.get("cache_read_input_tokens") or 0)
-    return {
-        "ts": cd.parse_ts(row.get("at")),
-        "model": row.get("model") or None,
-        "inp": inp,
-        "out": int(u.get("output_tokens") or 0),
-        "read": read,
-        "w5": w5,
-        "w1h": w1h,
-        "context": inp + read + w5 + w1h,
-        "seconds": row.get("seconds") if isinstance(row.get("seconds"), (int, float)) else None,
-    }
+    seconds = row.get("seconds") if isinstance(row.get("seconds"), (int, float)) else None
+    return cd.usage_call(u, cd.parse_ts(row.get("at")), row.get("model") or None) | {"seconds": seconds}
 
 
 def _bucket_of(ts: float | None, restore_end: float | None, handoff_from: float | None) -> str:
@@ -131,6 +119,43 @@ def _within(ts: float | None, windows: list[tuple[float, float]]) -> bool:
     return ts is not None and any(a <= ts < b for a, b in windows)
 
 
+def _mark_bounds(marks: list[dict], by_next: bool) -> tuple[float | None, float | None]:
+    """(復元の区間の終わり, 引継ぎの区間の始まり)。復元は ndf-next で始まったセッションの最初の「復元完了」、引継ぎは最後の「引継ぎ開始」。"""
+    restored = [cd.parse_ts(m.get("at")) for m in marks if m.get("event") == cd.MARK_RESTORED]
+    handoffs = [cd.parse_ts(m.get("at")) for m in marks if m.get("event") == cd.MARK_HANDOFF]
+    restore_end = min((t for t in restored if t is not None), default=None) if by_next else None
+    handoff_from = max((t for t in handoffs if t is not None), default=None)
+    return restore_end, handoff_from
+
+
+def _add_subagents(ndf: dict, transcript: str, excluded: set, seen: set, windows: list[tuple[float, float]]) -> None:
+    """会話の記録の隣の `subagents/` の呼び出しと秒を、NDF が起動した分へ足す。"""
+    sub = Path(str(transcript).removesuffix(".jsonl")) / "subagents"
+    for f in sorted(sub.glob("*.jsonl")) if sub.is_dir() else []:
+        if f.stem.removeprefix("agent-") in excluded:
+            continue  # SubagentStop が帳簿へ書いたサブエージェント（session_id = agent_id）は帳簿の行で数える
+        sub_calls, _, _ = cd.read_calls(f, seen)
+        sub_calls = [c for c in sub_calls if _within(c["ts"], windows)]
+        for c in sub_calls:
+            _add_call(ndf, c)
+        ndf["seconds"] += busy_seconds(c["ts"] for c in sub_calls)
+
+
+def _add_ledger(ndf: dict, sid: str, span: tuple, ledger_rows: list[dict], seen: set, windows: list[tuple[float, float]]) -> None:
+    """このセッションが親か、親の無い行で時刻がセッションの範囲に入る帳簿の行を、NDF が起動した分へ 1 回だけ足す。"""
+    for row in ledger_rows:
+        at = cd.parse_ts(row.get("at"))
+        mine = row.get("parent_session_id") == sid or (
+            not row.get("parent_session_id") and span[0] is not None and at is not None and span[0] <= at <= span[1]
+        )
+        key = ("ledger", row.get("session_id"), row.get("at"), row.get("step"))
+        c = ledger_calls(row) if mine and key not in seen and _within(at, windows) else None
+        if c is not None:
+            seen.add(key)
+            _add_call(ndf, c)
+            ndf["seconds"] += c["seconds"] or 0.0
+
+
 def session_parts(
     sid: str,
     transcript: str | None,
@@ -144,10 +169,7 @@ def session_parts(
     windows = ALL_TIME if windows is None else windows
     calls, compacts, by_next = cd.read_calls(transcript, seen) if transcript and sid not in excluded else ([], None, False)
     calls = [c for c in calls if _within(c["ts"], windows)]
-    restored = [cd.parse_ts(m.get("at")) for m in marks if m.get("event") == cd.MARK_RESTORED]
-    handoffs = [cd.parse_ts(m.get("at")) for m in marks if m.get("event") == cd.MARK_HANDOFF]
-    restore_end = min((t for t in restored if t is not None), default=None) if by_next else None
-    handoff_from = max((t for t in handoffs if t is not None), default=None)
+    restore_end, handoff_from = _mark_bounds(marks, by_next)
     parts = {b: _empty_totals() for b in BUCKETS}
     times: dict[str, list] = defaultdict(list)
     for c in calls:
@@ -155,27 +177,9 @@ def session_parts(
         _add_call(parts[b], c)
         times[b].append(c["ts"])
     if transcript:
-        sub = Path(str(transcript).removesuffix(".jsonl")) / "subagents"
-        for f in sorted(sub.glob("*.jsonl")) if sub.is_dir() else []:
-            if f.stem.removeprefix("agent-") in excluded:
-                continue  # SubagentStop が帳簿へ書いたサブエージェント（session_id = agent_id）は下の帳簿の行で数える
-            sub_calls, _, _ = cd.read_calls(f, seen)
-            sub_calls = [c for c in sub_calls if _within(c["ts"], windows)]
-            for c in sub_calls:
-                _add_call(parts["ndf"], c)
-            parts["ndf"]["seconds"] += busy_seconds(c["ts"] for c in sub_calls)
+        _add_subagents(parts["ndf"], transcript, excluded, seen, windows)
     span = (min((c["ts"] for c in calls if c["ts"]), default=None), max((c["ts"] for c in calls if c["ts"]), default=None))
-    for row in ledger_rows:
-        at = cd.parse_ts(row.get("at"))
-        mine = row.get("parent_session_id") == sid or (
-            not row.get("parent_session_id") and span[0] is not None and at is not None and span[0] <= at <= span[1]
-        )
-        key = ("ledger", row.get("session_id"), row.get("at"), row.get("step"))
-        c = ledger_calls(row) if mine and key not in seen and _within(at, windows) else None
-        if c is not None:
-            seen.add(key)
-            _add_call(parts["ndf"], c)
-            parts["ndf"]["seconds"] += c["seconds"] or 0.0
+    _add_ledger(parts["ndf"], sid, span, ledger_rows, seen, windows)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
     return {
@@ -188,27 +192,24 @@ def session_parts(
     }
 
 
-def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None) -> dict:
-    """作業の識別子 1 つの集計（受け入れ条件 12・13、I12〜I14）。"""
-    ledger_rows = ledger_rows or []
-    excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
-    filled = cd.fill_work(rows)
-    windows = work_windows(filled, work)
-    rows = [r for r in filled if (r.get("work") or "") == work]
-    sessions = cd.sessions_of(rows)
-    seen: set = set()
+def _session_spans(sessions: dict, excluded: set, windows: dict) -> dict[str, tuple[float, float]]:
+    """セッションごとの (最初, 最後) の時刻。作業の区間の呼び出しと判定の記録の行から取る（印の割り当てに使う）。"""
     spans = {}
-    marks = [r for r in rows if r.get("event") in cd.MARKS]
     for sid, s in sessions.items():
         calls, _, _ = cd.read_calls(s["transcript"], set()) if s["transcript"] and sid not in excluded else ([], None, False)
         calls = [c for c in calls if _within(c["ts"], windows.get(sid, ALL_TIME))]
         ts = [c["ts"] for c in calls if c["ts"]] + [cd.parse_ts(r.get("at")) for r in s["rows"] if cd.parse_ts(r.get("at"))]
         if ts:
             spans[sid] = (min(ts), max(ts))
-    by_session = cd.attach_marks(marks, spans)
+    return spans
+
+
+def _sum_sessions(sessions: dict, by_session: dict, ledger_rows: list[dict], excluded: set, windows: dict) -> dict:
+    """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
     totals = {b: _empty_totals() for b in BUCKETS}
     compacts: int | None = 0
     no_restore_mark = no_handoff_mark = 0
+    seen: set = set()
     for sid, s in sessions.items():
         summary = session_parts(sid, s["transcript"], by_session.get(sid, []), ledger_rows, excluded, seen, windows.get(sid))
         for b in BUCKETS:
@@ -218,33 +219,50 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
         no_restore_mark += 0 if summary["restore_known"] else 1
         restarted = any(r.get("verdict") == cp.RESTART for r in s["rows"])
         no_handoff_mark += 1 if restarted and not summary["handoff_known"] else 0
+    for b in BUCKETS:
+        totals[b]["cost"] = round(totals[b]["cost"])
+        totals[b]["seconds"] = round(totals[b]["seconds"])
+    return {"parts": totals, "compacts": compacts, "unknown_parts": {"restore": no_restore_mark, "handoff": no_handoff_mark}}
+
+
+def _restarts_by_reason(rows: list[dict]) -> dict[str, int]:
     restarts: dict[str, int] = defaultdict(int)
     for r in rows:
         if r.get("verdict") == cp.RESTART:
             restarts[r.get("reason") or cd.UNKNOWN] += 1
-    keep = defaultdict(int)
+    return dict(restarts)
+
+
+def _rework(rows: list[dict]) -> int | str:
+    """「継続」の判定が 2 回以上ある工程の数（やり直し）。「継続」の判定が無ければ「不明」。"""
+    keep: dict[str, int] = defaultdict(int)
     for r in rows:
         if r.get("event", cd.EVENT_DECISION) == cd.EVENT_DECISION and r.get("verdict") == cp.CONTINUE and r.get("stage"):
             keep[r["stage"]] += 1
-    for b in BUCKETS:
-        totals[b]["cost"] = round(totals[b]["cost"])
-        totals[b]["seconds"] = round(totals[b]["seconds"])
+    return sum(1 for n in keep.values() if n >= 2) if keep else cd.UNKNOWN
+
+
+def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None) -> dict:
+    """作業の識別子 1 つの集計（受け入れ条件 12・13、I12〜I14）。"""
+    ledger_rows = ledger_rows or []
+    excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
+    filled = cd.fill_work(rows)
+    windows = work_windows(filled, work)
+    rows = [r for r in filled if (r.get("work") or "") == work]
+    sessions = cd.sessions_of(rows)
+    by_session = cd.attach_marks([r for r in rows if r.get("event") in cd.MARKS], _session_spans(sessions, excluded, windows))
+    summed = _sum_sessions(sessions, by_session, ledger_rows, excluded, windows)
+    restarts = _restarts_by_reason(rows)
+    compacts = summed["compacts"]
     return {
         "work": work,
         "sessions": len(sessions),
-        "parts": totals,
-        "unknown_parts": {
-            "restore": no_restore_mark,
-            "handoff": no_handoff_mark,
-        },
-        "restarts": dict(restarts),
+        "parts": summed["parts"],
+        "unknown_parts": summed["unknown_parts"],
+        "restarts": restarts,
         "restart_count": sum(restarts.values()),
         "auto_compacts": cd.UNKNOWN if compacts is None or not sessions else compacts,
-        "quality": {
-            "rework": sum(1 for n in keep.values() if n >= 2) if keep else cd.UNKNOWN,
-            "review_fixes": cd.UNKNOWN,
-            "missed_requirements": cd.UNKNOWN,
-        },
+        "quality": {"rework": _rework(rows), "review_fixes": cd.UNKNOWN, "missed_requirements": cd.UNKNOWN},
         "no_policy_rows": sum(1 for r in rows if "policy" not in r),
     }
 
@@ -291,24 +309,14 @@ def cmd_record(a) -> None:
     if a.verdict is not None and (a.verdict != cp.RESTART or a.reason not in cp.REASONS):
         sr.emit(sr.result(TOOL, "stopped", f"--verdict 再起動 と、理由（{' / '.join(cp.REASONS)}）を渡す"), sr.EXIT_UNREADABLE)
     root = cd.toplevel(None)
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if a.runtime == "claude" else None
-    row = cli_row(a.runtime, "record", sid or None, a.work, root, a.context)
-    if a.event:
-        row.update(event=a.event)
-    else:
-        row.update(stage="cut", verdict=cp.RESTART, reason=a.reason)
+    row = cd.record_row(a.runtime, "record", a.work, cp.resolve_policy(root), a.context, a.event, a.reason)
     if not cd.append_decision(row, cd.decisions_repo(root)):
         sr.emit(sr.result(TOOL, "stopped", "判定の記録へ書けない", metrics={"dir": str(cd.context_state_dir())}), sr.EXIT_VIOLATION)
     sr.emit(sr.result(TOOL, "ok", f"{a.event or a.verdict} を記録した（{a.work}）", [row]))
 
 
-def cli_row(runtime: str, source: str, sid: str | None, work: str, root: str | None, context: int | None) -> dict:
-    """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。"""
-    return cd.boundary_row(runtime=runtime, source=source, session_id=sid, work=work, context=context, applied=cp.resolve_policy(root))
-
-
 def cmd_calibrate(a) -> None:
-    body, ok = cd.calibrate_repo(cd.toplevel(None), a.days)
+    body, ok = context_calibrate.calibrate_repo(cd.toplevel(None), a.days)
     if not ok:
         sr.emit(sr.result(TOOL, "stopped", "見込みのファイルへ書けない"), sr.EXIT_VIOLATION)
     sr.emit(sr.result(TOOL, "ok", f"見込みを較正した（標本 {body['samples']}）", [body], {"samples": body["samples"]}))

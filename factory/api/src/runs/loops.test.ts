@@ -1,4 +1,4 @@
-// #2347: 開発ループ・並行する実行の取り合い・利用上限の後の再開・手元のランナーの枠（設計の「テスト設計」）
+// #2347: 開発ループ・並行する実行の取り合い・利用上限の後の再開・手元のマシンの枠（設計の「テスト設計」）
 import { readdirSync, readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { validateRunJobInstruction, type RunJobInstruction } from "@ndf-factory/contracts";
@@ -441,7 +441,7 @@ describe("版（受け入れ条件 6、I48）と移行", () => {
 describe("リポジトリの同時の数（受け入れ条件 8、I49）", () => {
   beforeEach(() => setup());
 
-  it("プランの値 3 で宣言 1 のリポジトリは 2 本目が concurrent_repo_runs で断られる", async () => {
+  it("料金プランの値 3 で宣言 1 のリポジトリは 2 本目が concurrent_repo_runs で断られる", async () => {
     const pro = accountContext({ plan: "pro" });
     await h.table.setMaxConcurrentRuns("acc-1", REPO, 1);
     await manual([4], REPO, pro);
@@ -450,7 +450,7 @@ describe("リポジトリの同時の数（受け入れ条件 8、I49）", () =>
   });
 });
 
-describe("手元のランナーの同時のジョブの数（受け入れ条件 9、I50）", () => {
+describe("手元のマシンの同時のジョブの数（受け入れ条件 9、I50）", () => {
   beforeEach(() => setup());
 
   it("max_jobs 1 のランナーへ 2 本目を渡さず、1 本目が終わると渡す", async () => {
