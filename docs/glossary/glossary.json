@@ -3598,6 +3598,18 @@
       "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
+      "term": "範囲の終点",
+      "context": "ndf-release",
+      "meaning": "版の節と承認資料の「含む PR」に並べる PR の範囲の、新しい側の端のコミット。出す版のコミット（リリースのブランチの先頭か、承認に出すコミット）を指す",
+      "source": ""
+    },
+    {
+      "term": "リリースタグ",
+      "context": "ndf-release",
+      "meaning": "正式版を出したときに本番チャネルのコミットへ打つタグ `<プラグイン>--v<版>`。リリースタグのある版の節は工程から書き換えない",
+      "source": ""
+    },
+    {
       "term": "子の箇条",
       "context": "ndf-release",
       "meaning": "PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む",
