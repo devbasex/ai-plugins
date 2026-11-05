@@ -4582,13 +4582,13 @@
       "term": "予算の既定",
       "context": "ndf-workflow",
       "meaning": "開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は NDF の組み込みの値（周回 3・費用 60 USD・時間 24 時間）。Factory の画面で予算の欄を空にした単位はこの値へ戻る",
-      "pending_source": "issues/issue-2406-requirements.md"
+      "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
       "term": "既定へ戻す指示",
       "context": "ndf-workflow",
       "meaning": "開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする。Factory は予算の欄が空の単位をこの指示として実行ジョブの指示に載せる",
-      "pending_source": "issues/issue-2406-design.md"
+      "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
       "term": "予算の履歴",
