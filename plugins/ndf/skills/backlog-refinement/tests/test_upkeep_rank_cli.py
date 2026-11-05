@@ -367,7 +367,24 @@ def test_waiting_decision_and_needs_detail_are_reported(env):
     assert rep["metrics"]["waiting_decision"] == [4] and rep["metrics"]["needs_detail"] == {"4": ["size"]}
 
 
+def _created(env, before=(), after=()):
+    """起点（v1 のコミットの時刻）より前と後に作られた課題にする。"""
+
+    def fn(st):
+        for n in before:
+            st["issues"][str(n)]["created_at"] = "2000-01-01T00:00:00Z"
+        for n in after:
+            st["issues"][str(n)]["created_at"] = "2999-01-01T00:00:00Z"
+
+    env.set(fn)
+
+
+def _unscored(out):
+    return {i["number"] for i in out["items"] if "unscored" in i.get("routes", [])}
+
+
 def test_candidates_pick_unscored_issues_only_after_rank(env):
+    _created(env, after=(1, 2, 3, 4))
     _, out = env.run("candidates", "--since-ref", "v1")
     assert out["metrics"]["by_route"]["unscored"] == 0
     snaps = {i["number"]: i["digest"] for i in env.run("candidates", "--since-ref", "v1", "--all")[1]["items"]}
@@ -377,6 +394,14 @@ def test_candidates_pick_unscored_issues_only_after_rank(env):
     got = {i["number"] for i in out["items"] if "unscored" in i.get("routes", [])}
     assert got == {1, 4}  # 本文の変わった #1 と、見積の無い #4
     assert not (env.sd / "rank.json").exists()
+
+
+def test_diff_candidates_score_only_issues_created_after_the_ref(env):
+    """差分の棚卸しの見積の無い経路は起点より後に作られた課題だけ。見直しは作られた時刻で絞らない（#2315 の I4・I5）。"""
+    env.run("rank", "--scores", env.scores([]))  # 見積の記録を作る（4 件とも見積が無い）
+    _created(env, before=(1, 3), after=(2, 4))
+    assert _unscored(env.run("candidates", "--since-ref", "v1")[1]) == {2, 4}
+    assert _unscored(env.run("candidates", "--since-ref", "v1", "--depth", "review")[1]) == {1, 2, 3, 4}
 
 
 def test_apply_does_not_write_the_table_when_a_planned_move_fails(env):

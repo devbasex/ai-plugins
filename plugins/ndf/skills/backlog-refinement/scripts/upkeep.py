@@ -8,7 +8,7 @@
     python3 upkeep.py report [--depth diff|review|overhaul [--run R] [--order prune,rank,...]]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
-    python3 upkeep.py depth due|record ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
+    python3 upkeep.py depth due|record|compare ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
     python3 upkeep.py owner claim|touch|release|status ...（見直しの持ち主。upkeep_owner.py の冒頭）
     python3 upkeep.py research plan|run ...（ニーズとシーズの調査。upkeep_research.py の冒頭）
     python3 upkeep.py overhaul snapshot|count|measure ...（大整理。upkeep_overhaul.py の冒頭）
@@ -22,7 +22,7 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
   manual（--add で担当が足したもの）/ unscored（記録の見積が無いか、付けた後に要約値が変わった課題。rank を打った
-  リポジトリだけ。上限で切るときは数えない）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
+  リポジトリだけ。`--depth diff` では <ref> のコミットの時刻（metrics.since）より後に作られた課題だけ。上限で切るときは数えない）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
   課題の要約値（題名・本文・状態・マイルストーン・ラベル）を返す。
   上限（--limit → .ndf/backlog.json の candidate_limit → 既定 10）を超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば課題の
@@ -227,7 +227,9 @@ def cmd_candidates(a):
     _route_commits(root, a.since_ref, routes)
     _route_manual(a, routes, notes)
     sd = _state_dir(a.state_dir, repo)
-    for n in RC.unscored(sd, _read_state, open_issues, snapshot_digest) if has_milestones else []:
+    # 差分の棚卸しが見積の段階を付けるのは起点より後に作られた課題だけ（#2315 の決定 1・決定 6）。見直しは絞らない
+    pool = open_issues if a.depth == "review" else [i for i in open_issues if (i.get("created_at") or "") > since]
+    for n in RC.unscored(sd, _read_state, pool, snapshot_digest) if has_milestones else []:
         routes.add(n, "unscored")
     if a.depth == "review":
         _route_review(open_issues, set((D.materials(root) or {}).get("deferred_milestones") or []), routes)
