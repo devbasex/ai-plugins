@@ -696,11 +696,17 @@
     {
       "term": "プロダクションコード",
       "context": "ndf-cross-refactoring",
-      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）",
+      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）。名前がテストの形でもテストの関数を持たない .py を含む",
       "source": "docs/specifications/cross-refactoring-round-tests-and-assess.md",
       "deprecated": [
         "本番コード"
       ]
+    },
+    {
+      "term": "テストの関数",
+      "context": "ndf-cross-refactoring",
+      "meaning": "Python のファイルで、名前が test で始まる関数かメソッドの定義（async def を含む）。pytest が既定で集める形。名前がテストの形の .py は、これを持つときだけテストのファイルになる",
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md"
     },
     {
       "term": "文言固定テスト",
