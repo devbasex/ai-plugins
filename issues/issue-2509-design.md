@@ -339,10 +339,11 @@ stateDiagram-v2
 受け入れ条件 6 のテストは、ネットワークから Python とパッケージを取らずに組む。
 
 - **2 つの Python**: runner に既にある 2 つのインタプリタを使う。共有の環境は setup-python の 3.x（テストを動かすインタプリタの元）で `uv venv --python <1 つ目>` で作る。別のプロジェクトは `requires-python` を 2 つ目（`/usr/bin/python3`）の版だけに合う範囲にし、`uv run --python <2 つ目>` で指す。`UV_PYTHON_DOWNLOADS=never` を付ける。2 つがそろわない（どちらかが無い・同じマイナー版）ときは、理由を出して skip する
-- **`import psutil`**: 共有の環境の site-packages に `.pth` を置き、テストを動かす環境の site-packages を指す。共有の環境が作り直されると `.pth` が消え、`import psutil` が落ちる
+- **`import psutil`**: テストの前に `UV_PROJECT_ENVIRONMENT=<共有の環境> uv sync --frozen --offline --project plugins/ndf --extra procs` で、uv のキャッシュ（CI では `setup-uv` が `uv.lock` をキーに戻すキャッシュ）から入れる。この同期が失敗したら、理由を出して skip する。起動し直す時の `uv run --frozen --project <プラグインの根> --extra procs` は、入っている psutil をそのまま使い、PyPI へ取りに行かない。共有の環境が作り直されると psutil が消え、`import psutil` が落ちる
+- **`.pth` で psutil を見せる組み方を採らない理由**: uv の同期は `.pth` の先のパッケージを入っていると扱わない。起動し直すたびに PyPI から取りに行き、ネットワークの無い所では起動し直す段で落ちる
 - **合う Python が無い組み方を採らない理由**: `--python` を指さず、合う Python が無いと、uv は環境に触れずに失敗する。この組み方では変更の前でもテストが通り、受け入れ条件 9 を満たさない
 
-変更前の振る舞い（子へ `UV_PROJECT_ENVIRONMENT` が渡る）でこのテストが赤になることは、2026-11-05 に手元の uv 0.13.5 で確かめた。共有の環境は 3.13、別のプロジェクトは `requires-python = ">=3.14"` と `--python /usr/bin/python3.14` にした。
+変更前の振る舞い（子へ `UV_PROJECT_ENVIRONMENT` が渡る）でこのテストが赤になることは、2026-11-05 に手元の uv 0.13.5 で確かめた。共有の環境は 3.13、別のプロジェクトは `requires-python = ">=3.14"` と `--python /usr/bin/python3.14` にした。3.13 で作った一時の共有の環境へ上の `uv sync --frozen --offline` で psutil 7.2.2 を入れ、続く `uv run --quiet --frozen --project plugins/ndf --extra procs python -c 'import psutil'` が終了コード 0 で終わり、`pyvenv.cfg` の更新時刻が変わらないことも、同じ日に同じ uv で確かめた。
 
 | 子の環境変数 | `uv run` の終了コード | 共有の環境の `pyvenv.cfg` | `import psutil` |
 | --- | --- | --- | --- |
