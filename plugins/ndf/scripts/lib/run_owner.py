@@ -11,6 +11,7 @@ import contextlib
 import datetime as _dt
 import json
 import os
+import socket
 import uuid
 from pathlib import Path
 from typing import Any, Sequence
@@ -39,9 +40,10 @@ def utc_iso(ts: float) -> str:
 
 
 def owner_path(state: Path | str) -> Path:
-    """レビュー worktree（`pr<n>`・`rf<n>`）の持ち主の記録の置き場。worktree の外（隣）に置く（決定 3）。"""
+    """持ち主の記録の置き場。レビュー worktree（`pr<n>`・`rf<n>`）は worktree の外（隣）に置く（決定 3）。
+    `.json` で終わるパス（見直しの持ち主の宣言 `.ndf/backlog/owner.json`。#2315）はそのまま使う。"""
     p = Path(state)
-    return p.with_name(f"{p.name}.owner.json")
+    return p if p.suffix == ".json" else p.with_name(f"{p.name}.owner.json")
 
 
 def read_owner(state: Path | str) -> tuple[dict[str, Any] | None, str | None]:
@@ -64,6 +66,9 @@ def _write_owner(state: Path | str, record: dict[str, Any]) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, path)
+
+
+write_owner = _write_owner  # 見直しの持ち主の宣言（#2315）が使う公開の名前
 
 
 def claim_owner(state: Path | str, *, tool: str, pr: int, run: str | None = None) -> str:
@@ -153,11 +158,27 @@ def last_seen_iso(state: Path, record: dict[str, Any] | None) -> str:
     return utc_iso(_last_seen(state, record))
 
 
-def alive(state: Path, record: dict[str, Any] | None, now: float) -> bool:
-    """記録（無ければ状態の最終更新）から、持ち主の実行が生きているかを決める（決定 4）。"""
+def owner_pid_alive(record: dict[str, Any] | None) -> bool:
+    """記録の `pid` が同じホスト（`host`）で生きているか。別のホストと pid の無い記録は生きているとみなす（窓だけで決める）。"""
+    if not record or record.get("host") not in (None, socket.gethostname()) or not isinstance(record.get("pid"), int):
+        return True
+    try:
+        os.kill(record["pid"], 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def alive(state: Path, record: dict[str, Any] | None, now: float, window: float = WINDOW) -> bool:
+    """記録（無ければ状態の最終更新）から、持ち主の実行が生きているかを決める（決定 4）。
+
+    `window` は寿命の窓の秒（見直しの持ち主は `.ndf/backlog.json` の `depths.owner.ttl`）。記録に `pid` と `host` があれば、
+    同じホストでは pid の生死も見る（#2315 の不変条件 I2）。"""
     if record is not None and record.get("finished_at"):
         return False
-    return now - _last_seen(state, record) < WINDOW
+    return now - _last_seen(state, record) < window and owner_pid_alive(record)
 
 
 def alive_reason(state: Path, record: dict[str, Any] | None) -> str:

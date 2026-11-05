@@ -27,7 +27,7 @@ import statistics
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
-from typing import Iterable
+from typing import Iterable, NamedTuple
 
 # 会話の記録を層の単位で読む部品は共通層にある（#550 の決定 13）。Kiro CLI が Skill を
 # symlink にするため、`.resolve()` を通してからプラグインルートへ登る（`scripts/lib/README.md`）。
@@ -41,10 +41,7 @@ deps.require("mdtable", "yamlio")  # 表は tabulate、frontmatter は ruamel.ya
 import mdtable  # noqa: E402
 import transcript_agents  # noqa: E402
 import yamlio  # noqa: E402
-
-# 割る候補の目印を付ける目安。`development-workflow/references/context-window.md` の
-# 「遅くとも切る」値と揃える。**モデルに依る値であり、あの文書が書き換わったら揃え直す。**
-DEFAULT_WINDOW_LIMIT = 200000
+import context_decisions  # noqa: E402  割る候補の上限は記録ごとの再起動の方針で決める（#2262 の決定 14）
 
 
 def plugin_root_default() -> pathlib.Path:
@@ -378,6 +375,16 @@ def _lookahead_hit(tl: list, i: int, qualified: str, cap: int) -> bool:
     return False
 
 
+def _count_user_text(tl: list, i: int, text, skill_triggers: list, trig_h: Counter, hits: Counter, cap: int) -> None:
+    """利用者の発言 1 件（tl の i 番目）に現れたトリガーを Skill ごとに数え、続く呼び出しで当たったらヒットに数える。"""
+    text_l = str(text).lower()
+    for qualified, trs in skill_triggers:
+        if trs and any(t in text_l for t in trs):
+            trig_h[qualified] += 1
+            if _lookahead_hit(tl, i, qualified, cap):
+                hits[qualified] += 1
+
+
 def aggregate_by_project(
     transcripts: list[pathlib.Path],
     skills: list[dict],
@@ -401,20 +408,10 @@ def aggregate_by_project(
         for i, (kind, data) in enumerate(tl):
             if kind == "skill":
                 auto[data] += 1
-                continue
-            if kind == "slash":
+            elif kind == "slash":
                 explicit[data] += 1
-                continue
-            if kind != "user":
-                continue
-            text_l = str(data).lower()
-            for qualified, trs in skill_triggers:
-                if not trs:
-                    continue
-                if any(t in text_l for t in trs):
-                    trig_h[qualified] += 1
-                    if _lookahead_hit(tl, i, qualified, lookahead_cap):
-                        hits[qualified] += 1
+            elif kind == "user":
+                _count_user_text(tl, i, data, skill_triggers, trig_h, hits, lookahead_cap)
     return result
 
 
@@ -538,8 +535,8 @@ def measured_records(records: list) -> list:
     return [r for r in records if r.responses >= 3 and r.fixed is not None]
 
 
-def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]:
-    """層とフェーズ（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
+def summarize_agents(records: list, window_limit) -> tuple[list[dict], int]:
+    """層とフェーズ（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。window_limit はセッション → 上限。"""
     kept = measured_records(records)
     groups: dict[tuple[str, str, str], list] = defaultdict(list)
     for r in kept:
@@ -554,7 +551,7 @@ def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]
         # モードでも必ず関門を返すため対象にしない（契約の目印の表）。
         if layer == "supervisor" and role != "設計" and below > len(items) / 2:
             marks.append("束ねる候補")
-        if peak_max > window_limit:
+        if any(r.peak > window_limit(r.session) for r in items):
             marks.append("割る候補")
         rows.append(
             {
@@ -750,6 +747,32 @@ def filter_projects(
     return {k: v for k, v in per_project.items() if needle in k.lower()}
 
 
+class AgentReport(NamedTuple):
+    """`--agents` の報告（記録の行・要約・層ごとの合計・総計・役割ごとの使用量・要約から除いた数・割る候補の上限と出所）。"""
+
+    agents: list
+    summary: list[dict]
+    totals_rows: list[dict]
+    totals: dict
+    usage: list[dict]
+    excluded: int
+    limit_meta: dict
+
+
+def agent_report(args: argparse.Namespace) -> AgentReport:
+    """`--agents` のときだけ記録を読んで報告を作る。割る候補の上限と出所は `limit_meta` に返す。"""
+    if not args.agents:
+        return AgentReport([], [], [], {}, [], 0, {})
+    agents, skipped = collect_agents(args.session, args.layer)
+    if skipped:
+        print(f"[skill-stats] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
+    limit_of, limit_meta = context_decisions.record_limits([r.session for r in agents], args.window_limit)
+    summary, excluded = summarize_agents(agents, limit_of)
+    totals_rows, totals = layer_totals(agents)
+    usage = role_usage(agents) if args.session else []
+    return AgentReport(agents, summary, totals_rows, totals, usage, excluded, limit_meta)
+
+
 def emit_json(
     skills: list[dict],
     per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
@@ -757,12 +780,7 @@ def emit_json(
     effective_days: int | None,
     plugin_root: pathlib.Path,
     transcripts: list[pathlib.Path],
-    agents: list,
-    agent_summary: list[dict],
-    totals_rows: list[dict],
-    totals: dict,
-    usage: list[dict],
-    excluded: int,
+    report: AgentReport,
 ) -> None:
     projects_json = []
     for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
@@ -790,16 +808,16 @@ def emit_json(
         "projects": projects_json,
     }
     if args.agents:
-        out["meta"]["window_limit"] = args.window_limit
+        out["meta"].update(report.limit_meta)  # 割る候補の上限と出所（agent_report が記録から決めた値）
         out.update(
             {
-                "agents": [r.as_row() for r in agents],
-                "agent_summary": agent_summary,
-                "layer_totals": totals_rows,
-                "totals": totals,
-                "role_usage": usage,
-                "excluded": excluded,
-                "unphased_supervisors": transcript_agents.unphased_supervisors(agents),
+                "agents": [r.as_row() for r in report.agents],
+                "agent_summary": report.summary,
+                "layer_totals": report.totals_rows,
+                "totals": report.totals,
+                "role_usage": report.usage,
+                "excluded": report.excluded,
+                "unphased_supervisors": transcript_agents.unphased_supervisors(report.agents),
             }
         )
     print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -809,12 +827,7 @@ def emit_markdown(
     skills: list[dict],
     per_project: dict[str, tuple[Counter, Counter, Counter, Counter]],
     args: argparse.Namespace,
-    agents: list,
-    agent_summary: list[dict],
-    totals_rows: list[dict],
-    totals: dict,
-    usage: list[dict],
-    excluded: int,
+    report: AgentReport,
 ) -> None:
     if args.by_project:
         for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
@@ -841,12 +854,12 @@ def emit_markdown(
         print()
         print(
             format_agents_markdown(
-                agents,
-                agent_summary,
-                excluded,
-                totals_rows,
-                totals,
-                usage,
+                report.agents,
+                report.summary,
+                report.excluded,
+                report.totals_rows,
+                report.totals,
+                report.usage,
                 with_session=bool(args.session),
             )
         )
@@ -874,8 +887,8 @@ def main() -> int:
     ap.add_argument(
         "--window-limit",
         type=int,
-        default=DEFAULT_WINDOW_LIMIT,
-        help=f"割る候補の目印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})",
+        default=None,
+        help="割る候補の目印を付ける最大充填の目安。渡せば全記録へ当てる (default: 記録ごとの再起動の方針の運用上限。記録が無ければ 200000)",
     )
     args = ap.parse_args()
 
@@ -898,19 +911,7 @@ def main() -> int:
 
     transcripts = select_transcripts(args, date_from, date_to, effective_days)
 
-    agents: list = []
-    agent_summary: list[dict] = []
-    totals_rows: list[dict] = []
-    totals: dict = {}
-    usage: list[dict] = []
-    excluded = 0
-    if args.agents:
-        agents, skipped = collect_agents(args.session, args.layer)
-        if skipped:
-            print(f"[skill-stats] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
-        agent_summary, excluded = summarize_agents(agents, args.window_limit)
-        totals_rows, totals = layer_totals(agents)
-        usage = role_usage(agents) if args.session else []
+    report = agent_report(args)
 
     # Header summary
     window = []
@@ -933,32 +934,9 @@ def main() -> int:
             return 0
 
     if args.format == "json":
-        emit_json(
-            skills,
-            per_project,
-            args,
-            effective_days,
-            plugin_root,
-            transcripts,
-            agents,
-            agent_summary,
-            totals_rows,
-            totals,
-            usage,
-            excluded,
-        )
+        emit_json(skills, per_project, args, effective_days, plugin_root, transcripts, report)
     else:
-        emit_markdown(
-            skills,
-            per_project,
-            args,
-            agents,
-            agent_summary,
-            totals_rows,
-            totals,
-            usage,
-            excluded,
-        )
+        emit_markdown(skills, per_project, args, report)
 
     return 0
 

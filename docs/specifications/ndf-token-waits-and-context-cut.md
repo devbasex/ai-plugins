@@ -182,8 +182,11 @@ graph TB
   （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の「文脈の上限で切る」）
 - **コンテキスト量を読めない（記録が無い・`usage` が無い）ときは通す**
 
-**上限の既定は 200,000 で、`context-window.md` の「遅くとも 20 万」と `skill-stats.py` の
-`DEFAULT_WINDOW_LIMIT` と同じ値にする。** 測る側と止める側の上限を食い違わせないためである。
+**上限の既定は 200,000 で、`context-window.md` の「遅くとも 20 万」と同じ値にする。** 上限は再起動の方針
+（`lib/context_policy.py` の `resolve_policy`。既定は現行方式）が決め、`skill-stats.py` の「割る候補」も同じ方針の
+判定の記録から上限を読む。測る側と止める側の上限を食い違わせないためである。試行方式（`.ndf/context.json` の
+`policy: trial` か `NDF_CONTEXT_POLICY=trial`）を選んだときの帯・容量・費用の判定は `context-window.md` の
+「再起動の方針」が持つ（[仕様](ndf-context-restart-policy.md)）。
 10 万（目安の側）にしないのは、#827 で固定費だけで約 4 万あり、1 工程の途中で止まる回数が
 増えるためである。
 
@@ -330,7 +333,7 @@ worker の 2 回目の通知は、コピーを読んだ後に届いても読み�
 | `NDF_READ_REPEAT_GUARD` | `1` | `0` で連続 Read の判定を止める |
 | `NDF_READ_REPEAT_LIMIT` | `3` | 連続 Read を拒否する回数 |
 | `NDF_CONTEXT_GUARD` | `1` | `0` でコンテキスト量の判定を止める |
-| `NDF_CONTEXT_LIMIT` | `200000` | コンテキスト量の上限（トークン） |
+| `NDF_CONTEXT_LIMIT` | `200000` | 適用中の再起動の方針の運用上限（トークン）。現行方式ではコンテキスト量の上限、試行方式では判断開始の値がこれを上回れば同じ値へ下げる |
 
 ## 外部連携
 

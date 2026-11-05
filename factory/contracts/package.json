@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./phases": "./src/phases.ts",
+    "./views": "./src/views.ts",
+    "./operations": "./src/operations.ts"
+  },
   "scripts": {
     "generate": "node scripts/generate.ts",
     "typecheck": "tsc --noEmit",
@@ -10,7 +16,9 @@
     "check": "npm run typecheck && npm run test"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.19.2",
+    "js-yaml": "^4.3.2",
     "json-schema-to-typescript": "^16.0.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"

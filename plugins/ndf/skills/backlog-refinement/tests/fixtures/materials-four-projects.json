@@ -1,0 +1,126 @@
+{
+ "novel": {
+  "product": {
+   "kind": "AI が書くネット小説の制作リポジトリ",
+   "users": "ネット小説の読者"
+  },
+  "needs": {
+   "market": [
+    {
+     "name": "カクヨム",
+     "url": "https://kakuyomu.jp",
+     "viewpoints": [
+      "投稿の形式",
+      "ランキング"
+     ]
+    },
+    {
+     "name": "小説家になろう",
+     "url": "https://syosetu.com",
+     "viewpoints": [
+      "投稿の形式",
+      "ランキング"
+     ]
+    }
+   ]
+  },
+  "seeds": {
+   "libraries": [
+    {
+     "name": "faster-whisper",
+     "ecosystem": "pypi",
+     "alternatives": [
+      "whisper.cpp"
+     ]
+    }
+   ]
+  }
+ },
+ "carul": {
+  "product": {
+   "kind": "自動車販売店向けの顧客管理・商品情報管理の Web システム",
+   "users": "自動車販売店の営業・事務"
+  },
+  "needs": {
+   "usage": [
+    {
+     "name": "access-log-raw",
+     "command": "echo 個票は読まない",
+     "scope": {
+      "aggregate_only": false
+     }
+    }
+   ]
+  },
+  "seeds": {
+   "libraries": [
+    {
+     "name": "react",
+     "ecosystem": "npm",
+     "alternatives": [
+      "preact"
+     ]
+    }
+   ],
+   "environment": [
+    {
+     "name": "個人情報保護法",
+     "url": "https://www.ppc.go.jp/personalinfo/legal/"
+    }
+   ]
+  }
+ },
+ "bi-tools": {
+  "product": {
+   "kind": "社内 BI の dbt / BigQuery 基盤",
+   "users": "社内の分析担当"
+  },
+  "seeds": {
+   "libraries": [
+    {
+     "name": "dbt-bigquery",
+     "ecosystem": "pypi",
+     "alternatives": [
+      "sqlmesh"
+     ]
+    }
+   ]
+  },
+  "deferred_milestones": []
+ },
+ "ai-plugins": {
+  "product": {
+   "kind": "開発ツールのプラグイン（Claude Code / Codex 向けマーケットプレイス）",
+   "users": "AI で開発するチームの開発者"
+  },
+  "needs": {
+   "usage": [
+    {
+     "name": "commit-kinds",
+     "command": "git log --since=\"${NDF_USAGE_DAYS:-30} days ago\" --format=%s | cut -d: -f1 | sort | uniq -c | sort -rn | head -10",
+     "scope": {
+      "aggregate_only": true,
+      "days": 30,
+      "mask": [
+       "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"
+      ]
+     }
+    }
+   ]
+  },
+  "seeds": {
+   "libraries": [
+    {
+     "name": "pytest",
+     "ecosystem": "pypi",
+     "alternatives": [
+      "ward"
+     ]
+    }
+   ]
+  },
+  "failures": [
+   ".ndf/loop"
+  ]
+ }
+}

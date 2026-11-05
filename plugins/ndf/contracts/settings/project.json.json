@@ -46,6 +46,9 @@
     "instructions": {
       "summary": "instructions（このリポジトリの宣言にある最上位のキー）"
     },
+    "materials": {
+      "summary": "材料の宣言（見直しと大整理が読むニーズとシーズの調査の読み先・後回しのマイルストーン・原因の型・裏付けの計測。#2315）"
+    },
     "analysis": {
       "summary": "analysis（このリポジトリの宣言にある最上位のキー）"
     }

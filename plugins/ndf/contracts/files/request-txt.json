@@ -1,0 +1,7 @@
+{
+  "name": "request-txt",
+  "pattern": "request.txt",
+  "kind": "result",
+  "place": "state-dir",
+  "skill_readers": []
+}

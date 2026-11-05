@@ -4,7 +4,7 @@
     python3 project-mvv.py check    [--root DIR]
     python3 project-mvv.py collect  [--root DIR] [--out-dir DIR] [--request-file F] [--trend-commits N] [--trend-issues N] [--budget 60]
     python3 project-mvv.py propose  --materials F [--current] [--reason-file F] [--out-dir DIR] [--root DIR]
-    python3 project-mvv.py vet      --body F --kind candidate|revision|sprint [--root DIR]
+    python3 project-mvv.py vet      --body F --kind candidate|revision|sprint|issue [--root DIR]
     python3 project-mvv.py approve  --body F --by NAME [--reason TEXT] [--accept-unknown] [--root DIR]
     python3 project-mvv.py show     [--version N] [--diff M] [--root DIR]
     python3 project-mvv.py context  [--root DIR] [--format text|json] [--sprint <状態> | --mvv F | --milestone M [--repo OWNER/REPO]]
@@ -464,7 +464,7 @@ def build_parser():
     p.add_argument("--out-dir")
     p = add("vet", cmd_vet, "本文を NDF の共通原則とプロジェクト MVV に照らす")
     p.add_argument("--body", required=True)
-    p.add_argument("--kind", required=True, choices=("candidate", "revision", "sprint"))
+    p.add_argument("--kind", required=True, choices=("candidate", "revision", "sprint", "issue"))
     p = add("approve", cmd_approve, "利用者の承認の後に宣言を書く")
     p.add_argument("--body", required=True)
     p.add_argument("--by", required=True, help="承認者")

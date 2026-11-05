@@ -1,0 +1,7 @@
+{
+  "name": "before-json",
+  "pattern": "before.json",
+  "kind": "record",
+  "place": "main",
+  "skill_readers": []
+}

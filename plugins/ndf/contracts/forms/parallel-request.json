@@ -1,0 +1,13 @@
+{
+  "name": "parallel-request",
+  "summary": "並列の計画の下のレーンが、承認ゲート 2 の手前で本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（配布の依頼）。耐久ワークフロー parallel-<計画名> の話題 inbox へ、冪等の鍵 <ID>:inbox:<依頼> で送る。答えはイベント answer-<依頼>（result は released / rejected / failed）で 1 回だけ返り、次の配布へ回した知らせはイベント defer-<依頼> で返る",
+  "rule": "kind は request、id は <レーン名>-r<数字 12 桁>、lane はレーン名、prs と issues は整数の配列、sprint_state はプランの状態ディレクトリ、at は ISO 8601 の時刻。id のレーン名は lane と一致する",
+  "writers": ["plugins/ndf/scripts/parallel.py", "plugins/ndf/scripts/lib/parallel_lane.py"],
+  "readers": ["plugins/ndf/scripts/lib/parallel_run.py"],
+  "cases": [
+    {"message": {"kind": "request", "id": "lroot-r000000000042", "lane": "lroot", "prs": [2420], "issues": [2346], "sprint_state": "/w/.ndf/sprints/s1/8-release-prod", "at": "2026-11-02T13:00:00Z"}, "valid": true},
+    {"message": {"kind": "request", "id": "lroot-r000000000042", "lane": "lflow", "prs": [], "issues": [], "sprint_state": "/w", "at": "2026-11-02T13:00:00Z"}, "valid": false},
+    {"message": {"kind": "request", "id": "lroot-r42", "lane": "lroot", "prs": [1], "issues": [], "sprint_state": "/w", "at": "2026-11-02T13:00:00Z"}, "valid": false},
+    {"message": {"kind": "request", "id": "lroot-r000000000042", "lane": "lroot", "prs": ["1"], "issues": [], "sprint_state": "/w", "at": "2026-11-02T13:00:00Z"}, "valid": false}
+  ]
+}

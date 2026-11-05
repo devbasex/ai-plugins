@@ -21,13 +21,51 @@ ctx_label="${model_name:-ctx}"
 WARN_TOKENS=500000
 WARN_COLOR='\033[0;31m'
 
+NOTE_COLOR='\033[0;33m'
+
+# 再起動の方針（#2262）。窓の大きさは statusline の入力にだけあるので、状態ディレクトリへ書いて hook に渡す。
+# 適用値は SessionStart と hook が書いたファイルを読むだけにする（優先順位の解決を 2 か所に持たない）。
+# 置き場の順は lib/context_decisions.py の context_state_dir と同じ
+session_id=$(echo "$input" | jq -r '.session_id // empty' 2>/dev/null)
+[ -n "$session_id" ] || { [ -n "$transcript" ] && session_id=$(basename "$transcript" .jsonl); }
+case "$session_id" in *[!A-Za-z0-9_-]*) session_id="" ;; esac
+ctx_sessions="${NDF_CONTEXT_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ndf/context}"
+ctx_sessions="$ctx_sessions/sessions"
+policy="" decide_from="" policy_limit="" policy_margin=""
+if [ -n "$session_id" ]; then
+  model_id=$(echo "$input" | jq -r '.model.id // empty' 2>/dev/null)
+  window_file="$ctx_sessions/$session_id.window.json"
+  if [ -n "$ctx_size" ] && [ "$ctx_size" -gt 0 ] 2>/dev/null; then
+    seen=$(jq -r '"\(.window) \(.model)"' "$window_file" 2>/dev/null)
+    if [ "$seen" != "$ctx_size $model_id" ] && mkdir -p "$ctx_sessions" 2>/dev/null; then
+      jq -cn --argjson w "$ctx_size" --arg m "$model_id" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{window: $w, model: $m, at: $at}' > "$window_file.$$" 2>/dev/null && mv -f "$window_file.$$" "$window_file" 2>/dev/null
+      rm -f "$window_file.$$" 2>/dev/null
+    fi
+  fi
+  applied=$(jq -r 'select(.policy == "trial") | "\(.policy) \(.decide_from) \(.limit) \(.margin)"' "$ctx_sessions/$session_id.applied.json" 2>/dev/null)
+  [ -n "$applied" ] && read -r policy decide_from policy_limit policy_margin <<<"$applied"
+fi
+
 ctx_info=""
 if [ -n "$total_input" ]; then
   main_used="$((total_input / 1000))k"
-  # 上限が 200K 以下のモデル（Haiku 4.5）は 150k で知らせる。モデル名ではなく入力の上限で決める
-  main_limit=$WARN_TOKENS
-  [ -n "$ctx_size" ] && [ "$ctx_size" -le 200000 ] 2>/dev/null && main_limit=150000
-  [ "$total_input" -gt "$main_limit" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
+  if [ "$policy" = trial ]; then
+    # 試行方式: 判断開始の値を超えたら黄、実効の上限（運用上限か、窓 − 容量の余白の小さいほう）を超えたら赤
+    eff=$policy_limit
+    [ -n "$ctx_size" ] && [ $((ctx_size - policy_margin)) -lt "$eff" ] 2>/dev/null && eff=$((ctx_size - policy_margin))
+    if [ "$total_input" -gt "$eff" ] 2>/dev/null; then
+      main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
+    elif [ "$total_input" -gt "$decide_from" ] 2>/dev/null; then
+      main_used=$(printf "$NOTE_COLOR%s\033[0;36m" "$main_used")
+    fi
+  else
+    # 現行方式: 窓に対して危険な水準を示す表示の警告（hook の止める上限 200K とは別の意味）。
+    # 上限が 200K 以下のモデル（Haiku 4.5）は 150k で知らせる。モデル名ではなく入力の上限で決める
+    main_limit=$WARN_TOKENS
+    [ -n "$ctx_size" ] && [ "$ctx_size" -le 200000 ] 2>/dev/null && main_limit=150000
+    [ "$total_input" -gt "$main_limit" ] && main_used=$(printf "$WARN_COLOR%s\033[0;36m" "$main_used")
+  fi
   ctx_info=$(printf " \033[0;36m[%s %s" "$ctx_label" "$main_used")
 
   # 実行中のサブエージェントのコンテキスト使用量を並べる。statusLine の JSON は

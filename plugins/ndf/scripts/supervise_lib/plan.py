@@ -5,7 +5,8 @@
       "フェーズ": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
-      "起点": "origin/main",                # branch から作るときの起点（既定 origin/<base_branch>）
+      "起点": "origin/main",                # branch から作るときの起点（既定 origin/<base_branch>）。版の判定もこのブランチを読む
+      "起点のコミット": "<sha>",            # 省略可。作業ツリーだけをこのコミットから作る（起点より先に読む）
       "base_branch": "main",                # 起点のブランチ。pr のステップの宛先と preset の {base}（既定は .ndf/worktree.json）
       "no_reports": "-p no:x",              # run のステップの PYTEST_ADDOPTS に足す（既定は .ndf/supervise.json の test.no_reports）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）

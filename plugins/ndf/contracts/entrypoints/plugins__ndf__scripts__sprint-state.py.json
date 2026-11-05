@@ -6,19 +6,32 @@
     "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
+    "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
     "NDF_CLAUDE_ACCOUNT",
+    "NDF_CONTEXT_DIR",
+    "NDF_CONTEXT_LIMIT",
+    "NDF_CONTEXT_POLICY",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_LOOP_EXCLUDE",
     "NDF_MVV_STATE_DIR",
+    "NDF_ORGANIZER_DIR",
+    "NDF_ORGANIZER_LANE",
+    "NDF_PARALLEL_MAX_PLANS",
     "NDF_PRESENTATION_DIR",
     "NDF_RELAY_DIR",
+    "NDF_RELAY_MAX_NAMED",
+    "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
@@ -26,6 +39,7 @@
     "NDF_SUPERVISE_MODEL",
     "NDF_SV_STATE_DIR",
     "NDF_UPKEEP_STATE_DIR",
+    "NDF_VERSION",
     "NDF_WHOLE_RUNS_DIR",
     "XDG_STATE_HOME"
   ],
@@ -33,7 +47,9 @@
     {
       "file": "estimate.json",
       "keys": [
-        "records_dir"
+        "min_samples",
+        "records_dir",
+        "window"
       ]
     },
     {
@@ -66,8 +82,22 @@
   "stdin": "none",
   "stdout": "json",
   "writes": [
+    "answer-json",
+    "applied-json",
+    "approved-txt",
+    "breakdown-md",
+    "cost-estimates-json",
+    "decisions-jsonl",
     "laps-md",
-    "loop-json"
+    "loop-json",
+    "plan-json",
+    "plan-md",
+    "present-json",
+    "presented-json",
+    "prs-txt",
+    "request-id-txt",
+    "request-txt",
+    "requests-json"
   ],
   "reads": [],
   "exit": {

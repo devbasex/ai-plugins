@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CONTEXT_DIR",
+  "set_by": "user",
+  "summary": "判定の記録・費用の見込み・窓と適用値の受け渡しの置き場。無ければ ${XDG_STATE_HOME}/ndf/context → ~/.local/state/ndf/context（plugins/ndf/scripts/lib/context_decisions.py:state_dir）"
+}

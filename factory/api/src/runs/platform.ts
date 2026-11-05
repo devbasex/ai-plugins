@@ -18,6 +18,7 @@ export interface RunnerPlatform {
   runTask(mode: Exclude<ExecutionMode, "local">, instruction: RunJobInstruction, startedBy: string): Promise<string>;
   stopTask(taskArn: string, reason: string): Promise<void>;
   describeTask(taskArn: string): Promise<TaskStatus>;
-  // 状態の置き場（sprint-runs/<sprint_run_id>/ndf-state.tar.gz）の 15 分の署名つき URL。get で無ければ null
-  stateUrl(sprintRunId: string, op: "put" | "get"): Promise<SignedUrl | null>;
+  // 状態の置き場（sprint-runs/<sprint_run_id>/ndf-state.tar.gz。開発ループの実行は loops/<loopId>/ndf-state.tar.gz）の
+  // 15 分の署名つき URL。get で無ければ null
+  stateUrl(sprintRunId: string, op: "put" | "get", loopId?: string | null): Promise<SignedUrl | null>;
 }

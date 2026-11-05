@@ -1,0 +1,5 @@
+{
+  "name": "NDF_ORGANIZER_LANE",
+  "set_by": "runtime",
+  "summary": "外のオーガナイザーのレーンの名前（#2439）。配布の依頼の id の頭になる。NDF_ORGANIZER_DIR と組で渡す（plugins/ndf/scripts/lib/parallel_external.py）"
+}

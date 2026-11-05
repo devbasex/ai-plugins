@@ -480,6 +480,16 @@ def test_vet_prompt_puts_the_common_principles_first_and_the_contract(env):
     assert prompt.startswith(pm.principles()) and pm.contract() in prompt and "利用者の手を減らす" in prompt
 
 
+def test_vet_issue_judges_an_issue_body_against_the_project_mvv(env):
+    # 見直しのニーズ・シーズと大整理の大方針の本文を、承認済みのプロジェクト MVV と照らす（#2315 の決定 10）
+    assert approve(env) == 0
+    answer(env, FOLLOW)
+    issue = body_file(env, "## 何が起きたか\n帳票の出力が遅い\n", "issue.md")
+    code, out, _ = run(env, "vet", "--body", issue, "--kind", "issue", "--root", str(env["root"]))
+    prompt = (env["tmp"] / "prompt.txt").read_text()
+    assert code == 0 and "起票する課題の本文" in prompt and "利用者の手を減らす" in prompt
+
+
 # ---------------------------------------------------------------- 改訂（AC10・I3）
 
 

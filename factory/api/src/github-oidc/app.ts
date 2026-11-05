@@ -120,6 +120,12 @@ export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDe
     return (await res.json()) as T;
   }
 
+  // GitHub の利用者。取れない・数の ID を持たなければ null
+  async function githubUser(accessToken: string): Promise<GithubUser | null> {
+    const user = await githubJson<GithubUser>("/user", accessToken);
+    return user && typeof user.id === "number" ? user : null;
+  }
+
   async function exchangeGithubCode(
     clientId: string,
     clientSecret: string,
@@ -212,8 +218,8 @@ export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDe
     }
     const token = await exchangeGithubCode(clientId, clientSecret, code.gh_code);
     if (!token.access_token) return oauthError(c, "invalid_grant");
-    const user = await githubJson<GithubUser>("/user", token.access_token);
-    if (!user || typeof user.id !== "number") return oauthError(c, "invalid_grant");
+    const user = await githubUser(token.access_token);
+    if (!user) return oauthError(c, "invalid_grant");
     // sub は GitHub の数の利用者 ID。利用者が変えられるログイン名とメールを使わない
     const idToken = await issueIdToken(String(user.id), clientId, code.nonce);
     return c.json({
@@ -227,8 +233,8 @@ export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDe
   app.on(["GET", "POST"], "/userinfo", async (c) => {
     const bearer = /^Bearer (.+)$/.exec(c.req.header("Authorization") ?? "");
     if (!bearer) return oauthError(c, "invalid_token", 401);
-    const user = await githubJson<GithubUser>("/user", bearer[1]!);
-    if (!user || typeof user.id !== "number") return oauthError(c, "invalid_token", 401);
+    const user = await githubUser(bearer[1]!);
+    if (!user) return oauthError(c, "invalid_token", 401);
     const emails = (await githubJson<GithubEmail[]>("/user/emails", bearer[1]!)) ?? [];
     const primary = emails.find((e) => e.primary && e.verified);
     return c.json({

@@ -88,7 +88,13 @@ def read_pace(root) -> dict:
     return {**d, "fast": fast, "auto": auto, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
 
 
-LOOP_DEFAULTS = {"enabled": False, "budget": {"laps": 3, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 3}  # #2089 の決定 5・8
+LOOP_DEFAULTS = {
+    "enabled": False,
+    "budget": {"laps": 3, "usd": 60, "hours": 24},
+    "same_failure": 2,
+    "max_issues": 3,
+    "release_pending_max": 2,  # 配布待ちと質問待ちの周回を合わせた上限（#2436）
+}  # #2089 の決定 5・8
 
 
 def read_loop(root) -> dict:
@@ -105,7 +111,7 @@ def read_loop(root) -> dict:
     if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(_is_positive_number(v) for v in budget.values()):
         raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数で書く: {path}")
     out = {"enabled": sec.get("enabled") is True, "budget": budget}
-    for key in ("same_failure", "max_issues"):
+    for key in ("same_failure", "max_issues", "release_pending_max"):
         v = _default(sec, key, LOOP_DEFAULTS[key])
         if isinstance(v, bool) or not isinstance(v, int) or v < 1:
             raise PaceError(f"進め方の宣言の loop.{key} は 1 以上の整数で書く: {path}")

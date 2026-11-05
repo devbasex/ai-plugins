@@ -2,6 +2,23 @@
 
 正は課題の本文（#2346）で、この文書はその写しである。`spec-copy.py write` で作り直す。手で直さない。
 
+## 現状（2026-11-05、origin/develop e6af6e569）
+
+- 統括役（2 本目以降の `claude` を tmux の window で起動し、`relay.py ls` で一覧し、名前で止める）は ndf v10.27.14 で配布した。仕様は確定仕様 https://github.com/devbasex/ai-plugins/blob/develop/docs/specifications/ndf-relay-multi-session-supervisor.md にある
+- 受け入れ条件 9 の状態の語 `running` / `awaiting_approval` / `stopped` は、実装（`plugins/ndf/scripts/relay_lib/hub_client.py`）と確定仕様に入っている。`relay.py ls --json` の各行は name・state・awaiting_approval・sections・cost_usd・at・account を持つ
+- 受け入れ条件 25 の欠け（環境変数 `NDF_RELAY_HUB_WAIT`・`NDF_RELAY_STOP_WAIT` と `hub/` の受け渡しのファイル、副命令の契約）は #2434（relay.py の統括役の環境変数と hub/ の受け渡しのファイルが契約の宣言に無い）が持つ
+- 2026-11-04 に、受け入れ条件 3・8 を確かめる結合テスト `plugins/ndf/scripts/tests/test_relay_hub.py::test_spawn_ls_stop_and_hub_handover` が開発コンテナ（tmux 3.6）で「待ちが切れた: lroot の区間 2」で落ちたと記録された。**2026-11-05 の実測では再現しない**（下の表）。落ちた原因は未確認である
+- tmux を使う結合テスト 4 件は `needs_tmux`（`pytest.mark.skipif(shutil.which("tmux") is None)`）で、tmux が無い実行環境では黙って飛ばされる。リポジトリの根の `conftest.py` には、テストの置き場所ごとに要る外部コマンドの一覧（`REQUIRED_COMMANDS`）があり、欠けると既定で失敗にする（読み飛ばすのは `NDF_TESTS_ALLOW_MISSING_COMMANDS` を付けたときだけ）。tmux はこの一覧に無い
+- CI のテストのジョブ（`.github/workflows/pytest.yml` の分割の 2 本、`ubuntu-latest`）に tmux を入れる手順は無い（`grep -n tmux .github/workflows/*.yml` が 0 件）。runner に tmux が入っているか、4 件が CI で走ったかは未確認（実行 41945018391 の分割のジョブのログを `gh run view --job <番号> --log` で取ろうとしたが、件数の行を含むログが得られなかった）
+
+| 実行（2026-11-05） | 対象 | 結果 |
+| --- | --- | --- |
+| `pytest plugins/ndf/scripts/tests/test_relay_hub.py -k test_spawn_ls_stop_and_hub_handover` を 5 回続けて | develop の先頭 e6af6e569 | 5 回とも通過（1 回 3.6 秒前後） |
+| 同じテストを、環境変数 `TMUX` を立てた（tmux の中から打った）状態で | 同上 | 通過 |
+| `pytest plugins/ndf/scripts/tests/test_relay_hub.py -n 4` | 同上 | 48 件通過 |
+| `pytest plugins/ndf/scripts/tests -n 4` | 同上 | 5,780 件通過・4 件飛ばし（8 分 39 秒） |
+| 同じテストを 1 回 | タグ `ndf--v10.27.14` | 通過 |
+
 ## 具体例
 
 2026-11-01、利用者は 3 本の開発ループを並列で回すと決めた（Factory の `l20261031`・根本解決の `lroot`・開発フローの見直しの `lflow`。引継ぎ文書 `.ndf/handoff/loop-*.md`）。今のラッパー（`relay.py`）では、利用者が端末を 3 つ開き、それぞれで `claude` を打ち、文書の `ndf-next` のコマンドを手で貼る必要がある。
@@ -47,11 +64,15 @@
 | S13 | 新しいコードは共通部品（`lib/step_result.py`・`lib/locks.py`・`lib/procs.py`・`lib/run_state.py`）を通し、#2335（異常系・ログ・回復を 1 つの実行の核へ集める大方針）の契約（#2336 入口・受け渡しのファイル・設定・環境変数の契約の宣言）の対象に入る | 課題の本文の旧受け入れ条件 10 | 受け入れ条件 24・25 |
 | S14 | 起動・一覧・停止の入出力を、Factory の契約（`factory/contracts/` の実行ジョブの指示と進捗の事象）と同じ語と形で持つ。コードは参照しない | 課題の本文「Neural Development Factory との関係」 | 受け入れ条件 26・27 |
 | S15 | `relay.py ls` の出力を 1 行の JSON（統一 JSON レポート）と人の読む表の 2 つにする | 課題の本文の旧受け入れ条件 3 と、2026-10-31 の利用者の方針（統一 JSON レポート） | 受け入れ条件 9 |
+| S16 | 残りの作業は「統括役の結合テスト」である | 引継ぎ文書 `.ndf/handoff/notice-version-lfactory2.md` の 2026-11-05 09:58 JST の行（AI の起動指示。ループ lflow2 の周回 6 の版の予約）と、本文の「現状」の節（起票者、2026-11-04） | 受け入れ条件 28〜32 |
+| S17 | tmux を使う結合テストが、tmux の無い環境で黙って飛ばされないようにする | 本文の「現状」の節の「CI は tmux を入れていないため、この結合テストは `needs_tmux` で飛ばされうる」（起票者、2026-11-04） | 受け入れ条件 28・29 |
+| S18 | 2026-11-04 の失敗の原因を突き止めて直す | 本文の「現状」の節の失敗の記録（起票者、2026-11-04） | 採らない。2026-11-05 に再現しないため（前提 10）。代わりに、再び落ちたときに原因を読める出力を受け入れ条件 31 に置く |
 
 ## 目的
 
 - 同じコンテナで複数の開発ループを並列に回すとき、利用者が端末を開いてコマンドを貼る手間をなくし、どのループが動き・止まり・承認待ちかを 1 か所で見て、1 本ずつ止め・やり直し・結び付け直せる状態にする
 - conductor が自分の判断で別の開発ループを起動できるようにする（人の手を止めない。Value 2）
+- 受け入れ条件 3・8（端末の結び付いていない名前つきのラッパーでも `ndf-next` で次の区間が起動する）を確かめる結合テストが、手元と CI のどちらでも毎回走り、飛ばされたまま通過と数えられない状態にする（確かめていないものを済んだと記録しない。Value 1）
 
 ## 前提
 
@@ -64,6 +85,8 @@
 - 前提 7: 承認待ち通知は、今ある待ち通知（`lib/notify.py`・`lib/wait_notice.py`）の経路を使い、通知先を新しく足さない
 - 前提 8: 対象は 1 つのコンテナ（1 つの OS の利用者）の中だけで、ほかのコンテナや機械のラッパーは統括しない
 - 前提 9: 対象のランタイムは Claude Code だけである（ラッパーが Claude Code だけのため）。Codex は対象外
+- 前提 10: 2026-11-04 に記録された結合テストの失敗は、2026-11-05 に develop の先頭とタグ `ndf--v10.27.14` のどちらでも再現しない（「現状」の節の表）。原因は未確認のまま残し、この要求では原因を追わない。受け入れ条件 30 の実行で再び落ちたら、受け入れ条件 31 の出力を材料に別の課題を起こす
+- 前提 11: tmux の不足を失敗にする仕組みは、根の `conftest.py` の外部コマンドの一覧（`REQUIRED_COMMANDS`）と読み飛ばしの指定（`NDF_TESTS_ALLOW_MISSING_COMMANDS`）をそのまま使い、同じ役割の判定をテストのファイルに別に作らない（Value 7）
 
 ## 対象範囲
 
@@ -74,14 +97,20 @@
 - 同時に動かすラッパーの数の上限の宣言と判定
 - 統括役が落ちたときの引き継ぎ、tmux の無い環境での今の起動への戻り
 - 一覧と通知での承認待ちの表示
+- tmux を使う結合テストを、tmux の無い環境で飛ばさず失敗にすること（読み飛ばしの指定があるときを除く）
+- CI のテストのジョブで tmux を使えるようにし、4 件を走らせること
+- 結合テストの待ちが切れたときに、原因を読める記録を失敗の出力へ出すこと
 
 含まない:
 - 統括役が claude の擬似端末の親になる形（案 A）
 - 複数のコンテナ・機械をまたいだ統括
-- Factory の実行ジョブの指示でラッパーを起動する入口（手元のランナー #2189 が担う。ここでは語と形を揃えるだけ）
+- Factory の実行ジョブの指示でラッパーを起動する入口（手元のマシンで実行ジョブを動かす仕組み #2189 が担う。ここでは語と形を揃えるだけ）
 - 各ラッパーの区間の切り替え・`ndf-next` の拾い方・アカウントの切り替えの規則そのものの変更
 - tmux の導入（入っていなければ今の起動に戻るだけで、入れない）
 - 同時に流すプランの合計の上限（未決 1）
+- 2026-11-04 の結合テストの失敗の原因の調査（前提 10）
+- 契約の宣言の欠け（受け入れ条件 25 の残り。#2434 が持つ）
+- relay のラッパーと統括役のコードの変更（結合テストが通っているため。テストと CI の手順だけを変える）
 
 ## ドメインイベント
 
@@ -99,6 +128,10 @@
 | E10 | 利用者が 1 本を止めた・やり直した | `relay.py stop <名前>` / `restart <名前>` | 名前が無ければ理由つきで終わった | E5 |
 | E11 | 名前つきのラッパーが落ちた | ラッパーのプロセスの異常終了 | 一覧で「止まった」と出し、ほかは動き続けた（受け入れ条件 20） | E5 |
 | E12 | 統括役が落ちた | 1 本目のラッパーの終了・異常終了 | 動いているラッパーは止まらず、次に打った `claude` が統括役になった（受け入れ条件 21・22） | E1 |
+| E13 | テストの実行が、tmux を使う結合テストを集めた | `pytest` の収集 | — | — |
+| E14 | tmux が PATH に無く、テストの実行が失敗として tmux を名指しした | E13 で tmux が見つからない | 読み飛ばしの指定があれば、tmux を使う 4 件だけを飛ばした（受け入れ条件 28） | E13 |
+| E15 | CI のテストのジョブが tmux を使える状態でテストを始めた | Pull Request・push での CI の起動 | tmux を用意できなければ、E14 でジョブが落ちた（受け入れ条件 29） | — |
+| E16 | 結合テストの待ちが切れ、ラッパーの記録を失敗の出力に出した | 待ちの上限（区間 2 は 40 秒）に達した | — | E13 |
 
 ## 用語
 
@@ -123,7 +156,7 @@
 
 一覧と個別の操作:
 
-- [ ] 9. `relay.py ls --json` は 1 行の JSON（統一 JSON レポート。`lib/step_result.py` の形）を出し、`items` に名前つきのラッパーごとに名前・状態（`running` / `waiting_approval` / `stopped` のどれか）・承認待ちの有無・区間の数・使った費用・最後に動いた時刻を持つ。`--json` の無い `relay.py ls` は同じ中身を人の読む表で出す
+- [ ] 9. `relay.py ls --json` は 1 行の JSON（統一 JSON レポート。`lib/step_result.py` の形）を出し、`items` に名前つきのラッパーごとに名前・状態（`running` / `awaiting_approval` / `stopped` のどれか。Factory と同じ名前、2026-11-02 の承認ゲート 2 で利用者が決めた）・承認待ちの有無・区間の数・使った費用・最後に動いた時刻を持つ。`--json` の無い `relay.py ls` は同じ中身を人の読む表で出す
 - [ ] 10. 名前つきのラッパーの claude が承認ゲートの問い（`AskUserQuestion`）を出している間、`relay.py ls` のその行の状態は承認待ちになり、答えた後は動いているへ戻る
 - [ ] 11. 名前つきのラッパーが 3 本動いているとき `relay.py stop <名前>` を打つと、その 1 本だけが止まり、残りの 2 本は `relay.py ls` で動いているのまま
 - [ ] 12. 名前を付けない `relay.py stop` は、今と同じく動いているラッパーすべてに停止シグナルファイルを置く（退行しない。前提の確認: `relay_lib/mark.py` の `cmd_stop` が `state_root()` の下の動いているラッパーすべてに `stop` を置く、2026-11-02 に読んで確かめた）
@@ -155,6 +188,14 @@
 - [ ] 26. 設計文書に、起動・一覧・停止の入出力の項目と `factory/contracts/schemas/`（実行ジョブの指示・進捗の事象）の項目の対応表があり、対応する項目は同じ名前を使う
 - [ ] 27. `plugins/` から `factory/` を参照しない（`python3 scripts/check-service-boundary.py` が 0 で終わる）
 
+結合テストを毎回走らせる（2026-11-05 に足した。起票者の推定 S16・S17）:
+
+- [ ] 28. 前提: tmux が PATH に無い。操作: `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_relay_hub.py -q` を打つ。結果: 終了コードが 0 でなく、出力が不足した外部コマンドとして `tmux` を名指しする。同じ操作に `NDF_TESTS_ALLOW_MISSING_COMMANDS=1` を付けると、tmux を使う 4 件が skipped になり、終了コード 0 で終わる（tmux を使わない 44 件を一緒に飛ばすかは未決 6）
+- [ ] 29. develop 宛の Pull Request の CI のテストのジョブ（`pytest.yml` の分割の 2 本）で、tmux を使う 4 件（`test_spawn_ls_stop_and_hub_handover`・`test_second_claude_attaches_and_survives_terminal_close`・`test_limit_refuses_from_terminal_and_spawn`・`test_killed_named_wrapper_shows_stopped`）が実行されて通り、どれも skipped に数えられない。CI のログか成果物から、4 件の結果を名前で読める
+- [ ] 30. 開発コンテナ（tmux 3.6）で `test_spawn_ls_stop_and_hub_handover` を 10 回続けて実行し、10 回とも通る。`pytest plugins/ndf/scripts/tests -n 4` の全体の実行でも通る
+- [ ] 31. 結合テストが名前つきのラッパーの区間の待ちで切れて落ちるとき、失敗の出力に、そのラッパーの区間ごとの起動の引数と、作業ディレクトリのシグナルファイル（`next.json`・`stop` など）の有無が載る
+- [ ] 32. `relay.py` と `relay_lib/` の振る舞いを変えない（変更は `plugins/ndf/scripts/tests/`・根の `conftest.py`・`.github/workflows/` に限る。`git diff --stat origin/develop` で確かめる）
+
 ## 非機能の条件
 
 | 大項目 | 条件 |
@@ -163,7 +204,8 @@
 | 運用・保守性 | 統括役の起動・断り・引き継ぎ、名前つきのラッパーの起動・停止は、統括役の記録に時刻・名前・理由つきで 1 行ずつ残る |
 | 移行性 | 今の 1 本だけで使う利用者は、設定を変えずに今と同じ振る舞いになる（受け入れ条件 1・12）。tmux の無い環境も同じ（受け入れ条件 23） |
 | セキュリティ | 統括役への頼みは同じ OS の利用者だけが送れる（受け口のファイル・ソケットの権限を所有者だけにする）。最初の入力・一覧に秘密を出さない |
-| システム環境 | tmux 3.x（2026-11-02 の開発環境は 3.6）。Linux のコンテナ。Claude Code だけ |
+| システム環境 | tmux 3.x（2026-11-02 の開発環境は 3.6）。Linux のコンテナ。Claude Code だけ。CI は GitHub Actions の `ubuntu-latest` |
+| 性能・拡張性 | CI で tmux を用意する手順が足す時間は、テストのジョブ 1 本あたり 60 秒以内（今の分割の 2 本は `-n auto` で並列に回る） |
 
 ## 影響
 
@@ -172,6 +214,7 @@
 | 公開インタフェース | 変わる（足すだけ）。`relay.py` に副命令 `spawn`・`ls`・`attach`・`restart` と、`stop` の名前の引数を足す。名前を付けない `stop` と今の `run` の振る舞いは変えない（互換あり） |
 | データ | ラッパーの作業ディレクトリの置き場（`~/.local/state/ndf/relay/`）に、統括役の登録と名前の記録を足す。既存のシグナルファイルの形は変えない |
 | 既存の振る舞い | 統括役が居るときの 2 本目以降の `claude` が、自分の端末の前景で動く代わりに tmux の window へ結び付く |
+| テストの実行 | tmux の無い手元の環境で `pytest plugins/ndf/scripts/tests` を打つと、今は tmux を使う 4 件が飛ばされて通るが、失敗に変わる。続けて走らせるには `NDF_TESTS_ALLOW_MISSING_COMMANDS=1` を付ける（node・npm の不足と同じ扱い） |
 
 ## 検証手段
 
@@ -180,6 +223,8 @@
 | 起動 | `python3 plugins/ndf/scripts/relay.py ls --json` |
 | テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4`（擬似端末と使い捨ての tmux サーバ `tmux -L <使い捨ての名前>` で受け入れ条件 1〜23 を確かめる） |
 | 静的解析・型検査 | リポジトリの CI と同じ検査（`python3 scripts/check-service-boundary.py`・契約の検査） |
+| tmux の不足（受け入れ条件 28） | tmux を除いた PATH で `pytest plugins/ndf/scripts/tests/test_relay_hub.py` を打つ（pytester か `env PATH=...` の子プロセスで確かめるテスト） |
+| CI（受け入れ条件 29） | 設計 PR の後の実装 PR の CI の結果で、4 件の名前と結果を読む |
 | 手動確認 | 利用者が実際の端末エミュレータで 2 本目の `claude` を打ち、tmux の window の画面が崩れずに描かれ、キー入力が claude に届くことを見る（リリース後テスト） |
 
 ## 前提とする取り決め
@@ -206,6 +251,9 @@
 | 2. 同時に動かす数の上限の宣言の置き場（`.ndf/` の既存の設定か新しいファイルか） | 設計 | 設計の承認まで |
 | 3. conductor の起動のブロックの形（`ndf-next` と同じくコードブロックの情報文字列で拾うか） | 設計 | 設計の承認まで |
 | 4. 統括役が落ちた後、次の `claude` が来るまでの間に出た承認待ち通知を誰が出すか（各ラッパーが自分で出すか） | 設計 | 設計の承認まで |
+| 5. CI の runner（`ubuntu-latest`）に tmux が入っているか。入っていなければ CI の手順で入れる（`apt-get install tmux` など）か。設計で runner の上で `tmux -V` を実測して決める | 設計 | 設計の承認まで |
+| 6. tmux を外部コマンドの一覧へ載せる単位（`test_relay_hub.py` のファイル全体か、tmux を使う 4 件だけか）。ファイル全体にすると、tmux を使わない 44 件も tmux の無い環境で失敗になる | 設計 | 設計の承認まで |
+| 7. CI のログか成果物で 4 件の結果を名前で読む形（`-rs` の要約・JUnit XML など） | 設計 | 設計の承認まで |
 
 ## 背景
 
@@ -230,9 +278,9 @@
 
 Factory（確定仕様 `docs/specifications/ndf-factory-runs-and-runner.md`）は、並行を**サービスの側**で持つ。スプリントの実行 1 本を実行ジョブ（ECS Fargate のタスク 1 つ）で動かし、conductor は端末の無い `claude -p` で起動する。同時に動かせる数は「実行の枠」（アカウントごと・リポジトリごと。プランの表で上限 3 など）が開始のトランザクションで数える。承認ゲートで止まったら状態を S3 へ保存してジョブを終え、答えで別のコンテナが続ける。人は端末でなく画面（#2172 一覧・詳細、#2173 承認と通知）で見る。
 
-この課題と重なるのは **手元のランナー（#2189）** である。どちらも「利用者の機械の上で、複数の claude を起動し、見て、止める常駐のプロセス」になる。
+この課題と重なるのは **手元のマシンで Factory の実行ジョブを動かす仕組み（#2189）** である。どちらも「利用者の機械の上で、複数の claude を起動し、見て、止める常駐のプロセス」になる。
 
-| | この課題（ラッパーの統括役） | #2189（手元のランナー） |
+| | この課題（ラッパーの統括役） | #2189（手元のマシンで実行ジョブを動かす仕組み） |
 | --- | --- | --- |
 | 起動の出所 | 端末の `claude`・conductor の応答・`relay.py spawn` | Factory の実行ジョブの指示（サービスから受け取る） |
 | claude の形 | 対話の端末（tmux の window） | 端末の無い `claude -p` |
