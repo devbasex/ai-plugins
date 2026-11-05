@@ -111,7 +111,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- | --- |
 | `<ループ名>` | 記録の名前（英数字・`-`・`_`。先頭は英数字）。同じ名前の記録があれば再開する | `l<UTC の YYYYMMDD>` |
 | `--milestones` | 選定の対象を絞る | 開いているマイルストーンすべて（`rank` の `order`） |
-| `--budget-*` | 予算を上書きする。変わったときだけ `budget_history` に `{at, from, to}` を 1 行足す | `loop.budget` |
+| `--budget-*` | 予算を上書きする。値は数か `default`（既定へ戻す指示。その単位を反映の時点の `loop.budget` の値、宣言が無ければ組み込みの既定へ戻す）。数でも `default` でもなければ引数の誤り（終了コード 2）で記録を変えない。変わったときだけ `budget_history` に `{at, from, to}` を 1 行足し、`to` は数である | `loop.budget` |
 
 再開のコマンド（`ndf-next` の中身。`resume_command`）は
 `/goal /ndf:development-workflow --loop <名> -- 終わり: [ndf-loop] stopped <名> の行を出したとき` である。

@@ -112,7 +112,11 @@ NEW_ARGS = [
         "impl fix check release sprint close",
     ),
     ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"}, "impl fix check release sprint close"),
-    ("--production-branch", {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch）"}, "release sprint close"),
+    (
+        "--production-branch",
+        {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch → 既定ブランチ（origin/HEAD → main / master））"},
+        "release sprint close",
+    ),
     (
         "--test-cmd",
         {"help": "範囲テストの雛形（{paths} を 1 語で含むコマンド）。宣言（.ndf/project.json の test）より先に効く"},

@@ -71,6 +71,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | フェーズレポート | — | supervisor（またはプラン）が最後に返す報告 | フェーズの報告 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | worktree | `worktree` | 開発の変更を行う git worktree。課題ごとに 1 つ切る | 作業ツリー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | メインディレクトリ | — | リポジトリを clone したディレクトリ | 主ディレクトリ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 宣言を探す木 | — | supervise.py new が .ndf/ の宣言を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く | — | — | — |
 | ベースブランチ | — | worktree の分岐元と Pull Request の宛先 | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の置き場は `experimental/` | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |

@@ -415,6 +415,45 @@ def test_stop_file_works_at_the_next_boundary_and_resume_removes_it(env):
     assert [lap["n"] for lap in r["laps"]] == [1, 2] and sl.consumed(r)["laps"] == 2
 
 
+def test_budget_default_returns_the_unit_to_the_repository_default_and_judges_with_it(env):
+    start(env, usd=10)
+    n = len(rec(env)["budget_history"])
+    assert sl.cmd_start(env, "l1", [], {"usd": sl.BUDGET_DEFAULT})["status"] == "ok"
+    r = rec(env)
+    assert r["budget"] == {"laps": 3, "usd": 60, "hours": 24}
+    assert len(r["budget_history"]) == n + 1 and r["budget_history"][-1]["to"]["usd"] == 60
+    out = run_lap(env, cost=15.0)
+    assert out["status"] == "ok" and rec(env)["stop"] is None
+
+
+def test_budget_default_on_a_default_record_or_a_new_loop_adds_no_history(env):
+    start(env, laps=sl.BUDGET_DEFAULT, usd=sl.BUDGET_DEFAULT, hours=sl.BUDGET_DEFAULT)
+    assert rec(env)["budget"] == {"laps": 3, "usd": 60, "hours": 24} and rec(env)["budget_history"] == []
+    sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT, "usd": sl.BUDGET_DEFAULT, "hours": sl.BUDGET_DEFAULT})
+    assert rec(env)["budget_history"] == []
+
+
+def test_budget_default_uses_builtin_defaults_for_undeclared_units(env):
+    (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {"enabled": True, "budget": {"usd": 80}}}))
+    start(env, laps=1, usd=1, hours=1)
+    sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT, "usd": sl.BUDGET_DEFAULT, "hours": sl.BUDGET_DEFAULT})
+    assert rec(env)["budget"] == {"laps": 3, "usd": 80, "hours": 24}
+
+
+def test_cli_budget_takes_a_number_or_default_and_refuses_anything_else():
+    import argparse
+
+    import sprint_loop_cli
+
+    ap = argparse.ArgumentParser()
+    sprint_loop_cli.add_loop_parser(ap.add_subparsers(dest="cmd"), lambda a: None)
+    a = ap.parse_args(["loop", "start", "l1", "--budget-usd", "default", "--budget-laps", "2"])
+    assert (a.budget_usd, a.budget_laps, a.budget_hours) == (sl.BUDGET_DEFAULT, 2.0, None)
+    with pytest.raises(SystemExit) as e:
+        ap.parse_args(["loop", "start", "l1", "--budget-usd", "abc"])
+    assert e.value.code == 2
+
+
 def test_budget_resume_needs_an_override(env):
     start(env, laps=1)
     run_lap(env)
@@ -1970,3 +2009,109 @@ def test_characterize_answer_appends_notes_after_the_row(env):
     env.run = run
     out = sl.cmd_answer(env, "l1", 12, False, None)
     assert out["status"] == "ok" and out["items"] == [row(env, 12), {"note": "承認の記録を書けない（2）: 書けない理由"}]
+
+
+# ---------------------------------------------------------------- active_seconds の現状固定
+
+
+def _lap(s, e=None, **kw):
+    return {"started_at": s, "ended_at": e, **kw}
+
+
+@pytest.mark.parametrize(
+    ("rec_", "expected"),
+    [
+        ({}, 0.0),
+        ({"laps": [], "stops": []}, 0.0),
+        ({"laps": [_lap("2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z")]}, 3600.0),
+        # 進行中の周回（終わりが無い）は数えない
+        ({"laps": [_lap("2026-10-25T00:00:00Z")]}, 0.0),
+        # 始まりが無い周回も数えない
+        ({"laps": [_lap(None, "2026-10-25T01:00:00Z")]}, 0.0),
+        # 終わりが始まりより前なら 0 に丸める
+        ({"laps": [_lap("2026-10-25T01:00:00Z", "2026-10-25T00:00:00Z")]}, 0.0),
+        # タイムゾーンの無い時刻は UTC として読む
+        ({"laps": [_lap("2026-10-25T00:00:00", "2026-10-25T00:30:00Z")]}, 1800.0),
+        # 複数の周回は足す
+        (
+            {"laps": [_lap("2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z"), _lap("2026-10-25T02:00:00Z", "2026-10-25T02:30:00Z")]},
+            5400.0,
+        ),
+    ],
+)
+def test_characterize_active_seconds_laps(rec_, expected):
+    assert sl_record.active_seconds(rec_) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("stops", "expected"),
+    [
+        # 周回の途中の停止は重なりを引く
+        ([{"at": "2026-10-25T00:10:00Z", "resumed_at": "2026-10-25T00:20:00Z"}], 3000.0),
+        # 再開していない停止は引かない
+        ([{"at": "2026-10-25T00:10:00Z"}], 3600.0),
+        ([{"at": None, "resumed_at": "2026-10-25T00:20:00Z"}], 3600.0),
+        # 周回の外の停止は引かない
+        ([{"at": "2026-10-25T02:00:00Z", "resumed_at": "2026-10-25T03:00:00Z"}], 3600.0),
+        # 周回にまたがる停止は重なった分だけ引く
+        ([{"at": "2026-10-24T23:00:00Z", "resumed_at": "2026-10-25T00:15:00Z"}], 2700.0),
+        # 周回より長い停止は 0 に丸める
+        ([{"at": "2026-10-24T23:00:00Z", "resumed_at": "2026-10-25T02:00:00Z"}], 0.0),
+        # 重なる停止は別々に引き、負になれば 0 に丸める
+        (
+            [
+                {"at": "2026-10-25T00:00:00Z", "resumed_at": "2026-10-25T00:40:00Z"},
+                {"at": "2026-10-25T00:20:00Z", "resumed_at": "2026-10-25T01:00:00Z"},
+            ],
+            0.0,
+        ),
+        (
+            [
+                {"at": "2026-10-25T00:00:00Z", "resumed_at": "2026-10-25T00:10:00Z"},
+                {"at": "2026-10-25T00:30:00Z", "resumed_at": "2026-10-25T00:40:00Z"},
+            ],
+            2400.0,
+        ),
+    ],
+)
+def test_characterize_active_seconds_subtracts_stop_overlap(stops, expected):
+    r = {"laps": [_lap("2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z")], "stops": stops}
+    assert sl_record.active_seconds(r) == pytest.approx(expected)
+
+
+_FIN_R = {"started_at": "2026-10-26T00:00:00Z", "ended_at": "2026-10-26T00:20:00Z"}
+_FIN_Q = {"started_at": "2026-10-26T00:00:00Z", "ended_at": "2026-10-26T00:05:00Z"}
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        # held_at で区切り、release.finish の区間を足す。ended_at は使わない
+        ({"release": {"finish": _FIN_R}}, 1800.0 + 1200.0),
+        # release が無ければ question.finish の区間を足す
+        ({"question": {"finish": _FIN_Q}}, 1800.0 + 300.0),
+        # 両方あれば release を使う
+        ({"release": {"finish": _FIN_R}, "question": {"finish": _FIN_Q}}, 1800.0 + 1200.0),
+        # release に finish が無ければ question へ移る
+        ({"release": {}, "question": {"finish": _FIN_Q}}, 1800.0 + 300.0),
+        ({"release": None, "question": None}, 1800.0),
+        # 残りを流している最中（終わりが無い）は足さない
+        ({"release": {"finish": {"started_at": "2026-10-26T00:00:00Z"}}}, 1800.0),
+    ],
+)
+def test_characterize_active_seconds_held_lap(extra, expected):
+    lap = _lap("2026-10-25T00:00:00Z", "2026-10-27T00:00:00Z", held_at="2026-10-25T00:30:00Z", **extra)
+    assert sl_record.active_seconds({"laps": [lap]}) == pytest.approx(expected)
+
+
+def test_characterize_active_seconds_held_lap_subtracts_stops_from_each_span():
+    lap = _lap("2026-10-25T00:00:00Z", None, held_at="2026-10-25T00:30:00Z", release={"finish": _FIN_R})
+    stops = [
+        {"at": "2026-10-25T00:20:00Z", "resumed_at": "2026-10-26T00:10:00Z"},  # 両方の区間にまたがる
+    ]
+    assert sl_record.active_seconds({"laps": [lap], "stops": stops}) == pytest.approx(1200.0 + 600.0)
+
+
+def test_characterize_active_seconds_without_held_at_ignores_finish():
+    lap = _lap("2026-10-25T00:00:00Z", "2026-10-25T00:30:00Z", release={"finish": _FIN_R})
+    assert sl_record.active_seconds({"laps": [lap]}) == pytest.approx(1800.0)

@@ -28,6 +28,7 @@ from sprint_loop_record import (
     LAPS_MD,
     STOP_FILE,
     VERSION,
+    BUDGET_DEFAULT,
     EXIT_REFUSED,
     EXIT_STOPPED,
     DONE,
@@ -116,10 +117,8 @@ def permission(env: Env) -> tuple[dict | None, list[str], object]:
     return decl, why, project
 
 
-def apply_budget(env: Env, rec: dict, given: dict) -> None:
-    over = {k: v for k, v in given.items() if v is not None}
-    if not over:
-        return
+def apply_budget(env: Env, rec: dict, given: dict, defaults: dict) -> None:
+    over = {k: (defaults[k] if v == BUDGET_DEFAULT else v) for k, v in given.items() if v is not None}
     new = {**rec["budget"], **over}
     if new != rec["budget"]:
         rec.setdefault("budget_history", []).append({"at": env.now(), "from": dict(rec["budget"]), "to": new})
@@ -136,7 +135,7 @@ def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bo
             return start_new(env, name, decl, project, milestones, budget, goal)
         rec = read_loop_record(env, name)
         before = json.loads(json.dumps(rec))
-        apply_budget(env, rec, budget)
+        apply_budget(env, rec, budget, decl["budget"])
         if rec.get("status") == "stopped":
             return resume_stopped(env, rec, before)
         write_record(env, rec, before)
@@ -168,7 +167,7 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "excluded": [],
         "sprint_mvv_approvals": [],
     }
-    apply_budget(env, rec, budget)
+    apply_budget(env, rec, budget, decl["budget"])
     write_record(env, rec)
     update_handoff(env, rec, "始めた。次は選定", resume_command(rec), select_cmd(name))
     return loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name))

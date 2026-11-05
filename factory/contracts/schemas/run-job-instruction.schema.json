@@ -25,7 +25,7 @@
     "APPROVAL_REQUEST_ID": { "description": "答えの出た承認の依頼の識別子。答えの本文は載せない。無い resume は答えを書かずに続ける", "type": "string", "minLength": 1 },
     "LOOP_NAME": { "description": "NDF の開発ループの名前。loop と、ループの実行の resume に載せる", "type": "string", "pattern": "^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$" },
     "LOOP_MILESTONES": { "description": "選定の対象のマイルストーンの題を , で結ぶ", "type": "string", "minLength": 1, "maxLength": 1010 },
-    "LOOP_BUDGET": { "description": "宣言した予算だけを並べる。無ければ NDF の既定", "type": "string", "minLength": 1, "pattern": "^(laps=\\d+(\\.\\d+)?)?(,?usd=\\d+(\\.\\d+)?)?(,?hours=\\d+(\\.\\d+)?)?$" },
+    "LOOP_BUDGET": { "description": "単位ごとに数か default（その単位をリポジトリの既定へ戻す）を並べる。並べない単位と、LOOP_BUDGET が無いときは NDF の記録の値のまま（新しいループでは NDF の既定）", "type": "string", "minLength": 1, "pattern": "^(laps=(\\d+(\\.\\d+)?|default))?(,?usd=(\\d+(\\.\\d+)?|default))?(,?hours=(\\d+(\\.\\d+)?|default))?$" },
     "EXCLUDE_ISSUES": { "description": "同じリポジトリの別の実行が持つ課題の番号（カンマ区切り）。ループの選定から外す", "type": "string", "pattern": "^[1-9][0-9]*(,[1-9][0-9]*)*$" },
     "LOOP_ANSWERS": { "description": "人の判断待ちへの答え（<番号>=approved|rejected、承認なら #<PR の番号> を続けてよい）を , で結ぶ", "type": "string", "pattern": "^[1-9][0-9]*=(approved|rejected)(#[1-9][0-9]*)?(,[1-9][0-9]*=(approved|rejected)(#[1-9][0-9]*)?)*$" },
     "RELEASE_SEQ": { "description": "配布の実行のまとめた配布の連番（#2439）", "type": "string", "pattern": "^[1-9][0-9]*$" },

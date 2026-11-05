@@ -599,6 +599,11 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "宣言を探す木",
+      "context": "ndf-workflow",
+      "meaning": "supervise.py new が .ndf/ の宣言を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く"
+    },
+    {
       "term": "ベースブランチ",
       "context": "ndf-workflow",
       "meaning": "worktree の分岐元と Pull Request の宛先",

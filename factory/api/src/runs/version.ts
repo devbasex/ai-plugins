@@ -42,3 +42,10 @@ export function isLegacyVersion(version: string, minVersion: string | null | und
   const c = compareVersions(version, minVersion);
   return c === null || c < 0;
 }
+
+// 予算の単位を既定へ戻す指示（default）を NDF が受ける版か（#2406 の決定 4）。下限が無い・読めない版は戻せない側に倒す
+export function supportsBudgetReset(version: string, minVersion: string | null | undefined): boolean {
+  if (!minVersion) return false;
+  const c = compareVersions(version, minVersion);
+  return c !== null && c >= 0;
+}
