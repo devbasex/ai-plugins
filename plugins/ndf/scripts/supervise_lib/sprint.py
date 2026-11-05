@@ -278,6 +278,38 @@ PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方
 MERGE_STAGE = "設計 PR のマージ"
 
 
+def _design_waves(a, repo: str, advise: bool) -> list[dict]:
+    """設計 → 承認ゲート 1 → 設計 PR のマージの 3 ステージ。--design が無ければ空。"""
+    if not a.design:
+        return []
+    design = plan_advise_design if advise else plan_sprint_design
+    return [
+        {"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}},
+        {"name": GATE_1, "gate": normal_gate_1(a, advise)},
+        {"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}},
+    ]
+
+
+def _release_tail(a, repo: str, first: str, advise: bool) -> list[dict]:
+    """検査より後のステージ。雛形で組まない経路は route_waves、雛形なら配布と（組めれば）本番。"""
+    if not has_release_template(a):
+        return route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
+    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
+    if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
+        if advise:
+            release["note"] = normal_gate_2(a)
+        return [release]
+    prod = prod_version(a.version)
+    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
+        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
+        return [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
+    return [
+        release,
+        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
+        {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
+    ]
+
+
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     normal は承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → 配布）を、最初の
@@ -288,12 +320,7 @@ def sprint_plans(a) -> list[dict]:
         return build(a)
     repo = str(Path(a.worktree).resolve())
     advise = advises(a)
-    design = plan_advise_design if advise else plan_sprint_design
-    waves = []
-    if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
-        waves.append({"name": GATE_1, "gate": normal_gate_1(a, advise)})
-        waves.append({"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}})
+    waves = _design_waves(a, repo, advise)
     first = MERGE_STAGE if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
 
     def then(name: str) -> dict:
@@ -305,22 +332,7 @@ def sprint_plans(a) -> list[dict]:
         {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}, "then_of": first},
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
-    if not has_release_template(a):
-        return waves + route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
-    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
-    if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
-        if advise:
-            release["note"] = normal_gate_2(a)
-        return waves + [release]
-    prod = prod_version(a.version)
-    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
-        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
-        return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
-    return waves + [
-        release,
-        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
-        {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
-    ]
+    return waves + _release_tail(a, repo, first, advise)
 
 
 def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = None) -> str:
