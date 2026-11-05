@@ -32,7 +32,6 @@ from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
 from supervise_lib.release_templates import release_verify_step, strip_suffix
-from supervise_lib.stage_index import _stage_entry, write_stage_index  # noqa: F401  # _stage_entry はテストが sprint から読む
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
@@ -279,38 +278,6 @@ PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方
 MERGE_STAGE = "設計 PR のマージ"
 
 
-def _design_waves(a, repo: str, advise: bool) -> list[dict]:
-    """設計 → 承認ゲート 1 → 設計 PR のマージの 3 ステージ。--design が無ければ空。"""
-    if not a.design:
-        return []
-    design = plan_advise_design if advise else plan_sprint_design
-    return [
-        {"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}},
-        {"name": GATE_1, "gate": normal_gate_1(a, advise)},
-        {"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}},
-    ]
-
-
-def _release_tail(a, repo: str, first: str, advise: bool) -> list[dict]:
-    """検査より後のステージ。雛形で組まない経路は route_waves、雛形なら配布と（組めれば）本番。"""
-    if not has_release_template(a):
-        return route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
-    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
-    if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
-        if advise:
-            release["note"] = normal_gate_2(a)
-        return [release]
-    prod = prod_version(a.version)
-    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
-        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
-        return [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
-    return [
-        release,
-        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
-        {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
-    ]
-
-
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     normal は承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → 配布）を、最初の
@@ -321,7 +288,12 @@ def sprint_plans(a) -> list[dict]:
         return build(a)
     repo = str(Path(a.worktree).resolve())
     advise = advises(a)
-    waves = _design_waves(a, repo, advise)
+    design = plan_advise_design if advise else plan_sprint_design
+    waves = []
+    if a.design:
+        waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
+        waves.append({"name": GATE_1, "gate": normal_gate_1(a, advise)})
+        waves.append({"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}})
     first = MERGE_STAGE if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
 
     def then(name: str) -> dict:
@@ -333,7 +305,22 @@ def sprint_plans(a) -> list[dict]:
         {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}, "then_of": first},
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
-    return waves + _release_tail(a, repo, first, advise)
+    if not has_release_template(a):
+        return waves + route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
+    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
+    if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
+        if advise:
+            release["note"] = normal_gate_2(a)
+        return waves + [release]
+    prod = prod_version(a.version)
+    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
+        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
+        return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
+    return waves + [
+        release,
+        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
+        {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
+    ]
 
 
 def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = None) -> str:
@@ -418,6 +405,45 @@ def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
         p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
         paths.append(str(p))
     return paths
+
+
+def _stage_entry(wave: dict, i: int, out: Path) -> dict:
+    """ステージ 1 件の一覧の項目。then_of のステージは command を持たず、前のステージへ連結される。"""
+    import parallel_lane
+
+    entry = {"wave": i, "name": wave["name"]}
+    if "gate" in wave:
+        entry["gate"] = wave["gate"]
+    elif "manual" in wave:
+        entry.update(manual=wave["manual"], note=wave["note"])
+    else:
+        paths = _write_plans(wave, i, out)
+        entry["plans"] = paths
+        if "note" in wave:
+            entry["note"] = wave["note"]
+        if "then_of" in wave:
+            entry["then_of"] = wave["then_of"]
+        else:
+            entry["done"] = str(out.resolve() / f"done-{i}.json")  # 待ちとキューの続きが読む（#1426 の決定 6）
+            entry["command"] = (
+                f"python3 {shlex.quote(str(SELF))} queue "
+                + " ".join(map(shlex.quote, paths))
+                + f" --max {parallel_lane.queue_max()} --done {shlex.quote(entry['done'])}"
+            )
+    return entry
+
+
+def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
+    """ステージごとのプランをファイルへ書き、ステージの一覧（command / then_of の連結を含む）を返す。"""
+    index = []
+    for i, wave in enumerate(waves, 1):
+        entry = _stage_entry(wave, i, out)
+        if "then_of" in entry:
+            # 前のステージの queue が --then で続けて流す
+            prev = next(e for e in index if e["name"] == entry["then_of"])
+            prev["command"] += " --then " + " ".join(map(shlex.quote, entry["plans"]))
+        index.append(entry)
+    return index
 
 
 def manifest_head(a, pace: str, closing: bool = False) -> dict:
