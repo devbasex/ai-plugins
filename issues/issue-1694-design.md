@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: このリポジトリの継続的統合のジョブ 24 件のうち 11 件（生成物の同期・Skill の frontmatter・リンク・文書の行数・指示書・`claude plugin validate` など）が、テストの宣言（`.ndf/project.json` の `test`）のどこにも載っていない。cross-refactoring の改善項目がこれらの検査を壊しても、着手前のテストと最終ゲートは走らせず、Pull Request を出した後の継続的統合で初めて落ちる。`init` は毎回「宣言に無いもの 11 件」を知らせる
+- **今どうなっているか**: このリポジトリの継続的統合のジョブ 24 件のうち 11 件が、テストの宣言（`.ndf/project.json` の `test`）のどこにも載っていない。11 件は生成物の同期・Skill の frontmatter・リンク・文書の行数・指示書・`claude plugin validate` などである。cross-refactoring の改善項目がこれらの検査を壊しても、着手前のテストと最終ゲートは走らせず、Pull Request を出した後の継続的統合で初めて落ちる。`init` は毎回「宣言に無いもの 11 件」を知らせる
 - **誰に効くか**: このリポジトリで cross-refactoring・cross-review・テストの実行（`test-run.py`）を回す開発者と AI
 - **変えると何が成り立つか**: 手元で判定が決まる 9 件は静的解析の suite として最終ゲートで走り、改善項目が壊せば変更起因として止まる。手元で判定が決まらない 2 件は理由つきの除外になり、`init` は「宣言に無いジョブ」を知らせなくなる
 
@@ -20,7 +20,7 @@
 | `claude` を `PATH` から外して `bash scripts/validate-runtime-plugins.sh` を走らせると、`==> claude CLI not found; skipped claude plugin validate` を出して終了コード 0、8.5 秒（2026-11-05） | 実測 | `claude` の CLI が無いホストでも、このジョブの残りの検査は走り、判定が決まること |
 | `scripts/validate-runtime-plugins.sh` の `if command -v claude` の分岐 | 実測（コードの読み取り） | CLI の有無で落ちないことが、スクリプト自身の約束であること |
 | `plugins/ndf/scripts/lib/test_triage.py` の `lint_verdict`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/gate_lint.py` の `lint_gate` | 実測（コードの読み取り） | 最終ゲートは静的解析の suite を 1 本ずつ走らせ、着手前の suite ごとの成否で既存失敗と変更起因を分けること |
-| `plugins/ndf/scripts/project_lib/merge.py` の I1（置き換えてよいのは、キーが無い項目と、前の解析の値のままの項目だけ）と、宣言の `analysis.written` に `test` の指紋が無いこと | 実測（コードと宣言の読み取り） | 宣言の再解析が、手で足した `test` の要素を置き換えないこと |
+| `plugins/ndf/scripts/project_lib/merge.py` の不変条件（置き換えてよいのは、キーが無い項目と、前の解析の値のままの項目だけ）と、宣言の `analysis.written` に `test` の指紋が無いこと | 実測（コードと宣言の読み取り） | 宣言の再解析が、手で足した `test` の要素を置き換えないこと |
 
 要求と受け入れ条件は #1694 の本文にある（コピーは [issue-1694-requirements.md](issue-1694-requirements.md) ）。この文書は「どう作るか」だけを扱う。
 
@@ -33,7 +33,7 @@
 | このリポジトリの開発の検査（`repo-dev-checks`） | 継続的統合のジョブ・ジョブの識別子・除外したジョブ |
 | cross-refactoring（`ndf-cross-refactoring`） | 宣言に無いジョブ・着手前のテスト・最終ゲート・既存失敗・変更起因 |
 
-**関係は公開された言語である。** 2 つのコンテキストは、宣言のスキーマ（`plugins/ndf/skills/development-workflow/schemas/project.schema.json`）の `test.suites[].ci_jobs`・`test.ci_exempt` を介してだけやり取りする。この変更はスキーマを変えず、このリポジトリの側の値だけを足す。
+**関係は公開された言語である。** 2 つのコンテキストは、宣言のスキーマの `test.suites[].ci_jobs`・`test.ci_exempt` を介してだけやり取りする。スキーマは `plugins/ndf/skills/development-workflow/schemas/project.schema.json` にある。この変更はスキーマを変えず、このリポジトリの側の値だけを足す。
 
 ### 集約
 
@@ -106,7 +106,7 @@ graph TD
 
 ### 足す suite
 
-9 本とも `kind: lint`・`needs: []` で、`scope_command`・`junit`・`paths` を書かない（決定 3）。`ci_jobs` はジョブの単位の識別子 1 つで、パスは `.github/workflows/runtime-plugin-validate.yml`（以下の表では `#` 以降だけを書く）。並びは既存の suite 5 本の後ろに、ワークフローのジョブの順で置く。
+9 本とも `kind: lint`・`needs: []` で、`scope_command`・`junit`・`paths` を書かない（決定 3）。`ci_jobs` はジョブの単位の識別子 1 つである。パスは `.github/workflows/runtime-plugin-validate.yml` で、以下の表では `#` 以降だけを書く。並びは既存の suite 5 本の後ろに、ワークフローのジョブの順で置く。
 
 | `name` | `runner` | `command` | `ci_jobs` | 手元の所要 |
 | --- | --- | --- | --- | --- |
@@ -120,7 +120,7 @@ graph TD
 | `doc-line-limit-check` | `check-doc-line-limit` | `python3 scripts/check-doc-line-limit.py --root .` | `#doc-line-limit-check` | 0.1 秒 |
 | `instruction-files-check` | `check-instruction-files` | `python3 plugins/ndf/scripts/instructions-check.py --root .` | `#instruction-files-check` | 0.1 秒 |
 
-所要は 2026-11-05 のこのブランチの worktree での 1 回の実測で、合計 19.6 秒（丸める前の値の和。表の値の和は 19.5 秒。非機能の条件の 30 秒以内）。`runtime-plugin-validate` は `claude` の CLI があるときの値で、無いときは 8.5 秒。`name` は継続的統合のジョブ id と同じにし、最終ゲートの記録と継続的統合のチェックの名前を同じ語で読めるようにする。`runner` は呼ぶスクリプトの名前（拡張子を除く）で、判定には使われない。
+所要は 2026-11-05 のこのブランチの worktree での 1 回の実測である。合計は 19.6 秒で、非機能の条件の 30 秒以内に収まる（丸める前の値の和。表の値の和は 19.5 秒）。`runtime-plugin-validate` は `claude` の CLI があるときの値で、無いときは 8.5 秒。`name` は継続的統合のジョブ id と同じにし、最終ゲートの記録と継続的統合のチェックの名前を同じ語で読めるようにする。`runner` は呼ぶスクリプトの名前（拡張子を除く）で、判定には使われない。
 
 1 本を宣言に書いた形の例:
 
@@ -174,7 +174,7 @@ sequenceDiagram
 | 落ちていた | 既存失敗（判定から外す） |
 | 読めない | 変更起因 |
 
-`scope_command` を持たない suite は、改善項目ごとの検証（範囲テスト）では走らない（`targets.py` の `lint_runs_for` は `scope_command` を持つ suite だけを使う）。改善項目が壊した場合に気づくのは最終ゲートである。
+`scope_command` を持たない suite は、改善項目ごとの検証（範囲テスト）では走らない。`targets.py` の `lint_runs_for` が、`scope_command` を持つ suite だけを使うためである。改善項目が壊した場合に気づくのは最終ゲートである。
 
 ## 非機能の実現方式
 
@@ -187,7 +187,7 @@ sequenceDiagram
 
 ### 決定 1: 落ちた検査を 1 つずつ判定できるよう、ジョブ 1 件に suite を 1 本置く
 
-最終ゲートは静的解析の suite を 1 本ずつ走らせ、着手前の suite ごとの成否で既存失敗と変更起因を分ける（`gate_lint.py`・`lint_verdict`）。9 件を 1 本の suite にまとめると、どれか 1 つが着手前から落ちていれば suite 全体が既存失敗として判定から外れ、ほかの 8 件を改善項目が壊しても止まらない。`&&` でつないだコマンドは最初の失敗で止まり、後ろの検査が走らない。
+最終ゲートは静的解析の suite を 1 本ずつ走らせ、着手前の suite ごとの成否で既存失敗と変更起因を分ける（`gate_lint.py`・`lint_verdict`）。9 件を 1 本の suite にまとめると、どれか 1 つが着手前から落ちていれば suite 全体が既存失敗として判定から外れる。そのとき、ほかの 8 件を改善項目が壊しても止まらない。`&&` でつないだコマンドは最初の失敗で止まり、後ろの検査が走らない。
 
 9 本の `command` を 1 本の suite にまとめる形は採らない。suite を増やす費用は宣言の行数だけで、走らせる時間は変わらないためである。
 
@@ -195,7 +195,7 @@ sequenceDiagram
 
 ### 決定 2: `claude` の CLI が無いホストでも残りの検査を走らせるため、`runtime-plugin-validate` を suite にする
 
-このジョブのスクリプトは CLI が無いと `claude plugin validate` だけを飛ばし、定義ファイルの形・マーケットプレイスの登録・説明文書の数と版・Skill の境界をまたぐ参照の検査を走らせて 0 で終わる（実測）。後ろの 2 つの検査（`check-doc-staleness.py`・`check-cross-skill-refs.py`）は、継続的統合ではこのジョブでしか走らない（`.github/` と `scripts/*.sh` を検索し、呼ぶのは `scripts/validate-runtime-plugins.sh` だけ）。除外にすると改善項目が壊しても手元で気づけない。継続的統合で先に CLI を入れる手順（`npm install -g`）は準備の手順で、受け入れ条件 4 が除く。Codex のホストで CLI が無いときは、`claude plugin validate` の分だけ継続的統合より検査が少なくなる。
+このジョブのスクリプトは、CLI が無いと `claude plugin validate` だけを飛ばす。残りの検査（定義ファイルの形・マーケットプレイスの登録・説明文書の数と版・Skill の境界をまたぐ参照）は走らせ、0 で終わる（実測）。後ろの 2 つの検査（`check-doc-staleness.py`・`check-cross-skill-refs.py`）は、継続的統合ではこのジョブでしか走らない。`.github/` と `scripts/*.sh` を検索すると、呼ぶのは `scripts/validate-runtime-plugins.sh` だけである。除外にすると改善項目が壊しても手元で気づけない。継続的統合で先に CLI を入れる手順（`npm install -g`）は準備の手順で、受け入れ条件 4 が除く。Codex のホストで CLI が無いときは、`claude plugin validate` の分だけ継続的統合より検査が少なくなる。
 
 除外にする形は採らない。CLI の有無で変わるのは検査の 1 つだけで、残りの検査は手元で判定が決まるためである。スクリプトの中で別の suite と重なる検査（約 6.5 秒）は、重ならないように別の suite を外す形も採らない。外すとその suite の `command` の引数が継続的統合のジョブと変わり（スクリプトの中では `--root` に絶対パスを渡す）、決定 1 の 1 件ずつの判定も失うためである。
 
@@ -203,7 +203,7 @@ sequenceDiagram
 
 ### 決定 3: 読まれない値を宣言に残さないため、足す suite に `scope_command` と `paths` を書かない
 
-9 本の検査スクリプトはどれも対象のファイルのパスを引数に受けず、受ける形にする変更はこの課題の範囲の外である（要求の対象範囲）。静的解析の suite の `paths` を読むのは、`scope_command` を持つ suite の範囲を決めるとき（`lint_verdict`・`targets.py` の `suite_lint_files`・`lint_runs_for`）だけで、`scope_command` の無い suite では読まれない。読まれない値を書くと、検査スクリプトの読む範囲が変わっても誰も気づかず古くなる。
+9 本の検査スクリプトはどれも対象のファイルのパスを引数に受けず、受ける形にする変更はこの課題の範囲の外である（要求の対象範囲）。静的解析の suite の `paths` は、`scope_command` を持つ suite の範囲を決めるときだけ読まれ、`scope_command` の無い suite では読まれない。読むのは `lint_verdict` と、`targets.py` の `suite_lint_files`・`lint_runs_for` である。読まれない値を書くと、検査スクリプトの読む範囲が変わっても誰も気づかず古くなる。
 
 `{paths}` を受け取って捨てる `scope_command`（例: 末尾に `# {paths}` を付ける）は採らない。継続的統合と同じ引数で呼ぶ約束（受け入れ条件 4）から外れ、改善項目ごとに全体の検査を走らせて時間が増えるためである。
 
@@ -211,7 +211,7 @@ sequenceDiagram
 
 ### 決定 4: 手元で判定が決まらない 2 件を、理由つきの除外にする
 
-`required-checks-check` は Pull Request の宛先のブランチと GitHub の API を使い、`runtime-smoke-latest` はネットワークから最新の CLI を入れる。どちらも要求の前提 3（秘密・ネットワーク・Pull Request の文脈を使わずに手元で判定が決まる）を満たさない。理由には、手元で判定が決まらない要因を書く（受け入れ条件 2）。
+`required-checks-check` は Pull Request の宛先のブランチと GitHub の API を使う。`runtime-plugin-smoke-latest.yml` はネットワークから最新の CLI を入れる。どちらも要求の前提 3 を満たさない。前提 3 は、秘密・ネットワーク・Pull Request の文脈を使わずに手元で判定が決まることである。理由には、手元で判定が決まらない要因を書く（受け入れ条件 2）。
 
 `check-required-checks.py` を宛先を固定して手元で走らせる形は採らない。GitHub の API とトークンが要り、継続的統合と同じ引数でも呼べないためである。
 
@@ -246,4 +246,4 @@ sequenceDiagram
 | `claude plugin validate` の通信 | この環境ではネットワークを切る操作（`unshare -n`）が権限で拒否され、通信の有無を確かめられなかった。通信するなら非機能の条件（システム環境）に触れる。実装の検証で、通信できない状態で走らせられる環境があれば確かめる |
 | 所要のばらつき | 所要は 1 回の実測で、ばらつきは測っていない。ファイルが増えるとリンクの検査（6.2 秒）と `runtime-plugin-validate`（11.0 秒）が伸びる |
 | ジョブが増えたとき | 継続的統合にジョブを足すと、`init` はまた「宣言に無いジョブ」を知らせる。これは突き合わせの処理の目的どおりの振る舞いで、この課題では自動の検査を足さない |
-| 宣言の再解析 | `project-decl.py check` は今「古い」（入力の `.github/workflows/pytest.yml` が変わった）を返す。再解析はこの課題の範囲の外で、再解析は指紋の無い `test` を置き換えない（`merge.py` の I1） |
+| 宣言の再解析 | `project-decl.py check` は今「古い」（入力の `.github/workflows/pytest.yml` が変わった）を返す。再解析はこの課題の範囲の外で、再解析は指紋の無い `test` を置き換えない（`merge.py` の不変条件） |
