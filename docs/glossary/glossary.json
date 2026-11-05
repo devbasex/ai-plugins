@@ -696,7 +696,7 @@
     {
       "term": "プロダクションコード",
       "context": "ndf-cross-refactoring",
-      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）。名前がテストの形でもテストの関数を持たない .py を含む",
+      "meaning": "コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes）。名前がテストの形でもテストの関数を持たない .py は、tests/ などのテスト用ディレクトリの配下になければ含む",
       "source": "docs/specifications/cross-refactoring-round-tests-and-assess.md",
       "deprecated": [
         "本番コード"
