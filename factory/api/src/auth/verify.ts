@@ -14,6 +14,12 @@ const IDP_PREFIXES: ReadonlyArray<[string, Idp]> = [
   ["GitHub_", "github"],
 ];
 
+// token の username の頭から IdP を決める。文字列でない・知らない頭なら undefined
+function idpFromUsername(username: unknown): Idp | undefined {
+  const name = typeof username === "string" ? username : "";
+  return IDP_PREFIXES.find(([prefix]) => name.startsWith(prefix))?.[1];
+}
+
 export type AccessTokenVerifier = ReturnType<typeof createAccessTokenVerifier>;
 
 export function createAccessTokenVerifier(config: VerifierConfig) {
@@ -36,8 +42,7 @@ export async function verifyAuthorization(verifier: AccessTokenVerifier, authori
     if (err instanceof JwtBaseError) throw new AuthError();
     throw err;
   }
-  const username = typeof payload.username === "string" ? payload.username : "";
-  const idp = IDP_PREFIXES.find(([prefix]) => username.startsWith(prefix))?.[1];
+  const idp = idpFromUsername(payload.username);
   if (!idp || typeof payload.sub !== "string" || payload.sub === "") throw new AuthError();
   return { userId: payload.sub, idp };
 }

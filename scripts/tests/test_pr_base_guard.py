@@ -117,3 +117,54 @@ def test_local_declaration_alone_does_not_enable_the_guard(origin_repo: Path) ->
     push_branch(origin_repo, "main2")
 
     assert guard(origin_repo, "feature/x").returncode == 0
+
+
+# --- release/v<版> を head にした本番の Pull Request（#2436 の R1） ---------------
+
+
+def guard_sha(repo: Path, head_ref: str, sha: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(GUARD), head_ref, sha], cwd=str(repo), capture_output=True, text=True)
+
+
+def commit_on(repo: Path, name: str) -> str:
+    (repo / name).write_text(name, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", name], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", name], check=True)
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def release_world(repo: Path) -> tuple[str, str]:
+    """origin の develop の祖先にある版上げのコミットと、develop に無いコミットを返す。"""
+    declare(repo, {"version": 1, "base_branch": "develop"})
+    bumped = commit_on(repo, "bump.txt")
+    after = commit_on(repo, "later.txt")
+    subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", f"{after}:refs/heads/develop"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "side", bumped], check=True)
+    stray = commit_on(repo, "stray.txt")
+    subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", f"{stray}:refs/heads/release/v10.28.0"], check=True)
+    return bumped, stray
+
+
+def test_release_branch_inside_the_base_passes(origin_repo: Path) -> None:
+    """先頭が origin/develop の祖先の release/v* は通す（develop が先へ進んでいても）。"""
+    bumped, _ = release_world(origin_repo)
+    assert guard_sha(origin_repo, "release/v10.28.0", bumped).returncode == 0
+
+
+def test_release_branch_outside_the_base_fails(origin_repo: Path) -> None:
+    """develop に含まれないコミットを持つ release/v* は落とす。"""
+    _, stray = release_world(origin_repo)
+    got = guard_sha(origin_repo, "release/v10.28.0", stray)
+    assert got.returncode == 1 and "develop" in got.stdout + got.stderr
+
+
+def test_release_branch_without_the_head_sha_fails(origin_repo: Path) -> None:
+    """head の SHA を渡さない release/v* は、名前だけでは通さない。"""
+    release_world(origin_repo)
+    assert guard(origin_repo, "release/v10.28.0").returncode == 1
+
+
+def test_other_branch_inside_the_base_fails(origin_repo: Path) -> None:
+    """develop に含まれていても、release/v* でも develop でもない head は落とす。"""
+    bumped, _ = release_world(origin_repo)
+    assert guard_sha(origin_repo, "feature/x", bumped).returncode == 1

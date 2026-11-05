@@ -27,6 +27,7 @@ class Contracts:
     files: dict[str, dict] = field(default_factory=dict)  # name → 項目
     settings: dict[str, dict] = field(default_factory=dict)  # file → 項目
     env: dict[str, dict] = field(default_factory=dict)  # name → 項目
+    forms: dict[str, dict] = field(default_factory=dict)  # name → 項目（ファイルでなく文の形の受け渡し）
 
 
 def entry_file_name(path: str) -> str:
@@ -118,11 +119,23 @@ def load(root: Path) -> Contracts:
     """契約の一覧を読む。形が誤っていれば `ContractError`。"""
     base = root / CONTRACTS
     c = Contracts()
+    _load_entrypoints(root, base, c)
+    _load_files(base, c)
+    _load_settings(base, c)
+    _load_env(base, c)
+    _load_forms(base, c)
+    return c
+
+
+def _load_entrypoints(root: Path, base: Path, c: Contracts) -> None:
     for f in sorted((base / "entrypoints").glob("*.json")):
         d = _read(f)
         _check_entry(f, d)
         c.entrypoints[d["path"]] = d
         c.entry_files[d["path"]] = f.relative_to(root).as_posix()
+
+
+def _load_files(base: Path, c: Contracts) -> None:
     for f in sorted((base / "files").glob("*.json")):
         d = _read(f)
         _need(f, d, {"name": str, "pattern": str, "kind": str, "place": str, "skill_readers": list})
@@ -131,21 +144,31 @@ def load(root: Path) -> Contracts:
         if f.name != d["name"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
         c.files[d["name"]] = d
+
+
+def _load_settings(base: Path, c: Contracts) -> None:
     for f in sorted((base / "settings").glob("*.json")):
         d = _read(f)
         _need(f, d, {"file": str, "place": str, "scope": str, "readers": list, "keys": dict, "summary": str})
         _one_of(f, d, "place", SETTING_PLACES)
         _one_of(f, d, "scope", SCOPES)
         _strs(f, d, "readers")
-        for k, v in d["keys"].items():
-            if not isinstance(v, dict) or "summary" not in v or set(v) - {"summary", "migrate_from", "duplicates", "place"}:
-                raise ContractError(f"{f.name}: keys.{k} は summary と任意の migrate_from・duplicates・place を持つ")
-            # キーの place はファイルの place より先に効く（認可に関わる値をメインディレクトリから読む。lib/decl.py の key_places）
-            if "place" in v and v["place"] not in SETTING_PLACES:
-                raise ContractError(f"{f.name}: keys.{k}.place は {' / '.join(SETTING_PLACES)} のどれか")
+        _check_setting_keys(f, d)
         if f.name != d["file"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['file']}.json にする")
         c.settings[d["file"]] = d
+
+
+def _check_setting_keys(f: Path, d: dict) -> None:
+    for k, v in d["keys"].items():
+        if not isinstance(v, dict) or "summary" not in v or set(v) - {"summary", "migrate_from", "duplicates", "place"}:
+            raise ContractError(f"{f.name}: keys.{k} は summary と任意の migrate_from・duplicates・place を持つ")
+        # キーの place はファイルの place より先に効く（認可に関わる値をメインディレクトリから読む。lib/decl.py の key_places）
+        if "place" in v and v["place"] not in SETTING_PLACES:
+            raise ContractError(f"{f.name}: keys.{k}.place は {' / '.join(SETTING_PLACES)} のどれか")
+
+
+def _load_env(base: Path, c: Contracts) -> None:
     for f in sorted((base / "env").glob("*.json")):
         d = _read(f)
         _need(f, d, {"name": str, "set_by": str, "summary": str})
@@ -153,7 +176,38 @@ def load(root: Path) -> Contracts:
         if f.name != d["name"] + ".json":
             raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
         c.env[d["name"]] = d
-    return c
+
+
+def _load_forms(base: Path, c: Contracts) -> None:
+    for f in sorted((base / "forms").glob("*.json")):
+        d = _read(f)
+        _check_form(f, d)
+        c.forms[d["name"]] = d
+
+
+# 例の組の形。ndf-next のブロック（文 → 拾うブロックと起動の有無）と、メッセージの形（メッセージ → 正しいか。#2436 の配布の依頼）
+CASE_SHAPES: tuple[dict[str, type], ...] = (
+    {"text": str, "blocks": list, "launch": bool},
+    {"message": dict, "valid": bool},
+)
+
+
+def _check_form(f: Path, d: dict) -> None:
+    """受け渡しの形（`forms/`）: 規則の文と、読み手が同じ答えを返すべき例の組（#2347 の決定 8）。"""
+    _need(f, d, {"name": str, "summary": str, "rule": str, "writers": list, "readers": list, "cases": list})
+    if f.name != d["name"] + ".json":
+        raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
+    for k in ("writers", "readers"):
+        _strs(f, d, k)
+    if not d["cases"]:
+        raise ContractError(f"{f.name}: cases は 1 つ以上")
+    for i, case in enumerate(d["cases"]):
+        if not isinstance(case, dict):
+            raise ContractError(f"{f.name}: cases[{i}] はオブジェクト")
+        shape = next((sh for sh in CASE_SHAPES if set(case) == set(sh)), CASE_SHAPES[0])
+        _need(f, case, shape)
+        if "blocks" in shape and not all(isinstance(x, str) for x in case["blocks"]):
+            raise ContractError(f"{f.name}: cases[{i}].blocks は文字列の並び")
 
 
 def flat_args(args: dict) -> set[tuple[str, str, str]]:

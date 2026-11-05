@@ -62,7 +62,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ラウンドテスト | `round_test` | `cross-refactoring` で、`--scope` のテストの置き場所を走らせるコマンド | ラウンドのテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | グレード | — | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low） | 等級 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 指摘ファイル | — | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル | 指摘のファイル | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 進捗記録 | — | 工程に入った時点で 1 回打つ記録。課題の本文の「進行」も同じ 1 回で更新される | 進行の記録、記録のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 進捗記録 | — | 工程に入った時点で 1 回打つ記録。リリース後テストだけは、受け入れ条件ごとの記録を投稿してその工程を終えた時点で打つ。課題の本文の「進行」も同じ 1 回で更新される | 進行の記録、記録のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | シグナルファイル | — | ラッパーへ知らせるファイル（`next.json` と `stop`） | 合図 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | アナウンス | — | ndf-next のブロックの直前にそのまま置く 1 文 | 告知 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | アイドル | — | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | 静止 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -179,6 +179,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | チェック | — | 機械が合否を返すもの。CI のジョブと、mvv-gate.py・doc-lint.py などのスクリプト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 完了判定 | — | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 全体テスト | — | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ範囲テストのテンプレートの {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければテンプレートの {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す） | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 現状固定テスト | — | 構造を変える前の出力をそのまま期待値にしたテスト。構造を変える前後で同じ出力が出ることを縛る（英語の characterization test） | — | — | `plugins/ndf/skills/refactoring/references/characterization-tests.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | doc-lint | — | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 引継ぎ文書 | `handoff` | 会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -311,6 +312,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
+| 予算の反映 | — | 開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない | — | — | — |
+| 予算の履歴 | — | 開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す | — | — | — |
+| 人の判断待ちの行 | — | 開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語 | — | — | — |
 | 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
@@ -324,9 +328,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判断の項目 | `decisions` | 結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 最終工程の記録 | — | 最終工程を終えたことを示す、GitHub に残った記録。配布は配布の記録の `段階:`、リリース後テストはその課題の行、振り返りは課題の本文の `振り返り: <コメントの URL>` の行のうち、指すコメントの識別子が記録の PR の最後の配布の記録のコメントの識別子以上のもの（その実行の振り返り）。sprint-close.py が閉じる前に確かめる | — | — | `plugins/ndf/skills/progress-tracking/SKILL.md` |
 | 閉じる予定の参照 | — | Pull Request の本文に `最終工程の後に閉じる: #<番号>` と書く形。GitHub は閉じず、sprint-close.py がスプリント課題として集める。宛先が既定ブランチの Pull Request では、NDF の手順が closing keywords をこの形へ置き換える | — | — | `plugins/ndf/skills/progress-tracking/SKILL.md` |
-| 版の差し込み | — | 配布のプランが具体的な版の代わりに持つ `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）。キューがステージを流す直前に版の記録の値で埋める | — | — | — |
-| 版の記録 | — | 配布のプランの状態ディレクトリの `version.json`。キューが決めた、または確かめた版と、決めた根拠と、決め直しの履歴を持つ。流し直しはこれを読む | — | — | — |
-| 版の決め直し | — | 開発版の流し直しで、版の記録の版が自分の配布のマージより前に別のスプリントに出ていたとき、キューが次に空いている版を決め、差し込み前のプランの写しから埋め直すこと。明示の版と、自分の配布のマージの後には行わない | — | — | — |
+| 版の差し込み | — | 前の版の NDF が組んだ配布のプランが、具体的な版の代わりに持つ `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）。プランの型の移行関数が版の参照へ読み替える（#2344） | — | — | — |
+| 版の記録 | — | 解決の控えのうち、版の参照の行。決めた・確かめた版と、決めた根拠と、決め直しの履歴を持ち、流し直しはこれを読む。前の版の NDF が書いた `version.json` は移行関数でこの行へ読み替える（#2344） | — | — | — |
+| 版の決め直し | — | 開発版の流し直しで、版の記録の版が自分の配布のマージより前に別のスプリントに出ていたとき、次に空いている版を決め、解決の控えの版の行をその版へ上書きし、前の版と理由を控えの履歴に残すこと。プランのファイルは書き換えない。明示の版と、自分の配布のマージの後には行わない（#2344） | — | — | — |
 | 明示の版 | — | `new sprint` / `new close` の `--version`・`--prod`、`new release` の `--version` で渡した版。プランを作る時点で決まり、キューはその版がまだ出ていないかだけを確かめる | — | — | — |
 | 実行の核 | `run_core` | 入口・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335） | — | — | — |
 | 契約の一覧 | `contract_registry` | エントリポイントごとの入力（引数・環境変数・.ndf/ の設定のキー・標準入力）・出力・書く状態・終了コードと、受け渡しのファイル・設定・環境変数の書き手と読み手と置き場を持つ、リポジトリで 1 つの宣言 | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
@@ -337,6 +341,12 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実行の文脈 | `run_context` | 実行の核が本体へ渡す 1 つの値。解決した入力・実行の識別子・期限・記録の書き口・再試行・型の読み書きを持つ（#2335） | — | — | — |
 | 実行の記録 | `run_log` | 1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines のファイル（#2335） | — | — | — |
 | 上限の宣言 | `limits_declaration` | 上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335） | — | — | — |
+| 方針の名前 | — | 上限の宣言の 1 行を指す名前。入口の契約と部品の呼び出しが、値でなくこの名前で上限を引く（#2343） | — | — | — |
+| 原因の鍵 | — | 失敗が前回と同じ原因かを見る値。例外の型と、数字・時刻・パスを伏せた失敗の理由の文から作る（#2343） | — | — | — |
+| 再試行 | — | 失敗した同じ呼び出しを、同じプロセスの中で間隔を置いて打ち直すこと。条件が揃うまで問い合わせる待ちとは別である（#2343） | — | — | — |
+| ステップの打ち直し | — | プランの判定役（judge）が、失敗したステップを同じステップのまま流し直すと返すこと（#2343） | — | — | — |
+| 眠りのループ | — | 本体（入れ子の関数を除く）で sleep を呼ぶ for / while のループ。再試行と待ちの両方が当たり、lib/waits.py の外では構造チェックが落とす（#2343） | — | — | — |
+| 最後の照会 | — | 待ちの次の眠りが上限を超えるとき、残りの秒だけ眠った後に上限の時刻に打つ 1 回の照会（#2343） | — | — | — |
 | 名前の対応表 | `names` | 同じ意味の値の正しい名前と、読むだけ受ける旧い名前の対応（plugins/ndf/contracts/names.json。#2335） | — | — | — |
 | 受け渡しのファイル | `handoff_file` | あるエントリポイントが書き、別のエントリポイントか Skill の手順が読むファイル（状態・記録・結果）。1 つのエントリポイントの中で作って消す一時ファイルは含まない | — | — | `docs/specifications/ndf-entrypoint-contracts.md` |
 | 例外リスト | `allow_list` | 構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。構造チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える | 許可の一覧 | — | `docs/specifications/ndf-entrypoint-contracts.md` |
@@ -346,35 +356,54 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | Skill の渡し方 | — | Skill を worker へ届ける形。プランの worker には本文を system プロンプトへ入れ（本文）、ndf:worker には SKILL.md の絶対パスを起動指示の「読む Skill」に書く（パス。#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 読む Skill | — | supervisor が ndf:worker の起動指示に書く項目。その作業で読む規則の Skill の名前と SKILL.md の絶対パスを並べ、worker はここに挙がった SKILL.md だけを読む（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 規則の Skill | — | 手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
-| 差分の棚卸し | — | 毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題への見積の段階の付与だけを行う（#2315） | — | — | — |
-| 見直し | — | 数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315） | — | — | — |
-| 大整理 | — | 十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315） | — | — | — |
-| 後回しの再評価 | — | 後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315） | — | — | — |
-| ニーズの調査 | — | 宣言した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315） | — | — | — |
-| シーズの調査 | — | 宣言した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315） | — | — | — |
-| 調査の記録 | — | 調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315） | — | — | — |
-| 材料の宣言 | — | プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315） | — | — | — |
-| 見直しの持ち主 | — | 見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315） | — | — | — |
-| 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | — |
-| 統括役 | `relay_hub` | 同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない | — | — | — |
-| 名前つきのラッパー | `named_relay` | 統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | — |
-| 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | — |
-| 登録簿 | `relay_registry` | 統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | — |
-| 起動の依頼 | `spawn_request` | 頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | — |
-| 起動のブロック | `spawn_block` | conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる | — | — | — |
-| 再起動の方針 | — | conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ | — | — | — |
-| 現行方式 | — | 運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定 | — | — | — |
-| 試行方式 | — | カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く | — | — | — |
-| 判断開始の値 | — | 試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K） | — | — | — |
-| 運用上限 | — | これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない | — | — | — |
-| 容量の余白 | — | 実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量 | — | — | — |
-| 再起動の理由 | — | 工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動と、現行方式のカットポイントの 6 つ | — | — | — |
-| 復元の区間 | — | 再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで | — | — | — |
-| 境界の判定 | — | 工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る | — | — | — |
-| 適用値 | — | 優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所 | — | — | — |
-| 作業の識別子 | — | 複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830） | — | — | — |
-| 費用の見込み | — | 判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値 | — | — | — |
-| 引継ぎの区間 | — | conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで | — | — | — |
+| 差分の棚卸し | — | 毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題（起点のタグの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 見直し | — | 数スプリントに 1 回行う棚卸しの深さ。後回しを除く open の課題の枝刈り・順位付け・マイルストーンの再編と、ニーズ・シーズの調査からの起票を行う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 大整理 | — | 十数スプリントに 1 回行う棚卸しの深さ。未完了の課題すべてを原因の型で分け、Issue 単位では直らない根本原因を探し、見つかれば大方針を立てて課題とマイルストーンを組み直す。後回しの再評価を含む（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 後回しの再評価 | — | 後回しのマイルストーンの課題を、前倒し・やらない・据え置きに分けること。大整理の一部（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| ニーズの調査 | — | 宣言した利用の記録と市場・競合から、利用者が求めている変更を探すこと（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| シーズの調査 | — | 宣言した技術の構成・ライブラリの競合・周辺環境の変化から、取り入れられる変更を探すこと（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 調査の記録 | — | 調査の項目ごとに出典と調べた日時を持つ結果。見直しのフェーズだけが読んで起票に使う（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 材料の宣言 | — | プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 見直しの持ち主 | — | 見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 統括役 | `relay_hub` | 同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 名前つきのラッパー | `named_relay` | 統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 登録簿 | `relay_registry` | 統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 起動の依頼 | `spawn_request` | 頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 起動のブロック | `spawn_block` | conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 並列の計画 | — | 1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
+| レーン | — | 並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
+| オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別 | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 配布の依頼 | — | レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request） | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 一時レーン | — | 並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 保留の周回 | — | 並列の計画のループのレーンで、答えを待たずに締めた周回（配布待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| 配布待ち | — | 配布の依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| 質問待ち | — | 作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めた周回の結果 | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| 再起動の方針 | — | conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 現行方式 | — | 運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 試行方式 | — | カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 判断開始の値 | — | 試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 運用上限 | — | これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 容量の余白 | — | 実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 再起動の理由 | — | 工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動と、現行方式のカットポイントの 6 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 復元の区間 | — | 再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 境界の判定 | — | 工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 適用値 | — | 優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 作業の識別子 | — | 複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 費用の見込み | — | 判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 引継ぎの区間 | — | conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| プランの参照 | — | プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・前のプランが出した PR・承認したコミットと照らすブランチの先端）。流す直前に実行の核が値へ解決する（#2344） | — | — | — |
+| 解決の記録 | — | 1 回の実行がプランの参照ごとに解決した値と出所。実行の記録の行として残り、プランのファイルへは書き戻さない（#2344） | — | — | — |
+| 承認時の値 | — | 承認ゲートで人か MVV 判定が承認資料で見た値（承認したコミット・版）。流す直前に解決した値と照らし、食い違えば流さずに人へ戻す（#2344） | — | — | — |
+| 解決の控え | — | 流し直しでも同じ値を使う参照（版）の解決した値と決め直しの履歴を、プランの状態ディレクトリに残すファイル（`refs.json`）（#2344） | — | — | — |
+| プランのハッシュ | — | プランの型で読んだ中身を、キーを並べ替えた JSON にして取った sha256。完了したプランが変わったかを測る（#2344） | — | — | — |
+| 呼び手 | — | 関数かエントリポイントを呼ぶ、テストの外のファイル（Skill の本文・雛形・hook・CI・ほかのスクリプト）。テストだけが呼ぶものは呼び手 0 と数える | — | — | — |
+| 残す関数の一覧 | — | 関数の棚卸し（uvx vulture）が呼び手 0 と見るが、vulture に見えない呼ばれ方などで残す関数を、理由の種類と理由と定義のあるファイルを 1 行ずつ添えて持つ一覧。置き場は scripts/ndf-vulture-keep.txt。構造チェックの例外リストとは別のもの | — | — | — |
+| プランの進行の記録 | — | supervise のプランのステップごとの終了コード・秒・ドルを 1 行ずつ残す記録（`<状態のディレクトリ>/progress.jsonl`）。開発ループのまとめのプランでは `.ndf/loop/<名>/lap-<番号>/close*/` の下にある（#2315） | — | — | — |
+| 承認した先端 | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの先端のときだけ行う | — | — | — |
+| マージの結果 | — | 承認した設計 Pull Request を宛先へマージする 1 回の試みの結果。マージした・マージ済み・先端が動いた・印が無い・検査が緑でない・衝突・宛先が本番・失敗のどれか | — | — | — |
+| 答えの後の整理 | — | オーガナイザーが答えを送った後、待つ間に届いた依頼を取り直し、除くものを除いて残りをまとめて問う手順 | — | — | — |
 | 本体 | — | エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337） | — | — | — |
 | 核の対象外 | — | 実行の核を通さないエントリポイントの印。hook の定義から起動されるか、ランタイムが直接起動して標準出力をそのまま使うもの。契約の一覧の core に理由と根拠を書く（#2337） | — | — | — |
 | 作業の結果ファイル | — | worker が報告を終える前に書く、結果 JSON の形の 1 行のファイル。supervise と supervisor はこのファイルの status だけで作業の成否を決める（#2337） | — | — | — |
@@ -623,7 +652,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 移行の手順 | — | 利用者が新しい版へ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直しなど）。PR 本文の「移行の手順」の節が正 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
 | 互換なしの印 | — | 要求の「影響」の表の「公開インタフェース」の行に書く、互換の経路を持たないことを示す語（互換なし / 互換の経路は持たない）。release-steps.py changed-plugins が上げ幅の候補を MAJOR にする材料 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
 | 承認したコミット | — | ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 比べた先端 | — | 本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| 比べた先端 | — | 本番の配布が承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（本番の配布では `release/v<版>`、昇格の経路ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 確かめたコミット | — | 導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。配布物（`plugins/`・`.claude-plugin/`）に触れるものがあれば本番の配布は承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の記録 | — | 承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない | — | — | `docs/specifications/ndf-release-approved-commit.md` |
@@ -702,9 +731,10 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 人の判断待ち | — | 着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す | — | — | — |
 | 候補の上限 | — | 1 回の棚卸しで区分を決める候補の数の上限。candidates の --limit、.ndf/backlog.json の candidate_limit、既定 10 の順に決まる | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 持ち越し | — | 候補の上限を超えたため、その回で区分を決めずに残した候補。candidates の metrics.deferred に番号だけが載る | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
-| 棚卸しの深さ | — | 1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff\|review\|overhaul`（#2315） | — | — | — |
-| 調査の項目 | — | 調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315） | — | — | — |
-| 付け直しの記録 | — | 大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315） | — | — | — |
+| 棚卸しの深さ | — | 1 回の棚卸しが扱う範囲。差分の棚卸し・見直し・大整理の 3 つ。`upkeep.py` の `--depth diff\|review\|overhaul`（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 調査の項目 | — | 調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 付け直しの記録 | — | 大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
+| 深さの記録 | — | 棚卸しの深さごとの起動の判定と実行を 1 行ずつ残す記録。メインディレクトリの `.ndf/backlog/depths.jsonl` で、コミットしない。差分の棚卸しの行は、棚卸しのステップの秒・ドル・言語モデルの名前を持つ（#2315） | — | — | — |
 
 ## NDF の worktree（`ndf-worktree`）
 
@@ -729,10 +759,12 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | 状態の持ち主 | — | 残る状態を作った実行。持ち主が生きている間は、別の実行がその状態を消さない（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 状態の寿命 | — | 残る状態を片付けてよくなる条件（持ち主のプロセスの終わり・Pull Request が閉じたこと・送り終えたこと など）。状態の種類ごとに 1 つ決める（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 以前の実行 | — | 今の実行より前に同じ Pull Request・同じリポジトリで回った、終わった実行。supervise.py の run --from の「前の実行」とは別（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
-| 持ち主の記録 | — | 残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
-| 寿命の窓 | — | 持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。レビュー worktree は 24 時間（#2229）、見直しの持ち主は既定 15 分（#2315） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
+| 持ち主の記録 | — | 持ち主の鍵ごとに 1 つ、状態の置き場の leases/<リポジトリ>/ に置く記録。実行の識別子・入口・開始・最後に動いた時刻・終わった時刻・持ち主のプロセス（pid・開始時刻・ホスト名）を持つ。片付けが持ち主の生存を判定するときに読む（#2229・#2342） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
+| 寿命の窓 | — | 持ち主の記録が終わっていなくても、最後に動いた時刻からこの長さを過ぎた持ち主を死んでいるとみなす長さ。持ち主の部品（leases/）の記録では別のホストの記録にだけ使い、同じホストの生死は pid と開始時刻で決める。値は持ち主の契約の window_seconds に置く。レビュー worktree は 24 時間（#2229・#2342）、見直しの持ち主は既定 15 分（#2315） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 片付け | — | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep_states）。git が拒めば止まる操作だけで行う（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 持ち主の鍵 | `lease_key` | 持ち主の記録を取り合う単位。入口の契約が、解決した入力から作る形を宣言する（例 cross-refactoring:pr=2301。#2335） | — | — | — |
+| 持ち主の契約 | — | 入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342） | — | — | — |
+| 持ち主の単位 | — | 持ち主の記録を誰が持つか。run は入口の 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返す入口が呼ばれるかセッションが終わるまで持つ（#2342） | — | — | — |
 
 ## mcp-serena（`mcp-serena`）
 
@@ -768,6 +800,7 @@ ai-plugins の開発で formatter と静的解析を手元と CI で走らせる
 | 古いバイトコード | — | Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | git を使うテストの土台 | — | cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow） | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | CLI の版の一覧 | — | スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。版を上げるときに書き換える唯一の場所 | — | — | `docs/specifications/runtime-smoke-cli-versions.md` |
+| 前提のコマンドの一覧 | `required_commands` | 根の conftest.py が持つ、テストの置き場所（パス、またはパスに :: でつないだファイルの中のクラス）ごとに要る外部コマンドの表。収集した項目に当たるコマンドが PATH に無ければ、読み飛ばしの指定が無い限り収集を失敗させる | — | — | — |
 
 ## NDF の学習の設定（`ndf-training-optout`）
 
@@ -860,15 +893,15 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 進捗の受け口 | — | ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路 | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
 | 実行ジョブの token | — | 実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、Pull Request の参照はそのジョブの取り込むリポジトリのものだけを残せる。承認の依頼の答えを読める | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
 | 冪等の鍵 | — | 進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
-| アカウント | — | Neural Development Factory で、プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| アカウント | — | Neural Development Factory で、料金プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 席 | — | チームのアカウントの中で、1 人の利用者に割り当てる枠。種類は standard と premium | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 使える量 | — | プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 料金プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 使える量 | — | 料金プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 利用者 | — | Google か GitHub の 1 つのアカウントで Neural Development Factory にログインした人。Cognito の `sub` を利用者の ID として持つ。同じ人でも IdP が違えば別の利用者である | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | チームの持ち主 | — | チームのアカウントを作った利用者。席を足す・種類を変える・外すことができる唯一の利用者 | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 使える量の判定 | — | 呼び出す側が渡した今の値（動いているスプリントの実行の数・その月の token の数）を使える量の上限と照らし、許すか断るかと理由を返すこと | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | GitHub の仲立ち | — | GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 実行の形態 | — | アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 実行の形態 | — | アカウントのランナーが Claude をどう呼ぶか。`local`（手元のマシン）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない | — | — | — |
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
 | 起票の代行 | — | 記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理 | — | — | — |
@@ -877,6 +910,7 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 再開のジョブ | — | `START=resume` の実行ジョブ。承認の答えで起こすものと、利用上限のリセット時刻の後に起こすものがある。保存した状態を復元して前回の続きから進める | — | — | — |
 | 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
@@ -884,24 +918,38 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
 | 同じ役割の写し | — | リファクタリングの対象と同じ処理・同じ判断を、別の場所に書き写したもの。対象と同じ変更で 1 か所へ寄せる（#2199） | — | — | — |
 | 保存の契約 | — | アカウントの保存（AccountStore）の interface と、その引数・失敗の型。DynamoDB とメモリの 2 つの実装が満たし、AWS SDK を読まない（accounts/port.ts） | — | — | — |
-| スプリントの一覧 | — | アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172） | — | — | — |
-| スプリントの詳細 | — | 1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172） | — | — | — |
-| 詳細パネル | — | スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172） | — | — | — |
-| バックログの画面 | — | 取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172） | — | — | — |
-| フェーズの名前 | — | phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172） | — | — | — |
-| 工程の記録 | — | スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172） | — | — | — |
-| 工程の中身 | — | 1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172） | — | — | — |
-| スプリント全体の欄 | — | スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172） | — | — | — |
-| 区間 | — | 1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | — |
-| 区間の上限 | — | 1 つの実行ジョブで起動してよい区間の数の上限（既定 20）。超えたジョブは section_limit で終わる | — | — | — |
-| 同時のジョブの数 | `max_jobs` | 手元のランナーが同時に動かす実行ジョブの数の上限。ランナーが登録と心拍で申告し、サービスはそれを超えて指示を渡さない | — | — | — |
-| マイルストーンの持ち分 | — | 終わりの状態でない開発ループが、リポジトリのマイルストーン 1 つを選定の対象として占めていることを表す実行の枠の行。同じリポジトリのループどうしで重ならない | — | — | — |
-| 課題の持ち分 | — | 終わりの状態でない手動のスプリントの実行が、リポジトリの課題 1 つを持っていることを表す実行の枠の行。同じ課題を 2 つの実行に入れない | — | — | — |
-| 手元のランナーの枠 | — | 1 つの手元のランナーが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない | — | — | — |
-| 画面の地図 | — | Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表 | — | — | — |
-| デザインのトークン | — | 色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合 | — | — | — |
-| ダミーの API クライアント | — | 画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる | — | — | — |
-| 翻訳のファイル | — | 言語ごとに、画面の文言のキーと文言を持つファイル | — | — | — |
-| 見本の画面 | — | 土台の部品だけで組み、ダミーデータで動かす画面の 1 組（スプリントの一覧と詳細）。後続の課題が中身を置き換える出発点 | — | — | — |
-| つながりの状態 | — | 画面が今サーバーへつながっているか・最後に受け取った時刻・つながってから確定する操作の数の組 | — | — | — |
-| 言語と地域の設定 | — | 画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める | — | — | — |
+| スプリントの一覧 | — | アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
+| スプリントの詳細 | — | 1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
+| 詳細パネル | — | スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
+| バックログの画面 | — | 取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
+| フェーズの名前 | — | phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 工程の記録 | — | スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 工程の中身 | — | 1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| スプリント全体の欄 | — | スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 区間 | — | 1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 区間の上限 | — | 1 つの実行ジョブで起動してよい区間の数の上限（既定 20）。超えたジョブは section_limit で終わる | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 同時のジョブの数 | `max_jobs` | 手元のマシンが同時に動かす実行ジョブの数の上限。手元のマシンが登録と心拍で申告し、サービスはそれを超えて指示を渡さない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| マイルストーンの持ち分 | — | 終わりの状態でない開発ループが、リポジトリのマイルストーン 1 つを選定の対象として占めていることを表す実行の枠の行。同じリポジトリのループどうしで重ならない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 課題の持ち分 | — | 終わりの状態でない手動のスプリントの実行が、リポジトリの課題 1 つを持っていることを表す実行の枠の行。同じ課題を 2 つの実行に入れない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 手元のマシンの枠 | — | 1 つの手元のマシンが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない | 手元のランナーの枠 | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 手元のマシン | — | 利用者の環境に登録し、同時のジョブの数まで実行ジョブを受け取るマシン。受け取った実行ジョブごとに別のランナーが動く | 手元のランナー | — | `docs/specifications/ndf-factory-organizer.md` |
+| Factory のオーガナイザー | — | 同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（配布を 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他 | — | — | `docs/specifications/ndf-factory-organizer.md` |
+| 配布の実行 | — | Factory のオーガナイザーが、まとめた配布 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、本番の配布を流し、結果を返して終わる。同じリポジトリで同時に 1 本まで | — | — | `docs/specifications/ndf-factory-organizer.md` |
+| 画面の地図 | — | Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| 予定の画面 | — | 画面の地図で状態が「予定」の行。経路がまだ無く、載る機能だけが決まっている画面 | — | — | `docs/specifications/ndf-factory-screen-map.md` |
+| 作る課題 | — | 予定の画面を作り、画面の地図のその行を「あり」へ変える GitHub の課題。#2382 は「持ち主の課題」と書く | — | — | `docs/specifications/ndf-factory-screen-map.md` |
+| デザインのトークン | — | 色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| ダミーの API クライアント | — | 画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| 翻訳のファイル | — | 言語ごとに、画面の文言のキーと文言を持つファイル | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| 見本の画面 | — | 土台の部品だけで組み、ダミーデータで動かす画面の 1 組（スプリントの一覧と詳細）。後続の課題が中身を置き換える出発点 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| つながりの状態 | — | 画面が今サーバーへつながっているか・最後に受け取った時刻・つながってから確定する操作の数の組 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| 言語と地域の設定 | — | 画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める | — | — | `docs/specifications/ndf-factory-ui-components.md` |
+| 委任の資格情報 | — | 人が画面で発行し、エージェントかクライアントに渡す、期限と範囲つきの資格情報。だれの委任か（利用者）と、どのクライアントかを持ち、人が取り消せる（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 人だけが確定できる操作 | — | 承認ゲートの承認・判断の依頼への答えと、共通原則の C1〜C8・プロジェクト MVV の P に当たる Factory の操作。契約に印を持ち、委任の資格情報からは断る（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 操作の記録 | — | Factory の利用者向けの操作 1 回ごとに 1 件追記する記録。だれが・いつ・どの呼び出し元から・何を行ったかを持ち、書き換えと削除の経路を持たない（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 呼び出し元の種類 | — | 操作の記録に残す、操作がどこから来たかの区分。画面・API・MCP の 3 つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 機能から起こした契約 | — | 経路と入出力を、画面の 1 枚でなくエンティティと操作から決めた API の契約。取得・作成・更新・削除とも配列で受け渡す（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 操作の扱い | — | Factory の利用者向けの操作が要る範囲。読み取り（read）・書き込み（write）・人だけ（human）の 3 つで、契約の各操作に x-ndf-access として持つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 操作の表 | — | Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 要素の結果 | — | Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
+| 作成の冪等の鍵 | — | Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |

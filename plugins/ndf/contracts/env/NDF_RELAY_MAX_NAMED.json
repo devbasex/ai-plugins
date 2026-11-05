@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RELAY_MAX_NAMED",
+  "set_by": "user",
+  "summary": "名前つきのラッパーの数の上限（#2346）。並列の計画の検査も同じ値を読む（plugins/ndf/scripts/lib/parallel_plan.py・relay_lib/hub.py）"
+}

@@ -8,51 +8,18 @@ import {
   type TransactWriteCommandInput,
 } from "@aws-sdk/lib-dynamodb";
 import type { AccountRecord, HistoryRecord, SeatRecord, UserRecord } from "./model.ts";
+import { ConditionFailedError, type AccountPatch, type AccountStore, type AccountUpdate } from "./port.ts";
+import { epochSeconds, idempotencyPk, liveCreatedId, type IdempotencyClaim, type IdempotencyRef } from "../idempotency.ts";
 
-// 条件つきの書き込みが条件で失敗した。呼ぶ側が意味（I12・I15・版の競合など）へ読み替える
-export class ConditionFailedError extends Error {
-  constructor() {
-    super("condition failed");
-    this.name = "ConditionFailedError";
-  }
-}
+// 鍵の頭。表の pk と GSI gsi1 の鍵は、利用者とアカウントの ID にこの頭を付ける
+const USER_PREFIX = "USER#";
+const ACCOUNT_PREFIX = "ACCOUNT#";
+const userPk = (userId: string) => `${USER_PREFIX}${userId}`;
+const accountPk = (accountId: string) => `${ACCOUNT_PREFIX}${accountId}`;
 
-export interface AccountPatch {
-  plan?: AccountRecord["plan"];
-  executionMode?: AccountRecord["executionMode"];
-}
-
-// アカウントの表への読み書き。どの書き込みも履歴の行を同じトランザクションで足す（I20）
-export interface AccountStore {
-  getUser(userId: string): Promise<UserRecord | null>;
-  // 利用者の行が無いときだけ、利用者・個人のアカウント・履歴を書く（I12）
-  createUserWithPersonalAccount(user: UserRecord, account: AccountRecord, history: HistoryRecord[]): Promise<void>;
-  getAccount(accountId: string): Promise<AccountRecord | null>;
-  getSeat(accountId: string, userId: string): Promise<SeatRecord | null>;
-  listSeats(accountId: string): Promise<SeatRecord[]>;
-  // 利用者が席を持つチームのアカウントの ID（GSI gsi1）。GSI は結果整合のため、
-  // 返すのは候補であり、呼ぶ側は getSeat で元の席を確かめてから使う
-  listMemberships(userId: string): Promise<string[]>;
-  createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]): Promise<void>;
-  // 席が無いときだけ足す（I15）
-  addSeat(seat: SeatRecord, history: HistoryRecord[]): Promise<void>;
-  // 席が読んだときのまま（種類と足した時刻が expected と等しい）のときだけ変える
-  updateSeat(expected: SeatRecord, seatType: SeatRecord["seatType"], history: HistoryRecord[]): Promise<void>;
-  // 席が読んだときのまま（種類と足した時刻が expected と等しい）のときだけ外す
-  removeSeat(expected: SeatRecord, history: HistoryRecord[]): Promise<void>;
-  // version が expectedVersion と等しいときだけ変え、version を 1 増やす
-  updateAccount(
-    accountId: string,
-    expectedVersion: number,
-    patch: AccountPatch,
-    updatedAt: string,
-    history: HistoryRecord[],
-  ): Promise<void>;
-}
-
-const userKey = (userId: string) => ({ pk: `USER#${userId}`, sk: "USER" });
-const accountKey = (accountId: string) => ({ pk: `ACCOUNT#${accountId}`, sk: "ACCOUNT" });
-const seatKey = (accountId: string, userId: string) => ({ pk: `ACCOUNT#${accountId}`, sk: `SEAT#${userId}` });
+const userKey = (userId: string) => ({ pk: userPk(userId), sk: "USER" });
+const accountKey = (accountId: string) => ({ pk: accountPk(accountId), sk: "ACCOUNT" });
+const seatKey = (accountId: string, userId: string) => ({ pk: accountPk(accountId), sk: `SEAT#${userId}` });
 
 type Item = Record<string, unknown>;
 
@@ -84,8 +51,8 @@ function accountItem(a: AccountRecord): Item {
 function seatItem(s: SeatRecord): Item {
   return {
     ...seatKey(s.accountId, s.userId),
-    gsi1pk: `USER#${s.userId}`,
-    gsi1sk: `ACCOUNT#${s.accountId}`,
+    gsi1pk: userPk(s.userId),
+    gsi1sk: accountPk(s.accountId),
     account_id: s.accountId,
     user_id: s.userId,
     seat_type: s.seatType,
@@ -95,7 +62,7 @@ function seatItem(s: SeatRecord): Item {
 
 function historyItem(h: HistoryRecord): Item {
   return {
-    pk: `ACCOUNT#${h.accountId}`,
+    pk: accountPk(h.accountId),
     sk: `HIST#${h.at}#${randomUUID()}`,
     account_id: h.accountId,
     type: h.type,
@@ -144,6 +111,14 @@ const SEAT_UNCHANGED = "attribute_exists(#pk) AND #seat_type = :expected_type AN
 const SEAT_NAMES = { "#pk": "pk", "#seat_type": "seat_type", "#added_at": "added_at" };
 const seatExpected = (s: SeatRecord) => ({ ":expected_type": s.seatType, ":expected_added_at": s.addedAt });
 
+// AccountPatch の項目ごとの列の名前とプレースホルダ。SET には表の並びで足す
+const PATCH_COLUMNS: { field: keyof AccountPatch; column: string; placeholder: string }[] = [
+  { field: "plan", column: "plan", placeholder: ":plan" },
+  { field: "executionMode", column: "execution_mode", placeholder: ":mode" },
+];
+
+type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
+
 export class DynamoAccountStore implements AccountStore {
   private readonly doc: DynamoDBDocumentClient;
 
@@ -159,13 +134,15 @@ export class DynamoAccountStore implements AccountStore {
     return (out.Item as Item | undefined) ?? null;
   }
 
-  private put(item: Item, condition?: string): NonNullable<TransactWriteCommandInput["TransactItems"]>[number] {
+  private put(item: Item, condition?: string): TransactItem {
     return { Put: { TableName: this.tableName, Item: item, ConditionExpression: condition } };
   }
 
-  private async transact(items: NonNullable<TransactWriteCommandInput["TransactItems"]>): Promise<void> {
+  // どの書き込みも履歴の行を同じトランザクションで足す（I20）。並びは items → 履歴 → after
+  private async transact(items: TransactItem[], history: HistoryRecord[], after: TransactItem[] = []): Promise<void> {
+    const all = [...items, ...history.map((h) => this.put(historyItem(h))), ...after];
     try {
-      await this.doc.send(new TransactWriteCommand({ TransactItems: items }));
+      await this.doc.send(new TransactWriteCommand({ TransactItems: all }));
     } catch (err) {
       if (
         err instanceof TransactionCanceledException &&
@@ -183,11 +160,7 @@ export class DynamoAccountStore implements AccountStore {
   }
 
   async createUserWithPersonalAccount(user: UserRecord, account: AccountRecord, history: HistoryRecord[]) {
-    await this.transact([
-      this.put(userItem(user), NOT_EXISTS),
-      this.put(accountItem(account), NOT_EXISTS),
-      ...history.map((h) => this.put(historyItem(h))),
-    ]);
+    await this.transact([this.put(userItem(user), NOT_EXISTS), this.put(accountItem(account), NOT_EXISTS)], history);
   }
 
   async getAccount(accountId: string) {
@@ -204,7 +177,7 @@ export class DynamoAccountStore implements AccountStore {
     const items = await this.queryAll({
       TableName: this.tableName,
       KeyConditionExpression: "pk = :pk AND begins_with(sk, :seat)",
-      ExpressionAttributeValues: { ":pk": `ACCOUNT#${accountId}`, ":seat": "SEAT#" },
+      ExpressionAttributeValues: { ":pk": accountPk(accountId), ":seat": "SEAT#" },
       ConsistentRead: true,
     });
     return items.map(toSeat);
@@ -215,10 +188,10 @@ export class DynamoAccountStore implements AccountStore {
       TableName: this.tableName,
       IndexName: "gsi1",
       KeyConditionExpression: "gsi1pk = :u",
-      ExpressionAttributeValues: { ":u": `USER#${userId}` },
+      ExpressionAttributeValues: { ":u": userPk(userId) },
     });
     // 射影（KEYS_ONLY など）によらず必ず載る表の鍵 pk（ACCOUNT#<id>）から ID を取る
-    return items.map((i) => (i.pk as string).slice("ACCOUNT#".length));
+    return items.map((i) => (i.pk as string).slice(ACCOUNT_PREFIX.length));
   }
 
   private async queryAll(input: ConstructorParameters<typeof QueryCommand>[0]): Promise<Item[]> {
@@ -232,16 +205,33 @@ export class DynamoAccountStore implements AccountStore {
     return out;
   }
 
-  async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]) {
-    await this.transact([
-      this.put(accountItem(account), NOT_EXISTS),
-      this.put(seatItem(ownerSeat), NOT_EXISTS),
-      ...history.map((h) => this.put(historyItem(h))),
-    ]);
+  async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[], idempotency?: IdempotencyClaim) {
+    await this.transact(
+      [this.put(accountItem(account), NOT_EXISTS), this.put(seatItem(ownerSeat), NOT_EXISTS)],
+      history,
+      idempotency
+        ? [
+            {
+              Put: {
+                TableName: this.tableName,
+                Item: { pk: idempotencyPk(idempotency), sk: "IDEMP", createdId: idempotency.createdId, createdAt: idempotency.createdAt, ttl: idempotency.ttl },
+                ConditionExpression: "attribute_not_exists(pk) OR #ttl < :now",
+                ExpressionAttributeNames: { "#ttl": "ttl" },
+                ExpressionAttributeValues: { ":now": epochSeconds(idempotency.createdAt) },
+              },
+            },
+          ]
+        : [],
+    );
+  }
+
+  async getIdempotent(ref: IdempotencyRef, now: string) {
+    const item = await this.get({ pk: idempotencyPk(ref), sk: "IDEMP" });
+    return liveCreatedId(item && { createdId: String(item.createdId), ttl: Number(item.ttl) }, now);
   }
 
   async addSeat(seat: SeatRecord, history: HistoryRecord[]) {
-    await this.transact([this.put(seatItem(seat), NOT_EXISTS), ...history.map((h) => this.put(historyItem(h)))]);
+    await this.transact([this.put(seatItem(seat), NOT_EXISTS)], history);
   }
 
   async updateSeat(expected: SeatRecord, seatType: SeatRecord["seatType"], history: HistoryRecord[]) {
@@ -256,8 +246,7 @@ export class DynamoAccountStore implements AccountStore {
           ExpressionAttributeValues: { ":t": seatType, ...seatExpected(expected) },
         },
       },
-      ...history.map((h) => this.put(historyItem(h))),
-    ]);
+    ], history);
   }
 
   async removeSeat(expected: SeatRecord, history: HistoryRecord[]) {
@@ -271,43 +260,34 @@ export class DynamoAccountStore implements AccountStore {
           ExpressionAttributeValues: seatExpected(expected),
         },
       },
-      ...history.map((h) => this.put(historyItem(h))),
-    ]);
+    ], history);
   }
 
-  async updateAccount(
-    accountId: string,
-    expectedVersion: number,
-    patch: AccountPatch,
-    updatedAt: string,
-    history: HistoryRecord[],
-  ) {
+  async updateAccount({ accountId, expectedVersion, patch, updatedAt, history }: AccountUpdate) {
     // 予約語と重ならないよう、列の名前は常に #名前 で書く
     const names: Record<string, string> = { "#pk": "pk", "#version": "version", "#updated_at": "updated_at" };
     const sets = ["#version = :next", "#updated_at = :at"];
     const values: Record<string, unknown> = { ":expected": expectedVersion, ":next": expectedVersion + 1, ":at": updatedAt };
-    if (patch.plan !== undefined) {
-      names["#plan"] = "plan";
-      sets.push("#plan = :plan");
-      values[":plan"] = patch.plan;
+    for (const { field, column, placeholder } of PATCH_COLUMNS) {
+      if (patch[field] === undefined) continue;
+      names[`#${column}`] = column;
+      sets.push(`#${column} = ${placeholder}`);
+      values[placeholder] = patch[field];
     }
-    if (patch.executionMode !== undefined) {
-      names["#execution_mode"] = "execution_mode";
-      sets.push("#execution_mode = :mode");
-      values[":mode"] = patch.executionMode;
-    }
-    await this.transact([
-      {
-        Update: {
-          TableName: this.tableName,
-          Key: accountKey(accountId),
-          UpdateExpression: `SET ${sets.join(", ")}`,
-          ConditionExpression: "attribute_exists(#pk) AND #version = :expected",
-          ExpressionAttributeNames: names,
-          ExpressionAttributeValues: values,
+    await this.transact(
+      [
+        {
+          Update: {
+            TableName: this.tableName,
+            Key: accountKey(accountId),
+            UpdateExpression: `SET ${sets.join(", ")}`,
+            ConditionExpression: "attribute_exists(#pk) AND #version = :expected",
+            ExpressionAttributeNames: names,
+            ExpressionAttributeValues: values,
+          },
         },
-      },
-      ...history.map((h) => this.put(historyItem(h))),
-    ]);
+      ],
+      history,
+    );
   }
 }

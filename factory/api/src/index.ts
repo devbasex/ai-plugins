@@ -1,14 +1,14 @@
 // 他の子課題（#2171・#2186・#2174・#2189）へ公開する入口。使うのはここから export したものだけ
 import type { Hono } from "hono";
 import { AccountService } from "./accounts/service.ts";
-import { depsFromEnv } from "./handlers/api.ts";
+import { depsFromEnv } from "./auth/deps.ts";
 import { verifyAuthorization } from "./auth/verify.ts";
 import type { AuthEnv } from "./auth/resolve.ts";
 import type { AccountContext, Caller, Plan } from "./accounts/model.ts";
 import type { SprintRun } from "./runs/model.ts";
 import type { IssueRequestResolvedEvent, JobFinishedEvent } from "@ndf-factory/contracts";
 import { appendControlEventTo, appendIssueRequestResolvedTo } from "./progress/append.ts";
-import { progressStoreFromEnv } from "./handlers/ingest.ts";
+import { progressStoreFromEnv } from "./progress/deps.ts";
 import { runJobTokenVerifierFromEnv, type VerifiedRunJob } from "./progress/run-job-token.ts";
 import { factoryDepsFromEnv } from "./runs/deps.ts";
 
@@ -16,7 +16,7 @@ export { getLimits, judgeLimits, LIMITS_TABLE } from "./accounts/limits.ts";
 export type { CurrentUsage, Judgment, LimitReason, Limits } from "./accounts/limits.ts";
 export type { AccountContext, Caller, ExecutionMode, Plan, SeatType } from "./accounts/model.ts";
 export { ApiError, AuthError, ForbiddenError, PlanError } from "./errors.ts";
-export { createApiApp } from "./handlers/api.ts";
+export { createApiApp } from "./app.ts";
 export { requireCaller, resolveFromRequest } from "./auth/resolve.ts";
 export type { AuthEnv };
 export type ApiApp = Hono<AuthEnv>;
@@ -31,7 +31,7 @@ export function resolveAccount(caller: Caller, accountId?: string): Promise<Acco
   return depsFromEnv().accounts.resolveAccount(caller, accountId);
 }
 
-// アカウントのプランを変える（#2174 が決済の後に呼ぶ）。知らないプラン・I13 に反する組は PlanError
+// アカウントの料金プランを変える（#2174 が決済の後に呼ぶ）。知らない料金プラン・I13 に反する組は PlanError
 export function setPlan(accountId: string, plan: Plan): Promise<void> {
   return depsFromEnv().accounts.setPlan(accountId, plan);
 }
@@ -84,8 +84,9 @@ export type { ResumeRejectedCode, RunControlConfig, RunControlDeps } from "./run
 export type { RunJob, SprintRun, RunState, JobState } from "./runs/model.ts";
 export { repoKey } from "./progress/github.ts";
 
-// 承認待ちのスプリントの実行に resume の実行ジョブを作り起動する。承認待ちでない・動くジョブがある → ResumeRejectedError
-export function requestResume(input: { sprintRunId: string; approvalRequestId: string }): Promise<{ jobId: string }> {
+// 承認待ちのスプリントの実行に resume の実行ジョブを作り起動する。承認待ちでない・動くジョブがある → ResumeRejectedError。
+// 配布の実行（#2439）への差し戻しはジョブを起こさず jobId が null
+export function requestResume(input: { sprintRunId: string; approvalRequestId: string }): Promise<{ jobId: string | null }> {
   return factoryDepsFromEnv().control.requestResume(input);
 }
 
@@ -94,7 +95,7 @@ export function claimLocalRunJob(accountId: string) {
   return factoryDepsFromEnv().control.claimLocalRunJob(accountId);
 }
 
-// 手元のランナーの終わりか心拍の切れ。停止の知らせと同じ処理
+// 手元のマシンの終わりか心拍の切れ。停止の知らせと同じ処理
 export function reportLocalRunJobEnded(jobId: string): Promise<void> {
   return factoryDepsFromEnv().control.reportLocalRunJobEnded(jobId);
 }

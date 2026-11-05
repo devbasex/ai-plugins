@@ -1,0 +1,7 @@
+{
+  "name": "breakdown-md",
+  "pattern": "breakdown.md",
+  "kind": "report",
+  "place": "main",
+  "skill_readers": []
+}

@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CONTEXT_LIMIT",
+  "set_by": "user",
+  "summary": "適用中の再起動の方針の運用上限（token）。現行方式の既定 200000。試行方式で判断開始の値がこれを上回れば同じ値へ下げる（plugins/ndf/scripts/lib/context_policy.py:resolve_policy）"
+}

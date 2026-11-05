@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PARALLEL_MAX_PLANS",
+  "set_by": "user",
+  "summary": "並列の計画で同時に流すプランの合計の上限（#2436）。正の整数でなければ既定の 6（plugins/ndf/scripts/lib/parallel_plan.py）"
+}

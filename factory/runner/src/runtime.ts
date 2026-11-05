@@ -3,12 +3,16 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
-import { claudeEnv, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
-import { exec, packState, unpackState } from "./state.ts";
+import { claudeEnv, containerRoleSecrets, passedModelSecrets, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type AssumeRole, type ModelCredential } from "./model.ts";
+import { parseLoopFile } from "./loop-file.ts";
+import { fsOrganizerFiles, ORGANIZER_DIR, organizerEnv, RELEASE_PROMPT } from "./organizer.ts";
+import { runSections, sectionLimitOf, type SectionRun } from "./sections.ts";
+import { exec, packState, statePaths, unpackState } from "./state.ts";
+import { collectStepDetails, readPlan, type GitExec } from "./step-details.ts";
 import {
   delegatedFromRecord,
   issueRequestFromLine,
@@ -28,11 +32,24 @@ const POLL_MS = 2000;
 // 無人の conductor に許す Tool。supervise_lib/claude.py の FULL_TOOLS（Skill を回すステップ）と同じ
 const CONDUCTOR_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch";
 
-function run(cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string>; onLine?: (line: string) => void }): Promise<number> {
+function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; env?: Record<string, string>; onLine?: (line: string) => void; onStderr?: (chunk: string) => void },
+): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env ?? (process.env as Record<string, string>), stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env ?? (process.env as Record<string, string>),
+      stdio: ["ignore", "pipe", opts.onStderr ? "pipe" : "inherit"],
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      opts.onStderr?.(text);
+      process.stderr.write(text);
+    });
     let buf = "";
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout!.on("data", (chunk: Buffer) => {
       buf += chunk.toString("utf8");
       let i: number;
       while ((i = buf.indexOf("\n")) >= 0) {
@@ -49,6 +66,25 @@ function run(cmd: string, args: string[], opts: { cwd: string; env?: Record<stri
 export function ndfRef(version: string): { ref: string; version: string } {
   const at = version.indexOf("@");
   return at >= 0 ? { ref: version.slice(at + 1), version: version.slice(0, at) } : { ref: `ndf--v${version}`, version };
+}
+
+// 開発ループの周回を始める conductor への指示（#2347）。マイルストーンの題は空白を含むため 1 つの引数として囲む
+export function loopPrompt(inst: RunJobInstruction): string {
+  const quote = (v: string) => `"${v.replace(/(["\\$`])/g, "\\$1")}"`;
+  const parts = [`/ndf:development-workflow --loop ${inst.LOOP_NAME!} --milestones ${quote(inst.LOOP_MILESTONES!)}`];
+  for (const item of (inst.LOOP_BUDGET ?? "").split(",").filter(Boolean)) {
+    const [unit, value] = item.split("=");
+    parts.push(`--budget-${unit} ${value}`);
+  }
+  return parts.join(" ");
+}
+
+export function firstPrompt(inst: RunJobInstruction, directive: string | null): string {
+  if (inst.START === "new") return `/ndf:development-workflow ${inst.ISSUES!.split(",").map((n) => `#${n}`).join(" ")}`;
+  if (inst.START === "loop") return loopPrompt(inst);
+  // 配布の実行を判断への答えで再開したときは、答えの本文を添える（添えないと同じプランを答え無しで流し直して同じ問いで止まる）
+  if (inst.START === "release") return directive ? `${RELEASE_PROMPT}\n\n利用者の判断: ${directive}` : RELEASE_PROMPT;
+  return `前回の続きから進めてください。${directive ? `利用者の判断: ${directive}` : ""}`;
 }
 
 export async function createRuntime(instruction: RunJobInstruction, env: Record<string, string | undefined>, token: string): Promise<JobRuntime> {
@@ -76,15 +112,65 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   const issueRequests = join(jobHome, "issue-requests.jsonl");
   jobEnv.NDF_ISSUE_REQUEST_FILE = issueRequests;
   const sh = (cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string> }) => run(cmd, args, { env: jobEnv, ...opts });
-  const childEnv = () => claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, stsAssumeRole, sessionName, credentialDir);
+  // 引き受けたロールの資格は発行のたびに控える。更新の前の値も期限まで有効なため、伏せる値から外さない
+  const assumedSecrets: string[] = [];
+  const assumeRole: AssumeRole = async (cred, name) => {
+    const c = await stsAssumeRole(cred, name);
+    assumedSecrets.push(c.accessKeyId, c.secretAccessKey, c.sessionToken);
+    return c;
+  };
+  // managed で子が使うタスクの役割の資格も、読んだ値を控える。更新の前の値も期限まで有効なため外さない
+  const noteContainerRole = async () => {
+    for (const v of await containerRoleSecrets(jobEnv, instruction.EXECUTION_MODE)) if (!assumedSecrets.includes(v)) assumedSecrets.push(v);
+  };
+  const childEnv = async () => {
+    await noteContainerRole();
+    return claudeEnv(jobEnv, instruction.EXECUTION_MODE, credential, assumeRole, sessionName, credentialDir);
+  };
   // 版を固定して取った取得元。スクリプトは入れた版と同じこの写しから読む
   const ndfSource = join(work, "ndf-marketplace");
   const ndfScripts = () => join(ndfSource, "plugins/ndf/scripts");
   // ask_ledger.py の置き場（${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl）
   const askLedger = join(env.NDF_MVV_STATE_DIR ?? join(homedir(), ".local/state/ndf"), "ask.jsonl");
+  // 保存と復元のパス（ループの実行はそのループの引継ぎ文書を足す）
+  const paths = statePaths(instruction.LOOP_NAME);
+  // 同じリポジトリの別の実行が持つ課題を、NDF の loop select がその周回の選定から外す（決定 3）
+  if (instruction.EXCLUDE_ISSUES) jobEnv.NDF_LOOP_EXCLUDE = instruction.EXCLUDE_ISSUES;
+  // Factory のオーガナイザーの置き場（#2439 の I68）。1 台の中のオーガナイザーを起動させず、本番の配布は依頼として出させる
+  const organizerDir = join(repoDir, ORGANIZER_DIR);
+  Object.assign(jobEnv, organizerEnv(instruction, organizerDir));
+  // 外へ送る工程の中身から伏せる秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールとタスクの役割の資格。#2172 の決定 7）
+  const githubTokens: string[] = [];
+  const secretValues = async (): Promise<string[]> => {
+    const out = [token, ...githubTokens, jobEnv.INGEST_TOKEN ?? ""];
+    // local は利用者が手元で設定したモデルの資格をそのまま子へ渡すため、その値も伏せる
+    out.push(...passedModelSecrets(jobEnv, instruction.EXECUTION_MODE));
+    if (credential?.kind === "anthropic_api_key") out.push(credential.api_key);
+    await noteContainerRole();
+    out.push(...assumedSecrets);
+    return out.filter(Boolean);
+  };
+  const git: GitExec = async (args, cwd) => {
+    let stdout = "";
+    const code = await run("git", args, { cwd, env: jobEnv, onLine: (line) => (stdout += `${line}\n`), onStderr: () => undefined });
+    return { code, stdout };
+  };
+  const ledgerRows = async () =>
+    (await readFile(askLedger, "utf8").catch(() => ""))
+      .split("\n")
+      .filter(Boolean)
+      .flatMap((raw) => {
+        try {
+          return [JSON.parse(raw) as Record<string, unknown>];
+        } catch {
+          return [];
+        }
+      });
 
   return {
+    organizer: fsOrganizerFiles(organizerDir),
     async writeGitHubToken(token) {
+      githubTokens.push(token);
       const dir = jobEnv.GH_CONFIG_DIR!;
       await mkdir(dir, { recursive: true, mode: 0o700 });
       await writeFile(join(dir, "hosts.yml"), `github.com:\n    oauth_token: ${token}\n    git_protocol: https\n`, { mode: 0o600 });
@@ -119,11 +205,11 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       if (!res.ok) throw new Error(`状態を読めない（${res.status}）`);
       const archive = join(work, "state.tar.gz");
       await writeFile(archive, Buffer.from(await res.arrayBuffer()));
-      unpackState(repoDir, archive);
+      unpackState(repoDir, archive, exec, paths);
     },
     async saveState(url) {
       const archive = join(work, "state.tar.gz");
-      packState(repoDir, archive);
+      packState(repoDir, archive, exec, paths);
       const res = await fetch(url, { method: "PUT", body: await readFile(archive) });
       if (!res.ok) throw new Error(`状態を保存できない（${res.status}）`);
     },
@@ -147,17 +233,28 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       // 差し戻しは状態ファイルを変えないため、conductor へ差し戻しと理由を明示して渡す
       return decision === "rejected" ? rejectionDirective(gate, answer.body) : null;
     },
-    async runConductor(inst, directive, emit) {
-      const prompt =
-        inst.START === "new"
-          ? `/ndf:development-workflow ${inst.ISSUES!.split(",").map((n) => `#${n}`).join(" ")}`
-          : `前回の続きから進めてください。${directive ? `利用者の判断: ${directive}` : ""}`;
+    async readLoop(name) {
+      const text = await readFile(join(repoDir, ".ndf/loop", name, "loop.json"), "utf8").catch(() => null);
+      if (text === null) return null;
+      try {
+        return parseLoopFile(JSON.parse(text));
+      } catch {
+        return null;
+      }
+    },
+    async answerLoop(name, answer) {
+      const args = [join(ndfScripts(), "sprint-state.py"), "loop", "answer", name, String(answer.number), answer.decision === "approved" ? "--approved" : "--rejected"];
+      if (answer.pr) args.push("--pr", String(answer.pr));
+      if ((await sh("python3", args, { cwd: repoDir })) !== 0) throw new Error(`人の判断待ち #${answer.number} の答えを書けない`);
+    },
+    async runConductor(inst, directive, emit, lapClosed) {
       const offsets = new Map<string, number>();
       // このジョブの記録だけを送る（ask.jsonl は利用者の全プロジェクトで共有される）。cwd は realpath で書かれる
       const root = await realpath(work);
       const ownRow = (row: Record<string, unknown>) => typeof row.cwd === "string" && (row.cwd === root || row.cwd.startsWith(`${root}/`));
-      // 再開では復元したログの末尾から読む。前のジョブが送った行を新しい job_id で送り直さない
-      if (inst.START === "resume") {
+      // 再開と配布の実行（承認・出し直し・続きも START は release のまま）では復元したログの末尾から読む。
+      // 前のジョブが送った工程と使用量を新しい job_id で送り直さない
+      if (inst.START === "resume" || inst.START === "release") {
         for (const file of [...(await findFiles(join(repoDir, ".ndf"), "progress.jsonl")), askLedger]) {
           offsets.set(file, (await readFile(file, "utf8").catch(() => "")).length);
         }
@@ -173,17 +270,22 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
           const content = await readFile(file, "utf8").catch(() => "");
           const from = offsets.get(file) ?? 0;
           offsets.set(file, content.length);
+          const stateDir = dirname(file);
+          const name = basename(stateDir).replace(/-state$/, "");
+          const info = await readPlan(stateDir);
           for (const raw of content.slice(from).split("\n").filter(Boolean)) {
             const line = JSON.parse(raw) as Record<string, unknown>;
-            const name = file.split("/").slice(-2, -1)[0]!.replace(/-state$/, "");
             if (name !== plan) {
               plan = name;
-              await emit(phaseChanged(name));
+              await emit(phaseChanged(name, info.phase));
             }
-            const body = translateProgressLine(line, inst.REPO);
-            if (body) await emit(body);
+            const details = line.kind === "step" ? await collectStepDetails({ git, ledgerRows, secrets: secretValues }, name, stateDir, line, info) : {};
+            const body = translateProgressLine(line, inst.REPO, details);
+            // 同じ行の step.recorded と usage.recorded は同じ at で送り、工程の費用を結ぶ（決定 8）
+            const at = new Date().toISOString();
+            if (body) await emit(body, at);
             // supervise が別のプロセスで起動したステップの使用量（conductor の result には入らない）
-            for (const u of usageFromStepLine(line)) await emit(u);
+            for (const u of usageFromStepLine(line)) await emit(u, at);
           }
         }
         // 代わりの判断の記録（ask_ledger.py の ask.jsonl の kind: decision の行）
@@ -225,33 +327,63 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       // ロールの資格は 1 時間で切れるため、動いている間は置き直す（子は credential_process で読み直す）
       const role = credential?.kind === "aws_role" ? credential : null;
       const refresher = role
-        ? setInterval(() => void writeRoleCredentials(role, stsAssumeRole, sessionName, credentialDir).catch(() => undefined), ROLE_REFRESH_MS)
+        ? setInterval(() => void writeRoleCredentials(role, assumeRole, sessionName, credentialDir).catch(() => undefined), ROLE_REFRESH_MS)
         : null;
-      const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--allowed-tools", CONDUCTOR_TOOLS];
-      const code = await run("claude", args, {
-        cwd: repoDir,
-        env: await childEnv(),
-        onLine: (raw) => {
-          try {
-            const msg = JSON.parse(raw) as Record<string, unknown>;
-            if (msg.type === "result") {
-              lastText = typeof msg.result === "string" ? msg.result : lastText;
-              for (const u of usageFromResult(msg, "conductor")) track(emit(u));
+      // 区間ごとに claude -p を 1 回起動する。使用量（usage.recorded）は区間ごとに今のとおり送る
+      const launch = async (prompt: string): Promise<SectionRun> => {
+        const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--allowed-tools", CONDUCTOR_TOOLS];
+        let text = "";
+        let result: Record<string, unknown> | null = null;
+        let stderr = "";
+        const code = await run("claude", args, {
+          cwd: repoDir,
+          env: await childEnv(),
+          onStderr: (chunk) => {
+            stderr = (stderr + chunk).slice(-8000);
+          },
+          onLine: (raw) => {
+            try {
+              const msg = JSON.parse(raw) as Record<string, unknown>;
+              if (msg.type === "result") {
+                result = msg;
+                text = typeof msg.result === "string" ? msg.result : text;
+                for (const u of usageFromResult(msg, "conductor")) track(emit(u));
+              }
+            } catch {
+              // stream-json でない行は読まない
             }
-          } catch {
-            // stream-json でない行は読まない
-          }
-        },
-      });
-      clearInterval(timer);
-      if (refresher) clearInterval(refresher);
-      await polling;
-      await poll();
-      await Promise.all(pending);
-      if (code !== 0) throw new Error(`conductor が ${code} で終わった`);
+          },
+        });
+        return { code, text, result, stderr };
+      };
+      let outcome;
+      try {
+        outcome = await runSections({
+          firstPrompt: firstPrompt(inst, directive),
+          limit: sectionLimitOf(env),
+          detectUsageLimit: inst.EXECUTION_MODE === "local",
+          launch,
+          started: (section, command) => emit({ type: "section.started", payload: { section, command: command.slice(0, 2000) } }),
+          lapClosed,
+        });
+      } finally {
+        clearInterval(timer);
+        if (refresher) clearInterval(refresher);
+        await polling;
+        await poll().catch(() => undefined);
+        await Promise.all(pending);
+      }
+      lastText = outcome.last.text;
+      if (outcome.end.kind === "usage_limit") return { report: null, summary: lastText.slice(0, 2000), gate: null, end: outcome.end };
+      if (outcome.last.code !== 0) throw new Error(`conductor が ${outcome.last.code} で終わった`);
       const report = reportResult(lastText);
       const prUrl = /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(lastText)?.[0] ?? null;
-      return { report, summary: lastText.slice(0, 2000), gate: report === "判断が要る" ? { kind: gateKindOf(plan), pr_url: prUrl, material: lastText } : null };
+      return {
+        report,
+        summary: lastText.slice(0, 2000),
+        gate: report === "判断が要る" ? { kind: gateKindOf(plan), pr_url: prUrl, material: lastText } : null,
+        end: outcome.end,
+      };
     },
   };
 }

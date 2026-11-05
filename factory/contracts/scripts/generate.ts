@@ -1,13 +1,15 @@
-// JSON Schema（schemas/）から TypeScript の型（src/generated/）を作る。定義が正で、型は生成物（決定 2）
-// node scripts/generate.ts           生成した型を書く
-// node scripts/generate.ts --check   書かずに、コミットした型と食い違えば 1 で終わる
+// JSON Schema（schemas/）から TypeScript の型（src/generated/）を、契約（openapi/）から操作の表を作る。
+// 定義が正で、型と表は生成物（決定 2・#2384 の決定 5）
+// node scripts/generate.ts           生成した型と表を書く
+// node scripts/generate.ts --check   書かずに、コミットした型か表と食い違えば 1 で終わる
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { compile, type JSONSchema } from "json-schema-to-typescript";
+import { generateOperations, operationsPath } from "./operations.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-export const SCHEMAS = ["progress-event", "run-job-instruction", "ingest-response"] as const;
+export const SCHEMAS = ["progress-event", "run-job-instruction", "ingest-response", "local-runner-declaration"] as const;
 
 const BANNER = "// 生成したファイル。手で直さない。定義（schemas/）を直して `npm run generate -w contracts` で作り直す";
 
@@ -23,6 +25,8 @@ export function generateFromSchema(schema: JSONSchema, name: string): Promise<st
   return compile(schema, schema.title ?? name, {
     bannerComment: BANNER,
     additionalProperties: false,
+    // 上限つきの配列を組の和に展開しない（上限は定義の検査が縛る）
+    maxItems: 1,
     cwd: `${root}schemas`,
     style: { singleQuote: false, printWidth: 120 },
   });
@@ -35,6 +39,8 @@ export async function staleSchemas(): Promise<string[]> {
     const committed = await readFile(generatedPath(name), "utf8").catch(() => null);
     if (committed !== (await generateOne(name))) stale.push(name);
   }
+  const committed = await readFile(operationsPath, "utf8").catch(() => null);
+  if (committed !== (await generateOperations())) stale.push("operations");
   return stale;
 }
 
@@ -48,6 +54,7 @@ async function main(): Promise<void> {
     return;
   }
   for (const name of SCHEMAS) await writeFile(generatedPath(name), await generateOne(name));
+  await writeFile(operationsPath, await generateOperations());
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();

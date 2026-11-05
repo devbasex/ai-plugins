@@ -9,6 +9,9 @@
   "keys": {
     "quality": {
       "summary": "quality（このリポジトリの宣言にある最上位のキー）"
+    },
+    "depths": {
+      "summary": "棚卸しの深さの頻度・閾値・上限（review・overhaul・research・owner・labels。#2315）"
     }
   }
 }

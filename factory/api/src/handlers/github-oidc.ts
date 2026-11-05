@@ -1,13 +1,8 @@
 import { handle } from "hono/aws-lambda";
 import { Hono } from "hono";
+import { requireEnv } from "../env.ts";
 import { createGithubOidcApp } from "../github-oidc/app.ts";
 import { loadSigningKeys, type SigningKeys } from "../github-oidc/keys.ts";
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`環境変数 ${name} がありません`);
-  return value;
-}
 
 // 署名の鍵は起動のたびに 1 回だけ読む
 let keys: Promise<SigningKeys> | null = null;

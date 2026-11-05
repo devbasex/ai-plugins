@@ -11,7 +11,9 @@
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CONFIG_DIR",
     "HOME",
-    "NDF_STATUSLINE_AUTH_CACHE"
+    "NDF_CONTEXT_DIR",
+    "NDF_STATUSLINE_AUTH_CACHE",
+    "XDG_STATE_HOME"
   ],
   "settings": [],
   "stdin": "none",

@@ -41,6 +41,7 @@ from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, mai
 from project_lib import ANALYZER, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, fingerprint, merge  # noqa: E402
 from project_lib import measure_ci as mci  # noqa: E402
 from project_lib import measure_repo as mr  # noqa: E402
+from project_lib.measure_materials import measure_materials  # noqa: E402
 from project_lib.secret import mask  # noqa: E402
 
 TOOL = "project-decl"
@@ -164,6 +165,7 @@ def _measure_tree_items(tree, step, items: dict) -> dict:
         ("checks", lambda: mr.measure_checks(tree, dep)),
         ("ndf_policies", lambda: mr.measure_policies(tree)),
         ("instructions", lambda: mr.measure_instructions(tree)),
+        ("materials", lambda: measure_materials(tree, dep)),  # 材料の宣言の案（#2315）。手の値は write が変えない
     ):
         v = step(key, fn)
         if v is not None:

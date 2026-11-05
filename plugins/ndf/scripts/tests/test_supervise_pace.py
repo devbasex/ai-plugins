@@ -303,7 +303,16 @@ def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
     assert "backlog-refinement" not in steps["retro"]["prompt"]
     refine = steps["refine"]
     assert refine["stage"] == "棚卸し" and refine["type"] == "work" and refine["timeout"] > 0
-    assert refine["next"] == "end" and stages.index("後片付け") < stages.index("棚卸し")
+    assert refine["next"] == "refine-record" and stages.index("後片付け") < stages.index("棚卸し")
+    assert "--depth diff" in refine["prompt"] and steps["review"]["next"] == "review-release"
+    # 本体の成否によらず自分の宣言を手放してから先へ進む（PR 2414 の指摘）
+    for depth, after in (("overhaul", "review-due"), ("review", "end")):
+        assert steps[depth]["on_fail"] == f"{depth}-release"
+        rel = steps[f"{depth}-release"]
+        assert rel["next"] == after and rel["on_exit"] == {"10": after} and f"release --what {depth}" in rel["cmd"]
+    # 大整理と見直しは起動の判定（終了コード 3 で飛ぶ）と持ち主の宣言（10 で skipped の行）を挟む（#2315）
+    assert steps["overhaul-due"]["skip_to"] == "review-due" and steps["review-due"]["skip_to"] == "end"
+    assert steps["review-claim"]["on_exit"] == {"10": "review-skipped"} and steps["review-skipped"]["next"] == "end"
     # 無人で通す: 上限を上げて打ち直さない・終了コード 10 で承認を求めない・記録のリポジトリの外へ書かない
     for words in ("--limit` を上げて打ち直さず", "承認を求めず", "`--repo` を渡さない", "親 issue の起票"):
         assert words in refine["prompt"]

@@ -4,9 +4,9 @@ import { GITHUB_TOKEN_REFRESH_MS, runJob, type JobRuntime } from "./main.ts";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeEnv, ROLE_PROFILE, type AssumeRole } from "./model.ts";
+import { claudeEnv, containerRoleSecrets, passedModelSecrets, ROLE_PROFILE, type AssumeRole } from "./model.ts";
 import { createSender } from "./send.ts";
-import { trackedEntries } from "./state.ts";
+import { packState, trackedEntries } from "./state.ts";
 import {
   common,
   delegatedFromRecord,
@@ -126,6 +126,21 @@ describe("状態（受け入れ条件 28・32、I42）", () => {
     expect(trackedEntries([".ndf/tmp/x", ".ndf/pace.json"], tracked)).toEqual([".ndf/pace.json"]);
     expect(trackedEntries(["src/a.ts"], tracked)).toEqual(["src/a.ts"]);
   });
+
+  it("配布の提示が作った追跡しない承認資料も保存し、復元で受け入れる。追跡する承認資料とほかの issues/ は断る", () => {
+    const approval = "issues/approval-ndf-v1.2.0-parallel-3-2.md";
+    expect(trackedEntries([".ndf/tmp/x", approval], new Set())).toEqual([]);
+    expect(trackedEntries([approval], new Set([approval]))).toEqual([approval]);
+    expect(trackedEntries(["issues/approval-ndf-v1.2.0.md", "issues/x.md"], new Set())).toEqual(["issues/approval-ndf-v1.2.0.md", "issues/x.md"]);
+    const calls: string[][] = [];
+    const run = (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === "test" && args[1] !== ".ndf/tmp") throw new Error("無い");
+      return cmd === "git" ? `${approval}\0issues/memo.md\0` : "";
+    };
+    packState("/r", "/a.tgz", run);
+    expect(calls.at(-1)).toEqual(["tar", "-czf", "/a.tgz", "--", ".ndf/tmp", approval]);
+  });
 });
 
 describe("claude の呼び方（受け入れ条件 8・29）", () => {
@@ -150,6 +165,26 @@ describe("claude の呼び方（受け入れ条件 8・29）", () => {
     expect(env).toMatchObject({ ANTHROPIC_API_KEY: "mine", AWS_ACCESS_KEY_ID: "AK" });
     expect(env.INGEST_TOKEN).toBeUndefined();
     expect(env.MODEL_CREDENTIAL_SECRET_ARN).toBeUndefined();
+    // 子へそのまま渡した資格は、外へ送る工程の中身から伏せる値に入る
+    const creds = { ...base, ANTHROPIC_API_KEY: "mine", AWS_SECRET_ACCESS_KEY: "SK" };
+    expect(passedModelSecrets(creds, "local")).toEqual(["mine", "SK"]);
+    expect(passedModelSecrets(creds, "managed")).toEqual([]);
+  });
+
+  it("managed はコンテナの資格の口から子が使うタスクの役割の資格を読み、伏せる値に足す。ほかの形態と口の無いときは空", async () => {
+    const urls: string[] = [];
+    const get = (async (u: string, init?: RequestInit) => {
+      urls.push(`${u} ${new Headers(init?.headers).get("authorization") ?? ""}`);
+      return new Response(JSON.stringify({ AccessKeyId: "ASIA", SecretAccessKey: "SK", Token: "TK", Expiration: AT }));
+    }) as typeof fetch;
+    const relative = { ...base, AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/x" };
+    expect(await containerRoleSecrets(relative, "managed", get)).toEqual(["ASIA", "SK", "TK"]);
+    const full = { ...base, AWS_CONTAINER_CREDENTIALS_FULL_URI: "http://127.0.0.1/creds", AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: "/t" };
+    expect(await containerRoleSecrets(full, "managed", get, async () => "auth\n")).toEqual(["ASIA", "SK", "TK"]);
+    expect(urls).toEqual(["http://169.254.170.2/v2/credentials/x ", "http://127.0.0.1/creds auth"]);
+    expect(await containerRoleSecrets(relative, "byok", get)).toEqual([]);
+    expect(await containerRoleSecrets(base, "managed", get)).toEqual([]);
+    expect(await containerRoleSecrets(relative, "managed", (async () => new Response("", { status: 500 })) as typeof fetch)).toEqual([]);
   });
 
   it("byok の API キーは子の環境にだけ置き、ロールは外部 ID つきで引き受ける。外部 ID が違えば失敗する", async () => {
@@ -196,6 +231,8 @@ describe("ジョブの流れと終了コード（受け入れ条件 24・27・30
       installNdf: async () => opts.installed ?? "10.26.1",
       restoreState: async () => undefined,
       saveState: async () => undefined,
+      readLoop: async () => null,
+      answerLoop: vi.fn(async () => undefined),
       recordAnswer: vi.fn(async () => null),
       runConductor: async (_i, _d, emit) => {
         await emit({ type: "phase.changed", payload: { phase: "impl", issues: [1] } });

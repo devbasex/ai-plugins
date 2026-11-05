@@ -1,0 +1,7 @@
+{
+  "name": "prs-txt",
+  "pattern": "prs.txt",
+  "kind": "result",
+  "place": "state-dir",
+  "skill_readers": []
+}

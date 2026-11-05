@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBClient, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
-import { ConditionFailedError, DynamoAccountStore } from "./store.ts";
+import { ConditionFailedError } from "./port.ts";
+import { DynamoAccountStore } from "./store.ts";
 import type { AccountRecord, SeatRecord } from "./model.ts";
 
 const ddb = mockClient(DynamoDBDocumentClient);
@@ -53,7 +54,7 @@ describe("DynamoAccountStore（決定 8）", () => {
 
   it("アカウントの更新は版を条件にし、版を 1 増やす", async () => {
     ddb.on(TransactWriteCommand).resolves({});
-    await store.updateAccount("a-1", 4, { plan: "free", executionMode: "local" }, account.updatedAt, []);
+    await store.updateAccount({ accountId: "a-1", expectedVersion: 4, patch: { plan: "free", executionMode: "local" }, updatedAt: account.updatedAt, history: [] });
     const update = ddb.commandCalls(TransactWriteCommand)[0]!.args[0].input.TransactItems![0]!.Update!;
     expect(update.ConditionExpression).toBe("attribute_exists(#pk) AND #version = :expected");
     expect(update.ExpressionAttributeValues).toMatchObject({ ":expected": 4, ":next": 5, ":plan": "free", ":mode": "local" });

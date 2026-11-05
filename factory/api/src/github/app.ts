@@ -8,6 +8,8 @@ import {
   type GitHubPort,
   type InstallationToken,
   type IssueSummary,
+  type PullByHead,
+  type PullHead,
   type ReachableRepository,
   type RepositoryVisibility,
 } from "./port.ts";
@@ -107,6 +109,34 @@ export class GitHubApp implements GitHubPort {
     return repo.private === false ? "public" : "private";
   }
 
+  async branchHead(installationId: number, repositoryId: number, fullName: string, branch: string): Promise<string | null> {
+    const token = await this.tokenFor(installationId, repositoryId);
+    if (!token) return null;
+    const ref = await this.get(`/repos/${fullName}/git/ref/heads/${encodeURIComponent(branch)}`, token);
+    const sha = (ref?.object as { sha?: unknown } | undefined)?.sha;
+    return typeof sha === "string" ? sha : null;
+  }
+
+  async listOpenPullHeads(installationId: number, repositoryId: number, fullName: string, base: string): Promise<PullHead[]> {
+    const token = await this.tokenFor(installationId, repositoryId);
+    if (!token) return [];
+    const pulls = await this.getAllPages(`/repos/${fullName}/pulls?state=open&base=${encodeURIComponent(base)}`, token, null);
+    return pulls.map((p) => ({ head: ((p.head as { ref?: unknown } | undefined)?.ref as string) ?? "", url: p.html_url as string }));
+  }
+
+  async findPullByHead(installationId: number, repositoryId: number, fullName: string, head: string, base: string): Promise<PullByHead | null> {
+    const token = await this.tokenFor(installationId, repositoryId);
+    if (!token) return null;
+    const owner = fullName.split("/")[0]!;
+    const q = new URLSearchParams({ state: "all", head: `${owner}:${head}`, base, per_page: "10" });
+    const pulls = (await this.getList(`/repos/${fullName}/pulls?${q}`, token)) ?? [];
+    const merged = pulls.find((p) => typeof p.merged_at === "string");
+    const open = pulls.find((p) => p.state === "open");
+    const pick = merged ?? open ?? pulls[0];
+    if (!pick) return null;
+    return { state: pick === merged ? "merged" : pick.state === "open" ? "open" : "closed", url: pick.html_url as string };
+  }
+
   // リポジトリ 1 つと permissions の範囲だけに絞った導入の token。導入が届かなければ null
   private async scopedToken(installationId: number, repositoryId: number, permissions: Record<string, string>): Promise<InstallationToken | null> {
     const res = await this.http(`${this.api}/app/installations/${installationId}/access_tokens`, {
@@ -130,11 +160,13 @@ export class GitHubApp implements GitHubPort {
   async checkOpenIssues(installationId: number, repositoryId: number, fullName: string, numbers: number[]) {
     const token = await this.tokenFor(installationId, repositoryId);
     const invalid: number[] = [];
+    const milestones: Record<number, string | null> = {};
     for (const n of numbers) {
       const issue = token ? await this.get(`/repos/${fullName}/issues/${n}`, token) : null;
       if (!issue || issue.state !== "open" || issue.pull_request !== undefined) invalid.push(n);
+      else milestones[n] = ((issue.milestone as { title?: unknown } | null | undefined)?.title as string | undefined) ?? null;
     }
-    return { invalid };
+    return { invalid, milestones };
   }
 
   async listRecentOpenIssues(installationId: number, repositoryId: number, fullName: string, limit: number): Promise<IssueSummary[]> {

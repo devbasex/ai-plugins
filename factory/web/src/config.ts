@@ -4,6 +4,8 @@ export interface FactoryConfig {
   cognitoClientId: string;
   webUrl: string;
   apiUrl: string;
+  // 一覧と詳細を読み直す間隔（ミリ秒。#2172 の決定 12）
+  pollIntervalMs: number;
 }
 
 declare const __FACTORY_CONFIG__: FactoryConfig;

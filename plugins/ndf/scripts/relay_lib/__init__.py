@@ -1,14 +1,18 @@
 r"""NDF のラッパー: カットポイントで claude を起動し直す（#895）。中身は #1142 の C6 でこのパッケージへ分けた。
 
-副命令:
+副命令（`relay.py --help` が端末向けに記号を外してこの表を出す。表を持つのはここだけ）:
 
 | 副命令 | 役割 |
 | --- | --- |
 | `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。合図を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
-| `stop` | 動いているラッパーすべてに停止の合図を置く |
+| `stop [<名前>] [--json]` | 名前が無ければ動いているラッパーすべてに停止の合図を置く。名前があればその 1 本だけを止める（#2346） |
+| `spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | 統括役に頼み、tmux の中に端末の結び付いていない名前つきのラッパーを起動する（#2346）。`--role helper` は一時レーンで、1 本だけ上限を超えて通る（#2436） |
+| `ls [--json]` | 同じコンテナのラッパーの名前・状態・承認待ち・区間・時刻・アカウント・役割を 1 つの表（`--json` は 1 行の JSON）で出す（#2346）。`--json` の `metrics` に統括役と tmux の有無（#2436） |
+| `role organizer\|helper --plan <計画名>` / `role --clear` | 作業ディレクトリへ役割のファイルを書く・消す。オーガナイザーの印を持つ 1 本は同時に動かせる数に数えない（#2436） |
+| `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
-| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453・#1468。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
+| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` / `account use <名前>\|--clear` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す・次の区間から使うアカウントを指定する（#1389・#1453・#1468・#2460。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
@@ -28,31 +32,36 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 モジュール: `runtime`（ラッパーを動かす python と環境）・`accounts`（アカウントの副命令の入口）・`ask`（値の決定）・
 `login`（OAuth の登録）・`bedrock`（Bedrock の登録と確かめ）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
-`shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）。
+`shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）・
+`hub`（統括役）・`hub_client`（統括役への依頼の口と一覧）・`tmux`（tmux の包み）。
 
 規約は skills/development-workflow/references/relay.md にある。
 """
 
 from __future__ import annotations
 
+import re
 import sys
 
 from . import runtime
 from .common import launcher_path
 
+HELP = ("--help", "-h")
+
 
 def main(argv: list[str]) -> int:
+    # 一覧は環境を選ぶ前に出す（標準ライブラリだけで足り、素の python3 でも出る）。`run` の引数は claude のもの
+    if not argv:
+        return _help([], sys.stderr) or 2
+    if argv[0] in HELP or argv[0] == "help":
+        return _help(argv[1:2] if argv[0] == "help" else [])
+    if argv[0] != "run" and any(a in HELP for a in _before_separator(argv[1:])):
+        return _help(argv[:1])
     code = runtime.enter(argv, launcher_path())
     if code is not None:
         return code
-    from . import accounts, install, mark, proc, run  # 外部パッケージの包みを import する
+    from . import accounts, hub_client, install, mark, proc, run  # 外部パッケージの包みを import する
 
-    if not argv:
-        print(
-            "usage: relay.py run|stop|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove",
-            file=sys.stderr,
-        )
-        return 2
     sub, rest = argv[0], argv[1:]
     if sub in ("mark", "limit"):
         try:
@@ -61,7 +70,12 @@ def main(argv: list[str]) -> int:
             return 0
     commands = {
         "run": lambda: run.cmd_run(rest),
-        "stop": mark.cmd_stop,
+        "stop": lambda: _stop_cmd(rest),
+        "spawn": lambda: hub_client.cmd_spawn(rest),
+        "ls": lambda: hub_client.cmd_ls(rest),
+        "role": lambda: hub_client.cmd_role(rest),
+        "attach": lambda: hub_client.cmd_attach(rest),
+        "restart": lambda: hub_client.cmd_restart(rest),
         "install": install.cmd_install,
         "uninstall": install.cmd_uninstall,
         "status": install.cmd_status,
@@ -75,5 +89,50 @@ def main(argv: list[str]) -> int:
     }
     if sub in commands:
         return commands[sub]()
-    print(f"relay.py: 未知の副命令 {sub}", file=sys.stderr)
+    return _unknown(sub)
+
+
+def _unknown(sub: str) -> int:
+    print(f"relay.py: 未知の副命令 {sub}（一覧は relay.py --help）", file=sys.stderr)
     return 2
+
+
+def _before_separator(args: list[str]) -> list[str]:
+    """`--` より前の引数（`spawn ... -- <最初の入力>` の入力の中の `--help` は副命令の help ではない）。"""
+    return args[: args.index("--")] if "--" in args else args
+
+
+def _help_rows() -> list[tuple[list[str], str]]:
+    """docstring の副命令の表を、行ごとに（Markdown の記号を外した書式の並び, 役割）にする。"""
+    rows = []
+    for line in (__doc__ or "").splitlines():
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        rows.append((re.findall(r"`([^`]*)`", cells[0]), cells[1].replace("`", "")))
+    return rows
+
+
+def _help(subs: list[str], out=sys.stdout) -> int:
+    """副命令の一覧（`subs` が空のとき）か、その副命令の書式と役割を出す。未知の副命令なら 2。"""
+    lines = []
+    for forms, role in _help_rows():
+        hit = [f for f in forms if not subs or f.split()[0] == subs[0]]
+        if hit:
+            lines += [f"  {f}" for f in hit] + [f"      {role}"]
+    if subs and not lines:
+        return _unknown(subs[0])
+    if not subs:
+        lines = ["usage: relay.py <副命令> [引数 ...]", ""] + lines + ["", "relay.py <副命令> --help でその副命令だけを出す"]
+    print("\n".join(lines), file=out)
+    return 0
+
+
+def _stop_cmd(rest: list[str]) -> int:
+    """名前が無ければ今のまま全部に停止の合図を置く（AC12）。名前があればその 1 本だけを止める。"""
+    from . import hub_client, mark
+
+    names = [a for a in rest if not a.startswith("--")]
+    if not names:
+        return mark.cmd_stop()
+    return hub_client.cmd_stop_named(names[0], "--json" in rest)

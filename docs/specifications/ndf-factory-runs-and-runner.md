@@ -44,7 +44,7 @@ Neural Development Factory の利用者が自分の GitHub のリポジトリを
 ## 対象範囲
 
 - **含む**: `factory/api/src/` の取り込み（`repositories/`）・キーの持ち込み（`credentials/`）・GitHub の口（`github/`）・実行の制御（`runs/`）・進捗の記録の読み出し（`progress/read.ts`）・画面向けの経路（`routes/factory.ts`）・ランナー向けの経路と停止の知らせと見回りの handler（`handlers/run-jobs.ts`・`handlers/run-control.ts`）・`index.ts` への export、`factory/runner/`（ランナーとイメージ）、`factory/web/src/pages/` の 3 画面（リポジトリ・キーの持ち込み・スプリントを始める）、`factory/contracts/openapi/runs.yaml`、`factory/.env.example` の 14 の変数の名前
-- **含まない**: 承認の依頼の保存と答えを返す経路の実装（#2173。経路の形だけを `runs.yaml` に置く）、手元のランナー（形態 ①）の登録・心拍・受け取りの経路（#2189。本書は渡す口の関数だけを持つ）、一覧と詳細の画面（#2172）、料金と台帳（#2174）、承認ゲートの外の問い合わせを止める hook と `ask.jsonl` の書き手（#2206）、ECS・S3・Secrets Manager・DynamoDB・EventBridge・GitHub App の作成などインフラの定義（private リポジトリ）
+- **含まない**: 承認の依頼の保存と答えを返す経路の実装（経路の形だけを `runs.yaml` に置く）、手元のマシン（形態 ①）の登録・心拍・受け取りの経路（本書は渡す口の関数だけを持つ）、一覧と詳細の画面、料金と台帳、承認ゲートの外の問い合わせを止める hook と `ask.jsonl` の書き手、ECS・S3・Secrets Manager・DynamoDB・EventBridge・GitHub App の作成などインフラの定義（private リポジトリ）
 - **取り込むリポジトリの起点・テスト・配布・進め方の入力欄は持たない。** ランナーの中の NDF がそのリポジトリの `.ndf/` から読む（全体の契約の決定 8）
 - **止まった・失敗したスプリントの実行を同じ実行のまま続け直さない。** 新しいスプリントの実行として始める
 - プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
@@ -76,7 +76,7 @@ Neural Development Factory の利用者が自分の GitHub のリポジトリを
 | 実行の表 | `factory/api/src/runs/table.ts`（`RunsTable`）・`dynamo-table.ts`・`memory-table.ts` | 条件つきの書き込みを操作の単位で持つ。`memory-table.ts` はテスト用の偽物 |
 | 実行基盤の口 | `factory/api/src/runs/platform.ts`（`RunnerPlatform`）・`ecs.ts`（`EcsRunnerPlatform`） | `RunTask`・`StopTask`・`DescribeTasks`、token の置き場の作成と削除、状態の置き場の署名つき URL。テストは偽物 |
 | 依存の組み立て | `factory/api/src/runs/deps.ts`（`factoryDepsFromEnv`・`ndfVersionFromMarketplace`） | 環境変数から依存を 1 回だけ作り、秘密を ARN から読む |
-| 進捗の記録の読み出し | `factory/api/src/progress/read.ts`（`ProgressReader`） | `job.finished` を冪等の鍵で読む・月の `usage.recorded` の token を足す。読むだけで、保存の型に書き換えを足さない |
+| 進捗の記録の読み出し | `factory/api/src/progress/read.ts`（`ProgressReader`） | `job.finished` を冪等の鍵で読む・月の `usage.recorded` の token を足す・スプリントの一覧と詳細の事象を読む（[スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)）。読むだけで、保存の型に書き換えを足さない |
 | 画面向けの経路 | `factory/api/src/routes/factory.ts`（`registerFactory`） | 既存の API の handler（`handlers/api.ts`）に足す。どの経路も `resolveFromRequest` でアカウントを解決する |
 | ランナー向けの経路 | `factory/api/src/runs/runner-api.ts`（`createRunnerApiApp`）・`handlers/run-jobs.ts` | 実行ジョブの token で認証し、導入の token の渡し直しと状態の置き場の署名つき URL を返す |
 | 停止の知らせと見回りの handler | `factory/api/src/handlers/run-control.ts`（`handleRunControlEvent`） | HTTP を持たない。EventBridge の「ECS Task State Change」と 5 分ごとの起動を受ける |
@@ -108,7 +108,7 @@ graph TD
     end
     ING[進捗の受け口 #2171]
     C2173["#2173 承認と通知"]
-    C2189["#2189 手元のランナー"]
+    C2189["#2189 手元のマシン"]
     PR --> REPO
     PK --> CRED
     PS --> CAND
@@ -138,34 +138,34 @@ graph TD
 | 名前 | 使う側 | 入力 | 出力 | 失敗 |
 | --- | --- | --- | --- | --- |
 | `requestResume({sprintRunId, approvalRequestId})` | #2173（答えを保存した後） | 実行と依頼の識別子 | `Promise<{jobId}>`。`START=resume` のジョブを作り起動する | `ResumeRejectedError`（`code` が `not_found` / `not_awaiting_approval` / `sprint_run_busy`）。`sprint_run_busy` は前のジョブの停止を待っている間か、別の再開が先に通ったときで、呼ぶ側は時間をおいて呼び直す |
-| `claimLocalRunJob(accountId)` | #2189（手元のランナーの受け取り） | アカウント | `Promise<{instruction: RunJobInstruction, token} \| null>`。そのアカウントの最も古い `pending` の `local` のジョブ（取り消しの要求の無い実行のもの）を `running` にし、指示と token を 1 回だけ返す | 保存の失敗は投げる |
+| `claimLocalRunJob(accountId)` | #2189（手元のマシンの受け取り） | アカウント | `Promise<{instruction: RunJobInstruction, token} \| null>`。そのアカウントの最も古い `pending` の `local` のジョブ（取り消しの要求の無い実行のもの）を `running` にし、指示と token を 1 回だけ返す | 保存の失敗は投げる |
 | `reportLocalRunJobEnded(jobId)` | #2189（終わりか心拍の切れ） | ジョブ | `Promise<void>`。停止の知らせと同じ処理 | 知らないジョブ・`local` でないジョブ・終わったジョブは何もしない |
-| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`） |
+| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`。main へマージした後の配布の実行をジョブの無いときに取り消すと `release_after_main`） |
 | `getSprintRun(sprintRunId)`・`getRegistration(accountId, repositoryId)` | 実行と登録を読む側 | 識別子 | 行か `null` | — |
 
 あわせて `RunControl`・`ResumeRejectedError`・`repoKey`（`owner/name` を小文字にした比較の鍵）と、`ResumeRejectedCode`・`RunControlConfig`・`RunControlDeps`・`RunJob`・`SprintRun`・`RunState`・`JobState` の型を export する。
 
-**`local` のジョブの token は置き場に書かず、`claimLocalRunJob` の応答で 1 回だけ返す。** 指示の形（`INGEST_TOKEN_SECRET_ARN` は必須）を保つため、その項目には `arn:aws:secretsmanager:local:000000000000:secret:ndf-factory/run-jobs/<job_id>` の形の、実在しない ARN を置く。手元のランナーは環境変数 `INGEST_TOKEN` で token を直に渡し、ランナーはそれがあれば置き場を読まない。
+**`local` のジョブの token は置き場に書かず、`claimLocalRunJob` の応答で 1 回だけ返す。** 指示の形（`INGEST_TOKEN_SECRET_ARN` は必須）を保つため、その項目には `arn:aws:secretsmanager:local:000000000000:secret:ndf-factory/run-jobs/<job_id>` の形の、実在しない ARN を置く。手元のマシンは環境変数 `INGEST_TOKEN` で token を直に渡し、ランナーはそれがあれば置き場を読まない。
 
 ### 画面向けの経路
 
-機械可読な正は [`factory/contracts/openapi/runs.yaml`](../../factory/contracts/openapi/runs.yaml) である。どの経路も Cognito の access token を要り、`resolveFromRequest` でアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403 である（[認証とアカウント・席・プランごとの使える量](ndf-factory-accounts-and-plans.md)）。エラーの本文は `{"error": {"code", "message", "details"?}}`。
+機械可読な正は [`factory/contracts/openapi/runs.yaml`](../../factory/contracts/openapi/runs.yaml) である。どの経路も Cognito の access token か委任の資格情報を要り、`resolveFromRequest` でアカウントを解決する。他人のアカウントは #2170 の I18 と同じ 403 である（[認証とアカウント・席・料金プランごとの使える量](ndf-factory-accounts-and-plans.md)）。エラーの本文は `{"error": {"code", "message", "details"?}}`。入力・成功の形は [利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形) に従う。下の表の「要素・条件」は要素 1 個の項目か一覧の条件、「値」は成功の要素の `value`（一覧は配列の 1 件）、「失敗」は要素の結果の状態である。
 
-| 経路 | 誰が | 入力 | 成功 | 失敗 |
+| 経路 | 誰が | 要素・条件 | 値 | 失敗 |
 | --- | --- | --- | --- | --- |
-| `GET /accounts/{a}/github/install-url` | 席を持つ人 | — | 200 `{url}`（`https://github.com/apps/<GITHUB_APP_SLUG>/installations/new`） | 403 |
-| `GET /accounts/{a}/github/authorize-url` | 持ち主 | — | 200 `{url}`（`https://github.com/login/oauth/authorize?client_id=<GITHUB_APP_CLIENT_ID>&state=<state>`） | 403 |
-| `POST /accounts/{a}/github/candidates` | 持ち主 | `{code, state}`（認可の戻り） | 200 `{proof, candidates: [{repository_id, full_name, installation_id, registered}]}` | 400 `invalid_request`（`state` が合わない・`code` が無いか換えられない）・403 |
-| `GET /accounts/{a}/repositories` | 席を持つ人 | — | 200 `{repositories: [{repository_id, full_name, installation_id, registered_at, active_sprint_runs}]}` | 403 |
-| `POST /accounts/{a}/repositories` | 持ち主 | `{proof, repository_id}` | 201 登録の 1 行（`active_sprint_runs` を除く） | 400（証明の署名・期限・利用者・アカウントの違い）・403（証明に無い ID、登録の直前に導入の token を作れない。I33）・409 `repository_exists`（I32） |
-| `DELETE /accounts/{a}/repositories/{repositoryId}` | 持ち主 | — | 204 | 400（ID の形）・403・404 `repository_not_found`・409 `repository_in_use`（I36） |
-| `GET /accounts/{a}/model-credential` | 持ち主 | — | 200 `{registered, kind, updated_at, external_id}`。未登録なら `kind`・`updated_at` は `null`。`external_id` は常に返す（秘密でない） | 403 |
-| `PUT /accounts/{a}/model-credential` | 持ち主 | `{kind: "anthropic_api_key", api_key}`（1〜512 字）か `{kind: "aws_role", role_arn, region}`（`^arn:aws[a-z-]*:iam::\d{12}:role/.+$` で 2,048 字まで、`^[a-z]{2}(-[a-z]+)+-\d$` で 32 字まで） | 200 上と同じ形（値も ARN も返さない） | 400・403・503 `credential_unavailable` |
-| `DELETE /accounts/{a}/model-credential` | 持ち主 | — | 204（無くても 204） | 403・503 `credential_unavailable` |
-| `POST /accounts/{a}/repositories/{r}/issue-candidates` | 席を持つ人 | `{exclude?: [番号]}`（選び直しで外す番号） | 200 `{source: "ranking" \| "recent", milestone, candidates: [{number, title, selected, reason}], note}` | 400（ID の形）・403・404 `repository_not_found` |
-| `POST /accounts/{a}/sprint-runs` | 席を持つ人 | `{repository_id, issues}`（1〜20 件の重なりの無い番号） | 201 `{sprint_run_id, state: "starting"}` | 400・403・404・409・503（下の表） |
-| `GET /accounts/{a}/sprint-runs?repository_id=` | 席を持つ人 | — | 200 `{sprint_runs: [{sprint_run_id, repository_id, issues, state, failure_reason, created_at}]}`（新しい順 50 件） | 400（ID の形）・403 |
-| `POST /accounts/{a}/sprint-runs/{id}/cancel` | 席を持つ人 | — | 200 `{state}`（`cancelled` か、停止を待つ `running`） | 403・404 `sprint_run_not_found`・409 `already_finished` |
+| `GET /accounts/{a}/github/install-url` | 席を持つ人 | — | `[{url}]`（`https://github.com/apps/<GITHUB_APP_SLUG>/installations/new`） | 403 |
+| `GET /accounts/{a}/github/authorize-url` | 持ち主 | — | `[{url}]`（`https://github.com/login/oauth/authorize?client_id=<GITHUB_APP_CLIENT_ID>&state=<state>`） | 403 |
+| `POST /accounts/{a}/github/candidates` | 持ち主 | `{code, state}`（認可の戻り。要素は 1 個） | `{proof, candidates: [{repository_id, full_name, installation_id, registered}]}` | 400 `invalid_request`（`state` が合わない・`code` が無いか換えられない）・403 |
+| `GET /accounts/{a}/repositories` | 席を持つ人 | — | `[{repository_id, full_name, installation_id, registered_at, active_sprint_runs, max_concurrent_runs}]` | 403 |
+| `POST /accounts/{a}/repositories` | 持ち主 | `{proof, repository_id}` | 登録の 1 行（`active_sprint_runs` を除く） | 400（証明の署名・期限・利用者・アカウントの違い）・403（証明に無い ID、登録の直前に導入の token を作れない。I33）・409 `repository_exists`（I32） |
+| `DELETE /accounts/{a}/repositories?repository_id=` | 持ち主 | 鍵 `repository_id` | `{removed: true}` | 400（ID の形）・403・404 `repository_not_found`・409 `repository_in_use`（I36） |
+| `GET /accounts/{a}/model-credential` | 持ち主 | — | `[{registered, kind, updated_at, external_id}]`。未登録なら `kind`・`updated_at` は `null`。`external_id` は常に返す（秘密でない） | 403 |
+| `PUT /accounts/{a}/model-credential` | 持ち主 | `{kind: "anthropic_api_key", api_key}`（1〜512 字）か `{kind: "aws_role", role_arn, region}`（`^arn:aws[a-z-]*:iam::\d{12}:role/.+$` で 2,048 字まで、`^[a-z]{2}(-[a-z]+)+-\d$` で 32 字まで）。要素は 1 個 | 取得と同じ形（値も ARN も返さない） | 400・403・503 `credential_unavailable` |
+| `DELETE /accounts/{a}/model-credential` | 持ち主 | 鍵なし（要素は 1 個） | `{removed: true}`（無くても成功） | 403・503 `credential_unavailable` |
+| `POST /accounts/{a}/issue-candidates` | 席を持つ人 | `{repository_id, exclude?: [番号]}`（選び直しで外す番号） | `{source: "ranking" \| "recent", milestone, candidates: [{number, title, selected, reason}], note}` | 400（ID の形）・403・404 `repository_not_found` |
+| `POST /accounts/{a}/sprint-runs` | 席を持つ人 | `{repository_id, issues, idempotency_key}`（`issues` は 1〜20 件の重なりの無い番号） | `{sprint_run_id, state: "starting"}` | 400・403・404・409・503（下の表） |
+| `GET /accounts/{a}/sprint-runs?repository_id=` | 席を持つ人 | 条件 `repository_id`（省くとアカウント全体） | `[{sprint_run_id, repository_id, issues, state, failure_reason, created_at, repo, current_phase, current_step, last_event_at}]`（新しい順 50 件。後ろの 4 項目は進捗の事象から導く。規則は [スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)） | 要求全体の 400（ID の形）・403・503 `progress_unavailable` |
+| `POST /accounts/{a}/sprint-runs/cancel` | 席を持つ人 | `{sprint_run_id}` | `{state}`（`cancelled` か、停止を待つ `running`） | 403・404 `sprint_run_not_found`・409 `already_finished`・`release_after_main` |
 
 **持ち主だけの経路は、席を持つだけの利用者に他人のアカウントと同じ 403 `forbidden` を返す**（`requireOwner`）。チームのアカウントでは、リポジトリの登録と外し・認可・候補・キーの 3 つの操作は持ち主（`role` が `owner`）だけが、スプリントの開始・一覧・取り消しと課題の候補は席を持つ人が行う。
 
@@ -256,9 +256,9 @@ graph TD
 | 3. NDF の導入 | `NDF_MARKETPLACE` を `NDF_VERSION` の ref（タグかコミット）で `<作業場所>/ndf-marketplace` へ clone し、`claude plugin marketplace add <そのディレクトリ>` と `claude plugin install ndf@<取得元の marketplace.json の name>` を打つ。入った `plugin.json` の版が `NDF_VERSION` と違えば失敗。NDF のスクリプトはこの写しから読む |
 | 4. `job.started` | `ndf_version` は `NDF_VERSION`、`start` は `START` |
 | 5. 状態の復元（`resume`） | `POST /run-jobs/state`（`get`）の URL から取り、`.ndf/tmp`・`.ndf/loop` の下の追跡しないパスだけを戻す（I42） |
-| 6. 答えの記録（`resume`） | 答えの経路から読む。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <関門の名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
-| 7. conductor | `claude -p <指示> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch`。指示は `new` で `/ndf:development-workflow #<番号> …`、`resume` で「前回の続きから進めてください。」に手順 6 の指示を足したもの。NDF の worktree は `NDF_WORKTREE_BASE`（`<作業場所>/worktrees`）に置く |
-| 8. 終わり | `POST /run-jobs/state`（`put`）の URL へ状態を保存 → 結果が判断が要るなら `gate.reached` → `job.finished`。手順 1〜8 のどこかが失敗すれば `gate.reached` を送らず `job.finished`（`failed`） |
+| 6. 答えの記録（`APPROVAL_REQUEST_ID` のある `resume`） | 答えの経路から読む（識別子の無い `resume` は飛ばす。利用上限の後の再開。#2347 の決定 7）。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <関門の名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
+| 7. conductor | `claude -p <指示> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch`。指示は `new` で `/ndf:development-workflow #<番号> …`、`loop` で `/ndf:development-workflow --loop <LOOP_NAME> --milestones "<LOOP_MILESTONES>"` に `LOOP_BUDGET` の `--budget-<単位> <値>` を足したもの、`resume` で「前回の続きから進めてください。」に手順 6 の指示を足したもの。`EXCLUDE_ISSUES` は `NDF_LOOP_EXCLUDE` として子へ渡す。conductor の最後の `result` の文に `ndf-next` のブロックが 1 つだけあれば、同じ作業場所でその指示の `claude -p` を起動し直す（区間。起動ごとに `section.started`。読み方は [`ndf-next-block.json`](../../plugins/ndf/contracts/forms/ndf-next-block.json)）。ループの周回が締まったか止まる条件が書かれたら次の区間を起動せず、区間が `RUNNER_SECTION_LIMIT`（既定 20）に達するか、`local` で利用上限に当たれば止まる。NDF の worktree は `NDF_WORKTREE_BASE`（`<作業場所>/worktrees`）に置く |
+| 8. 終わり | `POST /run-jobs/state`（`put`）の URL へ状態を保存 → 結果が判断が要るなら `gate.reached`（利用上限で止まったときは送らない） → `job.finished`。手順 1〜8 のどこかが失敗すれば `gate.reached` を送らず `job.finished`（`failed`） |
 
 **ランナーの終了コードは 0（`job.finished` を受け口が受け取った）か 1 だけである**（I43）。`job.finished` が 4xx で断られたか、送り直しを使い切ったときも 1 である。
 
@@ -279,12 +279,13 @@ graph TD
 | --- | --- | --- |
 | `phase.changed` | 行が伸びた `progress.jsonl` の親のディレクトリの名前（計画の名前。末尾の `-state` を除く）が前と変わった | 先頭の番号を除き、残りの番号を課題、番号でない部分を `-` で結んだものをフェーズにする（`5-impl-2171` → `impl`・`[2171]`） |
 | `step.recorded` | `progress.jsonl` の `kind: step` の行 | `step`・`exit`（整数でなければ 0）・`seconds`（0 以上の数でなければ 0）・`summary`（JSON の文字列なら `summary` の値）。行の `pr`・`summary`・`report` にある Pull Request の URL のうち `REPO` のもの（大文字と小文字を問わない）だけを `pull_request` にする |
-| `attention` | `progress.jsonl` の `kind: attention` の行 | `reason`（空なら `attention`）・`summary`（`text`、無ければ `summary`） |
+| `attention` | `progress.jsonl` の `kind: attention` の行 | `reason`（`step` が `base-sync` の行は `base_conflict`。ほかは行の `reason`、空なら `attention`。#2347 の決定 10）・`summary`（`text`、無ければ `summary`） |
 | `usage.recorded` | conductor の stream-json の `result` の `modelUsage`（`step` は `conductor`）と、`progress.jsonl` の `step` の行の `models`（supervise が別のプロセスで起動したステップの分） | モデルごとに 1 件。入力の token は入力に cache の読みと書きを足す（#2170 の数え方）。`cost_usd` は `costUSD` か `cost` |
 | `decision.delegated` | `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`（[`ask_ledger.py`](../../plugins/ndf/scripts/lib/ask_ledger.py)）の `kind: decision` の行のうち、`cwd` がこのジョブの作業場所の下のもの | `question`・`answer`・`reason`（どれかが無ければ送らない。4,000 字で切る）。`category` は `ref` が指す `kind: verdict` の行の `source`、無ければ行の `category`、それも無ければ `null` |
 | `issue.requested` | `NDF_ISSUE_REQUEST_FILE` の 1 行（`{"repo", "title", "body"}` の JSON。#2216） | 値をそのまま写す。題が 256 字か本文が 50,000 字を超える行は送らず `attention`（`reason` は `issue_request_too_large`）にし、形の違う行は送らない |
 | `gate.reached` | conductor の最後の `result` の文の `- 結果: 判断が要る` | `kind` は最後の計画の名前が `design` を含めば `gate1`、`release` を含めば `gate2`、ほかは `decision`。`pr_url` は文の最初の Pull Request の URL、`material` は文そのもの |
-| `job.finished` | 終わり方 | 失敗 → `failed`、結果が `判断が要る` → `gate`、`完了` → `done`、`できなかった` → `stopped`、結果の行が無い → `failed`。`summary` は文の先頭 2,000 字か失敗の理由 |
+| `job.finished` | 終わり方 | 失敗 → `failed`、結果が `判断が要る` → `gate`、`完了` → `done`、`できなかった` → `stopped`、結果の行が無い → `failed`。区間の上限に達した → `stopped`（`reason` は `section_limit`）、`local` で利用上限に当たった → `stopped`（`reason` は `usage_limit`、`resets_at` はリセット時刻か `null`）。`summary` は文の先頭 2,000 字か失敗の理由 |
+| `loop.lap_closed`・`loop.stopped` | ループの実行で、区間の後の `.ndf/loop/<LOOP_NAME>/loop.json` の締めた周回と `stop` | 増えた周回ごとに 1 件と、`stop` が書かれたら 1 件 |
 
 - **256 KiB を超える `gate.reached` は `material` だけを切り詰める。** 末尾に `\n\n（ここから先を切り詰めた。全文は <pr_url> にある）`（`pr_url` が `null` なら `（ここから先を切り詰めた。元の大きさ <n> バイト）`）を足し、JSON にしたバイト数が 262,144 以下になる最長の位置で、文字の境目で切る
 - **送信は、送る前に契約で確かめる**（`validateProgressEvent`。合わなければ送らず標準エラーへ 1 行）。5xx と接続の失敗だけを、同じ事象のまま 1・2・4・8 秒…最大 60 秒の間を置いて 30 分まで送り直す。4xx は送り直さず標準エラーへ 1 行書いて次へ進む
@@ -412,7 +413,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 - **ワークフローを変える課題は Factory では進められない。** App が Workflows の権限を持たないため push が断られ、ジョブは `failed` で終わる。手元の NDF で進める
 - **ランナーの中の NDF のボードの記録は失敗する。** App が Projects の権限を持たないためで、NDF はボードの失敗で工程を止めない
 - **持ち込んだキーを消すと、その `byok` の実行の次のジョブは起動の時点で置き場を読めずに `failed` になる。** 実行は開始の時点のキーの ARN を持ち（I39）、消した後に保存し直したキーは新しい ARN になるためである。動いているジョブは起動の時点で読んだ値で続ける
-- **`local` の `pending` のジョブには 15 分の上限を掛けない。** 手元のランナーが受け取るまで枠を使い続ける。止めるには取り消す
+- **`local` の `pending` のジョブには 15 分の上限を掛けない。** 手元のマシンが受け取るまで枠を使い続ける。止めるには取り消す
 - **承認の依頼の答えの経路（`GET /run-jobs/approval-requests/{id}/answer`）は #2173 が実装するまで無い。** それまで `resume` のジョブは答えを読めず `failed` で終わる
 - **実環境の形は、インフラが入った後のリリース後テストで確かめる。** EventBridge の ECS の知らせの形・GitHub App の利用者の認可の応答・2 本の同時の実行の登録から完了まで
 
@@ -429,7 +430,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 | 観点 | 縛る振る舞い |
 | --- | --- |
 | 候補と登録（I32・I33） | 偽の GitHub が返した導入の対象のうち、利用者の届くものだけが候補に出ること。証明に無い ID・届かない導入の登録が 403 で行が増えないこと。同じ ID の 2 回目と同時の 2 本が 409 で 1 行であること |
-| 外し（I36） | 終わりの状態でない実行があると 409、終われば 204 であること |
+| 外し（I36） | 終わりの状態でない実行があると要素の 409、終われば成功の要素（`{removed: true}`）であること |
 | 他人のアカウント | 他人のアカウントへの経路が #2170 と同じ 403 の本文を返し、持ち主でない席の人の持ち主だけの操作も同じ 403 であること |
 | キーの持ち込み（I38） | 2 種類の保存・差し替え・消去が通り、応答が 4 項目だけであること。テストのキーの値が、応答・ログ・事象・`RunTask` の環境変数のどこにも無く、ARN は自分のアカウントの `byok` のジョブにだけ載ること |
 | 外部 ID | 外部 ID がアカウントごとに違い、`AssumeRole` に付くこと。偽の STS が断ると `failed` になること |
@@ -462,7 +463,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 - 実装: [#2248](https://github.com/devbasex/ai-plugins/pull/2248)・[#2250](https://github.com/devbasex/ai-plugins/pull/2250)
 - サービス全体の契約: [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md)
 - 受け口と実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
-- 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 認証とアカウント・席・料金プランの使える量: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
 - 経路の契約: [factory/contracts/openapi/runs.yaml](../../factory/contracts/openapi/runs.yaml)
 - サービスのディレクトリと API の入口: [factory/README.md](../../factory/README.md)
 - 代わりの判断を残す問い合わせの guard（#2206）: [ndf-ask-guard.md](ndf-ask-guard.md)、記録の形: [plugins/ndf/scripts/lib/ask_ledger.py](../../plugins/ndf/scripts/lib/ask_ledger.py)

@@ -46,6 +46,12 @@ allowed-tools:
 書き換え）は
 [parallel-work.md](../development-workflow/references/parallel-work.md) にある。
 
+## 並列の計画
+
+1 つのリポジトリで複数の開発ループかスプリントを tmux のレーンとして同時に進めるときは、並列の計画を 1 度書く。
+レーンごとの名前・最初の入力・触る場所・プランの本数・依存を 1 つの文書に置き、レーンの数だけ引継ぎ文書を作る
+（`parallel.py init <計画名>`）。形と検査は [references/parallel-plan.md](references/parallel-plan.md) にある。
+
 ## Step 0: 作成フェーズか実行フェーズか判定
 
 最初に **既に plan ファイルが存在するか** で判定する。skill 内で `Glob` を使うのが第一選択 (例: `Glob('issues/*PLAN42*')`)。shell で確認する場合は:
