@@ -1548,3 +1548,16 @@ def test_gate_1_of_a_lane_sends_the_request_to_the_organizer(env, monkeypatch):
     out = sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
     w = rec(env)["waiting"][0]
     assert out["metrics"]["waiting"] == [11] and sent == [11] and w["request"] == "lroot-g501-x" and w["plan"] == "p1"
+
+
+def test_selecting_a_returned_issue_marks_its_fix(env):
+    # 直しの周回: 差し戻された周回の課題を選ぶと、その直しを済みにする。選ばなかった直しと済みの直しは変えない（現状固定。#2422）
+    start(env)
+    with sl_record.open_record(env, "l1") as (r, before):
+        r["fixes"] = [{"lap": 0, "issues": [12]}, {"lap": 0, "issues": [99]}, {"lap": 0, "issues": [11], "fixed_by": 7}]
+        sl_record.write_record(env, r, before)
+    got = sl_select.cmd_select(env, "l1")
+    lap = rec(env)["laps"][-1]
+    assert got["metrics"]["selected"] == [12, 11]
+    assert (lap["sprint"], lap["milestone"], lap["rank_digest"], lap["state_path"]) == (f"l1-{lap['n']}", "01 近い", "dg", None)
+    assert [f.get("fixed_by") for f in rec(env)["fixes"]] == [lap["n"], None, 7]

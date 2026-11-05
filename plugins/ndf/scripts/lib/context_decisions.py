@@ -19,23 +19,21 @@ from __future__ import annotations
 import json
 import os
 import re
-import statistics
 import time
 from collections import defaultdict
 import subprocess
-from datetime import datetime
 from pathlib import Path
-from typing import Mapping
+from typing import Iterator, Mapping
 
+import clock
 import context_policy as cp
 import jsonio
 from context_policy import REASONS  # noqa: F401  sprint-state.py の --reason の選択肢
-from usage_ledger import now_utc
+from usage_ledger import cache_writes, now_utc
 
 SCHEMA = 1
 SESSION_DAYS = 7
 LOCAL = "_local"
-CACHE_1H = 3600  # 呼び出しの間隔がこれを超えたら、1 時間のキャッシュが切れたとみなす
 MARK_HANDOFF, MARK_RESTORED = "引継ぎ開始", "復元完了"
 MARKS = (MARK_HANDOFF, MARK_RESTORED)
 EVENT_DECISION = "判定"
@@ -94,13 +92,7 @@ def stage_of(key: str) -> str:
     return "plan"
 
 
-def parse_ts(value) -> float | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+parse_ts = clock.epoch_seconds  # 記録の時刻（ISO 8601）を UNIX 時刻（秒）にする。読めなければ None
 
 
 # --- 判定の記録 ----------------------------------------------------------------------------------------
@@ -237,7 +229,7 @@ def session_file(sid: str, kind: str, env: Mapping | None = None) -> Path:
 def read_window(sid: str, env: Mapping | None = None) -> int | None:
     """statusline が書いた窓の大きさ。無い・形が違えば None（推測で埋めない。I7）。"""
     w = jsonio.read(session_file(sid, "window", env), missing={}, broken={}, want=dict).get("window")
-    return w if isinstance(w, int) and not isinstance(w, bool) and w > 0 else None
+    return w if cp.is_positive_int(w) else None
 
 
 def read_applied(sid: str, env: Mapping | None = None) -> dict:
@@ -267,39 +259,60 @@ def write_applied(sid: str, applied, env: Mapping | None = None) -> bool:
 # --- 会話の記録 ---------------------------------------------------------------------------------------
 
 
-def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, bool]:
-    """会話の記録の API 呼び出し（同じ `message.id` は 1 回。I13）と、自動圧縮の回数と、ndf-next で始まったか。
+def usage_call(usage: Mapping, ts: float | None, model) -> dict:
+    """API 呼び出し 1 回の usage を {ts, model, inp, out, read, w5, w1h, context} にする（会話の記録と使用量の帳簿で共通）。"""
+    w5, w1h = cache_writes(usage)
+    inp, out, read = (int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"))
+    return {"ts": ts, "model": model, "inp": inp, "out": out, "read": read, "w5": w5, "w1h": w1h, "context": inp + read + w5 + w1h}
 
-    同じ `message.id` の行は最後の usage を採る（ストリーミングで後の行ほど output_tokens が増える。scripts/token-usage.py と同じ）。
-    時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
 
-    呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
-    from usage_ledger import cache_writes
+def _is_auto_compact(e: dict) -> bool:
+    meta = e.get("compactMetadata")
+    return e.get("type") == "system" and e.get("subtype") == "compact_boundary" and isinstance(meta, dict) and meta.get("trigger") == "auto"
 
-    seen = set() if seen is None else seen
-    calls: list[dict] = []
-    here: dict = {}  # このファイルで数えた message.id → calls の位置
-    compacts = 0
-    first_user: str | None = None
+
+def _user_text(e: dict) -> str | None:
+    """利用者の発言（メタの行を除く）の本文。文字列でなければ JSON にする。発言でなければ None。"""
+    if e.get("type") != "user" or e.get("isMeta"):
+        return None
+    content = (e.get("message") if isinstance(e.get("message"), dict) else {}).get("content")
+    return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+
+
+def _json_lines(path) -> Iterator[dict] | None:
+    """JSONL の辞書の行を 1 行ずつ返す（全行を辞書のまま保持しない）。読めなければ None。壊れた行と辞書でない行は飛ばす。"""
     try:
         lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
+        return None
+    return (e for e in map(_loads_or_none, lines) if isinstance(e, dict))
+
+
+def _loads_or_none(line: str):
+    try:
+        return json.loads(line)
+    except ValueError:
+        return None
+
+
+def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, bool]:
+    """会話の記録の API 呼び出し（同じ `message.id` は 1 回。I13）と、自動圧縮の回数と、ndf-next で始まったか。
+    同じ `message.id` の行は最後の usage を採る（ストリーミングで後の行ほど output_tokens が増える。scripts/token-usage.py と同じ）。
+    時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
+    呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
+    seen = set() if seen is None else seen
+    entries = _json_lines(path)
+    if entries is None:
         return [], None, False
-    for line in lines:
-        try:
-            e = json.loads(line)
-        except ValueError:
+    calls, here = [], {}  # here はこのファイルで数えた message.id → calls の位置
+    compacts, first_user = 0, None
+    for e in entries:  # 呼び出し・最初の利用者発言・自動圧縮を 1 回の走査で集める
+        if _is_auto_compact(e):
+            compacts += 1
             continue
-        if not isinstance(e, dict):
-            continue
-        if e.get("type") == "system" and e.get("subtype") == "compact_boundary":
-            meta = e.get("compactMetadata")
-            compacts += 1 if isinstance(meta, dict) and meta.get("trigger") == "auto" else 0
-            continue
+        if first_user is None:
+            first_user = _user_text(e)
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
-        if e.get("type") == "user" and first_user is None and not e.get("isMeta"):
-            content = msg.get("content")
-            first_user = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
         usage = msg.get("usage")
         if e.get("type") != "assistant" or not isinstance(usage, dict):
             continue
@@ -307,18 +320,7 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
         if mid in seen and mid not in here:
             continue
         seen.add(mid)
-        w5, w1h = cache_writes(usage)
-        inp, read = int(usage.get("input_tokens") or 0), int(usage.get("cache_read_input_tokens") or 0)
-        call = {
-            "ts": parse_ts(e.get("timestamp")),
-            "model": msg.get("model"),
-            "inp": inp,
-            "out": int(usage.get("output_tokens") or 0),
-            "read": read,
-            "w5": w5,
-            "w1h": w1h,
-            "context": inp + read + w5 + w1h,
-        }
+        call = usage_call(usage, parse_ts(e.get("timestamp")), msg.get("model"))
         if mid in here:
             call["ts"] = calls[here[mid]]["ts"] or call["ts"]
             calls[here[mid]] = call
@@ -357,99 +359,11 @@ def attach_marks(marks: list[dict], spans: dict[str, tuple[float, float]]) -> di
     return out
 
 
-# --- 較正 ---------------------------------------------------------------------------------------------
-
-
-def _median_of(values: list[float]) -> float | None:
-    return float(statistics.median(values)) if values else None
-
-
-def _mark_times(marks: list[dict], event: str) -> list[float]:
-    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))))
-
-
-def _restore_sample(calls: list[dict], marks: list[dict], by_next: bool) -> tuple[int, int] | None:
-    """ndf-next で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
-    restored = _mark_times(marks, MARK_RESTORED)
-    if not (by_next and restored):
-        return None
-    before = [c for c in calls if c["ts"] is not None and c["ts"] <= restored[0]]
-    return (before[-1]["context"], len(before)) if before else None
-
-
-def _handoff_sample(calls: list[dict], marks: list[dict]) -> tuple[int, int] | None:
-    """最後の引継ぎの印から後の (呼び出し数, 出力 token の合計)。印が無ければ None。"""
-    handoffs = _mark_times(marks, MARK_HANDOFF)
-    if not handoffs:
-        return None
-    after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoffs[-1]]
-    return len(after), sum(c["out"] for c in after)
-
-
-def _stage_segments(calls: list[dict], rows: list[dict]) -> list[tuple[str, int, int]]:
-    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
-    launches = sorted(
-        ((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at")))),
-    )
-    out = []
-    for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
-        seg = [c for c in calls if c["ts"] is not None and c["ts"] >= start and (nxt is None or c["ts"] < nxt)]
-        if not seg or nxt is None:
-            continue
-        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
-        out.append((stage, len(seg), gaps))
-    return out
-
-
-def calibrate(rows: list[dict], since: float | None = None) -> dict:
-    """判定の記録と会話の記録から費用の見込みを作る（決定 5・6）。標本が 3 未満の値は None。"""
-    rows = [r for r in fill_work(rows) if since is None or (parse_ts(r.get("at")) or 0) >= since]
-    sessions = sessions_of(rows)
-    restore_q, restore_n, handoff_h, handoff_out = [], [], [], []
-    stage_k: dict[str, list] = defaultdict(list)
-    stage_m: dict[str, list] = defaultdict(list)
-    spans = {}
-    cache: dict[str, tuple] = {}
-    for sid, s in sessions.items():
-        cache[sid] = read_calls(s["transcript"], set()) if s["transcript"] else ([], None, False)
-        ts = [c["ts"] for c in cache[sid][0] if c["ts"]]
-        if ts:
-            spans[sid] = (min(ts), max(ts))
-    by_session = attach_marks([r for r in rows if r.get("event") in MARKS], spans)
-    for sid, s in sessions.items():
-        calls, _, by_next = cache[sid]
-        marks = by_session.get(sid, [])
-        if (restore := _restore_sample(calls, marks, by_next)) is not None:
-            restore_q.append(restore[0])
-            restore_n.append(restore[1])
-        if (handoff := _handoff_sample(calls, marks)) is not None:
-            handoff_h.append(handoff[0])
-            handoff_out.append(handoff[1])
-        for stage, n, gaps in _stage_segments(calls, s["rows"]):
-            for key in (stage, "*"):
-                stage_k[key].append(n)
-                stage_m[key].append(gaps)
-
-    def med(values):
-        return _median_of(values) if len(values) >= cp.MIN_SAMPLES else None
-
-    return {
-        "restore_context": med(restore_q),
-        "restore_calls": med(restore_n),
-        "handoff_calls": med(handoff_h),
-        "handoff_output": med(handoff_out),
-        "stage_calls": {k: _median_of(v) for k, v in stage_k.items()},
-        "stage_expiries": {k: _median_of(v) for k, v in stage_m.items()},
-        "samples": {"restore": len(restore_q), "handoff": len(handoff_h)} | {f"stage:{k}": len(v) for k, v in stage_k.items()},
-        "at": now_utc(),
-    }
-
-
-def calibrate_repo(root: str | None, days: int = 30) -> tuple[dict, bool]:
-    """そのリポジトリの直近 `days` 日の記録から見込みを較正して書く。(見込み, 書けたか)。"""
-    repo = decisions_repo(root)
-    body = calibrate(read_decisions(repo), since=time.time() - days * 86400)
-    return body, write_cost_estimates(body, repo)
+def record_row(runtime: str, source: str, work: str, applied, context: int | None = None, event: str | None = None, reason=None) -> dict:
+    """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。"""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
+    row = boundary_row(runtime=runtime, source=source, session_id=sid or None, work=work, context=context, applied=applied)
+    return row | ({"event": event} if event else {"stage": "cut", "verdict": cp.RESTART, "reason": reason})
 
 
 def record_restart(work: str, reason: str | None = None, cwd: str | None = None, runtime: str = "claude") -> bool:
@@ -464,11 +378,10 @@ def record_restart(work: str, reason: str | None = None, cwd: str | None = None,
         if reason is None:
             prev = last_denial(read_decisions(repo), work)
             reason = (prev or {}).get("reason") or (cp.REASON_CUTPOINT if applied.policy == cp.CURRENT else cp.REASON_MANUAL)
-        sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
-        row = boundary_row(source="sprint-state", runtime=runtime, session_id=sid or None, work=work, applied=applied)
-        row.update(stage="cut", verdict=cp.RESTART, reason=reason)
-        ok = append_decision(row, repo)
-        calibrate_repo(root)
+        ok = append_decision(record_row(runtime, "sprint-state", work, applied, reason=reason), repo)
+        import context_calibrate  # 較正は会話の記録の全体を読む重い側。循環を避けて関数の中で読む
+
+        context_calibrate.calibrate_repo(root)
         return ok
     except Exception:  # noqa: BLE001 — 記録の失敗で ndf-next を止めない
         return False
