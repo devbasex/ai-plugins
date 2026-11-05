@@ -83,13 +83,14 @@ describe("枠とつながりの状態（受け入れ条件 16）", () => {
     expect((await screen.findByRole("status", { name: "つながりの状態" })).textContent).toContain("つながってから確定する操作: 2 件");
   });
 
-  it("個人のアカウントの持ち主には、ナビゲーションにキーの持ち込みまで 4 つの行き先が出る", async () => {
+  it("個人のアカウントの持ち主には、ナビゲーションにキーの持ち込みまで 5 つの行き先が出る", async () => {
     show(sprints);
     const nav = screen.getByRole("navigation", { name: "主な行き先" });
     expect(await within(nav).findByRole("link", { name: "キーの持ち込み" })).toBeTruthy();
     expect(within(nav).getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual([
       "/account",
       sprints,
+      `/accounts/${PERSONAL_ID}/approvals`,
       `/accounts/${PERSONAL_ID}/repositories`,
       `/accounts/${PERSONAL_ID}/model-credential`,
     ]);

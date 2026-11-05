@@ -21,6 +21,7 @@ import { BacklogPage } from "./pages/BacklogPage.tsx";
 import { LoopsPage } from "./pages/LoopsPage.tsx";
 import { LoopDetailPage } from "./pages/LoopDetailPage.tsx";
 import { DelegationsPage } from "./pages/DelegationsPage.tsx";
+import { ApprovalsPage } from "./pages/ApprovalsPage.tsx";
 
 // 地図の available の行の画面。経路は screens.ts だけが持つ
 const ELEMENTS: Partial<Record<ScreenId, ReactElement>> = {
@@ -35,6 +36,7 @@ const ELEMENTS: Partial<Record<ScreenId, ReactElement>> = {
   sprints: <SprintsPage />,
   sprintDetail: <SprintDetailPage />,
   backlog: <BacklogPage />,
+  approvals: <ApprovalsPage />,
   loops: <LoopsPage />,
   loopDetail: <LoopDetailPage />,
   delegations: <DelegationsPage />,
