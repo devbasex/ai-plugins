@@ -151,11 +151,8 @@ def _write_rank_result(sd, out, code=None):
     return emit(out, code)
 
 
-def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
-    """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded, left)。"""
-    open_issues = list_issues(gh, "state=open")
-    issues = {i["number"]: issue_facts(i) for i in open_issues}
-    previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
+def resolve_estimates(a, issues, scores, previous, cfg, sd, ctx):
+    """見積を確定して estimates.json へ書き、見積もりの記録を重ねる。戻り値は (ests, excluded, left, sizes)。"""
     since = ref_date(git_root(a.root), a.since_ref) if a.since_ref else None
     ests, excluded, left = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg, since)
     jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
@@ -165,16 +162,30 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
         sizes = estimate_overlay(git_root(a.root), list(issues), cfg.scale)  # Size を見積もりの記録の A から決める（#1856）
     except er.DeclError as e:
         raise StepError(f"見積もりの宣言の誤り: {e}", EXIT_UNREADABLE)
-    ests = apply_overlay(ests, sizes)
+    return apply_overlay(ests, sizes), excluded, left, sizes
+
+
+def build_edges(subs, ests, rows, issues):
+    """依存の辺を合成し、前提の辺を選り分ける。戻り値は (edges, prereq)。"""
+    recorded = [(n, d) for n, e in ests.items() for d in e.depends_on]
+    grouped = [e for r in rows for e in R.parallel_group_edges(r.get("description") or "")]
+    edges = R.merge_edges([R.sub_issue_edges(subs), recorded, grouped], set(issues))
+    prereq = edges & set(recorded + grouped)  # 前提の辺: 合成後に残った、記録と並列の組が宣言した辺（#2604）
+    return edges, prereq
+
+
+def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
+    """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded, left)。"""
+    open_issues = list_issues(gh, "state=open")
+    issues = {i["number"]: issue_facts(i) for i in open_issues}
+    previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
+    ests, excluded, left, sizes = resolve_estimates(a, issues, scores, previous, cfg, sd, ctx)
     notes.extend(
         f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues
     )
     subs = sub_issues(gh, [i["number"] for i in open_issues if (i.get("sub_issues_summary") or {}).get("total")], notes)
-    recorded = [(n, d) for n, e in ests.items() for d in e.depends_on]
-    grouped = [e for r in rows for e in R.parallel_group_edges(r.get("description") or "")]
-    edges = R.merge_edges([R.sub_issue_edges(subs), recorded, grouped], set(issues))
+    edges, prereq = build_edges(subs, ests, rows, issues)
     rejected = ctx.read_state(sd / "rejected.json") or []
-    prereq = edges & set(recorded + grouped)  # 前提の辺: 合成後に残った、記録と並列の組が宣言した辺（#2604）
     board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded, sizes, prereq)
     return board, issues, ests, excluded, left
 
