@@ -16,6 +16,7 @@ import jsonio
 import project_mvv as pm
 import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
+from sprint_loop_backlog import lap_depths, lap_research
 
 from sprint_loop_record import (
     TOOL,
@@ -607,18 +608,13 @@ def backlog_summary(env: Env, rec: dict, lap: dict) -> None:
     調査の費用は呼び出しごとの記録（`research/calls.jsonl`。結果を捨てた呼び出しも含む）から集める。背景の調査は周回を
     締めた後にも終わるため、このループのすべての周回を記録から数え直し、締め済みの周回へ後から終わった費用を精算する。"""
     d = env.main_dir() / ".ndf" / "backlog"
-    since = lap.get("started_at") or ""
     rows = jsonio.read_jsonl(d / "depths.jsonl", missing=[], skip_broken=True)
-    lap["depths"] = [{k: r.get(k) for k in ("depth", "event", "trigger", "cost", "seconds")} for r in rows if (r.get("at") or "") >= since]
+    lap["depths"] = lap_depths(rows, lap.get("started_at") or "")
     calls = jsonio.read_jsonl(d / "research" / "calls.jsonl", missing=[], skip_broken=True)
     for each in {id(x): x for x in [*rec.get("laps", []), lap]}.values():
-        mine = [r for r in calls if r.get("lap") == each.get("n") and (r.get("by") or {}).get("loop") == rec.get("name")]
-        if mine:
-            each["research"] = {
-                "items": [r.get("id") for r in mine if r.get("ok")],
-                "cost": round(sum(float(r.get("cost") or 0) for r in mine), 6),
-                "seconds": round(sum(float(r.get("seconds") or 0) for r in mine), 3),
-            }
+        research = lap_research(calls, rec.get("name"), each.get("n"))
+        if research is not None:
+            each["research"] = research
 
 
 def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None, deferred_issues=(), done_rows=()) -> None:
