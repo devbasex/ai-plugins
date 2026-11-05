@@ -103,6 +103,96 @@
         "ci_jobs": [
           ".github/workflows/lint.yml"
         ]
+      },
+      {
+        "name": "runtime-plugin-build-check",
+        "runner": "build-runtime-plugins",
+        "kind": "lint",
+        "command": "bash scripts/build-runtime-plugins.sh --check",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#runtime-plugin-build-check"
+        ]
+      },
+      {
+        "name": "skill-frontmatter-check",
+        "runner": "check-skill-frontmatter",
+        "kind": "lint",
+        "command": "python3 scripts/check-skill-frontmatter.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#skill-frontmatter-check"
+        ]
+      },
+      {
+        "name": "skill-repo-assumptions-check",
+        "runner": "check-skill-repo-assumptions",
+        "kind": "lint",
+        "command": "python3 scripts/check-skill-repo-assumptions.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#skill-repo-assumptions-check"
+        ]
+      },
+      {
+        "name": "skill-shell-vars-check",
+        "runner": "check-skill-shell-vars",
+        "kind": "lint",
+        "command": "python3 scripts/check-skill-shell-vars.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#skill-shell-vars-check"
+        ]
+      },
+      {
+        "name": "service-boundary-check",
+        "runner": "check-service-boundary",
+        "kind": "lint",
+        "command": "python3 scripts/check-service-boundary.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#service-boundary-check"
+        ]
+      },
+      {
+        "name": "runtime-plugin-validate",
+        "runner": "validate-runtime-plugins",
+        "kind": "lint",
+        "command": "bash scripts/validate-runtime-plugins.sh",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#runtime-plugin-validate"
+        ]
+      },
+      {
+        "name": "markdown-link-check",
+        "runner": "check-markdown-links",
+        "kind": "lint",
+        "command": "python3 scripts/check-markdown-links.py --root .",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#markdown-link-check"
+        ]
+      },
+      {
+        "name": "doc-line-limit-check",
+        "runner": "check-doc-line-limit",
+        "kind": "lint",
+        "command": "python3 scripts/check-doc-line-limit.py --root .",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#doc-line-limit-check"
+        ]
+      },
+      {
+        "name": "instruction-files-check",
+        "runner": "check-instruction-files",
+        "kind": "lint",
+        "command": "python3 plugins/ndf/scripts/instructions-check.py --root .",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#instruction-files-check"
+        ]
       }
     ],
     "ci_exempt": [
@@ -125,6 +215,14 @@
       {
         "job": ".github/workflows/runtime-plugin-smoke.yml",
         "reason": "4 つのランタイムの CLI を入れて動かす。手元の検証の時間に収まらない"
+      },
+      {
+        "job": ".github/workflows/runtime-plugin-smoke-latest.yml",
+        "reason": "定期と手動でだけ起動し、ネットワークから最新の CLI の版を解決して入れる。項目のコミットだけでは判定が決まらない"
+      },
+      {
+        "job": ".github/workflows/runtime-plugin-validate.yml#required-checks-check",
+        "reason": "Pull Request の宛先のブランチと GitHub の API（トークン）を使う。項目の変更で結果が変わらない"
       }
     ]
   },
