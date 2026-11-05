@@ -337,41 +337,65 @@ def _test_commit_problem(
     return None
 
 
-def cmd_merge_tests(args: argparse.Namespace) -> None:
-    """テストの追加を取り込む。
+def _merge_phase(
+    args: argparse.Namespace,
+    phase: str,
+    label: str,
+    intake_fn: Any,
+    apply_fn: Any,
+    report_fn: Any,
+) -> None:
+    """取り込みの骨組み。済みの判定・結論の読み直し・取り消しと見送り・手順の終わりを持つ。
 
-    終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（採り直しの判定へ）/ 4 = 範囲を確定できない。
+    手順に固有なのは、取り込み（`intake_fn`）・採った項目への書き込み（`apply_fn`）・集計の案内（`report_fn`）だけ。
     """
     path, state = load_state(args.id)
     _prepare(path, state)
-    if phase_record(state, "add-tests").get("ended_at"):
-        info("↻ テストの追加は取り込み済みです")
+    if phase_record(state, phase).get("ended_at"):
+        info(f"↻ {label}は取り込み済みです")
         if not live_items(state):
             sys.exit(2)
         return
-    intake = _recalled(state, "add-tests")
+    intake = _recalled(state, phase)
     if intake is None:
-        record_observed_model(state, str(state["implementer"]), "add-tests")
-        note_stopped(state, str(state["implementer"]), "add-tests")
-        intake = _intake_tests(state)
-        _run_added_tests(path, state, intake)
-        for item_id, commits in intake.accepted.items():
-            if item_id in intake.test_failed:
-                continue
-            item = find_item(state, item_id)
-            item["commits"]["test"] = commits[0]["sha"]
-            item["status"] = TESTED
-        _record_seconds(state, "add-tests", "test", {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
-        _remember(path, state, "add-tests", intake)
+        record_observed_model(state, str(state["implementer"]), phase)
+        note_stopped(state, str(state["implementer"]), phase)
+        intake = intake_fn(state)
+        apply_fn(path, state, intake)
+        _remember(path, state, phase, intake)
     else:
-        info("↻ テストの追加の結論は記録済みです。取り消しと見送りだけをやり直します")
-    _settle(path, state, intake, "テストの追加の取り込み")
+        info(f"↻ {label}の結論は記録済みです。取り消しと見送りだけをやり直します")
+    _settle(path, state, intake, f"{label}の取り込み")
+    report_fn(state, intake)
+    _finish(path, state, phase)
+
+
+def _apply_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) -> None:
+    """足したテストを走らせ、通った項目にテストのコミットを記録する。"""
+    _run_added_tests(path, state, intake)
+    for item_id, commits in intake.accepted.items():
+        if item_id in intake.test_failed:
+            continue
+        item = find_item(state, item_id)
+        item["commits"]["test"] = commits[0]["sha"]
+        item["status"] = TESTED
+    _record_seconds(state, "add-tests", "test", {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
+
+
+def _report_tests(state: dict[str, Any], intake: Intake) -> None:
     kept = [i for i in live_items(state) if i.get("status") == TESTED]
     info(
         f"テストの追加: 採用 {len(kept)} 件 / test_failed {len(intake.test_failed)} 件 / "
         f"持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件"
     )
-    _finish(path, state, "add-tests")
+
+
+def cmd_merge_tests(args: argparse.Namespace) -> None:
+    """テストの追加を取り込む。
+
+    終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（採り直しの判定へ）/ 4 = 範囲を確定できない。
+    """
+    _merge_phase(args, "add-tests", "テストの追加", _intake_tests, _apply_tests, _report_tests)
 
 
 # ---------- 実装 ----------
@@ -430,6 +454,32 @@ def _intake_implement(state: dict[str, Any]) -> Intake:
     )
 
 
+def _apply_implement(_path: pathlib.Path, state: dict[str, Any], intake: Intake) -> None:
+    """採った項目に実装のコミットと、最終ゲートへ引き継ぐ判定を記録する。"""
+    for item_id, commits in intake.accepted.items():
+        item = find_item(state, item_id)
+        item["commits"]["implement"] = [c["sha"] for c in commits]
+        item["status"] = IMPLEMENTED
+        # 実差分は記録だけ（判定に使わない。#1814 決定 4）
+        item["diff_lines"] = sum(safe_int(c.get("diff_lines")) for c in commits)
+        pending = pending_test_judgements(commits)
+        if pending:
+            item["review_test_judgements"] = pending
+        if intake.rewrites.get(item_id):
+            item["review_scope_judgements"] = intake.rewrites[item_id]
+    _record_seconds(state, "implement", "implement", intake.accepted)
+
+
+def _report_implement(state: dict[str, Any], intake: Intake) -> None:
+    carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
+    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件")
+    if carried:
+        info(
+            f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"
+            f"引き継ぎます（改修計画に載ります）: {', '.join(carried)}"
+        )
+
+
 def cmd_merge_implement(args: argparse.Namespace) -> None:
     """実装を取り込む。
 
@@ -438,39 +488,4 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
     **テストの差分のうち一次の判定で決まらないものは、最終ゲートのレビューへ引き継ぐ**
     （`review_test_judgements`。決定 25）。改修計画の後に判断のために LLM を起動しない。
     """
-    path, state = load_state(args.id)
-    _prepare(path, state)
-    if phase_record(state, "implement").get("ended_at"):
-        info("↻ 実装は取り込み済みです")
-        if not live_items(state):
-            sys.exit(2)
-        return
-    intake = _recalled(state, "implement")
-    if intake is None:
-        record_observed_model(state, str(state["implementer"]), "implement")
-        note_stopped(state, str(state["implementer"]), "implement")
-        intake = _intake_implement(state)
-        for item_id, commits in intake.accepted.items():
-            item = find_item(state, item_id)
-            item["commits"]["implement"] = [c["sha"] for c in commits]
-            item["status"] = IMPLEMENTED
-            # 実差分は記録だけ（判定に使わない。#1814 決定 4）
-            item["diff_lines"] = sum(safe_int(c.get("diff_lines")) for c in commits)
-            pending = pending_test_judgements(commits)
-            if pending:
-                item["review_test_judgements"] = pending
-            if intake.rewrites.get(item_id):
-                item["review_scope_judgements"] = intake.rewrites[item_id]
-        _record_seconds(state, "implement", "implement", intake.accepted)
-        _remember(path, state, "implement", intake)
-    else:
-        info("↻ 実装の結論は記録済みです。取り消しと見送りだけをやり直します")
-    _settle(path, state, intake, "実装の取り込み")
-    carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件")
-    if carried:
-        info(
-            f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"
-            f"引き継ぎます（改修計画に載ります）: {', '.join(carried)}"
-        )
-    _finish(path, state, "implement")
+    _merge_phase(args, "implement", "実装", _intake_implement, _apply_implement, _report_implement)
