@@ -4572,6 +4572,12 @@
       "pending_source": "issues/issue-2406-requirements.md"
     },
     {
+      "term": "既定へ戻す指示",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする。Factory は予算の欄が空の単位をこの指示として実行ジョブの指示に載せる",
+      "pending_source": "issues/issue-2406-design.md"
+    },
+    {
       "term": "予算の履歴",
       "context": "ndf-workflow",
       "meaning": "開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す",
