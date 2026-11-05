@@ -5547,6 +5547,24 @@
       "context": "ndf-workflow",
       "meaning": "開発ループが周回ごとに、そのループでの課題の全回の出し直しの指摘をループの記録から書き出したファイル。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
       "pending_source": "issues/issue-2510-design.md"
+    },
+    {
+      "term": "設計の承認の依頼",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のレーンが、承認ゲート 1 の判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "取り込みのコミット",
+      "context": "ndf-workflow",
+      "meaning": "起点ブランチを設計 PR のブランチへ取り込むマージコミット。これだけで先頭が動いた設計 PR は、承認の依頼を送り直さない",
+      "pending_source": "issues/issue-2510-requirements.md"
+    },
+    {
+      "term": "前のループ",
+      "context": "ndf-workflow",
+      "meaning": "同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その答えがまだの人の判断待ちは、オーガナイザーの問いの一覧に出す",
+      "pending_source": "issues/issue-2510-requirements.md"
     }
   ]
 }
