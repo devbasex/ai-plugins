@@ -9,6 +9,7 @@ import argparse
 import pathlib
 from typing import Any
 
+import gh_sections  # noqa: E402
 import review_lib  # noqa: E402
 import project_mvv  # noqa: E402
 import review_criteria  # noqa: E402
@@ -134,6 +135,28 @@ CATEGORY_TEMPLATES = {
 }
 
 
+# 外部の調査の確認の観点（#2519 の決定 10・11）。正本は pr-review の SKILL.md の節で、文を写さずに読む
+PR_REVIEW_SKILL = pathlib.Path(__file__).resolve().parents[3] / "pr-review" / "SKILL.md"
+EXTERNAL_SURVEY_HEADING = "### 外部の調査の確認"
+EXTERNAL_SURVEY_TITLE = "## 自動追加レビュー観点: 外部の調査の確認"
+# 観点を載せる既定の分類。プロファイルを当てる前の分類で判定する
+EXTERNAL_SURVEY_CATEGORIES = ("design", "code")
+
+
+def _external_survey_review() -> str:
+    """`pr-review` の SKILL.md の節 `### 外部の調査の確認` を観点の見出しの下に置いた文。
+    ファイルか節が無ければ、観点の無いまま担当を起動しないよう止める（I8）。"""
+    path = PR_REVIEW_SKILL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        review_lib.die(f"外部の調査の確認の観点を読めません: {path} ({exc})")
+    section = gh_sections.get_section(text, EXTERNAL_SURVEY_HEADING)
+    if not section or not section.strip():
+        review_lib.die(f"外部の調査の確認の観点を読めません: {path} に見出し `{EXTERNAL_SURVEY_HEADING}` の節がありません")
+    return f"{EXTERNAL_SURVEY_TITLE}\n{section.strip()}"
+
+
 def _design_stage_fields(
     kind: str, worktree: object, changed_files: list[dict[str, Any]], review_instructions: str, manual: str
 ) -> dict[str, Any]:
@@ -174,11 +197,13 @@ def _auto_review(
 ) -> tuple[list[str], str]:
     """(観点を渡す分類の名前の列, 自動レビュー観点の文)。既定の分類（`categories`）に、変更ファイルに当たった
     プロファイルの分類を足す。`replace_auto_categories` が真なら既定の分類を外す（#1910）。
-    同じ名前は列で 1 つにまとめ、文は既定の後ろにプロファイルの文を足す（決定 5）。"""
+    同じ名前は列で 1 つにまとめ、文は既定の後ろにプロファイルの文を足す（決定 5）。
+    既定の分類が `design` か `code` を持てば、プロファイルに依らず外部の調査の確認の観点を最後に足す（#2519 の決定 11）。"""
     hits = review_criteria.profile_categories(profile, _changed_file_paths(changed_files))
     base = [] if profile.replace_auto_categories else list(categories)
     names = list(dict.fromkeys([*base, *(name for name, _ in hits)]))
-    text = "\n\n".join(part for part in (_auto_review_instructions(base), *(t for _, t in hits)) if part)
+    survey = _external_survey_review() if any(c in categories for c in EXTERNAL_SURVEY_CATEGORIES) else ""
+    text = "\n\n".join(part for part in (_auto_review_instructions(base), *(t for _, t in hits), survey) if part)
     return names, text
 
 

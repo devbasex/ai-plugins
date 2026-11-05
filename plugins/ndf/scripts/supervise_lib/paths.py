@@ -151,6 +151,8 @@ GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
 # 完了判定の設計との突き合わせ（確認 (a) tests・確認 (b) specs。#1241）
 DESIGN_MATCH_PY = f"python3 {HERE / 'design-match.py'}"
+# 自前で作る決定に外部の調査で比べた候補があるかの検査（#2519）
+DESIGN_SURVEY_PY = f"python3 {HERE / 'design-survey.py'}"
 DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
 PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"

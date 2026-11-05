@@ -5516,31 +5516,31 @@
       "term": "外部の調査",
       "context": "ndf-workflow",
       "meaning": "設計の判断の前に、業界の事実上の標準・仕様、主要な製品の解き方、使える既存のライブラリとマネージドサービスを一次情報で調べ、設計文書に残す手順（#2519）。棚卸しのシーズの調査とは別のもの",
-      "pending_source": "issues/issue-2519-requirements.md"
+      "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "自前で作る決定",
       "context": "ndf-workflow",
       "meaning": "既存のライブラリ・サービス・標準の実装を使わず、プロジェクトの中で作ると決めた決定の記録。決定の作り方の行に「自前で作る」を含むもので見分ける（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "確かめられなかったこと",
       "context": "ndf-workflow",
       "meaning": "外部の調査で、公開の資料が無い・取得できなかった・上限で止めた対象と、試した手段（URL か検索の語）と理由を並べた設計文書の欄（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/external-survey.md"
     },
     {
       "term": "作り方",
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "比べた候補",
       "context": "ndf-workflow",
       "meaning": "設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519）",
-      "pending_source": "issues/issue-2519-design.md"
+      "source": "plugins/ndf/skills/design/references/decisions.md"
     },
     {
       "term": "深さの記録",

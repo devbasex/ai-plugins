@@ -30,6 +30,7 @@ import deps  # noqa: E402
 deps.require("md")
 import md  # noqa: E402
 import repo  # noqa: E402
+from design_docs import find_designs, git_list, read_files, require_repo  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_OK,
     EXIT_PRECONDITION,
@@ -45,8 +46,6 @@ from step_result import (  # noqa: E402
 )
 
 TOOL = "design-match"
-DESIGN_DIR = "issues"
-DESIGN_NAME = re.compile(r"^issue-(?P<nums>\d+(?:-\d+)*)-design(?:-[^/]+)?\.md$")
 # 名前を拾う節（決定 2）。bare の test 識別子は `## テスト設計` だけから拾う
 NAME_SECTIONS = ("決定の記録", "テスト設計", "構成要素")
 BARE_SECTION = "テスト設計"
@@ -64,49 +63,6 @@ DEF_NAME = re.compile(r"\b(?:def|class|function|func|fn)\s+([A-Za-z_][A-Za-z0-9_
 CONST_NAME = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9]*_[A-Z0-9_]*)(?![A-Za-z0-9_])")
 MIN_SYMBOL = 4
 IDENT = "A-Za-z0-9_"
-
-
-def _git_list(root, *args) -> list[str]:
-    p = git(root, *args, check=False)
-    if p.returncode != 0:
-        raise StepError(f"git {' '.join(args[:3])} が読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-    return [ln for ln in p.stdout.splitlines() if ln]
-
-
-def _require_repo(root) -> None:
-    try:
-        _git_list(root, "rev-parse", "--verify", "HEAD")
-    except OSError as e:
-        raise StepError(f"git を起動できない: {e}", EXIT_UNREADABLE)
-
-
-# --- 確認 (a): 設計に名前の出るテスト ------------------------------------------------
-
-
-def find_designs(root, issues: list[str]) -> list[tuple[str, str]]:
-    """HEAD の `issues/` から、番号の並びに `issues` のどれかを含む設計文書を `(パス, 中身)` で返す。"""
-    want = {str(int(n)) for n in issues}
-    out = []
-    for rel in _git_list(root, "ls-tree", "-r", "--name-only", "HEAD", "--", f"{DESIGN_DIR}/"):
-        m = DESIGN_NAME.match(PurePosixPath(rel).name)
-        if not m or not want & {str(int(n)) for n in m.group("nums").split("-")}:
-            continue
-        p = git(root, "show", f"HEAD:{rel}", check=False)
-        if p.returncode != 0:
-            raise StepError(f"設計文書を HEAD から読めない: {rel}", EXIT_UNREADABLE)
-        out.append((rel, p.stdout))
-    return out
-
-
-def read_designs(root, paths: list[str]) -> list[tuple[str, str]]:
-    out = []
-    for raw in paths:
-        p = Path(raw) if Path(raw).is_absolute() else Path(root) / raw
-        try:
-            out.append((raw, p.read_text(encoding="utf-8")))
-        except (OSError, UnicodeDecodeError) as e:
-            raise StepError(f"設計文書を読めない: {raw}（{e}）", EXIT_UNREADABLE)
-    return out
 
 
 def looks_like_test_file(s: str) -> bool:
@@ -191,10 +147,8 @@ def _path_present(path: str, files: set[str], dirs: set[str]) -> bool:
     return "/" not in path and any(f.rsplit("/", 1)[-1] == path for f in files)
 
 
-def judge_names(root, items: list[dict]) -> None:
-    """各名前の `result` を present / missing / unverified に決める。"""
-    files = set(_git_list(root, "ls-tree", "-r", "--name-only", "HEAD"))
-    dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
+def partition_test_names(items: list[dict], files: set[str], dirs: set[str]) -> tuple[dict[str, list[dict]], list[dict]]:
+    """テストのファイルと HEAD に無いパスの項目へ `result` を付け、残りをパスごとの組とパスなしに分ける。"""
     by_path: dict[str, list[dict]] = {}
     bare: list[dict] = []
     for it in items:
@@ -206,13 +160,29 @@ def judge_names(root, items: list[dict]) -> None:
             it["result"] = "missing"
         else:
             by_path.setdefault(it["_path"], []).append(it)
+    return by_path, bare
+
+
+def _found_result(found: set[str] | None, names) -> str:
+    """検索で見つかった名前の集合から結果を決める。検索できなかった（None）なら unverified。"""
+    if found is None:
+        return "unverified"
+    return "present" if set(names) <= found else "missing"
+
+
+def judge_names(root, items: list[dict]) -> None:
+    """各名前の `result` を present / missing / unverified に決める。"""
+    files = set(git_list(root, "ls-tree", "-r", "--name-only", "HEAD"))
+    dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
+    by_path, bare = partition_test_names(items, files, dirs)
+    # パスつきはその項目の全ての名前を、パスなしは先頭の名前だけを判定する
     for path, group in by_path.items():
         found = _grep_words(root, sorted({n for it in group for n in it["_names"]}), [path])
         for it in group:
-            it["result"] = "unverified" if found is None else ("present" if set(it["_names"]) <= found else "missing")
+            it["result"] = _found_result(found, it["_names"])
     found = _grep_words(root, sorted({it["_names"][0] for it in bare}), [".", ":(exclude)*.md"])
     for it in bare:
-        it["result"] = "unverified" if found is None else ("present" if it["_names"][0] in found else "missing")
+        it["result"] = _found_result(found, it["_names"][:1])
 
 
 def tests_outcome(items: list[dict]) -> tuple[str, int, str]:
@@ -227,8 +197,8 @@ def tests_outcome(items: list[dict]) -> tuple[str, int, str]:
 
 def cmd_tests(a):
     root = git_root(a.root)
-    _require_repo(root)
-    designs = find_designs(root, a.issue) if a.issue else read_designs(root, a.design)
+    require_repo(root)
+    designs = find_designs(root, a.issue) if a.issue else read_files(root, a.design)
     if not designs:
         nums = ", ".join(f"#{n}" for n in a.issue or [])
         emit(result(TOOL, "stopped", f"設計文書が無い（{nums}）。3 つの確認は該当なし（設計文書が無い）",
@@ -262,7 +232,7 @@ def cmd_tests(a):
 
 def diff_paths(root, mb: str) -> list[str]:
     out: list[str] = []
-    for ln in _git_list(root, "diff", "--name-status", "-M", mb, "HEAD"):
+    for ln in git_list(root, "diff", "--name-status", "-M", mb, "HEAD"):
         out += ln.split("\t")[1:]
     return list(dict.fromkeys(out))
 
@@ -288,9 +258,9 @@ def diff_symbols(root, mb: str) -> list[str]:
 
 def target_docs(root, mb: str) -> list[str]:
     """HEAD の確定仕様の置き場の `.md` と `CHANGELOG.md` のうち、merge-base にもあったもの。"""
-    old = set(_git_list(root, "ls-tree", "-r", "--name-only", mb))
+    old = set(git_list(root, "ls-tree", "-r", "--name-only", mb))
     out = []
-    for rel in _git_list(root, "ls-tree", "-r", "--name-only", "HEAD"):
+    for rel in git_list(root, "ls-tree", "-r", "--name-only", "HEAD"):
         is_spec = rel.startswith(repo.SPEC_DIR + "/") and rel.endswith(".md")
         if (is_spec or PurePosixPath(rel).name == "CHANGELOG.md") and rel in old:
             out.append(rel)
@@ -346,8 +316,8 @@ def scan_doc(text: str, pat: re.Pattern, max_lines: int) -> tuple[list[str], lis
 
 def cmd_specs(a):
     root = git_root(a.root)
-    _require_repo(root)
-    mb_lines = _git_list(root, "merge-base", a.base, "HEAD")
+    require_repo(root)
+    mb_lines = git_list(root, "merge-base", a.base, "HEAD")
     mb = mb_lines[0]
     paths = diff_paths(root, mb)
     symbols = diff_symbols(root, mb)

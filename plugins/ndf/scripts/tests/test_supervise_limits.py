@@ -306,7 +306,8 @@ def test_1909_3_the_route_of_m1910_reaches_record(plans, tmp_path):
 
 DESIGN_ROUTE = (
     "glossary", ("requirements-check", 1), "requirements", "design", "rebuild", "pr", "sync-body", "review", "sync-review",
-    "requirements-recheck", ("glossary-check", 1), "fix-glossary", "glossary-recheck", "push-glossary", "ready", ("gate", "gate"),
+    "requirements-recheck", ("survey-check", 1), "fix-survey", "survey-recheck", ("glossary-check", 1), "fix-glossary",
+    "glossary-recheck", "push-glossary", "ready", ("gate", "gate"),
 )  # fmt: skip
 
 
