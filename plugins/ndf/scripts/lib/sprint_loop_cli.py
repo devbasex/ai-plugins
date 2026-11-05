@@ -12,14 +12,14 @@ import step_result
 
 def budget_value(text: str) -> float | str:
     """`--budget-*` の値: 数か既定へ戻す指示 `default`（#2406）。どちらでもなければ引数の誤り（終了コード 2）。"""
-    import sprint_loop as sl  # loop のときだけ読む
+    from sprint_loop_record import BUDGET_DEFAULT  # loop のときだけ読む
 
-    if text == sl.BUDGET_DEFAULT:
-        return sl.BUDGET_DEFAULT
+    if text == BUDGET_DEFAULT:
+        return BUDGET_DEFAULT
     try:
         return float(text)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"数か {sl.BUDGET_DEFAULT} を渡す: {text!r}") from None
+        raise argparse.ArgumentTypeError(f"数か {BUDGET_DEFAULT} を渡す: {text!r}") from None
 
 
 def run_loop_command(a, update) -> dict | None:
