@@ -5619,6 +5619,30 @@
       "context": "ndf-release",
       "meaning": "利用者の設定ディレクトリの、導入済みのプラグインと取得元の登録を鍵と値の組で書き出したもの。リリース後テストの前に取り、後で今の状態と比べる",
       "pending_source": "issues/issue-2401-design.md"
+    },
+    {
+      "term": "扱い",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。課題ごとに `実装する` / `取り込む` / `閉じる` のどれかを書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "取り込み先",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `取り込む` の課題を、どの課題の実装へ含めるかを課題の番号で書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "触るファイル",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "食い違い",
+      "context": "ndf-workflow",
+      "meaning": "同じ課題について、2 本の設計文書が違う設計の結果（扱い・取り込み先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す",
+      "pending_source": "issues/issue-2361-design.md"
     }
   ]
 }
