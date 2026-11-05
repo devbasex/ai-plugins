@@ -20,6 +20,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
+from itertools import groupby
 
 from upkeep_rank_config import (  # noqa: F401  呼び出し側は upkeep_rank から引く
     APPROVAL,
@@ -74,6 +75,10 @@ def merge_edges(sources, open_numbers) -> set:
                 continue
             got.setdefault((a, b), prio)
     return set(got)
+
+
+def depends_on_map(edges) -> dict:  # 依存の辺（a は b に依存する）→ 課題ごとの依存先の集合
+    return {a: {b for _, b in g} for a, g in groupby(sorted(edges), key=lambda e: e[0])}
 
 
 def sub_issue_edges(sub_issues: dict) -> list:
@@ -263,9 +268,7 @@ def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=(),
     pool.sort(key=lambda r: quality_key(r, issues.get(r.number) or {}))
     budget = None if capacity is None else math.floor(capacity * q["ratio"])
     room = None if capacity is None else capacity - (slot["size"] if piece is not None else 0)
-    deps: dict = {}
-    for a, b in edges:  # a は b に依存する
-        deps.setdefault(a, set()).add(b)
+    deps = depends_on_map(edges)
     taken, total = [], 0
     for r in pool:
         if not deps.get(r.number, set()) <= set(taken):
@@ -339,9 +342,7 @@ def _over_and_dependents(board, ranked) -> set:
 
 def _group(board, n, place, nearest):
     """候補が依存する課題のうち、直近より後ろか未設定にあるもの（推移的に集める）。"""
-    deps = {}
-    for a, b in board.edges:
-        deps.setdefault(a, set()).add(b)
+    deps = depends_on_map(board.edges)
     seen, stack, out = {n}, [n], set()
     while stack:
         for b in deps.get(stack.pop(), ()):
@@ -436,9 +437,7 @@ def _milestone_out(board, rows, place, title, idx):
     ranked = _milestone_rows(board, rows, place, title)
     slot, quality, bnd = _slots(board, ranked)
     marked = set(quality["issues"]) if quality else set()
-    waits = {}  # 課題 → 閉じるのを待つ open の前提の課題の番号（昇順。#2604）
-    for a, b in sorted(board.prerequisites):
-        waits.setdefault(a, []).append(b)
+    waits = {a: sorted(bs) for a, bs in depends_on_map(board.prerequisites).items()}  # 閉じるのを待つ前提（昇順。#2604）
     out_rows = [
         {
             "rank": k,
