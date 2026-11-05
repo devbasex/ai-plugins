@@ -885,3 +885,13 @@ def test_judge_gets_the_block_and_records_the_basis(env, monkeypatch):
     assert state["project_mvv"] == {"status": "approved", "version": 1, "sha256": sha(BODY)}
     assert state["log"][-1]["basis"] == ["Value 2"]
     assert (env["tmp"] / "judge-prompt.txt").read_text().startswith(pm.principles())
+
+
+def test_unknown_streak_counts_each_sprint_gate_and_pr_once():
+    # オーガナイザーの打ち直しの行（#2507）は、隣り合っていなくても同じ組を 1 件と数える
+    ref = {"project_mvv": {"sha256": "s"}, "verdict": "unknown", "gate": "design"}
+    a, b = {**ref, "sprint": "/a.json", "pr": [5]}, {**ref, "sprint": "/b.json", "pr": [6]}
+    assert pms.unknown_streak([a, a], "s") == 1
+    assert pms.unknown_streak([a, b, a], "s") == 2
+    assert pms.unknown_streak([a, {**b, "verdict": "follow"}, b, a], "s") == 2
+    assert pms.unknown_streak([{**ref}, {**ref}], "s") == 2  # スプリント状態の無い行は 1 行を 1 件と数える

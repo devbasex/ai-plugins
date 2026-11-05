@@ -410,7 +410,11 @@ def cmd_answer(a) -> None:
     pl.send_answer(main, a.name, a.id, result, note=note, choice=a.choice, merge=merge, by=a.by)
     summary = f"依頼 {a.id} へ答え（{result}）を送った"
     if merge:
-        summary += "。設計 PR をマージした" if merge["result"] in ("merged", "already_merged") else f"。設計 PR をマージできない（{merge['result']}: {merge['reason']}）"
+        summary += (
+            "。設計 PR をマージした"
+            if merge["result"] in ("merged", "already_merged")
+            else f"。設計 PR をマージできない（{merge['result']}: {merge['reason']}）"
+        )
     extra = {"merge": merge} if merge is not None else {}
     reply("ok", summary, id=a.id, result=result, next=nxt, seq=seq, after=pa.after_items(items, q or {"id": a.id}), **extra)
 

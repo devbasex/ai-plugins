@@ -407,7 +407,9 @@ def regated_answer(env: Env, w: dict) -> str | None:
         return None
     w.update(stamp=head, restamped=stamp)
     if not stamp.strip("0"):
-        return f"#{w['number']} の設計 PR #{w['pr']} の承認した先端が記録に無い。今の先端 {head[:12]} を記録した。この先端を見てから答え直す"
+        return (
+            f"#{w['number']} の設計 PR #{w['pr']} の承認した先端が記録に無い。今の先端 {head[:12]} を記録した。この先端を見てから答え直す"
+        )
     return f"#{w['number']} の設計 PR #{w['pr']} の先端が問いの後に動いた（{stamp[:12]} → {head[:12]}）。新しい先端を見てから答え直す"
 
 

@@ -49,7 +49,9 @@ def after_items(items: list[dict], answered: dict) -> list[dict]:
             return None
         if answered.get("kind") == "gate1" and key(q) == key(answered):
             return "settled"
-        if any(o is not q and o.get("kind") == "gate1" and key(o) == key(q) and str(o.get("at") or "") > str(q.get("at") or "") for o in rest):
+        if any(
+            o is not q and o.get("kind") == "gate1" and key(o) == key(q) and str(o.get("at") or "") > str(q.get("at") or "") for o in rest
+        ):
             return "resend"
         return None
 

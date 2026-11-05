@@ -1578,3 +1578,237 @@ def test_selecting_a_returned_issue_marks_its_fix(env):
     assert got["metrics"]["selected"] == [12, 11]
     assert (lap["sprint"], lap["milestone"], lap["rank_digest"], lap["state_path"]) == (f"l1-{lap['n']}", "01 近い", "dg", None)
     assert [f.get("fixed_by") for f in rec(env)["fixes"]] == [lap["n"], None, 7]
+
+
+# ---------------------------------------------------------------- 承認した設計のマージ（#2507）
+
+
+def gated_both(env):
+    """#11（設計 PR 501）と #12（設計 PR 502）を承認ゲート 1 で人の判断待ちへ移し、周回を締めた記録。"""
+    lap = built_lap(env)
+    items = [
+        {
+            "plan": str(Path(lap["out"]) / f"design-{n}.json"),
+            "result": "関門",
+            "report": design_report(env, f"d{n}", f"https://github.com/o/r/pull/{pr}"),
+        }
+        for n, pr in ((11, 501), (12, 502))
+    ]
+    sl_gate.cmd_gate(env, "l1", write_done(env, items))
+    assert sl.current_lap(rec(env)) is None
+    return rec(env)
+
+
+def row(env, n):
+    return next(w for w in reversed(rec(env)["waiting"]) if w["number"] == n)
+
+
+def test_loop_answer_merges_the_approved_design_and_the_next_lap_selects_it_first(env):
+    r = gated_both(env)
+    assert [w["stamp"] for w in r["waiting"]] == [HEAD, HEAD]  # 並列の計画の外でも承認した先端を書く
+    out = sl.cmd_answer(env, "l1", 11, True, None)
+    w = row(env, 11)
+    assert out["status"] == "ok" and env.merges == [(501, HEAD)] and w["merge"]["result"] == "merged" and w["merged_at"]
+    assert out["items"][0]["merge"]["result"] == "merged"
+    sl.cmd_answer(env, "l1", 12, False, None)
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 14, 11]))
+    got = sl_select.cmd_select(env, "l1")
+    assert got["metrics"]["selected"][0] == 11
+    first = next(x for x in got["items"] if x["number"] == 11)
+    assert first["reason"] == sl_select.APPROVED_REASON
+    assert any(c[-2:] == ["cleanup", "501"] for c in env.calls)  # 後片付けは周回の境が打つ
+    # 選ばれた後の周回では先頭に選ばない
+    assert 11 not in sl_select.approved_designs(rec(env))
+
+
+def test_revise_and_rejected_answers_do_not_merge(env, tmp_path):
+    gated_both(env)
+    note = tmp_path / "n.md"
+    note.write_text("直す")
+    sl.cmd_answer(env, "l1", 11, False, None, revise=True, note=str(note))
+    sl.cmd_answer(env, "l1", 12, False, None)
+    assert env.merges == []
+
+
+def test_loop_answer_for_a_moved_design_pr_is_regated_without_merging(env):
+    gated_both(env)
+    env.heads[501] = "b" * 40
+    out = sl.cmd_answer(env, "l1", 11, True, None)
+    w = row(env, 11)
+    assert out["status"] == "ok" and out["metrics"]["status"] == "regated" and not w.get("answer") and env.merges == []
+    assert w["stamp"] == "b" * 40 and w["restamped"] == HEAD
+    assert sl.cmd_answer(env, "l1", 11, True, None)["metrics"]["status"] == "answered" and env.merges == [(501, "b" * 40)]
+
+
+def test_a_failed_merge_still_answers_and_is_retried_at_the_next_boundary(env):
+    gated_both(env)
+    env.merge_box = {"result": "not_green", "class": "running", "reason": "検査が緑でない（running）"}
+    out = sl.cmd_answer(env, "l1", 11, True, None)
+    assert out["status"] == "ok" and row(env, 11)["answer"] == "approved" and "マージできない" in out["summary"]
+    sl.cmd_answer(env, "l1", 12, False, None)
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 13, 14]))
+    env.merge_box = {"result": "merged", "class": "passed", "reason": ""}
+    got = sl_select.cmd_select(env, "l1")  # 境で 1 回マージし直し、同じ周回の選定に含める（受け入れ条件 7）
+    assert len(env.merges) == 2 and got["metrics"]["selected"][0] == 11 and row(env, 11)["merge"]["lap"] == 2
+
+
+def test_a_merge_that_fails_again_only_drops_that_issue(env):
+    gated_both(env)
+    env.merge_box = {"result": "not_green", "class": "queued", "reason": "検査が緑でない（queued）"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    sl.cmd_answer(env, "l1", 12, False, None)
+    env.rank_box["out"] = rank_out(ms("01 近い", [11, 13, 14]))
+    got = sl_select.cmd_select(env, "l1")
+    drop = next(x for x in got["items"] if x["number"] == 11)
+    assert len(env.merges) == 2 and got["metrics"]["selected"] == [13]
+    assert drop["reason"] == "設計 PR がマージ待ち（検査が緑でない（queued））" and row(env, 11)["merge"]["streak"] == 2
+
+
+def boundary(env, n=1):
+    """周回の境のマージし直しだけを n 回打つ（選定は流さない）。"""
+    for _ in range(n):
+        with sl_record.open_record(env, "l1") as (r, before):
+            sl_select.settle_approved_designs(env, r)
+            sl_record.write_record(env, r, before)
+
+
+def test_the_same_not_green_for_three_laps_is_given_back_to_the_user(env):
+    gated_both(env)
+    env.merge_box = {"result": "not_green", "class": "running", "reason": "走っている"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    boundary(env, 2)
+    assert len(env.merges) == 3 and row(env, 11)["merge"]["streak"] == 3
+    boundary(env)
+    w = row(env, 11)
+    assert len(env.merges) == 3 and not w.get("answer") and w["returned"] == "走っている" and "merge" not in w
+    assert "利用者へ戻した理由: 走っている" in env.bodies[11]
+
+
+@pytest.mark.parametrize("res, cls", [("failed", None), ("not_green", "stale_again")])
+def test_results_that_time_does_not_solve_are_given_back_at_once(env, res, cls):
+    gated_both(env)
+    env.merge_box = {"result": res, "class": cls, "reason": "権限が無い"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    boundary(env)
+    w = row(env, 11)
+    assert len(env.merges) == 1 and not w.get("answer") and w["returned"] == "権限が無い"
+
+
+def test_infra_reruns_are_counted_across_classes_and_capped(env):
+    gated_both(env)
+    env.merge_box = {"result": "not_green", "class": "infra", "reason": "基盤待ち", "infra_rerun": True}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    env.merge_box = {"result": "not_green", "class": "running", "reason": "走っている"}
+    boundary(env)  # 実行中に変わっても累計は 0 に戻さない
+    env.merge_box = {"result": "not_green", "class": "infra", "reason": "基盤待ち", "infra_rerun": True}
+    boundary(env, 2)
+    assert row(env, 11)["merge"]["infra_reruns"] == 3 and len(env.merges) == 4
+    boundary(env)
+    w = row(env, 11)
+    assert len(env.merges) == 4 and not w.get("answer") and "基盤待ち" in w["returned"]
+
+
+def test_production_target_is_not_retried_and_waits_for_gate_2(env):
+    gated_both(env)
+    env.merge_box = {"result": "production", "class": None, "reason": "宛先 main が本番"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    boundary(env)
+    assert len(env.merges) == 1 and not row(env, 11).get("merged_at")
+    assert sl_select.exclusion_reason(env, rec(env), {"number": 11}, 2, set()) == sl_select.PRODUCTION_REASON
+    env.prs[501] = "MERGED"
+    boundary(env)
+    assert len(env.merges) == 1 and row(env, 11)["merged_at"]
+
+
+def test_head_moved_at_the_boundary_asks_again_with_the_new_head(env):
+    gated_both(env)
+    env.merge_box = {"result": "head_moved", "class": None, "reason": "動いた"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    env.heads[501] = "c" * 40
+    boundary(env)
+    w = row(env, 11)
+    assert not w.get("answer") and w["stamp"] == "c" * 40 and w["restamped"] == HEAD and len(env.merges) == 1
+
+
+def test_conflict_syncs_the_base_in_the_design_worktree_and_asks_again(env):
+    gated_both(env)
+    env.merge_box = {"result": "conflict", "class": "passed", "reason": "衝突", "branch": "design/11"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        if cmd[:3] == ["git", "worktree", "list"]:
+            return 0, "worktree /m\nbranch refs/heads/develop\n\nworktree /wt/d11\nbranch refs/heads/design/11\n", ""
+        if "base-sync" in cmd:
+            env.calls.append([*cmd, cwd])
+            env.heads[501] = "d" * 40
+            return env.sync_code, "{}", ""
+        return base(cmd, cwd=cwd, stdin=stdin)
+
+    env.run, env.sync_code = run, 0
+    boundary(env)
+    w = row(env, 11)
+    assert any("base-sync" in c and c[-1] == "/wt/d11" for c in env.calls)
+    assert not w.get("answer") and w["stamp"] == "d" * 40
+
+
+def test_conflict_that_base_sync_cannot_solve_aborts_and_gives_back(env):
+    gated_both(env)
+    env.merge_box = {"result": "conflict", "class": "passed", "reason": "衝突", "branch": "design/11"}
+    sl.cmd_answer(env, "l1", 11, True, None)
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        if cmd[:3] == ["git", "worktree", "list"]:
+            return 0, "worktree /wt/d11\nbranch refs/heads/design/11\n", ""
+        if "base-sync" in cmd:
+            return 1, "{}", "衝突が残る"
+        return base(cmd, cwd=cwd, stdin=stdin)
+
+    env.run = run
+    boundary(env)
+    w = row(env, 11)
+    assert ["git", "merge", "--abort"] in env.calls and not w.get("answer") and "衝突が残る" in w["returned"]
+
+
+def lane_env(env, monkeypatch):
+    env.answer_box = {}
+    env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
+    sent = []
+
+    def lane_gate1(e, w, report, state, suffix="", stamp=None):
+        stamp = stamp or sl_gate.design_head(e, w)
+        sent.append({"suffix": suffix, "stamp": stamp, "returned": w.get("returned")})
+        return {"request": f"la-g{w['pr']}-{stamp[:12]}{suffix}", "plan": "p1", "stamp": stamp, "report": report, "state": state}
+
+    monkeypatch.setattr(sl_gate, "lane_gate1", lane_gate1)
+    return sent
+
+
+def test_lane_copies_the_organizer_merge_and_does_not_rewrite_an_mvv_approval(env, monkeypatch):
+    sent = lane_env(env, monkeypatch)
+    r = gated_both(env)
+    rid = r["waiting"][0]["request"]
+    assert rid == f"la-g501-{HEAD[:12]}" and sent[0]["suffix"] == ""
+    merge = {"result": "merged", "class": "passed", "reason": "", "pr": 501, "head": HEAD, "at": "t", "infra_rerun": False}
+    env.answer_box[rid] = {"answer": {"result": "approved", "merge": merge, "by": "mvv"}, "defer": None}
+    env.answer_box[r["waiting"][1]["request"]] = {"answer": {"result": "rejected"}, "defer": None}
+    env.calls.clear()
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 11]))
+    got = sl_select.cmd_select(env, "l1")
+    w = row(env, 11)
+    assert w["answer"] == "approved" and w["by"] == "mvv" and w["merged_at"] and w["merge"]["result"] == "merged"
+    assert not any("gate" in c and c[-2:] == ["--pr", "501"] for c in env.calls)  # 承認の記録は mvv-gate.py が書いた
+    assert env.merges == [] and got["metrics"]["selected"][0] == 11
+
+
+def test_lane_gives_back_with_a_new_request_id_for_the_same_head(env, monkeypatch):
+    sent = lane_env(env, monkeypatch)
+    r = gated_both(env)
+    rid = r["waiting"][0]["request"]
+    failed = {"result": "failed", "class": None, "reason": "権限が無い", "pr": 501, "head": HEAD, "at": "t"}
+    env.answer_box[rid] = {"answer": {"result": "approved", "merge": failed}, "defer": None}
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 14]))
+    sl_select.cmd_select(env, "l1")
+    w = row(env, 11)
+    assert not w.get("answer") and w["request"] == f"la-g501-{HEAD[:12]}-m2" and sent[-1]["returned"] == "権限が無い"
