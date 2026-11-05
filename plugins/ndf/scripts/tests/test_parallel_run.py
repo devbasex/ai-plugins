@@ -402,6 +402,20 @@ def test_ask_request_raises_questions_and_the_answer_reaches_the_lane(env, tmp_p
     until(lambda: not [i for i in questions(main)["items"] if i["id"] == rid])  # 答えた問いはもう返さない
 
 
+def test_gate1_answer_event_carries_the_merge_result_and_who_approved(env, tmp_path):
+    """設計の承認の答えのイベントに、答えの前に試みたマージの結果と担い手が載る（#2507）。同じ先端で戻した依頼は別の id。"""
+    main = env["main"]
+    start(main)
+    rid = pl.request_gate1(main, "p1", "la", 11, 501, "r.md", "s.json", "a" * 40, verdict="unknown")
+    again = pl.request_gate1(main, "p1", "la", 11, 501, "r.md", "s.json", "a" * 40, suffix="-m3")
+    assert again == f"{rid}-m3"
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    pl.send_answer(main, "p1", rid, "approved", merge={"result": "merged"}, by="mvv")
+    ans = until(lambda: pl.answers_of(main, "p1", [rid])[rid]["answer"])
+    assert ans["merge"] == {"result": "merged"} and ans["by"] == "mvv"
+    until(lambda: [i["id"] for i in questions(main)["items"]] == [again])
+
+
 def test_the_same_ask_id_is_counted_once(env, tmp_path):
     main = env["main"]
     start(main)

@@ -4468,16 +4468,18 @@
     {
       "term": "作業の報告",
       "context": "ndf-workflow",
-      "meaning": "worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める",
+      "meaning": "worker が応答の最後に書く「## 作業の報告」の節。人と conductor が読む。成否は作業の結果ファイルで決め、この節の文からは決めない（#2337）",
       "code": "work_report",
-      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md",
+      "pending_source": "issues/issue-2337-design.md"
     },
     {
       "term": "起こし直し",
       "context": "ndf-workflow",
-      "meaning": "supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで",
+      "meaning": "supervise の full のステップで、作業の結果ファイルが無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで（#2337）",
       "code": "resume_prompt",
-      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md",
+      "pending_source": "issues/issue-2337-design.md"
     },
     {
       "term": "所要の記録",
@@ -5023,6 +5025,12 @@
       "source": "docs/specifications/ndf-worker-stage-skills.md"
     },
     {
+      "term": "読む Skill の guard",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が ndf:worker を起動する Agent の呼び出しを PreToolUse の hook で見て、「読む Skill」の欄が無い起動と、Skill の対応表を引かずに Skill を挙げた起動を止める判定。止めた理由に正本の「supervisor → worker」の節を添える（#2399）",
+      "pending_source": "issues/issue-2399-design.md"
+    },
+    {
       "term": "規則の Skill",
       "context": "ndf-workflow",
       "meaning": "手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376）",
@@ -5565,6 +5573,76 @@
       "context": "ndf-workflow",
       "meaning": "オーガナイザーが答えを送った後、待つ間に届いた依頼を取り直し、除くものを除いて残りをまとめて問う手順",
       "pending_source": "issues/issue-2507-design.md"
+    },
+    {
+      "term": "本体",
+      "context": "ndf-workflow",
+      "meaning": "エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "核の対象外",
+      "context": "ndf-workflow",
+      "meaning": "実行の核を通さないエントリポイントの印。hook の定義から起動されるか、ランタイムが直接起動して標準出力をそのまま使うもの。契約の一覧の core に理由と根拠を書く（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "作業の結果ファイル",
+      "context": "ndf-workflow",
+      "meaning": "worker が報告を終える前に書く、結果 JSON の形の 1 行のファイル。supervise と supervisor はこのファイルの status だけで作業の成否を決める（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "フェーズの結果",
+      "context": "ndf-workflow",
+      "meaning": "supervise の 1 つのプランの実行の終わり方を結果 JSON の形で書いたファイル（状態ディレクトリの phase-result.json）。supervise.py run の終了コードはこの status から決まる（#2337）",
+      "source": "",
+      "pending_source": "issues/issue-2337-design.md"
+    },
+    {
+      "term": "利用者の設定ディレクトリ",
+      "context": "ndf-release",
+      "meaning": "利用者の Claude Code の設定ディレクトリ（`CLAUDE_CONFIG_DIR`、無ければ `~/.claude`）と Codex の設定ディレクトリ（`CODEX_HOME`、無ければ `~/.codex`）。リリース後テストはこの中の導入済みのプラグインと取得元の登録を変えない",
+      "pending_source": "issues/issue-2401-requirements.md"
+    },
+    {
+      "term": "導入の操作",
+      "context": "ndf-release",
+      "meaning": "プラグインの導入・更新と、取得元の登録・更新（`claude plugin install` / `update` / `marketplace add` / `marketplace update`、`codex plugin add` / `marketplace add`）。リリース後テストの worker は利用者の設定ディレクトリでこれを打たない",
+      "pending_source": "issues/issue-2401-requirements.md"
+    },
+    {
+      "term": "利用者の設定の控え",
+      "context": "ndf-release",
+      "meaning": "利用者の設定ディレクトリの、導入済みのプラグインと取得元の登録を鍵と値の組で書き出したもの。リリース後テストの前に取り、後で今の状態と比べる",
+      "pending_source": "issues/issue-2401-design.md"
+    },
+    {
+      "term": "扱い",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。課題ごとに `実装する` / `取り込む` / `閉じる` のどれかを書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "取り込み先",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `取り込む` の課題を、どの課題の実装へ含めるかを課題の番号で書く",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "触るファイル",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
+      "pending_source": "issues/issue-2361-requirements.md"
+    },
+    {
+      "term": "食い違い",
+      "context": "ndf-workflow",
+      "meaning": "同じ課題について、2 本の設計文書が違う設計の結果（扱い・取り込み先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す",
+      "pending_source": "issues/issue-2361-design.md"
     }
   ]
 }
