@@ -55,8 +55,9 @@ pytest_plugins = ["pytester", "pytest_child_cleanup"]
 # 増えた）。**生成物は収集の対象から外す。**
 collect_ignore_glob = ["plugins/*/dev.agy"]
 
-# 束ごとに要る外部コマンド。**束によって前提が違う**ため、一覧は 1 か所に置きつつ
-# 収集した束にだけ適用する。全体へ課すと、必要のないコマンドを求めることになる。
+# 束ごとに要る外部コマンド（前提のコマンドの一覧）。**束によって前提が違う**ため、一覧は
+# 1 か所に置きつつ収集した束にだけ適用する。全体へ課すと、必要のないコマンドを求めることになる。
+# キーはリポジトリの根からの相対パスで、ファイルの中のクラスまで絞るときは `::` でつなぐ。
 REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     "scripts/tests": ("bash", "jq", "git"),
     "plugins/ndf/skills/worktree/tests": ("bash", "jq", "git"),
@@ -72,6 +73,9 @@ REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     # スライドの生成スクリプト（pptxgenjs）を node で実行し、依存が無ければ `npm ci` で入れる（#2065）
     "plugins/ndf/skills/release/tests/test_slide_template.py": ("node", "npm"),
     "tests/test_presentation_decks.py": ("node", "npm"),
+    # 名前つきのラッパーを使い捨ての tmux サーバで動かす結合テスト（#2346）。同じファイルの
+    # ほかのテストは tmux を使わないため、クラスまで絞る。
+    "plugins/ndf/scripts/tests/test_relay_hub.py::TestWithTmux": ("tmux",),
 }
 
 # 読み飛ばしを選ぶ指定。**既定は失敗**である。読み飛ばしたい実行環境のために残すが、
@@ -83,16 +87,27 @@ def _allow_missing() -> bool:
     return os.environ.get(ALLOW_MISSING_ENV, "") not in ("", "0")
 
 
-def _bundle_of(path: Path) -> str | None:
-    """その項目が属する束を返す。一覧に無ければ `None`。"""
-    try:
-        rel = path.resolve().relative_to(ROOT).as_posix()
-    except ValueError:
+def _item_id(item) -> str | None:
+    """項目の識別子（根からの相対パス、続けてファイルの中の位置を `::` でつないだもの）を返す。
+
+    根の外のファイルは `None`。
+    """
+    path = Path(str(item.fspath)).resolve()
+    if not path.is_relative_to(ROOT):
         return None
-    for bundle in REQUIRED_COMMANDS:
-        if rel == bundle or rel.startswith(bundle + "/"):
-            return bundle
-    return None
+    _, sep, inner = item.nodeid.partition("::")
+    return path.relative_to(ROOT).as_posix() + sep + inner
+
+
+def _bundles_of(item_id: str | None) -> list[str]:
+    """識別子が当たる一覧のキーを返す。
+
+    当たるのは、識別子がキーと一致するか、キーの直後が `/` か `::` のときだけである
+    （`::TestWithTmux` は `::TestWithTmuxOld` に当たらない）。
+    """
+    if item_id is None:
+        return []
+    return [k for k in REQUIRED_COMMANDS if item_id == k or item_id.startswith((k + "/", k + "::"))]
 
 
 def _missing(bundles: set[str]) -> dict[str, list[str]]:
@@ -213,7 +228,7 @@ def _select_shard(config, items) -> None:
 
 def pytest_collection_modifyitems(config, items) -> None:
     _select_shard(config, items)
-    bundles = {b for item in items if (b := _bundle_of(Path(str(item.fspath)))) is not None}
+    bundles = {b for item in items for b in _bundles_of(_item_id(item))}
     missing = _missing(bundles)
     if not missing:
         return
@@ -221,7 +236,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     if _allow_missing():
         mark = pytest.mark.skip(reason=f"外部コマンドが無い（{ALLOW_MISSING_ENV} の指定により読み飛ばす）")
         for item in items:
-            if _bundle_of(Path(str(item.fspath))) in missing:
+            if any(b in missing for b in _bundles_of(_item_id(item))):
                 item.add_marker(mark)
         return
     raise pytest.UsageError(
