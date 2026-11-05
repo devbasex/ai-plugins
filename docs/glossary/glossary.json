@@ -5785,6 +5785,20 @@
       "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
       "source": "",
       "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "デプロイ",
+      "context": "ndf-release",
+      "meaning": "開発・本番を問わず、環境に変更を届けること。本番へのデプロイだけをリリースと呼ぶ",
+      "source": "",
+      "pending_source": "issues/issue-2620-requirements.md"
+    },
+    {
+      "term": "書いた日の記録",
+      "context": "ndf-workflow",
+      "meaning": "書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録",
+      "source": "",
+      "pending_source": "issues/issue-2620-requirements.md"
     }
   ]
 }
