@@ -5785,6 +5785,18 @@
       "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
       "source": "",
       "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "再掲",
+      "context": "ndf-factory",
+      "meaning": "Factory の確定仕様で、別のファイルの不変条件を同じ番号のまま書き直して載せた行",
+      "pending_source": "issues/issue-2445-requirements.md"
+    },
+    {
+      "term": "番号の重なり",
+      "context": "ndf-factory",
+      "meaning": "再掲でないのに、Factory の 2 つの確定仕様の別の不変条件が同じ番号を持つこと",
+      "pending_source": "issues/issue-2445-requirements.md"
     }
   ]
 }
