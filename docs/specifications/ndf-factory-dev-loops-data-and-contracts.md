@@ -31,7 +31,7 @@ erDiagram
 | ループ | `loopId` | 文字列 | 不可 | 32 字（実行と同じ作り方） |
 | ループ | `repositoryId`・`name` | 数・文字列 | 不可 | 属する登録と、NDF のループ名（`^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$`） |
 | ループ | `milestones` | 文字列の並び | 不可 | 1〜10 件。題に `,` を含まない（NDF の `--milestones` の区切り） |
-| ループ | `budget` | `{laps, usd, hours}` | 各値は可 | 空は「宣言しない（NDF の `.ndf/pace.json` の既定）」 |
+| ループ | `budget` | `{laps, usd, hours}` | 各値は可 | 空はリポジトリの予算の既定（NDF の `.ndf/pace.json` の `loop.budget`）に従う |
 | ループ | `state` | 文字列 | 不可 | `running` / `between_laps` / `awaiting_approval` / `stopped` / `cancelled`。後ろの 2 つが終わりの状態 |
 | ループ | `waitReason` | 文字列 | 可 | `between_laps` の理由: `slots`（枠）・`legacy_version`・`user_start`（`local`）。空は「起こす途中」 |
 | ループ | `currentRunId` | 文字列 | 可 | 終わりの状態でない実行（I44）。空は「動く実行が無い」 |
@@ -86,6 +86,7 @@ erDiagram
 | 名前 | 使う側 | 意味 |
 | --- | --- | --- |
 | `NDF_PARALLEL_MIN_VERSION` | 制御 | 並行を許す NDF の版の下限。無ければ並行を許さない |
+| `NDF_BUDGET_RESET_MIN_VERSION` | 制御 | 予算の単位を既定へ戻せる（`--budget-* default` を受ける）NDF の版の下限。無ければ戻せない |
 | `LOCAL_LOOP_AUTOSTART` | 制御 | `true` のとき `local` のループも自動で次の周回を起こす。既定 `false` |
 | `USAGE_LIMIT_RETRY_SECONDS` | 制御 | リセット時刻を読めないときの待ち。既定 900 |
 | `RUNNER_SECTION_LIMIT` | ランナー | 区間の上限。既定 20 |
@@ -103,7 +104,7 @@ erDiagram
 | `APPROVAL_REQUEST_ID` | 文字列・任意 | 無い `resume` は答えを書かずに続ける（利用上限の後の再開） |
 | `LOOP_NAME` | `^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$`・`loop` で必須 | NDF のループ名。ループの実行の `resume` にも載せる |
 | `LOOP_MILESTONES` | 文字列・`loop` で必須 | マイルストーンの題を `,` で結ぶ |
-| `LOOP_BUDGET` | `^(laps=\d+(\.\d+)?)?(,?usd=\d+(\.\d+)?)?(,?hours=\d+(\.\d+)?)?$`・任意 | 宣言した予算だけを並べる。無ければ NDF の既定 |
+| `LOOP_BUDGET` | `^(laps=(\d+(\.\d+)?\|default))?(,?usd=(\d+(\.\d+)?\|default))?(,?hours=(\d+(\.\d+)?\|default))?$`・任意 | 単位ごとに数か `default`（その単位をリポジトリの既定へ戻す）を並べる。既定へ戻せる版の実行では 3 単位すべてを並べ、戻せない版では値のある単位だけを並べて 1 つも無ければ載せない |
 | `EXCLUDE_ISSUES` | 番号の並び・任意 | 同じリポジトリの課題の持ち分。無ければ外さない |
 | `LOOP_ANSWERS` | `<番号>=(approved\|rejected)(#<PR の番号>)?` を `,` で結ぶ・任意 | 人の判断待ちへの答え |
 
@@ -157,7 +158,7 @@ erDiagram
 | `POST /accounts/{a}/loops` | 席を持つ人 | `{repository_id, name, milestones, budget?: {laps?, usd?, hours?}, idempotency_key}` | `{loop_id, state}`（`running` か `between_laps`） | 400 `invalid_request`（名前・題の形、1〜10 件、予算が正の数でない）・403・404 `repository_not_found`・409 `milestone_in_use`（`details.milestones`・`details.loop_name`）・409 `loop_name_in_use`（同じ登録の終わりの状態でないループ） |
 | `GET /accounts/{a}/loops?repository_id=` | 席を持つ人 | 条件 `repository_id` | `{loop_id, name, milestones, state, wait_reason, laps_closed, cost_usd, budget, budget_remaining, last_run_at, stop_condition, stop_detail}`（新しい順 50 件） | 要求全体の 400・403 |
 | `GET /accounts/{a}/loops/detail?loop_id=` | 席を持つ人 | 鍵 `loop_id` | `{loop, laps: [{lap, issues, result, version, cost_usd, seconds}], runs: [{sprint_run_id, lap, state, failure_reason, finish_reason, resume_at, cost_usd, sections}], pending: [{number, reason, lap, answer}]}` | 403・404 |
-| `PATCH /accounts/{a}/loops` | 席を持つ人 | `{loop_id, budget}` | ループの 1 行 | 400・403・404・409 `already_finished` |
+| `PATCH /accounts/{a}/loops` | 席を持つ人 | `{loop_id, budget}` | ループの 1 行 | 400・403・404・409 `already_finished`・409 `budget_reset_unsupported`（既定へ戻せない版のループで値のある単位を空にした。`details.ndf_version`・`details.units`） |
 | `POST /accounts/{a}/loops/cancel` | 席を持つ人 | `{loop_id}` | `{state}`（`cancelled` か、実行の停止を待つ `running`） | 403・404・409 `already_finished` |
 | `POST /accounts/{a}/loops/next-lap` | 席を持つ人 | `{loop_id}` | `{state}` | 403・404・409 `not_awaiting_user_start` |
 | `POST /accounts/{a}/loops/answers` | 席を持つ人（委任の資格情報では断る） | `{loop_id, issue, decision: approved \| rejected, pr?}` | `{loop_id, pending}` | 400・403・404・409 `not_pending`（`pending` に無い番号） |

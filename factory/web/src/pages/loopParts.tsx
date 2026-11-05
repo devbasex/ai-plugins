@@ -51,13 +51,17 @@ export function useLoopView() {
       return loop.stop_condition.startsWith("budget_") ? `${parts} ${t("loops.budgetContinue")}` : parts;
     },
     usd,
+    // 値のある単位は残りを、空の単位はリポジトリの既定に従うことをまとめて 1 項目で出す（#2406）
     remaining: (b: LoopBudget): string => {
       const items = [
         typeof b.laps === "number" ? t("loops.remainingLaps", { value: format.number(b.laps) }) : null,
         typeof b.usd === "number" ? t("loops.remainingUsd", { value: usd(b.usd) }) : null,
         typeof b.hours === "number" ? t("loops.remainingHours", { value: format.number(b.hours) }) : null,
       ].filter((x): x is string => x !== null);
-      return items.length === 0 ? t("loops.noBudget") : items.join(" / ");
+      const empty = (["laps", "usd", "hours"] as const).filter((k) => typeof b[k] !== "number");
+      const units = { laps: t("loops.unitLaps"), usd: t("loops.unitUsd"), hours: t("loops.unitHours") };
+      if (empty.length > 0) items.push(t("loops.followsDefault", { units: empty.map((k) => units[k]).join(t("loops.separator")) }));
+      return items.join(" / ");
     },
   };
 }
@@ -69,7 +73,7 @@ export function budgetText(b: LoopBudget = {}): BudgetText {
   return { laps: s(b.laps), usd: s(b.usd), hours: s(b.hours) };
 }
 
-// 空の欄は予算を掛けない（null）。正の数でなければ null を返して入力の誤りにする
+// 空の欄は null（リポジトリの既定に従う）。正の数でなければ null を返して入力の誤りにする
 export function parseBudget(text: BudgetText): LoopBudget | null {
   const out: LoopBudget = {};
   for (const key of ["laps", "usd", "hours"] as const) {
@@ -90,11 +94,24 @@ export function BudgetFields({ value, onChange, error }: { value: BudgetText; on
   const { t } = useTranslation();
   return (
     <>
-      <TextField label={t("loops.budgetLaps")} inputMode="numeric" value={value.laps} onChange={(e) => onChange({ ...value, laps: e.target.value })} />
-      <TextField label={t("loops.budgetUsd")} inputMode="decimal" value={value.usd} onChange={(e) => onChange({ ...value, usd: e.target.value })} />
+      <TextField
+        label={t("loops.budgetLaps")}
+        inputMode="numeric"
+        placeholder={t("loops.budgetPlaceholder")}
+        value={value.laps}
+        onChange={(e) => onChange({ ...value, laps: e.target.value })}
+      />
+      <TextField
+        label={t("loops.budgetUsd")}
+        inputMode="decimal"
+        placeholder={t("loops.budgetPlaceholder")}
+        value={value.usd}
+        onChange={(e) => onChange({ ...value, usd: e.target.value })}
+      />
       <TextField
         label={t("loops.budgetHours")}
         inputMode="decimal"
+        placeholder={t("loops.budgetPlaceholder")}
         value={value.hours}
         onChange={(e) => onChange({ ...value, hours: e.target.value })}
         error={error}
