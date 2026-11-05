@@ -5320,7 +5320,7 @@
     {
       "term": "オーガナイザー",
       "context": "ndf-workflow",
-      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
+      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
@@ -5505,6 +5505,24 @@
       "context": "repo-dev-checks",
       "meaning": "根の conftest.py が持つ、テストの置き場所（パス、またはパスに :: でつないだファイルの中のクラス）ごとに要る外部コマンドの表。収集した項目に当たるコマンドが PATH に無ければ、読み飛ばしの指定が無い限り収集を失敗させる",
       "pending_source": "issues/issue-2346-design.md"
+    },
+    {
+      "term": "承認した先端",
+      "context": "ndf-workflow",
+      "meaning": "設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの先端のときだけ行う",
+      "pending_source": "issues/issue-2507-design.md"
+    },
+    {
+      "term": "マージの結果",
+      "context": "ndf-workflow",
+      "meaning": "承認した設計 Pull Request を宛先へマージする 1 回の試みの結果。マージした・マージ済み・先端が動いた・印が無い・検査が緑でない・衝突・宛先が本番・失敗のどれか",
+      "pending_source": "issues/issue-2507-design.md"
+    },
+    {
+      "term": "答えの後の整理",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが答えを送った後、待つ間に届いた依頼を取り直し、除くものを除いて残りをまとめて問う手順",
+      "pending_source": "issues/issue-2507-design.md"
     }
   ]
 }
