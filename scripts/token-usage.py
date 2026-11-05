@@ -469,47 +469,60 @@ class External:
     usage: Usage | None = None  # 呼び出しの並びが分かる席だけ（claude・codex）。P・k・書き直しに使う
 
 
+def _codex_lines(path: Path, until: float | None) -> tuple[str, str | None, dict | None, list[float], list[tuple]]:
+    """codex の記録 1 本の (作業ディレクトリ, モデル, 最後の累計, 時刻の並び, 呼び出しごとの (時刻, 入力, キャッシュ, 出力))。
+
+    `until` より後の行は読まない。同じ累計の token_count は同じ呼び出しの再掲として数えない。"""
+    cwd, model, total, times, calls = "", None, None, [], []
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = fh.readlines()
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        t = parse_ts(d.get("timestamp"))
+        if until is not None and t is not None and t > until:
+            continue
+        if t is not None:
+            times.append(t)
+        p = d.get("payload") or {}
+        if d.get("type") == "session_meta":
+            cwd = p.get("cwd") or ""
+        elif d.get("type") == "turn_context" and not model:
+            model = p.get("model")
+        elif p.get("type") == "token_count" and p.get("info"):
+            new_total = p["info"].get("total_token_usage") or total
+            last = p["info"].get("last_token_usage") or {}
+            if last and new_total != total:  # 同じ累計の token_count は同じ呼び出しの再掲
+                inp, cached = last.get("input_tokens", 0), last.get("cached_input_tokens", 0)
+                calls.append((t, inp, cached, last.get("output_tokens", 0)))
+            total = new_total
+    return cwd, model, total, times, calls
+
+
+def _codex_usage(calls: list[tuple]) -> Usage | None:
+    """呼び出しごとの値から使用量を組む。codex の input_tokens は cached を含むため、キャッシュに当たらなかった分を書き込みとみなす。
+
+    呼び出しごとの値（last_token_usage）が無い記録は、P・k を取れないものとして None を返す。"""
+    if not calls:
+        return None
+    usage = Usage()
+    for _, inp, cached, out_t in calls:
+        usage.add(Usage(1, inp - cached, cached, 0, 0, out_t))
+    usage.record_calls([(t, inp, inp - cached, cached) for t, inp, cached, _ in calls])
+    return usage
+
+
 def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[External]:
     out = []
     for path in sorted(root.glob("**/rollout-*.jsonl")):
-        cwd, model, total, times, calls = "", None, None, [], []
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-        for line in lines:
-            try:
-                d = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(d, dict):
-                continue
-            t = parse_ts(d.get("timestamp"))
-            if until is not None and t is not None and t > until:
-                continue
-            if t is not None:
-                times.append(t)
-            p = d.get("payload") or {}
-            if d.get("type") == "session_meta":
-                cwd = p.get("cwd") or ""
-            elif d.get("type") == "turn_context" and not model:
-                model = p.get("model")
-            elif p.get("type") == "token_count" and p.get("info"):
-                new_total = p["info"].get("total_token_usage") or total
-                last = p["info"].get("last_token_usage") or {}
-                if last and new_total != total:  # 同じ累計の token_count は同じ呼び出しの再掲
-                    inp, cached = last.get("input_tokens", 0), last.get("cached_input_tokens", 0)
-                    calls.append((t, inp, cached, last.get("output_tokens", 0)))
-                total = new_total
+        cwd, model, total, times, calls = _codex_lines(path, until)
         m = WT_RE.search(cwd + "/")
         if not m or not times or total is None:  # token_count の無い記録（起動に失敗した席）は数えない
             continue
-        # codex の input_tokens は cached を含む。キャッシュに当たらなかった分を書き込みとみなす。
-        # 呼び出しごとの値（last_token_usage）が無い記録は、P・k を取れないものとして usage を持たない
-        usage = None
-        if calls:
-            usage = Usage()
-            for _, inp, cached, out_t in calls:
-                usage.add(Usage(1, inp - cached, cached, 0, 0, out_t))
-            usage.record_calls([(t, inp, inp - cached, cached) for t, inp, cached, _ in calls])
         out.append(
             External(
                 "codex",
@@ -523,7 +536,7 @@ def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[Ex
                     "cached": total.get("cached_input_tokens", 0),
                     "out": total.get("output_tokens", 0),
                 },
-                usage=usage,
+                usage=_codex_usage(calls),
             )
         )
     return out
