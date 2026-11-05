@@ -301,6 +301,7 @@ class Board:
     approved: tuple = ()
     excluded: list = field(default_factory=list)
     sizes: dict = field(default_factory=dict)  # 見積もりの記録から決めた Size と追加の列（upkeep_rank_estimate。#1856）
+    prerequisites: set = field(default_factory=set)  # 前提の辺（a は b の閉じるのを待つ）。edges の部分集合（#2604）
 
 
 def _milestone_rows(board, rows, place, title):
@@ -435,6 +436,9 @@ def _milestone_out(board, rows, place, title, idx):
     ranked = _milestone_rows(board, rows, place, title)
     slot, quality, bnd = _slots(board, ranked)
     marked = set(quality["issues"]) if quality else set()
+    waits = {}  # 課題 → 閉じるのを待つ open の前提の課題の番号（昇順。#2604）
+    for a, b in sorted(board.prerequisites):
+        waits.setdefault(a, []).append(b)
     out_rows = [
         {
             "rank": k,
@@ -448,6 +452,7 @@ def _milestone_out(board, rows, place, title, idx):
             "released": r.released,
             "sources": r.sources,
             **({"quality_slot": r.number in marked} if quality is not None else {}),
+            **({"prerequisites": waits[r.number]} if r.number in waits else {}),
         }  # fmt: skip
         for k, r in enumerate(ranked, 1)
     ]
