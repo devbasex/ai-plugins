@@ -505,6 +505,20 @@ export const OPERATIONS = [
     "source": "runs.yaml"
   },
   {
+    "operationId": "listApprovalRequests",
+    "method": "GET",
+    "path": "/accounts/{accountId}/sprint-runs/approval-requests",
+    "kind": "list",
+    "access": "read",
+    "keys": [],
+    "idField": null,
+    "summary": "承認待ちの一覧",
+    "description": "アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 待ち始めた日時の古い順（同じ日時は実行の ID の順）に返す。1 つの実行に 0 か 1 行で、状態が awaiting_approval で待つ理由が無く、 最後の gate.reached より後に同じ種類の gate.answered が無い実行だけが載る。読むだけで、承認を確定しない。分割せず 1 回で返す。",
+    "parameters": [],
+    "itemSchema": null,
+    "source": "runs.yaml"
+  },
+  {
     "operationId": "listDelegations",
     "method": "GET",
     "path": "/delegations",

@@ -54,6 +54,7 @@ const CALLS: { [K in keyof Api]: (api: Api) => Promise<unknown> } = {
   stepDetails: (a) => a.stepDetails("p-1", "s1", ["k1"]),
   backlogs: (a) => a.backlogs("p-1", [1]),
   cancelSprintRun: (a) => a.cancelSprintRun("p-1", "s1"),
+  approvalRequests: (a) => a.approvalRequests("p-1"),
   updateRepository: (a) => a.updateRepository("p-1", 1, null),
   loops: (a) => a.loops("p-1", 1),
   startLoop: (a) => a.startLoop("p-1", 1, { name: "l", milestones: ["m"] }),

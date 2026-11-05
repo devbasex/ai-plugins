@@ -203,6 +203,10 @@ export class MemoryRunsTable implements RunsTable {
       .map((r) => structuredClone(r));
   }
 
+  async listAwaitingRuns(accountId: string) {
+    return (await this.listRuns(accountId, 1000)).filter((r) => r.state === "awaiting_approval");
+  }
+
   async setCancelRequested(sprintRunId: string) {
     await this.tick();
     const r = this.runs.get(sprintRunId);

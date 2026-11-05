@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 from typing import Optional
 
@@ -41,11 +42,64 @@ CODE_EXTENSIONS = frozenset(
 )
 
 
-def is_test_path(path: str) -> bool:
-    """テストの置き場所か。判定は `commit_touches_tests` と同じ基準で行う。"""
+# テストの関数の定義の行。pytest が既定で集める `test` で始まる関数とメソッドを、行頭の空白の後で探す（#2516 決定 1）。
+_PYTHON_TEST_DEF = re.compile(r"^[ \t]*(?:async[ \t]+)?def[ \t]+test", re.MULTILINE)
+
+
+def python_text_lacks_tests(text: str) -> bool:
+    """Python のソースの文字列が、テストの関数の定義の行を 1 つも持たないか（#2516 決定 1）。"""
+    return _PYTHON_TEST_DEF.search(text) is None
+
+
+def lacks_python_tests(path: str, work: Optional[str]) -> bool:
+    """`<work>/<path>` が、テストの関数を持たない `.py` か。
+
+    名前の形は見ない。呼ぶ側が名前の形で当たったファイルにだけ呼ぶ。`.py` でない・`work` が無い・
+    読めない（無い・ディレクトリ・権限）ときは偽を返し、名前の形の判定のままにする（#2516）。
+    """
+    if work is None or pathlib.PurePosixPath(str(path).strip()).suffix.lower() != ".py":
+        return False
+    try:
+        text = (pathlib.Path(work) / str(path).strip()).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return python_text_lacks_tests(text)
+
+
+def _test_marks(path: str) -> tuple[bool, bool]:
+    """`(ディレクトリの印があるか, ファイル名の印があるか)`。"""
     lowered = f"/{path.lower()}"
     name = lowered.rsplit("/", 1)[-1]
-    return any(m in lowered for m in TEST_PATH_MARKERS) or any(m in name for m in TEST_NAME_MARKERS)
+    return any(m in lowered for m in TEST_PATH_MARKERS), any(m in name for m in TEST_NAME_MARKERS)
+
+
+def is_test_path(path: str, work: Optional[str] = None) -> bool:
+    """テストの置き場所か。
+
+    `work`（作業ディレクトリ）を受けたときは、ディレクトリの印が無くファイル名の印だけで当たった
+    `.py` の中身を読み、テストの関数を持たなければプロダクションコードとする（#2516 決定 3）。
+    """
+    by_dir, by_name = _test_marks(path)
+    if by_dir:
+        return True
+    return by_name and not lacks_python_tests(path, work)
+
+
+def is_test_path_in_versions(path: str, before: Optional[str], after: Optional[str]) -> bool:
+    """コミットの前後の版の中身（読めなければ `None`）でテストかを決める。git は起動しない（#2516 決定 3）。
+
+    ファイル名の印で当たった `.py` は、読めた版のどちらかがテストの関数を持てばテストとする。
+    どちらの版も読めなければ名前の形のまま。テストの関数を消すコミットもテストの変更として残る。
+    """
+    by_dir, by_name = _test_marks(path)
+    if by_dir:
+        return True
+    if not by_name:
+        return False
+    if pathlib.PurePosixPath(path).suffix.lower() != ".py":
+        return True
+    readable = [text for text in (before, after) if text is not None]
+    return not readable or any(not python_text_lacks_tests(text) for text in readable)
 
 
 def _has_shebang(work: str, rev: str, path: str) -> bool:
@@ -85,7 +139,7 @@ def production_code_changes(work: str, base: str) -> Optional[list[tuple[str, in
         if len(parts) < 3:
             continue
         path = parts[2]
-        if is_test_path(path) or not _is_code_path(work, base, path):
+        if is_test_path(path, work) or not _is_code_path(work, base, path):
             continue
         # バイナリは `-` になるので数えない
         changes.append((path, sum(int(n) for n in parts[:2] if n.isdigit())))

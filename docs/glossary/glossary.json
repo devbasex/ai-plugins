@@ -5739,13 +5739,13 @@
       "term": "承認待ちの一覧",
       "context": "ndf-factory",
       "meaning": "アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し",
-      "pending_source": "issues/issue-2430-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "取り込みの衝突",
       "context": "ndf-factory",
       "meaning": "ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く",
-      "pending_source": "issues/issue-2430-requirements.md"
+      "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
       "term": "共有の環境",
@@ -5764,6 +5764,27 @@
       "context": "ndf-workflow",
       "meaning": "ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する",
       "pending_source": "issues/issue-2509-requirements.md"
+    },
+    {
+      "term": "対象の版",
+      "context": "ndf-release",
+      "meaning": "リリース後テストの記録の `対象の版:` の行に書く版。全角の括弧から後ろは注記として読まない。先頭の小文字の `v` の有無は同じ版として扱う",
+      "source": "",
+      "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "本番の版",
+      "context": "ndf-release",
+      "meaning": "リリース記録の `版:` の行の `→` の右に書く、本番へ出した版。全角の括弧から後ろは注記として読まない。読み取った値は先頭の `v` を付けない形にそろえる",
+      "source": "",
+      "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "版の表記の揺れ",
+      "context": "ndf-release",
+      "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
+      "source": "",
+      "pending_source": "issues/issue-2225-requirements.md"
     }
   ]
 }

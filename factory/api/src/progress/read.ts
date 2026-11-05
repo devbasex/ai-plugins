@@ -14,6 +14,7 @@ import type {
   StepRecordedEvent,
   UsageRecordedEvent,
 } from "@ndf-factory/contracts";
+import type { SprintRun } from "../runs/model.ts";
 import { finishedKey } from "./authorize.ts";
 import type { MemoryProgressEventStore } from "./memory-store.ts";
 import type { ProgressEventRecord } from "./store.ts";
@@ -34,6 +35,8 @@ export interface ProgressReader {
   findLastGate(sprintRunId: string): Promise<{ at: string; jobId: string | null; payload: GateReachedPayload } | null>;
   // 承認の依頼への答え（gate.answered。#2439 の配布のまとめが読む）。無ければ null
   findGateAnswer(sprintRunId: string, approvalRequestId: string): Promise<GateAnsweredPayload | null>;
+  // 実行の gate.reached と gate.answered を order_key の順に（承認待ちの一覧の判定 awaitingGateOf が読む。#2430）
+  listGateEvents(sprintRunId: string): Promise<ProgressEventRecord[]>;
   // ---- スプリントの一覧と詳細（#2172）。どれも本文（step.recorded の files・decisions・output）を返さない ----
   // 実行の事象を order_key の順に。step.recorded は新しい方から stepLimit 件までで、ほかの種類はすべて（I11）
   listRunEvents(sprintRunId: string, stepLimit: number): Promise<RunEvents>;
@@ -132,6 +135,25 @@ const gateAnswerOf = (records: ProgressEventRecord[], approvalRequestId: string)
   return e ? (e.payload as unknown as GateAnsweredPayload) : null;
 };
 
+export interface AwaitingGate {
+  at: string;
+  jobId: string | null;
+  payload: GateReachedPayload;
+}
+
+// 実行が今待っている承認の依頼（#2430 の決定 1・I3・I4）。状態が awaiting_approval で待つ理由が無く、最後の gate.reached より後に
+// 同じ種類の gate.answered が無いときだけ、その gate.reached を返す。gateEvents は gate.reached と gate.answered の order_key の順の列。
+// 承認待ちの一覧とリポジトリの承認と問いの一覧（organizer/control.ts）が共有する
+export function awaitingGateOf(run: Pick<SprintRun, "state" | "awaitingReason">, gateEvents: ProgressEventRecord[]): AwaitingGate | null {
+  if (run.state !== "awaiting_approval" || run.awaitingReason) return null;
+  let last: AwaitingGate | null = null;
+  for (const e of gateEvents) {
+    if (e.type === "gate.reached") last = { at: e.at, jobId: e.job_id, payload: e.payload as unknown as GateReachedPayload };
+    else if (e.type === "gate.answered" && last && (e.payload as unknown as GateAnsweredPayload).kind === last.payload.kind) last = null;
+  }
+  return last;
+}
+
 export interface LoopRunsDetail {
   laps: LoopLapClosedPayload[];
   summaries: Record<string, { costUsd: number; sections: number }>;
@@ -205,6 +227,9 @@ export function memoryProgressReader(store: MemoryProgressEventStore): ProgressR
     },
     async findGateAnswer(sprintRunId, approvalRequestId) {
       return gateAnswerOf(store.listRun(sprintRunId), approvalRequestId);
+    },
+    async listGateEvents(sprintRunId) {
+      return store.listRun(sprintRunId).filter((e) => GATE_TYPES.includes(e.type));
     },
     async listRunEvents(sprintRunId, stepLimit) {
       return capSteps(store.listRun(sprintRunId), stepLimit);
@@ -319,6 +344,10 @@ export class DynamoProgressReader implements ProgressReader {
 
   async findGateAnswer(sprintRunId: string, approvalRequestId: string) {
     return gateAnswerOf(await this.listTypes(sprintRunId, GATE_TYPES), approvalRequestId);
+  }
+
+  async listGateEvents(sprintRunId: string): Promise<ProgressEventRecord[]> {
+    return (await this.listTypes(sprintRunId, GATE_TYPES)).sort(byOrderKey);
   }
 
   // 表に type の索引が無いため、実行の事象を全ページ読んでから手元で古い step.recorded を捨てる。

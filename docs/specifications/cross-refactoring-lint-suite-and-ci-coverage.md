@@ -142,11 +142,16 @@ cross-refactoring は範囲テストを作業ディレクトリの根で走ら�
 | `pytest` | `test` | `uv run … pytest . …` / `… pytest {paths} …` | `["."]` | `.github/workflows/pytest.yml` |
 | `script-structure` | `lint` | `python3 scripts/check-script-structure.py` / `… {paths}` | `plugins/ndf` ほか | `.github/workflows/script-structure.yml` |
 | `lint` | `lint` | `bash scripts/check-lint.sh` / `bash scripts/check-lint.sh -- {paths}` | `["."]` | `.github/workflows/lint.yml` |
+| `runtime-plugin-build-check` ほか 9 本 | `lint` | ワークフローの `run` の行と同じ文 / 持たない | 持たない | `.github/workflows/runtime-plugin-validate.yml#<ジョブ>`（1 本に 1 ジョブ） |
 
-`test.ci_exempt` は、手元の検証で結果が決まらないか走らせられない 5 本（`glossary.yml`・`pr-base-guard.yml`・
-`pr-body-decisions.yml`・`runtime-plugin-authenticated-smoke.yml`・`runtime-plugin-smoke.yml`）を理由とともに持つ。
-`runtime-plugin-validate.yml` のジョブはどこにも書かない。生成物の同期・frontmatter・リンクなど項目の変更で壊れうる検査で、
-宣言に無いと知らせるのが正しいためである（扱いは #1694）。
+`runtime-plugin-validate.yml` の 9 本の suite は、ジョブ `runtime-plugin-build-check`・`skill-frontmatter-check`・
+`skill-repo-assumptions-check`・`skill-shell-vars-check`・`service-boundary-check`・`runtime-plugin-validate`・
+`markdown-link-check`・`doc-line-limit-check`・`instruction-files-check` を 1 つずつ受け持つ。どれも検査のスクリプトが
+ファイルのパスを受けないため `scope_command` と `paths` を持たず、範囲テストでは走らず、最終ゲートで 1 本ずつ判定される。
+
+`test.ci_exempt` は、手元の検証で結果が決まらないか走らせられない 7 件（`glossary.yml`・`pr-base-guard.yml`・
+`pr-body-decisions.yml`・`runtime-plugin-authenticated-smoke.yml`・`runtime-plugin-smoke.yml`・
+`runtime-plugin-smoke-latest.yml`・`runtime-plugin-validate.yml#required-checks-check`）を理由とともに持つ。
 
 `analysis.written.test` の指紋は宣言の値と一致しない（suite を手で足したため）。解析の書き出し（`merge.merge_item`）は
 一致しない項目を書き換えずに残すため、手で足した値は解析で消えない。

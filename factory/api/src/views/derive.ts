@@ -1,9 +1,9 @@
 // スプリントの一覧・詳細・工程の中身・棚卸しの記録の派生（#2172）。進捗の事象の列とスプリントの実行の行から作る純粋な関数で、
 // 時刻も外の世界も読まず、どちらの集約も書き換えない。リンクは GitHub を呼ばずに文字列で作る（I13）
 import { CLOSING_STEPS, PHASE_NAMES } from "@ndf-factory/contracts/phases";
-import type { StepDetailBody } from "@ndf-factory/contracts/views";
-import type { CiUpdatedPayload, GateAnsweredPayload, GateReachedPayload, PrUpdatedPayload, StepRecordedPayload, UsageRecordedPayload } from "@ndf-factory/contracts";
-import type { RunLatest, StepRecord } from "../progress/read.ts";
+import type { ApprovalRequestRow, AttentionRow, StepDetailBody } from "@ndf-factory/contracts/views";
+import type { AttentionPayload, CiUpdatedPayload, GateAnsweredPayload, GateReachedPayload, PrUpdatedPayload, StepRecordedPayload, UsageRecordedPayload } from "@ndf-factory/contracts";
+import type { AwaitingGate, RunLatest, StepRecord } from "../progress/read.ts";
 import type { ProgressEventRecord } from "../progress/store.ts";
 import type { SprintRun } from "../runs/model.ts";
 
@@ -91,6 +91,7 @@ export interface SprintRunDetail extends SprintRunSummaryView {
   delegated_decisions: number;
   usage: { input_tokens: number; output_tokens: number; cost_usd: number };
   omitted_steps: number;
+  attention: AttentionRow[];
 }
 
 export type StepDetail = StepRow & StepDetailBody;
@@ -192,10 +193,11 @@ function phasesOf(rows: StepRow[], events: Rec[]): PhaseView[] {
   }));
 }
 
-// 課題の欄。実行の課題の順に、続いて実行に無い課題を現れた順に、最後にスプリント全体の欄（I6）
-function columnsOf(run: SprintRun, rows: StepRow[], events: Rec[]): IssueColumn[] {
-  const issues = [...run.issues];
-  for (const r of rows) for (const n of r.issues) if (!issues.includes(n)) issues.push(n);
+// PR ごとの最新の状態と、チェックの名前ごとの最新の結論。どちらも後の更新が勝つ
+function pullRequestIndexes(events: Rec[]): {
+  prState: Map<string, PullRequestView["state"]>;
+  checks: Map<string, Map<string, string | null>>;
+} {
   const prState = new Map<string, PullRequestView["state"]>();
   const checks = new Map<string, Map<string, string | null>>();
   for (const e of events) {
@@ -210,6 +212,14 @@ function columnsOf(run: SprintRun, rows: StepRow[], events: Rec[]): IssueColumn[
       checks.get(k)!.set(p.name, p.conclusion);
     }
   }
+  return { prState, checks };
+}
+
+// 課題の欄。実行の課題の順に、続いて実行に無い課題を現れた順に、最後にスプリント全体の欄（I6）
+function columnsOf(run: SprintRun, rows: StepRow[], events: Rec[]): IssueColumn[] {
+  const issues = [...run.issues];
+  for (const r of rows) for (const n of r.issues) if (!issues.includes(n)) issues.push(n);
+  const { prState, checks } = pullRequestIndexes(events);
   const column = (issue: number | null): IssueColumn => {
     const own = rows.filter((r) => (issue === null ? r.issues.length === 0 : r.issues.includes(issue)));
     const prs = new Map<string, PullRequestView>();
@@ -250,6 +260,37 @@ export function gatesOf(events: Rec[]): GatesView {
   return gates;
 }
 
+// 注意の行（#2430 の I1・I2）。attention を events の順（order_key の順）にすべて。理由と要約は受けた値のまま
+export function attentionsOf(events: Rec[]): AttentionRow[] {
+  return events
+    .filter((e) => e.type === "attention")
+    .map((e) => {
+      const p = payloadOf<AttentionPayload>(e);
+      return { key: e.idempotency_key, at: e.at, reason: p.reason, summary: p.summary };
+    });
+}
+
+// 承認待ちの一覧の行。待っている依頼が無ければ null
+export function approvalRequestOf(run: SprintRun, gate: AwaitingGate | null): ApprovalRequestRow | null {
+  if (!gate) return null;
+  const loop = gate.payload.loop;
+  return {
+    sprint_run_id: run.sprintRunId,
+    repository_id: run.repositoryId,
+    repo: run.repo,
+    issues: run.issues,
+    kind: gate.payload.kind,
+    loop: loop ? { name: loop.name, lap: loop.lap } : null,
+    waiting_since: gate.at,
+  };
+}
+
+// 待ち始めた日時の古い順、同じ日時は実行の ID の順（I5）
+export function sortApprovalRequests(rows: ApprovalRequestRow[]): ApprovalRequestRow[] {
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [...rows].sort((a, b) => cmp(a.waiting_since, b.waiting_since) || cmp(a.sprint_run_id, b.sprint_run_id));
+}
+
 function usageOf(events: Rec[]) {
   let input = 0;
   let output = 0;
@@ -282,6 +323,7 @@ export function deriveDetail(run: SprintRun, events: Rec[], omittedSteps: number
     delegated_decisions: events.filter((e) => e.type === "decision.delegated").length,
     usage: usageOf(events),
     omitted_steps: omittedSteps,
+    attention: attentionsOf(events),
   };
 }
 
