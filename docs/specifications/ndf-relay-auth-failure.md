@@ -20,8 +20,8 @@
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 401 のときにラッパーが何をするか（替え先の順・直し方の 3 つ・区間ごとに 1 度）・再開の最初の入力 | [`development-workflow` の `references/relay.md`](../../plugins/ndf/skills/development-workflow/references/relay.md) の「アカウントの切り替え」の表の「認証が通らなかった（401）」 |
-| リフレッシュトークンが空のアカウントが `再登録が要る` になること・起動時の 1 行・`account list` が認証ファイルを確かめないこと・「1 アカウント = 1 ログイン」 | 同じ `relay.md` の `account list` の状態の説明 |
+| 401 のときにラッパーが何をするか（替え先の順・直し方の 3 つ・区間ごとに 1 度）・再開の最初の入力 | [`development-workflow` の `references/relay-accounts.md`](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) の「アカウントの切り替え」の表の「認証が通らなかった（401）」 |
+| リフレッシュトークンが空のアカウントが `再登録が要る` になること・起動時の 1 行・`account list` が認証ファイルを確かめないこと・「1 アカウント = 1 ログイン」 | 同じ `relay-accounts.md` の `account list` の状態の説明 |
 | `log.jsonl` の `account` の行の項目 | 同じ `relay.md` の「記録の読み方」 |
 | 画面の文（直し方の 1 行・従量の接続へ替えた 1 行・既定のログインから替えた 1 行・背景の作業を待つ 1 行） | [`relay_lib/switch.py`](../../plugins/ndf/scripts/relay_lib/switch.py) の `auth_guide`・`login_on`・`_msg_auth`・`AccountSwitch.tell_account`・`_wait_background` |
 | 再登録が要るにする判定 | [`lib/claude_accounts.py`](../../plugins/ndf/scripts/lib/claude_accounts.py) の `_usable_held` |
@@ -172,7 +172,7 @@ refreshToken は調べない（決定 8）。
 | refreshToken を持たない正しいログインの形 | `account add` の登録は `claude auth login` の OAuth で refreshToken を持つ前提である。refreshToken を持たない正しい認証ファイル（長期の token など）が登録済みアカウントに入る経路は確かめていない。あれば I3 で外れ、起動時に「再登録が要る」と出る |
 | Claude Code が refreshToken を空にする時点 | `invalid_grant` で空にする振る舞いは 2026-10-04 の観測からの推定で、本体の版で変わりうる（順応者）。変われば I3 が働く場面が減るだけで、誤って外すことはない |
 | 既定のログインの 401 から替えた後 | 登録が 1 つ以下で替えた区間では `multi` が偽のままなので、使用率の定期の確認と上限の切り替えは働かない（I4） |
-| `account list` の表示 | `usable` を通らないため、refreshToken が空のアカウントはラッパーの起動か切り替えの前は `使える` と出る（`relay.md` に書いてある） |
+| `account list` の表示 | `usable` を通らないため、refreshToken が空のアカウントはラッパーの起動か切り替えの前は `使える` と出る（`relay-accounts.md` に書いてある） |
 
 ## テスト観点
 

@@ -137,15 +137,15 @@ graph TD
 
 | 課題 | 受け持つ範囲 | 提供する契約 | 使う契約 |
 | --- | --- | --- | --- |
-| #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・プランと使える量・実行の形態の値の画面と API | `resolveAccount(caller, accountId?)` が返す `account_id`（token には載せず、検証した token の利用者と経路 `/accounts/{account_id}/…` から解決する。経路に無ければ個人のアカウント）、使える量の問い合わせ（同時のスプリントの数・月の token の上限）、アカウントの実行の形態 | 無し |
+| #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・料金プランと使える量・実行の形態の値の画面と API | `resolveAccount(caller, accountId?)` が返す `account_id`（token には載せず、検証した token の利用者と経路 `/accounts/{account_id}/…` から解決する。経路に無ければ個人のアカウント）、使える量の問い合わせ（同時のスプリントの数・月の token の上限）、アカウントの実行の形態 | 無し |
 | #2171 | `factory/contracts/`・進捗の受け口・実行ジョブの token の検証 | 実行ジョブの指示・進捗の事象の種類と形・受け口の認証と応答・実行ジョブの token の検証（token から実行ジョブと `sprint_run_id`・`repo` を返し、無効なら拒む） | #2170 の `resolveAccount` が返す `account_id`、#2173 の保存済みの答え（`gate.answered` の照合） |
 | #2186 | GitHub App・リポジトリの登録・スプリントの実行と実行ジョブ・クラウドのランナー（形態 ② と ③）・持ち込んだキーの保存・実行ジョブの token の発行 | 実行の制御への再開の要求の受け口、実行ジョブを渡す口（#2189 が使う） | #2171 の `factory/contracts/`・進捗の受け口・token の検証、#2170 の `resolveAccount` が返す `account_id` と使える量と実行の形態、#2173 の承認の依頼の答えを読む経路 |
-| #2172 | 一覧と詳細の画面・派生の形・フェーズの名前の集合 | 無し | 進捗の事象（`phase.changed`・`step.recorded`・`pr.updated`・`ci.updated`） |
+| #2172 | 一覧・詳細・バックログの画面と読み出しの経路・派生の形・フェーズの名前の集合・ランナーの工程の中身の翻訳 | フェーズの名前の列挙（`factory/contracts/src/phases.ts`）、`step.recorded` の工程の中身の任意の項目 | 進捗の事象（`phase.changed`・`step.recorded`・`gate.reached`・`gate.answered`・`usage.recorded`・`decision.delegated`・`pr.updated`・`ci.updated`）、#2186 のスプリントの実行の行と GitHub の口の順位の表、#2170 の `resolveAccount` が返す `account_id` |
 | #2173 | 承認の依頼・Web と Slack の通知・Web からの承認 | `gate.answered`、承認の依頼の答えを読む経路、実行の制御への再開の要求 | `gate.reached`・`attention`、#2171 の実行ジョブの token の検証 |
-| #2174 | プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 のプランと実行の形態 |
-| #2189 | 手元のランナー（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
+| #2174 | 料金プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 の料金プランと実行の形態 |
+| #2189 | 手元のマシン（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
 
-各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI と実行ジョブの打ち切りの時間は #2186 が決めた（「実行の制御」）。`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
+各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI と実行ジョブの打ち切りの時間は #2186 が決めた（「実行の制御」）。`phase.changed` が運ぶフェーズの名前の集合は #2172 が 5 つに決め、一覧と詳細の派生の規則とともに [スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し) にある。決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
 
 ### 構成と言語
 
@@ -153,16 +153,16 @@ graph TD
 
 | 要素 | 責務 | 課題 |
 | --- | --- | --- |
-| 画面 | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・プランと請求 | 各課題が各画面 |
+| 画面 | ログイン・リポジトリの登録・スプリントの一覧と詳細・承認・料金プランと請求 | 各課題が各画面 |
 | API | 画面からの要求を受け、アカウントで認可して各集約の持ち主へ渡す | 各課題が自分の経路 |
-| 認証とプラン | 利用者プールとアカウント・席・プランの使える量 | #2170 |
+| 認証と料金プラン | 利用者プールとアカウント・席・料金プランの使える量 | #2170 |
 | 取り込み | GitHub App の導入とリポジトリの登録 | #2186 |
-| 実行の制御 | スプリントの実行と実行ジョブの状態を持ち、ジョブを起動し終了を受ける。同時の数をプランの使える量で抑える。実行ジョブの token を発行する | #2186 |
+| 実行の制御 | スプリントの実行と実行ジョブの状態を持ち、ジョブを起動し終了を受ける。同時の数を料金プランの使える量で抑える。実行ジョブの token を発行する | #2186 |
 | ランナー | 実行ジョブの中身。取り込み・NDF の導入・conductor の起動・翻訳・送信・状態の保存 | #2186 |
 | 進捗の受け口 | ランナー・GitHub の通知・API から進捗の事象を受け、出所ごとに認証して冪等に追記する。実行ジョブの token を検証する | #2171 |
 | 一覧と詳細 | 進捗の事象から一覧と詳細の読み出しの形を導く | #2172 |
 | 承認と通知 | 承認の依頼を作って知らせ（Web・Slack）、答えを実行の制御へ渡す | #2173 |
-| 課金 | 使用量の事象を台帳へ積み、プランの料金に上乗せして請求する | #2174 |
+| 課金 | 使用量の事象を台帳へ積み、料金プランの料金に上乗せして請求する | #2174 |
 
 ```mermaid
 graph TD
@@ -180,7 +180,7 @@ graph TD
         APR[承認と通知]
         BILL[課金]
     end
-    AUTH[認証とプラン]
+    AUTH[認証と料金プラン]
     REPO[取り込み]
     WEB --> API
     API --> AUTH
@@ -229,7 +229,7 @@ graph TD
 
 | 集約 | 持ち主 | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| アカウント | 認証とプラン（#2170） | アカウント | 席 | プラン・使える量 |
+| アカウント | 認証と料金プラン | アカウント | 席 | 料金プラン・使える量 |
 | リポジトリの登録 | 取り込み（#2186） | 登録 | — | GitHub のリポジトリの識別子・GitHub App の導入の識別子 |
 | スプリントの実行 | 実行の制御（#2186） | スプリントの実行 | 実行ジョブ | NDF の版・スプリントの状態・ジョブの結果 |
 | 実行の枠 | 実行の制御（#2186） | アカウントの枠 | — | 終わりの状態でない数（アカウント全体・リポジトリごと） |
@@ -246,7 +246,7 @@ graph TD
 
 | 形態 | 値 | ランナーの場所 | Claude をどう呼ぶか | サービスが持つ Claude の認証情報 | 月の token の上限 | token の課金 | 受け持つ課題 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ① 手元のランナー | `local` | 利用者の環境 | 利用者がログインした `claude` | 無し | 掛けない | しない | #2189 |
+| ① 手元のマシン | `local` | 利用者の環境 | 利用者がログインした `claude` | 無し | 掛けない | しない | #2189 |
 | ② キーの持ち込み | `byok` | ECS Fargate | 利用者の Anthropic API キーか、利用者の AWS アカウントの Bedrock（ロールを引き受ける） | 利用者のキーかロールの ARN（Secrets Manager） | 掛けない | しない | #2186 |
 | ③ サービスの Bedrock | `managed` | ECS Fargate | サービスの AWS アカウントの Bedrock（タスクの役割の権限） | 無し（役割の権限） | 掛ける | する（#2174） | #2186・#2174 |
 
@@ -317,21 +317,21 @@ erDiagram
 
 ### 実行ジョブの指示
 
-実行の制御からランナーへ、コンテナの環境変数で渡す。形態 ① では、手元のランナーが受け取りの応答で同じ項目を受け取る（#2189）。
+実行の制御からランナーへ、コンテナの環境変数で渡す。形態 ① では、手元のマシンが受け取りの応答で同じ項目を受け取る。
 
 | 入力 | 型・必須 | 意味 |
 | --- | --- | --- |
 | `SPRINT_RUN_ID`・`JOB_ID` | 文字列・必須 | 事象の宛先と冪等の鍵の頭 |
 | `REPO` | `owner/name`・必須 | 取り込むリポジトリ |
 | `NDF_VERSION` | 文字列・必須 | スプリントの開始で固定した NDF の版 |
-| `START` | `new` / `resume`・必須 | `new` は課題から始め、`resume` は保存した状態から続ける |
-| `ISSUES` | 番号の並び・`new` で必須 | スプリントへ入れる課題 |
-| `APPROVAL_REQUEST_ID` | 文字列・`resume` で必須 | 答えの出た承認の依頼の識別子。答えの本文は載せない（RunTask の `overrides` は全体で 8192 字が上限で、長い差し戻しで起動が失敗するため） |
+| `START` | `new` / `resume` / `loop`・必須 | `new` は課題から始め、`resume` は保存した状態から続け、`loop` は開発ループの周回を新しく始める。開発ループの入力 `LOOP_NAME`・`LOOP_MILESTONES`（`loop` で必須）・`LOOP_BUDGET`・`EXCLUDE_ISSUES`・`LOOP_ANSWERS` の形は `run-job-instruction.schema.json` にある |
+| `ISSUES` | 番号の並び・`new` で必須、`loop` で持たない | スプリントへ入れる課題 |
+| `APPROVAL_REQUEST_ID` | 文字列・任意 | 答えの出た承認の依頼の識別子。無い `resume` は答えを書かずに続ける（利用上限の後の再開。#2347 の決定 7）。答えの本文は載せない（RunTask の `overrides` は全体で 8192 字が上限で、長い差し戻しで起動が失敗するため） |
 | `INGEST_URL`・`INGEST_TOKEN_SECRET_ARN` | 文字列・必須 | 進捗の受け口と、このジョブだけに効く token の置き場 |
 | `EXECUTION_MODE` | `local` / `byok` / `managed`・必須 | スプリントの開始でアカウントから写した実行の形態。スプリントの実行の途中で変えない |
 | `MODEL_CREDENTIAL_SECRET_ARN` | 文字列・`byok` で必須 | 利用者の Anthropic API キーか、引き受けるロールの ARN の置き場。`local`・`managed` では渡さない |
 
-**`resume` のランナーは、答えを #2173 の API からこのジョブの token で読む。** #2173 はその token を #2171 の token の検証で確かめ、token の実行ジョブの `sprint_run_id` と依頼の属するスプリントの実行が一致し、かつ答えが保存済みのときだけ本文を返す。一致しなければ 403 を返し、本文も依頼の有無も明かさない。
+**`APPROVAL_REQUEST_ID` のある `resume` のランナーは、答えを #2173 の API からこのジョブの token で読む。** #2173 はその token を #2171 の token の検証で確かめ、token の実行ジョブの `sprint_run_id` と依頼の属するスプリントの実行が一致し、かつ答えが保存済みのときだけ本文を返す。一致しなければ 403 を返し、本文も依頼の有無も明かさない。
 
 | 種類 | 答えの形 | ランナーが NDF へ書くもの |
 | --- | --- | --- |
@@ -345,8 +345,8 @@ erDiagram
 | 種類 | 出所 | `payload` | 主な受け手 |
 | --- | --- | --- | --- |
 | `job.started` | ランナー | NDF の版・`START` | #2172 |
-| `phase.changed` | ランナー（`sprint.json` の計画と `progress.jsonl` の `step` の行） | フェーズの名前・課題 | #2172 |
-| `step.recorded` | ランナー（`progress.jsonl` の `step`） | ステップ・終了コード・秒・要約・このステップが作った・更新した Pull Request（リポジトリと番号。任意） | #2172 |
+| `phase.changed` | ランナー（`sprint.json` の計画と `progress.jsonl` の `step` の行） | フェーズの名前（[スプリントの一覧と詳細の読み出し](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し) の 5 つ）・課題 | #2172 |
+| `step.recorded` | ランナー（`progress.jsonl` の `step`） | ステップ・終了コード・秒・要約・このステップが作った・更新した Pull Request（リポジトリと番号。任意）・工程の中身（フェーズ・課題・触ったファイル・コミットの範囲・決めたこと・出力。どれも任意） | #2172 |
 | `attention` | ランナー（`progress.jsonl` の `attention`） | 理由・要約 | #2172・#2173 |
 | `gate.reached` | ランナー（作業の報告の `判断が要る` と承認資料） | 種類（ゲート 1・ゲート 2・判断）・Pull Request の URL・承認資料の本文 | #2173 |
 | `gate.answered` | API（#2173） | 承認の依頼の識別子・種類・承認か差し戻しか（判断では無し）・答えた人のアカウント。本文は事象に載せない | #2171・#2172 |
@@ -432,9 +432,9 @@ stateDiagram-v2
 | 打ち切りの時間 | 28,800 秒（8 時間）。`RUN_JOB_TIMEOUT_SECONDS` で変える。過去 7 本のスプリントの実行ジョブ 1 本に当たる区間の最大 18,031 秒の 1.5 倍を時間へ切り上げた値 |
 | 実行ジョブの token の期限 | 32,400 秒（9 時間）。`RUN_JOB_TOKEN_TTL_SECONDS` で変える。打ち切りの時間以下の値は起動の設定の読み込みで断る |
 | 発行の鍵 | `RUN_JOB_TOKEN_SIGNING_KEY_SECRET_ARN`（Ed25519 の秘密鍵の JWK と `kid`） |
-| 見回り | 5 分ごと。打ち切りの時間を過ぎたジョブを止め、止まったタスクのジョブを終わらせ、`pending` のまま 15 分を過ぎたジョブを `failed`（`launch_failed`）にする |
-| 実行の枠 | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた行。開始と終わりの状態への移りで、実行と同じトランザクションで増減し、`judgeLimits` へ渡す。承認待ちも数え、再開は数を変えない |
-| スプリントの実行の状態 | `starting` / `running` / `awaiting_approval` / `done` / `stopped` / `failed` / `cancelled`。後ろの 4 つが終わりの状態 |
+| 見回り | 5 分ごと。打ち切りの時間を過ぎたジョブを止め、止まったタスクのジョブを終わらせ、`pending` のまま 15 分を過ぎたジョブを `failed`（`launch_failed`）にする。リセット時刻を過ぎた `awaiting_reset` の実行を再開し、次の周回を待つ開発ループを起こす |
+| 実行の枠 | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた行。開始と終わりの状態への移りで、実行と同じトランザクションで増減し、`judgeLimits` へ渡す。承認待ちとリセット待ちも数え、再開は数を変えない。リポジトリの行は古い版の実行の数 `legacyCount` も持つ |
+| スプリントの実行の状態 | `starting` / `running` / `awaiting_approval` / `awaiting_reset` / `done` / `stopped` / `failed` / `cancelled`。後ろの 4 つが終わりの状態 |
 | NDF の版 | 開始の時点で決め、以後の実行ジョブは同じ値を持つ。正式版は `plugin.json` の版（タグ `ndf--v<版>` を入れる）、開発版は `<版>@<コミットの SHA>` |
 | ランナーで使える CLI | `claude` だけ。cross-review は、ランタイムが 1 つのとき 2 つの枠を `claude` で埋める既存の振る舞いに任せる |
 | GitHub App の権限 | Metadata（読む）・Contents（読み書き）・Pull requests（読み書き）・Issues（読み書き）・Checks（読む）・Actions（読む）。Workflows・Administration・Projects は持たない。導入の token はリポジトリ 1 つに絞る |
@@ -493,8 +493,8 @@ stateDiagram-v2
 - 子課題: [#2170](https://github.com/devbasex/ai-plugins/issues/2170)・[#2171](https://github.com/devbasex/ai-plugins/issues/2171)・[#2172](https://github.com/devbasex/ai-plugins/issues/2172)・[#2173](https://github.com/devbasex/ai-plugins/issues/2173)・[#2174](https://github.com/devbasex/ai-plugins/issues/2174)・[#2186](https://github.com/devbasex/ai-plugins/issues/2186)・[#2189](https://github.com/devbasex/ai-plugins/issues/2189)
 - 設計 Pull Request: [#2175](https://github.com/devbasex/ai-plugins/pull/2175)、実装: [#2177](https://github.com/devbasex/ai-plugins/pull/2177)
 - サービスのディレクトリ: [factory/README.md](../../factory/README.md)
-- 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
-- 契約の定義と型・進捗の受け口・実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
+- 認証とアカウント・席・料金プランの使える量: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 契約の定義と型・進捗の受け口・実行ジョブの token・[利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形): [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
 - 境界の検査: [scripts/check-service-boundary.py](../../scripts/check-service-boundary.py)、許可の一覧: [scripts/service-boundary-allow.json](../../scripts/service-boundary-allow.json)
 - 追加待ちの扱い: [必須のチェックの突き合わせ](ci-required-checks-reconcile.md)
 - 版と配布の規則（ランナーが導入する NDF に当たる）: [版と配布の正本](../versioning-and-distribution.md)

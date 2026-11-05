@@ -7,8 +7,8 @@ NDF プラグインの版数の付け方と、正式版・開発版のリリー�
 ## チャネルと ref
 
 **配布のチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
-開発の変更は `develop` へマージし、正式版として出すときだけ `develop` の内容を `main` へ
-送る。**これにより、マージとリリースが別の操作になる。**
+開発の変更は `develop` へマージし、正式版として出すときだけ `develop` の承認したコミットを
+`main` へ送る。**これにより、マージとリリースが別の操作になる。**
 
 分けない場合、マージした時点で常用する利用者へ届く。レビューを通った変更であっても、利用者の
 環境で動くかはリリースした後にしか分からない。`release` が定めた「検証リリース → 本番リリース」の
@@ -57,11 +57,11 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `10.27.10` | 利用者が常用してよい |
+| 正式版 | `10.27.21` | 利用者が常用してよい |
 | 開発版 | `10.28.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
 | 公開前の確認版 | `10.28.0-rc.1` | 正式版の候補。残るのは確認だけ |
 
-- 接尾辞は**次に出す正式版の版数へ付ける**。`10.27.10` の次を開発するなら `10.28.0-dev.1`
+- 接尾辞は**次に出す正式版の版数へ付ける**。`10.27.21` の次を開発するなら `10.28.0-dev.1`
 - 連番は開発版を出すたびに増やす。**同じ版数で中身を差し替えない**。差し替えると、利用者の
   手元にある版と `main` の版が同じ番号で別物になり、何を確かめたのかが分からなくなる
 - **正式版を出すときは接尾辞を外す。** `10.28.0-dev.3` の次は `10.28.0`
@@ -133,8 +133,24 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 
 ## 正式版を出す
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに `develop` から `main`
-への Pull Request を作り、管理者の bypass でマージする。`main` へ直接コミットしない。
+**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、承認ゲート 2 で承認したコミット
+（`develop` のコミット）から `release/v<版>` を切って版上げのコミットを積み、`release/v<版>` を先に `develop` へ
+取り込んでから、`release/v<版>` を head にした `main` 宛の Pull Request を管理者の bypass でマージする。
+`main` へ直接コミットしない。`main` 宛の Pull Request は `develop` に含まれるコミットだけを出す（head は
+`develop` か、先頭が `origin/develop` の祖先の `release/v<版>`。`scripts/check-pr-base.sh`）。
+
+**承認の後に `develop` が進んでも、配布は止まらない。** 本番の配布（`release-steps.py release --channel prod`）が
+承認したコミットと比べる相手は `origin/release/v<版>` の先端とし、`develop` の先端は比べる相手に入れない。`release/v<版>` に
+承認したコミットと版上げの外のコミットがあれば、承認ゲート（終了コード 10）で止まる。承認の後に `develop` へ
+入った変更は、この版の `main` には入らず次の配布で出る。
+
+**`release/v<版>` を `develop` へ取り込むときに版数を持つ箇所が衝突したら、本番の版を取る。** 承認の後に
+開発版の配布が `develop` の版数を上げていると衝突する。`release/v<版>` そのものへは `develop` を取り込まず
+（取り込むと承認の外のコミットが `main` へ出る）、`release/v<版>-sync` に `origin/develop` を取り込んで衝突した塊の
+`release/v<版>` の側を取り、`release/v<版>-sync` → `develop` の Pull Request で取り込む。版数の外の箇所が
+衝突すれば解かずに止まる。取り込んだ後の `develop` の版数は本番の版になり、次の開発版の配布は次に空いている版で
+決め直す。取り込みはマージのコミットで行い（squash と rebase では行わない）、`release/v<版>` の先頭を
+`develop` の祖先に残す。
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
@@ -155,13 +171,14 @@ remote:
 `N-1 of N` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
-`develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端で
-あって、両者が同じコミットを指していることではない。中身が一致していることは差分で確かめる。
+`develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端である。
+`main` と `develop` が同じコミットを指すことは求めない。中身が出した `release/v<版>` と一致していることは
+差分で確かめる（承認の後に `develop` が進んでいれば、`develop` とは一致しない）。
 
 ```bash
-gh pr create --base main --head develop --title "Release: v<版>" --body "..."
+gh pr create --base main --head release/v<版> --title "Release: v<版>" --body "..."
 gh pr merge <番号> --merge --admin      # 承認 1 件必須。メンテナーが 1 人の間は bypass で通す
-git fetch origin && git diff --stat origin/develop origin/main   # 空であること
+git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空であること
 ```
 
 **`--admin` を使うのは、GitHub が自分の Pull Request を自分で承認できないためである。**
@@ -179,7 +196,7 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
   `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
   の記録で、`plugin.json` と `marketplace.json` は `version` / `description` の行だけ
 - `develop` への push でその workflow を通ったコミットがあり、head がそこから版数と説明しか
-  変えていない（`develop` → `main`）。`main` の側に `develop` へ無い変更があれば省かない
+  変えていない（`main` 宛の本番の Pull Request）。`main` の側に `develop` へ無い変更があれば省かない
 
 コードやテストを 1 行でも変えた差分では省かない。`develop` / `main` への push では常に回す。
 省いても必須のチェックの名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、

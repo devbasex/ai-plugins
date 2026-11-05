@@ -89,14 +89,14 @@ describe("席の変更と削除の競合", () => {
 });
 
 describe("setPlan（E6、I13・I20・I21）", () => {
-  it("プランを変え、履歴を 1 つ足す", async () => {
+  it("料金プランを変え、履歴を 1 つ足す", async () => {
     const id = await personal();
     await service.setPlan(id, "max");
     expect(store.accounts.get(id)).toMatchObject({ plan: "max", version: 2 });
     expect(store.history.at(-1)).toMatchObject({ type: "plan.changed", actor: "system", before: "free", after: "max" });
   });
 
-  it("知らないプランと、種類に合わない組は PlanError で、行も履歴も変わらない", async () => {
+  it("知らない料金プランと、種類に合わない組は PlanError で、行も履歴も変わらない", async () => {
     const id = await personal();
     const team = await service.createTeam({ userId: "u-1", idp: "google" }, "t", "standard");
     const before = store.history.length;
@@ -119,7 +119,7 @@ describe("setPlan（E6、I13・I20・I21）", () => {
     expect(store.history.slice(before).map((h) => h.type)).toEqual(["plan.changed", "execution_mode.changed"]);
   });
 
-  it("形態の書き込みが失敗すればプランも変わらない", async () => {
+  it("形態の書き込みが失敗すれば料金プランも変わらない", async () => {
     const id = await personal();
     await service.setPlan(id, "pro");
     await service.setExecutionMode(await service.resolveAccount({ userId: "u-1", idp: "google" }), "managed");

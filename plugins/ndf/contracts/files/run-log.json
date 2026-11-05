@@ -1,0 +1,7 @@
+{
+  "name": "run-log",
+  "pattern": "run.log",
+  "kind": "report",
+  "place": "main",
+  "skill_readers": []
+}

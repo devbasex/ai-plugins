@@ -6,8 +6,14 @@ import type {
   IssueRequestedEvent,
   IssueRequestResolvedEvent,
   ProgressEvent,
+  ReleaseAnsweredEvent,
+  ReleasePresentedEvent,
+  ReleaseProgressEvent,
+  ReleaseRequestedEvent,
+  ReleaseSettledEvent,
   StepRecordedEvent,
 } from "@ndf-factory/contracts";
+import { releasePresentedKey, releaseProgressKey, releaseSettledKey } from "@ndf-factory/contracts";
 import { repoKey } from "./github.ts";
 import type { VerifiedRunJob } from "./run-job-token.ts";
 import type { SavedAnswerReader } from "./saved-answers.ts";
@@ -24,10 +30,19 @@ export const WRITABLE_TYPES: Record<EventSource, ReadonlySet<EventType>> = {
     "job.finished",
     "decision.delegated",
     "issue.requested",
+    // 区間とループの事象（#2347）。ランナーが送り、周回・判断待ち・停止の理由として読まれる
+    "section.started",
+    "loop.lap_closed",
+    "loop.stopped",
+    // 配布の依頼と配布の実行の事象（#2439）。Factory のオーガナイザーが停止の後の処理で読む
+    "release.requested",
+    "release.presented",
+    "release.progress",
+    "release.settled",
   ]),
   api: new Set<EventType>(["gate.answered"]),
   github: new Set<EventType>(["pr.updated", "ci.updated"]),
-  control: new Set<EventType>(["job.finished", "issue.request_resolved"]),
+  control: new Set<EventType>(["job.finished", "issue.request_resolved", "release.answered"]),
 };
 
 const canWrite = (source: EventSource, event: ProgressEvent) =>
@@ -36,9 +51,32 @@ const canWrite = (source: EventSource, event: ProgressEvent) =>
 // 実行ジョブの終わりの冪等の鍵。ランナーと実行の制御が同じ鍵を使い、先の 1 つだけが残る
 export const finishedKey = (jobId: string) => `${jobId}:finished`;
 
-// ランナーの冪等の鍵の形（I27）: job.finished は <job_id>:finished、ほかは <job_id>:<seq>（seq は 1 以上）
+// 配布の事象の冪等の鍵（#2439）。依頼は依頼の id、配布の実行の事象は実行の識別子を頭にする（式は契約が持ち、
+// ランナーの送信と同じ式で照らす）。ランナーが送り直しても 1 件になる
+export const releaseRequestedKey = (requestId: string) => requestId;
+export { releasePresentedKey, releaseProgressKey, releaseSettledKey };
+export const releaseAnsweredKey = (seq: number, sprintRunId: string) => `${seq}:${sprintRunId}`;
+
+function releaseKeyOf(event: ProgressEvent): string | null {
+  switch (event.type) {
+    case "release.requested":
+      return releaseRequestedKey((event as ReleaseRequestedEvent).payload.request_id);
+    case "release.presented":
+      return releasePresentedKey(event.sprint_run_id, (event as ReleasePresentedEvent).payload.k);
+    case "release.progress":
+      return releaseProgressKey(event.sprint_run_id, (event as ReleaseProgressEvent).payload.stage);
+    case "release.settled":
+      return releaseSettledKey(event.sprint_run_id, (event as ReleaseSettledEvent).payload.result);
+    default:
+      return null;
+  }
+}
+
+// ランナーの冪等の鍵の形（I27）: job.finished は <job_id>:finished、配布の事象は releaseKeyOf、ほかは <job_id>:<seq>（seq は 1 以上）
 function isRunnerKey(event: ProgressEvent, jobId: string): boolean {
   if (event.type === "job.finished") return event.idempotency_key === finishedKey(jobId);
+  const releaseKey = releaseKeyOf(event);
+  if (releaseKey !== null) return event.idempotency_key === releaseKey;
   const prefix = `${jobId}:`;
   return event.idempotency_key.startsWith(prefix) && /^[1-9][0-9]*$/.test(event.idempotency_key.slice(prefix.length));
 }
@@ -74,7 +112,12 @@ export const resolvedKey = (requestKey: string) => `${requestKey}:resolved`;
 
 // control: job.finished は鍵が <job_id>:finished（決定 9）。issue.request_resolved は request_key が
 // そのジョブの依頼の鍵（<job_id>:<seq>）で、鍵が <request_key>:resolved（#2216）
+// release.answered はジョブの外の事象（job_id は null）で、鍵が <seq>:<sprint_run_id>（#2439）
 export function authorizeControl(event: ProgressEvent): boolean {
+  if (event.type === "release.answered") {
+    const { seq } = (event as ReleaseAnsweredEvent).payload;
+    return canWrite("control", event) && event.job_id === null && event.idempotency_key === releaseAnsweredKey(seq, event.sprint_run_id);
+  }
   if (!canWrite("control", event) || event.job_id === null) return false;
   if (event.type === "job.finished") return event.idempotency_key === finishedKey(event.job_id);
   const { request_key } = (event as IssueRequestResolvedEvent).payload;

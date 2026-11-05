@@ -1,0 +1,7 @@
+{
+  "name": "decisions-jsonl",
+  "pattern": "*.decisions.jsonl",
+  "kind": "record",
+  "place": "state-dir",
+  "skill_readers": []
+}

@@ -211,6 +211,12 @@ def cmd_mark() -> int:
     remove(question)
     record = RelayRecord(d)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
+    try:  # 起動のブロック（`ndf-spawn <名前>`）は統括役へ依頼を置くだけで、区間を終えない（#2346 の決定 6）
+        from . import hub_client
+
+        hub_client.place_blocks(str(data.get("last_assistant_message") or ""), str(data.get("cwd") or ""), d)
+    except Exception:  # noqa: BLE001 — 依頼を置けなくても Stop を止めない
+        pass
     tasks = running_tasks(data.get("background_tasks")) + cl.pending_wakeups(str(data.get("transcript_path") or ""), time.time())
     action = _mark_action(blocks, tasks)
     if action == "skip":
@@ -257,6 +263,7 @@ def cmd_limit() -> int:
 
 
 def cmd_stop() -> int:
+    """名前を付けない `stop`: 動いているラッパーすべてに停止の合図を置く（名前つきは `hub_client.cmd_stop_named`）。"""
     root = state_root()
     found = 0
     try:

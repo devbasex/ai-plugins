@@ -236,7 +236,7 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
         "on_exit": dict(INFRA_WAIT_STOP),
         "on_fail": "judge",
         "next": "verify" if dev else "record",
-        # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる
+        # 配布の PR（release/v<版> → 起点）と、本番では続く release/v<版> → 本番 の PR のチェックを調べる（#2436 の R1）
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
     if not dev:
@@ -285,6 +285,7 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
         "受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、"
         "マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。"
         "課題は閉じない（次の close が閉じる）。"
+        "進捗記録（progress-record.sh・projects-sync.sh）は打たない（このステップが ok で終わった後にプランが打つ）。"
         "番号が 0 なら本番へ出ていないため、何もせずに終える。",
         "next": "retro",
     }
@@ -358,7 +359,8 @@ def plan_release_package_plugin(a) -> dict:
         + ["release", "verify"]
         + (["facts", "explain", "others"] if dev else [])
     )
-    approval = f"issues/approval-{plugin}-v{base}.md"
+    # まとめた配布（#2436）の本番は、提示で作って承認した資料を渡す
+    approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
     ref = a.base if dev else a.production_branch
     if sync:

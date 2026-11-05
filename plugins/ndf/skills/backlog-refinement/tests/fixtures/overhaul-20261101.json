@@ -1,0 +1,5667 @@
+{
+ "at": "2026-11-01T04:23:00Z",
+ "note": "2026-11-01T04:23Z 時点の open を createdAt・closedAt から作り直した（ラベルとマイルストーンは作り直した時点の値。#2315 の決定 17） 本文は部品の名前（count が数える語）だけに縮め、題名のサービスの置き場の参照を名前に言い換えた。",
+ "open": [
+  {
+   "number": 158,
+   "title": "研究: AI エージェント開発におけるモデルのアンサンブル利用の優位性を示す",
+   "labels": [
+    "area: docs",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "",
+   "created_at": "2026-08-29T05:56:07Z"
+  },
+  {
+   "number": 159,
+   "title": "研究データの収集基盤を整える",
+   "labels": [
+    "area: docs",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "PRIVACY.md TELEMETRY.md run_metrics.py",
+   "created_at": "2026-08-29T06:15:25Z"
+  },
+  {
+   "number": 620,
+   "title": "cross-refactoring: テストを足す項目（add-tests）が pytest の収集しないファイルへテストを足し、実行されないまま検証を通る",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "doc_staleness_helpers.py test_strategy.py",
+   "created_at": "2026-09-13T18:03:03Z"
+  },
+  {
+   "number": 622,
+   "title": "cross-refactoring の --scope がファイル単位のため、issue と関係の無い既存の関数まで整理し、変わった範囲が issue から読めない",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "AGENTS.md check-doc-staleness.py parallel-work.md workflow-common.sh worktree-common.sh",
+   "created_at": "2026-09-13T18:03:05Z"
+  },
+  {
+   "number": 690,
+   "title": "A5 リポジトリ設定・Releases・Discussions を整える",
+   "labels": [
+    "area: docs",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "form-package-plugin.md",
+   "created_at": "2026-09-15T23:24:29Z"
+  },
+  {
+   "number": 694,
+   "title": "A6 「最初の 1 個」の導線を作る",
+   "labels": [
+    "area: docs",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "",
+   "created_at": "2026-09-15T23:24:36Z"
+  },
+  {
+   "number": 698,
+   "title": "C1 awesome リストとディレクトリサイトへ掲載する",
+   "labels": [
+    "area: docs",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "",
+   "created_at": "2026-09-15T23:24:42Z"
+  },
+  {
+   "number": 702,
+   "title": "D1 外部の貢献者を受け入れる準備をする",
+   "labels": [
+    "area: docs",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md SUPPORT.md bug_report.yml feature_request.yml skill_proposal.yml",
+   "created_at": "2026-09-15T23:24:48Z"
+  },
+  {
+   "number": 710,
+   "title": "正式版の直後は develop と main が同じ版数になることを docs/versioning-and-distribution.md に書く",
+   "labels": [
+    "area: docs",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "SKILL.md release-steps.py",
+   "created_at": "2026-09-16T02:17:37Z"
+  },
+  {
+   "number": 715,
+   "title": "実行する版を解決する層を 1 つにし、開発中の版と配布済みの版の食い違いを根本原因の場所で直す",
+   "labels": [
+    "area: ndf-skill",
+    "priority: high"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "hook.py relay.py scripts-lookup.md training-optout.py usage-subagent.py",
+   "created_at": "2026-09-16T13:38:15Z"
+  },
+  {
+   "number": 750,
+   "title": "cross-refactoring: 提案担当の codex が結果ファイルを提出先に書けず NO_RESULT になる（提出先が読み取り用ディレクトリの外）",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "external-ai.py monitor.py result.json",
+   "created_at": "2026-09-18T10:10:45Z"
+  },
+  {
+   "number": 934,
+   "title": "cross-review: 2 ラウンド目以降に前のラウンドからの変更を渡す（#542 の決定 4）を、出し切り（決定 3）の効果を確かめてから入れる",
+   "labels": [
+    "area: ndf-skill",
+    "priority: low"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "-design-decisions.md cr-classify.py",
+   "created_at": "2026-09-23T22:45:13Z"
+  },
+  {
+   "number": 1142,
+   "title": "NDF のスクリプト全体をモデル・クラスの設計からやり直し、分割と重複の整理を 1 回で行う",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "check-trigger.py clock.py mvv-gate.py relay.py state.py supervise.py",
+   "created_at": "2026-09-25T17:03:55Z"
+  },
+  {
+   "number": 1286,
+   "title": "relay: ndf-next と同じ応答に書いた質問を待たずに会話を切り替える",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "context-window.md token-guard.sh",
+   "created_at": "2026-09-26T12:17:34Z"
+  },
+  {
+   "number": 1338,
+   "title": "マージと Pull Request の運用を --admin・merge commit・develop と main の 2 本に縛らない",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "check-trigger.py claude.yml merged-steps.py merged_range.py",
+   "created_at": "2026-09-26T23:47:13Z"
+  },
+  {
+   "number": 1339,
+   "title": "テストのパスと変更の分類を、PHP・TypeScript・Vue の慣習でも正しく判定する",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "_test.go contest_rules.ts latest_price.py",
+   "created_at": "2026-09-26T23:47:15Z"
+  },
+  {
+   "number": 1411,
+   "title": "cross-review の監視が、err.log に写った既存コメントの「quota exceeded」を codex の利用上限と誤判定して中断する",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-09-28T07:23:10Z"
+  },
+  {
+   "number": 1502,
+   "title": "mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、関門 1 の助言が unknown になる",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "-requirements.md mvv-gate.py spec-copy.py sprint_waves.py supervise.py",
+   "created_at": "2026-09-29T11:09:56Z"
+  },
+  {
+   "number": 1512,
+   "title": ".ndf/ の定義ファイルに作成・更新の定義が無く、チーム単位と個人単位の区別と .gitignore による分離も無い",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "needs-decision",
+    "priority: medium"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "SKILL.md backlog.json code-metrics.json document.json instructions.json pace.json projects-tracking.md projects.json ranking.md release.json review.json review_criteria.py supervise.json supervise.py worktree.json",
+   "created_at": "2026-09-29T21:49:26Z"
+  },
+  {
+   "number": 1516,
+   "title": "supervise.py のフェーズレポートが、設計の関門 1 でも「関門: 本番の系へ届く操作」と書く",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: low"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "report.md supervise.py",
+   "created_at": "2026-09-29T22:18:24Z"
+  },
+  {
+   "number": 1568,
+   "title": "ML・データの課題（クレンジング・分析・学習と評価）を development-workflow で通す: モードを増やさず既存の工程へ「データと学習」の領域を足す",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "SKILL.md distribution-forms.md features.py metrics.json review_focus.py",
+   "created_at": "2026-09-30T14:07:24Z"
+  },
+  {
+   "number": 1571,
+   "title": "工程ごとの単価（日本円）の基礎統計を、全プロジェクトの実績から出すスクリプト（サブスクリプションあり・なしの 2 通り）",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "AGENTS.md token-usage-snapshot.py",
+   "created_at": "2026-09-30T15:21:22Z"
+  },
+  {
+   "number": 1574,
+   "title": "NDF の Python スクリプトの内部 AI 呼び出しで、Codex ホスト時は Codex CLI を既定にする",
+   "labels": [
+    "priority: high"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "project-mvv.py",
+   "created_at": "2026-09-30T16:38:43Z"
+  },
+  {
+   "number": 1592,
+   "title": "supervise.py のキューを頭から流し直すとき、状態ディレクトリを退避しても dbos の queue-*/review-* の記録から途中のステップへ戻る",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "SKILL.md drive.py supervise.py",
+   "created_at": "2026-10-01T21:51:31Z"
+  },
+  {
+   "number": 1595,
+   "title": "backlog-refinement: apply が plan の rejected を依存先として一致した別の候補の値で記録し、却下が効かない",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "rejected.json upkeep.py upkeep_rank.py",
+   "created_at": "2026-10-01T22:26:09Z"
+  },
+  {
+   "number": 1601,
+   "title": "metrics.aggregate が本番から呼ばれず、#933 の後の cross-refactoring の状態ファイルの形とも合わない",
+   "labels": [
+    "priority: low"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "",
+   "created_at": "2026-10-02T00:19:58Z"
+  },
+  {
+   "number": 1603,
+   "title": "agy 1.2.11 で実際に動いたモデルがログの要求 URL から取れるかを、認証済みの環境で確かめる",
+   "labels": [
+    "priority: low"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "",
+   "created_at": "2026-10-02T00:31:38Z"
+  },
+  {
+   "number": 1616,
+   "title": "glossary.py render: docs/glossary.md を複数ファイルへ分割して出せるようにし、行数検査の EXEMPT を外す",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "check-doc-line-limit.py glossary.json glossary.py",
+   "created_at": "2026-10-02T09:06:49Z"
+  },
+  {
+   "number": 1622,
+   "title": "operation: 取り消しの手段に書いたコマンドが実在して効くかを、承認の前に確かめる手順が無い",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "operation-run.md",
+   "created_at": "2026-10-02T12:05:47Z"
+  },
+  {
+   "number": 1635,
+   "title": "cross-review: drive.py --reopen が final=error で止まった耐久ワークフローを新しい実行の回へ移さない",
+   "labels": [
+    "area: ndf-skill"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "drive.py",
+   "created_at": "2026-10-02T16:47:23Z"
+  },
+  {
+   "number": 1640,
+   "title": "棚卸しで上限を超えて持ち越した候補が、次のスプリントの棚卸しへ渡らない",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "candidates.json rejected.json upkeep.py",
+   "created_at": "2026-10-02T18:13:53Z"
+  },
+  {
+   "number": 1653,
+   "title": "supervise: pr のステップの push が一時的な拒否（missing necessary objects）で落ちても再試行せずプランを止める",
+   "labels": [
+    "area: ndf-skill",
+    "bug"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "5-impl-824.json",
+   "created_at": "2026-10-02T20:55:20Z"
+  },
+  {
+   "number": 1657,
+   "title": "cross-refactoring: CI に任せる戦略の最終ゲートで、CI で落ちた範囲外のテストを修正の CLI が再現できない",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "SKILL.md final-fix.md gate_ci.py",
+   "created_at": "2026-10-02T21:13:54Z"
+  },
+  {
+   "number": 1659,
+   "title": "cross-refactoring: docs が SKILL.md にあるとする rf / rf_eval の定義が無く、自作すると中断が効かない形を踏みうる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: low"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "SKILL.md drive.py",
+   "created_at": "2026-10-02T21:13:58Z"
+  },
+  {
+   "number": 1682,
+   "title": "実装のプランが要求の手動確認（マージ前）を残したまま「完了」で返り、検査のプランの merge-gate まで conductor に見えない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "6-check-r2.json 7-release-r2.json",
+   "created_at": "2026-10-03T08:01:15Z"
+  },
+  {
+   "number": 1687,
+   "title": "設計のプランで作成者 t <a@b>・題 tmp のコミットが設計ブランチに入り、worker の報告に出ない",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: low"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "check-script-structure.py",
+   "created_at": "2026-10-03T08:57:36Z"
+  },
+  {
+   "number": 1691,
+   "title": "言語別の整形・静的解析の規約を NDF が Skill のリファレンスで持ち、規約の無いリポジトリへ移植する",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: low"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "lang-javascript.md lang-php.md lang-python.md lang-typescript.md",
+   "created_at": "2026-10-03T09:38:35Z"
+  },
+  {
+   "number": 1694,
+   "title": "このリポジトリの runtime-plugin-validate.yml の 9 ジョブがテストの宣言に無く、cross-refactoring の項目が壊しても手元で拾えない",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "runtime-plugin-validate.yml",
+   "created_at": "2026-10-03T09:55:23Z"
+  },
+  {
+   "number": 1699,
+   "title": "「別の文脈の AI が手順を辿れる」受け入れ条件を担うステップがプランに無く、実装の worker が残したまま完了へ進む",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "supervise.py",
+   "created_at": "2026-10-03T11:33:45Z"
+  },
+  {
+   "number": 1706,
+   "title": "古い版の NDF が新しい版で足した .ndf/project.json の項目を「知らない項目」として拒み、プラグインを更新するまで手順 0 が止まる",
+   "labels": [
+    "priority: high"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "project-decl.py project.json release-steps.py",
+   "created_at": "2026-10-03T23:26:09Z"
+  },
+  {
+   "number": 1707,
+   "title": "cross-review: ai-plugins 以外のリポジトリで SKILL.md のとおりに単独起動すると、Skill のディレクトリが git リポジトリでないため PR を取れずに止まる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "SKILL.md resolve.sh",
+   "created_at": "2026-10-03T23:29:24Z"
+  },
+  {
+   "number": 1709,
+   "title": "cross-refactoring: 戦略の宣言をメインディレクトリから読み、Pull Request が変えた宣言（足した静的解析の suite）が検証に入らない",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "cross-refactoring-rf1673-state.json gate.py",
+   "created_at": "2026-10-03T23:32:50Z"
+  },
+  {
+   "number": 1715,
+   "title": "plan-to-spec: spec-finalize が --spec を 1 つしか受けず、既存の複数ファイルの確定仕様へ溶かすと残りのファイルがコミットに入らないまま ok で終わる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "09-tests.md plan-to-spec-steps.py",
+   "created_at": "2026-10-04T01:36:47Z"
+  },
+  {
+   "number": 1722,
+   "title": "glossary: 設計のプランの用語チェックが要求の写しの題と原文の引用に当たり、課題の本文を書き換えないと進めない",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "-requirements.md 1-design-1654.json spec-copy.py",
+   "created_at": "2026-10-04T04:12:07Z"
+  },
+  {
+   "number": 1734,
+   "title": "cross-review: 修正担当（claude -p）がテストを背景で起動して通知を待ったまま終わり、結果ファイルを書かない",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "fix-pr1732-decisions.json",
+   "created_at": "2026-10-04T12:37:18Z"
+  },
+  {
+   "number": 1735,
+   "title": "test_external_ai_run の codex の成功ケースが CI でだけまれに落ちる",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "external_ai_run.py test_external_ai_run.py",
+   "created_at": "2026-10-04T13:33:49Z"
+  },
+  {
+   "number": 1742,
+   "title": "スプリントの実装のプランの pr のステップが append を持たず、worker が書いた PR の本文の下書きが載らない",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "pr-body.md pr_body.md supervise.py",
+   "created_at": "2026-10-05T00:23:24Z"
+  },
+  {
+   "number": 1755,
+   "title": "CHANGELOG の ndf 10.17.61 の節から移行の手順が消え、利用者が認証のし直しを知れない",
+   "labels": [
+    "area: docs",
+    "bug",
+    "priority: low"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "CHANGELOG.md release-steps.py",
+   "created_at": "2026-10-05T04:40:18Z"
+  },
+  {
+   "number": 1756,
+   "title": "release: plugin_dir と changed-plugins がプラグインの置き場を ndf・playwright-kit の名前で決め打ち、他のリポジトリで package-plugin の手順が止まる",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "marketplace.json release-steps.py release-verification-steps.py",
+   "created_at": "2026-10-05T04:40:19Z"
+  },
+  {
+   "number": 1774,
+   "title": "CI のチェックの結論を失敗と数える集合が lib/gh_checks.py と merged_lib/checks.py で別々にあり、取り消しと stale の扱いが食い違う",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "gh_parts.py gh_pr_info.py test-run.py",
+   "created_at": "2026-10-05T23:03:20Z"
+  },
+  {
+   "number": 1777,
+   "title": "cross-refactoring の assess が dbt の .sql を本番コードに数えず、飛ばしてよいと判定する",
+   "labels": [],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "refactor.py",
+   "created_at": "2026-10-06T00:51:22Z"
+  },
+  {
+   "number": 1785,
+   "title": "引き継ぎ文書に大きさの上限が無く、milestone-26.md が 52KB に育って conductor が区間の頭で毎回 3 万文字を読み込む",
+   "labels": [],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "handoff.py issue-2065.md milestone-26-history.md skill-stats.py",
+   "created_at": "2026-10-06T03:16:01Z"
+  },
+  {
+   "number": 1787,
+   "title": "merged / lib README: 基盤待ち（終了コード 75）と merge-when-green の引数が正本に無い",
+   "labels": [
+    "area: docs",
+    "priority: low"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "SKILL.md",
+   "created_at": "2026-10-06T03:19:13Z"
+  },
+  {
+   "number": 1809,
+   "title": "cross-refactoring: 取り消しの規則の決め直し（#1793 の R2・R3・R5）の効果を実際の実行で測り、案 B（逐次の採用）へ移るかを決める",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "",
+   "created_at": "2026-10-06T15:22:07Z"
+  },
+  {
+   "number": 1811,
+   "title": "supervise: 設計の置き場所のテストのディレクトリが重なりの判定に当たり、スプリントの実装のプランがすべて直列になる",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "5-impl-1290.json 5-impl-1739.json 5-impl-780.json supervise.py",
+   "created_at": "2026-10-06T15:22:23Z"
+  },
+  {
+   "number": 1812,
+   "title": "fix: 修正で契約を変えても呼び手・設計文書・実測値を追わず、次のラウンドの指摘になってレビューが延びる",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "corder.md issue-1290-design.md",
+   "created_at": "2026-10-06T15:22:25Z"
+  },
+  {
+   "number": 1835,
+   "title": "引継ぎ文書に「作成済み」と書いたファイルが実在しなくても、書く時点にも読む時点にも気付けない",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "7-release-dev3.json",
+   "created_at": "2026-10-07T05:21:22Z"
+  },
+  {
+   "number": 1839,
+   "title": "cross-refactoring の見送った提案（budget・not_done）が起票されず、マージの後に振り返りが改修計画を読むまで残らない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-10-07T13:42:35Z"
+  },
+  {
+   "number": 1871,
+   "title": "supervise.py が起動する claude -p の会話が design / requirements-design の Skill 本文を毎回読み込み、#827 の数え方の外で約 99 万トークンを使う",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "clip.py clip2.py supervise.py",
+   "created_at": "2026-10-09T01:45:32Z"
+  },
+  {
+   "number": 1872,
+   "title": "conductor が出力ファイルを確かめる回数が移行後に 15 回から 1,185 回へ増え、conductor の費用の 12.7% を占める",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "poll.py supervise.py token_guard.py",
+   "created_at": "2026-10-09T01:45:42Z"
+  },
+  {
+   "number": 1877,
+   "title": "relay: /goal の続きの応答では stop_hook_active が真になり、背景の作業が残る ndf-next の応答で Stop を止めて知らせる仕組みが働かない",
+   "labels": [
+    "bug"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "relay.py",
+   "created_at": "2026-10-09T02:43:29Z"
+  },
+  {
+   "number": 1886,
+   "title": "作業ツリーから起動したキューが、後片付けで消えた cwd により --then の計画で落ちる",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "6-check.json 7-release.json actuals.py commands.py sprint.py supervise.py templates.py",
+   "created_at": "2026-10-10T08:58:11Z"
+  },
+  {
+   "number": 1893,
+   "title": "後片付けを終えても課題の工程表の「後片付け」の行が未チェックのまま残る",
+   "labels": [
+    "priority: low"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "SKILL.md merged-steps.py projects-sync.sh stage-check.sh",
+   "created_at": "2026-10-10T19:20:18Z"
+  },
+  {
+   "number": 1919,
+   "title": "conductor が NDF のスクリプトをシェルでつないで待つと、hook が止めてプランと wait を案内する",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "merged-steps.py p.json shell_checks.py supervise.py token_guard.py waiting.md",
+   "created_at": "2026-10-11T03:39:49Z"
+  },
+  {
+   "number": 1957,
+   "title": "トークン削減の効果をサブエージェントだけで判定し、claude -p へ移しただけの施策を削減と数えている → 全体の値で測り直し、効いていない施策を戻すか直す",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: high"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "supervise.py token-usage.py usage_ledger.py",
+   "created_at": "2026-10-12T16:13:42Z"
+  },
+  {
+   "number": 1958,
+   "title": "cross-review の修正の worker が /ndf:fix の手順書を持たない最小構成で起動し、1 回 503k・16 往復を使う → 手順書を確実に読ませ、1 回の費用を実測で下げる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: high"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "SKILL.md supervise.py",
+   "created_at": "2026-10-12T16:13:44Z"
+  },
+  {
+   "number": 1959,
+   "title": "supervise.py の full のステップが MCP を含む全 Tool の定義を載せて起動し、初回 55k を 1 往復ごとに読み直す → 使わない Tool と MCP を載せずに起動する",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "supervise.py",
+   "created_at": "2026-10-12T16:13:46Z"
+  },
+  {
+   "number": 1960,
+   "title": "cross-refactoring が全フェーズで手順書 3 本と references 2 本（約 54KB）を読ませる → フェーズに要る手順書だけを渡す",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "SKILL.md launch-cli.sh",
+   "created_at": "2026-10-12T16:13:49Z"
+  },
+  {
+   "number": 1962,
+   "title": "retrospective: 「MVV を見直すか」を毎回問わず、改訂の兆候があるときだけ問う",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "SKILL.md project-mvv.md project-mvv.py",
+   "created_at": "2026-10-12T16:20:47Z"
+  },
+  {
+   "number": 1967,
+   "title": "test_relay.py の test_guard_* が並列の全体テストでだけ落ち、全体テストを使う工程が揺れで止まる",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "test_relay.py",
+   "created_at": "2026-10-12T20:23:41Z"
+  },
+  {
+   "number": 1968,
+   "title": "宣言の無いリポジトリで指示書の既定が指示書のチェック（3 つ）と承認資料（2 つ）で食い違い、KIRO.md の変更が承認資料に載らない",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "AGENTS.md CLAUDE.md KIRO.md release-steps.md",
+   "created_at": "2026-10-12T20:23:42Z"
+  },
+  {
+   "number": 1978,
+   "title": "usage-report.py の閉じた課題の数が UTC の日付で数えられ、使用量の集計（JST の日付）と期間がずれる → JST の両端で数える",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "usage-report.py",
+   "created_at": "2026-10-13T09:11:34Z"
+  },
+  {
+   "number": 1979,
+   "title": "使用量の帳簿が同じ message.id の最後の usage を捨て、続けたサブエージェントを 2 回数え、日をまたぐ会話を丸ごと採るか落とす → 会話の記録の合計と一致させる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: high"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "token-usage.py",
+   "created_at": "2026-10-13T09:20:42Z"
+  },
+  {
+   "number": 1981,
+   "title": "agy の --output-format json の成功時の形（response・usage の鍵）を実物で確かめないまま本番へ出ている → 認証の通る環境で確かめ、違えば読み方を直す",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "external-ai.py launch-cli.sh",
+   "created_at": "2026-10-13T09:20:46Z"
+  },
+  {
+   "number": 1983,
+   "title": "本番の配布のプランで judge が同じ CI の失敗に打ち直しを 7 回返し、上限まで同じ run を読み直す → 同じ失敗が続いたら止めて人へ戻す",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-10-13T09:20:50Z"
+  },
+  {
+   "number": 1984,
+   "title": "supervise が worker の途中の報告の「止まった」の語に反応し、作業の中身（止まったものとみなす実装）でも conductor へ attention を出す",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-10-13T09:20:53Z"
+  },
+  {
+   "number": 1985,
+   "title": "リリース後テストの表でコード表記の中の | がセルを割り、sprint-close が合格と読まずに理由も示さない → 書く側でエスケープし、読む側は割れた行を名指しする",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "sprint-close.py",
+   "created_at": "2026-10-13T09:20:56Z"
+  },
+  {
+   "number": 2004,
+   "title": "要求の検証手段が既定ブランチに無い新しい workflow のマージ前の workflow_dispatch を求め、検査の merge-gate が実行できない手動確認で止まる",
+   "labels": [
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "spec-template.md",
+   "created_at": "2026-10-15T06:58:33Z"
+  },
+  {
+   "number": 2005,
+   "title": "LLM へ渡す規則の「閉じる語を PR 本文に書かない」が範囲を限らず、スプリント PR の「閉じる課題」の節を規則違反と読ませる",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "procedures.py prompts.py sprint-close.py",
+   "created_at": "2026-10-15T06:58:45Z"
+  },
+  {
+   "number": 2006,
+   "title": "codex のスモークが codex_home を /tmp の下に置き、helper binaries を作れない WARNING を毎回出す",
+   "labels": [],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "",
+   "created_at": "2026-10-15T06:58:55Z"
+  },
+  {
+   "number": 2009,
+   "title": "配布の後片付けが承認資料 issues/approval-*.md を消さず、版ごとに未追跡のファイルがメインディレクトリへ溜まる",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-10-15T13:25:39Z"
+  },
+  {
+   "number": 2010,
+   "title": ".ndf/project.json の計測値（ファイル数・テストの時間）が実行のたびに書き戻され、追跡ファイルを汚す → 宣言と計測値を分ける",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "measure_ci.py project-decl.py",
+   "created_at": "2026-10-15T13:25:42Z"
+  },
+  {
+   "number": 2011,
+   "title": "テストのコマンドを .ndf/supervise.json の test と .ndf/project.json の test.suites の 2 か所が持つ → 宣言の 1 か所にする",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "supervise.json",
+   "created_at": "2026-10-15T13:25:45Z"
+  },
+  {
+   "number": 2012,
+   "title": "CHANGELOG の notes の形が版ごとに揃わない（小見出しの有無・Docs: の行）→ release に規則を書く",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "CHANGELOG.md",
+   "created_at": "2026-10-15T13:25:49Z"
+  },
+  {
+   "number": 2013,
+   "title": "Skill の仕様を docs/specifications/ に置くかの方針が無く、cross 系の確定仕様 28 本が Skill の本文と重なる",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "",
+   "created_at": "2026-10-15T13:25:52Z"
+  },
+  {
+   "number": 2020,
+   "title": "test_mvv_ask_appends_one_row がプランの全体テストでだけ落ちる",
+   "labels": [
+    "priority: low"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "supervise.py",
+   "created_at": "2026-10-15T14:31:48Z"
+  },
+  {
+   "number": 2022,
+   "title": "見積もりの部品が cross-refactoring の予算とスプリントの大きさ（L）へつながっていない",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "budget.py",
+   "created_at": "2026-10-15T22:03:45Z"
+  },
+  {
+   "number": 2028,
+   "title": "Skill を足す設計の触るファイルに Skill の数を持つ 7 箇所が入らず、実装のステップが範囲外の失敗で止まる",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "5-impl-1856.json CLAUDE.md README.md plugin.json supervise.py",
+   "created_at": "2026-10-16T01:11:35Z"
+  },
+  {
+   "number": 2037,
+   "title": "supervise queue の重なりの判定がファイル単位のため、設計が関数単位で分けた実装のプランも直列になる（スプリント a1 で 58 分が 2 時間 47 分）",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "5-impl-1651.json 5-impl-1909.json 5-impl-1917.json supervise.py",
+   "created_at": "2026-10-17T04:01:05Z"
+  },
+  {
+   "number": 2039,
+   "title": "relay.md の一覧の出力例で支出上限の列が実際の出力（yes / no）と食い違う",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "relay.md",
+   "created_at": "2026-10-17T04:04:02Z"
+  },
+  {
+   "number": 2041,
+   "title": "merge-when-green の --expect-head が短い SHA を完全一致で比べ、同じ先端でも head_moved で止まる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "merged-steps.py",
+   "created_at": "2026-10-17T04:06:27Z"
+  },
+  {
+   "number": 2042,
+   "title": "ndf:supervisor の名前が既定の手段に読め、プランの雛形があるフェーズでも Agent で回される → エージェントは雛形の無いときの代わりだと分かる名前に、supervise.py は supervisor.py に改める",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "agent-layers.md supervise.py supervisor.py",
+   "created_at": "2026-10-17T04:09:49Z"
+  },
+  {
+   "number": 2044,
+   "title": "new close: merge・手動の経路のスプリントで、リリース記録の PR をまとめの close へ渡す手段が無く、課題が --record-pr unknown で開いたまま残る",
+   "labels": [],
+   "milestone": "v10.27.6",
+   "body": "supervise.py",
+   "created_at": "2026-10-17T04:25:16Z"
+  },
+  {
+   "number": 2047,
+   "title": "検査のプランの構造改善が既定の予算で下限に届かず、33 行の差分でも refactor が落ちて abort へ進む",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "6-check.json done-4c.json refactor.py supervise.py",
+   "created_at": "2026-10-17T04:31:53Z"
+  },
+  {
+   "number": 2049,
+   "title": "検査のプランの構造改善が --sync-command を渡さず、生成元に触れる改善が push で止まる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "SKILL.md drive.py install.sh supervise.py",
+   "created_at": "2026-10-17T06:20:33Z"
+  },
+  {
+   "number": 2054,
+   "title": "サブモジュールのリポジトリでメインディレクトリを .git/modules の下と取り違え、project-decl.py check が宣言を「無い」と返す",
+   "labels": [
+    "priority: high"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "handoff.py merged-steps.py project-decl.py worktree-setup.sh",
+   "created_at": "2026-10-17T11:33:35Z"
+  },
+  {
+   "number": 2056,
+   "title": "design-results の書き直しが、主題で束ねた実装のプランの触るファイルと課題を先頭の課題の分だけにする",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "5-impl-1263.json supervise.py",
+   "created_at": "2026-10-17T11:49:32Z"
+  },
+  {
+   "number": 2057,
+   "title": "cross-refactoring の drive が完了した回を返す案内に、持たない --reopen を書く",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-10-17T11:49:34Z"
+  },
+  {
+   "number": 2058,
+   "title": "mcp-redash の設定スクリプトが Kiro の default.json を tools 無しで作り、MCP のツールを呼べない（#1873 の漏れ）",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "default.json",
+   "created_at": "2026-10-17T11:50:57Z"
+  },
+  {
+   "number": 2059,
+   "title": "監視が先に別の早期の警告を出していると、非致命にした permission_denials の件数を警告に残さない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-10-17T11:54:22Z"
+  },
+  {
+   "number": 2060,
+   "title": "release の release-steps.md に、範囲の PR と notes --check-state（承認の材料）の打ち方が無い",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "ndf-release-approval-materials.md release-steps.md release-steps.py",
+   "created_at": "2026-10-17T11:54:24Z"
+  },
+  {
+   "number": 2064,
+   "title": "棚卸しの candidates が --add で渡した課題も上限で切り、利用者が指定した対象が持ち越しへ回る",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "SKILL.md upkeep.py",
+   "created_at": "2026-10-17T13:49:08Z"
+  },
+  {
+   "number": 2065,
+   "title": "スライドを作る実務の手順（生成スクリプト・ページの枠組み・トーン＆マナー・構成メモ・gws での変換と確認）を Skill に取り込む",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "04-presentation-notes.md AGENTS.md build.sh form-slide.md layout-slide.md system-gdrive.md",
+   "created_at": "2026-10-17T15:45:10Z"
+  },
+  {
+   "number": 2067,
+   "title": "gws-check.py がトークンの無い状態（auth_method: none）を認証済みと判定して exit 0 を返す",
+   "labels": [
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "client_secret.json gws-check.py",
+   "created_at": "2026-10-17T18:18:50Z"
+  },
+  {
+   "number": 2071,
+   "title": "cross-review の価値を測る指標が修正担当の判断を正解にしていて自己採点になる → 見落とし・相補性・費用を独立に測れる指標を決める",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "06-evidence.md",
+   "created_at": "2026-10-18T05:26:18Z"
+  },
+  {
+   "number": 2077,
+   "title": "棚卸し: 自動の前倒しを退けると同じ rank で順位の表を書けず、先に打った反映で境界が動くと却下が効かない",
+   "labels": [
+    "area: ndf-skill",
+    "priority: low"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "rejected.json upkeep.py upkeep_rank.py upkeep_rank_cmd.py",
+   "created_at": "2026-10-19T00:27:32Z"
+  },
+  {
+   "number": 2078,
+   "title": "system-repo.md の記録の説明に Marp と比較の言い回しが残り、#2065 の受け入れ条件 15・16 が通らない",
+   "labels": [
+    "area: ndf-skill",
+    "bug"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "AGENTS.md form-slide.md system-repo.md",
+   "created_at": "2026-10-19T00:32:11Z"
+  },
+  {
+   "number": 2082,
+   "title": "既定ブランチ宛の実装 PR の本文の閉じる語で、マージの時点に課題が閉じ、仕上げの工程と受け入れ条件のチェックが閉じた課題に残る",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "pr-steps.py sprint-close.py",
+   "created_at": "2026-10-19T10:18:05Z"
+  },
+  {
+   "number": 2085,
+   "title": "NDF の手順が TMPDIR に置く一時の worktree と状態のファイルが消されず溜まる（1 回分で数百 MB）",
+   "labels": [],
+   "milestone": "v10.27.6",
+   "body": "merged-steps.py worktree-deps.sh worktree-session.sh",
+   "created_at": "2026-10-23T06:45:39Z"
+  },
+  {
+   "number": 2093,
+   "title": "test_usage_capture: 負荷が高いときだけ test_runtime_specific_usage_shapes が落ちる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-10-24T21:37:32Z"
+  },
+  {
+   "number": 2096,
+   "title": "cross-refactoring: 全体テストを CI に任せる戦略の着手前のテストがディレクトリを {paths} へ入れ、ファイルだけを受けるテンプレートで落ちる",
+   "labels": [
+    "area: ndf-skill",
+    "bug"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "__init__.py",
+   "created_at": "2026-10-24T21:39:48Z"
+  },
+  {
+   "number": 2097,
+   "title": "release の雛形が本番のブランチを既定ブランチへ後退させず、worktree.json に production_branch が無いと本番のプランを組めない",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "decl.py delivery.py supervise.py worktree.json",
+   "created_at": "2026-10-24T21:40:29Z"
+  },
+  {
+   "number": 2105,
+   "title": "document-style: 並べた物の数を本文に書かず、足し減らしで本文が食い違わないようにする",
+   "labels": [
+    "area: ndf-skill",
+    "documentation",
+    "priority: medium"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "AGENTS.md CLAUDE.md SKILL.md agent-layers.md glossary.md stage-notes.md",
+   "created_at": "2026-10-25T00:05:30Z"
+  },
+  {
+   "number": 2113,
+   "title": "document-rebuild: 未決の問いがある提案書の冒頭の章が、組み直しと執筆の決まりで食い違わないようにする",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "type-proposal.md",
+   "created_at": "2026-10-25T00:54:44Z"
+  },
+  {
+   "number": 2114,
+   "title": "document-rebuild: 読み手役を外部の CLI で立てるときに、止まらず文脈を持たない形で起動できるようにする",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "cli-codex.md external-ai.py",
+   "created_at": "2026-10-25T00:54:45Z"
+  },
+  {
+   "number": 2115,
+   "title": "ndf-plugin-reference: 文書の記述を 4 ランタイムの今の構成に揃え、食い違う記述を無くす",
+   "labels": [
+    "area: docs",
+    "documentation",
+    "priority: low"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "AGENTS.md install.sh openai.yaml",
+   "created_at": "2026-10-25T00:54:47Z"
+  },
+  {
+   "number": 2116,
+   "title": "文書系の Skill の「出力の形」を「文書形式」に揃え、1 つのものを 1 つの語で呼ぶ",
+   "labels": [
+    "area: ndf-skill",
+    "documentation",
+    "priority: low"
+   ],
+   "milestone": "33 文書と用語",
+   "body": "",
+   "created_at": "2026-10-25T00:56:06Z"
+  },
+  {
+   "number": 2118,
+   "title": "実装のプランの design-tests が、設計で改名を決めたテストを止まりと判定せず、止まった理由を全文で残す",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "d.md supervise.py test_document_rebuild_stage.py test_document_restructuring_stage.py",
+   "created_at": "2026-10-25T00:57:54Z"
+  },
+  {
+   "number": 2119,
+   "title": "sprint-close: 最終工程を通っていない課題を、リリース後テストの前に閉じないようにする",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: high"
+   ],
+   "milestone": "v10.27.6",
+   "body": "sprint-close.py supervise.py",
+   "created_at": "2026-10-25T00:58:29Z"
+  },
+  {
+   "number": 2121,
+   "title": "開発ループの承認ゲート 2 の後のまとめが配布の記録の PR を読まない → 本番の後に記録の PR を解いてまとめを組む（#2089）",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "v10.27.6",
+   "body": "sprint-state.py supervise.py",
+   "created_at": "2026-10-25T02:19:47Z"
+  },
+  {
+   "number": 2130,
+   "title": "全角の文字を含むパスに置いた worktree で、コマンドの文字列を照合する 2 件のテストが落ちる",
+   "labels": [],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "sprint-close.py",
+   "created_at": "2026-10-25T04:02:56Z"
+  },
+  {
+   "number": 2132,
+   "title": "開発ループの周回の created[] を書く経路が無く、周回の中で起票した課題が記録に残らない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "issue-file.py sprint-state.py upkeep.py",
+   "created_at": "2026-10-25T04:07:46Z"
+  },
+  {
+   "number": 2135,
+   "title": "開発ループ（--loop）を実際に 2 周以上回し、周回の記録と /goal の終わりの判定を確かめる",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "laps.md",
+   "created_at": "2026-10-25T04:22:52Z"
+  },
+  {
+   "number": 2140,
+   "title": "リリースのプランの verify が、メインディレクトリが本番ブランチにいると develop を fast-forward できずに止まる",
+   "labels": [
+    "bug"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "release-verification-steps.py supervise.py",
+   "created_at": "2026-10-25T07:16:41Z"
+  },
+  {
+   "number": 2144,
+   "title": "受け入れ条件の前提と文言の確認がリリース後テストまで遅れる（退行しない条件の前提を今の振る舞いで確かめず、マージ前に確かめられる条件も未実施に並ぶ）",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "sprint-close.py",
+   "created_at": "2026-10-25T10:10:19Z"
+  },
+  {
+   "number": 2147,
+   "title": "merge-when-green: 自動反映の本番チャネルへのマージで、承認ゲート 2 で見た先端と merge-approved がマージする先端を照合しない",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "merge.py merged-steps.py",
+   "created_at": "2026-10-25T10:39:24Z"
+  },
+  {
+   "number": 2148,
+   "title": "relay: アカウントの追加・一覧・削除を AI が決まった手順で通す Skill を足す（URL を問いに載せ、1 つずつ・登録先ごとに通す）",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "relay.py",
+   "created_at": "2026-10-25T11:56:36Z"
+  },
+  {
+   "number": 2154,
+   "title": "PR の pytest が 1 回 10〜13 分かかり、push のたびに古い実行も止まらず走り直す",
+   "labels": [],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "merged-steps.py pytest.yml release-steps.py",
+   "created_at": "2026-10-28T09:57:00Z"
+  },
+  {
+   "number": 2158,
+   "title": "cross-refactoring: 着手前のテストが上限の近くで通ると、範囲テストの雛形の試走の残り時間が数秒になり init が止まる",
+   "labels": [
+    "area: ndf-skill",
+    "bug",
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "refactor.py",
+   "created_at": "2026-10-29T12:20:27Z"
+  },
+  {
+   "number": 2163,
+   "title": "agy が NDF の Skill 5 本の本文を先頭 24000 バイトで切って読み込み、agy の利用者に後半の手順が届かない",
+   "labels": [
+    "area: ndf-skill",
+    "bug"
+   ],
+   "milestone": "23 汎用性の回復",
+   "body": "",
+   "created_at": "2026-10-29T22:41:39Z"
+  },
+  {
+   "number": 2164,
+   "title": "スプリントのプランが作った時点の版数を配布と本番のプランへ書き込み、並行する別のスプリントがその版を先に出すとプランを作り直すまで止まる",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "7-release.json 9-release-prod.json release-steps.py",
+   "created_at": "2026-10-29T22:56:03Z"
+  },
+  {
+   "number": 2165,
+   "title": "設計を持たない実装のプランが触るファイルを宣言せず、同時に流す別のプランと重なるとそのファイルを「変えない」と指示されて止まる",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "5-impl-2104.json 5-impl-2142.json done-5b.json issue-file.py merged-steps.py supervise.py",
+   "created_at": "2026-10-29T22:56:13Z"
+  },
+  {
+   "number": 2166,
+   "title": "リリース後テストの起動指示が根拠に指した配布の記録が条件の経路を通ったかを確かめず、#2104 の昇格の経路が実機で一度も通らないまま残る",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "merged-steps.py release-steps.py",
+   "created_at": "2026-10-29T22:56:48Z"
+  },
+  {
+   "number": 2168,
+   "title": "Neural Development Factory: NDF を Web UI で操作できる Software Factory のサービスにする",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "supervise.py",
+   "created_at": "2026-10-30T01:08:35Z"
+  },
+  {
+   "number": 2170,
+   "title": "NDF Factory: Cognito の認証（Google・GitHub）とプランごとの利用量",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T01:10:39Z"
+  },
+  {
+   "number": 2171,
+   "title": "NDF Factory: contracts と進捗の受け口",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T01:10:43Z"
+  },
+  {
+   "number": 2172,
+   "title": "NDF Factory: スプリントの一覧（フェーズ）と詳細（工程・PR・CI・承認ゲート）",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "agent-layers.md",
+   "created_at": "2026-10-30T01:10:46Z"
+  },
+  {
+   "number": 2173,
+   "title": "NDF Factory: 承認ゲートの通知（Slack を含む）と Web からの承認",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T01:10:50Z"
+  },
+  {
+   "number": 2174,
+   "title": "NDF Factory: サブスクリプションと Bedrock の token 課金",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T01:10:53Z"
+  },
+  {
+   "number": 2176,
+   "title": "文書検査: mermaid の構文を解析せず、GitHub で描画できない図が承認ゲート 1 まで届く",
+   "labels": [
+    "bug"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "",
+   "created_at": "2026-10-30T04:00:17Z"
+  },
+  {
+   "number": 2189,
+   "title": "NDF Factory: 手元のランナー（利用者の環境で、利用者の claude ログインで実行する）",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T10:24:30Z"
+  },
+  {
+   "number": 2198,
+   "title": "本番の配布で GitHub Release の作成だけが失敗すると、タグが既にあるため release のステップを打ち直しても再開できない",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "release-steps.py",
+   "created_at": "2026-10-30T14:54:14Z"
+  },
+  {
+   "number": 2199,
+   "title": "Factory のリファクタリングの提案 20 件が時間で見送られ、子課題が同じ重複を写して広げる",
+   "labels": [],
+   "milestone": "25 Neural Development Factory",
+   "body": "service.ts store.ts",
+   "created_at": "2026-10-30T14:54:15Z"
+  },
+  {
+   "number": 2200,
+   "title": "NDF Factory: インフラ（private リポジトリ）の課題を辿れず、実環境の受け入れが保留のまま実施の契機が無い",
+   "labels": [],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T14:54:17Z"
+  },
+  {
+   "number": 2202,
+   "title": "cross-refactoring: 既定の予算を固定の分数でなく、テストの所要とコード量から決める",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-10-30T16:12:53Z"
+  },
+  {
+   "number": 2203,
+   "title": "cross-refactoring: 最終ゲートの CI の待ち（予算 30 分のうち 13.4 分）を想定最大時間の勘定から外し、別の上限で待つ",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-10-30T16:12:56Z"
+  },
+  {
+   "number": 2204,
+   "title": "意味の薄いテストを徹底的に削る: 削る基準を決めて要らないテストを消す（全体テストを 3 分以内にする #2291 の削る側）",
+   "labels": [
+    "enhancement",
+    "quality"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "AGENTS.md test_relay.py test_supervise_contract.py test_supervise_limits.py",
+   "created_at": "2026-10-30T16:12:58Z"
+  },
+  {
+   "number": 2205,
+   "title": "cross-refactoring の効果（採用・取り消し・時間・トークン）を版ごとに集計するスクリプトを作る",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-10-30T16:13:01Z"
+  },
+  {
+   "number": 2208,
+   "title": "hook: conductor がバックグラウンドの sleep と NDF のスクリプトのつなぎを書くと拒み、プランと wait を案内する",
+   "labels": [
+    "area: ndf-skill"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "merged-steps.py supervise.py",
+   "created_at": "2026-10-30T17:23:07Z"
+  },
+  {
+   "number": 2216,
+   "title": "step.recorded の Pull Request の参照を、その実行に許可されたリポジトリと照合する",
+   "labels": [],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-30T18:30:26Z"
+  },
+  {
+   "number": 2217,
+   "title": "他のプラグインの版上げで、配布物に関わらない差分（テストだけ）なら上げないを選べるようにする",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "release-steps.py",
+   "created_at": "2026-10-30T21:36:10Z"
+  },
+  {
+   "number": 2224,
+   "title": "待ちの部品 wait_until が上限の時刻に最後の照会を打たず、上限の最大 2 分前に CI 待ちを打ち切る",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "waits.py",
+   "created_at": "2026-10-31T00:08:22Z"
+  },
+  {
+   "number": 2225,
+   "title": "sprint-close がリリース後テストの「対象の版:」に v の付いた版を読めず、課題を閉じない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "dist_record.py sprint-close.py",
+   "created_at": "2026-10-31T00:14:19Z"
+  },
+  {
+   "number": 2227,
+   "title": "全工程の結果を統一した JSON レポートにし、失敗・未収束・未記録を ok で返さない",
+   "labels": [
+    "area: ndf-skill",
+    "priority: high"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "gate-rejections.py progress-record.sh project-mvv.py upkeep.py",
+   "created_at": "2026-10-31T00:19:37Z"
+  },
+  {
+   "number": 2228,
+   "title": "課題を閉じる時点を 1 つにし、最終の工程を通ってから閉じる",
+   "labels": [
+    "area: ndf-skill",
+    "priority: high"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "sprint-close.py supervise.py",
+   "created_at": "2026-10-31T00:19:38Z"
+  },
+  {
+   "number": 2229,
+   "title": "実行をまたいで残る状態（待ち行列・一時の worktree）に寿命と持ち主を持たせ、並行する実行が互いを塞がないようにする",
+   "labels": [
+    "area: ndf-skill",
+    "priority: high"
+   ],
+   "milestone": "v10.27.6",
+   "body": "merged-steps.py worktree-deps.sh",
+   "created_at": "2026-10-31T00:19:40Z"
+  },
+  {
+   "number": 2230,
+   "title": "リリース記録の PR を、まとめのプランを組む時点でなく実行の時点で解決する",
+   "labels": [
+    "area: ndf-skill",
+    "priority: medium"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-10-31T00:19:42Z"
+  },
+  {
+   "number": 2231,
+   "title": "配布を Claude Code と codex だけにし（すべてのプラグイン）、agy・kiro へは配らず cross 系の相手役だけにする",
+   "labels": [
+    "area: ndf-skill",
+    "priority: high"
+   ],
+   "milestone": "32 Skill の機能と手順",
+   "body": "AGENTS.md CLAUDE.md KIRO.md launch-cli.sh launch-reviewer.sh",
+   "created_at": "2026-10-31T00:19:44Z"
+  },
+  {
+   "number": 2232,
+   "title": "棚卸しの切り出しの境界が人の判断待ちの行を容量に数える",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "sprint-state.py",
+   "created_at": "2026-10-31T00:33:27Z"
+  },
+  {
+   "number": 2235,
+   "title": "require-groups の例外リストに残した 11 本へ依存の宣言を足す",
+   "labels": [
+    "area: ndf-skill",
+    "priority: low"
+   ],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "",
+   "created_at": "2026-10-31T00:49:24Z"
+  },
+  {
+   "number": 2237,
+   "title": "承認ゲート 1 の MVV 判定が、要求の文書を書く前の requirements-check の exit 2 を材料の欠けと読む",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "-requirements.md",
+   "created_at": "2026-10-31T01:17:48Z"
+  },
+  {
+   "number": 2239,
+   "title": "out-of-scope: 起票先のリポジトリの流儀（課題追跡の宣言・Issue テンプレート）に従って起票する",
+   "labels": [],
+   "milestone": "32 Skill の機能と手順",
+   "body": "CONTRIBUTING.md",
+   "created_at": "2026-10-31T02:00:29Z"
+  },
+  {
+   "number": 2241,
+   "title": "handoff.py が終了コード 4・5 を共通の表と違う意味で返し、emit の検査も通らない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "handoff.py",
+   "created_at": "2026-10-31T02:05:04Z"
+  },
+  {
+   "number": 2243,
+   "title": "一時の置き場の残る状態のうち #2229 の対象外の種類（ndf/ の下の Skill の置き場・ndf-stages・ndf-guards・ndf-checks・ndf-usage）に持ち主と寿命を決める",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "check-trigger.py workflow-common.sh",
+   "created_at": "2026-10-31T02:10:29Z"
+  },
+  {
+   "number": 2246,
+   "title": "要求の工程が、## 受け入れ条件 の節を持たない本文を通す（承認後の new sprint で初めて落ちる）",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "spec-copy.py sprint-state.py supervise.py",
+   "created_at": "2026-10-31T02:32:33Z"
+  },
+  {
+   "number": 2251,
+   "title": "構造改善の持ち越し: 周回 l20261031-2（#2206 #2186 #2216）の範囲に cross-refactoring を通す",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "drive.py",
+   "created_at": "2026-10-31T04:23:06Z"
+  },
+  {
+   "number": 2258,
+   "title": "レビューの持ち越し: 周回 l20261031-2（PR #2250）の設計判断が要る指摘 4 件",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "control.ts",
+   "created_at": "2026-10-31T05:42:32Z"
+  },
+  {
+   "number": 2262,
+   "title": "NDF: 200K固定・工程境界の無条件再起動を見直し、費用と品質で継続を判断する方式を比較検証する",
+   "labels": [
+    "area: ndf-skill",
+    "enhancement",
+    "priority: medium"
+   ],
+   "milestone": "35 開発フローの見直しと大整理",
+   "body": "token_guard.py work-vessels.md",
+   "created_at": "2026-10-31T06:20:04Z"
+  },
+  {
+   "number": 2270,
+   "title": "確定仕様化で見つけた文書と実装の食い違い 8 件（周回 l20261031-2）",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "25 Neural Development Factory",
+   "body": "ingest.yaml",
+   "created_at": "2026-10-31T07:51:46Z"
+  },
+  {
+   "number": 2273,
+   "title": "設計 PR のマージのプランがベースブランチとの衝突（DIRTY）で取り込みへ戻らず止まり、並行の設計 PR の用語集の衝突を手で解く",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "glossary.py supervise.py templates.py",
+   "created_at": "2026-10-31T07:59:26Z"
+  },
+  {
+   "number": 2274,
+   "title": "取り込み（absorb）の後、取り込まれた課題の受け入れ条件の一部が取り込み先の実装から落ちたまま完了になる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "design-results.json",
+   "created_at": "2026-10-31T08:18:33Z"
+  },
+  {
+   "number": 2275,
+   "title": "Factory の api: DynamoDB の条件の失敗の判定が 3 つの保存に別々にあり、判定の形が揃っていない",
+   "labels": [],
+   "milestone": "25 Neural Development Factory",
+   "body": "",
+   "created_at": "2026-10-31T08:35:14Z"
+  },
+  {
+   "number": 2276,
+   "title": "Factory の api: 秘密を 1 回だけ読むキャッシュが 3 か所に別々にある",
+   "labels": [],
+   "milestone": "25 Neural Development Factory",
+   "body": "github-oidc.ts",
+   "created_at": "2026-10-31T08:35:16Z"
+  },
+  {
+   "number": 2284,
+   "title": "設計文書が組み直しを通らず、PR の題・設計文書・報告が番号と内部の呼び名だけで書かれて読めない",
+   "labels": [],
+   "milestone": "33 文書と用語",
+   "body": "1-design-2172.json supervise.py",
+   "created_at": "2026-10-31T10:53:46Z"
+  },
+  {
+   "number": 2285,
+   "title": "リファクタリングの工程で着手前のテストが時間切れになると、作業場所が「使用中」のまま残り、テストのプロセスも残る",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "test_relay.py",
+   "created_at": "2026-10-31T10:54:09Z"
+  },
+  {
+   "number": 2288,
+   "title": "本番のプランの verify が導入の確認だけを流して「リリース後テスト」を通ったと記録し、受け入れ条件ごとの記録が無いためスプリントを閉じる工程で課題が閉じない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "8-release-prod.json SKILL.md release-verification-steps.py sprint-close.py supervise.py",
+   "created_at": "2026-10-31T11:06:42Z"
+  },
+  {
+   "number": 2289,
+   "title": "結果を読む共通の関数（step_read.py の試行と置き場の読み方）を製品のコードが使わず、承認資料は試行の選び方を自前の last_result に持ち続ける",
+   "labels": [
+    "out-of-scope"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "materials.py sprint-close.py step_read.py",
+   "created_at": "2026-10-31T11:08:58Z"
+  },
+  {
+   "number": 2291,
+   "title": "全体テストが重すぎて工程の時間の枠に収まらない。手元の全体テストを 3 分以内にする",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "",
+   "created_at": "2026-10-31T11:20:31Z"
+  },
+  {
+   "number": 2293,
+   "title": "sprint-close: --with-verification を付け忘れると、リリース後テストに不合格の行を持つ課題も閉じる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "sprint-close.py",
+   "created_at": "2026-10-31T11:46:54Z"
+  },
+  {
+   "number": 2296,
+   "title": "プロジェクト MVV の Mission を、Claude Code と Codex へ配布し agy・kiro を相手役に使う構成へ改訂する",
+   "labels": [],
+   "milestone": "34 研究基盤・汎用性・利用者を増やす",
+   "body": "project-mvv.py",
+   "created_at": "2026-10-31T12:32:19Z"
+  },
+  {
+   "number": 2300,
+   "title": "検査の記録の集計で閾値を見直せない: トリガーの評価が 0 回・落ちた工程が「不明」・流出不具合の記録が 0 行",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "check-trigger.py pace.md state.json",
+   "created_at": "2026-10-31T13:10:15Z"
+  },
+  {
+   "number": 2309,
+   "title": "全体テストを 636 秒から 180 秒へ縮める: 子のプロセスを起こす結合テストとスクリプトの起動の時間を減らす",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "31 費用の削減とテストの軽量化",
+   "body": "supervise.py",
+   "created_at": "2026-10-31T17:01:35Z"
+  },
+  {
+   "number": 2313,
+   "title": "全体テストとリファクタリングの時間の枠を直した PR に、リファクタリングを一度も通せていない",
+   "labels": [
+    "quality"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "conftest.py",
+   "created_at": "2026-10-31T17:33:24Z"
+  },
+  {
+   "number": 2315,
+   "title": "開発ワークフローに「見直し」と「大整理」を足す: 棚卸しを毎スプリントの差分の棚卸し・数回に 1 回の見直し・十数回に 1 回の大整理（根本原因の発見と組み直し、後回しの再評価）に分ける",
+   "labels": [
+    "enhancement"
+   ],
+   "milestone": "35 開発フローの見直しと大整理",
+   "body": "laps.md",
+   "created_at": "2026-10-31T17:46:58Z"
+  },
+  {
+   "number": 2316,
+   "title": "conductor どうしの排他が無い: Issue・プラン・ファイル・版数などの対象ごとにロックを置き、並列の conductor が同じ物を同時に書き換えないようにする",
+   "labels": [
+    "bug"
+   ],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "run_owner.py running.py",
+   "created_at": "2026-10-31T18:10:10Z"
+  },
+  {
+   "number": 2317,
+   "title": "全体テストの CI 待ちが、PR で外したチェックをメインディレクトリの宣言から読んで待ち続ける",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "test-run.py",
+   "created_at": "2026-10-31T18:22:17Z"
+  },
+  {
+   "number": 2321,
+   "title": "cross-refactoring の init が着手前テストの打ち切りで止まると、持ち主の記録が残り次の実行を 24 時間断る",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "6-check.json drive.py refactor.py",
+   "created_at": "2026-10-31T18:47:01Z"
+  },
+  {
+   "number": 2323,
+   "title": "cross-refactoring の最終ゲートが締め切りで巻き戻すとき、途中で取り込んだベースブランチの変更まで消す",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "refactor.py",
+   "created_at": "2026-10-31T22:27:50Z"
+  },
+  {
+   "number": 2324,
+   "title": "中継の Stop の hook が、別のセッションの承認待ちを報告しただけの応答を「本文で承認を待って終わった」と差し戻す",
+   "labels": [
+    "bug"
+   ],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "ask.py wait-held.json",
+   "created_at": "2026-10-31T23:39:16Z"
+  },
+  {
+   "number": 2325,
+   "title": "queue --resume の --from が、強制終了した前の起動が残っていると無視され、前の途中のステップから続く",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "6-check.json supervise.py",
+   "created_at": "2026-11-01T00:00:14Z"
+  },
+  {
+   "number": 2327,
+   "title": "スプリントの閉じる条件 3: 別のリポジトリの課題が振り返りの記録を満たせず開いたまま残る",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-11-01T00:06:07Z"
+  },
+  {
+   "number": 2330,
+   "title": "リリース後テストで「次のスプリントで確かめる」と保留にした条件を、次のスプリントで拾い直す工程が無く、課題が開いたまま残る",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "sprint-close.py",
+   "created_at": "2026-11-01T01:10:37Z"
+  },
+  {
+   "number": 2334,
+   "title": "NDF のスクリプトの結果の JSON・ログ出力・異常系の処理を 1 つの形へ揃える",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "bundle-close.py hook-env.py hook.py instructions-check.py mission-close.py mission-state.py parallel-measure.py phase-steps.py refactor-scope.py relay.py usage-report.py usage-subagent.py wait-notify.py",
+   "created_at": "2026-11-01T03:52:51Z"
+  },
+  {
+   "number": 2335,
+   "title": "異常系・ログ・回復とデータ・入出力の形を 1 つの実行の核へ集め、異常系の課題 103 件を型ごとにまとめて解く",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "",
+   "created_at": "2026-11-01T03:58:45Z"
+  },
+  {
+   "number": 2336,
+   "title": "入口・受け渡しのファイル・設定・環境変数の契約を 1 か所に宣言し、宣言の外を検査で落とす",
+   "labels": [],
+   "milestone": "28 根本解決 1: 設計と契約の棚卸し",
+   "body": "project.json worktree.json",
+   "created_at": "2026-11-01T04:14:19Z"
+  },
+  {
+   "number": 2337,
+   "title": "結果の契約をそろえ、失敗・未収束・判定できないを ok で返す経路を無くす",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-11-01T04:14:22Z"
+  },
+  {
+   "number": 2338,
+   "title": "1 回の実行を識別子 1 つで追える記録とログにそろえる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-11-01T04:14:25Z"
+  },
+  {
+   "number": 2339,
+   "title": "内部データに型と版を持たせ、同じ意味の値を 1 つの名前にそろえる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-11-01T04:14:28Z"
+  },
+  {
+   "number": 2340,
+   "title": "機械が読む出力を 1 行 JSON にそろえ、Markdown と本文の見出しから判定しない",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-11-01T04:14:31Z"
+  },
+  {
+   "number": 2341,
+   "title": "入口の引数・環境変数・設定の受け取り方を 1 つの読み込み部品にそろえる",
+   "labels": [],
+   "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
+   "body": "",
+   "created_at": "2026-11-01T04:14:34Z"
+  },
+  {
+   "number": 2342,
+   "title": "実行の持ち主と後片付けを核に持たせ、残骸と並行の衝突で止まらないようにする",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-11-01T04:14:37Z"
+  },
+  {
+   "number": 2343,
+   "title": "上限と再試行の方針を 1 つの宣言に集め、同じ失敗の打ち直しを止める",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-11-01T04:14:39Z"
+  },
+  {
+   "number": 2344,
+   "title": "プランは値でなく参照を持ち、実行の直前に解決して照合する",
+   "labels": [],
+   "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
+   "body": "",
+   "created_at": "2026-11-01T04:14:42Z"
+  }
+ ],
+ "closed": [
+  {
+   "number": 7,
+   "created_at": "2026-05-24T03:31:33Z",
+   "closed_at": "2026-05-24T22:11:04Z"
+  },
+  {
+   "number": 11,
+   "created_at": "2026-05-24T21:20:40Z",
+   "closed_at": "2026-06-09T15:21:21Z"
+  },
+  {
+   "number": 13,
+   "created_at": "2026-05-25T01:30:53Z",
+   "closed_at": "2026-05-25T10:34:15Z"
+  },
+  {
+   "number": 17,
+   "created_at": "2026-05-25T13:58:07Z",
+   "closed_at": "2026-06-09T15:21:16Z"
+  },
+  {
+   "number": 21,
+   "created_at": "2026-05-27T02:04:32Z",
+   "closed_at": "2026-05-28T07:04:39Z"
+  },
+  {
+   "number": 25,
+   "created_at": "2026-06-09T13:58:50Z",
+   "closed_at": "2026-06-09T15:19:41Z"
+  },
+  {
+   "number": 28,
+   "created_at": "2026-06-12T03:37:39Z",
+   "closed_at": "2026-06-12T03:57:50Z"
+  },
+  {
+   "number": 33,
+   "created_at": "2026-06-13T07:54:58Z",
+   "closed_at": "2026-08-31T07:24:44Z"
+  },
+  {
+   "number": 35,
+   "created_at": "2026-06-27T08:10:47Z",
+   "closed_at": "2026-07-17T05:29:57Z"
+  },
+  {
+   "number": 36,
+   "created_at": "2026-06-27T22:11:45Z",
+   "closed_at": "2026-06-28T04:14:38Z"
+  },
+  {
+   "number": 37,
+   "created_at": "2026-06-27T22:30:25Z",
+   "closed_at": "2026-08-31T07:24:44Z"
+  },
+  {
+   "number": 81,
+   "created_at": "2026-08-08T07:53:41Z",
+   "closed_at": "2026-08-31T07:24:49Z"
+  },
+  {
+   "number": 83,
+   "created_at": "2026-08-08T08:41:03Z",
+   "closed_at": "2026-08-13T17:00:19Z"
+  },
+  {
+   "number": 113,
+   "created_at": "2026-08-15T04:32:37Z",
+   "closed_at": "2026-09-03T16:18:31Z"
+  },
+  {
+   "number": 115,
+   "created_at": "2026-08-15T12:22:11Z",
+   "closed_at": "2026-08-15T14:02:25Z"
+  },
+  {
+   "number": 116,
+   "created_at": "2026-08-15T14:02:01Z",
+   "closed_at": "2026-09-05T14:17:32Z"
+  },
+  {
+   "number": 144,
+   "created_at": "2026-08-28T08:41:44Z",
+   "closed_at": "2026-09-05T14:17:34Z"
+  },
+  {
+   "number": 146,
+   "created_at": "2026-08-28T09:49:03Z",
+   "closed_at": "2026-08-30T17:46:13Z"
+  },
+  {
+   "number": 156,
+   "created_at": "2026-08-29T04:56:52Z",
+   "closed_at": "2026-09-12T13:23:33Z"
+  },
+  {
+   "number": 161,
+   "created_at": "2026-08-29T21:05:29Z",
+   "closed_at": "2026-09-01T16:42:10Z"
+  },
+  {
+   "number": 163,
+   "created_at": "2026-08-29T23:09:19Z",
+   "closed_at": "2026-08-29T23:37:12Z"
+  },
+  {
+   "number": 173,
+   "created_at": "2026-08-30T18:55:10Z",
+   "closed_at": "2026-08-30T20:15:43Z"
+  },
+  {
+   "number": 175,
+   "created_at": "2026-08-30T19:46:11Z",
+   "closed_at": "2026-08-31T08:52:17Z"
+  },
+  {
+   "number": 176,
+   "created_at": "2026-08-31T01:11:49Z",
+   "closed_at": "2026-09-01T00:50:15Z"
+  },
+  {
+   "number": 178,
+   "created_at": "2026-08-31T02:12:52Z",
+   "closed_at": "2026-08-31T07:24:38Z"
+  },
+  {
+   "number": 181,
+   "created_at": "2026-08-31T02:46:03Z",
+   "closed_at": "2026-09-05T13:50:39Z"
+  },
+  {
+   "number": 182,
+   "created_at": "2026-08-31T02:50:44Z",
+   "closed_at": "2026-09-02T00:34:34Z"
+  },
+  {
+   "number": 186,
+   "created_at": "2026-08-31T03:03:28Z",
+   "closed_at": "2026-09-01T00:50:38Z"
+  },
+  {
+   "number": 188,
+   "created_at": "2026-08-31T08:03:22Z",
+   "closed_at": "2026-09-01T00:48:03Z"
+  },
+  {
+   "number": 193,
+   "created_at": "2026-08-31T08:59:32Z",
+   "closed_at": "2026-09-03T06:26:14Z"
+  },
+  {
+   "number": 196,
+   "created_at": "2026-08-31T10:14:55Z",
+   "closed_at": "2026-09-02T01:13:23Z"
+  },
+  {
+   "number": 197,
+   "created_at": "2026-08-31T10:21:20Z",
+   "closed_at": "2026-09-03T23:00:21Z"
+  },
+  {
+   "number": 198,
+   "created_at": "2026-08-31T10:47:07Z",
+   "closed_at": "2026-08-31T10:54:33Z"
+  },
+  {
+   "number": 199,
+   "created_at": "2026-08-31T11:50:36Z",
+   "closed_at": "2026-09-01T00:52:11Z"
+  },
+  {
+   "number": 201,
+   "created_at": "2026-08-31T13:00:06Z",
+   "closed_at": "2026-09-03T23:00:19Z"
+  },
+  {
+   "number": 202,
+   "created_at": "2026-08-31T23:53:44Z",
+   "closed_at": "2026-09-01T16:26:55Z"
+  },
+  {
+   "number": 203,
+   "created_at": "2026-09-01T00:13:54Z",
+   "closed_at": "2026-09-01T00:47:52Z"
+  },
+  {
+   "number": 206,
+   "created_at": "2026-09-01T07:01:24Z",
+   "closed_at": "2026-09-01T13:50:55Z"
+  },
+  {
+   "number": 209,
+   "created_at": "2026-09-01T11:00:54Z",
+   "closed_at": "2026-09-02T01:13:44Z"
+  },
+  {
+   "number": 214,
+   "created_at": "2026-09-01T15:02:37Z",
+   "closed_at": "2026-09-03T06:47:28Z"
+  },
+  {
+   "number": 215,
+   "created_at": "2026-09-01T15:02:38Z",
+   "closed_at": "2026-09-03T07:20:24Z"
+  },
+  {
+   "number": 216,
+   "created_at": "2026-09-01T15:02:44Z",
+   "closed_at": "2026-09-04T11:57:51Z"
+  },
+  {
+   "number": 217,
+   "created_at": "2026-09-01T15:16:51Z",
+   "closed_at": "2026-09-02T01:13:34Z"
+  },
+  {
+   "number": 221,
+   "created_at": "2026-09-01T16:40:53Z",
+   "closed_at": "2026-09-03T07:16:17Z"
+  },
+  {
+   "number": 223,
+   "created_at": "2026-09-01T16:45:18Z",
+   "closed_at": "2026-09-01T17:11:45Z"
+  },
+  {
+   "number": 224,
+   "created_at": "2026-09-01T16:45:24Z",
+   "closed_at": "2026-09-05T13:50:31Z"
+  },
+  {
+   "number": 228,
+   "created_at": "2026-09-01T23:05:33Z",
+   "closed_at": "2026-09-03T06:51:38Z"
+  },
+  {
+   "number": 229,
+   "created_at": "2026-09-01T23:13:56Z",
+   "closed_at": "2026-09-03T07:30:27Z"
+  },
+  {
+   "number": 231,
+   "created_at": "2026-09-01T23:18:58Z",
+   "closed_at": "2026-09-02T07:40:37Z"
+  },
+  {
+   "number": 232,
+   "created_at": "2026-09-01T23:21:00Z",
+   "closed_at": "2026-09-02T07:32:07Z"
+  },
+  {
+   "number": 233,
+   "created_at": "2026-09-01T23:21:04Z",
+   "closed_at": "2026-09-02T07:32:10Z"
+  },
+  {
+   "number": 235,
+   "created_at": "2026-09-01T23:24:58Z",
+   "closed_at": "2026-09-02T07:32:12Z"
+  },
+  {
+   "number": 236,
+   "created_at": "2026-09-01T23:31:21Z",
+   "closed_at": "2026-09-05T12:12:08Z"
+  },
+  {
+   "number": 237,
+   "created_at": "2026-09-01T23:31:23Z",
+   "closed_at": "2026-09-05T12:11:57Z"
+  },
+  {
+   "number": 238,
+   "created_at": "2026-09-01T23:31:25Z",
+   "closed_at": "2026-09-05T12:11:59Z"
+  },
+  {
+   "number": 239,
+   "created_at": "2026-09-01T23:31:26Z",
+   "closed_at": "2026-09-05T12:12:01Z"
+  },
+  {
+   "number": 240,
+   "created_at": "2026-09-01T23:31:28Z",
+   "closed_at": "2026-09-05T12:12:03Z"
+  },
+  {
+   "number": 241,
+   "created_at": "2026-09-01T23:31:30Z",
+   "closed_at": "2026-09-05T12:12:06Z"
+  },
+  {
+   "number": 242,
+   "created_at": "2026-09-01T23:40:59Z",
+   "closed_at": "2026-09-03T07:30:26Z"
+  },
+  {
+   "number": 243,
+   "created_at": "2026-09-01T23:41:00Z",
+   "closed_at": "2026-09-04T23:12:39Z"
+  },
+  {
+   "number": 244,
+   "created_at": "2026-09-02T00:24:25Z",
+   "closed_at": "2026-09-02T07:15:15Z"
+  },
+  {
+   "number": 245,
+   "created_at": "2026-09-02T00:24:25Z",
+   "closed_at": "2026-09-02T07:15:20Z"
+  },
+  {
+   "number": 246,
+   "created_at": "2026-09-02T00:24:40Z",
+   "closed_at": "2026-09-02T07:15:18Z"
+  },
+  {
+   "number": 248,
+   "created_at": "2026-09-02T00:26:14Z",
+   "closed_at": "2026-09-02T01:41:46Z"
+  },
+  {
+   "number": 252,
+   "created_at": "2026-09-02T00:54:09Z",
+   "closed_at": "2026-09-02T01:49:45Z"
+  },
+  {
+   "number": 254,
+   "created_at": "2026-09-02T01:15:36Z",
+   "closed_at": "2026-09-02T01:41:49Z"
+  },
+  {
+   "number": 256,
+   "created_at": "2026-09-02T01:23:16Z",
+   "closed_at": "2026-09-02T07:03:02Z"
+  },
+  {
+   "number": 258,
+   "created_at": "2026-09-02T01:37:06Z",
+   "closed_at": "2026-09-02T07:03:00Z"
+  },
+  {
+   "number": 259,
+   "created_at": "2026-09-02T01:41:50Z",
+   "closed_at": "2026-09-02T07:40:39Z"
+  },
+  {
+   "number": 261,
+   "created_at": "2026-09-02T01:50:04Z",
+   "closed_at": "2026-09-02T07:15:13Z"
+  },
+  {
+   "number": 263,
+   "created_at": "2026-09-02T02:08:23Z",
+   "closed_at": "2026-09-02T06:52:38Z"
+  },
+  {
+   "number": 266,
+   "created_at": "2026-09-02T03:35:18Z",
+   "closed_at": "2026-09-03T07:16:18Z"
+  },
+  {
+   "number": 270,
+   "created_at": "2026-09-02T05:51:57Z",
+   "closed_at": "2026-09-02T23:51:53Z"
+  },
+  {
+   "number": 271,
+   "created_at": "2026-09-02T05:51:58Z",
+   "closed_at": "2026-09-04T11:36:42Z"
+  },
+  {
+   "number": 277,
+   "created_at": "2026-09-02T07:51:43Z",
+   "closed_at": "2026-09-05T13:37:14Z"
+  },
+  {
+   "number": 279,
+   "created_at": "2026-09-03T00:09:42Z",
+   "closed_at": "2026-09-05T13:37:07Z"
+  },
+  {
+   "number": 280,
+   "created_at": "2026-09-03T00:12:42Z",
+   "closed_at": "2026-09-04T11:19:45Z"
+  },
+  {
+   "number": 281,
+   "created_at": "2026-09-03T00:12:42Z",
+   "closed_at": "2026-09-04T23:12:42Z"
+  },
+  {
+   "number": 282,
+   "created_at": "2026-09-03T00:12:43Z",
+   "closed_at": "2026-09-04T23:12:40Z"
+  },
+  {
+   "number": 283,
+   "created_at": "2026-09-03T00:12:43Z",
+   "closed_at": "2026-09-05T13:50:29Z"
+  },
+  {
+   "number": 284,
+   "created_at": "2026-09-03T00:15:01Z",
+   "closed_at": "2026-09-04T11:57:54Z"
+  },
+  {
+   "number": 285,
+   "created_at": "2026-09-03T00:15:01Z",
+   "closed_at": "2026-09-04T11:19:42Z"
+  },
+  {
+   "number": 286,
+   "created_at": "2026-09-03T00:15:02Z",
+   "closed_at": "2026-09-04T11:19:52Z"
+  },
+  {
+   "number": 287,
+   "created_at": "2026-09-03T00:17:11Z",
+   "closed_at": "2026-09-04T23:12:44Z"
+  },
+  {
+   "number": 288,
+   "created_at": "2026-09-03T00:26:23Z",
+   "closed_at": "2026-09-05T14:28:27Z"
+  },
+  {
+   "number": 289,
+   "created_at": "2026-09-03T00:26:24Z",
+   "closed_at": "2026-09-05T13:37:11Z"
+  },
+  {
+   "number": 291,
+   "created_at": "2026-09-03T00:59:32Z",
+   "closed_at": "2026-09-04T13:07:09Z"
+  },
+  {
+   "number": 292,
+   "created_at": "2026-09-03T02:22:20Z",
+   "closed_at": "2026-09-04T11:45:37Z"
+  },
+  {
+   "number": 293,
+   "created_at": "2026-09-03T03:12:24Z",
+   "closed_at": "2026-09-04T00:36:00Z"
+  },
+  {
+   "number": 297,
+   "created_at": "2026-09-03T06:40:35Z",
+   "closed_at": "2026-09-04T00:05:00Z"
+  },
+  {
+   "number": 300,
+   "created_at": "2026-09-03T06:47:08Z",
+   "closed_at": "2026-09-05T13:37:09Z"
+  },
+  {
+   "number": 304,
+   "created_at": "2026-09-03T09:10:23Z",
+   "closed_at": "2026-09-03T10:07:14Z"
+  },
+  {
+   "number": 305,
+   "created_at": "2026-09-03T09:10:42Z",
+   "closed_at": "2026-09-05T13:54:56Z"
+  },
+  {
+   "number": 306,
+   "created_at": "2026-09-03T09:10:58Z",
+   "closed_at": "2026-09-03T10:07:15Z"
+  },
+  {
+   "number": 308,
+   "created_at": "2026-09-03T10:05:34Z",
+   "closed_at": "2026-09-04T00:05:02Z"
+  },
+  {
+   "number": 312,
+   "created_at": "2026-09-03T21:41:53Z",
+   "closed_at": "2026-09-14T12:09:44Z"
+  },
+  {
+   "number": 313,
+   "created_at": "2026-09-03T21:41:55Z",
+   "closed_at": "2026-09-14T12:13:14Z"
+  },
+  {
+   "number": 314,
+   "created_at": "2026-09-03T21:41:57Z",
+   "closed_at": "2026-09-04T04:02:05Z"
+  },
+  {
+   "number": 315,
+   "created_at": "2026-09-03T21:41:58Z",
+   "closed_at": "2026-09-14T12:09:46Z"
+  },
+  {
+   "number": 318,
+   "created_at": "2026-09-03T22:41:34Z",
+   "closed_at": "2026-09-05T00:24:18Z"
+  },
+  {
+   "number": 319,
+   "created_at": "2026-09-03T22:54:17Z",
+   "closed_at": "2026-09-04T04:02:07Z"
+  },
+  {
+   "number": 321,
+   "created_at": "2026-09-03T23:05:57Z",
+   "closed_at": "2026-09-05T00:24:21Z"
+  },
+  {
+   "number": 324,
+   "created_at": "2026-09-04T00:55:25Z",
+   "closed_at": "2026-09-04T04:02:10Z"
+  },
+  {
+   "number": 326,
+   "created_at": "2026-09-04T01:31:23Z",
+   "closed_at": "2026-09-05T10:38:58Z"
+  },
+  {
+   "number": 327,
+   "created_at": "2026-09-04T01:34:31Z",
+   "closed_at": "2026-09-04T11:36:44Z"
+  },
+  {
+   "number": 328,
+   "created_at": "2026-09-04T01:34:32Z",
+   "closed_at": "2026-09-05T13:37:13Z"
+  },
+  {
+   "number": 329,
+   "created_at": "2026-09-04T04:14:34Z",
+   "closed_at": "2026-09-04T11:19:49Z"
+  },
+  {
+   "number": 330,
+   "created_at": "2026-09-04T04:14:36Z",
+   "closed_at": "2026-09-04T11:19:47Z"
+  },
+  {
+   "number": 331,
+   "created_at": "2026-09-04T04:21:19Z",
+   "closed_at": "2026-09-05T00:06:59Z"
+  },
+  {
+   "number": 332,
+   "created_at": "2026-09-04T06:19:10Z",
+   "closed_at": "2026-10-01T23:26:06Z"
+  },
+  {
+   "number": 333,
+   "created_at": "2026-09-04T06:50:58Z",
+   "closed_at": "2026-10-01T23:27:04Z"
+  },
+  {
+   "number": 334,
+   "created_at": "2026-09-04T06:52:51Z",
+   "closed_at": "2026-10-01T23:24:22Z"
+  },
+  {
+   "number": 335,
+   "created_at": "2026-09-04T06:52:52Z",
+   "closed_at": "2026-10-01T23:25:22Z"
+  },
+  {
+   "number": 336,
+   "created_at": "2026-09-04T06:52:53Z",
+   "closed_at": "2026-09-16T22:52:18Z"
+  },
+  {
+   "number": 337,
+   "created_at": "2026-09-04T06:52:54Z",
+   "closed_at": "2026-10-01T23:26:09Z"
+  },
+  {
+   "number": 338,
+   "created_at": "2026-09-04T06:52:55Z",
+   "closed_at": "2026-10-01T23:27:06Z"
+  },
+  {
+   "number": 339,
+   "created_at": "2026-09-04T06:52:55Z",
+   "closed_at": "2026-10-01T23:24:25Z"
+  },
+  {
+   "number": 340,
+   "created_at": "2026-09-04T06:52:56Z",
+   "closed_at": "2026-09-23T03:56:50Z"
+  },
+  {
+   "number": 341,
+   "created_at": "2026-09-04T06:52:57Z",
+   "closed_at": "2026-10-01T23:25:24Z"
+  },
+  {
+   "number": 342,
+   "created_at": "2026-09-04T06:52:58Z",
+   "closed_at": "2026-10-01T23:26:11Z"
+  },
+  {
+   "number": 344,
+   "created_at": "2026-09-04T09:45:52Z",
+   "closed_at": "2026-09-26T16:32:39Z"
+  },
+  {
+   "number": 345,
+   "created_at": "2026-09-04T09:45:54Z",
+   "closed_at": "2026-09-23T03:56:07Z"
+  },
+  {
+   "number": 346,
+   "created_at": "2026-09-04T09:45:55Z",
+   "closed_at": "2026-09-15T11:43:05Z"
+  },
+  {
+   "number": 347,
+   "created_at": "2026-09-04T09:45:57Z",
+   "closed_at": "2026-09-15T11:43:02Z"
+  },
+  {
+   "number": 348,
+   "created_at": "2026-09-04T09:45:58Z",
+   "closed_at": "2026-09-15T11:42:59Z"
+  },
+  {
+   "number": 349,
+   "created_at": "2026-09-04T09:46:00Z",
+   "closed_at": "2026-09-15T11:42:56Z"
+  },
+  {
+   "number": 350,
+   "created_at": "2026-09-04T09:46:10Z",
+   "closed_at": "2026-09-22T23:50:18Z"
+  },
+  {
+   "number": 351,
+   "created_at": "2026-09-04T09:46:11Z",
+   "closed_at": "2026-09-15T11:42:52Z"
+  },
+  {
+   "number": 352,
+   "created_at": "2026-09-04T09:46:12Z",
+   "closed_at": "2026-09-15T11:41:01Z"
+  },
+  {
+   "number": 353,
+   "created_at": "2026-09-04T09:46:14Z",
+   "closed_at": "2026-09-05T14:28:25Z"
+  },
+  {
+   "number": 354,
+   "created_at": "2026-09-04T09:46:15Z",
+   "closed_at": "2026-09-05T14:28:20Z"
+  },
+  {
+   "number": 355,
+   "created_at": "2026-09-04T09:46:17Z",
+   "closed_at": "2026-09-05T13:50:35Z"
+  },
+  {
+   "number": 356,
+   "created_at": "2026-09-04T09:46:18Z",
+   "closed_at": "2026-09-05T13:50:37Z"
+  },
+  {
+   "number": 357,
+   "created_at": "2026-09-04T09:46:20Z",
+   "closed_at": "2026-10-01T23:27:09Z"
+  },
+  {
+   "number": 358,
+   "created_at": "2026-09-04T09:46:21Z",
+   "closed_at": "2026-09-15T11:42:49Z"
+  },
+  {
+   "number": 359,
+   "created_at": "2026-09-04T10:26:33Z",
+   "closed_at": "2026-09-04T10:32:27Z"
+  },
+  {
+   "number": 360,
+   "created_at": "2026-09-04T10:27:54Z",
+   "closed_at": "2026-09-04T11:21:45Z"
+  },
+  {
+   "number": 367,
+   "created_at": "2026-09-04T12:40:36Z",
+   "closed_at": "2026-09-15T11:40:35Z"
+  },
+  {
+   "number": 370,
+   "created_at": "2026-09-04T15:55:22Z",
+   "closed_at": "2026-09-04T21:19:36Z"
+  },
+  {
+   "number": 371,
+   "created_at": "2026-09-04T15:55:24Z",
+   "closed_at": "2026-09-04T22:24:18Z"
+  },
+  {
+   "number": 372,
+   "created_at": "2026-09-04T16:04:18Z",
+   "closed_at": "2026-09-04T21:19:33Z"
+  },
+  {
+   "number": 375,
+   "created_at": "2026-09-04T21:10:15Z",
+   "closed_at": "2026-09-08T14:08:02Z"
+  },
+  {
+   "number": 376,
+   "created_at": "2026-09-04T21:10:23Z",
+   "closed_at": "2026-09-08T14:08:04Z"
+  },
+  {
+   "number": 377,
+   "created_at": "2026-09-04T21:10:24Z",
+   "closed_at": "2026-09-05T13:50:33Z"
+  },
+  {
+   "number": 383,
+   "created_at": "2026-09-05T01:39:09Z",
+   "closed_at": "2026-09-05T13:50:25Z"
+  },
+  {
+   "number": 384,
+   "created_at": "2026-09-05T01:39:27Z",
+   "closed_at": "2026-09-05T13:50:28Z"
+  },
+  {
+   "number": 388,
+   "created_at": "2026-09-05T03:38:03Z",
+   "closed_at": "2026-09-05T13:54:58Z"
+  },
+  {
+   "number": 389,
+   "created_at": "2026-09-05T03:54:09Z",
+   "closed_at": "2026-09-26T16:32:41Z"
+  },
+  {
+   "number": 390,
+   "created_at": "2026-09-05T05:09:17Z",
+   "closed_at": "2026-10-01T23:24:28Z"
+  },
+  {
+   "number": 391,
+   "created_at": "2026-09-05T08:59:42Z",
+   "closed_at": "2026-09-06T23:39:46Z"
+  },
+  {
+   "number": 392,
+   "created_at": "2026-09-05T09:00:01Z",
+   "closed_at": "2026-09-06T06:00:28Z"
+  },
+  {
+   "number": 399,
+   "created_at": "2026-09-05T12:02:53Z",
+   "closed_at": "2026-09-05T14:28:22Z"
+  },
+  {
+   "number": 401,
+   "created_at": "2026-09-05T12:07:02Z",
+   "closed_at": "2026-09-05T13:37:05Z"
+  },
+  {
+   "number": 415,
+   "created_at": "2026-09-05T22:53:55Z",
+   "closed_at": "2026-09-13T18:06:20Z"
+  },
+  {
+   "number": 416,
+   "created_at": "2026-09-05T22:54:19Z",
+   "closed_at": "2026-09-08T10:47:51Z"
+  },
+  {
+   "number": 417,
+   "created_at": "2026-09-05T23:35:33Z",
+   "closed_at": "2026-09-06T05:41:51Z"
+  },
+  {
+   "number": 418,
+   "created_at": "2026-09-05T23:36:03Z",
+   "closed_at": "2026-09-06T06:00:22Z"
+  },
+  {
+   "number": 420,
+   "created_at": "2026-09-05T23:58:21Z",
+   "closed_at": "2026-09-06T06:00:24Z"
+  },
+  {
+   "number": 421,
+   "created_at": "2026-09-05T23:59:01Z",
+   "closed_at": "2026-09-06T14:13:26Z"
+  },
+  {
+   "number": 422,
+   "created_at": "2026-09-05T23:59:02Z",
+   "closed_at": "2026-09-06T06:00:26Z"
+  },
+  {
+   "number": 423,
+   "created_at": "2026-09-05T23:59:34Z",
+   "closed_at": "2026-09-06T22:35:42Z"
+  },
+  {
+   "number": 424,
+   "created_at": "2026-09-06T00:57:46Z",
+   "closed_at": "2026-09-06T06:29:39Z"
+  },
+  {
+   "number": 432,
+   "created_at": "2026-09-06T06:55:39Z",
+   "closed_at": "2026-09-08T10:47:53Z"
+  },
+  {
+   "number": 433,
+   "created_at": "2026-09-06T06:55:40Z",
+   "closed_at": "2026-09-07T08:11:05Z"
+  },
+  {
+   "number": 436,
+   "created_at": "2026-09-06T13:38:48Z",
+   "closed_at": "2026-09-06T21:23:48Z"
+  },
+  {
+   "number": 438,
+   "created_at": "2026-09-06T18:39:19Z",
+   "closed_at": "2026-09-06T19:13:51Z"
+  },
+  {
+   "number": 440,
+   "created_at": "2026-09-06T19:14:14Z",
+   "closed_at": "2026-09-07T12:03:11Z"
+  },
+  {
+   "number": 441,
+   "created_at": "2026-09-06T19:14:33Z",
+   "closed_at": "2026-09-07T13:12:57Z"
+  },
+  {
+   "number": 442,
+   "created_at": "2026-09-06T19:36:44Z",
+   "closed_at": "2026-09-07T17:27:32Z"
+  },
+  {
+   "number": 443,
+   "created_at": "2026-09-06T20:01:44Z",
+   "closed_at": "2026-09-07T17:14:21Z"
+  },
+  {
+   "number": 444,
+   "created_at": "2026-09-06T20:06:07Z",
+   "closed_at": "2026-09-07T17:14:18Z"
+  },
+  {
+   "number": 445,
+   "created_at": "2026-09-06T20:56:47Z",
+   "closed_at": "2026-09-13T18:06:50Z"
+  },
+  {
+   "number": 446,
+   "created_at": "2026-09-06T20:57:05Z",
+   "closed_at": "2026-09-07T11:37:32Z"
+  },
+  {
+   "number": 451,
+   "created_at": "2026-09-07T01:11:28Z",
+   "closed_at": "2026-09-07T09:01:43Z"
+  },
+  {
+   "number": 452,
+   "created_at": "2026-09-07T01:11:33Z",
+   "closed_at": "2026-10-01T23:25:27Z"
+  },
+  {
+   "number": 456,
+   "created_at": "2026-09-07T08:15:22Z",
+   "closed_at": "2026-09-07T08:33:59Z"
+  },
+  {
+   "number": 459,
+   "created_at": "2026-09-07T09:04:19Z",
+   "closed_at": "2026-10-01T23:26:14Z"
+  },
+  {
+   "number": 461,
+   "created_at": "2026-09-07T11:10:38Z",
+   "closed_at": "2026-10-06T15:16:12Z"
+  },
+  {
+   "number": 462,
+   "created_at": "2026-09-07T11:19:44Z",
+   "closed_at": "2026-09-26T16:32:44Z"
+  },
+  {
+   "number": 463,
+   "created_at": "2026-09-07T11:20:08Z",
+   "closed_at": "2026-09-08T14:08:07Z"
+  },
+  {
+   "number": 464,
+   "created_at": "2026-09-07T11:20:37Z",
+   "closed_at": "2026-10-03T23:20:50Z"
+  },
+  {
+   "number": 469,
+   "created_at": "2026-09-07T15:32:29Z",
+   "closed_at": "2026-10-25T00:45:18Z"
+  },
+  {
+   "number": 476,
+   "created_at": "2026-09-07T23:30:38Z",
+   "closed_at": "2026-09-29T21:40:16Z"
+  },
+  {
+   "number": 478,
+   "created_at": "2026-09-08T00:30:48Z",
+   "closed_at": "2026-09-22T21:55:23Z"
+  },
+  {
+   "number": 479,
+   "created_at": "2026-09-08T06:00:50Z",
+   "closed_at": "2026-10-03T09:40:00Z"
+  },
+  {
+   "number": 480,
+   "created_at": "2026-09-08T06:01:05Z",
+   "closed_at": "2026-10-01T23:27:10Z"
+  },
+  {
+   "number": 481,
+   "created_at": "2026-09-08T06:01:07Z",
+   "closed_at": "2026-10-01T23:24:31Z"
+  },
+  {
+   "number": 482,
+   "created_at": "2026-09-08T06:01:09Z",
+   "closed_at": "2026-10-01T23:25:29Z"
+  },
+  {
+   "number": 483,
+   "created_at": "2026-09-08T06:01:11Z",
+   "closed_at": "2026-10-01T23:26:16Z"
+  },
+  {
+   "number": 484,
+   "created_at": "2026-09-08T06:01:13Z",
+   "closed_at": "2026-10-01T23:27:13Z"
+  },
+  {
+   "number": 485,
+   "created_at": "2026-09-08T10:17:24Z",
+   "closed_at": "2026-09-08T22:51:22Z"
+  },
+  {
+   "number": 487,
+   "created_at": "2026-09-08T10:37:56Z",
+   "closed_at": "2026-10-01T23:24:33Z"
+  },
+  {
+   "number": 493,
+   "created_at": "2026-09-08T21:08:33Z",
+   "closed_at": "2026-09-26T16:32:46Z"
+  },
+  {
+   "number": 494,
+   "created_at": "2026-09-08T21:08:35Z",
+   "closed_at": "2026-09-25T09:33:38Z"
+  },
+  {
+   "number": 495,
+   "created_at": "2026-09-08T21:15:37Z",
+   "closed_at": "2026-09-15T07:49:12Z"
+  },
+  {
+   "number": 496,
+   "created_at": "2026-09-08T21:36:36Z",
+   "closed_at": "2026-09-08T21:42:02Z"
+  },
+  {
+   "number": 498,
+   "created_at": "2026-09-08T21:58:07Z",
+   "closed_at": "2026-09-08T22:50:04Z"
+  },
+  {
+   "number": 499,
+   "created_at": "2026-09-08T22:03:01Z",
+   "closed_at": "2026-09-13T18:07:12Z"
+  },
+  {
+   "number": 500,
+   "created_at": "2026-09-08T22:03:35Z",
+   "closed_at": "2026-09-13T18:07:37Z"
+  },
+  {
+   "number": 506,
+   "created_at": "2026-09-08T23:43:29Z",
+   "closed_at": "2026-09-09T09:48:25Z"
+  },
+  {
+   "number": 507,
+   "created_at": "2026-09-08T23:45:28Z",
+   "closed_at": "2026-09-09T05:40:16Z"
+  },
+  {
+   "number": 508,
+   "created_at": "2026-09-08T23:45:30Z",
+   "closed_at": "2026-09-09T05:40:18Z"
+  },
+  {
+   "number": 509,
+   "created_at": "2026-09-08T23:45:32Z",
+   "closed_at": "2026-09-09T08:45:32Z"
+  },
+  {
+   "number": 510,
+   "created_at": "2026-09-08T23:45:34Z",
+   "closed_at": "2026-09-09T08:45:34Z"
+  },
+  {
+   "number": 511,
+   "created_at": "2026-09-08T23:45:35Z",
+   "closed_at": "2026-09-09T08:33:10Z"
+  },
+  {
+   "number": 512,
+   "created_at": "2026-09-08T23:45:37Z",
+   "closed_at": "2026-09-09T09:01:53Z"
+  },
+  {
+   "number": 513,
+   "created_at": "2026-09-09T00:21:01Z",
+   "closed_at": "2026-09-09T09:01:50Z"
+  },
+  {
+   "number": 514,
+   "created_at": "2026-09-09T01:06:59Z",
+   "closed_at": "2026-09-09T08:33:12Z"
+  },
+  {
+   "number": 515,
+   "created_at": "2026-09-09T01:25:15Z",
+   "closed_at": "2026-09-09T08:33:08Z"
+  },
+  {
+   "number": 518,
+   "created_at": "2026-09-09T04:46:30Z",
+   "closed_at": "2026-09-09T12:27:53Z"
+  },
+  {
+   "number": 524,
+   "created_at": "2026-09-09T09:46:13Z",
+   "closed_at": "2026-09-09T12:27:56Z"
+  },
+  {
+   "number": 525,
+   "created_at": "2026-09-09T09:46:33Z",
+   "closed_at": "2026-09-13T18:08:01Z"
+  },
+  {
+   "number": 526,
+   "created_at": "2026-09-09T09:47:46Z",
+   "closed_at": "2026-09-13T18:08:24Z"
+  },
+  {
+   "number": 527,
+   "created_at": "2026-09-09T10:17:08Z",
+   "closed_at": "2026-09-13T18:08:51Z"
+  },
+  {
+   "number": 530,
+   "created_at": "2026-09-09T11:32:07Z",
+   "closed_at": "2026-10-01T23:25:32Z"
+  },
+  {
+   "number": 534,
+   "created_at": "2026-09-09T13:27:12Z",
+   "closed_at": "2026-09-23T03:55:18Z"
+  },
+  {
+   "number": 536,
+   "created_at": "2026-09-09T18:32:18Z",
+   "closed_at": "2026-09-15T11:41:05Z"
+  },
+  {
+   "number": 537,
+   "created_at": "2026-09-09T20:34:54Z",
+   "closed_at": "2026-09-15T23:14:19Z"
+  },
+  {
+   "number": 540,
+   "created_at": "2026-09-09T22:01:41Z",
+   "closed_at": "2026-09-19T00:10:59Z"
+  },
+  {
+   "number": 541,
+   "created_at": "2026-09-09T22:05:58Z",
+   "closed_at": "2026-09-19T00:11:11Z"
+  },
+  {
+   "number": 542,
+   "created_at": "2026-09-09T22:26:07Z",
+   "closed_at": "2026-09-25T09:33:40Z"
+  },
+  {
+   "number": 543,
+   "created_at": "2026-09-09T22:45:06Z",
+   "closed_at": "2026-09-13T18:09:15Z"
+  },
+  {
+   "number": 544,
+   "created_at": "2026-09-09T23:16:51Z",
+   "closed_at": "2026-09-26T16:32:49Z"
+  },
+  {
+   "number": 545,
+   "created_at": "2026-09-09T23:23:25Z",
+   "closed_at": "2026-09-13T18:09:37Z"
+  },
+  {
+   "number": 546,
+   "created_at": "2026-09-09T23:42:19Z",
+   "closed_at": "2026-09-10T00:13:39Z"
+  },
+  {
+   "number": 548,
+   "created_at": "2026-09-10T00:03:32Z",
+   "closed_at": "2026-09-22T23:50:20Z"
+  },
+  {
+   "number": 550,
+   "created_at": "2026-09-10T00:55:15Z",
+   "closed_at": "2026-09-19T01:32:46Z"
+  },
+  {
+   "number": 551,
+   "created_at": "2026-09-10T01:53:12Z",
+   "closed_at": "2026-09-10T03:25:15Z"
+  },
+  {
+   "number": 553,
+   "created_at": "2026-09-10T02:06:59Z",
+   "closed_at": "2026-09-22T15:44:34Z"
+  },
+  {
+   "number": 554,
+   "created_at": "2026-09-10T02:59:54Z",
+   "closed_at": "2026-09-19T00:11:21Z"
+  },
+  {
+   "number": 555,
+   "created_at": "2026-09-10T03:00:17Z",
+   "closed_at": "2026-09-13T17:49:27Z"
+  },
+  {
+   "number": 556,
+   "created_at": "2026-09-10T19:56:51Z",
+   "closed_at": "2026-09-11T23:19:06Z"
+  },
+  {
+   "number": 560,
+   "created_at": "2026-09-12T12:42:51Z",
+   "closed_at": "2026-09-25T09:35:40Z"
+  },
+  {
+   "number": 561,
+   "created_at": "2026-09-12T12:52:20Z",
+   "closed_at": "2026-09-19T00:11:33Z"
+  },
+  {
+   "number": 563,
+   "created_at": "2026-09-12T13:07:58Z",
+   "closed_at": "2026-09-13T17:49:26Z"
+  },
+  {
+   "number": 565,
+   "created_at": "2026-09-12T13:20:51Z",
+   "closed_at": "2026-09-13T18:10:55Z"
+  },
+  {
+   "number": 566,
+   "created_at": "2026-09-12T13:22:05Z",
+   "closed_at": "2026-09-13T18:11:19Z"
+  },
+  {
+   "number": 571,
+   "created_at": "2026-09-13T01:28:02Z",
+   "closed_at": "2026-09-13T18:11:41Z"
+  },
+  {
+   "number": 573,
+   "created_at": "2026-09-13T02:11:19Z",
+   "closed_at": "2026-09-14T11:17:15Z"
+  },
+  {
+   "number": 577,
+   "created_at": "2026-09-13T02:19:55Z",
+   "closed_at": "2026-09-25T14:16:08Z"
+  },
+  {
+   "number": 580,
+   "created_at": "2026-09-13T02:24:48Z",
+   "closed_at": "2026-09-29T01:40:31Z"
+  },
+  {
+   "number": 581,
+   "created_at": "2026-09-13T02:26:06Z",
+   "closed_at": "2026-10-02T18:01:52Z"
+  },
+  {
+   "number": 583,
+   "created_at": "2026-09-13T02:41:19Z",
+   "closed_at": "2026-09-22T15:44:27Z"
+  },
+  {
+   "number": 584,
+   "created_at": "2026-09-13T03:21:34Z",
+   "closed_at": "2026-09-22T15:44:19Z"
+  },
+  {
+   "number": 585,
+   "created_at": "2026-09-13T03:21:35Z",
+   "closed_at": "2026-09-22T23:50:14Z"
+  },
+  {
+   "number": 589,
+   "created_at": "2026-09-13T03:32:33Z",
+   "closed_at": "2026-09-26T07:00:30Z"
+  },
+  {
+   "number": 590,
+   "created_at": "2026-09-13T03:36:09Z",
+   "closed_at": "2026-09-23T03:55:12Z"
+  },
+  {
+   "number": 592,
+   "created_at": "2026-09-13T06:59:46Z",
+   "closed_at": "2026-09-22T15:44:11Z"
+  },
+  {
+   "number": 595,
+   "created_at": "2026-09-13T07:18:05Z",
+   "closed_at": "2026-09-16T22:52:21Z"
+  },
+  {
+   "number": 598,
+   "created_at": "2026-09-13T07:30:02Z",
+   "closed_at": "2026-09-15T23:14:17Z"
+  },
+  {
+   "number": 599,
+   "created_at": "2026-09-13T08:01:29Z",
+   "closed_at": "2026-09-29T01:41:53Z"
+  },
+  {
+   "number": 602,
+   "created_at": "2026-09-13T09:15:30Z",
+   "closed_at": "2026-09-23T03:55:54Z"
+  },
+  {
+   "number": 603,
+   "created_at": "2026-09-13T09:58:43Z",
+   "closed_at": "2026-09-26T16:32:51Z"
+  },
+  {
+   "number": 605,
+   "created_at": "2026-09-13T10:32:52Z",
+   "closed_at": "2026-09-26T16:32:54Z"
+  },
+  {
+   "number": 606,
+   "created_at": "2026-09-13T10:32:53Z",
+   "closed_at": "2026-09-26T16:32:57Z"
+  },
+  {
+   "number": 607,
+   "created_at": "2026-09-13T10:32:55Z",
+   "closed_at": "2026-09-26T16:32:59Z"
+  },
+  {
+   "number": 610,
+   "created_at": "2026-09-13T11:24:25Z",
+   "closed_at": "2026-09-14T12:59:54Z"
+  },
+  {
+   "number": 611,
+   "created_at": "2026-09-13T12:55:15Z",
+   "closed_at": "2026-09-26T16:33:01Z"
+  },
+  {
+   "number": 618,
+   "created_at": "2026-09-13T17:55:35Z",
+   "closed_at": "2026-09-16T22:52:14Z"
+  },
+  {
+   "number": 619,
+   "created_at": "2026-09-13T18:03:02Z",
+   "closed_at": "2026-09-22T21:55:31Z"
+  },
+  {
+   "number": 621,
+   "created_at": "2026-09-13T18:03:04Z",
+   "closed_at": "2026-09-19T00:11:46Z"
+  },
+  {
+   "number": 623,
+   "created_at": "2026-09-13T18:03:06Z",
+   "closed_at": "2026-09-19T00:11:57Z"
+  },
+  {
+   "number": 624,
+   "created_at": "2026-09-14T00:01:22Z",
+   "closed_at": "2026-09-22T15:44:03Z"
+  },
+  {
+   "number": 625,
+   "created_at": "2026-09-14T01:39:22Z",
+   "closed_at": "2026-09-26T16:33:04Z"
+  },
+  {
+   "number": 626,
+   "created_at": "2026-09-14T01:44:35Z",
+   "closed_at": "2026-09-26T16:33:06Z"
+  },
+  {
+   "number": 627,
+   "created_at": "2026-09-14T01:47:13Z",
+   "closed_at": "2026-09-26T16:33:09Z"
+  },
+  {
+   "number": 628,
+   "created_at": "2026-09-14T01:49:47Z",
+   "closed_at": "2026-09-26T16:33:12Z"
+  },
+  {
+   "number": 631,
+   "created_at": "2026-09-14T01:58:19Z",
+   "closed_at": "2026-09-26T12:14:32Z"
+  },
+  {
+   "number": 632,
+   "created_at": "2026-09-14T02:19:08Z",
+   "closed_at": "2026-09-25T12:31:38Z"
+  },
+  {
+   "number": 633,
+   "created_at": "2026-09-14T02:23:19Z",
+   "closed_at": "2026-09-26T11:46:18Z"
+  },
+  {
+   "number": 635,
+   "created_at": "2026-09-14T02:30:18Z",
+   "closed_at": "2026-10-08T22:33:32Z"
+  },
+  {
+   "number": 638,
+   "created_at": "2026-09-14T09:54:09Z",
+   "closed_at": "2026-09-26T07:00:32Z"
+  },
+  {
+   "number": 641,
+   "created_at": "2026-09-14T10:56:37Z",
+   "closed_at": "2026-09-25T17:32:41Z"
+  },
+  {
+   "number": 642,
+   "created_at": "2026-09-14T10:57:10Z",
+   "closed_at": "2026-09-26T16:33:17Z"
+  },
+  {
+   "number": 644,
+   "created_at": "2026-09-14T12:07:20Z",
+   "closed_at": "2026-09-26T16:33:19Z"
+  },
+  {
+   "number": 645,
+   "created_at": "2026-09-14T12:07:39Z",
+   "closed_at": "2026-09-26T16:33:22Z"
+  },
+  {
+   "number": 647,
+   "created_at": "2026-09-15T07:18:47Z",
+   "closed_at": "2026-09-22T15:43:55Z"
+  },
+  {
+   "number": 648,
+   "created_at": "2026-09-15T07:46:41Z",
+   "closed_at": "2026-09-22T15:43:48Z"
+  },
+  {
+   "number": 653,
+   "created_at": "2026-09-15T09:02:45Z",
+   "closed_at": "2026-10-06T03:17:46Z"
+  },
+  {
+   "number": 654,
+   "created_at": "2026-09-15T09:17:58Z",
+   "closed_at": "2026-09-26T16:33:24Z"
+  },
+  {
+   "number": 655,
+   "created_at": "2026-09-15T09:30:15Z",
+   "closed_at": "2026-10-01T23:27:15Z"
+  },
+  {
+   "number": 656,
+   "created_at": "2026-09-15T09:30:37Z",
+   "closed_at": "2026-09-25T09:35:42Z"
+  },
+  {
+   "number": 657,
+   "created_at": "2026-09-15T09:30:57Z",
+   "closed_at": "2026-09-19T00:12:09Z"
+  },
+  {
+   "number": 658,
+   "created_at": "2026-09-15T09:31:20Z",
+   "closed_at": "2026-09-26T16:33:27Z"
+  },
+  {
+   "number": 659,
+   "created_at": "2026-09-15T09:42:18Z",
+   "closed_at": "2026-10-05T22:10:59Z"
+  },
+  {
+   "number": 660,
+   "created_at": "2026-09-15T10:53:24Z",
+   "closed_at": "2026-09-15T14:07:28Z"
+  },
+  {
+   "number": 662,
+   "created_at": "2026-09-15T12:25:00Z",
+   "closed_at": "2026-09-15T19:27:20Z"
+  },
+  {
+   "number": 664,
+   "created_at": "2026-09-15T13:08:06Z",
+   "closed_at": "2026-09-22T15:43:39Z"
+  },
+  {
+   "number": 668,
+   "created_at": "2026-09-15T14:06:33Z",
+   "closed_at": "2026-09-19T01:33:06Z"
+  },
+  {
+   "number": 669,
+   "created_at": "2026-09-15T14:06:35Z",
+   "closed_at": "2026-09-16T02:59:17Z"
+  },
+  {
+   "number": 670,
+   "created_at": "2026-09-15T14:06:36Z",
+   "closed_at": "2026-10-01T23:25:35Z"
+  },
+  {
+   "number": 671,
+   "created_at": "2026-09-15T14:06:38Z",
+   "closed_at": "2026-10-31T11:19:46Z"
+  },
+  {
+   "number": 674,
+   "created_at": "2026-09-15T15:05:08Z",
+   "closed_at": "2026-09-22T23:50:16Z"
+  },
+  {
+   "number": 676,
+   "created_at": "2026-09-15T16:27:16Z",
+   "closed_at": "2026-09-26T11:46:31Z"
+  },
+  {
+   "number": 678,
+   "created_at": "2026-09-15T16:53:40Z",
+   "closed_at": "2026-09-22T15:43:32Z"
+  },
+  {
+   "number": 680,
+   "created_at": "2026-09-15T17:41:17Z",
+   "closed_at": "2026-09-25T09:33:43Z"
+  },
+  {
+   "number": 684,
+   "created_at": "2026-09-15T21:33:16Z",
+   "closed_at": "2026-09-26T16:33:29Z"
+  },
+  {
+   "number": 685,
+   "created_at": "2026-09-15T21:33:17Z",
+   "closed_at": "2026-09-16T02:59:21Z"
+  },
+  {
+   "number": 686,
+   "created_at": "2026-09-15T21:34:00Z",
+   "closed_at": "2026-10-01T23:27:18Z"
+  },
+  {
+   "number": 687,
+   "created_at": "2026-09-15T21:39:30Z",
+   "closed_at": "2026-09-22T15:43:23Z"
+  },
+  {
+   "number": 689,
+   "created_at": "2026-09-15T23:24:28Z",
+   "closed_at": "2026-10-01T23:24:35Z"
+  },
+  {
+   "number": 691,
+   "created_at": "2026-09-15T23:24:31Z",
+   "closed_at": "2026-10-01T23:26:19Z"
+  },
+  {
+   "number": 692,
+   "created_at": "2026-09-15T23:24:33Z",
+   "closed_at": "2026-10-01T23:27:20Z"
+  },
+  {
+   "number": 693,
+   "created_at": "2026-09-15T23:24:34Z",
+   "closed_at": "2026-10-01T23:24:38Z"
+  },
+  {
+   "number": 695,
+   "created_at": "2026-09-15T23:24:37Z",
+   "closed_at": "2026-10-01T23:26:22Z"
+  },
+  {
+   "number": 696,
+   "created_at": "2026-09-15T23:24:39Z",
+   "closed_at": "2026-10-01T23:27:23Z"
+  },
+  {
+   "number": 697,
+   "created_at": "2026-09-15T23:24:40Z",
+   "closed_at": "2026-10-01T23:24:40Z"
+  },
+  {
+   "number": 699,
+   "created_at": "2026-09-15T23:24:44Z",
+   "closed_at": "2026-10-01T23:26:25Z"
+  },
+  {
+   "number": 700,
+   "created_at": "2026-09-15T23:24:45Z",
+   "closed_at": "2026-10-01T23:27:26Z"
+  },
+  {
+   "number": 701,
+   "created_at": "2026-09-15T23:24:47Z",
+   "closed_at": "2026-10-01T23:24:43Z"
+  },
+  {
+   "number": 703,
+   "created_at": "2026-09-15T23:24:50Z",
+   "closed_at": "2026-10-01T23:26:27Z"
+  },
+  {
+   "number": 705,
+   "created_at": "2026-09-15T23:55:19Z",
+   "closed_at": "2026-09-25T17:32:43Z"
+  },
+  {
+   "number": 706,
+   "created_at": "2026-09-15T23:55:21Z",
+   "closed_at": "2026-09-22T15:43:16Z"
+  },
+  {
+   "number": 707,
+   "created_at": "2026-09-15T23:56:32Z",
+   "closed_at": "2026-10-02T13:15:12Z"
+  },
+  {
+   "number": 711,
+   "created_at": "2026-09-16T02:17:55Z",
+   "closed_at": "2026-09-26T16:33:32Z"
+  },
+  {
+   "number": 712,
+   "created_at": "2026-09-16T03:29:52Z",
+   "closed_at": "2026-09-16T20:39:04Z"
+  },
+  {
+   "number": 713,
+   "created_at": "2026-09-16T03:30:31Z",
+   "closed_at": "2026-09-16T20:39:07Z"
+  },
+  {
+   "number": 716,
+   "created_at": "2026-09-16T13:38:31Z",
+   "closed_at": "2026-09-16T22:52:12Z"
+  },
+  {
+   "number": 718,
+   "created_at": "2026-09-16T20:30:45Z",
+   "closed_at": "2026-09-26T16:33:34Z"
+  },
+  {
+   "number": 722,
+   "created_at": "2026-09-16T21:40:58Z",
+   "closed_at": "2026-10-01T23:26:30Z"
+  },
+  {
+   "number": 723,
+   "created_at": "2026-09-16T21:41:00Z",
+   "closed_at": "2026-09-25T09:33:45Z"
+  },
+  {
+   "number": 724,
+   "created_at": "2026-09-16T22:47:34Z",
+   "closed_at": "2026-10-01T23:27:28Z"
+  },
+  {
+   "number": 725,
+   "created_at": "2026-09-16T22:47:37Z",
+   "closed_at": "2026-10-03T00:52:41Z"
+  },
+  {
+   "number": 726,
+   "created_at": "2026-09-16T22:47:39Z",
+   "closed_at": "2026-09-26T16:33:36Z"
+  },
+  {
+   "number": 727,
+   "created_at": "2026-09-16T22:47:41Z",
+   "closed_at": "2026-09-22T15:43:07Z"
+  },
+  {
+   "number": 728,
+   "created_at": "2026-09-16T22:47:44Z",
+   "closed_at": "2026-09-22T15:43:00Z"
+  },
+  {
+   "number": 729,
+   "created_at": "2026-09-16T22:47:46Z",
+   "closed_at": "2026-09-22T21:55:37Z"
+  },
+  {
+   "number": 730,
+   "created_at": "2026-09-16T22:47:48Z",
+   "closed_at": "2026-09-22T15:42:52Z"
+  },
+  {
+   "number": 731,
+   "created_at": "2026-09-16T22:47:51Z",
+   "closed_at": "2026-09-25T09:33:47Z"
+  },
+  {
+   "number": 732,
+   "created_at": "2026-09-16T22:47:53Z",
+   "closed_at": "2026-09-22T15:42:43Z"
+  },
+  {
+   "number": 733,
+   "created_at": "2026-09-16T22:47:55Z",
+   "closed_at": "2026-10-01T23:25:38Z"
+  },
+  {
+   "number": 734,
+   "created_at": "2026-09-16T22:47:58Z",
+   "closed_at": "2026-10-01T23:26:32Z"
+  },
+  {
+   "number": 735,
+   "created_at": "2026-09-16T23:03:21Z",
+   "closed_at": "2026-10-11T02:49:50Z"
+  },
+  {
+   "number": 736,
+   "created_at": "2026-09-16T23:08:26Z",
+   "closed_at": "2026-09-22T15:44:40Z"
+  },
+  {
+   "number": 737,
+   "created_at": "2026-09-16T23:08:29Z",
+   "closed_at": "2026-09-23T03:55:36Z"
+  },
+  {
+   "number": 738,
+   "created_at": "2026-09-17T00:20:13Z",
+   "closed_at": "2026-09-23T03:55:30Z"
+  },
+  {
+   "number": 743,
+   "created_at": "2026-09-17T23:25:14Z",
+   "closed_at": "2026-09-26T16:33:39Z"
+  },
+  {
+   "number": 744,
+   "created_at": "2026-09-18T01:13:16Z",
+   "closed_at": "2026-10-05T04:15:39Z"
+  },
+  {
+   "number": 745,
+   "created_at": "2026-09-18T01:13:29Z",
+   "closed_at": "2026-10-01T23:25:40Z"
+  },
+  {
+   "number": 748,
+   "created_at": "2026-09-18T09:33:13Z",
+   "closed_at": "2026-09-26T16:33:41Z"
+  },
+  {
+   "number": 753,
+   "created_at": "2026-09-18T12:06:24Z",
+   "closed_at": "2026-09-26T16:33:44Z"
+  },
+  {
+   "number": 754,
+   "created_at": "2026-09-18T12:11:00Z",
+   "closed_at": "2026-09-26T11:46:49Z"
+  },
+  {
+   "number": 755,
+   "created_at": "2026-09-18T12:11:02Z",
+   "closed_at": "2026-09-26T12:14:36Z"
+  },
+  {
+   "number": 756,
+   "created_at": "2026-09-18T12:14:11Z",
+   "closed_at": "2026-09-26T11:46:51Z"
+  },
+  {
+   "number": 759,
+   "created_at": "2026-09-18T13:10:16Z",
+   "closed_at": "2026-10-02T06:11:52Z"
+  },
+  {
+   "number": 760,
+   "created_at": "2026-09-18T13:31:56Z",
+   "closed_at": "2026-10-01T23:24:45Z"
+  },
+  {
+   "number": 762,
+   "created_at": "2026-09-18T18:37:26Z",
+   "closed_at": "2026-09-19T01:31:55Z"
+  },
+  {
+   "number": 764,
+   "created_at": "2026-09-18T19:28:57Z",
+   "closed_at": "2026-09-25T09:35:44Z"
+  },
+  {
+   "number": 767,
+   "created_at": "2026-09-18T20:13:32Z",
+   "closed_at": "2026-10-08T22:33:36Z"
+  },
+  {
+   "number": 768,
+   "created_at": "2026-09-18T20:13:54Z",
+   "closed_at": "2026-09-25T09:33:50Z"
+  },
+  {
+   "number": 769,
+   "created_at": "2026-09-18T20:14:14Z",
+   "closed_at": "2026-09-23T03:55:24Z"
+  },
+  {
+   "number": 772,
+   "created_at": "2026-09-19T00:06:15Z",
+   "closed_at": "2026-10-03T09:39:57Z"
+  },
+  {
+   "number": 773,
+   "created_at": "2026-09-19T00:06:43Z",
+   "closed_at": "2026-10-01T23:27:33Z"
+  },
+  {
+   "number": 774,
+   "created_at": "2026-09-19T00:07:02Z",
+   "closed_at": "2026-09-23T03:56:40Z"
+  },
+  {
+   "number": 775,
+   "created_at": "2026-09-19T00:07:24Z",
+   "closed_at": "2026-10-01T23:24:48Z"
+  },
+  {
+   "number": 780,
+   "created_at": "2026-09-19T02:29:45Z",
+   "closed_at": "2026-10-06T15:16:18Z"
+  },
+  {
+   "number": 785,
+   "created_at": "2026-09-19T04:28:38Z",
+   "closed_at": "2026-10-03T09:39:59Z"
+  },
+  {
+   "number": 786,
+   "created_at": "2026-09-19T04:40:10Z",
+   "closed_at": "2026-09-25T09:33:52Z"
+  },
+  {
+   "number": 787,
+   "created_at": "2026-09-19T04:40:11Z",
+   "closed_at": "2026-09-26T16:33:46Z"
+  },
+  {
+   "number": 788,
+   "created_at": "2026-09-19T08:46:42Z",
+   "closed_at": "2026-09-26T16:33:49Z"
+  },
+  {
+   "number": 789,
+   "created_at": "2026-09-19T11:24:51Z",
+   "closed_at": "2026-09-26T16:33:52Z"
+  },
+  {
+   "number": 792,
+   "created_at": "2026-09-19T12:26:04Z",
+   "closed_at": "2026-09-26T11:47:02Z"
+  },
+  {
+   "number": 799,
+   "created_at": "2026-09-22T09:44:02Z",
+   "closed_at": "2026-09-26T11:47:03Z"
+  },
+  {
+   "number": 802,
+   "created_at": "2026-09-22T11:34:22Z",
+   "closed_at": "2026-09-22T22:05:03Z"
+  },
+  {
+   "number": 804,
+   "created_at": "2026-09-22T11:58:09Z",
+   "closed_at": "2026-09-26T11:47:05Z"
+  },
+  {
+   "number": 811,
+   "created_at": "2026-09-22T15:19:49Z",
+   "closed_at": "2026-09-22T21:55:09Z"
+  },
+  {
+   "number": 813,
+   "created_at": "2026-09-22T15:36:26Z",
+   "closed_at": "2026-09-22T21:55:16Z"
+  },
+  {
+   "number": 814,
+   "created_at": "2026-09-22T15:36:39Z",
+   "closed_at": "2026-09-23T03:56:44Z"
+  },
+  {
+   "number": 815,
+   "created_at": "2026-09-22T15:40:34Z",
+   "closed_at": "2026-10-05T22:10:48Z"
+  },
+  {
+   "number": 816,
+   "created_at": "2026-09-22T15:40:36Z",
+   "closed_at": "2026-09-23T03:56:00Z"
+  },
+  {
+   "number": 817,
+   "created_at": "2026-09-22T15:44:54Z",
+   "closed_at": "2026-09-30T00:43:49Z"
+  },
+  {
+   "number": 818,
+   "created_at": "2026-09-22T16:05:53Z",
+   "closed_at": "2026-09-25T09:33:54Z"
+  },
+  {
+   "number": 821,
+   "created_at": "2026-09-22T18:36:53Z",
+   "closed_at": "2026-09-25T23:07:50Z"
+  },
+  {
+   "number": 822,
+   "created_at": "2026-09-22T20:14:05Z",
+   "closed_at": "2026-09-22T22:05:00Z"
+  },
+  {
+   "number": 824,
+   "created_at": "2026-09-22T20:48:02Z",
+   "closed_at": "2026-10-03T00:52:48Z"
+  },
+  {
+   "number": 825,
+   "created_at": "2026-09-22T20:49:23Z",
+   "closed_at": "2026-09-26T16:33:55Z"
+  },
+  {
+   "number": 827,
+   "created_at": "2026-09-22T20:55:26Z",
+   "closed_at": "2026-09-25T09:33:57Z"
+  },
+  {
+   "number": 828,
+   "created_at": "2026-09-22T21:16:26Z",
+   "closed_at": "2026-09-25T09:34:00Z"
+  },
+  {
+   "number": 829,
+   "created_at": "2026-09-22T21:16:27Z",
+   "closed_at": "2026-09-25T09:34:02Z"
+  },
+  {
+   "number": 830,
+   "created_at": "2026-09-22T21:16:29Z",
+   "closed_at": "2026-09-25T09:34:05Z"
+  },
+  {
+   "number": 834,
+   "created_at": "2026-09-22T21:53:07Z",
+   "closed_at": "2026-10-01T23:25:43Z"
+  },
+  {
+   "number": 835,
+   "created_at": "2026-09-22T21:53:08Z",
+   "closed_at": "2026-09-26T16:33:57Z"
+  },
+  {
+   "number": 837,
+   "created_at": "2026-09-22T23:10:50Z",
+   "closed_at": "2026-10-11T03:09:16Z"
+  },
+  {
+   "number": 838,
+   "created_at": "2026-09-22T23:11:16Z",
+   "closed_at": "2026-10-01T23:27:36Z"
+  },
+  {
+   "number": 839,
+   "created_at": "2026-09-22T23:11:36Z",
+   "closed_at": "2026-09-23T03:55:42Z"
+  },
+  {
+   "number": 840,
+   "created_at": "2026-09-22T23:17:57Z",
+   "closed_at": "2026-09-23T03:55:48Z"
+  },
+  {
+   "number": 841,
+   "created_at": "2026-09-22T23:22:46Z",
+   "closed_at": "2026-10-01T23:24:50Z"
+  },
+  {
+   "number": 842,
+   "created_at": "2026-09-22T23:42:29Z",
+   "closed_at": "2026-10-03T00:52:46Z"
+  },
+  {
+   "number": 845,
+   "created_at": "2026-09-23T02:27:22Z",
+   "closed_at": "2026-10-09T01:46:26Z"
+  },
+  {
+   "number": 846,
+   "created_at": "2026-09-23T02:27:24Z",
+   "closed_at": "2026-09-25T09:34:07Z"
+  },
+  {
+   "number": 847,
+   "created_at": "2026-09-23T02:27:25Z",
+   "closed_at": "2026-09-25T09:34:09Z"
+  },
+  {
+   "number": 848,
+   "created_at": "2026-09-23T02:27:27Z",
+   "closed_at": "2026-10-01T23:27:39Z"
+  },
+  {
+   "number": 849,
+   "created_at": "2026-09-23T02:27:29Z",
+   "closed_at": "2026-09-25T10:29:44Z"
+  },
+  {
+   "number": 850,
+   "created_at": "2026-09-23T02:27:31Z",
+   "closed_at": "2026-10-01T23:24:53Z"
+  },
+  {
+   "number": 851,
+   "created_at": "2026-09-23T02:27:34Z",
+   "closed_at": "2026-10-08T07:12:47Z"
+  },
+  {
+   "number": 852,
+   "created_at": "2026-09-23T02:27:35Z",
+   "closed_at": "2026-09-25T09:34:11Z"
+  },
+  {
+   "number": 853,
+   "created_at": "2026-09-23T02:27:37Z",
+   "closed_at": "2026-10-01T23:26:35Z"
+  },
+  {
+   "number": 854,
+   "created_at": "2026-09-23T02:27:38Z",
+   "closed_at": "2026-10-01T23:27:41Z"
+  },
+  {
+   "number": 855,
+   "created_at": "2026-09-23T02:27:40Z",
+   "closed_at": "2026-10-01T23:24:56Z"
+  },
+  {
+   "number": 856,
+   "created_at": "2026-09-23T02:27:42Z",
+   "closed_at": "2026-09-25T09:34:14Z"
+  },
+  {
+   "number": 857,
+   "created_at": "2026-09-23T02:27:43Z",
+   "closed_at": "2026-09-25T09:34:16Z"
+  },
+  {
+   "number": 858,
+   "created_at": "2026-09-23T02:27:45Z",
+   "closed_at": "2026-09-25T09:34:18Z"
+  },
+  {
+   "number": 859,
+   "created_at": "2026-09-23T02:27:47Z",
+   "closed_at": "2026-09-25T09:34:20Z"
+  },
+  {
+   "number": 860,
+   "created_at": "2026-09-23T02:27:49Z",
+   "closed_at": "2026-10-08T07:12:51Z"
+  },
+  {
+   "number": 861,
+   "created_at": "2026-09-23T02:27:50Z",
+   "closed_at": "2026-10-01T23:26:38Z"
+  },
+  {
+   "number": 862,
+   "created_at": "2026-09-23T02:27:52Z",
+   "closed_at": "2026-10-01T23:27:44Z"
+  },
+  {
+   "number": 863,
+   "created_at": "2026-09-23T02:27:53Z",
+   "closed_at": "2026-10-01T23:24:58Z"
+  },
+  {
+   "number": 864,
+   "created_at": "2026-09-23T02:27:55Z",
+   "closed_at": "2026-09-25T10:29:41Z"
+  },
+  {
+   "number": 865,
+   "created_at": "2026-09-23T02:27:57Z",
+   "closed_at": "2026-10-08T07:12:54Z"
+  },
+  {
+   "number": 866,
+   "created_at": "2026-09-23T02:27:59Z",
+   "closed_at": "2026-10-01T23:26:41Z"
+  },
+  {
+   "number": 867,
+   "created_at": "2026-09-23T02:28:00Z",
+   "closed_at": "2026-10-01T23:27:46Z"
+  },
+  {
+   "number": 868,
+   "created_at": "2026-09-23T02:28:02Z",
+   "closed_at": "2026-09-26T16:34:00Z"
+  },
+  {
+   "number": 869,
+   "created_at": "2026-09-23T02:28:03Z",
+   "closed_at": "2026-09-25T09:34:25Z"
+  },
+  {
+   "number": 870,
+   "created_at": "2026-09-23T02:28:05Z",
+   "closed_at": "2026-09-25T09:34:28Z"
+  },
+  {
+   "number": 871,
+   "created_at": "2026-09-23T02:28:07Z",
+   "closed_at": "2026-10-01T23:25:01Z"
+  },
+  {
+   "number": 872,
+   "created_at": "2026-09-23T02:28:09Z",
+   "closed_at": "2026-09-25T09:34:30Z"
+  },
+  {
+   "number": 873,
+   "created_at": "2026-09-23T02:28:11Z",
+   "closed_at": "2026-10-08T07:47:54Z"
+  },
+  {
+   "number": 874,
+   "created_at": "2026-09-23T02:28:13Z",
+   "closed_at": "2026-10-01T23:26:44Z"
+  },
+  {
+   "number": 875,
+   "created_at": "2026-09-23T02:28:15Z",
+   "closed_at": "2026-09-26T10:57:47Z"
+  },
+  {
+   "number": 876,
+   "created_at": "2026-09-23T02:28:16Z",
+   "closed_at": "2026-09-26T10:57:45Z"
+  },
+  {
+   "number": 877,
+   "created_at": "2026-09-23T02:28:18Z",
+   "closed_at": "2026-09-26T16:34:02Z"
+  },
+  {
+   "number": 878,
+   "created_at": "2026-09-23T02:28:19Z",
+   "closed_at": "2026-09-25T13:08:44Z"
+  },
+  {
+   "number": 879,
+   "created_at": "2026-09-23T02:28:21Z",
+   "closed_at": "2026-09-25T13:08:47Z"
+  },
+  {
+   "number": 880,
+   "created_at": "2026-09-23T03:53:26Z",
+   "closed_at": "2026-09-25T09:34:33Z"
+  },
+  {
+   "number": 882,
+   "created_at": "2026-09-23T05:02:02Z",
+   "closed_at": "2026-09-23T07:01:29Z"
+  },
+  {
+   "number": 883,
+   "created_at": "2026-09-23T05:02:04Z",
+   "closed_at": "2026-09-25T09:34:35Z"
+  },
+  {
+   "number": 884,
+   "created_at": "2026-09-23T05:02:05Z",
+   "closed_at": "2026-09-25T09:34:37Z"
+  },
+  {
+   "number": 885,
+   "created_at": "2026-09-23T05:02:07Z",
+   "closed_at": "2026-09-23T21:29:29Z"
+  },
+  {
+   "number": 888,
+   "created_at": "2026-09-23T05:44:45Z",
+   "closed_at": "2026-10-01T23:27:49Z"
+  },
+  {
+   "number": 889,
+   "created_at": "2026-09-23T05:44:50Z",
+   "closed_at": "2026-10-01T23:25:03Z"
+  },
+  {
+   "number": 892,
+   "created_at": "2026-09-23T05:59:39Z",
+   "closed_at": "2026-09-25T09:34:39Z"
+  },
+  {
+   "number": 893,
+   "created_at": "2026-09-23T06:13:21Z",
+   "closed_at": "2026-09-25T09:34:41Z"
+  },
+  {
+   "number": 895,
+   "created_at": "2026-09-23T06:24:09Z",
+   "closed_at": "2026-09-23T21:29:30Z"
+  },
+  {
+   "number": 898,
+   "created_at": "2026-09-23T06:58:29Z",
+   "closed_at": "2026-09-25T10:29:24Z"
+  },
+  {
+   "number": 900,
+   "created_at": "2026-09-23T07:30:06Z",
+   "closed_at": "2026-09-26T16:34:04Z"
+  },
+  {
+   "number": 901,
+   "created_at": "2026-09-23T07:30:17Z",
+   "closed_at": "2026-09-25T09:34:44Z"
+  },
+  {
+   "number": 906,
+   "created_at": "2026-09-23T09:37:02Z",
+   "closed_at": "2026-09-25T13:08:50Z"
+  },
+  {
+   "number": 909,
+   "created_at": "2026-09-23T09:51:30Z",
+   "closed_at": "2026-10-01T23:25:45Z"
+  },
+  {
+   "number": 912,
+   "created_at": "2026-09-23T10:11:39Z",
+   "closed_at": "2026-09-25T13:08:52Z"
+  },
+  {
+   "number": 913,
+   "created_at": "2026-09-23T10:18:14Z",
+   "closed_at": "2026-09-25T10:29:26Z"
+  },
+  {
+   "number": 919,
+   "created_at": "2026-09-23T13:30:34Z",
+   "closed_at": "2026-10-04T14:34:13Z"
+  },
+  {
+   "number": 922,
+   "created_at": "2026-09-23T14:12:47Z",
+   "closed_at": "2026-09-25T10:29:28Z"
+  },
+  {
+   "number": 923,
+   "created_at": "2026-09-23T14:17:24Z",
+   "closed_at": "2026-09-25T10:29:31Z"
+  },
+  {
+   "number": 924,
+   "created_at": "2026-09-23T14:17:25Z",
+   "closed_at": "2026-09-26T16:34:07Z"
+  },
+  {
+   "number": 928,
+   "created_at": "2026-09-23T21:30:17Z",
+   "closed_at": "2026-09-25T09:34:46Z"
+  },
+  {
+   "number": 931,
+   "created_at": "2026-09-23T21:54:45Z",
+   "closed_at": "2026-10-01T23:27:51Z"
+  },
+  {
+   "number": 933,
+   "created_at": "2026-09-23T22:08:34Z",
+   "closed_at": "2026-09-25T09:34:49Z"
+  },
+  {
+   "number": 936,
+   "created_at": "2026-09-23T23:24:55Z",
+   "closed_at": "2026-09-25T13:04:40Z"
+  },
+  {
+   "number": 938,
+   "created_at": "2026-09-23T23:40:23Z",
+   "closed_at": "2026-09-25T09:34:51Z"
+  },
+  {
+   "number": 940,
+   "created_at": "2026-09-23T23:48:33Z",
+   "closed_at": "2026-09-25T10:29:34Z"
+  },
+  {
+   "number": 942,
+   "created_at": "2026-09-24T00:37:45Z",
+   "closed_at": "2026-09-25T09:34:53Z"
+  },
+  {
+   "number": 943,
+   "created_at": "2026-09-24T01:13:07Z",
+   "closed_at": "2026-09-25T13:08:54Z"
+  },
+  {
+   "number": 945,
+   "created_at": "2026-09-24T01:19:12Z",
+   "closed_at": "2026-09-25T13:08:57Z"
+  },
+  {
+   "number": 946,
+   "created_at": "2026-09-24T01:40:22Z",
+   "closed_at": "2026-09-25T12:58:56Z"
+  },
+  {
+   "number": 950,
+   "created_at": "2026-09-24T02:18:08Z",
+   "closed_at": "2026-09-25T10:29:37Z"
+  },
+  {
+   "number": 953,
+   "created_at": "2026-09-24T04:29:51Z",
+   "closed_at": "2026-09-24T05:11:03Z"
+  },
+  {
+   "number": 954,
+   "created_at": "2026-09-24T04:31:47Z",
+   "closed_at": "2026-09-25T10:04:38Z"
+  },
+  {
+   "number": 955,
+   "created_at": "2026-09-24T04:31:48Z",
+   "closed_at": "2026-09-25T09:34:56Z"
+  },
+  {
+   "number": 961,
+   "created_at": "2026-09-24T05:12:10Z",
+   "closed_at": "2026-10-01T23:25:47Z"
+  },
+  {
+   "number": 962,
+   "created_at": "2026-09-24T05:44:23Z",
+   "closed_at": "2026-09-25T12:31:40Z"
+  },
+  {
+   "number": 966,
+   "created_at": "2026-09-24T09:49:06Z",
+   "closed_at": "2026-09-25T13:08:59Z"
+  },
+  {
+   "number": 967,
+   "created_at": "2026-09-24T09:50:00Z",
+   "closed_at": "2026-09-25T10:29:39Z"
+  },
+  {
+   "number": 968,
+   "created_at": "2026-09-24T09:50:02Z",
+   "closed_at": "2026-09-25T13:09:02Z"
+  },
+  {
+   "number": 969,
+   "created_at": "2026-09-24T09:50:03Z",
+   "closed_at": "2026-09-25T13:09:04Z"
+  },
+  {
+   "number": 971,
+   "created_at": "2026-09-24T10:14:02Z",
+   "closed_at": "2026-09-25T23:07:57Z"
+  },
+  {
+   "number": 975,
+   "created_at": "2026-09-24T10:30:38Z",
+   "closed_at": "2026-09-25T13:09:07Z"
+  },
+  {
+   "number": 976,
+   "created_at": "2026-09-24T10:31:06Z",
+   "closed_at": "2026-09-25T23:08:03Z"
+  },
+  {
+   "number": 980,
+   "created_at": "2026-09-24T11:39:25Z",
+   "closed_at": "2026-09-25T09:34:58Z"
+  },
+  {
+   "number": 984,
+   "created_at": "2026-09-24T11:54:00Z",
+   "closed_at": "2026-09-25T13:09:09Z"
+  },
+  {
+   "number": 985,
+   "created_at": "2026-09-24T12:24:31Z",
+   "closed_at": "2026-09-25T09:35:00Z"
+  },
+  {
+   "number": 987,
+   "created_at": "2026-09-24T21:26:30Z",
+   "closed_at": "2026-09-25T09:35:03Z"
+  },
+  {
+   "number": 990,
+   "created_at": "2026-09-24T21:50:57Z",
+   "closed_at": "2026-09-25T13:09:12Z"
+  },
+  {
+   "number": 994,
+   "created_at": "2026-09-24T23:03:32Z",
+   "closed_at": "2026-09-25T09:35:05Z"
+  },
+  {
+   "number": 996,
+   "created_at": "2026-09-24T23:15:18Z",
+   "closed_at": "2026-09-25T09:35:08Z"
+  },
+  {
+   "number": 1000,
+   "created_at": "2026-09-24T23:30:17Z",
+   "closed_at": "2026-09-25T09:35:10Z"
+  },
+  {
+   "number": 1005,
+   "created_at": "2026-09-25T00:52:50Z",
+   "closed_at": "2026-09-25T09:35:12Z"
+  },
+  {
+   "number": 1011,
+   "created_at": "2026-09-25T01:37:20Z",
+   "closed_at": "2026-09-25T09:35:14Z"
+  },
+  {
+   "number": 1016,
+   "created_at": "2026-09-25T03:08:23Z",
+   "closed_at": "2026-09-25T09:35:17Z"
+  },
+  {
+   "number": 1017,
+   "created_at": "2026-09-25T03:37:28Z",
+   "closed_at": "2026-09-25T09:35:19Z"
+  },
+  {
+   "number": 1031,
+   "created_at": "2026-09-25T05:04:42Z",
+   "closed_at": "2026-09-25T09:35:22Z"
+  },
+  {
+   "number": 1032,
+   "created_at": "2026-09-25T05:04:44Z",
+   "closed_at": "2026-09-25T09:35:24Z"
+  },
+  {
+   "number": 1035,
+   "created_at": "2026-09-25T05:28:01Z",
+   "closed_at": "2026-09-25T09:35:26Z"
+  },
+  {
+   "number": 1042,
+   "created_at": "2026-09-25T05:59:05Z",
+   "closed_at": "2026-09-25T09:35:28Z"
+  },
+  {
+   "number": 1053,
+   "created_at": "2026-09-25T06:55:53Z",
+   "closed_at": "2026-09-25T09:35:30Z"
+  },
+  {
+   "number": 1054,
+   "created_at": "2026-09-25T06:55:54Z",
+   "closed_at": "2026-09-25T09:35:33Z"
+  },
+  {
+   "number": 1055,
+   "created_at": "2026-09-25T06:55:56Z",
+   "closed_at": "2026-09-25T09:35:35Z"
+  },
+  {
+   "number": 1063,
+   "created_at": "2026-09-25T07:35:07Z",
+   "closed_at": "2026-09-25T09:35:38Z"
+  },
+  {
+   "number": 1078,
+   "created_at": "2026-09-25T09:49:16Z",
+   "closed_at": "2026-09-25T12:31:35Z"
+  },
+  {
+   "number": 1082,
+   "created_at": "2026-09-25T10:00:55Z",
+   "closed_at": "2026-09-25T11:11:28Z"
+  },
+  {
+   "number": 1088,
+   "created_at": "2026-09-25T10:17:35Z",
+   "closed_at": "2026-09-25T11:11:26Z"
+  },
+  {
+   "number": 1102,
+   "created_at": "2026-09-25T12:16:13Z",
+   "closed_at": "2026-09-25T14:02:19Z"
+  },
+  {
+   "number": 1107,
+   "created_at": "2026-09-25T12:56:34Z",
+   "closed_at": "2026-09-25T15:40:47Z"
+  },
+  {
+   "number": 1111,
+   "created_at": "2026-09-25T13:21:57Z",
+   "closed_at": "2026-09-25T17:32:36Z"
+  },
+  {
+   "number": 1113,
+   "created_at": "2026-09-25T13:37:20Z",
+   "closed_at": "2026-09-29T01:40:47Z"
+  },
+  {
+   "number": 1114,
+   "created_at": "2026-09-25T13:37:21Z",
+   "closed_at": "2026-09-26T16:34:09Z"
+  },
+  {
+   "number": 1117,
+   "created_at": "2026-09-25T13:48:05Z",
+   "closed_at": "2026-09-25T17:32:38Z"
+  },
+  {
+   "number": 1132,
+   "created_at": "2026-09-25T16:18:22Z",
+   "closed_at": "2026-09-26T12:17:47Z"
+  },
+  {
+   "number": 1133,
+   "created_at": "2026-09-25T16:18:23Z",
+   "closed_at": "2026-09-26T12:34:41Z"
+  },
+  {
+   "number": 1134,
+   "created_at": "2026-09-25T16:18:24Z",
+   "closed_at": "2026-09-26T04:14:17Z"
+  },
+  {
+   "number": 1136,
+   "created_at": "2026-09-25T16:29:00Z",
+   "closed_at": "2026-09-26T04:14:25Z"
+  },
+  {
+   "number": 1140,
+   "created_at": "2026-09-25T17:01:13Z",
+   "closed_at": "2026-09-26T04:14:38Z"
+  },
+  {
+   "number": 1141,
+   "created_at": "2026-09-25T17:01:14Z",
+   "closed_at": "2026-09-26T04:14:44Z"
+  },
+  {
+   "number": 1166,
+   "created_at": "2026-09-25T23:34:49Z",
+   "closed_at": "2026-09-26T03:21:43Z"
+  },
+  {
+   "number": 1183,
+   "created_at": "2026-09-26T01:03:47Z",
+   "closed_at": "2026-09-26T03:21:49Z"
+  },
+  {
+   "number": 1187,
+   "created_at": "2026-09-26T01:35:05Z",
+   "closed_at": "2026-09-26T04:14:31Z"
+  },
+  {
+   "number": 1191,
+   "created_at": "2026-09-26T02:10:33Z",
+   "closed_at": "2026-09-26T03:21:56Z"
+  },
+  {
+   "number": 1192,
+   "created_at": "2026-09-26T02:10:34Z",
+   "closed_at": "2026-09-26T03:22:02Z"
+  },
+  {
+   "number": 1193,
+   "created_at": "2026-09-26T02:10:36Z",
+   "closed_at": "2026-09-26T03:22:09Z"
+  },
+  {
+   "number": 1194,
+   "created_at": "2026-09-26T02:10:37Z",
+   "closed_at": "2026-09-26T03:22:15Z"
+  },
+  {
+   "number": 1200,
+   "created_at": "2026-09-26T03:15:02Z",
+   "closed_at": "2026-09-26T04:14:51Z"
+  },
+  {
+   "number": 1220,
+   "created_at": "2026-09-26T05:21:41Z",
+   "closed_at": "2026-10-01T23:27:54Z"
+  },
+  {
+   "number": 1221,
+   "created_at": "2026-09-26T05:21:43Z",
+   "closed_at": "2026-10-01T23:25:05Z"
+  },
+  {
+   "number": 1222,
+   "created_at": "2026-09-26T05:21:45Z",
+   "closed_at": "2026-09-26T16:34:12Z"
+  },
+  {
+   "number": 1223,
+   "created_at": "2026-09-26T05:21:46Z",
+   "closed_at": "2026-10-01T23:25:49Z"
+  },
+  {
+   "number": 1224,
+   "created_at": "2026-09-26T05:21:48Z",
+   "closed_at": "2026-10-01T23:26:46Z"
+  },
+  {
+   "number": 1225,
+   "created_at": "2026-09-26T05:21:50Z",
+   "closed_at": "2026-10-01T23:27:56Z"
+  },
+  {
+   "number": 1226,
+   "created_at": "2026-09-26T05:25:23Z",
+   "closed_at": "2026-09-29T01:41:29Z"
+  },
+  {
+   "number": 1227,
+   "created_at": "2026-09-26T05:25:24Z",
+   "closed_at": "2026-09-29T01:42:06Z"
+  },
+  {
+   "number": 1237,
+   "created_at": "2026-09-26T06:58:00Z",
+   "closed_at": "2026-09-30T00:43:54Z"
+  },
+  {
+   "number": 1240,
+   "created_at": "2026-09-26T07:15:19Z",
+   "closed_at": "2026-09-29T01:39:26Z"
+  },
+  {
+   "number": 1241,
+   "created_at": "2026-09-26T07:18:41Z",
+   "closed_at": "2026-10-08T22:33:40Z"
+  },
+  {
+   "number": 1248,
+   "created_at": "2026-09-26T08:23:55Z",
+   "closed_at": "2026-10-01T23:25:52Z"
+  },
+  {
+   "number": 1249,
+   "created_at": "2026-09-26T08:23:56Z",
+   "closed_at": "2026-09-26T10:57:49Z"
+  },
+  {
+   "number": 1253,
+   "created_at": "2026-09-26T09:00:03Z",
+   "closed_at": "2026-09-29T01:41:31Z"
+  },
+  {
+   "number": 1263,
+   "created_at": "2026-09-26T10:06:22Z",
+   "closed_at": "2026-10-17T12:10:23Z"
+  },
+  {
+   "number": 1271,
+   "created_at": "2026-09-26T11:03:07Z",
+   "closed_at": "2026-10-01T23:27:59Z"
+  },
+  {
+   "number": 1272,
+   "created_at": "2026-09-26T11:03:09Z",
+   "closed_at": "2026-10-02T13:15:07Z"
+  },
+  {
+   "number": 1273,
+   "created_at": "2026-09-26T11:03:11Z",
+   "closed_at": "2026-10-05T22:10:50Z"
+  },
+  {
+   "number": 1274,
+   "created_at": "2026-09-26T11:03:12Z",
+   "closed_at": "2026-10-11T02:49:55Z"
+  },
+  {
+   "number": 1275,
+   "created_at": "2026-09-26T11:03:14Z",
+   "closed_at": "2026-10-01T23:28:02Z"
+  },
+  {
+   "number": 1276,
+   "created_at": "2026-09-26T11:04:00Z",
+   "closed_at": "2026-09-26T16:34:14Z"
+  },
+  {
+   "number": 1287,
+   "created_at": "2026-09-26T12:34:32Z",
+   "closed_at": "2026-09-26T18:14:42Z"
+  },
+  {
+   "number": 1289,
+   "created_at": "2026-09-26T12:43:13Z",
+   "closed_at": "2026-10-03T00:52:43Z"
+  },
+  {
+   "number": 1290,
+   "created_at": "2026-09-26T12:43:15Z",
+   "closed_at": "2026-10-06T15:16:09Z"
+  },
+  {
+   "number": 1291,
+   "created_at": "2026-09-26T12:59:03Z",
+   "closed_at": "2026-10-01T23:28:04Z"
+  },
+  {
+   "number": 1295,
+   "created_at": "2026-09-26T16:29:50Z",
+   "closed_at": "2026-10-01T23:25:08Z"
+  },
+  {
+   "number": 1296,
+   "created_at": "2026-09-26T16:29:51Z",
+   "closed_at": "2026-10-13T09:13:28Z"
+  },
+  {
+   "number": 1297,
+   "created_at": "2026-09-26T16:29:52Z",
+   "closed_at": "2026-09-30T05:10:39Z"
+  },
+  {
+   "number": 1298,
+   "created_at": "2026-09-26T16:29:53Z",
+   "closed_at": "2026-10-02T13:14:58Z"
+  },
+  {
+   "number": 1299,
+   "created_at": "2026-09-26T16:29:54Z",
+   "closed_at": "2026-10-02T13:15:04Z"
+  },
+  {
+   "number": 1308,
+   "created_at": "2026-09-26T17:53:24Z",
+   "closed_at": "2026-10-01T23:25:09Z"
+  },
+  {
+   "number": 1309,
+   "created_at": "2026-09-26T17:53:26Z",
+   "closed_at": "2026-09-29T01:40:57Z"
+  },
+  {
+   "number": 1312,
+   "created_at": "2026-09-26T18:08:53Z",
+   "closed_at": "2026-09-26T23:18:40Z"
+  },
+  {
+   "number": 1315,
+   "created_at": "2026-09-26T18:19:24Z",
+   "closed_at": "2026-10-02T13:15:15Z"
+  },
+  {
+   "number": 1316,
+   "created_at": "2026-09-26T18:25:18Z",
+   "closed_at": "2026-09-30T00:43:58Z"
+  },
+  {
+   "number": 1317,
+   "created_at": "2026-09-26T18:25:20Z",
+   "closed_at": "2026-09-30T00:44:00Z"
+  },
+  {
+   "number": 1319,
+   "created_at": "2026-09-26T18:49:16Z",
+   "closed_at": "2026-09-26T22:28:28Z"
+  },
+  {
+   "number": 1320,
+   "created_at": "2026-09-26T18:58:31Z",
+   "closed_at": "2026-09-26T19:03:11Z"
+  },
+  {
+   "number": 1323,
+   "created_at": "2026-09-26T20:18:35Z",
+   "closed_at": "2026-09-27T00:30:45Z"
+  },
+  {
+   "number": 1330,
+   "created_at": "2026-09-26T22:54:49Z",
+   "closed_at": "2026-10-01T23:26:49Z"
+  },
+  {
+   "number": 1331,
+   "created_at": "2026-09-26T22:54:51Z",
+   "closed_at": "2026-09-29T01:40:17Z"
+  },
+  {
+   "number": 1333,
+   "created_at": "2026-09-26T23:18:17Z",
+   "closed_at": "2026-09-27T06:43:20Z"
+  },
+  {
+   "number": 1334,
+   "created_at": "2026-09-26T23:18:35Z",
+   "closed_at": "2026-09-27T10:43:10Z"
+  },
+  {
+   "number": 1336,
+   "created_at": "2026-09-26T23:47:10Z",
+   "closed_at": "2026-09-28T17:52:13Z"
+  },
+  {
+   "number": 1337,
+   "created_at": "2026-09-26T23:47:12Z",
+   "closed_at": "2026-09-28T05:27:49Z"
+  },
+  {
+   "number": 1340,
+   "created_at": "2026-09-26T23:47:17Z",
+   "closed_at": "2026-10-02T18:01:46Z"
+  },
+  {
+   "number": 1366,
+   "created_at": "2026-09-27T13:36:07Z",
+   "closed_at": "2026-09-27T23:08:41Z"
+  },
+  {
+   "number": 1367,
+   "created_at": "2026-09-27T13:57:49Z",
+   "closed_at": "2026-09-29T01:39:00Z"
+  },
+  {
+   "number": 1370,
+   "created_at": "2026-09-27T21:20:13Z",
+   "closed_at": "2026-09-28T02:58:50Z"
+  },
+  {
+   "number": 1371,
+   "created_at": "2026-09-27T21:21:29Z",
+   "closed_at": "2026-09-29T01:39:35Z"
+  },
+  {
+   "number": 1376,
+   "created_at": "2026-09-27T22:14:18Z",
+   "closed_at": "2026-10-01T23:26:51Z"
+  },
+  {
+   "number": 1382,
+   "created_at": "2026-09-27T23:06:32Z",
+   "closed_at": "2026-09-29T01:41:01Z"
+  },
+  {
+   "number": 1385,
+   "created_at": "2026-09-27T23:18:36Z",
+   "closed_at": "2026-10-04T14:34:08Z"
+  },
+  {
+   "number": 1388,
+   "created_at": "2026-09-28T00:23:35Z",
+   "closed_at": "2026-10-01T23:25:12Z"
+  },
+  {
+   "number": 1389,
+   "created_at": "2026-09-28T00:32:44Z",
+   "closed_at": "2026-09-28T08:19:06Z"
+  },
+  {
+   "number": 1393,
+   "created_at": "2026-09-28T01:35:38Z",
+   "closed_at": "2026-10-01T23:25:53Z"
+  },
+  {
+   "number": 1398,
+   "created_at": "2026-09-28T02:59:33Z",
+   "closed_at": "2026-10-02T13:15:09Z"
+  },
+  {
+   "number": 1399,
+   "created_at": "2026-09-28T02:59:44Z",
+   "closed_at": "2026-09-30T00:43:52Z"
+  },
+  {
+   "number": 1400,
+   "created_at": "2026-09-28T03:04:00Z",
+   "closed_at": "2026-09-28T09:07:47Z"
+  },
+  {
+   "number": 1407,
+   "created_at": "2026-09-28T06:36:41Z",
+   "closed_at": "2026-09-28T13:39:11Z"
+  },
+  {
+   "number": 1412,
+   "created_at": "2026-09-28T07:25:24Z",
+   "closed_at": "2026-10-02T06:11:46Z"
+  },
+  {
+   "number": 1413,
+   "created_at": "2026-09-28T07:28:02Z",
+   "closed_at": "2026-09-28T07:35:54Z"
+  },
+  {
+   "number": 1417,
+   "created_at": "2026-09-28T08:28:20Z",
+   "closed_at": "2026-10-01T23:25:56Z"
+  },
+  {
+   "number": 1421,
+   "created_at": "2026-09-28T09:17:32Z",
+   "closed_at": "2026-10-02T13:15:01Z"
+  },
+  {
+   "number": 1422,
+   "created_at": "2026-09-28T09:17:33Z",
+   "closed_at": "2026-10-01T23:28:06Z"
+  },
+  {
+   "number": 1426,
+   "created_at": "2026-09-28T09:56:20Z",
+   "closed_at": "2026-10-31T08:00:58Z"
+  },
+  {
+   "number": 1427,
+   "created_at": "2026-09-28T10:08:40Z",
+   "closed_at": "2026-10-01T23:25:58Z"
+  },
+  {
+   "number": 1429,
+   "created_at": "2026-09-28T10:28:36Z",
+   "closed_at": "2026-09-28T20:01:26Z"
+  },
+  {
+   "number": 1434,
+   "created_at": "2026-09-28T12:06:04Z",
+   "closed_at": "2026-10-01T23:26:54Z"
+  },
+  {
+   "number": 1435,
+   "created_at": "2026-09-28T12:37:46Z",
+   "closed_at": "2026-10-02T18:01:51Z"
+  },
+  {
+   "number": 1436,
+   "created_at": "2026-09-28T12:37:48Z",
+   "closed_at": "2026-09-29T21:40:14Z"
+  },
+  {
+   "number": 1437,
+   "created_at": "2026-09-28T12:37:50Z",
+   "closed_at": "2026-09-30T05:10:41Z"
+  },
+  {
+   "number": 1438,
+   "created_at": "2026-09-28T12:56:00Z",
+   "closed_at": "2026-10-01T23:25:15Z"
+  },
+  {
+   "number": 1447,
+   "created_at": "2026-09-28T17:33:04Z",
+   "closed_at": "2026-10-01T23:26:00Z"
+  },
+  {
+   "number": 1453,
+   "created_at": "2026-09-28T18:42:26Z",
+   "closed_at": "2026-09-28T23:10:33Z"
+  },
+  {
+   "number": 1454,
+   "created_at": "2026-09-28T18:46:30Z",
+   "closed_at": "2026-09-28T23:10:35Z"
+  },
+  {
+   "number": 1455,
+   "created_at": "2026-09-28T18:47:26Z",
+   "closed_at": "2026-10-31T08:01:04Z"
+  },
+  {
+   "number": 1457,
+   "created_at": "2026-09-28T19:10:24Z",
+   "closed_at": "2026-09-30T05:10:37Z"
+  },
+  {
+   "number": 1459,
+   "created_at": "2026-09-28T19:42:03Z",
+   "closed_at": "2026-09-29T21:44:27Z"
+  },
+  {
+   "number": 1462,
+   "created_at": "2026-09-28T19:53:16Z",
+   "closed_at": "2026-10-01T23:28:09Z"
+  },
+  {
+   "number": 1468,
+   "created_at": "2026-09-28T20:08:32Z",
+   "closed_at": "2026-09-29T00:55:14Z"
+  },
+  {
+   "number": 1482,
+   "created_at": "2026-09-29T01:30:42Z",
+   "closed_at": "2026-09-30T00:43:56Z"
+  },
+  {
+   "number": 1483,
+   "created_at": "2026-09-29T01:30:44Z",
+   "closed_at": "2026-09-29T21:40:11Z"
+  },
+  {
+   "number": 1484,
+   "created_at": "2026-09-29T01:30:46Z",
+   "closed_at": "2026-10-02T18:01:48Z"
+  },
+  {
+   "number": 1485,
+   "created_at": "2026-09-29T01:30:48Z",
+   "closed_at": "2026-10-02T13:14:56Z"
+  },
+  {
+   "number": 1486,
+   "created_at": "2026-09-29T02:35:45Z",
+   "closed_at": "2026-10-01T23:26:57Z"
+  },
+  {
+   "number": 1487,
+   "created_at": "2026-09-29T02:35:47Z",
+   "closed_at": "2026-10-01T23:28:12Z"
+  },
+  {
+   "number": 1488,
+   "created_at": "2026-09-29T02:35:49Z",
+   "closed_at": "2026-10-17T12:10:37Z"
+  },
+  {
+   "number": 1489,
+   "created_at": "2026-09-29T02:35:51Z",
+   "closed_at": "2026-10-10T19:00:03Z"
+  },
+  {
+   "number": 1490,
+   "created_at": "2026-09-29T02:35:53Z",
+   "closed_at": "2026-10-01T23:27:00Z"
+  },
+  {
+   "number": 1491,
+   "created_at": "2026-09-29T02:35:55Z",
+   "closed_at": "2026-10-07T05:16:32Z"
+  },
+  {
+   "number": 1492,
+   "created_at": "2026-09-29T02:36:02Z",
+   "closed_at": "2026-10-10T09:09:43Z"
+  },
+  {
+   "number": 1493,
+   "created_at": "2026-09-29T02:36:04Z",
+   "closed_at": "2026-09-29T02:36:47Z"
+  },
+  {
+   "number": 1494,
+   "created_at": "2026-09-29T02:37:05Z",
+   "closed_at": "2026-10-01T23:26:03Z"
+  },
+  {
+   "number": 1496,
+   "created_at": "2026-09-29T08:37:24Z",
+   "closed_at": "2026-10-17T04:18:22Z"
+  },
+  {
+   "number": 1507,
+   "created_at": "2026-09-29T13:02:03Z",
+   "closed_at": "2026-10-17T04:18:38Z"
+  },
+  {
+   "number": 1513,
+   "created_at": "2026-09-29T21:49:40Z",
+   "closed_at": "2026-10-17T12:10:28Z"
+  },
+  {
+   "number": 1522,
+   "created_at": "2026-09-29T23:50:04Z",
+   "closed_at": "2026-10-01T23:25:18Z"
+  },
+  {
+   "number": 1523,
+   "created_at": "2026-09-30T00:18:35Z",
+   "closed_at": "2026-09-30T14:11:33Z"
+  },
+  {
+   "number": 1529,
+   "created_at": "2026-09-30T02:04:59Z",
+   "closed_at": "2026-10-25T10:18:46Z"
+  },
+  {
+   "number": 1532,
+   "created_at": "2026-09-30T02:16:33Z",
+   "closed_at": "2026-10-01T23:27:02Z"
+  },
+  {
+   "number": 1543,
+   "created_at": "2026-09-30T04:48:37Z",
+   "closed_at": "2026-10-01T13:03:37Z"
+  },
+  {
+   "number": 1550,
+   "created_at": "2026-09-30T05:13:47Z",
+   "closed_at": "2026-10-01T23:28:15Z"
+  },
+  {
+   "number": 1555,
+   "created_at": "2026-09-30T09:59:18Z",
+   "closed_at": "2026-10-04T14:34:11Z"
+  },
+  {
+   "number": 1560,
+   "created_at": "2026-09-30T11:47:08Z",
+   "closed_at": "2026-10-01T13:03:34Z"
+  },
+  {
+   "number": 1575,
+   "created_at": "2026-09-30T16:53:37Z",
+   "closed_at": "2026-10-01T23:25:21Z"
+  },
+  {
+   "number": 1576,
+   "created_at": "2026-09-30T23:31:59Z",
+   "closed_at": "2026-10-01T13:02:47Z"
+  },
+  {
+   "number": 1586,
+   "created_at": "2026-10-01T13:20:53Z",
+   "closed_at": "2026-10-01T13:32:42Z"
+  },
+  {
+   "number": 1587,
+   "created_at": "2026-10-01T13:34:09Z",
+   "closed_at": "2026-10-01T23:22:14Z"
+  },
+  {
+   "number": 1589,
+   "created_at": "2026-10-01T14:08:54Z",
+   "closed_at": "2026-10-06T15:16:15Z"
+  },
+  {
+   "number": 1593,
+   "created_at": "2026-10-01T21:51:32Z",
+   "closed_at": "2026-10-25T10:11:28Z"
+  },
+  {
+   "number": 1594,
+   "created_at": "2026-10-01T21:51:33Z",
+   "closed_at": "2026-10-11T02:50:00Z"
+  },
+  {
+   "number": 1597,
+   "created_at": "2026-10-01T23:11:20Z",
+   "closed_at": "2026-10-02T06:11:55Z"
+  },
+  {
+   "number": 1598,
+   "created_at": "2026-10-01T23:11:22Z",
+   "closed_at": "2026-10-02T06:11:49Z"
+  },
+  {
+   "number": 1623,
+   "created_at": "2026-10-02T12:05:48Z",
+   "closed_at": "2026-10-17T04:18:19Z"
+  },
+  {
+   "number": 1630,
+   "created_at": "2026-10-02T15:09:18Z",
+   "closed_at": "2026-10-25T10:11:33Z"
+  },
+  {
+   "number": 1631,
+   "created_at": "2026-10-02T15:09:19Z",
+   "closed_at": "2026-10-31T08:01:09Z"
+  },
+  {
+   "number": 1637,
+   "created_at": "2026-10-02T17:51:30Z",
+   "closed_at": "2026-10-08T07:47:50Z"
+  },
+  {
+   "number": 1644,
+   "created_at": "2026-10-02T19:08:49Z",
+   "closed_at": "2026-10-15T13:20:32Z"
+  },
+  {
+   "number": 1645,
+   "created_at": "2026-10-02T19:08:52Z",
+   "closed_at": "2026-10-06T03:17:51Z"
+  },
+  {
+   "number": 1648,
+   "created_at": "2026-10-02T20:37:52Z",
+   "closed_at": "2026-10-03T23:20:57Z"
+  },
+  {
+   "number": 1649,
+   "created_at": "2026-10-02T20:41:02Z",
+   "closed_at": "2026-10-03T05:22:09Z"
+  },
+  {
+   "number": 1651,
+   "created_at": "2026-10-02T20:55:15Z",
+   "closed_at": "2026-10-17T04:18:31Z"
+  },
+  {
+   "number": 1652,
+   "created_at": "2026-10-02T20:55:17Z",
+   "closed_at": "2026-10-03T23:21:00Z"
+  },
+  {
+   "number": 1654,
+   "created_at": "2026-10-02T21:13:48Z",
+   "closed_at": "2026-10-04T04:06:06Z"
+  },
+  {
+   "number": 1655,
+   "created_at": "2026-10-02T21:13:50Z",
+   "closed_at": "2026-10-04T04:06:08Z"
+  },
+  {
+   "number": 1656,
+   "created_at": "2026-10-02T21:13:52Z",
+   "closed_at": "2026-10-04T04:06:10Z"
+  },
+  {
+   "number": 1658,
+   "created_at": "2026-10-02T21:13:56Z",
+   "closed_at": "2026-10-07T05:16:40Z"
+  },
+  {
+   "number": 1660,
+   "created_at": "2026-10-02T21:14:00Z",
+   "closed_at": "2026-10-07T05:16:43Z"
+  },
+  {
+   "number": 1661,
+   "created_at": "2026-10-02T21:14:02Z",
+   "closed_at": "2026-10-11T02:50:05Z"
+  },
+  {
+   "number": 1664,
+   "created_at": "2026-10-02T21:36:01Z",
+   "closed_at": "2026-10-04T14:34:16Z"
+  },
+  {
+   "number": 1668,
+   "created_at": "2026-10-03T00:52:16Z",
+   "closed_at": "2026-10-03T05:22:49Z"
+  },
+  {
+   "number": 1669,
+   "created_at": "2026-10-03T00:52:31Z",
+   "closed_at": "2026-10-03T05:22:51Z"
+  },
+  {
+   "number": 1674,
+   "created_at": "2026-10-03T02:55:28Z",
+   "closed_at": "2026-10-13T09:13:34Z"
+  },
+  {
+   "number": 1675,
+   "created_at": "2026-10-03T04:21:14Z",
+   "closed_at": "2026-10-17T12:10:43Z"
+  },
+  {
+   "number": 1676,
+   "created_at": "2026-10-03T04:21:15Z",
+   "closed_at": "2026-10-17T04:18:15Z"
+  },
+  {
+   "number": 1680,
+   "created_at": "2026-10-03T07:57:09Z",
+   "closed_at": "2026-10-31T11:24:21Z"
+  },
+  {
+   "number": 1681,
+   "created_at": "2026-10-03T08:01:14Z",
+   "closed_at": "2026-10-12T20:44:32Z"
+  },
+  {
+   "number": 1683,
+   "created_at": "2026-10-03T08:57:32Z",
+   "closed_at": "2026-10-11T02:50:10Z"
+  },
+  {
+   "number": 1684,
+   "created_at": "2026-10-03T08:57:33Z",
+   "closed_at": "2026-10-03T23:20:55Z"
+  },
+  {
+   "number": 1685,
+   "created_at": "2026-10-03T08:57:34Z",
+   "closed_at": "2026-10-05T22:10:56Z"
+  },
+  {
+   "number": 1686,
+   "created_at": "2026-10-03T08:57:35Z",
+   "closed_at": "2026-10-17T12:10:34Z"
+  },
+  {
+   "number": 1688,
+   "created_at": "2026-10-03T08:57:37Z",
+   "closed_at": "2026-10-04T04:06:03Z"
+  },
+  {
+   "number": 1689,
+   "created_at": "2026-10-03T08:57:38Z",
+   "closed_at": "2026-10-04T14:34:21Z"
+  },
+  {
+   "number": 1692,
+   "created_at": "2026-10-03T09:41:07Z",
+   "closed_at": "2026-10-03T23:20:52Z"
+  },
+  {
+   "number": 1693,
+   "created_at": "2026-10-03T09:55:22Z",
+   "closed_at": "2026-10-04T04:06:01Z"
+  },
+  {
+   "number": 1698,
+   "created_at": "2026-10-03T11:33:44Z",
+   "closed_at": "2026-10-31T08:01:15Z"
+  },
+  {
+   "number": 1702,
+   "created_at": "2026-10-03T12:12:20Z",
+   "closed_at": "2026-10-15T13:20:13Z"
+  },
+  {
+   "number": 1717,
+   "created_at": "2026-10-04T02:34:34Z",
+   "closed_at": "2026-10-04T14:34:19Z"
+  },
+  {
+   "number": 1727,
+   "created_at": "2026-10-04T07:52:13Z",
+   "closed_at": "2026-10-15T06:57:34Z"
+  },
+  {
+   "number": 1733,
+   "created_at": "2026-10-04T11:56:16Z",
+   "closed_at": "2026-10-06T15:16:26Z"
+  },
+  {
+   "number": 1739,
+   "created_at": "2026-10-04T14:39:23Z",
+   "closed_at": "2026-10-06T15:16:20Z"
+  },
+  {
+   "number": 1743,
+   "created_at": "2026-10-05T00:33:14Z",
+   "closed_at": "2026-10-07T05:16:29Z"
+  },
+  {
+   "number": 1751,
+   "created_at": "2026-10-05T04:20:53Z",
+   "closed_at": "2026-10-06T03:17:56Z"
+  },
+  {
+   "number": 1752,
+   "created_at": "2026-10-05T04:20:54Z",
+   "closed_at": "2026-10-05T22:10:53Z"
+  },
+  {
+   "number": 1767,
+   "created_at": "2026-10-05T22:17:59Z",
+   "closed_at": "2026-10-06T03:17:59Z"
+  },
+  {
+   "number": 1768,
+   "created_at": "2026-10-05T22:18:01Z",
+   "closed_at": "2026-10-06T03:18:03Z"
+  },
+  {
+   "number": 1769,
+   "created_at": "2026-10-05T22:18:03Z",
+   "closed_at": "2026-10-15T06:57:39Z"
+  },
+  {
+   "number": 1771,
+   "created_at": "2026-10-05T23:00:08Z",
+   "closed_at": "2026-10-09T01:46:22Z"
+  },
+  {
+   "number": 1789,
+   "created_at": "2026-10-06T05:57:03Z",
+   "closed_at": "2026-10-11T03:09:18Z"
+  },
+  {
+   "number": 1793,
+   "created_at": "2026-10-06T11:26:03Z",
+   "closed_at": "2026-10-06T15:16:23Z"
+  },
+  {
+   "number": 1806,
+   "created_at": "2026-10-06T15:22:02Z",
+   "closed_at": "2026-10-07T05:16:35Z"
+  },
+  {
+   "number": 1807,
+   "created_at": "2026-10-06T15:22:04Z",
+   "closed_at": "2026-10-07T05:16:38Z"
+  },
+  {
+   "number": 1808,
+   "created_at": "2026-10-06T15:22:06Z",
+   "closed_at": "2026-10-19T00:24:51Z"
+  },
+  {
+   "number": 1810,
+   "created_at": "2026-10-06T15:22:22Z",
+   "closed_at": "2026-10-19T00:24:53Z"
+  },
+  {
+   "number": 1814,
+   "created_at": "2026-10-06T15:54:22Z",
+   "closed_at": "2026-10-07T05:16:45Z"
+  },
+  {
+   "number": 1817,
+   "created_at": "2026-10-06T16:25:38Z",
+   "closed_at": "2026-10-13T09:13:12Z"
+  },
+  {
+   "number": 1822,
+   "created_at": "2026-10-06T22:54:20Z",
+   "closed_at": "2026-10-08T22:33:45Z"
+  },
+  {
+   "number": 1833,
+   "created_at": "2026-10-07T05:21:18Z",
+   "closed_at": "2026-10-11T02:50:16Z"
+  },
+  {
+   "number": 1834,
+   "created_at": "2026-10-07T05:21:20Z",
+   "closed_at": "2026-10-15T13:20:29Z"
+  },
+  {
+   "number": 1843,
+   "created_at": "2026-10-07T23:32:37Z",
+   "closed_at": "2026-10-08T22:33:48Z"
+  },
+  {
+   "number": 1847,
+   "created_at": "2026-10-08T07:17:23Z",
+   "closed_at": "2026-10-08T22:33:53Z"
+  },
+  {
+   "number": 1849,
+   "created_at": "2026-10-08T07:46:39Z",
+   "closed_at": "2026-10-31T11:19:51Z"
+  },
+  {
+   "number": 1856,
+   "created_at": "2026-10-08T15:44:20Z",
+   "closed_at": "2026-10-16T01:19:27Z"
+  },
+  {
+   "number": 1867,
+   "created_at": "2026-10-08T23:04:00Z",
+   "closed_at": "2026-10-10T09:09:47Z"
+  },
+  {
+   "number": 1870,
+   "created_at": "2026-10-09T01:42:53Z",
+   "closed_at": "2026-10-10T09:09:51Z"
+  },
+  {
+   "number": 1873,
+   "created_at": "2026-10-09T02:00:47Z",
+   "closed_at": "2026-10-17T12:10:46Z"
+  },
+  {
+   "number": 1875,
+   "created_at": "2026-10-09T02:40:23Z",
+   "closed_at": "2026-10-17T12:10:40Z"
+  },
+  {
+   "number": 1885,
+   "created_at": "2026-10-10T08:58:09Z",
+   "closed_at": "2026-10-17T12:10:31Z"
+  },
+  {
+   "number": 1889,
+   "created_at": "2026-10-10T09:14:38Z",
+   "closed_at": "2026-11-01T04:23:00Z"
+  },
+  {
+   "number": 1908,
+   "created_at": "2026-10-11T02:40:34Z",
+   "closed_at": "2026-10-13T09:14:11Z"
+  },
+  {
+   "number": 1909,
+   "created_at": "2026-10-11T02:40:35Z",
+   "closed_at": "2026-10-17T04:18:10Z"
+  },
+  {
+   "number": 1910,
+   "created_at": "2026-10-11T02:56:27Z",
+   "closed_at": "2026-10-12T00:49:29Z"
+  },
+  {
+   "number": 1912,
+   "created_at": "2026-10-11T03:39:37Z",
+   "closed_at": "2026-10-31T08:03:14Z"
+  },
+  {
+   "number": 1913,
+   "created_at": "2026-10-11T03:39:39Z",
+   "closed_at": "2026-10-13T09:14:19Z"
+  },
+  {
+   "number": 1914,
+   "created_at": "2026-10-11T03:39:40Z",
+   "closed_at": "2026-10-25T10:11:38Z"
+  },
+  {
+   "number": 1915,
+   "created_at": "2026-10-11T03:39:42Z",
+   "closed_at": "2026-10-12T00:36:39Z"
+  },
+  {
+   "number": 1916,
+   "created_at": "2026-10-11T03:39:44Z",
+   "closed_at": "2026-10-15T13:20:26Z"
+  },
+  {
+   "number": 1917,
+   "created_at": "2026-10-11T03:39:46Z",
+   "closed_at": "2026-10-17T04:18:25Z"
+  },
+  {
+   "number": 1918,
+   "created_at": "2026-10-11T03:39:47Z",
+   "closed_at": "2026-10-31T08:03:17Z"
+  },
+  {
+   "number": 1920,
+   "created_at": "2026-10-11T03:39:51Z",
+   "closed_at": "2026-10-31T08:03:21Z"
+  },
+  {
+   "number": 1921,
+   "created_at": "2026-10-11T03:39:52Z",
+   "closed_at": "2026-10-31T08:03:24Z"
+  },
+  {
+   "number": 1932,
+   "created_at": "2026-10-12T00:25:38Z",
+   "closed_at": "2026-10-13T09:13:40Z"
+  },
+  {
+   "number": 1941,
+   "created_at": "2026-10-12T12:33:18Z",
+   "closed_at": "2026-10-17T04:18:34Z"
+  },
+  {
+   "number": 1942,
+   "created_at": "2026-10-12T12:56:46Z",
+   "closed_at": "2026-10-19T00:25:18Z"
+  },
+  {
+   "number": 1944,
+   "created_at": "2026-10-12T13:04:19Z",
+   "closed_at": "2026-10-17T12:10:25Z"
+  },
+  {
+   "number": 1953,
+   "created_at": "2026-10-12T15:57:03Z",
+   "closed_at": "2026-10-13T09:13:18Z"
+  },
+  {
+   "number": 1980,
+   "created_at": "2026-10-13T09:20:44Z",
+   "closed_at": "2026-10-15T13:20:18Z"
+  },
+  {
+   "number": 1982,
+   "created_at": "2026-10-13T09:20:48Z",
+   "closed_at": "2026-10-15T13:20:23Z"
+  },
+  {
+   "number": 1997,
+   "created_at": "2026-10-14T06:27:02Z",
+   "closed_at": "2026-10-14T06:27:30Z"
+  },
+  {
+   "number": 2003,
+   "created_at": "2026-10-15T06:58:22Z",
+   "closed_at": "2026-10-17T04:18:28Z"
+  },
+  {
+   "number": 2008,
+   "created_at": "2026-10-15T13:16:54Z",
+   "closed_at": "2026-10-17T12:31:17Z"
+  },
+  {
+   "number": 2036,
+   "created_at": "2026-10-17T03:52:12Z",
+   "closed_at": "2026-10-17T12:10:49Z"
+  },
+  {
+   "number": 2068,
+   "created_at": "2026-10-17T22:54:26Z",
+   "closed_at": "2026-10-31T00:22:03Z"
+  },
+  {
+   "number": 2079,
+   "created_at": "2026-10-19T00:36:14Z",
+   "closed_at": "2026-10-31T11:19:54Z"
+  },
+  {
+   "number": 2080,
+   "created_at": "2026-10-19T00:37:08Z",
+   "closed_at": "2026-10-25T00:45:21Z"
+  },
+  {
+   "number": 2083,
+   "created_at": "2026-10-19T18:31:27Z",
+   "closed_at": "2026-10-25T00:45:24Z"
+  },
+  {
+   "number": 2084,
+   "created_at": "2026-10-21T01:51:24Z",
+   "closed_at": "2026-10-31T11:19:58Z"
+  },
+  {
+   "number": 2086,
+   "created_at": "2026-10-24T13:12:36Z",
+   "closed_at": "2026-10-25T00:45:28Z"
+  },
+  {
+   "number": 2087,
+   "created_at": "2026-10-24T13:26:31Z",
+   "closed_at": "2026-10-30T06:54:06Z"
+  },
+  {
+   "number": 2089,
+   "created_at": "2026-10-24T20:27:45Z",
+   "closed_at": "2026-10-25T04:23:08Z"
+  },
+  {
+   "number": 2095,
+   "created_at": "2026-10-24T21:39:47Z",
+   "closed_at": "2026-10-25T10:18:48Z"
+  },
+  {
+   "number": 2104,
+   "created_at": "2026-10-24T23:51:58Z",
+   "closed_at": "2026-10-29T22:57:59Z"
+  },
+  {
+   "number": 2108,
+   "created_at": "2026-10-25T00:30:44Z",
+   "closed_at": "2026-10-25T04:07:11Z"
+  },
+  {
+   "number": 2129,
+   "created_at": "2026-10-25T04:02:55Z",
+   "closed_at": "2026-10-31T11:20:04Z"
+  },
+  {
+   "number": 2131,
+   "created_at": "2026-10-25T04:02:57Z",
+   "closed_at": "2026-10-25T04:33:25Z"
+  },
+  {
+   "number": 2142,
+   "created_at": "2026-10-25T10:08:44Z",
+   "closed_at": "2026-10-29T22:58:03Z"
+  },
+  {
+   "number": 2143,
+   "created_at": "2026-10-25T10:08:45Z",
+   "closed_at": "2026-11-01T01:03:04Z"
+  },
+  {
+   "number": 2157,
+   "created_at": "2026-10-29T09:16:25Z",
+   "closed_at": "2026-10-31T11:20:08Z"
+  },
+  {
+   "number": 2169,
+   "created_at": "2026-10-30T01:10:36Z",
+   "closed_at": "2026-10-30T06:46:59Z"
+  },
+  {
+   "number": 2183,
+   "created_at": "2026-10-30T06:41:35Z",
+   "closed_at": "2026-10-31T11:20:12Z"
+  },
+  {
+   "number": 2186,
+   "created_at": "2026-10-30T08:31:38Z",
+   "closed_at": "2026-10-31T08:15:47Z"
+  },
+  {
+   "number": 2206,
+   "created_at": "2026-10-30T16:24:28Z",
+   "closed_at": "2026-10-31T08:15:44Z"
+  },
+  {
+   "number": 2221,
+   "created_at": "2026-10-30T23:51:55Z",
+   "closed_at": "2026-10-31T11:20:17Z"
+  },
+  {
+   "number": 2287,
+   "created_at": "2026-10-31T11:02:13Z",
+   "closed_at": "2026-10-31T13:17:12Z"
+  },
+  {
+   "number": 2310,
+   "created_at": "2026-10-31T17:02:58Z",
+   "closed_at": "2026-10-31T17:35:43Z"
+  }
+ ]
+}

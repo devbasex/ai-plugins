@@ -73,6 +73,12 @@ def parse(value: Any, naive: str = "local") -> Optional[_dt.datetime]:
     return None
 
 
+def epoch_seconds(value: Any, naive: str = "local") -> Optional[float]:
+    """`parse` で読んだ時刻の UNIX 時刻（秒）。読めなければ `None`。"""
+    parsed = parse(value, naive)
+    return None if parsed is None else parsed.timestamp()
+
+
 def seconds_between(start: Any, end: Any, naive: str = "local") -> Optional[float]:
     """`end − start` の秒。どちらかが読めなければ `None`。"""
     s, e = parse(start, naive), parse(end, naive)

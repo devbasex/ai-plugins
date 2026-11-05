@@ -1,57 +1,65 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { ForbiddenError, InvalidRequestError } from "../errors.ts";
-import { isExecutionMode, isSeatType } from "../accounts/model.ts";
+import { isExecutionMode, type AccountContext } from "../accounts/model.ts";
+import { validateSeatType } from "../accounts/service.ts";
 import { resolveFromRequest, type AuthEnv } from "../auth/resolve.ts";
-import { readJson } from "./body.ts";
-import { accountDetail, seatView } from "./views.ts";
+import { registerOperation } from "./operation.ts";
+import { accountDetailBody, seatView } from "./views.ts";
 
-const SEAT_TYPE_MESSAGE = "席の種類は standard か premium です";
+function userIdOf(raw: unknown): string {
+  if (typeof raw !== "string" || raw === "" || raw.length > 128) throw new InvalidRequestError("利用者の ID の形ではありません");
+  return raw;
+}
+
+// アカウントそのものの操作は、要素がアカウントのため要素ごとに解決する（#2384 の決定 2）。解決できない要素は forbidden
+function accountOf(c: Context<AuthEnv>, raw: unknown): Promise<AccountContext> {
+  if (typeof raw !== "string" || raw === "") throw new ForbiddenError();
+  return resolveFromRequest(c, raw);
+}
 
 export function registerAccounts(app: Hono<AuthEnv>): void {
-  app.get("/accounts/:accountId", async (c) => {
-    const ctx = await resolveFromRequest(c, c.req.param("accountId"));
-    const accounts = c.get("auth").accounts;
-    const account = await accounts.getAccount(ctx.accountId);
-    if (!account) throw new ForbiddenError();
-    const seats = ctx.kind === "team" ? await accounts.listSeats(ctx) : null;
-    return c.json(accountDetail(ctx, account, seats));
+  registerOperation(app, "getAccount", {
+    run: async (e, _ctx, _s, c) => {
+      const ctx = await accountOf(c, e.account_id);
+      const accounts = c.get("auth").accounts;
+      const account = await accounts.getAccount(ctx.accountId);
+      if (!account) throw new ForbiddenError();
+      return accountDetailBody(accounts, ctx, account);
+    },
   });
 
-  app.put("/accounts/:accountId/execution-mode", async (c) => {
-    const ctx = await resolveFromRequest(c, c.req.param("accountId"));
-    const body = await readJson(c);
-    if (!isExecutionMode(body.execution_mode)) {
-      throw new InvalidRequestError("実行の形態は local・byok・managed のどれかです");
-    }
-    const accounts = c.get("auth").accounts;
-    const account = await accounts.setExecutionMode(ctx, body.execution_mode);
-    const next = { ...ctx, executionMode: account.executionMode, plan: account.plan };
-    const seats = next.kind === "team" ? await accounts.listSeats(next) : null;
-    return c.json(accountDetail(next, account, seats));
+  registerOperation(app, "setExecutionMode", {
+    run: async (e, _ctx, _s, c) => {
+      const ctx = await accountOf(c, e.account_id);
+      if (!isExecutionMode(e.execution_mode)) {
+        throw new InvalidRequestError("実行の形態は local・byok・managed のどれかです");
+      }
+      const accounts = c.get("auth").accounts;
+      const account = await accounts.setExecutionMode(ctx, e.execution_mode);
+      return accountDetailBody(accounts, { ...ctx, executionMode: account.executionMode, plan: account.plan }, account);
+    },
   });
 
-  app.post("/accounts/:accountId/seats", async (c) => {
-    const ctx = await resolveFromRequest(c, c.req.param("accountId"));
-    const body = await readJson(c);
-    if (typeof body.user_id !== "string" || body.user_id === "" || body.user_id.length > 128) {
-      throw new InvalidRequestError("利用者の ID の形ではありません");
-    }
-    if (!isSeatType(body.seat_type)) throw new InvalidRequestError(SEAT_TYPE_MESSAGE);
-    const seat = await c.get("auth").accounts.addSeat(ctx, body.user_id, body.seat_type);
-    return c.json(seatView(seat), 201);
+  registerOperation(app, "addSeat", {
+    run: async (e, ctx, _s, c) => {
+      const userId = userIdOf(e.user_id);
+      const seatType = validateSeatType(e.seat_type);
+      return seatView(await c.get("auth").accounts.addSeat(ctx!, userId, seatType));
+    },
   });
 
-  app.patch("/accounts/:accountId/seats/:userId", async (c) => {
-    const ctx = await resolveFromRequest(c, c.req.param("accountId"));
-    const body = await readJson(c);
-    if (!isSeatType(body.seat_type)) throw new InvalidRequestError(SEAT_TYPE_MESSAGE);
-    const seat = await c.get("auth").accounts.changeSeat(ctx, c.req.param("userId"), body.seat_type);
-    return c.json(seatView(seat));
+  registerOperation(app, "changeSeat", {
+    run: async (e, ctx, _s, c) => {
+      const userId = userIdOf(e.user_id);
+      const seatType = validateSeatType(e.seat_type);
+      return seatView(await c.get("auth").accounts.changeSeat(ctx!, userId, seatType));
+    },
   });
 
-  app.delete("/accounts/:accountId/seats/:userId", async (c) => {
-    const ctx = await resolveFromRequest(c, c.req.param("accountId"));
-    await c.get("auth").accounts.removeSeat(ctx, c.req.param("userId"));
-    return c.body(null, 204);
+  registerOperation(app, "removeSeat", {
+    run: async (e, ctx, _s, c) => {
+      await c.get("auth").accounts.removeSeat(ctx!, userIdOf(e.user_id));
+      return { removed: true };
+    },
   });
 }

@@ -69,6 +69,30 @@
       "title": "BranchState",
       "type": "object"
     },
+    "CauseType": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "defect": {
+          "default": true,
+          "title": "Defect",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "CauseType",
+      "type": "object"
+    },
     "Checks": {
       "additionalProperties": false,
       "properties": {
@@ -137,6 +161,33 @@
         "reason"
       ],
       "title": "CiExempt",
+      "type": "object"
+    },
+    "CodeMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "types": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Types",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "CodeMeasure",
       "type": "object"
     },
     "Container": {
@@ -265,6 +316,32 @@
       "title": "Duration",
       "type": "object"
     },
+    "Environment": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Environment",
+      "type": "object"
+    },
     "Import": {
       "additionalProperties": false,
       "properties": {
@@ -379,6 +456,155 @@
       "title": "Language",
       "type": "object"
     },
+    "Library": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ecosystem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ecosystem"
+        },
+        "alternatives": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "viewpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Viewpoints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Library",
+      "type": "object"
+    },
+    "Market": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "viewpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Viewpoints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Market",
+      "type": "object"
+    },
+    "Materials": {
+      "additionalProperties": false,
+      "description": "材料の宣言（#2315）。ニーズとシーズの調査・後回しのマイルストーン・原因の型・大整理の裏付けの計測。",
+      "properties": {
+        "product": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "needs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Needs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seeds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Seeds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "deferred_milestones": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Deferred Milestones",
+          "type": "array"
+        },
+        "cause_types": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CauseType"
+          },
+          "title": "Cause Types",
+          "type": "array"
+        },
+        "code_measures": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CodeMeasure"
+          },
+          "title": "Code Measures",
+          "type": "array"
+        },
+        "failures": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Failures",
+          "type": "array"
+        }
+      },
+      "title": "Materials",
+      "type": "object"
+    },
     "NdfPolicies": {
       "additionalProperties": false,
       "description": "ai-plugins の方針の検査を掛けるか。キーが無ければどちらも掛けない（決定 8）。",
@@ -397,6 +623,78 @@
         "reject_md_wording_tests"
       ],
       "title": "NdfPolicies",
+      "type": "object"
+    },
+    "Needs": {
+      "additionalProperties": false,
+      "properties": {
+        "usage": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Usage"
+          },
+          "title": "Usage",
+          "type": "array"
+        },
+        "market": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Market"
+          },
+          "title": "Market",
+          "type": "array"
+        }
+      },
+      "title": "Needs",
+      "type": "object"
+    },
+    "Product": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "users": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Users"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Product",
+      "type": "object"
+    },
+    "Seeds": {
+      "additionalProperties": false,
+      "properties": {
+        "libraries": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Library"
+          },
+          "title": "Libraries",
+          "type": "array"
+        },
+        "environment": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Environment"
+          },
+          "title": "Environment",
+          "type": "array"
+        }
+      },
+      "title": "Seeds",
       "type": "object"
     },
     "Services": {
@@ -662,6 +960,64 @@
       "title": "Unknown",
       "type": "object"
     },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/UsageScope"
+        }
+      },
+      "required": [
+        "name",
+        "command",
+        "scope"
+      ],
+      "title": "Usage",
+      "type": "object"
+    },
+    "UsageScope": {
+      "additionalProperties": false,
+      "description": "利用の記録を読む範囲。`aggregate_only` が true の行だけを読む（#2315 の決定 9）。",
+      "properties": {
+        "aggregate_only": {
+          "title": "Aggregate Only",
+          "type": "boolean"
+        },
+        "days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Days"
+        },
+        "mask": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Mask",
+          "type": "array"
+        }
+      },
+      "required": [
+        "aggregate_only"
+      ],
+      "title": "UsageScope",
+      "type": "object"
+    },
     "Workflow": {
       "additionalProperties": false,
       "properties": {
@@ -870,6 +1226,21 @@
       ],
       "default": null,
       "title": "Instructions"
+    },
+    "materials": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Materials"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Materials"
     },
     "analysis": {
       "anyOf": [

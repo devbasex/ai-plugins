@@ -69,7 +69,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 | `development-workflow/SKILL.md` | conductor が `$SCRIPTS` を解いてから supervisor を起動し、進捗記録を絶対パスで書くこと |
 | `plugins/ndf/skills/EXCERPTS.md` | 抜粋の規約。`AUTHORING.md` から 1 文で指す（`AUTHORING.md` は分割の基準の 500 行に達しているため別ファイルにした） |
 | `progress-tracking/SKILL.md` / `references/excerpt.md` | 「呼び方」を進捗記録 1 行にし、抜粋を指す。抜粋は形の見本を兼ねる |
-| 工程 Skill 20 個の末尾の記録の文 | 「この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"` を 1 行打つ」の形。`design` は契機が 2 つあり、2 行を示す |
+| 工程 Skill 20 個の末尾の記録の文 | 「この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"` を 1 行打つ」の形。`design` は契機が 2 つあり、2 行を示す。`release-verification` は記録を配布の記録の Pull Request へ投稿した後に打ち、プランのステップとして起動指示が打たないと言うときは打たない |
 
 ```mermaid
 flowchart TB
@@ -204,7 +204,7 @@ supervisor の守る規則のうち、この仕様に関わるのは 2 つであ
 
 | # | 規則 |
 | --- | --- |
-| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ。`development-workflow` を起動しない。スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
+| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ（リリース後テストだけは、記録を配布の記録の Pull Request へ投稿した後に打つ）。`development-workflow` を起動しない。スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
 | 7 | 委譲してよい作業は worker へ出し、委譲しない 5 つは自分で行う。小さな作業は worker へ出さずにインライン実行にする（`work-vessels.md` の線引き） |
 
 「スプリントを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `sprint-close.py` へ

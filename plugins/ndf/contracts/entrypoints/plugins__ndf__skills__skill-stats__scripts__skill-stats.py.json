@@ -22,15 +22,25 @@
     "positionals": []
   },
   "env": [
+    "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_PLUGIN_ROOT",
+    "HOME",
+    "NDF_CONTEXT_DIR",
+    "NDF_CONTEXT_LIMIT",
+    "NDF_CONTEXT_POLICY",
     "NDF_DEPS_REEXEC",
-    "NDF_DEPS_VENV"
+    "NDF_DEPS_VENV",
+    "XDG_STATE_HOME"
   ],
   "settings": [],
   "stdin": "none",
   "stdout": "json",
-  "writes": [],
+  "writes": [
+    "applied-json",
+    "cost-estimates-json",
+    "decisions-jsonl"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",

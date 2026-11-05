@@ -73,6 +73,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 | `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "channel"?: "production" / "base", "branch"?, "versioned", "production"?}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める。本番のブランチ・起点のブランチへのマージで動く行は `channel`（`"production"` / `"base"`）で書き、ブランチ名を写さない。`branch` はほかのブランチで動く行だけに書く（`write` は本番・起点の名前を写した `branch` を `channel` に直す）。`production`（本番系へ届くか。[pace.md](pace.md) の「手動反映の本番系の形」）は解析では書かず、利用者が書く |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
+| `materials` | `{"product"?: {"kind", "users"?}, "needs"?: {"usage", "market"}, "seeds"?: {"libraries", "environment"}, "deferred_milestones", "cause_types"?, "code_measures"?, "failures"?}` | 棚卸しの見直しと大整理が読む材料の宣言（`backlog-refinement` の `references/research.md`）。候補は README の冒頭と直接の依存から出る。調べる依存（`seeds.libraries`）は候補から人が残すものだけにする。利用の記録（`needs.usage`）の読むコマンドと範囲（`scope.aggregate_only`・`days`・`mask`）・市場と競合・周辺環境・後回しのマイルストーンは人が書く。決められなければ `{"unknown": "<理由>"}` と書き、見直しはすべての側面を飛ばす |
 
 答えのファイルの例:
 

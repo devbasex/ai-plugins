@@ -34,6 +34,8 @@ export interface RankedMilestone {
 // 課題の番号を確かめた結果。開いている課題でない番号（閉じた・Pull Request・無い）を返す
 export interface IssueCheck {
   invalid: number[];
+  // 開いている課題のマイルストーンの題（無ければ null）。開発ループの持ち分の照合に使う（#2347）。読めない口は省く
+  milestones?: Record<number, string | null>;
 }
 
 // サービスが起票した Issue の参照（#2216）
@@ -66,6 +68,23 @@ export interface GitHubPort {
   createIssue(installationId: number, repositoryId: number, issue: { title: string; body: string }): Promise<CreatedIssue | null>;
   // 公開範囲（metadata: read だけの token で読む）。導入が届かなければ null
   repositoryVisibility(installationId: number, repositoryId: number): Promise<RepositoryVisibility | null>;
+  // ---- Factory のオーガナイザー（#2439）。読むだけ ----
+  // 枝の先頭のコミット。枝が無いか導入が届かなければ null
+  branchHead(installationId: number, repositoryId: number, fullName: string, branch: string): Promise<string | null>;
+  // base 宛ての開いている Pull Request の head の枝と URL
+  listOpenPullHeads(installationId: number, repositoryId: number, fullName: string, base: string): Promise<PullHead[]>;
+  // head の枝から base 宛ての Pull Request（開いている・マージ済み）。無ければ null
+  findPullByHead(installationId: number, repositoryId: number, fullName: string, head: string, base: string): Promise<PullByHead | null>;
+}
+
+export interface PullHead {
+  head: string;
+  url: string;
+}
+
+export interface PullByHead {
+  state: "open" | "merged" | "closed";
+  url: string;
 }
 
 // マイルストーンの名前の形（<2 桁の連番> <主題>）
