@@ -21,6 +21,9 @@ LIB = SKILL.parents[1] / "scripts" / "lib"
 OWNERS = {
     "pathkinds": (
         "is_test_path",
+        "is_test_path_in_versions",
+        "lacks_python_tests",
+        "python_text_lacks_tests",
         "_has_shebang",
         "_is_code_path",
         "production_code_changes",

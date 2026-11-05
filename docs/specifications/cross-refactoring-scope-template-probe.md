@@ -165,6 +165,10 @@ graph LR
 - 2 で最初の suite へ寄せないのは、どの suite の `paths` にも当たらない宣言していないテスト（`e2e/login.spec.ts` など）で正しいテンプレートが
   落ち、`defect` で止まるのを防ぐためである。`paths` が `.` か空の suite には `suite_for` が全ファイルを当てるため、そうしたファイルも候補に入り
   受け持ちが未確定になる
+- 1 と 2 の「テストの名前の形の追跡ファイル」からは、テストの関数（行頭の空白に続く `def test` か `async def test` の行）を持たない `.py` を
+  外す。`lib/test_strategy.py` のような本番のモジュールと `tests/test_helpers.py` のような補助のファイルは、走らせてもテストを 1 件も集めずに
+  落ちるためである。`--scope` の 1 件がファイル名の形で当たっても、そうした `.py` ならテストの置き場所とみなさない。`tests/` などのディレクトリの
+  名前による置き場所の判定は変わらない
 - 3 はテストの名前が形（`test_*`・`*_test.*`・`*.test.*`・`*_spec.*`・`*.spec.*`）に当たらないエコシステム（`FooTest.java`・`FooTests.cs`・
   `UserTest.php`・`*.bats`・Rust の `tests/*.rs`）でも、suite がテストの置き場所を `paths` に宣言していれば試走できるようにする。配下にはテストで
   ないファイル（`tests/TestCase.php`・`tests/fixtures/*.json`・`tests/common/mod.rs`）が残りうるため受け持ちは未確定である
