@@ -404,6 +404,21 @@ def test_diff_candidates_score_only_issues_created_after_the_ref(env):
     assert _unscored(env.run("candidates", "--since-ref", "v1", "--depth", "review")[1]) == {1, 2, 3, 4}
 
 
+def test_diff_rank_leaves_issues_created_before_the_ref_for_review(env):
+    """差分の棚卸しの rank は、起点以前に作られた見積の無い課題で止まらず、見直しへ回す（#2315 の決定 1・決定 6）。"""
+    _created(env, before=(1, 3), after=(2, 4))
+    code, out = env.run("rank", "--since-ref", "v1", "--scores", env.scores([s for s in BASE if s["number"] in (2, 4)]))
+    assert code == 0 and out["metrics"]["excluded"] == [] and out["metrics"]["left_for_review"] == [1, 3]
+    ranked = {r["number"] for m in out["metrics"]["milestones"] for r in m["rows"]}
+    assert not ranked & {1, 3}
+    code, out = env.run("rank", "--since-ref", "v1")  # 起点より後の課題は記録の見積を使い、見積が無ければ外す
+    assert code == 0 and out["metrics"]["left_for_review"] == [1, 3]
+    _created(env, after=(1,))
+    code, out = env.run("rank", "--since-ref", "v1")
+    assert code == 20 and {e["number"] for e in out["metrics"]["excluded"]} == {1}
+    assert "left_for_review" not in env.run("rank")[1]["metrics"]  # 渡さなければ従来どおり
+
+
 def test_apply_does_not_write_the_table_when_a_planned_move_fails(env):
     """予定どおりに移せなかった課題があれば、順位の表を書かずに止める（表と課題の所属を食い違わせない）。"""
     snaps = env.snapshots()

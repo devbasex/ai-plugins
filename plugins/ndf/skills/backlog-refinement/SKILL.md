@@ -172,7 +172,7 @@ python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ>
 `commit-subject`）。`commit-subject` の候補は上限で切るときも先に残す。`rank` を打ったことのあるリポジトリでは、記録の
 見積が無い課題と、見積を付けた後に要約値が変わった課題も拾う（`unscored`。上限で切るときの経路の数には入れない）。
 差分の棚卸し（`--depth diff`）の `unscored` は、`--since-ref` のコミットの時刻（`metrics.since`）より後に作られた課題だけである。
-それより前の課題は見直しで拾う。
+それより前の課題は見直しで拾う。手順 2C の `rank` にも同じ `--since-ref` を渡し、それより前の課題を `excluded` にしない。
 `rank` を打ったことが無い初回は、手順 2C の `rank` が見積の無い open の課題をすべて `excluded` で返し、その全件が採点の対象になる。担当が足す
 経路の課題は `--add` で渡す（`manual`）。候補ごとに `updated_at` と課題の要約値（`digest`。題名・本文・
 状態・マイルストーン・ラベルから作る）を返し、手順 3 の照合に使う。未完了が 0 件になったマイルストーンは `kind: milestone` の項目で返る。
@@ -268,8 +268,12 @@ open の全件へ広げる（`--all`）。
 ### 手順 2C: 順位を算出する
 
 ```bash
-python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34]
+python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
 ```
+
+差分の棚卸しでは `--since-ref` に手順 1 と同じタグを渡す。見積がどこにも無い課題のうち、そのコミットの時刻以前に
+作られたものは `excluded` にせず（終了コード 20 にしない）、順位にも入れずに `metrics.left_for_review` へ番号だけを返す。
+それらに段階を付けるのは見直しである。見直しと大整理では渡さない。
 
 `rank` は open の課題・マイルストーンの説明・サブイシューを読み、マイルストーンごとの順位・大きい課題の枠・切り出しの
 境界・前倒しと後ろ倒しの候補・前回の `### 順位` の表からの変化を返す。見積は `--scores`（この回に付けた課題）→ 記録 →

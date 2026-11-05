@@ -57,7 +57,6 @@ plan.json の形（起票・付け直しと深さのキーは upkeep_actions.py 
 from __future__ import annotations
 
 import argparse
-import datetime
 import functools
 import hashlib
 import json
@@ -74,7 +73,7 @@ import deps  # noqa: E402  外部パッケージの環境（upkeep_gh が投稿�
 deps.require("locks")  # 深さの記録と見直しの持ち主の錠（upkeep_depth・upkeep_owner が最上位で読む。#2315）
 import jsonio  # noqa: E402
 from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
-from step_result import emit, git, git_root, main_with, result  # noqa: E402
+from step_result import emit, git_root, main_with, result  # noqa: E402
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
 from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, with_labels  # noqa: E402
@@ -137,14 +136,6 @@ def _read_state(path: Path):
 
 
 # ---------------- candidates ----------------
-
-
-def _ref_date(root, ref: str) -> str:
-    p = git(root, "log", "-1", "--format=%cI", ref, check=False)
-    if p.returncode != 0 or not p.stdout.strip():
-        raise StepError(f"ref を読めない: {ref}", EXIT_UNREADABLE)
-    d = datetime.datetime.fromisoformat(p.stdout.strip())
-    return d.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
@@ -216,7 +207,7 @@ def cmd_candidates(a):
     a.limit = None if a.depth == "review" else a.limit
     repo = target_repo(root, a.repo)
     gh = Gh(repo)
-    since = _ref_date(root, a.since_ref)
+    since = RC.ref_date(root, a.since_ref)
     open_issues = list_issues(gh, "state=open")
     routes = _Routes(open_issues)
     notes = []
