@@ -1627,6 +1627,9 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
         "review",
         "sync-review",
         "requirements-recheck",
+        "survey-check",
+        "fix-survey",
+        "survey-recheck",
         "glossary-check",
         "fix-glossary",
         "glossary-recheck",
@@ -1641,7 +1644,11 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "requirements-recheck"
     # レビューの直しの後にも写しと本文の一致を見て、食い違えば on_fail を置かずに止まる（#1769）
     assert "spec-copy.py check" in ds["requirements-recheck"]["cmd"] and "on_fail" not in ds["requirements-recheck"]
-    assert ds["requirements-recheck"]["next"] == "glossary-check"
+    assert ds["requirements-recheck"]["next"] == "survey-check"
+    # 自前で作る決定に比べた候補が無ければ 1 回だけ直し、残れば on_fail を置かずに止まる（#2519）
+    assert "design-survey.py check --issue" in ds["survey-check"]["cmd"] and ds["survey-check"]["on_fail"] == "fix-survey"
+    assert ds["fix-survey"]["next"] == "survey-recheck" and ds["survey-recheck"]["cmd"] == ds["survey-check"]["cmd"]
+    assert "on_fail" not in ds["survey-recheck"] and ds["survey-check"]["next"] == ds["survey-recheck"]["next"] == "glossary-check"
     assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"

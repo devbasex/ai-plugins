@@ -82,6 +82,7 @@ LLM を呼ばずに出し、(c) 設計の決定と実装の一致と、(b) で�
 | 要素 | 責務 |
 | --- | --- |
 | `plugins/ndf/scripts/design-match.py` | `tests`（確認 (a)）と `specs`（確認 (b)）。LLM を呼ばず、どの文書も書き換えず、結果を 1 行の JSON（`lib/step_result.py` の形）で返す |
+| `plugins/ndf/scripts/lib/design_docs.py` | 設計文書の名前の規則と、課題の番号から HEAD の設計文書を読む処理。`design-match.py` と `design-survey.py`（設計の外部の調査の検査）が読む |
 | `plugins/ndf/scripts/lib/repo.py`（`SPEC_DIR`） | 確定仕様の置き場の定数。`plan-to-spec-steps.py` の索引のパスと `design-match.py specs` の対象が読む |
 | `plugins/ndf/scripts/supervise_lib/procedures.py`（`DESIGN_MATCH_MODES`・`design_match_steps`・`design_diff_on_pr`） | 突き合わせの 3 ステップと、`pr` のステップへ持たせる `diff_section`（節のファイル）・`on_section_missing`（節が無いときの行き先） |
 | `plugins/ndf/scripts/supervise_lib/templates.py`（`plan_to_merge`） | `standard` で課題があるとき、`test-limited` の次と judge の「先へ進む」選択肢を `design-tests` へ向ける |
