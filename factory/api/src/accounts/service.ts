@@ -77,6 +77,26 @@ export class AccountService {
     };
   }
 
+  // 席の履歴の行。null の側は席が無いことを表す
+  private seatHistory(
+    type: "seat.added" | "seat.changed" | "seat.removed",
+    accountId: string,
+    at: string,
+    actor: string,
+    userId: string,
+    before: SeatType | null,
+    after: SeatType | null,
+  ): HistoryRecord {
+    return {
+      accountId,
+      type,
+      at,
+      actor,
+      before: before === null ? null : { user_id: userId, seat_type: before },
+      after: after === null ? null : { user_id: userId, seat_type: after },
+    };
+  }
+
   // 利用者の行を読み、無ければ利用者と個人のアカウント（Free・local）を 1 つのトランザクションで作る（I12・I24、E2）
   async ensureUser(caller: Caller): Promise<UserRecord> {
     const existing = await this.store.getUser(caller.userId);
@@ -175,7 +195,7 @@ export class AccountService {
           seat,
           [
             this.accountCreated(account, caller.userId, { name }),
-            { accountId: account.accountId, type: "seat.added", at, actor: caller.userId, before: null, after: { user_id: caller.userId, seat_type: seatType } },
+            this.seatHistory("seat.added", account.accountId, at, caller.userId, caller.userId, null, seatType),
           ],
           ref && claimOf(ref, account.accountId, at),
         ),
@@ -204,9 +224,7 @@ export class AccountService {
     const seat: SeatRecord = { accountId: ctx.accountId, userId, seatType, addedAt: at };
     await writeOr(
       () =>
-        this.store.addSeat(seat, [
-          { accountId: ctx.accountId, type: "seat.added", at, actor: ctx.userId, before: null, after: { user_id: userId, seat_type: seatType } },
-        ]),
+        this.store.addSeat(seat, [this.seatHistory("seat.added", ctx.accountId, at, ctx.userId, userId, null, seatType)]),
       () => {
         throw new ConflictError("seat_exists", "その利用者は既にこのチームの席を持っています");
       },
@@ -221,14 +239,7 @@ export class AccountService {
       const current = await this.store.getSeat(ctx.accountId, userId);
       if (!current) throw seatNotFound();
       const at = this.stamp();
-      const history: HistoryRecord = {
-        accountId: ctx.accountId,
-        type: "seat.changed",
-        at,
-        actor: ctx.userId,
-        before: { user_id: userId, seat_type: current.seatType },
-        after: { user_id: userId, seat_type: seatType },
-      };
+      const history = this.seatHistory("seat.changed", ctx.accountId, at, ctx.userId, userId, current.seatType, seatType);
       return { write: () => this.store.updateSeat(current, seatType, [history]), result: { ...current, seatType } };
     });
   }
@@ -244,14 +255,7 @@ export class AccountService {
       const current = await this.store.getSeat(ctx.accountId, userId);
       if (!current) throw seatNotFound();
       const at = this.stamp();
-      const history: HistoryRecord = {
-        accountId: ctx.accountId,
-        type: "seat.removed",
-        at,
-        actor: ctx.userId,
-        before: { user_id: userId, seat_type: current.seatType },
-        after: null,
-      };
+      const history = this.seatHistory("seat.removed", ctx.accountId, at, ctx.userId, userId, current.seatType, null);
       return { write: () => this.store.removeSeat(current, [history]), result: undefined };
     });
   }
