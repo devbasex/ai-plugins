@@ -93,11 +93,13 @@
 
 | 要素 | 責務 | 置き場 |
 | --- | --- | --- |
-| 契約（OpenAPI） | 承認待ちの一覧の操作 `listApprovalRequests` を足し、スプリントの詳細の形に `attention` を足す | `factory/contracts/openapi/runs.yaml` |
+| 契約（OpenAPI） | 承認待ちの一覧の操作 `listApprovalRequests`（`GET /accounts/{accountId}/sprint-runs/approval-requests`）を足し、スプリントの詳細の形に `attention` を足す | `factory/contracts/openapi/runs.yaml` |
 | 共有する形 | 注意の行と承認を待つ依頼の行の型の正本。API と画面の両方が読む | `factory/contracts/src/views.ts` |
 | 操作の表 | 契約から生成する操作の一覧。新しい操作が画面・API・MCP に同時に現れる | `factory/contracts/src/generated/operations.ts`（`npm run generate -w contracts` で作る） |
 | 進捗の読み出し | 実行の `gate.reached` と `gate.answered` だけを `order_key` の順に返すメソッド（`listGateEvents`）を足す | `factory/api/src/progress/read.ts` |
-| 導出 | 事象の列から注意の行を、実行と承認の事象から承認を待つ依頼の行を作る純粋な関数（`attentionsOf`・`approvalRequestOf`） | `factory/api/src/views/derive.ts` |
+| 実行の表 | アカウントの実行のうち状態が `awaiting_approval` のものだけを返すメソッド（`listAwaitingRuns`）を足す | `factory/api/src/runs/table.ts`・`dynamo-table.ts`・`memory-table.ts` |
+| 導出 | 事象の列から注意の行を作る関数（`attentionsOf`）、実行と承認の事象から答えの無い最後の承認の依頼を選ぶ関数（`awaitingGateOf`）、その結果から承認を待つ依頼の行を作る関数（`approvalRequestOf`）。どれも純粋な関数 | `factory/api/src/views/derive.ts` |
+| オーガナイザーの一覧 | 既存のリポジトリの承認と問いの一覧（`OrganizerControl.list`）の承認の依頼の判定を `awaitingGateOf` へ置き換え、実行を `listAwaitingRuns` で読む | `factory/api/src/organizer/control.ts` |
 | 読み出しの経路 | 詳細の読み出しへ注意の行を足す。一覧の操作を登録し、アカウントの実行を絞って行を集める | `factory/api/src/routes/sprint-views.ts` |
 | 承認待ちの一覧の画面 | 一覧を読み直しながら出し、行からスプリントの詳細へ移す | `factory/web/src/pages/ApprovalsPage.tsx`（新設） |
 | スプリントの詳細の画面 | 注意の欄を足す | `factory/web/src/pages/SprintDetailPage.tsx` |
@@ -176,6 +178,10 @@ factory/
 │       ├── views.ts                   （変更: AttentionRow・ApprovalRequestRow）
 │       └── generated/operations.ts    （生成し直す）
 ├── api/src/
+│   ├── runs/{table,dynamo-table,memory-table}.ts （変更: listAwaitingRuns）
+│   ├── runs/dynamo-table.test.ts      （新設）
+│   ├── organizer/control.ts           （変更: list が awaitingGateOf を使う）
+│   ├── organizer/control.test.ts      （変更）
 │   ├── progress/read.ts               （変更: listGateEvents）
 │   ├── views/derive.ts                （変更: attentionsOf・approvalRequestOf）
 │   ├── views/derive.test.ts           （変更）
@@ -238,7 +244,8 @@ classDiagram
 | 操作 | 変更 | 互換性 |
 | --- | --- | --- |
 | `getSprintRunDetail`（`GET /accounts/{accountId}/sprint-runs/detail`） | 要素の値 `SprintRunDetail` に必須の `attention`（`AttentionRow` の配列）を足す | 足すだけ。既存の項目の形と意味は変えない。既存の呼び出し側（画面・MCP）は知らない項目を読み飛ばす |
-| `listApprovalRequests`（`GET /accounts/{accountId}/approval-requests`） | 新設。種類は一覧（`list`）、`x-ndf-access: read`、鍵と入力の本文を持たない | 新しい操作。MCP のツールが 1 つ増える |
+| `listApprovalRequests`（`GET /accounts/{accountId}/sprint-runs/approval-requests`） | 新設。種類は一覧（`list`）、`x-ndf-access: read`、鍵と入力の本文を持たない | 新しい操作。MCP のツールが 1 つ増える。既存の `listRepositoryApprovalRequests`（`GET /accounts/{accountId}/approval-requests`）と経路が重ならない |
+| `listRepositoryApprovalRequests`（既存） | 形は変えない。承認の依頼（ゲート 1・ゲート 2・判断）の要素を、新しい一覧と同じ判定（決定 1）で選ぶ | 形は同じ。最後の承認の依頼に同じ種類の答えが記録済みで、まだ再開していない実行の要素が出なくなる |
 
 ### 新しい形
 
@@ -332,13 +339,13 @@ sequenceDiagram
     participant 導出
     画面->>経路: listApprovalRequests(アカウント)
     経路->>経路: アカウントを解決（他人なら 403）
-    経路->>保存: 実行を新しい順に 1,000 件まで読む
-    保存-->>経路: 実行の行
-    経路->>経路: awaiting_approval で待つ理由が空の実行に絞る
+    経路->>保存: listAwaitingRuns(アカウント)
+    保存-->>経路: awaiting_approval の実行の行（索引の Query 1 回と、該当した実行だけの読み直し）
+    経路->>経路: 待つ理由が空の実行に絞る
     loop 絞った実行ごと（並べる数 10 まで）
         経路->>保存: listGateEvents(実行)
         保存-->>経路: gate.reached と gate.answered（order_key の順）
-        経路->>導出: approvalRequestOf(実行, 承認の事象)
+        経路->>導出: approvalRequestOf(実行, awaitingGateOf(実行, 承認の事象))
         導出-->>経路: 0 か 1 行
     end
     alt どれかの読み出しが失敗
@@ -384,7 +391,7 @@ sequenceDiagram
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 承認待ちの一覧は 1 回の読み出しで返す。件数の上限と分割の要否は設計で決める | 分割しない。実行の表から新しい順に 1,000 件まで読み、承認を待つ実行だけ承認の事象を読む（決定 2・決定 3）。並べる数は既存の一覧と同じ 10 | 経路のテストで、承認を待つ実行 3 件と終わった実行を混ぜ、1 回の応答に 3 行が返り、終わった実行の事象を読まないことを見る |
+| 性能・拡張性 | 承認待ちの一覧は 1 回の読み出しで返す。件数の上限と分割の要否は設計で決める | 分割しない。索引の Query 1 回で承認を待つ状態の実行だけを選び、その実行だけを表から読み直して承認の事象を読む（決定 2・決定 3）。1 回の読み出しの呼び出しは、承認を待つ実行の数を W とすると 1 + 2W 回。並べる数は既存の一覧と同じ 10 | 経路のテストで、承認を待つ実行 3 件と終わった実行を混ぜ、1 回の応答に 3 行が返り、終わった実行を表から読み直さず事象も読まないことを見る |
 | セキュリティ | 一覧と `attention` の欄の見せる範囲は前提 5 のとおり。読み出しは他の読み出しと同じく監査の記録に残る。`attention` の要約は進捗の受け口で受けた値をそのまま出し、受け口の外で秘密を足さない | アカウントの解決と監査の記録は既存の操作の登録の層（`registerList` の `trace`・`contextOf`）が持つ。要約は事象の値をそのまま返し、ほかの値を足さない | 他人のアカウントで一覧を読み、403 と `listSprintRuns` と同じ本文を見る。MCP の経路の既存の記録のテストに新しい操作を加える |
 
 ## 決定の記録
@@ -406,13 +413,17 @@ sequenceDiagram
 
 待つ理由が `release_requested`・`release_stalled` の実行は承認の依頼でなく配布の依頼と停止を待っているため、行にしない。
 
-根拠: スプリント Vision（いま何が人を待っているかが分かる）（MVV 版 5・スプリント MVV 44cd096d）
+既存のリポジトリの承認と問いの一覧（`OrganizerControl.list`、`factory/api/src/organizer/control.ts`）も、承認を待つ実行を絞って最後の `gate.reached`（`findLastGate`）から種類と日時を取る、同じ役割の判定を持つ。こちらは答えの事象を見ないため、答えを記録して再開を待つ間の古い依頼を出す。判定は 1 つの関数（`awaitingGateOf`。実行と承認の事象から、上の規則で答えの無い最後の `gate.reached` を返し、無ければ空）にし、2 つの一覧の両方がこれを使う。行の形は一覧ごとに違うため（新しい一覧はループの参照と課題の番号、既存の一覧は承認資料の PR と配布の要約）、形を組む部分だけを分ける。既存の一覧の配布の停止とループの判断待ちの要素は変えない。
+
+根拠: スプリント Vision（いま何が人を待っているかが分かる）/ Value 7（同じ役割の関数を分けない）（MVV 版 5・スプリント MVV 44cd096d）
 
 ### 決定 2: 一覧の読み出しを重くしないため、実行を状態で絞ってから承認の事象だけを読むメソッドを足す
 
-既存の詳細の読み出し（`listRunEvents`）は実行の事象をすべて読む。一覧で全実行に使うと、工程の記録の数だけ読む量が増える。進捗の読み出しに、`gate.reached` と `gate.answered` だけを `order_key` の順に返すメソッド（`listGateEvents`）を足す。このメソッドは承認を待つ状態の実行にだけ使う。実行の表は既存の `listRuns(accountId, 1000)`（バックログと月の使用量の判定が使う上限）で読む。
+既存の詳細の読み出し（`listRunEvents`）は実行の事象をすべて読む。一覧で全実行に使うと、工程の記録の数だけ読む量が増える。進捗の読み出しに、`gate.reached` と `gate.answered` だけを `order_key` の順に返すメソッド（`listGateEvents`）を足す。このメソッドは承認を待つ状態の実行にだけ使う。
 
-実行の表に状態の索引を足す形は採らない。スキーマを変えない（要求の「影響」の「データ」）ためである。読む量が問題になったときに改めて決める（未確認のまま残ること）。既存の `findLastGate` を使う形も採らない。答えの有無を決めるのに `gate.answered` も要り、2 回の読み出しになる。
+実行の表には、承認を待つ状態の実行だけを返すメソッド（`listAwaitingRuns`）を足す。既存の `listRuns(accountId, 1000)` は索引（GSI `gsi1`）の Query 1 回の後に、行ごとに表から読み直す（`getRun`）ため、1 回の読み出しが最大 1,001 回の呼び出しになる。30 秒ごとの読み直しでは、開いている画面 1 つで毎回これが起きる。`gsi1` の射影は全部の項目である（`docs/specifications/ndf-factory-runs-state-and-data.md` の「データ」）。そこで `listAwaitingRuns` は、`listRuns` と同じ鍵の条件・新しい順・上限 1,000 件の Query に、状態が `awaiting_approval` の条件（`FilterExpression`）を付ける。条件に合った実行だけを表から読み直し、読み直した状態でもう一度絞る（索引は結果整合のため）。承認を待つ実行の数を W とすると、一覧 1 回の呼び出しは Query 1 回・読み直し W 回・承認の事象の読み出し W 回の 1 + 2W 回になる。W は決定 3 の上限（料金プランの同時の数 1・3・10 に配布の実行を足した数）に収まる。既存の一覧（`OrganizerControl.list`）も同じメソッドへ移す。
+
+実行の表に状態の索引を足す形は採らない。スキーマを変えない（要求の「影響」の「データ」）ためである。既存の `findLastGate` を使う形も採らない。答えの有無を決めるのに `gate.answered` も要り、2 回の読み出しになる。
 
 根拠: スプリント Value 6（安く届けられる仕組みを選ぶ）/ Value 7（MVV 版 5・スプリント MVV 44cd096d）
 
@@ -422,9 +433,11 @@ sequenceDiagram
 
 根拠: スプリント Value 1（操作を速く分かりやすく）/ Value 5（MVV 版 5・スプリント MVV 44cd096d）
 
-### 決定 4: 名前を既存の形に揃えるため、操作を `listApprovalRequests`、画面を `/accounts/:accountId/approvals` にする
+### 決定 4: 名前を既存の形に揃えるため、操作を `listApprovalRequests`（経路 `/accounts/{accountId}/sprint-runs/approval-requests`）、画面を `/accounts/:accountId/approvals` にする
 
-操作の名前は既存の一覧（`listSprintRuns`・`listLoops`）と同じく「list + 返すものの複数形」にする。返すものは用語集の「承認の依頼」に合わせる。操作の経路は `/accounts/{accountId}/approval-requests` である。画面は `screens.ts` に既にある `approvals` の行（予定）に経路を与える。#2173 は同じ画面へ答える操作と通知を足すため、画面の名前を「承認を待つものを読む場所」と「答える場所」で分けない。
+操作の名前は既存の一覧（`listSprintRuns`・`listLoops`）と同じく「list + 返すものの複数形」にする。返すものは用語集の「承認の依頼」に合わせる。
+
+操作の経路は `/accounts/{accountId}/sprint-runs/approval-requests` にし、スプリントの実行の操作（`/accounts/{accountId}/sprint-runs/detail` など）の下に置く。`/accounts/{accountId}/approval-requests` は既存のリポジトリの承認と問いの一覧（`listRepositoryApprovalRequests`、`factory/contracts/openapi/organizer.yaml`）が使っている。既存の操作の鍵（`repository_id`）を省略可にしてアカウント全体を返す形は採らない。既存の操作は鍵ごとに入力と同じ順・同じ数の要素の結果を返す約束で、鍵を省くとこの約束が崩れる。また要素がオーガナイザーの状態と配布の停止を持ち、アカウント全体の一覧と形が合わない。判定の規則は 2 つの操作で共有する（決定 1）。画面は `screens.ts` に既にある `approvals` の行（予定）に経路を与える。#2173 は同じ画面へ答える操作と通知を足すため、画面の名前を「承認を待つものを読む場所」と「答える場所」で分けない。
 
 根拠: Value 8（語をそろえる）（MVV 版 5）
 
@@ -451,6 +464,8 @@ sequenceDiagram
 | 受け入れ条件 5・I3・I4 | (a)(b)(c)(d) の 4 実行から 3 行が出て、(c) のループは空・画面は「—」、(d) は出ない（導出と経路のテスト、画面のテスト） | 答えた依頼を残す・`loop` の無い依頼を落とす |
 | 受け入れ条件 6・I3・I5 | 同じ実行の同じ種類の `gate.reached` が 2 件で 1 行・後の日時。行は古い順、同じ日時は実行の ID の順 | 2 行出す・前の日時を使う・新しい順に並べる |
 | I3（実行の状態） | 状態が `running` の実行と、待つ理由が `release_requested` の実行は、答えの事象が無くても行にならない | 状態を見ずに事象だけで決める |
+| 決定 1（判定の共有） | 最後の `gate.reached` に同じ種類の `gate.answered` がある承認待ちの実行は、新しい一覧にも `listRepositoryApprovalRequests` の要素にも出ない。配布の停止とループの判断待ちの要素は変わらない（オーガナイザーの既存のテストに加える） | 2 つの一覧で別の判定を使う・既存の一覧の配布の停止を落とす |
+| 決定 2（読み出しの回数） | 終わった実行 5 件と承認を待つ実行 2 件のアカウントで、`listAwaitingRuns` は 2 件を返し、表からの読み直しは 2 回だけ。索引で承認待ちに見えても読み直した状態が違う実行は返さない（DynamoDB の実行の表のテストを新設し、送った命令を記録する偽の client で Query と読み直しの回数を数える） | 全行を読み直す・索引の状態だけで返す |
 | 受け入れ条件 7 | 行を押すとその実行のスプリントの詳細の経路へ移る | 経路の実行の ID を符号化しない・別の実行へ移る |
 | 受け入れ条件 8 | 空の配列で「承認を待っているものはありません」 | 空の表を出す |
 | 受け入れ条件 9 | 画面の地図の表と `screens.ts` の経路が一致する（既存の `docs.test.ts`）。ナビゲーションに承認待ちの一覧が出る（既存の部品のテストに加える） | 地図だけ・`screens.ts` だけを直す・`nav: false` のまま |
@@ -465,14 +480,14 @@ sequenceDiagram
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2430 | 実装する | — | `factory/contracts/openapi/runs.yaml`、`factory/contracts/src/`、`factory/api/src/progress/read.ts`、`factory/api/src/views/`、`factory/api/src/routes/sprint-views.ts`、`factory/api/src/routes/sprint-views.test.ts`、`factory/api/src/mcp/mcp.test.ts`、`factory/web/src/`、`docs/specifications/ndf-factory-screen-map.md` |
+| #2430 | 実装する | — | `factory/contracts/openapi/runs.yaml`、`factory/contracts/src/`、`factory/api/src/runs/table.ts`、`factory/api/src/runs/dynamo-table.ts`、`factory/api/src/runs/memory-table.ts`、`factory/api/src/runs/dynamo-table.test.ts`（新設）、`factory/api/src/organizer/control.ts`、`factory/api/src/organizer/control.test.ts`、`factory/api/src/progress/read.ts`、`factory/api/src/views/`、`factory/api/src/routes/sprint-views.ts`、`factory/api/src/routes/sprint-views.test.ts`、`factory/api/src/mcp/mcp.test.ts`、`factory/web/src/`、`docs/specifications/ndf-factory-screen-map.md` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | 実環境での表示 | `factory/` はどの環境にもデプロイされていないため、取り込みの衝突で止まった実行と、2 つ以上のループが承認を待つときの表示を実環境で確かめられない（要求の「検証手段」の手動確認）。デプロイの後のリリース後テストで確かめる |
-| 一覧の読む量 | 1 回の読み出しで実行の表の行を最大 1,000 件読む（決定 2）。30 秒ごとの読み直しで、開いている画面 1 つあたり 1 時間に最大 120,000 件の読み出しになる。費用は未測定。索引（GSI）が実行の状態を持っていれば、絞り込みを表の側へ移して読む量を減らせるが、索引の射影する項目は未確認 |
+| 一覧の読む量 | 1 回の読み出しの呼び出しは 1 + 2W 回（W は承認を待つ実行の数、決定 2）。30 秒ごとの読み直しで、開いている画面 1 つあたり 1 時間に 120 × (1 + 2W) 回になる。ただし索引の Query は条件で外した項目も読んだ量に数えるため、Query 1 回が読む索引の項目は最大 1,000 件のまま。費用は未測定 |
 | 新しい順の 1,000 件より古い実行 | 承認を待ったまま、その後に 1,000 件を超える実行が作られた実行は一覧に出ない。同時の数の上限から起こりにくいが、起こらないことは確かめていない |
 | 配布の実行が同時に待つ数 | 配布の実行は枠を持たないため、決定 3 の上限の根拠に含まれない。1 つのリポジトリで同時に待つ配布の実行の数の上限は、オーガナイザーの確定仕様で確かめていない |
 | #2173 の要求 | #2173 の「対応待ち」の一覧をこの画面の上に作ると書き換えるかは、利用者が #2173 の着手の前に決める（要求の未決 3） |
