@@ -7,10 +7,20 @@ import type { AuthEnv } from "../auth/resolve.ts";
 import { ForbiddenError, InvalidRequestError, ServiceUnavailableError } from "../errors.ts";
 import type { RankingTable } from "../github/port.ts";
 import type { SprintRun } from "../runs/model.ts";
-import { DETAIL_STEP_LIMIT, deriveDetail, deriveRefinements, deriveStepDetail, listRowExtras, stepRows } from "../views/derive.ts";
+import {
+  approvalRequestOf,
+  DETAIL_STEP_LIMIT,
+  deriveDetail,
+  deriveRefinements,
+  deriveStepDetail,
+  listRowExtras,
+  sortApprovalRequests,
+  stepRows,
+} from "../views/derive.ts";
+import { awaitingGateOf } from "../progress/read.ts";
 import { mapLimit } from "./elements.ts";
 import type { FactoryDeps } from "./factory.ts";
-import { positiveInt, registerOperation } from "./operation.ts";
+import { positiveInt, registerList, registerOperation } from "./operation.ts";
 
 // 一覧の行ごとの読み出しを並べる数の上限
 const LIST_CONCURRENCY = 10;
@@ -51,7 +61,19 @@ export async function sprintRunList(deps: FactoryDeps, ctx: AccountContext, repo
   });
 }
 
+// 承認待ちの一覧（#2430）。承認を待つ状態の実行だけを読み、その実行の承認の事象から答えの無い最後の依頼を 1 行にする。
+// 分割せず 1 回で全行を返す（決定 3）。読むだけで、承認を確定しない（I7）
+export async function approvalRequestList(deps: FactoryDeps, ctx: AccountContext) {
+  const runs = (await readOrUnavailable(() => deps.table.listAwaitingRuns(ctx.accountId))).filter((r) => !r.awaitingReason);
+  const rows = await mapLimit(runs, LIST_CONCURRENCY, async (run) =>
+    approvalRequestOf(run, awaitingGateOf(run, await readOrUnavailable(() => deps.reader.listGateEvents(run.sprintRunId)))),
+  );
+  return sortApprovalRequests(rows.filter((r) => r !== null));
+}
+
 export function registerSprintViews(app: Hono<AuthEnv>, deps: () => FactoryDeps): void {
+  registerList(app, "listApprovalRequests", async (_c, ctx) => approvalRequestList(deps(), ctx!));
+
   registerOperation(app, "getSprintRunDetail", {
     run: async (e, ctx) => {
       const d = deps();

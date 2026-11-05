@@ -85,7 +85,7 @@ describe("ナビゲーション", () => {
   it("リンクを li に入れず、役割の要る行き先は役割があるときだけ出す", async () => {
     wrap(<NavMenu accountId="p-1" role={null} />);
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
-    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["自分のアカウント", "スプリントの一覧", "リポジトリ"]);
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["自分のアカウント", "スプリントの一覧", "承認待ちの一覧", "リポジトリ"]);
     cleanup();
     wrap(<NavMenu accountId="p-1" role="personal" />);
     expect(screen.getByRole("link", { name: "キーの持ち込み" }).getAttribute("href")).toBe("/accounts/p-1/model-credential");

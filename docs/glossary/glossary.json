@@ -2572,6 +2572,20 @@
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
+      "term": "選定",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す",
+      "source": "",
+      "pending_source": "issues/issue-2604-requirements.md"
+    },
+    {
+      "term": "前提の課題",
+      "context": "ndf-workflow",
+      "meaning": "ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない",
+      "source": "",
+      "pending_source": "issues/issue-2604-requirements.md"
+    },
+    {
       "term": "ループの予算",
       "context": "ndf-workflow",
       "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる",
@@ -4582,13 +4596,13 @@
       "term": "予算の既定",
       "context": "ndf-workflow",
       "meaning": "開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は NDF の組み込みの値（周回 3・費用 60 USD・時間 24 時間）。Factory の画面で予算の欄を空にした単位はこの値へ戻る",
-      "pending_source": "issues/issue-2406-requirements.md"
+      "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
       "term": "既定へ戻す指示",
       "context": "ndf-workflow",
       "meaning": "開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする。Factory は予算の欄が空の単位をこの指示として実行ジョブの指示に載せる",
-      "pending_source": "issues/issue-2406-design.md"
+      "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
       "term": "予算の履歴",
@@ -5732,6 +5746,24 @@
       "context": "ndf-factory",
       "meaning": "ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く",
       "pending_source": "issues/issue-2430-requirements.md"
+    },
+    {
+      "term": "共有の環境",
+      "context": "ndf-workflow",
+      "meaning": "NDF のスクリプトとラッパーが使う Python の環境。置き場は ~/.cache/ndf/venv/<版>（NDF_DEPS_VENV で変えられる）。プラグインの版ごとに 1 つで、同じ版のスクリプトとラッパーが共に使う",
+      "pending_source": "issues/issue-2509-requirements.md"
+    },
+    {
+      "term": "一覧の失敗の問い",
+      "context": "ndf-workflow",
+      "meaning": "状態の一覧の失敗が停滞の区切りより長く続いたときに、並列の計画のオーガナイザーの耐久ワークフローが自分で立てる問い（kind は observe）。一覧の終了コードと標準エラーの末尾 1 行を持ち、一覧が成功に戻れば外れる",
+      "pending_source": "issues/issue-2509-design.md"
+    },
+    {
+      "term": "状態の一覧",
+      "context": "ndf-workflow",
+      "meaning": "ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する",
+      "pending_source": "issues/issue-2509-requirements.md"
     }
   ]
 }

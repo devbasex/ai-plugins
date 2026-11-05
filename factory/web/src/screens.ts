@@ -44,11 +44,12 @@ export const SCREENS: readonly Screen[] = [
   { id: "team", path: "/accounts/:accountId", roles: ["team_owner", "team_seat"], nav: false, status: "available" },
   { id: "sprints", path: "/accounts/:accountId/sprints", roles: ALL_ROLES, nav: true, status: "available" },
   { id: "sprintDetail", path: "/accounts/:accountId/sprints/:sprintRunId", roles: ALL_ROLES, nav: false, status: "available" },
+  // 承認待ちの一覧（#2430）。読むだけで、答える操作と通知は #2173 が同じ画面へ足す
+  { id: "approvals", path: "/accounts/:accountId/approvals", roles: ALL_ROLES, nav: true, status: "available" },
   { id: "repositories", path: "/accounts/:accountId/repositories", roles: ALL_ROLES, nav: true, status: "available" },
   { id: "modelCredential", path: "/accounts/:accountId/model-credential", roles: OWNERS, nav: true, status: "available" },
   { id: "newSprint", path: "/accounts/:accountId/repositories/:repositoryId/sprints/new", roles: ALL_ROLES, nav: false, status: "available" },
   { id: "backlog", path: "/accounts/:accountId/repositories/:repositoryId/backlog", roles: ALL_ROLES, nav: false, status: "available" },
-  { id: "approvals", path: null, roles: ALL_ROLES, nav: false, status: "planned" },
   { id: "billing", path: null, roles: OWNERS, nav: false, status: "planned" },
   { id: "runners", path: null, roles: OWNERS, nav: false, status: "planned" },
   { id: "loops", path: "/accounts/:accountId/repositories/:repositoryId/loops", roles: ALL_ROLES, nav: false, status: "available" },
