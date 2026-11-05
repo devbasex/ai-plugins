@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { JobFinishedEvent, RunJobInstruction } from "@ndf-factory/contracts";
 import { judgeLimits } from "../accounts/limits.ts";
 import type { AccountContext } from "../accounts/model.ts";
-import { ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, ServiceUnavailableError } from "../errors.ts";
+import { ApiError, ConflictError, ForbiddenError, InvalidRequestError, NotFoundError, ServiceUnavailableError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
 import type { OrganizerWrite, OrgRequest } from "../organizer/model.ts";
 import { finishedKey } from "../progress/authorize.ts";
@@ -184,7 +184,6 @@ export class RunControl {
   // 開始。確かめの順は 課題の形（400）→ 登録（404）→ 課題（400）→ ループのマイルストーン（409）→ キー（409）→ 導入（409）→
   // 使える量（409）→ 版（409）→ 課題の持ち分（409）
   async startSprintRun(ctx: AccountContext, input: StartInput): Promise<{ sprint_run_id: string; state: "starting" }> {
-    const { table, github } = this.deps;
     const repositoryId = input.repositoryId;
     if (!Number.isInteger(repositoryId) || (repositoryId as number) < 1) throw new InvalidRequestError("リポジトリの ID の形ではありません");
     const issues = input.issues;
@@ -200,30 +199,51 @@ export class RunControl {
     const idempotency: IdempotencyRef | undefined =
       input.idempotencyKey === undefined ? undefined : { userId: ctx.userId, operationId: "startSprintRun", key: input.idempotencyKey };
     // 同じ鍵の 2 回目は 1 回目の結果を返し、何も確かめず何も書かない
-    const replayed = idempotency ? await table.getIdempotent(idempotency, this.iso()) : null;
-    if (replayed) return { sprint_run_id: replayed, state: "starting" };
-    const registration = await table.getRegistration(ctx.accountId, repositoryId as number);
+    const replayed = idempotency ? await this.replayRun(ctx, idempotency) : null;
+    if (replayed) return replayed;
+    try {
+      return await this.createSprintRun(ctx, repositoryId as number, issues as number[], idempotency);
+    } catch (err) {
+      // 同じ鍵の先行の要求が途中で作り終えていれば、枠・持ち分の断りより先にその実行を返す
+      const won = idempotency && err instanceof ApiError ? await this.replayRun(ctx, idempotency) : null;
+      if (won) return won;
+      throw err;
+    }
+  }
+
+  // 期限の中の同じ鍵が作った実行。別のアカウントの実行なら返さずに forbidden（鍵は利用者ごとで、アカウントをまたぐ）
+  private async replayRun(ctx: AccountContext, ref: IdempotencyRef): Promise<{ sprint_run_id: string; state: "starting" } | null> {
+    const runId = await this.deps.table.getIdempotent(ref, this.iso());
+    if (!runId) return null;
+    const run = await this.deps.table.getRun(runId);
+    if (!run || run.accountId !== ctx.accountId) throw new ForbiddenError();
+    return { sprint_run_id: runId, state: "starting" };
+  }
+
+  private async createSprintRun(
+    ctx: AccountContext,
+    repositoryId: number,
+    issues: number[],
+    idempotency: IdempotencyRef | undefined,
+  ): Promise<{ sprint_run_id: string; state: "starting" }> {
+    const { table, github } = this.deps;
+    const registration = await table.getRegistration(ctx.accountId, repositoryId);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
-    const check = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues as number[]);
+    const check = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues);
     if (check.invalid.length > 0) throw new InvalidRequestError("開いている課題ではありません", "invalid_issues", { numbers: check.invalid });
     // 動いているループのマイルストーンに属する課題は断る（ループの周回の選定と取り合う。決定 11）
     const titles = [...new Set(Object.values(check.milestones ?? {}).filter((t): t is string => typeof t === "string" && t !== ""))];
     await this.refuseIssuesInLoop(ctx.accountId, registration.repositoryId, titles, check.milestones ?? {});
 
     const created = await this.admit(ctx, registration, {
-      issues: issues as number[],
+      issues: issues,
       milestoneTitles: titles,
       milestonesOf: check.milestones ?? {},
       start: "new",
       ...(idempotency ? { idempotency } : {}),
     });
-    if (created === "duplicate") {
-      // 同じ鍵の作成が同時に走り、先に書いた方が勝った
-      const won = await table.getIdempotent(idempotency!, this.iso());
-      if (!won) throw new ServiceUnavailableError("sprint_run_unavailable");
-      return { sprint_run_id: won, state: "starting" };
-    }
-    if (created === "loop_changed") throw new ServiceUnavailableError("sprint_run_unavailable");
+    // duplicate は同じ鍵の作成が同時に走り、先に書いた方が勝った。勝った実行は呼び出し元が鍵から引き直す
+    if (created === "duplicate" || created === "loop_changed") throw new ServiceUnavailableError("sprint_run_unavailable");
     return { sprint_run_id: created.sprintRunId, state: "starting" };
   }
 

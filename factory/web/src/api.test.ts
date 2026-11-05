@@ -1,7 +1,7 @@
 // 画面の API クライアントと契約の対応（#2384 の受け入れ条件 1、性能の条件）
 import { describe, expect, it } from "vitest";
 import { MAX_ITEMS, OPERATIONS } from "@ndf-factory/contracts/operations";
-import { createApi, type Api } from "./api.ts";
+import { ApiFailure, createApi, type Api } from "./api.ts";
 import type { Auth } from "./auth.ts";
 
 const API_URL = "https://api.example.test";
@@ -89,6 +89,29 @@ describe("画面の API クライアントと契約（受け入れ条件 1）", 
     const keys = sent.map((s) => (s.body as { idempotency_key: string }[])[0]!.idempotency_key);
     expect(keys[0]).toMatch(/^[0-9A-Za-z-]{1,64}$/);
     expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("結果が分からない失敗（503・通信の失敗）の後の同じ中身の送り直しは同じ鍵を使い、断りの後は変える", async () => {
+    const keys: string[] = [];
+    const replies = [503, 0, 200, 409, 200];
+    const doFetch: typeof fetch = async (_input, init) => {
+      keys.push((JSON.parse(String(init?.body)) as { idempotency_key: string }[])[0]!.idempotency_key);
+      const status = replies.shift()!;
+      if (status === 0) throw new TypeError("Failed to fetch");
+      if (status === 503) return Response.json({ error: { code: "audit_unavailable", message: "" } }, { status });
+      if (status === 409) return Response.json([{ ok: false, status, error: { code: "limits_exceeded", message: "" } }]);
+      return Response.json([{ ok: true, value: {} }]);
+    };
+    const api = createApi(API_URL, auth, doFetch);
+    await expect(api.createTeam("t", "standard")).rejects.toBeInstanceOf(ApiFailure);
+    await expect(api.createTeam("t", "standard")).rejects.toBeInstanceOf(TypeError);
+    await api.createTeam("t", "standard");
+    await expect(api.createTeam("t", "standard")).rejects.toBeInstanceOf(ApiFailure);
+    await api.createTeam("t", "standard");
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).toBe(keys[0]);
+    expect(keys[3]).not.toBe(keys[0]);
+    expect(keys[4]).not.toBe(keys[3]);
   });
 });
 

@@ -341,6 +341,23 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
   // 要素 1 個を送り、その結果の値を返す。失敗の要素は ApiFailure にする
   const one = async <T>(id: OperationId, accountId: string | null, item: Record<string, unknown>) =>
     valueOf((await request<ElementResult<T>[]>(id, accountId, { items: [item] }))[0]);
+  // 作成（新しい識別子を作る操作）。冪等の鍵は送る中身ごとに持ち、結果が分からない失敗（503・通信の失敗）の後に
+  // 同じ中身を送り直すときは同じ鍵を使う（保存の後に記録の追記が落ちた 503 で、作り直しを 2 重にしない。#2384 の決定 4）。
+  // 成功か、断りの結果（503 以外の失敗）が届いたら鍵を捨て、次の送信は新しい作成にする
+  const pendingKeys = new Map<string, string>();
+  const create = async <T>(id: OperationId, accountId: string | null, item: Record<string, unknown>) => {
+    const slot = JSON.stringify([id, accountId, item]);
+    const idempotency_key = pendingKeys.get(slot) ?? newKey();
+    pendingKeys.set(slot, idempotency_key);
+    try {
+      const value = await one<T>(id, accountId, { ...item, idempotency_key });
+      pendingKeys.delete(slot);
+      return value;
+    } catch (err) {
+      if (err instanceof ApiFailure && err.status !== 503) pendingKeys.delete(slot);
+      throw err;
+    }
+  };
   // 鍵の query で指す取得と削除。要素の結果を入力と同じ順に返す
   const select = async <T>(id: OperationId, accountId: string | null, key: string, values: (string | number)[], query: Record<string, unknown> = {}) => {
     const out: ElementResult<T>[] = [];
@@ -354,7 +371,7 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
   return {
     me: async () => (await list<Me>("getMe", null))[0]!,
     account: async (id) => (await values<AccountDetail>("getAccount", null, "account_id", [id]))[0]!,
-    createTeam: (name, seat_type) => one("createTeam", null, { name, seat_type, idempotency_key: newKey() }),
+    createTeam: (name, seat_type) => create("createTeam", null, { name, seat_type }),
     setExecutionMode: (id, execution_mode) => one("setExecutionMode", null, { account_id: id, execution_mode }),
     addSeat: (id, user_id, seat_type) => one("addSeat", id, { user_id, seat_type }),
     changeSeat: (id, user_id, seat_type) => one("changeSeat", id, { user_id, seat_type }),
@@ -375,7 +392,7 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
       valueOf((await request<ElementResult<unknown>[]>("deleteModelCredential", id))[0]);
     },
     issueCandidates: (id, repository_id, exclude) => one("postIssueCandidates", id, { repository_id, exclude }),
-    startSprintRun: (id, repository_id, issues) => one("startSprintRun", id, { repository_id, issues, idempotency_key: newKey() }),
+    startSprintRun: (id, repository_id, issues) => create("startSprintRun", id, { repository_id, issues }),
     sprintRuns: async (id, repositoryId) => ({
       sprint_runs: await list<SprintRunRow>("listSprintRuns", id, repositoryId === undefined ? {} : { repository_id: repositoryId }),
     }),
@@ -386,7 +403,7 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     cancelSprintRun: (id, sprint_run_id) => one("cancelSprintRun", id, { sprint_run_id }),
     updateRepository: (id, repository_id, max_concurrent_runs) => one("updateRepository", id, { repository_id, max_concurrent_runs }),
     loops: async (id, repositoryId) => ({ loops: await list<LoopRow>("listLoops", id, { repository_id: repositoryId }) }),
-    startLoop: (id, repository_id, input) => one("startLoop", id, { repository_id, ...input, idempotency_key: newKey() }),
+    startLoop: (id, repository_id, input) => create("startLoop", id, { repository_id, ...input }),
     // 要素の数によらず 1 回の要求で読む。無いループ（loop_not_found）の要素は返さない
     loopDetails: async (id, loopIds) => {
       const results = await select<LoopDetail>("getLoop", id, "loop_id", loopIds);
@@ -397,7 +414,7 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     requestNextLap: (id, loop_id) => one("startNextLap", id, { loop_id }),
     answerLoop: (id, loop_id, issue, decision, pr) => one("answerLoopPending", id, { loop_id, issue, decision, ...(pr === undefined ? {} : { pr }) }),
     delegations: () => list<Delegation>("listDelegations", null),
-    createDelegation: (input) => one("createDelegation", null, { ...input, idempotency_key: newKey() }),
+    createDelegation: (input) => create("createDelegation", null, { ...input }),
     revokeDelegation: async (credentialId) => (await values<Delegation>("revokeDelegation", null, "credential_id", [credentialId]))[0]!,
   };
 }

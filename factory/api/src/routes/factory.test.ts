@@ -215,6 +215,33 @@ describe("作成の冪等の鍵（#2384 の受け入れ条件 9・I14）", () =>
     expect(h.table.idempotency.size).toBe(1);
   });
 
+  it("別のアカウントへ同じ鍵を送ると、元の実行・ループを返さずに forbidden", async () => {
+    const acc = await ready();
+    const team = (await op("createTeam", "u-1", { items: [{ name: "チーム", seat_type: "standard", idempotency_key: idem() }] })).body.account_id;
+    await op("startSprintRun", "u-1", { accountId: acc, items: [{ repository_id: 101, issues: [1], idempotency_key: "cross" }] });
+    await op("startLoop", "u-1", { accountId: acc, items: [{ repository_id: 101, name: "l1", milestones: ["m"], idempotency_key: "cross" }] });
+    expect((await op("startSprintRun", "u-1", { accountId: team, items: [{ repository_id: 101, issues: [1], idempotency_key: "cross" }] })).status).toBe(403);
+    expect((await op("startLoop", "u-1", { accountId: team, items: [{ repository_id: 101, name: "l1", milestones: ["m"], idempotency_key: "cross" }] })).status).toBe(403);
+  });
+
+  it("先行の同じ鍵が途中で作り終えたら、枠・名前の断りより先にその結果を返す", async () => {
+    const acc = await ready();
+    const run = await op("startSprintRun", "u-1", { accountId: acc, items: [{ repository_id: 101, issues: [1], idempotency_key: "race" }] });
+    const loop = await op("startLoop", "u-1", { accountId: acc, items: [{ repository_id: 101, name: "l1", milestones: ["m"], idempotency_key: "race" }] });
+    // 2 本目の最初の読み出しだけを、先行の要求が書く前の空として返す
+    const real = h.table.getIdempotent.bind(h.table);
+    let blind = 0;
+    h.table.getIdempotent = async (ref, now) => (blind-- > 0 ? null : real(ref, now));
+    blind = 1;
+    const again = await op("startSprintRun", "u-1", { accountId: acc, items: [{ repository_id: 101, issues: [2], idempotency_key: "race" }] });
+    expect(again.status).toBe(200);
+    expect(again.body.sprint_run_id).toBe(run.body.sprint_run_id);
+    blind = 1;
+    const loopAgain = await op("startLoop", "u-1", { accountId: acc, items: [{ repository_id: 101, name: "l1", milestones: ["m"], idempotency_key: "race" }] });
+    expect(loopAgain.status).toBe(200);
+    expect(loopAgain.body.loop_id).toBe(loop.body.loop_id);
+  });
+
   it("鍵の形が違えば要素だけを 400 にする", async () => {
     const acc = await ready();
     expect((await op("startSprintRun", "u-1", { accountId: acc, items: [{ repository_id: 101, issues: [1], idempotency_key: "空白 あり" }] })).status).toBe(400);
