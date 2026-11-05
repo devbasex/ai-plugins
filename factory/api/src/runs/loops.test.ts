@@ -651,3 +651,86 @@ describe("選定の規則を持たない（受け入れ条件 1）", () => {
     }
   });
 });
+
+// 現状固定テスト（cross-refactoring の I-001。RunControl.finalize の分岐ごとの今の振る舞いを固定する）
+describe("タスクが止まった後の処理（RunControl.finalize の現状）", () => {
+  beforeEach(() => setup());
+
+  const jobOf = async (jobId: string) => (await h.table.getJob(jobId))!;
+
+  it("job.finished の無いまま止まると、control が failed を書き、実行は task_stopped で failed、ジョブは failed で token を消す", async () => {
+    const run = await manual([4]);
+    const jobId = (await runOf(run.sprint_run_id)).currentJobId!;
+    await h.control.onTaskStateChange(jobId, "RUNNING");
+    const arn = (await jobOf(jobId)).tokenSecretArn!;
+    expect(h.platform.tokens.has(arn)).toBe(true);
+    await h.control.onTaskStateChange(jobId, "STOPPED");
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "task_stopped" });
+    expect(await jobOf(jobId)).toMatchObject({ state: "failed", result: "failed", finishedAt: h.clock.now.toISOString() });
+    expect(h.platform.tokens.has(arn)).toBe(false);
+    const finished = await memoryProgressReader(h.progress).findJobFinished(run.sprint_run_id, jobId);
+    expect(finished).toMatchObject({ source: "control", payload: { result: "failed", summary: "実行の制御が終わりを書いた（task_stopped）" } });
+  });
+
+  it("ランナーが failed を書いたジョブは job_failed で failed になる", async () => {
+    const run = await manual([4]);
+    await finishEcs(run.sprint_run_id, { result: "failed", summary: "" });
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "job_failed" });
+  });
+
+  it("done で終わると実行は done、枠を返し、2 度目の停止の知らせでは何も変えない", async () => {
+    const run = await manual([4]);
+    const jobId = await finishEcs(run.sprint_run_id, { result: "done", summary: "" });
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "done", failureReason: null });
+    expect(await jobOf(jobId)).toMatchObject({ state: "done", result: "done" });
+    expect((await h.table.getSlots("acc-1", REPO)).account).toBe(0);
+    const before = structuredClone(await runOf(run.sprint_run_id));
+    await h.control.onTaskStateChange(jobId, "STOPPED");
+    expect(await runOf(run.sprint_run_id)).toEqual(before);
+  });
+
+  it("起動に失敗したジョブは launch_failed で failed になる", async () => {
+    h.platform.failRunTask = true;
+    const run = await manual([4]);
+    expect(await runOf(run.sprint_run_id)).toMatchObject({ state: "failed", failureReason: "launch_failed" });
+  });
+
+  it("打ち切りの時間を過ぎた local のジョブは見回りが timeout で終える", async () => {
+    await manual([4], REPO, accountContext({ executionMode: "local" }));
+    const ins = (await h.control.claimLocalRunJob("acc-1"))!.instruction;
+    h.clock.now = new Date(h.clock.now.getTime() + (TEST_CONFIG.timeoutSeconds + 1) * 1000);
+    await h.control.sweep();
+    expect(await runOf(ins.SPRINT_RUN_ID)).toMatchObject({ state: "failed", failureReason: "timeout" });
+    expect((await jobOf(ins.JOB_ID)).state).toBe("failed");
+  });
+
+  it("手動の実行の gate は承認待ちになり、配布の依頼が無ければ release_requested の理由でも依頼を待たない", async () => {
+    const run = await manual([4]);
+    await finishEcs(run.sprint_run_id, { result: "gate", summary: "", reason: "release_requested" });
+    const r = await runOf(run.sprint_run_id);
+    expect(r.state).toBe("awaiting_approval");
+    expect(r.awaitingReason ?? null).toBeNull();
+    expect(r.releaseRequestId ?? null).toBeNull();
+  });
+
+  it("ループの周回の gate は release_requested の理由を終わりの理由へ写さず、ループも承認待ちになる", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const runId = (await loopOf(loop_id)).currentRunId!;
+    await finishEcs(runId, { result: "gate", summary: "", reason: "release_requested" });
+    const r = await runOf(runId);
+    expect(r.state).toBe("awaiting_approval");
+    expect(r.finishReason ?? null).toBeNull();
+    expect(r.awaitingReason ?? null).toBeNull();
+    expect((await loopOf(loop_id)).state).toBe("awaiting_approval");
+  });
+
+  it("ループの周回が done で終わると、次の周回が起きる", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const runId = (await loopOf(loop_id)).currentRunId!;
+    await finishEcs(runId, { result: "done", summary: "" }, [["loop.lap_closed", lap(1)]]);
+    expect((await runOf(runId)).state).toBe("done");
+    const loop = await loopOf(loop_id);
+    expect(loop).toMatchObject({ state: "running", lapRuns: 2 });
+    expect(loop.currentRunId).not.toBe(runId);
+  });
+});
