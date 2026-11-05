@@ -5087,13 +5087,13 @@
       "term": "予定の画面",
       "context": "ndf-factory",
       "meaning": "画面の地図で状態が「予定」の行。経路がまだ無く、載る機能だけが決まっている画面",
-      "pending_source": "issues/issue-2431-requirements.md"
+      "source": "docs/specifications/ndf-factory-screen-map.md"
     },
     {
       "term": "作る課題",
       "context": "ndf-factory",
       "meaning": "予定の画面を作り、画面の地図のその行を「あり」へ変える GitHub の課題。#2382 は「持ち主の課題」と書く",
-      "pending_source": "issues/issue-2431-requirements.md"
+      "source": "docs/specifications/ndf-factory-screen-map.md"
     },
     {
       "term": "デザインのトークン",
@@ -5135,55 +5135,55 @@
       "term": "委任の資格情報",
       "context": "ndf-factory",
       "meaning": "人が画面で発行し、エージェントかクライアントに渡す、期限と範囲つきの資格情報。だれの委任か（利用者）と、どのクライアントかを持ち、人が取り消せる（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "人だけが確定できる操作",
       "context": "ndf-factory",
       "meaning": "承認ゲートの承認・判断の依頼への答えと、共通原則の C1〜C8・プロジェクト MVV の P に当たる Factory の操作。契約に印を持ち、委任の資格情報からは断る（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "操作の記録",
       "context": "ndf-factory",
       "meaning": "Factory の利用者向けの操作 1 回ごとに 1 件追記する記録。だれが・いつ・どの呼び出し元から・何を行ったかを持ち、書き換えと削除の経路を持たない（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "呼び出し元の種類",
       "context": "ndf-factory",
       "meaning": "操作の記録に残す、操作がどこから来たかの区分。画面・API・MCP の 3 つ（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "機能から起こした契約",
       "context": "ndf-factory",
       "meaning": "経路と入出力を、画面の 1 枚でなくエンティティと操作から決めた API の契約。取得・作成・更新・削除とも配列で受け渡す（#2384）",
-      "pending_source": "issues/issue-2384-requirements.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "操作の扱い",
       "context": "ndf-factory",
       "meaning": "Factory の利用者向けの操作が要る範囲。読み取り（read）・書き込み（write）・人だけ（human）の 3 つで、契約の各操作に x-ndf-access として持つ（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "操作の表",
       "context": "ndf-factory",
       "meaning": "Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "要素の結果",
       "context": "ndf-factory",
       "meaning": "Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "作成の冪等の鍵",
       "context": "ndf-factory",
       "meaning": "Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384）",
-      "pending_source": "issues/issue-2384-design.md"
+      "source": "docs/specifications/ndf-factory-agent-access.md"
     },
     {
       "term": "差分の棚卸し",
