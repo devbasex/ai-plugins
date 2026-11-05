@@ -484,6 +484,24 @@ paths:
         "401": { $ref: "#/components/responses/E401" }
         "403": { $ref: "#/components/responses/E403" }
         "503": { $ref: "#/components/responses/E503" }
+  "/accounts/{accountId}/sprint-runs/approval-requests":
+    get:
+      tags: [sprint-runs]
+      operationId: listApprovalRequests
+      summary: 承認待ちの一覧
+      description: >-
+        アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 待ち始めた日時の古い順（同じ日時は実行の ID の順）に返す。1 つの実行に 0 か 1 行で、状態が awaiting_approval で待つ理由が無く、 最後の gate.reached より後に同じ種類の gate.answered が無い実行だけが載る。読むだけで、承認を確定しない。分割せず 1 回で返す。
+      x-ndf-access: read
+      parameters:
+        - { name: accountId, in: path, required: true, description: アカウントの ID, schema: { type: string } }
+      responses:
+        "200":
+          description: 承認を待つ依頼の行の配列。0 件は空の配列
+          content:
+            "application/json": { schema: { type: array, items: { $ref: "#/components/schemas/ApprovalRequestRow" } } }
+        "401": { $ref: "#/components/responses/E401" }
+        "403": { $ref: "#/components/responses/E403" }
+        "503": { $ref: "#/components/responses/E503" }
   "/accounts/{accountId}/sprint-runs/steps":
     get:
       tags: [sprint-runs]
@@ -764,6 +782,7 @@ components:
         - delegated_decisions
         - usage
         - omitted_steps
+        - attention
       properties:
         sprint_run_id: { type: string }
         repository_id: { type: integer }
@@ -835,6 +854,38 @@ components:
           required: [input_tokens, output_tokens, cost_usd]
           properties: { input_tokens: { type: integer }, output_tokens: { type: integer }, cost_usd: { type: number } }
         omitted_steps: { type: integer, description: 上限で省いた古い工程の数 }
+        attention:
+          type: array
+          description: >-
+            実行の attention を記録された順（order_key の順）にすべて。工程の記録の上限で減らない。reason は受け口が受けた値のまま返す
+          items: { $ref: "#/components/schemas/AttentionRow" }
+    AttentionRow:
+      type: object
+      required: [key, at, reason, summary]
+      properties:
+        key: { type: string, description: 事象の idempotency_key }
+        at: { type: string, format: date-time }
+        reason: { type: string, description: "受け口が受けた理由の値（取り込みで解けない衝突は base_conflict）" }
+        summary: { type: string }
+    LoopRef:
+      type: object
+      required: [name, lap]
+      properties:
+        name: { type: string, description: 開発ループの名前 }
+        lap: { type: integer, minimum: 1, description: 周回の番号 }
+    ApprovalRequestRow:
+      type: object
+      required: [sprint_run_id, repository_id, repo, issues, kind, loop, waiting_since]
+      properties:
+        sprint_run_id: { type: string }
+        repository_id: { type: integer }
+        repo: { type: string, description: owner/name }
+        issues: { type: array, items: { type: integer } }
+        kind: { type: string, enum: [gate1, gate2, decision] }
+        loop:
+          description: 最後の gate.reached のループの名前と周回の番号。ループでない実行は null
+          oneOf: [{ $ref: "#/components/schemas/LoopRef" }, { type: "null" }]
+        waiting_since: { type: string, format: date-time, description: 最後の gate.reached の日時 }
     StepDetail:
       allOf:
         - { $ref: "#/components/schemas/StepRow" }

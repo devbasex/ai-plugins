@@ -18,6 +18,8 @@ import { issueNumbers, useSprintState } from "./parts.tsx";
 import { PhaseBars, StaleNotice, usePhaseLabel } from "./sprintParts.tsx";
 
 const REQUIRED_KEYS = { retro: "sprintDetail.requiredStep.retro", refine: "sprintDetail.requiredStep.refine" } as const;
+// 文言を持つ注意の理由。ほかの理由は値そのものを出す（#2430 の決定 6）
+const ATTENTION_REASON_KEYS = { base_conflict: "sprintDetail.attentionReason.base_conflict" } as const;
 
 // 費用は USD（usage.recorded の cost_usd）。金額は通貨とともに整形する
 const usd = (amount: number) => ({ amount, currency: "USD" });
@@ -34,6 +36,28 @@ function GatesView({ gates }: { gates: SprintRunDetail["gates"] }) {
           { term: t("sprintDetail.decision"), value: t(`sprintDetail.decisionState.${gates.decision.state}`) },
         ]}
       />
+    </Section>
+  );
+}
+
+// 注意の欄（#2430）。詳細の応答の attention を記録された順に出す
+function AttentionView({ attention }: { attention: SprintRunDetail["attention"] }) {
+  const { t } = useTranslation();
+  const format = useFormat();
+  const reasonLabel = (reason: string) => (Object.hasOwn(ATTENTION_REASON_KEYS, reason) ? t(ATTENTION_REASON_KEYS[reason as keyof typeof ATTENTION_REASON_KEYS]) : reason);
+  return (
+    <Section title={t("sprintDetail.attention")}>
+      {attention.length === 0 ? (
+        <p>{t("sprintDetail.attentionEmpty")}</p>
+      ) : (
+        <ul className="ui-plain-list">
+          {attention.map((a) => (
+            <li key={a.key}>
+              <strong>{reasonLabel(a.reason)}</strong> <span className="ui-wrap">{a.summary}</span> <span className="ui-muted">{format.dateTime(a.at)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </Section>
   );
 }
@@ -339,6 +363,7 @@ export function SprintDetailPage() {
           ]}
         />
       </Section>
+      <AttentionView attention={detail.attention} />
       <PhasesView detail={detail} />
       <div className="sprint-detail">
         <div className="sprint-detail__log">

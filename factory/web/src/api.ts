@@ -1,5 +1,7 @@
 import type { Auth } from "./auth.ts";
-import type { StepDetailBody } from "@ndf-factory/contracts/views";
+import type { ApprovalRequestRow, AttentionRow, StepDetailBody } from "@ndf-factory/contracts/views";
+
+export type { ApprovalRequestRow, AttentionRow };
 import { MAX_ITEMS, operation, operationUrl, type OperationId } from "@ndf-factory/contracts/operations";
 
 // API の応答の形（factory/contracts/openapi/accounts.yaml）
@@ -152,6 +154,8 @@ export interface SprintRunDetail extends SprintRunSummary {
   delegated_decisions: number;
   usage: { input_tokens: number; output_tokens: number; cost_usd: number };
   omitted_steps: number;
+  // 実行の注意（取り込みの衝突など）を記録された順に（#2430）
+  attention: AttentionRow[];
 }
 
 export type StepDetail = StepRow & StepDetailBody;
@@ -278,6 +282,8 @@ export interface Api {
   // バックログ（順位の表と棚卸しの記録）。リポジトリの ID の配列で受ける
   backlogs(id: string, repositoryIds: number[]): Promise<Backlog[]>;
   cancelSprintRun(id: string, sprintRunId: string): Promise<{ state: string }>;
+  // 承認待ちの一覧（#2430）。答えの無い承認の依頼を待ち始めた日時の古い順に。読むだけ
+  approvalRequests(id: string): Promise<ApprovalRequestRow[]>;
   // 同時の実行の数の宣言（持ち主だけ）。null は宣言を外す
   updateRepository(id: string, repositoryId: number, maxConcurrentRuns: number | null): Promise<Repository>;
   loops(id: string, repositoryId: number): Promise<{ loops: LoopRow[] }>;
@@ -401,6 +407,7 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     stepDetails: (id, sprintRunId, stepKeys) => values<StepDetail>("getStepDetail", id, "step_key", stepKeys, { sprint_run_id: sprintRunId }),
     backlogs: (id, repositoryIds) => values<Backlog>("getBacklog", id, "repository_id", repositoryIds),
     cancelSprintRun: (id, sprint_run_id) => one("cancelSprintRun", id, { sprint_run_id }),
+    approvalRequests: (id) => list<ApprovalRequestRow>("listApprovalRequests", id),
     updateRepository: (id, repository_id, max_concurrent_runs) => one("updateRepository", id, { repository_id, max_concurrent_runs }),
     loops: async (id, repositoryId) => ({ loops: await list<LoopRow>("listLoops", id, { repository_id: repositoryId }) }),
     startLoop: (id, repository_id, input) => create("startLoop", id, { repository_id, ...input }),

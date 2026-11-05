@@ -245,7 +245,7 @@ sequenceDiagram
 
 | 種類（`kind`） | 何が並ぶか |
 | --- | --- |
-| `gate1` / `gate2` / `decision` | 承認ゲートか判断で止まった実行の最後の `gate.reached`。配布の実行のものは、まとめた配布の要約（連番・提示・レーンごとの依頼の有無と Pull Request・加わった Pull Request・選択肢）を添える |
+| `gate1` / `gate2` / `decision` | 承認ゲートか判断で止まった実行の、答えの無い最後の `gate.reached`（最後の `gate.reached` より後に同じ種類の `gate.answered` があれば出さない。判定は承認待ちの一覧と同じ `awaitingGateOf`）。配布の実行のものは、まとめた配布の要約（連番・提示・レーンごとの依頼の有無と Pull Request・加わった Pull Request・選択肢）を添える |
 | `release_stalled` | 止まった配布。要約と選択肢（`continue` / `reject`、`main` へのマージの後は `continue` だけ）を添える |
 | `loop_pending` | ループの人の判断待ち |
 
