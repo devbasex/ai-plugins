@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { validateRunJobInstruction } from "@ndf-factory/contracts";
 import { ApiError } from "../errors.ts";
 import { appendEvent } from "../progress/append.ts";
+import { memoryProgressReader } from "../progress/read.ts";
 import { accountContext, createRunsHarness, TEST_CONFIG, type RunsHarness } from "../testing/runs.ts";
 import { ResumeRejectedError } from "../runs/control.ts";
+import { approvalRequestOf, awaitingGateOf } from "../views/derive.ts";
 import { laneOf } from "./model.ts";
 
 const REPO_ID = 101;
@@ -546,6 +548,30 @@ describe("一覧と履歴（受け入れ条件 9・11、I66）", () => {
 
   it("別のアカウントのリポジトリは 404", async () => {
     expect(await codeOf(h.organizer.list(accountContext({ accountId: "acc-2" }), REPO_ID))).toBe("repository_not_found");
+  });
+});
+
+describe("承認の依頼の判定の共有（#2430 の決定 1）", () => {
+  it("最後の gate.reached に同じ種類の答えが記録済みで再開を待つ実行は、一覧にも承認待ちの一覧にも出ない。待っている実行は両方に出る", async () => {
+    const answered = await startRun(1);
+    const waiting = await startRun(2);
+    for (const id of [answered, waiting]) {
+      const run = await runOf(id);
+      await event(id, run.currentJobId, "gate.reached", { kind: "gate1", pr_url: null, material: "m", loop: { name: "lfactory3", lap: 2 } });
+      await finish(id, run.currentJobId!, "gate");
+    }
+    h.clock.now = new Date(h.clock.now.getTime() + 1000);
+    await event(answered, null, "gate.answered", { approval_request_id: "ar-x", kind: "gate1", decision: "approved", answered_by_account_id: "acc-1" }, "api:ar-x", "api");
+    expect((await runOf(answered)).state).toBe("awaiting_approval");
+    const list = await h.organizer.list(accountContext(), REPO_ID);
+    expect(list.items.map((i) => i.sprint_run_id)).toEqual([waiting]);
+    const awaiting = await h.table.listAwaitingRuns("acc-1");
+    const rows = [];
+    for (const run of awaiting) {
+      const row = approvalRequestOf(run, awaitingGateOf(run, await memoryProgressReader(h.progress).listGateEvents(run.sprintRunId)));
+      if (row) rows.push(row);
+    }
+    expect(rows.map((r) => [r.sprint_run_id, r.kind, r.loop])).toEqual([[waiting, "gate1", { name: "lfactory3", lap: 2 }]]);
   });
 });
 

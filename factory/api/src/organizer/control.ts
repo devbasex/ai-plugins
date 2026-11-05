@@ -10,6 +10,7 @@ import type { ProgressReader, ReleaseEvents } from "../progress/read.ts";
 import type { RunControl } from "../runs/control.ts";
 import { isTerminalRun, type Registration, type ReleaseStep, type SprintRun } from "../runs/model.ts";
 import type { RunsTable } from "../runs/table.ts";
+import { awaitingGateOf } from "../views/derive.ts";
 import {
   choicesOf,
   emptyRoot,
@@ -544,8 +545,8 @@ export class OrganizerControl {
     const root = await table.getOrganizer(ctx.accountId, repositoryId);
     const requests = await table.listOrgRequests(ctx.accountId, repositoryId);
     const items: Record<string, unknown>[] = [];
-    for (const run of await table.listRuns(ctx.accountId, 1000)) {
-      if (run.repositoryId !== repositoryId || run.state !== "awaiting_approval") continue;
+    for (const run of await table.listAwaitingRuns(ctx.accountId)) {
+      if (run.repositoryId !== repositoryId) continue;
       if (run.awaitingReason === "release_requested") continue;
       const batch = run.purpose === "release" && run.releaseSeq ? await table.getBatch(ctx.accountId, repositoryId, run.releaseSeq) : null;
       if (run.awaitingReason === "release_stalled") {
@@ -553,7 +554,8 @@ export class OrganizerControl {
         items.push({ kind: "release_stalled", sprint_run_id: run.sprintRunId, created_at: run.updatedAt, release: this.releaseSummary(batch, requests, choicesOf(batch)) });
         continue;
       }
-      const gate = await reader.findLastGate(run.sprintRunId);
+      // 答えの無い最後の承認の依頼だけを載せる。判定は承認待ちの一覧と共有する（#2430 の決定 1）
+      const gate = awaitingGateOf(run, await reader.listGateEvents(run.sprintRunId));
       if (!gate) continue;
       items.push({
         kind: gate.payload.kind,

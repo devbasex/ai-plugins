@@ -1,4 +1,4 @@
-import type { AccountDetail, Backlog, Delegation, IssueCandidates, LoopDetail, Me, ModelCredential, Repository, SprintRunDetail, SprintRunRow, StepDetail, StepRow } from "../api.ts";
+import type { AccountDetail, ApprovalRequestRow, Backlog, Delegation, IssueCandidates, LoopDetail, Me, ModelCredential, Repository, SprintRunDetail, SprintRunRow, StepDetail, StepRow } from "../api.ts";
 
 // ダミーデータ。本番の成果物にこの印が出たら check:bundle が落とす。実在の人・秘密を書かない
 export const DUMMY_MARKER = "ndf-factory-dummy-data";
@@ -130,6 +130,7 @@ function detailOf(row: SprintRunRow, steps: StepRow[], patch: Partial<SprintRunD
     delegated_decisions: 0,
     usage: { input_tokens: 1_250_000, output_tokens: 48_000, cost_usd: 3.75 },
     omitted_steps: 0,
+    attention: [],
     ...patch,
   };
 }
@@ -154,10 +155,26 @@ export const sprintRunDetails: SprintRunDetail[] = [
     gates: { gate1: { state: "waiting", at: "2026-11-02T00:20:00Z" }, gate2: { state: "not_reached", at: null }, decision: { state: "none", at: null } },
     delegated_decisions: 2,
   }),
-  detailOf(sprintRuns[1]!, []),
+  // 取り込みで解けない衝突で止まった実行（#2430）
+  detailOf(sprintRuns[1]!, [], {
+    attention: [{ key: "job-b:attention:1", at: "2026-10-31T10:30:00Z", reason: "base_conflict", summary: "src/a.ts で衝突（見本）" }],
+  }),
   detailOf(sprintRuns[2]!, sr1Steps, {
     gates: { gate1: { state: "approved", at: "2026-10-30T01:50:00Z" }, gate2: { state: "approved", at: "2026-10-30T04:10:00Z" }, decision: { state: "none", at: null } },
   }),
+];
+
+// 承認待ちの一覧（#2430）。承認を待つ実行の答えの無い承認の依頼
+export const approvalRequests: ApprovalRequestRow[] = [
+  {
+    sprint_run_id: sprintRuns[0]!.sprint_run_id,
+    repository_id: sprintRuns[0]!.repository_id,
+    repo: sprintRuns[0]!.repo,
+    issues: sprintRuns[0]!.issues,
+    kind: "gate1",
+    loop: { name: "lfactory2", lap: 3 },
+    waiting_since: "2026-11-02T00:20:00Z",
+  },
 ];
 
 const sha = (c: string) => c.repeat(40);

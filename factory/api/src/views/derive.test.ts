@@ -4,7 +4,18 @@ import { toRecord } from "../progress/append.ts";
 import { capSteps, latestOf, type StepRecord } from "../progress/read.ts";
 import type { ProgressEventRecord } from "../progress/store.ts";
 import type { SprintRun } from "../runs/model.ts";
-import { deriveDetail, deriveRefinements, deriveStepDetail, gatesOf, listRowExtras, stepRows } from "./derive.ts";
+import {
+  approvalRequestOf,
+  attentionsOf,
+  awaitingGateOf,
+  deriveDetail,
+  deriveRefinements,
+  deriveStepDetail,
+  gatesOf,
+  listRowExtras,
+  sortApprovalRequests,
+  stepRows,
+} from "./derive.ts";
 
 const SHA = (c: string) => c.repeat(40);
 
@@ -256,5 +267,89 @@ describe("棚卸しの記録（受け入れ条件 15）", () => {
     ]);
     expect(list.map((r) => r.sprint_run_id)).toEqual(["sr-b", "sr-a"]);
     expect(list[0]!.pull_request).toEqual({ repo: "org-a/repo-a", number: 3, url: "https://github.com/org-a/repo-a/pull/3" });
+  });
+});
+
+describe("注意の行（#2430 の受け入れ条件 1〜3・I1・I2）", () => {
+  it("attention は理由と要約を受けた値のまま、order_key の順にすべて行になる。base_conflict 以外の理由も落とさない", () => {
+    const e = events();
+    e.add("attention", { reason: "base_conflict", summary: "src/a.ts で衝突" }, { at: "2026-11-04T00:00:09.000Z" });
+    e.step("impl");
+    e.add("attention", { reason: "stopped", summary: "止まった" }, { at: "2026-11-04T00:00:01.000Z" });
+    e.add("attention", { reason: "base_conflict", summary: "src/b.ts で衝突" });
+    const rows = deriveDetail(runOf(), e.out, 0).attention;
+    expect(rows.map((r) => [r.reason, r.summary])).toEqual([
+      ["base_conflict", "src/a.ts で衝突"],
+      ["stopped", "止まった"],
+      ["base_conflict", "src/b.ts で衝突"],
+    ]);
+    expect(rows[0]).toEqual({ key: e.out[0]!.idempotency_key, at: "2026-11-04T00:00:09.000Z", reason: "base_conflict", summary: "src/a.ts で衝突" });
+  });
+
+  it("2,000 件を超える工程の記録と混ぜても attention は減らず、0 件なら空の配列", () => {
+    const e = events();
+    e.add("attention", { reason: "base_conflict", summary: "古い衝突" });
+    for (let i = 0; i < 2001; i += 1) e.step("impl");
+    e.add("attention", { reason: "base_conflict", summary: "新しい衝突" });
+    const capped = capSteps(e.out, 2000);
+    expect(attentionsOf(capped.events).map((r) => r.summary)).toEqual(["古い衝突", "新しい衝突"]);
+    expect(deriveDetail(runOf(), events().out, 0).attention).toEqual([]);
+  });
+});
+
+describe("承認を待つ依頼（#2430 の受け入れ条件 5・6・I3〜I5、決定 1）", () => {
+  const waiting = (patch: Partial<SprintRun> = {}) => runOf({ state: "awaiting_approval", ...patch });
+
+  it("最後の gate.reached を、種類・ループの参照・日時とともに 1 行にする。loop が無ければ null", () => {
+    const e = events();
+    e.add("gate.reached", { kind: "gate1", pr_url: null, material: "x", loop: { name: "lfactory2", lap: 3 } });
+    const run = waiting({ sprintRunId: "sr-a" });
+    expect(approvalRequestOf(run, awaitingGateOf(run, e.out))).toEqual({
+      sprint_run_id: "sr-a",
+      repository_id: 101,
+      repo: "org-a/repo-a",
+      issues: [11, 12],
+      kind: "gate1",
+      loop: { name: "lfactory2", lap: 3 },
+      waiting_since: e.out[0]!.at,
+    });
+    const c = events();
+    c.add("gate.reached", { kind: "decision", pr_url: null, material: "x" });
+    expect(approvalRequestOf(run, awaitingGateOf(run, c.out))?.loop).toBeNull();
+  });
+
+  it("最後の gate.reached より後に同じ種類の gate.answered があれば行にしない。別の種類の答えでは外さない", () => {
+    const e = events();
+    e.add("gate.reached", { kind: "gate1", pr_url: null, material: "x" });
+    e.add("gate.answered", { approval_request_id: "a1", kind: "gate1", decision: "approved", answered_by_account_id: "u" });
+    expect(awaitingGateOf(waiting(), e.out)).toBeNull();
+    const f = events();
+    f.add("gate.reached", { kind: "gate2", pr_url: null, material: "x" });
+    f.add("gate.answered", { approval_request_id: "a1", kind: "decision", answered_by_account_id: "u" });
+    expect(awaitingGateOf(waiting(), f.out)?.payload.kind).toBe("gate2");
+  });
+
+  it("同じ種類の gate.reached が 2 度届くと 1 行で、日時は後のもの。答えた後に出し直した依頼は待ちに戻る", () => {
+    const e = events();
+    e.add("gate.reached", { kind: "gate1", pr_url: null, material: "x" });
+    e.add("gate.answered", { approval_request_id: "a1", kind: "gate1", decision: "rejected", answered_by_account_id: "u" });
+    e.add("gate.reached", { kind: "gate1", pr_url: null, material: "y" });
+    const second = e.add("gate.reached", { kind: "gate1", pr_url: null, material: "z" });
+    expect(awaitingGateOf(waiting(), e.out)?.at).toBe(second.at);
+  });
+
+  it("状態が awaiting_approval でない実行と、待つ理由が配布の依頼・止まった配布の実行は、答えが無くても行にしない", () => {
+    const e = events();
+    e.add("gate.reached", { kind: "gate1", pr_url: null, material: "x" });
+    expect(awaitingGateOf(runOf({ state: "running" }), e.out)).toBeNull();
+    expect(awaitingGateOf(waiting({ awaitingReason: "release_requested" }), e.out)).toBeNull();
+    expect(awaitingGateOf(waiting({ awaitingReason: "release_stalled" }), e.out)).toBeNull();
+    expect(awaitingGateOf(waiting(), [])).toBeNull();
+  });
+
+  it("行は待ち始めた日時の古い順で、同じ日時は実行の ID の順", () => {
+    const row = (id: string, at: string) => ({ sprint_run_id: id, repository_id: 1, repo: "o/r", issues: [], kind: "gate1" as const, loop: null, waiting_since: at });
+    const sorted = sortApprovalRequests([row("sr-c", "2026-11-04T00:00:02Z"), row("sr-b", "2026-11-04T00:00:01Z"), row("sr-a", "2026-11-04T00:00:02Z")]);
+    expect(sorted.map((r) => r.sprint_run_id)).toEqual(["sr-b", "sr-a", "sr-c"]);
   });
 });

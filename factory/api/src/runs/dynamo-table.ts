@@ -75,6 +75,9 @@ const isConditionFailure = (err: unknown) =>
   (err instanceof TransactionCanceledException && err.CancellationReasons?.some((r) => r.Code === "ConditionalCheckFailed")) ||
   (err as { name?: string }).name === "ConditionalCheckFailedException";
 
+// listAwaitingRuns が索引で読む新しい方からの行の数（listRuns(accountId, 1000) と同じ範囲）
+const RUN_LIST_LIMIT = 1000;
+
 export class DynamoRunsTable implements RunsTable {
   private readonly doc: DynamoDBDocumentClient;
 
@@ -380,6 +383,25 @@ export class DynamoRunsTable implements RunsTable {
     // GSI は結果整合のため、行は表から読み直す
     const runs = await Promise.all((out.Items ?? []).map((i) => this.getRun(i.sprintRunId as string)));
     return runs.filter((r): r is SprintRun => r !== null);
+  }
+
+  // listRuns と同じ鍵の条件・並び・上限の Query に状態の条件を付け、合った実行だけを表から読み直す。
+  // 索引は結果整合のため、読み直した状態でもう一度絞る（#2430 の決定 2）
+  async listAwaitingRuns(accountId: string): Promise<SprintRun[]> {
+    const out = await this.doc.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        IndexName: GSI1,
+        KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :p)",
+        FilterExpression: "#s = :awaiting",
+        ExpressionAttributeNames: { "#s": "state" },
+        ExpressionAttributeValues: { ":pk": accountPk(accountId), ":p": "RUN#", ":awaiting": "awaiting_approval" },
+        ScanIndexForward: false,
+        Limit: RUN_LIST_LIMIT,
+      }),
+    );
+    const runs = await Promise.all((out.Items ?? []).map((i) => this.getRun(i.sprintRunId as string)));
+    return runs.filter((r): r is SprintRun => r !== null && r.state === "awaiting_approval");
   }
 
   async setCancelRequested(sprintRunId: string) {

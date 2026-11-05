@@ -69,6 +69,7 @@ export function createDummyApi(scenario: Scenario = "normal"): Api {
         }),
       ),
     cancelSprintRun: () => read(() => ({ state: "cancelled" })),
+    approvalRequests: () => read(() => list(data.approvalRequests)),
     updateRepository: (_id, repositoryId, max) =>
       read(() => ({ ...(data.repositories.find((r) => r.repository_id === repositoryId) ?? data.repositories[0]!), max_concurrent_runs: max })),
     // ダミーのループは最初のリポジトリにだけ属する
