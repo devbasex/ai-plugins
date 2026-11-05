@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 import subprocess
 from pathlib import Path
-from typing import Mapping
+from typing import Iterator, Mapping
 
 import clock
 import context_policy as cp
@@ -279,21 +279,20 @@ def _user_text(e: dict) -> str | None:
     return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
 
 
-def _json_lines(path) -> list[dict] | None:
-    """JSONL の辞書の行。読めなければ None。壊れた行と辞書でない行は飛ばす。"""
+def _json_lines(path) -> Iterator[dict] | None:
+    """JSONL の辞書の行を 1 行ずつ返す（全行を辞書のまま保持しない）。読めなければ None。壊れた行と辞書でない行は飛ばす。"""
     try:
         lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
-    out = []
-    for line in lines:
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(e, dict):
-            out.append(e)
-    return out
+    return (e for e in map(_loads_or_none, lines) if isinstance(e, dict))
+
+
+def _loads_or_none(line: str):
+    try:
+        return json.loads(line)
+    except ValueError:
+        return None
 
 
 def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, bool]:
@@ -306,7 +305,13 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
     if entries is None:
         return [], None, False
     calls, here = [], {}  # here はこのファイルで数えた message.id → calls の位置
-    for e in entries:
+    compacts, first_user = 0, None
+    for e in entries:  # 呼び出し・最初の利用者発言・自動圧縮を 1 回の走査で集める
+        if _is_auto_compact(e):
+            compacts += 1
+            continue
+        if first_user is None:
+            first_user = _user_text(e)
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
         usage = msg.get("usage")
         if e.get("type") != "assistant" or not isinstance(usage, dict):
@@ -322,8 +327,7 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
         else:
             here[mid] = len(calls)
             calls.append(call)
-    first_user = next((t for e in entries if (t := _user_text(e)) is not None), None)
-    return calls, sum(1 for e in entries if _is_auto_compact(e)), bool(first_user and HANDOFF_PATH.search(first_user))
+    return calls, compacts, bool(first_user and HANDOFF_PATH.search(first_user))
 
 
 # --- セッションと印 ---------------------------------------------------------------------------------
