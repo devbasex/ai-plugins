@@ -2,15 +2,15 @@
 
 ## 目的
 
-- **何が壊れているか**: #2170 の cross-refactoring（PR #2192）が `factory/` のリファクタリングの提案 20 件（R01〜R20）を時間（`budget`）で見送り、どの課題にも残っていない。その後に重複が広がり、2026-11-05 の `develop`（86436dace）では `requireEnv` が 5 か所、ログインの確認が 12 画面、失敗を画面の文へ変える `onFailure(err)` が 23 行にある
-- **誰が困るか**: 同じ `factory/api/`・`factory/web/` に足していく子課題（#2171・#2172・#2173・#2174・#2189）の実装者と、その cross-refactoring。重複を写して広げ、同じ提案を毎回出し直しては時間で見送る
-- **直すと何が成り立つか**: 20 件のそれぞれが「適用した」か「採らない（理由つき）」に決まり、同じ役割の関数の定義が `factory/` の中で 1 か所になる。HTTP の応答・OpenAPI の契約・DynamoDB の行の形・画面の表示は変わらない
+- **今どうなっているか**: #2170 の cross-refactoring（PR #2192）は、`factory/` のリファクタリングの提案 20 件（R01〜R20）を時間（`budget`）で見送った。20 件はどの課題にも残っていない。その後に重複が広がった。2026-11-05 の `develop`（86436dace）では、`requireEnv` が 5 か所、ログインの確認が 12 画面、失敗を画面の文へ変える `onFailure(err)` が 23 行にある
+- **誰に効くか**: 子課題（#2171・#2172・#2173・#2174・#2189）の実装者と、その cross-refactoring。子課題は同じ `factory/api/`・`factory/web/` に足していく。重複を写して広げ、同じ提案を毎回出し直しては時間で見送る
+- **変えると何が成り立つか**: 20 件のそれぞれが「適用した」か「採らない（理由つき）」に決まり、同じ役割の関数の定義が `factory/` の中で 1 か所になる。HTTP の応答・OpenAPI の契約・DynamoDB の行の形・画面の表示は変わらない
 
 ## 適用範囲
 
 - **働く範囲**: このリポジトリの `factory/api/src`・`factory/web/src` と `scripts/tests/test_check_markdown_links.py` だけ。配布物（`plugins/`）には届かない
 - **プロジェクトごとに違うもの**: 無し（`factory/` の内部の関数の置き場と引数の形だけを変える）
-- **当たるモード**: `standard`。要求と受け入れ条件があり、対象には既存のテスト（`factory/api/src`・`factory/web/src` の vitest 37 ファイル・pytest 46 件）がある
+- **当たるモード**: `standard`。要求と受け入れ条件があり、対象には既存のテストがある。vitest は `factory/api/src`・`factory/web/src` の 37 ファイル、pytest は `scripts/tests/test_check_markdown_links.py` の 46 件である
 
 ## あるべき姿の根拠
 
@@ -21,7 +21,7 @@
 | 同じ日の `grep -rn 'Navigate to="/login"' factory/web/src/pages` が 12 行、`factory/web/src` の `onFailure(err)` が 13 ファイルで 23 行 | 実測 | 画面の重複が PR #2192 の後に足された画面（スプリント・ループ・委任・バックログなど）へ写っている |
 | 同じ日の `factory/web/src/App.tsx` が、ログインの後の画面をすべて 1 つの枠（`AppShell` の layout route）の下に置く | 実測（コードの読み取り） | ログインの確認を 1 か所に置ける場所が既にある（R14） |
 | 同じ日の `factory/api/src/github-oidc/app.ts` に `clientCredentials`・`exchangeGithubCode`・`issueIdToken` があり、POST /token の本体は 21 行 | 実測 | R07 の兆候は PR #2192 の I-001 で消えている（要求の前提 2） |
-| `factory/api/src/index.ts` が `./handlers/api.ts`（`depsFromEnv`・`createApiApp`）と `./handlers/ingest.ts`（`progressStoreFromEnv`）を読み、どちらも読み込みの時点で `export const handler = ...` を組み立てる。`runs/deps.ts` も `handlers/ingest.ts` を読む | 実測（コードの読み取り） | 公開の入口が Lambda の入口を読む向き（R02） |
+| `factory/api/src/index.ts` が `./handlers/api.ts`（`depsFromEnv`・`createApiApp`）と `./handlers/ingest.ts`（`progressStoreFromEnv`）を読み、どちらも読み込みの時点で `export const handler = ...` を組み立てる。`runs/deps.ts` も `handlers/ingest.ts` を読む | 実測（コードの読み取り） | 公開のエントリポイントが Lambda のエントリポイントを読む向き（R02） |
 | 着手前の `uv run --frozen --project . --all-extras pytest scripts/tests/test_check_markdown_links.py -q` が `46 passed`（2026-11-05） | 実測 | 受け入れ条件 5 の「変更の前の件数」 |
 
 要求と受け入れ条件は #2199 の本文にある（コピーは [issue-2199-requirements.md](issue-2199-requirements.md)）。この文書は「どう作るか」だけを扱う。
@@ -35,7 +35,7 @@
 | Neural Development Factory（`ndf-factory`） | アカウント・席・履歴・実行の形態・プラン（`factory/api/src/accounts/`）、GitHub の仲立ち（`github-oidc/`）、画面（`factory/web/`） |
 | NDF の cross-refactoring（`ndf-cross-refactoring`） | 見送った提案・リファクタリング計画（R01〜R20 の出所） |
 
-関係は**順応者**である。この変更は `ndf-cross-refactoring` が残した見送った提案を、その語と兆候の分類（duplication など）のまま受け取り、`ndf-factory` の構造を直す。`ndf-cross-refactoring` の側は何も変えない。
+関係は**順応者（Conformist）**である。この変更は `ndf-cross-refactoring` が残した見送った提案を、その語と兆候の分類（duplication など）のまま受け取り、`ndf-factory` の構造を直す。`ndf-cross-refactoring` の側は何も変えない。
 
 ### 集約
 
@@ -89,7 +89,7 @@
 | # | 機能 | 誰が使うか |
 | --- | --- | --- |
 | F1 | 20 件の扱い（適用した・採らない）と写しの扱いを 1 つの表で読む | 承認ゲート 2 で見る人 |
-| F2 | 環境変数の読み取り・API の入口の組み立て・保存の契約・再試行・ログインの確認・失敗の表示を、1 か所の定義から使う | 子課題（#2171・#2172・#2173・#2174・#2189）の実装者 |
+| F2 | 環境変数の読み取り・API のエントリポイントの組み立て・保存の契約・再試行・ログインの確認・失敗の表示を、1 か所の定義から使う | 子課題（#2171・#2172・#2173・#2174・#2189）の実装者 |
 | F3 | 後の cross-refactoring が R01〜R20 と同じ提案を出さない | cross-refactoring の提案の担当 |
 
 ## 20 件の判定表
@@ -121,7 +121,9 @@
 
 適用する 19 件・採らない 1 件。実装で適用してテストが落ちた件は戻し、扱いを「採らない（適用するとテストが落ちる）」にして落ちた理由を書く（E4）。
 
-**写しとして含めなかった候補**（E2。含めない理由を実装の Pull Request の表の下にも写す）:
+### 写しとして含めなかった候補
+
+E2 で拾い、含めなかった候補である。含めない理由は、実装の Pull Request の表の下にも写す。
 
 | 候補 | 含めない理由 |
 | --- | --- |
@@ -142,7 +144,7 @@
 | `factory/api/src/app.ts`（新規） | `createApiApp`・`jsonLogger`・`webOriginFromEnv`・`LogEntry`・`Logger` を `handlers/api.ts` から移す | R02 |
 | `factory/api/src/auth/deps.ts`（新規） | `depsFromEnv`（`AuthDeps` を 1 回だけ作る）を `handlers/api.ts` から移す | R02 |
 | `factory/api/src/progress/deps.ts`（新規） | `progressStoreFromEnv` を `handlers/ingest.ts` から移す | R02 |
-| `factory/api/src/handlers/api.ts`・`ingest.ts`・`github-oidc.ts`・`issue-requests.ts` | Lambda の `handler` の配線だけを持つ。`handler` の名前と置き場は変えない（インフラが束ねる入口のため）。`issue-requests.ts` は `progressStoreFromEnv` を `progress/deps.ts` から読む | R02・R20 |
+| `factory/api/src/handlers/api.ts`・`ingest.ts`・`github-oidc.ts`・`issue-requests.ts` | Lambda の `handler` の配線だけを持つ。`handler` の名前と置き場は変えない（インフラがバンドルするエントリポイントのため）。`issue-requests.ts` は `progressStoreFromEnv` を `progress/deps.ts` から読む | R02・R20 |
 | `factory/api/src/index.ts` | import と再 export を `app.ts`・`auth/deps.ts`・`progress/deps.ts` へ替える。export する名前と形は変えない | R02 |
 | `factory/api/src/runs/deps.ts` | `requireEnv` を `env.ts` から、`progressStoreFromEnv` を `progress/deps.ts` から読む | R02・R20 |
 | `factory/api/src/testing/app.ts`・`routes/factory.test.ts`・`routes/sprint-views.test.ts`・`handlers/api.test.ts` | `createApiApp`・`LogEntry` の import 元を `app.ts` へ替える（import の行だけを変え、期待値は変えない）。`handlers/api.ts` は移した名前を再 export しない | R02 |
@@ -159,7 +161,9 @@
 | `factory/web/src/pages/*.tsx` | ログインの確認と、判定表の対象の `try`/`catch` を消し、`SeatTypeOptions`（`parts.tsx`）を使う | R05・R14・R15 |
 | `scripts/tests/test_check_markdown_links.py` | 読み込みの fixture を足し、11 のテストが使う | R16 |
 
-R02 の依存の向き（API のコード。テストと、向きを変えない依存は省く）:
+### R02 の依存の向き
+
+API のコードの依存の向きを示す。テストと、向きを変えない依存は省く。
 
 ```mermaid
 graph LR
@@ -181,7 +185,10 @@ graph LR
   end
 ```
 
-`env.ts` は `auth/deps.ts`・`progress/deps.ts`・`runs/deps.ts` と、`handlers/` の `ingest.ts`・`github-oidc.ts`・`issue-requests.ts` が読む（図の横幅のため省いた）。
+図の横幅のため、`env.ts` を読む向きは図から省いた。`env.ts` を読むのは次の 6 つである。
+
+- `auth/deps.ts`・`progress/deps.ts`・`runs/deps.ts`
+- `handlers/` の `ingest.ts`・`github-oidc.ts`・`issue-requests.ts`
 
 ### パッケージ・モジュール構成
 
@@ -236,7 +243,7 @@ classDiagram
 
 - `AccountUpdate` のフィールドは今の 5 つの位置引数と同じ名前・型・必須性にする（R18）
 - `ConditionFailedError` は `port.ts` に 1 つだけ定義し、`store.ts` は再公開しない。両方の実装とサービスの `instanceof` が同じクラスを見る（I3）
-- `retryOnConflict` の `step` は、読み直しと判定をして `{ done: T }`（書かずに終わる）か `{ write: () => Promise<void>; result: T }`（書いて終わる）を返す。`onOther` は条件以外の書き込みの失敗を何へ変えるかで、既定は `AccountUnavailableError`、`setPlan` は受けた誤りをそのまま返す
+- `retryOnConflict` の `step` は読み直しと判定をする。返すのは `{ done: T }`（書かずに終わる）か `{ write: () => Promise<void>; result: T }`（書いて終わる）である。`onOther` は条件以外の書き込みの失敗を何へ変えるかで、既定は `AccountUnavailableError`、`setPlan` は受けた誤りをそのまま返す
 - `writeOr(write, onCondition)`（モジュール内の関数）は `write` を呼び、成功なら `undefined` を返す。条件の失敗なら `onCondition()` の結果を返す（`onCondition` は値を返すか投げる）。それ以外の失敗は `AccountUnavailableError` を投げる。3 つの呼び出しの `onCondition` は次のとおりで、どれも今の `catch` の中の処理をそのまま移す
 
 | 呼ぶメソッド | `onCondition` | 返した値の使い方 |
@@ -247,7 +254,9 @@ classDiagram
 
 ## 処理の流れ
 
-`retryOnConflict` の 1 回の呼び出し（R06）。`step` の中で投げた誤り（`ForbiddenError`・`ConflictError`・`PlanError`・席が無い）は、書き込みの前の判定なのでそのまま呼ぶ側へ届く。読み替えるのは `write` の失敗だけである。
+### retryOnConflict の 1 回の呼び出し
+
+R06 の `retryOnConflict` を 1 回呼んだときの流れである。`step` の中で投げた誤り（`ForbiddenError`・`ConflictError`・`PlanError`・席が無い）は、書き込みの前の判定なのでそのまま呼ぶ側へ届く。読み替えるのは `write` の失敗だけである。
 
 ```mermaid
 sequenceDiagram
@@ -272,7 +281,9 @@ sequenceDiagram
   R-->>S: AccountUnavailableError を投げる
 ```
 
-実装の順序（E1〜E6）。各件はコミットを分け、件ごとに範囲のテストを流してから次へ進む。
+### 実装の順序
+
+E1〜E6 の順に進める。各件はコミットを分け、件ごとに範囲のテストを流してから次へ進む。
 
 ```mermaid
 graph LR
@@ -286,7 +297,19 @@ graph LR
   E5 --> E6[E6 PR 本文の表]
 ```
 
-**件の順序は、置き場を作る件を先にする。** R20（`env.ts`）→ R02（`app.ts`・`deps.ts`）→ R08・R18（`port.ts`）→ R04・R09・R10・R19（`store.ts`）→ R06・R11・R17（`service.ts`）→ R01・R13 → R03・R12 → 画面（R05・R14・R15）→ R16。後の件が前の件の置き場を使うためである。構成要素の表の各行は「件」の列の番号で、この順序のどこかに入る（R07 は採らないため入らない）。
+**件の順序は、置き場を作る件を先にする。** 後の件が前の件の置き場を使うためである。
+
+1. R20（`env.ts`）
+2. R02（`app.ts`・`deps.ts`）
+3. R08・R18（`port.ts`）
+4. R04・R09・R10・R19（`store.ts`）
+5. R06・R11・R17（`service.ts`）
+6. R01・R13
+7. R03・R12
+8. 画面（R05・R14・R15）
+9. R16
+
+構成要素の表の各行は、「件」の列の番号でこの順序のどこかに入る。R07 は採らないため入らない。
 
 ## 非機能の実現方式
 
@@ -298,9 +321,17 @@ graph LR
 
 ## 決定の記録
 
-### 決定 1: 公開の入口が Lambda の入口を読まないよう、handlers/ を handler の配線だけにする
+### 決定 1: 公開のエントリポイントが Lambda のエントリポイントを読まないよう、handlers/ を handler の配線だけにする
 
-`index.ts` は `depsFromEnv` だけでなく `createApiApp` も `handlers/api.ts` から、`progressStoreFromEnv` を `handlers/ingest.ts` から読む。`depsFromEnv` だけを移しても、残りの 2 つが同じ向きを残す。そこで `createApiApp` と付随する型・関数を `src/app.ts` へ、`depsFromEnv` を `auth/deps.ts` へ、`progressStoreFromEnv` を `progress/deps.ts` へ移し、`handlers/*.ts` は `handler` の組み立てだけにする。`handlers/issue-requests.ts` が `handlers/ingest.ts` を読む向きも同じ変更で `progress/deps.ts` へ替え、Lambda の入口どうしが互いを読まない形にする（I6）。置き場の名前は既存の `runs/deps.ts`（環境変数から依存を作る）と `progress/app.ts`・`github-oidc/app.ts`（Hono の app を組む）に揃える。
+`index.ts` は、`handlers/api.ts` から `depsFromEnv` と `createApiApp` を読む。`handlers/ingest.ts` からは `progressStoreFromEnv` を読む。`depsFromEnv` だけを移しても、残りの 2 つが同じ向きを残す。そこで 3 つを次の場所へ移し、`handlers/*.ts` は `handler` の組み立てだけにする。
+
+| 移すもの | 移す先 |
+| --- | --- |
+| `createApiApp` と付随する型・関数 | `src/app.ts` |
+| `depsFromEnv` | `auth/deps.ts` |
+| `progressStoreFromEnv` | `progress/deps.ts` |
+
+`handlers/issue-requests.ts` が `handlers/ingest.ts` を読む向きも、同じ変更で `progress/deps.ts` を読む向きへ替える。これで Lambda のエントリポイントどうしが互いを読まない形になる（I6）。置き場の名前は既存の `runs/deps.ts`（環境変数から依存を作る）と `progress/app.ts`・`github-oidc/app.ts`（Hono の app を組む）に揃える。
 
 提案どおり `depsFromEnv` だけを `src/deps.ts` へ移す形は採らない。`createApiApp` と `progressStoreFromEnv` の向きが残り、後の cross-refactoring が同じ兆候を出し直す。
 
@@ -332,7 +363,7 @@ R04 と R09 は同じ兆候（6 つの書き込みが履歴の行の展開を書
 
 ### 決定 5: 保存の契約を DynamoDB の実装から分けるため、accounts/port.ts に置き、updateAccount の引数を 1 つにまとめる
 
-`memory-store.ts` と `service.ts` は `ConditionFailedError` のために `store.ts` を実行時に読み、DynamoDB を使わない経路でも AWS SDK を読み込む（R08）。契約を `accounts/port.ts` へ移す。置き場の名前は既存の `github/port.ts`（GitHub の口の型）に揃える。同じ変更で `updateAccount` の 5 つの位置引数を `AccountUpdate` にする（R18）。契約を一度に変えるため、2 つの実装と 2 つの呼び出しを 1 回で直せる。
+`memory-store.ts` と `service.ts` は、`ConditionFailedError` のために `store.ts` を実行時に読む。そのため DynamoDB を使わない経路でも AWS SDK を読み込む（R08）。契約を `accounts/port.ts` へ移す。置き場の名前は既存の `github/port.ts`（GitHub の口の型）に揃える。同じ変更で `updateAccount` の 5 つの位置引数を `AccountUpdate` にする（R18）。契約を一度に変えるため、2 つの実装と 2 つの呼び出しを 1 回で直せる。
 
 契約を `accounts/model.ts` へ置く形は採らない。`model.ts` は値の型と判定の関数（`isPlan` など）を持ち、保存の契約を混ぜると変わる理由が 2 つになる。`store.ts` に再公開を残す形も採らない。読む側が 2 つの置き場のどちらを使うかが揃わなくなる。
 
@@ -356,7 +387,7 @@ R04 と R09 は同じ兆候（6 つの書き込みが履歴の行の展開を書
 
 画面ごとに `RequireLogin` で包む形は採らない。包む行が画面の数だけ残り、画面を足すたびに写しが増える。
 
-`App.test.tsx` と `pages/*.test.tsx` はすべての画面を `App` の経路から描くため、確認を経路へ移しても既存のテストが同じ振る舞い（token が無ければ `/login` へ移る）を縛る。
+`App.test.tsx` と `pages/*.test.tsx` は、すべての画面を `App` の経路から描く。そのため確認を経路へ移しても、既存のテストが同じ振る舞い（token が無ければ `/login` へ移る）を縛る。
 
 根拠: Value 7（MVV 版 5）・スプリント Value 1
 
@@ -370,15 +401,36 @@ R04 と R09 は同じ兆候（6 つの書き込みが履歴の行の展開を書
 
 ### 決定 9: 既存のテストを振る舞いの基準にし、提案が求めた現状固定テストは足さない
 
-提案のうち R05・R07・R09 の手順は、適用の前に現状固定テストを足すとしていた。今の `store.test.ts` は `transact` を通る書き込み（利用者の作成・席の追加と外し・アカウントの更新）の `TransactItems` の並びと鍵を、`App.test.tsx` は席の操作の画面を、`github-oidc/app.test.ts` は `/token` を既に縛る。共通の関数へ寄せた後もこれらのテストが同じ経路を通るため、要求の「新しいテストは足さない（既存のテストが届かないときだけ足す）」に従い足さない。実装で既存のテストが届かない共通の関数が見つかったときだけ足す。
+提案のうち R05・R07・R09 の手順は、適用の前に現状固定テストを足すとしていた。今のテストは、次のものを既に縛る。
 
-テストの呼び出しの形は変わる。`store.test.ts` の `updateAccount` の呼び出し（R18）、`ConditionFailedError` の import の置き場（R08）、`createApiApp` の import の置き場（`handlers/api.test.ts`・`routes/factory.test.ts`・`routes/sprint-views.test.ts`、R02）である。どれも `expect(...)` の右辺を変えず、実装の Pull Request の表の行に理由を書く（受け入れ条件 6）。
+| テスト | 既に縛るもの |
+| --- | --- |
+| `store.test.ts` | `transact` を通る書き込み（利用者の作成・席の追加と外し・アカウントの更新）の `TransactItems` の並びと鍵 |
+| `App.test.tsx` | 席の操作の画面 |
+| `github-oidc/app.test.ts` | `/token` |
+
+共通の関数へ寄せた後も、これらのテストが同じ経路を通る。そのため要求の「新しいテストは足さない（既存のテストが届かないときだけ足す）」に従い、足さない。実装で既存のテストが届かない共通の関数が見つかったときだけ足す。
+
+テストの呼び出しの形は、次の 3 つが変わる。
+
+- `store.test.ts` の `updateAccount` の呼び出し（R18）
+- `ConditionFailedError` の import の置き場（R08）
+- `createApiApp` の import の置き場（`handlers/api.test.ts`・`routes/factory.test.ts`・`routes/sprint-views.test.ts`、R02）
+
+どれも `expect(...)` の右辺を変えず、実装の Pull Request の表の行に理由を書く（受け入れ条件 6）。
 
 根拠: Value 1 / Value 3（MVV 版 5）
 
 ### 決定 10: 実装の差分を factory/ と R16 のテストに限るため、確定仕様の構成要素の表は確定仕様化で直す
 
-`docs/specifications/ndf-factory-accounts-and-plans.md` の構成要素の表は、API の入口（ログ・CORS・中間処理）を `handlers/api.ts`、保存を `accounts/store.ts` としている。決定 1・5 の後はこの 2 行が実装と食い違う。受け入れ条件 8 は `factory/` の外の差分を `scripts/tests/test_check_markdown_links.py` に限るため、この 2 行は実装の Pull Request で直さず、#2199 の確定仕様化（`plan-to-spec`）で `app.ts`・`accounts/port.ts` の行とともに直す。
+`docs/specifications/ndf-factory-accounts-and-plans.md` の構成要素の表は、次の 2 行を持つ。決定 1・5 の後は、この 2 行が実装と食い違う。
+
+| 構成要素 | 表が示す置き場 |
+| --- | --- |
+| API のエントリポイント（ログ・CORS・中間処理） | `handlers/api.ts` |
+| 保存 | `accounts/store.ts` |
+
+受け入れ条件 8 は、`factory/` の外の差分を `scripts/tests/test_check_markdown_links.py` に限る。そのためこの 2 行は実装の Pull Request で直さない。#2199 の確定仕様化（`plan-to-spec`）で、`app.ts`・`accounts/port.ts` の行とともに直す。
 
 根拠: Value 8（MVV 版 5）
 
@@ -411,4 +463,4 @@ R04 と R09 は同じ兆候（6 つの書き込みが履歴の行の展開を書
 | 着手の順位（要求の未決 1） | #2171 の実装より前に行うかは棚卸しが決める。後になるほど写しが増え、判定表の「写し」の列を E1 で確かめ直す量が増える（2026-10-31 から 2026-11-05 の間に、`requireEnv` は 4 か所から 5 か所、ログインの確認は 6 画面から 12 画面になった） |
 | `develop` が進んだときの判定表 | 2026-11-05 の 86436dace で確かめた。実装の開始までに子課題がマージされれば、E1 で 20 件と写しを数え直す |
 | 枠の経路でログインを確かめたときの描き方 | token が無いとき、画面の枠（見出しの帯・ナビゲーション）を描かずにログインの画面へ移る。移った先は今と同じ `/login` で、既存のテストが縛るのは移った先だけである。枠が一瞬描かれるかどうかは人の目で確かめていない（未確認） |
-| インフラが束ねる入口 | private リポジトリのインフラは `handlers/*.ts` の `handler` を束ねる。名前と置き場を変えないため影響しない見込みだが、インフラの定義はこのリポジトリから読めない（#2200） |
+| インフラがバンドルするエントリポイント | private リポジトリのインフラは `handlers/*.ts` の `handler` をバンドルする。名前と置き場を変えないため影響しない見込みだが、インフラの定義はこのリポジトリから読めない（#2200） |
