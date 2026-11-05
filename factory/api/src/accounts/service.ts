@@ -11,6 +11,7 @@ import {
 import {
   INITIAL_EXECUTION_MODE,
   isPlan,
+  isSeatType,
   planFitsKind,
   type AccountContext,
   type AccountKind,
@@ -352,6 +353,13 @@ function seatNotFound(): NotFoundError {
 
 const TEAM_NAME_MAX_LENGTH = 64;
 const TEAM_NAME_MESSAGE = `1〜${TEAM_NAME_MAX_LENGTH} 字で入力してください`;
+
+const SEAT_TYPE_MESSAGE = "席の種類は standard か premium です";
+
+export function validateSeatType(value: unknown): SeatType {
+  if (!isSeatType(value)) throw new InvalidRequestError(SEAT_TYPE_MESSAGE);
+  return value;
+}
 
 export function validateTeamName(name: unknown): string {
   if (typeof name !== "string") throw new InvalidRequestError(TEAM_NAME_MESSAGE);
