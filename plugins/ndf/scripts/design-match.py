@@ -30,6 +30,10 @@ import deps  # noqa: E402
 deps.require("md")
 import md  # noqa: E402
 import repo  # noqa: E402
+from design_docs import find_designs  # noqa: E402
+from design_docs import git_list as _git_list  # noqa: E402
+from design_docs import read_files as read_designs  # noqa: E402
+from design_docs import require_repo as _require_repo  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_OK,
     EXIT_PRECONDITION,
@@ -45,8 +49,6 @@ from step_result import (  # noqa: E402
 )
 
 TOOL = "design-match"
-DESIGN_DIR = "issues"
-DESIGN_NAME = re.compile(r"^issue-(?P<nums>\d+(?:-\d+)*)-design(?:-[^/]+)?\.md$")
 # 名前を拾う節（決定 2）。bare の test 識別子は `## テスト設計` だけから拾う
 NAME_SECTIONS = ("決定の記録", "テスト設計", "構成要素")
 BARE_SECTION = "テスト設計"
@@ -64,49 +66,6 @@ DEF_NAME = re.compile(r"\b(?:def|class|function|func|fn)\s+([A-Za-z_][A-Za-z0-9_
 CONST_NAME = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9]*_[A-Z0-9_]*)(?![A-Za-z0-9_])")
 MIN_SYMBOL = 4
 IDENT = "A-Za-z0-9_"
-
-
-def _git_list(root, *args) -> list[str]:
-    p = git(root, *args, check=False)
-    if p.returncode != 0:
-        raise StepError(f"git {' '.join(args[:3])} が読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-    return [ln for ln in p.stdout.splitlines() if ln]
-
-
-def _require_repo(root) -> None:
-    try:
-        _git_list(root, "rev-parse", "--verify", "HEAD")
-    except OSError as e:
-        raise StepError(f"git を起動できない: {e}", EXIT_UNREADABLE)
-
-
-# --- 確認 (a): 設計に名前の出るテスト ------------------------------------------------
-
-
-def find_designs(root, issues: list[str]) -> list[tuple[str, str]]:
-    """HEAD の `issues/` から、番号の並びに `issues` のどれかを含む設計文書を `(パス, 中身)` で返す。"""
-    want = {str(int(n)) for n in issues}
-    out = []
-    for rel in _git_list(root, "ls-tree", "-r", "--name-only", "HEAD", "--", f"{DESIGN_DIR}/"):
-        m = DESIGN_NAME.match(PurePosixPath(rel).name)
-        if not m or not want & {str(int(n)) for n in m.group("nums").split("-")}:
-            continue
-        p = git(root, "show", f"HEAD:{rel}", check=False)
-        if p.returncode != 0:
-            raise StepError(f"設計文書を HEAD から読めない: {rel}", EXIT_UNREADABLE)
-        out.append((rel, p.stdout))
-    return out
-
-
-def read_designs(root, paths: list[str]) -> list[tuple[str, str]]:
-    out = []
-    for raw in paths:
-        p = Path(raw) if Path(raw).is_absolute() else Path(root) / raw
-        try:
-            out.append((raw, p.read_text(encoding="utf-8")))
-        except (OSError, UnicodeDecodeError) as e:
-            raise StepError(f"設計文書を読めない: {raw}（{e}）", EXIT_UNREADABLE)
-    return out
 
 
 def looks_like_test_file(s: str) -> bool:
