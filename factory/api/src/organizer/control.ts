@@ -6,11 +6,10 @@ import type { AccountContext } from "../accounts/model.ts";
 import { ConflictError, InvalidRequestError, NotFoundError, ServiceUnavailableError } from "../errors.ts";
 import type { GitHubPort } from "../github/port.ts";
 import { releaseAnsweredKey } from "../progress/authorize.ts";
-import type { ProgressReader, ReleaseEvents } from "../progress/read.ts";
+import { awaitingGateOf, type ProgressReader, type ReleaseEvents } from "../progress/read.ts";
 import type { RunControl } from "../runs/control.ts";
 import { isTerminalRun, type Registration, type ReleaseStep, type SprintRun } from "../runs/model.ts";
 import type { RunsTable } from "../runs/table.ts";
-import { awaitingGateOf } from "../views/derive.ts";
 import {
   choicesOf,
   emptyRoot,

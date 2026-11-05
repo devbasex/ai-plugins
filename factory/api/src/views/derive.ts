@@ -3,7 +3,7 @@
 import { CLOSING_STEPS, PHASE_NAMES } from "@ndf-factory/contracts/phases";
 import type { ApprovalRequestRow, AttentionRow, StepDetailBody } from "@ndf-factory/contracts/views";
 import type { AttentionPayload, CiUpdatedPayload, GateAnsweredPayload, GateReachedPayload, PrUpdatedPayload, StepRecordedPayload, UsageRecordedPayload } from "@ndf-factory/contracts";
-import type { RunLatest, StepRecord } from "../progress/read.ts";
+import type { AwaitingGate, RunLatest, StepRecord } from "../progress/read.ts";
 import type { ProgressEventRecord } from "../progress/store.ts";
 import type { SprintRun } from "../runs/model.ts";
 
@@ -259,25 +259,6 @@ export function attentionsOf(events: Rec[]): AttentionRow[] {
       const p = payloadOf<AttentionPayload>(e);
       return { key: e.idempotency_key, at: e.at, reason: p.reason, summary: p.summary };
     });
-}
-
-export interface AwaitingGate {
-  at: string;
-  jobId: string | null;
-  payload: GateReachedPayload;
-}
-
-// 実行が今待っている承認の依頼（#2430 の決定 1・I3・I4）。状態が awaiting_approval で待つ理由が無く、最後の gate.reached より後に
-// 同じ種類の gate.answered が無いときだけ、その gate.reached を返す。gateEvents は gate.reached と gate.answered の order_key の順の列。
-// 承認待ちの一覧とリポジトリの承認と問いの一覧（organizer/control.ts）が共有する
-export function awaitingGateOf(run: Pick<SprintRun, "state" | "awaitingReason">, gateEvents: ProgressEventRecord[]): AwaitingGate | null {
-  if (run.state !== "awaiting_approval" || run.awaitingReason) return null;
-  let last: AwaitingGate | null = null;
-  for (const e of gateEvents) {
-    if (e.type === "gate.reached") last = { at: e.at, jobId: e.job_id, payload: payloadOf<GateReachedPayload>(e) };
-    else if (e.type === "gate.answered" && last && payloadOf<GateAnsweredPayload>(e).kind === last.payload.kind) last = null;
-  }
-  return last;
 }
 
 // 承認待ちの一覧の行。待っている依頼が無ければ null

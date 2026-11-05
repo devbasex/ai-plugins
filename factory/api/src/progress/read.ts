@@ -14,6 +14,7 @@ import type {
   StepRecordedEvent,
   UsageRecordedEvent,
 } from "@ndf-factory/contracts";
+import type { SprintRun } from "../runs/model.ts";
 import { finishedKey } from "./authorize.ts";
 import type { MemoryProgressEventStore } from "./memory-store.ts";
 import type { ProgressEventRecord } from "./store.ts";
@@ -133,6 +134,25 @@ const gateAnswerOf = (records: ProgressEventRecord[], approvalRequestId: string)
   const e = (records as Rec[]).filter((x) => x.type === "gate.answered" && x.payload.approval_request_id === approvalRequestId).at(-1);
   return e ? (e.payload as unknown as GateAnsweredPayload) : null;
 };
+
+export interface AwaitingGate {
+  at: string;
+  jobId: string | null;
+  payload: GateReachedPayload;
+}
+
+// 実行が今待っている承認の依頼（#2430 の決定 1・I3・I4）。状態が awaiting_approval で待つ理由が無く、最後の gate.reached より後に
+// 同じ種類の gate.answered が無いときだけ、その gate.reached を返す。gateEvents は gate.reached と gate.answered の order_key の順の列。
+// 承認待ちの一覧とリポジトリの承認と問いの一覧（organizer/control.ts）が共有する
+export function awaitingGateOf(run: Pick<SprintRun, "state" | "awaitingReason">, gateEvents: ProgressEventRecord[]): AwaitingGate | null {
+  if (run.state !== "awaiting_approval" || run.awaitingReason) return null;
+  let last: AwaitingGate | null = null;
+  for (const e of gateEvents) {
+    if (e.type === "gate.reached") last = { at: e.at, jobId: e.job_id, payload: e.payload as unknown as GateReachedPayload };
+    else if (e.type === "gate.answered" && last && (e.payload as unknown as GateAnsweredPayload).kind === last.payload.kind) last = null;
+  }
+  return last;
+}
 
 export interface LoopRunsDetail {
   laps: LoopLapClosedPayload[];

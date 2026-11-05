@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { validateRunJobInstruction } from "@ndf-factory/contracts";
 import { ApiError } from "../errors.ts";
 import { appendEvent } from "../progress/append.ts";
-import { memoryProgressReader } from "../progress/read.ts";
+import { awaitingGateOf, memoryProgressReader } from "../progress/read.ts";
 import { accountContext, createRunsHarness, TEST_CONFIG, type RunsHarness } from "../testing/runs.ts";
 import { ResumeRejectedError } from "../runs/control.ts";
-import { approvalRequestOf, awaitingGateOf } from "../views/derive.ts";
+import { approvalRequestOf } from "../views/derive.ts";
 import { laneOf } from "./model.ts";
 
 const REPO_ID = 101;

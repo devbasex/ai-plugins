@@ -9,7 +9,6 @@ import type { RankingTable } from "../github/port.ts";
 import type { SprintRun } from "../runs/model.ts";
 import {
   approvalRequestOf,
-  awaitingGateOf,
   DETAIL_STEP_LIMIT,
   deriveDetail,
   deriveRefinements,
@@ -18,6 +17,7 @@ import {
   sortApprovalRequests,
   stepRows,
 } from "../views/derive.ts";
+import { awaitingGateOf } from "../progress/read.ts";
 import { mapLimit } from "./elements.ts";
 import type { FactoryDeps } from "./factory.ts";
 import { positiveInt, registerList, registerOperation } from "./operation.ts";

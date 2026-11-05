@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ProgressEvent } from "@ndf-factory/contracts";
 import { toRecord } from "../progress/append.ts";
-import { capSteps, latestOf, type StepRecord } from "../progress/read.ts";
+import { awaitingGateOf, capSteps, latestOf, type StepRecord } from "../progress/read.ts";
 import type { ProgressEventRecord } from "../progress/store.ts";
 import type { SprintRun } from "../runs/model.ts";
 import {
   approvalRequestOf,
   attentionsOf,
-  awaitingGateOf,
   deriveDetail,
   deriveRefinements,
   deriveStepDetail,
