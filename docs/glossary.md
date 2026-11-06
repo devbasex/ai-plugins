@@ -687,7 +687,9 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリース種別 | `release_type` | リリースの種類。production（本番リリース）/ verification（開発版のデプロイ） | — | — | `docs/specifications/ndf-release-steps-and-token-usage-snapshot.md` |
 | 公開操作 | — | release の手順 4 で行う操作。レジストリへの公開・配備先への反映・署名したアーティファクトの設置・ストアへの提出 | 公開の操作 | — | `plugins/ndf/skills/release/references/completion-check.md` |
 | リリースの経路 | `release_route` | 変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸 | 配布の経路 | — | — |
-| CD | — | 継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する | — | — | — |
+| CD | — | 継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映を NDF の工程の外の仕組みが行うこと。delivery の kind: auto で宣言する | — | — | — |
+| CD の案内 | — | CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない | — | — | — |
+| 手動反映の理由 | — | delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない | — | — | — |
 | 昇格の Pull Request | `promotion_pr` | ベースブランチから本番チャネルへ変更を入れる Pull Request | — | — | — |
 | 昇格のプラン | — | リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、リリース承認ゲートの後にマージする | — | — | — |
 | 昇格の承認資料 | — | 昇格のリリース承認ゲートで利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote のリリース承認ゲートの停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする | — | — | `docs/specifications/ndf-release-approved-commit.md` |

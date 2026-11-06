@@ -2678,8 +2678,20 @@
     {
       "term": "CD",
       "context": "ndf-release",
-      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する",
+      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映を NDF の工程の外の仕組みが行うこと。delivery の kind: auto で宣言する",
       "pending_source": "issues/issue-2616-requirements.md"
+    },
+    {
+      "term": "CD の案内",
+      "context": "ndf-release",
+      "meaning": "CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない",
+      "pending_source": "issues/issue-2623-requirements.md"
+    },
+    {
+      "term": "手動反映の理由",
+      "context": "ndf-release",
+      "meaning": "delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない",
+      "pending_source": "issues/issue-2623-requirements.md"
     },
     {
       "term": "昇格の Pull Request",
