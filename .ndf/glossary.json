@@ -46,6 +46,7 @@
         "docs/glossary.md",
         "plugins/ndf/scripts/data/legacy-values.json",
         "plugins/ndf/scripts/tests/test_legacy_values.py",
+        "plugins/ndf/scripts/tests/test_estimate_predict.py",
         "factory/runner/src/legacy-phases.ts",
         "factory/runner/src/legacy-phases.test.ts"
       ]

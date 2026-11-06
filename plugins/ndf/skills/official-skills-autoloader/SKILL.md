@@ -134,10 +134,10 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 ### ライセンス
 
-- Apache-2.0（mcp-builder, frontend-design, webapp-testing, claude-api 等）: 再デプロイ可
+- Apache-2.0（mcp-builder, frontend-design, webapp-testing, claude-api 等）: 再頒布可
 - プロプライエタリ（docx, pptx, xlsx, pdf）: **個人環境での利用のみ**。リポジトリに含めない、社内共有しない
 
-このautoloaderが行うのは**利用者のローカル環境へのインストールのみ**で、再デプロイには該当しません。
+このautoloaderが行うのは**利用者のローカル環境へのインストールのみ**で、再頒布には該当しません。
 
 ### パス規約
 
