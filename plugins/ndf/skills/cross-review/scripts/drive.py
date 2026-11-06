@@ -255,7 +255,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             return Path(wt).resolve() / ".cross_review"
         github, workspace = review_paths()
         repo = github._repo_from_git()
-        return workspace._default_worktree_base() / github._repo_slug(repo) / f"pr{self.pr}" / ".cross_review" if repo else None
+        return workspace._default_worktree_base(".") / github._repo_slug(repo) / f"pr{self.pr}" / ".cross_review" if repo else None
 
     def identity(self) -> str:
         """耐久の記録の鍵の元。状態の置き場（求まらなければ作業ディレクトリと PR）。"""

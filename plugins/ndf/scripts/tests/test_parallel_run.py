@@ -37,6 +37,8 @@ PLAN = {
     ],
 }
 
+TEMPLATE_DECL = {"release": {"form": "package-plugin", "plugin": "ndf"}}
+
 FAKE = textwrap.dedent(
     """
     import json, os, sys
@@ -64,6 +66,7 @@ FAKE = textwrap.dedent(
 def env(tmp_path, monkeypatch):
     main = tmp_path / "repo"
     (main / ".ndf").mkdir(parents=True)
+    (main / ".ndf" / "supervise.json").write_text(json.dumps(TEMPLATE_DECL))
     subprocess.run(["git", "init", "-q", str(main)], check=True)
     plan = pp.check_data(PLAN)[0]
     pp.write_all(main, plan, PLAN)
@@ -259,15 +262,23 @@ def test_char_awaiting_approval_pauses_with_notice(env):
 
 
 def test_char_build_error_fails_release_and_stops(env, tmp_path, monkeypatch):
+    """リリースだけが失敗で止まり、計画は止まらない（#2616 の受け入れ条件 10・14 と I4・I5）。"""
     main, log, states = env["main"], env["log"], env["states"]
     monkeypatch.setattr(prun, "dev_version", lambda _m: "")
     states.write_text(json.dumps({"la": "running"}))
     start(main)
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
-    out = durable.output_of(pl.workflow_id("p1"))
-    assert out["status"] == "stopped" and out["not_stopped"] == [] and out["pending"] == [rid]
-    assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "failed")] and "出す版を決められない" in out["releases"][0]["reason"]
-    assert ["stop", "la", "--json"] in calls(log, "stop") and pl.read_answer(main, "p1", rid) == (None, None)
+    ans = read(main, rid)
+    assert (ans["result"], ans["version"], ans["release"]) == ("failed", None, 1) and "出す版を決められない" in ans["reason"]
+    q = build_question(main)
+    assert q["id"] == "p1-build-1" and q["options"] == ["直してから組み直す", "止める"] and [r["id"] for r in q["requests"]] == [rid]
+    assert "lane" not in q and "attach" not in q
+    states.write_text(json.dumps({"la": "stopped"}))
+    until(lambda: "lb" in spawned(log))  # 問いが開いていても依存先のレーンは起動する
+    out = stop(main)
+    assert out["status"] == "stopped" and out["pending"] == []
+    rel = out["releases"][0]
+    assert (rel["n"], rel["state"], rel["prs"], rel["requests"]) == (1, "failed", [10], [rid]) and "出す版を決められない" in rel["reason"]
 
 
 def test_char_rejected_settle_answers_with_reason(env, tmp_path):
@@ -588,7 +599,7 @@ def test_the_plan_waits_until_the_owner_applies_a_design_answer(env, monkeypatch
     """全レーンが止まった後に設計の承認へ答えても、持ち主が答えを当てるまで計画を終えず、起こす 1 行を添える（6f）。"""
     main, states = env["main"], env["states"]
     applied = {"v": False}
-    monkeypatch.setattr(prun, "design_held", lambda m, n, answered: ["la"] if answered and not applied["v"] else [])
+    monkeypatch.setattr(prun.prt, "design_held", lambda m, n, answered: ["la"] if answered and not applied["v"] else [])
     states.write_text(json.dumps({"la": "running"}))
     start(main)
     rid = pl.request_ask(main, "p1", "la", ASK, str(tmp_path), "d1")
@@ -620,7 +631,7 @@ def test_stop_force_does_not_wait_for_settle_and_stops_the_helper(env, tmp_path)
 
 def test_answered_pending_laps_of_stopped_loop_lanes_are_closed_by_a_helper_before_finishing(env, monkeypatch, tmp_path):
     main, states = env["main"], env["states"]
-    monkeypatch.setattr(prun, "held_loops", lambda m, n, answered: ["lroot"] if answered else [])
+    monkeypatch.setattr(prun.prt, "held_loops", lambda m, n, answered: ["lroot"] if answered else [])
     start(main)
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
@@ -1060,3 +1071,257 @@ def test_answering_rebuild_returns_the_status_command(tmp_path):
     item = {"id": "p1-observe-1", "kind": "observe", "commands": {"ラッパーの環境を作り直す": "python3 relay.py status"}}
     assert pa.owner_restart(tmp_path, "p1", item["id"], ["ラッパーの環境を作り直す"], [item]) == "python3 relay.py status"
     assert pa.owner_restart(tmp_path, "p1", item["id"], ["待つ"], [item]) is None
+
+
+# ---- リリースの組み方（#2616） ----
+
+WORKTREE = {"base_branch": "develop", "production_branch": "main"}
+CD = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod", "production": True}]
+HAND = [{"kind": "manual", "target": "prod", "trigger": "手で流す", "production": True}]
+
+
+def declare(main, delivery="absent", form=False):
+    """配る形の宣言を置く。`delivery` の既定は宣言が無い形。文字列はそのまま書く。`form` が真なら `release.form`。"""
+    sv = main / ".ndf" / "supervise.json"
+    sv.unlink(missing_ok=True)
+    if form:
+        sv.write_text(json.dumps(TEMPLATE_DECL))
+    (main / ".ndf" / "worktree.json").write_text(json.dumps(WORKTREE))
+    pj = main / ".ndf" / "project.json"
+    pj.unlink(missing_ok=True)
+    if delivery != "absent":
+        pj.write_text(delivery if isinstance(delivery, str) else json.dumps({"delivery": delivery}))
+
+
+def read(main, rid):
+    return until(lambda: pl.read_answer(main, "p1", rid)[0])
+
+
+def build_question(main):
+    return until(lambda: next((q for q in (event(main, "p1", "questions") or {}).get("items") or [] if q.get("kind") == "build"), None))
+
+
+def no_build_ran(main):
+    """`parallel.build` は最初に依頼の一覧を書く。一覧も提示の置き場も無ければ呼ばれていない。"""
+    return not (pp.plan_dir(main, "p1") / "releases").exists()
+
+
+@pytest.mark.parametrize("rows, said", [(CD, "stg はマージで反映する"), ([], "デプロイしない")])
+def test_merge_or_no_delivery_repo_answers_released_without_building(env, tmp_path, rows, said):
+    """受け入れ条件 1〜3・5・9。"""
+    main, log, states = env["main"], env["log"], env["states"]
+    declare(main, rows)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    ans = read(main, rid)
+    assert (ans["result"], ans["version"], ans["release"]) == ("released", None, 1) and said in ans["reason"]
+    assert no_build_ran(main) and event(main, "p1", "pause")["action"] == "running" and event(main, "p1", "range-1") is None
+    states.write_text(json.dumps({"la": "stopped"}))
+    until(lambda: "lb" in spawned(log))
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    out = durable.output_of(pl.workflow_id("p1"))
+    assert out["status"] == "finished" and out["pending"] == [] and no_build_ran(main)
+    rel = out["releases"][0]
+    assert (rel["state"], rel["version"], rel["prs"], rel["skipped"]) == ("released", None, [10], True) and said in rel["reason"]
+    assert "| 1 | released | - | - |" in (pp.plan_dir(main, "p1") / "plan.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "rows, said",
+    [
+        (HAND, "手で流す"),
+        ([CD[0], HAND[0]], "手で流す"),
+        ("absent", "delivery も"),
+        (json.dumps({"delivery": {"unknown": "調べていない"}}), "調べていない"),
+        ("{", "読めない"),
+    ],
+)
+def test_manual_or_unreadable_repo_answers_failed_and_keeps_running(env, tmp_path, rows, said):
+    """受け入れ条件 6・7。"""
+    main, states = env["main"], env["states"]
+    declare(main, rows)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    ans = read(main, rid)
+    assert ans["result"] == "failed" and said in ans["reason"] and "project.json" in ans["reason"]
+    assert no_build_ran(main) and build_question(main)["reason"] == ans["reason"]
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+
+
+def test_template_repo_still_builds(env, tmp_path):
+    """受け入れ条件 8。"""
+    main = env["main"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    assert (prl.release_dir(main, "p1", 1, 1) / "present.json").is_file()
+
+
+def test_build_exception_and_seq_limit_answer_failed(env, tmp_path, monkeypatch):
+    """受け入れ条件 11・12。組み立ての例外と連番の上限は、同じ答えと問いになる。"""
+    main, states = env["main"], env["states"]
+
+    def boom(*_a, **_k):
+        raise RuntimeError("組み立ての失敗")
+
+    monkeypatch.setattr(prl, "build_plans", boom)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    ans = read(main, r1)
+    assert ans["result"] == "failed" and "組み立ての失敗" in ans["reason"] and build_question(main)["id"] == "p1-build-1"
+    monkeypatch.setattr(prl, "MAX_HELPER_SEQ", 0)
+    r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
+    ans = read(main, r2)
+    assert ans["result"] == "failed" and ans["release"] == 2 and "上限" in ans["reason"]
+    assert stop(main)["status"] == "stopped"
+
+
+def test_same_build_cause_keeps_one_question_across_releases(env, tmp_path, monkeypatch):
+    """I6。同じ原因の組み立ての例外は、リリースの連番が進んでも問いが 1 件のままである。"""
+    main, states = env["main"], env["states"]
+
+    def boom(*_a, **_k):
+        raise RuntimeError("組み立ての失敗")
+
+    monkeypatch.setattr(prl, "build_plans", boom)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
+    assert (read(main, r1)["release"], read(main, r2)["release"]) == (1, 2)
+    q = until(lambda: len((got := build_question(main))["requests"]) == 2 and got)
+    assert q["id"] == "p1-build-1" and [r["id"] for r in q["requests"]] == [r1, r2]
+    assert len([x for x in event(main, "p1", "questions")["items"] if x.get("kind") == "build"]) == 1
+    assert stop(main)["status"] == "stopped"
+
+
+def test_second_present_failure_closes_the_range_and_defers_the_rest(env, tmp_path, monkeypatch):
+    """受け入れ条件 13・14（I4・I6）。範囲の外の依頼は次のリリースで答えを受け、理由が同じなら問いは 1 件のままである。"""
+    main, heads, states = env["main"], env["heads"], env["states"]
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
+    until(lambda: (event(main, "p1", "lane-la") or {}).get("received") == 2)
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    heads["v"] = "sha2"
+    monkeypatch.setattr(prun, "dev_version", lambda _m: "")
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    first, second = read(main, r1), read(main, r2)
+    assert (first["result"], first["release"]) == ("failed", 1) and (second["result"], second["release"]) == ("failed", 2)
+    q = until(lambda: len((got := build_question(main))["requests"]) == 2 and got)
+    assert q["id"] == "p1-build-1" and [r["id"] for r in q["requests"]] == [r1, r2]
+    assert len([x for x in event(main, "p1", "questions")["items"] if x.get("kind") == "build"]) == 1
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+
+
+def test_stop_choice_stops_the_plan(env, tmp_path):
+    """受け入れ条件 15 の「止める」。"""
+    main, states = env["main"], env["states"]
+    declare(main, HAND)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    pl.send_answer(main, "p1", build_question(main)["id"], "answered", choice=["止める"])
+    assert durable.output_of(pl.workflow_id("p1"))["status"] == "stopped"
+
+
+def test_rebuild_choice_reads_the_fixed_declaration_and_builds(env, tmp_path):
+    """受け入れ条件 15 の「直してから組み直す」と決定 5。元の依頼の答えは変えず、計画は組み直しが流れ切るまで終わらない。"""
+    main, log, states = env["main"], env["log"], env["states"]
+    declare(main, HAND)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    failed = read(main, rid)
+    q = build_question(main)
+    declare(main, form=True)
+    pl.send_answer(main, "p1", q["id"], "answered", choice=["直してから組み直す"])
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e)
+    assert ev["n"] == 2 and pl.read_answer(main, "p1", rid)[0] == failed
+    (prl.release_dir(main, "p1", 2, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 2, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    until(lambda: "lb" in spawned(log))
+    time.sleep(0.6)
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    resume(main, {"n": 2, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
+    out = durable.output_of(pl.workflow_id("p1"))
+    assert out["status"] == "finished" and out["pending"] == []
+    assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "failed"), (2, "released")]
+    assert out["releases"][1]["requests"] == [f"{rid}-again2"]
+    assert read(main, f"{rid}-again2")["result"] == "released" and "wake" not in event(main, "p1", "pause")
+
+
+CRASH = textwrap.dedent(
+    """
+    import os, sys, time
+    from pathlib import Path
+    main, mode, state = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+    sys.path[:0] = [sys.argv[4], sys.argv[4] + "/lib"]
+    import dbos
+    import durable, parallel_lane as pl, parallel_release as prl, parallel_run as prun
+    prun.dev_version = lambda _m: "1.2.3"
+    prun.git_head = lambda _m: "sha1"
+    orig = prl.build_plans
+    prl.build_plans = lambda m, n, s, k, v: orig(m, n, s, k, v, lambda *_a: ({"steps": []}, {"steps": []}))
+    if mode == "old":
+        durable.patched = lambda _n: False  # parallel.route の無い版の並びで記録する
+    prun.open_parallel_record(main, "p1")
+    wid = pl.workflow_id("p1")
+    durable.start(durable.WorkflowRef(wid, 1, "start"), prun.parallel_workflow, str(main), "p1")
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], state)
+    end = time.monotonic() + 30
+    while time.monotonic() < end:
+        ev = durable.event(wid, "pause") or {}
+        if ev.get("action") == "release" or pl.read_answer(main, "p1", rid)[0]:
+            print(rid, flush=True)
+            os._exit(0)
+        time.sleep(0.1)
+    os._exit(1)
+    """
+)
+
+
+def crash_after_first_request(env, tmp_path, mode):
+    """別のプロセスで最初の依頼まで記録し、後始末をせずに落とす。依頼の ID を返す。"""
+    script, states = tmp_path / "crash.py", env["states"]
+    script.write_text(CRASH)
+    states.write_text(json.dumps({"la": "running"}))
+    argv = [sys.executable, str(script), str(env["main"]), mode, str(tmp_path / "st"), str(SCRIPTS)]
+    got = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got.stderr[-2000:]
+    return got.stdout.strip().splitlines()[-1]
+
+
+def test_recorded_run_of_the_old_steps_continues_with_the_new_code(env, tmp_path):
+    """I7: `parallel.build` まで古い並びで記録した実行を続けても落ちず、次の依頼は新しい処理を通る。"""
+    main = env["main"]
+    rid = crash_after_first_request(env, tmp_path, "old")
+    prun.open_parallel_record(main, "p1")  # 落ちた実行を記録から続ける
+    (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
+    assert read(main, rid)["version"] == "1.2.3"
+    declare(main, CD)
+    r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
+    ans = read(main, r2)
+    assert (ans["result"], ans["version"], ans["release"]) == ("released", None, 2)
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+
+
+def test_new_record_replays_to_the_same_values(env, tmp_path):
+    """I7: 新しい手順の記録は、落ちた後の打ち直しで同じ値に戻る。宣言が変わっても記録した分岐を通る。"""
+    main = env["main"]
+    declare(main, CD)
+    rid = crash_after_first_request(env, tmp_path, "new")
+    declare(main, HAND)
+    prun.open_parallel_record(main, "p1")
+    out = stop(main)
+    assert out["status"] == "stopped" and [(r["n"], r["state"], r["requests"]) for r in out["releases"]] == [(1, "released", [rid])]

@@ -332,7 +332,7 @@ python3 scripts/state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID
 launcher が生成するプロンプトに以下を強制している:
 
 - **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れることがある
-- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）
+- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は「`<worktree-base>` の解決順」の順で解決）
 - **投稿の手順を持たない**（#730）: 担当は投稿しない。判定の格下げ（`event_downgrade`）も
   担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止。2 ラウンド目以降は `start-round` が取り直す（#542）
@@ -423,7 +423,10 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 `state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
 
 1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
-2. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
+2. `.ndf/project.json` にコンテナの宣言（`test.suites[].container`）があれば `<メインディレクトリ>/.worktrees/.ndf`
+   （ホストの Docker を共有する環境で一時ディレクトリはデーモンから見えないため。作る前に `.worktrees/` を共通の git
+   ディレクトリの `info/exclude` へ登録し、登録できなければ止まる）
+3. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
    コンテナ再作成で自動消滅し、共有 volume を消費しない）
 
 worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
@@ -443,7 +446,7 @@ worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジ�
 | # | 対策 | スクリプト側で何をするか |
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
-| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を worktree の外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
+| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は「`<worktree-base>` の解決順」の順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を worktree の外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
 | 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で worktree を宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
 | 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、担当のプロンプトへ**内容をインライン埋め込み**する。**2 ラウンド目以降は `start-round` が `--strict` で取り直す**（1 ソースでも失敗したら前のスナップショットのまま `⚠` で続ける） |
 
@@ -467,34 +470,4 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 ## 自動レビュー観点テンプレート
 
-`state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
-そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
-`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる（レビューのプロファイルの観点があっても同じ）。レビューのプロファイルの分類（[02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」）に当たる変更ファイルがあれば、その観点を既定の観点の後ろに足し、`replace_auto_categories` が真なら既定の自動カテゴリ（`common` / `docs_only` を含むすべて）の観点を渡さない（外部の調査の確認の観点は外さない。下の `code`）。
-
-自動カテゴリ:
-
-- `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
-- `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
-- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか、用語集どおりか、不変条件を破っていないか、コンテキストの境界を越えていないか。モデルレビューと詳細レビューに分けて渡す（下の「設計 PR のモデルレビューと詳細レビュー」）。詳細レビューには `code` と同じく外部の調査の確認を足す
-
-### 設計 PR のモデルレビューと詳細レビュー
-
-| レビュー | ラウンド | 見るもの | 渡す観点 |
-| --- | --- | --- | --- |
-| モデルレビュー（`model`） | 1 ラウンド目（`design_has_model` が真のとき） | ドメインモデルの節と、用語集の差分だけ | コンテキストの関係の宣言・集約の持ち主・不変条件どうしの矛盾・ドメインイベントの受け手・用語の表と用語集の一致。節の外への指摘は書かない |
-| 詳細レビュー（`detail`） | 2 ラウンド目以降（節が無ければ 1 ラウンド目から） | 残りの節 | `design` の観点。ドメインモデルの節は確定したものとして扱う |
-
-モデルレビューで両スロットが承認しても抜けない。承認ゲートの数とラウンドの上限（設計は 3）は変えない。
-- `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ。既定の分類が `design` か `code` を持つ PR には、`pr-review` の SKILL.md の節 `### 外部の調査の確認` を読んで `## 自動追加レビュー観点: 外部の調査の確認` の見出しで最後に足す（プロファイルの `replace_auto_categories` でも外さない。節を読めなければ `init` が止まる）
-- `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
-- `test`: テストの仕様性、境界値、失敗系、flaky リスク
-- `dependency`: 依存追加/更新、lockfile、ライセンス、互換性、セキュリティ
-- `config_ci`: CI/設定、権限、secret、cache、環境差分
-- `api_contract`: API 契約、互換性、schema、status、エラー形式、認可
-- `auth_security`: 認証/認可、secret/PII、CSRF/CORS/session/JWT/OAuth
-- `frontend`: UI 状態、アクセシビリティ、レスポンシブ、状態管理、表示文言
-- `performance`: N+1、I/O、メモリ、ロック、cache、queue、冪等性
-- `deletion_rename`: 削除/リネーム参照漏れ、後方互換、移行手順
-- `generated`: 生成物、lockfile、再生成手順、差分ノイズ
-- `i18n`: 翻訳キー、fallback、変数展開、表示幅、文言整合
-- `infra`: IaC / Docker / Kubernetes 等の権限、secret、公開範囲、ロールバック
+変更ファイルの分類と担当へ渡す観点の一覧は [08-review-categories.md](08-review-categories.md) にある。

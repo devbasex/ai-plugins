@@ -1115,7 +1115,7 @@
     {
       "term": "リリース記録",
       "context": "ndf-release",
-      "meaning": "release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request を持つ",
+      "meaning": "release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request に、CD を読んだときは CD の結果を持つ",
       "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md",
       "deprecated": [
         "リリースの記録",
@@ -2678,8 +2678,20 @@
     {
       "term": "CD",
       "context": "ndf-release",
-      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する",
+      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映を NDF の工程の外の仕組みが行うこと。delivery の kind: auto で宣言する",
       "pending_source": "issues/issue-2616-requirements.md"
+    },
+    {
+      "term": "CD の案内",
+      "context": "ndf-release",
+      "meaning": "CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない",
+      "pending_source": "issues/issue-2623-requirements.md"
+    },
+    {
+      "term": "手動反映の理由",
+      "context": "ndf-release",
+      "meaning": "delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない",
+      "pending_source": "issues/issue-2623-requirements.md"
     },
     {
       "term": "昇格の Pull Request",
@@ -5756,19 +5768,19 @@
       "term": "共有の環境",
       "context": "ndf-workflow",
       "meaning": "NDF のスクリプトとラッパーが使う Python の環境。置き場は ~/.cache/ndf/venv/<版>（NDF_DEPS_VENV で変えられる）。プラグインの版ごとに 1 つで、同じ版のスクリプトとラッパーが共に使う",
-      "pending_source": "issues/issue-2509-requirements.md"
+      "source": "docs/specifications/ndf-shared-venv-and-relay-ls-failure.md"
     },
     {
       "term": "一覧の失敗の問い",
       "context": "ndf-workflow",
       "meaning": "状態の一覧の失敗が停滞の区切りより長く続いたときに、並列の計画のオーガナイザーの耐久ワークフローが自分で立てる問い（kind は observe）。一覧の終了コードと標準エラーの末尾 1 行を持ち、一覧が成功に戻れば外れる",
-      "pending_source": "issues/issue-2509-design.md"
+      "source": "docs/specifications/ndf-shared-venv-and-relay-ls-failure.md"
     },
     {
       "term": "状態の一覧",
       "context": "ndf-workflow",
       "meaning": "ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する",
-      "pending_source": "issues/issue-2509-requirements.md"
+      "source": "docs/specifications/ndf-shared-venv-and-relay-ls-failure.md"
     },
     {
       "term": "対象の版",
@@ -6053,6 +6065,30 @@
       ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "CD の結果",
+      "context": "ndf-release",
+      "meaning": "本番チャネルへのマージの後に NDF が読んだ CD の状態。成功・失敗・未確定の 3 つで、リリース記録に残す",
+      "pending_source": "issues/issue-2623-design.md"
+    },
+    {
+      "term": "結果の読み方",
+      "context": "ndf-release",
+      "meaning": "CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す",
+      "pending_source": "issues/issue-2623-design.md"
+    },
+    {
+      "term": "公開物",
+      "context": "ndf-release",
+      "meaning": "正式版ごとのリリースタグと GitHub Release の組",
+      "pending_source": "issues/issue-2623-design.md"
+    },
+    {
+      "term": "反映失敗",
+      "context": "ndf-release",
+      "meaning": "リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態",
+      "pending_source": "issues/issue-2623-design.md"
     },
     {
       "term": "リポジトリ前提の検査",

@@ -47,6 +47,8 @@ import parallel_external as pe  # noqa: E402
 import parallel_external_cli as px  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
+import parallel_route  # noqa: E402
+from parallel_repo import relay  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "parallel"
@@ -105,7 +107,7 @@ def cmd_init(a) -> None:
 
 
 def cmd_check(a) -> None:
-    plan, items, metrics = checked_plan(main_of(), a.name)
+    plan, items, metrics = parallel_route.with_release_warnings(main_of(), checked_plan(main_of(), a.name))
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）", items, 1, **metrics)
     reply("ok", f"並列の計画 {a.name} の検査を通った（警告 {metrics['warnings']} 件）", items, **metrics)
@@ -116,13 +118,11 @@ def cmd_check(a) -> None:
 
 def _manual_or_none(main: Path, plan: pp.ParallelPlan) -> None:
     """ラッパーの外・tmux が無いときは、レーンごとの手で起動する 1 行を返して 3 で終える（受け入れ条件 9）。"""
-    import parallel_run as pr_run
-
     why = None
     if not os.environ.get("NDF_RELAY_DIR"):
         why = "ラッパーの外（NDF_RELAY_DIR が無い）"
     else:
-        _, res = pr_run.relay(main, "ls", "--json")
+        _, res = relay(main, "ls", "--json")
         m = res.get("metrics") or {}
         if not m.get("tmux"):
             why = "tmux が無い"

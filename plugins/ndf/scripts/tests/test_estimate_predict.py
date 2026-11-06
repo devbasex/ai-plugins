@@ -171,6 +171,23 @@ def test_size_unit_from_decl_or_smallest_quarter():
     assert ep.size_unit([800, 100, 200, 300, 400, 500, 600, 700], {}) == 150
 
 
+def _script_only(rows, issue, seconds, day=1):
+    """スプリントの機械のプラン（run のステップだけ）の実行を 1 本足す。"""
+    _done(rows, issue, seconds, day=day)
+    rows[-2]["type"] = "run"
+
+
+def test_size_unit_ignores_issues_with_only_script_steps():
+    """#2433: run のステップだけの実績を基準に数えると基準が 1 秒未満になり、どの見積もりも尺度を超える。"""
+    rows: list[dict] = []
+    for i in range(20):
+        _script_only(rows, 100 + i, 0.3)
+    for i in range(8):
+        _done(rows, 40 + i, 1000 + 100 * i, day=i + 1)
+    got = ep.predict(_req(like=[47]), rows, [], {}, {}, alive=DEAD)
+    assert got["size"] == 2  # 1700 ÷ 基準 1050 = 1.6
+
+
 def test_predict_size_uses_unit():
     rows: list[dict] = []
     for i in range(4):

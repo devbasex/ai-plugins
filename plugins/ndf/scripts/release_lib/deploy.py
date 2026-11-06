@@ -11,8 +11,9 @@ deploy-facts は手動反映の本番系（#1454）のリリース承認ゲー�
 確認の終了コードを `out` へ書く。`root` が先頭より遅れていれば（検査の PR が origin でマージされた後の主ディレクトリ）
 先に fast-forward する。確認するコミットと届けるコミットを同じにするため、それでも `root` の HEAD が先頭と違う・
 追跡中のファイルに変更があるときは確認を走らせずに 3 で止まる。確認の出力は秘密を含みうるため承認資料
-（MVV 判定で外部の LLM へ渡る）へ載せず、所有者だけが読める `<out>.verify.log` へ分ける。宣言が読めない・
-`out` へ書けないときは EXIT_UNREADABLE の StepError を投げる。
+（MVV 判定で外部の LLM へ渡る）へ載せず、所有者だけが読める `<out>.verify.log` へ走っている間に順に書く。打ち切られても
+書いた分が残る。ログが伸びたことだけを、バイト数と秒で標準エラーへ知らせる（遅れの見張りが標準エラーの伸びを見る）。
+宣言が読めない・`out` へ書けないときは EXIT_UNREADABLE の StepError を投げる。
 
 使う側は `lib/` を `sys.path` に入れてから import する。
 """
@@ -21,6 +22,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import approved_commit
@@ -29,6 +32,8 @@ import proc
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root, result
 
 TOOL = "release"
+WATCH_SECONDS = 5  # ログの大きさを見る間隔（秒）
+REPORT_SECONDS = 30  # 進みを知らせる最短の間隔（秒）
 
 
 def deploy_rows(decl) -> list[dict]:
@@ -135,26 +140,42 @@ def head_of_base(root, base: str) -> str:
     return sha
 
 
-def write_private(path: Path, text: str) -> None:
-    """所有者だけが読めるファイル（0600）として書く。"""
+def open_private(path: Path):
+    """所有者だけが読めるファイル（0600）を書き込み用に開く。"""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.chmod(path, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
+    return os.fdopen(fd, "wb")
+
+
+def wait_reporting(p: "subprocess.Popen[bytes]", log: Path) -> int:
+    """確認のコマンドの終了を待ち、ログが伸びていれば最短 REPORT_SECONDS の間隔で標準エラーへ知らせる。中身は載せない。"""
+    started = reported_at = time.monotonic()
+    reported = 0
+    while True:
+        try:
+            return p.wait(timeout=WATCH_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        now = time.monotonic()
+        size = log.stat().st_size
+        if size > reported and now - reported_at >= REPORT_SECONDS:
+            print(f"導入の確認の出力: {size} バイト（{round(now - started)} 秒）", file=sys.stderr, flush=True)
+            reported, reported_at = size, now
 
 
 def run_verify(root, base: str, verify: str, out: str) -> dict:
-    """ベースブランチの先頭で確認を 1 度走らせ、出力を所有者だけが読める `<out>.verify.log` へ書く。
+    """ベースブランチの先頭で確認を 1 度走らせ、出力を所有者だけが読める `<out>.verify.log` へ順に書く。
     {"sha", "verify_exit", "log"} を返す。前提を満たさなければ 3、ログへ書けなければ 2 の StepError。"""
     sha = head_of_base(root, base)
-    p = subprocess.run(["sh", "-c", verify], cwd=root, capture_output=True, text=True)
     log = Path(f"{out}.verify.log")
     try:
         Path(out).parent.mkdir(parents=True, exist_ok=True)
-        write_private(log, p.stdout + p.stderr)
+        with open_private(log) as sink:
+            p = subprocess.Popen(["sh", "-c", verify], cwd=root, stdout=sink, stderr=subprocess.STDOUT)
+            code = wait_reporting(p, log)
     except OSError as e:
         raise StepError(f"確認のログを書けない: {e}", EXIT_UNREADABLE) from e
-    return {"sha": sha, "verify_exit": p.returncode, "log": str(log)}
+    return {"sha": sha, "verify_exit": code, "log": str(log)}
 
 
 def write_material(out: str, text: str) -> None:

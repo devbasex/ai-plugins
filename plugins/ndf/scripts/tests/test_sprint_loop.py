@@ -1159,6 +1159,14 @@ def test_gate_1_drops_the_waiting_issue_from_the_shared_plan_and_its_closes(env)
     assert got["課題"] == [12] and got["steps"][0]["materials"]["closes"] == [12]
 
 
+def test_gate_1_points_the_held_close_at_the_close_without_the_waiting_issue(env):
+    lap = built_lap(env)
+    first = lap["close_plans"]
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    now = rec(env)["laps"][-1]["close_plans"]
+    assert now != first and all(Path(p).parent.name.startswith("close-") for p in now)
+
+
 def design_report(env, name, pr_url):
     p = env.root / f"{name}-report.md"
     p.write_text(f"# 報告\n\n- 結果: 関門\n- Pull Request: {pr_url}\n")
@@ -1678,6 +1686,16 @@ def test_released_answer_runs_the_close_and_finish_closes_the_lap_with_the_versi
     lap = rec(env)["laps"][0]
     assert fin["status"] == "ok" and lap["outcome"] == "完了" and lap["versions"]["prod"] == "10.28.0"
     assert sl.cmd_finish(env, "l1", 1, d)["exit"] == 1  # 締め直しは 1 回だけ
+
+
+def test_released_answer_without_a_version_runs_the_close_and_writes_no_version(env):
+    """組まずに答えたリリース済み（#2616 の受け入れ条件 4）は版を持たず、まとめへ進む。"""
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": None, "reason": "stg はマージで反映する"}, "defer": None}
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["status"] == "finish" and "1-close.json" in out["metrics"]["pipeline"]
+    lap = rec(env)["laps"][0]
+    assert lap["release"]["answer"]["version"] is None and "prod" not in lap.get("versions", {})
 
 
 def test_two_answered_pending_laps_are_finished_oldest_first(env):

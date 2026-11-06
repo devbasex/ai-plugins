@@ -253,3 +253,54 @@ def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
     res = json.loads(got.stdout.strip().splitlines()[-1])
     assert got.returncode == 0 and res["metrics"]["organizer"] is False and res["metrics"]["pid"] == os.getpid()
     assert (pp.plan_dir(main, "p1") / "run.pid").read_text().strip() == str(os.getpid())
+
+
+# ---- 起動の前のリリースの検査（#2616 の受け入れ条件 16・17） ----
+
+AUTO = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod"}]
+
+
+def _declare(main, delivery=None, form=False):
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
+    if delivery is not None:
+        (main / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}))
+    if form:
+        (main / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "ndf"}}))
+
+
+@pytest.mark.parametrize(
+    "rows, form, at",
+    [
+        ([{"kind": "manual", "target": "prod", "trigger": "手で流す"}], False, "delivery"),
+        (None, False, "delivery"),
+        ({"unknown": "調べていない"}, False, "delivery"),
+        (None, True, "release.plugin"),
+    ],
+)
+def test_check_items_warns_when_a_release_cannot_be_built(tmp_path, monkeypatch, rows, form, at):
+    import parallel_route as prt
+
+    monkeypatch.setattr(prt, "dev_version", lambda _m: "")
+    _declare(_git_main(tmp_path), rows, form)
+    got = prt.check_items(tmp_path)
+    assert [(g["level"], g["rule"], g["at"]) for g in got] == [("warning", "release", at)] and got[0]["message"]
+
+
+@pytest.mark.parametrize("rows, form", [(AUTO, False), (None, True)])
+def test_check_items_is_silent_when_a_release_can_be_answered(tmp_path, monkeypatch, rows, form):
+    import parallel_route as prt
+
+    monkeypatch.setattr(prt, "dev_version", lambda _m: "1.2.3")
+    _declare(_git_main(tmp_path), rows, form)
+    assert prt.check_items(tmp_path) == []
+
+
+def test_check_cli_counts_the_warning_and_exits_zero(tmp_path):
+    main = _git_main(tmp_path)
+    assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
+    code, res = _cli(main, "check", "p1")
+    assert code == 0 and [i["at"] for i in res["items"] if i.get("rule") == "release"] == ["delivery"]
+    warned = res["metrics"]["warnings"]
+    _declare(main, AUTO)
+    code, res = _cli(main, "check", "p1")
+    assert code == 0 and res["metrics"]["warnings"] == warned - 1 and all(i.get("rule") != "release" for i in res["items"])
