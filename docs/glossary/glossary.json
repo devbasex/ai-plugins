@@ -6053,6 +6053,20 @@
       ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リポジトリ前提の検査",
+      "context": "repo-dev-checks",
+      "meaning": "リリース対象の Skill とスクリプトに ai-plugins にしか無い語が無いかを見る CI のジョブ `skill-repo-assumptions-check`",
+      "source": "",
+      "pending_source": "issues/issue-2624-requirements.md"
+    },
+    {
+      "term": "既知の当たり",
+      "context": "repo-dev-checks",
+      "meaning": "リポジトリ前提の検査に当たるが、NDF 自身の置き場を読むなど違反でない箇所か、行き先の課題が直すまで残す箇所。語とファイルの組で宣言する",
+      "source": "",
+      "pending_source": "issues/issue-2624-requirements.md"
     }
   ]
 }
