@@ -5814,6 +5814,20 @@
       "context": "ndf-factory",
       "meaning": "オフラインの間に押した取り消せない操作で、つながったときに今の状態と照らしてから確定するもの",
       "pending_source": "issues/issue-2383-requirements.md"
+    },
+    {
+      "term": "無進捗の打ち切り",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップで、進みの観測が許容時間を越えて途絶えたときだけ打ち切ること",
+      "source": "",
+      "pending_source": "issues/issue-2505-requirements.md"
+    },
+    {
+      "term": "実行環境の調査",
+      "context": "ndf-workflow",
+      "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
+      "source": "",
+      "pending_source": "issues/issue-2505-requirements.md"
     }
   ]
 }
