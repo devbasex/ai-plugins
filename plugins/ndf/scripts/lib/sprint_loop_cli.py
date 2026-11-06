@@ -30,7 +30,7 @@ def environment_result(root: Path, as_json: bool) -> dict | None:
     if not as_json:
         print("\n".join([report["reason"], json.dumps(report, ensure_ascii=False)]))
         return None
-    return step_result.result("sprint-state", "ok", report["reason"], run_environment.lines(report), report)
+    return step_result.result("sprint-state", "ok", report["reason"], run_environment.notes(report), report)
 
 
 def run_loop_command(a, update) -> dict | None:

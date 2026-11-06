@@ -176,7 +176,7 @@ def cmd_start(a) -> None:
     import run_environment
 
     env = run_environment.survey(main, lanes=len(plan.lanes))  # レーンがまだ動いていないので計画の数を渡す
-    notes = run_environment.lines(env)
+    notes = run_environment.notes(env)
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
         import parallel_run as pr_run

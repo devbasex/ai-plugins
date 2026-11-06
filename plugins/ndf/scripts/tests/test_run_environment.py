@@ -90,7 +90,7 @@ def test_survey_reports_the_items_and_the_reason(tmp_path, machine):
     assert r["candidates"] == {"max_issues": 6, "max_plans": 6, "max_named": 3}
     assert r["current"] == {"max_issues": 3, "max_plans": 6, "max_named": 3}
     assert "承認で読める量は別に見る" in r["reason"] and r["place"] and r["unreadable"] == []
-    assert re_.differs(r) and len(re_.lines(r)) == 1
+    assert re_.differs(r) and len(re_.notes(r)) == 1
 
 
 def test_the_lanes_of_a_plan_being_started_divide_the_issue_candidate(tmp_path, machine):
@@ -101,7 +101,7 @@ def test_the_lanes_of_a_plan_being_started_divide_the_issue_candidate(tmp_path, 
 def test_no_line_when_candidates_match_the_current_values(tmp_path, machine):
     declare(tmp_path, max_issues=6)
     r = re_.survey(tmp_path)
-    assert not re_.differs(r) and re_.lines(r) == []
+    assert not re_.differs(r) and re_.notes(r) == []
 
 
 def test_unreadable_values_keep_the_current_ones(tmp_path, machine, monkeypatch):

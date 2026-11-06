@@ -138,7 +138,7 @@ def note_environment(env: Env, rec: dict) -> dict:
 def with_environment(out: dict, report: dict) -> dict:
     """結果へ実行環境の報告を載せる。"""
     out["metrics"]["environment"] = report
-    out["items"] = [*out["items"], *run_environment.lines(report)]
+    out["items"] = [*out["items"], *run_environment.notes(report)]
     return out
 
 

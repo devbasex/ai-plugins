@@ -14,15 +14,15 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import clock
-import procs
 from pace import PaceError, read_loop
 
 BASE_CORES, BASE_GIB, BASE_PLANS = 8, 30, 6  # 実測の起点
 CONTAINER_CGROUP = re.compile(r"docker|kubepods|containerd|lxc")
 PARALLEL_PLANS = Path(".ndf") / "parallel"
+PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 
 
-def place(proc_cgroup: Path = procs.PROC_SELF_CGROUP, dockerenv: Path = Path("/.dockerenv")) -> str:
+def place(proc_cgroup: Path = PROC_SELF_CGROUP, dockerenv: Path = Path("/.dockerenv")) -> str:
     """`factory`（実行ジョブの中）・`container`・`host` のどれか。"""
     if os.environ.get("NDF_FACTORY_RUN"):
         return "factory"
@@ -35,6 +35,8 @@ def cpus(cgroup: Optional[Path] = None) -> float:
     """使える CPU。割り当て（`sched_getaffinity`）と cgroup の `cpu.max` の小さい方。"""
     # os.cpu_count はマシン全体の数でコンテナの制限を見ない。process_cpu_count は Python 3.13 以降
     have = float(len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 0)
+    import procs  # psutil の無い環境でも開始を止めない（読めない項目になる）
+
     try:
         quota, period = (Path(cgroup or procs.cgroup_dir()) / "cpu.max").read_text(encoding="utf-8").split()
     except (OSError, ValueError):
@@ -44,6 +46,8 @@ def cpus(cgroup: Optional[Path] = None) -> float:
 
 def memory_gib(cgroup: Optional[Path] = None) -> float:
     """使えるメモリ（GiB）。マシンの合計と cgroup の `memory.max` の小さい方。"""
+    import procs
+
     total = procs.memory_available()[1]
     limit = procs.cgroup_memory(cgroup).limit
     return round((min(total, limit) if limit else total) / 2**30, 1)
@@ -63,6 +67,8 @@ def running_lanes(main: Path) -> int:
 
 def running_plans() -> int:
     """動いているプランの数（`supervise.py queue` のプロセスの数）。"""
+    import procs
+
     return procs.count_cmdline("supervise.py", "queue")
 
 
@@ -127,13 +133,14 @@ def differs(report: dict) -> bool:
     return report["candidates"] != report["current"]
 
 
-def lines(report: dict) -> list[str]:
-    """候補と今の値が違うときの 1 行。"""
+def notes(report: dict) -> list[dict]:
+    """候補と今の値が違うときの結果の 1 項目。"""
     if not differs(report):
         return []
     a, b = report["candidates"], report["current"]
-    return [
+    text = (
         f"実行環境の候補: 課題 {a['max_issues']}・プラン {a['max_plans']}・ラッパー {a['max_named']}"
         f"（今の値: {b['max_issues']}・{b['max_plans']}・{b['max_named']}。{report['reason']}）。"
         "変えるなら .ndf/pace.json の loop.max_issues と環境変数を人が直す"
-    ]
+    )
+    return [{"kind": "environment", "name": "candidates", "result": "differs", "summary": text}]

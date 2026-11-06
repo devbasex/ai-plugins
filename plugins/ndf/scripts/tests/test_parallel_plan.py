@@ -239,6 +239,7 @@ def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path):
     main, env = _running_plan(tmp_path)
     env.pop("NDF_RELAY_DIR", None)
     got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
+    assert got.stdout, got.stderr
     report = json.loads(got.stdout.strip().splitlines()[-1])["metrics"]["environment"]
     lanes = len(BASE["lanes"])
     assert report["lanes"] == lanes and report["candidates"]["max_issues"] == max(1, report["candidates"]["max_plans"] // lanes)
