@@ -132,7 +132,9 @@ class WorkStep:
         if not step.get("stall"):
             return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), serena=serena)
         st = ctx.state
-        watch = ProgressWatch(step["stall"], st.session, lambda: st.pcount["worker"], lambda: slow_step.commit_count(cwd), step.get("timeout"))
+        watch = ProgressWatch(
+            step["stall"], st.session, lambda: st.pcount["worker"], lambda: slow_step.commit_count(cwd), step.get("timeout")
+        )
         res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, watch.first_timeout(), serena=serena, watch=watch)
         if res.get("timed_out") and watch.stalled():
             note_stalled(ctx, step, watch.allowance, watch.last_at, watch.last_signal)

@@ -165,7 +165,11 @@ NEW_ARGS = [
     ),
     (
         "--impl-timeout",
-        {"type": positive_int, "metavar": "SECONDS", "help": "実装のステップの経過時間の上限（秒）。既定は .ndf/supervise.json の impl_timeout。どちらも無ければ上限なし"},
+        {
+            "type": positive_int,
+            "metavar": "SECONDS",
+            "help": "実装のステップの経過時間の上限（秒）。既定は .ndf/supervise.json の impl_timeout。どちらも無ければ上限なし",
+        },
         "impl sprint",
     ),
     (

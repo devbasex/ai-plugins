@@ -22,7 +22,6 @@ from supervise_lib.verify_steps import with_margin  # noqa: E402
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
-
 def repo(tmp_path, **sv) -> Path:
     root = tmp_path / "r"
     (root / ".ndf").mkdir(parents=True)

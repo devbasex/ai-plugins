@@ -512,7 +512,12 @@ def declare(env, **loop):
 def closed_laps(n, hours):
     """1 周回が `hours` 時間かかった `n` 周の締めた周回。"""
     return [
-        {"n": i + 1, "outcome": sl.DONE, "started_at": f"2026-10-{i + 1:02d}T00:00:00Z", "ended_at": f"2026-10-{i + 1:02d}T{hours:02d}:00:00Z"}
+        {
+            "n": i + 1,
+            "outcome": sl.DONE,
+            "started_at": f"2026-10-{i + 1:02d}T00:00:00Z",
+            "ended_at": f"2026-10-{i + 1:02d}T{hours:02d}:00:00Z",
+        }
         for i in range(n)
     ]
 
@@ -594,7 +599,10 @@ def ledger_row(env, runtime, plan, **row):
     d = env.root / "usage" / runtime
     d.mkdir(parents=True, exist_ok=True)
     with open(d / "o__r.jsonl", "a") as f:
-        f.write(json.dumps({"schema": 2, "at": "2026-11-06T00:00:00Z", "source": "supervise", "kind": "work", "plan": plan, "usage": {}, **row}) + "\n")
+        f.write(
+            json.dumps({"schema": 2, "at": "2026-11-06T00:00:00Z", "source": "supervise", "kind": "work", "plan": plan, "usage": {}, **row})
+            + "\n"
+        )
 
 
 @pytest.fixture
@@ -668,7 +676,9 @@ def test_lap_close_survives_an_unreadable_ledger(ledger, monkeypatch):
 
 def test_loop_environment_prints_the_report_and_exits_zero(env):
     sp = SCRIPTS / "sprint-state.py"
-    got = subprocess.run([sys.executable, str(sp), "loop", "environment", "--root", str(env.root), "--json"], capture_output=True, text=True)
+    got = subprocess.run(
+        [sys.executable, str(sp), "loop", "environment", "--root", str(env.root), "--json"], capture_output=True, text=True
+    )
     out = json.loads(got.stdout.strip().splitlines()[-1])
     assert got.returncode == 0 and set(out["metrics"]["candidates"]) == {"max_issues", "max_plans", "max_named"}
 
