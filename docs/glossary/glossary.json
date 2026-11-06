@@ -6113,6 +6113,18 @@
       "context": "ndf-workflow",
       "meaning": "答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
       "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "止める指示のファイル",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い",
+      "pending_source": "issues/issue-2707-design.md"
+    },
+    {
+      "term": "再開の印",
+      "context": "ndf-workflow",
+      "meaning": "答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く",
+      "pending_source": "issues/issue-2707-design.md"
     }
   ]
 }
