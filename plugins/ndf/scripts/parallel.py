@@ -48,7 +48,7 @@ import parallel_external_cli as px  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
-from parallel_repo import relay  # noqa: E402
+from parallel_repo import relay_unavailable  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "parallel"
@@ -118,17 +118,7 @@ def cmd_check(a) -> None:
 
 def _manual_or_none(main: Path, plan: pp.ParallelPlan) -> None:
     """ラッパーの外・tmux が無いときは、レーンごとの手で起動する 1 行を返して 3 で終える（受け入れ条件 9）。"""
-    why = None
-    if not os.environ.get("NDF_RELAY_DIR"):
-        why = "ラッパーの外（NDF_RELAY_DIR が無い）"
-    else:
-        _, res = relay(main, "ls", "--json")
-        m = res.get("metrics") or {}
-        if not m.get("tmux"):
-            why = "tmux が無い"
-        elif not m.get("hub"):
-            why = "統括役が居ない"
-    if why:
+    if why := relay_unavailable(main):
         lines = pp.manual_commands(plan)
         reply(
             "stopped",
