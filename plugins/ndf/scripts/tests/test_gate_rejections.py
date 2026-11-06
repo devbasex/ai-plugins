@@ -117,7 +117,7 @@ def test_count_without_any_answer_in_scope_is_unrecorded_not_zero(ledger_rows):
 
 def test_count_with_only_approvals_in_scope_is_a_recorded_zero():
     code, out = record("--gate", "設計承認ゲート", "--what", "設計", "--issue", "1", "--outcome", "approved")
-    assert code == 0 and out["summary"].startswith("設計承認ゲートの承認を記録した")
+    assert code == 0 and out["summary"].startswith("設計承認ゲート の承認を記録した")
     code, out = run("count", "--repo", "o/r", "--issue", "1")
     assert (code, out["status"], out["items"]) == (0, "ok", [])
     assert out["metrics"] == {"gate_1": 0, "gate_2": 0, "other": 0, "total": 0, "recorded": True}

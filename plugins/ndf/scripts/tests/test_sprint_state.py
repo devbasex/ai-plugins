@@ -369,7 +369,7 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
     assert out == {
         "tool": "sprint-state",
         "status": "ok",
-        "summary": f"設計承認ゲートの承認を書いた（{GATE_AT}）",
+        "summary": f"設計承認ゲート の承認を書いた（{GATE_AT}）",
         "items": [g2, g1],
         "metrics": {"gates": 2},
     }
@@ -394,7 +394,7 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
             m,
         )
     code, out, m = gate(sprint, tmp, "リリース承認ゲート", "--withdraw")
-    assert (code, out["summary"]) == (0, "リリース承認ゲートの MVV 判定の記録が無い（外すものが無い）")
+    assert (code, out["summary"]) == (0, "リリース承認ゲート の MVV 判定の記録が無い（外すものが無い）")
     assert (out["items"], out["metrics"], m["gates"]) == ([g1, g2a], {"gates": 2, "withdrawn": 0}, [g1, g2a])
     assert m["withdrawals"] == [{"name": "リリース承認ゲート", "at": GATE_AT}]
 
@@ -412,18 +412,18 @@ def mvv_gate_paths(sprint: str, tmp: Path) -> None:
     # 配列でない理由は 1 件の配列にする。--reasons と --log を省くと空になる。--by mvv の記録に outcome は載らない
     g1 = {"name": "設計承認ゲート", "what": "設計", "at": GATE_AT, "by": "mvv", "verdict": "follow", "reasons": ["Value 1"], "log": ""}
     code, out, m = gate(sprint, tmp, "設計承認ゲート", "--what", "設計", "--by", "mvv", "--verdict", "follow", "--reasons", '"Value 1"')
-    assert (code, out["summary"], m["gates"]) == (0, f"設計承認ゲートのMVV 判定を書いた（{GATE_AT}）", [*kept, g1])
+    assert (code, out["summary"], m["gates"]) == (0, f"設計承認ゲート のMVV 判定を書いた（{GATE_AT}）", [*kept, g1])
     g3 = {"name": "承認ゲート 3", "what": "デプロイ", "at": GATE_AT, "by": "mvv", "verdict": "unknown", "reasons": [], "log": ""}
     code, out, m = gate(sprint, tmp, "承認ゲート 3", "--what", "デプロイ", "--by", "mvv", "--verdict", "unknown", "--outcome", "approved")
     assert (code, out["items"], out["metrics"], m["gates"]) == (0, [*kept, g1, g3], {"gates": len(kept) + 2}, [*kept, g1, g3])
     # 取り消すと同じ名前の by: mvv の記録だけが外れ、以後その承認ゲートへ --by mvv を書かない
     code, out, m = gate(sprint, tmp, "設計承認ゲート", "--withdraw")
-    assert (code, out["summary"]) == (0, f"設計承認ゲートの MVV 判定の記録を外した（{GATE_AT}）")
+    assert (code, out["summary"]) == (0, f"設計承認ゲート の MVV 判定の記録を外した（{GATE_AT}）")
     assert (out["items"], out["metrics"], m["gates"]) == ([*kept, g3], {"gates": len(kept) + 1, "withdrawn": 1}, [*kept, g3])
     assert m["withdrawals"] == [{"name": "設計承認ゲート", "at": GATE_AT}]
     assert gate(sprint, tmp, "設計承認ゲート", "--what", "設計", "--by", "mvv", "--verdict", "follow") == (
         1,
-        stopped("設計承認ゲートは MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める"),
+        stopped("設計承認ゲート は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める"),
         m,
     )
 

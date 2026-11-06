@@ -168,7 +168,7 @@ def handoff_step(state: str, gate: str, what: str) -> dict:
     """MVV 判定で通した後のステップ（ラベル・マージ・判定のコメント）が落ちたときに承認ゲートへ落とすステップ（#1370 の I8）。
     `mvv` のステップが書いた `by: mvv` の記録を外し、理由を 1 行出して終了コード 10（承認ゲート）を返す。外せなくても 10 を返す。"""
     st, g = shlex.quote(state), shlex.quote(gate)
-    why = shlex.quote(f"{what}が失敗した。{gate} は自動で通さず、利用者の承認を求める")
+    why = shlex.quote(f"{what}が失敗した。{gate}は自動で通さず、利用者の承認を求める")
     cmd = (
         f'sh -c \'{SPRINT_STATE_PY} gate "$1" "$2" --withdraw >/dev/null || echo "$2 の MVV 判定の記録を外せなかった"; '
         f'echo "$3"; exit 10\' handoff {st} {g} {why}'
@@ -183,7 +183,7 @@ def reject_step(state: str, gate: str, next_id: str, root: str = ".", pr: str | 
     """承認ゲートで差し戻された後の続き（#2183）。直した後に `run <計画> --from reject` で流すと、差し戻しを差し戻しの記録
     （`gate-rejections.jsonl`）へ 1 行書いてから `next_id`（再提示のステップ）へ進む。記録を書けなければ止まる。
     conductor は `sprint-state.py gate ... --outcome rejected` を手で打たない。"""
-    what = shlex.quote(f"{gate} で差し戻された（直して再提示する）")
+    what = shlex.quote(f"{gate}で差し戻された（直して再提示する）")
     cmd = (
         f"{SPRINT_STATE_PY} gate {shlex.quote(state)} {shlex.quote(gate)} --what {what} --by user --outcome rejected "
         f"--root {shlex.quote(root)}" + (f" --pr {pr}" if pr else "")
