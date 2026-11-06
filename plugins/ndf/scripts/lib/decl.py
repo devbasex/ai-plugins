@@ -6,7 +6,7 @@
 - `main`（個人の設定。`.ndf/.gitignore` に載る）: メインディレクトリ → 無ければ呼ばれた木の根
 
 認可に関わる値（本番マージの判定に使う `project.json` の `delivery`・`worktree.json` の `production_branch`・
-`runtimes.json`）は、Pull Request の変更だけで承認ゲート 2 やランタイムの制限を緩められないよう `main` に置く（#2363）。
+`runtimes.json`）は、Pull Request の変更だけでリリース承認ゲートやランタイムの制限を緩められないよう `main` に置く（#2363）。
 ファイルごとならファイルの `place`、キーごとなら `keys.<キー>.place` に書く。`main` のキーの値は `read_json_setting` が
 メインディレクトリのファイルの値で上書きする（キーかファイルが無ければ消す。呼ばれた木の値で補わない）。
 

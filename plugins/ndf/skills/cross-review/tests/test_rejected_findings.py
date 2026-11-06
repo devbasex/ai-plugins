@@ -86,7 +86,7 @@ REJECTED = {
     "line": 42,
     "severity": "minor",
     "summary": "version bump をこの Pull Request でやるべき",
-    "reason_for_rejection": "版を上げるのは配布の工程であり、この変更の範囲外である",
+    "reason_for_rejection": "版を上げるのはデプロイの工程であり、この変更の範囲外である",
 }
 
 

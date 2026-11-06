@@ -3,7 +3,7 @@
 `worktree` の手順書は、プラグイン配下のスクリプトを変数経由で呼ぶ。その変数を決める
 手順は `development-workflow/references/scripts-lookup.md` の「候補の並び」
 節にしかない。**このテストは解決手順の複製を持たず、その節の bash を読み出して実行する。**
-複製を持つと、複製だけが正しくて配布された手順が外れている状態を作れてしまう。
+複製を持つと、複製だけが正しくてデプロイされた手順が外れている状態を作れてしまう。
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
 """
@@ -84,7 +84,7 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
 
 
 def make_plugin(root: Path) -> Path:
-    """プラグインの配布物を作る。`worktree` の手順が呼ぶスクリプトを持つ。"""
+    """プラグインのアーティファクトを作る。`worktree` の手順が呼ぶスクリプトを持つ。"""
     (root / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy(RESOLVE_ENTRY, root / "scripts" / "resolve.sh")
     for name in ("projects-sync.sh", "worktree-setup.sh"):

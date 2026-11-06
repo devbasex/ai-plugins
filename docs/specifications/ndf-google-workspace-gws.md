@@ -43,7 +43,7 @@
 | 扱う | 扱わない |
 | --- | --- |
 | `google-workspace` の Skill と確認のスクリプト `gws-check.py` | gws の Drive と Google Slides のページの ID・サムネイル以外の操作の手順（Sheets の編集・Gmail・Calendar など。Skill は `gws <サービス> --help` を案内するだけ） |
-| `google-auth` と `google-drive` を配布から外したこと（manifests 4 つ・`plugin.json` 2 つ・Skill 間の参照の例外） | playwright-kit の Drive 連携を gws へ移すこと（#745 は not planned） |
+| `google-auth` と `google-drive` をデプロイから外したこと（manifests 4 つ・`plugin.json` 2 つ・Skill 間の参照の例外） | playwright-kit の Drive 連携を gws へ移すこと（#745 は not planned） |
 | `document-systems` と `document-sources` の Drive の経路を gws へ向けたこと | gws の版の固定と、gws の不具合の回避策 |
 | playwright-kit から Drive への保管を外したこと | 旧 Skill のトークンを gws へ移すこと（利用者は `gws auth login` で認証し直す） |
 
@@ -81,7 +81,7 @@ Google Workspace の操作は `google-auth`（OAuth2 のトークンを NDF が�
 | I3 | gws の状態は `authenticated` / `missing` / `unauthenticated` / `uninstallable` のどれか 1 つで、状態ごとに `status` と終了コードが 1 つに決まる | 状態を決められないときは 4 つのどれにもせず、`stopped` と終了コード 2 で返す |
 | I4 | 結果へ写す gws の出力は `credential_source`・`auth_method`・`client_config_exists` の 3 つだけで、資格情報のファイルを開かない | 他のキーの値が結果に現れたらテストが落とす |
 | I5 | `uninstallable` と導入の失敗は 0 以外の終了コードで終わる | 0 で終わったらテストが落とす |
-| I6 | 4 つの manifest に `google-workspace` が 1 行ずつあり、`google-auth` と `google-drive` が無い。2 つの `plugin.json` の列挙も同じ | 配布の検査が落とす |
+| I6 | 4 つの manifest に `google-workspace` が 1 行ずつあり、`google-auth` と `google-drive` が無い。2 つの `plugin.json` の列挙も同じ | デプロイの検査が落とす |
 | I7 | playwright-kit は `--pwk-drive-folder` を受けず、Google の API の包みを依存に持たない | 渡した実行は pytest が未知の引数として止める |
 | I8 | アップロードの既定は非公開で、公開リンクは利用者が公開を明示したときだけ付ける | Skill の手順が持つ。スクリプトは Drive を操作しない |
 
@@ -162,7 +162,7 @@ playwright-kit の Skill の名前は変えない。`playwright-evidence` は報
 | `missing` と `unauthenticated` を別の承認ゲートの終了コード（10 と 11）にし、`uninstallable` は「前提が無い」の 3 にする | 読み手は `status` で「人が要る」と知り、終了コードで「何を頼むか」を知る。npm が無い場面は同意では解けない |
 | 認証済みの判定は `credential_source` で行う | `GOOGLE_WORKSPACE_CLI_TOKEN` を渡しても `auth_method` は `none` のままだった（gws 0.22.5 実測）。`auth_method` で判定すると環境変数のトークンで動く CI を未認証と誤る。トークンの有効性は確かめない（確認のたびに利用者の Drive を読むことになる）。無効なら操作のコマンドが失敗して分かる |
 | 導入は `--install` の起動だけにし、人がいない起動では止める | 利用者の環境を同意なしに書き換えない（C6）。スクリプトが対話で尋ねる形は、エージェント経由の起動に標準入力が無く働かない。`pace: fast` / `auto` でも同意は省かない |
-| 確認のスクリプトは Skill の `scripts/` に置き、結果の形は `step_result` を使う | 呼ぶのはこの Skill だけで、配布の単位も Skill である。結果の形と承認資料の書き出しは `step_result` が既に持つ |
+| 確認のスクリプトは Skill の `scripts/` に置き、結果の形は `step_result` を使う | 呼ぶのはこの Skill だけで、デプロイの単位も Skill である。結果の形と承認資料の書き出しは `step_result` が既に持つ |
 | 導入後に gws が `PATH` に無いときは案内して止まる。`npm install -g` の失敗を `sudo` で打ち直さない | 利用者のシェルの設定を書き換えない。`bin` を直接起動しても次の操作のコマンドで見つからず、手順が途中で止まる |
 | OAuth クライアントが無い未認証は `unauthenticated` に含め、`next` で `gws auth setup` を先に案内する | 利用者に頼むことは同じで、5 つ目の状態は LLM の分岐を増やすだけである |
 | `--pwk-drive-folder` は受けて無視せずに消す | 警告を読まない CI で、成果物が上がったと誤解されたまま残る。消せば最初の起動で止まり、利用者が気づく |

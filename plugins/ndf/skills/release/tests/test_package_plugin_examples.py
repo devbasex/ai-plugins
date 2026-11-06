@@ -1,4 +1,4 @@
-"""公開されている配布起点の Bash 例を、本物の Git で現状固定する。"""
+"""公開されているデプロイ起点の Bash 例を、本物の Git で現状固定する。"""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def commit_package(repository, version: str, payload: str) -> None:
     )
     (root / PAYLOAD).write_text(payload + "\n", encoding="utf-8")
     git("add", "plugins/ndf")
-    git("commit", "-m", "テスト用の配布内容を記録")
+    git("commit", "-m", "テスト用のデプロイ内容を記録")
 
 
 def run_base_example(repository) -> subprocess.CompletedProcess[str]:
@@ -73,21 +73,21 @@ def run_base_example(repository) -> subprocess.CompletedProcess[str]:
 
 
 def test_latest_product_tag_is_used_even_outside_head_ancestry(repository) -> None:
-    """現状固定: 版順・製品名で選び、祖先でない公開版と同じ配布内容なら差分なし。"""
+    """現状固定: 版順・製品名で選び、祖先でない公開版と同じデプロイ内容なら差分なし。"""
     root, _, git = repository
-    commit_package(repository, "1.9.0", "古い配布内容")
+    commit_package(repository, "1.9.0", "古いデプロイ内容")
     git("tag", "ndf--v1.9.0")
     git("tag", "other--v99.0.0")
 
     git("checkout", "-b", "published")
-    commit_package(repository, "1.10.0", "最新の配布内容")
+    commit_package(repository, "1.10.0", "最新のデプロイ内容")
     git("tag", "ndf--v1.10.0")
 
     git("checkout", "development")
-    # 配布物以外の差も置き、比較対象をプラグインへ絞る挙動を通す。
+    # リリース対象以外の差も置き、比較対象をプラグインへ絞る挙動を通す。
     (root / "development.txt").write_text("開発側だけの記録\n", encoding="utf-8")
     git("add", "development.txt")
-    commit_package(repository, "1.10.0", "最新の配布内容")
+    commit_package(repository, "1.10.0", "最新のデプロイ内容")
     assert git("rev-list", "HEAD..ndf--v1.10.0").stdout.strip()
 
     result = run_base_example(repository)

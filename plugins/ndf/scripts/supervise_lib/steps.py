@@ -26,7 +26,7 @@ import project_mvv
 
 
 def is_gate(code: int | None) -> bool:
-    """run のステップの終了コード 10〜19 は共通の契約の関門（lib/step_result.py の EXIT_GATE）。"""
+    """run のステップの終了コード 10〜19 は共通の契約の承認ゲート（lib/step_result.py の EXIT_GATE）。"""
     return code is not None and 10 <= code <= 19
 
 
@@ -326,7 +326,7 @@ class JudgeStep:
         prompt = (
             project_mvv.block(mvv, sprint) + "\n" + f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
             f"問い: {step['question']}\n"
-            + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
+            + (f"選べる値: {', '.join(choices)}（承認ゲートなら gate、止めるなら stop）\n" if choices else "")
             + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
             + f"\n## 規則\n{ctx.plan.get('規則', '（無し）')}\n\n## 結果\n{ctx.inputs_text(step)}"
         )

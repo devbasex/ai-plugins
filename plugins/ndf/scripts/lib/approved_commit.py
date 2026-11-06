@@ -1,14 +1,14 @@
-"""承認したコミット（本番への配布の承認ゲート 2 が対象にしたベースブランチの先端）の扱い（#815）。
+"""承認したコミット（本番へのリリースのリリース承認ゲートが対象にしたベースブランチの先端）の扱い（#815）。
 
 - 承認資料（`release-steps.py approval-facts` が書く Markdown）の欄の名前・SHA の形の検査・読み取り・承認の記録の書き込み
-- 承認したコミットから比べた先端までに、許したもの（配布の PR）の外のコミットや中身が無いかの比較（`compare_approved`）
+- 承認したコミットから比べた先端までに、許したもの（デプロイの PR）の外のコミットや中身が無いかの比較（`compare_approved`）
 - 導入の確認の承認資料（`release-steps.py verify-facts` が書く）の、確かめたコミットの行の形と読み取り
   （`verified_line` / `verified_sha`。昇格の経路 `merged-steps.py promote --expect-head-from` が読む。#1529）
 
 `compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
 ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる。
 `ungated`（承認を取り直さずに通すパスの接頭辞。許可リスト）を渡すと、差分がすべてその下に収まる承認の外のコミットは止めずに
-`Verdict.tolerated` へ入れ、木の比較もその外のパスだけで行う（#2221）。許可リストの外はどれも承認の対象で、配布物だけでなく
+`Verdict.tolerated` へ入れ、木の比較もその外のパスだけで行う（#2221）。許可リストの外はどれも承認の対象で、リリース対象だけでなく
 秘密を渡すワークフローが実行する `scripts/`・`.github/` なども止まる。渡さなければ、承認の外のコミットと木の違いを一律に止める。
 """
 
@@ -51,7 +51,7 @@ class Outside:
 
 @dataclass
 class AllowedPR:
-    """承認したコミットの後に入ってよい PR（本番の配布では、この版の配布の PR）。"""
+    """承認したコミットの後に入ってよい PR（リリースでは、この版のデプロイの PR）。"""
 
     number: int
     head: str
@@ -157,8 +157,8 @@ def material_sha_or_none(path) -> str | None:
 
 
 def record_all(approved: dict[str, str], by: str, at: str) -> list[dict]:
-    """{承認資料: 承認したコミット} のそれぞれへ承認の記録を書き、結果の items を返す（mvv-gate.py の関門 2。I10）。
-    判定の後に資料が書き直されていれば書かず result: not_recorded（本番の配布は記録が無いとして承認ゲートで止まる）。"""
+    """{承認資料: 承認したコミット} のそれぞれへ承認の記録を書き、結果の items を返す（mvv-gate.py のリリース承認ゲート。I10）。
+    判定の後に資料が書き直されていれば書かず result: not_recorded（リリースは記録が無いとして承認ゲートで止まる）。"""
     items = []
     for path, sha in approved.items():
         try:
@@ -242,7 +242,7 @@ def _expected_tree(root, approved, allowed) -> str | None:
 
 
 def _outside_of_prs(root, approved, allowed) -> list[str] | None:
-    """approved..配布の PR の先端のうち、配布の PR のコミットでないもの（I3）。読めなければ None。"""
+    """approved..デプロイの PR の先端のうち、デプロイの PR のコミットでないもの（I3）。読めなければ None。"""
     outside: list[str] = []
     for pr in allowed:
         listed = _rev_list(root, f"{approved}..{pr.head}")
@@ -253,7 +253,7 @@ def _outside_of_prs(root, approved, allowed) -> list[str] | None:
 
 
 def _outside_to_tip(root, approved, tip, allowed) -> list[str] | None:
-    """approved..tip の（マージでない）コミットのうち、配布の PR の先端から届かず、配布の PR の mergeCommit でも
+    """approved..tip の（マージでない）コミットのうち、デプロイの PR の先端から届かず、デプロイの PR の mergeCommit でも
     同じ patch-id でもないもの（I9）。読めなければ None。"""
     listed = _rev_list(root, "--no-merges", f"{approved}..{tip}", *(f"^{pr.head}" for pr in allowed))
     if listed is None:
@@ -270,7 +270,7 @@ def _touched(root, sha) -> list[str] | None:
 
 def _tree_diff_paths(root, a, b) -> list[str] | None:
     """2 つの木の間で変わったパス。読めなければ None。引用符で包まない（-z）・移動は元の削除と先の追加に分ける
-    （--no-renames）ため、日本語や空白を含むパスと、配布物から外へ移したファイルも配布物の変更として拾う。"""
+    （--no-renames）ため、日本語や空白を含むパスと、リリース対象から外へ移したファイルもリリース対象の変更として拾う。"""
     p = proc.git(root, "diff", "--name-only", "-z", "--no-renames", a, b, check=False)
     return None if p.returncode else [x for x in p.stdout.split("\0") if x]
 
@@ -287,7 +287,7 @@ def _gated_differs(root, expected, actual, ungated) -> bool | None:
 
 
 def _commits_resolvable(root, tip, allowed) -> bool:
-    """比べた先端と配布の PR の先端がどれもコミットとして読めるか。"""
+    """比べた先端とデプロイの PR の先端がどれもコミットとして読めるか。"""
     return _is_commit(root, tip) and all(_is_commit(root, pr.head) for pr in allowed)
 
 
@@ -326,12 +326,12 @@ def _tree_matches(root, v: Verdict, approved, allowed, ungated) -> bool | None:
 def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (), ungated: tuple[str, ...] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
-    1. 読めない approved は unknown_commit、読めない tip・配布の PR の先端は undecidable
+    1. 読めない approved は unknown_commit、読めない tip・デプロイの PR の先端は undecidable
     2. approved が tip の祖先でなければ not_ancestor
-    3. approved..配布の PR の先端に配布の PR のコミットでないものがあれば outside_commits（I3）
-    4. approved..tip の（マージでない）コミットのうち、配布の PR の先端から届かず、配布の PR の mergeCommit でも
+    3. approved..デプロイの PR の先端にデプロイの PR のコミットでないものがあれば outside_commits（I3）
+    4. approved..tip の（マージでない）コミットのうち、デプロイの PR の先端から届かず、デプロイの PR の mergeCommit でも
        同じ patch-id でもないものがあれば outside_commits（I9。木の結果によらない）
-    5. tip の木が approved に配布の PR を merge-tree で足した木と違えば tree_differs、merge-tree が失敗すれば undecidable
+    5. tip の木が approved にデプロイの PR を merge-tree で足した木と違えば tree_differs、merge-tree が失敗すれば undecidable
 
     ungated（許可リスト）を渡すと、3・4 の承認の外のコミットのうち差分がすべて ungated の下に収まるもの（読めないものは
     収まらないとみなす）を tolerated へ移して止めず、5 は違いが ungated の外のパスに及ぶときだけ tree_differs にする（#2221）。

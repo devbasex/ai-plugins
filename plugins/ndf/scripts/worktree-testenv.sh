@@ -326,7 +326,7 @@ do_bake() {
 # --- up / stop / down -------------------------------------------------------
 
 # 行に基準のタグが無い割り当ては、残ったボリュームが無いと確かめられたときだけ書く。
-# タグはデータを見ずに求めるため、残りの上で書くと古いデータのまま expose の関門を通る。
+# タグはデータを見ずに求めるため、残りの上で書くと古いデータのまま expose の判定を通る。
 golden_tag_writable() {
   [ -z "$(current_assignment | jq -r '.golden_tag // empty')" ] && ! wt_no_volumes "$(docker_command)" "$ENVIRONMENT" || return 0
   printf '%s\n' "ボリュームが残っているか確かめられないため、基準のタグを書かずに起こします: $ENVIRONMENT" >&2
@@ -341,7 +341,7 @@ do_up() {
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
   if [ -n "$TAG" ] && golden_tag_writable; then
-    # 基準のタグは expose の関門が読む。書けないまま起動すると、載っている基準が
+    # 基準のタグは expose の判定が読む。書けないまま起動すると、載っている基準が
     # 台帳に残らず、公開の可否を判定できない（#315）。
     wt_registry_update "$(registry)" '
       .assignments |= map(
@@ -385,7 +385,7 @@ do_down() {
     # 破棄に失敗したままスロットを返すと、コンテナとポートが残ったまま同じ
     # 番号が別の作業ツリーへ渡る。
     if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then
-      # 中身を確かめられない環境に基準のタグを残さない（作り直すと expose の関門を通る）。
+      # 中身を確かめられない環境に基準のタグを残さない（作り直すと expose の判定を通る）。
       _wt_slot_set_field "$MAIN_DIR" "$TARGET" 'del(.golden_tag)' \
         || printf '%s\n' "基準のタグを台帳から消せませんでした: $ENVIRONMENT" >&2
       printf '%s\n' "破棄に失敗しました。スロットは解放していません: $ENVIRONMENT" >&2
@@ -654,7 +654,7 @@ do_expose() {
   local opened
   opened=$(expose_record_assignment "$host" "$ttl") || return 1
 
-  # 記録を先に置くのは、先着 1 本の関門を通ったことを示すため。口を開けられ
+  # 記録を先に置くのは、先着 1 本の判定を通ったことを示すため。口を開けられ
   # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
   if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
         "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \

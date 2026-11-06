@@ -46,7 +46,7 @@ describe("置き場の翻訳（受け入れ条件 10、I59・I68）", () => {
     }
   });
 
-  it("答えのある依頼は送り直さず、配布の実行の事象は配布の実行のジョブだけが送る", async () => {
+  it("答えのある依頼は送り直さず、リリースの実行の事象はリリースの実行のジョブだけが送る", async () => {
     const req = FORM.cases.find((c) => c.valid && c.message.file.startsWith("requests/"))!.message;
     const res = FORM.cases.find((c) => c.valid && c.message.file.startsWith("results/"))!.message;
     const files = memoryFiles({ [req.file]: req.body, [res.file]: res.body });
@@ -70,7 +70,7 @@ describe("置き場の翻訳（受け入れ条件 10、I59・I68）", () => {
   });
 });
 
-describe("配布の依頼と配布の実行のジョブ（受け入れ条件 7・10、I65）", () => {
+describe("リリースの依頼とリリースの実行のジョブ（受け入れ条件 7・10、I65）", () => {
   const base: RunJobInstruction = {
     SPRINT_RUN_ID: "sr1",
     JOB_ID: "job1",
@@ -110,12 +110,12 @@ describe("配布の依頼と配布の実行のジョブ（受け入れ条件 7�
     return { events, run: (inst: RunJobInstruction) => runJob({ instruction: inst, token: "tok", runtime, fetch: fetchImpl, setInterval: () => 1, clearInterval: () => undefined, stderr: () => undefined }) };
   }
 
-  it("手動の実行が配布の依頼を出すと release.requested を依頼の id の鍵で送り、gate（release_requested）で終える", async () => {
+  it("手動の実行がリリースの依頼を出すと release.requested を依頼の id の鍵で送り、gate（release_requested）で終える", async () => {
     const req = FORM.cases.find((c) => c.valid && c.message.file.startsWith("requests/"))!.message;
     const files = memoryFiles();
     const t = harness(files, async () => {
       await files.write(req.file, req.body);
-      return { report: "判断が要る", summary: "配布待ち", gate: null };
+      return { report: "判断が要る", summary: "リリース待ち", gate: null };
     });
     expect(await t.run(base)).toBe(0);
     const requested = t.events.find((e) => e.type === "release.requested")!;
@@ -126,7 +126,7 @@ describe("配布の依頼と配布の実行のジョブ（受け入れ条件 7�
     expect(validateProgressEvent(t.events.at(-1)!).ok).toBe(true);
   });
 
-  it("配布の実行はまとめた配布の中身を置き場へ書き、承認資料で止まれば提示と gate2 を送る", async () => {
+  it("リリースの実行はまとめたリリースの中身を置き場へ書き、承認資料で止まれば提示と gate2 を送る", async () => {
     const files = memoryFiles();
     const inst = { ...base, START: "release" as const, ISSUES: undefined, RELEASE_SEQ: "1", RELEASE_STEP: "present" as const };
     expect(validateRunJobInstruction(Object.fromEntries(Object.entries(inst).filter(([, v]) => v !== undefined))).ok).toBe(true);
@@ -134,7 +134,7 @@ describe("配布の依頼と配布の実行のジョブ（受け入れ条件 7�
     const t = harness(files, async () => {
       expect(files.files.get("batch.json")).toMatchObject({ seq: 1, step: "present" });
       await files.write(presented.file, presented.body);
-      return { report: "判断が要る", summary: "承認ゲート 2", gate: null };
+      return { report: "判断が要る", summary: "リリース承認ゲート", gate: null };
     });
     await t.run(inst);
     expect(t.events.map((e) => e.type)).toEqual(["job.started", "release.presented", "gate.reached", "job.finished"]);
@@ -143,7 +143,7 @@ describe("配布の依頼と配布の実行のジョブ（受け入れ条件 7�
     for (const e of t.events) expect(validateProgressEvent(e).ok, e.type).toBe(true);
   });
 
-  it("配布の実行が提示を書かずに本番のプランの中で止まれば、conductor が gate2 と言っても判断（decision）で送る", async () => {
+  it("リリースの実行が提示を書かずに本番のプランの中で止まれば、conductor が gate2 と言っても判断（decision）で送る", async () => {
     const files = memoryFiles();
     const inst = { ...base, START: "release" as const, ISSUES: undefined, RELEASE_SEQ: "1", RELEASE_STEP: "confirm:1" as const };
     const t = harness(files, async () => ({ report: "判断が要る", summary: "本番のプランが止まった", gate: { kind: "gate2", pr_url: null, material: "資料" } }));

@@ -82,7 +82,7 @@ cat <資料>/slides/lib/*.js | sha256sum
 
 | 項目 | 書き方 |
 | --- | --- |
-| `font` | 書体名。**Google Slides と配布先の環境にある書体を選ぶ** |
+| `font` | 書体名。**Google Slides とデプロイ先の環境にある書体を選ぶ** |
 | `colors` | 項目名ごとに 6 桁の 16 進（`#` なし）。項目ごとに既定値へ重なる |
 | `sizes` | 項目名ごとに pt。項目ごとに既定値へ重なる |
 | `copyright` | 著作権表示の文言。空なら描かない |
@@ -156,7 +156,7 @@ node <資料>/slides/build-deck.js <出力>.pptx [<theme.json>]
 2. ページごとのサムネイルを取り、全ページを見る（`layout-review`）
 3. 文字あふれ・重なりは `layout-review` の差し戻し先へ戻し、作り直してから 1. の差し替えで同じ URL に上げ直す
 
-## 検証リリース
+## 開発版のデプロイ
 
 **対になる下書き先へ生成する。** 本番の提出先へは、承認した生成物だけが届く。
 下書き先は `.ndf/document.json` の `draft` が指す（`development-workflow` の
@@ -172,7 +172,7 @@ node <資料>/slides/build-deck.js <出力>.pptx [<theme.json>]
 1. 下書き先で生成する
 2. 生成物を取り込み、正本と内容を照合する（`document-systems` の `import.md`、用途 1）
 3. 描画して版面を見る（`layout-review`）
-4. **制作物承認を得る**（承認ゲート 2。`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）
+4. **制作物承認を得る**（リリース承認ゲート。`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）
 5. 本番の提出先へ移す
 6. 公開範囲を設定し、**設定した後に読み直して確かめる**
 7. 索引へ登録する（ドキュメントの設定に `index` があるとき）

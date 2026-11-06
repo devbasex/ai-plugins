@@ -1,6 +1,6 @@
-"""`--scope` とテストの置き場所の関門（#436 決定 5 / #1334 決定 12・AC12）。
+"""`--scope` とテストの置き場所の検査（#436 決定 5 / #1334 決定 12・AC12）。
 
-**案内だけでは同じ失敗を繰り返す。** 関門が見るのは「置き場所が範囲にあるか」の 1 つで、
+**案内だけでは同じ失敗を繰り返す。** 検査が見るのは「置き場所が範囲にあるか」の 1 つで、
 コマンドの語から実行集合を読む判定は持たない（雛形の `{paths}` に置き場所が直に入る）。
 """
 
@@ -66,7 +66,7 @@ def test_a_shared_prefix_is_not_enough(scope):
     assert scope.covered_by_roots("tests-legacy", ["tests"]) is False
 
 
-# ---------- 関門 ----------
+# ---------- 検査 ----------
 
 
 def test_a_scope_without_a_test_location_is_a_problem(scope, tmp_path):
@@ -105,7 +105,7 @@ def test_a_parent_without_tests_is_still_not_recognized(scope, tmp_path):
 
 
 def test_the_scan_does_not_go_deeper_than_one_level(scope, tmp_path):
-    """深く潜ると、無関係な階層のテストを根拠にして関門が素通りする。"""
+    """深く潜ると、無関係な階層のテストを根拠にして検査が素通りする。"""
     (tmp_path / "src" / "a" / "b" / "tests").mkdir(parents=True)
     assert scope.is_test_location("src", str(tmp_path)) is False
 
@@ -143,7 +143,7 @@ def _git_repo(tmp_path, files):
 
 
 def test_a_directory_holding_spec_files_is_a_test_location(scope, tmp_path):
-    """`src/**/*.spec.ts` だけでテストのディレクトリが無い構成で、`--scope src` の関門が通る（AC12）。"""
+    """`src/**/*.spec.ts` だけでテストのディレクトリが無い構成で、`--scope src` の検査が通る（AC12）。"""
     _git_repo(tmp_path, ["src/app.ts", "src/app.spec.ts", "src/lib/util.ts"])
     assert scope.is_test_location("src", str(tmp_path)) is True
     assert scope.test_locations(["src"], str(tmp_path)) == ["src"]
@@ -152,7 +152,7 @@ def test_a_directory_holding_spec_files_is_a_test_location(scope, tmp_path):
 
 
 def test_a_directory_without_test_named_files_stays_outside(scope, tmp_path):
-    """追跡ファイルの名前がテストの形でなければ置き場所に数えない（数えると関門が素通りする）。"""
+    """追跡ファイルの名前がテストの形でなければ置き場所に数えない（数えると検査が素通りする）。"""
     _git_repo(tmp_path, ["src/app.ts", "src/lib/util.ts"])
     assert scope.is_test_location("src", str(tmp_path)) is False
     assert scope.scope_problem(["src"], str(tmp_path)) is not None

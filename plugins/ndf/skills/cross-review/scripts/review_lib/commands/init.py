@@ -317,7 +317,7 @@ def _build_initial_review_state(
     """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
     host, host_source, participants = ctx.assignment
     only, _include, _exclude = participants_mod._normalize_participant_args(args)
-    # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで関門 1 へ渡す
+    # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで設計承認ゲートへ渡す
     kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.default_categories)
     return {
         "started_at": review_lib._now(),

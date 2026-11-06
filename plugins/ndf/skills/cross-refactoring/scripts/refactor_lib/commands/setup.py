@@ -500,7 +500,7 @@ def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
 
 
 def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
-    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の検査を通し、テストの戦略を解く。
     継続的統合のジョブのうち宣言に無いものは知らせるだけで止めない（#464 E2）。状態には新しい実行だけが書く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author, status = _fetch_pr_context(args.pr)
@@ -542,7 +542,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     for line in (coverage := ci_coverage.compare_jobs(decl, work)).lines():
         info(line)
 
-    # **`--scope` の関門は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
+    # **`--scope` の検査は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
     # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
     # テストの種別の suite が無い戦略はテスト整備ラウンドを行わないため、検査を通らない（計画に残す）。
     if strategy.has_kind(ts.TEST):

@@ -125,7 +125,7 @@ def test_document_writing_stages_get_document_style(stage):
     assert "document-style" in stage_skills.skills_for_step({"stage": stage}, TABLE)
 
 
-@pytest.mark.parametrize("step", [{}, {"stage": None}, {"stage": "無い工程"}, {"stage": "配布"}])
+@pytest.mark.parametrize("step", [{}, {"stage": None}, {"stage": "無い工程"}, {"stage": "デプロイ"}])
 def test_steps_without_a_table_row_get_nothing(step, tmp_path):
     """受け入れ条件 2: stage が無い・対応表に無い工程は空で、本文の節が入らない。"""
     assert stage_skills.skills_for_step(step, TABLE) == []

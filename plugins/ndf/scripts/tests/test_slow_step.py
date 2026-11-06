@@ -68,7 +68,7 @@ def test_history_append_and_read(tmp_path):
     h = tmp_path / "h" / "step-history.jsonl"
     for sec in (1, 2, 3):
         assert ss.append_history(h, ss.history_record("実装", "impl", "work", sec, 0, "p.json", f"t{sec}")) is None
-    ss.append_history(h, ss.history_record("配布", "impl", "work", 99, 0, "p.json", "t9"))
+    ss.append_history(h, ss.history_record("デプロイ", "impl", "work", 99, 0, "p.json", "t9"))
     assert ss.read_history(h, "実装", "impl") == [1.0, 2.0, 3.0]
     assert ss.read_history(h, "実装", "impl", 2) == [2.0, 3.0]
     assert ss.read_history(tmp_path / "none.jsonl", "実装", "impl") == []

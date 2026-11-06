@@ -53,7 +53,7 @@ class CheckError(Exception):
 
 @dataclass
 class Source:
-    """指摘の配布元。プラグインのスコープの指摘だけが持つ。"""
+    """指摘の取得元。プラグインのスコープの指摘だけが持つ。"""
 
     name: str = ""
     version: str = ""

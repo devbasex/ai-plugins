@@ -22,7 +22,7 @@ REPO = "o/r"
 
 
 def record(stage="本番（npm）", sprint=(10,)):
-    return f"## 配布の記録\n\n段階: {stage}\n版: 1.0.0 → 1.1.0（minor）\nスプリント: PR " + " / ".join(f"#{n}" for n in sprint) + "\n"
+    return f"## リリース記録\n\n段階: {stage}\n版: 1.0.0 → 1.1.0（minor）\nスプリント: PR " + " / ".join(f"#{n}" for n in sprint) + "\n"
 
 
 class FakeGh:
@@ -140,7 +140,7 @@ def test_github_errors_are_reported(fake):
 def close_plan(tmp_path, issues=(5,)):
     p = tmp_path / "close.json"
     steps = [
-        {"id": "release-verify", "type": "work", "prompt": "配布の記録は Pull Request #{queue_record} にある。"},
+        {"id": "release-verify", "type": "work", "prompt": "リリース記録は Pull Request #{queue_record} にある。"},
         {"id": "close", "type": "run", "cmd": "sprint-close.py --record-pr {queue_record} --issues 5"},
     ]
     p.write_text(json.dumps({"課題": list(issues), "リポジトリ": str(tmp_path), "steps": steps}, ensure_ascii=False))

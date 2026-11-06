@@ -85,7 +85,7 @@ def sample(tmp_path, name):
         ("carmo-contractors-app", "main", "production"),
         ("with-ai-dev", "main", "not-production"),  # manual だけ
         ("ai-plugins", "develop", "not-production"),  # AC6: 実装 PR は止めない
-        ("ai-plugins", "main", "not-production"),  # 本番の工程のゲート 2 で止める（二重に止めない）
+        ("ai-plugins", "main", "not-production"),  # 本番の工程のリリース承認ゲートで止める（二重に止めない）
     ],
 )
 def test_judge_samples(tmp_path, name, target, value):
@@ -226,7 +226,7 @@ def test_route_rows_carry_production_only_when_written(tmp_path):
     assert rows[0]["production"] is False and "production" not in rows[1]
 
 
-# ---- 配布の組み方（#2616） ----
+# ---- リリースの組み方（#2616） ----
 
 WT_CHANNELS = {"base_branch": "develop", "production_branch": "main"}
 AUTO_BASE = {"kind": "auto", "channel": "base", "target": "stg"}
@@ -241,7 +241,7 @@ PLUGIN = {"form": "package-plugin"}
         ({"delivery": [HAND]}, PLUGIN, delivery.BUILD, ""),  # release.form の雛形があれば delivery を見ない
         ({"delivery": [AUTO_BASE, AUTO_PROD]}, None, delivery.SKIP, "stg はマージで反映する"),
         ({"delivery": [AUTO_PROD]}, None, delivery.SKIP, "昇格の Pull Request で届く"),
-        ({"delivery": []}, None, delivery.SKIP, "配布しない"),
+        ({"delivery": []}, None, delivery.SKIP, "デプロイしない"),
         ({"delivery": [AUTO_BASE, HAND]}, None, delivery.REFUSE, "手で流す"),
         ({"delivery": [{**AUTO_PROD, "versioned": True}]}, None, delivery.REFUSE, "版数を持つ経路"),
         ({"delivery": [{"kind": "auto", "branch": "other", "target": "x"}]}, None, delivery.REFUSE, "手で届ける"),

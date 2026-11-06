@@ -1,7 +1,7 @@
 """並列の進行の耐久ワークフロー（#2436 の受け入れ条件 4・6・8・11・12、I7・I9・I10・I11・I14・I15）。
 
 本物の DBOS（SQLite。置き場は根の conftest.py が `NDF_DBOS_DIR` へ向ける）で流し、統括役の CLI は
-`NDF_PARALLEL_RELAY` の差し替え（呼び出しを記録し、`ls` の状態をファイルから返す）で、git と配布のプランの作りは
+`NDF_PARALLEL_RELAY` の差し替え（呼び出しを記録し、`ls` の状態をファイルから返す）で、git とリリースプランの作りは
 monkeypatch で差し替える。
 """
 
@@ -262,7 +262,7 @@ def test_char_awaiting_approval_pauses_with_notice(env):
 
 
 def test_char_build_error_fails_release_and_stops(env, tmp_path, monkeypatch):
-    """配布だけが失敗で止まり、計画は止まらない（#2616 の受け入れ条件 10・14 と I4・I5）。"""
+    """リリースだけが失敗で止まり、計画は止まらない（#2616 の受け入れ条件 10・14 と I4・I5）。"""
     main, log, states = env["main"], env["log"], env["states"]
     monkeypatch.setattr(prun, "dev_version", lambda _m: "")
     states.write_text(json.dumps({"la": "running"}))
@@ -316,13 +316,13 @@ def test_char_request_outside_range_is_deferred_to_next_release(env, tmp_path):
     assert (ans["result"], ans["version"], ans["release"]) == ("released", "1.2.4", 1)
     assert event(main, "p1", "range-1") == {"sha": "sha1", "version": "1.2.4", "prs": [10], "lanes": ["la"]}
     dfr = until(lambda: event(main, "p1", f"defer-{r2}"))
-    assert dfr == {"seq": 1, "reason": "範囲に入らないため次の配布へ回した", "at": None}
+    assert dfr == {"seq": 1, "reason": "範囲に入らないため次のリリースへ回した", "at": None}
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e.get("n") == 2 and e)
     assert ev["k"] == 1 and ev["represent"] is False
     wid = pl.workflow_id("p1")
     durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
     time.sleep(0.8)
-    assert durable.status(wid) not in ("SUCCESS",)  # 提示のまま流れている配布の途中の stop も settle まで終わらない
+    assert durable.status(wid) not in ("SUCCESS",)  # 提示のまま流れているリリースの途中の stop も settle まで終わらない
     resume(main, {"n": 2, "phase": "settle", "result": "rejected", "reason": "stop"}, "s2")
     out = durable.output_of(wid)
     assert [(r["n"], r["state"]) for r in out["releases"]] == [(1, "released"), (2, "rejected")]
@@ -359,7 +359,7 @@ def test_stop_during_release_waits_for_settle(env, tmp_path):
     wid = pl.workflow_id("p1")
     durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
     time.sleep(0.8)
-    assert durable.status(wid) not in ("SUCCESS",)  # 配布の途中の stop は settle まで終わらない
+    assert durable.status(wid) not in ("SUCCESS",)  # リリースの途中の stop は settle まで終わらない
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
     out = durable.output_of(wid)
     assert out["status"] == "stopped" and out["releases"][0]["state"] == "released"
@@ -478,10 +478,14 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     assert item["id"] == "p1-p1-1" and item["stamp"] == "sha1"
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
-    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # 承認ゲート 2 の問いは答えで消える
+    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # リリース承認ゲートの問いは答えで消える
     task = prun.helper_task(main, "p1", 1, 1)
     assert task["phase"] == "confirmed"
-    assert "'関門 2'" in task["pipeline"] and "--from approve" in task["pipeline"] and f"queue {d / 'release.json'}" in task["pipeline"]
+    assert (
+        "'リリース承認ゲート'" in task["pipeline"]
+        and "--from approve" in task["pipeline"]
+        and f"queue {d / 'release.json'}" in task["pipeline"]
+    )
 
 
 def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypatch):
@@ -536,6 +540,24 @@ def test_three_spawn_refusals_raise_a_question(env, monkeypatch):
     assert item["lane"] == "la" and "limit" in item["question"] and len(calls(env["log"], "spawn")) >= 3
 
 
+@pytest.mark.parametrize("value, want", [("5", 5), (None, 3), ("0", 3), ("x", 3)])
+def test_the_refusals_before_asking_can_be_overridden(monkeypatch, value, want):
+    if value is None:
+        monkeypatch.delenv("NDF_PARALLEL_SPAWN_REFUSALS", raising=False)
+    else:
+        monkeypatch.setenv("NDF_PARALLEL_SPAWN_REFUSALS", value)
+    assert prun.spawn_refusals() == want
+
+
+def test_five_spawn_refusals_raise_a_question_when_overridden(env, monkeypatch):
+    monkeypatch.setenv("FAKE_REFUSE", "la")
+    monkeypatch.setenv("NDF_PARALLEL_SPAWN_REFUSALS", "5")
+    main = env["main"]
+    start(main)
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "spawn"])[0]
+    assert "5 回" in item["question"] and len(calls(env["log"], "spawn")) >= 5
+
+
 def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
     main, states = env["main"], env["states"]
     start(main)
@@ -547,7 +569,7 @@ def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
 
 
 def test_stop_answer_to_a_stopped_helper_fails_the_release(env, tmp_path):
-    """一時レーンの問いへ「止める」と答えると、配布を失敗として締め、依頼へ failed を答える。"""
+    """一時レーンの問いへ「止める」と答えると、リリースを失敗として締め、依頼へ failed を答える。"""
     main, states = env["main"], env["states"]
     start(main)
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
@@ -743,7 +765,7 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
 
 def test_a_helper_ends_by_stopping_its_own_wrapper():
     """一時レーンは helper-done の後に自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。止めないと対話の claude が
-    入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。配布と保留の周回のどちらの起動も同じ。"""
+    入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。リリースと保留の周回のどちらの起動も同じ。"""
     for line in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
         name = line.split("--name ", 1)[1].split()[0]
         assert f"{prun.RELAY} stop {name}" in line.split(" -- ", 1)[1]
@@ -849,7 +871,7 @@ def test_a_repeated_answer_stands_once_and_warns_once(monkeypatch, capsys):
 
 
 def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
-    """一時レーンが ask を送って自分のラッパーを止めたときは、「配布の途中で止まった」を問わない（6g）。"""
+    """一時レーンが ask を送って自分のラッパーを止めたときは、「リリースの途中で止まった」を問わない（6g）。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
     run.current, run.launch = {"n": 1}, {"seq": 3, "spawn": "SPAWN"}
     helper = prl.helper_name("p1", 1)
@@ -881,7 +903,7 @@ def test_settle_answers_with_the_version_of_the_chosen_presentation(env, tmp_pat
 
 
 def test_a_late_request_is_answered_by_the_release_that_completed_it(monkeypatch):
-    """配布 1 と配布 2 の PR を両方含む遅れた依頼には、配布 2 の版と連番で答える（I15）。"""
+    """リリース 1 とリリース 2 の PR を両方含む遅れた依頼には、リリース 2 の版と連番で答える（I15）。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
     got = []
     monkeypatch.setattr(run, "answer", lambda rid, result, version, n, reason=None: got.append((rid, version, n)))
@@ -1051,7 +1073,7 @@ def test_answering_rebuild_returns_the_status_command(tmp_path):
     assert pa.owner_restart(tmp_path, "p1", item["id"], ["待つ"], [item]) is None
 
 
-# ---- 配布の組み方（#2616） ----
+# ---- リリースの組み方（#2616） ----
 
 WORKTREE = {"base_branch": "develop", "production_branch": "main"}
 CD = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod", "production": True}]
@@ -1084,7 +1106,7 @@ def no_build_ran(main):
     return not (pp.plan_dir(main, "p1") / "releases").exists()
 
 
-@pytest.mark.parametrize("rows, said", [(CD, "stg はマージで反映する"), ([], "配布しない")])
+@pytest.mark.parametrize("rows, said", [(CD, "stg はマージで反映する"), ([], "デプロイしない")])
 def test_merge_or_no_delivery_repo_answers_released_without_building(env, tmp_path, rows, said):
     """受け入れ条件 1〜3・5・9。"""
     main, log, states = env["main"], env["log"], env["states"]
@@ -1158,7 +1180,7 @@ def test_build_exception_and_seq_limit_answer_failed(env, tmp_path, monkeypatch)
 
 
 def test_second_present_failure_closes_the_range_and_defers_the_rest(env, tmp_path, monkeypatch):
-    """受け入れ条件 13・14（I4・I6）。範囲の外の依頼は次の配布で答えを受け、理由が同じなら問いは 1 件のままである。"""
+    """受け入れ条件 13・14（I4・I6）。範囲の外の依頼は次のリリースで答えを受け、理由が同じなら問いは 1 件のままである。"""
     main, heads, states = env["main"], env["heads"], env["states"]
     states.write_text(json.dumps({"la": "running"}))
     start(main)

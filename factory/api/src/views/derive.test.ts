@@ -128,7 +128,7 @@ describe("詳細（受け入れ条件 5・6・8・9・I6〜I10）", () => {
     expect(d.columns[1]!.pull_requests[0]).toMatchObject({ number: 8, state: "unknown", checks: [] });
   });
 
-  it("承認の欄はゲート 1・ゲート 2・判断の 3 つで、到達・承認・差し戻し・判断の答えで状態が移る", () => {
+  it("承認の欄は設計承認ゲート・リリース承認ゲート・判断の 3 つで、到達・承認・差し戻し・判断の答えで状態が移る", () => {
     const e = events();
     expect(gatesOf(e.out)).toEqual({ gate1: { state: "not_reached", at: null }, gate2: { state: "not_reached", at: null }, decision: { state: "none", at: null } });
     // 到達の前の答えは状態を変えない
@@ -337,7 +337,7 @@ describe("承認を待つ依頼（#2430 の受け入れ条件 5・6・I3〜I5、
     expect(awaitingGateOf(waiting(), e.out)?.at).toBe(second.at);
   });
 
-  it("状態が awaiting_approval でない実行と、待つ理由が配布の依頼・止まった配布の実行は、答えが無くても行にしない", () => {
+  it("状態が awaiting_approval でない実行と、待つ理由がリリースの依頼・止まったリリースの実行は、答えが無くても行にしない", () => {
     const e = events();
     e.add("gate.reached", { kind: "gate1", pr_url: null, material: "x" });
     expect(awaitingGateOf(runOf({ state: "running" }), e.out)).toBeNull();

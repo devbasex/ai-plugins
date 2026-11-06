@@ -1,6 +1,6 @@
-"""配布の手順が plugin の README に触れず、更新情報を CHANGELOG.md の版の節だけへ書く（#1867）。
+"""リリースの手順が plugin の README に触れず、更新情報を CHANGELOG.md の版の節だけへ書く（#1867）。
 
-`release-steps.py changelog` と `notes` を、PR #1863（10.17.68 の配布で使ったスプリント PR）の実物の本文と、
+`release-steps.py changelog` と `notes` を、PR #1863（10.17.68 のデプロイで使ったスプリント PR）の実物の本文と、
 子の箇条を持つ PR #1861 の本文の形で走らせる。偽の gh は `test_release_steps.fake_gh` を使う。
 """
 
@@ -22,7 +22,7 @@ import gh_sections  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "release_notes"
 PR1863 = {int(k): v for k, v in json.loads((FIXTURES / "pr1863.json").read_text(encoding="utf-8")).items()}
-BEFORE_10_17_68 = "89766449e"  # PR #1863 のマージ。10.17.68-dev.1 の配布の直前
+BEFORE_10_17_68 = "89766449e"  # PR #1863 のマージ。10.17.68-dev.1 のデプロイの直前
 CHANGES = "## 利用者向けの変化"
 
 # PR #1861 の本文の「利用者向けの変化」（2 字下げの子の箇条 3 行）
@@ -39,7 +39,7 @@ PR1861_ITEM = f"{PR1861_PARENT}（#1861）\n  - ファイルの名前\n  - `## �
 APPROVAL = (
     "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 10.17.68 |\n"
     "| 含む PR | #1863 t（MERGED・abcdef12・CI 1/1） |\n"
-    "| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n"
+    "| 配る中身 | （未記入） |\n| 開発版のデプロイで確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n"
 )
 
 
@@ -92,7 +92,7 @@ def show(rev: str, rel: str) -> str:
 
 
 def test_pr1863_leaves_the_readme_and_keeps_it_under_the_line_limit(tmp_path):
-    """受け入れ条件 1: 10.17.68 の配布の直前の README と CHANGELOG で changelog と notes を走らせても、README は変わらない。
+    """受け入れ条件 1: 10.17.68 のデプロイの直前の README と CHANGELOG で changelog と notes を走らせても、README は変わらない。
 
     README の見出しは、前の bump が書き換えた後の形（v10.17.68-dev.1）にして、前の notes が書き込んだ状態を再現する。
     """

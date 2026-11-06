@@ -60,7 +60,7 @@ closing keywords を書かない経路は規約として残る（`pace: fast` �
 | --- | --- |
 | 参照だけの課題には `gh issue close` もボードの書き込み（`projects-sync.sh`）も行わない。`close_one` を通さない | 実装の誤り。テストが落とす |
 | `items` の `kind: "issue"` の行は `(repo, number)` ごとに 1 件。`--issues` と参照が重なれば `--issues` 側の結果だけが載り、同じ番号を何度参照しても 1 件 | 実装の誤り。テストが落とす |
-| スプリントの PR を 1 本以上読み、スプリント課題が 0 件なら、課題もボードも書かずに `stopped`（2）で終わる。この判定は閉じる条件の判定より前にあり、配布の記録が本番の前でも止まる | 実装の誤り。テストが落とす |
+| スプリントの PR を 1 本以上読み、スプリント課題が 0 件なら、課題もボードも書かずに `stopped`（2）で終わる。この判定は閉じる条件の判定より前にあり、リリース記録が本番の前でも止まる | 実装の誤り。テストが落とす |
 | 参照だけの課題の行は、記録のリポジトリの、状態が `CLOSED` でなく URL に `/pull/` を含まない番号だけ | 当たらない番号は行にしない |
 | 参照だけの課題の状態を読めなくても、他の課題の処理と終了コードは変わらない | その番号を `kept_open`（理由の先頭に「状態を読めない」）にして続ける |
 | closing keywords は本文だけから読む。題の closing keywords で課題を閉じない | 実装の誤り。テストが落とす |
@@ -114,7 +114,7 @@ closing keywords を書かない経路は規約として残る（`pace: fast` �
 - 他のリポジトリの参照が `items` に無いこと
 - `metrics.referenced_only` が参照だけの課題の行数と等しく、`summary` にその数が入ること
 - closing keywords も `--issues` も無いとき、`stopped`・終了コード 2 で「閉じる課題が 0 件」を返し、`issue close` もボードの書き込みも呼ばれないこと。`--issues` を足すと止まらずに閉じること
-- 配布の記録が本番の前のとき、参照だけの課題も `kept_open` で載り、何も閉じないこと
+- リリース記録が本番の前のとき、参照だけの課題も `kept_open` で載り、何も閉じないこと
 - PR #766 の事例（closing keywords が 2 件、`Refs #554`・`関連 #550`・本文中の `#540`）で、#554 #550 #540 が `kept_open` で載ること
 - `referenced_numbers` が上の「参照の読み方の境界」の表の各行の例のとおりに読む・読まないを返し、現れた順で重ならないこと
 - 既存の `test_sprint_close_issues.py`・`test_sprint_close_merge_green.py`・`test_release_record.py` と supervise の雛形の契約テスト（`tests/fixtures/supervise-contract/`）が期待値を変えずに通ること
@@ -123,6 +123,6 @@ closing keywords を書かない経路は規約として残る（`pace: fast` �
 
 - [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md)（「スプリントを閉じる」の手順と結果の読み方の正）
 - [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py)・[`lib/closing.py`](../../plugins/ndf/scripts/lib/closing.py)・[`lib/closing-issues.sh`](../../plugins/ndf/scripts/lib/closing-issues.sh)
-- [ndf-production-release-record.md](ndf-production-release-record.md)（`--record-pr` が読む配布の記録と閉じる条件 1）
+- [ndf-production-release-record.md](ndf-production-release-record.md)（`--record-pr` が読むリリース記録と閉じる条件 1）
 - [ndf-backlog-refinement-stage.md](ndf-backlog-refinement-stage.md)（`sprint-close.py` が `ok` で終わった後の棚卸し）
 - #767（この形を決めた課題）、PR #766・PR #1825（漏れを観測した事例）

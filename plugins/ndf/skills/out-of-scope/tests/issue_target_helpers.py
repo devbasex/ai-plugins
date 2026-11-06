@@ -53,7 +53,7 @@ RUNTIME_LAYOUTS = {
 def make_clone(path: Path, url: str | None = REMOTE, *, carries_ndf: bool = True) -> Path:
     """origin を持つ clone を作る。通信はしない。
 
-    `carries_ndf` を偽にすると `plugins/ndf/` を持たない clone になる。配布元へ絞る
+    `carries_ndf` を偽にすると `plugins/ndf/` を持たない clone になる。上流リポジトリへ絞る
     条件が働いているかを確かめるために使う。
     """
     path.mkdir(parents=True, exist_ok=True)

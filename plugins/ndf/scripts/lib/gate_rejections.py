@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gate_answer
 import jsonio
 import project_mvv as pm
 import project_mvv_signals as pms
@@ -111,20 +112,20 @@ def is_rejection(row: dict) -> bool:
 
 
 def state_answered(sprint) -> bool:
-    """状態ファイルの `gates` に承認ゲート（`関門 1` / `関門 2`）の記録（利用者の承認か MVV 判定の通過）があるか。
+    """状態ファイルの `gates` に承認ゲート（設計承認ゲート・リリース承認ゲート。旧名の記録を含む）の記録（利用者の承認か MVV 判定の通過）があるか。
     状態ファイルが無ければ False、読めなければ `jsonio.JsonReadError`。"""
     if not sprint:
         return False
     m = jsonio.read(sprint, missing={}, want=dict)
-    return any(isinstance(g, dict) and g.get("name") in pms.GATE_KEYS for g in m.get("gates") or [])
+    return any(isinstance(g, dict) and gate_answer.canonical(g.get("name")) in pms.GATE_KEYS for g in m.get("gates") or [])
 
 
 def count_by_gate(rows: list[dict]) -> dict:
-    """差し戻しを承認ゲート 1・2・ほかに分けた件数（承認の行は数えない）。名前は `sprint-state.py` の記録の名前
-    （`関門 1` / `関門 2`）で仕分ける。"""
+    """差し戻しを設計承認ゲート・リリース承認ゲート・ほかに分けた件数（承認の行は数えない）。名前は `sprint-state.py` の
+    記録の名前を正の名前へ寄せて仕分ける。"""
     rejected = [r for r in rows if is_rejection(r)]
     counts = dict.fromkeys(COUNT_KEYS, 0)
     for r in rejected:
-        counts[_GATE_COUNT_KEY.get(pms.GATE_KEYS.get(r.get("gate")), "other")] += 1
+        counts[_GATE_COUNT_KEY.get(pms.GATE_KEYS.get(gate_answer.canonical(r.get("gate"))), "other")] += 1
     counts["total"] = len(rejected)
     return counts

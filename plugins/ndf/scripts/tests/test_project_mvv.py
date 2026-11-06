@@ -51,7 +51,7 @@ BODY = """# 例のプロジェクト MVV
 
 | # | 操作 | 理由 |
 | --- | --- | --- |
-| P1 | 配布の規則を変える | 利用者全員に効く |
+| P1 | デプロイの規則を変える | 利用者全員に効く |
 
 ## 改訂
 
@@ -220,7 +220,7 @@ def candidate(cid: str, ev: str = "S1") -> dict:
         "mission": {"text": "手を減らす", "evidence": [ev]},
         "vision": {"text": "2 回だけ止まる", "evidence": [ev]},
         "values": [{"title": "まず届ける", "text": "早く出す", "evidence": [ev]}],
-        "redlines": [{"id": "P1", "text": "配布の規則を変える", "reason": "全員に効く", "evidence": [ev]}],
+        "redlines": [{"id": "P1", "text": "デプロイの規則を変える", "reason": "全員に効く", "evidence": [ev]}],
     }
 
 
@@ -628,7 +628,9 @@ def test_signals_do_not_change_when_gate_rejections_are_recorded(env):
     row = {"at": "2999-01-01T00:00:00Z", "repo": pm.mvv_repo_key(env["root"]), "kind": "override_pass", "project_sha256": mvv.sha256}
     pms.append_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl", row)
     before = run(env, "signals", "--root", str(env["root"]), "--format", "json")
-    code, out, text = run(env, "record", "--gate", "関門 2", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py")
+    code, out, text = run(
+        env, "record", "--gate", "リリース承認ゲート", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py"
+    )
     assert code == 0, text
     state = new_state(env, env["tmp"])
     assert sprint_gate(env, state, "--outcome", "rejected") == 0
@@ -647,7 +649,7 @@ def test_signals_without_a_declaration_is_0(env):
 
 
 def sprint_gate(env, state: Path, *args: str) -> int:
-    return run(env, "gate", str(state), "関門 2", "--what", "本番", "--root", str(env["root"]), *args, script=STATE_PY)[0]
+    return run(env, "gate", str(state), "リリース承認ゲート", "--what", "本番", "--root", str(env["root"]), *args, script=STATE_PY)[0]
 
 
 def signal_rows(env) -> list[dict]:
@@ -672,8 +674,8 @@ def test_gate_records_overrides_only_when_the_user_disagrees(env):
     m = json.loads(state.read_text())
     assert "rejections" not in m  # 差し戻しは差し戻しの記録へだけ書く（#1833）
     ledger = gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)
-    assert [r["gate"] for r in ledger if gr.is_rejection(r)] == ["関門 2"]
-    assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
+    assert [r["gate"] for r in ledger if gr.is_rejection(r)] == ["リリース承認ゲート"]
+    assert next(g for g in m["gates"] if g["name"] == "リリース承認ゲート")["by"] == "mvv"  # 差し戻しは承認ゲートを通さない
     sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
     assert sprint_gate(env, state, "--outcome", "approved") == 0
     assert len(signal_rows(env)) == 2
@@ -730,7 +732,7 @@ def gate_state(env, tmp: Path, with_sprint: bool) -> Path:
 
 def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
     material = env["tmp"] / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     log = env["tmp"] / "gate.jsonl"
     code, out, text = run(
         env,

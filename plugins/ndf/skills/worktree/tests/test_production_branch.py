@@ -58,7 +58,7 @@ def test_the_base_branch_is_not_borrowed(main_repo: Path) -> None:
 
 
 def test_a_branch_that_does_not_exist_is_refused(main_repo: Path) -> None:
-    """本番のチャネルを取り違えると、配布の承認の対象が変わる。既定へ落とさない。"""
+    """本番のチャネルを取り違えると、リリースの承認の対象が変わる。既定へ落とさない。"""
     add_origin(main_repo)
     write_declaration(main_repo, json.dumps({"version": 1, "production_branch": "nowhere"}))
     _out, err, rc = resolve(main_repo)

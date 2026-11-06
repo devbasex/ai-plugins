@@ -18,7 +18,7 @@ description: "Before asking the user to decide or approve, lay out the findings,
 
 | 場面 | 例 |
 | --- | --- |
-| 承認の関門 | 設計のマージ・本番への配布の前（`ndf-gate:1` / `ndf-gate:2`） |
+| 承認ゲート | 設計のマージ・リリースの前（`ndf-gate:1` / `ndf-gate:2`） |
 | レッドラインの操作 | 強制 push・他のリポジトリへの起票・`.ndf/` の書き換え（`ndf-ask:redline:<番号>`） |
 | 区分に当たる問い | 有料の資源の起動（`ndf-ask:cost`）・対話のログイン（`ndf-ask:human-action`） |
 | 下位の担当が「判断が要る」で止まった | 実装の担当が、設計に無い前提に当たって止まった。conductor が区分に当たるかを見て、当たらなければ決める |
@@ -95,4 +95,4 @@ description: "Before asking the user to decide or approve, lay out the findings,
 ## 関連
 
 - `investigation-rules` — 「無い」と言うときに検索を示す（材料の 2 と 3 に効く）
-- `development-workflow` — 承認の関門で出す提示物の項目（この形に加えて求めるもの）
+- `development-workflow` — 承認ゲートで出す提示物の項目（この形に加えて求めるもの）

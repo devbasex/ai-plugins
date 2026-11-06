@@ -9,13 +9,13 @@
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
 | `wait <計画名> [--after <seq>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions）か終わりまで待つ。上限なら 3 |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
-| `confirm <計画名> <連番> [--take new\\|first]` | 承認ゲート 2 の承認を送る |
-| `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | 本番の配布の結果を送る |
-| `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（配布の途中は settle を待つ。`--force` は待たない） |
-| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を送る（10）か、すでに `main` にあれば送らない（0） |
+| `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
+| `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
+| `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
+| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
-| `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンが承認ゲート 2 の依頼を送る |
+| `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
 | `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -48,6 +48,7 @@ import parallel_external_cli as px  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
+from parallel_repo import relay  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "parallel"
@@ -117,13 +118,11 @@ def cmd_check(a) -> None:
 
 def _manual_or_none(main: Path, plan: pp.ParallelPlan) -> None:
     """ラッパーの外・tmux が無いときは、レーンごとの手で起動する 1 行を返して 3 で終える（受け入れ条件 9）。"""
-    import parallel_run as pr_run
-
     why = None
     if not os.environ.get("NDF_RELAY_DIR"):
         why = "ラッパーの外（NDF_RELAY_DIR が無い）"
     else:
-        _, res = pr_run.relay(main, "ls", "--json")
+        _, res = relay(main, "ls", "--json")
         m = res.get("metrics") or {}
         if not m.get("tmux"):
             why = "tmux が無い"
@@ -174,19 +173,20 @@ def cmd_start(a) -> None:
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがあるため、レーンを 1 本も起動しない", items, 1, **metrics)
+    import parallel_run as pr_run
+
+    env, notes = pr_run.environment_report(main, plan)
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
-        import parallel_run as pr_run
-
         marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
-        reply("ok", f"run は動いている（pid {pid}）", pid=pid, organizer=marked, next=_wait_line(a.name))
+        reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=_wait_line(a.name), environment=env)
     if pl.run_status(main, a.name) is None:
         _manual_or_none(main, plan)
     log = pp.plan_dir(main, a.name) / "run.log"
     with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
         p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
     (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
-    reply("ok", f"run を切り離して起動した（pid {p.pid}）", pid=p.pid, log=str(log), next=_wait_line(a.name))
+    reply("ok", f"run を切り離して起動した（pid {p.pid}）", notes, pid=p.pid, log=str(log), next=_wait_line(a.name), environment=env)
 
 
 def cmd_wait(a) -> None:
@@ -260,7 +260,7 @@ def cmd_confirm(a) -> None:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     wid = pl.workflow_id(a.name)
     pl.resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
-    reply("ok", f"配布 {a.n} の承認を送った", n=a.n, take=a.take)
+    reply("ok", f"リリース {a.n} の承認を送った", n=a.n, take=a.take)
 
 
 def cmd_settle(a) -> None:
@@ -285,7 +285,7 @@ def cmd_settle(a) -> None:
     wid = pl.workflow_id(a.name)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
     pl.resume_plan(main, a.name, msg, f"{wid}:resume:settle:{a.n}")
-    reply("ok", f"配布 {a.n} の結果 {res} を送った", result=res, version=version)
+    reply("ok", f"リリース {a.n} の結果 {res} を送った", result=res, version=version)
 
 
 def cmd_stop(a) -> None:
@@ -323,7 +323,7 @@ def cmd_request(a) -> None:
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    summary = f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む"
+    summary = f"リリースの依頼 {rid} を送った（リリース待ち）。答えは parallel.py await で読む"
     reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested")
 
 
@@ -334,7 +334,7 @@ def cmd_await(a) -> None:
     except (OSError, ValueError) as exc:
         reply("stopped", f"依頼の記録を読めない: {exc}", code=2)
     if sent.get("result") == "released" and not sent.get("id"):
-        reply("ok", "配布済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
+        reply("ok", "リリース済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
     if a.external or pe.is_external(sent.get("plan")):
         ans, dfr = pe.read_answer_file(px.external_dir(reply), sent["id"]), None
     else:
@@ -347,9 +347,9 @@ def cmd_await(a) -> None:
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
     reply(
         status,
-        f"配布の依頼 {sent['id']} の答え: {res}",
+        f"リリースの依頼 {sent['id']} の答え: {res}",
         code=code,
-        next_step="今の承認ゲート 2 の差し戻しと同じに扱う" if code == 10 else None,
+        next_step="今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None,
         result=res,
         version=ans.get("version"),
         release=ans.get("release"),
@@ -381,7 +381,7 @@ def cmd_request_gate2(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     rid = pl.request_gate2(main, a.name, a.n, a.k, a.report)
-    reply("ok", f"承認ゲート 2 の依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
+    reply("ok", f"リリース承認ゲートの依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
 
 
 def cmd_answer(a) -> None:
@@ -412,7 +412,7 @@ def cmd_helper(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     task = pr_run.helper_task(main, a.name, a.n, a.k)
-    reply("ok", f"一時レーンの仕事: 配布 {a.n} の提示 {a.k}（{task['phase']}）", **task)
+    reply("ok", f"一時レーンの仕事: リリース {a.n} の提示 {a.k}（{task['phase']}）", **task)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -430,7 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_.add_argument("name")
     stp = sub.add_parser("stop")
     stp.add_argument("name")
-    stp.add_argument("--force", action="store_true", help="配布の途中でも settle を待たずに終え、一時レーンも止める")
+    stp.add_argument("--force", action="store_true", help="リリースの途中でも settle を待たずに終え、一時レーンも止める")
     w = sub.add_parser("wait")
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
@@ -441,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("k", type=int)
     p.add_argument("--approval")
     p.add_argument("--external", action="store_true")
-    p.add_argument("--record", action="store_true", help="--external で、承認ゲート 2 で止まった提示を presented/ へ書く")
+    p.add_argument("--record", action="store_true", help="--external で、リリース承認ゲートで止まった提示を presented/ へ書く")
     c = sub.add_parser("confirm")
     c.add_argument("name")
     c.add_argument("n", type=int)

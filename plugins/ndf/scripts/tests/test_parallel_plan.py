@@ -182,7 +182,7 @@ def test_registry_role_counts_before_role_file():
     assert now.count == 1 and now.helpers == 1
 
 
-# ---- まとめた配布（I9・I14・I15） ----
+# ---- まとめたリリース（I9・I14・I15） ----
 
 
 def test_range_maps_unrequested_lane_and_orphans():
@@ -196,9 +196,9 @@ def test_range_maps_unrequested_lane_and_orphans():
 def test_answerable_and_moved():
     pending = [{"id": "a", "prs": [1]}, {"id": "b", "prs": [5]}]
     assert prl.answerable(pending, [1, 2]) == ["a"]
-    # 一部だけが範囲に入る依頼は答えない（残りを出さずに配布済みと答えない）
+    # 一部だけが範囲に入る依頼は答えない（残りを出さずにリリース済みと答えない）
     assert prl.answerable([{"id": "c", "prs": [1, 3]}, {"id": "d", "prs": []}], [1, 2]) == []
-    # 先の PR が前の配布で出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこの配布で答えない
+    # 先の PR が前のリリースで出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこのリリースで答えない
     assert prl.answerable([{"id": "e", "prs": [1, 3]}, {"id": "f", "prs": [3]}], [1, 2], done=[3]) == ["e"]
     assert prl.moved("abc", "abc") is False and prl.moved("abc", "def") is True
 
@@ -235,6 +235,16 @@ def test_start_on_a_running_plan_marks_the_session_as_organizer(tmp_path):
     assert (role["role"], role["plan"]) == ("organizer", "p1")
 
 
+def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path):
+    main, env = _running_plan(tmp_path)
+    env.pop("NDF_RELAY_DIR", None)
+    got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
+    assert got.stdout, got.stderr
+    report = json.loads(got.stdout.strip().splitlines()[-1])["metrics"]["environment"]
+    lanes = len(BASE["lanes"])
+    assert report["lanes"] == lanes and report["candidates"]["max_issues"] == max(1, report["candidates"]["max_plans"] // lanes)
+
+
 def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
     """ラッパーの外では印を付けられないが、`start` の答えは今のまま（次の 1 手を返す）で、run を増やさない。"""
     main, env = _running_plan(tmp_path)
@@ -245,7 +255,7 @@ def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
     assert (pp.plan_dir(main, "p1") / "run.pid").read_text().strip() == str(os.getpid())
 
 
-# ---- 起動の前の配布の検査（#2616 の受け入れ条件 16・17） ----
+# ---- 起動の前のリリースの検査（#2616 の受け入れ条件 16・17） ----
 
 AUTO = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod"}]
 

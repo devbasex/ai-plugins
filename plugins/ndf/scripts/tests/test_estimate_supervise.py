@@ -84,54 +84,6 @@ def test_unwritable_records_do_not_change_result(tmp_path, monkeypatch):
 # --- 実装の上限（受け入れ条件 7） ---
 
 
-def _impl_history(seconds_list, config=None, exits=None):
-    d = Path(os.environ["NDF_ESTIMATE_DIR"])
-    for i, sec in enumerate(seconds_list):
-        code = (exits or {}).get(i, 0)
-        run = f"r{i}"
-        at = f"2026-10-0{i + 1}T00:00:00+00:00"
-        er.append_actual(
-            d,
-            {
-                "kind": "run_start",
-                "at": at,
-                "run": run,
-                "plan": "/p.json",
-                "issues": [i],
-                "phase": "実装",
-                "from": None,
-                "attempt": 1,
-                "imported": False,
-            },
-        )
-        er.append_actual(
-            d, {"kind": "step", "at": at, "run": run, "step": "impl", "type": "work", "exit": code, "seconds": sec, "retry": 0}
-        )
-        er.append_actual(d, {"kind": "run_end", "at": at, "run": run, "outcome": "成功", "wall_seconds": sec, "config": config or {}})
-
-
-def _ns(**kw):
-    import argparse
-
-    return argparse.Namespace(**{"impl_timeout": None, "impl_timeout_source": None, "worktree": ".", **kw})
-
-
-def test_impl_timeout_from_history_uses_max_with_margin():
-    from supervise_lib.verify_steps import impl_timeout_estimate, with_margin
-
-    _impl_history([1000, 5000, 3000])
-    timeout, est = impl_timeout_estimate(_ns())
-    assert timeout == with_margin(5000) and est["source"] == "history" and est["samples"] == 3
-
-
-def test_impl_timeout_does_not_grow_on_a_timed_out_max():
-    from supervise_lib.verify_steps import impl_timeout_estimate
-
-    _impl_history([1000, 3960, 3000], exits={1: 124})  # 打ち切り（124）の秒は前の上限と同じ値
-    timeout, est = impl_timeout_estimate(_ns())
-    assert (timeout, est["source"]) == (3960, "history") and "timed_out" not in est
-
-
 def test_import_skips_runs_supervise_already_recorded(tmp_path):
     from estimate_import import import_supervise_progress
 
@@ -141,43 +93,6 @@ def test_import_skips_runs_supervise_already_recorded(tmp_path):
     got = import_supervise_progress(tmp_path, Path(os.environ["NDF_ESTIMATE_DIR"]))
     assert (got["added"], got["skipped"]) == (0, 1)
     assert [r["kind"] for r in _rows()] == ["run_start", "step", "run_end"]
-
-
-def test_impl_timeout_uncalibrated_without_history():
-    from supervise_lib.verify_steps import impl_timeout_estimate
-
-    _impl_history([1000, 2000])
-    timeout, est = impl_timeout_estimate(_ns())
-    assert (timeout, est["source"]) == (3600, "uncalibrated")
-
-
-def test_impl_timeout_argument_and_declaration_win():
-    from supervise_lib.verify_steps import impl_timeout_estimate
-
-    _impl_history([1000, 5000, 3000])
-    assert impl_timeout_estimate(_ns(impl_timeout=1234, impl_timeout_source="arg")) == (
-        1234,
-        {"source": "arg", "samples": 0, "high": None, "basis": []},
-    )
-    assert impl_timeout_estimate(_ns(impl_timeout=99, impl_timeout_source="decl"))[1]["source"] == "decl"
-
-
-def test_impl_timeout_window_and_min_samples_from_declaration(tmp_path):
-    from supervise_lib.verify_steps import impl_timeout_estimate
-
-    (tmp_path / ".ndf").mkdir()
-    (tmp_path / ".ndf" / "estimate.json").write_text('{"window": 2, "min_samples": 2}')
-    _impl_history([9000, 1000, 2000])
-    timeout, est = impl_timeout_estimate(_ns(worktree=str(tmp_path)))
-    assert (est["source"], est["samples"], est["high"]) == ("history", 2, 2000)
-
-
-def test_impl_timeout_does_not_drop_below_default():
-    from supervise_lib.verify_steps import IMPL_TIMEOUT_DEFAULT, impl_timeout_estimate
-
-    _impl_history([300, 200, 250])
-    timeout, est = impl_timeout_estimate(_ns())
-    assert (timeout, est["source"]) == (IMPL_TIMEOUT_DEFAULT, "history")
 
 
 def test_step_cost_is_unknown_when_a_call_had_no_cost():

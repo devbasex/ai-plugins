@@ -237,7 +237,7 @@ def render(snap: Snapshot) -> str:
     diffs, large, by_version = snap.diffs, snap.large, snap.by_version
     cmd = f"python3 scripts/token-usage-snapshot.py --released {released} --until {until_s} --min-version {floor}"
     out = [
-        f"# ndf の版ごとのトークン消費と所要時間（{date} 集計・{released} の配布）",
+        f"# ndf の版ごとのトークン消費と所要時間（{date} 集計・{released} のリリース）",
         "",
         f"**{released} を正式版として出したときの記録である。** 打ち切りの時刻は `{until_s}`。"
         f"表の最初の行は {floor}（前の記録: {previous or 'なし'}）。既定では前の記録の最後の版で、記録どうしが 1 行ずつ重なる。"

@@ -27,9 +27,9 @@ from release_lib.others import CHANGES_HEADING
 from step_result import EXIT_PRECONDITION, StepError
 
 ROW = "含む PR"
-RELEASE_PREFIX = "release/"  # 配布の工程が作る版上げのブランチ（release/v<版>）
+RELEASE_PREFIX = "release/"  # デプロイの工程が作る版上げのブランチ（release/v<版>）
 VIA = "スプリント PR #{} 経由"  # 「含む PR」の行の括弧の中の印（スプリント経由の PR）
-NO_CHANGE = "配布物の変化なし"  # 「含む PR」の行の括弧の中の印（`## 利用者向けの変化` が「無し」だけの PR）
+NO_CHANGE = "利用者向けの変化なし"  # 「含む PR」の行の括弧の中の印（`## 利用者向けの変化` が「無し」だけの PR）
 _VIA = re.compile(r"・スプリント PR #(\d+) 経由")
 PER_PAGE = 100
 RISKS_HEADING = "## 未検証・残る危険"  # PR の本文と承認資料の危険の節（承認資料の節は release_lib/materials.py が書く）
@@ -160,7 +160,7 @@ def read_prs(root: Path, prs, view, fields: str = "title,body,state", comments: 
 
 
 def no_change(d) -> bool:
-    """PR の本文の `## 利用者向けの変化` が「無し」だけか（配布物の変化なし。#1686）。"""
+    """PR の本文の `## 利用者向けの変化` が「無し」だけか（利用者向けの変化なし。#1686）。"""
     return isinstance(d, dict) and gh_sections.says_none(d.get("body") or "", CHANGES_HEADING)
 
 
@@ -192,7 +192,7 @@ def require_merged(found, prs):
 
 def titles_of(prs: list[IncludedPr], data: dict, skipped=None) -> list[tuple[int, str]]:
     """PR ごとに (番号, 箇条)。マージされていない PR は載せず、番号を skipped へ足す。スプリント経由の PR
-    （変化はスプリント PR の本文が持つ）と配布物の変化なしの PR は箇条にしない（#1885・#1686）。"""
+    （変化はスプリント PR の本文が持つ）と利用者向けの変化なしの PR は箇条にしない（#1885・#1686）。"""
     items, merged = [], []
     for p in prs:
         n, d = p.number, data.get(p.number)
@@ -214,7 +214,7 @@ def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, un
     """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
     マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
     `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。
-    スプリント経由の PR は変化と移行の手順をスプリント PR の本文に任せて危険だけを返し、配布物の変化なしの PR は
+    スプリント経由の PR は変化と移行の手順をスプリント PR の本文に任せて危険だけを返し、利用者向けの変化なしの PR は
     変化を返さない（#1885・#1686）。"""
     out = []
     for p in prs:

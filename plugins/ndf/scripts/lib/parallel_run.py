@@ -1,15 +1,15 @@
-"""並列の進行（#2436）: 耐久ワークフロー `parallel-<計画名>` と耐久ステップ（起動・観測・停止・配布を組む・要約）。
+"""並列の進行（#2436）: 耐久ワークフロー `parallel-<計画名>` と耐久ステップ（起動・観測・停止・リリースを組む・要約）。
 
 耐久ワークフローの中の分岐は耐久ステップの結果とメッセージだけで決まる。時刻・外のコマンド・ファイルを読むのは
 すべて耐久ステップである（打ち直しで同じ道を通るため。#1142 の I18）。外へ見せるのはイベントと出力だけである。
 
 - メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | answer | stop, ...}`（レーン・一時レーン・オーガナイザーの答え・`stop`）
 - メッセージ `resume`: `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}`（`confirm`・`settle`）
-- 配布の組み方は依頼を受けるたびに耐久ステップ `parallel.route` が宣言から読む。組まないなら `released`、組めないなら
+- リリースの組み方は依頼を受けるたびに耐久ステップ `parallel.route` が宣言から読む。組まないなら `released`、組めないなら
   `failed` と理由を依頼へ答え、計画を止めるかは問い（`kind: build`）への人の答えで決まる（#2616）
-- イベント `pause`: `{seq, action}`（`running` / `notice` / `release` / `confirmed`。配布の途中の `notice` は
+- イベント `pause`: `{seq, action}`（`running` / `notice` / `release` / `confirmed`。リリースの途中の `notice` は
   最後の起動の指示を `release` に添える）、`questions`: `{seq, items}`
-- イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次の配布へ回した知らせ）・`range-<連番>`・`lane-<名>`
+- イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次のリリースへ回した知らせ）・`range-<連番>`・`lane-<名>`
 
 統括役の CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
 """
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -30,41 +29,10 @@ import parallel_lane as pl
 import parallel_plan as pp
 import parallel_release as pr
 import parallel_route as prt
-from parallel_helper import RELAY, SUPERVISE, helper_spawn, helper_task, present_approval  # noqa: F401  parallel_run の名前でも読む
-from parallel_repo import dev_version, git_head
+from parallel_files import RELAY
+from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
 from parallel_question import cause_of
-
-REBUILD, STOP_PLAN = "直してから組み直す", "止める"  # 配布を組めないときの問いの選択肢
-
-
-def poll_seconds() -> float:
-    """`inbox` と `resume` を待つ秒（既定 60。テストは `NDF_PARALLEL_POLL` で縮める）。"""
-    try:
-        return max(0.1, float(os.environ.get("NDF_PARALLEL_POLL") or 60))
-    except ValueError:
-        return 60.0
-
-
-def relay_argv() -> list[str]:
-    """統括役の CLI の打ち方。`NDF_PARALLEL_RELAY` があればその 1 行（テストの差し替え）。"""
-    alt = os.environ.get("NDF_PARALLEL_RELAY")
-    return alt.split() if alt else [sys.executable, str(RELAY)]
-
-
-def relay_proc(main: Path, *args: str) -> tuple[subprocess.CompletedProcess, dict]:
-    """統括役の CLI を打ち、(終わったプロセス, 統一 JSON レポート) を返す。読めなければ空の dict。"""
-    got = subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
-    lines = [ln for ln in (got.stdout or "").splitlines() if ln.strip().startswith("{")]
-    try:
-        return got, json.loads(lines[-1]) if lines else {}
-    except ValueError:
-        return got, {}
-
-
-def relay(main: Path, *args: str) -> tuple[int, dict]:
-    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
-    got, res = relay_proc(main, *args)
-    return got.returncode, res
+from parallel_repo import dev_version, git_head, poll_seconds, relay, relay_proc
 
 
 # ---- 耐久ステップ ----
@@ -98,6 +66,15 @@ def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
 
 STALL_MINUTES = 60  # 動かないレーンを問うまでの分（設計の失敗の 3 番の既定）
 SPAWN_REFUSALS = 3  # 起動の断りがこの回数続いたら問う（設計の失敗の 17 番）
+
+
+def spawn_refusals() -> int:
+    """起動の断りを問うまでの回数（`NDF_PARALLEL_SPAWN_REFUSALS` で変えられる。不正な値なら既定の 3）。"""
+    try:
+        n = int(os.environ.get("NDF_PARALLEL_SPAWN_REFUSALS") or SPAWN_REFUSALS)
+    except ValueError:
+        return SPAWN_REFUSALS
+    return n if n >= 1 else SPAWN_REFUSALS
 
 
 def stall_seconds() -> float:
@@ -139,25 +116,25 @@ def step_waiting_lanes(main: str, name: str) -> list[str]:
 
 @durable.step(name="parallel.route")
 def step_route(main: str) -> dict:
-    """宣言から配布の組み方を読む。耐久ワークフローの分岐を記録した値だけで決めるため、耐久ステップにする（#2616 の決定 2）。"""
+    """宣言からリリースの組み方を読む。耐久ワークフローの分岐を記録した値だけで決めるため、耐久ステップにする（#2616 の決定 2）。"""
     got = prt.way_of(Path(main))
     return {"way": got.way, "reason": got.reason}
 
 
 @durable.step(name="parallel.build")
 def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None) -> dict:
-    """まとめた配布の提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
+    """まとめたリリースの提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
     （`parallel.py present` が耐久ワークフローの外からレーンの内訳に読む）。組めない理由は `error` で返し、例外を上げない（#2616 の決定 3）。"""
     try:
         pr.write_requests(Path(main), name, list(requests or []))
         if seq > pr.MAX_HELPER_SEQ:
-            return {"error": f"配布の連番 {seq} が一時レーンの名前の上限 {pr.MAX_HELPER_SEQ} を超える"}
+            return {"error": f"リリースの連番 {seq} が一時レーンの名前の上限 {pr.MAX_HELPER_SEQ} を超える"}
         version = dev_version(Path(main))
         if not version:
             return {"error": prt.NO_VERSION}
         d = pr.build_plans(Path(main), name, seq, k, version)
-    except Exception as exc:  # noqa: BLE001  理由を依頼への答えと配布の記録へ渡す
-        return {"error": f"配布 {seq} の提示 {k} を組み立てられない（{type(exc).__name__}: {exc}）"}
+    except Exception as exc:  # noqa: BLE001  理由を依頼への答えとリリースの記録へ渡す
+        return {"error": f"リリース {seq} の提示 {k} を組み立てられない（{type(exc).__name__}: {exc}）"}
     return {"dir": str(d), "version": version}
 
 
@@ -201,7 +178,7 @@ def render_progress(main: str, name: str, progress: dict) -> None:
 # ---- 耐久ワークフロー ----
 
 
-class _Run:
+class _Run(prt.ReleaseRouting):
     """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。"""
 
     def __init__(self, main: str, name: str, lanes: list[dict]):
@@ -238,8 +215,8 @@ class _Run:
         return self.seq
 
     def pause(self, action: str, **fields) -> None:
-        """イベント `pause` は上書きされるため、流れている配布の最後の起動の指示（release / confirmed）を
-        他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。配布の答えを受けた止まっている
+        """イベント `pause` は上書きされるため、流れているリリースの最後の起動の指示（release / confirmed）を
+        他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。リリースの答えを受けた止まっている
         レーンを起こす行（`wake`）も、そのレーンが動き出すまでどの知らせにも添える。"""
         seq = self.bump()
         if action in ("release", "confirmed"):
@@ -332,20 +309,20 @@ class _Run:
 
     def apply_own(self, q: dict, choice: list[str]) -> None:
         """耐久ワークフローが自分で立てた問いへの答えを当てる。「止める」は、起動できないレーンなら起こし直しをやめて
-        止まったものと数え、配布の途中で止まった一時レーンなら配布を失敗として締める（依頼へ failed を答える）。
-        配布を組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。"""
+        止まったものと数え、リリースの途中で止まった一時レーンならリリースを失敗として締める（依頼へ failed を答える）。
+        リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。"""
         if q.get("kind") == "build":
             self.apply_build(q, choice)
             return
-        if STOP_PLAN not in choice:
+        if prt.STOP_PLAN not in choice:
             return
         if q.get("kind") == "spawn" and q.get("lane") in self.lanes:
             self.lanes[q["lane"]].update(started=True, state="stopped", given_up=True)
         elif q.get("kind") == "helper" and (rel := self.current) is not None and q.get("n") == rel["n"]:
-            if not rel.get("prs"):  # 提示の前に止まったなら、この配布へ入れた依頼の Pull Request を範囲として締める
+            if not rel.get("prs"):  # 提示の前に止まったなら、このリリースへ入れた依頼の Pull Request を範囲として締める
                 own = {n for r in self.pending if r["id"] in rel.get("requests", []) for n in r.get("prs") or []}
                 rel["prs"] = step_presented(rel["dirs"][-1]).get("prs") or sorted(own)
-            self.settle(rel, {"result": "failed", "reason": "配布の途中で止まった一時レーンを、人が止めると答えた"})
+            self.settle(rel, {"result": "failed", "reason": "リリースの途中で止まった一時レーンを、人が止めると答えた"})
 
     def ask(self, kind: str, rid: str, lane: Optional[str], question: str, options: list[str], **extra) -> None:
         """耐久ワークフローが自分で立てる問い（動かないレーン・一時レーンの停止・起動の断り・一覧の失敗）。同じ id は 1 回だけ。
@@ -362,11 +339,11 @@ class _Run:
         self.answered.add(rid)
         durable.set_event(f"answer-{rid}", {"result": result, "version": version, "release": n, "reason": reason, "at": None})
 
-    # -- 配布 --
+    # -- リリース --
 
     def answer_from_ranges(self) -> None:
-        """出した配布の範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
-        和は古い配布から順に足し、依頼の最後の PR が出た配布の版と連番で答える（後の配布の PR を前の配布の版で答えない）。"""
+        """出したリリースの範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
+        和は古いリリースから順に足し、依頼の最後の PR が出たリリースの版と連番で答える（後のリリースの PR を前のリリースの版で答えない）。"""
         done: set[int] = set()
         for rel in self.releases:
             if rel.get("state") != "released":
@@ -378,7 +355,7 @@ class _Run:
             self.pending = [r for r in self.pending if r["id"] not in hit]
 
     def open_release(self) -> None:
-        """流れている配布が無く依頼があれば、配布の組み方を読む。組むなら他のレーンを待たずに提示 1 を組む（I9）。
+        """流れているリリースが無く依頼があれば、リリースの組み方を読む。組むなら他のレーンを待たずに提示 1 を組む（I9）。
         組まない・組めないなら、受けている依頼のすべてへその場で答える。古い手順の記録の打ち直しは `open_recorded` を通す。"""
         if not durable.patched("parallel-route"):
             self.open_recorded()
@@ -406,48 +383,6 @@ class _Run:
             self.releases.append({"n": n, "state": "failed", "reason": built["error"]})
             return
         self.begin_release(n, built)
-
-    def take_pending(self) -> tuple[list[dict], dict]:
-        """受けている依頼をすべて外し、(依頼, 配布の記録の共通のキー) を返す（#2616 の I4）。"""
-        taken, self.pending = self.pending, []
-        return taken, {"prs": sorted({n for r in taken for n in r.get("prs") or []}), "requests": [r["id"] for r in taken]}
-
-    def skip_release(self, n: int, reason: str) -> None:
-        """マージで届くか配布しないリポジトリ: 組まずに受けている依頼のすべてへ配布済みと答える。"""
-        taken, keys = self.take_pending()
-        self.releases.append({"n": n, "state": "released", "version": None, **keys, "reason": reason, "skipped": True})
-        for r in taken:
-            self.answer(r["id"], "released", None, n, reason)
-        self.wake_answered(taken)
-
-    def refuse_release(self, n: int, reason: str) -> None:
-        """組めない: 配布を失敗として締め、受けている依頼のすべてへ理由を答え、組み直すか止めるかを問う。計画は止めない（I5）。"""
-        taken, keys = self.take_pending()
-        self.releases.append({"n": n, "state": "failed", **keys, "reason": reason})
-        for r in taken:
-            self.answer(r["id"], "failed", None, n, reason)
-        self.ask_rebuild(n, reason, taken)
-        self.wake_answered(taken)
-
-    def ask_rebuild(self, n: int, reason: str, requests: list[dict]) -> None:
-        """配布を組めない問いを立てる。レーンに結び付けない（後続のレーンの起動を止めない）。同じ理由の問いは 1 件にまとめる（I6）。"""
-        same = next((q for q in self.questions if q.get("kind") == "build" and q.get("reason") == reason), None)
-        if same is not None:
-            same["requests"] = [*same["requests"], *requests]
-            self.publish_questions()
-            return
-        text = f"配布 {n} を組めない: {reason}"
-        self.ask("build", f"{self.name}-build-{n}", None, text, [REBUILD, STOP_PLAN], reason=reason, requests=requests)
-
-    def apply_build(self, q: dict, choice: list[str]) -> None:
-        """配布を組めない問いへの答え。組み直しの依頼は元の依頼の答えを変えず、次の配布の範囲に入れるために受けている依頼へ入れ直す。"""
-        if STOP_PLAN in choice:
-            self.stop = True
-        elif REBUILD in choice:
-            seq = len(self.releases) + 1
-            for r in q.get("requests") or []:
-                origin = r.get("origin") or r["id"]
-                self.pending.append({**r, "id": f"{origin}-again{seq}", "origin": origin, "again": True})
 
     def begin_release(self, n: int, built: dict) -> None:
         rel = {
@@ -477,7 +412,7 @@ class _Run:
         rel = self.current
         if rel is None or msg.get("n") != rel["n"]:
             return
-        if any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in self.questions):  # 承認ゲート 2 の答えが届いた
+        if any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in self.questions):  # リリース承認ゲートの答えが届いた
             self.questions = [q for q in self.questions if not (q.get("kind") == "gate2" and q.get("n") == rel["n"])]
             self.publish_questions()
         if msg.get("phase") == "confirm":
@@ -497,7 +432,7 @@ class _Run:
                     self.ask_rebuild(rel["n"], built["error"], answered)
                     return
                 rel["dirs"].append(built["dir"])
-                rel["versions"] = [rel.get("version"), built.get("version")]  # 提示ごとの版。選ばれた提示の版を配布の答えへ渡す
+                rel["versions"] = [rel.get("version"), built.get("version")]  # 提示ごとの版。選ばれた提示の版をリリースの答えへ渡す
                 self.emit_release(rel, 2, represent=True)
                 return
             k = 1
@@ -511,13 +446,13 @@ class _Run:
         )
 
     def settle(self, rel: dict, msg: dict) -> list[dict]:
-        """配布を締め、範囲で答えられる依頼へ答える。答えた依頼を返す。"""
+        """リリースを締め、範囲で答えられる依頼へ答える。答えた依頼を返す。"""
         result = msg.get("result")
         if not rel.get("prs"):
             got = step_presented(rel["dirs"][-1])
             rel["prs"] = got.get("prs") or []
         done = {n for r in self.releases if r is not rel and r.get("state") == "released" for n in r.get("prs") or []}
-        hit = set(pr.answerable(self.pending, rel["prs"], done))  # 前の配布で出た PR と合わせて全部が入る依頼に答える
+        hit = set(pr.answerable(self.pending, rel["prs"], done))  # 前のリリースで出た PR と合わせて全部が入る依頼に答える
         answered = [r for r in self.pending if r["id"] in hit]
         if result == "released":
             rel.update(state="released", version=msg.get("version") or rel.get("version"))
@@ -538,7 +473,7 @@ class _Run:
                 self.answer(r["id"], rel["state"], None, rel["n"], msg.get("reason"))
         self.pending = [r for r in self.pending if r["id"] not in hit]
         for r in self.pending:
-            durable.set_event(f"defer-{r['id']}", {"seq": rel["n"], "reason": "範囲に入らないため次の配布へ回した", "at": None})
+            durable.set_event(f"defer-{r['id']}", {"seq": rel["n"], "reason": "範囲に入らないため次のリリースへ回した", "at": None})
         self.current = None
         self.wake_answered(answered)
         return answered
@@ -561,9 +496,9 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.pause("running")
     wait = poll_seconds()
     while True:
-        if run.stop and (run.current is None or run.force):  # --force は配布の settle を待たず、一時レーンも止める
+        if run.stop and (run.current is None or run.force):  # --force はリリースの settle を待たず、一時レーンも止める
             return _handle_stop(run, main)
-        # 一時レーンが配布を流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、settle が届くまで
+        # 一時レーンがリリースを流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、settle が届くまで
         # 待ってから終える（設計の失敗の 12 番。作りかけを残さない）。待つ間も inbox を読み、--force と問いを受ける
         if not run.stop:
             _spawn_ready(run, main)
@@ -636,18 +571,19 @@ def _spawn_ready(run: _Run, main: str) -> None:
             run.lanes[n].update(got)
             if got.get("refused"):
                 run.refusals[n] = run.refusals.get(n, 0) + 1
-                if run.refusals[n] % SPAWN_REFUSALS == 0:  # 3 回続けて断られるたびに理由を添えて問う（異常系 17）
+                limit = spawn_refusals()
+                if run.refusals[n] % limit == 0:  # 既定 3 回続けて断られるたびに理由を添えて問う（異常系 17）
                     run.ask(
                         "spawn",
                         f"{run.name}-spawn-{n}-{run.refusals[n]}",
                         n,
-                        f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）",
+                        f"レーン {n} を {limit} 回起動できない（{got['refused']}）",
                         ["起こし直す", "止める"],
                     )
 
 
 def _run_finished(run: _Run) -> bool:
-    """配布の途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
+    """リリースの途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
     return run.ls_ok and run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
 
 
@@ -733,7 +669,7 @@ def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
 
 
 def _ask_helper(run: _Run, rows: dict) -> None:
-    """配布の途中で一時レーンが止まり、settle も承認ゲート 2 の依頼も、その一時レーンが送った答えていない問い（ask も含む）も
+    """リリースの途中で一時レーンが止まり、settle もリリース承認ゲートの依頼も、その一時レーンが送った答えていない問い（ask も含む）も
     無ければ問う（受け入れ条件 6g）。一時レーンは問いを保留すると自分のラッパーを止めるため、問いを送って止まったものは問わない。"""
     rel = run.current
     if rel is None or not run.launch or run.helper_asked == run.launch["seq"]:
@@ -745,7 +681,7 @@ def _ask_helper(run: _Run, rows: dict) -> None:
         return
     run.helper_asked = run.launch["seq"]
     run.ask(
-        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} が配布 {rel['n']} の途中で止まった（settle も承認ゲート 2 の依頼も無い）",
+        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle もリリース承認ゲートの依頼も無い）",
         ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")}, n=rel["n"],
     )  # fmt: skip
 
@@ -775,3 +711,11 @@ def run_plan(main: Path, name: str) -> tuple[dict, bool]:
     if st is None:
         durable.start(durable.WorkflowRef(wid, 1, "start"), parallel_workflow, str(main), name)
     return durable.output_of(wid), resumed
+
+
+def environment_report(main: Path, plan: pp.ParallelPlan) -> tuple[dict, list[dict]]:
+    """開始のときの実行環境の報告と結果の項目。レーンがまだ動いていないので計画の数を渡す。"""
+    import run_environment
+
+    report = run_environment.survey(main, lanes=len(plan.lanes))
+    return report, run_environment.notes(report)

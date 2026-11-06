@@ -448,7 +448,7 @@ def test_a_declaration_only_on_the_working_branch_does_not_keep_volumes(main_rep
     assert any(c.endswith(" down --volumes") for c in calls(fake))
 
 
-# --- 残ったボリュームと公開の関門 ---------------------------------------------------------
+# --- 残ったボリュームと公開の判定 ---------------------------------------------------------
 
 
 def tag_of(main: Path, worktree: Path) -> str | None:

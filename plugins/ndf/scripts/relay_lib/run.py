@@ -38,7 +38,7 @@ from .common import (
     stamp,
 )
 from .mark import asked_after
-from .record import RelayRecord, StartLimit
+from .record import RelayRecord, SpinGuard
 from .switch import REASON_AUTH, AccountSwitch, UsageWatch
 from .terminal import StartFailed, Terminal, pty_available, serve_terminal, wait_exit_code
 
@@ -52,7 +52,7 @@ class NoAccountEnv(Exception):
 class Relay(AccountSwitch, ho.Swapper):
     """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
 
-    def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str, term: Terminal, limit: StartLimit):
+    def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str, term: Terminal, spin_guard: SpinGuard):
         self.claude = claude
         self.dir = relay_dir
         self.record = RelayRecord(relay_dir)
@@ -60,7 +60,7 @@ class Relay(AccountSwitch, ho.Swapper):
         self.version = version
         self.env = cl.child_env(relay_dir)
         self.term = term
-        self.limit = limit
+        self.spin_guard = spin_guard
         self.section = 0
         self.started_at = 0.0
         self.session_id = ""
@@ -131,7 +131,6 @@ class Relay(AccountSwitch, ho.Swapper):
             self.watch.reset()
             if not self.watch.thread.is_alive():
                 self.watch.start()
-        self.limit.release()
 
     def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
         """使えなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
@@ -166,12 +165,9 @@ class Relay(AccountSwitch, ho.Swapper):
             return None
 
     def _may_start(self, written: float) -> bool:
-        """次の区間の起動の許可を取る。取れない・起動の上限で断られたら偽（断られたら止める）。"""
-        if not self.limit.take():
-            return False
-        refusal = self.limit.refusal(written, self.started_at)
+        """次の区間を起動してよいかを判定する。再起動ループなら止めて偽。"""
+        refusal = self.spin_guard.refusal(written, self.started_at)
         if refusal:
-            self.limit.release()
             self.halt(*refusal)
             return False
         return True
@@ -210,10 +206,8 @@ class Relay(AccountSwitch, ho.Swapper):
         return m
 
     def recheck(self, m) -> tuple[str, str] | None:
-        """質問の後に読み直した合図で起動する前に、`count.lock`・上限・空回りを判定し直す。"""
-        if not self.limit.take_within():
-            return "count-lock", "起動の数を数えるロックが取れない"
-        return self.limit.refusal(parse_iso(m.get("written_at")) or time.time(), self.started_at)
+        """質問の後に読み直した合図で起動する前に、再起動ループを判定し直す。"""
+        return self.spin_guard.refusal(parse_iso(m.get("written_at")) or time.time(), self.started_at)
 
     def halt(self, reason: str, why: str) -> None:
         self.halted = True
@@ -260,14 +254,12 @@ class Relay(AccountSwitch, ho.Swapper):
     def write_exit(self, m) -> bool:
         """G3。`question.lock` の中で確かめ直し、`/exit` と改行を 1 回の write で書き、1 秒おいて放す。
         目標が未達の判定の後なら、先に Esc を書いて 1 秒おき、確かめ直してから `/exit` を書く。
-        確かめ直しで外れたら書かずに偽を返す（`count.lock` も放す）。"""
+        確かめ直しで外れたら書かずに偽を返す。"""
         fd = _lock(self.path(QUESTION_LOCK), 0)
         if fd is None:
-            self.limit.release()
             return False
         try:
             if not self._still_due(m):
-                self.limit.release()
                 return False
             if m.get("_unmet"):
                 # 応答の途中なら Esc で止める（入力待ちの Esc 1 回は何もしない。2 回は巻き戻しを開く）
@@ -279,7 +271,6 @@ class Relay(AccountSwitch, ho.Swapper):
                 if self._pump_for(env_num("NDF_RELAY_ESC_WAIT", 1)):
                     return True
                 if self.term.last_input > esc_at or not self._still_due(m):
-                    self.limit.release()
                     return False
             try:
                 os.write(self.term.fd, b"/exit\r")
@@ -300,14 +291,13 @@ class Relay(AccountSwitch, ho.Swapper):
                 return res, left, questioned
             if os.path.exists(self.path(QUESTION_FILE)):
                 questioned = True
-                self.limit.release()
                 continue
             left -= time.time() - t0
         return None, left, questioned
 
     def end_child(self) -> tuple[str, int, bool]:
         """`/exit` の後の待ち。(終わり方, 子の wait の状態, 待ちのあいだに質問が出たか) を返す。
-        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の合図がある間は秒を数えず、`count.lock` を放す。"""
+        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の合図がある間は秒を数えない。"""
         questioned, self.saw_question = self.saw_question, False
         if self.exited:
             res, self.exited = self.exited, None
@@ -319,7 +309,6 @@ class Relay(AccountSwitch, ho.Swapper):
         return ended_by, status, questioned
 
     def give_up(self, reason: str, why: str, command: str, **extra) -> int:
-        self.limit.release()
         self.log(event="stop", section=self.section, reason=reason, **extra)
         self.term.screen(f"ndf-relay: 次の区間を起動できない（{why}）。次のコマンド:\r\n{command}")
         return 2
@@ -335,7 +324,6 @@ class Relay(AccountSwitch, ho.Swapper):
         requeued = questioned or again is None or again.get("written_at") != m.get("written_at")
         if requeued:
             # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が合図を書き直すか消している
-            self.limit.release()
             if again is None:
                 self.log_end(time.time(), "no-mark")
                 return None, wait_exit_code(status)
@@ -434,7 +422,6 @@ class Relay(AccountSwitch, ho.Swapper):
 
     def close(self) -> None:
         self.stop_accounts()
-        self.limit.release()
         remove(self.path(PID_FILE), self.path(cl.SETTINGS_FILE))  # まとめた設定は利用者の資格情報を持ちうるため残さない
         _unlock(self.lock)
         self.lock = None
@@ -481,7 +468,7 @@ def cmd_run(args: list[str]) -> int:
         cl.passthrough(claude, args)
     hub_client.write_name(relay_dir, hub)
     term = Terminal()
-    relay = Relay(claude, relay_dir, got.marketplace, got.version, term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
+    relay = Relay(claude, relay_dir, got.marketplace, got.version, term, SpinGuard(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
     with hub_client.serving(hub, relay_dir):

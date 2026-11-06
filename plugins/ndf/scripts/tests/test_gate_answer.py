@@ -42,35 +42,35 @@ def test_gate_1_keeps_records_per_pr(tmp_path):
     state = tmp_path / "sprint.json"
     state.write_text(json.dumps({"name": "m1", "gates": []}))
     approve = ("--by", "user", "--outcome", "approved")
-    gate(state, tmp_path, "関門 1", *approve, "--pr", "1")
-    m = gate(state, tmp_path, "関門 1", *approve, "--pr", "2")
+    gate(state, tmp_path, "設計承認ゲート", *approve, "--pr", "1")
+    m = gate(state, tmp_path, "設計承認ゲート", *approve, "--pr", "2")
     assert [(g["by"], g["pr"]) for g in m["gates"]] == [("user", 1), ("user", 2)]
     # --pr を渡さない書き込みも --by mvv の書き込みも、pr を持つ記録を消さない
-    gate(state, tmp_path, "関門 1", *approve)
-    m = gate(state, tmp_path, "関門 1", "--by", "mvv", "--verdict", "follow")
+    gate(state, tmp_path, "設計承認ゲート", *approve)
+    m = gate(state, tmp_path, "設計承認ゲート", "--by", "mvv", "--verdict", "follow")
     assert sorted(str(g.get("pr")) for g in m["gates"]) == ["1", "2", "None"]
-    assert gate_answer.approved(state, "関門 1", pr=1).pr == 1
-    assert gate_answer.approved(state, "関門 1", pr=2).pr == 2
-    assert gate_answer.approved(state, "関門 1", pr=3) is None
+    assert gate_answer.approved(state, "設計承認ゲート", pr=1).pr == 1
+    assert gate_answer.approved(state, "設計承認ゲート", pr=2).pr == 2
+    assert gate_answer.approved(state, "設計承認ゲート", pr=3) is None
     # 同じ PR を書き直すと 1 件のまま置き換わる
-    m = gate(state, tmp_path, "関門 1", *approve, "--pr", "1", at="2026-10-30T02:00:00+00:00")
+    m = gate(state, tmp_path, "設計承認ゲート", *approve, "--pr", "1", at="2026-10-30T02:00:00+00:00")
     assert [g["at"] for g in m["gates"] if g.get("pr") == 1] == ["2026-10-30T02:00:00+00:00"]
 
 
 def test_reads_default_and_older_records_as_user_approval(tmp_path):
     state = tmp_path / "sprint.json"
     gates = [
-        {"name": "関門 2", "what": "本番", "at": "2026-10-30T01:00:00+00:00"},
-        {"name": "関門 3", "what": "x", "at": "2026-10-30T01:00:00+00:00", "outcome": "rejected"},
-        {"name": "関門 4", "what": "x", "at": "2026-10-30T01:00:00+00:00", "by": "mvv", "verdict": "follow"},
+        {"name": "リリース承認ゲート", "what": "本番", "at": "2026-10-30T01:00:00+00:00"},
+        {"name": "承認ゲート 3", "what": "x", "at": "2026-10-30T01:00:00+00:00", "outcome": "rejected"},
+        {"name": "承認ゲート 4", "what": "x", "at": "2026-10-30T01:00:00+00:00", "by": "mvv", "verdict": "follow"},
     ]
     state.write_text(json.dumps({"gates": gates}))
-    got = gate_answer.approved(state, "関門 2")
+    got = gate_answer.approved(state, "リリース承認ゲート")
     assert (got.by, got.outcome, got.pr) == ("user", "approved", None)
-    assert gate_answer.approved(state, "関門 3") is None
-    assert gate_answer.approved(state, "関門 4") is None
+    assert gate_answer.approved(state, "承認ゲート 3") is None
+    assert gate_answer.approved(state, "承認ゲート 4") is None
     # after より前か同じ時刻の記録は数えない
-    assert gate_answer.approved(state, "関門 2", after="2026-10-30T01:00:00+00:00") is None
-    assert gate_answer.approved(state, "関門 2", after="2026-10-30T00:59:00Z") is not None
-    assert gate_answer.approved(tmp_path / "none.json", "関門 2") is None
-    assert gate_answer.approved(None, "関門 2") is None
+    assert gate_answer.approved(state, "リリース承認ゲート", after="2026-10-30T01:00:00+00:00") is None
+    assert gate_answer.approved(state, "リリース承認ゲート", after="2026-10-30T00:59:00Z") is not None
+    assert gate_answer.approved(tmp_path / "none.json", "リリース承認ゲート") is None
+    assert gate_answer.approved(None, "リリース承認ゲート") is None

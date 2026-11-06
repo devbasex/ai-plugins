@@ -29,11 +29,11 @@ export interface ProgressReader {
   // ループの詳細の画面: 実行が送った締めた周回と、実行ごとの usage.recorded の費用の和・区間の数（section.started の数）。
   // 実行ごとに事象を 1 回だけ読む
   loopRunsDetail(sprintRunIds: string[]): Promise<LoopRunsDetail>;
-  // 実行が送った配布の事象（#2439）。jobId を渡すとそのジョブの分だけ
+  // 実行が送ったリリースの事象（#2439）。jobId を渡すとそのジョブの分だけ
   findReleaseEvents(sprintRunId: string, jobId?: string): Promise<ReleaseEvents>;
   // 実行の最後の gate.reached（一覧の承認の依頼の要約。#2439）。無ければ null
   findLastGate(sprintRunId: string): Promise<{ at: string; jobId: string | null; payload: GateReachedPayload } | null>;
-  // 承認の依頼への答え（gate.answered。#2439 の配布のまとめが読む）。無ければ null
+  // 承認の依頼への答え（gate.answered。#2439 のリリースのまとめが読む）。無ければ null
   findGateAnswer(sprintRunId: string, approvalRequestId: string): Promise<GateAnsweredPayload | null>;
   // 実行の gate.reached と gate.answered を order_key の順に（承認待ちの一覧の判定 awaitingGateOf が読む。#2430）
   listGateEvents(sprintRunId: string): Promise<ProgressEventRecord[]>;

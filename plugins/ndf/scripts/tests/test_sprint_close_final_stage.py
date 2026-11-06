@@ -29,7 +29,7 @@ def comment(body, cid):
 
 
 def setup(gh, issue_body, *, dist_in_comment=False, comments=None, state="OPEN", prs="Fixes #1"):
-    """記録の PR 20 と、PR 11 が閉じる課題 #1。dist_in_comment なら配布の記録を識別子 200 のコメントに置く。"""
+    """記録の PR 20 と、PR 11 が閉じる課題 #1。dist_in_comment ならリリース記録を識別子 200 のコメントに置く。"""
     if comments is None:
         comments = [comment(DIST_PROD, 200)] if dist_in_comment else [comment("メモ", 100)]
     gh.set(
@@ -80,7 +80,7 @@ def test_a_record_without_comments_has_no_base_and_keeps_open(repo, gh):
     setup(gh, retro(100), comments=[])
     code, out, _ = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     it = issues_of(out)["o/r#1"]
-    assert it["result"] == "kept_open" and "比べる配布の記録のコメントが無い" in it["reason"]
+    assert it["result"] == "kept_open" and "比べるリリース記録のコメントが無い" in it["reason"]
 
 
 def test_a_closed_issue_without_the_record_is_not_reopened(repo, gh):
@@ -139,7 +139,7 @@ def test_the_verification_stage_always_reads_the_rows(repo, gh):
 
 def test_the_distribution_stage_closes_without_a_retro_line(repo, gh):
     setup(gh, "本文")
-    code, out, _ = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布"], gh.env, repo)
+    code, out, _ = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "デプロイ"], gh.env, repo)
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "closed"
 
 
@@ -163,4 +163,4 @@ def test_final_stage_gap_counts_only_lines_from_the_start():
     body = "- 振り返り: https://github.com/o/r/pull/2#issuecomment-9\n"
     assert "行が無い" in mod.final_stage_gap("振り返り", body, 1)
     assert mod.final_stage_gap("振り返り", body.lstrip("- "), 9) is None
-    assert mod.final_stage_gap("配布", "", None) is None
+    assert mod.final_stage_gap("デプロイ", "", None) is None

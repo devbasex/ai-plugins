@@ -91,7 +91,7 @@ unknown owner type
 | 単一選択のフィールドを作る | `gh project field-create <番号> --owner <owner> --name 進行 --data-type SINGLE_SELECT --single-select-options "<工程名をカンマ区切り>"` |
 | 文字列のフィールドを作る | `gh project field-create <番号> --owner <owner> --name 作業ツリー --data-type TEXT` |
 
-`stage` の選択肢は工程表の行、`mode` はモード名を渡す。いずれも
+`stage` の選択肢は工程表の行（`デプロイ` の行を含む）、`mode` はモード名を渡す。工程の名前が変わった選択肢は、新しい名前の選択肢が無ければ旧い選択肢へ書き、名前を変えるよう `NOTE:` で案内する（ボードの設定は利用者が直す）。いずれも
 `development-workflow` の工程表が基準である。
 
 **作成とフィールドの追加には `project` スコープが要る。** 無ければ何もせず、従来どおり工程を

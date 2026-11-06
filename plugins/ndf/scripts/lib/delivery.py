@@ -1,4 +1,4 @@
-"""配布の宣言から、マージの宛先の判定とリリースの経路を決める（#1336）。
+"""リリースの設定から、マージの宛先の判定とリリースの経路を決める（#1336）。
 
 宣言は `.ndf/worktree.json`（ベースブランチ・本番チャネル）・`.ndf/project.json` の `delivery`・`.ndf/supervise.json` の
 `release` の 3 つ。ファイルと git の参照（既定ブランチ）だけを読み、`gh` を呼ばない。判定は保存せず、呼ぶたびに作り直す。
@@ -8,7 +8,7 @@
 - `routes`: 変更が本番系へ届く道筋（`template` / `merge` / `manual` / `none`）と、それを届けるステージ
 - `dev_channel`: 開発版のチャネルの形（`separate-branch` / `manual-production` / 無し）。`pace: fast` / `auto` の使ってよい
   条件とスプリントのステージの組み立てが読む（#1454）
-- `release_way`: 配布の依頼を受けたときの配布の組み方（組む / 組まない / 組めない）。並列の計画が読む（#2616）
+- `release_way`: リリースの依頼を受けたときのリリースの組み方（組む / 組まない / 組めない）。並列の計画が読む（#2616）
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ STAGE_PROMOTE = "promote"  # 昇格の Pull Request（ベースブランチ → 
 STAGE_MANUAL = "manual"  # 手で行うステージ（/ndf:release）
 STAGE_NONE = "none"  # 届けない（ステージを置かない）
 
-# 配布の組み方（ReleaseWay.way）
-BUILD, SKIP, REFUSE = "build", "skip", "refuse"  # まとめた配布を組む / 組まない / 組めない
+# リリースの組み方（ReleaseWay.way）
+BUILD, SKIP, REFUSE = "build", "skip", "refuse"  # まとめたリリースを組む / 組まない / 組めない
 
 # 開発版のチャネルの形（DevChannel.value）
 SEPARATE_BRANCH = "separate-branch"  # 起点と本番チャネルが違う
@@ -106,7 +106,7 @@ class Route:
 
 @dataclass(frozen=True)
 class ReleaseWay:
-    """配布の依頼を受けたときの配布の組み方。`way` は `BUILD` / `SKIP` / `REFUSE`、`reason` は組まない・組めない理由。"""
+    """リリースの依頼を受けたときのリリースの組み方。`way` は `BUILD` / `SKIP` / `REFUSE`、`reason` は組まない・組めない理由。"""
 
     way: str
     reason: str = ""
@@ -210,7 +210,7 @@ def load_delivery(root) -> DeliveryDecl:
 def _main_base(wt: dict, main, root) -> str | None:
     """`channel: base` を解く起点のブランチ。メインディレクトリの `worktree.json` の `base_branch` から読む。
 
-    `channel: base` の行は本番チャネルの判定（承認ゲート 2）に効くため、Pull Request の head の `base_branch` で
+    `channel: base` の行は本番チャネルの判定（リリース承認ゲート）に効くため、Pull Request の head の `base_branch` で
     行を本番から外せないようにする（#2363 round 6）。メインディレクトリにファイルかキーが無ければ `None`（既定ブランチ）で、
     呼ばれた木の値で補わない。メインディレクトリが解けない（git でない）か呼ばれた木そのものなら、読んだ `wt` の値を使う。
     """
@@ -336,7 +336,7 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
         }[decl.rows_state]
         return [Route(MANUAL, "（不明）", None, STAGE_MANUAL, f"{why}ため、リリースの経路を決められない")]
     if not decl.rows:
-        return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、配布しない")]
+        return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、デプロイしない")]
     return [_row_route(row, decl) for row in decl.rows]
 
 
@@ -353,7 +353,7 @@ def _reach_text(r: Route) -> str:
 
 
 def release_way(decl: DeliveryDecl, forms=()) -> ReleaseWay:
-    """配布の組み方。上から順に最初に当たった条件で決まる。決まらないときは「組めない」へ倒す（#2616 の I1）。"""
+    """リリースの組み方。上から順に最初に当たった条件で決まる。決まらないときは「組めない」へ倒す（#2616 の I1）。"""
     rs = routes(decl, forms)
     if needs_version(rs):
         return ReleaseWay(BUILD)
