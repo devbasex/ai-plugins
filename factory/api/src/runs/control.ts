@@ -26,6 +26,7 @@ import {
   type Registration,
   type ReleaseStep,
   type RunJob,
+  type Slots,
   type SprintRun,
 } from "./model.ts";
 import type { RunnerPlatform } from "./platform.ts";
@@ -206,6 +207,22 @@ function newSprintRun(fields: NewRunFields, sprintRunId: string, now: string): S
   };
 }
 
+// 取得した枠に対する開始の断り。使える量の上限、並行を許さない版との組み合わせの順に確かめる
+function refuseBySlots(ctx: AccountContext, registration: Registration, slots: Slots, tokensThisMonth: number | undefined, legacy: boolean): void {
+  const judgment = judgeLimits(ctx, {
+    runningSprintRuns: slots.account,
+    tokensThisMonth,
+    runningRepoRuns: slots.repository,
+    repoMaxRuns: registration.maxConcurrentRuns ?? null,
+  });
+  if (!judgment.allowed) {
+    throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons: judgment.reasons });
+  }
+  if ((legacy && slots.repository > 0) || (!legacy && (slots.legacy ?? 0) > 0)) {
+    throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
+  }
+}
+
 export class RunControl {
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -365,18 +382,7 @@ export class RunControl {
     const tokensThisMonth = ctx.executionMode === "managed" ? await this.tokensThisMonth(ctx.accountId, ctx.plan === "team" ? ctx.userId : null) : undefined;
     for (let attempt = 0; attempt < SLOT_RETRIES; attempt++) {
       const slots = await table.getSlots(ctx.accountId, registration.repositoryId);
-      const judgment = judgeLimits(ctx, {
-        runningSprintRuns: slots.account,
-        tokensThisMonth,
-        runningRepoRuns: slots.repository,
-        repoMaxRuns: registration.maxConcurrentRuns ?? null,
-      });
-      if (!judgment.allowed) {
-        throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons: judgment.reasons });
-      }
-      if ((legacy && slots.repository > 0) || (!legacy && (slots.legacy ?? 0) > 0)) {
-        throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
-      }
+      refuseBySlots(ctx, registration, slots, tokensThisMonth, legacy);
       if (loop && opts.loop) {
         // EXCLUDE_ISSUES は、トランザクションの直前に強い整合で読んだ同じリポジトリの課題の持ち分（決定 11）
         const exclude = (await table.listIssueShares(ctx.accountId, registration.repositoryId)).map((s) => s.number);
