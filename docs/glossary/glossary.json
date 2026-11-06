@@ -6053,6 +6053,41 @@
       ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "今の起動",
+      "context": "ndf-workflow",
+      "meaning": "一時レーンでは、耐久ワークフローが最後に指示した起動。通常のレーンでは、ラッパーが最後に起動した回",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "レーンの再起動",
+      "context": "ndf-workflow",
+      "meaning": "止まった、または動かないレーンを `relay.py restart` で起動し直すこと。問いの選択肢の「起こし直す」がこれに当たる",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "停滞の問い",
+      "context": "ndf-workflow",
+      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "途中停止の問い",
+      "context": "ndf-workflow",
+      "meaning": "リリースの途中で止まった一時レーンについて耐久ワークフローが立てる問い（`kind: helper`）",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "問いの取り下げ",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが、答えを待たずに自分の問いを問いの一覧から外すこと",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
     }
   ]
 }
