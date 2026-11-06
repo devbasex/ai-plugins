@@ -6057,16 +6057,37 @@
     {
       "term": "計画の台帳",
       "context": "ndf-workflow",
-      "meaning": "1 つの並列の計画を続けるのに要る状態（受けた依頼・問い・答え・リリースの連番と状態・レーンの起動の記録・オーガナイザーの役割・使う版）を、計画の置き場へ追記した記録",
+      "meaning": "1 つの並列の計画を続けるのに要る状態を、計画の置き場に持つ記録。受けた行を足す ledger.jsonl と、台帳のチェックポイントからなる",
       "source": "",
-      "pending_source": "issues/issue-2647-requirements.md"
+      "pending_source": "issues/issue-2647-design.md"
     },
     {
       "term": "耐久ワークフローの作り直し",
       "context": "ndf-workflow",
-      "meaning": "ERROR になったか耐久の記録が失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと",
+      "meaning": "失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと",
       "source": "",
-      "pending_source": "issues/issue-2647-requirements.md"
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "台帳のチェックポイント",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが自分の状態（答えた依頼・リリースの記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "失われた計画",
+      "context": "ndf-workflow",
+      "meaning": "閉じていないのに、耐久ワークフローが動いていない計画。ERROR か、耐久の記録が無い状態を指す",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "耐久の記録の退避",
+      "context": "ndf-workflow",
+      "meaning": "失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ置き場で開くために行う",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
     }
   ]
 }
