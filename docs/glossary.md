@@ -35,7 +35,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | セッション | `session` | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | プラン | `plan` | `supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | キュー | `queue` | プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| キューの続き | — | `supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す | — | — | `docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md` |
+| キューの続き | — | `supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了したプランを流さず、完了していないプランを終えたステップから続け、後続のステージも流す。開始の位置は --from の指定と耐久の記録だけで決まる | — | — | `docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md` |
 | リリース差分 | — | 版と版の間（タグからタグまで）の変更 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インライン実行 | — | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | オーケストレーター | — | `cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる | 進行側、レビューを回す側 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -382,7 +382,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 組み直しの依頼 | — | 組めなかったリリースの依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない | — | — | — |
 | 一時レーン | — | 並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 保留の周回 | — | 並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
-| 質問待ち | — | 作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めた周回の結果 | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| 質問待ち | — | 作業の途中の問いをオーガナイザーへ送り、止まったプランとステップを残した周回の結果。進行中の周回を締めたものと、締め直しの途中から戻したものがある | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 再起動の方針 | — | conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 現行方式 | — | 運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 試行方式 | — | カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く | — | — | `docs/specifications/ndf-context-restart-policy.md` |
@@ -450,6 +450,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 進みの観測 | — | 実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること | — | — | — |
 | 周回の費用の内訳 | — | 周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする | — | — | — |
 | 実行環境の調査 | — | 動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程 | — | — | — |
+| 締め直しの途中 | — | 保留の周回の答えを読み、残りの工程の pipeline を組んだ後、loop finish が締めるまでの間。周回の結果の値ではなく、配布待ちか質問待ちのまま締め直しの区間に終わりの時刻が無い状態である | — | — | — |
+| 前の待ちの控え | — | 同じ周回に問いが 2 回以上当たったときの、前の問いと答えの記録 | — | — | — |
+| 周回の見送り | — | 質問待ちの周回の答えを持ち主が読み、続けないと決めて「人へ戻した」で締めること | — | — | — |
+| 前の途中 | — | 前の起動が done を書けずに落ち、完了していないプランが終えたステップまで進んでいる状態 | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
