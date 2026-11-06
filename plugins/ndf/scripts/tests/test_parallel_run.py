@@ -1179,6 +1179,25 @@ def test_build_exception_and_seq_limit_answer_failed(env, tmp_path, monkeypatch)
     assert stop(main)["status"] == "stopped"
 
 
+def test_same_build_cause_keeps_one_question_across_releases(env, tmp_path, monkeypatch):
+    """I6。同じ原因の組み立ての例外は、リリースの連番が進んでも問いが 1 件のままである。"""
+    main, states = env["main"], env["states"]
+
+    def boom(*_a, **_k):
+        raise RuntimeError("組み立ての失敗")
+
+    monkeypatch.setattr(prl, "build_plans", boom)
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
+    assert (read(main, r1)["release"], read(main, r2)["release"]) == (1, 2)
+    q = until(lambda: len((got := build_question(main))["requests"]) == 2 and got)
+    assert q["id"] == "p1-build-1" and [r["id"] for r in q["requests"]] == [r1, r2]
+    assert len([x for x in event(main, "p1", "questions")["items"] if x.get("kind") == "build"]) == 1
+    assert stop(main)["status"] == "stopped"
+
+
 def test_second_present_failure_closes_the_range_and_defers_the_rest(env, tmp_path, monkeypatch):
     """受け入れ条件 13・14（I4・I6）。範囲の外の依頼は次のリリースで答えを受け、理由が同じなら問いは 1 件のままである。"""
     main, heads, states = env["main"], env["heads"], env["states"]

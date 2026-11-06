@@ -184,6 +184,15 @@ def _lint_verdicts(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a, f
     return out
 
 
+def _log_tail(log: pathlib.Path) -> str:
+    """ログの末尾。読み始めが行の途中なら、その行の残りを捨てる。先頭の切れた行は伏せ字の規則に当たらず、秘密の値が残るため。"""
+    with open(log, "rb") as f:
+        start = max(0, log.stat().st_size - LOG_TAIL_BYTES)
+        f.seek(max(0, start - 1))  # 1 バイト前から読み、読み始めが行の先頭なら捨てる行を空にする
+        data = f.read()
+    return (data.partition(b"\n")[2] if start else data).decode("utf-8", "replace")
+
+
 def _failed_commands(root: pathlib.Path, done: list) -> list[dict]:
     """落ちたコマンドの結果の行。ログの末尾は秘密を伏せて写す。"""
     out = []
@@ -191,9 +200,7 @@ def _failed_commands(root: pathlib.Path, done: list) -> list[dict]:
         if outcome.status == ts.PASSED:
             continue
         try:
-            with open(log, "rb") as f:
-                f.seek(max(0, log.stat().st_size - LOG_TAIL_BYTES))
-                tail = f.read().decode("utf-8", "replace")
+            tail = _log_tail(log)
         except OSError:
             tail = ""
         out.append({"command": command, "code": outcome.code, "log": str(log.relative_to(root)), "tail": secret_redact.redact_output(tail)})

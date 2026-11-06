@@ -124,17 +124,17 @@ def step_route(main: str) -> dict:
 @durable.step(name="parallel.build")
 def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None) -> dict:
     """まとめたリリースの提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
-    （`parallel.py present` が耐久ワークフローの外からレーンの内訳に読む）。組めない理由は `error` で返し、例外を上げない（#2616 の決定 3）。"""
+    （`parallel.py present` が耐久ワークフローの外からレーンの内訳に読む）。組めない理由は `error` で返し、例外を上げない（#2616 の決定 3）。問いは理由の一致でまとめるため、理由に連番と提示の番号を入れない。"""
     try:
         pr.write_requests(Path(main), name, list(requests or []))
         if seq > pr.MAX_HELPER_SEQ:
-            return {"error": f"リリースの連番 {seq} が一時レーンの名前の上限 {pr.MAX_HELPER_SEQ} を超える"}
+            return {"error": f"リリースの連番が一時レーンの名前の上限 {pr.MAX_HELPER_SEQ} を超える"}
         version = dev_version(Path(main))
         if not version:
             return {"error": prt.NO_VERSION}
         d = pr.build_plans(Path(main), name, seq, k, version)
     except Exception as exc:  # noqa: BLE001  理由を依頼への答えとリリースの記録へ渡す
-        return {"error": f"リリース {seq} の提示 {k} を組み立てられない（{type(exc).__name__}: {exc}）"}
+        return {"error": f"リリースを組み立てられない（{type(exc).__name__}: {exc}）"}
     return {"dir": str(d), "version": version}
 
 

@@ -340,6 +340,19 @@ def test_the_failed_command_is_reported_with_its_log(main_repo: Path, worktree: 
     assert "out-2" in failed[0]["tail"] and "ghp_aaa" not in failed[0]["tail"]
 
 
+def test_a_line_cut_by_the_tail_is_not_reported(main_repo: Path, worktree: Path, fake: dict) -> None:
+    """読み始めが認証ヘッダーの値の途中なら、切れた行を結果へ写さない（切れた行は伏せ字の規則に当たらない）。"""
+    suites = four_suites(2)
+    value = "v" * 3000 + "SECRETEND"
+    suites[2]["command"] = suites[2]["command"].replace("; exit 3", f"; echo 'Authorization: Bearer {value}'; echo last-line; exit 3")
+    declare(main_repo, None, suites=suites)
+
+    _, out = run_tests(worktree, fake, "whole")
+
+    failed = [row for item in out["items"] for row in item.get("failed_commands", [])]
+    assert "last-line" in failed[0]["tail"] and "SECRETEND" not in failed[0]["tail"]
+
+
 def test_the_summary_is_unchanged_when_everything_passes(main_repo: Path, worktree: Path, fake: dict) -> None:
     declare(main_repo, None, suites=four_suites(None))
 
