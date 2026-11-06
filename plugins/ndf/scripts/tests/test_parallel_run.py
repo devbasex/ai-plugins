@@ -783,6 +783,60 @@ def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatc
     assert run.revive == []
 
 
+def _answers(monkeypatch):
+    """立った答えのイベントを {キー: 値} で集める。"""
+    box = {}
+    monkeypatch.setattr(durable, "set_event", lambda key, value: box.update({key: value}))
+    return box
+
+
+def test_an_answer_to_an_unknown_id_is_held_until_the_question_arrives(monkeypatch, capsys):
+    """一覧に無い id への答えは捨てずに保留して警告を残し、その id の問いが届いたら当てる（#2617）。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    box = _answers(monkeypatch)
+    run.take({"kind": "answer", "id": "q1", "result": "answered", "note": "n", "by": "user"})
+    assert "answer-q1" not in box and "q1" not in run.answered
+    assert "q1" in capsys.readouterr().err
+    run.take({"kind": "ask", "id": "q1", "lane": "la", "question": "?"})
+    assert box["answer-q1"]["result"] == "answered" and box["answer-q1"]["note"] == "n"
+    assert run.questions == [] and "q1" in run.answered and run.held == {}
+
+
+def test_a_held_answer_reaches_a_question_merged_by_cause(monkeypatch):
+    """保留した答えの問いが同じ原因の問いへまとまったら、まとめた問いごと答える。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}, {"name": "lb"}])
+    box = _answers(monkeypatch)
+    run.questions = [{"id": "q0", "kind": "ask", "lane": "la", "cause": "c"}]
+    run.take({"kind": "answer", "id": "q1", "result": "answered"})
+    monkeypatch.setattr(prun, "cause_of", lambda _m: "c")
+    run.take({"kind": "ask", "id": "q1", "lane": "lb"})
+    assert box["answer-q0"]["result"] == box["answer-q1"]["result"] == "answered" and run.questions == []
+
+
+def test_a_held_answer_reaches_a_question_the_workflow_asks_itself(monkeypatch):
+    """耐久ワークフローが自分で立てる問いにも、保留した答えを当てる。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    box = _answers(monkeypatch)
+    run.take({"kind": "answer", "id": "s1", "result": "answered", "choice": ["止める"]})
+    run.ask("spawn", "s1", "la", "起動できない", ["止める"])
+    assert box["answer-s1"]["choice"] == ["止める"] and run.lanes["la"].get("given_up") is True
+
+
+def test_a_repeated_answer_stands_once_and_warns_once(monkeypatch, capsys):
+    """既に答えた id の重複は今のまま 1 回だけで、保留もしない。保留中の id の重複は最初の答えを保つ。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    box = _answers(monkeypatch)
+    run.questions = [{"id": "q1", "kind": "ask", "lane": "la"}]
+    run.reply({"id": "q1", "result": "answered"})
+    box.clear()
+    run.reply({"id": "q1", "result": "rejected"})
+    assert box == {} and run.held == {}
+    capsys.readouterr()
+    run.reply({"id": "q2", "result": "first"})
+    run.reply({"id": "q2", "result": "second"})
+    assert run.held["q2"]["result"] == "first" and capsys.readouterr().err.count("q2") == 1
+
+
 def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     """一時レーンが ask を送って自分のラッパーを止めたときは、「配布の途中で止まった」を問わない（6g）。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])

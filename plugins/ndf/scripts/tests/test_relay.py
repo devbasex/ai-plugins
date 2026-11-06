@@ -2703,6 +2703,107 @@ def test_version_dir_prune_keeps_two_and_in_use(tmp_path):
     assert (base / names[0] / f"inuse-{os.getpid()}").exists()
 
 
+def _idle_dir(tmp_path):
+    d = tmp_path / "relay-10.17.0-00000000"
+    d.mkdir()
+    return d
+
+
+def test_version_dir_foreign_mark_counts_as_in_use(tmp_path):
+    """別のコンテナの印は、こちらで pid が死んで見えても使用中で、消さない（#2583）。"""
+    d = _idle_dir(tmp_path)
+    mark = d / f"inuse-another-container-{dead_pid()}"
+    mark.touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    assert mark.exists()
+
+
+def test_version_dir_prune_keeps_a_dir_marked_by_another_container(tmp_path):
+    base = tmp_path / "ndf"
+    base.mkdir()
+    names = [f"relay-10.17.{i}-0000000{i}" for i in range(5)]
+    for i, n in enumerate(names):
+        (base / n).mkdir()
+        os.utime(base / n, (1000 + i, 1000 + i))
+    (base / names[0] / f"inuse-another-container-{dead_pid()}").touch()
+    relay_version_dir.VersionDir(str(base)).prune()
+    assert version_dirs(base) == sorted([names[0], names[3], names[4]])
+
+
+def test_version_dir_old_foreign_mark_expires_after_the_owner_window(tmp_path):
+    """別のコンテナの印でも、更新が寿命の窓（持ち主の記録と同じ 24 時間）より古ければ消す。"""
+    d = _idle_dir(tmp_path)
+    mark = d / f"inuse-another-container-{dead_pid()}"
+    mark.touch()
+    old = time.time() - relay_version_dir.FOREIGN_WINDOW - 60
+    os.utime(mark, (old, old))
+    assert not relay_version_dir.VersionDir._in_use(str(d))
+    assert not mark.exists()
+
+
+def test_version_dir_foreign_window_is_the_owner_record_window():
+    """寿命の窓は持ち主の記録（`lib/run_owner.py`）の窓と同じ値に保つ。"""
+    import run_owner
+
+    assert relay_version_dir.FOREIGN_WINDOW == run_owner.WINDOW
+
+
+def test_version_dir_own_container_mark_follows_the_pid(tmp_path):
+    """同じコンテナの印は pid の生死で決まる。"""
+    d = _idle_dir(tmp_path)
+    live, dead = relay_version_dir.inuse_name(os.getpid()), relay_version_dir.inuse_name(dead_pid())
+    (d / live).touch()
+    (d / dead).touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    assert (d / live).exists() and not (d / dead).exists()
+
+
+def test_version_dir_legacy_mark_is_read_as_before(tmp_path):
+    """旧形式の `inuse-<pid>` は持ち主が分からず、今までどおり pid の生死で読む。"""
+    d = _idle_dir(tmp_path)
+    (d / f"inuse-{os.getpid()}").touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    os.unlink(d / f"inuse-{os.getpid()}")
+    (d / f"inuse-{dead_pid()}").touch()
+    assert not relay_version_dir.VersionDir._in_use(str(d))
+    assert not [n for n in os.listdir(d) if n.startswith("inuse-")]
+
+
+def test_version_dir_refresh_keeps_a_long_run_within_the_window(tmp_path, monkeypatch):
+    """動いているラッパーは印の時刻を進める。別のコンテナの窓を過ぎても消されず、消えた印は置き直す。"""
+    d = _idle_dir(tmp_path)
+    (d / relay_version_dir.MANIFEST).touch()
+    mark = pathlib.Path(relay_version_dir.claim_inuse(str(d)))
+    old = time.time() - relay_version_dir.FOREIGN_WINDOW - 60
+    os.utime(mark, (old, old))
+    monkeypatch.setattr(relay_version_dir, "_refreshed_at", 0.0)
+    relay_version_dir.refresh_inuse(str(d))
+    assert time.time() - mark.stat().st_mtime < 60
+    mark.unlink()
+    relay_version_dir.refresh_inuse(str(d))  # 間隔の中は何もしない
+    assert not mark.exists()
+    monkeypatch.setattr(relay_version_dir, "_refreshed_at", 0.0)
+    relay_version_dir.refresh_inuse(str(d))
+    assert mark.exists()
+
+
+def test_relay_tick_refreshes_the_mark_even_when_halted(monkeypatch):
+    """動いている間の tick が印の時刻を進める。止まったラッパーも、プロセスが居る間は使用中である。"""
+    seen = []
+    monkeypatch.setattr(relay_run.version_dir, "refresh_inuse", lambda: seen.append(1))
+    relay_run.Relay.tick(types.SimpleNamespace(halted=True))
+    assert seen == [1]
+
+
+def test_version_dir_release_claims_removes_both_forms(tmp_path):
+    """入れ替えの前の版が旧形式で置いた印も、新しい形の印も外す。"""
+    d = _idle_dir(tmp_path)
+    (d / f"inuse-{os.getpid()}").touch()
+    (d / relay_version_dir.inuse_name(os.getpid())).touch()
+    relay_version_dir.release_claims(str(d))
+    assert os.listdir(d) == []
+
+
 def test_version_dir_half_written_is_not_pointed(tmp_path, monkeypatch):
     base = tmp_path / "ndf"
     base.mkdir()
@@ -2731,7 +2832,7 @@ def test_version_dir_claim_marks_only_version_dirs(tmp_path):
     base.mkdir()
     name = relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
     got = relay_version_dir.claim_inuse(str(base / name))
-    assert got == str(base / name / f"inuse-{os.getpid()}") and os.path.exists(got)
+    assert got == str(base / name / relay_version_dir.inuse_name(os.getpid())) and os.path.exists(got)
     relay_version_dir.release_inuse(got)
     assert not os.path.exists(got)
     assert relay_version_dir.claim_inuse(str(ROOT / "scripts")) is None  # プラグインのキャッシュには置かない
@@ -4190,8 +4291,8 @@ def test_swap_runs_next_session_in_new_version_dir(tmp_path, term):
     assert t.starts()[1]["relay_dir"] == str(d)
     assert not (d / "handover.json").exists()
     # 使用中の印は入れ替え後のバージョンディレクトリにだけある
-    assert not (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
-    assert (sw.base / new_name / f"inuse-{t.proc.pid}").exists()
+    assert not (sw.base / sw.old_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
+    assert (sw.base / new_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
     assert "── ndf-relay: 区間 2 ──" in t.text and "入れ替えずに" not in t.text
     assert termios.tcgetattr(t.slave) != t.before  # raw のまま中継する
     # 入れ替えた後も停止シグナルファイルの扱いが続く（起動は 2 回のまま）
@@ -4266,7 +4367,7 @@ def test_swap_failure_keeps_current_version(tmp_path, term, case):
     assert sk["section"] == 1 and sk["from"] == sw.old_name and isinstance(sk["seconds"], float)
     assert rows[3]["relay_version_dir"] == sw.old_name and rows[3]["section"] == 2
     assert t.text.count("入れ替えずに今の版で続ける") == 1
-    assert (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    assert (sw.base / sw.old_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
     (d,) = t.relay_dirs()
     assert not (d / "handover.json").exists()
     t.type("quit 0\r")
