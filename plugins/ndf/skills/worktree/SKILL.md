@@ -355,7 +355,7 @@ bash "$TE" down "$WT"                       # 破棄し、割り当てを解放�
 
 **テストのステップは、止まっているテスト環境を自動で起こす。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。
 手で worktree を消すときは先に `down "$WT"` を打つ。順序を逆にすると worktree レジストリから実体を引けなくなる。
-ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を宣言したときだけで、宣言に関わらず
+ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を宣言したときだけで、宣言より優先して
 消すときは `--volumes` を付ける。データを残して止めるのは `stop "$WT"` である。起こし方・破棄の担い手・残った
 ボリュームの消し方も `references/test-execution.md` にある。
 
