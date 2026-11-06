@@ -6089,6 +6089,30 @@
       "context": "ndf-release",
       "meaning": "リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態",
       "pending_source": "issues/issue-2623-design.md"
+    },
+    {
+      "term": "答え待ちの依頼",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーに届いて、まだ答えていない依頼。設計の承認・リリース承認ゲート・承認ゲートの外の問い・耐久ワークフローが自分で立てた問いの 4 種類",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "計画の閾値",
+      "context": "ndf-workflow",
+      "meaning": "計画全体の答え待ちの依頼の件数の閾値。既定は 4 で、これを超えると計画のすべてのレーンを止める",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "レーンの閾値",
+      "context": "ndf-workflow",
+      "meaning": "1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 で、これを超えるとそのレーンを止める",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "答え待ちの停止",
+      "context": "ndf-workflow",
+      "meaning": "答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
+      "pending_source": "issues/issue-2707-requirements.md"
     }
   ]
 }
