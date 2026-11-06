@@ -53,7 +53,7 @@ allowed-tools:
 │   │   ├── inference.py …           #   ハンドラ + tests/
 │   │   └── README.md
 │   ├── .dockerignore                #   ★build context ルート (= vN/) に置く
-│   ├── export_model_to_s3.py        #   成果物を model.tar.gz 化して配布
+│   ├── export_model_to_s3.py        #   成果物を model.tar.gz 化してデプロイ
 │   ├── TRAIN_SPEC.md                #   train↔serve 契約書
 │   └── README.md  *_report.md  executive_summary.md
 └── lab/                             # 版非依存・不採用の探索 (+ README)。「ボツにしたアイデア集」
@@ -130,7 +130,7 @@ flowchart LR
 ## 新しい版を作る・既存を再編する手順
 
 1. **新版 `vN/` を v(N-1) と対等な実体として作る** (既存版に触れない)。`features.py` / `train/` / `inference/`
-   を独自に持たせ、独立してビルド・配布・エンドポイント作成できる状態にする。旧版は並行稼働を続けられる。
+   を独自に持たせ、独立してビルド・デプロイ・エンドポイント作成できる状態にする。旧版は並行稼働を続けられる。
 2. **既存をこの構造へ再編するときは全移動を `git mv`** で行い履歴を保つ。改名 (`10_v2_model`→`10_train_model`) も `git mv`。
 3. 生成データ/成果物の gitignore を新パスに追従させる。
 4. パス参照 (絶対 `OUTPUT_DIR`・Docker build context・ドキュメントの相対リンク) を新構造に更新する。

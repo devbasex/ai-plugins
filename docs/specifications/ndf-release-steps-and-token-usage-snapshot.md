@@ -1,7 +1,7 @@
 # リリースコマンドの設定と、版ごとのトークン消費の記録
 
 リポジトリに固有のリリースの手順は、リポジトリの設定 `.ndf/release.json` が
-「リリースコマンド」として持つ。`release` は手順 3 で、設定に書かれたコマンドを 1 行のコマンド（配布物の
+「リリースコマンド」として持つ。`release` は手順 3 で、設定に書かれたコマンドを 1 行のコマンド（リリース対象の
 `plugins/ndf/scripts/release-steps.py`）で走らせるだけである。このリポジトリはコマンドを 1 つ設定に書き、
 正式版を出すたびに版ごとのトークン消費と所要時間の記録（`docs/metrics/ndf-token-usage/<集計日>.md` /
 `.json`）をリリースの Pull Request へ載せる。この文書は、コマンドの実行と記録の書き出しの契約と、決めたことの
@@ -69,7 +69,7 @@ python3 scripts/token-usage-snapshot.py --released 10.17.9
 
 ```mermaid
 graph LR
-    subgraph ndf["配布物（plugins/ndf）"]
+    subgraph ndf["リリース対象（plugins/ndf）"]
         SK["release の本文<br/>手順 3"]
         RS["release-steps.py"]
         SC["release.schema.json"]
@@ -101,7 +101,7 @@ GitHub へ出すのは `release` の既存の手順（リリースの Pull Reque
 | --- | --- |
 | リリースコマンド | 設定の `steps` が持つ 1 つのコマンド。リリース種別ごとに `release` の手順 3 で走る |
 | リリースの設定 | リポジトリ側に置く `.ndf/release.json`。無ければ何も走らない |
-| リリース種別 | リリースの種類。`production`（本番リリース: 正式版を公開する・本番へ反映する）/ `verification`（検証リリース: 開発版を公開する・検証環境へ反映する） |
+| リリース種別 | リリースの種類。`production`（本番リリース: 正式版を公開する・本番へ反映する）/ `verification`（開発版のデプロイ: 開発版を公開する・検証環境へ反映する） |
 | 書いてよい場所 | コマンドの `writes` が挙げるパスの前置き。コマンドがその外を変えたら失敗にする |
 | 手引き | コマンドの `guide` が指す文書。コマンドが 0 で終わった後、エージェントが判断する部分の書き方を持つ |
 | 記録 | `docs/metrics/ndf-token-usage/<集計日>.md` と同名の `.json` の 1 組 |
@@ -128,7 +128,7 @@ GitHub へ出すのは `release` の既存の手順（リリースの Pull Reque
   10.17.8 は 9 分差）、開発版のたびに残すとほぼ同じ内容の記録が並ぶ。開発版の会話は、次の正式版の
   記録に版の行として入る
 - **記録はリリースの Pull Request に含め、別の Pull Request にしない。** マージとリリースの手順が増えない。
-  記録は配布物の外の `docs/` の下に置くため、`release` の「リリースそのものを目的とする変更は対象外」の
+  記録はリリース対象の外の `docs/` の下に置くため、`release` の「リリースそのものを目的とする変更は対象外」の
   規定にもそのまま収まる
 - **判断の要らない部分はすべてスクリプトにする。** 集計・表・前の行との比・比べるときの注意は記録の
   値と `CHANGELOG.md` から一意に決まる。決まらないのは「なぜその値になったか」で、同じ版の中の作業の
@@ -390,6 +390,6 @@ kiro の席である。kiro の記録はターンに時刻を持たず、記録�
 - [PR #977](https://github.com/devbasex/ai-plugins/pull/977) — リリースごとに記録を残す要求と設計
 - [PR #989](https://github.com/devbasex/ai-plugins/pull/989) — 実装
 - [ndf-instruction-files-check.md](ndf-instruction-files-check.md) — 同じ置き方の設定 `.ndf/instructions.json`
-- [versioning-and-distribution.md](../versioning-and-distribution.md) — 版と配布の正本（「正式版を出す」）
+- [versioning-and-distribution.md](../versioning-and-distribution.md) — 版とリリースの正本（「正式版を出す」）
 - [metrics/ndf-token-usage/README.md](../metrics/ndf-token-usage/README.md) — 記録の読み方と読み取りの手引き
 - 要求と設計の元の文書は `issues/old/issue-893-release-snapshot-requirements.md` と `issues/old/issue-893-release-snapshot-design.md` にある

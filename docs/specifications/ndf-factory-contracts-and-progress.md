@@ -38,7 +38,7 @@ Neural Development Factory の子課題が共有する機械可読な契約（`f
 
 - **含む**: `factory/contracts/`（3 つの JSON Schema・生成した型・検査の関数・`openapi/ingest.yaml`・型のずれの検査）、`factory/api/src/progress/` の受け口・事象の検査・出所の照合・GitHub の翻訳・保存・追記・実行ジョブの token、`factory/api/src/handlers/ingest.ts`、`factory/api/src/testing/run-job-tokens.ts`、`factory/api/src/index.ts` への export、`factory/.env.example` の 5 つの変数の名前
 - **含まない**: GitHub App の導入とリポジトリの登録・実行の制御・ランナー・実行ジョブの token の発行の鍵の置き場と期限、承認の依頼の保存と答えを読む経路、事象からの一覧と詳細の派生と読み出し、使用量の台帳と請求、token の期限より前の取り消し、起票の代行（[起票の依頼と起票の代行](ndf-factory-issue-requests.md)）、DynamoDB の表と GSI・ストリーム・API Gateway の IAM 認可・ロール・秘密などインフラの定義（private リポジトリが作る）
-- プラグインの配布物は、NDF の `issue-file.py create` がランナーの中（環境変数 `NDF_ISSUE_REQUEST_FILE` があるとき）で別のリポジトリへの起票を依頼の行として書き出す分岐だけを持つ。`plugins/` は `factory/` を参照しない（全体の契約の I1）
+- プラグインのリリース対象は、NDF の `issue-file.py create` がランナーの中（環境変数 `NDF_ISSUE_REQUEST_FILE` があるとき）で別のリポジトリへの起票を依頼の行として書き出す分岐だけを持つ。`plugins/` は `factory/` を参照しない（全体の契約の I1）
 
 ## 仕様
 
@@ -172,8 +172,8 @@ graph TD
 | プランの `"フェーズ"` | 写すフェーズの名前 |
 | --- | --- |
 | `設計`・`実装`・`検査` | 同じ名前 |
-| `配布（開発版）` | `取り込み` |
-| `配布（本番）`・`まとめ` | `仕上げ` |
+| `開発版のデプロイ` | `取り込み` |
+| `リリース`・`まとめ` | `仕上げ` |
 
 **ランナーは `step.recorded` に工程の中身を任意の項目として添える（`schema_version` は 1 のまま）。** 項目は `phase`（プランの `"フェーズ"` を写した名前）・`issues`（計画の名前の課題の番号。スプリントで 1 つの計画は持たない）・`files`（その工程の時間の窓 `at − seconds` 〜 `at` に作業場所の git で作られたコミットが触ったファイルと増減の行数。最大 100 件で、外した数を `files_omitted`）・`commit_range`（窓の最初のコミットの親と最後のコミット）・`decisions`（判断の台帳の `decision` の行のうち、`cwd` が作業場所の下で `at` が窓の中のもの。最大 20 件）・`output`（ステップの出力。`work` のステップは作業の報告、`run` のステップはログ。UTF-8 で 32 KiB まで）である。集められない項目は省き、工程の送信は止めない。`output.text`・`decisions` の文・`files` のパスは、送る前に NDF の `secret_redact.py` の 4 つの形の規則と、ランナーが持つ秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールの資格）の置き換えで伏せる。事象 1 件が 256 KiB を超えるときは `output.text` → `files` → `decisions` の順に削り、それでも超えれば工程の中身をすべて外す。同じステップの行から作る `step.recorded` と `usage.recorded` は同じ `at` で送る。
 
@@ -184,7 +184,7 @@ graph TD
 | 課題の欄 | `step.recorded` の `issues` の課題ごとに 1 回ずつ。`issues` が無いか空なら「スプリント全体」の欄 |
 | 課題の欄の Pull Request | 欄の工程の `pull_request` を重複なく。状態は最後の `pr.updated`（無ければ `unknown`）、チェックは名前ごとの最後の `ci.updated` の結論（`null` は実行中） |
 | 工程の費用 | 同じ `job_id`・`payload.step`・`at` の `usage.recorded` の `cost_usd` の和。無ければ `null` |
-| 承認の欄 | ゲート 1・ゲート 2・判断の 3 つ。その種類の最後の `gate.reached` で待ちになり、その後の同じ種類の `gate.answered` で承認・差し戻し（判断は答えた）になる。`gate.reached` の前の答えは状態を変えない |
+| 承認の欄 | 設計承認ゲート・リリース承認ゲート・判断の 3 つ。その種類の最後の `gate.reached` で待ちになり、その後の同じ種類の `gate.answered` で承認・差し戻し（判断は答えた）になる。`gate.reached` の前の答えは状態を変えない |
 | 仕上げの欄 | 振り返り（`step` が `retro`）と棚卸し（`refine`）の行を常に持ち、記録が無ければ「まだ」 |
 | 詳細の件数の上限 | `step.recorded` は新しい方から 2,000 件までで、省いた数を `omitted_steps` に返す。ほかの種類はすべて読み、承認の欄と使用量の和から欠かさない |
 | 詳細の注意の行 | 実行の `attention` をすべて `order_key` の順に。`reason` と `summary` は受けた値のままで、工程の記録の上限で減らない |

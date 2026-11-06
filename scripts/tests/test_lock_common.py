@@ -1,6 +1,6 @@
 """排他の実装を 1 箇所へ寄せた結果を固定する（#293）。
 
-**この束が受け持つのは、寄せ方そのものである。** 関門が持ち主を 1 つに決めることと、
+**この束が受け持つのは、寄せ方そのものである。** 排他の判定が持ち主を 1 つに決めることと、
 陳腐化の判定は `worktree/tests/test_registry.py` と `worktree/tests/test_testenv.py` に
 あり、そちらは書き換えない。ここでは共通ファイルが 1 つであること・4 つの配布先
 ランタイムの配置で読み込めること・読み込めないときに書き込みへ進まないことを見る。
@@ -63,7 +63,7 @@ def test_the_two_stage_gate_lives_in_one_file() -> None:
 
 
 def test_no_other_file_holds_the_gate_of_the_second_stage() -> None:
-    """A1: 握りの目印を作る関門も、共通ファイルの外に複製を持たない。"""
+    """A1: 握りの目印を作る処理も、共通ファイルの外に複製を持たない。"""
     holders = sorted(p.relative_to(ROOT).as_posix() for p in _shell_files() if "/held" in p.read_text(encoding="utf-8"))
 
     assert holders == ["plugins/ndf/scripts/lib/lock-common.sh"], holders
@@ -276,7 +276,7 @@ def test_acquire_rejects_an_empty_directory_without_waiting() -> None:
 
 
 def test_acquire_reclaims_stale_discard_gate_before_taking_stale_lock(tmp_path: Path) -> None:
-    """古い所有者なしロックの古い discard 関門を回収してからロックを取得する。"""
+    """古い所有者なしロックの古い discard の目印を回収してからロックを取得する。"""
     lock = tmp_path / "stale_discard.lock"
     lock.mkdir()
     (lock / "pid").write_text("999999\n", encoding="utf-8")
@@ -291,4 +291,4 @@ def test_acquire_reclaims_stale_discard_gate_before_taking_stale_lock(tmp_path: 
     assert (lock / "token").is_file(), "新しい token が作られている"
     assert (lock / "pid").is_file(), "新しい pid が作られている"
     assert (lock / "held").is_file(), "新しい held が作られている"
-    assert not (lock / "discard").exists(), "古い discard 関門が残っていない"
+    assert not (lock / "discard").exists(), "古い discard の目印が残っていない"

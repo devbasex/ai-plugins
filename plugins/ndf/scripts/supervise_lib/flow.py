@@ -294,16 +294,16 @@ def fill_step(first: bool, stage: list[str], items: list[dict]) -> dict:
 def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None, rerun: list | None = None) -> dict:
     """流すプランの実行の回を選び、重なりの組を数えて標準エラーへ知らせる（耐久ステップの中なので、打ち直しで 2 度出ない）。
 
-    完了か関門の記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
-    `rerun`（キューの続きが続ける対象）のプランは、関門の記録があっても新しい実行の回で流す。
-    関門の記録があるプランは、記録した関門の attention を進捗ログへ書き直す。"""
+    完了か承認ゲートの記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
+    `rerun`（キューの続きが続ける対象）のプランは、承認ゲートの記録があっても新しい実行の回で流す。
+    承認ゲートの記録があるプランは、記録した承認ゲートの attention を進捗ログへ書き直す。"""
     refs: dict[str, dict] = {}
     files: dict[str, list[str]] = {}
     deps: dict[str, list[str]] = {}
     for p in plans:
         body = Path(p).read_text(encoding="utf-8")
         prefix = prefix_of(str(Path(p).resolve()), body, (starts or {}).get(p))  # 開始のステップが違えば別の実行の回
-        gate_ends = p not in (rerun or [])  # 続ける対象は、関門で終えた記録を終わりとして扱わない
+        gate_ends = p not in (rerun or [])  # 続ける対象は、承認ゲートで終えた記録を終わりとして扱わない
         ref = durable.resolve(prefix, finished=lambda out, ends=gate_ends: _finished(out) and (ends or out.get("result") != "関門"))
         refs[p] = {"prefix": prefix, "id": ref.id, "action": ref.action, "output": ref.output}
         if ref.action != "done":
@@ -454,7 +454,7 @@ def _collect_items(plans: list[str], waits: dict[str, tuple[str, int | None]], r
     out_items = []
     for p in plans:
         if p not in waits:
-            out_items.append(queue_files.plan_item(p, refs[p]["output"]))  # 完了か関門の記録があるプランは、記録した結果を返す
+            out_items.append(queue_files.plan_item(p, refs[p]["output"]))  # 完了か承認ゲートの記録があるプランは、記録した結果を返す
             continue
         wid, k = waits[p]
         if wid not in outs:

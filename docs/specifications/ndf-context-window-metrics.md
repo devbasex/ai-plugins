@@ -60,7 +60,7 @@ conductor / supervisor / worker の会話の記録を層の単位で読み、記
 
 **記録を読む部品をライブラリ（`plugins/ndf/scripts/lib/transcript_agents.py`）に 1 つ置く。** `skill-stats`
 が集計に使い、`development-workflow` が中断した記録の一覧と解除の待ちに使う。別の Skill の `scripts/`
-を呼ぶと、配る Skill を絞る配布先で解決できない（`scripts/check-cross-skill-refs.py`）。起動のたびに
+を呼ぶと、配る Skill を絞る導入先のランタイムで解決できない（`scripts/check-cross-skill-refs.py`）。起動のたびに
 台帳を書く案は、記録が既に必要な値を持つため採らなかった。
 
 **層は深さで決め、`description` へ書かせない。** `spawnDepth` が既に深さを持ち、conductor の記録は

@@ -6,7 +6,7 @@
 | design・2 ラウンド目以降、または節が無い | detail |
 | code | 段を持たない |
 
-モデルの段の APPROVE では抜けずに詳細の段へ進み、関門の数とラウンドの上限は変えない。
+モデルの段の APPROVE では抜けずに詳細の段へ進み、承認ゲートの数とラウンドの上限は変えない。
 """
 
 from __future__ import annotations

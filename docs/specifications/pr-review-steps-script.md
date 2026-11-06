@@ -40,7 +40,7 @@
 
 | # | 決定 | 理由 | 採らなかった案 |
 | ---: | --- | --- | --- |
-| 1 | スクリプトを Skill の `scripts/` に `pr-review-steps.py` として置き、`resolve.sh scripts pr-review` で解く | 隣の `../SKILL.md` の観点の節を読むため。配布も Skill のディレクトリと一緒に動く。前例は `fix/scripts/fix-steps.py` | `plugins/ndf/scripts/pr-review-steps.py`（プラグインの根から Skill の本文を読む向きの依存が生まれる） |
+| 1 | スクリプトを Skill の `scripts/` に `pr-review-steps.py` として置き、`resolve.sh scripts pr-review` で解く | 隣の `../SKILL.md` の観点の節を読むため。デプロイも Skill のディレクトリと一緒に動く。前例は `fix/scripts/fix-steps.py` | `plugins/ndf/scripts/pr-review-steps.py`（プラグインの根から Skill の本文を読む向きの依存が生まれる） |
 | 2 | ベースブランチの実在の確認を `lib/repo.py` の `existing_base_branch` に足す。既存の `base_branch` は変えない | 同じ解決の写しが `merged` / `cherry-pick-pr` / `deploy` / `retrospective` にもあり、後で置き換えるときに確認が 2 つにならない。`base_branch` に入れると、宛先の名前として使う `pr-steps.py` にも `git ls-remote` の通信と「無い」の扱いの変化が及ぶ | 確認をスクリプト側に置く |
 | 3 | 指摘ファイルに段の鍵 `stage`（`spec` / `quality`、省けば `quality`）を足す | 「仕様適合を満たさない指摘が 1 件以上なら `REQUEST_CHANGES`」を機械で数えるため。自由な文字列の `category` では書き方が揺れると数え漏れる。値を 2 つに決めれば読めない値を止められる | `severity` に `spec` を足す（重要度は `/ndf:fix` が直すかを決める別の軸で、混ぜると `fix` の判定の表が変わる） |
 | 4 | 外部 AI のプロンプトに `review_criteria.py reviewer` の節を入れない | その節は重要度を `critical` / `major` だけに絞り、pr-review の 4 段の重要度と `minor` / `nit` だけなら `COMMENT` の判定と食い違う。ホストの LLM がレビューするときも渡さないため、委譲の有無で基準が変わらない | 節を入れて pr-review の重要度を 2 段へ寄せる（観点そのものの見直しで、範囲の外） |

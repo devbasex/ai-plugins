@@ -221,7 +221,7 @@ def test_notes_stop_without_the_included_cell(monkeypatch, world, tmp_path):
     """AC8・I7: 「含む PR」の欄が無い承認資料には欄を書かない。"""
     mod = load(monkeypatch, world)
     path = tmp_path / "approval.md"
-    path.write_text("| 項目 | 内容 |\n| --- | --- |\n| 配る中身 | 前 |\n| 検証への配布で確かめたこと | 前 |\n", encoding="utf-8")
+    path.write_text("| 項目 | 内容 |\n| --- | --- |\n| 配る中身 | 前 |\n| 開発版のデプロイで確かめたこと | 前 |\n", encoding="utf-8")
     before = path.read_bytes()
     with pytest.raises(mod.StepError) as e:
         notes(mod, world, path, [13])

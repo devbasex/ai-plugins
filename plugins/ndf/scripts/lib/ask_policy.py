@@ -185,8 +185,8 @@ def judge_ask(tool_input, decl: Declaration) -> Verdict:
 def passing_sources(decl: Declaration) -> list[tuple[str, str]]:
     """人へ回してよい区分と説明の一覧（案内に載せる）。"""
     rows = [
-        ("ndf-gate:1", "承認ゲート 1（設計の承認）"),
-        ("ndf-gate:2", "承認ゲート 2（本番系へ届く操作の承認）"),
+        ("ndf-gate:1", "設計承認ゲート（設計の承認）"),
+        ("ndf-gate:2", "リリース承認ゲート（本番系へ届く操作の承認）"),
         ("ndf-ask:redline:<番号>", "共通原則の C1〜C8・プロジェクトの P・スプリントの R に当たる操作の承認（宣言で外せない）"),
     ]
     builtin_desc = {

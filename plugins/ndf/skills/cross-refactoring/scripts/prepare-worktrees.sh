@@ -29,7 +29,7 @@ SYNC_SHA=${3:-}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # `<...>/skills/cross-refactoring/scripts` の 2 つ上が Skill の置き場所。
-# 共通編集元でも各ランタイムの配布物でも同じ形なので、環境変数に頼らずに解決できる。
+# 共通編集元でも各ランタイムのリリース対象でも同じ形なので、環境変数に頼らずに解決できる。
 SKILLS_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 
 command -v jq >/dev/null 2>&1 || { echo "jq が必要です" >&2; exit 1; }

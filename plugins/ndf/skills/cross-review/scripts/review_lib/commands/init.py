@@ -237,7 +237,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     worktree = (
         str(pathlib.Path(args.worktree).resolve())
         if args.worktree
-        else str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+        else str(workspace_mod._default_worktree_base(".") / github._repo_slug(repo) / f"pr{pr}")
     )
 
     # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
@@ -317,7 +317,7 @@ def _build_initial_review_state(
     """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
     host, host_source, participants = ctx.assignment
     only, _include, _exclude = participants_mod._normalize_participant_args(args)
-    # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで関門 1 へ渡す
+    # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで設計承認ゲートへ渡す
     kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.default_categories)
     return {
         "started_at": review_lib._now(),
@@ -370,7 +370,7 @@ def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktre
     if meta.repo != repo:
         repo = meta.repo
         if not args_worktree:
-            worktree = str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+            worktree = str(workspace_mod._default_worktree_base(".") / github._repo_slug(repo) / f"pr{pr}")
     if meta.rate_remaining is not None:
         review_lib.info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
 

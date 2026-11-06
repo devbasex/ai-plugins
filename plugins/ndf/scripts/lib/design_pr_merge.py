@@ -4,7 +4,7 @@
 （`sprint_loop_select.settle_approved_designs`）の 3 か所で、どれもこの関数だけを使う（設計 #2507 の決定 2）。
 
 - 承認した先端（問いの時点の設計 PR の先頭のコミット）のままのときだけマージする（`merge-when-green --expect-head`）
-- 宛先が本番チャネルに当たるか決められないときはマージしない（承認ゲート 2 を承認ゲート 1 の答えで通さない。決定 3）
+- 宛先が本番チャネルに当たるか決められないときはマージしない（リリース承認ゲートを設計承認ゲートの答えで通さない。決定 3）
 - 必須の検査が緑のときだけマージする。検査の完了は待たない（`probe` で分類し、`passed` と `infra` のときだけ呼ぶ。決定 1）
 - 後片付けは持ち主の周回の境が打つ（`--no-cleanup`。決定 5）
 - 例外を投げず、終了コードを持たない。結果は「マージの結果」の 1 つ（`RESULTS`）にして返す
@@ -148,7 +148,7 @@ def _from_merge(pr: int, head: str, cls: str, code: int, got: dict, se: str, ctx
     if code == 4:
         return _res("conflict", pr, head, f"宛先と衝突している: {summary}", cls, **ctx)
     if code == 10:
-        return _res("production", pr, head, f"宛先が本番チャネルに当たる（承認ゲート 2 で止まった）: {summary}", cls, **ctx)
+        return _res("production", pr, head, f"宛先が本番チャネルに当たる（リリース承認ゲートで止まった）: {summary}", cls, **ctx)
     if code == 75 or (code == 1 and not any(isinstance(i, dict) and i.get("result") == "stopped" for i in items)):
         return _res("not_green", pr, head, f"検査が待ちの上限までに緑にならない（{code}）: {summary}", cls, **ctx)
     return _res("failed", pr, head, f"マージできない（{code}）: {summary}", cls, **ctx)

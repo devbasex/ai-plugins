@@ -1,7 +1,7 @@
-"""配布のコマンドの実行（`release-steps.py`、#893）。
+"""リリースコマンドの実行（`release-steps.py`、#893）。
 
 一時ディレクトリに最小のリポジトリ（`git init` と `.ndf/release.json`）を作り、`--root` で渡す。
-配布のコマンドは `sys.executable -c ...` で書き、シェルを通さない。
+リリースコマンドは `sys.executable -c ...` で書き、シェルを通さない。
 """
 
 from __future__ import annotations
@@ -247,7 +247,7 @@ def _release_steps_module(monkeypatch):
 
 
 def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
-    """配布の PR の待ちは merge-when-green に任せる（上限と取り残されたチェックの再実行を持つ）。"""
+    """デプロイの PR の待ちは merge-when-green に任せる（上限と取り残されたチェックの再実行を持つ）。"""
     mod = _release_steps_module(monkeypatch)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
@@ -286,7 +286,7 @@ def test_wait_and_merge_passes_the_ci_wait_as_the_timeout(monkeypatch):
 @pytest.mark.parametrize("code,expected", [(75, 75), (1, 1), (4, 1)])
 def test_wait_and_merge_returns_infra_wait_as_75(monkeypatch, code, expected):
     """AC11: merge-when-green の基盤待ち（75）は 75 で、中身の失敗（1）は今のとおり 1 で止まる。
-    ベースブランチとの衝突（4。#1917-8）も配布の手順では 1 として止まる。"""
+    ベースブランチとの衝突（4。#1917-8）もリリースの手順では 1 として止まる。"""
     mod = _release_steps_module(monkeypatch)
     summary = "#5 の CI の基盤待ち: Runner が付かずに取り消された（Lint / lint）。再実行 3 回で解けない"
     out = json.dumps({"tool": "merged", "status": "stopped", "summary": summary, "items": []})
@@ -418,7 +418,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     approval.parent.mkdir()
     approval.write_text(
         "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
-        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 開発版のデプロイで確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     before = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -446,7 +446,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
-    assert "| 検証への配布で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
+    assert "| 開発版のデプロイで確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
     assert (
         "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n- 無い材料: レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テスト\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること"
         in text
@@ -496,7 +496,7 @@ def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 検証への配布で確かめたこと | 前の確認 |\n", encoding="utf-8"
+        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 開発版のデプロイで確かめたこと | 前の確認 |\n", encoding="utf-8"
     )
     files = [repo / "CHANGELOG.md", pdir / "README.md", approval]
     before = [f.read_bytes() for f in files]
@@ -575,7 +575,7 @@ def test_bump_rerun_after_the_version_was_raised_is_ok(repo):
 
 
 def fake_gh_list(tmp: Path, out: str, code: int = 0) -> dict:
-    """`gh pr list` の答えを固定する偽の gh を PATH の先頭に置いた環境（自分の配布の照会。#2164）。"""
+    """`gh pr list` の答えを固定する偽の gh を PATH の先頭に置いた環境（自分のデプロイの照会。#2164）。"""
     d = tmp / "fakebin"
     d.mkdir(exist_ok=True)
     (d / "gh").write_text(f"#!/bin/sh\nprintf '%s' '{out}'\nexit {code}\n")
@@ -942,7 +942,7 @@ def test_bump_others_takes_the_decided_level(repo, tmp_path):
     assert res["metrics"]["decided"].endswith("issues/approval.md")
     code, res = others_run(root, env, "--approval", "issues/approval.md", "--set", "playwright-kit=minor")
     assert code == 0 and res["items"][0]["to"] == "2.1.0"
-    assert res["items"][0]["basis"][0] == "承認ゲート 2 で MINOR に決めた"
+    assert res["items"][0]["basis"][0] == "リリース承認ゲートで MINOR に決めた"
     code, res = others_run(root, env, "--decided", "issues/approval.md")
     assert code == 0 and res["items"][0]["to"] == "2.1.0"
 
@@ -1027,7 +1027,7 @@ def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 検証への配布で確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 開発版のデプロイで確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     args = [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13", "--approval", str(approval)]

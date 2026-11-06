@@ -45,9 +45,9 @@ Neural Development Factory の利用者が自分の GitHub のリポジトリを
 
 - **含む**: `factory/api/src/` の取り込み（`repositories/`）・キーの持ち込み（`credentials/`）・GitHub の口（`github/`）・実行の制御（`runs/`）・進捗の記録の読み出し（`progress/read.ts`）・画面向けの経路（`routes/factory.ts`）・ランナー向けの経路と停止の知らせと見回りの handler（`handlers/run-jobs.ts`・`handlers/run-control.ts`）・`index.ts` への export、`factory/runner/`（ランナーとイメージ）、`factory/web/src/pages/` の 3 画面（リポジトリ・キーの持ち込み・スプリントを始める）、`factory/contracts/openapi/runs.yaml`、`factory/.env.example` の 14 の変数の名前
 - **含まない**: 承認の依頼の保存と答えを返す経路の実装（経路の形だけを `runs.yaml` に置く）、手元のマシン（形態 ①）の登録・心拍・受け取りの経路（本書は渡す口の関数だけを持つ）、一覧と詳細の画面、料金と台帳、承認ゲートの外の問い合わせを止める hook と `ask.jsonl` の書き手、ECS・S3・Secrets Manager・DynamoDB・EventBridge・GitHub App の作成などインフラの定義（private リポジトリ）
-- **取り込むリポジトリの起点・テスト・配布・進め方の入力欄は持たない。** ランナーの中の NDF がそのリポジトリの `.ndf/` から読む（全体の契約の決定 8）
+- **取り込むリポジトリの起点・テスト・デプロイ・進め方の入力欄は持たない。** ランナーの中の NDF がそのリポジトリの `.ndf/` から読む（全体の契約の決定 8）
 - **止まった・失敗したスプリントの実行を同じ実行のまま続け直さない。** 新しいスプリントの実行として始める
-- プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
+- プラグインのリリース対象・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
 
 ## 仕様
 
@@ -140,7 +140,7 @@ graph TD
 | `requestResume({sprintRunId, approvalRequestId})` | #2173（答えを保存した後） | 実行と依頼の識別子 | `Promise<{jobId}>`。`START=resume` のジョブを作り起動する | `ResumeRejectedError`（`code` が `not_found` / `not_awaiting_approval` / `sprint_run_busy`）。`sprint_run_busy` は前のジョブの停止を待っている間か、別の再開が先に通ったときで、呼ぶ側は時間をおいて呼び直す |
 | `claimLocalRunJob(accountId)` | #2189（手元のマシンの受け取り） | アカウント | `Promise<{instruction: RunJobInstruction, token} \| null>`。そのアカウントの最も古い `pending` の `local` のジョブ（取り消しの要求の無い実行のもの）を `running` にし、指示と token を 1 回だけ返す | 保存の失敗は投げる |
 | `reportLocalRunJobEnded(jobId)` | #2189（終わりか心拍の切れ） | ジョブ | `Promise<void>`。停止の知らせと同じ処理 | 知らないジョブ・`local` でないジョブ・終わったジョブは何もしない |
-| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`。main へマージした後の配布の実行をジョブの無いときに取り消すと `release_after_main`） |
+| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`。main へマージした後のリリースの実行をジョブの無いときに取り消すと `release_after_main`） |
 | `getSprintRun(sprintRunId)`・`getRegistration(accountId, repositoryId)` | 実行と登録を読む側 | 識別子 | 行か `null` | — |
 
 あわせて `RunControl`・`ResumeRejectedError`・`repoKey`（`owner/name` を小文字にした比較の鍵）と、`ResumeRejectedCode`・`RunControlConfig`・`RunControlDeps`・`RunJob`・`SprintRun`・`RunState`・`JobState` の型を export する。
@@ -201,7 +201,7 @@ graph TD
 | `kind` | `gate1` / `gate2` / `decision`・必須 | 依頼の種類 |
 | `decision` | `approved` / `rejected` | ゲートの答え。判断では持たない |
 | `body` | 文字列か `null` | 承認の理由か判断の本文 |
-| `gate` | 文字列 | スプリント状態ファイルに書く関門の名前。無ければ `kind` を `関門 1` / `関門 2` へ写す |
+| `gate` | 文字列 | スプリント状態ファイルに書く承認ゲートの名前。無ければ `kind` を NDF の記録の名前へ写す（どの版の NDF でも記録できるよう旧名を渡し、新しい版の NDF が正の名前へ寄せて書く） |
 
 ### 実行の制御の値
 
@@ -256,7 +256,7 @@ graph TD
 | 3. NDF の導入 | `NDF_MARKETPLACE` を `NDF_VERSION` の ref（タグかコミット）で `<作業場所>/ndf-marketplace` へ clone し、`claude plugin marketplace add <そのディレクトリ>` と `claude plugin install ndf@<取得元の marketplace.json の name>` を打つ。入った `plugin.json` の版が `NDF_VERSION` と違えば失敗。NDF のスクリプトはこの写しから読む |
 | 4. `job.started` | `ndf_version` は `NDF_VERSION`、`start` は `START` |
 | 5. 状態の復元（`resume`） | `POST /run-jobs/state`（`get`）の URL から取り、`.ndf/tmp`・`.ndf/loop` の下の追跡しないパスだけを戻す（I42） |
-| 6. 答えの記録（`APPROVAL_REQUEST_ID` のある `resume`） | 答えの経路から読む（識別子の無い `resume` は飛ばす。利用上限の後の再開。#2347 の決定 7）。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <関門の名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
+| 6. 答えの記録（`APPROVAL_REQUEST_ID` のある `resume`） | 答えの経路から読む（識別子の無い `resume` は飛ばす。利用上限の後の再開。#2347 の決定 7）。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <承認ゲートの名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
 | 7. conductor | `claude -p <指示> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch`。指示は `new` で `/ndf:development-workflow #<番号> …`、`loop` で `/ndf:development-workflow --loop <LOOP_NAME> --milestones "<LOOP_MILESTONES>"` に `LOOP_BUDGET` の `--budget-<単位> <値>` を足したもの、`resume` で「前回の続きから進めてください。」に手順 6 の指示を足したもの。`EXCLUDE_ISSUES` は `NDF_LOOP_EXCLUDE` として子へ渡す。conductor の最後の `result` の文に `ndf-next` のブロックが 1 つだけあれば、同じ作業場所でその指示の `claude -p` を起動し直す（区間。起動ごとに `section.started`。読み方は [`ndf-next-block.json`](../../plugins/ndf/contracts/forms/ndf-next-block.json)）。ループの周回が締まったか止まる条件が書かれたら次の区間を起動せず、区間が `RUNNER_SECTION_LIMIT`（既定 20）に達するか、`local` で利用上限に当たれば止まる。NDF の worktree は `NDF_WORKTREE_BASE`（`<作業場所>/worktrees`）に置く |
 | 8. 終わり | `POST /run-jobs/state`（`put`）の URL へ状態を保存 → 結果が判断が要るなら `gate.reached`（利用上限で止まったときは送らない） → `job.finished`。手順 1〜8 のどこかが失敗すれば `gate.reached` を送らず `job.finished`（`failed`） |
 
@@ -449,7 +449,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 | 翻訳 | `progress.jsonl` の `step`・`attention` が契約に合う事象になり、`REPO` の Pull Request だけが付くこと（`pr` の URL を含む）。計画の名前からフェーズと課題、`modelUsage` からモデルごとの使用量ができること。代わりの判断の記録から `decision.delegated` ができ、形の違う記録は送らないこと |
 | 切り詰め | 300 KiB の承認資料が 256 KiB 以下に切られ、案内が残ること |
 | 送信 | 5xx と接続の失敗は同じ冪等の鍵で送り直し、4xx は送り直さないこと |
-| 答えの記録 | 関門の名前が NDF の名前へ写り、差し戻しが明示され、状態ファイルが目録の `sprint.json` と見分けられること。`resume` が状態を戻し答えを記録してから続け、`gate.reached` と `job.finished`（`gate`）を送って 0 で終わること |
+| 答えの記録 | 承認ゲートの名前が NDF の名前へ写り、差し戻しが明示され、状態ファイルが目録の `sprint.json` と見分けられること。`resume` が状態を戻し答えを記録してから続け、`gate.reached` と `job.finished`（`gate`）を送って 0 で終わること |
 | 状態（I42） | 追跡する `.ndf/pace.json` と状態ディレクトリの外を含む保存の復元を断ること |
 | claude の呼び方 | `managed` は Bedrock とタスクの役割で API キーもアクセスキーも置かないこと。`local` は手元の資格を渡し受け口の token を渡さないこと。`byok` の API キーは子の環境にだけ置かれること |
 | 版と終了コード（I39・I43） | 2 本目のジョブの `NDF_VERSION` が 1 本目と同じこと。入った版が違えば `failed`、`job.finished` が送れなければ 1 であること。50 分ごとに導入の token を取り直すこと |
@@ -467,5 +467,5 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 - 経路の契約: [factory/contracts/openapi/runs.yaml](../../factory/contracts/openapi/runs.yaml)
 - サービスのディレクトリと API の入口: [factory/README.md](../../factory/README.md)
 - 代わりの判断を残す問い合わせの guard（#2206）: [ndf-ask-guard.md](ndf-ask-guard.md)、記録の形: [plugins/ndf/scripts/lib/ask_ledger.py](../../plugins/ndf/scripts/lib/ask_ledger.py)
-- 版と配布の規則（ランナーが導入する NDF に当たる）: [版と配布の正本](../versioning-and-distribution.md)
+- 版とリリースの規則（ランナーが導入する NDF に当たる）: [版とリリースの正本](../versioning-and-distribution.md)
 - 用語: [用語集](../glossary.md)

@@ -171,11 +171,13 @@ def _presented(d: Path, k: int = 1) -> None:
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):
     d = tmp_path / "org"
     _presented(d)
-    pe.put_json(pe.batch_release_dir(d, 3, 1) / "answer.json", {"gates": [{"name": "関門 2", "by": "mvv", "verdict": "approve"}]})
+    pe.put_json(
+        pe.batch_release_dir(d, 3, 1) / "answer.json", {"gates": [{"name": "リリース承認ゲート", "by": "mvv", "verdict": "approve"}]}
+    )
     got = pe.settle_batch(tmp_path, d, BATCH, 3, {"items": [{"result": "完了"}]}, run=_fake_run(True))
     assert got["result"] == "released" and got["prod_pr_url"] == "https://github.com/o/r/pull/900"
     assert "main_merged" in pe.read_json(d / "progress" / "3.json")["stages"]
-    # MVV 判定が通して承認ゲート 2 で止まらなかった提示は auto 真で書き返す
+    # MVV 判定が通してリリース承認ゲートで止まらなかった提示は auto 真で書き返す
     assert pe.read_json(d / "presented" / "3-1.json")["auto"] is True
     for f in ("progress/3.json", "results/3.json", "presented/3-1.json"):
         assert pe.file_errors({"file": f, "body": pe.read_json(d / f)}) == []

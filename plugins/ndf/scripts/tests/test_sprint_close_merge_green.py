@@ -143,7 +143,7 @@ def repo(tmp_path):
     (root / "keep.txt").write_text("x\n", encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
-    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR は承認ゲート 2 に当たらない
+    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR はリリース承認ゲートに当たらない
     return root
 
 
@@ -190,7 +190,7 @@ def call(script, args, env, cwd):
 
 # --- sprint-close --------------------------------------------------------------
 
-DIST_PROD = "## 配布の記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nスプリント: PR #11 / #12\n"
+DIST_PROD = "## リリース記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nスプリント: PR #11 / #12\n"
 
 
 def verify_block(ver, rows):
@@ -205,12 +205,12 @@ def issues_of(out):
 
 def test_sprint_close_four_outcomes(repo, gh):
     gh.set(
-        records={"20": {"body": "old\n## 配布の記録\n段階: 検証\nスプリント: PR #99\n", "comments": [{"body": DIST_PROD}]}},
+        records={"20": {"body": "old\n## リリース記録\n段階: 検証\nスプリント: PR #99\n", "comments": [{"body": DIST_PROD}]}},
         bodies={"11": "Fixes #1, closes #2", "12": "Resolves #3 and fixes other/x#4"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["CLOSED"], "o/r#3": ["OPEN"], "other/x#4": [None]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo
     )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed" and res["o/r#1"]["cmd"] == "gh issue reopen 1 --repo o/r"
@@ -228,18 +228,18 @@ def test_sprint_close_failed_when_close_does_not_take(repo, gh):
         issues={"o/r#1": ["OPEN"]},
         close_works=False,
     )
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["cmd"] == "gh issue close 1 --repo o/r"
 
 
 def test_sprint_close_kept_open_before_production(repo, gh):
     gh.set(
-        records={"20": {"body": "## 配布の記録\n段階: 検証（止めた）\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n", "comments": []}},
+        records={"20": {"body": "## リリース記録\n段階: 検証（止めた）\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n", "comments": []}},
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 0 and out["status"] == "ok"
     assert issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert "closed" not in gh.get()
@@ -255,7 +255,7 @@ def test_sprint_close_verification_per_issue(repo, gh):
         issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"], "o/r#3": ["OPEN"]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
     )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed"
@@ -267,31 +267,31 @@ def test_sprint_close_verification_per_issue(repo, gh):
 def test_sprint_close_no_verification_record_keeps_all(repo, gh):
     gh.set(records={"20": {"body": DIST_PROD, "comments": []}}, bodies={"11": "Fixes #1", "12": ""}, issues={"o/r#1": ["OPEN"]})
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
     )
     assert code == 0 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
 
 
 def test_sprint_close_empty_list_is_2(repo, gh):
-    gh.set(records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}})
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    gh.set(records={"20": {"body": "## リリース記録\n段階: デプロイなし（文書だけ）\n", "comments": []}})
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
 
 
 def test_sprint_close_dry_run_writes_nothing(repo, gh):
     gh.set(
-        records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}},
+        records={"20": {"body": "## リリース記録\n段階: デプロイなし（文書だけ）\n", "comments": []}},
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo
     )
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "would_close"
     assert "closed" not in gh.get()
 
 
-MULTI_GENERATION_RECORD = """## 配布の記録
+MULTI_GENERATION_RECORD = """## リリース記録
 
 段階: 本番（2026-09-01 10:00 に承認）
 版: 10.13.0 → 10.14.0（MINOR: 旧スプリント）
@@ -302,7 +302,7 @@ MULTI_GENERATION_RECORD = """## 配布の記録
 対象の版: 10.14.0（2026-09-01 11:00）
 合否: 合格（旧版）
 
-## 配布の記録
+## リリース記録
 
 段階: 本番（2026-09-18 10:00 に承認）
 版: 10.14.0 → 10.15.0（MINOR: 新スプリント）
@@ -377,7 +377,7 @@ def test_merge_when_green_ok_when_local_change_blocks_pull(repo, gh, tmp_path):
     # マージの後の取り込みが未コミットの変更に塞がれても、マージは済んでいるので ok・0 で終える（#1685）
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
-    git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛ては承認ゲート 2 に当たらない
+    git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛てはリリース承認ゲートに当たらない
     (main / ".ndf").mkdir()
     (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
     (repo / "keep.txt").write_text("上流\n", encoding="utf-8")
@@ -775,10 +775,10 @@ def test_remove_worktree_evacuates_untracked_and_removes(repo, tmp_path):
 
 
 def test_parse_record_skips_a_distribution_heading_inside_a_fence():
-    """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## 配布の記録` は記録として読まない。"""
-    text = "## 配布の記録\n段階: 配布なし\nスプリント: #5\n\nコメント\n\n```md\n## 配布の記録\n段階: 開発版\n```\n"
+    """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## リリース記録` は記録として読まない。"""
+    text = "## リリース記録\n段階: デプロイなし\nスプリント: #5\n\nコメント\n\n```md\n## リリース記録\n段階: 開発版\n```\n"
     rec = load_sprint_close().parse_record(text)
-    assert rec["stage"] == "配布なし"
+    assert rec["stage"] == "デプロイなし"
     assert rec["sprint_prs"] == [5]
 
 
@@ -789,7 +789,7 @@ def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
     assert {k: v.all_pass for k, v in got.items()} == {("o/r", 7): True, ("o/r", 8): False}
 
 
-# --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
+# --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 
 def declare(repo, wt, rows=None):
@@ -1028,14 +1028,14 @@ def test_promote_does_not_merge_without_a_readable_verified_commit(repo, gh, tmp
 
 
 def test_promote_help_shows_the_verified_commit_argument(gh, repo):
-    """AC9・#2142: promote の --help に照合の引数と、食い違えば承認ゲート 2 へ戻ることが出る。"""
+    """AC9・#2142: promote の --help に照合の引数と、食い違えばリリース承認ゲートへ戻ることが出る。"""
     p = subprocess.run([PY, str(SCRIPTS / "merged-steps.py"), "promote", "--help"], capture_output=True, text=True, env=gh.env)
     text = "".join(p.stdout.split())  # argparse の折り返しを外す
     assert p.returncode == 0 and "--expect-head-from" in text
-    assert "承認ゲート2へ戻す" in text and "--fromverify" in text
+    assert "リリース承認ゲートへ戻す" in text and "--fromverify" in text
 
 
-# --- #2104: 昇格の承認の後のマージは、承認ゲート 2 の承認資料の承認したコミットのときだけ行う ----------------------
+# --- #2104: 昇格の承認の後のマージは、リリース承認ゲートの承認資料の承認したコミットのときだけ行う ----------------------
 
 
 def promote_args(*extra):
@@ -1051,7 +1051,7 @@ def promote_material(tmp_path, sha=X, row="承認したコミット"):
 
 
 def test_promote_gate_writes_the_head_into_the_material(repo, gh, tmp_path):
-    """AC1・AC8・I1: 承認ゲート 2 で止まるとき、最初の読みの先端を資料・metrics・gate の items に載せ、next が資料で照合する。"""
+    """AC1・AC8・I1: リリース承認ゲートで止まるとき、最初の読みの先端を資料・metrics・gate の items に載せ、next が資料で照合する。"""
     declare(repo, *TRYGROUP)
     out_path = tmp_path / "approval-promote.md"
     gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop"), dict(to("main", Y), headRefName="develop")]})
@@ -1090,7 +1090,7 @@ def test_promote_approved_merges_the_approved_commit(repo, gh, tmp_path):
     ],
 )
 def test_promote_approved_stops_when_the_head_moved(repo, gh, tmp_path, seq):
-    """AC3・I3: 先端が承認したコミットと違えば、マージせずに head_moved で 1。next が承認ゲート 2 からのやり直しを示す。"""
+    """AC3・I3: 先端が承認したコミットと違えば、マージせずに head_moved で 1。next がリリース承認ゲートからのやり直しを示す。"""
     declare(repo, *TRYGROUP)
     gh.set(open_prs=[{"number": 9}], pr_seq={"9": seq})
     material = promote_material(tmp_path)

@@ -5,7 +5,7 @@
   （プラグインの根）に置き換えて比べる。他のプランの無いディレクトリで書き出す
 - C-3a の後半: 移す前に書き出したプラン（`fixtures/supervise-contract/runnable/`）を今の `run` で流せる
 - C-3b: 副命令 10 個（と `new` の種別・`history import`）の usage の引数、代表の結果 JSON の鍵と終了コード
-  （`run` の完了・関門で 0 / ほかは 3、`wait` の done 0 / attention 20 / 上限 3）を `contract.json` と突き合わせる
+  （`run` の完了・承認ゲートで 0 / ほかは 3、`wait` の done 0 / attention 20 / 上限 3）を `contract.json` と突き合わせる
 
 固定した値は移す前の版で書き出したものである。移す移行ステップは、この固定を直さずに通す。
 """

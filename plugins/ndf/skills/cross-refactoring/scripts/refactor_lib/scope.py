@@ -1,4 +1,4 @@
-"""`--scope` とテストの置き場所の関門（#436 決定 5・#1334 決定 12）。
+"""`--scope` とテストの置き場所の検査（#436 決定 5・#1334 決定 12）。
 
 **案内だけでは同じ失敗を繰り返す。** 実測では 4 ラウンド続けて同じ理由で項目が落ちた。
 **止めれば、利用者は 1 度だけ範囲を直せばよい。**
@@ -20,7 +20,7 @@ from . import die
 from .pathkinds import lacks_python_tests
 
 # テストの置き場所とみなすディレクトリの名前。**言語をまたいで使われるものだけ**を
-# 並べる。増やすほど「テストの置き場所がある」と誤って判定して関門が素通りする。
+# 並べる。増やすほど「テストの置き場所がある」と誤って判定して検査が素通りする。
 TEST_PATH_SEGMENTS: tuple[str, ...] = (
     "test",
     "tests",
@@ -60,7 +60,7 @@ def _child_test_location(path: str, work: str) -> Optional[str]:
     """配下に実在するテストの置き場所を 1 つ返す。無ければ `None`。
 
     **走査は 1 階層だけである。** 深く潜ると、無関係な階層のテストを根拠にして
-    関門が素通りする。返すのは当たった置き場所であり、渡された親ではない。
+    検査が素通りする。返すのは当たった置き場所であり、渡された親ではない。
     """
     base = pathlib.Path(work) / str(path).strip()
     try:
@@ -138,7 +138,7 @@ def covered_by_roots(location: str, roots: list[str]) -> bool:
 
 
 def scope_problem(scope: Iterable[str], work: str) -> Optional[str]:
-    """関門に引っかかる理由を返す。問題が無ければ `None`。"""
+    """検査に引っかかる理由を返す。問題が無ければ `None`。"""
     listed = list(scope)
     if not test_locations(listed, work):
         return (
@@ -152,7 +152,7 @@ def scope_problem(scope: Iterable[str], work: str) -> Optional[str]:
 
 
 def require_scope_covers_tests(scope: Iterable[str], work: str) -> None:
-    """関門を通す。通らなければ**中断する**（終了コード 4）。"""
+    """検査を通す。通らなければ**中断する**（終了コード 4）。"""
     problem = scope_problem(scope, work)
     if problem:
         die(problem)

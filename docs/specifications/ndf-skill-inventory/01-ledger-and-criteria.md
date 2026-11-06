@@ -25,7 +25,7 @@ python3 plugins/ndf/skills/skill-stats/scripts/skill-stats.py \
 
 | 列 | 意味 |
 | --- | --- |
-| 配布 | 配布先ランタイム。`C` = Claude Code / `X` = Codex / `K` = Kiro。`plugins/ndf/manifests/` の内容 |
+| デプロイ | 導入先のランタイム。`C` = Claude Code / `X` = Codex / `K` = Kiro。`plugins/ndf/manifests/` の内容 |
 | 行数 | `SKILL.md` の行数。運用上限は 500 行 |
 | desc | `description` の文字数。運用目標は 300 文字以内 |
 | frontmatter 設定 | `明示専用` = `disable-model-invocation: true` / `常時注入` = `user-invocable: false` / `wtu` = `when_to_use` あり / `引数` = `argument-hint` あり / `tools` = `allowed-tools` あり |
@@ -54,7 +54,7 @@ python3 plugins/ndf/skills/skill-stats/scripts/skill-stats.py \
 
 ## 台帳
 
-| Skill | 配布 | 行数 | desc | frontmatter 設定 | 計 | 自動 | 明示 | 機会 | 判定 | 判定根拠 |
+| Skill | デプロイ | 行数 | desc | frontmatter 設定 | 計 | 自動 | 明示 | 機会 | 判定 | 判定根拠 |
 | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
 | `branch-fix-strategy` | CXK | 87 | 41 | wtu | 4 | 4 | 0 | 341 | 統合元 | `cherry-pick-pr` とトリガ語が完全重複 |
 | `browser-test` | CK | 159 | 37 | 明示専用 / 引数 / tools | 0 | 0 | 0 | — | 統合元 | ブラウザ自動テストのスクリプト作成と実行工程へ集約 |
@@ -76,14 +76,14 @@ python3 plugins/ndf/skills/skill-stats/scripts/skill-stats.py \
 | `investigation-rules` | CXK | 105 | 54 | wtu | 25 | 25 | 0 | 1271 | 維持 | 起動 25 回が全数自動起動。ただしトリガ `調査` が広すぎるため具体化する |
 | `issue-plan-strategy` | CXK | 358 | 52 | wtu / 引数 / tools | 141 | 38 | 103 | 142 | 維持 | 起動 141 回 |
 | `knowledge-reorg` | — | 269 | 46 | 明示専用 / 引数 / tools | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能） |
-| `logging-guidelines` | CXK | 112 | 43 | wtu | 0 | 0 | 0 | 112 | 発動改善 | 機会 112 に対し起動 0。`paths` は Claude Code 専用で配布先 3 種のうち Codex/Kiro に効かないため、`description` のトリガ語を `logger` `logging` からログ設計の依頼を表す語へ具体化して 3 ランタイム共通で絞る |
+| `logging-guidelines` | CXK | 112 | 43 | wtu | 0 | 0 | 0 | 112 | 発動改善 | 機会 112 に対し起動 0。`paths` は Claude Code 専用で導入先のランタイム 3 種のうち Codex/Kiro に効かないため、`description` のトリガ語を `logger` `logging` からログ設計の依頼を表す語へ具体化して 3 ランタイム共通で絞る |
 | `markdown-writing` | CXK | 203 | 76 | wtu / tools | 40 | 21 | 19 | 874 | 維持 | 起動 40 回 |
 | `mcp-builder` | — | 236 | 31 | — | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能） |
 | `merged` | CXK | 29 | 30 | 明示専用 / 引数 / tools | 248 | 0 | 248 | — | 統合先 | `clean` を吸収。起動 248 回。改名しない |
 | `ml-model-structure` | — | 152 | 55 | wtu / tools | 2 | 0 | 2 | 94 | 維持 | 起動 2 回。`paths` で `analysis/**` に限定する |
 | `ndf-policies` | CXK | 10 | 32 | 常時注入 | 0 | 0 | 0 | — | 維持 | Claude Code では `user-invocable: false` により説明のみが常時注入される。Codex / Kiro は同項目を解釈せず通常の Skill として扱うため、Kiro は [Task 0-9](../../../issues/old/ndf-development-skills/07-tasks.md) で `.kiro/steering/` へ移して回避し、Codex は [Task 0-10](../../../issues/old/ndf-development-skills/07-tasks.md) で `description` に「知識として参照する。手順として実行しない」旨を明記する。いずれのランタイムでも自然文からの発動を前提としないため判定対象外 |
 | `official-skills-autoloader` | — | 121 | 51 | wtu / tools | 0 | 0 | 0 | 97 | 発動改善 | 機会 97 に対し起動 0。各ランタイムの公式 Skill 提供状況を確認したうえで発動条件を見直す |
-| `plan-to-spec` | CXK | 182 | 401 | tools | 0 | 0 | 0 | 2 | 発動改善 | 機会 2 と少なく運用に組み込まれていない。`description` が 401 文字と最長だが、配布が `CXK` で `when_to_use` は Codex/Kiro に効かないため、トリガ語は `description` に残したまま重複した言い換えを削って要約する |
+| `plan-to-spec` | CXK | 182 | 401 | tools | 0 | 0 | 0 | 2 | 発動改善 | 機会 2 と少なく運用に組み込まれていない。`description` が 401 文字と最長だが、デプロイが `CXK` で `when_to_use` は Codex/Kiro に効かないため、トリガ語は `description` に残したまま重複した言い換えを削って要約する |
 | `playwright-browser-connect` | — | 484 | 49 | wtu / tools | 5 | 5 | 0 | 48 | 統合元 | ブラウザ自動テストのスクリプト作成と実行工程へ集約 |
 | `playwright-evidence-drive` | — | 190 | 43 | wtu / tools | 0 | 0 | 0 | 3 | 統合元 | ブラウザ自動テストの証跡とレポート工程へ集約 |
 | `playwright-execution` | X | 101 | 51 | wtu / tools | 3 | 3 | 0 | 94 | 統合元 | ブラウザ自動テストのスクリプト作成と実行工程へ集約 |
@@ -101,7 +101,7 @@ python3 plugins/ndf/skills/skill-stats/scripts/skill-stats.py \
 | `review` | CXK | 337 | 48 | 明示専用 / 引数 / tools | 58 | 1 | 57 | — | 統合先 | `review-branch` を吸収し `--branch` 引数で切り替える。起動 58 回 |
 | `review-branch` | CXK | 129 | 46 | wtu / 引数 / tools | 3 | 3 | 0 | 150 | 統合元 | 対象がローカル差分かの違いのみで、レビュー観点は `review` と同一 |
 | `review-pr-comments` | CXK | 110 | 44 | wtu / 引数 / tools | 0 | 0 | 0 | 0 | 統合元 | 分類・修正・返信が 3 分割されており、`fix` の一連の流れに含まれる |
-| `skill-stats` | — | 103 | 49 | wtu / tools | 0 | 0 | 0 | 1 | 維持 | 測定ツール自体。自然文からの発動を前提としないため判定対象外。配布先がなく（`常時注入` も未指定）ランタイム差分は生じない |
+| `skill-stats` | — | 103 | 49 | wtu / tools | 0 | 0 | 0 | 1 | 維持 | 測定ツール自体。自然文からの発動を前提としないため判定対象外。導入先のランタイムがなく（`常時注入` も未指定）ランタイム差分は生じない |
 | `statusline` | CK | 51 | 47 | 明示専用 / wtu / tools | 3 | 0 | 3 | 16 | 維持 | 起動 3 回 |
 | `sync-main` | CXK | 48 | 44 | 明示専用 / tools | 0 | 0 | 0 | — | 削除 | 既定を準用（起動 0 / 機会は測定不能）。Git 操作 1 コマンドに 48 行を割いており `merged` で代替できる |
 

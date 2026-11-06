@@ -20,7 +20,7 @@ from supervise_lib.claude import TAIL
 from supervise_lib.prompts import SLOW_SYSTEM
 
 
-SLOW_EXIT = 125  # 遅れの見張りがステップを打ち切った（124 の打ち切り・10〜19 の関門と分ける）
+SLOW_EXIT = 125  # 遅れの見張りがステップを打ち切った（124 の打ち切り・10〜19 の承認ゲートと分ける）
 
 
 class SlowAction(Exception):
@@ -121,7 +121,7 @@ class SlowWatch:
         )
 
     def end_watch(self) -> None:
-        """ステップの終わり。成功か関門なら所要（利用上限の待ちを除く）を履歴へ積み、見張りを捨てる。"""
+        """ステップの終わり。成功か承認ゲートなら所要（利用上限の待ちを除く）を履歴へ積み、見張りを捨てる。"""
         w, self.watch = self.watch, None
         cur = self.ctx.state.cur
         if not w or not self.history or not ss.keeps(cur.get("exit")) or cur.get("slow"):

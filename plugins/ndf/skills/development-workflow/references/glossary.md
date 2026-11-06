@@ -20,7 +20,7 @@
 6. `verify` のステップが【インストール確認】を行い、`facts` のステップが【承認資料】を書いて【承認ゲート】を返した。`progress.jsonl` に【attention】の行が載った
 7. リリースの Pull Request の待ちが【スタックしたチェック】で止まる不具合は、起票せず【即時修正】すると決めた。
    修正の Pull Request #1101 を足して、開発版を `10.17.22-dev.2` として出し直した
-8. 【ゲート 2】で【MVV 判定】は【レッドライン】（`.github/workflows/` を触った）に当たり、利用者の承認へ戻った。利用者が承認した
+8. 【リリース承認ゲート】で【MVV 判定】は【レッドライン】（`.github/workflows/` を触った）に当たり、利用者の承認へ戻った。利用者が承認した
 9. conductor は本番のキューと `sprint-state.py update → render → next` を 1 本のバックグラウンドの Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
 10. 最後に `relay.py notice` の【アナウンス】と ndf-next を出して応答を終え、ラッパーが次のセッションを起動した
 
@@ -67,7 +67,7 @@ flowchart TB
 | ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`supervise.py run <プラン> --from <ステップの id>` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | キュー | プランを空いた枠へ順に流す副命令。同時に `--max` 本まで流し、終わると結果を done へ書く | `supervise.py queue <plan.json>... --max 3 --then <plan.json>... --done <パス>` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
-| ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
+| ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
 | セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
 | context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | [context-window.md](context-window.md) の「用語」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |
@@ -95,7 +95,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
 | pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new sprint --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
-| MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` でゲート 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
+| MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` で設計承認ゲート・リリース承認ゲートの事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
 | スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` でコピーする | [project-mvv.md](project-mvv.md) |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |
 | レッドライン | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲。秘密・認証認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・対象外のモード・承認後に変わった MVV | `.ndf/pace.json` の `boundary_paths`、`boundary` | [pace.md](pace.md) の「レッドライン」 |
@@ -112,8 +112,8 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | 承認ゲート | 人手の承認を求める点。取り消せない操作の前の 2 つだけで、増やさない | 報告の `結果: 関門`、結果 JSON の `status: gate`、終了コード 10〜19 | [../SKILL.md](../SKILL.md) の「人手の承認を求める承認ゲート」 |
-| ゲート 1 | 設計 Pull Request のマージ。文書では企画承認に当たる | 承認ラベル `design-approved` | [../SKILL.md](../SKILL.md) の「設計 Pull Request のマージ」 |
-| ゲート 2 | 本番系へ届く操作（本番へのリリースと `operation` の実行）。文書では制作物承認に当たる | `sprint-state.py gate <状態> "関門 2"` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
+| 設計承認ゲート | 設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる | 承認ラベル `design-approved` | [../SKILL.md](../SKILL.md) の「設計 Pull Request のマージ」 |
+| リリース承認ゲート | 本番系へ届く操作（本番へのリリース・`operation` の実行・自動反映の本番チャネルへのマージ）の前に人の承認を求める承認ゲート。documentation モードでは制作物承認に当たる | `sprint-state.py gate <状態> "リリース承認ゲート"` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 承認ラベル | 人間が設計を承認したことを表す Pull Request のラベル。無ければ hook が設計 Pull Request のマージを拒む | `design-approved` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 承認資料 | 承認を求めるときに示すもの。対象を開くためのものと、承認の判断に使うものの 2 層を持つ | 報告の `提示物:`、結果 JSON の `presentation_path`、`issues/approval-<plugin>-v<正式版>.md`（承認資料のコピー） | [approval-request.md](approval-request.md) |
 | エビデンス | 承認資料のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ渡す | `release-steps.py approval-facts`、プランの `facts` のステップ、`mvv-gate.py --material` | [release-steps.md](../../release/references/release-steps.md)、[pace.md](pace.md) の「MVV 判定」 |
@@ -122,12 +122,13 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| リリース | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `配布` | [release](../../release/SKILL.md) |
+| デプロイ | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `デプロイ` | [release](../../release/SKILL.md) |
+| リリース | 本番へのデプロイ。フェーズの名前でもある | プランの `"フェーズ"` の値は `リリース` | [release](../../release/SKILL.md) |
 | リリースプラン | リリースの手順をステップの列として持つプラン | `supervise.py new release`、`--channel dev` / `prod` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、`production: false` の行（検証の環境）へ届くことも開発版に当たる | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
 | 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 正式版 | 本番チャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | タグ `<plugin>--v<版>` | [release](../../release/SKILL.md) の「リリース種別」 |
-| 検証リリース | 開発版と分かる版数での公開か、検証環境への反映。提示して進めてよい | — | [release](../../release/SKILL.md) の「リリース種別」 |
+| 開発版のデプロイ | 開発版と分かる版数での公開か、検証環境への反映。提示して進めてよい | — | [release](../../release/SKILL.md) の「リリース種別」 |
 | インストール確認 | 隔離した HOME で ref からプラグインをインストールし、版と中身が ref と一致するかを確かめる | `release-verification-steps.py verify-install --ref <ブランチ> --expect <版>`、プランの `verify` のステップ、`fast.verify` | [release-verification-steps.py](../../../scripts/release-verification-steps.py) の docstring |
 | リリース完了の確認 | 公開が済んだことを、リリース先の状態から読み取れる値 | `release` の結果 JSON の `items[]` | [completion-check.md](../../release/references/completion-check.md) の「用語」 |
 | スタックしたチェック | 実行が終わったのに pending のまま残った CI のチェック。1 度だけ再実行し、再び残れば止まる | `merged-steps.py merge-when-green --stale-after <秒>`、`items` の `rerun` / `stuck` | [merged](../../merged/SKILL.md) の `merge-when-green` |
@@ -161,8 +162,8 @@ flowchart TB
 | 指摘ファイル | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル。投稿は書いた者でなく、読む側のスクリプトが行う | `<席>-review-pr<番号>-round<R>-payload.json`、`pr-review-steps.py` の `findings.json` | [cross-review](../../cross-review/SKILL.md)、[pr-review](../../pr-review/SKILL.md) |
 | doc-lint | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | `doc-lint.py`、プランの `doc-lint` のステップ | [doc-lint.py](../../../scripts/doc-lint.py) の docstring |
 | 用語チェック | プロジェクトの用語集の形と、文書の追加した行の廃止した語・未登録の語を見るチェック。LLM を使わない | `glossary.py check`、設計のフェーズの `glossary-check` のステップ | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
-| モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) |
-| 詳細レビュー | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りの節を見る | 状態ファイルの `rounds[].stage: "detail"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) |
+| モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
+| 詳細レビュー | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りの節を見る | 状態ファイルの `rounds[].stage: "detail"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
 
 ## 記録と状態
 

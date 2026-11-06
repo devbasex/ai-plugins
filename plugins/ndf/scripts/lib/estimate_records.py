@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Literal
 
 import clock
+import legacy_values
 import schema
 
 SCHEMA = 1
@@ -27,7 +28,7 @@ ACTUALS = "actuals.jsonl"
 ESTIMATES = "estimates.jsonl"
 DECL = Path(".ndf") / "estimate.json"
 # 見積もりの完了条件。supervise のプランの `フェーズ` と同じ語で、この順に進む
-PHASES = ("設計", "実装", "検査", "配布（開発版）", "配布（本番）")
+PHASES = ("設計", "実装", "検査", "開発版のデプロイ", "リリース")
 OUTCOMES = ("成功", "承認ゲート", "失敗", "取り消し")
 ITEM_KEYS = ("requirements", "information", "spread", "verification", "environment", "rework")
 ITEM_VALUES = ("軽", "重", "判定できない")
@@ -121,7 +122,7 @@ class Estimate(schema.Shape):
     id: str
     issue: int | None = None
     task: str | None = None
-    done: Literal["設計", "実装", "検査", "配布（開発版）", "配布（本番）"]
+    done: Literal["設計", "実装", "検査", "開発版のデプロイ", "リリース"]
     items: Items
     config: Config
     values: Values
@@ -147,6 +148,8 @@ def check_actual(row: dict) -> None:
 
 def check_estimate(row: dict) -> None:
     """見積もりの記録の 1 行の形を検査する（A・H・L・C を足した欄は知らない項目として落ちる。I1）。"""
+    if "done" in row:
+        row["done"] = legacy_values.to_current("phase", row["done"])
     _check_row(Estimate, row, "estimates")
 
 
@@ -285,8 +288,12 @@ def read_actuals(directory: Path | str) -> list[dict]:
 
 
 def read_estimates(directory: Path | str) -> list[dict]:
-    """見積もりの記録の行。無ければ []。"""
-    return _read_rows(Path(directory) / ESTIMATES)
+    """見積もりの記録の行。無ければ []。旧い値の完了条件（`done`）は、実績のフェーズと同じく新しい値へ寄せて返す。"""
+    rows = _read_rows(Path(directory) / ESTIMATES)
+    for row in rows:
+        if "done" in row:
+            row["done"] = legacy_values.to_current("phase", row["done"])
+    return rows
 
 
 def human_row(issues: list[int], seconds: float, what: str | None) -> dict:
@@ -365,7 +372,7 @@ def run_table(rows: list[dict], alive: Callable[[Run], bool] | None = None) -> d
                 rid,
                 str(r.get("plan") or ""),
                 [int(i) for i in r.get("issues") or [] if isinstance(i, int)],
-                r.get("phase") or None,
+                legacy_values.to_current("phase", r.get("phase")) or None,
                 str(r.get("at") or ""),
                 bool(r.get("from")),
                 bool(r.get("imported")),
@@ -401,6 +408,11 @@ class IssueActual:
     config: dict = field(default_factory=dict)
     finished: str | None = None
     runs: list[Run] = field(default_factory=list)
+
+    @property
+    def ai_worked(self) -> bool:
+        """スクリプトの run 以外のステップがあるか。無ければ A は AI の実行量を表さない（機械のプランの秒だけ）。"""
+        return any(s.get("type") != "run" for r in self.runs for s in r.steps)
 
 
 def _collect_issue_runs(table: dict[str, Run], done: str, since_ts: float | None) -> dict[int, IssueActual]:

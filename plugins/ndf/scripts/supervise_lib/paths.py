@@ -45,7 +45,7 @@ def default_refactor_budget_minutes() -> int:
     return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
 
 
-HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
+HERE = SELF.parent  # デプロイしたスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
     "sync-check": f"python3 {SELF} sync-check --commit",
@@ -76,7 +76,7 @@ def _prepare_deps(wt, **kw) -> str | None:
 def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
     """作業ツリーの起点（起点のコミット → 起点 → base_branch → 宣言の順）を決め、origin なら fetch する。(起点, 誤りの文) を返す。
 
-    「起点のコミット」は作業ツリーだけが読む（まとめた配布の本番のプランが承認したコミットを入れる）。版の判定と
+    「起点のコミット」は作業ツリーだけが読む（まとめたリリースの本番のプランが承認したコミットを入れる）。版の判定と
     probe の {base} は「起点」（`origin/<ベースブランチ>`）を読むため、承認したコミットを「起点」へ入れない。"""
     base = plan.get("起点のコミット") or plan.get("起点")
     if not base:

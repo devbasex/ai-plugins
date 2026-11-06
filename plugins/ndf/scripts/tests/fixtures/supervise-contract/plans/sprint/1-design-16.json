@@ -8,7 +8,7 @@
   "branch": "design/issue-16",
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
-  "規則": "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
+  "規則": "設計の cross-review は上限 3 ラウンドで設計承認ゲートへ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
   "上限": 19,
   "steps": [
     {
@@ -192,7 +192,7 @@
         "review",
         "glossary-recheck"
       ],
-      "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に用語チェックの当たりが残っていれば、関門 1 の提示に載せる",
+      "question": "設計承認ゲート（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に用語チェックの当たりが残っていれば、設計承認ゲートの提示に載せる",
       "choices": [
         "gate",
         "stop"

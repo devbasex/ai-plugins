@@ -465,7 +465,7 @@ def test_version_section_two_digit_minor_passes(tree: Path) -> None:
 
 def test_version_section_heading_removed_fails(tree: Path) -> None:
     """章を消してチェックを通せる状態にしない。"""
-    edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
+    edit(versioning_md(tree), "## 版の付け方と開発版のデプロイ\n", "")
     result = run_check(tree)
     assert result.returncode != 0
     assert VERSIONING_MD_PATH in output_of(result)
@@ -545,8 +545,8 @@ def add_code_fence_to_version_section(tree: Path) -> None:
     """版の付け方の章の先頭へ、シェルのコメントを含む実行例を置く。"""
     edit(
         versioning_md(tree),
-        "## 版の付け方と開発版の配布\n",
-        "## 版の付け方と開発版の配布\n"
+        "## 版の付け方と開発版のデプロイ\n",
+        "## 版の付け方と開発版のデプロイ\n"
         "\n"
         "```bash\n"
         "# 常用する利用者（正式版）\n"
@@ -576,8 +576,8 @@ def test_stale_example_after_a_tilde_code_fence_is_still_found(tree: Path) -> No
     """~~~ の囲みより後ろも走査の対象に残る。閉じてしまうと後続の版数を見落とす。"""
     edit(
         versioning_md(tree),
-        "## 版の付け方と開発版の配布\n",
-        "## 版の付け方と開発版の配布\n"
+        "## 版の付け方と開発版のデプロイ\n",
+        "## 版の付け方と開発版のデプロイ\n"
         "\n"
         "~~~bash\n"
         "# 常用する利用者（正式版）\n"
@@ -746,7 +746,7 @@ def test_version_form_row_inside_code_fence_is_not_counted(tree: Path) -> None:
 
 def test_version_section_heading_removed_reports_only_the_existing_failure(tree: Path) -> None:
     """章の見出しが無いときは、既存の「版数を読み取れない」だけを出し、表と例の報告を重ねない。"""
-    edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
+    edit(versioning_md(tree), "## 版の付け方と開発版のデプロイ\n", "")
     result = run_check(tree)
     assert result.returncode == 1
     assert [line for line in j_errors(result) if "版数を読み取れない" not in line] == []

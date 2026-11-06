@@ -26,6 +26,7 @@ import {
   type Registration,
   type ReleaseStep,
   type RunJob,
+  type Slots,
   type SprintRun,
 } from "./model.ts";
 import type { RunnerPlatform } from "./platform.ts";
@@ -111,7 +112,7 @@ export interface OrganizerHooks {
   newRequestRows(run: SprintRun, events: ReleaseEvents): Promise<OrgRequest[]>;
   tick(accountId: string, repositoryId: number): Promise<void>;
   decide(run: SprintRun, approvalRequestId: string): Promise<ReleaseStep | null>;
-  // 配布の実行のまとめた配布が main へマージ済みか（取り消しを受けても止まった配布として残すかを決める。I63）
+  // リリースの実行のまとめたリリースが main へマージ済みか（取り消しを受けても止まったリリースとして残すかを決める。I63）
   releaseMerged(run: SprintRun): Promise<boolean>;
   sweep(): Promise<void>;
 }
@@ -170,6 +171,57 @@ interface RunEndContext {
 
 // 実行を終わりへ移し、次の周回と待っているループを起こす必要があるときのループの書き込み。起こさないときは null
 type RunMoved = { loopWrite: LoopWrite | undefined } | null;
+
+// 開始と周回の開始が作る実行の行に、admit が確かめて集めた値
+interface NewRunFields {
+  ctx: AccountContext;
+  registration: Registration;
+  repo: string;
+  issues: number[];
+  ndfVersion: string;
+  modelCredentialSecretArn: string | null;
+  loop: DevLoop | null;
+}
+
+// 開始と周回の開始の実行の行。最初のジョブの ID（currentJobId）は呼び手が入れる
+function newSprintRun(fields: NewRunFields, sprintRunId: string, now: string): SprintRun {
+  const { ctx, registration, repo, issues, ndfVersion, modelCredentialSecretArn, loop } = fields;
+  return {
+    sprintRunId,
+    accountId: ctx.accountId,
+    repositoryId: registration.repositoryId,
+    repo,
+    state: "starting",
+    issues,
+    ndfVersion,
+    executionMode: ctx.executionMode,
+    modelCredentialSecretArn,
+    currentJobId: null,
+    jobCount: 1,
+    cancelRequested: false,
+    failureReason: null,
+    createdBy: ctx.userId,
+    createdAt: now,
+    updatedAt: now,
+    ...(loop ? { loopId: loop.loopId, lap: loop.lapRuns + 1 } : {}),
+  };
+}
+
+// 取得した枠に対する開始の断り。使える量の上限、並行を許さない版との組み合わせの順に確かめる
+function refuseBySlots(ctx: AccountContext, registration: Registration, slots: Slots, tokensThisMonth: number | undefined, legacy: boolean): void {
+  const judgment = judgeLimits(ctx, {
+    runningSprintRuns: slots.account,
+    tokensThisMonth,
+    runningRepoRuns: slots.repository,
+    repoMaxRuns: registration.maxConcurrentRuns ?? null,
+  });
+  if (!judgment.allowed) {
+    throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons: judgment.reasons });
+  }
+  if ((legacy && slots.repository > 0) || (!legacy && (slots.legacy ?? 0) > 0)) {
+    throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
+  }
+}
 
 export class RunControl {
   private readonly now: () => Date;
@@ -311,7 +363,7 @@ export class RunControl {
       modelCredentialSecretArn = cred.secretArn;
     }
     // 周回の開始は、枠待ちのループを見回りと実行の終わりが起こし直すたびに通る。表だけで決まる断り（同時の数と古い版）を
-    // GitHub・配布元・月の token の数えより先に判定する（断るループに外の呼び出しを走らせない）
+    // GitHub・取得元・月の token の数えより先に判定する（断るループに外の呼び出しを走らせない）
     if (opts.start === "loop") await this.refuseFullSlots(ctx, registration);
     const fullName = await github.repositoryName(registration.installationId, registration.repositoryId);
     if (!fullName) throw new ConflictError("installation_unreachable", "GitHub App の導入がこのリポジトリへ届きません");
@@ -322,25 +374,7 @@ export class RunControl {
 
     const now = this.iso();
     const loop = opts.loop?.loop ?? null;
-    const run: SprintRun = {
-      sprintRunId: this.newId(),
-      accountId: ctx.accountId,
-      repositoryId: registration.repositoryId,
-      repo: fullName,
-      state: "starting",
-      issues: opts.issues,
-      ndfVersion,
-      executionMode: ctx.executionMode,
-      modelCredentialSecretArn,
-      currentJobId: null,
-      jobCount: 1,
-      cancelRequested: false,
-      failureReason: null,
-      createdBy: ctx.userId,
-      createdAt: now,
-      updatedAt: now,
-      ...(loop ? { loopId: loop.loopId, lap: loop.lapRuns + 1 } : {}),
-    };
+    const run = newSprintRun({ ctx, registration, repo: fullName, issues: opts.issues, ndfVersion, modelCredentialSecretArn, loop }, this.newId(), now);
     const job = this.newJob(run, 1, opts.start, null);
     run.currentJobId = job.jobId;
 
@@ -348,18 +382,7 @@ export class RunControl {
     const tokensThisMonth = ctx.executionMode === "managed" ? await this.tokensThisMonth(ctx.accountId, ctx.plan === "team" ? ctx.userId : null) : undefined;
     for (let attempt = 0; attempt < SLOT_RETRIES; attempt++) {
       const slots = await table.getSlots(ctx.accountId, registration.repositoryId);
-      const judgment = judgeLimits(ctx, {
-        runningSprintRuns: slots.account,
-        tokensThisMonth,
-        runningRepoRuns: slots.repository,
-        repoMaxRuns: registration.maxConcurrentRuns ?? null,
-      });
-      if (!judgment.allowed) {
-        throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons: judgment.reasons });
-      }
-      if ((legacy && slots.repository > 0) || (!legacy && (slots.legacy ?? 0) > 0)) {
-        throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
-      }
+      refuseBySlots(ctx, registration, slots, tokensThisMonth, legacy);
       if (loop && opts.loop) {
         // EXCLUDE_ISSUES は、トランザクションの直前に強い整合で読んだ同じリポジトリの課題の持ち分（決定 11）
         const exclude = (await table.listIssueShares(ctx.accountId, registration.repositoryId)).map((s) => s.number);
@@ -378,7 +401,7 @@ export class RunControl {
         return { ...run, legacy };
       }
       if (result === "loop_changed" || result === "duplicate") return result;
-      // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62）
+      // 古い版の実行は、まとめたリリースが流れている間は始めない（#2439 の I62）
       if (result === "release_running") {
         throw new ConflictError("parallel_unsupported_version", "このリポジトリでは、並行を許さない NDF の版の実行と並べて動かせません");
       }
@@ -502,12 +525,12 @@ export class RunControl {
     return signRunJobToken({ jobId: job.jobId, sprintRunId: run.sprintRunId, repo: run.repo, expiresAt }, await this.deps.signingKey());
   }
 
-  // Factory のオーガナイザーが配布の実行を起こす（組んだ直後と、起動の前で止まったときの起こし直し。#2439）
+  // Factory のオーガナイザーがリリースの実行を起こす（組んだ直後と、起動の前で止まったときの起こし直し。#2439）
   launchJob(run: SprintRun, job: RunJob): Promise<void> {
     return this.launch(run, job);
   }
 
-  // まとめた配布の配布の実行とその最初のジョブ（#2439 の I57・I64）。実行の枠を持たず、使える量の判定にかけない。
+  // まとめたリリースのリリースの実行とその最初のジョブ（#2439 の I57・I64）。実行の枠を持たず、使える量の判定にかけない。
   // 形態・キー・始めた利用者は範囲の実行（base）から写す
   buildReleaseRun(base: SprintRun, seq: number, ndfVersion: string): { run: SprintRun; job: RunJob } {
     const now = this.iso();
@@ -601,22 +624,22 @@ export class RunControl {
     const finished = await this.ensureFinished(run, job, reason);
     const result = finished.payload.result;
     const rawReason = finished.payload.reason ?? null;
-    // release_requested は gate の理由（手動の実行が配布の依頼の答えを待つ。#2439 の I65）で、ジョブの終わりの理由には写さない
+    // release_requested は gate の理由（手動の実行がリリースの依頼の答えを待つ。#2439 の I65）で、ジョブの終わりの理由には写さない
     const finishReason: FinishReason | null = rawReason === "release_requested" ? null : rawReason;
     const now = this.iso();
-    // 配布の依頼と配布の実行の事象（#2439）。受けた依頼の行は実行の移りと同じトランザクションで書く（I59）
+    // リリースの依頼とリリースの実行の事象（#2439）。受けた依頼の行は実行の移りと同じトランザクションで書く（I59）
     const releaseEvents = this.organizer ? await this.deps.reader.findReleaseEvents(run.sprintRunId, job.jobId) : null;
     const requests = releaseEvents && this.organizer && !isReleaseRun(run) ? await this.organizer.newRequestRows(run, releaseEvents) : [];
     const lastRequest = releaseEvents?.requested.at(-1)?.request_id ?? null;
     // 実行と枠を先に移し、ジョブを終わりの状態にするのは最後にする。途中で止まってもジョブは見回りの対象に残り、
     // 次の見回りか停止の知らせの再送が同じ結果でやり直す（実行の移し替えは条件つきで、2 度目は何もしない）
-    // main へマージした後の配布の実行は取り消しを受けても終わらせず、止まった配布として「続きから流す」で仕上げられるようにする（I63）
+    // main へマージした後のリリースの実行は取り消しを受けても終わらせず、止まったリリースとして「続きから流す」で仕上げられるようにする（I63）
     const keepRelease = run.cancelRequested && isReleaseRun(run) && this.organizer !== null && (await this.organizer.releaseMerged(run));
     if (run.currentJobId === job.jobId) {
       const moved = await this.resolveRunEnd(run, job, { finished, reason, finishReason, rawReason, now, releaseEvents, requests, lastRequest, keepRelease });
       if (moved) await this.afterRunMoved(run, moved.loopWrite, true);
     }
-    // 依頼を受けたか配布の実行が動いたら、配布のまとめを進める。落ちてよい（見回りが続ける）
+    // 依頼を受けたかリリースの実行が動いたら、リリースのまとめを進める。落ちてよい（見回りが続ける）
     if (this.organizer && (isReleaseRun(run) || requests.length > 0)) {
       await this.organizer.tick(run.accountId, run.repositoryId).catch((err: Error) =>
         this.log({ event: "organizer_tick_failed", sprint_run_id: run.sprintRunId, error: err.name }),
@@ -631,7 +654,7 @@ export class RunControl {
     }
   }
 
-  // 実行の終わりの状態を決めて書く。取り消し・配布の実行・それ以外（ジョブの結果）の順に分ける
+  // 実行の終わりの状態を決めて書く。取り消し・リリースの実行・それ以外（ジョブの結果）の順に分ける
   private async resolveRunEnd(run: SprintRun, job: RunJob, ctx: RunEndContext): Promise<RunMoved> {
     const { finishReason, now, requests } = ctx;
     if (run.cancelRequested && !ctx.keepRelease) {
@@ -645,7 +668,7 @@ export class RunControl {
     return this.finalizeJobResult(run, job, ctx);
   }
 
-  // 配布の実行は、配布済みで done、承認ゲートか判断で承認待ち、それ以外は止まった配布として承認待ち（I65・決定 11）
+  // リリースの実行は、リリース済みで done、承認ゲートか判断で承認待ち、それ以外は止まったリリースとして承認待ち（I65・決定 11）
   private async finalizeReleaseRun(run: SprintRun, job: RunJob, ctx: RunEndContext): Promise<void> {
     const { table } = this.deps;
     const { now, keepRelease } = ctx;
@@ -775,7 +798,7 @@ export class RunControl {
   }
 
   // 再開の要求（#2173）。承認待ちで動くジョブが無いときだけ resume のジョブを作り起動する（I8・I9）。
-  // 配布の実行は、配布のまとめが答えから再開の手を決める。差し戻しはジョブを起こさず jobId が null（#2439）
+  // リリースの実行は、リリースのまとめが答えから再開の手を決める。差し戻しはジョブを起こさず jobId が null（#2439）
   async requestResume(input: { sprintRunId: string; approvalRequestId: string }): Promise<{ jobId: string | null }> {
     const { table, reader } = this.deps;
     const run = await table.getRun(input.sprintRunId);
@@ -788,7 +811,7 @@ export class RunControl {
       throw new ResumeRejectedError("not_awaiting_approval");
     }
     if (run.currentJobId !== null) throw new ResumeRejectedError("sprint_run_busy");
-    // 配布の依頼の答えを待つ実行と止まった配布は、承認の依頼の答えでは再開しない（配布のまとめが再開する）
+    // リリースの依頼の答えを待つ実行と止まったリリースは、承認の依頼の答えでは再開しない（リリースのまとめが再開する）
     if (run.awaitingReason) throw new ResumeRejectedError("not_awaiting_approval");
     const seq = run.jobCount + 1;
     let releaseStep: ReleaseStep | null = null;
@@ -811,7 +834,7 @@ export class RunControl {
     return { jobId: job.jobId };
   }
 
-  // 手動の実行の配布の答えの再開（#2439）。実行がこの依頼を待つときだけ、条件つきの書き込みで resume のジョブを作る。
+  // 手動の実行のリリースの答えの再開（#2439）。実行がこの依頼を待つときだけ、条件つきの書き込みで resume のジョブを作る。
   // 待っていなければ not_waiting（取り消し・終わり・別の理由や別の依頼での承認待ち）、ジョブが動いていれば busy
   async resumeForRelease(sprintRunId: string, requestId: string): Promise<"resumed" | "busy" | "not_waiting"> {
     const { table } = this.deps;
@@ -827,8 +850,8 @@ export class RunControl {
     return "resumed";
   }
 
-  // 止まった配布の実行を「続きから流す」（#2439 の F7）。止まった配布の承認待ちのときだけ書く。配布の実行は作り直さない（I57）
-  // organizer を渡すと、まとめた配布の状態の戻しを同じトランザクションで書く（間に見回りが止まった印を書き戻さない）
+  // 止まったリリースの実行を「続きから流す」（#2439 の F7）。止まったリリースの承認待ちのときだけ書く。リリースの実行は作り直さない（I57）
+  // organizer を渡すと、まとめたリリースの状態の戻しを同じトランザクションで書く（間に見回りが止まった印を書き戻さない）
   async resumeRelease(run: SprintRun, step: ReleaseStep, organizer?: OrganizerWrite): Promise<boolean> {
     const job = this.newJob(run, run.jobCount + 1, "release", null);
     job.releaseStep = step;
@@ -843,9 +866,9 @@ export class RunControl {
     const run = await table.getRun(sprintRunId);
     if (!run || run.accountId !== ctx.accountId) throw new NotFoundError("sprint_run_not_found", "スプリントの実行が見つかりません");
     if (isTerminalRun(run.state)) throw new ConflictError("already_finished", "このスプリントの実行は終わっています");
-    // main へマージした後の配布の実行は取り消さない（取り消すと配布の仕上げも次の配布も進まない。I63）
+    // main へマージした後のリリースの実行は取り消さない（取り消すとリリースの仕上げも次のリリースも進まない。I63）
     if (run.currentJobId === null && isReleaseRun(run) && this.organizer && (await this.organizer.releaseMerged(run))) {
-      throw new ConflictError("release_after_main", "main へマージした配布は取り消せません。止まった配布は続きから流してください");
+      throw new ConflictError("release_after_main", "main へマージしたリリースは取り消せません。止まったリリースは続きから流してください");
     }
     if (run.currentJobId === null) {
       const lw = await this.loopWriteFor(run, null, { runState: "cancelled", failureReason: null, finishReason: null });
