@@ -167,6 +167,14 @@ def pipeline_cmd(supervise: str, d: Path) -> str:
     return f"{supervise} queue {d / 'present.json'} --then {d / 'release.json'} --done {d / 'done.json'}"
 
 
+def record_answer_cmd(d: Path, seq: int, k: int) -> str:
+    """確定の後に利用者の承認を答えの記録（`answer.json`）へ書く 1 行。提示のプランの `approve` がこの記録を読む。"""
+    from gate_answer import RELEASE_GATE
+
+    script = Path(__file__).resolve().parents[1] / "sprint-state.py"
+    return f"python3 {script} gate {d / 'answer.json'} '{RELEASE_GATE}' --what 'まとめたリリース {seq} の提示 {k}' --by user --outcome approved"
+
+
 def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: Optional[Callable] = None) -> Path:
     """`releases/<連番>/<提示>/` に提示のプランと本番のプランと答えの記録（`answer_state`）を書き、置き場を返す。
 

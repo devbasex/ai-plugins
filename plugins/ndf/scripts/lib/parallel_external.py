@@ -211,7 +211,7 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
         }
     done = rd / "release-done.json"
     if step.startswith("confirm:"):
-        gate = f"python3 {Path(__file__).resolve().parents[1] / 'sprint-state.py'} gate {rd / 'answer.json'} '{RELEASE_GATE}' --what 'まとめたリリース {seq} の提示 {k}' --by user --outcome approved"
+        gate = pr.record_answer_cmd(rd, seq, k)
         steps = [gate, f"{supervise} run {rd / 'present.json'} --from approve", f"{supervise} queue {rd / 'release.json'} --done {done}"]
         return {
             **out,

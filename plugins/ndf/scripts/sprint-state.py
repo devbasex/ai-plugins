@@ -260,7 +260,6 @@ def cmd_update(a) -> dict:
 
 def cmd_gate(a) -> dict:
     # 並列の設計プランが同じ承認ゲートを書く（mvv の記録と handoff の取り消し）ため、読んで書く間を排他にする
-    a.name = gate_answer.accept(a.name)
     with locks.exclusive(a.sprint, timeout=60):
         return gate_locked(a)
 
@@ -545,7 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("gate")
     s.add_argument("sprint")
-    s.add_argument("name")
+    s.add_argument("name", type=gate_answer.accept)
     s.add_argument("--what", help="何を承認したか（--withdraw のとき以外は要る）")
     s.add_argument("--at")
     s.add_argument("--by", choices=("user", "mvv"), default="user", help="誰が承認ゲートを通したか（既定 user）")

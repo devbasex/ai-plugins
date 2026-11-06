@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Optional
 
 import durable
-from gate_answer import RELEASE_GATE
 import legacy_values
 import parallel_lane as pl
 import parallel_plan as pp
@@ -567,7 +566,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
     if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k:
         done = d / "release-done.json"
-        gate = f"python3 {HERE / 'sprint-state.py'} gate {d / 'answer.json'} '{RELEASE_GATE}' --what 'まとめたリリース {n} の提示 {k}' --by user --outcome approved"
+        gate = pr.record_answer_cmd(d, n, k)
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
         return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
                 "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
