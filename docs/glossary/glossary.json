@@ -5397,6 +5397,18 @@
       "pending_source": "issues/issue-2616-requirements.md"
     },
     {
+      "term": "配布の組み方",
+      "context": "ndf-workflow",
+      "meaning": "配布の依頼を受けたときに、まとめた配布をどう扱うか。組む・組まない・組めないの 3 つがあり、宣言から決まる",
+      "pending_source": "issues/issue-2616-design.md"
+    },
+    {
+      "term": "組み直しの依頼",
+      "context": "ndf-workflow",
+      "meaning": "組めなかった配布の依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない",
+      "pending_source": "issues/issue-2616-design.md"
+    },
+    {
       "term": "一時レーン",
       "context": "ndf-workflow",
       "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",

@@ -383,6 +383,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別 | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 配布の依頼 | — | レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request） | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | まとめた配布 | — | オーガナイザーが複数のレーンの Pull Request を 1 つの版として出す配布。提示のプランと本番のプランからなる | — | — | — |
+| 配布の組み方 | — | 配布の依頼を受けたときに、まとめた配布をどう扱うか。組む・組まない・組めないの 3 つがあり、宣言から決まる | — | — | — |
+| 組み直しの依頼 | — | 組めなかった配布の依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない | — | — | — |
 | 一時レーン | — | 並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 保留の周回 | — | 並列の計画のループのレーンで、答えを待たずに締めた周回（配布待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 配布待ち | — | 配布の依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
