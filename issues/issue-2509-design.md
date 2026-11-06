@@ -95,9 +95,10 @@
 | `relay_lib/runtime.py` の `enter` | 副命令の振り分けの前に、`UV_PROJECT_ENVIRONMENT` が共有の環境を指していれば外す（古い版の NDF のスクリプトから継いだ値を含む） | 変える |
 | `lib/parallel_run.py` の `relay` | 統括役の CLI の起動を `relay_proc`（新設。終了コード・標準出力・標準エラーを持つ結果を返す）へ寄せ、戻り値の形 `(終了コード, 統一 JSON レポート)` は保つ | 変える |
 | `lib/parallel_run.py` の `step_observe` | 観測の結果に、一覧の終了コード（`code`）と標準エラーの末尾 1 行（`err`）を足す | 変える |
-| `lib/parallel_run.py` の `_observe_run` | 終了コードによらず先に `_track_ls_failure` を呼ぶ。0 以外ならそこで戻り、0 なら既存の観測を通す | 変える |
+| `lib/parallel_run.py` の `_observe_run` | 終了コードを `ls_ok` に控え、終了コードによらず先に `_track_ls_failure` を呼ぶ。0 以外ならそこで戻り、0 なら既存の観測を通す | 変える |
+| `lib/parallel_run.py` の `_run_finished` | `ls_ok` が偽の間は偽を返す（I2） | 変える |
 | `lib/parallel_run.py` の `_track_ls_failure`（新設） | 失敗の回は、一覧の失敗が始まった時刻を持ち、停滞の区切りを超えたら区切りごとに 1 回、一覧の失敗の問いを立てる。成功に戻ったら答えていない一覧の失敗の問いを外す | 足す |
-| `lib/parallel_run.py` の `_Run` | 一覧の失敗の追跡の値（`ls_failed_since`・`ls_ask_until`）を持つ。`ask` は `lane` を持たない問い（`attach` を添えない）を受ける | 変える |
+| `lib/parallel_run.py` の `_Run` | 最後の観測で一覧が成功したか（`ls_ok`）と、一覧の失敗の追跡の値（`ls_failed_since`・`ls_ask_until`）を持つ。`ask` は `lane` を持たない問い（`attach` を添えない）を受ける | 変える |
 | `lib/parallel_answer.py` の `owner_restart` | 自分で立てた問いの種類に `observe` を足し、選んだ答えの `commands` を返す | 変える |
 | `skills/development-workflow/references/parallel.md` | 耐久ワークフローが自分で立てる問いの種類の一覧に `observe` を足す | 変える |
 
@@ -149,9 +150,8 @@ plugins/ndf/
 │   ├── relay_lib/
 │   │   └── runtime.py              # enter
 │   └── tests/
-│       ├── test_deps.py
-│       ├── test_deps_child_env.py  # 受け入れ条件 5・6・8・10（新設）
-│       ├── test_relay_child_env.py # 受け入れ条件 7・8（新設）
+│       ├── test_deps.py            # 受け入れ条件 5・6・8・10
+│       ├── test_relay.py           # 受け入れ条件 7・8
 │       └── test_parallel_run.py    # 受け入れ条件 1〜4
 └── skills/development-workflow/references/parallel.md
 ```
@@ -164,6 +164,7 @@ classDiagram
         +dict lanes
         +list questions
         +float seen_at
+        +bool ls_ok
         +float ls_failed_since
         +float ls_ask_until
         +ask(kind, rid, lane, question, options)
@@ -177,7 +178,7 @@ classDiagram
     _Run ..> ObserveResult : _observe_run が読む
 ```
 
-観測の結果は耐久の記録に残るステップの戻り値で、`code` と `err` を足す。足す前の版で記録した戻り値は `code` を持たないため、無ければ 0（成功）として読む（決定 5）。`ls_failed_since` と `ls_ask_until` は `_Run` の値で、打ち直すと記録からの再生で同じ値に戻る（ほかの値と同じ）。
+観測の結果は耐久の記録に残るステップの戻り値で、`code` と `err` を足す。足す前の版で記録した戻り値は `code` を持たないため、無ければ 0（成功）として読む（決定 5）。`ls_ok`・`ls_failed_since`・`ls_ask_until` は `_Run` の値で、打ち直すと記録からの再生で同じ値に戻る（ほかの値と同じ）。
 
 ## 入出力の契約
 
@@ -251,7 +252,7 @@ stateDiagram-v2
     問い済み --> 正常: 一覧が 0（答えていない問いを外す）
 ```
 
-答えていない一覧の失敗の問いがある間は `run.questions` が空でないため、`_run_finished` は偽を返し、計画は終わらない（既存の条件）。
+答えていない一覧の失敗の問いがある間は `run.questions` が空でないため、`_run_finished` は偽を返し、計画は終わらない（既存の条件）。問いを答えた後でも、最後の観測が失敗なら `ls_ok` が偽のため終わらない（I2）。
 
 ## 非機能の実現方式
 
@@ -302,7 +303,7 @@ stateDiagram-v2
 
 ### 決定 6: 問いが計画の終わりを止め続けないよう、一覧が成功に戻ったら答えていない一覧の失敗の問いを外す
 
-答えていない問いがあると `_run_finished` が偽になり、計画は終われない。一覧が成功に戻れば問いの前提が無くなるため、外して `questions` のイベントを出し直す。外した後に届いた答えは、既存の `reply` が一覧に無い id として捨てる。
+答えていない問いがあると `_run_finished` が偽になり、計画は終われない。一覧が成功に戻れば問いの前提が無くなるため、外して `questions` のイベントを出し直す。外した後に届いた答えは、既存の `reply` が一覧に無い id として保留し、警告を残す。`id` は観測の時刻を含み、同じ id の問いは立たないため、保留した答えはどの問いにも当たらず、計画の終わりも止めない。
 
 問いを残して利用者の答えを待つ形は採らない。一覧が戻った後の答えは何も変えず、待つ間は計画が終われない。
 
