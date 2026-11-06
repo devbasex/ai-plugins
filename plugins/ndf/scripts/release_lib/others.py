@@ -21,7 +21,7 @@ import mdtable
 from release_lib.names import h2_lines, next_h2
 
 OTHERS_HEADING = "## 版を上げる他のプラグイン"
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-steps.py notes）の材料になる PR 本文の節
+CHANGES_HEADING = "## 利用者向けの変化"  # デプロイの説明文（release-steps.py notes）の材料になる PR 本文の節
 MIGRATION_HEADING = "## 移行の手順"  # PR 本文の節・承認資料の節（CHANGELOG の版の節の中では `### 移行の手順`）
 CONSENT_HEADING = "## 同意を求めること"
 CONSENT_LINE = "- [ ] 「版を上げる他のプラグイン」の表の上げ幅で、他のプラグインの版を上げる"
@@ -163,7 +163,7 @@ def read_section(text: str) -> list[OtherPlugin]:
     """承認資料の節を読む。節が無い・表の形が違えば ValueError。「- 無し」なら空。"""
     content = gh_sections.get_section(text or "", OTHERS_HEADING)
     if content is None:
-        raise ValueError(f"承認資料に {OTHERS_HEADING} の節が無い（開発版の配布の others のステップが書く）")
+        raise ValueError(f"承認資料に {OTHERS_HEADING} の節が無い（開発版のデプロイの others のステップが書く）")
     tables = md.tables(content)
     if not tables:
         if [line.strip() for line in content.splitlines() if line.strip()] == ["- 無し"]:

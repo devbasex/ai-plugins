@@ -49,7 +49,7 @@ def queue_words(command: str) -> list[list[str]]:
 def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
     stages = sprint(tmp_path, "--design", "11", "12")
     names = [s["name"] for s in stages]
-    assert names == ["設計", "関門 1", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
+    assert names == ["設計", "関門 1", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "デプロイ", "関門 2", "本番"]
     by = {s["name"]: s for s in stages}
     merge = by["設計 PR のマージ"]
     for n, path in zip((11, 12), merge["plans"]):
@@ -78,10 +78,10 @@ def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
 def test_normal_without_design_chains_from_the_sprint_branch(tmp_path):
     stages = sprint(tmp_path)
     by = {s["name"]: s for s in stages}
-    assert [s["name"] for s in stages] == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
+    assert [s["name"] for s in stages] == ["スプリントブランチ", "実装", "検査", "デプロイ", "関門 2", "本番"]
     assert "command" in by["スプリントブランチ"] and "then_of" not in by["スプリントブランチ"]
-    assert queue_words(by["スプリントブランチ"]["command"]) == [by[n]["plans"] for n in ("スプリントブランチ", "実装", "検査", "配布")]
-    assert by["配布"]["then_of"] == "スプリントブランチ"
+    assert queue_words(by["スプリントブランチ"]["command"]) == [by[n]["plans"] for n in ("スプリントブランチ", "実装", "検査", "デプロイ")]
+    assert by["デプロイ"]["then_of"] == "スプリントブランチ"
 
 
 def test_normal_with_state_passes_the_answer_to_merge_and_release(tmp_path):

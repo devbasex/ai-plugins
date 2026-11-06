@@ -126,7 +126,7 @@ export type ReleaseRequestedEvent = EventCommon & {
   payload: ReleaseRequestedPayload;
 };
 /**
- * NDF が作る配布の依頼の id（<レーンの名前>-r<乱数>）
+ * NDF が作るリリースの依頼の id（<レーンの名前>-r<乱数>）
  */
 export type ReleaseRequestId = string;
 /**
@@ -272,7 +272,7 @@ export interface GateReachedPayload {
   material: string;
   loop?: LoopRef;
   /**
-   * 答えの選択肢の制限。配布の実行が main へのマージの後に判断で止まったときは continue だけを載せる（#2439 の I63）
+   * 答えの選択肢の制限。リリースの実行が main へのマージの後に判断で止まったときは continue だけを載せる（#2439 の I63）
    *
    * @minItems 1
    */
@@ -305,7 +305,7 @@ export interface JobFinishedPayload {
   result: "gate" | "stopped" | "done" | "failed";
   summary: string;
   /**
-   * stopped の理由。section_limit は区間の上限、usage_limit は local の利用上限。release_requested は gate の理由で、手動の実行が配布の依頼を出して答えを待つ（#2439）
+   * stopped の理由。section_limit は区間の上限、usage_limit は local の利用上限。release_requested は gate の理由で、手動の実行がリリースの依頼を出して答えを待つ（#2439）
    */
   reason?: "section_limit" | "usage_limit" | "release_requested";
   /**
@@ -431,7 +431,7 @@ export interface LoopStoppedPayload {
   pending: LoopPending[];
 }
 /**
- * 実行が本番の配布の代わりに出した配布の依頼（#2439）。NDF の置き場の requests/ の写し
+ * 実行がリリースの代わりに出したリリースの依頼（#2439）。NDF の置き場の requests/ の写し
  */
 export interface ReleaseRequestedPayload {
   request_id: ReleaseRequestId;
@@ -442,7 +442,7 @@ export interface ReleaseRequestedPayload {
   requested_at: string;
 }
 /**
- * 配布の実行が承認資料をそろえた提示（#2439）。auto は MVV 判定が承認ゲート 2 を通したとき真
+ * リリースの実行が承認資料をそろえた提示（#2439）。auto は MVV 判定が承認ゲート 2 を通したとき真
  */
 export interface ReleasePresentedPayload {
   seq: number;
@@ -460,19 +460,19 @@ export interface ReleasePresentedPayload {
 export interface ReleasePresentedLane {
   lane: ReleaseLaneName;
   /**
-   * そのレーンが配布の依頼を出したか
+   * そのレーンがリリースの依頼を出したか
    */
   requested: boolean;
 }
 /**
- * 配布の実行の本番の配布が届いた段（#2439）
+ * リリースの実行のリリースが届いた段（#2439）
  */
 export interface ReleaseProgressPayload {
   seq: number;
   stage: "release_branch" | "develop_merged" | "prod_pr_opened" | "main_merged" | "tagged";
 }
 /**
- * 配布の実行の結果（#2439）
+ * リリースの実行の結果（#2439）
  */
 export interface ReleaseSettledPayload {
   seq: number;
@@ -485,7 +485,7 @@ export interface ReleaseSettledPayload {
   reason?: string;
 }
 /**
- * Factory のオーガナイザーが範囲の実行へ返した配布の答え（#2439）
+ * Factory のオーガナイザーが範囲の実行へ返したリリースの答え（#2439）
  */
 export interface ReleaseAnsweredPayload {
   seq: number;

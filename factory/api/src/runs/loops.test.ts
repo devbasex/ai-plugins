@@ -704,7 +704,7 @@ describe("タスクが止まった後の処理（RunControl.finalize の現状�
     expect((await jobOf(ins.JOB_ID)).state).toBe("failed");
   });
 
-  it("手動の実行の gate は承認待ちになり、配布の依頼が無ければ release_requested の理由でも依頼を待たない", async () => {
+  it("手動の実行の gate は承認待ちになり、リリースの依頼が無ければ release_requested の理由でも依頼を待たない", async () => {
     const run = await manual([4]);
     await finishEcs(run.sprint_run_id, { result: "gate", summary: "", reason: "release_requested" });
     const r = await runOf(run.sprint_run_id);

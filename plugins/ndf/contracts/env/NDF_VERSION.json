@@ -1,5 +1,5 @@
 {
   "name": "NDF_VERSION",
   "set_by": "runtime",
-  "summary": "サービスの実行ジョブが入れた NDF の版（開発版は <version>@<コミットの SHA>。#2439）。plugin.json の version と同じなら、配布の依頼の ndf_version へこの値を書く（plugins/ndf/scripts/lib/parallel_external.py）"
+  "summary": "サービスの実行ジョブが入れた NDF の版（開発版は <version>@<コミットの SHA>。#2439）。plugin.json の version と同じなら、リリースの依頼の ndf_version へこの値を書く（plugins/ndf/scripts/lib/parallel_external.py）"
 }

@@ -4,8 +4,8 @@ NDF を Web UI から操作できる Software Factory のサービス（Neural D
 
 ## 概要
 
-- **サービスのコードは根の `factory/` 1 つに閉じる。** `factory/` は自分の `LICENSE` を持ち、どのプラグインの配布物の木（`.claude-plugin/marketplace.json` の `source` が指すディレクトリ。すべて `./plugins/` の下）とも重ならない。ライセンスを差し替えても配布物は変わらない
-- **境目は `python3 scripts/check-service-boundary.py` が見る**（CI のジョブ `service-boundary-check`）。プラグインからサービスへの参照・配布物の木の重なり・インフラの定義・秘密らしい値・`.env` の実ファイル・値を持つ `.env.example`・古い許可を、違反 1 件 1 行で出して終了コード 1 を返す
+- **サービスのコードは根の `factory/` 1 つに閉じる。** `factory/` は自分の `LICENSE` を持ち、どのプラグインのリリース対象の木（`.claude-plugin/marketplace.json` の `source` が指すディレクトリ。すべて `./plugins/` の下）とも重ならない。ライセンスを差し替えてもリリース対象は変わらない
+- **境目は `python3 scripts/check-service-boundary.py` が見る**（CI のジョブ `service-boundary-check`）。プラグインからサービスへの参照・リリース対象の木の重なり・インフラの定義・秘密らしい値・`.env` の実ファイル・値を持つ `.env.example`・古い許可を、違反 1 件 1 行で出して終了コード 1 を返す
 - **インフラの定義（CDK など）と秘密は private リポジトリが持つ。** このリポジトリはインフラから受け取る変数の名前（`factory/.env.example`）だけを持つ
 - **サービス全体の形は「サービス全体の契約」の節が決める。** 子課題はこの形を変えずに作る。変えるときは本書を直す Pull Request を先に出す。本書を直すことが契約を変える手順である
 
@@ -35,9 +35,9 @@ NDF を Web UI から操作できる Software Factory のサービス（Neural D
 
 ## 対象範囲
 
-- **働く範囲はこのリポジトリだけ。** 境界の検査は配布物に入れない（`scripts/` に置く）。サービスが取り込む利用者のリポジトリには何も置かない
+- **働く範囲はこのリポジトリだけ。** 境界の検査はリリース対象に入れない（`scripts/` に置く）。サービスが取り込む利用者のリポジトリには何も置かない
 - **ライセンスは根と同じ MIT のままである。** 切り離す時期と新しいライセンスは利用者が決める
-- **含まない**: private リポジトリ側のインフラ（CDK のスタック・ネットワーク・秘密の管理）、プラグインの配布の仕組みと版の規則の変更
+- **含まない**: private リポジトリ側のインフラ（CDK のスタック・ネットワーク・秘密の管理）、プラグインのデプロイの仕組みと版の規則の変更
 
 ## 仕様
 
@@ -65,7 +65,7 @@ NDF を Web UI から操作できる Software Factory のサービス（Neural D
 | 種類 | 何に当たるか | 直し方 |
 | --- | --- | --- |
 | サービスへの参照 | `plugins/` の下と `.claude-plugin/marketplace.json` で、パスの区切りとして現れる `factory/`（前に語の文字・`.`・`-` が無いもの）、または行き先がサービスのディレクトリのシンボリックリンク | 参照を外す。プラグインからサービスを使わない |
-| 配布物の木の重なり | `source` が根・サービスのディレクトリ・その祖先か子孫を指す。パスは `marketplace.json#<プラグイン名>` で出す | `source` を `plugins/` の下へ戻す |
+| リリース対象の木の重なり | `source` が根・サービスのディレクトリ・その祖先か子孫を指す。パスは `marketplace.json#<プラグイン名>` で出す | `source` を `plugins/` の下へ戻す |
 | インフラの定義 | `cdk.json`・`cdk.context.json`・`.terraform.lock.hcl`、`*.tf`・`*.tf.json`・`*.tfvars`、依存の宣言（`package.json`・`pyproject.toml`・`requirements*.txt`）の中の `aws-cdk-lib` の行、`.json`・`.yaml`・`.yml`・`.template` の CloudFormation の宣言（`AWSTemplateFormatVersion` か `AWS::<種>::<型>`。1 ファイル 1 件）。Markdown の本文は見ない | private リポジトリへ移す |
 | 秘密らしい値 | AWS のアクセスキーの形（`AKIA` か `ASIA` に英大文字と数字 16 字）と、PEM の秘密鍵の始まりの行。許可の行と一致するものを除く | 値を消して環境変数で受ける。偽の値なら、行の末尾の sha256 をそのまま許可の行へ写す |
 | .env の実ファイル | 名前が `.env` か `.env.<何か>` のファイル（`.env.example` を除く） | ファイルを消し、`.gitignore` に足す |
@@ -83,7 +83,7 @@ graph TD
     G -->|はい| A{許可の一覧を読めるか}
     A -->|いいえ| E2
     A -->|はい| L[追跡するファイルを並べる]
-    L --> R[参照と配布物の木を見る]
+    L --> R[参照とリリース対象の木を見る]
     L --> I[インフラの定義を見る]
     L --> K[秘密らしい値と .env を見る]
     K --> M[許可の行と照らし、当たらない許可を集める]
@@ -100,7 +100,7 @@ graph TD
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | I1 | `plugins/` の下と `.claude-plugin/marketplace.json` のどのファイルも、サービスのディレクトリを参照しない（パスの語・シンボリックリンクの行き先） | 「サービスへの参照」で 1 |
-| I2 | どのプラグインの配布物の木も、サービスのディレクトリと重ならない | 「配布物の木の重なり」で 1 |
+| I2 | どのプラグインのリリース対象の木も、サービスのディレクトリと重ならない | 「リリース対象の木の重なり」で 1 |
 | I3 | 追跡するファイルに、インフラの定義が無い | 「インフラの定義」で 1。許可で除けない |
 | I4 | 秘密らしい値は、許可の一覧のファイルと値（sha256）の組に一致するものだけがある。`.env` の実ファイルは無い | 「秘密らしい値」「.env の実ファイル」で 1 |
 | I5 | 許可の行はどれも今の木の 1 か所以上に当たる。ディレクトリ単位・glob の許可は無い | 当たらない行は「古い許可」で 1、形の違う行は 2 |
@@ -258,8 +258,8 @@ graph TD
 ### 実行の単位と NDF の扱い
 
 - **実行ジョブは承認の依頼で終え、答えで新しいジョブを起こす。** 承認までの時間は人が決め数日かかることもあるため、待つ間にコンテナの費用を払わない。コードの状態は GitHub のブランチと Pull Request に、NDF の状態（`sprint.json` と計画の状態ディレクトリ）は S3 に置き、新しいジョブはそこから続ける。並列はスプリントの実行ごとに別のジョブと別の clone を持つことで成り立つ（決定 3）
-- **ランナーは NDF をマーケットプレイスから導入し、版をスプリントの開始で固定する。** `NDF_MARKETPLACE` から導入し、最初の実行ジョブで導入した版を `NDF_VERSION` として記録し、以後のジョブも同じ版を入れる。チャネルは `NDF_CHANNEL` で選ぶ。`plugins/` をパスで読まず、イメージに焼き込まない。プラグインの版と配布の規則がサービスにもそのまま当たる（決定 4）
-- **サービスは取り込むリポジトリの起点・テスト・配布を持たない。** リポジトリの登録が持つのはリポジトリと GitHub App の導入の識別子だけで、ベースブランチ（`.ndf/worktree.json`）・テストのコマンド・配布の手段・進め方（`.ndf/pace.json`）はランナーの中の NDF がそのリポジトリの `.ndf/` から読む。`.ndf/` が無ければ NDF の既定で動く。画面に入力欄を持たず、このリポジトリの形（`develop` 起点・`uv` のテスト）を既定に置かない（決定 8）
+- **ランナーは NDF をマーケットプレイスから導入し、版をスプリントの開始で固定する。** `NDF_MARKETPLACE` から導入し、最初の実行ジョブで導入した版を `NDF_VERSION` として記録し、以後のジョブも同じ版を入れる。チャネルは `NDF_CHANNEL` で選ぶ。`plugins/` をパスで読まず、イメージに焼き込まない。プラグインの版とリリースの規則がサービスにもそのまま当たる（決定 4）
+- **サービスは取り込むリポジトリの起点・テスト・デプロイを持たない。** リポジトリの登録が持つのはリポジトリと GitHub App の導入の識別子だけで、ベースブランチ（`.ndf/worktree.json`）・テストのコマンド・デプロイの手段・進め方（`.ndf/pace.json`）はランナーの中の NDF がそのリポジトリの `.ndf/` から読む。`.ndf/` が無ければ NDF の既定で動く。画面に入力欄を持たず、このリポジトリの形（`develop` 起点・`uv` のテスト）を既定に置かない（決定 8）
 - **翻訳はランナーだけが持つ。** NDF のファイルの形が変わっても、直すのはランナーだけで、受け口・画面・通知・課金は進捗の事象の形だけを知る（決定 6）
 - **サービスの承認は NDF の承認ゲートの答えを運ぶだけにする。** 承認を求めるのはゲート 1・2 だけで、判断は NDF が「止めて人へ戻す」としたときの知らせである。サービスの側で承認を足したり省いたりしない（決定 15）
 
@@ -467,7 +467,7 @@ stateDiagram-v2
 - **CI**: ジョブ `service-boundary-check` は `runtime-plugin-validate.yml` にあり、Pull Request では絞り込まずに走る。push（`main`・`develop`）の `paths` に `factory/**` を持ち、サービスの変更でも走る
 - **必須のチェックへの追加は利用者の作業で、まだ入っていない**（2026-10-30 に ruleset を見て確かめた）。それまでは `scripts/required-checks-allow.json` の `awaiting` にあり、突き合わせのチェックが「追加待ち」と知らせる。ruleset へ足したら `awaiting` から外す
 - **秘密の形の偽の値を足すとき**: 検査を打ち、違反の行の末尾の `（sha256=…）` の値を `path`・`reason` と一緒に許可の一覧へ写す。偽の値を消したら許可の行も消す（残すと「古い許可」で落ちる）
-- **ライセンスを差し替えるとき**: `factory/LICENSE` と根の `README.md` の「ライセンス」の節だけを書き換える。検査とプラグインの配布物は変わらない（I7）
+- **ライセンスを差し替えるとき**: `factory/LICENSE` と根の `README.md` の「ライセンス」の節だけを書き換える。検査とプラグインのリリース対象は変わらない（I7）
 - **サービス全体の契約を変えるとき**: 本書の「サービス全体の契約」を直す Pull Request を先に出し、`factory/contracts/` と各課題の実装をそれに合わせる
 
 ## テスト観点
@@ -476,7 +476,7 @@ stateDiagram-v2
 
 | 観点 | 縛る振る舞い |
 | --- | --- |
-| 配布物が変わらない（I2） | `source` が `./plugins/<名前>` の木で、`factory/` にファイルを足しても消しても 0、各 `source` の追跡ファイルの一覧も変わらない。`source` を `./` か `./factory` にすると「配布物の木の重なり」で 1 |
+| リリース対象が変わらない（I2） | `source` が `./plugins/<名前>` の木で、`factory/` にファイルを足しても消しても 0、各 `source` の追跡ファイルの一覧も変わらない。`source` を `./` か `./factory` にすると「リリース対象の木の重なり」で 1 |
 | 参照の禁止（I1） | `plugins/` の下の `.md`・`.json` と `marketplace.json` に `factory/` のパスを書くと 1。`factory/` を指すシンボリックリンクでも 1。似た語（`software-factory/`・`my_factory/`）と `plugins/` の外の参照は 0 |
 | ライセンスの差し替え（I7） | `factory/LICENSE` を別の文面にしても結果が同じ。`LICENSE` に AWS のアクセスキーの形の値を足すと「秘密らしい値」で 1 |
 | インフラの定義（I3） | `cdk.json`・`aws-cdk-lib` を依存に持つ `package.json`・`.tf`・CloudFormation の YAML がそれぞれ 1。`aws-cdk-lib` の語を書いた `.md` は 0 |
@@ -497,4 +497,4 @@ stateDiagram-v2
 - 契約の定義と型・進捗の受け口・実行ジョブの token・[利用者向けの操作の形](ndf-factory-contracts-and-progress.md#利用者向けの操作の形): [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
 - 境界の検査: [scripts/check-service-boundary.py](../../scripts/check-service-boundary.py)、許可の一覧: [scripts/service-boundary-allow.json](../../scripts/service-boundary-allow.json)
 - 追加待ちの扱い: [必須のチェックの突き合わせ](ci-required-checks-reconcile.md)
-- 版と配布の規則（ランナーが導入する NDF に当たる）: [版と配布の正本](../versioning-and-distribution.md)
+- 版とリリースの規則（ランナーが導入する NDF に当たる）: [版とリリースの正本](../versioning-and-distribution.md)

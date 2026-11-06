@@ -18,7 +18,7 @@
 # 失敗しても（`gh` が無い・issue を取得できない）積む。積めない（リポジトリを特定できない・`jq` が
 # 無い・排他を取れない）ときは標準エラーへ `NOTE:` を残して続ける。鍵は `--repo` があればそのリポジトリ、
 # 無ければ作業ディレクトリの origin である。`--worktree` / `--plan` / `--note` は積まない。
-# 工程名が `配布` で、記録の無い必須の工程があれば、工程ごとに `items` の `kind: "stage-missing"` の要素
+# 工程名が `デプロイ` で、記録の無い必須の工程があれば、工程ごとに `items` の `kind: "stage-missing"` の要素
 # （`result` は missing か conditional、`reason` に記録し直すコマンド）として返す。
 #
 # **結果は 1 行の結果 JSON で返す（#2227）。** 形は `lib/README.md` の「手順のスクリプトの結果」で、
@@ -97,11 +97,12 @@ done
 case "$ISSUE" in
   ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
+[ "$STAGE" = "-" ] || STAGE=$(pj_normalize_stage "$STAGE")
 [ "$STAGE" = "-" ] || wf_is_stage "$STAGE" || sr_bad_args "$TOOL" "工程表に無い工程名です: $STAGE"
 [ -z "$MODE" ] || wf_is_mode "$MODE" || sr_bad_args "$TOOL" "知らないモードです: $MODE"
 [ -z "$PACE" ] || wf_is_pace "$PACE" || sr_bad_args "$TOOL" "知らない進め方です: $PACE"
 
-# `配布` の記録で wf_record_progress が出す案内（`  記録なし: A / B`・`  条件付き: C`）を、工程ごとの
+# `デプロイ` の記録で wf_record_progress が出す案内（`  記録なし: A / B`・`  条件付き: C`）を、工程ごとの
 # `stage-missing` の要素へ移す。標準出力へは出さない（結果 JSON の 1 行を守る）。
 absorb_stage_report() {
   local line label result rest stage
@@ -205,6 +206,7 @@ import sys
 # （振り返りが末尾へ足す 1 行など）を節の外として残す。
 sys.path.insert(0, os.path.join(os.environ["SCRIPT_DIR"], "lib"))
 from gh_sections import SECTION_END, get_section, replace_section  # noqa: E402
+from legacy_values import to_current  # noqa: E402
 
 body = open(sys.argv[1], encoding="utf-8").read()
 heading = os.environ["SECTION_HEADING"]
@@ -236,7 +238,7 @@ if section is not None:
     for line in section.split("\n"):
         hit = re.match(r"- \[x\] (.+?)(?: — (.*))?$", line.strip())
         if hit:
-            done[hit.group(1)] = hit.group(2) or ""
+            done[to_current("stage", hit.group(1))] = hit.group(2) or ""  # 版を上げる前の行は新しい工程名へ移す
     meta = re.search(r"^モード: (\S+)(?: / 進め方: (\S+))?(?: / 作業ツリー: `(.+?)`)?(?: / 計画: `(.+?)`)?$",
                      section, re.M)
     if meta:

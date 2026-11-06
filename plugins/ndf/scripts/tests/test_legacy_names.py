@@ -205,7 +205,7 @@ def test_old_record_labels_are_read(tmp_path):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     for label in ln.record_labels():
-        out = mod.parse_record(f"## 配布の記録\n\n段階: 本番\n{label}PR #7 / PR #8\n")
+        out = mod.parse_record(f"## リリース記録\n\n段階: 本番\n{label}PR #7 / PR #8\n")
         assert out["sprint_prs"] == [7, 8]
 
 

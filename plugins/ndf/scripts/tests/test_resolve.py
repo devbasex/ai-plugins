@@ -1,4 +1,4 @@
-"""`scripts/resolve.sh`（解決の入口）が 4 ランタイム × 開発中 / 配布済みで当たることを確かめる。
+"""`scripts/resolve.sh`（解決の入口）が 4 ランタイム × 開発中 / デプロイ済みで当たることを確かめる。
 
 入口を探すコマンドは `development-workflow/references/scripts-lookup.md` の「入口を探すコマンド」の
 bash のコードブロックにある。テストはそのブロックを読み出し、入口の実物を写した配置の上で
@@ -69,7 +69,7 @@ def run_entry(entry: Path, cwd: Path, home: Path, *args: str, claude: bool = Fal
 
 
 def make_plugin(root: Path, *, entry: bool = True, skills=("fix", "worktree")) -> Path:
-    """配布物を作る。`entry=False` は入口を持たない古い版である。"""
+    """アーティファクトを作る。`entry=False` は入口を持たない古い版である。"""
     (root / "scripts").mkdir(parents=True, exist_ok=True)
     (root / "scripts" / "projects-sync.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     if entry:
@@ -98,7 +98,7 @@ def link_kiro(project: Path, plugin: Path) -> None:
 
 
 def install(runtime: str, home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
-    """ランタイムの配布物を置き、期待するルートと実行の条件を返す。"""
+    """ランタイムのリリース対象を置き、期待するルートと実行の条件を返す。"""
     if runtime == "claude":
         root = install_claude(home)
         return root, {"substitute": root, "claude": True}
@@ -131,14 +131,14 @@ def project(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
 def test_distributed(runtime, tmp_path, home, project) -> None:
-    """配布済み: 利用者のリポジトリからは、そのランタイムの配布物を採る。"""
+    """デプロイ済み: 利用者のリポジトリからは、そのランタイムのリリース対象を採る。"""
     root, kw = install(runtime, home, project, tmp_path)
     assert run_finder(project, home, **kw) == str(root / "scripts")
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
 def test_development(runtime, tmp_path, home) -> None:
-    """開発中: 配布物があっても、現在地のリポジトリの plugins/ndf を先に採る。"""
+    """開発中: リリース対象があっても、現在地のリポジトリの plugins/ndf を先に採る。"""
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     dev = make_plugin(repo / "plugins" / "ndf")
@@ -198,7 +198,7 @@ def test_skill_subcommands(tmp_path, home, project) -> None:
 
 
 def test_skill_not_distributed_exits_3(home, project) -> None:
-    """agy は配布の基準に無い Skill を持たない。理由を標準エラーへ書いて 3 で終わる。"""
+    """agy はデプロイの基準に無い Skill を持たない。理由を標準エラーへ書いて 3 で終わる。"""
     root = make_plugin(home / ".gemini" / "config" / "plugins" / "ndf", skills=("fix",))
     got = run_entry(root / "scripts" / "resolve.sh", project, home, "skill", "cross-review")
     assert got.returncode == 3

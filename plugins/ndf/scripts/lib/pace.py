@@ -93,7 +93,7 @@ LOOP_DEFAULTS = {
     "budget": {"laps": 3, "usd": 60, "hours": 24},
     "same_failure": 2,
     "max_issues": 3,
-    "release_pending_max": 2,  # 配布待ちと質問待ちの周回を合わせた上限（#2436）
+    "release_pending_max": 2,  # リリース待ちと質問待ちの周回を合わせた上限（#2436）
 }  # #2089 の決定 5・8
 
 

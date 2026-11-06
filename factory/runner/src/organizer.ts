@@ -1,5 +1,5 @@
 // Factory のオーガナイザーとの置き場の翻訳（#2439 の腐敗防止層）。NDF が置き場（NDF_ORGANIZER_DIR）へ書く依頼・提示・届いた段・結果の
-// ファイルを進捗の事象へ写し、API の答え・配布済みの範囲・まとめた配布の中身をファイルへ書く。形は NDF の契約
+// ファイルを進捗の事象へ写し、API の答え・リリース済みの範囲・まとめたリリースの中身をファイルへ書く。形は NDF の契約
 // plugins/ndf/contracts/forms/parallel-external.json。API は NDF のファイルを読まない
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -25,8 +25,8 @@ export function laneName(inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "LOOP_N
   return organizerLaneName(inst.SPRINT_RUN_ID, inst.LOOP_NAME);
 }
 
-// NDF へ渡す環境変数（I68）。Factory の実行ジョブでは 1 台の中のオーガナイザーを起動せず、本番の配布は依頼として出す
-// NDF_VERSION は入れた NDF の版（開発版は <version>@<SHA>）。配布の依頼の ndf_version が固定したコミットを落とさないように渡す
+// NDF へ渡す環境変数（I68）。Factory の実行ジョブでは 1 台の中のオーガナイザーを起動せず、リリースは依頼として出す
+// NDF_VERSION は入れた NDF の版（開発版は <version>@<SHA>）。リリースの依頼の ndf_version が固定したコミットを落とさないように渡す
 export function organizerEnv(inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "LOOP_NAME" | "NDF_VERSION">, dir: string): Record<string, string> {
   return { NDF_FACTORY_RUN: "1", NDF_ORGANIZER_DIR: dir, NDF_ORGANIZER_LANE: laneName(inst), NDF_VERSION: inst.NDF_VERSION };
 }
@@ -139,7 +139,7 @@ export async function openRequests(files: OrganizerFiles): Promise<ReleaseReques
     .filter((p): p is ReleaseRequestedPayload => p !== null && !answered.has(p.request_id));
 }
 
-// 置き場のファイルを進捗の事象へ写す。依頼は答えの無いものだけ、配布の実行の事象は配布の実行のジョブだけ（実行の識別子が鍵の頭）
+// 置き場のファイルを進捗の事象へ写す。依頼は答えの無いものだけ、リリースの実行の事象はリリースの実行のジョブだけ（実行の識別子が鍵の頭）
 export async function releaseBodies(files: OrganizerFiles, inst: Pick<RunJobInstruction, "SPRINT_RUN_ID" | "START">): Promise<ReleaseBody[]> {
   const out: ReleaseBody[] = (await openRequests(files)).map((p) => ({ key: p.request_id, event: { type: "release.requested", payload: p } }));
   if (inst.START !== "release") return out;
@@ -158,10 +158,10 @@ export async function releaseBodies(files: OrganizerFiles, inst: Pick<RunJobInst
   return out;
 }
 
-// 配布の実行の conductor への最初の指示（NDF の development-workflow の references/parallel.md の「配布の実行」）
+// リリースの実行の conductor への最初の指示（NDF の development-workflow の references/parallel.md の「リリースの実行」）
 export const RELEASE_PROMPT = "/ndf:development-workflow --parallel-helper --external";
 
-// 手動の実行の再開で、答えの出た配布の依頼を conductor へ渡す指示
+// 手動の実行の再開で、答えの出たリリースの依頼を conductor へ渡す指示
 export function releaseAnswerDirective(requestId: string): string {
-  return `配布の依頼 ${requestId} の答えが置き場（NDF_ORGANIZER_DIR）に届いた。parallel.py await --external で読み、続きを進めてください`;
+  return `リリースの依頼 ${requestId} の答えが置き場（NDF_ORGANIZER_DIR）に届いた。parallel.py await --external で読み、続きを進めてください`;
 }

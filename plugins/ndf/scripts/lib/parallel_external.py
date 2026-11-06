@@ -1,8 +1,8 @@
 """外のオーガナイザーとファイルでやり取りする切り替え口（#2439。契約 `contracts/forms/parallel-external.json`）。
 
 環境変数 `NDF_ORGANIZER_DIR` があるとき、このセッションは外のオーガナイザーのレーン（名前は `NDF_ORGANIZER_LANE`）で、
-本番の配布を自分で組まずに置き場へ配布の依頼を書く。外のオーガナイザーが答え・配布済みの範囲・まとめた配布の中身を
-置き場へ書き、配布の実行は提示・届いた段・結果を書き返す。どちらの書き手も一時ファイルへ書いて名前を付け替え、
+リリースを自分で組まずに置き場へリリースの依頼を書く。外のオーガナイザーが答え・リリース済みの範囲・まとめたリリースの中身を
+置き場へ書き、リリースの実行は提示・届いた段・結果を書き返す。どちらの書き手も一時ファイルへ書いて名前を付け替え、
 読み手は名前の付いたファイルだけを読む。
 
 ```text
@@ -10,11 +10,11 @@
 ├── requests/<依頼の id>.json      # レーンが書く
 ├── answers/<依頼の id>.json       # 外のオーガナイザーが書く
 ├── ranges/<連番>.json             # 外のオーガナイザーが書く
-├── batch.json                     # 外のオーガナイザーが書く（配布の実行だけ）
-├── presented/<連番>-<提示>.json   # 配布の実行が書く
-├── progress/<連番>.json           # 配布の実行が書く
-├── results/<連番>.json            # 配布の実行が書く
-└── releases/<連番>/<提示>/        # 配布の実行の提示のプランと本番のプラン
+├── batch.json                     # 外のオーガナイザーが書く（リリースの実行だけ）
+├── presented/<連番>-<提示>.json   # リリースの実行が書く
+├── progress/<連番>.json           # リリースの実行が書く
+├── results/<連番>.json            # リリースの実行が書く
+└── releases/<連番>/<提示>/        # リリースの実行の提示のプランと本番のプラン
 ```
 """
 
@@ -75,7 +75,7 @@ def session_ndf_version() -> str:
     """このセッションの NDF の版（plugin.json）。読めなければ空。
 
     サービスの実行ジョブは入れた版を `NDF_VERSION` で渡す。開発版は `<version>@<コミットの SHA>` で、plugin.json の
-    version だけでは固定したコミットが落ち、配布の実行が無い開発版のタグを取りに行くため、version が同じならそちらを返す。"""
+    version だけでは固定したコミットが落ち、リリースの実行が無い開発版のタグを取りに行くため、version が同じならそちらを返す。"""
     got = read_json(Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json", {}) or {}
     version = str(got.get("version") or "")
     pinned = os.environ.get("NDF_VERSION") or ""
@@ -88,7 +88,7 @@ def session_ndf_version() -> str:
 
 
 def write_request_file(d: Path, rid: str, lane: str, prs: list[int], issues: list[int], state: Path) -> dict:
-    """配布の依頼 `requests/<id>.json`（#2436 の依頼の形に `ndf_version` を足す）。同じ id の打ち直しは上書きで同じ中身。"""
+    """リリースの依頼 `requests/<id>.json`（#2436 の依頼の形に `ndf_version` を足す）。同じ id の打ち直しは上書きで同じ中身。"""
     msg = {
         "kind": "request",
         "id": rid,
@@ -117,7 +117,7 @@ def answer_files_of(d: Path, ids: list[str]) -> dict[str, dict]:
 
 
 def range_version(d: Path, prs: list[int]) -> Optional[str]:
-    """`prs` を含む配布済みの範囲 `ranges/<連番>.json` の版（無ければ None）。"""
+    """`prs` を含むリリース済みの範囲 `ranges/<連番>.json` の版（無ければ None）。"""
     found = None
     rd = Path(d) / "ranges"
     for p in sorted(rd.glob("*.json"), key=lambda x: int(x.stem) if x.stem.isdigit() else 0) if rd.is_dir() else []:
@@ -127,7 +127,7 @@ def range_version(d: Path, prs: list[int]) -> Optional[str]:
     return found
 
 
-# ---- 配布の実行の側 ----
+# ---- リリースの実行の側 ----
 
 
 def read_batch(d: Path) -> dict:
@@ -138,7 +138,7 @@ def read_batch(d: Path) -> dict:
 
 
 def requests_of(batch: dict) -> list[dict]:
-    """まとめた配布の依頼（`parallel_release.map_lanes` が読む形 {id, lane, prs}）。"""
+    """まとめたリリースの依頼（`parallel_release.map_lanes` が読む形 {id, lane, prs}）。"""
     return [
         {"id": r["id"], "lane": ln["lane"], "prs": list(r.get("prs") or [])}
         for ln in batch.get("lanes") or []
@@ -147,7 +147,7 @@ def requests_of(batch: dict) -> list[dict]:
 
 
 def plan_of(batch: dict):
-    """まとめた配布のレーンを、`parallel_release.map_lanes` が読む並列の計画の形にする（依頼の無いレーンは課題で対応づける）。"""
+    """まとめたリリースのレーンを、`parallel_release.map_lanes` が読む並列の計画の形にする（依頼の無いレーンは課題で対応づける）。"""
     import parallel_plan as pp
 
     lanes = [
@@ -179,7 +179,7 @@ def step_k(step: str, batch: dict) -> int:
 
 
 def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, version_of: Callable, builder=None) -> dict:
-    """まとめた配布の手（`batch.json` の `step`）ごとに流すものを返す（#2436 の一時レーンの `helper` と同じ形）。
+    """まとめたリリースの手（`batch.json` の `step`）ごとに流すものを返す（#2436 の一時レーンの `helper` と同じ形）。
 
     - present / represent: 提示 k の提示のプランと本番のプランを `releases/<連番>/<k>/` に作り、`pipeline` は提示のプラン → 本番のプラン
     - confirm:<k>: 答えの記録 → 提示 k のプランを `approve` から → 提示 k の本番のプラン（確定していない提示の本番のプランは流さない）
@@ -209,7 +209,7 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
         }
     done = rd / "release-done.json"
     if step.startswith("confirm:"):
-        gate = f"python3 {Path(__file__).resolve().parents[1] / 'sprint-state.py'} gate {rd / 'answer.json'} '関門 2' --what 'まとめた配布 {seq} の提示 {k}' --by user --outcome approved"
+        gate = f"python3 {Path(__file__).resolve().parents[1] / 'sprint-state.py'} gate {rd / 'answer.json'} '関門 2' --what 'まとめたリリース {seq} の提示 {k}' --by user --outcome approved"
         steps = [gate, f"{supervise} run {rd / 'present.json'} --from approve", f"{supervise} queue {rd / 'release.json'} --done {done}"]
         return {
             **out,
@@ -260,7 +260,7 @@ def record_presented(d: Path, seq: int, k: int, auto: bool) -> dict:
 
 
 def stages_of(root: Path, version: str, run=subprocess.run) -> list[str]:
-    """本番の配布が届いた段を GitHub で読む（head が `release/v<版>` の `main` 宛ての Pull Request）。"""
+    """リリースが届いた段を GitHub で読む（head が `release/v<版>` の `main` 宛ての Pull Request）。"""
     if not version:
         return []
     head = f"release/v{version}"

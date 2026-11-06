@@ -251,7 +251,7 @@ def approval_present(
     change: 変更量（コミット数・ファイル数・行数など）
     judge: [(項目, 内容)]（判断に使うもの）
     consent: 同意を求める項目の列
-    rollback: 戻し方（配布では取り消しの手段とその限界）
+    rollback: 戻し方（デプロイでは取り消しの手段とその限界）
     sections: [(見出し, 行の列)]。`## 同意を求めること` の前へ、この順で置く
     """
     _validate_present_args(targets, consent, rollback)

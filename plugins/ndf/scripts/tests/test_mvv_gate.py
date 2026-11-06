@@ -96,7 +96,7 @@ def sprint(tmp_path):
         )
     )
     material = tmp_path / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     return {"root": root, "state": state, "mvv": mvv, "material": material, "log": tmp_path / "log.jsonl", "tmp": tmp_path}
 
 
@@ -149,7 +149,7 @@ def test_follow_passes_the_gate_and_is_recorded(sprint):
 
 
 APPROVED = "a" * 40
-MATERIAL = f"# 配布\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 承認したコミット | {APPROVED} |\n"
+MATERIAL = f"# デプロイ\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 承認したコミット | {APPROVED} |\n"
 
 
 @pytest.mark.parametrize(

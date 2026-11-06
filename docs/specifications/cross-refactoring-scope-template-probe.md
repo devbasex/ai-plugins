@@ -52,7 +52,7 @@
 | | 宣言の検査（`project-decl.py check`）・戦略の解決（`test_strategy.resolve`）の振る舞い（字句の不備だけを見るまま） |
 
 ランナーとテンプレートは宣言（`.ndf/project.json` の `test.suites[].scope_command`）か引数（`--round-test` / `--baseline-test` の
-`{paths}` を含む値）で受け、ランナーの名前とコマンドの語は見ない。配布先のリポジトリでも働く。
+`{paths}` を含む値）で受け、ランナーの名前とコマンドの語は見ない。利用先のリポジトリでも働く。
 
 ## 背景
 

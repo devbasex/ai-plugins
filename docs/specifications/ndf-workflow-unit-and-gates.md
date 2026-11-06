@@ -34,7 +34,7 @@
 | 通過記録 | 通過工程とモードを課題ごとに残すファイル。リポジトリの外に置く |
 | 承認ゲート | 人手の承認を求めて工程を止める場所 |
 | 本番チャネル | リリースした版が常用する利用者へ届くブランチ |
-| 本番系 | 利用者が現に使っている配布のチャネル・環境・外部サービス。**チャネルは系の一種である** |
+| 本番系 | 利用者が現に使っているリリースのチャネル・環境・外部サービス。**チャネルは系の一種である** |
 | スプリント | 1 つの版として出す課題と Pull Request のセット。マイルストーンの中から切り出す（マイルストーンは着手の順序を決める単位で、スプリントとは別） |
 | 必須ルール | 分割と並行の手法を担当へ任せたうえで、それでも守る規則 |
 
@@ -356,7 +356,7 @@ symlink を含む）`absent`、存在すれば（ディレクトリを含む）`
 | `merge-fix` と `result_posts.py fix` は `push_fix` の `sent`、`record-fix` は確かめた修正のコミットを `--after-push` に渡し、送らなかったか `design/` でないときは `gh` を呼ばず、`sync` が 0 でないときは記録しない | `plugins/ndf/scripts/tests/test_result_posts.py`・`plugins/ndf/skills/cross-review/tests/` |
 | 閉じる語の読み取りが移設先で同じ結果を返す | `plugins/ndf/skills/merged/tests/` |
 | 参照のリンクが解決できる | `python3 scripts/check-markdown-links.py --root .` |
-| 4 ランタイムのマニフェストと配布物が一致する | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
+| 4 ランタイムのマニフェストとリリース対象が一致する | `bash scripts/build-runtime-plugins.sh --check` / `bash scripts/validate-runtime-plugins.sh` |
 
 ## 運用
 

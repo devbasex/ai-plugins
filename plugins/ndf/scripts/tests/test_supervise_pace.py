@@ -482,7 +482,7 @@ def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path,
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
-    check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]
+    check, release = waves["検査"]["plans"][0], waves["デプロイ"]["plans"][0]
     assert "{queue_prs}" not in Path(release).read_text()
     seen = {}
 

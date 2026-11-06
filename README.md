@@ -25,7 +25,7 @@ codex plugin add ndf@ai-plugins
 ### Kiro CLI と agy
 
 Kiro CLI と agy へはプラグインを配りません。cross-review と cross-refactoring が、別の AI の意見を得る相手役として CLI を起動するだけです（Claude Code か Codex に ndf を入れれば使えます）。
-前の版で入れた手元の扱いは [plugins/ndf/README.md の「agy・Kiro CLI への配布の終了」](./plugins/ndf/README.md#agykiro-cli-への配布の終了) にあります。
+前の版で入れた手元の扱いは [plugins/ndf/README.md の「agy・Kiro CLI へのデプロイの終了」](./plugins/ndf/README.md#agykiro-cli-へのデプロイの終了) にあります。
 
 更新の方法と Slack 通知の設定は [plugins/ndf/README.md](./plugins/ndf/README.md) にあります。
 
@@ -39,7 +39,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 | Pull Request を別の AI 2 者にレビューさせ、指摘が出なくなるまで直す | `/ndf:cross-review <PR番号>` |
 | Pull Request に付いたレビューコメントに対応する | `/ndf:fix <PR番号>` |
 | Pull Request をレビューしてもらう | `/ndf:pr-review <PR番号>` |
-| 変更の大きさに合った進め方（要求の整理から配布まで）を決めて進める | `/ndf:development-workflow` |
+| 変更の大きさに合った進め方（要求の整理からデプロイまで）を決めて進める | `/ndf:development-workflow` |
 | 作業用の git worktree を用意する | `/ndf:worktree` |
 
 呼ばなくても、依頼の内容に合う Skill を AI が選んで使うこともあります（例: 「PR を作って」）。
@@ -104,7 +104,7 @@ Skill のほかに、次のものが入ります。
 
 MIT License。詳細は [LICENSE](./LICENSE) にあります。
 
-Web サービスのディレクトリ [factory/](./factory/README.md)（Neural Development Factory）は、自分の [LICENSE](./factory/LICENSE) を持ちます。今は根と同じ MIT License です。ライセンスを差し替えるときは `factory/LICENSE` とこの節だけを書き換え、プラグインの配布物は変わりません。
+Web サービスのディレクトリ [factory/](./factory/README.md)（Neural Development Factory）は、自分の [LICENSE](./factory/LICENSE) を持ちます。今は根と同じ MIT License です。ライセンスを差し替えるときは `factory/LICENSE` とこの節だけを書き換え、プラグインのリリース対象は変わりません。
 
 ---
 

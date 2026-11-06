@@ -267,7 +267,7 @@ def test_gate_2_and_the_template_keep_their_stages(tmp_path):
     waves = pm.waves_of(tmp_path / "g", [pm.PRD])
     facts = steps_of(load(wave(waves, "承認ゲート 2")["plans"][0]))["facts"]
     repo = str((tmp_path / "g" / "repo").resolve())
-    assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "配布" and facts["next"] == "mvv"
+    assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "デプロイ" and facts["next"] == "mvv"
     assert "deploy-facts --root" in facts["cmd"] and "--out {state_dir}/work/approval-deploy.md" in facts["cmd"]
     repo = pa.make_repo(tmp_path / "t", {"auto": pa.AUTO}, form=True)
     p, out = pa.new_sprint(tmp_path / "t", repo, pa.sprint_state(tmp_path / "t", "auto"))

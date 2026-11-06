@@ -81,7 +81,7 @@ def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
     p = new_sprint(root, out)
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names[-1] == "配布" and "/ndf:release" not in json.loads(p.stdout)["next"]
+    assert names[-1] == "デプロイ" and "/ndf:release" not in json.loads(p.stdout)["next"]
     assert "production_branch" in json.loads(p.stdout)["next"]  # 本番のブランチが無いので本番を置かない（#1914 の決定 3）
 
 
@@ -93,7 +93,7 @@ def test_normal_sprint_without_a_production_branch_keeps_gate_2_on_the_release(t
     p = new_sprint(root, out, "--state", str(state))
     assert p.returncode == 0, p.stdout + p.stderr
     last = json.loads((out / "sprint.json").read_text())["ステージ"][-1]
-    assert last["name"] == "配布" and "--by user" in last["note"]
+    assert last["name"] == "デプロイ" and "--by user" in last["note"]
 
 
 def close_cli(root, out, *extra):
@@ -117,7 +117,7 @@ def close_cli(root, out, *extra):
 
 @pytest.mark.parametrize("delivery", [None, {"unknown": "CI の設定を読めない"}])
 def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
-    """#1336 の AC5: delivery が無い・不明でも止まらず、手で行う配布のステージが入り、理由が note に出る。"""
+    """#1336 の AC5: delivery が無い・不明でも止まらず、手で行うデプロイのステージが入り、理由が note に出る。"""
     root = plain_repo(tmp_path)
     if delivery is not None:
         (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}, ensure_ascii=False))
@@ -205,7 +205,7 @@ CLOSE_STAGES = {"carmo-system-console": ["導入の確認"], "carmo-contractors-
 @pytest.mark.parametrize("name", list(SAMPLES))
 def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     """#1336 の AC3・AC4・AC11: 版数の無い宣言で new sprint と new close が --version・--prod・release.form 無しで通り、
-    経路に合ったステージだけが検査の後に入る（ベースブランチへのマージで届く経路と配布しない宣言は置かない）。"""
+    経路に合ったステージだけが検査の後に入る（ベースブランチへのマージで届く経路とデプロイしない宣言は置かない）。"""
     wt, rows, expected, stages = SAMPLES[name]
     root = plain_repo(tmp_path)
     (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
@@ -585,7 +585,7 @@ def release_steps_of(root, tmp_path, channel, version, *extra):
 @pytest.mark.parametrize("mvv", [False, True])
 def test_prod_release_records_after_the_release_and_never_goes_back_to_it(tmp_path, mvv):
     """#1273 の AC1・AC4・I4・I6: 本番は release → record → verify。record の失敗は judge-record（record か stop）へ回り、
-    配布へ戻る選択肢を持たない。共有の judge は record を選べない。開発版は record を持たない。"""
+    デプロイへ戻る選択肢を持たない。共有の judge は record を選べない。開発版は record を持たない。"""
     root = plugin_repo(tmp_path)
     extra = ("--mvv", str(tmp_path / "s.json")) if mvv else ()
     steps = release_steps_of(root, tmp_path, "prod", "1.0.1", *extra)

@@ -337,7 +337,7 @@ describe("承認を待つ依頼（#2430 の受け入れ条件 5・6・I3〜I5、
     expect(awaitingGateOf(waiting(), e.out)?.at).toBe(second.at);
   });
 
-  it("状態が awaiting_approval でない実行と、待つ理由が配布の依頼・止まった配布の実行は、答えが無くても行にしない", () => {
+  it("状態が awaiting_approval でない実行と、待つ理由がリリースの依頼・止まったリリースの実行は、答えが無くても行にしない", () => {
     const e = events();
     e.add("gate.reached", { kind: "gate1", pr_url: null, material: "x" });
     expect(awaitingGateOf(runOf({ state: "running" }), e.out)).toBeNull();

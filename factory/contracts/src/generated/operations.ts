@@ -123,7 +123,7 @@ export const OPERATIONS = [
     ],
     "idField": null,
     "summary": "スプリントの実行を取り消す",
-    "description": "動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後の配布の実行は取り消さず、止まった配布（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。",
+    "description": "動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後のリリースの実行は取り消さず、止まったリリース（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。",
     "parameters": [],
     "itemSchema": {
       "type": "object",
@@ -582,7 +582,7 @@ export const OPERATIONS = [
     ],
     "idField": null,
     "summary": "リポジトリの承認と問いの一覧",
-    "description": "同じリポジトリの承認待ちの実行の承認の依頼（ゲート 1・ゲート 2・判断）、止まった配布、開発ループの人の判断待ちを、 作った時刻の古い順に 1 つの並びで返す。承認の依頼の中身（承認資料・答え）は承認の依頼の経路が持ち、ここは識別子と要約だけを返す。",
+    "description": "同じリポジトリの承認待ちの実行の承認の依頼（ゲート 1・ゲート 2・判断）、止まったリリース、開発ループの人の判断待ちを、 作った時刻の古い順に 1 つの並びで返す。承認の依頼の中身（承認資料・答え）は承認の依頼の経路が持ち、ここは識別子と要約だけを返す。",
     "parameters": [
       {
         "name": "repository_id",
@@ -611,7 +611,7 @@ export const OPERATIONS = [
     "access": "read",
     "keys": [],
     "idField": null,
-    "summary": "まとめた配布の履歴",
+    "summary": "まとめたリリースの履歴",
     "description": "新しい順に limit 件（既定 20、最大 100）。提示・確定・結果と、待ち・組む・出し直し・確定・結果の記録を返す。",
     "parameters": [
       {
@@ -892,8 +892,8 @@ export const OPERATIONS = [
       "seq"
     ],
     "idField": null,
-    "summary": "止まった配布を解く",
-    "description": "配布の実行が失敗して止まったまとめた配布を「続きから流す」（continue）か「差し戻す」（reject）で解く。 止まっていなければ 409 not_stalled、main へのマージの後の差し戻しは 409 release_after_main（I63）。",
+    "summary": "止まったリリースを解く",
+    "description": "リリースの実行が失敗して止まったまとめたリリースを「続きから流す」（continue）か「差し戻す」（reject）で解く。 止まっていなければ 409 not_stalled、main へのマージの後の差し戻しは 409 release_after_main（I63）。",
     "parameters": [],
     "itemSchema": {
       "type": "object",

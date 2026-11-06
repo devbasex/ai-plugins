@@ -338,7 +338,7 @@ def plan_sprint_check(a, repo: str) -> dict:
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
-    """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    """pace: normal のデプロイ。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
     単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
     `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の

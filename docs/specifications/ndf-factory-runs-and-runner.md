@@ -45,9 +45,9 @@ Neural Development Factory の利用者が自分の GitHub のリポジトリを
 
 - **含む**: `factory/api/src/` の取り込み（`repositories/`）・キーの持ち込み（`credentials/`）・GitHub の口（`github/`）・実行の制御（`runs/`）・進捗の記録の読み出し（`progress/read.ts`）・画面向けの経路（`routes/factory.ts`）・ランナー向けの経路と停止の知らせと見回りの handler（`handlers/run-jobs.ts`・`handlers/run-control.ts`）・`index.ts` への export、`factory/runner/`（ランナーとイメージ）、`factory/web/src/pages/` の 3 画面（リポジトリ・キーの持ち込み・スプリントを始める）、`factory/contracts/openapi/runs.yaml`、`factory/.env.example` の 14 の変数の名前
 - **含まない**: 承認の依頼の保存と答えを返す経路の実装（経路の形だけを `runs.yaml` に置く）、手元のマシン（形態 ①）の登録・心拍・受け取りの経路（本書は渡す口の関数だけを持つ）、一覧と詳細の画面、料金と台帳、承認ゲートの外の問い合わせを止める hook と `ask.jsonl` の書き手、ECS・S3・Secrets Manager・DynamoDB・EventBridge・GitHub App の作成などインフラの定義（private リポジトリ）
-- **取り込むリポジトリの起点・テスト・配布・進め方の入力欄は持たない。** ランナーの中の NDF がそのリポジトリの `.ndf/` から読む（全体の契約の決定 8）
+- **取り込むリポジトリの起点・テスト・デプロイ・進め方の入力欄は持たない。** ランナーの中の NDF がそのリポジトリの `.ndf/` から読む（全体の契約の決定 8）
 - **止まった・失敗したスプリントの実行を同じ実行のまま続け直さない。** 新しいスプリントの実行として始める
-- プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
+- プラグインのリリース対象・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
 
 ## 仕様
 
@@ -140,7 +140,7 @@ graph TD
 | `requestResume({sprintRunId, approvalRequestId})` | #2173（答えを保存した後） | 実行と依頼の識別子 | `Promise<{jobId}>`。`START=resume` のジョブを作り起動する | `ResumeRejectedError`（`code` が `not_found` / `not_awaiting_approval` / `sprint_run_busy`）。`sprint_run_busy` は前のジョブの停止を待っている間か、別の再開が先に通ったときで、呼ぶ側は時間をおいて呼び直す |
 | `claimLocalRunJob(accountId)` | #2189（手元のマシンの受け取り） | アカウント | `Promise<{instruction: RunJobInstruction, token} \| null>`。そのアカウントの最も古い `pending` の `local` のジョブ（取り消しの要求の無い実行のもの）を `running` にし、指示と token を 1 回だけ返す | 保存の失敗は投げる |
 | `reportLocalRunJobEnded(jobId)` | #2189（終わりか心拍の切れ） | ジョブ | `Promise<void>`。停止の知らせと同じ処理 | 知らないジョブ・`local` でないジョブ・終わったジョブは何もしない |
-| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`。main へマージした後の配布の実行をジョブの無いときに取り消すと `release_after_main`） |
+| `cancelSprintRun(ctx, sprintRunId)` | 画面の経路と同じ処理 | アカウントの文脈と実行 | `Promise<{state: "cancelled" \| "running"}>` | `NotFoundError`（`sprint_run_not_found`。別のアカウントの実行を含む）・`ConflictError`（`already_finished`。main へマージした後のリリースの実行をジョブの無いときに取り消すと `release_after_main`） |
 | `getSprintRun(sprintRunId)`・`getRegistration(accountId, repositoryId)` | 実行と登録を読む側 | 識別子 | 行か `null` | — |
 
 あわせて `RunControl`・`ResumeRejectedError`・`repoKey`（`owner/name` を小文字にした比較の鍵）と、`ResumeRejectedCode`・`RunControlConfig`・`RunControlDeps`・`RunJob`・`SprintRun`・`RunState`・`JobState` の型を export する。
@@ -467,5 +467,5 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 - 経路の契約: [factory/contracts/openapi/runs.yaml](../../factory/contracts/openapi/runs.yaml)
 - サービスのディレクトリと API の入口: [factory/README.md](../../factory/README.md)
 - 代わりの判断を残す問い合わせの guard（#2206）: [ndf-ask-guard.md](ndf-ask-guard.md)、記録の形: [plugins/ndf/scripts/lib/ask_ledger.py](../../plugins/ndf/scripts/lib/ask_ledger.py)
-- 版と配布の規則（ランナーが導入する NDF に当たる）: [版と配布の正本](../versioning-and-distribution.md)
+- 版とリリースの規則（ランナーが導入する NDF に当たる）: [版とリリースの正本](../versioning-and-distribution.md)
 - 用語: [用語集](../glossary.md)

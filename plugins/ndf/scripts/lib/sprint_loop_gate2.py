@@ -1,7 +1,7 @@
 """開発ループの承認ゲート 2 の答えの読み取りと、承認の後の続きのコマンド（sprint_loop から分けた）。
 
-並列の計画のレーン（#2436）では、承認ゲート 2 の答えは配布の依頼の答えとして耐久の記録に届く。周回の境の `pending_step` が
-保留の周回（配布待ち・質問待ち）と、オーガナイザーへ送った設計の承認の答えを待たずに読み、残りの工程（まとめ）を流す。"""
+並列の計画のレーン（#2436）では、承認ゲート 2 の答えはリリースの依頼の答えとして耐久の記録に届く。周回の境の `pending_step` が
+保留の周回（リリース待ち・質問待ち）と、オーガナイザーへ送った設計の承認の答えを待たずに読み、残りの工程（まとめ）を流す。"""
 
 from __future__ import annotations
 
@@ -160,7 +160,7 @@ def finish_result(env: Env, rec: dict, before: dict, lap: dict) -> dict:
 
 
 def answered_lap(rec: dict, answers: dict, results: tuple[str, ...] = ("released",)) -> dict | None:
-    """答えの届いた最も古い保留の周回（配布待ちは results の答え、質問待ちはどの答えでも）。"""
+    """答えの届いた最も古い保留の周回（リリース待ちは results の答え、質問待ちはどの答えでも）。"""
     for lap in pending_laps(rec):
         if lap["outcome"] == QUESTION_PENDING:
             if answer_of(answers, (lap.get("question") or {}).get("request")):
@@ -171,7 +171,7 @@ def answered_lap(rec: dict, answers: dict, results: tuple[str, ...] = ("released
 
 
 def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
-    """配布待ちの周回へ届いた答えを書く。差し戻しは人へ戻した、失敗は失敗で締め直す（まとめは流さない）。"""
+    """リリース待ちの周回へ届いた答えを書く。差し戻しは人へ戻した、失敗は失敗で締め直す（まとめは流さない）。"""
     lap["release"]["answer"] = {**a, "read_at": env.now()}
     if a.get("result") == "released":
         if a.get("version"):
@@ -184,11 +184,11 @@ def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
         )
         return
     finish_lap(env, rec, lap, FAILED)
-    lap["failure"] = {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "配布", "step": "配布の失敗"}
+    lap["failure"] = {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "リリース", "step": "リリースの失敗"}
 
 
 def settle_refused(env: Env, rec: dict, answers: dict) -> bool:
-    """配布待ちの周回へ届いた差し戻し・失敗の答えを書いて締め直す（まとめは流さない）。1 つでも書いたら True。"""
+    """リリース待ちの周回へ届いた差し戻し・失敗の答えを書いて締め直す（まとめは流さない）。1 つでも書いたら True。"""
     settled = False
     for lap in pending_laps(rec):
         a = answer_of(answers, (lap.get("release") or {}).get("request")) if lap["outcome"] == RELEASE_PENDING else None
@@ -228,7 +228,7 @@ def pending_pipeline(env: Env, rec: dict, before: dict) -> dict:
 
 def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict], state: dict) -> dict:
     """`loop finish`: 保留の周回の残りの done を読み、周回を 1 回だけ締め直して周回の境へ戻る。
-    質問待ちの続きが配布の依頼で止まったら、配布待ちへ移して答えを待つ。"""
+    質問待ちの続きがリリースの依頼で止まったら、リリース待ちへ移して答えを待つ。"""
     from sprint_loop_gate import DONE_RESULTS, RELEASE_REQUEST_PHASE, handle_release_pending
 
     part = lap["release"] if lap["outcome"] == RELEASE_PENDING else lap["question"]

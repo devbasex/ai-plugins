@@ -63,20 +63,20 @@ export interface SprintRun {
   finishReason?: FinishReason | null;
   // awaiting_reset の間だけ。リセット時刻
   resumeAt?: string | null;
-  // 実行の目的（#2439）。release は Factory のオーガナイザーが起こす配布の実行で、実行の枠を持たない（I64）。空は sprint
+  // 実行の目的（#2439）。release は Factory のオーガナイザーが起こすリリースの実行で、実行の枠を持たない（I64）。空は sprint
   purpose?: RunPurpose | null;
-  // 配布の実行のまとめた配布の連番。purpose が空なら空
+  // リリースの実行のまとめたリリースの連番。purpose が空なら空
   releaseSeq?: number | null;
   // awaiting_approval の理由（I65）。空は承認の依頼の待ち
   awaitingReason?: AwaitingReason | null;
-  // 手動の実行が待つ配布の依頼の id。awaitingReason が release_requested のときだけ
+  // 手動の実行が待つリリースの依頼の id。awaitingReason が release_requested のときだけ
   releaseRequestId?: string | null;
 }
 
 export type RunPurpose = "release";
-// release_requested は配布の依頼の答えを待つ手動の実行、release_stalled はジョブが失敗して止まった配布の実行
+// release_requested はリリースの依頼の答えを待つ手動の実行、release_stalled はジョブが失敗して止まったリリースの実行
 export type AwaitingReason = "release_requested" | "release_stalled";
-// 配布の実行のジョブの手（#2439）
+// リリースの実行のジョブの手（#2439）
 export const RELEASE_STEPS = ["present", "represent", "confirm:1", "confirm:2", "continue"] as const;
 export type ReleaseStep = (typeof RELEASE_STEPS)[number];
 export const isReleaseRun = (run: Pick<SprintRun, "purpose">) => run.purpose === "release";
@@ -103,9 +103,9 @@ export interface RunJob {
   loopInput?: LoopJobInput | null;
   // local で受け取った手元のマシン。手元のマシンの枠を減らす先（I50）
   runnerId?: string | null;
-  // 配布の実行のジョブの手（#2439）。ほかのジョブは空
+  // リリースの実行のジョブの手（#2439）。ほかのジョブは空
   releaseStep?: ReleaseStep | null;
-  // 手動の実行の配布の答えの再開で、答えの出た依頼の id（#2439）
+  // 手動の実行のリリースの答えの再開で、答えの出た依頼の id（#2439）
   releaseRequestId?: string | null;
   state: JobState;
   runnerKind: "ecs" | "local";
@@ -218,7 +218,7 @@ export interface CreateRunGuards {
   idempotency?: IdempotencyClaim;
 }
 
-// release_running は、古い版の実行の開始で、リポジトリのまとめた配布が流れていた（#2439 の I62）
+// release_running は、古い版の実行の開始で、リポジトリのまとめたリリースが流れていた（#2439 の I62）
 export type CreateRunResult = "created" | "slots" | "issue_in_use" | "issue_in_loop" | "legacy" | "loop_changed" | "release_running" | "duplicate";
 
 // マイルストーンの持ち分の行の鍵に使う、題の sha256 の先頭 32 字

@@ -171,6 +171,13 @@ class Queue:
         """始まりと終わりの時刻を書く run のステップの cmd。"""
         return f"date +%s.%N > {self.tmp}/{name}.s; sleep {seconds}; date +%s.%N > {self.tmp}/{name}.e"
 
+    def meet(self, name: str, other: str, limit: int = 30) -> str:
+        """`other` のステップが始まるまで待つ run のステップの cmd。`limit` 秒で始まらなければ失敗で終わる。
+
+        同時に流れたことを、眠る時間の長さでなく互いの始まりで確かめる（負荷で起動がずれても落ちない）。"""
+        wait = f"until [ -s {self.tmp}/{other}.s ]; do sleep 0.05; done"  # -s: 時刻が書かれた後（`>` は先に空のファイルを作る）
+        return f"date +%s.%N > {self.tmp}/{name}.s; timeout {limit} sh -c '{wait}' && date +%s.%N > {self.tmp}/{name}.e"
+
     def spans(self, *names: str) -> list[tuple[float, float]]:
         return [(float((self.tmp / f"{n}.s").read_text()), float((self.tmp / f"{n}.e").read_text())) for n in names]
 
@@ -273,8 +280,8 @@ def test_plans_needing_one_plan_wait_for_it_and_then_run_side_by_side(tmp_path, 
     """B と C が A だけを前提にし、触るファイルが重ならなければ、A の後に同時に流れる（I5）。"""
     q = Queue(tmp_path, env)
     a = q.plan("a", [run_step(q.span("a", 0.6))], ["a.py"])
-    b = q.plan("b", [run_step(q.span("b", 0.6))], ["b.py"], after=["a"])
-    c = q.plan("c", [run_step(q.span("c", 0.6))], ["c.py"], after=["a"])
+    b = q.plan("b", [run_step(q.meet("b", "c"))], ["b.py"], after=["a"])
+    c = q.plan("c", [run_step(q.meet("c", "b"))], ["c.py"], after=["a"])
     p, res = q.run(a, b, c, "--max", "2")
     assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
     sa, sb, sc = q.spans("a", "b", "c")

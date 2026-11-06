@@ -540,7 +540,7 @@ def test_init_rejects_unknown_model_runtime(run_init, tmp_path):
 
 
 def test_init_accepts_agy_as_host(run_init, tmp_path):
-    """agy も NDF の配布先であるため、ホストになれる。"""
+    """agy も NDF の導入先のランタイムであるため、ホストになれる。"""
     run_init(_args(tmp_path, host="agy"))
     _, state = _state_of(tmp_path)
     assert state["host"] == "agy"

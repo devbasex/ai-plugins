@@ -109,7 +109,7 @@ def approved_designs(rec: dict) -> set[int]:
 
 
 def first_issues(rec: dict) -> set[int]:
-    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・配布を差し戻された周回の直し・
+    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・デプロイを差し戻された周回の直し・
     承認とマージが済んだ設計の課題。"""
     last = {w["number"]: w for w in rec.get("waiting", [])}
     revise = {n for n, w in last.items() if w.get("answer") == "revise"}
@@ -271,7 +271,7 @@ def _select_candidate_rows(
     cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset(), approved: set[int] = frozenset()
 ) -> tuple[list[int], list[dict]]:
     """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。
-    max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・配布の直し）→ 品質の枠の課題 → 順位の順に割り当てる
+    max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・デプロイの直し）→ 品質の枠の課題 → 順位の順に割り当てる
     （品質の枠の最低件数を容量で削らない）。"""
     whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
     open_ = [i for i, w in enumerate(whys) if w is None]

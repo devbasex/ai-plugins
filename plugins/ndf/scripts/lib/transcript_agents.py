@@ -39,6 +39,7 @@ _LIB = pathlib.Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import legacy_values  # noqa: E402  旧い工程名の読み替え（#2620）
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
 
 
@@ -57,7 +58,7 @@ NO_ROLE = "-"
 
 # 工程名 → フェーズ（#768）。`development-workflow/references/agent-layers.md` のフェーズの表の
 # 「通す工程」の列を写した。括弧の注記と `。` より後ろを落とした行名で引く。2 つのフェーズに
-# 現れる行名（`作業場所の用意`・`配布`）は表で先に現れるフェーズへ写す。表との一致はテストが確かめる。
+# 現れる行名（`作業場所の用意`・`デプロイ`）は表で先に現れるフェーズへ写す。表との一致はテストが確かめる。
 STEP_PHASES = {
     "要求と受け入れ条件": "設計",
     "作業場所の用意": "設計",
@@ -72,7 +73,7 @@ STEP_PHASES = {
     "確定仕様化": "取り込み",
     "スプリントの Pull Request のマージ": "取り込み",
     "後片付け": "取り込み",
-    "配布": "取り込み",
+    "デプロイ": "取り込み",
     "リリース後テスト": "仕上げ",
     "振り返り": "仕上げ",
     "棚卸し": "仕上げ",
@@ -210,7 +211,7 @@ def role_of(description: str | None, layer: str) -> str:
     if layer == "supervisor":
         if head in POSTS:
             return head
-        return STEP_PHASES.get(head, OTHER)
+        return STEP_PHASES.get(legacy_values.to_current("stage", head), OTHER)
     return head if head in TASKS else OTHER
 
 

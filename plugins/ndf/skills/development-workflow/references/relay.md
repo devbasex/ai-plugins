@@ -108,7 +108,7 @@
 `relay.py ls` で 3 本の状態と承認待ちが 1 つの表に出て、`relay.py stop lroot` で 1 本だけを止められる。
 
 並列開発をまとめて始めるときは、起動のブロックを並べずに並列の計画を書き（[issue-plan-strategy の parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md)）、
-`--parallel <計画名>` でオーガナイザーに起動させる（[parallel.md](parallel.md)）。本番の配布がレーンどうしでぶつからない。
+`--parallel <計画名>` でオーガナイザーに起動させる（[parallel.md](parallel.md)）。リリースがレーンどうしでぶつからない。
 
 | 操作 | 効き目 |
 | --- | --- |

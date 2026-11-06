@@ -144,7 +144,7 @@ NO_ITEMS = ("無し", "なし")  # 節の箇条で「何も無い」を示す語
 
 
 def says_none(body: str, heading: str) -> bool:
-    """節があり、箇条が `NO_ITEMS` の語（「無し」・「なし」）だけか（#1885 の「配布物の変化なし」）。節が無い・空の節は偽
+    """節があり、箇条が `NO_ITEMS` の語（「無し」・「なし」）だけか（#1885 の「利用者向けの変化なし」）。節が無い・空の節は偽
     （書き忘れを「変化なし」と読まない）。"""
     section = get_section(body or "", heading)
     if section is None:

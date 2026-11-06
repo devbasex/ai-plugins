@@ -71,9 +71,9 @@ paths:
     get:
       tags: [run-jobs]
       operationId: getRunJobOrganizerAnswers
-      summary: 配布の依頼の答えと配布済みの範囲
+      summary: リリースの依頼の答えとリリース済みの範囲
       description: >-
-        実行ジョブの token で認証し、そのジョブの実行のレーン（ループならループのすべての実行）の配布の依頼の答えと、 リポジトリの配布済みの範囲を返す（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へそのまま書く。
+        実行ジョブの token で認証し、そのジョブの実行のレーン（ループならループのすべての実行）のリリースの依頼の答えと、 リポジトリのリリース済みの範囲を返す（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へそのまま書く。
       security: [{ runJob: [] }]
       responses:
         "200":
@@ -85,9 +85,9 @@ paths:
     get:
       tags: [run-jobs]
       operationId: getRunJobOrganizerBatch
-      summary: 配布の実行のまとめた配布の中身
+      summary: リリースの実行のまとめたリリースの中身
       description: >-
-        配布の実行のジョブの token だけが読める（ほかの実行は 403）。レーンの一覧と依頼、提示、選択肢と、 このジョブの手（step）を返す。ランナーは NDF の置き場の batch.json へそのまま書く（#2439）。
+        リリースの実行のジョブの token だけが読める（ほかの実行は 403）。レーンの一覧と依頼、提示、選択肢と、 このジョブの手（step）を返す。ランナーは NDF の置き場の batch.json へそのまま書く（#2439）。
       security: [{ runJob: [] }]
       responses:
         "200":
@@ -583,7 +583,7 @@ paths:
       operationId: cancelSprintRun
       summary: スプリントの実行を取り消す
       description: >-
-        動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後の配布の実行は取り消さず、止まった配布（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。
+        動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後のリリースの実行は取り消さず、止まったリリース（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。
       x-ndf-access: write
       x-ndf-keys: [sprint_run_id]
       parameters: [{ name: accountId, in: path, required: true, description: アカウントの ID, schema: { type: string } }]

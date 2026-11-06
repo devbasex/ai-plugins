@@ -1,4 +1,4 @@
-"""ベースブランチへ入った PR の拾い出し（#1274）。検査（`check-trigger.py`）と配布（`release_lib/included.py`）が使う。
+"""ベースブランチへ入った PR の拾い出し（#1274）。検査（`check-trigger.py`）とデプロイ（`release_lib/included.py`）が使う。
 
 `<起点>..<終点>` の first-parent のログから、merge commit（件名 `Merge pull request #N from <owner>/<branch>`）と
 squash merge（件名の末尾 `(#N)`）で入った PR を拾う。squash の件名には head のブランチが残らないため、

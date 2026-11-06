@@ -386,9 +386,13 @@
     {
       "term": "リリース",
       "context": "ndf-workflow",
-      "meaning": "変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある",
+      "meaning": "本番へのデプロイ。フェーズの名前でもある。工程の名前は「デプロイ」である",
       "code": "release",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "deprecated": [
+        "配布",
+        "本番の配布"
+      ]
     },
     {
       "term": "リリースプラン",
@@ -405,15 +409,6 @@
       "meaning": "リポジトリが `.ndf/release.json` に宣言し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド",
       "deprecated": [
         "配布のコマンド"
-      ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
-    },
-    {
-      "term": "検証リリース",
-      "context": "ndf-workflow",
-      "meaning": "開発版と分かる版数での公開か、検証環境への反映",
-      "deprecated": [
-        "検証への配布"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1111,7 +1106,7 @@
     {
       "term": "最終工程",
       "context": "ndf-workflow",
-      "meaning": "棚卸しの前にその実行で最後に通る工程。振り返りを通るなら振り返り（retrospective）、通らずリリース後テストを通るならリリース後テスト（release-verification）、どちらも通らなければ配布（release）",
+      "meaning": "棚卸しの前にその実行で最後に通る工程。振り返りを通るなら振り返り（retrospective）、通らずリリース後テストを通るならリリース後テスト（release-verification）、どちらも通らなければデプロイ（release）",
       "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md",
       "deprecated": [
         "終わりの工程"
@@ -1123,7 +1118,8 @@
       "meaning": "release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request を持つ",
       "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md",
       "deprecated": [
-        "リリースの記録"
+        "リリースの記録",
+        "配布の記録"
       ]
     },
     {
@@ -1403,7 +1399,7 @@
     {
       "term": "リリース種別",
       "context": "ndf-release",
-      "meaning": "リリースの種類。production（本番リリース）/ verification（検証リリース）",
+      "meaning": "リリースの種類。production（本番リリース）/ verification（開発版のデプロイ）",
       "code": "release_type",
       "source": "docs/specifications/ndf-release-steps-and-token-usage-snapshot.md"
     },
@@ -1703,7 +1699,7 @@
     {
       "term": "公開操作",
       "context": "ndf-release",
-      "meaning": "release の手順 4 で行う操作。レジストリへの公開・配備先への反映・署名した配布物の設置・ストアへの提出",
+      "meaning": "release の手順 4 で行う操作。レジストリへの公開・配備先への反映・署名したアーティファクトの設置・ストアへの提出",
       "source": "plugins/ndf/skills/release/references/completion-check.md",
       "deprecated": [
         "公開の操作"
@@ -1842,7 +1838,7 @@
     {
       "term": "実践投入",
       "context": "ndf-workflow",
-      "meaning": "pace: fast の検証の場所。実装の Pull Request が develop（開発版のチャネル）へ入り、開発版として配布され使われること。fast の検査はその後にトリガーで通る",
+      "meaning": "pace: fast の検証の場所。実装の Pull Request が develop（開発版のチャネル）へ入り、開発版としてデプロイされ使われること。fast の検査はその後にトリガーで通る",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
@@ -2335,7 +2331,7 @@
     {
       "term": "プロジェクトの宣言",
       "context": "ndf-workflow",
-      "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
+      "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・デプロイ・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
       "source": "",
       "pending_source": "issues/old/issue-1333-requirements.md"
     },
@@ -2663,7 +2659,7 @@
     {
       "term": "手動反映の本番系",
       "context": "ndf-workflow",
-      "meaning": "配布の宣言の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
+      "meaning": "リリースの設定の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
       "code": "manual_production",
       "pending_source": "issues/old/issue-1454-requirements.md"
     },
@@ -2672,7 +2668,10 @@
       "context": "ndf-release",
       "meaning": "変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸",
       "code": "release_route",
-      "pending_source": "issues/old/issue-1336-design.md"
+      "pending_source": "issues/old/issue-1336-design.md",
+      "deprecated": [
+        "配布の経路"
+      ]
     },
     {
       "term": "昇格の Pull Request",
@@ -3185,7 +3184,7 @@
     {
       "term": "記録の PR",
       "context": "ndf-workflow",
-      "meaning": "リリース記録（## 配布の記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230）",
+      "meaning": "リリース記録（## リリース記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230）",
       "source": "docs/specifications/ndf-sprint-close-record-pr-at-run-time.md"
     },
     {
@@ -3259,7 +3258,7 @@
     {
       "term": "適用範囲",
       "context": "ndf-workflow",
-      "meaning": "設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く",
+      "meaning": "設計した変更が働く範囲。このリポジトリだけで働くのか利用先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く",
       "source": "docs/specifications/ndf-design-phase.md"
     },
     {
@@ -3532,7 +3531,7 @@
     {
       "term": "他のプラグイン",
       "context": "ndf-release",
-      "meaning": "配布の宣言の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する",
+      "meaning": "リリースの設定の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する",
       "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
@@ -3562,7 +3561,7 @@
     {
       "term": "比べた先端",
       "context": "ndf-release",
-      "meaning": "本番の配布が承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（本番の配布では `release/v<版>`、昇格の経路ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである",
+      "meaning": "リリースが承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（リリースでは `release/v<版>`、昇格の経路ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
@@ -3574,19 +3573,19 @@
     {
       "term": "承認の外のコミット",
       "context": "ndf-release",
-      "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。配布物（`plugins/`・`.claude-plugin/`）に触れるものがあれば本番の配布は承認ゲートで止まる",
+      "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版のデプロイの PR のものでないもの。リリース対象（`plugins/`・`.claude-plugin/`）に触れるものがあればリリースは承認ゲートで止まる",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の記録",
       "context": "ndf-release",
-      "meaning": "承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない",
+      "meaning": "承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまでリリースは通らない",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "更新情報の節",
       "context": "ndf-release",
-      "meaning": "plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない",
+      "meaning": "plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。リリースの手順（bump・changelog・notes）は書かない",
       "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
@@ -3923,10 +3922,13 @@
       "source": "docs/specifications/ndf-production-release-record.md"
     },
     {
-      "term": "版数を上げない配布",
+      "term": "版数を上げないリリース",
       "context": "ndf-release",
-      "meaning": "版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布",
-      "source": "docs/specifications/ndf-production-release-record.md"
+      "meaning": "版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース",
+      "source": "docs/specifications/ndf-production-release-record.md",
+      "deprecated": [
+        "版数を上げない配布"
+      ]
     },
     {
       "term": "範囲の PR",
@@ -4010,7 +4012,7 @@
     {
       "term": "手で足した節",
       "context": "ndf-release",
-      "meaning": "承認資料の `## ` の節のうち、配布のステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る",
+      "meaning": "承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る",
       "source": "plugins/ndf/skills/release/references/release-steps.md"
     },
     {
@@ -4130,7 +4132,7 @@
     {
       "term": "見積もりの完了条件",
       "context": "ndf-estimate",
-      "meaning": "見積もる作業がどこまで終われば完了かを、supervise のフェーズの名前（設計・実装・検査・配布（開発版）・配布（本番））で表したもの",
+      "meaning": "見積もる作業がどこまで終われば完了かを、supervise のフェーズの名前（設計・実装・検査・開発版のデプロイ・リリース）で表したもの",
       "source": "docs/specifications/ndf-estimate.md"
     },
     {
@@ -4229,12 +4231,6 @@
       "context": "ndf-release",
       "meaning": "承認資料が集める 5 つの材料。レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト",
       "source": "docs/specifications/ndf-release-approval-materials.md"
-    },
-    {
-      "term": "配布物の変化なし",
-      "context": "ndf-release",
-      "meaning": "PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う",
-      "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
       "term": "トーン＆マナー",
@@ -4371,7 +4367,7 @@
     {
       "term": "境界の検査",
       "context": "ndf-factory",
-      "meaning": "サービスのディレクトリとプラグイン・配布物・インフラの境目が守られているかを CI で見る検査",
+      "meaning": "サービスのディレクトリとプラグイン・リリース対象・インフラの境目が守られているかを CI で見る検査",
       "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
@@ -4839,19 +4835,13 @@
     {
       "term": "マニフェスト",
       "context": "ndf-release",
-      "meaning": "plugins/ndf/manifests/<ランタイム>-skills.txt。ランタイムごとに配る Skill の一覧で、配布の唯一の基準（#2231）",
-      "source": "docs/specifications/ndf-distribution-runtimes.md"
-    },
-    {
-      "term": "配布先のランタイム",
-      "context": "ndf-release",
-      "meaning": "マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231）",
+      "meaning": "plugins/ndf/manifests/<ランタイム>-skills.txt。ランタイムごとに配る Skill の一覧で、デプロイの唯一の基準（#2231）",
       "source": "docs/specifications/ndf-distribution-runtimes.md"
     },
     {
       "term": "最終工程の記録",
       "context": "ndf-workflow",
-      "meaning": "最終工程を終えたことを示す、GitHub に残った記録。配布は配布の記録の `段階:`、リリース後テストはその課題の行、振り返りは課題の本文の `振り返り: <コメントの URL>` の行のうち、指すコメントの識別子が記録の PR の最後の配布の記録のコメントの識別子以上のもの（その実行の振り返り）。sprint-close.py が閉じる前に確かめる",
+      "meaning": "最終工程を終えたことを示す、GitHub に残った記録。デプロイはリリース記録の `段階:`、リリース後テストはその課題の行、振り返りは課題の本文の `振り返り: <コメントの URL>` の行のうち、指すコメントの識別子が記録の PR の最後のリリース記録のコメントの識別子以上のもの（その実行の振り返り）。sprint-close.py が閉じる前に確かめる",
       "source": "plugins/ndf/skills/progress-tracking/SKILL.md"
     },
     {
@@ -4863,7 +4853,7 @@
     {
       "term": "版の差し込み",
       "context": "ndf-workflow",
-      "meaning": "前の版の NDF が組んだ配布のプランが、具体的な版の代わりに持つ `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）。プランの型の移行関数が版の参照へ読み替える（#2344）",
+      "meaning": "前の版の NDF が組んだリリースプランが、具体的な版の代わりに持つ `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）。プランの型の移行関数が版の参照へ読み替える（#2344）",
       "source": ""
     },
     {
@@ -4875,7 +4865,7 @@
     {
       "term": "版の決め直し",
       "context": "ndf-workflow",
-      "meaning": "開発版の流し直しで、版の記録の版が自分の配布のマージより前に別のスプリントに出ていたとき、次に空いている版を決め、解決の控えの版の行をその版へ上書きし、前の版と理由を控えの履歴に残すこと。プランのファイルは書き換えない。明示の版と、自分の配布のマージの後には行わない（#2344）",
+      "meaning": "開発版の流し直しで、版の記録の版が自分のデプロイのマージより前に別のスプリントに出ていたとき、次に空いている版を決め、解決の控えの版の行をその版へ上書きし、前の版と理由を控えの履歴に残すこと。プランのファイルは書き換えない。明示の版と、自分のデプロイのマージの後には行わない（#2344）",
       "source": ""
     },
     {
@@ -5123,13 +5113,7 @@
     {
       "term": "Factory のオーガナイザー",
       "context": "ndf-factory",
-      "meaning": "同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（配布を 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他",
-      "source": "docs/specifications/ndf-factory-organizer.md"
-    },
-    {
-      "term": "配布の実行",
-      "context": "ndf-factory",
-      "meaning": "Factory のオーガナイザーが、まとめた配布 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、本番の配布を流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
+      "meaning": "同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（デプロイを 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他",
       "source": "docs/specifications/ndf-factory-organizer.md"
     },
     {
@@ -5375,31 +5359,19 @@
     {
       "term": "オーガナイザー",
       "context": "ndf-workflow",
-      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別",
-      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
-    },
-    {
-      "term": "配布の依頼",
-      "context": "ndf-workflow",
-      "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。統括役とは別",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "一時レーン",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
+      "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "保留の周回",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（配布待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
-      "source": "plugins/ndf/skills/development-workflow/references/loop.md"
-    },
-    {
-      "term": "配布待ち",
-      "context": "ndf-workflow",
-      "meaning": "配布の依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない",
+      "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
@@ -5842,9 +5814,12 @@
     {
       "term": "デプロイ",
       "context": "ndf-release",
-      "meaning": "開発・本番を問わず、環境に変更を届けること。本番へのデプロイだけをリリースと呼ぶ",
+      "meaning": "開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある",
       "source": "",
-      "pending_source": "issues/issue-2620-requirements.md"
+      "pending_source": "issues/issue-2620-requirements.md",
+      "deprecated": [
+        "配布"
+      ]
     },
     {
       "term": "書いた日の記録",
@@ -5857,50 +5832,69 @@
       "term": "開発版のデプロイ",
       "context": "ndf-release",
       "meaning": "開発版のチャネルへ版を出すことと、検証の環境への反映。フェーズの名前でもある",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "deprecated": [
+        "検証リリース",
+        "検証への配布",
+        "開発版の配布"
+      ]
     },
     {
       "term": "デプロイなし",
       "context": "ndf-release",
       "meaning": "リリース記録の段階の値。どの環境へも届けずに工程を終えたこと",
       "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "pending_source": "issues/issue-2620-design.md",
+      "deprecated": [
+        "配布なし"
+      ]
     },
     {
       "term": "リリース待ち",
       "context": "ndf-workflow",
-      "meaning": "リリースの依頼を送り、答えを待たずに締めた周回の結果",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "meaning": "リリースの依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない",
+      "source": "plugins/ndf/skills/development-workflow/references/loop.md",
+      "deprecated": [
+        "配布待ち"
+      ]
     },
     {
       "term": "リリースの依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンがリリース承認の手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "meaning": "レーンが承認ゲート 2 の手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
+      "deprecated": [
+        "配布の依頼"
+      ]
     },
     {
       "term": "リリースの実行",
       "context": "ndf-factory",
-      "meaning": "Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "meaning": "Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
+      "source": "docs/specifications/ndf-factory-organizer.md",
+      "deprecated": [
+        "配布の実行"
+      ]
     },
     {
       "term": "まとめたリリース",
       "context": "ndf-workflow",
       "meaning": "オーガナイザーが複数のレーンのリリースの依頼をまとめた 1 回のリリース",
       "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "pending_source": "issues/issue-2620-design.md",
+      "deprecated": [
+        "まとめた配布"
+      ]
     },
     {
       "term": "リリース対象",
       "context": "ndf-release",
       "meaning": "リリースで利用者へ届くファイルの集まり。ai-plugins では plugins/ と .claude-plugin/",
       "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "pending_source": "issues/issue-2620-design.md",
+      "deprecated": [
+        "配布物"
+      ]
     },
     {
       "term": "アーティファクト",
@@ -5912,23 +5906,30 @@
     {
       "term": "導入先のランタイム",
       "context": "ndf-release",
-      "meaning": "マーケットプレイスのプラグインを導入できる形で届けるランタイム（Claude Code と Codex）",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "meaning": "マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231）",
+      "source": "docs/specifications/ndf-distribution-runtimes.md",
+      "deprecated": [
+        "配布先のランタイム"
+      ]
     },
     {
       "term": "利用先のリポジトリ",
       "context": "ndf-workflow",
       "meaning": "NDF を導入して使っているリポジトリ",
       "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "pending_source": "issues/issue-2620-design.md",
+      "deprecated": [
+        "配布先のリポジトリ"
+      ]
     },
     {
       "term": "利用者向けの変化なし",
       "context": "ndf-release",
-      "meaning": "Pull Request の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "meaning": "PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う",
+      "source": "docs/specifications/ndf-release-approval-included-prs.md",
+      "deprecated": [
+        "配布物の変化なし"
+      ]
     },
     {
       "term": "旧い値の読み替え",
@@ -5941,6 +5942,46 @@
       "term": "禁止語",
       "context": "ndf-workflow",
       "meaning": "用語集の設定が、検査する範囲で新しく書くことを禁じた語",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリースの設定",
+      "context": "ndf-release",
+      "meaning": "`.ndf/` に書く、そのリポジトリのリリースの宣言（`.ndf/supervise.json` の release と `.ndf/release.json`）",
+      "deprecated": [
+        "配布の宣言"
+      ],
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリースの形",
+      "context": "ndf-release",
+      "meaning": "リリースの設定の release.form が表す、版の出し方の雛形の種類",
+      "deprecated": [
+        "配布の形"
+      ],
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリースの手順",
+      "context": "ndf-release",
+      "meaning": "版を上げてから公開するまでの手順。`release` が持つ",
+      "deprecated": [
+        "配布の手順"
+      ],
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "取得元",
+      "context": "ndf-release",
+      "meaning": "プラグインを取得するマーケットプレイスの登録が指す先",
+      "deprecated": [
+        "配布元"
+      ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
     }

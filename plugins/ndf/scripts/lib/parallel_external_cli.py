@@ -1,11 +1,11 @@
 """`parallel.py` の `--external` の副命令の本体（#2439。置き場のファイルは `parallel_external.py`）。
 
-外のオーガナイザーのレーンと配布の実行（環境変数 `NDF_ORGANIZER_DIR`）は、計画名の代わりに `--external` を付けて
+外のオーガナイザーのレーンとリリースの実行（環境変数 `NDF_ORGANIZER_DIR`）は、計画名の代わりに `--external` を付けて
 置き場のファイルでやり取りする。
 
 | 副命令 | 役割 |
 | --- | --- |
-| `request --external --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を `requests/<id>.json` へ書く（10）か、すでに `main` にあれば書かない（0） |
+| `request --external --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を `requests/<id>.json` へ書く（10）か、すでに `main` にあれば書かない（0） |
 | `await --external --from <パス>` | `answers/<id>.json` を読む（released 0・rejected 10・まだ無い 3） |
 | `compose --external` | `batch.json` の手（`step`）ごとに流すもの（`pipeline`・`record`・`settle`）を返す |
 | `present --external <連番> <提示> (--approval <承認資料> \\| --record)` | 範囲をレーンへ対応づける。`--record` は承認ゲート 2 で止まった提示を `presented/` へ書く |
@@ -31,7 +31,10 @@ def refuse_in_factory_run(reply: Callable) -> None:
     """サービスの実行ジョブ（`NDF_FACTORY_RUN`）の中では 1 台の中のオーガナイザーを起動しない（#2439 の I68。2 つのオーガナイザーは排他）。"""
     if os.environ.get("NDF_FACTORY_RUN"):
         reply(
-            "stopped", "サービスの実行ジョブの中では並列の計画を起動しない（外のオーガナイザーが配布をまとめる）", code=1, factory_run=True
+            "stopped",
+            "サービスの実行ジョブの中では並列の計画を起動しない（外のオーガナイザーがリリースをまとめる）",
+            code=1,
+            factory_run=True,
         )
 
 
@@ -66,7 +69,7 @@ def present_external(main: Path, a, reply: Callable) -> None:
 
 
 def compose_external(main: Path, reply: Callable) -> None:
-    """配布の実行（`--parallel-helper --external`）が `batch.json` の手で流すもの（#2439）。"""
+    """リリースの実行（`--parallel-helper --external`）が `batch.json` の手で流すもの（#2439）。"""
     from parallel_run import dev_version
     from supervise_lib.paths import PARALLEL_PY, SELF
 
@@ -74,10 +77,10 @@ def compose_external(main: Path, reply: Callable) -> None:
     try:
         task = pe.compose(main, d, pe.read_batch(d), f"python3 {SELF}", PARALLEL_PY, dev_version)
     except ValueError as exc:
-        reply("stopped", f"まとめた配布を組めない: {exc}", code=1)
+        reply("stopped", f"まとめたリリースを組めない: {exc}", code=1)
     except OSError as exc:
         reply("stopped", f"書けない: {exc}", code=2)
-    reply("ok", f"まとめた配布 {task['seq']} の手 {task['step']}（提示 {task['k']}）", **task)
+    reply("ok", f"まとめたリリース {task['seq']} の手 {task['step']}（提示 {task['k']}）", **task)
 
 
 def settle_external(main: Path, a, reply: Callable) -> None:
@@ -91,7 +94,7 @@ def settle_external(main: Path, a, reply: Callable) -> None:
         reply("stopped", f"結果を書かない: {exc}", code=4)
     except OSError as exc:
         reply("stopped", f"done を読めない: {exc}", code=2)
-    reply("ok", f"配布 {a.n} の結果 {got['result']} を外のオーガナイザーへ書いた", result=got["result"], version=got["version"])
+    reply("ok", f"リリース {a.n} の結果 {got['result']} を外のオーガナイザーへ書いた", result=got["result"], version=got["version"])
 
 
 def request_external(main: Path, a, reply: Callable, parallel_py: Path) -> None:
@@ -106,7 +109,7 @@ def request_external(main: Path, a, reply: Callable, parallel_py: Path) -> None:
     nxt = f"python3 {parallel_py} await --external --from {Path(a.state) / 'work' / 'request.txt'}"
     reply(
         "gate",
-        f"配布の依頼 {rid} を外のオーガナイザーへ書いた（配布待ち）。答えは parallel.py await --external で読む",
+        f"リリースの依頼 {rid} を外のオーガナイザーへ書いた（リリース待ち）。答えは parallel.py await --external で読む",
         code=10,
         next_step=nxt,
         id=rid,

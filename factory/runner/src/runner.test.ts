@@ -127,7 +127,7 @@ describe("状態（受け入れ条件 28・32、I42）", () => {
     expect(trackedEntries(["src/a.ts"], tracked)).toEqual(["src/a.ts"]);
   });
 
-  it("配布の提示が作った追跡しない承認資料も保存し、復元で受け入れる。追跡する承認資料とほかの issues/ は断る", () => {
+  it("リリースの提示が作った追跡しない承認資料も保存し、復元で受け入れる。追跡する承認資料とほかの issues/ は断る", () => {
     const approval = "issues/approval-ndf-v1.2.0-parallel-3-2.md";
     expect(trackedEntries([".ndf/tmp/x", approval], new Set())).toEqual([]);
     expect(trackedEntries([approval], new Set([approval]))).toEqual([approval]);

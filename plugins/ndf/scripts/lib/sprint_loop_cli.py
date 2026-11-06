@@ -126,7 +126,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--done", help="周回の queue の done（承認ゲートで止まっていれば loop gate と同じに扱う）")
     s.add_argument("--deferred-issues", type=int, nargs="+", help="上限に達して Issue へ回した指摘の Issue 番号（決定 13）")
     s = name(ls.add_parser("finish"))
-    s.add_argument("lap", type=int, help="締め直す保留の周回（配布待ち・質問待ち）")
+    s.add_argument("lap", type=int, help="締め直す保留の周回（リリース待ち・質問待ち）")
     s.add_argument("--done", required=True, help="残りの工程（まとめ）の queue の done")
     name(ls.add_parser("pending"))
     s = name(ls.add_parser("hold-question"))

@@ -39,12 +39,12 @@
 ## 用語
 
 「承認資料」「手で足した節」「置き換える箇条」の定義は用語集（[docs/glossary.md](../glossary.md)）の「NDF のリリース（`ndf-release`）」が、
-「指示書」は「指示書（`ndf-instructions`）」が正である。配布は指示書の宣言の読み込み（`Declaration.load`）をそのまま使う
+「指示書」は「指示書（`ndf-instructions`）」が正である。デプロイは指示書の宣言の読み込み（`Declaration.load`）をそのまま使う
 （顧客 / 供給者の関係）。
 
 ## 背景
 
-承認ゲート 2 で差し戻して同じ版の開発版を出し直すと、配布のプランの `approval-facts` が承認資料を丸ごと作り直し、監督の写し
+承認ゲート 2 で差し戻して同じ版の開発版を出し直すと、リリースプランの `approval-facts` が承認資料を丸ごと作り直し、監督の写し
 （`presentation_to`）がそれで承認資料を上書きしていた。ndf 10.17.66（スプリント m1743）では、conductor が手で足した節
 （「未検証・残る危険」の中身・「指示書の変更」）が dev.2・dev.3 で消え、控え（`approval-ndf-v10.17.66.dev1.md`・`.dev2.md`）から
 書き戻した。
@@ -79,7 +79,7 @@
 | それ以外の `## ` の節 | 人・conductor（手で足した節） | 残す |
 | CHANGELOG の版の節 `## [<plugin> <版>]` | `notes`（`write_notes`） | — |
 
-「配る中身」と「検証への配布で確かめたこと」の欄と同意の 1 行は `approval-facts` の節の中にあるため、作り直しで仮の値へ戻り、
+「配る中身」と「開発版のデプロイで確かめたこと」の欄と同意の 1 行は `approval-facts` の節の中にあるため、作り直しで仮の値へ戻り、
 同じプランの `explain`・`others` が書き直す。「承認の記録」も `## 2.` の中にあり、作り直しで消える（承認を取り直す）。
 `changelog`（`_update_changelog`）は版の節の見出しと仮の中身（PR のタイトル）を置くだけで、最終の箇条は `notes` が決める。
 置き換えは `notes` にだけ効き、`changelog` のタイトルには効かない。
@@ -116,7 +116,7 @@
 
 ```mermaid
 graph TD
-    subgraph 配布のプラン
+    subgraph リリースプラン
         T[facts / explain / others の雛形]
     end
     subgraph 承認の材料
@@ -147,7 +147,7 @@ GitHub の PR の本文と git のログは読むだけで、書かない（I8�
 
 ```mermaid
 sequenceDiagram
-    participant P as 配布のプラン
+    participant P as リリースプラン
     participant AF as approval-facts
     participant C as carry
     participant I as instructions

@@ -1,7 +1,7 @@
 """`$SCRIPTS` の解決が 4 ランタイムの配置で当たることを検証する。
 
 解決の手順は `references/scripts-lookup.md` の bash のコードブロックにしかない。
-テストはそのブロックを読み出して実行する。手順を写し取ると、複製だけが正しくて配布された
+テストはそのブロックを読み出して実行する。手順を写し取ると、複製だけが正しくてデプロイされた
 手順が外れている状態を作れてしまう。
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
@@ -58,7 +58,7 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
 
 
 def make_plugin(root: Path) -> Path:
-    """プラグインの配布物を作る。`scripts/` と `skills/<Skill名>/` を持つ。"""
+    """プラグインのアーティファクトを作る。`scripts/` と `skills/<Skill名>/` を持つ。"""
     (root / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy(RESOLVE_ENTRY, root / "scripts" / "resolve.sh")
     (root / "scripts" / "projects-sync.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -83,7 +83,7 @@ def link_kiro(project: Path, plugin: Path) -> Path:
 
 
 def make_foreign_plugin(root: Path) -> Path:
-    """NDF ではないプラグインの配布物を作る。`scripts/projects-sync.sh` を持たない。"""
+    """NDF ではないプラグインのアーティファクトを作る。`scripts/projects-sync.sh` を持たない。"""
     skill = root / "skills" / "another-skill"
     skill.mkdir(parents=True, exist_ok=True)
     (skill / "SKILL.md").write_text("# another-skill\n", encoding="utf-8")
@@ -156,7 +156,7 @@ def test_kiro_global_symlink(tmp_path, elsewhere, home) -> None:
 
 
 def test_kiro_skills_parent_is_not_the_plugin(tmp_path, home) -> None:
-    """`.kiro/skills/../scripts` はプラグインの外を指す。そこには配布物が無い。"""
+    """`.kiro/skills/../scripts` はプラグインの外を指す。そこにはリリース対象が無い。"""
     plugin = make_plugin(tmp_path / "kiro-plugin" / "plugins" / "ndf")
     project = link_kiro(tmp_path / "project", plugin)
     assert not (project / ".kiro" / "scripts").exists()
@@ -167,7 +167,7 @@ def test_kiro_skips_another_plugins_symlink(tmp_path, home) -> None:
     """別プラグインの symlink が先に並んでも、NDF のリンクを見つけるまで調べ続ける。
 
     インストーラが消すのは NDF 配下を指すリンクだけで、他のプラグインのリンクは残る。
-    最初のリンクで打ち切ると、配布物を持たない別プラグインを採ってしまう。
+    最初のリンクで打ち切ると、リリース対象を持たない別プラグインを採ってしまう。
     """
     foreign = make_foreign_plugin(tmp_path / "other-plugin" / "plugins" / "other")
     plugin = make_plugin(tmp_path / "kiro-plugin" / "plugins" / "ndf")

@@ -21,7 +21,7 @@ export type RunJobInstruction = {
    */
   NDF_VERSION: string;
   /**
-   * new は課題から始め、resume は保存した状態から続け、loop は開発ループの周回を新しく始め、release は配布の実行の手（RELEASE_STEP）を流す
+   * new は課題から始め、resume は保存した状態から続け、loop は開発ループの周回を新しく始め、release はリリースの実行の手（RELEASE_STEP）を流す
    */
   START: "new" | "resume" | "loop" | "release";
   /**
@@ -53,15 +53,15 @@ export type RunJobInstruction = {
    */
   LOOP_ANSWERS?: string;
   /**
-   * 配布の実行のまとめた配布の連番（#2439）
+   * リリースの実行のまとめたリリースの連番（#2439）
    */
   RELEASE_SEQ?: string;
   /**
-   * 配布の実行の手。present / represent は提示を作り、confirm:<k> は確定した提示 k の本番の配布を流し、continue は止まったプランを続ける
+   * リリースの実行の手。present / represent は提示を作り、confirm:<k> は確定した提示 k のリリースを流し、continue は止まったプランを続ける
    */
   RELEASE_STEP?: "present" | "represent" | "confirm:1" | "confirm:2" | "continue";
   /**
-   * 手動の実行の再開で、答えの出た配布の依頼の id
+   * 手動の実行の再開で、答えの出たリリースの依頼の id
    */
   RELEASE_REQUEST_ID?: string;
   /**

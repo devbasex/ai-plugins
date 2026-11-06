@@ -16,7 +16,7 @@
                "plugins/ndf/skills/*/scripts/drive.py"]},
     {"name": "共通の部品と結果の契約", "common": true, "paths": ["plugins/ndf/scripts/lib/**"]},
     {"name": "hook", "common": true, "paths": ["plugins/ndf/hooks/**", "plugins/ndf/scripts/*-guard.sh"]},
-    {"name": "配布の手順", "common": true,
+    {"name": "リリースの手順", "common": true,
      "paths": ["plugins/ndf/scripts/release-steps.py", "plugins/ndf/scripts/release-verification-steps.py",
                "plugins/ndf/scripts/merged-steps.py", "scripts/build-runtime-plugins.sh"]}
   ],
