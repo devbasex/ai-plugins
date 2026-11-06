@@ -45,6 +45,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（参加者プール・担当の輪番・認証・終了基準の 3 層）
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
 - [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
+- [docs/08-review-categories.md](docs/08-review-categories.md) — 変更ファイルの分類から担当へ渡す自動レビュー観点の一覧（手順の途中では読まない）
 - [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
@@ -86,7 +87,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 ```
 
 `init` は変更ファイルを分類して自動のレビュー観点を組み立て、`--focus` / `--extra-instructions-file` をその後ろに
-上乗せする。分類の一覧は [docs/04-contracts.md](docs/04-contracts.md) の「自動レビュー観点テンプレート」にある。
+上乗せする。分類の一覧は [docs/08-review-categories.md](docs/08-review-categories.md) の「自動レビュー観点テンプレート」にある。
 
 ### 設計 PR と実装 PR の戦略
 
@@ -100,7 +101,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 | `--max-rounds` を渡さないときの上限 | `3` | `12` |
 | 担当へ渡す差分 | 2 ラウンド目以降は前のラウンドの head からの変更だけ（`git diff <前の head> <今の head>` をプロンプトに書く） | 全差分 |
 | 大きさ | 設計文書 1 本は 1,000 行以下。超えると `init` が文書と行数を標準エラーへ出し、状態ファイルの `design_doc_oversize` に残す（止めない） | 制限なし |
-| レビューの種類 | 設計文書に `## ドメインモデル` の節があれば、1 ラウンド目はその節と用語集の差分だけを見る（モデルレビュー）。2 ラウンド目以降は確定したモデルを前提に残りを見る（詳細レビュー）。モデルレビューの承認では抜けない。観点と状態ファイルの項目は [docs/04-contracts.md](docs/04-contracts.md) の「設計 PR のモデルレビューと詳細レビュー」 | 分けない |
+| レビューの種類 | 設計文書に `## ドメインモデル` の節があれば、1 ラウンド目はその節と用語集の差分だけを見る（モデルレビュー）。2 ラウンド目以降は確定したモデルを前提に残りを見る（詳細レビュー）。モデルレビューの承認では抜けない。観点と状態ファイルの項目は [docs/08-review-categories.md](docs/08-review-categories.md) の「設計 PR のモデルレビューと詳細レビュー」 | 分けない |
 
 `--max-rounds` を渡せば、どちらの分類でも渡した値が勝つ。
 

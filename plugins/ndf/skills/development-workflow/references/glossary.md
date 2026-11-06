@@ -162,8 +162,8 @@ flowchart TB
 | 指摘ファイル | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル。投稿は書いた者でなく、読む側のスクリプトが行う | `<席>-review-pr<番号>-round<R>-payload.json`、`pr-review-steps.py` の `findings.json` | [cross-review](../../cross-review/SKILL.md)、[pr-review](../../pr-review/SKILL.md) |
 | doc-lint | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | `doc-lint.py`、プランの `doc-lint` のステップ | [doc-lint.py](../../../scripts/doc-lint.py) の docstring |
 | 用語チェック | プロジェクトの用語集の形と、文書の追加した行の廃止した語・未登録の語を見るチェック。LLM を使わない | `glossary.py check`、設計のフェーズの `glossary-check` のステップ | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
-| モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) |
-| 詳細レビュー | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りの節を見る | 状態ファイルの `rounds[].stage: "detail"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) |
+| モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
+| 詳細レビュー | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りの節を見る | 状態ファイルの `rounds[].stage: "detail"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
 
 ## 記録と状態
 

@@ -312,7 +312,7 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
         if rels:
             lines += ["", "## まとめたリリース", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]
             for r in rels:
-                lines.append(f"| {r.get('seq')} | {r.get('state')} | {r.get('version') or '-'} | {(r.get('sha') or '-')[:12]} |")
+                lines.append(f"| {r.get('n')} | {r.get('state')} | {r.get('version') or '-'} | {(r.get('sha') or '-')[:12]} |")
     return "\n".join(lines) + "\n"
 
 

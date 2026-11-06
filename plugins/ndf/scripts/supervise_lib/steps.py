@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
+import container_reach
 import gh_call
 import stage_skills
 import test_strategy as ts
@@ -123,7 +124,8 @@ def fill_test_limit(ctx, step: dict, cmd: str) -> tuple[str, Any]:
 
     上限 = max(プランの作成の時点の秒, 所要の記録と直近の全体テストの実測から決めた秒)。広がったら `timeout` を
     `with_margin(上限)` にし（ほかの余裕は足さない）、同じ秒を `test-run.py` の `--limit` へ渡す。決め直せない
-    （プランの「テストの時間」の `basis` が読めない）ときは作成の時点の秒で流す。決めた値は `cur.test_limit` に残す。"""
+    （プランの「テストの時間」の `basis` が読めない）ときは作成の時点の秒で流す。決めた値は `cur.test_limit` に残す。
+    コンテナの宣言があるときは、テスト環境の用意の分として `timeout` だけへ起動の上限を足す（`--limit` は変えない）。"""
     from supervise_lib.verify_steps import with_margin
 
     timeout = step.get("timeout", 3600)
@@ -141,6 +143,8 @@ def fill_test_limit(ctx, step: dict, cmd: str) -> tuple[str, Any]:
             limit, basis = planned, None
     if limit > planned:
         timeout = max(int(timeout), with_margin(limit))
+    if container_reach.container_suites(step.get("cwd", ctx.cwd)):
+        timeout = int(timeout) + container_reach.UP_TIMEOUT
     cur = getattr(ctx.state, "cur", None)
     if isinstance(cur, dict):
         cur["test_limit"] = {"key": key, "planned": planned, "seconds": limit, "timeout": timeout, "basis": basis}

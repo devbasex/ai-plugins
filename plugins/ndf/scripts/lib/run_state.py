@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import container_reach  # noqa: E402
 import worktree_base  # noqa: E402
 from run_owner import NDF_STATE_DIRS, WINDOW, alive, alive_reason, last_seen_iso, mtime, owner_path, read_owner, utc_iso  # noqa: E402, F401
 from run_state_kinds import KINDS, SWEPT_KINDS, Kind  # noqa: E402, F401
@@ -117,7 +118,9 @@ def worktree_work(path: Path | str, head_oid: str | None = None) -> str | None:
 
 
 def remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict[str, Any] | None) -> tuple[bool, str | None]:
-    """レビュー worktree 1 本を `--force` を使わずに外す。外せなければ (False, 理由)。"""
+    """レビュー worktree 1 本を `--force` を使わずに外す。外せなければ (False, 理由)。
+
+    外す前に公開を閉じてテスト環境を破棄する。閉じられなければ外さず、破棄できなければ (True, 理由) を返す。"""
     path = Path(path)
     w = _listed(root).get(str(path.resolve()))
     if w is None:
@@ -127,6 +130,9 @@ def remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict[st
     why = _local_work(path) or _unpushed(path, (pr_state or {}).get("headRefOid"))
     if why:
         return False, why
+    ok, note = container_reach.discard_testenv(path)
+    if not ok:
+        return False, note
     for d in NDF_STATE_DIRS:
         shutil.rmtree(path / d, ignore_errors=True)
     env = os.environ.get("CROSS_REVIEW_TMP_DIR")
@@ -135,7 +141,7 @@ def remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict[st
     r = _review_git(root, "worktree", "remove", str(path))
     if r.returncode != 0:
         return False, f"git worktree remove が拒否: {(r.stderr or r.stdout).strip()[:300]}"
-    return True, None
+    return True, note
 
 
 def remove_run_dir(root: Path | str, rf_dir: Path | str, pr_state: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -375,7 +381,7 @@ def review_base(root: Path | str) -> Path | None:
     import repo as repo_lib
 
     slug = repo_lib.slug(repo_lib.owner_repo(root))
-    return worktree_base.worktree_parent() / slug if slug else None
+    return worktree_base.worktree_parent(root) / slug if slug else None
 
 
 def sweep_states(

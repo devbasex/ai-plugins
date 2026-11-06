@@ -237,7 +237,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     worktree = (
         str(pathlib.Path(args.worktree).resolve())
         if args.worktree
-        else str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+        else str(workspace_mod._default_worktree_base(".") / github._repo_slug(repo) / f"pr{pr}")
     )
 
     # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
@@ -370,7 +370,7 @@ def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktre
     if meta.repo != repo:
         repo = meta.repo
         if not args_worktree:
-            worktree = str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+            worktree = str(workspace_mod._default_worktree_base(".") / github._repo_slug(repo) / f"pr{pr}")
     if meta.rate_remaining is not None:
         review_lib.info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
 

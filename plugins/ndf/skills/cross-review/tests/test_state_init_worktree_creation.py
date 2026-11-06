@@ -88,6 +88,7 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
+    monkeypatch.setattr(review_lib.workspace.worktree_base, "ensure_ignored", lambda root, worktree: None)
 
     recorder = _RecordingRun()
     monkeypatch.setattr(subprocess, "run", recorder)

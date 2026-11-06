@@ -12,6 +12,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 import types
 
 import pytest
@@ -1099,7 +1100,7 @@ def test_a_failed_rebuild_leaves_the_state_untouched(run_init, tmp_path):
 
 
 @pytest.fixture
-def test_calls(patch_lib):
+def test_calls(patch_lib, monkeypatch):
     """`init` が実行したテストのコマンドを記録する。終了コードはコマンドごとに決める。"""
     seen: list[str] = []
     codes: dict[str, int] = {}
@@ -1109,6 +1110,7 @@ def test_calls(patch_lib):
         return codes.get(command if isinstance(command, str) else " ".join(command), 0), False
 
     patch_lib("run_with_timeout", fake_run)
+    monkeypatch.setattr(sys.modules["refactor_lib.baseline"].container_reach, "env_for", lambda cwd: {})
     seen_codes = codes
     return type("Calls", (), {"seen": seen, "codes": seen_codes})()
 
@@ -1721,6 +1723,22 @@ def test_run_baseline_records_a_green_run_of_test_and_lint_suites(refactor, monk
     }
     captured = capsys.readouterr()
     assert "着手前のテスト成功: run unit && run lint" in captured.out + captured.err
+
+
+def test_run_baseline_prepares_the_test_env_before_the_clock_starts(refactor, monkeypatch, tmp_path):
+    """用意の秒を suite 群の共通の上限へ数えない。テストが無ければ用意しない。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun(suite="u", kind=ts.TEST, command="pytest")]
+    baseline = _fake_baseline(monkeypatch, runs, {"pytest": 0})
+    seen = []
+    monkeypatch.setattr(baseline.container_reach, "env_for", lambda work: seen.append("prepare") or {})
+    monkeypatch.setattr(baseline, "time", types.SimpleNamespace(monotonic=lambda: seen.append("clock") or time.monotonic()))
+    baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+    assert seen[:2] == ["prepare", "clock"]
+    seen.clear()
+    monkeypatch.setattr(baseline, "commands_of", lambda strategy, scope, work: ("whole", []))
+    baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+    assert "prepare" not in seen
 
 
 def test_run_baseline_records_existing_failures_and_a_red_lint_suite(refactor, monkeypatch, tmp_path, capsys):

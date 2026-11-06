@@ -67,6 +67,7 @@ from step_result import (
     result,
     run,
 )
+import container_reach  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 import run_owner  # noqa: E402
@@ -107,14 +108,21 @@ def remove_worktree(root, path, label, merge_commit=None):
     """作業ツリーを外す。拒否されたら未追跡・無視のファイルを退避してから --force で外す。(成否, 理由) を返す。
 
     追跡ファイルの未コミットの変更は退避できず --force が消すため、残っていれば外さず kept にする。
-    理由は `退避先 <パス>` で始まり、作り直せる生成物を捨てたら `（捨てた: <相対パス>, …）` を続ける。
+    外す前に公開を閉じてテスト環境を破棄する（compose の定義と閉じる手段は作業ツリーにある）。閉じられなければ外さず、
+    破棄できなければ理由を載せて外す。理由は `退避先 <パス>` で始まり、作り直せる生成物を捨てたら
+    `（捨てた: <相対パス>, …）` を続ける。
     """
+    note = None
+    if Path(path).exists():
+        dirty = git(path, "status", "--porcelain=v1", "--untracked-files=no").stdout.splitlines()
+        if dirty:
+            names = ", ".join(line[3:] for line in dirty[:5]) + ("…" if len(dirty) > 5 else "")
+            return False, f"追跡ファイルに未コミットの変更が {len(dirty)} 件ある（{names}）ため --force で外さない"
+        ok, note = container_reach.discard_testenv(path)
+        if not ok:
+            return False, note
     if git(root, "worktree", "remove", path, check=False).returncode == 0:
-        return True, None
-    dirty = git(path, "status", "--porcelain=v1", "--untracked-files=no").stdout.splitlines()
-    if dirty:
-        names = ", ".join(line[3:] for line in dirty[:5]) + ("…" if len(dirty) > 5 else "")
-        return False, f"追跡ファイルに未コミットの変更が {len(dirty)} 件ある（{names}）ため --force で外さない"
+        return True, note
     try:
         dest, discarded = trash.evacuate(path, label, merge_commit)
     except (StepError, OSError) as e:
@@ -123,7 +131,8 @@ def remove_worktree(root, path, label, merge_commit=None):
     if p.returncode != 0:
         return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
     why = f"退避先 {dest}" if dest else "退避するものは無かった"
-    return True, why + (f"（捨てた: {', '.join(discarded)}）" if discarded else "")
+    why += f"（捨てた: {', '.join(discarded)}）" if discarded else ""
+    return True, f"{why}。{note}" if note else why
 
 
 def _recorder():
@@ -281,7 +290,7 @@ def cleanup(root, prs):
     # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
     root = main_dir
     slug = repo_slug(root)
-    wt_base = worktree_base.worktree_parent()
+    wt_base = worktree_base.worktree_parent(main_dir)
 
     for n in prs:
         with main_dir_lock(main_dir):

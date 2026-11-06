@@ -351,6 +351,150 @@ def test_merged_cleanup_removes_rf_like_pr(place, tmp_path) -> None:
     assert {"swept_removed", "swept_kept"} <= set(out["metrics"])
 
 
+# ---------------- テスト環境の破棄（#2567） ----------------
+
+FAKE_DOCKER = """#!/bin/sh
+printf '%s\\n' "$*" >> "$DOCKER_LOG"
+case "$*" in
+  *" down"*)
+    [ ! -d "$NDF_WORKTREE" ] || echo "tree-present $NDF_WORKTREE" >> "$DOCKER_LOG"
+    [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo busy >&2; exit 1; }
+    ;;
+esac
+"""
+TESTENV = SCRIPTS / "worktree-testenv.sh"
+
+
+@pytest.fixture
+def declared(place, tmp_path, monkeypatch):
+    """テスト環境とコンテナの宣言があり、`NDF_WORKTREE_BASE` を与えないリポジトリ。(root, 置き場, 環境)。"""
+    root, _, systmp = place
+    monkeypatch.delenv("NDF_WORKTREE_BASE")
+    (root / ".ndf").mkdir()
+    worktree = {"version": 1, "localenv": {"kind": "compose", "compose_files": ["compose.yml"]}, "testenv": {}}
+    (root / ".ndf" / "worktree.json").write_text(json.dumps(worktree), encoding="utf-8")
+    suite = {"name": "unit", "runner": "sh", "command": "x", "container": {"service": "app"}}
+    (root / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": [suite]}}), encoding="utf-8")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "docker").write_text(FAKE_DOCKER, encoding="utf-8")
+    (bindir / "docker").chmod(0o755)
+    (bindir / "gh").write_text(FAKE_GH.format(py=sys.executable), encoding="utf-8")
+    (bindir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("DOCKER_LOG", str(tmp_path / "docker.log"))
+    monkeypatch.setenv("TMPDIR", str(systmp))
+    monkeypatch.setenv("NDF_PRESENTATION_DIR", str(tmp_path / "pres"))
+    return root, root / ".worktrees" / ".ndf" / "o--r", tmp_path / "docker.log"
+
+
+def assign(path) -> None:
+    subprocess.run(["bash", str(TESTENV), "env", str(path)], check=True, capture_output=True)
+
+
+def released(root, path) -> bool:
+    rows = json.loads((root / ".git" / "ndf" / "worktree-registry.json").read_text(encoding="utf-8"))["assignments"]
+    return [r for r in rows if r["worktree"] == str(path.resolve())][-1]["released_at"] is not None
+
+
+def merged_cleanup(root, n, head_ref="feature/z") -> dict:
+    head = git(root, "rev-parse", "HEAD").strip()
+    os.environ["FAKE_GH_PRS"] = json.dumps(
+        {str(n): {"headRefName": head_ref, "state": "MERGED", "mergeCommit": {"oid": head}, "headRefOid": head}}
+    )
+    try:
+        p = subprocess.run(
+            [sys.executable, str(SCRIPTS / "merged-steps.py"), "cleanup", str(n), "--root", str(root)], capture_output=True, text=True
+        )
+    finally:
+        del os.environ["FAKE_GH_PRS"]
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def test_the_new_place_is_found_by_the_cleanup_and_the_testenv_goes_first(declared) -> None:
+    root, base, log = declared
+    pr, work = add_tree(root, base / "pr5"), add_tree(root, base / "rf5" / "work")
+    assign(pr), assign(work)
+
+    out = merged_cleanup(root, 5)
+
+    got = {Path(i["name"]).name: i["result"] for i in out["items"]}
+    assert got["pr5"] == "removed" and got["work"] == "removed", out
+    calls = log.read_text(encoding="utf-8")
+    assert f"tree-present {pr.resolve()}" in calls and f"tree-present {work.resolve()}" in calls
+    assert " down --volumes" in calls
+    assert released(root, pr) and released(root, work)
+
+
+def test_the_new_place_is_found_by_the_sweep(declared) -> None:
+    root, base, log = declared
+    pr = add_tree(root, base / "pr7")
+    assign(pr)
+    age(pr)
+
+    items = run_state.sweep_states(root, view=View({7: "CLOSED"}))
+
+    assert by_name(items)["pr7"]["result"] == "removed"
+    assert f"tree-present {pr.resolve()}" in log.read_text(encoding="utf-8") and released(root, pr)
+
+
+def test_a_failed_discard_removes_the_worktree_and_names_the_environment(declared, monkeypatch) -> None:
+    root, _, _ = declared
+    path = root / ".worktrees" / "feature" / "z"
+    git(root, "worktree", "add", "-q", "-b", "feature/z", str(path))
+    assign(path)
+    monkeypatch.setenv("FAKE_DOWN_FAIL", "1")
+
+    out = merged_cleanup(root, 5)
+
+    item = next(i for i in out["items"] if i["kind"] == "worktree" and i["name"] == str(path))
+    assert item["result"] == "removed" and "テスト環境を破棄できない: repo-wt-feature-z-" in item["reason"]
+    assert not path.exists() and not released(root, path)
+
+
+def test_a_changed_tracked_file_keeps_the_worktree_and_its_testenv(declared) -> None:
+    root, _, log = declared
+    path = root / ".worktrees" / "feature" / "z"
+    git(root, "worktree", "add", "-q", "-b", "feature/z", str(path))
+    assign(path)
+    (path / "a.txt").write_text("changed\n", encoding="utf-8")
+
+    out = merged_cleanup(root, 5)
+
+    item = next(i for i in out["items"] if i["kind"] == "worktree" and i["name"] == str(path))
+    assert item["result"] == "kept" and path.exists() and not released(root, path)
+    assert not log.exists()
+
+
+def test_a_failed_close_keeps_the_worktree_until_the_next_cleanup(declared) -> None:
+    root, base, log = declared
+    decl_file = root / ".ndf" / "worktree.json"
+    decl = json.loads(decl_file.read_text(encoding="utf-8"))
+    decl["testenv"]["expose"] = {
+        "enabled": True,
+        "public_tag": "t",
+        "base_domain": "e.example",
+        "open_command": "true",
+        "close_command": "false",
+    }
+    decl_file.write_text(json.dumps(decl), encoding="utf-8")
+    pr = add_tree(root, base / "pr5")
+    subprocess.run(["bash", str(TESTENV), "up", str(pr), "--tag", "t"], check=True, capture_output=True)
+    subprocess.run(["bash", str(TESTENV), "expose", str(pr)], check=True, capture_output=True)
+
+    out = merged_cleanup(root, 5)
+
+    item = next(i for i in out["items"] if Path(i["name"]).name == "pr5")
+    assert item["result"] == "kept" and "テスト環境の公開を閉じられない" in item["reason"], out
+    assert pr.exists() and not released(root, pr) and " down" not in log.read_text(encoding="utf-8")
+
+    decl["testenv"]["expose"]["close_command"] = "true"
+    decl_file.write_text(json.dumps(decl), encoding="utf-8")
+    out = merged_cleanup(root, 5)
+
+    assert not pr.exists() and released(root, pr)
+
+
 # ---------------- 状態の一覧 ----------------
 
 
