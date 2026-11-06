@@ -171,6 +171,41 @@ interface RunEndContext {
 // 実行を終わりへ移し、次の周回と待っているループを起こす必要があるときのループの書き込み。起こさないときは null
 type RunMoved = { loopWrite: LoopWrite | undefined } | null;
 
+// 開始と周回の開始が作る実行の行に、admit が確かめて集めた値
+interface NewRunFields {
+  ctx: AccountContext;
+  registration: Registration;
+  repo: string;
+  issues: number[];
+  ndfVersion: string;
+  modelCredentialSecretArn: string | null;
+  loop: DevLoop | null;
+}
+
+// 開始と周回の開始の実行の行。最初のジョブの ID（currentJobId）は呼び手が入れる
+function newSprintRun(fields: NewRunFields, sprintRunId: string, now: string): SprintRun {
+  const { ctx, registration, repo, issues, ndfVersion, modelCredentialSecretArn, loop } = fields;
+  return {
+    sprintRunId,
+    accountId: ctx.accountId,
+    repositoryId: registration.repositoryId,
+    repo,
+    state: "starting",
+    issues,
+    ndfVersion,
+    executionMode: ctx.executionMode,
+    modelCredentialSecretArn,
+    currentJobId: null,
+    jobCount: 1,
+    cancelRequested: false,
+    failureReason: null,
+    createdBy: ctx.userId,
+    createdAt: now,
+    updatedAt: now,
+    ...(loop ? { loopId: loop.loopId, lap: loop.lapRuns + 1 } : {}),
+  };
+}
+
 export class RunControl {
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -322,25 +357,7 @@ export class RunControl {
 
     const now = this.iso();
     const loop = opts.loop?.loop ?? null;
-    const run: SprintRun = {
-      sprintRunId: this.newId(),
-      accountId: ctx.accountId,
-      repositoryId: registration.repositoryId,
-      repo: fullName,
-      state: "starting",
-      issues: opts.issues,
-      ndfVersion,
-      executionMode: ctx.executionMode,
-      modelCredentialSecretArn,
-      currentJobId: null,
-      jobCount: 1,
-      cancelRequested: false,
-      failureReason: null,
-      createdBy: ctx.userId,
-      createdAt: now,
-      updatedAt: now,
-      ...(loop ? { loopId: loop.loopId, lap: loop.lapRuns + 1 } : {}),
-    };
+    const run = newSprintRun({ ctx, registration, repo: fullName, issues: opts.issues, ndfVersion, modelCredentialSecretArn, loop }, this.newId(), now);
     const job = this.newJob(run, 1, opts.start, null);
     run.currentJobId = job.jobId;
 
