@@ -268,3 +268,8 @@ def test_board_without_either_option_still_reports_the_missing_option(board_with
     board = board_with([{"id": "O_other", "name": "設計"}])
     out = run(board, SYNC, "42", "stage", "デプロイ")
     assert "選択肢「デプロイ」が無い" in out.stdout + out.stderr
+
+
+@pytest.mark.parametrize("old", ["配布（承認ゲート 2）", "リリース（承認ゲート 2）"])
+def test_old_phase_of_the_release_gate_reads_as_the_current_one(old):
+    assert legacy_values.to_current("phase", old) == "リリース（リリース承認ゲート）"

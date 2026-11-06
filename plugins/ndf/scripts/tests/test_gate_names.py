@@ -16,7 +16,6 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 import gate_answer  # noqa: E402
 import gate_rejections as gr  # noqa: E402
 import legacy_names  # noqa: E402
-import legacy_values  # noqa: E402
 import parallel_external as pe  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 import sprint_loop_gate2 as gate2  # noqa: E402
@@ -159,11 +158,6 @@ def test_other_spellings_stay_unread_as_before(tmp_path, name):
     assert gate_answer.approved(state, RELEASE) is None
     assert not gr.state_answered(state)
     assert gr.count_by_gate([{"gate": name}])["other"] == 1
-
-
-@pytest.mark.parametrize("old", ["配布（承認ゲート 2）", "リリース（承認ゲート 2）"])
-def test_old_phase_of_the_release_gate_reads_as_the_current_one(old):
-    assert legacy_values.to_current("phase", old) == "リリース（リリース承認ゲート）"
 
 
 def python_sources():
