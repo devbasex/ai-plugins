@@ -1,6 +1,6 @@
 // #2347: 開発ループ・並行する実行の取り合い・利用上限の後の再開・手元のマシンの枠（設計の「テスト設計」）
 import { readdirSync, readFileSync } from "node:fs";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { validateRunJobInstruction, type RunJobInstruction } from "@ndf-factory/contracts";
 import type { AccountContext } from "../accounts/model.ts";
 import { ApiError } from "../errors.ts";
@@ -10,6 +10,7 @@ import { accountContext, createRunsHarness, TEST_CONFIG, type RunsHarness } from
 import { backfill } from "./backfill.ts";
 import type { RunControlConfig } from "./control.ts";
 import { LoopControl, loopStateAfter, type RunOutcome } from "./loops.ts";
+import type { DevLoop, LoopWrite, SprintRun } from "./model.ts";
 import { compareVersions, isLegacyVersion, supportsBudgetReset } from "./version.ts";
 
 const REPO = 101;
@@ -732,5 +733,279 @@ describe("タスクが止まった後の処理（RunControl.finalize の現状�
     const loop = await loopOf(loop_id);
     expect(loop).toMatchObject({ state: "running", lapRuns: 2 });
     expect(loop.currentRunId).not.toBe(runId);
+  });
+});
+
+// 現状固定。開始と周回の開始に共通の判定と書き込みを、断りの順・問い合わせの回数・書く行の形まで今の振る舞いのまま押さえる
+describe("開始の判定と書き込み（RunControl.admit の現状）", () => {
+  beforeEach(() => setup());
+
+  const managed = (patch: Partial<AccountContext> = {}) => accountContext({ plan: "pro", executionMode: "managed", ...patch });
+  const lapWrite = (loop: DevLoop) => (run: SprintRun): LoopWrite => ({
+    accountId: loop.accountId,
+    loopId: loop.loopId,
+    set: { state: "running", currentRunId: run.sprintRunId, lapRuns: loop.lapRuns + 1, updatedAt: h.clock.now.toISOString() },
+    expect: { currentRunId: null, lapRuns: loop.lapRuns, states: ["between_laps"] },
+  });
+  const nextLap = (loop: DevLoop) => h.control.startLapRun(loop, lapWrite(loop));
+  const limitRepoTo = (maxConcurrentRuns: number) => h.table.setMaxConcurrentRuns("acc-1", REPO, maxConcurrentRuns);
+  const usage = (sprintRunId: string, tokens: number) =>
+    event(sprintRunId, "j", "usage.recorded", { model: "m", input_tokens: tokens, output_tokens: 0, cost_usd: 1, step: "impl" });
+
+  it("手動の開始が書く実行とジョブの行", async () => {
+    const { sprint_run_id } = await manual([1, 4]);
+    const at = h.clock.now.toISOString();
+    expect(sprint_run_id).toBe("id0001");
+    expect(await runOf(sprint_run_id)).toEqual({
+      sprintRunId: "id0001",
+      accountId: "acc-1",
+      repositoryId: REPO,
+      repo: "org-a/repo-a",
+      state: "starting",
+      issues: [1, 4],
+      ndfVersion: "10.26.1",
+      executionMode: "byok",
+      modelCredentialSecretArn: CRED_ARN,
+      currentJobId: "id0002",
+      jobCount: 1,
+      cancelRequested: false,
+      failureReason: null,
+      createdBy: "user-1",
+      createdAt: at,
+      updatedAt: at,
+      legacy: false,
+    });
+    expect(await h.table.getJob("id0002")).toMatchObject({
+      jobId: "id0002",
+      sprintRunId: "id0001",
+      accountId: "acc-1",
+      seq: 1,
+      start: "new",
+      approvalRequestId: null,
+      state: "pending",
+      runnerKind: "ecs",
+      stopReason: null,
+      createdAt: at,
+      startedAt: null,
+      finishedAt: null,
+      result: null,
+    });
+  });
+
+  it("手動の開始の照合の条件。マイルストーンは重ねず、無い課題は数えない", async () => {
+    const createRun = vi.spyOn(h.table, "createRun");
+    await manual([1, 2, 4]);
+    expect(createRun.mock.calls[0]![3]).toEqual({ issues: [1, 2, 4], milestoneChecks: ["25 Factory"], legacy: false });
+  });
+
+  it("冪等の鍵があれば、作った実行の ID を持つ鍵の行を照合に入れる", async () => {
+    const createRun = vi.spyOn(h.table, "createRun");
+    const { sprint_run_id } = await h.control.startSprintRun(accountContext(), { repositoryId: REPO, issues: [1], idempotencyKey: "k1" });
+    expect(createRun.mock.calls[0]![3]!.idempotency).toEqual({
+      userId: "user-1",
+      operationId: "startSprintRun",
+      key: "k1",
+      createdId: sprint_run_id,
+      createdAt: h.clock.now.toISOString(),
+      ttl: expect.any(Number),
+    });
+  });
+
+  it("周回の開始は課題を持たず、loop の書き込みを照合に入れ、ループの番号と周回を実行へ写す", async () => {
+    const start = vi.spyOn(h.control, "startLapRun");
+    const createRun = vi.spyOn(h.table, "createRun");
+    await manual([4]);
+    createRun.mockClear();
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const loop = await loopOf(loop_id);
+    const run = await runOf(loop.currentRunId!);
+    expect(run).toMatchObject({ loopId: loop_id, lap: 1, issues: [], legacy: false });
+    expect(await h.table.getJob(run.currentJobId!)).toMatchObject({ start: "loop", seq: 1, loopInput: { name: "l1", milestones: ["25 Factory"], exclude: [4] } });
+    expect(instructionOf(run.currentJobId!)).toMatchObject({ START: "loop", EXCLUDE_ISSUES: "4", LOOP_NAME: "l1" });
+    const guards = createRun.mock.calls[0]![3]!;
+    expect(guards).toMatchObject({ issues: [], milestoneChecks: [], legacy: false });
+    expect(guards.loop).toMatchObject({ loopId: loop_id, set: { currentRunId: run.sprintRunId } });
+    expect(guards.idempotency).toBeUndefined();
+    expect(await start.mock.results[0]!.value).toMatchObject({ sprintRunId: run.sprintRunId, legacy: false, lap: 1 });
+  });
+
+  it("リポジトリの名前が変わっていれば登録を直し、実行と指示は新しい名前を持つ", async () => {
+    h.github.installations.set(9, new Map([[REPO, "org-a/renamed"]]));
+    const { sprint_run_id } = await manual([1]);
+    const run = await runOf(sprint_run_id);
+    expect(run.repo).toBe("org-a/renamed");
+    expect(instructionOf(run.currentJobId!).REPO).toBe("org-a/renamed");
+    expect((await h.table.getRegistration("acc-1", REPO))!.fullName).toBe("org-a/renamed");
+  });
+
+  it("キーを読むのは byok だけで、managed と local の実行はキーの ARN を持たない", async () => {
+    const getCredential = vi.spyOn(h.table, "getCredential");
+    await h.table.deleteCredential("acc-1");
+    const m = await manual([1], REPO, managed());
+    const l = await manual([2], REPO, accountContext({ executionMode: "local" }));
+    expect(getCredential).not.toHaveBeenCalled();
+    expect(await runOf(m.sprint_run_id)).toMatchObject({ executionMode: "managed", modelCredentialSecretArn: null });
+    const local = await runOf(l.sprint_run_id);
+    expect(local).toMatchObject({ executionMode: "local", modelCredentialSecretArn: null });
+    expect(await h.table.getJob(local.currentJobId!)).toMatchObject({ runnerKind: "local", taskArn: null });
+    expect(h.platform.tasks.size).toBe(1);
+  });
+
+  it("キーが無い断りは枠の断りより先に出る", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    await limitRepoTo(1);
+    await h.table.deleteCredential("acc-1");
+    expect(await codeOf(nextLap(await loopOf(loop_id)))).toBe("model_credential_missing");
+  });
+
+  it("手動の開始は導入の確かめが枠の判定より先で、周回の開始は枠の判定が GitHub より先", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    await limitRepoTo(1);
+    const reasons = [{ quantity: "concurrent_repo_runs", limit: 1, current: 1 }];
+    expect(await detailsOf(manual([4]))).toEqual({ reasons });
+    h.github.installations.set(9, new Map());
+    const repositoryName = vi.spyOn(h.github, "repositoryName");
+    expect(await codeOf(manual([4]))).toBe("installation_unreachable");
+    repositoryName.mockClear();
+    const refused = nextLap(await loopOf(loop_id));
+    expect(await detailsOf(refused)).toEqual({ reasons });
+    expect(repositoryName).not.toHaveBeenCalled();
+  });
+
+  it("周回の先の断りは月の token を見ず、GitHub の後の判定で断る", async () => {
+    const ctx = managed();
+    const { loop_id } = await startLoop("l1", ["25 Factory"], ctx);
+    const loop = await loopOf(loop_id);
+    await usage(loop.currentRunId!, 20_000_000);
+    const repositoryName = vi.spyOn(h.github, "repositoryName");
+    const createRun = vi.spyOn(h.table, "createRun");
+    expect(await detailsOf(nextLap(loop))).toEqual({ reasons: [{ quantity: "monthly_tokens", limit: 20_000_000, current: 20_000_000 }] });
+    expect(repositoryName).toHaveBeenCalledTimes(1);
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it("周回の先の断り: 古い版の実行があるリポジトリは GitHub を呼ばず、新しい版どうしなら通って条件の照合まで進む", async () => {
+    await setup({ parallelMinVersion: "99.0.0" });
+    const old = await startLoop("l1", ["25 Factory"]);
+    expect((await runOf((await loopOf(old.loop_id)).currentRunId!)).legacy).toBe(true);
+    const repositoryName = vi.spyOn(h.github, "repositoryName");
+    h.control.config.parallelMinVersion = "10.0.0";
+    expect(await codeOf(nextLap(await loopOf(old.loop_id)))).toBe("parallel_unsupported_version");
+    expect(repositoryName).not.toHaveBeenCalled();
+
+    await setup();
+    const fresh = await startLoop("l1", ["25 Factory"]);
+    const spy = vi.spyOn(h.github, "repositoryName");
+    expect(await nextLap(await loopOf(fresh.loop_id))).toBe("loop_changed");
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("周回の先の断り: 移行の前は実行があるリポジトリを GitHub の前に断る", async () => {
+    await setup({}, false);
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    const repositoryName = vi.spyOn(h.github, "repositoryName");
+    expect(await codeOf(nextLap(await loopOf(loop_id)))).toBe("parallel_unsupported_version");
+    expect(repositoryName).not.toHaveBeenCalled();
+  });
+
+  it("古い版の実行と新しい版の実行は同じリポジトリに並ばない", async () => {
+    await setup({ parallelMinVersion: "99.0.0" });
+    const old = await manual([1]);
+    expect((await runOf(old.sprint_run_id)).legacy).toBe(true);
+    expect(await codeOf(manual([2]))).toBe("parallel_unsupported_version");
+    h.control.config.parallelMinVersion = "10.0.0";
+    expect(await codeOf(manual([2]))).toBe("parallel_unsupported_version");
+    expect((await runOf((await manual([2], OTHER_REPO)).sprint_run_id)).legacy).toBe(false);
+  });
+
+  it("移行の前は版によらず古い版の実行になる", async () => {
+    await setup({}, false);
+    expect((await runOf((await manual([1])).sprint_run_id)).legacy).toBe(true);
+  });
+
+  it("月の token はチームでは席の利用者の分だけ、managed の実行だけを数える", async () => {
+    const seat = { plan: "team", seatType: "standard" } as const;
+    const other = await manual([1], REPO, managed({ ...seat, userId: "user-2" }));
+    await usage(other.sprint_run_id, 25_000_000);
+    expect(await codeOf(manual([2], REPO, managed({ ...seat })))).toBe("ok");
+    expect(await detailsOf(manual([3], REPO, managed({ ...seat, userId: "user-2" })))).toEqual({
+      reasons: [{ quantity: "monthly_tokens", limit: 25_000_000, current: 25_000_000 }],
+    });
+
+    await setup();
+    const byok = await manual([1]);
+    await usage(byok.sprint_run_id, 20_000_000);
+    expect(await codeOf(manual([2], REPO, managed()))).toBe("ok");
+  });
+
+  it.each(["slots", "legacy", "issue_in_loop"] as const)("createRun の %s が続くと同じ実行で 3 回まで試し、sprint_run_unavailable で何も起動しない", async (refusal) => {
+    const getSlots = vi.spyOn(h.table, "getSlots");
+    const createRun = vi.spyOn(h.table, "createRun").mockResolvedValue(refusal);
+    expect(await codeOf(manual([1]))).toBe("sprint_run_unavailable");
+    expect(createRun).toHaveBeenCalledTimes(3);
+    expect(new Set(createRun.mock.calls.map((c) => c[0].sprintRunId)).size).toBe(1);
+    expect(new Set(createRun.mock.calls.map((c) => c[1].jobId)).size).toBe(1);
+    expect(getSlots).toHaveBeenCalledTimes(3);
+    expect(h.platform.tasks.size).toBe(0);
+  });
+
+  it("枠を取り損ねた次の試しで作れれば 1 回だけ起動する", async () => {
+    const createRun = vi.spyOn(h.table, "createRun").mockResolvedValueOnce("slots");
+    const { sprint_run_id } = await manual([1]);
+    expect(createRun).toHaveBeenCalledTimes(2);
+    expect(h.platform.tasks.size).toBe(1);
+    expect((await runOf(sprint_run_id)).state).toBe("starting");
+  });
+
+  it("月の token は取り直しでも 1 回だけ数え、managed でなければ数えない", async () => {
+    vi.spyOn(h.table, "createRun").mockResolvedValue("slots");
+    const listRuns = vi.spyOn(h.table, "listRuns");
+    await codeOf(manual([1]));
+    expect(listRuns).not.toHaveBeenCalled();
+    await codeOf(manual([1], REPO, managed()));
+    expect(listRuns).toHaveBeenCalledTimes(1);
+  });
+
+  it("除外する課題は試しごとに読み直し、最後の試しの値がジョブに載る", async () => {
+    const shares = vi.spyOn(h.table, "listIssueShares").mockResolvedValueOnce([]).mockResolvedValueOnce([{ number: 4 }] as never);
+    vi.spyOn(h.table, "createRun").mockResolvedValueOnce("slots");
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    expect(shares).toHaveBeenCalledTimes(2);
+    const jobId = (await runOf((await loopOf(loop_id)).currentRunId!)).currentJobId!;
+    expect((await h.table.getJob(jobId))!.loopInput!.exclude).toEqual([4]);
+    expect(instructionOf(jobId).EXCLUDE_ISSUES).toBe("4");
+  });
+
+  it("createRun の release_running は版の断りになり、起動しない", async () => {
+    vi.spyOn(h.table, "createRun").mockResolvedValue("release_running");
+    expect(await codeOf(manual([1]))).toBe("parallel_unsupported_version");
+    expect(h.platform.tasks.size).toBe(0);
+  });
+
+  it("issue_in_use は持たれている番号だけを返す", async () => {
+    await manual([1]);
+    const err = (await manual([1, 2]).catch((e: ApiError) => e)) as ApiError;
+    expect(err.body().error).toMatchObject({ code: "issue_in_use", details: { numbers: [1] } });
+  });
+
+  it("確かめの後にループがマイルストーンを取ると、照合の結果から issue_in_loop で断る", async () => {
+    await startLoop("l1", ["25 Factory"]);
+    const getMilestoneShare = vi.spyOn(h.table, "getMilestoneShare").mockResolvedValueOnce(null);
+    expect(await detailsOf(manual([1]))).toEqual({ numbers: [1], loop_name: "l1" });
+    expect(getMilestoneShare).toHaveBeenCalledTimes(2);
+  });
+
+  it("手動の開始は loop_changed と duplicate を sprint_run_unavailable にする", async () => {
+    const createRun = vi.spyOn(h.table, "createRun").mockResolvedValueOnce("loop_changed");
+    expect(await codeOf(manual([1]))).toBe("sprint_run_unavailable");
+    createRun.mockResolvedValueOnce("duplicate");
+    expect(await codeOf(manual([1]))).toBe("sprint_run_unavailable");
+    expect(createRun).toHaveBeenCalledTimes(2);
+  });
+
+  it("周回の開始は duplicate を loop_changed として返す", async () => {
+    const { loop_id } = await startLoop("l1", ["25 Factory"]);
+    vi.spyOn(h.table, "createRun").mockResolvedValueOnce("duplicate");
+    expect(await nextLap(await loopOf(loop_id))).toBe("loop_changed");
   });
 });
