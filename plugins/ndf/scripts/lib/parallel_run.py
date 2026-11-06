@@ -26,6 +26,7 @@ import durable
 import parallel_lane as pl
 import parallel_plan as pp
 import parallel_release as pr
+from parallel_repo import dev_version, git_head
 from parallel_question import cause_of
 from sprint_loop_names import LOOP_DIR, PENDING
 
@@ -62,48 +63,6 @@ def relay(main: Path, *args: str) -> tuple[int, dict]:
     """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
     got, res = relay_proc(main, *args)
     return got.returncode, res
-
-
-def base_tracking_ref(main: Path) -> str:
-    """ベースブランチ（`.ndf/worktree.json` の `base_branch` → 既定ブランチ）の `origin/<名>`。決まらなければ空。"""
-    import repo
-
-    b = repo.base_branch(main)
-    return f"origin/{b}" if b else ""
-
-
-def release_plugin(main: Path) -> str:
-    """配るプラグイン（`.ndf/supervise.json` の `release.plugin`）。無ければ空。"""
-    from supervise_lib.decl import read_decl
-
-    return str((read_decl([Path(main)], "supervise.json").get("release") or {}).get("plugin") or "")
-
-
-def git_head(main: Path) -> str:
-    """ベースブランチの先頭のコミット。ベースブランチが決まらなければ空。"""
-    ref = base_tracking_ref(main)
-    if not ref:
-        return ""
-    subprocess.run(["git", "fetch", "-q", "origin"], cwd=main, capture_output=True)
-    got = subprocess.run(["git", "rev-parse", ref], cwd=main, capture_output=True, text=True)
-    return (got.stdout or "").strip()
-
-
-def dev_version(main: Path) -> str:
-    """ベースブランチの配るプラグインの `plugin.json` の開発版の版数から接尾辞を外した版（出す版）。決まらなければ空。"""
-    import re
-
-    from release_version import plugin_json_rel
-
-    ref, plugin = base_tracking_ref(main), release_plugin(main)
-    rel = plugin_json_rel(main, ref, plugin) if ref and plugin else None
-    if not rel:
-        return ""
-    got = subprocess.run(["git", "show", f"{ref}:{rel}"], cwd=main, capture_output=True, text=True)
-    try:
-        return re.sub(r"-.*$", "", json.loads(got.stdout).get("version") or "") if got.returncode == 0 else ""
-    except ValueError:
-        return ""
 
 
 # ---- 耐久ステップ ----
@@ -298,6 +257,7 @@ class _Run:
         self.revive_at: dict[str, float] = {}  # revive に入れたときの最後の観測の時刻（エポック秒）。最後に動いた時刻と比べる
         self.seen_at = 0.0  # 最後に観測した時刻（エポック秒）
         self.ls_ok = True  # 最後の観測で一覧が成功したか。失敗した回の後は全レーンが止まったと読まない（#2509 の I2）
+        self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
 
     def bump(self) -> int:
         self.seq += 1
@@ -355,21 +315,34 @@ class _Run:
             same["also"] = [*same.get("also", []), msg.get("id")]
             same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
             self.publish_questions()
+            self.apply_held(msg.get("id"), same.get("id"))
             return
         if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
             msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
         self.questions.append({**msg, "cause": key} if key else msg)
         self.publish_questions()
+        self.apply_held(msg.get("id"))
+
+    def apply_held(self, rid, target=None) -> None:
+        """保留した依頼 `rid` への答えを、届いた問い（まとめた先があれば `target`）へ当てる。"""
+        if (msg := self.held.pop(rid, None)) is not None:
+            self.reply({**msg, "id": target or rid})
 
     def publish_questions(self) -> None:
         durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
 
     def reply(self, msg: dict) -> None:
-        """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。"""
+        """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。
+        一覧に無い依頼への答えは捨てずに保留し、run.log へ警告を残す（#2617）。"""
         rid = msg.get("id")
-        if rid in self.answered or all(q.get("id") != rid for q in self.questions):
+        if rid in self.answered:
             return
-        q = next(q for q in self.questions if q.get("id") == rid)
+        q = next((q for q in self.questions if q.get("id") == rid), None)
+        if q is None:
+            if rid and rid not in self.held:
+                self.held[rid] = msg
+                print(f"parallel: 一覧に無い依頼 {rid} への答えを保留した（届いたら当てる）", file=sys.stderr, flush=True)
+            return
         for each in [rid, *q.get("also", [])]:
             self.answered.add(each)
             durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "merge", "by", "at")})
@@ -403,6 +376,7 @@ class _Run:
         item = {"kind": kind, "id": rid, "lane": lane, "source": "ndf-ask:human-action", "question": question, "options": options}
         self.questions.append({**item, "attach": f"python3 {RELAY} attach {lane}", **extra})
         self.publish_questions()
+        self.apply_held(rid)
 
     def answer(self, rid: str, result: str, version: Optional[str], n: Optional[int], reason: Optional[str] = None) -> None:
         self.answered.add(rid)

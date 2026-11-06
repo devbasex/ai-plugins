@@ -155,6 +155,7 @@ class Relay(AccountSwitch, ho.Swapper):
         return self.record.read_mark()
 
     def tick(self):
+        version_dir.refresh_inuse()
         if self.halted:
             return None
         try:

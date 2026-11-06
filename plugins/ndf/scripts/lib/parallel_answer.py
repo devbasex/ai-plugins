@@ -23,6 +23,13 @@ def questions(main: Path, name: str) -> tuple[int, list[dict]]:
 MVV_VERDICTS = ("unknown", "unreadable")  # レーンの判定が決まらなかった（判定できない・判定を読めない）
 
 
+def not_listed(rid: str, items: list[dict]) -> dict:
+    """今の問いの一覧に無い依頼への答えなら、結果へ足す `warning` を返す（#2617）。"""
+    if any(q.get("id") == rid for q in items):
+        return {}
+    return {"warning": f"依頼 {rid} は今の問いの一覧に無い。答えは保留され、その依頼が届いたら当たる（答え済みなら何もしない）"}
+
+
 def mvv_mark(q: dict) -> dict:
     """MVV 判定でオーガナイザーが自分で答えてよい依頼か（#2507 の決定 8）。設計の承認で、レーンの判定が決まらず、
     レッドラインが空で、利用者へ戻した依頼（印 `returned`。#2507 の決定 9）でなく、判定を打ち直す材料（レーンの周回のスプリント状態）が残るときだけ true。"""
