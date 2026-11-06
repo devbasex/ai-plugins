@@ -216,7 +216,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 周回 | — | 開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 選定 | — | 開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
 | 前提の課題 | — | ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
-| ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。周回の数と経過時間は宣言に数を書いたときだけ効き、書かない・null は無制限である | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 止まる条件 | — | 開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | ループの記録 | — | 開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | スプリントブランチ | — | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | ミッションブランチ、ミッションのブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -253,7 +253,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 決定を分けたファイル | — | 設計文書から決定の記録の節だけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md` | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | 決定を読めない文書 | — | 設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示す節は除く。pr-body-decisions.sh の check / sync が 1 で止まる | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | hook の上限 | — | ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
-| 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値 | — | — | `docs/specifications/ndf-supervise-step-budgets.md` |
+| 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い | — | — | `docs/specifications/ndf-supervise-step-budgets.md` |
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
 | あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
@@ -382,6 +382,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | レーン | — | 並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
 | オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、配布の依頼をまとめて本番の配布を 1 本にする。統括役とは別 | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 配布の依頼 | — | レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request） | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| まとめた配布 | — | オーガナイザーが複数のレーンの Pull Request を 1 つの版として出す配布。提示のプランと本番のプランからなる | — | — | — |
+| 配布の組み方 | — | 配布の依頼を受けたときに、まとめた配布をどう扱うか。組む・組まない・組めないの 3 つがあり、宣言から決まる | — | — | — |
+| 組み直しの依頼 | — | 組めなかった配布の依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない | — | — | — |
 | 一時レーン | — | 並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 保留の周回 | — | 並列の計画のループのレーンで、答えを待たずに締めた周回（配布待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 配布待ち | — | 配布の依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
@@ -448,6 +451,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 利用先のリポジトリ | — | NDF を導入して使っているリポジトリ | — | — | — |
 | 旧い値の読み替え | — | 版を上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること | — | — | — |
 | 禁止語 | — | 用語集の設定が、検査する範囲で新しく書くことを禁じた語 | — | — | — |
+| 無進捗の打ち切り | — | 実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること | — | — | — |
+| 無進捗の許容時間 | `impl_stall_seconds` | 実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒 | — | — | — |
+| 進みの観測 | — | 実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること | — | — | — |
+| 周回の費用の内訳 | — | 周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする | — | — | — |
+| 実行環境の調査 | — | 動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程 | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -685,6 +693,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリース種別 | `release_type` | リリースの種類。production（本番リリース）/ verification（検証リリース） | — | — | `docs/specifications/ndf-release-steps-and-token-usage-snapshot.md` |
 | 公開操作 | — | release の手順 4 で行う操作。レジストリへの公開・配備先への反映・署名した配布物の設置・ストアへの提出 | 公開の操作 | — | `plugins/ndf/skills/release/references/completion-check.md` |
 | リリースの経路 | `release_route` | 変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸 | — | — | — |
+| CD | — | 継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する | — | — | — |
 | 昇格の Pull Request | `promotion_pr` | ベースブランチから本番チャネルへ変更を入れる Pull Request | — | — | — |
 | 昇格のプラン | — | リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする | — | — | — |
 | 昇格の承認資料 | — | 昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする | — | — | `docs/specifications/ndf-release-approved-commit.md` |
@@ -809,6 +818,8 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | 依存物 | — | パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い | — | — | — |
 | 依存の用意 | — | worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、宣言に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない | — | — | — |
 | 用意の印 | — | 依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く | — | — | — |
+| テスト環境 | — | 1 つの worktree に対応して立ち上げる、テスト実行に必要なサービスの一式。番号で識別され、他の worktree とポート・データ保存先・ネットワークを共有しない | — | — | — |
+| テスト環境の用意 | — | 到達の確認が通らないときに、テスト環境を起こして到達を確かめ直すこと | — | — | — |
 | 到達の確認 | — | コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること | — | — | — |
 | ツールのパス | `tool_paths` | CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す | — | — | — |
 | 残る状態 | — | NDF の実行が作り、その実行が終わった後もディスクに残るもの（レビュー worktree・状態ファイル・一時ファイル・投稿キューの項目）（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |

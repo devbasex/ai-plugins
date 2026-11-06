@@ -2441,6 +2441,20 @@
       "pending_source": "issues/old/issue-1337-design.md"
     },
     {
+      "term": "テスト環境",
+      "context": "ndf-worktree",
+      "meaning": "1 つの worktree に対応して立ち上げる、テスト実行に必要なサービスの一式。番号で識別され、他の worktree とポート・データ保存先・ネットワークを共有しない",
+      "source": "",
+      "pending_source": "issues/issue-2567-requirements.md"
+    },
+    {
+      "term": "テスト環境の用意",
+      "context": "ndf-worktree",
+      "meaning": "到達の確認が通らないときに、テスト環境を起こして到達を確かめ直すこと",
+      "source": "",
+      "pending_source": "issues/issue-2567-requirements.md"
+    },
+    {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
@@ -2586,7 +2600,7 @@
     {
       "term": "ループの予算",
       "context": "ndf-workflow",
-      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる",
+      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。周回の数と経過時間は宣言に数を書いたときだけ効き、書かない・null は無制限である",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
@@ -2673,6 +2687,12 @@
       "meaning": "変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸",
       "code": "release_route",
       "pending_source": "issues/old/issue-1336-design.md"
+    },
+    {
+      "term": "CD",
+      "context": "ndf-release",
+      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する",
+      "pending_source": "issues/issue-2616-requirements.md"
     },
     {
       "term": "昇格の Pull Request",
@@ -3240,7 +3260,7 @@
     {
       "term": "実装の上限",
       "context": "ndf-workflow",
-      "meaning": "プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値",
+      "meaning": "プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い",
       "code": "impl_timeout",
       "source": "docs/specifications/ndf-supervise-step-budgets.md"
     },
@@ -5385,6 +5405,24 @@
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
+      "term": "まとめた配布",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが複数のレーンの Pull Request を 1 つの版として出す配布。提示のプランと本番のプランからなる",
+      "pending_source": "issues/issue-2616-requirements.md"
+    },
+    {
+      "term": "配布の組み方",
+      "context": "ndf-workflow",
+      "meaning": "配布の依頼を受けたときに、まとめた配布をどう扱うか。組む・組まない・組めないの 3 つがあり、宣言から決まる",
+      "pending_source": "issues/issue-2616-design.md"
+    },
+    {
+      "term": "組み直しの依頼",
+      "context": "ndf-workflow",
+      "meaning": "組めなかった配布の依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない",
+      "pending_source": "issues/issue-2616-design.md"
+    },
+    {
       "term": "一時レーン",
       "context": "ndf-workflow",
       "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめた配布のプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
@@ -5943,6 +5981,42 @@
       "meaning": "用語集の設定が、検査する範囲で新しく書くことを禁じた語",
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "無進捗の打ち切り",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること",
+      "source": "",
+      "pending_source": "issues/issue-2505-requirements.md"
+    },
+    {
+      "term": "無進捗の許容時間",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒",
+      "code": "impl_stall_seconds",
+      "source": "",
+      "pending_source": "issues/issue-2505-design.md"
+    },
+    {
+      "term": "進みの観測",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること",
+      "source": "",
+      "pending_source": "issues/issue-2505-design.md"
+    },
+    {
+      "term": "周回の費用の内訳",
+      "context": "ndf-workflow",
+      "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
+      "source": "",
+      "pending_source": "issues/issue-2505-design.md"
+    },
+    {
+      "term": "実行環境の調査",
+      "context": "ndf-workflow",
+      "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
+      "source": "",
+      "pending_source": "issues/issue-2505-requirements.md"
     }
   ]
 }
