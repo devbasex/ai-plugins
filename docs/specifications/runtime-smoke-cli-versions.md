@@ -27,7 +27,7 @@
 こちらの変更と関係なく agy 1.3.4 の出力の変化（`agy plugin list` の既定がテキストになり、JSON は
 `--json` のときだけ・形も配列）だけで落ちた。本番のプランは 7 回打ち直して上限で止まり
 （[#1983](https://github.com/devbasex/ai-plugins/issues/1983)）、即時修正
-（[PR #1977](https://github.com/devbasex/ai-plugins/pull/1977)）と承認ゲート 2 の再承認が要った。
+（[PR #1977](https://github.com/devbasex/ai-plugins/pull/1977)）とリリース承認ゲートの再承認が要った。
 当時のスモークは 4 ランタイムの CLI を版を決めずに公式のインストーラか npm の最新で入れており、
 kiro と agy は取得の失敗を `|| true` で読み飛ばしていた。kiro はこのため、一度も CLI が入らないまま
 通っていた。
@@ -199,7 +199,7 @@ workflow の一覧の表（trigger・permissions・job・artifact）は
 ## セキュリティ
 
 - 最新の版のスモークの書き込みの権限は課題を作る `issues: write` だけにし、secret を参照せず
-  `--with-secrets=off` で走らせる。`issues: write` は認可の変更に当たり、承認ゲート 2 で人が見た
+  `--with-secrets=off` で走らせる。`issues: write` は認可の変更に当たり、リリース承認ゲートで人が見た
 - kiro と agy の取得物は、一覧に持つ checksum（sha256・sha512）で確かめてから置く
 - リリースの経路は版数を含む取得先だけを使い、版を変えずに中身が変わりうるインストーラを通さない
 

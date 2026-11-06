@@ -7,7 +7,7 @@
   突き合わせのチェック（ジョブ `required-checks-check`、`scripts/check-required-checks.py`）が、ワークフローの
   ジョブから決まるチェックの名前・宛先のブランチの必須のチェック・宣言（`scripts/required-checks-allow.json`）の
   3 つを読み、差があれば落ちる
-- **突き合わせのチェックは読むだけである。** ruleset へ書き込まない。ruleset を変えるのは承認ゲート 2 で
+- **突き合わせのチェックは読むだけである。** ruleset へ書き込まない。ruleset を変えるのはリリース承認ゲートで
   利用者が打つ 1 回の `PUT` だけである
 - **必須のチェックの一覧の解釈は 1 か所に置く。** `rules/branches/<branch>` の応答から名前を取り出すのは
   `plugins/ndf/scripts/lib/ci_workflows.py` の `required_contexts` で、突き合わせのスクリプトと解析
@@ -19,8 +19,8 @@
 
 ```console
 $ python3 scripts/check-required-checks.py --repo devbasex/ai-plugins --branch develop; echo "exit=$?"
-追加待ち: doc-line-limit-check（scripts/required-checks-allow.json の awaiting）→ 承認ゲート 2 で ruleset へ足す
-追加待ち: glossary-check（scripts/required-checks-allow.json の awaiting）→ 承認ゲート 2 で ruleset へ足す
+追加待ち: doc-line-limit-check（scripts/required-checks-allow.json の awaiting）→ リリース承認ゲートで ruleset へ足す
+追加待ち: glossary-check（scripts/required-checks-allow.json の awaiting）→ リリース承認ゲートで ruleset へ足す
 …（lint・pr-body-decisions-check・required-checks-check・script-structure-check・skill-shell-vars-check）
 失敗 0 件・知らせ 7 件
 exit=0
@@ -54,7 +54,7 @@ ruleset の必須のチェックはジョブを足した側から自動では増
   読むのは突き合わせのスクリプトだけである。`.ndf/` に置くと書き換えのたびに承認（C7）が要る
 - **ruleset へ足す前のチェックは追加待ちとして宣言し、差に数えない。** 実装の Pull Request の時点で ruleset は
   古いままで、何もしなければ突き合わせのチェック自身が落ち、`merge-when-green`（必須でないチェックの失敗でも止まる）
-  が止まる。追加待ちは名前ごとに理由を持ち、承認ゲート 2 で足す名前の一覧になる。足した後は「追加済み」を
+  が止まる。追加待ちは名前ごとに理由を持ち、リリース承認ゲートで足す名前の一覧になる。足した後は「追加済み」を
   知らせて成功のまま残す（失敗にすると、宣言から外す Pull Request が入るまですべての Pull Request が落ちる）
 - **読めないときと宛先のブランチが無いときは 2、規則を持たない実在のブランチは 0。** 存在しないブランチの
   `rules/branches` も `[]` を終了コード 0 で返すため、空の一覧として扱うとブランチ名の誤りがすべてのジョブの
@@ -68,7 +68,7 @@ ruleset の必須のチェックはジョブを足した側から自動では増
 - **名前を静的に決められないジョブと `paths` で絞ったジョブは失敗に倒す。** 推測した名前で突き合わせると未登録を
   見落とす。`paths` で絞ったジョブを必須にすると、対象外の変更で結果が来ずマージが塞がる
 - **文書は必須のチェックの数を持たず、一覧を読むコマンドを指す。** 数の写しはジョブを足すたびに古くなる
-- **ruleset の変更は承認ゲート 2 で利用者がコマンドを打つ。** スクリプトに書き換えの副コマンドを持たせると、
+- **ruleset の変更はリリース承認ゲートで利用者がコマンドを打つ。** スクリプトに書き換えの副コマンドを持たせると、
   管理者の権限を持つトークンが要り、承認の外で ruleset が変わる経路ができる
 - **突き合わせのジョブは `runtime-plugin-validate.yml` に置く。** 新しいワークフローを足すと、cross-refactoring の
   `init` が宣言に無いジョブとして数え、`.ndf/project.json` の `test.ci_exempt` への追記（C7）が要る
@@ -117,7 +117,7 @@ ruleset の必須のチェックはジョブを足した側から自動では増
 | 古い宣言 | 失敗 | I6 | 宣言から外す |
 | 宣言と ruleset の食い違い | 失敗 | I7 | `not_required` から外すか、ruleset から外す |
 | 絞り込みのあるジョブ | 失敗 | I9 | `paths` の絞り込みを外すか、必須にしないジョブとして宣言する |
-| 追加待ち | 知らせ | — | 承認ゲート 2 で ruleset へ足す |
+| 追加待ち | 知らせ | — | リリース承認ゲートで ruleset へ足す |
 | 追加済み | 知らせ | I8 | 追加待ちの宣言から外す |
 | 対象外 | 知らせ | I10 | 何もしない（この行と件数の行だけを出して 0 で終える） |
 
@@ -156,7 +156,7 @@ matrix の組は、一覧の値を持つキーの直積から `exclude` に当�
     {"name": "pytest (0/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"}
   ],
   "awaiting": [
-    {"name": "doc-line-limit-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"}
+    {"name": "doc-line-limit-check", "reason": "#653 で必須にすると決めた。リリース承認ゲートで ruleset へ足す"}
   ]
 }
 ```
@@ -173,7 +173,7 @@ matrix の組は、一覧の値を持つキーの直積から `exclude` に当�
 持つ）、配列でなければ `ValueError`。解析の `_required_checks` は `None` と `ValueError` を空の一覧として扱い、
 時間切れ以外の取得の失敗でも空で続ける。
 
-### 承認ゲート 2 で ruleset へ足す手順
+### リリース承認ゲートで ruleset へ足す手順
 
 ruleset（`protect main and develop`、`main` と `develop` が対象）は管理者が 1 回の `PUT` で書き換える。
 承認ゲートの止まり方と承認資料の形は `development-workflow` の `references/approval-request.md` が正である。
@@ -222,7 +222,7 @@ ruleset（`protect main and develop`、`main` と `develop` が対象）は管�
 
 - **ジョブを足す・改名するときは、同じ Pull Request で宣言を直す。** 必須にするなら `awaiting` へ、必須にしない
   なら `not_required` へ理由つきで置く。ruleset に載った名前を改名・削除すると「消えた必須」で落ちるため、
-  ruleset からも外す（承認ゲート 2）
+  ruleset からも外す（リリース承認ゲート）
 - **ジョブは `runtime-plugin-validate.yml` の `required-checks-check`。** `if: github.event_name == 'pull_request'`
   で `push`（`main`・`develop`）では起動しない（`GITHUB_BASE_REF` が空で宛先が決まらないため）。権限は
   `contents: read`、`GH_TOKEN` に `github.token` を渡し、`--repo "${{ github.repository }}" --branch "${{ github.base_ref }}"`

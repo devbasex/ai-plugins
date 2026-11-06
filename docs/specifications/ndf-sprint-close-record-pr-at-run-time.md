@@ -20,7 +20,7 @@
 
 変更前は、merge（`merged-by-check`）・手で届ける・検証の環境だけ・手動反映の本番系の経路では、まとめのプランを
 組む時点に記録の PR が無く、プランが `--record-pr unknown` を組んで課題が閉じないまま ok で返った（#2044）。
-開発ループの承認ゲート 2 の後のまとめは、検査のスプリント PR（止まった記録の `values.pr`）を記録の PR として
+開発ループのリリース承認ゲートの後のまとめは、検査のスプリント PR（止まった記録の `values.pr`）を記録の PR として
 受け取った（#2121）。
 
 今は、記録の PR を決めるのは queue の差し込み `{queue_record}` の 1 か所で、通常の起動と開発ループの
@@ -43,7 +43,7 @@
 | `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 差し込み `{queue_record}` を、計画の `課題` と `リポジトリ` から `find_record` で解決した番号で置き換える。解決できなければ計画を書き換えずに理由を返す |
 | `plugins/ndf/scripts/supervise_lib/plan.py` | 置き換わらずに残った差し込みの検出（`QUEUE_NAMED`・`leftover_placeholders`）に `{queue_record}` を含める |
 | `plugins/ndf/scripts/supervise_lib/sprint_routes.py` | `record_pr_ref` がまとめの記録の PR の参照を返す（下の表）。`has_record` は `0` でなければ真 |
-| `plugins/ndf/scripts/lib/sprint_loop_gate2.py`・`lib/sprint_loop_gate.py` | 開発ループの承認ゲート 2 の後の `gate2_pipeline` が、`build_close` を記録の PR なしで呼ぶ |
+| `plugins/ndf/scripts/lib/sprint_loop_gate2.py`・`lib/sprint_loop_gate.py` | 開発ループのリリース承認ゲートの後の `gate2_pipeline` が、`build_close` を記録の PR なしで呼ぶ |
 | `plugins/ndf/scripts/lib/sprint_loop.py` | `cmd_lap` が、差し込みを埋められずに流さなかった計画（`unfilled`）を失敗として数える |
 | `plugins/ndf/scripts/lib/dist_record.py` | リリース記録の段階が本番かデプロイなしかの判定 `released` を持つ。`sprint-close.py` と `record_find` が共有する |
 
@@ -112,7 +112,7 @@ graph LR
 | 同上 | 雛形（`release.form`） | `{queue_pr:release-prod}` | 置く |
 | 同上 | 昇格（手動反映の本番系を除く） | `{queue_pr:promote}` | 置く |
 | 同上 | merge・手で届ける・検証の環境だけ・手動反映の本番系 | `{queue_record}` | 置く |
-| 開発ループ（`new close --pace auto`、承認ゲート 2 の後の `gate2_pipeline` を含む） | 届けない経路だけ | `0` | 置かない |
+| 開発ループ（`new close --pace auto`、リリース承認ゲートの後の `gate2_pipeline` を含む） | 届けない経路だけ | `0` | 置かない |
 | 同上 | それ以外 | `{queue_record}` | 置く |
 
 ```mermaid
@@ -194,7 +194,7 @@ sequenceDiagram
   end
 ```
 
-開発ループの承認ゲート 2 の後は、`gate2_pipeline` が `build_close` を記録の PR なしで呼び、組んだまとめのプランは
+開発ループのリリース承認ゲートの後は、`gate2_pipeline` が `build_close` を記録の PR なしで呼び、組んだまとめのプランは
 `{queue_record}` を持つ。続きの 1 行（`run <本番> --from <ステップ> && queue <残り> --then <まとめ> && wait && loop lap`）
 の中で、まとめのステージを流し始める時点に解決する。解決できずにまとめを流さなかったら、`loop lap` が周回を
 失敗で締める（I8）。
@@ -214,7 +214,7 @@ sequenceDiagram
 | 段階を本番かデプロイなしに限る | `sprint-close.py` が閉じてよいとする段階と同じにするため。本番の前の記録を採ると close が閉じずに ok で返り、「未記録を ok で返さない」という決まりに反する |
 | 解決は queue の差し込みとして、まとめのステージを流し始める時点に 1 回行う | プランの中で値を後のステップへ渡す手段は差し込みだけで、リリース後テストと close が同じ番号を受け取れる（I2）。見つからないときにまとめ全体を流さないのは、本番へ届いていないスプリントで確定仕様化と振り返りを先に進めないため |
 | 開発ループの外の雛形と昇格の経路は `{queue_pr:…}` のまま | プランが記録の PR を持ち今の形で解けており、GitHub を読む回数も増やさない |
-| 開発ループのまとめは経路にかかわらず `{queue_record}` | 承認ゲート 2 の後のまとめは本番のプランと別の queue・別のディレクトリにあり `{queue_pr:release-prod}` を解けない。承認ゲートの有無でプランを 2 通りにしない。`values.pr` は検査のスプリント PR で、記録の PR ではない |
+| 開発ループのまとめは経路にかかわらず `{queue_record}` | リリース承認ゲートの後のまとめは本番のプランと別の queue・別のディレクトリにあり `{queue_pr:release-prod}` を解けない。承認ゲートの有無でプランを 2 通りにしない。`values.pr` は検査のスプリント PR で、記録の PR ではない |
 | `sprint-close.py --record-pr unknown` の受け付けと振る舞いを変えない | 実行中のスプリントには前の版で組んだプランが残り、組み直しを求めずに流せるようにする（移行性）。手で打つ入口としても残す |
 | 開発ループは `unfilled` の計画を失敗に数える | 差し込みを埋められなかったまとめは前のステージがすべて完了のため、数えないと周回が完了で締まる |
 
@@ -247,7 +247,7 @@ sequenceDiagram
 - 同じスプリントの記録が本文とコメントの両方にあれば、コメントの識別子が最も大きい記録の PR を採ること
 - 雛形と昇格の経路の `new close` が組むまとめのプランが変わらないこと
 - 届けない経路だけなら `--record-pr 0` で `release-verify` を持たず、`--record-pr <番号>` を明示するとその番号を組むこと
-- 開発ループの承認ゲート 2 の後の `gate2_pipeline` が組むまとめのプランが、`values.pr` でなく `{queue_record}` を持つこと
+- 開発ループのリリース承認ゲートの後の `gate2_pipeline` が組むまとめのプランが、`values.pr` でなく `{queue_record}` を持つこと
 - 差し込みを埋められずに流さなかったまとめを含む結果を `loop lap` に渡すと、周回が失敗で締まること
 
 ## 関連リンク

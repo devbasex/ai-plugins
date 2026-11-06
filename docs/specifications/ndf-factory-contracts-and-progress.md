@@ -184,7 +184,7 @@ graph TD
 | 課題の欄 | `step.recorded` の `issues` の課題ごとに 1 回ずつ。`issues` が無いか空なら「スプリント全体」の欄 |
 | 課題の欄の Pull Request | 欄の工程の `pull_request` を重複なく。状態は最後の `pr.updated`（無ければ `unknown`）、チェックは名前ごとの最後の `ci.updated` の結論（`null` は実行中） |
 | 工程の費用 | 同じ `job_id`・`payload.step`・`at` の `usage.recorded` の `cost_usd` の和。無ければ `null` |
-| 承認の欄 | ゲート 1・ゲート 2・判断の 3 つ。その種類の最後の `gate.reached` で待ちになり、その後の同じ種類の `gate.answered` で承認・差し戻し（判断は答えた）になる。`gate.reached` の前の答えは状態を変えない |
+| 承認の欄 | 設計承認ゲート・リリース承認ゲート・判断の 3 つ。その種類の最後の `gate.reached` で待ちになり、その後の同じ種類の `gate.answered` で承認・差し戻し（判断は答えた）になる。`gate.reached` の前の答えは状態を変えない |
 | 仕上げの欄 | 振り返り（`step` が `retro`）と棚卸し（`refine`）の行を常に持ち、記録が無ければ「まだ」 |
 | 詳細の件数の上限 | `step.recorded` は新しい方から 2,000 件までで、省いた数を `omitted_steps` に返す。ほかの種類はすべて読み、承認の欄と使用量の和から欠かさない |
 | 詳細の注意の行 | 実行の `attention` をすべて `order_key` の順に。`reason` と `summary` は受けた値のままで、工程の記録の上限で減らない |

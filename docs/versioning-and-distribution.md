@@ -133,7 +133,7 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 
 ## 正式版を出す
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、承認ゲート 2 で承認したコミット
+**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、リリース承認ゲートで承認したコミット
 （`develop` のコミット）から `release/v<版>` を切って版上げのコミットを積み、`release/v<版>` を先に `develop` へ
 取り込んでから、`release/v<版>` を head にした `main` 宛の Pull Request を管理者の bypass でマージする。
 `main` へ直接コミットしない。`main` 宛の Pull Request は `develop` に含まれるコミットだけを出す（head は

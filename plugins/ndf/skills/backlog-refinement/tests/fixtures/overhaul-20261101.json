@@ -201,7 +201,7 @@
   },
   {
    "number": 1502,
-   "title": "mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、関門 1 の助言が unknown になる",
+   "title": "mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、設計承認ゲートの助言が unknown になる",
    "labels": [
     "area: ndf-skill",
     "priority: medium"
@@ -225,7 +225,7 @@
   },
   {
    "number": 1516,
-   "title": "supervise.py のフェーズレポートが、設計の関門 1 でも「関門: 本番の系へ届く操作」と書く",
+   "title": "supervise.py のフェーズレポートが、設計の設計承認ゲートでも「承認ゲート: 本番の系へ届く操作」と書く",
    "labels": [
     "area: ndf-skill",
     "bug",
@@ -1220,7 +1220,7 @@
   },
   {
    "number": 2121,
-   "title": "開発ループの承認ゲート 2 の後のまとめがリリース記録の PR を読まない → 本番の後に記録の PR を解いてまとめを組む（#2089）",
+   "title": "開発ループのリリース承認ゲートの後のまとめがリリース記録の PR を読まない → 本番の後に記録の PR を解いてまとめを組む（#2089）",
    "labels": [
     "quality"
    ],
@@ -1272,7 +1272,7 @@
   },
   {
    "number": 2147,
-   "title": "merge-when-green: 自動反映の本番チャネルへのマージで、承認ゲート 2 で見た先端と merge-approved がマージする先端を照合しない",
+   "title": "merge-when-green: 自動反映の本番チャネルへのマージで、リリース承認ゲートで見た先端と merge-approved がマージする先端を照合しない",
    "labels": [
     "area: ndf-skill",
     "priority: medium"
@@ -1409,7 +1409,7 @@
   },
   {
    "number": 2176,
-   "title": "文書検査: mermaid の構文を解析せず、GitHub で描画できない図が承認ゲート 1 まで届く",
+   "title": "文書検査: mermaid の構文を解析せず、GitHub で描画できない図が設計承認ゲートまで届く",
    "labels": [
     "bug"
    ],
@@ -1613,7 +1613,7 @@
   },
   {
    "number": 2237,
-   "title": "承認ゲート 1 の MVV 判定が、要求の文書を書く前の requirements-check の exit 2 を材料の欠けと読む",
+   "title": "設計承認ゲートの MVV 判定が、要求の文書を書く前の requirements-check の exit 2 を材料の欠けと読む",
    "labels": [],
    "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
    "body": "-requirements.md",

@@ -5,7 +5,7 @@
 **`supervise.py new` の `release`・`sprint`・`close` は、本番チャネルを `--production-branch` → `.ndf/worktree.json` の
 `production_branch` → 既定ブランチの順で決める。** 既定ブランチは、宣言を探す木の並びのうち最初に存在する git の木から解く。
 そのため、`--worktree` にまだ作っていない worktree のパスを渡しても、`production_branch` を宣言しないリポジトリで
-リリースプラン・承認ゲート 2・本番のステージが組まれる。リリースの経路の判定（`lib/delivery.py`）も同じ木から既定ブランチを
+リリースプラン・リリース承認ゲート・本番のステージが組まれる。リリースの経路の判定（`lib/delivery.py`）も同じ木から既定ブランチを
 解き、プランと同じ本番チャネルを使う。
 
 例: origin の HEAD が `main` で、`.ndf/worktree.json` が `{"base_branch":"main"}` だけのリポジトリで、
@@ -86,7 +86,7 @@ graph TD
 | I2 | 既定ブランチは、宣言を探す木の並びのうち最初に存在する git の木から解く。worktree のパスが存在しないことで結果が変わらない | 結合のテストで落ちる |
 | I3 | 同じ起動の中で、雛形の引数の本番チャネル（`a.production_branch`）と、リリースの判定の宣言の本番チャネル（`delivery_decl(a).production`）は同じ値である | 結合のテストで落ちる |
 | I4 | `production_branch` の宣言か引数があるときは、木の選択も既定ブランチの問い合わせも行わない | 単体のテストで落ちる |
-| I5 | 3 つの出所のどれでも決まらないとき、止まるのは本番のプランを組む経路（`new release --channel prod`・昇格のプラン・fast / auto の `new sprint`・`new close`）だけである。開発版のデプロイ（`--channel dev`）は本番チャネルを使わずにプランを書き、normal の `new sprint` は承認ゲート 2 と本番のステージを置かずに案内を出してプランを書く | 結合のテストで落ちる |
+| I5 | 3 つの出所のどれでも決まらないとき、止まるのは本番のプランを組む経路（`new release --channel prod`・昇格のプラン・fast / auto の `new sprint`・`new close`）だけである。開発版のデプロイ（`--channel dev`）は本番チャネルを使わずにプランを書き、normal の `new sprint` はリリース承認ゲートと本番のステージを置かずに案内を出してプランを書く | 結合のテストで落ちる |
 
 ### 処理の流れ
 
@@ -147,7 +147,7 @@ supervise.py: error: リリースに要る本番のブランチが無い（--pro
 ```
 
 昇格のプランは「昇格に要る本番チャネルが無い（…）」、normal の `new sprint` は結果 JSON の `next` に
-「本番のブランチ（…）が無いため、承認ゲート 2 と本番は置いていない」を出す。括弧の中はどれも `PRODUCTION_SOURCES` である。
+「本番のブランチ（…）が無いため、リリース承認ゲートと本番は置いていない」を出す。括弧の中はどれも `PRODUCTION_SOURCES` である。
 
 ## 運用
 
@@ -167,7 +167,7 @@ supervise.py: error: リリースに要る本番のブランチが無い（--pro
   `verify` の ref が既定ブランチ（`main` と `main` 以外の名前の両方）であること。worktree を作った後も同じステップの並びになること（I1・I2）
 - origin の HEAD もローカルの `main` / `master` も無いとき、`--channel prod` が終了コード 2 で 3 つの出所を挙げ、`--channel dev` と normal の
   `new sprint` は終了コード 0 でプランを書くこと（I5）
-- まだ作っていない worktree のパスで、`new sprint` の normal・fast・auto が承認ゲート 2 と本番のステージを置き、本番を置かない案内を出さないこと
+- まだ作っていない worktree のパスで、`new sprint` の normal・fast・auto がリリース承認ゲートと本番のステージを置き、本番を置かない案内を出さないこと
 - `production_branch` の宣言（既定ブランチと違う値を含む）と `--production-branch` が既定ブランチより先に効くこと（I1）
 - 同じ起動で、雛形の引数とリリースの判定の宣言の本番チャネルが一致すること（I3）
 - `production_branch` を宣言した組で、既定ブランチと木の選択を問い合わせないこと（I4）
