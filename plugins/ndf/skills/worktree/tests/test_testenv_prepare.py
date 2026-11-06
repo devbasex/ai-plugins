@@ -39,7 +39,7 @@ case "$1" in
     case "$*" in
       *--wait*) [ -z "${FAKE_WAIT_FAIL:-}" ] || { echo "dependency db failed" >&2; exit 1; } ;;
       *)
-        [ -z "${FAKE_UP_FAIL:-}" ] || { echo "image not found" >&2; exit 1; }
+        [ -z "${FAKE_UP_FAIL:-}" ] || { echo "${FAKE_UP_MESSAGE:-image not found}" >&2; exit 1; }
         [ -z "${FAKE_UP_SLEEP:-}" ] || sleep "$FAKE_UP_SLEEP"
         : > "$FAKE_STATE/running"
         ;;
@@ -47,7 +47,7 @@ case "$1" in
     ;;
   down)
     [ ! -d "${NDF_WORKTREE:-/nonexistent}" ] || echo "down: worktree present" >> "$FAKE_STATE/calls"
-    [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo "device busy" >&2; exit 1; }
+    [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo "${FAKE_DOWN_MESSAGE:-device busy}" >&2; exit 1; }
     rm -f "$FAKE_STATE/running"
     ;;
   exec)
@@ -63,6 +63,7 @@ esac
 
 RUN = 'echo ran >> "$RAN_LOG"'
 SCOPED = 'echo {paths} >> "$RAN_LOG"'
+LEAKED = "https://x-access-token:s3cret-value@ghcr.io"
 EXPOSE = {"enabled": True, "public_tag": "golden-public", "base_domain": "t.example", "open_command": "true"}
 
 
@@ -222,6 +223,17 @@ def test_a_failed_wake_stops_without_running(main_repo: Path, worktree: Path, fa
     assert not ran(fake)
     assert [r["result"] for r in wake_rows(out)] == ["failed"]
     assert want in wake_rows(out)[0]["reason"]
+
+
+def test_a_failed_wake_hides_the_credentials_before_the_cut(main_repo: Path, worktree: Path, fake: dict) -> None:
+    declare(main_repo, {})
+    # 切る位置が資格情報の途中に来る長さ。切ってから伏せると、資格情報の後半が残る
+    message = f"pull {LEAKED}/" + "x" * (container_reach.TAIL_CHARS - len("@ghcr.io/") - 6)
+
+    _, out = run_tests(worktree, {**fake, "FAKE_UP_FAIL": "1", "FAKE_UP_MESSAGE": message}, "whole")
+
+    assert out["status"] == "stopped"
+    assert "value" not in out["summary"] and "value" not in wake_rows(out)[0]["reason"]
 
 
 def test_no_free_slot_stops_with_the_service_and_the_reason(main_repo: Path, worktree: Path, fake: dict) -> None:
@@ -605,6 +617,26 @@ def test_a_failed_close_keeps_everything(main_repo: Path, worktree: Path, fake: 
     assert not ok and row["environment"] in why and "https://wt0.t.example" in why
     assert f"worktree-testenv.sh unexpose {worktree.resolve()}" in why
     assert row["released_at"] is None and not any(" down" in c for c in calls(fake))
+
+
+def test_a_failed_close_hides_the_credentials_in_its_line(worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    line = f"公開を閉じる手段が失敗しました。台帳は閉じていません: env {LEAKED}\n"
+    monkeypatch.setattr(container_reach, "_testenv", lambda *a, **k: (1, "", line))
+
+    ok, why = container_reach.discard_testenv(worktree)
+
+    assert not ok and "s3cret-value" not in why and "***@ghcr.io" in why
+
+
+def test_a_failed_down_hides_the_credentials(main_repo: Path, worktree: Path, fake: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    declare(main_repo, {})
+    assert wt_env(["env", str(worktree)], fake, main_repo).returncode == 0
+    monkeypatch.setenv("FAKE_DOWN_FAIL", "1")
+    monkeypatch.setenv("FAKE_DOWN_MESSAGE", f"pull {LEAKED}")
+
+    ok, why = container_reach.discard_testenv(worktree)
+
+    assert ok and "s3cret-value" not in why and "***@ghcr.io" in why
 
 
 def test_no_expose_does_not_run_the_close_command(main_repo: Path, worktree: Path, fake: dict) -> None:

@@ -39,6 +39,7 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+import secret_redact
 import worktree_base
 
 TESTENV = Path(__file__).resolve().parent.parent / "worktree-testenv.sh"
@@ -46,7 +47,7 @@ EVIDENCE = ".ndf-evidence"
 EXEC_TIMEOUT = 60  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
 UP_TIMEOUT = 300  # テスト環境の起動の上限（秒）。実測の最長 49 秒の 6 倍で、遅れの見張りの既定の下限と同じ（#2567 の決定 3）
 STOP_GRACE = 5  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
-TAIL_CHARS = 300  # 理由へ載せる標準エラーの末尾の文字数
+TAIL_CHARS = 300  # 理由へ載せる標準エラーの末尾の文字数（伏せ字の後に数える）
 
 # 作業ディレクトリごとの、到達を確かめた後に足す環境（1 プロセスで 1 回だけ確かめる）
 _CACHE: dict[str, dict[str, str]] = {}
@@ -76,7 +77,7 @@ def compose_env(worktree: str | Path) -> dict[str, str]:
     """`worktree-testenv.sh compose-env` が出す環境。割り当てが無ければ空。"""
     p = subprocess.run(["bash", str(TESTENV), "compose-env", str(worktree)], capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise Unreachable(f"テスト環境の値を得られない: {p.stderr.strip()[:300]}")
+        raise Unreachable(f"テスト環境の値を得られない: {_tail(p.stderr)}")
     env: dict[str, str] = {}
     for line in p.stdout.splitlines():
         key, sep, value = line.partition("=")
@@ -136,7 +137,7 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
             f"サービス {service} の作業ディレクトリはこの worktree ではない（メインディレクトリを見ている可能性がある）", wakeable=True
         )
     project = env.get("COMPOSE_PROJECT_NAME") or "既定"
-    tail = (p.stderr.strip().splitlines() or [""])[-1][:200]
+    tail = secret_redact.redact_output(p.stderr, max_lines=1, max_chars=200)
     raise Unreachable(f"サービス {service} のコンテナが動いていない（プロジェクト {project}。{tail}）", wakeable=True)
 
 
@@ -158,7 +159,8 @@ def container_suites(root: str | Path) -> list[tuple[str, tuple[str, ...]]]:
 
 
 def _tail(text: str) -> str:
-    return text.strip()[-TAIL_CHARS:]
+    """標準エラーを伏せ字にしてから末尾だけにする（結果と summary へ載るため、切る前に伏せる）。"""
+    return secret_redact.redact_output(text, max_chars=TAIL_CHARS)
 
 
 def _stop_group(p: "subprocess.Popen[str]") -> None:
@@ -302,8 +304,8 @@ def discard_testenv(worktree: str | Path) -> tuple[bool, str | None]:
     wt = str(Path(worktree).resolve())
     code, _, err = _testenv("unexpose", wt, timeout=UP_TIMEOUT)
     if code != 0:
-        lines = err.strip().splitlines() or ["公開を閉じる手段が終わらなかった: "]
-        why, _, where = lines[-1].rpartition(": ")
+        line = secret_redact.redact_output(err, max_lines=1) or "公開を閉じる手段が終わらなかった: "
+        why, _, where = line.rpartition(": ")
         return False, f"テスト環境の公開を閉じられない: {where}（{why}）。close_command を直して worktree-testenv.sh unexpose {wt} を打つ"
     try:
         environment = compose_env(wt).get("COMPOSE_PROJECT_NAME")
