@@ -51,7 +51,7 @@
 | I1 | スプリント状態・差し戻しの記録・スプリントの目録 | 新しい版は承認ゲートの旧名（`関門 1` / `関門 2`）を書かない。旧名で呼ばれたら、正の名前（「設計承認ゲート」「リリース承認ゲート」）へ寄せて書く。旧名でも正の名前でもない名前（「MVV」を含む）は、今と同じく受けてそのまま書く | テストが落ちる（書いた JSON に旧名が残る、または旧名でない名前が書き換わる） |
 | I2 | スプリント状態・差し戻しの記録・スプリントの目録 | 旧名（`関門 1` / `関門 2`）の記録は、正の名前の記録と同じ承認ゲートとして読まれる。承認済みの判定・差し戻しの件数・改訂の兆候の件数・取り消しの判定・続きの queue の組み立てが、名前を正の名前に書き換えた記録と同じ結果になる | 旧い記録で再開したループが承認済みの承認ゲートを未承認と判定して止まる。テストで落とす |
 | I3 | スプリント状態 | 同じ承認ゲート・同じ Pull Request の利用者の承認の記録は 1 件に置き換わる。旧名の記録も置き換えの対象になる | 旧名と正の名前の記録が並び、新旧の記録の数が食い違う。テストで落とす |
-| I4 | （定数） | 承認ゲートの正の名前は `lib/gate_answer.py` の 1 か所、旧名との対応は `lib/legacy_names.py` の 1 か所にだけ書く | 別のファイルに同じ文字列の定数があると、片方だけが変わる。テストで落とす |
+| I4 | （定数） | NDF のスクリプトの中では、承認ゲートの正の名前は `lib/gate_answer.py` の 1 か所、旧名との対応は `lib/legacy_names.py` の 1 か所にだけ書く。Factory のランナーは NDF を読み込めないため、対応を `factory/runner/src/translate.ts` の 1 か所に持つ（X2） | 別のファイルに同じ文字列の定数があると、片方だけが変わる。テストで落とす |
 | I5 | （識別子） | 機械が読む識別子のうち、問いの区分 `ndf-gate:1` / `ndf-gate:2`、Factory の種類 `gate1` / `gate2`、承認ラベル `design-approved`、報告の結果の値 `関門` は値を変えない | hook が問いを拒む・Factory の依頼が表示されない・再開が止まる。既存のテストが落ちる |
 | I6 | （識別子） | Factory の承認の依頼は、API・ランナー・画面で同じ種類の値（`gate1` / `gate2` / `decision`）を使う | 依頼が表示されないか、答えが写らない。既存の契約のテストが落ちる |
 
@@ -114,7 +114,7 @@
 | Skill・references・エージェントの定義（`plugins/ndf/skills/`・`plugins/ndf/agents/director.md`） | 本文の呼び名を新しい名前へ。`sprint-state.py gate` のコマンドの例も正の名前で書く |
 | 用語集（`docs/glossary/glossary.json`・`docs/glossary.md`・`plugins/ndf/skills/development-workflow/references/glossary.md`） | 用語の表のとおりに直し、`glossary.py render` で作り直す |
 | 確定仕様とリポジトリ知識の文書（`docs/specifications/`・`docs/ndf-experiments.md`・`docs/versioning-and-distribution.md`・`AGENTS.md`） | 呼び名を新しい名前へ。判断の中身は変えない |
-| Factory のランナー（`factory/runner/src/translate.ts`・`runtime.ts`・`main.ts`） | 種類から `sprint-state.py gate` に渡す名前を作る関数は旧名を渡し続ける（決定 5）。`runtime.ts` の `recordAnswer` は、今 1 つの変数 `gate` を `sprint-state.py gate` の引数と `rejectionDirective()` の両方へ渡している。これを記録用の名前（`answer.gate ?? gateRecordName(answer.kind)`。旧名のまま、X2）と表示用の名前に分ける。表示用の名前は、記録用の名前を `gate_answer.canonical()` と同じ対応で正の名前へ寄せて作る（`answer.gate` が来た経路でも記録と表示が食い違わない）。`rejectionDirective()` は表示用の名前を受け、文中の「関門を通さず」も「承認ゲートを通さず」へ直す |
+| Factory のランナー（`factory/runner/src/translate.ts`・`runtime.ts`・`main.ts`） | 種類から `sprint-state.py gate` に渡す名前を作る関数は旧名を渡し続ける（決定 5）。`runtime.ts` の `recordAnswer` は、今 1 つの変数 `gate` を `sprint-state.py gate` の引数と `rejectionDirective()` の両方へ渡している。これを記録用の名前（`answer.gate ?? gateRecordName(answer.kind)`。旧名のまま、X2）と表示用の名前に分ける。表示用の名前は、`translate.ts` に置く関数 `gateDisplayName()` が記録用の名前を正の名前へ寄せて作る（`answer.gate` が来た経路でも記録と表示が食い違わない）。旧名と正の名前の対応は、`gateRecordName()` と同じ種類と旧名の対から作り、`translate.ts` の中の 1 か所にだけ置く。インストールした NDF の `canonical()` は呼ばない（決定 5 のとおり、この変更より前の版の NDF には `canonical()` が無い）。`rejectionDirective()` は表示用の名前を受け、文中の「関門を通さず」も「承認ゲートを通さず」へ直す |
 | Factory の画面と契約の説明（`factory/web/src/i18n/ja.json`・`factory/web/src/pages/`・`factory/contracts/openapi/*.yaml`・`factory/contracts/schemas/progress-event.schema.json`・`factory/api/src/organizer/`） | 表示と説明文を新しい名前へ。種類の値は変えない。`factory/contracts/src/generated/` は手で直さず、契約から作り直す |
 
 ```mermaid
@@ -250,7 +250,7 @@ E6（旧い版が新しい版の書いた記録を読む）も互換の対象に
 
 ### 決定 5: Factory がどの版の NDF を入れても承認を記録できるよう、ランナーは `sprint-state.py gate` へ旧名を渡し続ける
 
-Factory のランナーは、ジョブごとに指定された版の NDF を入れる。入れる箇所は `factory/runner/src/main.ts` の `installNdf(instruction.NDF_VERSION)` である。新しい名前を渡すと、この変更より前の版の NDF は承認を読めず、承認済みの承認ゲートで止まり続ける。旧名なら、前の版はそのまま読み、新しい版は `canonical()` で正の名前へ寄せて書く。ランナーの差し戻しの指示の文は人へ出す文である。今の `runtime.ts` は同じ変数を記録と指示の文の両方へ渡しているため、記録用の名前（旧名のまま）と表示用の名前（記録用の名前を正の名前へ寄せたもの）の 2 つの変数に分ける。表示用の名前は種類からではなく記録用の名前から作り、`answer.gate` が来た経路でも記録と同じ承認ゲートを指すようにする。
+Factory のランナーは、ジョブごとに指定された版の NDF を入れる。入れる箇所は `factory/runner/src/main.ts` の `installNdf(instruction.NDF_VERSION)` である。新しい名前を渡すと、この変更より前の版の NDF は承認を読めず、承認済みの承認ゲートで止まり続ける。旧名なら、前の版はそのまま読み、新しい版は `canonical()` で正の名前へ寄せて書く。ランナーの差し戻しの指示の文は人へ出す文である。今の `runtime.ts` は同じ変数を記録と指示の文の両方へ渡しているため、記録用の名前（旧名のまま）と表示用の名前（記録用の名前を正の名前へ寄せたもの）の 2 つの変数に分ける。表示用の名前は種類からではなく記録用の名前から作り、`answer.gate` が来た経路でも記録と同じ承認ゲートを指すようにする。表示用の名前への対応は `translate.ts` の `gateDisplayName()` が持ち、インストールした NDF の `canonical()` は呼ばない。ランナーが入れる NDF の版は Factory の利用者が選ぶため、前の版を入れたジョブでは `canonical()` を呼べない。
 
 旧名を渡すのをやめるのは、Factory がこの変更より前の版の NDF をジョブで入れなくなったときとする。
 
@@ -269,7 +269,7 @@ Factory のランナーは、ジョブごとに指定された版の NDF を入�
 | # | 残す箇所 | 理由 |
 | --- | --- | --- |
 | X1 | `plugins/ndf/scripts/lib/legacy_names.py` の旧名の表 | 旧い記録を読むため（決定 2） |
-| X2 | `factory/runner/src/translate.ts` の `sprint-state.py gate` へ渡す名前と、その期待値を持つ `factory/runner/src/runner.test.ts` | どの版の NDF でも承認を記録するため（決定 5） |
+| X2 | `factory/runner/src/translate.ts` の `sprint-state.py gate` へ渡す名前、`gateDisplayName()` の旧名と正の名前の対応、それらの期待値を持つ `factory/runner/src/runner.test.ts` | どの版の NDF でも承認を記録するため（決定 5） |
 | X3 | 報告の結果の値 `関門` を値として書く・比べるコード（`lib/durable.py`・`lib/parallel_external.py`・`lib/sprint_loop.py`・`lib/sprint_loop_gate.py`・`lib/sprint_loop_gate2.py`・`lib/sprint_loop_record.py`・`parallel.py`・`supervise_lib/actuals.py`・`commands.py`・`engine.py`・`flow.py`・`plan.py`・`queue.py`・`queue_fill.py`・`queue_resume.py`・`release_templates.py`・`state.py`）と、値をコードの記法（`` `結果: 関門` ``）で示す Skill と references の行 | 機械が読む識別子のため（決定 4） |
 | X4 | 旧名を入力にした互換のテスト（`plugins/ndf/scripts/tests/` の I2・I3 のテスト） | 受け入れ条件 4 |
 | X5 | 用語集の廃止した語（`docs/glossary/glossary.json` の `deprecated` と、それを描いた `docs/glossary.md` の行） | 旧い呼び名を引けるようにするため（受け入れ条件 3） |
