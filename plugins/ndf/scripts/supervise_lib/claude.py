@@ -99,8 +99,8 @@ def run_ticking(
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
     子は新しいセッションで起こし、`watch_children` の知らせる先へ渡す（孤児の片付け）。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
     tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。
-    kw の extend(開始の時刻) は待ちの周期ごとに呼び、返した時刻が締め切りより後なら締め切りを後ろへずらす（#2047 の I7）。"""
-    extend = kw.pop("extend", None)
+    kw の extend(開始の時刻) は待ちの周期ごとに呼び、返した時刻が締め切りより後なら後ろへずらす（#2047 の I7）。kw の follow が真なら前へも動かす（#2505）。"""
+    extend, follow = kw.pop("extend", None), kw.pop("follow", False)
     with open(err_path, "w", encoding="utf-8") if err_path else contextlib.nullcontext() as errf:  # 閉じ済みでも閉じ直してよい
         p = subprocess.Popen(
             cmd,
@@ -116,13 +116,13 @@ def run_ticking(
             note(p.pid, True)
         deadline = time.time() + timeout if timeout else None
         try:
-            return _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend)
+            return _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend, follow)
         finally:
             if note:
                 note(p.pid, False)
 
 
-def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend=None) -> subprocess.CompletedProcess:
+def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend, follow) -> subprocess.CompletedProcess:
     """every 秒ごとに tick() を呼びながら p の終わりを待つ。打ち切りと tick() の例外では子のプロセスグループを止める。"""
     first = True
     while True:
@@ -135,7 +135,7 @@ def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd
             return subprocess.CompletedProcess(cmd, p.returncode, out, err)
         except subprocess.TimeoutExpired:
             first = False
-            if extend and deadline is not None and (later := extend(deadline - timeout)) and later > deadline:
+            if extend and deadline is not None and (later := extend(deadline - timeout)) and (follow or later > deadline):
                 deadline, timeout = later, timeout + later - deadline
             if deadline is not None and time.time() >= deadline:
                 kill_group(p)
@@ -233,7 +233,7 @@ def call_claude(
             cwd=cwd,
             timeout=timeout,
             env=run_env,
-            extend=watch.deadline if watch else None,
+            **({"extend": watch.deadline, "follow": True} if watch else {}),  # 記録が遅れて現れたら長い許容時間の締め切りを戻す
         )
     except OSError:
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="error")

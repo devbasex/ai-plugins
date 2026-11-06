@@ -119,6 +119,23 @@ def test_cgroup_dir_inside_a_container_and_on_a_host(tmp_path: Path):
     assert procs.cgroup_dir(root, own) == root
 
 
+def test_cgroup_cpu_takes_the_smallest_limit_up_to_the_root(tmp_path: Path):
+    """親の slice の帯域の上限は、子が `max` でも効く（読めない階層は飛ばし、`root` の外は読まない）。"""
+    root = tmp_path / "cg"
+    child = root / "slow.slice" / "x.scope"
+    child.mkdir(parents=True)
+    (tmp_path / "cpu.max").write_text("100000 100000\n")  # root の外
+    (child / "cpu.max").write_text("max 100000\n")
+    assert procs.cgroup_cpu(child, root) is None
+    (child.parent / "cpu.max").write_text("150000 100000\n")
+    assert procs.cgroup_cpu(child, root) == 1.5
+    (child / "cpu.max").write_text("400000 100000\n")
+    (root / "cpu.max").write_text("broken\n")
+    assert procs.cgroup_cpu(child, root) == 1.5
+    (child / "cpu.max").write_text("50000 100000\n")
+    assert procs.cgroup_cpu(child, root) == 0.5
+
+
 def _raising_wait(exc: BaseException):
     def wait_procs(procs_, timeout=None):
         raise exc

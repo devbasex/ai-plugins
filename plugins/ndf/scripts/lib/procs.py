@@ -226,14 +226,23 @@ def self_cgroup(path: Path = PROC_SELF_CGROUP) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def cgroup_cpu(directory: Path | None = None) -> float | None:
-    """cgroup の `cpu.max` が許す CPU の数。上限が無い（`max`）・読めないときは None。"""
-    d = cgroup_dir() if directory is None else Path(directory)
+def _cpu_max(path: Path) -> float | None:
+    """1 つの `cpu.max` が許す CPU の数。上限が無い（`max`）・読めないときは None。"""
     try:
-        quota, period = (d / "cpu.max").read_text(encoding="utf-8").split()
+        quota, period = path.read_text(encoding="utf-8").split()
         return None if quota == "max" else int(quota) / int(period)
     except (OSError, ValueError):
         return None
+
+
+def cgroup_cpu(directory: Path | None = None, root: Path = CGROUP_ROOT) -> float | None:
+    """自分から `root` までの cgroup の `cpu.max` が許す CPU の数の最小。親の上限も子に効くため階層をたどる。
+
+    `root` の外のディレクトリはそこだけを読む。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    d = cgroup_dir() if directory is None else Path(directory)
+    levels = [d, *(p for p in d.parents if p.is_relative_to(root))] if d.is_relative_to(root) else [d]
+    limits = [v for v in (_cpu_max(p / "cpu.max") for p in levels) if v is not None]
+    return min(limits, default=None)
 
 
 def _read_int(path: Path) -> int | None:

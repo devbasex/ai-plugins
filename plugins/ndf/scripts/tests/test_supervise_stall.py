@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import monitor_loop  # noqa: E402
-from supervise_lib import engine, paths, progress_watch, worker_steps  # noqa: E402
+from supervise_lib import claude, engine, paths, progress_watch, worker_steps  # noqa: E402
 from supervise_lib.progress_watch import ProgressWatch  # noqa: E402
 
 
@@ -85,6 +86,23 @@ def test_without_a_transcript_the_longer_allowance_is_used(sig):
     sig.lines += 1
     sig.t += 60
     assert w.deadline(1000.0) == sig.t + progress_watch.BLIND_STALL
+
+
+def test_a_late_transcript_brings_the_deadline_back_to_the_normal_allowance(sig):
+    """起動から 60 秒を過ぎて会話の記録が現れたら、長い許容時間の締め切りより前へ戻す（待ちの部品は follow で前へも動かす）。"""
+    w = sig.watch()
+    assert advance(sig, w, 120) == 1000.0 + progress_watch.BLIND_STALL
+    sig.grow()
+    sig.t += 60
+    assert w.deadline(1000.0) == sig.t + 1800 and w.observable and w.allowance == 1800
+
+
+def test_run_ticking_follow_moves_the_deadline_earlier():
+    """follow の締め切りは前へも動き、呼び出しの timeout の外で打ち切る。"""
+    started = time.time()
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude.run_ticking("sleep 5", shell=True, timeout=30, every=0.05, extend=lambda at: at + 0.2, follow=True)
+    assert time.time() - started < 3
 
 
 def test_an_elapsed_limit_wins_over_progress_and_is_not_a_stall(sig):
