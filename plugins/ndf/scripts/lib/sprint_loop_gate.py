@@ -519,7 +519,7 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
         if plans:
             stages.append(plans)
     tag = f"close-{len(lap.get('dones', [])) + 1}"
-    lap["close_plans"] = build_close(env, rec, lap, kept, tag=tag)  # 配布待ち・質問待ちで締めた周回は答えの後にこれを流す
+    lap["close_plans"] = build_close(env, rec, lap, kept, tag=tag)  # リリース待ち・質問待ちで締めた周回は答えの後にこれを流す
     stages.append(lap["close_plans"])
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
