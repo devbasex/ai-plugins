@@ -143,7 +143,7 @@ def repo(tmp_path):
     (root / "keep.txt").write_text("x\n", encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
-    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR は承認ゲート 2 に当たらない
+    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR はリリース承認ゲートに当たらない
     return root
 
 
@@ -377,7 +377,7 @@ def test_merge_when_green_ok_when_local_change_blocks_pull(repo, gh, tmp_path):
     # マージの後の取り込みが未コミットの変更に塞がれても、マージは済んでいるので ok・0 で終える（#1685）
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
-    git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛ては承認ゲート 2 に当たらない
+    git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛てはリリース承認ゲートに当たらない
     (main / ".ndf").mkdir()
     (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
     (repo / "keep.txt").write_text("上流\n", encoding="utf-8")
@@ -789,7 +789,7 @@ def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
     assert {k: v.all_pass for k, v in got.items()} == {("o/r", 7): True, ("o/r", 8): False}
 
 
-# --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
+# --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 
 def declare(repo, wt, rows=None):
@@ -1028,14 +1028,14 @@ def test_promote_does_not_merge_without_a_readable_verified_commit(repo, gh, tmp
 
 
 def test_promote_help_shows_the_verified_commit_argument(gh, repo):
-    """AC9・#2142: promote の --help に照合の引数と、食い違えば承認ゲート 2 へ戻ることが出る。"""
+    """AC9・#2142: promote の --help に照合の引数と、食い違えばリリース承認ゲートへ戻ることが出る。"""
     p = subprocess.run([PY, str(SCRIPTS / "merged-steps.py"), "promote", "--help"], capture_output=True, text=True, env=gh.env)
     text = "".join(p.stdout.split())  # argparse の折り返しを外す
     assert p.returncode == 0 and "--expect-head-from" in text
-    assert "承認ゲート2へ戻す" in text and "--fromverify" in text
+    assert "リリース承認ゲートへ戻す" in text and "--fromverify" in text
 
 
-# --- #2104: 昇格の承認の後のマージは、承認ゲート 2 の承認資料の承認したコミットのときだけ行う ----------------------
+# --- #2104: 昇格の承認の後のマージは、リリース承認ゲートの承認資料の承認したコミットのときだけ行う ----------------------
 
 
 def promote_args(*extra):
@@ -1051,7 +1051,7 @@ def promote_material(tmp_path, sha=X, row="承認したコミット"):
 
 
 def test_promote_gate_writes_the_head_into_the_material(repo, gh, tmp_path):
-    """AC1・AC8・I1: 承認ゲート 2 で止まるとき、最初の読みの先端を資料・metrics・gate の items に載せ、next が資料で照合する。"""
+    """AC1・AC8・I1: リリース承認ゲートで止まるとき、最初の読みの先端を資料・metrics・gate の items に載せ、next が資料で照合する。"""
     declare(repo, *TRYGROUP)
     out_path = tmp_path / "approval-promote.md"
     gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop"), dict(to("main", Y), headRefName="develop")]})
@@ -1090,7 +1090,7 @@ def test_promote_approved_merges_the_approved_commit(repo, gh, tmp_path):
     ],
 )
 def test_promote_approved_stops_when_the_head_moved(repo, gh, tmp_path, seq):
-    """AC3・I3: 先端が承認したコミットと違えば、マージせずに head_moved で 1。next が承認ゲート 2 からのやり直しを示す。"""
+    """AC3・I3: 先端が承認したコミットと違えば、マージせずに head_moved で 1。next がリリース承認ゲートからのやり直しを示す。"""
     declare(repo, *TRYGROUP)
     gh.set(open_prs=[{"number": 9}], pr_seq={"9": seq})
     material = promote_material(tmp_path)

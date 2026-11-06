@@ -92,7 +92,7 @@ PENDING_REASON = "保留の周回の課題"
 
 
 APPROVED_REASON = "承認した設計"
-PRODUCTION_REASON = "設計 PR の宛先が本番（承認ゲート 2 で人がマージする）"
+PRODUCTION_REASON = "設計 PR の宛先が本番（リリース承認ゲートで人がマージする）"
 
 
 def approved_designs(rec: dict) -> set[int]:
@@ -194,7 +194,7 @@ def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
         return None
     if res in ("head_moved", "no_stamp"):
         return f"#{w['number']} の設計 PR #{pr} を新しい先端で問い直した" if reask_design(env, rec, w, design_head(env, w)) else None
-    if res == "production":  # 宛先は周回を重ねても変わらない。人が承認ゲート 2 でマージしたかだけを読む
+    if res == "production":  # 宛先は周回を重ねても変わらない。人がリリース承認ゲートでマージしたかだけを読む
         if env.pr_state(pr) == "MERGED":
             w["merged_at"] = env.now()
         return None

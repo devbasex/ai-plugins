@@ -194,10 +194,10 @@ def test_old_record_key_counts_as_the_same_sprint(tmp_path):
     old_row = {"at": "2026-09-28T00:00:00Z", "gate": "design", "mission": str(state), "pr": [1], "verdict": "not_follow"}
     pms.append_jsonl(log, old_row)
     before = sha(log)
-    assert pms.last_mvv_verdict({}, str(state), "関門 1", log, 1) == "not_follow"
+    assert pms.last_mvv_verdict({}, str(state), "設計承認ゲート", log, 1) == "not_follow"
     assert sha(log) == before
     pms.append_jsonl(log, {"at": "2026-09-28T00:01:00Z", "gate": "design", "sprint": str(state), "pr": [1], "verdict": "follow"})
-    assert pms.last_mvv_verdict({}, str(state), "関門 1", log, 1) == "follow"
+    assert pms.last_mvv_verdict({}, str(state), "設計承認ゲート", log, 1) == "follow"
 
 
 def test_old_record_labels_are_read(tmp_path):

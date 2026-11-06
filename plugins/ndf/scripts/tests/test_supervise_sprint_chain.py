@@ -49,7 +49,7 @@ def queue_words(command: str) -> list[list[str]]:
 def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
     stages = sprint(tmp_path, "--design", "11", "12")
     names = [s["name"] for s in stages]
-    assert names == ["設計", "関門 1", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "デプロイ", "関門 2", "本番"]
+    assert names == ["設計", "設計承認ゲート", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "デプロイ", "リリース承認ゲート", "本番"]
     by = {s["name"]: s for s in stages}
     merge = by["設計 PR のマージ"]
     for n, path in zip((11, 12), merge["plans"]):
@@ -58,7 +58,7 @@ def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
         assert plan["Pull Request"] == f"{{queue_pr:design-{n}}}"
         assert [s["id"] for s in plan["steps"]] == ["approved", "merge-gate", "merge", "merge-approved"]
         assert "design-approved --pr {pr}" in plan["steps"][0]["cmd"] and plan["steps"][0]["gate_next"] == "end"
-    # 承認ゲート 1 の後はマージのステージの command 1 本だけで、後続はその --then の順に並ぶ
+    # 設計承認ゲートの後はマージのステージの command 1 本だけで、後続はその --then の順に並ぶ
     chained = names[3:8]
     assert all("command" not in by[n] and by[n]["then_of"] == "設計 PR のマージ" for n in chained)
     assert queue_words(merge["command"]) == [merge["plans"], *(by[n]["plans"] for n in chained)]
@@ -69,7 +69,7 @@ def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
         assert by[n]["resume"].endswith(f"queue --resume {done}")
     assert by["設計"]["resume"].endswith("queue --resume " + str((tmp_path / "m" / "done-1.json").resolve()))
     assert by["本番"]["resume"].endswith("queue --resume " + str((tmp_path / "m" / "done-10.json").resolve()))
-    assert "resume" not in by["関門 1"] and "resume" not in by["関門 2"]
+    assert "resume" not in by["設計承認ゲート"] and "resume" not in by["リリース承認ゲート"]
     # 本番のプランの先頭が approve（AC9）
     prod = json.loads(Path(by["本番"]["plans"][0]).read_text())
     assert prod["steps"][0]["id"] == "approve" and "--facts-from '{queue_state?:release}'" in prod["steps"][0]["cmd"]
@@ -78,7 +78,7 @@ def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
 def test_normal_without_design_chains_from_the_sprint_branch(tmp_path):
     stages = sprint(tmp_path)
     by = {s["name"]: s for s in stages}
-    assert [s["name"] for s in stages] == ["スプリントブランチ", "実装", "検査", "デプロイ", "関門 2", "本番"]
+    assert [s["name"] for s in stages] == ["スプリントブランチ", "実装", "検査", "デプロイ", "リリース承認ゲート", "本番"]
     assert "command" in by["スプリントブランチ"] and "then_of" not in by["スプリントブランチ"]
     assert queue_words(by["スプリントブランチ"]["command"]) == [by[n]["plans"] for n in ("スプリントブランチ", "実装", "検査", "デプロイ")]
     assert by["デプロイ"]["then_of"] == "スプリントブランチ"
@@ -93,8 +93,8 @@ def test_normal_with_state_passes_the_answer_to_merge_and_release(tmp_path):
     assert f"--state {state.resolve()}" in merge["steps"][0]["cmd"]
     prod = json.loads(Path(by["本番"]["plans"][0]).read_text())
     assert f"--answer-from {state.resolve()}" in prod["steps"][0]["cmd"]
-    assert "'関門 1'" in by["関門 1"]["gate"] and "--pr <設計 PR>" in by["関門 1"]["gate"]
-    assert "'関門 2'" in by["関門 2"]["gate"] and "approved-sha" not in by["関門 2"]["gate"]
+    assert "'設計承認ゲート'" in by["設計承認ゲート"]["gate"] and "--pr <設計 PR>" in by["設計承認ゲート"]["gate"]
+    assert "'リリース承認ゲート'" in by["リリース承認ゲート"]["gate"] and "approved-sha" not in by["リリース承認ゲート"]["gate"]
 
 
 def plans_of(stages: list[dict]) -> dict[str, dict]:
@@ -136,7 +136,7 @@ def test_absorb_with_a_bad_pair_writes_nothing(tmp_path, extra):
 
 
 def test_design_approved_needs_a_label_or_the_users_answer_for_that_pr(tmp_path):
-    """I1: 承認ラベルも承認ゲート 1 の記録も無ければ 10。別の PR の記録は数えない。記録があればラベルを付けて 0。"""
+    """I1: 承認ラベルも設計承認ゲートの記録も無ければ 10。別の PR の記録は数えない。記録があればラベルを付けて 0。"""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from supervise_lib import design_merge
 
@@ -150,7 +150,7 @@ def test_design_approved_needs_a_label_or_the_users_answer_for_that_pr(tmp_path)
         return run
 
     state = tmp_path / "state.json"
-    state.write_text(json.dumps({"gates": [{"name": "関門 1", "what": "x", "at": "2026-10-30T00:00:00Z", "by": "user", "pr": 2}]}))
+    state.write_text(json.dumps({"gates": [{"name": "設計承認ゲート", "what": "x", "at": "2026-10-30T00:00:00Z", "by": "user", "pr": 2}]}))
     assert design_merge.cmd_design_approved(1, str(state), gh([]))[1] == 10
     assert design_merge.cmd_design_approved(0, str(state), gh([]))[1] == 10
     assert design_merge.cmd_design_approved(1, None, gh(["design-approved"]))[1] == 0

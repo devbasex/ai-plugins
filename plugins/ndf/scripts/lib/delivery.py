@@ -198,7 +198,7 @@ def load_delivery(root) -> DeliveryDecl:
 def _main_base(wt: dict, main, root) -> str | None:
     """`channel: base` を解く起点のブランチ。メインディレクトリの `worktree.json` の `base_branch` から読む。
 
-    `channel: base` の行は本番チャネルの判定（承認ゲート 2）に効くため、Pull Request の head の `base_branch` で
+    `channel: base` の行は本番チャネルの判定（リリース承認ゲート）に効くため、Pull Request の head の `base_branch` で
     行を本番から外せないようにする（#2363 round 6）。メインディレクトリにファイルかキーが無ければ `None`（既定ブランチ）で、
     呼ばれた木の値で補わない。メインディレクトリが解けない（git でない）か呼ばれた木そのものなら、読んだ `wt` の値を使う。
     """

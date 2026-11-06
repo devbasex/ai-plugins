@@ -8,7 +8,7 @@
 | `request --external --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を `requests/<id>.json` へ書く（10）か、すでに `main` にあれば書かない（0） |
 | `await --external --from <パス>` | `answers/<id>.json` を読む（released 0・rejected 10・まだ無い 3） |
 | `compose --external` | `batch.json` の手（`step`）ごとに流すもの（`pipeline`・`record`・`settle`）を返す |
-| `present --external <連番> <提示> (--approval <承認資料> \\| --record)` | 範囲をレーンへ対応づける。`--record` は承認ゲート 2 で止まった提示を `presented/` へ書く |
+| `present --external <連番> <提示> (--approval <承認資料> \\| --record)` | 範囲をレーンへ対応づける。`--record` はリリース承認ゲートで止まった提示を `presented/` へ書く |
 | `settle --external <連番> --done <D>` | 届いた段を `progress/`、結果を `results/` へ書く |
 
 サービスの実行ジョブ（環境変数 `NDF_FACTORY_RUN`）では `init`・`start`・`run` を断る（1 台の中のオーガナイザーを起動しない）。

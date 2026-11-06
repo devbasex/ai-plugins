@@ -199,12 +199,12 @@ def answer_state(main: Path) -> dict:
 
 
 def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mode: str, facts_from: str, answer_from: str) -> list[dict]:
-    """まとめたリリース（#2436）の提示のプランの承認ゲート 2: MVV 判定（mvv・note）→ approve の順に置く。
+    """まとめたリリース（#2436）の提示のプランのリリース承認ゲート: MVV 判定（mvv・note）→ approve の順に置く。
 
     今の本番のプランでは MVV 判定と approve が排他だが、提示のプランは両方を並べる。MVV 判定が通せば承認の記録が
-    既にあるため approve は答えの記録を読まずに通り、関門（10）なら提示のプランは承認ゲートで終わる。確定の後は
+    既にあるため approve は答えの記録を読まずに通り、承認ゲート（10）なら提示のプランは承認ゲートで終わる。確定の後は
     一時レーンが答えを `answer_from` へ書いて `--from approve` で続ける。"""
-    from gate_answer import GATE_2
+    from gate_answer import RELEASE_GATE
     from supervise_lib.paths import MVV_PY, STEPS_PY
     from supervise_lib.release_templates import MVV_NOTE, material_path, mvv_gate_steps
     from supervise_lib.verify_steps import handoff_step, reject_step
@@ -231,8 +231,8 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
             "gate_next": "end",
         }
     )
-    steps.append(handoff_step(str(Path(state).resolve()), GATE_2, "判定のコメント"))
-    steps.append(reject_step(str(Path(state).resolve()), GATE_2, "mvv", root=repo or "."))
+    steps.append(handoff_step(str(Path(state).resolve()), RELEASE_GATE, "判定のコメント"))
+    steps.append(reject_step(str(Path(state).resolve()), RELEASE_GATE, "mvv", root=repo or "."))
     return steps
 
 
@@ -272,8 +272,8 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     """まとめたリリース（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
 
     提示のプランは開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで
-    流し、`parallel.py present` でレーンの内訳を足し、最後に承認ゲート 2（MVV 判定 → approve）を置く。本番のプランは
-    承認ゲート 2 を持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。
+    流し、`parallel.py present` でレーンの内訳を足し、最後にリリース承認ゲート（MVV 判定 → approve）を置く。本番のプランは
+    リリース承認ゲートを持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。
     本番のプランの承認資料はこの提示の承認資料で、先頭の approve は提示のプランの facts と答えの記録を読む。"""
     from supervise_lib.decl import apply_decls, decl_fields
     from supervise_lib.paths import PARALLEL_PY
@@ -324,7 +324,7 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     facts = _dev_approval_steps(ns, repo, approval, "", ",".join((ns.release or {}).get("runtimes") or []))
     for s in facts:
         s.pop("on_fail", None)  # 提示のプランに judge は無い。落ちたらそのステップで止まる
-    facts[0]["gate_as_ok"] = True  # facts の 10 は関門にせず、承認の成否は後段の mvv・approve が決める
+    facts[0]["gate_as_ok"] = True  # facts の 10 は承認ゲートにせず、承認の成否は後段の mvv・approve が決める
     facts[-1]["next"] = "present"
     present = {
         "id": "present",

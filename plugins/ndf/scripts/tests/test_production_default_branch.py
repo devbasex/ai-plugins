@@ -26,7 +26,7 @@ from supervise_lib import decl as sdecl  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 RELEASE = {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]}
-NO_PROD = "承認ゲート 2 と本番は置いていない"
+NO_PROD = "リリース承認ゲートと本番は置いていない"
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
@@ -124,7 +124,7 @@ def test_without_any_source_prod_stops_naming_three_sources_and_dev_and_normal_g
 
 @pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
 def test_sprint_puts_gate_2_and_production_before_the_worktree_exists(tmp_path, pace):
-    """受け入れ条件 5: まだ作っていない worktree のパスでも、どの進め方も承認ゲート 2 と本番を置く。
+    """受け入れ条件 5: まだ作っていない worktree のパスでも、どの進め方もリリース承認ゲートと本番を置く。
     fast / auto は開発版のチャネルが要るため、起点を develop・既定ブランチを main にする。"""
     main = make_repo(tmp_path, base="develop")
     wt = main / ".worktrees" / "feat" / "m"

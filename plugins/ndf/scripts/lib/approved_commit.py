@@ -1,4 +1,4 @@
-"""承認したコミット（本番へのリリースの承認ゲート 2 が対象にしたベースブランチの先端）の扱い（#815）。
+"""承認したコミット（本番へのリリースのリリース承認ゲートが対象にしたベースブランチの先端）の扱い（#815）。
 
 - 承認資料（`release-steps.py approval-facts` が書く Markdown）の欄の名前・SHA の形の検査・読み取り・承認の記録の書き込み
 - 承認したコミットから比べた先端までに、許したもの（デプロイの PR）の外のコミットや中身が無いかの比較（`compare_approved`）
@@ -157,7 +157,7 @@ def material_sha_or_none(path) -> str | None:
 
 
 def record_all(approved: dict[str, str], by: str, at: str) -> list[dict]:
-    """{承認資料: 承認したコミット} のそれぞれへ承認の記録を書き、結果の items を返す（mvv-gate.py の関門 2。I10）。
+    """{承認資料: 承認したコミット} のそれぞれへ承認の記録を書き、結果の items を返す（mvv-gate.py のリリース承認ゲート。I10）。
     判定の後に資料が書き直されていれば書かず result: not_recorded（リリースは記録が無いとして承認ゲートで止まる）。"""
     items = []
     for path, sha in approved.items():

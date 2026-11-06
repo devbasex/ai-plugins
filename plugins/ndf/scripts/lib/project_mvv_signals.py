@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 from pathlib import Path
 
+import gate_answer
 import jsonio
 import legacy_names
 import project_mvv as pm
@@ -119,15 +120,15 @@ def revise_suggestion(sig: dict) -> dict | None:
     }
 
 
-GATE_KEYS = {"関門 1": "design", "関門 2": "release"}  # mvv-gate.py の --gate
+GATE_KEYS = {gate_answer.DESIGN_GATE: "design", gate_answer.RELEASE_GATE: "release"}  # mvv-gate.py の --gate
 
 
 def last_mvv_verdict(state: dict, sprint: str, gate: str, gate_log, pr: int | None = None) -> str | None:
     """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じスプリントの最後の行の新しい方）。
     それより新しい取り消し（`withdrawals`）があれば None。`pr` を渡すと、mvv-gate.jsonl の行は `pr` にその番号を含むものだけを
     見る（1 つのスプリントの複数の設計 PR の判定を取り違えない。#1400 の I8）。"""
-    found = []
-    g = next((g for g in state.get("gates", []) if g.get("name") == gate and g.get("by") == "mvv"), None)
+    found, gate = [], gate_answer.canonical(gate)
+    g = next((g for g in state.get("gates", []) if gate_answer.canonical(g.get("name")) == gate and g.get("by") == "mvv"), None)
     if g:
         found.append((g.get("at") or "", g.get("verdict")))
     me = str(Path(sprint).resolve())
@@ -141,7 +142,7 @@ def last_mvv_verdict(state: dict, sprint: str, gate: str, gate_log, pr: int | No
     if rows:
         found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
     # 自動の通過を取り消した（sprint-state.py gate --withdraw）なら、それより前の判定は直前の判定として読まない
-    found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if w.get("name") == gate]
+    found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if gate_answer.canonical(w.get("name")) == gate]
     if not found:
         return None
     verdict = max(found, key=lambda x: (x[0], x[1] == "withdrawn"))[1]  # 同じ時刻なら取り消しを後とみなす

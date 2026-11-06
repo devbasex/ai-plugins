@@ -341,7 +341,7 @@ def request_gate1(
 
 
 def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
-    """一時レーンが提示のプランの承認ゲート 2 で止まったときの依頼（`kind: gate2`）。id は `<計画名>-p<連番>-<提示>`、
+    """一時レーンが提示のプランのリリース承認ゲートで止まったときの依頼（`kind: gate2`）。id は `<計画名>-p<連番>-<提示>`、
     stamp は提示したコミット（`presented.json`）。"""
     import parallel_release as prl
 

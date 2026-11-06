@@ -154,7 +154,7 @@ def test_old_supervise_test_command_is_read_only_without_project_suites(repo_wt)
 
 
 # 認可に関わる値（本番マージの判定・本番のブランチ・使ってよいランタイム）はメインディレクトリから読む（#2363）。
-# Pull Request の変更だけで承認ゲート 2 やランタイムの制限を緩められないようにする。
+# Pull Request の変更だけでリリース承認ゲートやランタイムの制限を緩められないようにする。
 
 PROD_ROW = dict(ROW, channel="production")
 

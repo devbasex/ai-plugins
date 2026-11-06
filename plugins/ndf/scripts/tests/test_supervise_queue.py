@@ -352,7 +352,7 @@ def test_a_needed_plan_later_in_the_queue_or_missing_blocks_the_plan(tmp_path, e
 
 
 def test_a_needed_plan_of_an_earlier_stage_or_with_a_gate_record(tmp_path, env):
-    """前のステージの完了は前提を満たす。関門の記録は完了でない（受け入れ条件 5）。"""
+    """前のステージの完了は前提を満たす。承認ゲートの記録は完了でない（受け入れ条件 5）。"""
     t, q = tmp_path, Queue(tmp_path, env)
     a = q.plan("a", [run_step(note(t, "a"))], ["a.py"])
     b = q.plan("b", [run_step(note(t, "b"))], ["b.py"], after=["a"])
@@ -499,7 +499,7 @@ def test_a_gate_stays_a_gate_and_a_stopped_plan_runs_again_from_the_top(tmp_path
         assert p.returncode == 1 and {Path(i["plan"]).stem: i["result"] for i in res["items"]} == {"gate": "関門", "stop": "止まった"}
         events = [json.loads(ln) for ln in p.stdout.splitlines()[:-1]]
         assert [(Path(e["plan"]).stem, e["reason"]) for e in events if e["reason"] == "関門"] == [("gate", "関門")]  # 打ち直しでも知らせる
-    assert sorted(q.visits()) == ["g1", "s1", "s1", "s2", "s2"]  # 関門は同じ所で止まったまま、止まったプランは頭から
+    assert sorted(q.visits()) == ["g1", "s1", "s1", "s2", "s2"]  # 承認ゲートは同じ所で止まったまま、止まったプランは頭から
     assert q.step_lines(gate) == ["g1"]
 
 

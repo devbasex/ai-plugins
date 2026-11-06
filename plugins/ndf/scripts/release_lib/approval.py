@@ -191,7 +191,7 @@ def _approve_gate(path, why: str, metrics: dict, nxt: str) -> Gate:
 
 def approve_from_facts(root, a) -> dict:
     """本番のプランの先頭の approve（#1426 の決定 7）。提示した SHA は開発版の facts の出力から読み（資料を読み直さない）、
-    承認資料に一致する承認の記録が既にあれば書かずに通す。無ければ承認ゲート 2 の利用者の承認の記録（facts の出力より後）が
+    承認資料に一致する承認の記録が既にあれば書かずに通す。無ければリリース承認ゲートの利用者の承認の記録（facts の出力より後）が
     `--answer-from` にあるときだけ書く。どれかが欠ければ書かずに承認ゲート（10）で止まる（I2・I3）。"""
     import gate_answer
 
@@ -200,7 +200,7 @@ def approve_from_facts(root, a) -> dict:
     path = _material(root, a.approval)
     sha, facts_at = _facts_of(a.facts_from)
     metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by}
-    retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.GATE_2}" --what <要約> --by user --outcome approved を書いてから続ける'
+    retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.RELEASE_GATE}" --what <要約> --by user --outcome approved を書いてから続ける'
     if not sha:
         # facts を読めなくても（--dev-state を省いた単発の本番のプランなど）、資料に一致する承認の記録が既にあれば通す（決定 7）
         try:
@@ -237,9 +237,9 @@ def approve_from_facts(root, a) -> dict:
             )
     except ValueError as e:
         raise _approve_gate(path, str(e), metrics, "開発版のプランを流し直す")
-    answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.GATE_2, after=facts_at)
+    answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.RELEASE_GATE, after=facts_at)
     if answer is None:
-        raise _approve_gate(path, "承認ゲート 2 の利用者の承認の記録が facts の出力より後に無い", metrics, retry)
+        raise _approve_gate(path, "リリース承認ゲートの利用者の承認の記録が facts の出力より後に無い", metrics, retry)
     at = clock.now_iso("utc")
     ac.record_approval(path, sha, a.by, at)
     metrics.update({"at": at, "answer_at": answer.at})
@@ -254,7 +254,7 @@ def approve_from_facts(root, a) -> dict:
 
 
 def approve(root, a) -> dict:
-    """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
+    """リリース承認ゲートの承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
     metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
     --facts-from なら approve_from_facts（#1426）。"""
     # 空の --facts-from（queue が {queue_state?:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す

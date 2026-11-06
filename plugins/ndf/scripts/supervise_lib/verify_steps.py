@@ -135,7 +135,7 @@ def refactor_template_arg(a) -> str:
 def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
-    - `merge-gate`: 宛先が承認ゲート 2（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
+    - `merge-gate`: 宛先がリリース承認ゲート（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
     - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 

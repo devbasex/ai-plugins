@@ -49,12 +49,12 @@ def git(cwd: Path, *args: str) -> None:
 
 
 def test_record_appends_one_row_with_gate_time_summary_repo_and_scope():
-    code, out = record("--gate", "関門 1", "--what", "設計の条件が違う", "--issue", "5", "--issue", "3")
+    code, out = record("--gate", "設計承認ゲート", "--what", "設計の条件が違う", "--issue", "5", "--issue", "3")
     assert (code, out["status"], out["metrics"]["path"]) == (0, "ok", str(ledger()))
     expected = {
         "at": AT,
         "repo": "o/r",
-        "gate": "関門 1",
+        "gate": "設計承認ゲート",
         "what": "設計の条件が違う",
         "sprint": None,
         "issues": [3, 5],
@@ -63,16 +63,16 @@ def test_record_appends_one_row_with_gate_time_summary_repo_and_scope():
         "outcome": "rejected",
     }
     assert out["items"] == [expected] and rows() == [expected]
-    record("--gate", "関門 2", "--what", "本番", "--pr", "9")
-    assert [r["gate"] for r in rows()] == ["関門 1", "関門 2"]  # 追記だけで、前の行は残る
+    record("--gate", "リリース承認ゲート", "--what", "本番", "--pr", "9")
+    assert [r["gate"] for r in rows()] == ["設計承認ゲート", "リリース承認ゲート"]  # 追記だけで、前の行は残る
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ("--gate", "関門 1", "--what", "x"),  # 範囲が無い
-        ("--gate", "関門 1", "--what", "  ", "--issue", "1"),  # 要約が空白だけ
-        ("--gate", "関門 1", "--issue", "1"),  # 要約が無い
+        ("--gate", "設計承認ゲート", "--what", "x"),  # 範囲が無い
+        ("--gate", "設計承認ゲート", "--what", "  ", "--issue", "1"),  # 要約が空白だけ
+        ("--gate", "設計承認ゲート", "--issue", "1"),  # 要約が無い
     ],
 )
 def test_record_without_scope_or_summary_is_two_and_writes_nothing(args):
@@ -84,19 +84,19 @@ def test_record_that_cannot_write_is_one(tmp_path, monkeypatch):
     blocker = tmp_path / "file"
     blocker.write_text("")
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(blocker / "sub"))  # ファイルの下にディレクトリは作れない
-    code, out = record("--gate", "関門 1", "--what", "x", "--issue", "1")
+    code, out = record("--gate", "設計承認ゲート", "--what", "x", "--issue", "1")
     assert (code, out["status"]) == (1, "stopped") and "書けない" in out["summary"]
 
 
 def test_count_splits_by_gate_and_scope():
-    record("--gate", "関門 1", "--what", "a", "--issue", "1")
-    record("--gate", "関門 2", "--what", "b", "--pr", "10")
-    record("--gate", "関門 2", "--what", "c", "--issue", "2", "--pr", "11")
+    record("--gate", "設計承認ゲート", "--what", "a", "--issue", "1")
+    record("--gate", "リリース承認ゲート", "--what", "b", "--pr", "10")
+    record("--gate", "リリース承認ゲート", "--what", "c", "--issue", "2", "--pr", "11")
     record("--gate", "MVV", "--what", "d", "--issue", "1")
-    run("record", "--repo", "x/y", "--gate", "関門 1", "--what", "e", "--issue", "1")  # ほかのリポジトリ
+    run("record", "--repo", "x/y", "--gate", "設計承認ゲート", "--what", "e", "--issue", "1")  # ほかのリポジトリ
     code, out = run("count", "--repo", "o/r")
     assert (code, out["status"], out["metrics"]) == (0, "ok", {"gate_1": 1, "gate_2": 2, "other": 1, "total": 4, "recorded": True})
-    assert out["summary"] == "承認ゲートの差し戻し: 関門 1 が 1 件・関門 2 が 2 件（ほか 1 件）"
+    assert out["summary"] == "承認ゲートの差し戻し: 設計承認ゲートが 1 件・リリース承認ゲートが 2 件（ほか 1 件）"
     _, out = run("count", "--repo", "o/r", "--issue", "1")
     assert out["metrics"] == {"gate_1": 1, "gate_2": 0, "other": 1, "total": 2, "recorded": True}
     _, out = run("count", "--repo", "o/r", "--issue", "2", "--pr", "10")
@@ -109,15 +109,15 @@ UNRECORDED = {**dict.fromkeys(gr.COUNT_KEYS), "recorded": False}
 @pytest.mark.parametrize("ledger_rows", [0, 1])  # 記録のファイルが無い・ほかの範囲の行だけがある
 def test_count_without_any_answer_in_scope_is_unrecorded_not_zero(ledger_rows):
     if ledger_rows:
-        record("--gate", "関門 1", "--what", "a", "--issue", "2")
+        record("--gate", "設計承認ゲート", "--what", "a", "--issue", "2")
     code, out = run("count", "--repo", "o/r", "--issue", "1")
     assert (code, out["status"], out["metrics"]) == (3, "stopped", UNRECORDED)
     assert "未記録" in out["summary"] and "0 件" not in out["summary"].replace("0 件とは読まない", "")
 
 
 def test_count_with_only_approvals_in_scope_is_a_recorded_zero():
-    code, out = record("--gate", "関門 1", "--what", "設計", "--issue", "1", "--outcome", "approved")
-    assert code == 0 and out["summary"].startswith("関門 1 の承認を記録した")
+    code, out = record("--gate", "設計承認ゲート", "--what", "設計", "--issue", "1", "--outcome", "approved")
+    assert code == 0 and out["summary"].startswith("設計承認ゲートの承認を記録した")
     code, out = run("count", "--repo", "o/r", "--issue", "1")
     assert (code, out["status"], out["items"]) == (0, "ok", [])
     assert out["metrics"] == {"gate_1": 0, "gate_2": 0, "other": 0, "total": 0, "recorded": True}
@@ -126,7 +126,7 @@ def test_count_with_only_approvals_in_scope_is_a_recorded_zero():
 def test_rows_without_an_outcome_count_as_rejections():
     """#2183 より前に書いた行（outcome が無い）は、今と同じく差し戻しとして数える。"""
     ledger().parent.mkdir(parents=True, exist_ok=True)
-    old = {"at": AT, "repo": "o/r", "gate": "関門 2", "what": "x", "sprint": None, "issues": [], "prs": [7], "by": "user"}
+    old = {"at": AT, "repo": "o/r", "gate": "リリース承認ゲート", "what": "x", "sprint": None, "issues": [], "prs": [7], "by": "user"}
     ledger().write_text(json.dumps(old, ensure_ascii=False) + "\n")
     code, out = run("count", "--repo", "o/r", "--pr", "7")
     assert (code, out["status"], out["metrics"]["gate_2"]) == (0, "ok", 1)
@@ -134,7 +134,7 @@ def test_rows_without_an_outcome_count_as_rejections():
 
 @pytest.mark.parametrize("bad", ["{broken\n", "[1]\n"])
 def test_count_with_a_broken_row_is_unknown_not_zero(bad):
-    record("--gate", "関門 1", "--what", "a", "--issue", "1")
+    record("--gate", "設計承認ゲート", "--what", "a", "--issue", "1")
     with ledger().open("a", encoding="utf-8") as f:
         f.write(bad)
     code, out = run("count", "--repo", "o/r")
@@ -148,7 +148,7 @@ def test_a_worktree_without_origin_counts_from_the_main_directory(tmp_path):
     git(main, "init", "-q")
     git(main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
     git(main, "worktree", "add", "-q", str(tmp_path / "wt"))
-    code, _ = run("record", "--gate", "関門 1", "--what", "a", "--issue", "1", cwd=tmp_path / "wt")
+    code, _ = run("record", "--gate", "設計承認ゲート", "--what", "a", "--issue", "1", cwd=tmp_path / "wt")
     assert code == 0 and rows()[0]["repo"] == str(main.resolve())
     _, out = run("count", "--issue", "1", cwd=main)
     assert out["metrics"]["total"] == 1
@@ -164,7 +164,7 @@ def _state(tmp_path: Path, pace: str) -> Path:
 def _gate(tmp_path: Path, state: Path, *args: str) -> tuple[int, dict]:
     log = str(tmp_path / "mvv-gate.jsonl")
     return run(
-        "gate", str(state), "関門 1", "--what", "設計", "--at", AT, "--mvv-log", log, "--root", str(tmp_path), *args, script=STATE_PY
+        "gate", str(state), "設計承認ゲート", "--what", "設計", "--at", AT, "--mvv-log", log, "--root", str(tmp_path), *args, script=STATE_PY
     )
 
 
@@ -177,7 +177,7 @@ def test_sprint_state_rejection_on_a_normal_pace_writes_the_ledger(tmp_path):
         {
             "at": AT,
             "repo": str(tmp_path.resolve()),
-            "gate": "関門 1",
+            "gate": "設計承認ゲート",
             "what": "設計",
             "sprint": str(state.resolve()),
             "issues": [4],
@@ -213,7 +213,7 @@ def test_a_gate_passed_by_mvv_in_the_state_file_is_a_recorded_zero(tmp_path):
     """MVV 判定で通した承認ゲートは状態ファイルにだけ残る。それも答えとして読み、0 件を返す。"""
     state = _state(tmp_path, "normal")
     m = json.loads(state.read_text())
-    m["gates"] = [{"name": "関門 2", "what": "x", "at": AT, "by": "mvv", "verdict": "従う"}]
+    m["gates"] = [{"name": "リリース承認ゲート", "what": "x", "at": AT, "by": "mvv", "verdict": "従う"}]
     state.write_text(json.dumps(m, ensure_ascii=False))
     code, out = run("count", "--sprint", str(state), "--root", str(tmp_path))
     assert (code, out["status"], out["metrics"]["total"]) == (0, "ok", 0)
@@ -246,7 +246,7 @@ def test_running_a_plan_from_reject_records_the_rejection_and_re_presents(tmp_pa
     marker = tmp_path / "re-presented"
     steps = [
         {"id": "mvv", "type": "run", "timeout": 30, "cmd": f"touch {marker}", "next": "end"},
-        reject_step(str(state), "関門 1", "mvv", root=str(tmp_path)),
+        reject_step(str(state), "設計承認ゲート", "mvv", root=str(tmp_path)),
     ]
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
@@ -263,5 +263,5 @@ def test_a_plan_does_not_fall_into_reject_without_from(tmp_path):
     from supervise_lib import limits
     from supervise_lib.verify_steps import reject_step
 
-    steps = [{"id": "gate", "type": "judge"}, reject_step("s.json", "関門 1", "gate")]
+    steps = [{"id": "gate", "type": "judge"}, reject_step("s.json", "設計承認ゲート", "gate")]
     assert limits.default_next(steps, "gate") is None

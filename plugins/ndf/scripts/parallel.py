@@ -9,13 +9,13 @@
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
 | `wait <計画名> [--after <seq>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions）か終わりまで待つ。上限なら 3 |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
-| `confirm <計画名> <連番> [--take new\\|first]` | 承認ゲート 2 の承認を送る |
+| `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
 | `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
-| `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンが承認ゲート 2 の依頼を送る |
+| `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲートの依頼を送る |
 | `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
@@ -349,7 +349,7 @@ def cmd_await(a) -> None:
         status,
         f"リリースの依頼 {sent['id']} の答え: {res}",
         code=code,
-        next_step="今の承認ゲート 2 の差し戻しと同じに扱う" if code == 10 else None,
+        next_step="今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None,
         result=res,
         version=ans.get("version"),
         release=ans.get("release"),
@@ -381,7 +381,7 @@ def cmd_request_gate2(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     rid = pl.request_gate2(main, a.name, a.n, a.k, a.report)
-    reply("ok", f"承認ゲート 2 の依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
+    reply("ok", f"リリース承認ゲートの依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
 
 
 def cmd_answer(a) -> None:
@@ -441,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("k", type=int)
     p.add_argument("--approval")
     p.add_argument("--external", action="store_true")
-    p.add_argument("--record", action="store_true", help="--external で、承認ゲート 2 で止まった提示を presented/ へ書く")
+    p.add_argument("--record", action="store_true", help="--external で、リリース承認ゲートで止まった提示を presented/ へ書く")
     c = sub.add_parser("confirm")
     c.add_argument("name")
     c.add_argument("n", type=int)

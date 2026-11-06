@@ -3,7 +3,7 @@
 - 候補: 版に含む PR のうちそのプラグインのパスに触れた PR の材料だけから、字面で決める（LLM を挟まない）。
   PR の閉じる語が指す課題の要求の「影響」の表の「公開インタフェース」の行に互換なしの印（`BREAKING_MARKS`）が
   あるか、PR 本文の `## 移行の手順` の箇条がプラグインの名前に語として触れれば MAJOR、無ければ PATCH。MINOR の
-  候補は出さない（承認ゲート 2 で `--set <名前>=MINOR` として選ぶ）。材料を読めない PR は根拠の欄に書く
+  候補は出さない（リリース承認ゲートで `--set <名前>=MINOR` として選ぶ）。材料を読めない PR は根拠の欄に書く
 - 承認資料の `## 版を上げる他のプラグイン` の節の組み立て・読み取りと、本番の上げ幅の確かめ（`decided_versions`）
 
 出す（emit）のと GitHub・git を読むのは呼び手（`release-steps.py changed-plugins`）である。
@@ -179,7 +179,7 @@ def read_section(text: str) -> list[OtherPlugin]:
 
 
 def set_level(rows: list[OtherPlugin], name: str, level: str) -> OtherPlugin:
-    """承認ゲート 2 で決めた上げ幅へ行を書き換える。表に無い名前・上げ済みの行・知らない上げ幅は ValueError。"""
+    """リリース承認ゲートで決めた上げ幅へ行を書き換える。表に無い名前・上げ済みの行・知らない上げ幅は ValueError。"""
     row = next((r for r in rows if r.name == name), None)
     if row is None:
         raise ValueError(f"表に {name} の行が無い")
@@ -188,7 +188,7 @@ def set_level(rows: list[OtherPlugin], name: str, level: str) -> OtherPlugin:
     if level.lower() not in LEVELS:
         raise ValueError(f"上げ幅が違う: {level}（{' / '.join(LEVELS.values())}）")
     row.level, row.to = LEVELS[level.lower()], bumped(row.current, level)
-    row.basis.insert(0, f"承認ゲート 2 で {row.level} に決めた")
+    row.basis.insert(0, f"リリース承認ゲートで {row.level} に決めた")
     return row
 
 

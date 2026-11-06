@@ -85,7 +85,7 @@ def sample(tmp_path, name):
         ("carmo-contractors-app", "main", "production"),
         ("with-ai-dev", "main", "not-production"),  # manual だけ
         ("ai-plugins", "develop", "not-production"),  # AC6: 実装 PR は止めない
-        ("ai-plugins", "main", "not-production"),  # 本番の工程のゲート 2 で止める（二重に止めない）
+        ("ai-plugins", "main", "not-production"),  # 本番の工程のリリース承認ゲートで止める（二重に止めない）
     ],
 )
 def test_judge_samples(tmp_path, name, target, value):

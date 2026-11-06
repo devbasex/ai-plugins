@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 import durable
+from gate_answer import RELEASE_GATE
 import legacy_values
 import parallel_lane as pl
 import parallel_plan as pp
@@ -460,7 +461,7 @@ class _Run:
         rel = self.current
         if rel is None or msg.get("n") != rel["n"]:
             return
-        if any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in self.questions):  # 承認ゲート 2 の答えが届いた
+        if any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in self.questions):  # リリース承認ゲートの答えが届いた
             self.questions = [q for q in self.questions if not (q.get("kind") == "gate2" and q.get("n") == rel["n"])]
             self.publish_questions()
         if msg.get("phase") == "confirm":
@@ -555,8 +556,8 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
     リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed` なら確定の後の 3 手、そうでなければ提示。
 
-    - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランが承認ゲート 2 で
-      止まったかを見て、止まっていれば `gate2`（承認ゲート 2 の依頼を送る）、流れ切れば `settle` を打つ
+    - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランがリリース承認ゲートで
+      止まったかを見て、止まっていれば `gate2`（リリース承認ゲートの依頼を送る）、流れ切れば `settle` を打つ
     - 確定の後（`phase: confirmed`）: `pipeline` は答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。
       終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る"""
     ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0) or {}
@@ -566,7 +567,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
     if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k:
         done = d / "release-done.json"
-        gate = f"python3 {HERE / 'sprint-state.py'} gate {d / 'answer.json'} '関門 2' --what 'まとめたリリース {n} の提示 {k}' --by user --outcome approved"
+        gate = f"python3 {HERE / 'sprint-state.py'} gate {d / 'answer.json'} '{RELEASE_GATE}' --what 'まとめたリリース {n} の提示 {k}' --by user --outcome approved"
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
         return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
                 "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
@@ -734,7 +735,7 @@ def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
 
 
 def _ask_helper(run: _Run, rows: dict) -> None:
-    """リリースの途中で一時レーンが止まり、settle も承認ゲート 2 の依頼も、その一時レーンが送った答えていない問い（ask も含む）も
+    """リリースの途中で一時レーンが止まり、settle もリリース承認ゲートの依頼も、その一時レーンが送った答えていない問い（ask も含む）も
     無ければ問う（受け入れ条件 6g）。一時レーンは問いを保留すると自分のラッパーを止めるため、問いを送って止まったものは問わない。"""
     rel = run.current
     if rel is None or not run.launch or run.helper_asked == run.launch["seq"]:
@@ -746,7 +747,7 @@ def _ask_helper(run: _Run, rows: dict) -> None:
         return
     run.helper_asked = run.launch["seq"]
     run.ask(
-        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle も承認ゲート 2 の依頼も無い）",
+        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle もリリース承認ゲートの依頼も無い）",
         ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")}, n=rel["n"],
     )  # fmt: skip
 

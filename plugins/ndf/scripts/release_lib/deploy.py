@@ -3,7 +3,7 @@
     python3 release-steps.py deploy-facts --verify <コマンド> --out <承認資料> [--root <dir>]
     python3 release-steps.py verify-facts --base <ベースブランチ> --verify <コマンド> --out <承認資料> [--root <dir>]
 
-deploy-facts は手動反映の本番系（#1454）の承認ゲート 2 の材料、verify-facts は経路 merge / promote の fast / auto の
+deploy-facts は手動反映の本番系（#1454）のリリース承認ゲートの材料、verify-facts は経路 merge / promote の fast / auto の
 導入の確認の材料（#1457。リリースの設定は読まない）。
 
 `verify`（`.ndf/pace.json` の `<節>.verify`）を `root` で `sh -c` で走らせ、本番系へ届ける行（`production: true` と、
@@ -32,7 +32,7 @@ TOOL = "release"
 
 
 def deploy_rows(decl) -> list[dict]:
-    """本番系へ届ける行: production: true と、production を書いていない手動の行（承認ゲート 2 の後に届ける。#1454 の I7）。"""
+    """本番系へ届ける行: production: true と、production を書いていない手動の行（リリース承認ゲートの後に届ける。#1454 の I7）。"""
     return [r for r in decl.rows or [] if r.get("production") is True or (r.get("production") is None and r.get("kind") == "manual")]
 
 
@@ -44,7 +44,7 @@ def deploy_markdown(rows, base: str, sha: str, verify: str, code: int) -> str:
         "## 届けるコミット",
         "",
         f"- ベースブランチ {base} の先頭: `{sha}`。導入の確認もこのコミットで走らせた。本番へ届けるのはこのコミットに限る。"
-        "先頭が変わったら承認ゲート 2 からやり直す",
+        "先頭が変わったらリリース承認ゲートからやり直す",
         "",
         *verify_lines(verify, code),
     ]
@@ -102,7 +102,7 @@ def cmd_verify_facts(a):
     """確認が非 0 なら 1（承認資料は書く）、--out へ書けないなら 2、確認するコミットが違えば 3 で終える。"""
     items, m = verify_facts(git_root(a.root), a.base, a.verify, a.out)
     if m["verify_exit"] != 0:
-        emit(result(TOOL, "stopped", f"導入の確認が {m['verify_exit']} で終わった。承認ゲート 2 へ進まない", items, m, a.out))
+        emit(result(TOOL, "stopped", f"導入の確認が {m['verify_exit']} で終わった。リリース承認ゲートへ進まない", items, m, a.out))
     emit(result(TOOL, "ok", f"導入の確認が通った（{m['base']} の先頭 {m['sha'][:8]}）", items, m, a.out))
 
 

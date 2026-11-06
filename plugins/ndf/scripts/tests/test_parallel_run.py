@@ -467,10 +467,10 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     assert item["id"] == "p1-p1-1" and item["stamp"] == "sha1"
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
-    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # 承認ゲート 2 の問いは答えで消える
+    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # リリース承認ゲートの問いは答えで消える
     task = prun.helper_task(main, "p1", 1, 1)
     assert task["phase"] == "confirmed"
-    assert "'関門 2'" in task["pipeline"] and "--from approve" in task["pipeline"] and f"queue {d / 'release.json'}" in task["pipeline"]
+    assert "'リリース承認ゲート'" in task["pipeline"] and "--from approve" in task["pipeline"] and f"queue {d / 'release.json'}" in task["pipeline"]
 
 
 def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypatch):

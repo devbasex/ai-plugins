@@ -1,6 +1,6 @@
-"""リリースプラン（導入の確認・昇格・承認ゲート 2）の雛形（#1336 の F5・#1454・#1457）。`engine` を import しない。
+"""リリースプラン（導入の確認・昇格・リリース承認ゲート）の雛形（#1336 の F5・#1454・#1457）。`engine` を import しない。
 
-スプリントの経路（sprint_routes）が使う。リリースの雛形（release_templates）の関門 2 の MVV 判定の部品を共有する。
+スプリントの経路（sprint_routes）が使う。リリースの雛形（release_templates）のリリース承認ゲートの MVV 判定の部品を共有する。
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY
 from supervise_lib.plan import QUEUE_PRS
@@ -17,7 +18,7 @@ from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step, reject_step
 
 
 VERIFY_MATERIAL = "{state_dir}/work/approval-verify.md"  # verify-facts が書く承認資料（#1457）
-# 昇格の承認資料。normal は promote の承認ゲート 2 の停止が、fast / auto は prepare が書き、promote-approved が照合に読む（#2104）
+# 昇格の承認資料。normal は promote のリリース承認ゲートの停止が、fast / auto は prepare が書き、promote-approved が照合に読む（#2104）
 PROMOTE_MATERIAL = "{state_dir}/work/approval-promote.md"
 
 
@@ -33,7 +34,7 @@ def verify_facts_cmd(a, repo: str, verify: str) -> str:
 
 
 def release_plan(a, repo: str, phase: str, rule: str, steps: list, condition: dict | None) -> dict:
-    """リリースプラン（導入の確認・昇格・承認ゲート 2）に共通の枠。上限は書き出しが遷移から求める。condition があれば「実行の条件」を足す。"""
+    """リリースプラン（導入の確認・昇格・リリース承認ゲート）に共通の枠。上限は書き出しが遷移から求める。condition があれば「実行の条件」を足す。"""
     plan = {
         "フェーズ": phase,
         "課題": a.issue,
@@ -66,13 +67,13 @@ class PromoteParams:
 
 def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromoteParams(), condition: dict | None = None) -> dict:
     """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
-    `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
+    `merged-steps.py promote` が作り（あれば使い）、リリース承認ゲートの後にマージする。後片付けはしない（head はベースブランチ）。
     マージの後に record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、その PR を計画の
     Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進む。
 
-    - normal（`mvv` 無し）: promote（承認の引数無し。昇格の承認資料 PROMOTE_MATERIAL へ先端を載せて承認ゲート 2 で終える）→
+    - normal（`mvv` 無し）: promote（承認の引数無し。昇格の承認資料 PROMOTE_MATERIAL へ先端を載せてリリース承認ゲートで終える）→
       promote-approved（`--from` でだけ入る。PROMOTE_MATERIAL の承認したコミットのときだけマージする。#2104）
-    - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
+    - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（リリース承認ゲートの MVV 判定）→ note（判定のコメント）→
       promote（`--gate-approved mvv`）。promote は mvv と同じ導入の確認の承認資料（VERIFY_MATERIAL）を `--expect-head-from` に受け、
       確かめたコミットのときだけマージする（#1529）。note か promote が落ちたら handoff が承認ゲートへ落とす
     """
@@ -113,7 +114,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
 
 
 def _promote_steps_normal(promote: str, wait: str, timeout: int, approved: dict, record: list) -> list:
-    """normal の昇格の steps: promote（承認ゲート 2 で終える）→ promote-approved → record。"""
+    """normal の昇格の steps: promote（リリース承認ゲートで終える）→ promote-approved → record。"""
     return [
         {
             "id": "promote",
@@ -165,8 +166,8 @@ def _promote_steps_mvv(
         },
         approved,
         *record,
-        handoff_step(state, "関門 2", "昇格のマージ"),
-        reject_step(state, "関門 2", "verify", root=repo),
+        handoff_step(state, RELEASE_GATE, "昇格のマージ"),
+        reject_step(state, RELEASE_GATE, "verify", root=repo),
     ]
 
 
@@ -174,15 +175,15 @@ GATE_2_MATERIAL = "{state_dir}/work/approval-deploy.md"  # deploy-facts が書�
 
 
 def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition: dict | None = None) -> dict:
-    """手動反映の本番系（#1454）の承認ゲート 2 のプラン: facts（導入の確認を走らせ承認資料を書く。落ちたら止まる）→
-    mvv（承認ゲート 2 の MVV 判定）→ note（判定の記録を PR へ。PR が無ければ承認資料の末尾へ）。note が落ちたら handoff。
+    """手動反映の本番系（#1454）のリリース承認ゲートのプラン: facts（導入の確認を走らせ承認資料を書く。落ちたら止まる）→
+    mvv（リリース承認ゲートの MVV 判定）→ note（判定の記録を PR へ。PR が無ければ承認資料の末尾へ）。note が落ちたら handoff。
     `prs` が None（fast の単独の queue。前のステージの PR を集められない）なら、mvv は判定を打たずに承認ゲート（10）を返す。
     本番のデプロイそのものは、このプランの後の手で行う「本番」のステージで担い手が起こす。"""
     state = str(Path(mvv).resolve())
     q = shlex.quote
     facts = facts_step(repo, f"{STEPS_PY} deploy-facts --root {q(repo)} --verify {q(verify)} --out {GATE_2_MATERIAL}", "mvv")
     if prs is None:
-        why = q("前のステージの Pull Request を集められないため、承認ゲート 2 は MVV 判定で通さず、利用者の承認を求める")
+        why = q("前のステージの Pull Request を集められないため、リリース承認ゲートは MVV 判定で通さず、利用者の承認を求める")
         steps = [
             facts,
             {
@@ -203,18 +204,18 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
             f"sh -c 'set -- {prs}; [ $# -gt 0 ] || {{ cat {MVV_NOTE} >> {GATE_2_MATERIAL}; exit 0; }}; "
             f'for p; do gh pr comment "$p" --body-file {MVV_NOTE} || exit 1; done\''
         )
-        steps = [facts, *mvv_gate_steps(mvv_cmd, note_cmd, "end"), handoff_step(state, "関門 2", "判定のコメント")]
-    steps.append(reject_step(state, "関門 2", "facts", root=repo))
-    return release_plan(a, repo, "リリース（承認ゲート 2）", RULE_GATE_2, steps, condition)
+        steps = [facts, *mvv_gate_steps(mvv_cmd, note_cmd, "end"), handoff_step(state, RELEASE_GATE, "判定のコメント")]
+    steps.append(reject_step(state, RELEASE_GATE, "facts", root=repo))
+    return release_plan(a, repo, "リリース（リリース承認ゲート）", RULE_GATE_2, steps, condition)
 
 
 RULE_GATE_2 = (
-    "本番のデプロイの前の承認ゲート 2。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
+    "本番のデプロイの前のリリース承認ゲート。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
 )
 
 RULE_VERIFY = "開発版のチャネルへの反映の後の導入の確認。落ちたら直さずに止める。"
 
 RULE_PROMOTE = (
-    "昇格の Pull Request のマージは本番系への反映で、承認ゲート 2 に当たる。承認の無いマージは merged-steps.py が止める。"
+    "昇格の Pull Request のマージは本番系への反映で、リリース承認ゲートに当たる。承認の無いマージは merged-steps.py が止める。"
     "CI の失敗は直さずに止める（昇格の Pull Request にはコミットを足さない）。"
 )
