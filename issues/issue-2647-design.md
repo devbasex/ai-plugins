@@ -116,7 +116,7 @@
 | 耐久の記録を扱うモジュール（`lib/durable.py`） | `launch` の排他の中で記録を退避する。古い退避のファイルを消す |
 | CLI（`parallel.py`・新規 `lib/parallel_cli.py`） | `start`・`run`・`wait` の結果を足す。`parallel.py` は 500 行ちょうどのため、`start` と `wait` の本体を `parallel_external_cli` と同じ形で移す。`build_parser` は契約の検査が静的に読むため動かさない |
 | ループの記録の読み出し（`lib/parallel_route.py`） | 台帳に無い待ちを返す関数を足す |
-| 統括役の CLI（`relay_lib/hub_client.py`） | `role organizer` が同じ計画の他のオーガナイザーの印を消す。`role --clear --plan-dir` が計画のオーガナイザーの印をすべて消す。どちらも計画の置き場の絶対パスで照合する。`parallel.py` と `parallel_run.py` が `parallel_lane.record_identity` の値を `--plan-dir` で渡す |
+| 統括役の CLI（`relay_lib/hub_client.py`） | `role organizer` が同じ計画の他のオーガナイザーの印を消す。`role --clear --plan-dir` がラッパーの外からでも計画のオーガナイザーの印をすべて消す。どちらも計画の置き場の絶対パスで照合する。`parallel.py` と `parallel_run.py` が `parallel_lane.record_identity` の値を `--plan-dir` で渡す |
 | 統括役（`relay_lib/hub.py`・`version_dir.py`） | 起こす python を決める。切り替えを `hub-log.jsonl` へ 1 行残す |
 | 契約（`plugins/ndf/contracts/`） | 台帳の行の形（`forms/parallel-ledger.json`）と、2 つのファイルの項目（`files/`） |
 | オーガナイザーの手順（`development-workflow` の `references/parallel.md`） | `wait` が返す失敗と `start` の作り直し、新しい `metrics` を書く |
@@ -313,7 +313,7 @@ erDiagram
 | `stop <計画名>` | 変えない | 失われた計画なら `closed` の行を書く。動いていれば今どおり | 今どおり | 振る舞いの追加 |
 | `await <計画名>` | 変えない | 答えが耐久の記録に無ければチェックポイントの `published` を読む | 記録が無く答えも無ければ 3 | 例外で落ちていた経路が 3 になる |
 | `relay.py role organizer --plan <計画名> [--plan-dir <計画の置き場の絶対パス>]` | `--plan-dir` を足す | 印に `plan_dir` を書き、`plan_dir` が一致する他のオーガナイザーの印を消す。`items[0].cleared` に消した数 | 今どおり | 指定が無ければ、印を書くだけで他の印を消さない（`cleared` は 0）。`plan_dir` を持たない既存の印は消さない |
-| `relay.py role --clear [--plan-dir <計画の置き場の絶対パス>]` | `--plan-dir` を足す | 指定があれば `plan_dir` が一致するオーガナイザーの印をすべて消す | 今どおり | 指定が無ければ今どおり |
+| `relay.py role --clear [--plan-dir <計画の置き場の絶対パス>]` | `--plan-dir` を足す | 指定があれば、`NDF_RELAY_DIR` が無くても状態の置き場の全ラッパーを走査し、`plan_dir` が一致するオーガナイザーの印をすべて消す。`items[0].cleared` に消した数（一致が無ければ 0 で終了コード 0） | 指定が無く `NDF_RELAY_DIR` も無ければ今どおり 1 | 指定が無ければ今どおり |
 
 `parallel_ledger` の主な関数:
 
@@ -462,7 +462,7 @@ grep -rn 'RUNNING\|run_status' plugins/ndf/scripts --include=*.py
 | 条件 13 | 版が違うときだけ両方の版が出る | 片方の版を返す |
 | 条件 14 | 待ちの id が台帳に無いと `orphans` に出る | ループの記録を読まないように壊す |
 | 条件 15 | pid が死んでいる `start`・動いている `run` の経路で印が付く。使い回された pid を動いていると読まない | 起動の引数の確かめを外す |
-| 条件 16・I13 | `relay.py ls` の `organizer` が 1 本である。計画の終わりに全部消える。別のメインディレクトリの同じ名前の計画の印は、引き継ぎでも計画の終わりでも残る | 他の印の消去を外す。照合を計画名だけに変える |
+| 条件 16・I13 | `relay.py ls` の `organizer` が 1 本である。計画の終わりに、`NDF_RELAY_DIR` の無いプロセスの `step_finish` からでも全部消える。別のメインディレクトリの同じ名前の計画の印は、引き継ぎでも計画の終わりでも残る | 他の印の消去を外す。`--plan-dir` の指定でもラッパーの外を 1 で返す。照合を計画名だけに変える |
 | 条件 17 | 版の更新を 2 回行った後に `restart` が起動する | 使用中の印と切り替えの両方を外す |
 | 条件 18・I14 | 置き場を消すと `relay.current` の仮想環境で起動し、記録に 1 行残る | `sys.executable` に固定する |
 | 条件 19 | 途中の記録が台帳なしで同じ道を通る | 先頭の `patched` を外す |
