@@ -789,6 +789,7 @@ def test_mvv_gate_suggests_revision_after_the_unknown_streak(env):
     assert approve(env) == 0
     state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "unknown", "reasons": ["決められない"], "boundary": []}')
+
     # 判定できなかった依頼の数で数える（#2507）: 同じスプリント状態の打ち直しは 1 件、別のスプリント状態なら別の件
     # 累計（`unknowns`）の閾値でも同じ kind の提案が出る。承認と同じ秒の行は累計に入らず、秒をまたぐと結果が変わるため、連続の提案だけを見る
     def streak_revise(out: dict) -> bool:
