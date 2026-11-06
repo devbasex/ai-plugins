@@ -622,6 +622,23 @@ def backlog_summary(env: Env, rec: dict, lap: dict) -> None:
             each["research"] = research
 
 
+def closed_versions(lap: dict, state: dict) -> dict:
+    """締めた周回の版。開発版を渡した周回はスプリント状態の版の欄（無ければ周回の版）。渡さなかった周回は版の記録からコピーし、
+    読めない側は周回が持つ値のまま残す。本番の版はリリース承認ゲートの前にも記録があるため、本番のプランが完了した周回でだけ読む。
+
+    渡したかは締め直しでも変わらないスプリント状態の欄で見る（周回の開発版は 1 回目の締めで埋まる）。"""
+    from supervise_lib.queue_fill import plan_finished, recorded_version  # 版の記録の置き場はキューの層が持つ
+
+    kept = lap.get("versions") or {}
+    versions = state.get("versions") or kept
+    if versions.get("dev"):
+        return versions
+    copied = {"dev": recorded_version(lap.get("dev_plan"))}
+    if plan_finished(lap.get("prod_plan")):
+        copied["prod"] = recorded_version(lap.get("prod_plan"))
+    return {**kept, **{k: v for k, v in copied.items() if v}}
+
+
 def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None, deferred_issues=(), done_rows=()) -> None:
     """周回を締め、スプリント状態とまとめの記録から値を写して固定する。"""
     if lap.get("outcome") != IN_PROGRESS:
@@ -632,7 +649,7 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
     rows = [p.get("row") or {} for p in state.get("plans", [])]
     lap["cost"], lap["cost_parts"] = lap_cost(lap, round(sum(float(r.get("cost") or 0) for r in rows), 6))
     lap["seconds"] = round(sum(float(r.get("seconds") or 0) for r in rows), 3)
-    lap["versions"] = state.get("versions") or lap.get("versions") or {}
+    lap["versions"] = closed_versions(lap, state)
     copy_state_gates(lap, state)
     close_rep = next((p for p in state.get("plans", []) if p.get("kind") == "まとめ"), None)
     if close_rep:
