@@ -1410,7 +1410,9 @@ def test_a_skipped_loop_is_shown_like_an_unmatched_answer(monkeypatch):
 def test_an_answer_to_a_prior_wait_goes_to_its_loop(monkeypatch):
     run, box = _route(monkeypatch)
     calls = []
-    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append((q["id"], a["result"], stamp)) or {})
+    monkeypatch.setattr(
+        parallel_reply, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append((q["id"], a["result"], stamp)) or {}
+    )
     run.questions = [dict(PRIOR)]
     run.reply({"id": PRIOR["id"], "result": "approved"})
     assert calls == [(PRIOR["id"], "approved", None)] and run.questions == [] and box[f"answer-{PRIOR['id']}"]["result"] == "approved"
