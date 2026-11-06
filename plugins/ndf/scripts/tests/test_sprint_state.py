@@ -588,7 +588,12 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
     g = {x["name"]: x for x in json.loads(sprint.read_text())["gates"]}
     assert g["MVV"]["sha256"] == hashlib.sha256(mvv.read_bytes()).hexdigest()
     assert g["MVV"].get("by", "user") == "user"
-    assert (g["リリース承認ゲート"]["by"], g["リリース承認ゲート"]["verdict"], g["リリース承認ゲート"]["reasons"], g["リリース承認ゲート"]["log"]) == (
+    assert (
+        g["リリース承認ゲート"]["by"],
+        g["リリース承認ゲート"]["verdict"],
+        g["リリース承認ゲート"]["reasons"],
+        g["リリース承認ゲート"]["log"],
+    ) == (
         "mvv",
         "follow",
         ["Value 1"],

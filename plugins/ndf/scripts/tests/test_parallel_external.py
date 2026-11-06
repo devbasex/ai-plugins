@@ -171,7 +171,9 @@ def _presented(d: Path, k: int = 1) -> None:
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):
     d = tmp_path / "org"
     _presented(d)
-    pe.put_json(pe.batch_release_dir(d, 3, 1) / "answer.json", {"gates": [{"name": "リリース承認ゲート", "by": "mvv", "verdict": "approve"}]})
+    pe.put_json(
+        pe.batch_release_dir(d, 3, 1) / "answer.json", {"gates": [{"name": "リリース承認ゲート", "by": "mvv", "verdict": "approve"}]}
+    )
     got = pe.settle_batch(tmp_path, d, BATCH, 3, {"items": [{"result": "完了"}]}, run=_fake_run(True))
     assert got["result"] == "released" and got["prod_pr_url"] == "https://github.com/o/r/pull/900"
     assert "main_merged" in pe.read_json(d / "progress" / "3.json")["stages"]

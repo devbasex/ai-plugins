@@ -274,7 +274,9 @@ def test_withdraw_keeps_the_user_record_and_does_nothing_without_a_record(tmp_pa
     subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--what", "承認"], check=True, capture_output=True)
     p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and [g["name"] for g in load(state)["gates"]].count("設計承認ゲート") == 1
-    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw", "--by", "mvv"], capture_output=True, text=True)
+    p = subprocess.run(
+        [PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw", "--by", "mvv"], capture_output=True, text=True
+    )
     assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
 
 

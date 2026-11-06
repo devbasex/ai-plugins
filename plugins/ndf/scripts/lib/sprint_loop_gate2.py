@@ -67,7 +67,9 @@ def latest_gate2_answer(gates: list[dict], rejections: list[dict], since: str | 
             return t or EPOCH
         return t if t is not None and t >= after else None
 
-    answers = [(k, "approved") for g in gates if canonical(g.get("name")) == RELEASE_GATE and g.get("by") != "mvv" and (k := fresh(g.get("at")))]
+    answers = [
+        (k, "approved") for g in gates if canonical(g.get("name")) == RELEASE_GATE and g.get("by") != "mvv" and (k := fresh(g.get("at")))
+    ]
     answers += [(k, "rejected") for r in rejections if (k := fresh(r.get("at")))]
     return max(answers, key=lambda a: a[0])[1] if answers else None
 

@@ -1111,7 +1111,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--approval", required=True, help="承認資料")
     p.add_argument("--approved-sha", metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
     p.add_argument("--facts-from", metavar="DIR", help="開発版のプランの状態ディレクトリ（facts の出力から SHA を読む。#1426）")
-    p.add_argument("--answer-from", metavar="STATE", help="--facts-from: リリース承認ゲートの利用者の承認の記録を読むスプリント状態ファイル")
+    p.add_argument(
+        "--answer-from", metavar="STATE", help="--facts-from: リリース承認ゲートの利用者の承認の記録を読むスプリント状態ファイル"
+    )
     p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
     p.set_defaults(func=cmd_approve)
 

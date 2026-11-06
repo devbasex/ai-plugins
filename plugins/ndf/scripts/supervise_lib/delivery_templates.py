@@ -209,9 +209,7 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
     return release_plan(a, repo, "リリース（リリース承認ゲート）", RULE_GATE_2, steps, condition)
 
 
-RULE_GATE_2 = (
-    "本番のデプロイの前のリリース承認ゲート。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
-)
+RULE_GATE_2 = "本番のデプロイの前のリリース承認ゲート。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
 
 RULE_VERIFY = "開発版のチャネルへの反映の後の導入の確認。落ちたら直さずに止める。"
 

@@ -628,7 +628,9 @@ def test_signals_do_not_change_when_gate_rejections_are_recorded(env):
     row = {"at": "2999-01-01T00:00:00Z", "repo": pm.mvv_repo_key(env["root"]), "kind": "override_pass", "project_sha256": mvv.sha256}
     pms.append_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl", row)
     before = run(env, "signals", "--root", str(env["root"]), "--format", "json")
-    code, out, text = run(env, "record", "--gate", "リリース承認ゲート", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py")
+    code, out, text = run(
+        env, "record", "--gate", "リリース承認ゲート", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py"
+    )
     assert code == 0, text
     state = new_state(env, env["tmp"])
     assert sprint_gate(env, state, "--outcome", "rejected") == 0

@@ -167,7 +167,10 @@ def test_design_results_stage_follows_gate_1_in_every_pace(tmp_path):
         sub.mkdir()
         names = list(new_sprint(sub, pace))
         # normal は設計承認ゲートの直後に設計 PR のマージを置き、設計の結果はその --then で続く（#1426 の決定 5）
-        assert names.index("設計承認ゲート") + (2 if pace == "normal" else 1) == names.index("設計の結果") < names.index("実装"), (pace, names)
+        assert names.index("設計承認ゲート") + (2 if pace == "normal" else 1) == names.index("設計の結果") < names.index("実装"), (
+            pace,
+            names,
+        )
     assert "設計の結果" not in new_sprint(tmp_path / "none", "normal", design=False)
 
 

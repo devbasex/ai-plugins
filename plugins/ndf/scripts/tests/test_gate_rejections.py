@@ -164,7 +164,19 @@ def _state(tmp_path: Path, pace: str) -> Path:
 def _gate(tmp_path: Path, state: Path, *args: str) -> tuple[int, dict]:
     log = str(tmp_path / "mvv-gate.jsonl")
     return run(
-        "gate", str(state), "設計承認ゲート", "--what", "設計", "--at", AT, "--mvv-log", log, "--root", str(tmp_path), *args, script=STATE_PY
+        "gate",
+        str(state),
+        "設計承認ゲート",
+        "--what",
+        "設計",
+        "--at",
+        AT,
+        "--mvv-log",
+        log,
+        "--root",
+        str(tmp_path),
+        *args,
+        script=STATE_PY,
     )
 
 

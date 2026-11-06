@@ -256,7 +256,9 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     if stop := mvv_change_stop(env, rec):
         return stop_and_report(env, rec, before, stop, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
     request = next((i["plan"] for i in gated if plan_info(i["plan"]).get("フェーズ") == RELEASE_REQUEST_PHASE), None)
-    if request:  # 並列の計画のレーンがリリースの依頼を送った: リリース承認ゲートとして止まらず、リリース待ちで締めて次の周回へ（#2436 の 6a）
+    if (
+        request
+    ):  # 並列の計画のレーンがリリースの依頼を送った: リリース承認ゲートとして止まらず、リリース待ちで締めて次の周回へ（#2436 の 6a）
         return handle_release_pending(env, rec, before, lap, request)
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
@@ -299,7 +301,9 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None 
     prs = pr_numbers(row.get("pr"))
     values = {"pr": prs[0] if len(prs) == 1 else prs or None, "verdict": row.get("verdict", "unknown"), "reasons": row.get("reasons") or []}
     stop = {"condition": "gate2_returned", "values": values}
-    return stop_and_report(env, rec, before, stop, "リリース承認ゲートを人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
+    return stop_and_report(
+        env, rec, before, stop, "リリース承認ゲートを人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2}
+    )
 
 
 RELEASE_REQUEST_PHASE = "リリースの依頼"  # parallel_release.RELEASE_REQUEST_PHASE（リリースの依頼のプランの「フェーズ」）

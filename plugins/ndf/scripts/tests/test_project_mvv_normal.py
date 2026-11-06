@@ -320,11 +320,15 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     manifest, out = new_normal_sprint(tmp_path, "--state", str(state))
     assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "sprint/m26")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "--what <要約> --by user --pr <設計 PR>" in waves["設計承認ゲート"]["gate"] and "--by user" in waves["リリース承認ゲート"]["gate"]
+    assert (
+        "--what <要約> --by user --pr <設計 PR>" in waves["設計承認ゲート"]["gate"] and "--by user" in waves["リリース承認ゲート"]["gate"]
+    )
     assert "note" not in waves["デプロイ"] and "'リリース承認ゲート' --what" in waves["リリース承認ゲート"]["gate"]
     # 状態があれば承認の記録は本番のプランの先頭の approve が書き、conductor は打たない（#1426 の決定 1）
     assert "--approved-sha" not in waves["リリース承認ゲート"]["gate"]
-    assert waves["リリース承認ゲート"]["gate"].index("'リリース承認ゲート' --what") < waves["リリース承認ゲート"]["gate"].index("「本番」のステージ")
+    assert waves["リリース承認ゲート"]["gate"].index("'リリース承認ゲート' --what") < waves["リリース承認ゲート"]["gate"].index(
+        "「本番」のステージ"
+    )
     # 承認資料は本番の release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）
     assert re.search(r"承認資料（/\S+/issues/approval-\S+\.md）", waves["リリース承認ゲート"]["gate"])
     assert "sprint-state.py gate" in out["next"]

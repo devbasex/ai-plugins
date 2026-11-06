@@ -49,7 +49,18 @@ def queue_words(command: str) -> list[list[str]]:
 def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
     stages = sprint(tmp_path, "--design", "11", "12")
     names = [s["name"] for s in stages]
-    assert names == ["設計", "設計承認ゲート", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "デプロイ", "リリース承認ゲート", "本番"]
+    assert names == [
+        "設計",
+        "設計承認ゲート",
+        "設計 PR のマージ",
+        "設計の結果",
+        "スプリントブランチ",
+        "実装",
+        "検査",
+        "デプロイ",
+        "リリース承認ゲート",
+        "本番",
+    ]
     by = {s["name"]: s for s in stages}
     merge = by["設計 PR のマージ"]
     for n, path in zip((11, 12), merge["plans"]):

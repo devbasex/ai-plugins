@@ -39,7 +39,9 @@ def _scope_args(a) -> dict:
 def cmd_record(a) -> tuple[dict, int]:
     repo = gr.ledger_repo(a.root, a.repo)
     try:
-        row = gr.make_row(gate_answer.accept(a.gate), a.what, repo=repo, at=a.at or clock.now_iso("utc"), outcome=a.outcome, **_scope_args(a))
+        row = gr.make_row(
+            gate_answer.accept(a.gate), a.what, repo=repo, at=a.at or clock.now_iso("utc"), outcome=a.outcome, **_scope_args(a)
+        )
     except ValueError as e:
         return step_result.result(TOOL, "stopped", f"記録しない: {e}"), step_result.EXIT_UNREADABLE
     try:

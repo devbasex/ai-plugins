@@ -132,9 +132,7 @@ def test_records_under_the_old_name_read_the_same_as_the_canonical_name(tmp_path
             "not_withdrawn": sprint_mvv.withdrawn(m, RELEASE),
             "answered": gr.state_answered(state),
             "counts": gr.count_by_gate(rows),
-            "gate2": gate2.latest_gate2_answer(
-                [{"name": release, "by": "user", "at": AT}], [], "2026-10-29T00:00:00+00:00"
-            ),
+            "gate2": gate2.latest_gate2_answer([{"name": release, "by": "user", "at": AT}], [], "2026-10-29T00:00:00+00:00"),
             "mvv_passed": pe.mvv_passed(answer_dir),
         }
 

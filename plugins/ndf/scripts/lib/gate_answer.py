@@ -17,7 +17,10 @@ import clock
 import jsonio
 import legacy_names
 
-DESIGN_GATE, RELEASE_GATE = "設計承認ゲート", "リリース承認ゲート"  # sprint-state.py gate が書き、approved が名前で読む承認ゲートの記録の名前
+DESIGN_GATE, RELEASE_GATE = (
+    "設計承認ゲート",
+    "リリース承認ゲート",
+)  # sprint-state.py gate が書き、approved が名前で読む承認ゲートの記録の名前
 _CANONICAL = {old: new for key, new in (("design", DESIGN_GATE), ("release", RELEASE_GATE)) for old in legacy_names.GATE_NAMES[key]}
 
 

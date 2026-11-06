@@ -1094,7 +1094,9 @@ def test_handoff_keeps_the_concrete_next_step_for_resuming_inside_a_lap(env):
 def test_gate_2_answer_ignores_an_approval_from_before_the_stop(env):
     lap = built_lap(env)
     state = json.loads(Path(lap["state_path"]).read_text())
-    state["gates"].append({"name": "リリース承認ゲート", "by": "user", "outcome": "approved", "at": "2026-10-01T00:00:00Z"})  # 前の承認ゲートへの承認
+    state["gates"].append(
+        {"name": "リリース承認ゲート", "by": "user", "outcome": "approved", "at": "2026-10-01T00:00:00Z"}
+    )  # 前の承認ゲートへの承認
     Path(lap["state_path"]).write_text(json.dumps(state))
     p = Path(lap["out"]) / "prod.json"
     assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(p), "result": "関門"}]))["exit"] == 3
@@ -1135,7 +1137,11 @@ def test_sprint_pipeline_chains_close_after_the_first_command_without_hands(tmp_
 
 def test_sprint_pipeline_waits_for_hands_before_the_close(tmp_path):
     done, rec_ = tmp_path / "done-1.json", {"name": "l1"}
-    index = [{"name": "実装", "command": "Q1"}, {"name": "リリース承認ゲート", "command": "Q2"}, {"name": "リリース", "manual": "/ndf:release"}]
+    index = [
+        {"name": "実装", "command": "Q1"},
+        {"name": "リリース承認ゲート", "command": "Q2"},
+        {"name": "リリース", "manual": "/ndf:release"},
+    ]
     queue, pipeline = sl.sprint_pipeline(index, ["c1"], done, rec_)
     assert queue == f"python3 {sl.SUPERVISE} queue c1 --max 3 --done {done}"
     assert pipeline == f"Q1 を流し、続けて Q2 → リリース（/ndf:release で行う） を終えてから: {queue} && {sl_gate.wait_lap(rec_, done)}"
