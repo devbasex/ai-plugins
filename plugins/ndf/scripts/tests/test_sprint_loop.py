@@ -1159,6 +1159,14 @@ def test_gate_1_drops_the_waiting_issue_from_the_shared_plan_and_its_closes(env)
     assert got["課題"] == [12] and got["steps"][0]["materials"]["closes"] == [12]
 
 
+def test_gate_1_points_the_held_close_at_the_close_without_the_waiting_issue(env):
+    lap = built_lap(env)
+    first = lap["close_plans"]
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    now = rec(env)["laps"][-1]["close_plans"]
+    assert now != first and all(Path(p).parent.name.startswith("close-") for p in now)
+
+
 def design_report(env, name, pr_url):
     p = env.root / f"{name}-report.md"
     p.write_text(f"# 報告\n\n- 結果: 関門\n- Pull Request: {pr_url}\n")

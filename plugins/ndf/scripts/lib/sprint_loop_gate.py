@@ -19,7 +19,6 @@ import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
 from lap_cost import lap_cost
 from sprint_loop_backlog import lap_depths, lap_research
-
 from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
@@ -520,7 +519,8 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
         if plans:
             stages.append(plans)
     tag = f"close-{len(lap.get('dones', [])) + 1}"
-    stages.append(build_close(env, rec, lap, kept, tag=tag))
+    lap["close_plans"] = build_close(env, rec, lap, kept, tag=tag)  # リリース待ち・質問待ちで締めた周回は答えの後にこれを流す
+    stages.append(lap["close_plans"])
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
     return queue_command(stages, done), done
