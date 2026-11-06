@@ -5814,6 +5814,30 @@
       "context": "ndf-factory",
       "meaning": "オフラインの間に押した取り消せない操作で、つながったときに今の状態と照らしてから確定するもの",
       "pending_source": "issues/issue-2383-requirements.md"
+    },
+    {
+      "term": "設計承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる",
+      "pending_source": "issues/issue-2619-requirements.md"
+    },
+    {
+      "term": "リリース承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "本番系へ届く操作（本番へのリリース・operation の実行・自動反映の本番チャネルへのマージ）の前に人の承認を求める承認ゲート。documentation モードでは制作物承認に当たる",
+      "pending_source": "issues/issue-2619-requirements.md"
+    },
+    {
+      "term": "人へ出す文",
+      "context": "ndf-workflow",
+      "meaning": "Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる",
+      "pending_source": "issues/issue-2619-requirements.md"
+    },
+    {
+      "term": "機械が読む識別子",
+      "context": "ndf-workflow",
+      "meaning": "スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる",
+      "pending_source": "issues/issue-2619-requirements.md"
     }
   ]
 }
