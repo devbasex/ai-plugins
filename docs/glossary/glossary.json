@@ -2675,6 +2675,12 @@
       "pending_source": "issues/old/issue-1336-design.md"
     },
     {
+      "term": "CD",
+      "context": "ndf-release",
+      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する",
+      "pending_source": "issues/issue-2616-requirements.md"
+    },
+    {
       "term": "昇格の Pull Request",
       "context": "ndf-release",
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
@@ -5383,6 +5389,12 @@
       "context": "ndf-workflow",
       "meaning": "レーンが承認ゲート 2 の手前で、本番の配布をオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+    },
+    {
+      "term": "まとめた配布",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが複数のレーンの Pull Request を 1 つの版として出す配布。提示のプランと本番のプランからなる",
+      "pending_source": "issues/issue-2616-requirements.md"
     },
     {
       "term": "一時レーン",
