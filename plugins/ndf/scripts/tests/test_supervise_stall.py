@@ -155,10 +155,10 @@ def calls(tmp: Path) -> list[dict]:
 
 def test_a_worker_that_keeps_progressing_outlives_the_allowance(env, monkeypatch):
     monkeypatch.setenv("FAKE_GROW", "1")
-    monkeypatch.setenv("FAKE_TICKS", "25")
-    s, text = run_plan(env, stall=1, expected=0.3)
+    monkeypatch.setenv("FAKE_TICKS", "50")
+    s, text = run_plan(env, stall=3, expected=0.3)
     assert "結果: 完了" in text and not rows(env, "stalled")
-    assert s.state.log[0]["seconds"] > 2
+    assert s.state.log[0]["seconds"] > 3
     argv = calls(env)[0]["argv"]
     assert "--no-session-persistence" not in argv and "--session-id" in argv
     assert not rows(env, "slow") and not any(c["judge"] for c in calls(env))  # 遅れの見張りは止めない

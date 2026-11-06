@@ -129,6 +129,15 @@ def child_pids(pid: int, recursive: bool = True) -> list[int]:
         return []
 
 
+def count_cmdline(*words: str) -> int:
+    """コマンドラインに `words` をすべて含むプロセスの数。"""
+    found = 0
+    for p in psutil.process_iter(["cmdline"]):
+        line = p.info["cmdline"] or []
+        found += all(any(word in arg for arg in line) for word in words)
+    return found
+
+
 def leads_own_group(pid: int) -> bool:
     """pid がプロセスグループの先頭で、呼んだ側と別のグループか。"""
     try:
