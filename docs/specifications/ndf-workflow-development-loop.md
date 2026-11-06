@@ -333,7 +333,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `gates[]` | 承認ゲートの判定の写し（`{name, by, verdict, basis, pr, at}`） |
 | `retro` / `refine` | 振り返りの置き場（まとめのプランの報告）・棚卸しの結果 `{report, rank_changes, deferred[]}`（upkeep の記録の `candidates.json`・`rank.json` から） |
 | `created[]` / `deferred_issues[]` | 周回の中で起票された課題（その周回の選定に入れない）・上限で後へ回した Issue（`lap --deferred-issues`） |
-| `cost` | 周回の費用。使用量の帳簿の和（Claude の行のうち周回のディレクトリの下のプランを指す行）とスプリント状態の計画の行の和の大きい方。conductor の会話は入らない。USD は定価の見積もりで請求額ではない |
+| `cost` | 周回の費用。使用量の帳簿の和（Claude の行のうち周回のディレクトリの下のプランを指す行）とスプリント状態の計画の行の和の大きい方。conductor の会話は入らない。USD は定価で計算した見積もりであり、請求額と一致するとは限らない |
 | `cost_parts` | 周回の費用の内訳 `{source, plans, others, unpriced}`。`source` は `ledger` か `reports`（報告の和が大きい、または帳簿を読めない）。`plans` は `supervise` の起動、`others` は cross-review・MVV 判定ほかの Claude の起動の和。`unpriced` は USD を持たない起動（Codex・Kiro など）の呼び出しの数とトークンで、和に足さない。帳簿の読み取りが例外で失敗したときは、理由の文を `unreadable` に残す |
 | `seconds` | スプリント状態の計画の行の和 |
 | `outcome` / `failure` | `進行中` / `完了` / `失敗` / `人へ戻した` / `配布待ち` / `質問待ち`・失敗の鍵 |
