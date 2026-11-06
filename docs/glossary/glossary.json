@@ -283,7 +283,7 @@
     {
       "term": "キューの続き",
       "context": "ndf-workflow",
-      "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す",
+      "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了したプランを流さず、完了していないプランを終えたステップから続け、後続のステージも流す。開始の位置は --from の指定と耐久の記録だけで決まる",
       "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
@@ -5443,7 +5443,7 @@
     {
       "term": "質問待ち",
       "context": "ndf-workflow",
-      "meaning": "作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めた周回の結果",
+      "meaning": "作業の途中の問いをオーガナイザーへ送り、止まったプランとステップを残した周回の結果。進行中の周回を締めたものと、締め直しの途中から戻したものがある",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
@@ -6017,6 +6017,34 @@
       "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
       "source": "",
       "pending_source": "issues/issue-2505-requirements.md"
+    },
+    {
+      "term": "締め直しの途中",
+      "context": "ndf-workflow",
+      "meaning": "保留の周回の答えを読み、残りの工程の pipeline を組んだ後、loop finish が締めるまでの間。周回の結果の値ではなく、配布待ちか質問待ちのまま締め直しの区間に終わりの時刻が無い状態である",
+      "source": "",
+      "pending_source": "issues/issue-2664-design.md"
+    },
+    {
+      "term": "前の待ちの控え",
+      "context": "ndf-workflow",
+      "meaning": "同じ周回に問いが 2 回以上当たったときの、前の問いと答えの記録",
+      "source": "",
+      "pending_source": "issues/issue-2664-design.md"
+    },
+    {
+      "term": "周回の見送り",
+      "context": "ndf-workflow",
+      "meaning": "質問待ちの周回の答えを持ち主が読み、続けないと決めて「人へ戻した」で締めること",
+      "source": "",
+      "pending_source": "issues/issue-2664-design.md"
+    },
+    {
+      "term": "前の途中",
+      "context": "ndf-workflow",
+      "meaning": "前の起動が done を書けずに落ち、完了していないプランが終えたステップまで進んでいる状態",
+      "source": "",
+      "pending_source": "issues/issue-2664-design.md"
     }
   ]
 }
