@@ -16,6 +16,7 @@ import pathlib
 import time
 from typing import Any
 
+import container_reach
 import statefile
 import test_strategy as ts
 import test_triage
@@ -103,6 +104,8 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
     上限を超えたら打ち切りの記録（`timed_out` が真、`seconds` は上限の秒）を返す。止めるのは呼び手（`init`）。"""
     mode, runs = commands_of(strategy, scope, work)
     test_triage.clear_junit(str(work), strategy)
+    if runs:
+        container_reach.env_for(work)  # 用意の秒は着手前のテストの上限と実測へ数えない（test-run.py と同じ）
     started = time.monotonic()
     status, suites, timed_out = _run_suites(runs, mode, timeout, started, work, tmp_dir)
     seconds = float(timeout) if timed_out else round(time.monotonic() - started, 1)

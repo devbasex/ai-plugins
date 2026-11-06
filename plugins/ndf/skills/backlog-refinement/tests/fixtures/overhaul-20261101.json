@@ -110,7 +110,7 @@
   },
   {
    "number": 715,
-   "title": "実行する版を解決する層を 1 つにし、開発中の版と配布済みの版の食い違いを根本原因の場所で直す",
+   "title": "実行する版を解決する層を 1 つにし、開発中の版とリリース済みの版の食い違いを根本原因の場所で直す",
    "labels": [
     "area: ndf-skill",
     "priority: high"
@@ -201,7 +201,7 @@
   },
   {
    "number": 1502,
-   "title": "mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、関門 1 の助言が unknown になる",
+   "title": "mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、設計承認ゲートの助言が unknown になる",
    "labels": [
     "area: ndf-skill",
     "priority: medium"
@@ -225,7 +225,7 @@
   },
   {
    "number": 1516,
-   "title": "supervise.py のフェーズレポートが、設計の関門 1 でも「関門: 本番の系へ届く操作」と書く",
+   "title": "supervise.py のフェーズレポートが、設計の設計承認ゲートでも「承認ゲート: 本番の系へ届く操作」と書く",
    "labels": [
     "area: ndf-skill",
     "bug",
@@ -794,7 +794,7 @@
   },
   {
    "number": 1983,
-   "title": "本番の配布のプランで judge が同じ CI の失敗に打ち直しを 7 回返し、上限まで同じ run を読み直す → 同じ失敗が続いたら止めて人へ戻す",
+   "title": "本番のリリースプランで judge が同じ CI の失敗に打ち直しを 7 回返し、上限まで同じ run を読み直す → 同じ失敗が続いたら止めて人へ戻す",
    "labels": [],
    "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
    "body": "",
@@ -848,7 +848,7 @@
   },
   {
    "number": 2009,
-   "title": "配布の後片付けが承認資料 issues/approval-*.md を消さず、版ごとに未追跡のファイルがメインディレクトリへ溜まる",
+   "title": "デプロイの後片付けが承認資料 issues/approval-*.md を消さず、版ごとに未追跡のファイルがメインディレクトリへ溜まる",
    "labels": [],
    "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
    "body": "",
@@ -1220,7 +1220,7 @@
   },
   {
    "number": 2121,
-   "title": "開発ループの承認ゲート 2 の後のまとめが配布の記録の PR を読まない → 本番の後に記録の PR を解いてまとめを組む（#2089）",
+   "title": "開発ループのリリース承認ゲートの後のまとめがリリース記録の PR を読まない → 本番の後に記録の PR を解いてまとめを組む（#2089）",
    "labels": [
     "quality"
    ],
@@ -1272,7 +1272,7 @@
   },
   {
    "number": 2147,
-   "title": "merge-when-green: 自動反映の本番チャネルへのマージで、承認ゲート 2 で見た先端と merge-approved がマージする先端を照合しない",
+   "title": "merge-when-green: 自動反映の本番チャネルへのマージで、リリース承認ゲートで見た先端と merge-approved がマージする先端を照合しない",
    "labels": [
     "area: ndf-skill",
     "priority: medium"
@@ -1325,7 +1325,7 @@
   },
   {
    "number": 2164,
-   "title": "スプリントのプランが作った時点の版数を配布と本番のプランへ書き込み、並行する別のスプリントがその版を先に出すとプランを作り直すまで止まる",
+   "title": "スプリントのプランが作った時点の版数をリリースと本番のプランへ書き込み、並行する別のスプリントがその版を先に出すとプランを作り直すまで止まる",
    "labels": [],
    "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
    "body": "7-release.json 9-release-prod.json release-steps.py",
@@ -1341,7 +1341,7 @@
   },
   {
    "number": 2166,
-   "title": "リリース後テストの起動指示が根拠に指した配布の記録が条件の経路を通ったかを確かめず、#2104 の昇格の経路が実機で一度も通らないまま残る",
+   "title": "リリース後テストの起動指示が根拠に指したリリース記録が条件の経路を通ったかを確かめず、#2104 の昇格の経路が実機で一度も通らないまま残る",
    "labels": [],
    "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
    "body": "merged-steps.py release-steps.py",
@@ -1409,7 +1409,7 @@
   },
   {
    "number": 2176,
-   "title": "文書検査: mermaid の構文を解析せず、GitHub で描画できない図が承認ゲート 1 まで届く",
+   "title": "文書検査: mermaid の構文を解析せず、GitHub で描画できない図が設計承認ゲートまで届く",
    "labels": [
     "bug"
    ],
@@ -1429,7 +1429,7 @@
   },
   {
    "number": 2198,
-   "title": "本番の配布で GitHub Release の作成だけが失敗すると、タグが既にあるため release のステップを打ち直しても再開できない",
+   "title": "リリースで GitHub Release の作成だけが失敗すると、タグが既にあるため release のステップを打ち直しても再開できない",
    "labels": [],
    "milestone": "30 根本解決 3: 回復・上限・実行時点の解決",
    "body": "release-steps.py",
@@ -1515,7 +1515,7 @@
   },
   {
    "number": 2217,
-   "title": "他のプラグインの版上げで、配布物に関わらない差分（テストだけ）なら上げないを選べるようにする",
+   "title": "他のプラグインの版上げで、リリース対象に関わらない差分（テストだけ）なら上げないを選べるようにする",
    "labels": [],
    "milestone": "32 Skill の機能と手順",
    "body": "release-steps.py",
@@ -1583,7 +1583,7 @@
   },
   {
    "number": 2231,
-   "title": "配布を Claude Code と codex だけにし（すべてのプラグイン）、agy・kiro へは配らず cross 系の相手役だけにする",
+   "title": "デプロイを Claude Code と codex だけにし（すべてのプラグイン）、agy・kiro へは配らず cross 系の相手役だけにする",
    "labels": [
     "area: ndf-skill",
     "priority: high"
@@ -1613,7 +1613,7 @@
   },
   {
    "number": 2237,
-   "title": "承認ゲート 1 の MVV 判定が、要求の文書を書く前の requirements-check の exit 2 を材料の欠けと読む",
+   "title": "設計承認ゲートの MVV 判定が、要求の文書を書く前の requirements-check の exit 2 を材料の欠けと読む",
    "labels": [],
    "milestone": "29 根本解決 2: 結果・記録・データ・入出力の契約",
    "body": "-requirements.md",
@@ -1781,7 +1781,7 @@
   },
   {
    "number": 2296,
-   "title": "プロジェクト MVV の Mission を、Claude Code と Codex へ配布し agy・kiro を相手役に使う構成へ改訂する",
+   "title": "プロジェクト MVV の Mission を、Claude Code と Codex へデプロイし agy・kiro を相手役に使う構成へ改訂する",
    "labels": [],
    "milestone": "34 研究基盤・汎用性・利用者を増やす",
    "body": "project-mvv.py",

@@ -1,7 +1,7 @@
 """release-steps.py: 承認したコミット（#815）。approval-facts・approve・release --channel prod の受け取りと比較。
 
 release は一時の git リポジトリ（origin は bare）で動かし、GitHub（PR の作成・マージ・gh）だけを差し替える。
-配布の PR のマージは、差し替えた wait_and_merge が別の clone で develop へ入れて push する。
+デプロイの PR のマージは、差し替えた wait_and_merge が別の clone で develop へ入れて push する。
 """
 
 from __future__ import annotations
@@ -90,9 +90,9 @@ def run_release(
     monkeypatch, w, *, outside_after=None, move_head=None, dev_bump=None, prod_merged=False, published=(), delete_on_merge=False, **extra
 ):
     """release --channel prod を流し、(結果, 終了コード, マージした PR と expect, gh の呼び出し) を返す。
-    outside_after は配布の PR の後に起点のブランチへ、move_head は本番チャネルへのマージを待つ間に（1 回だけ）
+    outside_after はリリースの PR の後に起点のブランチへ、move_head は本番チャネルへのマージを待つ間に（1 回だけ）
     release/v<版> へ別の人が入れるファイルのパス。dev_bump は承認の後に起点のブランチへ入る version.txt の中身
-    （配布の PR と衝突する）。prod_merged は本番の PR がマージ済みの再開、published はすでにある tag / release。
+    （リリースの PR と衝突する）。prod_merged は本番の PR がマージ済みの再開、published はすでにある tag / release。
     PR の番号は 1 = release/v<版> → trunk、2 = release/v<版> → live、3 = release/v<版>-sync → trunk。"""
     mod = load(monkeypatch)
     work, other = w["work"], w["other"]
@@ -215,7 +215,7 @@ def test_release_restores_the_release_branch_deleted_by_the_merge(monkeypatch, w
 
 
 def test_release_after_the_base_moved_ships_only_the_approved_commit(monkeypatch, world):
-    """#2436 の R2: 承認の後に起点のブランチが進んでも止まらず、進んだ分は本番チャネルへ入れない（次の配布）。"""
+    """#2436 の R2: 承認の後に起点のブランチが進んでも止まらず、進んだ分は本番チャネルへ入れない（次のリリース）。"""
     out, code, merged, _, _ = run_release(monkeypatch, world, outside_after=SHIPPED_FILE, approved_sha=world["approved"])
     assert (out["status"], code) == ("ok", None)
     assert not shipped(world, SHIPPED_FILE) and shipped(world, "version.txt")
@@ -248,7 +248,7 @@ def test_release_stops_when_the_head_moves_while_waiting(monkeypatch, world):
 
 
 def test_release_retries_when_the_head_moves_by_a_change_that_ships_nothing(monkeypatch, world):
-    """#2221: 待つ間に配布物に触れないコミットで先端が進めば、比べ直した先端で入れ直し、通したコミットを残す。"""
+    """#2221: 待つ間にリリース対象に触れないコミットで先端が進めば、比べ直した先端で入れ直し、通したコミットを残す。"""
     out, code, merged, _, _ = run_release(monkeypatch, world, move_head=DOC_FILE, approved_sha=world["approved"])
     tip = git(world["origin"], "rev-parse", f"release/v{VER}")
     assert (out["status"], code) == ("ok", None)
@@ -425,7 +425,7 @@ def approve_facts(mod, world, path, facts, answer=None):
 
 def answer_state(tmp_path: Path, at: str) -> str:
     state = tmp_path / "sprint.json"
-    state.write_text(json.dumps({"gates": [{"name": "関門 2", "what": "本番", "at": at, "by": "user", "outcome": "approved"}]}))
+    state.write_text(json.dumps({"gates": [{"name": "リリース承認ゲート", "what": "本番", "at": at, "by": "user", "outcome": "approved"}]}))
     return str(state)
 
 

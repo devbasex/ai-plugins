@@ -2,7 +2,7 @@
 
 ## 概要
 
-NDF は Claude Code / Codex 向けの開発支援プラグイン群です。marketplace 上の plugin 名はどちらでも `ndf` を維持し、配布物は `plugins/ndf/` の 1 ディレクトリにまとまっています。配布先は Claude Code と Codex の 2 つで、Kiro CLI と agy へは配りません。この 2 つは cross-review / cross-refactoring の相手役として、ホスト（Claude Code・Codex）から CLI プロセスで起動されるだけです（「相手役のランタイム」）。
+NDF は Claude Code / Codex 向けの開発支援プラグイン群です。marketplace 上の plugin 名はどちらでも `ndf` を維持し、リリース対象は `plugins/ndf/` の 1 ディレクトリにまとまっています。導入先のランタイムは Claude Code と Codex の 2 つで、Kiro CLI と agy へは配りません。この 2 つは cross-review / cross-refactoring の相手役として、ホスト（Claude Code・Codex）から CLI プロセスで起動されるだけです（「相手役のランタイム」）。
 
 | ランタイム | 導入方法 | 公開 Skill |
 |---|---|---|
@@ -18,8 +18,8 @@ Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイ
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code（agents / hooks / skills 配列）
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
-├── skills/                      # 配布 Skill の唯一の実体（49 個）
-├── manifests/                   # ランタイム別の配布 Skill 一覧
+├── skills/                      # 配る Skill の唯一の実体（49 個）
+├── manifests/                   # ランタイム別の配る Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
 ├── hooks/codex.json             # Codex の Stop hook
@@ -69,7 +69,7 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
 - 外部サービスと測定: `google-workspace`, `skill-stats`, `ml-model-structure`,
-  `notion-writing`（v10.5.0 で配布へ回しました。#116 / #144）
+  `notion-writing`（v10.5.0 でデプロイへ回しました。#116 / #144）
 
 ## MCP Plugins
 

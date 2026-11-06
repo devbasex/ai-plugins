@@ -69,7 +69,16 @@ def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_
     manifest = load(out / "sprint.json")
     assert manifest["進め方"] == "fast" and manifest["状態"].endswith("sprint-state.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "実装", "検査", "実装レビュー", "開発版", "本番"]
+    assert [w["name"] for w in manifest["ステージ"]] == [
+        "設計",
+        "設計承認ゲート",
+        "設計の結果",
+        "実装",
+        "検査",
+        "実装レビュー",
+        "開発版",
+        "本番",
+    ]
     cmd = waves["設計の結果"]["command"]  # 設計の結果の queue が実装以降を --then で流す（#1485 の決定 2）
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
     review = waves["実装レビュー"]["plans"][0]
@@ -98,7 +107,7 @@ def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_
     assert "--gate design" in ds["mvv"]["cmd"] and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
     assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge-gate"
     assert ds["review"]["next"] == "sync-review" and ds["push-glossary"]["next"] == "mvv"  # 用語チェックの後で判定する
-    # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
+    # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ設計承認ゲートの judge へ回る
     assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
     assert ds["push-glossary-gate"]["next"] == "ready" and ds["ready"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
     for i in ("push-glossary", "push-glossary-gate"):  # 本文の「決めたこと」を設計文書に合わせる
@@ -482,7 +491,7 @@ def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path,
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
-    check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]
+    check, release = waves["検査"]["plans"][0], waves["デプロイ"]["plans"][0]
     assert "{queue_prs}" not in Path(release).read_text()
     seen = {}
 
@@ -496,7 +505,7 @@ def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path,
 
     monkeypatch.setattr(flow, "run_stage", batch)
     monkeypatch.setattr(queue, "fill_release_version", lambda plan, items: (None, None))  # 版の差し込みは test_release_version が見る
-    if alone:  # 検査の関門の後・開発版の出し直し: 検査の報告だけが残っている
+    if alone:  # 検査の承認ゲートの後・開発版の出し直し: 検査の報告だけが残っている
         report_with_pr(check, "https://github.com/o/r/pull/1915")
         queue.cmd_queue([release], 3, poll=0.05)
     else:

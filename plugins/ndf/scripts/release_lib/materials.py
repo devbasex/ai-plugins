@@ -304,7 +304,7 @@ def check_lines(m: Materials) -> list[str]:
         out.append(_not_ok("レビュー", m.review.status) + (f"、見送った指摘 {len(m.review.deferred)} 件" if m.review.deferred else ""))
     elif m.review is not None:
         out.append(f"- レビュー: cross-review {m.review.rounds} ラウンド、見送った指摘 {len(m.review.deferred)} 件")
-    if m.review is not None:  # 未収束（終了コード 6）で配布へ進んだときも、残る指摘を承認ゲート 2 で確かめられるように載せる
+    if m.review is not None:  # 未収束（終了コード 6）でリリースへ進んだときも、残る指摘をリリース承認ゲートで確かめられるように載せる
         out += [f"  - {_deferred_place(d)}{d.summary}".rstrip() for d in m.review.deferred]
     if m.refactor is not None and m.refactor.status != "ok":
         out.append(_not_ok("リファクタリング", m.refactor.status))
@@ -417,7 +417,7 @@ def approval_cell(text: str) -> str:
 
 
 def write_approval(path: Path, version, bullets, risks, verified, ref, migration=(), results=None, machine=()) -> list[dict]:
-    """notes --approval が承認資料の「配る中身」「検証への配布で確かめたこと」の欄と、`## 検査の結果`・
+    """notes --approval が承認資料の「配る中身」「開発版のデプロイで確かめたこと」の欄と、`## 検査の結果`・
     `## 未検証・残る危険`・`## 移行の手順` の節を書く。資料か欄が無ければ StepError（3）。"""
     if not path.is_file():
         raise StepError(f"提示物 {path} が無い（先に approval-facts を走らせる）", EXIT_PRECONDITION)
@@ -428,7 +428,7 @@ def write_approval(path: Path, version, bullets, risks, verified, ref, migration
         if verified
         else "—"
     )
-    rows = {"配る中身": "\n".join(bullets) or "—", "検証への配布で確かめたこと": check}
+    rows = {"配る中身": "\n".join(bullets) or "—", "開発版のデプロイで確かめたこと": check}
     lines = path.read_text(encoding="utf-8").split("\n")
     done = []
     for i, line in enumerate(lines):

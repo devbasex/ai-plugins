@@ -78,13 +78,14 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "format": [{"name": "<名前>", "command": "<整形のコマンド>"}, ...],   # 省略可。無ければ format のステップを置かず、送信の前にも整形しない
                                             # 終了コード 0 = 違反が残らない / 1 = 整形で直らない違反 / ほか = 仕組みの失敗
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
-       "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの timeout（秒）。無ければ雛形の値
+       "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの経過時間の上限（秒）。無ければ上限なし
+       "impl_stall_seconds": <1 以上の整数>,        # 省略可。impl のステップの無進捗の許容時間（秒）。無ければ 1800
        "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
   refactor の timeout は想定最大時間（無ければ cross-refactoring の既定の予算）に 10%（最低 30 秒）の余裕を足した秒。
-  impl_timeout と refactor_budget_minutes は --impl-timeout・--refactor-budget-minutes が先に効く
-  テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
+  impl_timeout・impl_stall_seconds・refactor_budget_minutes は --impl-timeout・--impl-stall・--refactor-budget-minutes が先に効く
+  テストの範囲の選び方（--tests）とデプロイしてよいかの判断は、宣言にせず conductor と judge のステップに残す
 
-配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint は配布の計画を
+デプロイの雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint はリリースプランを
 書かずに検査までを書き、結果の next と items に /ndf:release で行うことを載せる。new close と new release は形を要る）。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
@@ -126,20 +127,20 @@ run のステップ:
   フレーキー・既存失敗・変更起因に分ける（変更起因が無ければ通る）。計画の `テストの戦略` と `テストの時間` に戦略と上限が載る
 - `"skip_to": "<ステップの id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   そのステップへ進む
-- 終了コード 10〜19（共通の契約の関門）は失敗にしない。ステップの結果に `gate` を残して `"gate_next"`（無ければ
+- 終了コード 10〜19（共通の契約の承認ゲート）は失敗にしない。ステップの結果に `gate` を残して `"gate_next"`（無ければ
   `next`）へ進み、最後まで進めば報告は `結果: 関門`。結果 JSON の `presentation_path` を報告の `提示物` に写す。
   `"presentation_to": "<パス>"` があれば提示物をそのパス（ステップの作業場所から）へ写し、そちらを載せる
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに置き換わる
-- `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`（run と drive。drive は 0・1 と、欠けの残る終わりの 6）: 終了コードを読んだら `skip_to` の次・関門（10〜19）の
+- `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`（run と drive。drive は 0・1 と、欠けの残る終わりの 6）: 終了コードを読んだら `skip_to` の次・承認ゲート（10〜19）の
   前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
   <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
   鍵が整数でない・行き先が知らないステップの id なら、ステップを流す前に `結果: 止まった`
 - `"on_fail_only": "push-check"`: 失敗のうち `on_fail` へ回すものを絞る。`push-check` は pr のステップの push が
   push 前の検査（`pre-push` フック）で拒まれたとき（終了コード 1 で `! [` の拒否の行が無い）だけを回し、同じコミットで
   2 回続けて落ちたとき・先行の拒否・接続の失敗・Pull Request の作成の失敗は止まる。無ければすべての失敗を回す
-- `"gate_as_ok": true`: 終了コード 10〜19 を関門として数えず、提示物だけを写して `next` へ進む
+- `"gate_as_ok": true`: 終了コード 10〜19 を承認ゲートとして数えず、提示物だけを写して `next` へ進む
 - `"pr_from": "<鍵>"`: 終了コード 0 で終わったとき、出力の最後の JSON の `metrics.<鍵>` が空でなければ、計画の
   `"Pull Request"` をその値（URL）にする。報告の `Pull Request` に載り、queue の `{queue_pr:<計画名>}` が読む
 
@@ -152,19 +153,19 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 同じディレクトリの計画の報告。完了して Pull Request が無い・飛ばされたなら `0`）、`{queue_state:<計画名>}` は
 同じ名前の計画の状態ディレクトリの絶対パス。名前の一致する計画の結果（完了した報告・状態ディレクトリ）が見つからなければ
 埋めずに、そのプランを流さない（`0`・空文字で黙って埋めない。#2079）。`{queue_state?:<計画名>}` は無いことを読む側が扱う差し込みで、無ければ空文字で埋め、残っても止めない。
-`{queue_record}` は計画の `課題` のリリース記録（`## 配布の記録`）を置いた PR の番号で、課題を閉じる PR とそれを参照する PR を
-GitHub から読み、段階が本番か配布なしで `スプリント:` がその閉じる PR を含む記録を採る。見つからない・2 つ以上のスプリントに
+`{queue_record}` は計画の `課題` のリリース記録（`## リリース記録`）を置いた PR の番号で、課題を閉じる PR とそれを参照する PR を
+GitHub から読み、段階が本番かデプロイなしで `スプリント:` がその閉じる PR を含む記録を採る。見つからない・2 つ以上のスプリントに
 ある・GitHub を読めなければ、同じく埋めずにそのプランを流さない（#2230）。置き換わらずに `{queue_pr:…}`・`{queue_state:…}`・
 `{queue_record}` が残ったコマンドのステップは、run でも queue でもコマンドを打たずに止まる
 
 ステップの遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
-- run: 終了コード 0 なら `next`（無ければ次のステップ）。`on_exit` に当たればその行き先。10〜19 は関門として
+- run: 終了コード 0 なら `next`（無ければ次のステップ）。`on_exit` に当たればその行き先。10〜19 は承認ゲートとして
   `gate_next` か `next`。それ以外の 0 以外なら `on_fail`（無ければ止まる）
 - work: 終了後に `next`（無ければ次のステップ）。`"back_to_failed": true` なら、最後に落ちて `on_fail` へ回った
   ステップが `next` より並びで前のとき、そのステップからやり直す（judge の後の fix で使う）
 - judge: 答えの `decision` がステップの id ならそのステップへ、`next` なら次のステップへ、`stop` なら止まる、
-  `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
+  `gate` なら承認ゲートとして止まる。`choices` を渡すとその中から選ばせる
 
 途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
 - `"kind": "step"`: ステップの切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary・out）。
@@ -180,7 +181,7 @@ GitHub から読み、段階が本番か配布なしで `スプリント:` が�
   読めなければ（残りがあるときも）同じステップの待ちごとに 60 秒から倍々で、1 時間で頭打ち
 - `"kind": "account"`: 利用上限などで claude -p のアカウントを替えた 1 回ごとに 1 行（step・reason・from・to。
   従量の接続へ移ったときは to が `metered` で、keys に宣言の変数の名前。値は書かない）
-- `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
+- `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・承認ゲート・同じ失敗の繰り返し・
   judge のステップで stop が出そう・遅れ）。worker の行の語と繰り返し、ステップの結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
 
@@ -190,7 +191,7 @@ GitHub から読み、段階が本番か配布なしで `スプリント:` が�
 
 遅れの見張り（run・work・drive のステップ。LLM は決まった手で解けないときだけ）:
 - 想定: ステップの `"expected": <秒>` があればそれ。無ければ同じステップ（フェーズ, ステップの id）の直近 `window` 件の所要の
-  中央値 × `factor`（下限 `floor`）、履歴が `min_samples` 件に満たなければ `default`。所要の履歴は成功と関門の
+  中央値 × `factor`（下限 `floor`）、履歴が `min_samples` 件に満たなければ `default`。所要の履歴は成功と承認ゲートの
   ステップだけを `<git の共通ディレクトリ>/ndf/step-history.jsonl`（git でなければ `<state-dir>/`）へ積む
 - 経過（利用上限の待ちを除く）が想定を超えると、ステップの `"probe"` で一次の調査を流す。`"output"`（run・drive の
   既定。stderr が伸びたか。drive は前の確認より後の Pull Request の投稿・レビュー・コミットも見る）/ `"worker"`（work の

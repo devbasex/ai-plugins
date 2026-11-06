@@ -648,7 +648,7 @@ def test_candidates_do_not_match_a_path_inside_a_longer_path(env):
 
 
 def test_candidates_pick_issues_named_in_commit_subjects(env):
-    # 配布に入ったコミットの件名が番号を指す open の課題は、直っていても閉じ忘れのまま残る
+    # デプロイに入ったコミットの件名が番号を指す open の課題は、直っていても閉じ忘れのまま残る
     _git(env.root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "Fix: 落ちる所を直す (#7 #10)")
     code, out = env.run("candidates", "--since-ref", "v1", "--limit", "1")
     assert code == 20

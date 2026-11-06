@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import estimate_predict as ep  # noqa: E402
+import estimate_records as er  # noqa: E402
 
 DEAD = lambda run: False  # noqa: E731
 CFG = {"models": ["opus"], "harness": "claude-p", "review": None, "test": None, "parallel": None}
@@ -169,6 +171,23 @@ def test_size_unit_from_decl_or_smallest_quarter():
     assert ep.size_unit([800, 100, 200, 300, 400, 500, 600, 700], {}) == 150
 
 
+def _script_only(rows, issue, seconds, day=1):
+    """スプリントの機械のプラン（run のステップだけ）の実行を 1 本足す。"""
+    _done(rows, issue, seconds, day=day)
+    rows[-2]["type"] = "run"
+
+
+def test_size_unit_ignores_issues_with_only_script_steps():
+    """#2433: run のステップだけの実績を基準に数えると基準が 1 秒未満になり、どの見積もりも尺度を超える。"""
+    rows: list[dict] = []
+    for i in range(20):
+        _script_only(rows, 100 + i, 0.3)
+    for i in range(8):
+        _done(rows, 40 + i, 1000 + 100 * i, day=i + 1)
+    got = ep.predict(_req(like=[47]), rows, [], {}, {}, alive=DEAD)
+    assert got["size"] == 2  # 1700 ÷ 基準 1050 = 1.6
+
+
 def test_predict_size_uses_unit():
     rows: list[dict] = []
     for i in range(4):
@@ -186,53 +205,6 @@ def test_size_over_scale():
 
 
 # --- 実装の上限 ---
-
-
-def test_impl_limit_needs_three_samples_and_uses_max():
-    rows: list[dict] = []
-    assert ep.impl_limit(rows)["source"] == "uncalibrated"
-    for d, a in enumerate([1000, 4000, 2000]):
-        _done(rows, 1, a, day=d + 1)
-    got = ep.impl_limit(rows)
-    assert (got["source"], got["samples"], got["high"]) == ("history", 3, 4000)
-    assert len(got["basis"]) == 3
-
-
-def test_impl_limit_includes_failures_and_skips_other_config():
-    rows: list[dict] = []
-    for d, a in enumerate([1000, 2000]):
-        _done(rows, 1, a, day=d + 1)
-    _done(rows, 2, 99999, day=3, config={**CFG, "harness": "codex"})
-    rows.append(
-        {
-            "schema": 1,
-            "kind": "run_start",
-            "at": "2026-10-04T00:00:00+00:00",
-            "run": "f",
-            "plan": "/p.json",
-            "issues": [3],
-            "phase": "実装",
-            "from": None,
-            "attempt": 1,
-            "imported": False,
-        }
-    )
-    rows.append(
-        {
-            "schema": 1,
-            "kind": "step",
-            "at": "2026-10-04T00:00:00+00:00",
-            "run": "f",
-            "step": "impl",
-            "type": "work",
-            "exit": 1,
-            "seconds": 3000,
-            "retry": 0,
-        }
-    )
-    _done(rows, 4, 500, day=5)
-    got = ep.impl_limit(rows)
-    assert (got["samples"], got["high"]) == (4, 3000)
 
 
 # --- 誤差 ---
@@ -272,6 +244,68 @@ def test_errors_pairs_after_estimate_only():
 def test_errors_zero_pairs():
     items, metrics = ep.errors([], [], alive=DEAD)
     assert items == [] and metrics["pairs"] == 0
+
+
+def _est(id_, day, values=None, issue=1):
+    return {
+        "schema": 1,
+        "id": id_,
+        "at": f"2026-10-{day:02d}T00:00:00+00:00",
+        "issue": issue,
+        "values": {"A": {"typical": 100}} if values is None else values,
+    }
+
+
+def test_errors_picks_latest_estimate_per_issue():
+    """時刻が新しい見積もりを採り、同時刻なら後の行を採る。`done` が無ければ `実装` で実績を引く。"""
+    rows: list[dict] = []
+    _done(rows, 1, 200, day=5)
+    items, _ = ep.errors([_est("new", 4), _est("old", 3)], rows, alive=DEAD)
+    assert [i["estimate"] for i in items] == ["new"]
+    items, _ = ep.errors([_est("a", 3), _est("b", 3)], rows, alive=DEAD)
+    assert [i["estimate"] for i in items] == ["b"]
+
+
+def test_errors_pairs_an_estimate_saved_with_an_old_done(tmp_path):
+    """旧い値の完了条件で書かれた見積もりは、読むときに新しい値へ寄り、新しい名前の実績と組になる。"""
+    (tmp_path / er.ESTIMATES).write_text(
+        json.dumps({**_est("old-done", 3), "done": "配布（本番）"}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    rows: list[dict] = []
+    _done(rows, 1, 200, day=5, phase="リリース")
+    items, _ = ep.errors(er.read_estimates(tmp_path), rows, alive=DEAD)
+    assert [i["estimate"] for i in items] == ["old-done"]
+
+
+def test_errors_since_drops_earlier_estimates():
+    """`since` より前の見積もりは除き、ちょうどの時刻は残す。"""
+    rows: list[dict] = []
+    _done(rows, 1, 200, day=5)
+    ests = [_est("old", 2), _est("kept", 3)]
+    items, _ = ep.errors(list(reversed(ests)), rows, since="2026-10-03T00:00:00+00:00", alive=DEAD)
+    assert [i["estimate"] for i in items] == ["kept"]
+    items, metrics = ep.errors(ests, rows, since="2026-10-04T00:00:00+00:00", alive=DEAD)
+    assert items == [] and metrics["pairs"] == 0
+
+
+def test_errors_ratio_none_when_not_comparable():
+    """予測が 0・数でない・無いときと、実績が None のときは比が None で、中央値から外れる。"""
+    rows: list[dict] = []
+    _done(rows, 1, 200, day=5)
+    _done(rows, 2, 300, day=5)
+    ests = [_est("a", 3, {"A": {"typical": 0}, "L": {"typical": "x"}}), _est("b", 3, {"A": {"typical": 150}}, issue=2)]
+    items, metrics = ep.errors(ests, rows, alive=DEAD)
+    assert items[0]["ratio"] == {"A": None, "L": None, "C": None}
+    assert items[0]["predicted"] == {"A": 0, "L": "x", "C": None}
+    assert items[1]["ratio"] == {"A": 2, "L": None, "C": None}
+    assert metrics == {"pairs": 2, "ratio_median_A": 2, "ratio_median_L": None, "ratio_median_C": None, "rank_correlation_A": 1.0}
+
+
+def test_errors_ratio_none_when_actual_missing(monkeypatch):
+    got = ep.er.IssueActual(issue=1, completed=True, a=30.0, l=None, c=1.0)
+    monkeypatch.setattr(ep.er, "issue_actuals", lambda *a, **k: {1: got})
+    items, _ = ep.errors([_est("a", 3, {"A": {"typical": 7}, "L": {"typical": 1}, "C": {"typical": 3}})], [], alive=DEAD)
+    assert items[0]["ratio"] == {"A": 4.2857, "L": None, "C": 0.3333}
 
 
 def test_no_multiplier_constants():

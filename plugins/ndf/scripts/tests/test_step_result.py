@@ -101,7 +101,7 @@ def test_approval_present_writes_two_layers(tmp_path, monkeypatch):
     path = sr.approval_present(
         "release",
         "v1.2.3",
-        title="ndf v1.2.3 の本番への配布",
+        title="ndf v1.2.3 のリリース",
         targets=[{"url": "https://github.com/o/r/compare/a...b", "title": "a → b", "base_head": "main ← develop"}],
         change="3 ファイル / +10 / −2",
         judge=[("版数", "1.2.3"), ("含む PR", "#1 x | y\n#2 z")],

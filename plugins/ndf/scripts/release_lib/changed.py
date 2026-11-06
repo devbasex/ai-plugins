@@ -75,7 +75,7 @@ def plugin_items(rows):
 
 
 def set_levels(tool, path, sets):
-    """承認ゲート 2 で決めた上げ幅（`<名前>=<上げ幅>`）で承認資料の表の行を書き直し、結果を返す。"""
+    """リリース承認ゲートで決めた上げ幅（`<名前>=<上げ幅>`）で承認資料の表の行を書き直し、結果を返す。"""
     lines = read_approval(path)
     try:
         rows = others.read_section("\n".join(lines))

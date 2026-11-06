@@ -171,6 +171,13 @@ class Queue:
         """始まりと終わりの時刻を書く run のステップの cmd。"""
         return f"date +%s.%N > {self.tmp}/{name}.s; sleep {seconds}; date +%s.%N > {self.tmp}/{name}.e"
 
+    def meet(self, name: str, other: str, limit: int = 30) -> str:
+        """`other` のステップが始まるまで待つ run のステップの cmd。`limit` 秒で始まらなければ失敗で終わる。
+
+        同時に流れたことを、眠る時間の長さでなく互いの始まりで確かめる（負荷で起動がずれても落ちない）。"""
+        wait = f"until [ -s {self.tmp}/{other}.s ]; do sleep 0.05; done"  # -s: 時刻が書かれた後（`>` は先に空のファイルを作る）
+        return f"date +%s.%N > {self.tmp}/{name}.s; timeout {limit} sh -c '{wait}' && date +%s.%N > {self.tmp}/{name}.e"
+
     def spans(self, *names: str) -> list[tuple[float, float]]:
         return [(float((self.tmp / f"{n}.s").read_text()), float((self.tmp / f"{n}.e").read_text())) for n in names]
 
@@ -273,8 +280,8 @@ def test_plans_needing_one_plan_wait_for_it_and_then_run_side_by_side(tmp_path, 
     """B と C が A だけを前提にし、触るファイルが重ならなければ、A の後に同時に流れる（I5）。"""
     q = Queue(tmp_path, env)
     a = q.plan("a", [run_step(q.span("a", 0.6))], ["a.py"])
-    b = q.plan("b", [run_step(q.span("b", 0.6))], ["b.py"], after=["a"])
-    c = q.plan("c", [run_step(q.span("c", 0.6))], ["c.py"], after=["a"])
+    b = q.plan("b", [run_step(q.meet("b", "c"))], ["b.py"], after=["a"])
+    c = q.plan("c", [run_step(q.meet("c", "b"))], ["c.py"], after=["a"])
     p, res = q.run(a, b, c, "--max", "2")
     assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
     sa, sb, sc = q.spans("a", "b", "c")
@@ -345,7 +352,7 @@ def test_a_needed_plan_later_in_the_queue_or_missing_blocks_the_plan(tmp_path, e
 
 
 def test_a_needed_plan_of_an_earlier_stage_or_with_a_gate_record(tmp_path, env):
-    """前のステージの完了は前提を満たす。関門の記録は完了でない（受け入れ条件 5）。"""
+    """前のステージの完了は前提を満たす。承認ゲートの記録は完了でない（受け入れ条件 5）。"""
     t, q = tmp_path, Queue(tmp_path, env)
     a = q.plan("a", [run_step(note(t, "a"))], ["a.py"])
     b = q.plan("b", [run_step(note(t, "b"))], ["b.py"], after=["a"])
@@ -492,7 +499,7 @@ def test_a_gate_stays_a_gate_and_a_stopped_plan_runs_again_from_the_top(tmp_path
         assert p.returncode == 1 and {Path(i["plan"]).stem: i["result"] for i in res["items"]} == {"gate": "関門", "stop": "止まった"}
         events = [json.loads(ln) for ln in p.stdout.splitlines()[:-1]]
         assert [(Path(e["plan"]).stem, e["reason"]) for e in events if e["reason"] == "関門"] == [("gate", "関門")]  # 打ち直しでも知らせる
-    assert sorted(q.visits()) == ["g1", "s1", "s1", "s2", "s2"]  # 関門は同じ所で止まったまま、止まったプランは頭から
+    assert sorted(q.visits()) == ["g1", "s1", "s1", "s2", "s2"]  # 承認ゲートは同じ所で止まったまま、止まったプランは頭から
     assert q.step_lines(gate) == ["g1"]
 
 

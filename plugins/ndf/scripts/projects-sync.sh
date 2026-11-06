@@ -56,6 +56,7 @@ case "$ISSUE" in
   ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
 KIND=$(pj_key_kind "$KEY") || sr_bad_args "$TOOL" "知らないキーです: $KEY" usage
+[ "$KEY" != stage ] || VALUE=$(pj_normalize_stage "$VALUE")
 case "$KEY" in
   stage) wf_is_stage "$VALUE" ;;
   mode) wf_is_mode "$VALUE" ;;
@@ -257,6 +258,30 @@ update() {
   write_field "$project_id" "$item_id" "$fields_json"
 }
 
+# 単一選択のフィールドの、名前が一致する選択肢の識別子を返す。無ければ空。
+field_option_id() {
+  printf '%s' "$1" | jq -r --arg n "$FIELD_NAME" --arg v "$2" \
+    'first(.fields[]? | select(.name == $n) | .options[]? | select(.name == $v) | .id) // empty' 2>/dev/null
+}
+
+# 工程の新しい名前の選択肢が無いとき、旧い名前の選択肢の識別子を返し、名前を変える案内を標準エラーへ出す。
+# 選択肢は利用者が作った設定なので、スクリプトは名前を変えない（#2620 の決定 7）。
+legacy_option_id() {
+  local old id table
+  [ "$KEY" = stage ] || return 1
+  table="$SCRIPT_DIR/data/legacy-values.json"
+  while IFS= read -r old; do
+    [ -n "$old" ] || continue
+    id=$(field_option_id "$1" "$old") || continue
+    [ -n "$id" ] || continue
+    printf 'NOTE: フィールド「%s」の選択肢「%s」へ書いた。工程の名前は「%s」に変わったため、ボードの設定で選択肢の名前を「%s」へ変える\n' \
+      "$FIELD_NAME" "$old" "$VALUE" "$VALUE" >&2
+    printf '%s\n' "$id"
+    return 0
+  done < <(jq -r --arg v "$VALUE" '.sets.stage | to_entries[] | select(.value == $v) | .key' "$table" 2>/dev/null)
+  return 1
+}
+
 # フィールドへ値を書く。単一選択は選択肢の識別子へ、文字列はそのまま。
 write_field() {
   local project_id="$1" item_id="$2" fields_json="$3" field_id option_id
@@ -265,9 +290,9 @@ write_field() {
   [ -n "$field_id" ] || { board_fail "ボードにフィールド「${FIELD_NAME}」が無い"; return 1; }
 
   if [ "$KIND" = "select" ]; then
-    option_id=$(printf '%s' "$fields_json" | jq -r --arg n "$FIELD_NAME" --arg v "$VALUE" \
-      'first(.fields[]? | select(.name == $n) | .options[]? | select(.name == $v) | .id) // empty' 2>/dev/null) \
+    option_id=$(field_option_id "$fields_json" "$VALUE") \
       || { board_fail "ボードのフィールドの応答を読めない"; return 1; }
+    [ -n "$option_id" ] || option_id=$(legacy_option_id "$fields_json") || option_id=''
     [ -n "$option_id" ] || { board_fail "フィールド「${FIELD_NAME}」に選択肢「${VALUE}」が無い"; return 1; }
     sr_gh project item-edit --project-id "$project_id" --id "$item_id" \
       --field-id "$field_id" --single-select-option-id "$option_id" >/dev/null \

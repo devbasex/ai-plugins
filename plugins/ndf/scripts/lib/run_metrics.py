@@ -101,7 +101,7 @@ def _whole_seconds(start: Any, end: Any) -> Optional[int]:
 
 @functools.lru_cache(maxsize=1)
 def _ndf_version() -> Optional[str]:
-    """プラグインの版。**読めなければ `null`**（配布の形によって置き場所が無い）。"""
+    """プラグインの版。**読めなければ `null`**（リリースの形によって置き場所が無い）。"""
     try:
         data = json.loads((_LIB.parents[1] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):

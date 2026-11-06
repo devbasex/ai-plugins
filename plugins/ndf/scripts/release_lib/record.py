@@ -1,4 +1,4 @@
-"""本番の配布の後に書くリリース記録の組み立てと投稿（`release-steps.py` の record から分けた。#1273）。
+"""リリースの後に書くリリース記録の組み立てと投稿（`release-steps.py` の record から分けた。#1273）。
 
 記録の形は `lib/dist_record.py` が持つ。ここはタグの時刻・PR の本文とコメントの読み取り・同じ記録の有無の判定と
 コメントの投稿を持ち、出す（emit）のは呼び手である。
@@ -45,7 +45,7 @@ def body_of(root, plugin, ver, tag, prev_tag, prs):
         prev,
         ver,
         prs,
-        stage_note=f"承認ゲート 2 の承認の後、{at + ' に ' if at else ''}{tag} を出した",
+        stage_note=f"リリース承認ゲートの承認の後、{at + ' に ' if at else ''}{tag} を出した",
         version_note=f"タグ {tag}。直前はタグ {prev_tag}" if prev_tag else f"タグ {tag}。直前の正式版のタグは無い",
     )
 
@@ -56,7 +56,7 @@ def promote_body_of(n, head, base, prev_sha, sha, prs):
         f"{base} {prev_sha}" if prev_sha else None,
         f"{base} {sha}",
         prs,
-        stage_note=f"承認ゲート 2 の承認の後、昇格の Pull Request #{n}（{head} → {base}）をマージした",
+        stage_note=f"リリース承認ゲートの承認の後、昇格の Pull Request #{n}（{head} → {base}）をマージした",
         version_note=f"#{n} のマージのコミット。直前は {base} の {prev_sha}" if prev_sha else f"#{n} のマージのコミット",
     )
 

@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import context_calibrate  # noqa: E402
 import context_decisions as cd  # noqa: E402
 import context_policy as cp  # noqa: E402
+import legacy_values  # noqa: E402
 import step_result as sr  # noqa: E402
 
 TOOL = "context-policy"
@@ -238,7 +239,7 @@ def _rework(rows: list[dict]) -> int | str:
     keep: dict[str, int] = defaultdict(int)
     for r in rows:
         if r.get("event", cd.EVENT_DECISION) == cd.EVENT_DECISION and r.get("verdict") == cp.CONTINUE and r.get("stage"):
-            keep[r["stage"]] += 1
+            keep[legacy_values.to_current("stage", r["stage"])] += 1
     return sum(1 for n in keep.values() if n >= 2) if keep else cd.UNKNOWN
 
 

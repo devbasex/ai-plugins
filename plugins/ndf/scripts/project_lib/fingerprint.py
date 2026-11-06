@@ -33,7 +33,7 @@ INPUT_NAMES = (
     # コンテナ
     "compose*.y*ml",
     "docker-compose*.y*ml",
-    # 配布
+    # デプロイ
     "amplify.yml",
     "samconfig.toml",
     "buildspec.yml",

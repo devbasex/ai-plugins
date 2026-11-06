@@ -548,7 +548,7 @@ def summarize_agents(records: list, window_limit) -> tuple[list[dict], int]:
         peak_max = max(r.peak for r in items)
         marks: list[str] = []
         # **束ねる候補は supervisor の行にだけ付く。** 設計のフェーズは、作るときはどの
-        # モードでも必ず関門を返すため対象にしない（契約の目印の表）。
+        # モードでも必ず承認ゲートを返すため対象にしない（契約の目印の表）。
         if layer == "supervisor" and role != "設計" and below > len(items) / 2:
             marks.append("束ねる候補")
         if any(r.peak > window_limit(r.session) for r in items):

@@ -1,6 +1,6 @@
 """`supervise.py design-results`: 設計の結果を読み、実装のステージのプランを書き換える（#1485 の決定 1〜3）。
 
-承認ゲート 1 の直後のステージが打つ。設計の課題ごとに `design/issue-<番号>` のマージした PR を探し、その PR が
+設計承認ゲートの直後のステージが打つ。設計の課題ごとに `design/issue-<番号>` のマージした PR を探し、その PR が
 変えた `issues/*.md` を `origin/<ベースブランチ>` から読んで「設計の結果」の表を集める。実装する課題のプランへ
 `触るファイル` と `設計文書` を、取り込んだ課題と閉じる課題のプランへ `実行の条件` を書き、取り込み先のプランの `課題` と
 実装の指示文へ取り込んだ課題を足す。指示文は雛形の部分だけを組み直し、conductor の補正は残す（#1651）。
@@ -162,10 +162,9 @@ def kept_lines(prompt: str, before: dict, after: dict) -> list[str]:
     return [line for line in prompt.splitlines() if line.strip() and line not in template]
 
 
-def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = False) -> list[dict]:
-    """プランへ設計の結果を書く。取り込み先に流れる実装プランが無ければ DesignResultsError（書き換える前に止まる）。
-    「閉じる」と「取り込む」の課題のプランは `実行の条件` で飛ばす。実装の指示は雛形の部分（課題・設計文書・触る範囲・
-    共通の規則）だけを組み直し、conductor の補正は順のまま残す（`kept_lines`）。書いた内容の一覧を返す。"""
+def _checked_absorptions(plans: dict[int, dict], res: dr.DesignResults) -> tuple[dict[int, int], dict[int, list[int]]]:
+    """取り込みの対応を作り、すべての取り込み先を確かめる。返すのは書き出しの時点の取り込み（課題 → 取り込み先）と、
+    取り込み先ごとの取り込んだ課題。取り込み先に流れる実装プランが無ければ DesignResultsError。プランは変えない。"""
     absorbed: dict[int, list[int]] = {}
     # new sprint --absorb で書き出しの時点に取り込んだ課題（プランの `取り込み先`）も表の取り込みと合わせる（#1426 の決定 8）
     pre = {n: p["取り込み先"] for n, p in plans.items() if isinstance(p.get("取り込み先"), int)}
@@ -178,6 +177,31 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
                 f"#{n} の取り込み先 #{h} に流れる実装プランが無い（スプリントの課題でないか、設計の結果で取り込む・閉じるとした）"
             )
         absorbed.setdefault(h, []).append(n)
+    return pre, absorbed
+
+
+def _rebuild_impl_prompts(plan: dict, before: dict, after: dict, glossary: bool) -> None:
+    """プランの実装のステップの指示を `after` の状態の雛形で組み直し、補正は順のまま残す（`kept_lines`）。"""
+    for step in plan.get("steps", []):
+        if step.get("id") == "impl":
+            kept = kept_lines(str(step.get("prompt") or ""), before, after)
+            ns = argparse.Namespace(
+                issue=after["課題"],
+                prompt=None,
+                prompt_file=None,
+                files=after["触るファイル"],
+                design_docs=after["設計文書"],
+                glossary_ready=glossary,
+                kept=kept,
+            )
+            step["prompt"] = impl_prompt(ns)
+
+
+def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = False) -> list[dict]:
+    """プランへ設計の結果を書く。取り込み先に流れる実装プランが無ければ DesignResultsError（書き換える前に止まる）。
+    「閉じる」と「取り込む」の課題のプランは `実行の条件` で飛ばす。実装の指示は雛形の部分（課題・設計文書・触る範囲・
+    共通の規則）だけを組み直し、conductor の補正は順のまま残す（`kept_lines`）。書いた内容の一覧を返す。"""
+    pre, absorbed = _checked_absorptions(plans, res)
     items = []
     for n, plan in plans.items():
         row, host = res.row_of(n), res.host_of(n)
@@ -197,19 +221,7 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
         if docs:
             plan["設計文書"] = docs
         after = {k: plan.get(k) for k in ("課題", "触るファイル", "設計文書")}
-        for step in plan.get("steps", []):
-            if step.get("id") == "impl":
-                kept = kept_lines(str(step.get("prompt") or ""), before, after)
-                ns = argparse.Namespace(
-                    issue=issues,
-                    prompt=None,
-                    prompt_file=None,
-                    files=after["触るファイル"],
-                    design_docs=after["設計文書"],
-                    glossary_ready=glossary,
-                    kept=kept,
-                )
-                step["prompt"] = impl_prompt(ns)
+        _rebuild_impl_prompts(plan, before, after, glossary)
         items.append({"issue": n, "issues": issues, "files": plan.get("触るファイル", []), "docs": plan.get("設計文書", [])})
     return items
 

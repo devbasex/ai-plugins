@@ -93,7 +93,7 @@ describe("appendIssueRequestResolved（#2216 の決定 10、I48）", () => {
   });
 });
 
-describe("配布の事象の出所と鍵（#2439）", () => {
+describe("リリースの事象の出所と鍵（#2439）", () => {
   const answered = (patch: Partial<ReleaseAnsweredEvent> = {}): ReleaseAnsweredEvent => ({
     sprint_run_id: "sr-1",
     idempotency_key: "3:sr-1",
@@ -113,7 +113,7 @@ describe("配布の事象の出所と鍵（#2439）", () => {
     expect(await errorOf(appendReleaseAnsweredTo(store, answered({ job_id: "job-1" })))).toBe("forbidden");
   });
 
-  it("ランナーは配布の事象を決まった鍵で書け、release.answered は書けない", () => {
+  it("ランナーはリリースの事象を決まった鍵で書け、release.answered は書けない", () => {
     const job = { jobId: "job-1", sprintRunId: "sr-1", repo: "o/r" } as never;
     const ev = (type: string, key: string, payload: Record<string, unknown>) =>
       ({ sprint_run_id: "sr-1", idempotency_key: key, type, at: "2026-11-02T02:00:00Z", source: "runner", job_id: "job-1", schema_version: 1, payload }) as unknown as ProgressEvent;

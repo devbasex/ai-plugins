@@ -259,7 +259,7 @@ export class DynamoRunsTable implements RunsTable {
     if (run.loopId) {
       items.push({ Put: { TableName: this.tableName, Item: { pk: accountPk(run.accountId), sk: loopRunSk(run.loopId, run.sprintRunId), sprintRunId: run.sprintRunId } } });
     }
-    // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62。オーガナイザーの根を読むだけ）
+    // 古い版の実行は、まとめたリリースが流れている間は始めない（#2439 の I62。オーガナイザーの根を読むだけ）
     // 作成の冪等の鍵の行（#2384 の I14）。期限を過ぎた行は上書きする
     const idempotencyAt = items.length;
     if (guards?.idempotency) items.push(this.idempotencyPut(guards.idempotency));
@@ -585,7 +585,7 @@ export class DynamoRunsTable implements RunsTable {
             },
           },
         },
-        // 配布の実行は枠を持たない（#2439 の I64）
+        // リリースの実行は枠を持たない（#2439 の I64）
         ...(run.purpose === "release" ? [] : [decrement("ACTIVE"), decrement(repoSlotSk(run.repositoryId), run.legacy === true)]),
         ...shares.map((x) => ({
           Delete: {
@@ -982,7 +982,7 @@ export class DynamoRunsTable implements RunsTable {
     return { Put: { TableName: this.tableName, Item: { pk: accountPk(log.accountId), sk: orgLogSk(log), ...log }, ConditionExpression: "attribute_not_exists(sk)" } };
   }
 
-  // 根（と渡されたまとめた配布・記録）の条件つきの書き込み（I56・I67）
+  // 根（と渡されたまとめたリリース・記録）の条件つきの書き込み（I56・I67）
   private organizerItems(write: OrganizerWrite, extraRootCond?: string): Record<string, unknown>[] {
     const rootValues: Record<string, unknown> = {};
     const rootNames: Record<string, string> = {};
@@ -1044,7 +1044,7 @@ export class DynamoRunsTable implements RunsTable {
     const { write, run, job } = input;
     const runItem = { pk: runPk(run.sprintRunId), sk: "RUN", gsi1pk: accountPk(run.accountId), gsi1sk: `RUN#${run.createdAt}`, ...run };
     const items: Record<string, unknown>[] = [
-      // 根は流れている配布が無いときだけ（I56）
+      // 根は流れているリリースが無いときだけ（I56）
       ...this.organizerItems(write, "(attribute_not_exists(currentSeq) OR attribute_type(currentSeq, :nul))"),
       { Put: { TableName: this.tableName, Item: runItem, ConditionExpression: "attribute_not_exists(pk)" } },
       { Put: { TableName: this.tableName, Item: this.jobItem(job), ConditionExpression: "attribute_not_exists(pk)" } },

@@ -6,7 +6,7 @@ import re
 import shlex
 from pathlib import Path
 
-from gate_answer import GATE_2
+from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
@@ -22,22 +22,22 @@ RULE_RELEASE_DEV = (
     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。"
 )
 RULE_RELEASE_PROD = (
-    "利用者は関門 2 を承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
+    "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
     "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
 )
 RULE_RELEASE_PROD_MVV = (
-    "関門 2 は利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
+    "リリース承認ゲートは利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
     "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
     "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
 )
 
 
 def plan_release(a) -> dict:
-    """配布の計画。形（.ndf/supervise.json の release.form）ごとの雛形へ渡す。知らない形なら DeclError。"""
+    """リリースプラン。形（.ndf/supervise.json の release.form）ごとの雛形へ渡す。知らない形なら DeclError。"""
     form = (a.release or {}).get("form")
     maker = RELEASE_FORMS.get(form)
     if not maker:
-        raise DeclError(f"配布の形 {form!r} の雛形が無い（雛形のある形: {', '.join(RELEASE_FORMS)}）。その形は /ndf:release で配る")
+        raise DeclError(f"リリースの形 {form!r} の雛形が無い（雛形のある形: {', '.join(RELEASE_FORMS)}）。その形は /ndf:release で配る")
     return maker(a)
 
 
@@ -45,7 +45,7 @@ DEV_SERIES = "release"  # スプリントの本番のプランが版を読む開
 
 
 def release_names(version: str | None) -> tuple[str, str]:
-    """配布のプランの (作業場所のリポジトリからの位置, branch)。版が無ければ版の差し込みで書き、キューが流す時点に埋める。"""
+    """リリースプランの (作業場所のリポジトリからの位置, branch)。版が無ければ版の差し込みで書き、キューが流す時点に埋める。"""
     v = version or RELEASE_VERSION
     return f".worktrees/release/v{v}", f"release/v{v}"
 
@@ -66,7 +66,7 @@ def version_field(a, plugin: str, dev: bool) -> dict:
     explicit = getattr(a, "version", None) or None
     series = None if dev or explicit else getattr(a, "series", None) or None
     if not dev and not explicit and not series:
-        raise DeclError("本番の配布に要る版が無い（--prod か、版を読む開発版のプランの系列）")
+        raise DeclError("リリースに要る版が無い（--prod か、版を読む開発版のプランの系列）")
     return {
         "プラグイン": plugin,
         "チャネル": "dev" if dev else "prod",
@@ -77,14 +77,14 @@ def version_field(a, plugin: str, dev: bool) -> dict:
 
 
 def _validate_release_decl(rel: dict, dev: bool, a) -> tuple[str, list[str]]:
-    """宣言の release の plugin・runtimes と、本番の配布の本番のブランチを確かめる。"""
+    """宣言の release の plugin・runtimes と、リリースの本番のブランチを確かめる。"""
     plugin, runtimes = rel.get("plugin"), rel.get("runtimes")
     if not isinstance(plugin, str) or not plugin:
         raise DeclError("supervise.json: release.plugin（配るプラグインの名前）が要る")
     if not isinstance(runtimes, list) or not runtimes or not all(isinstance(r, str) for r in runtimes):
         raise DeclError("supervise.json: release.runtimes（導入を確かめるランタイムの並び）が要る")
     if not dev and not a.production_branch:
-        raise DeclError(f"本番の配布に要る本番のブランチが無い（{PRODUCTION_SOURCES}）")
+        raise DeclError(f"リリースに要る本番のブランチが無い（{PRODUCTION_SOURCES}）")
     return plugin, runtimes
 
 
@@ -92,7 +92,7 @@ def _snapshot_step(plugin: str, v: str, after_notes: str) -> dict:
     return {
         "id": "snapshot",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": 900,
         "cmd": f"sh -c '{STEPS_PY} run --root . --stage production --version {v} && git add -A && "
         f'(git diff --cached --quiet || git commit -q -m "Release: {plugin} v{v} のトークン消費の記録")\'',
@@ -133,7 +133,7 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
         "next": "explain",
     }
     if getattr(a, "mvv", None):
-        facts["gate_as_ok"] = True  # 関門 2 は本番の計画の先頭で MVV が判定する
+        facts["gate_as_ok"] = True  # リリース承認ゲートは本番の計画の先頭で MVV が判定する
     steps = [
         facts,
         {
@@ -162,9 +162,9 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
 
 
 def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, prs: str) -> None:
-    # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
+    # リリース承認ゲートを MVV で判定する。承認ゲート（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
     # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
-    # コメントが落ちたら handoff が関門 2 の by: mvv の記録を外して関門で終える（#1370 の I8）
+    # コメントが落ちたら handoff がリリース承認ゲートの by: mvv の記録を外して承認ゲートで終える（#1370 の I8）
     material = material_path(repo, approval)
     state = str(Path(a.mvv).resolve())
     steps[0:0] = mvv_gate_steps(
@@ -175,8 +175,8 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
         f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
         "bump",
     )
-    steps.append(handoff_step(state, GATE_2, "判定のコメント"))
-    steps.append(reject_step(state, GATE_2, "mvv", root=repo or "."))
+    steps.append(handoff_step(state, RELEASE_GATE, "判定のコメント"))
+    steps.append(reject_step(state, RELEASE_GATE, "mvv", root=repo or "."))
 
 
 def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str) -> list[dict]:
@@ -190,7 +190,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
         {
             "id": "bump",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {a.base}",
             "on_exit": dict(BUMP_STOP),
             "on_fail": "judge",
@@ -203,7 +203,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
                 {
                     "id": "bump-others",
                     "type": "run",
-                    "stage": "配布",
+                    "stage": "デプロイ",
                     "cmd": bump_others_cmd(a, plugin, material_path(repo, approval)),
                     "on_fail": "judge",
                     "next": "changelog",
@@ -211,7 +211,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
             ]
         ),
         {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}", "on_fail": "judge", "next": "notes"},
-        {"id": "notes", "type": "run", "stage": "配布", "cmd": notes, "on_fail": "judge", "next": after_notes if dev else "snapshot"},
+        {"id": "notes", "type": "run", "stage": "デプロイ", "cmd": notes, "on_fail": "judge", "next": after_notes if dev else "snapshot"},
     ]
     if not dev:
         steps.append(_snapshot_step(plugin, v, after_notes))
@@ -220,7 +220,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
 
 def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
-    承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff で関門 2 の by: mvv の
+    承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
 
     待つ PR ごとの CI の待ちの上限は `ci_wait_timeout`（マージのプランと同じ値）を `--ci-wait` で渡し、ステップの
@@ -230,13 +230,13 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
     step = {
         "id": "release",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": max(2400 if dev else 3000, with_margin((1 if dev else 2) * ci_wait)),
         "cmd": f"{STEPS_PY} release --version {v} --ci-wait {ci_wait} --channel {a.channel}",
         "on_exit": dict(INFRA_WAIT_STOP),
         "on_fail": "judge",
         "next": "verify" if dev else "record",
-        # 配布の PR（release/v<版> → 起点）と、本番では続く release/v<版> → 本番 の PR のチェックを調べる（#2436 の R1）
+        # リリースの PR（release/v<版> → 起点）と、本番では続く release/v<版> → 本番 の PR のチェックを調べる（#2436 の R1）
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
     if not dev:
@@ -246,12 +246,12 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
 
 
 def _record_step(v: str, prs: str) -> dict:
-    """本番の配布の後に、本番のリリースの PR へリリース記録を書くステップ（#1273）。落ちたら judge-record へ回し、
-    配布（release）へは戻らない。書けたら本番のリリースの PR を計画の Pull Request にする（まとめの close が読む）。"""
+    """リリースの後に、本番のリリースの PR へリリース記録を書くステップ（#1273）。落ちたら judge-record へ回し、
+    リリース（release）へは戻らない。書けたら本番のリリースの PR を計画の Pull Request にする（まとめの close が読む）。"""
     return {
         "id": "record",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": 300,
         "cmd": f"{STEPS_PY} record --version {v} --prs {prs}",
         "pr_from": "release_pr_url",
@@ -261,19 +261,19 @@ def _record_step(v: str, prs: str) -> dict:
 
 
 def judge_record_step() -> dict:
-    """record が落ちたときの判断。選べるのは record のやり直しか停止だけ（fix は配布へ戻るため置かない）。"""
+    """record が落ちたときの判断。選べるのは record のやり直しか停止だけ（fix はデプロイへ戻るため置かない）。"""
     return {
         "id": "judge-record",
         "type": "judge",
         "inputs": ["record"],
-        "question": "リリース記録の書き込み（record）が落ちた。本番の配布は済んでいる。GitHub の揺れなら record をもう一度、"
+        "question": "リリース記録の書き込み（record）が落ちた。リリースは済んでいる。GitHub の揺れなら record をもう一度、"
         "権限の不足・本番のリリースの PR が無いなら止める（stop）",
         "choices": ["record", "stop"],
     }
 
 
 def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
-    """リリース後テスト（/ndf:release-verification）。記録を配布の記録の PR へ置き、振り返りの後のまとめの close がそれを読む（#1683）。"""
+    """リリース後テスト（/ndf:release-verification）。記録をリリース記録の PR へ置き、振り返りの後のまとめの close がそれを読む（#1683）。"""
     return {
         "id": "release-verify",
         "type": "work",
@@ -281,7 +281,7 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
         "kind": "リリース後テスト",
         "stage": "リリース後テスト",
         "timeout": 3600,
-        "prompt": f"/ndf:release-verification スプリント {sprint}（{refs}）。配布の記録は Pull Request #{record_pr} にある。"
+        "prompt": f"/ndf:release-verification スプリント {sprint}（{refs}）。リリース記録は Pull Request #{record_pr} にある。"
         "受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、"
         "マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。"
         "課題は閉じない（次の close が閉じる）。"
@@ -300,8 +300,8 @@ def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts:
             "id": "verify",
             "type": "run",
             # 導入の確認だけを流すため、本番でも「リリース後テスト」と記録しない。受け入れ条件ごとの確認と
-            # 配布の記録の PR への記録は、まとめの release-verify（release_verify_step）が担う（#2288）
-            "stage": "配布",
+            # リリース記録の PR への記録は、まとめの release-verify（release_verify_step）が担う（#2288）
+            "stage": "デプロイ",
             "timeout": 1500,
             "cwd": repo,
             "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} --expect {v} --runtimes {rts}'",
@@ -359,7 +359,7 @@ def plan_release_package_plugin(a) -> dict:
         + ["release", "verify"]
         + (["facts", "explain", "others"] if dev else [])
     )
-    # まとめた配布（#2436）の本番は、提示で作って承認した資料を渡す
+    # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
     ref = a.base if dev else a.production_branch
@@ -367,7 +367,7 @@ def plan_release_package_plugin(a) -> dict:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
     steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs)
     if not dev:
-        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
+        # 後片付け: デプロイの PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(_cleanup_step(v, prs, repo))
@@ -383,7 +383,7 @@ def plan_release_package_plugin(a) -> dict:
         steps.insert(0, approve_step(a, repo, approval))
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
-        "フェーズ": f"配布（{'開発版' if dev else '本番'}）",
+        "フェーズ": "開発版のデプロイ" if dev else "リリース",
         "課題": a.issue,
         "モード": a.mode,
         "作業場所": a.worktree,
@@ -401,7 +401,7 @@ def plan_release_package_plugin(a) -> dict:
 
 
 def approve_step(a, repo: str | None, approval: str) -> dict:
-    """本番のプラン（MVV 判定なし）の先頭: 承認ゲート 2 の承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
+    """本番のプラン（MVV 判定なし）の先頭: リリース承認ゲートの承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
     facts の出力（--dev-state か、同じディレクトリの開発版のプランの状態）から読み、利用者の承認の記録は --state から読む。
     証跡が無ければ承認ゲート（10）で終え、bump へ進まない。"""
     dev_state = getattr(a, "dev_state", None)
@@ -411,7 +411,7 @@ def approve_step(a, repo: str | None, approval: str) -> dict:
     return {
         "id": "approve",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": 120,
         **({"cwd": repo} if repo else {}),
         "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {facts}{answer} --by user",
@@ -440,7 +440,7 @@ def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None
 
 def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
     """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
-    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の関門のままである。"""
+    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の承認ゲートのままである。"""
     material = material_path(repo, approval)
     state = shlex.quote(str(Path(a.advise).resolve()))
     args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
@@ -472,7 +472,7 @@ def bump_others_cmd(a, plugin: str, material: str) -> str:
 
 
 def mvv_gate_steps(mvv_cmd: str, note_cmd: str, next_id: str) -> list[dict]:
-    """関門 2 の MVV 判定（mvv）と、判定の記録のコメント（note。落ちたら handoff）の 2 ステップ。note の後は `next_id` へ進む。"""
+    """リリース承認ゲートの MVV 判定（mvv）と、判定の記録のコメント（note。落ちたら handoff）の 2 ステップ。note の後は `next_id` へ進む。"""
     return [
         {"id": "mvv", "type": "run", "timeout": 900, "cmd": mvv_cmd, "next": "note", "gate_next": "end"},
         {"id": "note", "type": "run", "timeout": 300, "cmd": note_cmd, "on_fail": "handoff", "next": next_id},
@@ -484,5 +484,5 @@ def material_path(repo, approval):
     return f"{repo}/{approval}" if repo else approval
 
 
-# 配布の形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
+# リリースの形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
 RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}

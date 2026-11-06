@@ -16,10 +16,11 @@ import design_pr_merge
 import jsonio
 import project_mvv as pm
 import repo as repo_lib
+import run_environment
 import sprint_loop_gate
 import sprint_mvv
 import step_result
-from pace import PaceError, read_loop, read_pace
+from pace import PaceError, over_budget, read_loop, read_pace
 
 from sprint_loop_record import (
     TOOL,
@@ -36,7 +37,7 @@ from sprint_loop_record import (
     RETURNED,
     QUESTION_PENDING,
     PENDING,
-    GATE_1,
+    DESIGN_GATE,
     FINISHED,
     NOT_RUN,
     LoopError,
@@ -136,13 +137,14 @@ def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bo
         rec = read_loop_record(env, name)
         before = json.loads(json.dumps(rec))
         apply_budget(env, rec, budget, decl["budget"])
+        report = run_environment.note(env.main_dir(), rec)
         if rec.get("status") == "stopped":
-            return resume_stopped(env, rec, before)
+            return run_environment.with_report(resume_stopped(env, rec, before), report)
         write_record(env, rec, before)
         lap = current_lap(rec)
         status = "in_lap" if lap else "resumed"
         nxt = f"引継ぎ文書 {handoff_path(env, name)} の「次にやること」から続ける" if lap else select_cmd(name)
-        return loop_ok(f"開発ループ {name} を続ける（{status}）", rec, status=status, next_=nxt)
+        return run_environment.with_report(loop_ok(f"開発ループ {name} を続ける（{status}）", rec, status=status, next_=nxt), report)
 
 
 def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], budget: dict, goal: bool) -> dict:
@@ -156,7 +158,6 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "budget_history": [],
         "same_failure": decl["same_failure"],
         "max_issues": decl["max_issues"],
-        "release_pending_max": decl.get("release_pending_max", 2),
         "milestones": list(milestones or []),
         "goal": goal,
         "status": "running",
@@ -168,9 +169,10 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "sprint_mvv_approvals": [],
     }
     apply_budget(env, rec, budget, decl["budget"])
+    report = run_environment.note(env.main_dir(), rec)
     write_record(env, rec)
     update_handoff(env, rec, "始めた。次は選定", resume_command(rec), select_cmd(name))
-    return loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name))
+    return run_environment.with_report(loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name)), report)
 
 
 def resume_record(env: Env, rec: dict) -> None:
@@ -198,7 +200,7 @@ def _resume_user_stop(env: Env, rec: dict, before: dict, stop: dict, lap: dict |
 def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
     unit = stop["condition"].removeprefix("budget_")
     used = consumed(rec)[unit]
-    if used >= rec["budget"][unit]:
+    if over_budget(used, rec["budget"].get(unit)):
         write_record(env, rec, before)
         return (
             stopped_result(
@@ -214,7 +216,7 @@ def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | Non
         return None, nxt
     answer = gate2_answer(lap, stop.get("at"))
     if answer is None:
-        return stopped_result(env, rec, "承認ゲート 2 の答え（承認か差し戻し）がまだ無い"), nxt
+        return stopped_result(env, rec, "リリース承認ゲートの答え（承認か差し戻し）がまだ無い"), nxt
     if answer == "rejected":
         close_lap(env, rec, lap, RETURNED)
         return None, nxt
@@ -229,13 +231,13 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
             None,
             f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す）",
         )
-    # 承認ゲート 1 の後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
+    # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:
         queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
         write_record(env, rec, before)
-        return stopped_result(env, rec, f"承認ゲート 1 の後の続きをまだ組めない: {str(e)[:200]}"), nxt
+        return stopped_result(env, rec, f"設計承認ゲートの後の続きをまだ組めない: {str(e)[:200]}"), nxt
     return None, f"{queue} && {wait_lap(rec, done)}"
 
 
@@ -308,7 +310,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
             return stopped_result(env, rec, "ループは止まっている")
         if lap.get("issues_kept") is not None:
-            return refusal_order("承認ゲート 1 の後の周回は組み直さない（loop start で残した課題の続きを組む）")
+            return refusal_order("設計承認ゲートの後の周回は組み直さない（loop start で残した課題の続きを組む）")
         issues = selected_issues(lap)
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
@@ -330,7 +332,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             close = build_close(env, rec, lap, issues)
         except (LoopError, OSError, ValueError) as e:
             return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
-        lap["close_plans"] = close  # 配布待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
+        lap["close_plans"] = close  # リリース待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)
@@ -395,7 +397,7 @@ def answer_after(approved: bool, revise: bool, merge: dict | None) -> str:
     if merge and merge["result"] in sprint_loop_gate.MERGED_RESULTS:
         return "設計 PR をマージした。次の周回で先頭に選ぶ"
     if merge and merge["result"] == "production":
-        return f"設計 PR をマージしない（{merge['reason']}）。承認ゲート 2 で人がマージするまで実装に選ばない"
+        return f"設計 PR をマージしない（{merge['reason']}）。リリース承認ゲートで人がマージするまで実装に選ばない"
     if merge:
         return f"設計 PR をマージできない（{merge['result']}: {merge['reason']}）。次の周回の境でマージし直す"
     return "設計 PR のマージの後の周回で選定の対象に戻る"
@@ -437,7 +439,7 @@ def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note
             str(SPRINT_STATE),
             "gate",
             state,
-            GATE_1,
+            DESIGN_GATE,
             "--by",
             "user",
             "--what",
@@ -524,7 +526,7 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
 
 
 def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None = None) -> dict:
-    """保留の周回（配布待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
+    """保留の周回（リリース待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
     with open_record(env, name) as (rec, before):
         lap = rec["laps"][n - 1] if 1 <= n <= len(rec.get("laps", [])) else None
         if not lap or lap.get("outcome") not in PENDING:
@@ -569,22 +571,9 @@ def lane_plan_name(env: Env) -> str | None:
 # ---------------------------------------------------------------- status / list
 
 
-def relay_stopped(lap: dict | None) -> bool:
-    """最後の周回のラッパーの記録に起動回数の上限（max-starts）の stop の行があるか。"""
-    d = (lap or {}).get("relay_dir")
-    if not d:
-        return False
-    try:
-        rows = jsonio.read_jsonl(Path(d) / "log.jsonl", missing=[], skip_broken=True)
-    except jsonio.JsonReadError:
-        return False
-    return any(r.get("event") == "stop" and r.get("reason") == "max-starts" for r in rows)
-
-
 def cmd_status(env: Env, name: str) -> dict:
     rec = read_loop_record(env, name)
     lap = current_lap(rec)
-    last = rec["laps"][-1] if rec.get("laps") else None
     lines = [
         f"ループ: {name}（{rec.get('status')}）",
         f"周回: {len(rec.get('laps', []))}（進行中 {lap['n'] if lap else 'なし'}）",
@@ -612,9 +601,6 @@ def cmd_status(env: Env, name: str) -> dict:
     if rec.get("stop"):
         lines.append(f"止まった理由: {rec['stop']['condition']}。再開: {resume_command(rec)}")
         metrics.update(stop=rec["stop"], stop_line=stop_line(rec, rec["stop"]["condition"]))
-    if relay_stopped(last):
-        lines.append(f"ラッパーが起動回数の上限で止めた。再開: {resume_command(rec)}")
-        metrics["relay_max_starts"] = True
     return step_result.result(TOOL, "ok", lines[0], lines[1:], metrics)
 
 

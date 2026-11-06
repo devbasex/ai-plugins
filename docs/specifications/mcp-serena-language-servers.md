@@ -446,7 +446,7 @@ uv run --frozen --project . --all-extras pytest plugins/mcp/mcp-serena -q -n 4
 | 1 万ファイルのリポジトリで SessionStart 1 秒以内・PreToolUse 0.2 秒以内 | 同 `tests/test_serena_lsp_hook_speed.py` |
 | Kiro の installer が生成した `agentSpawn` のコマンドが `CLAUDE_PLUGIN_ROOT` の無い環境で何も出さないこと | 同 `tests/test_serena_lsp_kiro.py` |
 | このリポジトリの `project.yml` が検出と食い違わないこと | 同 `tests/test_serena_lsp_this_repo.py` |
-| 配布物のチェック | `claude plugin validate .`（終了コード 0）/ `bash scripts/build-runtime-plugins.sh --check` / `bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` |
+| リリース対象のチェック | `claude plugin validate .`（終了コード 0）/ `bash scripts/build-runtime-plugins.sh --check` / `bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` |
 
 実機でだけ確かめられる観点（2026-09-24 に `env -i` と一時の HOME で隔離した claude / codex で確認済み）:
 

@@ -10,7 +10,7 @@ description: "Write a failing test first, then the smallest implementation that 
 
 ## 同じリリースで追加する Skill（本文の `※` 印）
 
-本文で `※` を付けた Skill 名は同じリリースで順次追加されるものであり、まだ配布物に
+本文で `※` を付けた Skill 名は同じリリースで順次追加されるものであり、まだリリース対象に
 存在しないことがある。**見つからない場合は探し回らず、下表の代替でそのまま進める。**
 
 | Skill | 参照している内容 | 未追加のあいだの代替 |

@@ -14,12 +14,16 @@ import sys
 import time
 from pathlib import Path
 
+import legacy_values
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
 from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
+
+
+RELEASE_PHASES = frozenset(legacy_values.legacy_table()["phase"].values())  # リリースプランのフェーズの名前
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
@@ -69,13 +73,14 @@ def progress_size(plan: str) -> int:
 
 def queue_prs(items: list[dict]) -> list[str]:
     """完了した計画の報告の Pull Request を番号にして、重ねずに番号の順に返す（計画の終わった順に依らない）。
-    配布の計画（フェーズが「配布」で始まる）の Pull Request は含めない（開発版の後に本番をステージで流すとき）。"""
+    リリースプラン（フェーズが RELEASE_PHASES のどれか）の Pull Request は含めない（開発版の後に本番をステージで流すとき）。"""
     out: list[str] = []
     for i in items:
         rep = Path(i.get("report") or "")
         if i.get("result") != "完了" or not rep.is_file():
             continue
-        if re.search(r"^- フェーズ: 配布", rep.read_text(), re.M):
+        phase = re.search(r"^- フェーズ: (.*)$", rep.read_text(), re.M)
+        if phase and legacy_values.to_current("phase", phase.group(1).strip()) in RELEASE_PHASES:
             continue
         m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
         n = pr_number(m.group(1).strip()) if m else ""
@@ -99,7 +104,7 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
             conditional = False
         if not conditional:
             return "--prs-from-queue の計画だが、先行の計画の報告に Pull Request が無い"
-        # 実行の条件のある計画（最終の検査で変更が無ければ飛ぶ配布）は、条件に判断を任せる
+        # 実行の条件のある計画（最終の検査で変更が無ければ飛ぶデプロイ）は、条件に判断を任せる
     write_text_atomic(Path(plan), text.replace(QUEUE_PRS, " ".join(prs)))
     return None
 
@@ -124,9 +129,9 @@ def cmd_queue(
     あるステップは、資源の枠の本数まで同時に流す（宣言は .ndf/supervise.json の queue）。
     始めに流すプランの一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
-    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
+    記録を止めて頭から流す（完了か承認ゲートの記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
     キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
-    キューの続きが渡し、そのプランは関門の記録があっても新しい実行の回で流す。"""
+    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -239,9 +244,9 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
 
 
 def _release_skipped_by_condition(plan: str) -> bool:
-    """「版」と「実行の条件」を持つ配布のプランで、条件が配布不要（skip_code）を返すか。
+    """「版」と「実行の条件」を持つリリースプランで、条件がデプロイ不要（skip_code）を返すか。
 
-    条件で飛ぶ配布は版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
+    条件で飛ぶデプロイは版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
     判定できないときと流すときは False（版を埋めてから流し、engine が条件を打ち直す）。"""
     try:
         info = json.loads(Path(plan).read_text())
@@ -339,10 +344,10 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     gates = [i for i in ran if i["result"] == "関門"]
     unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
     status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
-    summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
+    summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
-    nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
+    nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
     return result(
         "supervise-queue",
         status,

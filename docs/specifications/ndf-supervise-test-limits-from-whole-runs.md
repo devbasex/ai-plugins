@@ -6,6 +6,7 @@
 `.ndf/project.json` の所要の記録 w と、同じリポジトリで先に走った全体テストの実測 m の大きい方の 3 倍（`ceil(3·max(w, m))`）である。**
 手元の全体検証が上限の中で終わるたびに、その秒をリポジトリの git の共通ディレクトリへ 1 行追記する。範囲テストと全体テストの
 ステップは、開始の時点で上限を決め直し、同じ秒をステップの `timeout`（`with_margin(上限)`）と `test-run.py --limit` の両方に使う。
+コンテナの宣言があるときだけ、テスト環境の用意の分として `timeout` へ起動の上限 300 秒を足す（`--limit` は変えない）。
 `.ndf/project.json` は書き換えない。
 
 例: 記録が 2.7 秒（`ndf-record`）で、テストを足して全体テストが約 12 秒になったリポジトリ（#1631 の報告。takemi-ohama/novel のスプリント world）。
@@ -52,7 +53,7 @@
 このため、プランの作成の時点だけで実測を読んでも、同じスプリントの検査のフェーズには届かない（決定 3）。
 
 要求の受け入れ条件 2（後のプランの上限は `3·max(w, m)` 以上）と、当初の受け入れ条件 5（実測が記録の 3 倍以下なら今と同じ値）は
-`w < m ≤ 3w` で両立しなかった（例: w 2.7・m 5 で、条件 2 は 15 秒以上、条件 5 は 9 秒）。承認ゲート 1（2026-10-30）で条件 2 を採り、
+`w < m ≤ 3w` で両立しなかった（例: w 2.7・m 5 で、条件 2 は 15 秒以上、条件 5 は 9 秒）。設計承認ゲート（2026-10-30）で条件 2 を採り、
 条件 5 を「実測が記録以下のとき」へ直した。
 
 ## 決定と理由
@@ -172,11 +173,13 @@ classDiagram
    `unbudgeted_limits` へ渡して、その時点の上限を得る
 2. 上限 = `max(作成の時点の秒, その時点の上限の <鍵>)`。決め直せない（`basis` が無い・`key` が無い・読めない）ときは作成の時点の秒
 3. 上限が作成の時点の秒を上回ったときだけ、`timeout` を `max(ステップの timeout, with_margin(上限))` にする
-4. `{test_limit:…}` を上限の秒へ置き換え、`cur.test_limit` に `key`・`planned`・`seconds`・`timeout`・`basis` を残す
+4. コンテナの宣言があるときは、`timeout` へ起動の上限（`container_reach.UP_TIMEOUT`、300 秒）を足す。`with_margin` の余裕には重ねない
+5. `{test_limit:…}` を上限の秒へ置き換え、`cur.test_limit` に `key`・`planned`・`seconds`・`timeout`・`basis` を残す
 
 `test-run.py` は `--limit` を受けたら、`scope` では `test_timeout`、`whole` では `whole_timeout` をその秒に置き換える（`LIMIT_KEY`）。
 ほかの上限（`ci_wait_timeout`、落ちたテストの分類に使う `test_timeout`）は `unbudgeted_limits` の値のままである。`--limit` を省くと
 起動の時点の `unbudgeted_limits` の値を使う。出力の `items[0].limits` は置き換えた後の値を出し、終了コードは変えない。
+テスト環境の用意の秒は、上限にも全体テストの実測にも数えない（`test-run.py` は用意の後に時間を数え始める）。
 
 ### 実測を残す条件
 
@@ -204,7 +207,7 @@ classDiagram
 ### 境界の決まり
 
 - 変えないもの: `.ndf/project.json`（`test_duration` は今どおり宣言の解析だけが書く）、予算を持つ呼び出しの上限、`ci_wait_timeout`、
-  `with_margin` の式、`TEST_FACTOR`、実装の上限（`impl_timeout_estimate`）
+  `with_margin` の式、`TEST_FACTOR`、実装の上限
 - `{test_limit:…}` を持たないステップ（この変更の前に作ったプラン・CI に任せる戦略の全体テスト）は今どおり動く
 - `basis.key` を持たない「テストの時間」（宣言も `--test-cmd` も無く `plan_limits` が所要不明の値を出したプラン）では決め直さない
 
@@ -245,7 +248,7 @@ classDiagram
 
 | 置き場 | 形 |
 | --- | --- |
-| run のステップの `cmd` | `test-run.py scope … --limit {test_limit:test_timeout:<秒>}` / `test-run.py whole --pr {pr} … --limit {test_limit:whole_timeout:<秒>}`。`timeout` は `with_margin(<秒>)` |
+| run のステップの `cmd` | `test-run.py scope … --limit {test_limit:test_timeout:<秒>}` / `test-run.py whole --pr {pr} … --limit {test_limit:whole_timeout:<秒>}`。`timeout` は `with_margin(<秒>)`。開始の決め直しが、コンテナの宣言があるときだけ 300 秒足す |
 | ステップの状態の `cur.test_limit` | `{"key", "planned", "seconds", "timeout", "basis"}`。`basis` は決め直せなかったとき `null` |
 
 ## エラー処理

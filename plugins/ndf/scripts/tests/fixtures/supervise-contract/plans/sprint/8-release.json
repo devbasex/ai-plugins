@@ -1,5 +1,5 @@
 {
-  "フェーズ": "配布（開発版）",
+  "フェーズ": "開発版のデプロイ",
   "課題": [
     16,
     17
@@ -21,7 +21,7 @@
     {
       "id": "bump",
       "type": "run",
-      "stage": "配布",
+      "stage": "デプロイ",
       "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0-dev.1 --base main",
       "on_exit": {
         "2": "stop",
@@ -40,7 +40,7 @@
     {
       "id": "notes",
       "type": "run",
-      "stage": "配布",
+      "stage": "デプロイ",
       "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_pr:check} && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0-dev.1\")'",
       "on_fail": "judge",
       "next": "release"
@@ -48,7 +48,7 @@
     {
       "id": "release",
       "type": "run",
-      "stage": "配布",
+      "stage": "デプロイ",
       "timeout": 3960,
       "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0-dev.1 --ci-wait 3600 --channel dev",
       "on_exit": {
@@ -63,7 +63,7 @@
     {
       "id": "verify",
       "type": "run",
-      "stage": "配布",
+      "stage": "デプロイ",
       "timeout": 1500,
       "cwd": "<TMP>/repo",
       "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0-dev.1 --runtimes claude'",

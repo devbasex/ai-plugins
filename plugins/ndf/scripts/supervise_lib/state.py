@@ -28,7 +28,7 @@ USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
 # worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
 PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
-PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
+PROGRESS_GATE = re.compile(r"承認ゲート|関門|承認が要る|承認を待つ")  # 関門: 旧い版の worker が書いた行
 PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
 DICT_LISTS = ("gates", "process", "slow_events", "attention_log")  # ステップをまたいで積むオブジェクトの列（snapshot / replay）
 STAGES_AFTER_OK = ("リリース後テスト",)  # 印を ok の後に付ける工程（工程表の行名）。記録より先に付けない（#2288 の決定 1）
@@ -88,7 +88,7 @@ class RunState:
         self.pace_recorded = False
         self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
         self.process: list[dict] = []  # 進行の記録で書けなかったもの（結果 JSON の process の形）。止めずに報告へ載せる（#2227）
-        self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
+        self.gates: list[dict] = []  # run のステップが返した承認ゲート（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
         self.fail_counts: dict[str, int] = {}
@@ -104,7 +104,7 @@ class RunState:
         self.worker_last = ""
         self.worker_counts: dict[str, int] = {}
         self.attention_keys: set[str] = set()
-        self.attention_log: list[dict] = []  # 書いた attention の行（関門で打ち直したときに知らせ直す）
+        self.attention_log: list[dict] = []  # 書いた attention の行（承認ゲートで打ち直したときに知らせ直す）
         self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0, "llm_cost": 0.0}
         self.slow_events: list[dict] = []
         self.worker_recent: list[str] = []
@@ -399,7 +399,7 @@ class RunState:
         return True
 
     def retell_gates(self, recorded: list[dict]) -> None:
-        """関門の記録を返す打ち直しで、記録した関門の attention を進捗ログへ書き直す（conductor へもう一度知らせる）。"""
+        """承認ゲートの記録を返す打ち直しで、記録した承認ゲートの attention を進捗ログへ書き直す（conductor へもう一度知らせる）。"""
         for rec in recorded:
             self.progress_write({"kind": "attention", **rec})
 
@@ -477,7 +477,7 @@ class RunState:
 - フェーズ: {plan.get("フェーズ")}
 - 課題: {" ".join("#" + str(i) for i in plan.get("課題", []))}
 - 結果: {result}
-- 関門: {gate_line}
+- 承認ゲート: {gate_line}
 - 次のフェーズ: {plan.get("次のフェーズ", "無し") if result == "完了" else "無し"}
 - Pull Request: {plan.get("Pull Request", "無し")}
 - 最後に記録した工程: {self.last_stage}

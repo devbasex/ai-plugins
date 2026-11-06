@@ -1,7 +1,7 @@
-"""配布の版を流す時点に決める（#2164）: 版の判定（lib/release_version.py）とキューの版の差し込み（queue_fill.fill_release_version）。
+"""デプロイの版を流す時点に決める（#2164）: 版の判定（lib/release_version.py）とキューの版の差し込み（queue_fill.fill_release_version）。
 
 一時の bare の origin にベースブランチ develop・本番のブランチ main・タグ `ndf--v<版>` を作り、プランを作った後に
-別のスプリントが版を出した状況を、origin へ版を送って再現する。自分の配布のマージ済みの PR の照会は差し替える。
+別のスプリントが版を出した状況を、origin へ版を送って再現する。自分のデプロイのマージ済みの PR の照会は差し替える。
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class World:
         self.publish(version, "develop", "main", tag=True)
 
     def publish(self, version: str, *branches: str, tag: bool = False) -> None:
-        """別のスプリントの配布を模す: plugin.json を version にしたコミットを branches へ送り、tag なら正式版のタグも送る。"""
+        """別のスプリントのリリースを模す: plugin.json を version にしたコミットを branches へ送り、tag なら正式版のタグも送る。"""
         f = self.repo / "plugins" / "ndf" / ".claude-plugin" / "plugin.json"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps({"version": version}))
@@ -109,7 +109,7 @@ def write_plan(tmp: Path, world: World, name: str = "7-release", channel: str = 
     v = explicit or "{release_version}"
     base = explicit.split("-")[0] if explicit else "{release_base}"
     plan = {
-        "フェーズ": "配布",
+        "フェーズ": "デプロイ",
         "作業場所": f"{world.repo}/.worktrees/release/v{v}",
         "branch": f"release/v{v}",
         "起点": "origin/develop",
@@ -189,7 +189,7 @@ def test_explicit_dev_version_that_is_free_runs_unchanged(tmp_path, world):
 
 
 def test_rerun_keeps_the_recorded_version(tmp_path, world, monkeypatch):
-    """受け入れ条件 7・I3: 流し直しは記録の版を使う。ベースブランチがまだ小さければ照会せず、自分の配布の後なら照会して同じ版。"""
+    """受け入れ条件 7・I3: 流し直しは記録の版を使う。ベースブランチがまだ小さければ照会せず、自分のデプロイの後なら照会して同じ版。"""
     plan = write_plan(tmp_path, world)
     fill(plan)
     rec = record(plan)
@@ -201,7 +201,7 @@ def test_rerun_keeps_the_recorded_version(tmp_path, world, monkeypatch):
 
 
 def test_rerun_redecides_when_another_sprint_took_the_version_first(tmp_path, world, monkeypatch):
-    """決定 8・I9: 記録の版が自分の配布のマージより前に別のスプリントに出ていたら、写しから次の版で埋め直す。"""
+    """決定 8・I9: 記録の版が自分のデプロイのマージより前に別のスプリントに出ていたら、写しから次の版で埋め直す。"""
     plan = write_plan(tmp_path, world)
     fill(plan)
     sd = state_dir_of(str(plan.absolute()))
@@ -260,7 +260,7 @@ def test_unreadable_origin_stops_without_a_record(tmp_path, world, monkeypatch):
     fill(plan)
     rec, text = record(plan), plan.read_text()
     world.publish("10.27.6", "develop", "main", tag=True)
-    own(monkeypatch, None)  # 自分の配布の照会ができない
+    own(monkeypatch, None)  # 自分のデプロイの照会ができない
     err, info = fill(plan)
     assert info["cause"] == "unreadable" and info["unreadable"] == ["pr"] and record(plan) == rec and plan.read_text() == text
 
@@ -310,7 +310,7 @@ def test_prod_plan_without_the_dev_record_stops(tmp_path, world):
 
 
 def test_prod_follows_a_changed_dev_record_only_before_gate_2(tmp_path, world):
-    """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、承認ゲート 2 の前は追い、後は止める。"""
+    """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、リリース承認ゲートの前は追い、後は止める。"""
     dev, prod = dev_and_prod(tmp_path, world)
     fill(prod)
     rec_path = state_dir_of(str(dev.absolute())) / queue_fill.VERSION_RECORD
@@ -335,7 +335,7 @@ def test_fill_stage_reports_the_version_of_a_plan_it_did_not_run(tmp_path, world
 
 @pytest.mark.parametrize(("code", "runs"), [(3, True), (0, False)])
 def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code, runs):
-    """実行の条件が配布不要なら、明示の版が既出でも版を照会せずに流す（engine が条件で完了にする）。要るなら従来どおり止める。"""
+    """実行の条件がデプロイ不要なら、明示の版が既出でも版を照会せずに流す（engine が条件で完了にする）。要るなら従来どおり止める。"""
     plan = write_plan(tmp_path, world, explicit="10.27.5-dev.1")
     info = json.loads(plan.read_text())
     plan.write_text(json.dumps({**info, "実行の条件": {"cmd": f"exit {code}", "skip_code": 3}}, ensure_ascii=False))

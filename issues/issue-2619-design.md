@@ -102,13 +102,13 @@
 | 要素 | 責務 |
 | --- | --- |
 | 承認ゲートの名前（`plugins/ndf/scripts/lib/gate_answer.py`） | 正の名前 2 つ（定数 `DESIGN_GATE` / `RELEASE_GATE`）と、名前を正の名前へ寄せる関数 `canonical()` を持つ。`approved()` と `replaces()` は `canonical()` で比べる。今の定数 `GATE_1` / `GATE_2` を置き換える |
-| 旧名の対応表（`plugins/ndf/scripts/lib/legacy_names.py`） | 承認ゲートの名前の旧名の表（正の名前 → 旧名の並び）を足す。旧名はこの表にだけ書く。読み取りの種類として扱い、`MODE` に関わらず読む。`sprint-state.py gate` と `gate-rejections.py record` が旧名を受け付けるのも `MODE` に関わらず続け、呼び出しの種類の止め方（`_tell()`。`MODE="refuse"` で終了コード 2）を使わない。Factory のランナーが旧名を渡し続けるため（決定 5）である。案内の文は `rename_notice()` を使わず、期限（`WHEN`）を含まない承認ゲート用の文を置く |
+| 旧名の対応表（`plugins/ndf/scripts/lib/legacy_names.py`） | 承認ゲートの名前の旧名の表（承認ゲートの区分 `design` / `release` → 旧名の並び）を足す。旧名はこの表にだけ書く。読み取りの種類として扱い、`MODE` に関わらず読む。`sprint-state.py gate` と `gate-rejections.py record` が旧名を受け付けるのも `MODE` に関わらず続け、呼び出しの種類の止め方（`_tell()`。`MODE="refuse"` で終了コード 2）を使わない。Factory のランナーが旧名を渡し続けるため（決定 5）である。案内の文は `rename_notice()` を使わず、期限（`WHEN`）を含まない承認ゲート用の文を置く |
 | ループの記録（`lib/sprint_loop_record.py`） | 自分で持つ定数 `GATE_1` / `GATE_2` を消し、`gate_answer` から読む |
 | 改訂の兆候（`lib/project_mvv_signals.py`） | `GATE_KEYS` を正の名前の定数から作り、引くときは `canonical()` を通す |
 | 差し戻しの集計（`lib/gate_rejections.py`・`gate-rejections.py`） | 記録の有無と件数を `canonical()` で仕分ける。`record --gate` は旧名を受けて正の名前で書く |
 | 取り消し（`lib/sprint_mvv.py`） | `withdraw()` と `withdrawn()` を `canonical()` で比べる |
 | 開発ループの承認ゲート（`lib/sprint_loop_gate.py`・`lib/sprint_loop_gate2.py`） | 目録のステージの名前・承認の記録・差し戻しの記録を `canonical()` で比べる |
-| 並列の計画（`lib/parallel_external.py`・`lib/parallel_run.py`・`lib/parallel_release.py`） | 打つコマンドの承認ゲートの名前を定数から作り、記録を `canonical()` で比べる |
+| 並列の計画（`lib/parallel_external.py`・`lib/parallel_release.py`） | 打つコマンドの承認ゲートの名前を定数から作り、記録を `canonical()` で比べる |
 | 記録を書くコマンド（`sprint-state.py gate`） | 受けた名前を `canonical()` で寄せてから書く。旧名で呼ばれたら案内を標準エラーへ 1 行出す |
 | 人へ出す文を持つスクリプト（`mvv-gate.py`・`supervise.py`・`supervise_lib/`・`release_lib/`・`relay_lib/`・`lib/ask_policy.py` ほか） | 問い・承認資料・報告・案内・エラーの文と、それを作る定数を新しい名前へ |
 | Skill・references・エージェントの定義（`plugins/ndf/skills/`・`plugins/ndf/agents/director.md`） | 本文の呼び名を新しい名前へ。`sprint-state.py gate` のコマンドの例も正の名前で書く |
@@ -268,10 +268,10 @@ Factory のランナーは、ジョブごとに指定された版の NDF を入�
 
 | # | 残す箇所 | 理由 |
 | --- | --- | --- |
-| X1 | `plugins/ndf/scripts/lib/legacy_names.py` の旧名の表 | 旧い記録を読むため（決定 2） |
+| X1 | `plugins/ndf/scripts/lib/legacy_names.py` の旧名の表と、版を上げる前のプランが持つフェーズの値を読み替える表（`plugins/ndf/scripts/data/legacy-values.json`・`factory/runner/src/legacy-phases.ts`） | 旧い記録を読むため（決定 2） |
 | X2 | `factory/runner/src/translate.ts` の `sprint-state.py gate` へ渡す名前、`gateDisplayName()` の旧名と正の名前の対応、それらの期待値を持つ `factory/runner/src/runner.test.ts` | どの版の NDF でも承認を記録するため（決定 5） |
-| X3 | 報告の結果の値 `関門` を値として書く・比べるコード（`lib/durable.py`・`lib/parallel_external.py`・`lib/sprint_loop.py`・`lib/sprint_loop_gate.py`・`lib/sprint_loop_gate2.py`・`lib/sprint_loop_record.py`・`parallel.py`・`supervise_lib/actuals.py`・`commands.py`・`engine.py`・`flow.py`・`plan.py`・`queue.py`・`queue_fill.py`・`queue_resume.py`・`release_templates.py`・`state.py`）と、値をコードの記法（`` `結果: 関門` ``）で示す Skill と references の行 | 機械が読む識別子のため（決定 4） |
-| X4 | 旧名を入力にした互換のテスト（`plugins/ndf/scripts/tests/` の I2・I3 のテスト） | 受け入れ条件 4 |
+| X3 | 報告の結果の値 `関門` を値として書く・比べるコード（`lib/durable.py`・`lib/parallel_external.py`・`lib/sprint_loop.py`・`lib/sprint_loop_gate.py`・`lib/sprint_loop_gate2.py`・`lib/sprint_loop_record.py`・`parallel.py`・`supervise_lib/actuals.py`・`commands.py`・`engine.py`・`flow.py`・`plan.py`・`queue.py`・`queue_fill.py`・`queue_resume.py`・`release_templates.py`・`state.py`）と、値をコードの記法（`` `結果: 関門` ``）で示す Skill・references・確定仕様・用語集の行と、値を入力や期待値に持つテスト | 機械が読む識別子のため（決定 4） |
+| X4 | 旧名と旧いフェーズの値を入力にした互換のテスト（`plugins/ndf/scripts/tests/` の I2・I3 のテスト） | 受け入れ条件 4 |
 | X5 | 用語集の廃止した語（`docs/glossary/glossary.json` の `deprecated` と、それを描いた `docs/glossary.md` の行） | 旧い呼び名を引けるようにするため（受け入れ条件 3） |
 | X6 | `.ndf/mvv.json` の版の `reason`（MVV の過去の版を承認した理由の記録） | 承認した時点の記録で、書き換えると承認の経緯が変わる |
 | X7 | `CHANGELOG.md` のこの変更の版の項で、旧い呼び名を挙げて改名を知らせる行 | 改名のアナウンスに旧い語が要る |
@@ -292,7 +292,7 @@ Factory のランナーは、ジョブごとに指定された版の NDF を入�
 | I1 | `sprint-state.py gate` と `gate-rejections.py record` に旧名を渡すと、書いた JSON の名前が正の名前になり、標準エラーに案内が 1 行出る | 受けた名前をそのまま書くと、旧名が記録に残る |
 | I3 | 旧名で書かれた同じ PR の承認の記録がある状態で正の名前の承認を書くと、承認の記録は 1 件になる | `replaces()` が既存の名前を寄せずに比べると 2 件になる |
 | I4 | スクリプトの中で、承認ゲートの正の名前の文字列が `gate_answer.py` の外に定数として現れず、旧名の文字列が `legacy_names.py` と X2・X3 の外に現れない（`plugins/ndf/scripts/` を走査するテスト） | `sprint_loop_record.py` に定数を残すと落ちる |
-| 受け入れ条件 5・I5 | 既存の hook のテスト（`tests/test_ask_guard.py`）が `ndf-gate:1` / `ndf-gate:2` の問いを通す | 区分の値を変えると落ちる |
+| 受け入れ条件 5・I5 | 既存の hook のテスト（`plugins/ndf/scripts/tests/test_ask_guard.py`）が `ndf-gate:1` / `ndf-gate:2` の問いを通す | 区分の値を変えると落ちる |
 | 受け入れ条件 6・I6 | 既存の Factory の契約と画面のテストが種類 `gate1` / `gate2` で通り、画面のテストの表示の期待値が新しい名前になる | 種類の値を変えるか、表示のキーを変えると落ちる |
 | 受け入れ条件 7 | 全体テスト・Factory のテスト・CI が通る | — |
 | 受け入れ条件 8 | 変更した文書に `glossary.py check --file` を当て、廃止した語の当たりが決定 7 の例外だけになる | 本文に「ゲート 2」を残すと当たる |

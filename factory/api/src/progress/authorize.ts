@@ -34,7 +34,7 @@ export const WRITABLE_TYPES: Record<EventSource, ReadonlySet<EventType>> = {
     "section.started",
     "loop.lap_closed",
     "loop.stopped",
-    // 配布の依頼と配布の実行の事象（#2439）。Factory のオーガナイザーが停止の後の処理で読む
+    // リリースの依頼とリリースの実行の事象（#2439）。Factory のオーガナイザーが停止の後の処理で読む
     "release.requested",
     "release.presented",
     "release.progress",
@@ -51,7 +51,7 @@ const canWrite = (source: EventSource, event: ProgressEvent) =>
 // 実行ジョブの終わりの冪等の鍵。ランナーと実行の制御が同じ鍵を使い、先の 1 つだけが残る
 export const finishedKey = (jobId: string) => `${jobId}:finished`;
 
-// 配布の事象の冪等の鍵（#2439）。依頼は依頼の id、配布の実行の事象は実行の識別子を頭にする（式は契約が持ち、
+// リリースの事象の冪等の鍵（#2439）。依頼は依頼の id、リリースの実行の事象は実行の識別子を頭にする（式は契約が持ち、
 // ランナーの送信と同じ式で照らす）。ランナーが送り直しても 1 件になる
 export const releaseRequestedKey = (requestId: string) => requestId;
 export { releasePresentedKey, releaseProgressKey, releaseSettledKey };
@@ -72,7 +72,7 @@ function releaseKeyOf(event: ProgressEvent): string | null {
   }
 }
 
-// ランナーの冪等の鍵の形（I27）: job.finished は <job_id>:finished、配布の事象は releaseKeyOf、ほかは <job_id>:<seq>（seq は 1 以上）
+// ランナーの冪等の鍵の形（I27）: job.finished は <job_id>:finished、リリースの事象は releaseKeyOf、ほかは <job_id>:<seq>（seq は 1 以上）
 function isRunnerKey(event: ProgressEvent, jobId: string): boolean {
   if (event.type === "job.finished") return event.idempotency_key === finishedKey(jobId);
   const releaseKey = releaseKeyOf(event);

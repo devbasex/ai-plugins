@@ -1,7 +1,7 @@
 """token の換算費用の単価の正本（#893・#2262 の決定 10）。
 
 input の単価を 1 とした倍率で持つ。cache read だけはモデルで倍率が違うため `READ_RATES` で引く。
-配布する hook（`hook_lib/token_guard.py` の判定）と、根の `scripts/token-usage.py` の両方がここを読む。
+デプロイする hook（`hook_lib/token_guard.py` の判定）と、根の `scripts/token-usage.py` の両方がここを読む。
 
 出典: 公式の料金表 https://platform.claude.com/docs/en/about-claude/pricing と claude-api の Skill
 （2026-09-24 に確認。Opus 5.5 は input $4 / cache read $0.20、Fable 5.1 は $10 / $0.25）。

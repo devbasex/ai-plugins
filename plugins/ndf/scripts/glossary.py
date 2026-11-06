@@ -39,6 +39,7 @@ from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_w
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
+import glossary_banned  # noqa: E402
 import glossary_merge  # noqa: E402
 import ndf_tracking  # noqa: E402
 
@@ -111,6 +112,7 @@ class Declaration:
         self.paths = paths
         self.term_sections = sections
         self.source_paths = source_paths  # 語の正本（terms[].source）に認めるパス。空なら見ない
+        self.banned = glossary_banned.parse_banned(check.get("banned"), DECLARATION, unreadable)
 
 
 def _read_declared(path: Path, label: str):
@@ -262,7 +264,7 @@ def _term_schema_findings(i: int, t: dict, decl: Declaration, ids: list[str], hi
         hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
     elif "pending_source" in t and not isinstance(t["pending_source"], str):
         hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
-    elif decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths):
+    elif decl.source_paths and t.get("source") and "://" not in t["source"] and not pathmatch.path_matches(t["source"], decl.source_paths):
         hit(
             "unconfirmed_source",
             t["term"],
@@ -310,6 +312,8 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             continue
         _term_schema_findings(i, t, decl, ids, hit)
         _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
+        for w in glossary_banned.banned_in_term(t, decl.banned):
+            hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
         if code_of(t):
             ckey = (t["context"], code_of(t))
             if ckey in code_seen:
@@ -503,11 +507,6 @@ def added_lines(root: Path, base: str, pathspecs: tuple[str, ...] = ()) -> dict[
     return out
 
 
-def declared_path_matches(rel: str, patterns: list[str]) -> bool:
-    """宣言のパスのパターン（git の wildmatch。`*` は `/` をまたがない）に当たるか。"""
-    return pathmatch.path_matches(rel, patterns)
-
-
 # --- 副命令 ----------------------------------------------------------------------------
 
 
@@ -688,7 +687,7 @@ def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | Non
             targets.append((f, text, None))
     else:
         for rel, lines in sorted(added_lines(root, a.diff).items()):
-            if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
+            if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or pathmatch.path_matches(rel, decl.paths)):
                 continue
             p = root / rel
             if p.is_file():
@@ -714,6 +713,7 @@ def cmd_check(a):
                     items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
                 continue
             items += text_findings(rel, text, wanted, g, decl, dep_re, live_re)
+    items += glossary_banned.banned_findings(a, root, decl.banned, added_lines, lambda w: replacement(g, w))
     for it in items:
         print(f"ERROR: {it['path']}:{it['line']}: {it['rule']}: {it['term']}", file=sys.stderr)
     metrics = {"hits": len(items)}

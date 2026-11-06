@@ -34,22 +34,23 @@
     "NDF_SV_STATE_DIR",
     "NDF_VERSION",
     "NDF_WHOLE_RUNS_DIR",
+    "NDF_WORKTREE_BASE",
     "UV_PROJECT_ENVIRONMENT",
+    "WT_DOCKER_COMMAND",
     "XDG_STATE_HOME"
   ],
   "settings": [
     {
       "file": "estimate.json",
       "keys": [
-        "min_samples",
-        "records_dir",
-        "window"
+        "records_dir"
       ]
     },
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies"
+        "ndf_policies",
+        "test"
       ]
     },
     {

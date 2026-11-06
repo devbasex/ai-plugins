@@ -35,7 +35,7 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 
 - **含む**: `factory/web/` のログイン・ログアウトとアカウントの画面、`factory/api/` の token の検証・アカウントの解決・アカウントと席と料金プランと実行の形態の読み書き・使える量の問い合わせと判定・GitHub の仲立ち、`factory/contracts/openapi/accounts.yaml`、`factory/` のパッケージの管理と CI のジョブ `factory-check`
 - **含まない**: Cognito の利用者プール・DynamoDB の表・Lambda の束ね方などインフラの定義（private リポジトリが作る）、決済・料金・請求と料金プランを有料へ変える経路、使用量の台帳とその月の token の集計、スプリントの開始を断る処理そのもの（本書は判定を返す）、実行の形態ごとのランナー・持ち込んだキーの保存、2 つの IdP の利用者をまとめる機能、招待のメール
-- プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
+- プラグインのリリース対象・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
 
 ## 仕様
 
@@ -442,7 +442,7 @@ graph TD
 | GitHub の仲立ち | ID token の `sub` が GitHub の数の利用者 ID、`aud` が `client_id` で、公開した鍵で検証できること。検証済みでないメールを返さないこと。`/authorize` の `nonce` が ID token に同じ値で出ること。署名の壊れた・期限の切れた・`client_id` か `redirect_uri` の違う `state` と `code` を断ること。`/authorize` に違う `redirect_uri` か `client_id` が来たら GitHub へ送らずに 400 を返すこと |
 | 秘密を出さない | ログの出力に token・`client_secret`・鍵の形が無いこと。`python3 scripts/check-service-boundary.py` が 0 で終わること |
 | パッケージの管理と CI | `npm ci` がロックファイルどおりに入り、`npm run check -w web`・`npm run check -w api` が手元と CI の両方で走り、型の誤りかテストの失敗で 1 になること。`factory/` を変えない Pull Request ではジョブが成功で終わること |
-| 既存への影響 | `uv run --frozen --project . --all-extras pytest . -q -n 4`・`claude plugin validate .`・既存の必須のチェックが変わらず通り、プラグインの配布物と CLI だけで使う人の振る舞いが変わらないこと |
+| 既存への影響 | `uv run --frozen --project . --all-extras pytest . -q -n 4`・`claude plugin validate .`・既存の必須のチェックが変わらず通り、プラグインのリリース対象と CLI だけで使う人の振る舞いが変わらないこと |
 | 実環境のログイン | private リポジトリのインフラが利用者プールを作った後、実際の Google と GitHub のアカウントでログインし、料金プラン Free・形態 `local` の個人のアカウントができること |
 
 ## 関連リンク

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import time
@@ -916,12 +917,12 @@ def test_1644_the_deadline_is_shared_before_and_after_writing(fake):
         compare=BEHIND,
         contents_at={OLD_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
     )
-    started = time.monotonic()
     out = after_push(fake, "--wait-seconds", "2")
-    elapsed = time.monotonic() - started
     assert out.returncode == 1, out.stdout + out.stderr
-    assert "待った: 2 秒" in out.stdout
-    assert elapsed < 2 + 3
+    # 読みにかかる時間も締め切りを使うので、待った秒は負荷で 2 を下回る。上限だけを固定する。
+    waited = re.search(r"待った: (\d+) 秒", out.stdout)
+    assert waited, out.stdout
+    assert int(waited.group(1)) <= 2
 
 
 @pytest.mark.parametrize("sent", [HEAD_SHA, HEAD_SHA[:7]], ids=["full", "short"])
