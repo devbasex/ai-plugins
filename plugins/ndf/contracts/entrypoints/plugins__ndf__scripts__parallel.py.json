@@ -170,6 +170,7 @@
     "NDF_PARALLEL_MAX_PLANS",
     "NDF_PARALLEL_POLL",
     "NDF_PARALLEL_RELAY",
+    "NDF_PARALLEL_SPAWN_REFUSALS",
     "NDF_PARALLEL_STALL_MINUTES",
     "NDF_PRESENTATION_DIR",
     "NDF_RELAY_DIR",
@@ -190,9 +191,7 @@
     {
       "file": "estimate.json",
       "keys": [
-        "min_samples",
-        "records_dir",
-        "window"
+        "records_dir"
       ]
     },
     {

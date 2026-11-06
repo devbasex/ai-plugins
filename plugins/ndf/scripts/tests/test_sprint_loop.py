@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -19,6 +20,8 @@ import sprint_loop as sl  # noqa: E402
 import sprint_loop_gate as sl_gate  # noqa: E402
 import sprint_loop_record as sl_record  # noqa: E402
 import sprint_loop_select as sl_select  # noqa: E402
+import lap_cost  # noqa: E402
+import usage_ledger  # noqa: E402
 
 MVV_TEXT = "## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n"
 DECL = {
@@ -503,6 +506,190 @@ def test_budget_default_returns_the_unit_to_the_repository_default_and_judges_wi
     assert out["status"] == "ok" and rec(env)["stop"] is None
 
 
+def declare(env, **loop):
+    (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {"enabled": True, **loop}}))
+
+
+def closed_laps(n, hours):
+    """1 周回が `hours` 時間かかった `n` 周の締めた周回。"""
+    return [
+        {
+            "n": i + 1,
+            "outcome": sl.DONE,
+            "started_at": f"2026-10-{i + 1:02d}T00:00:00Z",
+            "ended_at": f"2026-10-{i + 1:02d}T{hours:02d}:00:00Z",
+        }
+        for i in range(n)
+    ]
+
+
+@pytest.mark.parametrize("budget", [{}, {"laps": None, "usd": None, "hours": None}])
+def test_units_not_written_never_stop_the_loop(env, budget):
+    """書かない宣言と null の宣言は同じ意味で、周回の数・時間・費用のどれでも止まらない。"""
+    declare(env, budget=budget)
+    start(env)
+    r = rec(env)
+    assert r["budget"] == {"laps": None, "usd": None, "hours": None}
+    r["laps"] = closed_laps(4, 7)
+    r["laps"][0]["cost"] = 100000
+    used = sl.consumed(r)
+    assert used["laps"] == 4 and used["hours"] > 25
+    assert sl_record.boundary_stop(env, r) is None
+
+
+def test_a_null_budget_passes_every_path_that_reads_the_budget(env):
+    declare(env, budget={"laps": None, "usd": None, "hours": None})
+    start(env)
+    assert run_lap(env)["status"] == "ok" and rec(env)["stop"] is None
+    assert (env.root / ".ndf/loop/l1" / sl.LAPS_MD).is_file()
+    assert sl.cmd_status(env, "l1")["metrics"]["budget"]["laps"] is None
+    r = stopped_on(env, "budget_laps")  # 版を上げる前に止まった記録を再開する
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["metrics"]["status"] == "resumed"
+
+
+def test_a_written_unit_stops_at_its_value_when_others_are_unlimited(env):
+    declare(env, budget={"laps": 2})
+    start(env)
+    run_lap(env)
+    assert rec(env)["stop"] is None
+    env.rank_box["out"] = rank_out(ms("01 近い", [12, 13]))
+    run_lap(env)
+    assert rec(env)["stop"]["condition"] == "budget_laps"
+
+
+def test_budget_override_and_default_on_an_unlimited_loop_leave_history(env):
+    declare(env)
+    start(env)
+    sl.cmd_start(env, "l1", [], {"laps": 5})
+    assert rec(env)["budget"]["laps"] == 5
+    sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT})
+    r = rec(env)
+    assert r["budget"]["laps"] is None
+    assert [h["to"]["laps"] for h in r["budget_history"]] == [5, None]
+
+
+def fake_survey(candidates, current, unreadable=()):
+    return {"candidates": candidates, "current": current, "reason": "理由", "unreadable": list(unreadable)}
+
+
+def test_loop_start_reports_the_environment_and_keeps_the_declaration(env, monkeypatch):
+    decl = env.root / ".ndf" / "pace.json"
+    before = hashlib.sha256(decl.read_bytes()).hexdigest()
+    report = fake_survey({"max_issues": 6, "max_plans": 6, "max_named": 3}, {"max_issues": 2, "max_plans": 6, "max_named": 3})
+    monkeypatch.setattr(sl.run_environment, "survey", lambda root: report)
+    out = start(env)
+    assert out["metrics"]["environment"] == report and len(out["items"]) == 1
+    assert rec(env)["environments"] == [report]
+    assert hashlib.sha256(decl.read_bytes()).hexdigest() == before
+
+
+def test_loop_start_records_nothing_when_the_candidates_match(env, monkeypatch):
+    same = {"max_issues": 2, "max_plans": 6, "max_named": 3}
+    monkeypatch.setattr(sl.run_environment, "survey", lambda root: fake_survey(same, same))
+    assert start(env)["items"] == [] and "environments" not in rec(env)
+
+
+def test_loop_start_goes_on_when_the_environment_cannot_be_read(env, monkeypatch):
+    monkeypatch.setattr(sl.run_environment, "cpus", lambda: 1 / 0)
+    out = start(env)
+    assert out["status"] == "ok" and "cpus" in out["metrics"]["environment"]["unreadable"]
+
+
+def ledger_row(env, runtime, plan, **row):
+    d = env.root / "usage" / runtime
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / "o__r.jsonl", "a") as f:
+        f.write(
+            json.dumps({"schema": 2, "at": "2026-11-06T00:00:00Z", "source": "supervise", "kind": "work", "plan": plan, "usage": {}, **row})
+            + "\n"
+        )
+
+
+@pytest.fixture
+def ledger(env, monkeypatch):
+    monkeypatch.setenv("NDF_USAGE_DIR", str(env.root / "usage"))
+    assert usage_ledger.ledger_dir() == env.root / "usage"
+    return env
+
+
+def lap_plan(env):
+    lap = sl.current_lap(rec(env))
+    return lap, str(Path(lap["out"]) / "1-impl.json")
+
+
+def close(env, cost):
+    lap = sl.current_lap(rec(env))
+    set_state(env, lap, cost=cost)
+    sl.cmd_lap(env, "l1", False, None, [])
+    return rec(env)["laps"][0]
+
+
+def open_lap(env):
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+
+
+def test_lap_cost_is_the_ledger_sum_without_unpriced_runs(ledger):
+    open_lap(ledger)
+    _, plan = lap_plan(ledger)
+    ledger_row(ledger, "claude", plan, cost_usd=1.0)
+    ledger_row(ledger, "claude", plan, cost_usd=0.5, source="cross-review")
+    ledger_row(ledger, "claude", plan, cost_usd=None, kind="subagent")
+    ledger_row(ledger, "claude", "/other/lap-1/sprint/1-impl.json", cost_usd=9.0)
+    ledger_row(ledger, "codex", plan, usage={"total_tokens": 100})
+    ledger_row(ledger, "kiro", plan, usage="unknown")
+    lap = close(ledger, 1.0)
+    assert lap["cost"] == 1.5
+    assert lap["cost_parts"] == {
+        "source": "ledger",
+        "plans": 1.0,
+        "others": 0.5,
+        "unpriced": {"codex": {"calls": 1, "tokens": 100}, "kiro": {"calls": 1}},
+    }
+
+
+def test_lap_cost_falls_back_to_the_reports_without_a_ledger(ledger):
+    open_lap(ledger)
+    lap = close(ledger, 2.5)
+    assert lap["cost"] == 2.5 and lap["cost_parts"]["source"] == "reports"
+
+
+def test_lap_cost_takes_the_reports_when_the_ledger_lost_rows_on_a_resume(ledger):
+    open_lap(ledger)
+    _, plan = lap_plan(ledger)
+    ledger_row(ledger, "claude", plan, cost_usd=1.0)
+    lap = close(ledger, 4.0)
+    assert lap["cost"] == 4.0 and lap["cost_parts"]["source"] == "reports" and lap["cost_parts"]["plans"] == 1.0
+
+
+def test_lap_close_survives_an_unreadable_ledger(ledger, monkeypatch):
+    open_lap(ledger)
+
+    def broken(*a, **k):
+        raise OSError("読めない")
+
+    monkeypatch.setattr(lap_cost.usage_ledger, "read_usage_ledger", broken)
+    lap = close(ledger, 2.0)
+    assert lap["cost"] == 2.0 and lap["cost_parts"]["source"] == "reports"
+
+
+def test_loop_environment_prints_the_report_and_exits_zero(env):
+    sp = SCRIPTS / "sprint-state.py"
+    got = subprocess.run(
+        [sys.executable, str(sp), "loop", "environment", "--root", str(env.root), "--json"], capture_output=True, text=True
+    )
+    out = json.loads(got.stdout.strip().splitlines()[-1])
+    assert got.returncode == 0 and set(out["metrics"]["candidates"]) == {"max_issues", "max_plans", "max_named"}
+
+
+def test_a_stale_release_pending_max_is_not_read(env):
+    declare(env, release_pending_max="何でも")
+    assert start(env)["metrics"]["status"] == "new"
+    assert "release_pending_max" not in rec(env)
+
+
 def test_budget_default_on_a_default_record_or_a_new_loop_adds_no_history(env):
     start(env, laps=sl.BUDGET_DEFAULT, usd=sl.BUDGET_DEFAULT, hours=sl.BUDGET_DEFAULT)
     assert rec(env)["budget"] == {"laps": 3, "usd": 60, "hours": 24} and rec(env)["budget_history"] == []
@@ -514,7 +701,7 @@ def test_budget_default_uses_builtin_defaults_for_undeclared_units(env):
     (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {"enabled": True, "budget": {"usd": 80}}}))
     start(env, laps=1, usd=1, hours=1)
     sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT, "usd": sl.BUDGET_DEFAULT, "hours": sl.BUDGET_DEFAULT})
-    assert rec(env)["budget"] == {"laps": 3, "usd": 80, "hours": 24}
+    assert rec(env)["budget"] == {"laps": None, "usd": 80, "hours": None}
 
 
 def test_cli_budget_takes_a_number_or_default_and_refuses_anything_else():
@@ -1529,13 +1716,18 @@ def test_defer_keeps_the_lap_pending(env):
     assert rec(env)["laps"][0]["outcome"] == "リリース待ち" and out["metrics"]["selected"] == [13]
 
 
-def test_waiting_only_when_pending_laps_reach_the_limit(env):
+def test_unanswered_pending_laps_do_not_stop_the_next_selection(env):
+    """答えの無い保留の周回がいくつあっても、選べる課題があれば次の周回を選ぶ。"""
+    start(env, laps=100)
     request_lap(env, rid="lroot-r000000000001")
-    lap2 = lane_lap(env, nums=(13,), rid="lroot-r000000000002", rank=rank_out(ms("01 近い", [13, 14])))
-    set_state(env, lap2)
-    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap2["out"]) / "prod.json"), "result": "関門"}]), [])
+    for i, n in enumerate((13, 14), 2):
+        lap = lane_lap(env, nums=(n,), rid=f"lroot-r00000000000{i}", rank=rank_out(ms("01 近い", [13, 14, 15])))
+        set_state(env, lap)
+        sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
+    assert len(sl_record.pending_laps(rec(env))) == 3
+    env.rank_box["out"] = rank_out(ms("01 近い", [16]))
     out = sl_select.cmd_select(env, "l1")
-    assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "waiting_only" and len(rec(env)["laps"]) == 2
+    assert out["metrics"]["selected"] == [16] and "stop" not in out["metrics"]
 
 
 def test_waiting_only_instead_of_no_issue_when_only_pending_work_is_left(env):
@@ -1759,6 +1951,19 @@ def test_loop_answer_merges_the_approved_design_and_the_next_lap_selects_it_firs
     assert any(c[-2:] == ["cleanup", "501"] for c in env.calls)  # 後片付けは周回の境が打つ
     # 選ばれた後の周回では先頭に選ばない
     assert 11 not in sl_select.approved_designs(rec(env))
+
+
+def test_loop_exclude_keeps_the_approved_design_first_on_every_reselection(env):
+    """同じ周回の取り直し（loop exclude）は、取り直す周回自身の選定を「選ばれた後の周回」に数えない。"""
+    gated_both(env)
+    sl.cmd_answer(env, "l1", 11, True, None)
+    sl.cmd_answer(env, "l1", 12, False, None)
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 14, 15, 16, 17, 11]))
+    assert sl_select.cmd_select(env, "l1")["metrics"]["selected"][0] == 11
+    for excluded in (13, 14):  # 1 回ごとに先頭から落ちて戻るのではなく、どの取り直しでも先頭に残る
+        got = sl_select.cmd_exclude(env, "l1", excluded, "外す")
+        assert got["metrics"]["selected"][0] == 11
+        assert next(x for x in got["items"] if x["number"] == 11)["reason"] == sl_select.APPROVED_REASON
 
 
 def test_revise_and_rejected_answers_do_not_merge(env, tmp_path):

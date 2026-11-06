@@ -202,7 +202,7 @@ def monitor_argv(a, run_id: int, tdir: pathlib.Path) -> list[str]:
         "--poll",
         str(a.poll),
     ]
-    if a.timeout:
+    if a.timeout is not None:
         mon += ["--timeout", str(a.timeout)]
     if a.stall_timeout:
         mon += ["--stall-timeout", str(a.stall_timeout)]
@@ -303,7 +303,7 @@ def main(argv=None) -> None:
     r.add_argument("--phase", default=limits.DEFAULT_PHASE, help=f"上限の表の工程（{' / '.join(limits.PHASE_TIMEOUT)}）")
     r.add_argument("--model", default=None)
     r.add_argument("--workdir", default=None, help="CLI の作業ディレクトリ（既定はカレント）")
-    r.add_argument("--timeout", type=int, default=None, help="監視の上限（秒）。既定は工程の値")
+    r.add_argument("--timeout", type=int, default=None, help="監視の上限（秒）。既定は工程の値。0 は上限なし")
     r.add_argument("--stall-timeout", type=int, default=None, help="無進捗の許容（秒）")
     r.add_argument("--poll", type=int, default=15, help="監視の周期（秒）")
     r.add_argument("--tmp-dir", default=None, help=f"一時ファイルの置き場所（env: {TMP_ENV}）")

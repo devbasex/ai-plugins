@@ -211,8 +211,8 @@ def load_estimate_decl(root: Path | str | None = None) -> dict:
 
 
 class Decl(schema.Shape):
-    window: int | None = None
-    min_samples: int | None = None
+    window: int | None = None  # 読まない。書いてある宣言を断らないために残す（#2505）
+    min_samples: int | None = None  # 同上
     size_unit_seconds: float | None = None
     scale: list[int] | None = None
     records_dir: str | None = None
@@ -406,8 +406,23 @@ class IssueActual:
     runs: list[Run] = field(default_factory=list)
 
 
-def _settle_runs(acc: IssueActual, done: str) -> None:
-    """振り分けた実行を始まりの順に並べ、完了条件のフェーズの最初の `成功` で打ち切って、A・C・L を acc へ書く。"""
+def _collect_issue_runs(table: dict[str, Run], done: str, since_ts: float | None) -> dict[int, IssueActual]:
+    """実行を課題へ振り分ける。`since_ts` 以前に始まった実行と、完了条件より後のフェーズの実行は入れない。"""
+    limit = _phase_index(done)
+    out: dict[int, IssueActual] = {}
+    for run in table.values():
+        if since_ts is not None and (ts(run.started) or 0) <= since_ts:
+            continue
+        idx = _phase_index(run.phase)
+        if limit is not None and idx is not None and idx > limit:
+            continue
+        for issue in run.issues:
+            out.setdefault(issue, IssueActual(issue)).runs.append(run)
+    return out
+
+
+def _accumulate_issue(acc: IssueActual, done: str) -> None:
+    """1 課題の完了判定と A・C・L を `acc` へ書く。完了した課題の `runs` は完了より後に始まった実行を除く。"""
     acc.runs.sort(key=lambda r: ts(r.started) or 0)
     ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
     end = ends[0] if ends else None
@@ -432,7 +447,7 @@ def _settle_runs(acc: IssueActual, done: str) -> None:
 
 
 def _add_human_seconds(out: dict[int, IssueActual], rows: list[dict], since_ts: float | None) -> None:
-    """`human` の行の秒を H へ足す。`since_ts` があれば、その時刻より後の行だけを足す。実行の無い課題も out に加える。"""
+    """`human` の行の秒を課題の H へ足す。実行の無い課題の行は、その課題の項目を新しく作る。"""
     for r in rows:
         if r.get("kind") != "human" or not isinstance(r.get("seconds"), (int, float)):
             continue
@@ -451,19 +466,9 @@ def issue_actuals(
     A は完了条件のフェーズまでの実行（失敗・中断・取り消し・再試行を含む）の `step` の秒の和で、2 つ以上の課題を
     指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
     C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
-    limit = _phase_index(done)
     since_ts = ts(since) if since else None
-    table = run_table(rows, alive)
-    out: dict[int, IssueActual] = {}
-    for run in table.values():
-        if since_ts is not None and (ts(run.started) or 0) <= since_ts:
-            continue
-        idx = _phase_index(run.phase)
-        if limit is not None and idx is not None and idx > limit:
-            continue
-        for issue in run.issues:
-            out.setdefault(issue, IssueActual(issue)).runs.append(run)
+    out = _collect_issue_runs(run_table(rows, alive), done, since_ts)
     for acc in out.values():
-        _settle_runs(acc, done)
+        _accumulate_issue(acc, done)
     _add_human_seconds(out, rows, since_ts)
     return out

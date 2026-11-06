@@ -59,4 +59,3 @@ python3 "$SCRIPTS/estimate.py" predict --issue 1856 --done 実装 \
 ## 関連
 
 - 棚卸しの Size は `backlog-refinement` が同じ部品の見込みから決める（`references/ranking.md` の「大きさ」）
-- 実装のステップの上限は `supervise.py new` が同じ記録から決める（規約の「実装の上限」）

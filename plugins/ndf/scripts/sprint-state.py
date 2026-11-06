@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "schema", "locks", "durable", "versions")  # schema は supervise_lib.paths → decl が使う
+deps.require("md", "mdtable", "schema", "locks", "durable", "versions", "procs")  # schema は supervise_lib.paths → decl が使う
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402

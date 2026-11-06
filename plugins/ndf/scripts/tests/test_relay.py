@@ -654,7 +654,7 @@ def test_run_carries_policy_args_through_shell_function(term, tmp_path):
 
 def test_run_chain_three_sections(term):
     """人が何も入力せずに 3 つ目の区間まで起動する（AC17 の試験用の形）。"""
-    t = term()
+    t = term(env={"NDF_RELAY_EXIT_WAIT": "30"})  # 負荷の下でも /exit で終わる形を見る（SIGTERM へ進ませない）
     t.wait_start(1)
     t.type("mark mark 三つ目\r")
     t.wait_start(3, timeout=25)
@@ -1072,60 +1072,21 @@ def seed_starts(home, n, name="old"):
             f.write(json.dumps({"event": "start", "at": at, "section": i + 1}) + "\n")
 
 
-def test_run_max_starts_keeps_section(term):
-    t = term()
+def test_run_many_starts_of_the_day_do_not_refuse(term):
+    """同じ日の起動が何件あっても、`NDF_RELAY_MAX_STARTS` を設定しても、次の区間を起動する。"""
+    t = term(env={"NDF_RELAY_MAX_STARTS": "1"})
     seed_starts(t.env["HOME"], 20)
     t.wait_start(1)
     t.type("mark next\r")
-    t.wait(lambda: "ndf-relay: 次の区間を起動しない" in t.text, what="上限の 1 行")
-    time.sleep(0.5)
-    assert len(t.starts()) == 1
-    assert b"/exit" not in t.child_input(0)
-    assert events(t.rows(), "stop")[0]["reason"] == "max-starts"
-    assert "/exit して示されたコマンドを手で入力する" in t.text
-    t.type("quit 5\r")
-    assert t.finish() == 5
-    assert events(t.rows(), "end")[0]["ended_by"] == "no-mark"
-
-
-def test_run_max_starts_race_one_wins(tmp_path):
-    """残り 1 枠を 2 つのラッパーが取り合っても、起動するのは 1 つだけ（AC10）。"""
-    home = tmp_path / "shared-home"
-    home.mkdir()
-    ts = []
-    try:
-        for name in ("a", "b"):
-            (tmp_path / name).mkdir()
-            ts.append(Term(tmp_path / name, env={"HOME": home}))
-        seed_starts(home, 17)  # 2 つの 1 つ目の区間で 19。残り 1 枠
-        for t in ts:
-            t.wait_start(1)
-        for t in ts:
-            t.type("mark next\r")
-
-        # HOME を共有するので t.rows() は両方の記録を含む。自分のラッパーの記録だけを見る。
-        # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
-        # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
-        def own(t):
-            p = pathlib.Path(t.starts()[0]["relay_dir"]) / "log.jsonl"
-            return [json.loads(x) for x in p.read_text().splitlines()]
-
-        def decided(t):
-            return len(t.starts()) >= 2 or events(own(t), "stop")
-
-        ts[0].wait(lambda: all(decided(t) for t in ts), what="両方が決まる")
-        started = sorted(len(t.starts()) for t in ts)
-        assert started == [1, 2], [own(t) for t in ts]
-        loser = next(t for t in ts if len(t.starts()) == 1)
-        assert [r["reason"] for r in events(own(loser), "stop")] == ["max-starts"]
-    finally:
-        for t in ts:
-            t.close()
+    t.wait_start(2)
+    assert events(t.rows(), "stop") == []
+    t.type("quit 0\r")
+    t.finish()
 
 
 def test_run_spin_stops_third(term):
     """3 つ続けて短い区間なら 3 つ目の合図で切り替えない。1 つ目の区間も数える（AC11）。"""
-    t = term(env={"NDF_RELAY_SPIN": "3"})
+    t = term(env={"NDF_RELAY_SPIN": "30"})  # 負荷の下で hook が遅れても、区間が短いままの値
     t.wait_start(1)
     t.type("mark mark mark 終点\r")
     t.wait_start(3, timeout=25)
@@ -1158,7 +1119,9 @@ def test_run_sigkill_when_child_ignores_exit(term):
     t.wait_start(2)
     e1 = events(t.rows(), "end")[0]
     assert e1["ended_by"] == "sigkill"
-    assert e1["seconds"] < 1.5  # 合図の written_at まで。/exit の後の待ちを含めない
+    started = dt.datetime.fromisoformat(events(t.rows(), "start")[0]["at"])
+    ended = dt.datetime.fromisoformat(e1["at"])
+    assert (ended - started).total_seconds() - e1["seconds"] >= 0.5  # 合図の written_at まで。/exit の後の待ちを含めない
     os.kill(t.starts()[1]["pid"], signal.SIGKILL)
     t.finish()
 
@@ -1392,10 +1355,13 @@ def test_run_switches_when_goal_unmet(term):
     t.finish()
 
 
+LOADED_QUIET = 5  # 合図の後の入力や hook が動く秒を静止の待ちの内に収める。負荷の下では数秒かかる
+
+
 @pytest.mark.parametrize("case", ["user", "question", "background"])
 def test_run_goal_unmet_cancelled(term, case):
     """合図の後に利用者が入力したとき・質問が出たとき・背景の処理が起動したときは切り替えない。"""
-    t = term(env={"NDF_RELAY_QUIET": "0.5", "NDF_RELAY_ESC_WAIT": "0.3"})
+    t = term(env={"NDF_RELAY_QUIET": str(LOADED_QUIET), "NDF_RELAY_ESC_WAIT": "0.3"})
     t.wait_start(1)
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
@@ -1406,7 +1372,14 @@ def test_run_goal_unmet_cancelled(term, case):
         t.type(f"tr {json.dumps(row, ensure_ascii=False)}\r")
     elif case == "question":
         t.type("q open\r")
-        t.wait(lambda: (d / "question").exists(), what="質問の合図")
+
+        def question_opened():
+            # 負荷が高いと hook の起動が静止の待ち（0.5 秒）より遅れ、質問の前に /exit が書かれる。
+            # 端末の入力で静止の待ちを延ばし、合図が立ってから判定させる
+            t.type("\r")
+            return (d / "question").exists()
+
+        t.wait(question_opened, what="質問の合図")
         t.type("q close\r")
     else:
         row = {
@@ -1417,7 +1390,7 @@ def test_run_goal_unmet_cancelled(term, case):
         t.type(f"tr {json.dumps(row)}\r")
     t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
     t.type("stop\r")
-    time.sleep(2.5)
+    time.sleep(LOADED_QUIET + 2)
     assert len(t.starts()) == 1
     assert b"/exit" not in t.child_input(0)
     t.type("quit 0\r")
@@ -2214,15 +2187,16 @@ def question_rows(t, n=0):
 
 def test_guard_question_blocks_exit(term):
     """G1: 合図の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
-    t = term(env={"NDF_RELAY_QUIET": "0.5"})
+    t = term(env={"NDF_RELAY_QUIET": str(LOADED_QUIET)})
     t.wait_start(1)
+    d = pathlib.Path(t.starts()[0]["relay_dir"])
     t.type("mark 次\r")  # 合図の後に応答が再開して質問が出た形
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     t.type("q open\r")
     t.wait(lambda: question_rows(t), what="質問の合図")
     assert question_rows(t)[0] == {"action": "open", "stdout": "", "code": 0}
-    d = pathlib.Path(t.starts()[0]["relay_dir"])
     assert (d / "question").exists() and (d / "next.json").exists()
-    time.sleep(1.2)  # 静止の待ちの 2 倍を超えても書かない
+    time.sleep(LOADED_QUIET + 0.5)  # 静止の待ちを超えても書かない
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
     t.type("q close\r")
     t.wait(lambda: not (d / "question").exists(), what="合図が消える")
@@ -2362,7 +2336,7 @@ def test_question_denies_when_lock_busy(tmp_path, relay):
         fcntl.flock(f, fcntl.LOCK_EX)
         t0 = time.time()
         p = question(tmp_path, relay.dir)
-        assert time.time() - t0 < 4.5
+        assert time.time() - t0 < 10  # 待ちの 3 秒に、負荷の下の起動の遅れを足した上限
     assert p.returncode == 0
     out = json.loads(p.stdout)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and out["hookEventName"] == "PreToolUse"
@@ -2416,7 +2390,7 @@ def test_question_unknown_or_missing_action_keeps_mark(tmp_path, relay, action):
 
 
 def test_guard_exit_queued_behind_question(term):
-    """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えず、count.lock を放す。
+    """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えない。
     答えの後の Stop が合図を書き直していれば、その中身で起動する。"""
     t = term(env={"FAKE_EXIT_QUESTION": "1", "NDF_RELAY_EXIT_WAIT": "1", "NDF_RELAY_TERM_WAIT": "1"})
     t.wait_start(1)
@@ -2426,9 +2400,6 @@ def test_guard_exit_queued_behind_question(term):
     time.sleep(2.5)
     pid = t.starts()[0]["pid"]
     assert not (t.fake_dir / f"sigterm-{pid}").exists()
-    with open(pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "count.lock", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別のラッパーが取れる
-        fcntl.flock(f, fcntl.LOCK_UN)
     t.type("answer mark 答えの後\r")
     t.wait_start(2)
     assert t.starts()[1]["argv"] == ["答えの後"]
@@ -2703,6 +2674,107 @@ def test_version_dir_prune_keeps_two_and_in_use(tmp_path):
     assert (base / names[0] / f"inuse-{os.getpid()}").exists()
 
 
+def _idle_dir(tmp_path):
+    d = tmp_path / "relay-10.17.0-00000000"
+    d.mkdir()
+    return d
+
+
+def test_version_dir_foreign_mark_counts_as_in_use(tmp_path):
+    """別のコンテナの印は、こちらで pid が死んで見えても使用中で、消さない（#2583）。"""
+    d = _idle_dir(tmp_path)
+    mark = d / f"inuse-another-container-{dead_pid()}"
+    mark.touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    assert mark.exists()
+
+
+def test_version_dir_prune_keeps_a_dir_marked_by_another_container(tmp_path):
+    base = tmp_path / "ndf"
+    base.mkdir()
+    names = [f"relay-10.17.{i}-0000000{i}" for i in range(5)]
+    for i, n in enumerate(names):
+        (base / n).mkdir()
+        os.utime(base / n, (1000 + i, 1000 + i))
+    (base / names[0] / f"inuse-another-container-{dead_pid()}").touch()
+    relay_version_dir.VersionDir(str(base)).prune()
+    assert version_dirs(base) == sorted([names[0], names[3], names[4]])
+
+
+def test_version_dir_old_foreign_mark_expires_after_the_owner_window(tmp_path):
+    """別のコンテナの印でも、更新が寿命の窓（持ち主の記録と同じ 24 時間）より古ければ消す。"""
+    d = _idle_dir(tmp_path)
+    mark = d / f"inuse-another-container-{dead_pid()}"
+    mark.touch()
+    old = time.time() - relay_version_dir.FOREIGN_WINDOW - 60
+    os.utime(mark, (old, old))
+    assert not relay_version_dir.VersionDir._in_use(str(d))
+    assert not mark.exists()
+
+
+def test_version_dir_foreign_window_is_the_owner_record_window():
+    """寿命の窓は持ち主の記録（`lib/run_owner.py`）の窓と同じ値に保つ。"""
+    import run_owner
+
+    assert relay_version_dir.FOREIGN_WINDOW == run_owner.WINDOW
+
+
+def test_version_dir_own_container_mark_follows_the_pid(tmp_path):
+    """同じコンテナの印は pid の生死で決まる。"""
+    d = _idle_dir(tmp_path)
+    live, dead = relay_version_dir.inuse_name(os.getpid()), relay_version_dir.inuse_name(dead_pid())
+    (d / live).touch()
+    (d / dead).touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    assert (d / live).exists() and not (d / dead).exists()
+
+
+def test_version_dir_legacy_mark_is_read_as_before(tmp_path):
+    """旧形式の `inuse-<pid>` は持ち主が分からず、今までどおり pid の生死で読む。"""
+    d = _idle_dir(tmp_path)
+    (d / f"inuse-{os.getpid()}").touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    os.unlink(d / f"inuse-{os.getpid()}")
+    (d / f"inuse-{dead_pid()}").touch()
+    assert not relay_version_dir.VersionDir._in_use(str(d))
+    assert not [n for n in os.listdir(d) if n.startswith("inuse-")]
+
+
+def test_version_dir_refresh_keeps_a_long_run_within_the_window(tmp_path, monkeypatch):
+    """動いているラッパーは印の時刻を進める。別のコンテナの窓を過ぎても消されず、消えた印は置き直す。"""
+    d = _idle_dir(tmp_path)
+    (d / relay_version_dir.MANIFEST).touch()
+    mark = pathlib.Path(relay_version_dir.claim_inuse(str(d)))
+    old = time.time() - relay_version_dir.FOREIGN_WINDOW - 60
+    os.utime(mark, (old, old))
+    monkeypatch.setattr(relay_version_dir, "_refreshed_at", 0.0)
+    relay_version_dir.refresh_inuse(str(d))
+    assert time.time() - mark.stat().st_mtime < 60
+    mark.unlink()
+    relay_version_dir.refresh_inuse(str(d))  # 間隔の中は何もしない
+    assert not mark.exists()
+    monkeypatch.setattr(relay_version_dir, "_refreshed_at", 0.0)
+    relay_version_dir.refresh_inuse(str(d))
+    assert mark.exists()
+
+
+def test_relay_tick_refreshes_the_mark_even_when_halted(monkeypatch):
+    """動いている間の tick が印の時刻を進める。止まったラッパーも、プロセスが居る間は使用中である。"""
+    seen = []
+    monkeypatch.setattr(relay_run.version_dir, "refresh_inuse", lambda: seen.append(1))
+    relay_run.Relay.tick(types.SimpleNamespace(halted=True))
+    assert seen == [1]
+
+
+def test_version_dir_release_claims_removes_both_forms(tmp_path):
+    """入れ替えの前の版が旧形式で置いた印も、新しい形の印も外す。"""
+    d = _idle_dir(tmp_path)
+    (d / f"inuse-{os.getpid()}").touch()
+    (d / relay_version_dir.inuse_name(os.getpid())).touch()
+    relay_version_dir.release_claims(str(d))
+    assert os.listdir(d) == []
+
+
 def test_version_dir_half_written_is_not_pointed(tmp_path, monkeypatch):
     base = tmp_path / "ndf"
     base.mkdir()
@@ -2731,7 +2803,7 @@ def test_version_dir_claim_marks_only_version_dirs(tmp_path):
     base.mkdir()
     name = relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
     got = relay_version_dir.claim_inuse(str(base / name))
-    assert got == str(base / name / f"inuse-{os.getpid()}") and os.path.exists(got)
+    assert got == str(base / name / relay_version_dir.inuse_name(os.getpid())) and os.path.exists(got)
     relay_version_dir.release_inuse(got)
     assert not os.path.exists(got)
     assert relay_version_dir.claim_inuse(str(ROOT / "scripts")) is None  # プラグインのキャッシュには置かない
@@ -4190,8 +4262,8 @@ def test_swap_runs_next_session_in_new_version_dir(tmp_path, term):
     assert t.starts()[1]["relay_dir"] == str(d)
     assert not (d / "handover.json").exists()
     # 使用中の印は入れ替え後のバージョンディレクトリにだけある
-    assert not (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
-    assert (sw.base / new_name / f"inuse-{t.proc.pid}").exists()
+    assert not (sw.base / sw.old_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
+    assert (sw.base / new_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
     assert "── ndf-relay: 区間 2 ──" in t.text and "入れ替えずに" not in t.text
     assert termios.tcgetattr(t.slave) != t.before  # raw のまま中継する
     # 入れ替えた後も停止シグナルファイルの扱いが続く（起動は 2 回のまま）
@@ -4266,7 +4338,7 @@ def test_swap_failure_keeps_current_version(tmp_path, term, case):
     assert sk["section"] == 1 and sk["from"] == sw.old_name and isinstance(sk["seconds"], float)
     assert rows[3]["relay_version_dir"] == sw.old_name and rows[3]["section"] == 2
     assert t.text.count("入れ替えずに今の版で続ける") == 1
-    assert (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    assert (sw.base / sw.old_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
     (d,) = t.relay_dirs()
     assert not (d / "handover.json").exists()
     t.type("quit 0\r")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -345,3 +346,56 @@ def test_an_importable_require_drops_an_inherited_shared_venv(monkeypatch, tmp_p
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / "mine"))
     deps.require("t")
     assert os.environ["UV_PROJECT_ENVIRONMENT"] == str(tmp_path / "mine")
+
+
+def minor_of(python: str) -> tuple[int, int] | None:
+    """`python` のマイナー版。起動できなければ None。"""
+    p = subprocess.run([python, "-c", "import sys; print(*sys.version_info[:2])"], capture_output=True, text=True)
+    return tuple(int(x) for x in p.stdout.split()) if p.returncode == 0 else None  # type: ignore[return-value]
+
+
+def test_a_child_uv_run_of_another_project_leaves_the_shared_venv_alone(tmp_path):
+    """受け入れ条件 6: 本物の uv で、起動し直したスクリプトの子が打つ別のプロジェクトの `uv run` が共有の環境を作り直さない。
+
+    ネットワークを使わないよう、Python は手元の 2 つを使い、psutil は uv のキャッシュから入れる。そろわなければ skip する。"""
+    uv = shutil.which("uv")
+    first, second = getattr(sys, "_base_executable", sys.executable), "/usr/bin/python3"
+    if uv is None or not Path(second).exists():
+        pytest.skip("uv か /usr/bin/python3 が無い")
+    a, b = minor_of(first), minor_of(second)
+    if a is None or b is None or a == b:
+        pytest.skip(f"マイナー版の違う Python が 2 つそろわない（{a} と {b}）")
+    drop = ("NDF_DEPS_REEXEC", "NDF_DEPS_VENV", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "PYTHONPATH")
+    base = {k: v for k, v in os.environ.items() if k not in drop}
+    base.update(UV_PYTHON_DOWNLOADS="never", UV_OFFLINE="1")
+    shared, bare = tmp_path / "shared", tmp_path / "bare"
+    for venv, python in ((shared, first), (bare, first)):
+        if (
+            p := subprocess.run([uv, "venv", "--quiet", "--python", python, str(venv)], capture_output=True, text=True, env=base)
+        ).returncode:
+            pytest.skip(f"環境を作れない: {p.stderr.strip()}")
+    sync = [uv, "sync", "--quiet", "--frozen", "--offline", "--project", str(PLUGIN), "--extra", "procs"]
+    p = subprocess.run(sync, capture_output=True, text=True, env={**base, "UV_PROJECT_ENVIRONMENT": str(shared)})
+    if p.returncode:
+        pytest.skip(f"uv のキャッシュから psutil を入れられない: {p.stderr.strip()}")
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "pyproject.toml").write_text(
+        f'[project]\nname = "other"\nversion = "0"\nrequires-python = ">={b[0]}.{b[1]},<{b[0]}.{b[1] + 1}"\n'
+    )
+    script = tmp_path / "entry.py"
+    script.write_text(
+        f"import subprocess, sys\nsys.path.insert(0, {str(LIB)!r})\nimport deps\ndeps.require('procs')\n"
+        f"c = [{uv!r}, 'run', '--quiet', '--project', {str(other)!r}, '--python', {second!r}, 'python', '-c', 'pass']\n"
+        "sys.exit(subprocess.run(c, cwd=sys.argv[1]).returncode)\n"
+    )
+    cfg = shared / "pyvenv.cfg"
+    before = (cfg.read_text(), cfg.stat().st_mtime_ns)
+    # psutil の無い環境の python で打ち、require に共有の環境へ起動し直させる
+    p = subprocess.run(
+        [str(bare / "bin" / "python"), str(script), str(other)], capture_output=True, text=True, env={**base, "NDF_DEPS_VENV": str(shared)}
+    )
+    assert p.returncode == 0, p.stderr
+    assert (cfg.read_text(), cfg.stat().st_mtime_ns) == before
+    assert (other / ".venv").is_dir()  # 別のプロジェクトは自分の環境で動く
+    assert subprocess.run([str(shared / "bin" / "python"), "-c", "import psutil"], capture_output=True).returncode == 0

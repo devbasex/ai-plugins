@@ -41,9 +41,7 @@
     {
       "file": "estimate.json",
       "keys": [
-        "min_samples",
-        "records_dir",
-        "window"
+        "records_dir"
       ]
     },
     {

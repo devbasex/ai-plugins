@@ -37,6 +37,7 @@ SUBCOMMANDS = [
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
+    "progress_watch",  # 実装のステップの進みの観測（#2505）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
     "pr_materials",
     "design_stage",
@@ -75,6 +76,7 @@ MODULES = [
 ]
 # プランの実行の部品（ハンドラー・状態・監視・claude）とプランを作る側は Engine を import しない
 NO_ENGINE = [
+    "progress_watch",
     "decl",
     "plan",
     "limits",

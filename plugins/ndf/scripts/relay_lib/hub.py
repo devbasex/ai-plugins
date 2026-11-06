@@ -85,6 +85,11 @@ def max_named() -> int:
     return max(1, int(env_num("NDF_RELAY_MAX_NAMED", 3)))
 
 
+def launch_check_seconds() -> float:
+    """起動の後、セッションが残っているかを確かめるまで待つ秒数（`NDF_RELAY_LAUNCH_CHECK`。既定 2）。"""
+    return env_num("NDF_RELAY_LAUNCH_CHECK", 2)
+
+
 def wait_seconds() -> float:
     """頼む側が結果を待つ秒数（`NDF_RELAY_HUB_WAIT`。既定 10。決定 14）。"""
     return env_num("NDF_RELAY_HUB_WAIT", 10)
@@ -440,6 +445,10 @@ class Hub:
             env.update(NDF_RELAY_ROLE=role, NDF_RELAY_PLAN=plan or "")
         why = tmux.new_session(name, cwd, argv, env)
         if why:
+            return self.refuse(kind, name, Refusal(TMUX_FAILED, why, 1))
+        time.sleep(launch_check_seconds())
+        if tmux.session_gone(name):
+            why = f"{name} のセッションが起動の直後に消えた（起動のコマンド: {argv[0]}）"
             return self.refuse(kind, name, Refusal(TMUX_FAILED, why, 1))
         registry[name] = {"session": name, "cwd": cwd, "args": args, "created_at": stamp(), "by": by}
         if role:

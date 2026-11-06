@@ -17,6 +17,7 @@ import legacy_values
 import project_mvv as pm
 import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
+from lap_cost import lap_cost
 from sprint_loop_backlog import lap_depths, lap_research
 
 from sprint_loop_record import (
@@ -629,7 +630,7 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
         state if state is not None else (jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {})
     )
     rows = [p.get("row") or {} for p in state.get("plans", [])]
-    lap["cost"] = round(sum(float(r.get("cost") or 0) for r in rows), 6)
+    lap["cost"], lap["cost_parts"] = lap_cost(lap, round(sum(float(r.get("cost") or 0) for r in rows), 6))
     lap["seconds"] = round(sum(float(r.get("seconds") or 0) for r in rows), 3)
     lap["versions"] = state.get("versions") or lap.get("versions") or {}
     copy_state_gates(lap, state)

@@ -78,10 +78,11 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "format": [{"name": "<名前>", "command": "<整形のコマンド>"}, ...],   # 省略可。無ければ format のステップを置かず、送信の前にも整形しない
                                             # 終了コード 0 = 違反が残らない / 1 = 整形で直らない違反 / ほか = 仕組みの失敗
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
-       "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの timeout（秒）。無ければ雛形の値
+       "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの経過時間の上限（秒）。無ければ上限なし
+       "impl_stall_seconds": <1 以上の整数>,        # 省略可。impl のステップの無進捗の許容時間（秒）。無ければ 1800
        "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
   refactor の timeout は想定最大時間（無ければ cross-refactoring の既定の予算）に 10%（最低 30 秒）の余裕を足した秒。
-  impl_timeout と refactor_budget_minutes は --impl-timeout・--refactor-budget-minutes が先に効く
+  impl_timeout・impl_stall_seconds・refactor_budget_minutes は --impl-timeout・--impl-stall・--refactor-budget-minutes が先に効く
   テストの範囲の選び方（--tests）とデプロイしてよいかの判断は、宣言にせず conductor と judge のステップに残す
 
 デプロイの雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint はリリースプランを

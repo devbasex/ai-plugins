@@ -15,14 +15,15 @@ DECL_WORDS = {
     "base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
     "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
     "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
-    "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout）",
+    "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout。書いたときだけ効く）",
+    "impl_stall_seconds": "無進捗の許容時間（--impl-stall か .ndf/supervise.json の impl_stall_seconds。既定 1800 秒）",
     "refactor_budget_minutes": "構造改善の想定最大時間（--refactor-budget-minutes か .ndf/supervise.json の refactor_budget_minutes）",
 }
 # 任意の設定（--help の「任意の設定」に出す。無くてもプランを書ける）
 OPTIONAL_DECLS = {
-    "impl": ("impl_timeout",),
+    "impl": ("impl_timeout", "impl_stall_seconds"),
     "check": ("refactor_budget_minutes",),
-    "sprint": ("release", "impl_timeout", "refactor_budget_minutes"),
+    "sprint": ("release", "impl_timeout", "impl_stall_seconds", "refactor_budget_minutes"),
     "close": ("release", "refactor_budget_minutes"),
 }
 
@@ -164,7 +165,21 @@ NEW_ARGS = [
     ),
     (
         "--impl-timeout",
-        {"type": positive_int, "metavar": "SECONDS", "help": "実装のステップの上限（秒）。既定は .ndf/supervise.json の impl_timeout"},
+        {
+            "type": positive_int,
+            "metavar": "SECONDS",
+            "help": "実装のステップの経過時間の上限（秒）。既定は .ndf/supervise.json の impl_timeout。どちらも無ければ上限なし",
+        },
+        "impl sprint",
+    ),
+    (
+        "--impl-stall",
+        {
+            "type": positive_int,
+            "dest": "impl_stall_seconds",
+            "metavar": "SECONDS",
+            "help": "実装のステップの無進捗の許容時間（秒）。既定は .ndf/supervise.json の impl_stall_seconds、無ければ 1800",
+        },
         "impl sprint",
     ),
     (

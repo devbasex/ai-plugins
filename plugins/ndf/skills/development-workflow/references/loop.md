@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | `<ループ名>` | 記録の名前（英数字・`-`・`_`）。同じ名前の記録があれば再開する | `l<UTC の YYYYMMDD>` |
 | `--milestones` | 選定の対象を絞る | 開いているマイルストーンすべて |
-| `--budget-*` | 予算を上書きする（記録の `budget_history` に残る）。値は数か `default`（その単位を反映の時点の `.ndf/pace.json` の `loop.budget` へ戻す。宣言が無い単位は組み込みの既定）。値が変わらなければ履歴に行を足さない | `.ndf/pace.json` の `loop.budget` |
+| `--budget-*` | 予算を上書きする（記録の `budget_history` に残る）。値は数か `default`（その単位を反映の時点の `.ndf/pace.json` の `loop.budget` へ戻す。宣言が無い単位は無制限）。値が変わらなければ履歴に行を足さない | `.ndf/pace.json` の `loop.budget`。書かない単位は無制限 |
 
 `ndf-next` と再開のコマンドは `/goal /ndf:development-workflow --loop <ループ名> -- 終わり: [ndf-loop] stopped <ループ名> の行を出したとき`
 の形で、`sprint-state.py loop` の結果の `resume` をそのまま使う。`/goal` で始めていなければ `loop start --no-goal` を打つ。
@@ -112,9 +112,9 @@
 | 1 | `user_stop` | `.ndf/loop/<名>/stop` がある（`$SS loop stop <名>` が置く） | 再開でファイルを消して解ける |
 | 2 | `mvv_changed` | プロジェクト MVV が開始時と違う・承認と一致しない | 解けない。新しい名前でループを始め直す |
 | 3 | `same_failure` | 直近の失敗の周回が同じ鍵で `loop.same_failure` 回続く（完了の周回で数え直す） | 再開の起動で解け、数え直す |
-| 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わった周回の数・費用の和・動いていた時間が予算以上 | `--budget-*` で上書きした予算で判定し直す |
+| 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わった周回の数・費用の和・動いていた時間が、数を書いた予算以上（書かない単位では当たらない） | `--budget-*` で上書きした予算で判定し直す |
 | 5 | `no_issue` / `outside_mvv` | 選定の候補が 0 件 / 候補がすべて外れた。`no_issue` は止まる前に 1 回だけ見直しを挟む（`loop select` が `status: review_first` と `metrics.next` を返す。見直しの後も 0 件なら止まる） | 再開で選定をやり直す |
-| — | `waiting_only` | 並列の計画のレーンで、答えの無い保留の周回が `loop.release_pending_max`（既定 2）に達した・選べる課題が無く答えを待つ作業だけが残る・3〜5 に当たったが答えの無い保留の周回がある | 再開（答えを送ったオーガナイザーが `relay.py restart` で起こす）の境で答えを読み直す |
+| — | `waiting_only` | 並列の計画のレーンで、選べる課題が無く答えを待つ作業だけが残る・3〜5 に当たったが答えの無い保留の周回がある。保留の周回の数では止まらず、待ちを抱えたまま次の周回へ進む | 再開（答えを送ったオーガナイザーが `relay.py restart` で起こす）の境で答えを読み直す |
 
 周回の途中で止まるのは `gate2_returned`・`mvv_changed`・`refused`（`new sprint` などが断った）だけで、周回は進行中のまま残る。
 `gate2_returned` は利用者が承認すれば `loop start` の `metrics.next` の `pipeline`（リリース承認ゲートで止まった計画を経路に合う
@@ -168,7 +168,11 @@
 | `gate2_returned` | 問う（リリース承認ゲート） |
 | それ以外 | 問わない。本文で理由と再開のコマンドを示して終える |
 
-ラッパーが 1 日の起動回数の上限で止めたときは、`$SS loop status <名>` がそのことと再開のコマンドを出す。
+## 実行環境の調査
+
+`loop start` と `parallel.py start` のたびに、動く場所・CPU・メモリ・レーンとプランの数を調べ、`loop.max_issues`・`NDF_PARALLEL_MAX_PLANS`・`NDF_RELAY_MAX_NAMED` の候補を結果の `metrics.environment` に載せる。単独では `$SS loop environment --json` で見る。
+
+調査は宣言を書かない。候補と今の値が違うときは結果の項目と記録の `environments` に残して進み、宣言へ書くのは人である（`.ndf/pace.json` の変更は Pull Request として承認ゲートを通る。C7）。読めない項目は `unreadable` に載せ、開発ループを止めない。候補は 8 コア・30 GiB でプラン 6 本の実測の比から導き、人が 1 回の承認で読める量は式に入らない。
 
 ## 記録
 

@@ -37,6 +37,7 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("NDF_RELAY_TMUX", "ndf-no-tmux")
     monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
+    monkeypatch.setenv("NDF_RELAY_LAUNCH_CHECK", "0")
     monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "accounts"))  # 利用者の置き場（`account use` の指定）を読まない
     root = tmp_path / "state" / "ndf" / "relay"
     root.mkdir(parents=True)
@@ -370,7 +371,13 @@ def hubenv(tmp_path):
     sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
     made = []
     # CI には TERM が無く、tmux の attach が端末の種類を決められずに失敗する。擬似端末に実際の端末と同じく TERM を与える
-    env = {"NDF_RELAY_TMUX": "tmux", "TMUX_TMPDIR": sock, "NDF_RELAY_HUB_WAIT": "15", "TERM": "xterm-256color"}
+    env = {
+        "NDF_RELAY_TMUX": "tmux",
+        "TMUX_TMPDIR": sock,
+        "NDF_RELAY_HUB_WAIT": "15",
+        "TERM": "xterm-256color",
+        "NDF_RELAY_LAUNCH_CHECK": "0.2",
+    }
 
     def start(**kw):
         t = Term(tmp_path, env={**env, **kw.pop("env", {})}, **kw)
@@ -480,6 +487,32 @@ class TestWithTmux:
         os.kill(int((d / "relay.pid").read_text()), 9)
         wait_state(hub, "a", "stopped")
         assert ls_rows(hub)["t1"]["state"] == "running"
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
+def test_session_gone_with_a_real_tmux(tmp_path, monkeypatch):
+    """実物の tmux: 消えた置き場の python を渡しても `new-session` は成功し、セッションは残らない（#2583 の再現）。
+    サーバごと居ないときも消えたと読み、動いているセッションは消えたと読まない。"""
+    sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
+    monkeypatch.setenv("TMUX_TMPDIR", sock)
+    monkeypatch.setenv("NDF_RELAY_TMUX", "tmux")
+    try:
+        assert tx.new_session("gone", str(tmp_path), ["/無い/.venv/bin/python", "relay.py"], {}) is None
+        end = time.monotonic() + 5
+        while time.monotonic() < end and not tx.session_gone("gone"):
+            time.sleep(0.05)
+        assert tx.session_gone("gone")
+        assert tx.new_session("stays", str(tmp_path), ["sleep", "30"], {}) is None
+        assert not tx.session_gone("stays")
+    finally:
+        subprocess.run(["tmux", "-L", tx.SOCKET, "kill-server"], env={**os.environ, "TMUX_TMPDIR": sock}, capture_output=True)
+        shutil.rmtree(sock, ignore_errors=True)
+
+
+def test_session_gone_is_false_when_tmux_cannot_be_asked(monkeypatch):
+    """tmux を呼べないときは消えたと決めない（動いているセッションを失敗と誤らない）。"""
+    monkeypatch.setattr(hb.tmux, "_tmux", lambda *a: None)
+    assert not tx.session_gone("a")
 
 
 def test_tmux_class_has_no_skip_of_its_own():
@@ -607,6 +640,41 @@ def test_process_tmux_failure_is_refused_and_registry_untouched(launched, monkey
     assert res["status"] == "stopped" and res["items"][0]["result"] == hb.TMUX_FAILED
     assert res["metrics"]["exit_code"] == 1 and res["summary"] == "duplicate session"
     assert not os.path.exists(hb.hub_path(hb.REGISTRY))
+
+
+def test_process_session_gone_after_launch_is_refused_and_not_registered(launched, monkeypatch):
+    """作ったセッションがすぐ消えたら「起動した」と返さず、登録もしない（#2563・#2583 の受け入れ条件 2）。"""
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: True)
+    res = hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": "/", "args": [], "by": "spawn"})
+    assert res["status"] == "stopped" and res["items"][0]["result"] == hb.TMUX_FAILED
+    assert res["metrics"]["exit_code"] == 1 and "a" in res["summary"]
+    assert not os.path.exists(hb.hub_path(hb.REGISTRY))
+
+
+def test_process_restart_gone_keeps_the_registry_row(launched, tmp_path, monkeypatch):
+    """起こし直しで消えたら、前の登録の行はそのまま残す（次の起こし直しの入力になる）。"""
+    row = {"session": "a", "cwd": str(tmp_path), "args": [], "created_at": "x", "by": "spawn"}
+    _write_registry({"a": row})
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: True)
+    res = hb.Hub(None).process({"kind": "restart", "name": "a", "by": "restart"})
+    assert res["metrics"]["exit_code"] == 1 and hb.read_registry()["a"] == row
+
+
+def test_launch_waits_the_check_seconds_before_looking(launched, monkeypatch):
+    """セッションの確かめの前に `NDF_RELAY_LAUNCH_CHECK` 秒待つ。tmux に聞けなければ起動した扱いのまま。"""
+    monkeypatch.setenv("NDF_RELAY_LAUNCH_CHECK", "1.5")
+    order = []
+    monkeypatch.setattr(hb.time, "sleep", lambda s: order.append(("sleep", s)))
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: order.append(("look", name)) or False)
+    res = hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": "/", "args": [], "by": "spawn"})
+    assert order == [("sleep", 1.5), ("look", "a")] and res["status"] == "ok"
+
+
+def test_launch_check_seconds_default_and_broken_value(monkeypatch):
+    monkeypatch.delenv("NDF_RELAY_LAUNCH_CHECK", raising=False)
+    assert hb.launch_check_seconds() == 2
+    monkeypatch.setenv("NDF_RELAY_LAUNCH_CHECK", "x")
+    assert hb.launch_check_seconds() == 2
 
 
 def test_process_restart_uses_registry_row(launched, tmp_path):
