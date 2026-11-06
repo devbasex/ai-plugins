@@ -520,7 +520,9 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
         if plans:
             stages.append(plans)
     tag = f"close-{len(lap.get('dones', [])) + 1}"
-    stages.append(build_close(env, rec, lap, kept, tag=tag))
+    close = build_close(env, rec, lap, kept, tag=tag)
+    stages.append(close)
+    lap["close_plans"] = close  # リリース待ち・質問待ちで締めた周回は、答えの後に外した課題を含まないこのまとめを流す
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
     return queue_command(stages, done), done
