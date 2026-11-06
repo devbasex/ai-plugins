@@ -546,7 +546,8 @@ class _Run:
     def wake_answered(self, answered: list[dict]) -> None:
         """止まった宛先を起こす 1 行を知らせへ（異常系 6）。全レーンが止まれば異常系 11 に任せる。組み直しの依頼の答えを読むレーンはいない。"""
         stopped = self.stopped()
-        if (wake := sorted({r["lane"] for r in answered if r.get("lane") in stopped and not r.get("again")})) and len(stopped) < len(self.order):
+        wake = sorted({r["lane"] for r in answered if r.get("lane") in stopped and not r.get("again")})
+        if wake and len(stopped) < len(self.order):
             self.wake = sorted({*self.wake, *wake})
             self.pause("notice", lanes=[], attach=[])
 

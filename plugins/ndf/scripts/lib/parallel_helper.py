@@ -64,4 +64,3 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     done = d / "done.json"
     return {**out, "phase": "present", "pipeline": f"{pr.pipeline_cmd(SUPERVISE, d)} && {SUPERVISE} wait {done}",
             "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
-
