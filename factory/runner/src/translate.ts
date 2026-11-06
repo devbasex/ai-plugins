@@ -13,6 +13,7 @@ import type {
   UsageRecordedEvent,
 } from "@ndf-factory/contracts";
 import type { PhaseName } from "@ndf-factory/contracts/phases";
+import { normalizePhase } from "./legacy-phases.ts";
 
 export interface JobIdentity {
   sprintRunId: string;
@@ -58,14 +59,15 @@ const PLAN_PHASES: Readonly<Record<string, PhaseName>> = {
   設計: "設計",
   実装: "実装",
   検査: "検査",
-  "配布（開発版）": "取り込み",
-  "配布（本番）": "仕上げ",
+  開発版のデプロイ: "取り込み",
+  リリース: "仕上げ",
   まとめ: "仕上げ",
 };
 
 // フェーズの名前。プランの JSON が読めない（null）・表に無い値は、計画の名前の断片をそのまま返す（画面は「その他」と出す）
 export function phaseNameOf(planName: string, planPhase: string | null): string {
-  if (planPhase !== null && Object.hasOwn(PLAN_PHASES, planPhase)) return PLAN_PHASES[planPhase]!;
+  const phase = planPhase === null ? null : normalizePhase(planPhase);
+  if (phase !== null && Object.hasOwn(PLAN_PHASES, phase)) return PLAN_PHASES[phase]!;
   return phaseOf(planName).phase;
 }
 
@@ -146,7 +148,7 @@ export function reportResult(report: string): ReportResult {
   return (m?.[1] as ReportResult) ?? null;
 }
 
-// 承認の依頼の種類。計画の名前が設計なら gate1、本番の配布なら gate2、ほかは判断
+// 承認の依頼の種類。計画の名前が設計なら gate1、リリースなら gate2、ほかは判断
 export function gateKindOf(planName: string | null): GateKind {
   if (!planName) return "decision";
   if (/design/.test(planName)) return "gate1";

@@ -136,9 +136,9 @@ export function registerFactory(app: Hono<AuthEnv>, deps: () => FactoryDeps): vo
     return (await deps().organizer.history(ctx!, positiveInt(c.req.query("repository_id")), limit)).items;
   });
 
-  // 止まった配布を解く。人だけが確定できる（扱い human。オーガナイザーの I66）
+  // 止まったリリースを解く。人だけが確定できる（扱い human。オーガナイザーの I66）
   registerOperation(app, "resolveStalledRelease", {
     run: (e, ctx) =>
-      deps().organizer.resolve(ctx!, positiveInt(e.repository_id), positiveInt(e.seq, "まとめた配布の連番の形ではありません"), { choice: e.choice }),
+      deps().organizer.resolve(ctx!, positiveInt(e.repository_id), positiveInt(e.seq, "まとめたリリースの連番の形ではありません"), { choice: e.choice }),
   });
 }

@@ -318,7 +318,7 @@ describe("課題の候補（受け入れ条件 9・10）", () => {
 });
 
 describe("Factory のオーガナイザーの経路（#2439 の AC 9・11、I66）", () => {
-  it("一覧と履歴は GET で読め、止まっていない配布を解く操作は 404、承認の依頼へ答える経路は無い", async () => {
+  it("一覧と履歴は GET で読め、止まっていないリリースを解く操作は 404、承認の依頼へ答える経路は無い", async () => {
     const acc = await personal("u-1");
     await register(acc);
     const list = await op("listRepositoryApprovalRequests", "u-1", { accountId: acc, query: { repository_id: [101] } });

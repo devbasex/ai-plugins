@@ -82,7 +82,7 @@ export function loopPrompt(inst: RunJobInstruction): string {
 export function firstPrompt(inst: RunJobInstruction, directive: string | null): string {
   if (inst.START === "new") return `/ndf:development-workflow ${inst.ISSUES!.split(",").map((n) => `#${n}`).join(" ")}`;
   if (inst.START === "loop") return loopPrompt(inst);
-  // 配布の実行を判断への答えで再開したときは、答えの本文を添える（添えないと同じプランを答え無しで流し直して同じ問いで止まる）
+  // リリースの実行を判断への答えで再開したときは、答えの本文を添える（添えないと同じプランを答え無しで流し直して同じ問いで止まる）
   if (inst.START === "release") return directive ? `${RELEASE_PROMPT}\n\n利用者の判断: ${directive}` : RELEASE_PROMPT;
   return `前回の続きから進めてください。${directive ? `利用者の判断: ${directive}` : ""}`;
 }
@@ -136,7 +136,7 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
   const paths = statePaths(instruction.LOOP_NAME);
   // 同じリポジトリの別の実行が持つ課題を、NDF の loop select がその周回の選定から外す（決定 3）
   if (instruction.EXCLUDE_ISSUES) jobEnv.NDF_LOOP_EXCLUDE = instruction.EXCLUDE_ISSUES;
-  // Factory のオーガナイザーの置き場（#2439 の I68）。1 台の中のオーガナイザーを起動させず、本番の配布は依頼として出させる
+  // Factory のオーガナイザーの置き場（#2439 の I68）。1 台の中のオーガナイザーを起動させず、リリースは依頼として出させる
   const organizerDir = join(repoDir, ORGANIZER_DIR);
   Object.assign(jobEnv, organizerEnv(instruction, organizerDir));
   // 外へ送る工程の中身から伏せる秘密の値（実行ジョブの token・導入の token・持ち込んだキー・引き受けたロールとタスクの役割の資格。#2172 の決定 7）
@@ -252,7 +252,7 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       // このジョブの記録だけを送る（ask.jsonl は利用者の全プロジェクトで共有される）。cwd は realpath で書かれる
       const root = await realpath(work);
       const ownRow = (row: Record<string, unknown>) => typeof row.cwd === "string" && (row.cwd === root || row.cwd.startsWith(`${root}/`));
-      // 再開と配布の実行（承認・出し直し・続きも START は release のまま）では復元したログの末尾から読む。
+      // 再開とリリースの実行（承認・出し直し・続きも START は release のまま）では復元したログの末尾から読む。
       // 前のジョブが送った工程と使用量を新しい job_id で送り直さない
       if (inst.START === "resume" || inst.START === "release") {
         for (const file of [...(await findFiles(join(repoDir, ".ndf"), "progress.jsonl")), askLedger]) {

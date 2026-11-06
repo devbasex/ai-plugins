@@ -58,7 +58,7 @@ async function finish(sprintRunId: string, jobId: string, result: "gate" | "done
 const runOf = async (id: string) => (await h.table.getRun(id))!;
 const startRun = async (issue: number) => (await h.control.startSprintRun(accountContext(), { repositoryId: REPO_ID, issues: [issue] })).sprint_run_id;
 
-// 手動の実行が配布の依頼を出して答えを待つ（I65）
+// 手動の実行がリリースの依頼を出して答えを待つ（I65）
 async function requestRelease(sprintRunId: string, prs: number[], requestId = `run-${sprintRunId}-r${++n}`) {
   const run = await runOf(sprintRunId);
   const jobId = run.currentJobId!;
@@ -72,7 +72,7 @@ const currentBatch = async () => {
   return root?.currentSeq ? h.table.getBatch("acc-1", REPO_ID, root.currentSeq) : null;
 };
 
-// 配布の実行のジョブが承認資料をそろえて承認ゲート 2 で止まる（auto なら MVV 判定が通して続ける）
+// リリースの実行のジョブが承認資料をそろえて承認ゲート 2 で止まる（auto なら MVV 判定が通して続ける）
 async function present(k: 1 | 2, sha: string, prs: number[], opts: { auto?: boolean } = {}) {
   const batch = (await currentBatch())!;
   const run = await runOf(batch.releaseRunId);
@@ -101,8 +101,8 @@ async function settle(releaseRunId: string, prs: number[], sha = "aaaa111") {
 const answeredOf = (sprintRunId: string) => h.progress.listRun(sprintRunId).filter((e) => e.type === "release.answered");
 const instructionOf = (jobId: string) => h.platform.taskOf(jobId)![1].instruction;
 
-describe("配布のまとめ（受け入れ条件 1・2・3・5・6、I56・I57・I61・I64）", () => {
-  it("同じリポジトリの 2 本の依頼で、まとめた配布 1 つ・配布の実行 1 本・本番の Pull Request 1 本になり、2 本とも同じ答えを持つ", async () => {
+describe("リリースのまとめ（受け入れ条件 1・2・3・5・6、I56・I57・I61・I64）", () => {
+  it("同じリポジトリの 2 本の依頼で、まとめたリリース 1 つ・リリースの実行 1 本・本番の Pull Request 1 本になり、2 本とも同じ答えを持つ", async () => {
     const a = await startRun(1);
     const b = await startRun(2);
     await requestRelease(a, [11]);
@@ -120,7 +120,7 @@ describe("配布のまとめ（受け入れ条件 1・2・3・5・6、I56・I57�
     expect(validateRunJobInstruction(instruction).ok).toBe(true);
     expect(instruction).toMatchObject({ START: "release", RELEASE_SEQ: "1", RELEASE_STEP: "present", NDF_VERSION: "10.27.16" });
 
-    // 配布の実行の承認資料は、作る時点の develop（2 本の変更を含む）で決まる（AC 3）
+    // リリースの実行の承認資料は、作る時点の develop（2 本の変更を含む）で決まる（AC 3）
     await present(1, "aaaa111", [11, 12]);
     expect((await currentBatch())!.state).toBe("presented");
     const resumed = await answer(release.sprintRunId, "approved");
@@ -141,7 +141,7 @@ describe("配布のまとめ（受け入れ条件 1・2・3・5・6、I56・I57�
     expect((await h.table.getOrganizer("acc-1", REPO_ID))!.currentSeq).toBeNull();
   });
 
-  it("配布の実行は実行の枠を持たない（I64）", async () => {
+  it("リリースの実行は実行の枠を持たない（I64）", async () => {
     const a = await startRun(1);
     const before = await h.table.getSlots("acc-1", REPO_ID);
     await requestRelease(a, [11]);
@@ -161,7 +161,7 @@ describe("配布のまとめ（受け入れ条件 1・2・3・5・6、I56・I57�
     expect(await codeOf(h.control.requestResume({ sprintRunId: a, approvalRequestId: "ar-x" }))).toBe("not_awaiting_approval");
   });
 
-  it("流れている間に届いた依頼は、配布済みの後に次のまとめた配布になる（AC 5）", async () => {
+  it("流れている間に届いた依頼は、リリース済みの後に次のまとめたリリースになる（AC 5）", async () => {
     const a = await startRun(1);
     const b = await startRun(2);
     await requestRelease(a, [11]);
@@ -176,7 +176,7 @@ describe("配布のまとめ（受け入れ条件 1・2・3・5・6、I56・I57�
     expect(answeredOf(b)).toHaveLength(0);
   });
 
-  it("組む書き込みが落ちれば、まとめた配布も配布の実行も無い（AC 6・I57）", async () => {
+  it("組む書き込みが落ちれば、まとめたリリースもリリースの実行も無い（AC 6・I57）", async () => {
     const a = await startRun(1);
     h.table.failNextCompose = true;
     await requestRelease(a, [11]);
@@ -240,7 +240,7 @@ describe("答えと出し直し（受け入れ条件 4、I60）", () => {
     expect(await h.table.getBatch("acc-1", REPO_ID, 1)).toMatchObject({ state: "rejected" });
     expect(await runOf(batch.releaseRunId)).toMatchObject({ state: "stopped" });
     expect(answeredOf(a).map((e) => e.payload)).toEqual([expect.objectContaining({ result: "rejected" })]);
-    // 範囲に入らない依頼は次のまとめた配布になる
+    // 範囲に入らない依頼は次のまとめたリリースになる
     expect(answeredOf(b)).toHaveLength(0);
     expect((await currentBatch())!.seq).toBe(2);
   });
@@ -299,7 +299,7 @@ describe("待ち（受け入れ条件 8、I62）", () => {
     expect((await h.table.getOrganizer("acc-1", REPO_ID))!.waitReason).toBeNull();
   });
 
-  it("差し戻したまとめた配布が自分で開いた release/v<版> は外の本番と見なさず、次の配布を組む", async () => {
+  it("差し戻したまとめたリリースが自分で開いた release/v<版> は外の本番と見なさず、次のリリースを組む", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -325,7 +325,7 @@ describe("待ち（受け入れ条件 8、I62）", () => {
     expect((await currentBatch())!.seq).toBe(1);
   });
 
-  it("まとめた配布が流れている間は古い版の実行を始めない", async () => {
+  it("まとめたリリースが流れている間は古い版の実行を始めない", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     expect(await currentBatch()).not.toBeNull();
@@ -351,8 +351,8 @@ describe("待ち（受け入れ条件 8、I62）", () => {
   });
 });
 
-describe("止まった配布と再開（受け入れ条件 12・13、I58・I59・I63）", () => {
-  it("配布の実行が失敗すると止まった配布になり、main のマージの後は continue だけで、差し戻しは 409", async () => {
+describe("止まったリリースと再開（受け入れ条件 12・13、I58・I59・I63）", () => {
+  it("リリースの実行が失敗すると止まったリリースになり、main のマージの後は continue だけで、差し戻しは 409", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -372,7 +372,7 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(await codeOf(h.organizer.resolve(accountContext(), REPO_ID, 1, { choice: "continue" }))).toBe("not_stalled");
   });
 
-  it("配布の実行が取り消されても、GitHub で main へマージ済みなら差し戻さない", async () => {
+  it("リリースの実行が取り消されても、GitHub で main へマージ済みなら差し戻さない", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -385,7 +385,7 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(answeredOf(a)).toHaveLength(0);
   });
 
-  it("main へのマージの後に取り消された配布の実行は、止まった配布として残り、続きから流せる。ジョブの無いときの取り消しは 409", async () => {
+  it("main へのマージの後に取り消されたリリースの実行は、止まったリリースとして残り、続きから流せる。ジョブの無いときの取り消しは 409", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -403,7 +403,7 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(instructionOf(run.currentJobId!)).toMatchObject({ RELEASE_STEP: "continue" });
   });
 
-  it("main へのマージの前に取り消された配布の実行は、今のとおり差し戻す", async () => {
+  it("main へのマージの前に取り消されたリリースの実行は、今のとおり差し戻す", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -416,7 +416,7 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(await h.table.getBatch("acc-1", REPO_ID, 1)).toMatchObject({ state: "rejected" });
   });
 
-  it("提示を受けた後に承認ゲート 2 へ届かずに落ちた配布は止まった配布になり、続きは提示のプランを流し直して承認を待つ", async () => {
+  it("提示を受けた後に承認ゲート 2 へ届かずに落ちたリリースは止まったリリースになり、続きは提示のプランを流し直して承認を待つ", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -433,7 +433,7 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(instructionOf(r.jobId!)).toMatchObject({ RELEASE_STEP: "confirm:1" });
   });
 
-  it("提示を受けた後に落ちた配布は差し戻せる", async () => {
+  it("提示を受けた後に落ちたリリースは差し戻せる", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -461,7 +461,7 @@ describe("止まった配布と再開（受け入れ条件 12・13、I58・I59�
     expect(instructionOf(run.currentJobId!)).toMatchObject({ RELEASE_STEP: "continue" });
   });
 
-  it("提示の前に止まった配布の差し戻しは、受けた依頼すべてへ rejected を返す", async () => {
+  it("提示の前に止まったリリースの差し戻しは、受けた依頼すべてへ rejected を返す", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
