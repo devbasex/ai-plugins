@@ -683,7 +683,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| リリース記録 | — | release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request を持つ | リリースの記録、配布の記録 | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
+| リリース記録 | — | release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request に、CD を読んだときは CD の結果を持つ | リリースの記録、配布の記録 | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
 | リリース種別 | `release_type` | リリースの種類。production（本番リリース）/ verification（開発版のデプロイ） | — | — | `docs/specifications/ndf-release-steps-and-token-usage-snapshot.md` |
 | 公開操作 | — | release の手順 4 で行う操作。レジストリへの公開・配備先への反映・署名したアーティファクトの設置・ストアへの提出 | 公開の操作 | — | `plugins/ndf/skills/release/references/completion-check.md` |
 | リリースの経路 | `release_route` | 変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸 | 配布の経路 | — | — |
@@ -734,6 +734,10 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリースの形 | — | リリースの設定の release.form が表す、版の出し方の雛形の種類 | 配布の形 | — | — |
 | リリースの手順 | — | 版を上げてから公開するまでの手順。`release` が持つ | 配布の手順 | — | — |
 | 取得元 | — | プラグインを取得するマーケットプレイスの登録が指す先 | 配布元 | — | — |
+| CD の結果 | — | 本番チャネルへのマージの後に NDF が読んだ CD の状態。成功・失敗・未確定の 3 つで、リリース記録に残す | — | — | — |
+| 結果の読み方 | — | CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す | — | — | — |
+| 公開物 | — | 正式版ごとのリリースタグと GitHub Release の組 | — | — | — |
+| 反映失敗 | — | リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態 | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
