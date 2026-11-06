@@ -231,7 +231,7 @@ flowchart TB
   "check": {
     "banned": {
       "words": ["配布"],
-      "paths": ["plugins/**", "factory/**", "docs/**", "AGENTS.md", "CLAUDE.md", "README.md", "KIRO.md", ".ndf/**"],
+      "paths": ["plugins/**", "factory/**", "docs/**", ".github/**", "AGENTS.md", "CLAUDE.md", "README.md", "KIRO.md", ".ndf/**"],
       "exclude": [
         "docs/presentations/**", "docs/articles/**", "docs/archive/**", "docs/development-history/**", "docs/changelog/**",
         "docs/metrics/**", ".ndf/mvv.md", ".ndf/mvv.json",
@@ -386,7 +386,7 @@ Vale（LIB1）と textlint-rule-prh（LIB2）は採らない。どちらも足�
 
 `.ndf/mvv.md` は利用者が承認した本文で、書き換えるとハッシュが合わなくなり、MVV 判定が承認ゲートを省かなくなる。`.ndf/mvv.json` は承認した版の本文の履歴である。MVV の本文の `配布`（5 行）は、利用者が次に MVV を改訂するときに `project-mvv.md` の「改訂」の手順で直す。`docs/metrics/ndf-token-usage/` の 94 ファイルは版ごとの計測の記録で、集計した日の時点の見出しを持つ書いた日の記録である。新しく書く記録の見出しには `配布` を出さない（書き手の文言を置き換える）。
 
-この 2 つは受け入れ条件 1 の検索に当たり続ける。設計承認で、受け入れ条件 1 の例外にこの 2 つを足すかを確かめる（「未確認のまま残ること」）。
+この 2 つは受け入れ条件 1 の検索に当たり続けるため、受け入れ条件 1 の例外に足す（設計承認の答え、2026-11-06）。MVV の語は、次に MVV を改訂するときに直す。
 
 根拠: Value 8 / C7 / P1（MVV 版 5）
 
@@ -411,7 +411,7 @@ Vale（LIB1）と textlint-rule-prh（LIB2）は採らない。どちらも足�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2620 | 実装する | — | `plugins/ndf/`、`plugins/playwright-kit/README.md`、`factory/`、`docs/specifications/`、`docs/versioning-and-distribution.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`KIRO.md`、`.ndf/glossary.json`、`.ndf/pace.json` |
+| #2620 | 実装する | — | `plugins/ndf/`、`plugins/playwright-kit/README.md`、`factory/`、`.github/`、`docs/specifications/`、`docs/versioning-and-distribution.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`KIRO.md`、`.ndf/glossary.json`、`.ndf/pace.json` |
 
 受け入れ条件 1 の検索（`75fc92737`）が当たる 2,000 行の内訳は次のとおりである。
 
@@ -427,12 +427,19 @@ Vale（LIB1）と textlint-rule-prh（LIB2）は採らない。どちらも足�
 
 実装計画は、用語集と読み替えの表と検査 → スクリプト → Skill と現行の文書 → 確定仕様 → Factory の順に Pull Request を分ける。用語集と読み替えの表が先に要る（E2 が E3・E4 の前提）。最初の Pull Request は、用語の表の意味の変更と旧い語の廃止を用語集へ入れる（既存の「リリース」の意味から工程の名前を外し、設計の Pull Request で足した「デプロイ」の意味へ工程の名前を足し、「検証リリース」「配布」などを廃止した語として置き換え先を引ける形にする）。設計の Pull Request の用語集の差分は、追加の語だけである。
 
+## 設計承認での利用者の答え（2026-11-06）
+
+答えの正本は #2620 の本文の節「設計の承認ゲート 1 での利用者の答え（2026-11-06）」にある。この文書へは次の 3 点を反映した。
+
+| 問い | 答え | 反映した箇所 |
+| --- | --- | --- |
+| 受け入れ条件 1 の例外（`.ndf/mvv.md`・`.ndf/mvv.json`・`docs/metrics/`） | 例外に足す。MVV の語は次に MVV を改訂するときに直す | 決定 9 |
+| `.github/` の 8 行（継続的統合の定義と Pull Request・課題のテンプレート） | 範囲に入れる。置き換え、禁止語の検査の対象にもする | 「禁止語の宣言の形」の `paths`、「設計の結果」の触るファイル |
+| #2619（承認ゲートの呼び名）との順序 | 1 つのスプリントにまとめ、#2619 と同じスプリントで実装する。重なった行は、後に入る方が先の差分へ合わせ直す | — |
+
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 受け入れ条件 1 の例外 | 決定 9 の `.ndf/mvv.md`・`.ndf/mvv.json`（承認済みの MVV と履歴）と `docs/metrics/`（計測の記録）が受け入れ条件 1 の検索に当たり続ける。設計承認で、例外へ足すか、MVV の改訂を同じスプリントで行うかを利用者が決める |
-| `.github/` の 8 行 | 継続的統合の定義と Pull Request・課題のテンプレートが `配布` を持つ（`git grep -cF 配布 -- .github`）。要求の対象範囲に無いため、この設計では置き換えも検査もしない。設計承認で範囲に入れるかを利用者が決める |
-| #2619 との順序 | 承認ゲートの呼び名（`関門 2（本番への配布の承認）` など）は両方の課題が触る。この設計は「リリースの承認」までを置き換え、ゲートの名前は #2619 の語に従う。後に入る方が先の差分へ合わせ直す |
 | 起動の語の効き | `release` の説明文から「配布する」を外すと、利用者が「配布して」と書いたときに Skill が起動しにくくなるおそれがある。リリース後テストで起動を 1 回確かめる |
 | 利用者のボード | 工程の選択肢の名前を変えるまで、ボードは旧い名前を表示し続ける。変えるのは利用者で、案内は `NOTE:` と `board.md` に置く |
