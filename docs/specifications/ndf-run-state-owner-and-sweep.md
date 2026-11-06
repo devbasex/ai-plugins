@@ -79,14 +79,14 @@ merged の `cleanup`・テストのセッションの終わりが自動で外す
 
 **働く範囲は配布先のリポジトリを含む**（`plugins/ndf/scripts/` と cross-review・cross-refactoring・merged の配布物）。片付けるレビュー
 worktree は、実行したリポジトリの slug の下（`<base>/<slug>/`）だけである。一時ファイルはリポジトリに依らず、システムの一時の置き場
-（`tempfile.gettempdir()`）の下を見る。`<base>` は `lib/worktree_base.worktree_parent()`（`NDF_WORKTREE_BASE` か
-`<tmp>/ndf-worktrees`）である。
+（`tempfile.gettempdir()`）の下を見る。`<base>` は `lib/worktree_base.worktree_parent(root)`（`NDF_WORKTREE_BASE`、コンテナの宣言があれば
+`<メインディレクトリ>/.worktrees/.ndf`、どちらも無ければ `<tmp>/ndf-worktrees`）である。
 
 ## 決定と理由
 
 | # | 決定 | 理由 |
 | ---: | --- | --- |
-| 1 | 持ち主・寿命・片付けを共通の層（`lib/run_state.py`・`run_owner.py`・`run_state_kinds.py`）に置き、`worktree_base.py` は置き場の解決だけを持つ | cross-review・cross-refactoring・merged・テストの 4 か所が同じ判定を使う。各所に書くと、`pr<n>` と `rf<n>` で外し方が分かれた不具合（#1680）を繰り返す。片付けは一時ファイルとセッションの状態も扱い、置き場の解決とは責務が違う |
+| 1 | 持ち主・寿命・片付けを共通の層（`lib/run_state.py`・`run_owner.py`・`run_state_kinds.py`）に置き、`worktree_base.py` は置き場の解決と、その置き場の git の無視への登録だけを持つ | cross-review・cross-refactoring・merged・テストの 4 か所が同じ判定を使う。各所に書くと、`pr<n>` と `rf<n>` で外し方が分かれた不具合を繰り返す。片付けは一時ファイルとセッションの状態も扱い、置き場の解決とは責務が違う |
 | 2 | 状態の一覧をコードの表（`KINDS`）に置き、文書に写さない | 片付けとテストが同じ表を読み、表に載せずに一時の置き場へ書くスクリプトを足すとテストが落ちる。文書に置くと 2 か所になり、更新を検査できない |
 | 3 | レビュー worktree は `--force` を使わずに外し、未 push のコミットは自分で数え、持ち主の記録は worktree の外（隣）に置く | git は detached の HEAD の未 push のコミットを守らない。`headRefOid` を数えの除外に加え、squash でマージされ head のブランチが消えた PR でも未 push と取り違えない。記録を外に置くと、レビュー対象のリポジトリの `.gitignore` に頼らずに未追跡の判定から外れ、worktree を外した後も同じ場所で扱える |
 | 4 | 生存は「記録の終わり・最後に動いた時刻と 24 時間の寿命の窓・プロセスの生存」で決め、窓は設定にしない | cross-review と cross-refactoring は LLM の判断の地点で止まるたびにプロセスが終わるため、プロセスでは実行の生存を読めない。セッションと `worktree-deps.sh` はプロセスが実行そのものなので pid で読む。PR の状態だけで決めると、マージ済みでも動いている実行の状態を消す。窓の値を変えたい利用例はまだ無い |
@@ -115,7 +115,7 @@ worktree は、実行したリポジトリの slug の下（`<base>/<slug>/`）�
 | `scripts/lib/run_state_kinds.py` | 状態の一覧 `KINDS` と、`sweep_states` が既定で見る種類 `SWEPT_KINDS`（`review-worktree`・`session-state`・`deps-work`・`fix-files`・`test-tmp`） |
 | `scripts/lib/run_owner.py` | 寿命の窓 `WINDOW`（24 時間）、持ち主の記録の読み書き（`read_owner`・`claim_owner`・`touch_owner`・`finish_owner`）、開始と `drive.py` が共有する `adopt_owner`・`mark_owner`・`run_args`、生存の判定 `alive`（窓は引数 `window`。既定は `WINDOW`。記録に `pid` と `host` があれば同じホストでは `owner_pid_alive` で pid の生死も見る）と理由の文 `alive_reason`。`owner_path` は `.json` で終わるパスをそのまま使う（棚卸しの見直しの持ち主の宣言 `.ndf/backlog/owner.json` が窓を `depths.owner.ttl` で渡して使う。#2315） |
 | `scripts/lib/run_state.py` | レビュー worktree の外し方（`remove_review_worktree`・`remove_pr_dir`・`remove_run_dir`）、作業の判定（`worktree_work`）、PR の照会（`view_pr`）、開始の判定（`check_start`・`begin_review`）、片付け（`sweep_states`）。`python3 run_state.py sweep` で単独でも呼べる |
-| `scripts/lib/worktree_base.py` | 一時の置き場の解決の唯一の場所。`run_state` と merged が使う |
+| `scripts/lib/worktree_base.py` | 作業用 worktree の置き場の解決の唯一の場所。`run_state` と merged が使う |
 | `scripts/merged-steps.py` の `cleanup` | PR ごとに `pr<n>` と `rf<n>` を `run_state` で外し、最後に `sweep_states` を呼んで結果を `items` へ足す |
 | cross-review の `review_lib/commands/init.py`・`drive.py` | `init` が `begin_review` で片付けと既存の `pr<n>` の判定を行い、`adopt_owner` で記録を書き、`RUN`・`SWEPT` を出す。`drive.py` は `init` に `--run` を足し、起動のたびに `touch`、終わりで `finish` を書き、`SWEPT` を結果の `items` へ載せる |
 | cross-refactoring の `refactor_lib/commands/setup.py`・`refactor.py`・`drive.py` | `init`（`setup.py`）が `begin_review` と `adopt_owner` を `rf<n>` で行い、`RUN`・`SWEPT` を出す。`refactor.py init` は `--run` を受ける。`drive.py` は `init` の後に `touch`、終わり（`finalize` の後）に `finish` を書き、`SWEPT` を結果の `items` へ載せる |
@@ -266,8 +266,9 @@ remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict | None
 | 4 | NDF の状態（`.cross_review/`・`.cross_refactoring/`・worktree の中の `CROSS_REVIEW_TMP_DIR`）でない未追跡のファイル | 「NDF の状態でない未追跡のファイルが <N> 件ある（…）」 |
 | 5 | 未 push のコミット（`git rev-list --count HEAD --not --remotes <headRefOid>`。`headRefOid` は `pr_state` から） | 「未 push のコミットが <N> 件ある」。head が手元に無い・数えられなければ「判定できない: …」 |
 
-どれにも当たらなければ NDF の状態のディレクトリを消してから `git worktree remove <path>`（`--force` なし）を打ち、拒まれたら
-「git worktree remove が拒否: <git の出力の先頭 300 文字>」を返す。`remove_pr_dir` は外れたら記録も消し、`remove_run_dir` は
+どれにも当たらなければ、開いた公開を閉じてテスト環境を破棄する（`container_reach.discard_testenv`）。公開を閉じられなければ
+外さず `(False, 理由)` を返す。破棄できなければ外して `(True, 理由)` を返す。続けて NDF の状態のディレクトリを消してから
+`git worktree remove <path>`（`--force` なし）を打ち、拒まれたら「git worktree remove が拒否: <git の出力の先頭 300 文字>」を返す。`remove_pr_dir` は外れたら記録も消し、`remove_run_dir` は
 中の worktree を 1 本ずつ外し、すべて外れて他に何も残らなければ `rf<n>` と記録を消す（残れば `run-dir` を `kept`、理由
 「中の worktree が残る」か「worktree でないものが残る（…）」）。
 
@@ -426,8 +427,8 @@ sequenceDiagram
 | セッションの状態ファイル | `<tmp>/ndf-worktree-<session>.json` のキー `owner` | `{"pid": 123, "started": 1761872400.12}`（`started` は `procs.start_time(pid)`）。ランタイムのプロセス（名前が `claude`・`codex`・`kiro-cli`・`kiro`・`agy` で始まる最初の祖先）が見つからなければ `null` |
 | `worktree-deps.sh` の作業ディレクトリ | `<tmp>/ndf-deps.XXXXXX/owner` | pid の 1 行（シェルから書くため開始時刻を持たない） |
 
-設定は無い。寿命の窓（24 時間）はコードの定数（`run_owner.WINDOW`）で、一時の置き場は `NDF_WORKTREE_BASE` →
-`tempfile.gettempdir()` で決まる。
+設定は無い。寿命の窓（24 時間）はコードの定数（`run_owner.WINDOW`）で、作業用 worktree の置き場は
+`NDF_WORKTREE_BASE` → コンテナの宣言があれば `<メインディレクトリ>/.worktrees/.ndf` → `tempfile.gettempdir()` で決まる。
 
 ## 運用
 
