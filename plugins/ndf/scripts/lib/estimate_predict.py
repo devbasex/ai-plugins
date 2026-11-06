@@ -237,6 +237,21 @@ def _latest_estimates(estimates: list[dict], since_ts: float | None) -> dict[int
     return latest
 
 
+def _pair(issue: int, e: dict, got: er.IssueActual) -> dict:
+    """見積もり 1 件とその実績の組。比は実績 ÷ 予測で、どちらかの値が無ければ None。"""
+    actual = {"A": got.a, "L": got.l, "C": got.c}
+    predicted = {k: ((e.get("values") or {}).get(k) or {}).get("typical") for k in ("A", "L", "C")}
+    ratio = {
+        k: (
+            round(actual[k] / predicted[k], 4)
+            if isinstance(predicted[k], (int, float)) and predicted[k] and actual[k] is not None
+            else None
+        )
+        for k in ("A", "L", "C")
+    }
+    return {"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio}
+
+
 def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
     """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
 
@@ -245,19 +260,8 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
     items = []
     for issue, e in sorted(_latest_estimates(estimates, since_ts).items()):
         got = er.issue_actuals(rows, e.get("done") or "実装", since=e.get("at"), alive=alive).get(issue)
-        if not got or not got.completed:
-            continue
-        actual = {"A": got.a, "L": got.l, "C": got.c}
-        predicted = {k: ((e.get("values") or {}).get(k) or {}).get("typical") for k in ("A", "L", "C")}
-        ratio = {
-            k: (
-                round(actual[k] / predicted[k], 4)
-                if isinstance(predicted[k], (int, float)) and predicted[k] and actual[k] is not None
-                else None
-            )
-            for k in ("A", "L", "C")
-        }
-        items.append({"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio})
+        if got and got.completed:
+            items.append(_pair(issue, e, got))
     metrics: dict = {"pairs": len(items)}
     for k in ("A", "L", "C"):
         metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
