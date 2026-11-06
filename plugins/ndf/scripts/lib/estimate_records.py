@@ -431,6 +431,18 @@ def _settle_runs(acc: IssueActual, done: str) -> None:
     acc.a, acc.c = round(acc.a, 1), round(acc.c, 4)
 
 
+def _add_human_seconds(out: dict[int, IssueActual], rows: list[dict], since_ts: float | None) -> None:
+    """`human` の行の秒を H へ足す。`since_ts` があれば、その時刻より後の行だけを足す。実行の無い課題も out に加える。"""
+    for r in rows:
+        if r.get("kind") != "human" or not isinstance(r.get("seconds"), (int, float)):
+            continue
+        if since_ts is not None and (ts(r.get("at")) or 0) <= since_ts:
+            continue
+        for issue in r.get("issues") or []:
+            acc = out.setdefault(issue, IssueActual(issue))
+            acc.h = (acc.h or 0.0) + float(r["seconds"])
+
+
 def issue_actuals(
     rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
 ) -> dict[int, IssueActual]:
@@ -453,12 +465,5 @@ def issue_actuals(
             out.setdefault(issue, IssueActual(issue)).runs.append(run)
     for acc in out.values():
         _settle_runs(acc, done)
-    for r in rows:
-        if r.get("kind") != "human" or not isinstance(r.get("seconds"), (int, float)):
-            continue
-        if since_ts is not None and (ts(r.get("at")) or 0) <= since_ts:
-            continue
-        for issue in r.get("issues") or []:
-            acc = out.setdefault(issue, IssueActual(issue))
-            acc.h = (acc.h or 0.0) + float(r["seconds"])
+    _add_human_seconds(out, rows, since_ts)
     return out
