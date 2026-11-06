@@ -237,7 +237,7 @@ def _latest_estimates(estimates: list[dict], since_ts: float | None) -> dict[int
     return latest
 
 
-def _ratio(actual: dict, predicted: dict) -> dict:
+def _pair_ratios(actual: dict, predicted: dict) -> dict:
     """1 組の項目ごとの比（実績 ÷ 予測）。予測が 0・数でない・無いか、実績が None の項目は None。"""
     out = {}
     for k, p in predicted.items():
@@ -268,6 +268,6 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
             continue
         actual = {"A": got.a, "L": got.l, "C": got.c}
         predicted = {k: ((e.get("values") or {}).get(k) or {}).get("typical") for k in ("A", "L", "C")}
-        ratio = _ratio(actual, predicted)
+        ratio = _pair_ratios(actual, predicted)
         items.append({"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio})
     return items, _error_metrics(items)
