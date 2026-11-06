@@ -58,7 +58,7 @@
 | `supervise.py new release --channel prod` が `package-plugin` から組む本番のリリースプランと、それを使うスプリントのまとめ（利用先のリポジトリでも、同じ宣言を置けば働く） | 開発版のリリースプラン（`段階: 検証` の記録は書かない。`close` ステップは本番のリリースの PR しか読まない） |
 | `release-steps.py record`・`lib/dist_record.py`・`release_lib/record.py`・ステップの鍵 `pr_from` | リリース後テストのブロック（`## リリース後テスト`）の中身。本番のリリースプランはこれを書かない（まとめの `release-verify` が `/ndf:release-verification` に書かせる。#1683・#1870） |
 | 昇格のプランの `record`（`record --promote`。#837・#1870） | 手で届ける経路・`--record-pr 0` / `unknown` の経路（merge・manual・検証の環境だけ）の記録 |
-| `pace: normal` の `new sprint` が雛形の経路でリリース承認ゲートと本番のステージを書き出すこと（#1914） | `pace: fast` / `auto` の本番のステージ（先頭が MVV 判定の本番のプラン。`fast_sprint_plans`・`auto_sprint_plans`）、雛形の無い経路（`route_waves`）・手動反映の本番系 |
+| `pace: normal` の `new sprint` が雛形の経路でリリース承認ゲートと本番のステージを書き出すこと | `pace: fast` / `auto` の本番のステージ（先頭が MVV 判定の本番のプラン。`fast_sprint_plans`・`auto_sprint_plans`）、雛形の無い経路（`route_waves`）・手動反映の本番系 |
 | | `sprint-close.py` の引数・結果 JSON・閉じる条件（変えていない） |
 
 プラグイン名・ベースブランチ・本番チャネルは `.ndf/supervise.json` の `release.plugin` と `.ndf/worktree.json` から
@@ -178,7 +178,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 | 昇格（`route_waves` が昇格のプランを置き、開発版のチャネルが手で届ける本番でないとき） | `{queue_pr:promote}` | 置く |
 | 経路がすべて届けない経路（none） | `0`（本番の記録なし。条件を見ずに閉じる） | 置かない |
 | それ以外（merge・manual・検証の環境だけ・手動反映の本番系の昇格） | `{queue_record}`（まとめを流し始める時点に queue が GitHub の参照から記録の PR を探して埋める。#2230） | 置く |
-| 開発ループのまとめ（`new close --pace auto`）で、経路がすべて届けない経路でないとき | 経路にかかわらず `{queue_record}`（リリース承認ゲートの後のまとめは本番のプランと別の queue にあり、`{queue_pr:…}` を解けない） | 置く |
+| 開発ループのまとめ（`new close --pace auto`）で、経路がすべて届けない経路でないとき | どの経路でも `{queue_record}`（リリース承認ゲートの後のまとめは本番のプランと別の queue にあり、`{queue_pr:…}` を解けない） | 置く |
 
 `{queue_record}` は、まとめの課題を閉じる PR とそれを参照する PR のリリース記録のうち、段階が本番かデプロイなしで `スプリント:` が
 その閉じる PR を含む記録を置いた PR の番号で埋まる（`sprint_close_lib/record_find.py`）。見つからない・2 つ以上のスプリントにある・
@@ -334,7 +334,7 @@ sequenceDiagram
 | 昇格の後の記録は、既存の `record` に `--promote` を足し、`plan_promote` のマージの後の別のステップにする | package-plugin と同じステップ・同じ `judge-record`・同じ `pr_from` を使える。`merged-steps.py promote` の中で書くと、書き込みの失敗がマージのステップの失敗になり、やり直すと開いた昇格の PR が無いため「昇格する変更が無い」で ok に終わり、記録を書かずに進む。`--promote` を `--version` と排他のフラグにしたのは、片方の形の引数だけを渡す誤りを引数の解析で止めるためである |
 | 昇格の `版:` は `<本番チャネル> <直前の短い SHA> → <本番チャネル> <マージのコミットの短い SHA>` にする | package-plugin の形（直前の版 → 出した版）と同じ並びになる。`parse_record` が読む `version` は矢印の右である |
 | LLM がデプロイする形は、`release` の手順に「デプロイの後に記録をコメントで置く」段を足すだけにする | 読む側は最後の記録を読むため、承認の前の `段階: 検証` を書き換えずに済む。承認の前に記録を置かない案は、Draft の時点で本文を用意する運用を変えるため採らない |
-| `pace: normal` でもリリース承認ゲートと本番のステージを目録へ書き出す（#1914） | 本番のプランを手で作る手当てが 5 スプリント（m1693・m1385・m744・m653・m1683）で繰り返され、m1385 ではプランを作る前にキューを打って空振りした。`fast` / `auto` は同じ雛形の経路で既に本番のステージを持つ |
+| `pace: normal` でもリリース承認ゲートと本番のステージを目録へ書き出す | 本番のプランを手で作る手当てが 5 スプリント（m1693・m1385・m744・m653・m1683）で繰り返され、m1385 ではプランを作る前にキューを打って空振りした。`fast` / `auto` は同じ雛形の経路で既に本番のステージを持つ |
 | リリース承認ゲートの文を `リリース承認ゲート` の `gate` へ移し、リリースの `note` から外す | 2 か所に置くと片方だけが直され、conductor が古い方を読む。`設計承認ゲート` が `gate` に答えを状態へ書くコマンドを持つ形とも揃う。雛形の無い経路はリリース承認ゲートのステージを持たないため `note` のまま残す |
 | 本番のプランは `plan_sprint_release` にチャネルと版を渡して作り、`plan_mvv_release` を使わない | リリースプランの組み立てが 1 つになる。試作を conductor が打っていた `new release --channel prod` の出力と比べると、出す PR と `課題` の欄を除いて 13 ステップが一致した。`plan_mvv_release` は `--state` を渡した normal で本番の先頭に MVV 判定の承認ゲートを入れ、利用者の承認の後にもう一度判定で止まる（N4） |
 | 本番のブランチが無ければ本番を置かず、`new sprint` は止めない（#1914） | 雛形の本番のプランは本番のブランチが無いと `DeclError` で組めない。止めると、今まで開発版まで流せたリポジトリの `new sprint` が流せなくなる |
