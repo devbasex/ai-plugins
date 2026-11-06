@@ -28,7 +28,8 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_MVV_STATE_DIR",
-    "NDF_PRESENTATION_DIR"
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],
   "stdin": "none",

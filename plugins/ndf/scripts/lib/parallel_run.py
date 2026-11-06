@@ -48,14 +48,24 @@ def relay_argv() -> list[str]:
     return alt.split() if alt else [sys.executable, str(RELAY)]
 
 
-def relay(main: Path, *args: str) -> tuple[int, dict]:
-    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
-    got = subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
+def relay_proc(main: Path, *args: str) -> subprocess.CompletedProcess:
+    """統括役の CLI を打ち、終わったプロセスを返す（標準出力と標準エラーを持つ）。"""
+    return subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
+
+
+def report_of(got: subprocess.CompletedProcess) -> dict:
+    """標準出力の最後の JSON の行（統一 JSON レポート）。読めなければ空の dict。"""
     lines = [ln for ln in (got.stdout or "").splitlines() if ln.strip().startswith("{")]
     try:
-        return got.returncode, json.loads(lines[-1]) if lines else {}
+        return json.loads(lines[-1]) if lines else {}
     except ValueError:
-        return got.returncode, {}
+        return {}
+
+
+def relay(main: Path, *args: str) -> tuple[int, dict]:
+    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+    got = relay_proc(main, *args)
+    return got.returncode, report_of(got)
 
 
 def base_tracking_ref(main: Path) -> str:
@@ -143,14 +153,17 @@ def stall_seconds() -> float:
 
 @durable.step(name="parallel.observe")
 def step_observe(main: str) -> dict:
-    """`relay.py ls --json` の行（名前 → {state, at, role}）と、観た時刻（エポック秒）。"""
-    _, res = relay(Path(main), "ls", "--json")
+    """`relay.py ls --json` の行（名前 → {state, at, role}）と、観た時刻（エポック秒）・一覧の終了コード（`code`）・
+    標準エラーの末尾 1 行（`err`）。"""
+    got = relay_proc(Path(main), "ls", "--json")
+    res = report_of(got)
     rows = {
         it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
         for it in res.get("items") or []
         if isinstance(it, dict) and it.get("name")
     }
-    return {"now": time.time(), "rows": rows}
+    err = (got.stderr or "").strip().splitlines()[-1:]
+    return {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else ""}
 
 
 @durable.step(name="parallel.held-loops")
@@ -290,6 +303,7 @@ class _Run:
         self.revive: list[str] = []  # 問いへ答えた後、まだ動き出していない止まった 1 スプリントのレーン（6f）
         self.revive_at: dict[str, float] = {}  # revive に入れたときの最後の観測の時刻（エポック秒）。最後に動いた時刻と比べる
         self.seen_at = 0.0  # 最後に観測した時刻（エポック秒）
+        self.ls_ok = True  # 最後の観測で一覧が成功したか。失敗した回の後は全レーンが止まったと読まない（#2509 の I2）
 
     def bump(self) -> int:
         self.seq += 1
@@ -661,12 +675,18 @@ def _spawn_ready(run: _Run, main: str) -> None:
 
 def _run_finished(run: _Run) -> bool:
     """配布の途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
-    return run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
+    return run.ls_ok and run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
 
 
 def _observe_run(run: _Run, main: str) -> None:
-    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。"""
+    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。
+
+    一覧が 0 以外で終わった回は、レーンの状態・最後に観測した時刻・起こし直しの待ち・問いを変えずに戻る（#2509 の I1）。
+    `code` を持たない記録（足す前の版の観測）は成功として読む（決定 5）。"""
     seen = step_observe(main)
+    run.ls_ok = int(seen.get("code") or 0) == 0
+    if not run.ls_ok:
+        return
     rows = seen.get("rows") or {}
     states = {n: r.get("state") for n, r in rows.items()}
     run.seen_at = float(seen.get("now") or 0)

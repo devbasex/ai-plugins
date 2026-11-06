@@ -129,6 +129,7 @@
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_WHOLE_RUNS_DIR",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [

@@ -20,7 +20,8 @@
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "NDF_DEPS_REEXEC",
-    "NDF_DEPS_VENV"
+    "NDF_DEPS_VENV",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],
   "stdin": "none",

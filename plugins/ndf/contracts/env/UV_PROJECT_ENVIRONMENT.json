@@ -1,0 +1,5 @@
+{
+  "name": "UV_PROJECT_ENVIRONMENT",
+  "set_by": "user",
+  "summary": "uv のプロジェクトの環境の置き場。lib/deps.py の require が起動し直すときに共有の環境へ向け、起動し直した後に利用者の値へ戻す（無ければ外す）。共有の環境を指す値は子プロセスへ継がせない（#2509）"
+}

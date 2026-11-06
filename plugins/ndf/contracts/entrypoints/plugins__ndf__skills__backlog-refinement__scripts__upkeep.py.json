@@ -26,6 +26,7 @@
     "NDF_SUPERVISE_MODEL",
     "NDF_UPKEEP_NO_SLEEP",
     "NDF_UPKEEP_STATE_DIR",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [
