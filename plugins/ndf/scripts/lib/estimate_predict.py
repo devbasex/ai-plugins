@@ -223,11 +223,8 @@ def spearman(xs: list[float], ys: list[float]) -> float | None:
     return round(sxy / (sx * sy), 4) if sx and sy else None
 
 
-def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
-    """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
-
-    組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
-    since_ts = er.ts(since) if since else None
+def _latest_estimates(estimates: list[dict], since_ts: float | None) -> dict[int, dict]:
+    """課題ごとの最新の見積もり。`since_ts` より前のものは選ぶ前に除く。"""
     latest: dict[int, dict] = {}
     for e in estimates:
         if not isinstance(e.get("issue"), int):
@@ -237,8 +234,16 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
             continue
         if e["issue"] not in latest or (er.ts(latest[e["issue"]].get("at")) or 0) <= t:
             latest[e["issue"]] = e
+    return latest
+
+
+def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
+    """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
+
+    組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
+    since_ts = er.ts(since) if since else None
     items = []
-    for issue, e in sorted(latest.items()):
+    for issue, e in sorted(_latest_estimates(estimates, since_ts).items()):
         got = er.issue_actuals(rows, e.get("done") or "実装", since=e.get("at"), alive=alive).get(issue)
         if not got or not got.completed:
             continue
