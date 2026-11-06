@@ -695,15 +695,9 @@ def _track_ls_failure(run: _Run, seen: dict) -> None:
         return
     run.ls_ask_until = now + limit
     mins = int((now - run.ls_failed_since) // 60)
-    rebuild = "ラッパーの環境を作り直す"
-    run.ask(
-        "observe",
-        f"{run.name}-observe-{int(now)}",
-        None,
-        f"レーンの状態の一覧（relay.py ls）が {mins} 分続けて失敗している（終了コード {seen.get('code')}: {seen.get('err') or ''}）",
-        [rebuild, "待つ"],
-        commands={rebuild: f"python3 {RELAY} status"},
-    )
+    rebuild, rid = "ラッパーの環境を作り直す", f"{run.name}-observe-{int(now)}"
+    text = f"レーンの状態の一覧（relay.py ls）が {mins} 分続けて失敗している（終了コード {seen.get('code')}: {seen.get('err') or ''}）"
+    run.ask("observe", rid, None, text, [rebuild, "待つ"], commands={rebuild: f"python3 {RELAY} status"})
 
 
 def _clear_revived(run: _Run, rows: dict) -> None:
