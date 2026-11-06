@@ -6089,6 +6089,27 @@
       "context": "ndf-release",
       "meaning": "リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態",
       "pending_source": "issues/issue-2623-design.md"
+    },
+    {
+      "term": "差し込み",
+      "context": "ndf-workflow",
+      "meaning": "プランの文字列に置いた `{queue_prs}` などの目印を、プランを流す前に値へ置き換える仕組み",
+      "source": "",
+      "pending_source": "issues/issue-2663-requirements.md"
+    },
+    {
+      "term": "昇格だけの周回",
+      "context": "ndf-workflow",
+      "meaning": "課題の検査が前の周回で済み、本番のプランから始まる開発ループの周回",
+      "source": "",
+      "pending_source": "issues/issue-2663-requirements.md"
+    },
+    {
+      "term": "課題を閉じる PR",
+      "context": "ndf-workflow",
+      "meaning": "本文の closing keywords か閉じる予定の参照が、その課題を指す Pull Request",
+      "source": "",
+      "pending_source": "issues/issue-2663-requirements.md"
     }
   ]
 }
