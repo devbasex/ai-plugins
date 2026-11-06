@@ -276,6 +276,38 @@ def test_a_release_test_of_another_version_is_not_used_for_production():
     assert dist_record.parse_record(text)["verify_block"] is None
 
 
+def _verify(ver: str, label: str) -> str:
+    return f"\n## リリース後テスト\n\n対象の版: {ver}\n合否: 合格（{label}）\n"
+
+
+@pytest.mark.parametrize(
+    ("dist_ver", "verify_ver", "want_ver"),
+    [
+        ("10.26.1", "v10.26.1（2026-10-31 08:52 JST に配布）", "10.26.1"),
+        ("v10.26.1", "10.26.1（2026-10-31）", "10.26.1"),
+        ("10.17.69-dev.1", "v10.17.69-dev.1（2026-10-02）", "10.17.69-dev.1"),
+    ],
+)
+def test_a_leading_v_on_either_version_still_matches(dist_ver, verify_ver, want_ver):
+    """#2225 AC1〜3: 先頭の `v` の有無だけが違う本番の版と対象の版は同じ版として読み、本番の版は `v` なしで返す。"""
+    text = f"## 配布の記録\n\n段階: 本番（承認の後）\n版: 10.26.0 → {dist_ver}（タグ）\nスプリント: PR #1\n"
+    text += _verify(verify_ver, "一致")
+    got = dist_record.parse_record(text)
+    assert got["version"] == want_ver and got["verify_block"].endswith("合否: 合格（一致）")
+
+
+def test_a_leading_v_does_not_let_another_version_be_used_for_production():
+    """#2225 AC4: `v` を落としても、版数の違うテスト（v10.17.69-dev.1）は本番 10.17.68 の検証に使わない。"""
+    text = dist_record.format_record("10.17.67", "10.17.68", [1], stage_note="承認の後", version_note="タグ")
+    assert dist_record.parse_record(text + _verify("v10.17.69-dev.1（2026-10-02）", "開発版"))["verify_block"] is None
+
+
+@pytest.mark.parametrize("ver", ["V10.26.1", "main c427284", "vnext"])
+def test_only_a_lowercase_v_before_a_digit_is_dropped(ver):
+    """#2225 前提 1: 大文字の `V` と、`v` の後が数字でない表記は読み替えない。"""
+    assert dist_record._strip_note(f"{ver}（注記）") == ver
+
+
 def test_a_release_test_before_the_record_is_not_used():
     """AC1: 記録より前のリリース後テストは、版が違えば選ばない。"""
     text = "## リリース後テスト\n\n対象の版: main abc1234\n合否: 合格\n\n" + UNVERSIONED.split("## リリース後テスト")[0]

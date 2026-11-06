@@ -1740,6 +1740,19 @@ def test_loop_answer_merges_the_approved_design_and_the_next_lap_selects_it_firs
     assert 11 not in sl_select.approved_designs(rec(env))
 
 
+def test_loop_exclude_keeps_the_approved_design_first_on_every_reselection(env):
+    """同じ周回の取り直し（loop exclude）は、取り直す周回自身の選定を「選ばれた後の周回」に数えない。"""
+    gated_both(env)
+    sl.cmd_answer(env, "l1", 11, True, None)
+    sl.cmd_answer(env, "l1", 12, False, None)
+    env.rank_box["out"] = rank_out(ms("01 近い", [13, 14, 15, 16, 17, 11]))
+    assert sl_select.cmd_select(env, "l1")["metrics"]["selected"][0] == 11
+    for excluded in (13, 14):  # 1 回ごとに先頭から落ちて戻るのではなく、どの取り直しでも先頭に残る
+        got = sl_select.cmd_exclude(env, "l1", excluded, "外す")
+        assert got["metrics"]["selected"][0] == 11
+        assert next(x for x in got["items"] if x["number"] == 11)["reason"] == sl_select.APPROVED_REASON
+
+
 def test_revise_and_rejected_answers_do_not_merge(env, tmp_path):
     gated_both(env)
     note = tmp_path / "n.md"

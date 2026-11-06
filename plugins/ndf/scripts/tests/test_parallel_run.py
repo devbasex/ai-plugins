@@ -44,6 +44,9 @@ FAKE = textwrap.dedent(
     with open(log, "a") as f:
         f.write(json.dumps(sys.argv[1:]) + "\\n")
     sub = sys.argv[1]
+    if sub == "ls" and os.path.exists(os.environ.get("FAKE_LS_FAIL", "")):
+        print("ls: hub に届かない", file=sys.stderr)
+        sys.exit(3)
     if sub == "ls":
         st = json.load(open(states)) if os.path.exists(states) else {}
         rows = [{"name": n, **(s if isinstance(s, dict) else {"state": s})} for n, s in st.items()]
@@ -70,6 +73,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_PARALLEL_RELAY", f"{sys.executable} {fake}")
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.setenv("FAKE_STATES", str(states))
+    monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
     heads = {"v": "sha1"}
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
@@ -779,6 +783,60 @@ def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatc
     assert run.revive == []
 
 
+def _answers(monkeypatch):
+    """立った答えのイベントを {キー: 値} で集める。"""
+    box = {}
+    monkeypatch.setattr(durable, "set_event", lambda key, value: box.update({key: value}))
+    return box
+
+
+def test_an_answer_to_an_unknown_id_is_held_until_the_question_arrives(monkeypatch, capsys):
+    """一覧に無い id への答えは捨てずに保留して警告を残し、その id の問いが届いたら当てる（#2617）。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    box = _answers(monkeypatch)
+    run.take({"kind": "answer", "id": "q1", "result": "answered", "note": "n", "by": "user"})
+    assert "answer-q1" not in box and "q1" not in run.answered
+    assert "q1" in capsys.readouterr().err
+    run.take({"kind": "ask", "id": "q1", "lane": "la", "question": "?"})
+    assert box["answer-q1"]["result"] == "answered" and box["answer-q1"]["note"] == "n"
+    assert run.questions == [] and "q1" in run.answered and run.held == {}
+
+
+def test_a_held_answer_reaches_a_question_merged_by_cause(monkeypatch):
+    """保留した答えの問いが同じ原因の問いへまとまったら、まとめた問いごと答える。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}, {"name": "lb"}])
+    box = _answers(monkeypatch)
+    run.questions = [{"id": "q0", "kind": "ask", "lane": "la", "cause": "c"}]
+    run.take({"kind": "answer", "id": "q1", "result": "answered"})
+    monkeypatch.setattr(prun, "cause_of", lambda _m: "c")
+    run.take({"kind": "ask", "id": "q1", "lane": "lb"})
+    assert box["answer-q0"]["result"] == box["answer-q1"]["result"] == "answered" and run.questions == []
+
+
+def test_a_held_answer_reaches_a_question_the_workflow_asks_itself(monkeypatch):
+    """耐久ワークフローが自分で立てる問いにも、保留した答えを当てる。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    box = _answers(monkeypatch)
+    run.take({"kind": "answer", "id": "s1", "result": "answered", "choice": ["止める"]})
+    run.ask("spawn", "s1", "la", "起動できない", ["止める"])
+    assert box["answer-s1"]["choice"] == ["止める"] and run.lanes["la"].get("given_up") is True
+
+
+def test_a_repeated_answer_stands_once_and_warns_once(monkeypatch, capsys):
+    """既に答えた id の重複は今のまま 1 回だけで、保留もしない。保留中の id の重複は最初の答えを保つ。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    box = _answers(monkeypatch)
+    run.questions = [{"id": "q1", "kind": "ask", "lane": "la"}]
+    run.reply({"id": "q1", "result": "answered"})
+    box.clear()
+    run.reply({"id": "q1", "result": "rejected"})
+    assert box == {} and run.held == {}
+    capsys.readouterr()
+    run.reply({"id": "q2", "result": "first"})
+    run.reply({"id": "q2", "result": "second"})
+    assert run.held["q2"]["result"] == "first" and capsys.readouterr().err.count("q2") == 1
+
+
 def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     """一時レーンが ask を送って自分のラッパーを止めたときは、「配布の途中で止まった」を問わない（6g）。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
@@ -823,3 +881,160 @@ def test_a_late_request_is_answered_by_the_release_that_completed_it(monkeypatch
     run.pending = [{"id": "r1", "lane": "la", "prs": [10, 20]}, {"id": "r0", "lane": "la", "prs": [10]}]
     run.answer_from_ranges()
     assert sorted(got) == [("r0", "1.2.3", 1), ("r1", "1.2.4", 2)] and run.pending == []
+
+
+# ---------------------------------------------------------------- 状態の一覧の失敗（#2509 の I1・I2・決定 5）
+
+
+def test_a_failed_ls_keeps_lane_states_and_the_last_observation(monkeypatch):
+    """受け入れ条件 1・I1: 一覧が 0 以外で終わった回は、レーンの状態・最後に観測した時刻・起こし直しの待ち・問いを変えない。"""
+    run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb"}])
+    seen = {"now": 1_000_000.0, "rows": {"la": {"state": "running", "at": "1970-01-01T00:00:00Z"}}, "code": 0}
+    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    run.lanes["la"].update(started=True)
+    run.lanes["lb"].update(started=True)
+    prun._observe_run(run, "/m")
+    run.questions, run.stall_until = [], {}
+    run.revive, run.revive_at = ["lb"], {"lb": 1_000_000.0}
+    before = (json.dumps(run.lanes, sort_keys=True), run.seen_at, list(run.revive), dict(run.revive_at))
+    seen.update(now=1_000_060.0, rows={}, code=3, err="ls: hub に届かない")
+    prun._observe_run(run, "/m")
+    assert (json.dumps(run.lanes, sort_keys=True), run.seen_at, list(run.revive), dict(run.revive_at)) == before
+    assert run.questions == [] and run.stall_until == {}
+
+
+def test_after_a_failed_ls_the_plan_is_not_finished(monkeypatch):
+    """I2: 最後の観測が失敗した回の後は、全レーンが止まって見えていても終えない。成功に戻れば終えられる。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    seen = {"now": 1.0, "rows": {}, "code": 0}
+    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    run.lanes["la"].update(started=True)
+    prun._observe_run(run, "/m")
+    assert prun._run_finished(run)
+    seen["code"] = 3
+    prun._observe_run(run, "/m")
+    assert not prun._run_finished(run)
+    seen["code"] = 0
+    prun._observe_run(run, "/m")
+    assert prun._run_finished(run)
+
+
+def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
+    """決定 5: 足す前の版で記録した観測（`code` が無い）は成功として読み、行の無い起動済みのレーンを止まったと読む。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    monkeypatch.setattr(prun, "step_observe", lambda _m: {"now": 1.0, "rows": {}})
+    run.lanes["la"].update(started=True)
+    prun._observe_run(run, "/m")
+    assert run.lanes["la"]["state"] == "stopped" and prun._run_finished(run)
+
+
+def test_step_observe_carries_the_exit_code_and_the_last_stderr_line(env, tmp_path):
+    (tmp_path / "ls.fail").write_text("")
+    got = prun.step_observe(str(env["main"]))
+    assert got["code"] == 3 and got["err"] == "ls: hub に届かない" and got["rows"] == {} and got["can_ask"] is True
+
+
+def test_the_plan_does_not_finish_while_ls_keeps_failing(env, tmp_path):
+    """受け入れ条件 1・2: 一覧が失敗し続ける間は、起動済みのレーンを止まったと読まず、計画を finished で終えない。"""
+    main, log = env["main"], env["log"]
+    fail = tmp_path / "ls.fail"
+    fail.write_text("")
+    start(main)
+    until(lambda: len(calls(log, "ls")) >= 5)
+    assert spawned(log) == ["la"]  # la を止まったと読まないため、lb を起動しない
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    fail.unlink()  # 成功に戻ると、行の無い起動済みのレーンを止まったと読んで終える（受け入れ条件 3 の既存の振る舞い）
+    out = until(lambda: durable.status(pl.workflow_id("p1")) not in pl.RUNNING and durable.output_of(pl.workflow_id("p1")))
+    assert out["status"] == "finished" and spawned(log) == ["la", "lb"]
+
+
+# ---------------------------------------------------------------- 一覧の失敗の問い（#2509 の I3・I4）
+
+
+def _failing_run(monkeypatch):
+    """起動済みのレーン 1 本の計画と、書き換えられる観測の結果。停滞の区切りは 1 分。"""
+    monkeypatch.setenv("NDF_PARALLEL_STALL_MINUTES", "1")
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    run.lanes["la"].update(started=True, state="running")
+    seen = {"now": 1000.0, "rows": {}, "code": 3, "err": "ls: hub に届かない", "can_ask": True}
+    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    return run, seen
+
+
+def _observe_at(run, seen, now):
+    seen["now"] = now
+    prun._observe_run(run, "/m")
+    return [q for q in run.questions if q["kind"] == "observe"]
+
+
+def test_a_long_ls_failure_raises_one_question_per_limit(monkeypatch):
+    """受け入れ条件 4・I3: 失敗が区切りより長く続くと問いが 1 件立ち、本文に終了コードと標準エラーの末尾 1 行が入る。同じ区切りの間は増えない。"""
+    run, seen = _failing_run(monkeypatch)
+    assert _observe_at(run, seen, 1000.0) == [] and _observe_at(run, seen, 1059.0) == []
+    got = _observe_at(run, seen, 1060.0)
+    assert len(got) == 1
+    q = got[0]
+    assert q["id"] == "p1-observe-1060" and q["source"] == "ndf-ask:human-action"
+    assert "終了コード 3" in q["question"] and "ls: hub に届かない" in q["question"] and "1 分" in q["question"]
+    assert "lane" not in q and "attach" not in q
+    assert q["options"] == ["ラッパーの環境を作り直す", "待つ"]
+    assert q["commands"] == {"ラッパーの環境を作り直す": f"python3 {prun.RELAY} status"}
+    assert len(_observe_at(run, seen, 1119.0)) == 1  # 同じ区切りの間は重ねない
+    assert len(_observe_at(run, seen, 1120.0)) == 2  # 次の区切りで次の 1 件
+
+
+def test_replaying_a_record_from_before_the_question_keeps_the_recorded_calls(monkeypatch):
+    """決定 5: 問いを持たない版の失敗の記録の再生では問いも DBOS の呼び出しも足さない。続きの観測は続いた時間で問う。"""
+    run, seen = _failing_run(monkeypatch)
+    del seen["can_ask"]
+    calls = []
+    monkeypatch.setattr(durable, "set_event", lambda *a, **_k: calls.append(a))
+    assert _observe_at(run, seen, 1000.0) == [] and _observe_at(run, seen, 1060.0) == []
+    assert _observe_at(run, seen, 1200.0) == [] and calls == []
+    seen["can_ask"] = True
+    assert len(_observe_at(run, seen, 1201.0)) == 1 and len(calls) == 1
+
+
+def test_a_waited_ls_question_is_not_asked_again_before_the_next_limit(monkeypatch):
+    run, seen = _failing_run(monkeypatch)
+    _observe_at(run, seen, 1000.0)
+    rid = _observe_at(run, seen, 1060.0)[0]["id"]
+    run.take({"kind": "answer", "id": rid, "result": "answered", "choice": ["待つ"]})
+    assert run.questions == [] and run.lanes["la"]["state"] == "running"
+    assert _observe_at(run, seen, 1119.0) == []
+    assert len(_observe_at(run, seen, 1120.0)) == 1
+
+
+def test_a_recovered_ls_drops_the_question_and_restarts_the_tracking(monkeypatch):
+    """I4: 成功に戻ると答えていない一覧の失敗の問いが外れ、失敗の始まりも数え直す。ほかの問いは残す。"""
+    run, seen = _failing_run(monkeypatch)
+    run.questions.append({"id": "q1", "kind": "ask", "lane": "la"})
+    _observe_at(run, seen, 1000.0)
+    assert len(_observe_at(run, seen, 1060.0)) == 1
+    seen["code"] = 0
+    assert _observe_at(run, seen, 1061.0) == [] and [q["id"] for q in run.questions] == ["q1"]
+    seen["code"] = 3
+    assert _observe_at(run, seen, 1062.0) == []
+    assert _observe_at(run, seen, 1121.0) == []  # 新しい始まり（1062）から区切りまでは問わない
+    assert len(_observe_at(run, seen, 1122.0)) == 1
+
+
+def test_a_recovered_ls_lets_the_plan_finish_with_the_question_gone(env, tmp_path, monkeypatch):
+    """I3・I4: 耐久ワークフローを通しても、失敗が続けば問いが届き、成功に戻れば問いが外れて計画を終える。"""
+    main = env["main"]
+    monkeypatch.setattr(prun, "stall_seconds", lambda: 0.3)
+    fail = tmp_path / "ls.fail"
+    fail.write_text("")
+    start(main)
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "observe"])[0]
+    assert "終了コード 3" in item["question"] and "lane" not in item
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    fail.unlink()
+    out = until(lambda: durable.status(pl.workflow_id("p1")) not in pl.RUNNING and durable.output_of(pl.workflow_id("p1")))
+    assert out["status"] == "finished" and not [i for i in questions(main)["items"] if i["kind"] == "observe"]
+
+
+def test_answering_rebuild_returns_the_status_command(tmp_path):
+    item = {"id": "p1-observe-1", "kind": "observe", "commands": {"ラッパーの環境を作り直す": "python3 relay.py status"}}
+    assert pa.owner_restart(tmp_path, "p1", item["id"], ["ラッパーの環境を作り直す"], [item]) == "python3 relay.py status"
+    assert pa.owner_restart(tmp_path, "p1", item["id"], ["待つ"], [item]) is None

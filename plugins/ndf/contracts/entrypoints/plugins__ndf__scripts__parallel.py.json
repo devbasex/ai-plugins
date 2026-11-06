@@ -183,6 +183,7 @@
     "NDF_SV_STATE_DIR",
     "NDF_VERSION",
     "NDF_WHOLE_RUNS_DIR",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [

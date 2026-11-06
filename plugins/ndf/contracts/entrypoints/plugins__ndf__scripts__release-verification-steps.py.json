@@ -24,7 +24,8 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
-    "PATH"
+    "PATH",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [
     {

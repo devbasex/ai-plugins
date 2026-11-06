@@ -334,7 +334,7 @@ class Swapper:
         # 新しい方へ印を置いてから古い方の印を消す（I11・決定 7。pid は exec で変わらない）
         inuse = version_dir.claim_inuse()
         if h["from_dir"] != os.path.basename(PKG_ROOT):
-            version_dir.release_inuse(os.path.join(copy_base(), h["from_dir"], f"inuse-{os.getpid()}"))
+            version_dir.release_claims(os.path.join(copy_base(), h["from_dir"]))
         written = h["written_at"]
         relay.log(
             event="reexec",

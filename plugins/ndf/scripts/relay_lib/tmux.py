@@ -58,6 +58,12 @@ def has_session(name: str) -> bool:
     return p is not None and p.returncode == 0
 
 
+def session_gone(name: str) -> bool:
+    """セッション `name` が無いと tmux が答えた（サーバごと無いときも）。tmux に聞けなければ偽。"""
+    p = _tmux("has-session", "-t", f"={name}")
+    return p is not None and p.returncode != 0
+
+
 def sessions() -> dict[str, dict]:
     """在るセッションの {名前: {attached, activity, pid}}。サーバが無ければ空。"""
     p = _tmux("list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{window_activity}\t#{pane_pid}")

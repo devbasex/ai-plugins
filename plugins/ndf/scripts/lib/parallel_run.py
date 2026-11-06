@@ -26,6 +26,7 @@ import durable
 import parallel_lane as pl
 import parallel_plan as pp
 import parallel_release as pr
+from parallel_repo import dev_version, git_head
 from parallel_question import cause_of
 from sprint_loop_names import LOOP_DIR, PENDING
 
@@ -48,56 +49,20 @@ def relay_argv() -> list[str]:
     return alt.split() if alt else [sys.executable, str(RELAY)]
 
 
-def relay(main: Path, *args: str) -> tuple[int, dict]:
-    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+def relay_proc(main: Path, *args: str) -> tuple[subprocess.CompletedProcess, dict]:
+    """統括役の CLI を打ち、(終わったプロセス, 統一 JSON レポート) を返す。読めなければ空の dict。"""
     got = subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
     lines = [ln for ln in (got.stdout or "").splitlines() if ln.strip().startswith("{")]
     try:
-        return got.returncode, json.loads(lines[-1]) if lines else {}
+        return got, json.loads(lines[-1]) if lines else {}
     except ValueError:
-        return got.returncode, {}
+        return got, {}
 
 
-def base_tracking_ref(main: Path) -> str:
-    """ベースブランチ（`.ndf/worktree.json` の `base_branch` → 既定ブランチ）の `origin/<名>`。決まらなければ空。"""
-    import repo
-
-    b = repo.base_branch(main)
-    return f"origin/{b}" if b else ""
-
-
-def release_plugin(main: Path) -> str:
-    """配るプラグイン（`.ndf/supervise.json` の `release.plugin`）。無ければ空。"""
-    from supervise_lib.decl import read_decl
-
-    return str((read_decl([Path(main)], "supervise.json").get("release") or {}).get("plugin") or "")
-
-
-def git_head(main: Path) -> str:
-    """ベースブランチの先頭のコミット。ベースブランチが決まらなければ空。"""
-    ref = base_tracking_ref(main)
-    if not ref:
-        return ""
-    subprocess.run(["git", "fetch", "-q", "origin"], cwd=main, capture_output=True)
-    got = subprocess.run(["git", "rev-parse", ref], cwd=main, capture_output=True, text=True)
-    return (got.stdout or "").strip()
-
-
-def dev_version(main: Path) -> str:
-    """ベースブランチの配るプラグインの `plugin.json` の開発版の版数から接尾辞を外した版（出す版）。決まらなければ空。"""
-    import re
-
-    from release_version import plugin_json_rel
-
-    ref, plugin = base_tracking_ref(main), release_plugin(main)
-    rel = plugin_json_rel(main, ref, plugin) if ref and plugin else None
-    if not rel:
-        return ""
-    got = subprocess.run(["git", "show", f"{ref}:{rel}"], cwd=main, capture_output=True, text=True)
-    try:
-        return re.sub(r"-.*$", "", json.loads(got.stdout).get("version") or "") if got.returncode == 0 else ""
-    except ValueError:
-        return ""
+def relay(main: Path, *args: str) -> tuple[int, dict]:
+    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+    got, res = relay_proc(main, *args)
+    return got.returncode, res
 
 
 # ---- 耐久ステップ ----
@@ -143,14 +108,16 @@ def stall_seconds() -> float:
 
 @durable.step(name="parallel.observe")
 def step_observe(main: str) -> dict:
-    """`relay.py ls --json` の行（名前 → {state, at, role}）と、観た時刻（エポック秒）。"""
-    _, res = relay(Path(main), "ls", "--json")
+    """`relay.py ls --json` の行（名前 → {state, at, role}）・観た時刻（エポック秒）・終了コード・標準エラーの末尾 1 行。
+    `can_ask` は一覧の失敗を問える版の記録の印で、無い記録の再生では問わない（問いの DBOS の呼び出しが記録の順を崩す。決定 5）。"""
+    got, res = relay_proc(Path(main), "ls", "--json")
     rows = {
         it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
         for it in res.get("items") or []
         if isinstance(it, dict) and it.get("name")
     }
-    return {"now": time.time(), "rows": rows}
+    err = (got.stderr or "").strip().splitlines()[-1:]
+    return {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else "", "can_ask": True}
 
 
 @durable.step(name="parallel.held-loops")
@@ -290,6 +257,10 @@ class _Run:
         self.revive: list[str] = []  # 問いへ答えた後、まだ動き出していない止まった 1 スプリントのレーン（6f）
         self.revive_at: dict[str, float] = {}  # revive に入れたときの最後の観測の時刻（エポック秒）。最後に動いた時刻と比べる
         self.seen_at = 0.0  # 最後に観測した時刻（エポック秒）
+        self.ls_ok = True  # 最後の観測で一覧が成功したか。失敗した回の後は全レーンが止まったと読まない（#2509 の I2）
+        self.ls_failed_since: Optional[float] = None  # 一覧の失敗が始まった時刻（エポック秒）。成功に戻ると None
+        self.ls_ask_until = 0.0  # 一覧の失敗を次に問うてよい時刻（エポック秒）
+        self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
 
     def bump(self) -> int:
         self.seq += 1
@@ -347,21 +318,34 @@ class _Run:
             same["also"] = [*same.get("also", []), msg.get("id")]
             same["merged"] = [*same.get("merged", []), {"id": msg.get("id"), "lane": msg.get("lane"), "question": msg.get("question")}]
             self.publish_questions()
+            self.apply_held(msg.get("id"), same.get("id"))
             return
         if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
             msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
         self.questions.append({**msg, "cause": key} if key else msg)
         self.publish_questions()
+        self.apply_held(msg.get("id"))
+
+    def apply_held(self, rid, target=None) -> None:
+        """保留した依頼 `rid` への答えを、届いた問い（まとめた先があれば `target`）へ当てる。"""
+        if (msg := self.held.pop(rid, None)) is not None:
+            self.reply({**msg, "id": target or rid})
 
     def publish_questions(self) -> None:
         durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
 
     def reply(self, msg: dict) -> None:
-        """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。"""
+        """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。
+        一覧に無い依頼への答えは捨てずに保留し、run.log へ警告を残す（#2617）。"""
         rid = msg.get("id")
-        if rid in self.answered or all(q.get("id") != rid for q in self.questions):
+        if rid in self.answered:
             return
-        q = next(q for q in self.questions if q.get("id") == rid)
+        q = next((q for q in self.questions if q.get("id") == rid), None)
+        if q is None:
+            if rid and rid not in self.held:
+                self.held[rid] = msg
+                print(f"parallel: 一覧に無い依頼 {rid} への答えを保留した（届いたら当てる）", file=sys.stderr, flush=True)
+            return
         for each in [rid, *q.get("also", [])]:
             self.answered.add(each)
             durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "merge", "by", "at")})
@@ -388,13 +372,16 @@ class _Run:
                 rel["prs"] = step_presented(rel["dirs"][-1]).get("prs") or sorted(own)
             self.settle(rel, {"result": "failed", "reason": "配布の途中で止まった一時レーンを、人が止めると答えた"})
 
-    def ask(self, kind: str, rid: str, lane: str, question: str, options: list[str], **extra) -> None:
-        """耐久ワークフローが自分で立てる問い（動かないレーン・一時レーンの停止・起動の断り）。同じ id は 1 回だけ。"""
+    def ask(self, kind: str, rid: str, lane: Optional[str], question: str, options: list[str], **extra) -> None:
+        """耐久ワークフローが自分で立てる問い（動かないレーン・一時レーンの停止・起動の断り・一覧の失敗）。同じ id は 1 回だけ。
+        レーンに紐づかない問い（`lane` が None）は `lane` と `attach` を持たない。"""
         if rid in self.answered or any(q.get("id") == rid for q in self.questions):
             return
-        item = {"kind": kind, "id": rid, "lane": lane, "source": "ndf-ask:human-action", "question": question, "options": options}
-        self.questions.append({**item, "attach": f"python3 {RELAY} attach {lane}", **extra})
+        item = {"kind": kind, "id": rid, "source": "ndf-ask:human-action", "question": question, "options": options}
+        where = {"lane": lane, "attach": f"python3 {RELAY} attach {lane}"} if lane else {}
+        self.questions.append({**item, **where, **extra})
         self.publish_questions()
+        self.apply_held(rid)
 
     def answer(self, rid: str, result: str, version: Optional[str], n: Optional[int], reason: Optional[str] = None) -> None:
         self.answered.add(rid)
@@ -661,12 +648,16 @@ def _spawn_ready(run: _Run, main: str) -> None:
 
 def _run_finished(run: _Run) -> bool:
     """配布の途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
-    return run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
+    return run.ls_ok and run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
 
 
 def _observe_run(run: _Run, main: str) -> None:
-    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。"""
+    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。一覧が失敗した回は、一覧の失敗の追跡のほかは何も変えない（#2509 の I1）。"""
     seen = step_observe(main)
+    run.ls_ok = int(seen.get("code") or 0) == 0  # code の無い古い記録は成功として読む（決定 5）
+    _track_ls_failure(run, seen)
+    if not run.ls_ok:
+        return
     rows = seen.get("rows") or {}
     states = {n: r.get("state") for n, r in rows.items()}
     run.seen_at = float(seen.get("now") or 0)
@@ -687,6 +678,27 @@ def _observe_run(run: _Run, main: str) -> None:
                 noticed.append(n)
     if noticed:
         run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
+
+
+def _track_ls_failure(run: _Run, seen: dict) -> None:
+    """一覧の失敗が停滞の区切りより長く続いたら、区切りごとに 1 回問う（#2509 の I3）。成功に戻ったら追跡を解き、答えていない
+    一覧の失敗の問いを外す（I4。残すと答えを待って計画が終われない）。"""
+    if run.ls_ok:
+        run.ls_failed_since, run.ls_ask_until = None, 0.0
+        if any(q.get("kind") == "observe" for q in run.questions):
+            run.questions = [q for q in run.questions if q.get("kind") != "observe"]
+            run.publish_questions()
+        return
+    now, limit = float(seen.get("now") or 0), stall_seconds()
+    if run.ls_failed_since is None:
+        run.ls_failed_since = now
+    if now - run.ls_failed_since < limit or now < run.ls_ask_until or not seen.get("can_ask"):
+        return
+    run.ls_ask_until = now + limit
+    mins = int((now - run.ls_failed_since) // 60)
+    rebuild, rid = "ラッパーの環境を作り直す", f"{run.name}-observe-{int(now)}"
+    text = f"レーンの状態の一覧（relay.py ls）が {mins} 分続けて失敗している（終了コード {seen.get('code')}: {seen.get('err') or ''}）"
+    run.ask("observe", rid, None, text, [rebuild, "待つ"], commands={rebuild: f"python3 {RELAY} status"})
 
 
 def _clear_revived(run: _Run, rows: dict) -> None:

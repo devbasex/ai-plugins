@@ -95,9 +95,10 @@
 | `relay_lib/runtime.py` の `enter` | 副命令の振り分けの前に、`UV_PROJECT_ENVIRONMENT` が共有の環境を指していれば外す（古い版の NDF のスクリプトから継いだ値を含む） | 変える |
 | `lib/parallel_run.py` の `relay` | 統括役の CLI の起動を `relay_proc`（新設。終了コード・標準出力・標準エラーを持つ結果を返す）へ寄せ、戻り値の形 `(終了コード, 統一 JSON レポート)` は保つ | 変える |
 | `lib/parallel_run.py` の `step_observe` | 観測の結果に、一覧の終了コード（`code`）と標準エラーの末尾 1 行（`err`）を足す | 変える |
-| `lib/parallel_run.py` の `_observe_run` | 終了コードによらず先に `_track_ls_failure` を呼ぶ。0 以外ならそこで戻り、0 なら既存の観測を通す | 変える |
+| `lib/parallel_run.py` の `_observe_run` | 終了コードを `ls_ok` に控え、終了コードによらず先に `_track_ls_failure` を呼ぶ。0 以外ならそこで戻り、0 なら既存の観測を通す | 変える |
+| `lib/parallel_run.py` の `_run_finished` | `ls_ok` が偽の間は偽を返す（I2） | 変える |
 | `lib/parallel_run.py` の `_track_ls_failure`（新設） | 失敗の回は、一覧の失敗が始まった時刻を持ち、停滞の区切りを超えたら区切りごとに 1 回、一覧の失敗の問いを立てる。成功に戻ったら答えていない一覧の失敗の問いを外す | 足す |
-| `lib/parallel_run.py` の `_Run` | 一覧の失敗の追跡の値（`ls_failed_since`・`ls_ask_until`）を持つ。`ask` は `lane` を持たない問い（`attach` を添えない）を受ける | 変える |
+| `lib/parallel_run.py` の `_Run` | 最後の観測で一覧が成功したか（`ls_ok`）と、一覧の失敗の追跡の値（`ls_failed_since`・`ls_ask_until`）を持つ。`ask` は `lane` を持たない問い（`attach` を添えない）を受ける | 変える |
 | `lib/parallel_answer.py` の `owner_restart` | 自分で立てた問いの種類に `observe` を足し、選んだ答えの `commands` を返す | 変える |
 | `skills/development-workflow/references/parallel.md` | 耐久ワークフローが自分で立てる問いの種類の一覧に `observe` を足す | 変える |
 
@@ -149,9 +150,8 @@ plugins/ndf/
 │   ├── relay_lib/
 │   │   └── runtime.py              # enter
 │   └── tests/
-│       ├── test_deps.py
-│       ├── test_deps_child_env.py  # 受け入れ条件 5・6・8・10（新設）
-│       ├── test_relay_child_env.py # 受け入れ条件 7・8（新設）
+│       ├── test_deps.py            # 受け入れ条件 5・6・8・10
+│       ├── test_relay.py           # 受け入れ条件 7・8
 │       └── test_parallel_run.py    # 受け入れ条件 1〜4
 └── skills/development-workflow/references/parallel.md
 ```
@@ -164,6 +164,7 @@ classDiagram
         +dict lanes
         +list questions
         +float seen_at
+        +bool ls_ok
         +float ls_failed_since
         +float ls_ask_until
         +ask(kind, rid, lane, question, options)
@@ -173,11 +174,12 @@ classDiagram
         +dict rows
         +int code
         +str err
+        +bool can_ask
     }
     _Run ..> ObserveResult : _observe_run が読む
 ```
 
-観測の結果は耐久の記録に残るステップの戻り値で、`code` と `err` を足す。足す前の版で記録した戻り値は `code` を持たないため、無ければ 0（成功）として読む（決定 5）。`ls_failed_since` と `ls_ask_until` は `_Run` の値で、打ち直すと記録からの再生で同じ値に戻る（ほかの値と同じ）。
+観測の結果は耐久の記録に残るステップの戻り値で、`code` と `err` と `can_ask` を足す。`code` を足す前の版で記録した戻り値は `code` を持たないため、無ければ 0（成功）として読む。`can_ask` が無い記録では一覧の失敗を問わない（どちらも決定 5）。`ls_ok`・`ls_failed_since`・`ls_ask_until` は `_Run` の値で、打ち直すと記録からの再生で同じ値に戻る（ほかの値と同じ）。
 
 ## 入出力の契約
 
@@ -251,7 +253,7 @@ stateDiagram-v2
     問い済み --> 正常: 一覧が 0（答えていない問いを外す）
 ```
 
-答えていない一覧の失敗の問いがある間は `run.questions` が空でないため、`_run_finished` は偽を返し、計画は終わらない（既存の条件）。
+答えていない一覧の失敗の問いがある間は `run.questions` が空でないため、`_run_finished` は偽を返し、計画は終わらない（既存の条件）。問いを答えた後でも、最後の観測が失敗なら `ls_ok` が偽のため終わらない（I2）。
 
 ## 非機能の実現方式
 
@@ -298,11 +300,13 @@ stateDiagram-v2
 
 観測の結果は耐久の記録に残るステップの戻り値で、打ち直すと記録から再生される。この変更の前に記録した戻り値は `code` を持たない。無いときは 0 として読み、記録の時点の振る舞い（成功として読む）を保つ。記録のテーブルと形は変えない。
 
+一覧の失敗の問いも同じ考えで、記録の時点の振る舞いを保つ。問いは `DBOS.set_event` を呼ぶため、問いの無い版の記録を再生する途中で立てると、記録済みの呼び出しの順と衝突して計画を再開できない。そこで観測の結果に `can_ask` を足し、これが無い記録の再生では問わない。失敗の始まりの追跡は続けるので、再生の後の最初の観測で失敗が続いていれば問う。形式の版（`durable.FORMAT`）は上げない。上げると全種類の記録に効くうえ、並列の計画は形式の版で続けるかを選ばないため、更新前の計画が回復されず待ち続ける。
+
 根拠: Value 6（MVV 版 5）
 
 ### 決定 6: 問いが計画の終わりを止め続けないよう、一覧が成功に戻ったら答えていない一覧の失敗の問いを外す
 
-答えていない問いがあると `_run_finished` が偽になり、計画は終われない。一覧が成功に戻れば問いの前提が無くなるため、外して `questions` のイベントを出し直す。外した後に届いた答えは、既存の `reply` が一覧に無い id として捨てる。
+答えていない問いがあると `_run_finished` が偽になり、計画は終われない。一覧が成功に戻れば問いの前提が無くなるため、外して `questions` のイベントを出し直す。外した後に届いた答えは、既存の `reply` が一覧に無い id として保留し、警告を残す。`id` は観測の時刻を含み、同じ id の問いは立たないため、保留した答えはどの問いにも当たらず、計画の終わりも止めない。
 
 問いを残して利用者の答えを待つ形は採らない。一覧が戻った後の答えは何も変えず、待つ間は計画が終われない。
 
@@ -329,6 +333,7 @@ stateDiagram-v2
 | 受け入れ条件 3 | 一覧が 0 で終わり、起動済みのレーンの行が無いとき、そのレーンを `stopped` と読み、全レーンがそうなら `finished` で終える | 成功した回の行の無いレーンも状態を変えないよう壊すと落ちる |
 | 受け入れ条件 4・I3 | 失敗が停滞の区切り（テストでは短い値）より長く続くと問いが 1 件立ち、本文に終了コードと標準エラーの末尾 1 行が入る。同じ区切りの間の次の失敗では増えない | 区切りの判定を外す・問いの本文から終了コードを落とす・毎回問うよう壊すと落ちる |
 | I4 | 失敗で問いが立った後、一覧が 0 で終わると問いが一覧から外れる | 成功の回で問いを外さないよう壊すと落ちる |
+| 決定 5 | `can_ask` の無い失敗の記録では、区切りを超えても問いも `set_event` も足さず、印のある観測で問う | `can_ask` を見ないよう壊すと落ちる |
 | 受け入れ条件 5・I5・I6 | 共有の環境へ起動し直したスクリプト（`require` を呼ぶ小さなスクリプト）の子プロセスの `env` の出力に `UV_PROJECT_ENVIRONMENT` が無い | `release_project_env` を呼ばない・退避の値が無いときに外さないよう壊すと落ちる |
 | 受け入れ条件 6 | 起動し直したスクリプトの子プロセスとして、`requires-python` が合わない別のプロジェクトで `uv run --project <別のプロジェクト> python -c pass` を打った後も、共有の環境の `pyvenv.cfg` の中身と更新時刻が変わらず、`import psutil` が通る（本物の uv で、一時ディレクトリの共有の環境を使う。用意の仕方は表の下） | 受け入れ条件 5 と同じ壊し方で落ちる |
 | 受け入れ条件 7・I6 | 共有の環境を指す `UV_PROJECT_ENVIRONMENT` を親に持たせてラッパーを通しても、子の claude（差し替えの claude が環境を書き出す）の環境に無い | `enter` で外さないよう壊すと落ちる |

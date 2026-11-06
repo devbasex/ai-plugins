@@ -44,6 +44,16 @@ def record_exists(main: Path, name: str) -> bool:
     return record_path(KIND, record_identity(main, name)).exists()
 
 
+def live_run_pid(main: Path, name: str) -> Optional[int]:
+    """`run.pid` の run が動いていればその pid。"""
+    try:
+        pid = int((pp.plan_dir(main, name) / "run.pid").read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return None
+    return pid
+
+
 def run_status(main: Path, name: str) -> Optional[str]:
     """計画の耐久ワークフローの状態（記録が無ければ None）。"""
     if not record_exists(main, name):

@@ -53,7 +53,8 @@
     "NDF_DEPS_VENV",
     "NDF_ISSUE_REQUEST_FILE",
     "NDF_PRESENTATION_DIR",
-    "NDF_SKILL_REPO"
+    "NDF_SKILL_REPO",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],
   "stdin": "none",
