@@ -6067,6 +6067,13 @@
       "meaning": "1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・照合する本文からなる。1 字でも違えば別の入力である",
       "source": "",
       "pending_source": "issues/issue-2614-requirements.md"
+    },
+    {
+      "term": "照合の記録",
+      "context": "ndf-workflow",
+      "meaning": "照合のたびに 1 行を足す JSONL のファイル（project-mvv.jsonl）。機械ごとに 1 つある",
+      "source": "",
+      "pending_source": "issues/issue-2614-design.md"
     }
   ]
 }
