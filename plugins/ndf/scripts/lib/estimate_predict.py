@@ -126,6 +126,11 @@ def size_unit(a_values: list[float], decl: dict) -> float | None:
     return stats.median_value(xs[: math.ceil(len(xs) / 4)])
 
 
+def size_unit_of(actuals, decl: dict) -> float | None:
+    """課題ごとの実績から Size 1 の基準を決める。完了した実績のうち、AI が働いたものだけを数える（#2433）。"""
+    return size_unit([a.a for a in actuals if a.completed and a.ai_worked], decl)
+
+
 def to_size(a_seconds: float | None, unit: float | None, scale=SCALE):
     """A を Size 1 の基準との比で尺度へ丸める。境界は隣り合う段階の中点、最大を超えたら「尺度を超える」（I7・決定 9）。"""
     if a_seconds is None or not unit:
@@ -176,7 +181,7 @@ def predict(
             notes + ([] if any(a.h is not None for a in same) else ["人の作業時間の記録が無い"]),
         ),
     }
-    unit = size_unit([a.a for a in actuals.values() if a.completed], decl)
+    unit = size_unit_of(actuals.values(), decl)
     a_val = values["A"]
     size = to_size(a_val["typical"], unit, decl.get("scale") or SCALE) if a_val["mark"] == "実績" else None
     return {
