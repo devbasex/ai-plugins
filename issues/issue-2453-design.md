@@ -48,6 +48,7 @@
 | I3 | 実装のプラン | 表を読んだ文書のどれかにセルの形の誤りがあれば、実装のプランと `design-results.json` のどちらも書かれない | `status: stopped`・終了コード 2 で止まり、人へ戻す |
 | I4 | 設計の結果 | 行の `files` は、セルの括弧の外のコードスパンの中身だけである | 注記や地の文がパスとして実装のプランへ入る。テストで縛る |
 | I5 | 設計の結果 | 「取り込む」「閉じる」の行のセルは読まない | 今の振る舞いのまま。テストで縛る |
+| I6 | 設計の結果 | 課題が「読めなかった」になるのは、PR が変えた文書にも、番号でつながるベースブランチの設計文書にも、読める表が無いときだけである | 分割した文書だけを直した修正 PR で、課題の設計文書が 1 本も worker へ渡らない。テストで縛る |
 
 ### ドメインイベント
 
@@ -87,7 +88,8 @@ E6 は新しい経路を作らない。読む中身はベースブランチな�
 | --- | --- |
 | `plugins/ndf/scripts/lib/design_docs.py` | 文書の名前と番号の規則を持つ。`find_closed` の番号をたどるループを `connected_docs` へ切り出し、パスの一覧にも使えるようにする |
 | `plugins/ndf/scripts/lib/design_results.py` | 触るファイルのセルをインラインのトークンで読み、形の誤りを `CellProblem` として返す。`base_docs` を持ち、`docs_of` が先頭の文書と番号でつながる文書を返す |
-| `plugins/ndf/scripts/supervise_lib/design_stage.py` | ベースブランチの一覧を `base_docs` へ入れ、すべての文書の形の誤りを集めて止まる |
+| `plugins/ndf/scripts/supervise_lib/design_stage.py` | ベースブランチの一覧を `base_docs` へ入れ、PR が変えた文書に表が無い課題は番号でつながる文書から表を読み、すべての文書の形の誤りを集めて止まる |
+| `plugins/ndf/scripts/supervise_lib/templates.py` | 指示文の「設計文書:」の行（`DESIGN_DOCS_LINE`）の括弧書きを、載せた文書をすべて読む意味にする |
 | `plugins/ndf/skills/design/references/design-template.md` | 「設計の結果の書き方」と「分量」に、分割しても先頭の表へ直に列挙することを書く |
 | `plugins/ndf/scripts/tests/test_design_results_rewrite.py` | 受け入れ条件と不変条件のテスト |
 
@@ -103,6 +105,7 @@ graph TD
         F[connected_docs]
     end
     B --> D
+    B --> F
     C --> E
     E --> F
     G[md_tokens] --> D
@@ -114,7 +117,7 @@ graph TD
 
 | 要素 | 手を入れない理由 |
 | --- | --- |
-| `supervise_lib/templates.py` の `impl_prompt` | `design_docs` の一覧を読点で連結済みである |
+| `supervise_lib/templates.py` の `impl_prompt` の本体 | `design_docs` の一覧を読点で連結済みである |
 | `supervise_lib/design_stage.py` の `kept_lines` | 書き直しの前後の状態からテンプレートの行を求めるため、一覧の本数が増えても影響しない |
 | `pr_materials.py` | `design-results.json` の `rows`・`unread`・`design_prs` だけを読むため、キーが増えても影響しない |
 
@@ -122,7 +125,7 @@ graph TD
 
 ### 決定 1: 設計の修正 PR でも抜けないよう、設計文書の一覧をベースブランチの一覧から組む
 
-ベースブランチの一覧は、変えた文書を求める処理（`changed_design_docs`）がすでに読んでいる。その結果を `base_docs` として返すため、git の呼び出しは増えない。PR の変更一覧だけを見ると、先頭の文書だけを直した修正 PR で分割した文書が抜ける。
+ベースブランチの一覧は、変えた文書を求める処理（`changed_design_docs`）の読み取りをそのまま使い、`base_docs` として返す。`issues/` の文書を変えていない PR でも一覧を読む。git の呼び出しが増えるのはこの PR の場面の 2 回（取得と一覧）だけである。PR の変更一覧だけを見ると、先頭の文書だけを直した修正 PR で分割した文書が抜ける。
 
 この一覧は、書き直しの処理（`rewrite`）の引数でなく設計の結果（`DesignResults`）に持たせる。書き直しの入力を 1 つに保ち、書いた `design-results.json` から同じ一覧を再現できるためである。
 
@@ -166,6 +169,20 @@ GFM はセルの中身をインラインとして解釈する。リポジトリ�
 `design-template.md` の「設計の結果の書き方」の 4 列の説明に、先頭の表へすべてのパスを列挙すること・リンクと語で別の文書へ委ねると止まること・注記は括弧で書けることを足す。分割した文書の「触るファイル」の節に書式を定める形は採らない（要求の S1）。
 
 根拠: Value 5（MVV 版 6）
+
+### 決定 7: 載せた文書がすべて読まれるよう、指示文の読む範囲を節で絞らない
+
+指示文の「設計文書:」の行の括弧書きを `（載せた文書をすべて読んでから実装する）` にする。「決定の記録」と「設計の結果」の 2 節を読むという書き方は、この 2 節を持たない分割した文書（`issue-2342-design-contracts.md` など、今の `issues/` の 9 本）の内容を読む範囲から外す。一覧に載せるだけでは、読まれずに終わる経路が残る。
+
+根拠: Value 7（MVV 版 6）
+
+### 決定 8: 分割した文書だけを直した修正 PR でも課題を読めるよう、表をベースブランチの文書からも探す
+
+マージ済みの PR は同じブランチの最新の 1 本だけを見るため、分割した文書だけを直した修正 PR が最新だと、表を持つ文書が変更一覧に入らない。PR が変えた文書のどれにも表が無いとき、課題の番号と番号でつながるベースブランチの設計文書（`connected_docs`）を読み、そこから表を探す。PR が `issues/` の文書を変えていないときも同じである。読む文書が増えるのはこの場面だけで、PR が変えた文書に表があれば git の呼び出しは増えない。
+
+要求の境界「『読めなかった』の扱いの変更は行わない」には当たらない。表を探す文書が増えるだけで、どの文書にも表が無い課題を今の振る舞いのまま流す扱いは同じである。
+
+根拠: Value 7（MVV 版 6）
 
 ## 外部の調査
 
@@ -287,6 +304,11 @@ sequenceDiagram
         end
         R->>P: 文書ごとの中身
         P-->>R: 行、または DesignCellError
+        opt 変えた文書に表が無い
+            R->>G: 番号でつながる文書の中身
+            R->>P: 文書ごとの中身
+            P-->>R: 行、または DesignCellError
+        end
     end
     alt 形の誤りが 1 件以上
         R-->>S: すべての誤りを持つ DesignCellError
@@ -327,6 +349,7 @@ uv run --frozen --project . --all-extras pytest \
 | 1・2・I1 | ベースブランチに 3 本ある課題で、プランの `設計文書` と指示文の「設計文書:」の行に 3 本が載る | `docs_of` が行の文書だけを返すと落ちる |
 | 3・I2 | 表を持つ文書が先頭で、残りが昇順である | 全体を昇順にすると、表が分割した文書にある場面で落ちる |
 | 4 | PR が先頭の文書だけを変えても分割した文書が載る | 一覧を PR の変更から組むと落ちる |
+| I6 | PR が分割した文書だけを変えた課題と、`issues/` の文書を変えなかった課題が `unread` に入らず、`設計文書` に先頭の文書と分割した文書が載る。つながる文書のどれにも表が無い課題は `unread` のままである | 表を PR の変更した文書からだけ読むと落ちる |
 | 5 | 表が分割した文書にあるとき、両方が載る | 先頭を `issue-<番号>-design.md` に固定すると落ちる |
 | 6 | 要求のコピー・番号を共有しない文書・ベースブランチから消えた文書が載らない | `requirements=True` で読む、番号の照合を外す、一覧を PR の変更と合わせると、それぞれ落ちる |
 | 7 | `#1`・`#2` の行を持つ表で両方のプランが同じ一覧になり、取り込むと両方の課題の文書が載る | 起点から表の行の番号を外すと落ちる |
@@ -339,12 +362,13 @@ uv run --frozen --project . --all-extras pytest \
 | 15・I4 | 読点・`,`・注記・空・`—` のセルが止まらず、`files` がコードスパンの中身だけである | 括弧の中のコードスパンを読むと落ちる |
 | 16・I5 | 「取り込む」「閉じる」の行のセルに語があっても止まらない | 扱いを問わず読むと落ちる |
 | 17 | 差分で見る（`.md` の文言を照合するテストは書かない） | — |
+| E7（決定 7） | 差分で見る（指示文の文言を照合するテストは書かない） | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2453 | 実装する | — | `plugins/ndf/scripts/lib/design_docs.py`、`plugins/ndf/scripts/lib/design_results.py`、`plugins/ndf/scripts/supervise_lib/design_stage.py`、`plugins/ndf/scripts/tests/test_design_results_rewrite.py`、`plugins/ndf/skills/design/references/design-template.md` |
+| #2453 | 実装する | — | `plugins/ndf/scripts/lib/design_docs.py`、`plugins/ndf/scripts/lib/design_results.py`、`plugins/ndf/scripts/supervise_lib/design_stage.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/tests/test_design_results_rewrite.py`、`plugins/ndf/skills/design/references/design-template.md` |
 
 ## 未確認のまま残ること
 
@@ -352,6 +376,7 @@ uv run --frozen --project . --all-extras pytest \
 | --- | --- |
 | 括弧の中の語で委ねる形 | `` `a.py`（残りは別の文書） `` は止まらず、抜けが残る。実測で該当は 0 行である（履歴の注記 2 行はどちらも委ねていない）。出現したら別の課題で判断する |
 | 「扱い」の列の外れ | 要求の範囲外で、文書ごと「読めなかった」（`unread`）のまま流れる。別の課題にするかは設計承認ゲートで決める（要求の未決） |
-| 表の無い課題の文書 | 「読めなかった」課題には今と同じく `設計文書` が載らない |
+| 表の無い課題の文書 | 番号でつながるベースブランチの文書のどれにも読める表が無い課題には、今と同じく `設計文書` が載らない |
+| 版をまたぐ打ち直し | 古い版で書いた指示文を新しい版で打ち直すと、古い括弧書きの行が補正の行として残り、「設計文書:」の行が 2 行になる。進行中のスプリントだけの一時的な形で、古い行を選んで消す処理は足さない |
 | 分割した文書の触るファイルと先頭の表の一致 | 列挙の抜け自体は機械で確かめない。設計 PR のレビューが見る |
 | 止まる位置 | 設計承認ゲートの後である。リンクで委ねたセルを止める方式の採用と止まる位置は、要求の未決のとおり設計承認ゲートで利用者が確かめる |
