@@ -136,6 +136,23 @@ def test_cgroup_cpu_takes_the_smallest_limit_up_to_the_root(tmp_path: Path):
     assert procs.cgroup_cpu(child, root) == 0.5
 
 
+def test_cgroup_memory_limit_takes_the_smallest_limit_up_to_the_root(tmp_path: Path):
+    """親の slice のメモリの上限は、子が `max` でも効く（読めない階層は飛ばし、`root` の外は読まない）。"""
+    root = tmp_path / "cg"
+    child = root / "slow.slice" / "x.scope"
+    child.mkdir(parents=True)
+    (tmp_path / "memory.max").write_text("1\n")  # root の外
+    (child / "memory.max").write_text("max\n")
+    assert procs.cgroup_memory_limit(child, root) is None
+    (child.parent / "memory.max").write_text(f"{4 * 2**30}\n")
+    assert procs.cgroup_memory_limit(child, root) == 4 * 2**30
+    (child / "memory.max").write_text(f"{8 * 2**30}\n")
+    (root / "memory.max").write_text("broken\n")
+    assert procs.cgroup_memory_limit(child, root) == 4 * 2**30
+    (child / "memory.max").write_text(f"{2 * 2**30}\n")
+    assert procs.cgroup_memory_limit(child, root) == 2 * 2**30
+
+
 def _raising_wait(exc: BaseException):
     def wait_procs(procs_, timeout=None):
         raise exc

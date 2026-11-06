@@ -44,11 +44,11 @@ def cpus(cgroup: Optional[Path] = None) -> float:
 
 
 def memory_gib(cgroup: Optional[Path] = None) -> float:
-    """使えるメモリ（GiB）。マシンの合計と cgroup の `memory.max` の小さい方。"""
+    """使えるメモリ（GiB）。マシンの合計と、親の階層まで見た cgroup の `memory.max` の最小の小さい方。"""
     import procs
 
     total = procs.memory_available()[1]
-    limit = procs.cgroup_memory(cgroup).limit
+    limit = procs.cgroup_memory_limit(cgroup)
     return round((min(total, limit) if limit else total) / 2**30, 1)
 
 

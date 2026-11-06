@@ -235,13 +235,15 @@ def _cpu_max(path: Path) -> float | None:
         return None
 
 
-def cgroup_cpu(directory: Path | None = None, root: Path = CGROUP_ROOT) -> float | None:
-    """自分から `root` までの cgroup の `cpu.max` が許す CPU の数の最小。親の上限も子に効くため階層をたどる。
-
-    `root` の外のディレクトリはそこだけを読む。どの階層にも上限が無い（`max`）・読めないときは None。"""
+def _cgroup_levels(directory: Path | None, root: Path) -> list[Path]:
+    """自分から `root` までの cgroup のディレクトリ。親の上限も子に効くため上限はこの全部で読む。`root` の外はそこだけ。"""
     d = cgroup_dir() if directory is None else Path(directory)
-    levels = [d, *(p for p in d.parents if p.is_relative_to(root))] if d.is_relative_to(root) else [d]
-    limits = [v for v in (_cpu_max(p / "cpu.max") for p in levels) if v is not None]
+    return [d, *(p for p in d.parents if p.is_relative_to(root))] if d.is_relative_to(root) else [d]
+
+
+def cgroup_cpu(directory: Path | None = None, root: Path = CGROUP_ROOT) -> float | None:
+    """自分から `root` までの cgroup の `cpu.max` が許す CPU の数の最小。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    limits = [v for v in (_cpu_max(p / "cpu.max") for p in _cgroup_levels(directory, root)) if v is not None]
     return min(limits, default=None)
 
 
@@ -250,6 +252,12 @@ def _read_int(path: Path) -> int | None:
         return int(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
+
+
+def cgroup_memory_limit(directory: Path | None = None, root: Path = CGROUP_ROOT) -> int | None:
+    """自分から `root` までの cgroup の `memory.max` の最小（バイト）。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    limits = [v for v in (_read_int(p / "memory.max") for p in _cgroup_levels(directory, root)) if v is not None]
+    return min(limits, default=None)
 
 
 def cgroup_memory(directory: Path | None = None) -> CgroupMemory:

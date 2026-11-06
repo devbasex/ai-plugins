@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,16 @@ def test_an_unlimited_or_missing_cgroup_keeps_the_machine_values(tmp_path, monke
     assert re_.cpus(d) == 8.0 and re_.memory_gib(d) == 30.0
     missing = tmp_path / "none"
     assert re_.cpus(missing) == 8.0 and re_.memory_gib(missing) == 30.0
+
+
+def test_a_memory_limit_on_a_parent_slice_narrows_the_machine_total(tmp_path, monkeypatch):
+    monkeypatch.setattr(procs, "memory_available", lambda: (0, 30 * 2**30))
+    child = tmp_path / "slow.slice" / "x.scope"
+    child.mkdir(parents=True)
+    (child / "memory.max").write_text("max\n")
+    (child.parent / "memory.max").write_text(f"{4 * 2**30}\n")
+    monkeypatch.setattr(procs, "cgroup_memory_limit", partial(procs.cgroup_memory_limit, root=tmp_path))
+    assert re_.memory_gib(child) == 4.0
 
 
 def test_place_tells_factory_from_container_and_host(tmp_path, monkeypatch):
