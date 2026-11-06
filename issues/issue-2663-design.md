@@ -50,8 +50,8 @@
 | --- | --- | --- | --- |
 | I1 | プラン | `{queue_prs}` を埋める値は、前のステージの PR とマージ済みの課題を閉じる PR の和で、重ねず番号の昇順である | 埋める処理の単体テストで落とす |
 | I2 | プラン | GitHub を読めないときは、前のステージの PR があってもプランを書き換えない | プランを流さず、理由に「GitHub を読めない」と課題の番号を残す |
-| I3 | プラン | 和が空のときに流すのは、実行条件を打つ経路だけである。`--from` は条件を打たないため流さない | プランを流さず、理由に「閉じる PR が無い」と課題の番号を残す |
-| I4 | プラン | `{queue_prs}` が残ったコマンドは打たない | run と queue のどちらも、そのステップを打たずに `止まった` で終わる |
+| I3 | プラン | 和が空のときに流すのは、実行条件を評価する経路だけである。`--from` は条件を評価しないため流さない | プランを流さず、理由に「閉じる PR が無い」と課題の番号を残す |
+| I4 | プラン | `{queue_prs}` が残ったコマンドは実行しない | run と queue のどちらも、そのステップを実行せずに `止まった` で終わる |
 | I5 | プラン | GitHub を読むのは、`{queue_prs}` と課題の両方を持つプランを埋めるときだけである | 読み出しの回数のテストで落とす |
 | I6 | 進捗ログ | 件数を読む範囲は、`--from` の無い最後の実行の始まりより後である | 頭から流し直した実行は、それより前の件数を読まない |
 | I7 | 進捗ログ | 同じステップの件数が複数の実行にあれば、足さずに最後の実行の値を採る | 足すと二重に数えるため、足さない |
@@ -79,65 +79,31 @@
 | 昇格だけの周回 | 課題の検査が前の周回で済み、本番のプランから始まる開発ループの周回 | 追加済み（`ndf-workflow`） |
 | 課題を閉じる PR | 本文の closing keywords か閉じる予定の参照が、その課題を指す Pull Request | 追加済み（`ndf-workflow`）。マージ済みに絞るのは差し込みの規則で、語の意味は変えない |
 
-## 外部の調査
-
-| 種類 | 調べるか | 理由 |
-| --- | --- | --- |
-| 標準・仕様 | 調べる | 課題から閉じる PR へたどる手段が GitHub の API の形で決まる |
-| 主要な製品 | 調べる | 流し直しをまたいで前の実行の値をどう残すかに、ワークフローの製品の解き方がある |
-| ライブラリとサービス | 調べる | 耐久の実行に使っている DBOS と、GitHub の閉じる参照の機能で足りるかを決める |
-
-### 標準・仕様
-
-| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| STD1 | GitHub REST API のタイムライン | `cross-referenced` のイベントの `source.issue` は課題のオブジェクトで、`pull_request.merged_at`（日時か null）を持つ | 追加の問い合わせをせず、タイムラインの 1 回の読み出しでマージ済みへ絞る | https://docs.github.com/en/rest/issues/timeline 、`gh api repos/devbasex/ai-plugins/issues/2620/timeline` で #2645 の `merged_at` を実測（2026-11-06） |
-
-### 主要な製品
-
-| # | 製品 | どう解いているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| PRD1 | GitHub Actions の再実行 | 失敗したジョブだけを再実行でき、前の試行は画面から選んで参照できる。試行を消さず積む形である（前の出力の引き継ぎの仕様はこのページに無い） | 進捗ログを実行の試行の積み上げとして読む | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs （2026-11-06） |
-| PRD2 | Airflow の XCom | 失敗後の再試行では値を消す。文書は、再試行をまたぐ状態の保持に使えないと書く | 件数を実行の中の値へ置かず、追記の記録へ置く | https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/xcoms.html （2026-11-06） |
-
-### ライブラリとサービス
-
-| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | DBOS の `fork_workflow`（選んだステップより前の結果をコピーして新しい実行を作る） | 依存は 3.1.0、最新は 3.4.0 | MIT | 2026-10-28 | 未確認 | 満たさない。`--from` は開始のステップごとに別の耐久ワークフロー（`flow.prefix_of`）で、前の実行の値を読む経路が無い。実行の作りを変える範囲は #2344 より広い | https://docs.dbos.dev/python/tutorials/workflow-management 、`pyproject.toml:33`、https://pypi.org/pypi/dbos/json （2026-11-06） |
-| LIB2 | GitHub GraphQL の `closingIssuesReferences` | — | — | — | 未確認 | 満たさない。宛先が既定ブランチでない PR は空になる。このリポジトリの開発の PR の宛先は `develop` である | `plugins/ndf/scripts/lib/closing.py:3-4`（2026-11-06） |
-
-### 確かめられなかったこと
-
-| 対象 | 試した手段 | 結果と理由 |
-| --- | --- | --- |
-| Dagster の失敗の位置からの再実行で、親の実行のステップ出力をどう使うか | https://docs.dagster.io/guides/operate/re-execution | 転送先 `dagster.io/docs/guides/operate/re-execution` が HTTP 404。`.../build/jobs/job-execution` は取得できたが該当の記述が無い |
-| GitHub Actions の再実行で、前の試行の出力を次の試行が読めるか | 上の再実行のページ | ページに記述が無い。他のページは試していない |
-| DBOS 3.1.0 が `fork_workflow` を持つか、終了のアナウンスの有無 | PyPI の JSON と文書の入門のページ | リファレンスと 3.1.0 の文書は試していない。採らない候補のため止めた |
-
-調べた量: 候補 5 件・取得の試み 11 回。
-
 ## 機能一覧
 
 | # | 機能 | 誰が使うか |
 | --- | --- | --- |
 | F1 | 昇格だけの周回で `{queue_prs}` がスプリントの PR で埋まる（queue の先頭のステージと `run`） | 開発ループ・conductor |
 | F2 | 埋められないプランが、理由を残して流れずに止まる | conductor |
-| F3 | 残った `{queue_prs}` のコマンドが打たれない | conductor |
+| F3 | 残った `{queue_prs}` のコマンドが実行されない | conductor |
 | F4 | 流し直した検査の行に、ステップごとの最後の件数が残る | トリガーの閾値を見直す担当者 |
 
 ## 構成要素
 
+### 変える要素と責務
+
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
 | 閉じる PR の読み出し（`sprint_close_lib/record_find.py`） | 課題ごとの閉じる PR を探す。マージ済みに絞って読む関数を公開する | 変更。公開関数 `merged_closers` を足し、`_referencing_prs` が `merged` を返す |
-| 差し込みの処理（`supervise_lib/queue.py`・`queue_fill.py`） | `{queue_prs}` の和を作って埋めるか、理由を返す。`first` でも埋める | 変更 |
+| 差し込みの処理（`supervise_lib/queue.py`・`queue_fill.py`） | `{queue_prs}` の和を作って埋めるか、理由を返す。先頭のステージでも埋める | 変更 |
 | 実行の起動（`supervise_lib/commands.py` の `cmd_run`） | 耐久の記録を開く前に差し込みを埋める | 変更 |
 | 実行の準備（`supervise_lib/engine.py` の `Engine.setup`） | 埋められなかった理由を受け、ステップを 1 つも流さず `止まった` で終える | 変更 |
 | 残った差し込みの検査（`supervise_lib/plan.py` の `QUEUE_NAMED`） | `{queue_prs}` も検出する | 変更 |
 | 実行の状態（`supervise_lib/state.py` の `step_line`・`prior_rows`） | ステップの行に件数を足す。読む範囲の切り分けを共有の関数へ渡す | 変更 |
 | 進捗ログの読み出し（`lib/progress_rows.py`） | 読む範囲の切り分けと、ステップごとの最後の件数を返す | 新設 |
 | 検査の記録（`check-trigger.py` の `findings_of`） | 進捗ログの件数に `state.json` の件数を重ねて読む | 変更 |
+
+### 要素のつながり
 
 ```mermaid
 graph TD
@@ -165,7 +131,7 @@ graph TD
     Check --> Prog
 ```
 
-変える範囲の置き場所:
+### 変える範囲の置き場所
 
 ```text
 plugins/ndf/scripts/
@@ -182,6 +148,104 @@ plugins/ndf/scripts/
     ├── queue_fill.py
     └── state.py
 ```
+
+## 外部の調査
+
+| 種類 | 調べるか | 理由 |
+| --- | --- | --- |
+| 標準・仕様 | 調べる | 課題から閉じる PR へたどる手段が GitHub の API の形で決まる |
+| 主要な製品 | 調べる | 流し直しをまたいで前の実行の値をどう残すかに、ワークフローの製品の解き方がある |
+| ライブラリとサービス | 調べる | 耐久の実行に使っている DBOS と、GitHub の閉じる参照の機能で足りるかを決める |
+
+### 標準・仕様
+
+| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| STD1 | GitHub REST API のタイムライン | `cross-referenced` のイベントの `source.issue` は課題のオブジェクトで、`pull_request.merged_at`（日時か null）を持つ | 追加の問い合わせをせず、タイムラインの 1 回の読み出しでマージ済みへ絞る | https://docs.github.com/en/rest/issues/timeline 、`gh api repos/devbasex/ai-plugins/issues/2620/timeline` で #2645 の `merged_at` を実測（2026-11-06） |
+
+### 主要な製品
+
+| # | 製品 | どう解いているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| PRD1 | GitHub Actions の再実行 | 失敗したジョブだけを再実行でき、前の試行は画面から選んで参照できる。試行を消さず積む形である（前の出力の引き継ぎの仕様はこのページに無い） | 進捗ログを実行の試行の積み上げとして読む | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs （2026-11-06） |
+| PRD2 | Airflow の XCom | 失敗後の再試行では値を消す。文書は、再試行をまたぐ状態の保持に使えないと書く | 件数を実行の中の値へ置かず、追記の記録へ置く | https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/xcoms.html （2026-11-06） |
+
+### ライブラリとサービス
+
+| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LIB1 | DBOS の `fork_workflow`（選んだステップより前の結果をコピーして新しい実行を作る） | 依存は 3.1.0、最新は 3.4.0 | MIT | 2026-10-28 | 未確認 | 満たさない。`--from` は開始のステップごとに別の耐久ワークフロー（`flow.prefix_of`）で、前の実行の値を読む経路が無い。実行の作りを変える範囲はプランの参照（#2344）より広い | https://docs.dbos.dev/python/tutorials/workflow-management 、`pyproject.toml:33`、https://pypi.org/pypi/dbos/json （2026-11-06） |
+| LIB2 | GitHub GraphQL の `closingIssuesReferences` | — | — | — | 未確認 | 満たさない。宛先が既定ブランチでない PR は空になる。このリポジトリの開発の PR の宛先は `develop` である | `plugins/ndf/scripts/lib/closing.py:3-4`（2026-11-06） |
+
+### 確かめられなかったこと
+
+| 対象 | 試した手段 | 結果と理由 |
+| --- | --- | --- |
+| Dagster の失敗の位置からの再実行で、親の実行のステップ出力をどう使うか | https://docs.dagster.io/guides/operate/re-execution | 転送先 `dagster.io/docs/guides/operate/re-execution` が HTTP 404。`.../build/jobs/job-execution` は取得できたが該当の記述が無い |
+| GitHub Actions の再実行で、前の試行の出力を次の試行が読めるか | 上の再実行のページ | ページに記述が無い。他のページは試していない |
+| DBOS 3.1.0 が `fork_workflow` を持つか、終了のアナウンスの有無 | PyPI の JSON と文書の入門のページ | リファレンスと 3.1.0 の文書は試していない。採らない候補のため止めた |
+
+調べた量: 候補 5 件・取得の試み 11 回。
+
+## 決定の記録
+
+### 決定 1: 周回をまたいで値が届くよう、`{queue_prs}` を前のステージの PR とマージ済みの課題を閉じる PR の和で埋める
+
+取り先を GitHub の履歴の参照にすると、周回・プラン・状態ディレクトリに依らず、同じ課題から同じ値が得られる。carul の周回 3 のスプリント状態は PR の値が空で、状態ファイルからは #143 に届かない。
+
+マージ済みに絞るのは、`--prs` が `スプリント:` の行と CHANGELOG の中身になるためである。閉じた PR やマージ前の PR が本文に閉じる指定を持つと、配布されていない PR を記録へ載せる。絞らない案は、`find_record` が記録の側で絞れるのと違い、記録を書く値そのものになるため採らない。スプリントの記録から読む案は、上の実測で値が空のため採らない。GitHub の `closingIssuesReferences`（LIB2）は宛先が既定ブランチでない PR で空になるため採らない。
+
+- 作り方: 自前で作る・標準に倣う
+- 比べた候補: STD1 / LIB2
+
+根拠: Value 7 / Value 1（MVV 版 6）
+
+### 決定 2: 落ちた後の再実行が同じ耐久ワークフローへ戻るよう、`run` の差し込みは耐久の記録を開く前に `cmd_run` で埋める
+
+実行の鍵はプランの本文から決まる。`Engine.setup` や `prepare` の中で埋めると、再実行のときに本文が変わって別の耐久ワークフローになり、済んだステップを流し直す。埋められないときは `Engine` へ理由を渡し、`setup` が `止まった` を返す。こうすると報告（`report.md`）は通常の止まりと同じ形で残る。`cmd_run` がその場で終了する案は、報告が残らず開発ループが理由を読めないため採らない。
+
+根拠: Value 5 / Value 3（MVV 版 6）
+
+### 決定 3: 誤った `スプリント:` を残さないよう、GitHub を読めなければ前のステージの PR があっても止める
+
+読めないまま前のステージの PR だけで流すと、記録の `スプリント:` が課題を閉じる PR を欠き、まとめのプランの `find_record` が後から止まる。配布の途中より、流す前に止まる方が戻す手間が少ない。受け入れ条件 4 の「GitHub を読めないとき」を、前のステージの PR の有無に依らない条件として読む。
+
+根拠: Value 2 / Value 1（MVV 版 6）
+
+### 決定 4: 条件が評価されない経路で空のコマンドを実行しないよう、`--from` では和が空なら実行条件があっても止める
+
+`実行の条件` は `--from` で評価されない（`Engine.prepare`）。受け入れ条件 7 の「条件に判断を任せる」は条件が評価される経路でだけ成り立つ。`--from` で空にして流すと `--prs` が値を持たず終了コード 2 で落ち、#2568 と同じ形になる。
+
+根拠: Value 7（MVV 版 6）
+
+### 決定 5: 閉じる PR の判定を 1 か所に保つため、`record_find.py` に公開関数を足して差し込みから呼ぶ
+
+`find_record` の手順 1〜2（履歴の参照を読み、閉じる指定で絞る）をそのまま使う。`queue_fill.py` に同じ読み出しを書く案は、判定が 2 か所に分かれるため採らない。`find_record` の探し方は変えない。絞りは `merged_closers` だけに掛け、未マージの閉じる PR を候補に含む `find_record` の結果を変えない。受け入れ条件 3 は、マージ済みの閉じる PR が `スプリント:` にあれば成り立つ。
+
+根拠: Value 7（MVV 版 6）
+
+### 決定 6: 流し直しで件数を失わないよう、件数を進捗ログのステップの行へ足す
+
+進捗ログは実行をまたいで追記される唯一の記録で、実行の始まりの行が読む範囲の区切りも持つ。別のファイルを足す案は、同じ区切りをもう 1 つ持つことになるため採らない。`.out` の番号付きのファイルは実行ごとに上書きされるため採らない。DBOS の fork（LIB1）は `--from` の作りを変える必要があり、この課題の範囲を超える。実行の中の値に頼らない点は PRD2 の注意書きと同じで、試行を積む形は PRD1 に倣う。
+
+`state.json` の件数を進捗ログの値へ重ねて読むのは、この変更より前に始まった実行が状態ディレクトリに残るためである。`state.json` は最後の実行の値だけを持つので、重ねても受け入れ条件 9 の結果は変わらない。
+
+- 作り方: 自前で作る
+- 比べた候補: PRD1 / PRD2 / LIB1
+
+根拠: Value 7 / Value 4（MVV 版 6）
+
+### 決定 7: 件数を足すと二重に数えるため、読む範囲は `--from` の無い最後の実行より後にし、同じステップは最後の値を採る
+
+cross-review と cross-refactoring の件数は PR ごとの状態ファイルから数えるため、同じ状態を読む 2 回の実行を足すと重なる。範囲の切り分けは `RunState.prior_rows` と同じ規則である。`check-trigger.py` は `supervise_lib` を読み込まないため、切り分けを `lib/progress_rows.py` へ移し、両方から呼ぶ。
+
+根拠: Value 7（MVV 版 6）
+
+### 決定 8: プランの参照の設計（#2344）が今の規則を前提に残らないよう、同じ実装でその決定 9 の 1 文を直す
+
+#2344 の決定は `QUEUE_PRS` の値を「キューの前のステージのプランから引く」と書く。この課題の後は課題を閉じる PR も集合に入るため、移すときに規則が欠ける。#2344 の範囲は広げず、値の定義の 1 文だけを直す。#2344 の部品の先行実装はしない。
+
+根拠: Value 8（MVV 版 6）
 
 ## データ構造
 
@@ -211,7 +275,7 @@ plugins/ndf/scripts/
 | `run` | 埋めずに流す | 埋める。`--from` でも同じ |
 | GitHub を読めない | — | queue: `流さなかった`・`unfilled: true`・理由。run: `結果: 止まった`・理由、終了コード 3 |
 | 和が空 | 後続のステージでは止める（条件のあるプランは流す） | 同じ規則を先頭のステージと `run` へ広げる。`--from` は止める（I3） |
-| `{queue_prs}` が残ったコマンド | 文字列のまま打つ | 打たずに `止まった` |
+| `{queue_prs}` が残ったコマンド | 文字列のまま実行する | 実行せずに `止まった` |
 
 止まった理由の文（運用・保守性の要求。課題の番号と、空か読めないかの区別が出る）:
 
@@ -233,7 +297,9 @@ def merged_closers(root, repo: str | None, issues) -> ClosingPrs: ...
 
 ## 処理の流れ
 
-**`{queue_prs}` の解決。** queue は `fill_stage` から、`run` は `cmd_run` から、同じ `fill_queue_prs` を呼ぶ。
+### `{queue_prs}` の解決
+
+queue は `fill_stage` から、`run` は `cmd_run` から、同じ `fill_queue_prs` を呼ぶ。
 
 ```mermaid
 sequenceDiagram
@@ -258,9 +324,11 @@ sequenceDiagram
     end
 ```
 
-`cmd_run` は `Engine` を作る前に埋める。実行の鍵（`flow.prefix_of`）はプランの本文から決まるため、埋めた後の本文で鍵が決まり、落ちた後の打ち直しが同じ耐久ワークフローへ戻る。
+`cmd_run` は `Engine` を作る前に埋める。実行の鍵（`flow.prefix_of`）はプランの本文から決まるため、埋めた後の本文で鍵が決まり、落ちた後の再実行が同じ耐久ワークフローへ戻る。
 
-**検査の件数。** ステップが終わるたびに `step_line` が件数を進捗ログへ書き、`findings_of` が読む。
+### 検査の件数
+
+ステップが終わるたびに `step_line` が件数を進捗ログへ書き、`findings_of` が読む。
 
 ```mermaid
 graph TD
@@ -280,65 +348,11 @@ graph TD
 | 性能・拡張性 | GitHub の読み出しは、`{queue_prs}` を持つプランを埋めるときだけ行う。`{queue_prs}` を持たないプランのステージでは呼ばない | `fill_queue_prs` が目印の有無を先に見て、無ければ `record_find` を読み込まずに返す | 目印の無いプランで読み出しを差し替えた関数が呼ばれないことをテストで見る |
 | 運用・保守性 | 差し込みで止まったときの理由に、計画の課題の番号と、空か読めないかの区別が出る | 上の 2 つの理由の文を返す | 空と読めないの 2 通りで、理由の文を単体テストで見る |
 
-## 決定の記録
+## 設計の結果
 
-### 決定 1: 周回をまたいで値が届くよう、`{queue_prs}` を前のステージの PR とマージ済みの課題を閉じる PR の和で埋める
-
-取り先を GitHub の履歴の参照にすると、周回・プラン・状態ディレクトリに依らず、同じ課題から同じ値が得られる。carul の周回 3 のスプリント状態は PR の値が空で、状態ファイルからは #143 に届かない。
-
-マージ済みに絞るのは、`--prs` が `スプリント:` の行と CHANGELOG の中身になるためである。閉じた PR やマージ前の PR が本文に閉じる指定を持つと、配布されていない PR を記録へ載せる。絞らない案は、`find_record` が記録の側で絞れるのと違い、記録を書く値そのものになるため採らない。スプリントの記録から読む案は、上の実測で値が空のため採らない。GitHub の `closingIssuesReferences`（LIB2）は宛先が既定ブランチでない PR で空になるため採らない。
-
-- 作り方: 自前で作る・標準に倣う
-- 比べた候補: STD1 / LIB2
-
-根拠: Value 7 / Value 1（MVV 版 6）
-
-### 決定 2: 落ちた後の打ち直しが同じ実行へ戻るよう、`run` の差し込みは耐久の記録を開く前に `cmd_run` で埋める
-
-実行の鍵はプランの本文から決まる。`Engine.setup` や `prepare` の中で埋めると、打ち直しのときに本文が変わって別の耐久ワークフローになり、済んだステップを流し直す。埋められないときは `Engine` へ理由を渡し、`setup` が `止まった` を返す。こうすると報告（`report.md`）は通常の止まりと同じ形で残る。`cmd_run` がその場で終了する案は、報告が残らず開発ループが理由を読めないため採らない。
-
-根拠: Value 5 / Value 3（MVV 版 6）
-
-### 決定 3: 誤った `スプリント:` を残さないよう、GitHub を読めなければ前のステージの PR があっても止める
-
-読めないまま前のステージの PR だけで流すと、記録の `スプリント:` が課題を閉じる PR を欠き、まとめのプランの `find_record` が後から止まる。配布の途中より、流す前に止まる方が戻す手間が少ない。受け入れ条件 4 の「GitHub を読めないとき」を、前のステージの PR の有無に依らない条件として読む。
-
-根拠: Value 2 / Value 1（MVV 版 6）
-
-### 決定 4: 条件が打たれない経路で空のコマンドを打たないよう、`--from` では和が空なら実行条件があっても止める
-
-`実行の条件` は `--from` で打たれない（`Engine.prepare`）。受け入れ条件 7 の「条件に判断を任せる」は条件が打たれる経路でだけ成り立つ。`--from` で空にして流すと `--prs` が値を持たず終了コード 2 で落ち、#2568 と同じ形になる。
-
-根拠: Value 7（MVV 版 6）
-
-### 決定 5: 閉じる PR の判定を 1 か所に保つため、`record_find.py` に公開関数を足して差し込みから呼ぶ
-
-`find_record` の手順 1〜2（履歴の参照を読み、閉じる指定で絞る）をそのまま使う。`queue_fill.py` に同じ読み出しを書く案は、判定が 2 か所に分かれるため採らない。`find_record` の探し方は変えない。絞りは `merged_closers` だけに掛け、未マージの閉じる PR を候補に含む `find_record` の結果を変えない。受け入れ条件 3 は、マージ済みの閉じる PR が `スプリント:` にあれば成り立つ。
-
-根拠: Value 7（MVV 版 6）
-
-### 決定 6: 流し直しで件数を失わないよう、件数を進捗ログのステップの行へ足す
-
-進捗ログは実行をまたいで追記される唯一の記録で、実行の始まりの行が読む範囲の区切りも持つ。別のファイルを足す案は、同じ区切りをもう 1 つ持つことになるため採らない。`.out` の番号付きのファイルは実行ごとに上書きされるため採らない。DBOS の fork（LIB1）は `--from` の作りを変える必要があり、この課題の範囲を超える。実行の中の値に頼らない点は PRD2 の注意書きと同じで、試行を積む形は PRD1 に倣う。
-
-`state.json` の件数を進捗ログの値へ重ねて読むのは、この変更より前に始まった実行が状態ディレクトリに残るためである。`state.json` は最後の実行の値だけを持つので、重ねても受け入れ条件 9 の結果は変わらない。
-
-- 作り方: 自前で作る
-- 比べた候補: PRD1 / PRD2 / LIB1
-
-根拠: Value 7 / Value 4（MVV 版 6）
-
-### 決定 7: 件数を足すと二重に数えるため、読む範囲は `--from` の無い最後の実行より後にし、同じステップは最後の値を採る
-
-cross-review と cross-refactoring の件数は PR ごとの状態ファイルから数えるため、同じ状態を読む 2 回の実行を足すと重なる。範囲の切り分けは `RunState.prior_rows` と同じ規則で、`check-trigger.py` は `supervise_lib` を読み込まないため、切り分けを `lib/progress_rows.py` へ移し、両方から呼ぶ。
-
-根拠: Value 7（MVV 版 6）
-
-### 決定 8: #2344 の設計が今の規則を前提に残らないよう、同じ実装で #2344 の決定 9 の 1 文を直す
-
-#2344 の決定は `QUEUE_PRS` の値を「キューの前のステージのプランから引く」と書く。この課題の後は課題を閉じる PR も集合に入るため、移すときに規則が欠ける。#2344 の範囲は広げず、値の定義の 1 文だけを直す。#2344 の部品の先行実装はしない。
-
-根拠: Value 8（MVV 版 6）
+| 課題 | 扱い | 取り込み先 | 触るファイル |
+| --- | --- | --- | --- |
+| #2663 | 実装する | — | `plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/lib/progress_rows.py`、`plugins/ndf/scripts/sprint_close_lib/record_find.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/tests/`、`docs/specifications/ndf-production-release-record.md`、`issues/issue-2344-design-decisions.md` |
 
 ## テスト設計
 
@@ -347,9 +361,9 @@ cross-review と cross-refactoring の件数は PR ごとの状態ファイル�
 | 1 | `{queue_prs}` を持つ昇格のプランだけのステージを queue で流すと、record のコマンドが `--prs 143` になる | `fill_stage` の先頭のステージの埋めを外す |
 | 2 | 同じ前提で `run --from verify` が `--prs 143` で流れる | `cmd_run` の埋めを外す |
 | 3 | 1 か 2 の後、まとめのプランの `{queue_record}` が記録の PR で埋まる | 集合から閉じる PR を外し、前のステージの PR だけにする |
-| 4 | 空・読めないの 2 通りで、queue は `流さなかった`・`unfilled: true`、run は最初のステップを打たずに `止まった`。理由が 2 通りで違う | 読めないときに空として扱う |
+| 4 | 空・読めないの 2 通りで、queue は `流さなかった`・`unfilled: true`、run は最初のステップを実行せずに `止まった`。理由が 2 通りで違う | 読めないときに空として扱う |
 | 5 | 前のステージ #140・#143 と閉じる PR #143 で `140 143` になる | 和を作らず連結する。番号を文字列の順で並べる |
-| 6 | `{queue_prs}` が残ったコマンドを run でも queue でも打たない | `QUEUE_NAMED` から外す |
+| 6 | `{queue_prs}` が残ったコマンドを run でも queue でも実行しない | `QUEUE_NAMED` から外す |
 | 7 | `実行の条件` を持つプランは和が空でも流し、条件が判断する（`--from` は決定 4 のとおり止まる） | 条件の分岐を消す |
 | 8 | 1 回目の review が件数を持って 6 で終わり、`--from base-sync` で record まで終えると `rounds` 4・`fixed` 8 | `step_line` の件数を外す |
 | 9 | 2 回の実行で `fixed` 3・5 なら 5 | 足し合わせる。最初の値を採る |
@@ -368,13 +382,7 @@ cross-review と cross-refactoring の件数は PR ごとの状態ファイル�
 | I8 | 条件 11 と同じ | 同上 |
 | I9 | `counts` の無い過去の行を含むログで読み出しが落ちず、記録の行とログが書き換わらない | 読むときにログを書き直す |
 | マージ済みの絞り（決定 1） | `merged_at` が null の閉じる PR が集合に入らない | `merged` の判定を外す |
-| 実行の鍵（決定 2） | 埋めた後の打ち直しが同じ耐久ワークフローの記録から続く | `Engine` を作った後に埋める |
-
-## 設計の結果
-
-| 課題 | 扱い | 取り込み先 | 触るファイル |
-| --- | --- | --- | --- |
-| #2663 | 実装する | — | `plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/lib/progress_rows.py`、`plugins/ndf/scripts/sprint_close_lib/record_find.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/tests/`、`docs/specifications/ndf-production-release-record.md`、`issues/issue-2344-design-decisions.md` |
+| 実行の鍵（決定 2） | 埋めた後の再実行が同じ耐久ワークフローの記録から続く | `Engine` を作った後に埋める |
 
 ## 未確認のまま残ること
 
