@@ -403,17 +403,9 @@ class IssueActual:
     runs: list[Run] = field(default_factory=list)
 
 
-def issue_actuals(
-    rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
-) -> dict[int, IssueActual]:
-    """課題ごとの実績の合計（確定仕様の「課題ごとの実績の合計」）。`since` があれば、その時刻より後に始まった実行だけを足す。
-
-    A は完了条件のフェーズまでの実行（失敗・中断・取り消し・再試行を含む）の `step` の秒の和で、2 つ以上の課題を
-    指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
-    C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
+def _runs_by_issue(table: dict[str, Run], done: str, since_ts: float | None) -> dict[int, IssueActual]:
+    """`since` より後に始まり、完了条件のフェーズを超えない実行を課題ごとに集める。"""
     limit = _phase_index(done)
-    since_ts = ts(since) if since else None
-    table = run_table(rows, alive)
     out: dict[int, IssueActual] = {}
     for run in table.values():
         if since_ts is not None and (ts(run.started) or 0) <= since_ts:
@@ -423,6 +415,19 @@ def issue_actuals(
             continue
         for issue in run.issues:
             out.setdefault(issue, IssueActual(issue)).runs.append(run)
+    return out
+
+
+def issue_actuals(
+    rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
+) -> dict[int, IssueActual]:
+    """課題ごとの実績の合計（確定仕様の「課題ごとの実績の合計」）。`since` があれば、その時刻より後に始まった実行だけを足す。
+
+    A は完了条件のフェーズまでの実行（失敗・中断・取り消し・再試行を含む）の `step` の秒の和で、2 つ以上の課題を
+    指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
+    C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
+    since_ts = ts(since) if since else None
+    out = _runs_by_issue(run_table(rows, alive), done, since_ts)
     for issue, acc in out.items():
         acc.runs.sort(key=lambda r: ts(r.started) or 0)
         ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
