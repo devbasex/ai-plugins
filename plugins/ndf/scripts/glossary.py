@@ -84,6 +84,21 @@ def inside(root: Path, rel: str, label: str) -> Path:
 # --- 宣言と用語集の読み込み ------------------------------------------------------
 
 
+def _parse_banned(raw) -> dict | None:
+    """`check.banned` を確かめる。語・検査する範囲・外す範囲を持つ辞書か、宣言が無ければ None を返す。"""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise unreadable(f"{DECLARATION} の check.banned はオブジェクトで書く")
+    words, paths, exclude = raw.get("words"), raw.get("paths"), raw.get("exclude", [])
+    for name, value in (("words", words), ("paths", paths), ("exclude", exclude)):
+        if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+            raise unreadable(f"{DECLARATION} の check.banned.{name} は文字列の配列で書く")
+    if not words or not paths:
+        raise unreadable(f"{DECLARATION} の check.banned は words と paths を持つ")
+    return {"words": words, "paths": paths, "exclude": exclude}
+
+
 class Declaration:
     def __init__(self, root: Path, raw: dict):
         if not isinstance(raw, dict):
@@ -111,6 +126,7 @@ class Declaration:
         self.paths = paths
         self.term_sections = sections
         self.source_paths = source_paths  # 語の正本（terms[].source）に認めるパス。空なら見ない
+        self.banned = _parse_banned(check.get("banned"))  # 禁止語の宣言。無ければ None で規則 banned を走らせない
 
 
 def _read_declared(path: Path, label: str):
@@ -290,6 +306,13 @@ def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], code
             hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
 
 
+def _banned_term_findings(t: dict, decl: Declaration, hit) -> None:
+    """語と意味の欄の禁止語を指摘する。廃止した語の欄（deprecated）は置き換え先を引くために持つので見ない。"""
+    for w in decl.banned["words"] if decl.banned else []:
+        if w in t["term"] or w in t["meaning"]:
+            hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
+
+
 def structure_findings(g: dict, decl: Declaration) -> list[dict]:
     items = []
 
@@ -310,6 +333,7 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             continue
         _term_schema_findings(i, t, decl, ids, hit)
         _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
+        _banned_term_findings(t, decl, hit)
         if code_of(t):
             ckey = (t["context"], code_of(t))
             if ckey in code_seen:
@@ -473,6 +497,18 @@ def code_replacement(g: dict, form: str) -> str:
 def replacement(g: dict, word: str) -> str:
     names = [t["term"] for t in terms_of(g) if word in deprecated_of(t) and isinstance(t.get("term"), str)]
     return " / ".join(names) or "用語集の語"
+
+
+def banned_findings(rel: str, text: str, wanted: set[int] | None, g: dict, words: list[str]) -> list[dict]:
+    """禁止語の行を指摘する。ファイルの種類を問わず、コードのコメント・文字列・コードブロックも照らす。"""
+    items = []
+    for n, line in enumerate(text.splitlines(), 1):
+        if wanted is not None and n not in wanted:
+            continue
+        for w in words:
+            if w in line:
+                items.append({"rule": "banned", "path": rel, "line": n, "term": w, "detail": f"禁止語。{replacement(g, w)} と書く"})
+    return items
 
 
 # --- git ------------------------------------------------------------------------------
@@ -696,6 +732,24 @@ def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | Non
     return targets
 
 
+def _banned_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
+    """禁止語を照らす (根からの相対パス, 本文, 見る行) の並び。--file ならすべての行、--diff なら足した行を見る。"""
+    b = decl.banned
+
+    def wanted(rel: str) -> bool:
+        return declared_path_matches(rel, b["paths"]) and not declared_path_matches(rel, b["exclude"])
+
+    if not b or not (a.file or a.diff):
+        return []
+    if a.file:
+        base = root.resolve()
+        found = [(Path(f).resolve(), None) for f in a.file]
+        pairs = [(p.relative_to(base).as_posix(), p, lines) for p, lines in found if p.is_relative_to(base)]
+    else:
+        pairs = [(rel, root / rel, lines) for rel, lines in sorted(added_lines(root, a.diff).items())]
+    return [(rel, p.read_text(encoding="utf-8", errors="replace"), lines) for rel, p, lines in pairs if wanted(rel) and p.is_file()]
+
+
 def cmd_check(a):
     root = Path(a.root)
     decl = load_declaration(root)
@@ -714,6 +768,8 @@ def cmd_check(a):
                     items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
                 continue
             items += text_findings(rel, text, wanted, g, decl, dep_re, live_re)
+    for rel, text, wanted in _banned_targets(a, root, decl):  # --rules structure の継続的統合でも走る（#2620 の決定 8）
+        items += banned_findings(rel, text, wanted, g, decl.banned["words"])
     for it in items:
         print(f"ERROR: {it['path']}:{it['line']}: {it['rule']}: {it['term']}", file=sys.stderr)
     metrics = {"hits": len(items)}
