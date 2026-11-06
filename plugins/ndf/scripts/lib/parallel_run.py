@@ -48,24 +48,20 @@ def relay_argv() -> list[str]:
     return alt.split() if alt else [sys.executable, str(RELAY)]
 
 
-def relay_proc(main: Path, *args: str) -> subprocess.CompletedProcess:
-    """統括役の CLI を打ち、終わったプロセスを返す（標準出力と標準エラーを持つ）。"""
-    return subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
-
-
-def report_of(got: subprocess.CompletedProcess) -> dict:
-    """標準出力の最後の JSON の行（統一 JSON レポート）。読めなければ空の dict。"""
+def relay_proc(main: Path, *args: str) -> tuple[subprocess.CompletedProcess, dict]:
+    """統括役の CLI を打ち、(終わったプロセス, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+    got = subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
     lines = [ln for ln in (got.stdout or "").splitlines() if ln.strip().startswith("{")]
     try:
-        return json.loads(lines[-1]) if lines else {}
+        return got, json.loads(lines[-1]) if lines else {}
     except ValueError:
-        return {}
+        return got, {}
 
 
 def relay(main: Path, *args: str) -> tuple[int, dict]:
     """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
-    got = relay_proc(main, *args)
-    return got.returncode, report_of(got)
+    got, res = relay_proc(main, *args)
+    return got.returncode, res
 
 
 def base_tracking_ref(main: Path) -> str:
@@ -153,10 +149,8 @@ def stall_seconds() -> float:
 
 @durable.step(name="parallel.observe")
 def step_observe(main: str) -> dict:
-    """`relay.py ls --json` の行（名前 → {state, at, role}）と、観た時刻（エポック秒）・一覧の終了コード（`code`）・
-    標準エラーの末尾 1 行（`err`）。"""
-    got = relay_proc(Path(main), "ls", "--json")
-    res = report_of(got)
+    """`relay.py ls --json` の行（名前 → {state, at, role}）・観た時刻（エポック秒）・終了コード・標準エラーの末尾 1 行。"""
+    got, res = relay_proc(Path(main), "ls", "--json")
     rows = {
         it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
         for it in res.get("items") or []
@@ -679,12 +673,9 @@ def _run_finished(run: _Run) -> bool:
 
 
 def _observe_run(run: _Run, main: str) -> None:
-    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。
-
-    一覧が 0 以外で終わった回は、レーンの状態・最後に観測した時刻・起こし直しの待ち・問いを変えずに戻る（#2509 の I1）。
-    `code` を持たない記録（足す前の版の観測）は成功として読む（決定 5）。"""
+    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。一覧が失敗した回は何も変えない（#2509 の I1）。"""
     seen = step_observe(main)
-    run.ls_ok = int(seen.get("code") or 0) == 0
+    run.ls_ok = int(seen.get("code") or 0) == 0  # code の無い古い記録は成功として読む（決定 5）
     if not run.ls_ok:
         return
     rows = seen.get("rows") or {}
