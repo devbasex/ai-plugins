@@ -223,11 +223,8 @@ def spearman(xs: list[float], ys: list[float]) -> float | None:
     return round(sxy / (sx * sy), 4) if sx and sy else None
 
 
-def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
-    """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
-
-    組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
-    since_ts = er.ts(since) if since else None
+def _latest_estimates(estimates: list[dict], since_ts: float | None) -> dict[int, dict]:
+    """課題を指す見積もりのうち、課題ごとの最新の 1 件。`since_ts` より前は除き、同時刻なら後の行を採る。"""
     latest: dict[int, dict] = {}
     for e in estimates:
         if not isinstance(e.get("issue"), int):
@@ -237,6 +234,33 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
             continue
         if e["issue"] not in latest or (er.ts(latest[e["issue"]].get("at")) or 0) <= t:
             latest[e["issue"]] = e
+    return latest
+
+
+def _ratio(actual: dict, predicted: dict) -> dict:
+    """1 組の項目ごとの比（実績 ÷ 予測）。予測が 0・数でない・無いか、実績が None の項目は None。"""
+    out = {}
+    for k, p in predicted.items():
+        comparable = isinstance(p, (int, float)) and p and actual[k] is not None
+        out[k] = round(actual[k] / p, 4) if comparable else None
+    return out
+
+
+def _error_metrics(items: list[dict]) -> dict:
+    """組の一覧から、比の中央値と A の順位相関を求める。"""
+    metrics: dict = {"pairs": len(items)}
+    for k in ("A", "L", "C"):
+        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
+    both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
+    metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
+    return metrics
+
+
+def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
+    """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
+
+    組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
+    latest = _latest_estimates(estimates, er.ts(since) if since else None)
     items = []
     for issue, e in sorted(latest.items()):
         got = er.issue_actuals(rows, e.get("done") or "実装", since=e.get("at"), alive=alive).get(issue)
@@ -244,18 +268,6 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
             continue
         actual = {"A": got.a, "L": got.l, "C": got.c}
         predicted = {k: ((e.get("values") or {}).get(k) or {}).get("typical") for k in ("A", "L", "C")}
-        ratio = {
-            k: (
-                round(actual[k] / predicted[k], 4)
-                if isinstance(predicted[k], (int, float)) and predicted[k] and actual[k] is not None
-                else None
-            )
-            for k in ("A", "L", "C")
-        }
+        ratio = _ratio(actual, predicted)
         items.append({"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio})
-    metrics: dict = {"pairs": len(items)}
-    for k in ("A", "L", "C"):
-        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
-    both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
-    metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
-    return items, metrics
+    return items, _error_metrics(items)
