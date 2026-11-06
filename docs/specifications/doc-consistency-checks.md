@@ -1,12 +1,12 @@
 # 説明文書のチェック — リンクの照合と版数の例
 
 説明文書の食い違いを継続的統合で落とす 2 本のチェックのうち、見出しへの参照の照合・`issues/` の
-走査・インラインコードの扱い（`scripts/check-markdown-links.py`）と、版と配布の正本の
-「版の付け方と開発版の配布」章のチェック J（`scripts/check-doc-staleness.py`）について、確定した
+走査・インラインコードの扱い（`scripts/check-markdown-links.py`）と、版とリリースの正本の
+「版の付け方と開発版のデプロイ」章のチェック J（`scripts/check-doc-staleness.py`）について、確定した
 振る舞いと決定の理由を残す。
 
 **チェック J が見る記載の書き方は
-[版と配布の正本](../versioning-and-distribution.md)の「版数を持つ箇所」が正である。**
+[版とリリースの正本](../versioning-and-distribution.md)の「版数を持つ箇所」が正である。**
 ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、照合の規則の細部である。
 
 ## 概要
@@ -29,7 +29,7 @@
 | 参照先 | リンクの `](` と `)` の間に書かれた値 |
 | インラインコード | 1 行の中で、同じ本数のバッククォートの列に挟まれた範囲 |
 | 正本 | `docs/versioning-and-distribution.md`。版数の扱いを持つ唯一の文書 |
-| 章 2 | 正本の `## 版の付け方と開発版の配布` から、次の同位以上の見出しの直前まで |
+| 章 2 | 正本の `## 版の付け方と開発版のデプロイ` から、次の同位以上の見出しの直前まで |
 | 基底 | 版数から接尾辞を除いた数字 3 つ |
 
 ## 仕様: リンクのチェック
@@ -135,7 +135,7 @@ graph TD
 | 項目 | 内容 |
 | --- | --- |
 | 読む先・報告先 | `docs/versioning-and-distribution.md`（`VERSIONING_MD`）。指示書（`AGENTS.md`）は版数を持たないため読まない |
-| 位置決め | `VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"` |
+| 位置決め | `VERSION_SECTION_HEADING = "## 版の付け方と開発版のデプロイ"` |
 | 節の終端 | 位置決めの見出しと同じか上位の見出し。深さは位置決めの見出しから導く（`## ` なら `^#{1,2}\s`） |
 | 囲み | フェンスの中の `# ` 始まりは見出しと数えない |
 | 拾う版数 | `` `9.6.0` `` のように囲まれた版数だけ |
@@ -201,5 +201,5 @@ graph TD
 - [issue #499](https://github.com/devbasex/ai-plugins/issues/499) / [PR #594](https://github.com/devbasex/ai-plugins/pull/594)（実装） — チェック J の読む先を正本へ移す
 - [issue #566](https://github.com/devbasex/ai-plugins/issues/566) / [PR #604](https://github.com/devbasex/ai-plugins/pull/604)（設計） / [PR #609](https://github.com/devbasex/ai-plugins/pull/609)（実装） — 版の形の表と次の開発の例
 - [issue #885](https://github.com/devbasex/ai-plugins/issues/885) / [PR #918](https://github.com/devbasex/ai-plugins/pull/918)（実装） — 参照の実在を見ていた pytest をこのチェックへ寄せる
-- [版と配布の正本](../versioning-and-distribution.md)
+- [版とリリースの正本](../versioning-and-distribution.md)
 - [NDF 知識構造・Kiro CLI 仕様](ndf-knowledge-and-kiro.md) — `AGENTS.md` と正本の役割の分け方

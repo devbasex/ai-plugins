@@ -62,7 +62,7 @@ conductor が工程境界で会話を切るかを決める規則の組（再起�
 | statusline とは状態ディレクトリのファイルで窓と適用値を受け渡す | statusline は `~/.claude/ndf-statusline.sh` に写して動き、プラグインのライブラリを読めない。窓は statusline の入力にしか無い。statusline が設定を読むと優先順位の解決が 2 か所になる |
 | 状態ディレクトリは `CLAUDE_PLUGIN_DATA` に依らず `NDF_CONTEXT_DIR` → `XDG_STATE_HOME` → `~/.local/state` で決める | `CLAUDE_PLUGIN_DATA` は statusline に渡らず、書き手と読み手で置き場が分かれる |
 | 現行方式の statusline の色（500K / 窓 200K 以下は 150K）とサブエージェントの行は変えない。試行方式だけ判断開始の値で黄・実効の上限で赤にする | 現行方式の色は窓に対して危険な水準の表示で、hook の止める上限とは意味が違う。試行方式は試す値が見えないと比較の材料にならない |
-| 換算の単価の正本を配布する `plugins/ndf/scripts/lib/token_rates.py` へ移し、`scripts/token-usage.py` は import する | 配布しない `scripts/token-usage.py` の単価を hook は読めず、写すと正本が 2 つになる |
+| 換算の単価の正本をデプロイする `plugins/ndf/scripts/lib/token_rates.py` へ移し、`scripts/token-usage.py` は import する | デプロイしない `scripts/token-usage.py` の単価を hook は読めず、写すと正本が 2 つになる |
 | 試行方式では conductor はカットポイントで `ndf-next` を出さず、次の工程を起動して hook に判定させる。自分で切るのは独立性と手動だけ | conductor は自分の文脈の量を読めない。次の工程の起動は必ず hook を通るため、判断が 1 か所に集まる |
 | 集計の区分は時刻で排他に割り当て、同じ `message.id` は 1 回、帳簿にあるセッションの会話の記録は読まない | 会話の記録は 1 回の応答を複数の行に分けて同じ `usage` を持ち、`claude -p` のセッションは帳簿と会話の記録の両方に現れる |
 | 「割る候補」の上限はセッションの判定の記録の運用上限で決め、`--window-limit` を渡したときだけ全記録へ当てる | 測る側と止める側の上限を食い違わせない。今の `--window-limit` の使い方は保つ |

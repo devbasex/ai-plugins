@@ -47,7 +47,7 @@
 | ステップの `on_fail_only` と、`pr` のハンドラーが結果へ残す `push_check`・`head` | `## 何をするか` の有無の確かめ、受け入れ条件の自動の書き足し、実装の指示文 |
 | このリポジトリの `.ndf/supervise.json` の `sync_checks` の 2 行（`validate`・`lint`） | `pre-push` フックを読んで `sync_checks` との食い違いを知らせる仕組み |
 
-受け入れ条件の確かめと `pr` の修正の経路は雛形（`plugins/ndf/scripts/supervise_lib/`）にあり、配布先のリポジトリでも
+受け入れ条件の確かめと `pr` の修正の経路は雛形（`plugins/ndf/scripts/supervise_lib/`）にあり、利用先のリポジトリでも
 働く。`pre-push` フックを持たないリポジトリでは `fix-push` へ回る失敗が起きない。働かないだけで害は無い。
 
 ## 背景

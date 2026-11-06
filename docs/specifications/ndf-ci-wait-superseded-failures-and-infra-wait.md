@@ -34,7 +34,7 @@ Runner の名前が空のまま `cancelled` で終わった。ほかに失敗は
 | 何を | 正本 |
 | --- | --- |
 | `merge-when-green` と `probe` の打ち方・既存の止まり方（取り残しの再実行・ランナー待ち・`probe` の分類表） | [`merged` の SKILL.md](../../plugins/ndf/skills/merged/SKILL.md) の「マージから行うとき」 |
-| `release-steps.py release` の手順と、配布のプランのステップの並び | [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)・[references/form-package-plugin.md](../../plugins/ndf/skills/release/references/form-package-plugin.md) |
+| `release-steps.py release` の手順と、リリースプランのステップの並び | [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)・[references/form-package-plugin.md](../../plugins/ndf/skills/release/references/form-package-plugin.md) |
 | プランのステップの鍵 `on_exit` の書き方と遷移の順 | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
 | 共通の終了コードの表（0・1・2・3・10〜29・69）と結果 JSON の形 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の終了コードの表 |
 | 終了コードに `sysexits.h` の値を当てる前例（69） | [ndf-deps-missing-exit-code.md](ndf-deps-missing-exit-code.md) |
@@ -73,7 +73,7 @@ Runner の名前が空のまま `cancelled` で終わった。ほかに失敗は
 直した後も止まり、conductor が古い実行を探して `gh run rerun` を手で打っていた。
 
 また、`FAILURE` と同じ集合に `CANCELLED` が入っていたため、GitHub Actions の障害で Runner が付かずに取り消された
-ジョブも中身の失敗と数えた。本番の配布では `release` → judge → `fix` の往復が 19 ステップ続き、直すものの無い
+ジョブも中身の失敗と数えた。リリースでは `release` → judge → `fix` の往復が 19 ステップ続き、直すものの無い
 修正の worker に費用を使ったうえ、再開は conductor の手作業だった。
 
 2 つは同じ関数（数え方）と同じ分岐（`GreenWatch.poll`）の問題なので、1 本の変更で扱った。

@@ -199,8 +199,8 @@ I7 を成り立たせるためにある。** 規則の点検を測り直しの�
 ## テスト観点
 
 `.md` の文言を照合するテストは書かない（`AGENTS.md`）。参照のつながりは既存の検査、手順の効き目は試行で見る。
-工程名と配布の基準は
-[test_document_rebuild_stage.py](../../plugins/ndf/skills/development-workflow/tests/test_document_rebuild_stage.py) と配布のテストが見る。
+工程名とデプロイの基準は
+[test_document_rebuild_stage.py](../../plugins/ndf/skills/development-workflow/tests/test_document_rebuild_stage.py) とデプロイのテストが見る。
 
 - 共通ルール・文書系 Skill の表・形式別ガイドが指す節が実在すること（`scripts/check-markdown-links.py`・`scripts/check-cross-skill-refs.py`）。見出しを変えると落ちること（I1）
 - `layout-slide.md` と `format-slide.md` から `form-slide.md` の「ページの文言を書く」へのリンクが通ること（I1）

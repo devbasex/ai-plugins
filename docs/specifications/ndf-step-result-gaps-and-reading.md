@@ -70,7 +70,7 @@ Factory（`factory/`）は結果 JSON を読まない。
 | 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）の返し方と、呼ぶ側（`record_stage`・`sprint-close.py`）の読み方 | Factory の進行のイベントの語彙（`factory/contracts` の `result`） |
 | 状態と終了コードの表を `lib/README.md` だけに置くこと | `handoff.py` の終了コード 4・5（共通の表と違う意味で返し、`emit` を通らない。別の Issue で扱う） |
 
-**働く範囲は配布先のリポジトリを含む**（`plugins/ndf/scripts/lib/` は配布物）。プロジェクトごとに変わる設定は無い。
+**働く範囲は利用先のリポジトリを含む**（`plugins/ndf/scripts/lib/` はリリース対象）。プロジェクトごとに変わる設定は無い。
 
 ## 決定と理由
 
@@ -79,7 +79,7 @@ Factory（`factory/`）は結果 JSON を読まない。
 | 1 | 欠けの残る結果は新しい状態の値でなく、`stopped` と終了コード 6 と `gaps` で表す | 終了コード 0 だけ・`status == "ok"` だけを成功とする既存の読み手が、変えずに失敗の側へ回す。プランは `on_exit` の `"6"` で行き先を分けられる。新しい状態の値は、3 値で分岐する読み手（Skill の本文の表と LLM）が止めずに通す。1 の使い回しは失敗と欠けを分けられない |
 | 2 | `ok` と欠けの同居、`gaps` の無い終了コード 6 を `validate_result` の形の誤りにする | 規則を書くだけでは `ok` に欠けを添えた結果が出る。`emit` が通さなければ間違った成功は終了コード 2 に変わり、読む側は進まない |
 | 3 | `gaps`・`process`・`decisions` は任意の項目にする | 必須にすると `step_result` を使うすべてのスクリプトと結果を丸ごと照らす既存のテストが同時に変わり、成功時の出力が変わる。任意なら `ok` を誤って返していた箇所から先に埋まる |
-| 4 | 試行の選び方と置き場の区別を `lib/step_read.py` の関数として置き、`step_result.py` に混ぜない | 読む側ごとに `.out` を選ぶと `status` を見ない読み方が別の場所にまた生まれる。`step_result.py` は書く側の形で、配布物のすべての手順のスクリプトが import するため、ディレクトリを読む処理を入れない |
+| 4 | 試行の選び方と置き場の区別を `lib/step_read.py` の関数として置き、`step_result.py` に混ぜない | 読む側ごとに `.out` を選ぶと `status` を見ない読み方が別の場所にまた生まれる。`step_result.py` は書く側の形で、リリース対象のすべての手順のスクリプトが import するため、ディレクトリを読む処理を入れない |
 | 5 | 置き場が無い・読めないことは既存の 3・2 で返し、0 件だけを `ok` にする | 既存の表が「前提が無い（対象のファイル）」「読めない。0 件と読まない」の意味をすでに持つ。新しい値を足すと同じ意味の値が 2 つになる |
 | 6 | シェルは `step_result.py` の CLI を `step-result.sh` 経由で呼び、JSON を自前で組まない | `jq` や `printf` で組むとエスケープと形の検査がシェル側にもう 1 つでき、`validate_result` と食い違う。値は 1 つずつ別の引数で渡し、区切り文字を持たない |
 | 7 | 記録のスクリプトは書けなかった事実を `ok` 以外で返し、止めない判断は呼ぶ側が持つ | 進行管理を理由に開発の工程を止めない、は残す。ボードの一時的な上限で開発が止まる害の方が大きい。`record_stage` はフェーズレポートへ、`sprint-close.py` は `board_note` の項目へ、LLM は作業の報告へ載せる |
@@ -266,7 +266,7 @@ bash 3.2 で動く形で書く（`mapfile` を使わず、NUL 区切りをプロ
 | 場合 | `status` / 終了コード | 載せる所 |
 | --- | --- | --- |
 | 記録した・変える内容が無かった | `ok` / 0 | `items` に `{kind: "issue-body", name: "#N", result: "recorded" か "unchanged"}`。`projects-sync.sh` のボードは `{kind: "board", result: "recorded"}` か、宣言が無い・宣言にそのキーの列が無ければ `"not_declared"`（欠けにしない） |
-| `配布` を記録し、記録の無い必須の工程がある | 本文・ボードの結果のとおり（この要素は状態を変えない） | 工程ごとに `items` へ `{kind: "stage-missing", name: <工程>, result: "missing" か "conditional", reason: <記録し直すコマンド>}`。`wf_record_progress` の `記録なし:`・`条件付き:` の案内を標準出力へ出さずに捕まえて移す。`gaps` へは入れない |
+| `デプロイ` を記録し、記録の無い必須の工程がある | 本文・ボードの結果のとおり（この要素は状態を変えない） | 工程ごとに `items` へ `{kind: "stage-missing", name: <工程>, result: "missing" か "conditional", reason: <記録し直すコマンド>}`。`wf_record_progress` の `記録なし:`・`条件付き:` の案内を標準出力へ出さずに捕まえて移す。`gaps` へは入れない |
 | 引数の誤り（知らない工程名・キー・値、引数不足、Issue 番号が数でない） | `stopped` / 2 | `summary`。何も書かない |
 | 共通の関数のファイルを読めない | `stopped` / 3（`step-result.sh` 自身を読めなければ標準エラーへ出して 2） | `summary` |
 | `gh` が無い | `stopped` / 3 | `summary` に「gh が無い」。通過記録は積む（`process` に残す） |
@@ -392,7 +392,7 @@ sequenceDiagram
 | 子プロセスの結果 | 最後の行の結果 JSON が `ok` でなければ過程の項目が 1 件返る | 同上 |
 | 既存の読み手（I4） | run のステップが終了コード 6 で終わると `on_fail` へ回り、`on_fail` が無ければ止まり、`on_exit` に `"6"` があればその行き先へ回る | [`tests/test_step_result_readers.py`](../../plugins/ndf/scripts/tests/test_step_result_readers.py)・[`tests/test_supervise.py`](../../plugins/ndf/scripts/tests/test_supervise.py) |
 | 記録のスクリプト（I7） | 偽の `gh` が失敗するとき、`progress-record.sh` と `projects-sync.sh` が 1 行の結果 JSON を出し、それが `validate_result` を通り、`ok` でなく、`gaps` か `summary` に偽の `gh` の標準エラーの文が入り、終了コードが 0 以外。錠の内側でも `projects-sync.sh` からでも標準出力は 1 行 | [`tests/test_progress_record.py`](../../plugins/ndf/scripts/tests/test_progress_record.py)・[`tests/test_projects_sync_record.py`](../../plugins/ndf/scripts/tests/test_projects_sync_record.py) |
-| 記録の無い工程 | `配布` の記録で、記録の無い必須の工程が `items` の `kind: "stage-missing"` の要素になる | [`tests/test_progress_record_stages.py`](../../plugins/ndf/scripts/tests/test_progress_record_stages.py) |
+| 記録の無い工程 | `デプロイ` の記録で、記録の無い必須の工程が `items` の `kind: "stage-missing"` の要素になる | [`tests/test_progress_record_stages.py`](../../plugins/ndf/scripts/tests/test_progress_record_stages.py) |
 | 止めない（I8） | `record_stage` は記録のスクリプトが `stopped` / 6 を返しても進み、`process` に書けなかった工程が残る。`projects-sync.sh` が `stopped` を返すと `close_one` の `board_note` に理由が載り、Issue は閉じる | `tests/test_progress_record_stages.py`・[`tests/test_sprint_close_board.py`](../../plugins/ndf/scripts/tests/test_sprint_close_board.py) |
 | 退行しない | 成功し欠けの無い場合、既存の手順のスクリプトの `status` と終了コードが変わらない | 全体テスト `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` |
 

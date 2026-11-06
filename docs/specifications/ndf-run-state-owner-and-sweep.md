@@ -77,7 +77,7 @@ merged の `cleanup`・テストのセッションの終わりが自動で外す
 | セッションの状態ファイルと `ndf-deps.*` の持ち主（プロセス）の記録 | 承認ゲート 2 の後の別セッションのマージの扱い（#2221。[ndf-release-approved-commit.md](ndf-release-approved-commit.md)） |
 | 投稿キューで今回分でない位置エラーの `review-post` を控えへ外すこと、外された今回分を取り戻すこと | 寿命の窓の設定化 |
 
-**働く範囲は配布先のリポジトリを含む**（`plugins/ndf/scripts/` と cross-review・cross-refactoring・merged の配布物）。片付けるレビュー
+**働く範囲は利用先のリポジトリを含む**（`plugins/ndf/scripts/` と cross-review・cross-refactoring・merged のリリース対象）。片付けるレビュー
 worktree は、実行したリポジトリの slug の下（`<base>/<slug>/`）だけである。一時ファイルはリポジトリに依らず、システムの一時の置き場
 （`tempfile.gettempdir()`）の下を見る。`<base>` は `lib/worktree_base.worktree_parent()`（`NDF_WORKTREE_BASE` か
 `<tmp>/ndf-worktrees`）である。

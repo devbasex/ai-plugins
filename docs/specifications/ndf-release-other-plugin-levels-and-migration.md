@@ -3,20 +3,20 @@
 ## 目的
 
 - **主のプラグイン（宣言の `release.plugin`）以外のプラグインの版は、PATCH に決め打たれず、互換の扱いに合った
-  上げ幅で出る。** 上げ幅の候補は材料の字面から機械で出し、最終の上げ幅は承認ゲート 2（本番への配布の承認）で決まる
+  上げ幅で出る。** 上げ幅の候補は材料の字面から機械で出し、最終の上げ幅は承認ゲート 2（本番へのリリースの承認）で決まる
 - **利用者の操作が要る変更の移行の手順は、人が手で足さなくても CHANGELOG の版の節へ載る。** 正は実装の PR の本文の
   `## 移行の手順` の節である
 - **上げ幅の候補と根拠、移行の手順は承認資料にそろって載り、** 承認する人か MVV 判定が 1 回で判断できる
 
-例: スプリント m744 の配布（playwright-kit から Drive への保管と `--pwk-drive-folder` を外した版）を、今の仕組みで流す。
+例: スプリント m744 のデプロイ（playwright-kit から Drive への保管と `--pwk-drive-folder` を外した版）を、今の仕組みで流す。
 
 | 順 | 起きること |
 | --- | --- |
 | 1 | 実装の PR の `pr` のステップが、課題 #744 の要求の写しの非機能の条件の「移行性」の行を読む。同じ要求の「影響」の「公開インタフェース」の行に互換なしの印（`互換の経路は持たない`）があるので、LLM が `## 移行の手順` を「- 無し」と書いても、移行性の行から組んだ箇条で差し替える |
-| 2 | 開発版の配布のプランの `others` のステップが `changed-plugins --prs 1745 --approval <承認資料>` を打つ。スプリント PR #1745 の本文の `Closes #744` から #744 の本文を読み、#1745 のマージのコミットの差分に `plugins/playwright-kit/` があるので、playwright-kit 2.0.6 の候補は MAJOR・3.0.0、根拠は「#1745 が閉じる #744 の公開インタフェース: 互換の経路は持たない」になる |
+| 2 | 開発版のリリースプランの `others` のステップが `changed-plugins --prs 1745 --approval <承認資料>` を打つ。スプリント PR #1745 の本文の `Closes #744` から #744 の本文を読み、#1745 のマージのコミットの差分に `plugins/playwright-kit/` があるので、playwright-kit 2.0.6 の候補は MAJOR・3.0.0、根拠は「#1745 が閉じる #744 の公開インタフェース: 互換の経路は持たない」になる |
 | 3 | 承認資料に `## 版を上げる他のプラグイン` の表と `## 移行の手順` の節が載り、`## 同意を求めること` に同意の行が 1 つ足される |
 | 4 | 承認ゲート 2 で承認される（上げ幅を変えるなら、承認の前に `--set playwright-kit=<上げ幅>` で表を書き直す） |
-| 5 | 本番の配布のプランの `bump-others` が `changed-plugins --decided <承認資料>` で表を読み、playwright-kit を 3.0.0 へ上げる。表が読めなければ PATCH へ倒さずに止まる |
+| 5 | 本番のリリースプランの `bump-others` が `changed-plugins --decided <承認資料>` で表を読み、playwright-kit を 3.0.0 へ上げる。表が読めなければ PATCH へ倒さずに止まる |
 | 6 | `notes` が PR 本文の移行の手順を、CHANGELOG の主のプラグインの版の節の `### 移行の手順` の下へ `（#n）` つきで写す |
 
 **手順は `release` と `pr` の Skill の本文が正である。** ここに書き写さない。
@@ -28,7 +28,7 @@
 | 変更履歴の本文を PR 本文から組むこと | [`release` の SKILL.md](../../plugins/ndf/skills/release/SKILL.md) の「3. 版と説明文書を更新する」 |
 | PR 本文の `## 移行の手順` の書き方 | [`pr` の SKILL.md](../../plugins/ndf/skills/pr/SKILL.md) の「4. PR の作成・更新」 |
 | 要求の「公開インタフェース」の行に互換なしの印を書くこと | [`requirements-design` の `references/spec-template.md`](../../plugins/ndf/skills/requirements-design/references/spec-template.md) の「影響」 |
-| 版の付け方・チャネル・版数を持つ箇所 | [版と配布](../versioning-and-distribution.md) |
+| 版の付け方・チャネル・版数を持つ箇所 | [版とリリース](../versioning-and-distribution.md) |
 
 この文書が扱うのは、Skill に書かない上げ幅の候補の規則、承認資料の節と結果 JSON の形、常に成り立つ条件、決定の理由、
 テスト観点である。
@@ -42,14 +42,14 @@
 
 | 扱う | 扱わない |
 | --- | --- |
-| 配布の形が `package-plugin` のときの、他のプラグインの上げ幅の候補・承認資料の表・本番の上げ方 | 主のプラグインの上げ幅の決め方（配布のプランの `--version` で決まる） |
+| リリースの形が `package-plugin` のときの、他のプラグインの上げ幅の候補・承認資料の表・本番の上げ方 | 主のプラグインの上げ幅の決め方（リリースプランの `--version` で決まる） |
 | PR 本文の `## 移行の手順`（`pr-steps.py template` の雛形・実装のプランの `pr` のステップ・スプリント PR の `collect`） | 他のプラグイン自身の CHANGELOG の版の節（`## [playwright-kit 3.0.0]` のような節）の自動作成 |
-| `notes` が移行の手順を CHANGELOG と承認資料へ写すこと（plugin の README には写さない） | `package-plugin` 以外の配布の形 |
+| `notes` が移行の手順を CHANGELOG と承認資料へ写すこと（plugin の README には写さない） | `package-plugin` 以外のリリースの形 |
 | | 上げ幅の規則（セマンティックバージョニング）・取得元・既定ブランチ |
 
 ## 背景
 
-本番の配布は他のプラグインの版を PATCH に決め打って上げ、承認ゲート 2 の承認資料にも他のプラグインの版が
+リリースは他のプラグインの版を PATCH に決め打って上げ、承認ゲート 2 の承認資料にも他のプラグインの版が
 載っていなかった。m744 では MAJOR の要る playwright-kit 2.0.6 が、利用者が承認ゲート 2 の直前に気付いて手で
 直さなければ 2.0.7 で出ていた。移行の手順も PR 本文に書く節が無く、CHANGELOG へ写す工程も無かった。
 
@@ -146,7 +146,7 @@ classDiagram
 | E3 | 他のプラグインごとに上げ幅の候補を決めた | `changed-plugins --prs` | E4 |
 | E4 | 承認資料に他のプラグインの表と移行の手順を書いた | `changed-plugins --approval`・`notes --approval` | 承認ゲート 2（人か MVV 判定） |
 | E5 | 承認ゲート 2 で上げ幅が決まった | 利用者の承認か MVV 判定（変えるときは `changed-plugins --approval --set`） | E6 |
-| E6 | 本番の配布で他のプラグインの版を決まった上げ幅で上げた | 本番のプランの `bump-others`（`changed-plugins --decided`） | `bump` |
+| E6 | リリースで他のプラグインの版を決まった上げ幅で上げた | 本番のプランの `bump-others`（`changed-plugins --decided`） | `bump` |
 | E7 | CHANGELOG の主のプラグインの版の節に移行の手順を写した | 開発版と本番の `notes` | 利用者（CHANGELOG の版の節） |
 
 `others` と `bump-others` は落ちたら judge へ進む。開発版の `others` は `explain`（`notes --approval`）の次に置かれ、
@@ -176,7 +176,7 @@ classDiagram
 `items[].to` を返す。表の行のうち、差分の側では前のタグから版が変わっていて、その HEAD の版が表の「上げた後の版」と
 同じ行は、途中まで進んだ版上げで上げ終えたものとして外す。版上げの途中から本番のプランを再開しても通るためである。
 
-**他のプラグインが 0 件の版では承認資料を読まない。** 承認資料の無い本番の配布を、関係の無い理由で止めないためである。
+**他のプラグインが 0 件の版では承認資料を読まない。** 承認資料の無いリリースを、関係の無い理由で止めないためである。
 
 ### PR 本文の移行の手順
 
@@ -324,9 +324,9 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 - [`release` の `references/release-steps.md`](../../plugins/ndf/skills/release/references/release-steps.md)
 - [`pr` の SKILL.md](../../plugins/ndf/skills/pr/SKILL.md)
 - [`requirements-design` の要求の雛形](../../plugins/ndf/skills/requirements-design/references/spec-template.md)
-- [版と配布](../versioning-and-distribution.md)
+- [版とリリース](../versioning-and-distribution.md)
 - [リリースコマンドの設定と、版ごとのトークン消費の記録](ndf-release-steps-and-token-usage-snapshot.md)
-- [README の更新情報の節と CHANGELOG の版の節](ndf-release-readme-update-info.md) — README に触れない配布の手順と子の箇条の読み方
+- [README の更新情報の節と CHANGELOG の版の節](ndf-release-readme-update-info.md) — README に触れないリリースの手順と子の箇条の読み方
 - 課題 [#1752](https://github.com/devbasex/ai-plugins/issues/1752)
 - [PR #1757](https://github.com/devbasex/ai-plugins/pull/1757) — 設計
 - [PR #1762](https://github.com/devbasex/ai-plugins/pull/1762) — 実装

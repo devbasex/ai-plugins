@@ -3,7 +3,7 @@
 ## 概要
 
 **`pace: normal` の `supervise.py new sprint` は、承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 →
-検査 → 配布）を最初のステージの `command` 1 本に `--then` でつなぐ。** 設計 PR のマージは設計 PR ごとのプラン `design-merge-<N>`
+検査 → デプロイ）を最初のステージの `command` 1 本に `--then` でつなぐ。** 設計 PR のマージは設計 PR ごとのプラン `design-merge-<N>`
 が受け持ち、PR の番号を設計のプランの報告から読み、承認の証跡（承認ラベルか、スプリント状態ファイルの承認ゲート 1 の利用者の承認の記録）
 が無ければ承認ゲート（終了コード 10）で止まる。承認ゲート 2 の後の本番は別の `command` のままで、先頭の `approve` が承認の記録を書く。
 
@@ -18,7 +18,7 @@ done の隣に残した一覧（`<done>.plans.json`）からステージの並�
 conductor は `sprint-state.py gate <状態> "関門 1" --pr <設計 PR> --by user --outcome approved` を打ってから「設計 PR のマージ」の
 ステージの `command`（`queue 3-design-merge-1052.json --max 3 --done done-3.json --then …`）と `wait` を打つ。マージのプランが
 CI の失敗で止まったら、原因を片付けて `queue --resume done-3.json` を打つ。`design-merge-1052` は落ちた `merge-gate` から続き、
-設計の結果から配布までが流れる。
+設計の結果からデプロイまでが流れる。
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・スクリプトの契約・既知の限界・テスト観点）を残す。
 **conductor が打つ手順とステージの並びは Skill が、引数の正はスクリプトが持つ。** 次の正本の内容をここへ書き写さない。
@@ -28,7 +28,7 @@ CI の失敗で止まったら、原因を片付けて `queue --resume done-3.js
 | `normal` の 1 スプリントで conductor が打つコマンド（承認ゲート 1・2 の記録、ステージの `command` と `resume`、止まったときの手当て、`--state` を渡さないとき） | `plugins/ndf/skills/development-workflow/references/waiting.md` の「1 スプリントの流し方」「スプリントを流すコマンド」 |
 | `pace: auto` / `fast` のステージの並びと、`resume`・`--from <プラン名>=<ステップ>` の打ち方 | `plugins/ndf/skills/development-workflow/references/pace.md` の「プランのステージ」 |
 | 本番のプランの先頭の `approve`（`--facts-from`・`--answer-from`）の照合と終了コード | [ndf-release-approved-commit.md](ndf-release-approved-commit.md) |
-| `normal` の「配布」→「`関門 2`」→「本番」のステージと、本番のプランの組み立て（`--dev-state`・`{queue_state:release}`） | [ndf-production-release-record.md](ndf-production-release-record.md) の「`pace: normal` のスプリントの本番のステージ」 |
+| `normal` の「デプロイ」→「`関門 2`」→「本番」のステージと、本番のプランの組み立て（`--dev-state`・`{queue_state:release}`） | [ndf-production-release-record.md](ndf-production-release-record.md) の「`pace: normal` のスプリントの本番のステージ」 |
 | 受け入れ条件の確認から取り込んだ課題を除くこと（`sprint_inputs.py`） | [ndf-sprint-acceptance-check-and-prepush-fix.md](ndf-sprint-acceptance-check-and-prepush-fix.md) |
 | 引数の名前と help | `plugins/ndf/scripts/supervise.py`・`plugins/ndf/scripts/supervise_lib/new_args.py`・`plugins/ndf/scripts/sprint-state.py` |
 
@@ -69,7 +69,7 @@ conductor が打つコマンドをキューと `wait` だけにすることを�
 | 2 | 止まったプランの続きを `queue --resume <done>` の 1 つの形にする。開始のステップはプランの `state.json` の最後のステップ | conductor が知るのは done のパスだけで済み、目録の `resume` にそのまま書ける。承認ゲートで止まったマージのプランも、手動確認の印を待った検査の `merge-gate` も同じ形で続く | `queue <プラン>... --from <プラン>=<ステップ>` だけを足す（止まったプランとステップを報告から読み取り、`--then` の並びを打ち直す手当てが残る）。目録の `resume` に止まった続きを書き足す（書き出しの時点では止まる場所が分からない） |
 | 3 | 取り込みを `--absorb <課題>:<取り込み先>` で受け、取り込んだ課題の実装のプランは書いたうえで `実行の条件` で飛ばす | 左右の向きは設計の結果の表の列（課題・取り込み先）と同じ。プランの並びが 2 つの経路（設計の前の `--absorb` と承認ゲート 1 の後の設計の結果の表）で揃い、`design-results` がどちらも同じ形で扱える | 実装のプランを書かない（`design-results` が取り込み先のプランを探す照合と食い違う） |
 | 4 | 設計 PR のマージは設計 PR ごとの別のプラン `design-merge-<N>` にし、番号を `{queue_pr:design-<N>}` で読む。`{queue_pr:<名>}` を結果が `関門` のプランからも埋める | 設計のプランは承認ゲート 1 の judge で終わり、結果は `関門` である。PR ごとに分けると、1 本が CI の失敗で止まってもほかは進み、止まった 1 本だけを続けられる。名前を `merge-design-<N>` にしないのは、`named`（名前の末尾の一致）で `design-<N>` に当たり自分を設計のプランと取り違えるため | 設計のプランの後ろにマージのステップを足す（`auto` の形。承認ゲート 1 の前の耐久の記録と承認の後の実行の回が 1 本のプランに混ざる） |
-| 5 | `normal` のマージから配布までを 1 本の `--then` の列にし、承認ゲート 2 の後の本番は別の `command` のままにする | 並びは `auto_sprint_plans` と同じ形で、連結（`write_stage_index`）と後続の条件（`fill_stage`）を作り直さずに使える。承認ゲート 2 は本番系へ届く操作の前の承認で、答えを受けるまで流してはならない | 本番まで 1 本につなぐ |
+| 5 | `normal` のマージからリリースまでを 1 本の `--then` の列にし、承認ゲート 2 の後の本番は別の `command` のままにする | 並びは `auto_sprint_plans` と同じ形で、連結（`write_stage_index`）と後続の条件（`fill_stage`）を作り直さずに使える。承認ゲート 2 は本番系へ届く操作の前の承認で、答えを受けるまで流してはならない | 本番まで 1 本につなぐ |
 | 6 | 目録の `command` に `--done <出力先>/done-<番号>.json` を書き、`resume` を `queue --resume <done>` にそろえる。`auto` の承認ゲート 1 の文も `--from design-<N>=approve` を足した `resume` の 1 手にする | `--resume` は done のパスで前の起動を引く。止まったときの手順が進め方ごとに分かれると「1 つだけ示す」が崩れる | 手順書が「`--done` を足して打つ」と書く（目録だけからは打つコマンドが決まらない） |
 | 7 | `approve --facts-from` の誤りと証跡の無さを 10（承認ゲート）で返す | 本番のプランの先頭のステップが承認ゲートとして終わり、キューの続きでそのステップから続けられる | 今の `approve` の失敗（1〜3）で返す |
 | 8 | `--absorb` を、進め方ごとのステージの組み立ての中でなく、組み立てた後のプランへ `absorb.py` が 1 か所で当てる。`design-results` はプランの `取り込み先` を表の取り込みと合わせる | 組み立ての関数（`sprint_plans`・`fast_sprint_plans`・`auto_sprint_plans`）ごとに分岐を足すと同じ規則が 3 か所へ写る。表の内容だけで `課題` を作り直すと書き出しの取り込みが消える | 組み立ての関数ごとに扱う |
@@ -80,7 +80,7 @@ conductor が打つコマンドをキューと `wait` だけにすることを�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) | `sprint_plans` が `normal` の承認ゲート 1 の後のステージ（`MERGE_STAGE` = 「設計 PR のマージ」から配布まで）を最初のステージの `then_of` に並べる。`_stage_entry` が `command` に `--done` を書き、`add_resume` が `command` を持つステージと `then_of` のステージへ `resume` を書く。`--absorb` の拒否（`absorb_refusal`）・`--issue` への追加・プランへの適用を組み立ての前後で呼ぶ |
+| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) | `sprint_plans` が `normal` の承認ゲート 1 の後のステージ（`MERGE_STAGE` = 「設計 PR のマージ」からデプロイまで）を最初のステージの `then_of` に並べる。`_stage_entry` が `command` に `--done` を書き、`add_resume` が `command` を持つステージと `then_of` のステージへ `resume` を書く。`--absorb` の拒否（`absorb_refusal`）・`--issue` への追加・プランへの適用を組み立ての前後で呼ぶ |
 | [`supervise_lib/design_merge.py`](../../plugins/ndf/scripts/supervise_lib/design_merge.py) | `plan_design_merge` が `design-merge-<N>` のプラン（`approved` → `merge_steps`）を組む。`cmd_design_approved` が副命令 `design-approved` の本体 |
 | [`supervise_lib/queue_resume.py`](../../plugins/ndf/scripts/supervise_lib/queue_resume.py) | `resume_targets` が前の起動の一覧と done から、ステージの並び・`--max`・続けるプランと開始のステップ（`ResumeTarget`）を決める。`cmd_queue_resume` が `queue.cmd_queue` へ `starts`・`rerun` を渡す |
 | [`supervise_lib/queue.py`](../../plugins/ndf/scripts/supervise_lib/queue.py) | 一覧 `<done>.plans.json` を書く（`start_listing`）。`plan_pr` が結果 `完了` か `関門` のプランの PR で `{queue_pr:<名>}` を埋める。結果の `items` に `resumed_from` を足す |
@@ -116,13 +116,13 @@ graph LR
     M -.then_of.-> B[スプリントブランチ]
     M -.then_of.-> I[実装]
     M -.then_of.-> C[検査]
-    M -.then_of.-> D[配布]
+    M -.then_of.-> D[デプロイ]
     D --> G2[関門 2: gate]
     G2 --> P[本番: command と resume]
 ```
 
 `--design` が無ければ「設計」「`関門 1`」「設計 PR のマージ」を置かず、最初のステージは「設計の結果」（`--designed` があるとき）か
-「スプリントブランチ」になる。「配布」より後は [ndf-production-release-record.md](ndf-production-release-record.md) の形である。
+「スプリントブランチ」になる。「デプロイ」より後は [ndf-production-release-record.md](ndf-production-release-record.md) の形である。
 
 ### 設計 PR のマージのプラン（`design-merge-<N>`）
 
@@ -254,8 +254,8 @@ graph TD
 `test_release_approved_commit.py`（`approve --facts-from`）、`test_supervise_pace.py`（`auto` / `fast` の並び）にある。
 
 - `normal` で `--design` を渡すと、承認ゲート 1 の直後に設計 PR ごとの `design-merge-<N>` があり、`approved` → `merge-gate` → `merge` を持ち、`Pull Request` が `{queue_pr:design-<N>}` であること
-- 同じ目録で「設計 PR のマージ」だけが `command` を持ち、設計の結果から配布までが `then_of` を持ち、`--then` の順がステージの順と一致すること。「本番」が `then_of` を持たないこと（I8）
-- `--design` を渡さない `normal` では、マージのステージが無く、スプリントブランチ（`--designed` があれば設計の結果）の `command` に配布までがつながること
+- 同じ目録で「設計 PR のマージ」だけが `command` を持ち、設計の結果からリリースまでが `then_of` を持ち、`--then` の順がステージの順と一致すること。「本番」が `then_of` を持たないこと（I8）
+- `--design` を渡さない `normal` では、マージのステージが無く、スプリントブランチ（`--designed` があれば設計の結果）の `command` にデプロイまでがつながること
 - `command` を持つステージと `then_of` のステージの `resume` が、どれも `queue --resume <その done>` の形であること
 - 3 ステップ目で落ちるプランと後続のステージを流し、原因を除いて `queue --resume` を打つと、3 ステップ目から流れて後続のステージまで完了すること
 - 同じステージで完了したプランは続きで流し直さないこと（I3）。続けたプランが再び止まると後続のステージが `流さなかった` になること（I4）

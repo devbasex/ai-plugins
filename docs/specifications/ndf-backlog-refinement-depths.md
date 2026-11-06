@@ -344,7 +344,7 @@ classDiagram
 | まとめのプランで、`refine` の次が `refine-record`、大整理 → 見直しの判定は 3 で飛び、持ち主になれないと `skipped`、本体の成否によらず `release` を通る | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_retro_and_close_once_each_in_order`）・`test_supervise_pace_verify.py` |
 | `vet --kind issue` が課題の本文をプロジェクト MVV と照合する | `plugins/ndf/scripts/tests/test_project_mvv.py`（`test_vet_issue_judges_an_issue_body_against_the_project_mvv`） |
 | `measure` が直接の依存から材料の案を問いで出す | `plugins/ndf/scripts/tests/test_project_decl.py`（`test_measure_proposes_materials_from_direct_dependencies_as_a_question`） |
-| 毎スプリントの棚卸しの所要（秒・ドル）が、206〜224 秒・1.41〜1.61 ドルより短い | 手動確認（リリース後テスト）。配布の後、`depth compare --since-ref <配布した版のタグ> --seconds-under 206 --cost-under 1.41 --model <言語モデル>` が 0 を返す |
+| 毎スプリントの棚卸しの所要（秒・ドル）が、206〜224 秒・1.41〜1.61 ドルより短い | 手動確認（リリース後テスト）。デプロイの後、`depth compare --since-ref <デプロイした版のタグ> --seconds-under 206 --cost-under 1.41 --model <言語モデル>` が 0 を返す |
 | 大整理の分類・柱・付け直しの一覧が #2335 と同じ形になる | 手動確認。固定の入力で大整理の手順 1 をやり直し、件数の差を報告に書く |
 
 ## 運用

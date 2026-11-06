@@ -1,10 +1,10 @@
 # Runtime Plugin Distribution 仕様
 
-> **配布先は Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI への配布・導入物・生成・検査・スモークの記述は配布先を 4 つにしていた時点のもので、配布先については [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+> **導入先のランタイムは Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
 
 ## 概要
 
-AI Plugins marketplace は、Claude Code / Codex / Kiro CLI / agy へ同じ plugin を配布する。
+AI Plugins marketplace は、Claude Code / Codex / Kiro CLI / agy へ同じ plugin をデプロイする。
 
 NDF plugin と playwright-kit plugin は、runtime 分をプラグインごとに 1 ディレクトリへまとめる（NDF は 4 runtime、playwright-kit は 3 runtime）。Skill の実体は `skills/` の 1 箇所だけで、どの runtime へ配るかは `manifests/*-skills.txt` と各 manifest の `skills` 配列が決める。runtime 固有のファイルは名前空間ディレクトリへ分ける。MCP plugin も同じく 1 ディレクトリにまとめ、サーバ定義は `.mcp.json` の 1 箇所だけを持つ。
 
@@ -12,16 +12,16 @@ NDF plugin と playwright-kit plugin は、runtime 分をプラグインごと�
 
 対象 runtime:
 
-| runtime | marketplace / 導入方式 | NDF 配布物 | MCP 配布物 |
+| runtime | marketplace / 導入方式 | NDF リリース対象 | MCP リリース対象 |
 |---|---|---|---|
 | Claude Code | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
 | Codex | `.claude-plugin/marketplace.json` | `plugins/ndf` | `plugins/mcp/*` |
 | Kiro CLI | installer | `plugins/ndf` | `plugins/mcp/*` |
 | agy | `agy plugin install <clone>/plugins/ndf/dev.agy` | `plugins/ndf` | — |
 
-## NDF Plugin 配布仕様
+## NDF Plugin デプロイ仕様
 
-NDF plugin の plugin name は全 runtime で `ndf` を維持し、配布物は `plugins/ndf` の 1 ディレクトリにまとめる。
+NDF plugin の plugin name は全 runtime で `ndf` を維持し、リリース対象は `plugins/ndf` の 1 ディレクトリにまとめる。
 
 | runtime | manifest / installer | 主な内容 |
 |---|---|---|
@@ -30,7 +30,7 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持し、配布物は 
 | Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
 | agy | `plugins/ndf/dev.agy/plugin.json` | `dev.agy/hooks.json`、`dev.agy/skills/` の symlink、`dev.agy/agents/` の生成した写し、`scripts` への symlink |
 
-`plugins/ndf/manifests/{claude,codex,kiro,agy}-skills.txt` が runtime ごとの配布 Skill 一覧を
+`plugins/ndf/manifests/{claude,codex,kiro,agy}-skills.txt` が runtime ごとの配る Skill 一覧を
 定義する。Claude Code と Codex は manifest と同じ内容を各 plugin.json の `skills` 配列へ書き、
 Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。agy は Skill を絞る手段を
 利用者側の設定にしか持たないため、`scripts/build-runtime-plugins.sh` が `agy-skills.txt` から
@@ -42,7 +42,7 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 プラグインのマーカーはディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
 `dev.agy/plugin.json` へ置く。
 
-**この文書は配布 Skill の数を書かない（#288）。** 数はランタイムごとに違い、版を上げる
+**この文書は配る Skill の数を書かない（#288）。** 数はランタイムごとに違い、版を上げる
 たびに動く。基準を持つのは `plugins/ndf/manifests/*-skills.txt` の行数だけである。確定仕様の
 側に数を写すと、`docs/specifications/` をチェックの対象へ広げない限り古いまま残る。
 
@@ -54,7 +54,7 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 
 **Skill 内のパス参照は runtime ごとに書き換えない。** Skill が呼ぶスクリプトは Skill ディレクトリ
 起点（`$SKILL_DIR/scripts`、隣の Skill へは `$SKILL_DIR/../<Skill 名>/`、プラグインルート直下へは
-`$SKILL_DIR/../../scripts/`）で参照する。配布ディレクトリの形が runtime ごとに違っても、Skill
+`$SKILL_DIR/../../scripts/`）で参照する。デプロイディレクトリの形が runtime ごとに違っても、Skill
 ディレクトリからの位置は変わらないためである。Kiro CLI が `.kiro/skills/` へ張った symlink 越し
 でも `..` は解決先を経由して届く。
 
@@ -96,7 +96,7 @@ Skill ディレクトリ起点で書いた Skill は、候補を順に試し、`
 
 scripts は `plugins/ndf/scripts` に 1 箇所だけ置き、3 runtime が同じ実体を読む。
 
-## MCP Plugin 配布仕様
+## MCP Plugin デプロイ仕様
 
 MCP plugin も `plugins/mcp/<plugin-name>` の 1 ディレクトリにまとめる。サーバ定義は `.mcp.json` の
 1 箇所だけで、3 runtime が同じファイルを読む。
@@ -113,7 +113,7 @@ stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さず�
 
 各 runtime で plugin name は同一にする。例: `mcp-bigquery`、`mcp-redash`、`mcp-serena`。
 
-配布ディレクトリは `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`.mcp.json`、
+デプロイディレクトリは `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`.mcp.json`、
 `dev.kiro/install.sh` を持つ。hook や Skill を持つプラグインは `hooks/` と `skills/` も持つ。
 
 Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。Kiro は agent の `tools` に挙がったツールだけをモデルへ見せるため、installer は `default.json` に `tools` が無ければ `["*"]` を置く（利用者が書いた `tools` は上書きしない）。hook の command に含まれるプラグインルートのプレースホルダは、installer が張った symlink の絶対パスへ置き換える。
@@ -123,7 +123,7 @@ NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP 
 ## Marketplace
 
 marketplace 定義は `.claude-plugin/marketplace.json` の 1 つだけである。各 entry の `source` は
-プラグインの配布ディレクトリを指す。
+プラグインのデプロイディレクトリを指す。
 
 Codex は専用の定義（`.agents/plugins/marketplace.json`）が無ければこの定義へフォールバックする。
 Codex が要求する `policy` / `category` / `interface` は同じ entry に含める。Claude Code はこれらを
@@ -202,7 +202,7 @@ model の対応表（`agy_agents.py` の `MODEL_MAP`）:
 
 | 決定 | 理由 |
 |---|---|
-| symlink をやめて写しを生成し、コミットする | symlink のままでは agy が読む `model` を変えると Claude Code の定義が変わる。agy の `plugin install` は `dev.agy/` を丸ごと取り込み、中身を変える手段を持たないため、受け付ける値は配布物の時点で入っていなければならない。Claude Code の定義から `model` を外す形は型の選び分けを失い、検査の側で `Invalid model tier` だけを通す形は利用者の agy に読み込まれない状態を残す |
+| symlink をやめて写しを生成し、コミットする | symlink のままでは agy が読む `model` を変えると Claude Code の定義が変わる。agy の `plugin install` は `dev.agy/` を丸ごと取り込み、中身を変える手段を持たないため、受け付ける値はリリース対象の時点で入っていなければならない。Claude Code の定義から `model` を外す形は型の選び分けを失い、検査の側で `Invalid model tier` だけを通す形は利用者の agy に読み込まれない状態を残す |
 | `model` は外さずに対応表で tier 名へ変換する | Claude Code の `sonnet` / `opus` はエージェントごとに安い型と高い型を選び分けた値で、変換すればこの選び分けが agy でも保たれる。外すと 8 本すべてが利用者の選んだ型で動く |
 | frontmatter を YAML として読み直さず、`model:` の 1 行だけを置き換える | 読み直して書き出すと引用符・キーの順が変わりうる。1 行の置き換えなら写しと元の差は `model:` の 1 行だけになり、A2 をバイト列で確かめられる |
 | 対応表に無い値は生成を止める | 外すと agy の側だけ黙って型の選び分けが消え、そのまま写すと agy に読み飛ばされる。止めれば対応表に 1 行足すかを決める場面に必ず出会う |
@@ -248,7 +248,7 @@ container smoke test の詳細は [Runtime Plugin Container Smoke Test 仕様](r
 ## Agent Plugins 形式との関係
 
 [Agent Plugins](https://github.com/agentplugins/agent-plugins-spec) は Amazon / Cursor / Microsoft /
-OpenAI / Vercel が策定するプラグイン形式である。本リポジトリの配布構成はこの形式を全面採用
+OpenAI / Vercel が策定するプラグイン形式である。本リポジトリのデプロイ構成はこの形式を全面採用
 しては**いない**。採った点と採らなかった点を、判断の根拠とともに残す。
 
 ### 採った点
@@ -263,7 +263,7 @@ OpenAI / Vercel が策定するプラグイン形式である。本リポジト�
 
 | 項目 | 理由 |
 |---|---|
-| `ndf` へのルートマニフェスト | 配布 Skill がランタイムごとに違い、hook も持つ。ルートマニフェストは `skills/` を全件公開して hook を持てない（§6.1、マニフェストは 9 項目のみ） |
+| `ndf` へのルートマニフェスト | 配る Skill がランタイムごとに違い、hook も持つ。ルートマニフェストは `skills/` を全件公開して hook を持てない（§6.1、マニフェストは 9 項目のみ） |
 | MCP プラグインへのルートマニフェスト | 下記のとおり `mcp.json` が現行の設定を表現できず、ルートマニフェストを置くと Codex がそちらを優先するため |
 | `mcp.json`（§7.2） | スキーマが stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さない（`additionalProperties: false`）。MCP プラグイン 10 個のうち 6 個が使う `envFile` を表現できず、2 個が使う `type: "http"` も無い。かわりに Claude Code 形式の `.mcp.json` を 1 つ置き、Codex は `.codex-plugin/plugin.json` の `mcpServers` から参照する |
 

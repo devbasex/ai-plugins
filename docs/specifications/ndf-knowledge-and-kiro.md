@@ -1,10 +1,10 @@
 # NDF 知識構造・Kiro CLI 仕様
 
-> **配布先は Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI への配布・導入物・生成・検査・スモークの記述は配布先を 4 つにしていた時点のもので、配布先については [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+> **導入先のランタイムは Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
 
 ## 概要
 
-NDF の知識配置（`AGENTS.md` と版と配布の正本、README の役割を含む）、Serena MCP 分離、Kiro CLI 対応に関する確定仕様。
+NDF の知識配置（`AGENTS.md` と版とリリースの正本、README の役割を含む）、Serena MCP 分離、Kiro CLI 対応に関する確定仕様。
 
 Skill の挙動仕様は本ディレクトリでは管理しない。Skill の実体は `plugins/ndf/skills/*/SKILL.md` の 1 箇所で、Kiro CLI はその symlink を読む。
 
@@ -27,18 +27,18 @@ AI エージェント向けの知識は以下の層で管理する。
 
 `SessionStart` hook は `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保ち、statusline 未設定時は NDF 標準 statusline を設定する。
 
-## AGENTS.md と版と配布の正本
+## AGENTS.md と版とリリースの正本
 
 **`AGENTS.md` には判断の基準（何を選ぶか）だけを置き、手順と実測（どう動くか）は `docs/` へ置く。**
 `AGENTS.md` の役割は「ナビゲーション + ポリシー（軽量）」であり、全セッション・全サブエージェントが
 読む。版数の扱いの手順と実測が本文の 65% を占め、版を重ねるたびに増えていた。
 
-**版数と配布の正本は `docs/versioning-and-distribution.md` である。** 章は読み手が問う順に並べる。
+**版数とデプロイの正本は `docs/versioning-and-distribution.md` である。** 章は読み手が問う順に並べる。
 
 | 章 | 何を持つか |
 | --- | --- |
 | チャネルと ref | 正式版と開発版の対応、既定ブランチへ正式版を置く理由、clone の refspec |
-| 版の付け方と開発版の配布 | semver の区分、接尾辞の規則、版の形の表（チェック J の位置決め） |
+| 版の付け方と開発版のデプロイ | semver の区分、接尾辞の規則、版の形の表（チェック J の位置決め） |
 | ランタイムごとの取得と導入 | 4 ランタイムのコマンド、登録と導入が別の操作であること |
 | 開発版を試す | ref を明示した登録、Kiro と agy の clone 経由の導入 |
 | 正式版を出す | `develop` から `main` への Pull Request、タグ |
@@ -47,19 +47,19 @@ AI エージェント向けの知識は以下の層で管理する。
 | 取得元の登録を確かめる | 隔離した設定ディレクトリでの手順 |
 | 利用者が過去の版へ戻る | タグへの固定、対象だけの固定 |
 
-`AGENTS.md` の「版と配布の方針」に残すのは、チャネルを 2 つに分けること・正式版を既定ブランチへ
+`AGENTS.md` の「版とリリースの方針」に残すのは、チャネルを 2 つに分けること・正式版を既定ブランチへ
 置くこと・接尾辞の方針・版を上げる時期・マイルストーンの名前・版を決める唯一の箇所・同名の取得元を
 登録しないこと・タグを打つことである。
 
 | 決定 | 理由 |
 | --- | --- |
-| 開発ガイドへ足さず、新しい文書にする | 開発ガイドは「プラグインを作る」手順で、版と配布は「作ったものを届ける」手順である。1 つにすると読みに来た主題と違う側を通過する |
+| 開発ガイドへ足さず、新しい文書にする | 開発ガイドは「プラグインを作る」手順で、版とリリースは「作ったものを届ける」手順である。1 つにすると読みに来た主題と違う側を通過する |
 | 開発ガイドの「バージョン管理」「利用者が過去の版へ戻る」を正本へ集め、跡はリンクにする | どちらが正かが書かれていない状態を残さない |
 | `docs/archive/version-decisions/` へ足さない | あちらはリリース済み版ごとの判断を残す履歴で、書き換えない。こちらは版を上げるたびに読み直す現行の手順である |
-| `AGENTS.md` に版数を置かない（版数の例も現行版も書かない） | チェックの突き合わせから外れた例は、版を上げても落ちず古いまま残る。現行版を書くと、開発版の配布の `bump` が `-dev.<連番>` を付けて指示書の読み込み量を伸ばし、Pull Request で通った指示書のチェックが配布の時点で落ちる。版数の正本は `plugin.json` の `version` にある |
+| `AGENTS.md` に版数を置かない（版数の例も現行版も書かない） | チェックの突き合わせから外れた例は、版を上げても落ちず古いまま残る。現行版を書くと、開発版のデプロイの `bump` が `-dev.<連番>` を付けて指示書の読み込み量を伸ばし、Pull Request で通った指示書のチェックがデプロイの時点で落ちる。版数の正本は `plugin.json` の `version` にある |
 | 「`bump` は指示書を書き換えない」は `bump` → 指示書チェックの実行テストで縛り、`bump` の中に「書き換える先が指示書なら止める」判定を持たない | `bump` の共通の部分が書くのは `plugin.json`・`marketplace.json`・README で、既定の指示書に当たる経路が無い。判定は ndf の分岐のためだけのコードになる |
 | 実験版の `experimental/hook-trial/ht_bump.py` の `AGENTS.md` の項目は残す | 閉じた試行の記録で、既定の振る舞いから参照されない。今の `bump` に合わせると記録した試行の結果と中身が食い違う |
-| 残す節の見出しを「版と配布の方針」へ改める | 同じ見出しが 2 つの文書にあると、名前で指す参照がどちらを指すか決まらない。同じ見出しは 1 つの文書にだけ置く |
+| 残す節の見出しを「版とリリースの方針」へ改める | 同じ見出しが 2 つの文書にあると、名前で指す参照がどちらを指すか決まらない。同じ見出しは 1 つの文書にだけ置く |
 | 節ごとの分量の割合を機械で見る仕組みは作らない | 役割から離れたことは割合では判定できない。分量のチェック（501 行以上）は働いている |
 
 チェック J の読む先の移し方は [説明文書のチェック](doc-consistency-checks.md) にある。
@@ -86,11 +86,11 @@ AI エージェント向けの知識は以下の層で管理する。
 
 | 決定 | 理由 |
 | --- | --- |
-| Skill 執筆規約を同じディレクトリで `AUTHORING.md` にする | Skill を足す人は `plugins/ndf/skills/` を開いて規約を探す。`docs/` へ移すと、規約が律する Skill の実体から離れ、配布物から規約が消える |
+| Skill 執筆規約を同じディレクトリで `AUTHORING.md` にする | Skill を足す人は `plugins/ndf/skills/` を開いて規約を探す。`docs/` へ移すと、規約が律する Skill の実体から離れ、リリース対象から規約が消える |
 | 根の README から外した節の正本は既存の文書にする | 外した節のほとんどは同じ主題が既存の文書にあり、根の側が古いものもあった。新しい文書を作ると正本が 3 か所目に増える |
 | 「プラグインの削除」だけを開発ガイドへ移し、ブランチと Pull Request の手順へ書き換える | 削除の手順は他の文書に無い。作る・変える手順と同じ文書に置くとプラグインの一生が 1 か所で読める。運用の規則に反する直接 push の手順をそのまま移すと、正本が規則と食い違う |
 | 導入の最初の 1 手は根と NDF の入口の両方に置き、選択肢と後続の手順は NDF の入口へ寄せる | 規約は入口に導入と最初の 1 手を書くと定める。Kiro の選択肢や agy の hook の差し込みは NDF に固有である |
-| 入口の README には版ごとの更新の節を置かず、CHANGELOG.md を参照する固定の「更新情報」の節だけを置く | 版ごとの変化と移行の手順の正本は CHANGELOG.md の版の節である。README に写すと配布のたびに行数が増えて上限を超え、2 か所の記述が食い違う |
+| 入口の README には版ごとの更新の節を置かず、CHANGELOG.md を参照する固定の「更新情報」の節だけを置く | 版ごとの変化と移行の手順の正本は CHANGELOG.md の版の節である。README に写すとデプロイのたびに行数が増えて上限を超え、2 か所の記述が食い違う |
 | 「バージョン管理ルール」の例（`1.0.0 → 1.0.1` など）を正本へ持ち込まない | 区分の定義の言い換えで、囲めばチェック J が現行版より古い版数として落とす |
 | 記録（`issues/`、`docs/development-history/`、`docs/presentations/`）の旧いパスと節名は書き換えない | 起きたことを残す文書で、書き換えると当時どのファイルを指していたかが読めなくなる |
 
@@ -158,9 +158,9 @@ Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` 
 ## 関連リンク
 
 - [issue #415](https://github.com/devbasex/ai-plugins/issues/415) / [PR #502](https://github.com/devbasex/ai-plugins/pull/502)（設計） / [PR #586](https://github.com/devbasex/ai-plugins/pull/586)（実装） — Kiro installer の導入先のチェック
-- [issue #499](https://github.com/devbasex/ai-plugins/issues/499) / [PR #505](https://github.com/devbasex/ai-plugins/pull/505)（設計） / [PR #594](https://github.com/devbasex/ai-plugins/pull/594)（実装） — `AGENTS.md` と版と配布の正本
+- [issue #499](https://github.com/devbasex/ai-plugins/issues/499) / [PR #505](https://github.com/devbasex/ai-plugins/pull/505)（設計） / [PR #594](https://github.com/devbasex/ai-plugins/pull/594)（実装） — `AGENTS.md` と版とリリースの正本
 - [issue #500](https://github.com/devbasex/ai-plugins/issues/500) / [PR #608](https://github.com/devbasex/ai-plugins/pull/608)（設計） / [PR #612](https://github.com/devbasex/ai-plugins/pull/612)（実装） — README の役割の適用
-- [版と配布の正本](../versioning-and-distribution.md)
+- [版とリリースの正本](../versioning-and-distribution.md)
 - [README の役割の規約](../../plugins/ndf/skills/document-style/03-readme-roles.md)
 - [説明文書のチェック](doc-consistency-checks.md)
 - [mcp-serena README](../../plugins/mcp/mcp-serena/README.md)

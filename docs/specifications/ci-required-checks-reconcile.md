@@ -13,7 +13,7 @@
   `plugins/ndf/scripts/lib/ci_workflows.py` の `required_contexts` で、突き合わせのスクリプトと解析
   （`plugins/ndf/scripts/project_lib/measure_ci.py` の `_required_checks`）が共有する
 - **文書は必須のチェックの数を持たない。** 一覧の正は ruleset で、
-  `gh api repos/<owner>/<repo>/rules/branches/develop` で読む（[版と配布の正本](../versioning-and-distribution.md)）
+  `gh api repos/<owner>/<repo>/rules/branches/develop` で読む（[版とリリースの正本](../versioning-and-distribution.md)）
 
 例: 手元で `develop` に向けて走らせる（ruleset の必須のチェックが 12 個で、7 つが追加待ちの時点）。
 
@@ -263,7 +263,7 @@ ruleset（`protect main and develop`、`main` と `develop` が対象）は管�
 - [`scripts/check-required-checks.py`](../../scripts/check-required-checks.py)
 - [`scripts/required-checks-allow.json`](../../scripts/required-checks-allow.json)
 - [`plugins/ndf/scripts/lib/ci_workflows.py`](../../plugins/ndf/scripts/lib/ci_workflows.py)
-- [版と配布の正本](../versioning-and-distribution.md)（`main` / `develop` の保護と、必須のチェックの一覧の読み方）
+- [版とリリースの正本](../versioning-and-distribution.md)（`main` / `develop` の保護と、必須のチェックの一覧の読み方）
 - [ndf-workflow-unit-and-gates.md](ndf-workflow-unit-and-gates.md)（`pr-body-decisions-check` を必須にする決定）
 - [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md)（解析が CI の所要を測るときの必須のチェックの扱い）
 - 課題: #653

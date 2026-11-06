@@ -67,7 +67,7 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 | relay の `question open` が同じ判定に従うこと、差し戻しの文の区分の案内 | 承認ゲートの数と置き場所、`pace` の承認の委任（`.ndf/pace.json`） |
 | Codex・Kiro CLI・agy での扱い | Codex・agy の問い合わせの Tool を hook の matcher に足すこと（「運用」の制約） |
 
-**働く範囲は配布先のリポジトリを含む**（hook は NDF の配布物）。宣言が無いリポジトリでも既定で働く。
+**働く範囲は利用先のリポジトリを含む**（hook は NDF のリリース対象）。宣言が無いリポジトリでも既定で働く。
 
 ## 決定と理由
 

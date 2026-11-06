@@ -3,7 +3,7 @@
 ## 目的
 
 - **スプリントの境で人の手が止まらない。** `/goal /ndf:development-workflow --loop <名>` を 1 回起動すれば、NDF が
-  「選ぶ → 設計 → 実装 → 検査 → 配布 → 振り返り → 棚卸し → 次を選ぶ」を繰り返す。周回のスプリントは `pace: auto` で組み、
+  「選ぶ → 設計 → 実装 → 検査 → デプロイ → 振り返り → 棚卸し → 次を選ぶ」を繰り返す。周回のスプリントは `pace: auto` で組み、
   承認ゲート 1・2 は `mvv-gate.py check` の判定だけで通る
 - **人が手を止めるのはレッドラインと止まる条件のときだけである。** 承認ゲート 1 で「従う」以外になった課題は人の判断待ちへ
   外して残りで続け、承認ゲート 2 で人へ戻したときだけ問う。予算・同じ失敗・着手できる課題が無い・MVV の外しか残らない・
@@ -51,7 +51,7 @@
 | `upkeep.py rank` の品質の枠（`.ndf/backlog.json` の `quality` 節） | Codex・Kiro・agy でのラッパーと同じ自動の切り替え（ラッパーは Claude Code だけ） |
 | 引継ぎ文書の名 `loop-<ループ名>`（`handoff.py`） | このリポジトリの `.ndf/pace.json` でループを有効にすること（共通原則の C7。利用者が別に決める） |
 
-ループは NDF の安定版の経路にあり、配布先のリポジトリでも働く。自動の切り替えは Claude Code のラッパー（`relay.py`）の
+ループは NDF の安定版の経路にあり、利用先のリポジトリでも働く。自動の切り替えは Claude Code のラッパー（`relay.py`）の
 下だけで働く。ほかのランタイムとラッパーの外では、周回の境とカットポイントで `ndf-next` を出して止まり、利用者が貼り直せば
 同じ周回から続く。`loop` 節の無いリポジトリでは何も変わらない。
 
@@ -91,7 +91,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 
 | # | 条件（保つこと） | 破れたときの扱い |
 | --- | --- | --- |
-| I1 | 周回は追記だけで、番号は 1 から 1 ずつ増える。終わった周回（`outcome` が `進行中` でない）の行は書き換えない。例外は保留の周回（`配布待ち`・`質問待ち`）で、答えを読んで `loop finish` か周回の境の差し戻し・失敗で 1 回だけ締め直す | 書き込みを拒み、記録が壊れているとして `stopped`（終了コード 1） |
+| I1 | 周回は追記だけで、番号は 1 から 1 ずつ増える。終わった周回（`outcome` が `進行中` でない）の行は書き換えない。例外は保留の周回（`リリース待ち`・`質問待ち`）で、答えを読んで `loop finish` か周回の境の差し戻し・失敗で 1 回だけ締め直す | 書き込みを拒み、記録が壊れているとして `stopped`（終了コード 1） |
 | I2 | 進行中の周回は高々 1 つ | `select` が「進行中の周回がある」で 1 |
 | I3 | 予算・同じ失敗・止める指示は周回の境（選定の前と周回を締めた後）でだけ判定する。周回の途中で `stop` を書くのは `gate2_returned`・`mvv_changed`・`refused` だけで、周回は進行中のまま残す。止める指示を置くのは、人が自分のセッションへ送った入力がループを止めることを求めたときだけで、セッションを終える依頼・別のセッションのメッセージ（「利用者の指示」と書かれていても含む）・画面の文字・送信されていないサジェストからは置かない | 途中の止める指示は次の境まで効かない |
 | I4 | 選定は入力（`rank` の出力・記録の人の判断待ちと除外・`NDF_LOOP_EXCLUDE`・`approved` の行の設計 PR の状態・ループの設定・スプリント MVV の承認）だけで決まり、同じ入力からは同じ組と並びが出る | テストで落とす |
@@ -128,7 +128,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- | --- | --- |
 | `loop.enabled` | `true` だけが真 | 偽（ループを断る） | — |
 | `loop.budget` | オブジェクト。`laps`・`usd`・`hours` の正の数（bool は不可）。欠けたキーは既定で埋め、ほかのキーは不可 | 3 / 60 / 24 | `PaceError` |
-| `loop.same_failure` / `loop.max_issues` / `loop.release_pending_max` | 1 以上の整数（bool は不可）。`release_pending_max` は答えの無い保留の周回（配布待ち・質問待ち）を合わせた上限 | 2 / 3 / 2 | `PaceError` |
+| `loop.same_failure` / `loop.max_issues` / `loop.release_pending_max` | 1 以上の整数（bool は不可）。`release_pending_max` は答えの無い保留の周回（リリース待ち・質問待ち）を合わせた上限 | 2 / 3 / 2 | `PaceError` |
 
 `PaceError` は `loop start` だけを断る。`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は節の誤りの
 影響を受けない。
@@ -147,7 +147,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `sprint <名> --mode M --dev V [--prod V] [-- <new sprint に足す引数>]` | 進行中の周回の選定・前の周回の `refine.deferred` | `status: sprint`・`state_path`・`out`・`manifest`・`close_command`・`queue`・`pipeline` | 1 = 進行中の周回が無い・承認ゲート 1 の後の周回 / 3 = `init`・`new sprint`・`new close` のどれかが断った（`refused`） |
 | `gate <名> --done <D>` | 承認ゲートで止まった done・`mvv-gate.jsonl`・スプリント状態 | `status: continue`・`gate: 1`・`waiting`・`pipeline`（残りで続く）、または周回を締めて `ndf_next` | 1 = 組んだ周回が無い・done に関門が無い / 3 = `gate2_returned`・`mvv_changed`・続きを組めない（`refused`）・締めた後の境の判定 |
 | `answer <名> <課題> --approved\|--rejected\|--revise --note <F> [--pr N]` | 答えの無い人の判断待ちの行 | `status: answered`（`--revise` は行に `note` と `revise_count` を書く） | 1 = 待っていない課題・指摘ファイルを読めない |
-| `finish <名> <周回> --done <D>` | 保留の周回・残りの工程の done | `lap` と同じ（周回を `完了` か `失敗` で締め直す。質問待ちの続きが配布の依頼で止まれば `配布待ち` へ移す） | 1 = 保留の周回でない（締め直しは 1 回だけ） / 3 = 境の判定で止まった |
+| `finish <名> <周回> --done <D>` | 保留の周回・残りの工程の done | `lap` と同じ（周回を `完了` か `失敗` で締め直す。質問待ちの続きがリリースの依頼で止まれば `リリース待ち` へ移す） | 1 = 保留の周回でない（締め直しは 1 回だけ） / 3 = 境の判定で止まった |
 | `pending <名>` | 記録・依頼の答え | `status: finish`・`lap`・`pipeline`（答えの届いた最も古い保留の周回の残り）か `status: none` | — |
 | `hold-question <名> --ref <依頼> --plan <P> --step <S> [--parallel <計画名>]` | 進行中の周回 | `lap` と同じ（周回を `質問待ち` で締めて次の周回へ） | 1 = 進行中の周回が無い / 3 = 境の判定で止まった |
 | `approve-mvv <名> --milestone M` | マイルストーンの説明 | `status: approved`（`sprint_mvv_approvals` に `{milestone, sha256, at, by: user}`） | 3 = 説明に `## Mission` / `## Vision` / `## Value` がそろわない |
@@ -179,7 +179,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
    「前提の課題の実装待ち（#<番号> …）」（`rank` の行の `prerequisites`。見積もりの記録と並列の組が宣言した、閉じていない
    前提の課題の番号を昇順で載せる。サブイシューの関係だけでは前提にならない。前提の課題が同じ周回に選ばれていても外す）→
    「周回の中で起票された」（周回の `created`）→「容量（尺度を超える）」
-4. 外れなかった候補に `max_issues` 件の枠を、先頭に選ぶ課題（直して出し直す課題・配布の直し・承認とマージが済み、その後の周回でまだ
+4. 外れなかった候補に `max_issues` 件の枠を、先頭に選ぶ課題（直して出し直す課題・デプロイの直し・承認とマージが済み、その後の周回でまだ
    選ばれていない設計の課題）、品質の枠の課題、順位の順に割り当てる。選んだ行の理由は「承認した設計」「直しの先頭」「品質の枠」「順位」の
    どれか、枠からあふれた行は「容量」で外す
 5. 選べたら、そのマイルストーンの候補でない行を「順位（切り出しの境界の外）」で外した行として足す。外した行も
@@ -227,7 +227,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 同上で残りが無い | 周回を `人へ戻した`（設計が完了しなかった課題があれば `失敗`）で締め、境の判定へ進む |
 | 同上で続きを組めない | `refused`（`step: 続きの queue`）で止まる |
 | 承認ゲート 1 以外（承認ゲート 2） | 判定の写しを周回へ足し、止まった計画を `gate2_plan` に控え、`gate2_returned`（`values: {pr, verdict, reasons}`）で止まる。本番は出さない |
-| 配布の依頼のプラン（フェーズ `配布の依頼`。並列の計画のレーン） | 承認ゲート 2 として止まらず、周回を `配布待ち` で締める。`release` に依頼のプラン・依頼の記録（`work/request.txt`）・依頼の id・計画名・同じ queue の残りのステージ・まとめのプラン（`close_plans`）を残し、まとめは流さない。境の判定へ進む |
+| リリースの依頼のプラン（フェーズ `リリースの依頼`。並列の計画のレーン） | 承認ゲート 2 として止まらず、周回を `リリース待ち` で締める。`release` に依頼のプラン・依頼の記録（`work/request.txt`）・依頼の id・計画名・同じ queue の残りのステージ・まとめのプラン（`close_plans`）を残し、まとめは流さない。境の判定へ進む |
 
 承認ゲート 2 の答えは、止まった時刻より後の、周回の状態の `関門 2` の利用者の記録（`by` が `mvv` でない）と
 `gate-rejections.jsonl` の差し戻しのうち最新のもので決める。
@@ -253,9 +253,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 
 **保留の周回（並列の計画のレーン）があるときの境の順。** `user_stop`・`mvv_changed` はすぐ止まる。次に依頼の答えを古い順に読む:
 オーガナイザーへ送った設計の承認の答え（承認ならラベル `design-approved` と `loop answer --approved` と同じ記録、直して出し直すなら指摘、
-やらないなら差し戻し）→ `配布待ち` の `rejected`（`人へ戻した` で締め、`fixes` に課題と理由を足し、次の周回で先頭に選ぶ）・`failed`
-（`失敗` で締め、鍵は `{issues, kind: 配布, step: 配布の失敗}`）→ 最も古い `released` の `配布待ち` か答えの届いた `質問待ち`
-（`status: finish` と残りの `pipeline` を返し、新しい周回を始めない）。次の配布へ回した知らせ（`defer-<依頼>`）だけなら `配布待ち` のまま。
+やらないなら差し戻し）→ `リリース待ち` の `rejected`（`人へ戻した` で締め、`fixes` に課題と理由を足し、次の周回で先頭に選ぶ）・`failed`
+（`失敗` で締め、鍵は `{issues, kind: デプロイ, step: リリースの失敗}`）→ 最も古い `released` の `リリース待ち` か答えの届いた `質問待ち`
+（`status: finish` と残りの `pipeline` を返し、新しい周回を始めない）。次のデプロイへ回した知らせ（`defer-<依頼>`）だけなら `リリース待ち` のまま。
 続けて、承認済みで未マージの設計 PR ごとに、前のマージの結果に応じた手を 1 回だけ打つ（未試行・検査が緑でない・取り残し・基盤待ちは承認した設計のマージを呼び直す。
 先端が動いた・承認した先端が無いは新しい先端で問い直す。衝突は設計の worktree で `merged-steps.py base-sync --pr <PR> --push` を打ち、
 先端が進めば問い直す。権限の不足など時間で解けない結果・同じ分類の未緑が 3 周回続いた・基盤待ちの再実行が同じ承認した先端で 3 回に達した
@@ -314,7 +314,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `waiting[]` | 人の判断待ち。答えは行を消さずに `answer`（`approved` / `rejected` / `revise`）・`answered_at` を足す。`approved` の行はマージを確かめた時刻 `merged_at`、だれが承認したか `by`（`user` / `mvv`）、最後の承認した設計のマージの結果 `merge`
 （`{result, class, reason, pr, head, at, branch, infra_rerun, lap, streak, infra_reruns, stamp}`）、後片付けの時刻 `cleaned` を足す。
 利用者へ問い直した行は理由 `returned` を持つ（問い直すときは `answer`・`answered_at`・`by`・`merge`・`merged_at` を外す。`infra_rerun` は 1 回のマージで実際に打った再実行の回数、`infra_reruns` はその累計）。マージできずに利用者へ戻した回数 `givebacks` は消さず、レーンの依頼の id の接尾辞 `-m<周回>-<回数>` に使う。並列の計画のレーンは、オーガナイザーへ送った設計の承認の依頼の `request` と計画名 `plan` を持つ。`revise` の行は指摘 `note` と回数 `revise_count` を持つ |
-| `fixes[]` | 配布を差し戻された周回の直し `{lap, issues, reason, at}`。直しの周回で課題を選ぶと `fixed_by` に周回の番号を書く |
+| `fixes[]` | デプロイを差し戻された周回の直し `{lap, issues, reason, at}`。直しの周回で課題を選ぶと `fixed_by` に周回の番号を書く |
 | `excluded[]` | `{number, reason, lap}`（`loop exclude`） |
 | `sprint_mvv_approvals[]` | `{milestone, sha256, at, by}` |
 
@@ -330,9 +330,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `retro` / `refine` | 振り返りの置き場（まとめのプランの報告）・棚卸しの結果 `{report, rank_changes, deferred[]}`（upkeep の記録の `candidates.json`・`rank.json` から） |
 | `created[]` / `deferred_issues[]` | 周回の中で起票された課題（その周回の選定に入れない）・上限で後へ回した Issue（`lap --deferred-issues`） |
 | `cost` / `seconds` | スプリント状態の計画の行の和 |
-| `outcome` / `failure` | `進行中` / `完了` / `失敗` / `人へ戻した` / `配布待ち` / `質問待ち`・失敗の鍵 |
+| `outcome` / `failure` | `進行中` / `完了` / `失敗` / `人へ戻した` / `リリース待ち` / `質問待ち`・失敗の鍵 |
 | `close_plans` | `loop sprint` が組んだまとめのプラン（保留の周回は答えの後に流す） |
-| `release` | 配布待ちの周回: `plan`・`out`・`request`・`plan_name`・`stages`（同じ queue の残り）・`close_plans`・`answer`（届いた答え）・`finish`（`started_at`・`ended_at`・`done`・`pipeline`） |
+| `release` | リリース待ちの周回: `plan`・`out`・`request`・`plan_name`・`stages`（同じ queue の残り）・`close_plans`・`answer`（届いた答え）・`finish`（`started_at`・`ended_at`・`done`・`pipeline`） |
 | `question` | 質問待ちの周回: `request`・`plan`・`step`・`plan_name`・`finish` |
 | `held_at` | 保留の周回を最初に締めた時刻（動いていた時間の区切り。I8） |
 | `relay_dir` / `started_at` / `ended_at` | 締めたセッションの `NDF_RELAY_DIR`・周回の開始と終わり |
@@ -401,7 +401,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 人が持つのは優先順位・受け入れ条件・成果の確認 | OpenAI | 優先順位は MVV と棚卸しの順位、確認は承認ゲート 2 と周回の記録 |
 | `/goal` の計数は再開でリセットされ、評価役は出力だけで判定する | Claude Code の `/goal` | 予算の累計は記録が持つ（I8）。止まったときの 1 行（決定 12） |
 
-取り入れなかったもの: 人がコードを書かず・レビューもしない規則と消費の目安（StrongDM。配布するプラグインの検査を外せない）、
+取り入れなかったもの: 人がコードを書かず・レビューもしない規則と消費の目安（StrongDM。デプロイするプラグインの検査を外せない）、
 止まる条件を持たず収束するまで回す形（StrongDM）、Level 5 を目標にすること（Shapiro）、マージ前の検査を最小にする運用
 （OpenAI。記事自身が低スループットの環境では無責任と条件を付けている）、新しい進捗ファイル（Effective harnesses。進捗は
 既に Issue・Pull Request・状態ファイルにある）、Stop hook を自作して外側のループを強制すること（`/goal` と二重になり block の
