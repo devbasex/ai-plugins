@@ -51,7 +51,7 @@
 | I2 | 既知の当たり | 宣言の当たりの数を実際の数が超えると検査を落とす | 終了コード 1。その組の当たりをすべて出す |
 | I3 | 既知の当たり | 宣言の当たりの数より実際の数が少ないと検査を落とす（0 を含む） | 終了コード 2。直す値を出す |
 | I4 | 既知の当たり | 項目は理由を持ち、違反が残る項目は行き先の課題の番号も持つ | 終了コード 2 |
-| I5 | 検知する語 | 走査の範囲は、manifest に載る Skill の Markdown（`SKILL.md` と参照文書）、リリース対象のスクリプト（プラグインの単位である family の `scripts/` と manifest に載る Skill の `scripts/`）、`hooks/*.json` である。`tests/`・`experimental/` は入らない | 範囲の外の検知は誤り。範囲の中の見逃しはテストで落とす |
+| I5 | 検知する語 | 走査の範囲は、manifest に載る Skill のディレクトリの下の `*.md` すべて（`SKILL.md`・`references/`・`docs/`・`prompts/`・`templates/`・`assets/`・Skill 直下の番号付き文書を含む）、リリース対象のスクリプト（プラグインの単位である family の `scripts/` と manifest に載る Skill の `scripts/`）、`hooks/*.json` である。`tests/`・`experimental/` は入らない | 範囲の外の検知は誤り。範囲の中の見逃しはテストで落とす |
 | I6 | ベースブランチと本番の解決 | 並列の計画の本番の照会の宛先は `repo.production_branch` の結果だけである。決まらなければ照会しない | 決まらないときはリリースが届いた先を `release_branch` までとし、URL を空にする |
 | I7 | ベースブランチと本番の解決 | ベースブランチが決まらないとき、`pr-steps.py` は Pull Request を作るコマンドを打たない | `EXIT_PRECONDITION` で止まり、`base_branch` の設定を求める |
 | I8 | 行き先の表 | 27 行のすべてに課題の番号・「この課題」・「違反でない」と理由のどれかが入る | 完了判定で止まる |
