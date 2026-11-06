@@ -1406,7 +1406,14 @@ def test_run_goal_unmet_cancelled(term, case):
         t.type(f"tr {json.dumps(row, ensure_ascii=False)}\r")
     elif case == "question":
         t.type("q open\r")
-        t.wait(lambda: (d / "question").exists(), what="質問の合図")
+
+        def question_opened():
+            # 負荷が高いと hook の起動が静止の待ち（0.5 秒）より遅れ、質問の前に /exit が書かれる。
+            # 端末の入力で静止の待ちを延ばし、合図が立ってから判定させる
+            t.type("\r")
+            return (d / "question").exists()
+
+        t.wait(question_opened, what="質問の合図")
         t.type("q close\r")
     else:
         row = {
