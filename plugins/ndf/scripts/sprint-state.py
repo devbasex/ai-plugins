@@ -398,7 +398,7 @@ def section_body(m: dict) -> str:
     if v.get("dev") or v.get("prod"):
         lines.append(f"- 版: 開発版 {v.get('dev') or '—'} / 本番 {v.get('prod') or '—'}")
     for g in m.get("gates", []):
-        lines.append(f"- {g['name']} {gate_word(g)}（{g['at']}）: {g.get('what', '')}")
+        lines.append(f"- {gate_answer.canonical(g['name'])} {gate_word(g)}（{g['at']}）: {g.get('what', '')}")
     if m.get("done"):
         lines.append("- queue の done: " + " ".join(f"`{d}`" for d in m["done"]))
     total = [row_of(p).get("cost") for p in m.get("plans", [])]
@@ -452,7 +452,7 @@ def status_lines(m: dict) -> list[str]:
         state = state_text(r) + (f"（{extra}）" if extra else "")
         out.append(f"{p.get('label') or p['plan']}: {state}。次: {p.get('next') or '—'}")
     for g in m.get("gates", []):
-        out.append(f"{g['name']}: {gate_word(g)} {g['at']}")
+        out.append(f"{gate_answer.canonical(g['name'])}: {gate_word(g)} {g['at']}")
     return out
 
 

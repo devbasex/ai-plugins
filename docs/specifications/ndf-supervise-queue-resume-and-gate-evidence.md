@@ -174,12 +174,13 @@ graph TD
 ### 承認ゲートの記録の書き込みと読み取り
 
 `sprint-state.py gate <状態> <承認ゲートの名> --what <要約> --by user --outcome approved [--pr N]` は、記録に `by: user` と、`--pr` を渡したときの
-`pr` を書く。**置き換えるのは、承認ゲートの名と `pr`（どちらも無いを含む）の組が同じ記録だけである**（`gate_answer.replaces`）。
+`pr` を書く。**置き換えるのは、承認ゲートの名と `pr`（どちらも無いを含む）の組が同じ記録だけである**（`gate_answer.replaces`）。旧い版の承認ゲートの名前は `gate_answer.canonical` が正の名前へ寄せ、
+旧い名前で呼ばれても正の名前で書き、旧い名前の記録も同じ承認ゲートの記録として置き換える。
 同じ設計承認ゲートで複数の設計 PR を承認した記録は並んで残り、`--pr` を渡さない書き込み（リリース承認ゲート・`--by mvv`）は `pr` を持たない
 記録だけを置き換える。今のまま名前だけで置き換えると、`pr` を持たない設計承認ゲートの書き込みが先に承認した各 PR の記録を消し、
 `design-approved` が止まる。
 
-`lib/gate_answer.approved(state, gate, pr=None, after=None)` は、利用者の承認の記録を新しい順に探して 1 件返す。
+`lib/gate_answer.approved(state, gate, pr=None, after=None)` は、利用者の承認の記録を新しい順に探して 1 件返す。旧い名前の記録も同じ承認ゲートとして読む。
 
 | 数えるもの | 数えないもの |
 | --- | --- |

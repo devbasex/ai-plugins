@@ -43,7 +43,7 @@ def approved_of(root, a, plugin):
     """リリースが受け取る承認したコミット（#815 の I1・I10）。dev は None。何もマージする前に呼ぶ。
 
     --approved-sha の形の誤り・どちらも無い・dev に渡した → 2。--approval の資料・欄が無い・形の誤り → 3。
-    --approval の資料に承認の記録が無いか SHA が違う → Gate（承認ゲート 10）。"""
+    --approval の資料に承認の記録が無いか SHA が違う → Gate（承認ゲート。終了コード 10）。"""
     sha, material = getattr(a, "approved_sha", None), getattr(a, "approval", None)
     if a.channel == "dev":
         if sha or material:

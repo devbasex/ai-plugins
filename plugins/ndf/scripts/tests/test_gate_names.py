@@ -143,6 +143,14 @@ def test_records_under_the_old_name_read_the_same_as_the_canonical_name(tmp_path
     assert (new["answered"], new["gate2"], new["mvv_passed"]) == (True, "approved", True)
 
 
+def test_status_shows_old_records_under_the_canonical_name(tmp_path):
+    """旧名の記録も、人へ出す状態の一覧では正の名前で読む。"""
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"name": "s", "plans": [], "gates": [{"name": "関門 1", "at": AT}]}, ensure_ascii=False))
+    out = subprocess.run([sys.executable, str(SCRIPTS / "sprint-state.py"), "status", str(state)], capture_output=True, text=True)
+    assert DESIGN in out.stdout and "関門 1" not in out.stdout
+
+
 @pytest.mark.parametrize("name", ["承認ゲート 2", "ゲート 2"])
 def test_other_spellings_stay_unread_as_before(tmp_path, name):
     """記録に残る別の書き方は、変更の前も承認ゲートの記録として読まれていない。読み方を変えない。"""
