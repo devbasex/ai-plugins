@@ -54,7 +54,7 @@ SCRIPTS = Path(__file__).resolve().parent
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
 # credential helper が応答しない環境の退避（lib/git-credential.sh と同じ値）
 CREDENTIAL_FALLBACK = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG の版の節の材料（release-steps.py notes が読む）。正本は release_lib/others.py（lib だけを読むため写す）
+CHANGES_HEADING = "## 利用者向けの変化"  # デプロイの CHANGELOG の版の節の材料（release-steps.py notes が読む）。正本は release_lib/others.py（lib だけを読むため写す）
 MIGRATION_HEADING = "## 移行の手順"  # CHANGELOG の版の節の「### 移行の手順」と承認資料の材料（release-steps.py notes が読む）
 BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 
@@ -324,7 +324,7 @@ def upsert(a, must_exist):
         metrics["user_changes"] = has
         items.append({"kind": "section", "name": CHANGES_HEADING, "result": "ok" if has else "missing"})
         if not has:
-            nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いと配布の説明文が題名になる）"
+            nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いとデプロイの説明文が題名になる）"
         if getattr(a, "mode", None) == "standard":  # 設計との突き合わせの結果の節（#1241 の I8）
             diff = any(title == DESIGN_DIFF_HEADING[3:] for title, _ in h2_sections(body))
             items.append({"kind": "section", "name": DESIGN_DIFF_HEADING, "result": "ok" if diff else "missing"})

@@ -129,6 +129,15 @@ def child_pids(pid: int, recursive: bool = True) -> list[int]:
         return []
 
 
+def count_cmdline(*words: str) -> int:
+    """コマンドラインに `words` をすべて含むプロセスの数。"""
+    found = 0
+    for p in psutil.process_iter(["cmdline"]):
+        line = p.info["cmdline"] or []
+        found += all(any(word in arg for arg in line) for word in words)
+    return found
+
+
 def leads_own_group(pid: int) -> bool:
     """pid がプロセスグループの先頭で、呼んだ側と別のグループか。"""
     try:
@@ -212,11 +221,43 @@ def cgroup_dir(root: Path = CGROUP_ROOT, proc_cgroup: Path = PROC_SELF_CGROUP) -
     return root
 
 
+def self_cgroup(path: Path = PROC_SELF_CGROUP) -> str:
+    """自分の cgroup の行（`/proc/self/cgroup`）。読めなければ OSError。"""
+    return path.read_text(encoding="utf-8")
+
+
+def _cpu_max(path: Path) -> float | None:
+    """1 つの `cpu.max` が許す CPU の数。上限が無い（`max`）・読めないときは None。"""
+    try:
+        quota, period = path.read_text(encoding="utf-8").split()
+        return None if quota == "max" else int(quota) / int(period)
+    except (OSError, ValueError):
+        return None
+
+
+def _cgroup_levels(directory: Path | None, root: Path) -> list[Path]:
+    """自分から `root` までの cgroup のディレクトリ。親の上限も子に効くため上限はこの全部で読む。`root` の外はそこだけ。"""
+    d = cgroup_dir() if directory is None else Path(directory)
+    return [d, *(p for p in d.parents if p.is_relative_to(root))] if d.is_relative_to(root) else [d]
+
+
+def cgroup_cpu(directory: Path | None = None, root: Path = CGROUP_ROOT) -> float | None:
+    """自分から `root` までの cgroup の `cpu.max` が許す CPU の数の最小。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    limits = [v for v in (_cpu_max(p / "cpu.max") for p in _cgroup_levels(directory, root)) if v is not None]
+    return min(limits, default=None)
+
+
 def _read_int(path: Path) -> int | None:
     try:
         return int(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
+
+
+def cgroup_memory_limit(directory: Path | None = None, root: Path = CGROUP_ROOT) -> int | None:
+    """自分から `root` までの cgroup の `memory.max` の最小（バイト）。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    limits = [v for v in (_read_int(p / "memory.max") for p in _cgroup_levels(directory, root)) if v is not None]
+    return min(limits, default=None)
 
 
 def cgroup_memory(directory: Path | None = None) -> CgroupMemory:

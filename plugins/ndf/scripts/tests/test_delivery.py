@@ -85,7 +85,7 @@ def sample(tmp_path, name):
         ("carmo-contractors-app", "main", "production"),
         ("with-ai-dev", "main", "not-production"),  # manual だけ
         ("ai-plugins", "develop", "not-production"),  # AC6: 実装 PR は止めない
-        ("ai-plugins", "main", "not-production"),  # 本番の工程のゲート 2 で止める（二重に止めない）
+        ("ai-plugins", "main", "not-production"),  # 本番の工程のリリース承認ゲートで止める（二重に止めない）
     ],
 )
 def test_judge_samples(tmp_path, name, target, value):
@@ -224,3 +224,39 @@ def test_route_rows_carry_production_only_when_written(tmp_path):
     d = delivery.load_delivery(make_repo(tmp_path / "r", SAME, [STG, {k: v for k, v in PRD.items() if k != "production"}]))
     rows = [r.as_dict() for r in delivery.routes(d, FORMS)]
     assert rows[0]["production"] is False and "production" not in rows[1]
+
+
+# ---- リリースの組み方（#2616） ----
+
+WT_CHANNELS = {"base_branch": "develop", "production_branch": "main"}
+AUTO_BASE = {"kind": "auto", "channel": "base", "target": "stg"}
+AUTO_PROD = {"kind": "auto", "channel": "production", "target": "prod"}
+HAND = {"kind": "manual", "target": "prod", "trigger": "手で流す"}
+PLUGIN = {"form": "package-plugin"}
+
+
+@pytest.mark.parametrize(
+    "project, release, way, said",
+    [
+        ({"delivery": [HAND]}, PLUGIN, delivery.BUILD, ""),  # release.form の雛形があれば delivery を見ない
+        ({"delivery": [AUTO_BASE, AUTO_PROD]}, None, delivery.SKIP, "stg はマージで反映する"),
+        ({"delivery": [AUTO_PROD]}, None, delivery.SKIP, "昇格の Pull Request で届く"),
+        ({"delivery": []}, None, delivery.SKIP, "デプロイしない"),
+        ({"delivery": [AUTO_BASE, HAND]}, None, delivery.REFUSE, "手で流す"),
+        ({"delivery": [{**AUTO_PROD, "versioned": True}]}, None, delivery.REFUSE, "版数を持つ経路"),
+        ({"delivery": [{"kind": "auto", "branch": "other", "target": "x"}]}, None, delivery.REFUSE, "手で届ける"),
+        ({"delivery": {"unknown": "調べていない"}}, None, delivery.REFUSE, "調べていない"),
+        ({}, None, delivery.REFUSE, "delivery も"),
+        ({"delivery": [AUTO_BASE]}, {"form": "docker"}, delivery.REFUSE, "雛形が無い"),
+    ],
+)
+def test_release_way_table(project, release, way, said):
+    got = delivery.release_way(delivery.build(WT_CHANNELS, project, release), ("package-plugin",))
+    assert got.way == way and said in got.reason
+    if way == delivery.REFUSE:
+        assert "project.json" in got.reason and "supervise.json" in got.reason
+
+
+def test_release_way_refuses_a_broken_declaration_even_when_a_row_merges():
+    got = delivery.release_way(delivery.build(WT_CHANNELS, {"delivery": [AUTO_BASE]}, None, problems=["project.json: 読めない"]), ())
+    assert got.way == delivery.REFUSE and "宣言を読めない" in got.reason

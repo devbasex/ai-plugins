@@ -226,5 +226,5 @@ def test_test_run_stops_when_the_container_sees_main(main_repo: Path, worktree: 
     r = run_test_run(worktree, {**env, "FAKE_SEES_MAIN": "1"})
 
     assert r.returncode == 2, r.stdout + r.stderr
-    assert "この worktree ではない" in json.loads(r.stdout.splitlines()[-1])["summary"]
+    assert "localenv.compose_files" in json.loads(r.stdout.splitlines()[-1])["summary"]
     assert not ran(env)

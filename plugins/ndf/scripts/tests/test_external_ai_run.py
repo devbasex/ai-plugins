@@ -174,6 +174,12 @@ def test_timeout_ends_within_limit(tmp_path):
     assert (out["metrics"]["outcome"], out["metrics"]["monitor_status"]) == ("timeout", "TIMEOUT")
 
 
+def test_timeout_zero_leaves_only_the_stall_limit(tmp_path):
+    code, out = _run(tmp_path, "kiro", "hang", "--timeout", "0", "--stall-timeout", "2")
+    assert code != 0
+    assert (out["metrics"]["outcome"], out["metrics"]["monitor_status"]) == ("stalled", "STALLED")
+
+
 def test_stalled_is_not_ok(tmp_path):
     code, out = _run(tmp_path, "kiro", "hang", "--timeout", "20", "--stall-timeout", "2")
     assert code == 1

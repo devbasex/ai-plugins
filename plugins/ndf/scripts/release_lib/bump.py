@@ -162,7 +162,7 @@ def _ver_key(v):
 
 
 def versioning_doc(ed):
-    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。
+    """docs/versioning-and-distribution.md の「版の付け方と開発版のデプロイ」章の正式版の版数。
 
     正式版の行が開発版・公開前の確認版の例の基底に追いついたら、例（表の 2 行・次の開発の例・接尾辞を外す例・
     順序の例）の基底を次の MINOR へ進める（check-doc-staleness.py の「正式版の行より新しい版」を保つ）。
@@ -177,9 +177,9 @@ def versioning_doc(ed):
         return
     lines = ed.lines(doc)
     fenced = md.fenced_lines("\n".join(lines))
-    head = next((i for i, l in enumerate(lines) if l.startswith("## 版の付け方と開発版の配布")), None)
+    head = next((i for i, l in enumerate(lines) if l.startswith("## 版の付け方と開発版のデプロイ")), None)
     if head is None:
-        ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章が無い（この章は手で直す）")
+        ed.manual.append(f"{rel}: 「版の付け方と開発版のデプロイ」章が無い（この章は手で直す）")
         return
     tail = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     dev_rows = [l for l in lines[head:tail] if re.match(r"^\| 開発版 \| `", l)]
@@ -187,7 +187,7 @@ def versioning_doc(ed):
     example = m.group(1) if m else None
     advance = None
     if example is None:
-        ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の開発版の行が特定できない（この章は手で直す）")
+        ed.manual.append(f"{rel}: 「版の付け方と開発版のデプロイ」章の開発版の行が特定できない（この章は手で直す）")
     elif _ver_key(example) <= _ver_key(nb):
         if example == ob:
             ed.manual.append(f"{rel}: 開発版の例の基底 {example} が旧版と同じ（この章は手で直す）")
@@ -208,7 +208,7 @@ def versioning_doc(ed):
     for rx, what in targets:
         hits = [i for i in range(head, tail) if rx.search(lines[i])]
         if len(hits) != 1:
-            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
+            ed.manual.append(f"{rel}: 「版の付け方と開発版のデプロイ」章の{what}が特定できない（この章は手で直す）")
             continue
         i = hits[0]
         done.add(i)

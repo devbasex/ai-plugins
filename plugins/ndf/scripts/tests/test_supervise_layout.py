@@ -37,6 +37,7 @@ SUBCOMMANDS = [
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
+    "progress_watch",  # 実装のステップの進みの観測（#2505）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
     "pr_materials",
     "design_stage",
@@ -65,7 +66,7 @@ MODULES = [
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）
     "sprint",
-    "design_merge",  # normal の承認ゲート 1 の後の設計 PR のマージ（#1426）
+    "design_merge",  # normal の設計承認ゲートの後の設計 PR のマージ（#1426）
     "absorb",  # new sprint --absorb の取り込んだ課題（#1426）
     "queue_fill",  # queue の差し込みを前の計画の結果で埋める（queue から分けた）
     "queue",
@@ -75,6 +76,7 @@ MODULES = [
 ]
 # プランの実行の部品（ハンドラー・状態・監視・claude）とプランを作る側は Engine を import しない
 NO_ENGINE = [
+    "progress_watch",
     "decl",
     "plan",
     "limits",

@@ -76,7 +76,8 @@ PHASE_KIND = (
     ("検査", "check"),
     ("レビュー", "review"),
     ("リリース", "release"),
-    ("配布", "release"),
+    ("デプロイ", "release"),
+    ("配布", "release"),  # 語を分ける前の計画（#2620）
 )
 OUTSIDE = "（計画の外）"
 

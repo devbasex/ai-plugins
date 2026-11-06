@@ -111,7 +111,7 @@ PLUGIN_TABLE_ROW = re.compile(r"^\|\s*\*\*(?P<name>[A-Za-z0-9_.-]+)\*\*\s*\|\s*"
 
 # J: 節のチェック。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
 # 現行版の基底と比べる。
-VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"
+VERSION_SECTION_HEADING = "## 版の付け方と開発版のデプロイ"
 # 節は lib/md.py が CommonMark の規則で決める（自身と同じか上位の見出しで閉じ、囲みの中の `# ` は見出しに
 # しない）。深さは位置決めの見出しから導く。深さを固定すると、位置決めの見出しの深さを変えたときに規則から外れる。
 _SECTION_DEPTH = len(VERSION_SECTION_HEADING) - len(VERSION_SECTION_HEADING.lstrip("#"))

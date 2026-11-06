@@ -12,6 +12,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 import types
 
 import pytest
@@ -73,8 +74,8 @@ def origin_repo(tmp_path, _origin_template):
 
 def _args(tmp_path, **over):
     base = {
-        # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の関門で
-        # 止まる。関門そのものは `test_scope_gate.py` で見る。
+        # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の検査で
+        # 止まる。検査そのものは `test_scope_gate.py` で見る。
         "pr": 130,
         "scope": ["src", "tests"],
         "host": "claude",
@@ -85,7 +86,7 @@ def _args(tmp_path, **over):
         "baseline_test": "true",
         # **ラウンドのテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
         # `--round-test` が無いと提案の前に止まる。全体のテストと同じ文字列なので、
-        # 実行は 1 回で済む。関門そのものは下の AC3b のテストで見る。
+        # 実行は 1 回で済む。検査そのものは下の AC3b のテストで見る。
         "round_test": "true",
         "sync_command": None,
         "plan_file": None,
@@ -417,7 +418,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeyp
 
 
 def test_require_all_stops_without_writing_the_state(run_init, tmp_path):
-    """AC35 — 全員を要する指定では従来の関門で止め、状態ファイルを作らない。"""
+    """AC35 — 全員を要する指定では従来の検査で止め、状態ファイルを作らない。"""
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, require_all=True), probe={"kiro": "Not logged in"})
     assert e.value.code == refactor_abort()
@@ -540,7 +541,7 @@ def test_init_rejects_unknown_model_runtime(run_init, tmp_path):
 
 
 def test_init_accepts_agy_as_host(run_init, tmp_path):
-    """agy も NDF の配布先であるため、ホストになれる。"""
+    """agy も NDF の導入先のランタイムであるため、ホストになれる。"""
     run_init(_args(tmp_path, host="agy"))
     _, state = _state_of(tmp_path)
     assert state["host"] == "agy"
@@ -575,7 +576,7 @@ def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
 
 
 def test_init_checks_the_scope_before_running_the_baseline_test(run_init, tmp_path, test_calls):
-    """関門は着手前のテストより先に通す。落ちる実行に時間を使わせない。"""
+    """検査は着手前のテストより先に通す。落ちる実行に時間を使わせない。"""
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, scope=["src"], baseline_test="false"))
     assert e.value.code == refactor_abort()
@@ -1099,7 +1100,7 @@ def test_a_failed_rebuild_leaves_the_state_untouched(run_init, tmp_path):
 
 
 @pytest.fixture
-def test_calls(patch_lib):
+def test_calls(patch_lib, monkeypatch):
     """`init` が実行したテストのコマンドを記録する。終了コードはコマンドごとに決める。"""
     seen: list[str] = []
     codes: dict[str, int] = {}
@@ -1109,6 +1110,7 @@ def test_calls(patch_lib):
         return codes.get(command if isinstance(command, str) else " ".join(command), 0), False
 
     patch_lib("run_with_timeout", fake_run)
+    monkeypatch.setattr(sys.modules["refactor_lib.baseline"].container_reach, "env_for", lambda cwd: {})
     seen_codes = codes
     return type("Calls", (), {"seen": seen, "codes": seen_codes})()
 
@@ -1721,6 +1723,22 @@ def test_run_baseline_records_a_green_run_of_test_and_lint_suites(refactor, monk
     }
     captured = capsys.readouterr()
     assert "着手前のテスト成功: run unit && run lint" in captured.out + captured.err
+
+
+def test_run_baseline_prepares_the_test_env_before_the_clock_starts(refactor, monkeypatch, tmp_path):
+    """用意の秒を suite 群の共通の上限へ数えない。テストが無ければ用意しない。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun(suite="u", kind=ts.TEST, command="pytest")]
+    baseline = _fake_baseline(monkeypatch, runs, {"pytest": 0})
+    seen = []
+    monkeypatch.setattr(baseline.container_reach, "env_for", lambda work: seen.append("prepare") or {})
+    monkeypatch.setattr(baseline, "time", types.SimpleNamespace(monotonic=lambda: seen.append("clock") or time.monotonic()))
+    baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+    assert seen[:2] == ["prepare", "clock"]
+    seen.clear()
+    monkeypatch.setattr(baseline, "commands_of", lambda strategy, scope, work: ("whole", []))
+    baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+    assert "prepare" not in seen
 
 
 def test_run_baseline_records_existing_failures_and_a_red_lint_suite(refactor, monkeypatch, tmp_path, capsys):

@@ -11,7 +11,7 @@ Claude Code / Codex プラグインマーケットプレイス（内部用）と
 - **ライセンス**: MIT
 - **URL**: https://github.com/devbasex/ai-plugins
 
-## 配布コンポーネント
+## デプロイコンポーネント
 
 1. **MCPインテグレーションスキル**: GitHub、Serena、BigQuery、Notion MCPの自動セットアップ
 2. **カスタムスラッシュコマンド**: 共通タスク用の再利用可能なスラッシュコマンド

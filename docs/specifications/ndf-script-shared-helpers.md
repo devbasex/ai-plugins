@@ -66,7 +66,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
 | 対象 | 残す理由 |
 | --- | --- |
 | `context_decisions.py` の `append_decision`・`write_applied` の書き込み先のパス | 契約のチェック（`scripts/contracts_lib/extract_py.py`）は、書き込みの式に書かれた f 文字列から書き込み先のファイル名（`*.decisions.jsonl`・`*.applied.json`）を拾う。パスを作る関数へ寄せると契約から書き込み先が消える |
-| `context-policy.py` の `IDLE_CAP` と `scripts/token-usage.py` の `IDLE_CAP`・`parse_ts` | 相手は配布の外の `scripts/` にある。`plugins/` は `scripts/` を import しないため、共有の仕組みは置かない |
+| `context-policy.py` の `IDLE_CAP` と `scripts/token-usage.py` の `IDLE_CAP`・`parse_ts` | 相手はデプロイの外の `scripts/` にある。`plugins/` は `scripts/` を import しないため、共有の仕組みは置かない |
 | `context_decisions.py` の `attach_marks` と、`context-policy.py` の区間の作り方 | 本体は重複しない。作業の報告（`report_work`）は帳簿にあるセッションを除くなど、区間の作り方を意図して変えている |
 | `relay_lib/terminal.py` の `Terminal` が環境変数で待ち時間を読む形 | 待ち時間を環境変数で調整するのは `relay_lib` 全体の約束で、同じ読み方が他に 12 か所ある。1 クラスだけ引数で受けると同じパッケージに 2 つの書き方が残り、生成の時点で読むと読む時刻も変わる |
 | `upkeep_research.py` の `run_research` の 11 個の引数 | 引数は待つ条件・記録の持ち主・試験用の差し替えに分かれ、1 つの組として渡っていない。値の型にまとめても関数が受ける情報は変わらず、呼び出し元（CLI 1 か所・試験 12 か所）だけが変わる |
@@ -86,7 +86,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
 | `skill-stats.py` の `emit_json`・`emit_markdown` | `--agents` の報告の値（記録の行・要約・層ごとの合計・総計・役割ごとの使用量・要約から除いた数・上限と出所）を 1 つの値の型 `AgentReport` で受ける。値は `agent_report` が組む |
 | `upkeep_overhaul.py` の `count_types` | 型ごとの件数（`_issue_types`）・本文からの部品の拾い出し（`_components`）・月ごとの数え上げ（`_months`）。戻す辞書のキーと順序は変えない |
 | `upkeep_research.py` の `run_research` | 空きを待って止まる理由を返す（`_wait_turn`）・経過を書く関数を作る（`_ticker`） |
-| `scripts/token-usage.py` の `read_codex`（配布の外） | Codex の記録の行の読み取り（`_codex_lines`）・使用量の組み立て（`_codex_usage`） |
+| `scripts/token-usage.py` の `read_codex`（デプロイの外） | Codex の記録の行の読み取り（`_codex_lines`）・使用量の組み立て（`_codex_usage`） |
 
 ## 運用
 

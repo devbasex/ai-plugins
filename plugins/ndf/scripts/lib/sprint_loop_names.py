@@ -11,5 +11,5 @@ from __future__ import annotations
 from pathlib import Path
 
 LOOP_DIR = Path(".ndf") / "loop"
-RELEASE_PENDING, QUESTION_PENDING = "配布待ち", "質問待ち"  # 答えを待たずに締めた保留の周回（#2436 の受け入れ条件 6a・6d）
+RELEASE_PENDING, QUESTION_PENDING = "リリース待ち", "質問待ち"  # 答えを待たずに締めた保留の周回（#2436 の受け入れ条件 6a・6d）
 PENDING = (RELEASE_PENDING, QUESTION_PENDING)

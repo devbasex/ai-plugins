@@ -74,7 +74,7 @@ export function createRunnerApiApp(deps: () => RunnerApiDeps): Hono<Env> {
     return c.json({ url: url.url, expires_at: url.expiresAt });
   });
 
-  // 配布の依頼の答えと配布済みの範囲（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へ書く
+  // リリースの依頼の答えとリリース済みの範囲（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へ書く
   app.get("/run-jobs/organizer/answers", async (c) => {
     const d = deps();
     const claims = c.get("job");
@@ -85,7 +85,7 @@ export function createRunnerApiApp(deps: () => RunnerApiDeps): Hono<Env> {
     return c.json(await d.organizer.answersFor(run));
   });
 
-  // 配布の実行のまとめた配布の中身（batch.json）。配布の実行のジョブだけが読める
+  // リリースの実行のまとめたリリースの中身（batch.json）。リリースの実行のジョブだけが読める
   app.get("/run-jobs/organizer/batch", async (c) => {
     const d = deps();
     const claims = c.get("job");
@@ -95,7 +95,7 @@ export function createRunnerApiApp(deps: () => RunnerApiDeps): Hono<Env> {
     if (run.purpose !== "release") throw new IngestForbiddenError();
     if (!d.organizer) throw new IngestUnavailableError();
     const batch = await d.organizer.batchFor(run, job.releaseStep ?? null);
-    if (!batch) throw new ApiError(404, "release_not_found", "まとめた配布が見つかりません");
+    if (!batch) throw new ApiError(404, "release_not_found", "まとめたリリースが見つかりません");
     return c.json(batch);
   });
 

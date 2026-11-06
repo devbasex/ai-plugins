@@ -59,13 +59,13 @@ describe("ランナー向けの API（決定 7・8、受け入れ条件 30）", 
 describe("Factory のオーガナイザーの経路（#2439）", () => {
   const get = (path: string, token: string) => app.request(path, { headers: { Authorization: `Bearer ${token}` } });
 
-  it("答えの経路はそのレーンの答えと配布済みの範囲を返し、まとめた配布の経路は配布の実行のジョブだけが読める", async () => {
+  it("答えの経路はそのレーンの答えとリリース済みの範囲を返し、まとめたリリースの経路はリリースの実行のジョブだけが読める", async () => {
     const answers = await get("/run-jobs/organizer/answers", run.token);
     expect(answers.status).toBe(200);
     expect(await answers.json()).toEqual({ answers: [], ranges: [] });
     expect((await get("/run-jobs/organizer/batch", run.token)).status).toBe(403);
 
-    // 実行が配布の依頼を出して答えを待つと、配布の実行が起き、その token でまとめた配布を読める
+    // 実行がリリースの依頼を出して答えを待つと、リリースの実行が起き、その token でまとめたリリースを読める
     await appendEvent(h.progress, {
       sprint_run_id: run.sprintRunId,
       idempotency_key: "run-x-r1",

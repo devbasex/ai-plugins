@@ -10,7 +10,7 @@
 出すかである。
 
 **本番系へ届く操作は 2 つの形を取る。** リリース（`release`）と、運用モードの実行
-（`operation` の実装）である。**性質が同じであるため、承認ゲートとしては 1 つ（ゲート 2）に数える。**
+（`operation` の実装）である。**性質が同じであるため、承認ゲートとしては 1 つ（リリース承認ゲート）に数える。**
 
 ## 承認資料は 2 層に分ける
 
@@ -42,7 +42,7 @@
 | 未確認のまま残ること | 件数と、そのうち実装で決めるもの | 設計文書の同名の節 |
 | レビューの収束の状態 | 承認した担当と、未解決の指摘の件数 | `cross-review` の判定 |
 | 本文との一致 | 本文の決めたことの節が設計文書と一致したか（一致 / 未確認） | `pr-body-decisions.sh check` の終了コード |
-| MVV 判定 | 判定（従う / 反する疑い / 判定できない）・理由・根拠の項目。機械のチェックで外れた・判定を読めないときは外れた理由。判定の記録が無ければ「MVV なし」 | ゲート 1 は設計 PR の MVV 判定のコメント、ゲート 2 は承認資料の末尾（`pace: normal` は助言の MVV 判定。[pace.md](pace.md) の「MVV 判定」） |
+| MVV 判定 | 判定（従う / 反する疑い / 判定できない）・理由・根拠の項目。機械のチェックで外れた・判定を読めないときは外れた理由。判定の記録が無ければ「MVV なし」 | 設計承認ゲートは設計 PR の MVV 判定のコメント、リリース承認ゲートは承認資料の末尾（`pace: normal` は助言の MVV 判定。[pace.md](pace.md) の「MVV 判定」） |
 
 **設計 PR の先頭の 4 行は、承認する人が問う項目である。** 欄の書き方は `design` の
 [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) にある。
@@ -104,8 +104,8 @@ echo "exit=$rc"
 
 | 層 | 何を出すか |
 | --- | --- |
-| 対象を開くもの | 版の比較の URL（`compare/<前の版>...<今の版>`）/ 版数 / 配布物の差分 / 承認したコミット（ベースブランチの先端の 40 桁。本番へ入れてよい中身の上限） |
-| 判断に使うもの | リリースする中身・**取り消しの手段とその限界**・検証リリースで確かめたこと・MVV 判定（承認資料の末尾。無ければ「MVV なし」） |
+| 対象を開くもの | 版の比較の URL（`compare/<前の版>...<今の版>`）/ 版数 / リリース対象の差分 / 承認したコミット（ベースブランチの先端の 40 桁。本番へ入れてよい中身の上限） |
+| 判断に使うもの | リリースする中身・**取り消しの手段とその限界**・開発版のデプロイで確かめたこと・MVV 判定（承認資料の末尾。無ければ「MVV なし」） |
 
 **リリースでは取り消しの手段を必ず示す。** 設計のマージは差し戻せるが、リリースした版は利用者の側の
 操作でしか戻せない。
@@ -126,7 +126,7 @@ echo "exit=$rc"
 **取り消しの手段は共有の解除と版の差し戻しで、限界は「既に見た人には効かない」ことである。**
 リリースした版が利用者の側の操作でしか戻せないのと違い、読まれた文書は戻せない。
 
-**下書き先への提出は承認を求めない。** `production` が偽の提出先は、開発側の「検証リリース」
+**下書き先への提出は承認を求めない。** `production` が偽の提出先は、開発側の「開発版のデプロイ」
 に当たる。設定の形は [document-destinations.md](document-destinations.md) にある。
 
 #### 運用モードの実行（`operation`）
@@ -195,9 +195,9 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 **問いには承認ゲートの区分を付ける。** `AskUserQuestion` の入力に `"metadata": {"source": "ndf-gate:1"}`（設計 Pull Request のマージ）か
 `"ndf-gate:2"`（本番系へ届く操作・制作物承認）を入れる。区分の無い問いは hook が止める。区分の正本は [asking.md](asking.md) にある。
 
-**承認の関門に限らず、判断を求めるときは先に材料を示す**（何を決めるか・分かったこと・根拠の場所・
+**承認ゲートに限らず、判断を求めるときは先に材料を示す**（何を決めるか・分かったこと・根拠の場所・
 選択肢ごとに何が変わるか・推奨とその理由）。形は `decision-request` が定める。この文書の提示物は、
-その上に関門ごとに足すものである。
+その上に承認ゲートごとに足すものである。
 
 承認資料は質問の**本文の外**（直前の応答）へ書いてよい。質問の選択肢の説明に URL を埋めると、
 別の選択肢を選ぶつもりで読む人は対象を開かないまま承認することになる。
@@ -210,16 +210,16 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 | 進め方 | 承認 | 差し戻し |
 | --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
-| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome rejected [--pr <N>]` |
+| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
+| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome rejected [--pr <N>]` |
 | 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record --outcome approved` | 下の `gate-rejections.py record` |
 
 ```bash
-python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 1" --what "<要約>" --issue <N>   # 設計の承認の差し戻し
-python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 2" --what "<要約>" --pr <N>      # 本番への配布の承認の差し戻し
-python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 1" --what "<要約>" --issue <N> --outcome approved   # 承認
+python3 "$SCRIPTS/gate-rejections.py" record --gate "設計承認ゲート" --what "<要約>" --issue <N>   # 設計の承認の差し戻し
+python3 "$SCRIPTS/gate-rejections.py" record --gate "リリース承認ゲート" --what "<要約>" --pr <N>      # 本番へのリリースの承認の差し戻し
+python3 "$SCRIPTS/gate-rejections.py" record --gate "設計承認ゲート" --what "<要約>" --issue <N> --outcome approved   # 承認
 ```
 
-`--gate` には `関門 1` / `関門 2` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` がこの名前で承認ゲート 1・2 に
+`--gate` には `設計承認ゲート` / `リリース承認ゲート` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` がこの名前で設計承認ゲート・リリース承認ゲートに
 仕分ける）。終了コードが 1（記録を書けない）なら、書けなかったことと `summary` を conductor の報告に出して先へ進む。
-承認ゲート 1 で起票者の推定が差し戻されたときの仕様の直し方は `requirements-design` の手順 1a にある。
+設計承認ゲートで起票者の推定が差し戻されたときの仕様の直し方は `requirements-design` の手順 1a にある。

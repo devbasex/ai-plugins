@@ -161,7 +161,7 @@ export class MemoryRunsTable implements RunsTable {
     if ((this.repositorySlots.get(repoKey) ?? 0) !== expected.repository) return "slots";
     if (guards) {
       if (!guards.legacy && (this.legacySlots.get(repoKey) ?? 0) !== 0) return "legacy";
-      // 古い版の実行は、まとめた配布が流れている間は始めない（#2439 の I62）
+      // 古い版の実行は、まとめたリリースが流れている間は始めない（#2439 の I62）
       if (guards.legacy && (this.organizers.get(repoKey)?.currentSeq ?? null) !== null) return "release_running";
       if (guards.issues.some((n) => this.issueShares.has(shareKey(run.accountId, run.repositoryId, n)))) return "issue_in_use";
       if (guards.milestoneChecks.some((t) => this.milestoneShares.has(shareKey(run.accountId, run.repositoryId, t)))) return "issue_in_loop";
@@ -284,7 +284,7 @@ export class MemoryRunsTable implements RunsTable {
     Object.assign(r, { state, failureReason: reason, currentJobId: null, updatedAt: now, resumeAt: null, awaitingReason: null, releaseRequestId: null });
     if (extras.finishReason !== undefined) r.finishReason = extras.finishReason;
     const repoKey = regKey(r.accountId, r.repositoryId);
-    // 配布の実行は枠を持たない（#2439 の I64）
+    // リリースの実行は枠を持たない（#2439 の I64）
     if (r.purpose !== "release") {
       this.accountSlots.set(r.accountId, (this.accountSlots.get(r.accountId) ?? 0) - 1);
       this.repositorySlots.set(repoKey, (this.repositorySlots.get(repoKey) ?? 0) - 1);

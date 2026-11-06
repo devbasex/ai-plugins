@@ -1,4 +1,4 @@
-"""配布の宣言から決まる名前と、CHANGELOG.md の版の節（`release-steps.py` から分けた。#1336）。
+"""リリースの設定から決まる名前と、CHANGELOG.md の版の節（`release-steps.py` から分けた。#1336）。
 
 ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json`、配るプラグインは引数 → `.ndf/supervise.json` の
 release.plugin から読む（`lib/delivery.py`）。CHANGELOG.md の置き場と見出し `## [<plugin> <基底の版>]` は形 package-plugin の約束である。
@@ -53,7 +53,7 @@ def changelog_section(root, version, plugin):
 
 
 def release_decl(root, a=None):
-    """配布のブランチと名前（#1336 の決定 8）: (ベースブランチ, 本番チャネル, 配るプラグイン)。
+    """リリースのブランチと名前（#1336 の決定 8）: (ベースブランチ, 本番チャネル, 配るプラグイン)。
     ブランチは `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、プラグインは引数の
     --plugin / --plugins → `.ndf/supervise.json` の release.plugin の順に決める。決まらなければ止める。"""
     d = delivery.load_delivery(root)

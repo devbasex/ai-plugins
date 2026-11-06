@@ -38,7 +38,7 @@ body:
   - type: dropdown
     id: runtime
     attributes:
-      label: 配布先のランタイム
+      label: 導入先のランタイム
       multiple: true
       options:
         - Claude Code (claude)

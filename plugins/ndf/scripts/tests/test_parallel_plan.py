@@ -182,7 +182,7 @@ def test_registry_role_counts_before_role_file():
     assert now.count == 1 and now.helpers == 1
 
 
-# ---- まとめた配布（I9・I14・I15） ----
+# ---- まとめたリリース（I9・I14・I15） ----
 
 
 def test_range_maps_unrequested_lane_and_orphans():
@@ -196,9 +196,9 @@ def test_range_maps_unrequested_lane_and_orphans():
 def test_answerable_and_moved():
     pending = [{"id": "a", "prs": [1]}, {"id": "b", "prs": [5]}]
     assert prl.answerable(pending, [1, 2]) == ["a"]
-    # 一部だけが範囲に入る依頼は答えない（残りを出さずに配布済みと答えない）
+    # 一部だけが範囲に入る依頼は答えない（残りを出さずにリリース済みと答えない）
     assert prl.answerable([{"id": "c", "prs": [1, 3]}, {"id": "d", "prs": []}], [1, 2]) == []
-    # 先の PR が前の配布で出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこの配布で答えない
+    # 先の PR が前のリリースで出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこのリリースで答えない
     assert prl.answerable([{"id": "e", "prs": [1, 3]}, {"id": "f", "prs": [3]}], [1, 2], done=[3]) == ["e"]
     assert prl.moved("abc", "abc") is False and prl.moved("abc", "def") is True
 
@@ -235,6 +235,16 @@ def test_start_on_a_running_plan_marks_the_session_as_organizer(tmp_path):
     assert (role["role"], role["plan"]) == ("organizer", "p1")
 
 
+def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path):
+    main, env = _running_plan(tmp_path)
+    env.pop("NDF_RELAY_DIR", None)
+    got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
+    assert got.stdout, got.stderr
+    report = json.loads(got.stdout.strip().splitlines()[-1])["metrics"]["environment"]
+    lanes = len(BASE["lanes"])
+    assert report["lanes"] == lanes and report["candidates"]["max_issues"] == max(1, report["candidates"]["max_plans"] // lanes)
+
+
 def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
     """ラッパーの外では印を付けられないが、`start` の答えは今のまま（次の 1 手を返す）で、run を増やさない。"""
     main, env = _running_plan(tmp_path)
@@ -243,3 +253,54 @@ def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
     res = json.loads(got.stdout.strip().splitlines()[-1])
     assert got.returncode == 0 and res["metrics"]["organizer"] is False and res["metrics"]["pid"] == os.getpid()
     assert (pp.plan_dir(main, "p1") / "run.pid").read_text().strip() == str(os.getpid())
+
+
+# ---- 起動の前のリリースの検査（#2616 の受け入れ条件 16・17） ----
+
+AUTO = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod"}]
+
+
+def _declare(main, delivery=None, form=False):
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
+    if delivery is not None:
+        (main / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}))
+    if form:
+        (main / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "ndf"}}))
+
+
+@pytest.mark.parametrize(
+    "rows, form, at",
+    [
+        ([{"kind": "manual", "target": "prod", "trigger": "手で流す"}], False, "delivery"),
+        (None, False, "delivery"),
+        ({"unknown": "調べていない"}, False, "delivery"),
+        (None, True, "release.plugin"),
+    ],
+)
+def test_check_items_warns_when_a_release_cannot_be_built(tmp_path, monkeypatch, rows, form, at):
+    import parallel_route as prt
+
+    monkeypatch.setattr(prt, "dev_version", lambda _m: "")
+    _declare(_git_main(tmp_path), rows, form)
+    got = prt.check_items(tmp_path)
+    assert [(g["level"], g["rule"], g["at"]) for g in got] == [("warning", "release", at)] and got[0]["message"]
+
+
+@pytest.mark.parametrize("rows, form", [(AUTO, False), (None, True)])
+def test_check_items_is_silent_when_a_release_can_be_answered(tmp_path, monkeypatch, rows, form):
+    import parallel_route as prt
+
+    monkeypatch.setattr(prt, "dev_version", lambda _m: "1.2.3")
+    _declare(_git_main(tmp_path), rows, form)
+    assert prt.check_items(tmp_path) == []
+
+
+def test_check_cli_counts_the_warning_and_exits_zero(tmp_path):
+    main = _git_main(tmp_path)
+    assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
+    code, res = _cli(main, "check", "p1")
+    assert code == 0 and [i["at"] for i in res["items"] if i.get("rule") == "release"] == ["delivery"]
+    warned = res["metrics"]["warnings"]
+    _declare(main, AUTO)
+    code, res = _cli(main, "check", "p1")
+    assert code == 0 and res["metrics"]["warnings"] == warned - 1 and all(i.get("rule") != "release" for i in res["items"])

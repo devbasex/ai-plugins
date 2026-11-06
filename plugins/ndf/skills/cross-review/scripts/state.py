@@ -102,7 +102,7 @@ def _add_init_parser(sub: _Subparsers) -> None:
         dest="require_all",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="確認を通らない者が 1 者でもいれば失敗する（従来の関門）。既定は外して続ける",
+        help="確認を通らない者が 1 者でもいれば失敗する（従来の検査）。既定は外して続ける",
     )
     sp.add_argument(
         "--host",

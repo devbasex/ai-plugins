@@ -13,6 +13,7 @@ import {
   issueRequestFromLine,
   verdictSourcesOf,
   findPullRequest,
+  gateDisplayName,
   gateRecordName,
   isSprintState,
   rejectionDirective,
@@ -46,10 +47,16 @@ describe("翻訳（受け入れ条件 25）", () => {
     expect(step.payload).toMatchObject({ pull_request: { repo: "org-a/repo-a", number: 9 } });
   });
 
-  it("答えの記録: 関門の名前を NDF の名前へ写し、差し戻しを明示し、状態ファイルを目録と見分ける", () => {
+  it("答えの記録: 承認ゲートの名前を NDF の名前へ写し、差し戻しを明示し、状態ファイルを目録と見分ける", () => {
     expect(gateRecordName("gate1")).toBe("関門 1");
     expect(gateRecordName("gate2")).toBe("関門 2");
-    expect(rejectionDirective("関門 2", "テストが足りない")).toMatch(/差し戻し.*テストが足りない/);
+    expect(gateDisplayName("関門 1")).toBe("設計承認ゲート");
+    expect(gateDisplayName("関門 2")).toBe("リリース承認ゲート");
+    expect(gateDisplayName("リリース承認ゲート")).toBe("リリース承認ゲート");
+    expect(gateDisplayName("MVV")).toBe("MVV");
+    const directive = rejectionDirective(gateDisplayName("関門 2"), "テストが足りない");
+    expect(directive).toMatch(/リリース承認ゲートを差し戻した.*テストが足りない/);
+    expect(directive).not.toMatch(/関門/);
     expect(isSprintState({ name: "s", plans: [], gates: [] })).toBe(true);
     expect(isSprintState({ ステージ: [], plans: [], gates: [] })).toBe(false);
     expect(isSprintState({ ステージ: [] })).toBe(false);
@@ -127,7 +134,7 @@ describe("状態（受け入れ条件 28・32、I42）", () => {
     expect(trackedEntries(["src/a.ts"], tracked)).toEqual(["src/a.ts"]);
   });
 
-  it("配布の提示が作った追跡しない承認資料も保存し、復元で受け入れる。追跡する承認資料とほかの issues/ は断る", () => {
+  it("リリースの提示が作った追跡しない承認資料も保存し、復元で受け入れる。追跡する承認資料とほかの issues/ は断る", () => {
     const approval = "issues/approval-ndf-v1.2.0-parallel-3-2.md";
     expect(trackedEntries([".ndf/tmp/x", approval], new Set())).toEqual([]);
     expect(trackedEntries([approval], new Set([approval]))).toEqual([approval]);

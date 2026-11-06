@@ -1,5 +1,5 @@
 {
   "name": "NDF_ORGANIZER_DIR",
   "set_by": "runtime",
-  "summary": "外のオーガナイザーとファイルでやり取りする置き場（#2439）。あるとき、このセッションは外のオーガナイザーのレーンで、本番の配布を自分で組まずに配布の依頼を書く。形は contracts/forms/parallel-external.json（plugins/ndf/scripts/lib/parallel_external.py）"
+  "summary": "外のオーガナイザーとファイルでやり取りする置き場（#2439）。あるとき、このセッションは外のオーガナイザーのレーンで、リリースを自分で組まずにリリースの依頼を書く。形は contracts/forms/parallel-external.json（plugins/ndf/scripts/lib/parallel_external.py）"
 }

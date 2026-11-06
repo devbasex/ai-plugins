@@ -77,7 +77,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | Pull Request | `pr` | `Pull Request` |
 | 確定仕様化 | `plan-to-spec` | `確定仕様化` |
 | 後片付け | `merged` | `後片付け` |
-| 配布 | `release` | `配布` |
+| デプロイ | `release` | `デプロイ` |
 | 体裁レビュー | `layout-review` | `体裁レビュー` |
 | リリース後テスト | `release-verification` | `リリース後テスト` |
 | 振り返り | `retrospective` | `振り返り` |

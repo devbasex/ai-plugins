@@ -19,7 +19,7 @@
 # どれも当たらなければ、この入口自身が置かれたプラグインを採る。
 #
 # この入口はプラグインルート直下の scripts/ に置く。Skill の下に置くと、その Skill を
-# 配らない配布先（agy）で届かない（scripts/lib/README.md の「プラグインルート直下に置く理由」）。
+# 配らない導入先のランタイム（agy）で届かない（scripts/lib/README.md の「プラグインルート直下に置く理由」）。
 set -uo pipefail
 
 MARKER=scripts/projects-sync.sh
@@ -46,7 +46,7 @@ SELF_ROOT=$(cd -P -- "$SELF_DIR_LOGICAL" 2>/dev/null && pwd -P) || SELF_ROOT=
 
 # 2 の手がかり。Claude Code の中でだけ見る。
 #   - 環境変数 CLAUDE_PLUGIN_ROOT（hook から呼ばれたとき）
-#   - 入口が配布物の置き場（~/.codex / ~/.gemini / .kiro/skills / ~/.claude/plugins/cache）を
+#   - 入口がリリース対象の置き場（~/.codex / ~/.gemini / .kiro/skills / ~/.claude/plugins/cache）を
 #     通らずに届いたなら、SKILL.md の ${CLAUDE_PLUGIN_ROOT} の置き換えで届いた実体である
 #     （`claude --plugin-dir <パス>` で読み込んだとき）
 #   - ~/.claude/plugins/installed_plugins.json に記録された ndf の installPath
@@ -139,12 +139,12 @@ case "$KIND" in
     if [ -z "$NAME" ]; then
       echo "$ROOT/scripts"
     else
-      [ -d "$ROOT/skills/$NAME/scripts" ] || die "$ROOT/skills/$NAME/scripts が無い（この配布先は Skill $NAME を持たない）"
+      [ -d "$ROOT/skills/$NAME/scripts" ] || die "$ROOT/skills/$NAME/scripts が無い（この導入先のランタイムは Skill $NAME を持たない）"
       echo "$ROOT/skills/$NAME/scripts"
     fi
     ;;
   skill)
-    [ -d "$ROOT/skills/$NAME" ] || die "$ROOT/skills/$NAME が無い（この配布先は Skill $NAME を持たない）"
+    [ -d "$ROOT/skills/$NAME" ] || die "$ROOT/skills/$NAME が無い（この導入先のランタイムは Skill $NAME を持たない）"
     echo "$ROOT/skills/$NAME"
     ;;
 esac

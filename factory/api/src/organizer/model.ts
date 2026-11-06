@@ -1,4 +1,4 @@
-// 集約「オーガナイザーの進行」（#2439 の設計の「データ構造」）。根・受けた依頼・まとめた配布・記録の行の型と、
+// 集約「オーガナイザーの進行」（#2439 の設計の「データ構造」）。根・受けた依頼・まとめたリリース・記録の行の型と、
 // 状態の移りを決める純粋な関数。表への読み書きは実行の表（runs/table.ts）が持つ
 import { organizerLaneName } from "@ndf-factory/contracts";
 import type { ReleaseStep } from "../runs/model.ts";
@@ -10,7 +10,7 @@ export interface OrganizerRoot {
   accountId: string;
   repositoryId: number;
   version: number;
-  // 流れているまとめた配布の連番。空は「流れていない」（I56）
+  // 流れているまとめたリリースの連番。空は「流れていない」（I56）
   currentSeq: number | null;
   nextSeq: number;
   waitReason: OrganizerWaitReason | null;
@@ -65,7 +65,7 @@ export interface Presentation {
   lanes: { lane: string; requested: boolean }[];
   addedPrs: number[];
   at: string;
-  // この提示へ答えた承認の依頼（承認ゲート 2）。古い承認の再送を次の提示の承認と取り違えないために残す。前の記録には無い
+  // この提示へ答えた承認の依頼（リリース承認ゲート）。古い承認の再送を次の提示の承認と取り違えないために残す。前の記録には無い
   approvalRequestId?: string | null;
 }
 
@@ -76,7 +76,7 @@ export interface BatchResult {
   prs: number[];
 }
 
-// まとめた配布（I56・I57）
+// まとめたリリース（I56・I57）
 export interface ReleaseBatch {
   accountId: string;
   repositoryId: number;
@@ -134,14 +134,14 @@ export const laneOf = (run: { sprintRunId: string }, loopName: string | null) =>
 
 const overlaps = (a: number[], b: number[]) => a.some((n) => b.includes(n));
 
-// 範囲に入る依頼か。Pull Request が範囲に 1 つでも入るか、Pull Request の無い依頼はまとめた配布が受けた依頼であること
+// 範囲に入る依頼か。Pull Request が範囲に 1 つでも入るか、Pull Request の無い依頼はまとめたリリースが受けた依頼であること
 export function inRange(request: OrgRequest, prs: number[], batch: ReleaseBatch): boolean {
   if (request.prs.length === 0) return batch.lanes.some((l) => l.requestIds.includes(request.requestId));
   return overlaps(request.prs, prs);
 }
 
-// まとめた配布の終わり方で答える依頼を決める（I61）。配布済みは結果の prs、差し戻しは最後の提示の prs、
-// 提示の前の差し戻しはまとめた配布が受けた依頼すべて。どれにも入らない依頼は次のまとめた配布へ残る
+// まとめたリリースの終わり方で答える依頼を決める（I61）。リリース済みは結果の prs、差し戻しは最後の提示の prs、
+// 提示の前の差し戻しはまとめたリリースが受けた依頼すべて。どれにも入らない依頼は次のまとめたリリースへ残る
 export function requestsToAnswer(batch: ReleaseBatch, requests: OrgRequest[], end: "released" | "rejected", settledPrs: number[] = []): OrgRequest[] {
   const open = requests.filter((r) => r.answer === null);
   if (end === "released") return open.filter((r) => inRange(r, settledPrs, batch));
@@ -153,11 +153,11 @@ export function requestsToAnswer(batch: ReleaseBatch, requests: OrgRequest[], en
   return open.filter((r) => inRange(r, last.prs, batch));
 }
 
-// 止まった配布の選択肢（I63）。main へのマージの後は continue だけ
+// 止まったリリースの選択肢（I63）。main へのマージの後は continue だけ
 export const choicesOf = (batch: Pick<ReleaseBatch, "mainMerged">): ("continue" | "reject")[] => (batch.mainMerged ? ["continue"] : ["continue", "reject"]);
 
 // 止まる前の状態（ジョブが失敗した時点の state から）。presented は提示を受けた後にジョブが落ちたとき
-// （ランナーが release.presented を送った後の状態の保存に失敗したなど）で、承認ゲート 2 に届いていない
+// （ランナーが release.presented を送った後の状態の保存に失敗したなど）で、リリース承認ゲートに届いていない
 export function stalledFromOf(state: BatchState): StalledFrom | null {
   if (state === "composed" || state === "presented" || state === "represented" || state === "confirmed") return state;
   return null;
@@ -169,7 +169,7 @@ export function resumeStepOf(batch: ReleaseBatch, startedRelease: boolean): Rele
 }
 
 // 止まる前（か今）の状態から流し直す手。判断（承認ゲートの外の問い）への答えの再開も同じ規則で決める
-// presented は受けた最後の提示のプランを流し直す（提示 1 なら present、提示 2 なら represent。状態は presented のまま承認ゲート 2 を待つ）
+// presented は受けた最後の提示のプランを流し直す（提示 1 なら present、提示 2 なら represent。状態は presented のままリリース承認ゲートを待つ）
 export function stepFrom(state: StalledFrom | null, batch: Pick<ReleaseBatch, "mainMerged" | "confirmedK" | "presentations">, startedRelease: boolean): ReleaseStep {
   if (state === "composed") return "present";
   if (state === "represented") return "represent";
@@ -185,7 +185,7 @@ export function presentedVersion(batch: ReleaseBatch): string | null {
   return p?.version ?? null;
 }
 
-// 配布の実行の NDF の版: 範囲の依頼の版のうち最も新しいもの（下限とは比べない）
+// リリースの実行の NDF の版: 範囲の依頼の版のうち最も新しいもの（下限とは比べない）
 export function newestVersion(versions: string[], fallback: string): string {
   const parse = (v: string) => v.split("@")[0]!.split(/[.-]/).map((x) => (/^\d+$/.test(x) ? Number(x) : -1));
   let best: string | null = null;

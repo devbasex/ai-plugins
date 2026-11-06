@@ -33,6 +33,10 @@ KEYS = {"スプリント状態": "ミッション状態", "sprint": "mission", "
 BRANCH_PREFIXES = {"sprint/": "mission/"}
 # 見出し: リリース記録の行（新しい名前 → 旧名の並び）
 RECORD_LABELS = {"スプリント: ": ("ミッション: ", "まとまり: ")}
+# 承認ゲートの記録の名前: 種類 → 旧名の並び（#2619）。正の名前は lib/gate_answer.py が持ち、`canonical` がこの表で寄せる。
+# 読み取りの種類で `MODE` に関わらず読む。`sprint-state.py gate` と `gate-rejections.py record` は `MODE` に関わらず旧名を受ける
+# （Factory のランナーが、どの版の NDF でも記録できるよう旧名を渡し続ける。#2619 の決定 5）
+GATE_NAMES = {"design": ("関門 1",), "release": ("関門 2",)}
 
 WHEN = "旧名の受け付けは、改名を載せた正式版の次の正式版でやめる"
 
@@ -40,6 +44,11 @@ WHEN = "旧名の受け付けは、改名を載せた正式版の次の正式版
 def rename_notice(old: str, new: str) -> str:
     """旧名で呼ばれたときの案内の 1 行。"""
     return f"{old} は {new} へ改名した。{new} で呼ぶ（{WHEN}）"
+
+
+def gate_rename_notice(old: str, new: str) -> str:
+    """旧名の承認ゲートの名前で呼ばれたときの案内の 1 行（受け付けは続けるため、期限を書かない）。"""
+    return f"{old} は {new} へ改名した。{new} で呼ぶ"
 
 
 def refusal(old: str, new: str) -> str:

@@ -13,6 +13,7 @@ import type {
   UsageRecordedEvent,
 } from "@ndf-factory/contracts";
 import type { PhaseName } from "@ndf-factory/contracts/phases";
+import { normalizePhase } from "./legacy-phases.ts";
 
 export interface JobIdentity {
   sprintRunId: string;
@@ -58,14 +59,15 @@ const PLAN_PHASES: Readonly<Record<string, PhaseName>> = {
   設計: "設計",
   実装: "実装",
   検査: "検査",
-  "配布（開発版）": "取り込み",
-  "配布（本番）": "仕上げ",
+  開発版のデプロイ: "取り込み",
+  リリース: "仕上げ",
   まとめ: "仕上げ",
 };
 
 // フェーズの名前。プランの JSON が読めない（null）・表に無い値は、計画の名前の断片をそのまま返す（画面は「その他」と出す）
 export function phaseNameOf(planName: string, planPhase: string | null): string {
-  if (planPhase !== null && Object.hasOwn(PLAN_PHASES, planPhase)) return PLAN_PHASES[planPhase]!;
+  const phase = planPhase === null ? null : normalizePhase(planPhase);
+  if (phase !== null && Object.hasOwn(PLAN_PHASES, phase)) return PLAN_PHASES[phase]!;
   return phaseOf(planName).phase;
 }
 
@@ -146,7 +148,7 @@ export function reportResult(report: string): ReportResult {
   return (m?.[1] as ReportResult) ?? null;
 }
 
-// 承認の依頼の種類。計画の名前が設計なら gate1、本番の配布なら gate2、ほかは判断
+// 承認の依頼の種類。計画の名前が設計なら gate1、リリースなら gate2、ほかは判断
 export function gateKindOf(planName: string | null): GateKind {
   if (!planName) return "decision";
   if (/design/.test(planName)) return "gate1";
@@ -154,17 +156,27 @@ export function gateKindOf(planName: string | null): GateKind {
   return "decision";
 }
 
-// 承認の依頼の種類から、NDF のスプリント状態に書く関門の名前（sprint-state.py gate の名。NDF は「関門 2」で通過を判定する）
+// 種類ごとの NDF の承認ゲートの記録の名前と、人へ出す名前。ランナーが入れる NDF の版は利用者が選ぶため（前の版は新しい名前を読めない）、
+// 記録には旧名を渡し続ける。新しい版の NDF は旧名を受けて正の名前で書く。旧名と正の名前の対応はここにだけ置く
+const GATE_NAMES: Readonly<Record<string, { record: string; display: string }>> = {
+  gate1: { record: "関門 1", display: "設計承認ゲート" },
+  gate2: { record: "関門 2", display: "リリース承認ゲート" },
+};
+
+// 承認の依頼の種類から、NDF のスプリント状態に書く承認ゲートの名前（sprint-state.py gate の名）
 export function gateRecordName(kind: string): string {
-  if (kind === "gate1") return "関門 1";
-  if (kind === "gate2") return "関門 2";
-  return kind;
+  return GATE_NAMES[kind]?.record ?? kind;
+}
+
+// 記録の名前から人へ出す名前を作る。旧名でない名前はそのまま返す
+export function gateDisplayName(recordName: string): string {
+  return Object.values(GATE_NAMES).find((g) => g.record === recordName)?.display ?? recordName;
 }
 
 // 差し戻しの答えから、再開する conductor への指示を作る（承認と区別できるように差し戻しを明示する）
-export function rejectionDirective(gate: string, body: string | null | undefined): string {
+export function rejectionDirective(displayName: string, body: string | null | undefined): string {
   const reason = body && body.trim() !== "" ? body.trim() : "理由の記載なし";
-  return `利用者は${gate}を差し戻した（理由: ${reason}）。関門を通さず、差し戻された工程をこの理由に沿って直してから、もう一度${gate}の承認を求めてください。`;
+  return `利用者は${displayName}を差し戻した（理由: ${reason}）。承認ゲートを通さず、差し戻された工程をこの理由に沿って直してから、もう一度${displayName}の承認を求めてください。`;
 }
 
 // スプリント状態ファイル（sprint-state.py init が作る）か。目録の sprint.json（supervise.py new。「ステージ」を持つ）とは別
