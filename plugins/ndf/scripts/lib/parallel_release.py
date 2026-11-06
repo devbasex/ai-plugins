@@ -1,8 +1,8 @@
-"""まとめた配布（#2436 の I9・I14・I15）: 範囲の Pull Request をレーンへ対応づける（`present`）・提示したコミットと
+"""まとめたリリース（#2436 の I9・I14・I15）: 範囲の Pull Request をレーンへ対応づける（`present`）・提示したコミットと
 `develop` の先頭を比べる 1 つの関数（`moved`）・範囲で答えられる依頼を決める（`answerable`）・提示のプランと本番の
 プランを作る（`build_plans`）。
 
-配布の中身は依頼の集合ではなく、提示したコミットの範囲 `main..<SHA>` で決まる。内訳は承認する人が読むための表示である。
+リリースの中身は依頼の集合ではなく、提示したコミットの範囲 `main..<SHA>` で決まる。内訳は承認する人が読むための表示である。
 """
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]
 
 
 def answerable(pending: Iterable[dict], prs: Iterable[int], done: Iterable[int] = ()) -> list[str]:
-    """範囲 `prs` に Pull Request を持ち、残りもすべて出せた配布の範囲 `done` に入る依頼の ID（その配布の答えを受ける。I9・I15）。
+    """範囲 `prs` に Pull Request を持ち、残りもすべて出せたリリースの範囲 `done` に入る依頼の ID（そのリリースの答えを受ける。I9・I15）。
 
-    先の Pull Request が前の配布で本番に出た後に届いた依頼も、今回の範囲と合わせて全部が入れば答える。
-    一部が入らない依頼は答えず、次の配布へ回す（残りを本番へ出さずに配布済みと答えない）。"""
+    先の Pull Request が前のリリースで本番に出た後に届いた依頼も、今回の範囲と合わせて全部が入れば答える。
+    一部が入らない依頼は答えず、次のリリースへ回す（残りを本番へ出さずにリリース済みと答えない）。"""
     got = set(prs)
     have = got | set(done)
     return [r["id"] for r in pending if (want := set(r.get("prs") or [])) and want <= have and want & got]
@@ -147,7 +147,7 @@ def present_state_dir(d: Path) -> Path:
 
 
 def write_requests(main: Path, name: str, requests: list[dict]) -> None:
-    """耐久ワークフローが受けた配布の依頼を `releases/requests.json` へ書く（`parallel.py present` が内訳に使う）。"""
+    """耐久ワークフローが受けたリリースの依頼を `releases/requests.json` へ書く（`parallel.py present` が内訳に使う）。"""
     rel = pp.plan_dir(main, name) / "releases"
     rel.mkdir(parents=True, exist_ok=True)
     (rel / "requests.json").write_text(json.dumps(requests, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -199,7 +199,7 @@ def answer_state(main: Path) -> dict:
 
 
 def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mode: str, facts_from: str, answer_from: str) -> list[dict]:
-    """まとめた配布（#2436）の提示のプランの承認ゲート 2: MVV 判定（mvv・note）→ approve の順に置く。
+    """まとめたリリース（#2436）の提示のプランの承認ゲート 2: MVV 判定（mvv・note）→ approve の順に置く。
 
     今の本番のプランでは MVV 判定と approve が排他だが、提示のプランは両方を並べる。MVV 判定が通せば承認の記録が
     既にあるため approve は答えの記録を読まずに通り、関門（10）なら提示のプランは承認ゲートで終わる。確定の後は
@@ -222,7 +222,7 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
         {
             "id": "approve",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "timeout": 120,
             **({"cwd": repo} if repo else {}),
             "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {shlex.quote(facts_from)}"
@@ -236,11 +236,11 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
     return steps
 
 
-RELEASE_REQUEST_PHASE = "配布の依頼"
+RELEASE_REQUEST_PHASE = "リリースの依頼"
 
 
 def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str] | None = None) -> dict:
-    """並列の計画のレーンの本番のステージ（#2436 の F6）。本番を流さず、オーガナイザーへ配布の依頼を送る。
+    """並列の計画のレーンの本番のステージ（#2436 の F6）。本番を流さず、オーガナイザーへリリースの依頼を送る。
 
     ステップは `parallel-request` の 1 つで、依頼を送れば 10（承認ゲート）で終わり、自分の Pull Request が
     すでに `main` にあれば送らずに 0 で終わる（I15）。`prs` は出す版の Pull Request（`{queue_pr:<名>}` でもよい）。"""
@@ -263,13 +263,13 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
             "作業場所": repo,
             "規則": "",
             "並列の計画": plan_name,
-            "steps": [{"id": "parallel-request", "type": "run", "stage": "配布", "timeout": 300, "cmd": cmd, "next": "end"}],
+            "steps": [{"id": "parallel-request", "type": "run", "stage": "デプロイ", "timeout": 300, "cmd": cmd, "next": "end"}],
         }
     )
 
 
 def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]:
-    """まとめた配布（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
+    """まとめたリリース（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
 
     提示のプランは開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで
     流し、`parallel.py present` でレーンの内訳を足し、最後に承認ゲート 2（MVV 判定 → approve）を置く。本番のプランは
@@ -329,7 +329,7 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     present = {
         "id": "present",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": 300,
         "cwd": repo,
         "cmd": f"{PARALLEL_PY} present {shlex.quote(name)} {seq} {k} --approval {approval}"
@@ -339,7 +339,7 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     gate = present_gate_steps(str(state), repo, approval, "$(cat {state_dir}/work/prs.txt)", "standard", str(present_state), str(state))
     present_plan = with_record(
         {
-            "フェーズ": "配布（提示）",
+            "フェーズ": "リリース（提示）",
             "課題": [],
             "モード": "standard",
             "作業場所": repo,

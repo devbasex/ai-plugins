@@ -10,9 +10,9 @@
 | `wait <計画名> [--after <seq>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions）か終わりまで待つ。上限なら 3 |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | 承認ゲート 2 の承認を送る |
-| `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | 本番の配布の結果を送る |
-| `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（配布の途中は settle を待つ。`--force` は待たない） |
-| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | 配布の依頼を送る（10）か、すでに `main` にあれば送らない（0） |
+| `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
+| `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
+| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンが承認ゲート 2 の依頼を送る |
@@ -260,7 +260,7 @@ def cmd_confirm(a) -> None:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     wid = pl.workflow_id(a.name)
     pl.resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
-    reply("ok", f"配布 {a.n} の承認を送った", n=a.n, take=a.take)
+    reply("ok", f"リリース {a.n} の承認を送った", n=a.n, take=a.take)
 
 
 def cmd_settle(a) -> None:
@@ -285,7 +285,7 @@ def cmd_settle(a) -> None:
     wid = pl.workflow_id(a.name)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
     pl.resume_plan(main, a.name, msg, f"{wid}:resume:settle:{a.n}")
-    reply("ok", f"配布 {a.n} の結果 {res} を送った", result=res, version=version)
+    reply("ok", f"リリース {a.n} の結果 {res} を送った", result=res, version=version)
 
 
 def cmd_stop(a) -> None:
@@ -323,7 +323,7 @@ def cmd_request(a) -> None:
     rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    summary = f"配布の依頼 {rid} を送った（配布待ち）。答えは parallel.py await で読む"
+    summary = f"リリースの依頼 {rid} を送った（リリース待ち）。答えは parallel.py await で読む"
     reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested")
 
 
@@ -334,7 +334,7 @@ def cmd_await(a) -> None:
     except (OSError, ValueError) as exc:
         reply("stopped", f"依頼の記録を読めない: {exc}", code=2)
     if sent.get("result") == "released" and not sent.get("id"):
-        reply("ok", "配布済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
+        reply("ok", "リリース済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
     if a.external or pe.is_external(sent.get("plan")):
         ans, dfr = pe.read_answer_file(px.external_dir(reply), sent["id"]), None
     else:
@@ -347,7 +347,7 @@ def cmd_await(a) -> None:
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
     reply(
         status,
-        f"配布の依頼 {sent['id']} の答え: {res}",
+        f"リリースの依頼 {sent['id']} の答え: {res}",
         code=code,
         next_step="今の承認ゲート 2 の差し戻しと同じに扱う" if code == 10 else None,
         result=res,
@@ -412,7 +412,7 @@ def cmd_helper(a) -> None:
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
     task = pr_run.helper_task(main, a.name, a.n, a.k)
-    reply("ok", f"一時レーンの仕事: 配布 {a.n} の提示 {a.k}（{task['phase']}）", **task)
+    reply("ok", f"一時レーンの仕事: リリース {a.n} の提示 {a.k}（{task['phase']}）", **task)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -430,7 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_.add_argument("name")
     stp = sub.add_parser("stop")
     stp.add_argument("name")
-    stp.add_argument("--force", action="store_true", help="配布の途中でも settle を待たずに終え、一時レーンも止める")
+    stp.add_argument("--force", action="store_true", help="リリースの途中でも settle を待たずに終え、一時レーンも止める")
     w = sub.add_parser("wait")
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)

@@ -1,6 +1,6 @@
 """旧い値の読み替え（#2620 の決定 5）。版を上げる前に書かれた記録の値を、読む時点で新しい値へ変換する。
 
-旧い値の正本は `scripts/data/legacy-values.json` だけである。Python の読み手は記録を読んだ直後に `normalize` を
+旧い値の正本は `scripts/data/legacy-values.json` だけである。Python の読み手は記録を読んだ直後に `to_current` を
 1 回呼び、後の処理は新しい値だけを扱う。シェルの読み手は同じ表を `jq` で引く。既存の記録は書き換えない。
 
 表に誤りがあれば（1 つの集合で旧い値が重なる・新しい値が旧い値の欄に現れる）`StepError`（終了コード 2）で止まる。
@@ -12,13 +12,14 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from step_result import EXIT_UNREADABLE, StepError
-
 TABLE = Path(__file__).resolve().parents[1] / "data" / "legacy-values.json"
 PREFIX_SETS = ("record_stage_prefix",)  # 前方一致で変換する集合（値が後ろに理由を持つ）
 
 
-def _bad(msg: str) -> StepError:
+def _bad(msg: str) -> Exception:
+    # step_result は外部パッケージの環境を整えるため、誤りのときだけ読み込む（シェルの中の Python からも使う）
+    from step_result import EXIT_UNREADABLE, StepError
+
     return StepError(f"旧い値の読み替えの表（{TABLE.name}）: {msg}", EXIT_UNREADABLE)
 
 
@@ -30,7 +31,7 @@ def _no_duplicates(pairs: list) -> dict:
     return dict(pairs)
 
 
-def parse(text: str) -> dict[str, dict[str, str]]:
+def parse_table(text: str) -> dict[str, dict[str, str]]:
     """表の本文を読み、形を確かめて `{集合: {旧い値: 新しい値}}` を返す。"""
     try:
         raw = json.loads(text, object_pairs_hook=_no_duplicates)
@@ -48,16 +49,16 @@ def parse(text: str) -> dict[str, dict[str, str]]:
 
 
 @lru_cache(maxsize=1)
-def table() -> dict[str, dict[str, str]]:
+def legacy_table() -> dict[str, dict[str, str]]:
     try:
-        return parse(TABLE.read_text(encoding="utf-8"))
+        return parse_table(TABLE.read_text(encoding="utf-8"))
     except OSError as e:
         raise _bad(f"読めない: {e}") from e
 
 
-def normalize(name: str, value):
+def to_current(name: str, value):
     """値の集合 `name` の旧い値を新しい値へ変換する。表に無い値と文字列でない値はそのまま返す。"""
-    sets = table()
+    sets = legacy_table()
     if name not in sets:
         raise _bad(f"知らない値の集合: {name}")
     if not isinstance(value, str):
@@ -70,6 +71,28 @@ def normalize(name: str, value):
     return sets[name].get(value, value)
 
 
+def current_plan(data):
+    """前の版の NDF が組んだプランの「フェーズ」を新しい値へ読み替えた `data` を返す（その場で書き換える）。"""
+    if isinstance(data, dict) and "フェーズ" in data:
+        data["フェーズ"] = to_current("phase", data["フェーズ"])
+    return data
+
+
+def normalize_laps(rec: dict) -> dict:
+    """ループの記録（loop.json）の周回の結果と失敗の種類を新しい値へ読み替えた `rec` を返す（その場で書き換える）。"""
+    for lap in rec.get("laps") or []:
+        if not isinstance(lap, dict):
+            continue
+        if "outcome" in lap:
+            lap["outcome"] = to_current("lap_outcome", lap["outcome"])
+        failure = lap.get("failure")
+        if isinstance(failure, dict):
+            for key in ("kind", "step"):
+                if key in failure:
+                    failure[key] = to_current("failure_kind", failure[key])
+    return rec
+
+
 def old_values(name: str) -> list[str]:
     """値の集合の旧い値の一覧（本文の中の見出しを探す読み手が使う）。"""
-    return list(table().get(name, {}))
+    return list(legacy_table().get(name, {}))

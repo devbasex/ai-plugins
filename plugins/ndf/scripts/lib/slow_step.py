@@ -17,6 +17,7 @@ from pathlib import Path
 
 import estimate_stats as stats
 import gh_call
+import legacy_values
 
 HISTORY_NAME = "step-history.jsonl"
 WATCHED_TYPES = ("run", "work", "drive")
@@ -174,7 +175,8 @@ def _rows(path: Path):
 
 def read_history(path: Path, phase: str, step: str, window: int | None = None) -> list[float]:
     """同じステップ（フェーズ, ステップの id）の所要を古い順に返す（window があれば直近の件数だけ）。読めなければ []。"""
-    out = [float(d["seconds"]) for d in _rows(path) if d.get("phase") == phase and d.get("step") == step]
+    want = legacy_values.to_current("phase", phase)
+    out = [float(d["seconds"]) for d in _rows(path) if legacy_values.to_current("phase", d.get("phase")) == want and d.get("step") == step]
     return stats.recent(out, window) if window else out
 
 

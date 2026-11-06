@@ -41,7 +41,7 @@ deps.require("md", "mdtable", "schema", "locks", "durable", "versions")  # schem
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
-import gate_answer, jsonio, locks  # noqa: E402,E401
+import gate_answer, jsonio, legacy_values, locks  # noqa: E402,E401
 from handoff_doc import COMMAND_SECTION, PROGRESS_SECTION, find_section, heading_text  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
@@ -80,14 +80,14 @@ def plan_issues(plan: str) -> list[int]:
         return []
 
 
-PHASE_KINDS = {"配布（開発版）": "開発版", "配布（本番）": "本番"}
+PHASE_KINDS = {"開発版のデプロイ": "開発版", "リリース": "本番"}
 
 
 def plan_kind(plan: str) -> str:
-    """計画の「フェーズ」（旧キー「持ち場」も読む）から表の行の種類を決める（配布の 2 つは開発版・本番）。"""
+    """計画の「フェーズ」（旧キー「持ち場」も読む）から表の行の種類を決める（デプロイの 2 つは開発版・本番）。"""
     try:
         data = json.loads(Path(plan).read_text())
-        phase = str(data.get("フェーズ") or data.get("持ち場") or "")
+        phase = legacy_values.to_current("phase", str(data.get("フェーズ") or data.get("持ち場") or ""))
     except (OSError, ValueError, AttributeError):
         phase = ""
     return PHASE_KINDS.get(phase, phase or "計画")

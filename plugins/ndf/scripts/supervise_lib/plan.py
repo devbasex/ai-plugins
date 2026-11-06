@@ -82,9 +82,9 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
   refactor の timeout は想定最大時間（無ければ cross-refactoring の既定の予算）に 10%（最低 30 秒）の余裕を足した秒。
   impl_timeout と refactor_budget_minutes は --impl-timeout・--refactor-budget-minutes が先に効く
-  テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
+  テストの範囲の選び方（--tests）とデプロイしてよいかの判断は、宣言にせず conductor と judge のステップに残す
 
-配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint は配布の計画を
+デプロイの雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint はリリースプランを
 書かずに検査までを書き、結果の next と items に /ndf:release で行うことを載せる。new close と new release は形を要る）。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
@@ -152,8 +152,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 同じディレクトリの計画の報告。完了して Pull Request が無い・飛ばされたなら `0`）、`{queue_state:<計画名>}` は
 同じ名前の計画の状態ディレクトリの絶対パス。名前の一致する計画の結果（完了した報告・状態ディレクトリ）が見つからなければ
 埋めずに、そのプランを流さない（`0`・空文字で黙って埋めない。#2079）。`{queue_state?:<計画名>}` は無いことを読む側が扱う差し込みで、無ければ空文字で埋め、残っても止めない。
-`{queue_record}` は計画の `課題` のリリース記録（`## 配布の記録`）を置いた PR の番号で、課題を閉じる PR とそれを参照する PR を
-GitHub から読み、段階が本番か配布なしで `スプリント:` がその閉じる PR を含む記録を採る。見つからない・2 つ以上のスプリントに
+`{queue_record}` は計画の `課題` のリリース記録（`## リリース記録`）を置いた PR の番号で、課題を閉じる PR とそれを参照する PR を
+GitHub から読み、段階が本番かデプロイなしで `スプリント:` がその閉じる PR を含む記録を採る。見つからない・2 つ以上のスプリントに
 ある・GitHub を読めなければ、同じく埋めずにそのプランを流さない（#2230）。置き換わらずに `{queue_pr:…}`・`{queue_state:…}`・
 `{queue_record}` が残ったコマンドのステップは、run でも queue でもコマンドを打たずに止まる
 

@@ -6,7 +6,7 @@
 | `record --gate <名> --what <要約> (--sprint <状態ファイル> \\| --issue N \\| --pr N)... [--outcome rejected\\|approved] [--repo OWNER/REPO] [--at <ISO 8601>] [--root DIR]` | 答えを 1 行追記する（既定は差し戻し）。状態ファイルのあるスプリントは `sprint-state.py gate --by user` が同じ記録へ書く |
 | `count [--sprint <状態ファイル>] [--issue N]... [--pr N]... [--repo OWNER/REPO] [--root DIR]` | 渡した範囲のどれかに当たる差し戻しの行を、関門 1・関門 2・ほかに分けて数える。範囲を渡さなければリポジトリのすべての行 |
 
-`--gate` には `関門 1`（設計の承認）か `関門 2`（本番への配布の承認）を渡す。ほかの名前は `other` に数える。
+`--gate` には `関門 1`（設計の承認）か `関門 2`（本番へのリリースの承認）を渡す。ほかの名前は `other` に数える。
 `--repo` を省くと `--root`（既定はカレント）の `origin` の `owner/repo`、読めなければメインディレクトリの絶対パスを使う。
 
 `count` は、範囲に答えの行が 1 つも無く、`--sprint` の状態ファイルにも承認ゲート（関門 1・関門 2）の記録が無ければ、

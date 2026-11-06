@@ -1,14 +1,14 @@
 # プラグインのライブラリ
 
 `plugins/ndf/scripts/lib/` は、**どの Skill にも属さない部品**を置く。プラグイン
-ルート直下にあるため、配る Skill を絞る配布先でも残る。
+ルート直下にあるため、配る Skill を絞る導入先のランタイムでも残る。
 
 ## 用語
 
 | 語 | この文書での意味 |
 | --- | --- |
-| プラグインルート | 配布した先で `scripts/` と `skills/` が並ぶディレクトリ |
-| 配布の基準 | `plugins/ndf/manifests/*-skills.txt`。配る Skill の名前だけを持つ |
+| プラグインルート | デプロイした先で `scripts/` と `skills/` が並ぶディレクトリ |
+| デプロイの基準 | `plugins/ndf/manifests/*-skills.txt`。配る Skill の名前だけを持つ |
 | 収束ループ | `cross-review` / `cross-refactoring` が回す「起動 → 監視 → 判定」の繰り返し |
 
 ## 置いてあるもの
@@ -52,7 +52,7 @@
 | [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
 | [step_read.py](step_read.py) | 結果を読む側の共通の規則。同じステップの試行から `ok` の最も新しい試行だけを採る `pick_ok_attempt`、置き場の無い・読めない・空・ありを分ける `open_place` と、無い・読めないときの結果を組む `place_stop`、子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` / 子の課題の読み手（承認資料・差し戻しの件数ほか） |
 | [step-result.sh](step-result.sh) | シェルの手順のスクリプトが結果 JSON を 1 行出すための関数（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric` で値を溜め、`sr_emit` が `step_result.py emit` を呼ぶ。`sr_gh` は `gh` の失敗の要旨を `SR_GH_ERR` に残す。`sr_absorb` は別のスクリプトの結果 JSON を取り込む）。JSON をシェルで組まない | `progress-record.sh` / `projects-sync.sh` |
-| [dist_record.py](dist_record.py) | リリース記録（`## 配布の記録`）の組み立て（`format_record`）と読み取り（`parse_record`）。形は `progress-tracking` の「配布の記録」が定める | `release-steps.py`（`record`） / `sprint-close.py` |
+| [dist_record.py](dist_record.py) | リリース記録（`## リリース記録`）の組み立て（`format_record`）と読み取り（`parse_record`）。形は `progress-tracking` の「リリース記録」が定める | `release-steps.py`（`record`） / `sprint-close.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`review_lib/` の未解決のスレッドと checks） |
 | [gh_call.py](gh_call.py) | GitHub の呼び出しの最下層。GitHub を呼ぶのはここだけで、テストは `RUNNER` を差し替える。REST の 1 回の要求（githubkit が import できれば githubkit、できなければ `gh api`）と、ETag 付きの読み直し（`rest_cached`。変わっていなければ 304 で上限に数えられない） | `gh_*` |
 | [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
@@ -82,6 +82,8 @@
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [glossary_banned.py](glossary_banned.py) | 禁止語の宣言（`.ndf/glossary.json` の `check.banned`）の形の確かめと、検査する範囲・行の照合。特定のプロジェクトの語を持たない。標準ライブラリと `pathmatch` だけ | `glossary.py check` |
+| [legacy_values.py](legacy_values.py) | 旧い値の読み替え。`scripts/data/legacy-values.json` を読み、記録の値を読む時点で新しい値へ変換する（`to_current`・`normalize_laps`）。標準ライブラリだけ | 記録を読むスクリプト |
 | [glossary_merge.py](glossary_merge.py) | 用語集の 3 方向の取り込み（祖先・自分・相手を語は `(context, term)`、コンテキストは `id` で突き合わせ、片側だけの変更を採り、両側の食い違いを語の衝突として返す）と、`git ls-files -u -z` の段の読み取り。ファイルも git も触らない。標準ライブラリだけ | `glossary.py merge` |
 | [merged_range.py](merged_range.py) | 範囲の first-parent のログから、merge commit と squash merge（件名の末尾 `(#N)`）でベースブランチへ入った PR を拾う。squash の head のブランチは GitHub から 100 件ずつ読む。どの PR を外すかは持たない（呼び手が決める） | `check-trigger.py`・`release_lib/included.py` |
 | [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
@@ -200,7 +202,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 
 ## プラグインルート直下に置く理由
 
-**配る Skill を絞る配布先がある。** 配布の基準に無い Skill が配布した先に残るかを、
+**配る Skill を絞る導入先のランタイムがある。** デプロイの基準に無い Skill がデプロイした先に残るかを、
 実在する欠落（`official-skills-autoloader`）で測った。
 
 | ランタイム | 基準に無い Skill | 隣の Skill から相対で届くか |
@@ -210,8 +212,8 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 | Kiro CLI | `.kiro/skills/` からは消える | 届く（`..` がメインディレクトリの実体へ抜ける） |
 | agy | 消える | **届かない** |
 
-Skill の下にライブラリを置くと、その Skill を配らない配布先で読み込みが失敗する。
-プラグインルートの `scripts/` は配布の基準の対象ではないため、4 ランタイムすべてへ
+Skill の下にライブラリを置くと、その Skill を配らない導入先のランタイムで読み込みが失敗する。
+プラグインルートの `scripts/` はデプロイの基準の対象ではないため、4 ランタイムすべてへ
 届く（基準は Skill の名前だけを持ち、`scripts` という語を含まない）。
 
 ライブラリのための Skill を新設する形は採らない。利用者が呼ばない Skill でも初期一覧へ

@@ -190,7 +190,7 @@ def call(script, args, env, cwd):
 
 # --- sprint-close --------------------------------------------------------------
 
-DIST_PROD = "## 配布の記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nスプリント: PR #11 / #12\n"
+DIST_PROD = "## リリース記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nスプリント: PR #11 / #12\n"
 
 
 def verify_block(ver, rows):
@@ -205,12 +205,12 @@ def issues_of(out):
 
 def test_sprint_close_four_outcomes(repo, gh):
     gh.set(
-        records={"20": {"body": "old\n## 配布の記録\n段階: 検証\nスプリント: PR #99\n", "comments": [{"body": DIST_PROD}]}},
+        records={"20": {"body": "old\n## リリース記録\n段階: 検証\nスプリント: PR #99\n", "comments": [{"body": DIST_PROD}]}},
         bodies={"11": "Fixes #1, closes #2", "12": "Resolves #3 and fixes other/x#4"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["CLOSED"], "o/r#3": ["OPEN"], "other/x#4": [None]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo
     )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed" and res["o/r#1"]["cmd"] == "gh issue reopen 1 --repo o/r"
@@ -228,18 +228,18 @@ def test_sprint_close_failed_when_close_does_not_take(repo, gh):
         issues={"o/r#1": ["OPEN"]},
         close_works=False,
     )
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["cmd"] == "gh issue close 1 --repo o/r"
 
 
 def test_sprint_close_kept_open_before_production(repo, gh):
     gh.set(
-        records={"20": {"body": "## 配布の記録\n段階: 検証（止めた）\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n", "comments": []}},
+        records={"20": {"body": "## リリース記録\n段階: 検証（止めた）\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n", "comments": []}},
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 0 and out["status"] == "ok"
     assert issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert "closed" not in gh.get()
@@ -255,7 +255,7 @@ def test_sprint_close_verification_per_issue(repo, gh):
         issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"], "o/r#3": ["OPEN"]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
     )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed"
@@ -267,31 +267,31 @@ def test_sprint_close_verification_per_issue(repo, gh):
 def test_sprint_close_no_verification_record_keeps_all(repo, gh):
     gh.set(records={"20": {"body": DIST_PROD, "comments": []}}, bodies={"11": "Fixes #1", "12": ""}, issues={"o/r#1": ["OPEN"]})
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
     )
     assert code == 0 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
 
 
 def test_sprint_close_empty_list_is_2(repo, gh):
-    gh.set(records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}})
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    gh.set(records={"20": {"body": "## リリース記録\n段階: デプロイなし（文書だけ）\n", "comments": []}})
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
 
 
 def test_sprint_close_dry_run_writes_nothing(repo, gh):
     gh.set(
-        records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}},
+        records={"20": {"body": "## リリース記録\n段階: デプロイなし（文書だけ）\n", "comments": []}},
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo
     )
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "would_close"
     assert "closed" not in gh.get()
 
 
-MULTI_GENERATION_RECORD = """## 配布の記録
+MULTI_GENERATION_RECORD = """## リリース記録
 
 段階: 本番（2026-09-01 10:00 に承認）
 版: 10.13.0 → 10.14.0（MINOR: 旧スプリント）
@@ -302,7 +302,7 @@ MULTI_GENERATION_RECORD = """## 配布の記録
 対象の版: 10.14.0（2026-09-01 11:00）
 合否: 合格（旧版）
 
-## 配布の記録
+## リリース記録
 
 段階: 本番（2026-09-18 10:00 に承認）
 版: 10.14.0 → 10.15.0（MINOR: 新スプリント）
@@ -775,10 +775,10 @@ def test_remove_worktree_evacuates_untracked_and_removes(repo, tmp_path):
 
 
 def test_parse_record_skips_a_distribution_heading_inside_a_fence():
-    """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## 配布の記録` は記録として読まない。"""
-    text = "## 配布の記録\n段階: 配布なし\nスプリント: #5\n\nコメント\n\n```md\n## 配布の記録\n段階: 開発版\n```\n"
+    """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## リリース記録` は記録として読まない。"""
+    text = "## リリース記録\n段階: デプロイなし\nスプリント: #5\n\nコメント\n\n```md\n## リリース記録\n段階: 開発版\n```\n"
     rec = load_sprint_close().parse_record(text)
-    assert rec["stage"] == "配布なし"
+    assert rec["stage"] == "デプロイなし"
     assert rec["sprint_prs"] == [5]
 
 

@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
+import legacy_values  # noqa: E402
 
 TOOL = "estimate"
 
@@ -86,7 +87,8 @@ def _request(d: dict):
     issue, task = d.get("issue"), d.get("task")
     if issue is None and not task:
         raise ArgError("--issue か --task のどちらかが要る")
-    if d.get("done") not in er.PHASES:
+    d["done"] = legacy_values.to_current("phase", d.get("done"))
+    if d["done"] not in er.PHASES:
         raise ArgError(f"--done は {'・'.join(er.PHASES)} のどれか")
     items = d["items"] if isinstance(d.get("items"), dict) and d.get("_parsed") else _items_of_object(d.get("items") or {})
     prov = d.get("provisional") or {}
@@ -220,6 +222,7 @@ def cmd_actuals(a, root: Path) -> tuple[dict, int]:
     import estimate_records as er
     from step_result import result
 
+    a.done = legacy_values.to_current("phase", a.done)
     if a.done not in er.PHASES:
         raise ArgError(f"--done は {'・'.join(er.PHASES)} のどれか")
     rec = er.estimate_dir(root)

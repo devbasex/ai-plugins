@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次のステップを決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す。`"decisions": true` なら、設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`。後の sync が書き込まず、CI を 2 度起動しない）。`"title_doc": <設計文書>` なら、囲みの外の最初の H1（256 コードポイント以内）を題にし、既存の PR の題も書き直す。読めなければ `title` で出し、既存の題は書き直さない | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。デプロイの説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す。`"decisions": true` なら、設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`。後の sync が書き込まず、CI を 2 度起動しない）。`"title_doc": <設計文書>` なら、囲みの外の最初の H1（256 コードポイント以内）を題にし、既存の PR の題も書き直す。読めなければ `title` で出し、既存の題は書き直さない | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <ステップの id>] [--slow K=V]...
@@ -35,11 +35,11 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new release ... --mvv <スプリントの状態>
         # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
     supervise.py new sprint --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
-        # 並列の設計 → 関門 1 → 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → 配布
-        # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
+        # 並列の設計 → 関門 1 → 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → デプロイ
+        # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。デプロイは検査の queue が --then で流す
         # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
         # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 関門 1
-        # release.form が無いか雛形の無い形なら配布の計画を書かず、最後のステージを「/ndf:release で行う」にする
+        # release.form が無いか雛形の無い形ならリリースプランを書かず、最後のステージを「/ndf:release で行う」にする
         # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
@@ -52,7 +52,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
-        # 続けて流す（実装の queue の後の配布など）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
+        # 続けて流す（実装の queue の後のデプロイなど）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
         # 流れる。終わると結果の JSON を --done（省けば最初の計画の
         # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧とステージの並びを done の隣（<done>.plans.json）へ書く
     supervise.py queue --resume <done> [--from <プラン名>=<ステップ>]... [--max N]
@@ -156,7 +156,7 @@ def build_parser(sub) -> None:
         action="append",
         default=[],
         metavar="PLAN",
-        help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すとステージになり、"
+        help="前の計画がすべて完了したときだけ続けて流す計画（例: リリースプラン）。繰り返すとステージになり、"
         "ステージは前のすべてのステージが完了のときだけ流れる",
     )
     q.add_argument(

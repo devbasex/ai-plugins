@@ -233,7 +233,7 @@ def stage_missing(out) -> dict[str, str]:
 def test_the_release_lists_the_missing_stages_as_items(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "standard")
     env.run(str(SYNC), "42", "stage", "設計")
-    out = env.run(str(SYNC), "42", "stage", "配布")
+    out = env.run(str(SYNC), "42", "stage", "デプロイ")
     assert out.returncode == 0, out.stderr
     missing = stage_missing(out)
     assert missing["実装"] == "missing"
@@ -243,17 +243,17 @@ def test_the_release_lists_the_missing_stages_as_items(env: Env) -> None:
 
 def test_the_release_without_a_gap_says_nothing_more(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "light")
-    # 必須と条件付きの工程をすべて記録してから配布へ進む
+    # 必須と条件付きの工程をすべて記録してからデプロイへ進む
     required = env.sh(
         f'. "{WF_LIB}"; wf_stages | while IFS= read -r s; do case "$(wf_stage_class light "$s")" in R|C) printf "%s\\n" "$s" ;; esac; done'
     )
     for name in required.stdout.splitlines():
-        if name != "配布":
+        if name != "デプロイ":
             env.run(str(SYNC), "42", "stage", name)
-    out = env.run(str(SYNC), "42", "stage", "配布")
+    out = env.run(str(SYNC), "42", "stage", "デプロイ")
     assert out.returncode == 0, out.stderr
     assert stage_missing(out) == {}
-    assert json.loads(out.stdout)["summary"] == "#42 進行 = 配布"
+    assert json.loads(out.stdout)["summary"] == "#42 進行 = デプロイ"
 
 
 def test_a_conditional_stage_without_a_record_is_shown_apart(env: Env) -> None:
@@ -261,7 +261,7 @@ def test_a_conditional_stage_without_a_record_is_shown_apart(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "light")
     for name in ("要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定", "Pull Request", "後片付け"):
         env.run(str(SYNC), "42", "stage", name)
-    out = env.run(str(SYNC), "42", "stage", "配布")
+    out = env.run(str(SYNC), "42", "stage", "デプロイ")
     missing = stage_missing(out)
     assert missing.get("設計") == "conditional"
     assert "missing" not in missing.values()

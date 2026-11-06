@@ -330,7 +330,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             close = build_close(env, rec, lap, issues)
         except (LoopError, OSError, ValueError) as e:
             return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
-        lap["close_plans"] = close  # 配布待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
+        lap["close_plans"] = close  # リリース待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)
@@ -524,7 +524,7 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
 
 
 def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None = None) -> dict:
-    """保留の周回（配布待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
+    """保留の周回（リリース待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
     with open_record(env, name) as (rec, before):
         lap = rec["laps"][n - 1] if 1 <= n <= len(rec.get("laps", [])) else None
         if not lap or lap.get("outcome") not in PENDING:

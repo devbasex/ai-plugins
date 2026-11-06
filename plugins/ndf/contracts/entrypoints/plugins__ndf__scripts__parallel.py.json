@@ -1,7 +1,7 @@
 {
   "version": 1,
   "path": "plugins/ndf/scripts/parallel.py",
-  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめた配布の提示と確定・レーンの配布の依頼と答え（#2436）。外のオーガナイザーのレーンと配布の実行は `--external` で置き場のファイルとやり取りする（#2439）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
+  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめたリリースの提示と確定・レーンのリリースの依頼と答え（#2436）。外のオーガナイザーのレーンとリリースの実行は `--external` で置き場のファイルとやり取りする（#2439）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
   "args": {
     "options": [],
     "positionals": [],
@@ -239,7 +239,7 @@
     "2": "読めない・呼び出しの誤り（status stopped）",
     "3": "まだ変化が無い・答えがまだ無い（status stopped）",
     "4": "本番のプランが承認ゲートで止まっている（status stopped）",
-    "10": "配布の依頼を送った・依頼が退けられた（status gate）"
+    "10": "リリースの依頼を送った・依頼が退けられた（status gate）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/parallel_lane.py",

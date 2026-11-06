@@ -284,7 +284,7 @@ def load_valid_plan(main: Path, name: str) -> ParallelPlan:
 
 
 def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
-    """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態と配布の内訳。"""
+    """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態とリリースの内訳。"""
     lines = [f"# 並列の計画 {plan.name}", "", "`plan.json` から描画した。正本は `plan.json` である。", "", "## レーン", ""]
     lines += ["| レーン | 最初の入力 | プランの本数 | 触る場所 | 依存先 | 引継ぎ文書 |", "| --- | --- | --- | --- | --- | --- |"]
     for ln in plan.lanes:
@@ -300,7 +300,7 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     lines += [
         f"- 同時に流すプランの本数はレーンごとに上の表のとおり（合計 {sum(ln.plans for ln in plan.lanes)} 本）",
         "- 触る場所は上の表のとおり。取り込みの衝突は base-sync で解く",
-        f"- 本番の配布はオーガナイザーが 1 本にまとめる。レーンは本番を自分で出さず、配布の依頼を送る（`parallel.py request {plan.name}`）",
+        f"- リリースはオーガナイザーが 1 本にまとめる。レーンは本番を自分で出さず、リリースの依頼を送る（`parallel.py request {plan.name}`）",
         "- 承認ゲートと区分つきの問いはオーガナイザーだけが出す。レーンは問いで止まらず、別の作業へ進む",
     ]
     lines += [f"- {r}" for r in plan.rules]
@@ -310,7 +310,7 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
             lines.append(f"| {n} | {st.get('state') or '-'} | {st.get('started') or st.get('refused') or '-'} |")
         rels = progress.get("releases") or []
         if rels:
-            lines += ["", "## まとめた配布", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]
+            lines += ["", "## まとめたリリース", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]
             for r in rels:
                 lines.append(f"| {r.get('seq')} | {r.get('state')} | {r.get('version') or '-'} | {(r.get('sha') or '-')[:12]} |")
     return "\n".join(lines) + "\n"
@@ -326,7 +326,7 @@ def render_handoff(plan: ParallelPlan, lane: Lane, plan_md: Path) -> str:
             "## 進め方（利用者の指示）",
             "",
             f"- 並列の計画 `{plan.name}` のレーン `{lane.name}` として進める。共通の決まりは [plan.md]({plan_md}) にあり、ここへは写さない",
-            "- 本番の配布は自分で出さず、オーガナイザーへ配布の依頼を送る。承認ゲートと区分つきの問いはオーガナイザーへ送り、待たずに別の作業へ進む",
+            "- リリースは自分で出さず、オーガナイザーへリリースの依頼を送る。承認ゲートと区分つきの問いはオーガナイザーへ送り、待たずに別の作業へ進む",
             "",
             "## 次にやること",
             "",

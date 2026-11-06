@@ -226,8 +226,8 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "配る版（例 10.17.11-dev.1）",
-                "sprint": "開発版の明示の版（例 3.8.0-dev.1。省けば配布のステップを流す時点に origin から次に空いている版を決める）",
-                "close": "開発版の明示の版（最終の検査で変更があったときに配る。省けば配布のステップを流す時点に決める）",
+                "sprint": "開発版の明示の版（例 3.8.0-dev.1。省けばデプロイのステップを流す時点に origin から次に空いている版を決める）",
+                "close": "開発版の明示の版（最終の検査で変更があったときに配る。省けばデプロイのステップを流す時点に決める）",
             }
         },
         "release sprint close",
@@ -317,7 +317,7 @@ NEW_ARGS = [
     ),
     (
         "--record-pr",
-        {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けば配布の経路から導く。#2089）"},
+        {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けばリリースの経路から導く。#2089）"},
         "close",
     ),
     (
@@ -426,7 +426,7 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
 
 
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
-    """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければ配布のステップを流す時点に決める（#2164）。"""
+    """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければデプロイのステップを流す時点に決める（#2164）。"""
     if not (a.name and a.issue):
         ap.error(f"new {a.kind} には --name・--issue が要る")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):

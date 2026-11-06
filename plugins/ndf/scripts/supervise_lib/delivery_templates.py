@@ -1,4 +1,4 @@
-"""配布のプラン（導入の確認・昇格・承認ゲート 2）の雛形（#1336 の F5・#1454・#1457）。`engine` を import しない。
+"""リリースプラン（導入の確認・昇格・承認ゲート 2）の雛形（#1336 の F5・#1454・#1457）。`engine` を import しない。
 
 スプリントの経路（sprint_routes）が使う。リリースの雛形（release_templates）の関門 2 の MVV 判定の部品を共有する。
 """
@@ -24,7 +24,7 @@ PROMOTE_MATERIAL = "{state_dir}/work/approval-promote.md"
 def facts_step(repo: str, cmd: str, next_id: str, step_id: str = "facts") -> dict:
     """導入の確認を走らせて承認資料を書くステップ（落ちたらプランが止まる）。gate-2・昇格・導入の確認のプランが使う。"""
     # timeout は導入の確認の上限（雛形の verify-install と同じ）
-    return {"id": step_id, "type": "run", "stage": "配布", "timeout": 1500, "cwd": repo, "cmd": cmd, "next": next_id}
+    return {"id": step_id, "type": "run", "stage": "デプロイ", "timeout": 1500, "cwd": repo, "cmd": cmd, "next": next_id}
 
 
 def verify_facts_cmd(a, repo: str, verify: str) -> str:
@@ -33,7 +33,7 @@ def verify_facts_cmd(a, repo: str, verify: str) -> str:
 
 
 def release_plan(a, repo: str, phase: str, rule: str, steps: list, condition: dict | None) -> dict:
-    """配布のプラン（導入の確認・昇格・承認ゲート 2）に共通の枠。上限は書き出しが遷移から求める。condition があれば「実行の条件」を足す。"""
+    """リリースプラン（導入の確認・昇格・承認ゲート 2）に共通の枠。上限は書き出しが遷移から求める。condition があれば「実行の条件」を足す。"""
     plan = {
         "フェーズ": phase,
         "課題": a.issue,
@@ -51,7 +51,7 @@ def release_plan(a, repo: str, phase: str, rule: str, steps: list, condition: di
 def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dict:
     """経路 merge だけのスプリント（#1457）の「導入の確認」のプラン: verify（導入の確認。落ちたら止まる）の 1 ステップ。"""
     return release_plan(
-        a, repo, "配布（導入の確認）", RULE_VERIFY, [facts_step(repo, verify_facts_cmd(a, repo, verify), "end", "verify")], condition
+        a, repo, "デプロイ（導入の確認）", RULE_VERIFY, [facts_step(repo, verify_facts_cmd(a, repo, verify), "end", "verify")], condition
     )
 
 
@@ -86,7 +86,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
     approved = {
         "id": "promote-approved",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": timeout,
         "cmd": promote + wait + f" --approved-from {PROMOTE_MATERIAL} --gate-approved user",
         "next": "record",
@@ -95,7 +95,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
         {
             "id": "record",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "timeout": 300,
             "cwd": repo,
             "cmd": f"{STEPS_PY} record --promote --head {shlex.quote(head)} --base {shlex.quote(base)} --prs {QUEUE_PRS}",
@@ -109,7 +109,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
         steps = _promote_steps_normal(promote, wait, timeout, approved, record)
     else:
         steps = _promote_steps_mvv(a, repo, head, base, promote, wait, timeout, verify, mvv, approved, record)
-    return release_plan(a, repo, "配布（昇格）", RULE_PROMOTE, steps, condition)
+    return release_plan(a, repo, "リリース（昇格）", RULE_PROMOTE, steps, condition)
 
 
 def _promote_steps_normal(promote: str, wait: str, timeout: int, approved: dict, record: list) -> list:
@@ -118,7 +118,7 @@ def _promote_steps_normal(promote: str, wait: str, timeout: int, approved: dict,
         {
             "id": "promote",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "timeout": timeout,
             "cmd": promote + wait + f" --out {PROMOTE_MATERIAL}",
             "gate_next": "end",
@@ -142,7 +142,7 @@ def _promote_steps_mvv(
         {
             "id": "prepare",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "timeout": 300,
             "cmd": f"{promote} --prepare --out {PROMOTE_MATERIAL}",
             "next": "mvv",
@@ -156,7 +156,7 @@ def _promote_steps_mvv(
         {
             "id": "promote",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "timeout": timeout,
             "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
             "on_fail": "handoff",
@@ -205,7 +205,7 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
         )
         steps = [facts, *mvv_gate_steps(mvv_cmd, note_cmd, "end"), handoff_step(state, "関門 2", "判定のコメント")]
     steps.append(reject_step(state, "関門 2", "facts", root=repo))
-    return release_plan(a, repo, "配布（承認ゲート 2）", RULE_GATE_2, steps, condition)
+    return release_plan(a, repo, "リリース（承認ゲート 2）", RULE_GATE_2, steps, condition)
 
 
 RULE_GATE_2 = (

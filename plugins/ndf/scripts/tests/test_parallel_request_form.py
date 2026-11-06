@@ -1,4 +1,4 @@
-"""配布の依頼のメッセージの形（`contracts/forms/parallel-request.json`）を、書き手の検査と送るメッセージで縛る（#2436）。"""
+"""リリースの依頼のメッセージの形（`contracts/forms/parallel-request.json`）を、書き手の検査と送るメッセージで縛る（#2436）。"""
 
 from __future__ import annotations
 

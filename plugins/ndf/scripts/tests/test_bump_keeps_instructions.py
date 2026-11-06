@@ -1,7 +1,7 @@
 """開発版の `bump` の後も、指示書の読み込み量の判定が Pull Request の時点と変わらない（#1739）。
 
 `release-steps.py bump` は版数を持つ箇所を書き換える。指示書（`AGENTS.md` / `CLAUDE.md`）を
-書き換えると、Pull Request の CI で上限ちょうどだった読み込み量が、配布の `sync-check` で初めて
+書き換えると、Pull Request の CI で上限ちょうどだった読み込み量が、デプロイの `sync-check` で初めて
 上限を超える。ここでは ai-plugins の形の一時リポジトリで `bump` → `instructions-check.py` を順に
 走らせ、指示書の内容と判定が `bump` の前後で同じことを確かめる。
 """

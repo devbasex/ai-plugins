@@ -117,7 +117,7 @@ def fake_run(e):
                         plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
                         plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
                 (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
-                (out / "prod.json").write_text(json.dumps({"フェーズ": "配布（本番）", "課題": issues}))
+                (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
                 design = [str(plans[f"design-{n}"]) for n in issues]
                 stages = [
                     {"name": "設計", "plans": design, "command": "queue " + " ".join(design) + " --max 3"},
@@ -1032,7 +1032,7 @@ def approve_gate_2(lap):
 def test_gate_2_resume_continues_from_the_step_of_the_route(env, plan, steps, want):
     lap = built_lap(env)
     p = Path(lap["out"]) / plan
-    p.write_text(json.dumps({"フェーズ": "配布（本番）", "課題": [11, 12], "steps": [{"id": s} for s in steps]}))
+    p.write_text(json.dumps({"フェーズ": "リリース", "課題": [11, 12], "steps": [{"id": s} for s in steps]}))
     assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(p), "result": "関門"}]))["exit"] == 3
     approve_gate_2(sl.current_lap(rec(env)))
     nxt = sl.cmd_start(env, "l1", [], {})["metrics"]["next"]
@@ -1406,13 +1406,13 @@ def test_resume_stopped_refused_continuation_failure_stays_stopped(env, monkeypa
     assert rec(env)["status"] == "stopped"
 
 
-# ---------------- #2436 の受け入れ条件 6a・6d・6e: レーンの配布待ちと質問待ち ----------------
+# ---------------- #2436 の受け入れ条件 6a・6d・6e: レーンのリリース待ちと質問待ち ----------------
 
 REQ = "lroot-r000000000001"
 
 
 def lane_lap(env, nums=(11, 12), rid=REQ, rank=None):
-    """並列の計画のレーンの周回: 本番のステージが配布の依頼のプラン（フェーズ「配布の依頼」）で、依頼の記録がある。"""
+    """並列の計画のレーンの周回: 本番のステージがリリースの依頼のプラン（フェーズ「リリースの依頼」）で、依頼の記録がある。"""
     env.rank_box["out"] = rank or rank_out(ms("01 近い", [11, 12, 13]))
     env.answer_box = {}
     env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
@@ -1422,7 +1422,7 @@ def lane_lap(env, nums=(11, 12), rid=REQ, rank=None):
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     prod = Path(lap["out"]) / "prod.json"
-    prod.write_text(json.dumps({"フェーズ": "配布の依頼", "課題": list(nums), "並列の計画": "p1"}, ensure_ascii=False))
+    prod.write_text(json.dumps({"フェーズ": "リリースの依頼", "課題": list(nums), "並列の計画": "p1"}, ensure_ascii=False))
     work = prod.with_name("prod-state") / "work"
     work.mkdir(parents=True, exist_ok=True)
     (work / "request.txt").write_text(json.dumps({"id": rid, "plan": "p1", "lane": "lroot", "prs": [5]}))
@@ -1441,7 +1441,7 @@ def test_release_request_closes_the_lap_as_release_pending_and_goes_on(env):
     assert out["status"] == "ok" and "ndf_next" in out["metrics"]  # gate2_returned で止まらない
     r = rec(env)
     done = r["laps"][0]
-    assert done["outcome"] == "配布待ち" and r["status"] == "running"
+    assert done["outcome"] == "リリース待ち" and r["status"] == "running"
     assert done["release"]["plan_name"] == "p1" and done["release"]["request"] == REQ
     assert done["release"]["close_plans"]  # まとめは流さずに残す
     assert sl.current_lap(r) is None
@@ -1498,14 +1498,14 @@ def test_failed_answer_closes_the_lap_as_failed(env):
     env.answer_box[REQ] = {"answer": {"result": "failed", "reason": "CI"}, "defer": None}
     sl_select.cmd_select(env, "l1")
     lap = rec(env)["laps"][0]
-    assert lap["outcome"] == "失敗" and lap["failure"]["kind"] == "配布"
+    assert lap["outcome"] == "失敗" and lap["failure"]["kind"] == "デプロイ"
 
 
 def test_defer_keeps_the_lap_pending(env):
     request_lap(env)
-    env.answer_box[REQ] = {"answer": None, "defer": {"seq": 1, "reason": "次の配布へ"}}
+    env.answer_box[REQ] = {"answer": None, "defer": {"seq": 1, "reason": "次のデプロイへ"}}
     out = sl_select.cmd_select(env, "l1")
-    assert rec(env)["laps"][0]["outcome"] == "配布待ち" and out["metrics"]["selected"] == [13]
+    assert rec(env)["laps"][0]["outcome"] == "リリース待ち" and out["metrics"]["selected"] == [13]
 
 
 def test_waiting_only_when_pending_laps_reach_the_limit(env):

@@ -4,7 +4,7 @@
     python3 release-steps.py verify-facts --base <ベースブランチ> --verify <コマンド> --out <承認資料> [--root <dir>]
 
 deploy-facts は手動反映の本番系（#1454）の承認ゲート 2 の材料、verify-facts は経路 merge / promote の fast / auto の
-導入の確認の材料（#1457。配布の宣言は読まない）。
+導入の確認の材料（#1457。リリースの設定は読まない）。
 
 `verify`（`.ndf/pace.json` の `<節>.verify`）を `root` で `sh -c` で走らせ、本番系へ届ける行（`production: true` と、
 `production` の無い手動の行）の target・trigger、ベースブランチの先頭のコミット（本番へ届けるのはこのコミットに限る）、
@@ -169,7 +169,7 @@ def deploy_facts(root, verify: str, out: str) -> tuple[list[dict], dict]:
     decl = delivery.load_delivery(root)
     if decl.problems or decl.rows is None:
         why = " / ".join(decl.problems) or "delivery が無いか不明"
-        raise StepError(f"配布の宣言を読めない: {why}", EXIT_UNREADABLE)
+        raise StepError(f"リリースの設定を読めない: {why}", EXIT_UNREADABLE)
     rows = deploy_rows(decl)
     base = decl.base or ""
     m = run_verify(root, base, verify, out)

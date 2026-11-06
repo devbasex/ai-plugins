@@ -1,4 +1,4 @@
-"""並列の計画のレーンの側（#2436）: 自分が属する計画の判定（I12）・すでに配布済みかの判定（I15）・配布の依頼を送る・
+"""並列の計画のレーンの側（#2436）: 自分が属する計画の判定（I12）・すでにリリース済みかの判定（I15）・リリースの依頼を送る・
 答えを読む（待たずに読むのと待つのの両方）・プランの本数を返す。
 
 環境変数 `NDF_ORGANIZER_DIR` があれば、外のオーガナイザーのレーンとして判定し、計画名の代わりに `--external` を返す
@@ -158,7 +158,7 @@ def merged_on_production(root: Path, prs: list[int], run=subprocess.run) -> bool
 def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
     """`prs` を含む範囲のイベント `range-<連番>` の版（無ければ None）。
 
-    `range-<連番>` は出せた配布にだけあり、差し戻し・失敗の配布の連番は欠ける。欠番で打ち切らず、配布の置き場
+    `range-<連番>` は出せたリリースにだけあり、差し戻し・失敗のリリースの連番は欠ける。欠番で打ち切らず、リリースの置き場
     `releases/<連番>/` のある連番をすべて読む。"""
     import durable
 
@@ -193,7 +193,7 @@ REQUEST_ID_RE = re.compile(r"^([a-z0-9][a-z0-9_-]{0,31})-r\d{12}$")
 
 
 def request_errors(msg: object) -> list[str]:
-    """配布の依頼のメッセージの形の誤り（`contracts/forms/parallel-request.json`）。空なら形に合う。"""
+    """リリースの依頼のメッセージの形の誤り（`contracts/forms/parallel-request.json`）。空なら形に合う。"""
     if not isinstance(msg, dict):
         return ["オブジェクトでない"]
     errs = []
@@ -215,7 +215,7 @@ def request_errors(msg: object) -> list[str]:
 
 
 def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
-    """配布の依頼を話題 `inbox` へ送る。冪等の鍵は `<ID>:inbox:<依頼>`。依頼の ID を返す。"""
+    """リリースの依頼を話題 `inbox` へ送る。冪等の鍵は `<ID>:inbox:<依頼>`。依頼の ID を返す。"""
     import durable
 
     rid = lane_request_id(state, lane)
@@ -378,7 +378,7 @@ def send_answer(
 
 
 def requests_for(main: Path, name: str) -> list[dict]:
-    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローが配布を組むたびに書く。無ければ空）。"""
+    """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローがリリースを組むたびに書く。無ければ空）。"""
     p = pp.plan_dir(main, name) / "releases" / "requests.json"
     try:
         return json.loads(p.read_text(encoding="utf-8"))

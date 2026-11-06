@@ -6,7 +6,7 @@
 承認ゲート 2 を人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
 （`refused`）の 3 つだけで、周回は進行中のまま残す。
 
-並列の計画のレーン（#2436）では、配布の依頼を送った周回を「配布待ち」、作業の途中の問いをオーガナイザーへ送った周回を
+並列の計画のレーン（#2436）では、リリースの依頼を送った周回を「リリース待ち」、作業の途中の問いをオーガナイザーへ送った周回を
 「質問待ち」で締め、答えを待たずに次の周回へ進む。保留の周回は、周回の境で答えを読んで 1 回だけ締め直す（I1 の例外）。
 
 外の世界（gh・`upkeep.py rank`・`supervise.py`・`sprint-state.py` の別の副命令）は `Env` の関数を通して呼び、テストで
@@ -33,6 +33,7 @@ import clock
 import design_pr_merge
 import handoff_doc
 import jsonio
+import legacy_values
 import locks
 import parallel_files
 import project_mvv as pm
@@ -185,7 +186,7 @@ def loop_record_path(env: Env, name: str) -> Path:
 def read_loop_record(env: Env, name: str) -> dict:
     p = loop_record_path(env, name)
     try:
-        rec = jsonio.read(p, want=dict)
+        rec = legacy_values.normalize_laps(jsonio.read(p, want=dict))
     except jsonio.JsonReadError as e:
         raise LoopError(f"ループの記録が無いか読めない: {p}（{e.detail or e}）")
     check_laps(rec)
@@ -203,7 +204,7 @@ def check_laps(rec: dict) -> None:
 
 def write_record(env: Env, rec: dict, before: dict | None = None) -> None:
     """記録を書く。終わった周回の行を書き換える書き込みは拒む（I1）。`laps.md` も描き直す。
-    保留の周回（配布待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
+    保留の周回（リリース待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
     check_laps(rec)
     if before is not None:
         old = {lap["n"]: lap for lap in before.get("laps", []) if lap.get("outcome") not in (IN_PROGRESS, *PENDING)}
@@ -237,7 +238,7 @@ def current_lap(rec: dict) -> dict | None:
 
 
 def pending_laps(rec: dict) -> list[dict]:
-    """保留の周回（配布待ち・質問待ち）を古い順に。"""
+    """保留の周回（リリース待ち・質問待ち）を古い順に。"""
     return [lap for lap in rec.get("laps", []) if lap.get("outcome") in PENDING]
 
 
@@ -307,7 +308,7 @@ def failure_streak(rec: dict) -> tuple[dict | None, int]:
             break
         if lap.get("outcome") == DONE:
             break
-        if lap.get("outcome") != FAILED:  # 保留の周回（配布待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
+        if lap.get("outcome") != FAILED:  # 保留の周回（リリース待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
             continue
         k = lap.get("failure")
         if key is None:

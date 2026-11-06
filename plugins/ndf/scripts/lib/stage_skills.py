@@ -14,6 +14,8 @@ import json
 import re
 from pathlib import Path
 
+import legacy_values
+
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "stage-skills.json"
 SKILLS = HERE.parents[1] / "skills"
@@ -58,7 +60,7 @@ def skills_for_step(step: dict, table: dict) -> list[str]:
     """ステップへ届ける Skill の名前（I4）。`skills` があればそれ、無ければ工程の行（無ければ空）に `skills_add` を足す。"""
     base = step.get("skills")
     if base is None:
-        base = table["stages"].get(step.get("stage") or "", [])
+        base = table["stages"].get(legacy_values.to_current("stage", step.get("stage") or ""), [])
     out: list[str] = []
     for n in [*base, *(step.get("skills_add") or [])]:
         if n not in out:

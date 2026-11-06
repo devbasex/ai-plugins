@@ -82,10 +82,8 @@ def r6(tmp_path):
         "実装",
         report("実装", "#1054", "止まった", "https://github.com/devbasex/ai-plugins/pull/1058", "2.170", reason="merge のステップで衝突"),
     )
-    prod = write_plan(
-        tmp_path, "plan-release-prod", [1053, 1054], "配布（本番）", report("配布（本番）", "#1053 #1054", "完了", "無し", "0.000")
-    )
-    dev = write_plan(tmp_path, "plan-release-dev", [1053, 1054], "配布（開発版）", None)
+    prod = write_plan(tmp_path, "plan-release-prod", [1053, 1054], "リリース", report("リリース", "#1053 #1054", "完了", "無し", "0.000"))
+    dev = write_plan(tmp_path, "plan-release-dev", [1053, 1054], "開発版のデプロイ", None)
     done = tmp_path / "queue-done.json"
     done.write_text(
         json.dumps(
@@ -383,11 +381,11 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
     assert [(r["gate"], r["outcome"]) for r in answer_rows()][-2:] == [("関門 1", "approved"), ("関門 2", "approved")]
     # 差し戻しは関門を通さず、状態ファイルを変えずに差し戻しの記録へ 1 行だけ書く（#1833）
     before_reject = m
-    code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--outcome", "rejected", "--pr", "7")
+    code, out, m = gate(sprint, tmp, "関門 3", "--what", "デプロイ", "--outcome", "rejected", "--pr", "7")
     assert (code, out["summary"]) == (0, f"関門 3 の差し戻しを書いた（{GATE_AT}。関門は通さない）")
     assert (out["items"], out["metrics"], m) == ([], {"gates": 2}, before_reject)
     assert "rejections" not in m
-    assert rejection_rows() == [rejection(sprint, tmp, "関門 3", "配布", m, prs=[7])]
+    assert rejection_rows() == [rejection(sprint, tmp, "関門 3", "デプロイ", m, prs=[7])]
     # --withdraw はほかの指定と併せると止まり、外す記録が無くても取り消しの時刻を残す
     for extra in (("--outcome", "approved"), ("--by", "mvv"), ("--by", "mvv", "--verdict", "follow")):
         assert gate(sprint, tmp, "関門 2", "--withdraw", *extra) == (
@@ -415,8 +413,8 @@ def mvv_gate_paths(sprint: str, tmp: Path) -> None:
     g1 = {"name": "関門 1", "what": "設計", "at": GATE_AT, "by": "mvv", "verdict": "follow", "reasons": ["Value 1"], "log": ""}
     code, out, m = gate(sprint, tmp, "関門 1", "--what", "設計", "--by", "mvv", "--verdict", "follow", "--reasons", '"Value 1"')
     assert (code, out["summary"], m["gates"]) == (0, f"関門 1 のMVV 判定を書いた（{GATE_AT}）", [*kept, g1])
-    g3 = {"name": "関門 3", "what": "配布", "at": GATE_AT, "by": "mvv", "verdict": "unknown", "reasons": [], "log": ""}
-    code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--by", "mvv", "--verdict", "unknown", "--outcome", "approved")
+    g3 = {"name": "関門 3", "what": "デプロイ", "at": GATE_AT, "by": "mvv", "verdict": "unknown", "reasons": [], "log": ""}
+    code, out, m = gate(sprint, tmp, "関門 3", "--what", "デプロイ", "--by", "mvv", "--verdict", "unknown", "--outcome", "approved")
     assert (code, out["items"], out["metrics"], m["gates"]) == (0, [*kept, g1, g3], {"gates": len(kept) + 2}, [*kept, g1, g3])
     # 取り消すと同じ名前の by: mvv の記録だけが外れ、以後その関門へ --by mvv を書かない
     code, out, m = gate(sprint, tmp, "関門 1", "--withdraw")
@@ -638,7 +636,7 @@ def load_sprint_state():
 @pytest.mark.parametrize("key", ["フェーズ", "持ち場"])
 def test_plan_kind_reads_the_old_key_too(tmp_path, key):
     plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({key: "配布（開発版）"}, ensure_ascii=False))
+    plan.write_text(json.dumps({key: "開発版のデプロイ"}, ensure_ascii=False))
     assert load_sprint_state().plan_kind(str(plan)) == "開発版"
 
 

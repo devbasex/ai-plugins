@@ -13,6 +13,7 @@ from pathlib import Path
 
 import gh_sections
 import jsonio
+import legacy_values
 import project_mvv as pm
 import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
@@ -107,7 +108,7 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "c
     """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。
     記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。
     版も渡さない。周回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
-    まとめの配布の版は流す時点に次に空いている版で決める（#2164）。"""
+    まとめのデプロイの版は流す時点に次に空いている版で決める（#2164）。"""
     prev = rec["laps"][lap["n"] - 2] if lap["n"] >= 2 else None
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
@@ -151,7 +152,7 @@ def read_done_items(path: str) -> list[dict]:
 
 def plan_info(plan: str) -> dict:
     try:
-        return json.loads(Path(plan).read_text(encoding="utf-8"))
+        return legacy_values.current_plan(json.loads(Path(plan).read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
 
@@ -254,7 +255,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     if stop := mvv_change_stop(env, rec):
         return stop_and_report(env, rec, before, stop, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
     request = next((i["plan"] for i in gated if plan_info(i["plan"]).get("フェーズ") == RELEASE_REQUEST_PHASE), None)
-    if request:  # 並列の計画のレーンが配布の依頼を送った: 承認ゲート 2 として止まらず、配布待ちで締めて次の周回へ（#2436 の 6a）
+    if request:  # 並列の計画のレーンがリリースの依頼を送った: 承認ゲート 2 として止まらず、リリース待ちで締めて次の周回へ（#2436 の 6a）
         return handle_release_pending(env, rec, before, lap, request)
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
@@ -300,17 +301,17 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None 
     return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
 
 
-RELEASE_REQUEST_PHASE = "配布の依頼"  # parallel_release.RELEASE_REQUEST_PHASE（配布の依頼のプランの「フェーズ」）
+RELEASE_REQUEST_PHASE = "リリースの依頼"  # parallel_release.RELEASE_REQUEST_PHASE（リリースの依頼のプランの「フェーズ」）
 
 
 def request_record(plan: str) -> tuple[Path, dict]:
-    """配布の依頼のプランの状態ディレクトリの `work/request.txt`（`parallel.py request` が書く）のパスと中身。"""
+    """リリースの依頼のプランの状態ディレクトリの `work/request.txt`（`parallel.py request` が書く）のパスと中身。"""
     out = Path(plan).with_name(Path(plan).stem + "-state") / "work" / "request.txt"
     return out, jsonio.read(out, missing={}, broken={}, want=dict)
 
 
 def handle_release_pending(env: Env, rec: dict, before: dict, lap: dict, plan: str) -> dict:
-    """配布の依頼を送った周回を「配布待ち」で締める。まとめ（同じ queue の残りのステージと close）は流さずに記録へ残し、
+    """リリースの依頼を送った周回を「リリース待ち」で締める。まとめ（同じ queue の残りのステージと close）は流さずに記録へ残し、
     答えを待たずに次の周回へ進む。答えは周回の境（`pending_step`）で読む。"""
     out, sent = request_record(plan)
     rest = [s for s in stages_after(lap, plan) if s and s != lap.get("close_plans")]
@@ -324,11 +325,13 @@ def handle_release_pending(env: Env, rec: dict, before: dict, lap: dict, plan: s
     }
     close_lap(env, rec, lap, RELEASE_PENDING)
     lap["held_at"] = lap["ended_at"]
-    return after_close(env, rec, before, f"周回 {lap['n']} の配布の依頼（{sent.get('id') or '識別子なし'}）を送り、配布待ちで締めた")
+    return after_close(
+        env, rec, before, f"周回 {lap['n']} のリリースの依頼（{sent.get('id') or '識別子なし'}）を送り、リリース待ちで締めた"
+    )
 
 
 def finish_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None) -> None:
-    """保留の周回（配布待ち・質問待ち）を 1 回だけ締め直す（I1 の例外）。結果・終わった時刻・費用と秒・振り返り・棚卸しを書き換える。"""
+    """保留の周回（リリース待ち・質問待ち）を 1 回だけ締め直す（I1 の例外）。結果・終わった時刻・費用と秒・振り返り・棚卸しを書き換える。"""
     if lap.get("outcome") not in PENDING:
         raise LoopError(f"周回 {lap['n']} は保留の周回でない（締め直しは 1 回だけ）")
     lap["outcome"] = IN_PROGRESS

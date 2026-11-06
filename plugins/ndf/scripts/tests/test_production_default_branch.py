@@ -162,13 +162,13 @@ def new_args(main: Path, kind: str = "sprint", **kw) -> argparse.Namespace:
 
 
 def test_template_and_route_decision_use_the_same_production_branch(tmp_path, monkeypatch):
-    """受け入れ条件 7・I3: 同じ起動の中で、雛形の引数と配布の判定の宣言の本番チャネルが同じ値になる。"""
+    """受け入れ条件 7・I3: 同じ起動の中で、雛形の引数とリリースの判定の宣言の本番チャネルが同じ値になる。"""
     main = make_repo(tmp_path, "trunk")
     monkeypatch.chdir(main)
     a = new_args(main)
     sdecl.apply_decls(a)
     assert a.production_branch == "trunk"
-    a.production_branch = None  # 引数を外しても、配布の判定は同じ木から同じ既定ブランチを解く
+    a.production_branch = None  # 引数を外しても、デプロイの判定は同じ木から同じ既定ブランチを解く
     assert sdecl.delivery_decl(a).production == "trunk"
 
 

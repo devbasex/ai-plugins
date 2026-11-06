@@ -21,7 +21,7 @@ QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致す�
 QUEUE_RECORD = "{queue_record}"  # 計画の `課題` のリリース記録を置いた PR（#2230）
 QUEUE_STATE = re.compile(r"\{queue_state(\??):([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）。`?` 付きは無ければ空
 # 名前の一致する完了した計画の状態ディレクトリの `work/prs.txt`（空白区切りの Pull Request）・`work/approved.txt`（承認したコミット）。
-# まとめた配布の本番のプランが、提示のプランの結果を読む（#2436）
+# まとめたリリースの本番のプランが、提示のプランの結果を読む（#2436）
 QUEUE_WORK = re.compile(r"\{queue_(prs|approved):([A-Za-z0-9._-]+)\}")
 WORK_FILES = {"prs": "prs.txt", "approved": "approved.txt"}
 
@@ -372,11 +372,11 @@ def _fill_prod(f: _Fill, rec: dict | None):
 
 
 def fill_release_version(plan: str, items: list[dict]) -> tuple[str | None, dict | None]:
-    """配布のプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
+    """リリースプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
     (埋められない理由, キューの項目に載せる `version`) を返す。どちらも None なら流してよい。「版」の欄を持たないプランは触らない。
 
     開発版は、記録が無ければ origin から次に空いている版を決めて（明示の版はまだ出ていないかを確かめて）記録を書く。記録が
-    あれば記録の版を使い、それがもう出ていて自分の配布のマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
+    あれば記録の版を使い、それがもう出ていて自分のリリースのマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
     明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。承認ゲート 2 の後に開発版の記録の版が変わったら止める。"""
     try:
         text = Path(plan).read_text()

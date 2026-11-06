@@ -244,7 +244,7 @@ def apply_decls(a) -> None:
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 整形（a.format）: supervise.json の format（無ければ計画に format のステップを置かない）
     - 用語集の有無（a.glossary_ready）: `glossary_ready`（真なら実装の指示に用語集と突き合わせる行を入れる）
-    - 配布（a.release）: supervise.json の release
+    - デプロイ（a.release）: supervise.json の release
     - 実装の上限（a.impl_timeout）と想定最大時間（a.refactor_budget_minutes）: 引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
 
@@ -312,7 +312,7 @@ def _require_declared(a) -> None:
             a.strategy is None,
             f"テストの宣言（.ndf/{project_decl.DECL.name} の test か --test-cmd、または .ndf/{SUPERVISE_DECL} の test.command）",
         ),
-        "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
+        "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"リリースの形（.ndf/{SUPERVISE_DECL} の release.form）"),
     }
     lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
     if lack:
@@ -320,7 +320,7 @@ def _require_declared(a) -> None:
 
 
 def delivery_decl(a) -> "delivery.DeliveryDecl":
-    """配布の判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production_branch）が
+    """リリースの判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production_branch）が
     宣言より先に効く。読めない宣言は `problems` に書き、例外を上げない。"""
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     problems = []

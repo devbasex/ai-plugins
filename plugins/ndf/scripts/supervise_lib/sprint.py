@@ -61,7 +61,7 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
 
 
 def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。並列の計画のレーンなら配布の依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+    """本番のステージのプラン。並列の計画のレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
     lane = parallel_lane(repo)
     if lane:
         from parallel_release import plan_release_request
@@ -168,7 +168,7 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """まとめ: 確定仕様化 → Pull Request →（配布の記録があれば）リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。"""
+    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
@@ -280,7 +280,7 @@ MERGE_STAGE = "設計 PR のマージ"
 
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
-    normal は承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → 配布）を、最初の
+    normal は承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → デプロイ）を、最初の
     ステージの command 1 本に --then でつなぐ（#1426 の決定 5・I9）。承認ゲート 2 の後の本番は別の command にする。
     リリースの経路が雛形で組むものでなければ、経路ごとのステージ（route_waves）を最後に置く。"""
     build = PACE_PLANS.get(getattr(a, "pace", "normal"))
@@ -307,14 +307,14 @@ def sprint_plans(a) -> list[dict]:
     ]
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
-    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
-    if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
+    release = {"name": "デプロイ", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
+    if not has_prod_branch(a):  # 本番を組めないなら今のままリリースで終える（#1914 の決定 3）
         if advise:
             release["note"] = normal_gate_2(a)
         return waves + [release]
     prod = prod_version(a.version)
-    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、配布の依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
-        # 本番は配布の後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
+    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、リリースの依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
+        # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
     return waves + [
         release,
@@ -482,7 +482,7 @@ def next_text(pace: str, index: list[dict], advise: bool = False, no_prod: bool 
     if advise:
         nxt += (
             "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・承認ゲート 2 の文（関門 2 のステージの gate か、"
-            "配布の後のステージの note）にある "
+            "デプロイの後のステージの note）にある "
             "sprint-state.py gate（--what と --by user。関門 1 は --pr も）を打つ"
         )
     if pace == "auto":

@@ -1,4 +1,4 @@
-"""まとめの課題から GitHub の参照をたどり、リリース記録（`## 配布の記録`）を置いた PR を 1 本決める（#2230）。
+"""まとめの課題から GitHub の参照をたどり、リリース記録（`## リリース記録`）を置いた PR を 1 本決める（#2230）。
 
 queue の差し込み `{queue_record}`（`supervise_lib/queue_fill.py`）だけが呼ぶ。決め方（設計 `issues/issue-2230-design.md`
 の `find_record` の規則）:
@@ -7,7 +7,7 @@ queue の差し込み `{queue_record}`（`supervise_lib/queue_fill.py`）だけ�
 2. そのうち本文の closing keywords か閉じる予定の参照（`closing.closing_refs`）がその課題を指すものを、スプリントの PR とする。
    閉じる PR が見つかった課題が 0 件なら見つからない
 3. 候補はスプリントの PR と、スプリントの PR の履歴の参照のうち Pull Request のものの和
-4. 候補ごとに最後のリリース記録を読み、段階が本番か配布なし（`dist_record.released`）で、`スプリント:` の PR が
+4. 候補ごとに最後のリリース記録を読み、段階が本番かデプロイなし（`dist_record.released`）で、`スプリント:` の PR が
    閉じる PR の見つかった課題の 1 件ごとにその閉じる PR を 1 本以上含むものだけを残す
 5. 残った記録の `スプリント:` の並び（番号の集合）が 2 通り以上なら特定できない（見つからない）
 6. 残った中で記録のコメントの識別子（本文は 0）が最も大きいもの、同じなら PR の番号の大きいものを採る
@@ -55,7 +55,7 @@ class RecordHit:
         others = [n for n in self.searched if n not in self.closers]
         refs = f"と、それを参照する PR {' '.join(f'#{n}' for n in others)} " if others else ""
         tail = f"（本番の前の記録だけ: PR {' '.join(f'#{n}' for n in self.pre_release)}）" if self.pre_release else ""
-        return f"課題 {issues} を閉じる PR {closers} {refs}を読んだが、本番か配布なしの段階のリリース記録が無い{tail}"
+        return f"課題 {issues} を閉じる PR {closers} {refs}を読んだが、本番かデプロイなしの段階のリリース記録が無い{tail}"
 
 
 class _Unreadable(Exception):
@@ -110,7 +110,7 @@ def _record_candidates(root, repo: str, closers: tuple[int, ...]) -> set[int]:
 
 
 def _released_records(root, repo: str, cands: set[int], closers_of: dict[int, set[int]]) -> tuple[list, list[int]]:
-    """候補ごとに最後のリリース記録を読み、(本番か配布なしで閉じる PR を含む記録, 本番の前の記録の PR) に振り分ける。"""
+    """候補ごとに最後のリリース記録を読み、(本番かデプロイなしで閉じる PR を含む記録, 本番の前の記録の PR) に振り分ける。"""
     kept, pre = [], []
     for pr in sorted(cands):
         try:

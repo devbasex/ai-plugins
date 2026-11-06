@@ -51,7 +51,7 @@ BODY = """# 例のプロジェクト MVV
 
 | # | 操作 | 理由 |
 | --- | --- | --- |
-| P1 | 配布の規則を変える | 利用者全員に効く |
+| P1 | デプロイの規則を変える | 利用者全員に効く |
 
 ## 改訂
 
@@ -220,7 +220,7 @@ def candidate(cid: str, ev: str = "S1") -> dict:
         "mission": {"text": "手を減らす", "evidence": [ev]},
         "vision": {"text": "2 回だけ止まる", "evidence": [ev]},
         "values": [{"title": "まず届ける", "text": "早く出す", "evidence": [ev]}],
-        "redlines": [{"id": "P1", "text": "配布の規則を変える", "reason": "全員に効く", "evidence": [ev]}],
+        "redlines": [{"id": "P1", "text": "デプロイの規則を変える", "reason": "全員に効く", "evidence": [ev]}],
     }
 
 
@@ -730,7 +730,7 @@ def gate_state(env, tmp: Path, with_sprint: bool) -> Path:
 
 def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
     material = env["tmp"] / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     log = env["tmp"] / "gate.jsonl"
     code, out, text = run(
         env,

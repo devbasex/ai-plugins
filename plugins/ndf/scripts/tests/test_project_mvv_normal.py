@@ -41,7 +41,7 @@ def normal_state(env, *extra: str, name: str = "m.json") -> Path:
 
 def advise(env, state: Path, *extra: str) -> tuple[int, dict, list[dict], Path]:
     material = env["tmp"] / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     log, note = env["tmp"] / "gate.jsonl", env["tmp"] / "note.md"
     args = ["check", "--sprint", str(state), "--gate", "release", "--material", str(material), "--log", str(log)]
     code, out, text = run(env, *args, "--root", str(env["root"]), "--note", str(note), "--advise", *extra, script=GATE_PY)
@@ -321,7 +321,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "sprint/m26")
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "--what <要約> --by user --pr <設計 PR>" in waves["関門 1"]["gate"] and "--by user" in waves["関門 2"]["gate"]
-    assert "note" not in waves["配布"] and "'関門 2' --what" in waves["関門 2"]["gate"]
+    assert "note" not in waves["デプロイ"] and "'関門 2' --what" in waves["関門 2"]["gate"]
     # 状態があれば承認の記録は本番のプランの先頭の approve が書き、conductor は打たない（#1426 の決定 1）
     assert "--approved-sha" not in waves["関門 2"]["gate"]
     assert waves["関門 2"]["gate"].index("'関門 2' --what") < waves["関門 2"]["gate"].index("「本番」のステージ")
@@ -335,7 +335,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     assert ds["mvv"]["cmd"].endswith("--advise") and "--gate design --pr {pr}" in ds["mvv"]["cmd"]
     assert (ds["mvv"]["on_fail"], ds["mvv-note"]["on_fail"], ds["mvv-note"]["next"]) == ("mvv-note", "gate", "gate")
     assert "mvv" in ds["gate"]["inputs"] and "gate_next" not in ds["mvv"]
-    rel = steps_of(load(waves["配布"]["plans"][0]))
+    rel = steps_of(load(waves["デプロイ"]["plans"][0]))
     assert (
         rel["explain"]["next"] == "others"
         and rel["others"]["next"] == "mvv"

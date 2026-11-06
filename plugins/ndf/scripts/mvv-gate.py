@@ -5,7 +5,7 @@
                               [--material <ファイル>...] [--pr N...] [--mode M]
                               [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>] [--advise]
 
-`pace: fast` と `pace: auto` の関門 1（設計の承認）と関門 2（本番への配布の承認）を、利用者が承認した MVV への事前の
+`pace: fast` と `pace: auto` の関門 1（設計の承認）と関門 2（本番へのリリースの承認）を、利用者が承認した MVV への事前の
 承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに関門へ戻す。
 
 1. プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`。#1366）が 未承認・承認と一致しない・壊れている のどれでもない
@@ -70,7 +70,7 @@ import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 
 TOOL = "mvv-gate"
-GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本番への配布の承認）"}
+GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本番へのリリースの承認）"}
 GATE_NAMES = {"design": GATE_1, "release": GATE_2}  # sprint-state.py の関門の記録の名前
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 VERDICTS = ("follow", "not_follow", "unknown")
@@ -84,7 +84,7 @@ MVV に従う変更なら関門での個別の承認を省いてよいと決め�
 
 - 共通原則に反せず、Mission と Vision に沿い、Value のどれにも反しないなら follow
 - どれかに反するなら not_follow。材料から読み取れず決められないなら unknown（迷ったら unknown）
-- 配布の前に取れない実測（配布した後の効果）は判定の対象にしない。配布の後の測定へ回るものとして扱い、
+- デプロイの前に取れない実測（デプロイした後の効果）は判定の対象にしない。デプロイの後の測定へ回るものとして扱い、
   それが無いことだけを理由に unknown にしない
 - 必ず人の承認が要る操作（共通原則の C の番号・プロジェクト MVV の P の番号・スプリント MVV の越えない線）に当たる変更を
   含むなら、boundary にその中身を書く（boundary が空でなければ関門は省かれない）
