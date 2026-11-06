@@ -67,7 +67,12 @@ def prior_id(loop: str, issue: int, lap: int, head: str = "") -> str:
 def _other_plan_running(main: Path, w: dict) -> bool:
     import parallel_lane as pl
 
-    return bool(w.get("request") and w.get("plan")) and pl.run_status(main, w["plan"]) in pl.RUNNING
+    if not (w.get("request") and w.get("plan")):
+        return False
+    try:
+        return pl.run_status(main, w["plan"]) in pl.RUNNING
+    except Exception:  # noqa: BLE001 — 計画の状態を読めなければ動いていないものとして問いへ出す（埋もれさせない）
+        return False
 
 
 def prior_rows(main: str | Path, name: str) -> tuple[list[tuple[str, dict]], list[dict]]:

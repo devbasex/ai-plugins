@@ -11,10 +11,12 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import gate1_requests as gr1
 import gh_sections
 import jsonio
 import legacy_values
 import project_mvv as pm
+import revise_note
 import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
 from lap_cost import lap_cost
@@ -218,16 +220,21 @@ def waiting_section(rec: dict, w: dict) -> str:
         *([f"- 利用者へ戻した理由: {w['returned']}"] if w.get("returned") and not w.get("answer") else []),
         f"- 答え方: `{how}`",
     ]
-    if w.get("note"):  # 直して出し直す（#2436 の 6e）: 次の周回の設計がこの指摘を読む
-        lines += ["", "### 直して出し直す指摘", "", w["note"]]
+    if w.get("answer") == "revise":  # 指摘の全文は残る節に置き、ここは回を指す（#2510 の決定 6）
+        lines.append(f"- 指摘: 節「{revise_note.HISTORY.removeprefix('## ')}」の開発ループ {rec['name']} の第 {w['revise_count']} 回")
+        if w.get("missing"):
+            lines.append(f"- 届いていない項目: {'、'.join(w['missing'])}")
     return "\n".join(lines)
 
 
 def mark_issue(env: Env, rec: dict, w: dict) -> str | None:
-    """課題の本文に「人の判断待ち（開発ループ <名>）」の節を書く（本文全体を書き直す）。書けなければ理由を返す。"""
+    """課題の本文に「人の判断待ち（開発ループ <名>）」の節を書く（本文全体を書き直す）。直して出し直すの行は、回を残す節
+    「出し直しの指摘の履歴」へも 1 回分を追記する。書けなければ理由を返す。"""
     heading = f"## 人の判断待ち（開発ループ {rec['name']}）"
     try:
         body = env.issue_body(w["number"])
+        if w.get("answer") == "revise":
+            body = revise_note.with_history(body, rec["name"], w)
         env.edit_issue(w["number"], gh_sections.replace_section(body, heading, waiting_section(rec, w)))
     except OSError as e:
         return str(e)
@@ -367,9 +374,12 @@ def move_to_waiting(
             }  # fmt: skip
             if pr is not None:  # 承認した先端（#2507）: 並列の計画の外でも書き、答えの時点の先端と比べる
                 w["stamp"] = design_head(env, w)
-            if pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
+            auto = apply_table_check(env, rec, w, int(n))
+            if not auto and pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
                 w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えは周回の境で読む（#2436 の 6c）
             rec["waiting"].append(w)
+            if auto:
+                count_revise(rec, w)
             lap.setdefault("gates", []).append(gate_copy(DESIGN_GATE, row))
             moved.append(int(n))
             if err := mark_issue(env, rec, w):
@@ -377,6 +387,38 @@ def move_to_waiting(
     kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved and n not in unfinished]
     lap["issues_kept"] = kept
     return moved, kept, notes
+
+
+def count_revise(rec: dict, w: dict) -> None:
+    """直して出し直すの行の回数（ループの記録の、その課題の出し直しの行の数）を書く。"""
+    w["revise_count"] = sum(1 for x in rec.get("waiting", []) if x["number"] == w["number"] and x.get("answer") == "revise")
+
+
+def table_check(env: Env, rec: dict, w: dict, n: int) -> dict | None:
+    """出し直しの指摘を持つ課題の、設計文書の表を設計 PR の本文へ写して突き合わせる（`revise-note.py check` と同じ関数）。
+    指摘の回が無ければ None。"""
+    data, _ = revise_note.collect(env.main_dir(), rec, n)
+    if data is None:
+        return None
+    cwd, pr = str(env.main_dir()), w.get("pr")
+    doc = revise_note.doc_at_head(env.run, cwd, pr, n, w.get("stamp") or "") if pr is not None else None
+    if doc is None:
+        return {"code": revise_note.CHECK_UNREADABLE, "missing": [], "reason": "設計 PR か設計文書を読めない"}
+    return revise_note.check_table(env.run, cwd, pr, doc, data)
+
+
+def apply_table_check(env: Env, rec: dict, w: dict, n: int) -> bool:
+    """人の判断待ちへ移す前の突き合わせ。欠けがあり上限の内なら行を自動の出し直しにして True（人へ問わず、依頼も送らない）。
+    上限に達したか表を読めなければ、理由を添えて人へ問う行のまま False。"""
+    got = table_check(env, rec, w, n)
+    if got is None or got["code"] == revise_note.CHECK_OK:
+        return False
+    if got["code"] == revise_note.CHECK_MISSING and revise_note.may_return(rec, n):
+        w.update(answer="revise", answered_at=env.now(), by=revise_note.AUTO, note="", missing=got["missing"])
+        return True
+    why = f"届いていない項目: {'、'.join(got['missing'])}" if got["missing"] else f"表を読めなかった: {got['reason']}"
+    w["reason"] = f"{w['reason']}／{why}"
+    return False
 
 
 def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", stamp: str | None = None) -> dict | None:
@@ -404,23 +446,67 @@ def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", sta
 
 
 def design_head(env: Env, w: dict) -> str:
-    code, so, _ = env.run(["gh", "pr", "view", str(w["pr"]), "--json", "headRefOid", "-q", ".headRefOid"], cwd=str(env.main_dir()))
-    return so.strip() if code == 0 else ""
+    return gr1.design_head(env, w)
 
 
-def regate1(env: Env, w: dict) -> bool:
-    """承認の答えを当てる前に、問いの時点の設計 PR の先端（stamp）と今の先端を比べる。動いていれば新しい先端で問い直し、
-    読めなければ次の境で読み直す（どちらも True。古い範囲への答えで承認を書かない）。印の無い古い依頼は比べない。"""
+def carried_over(env: Env, w: dict, head: str | None = None) -> bool:
+    """今の先端が行の承認した先端と同じか、取り込みのコミットだけの違いなら、行の先端を今の先端へ書き換えて True（承認を引き継ぐ）。"""
+    head, stamp = head if head is not None else design_head(env, w), w.get("stamp") or ""
+    if head and head == stamp:
+        return True
+    if not head or gr1.merge_only(env.run, env.main_dir(), int(w["pr"]), w["number"], stamp, head) is not True:
+        return False
+    w["stamp"] = head
+    return True
+
+
+def lane_unmatched(env: Env, rid: str, reason: str) -> None:
+    """当たらなかった答えをオーガナイザーへ知らせる。レーンでない・送れなければ何もしない（答えは耐久の記録に残る）。"""
+    try:
+        import parallel_lane
+
+        got = parallel_lane.lane_of(env.main_dir())
+        if got:
+            parallel_lane.send_unmatched(env.main_dir(), got[0], got[1].name, rid, reason)
+    except Exception:  # noqa: BLE001 — 知らせを送れなくても周回は止めない
+        return
+
+
+def regate1(env: Env, w: dict, answered: bool = True) -> bool:
+    """承認の答えを当てる前に、問いの時点の設計 PR の先端（stamp）と今の先端を比べる。取り込みのコミットだけなら行の先端を
+    書き換えて当てる（False）。それ以外は新しい先端で問い直し、読めなければ次の境で読み直す（どちらも True。古い範囲への答えで
+    承認を書かない）。印の無い古い依頼は比べない。問い直すときは前の依頼を `requests_before` へ移す（`answered` は今の依頼への
+    答えを読んだか。読んだ答えは当たらないため 1 回だけ知らせ、判定済みで移す）。"""
     stamp = w.get("stamp") or ""
     if not stamp.strip("0"):
         return False
     head = design_head(env, w)
-    if head == stamp:
+    if carried_over(env, w, head):
         return False
     if head and (sent := lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")):
+        if answered:
+            lane_unmatched(env, w["request"], f"設計 PR #{w['pr']} が問いの後に取り込み以外で動いた（{stamp[:12]} → {head[:12]}）。新しい先端で問い直した")
+        w.setdefault("requests_before", []).append({"id": w["request"], "stamp": stamp, "settled": answered})
         w.pop("returned", None)  # 前に利用者へ戻した印と理由は新しい先端の問いに当てはまらない
         w.update(sent, restamped=stamp)
     return True
+
+
+def answer_before(env: Env, w: dict, answers: dict) -> dict | None:
+    """問い直した行の、前の依頼の id への答えを判定する。その印から今の先端まで取り込みのコミットだけなら答えを返し、
+    違えば当たらなかった答えとして知らせる。どちらでも要素を判定済みにする。先端を読めなければ次の境で読み直す。"""
+    for b in w.get("requests_before") or []:
+        a = (answers.get(b["id"]) or {}).get("answer")
+        if b.get("settled") or not isinstance(a, dict):
+            continue
+        head = design_head(env, w)
+        if not head:
+            return None
+        b["settled"] = True
+        if gr1.merge_only(env.run, env.main_dir(), int(w["pr"]), w["number"], b.get("stamp") or "", head) is True:
+            return a
+        lane_unmatched(env, b["id"], f"前の依頼の先端から設計 PR #{w['pr']} が取り込み以外で動いたため、答えを当てない")
+    return None
 
 
 def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:

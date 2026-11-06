@@ -16,6 +16,7 @@ import design_pr_merge
 import jsonio
 import project_mvv as pm
 import repo as repo_lib
+import revise_note
 import run_environment
 import sprint_loop_gate
 import sprint_mvv
@@ -285,12 +286,33 @@ def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -
     return init
 
 
+def design_issues(rec: dict, lap: dict) -> list[int]:
+    """周回で設計する課題（設計を承認済みの課題を除く）。"""
+    approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
+    return [n for n in selected_issues(lap) if n not in approved]
+
+
+def revise_notes(env: Env, rec: dict, lap: dict) -> tuple[list[str], list[str]]:
+    """設計する課題のうち出し直しの指摘を持つものの入力ファイルを周回のディレクトリへ書き、`new sprint` の引数と
+    読めずに飛ばしたループの名前を返す（#2510 の決定 1）。"""
+    argv, skipped = [], set()
+    for n in design_issues(rec, lap):
+        data, others = revise_note.collect(env.main_dir(), rec, n)
+        skipped |= set(others)
+        if data is None:
+            continue
+        path = revise_note.input_path(lap["dir"], n)
+        revise_note.write_input(path, data)
+        argv += ["--revise-note", f"{n}={path}"]
+    return argv, sorted(skipped)
+
+
 def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[str]:
     """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外して --designed へ入れ、
     設計の結果のステージ（supervise.py design-results）で設計の結果を読んで実装のプランへ渡す。"""
     issues = selected_issues(lap)
     approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
-    design = [n for n in issues if n not in approved]
+    design = design_issues(rec, lap)
     dev = lap["versions"]["dev"]
     new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
     new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"], "--version", dev, "--out", lap["out"]]
@@ -323,7 +345,11 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip())
         if mvv.is_file():
             copy_mvv_gate(rec, lap, state, mvv)
-        new = new_sprint_argv(root, rec, lap, extra)
+        try:
+            notes, skipped = revise_notes(env, rec, lap)
+        except OSError as e:
+            return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e))
+        new = new_sprint_argv(root, rec, lap, [*notes, *extra])
         code, so, se = env.run(new, cwd=root)
         lap["sprint_command"] = shlex.join(new)
         if code != 0:
@@ -347,7 +373,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         return loop_ok(
             f"周回 {lap['n']} のスプリント {lap['sprint']} を pace: auto で組んだ",
             rec,
-            [{"command": lap["sprint_command"]}, {"command": lap["close_command"]}],
+            [{"command": lap["sprint_command"]}, {"command": lap["close_command"]}, *({"skipped_loop": x} for x in skipped)],
             status="sprint",
             next_=pipeline,
             state_path=str(state),
@@ -408,7 +434,7 @@ def regated_answer(env: Env, w: dict) -> str | None:
     答えを当てずに行の承認した先端を今の先端へ書き換え、答え直しを促す 1 行を返す。読めなければ比べない（マージの部品が読み直す）。"""
     head = sprint_loop_gate.design_head(env, w)
     stamp = w.get("stamp") or ""
-    if not head or head == stamp:
+    if not head or head == stamp or (stamp.strip("0") and sprint_loop_gate.carried_over(env, w, head)):
         return None
     w.update(stamp=head, restamped=stamp)
     if not stamp.strip("0"):
@@ -427,7 +453,7 @@ def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note
     notes: list[str] = []
     if answer == "revise":
         w["note"] = note or ""
-        w["revise_count"] = sum(1 for x in rec.get("waiting", []) if x["number"] == w["number"] and x.get("answer") == "revise")
+        sprint_loop_gate.count_revise(rec, w)
         if err := mark_issue(env, rec, w):
             notes.append(err)
         return notes
@@ -459,6 +485,8 @@ def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
     承認ならラベル design-approved を付けて承認を書き、直して出し直すなら指摘を、やらないなら差し戻しを書く。"""
     for w in [w for w in rec.get("waiting", []) if w.get("request") and not w.get("answer")]:
         a = (answers.get(w["request"]) or {}).get("answer")
+        if not isinstance(a, dict):  # 問い直した行は、前の依頼への答えも読む（#2510 の I10）
+            a = sprint_loop_gate.answer_before(env, w, answers)
         if not isinstance(a, dict):
             continue
         result = a.get("result")

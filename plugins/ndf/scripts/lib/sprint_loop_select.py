@@ -8,6 +8,7 @@ import shlex
 import sys
 
 import design_pr_merge
+import gate1_requests as gr1
 import project_mvv as pm
 import sprint_mvv
 
@@ -40,8 +41,10 @@ from sprint_loop_record import (
 
 from sprint_loop_gate import (
     MERGED_RESULTS,
+    carried_over,
     design_head,
     giveback_design,
+    lane_gate1,
     loop_ok,
     note_merge,
     reask_design,
@@ -122,8 +125,10 @@ def prerequisite_reason(row: dict) -> str:
     return "前提の課題の実装待ち（" + " ".join(f"#{b}" for b in sorted(row["prerequisites"])) + "）"
 
 
-def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
+def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set, prior: dict | tuple = ()) -> str | None:
     n = row["number"]
+    if n in prior:  # 問いの一覧に出ている前のループの待ち（#2510 の受け入れ条件 13）。棚卸しの判断待ちより先に見る
+        return f"人の判断待ち（開発ループ {prior[n]}）"
     if row.get("waiting_decision"):
         return "人の判断待ち（棚卸し）"
     if n in pending_issues(rec):  # 締め直すまで選ばない（選ぶと保留中の実装と作業が重なる。#2436 の 6a）
@@ -192,7 +197,7 @@ def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
     if res in MERGED_RESULTS:
         w["merged_at"] = env.now()
         return None
-    if res in ("head_moved", "no_stamp"):
+    if res == "no_stamp" or (res == "head_moved" and not carried_over(env, w)):  # 取り込みのコミットだけなら承認を引き継いでマージし直す
         return f"#{w['number']} の設計 PR #{pr} を新しい先端で問い直した" if reask_design(env, rec, w, design_head(env, w)) else None
     if res == "production":  # 宛先は周回を重ねても変わらない。人がリリース承認ゲートでマージしたかだけを読む
         if env.pr_state(pr) == "MERGED":
@@ -242,6 +247,9 @@ def _settle_conflict(env: Env, rec: dict, w: dict, m: dict, lap_n: int) -> str |
     code, so, se = env.run([sys.executable, str(design_pr_merge.MERGED_STEPS), "base-sync", "--pr", str(w["pr"]), "--push"], cwd=wt)
     if code == 0:
         head = design_head(env, w)
+        if head and head != (w.get("stamp") or "") and carried_over(env, w, head):
+            w.pop("merge", None)  # 取り込みのコミットだけなので承認を引き継ぎ、次の境でマージし直す
+            return f"#{w['number']} の設計 PR #{w['pr']} にベースブランチを取り込み、承認を引き継いだ"
         if head and head != (w.get("stamp") or "") and reask_design(env, rec, w, head):
             return f"#{w['number']} の設計 PR #{w['pr']} にベースブランチを取り込み、新しい先端で問い直した"
     if code == 1:
@@ -294,11 +302,11 @@ def _rows_by_rank(ms: dict) -> list[dict]:
     return sorted(ms.get("rows", []), key=lambda r: r["rank"])
 
 
-def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int) -> list[dict]:
+def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int, prior: dict | tuple = ()) -> list[dict]:
     """マイルストーンの候補（切り出しの境界の内）に、境界の外にある先に選ぶ課題を順位の順で足す。
-    保留の周回の課題と今の周回で外した課題（loop exclude）は、境界が無いときの枠を使わない（#2627）。"""
+    保留の周回の課題・今の周回で外した課題（loop exclude）・前のループの待ちの課題は、境界が無いときの枠を使わない（#2627）。"""
     lap_excluded = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == lap_n}
-    cands = candidates_of(ms, rec["max_issues"], pending_issues(rec) | lap_excluded)
+    cands = candidates_of(ms, rec["max_issues"], pending_issues(rec) | lap_excluded | set(prior))
     have = {r["number"] for r in cands}
     return cands + [r for r in _rows_by_rank(ms) if r["number"] in first and r["number"] not in have]
 
@@ -313,8 +321,10 @@ def outside_boundary_rows(ms: dict, cands: list[dict], title: str) -> list[dict]
     ]
 
 
-def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dict, lap_created: set = frozenset()) -> dict:
-    """選定（決定 2）。入力は rank の出力・記録・マイルストーンの説明だけ。戻り値は
+def choose_issues(
+    env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dict, lap_created: set = frozenset(), prior: dict | tuple = ()
+) -> dict:
+    """選定（決定 2）。入力は rank の出力・記録・マイルストーンの説明と、前のループの待ち（課題 → ループの名前）だけ。戻り値は
     {"milestone", "selection", "candidates"}。選べたマイルストーンが無ければ milestone は None。"""
     m = rank.get("metrics") or {}
     by_title = {ms["title"]: ms for ms in m.get("milestones", [])}
@@ -325,7 +335,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
     approved = approved_designs(rec, lap_n)
     for title in order:
         ms = by_title[title]
-        cands = milestone_candidates(ms, rec, first, lap_n)
+        cands = milestone_candidates(ms, rec, first, lap_n, prior)
         total += len(cands)
         text = sprint_mvv.mvv_sections(descriptions.get(title) or "")
         unapproved = text is not None and (title, pm.sha256_text(text)) not in approvals
@@ -333,7 +343,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
             cands,
             title,
             rec["max_issues"],
-            (lambda r: "スプリント MVV が未承認") if unapproved else (lambda r: exclusion_reason(env, rec, r, lap_n, lap_created)),
+            (lambda r: "スプリント MVV が未承認") if unapproved else (lambda r: exclusion_reason(env, rec, r, lap_n, lap_created, prior)),
             first,
             approved,
         )
@@ -365,10 +375,48 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     if got is not None:
         return got
     settle_approved_designs(env, rec)  # 選定の前に、承認済みで未マージの設計 PR をマージし直す（#2507）
+    notes = lane_sends(env, rec)
     stop = held_stop(rec, boundary_stop(env, rec))
     if stop:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
-    return run_selection(env, rec, before, len(rec["laps"]) + 1)
+    return run_selection(env, rec, before, len(rec["laps"]) + 1, notes=notes)
+
+
+def lane_plan(env: Env) -> str | None:
+    """自分が属する動いている並列の計画の名前。レーンでない・外のオーガナイザーのレーンなら None（問いを依頼にしない）。"""
+    import parallel_external as pe
+    import sprint_loop
+
+    plan = sprint_loop.lane_plan_name(env)
+    return None if not plan or pe.is_external(plan) else plan
+
+
+def lane_sends(env: Env, rec: dict) -> list[dict]:
+    """レーンの周回の境: 自分の行で依頼の id を持たないもの（送れなかった依頼）を送り直し、前のループの待ちを送る（#2510 の
+    受け入れ条件 12・13）。読めずに飛ばしたループを結果の項目の形で返す。"""
+    plan = lane_plan(env)
+    if plan is None:
+        return []
+    for w in rec.get("waiting", []):
+        if w.get("pr") and not w.get("answer") and not w.get("request"):
+            if sent := lane_gate1(env, w, w.get("report") or "", w.get("state") or ""):
+                w.update(sent)
+    import parallel_lane
+
+    main = env.main_dir()
+    msgs, skipped = gr1.prior_requests(main, plan, env.now(), env.run)
+    try:
+        for msg in msgs:
+            parallel_lane.send_prior(main, plan, msg)
+    except Exception as e:  # noqa: BLE001 — 送れなければ次の境で送り直す（周回は止めない）
+        skipped = [*skipped, {"loop": msg["loop"], "reason": f"依頼を送れない: {e}"[:200]}]
+    return [{"skipped_loop": s["loop"], "reason": s["reason"]} for s in skipped]
+
+
+def prior_issues(env: Env) -> dict[int, str]:
+    """レーンなら、前のループの答えがまだの行を持つ課題（課題 → ループの名前）。レーンでなければ空。"""
+    plan = lane_plan(env)
+    return {w["number"]: loop for loop, w in gr1.prior_rows(env.main_dir(), plan)[0]} if plan else {}
 
 
 def has_held_work(rec: dict) -> bool:
@@ -448,7 +496,7 @@ def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, 
     return new
 
 
-def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None) -> dict:
+def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None, notes: list[dict] = ()) -> dict:
     add_env_exclusions(rec, n)
     code, rank = env.rank(env.main_dir())
     if code not in (0, PAUSE_RANK):
@@ -457,7 +505,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         descriptions = env.milestones(rec.get("repo") or "")
     except OSError as e:
         return refusal_order(str(e))
-    got = choose_issues(env, rec, rank, n, descriptions, set((lap or {}).get("created") or []))
+    got = choose_issues(env, rec, rank, n, descriptions, set((lap or {}).get("created") or []), prior_issues(env))
     if got["milestone"] is None:
         return _stop_without_issue(env, rec, before, got, rank, lap)
     new = _open_lap(env, rec, before, got, rank, n, lap)
@@ -467,7 +515,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
     return loop_ok(
         f"周回 {n} の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),
         rec,
-        got["selection"],
+        [*got["selection"], *notes],
         status="selected",
         next_=nxt,
         selected=chosen,

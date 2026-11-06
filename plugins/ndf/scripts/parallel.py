@@ -215,7 +215,7 @@ def cmd_wait(a) -> None:
     if got.kind == "done":
         o = got.value or {}
         lanes = [{"lane": n, **st} for n, st in sorted((o.get("lanes") or {}).items())]
-        reply("ok", f"並列の計画 {a.name} は {o.get('status')} で終わった", lanes, action=o.get("status"), releases=o.get("releases"))
+        reply("ok", f"並列の計画 {a.name} は {o.get('status')} で終わった", lanes, action=o.get("status"), releases=o.get("releases"), prior_waits=o.get("prior_waits") or [])
     reply("stopped", f"耐久ワークフローが {got.kind} で終わった: {got.value}", code=1, action=got.kind)
 
 

@@ -424,7 +424,7 @@ def test_gate1_answer_event_carries_the_merge_result_and_who_approved(env, tmp_p
     rid = pl.request_gate1(main, "p1", "la", 11, 501, "r.md", "s.json", "a" * 40, verdict="unknown")
     again = pl.request_gate1(main, "p1", "la", 11, 501, "r.md", "s.json", "a" * 40, suffix="-m3")
     assert again == f"{rid}-m3"
-    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == again])  # 同じ行の新しい依頼が前の依頼を置き換える（#2510 の I11）
     pl.send_answer(main, "p1", rid, "approved", merge={"result": "merged"}, by="mvv")
     ans = until(lambda: pl.answers_of(main, "p1", [rid])[rid]["answer"])
     assert ans["merge"] == {"result": "merged"} and ans["by"] == "mvv"
@@ -1325,3 +1325,124 @@ def test_new_record_replays_to_the_same_values(env, tmp_path):
     prun.open_parallel_record(main, "p1")
     out = stop(main)
     assert out["status"] == "stopped" and [(r["n"], r["state"], r["requests"]) for r in out["releases"]] == [(1, "released", [rid])]
+
+
+# ---- 答えの届け方（#2510） ----
+
+
+def _route(monkeypatch, lanes=None):
+    run = _bare_run(monkeypatch, lanes or [{"name": "la", "input": {"kind": "loop"}}, {"name": "lb", "input": {"kind": "loop"}}])
+    box = _answers(monkeypatch)
+    for ln in run.lanes.values():
+        ln.update(started=True, state="stopped")
+    return run, box
+
+
+def test_an_answer_wakes_a_stopped_loop_lane_that_waits_on_its_record(monkeypatch):
+    """記録が waiting_only で止まったループのレーンも起こす対象に入り、知らせに起こす 1 行が付く（#2474 の原因）。"""
+    run, box = _route(monkeypatch)
+    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: ["la"])
+    run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
+    run.reply({"id": "q", "result": "approved"})
+    assert box["answer-q"]["result"] == "approved" and run.revive == ["la"] and run.wake == ["la"]
+    assert "restart la" in box["pause"]["wake"][0]
+
+
+def test_a_stopped_loop_lane_that_does_not_wait_is_not_woken(monkeypatch):
+    run, _ = _route(monkeypatch)
+    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: [])
+    run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
+    run.reply({"id": "q", "result": "approved"})
+    assert run.revive == [] and run.wake == []
+
+
+def test_an_unknown_answer_is_held_and_shown_as_unmatched_until_the_question_arrives(monkeypatch):
+    run, box = _route(monkeypatch)
+    run.take({"kind": "answer", "id": "q1", "result": "approved"})
+    q = run.questions[0]
+    assert (q["kind"], q["id"], q["answered"], q["options"]) == ("unmatched", "q1-unmatched", "q1", ["確かめた"])
+    assert q["reason"] and box["questions"]["items"] == [q]
+    run.take({"kind": "ask", "id": "q1", "lane": "la", "question": "?"})
+    assert run.questions == [] and box["answer-q1"]["result"] == "approved"
+
+
+def test_a_lane_notice_of_an_unmatched_answer_blocks_the_finish_until_answered(monkeypatch):
+    run, _ = _route(monkeypatch)
+    run.take({"kind": "unmatched", "id": "a-unmatched", "answered": "a", "lane": "la", "reason": "動いた", "question": "?"})
+    run.ls_ok = True
+    assert not prun._run_finished(run)
+    run.reply({"id": "a-unmatched", "result": "answered", "choice": ["確かめた"]})
+    assert prun._run_finished(run)
+
+
+def test_a_new_request_of_the_same_row_replaces_the_old_and_the_old_answer_wakes_the_owner(monkeypatch):
+    run, box = _route(monkeypatch)
+    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: ["la"])
+    run.take({"kind": "gate1", "id": "la-g1-a", "lane": "la", "pr": 1, "stamp": "a"})
+    run.take({"kind": "gate1", "id": "la-g1-b", "lane": "la", "pr": 1, "stamp": "b"})
+    run.take({"kind": "gate1", "id": "la-g1-c", "lane": "la", "pr": 1, "stamp": "c"})
+    run.take({"kind": "gate1", "id": "lb-g2-a", "lane": "lb", "pr": 2, "stamp": "z"})
+    q = run.questions[0]
+    assert [x["id"] for x in run.questions] == ["la-g1-c", "lb-g2-a"]
+    assert q["replaced"] == [{"id": "la-g1-b", "stamp": "b"}, {"id": "la-g1-a", "stamp": "a"}]
+    run.reply({"id": "la-g1-a", "result": "approved"})
+    assert box["answer-la-g1-a"]["result"] == "approved" and run.wake == ["la"] and len(run.questions) == 2
+
+
+PRIOR = {"kind": "gate1", "id": "lroot2-w12-l3", "loop": "lroot2", "issue": 12, "pr": 412, "lap": 3, "stamp": "a"}
+
+
+def test_prior_waits_enter_the_list_once_and_do_not_block_the_finish(monkeypatch):
+    run, _ = _route(monkeypatch)
+    run.receive_prior({"requests": [PRIOR], "skipped": []})
+    run.take(dict(PRIOR))  # レーンの周回の境からの同じ行
+    assert [q["id"] for q in run.questions] == ["lroot2-w12-l3"] and prun._run_finished(run)
+    assert [q["id"] for q in run.summary("finished")["prior_waits"]] == ["lroot2-w12-l3"]
+
+
+def test_a_skipped_loop_is_shown_like_an_unmatched_answer(monkeypatch):
+    run, _ = _route(monkeypatch)
+    run.receive_prior({"requests": [], "skipped": [{"loop": "bad", "reason": "壊れている"}]})
+    assert run.questions[0]["kind"] == "unmatched" and "bad" in run.questions[0]["question"]
+
+
+def test_an_answer_to_a_prior_wait_goes_to_its_loop(monkeypatch):
+    run, box = _route(monkeypatch)
+    calls = []
+    monkeypatch.setattr(prun, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append((q["id"], a["result"], stamp)) or {})
+    run.questions = [dict(PRIOR)]
+    run.reply({"id": PRIOR["id"], "result": "approved"})
+    assert calls == [(PRIOR["id"], "approved", None)] and run.questions == [] and box[f"answer-{PRIOR['id']}"]["result"] == "approved"
+    assert run.revive == []
+
+
+def test_a_prior_head_that_moved_replaces_the_question_and_an_old_answer_lands_on_merge_only(monkeypatch):
+    run, _ = _route(monkeypatch)
+    new = {**PRIOR, "id": "lroot2-w12-l3-bbb", "stamp": "b"}
+    monkeypatch.setattr(prun, "step_prior_answer", lambda *a: {"reask": new})
+    run.questions = [dict(PRIOR)]
+    run.reply({"id": PRIOR["id"], "result": "approved"})
+    assert [q["id"] for q in run.questions] == [new["id"]] and run.questions[0]["replaced"] == [{"id": PRIOR["id"], "stamp": "a"}]
+    run.answered.discard(PRIOR["id"])  # 置き換える前の id へ後から答えた形
+    calls = []
+    monkeypatch.setattr(prun, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append(stamp) or {})
+    run.reply({"id": PRIOR["id"], "result": "approved"})
+    assert calls == ["a"] and run.questions == []
+
+
+def test_a_prior_answer_that_cannot_land_is_unmatched(monkeypatch):
+    run, _ = _route(monkeypatch)
+    monkeypatch.setattr(prun, "step_prior_answer", lambda *a: {"unmatched": "断った"})
+    run.questions = [dict(PRIOR)]
+    run.reply({"id": PRIOR["id"], "result": "rejected"})
+    assert [q["kind"] for q in run.questions] == ["unmatched"] and run.questions[0]["reason"] == "断った"
+
+
+def test_a_replay_of_an_old_record_keeps_the_old_steps(monkeypatch):
+    run, box = _route(monkeypatch)
+    run.routed = False
+    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: pytest.fail("古い記録の打ち直しでは打たない"))
+    run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
+    run.reply({"id": "q", "result": "approved"})
+    run.reply({"id": "unknown", "result": "approved"})
+    assert run.questions == [] and "unknown" in run.held
