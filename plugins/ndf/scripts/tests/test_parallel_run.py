@@ -525,6 +525,24 @@ def test_three_spawn_refusals_raise_a_question(env, monkeypatch):
     assert item["lane"] == "la" and "limit" in item["question"] and len(calls(env["log"], "spawn")) >= 3
 
 
+@pytest.mark.parametrize("value, want", [("5", 5), (None, 3), ("0", 3), ("x", 3)])
+def test_the_refusals_before_asking_can_be_overridden(monkeypatch, value, want):
+    if value is None:
+        monkeypatch.delenv("NDF_PARALLEL_SPAWN_REFUSALS", raising=False)
+    else:
+        monkeypatch.setenv("NDF_PARALLEL_SPAWN_REFUSALS", value)
+    assert prun.spawn_refusals() == want
+
+
+def test_five_spawn_refusals_raise_a_question_when_overridden(env, monkeypatch):
+    monkeypatch.setenv("FAKE_REFUSE", "la")
+    monkeypatch.setenv("NDF_PARALLEL_SPAWN_REFUSALS", "5")
+    main = env["main"]
+    start(main)
+    item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "spawn"])[0]
+    assert "5 回" in item["question"] and len(calls(env["log"], "spawn")) >= 5
+
+
 def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
     main, states = env["main"], env["states"]
     start(main)

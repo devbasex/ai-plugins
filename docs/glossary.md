@@ -216,7 +216,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 周回 | — | 開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 選定 | — | 開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
 | 前提の課題 | — | ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
-| ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。周回の数と経過時間は宣言に数を書いたときだけ効き、書かない・null は無制限である | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。どの単位も宣言に数を書いたときだけ効き、書かない・null は無制限である | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 止まる条件 | — | 開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | ループの記録 | — | 開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | スプリントブランチ | — | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | ミッションブランチ、ミッションのブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -316,7 +316,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 予算の反映 | — | 開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない | — | — | — |
-| 予算の既定 | — | 開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は NDF の組み込みの値（周回 3・費用 60 USD・時間 24 時間）。Factory の画面で予算の欄を空にした単位はこの値へ戻る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 予算の既定 | — | 開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は無制限。Factory の画面で予算の欄を空にした単位はこの値へ戻る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | 既定へ戻す指示 | — | 開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする。Factory は予算の欄が空の単位をこの指示として実行ジョブの指示に載せる | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
 | 予算の履歴 | — | 開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す | — | — | — |
 | 人の判断待ちの行 | — | 開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語 | — | — | — |
