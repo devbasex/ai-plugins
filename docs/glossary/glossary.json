@@ -4955,6 +4955,34 @@
       "code": "run_log"
     },
     {
+      "term": "起点の実行",
+      "context": "ndf-workflow",
+      "meaning": "親の実行の識別子を持たない実行。実行の記録のファイル名になる（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "子の実行",
+      "context": "ndf-workflow",
+      "meaning": "実行の核を通る入口が子プロセスとして起こした、核を通る入口の実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "診断",
+      "context": "ndf-workflow",
+      "meaning": "スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "全文ファイル",
+      "context": "ndf-workflow",
+      "meaning": "実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-design.md"
+    },
+    {
       "term": "上限の宣言",
       "context": "ndf-workflow",
       "meaning": "上限の秒・再試行の回数・同じ原因の上限を、方針の名前ごとに持つ 1 つのファイル（plugins/ndf/contracts/limits.json。#2335）",
