@@ -221,6 +221,21 @@ def cgroup_dir(root: Path = CGROUP_ROOT, proc_cgroup: Path = PROC_SELF_CGROUP) -
     return root
 
 
+def self_cgroup(path: Path = PROC_SELF_CGROUP) -> str:
+    """自分の cgroup の行（`/proc/self/cgroup`）。読めなければ OSError。"""
+    return path.read_text(encoding="utf-8")
+
+
+def cgroup_cpu(directory: Path | None = None) -> float | None:
+    """cgroup の `cpu.max` が許す CPU の数。上限が無い（`max`）・読めないときは None。"""
+    d = cgroup_dir() if directory is None else Path(directory)
+    try:
+        quota, period = (d / "cpu.max").read_text(encoding="utf-8").split()
+        return None if quota == "max" else int(quota) / int(period)
+    except (OSError, ValueError):
+        return None
+
+
 def _read_int(path: Path) -> int | None:
     try:
         return int(path.read_text(encoding="utf-8").strip())

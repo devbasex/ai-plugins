@@ -19,29 +19,28 @@ from pace import PaceError, read_loop
 BASE_CORES, BASE_GIB, BASE_PLANS = 8, 30, 6  # 実測の起点
 CONTAINER_CGROUP = re.compile(r"docker|kubepods|containerd|lxc")
 PARALLEL_PLANS = Path(".ndf") / "parallel"
-PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 
 
-def place(proc_cgroup: Path = PROC_SELF_CGROUP, dockerenv: Path = Path("/.dockerenv")) -> str:
+def place(proc_cgroup: Optional[Path] = None, dockerenv: Path = Path("/.dockerenv")) -> str:
     """`factory`（実行ジョブの中）・`container`・`host` のどれか。"""
     if os.environ.get("NDF_FACTORY_RUN"):
         return "factory"
     if dockerenv.exists():
         return "container"
-    return "container" if CONTAINER_CGROUP.search(proc_cgroup.read_text(encoding="utf-8")) else "host"
+    import procs  # psutil の無い環境でも開始を止めない（読めない項目になる）
+
+    text = procs.self_cgroup(proc_cgroup) if proc_cgroup else procs.self_cgroup()
+    return "container" if CONTAINER_CGROUP.search(text) else "host"
 
 
 def cpus(cgroup: Optional[Path] = None) -> float:
     """使える CPU。割り当て（`sched_getaffinity`）と cgroup の `cpu.max` の小さい方。"""
     # os.cpu_count はマシン全体の数でコンテナの制限を見ない。process_cpu_count は Python 3.13 以降
     have = float(len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 0)
-    import procs  # psutil の無い環境でも開始を止めない（読めない項目になる）
+    import procs
 
-    try:
-        quota, period = (Path(cgroup or procs.cgroup_dir()) / "cpu.max").read_text(encoding="utf-8").split()
-    except (OSError, ValueError):
-        return have  # cgroup が無い環境
-    return have if quota == "max" else min(have, int(quota) / int(period))
+    limit = procs.cgroup_cpu(cgroup)
+    return min(have, limit) if limit else have
 
 
 def memory_gib(cgroup: Optional[Path] = None) -> float:

@@ -208,8 +208,8 @@ def load_estimate_decl(root: Path | str | None = None) -> dict:
 
 
 class Decl(schema.Shape):
-    window: int | None = None
-    min_samples: int | None = None
+    window: int | None = None  # 読まない。書いてある宣言を断らないために残す（#2505）
+    min_samples: int | None = None  # 同上
     size_unit_seconds: float | None = None
     scale: list[int] | None = None
     records_dir: str | None = None

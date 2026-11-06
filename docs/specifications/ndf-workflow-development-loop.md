@@ -77,6 +77,8 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | [`lib/sprint_loop_select.py`](../../plugins/ndf/scripts/lib/sprint_loop_select.py) | 選定（`select` / `exclude`）。入力は `rank` の出力・記録・マイルストーンの説明と、環境変数 `NDF_LOOP_EXCLUDE` だけ |
 | [`lib/sprint_loop_gate.py`](../../plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue・まとめのステージ（`new close --pace auto`）の組み立て・周回の締め |
 | [`lib/sprint_loop_record.py`](../../plugins/ndf/scripts/lib/sprint_loop_record.py) | 記録の読み書き（排他・原子的な書き込み・終わった周回の書き換えの拒否）・消費・止まる条件の判定・再開のコマンド・引継ぎ文書・`laps.md` の描画。外の世界（gh・`upkeep.py rank`・`supervise.py`）は `Env` の関数を通して呼び、テストで差し替える |
+| [`lib/lap_cost.py`](../../plugins/ndf/scripts/lib/lap_cost.py) | 周回の費用と内訳を帳簿と報告から導く。帳簿を読めなければ報告の和を使い、周回の締めを止めない |
+| [`lib/run_environment.py`](../../plugins/ndf/scripts/lib/run_environment.py) | 実行環境の調査。読むだけで、読めない項目は `unreadable` に載せる |
 | [`lib/pace.py`](../../plugins/ndf/scripts/lib/pace.py) の `read_loop` | `loop` 節を読み、既定（`LOOP_DEFAULTS`）を埋めて形を確かめる。`read_pace` は `loop` 節を検証しない |
 | [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`・`--loop`・`--lap`、`new sprint --designed` |
 | [`handoff.py`](../../plugins/ndf/scripts/handoff.py) | 名の形（`NAME_RE`）に `loop-<名>` を持つ |
@@ -111,7 +113,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- | --- |
 | `<ループ名>` | 記録の名前（英数字・`-`・`_`。先頭は英数字）。同じ名前の記録があれば再開する | `l<UTC の YYYYMMDD>` |
 | `--milestones` | 選定の対象を絞る | 開いているマイルストーンすべて（`rank` の `order`） |
-| `--budget-*` | 予算を上書きする。値は数か `default`（既定へ戻す指示。その単位を反映の時点の `loop.budget` の値、宣言が無ければ組み込みの既定へ戻す）。数でも `default` でもなければ引数の誤り（終了コード 2）で記録を変えない。変わったときだけ `budget_history` に `{at, from, to}` を 1 行足し、`to` は数である | `loop.budget` |
+| `--budget-*` | 予算を上書きする。値は数か `default`（既定へ戻す指示。その単位を反映の時点の `loop.budget` の値、宣言が無ければ無制限へ戻す）。数でも `default` でもなければ引数の誤り（終了コード 2）で記録を変えない。変わったときだけ `budget_history` に `{at, from, to}` を 1 行足す。`to` の単位の値は数か `null`（無制限）である | `loop.budget` |
 
 再開のコマンド（`ndf-next` の中身。`resume_command`）は
 `/goal /ndf:development-workflow --loop <名> -- 終わり: [ndf-loop] stopped <名> の行を出したとき` である。
@@ -121,16 +123,16 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 ### 設定（`.ndf/pace.json` の `loop` 節）
 
 ```json
-{"loop": {"enabled": false, "budget": {"laps": 3, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 3, "release_pending_max": 2}}
+{"loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
 ```
 
 | 項目 | 形 | 無いとき | 誤っているとき |
 | --- | --- | --- | --- |
 | `loop.enabled` | `true` だけが真 | 偽（ループを断る） | — |
-| `loop.budget` | オブジェクト。`laps`・`usd`・`hours` の正の数（bool は不可）。欠けたキーは既定で埋め、ほかのキーは不可 | 3 / 60 / 24 | `PaceError` |
-| `loop.same_failure` / `loop.max_issues` / `loop.release_pending_max` | 1 以上の整数（bool は不可）。`release_pending_max` は答えの無い保留の周回（配布待ち・質問待ち）を合わせた上限 | 2 / 3 / 2 | `PaceError` |
+| `loop.budget` | オブジェクト。`laps`・`usd`・`hours` の正の数か `null`（bool は不可）。書かない単位と `null` は無制限で、数を書いた単位だけが効く。ほかのキーは不可 | すべて無制限 | `PaceError` |
+| `loop.same_failure` / `loop.max_issues` | 1 以上の整数（bool は不可） | 2 / 3 | `PaceError` |
 
-`PaceError` は `loop start` だけを断る。`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は節の誤りの
+`loop.release_pending_max` は読まない。書いてあっても断らない。`PaceError` は `loop start` だけを断る。`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は節の誤りの
 影響を受けない。
 
 ### 副命令の契約（`sprint-state.py loop`）
@@ -153,7 +155,8 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `approve-mvv <名> --milestone M` | マイルストーンの説明 | `status: approved`（`sprint_mvv_approvals` に `{milestone, sha256, at, by: user}`） | 3 = 説明に `## Mission` / `## Vision` / `## Value` がそろわない |
 | `lap <名> [--failed] [--done D] [--deferred-issues N...]` | スプリント状態（`update` を内で打つ）・done・upkeep の記録 | `status: continue`・`ndf_next`（`ndf-next` のブロック） | done に関門があれば `gate` と同じ / 1 = 進行中の周回が無い / 3 = 境の判定で止まった |
 | `stop <名>` | — | `path`（`.ndf/loop/<名>/stop` に時刻を書く） | — |
-| `status <名> [--json]` / `list <名> [--json]` | 記録・最後の周回の `relay_dir` の `log.jsonl` | `status`・`consumed`・`budget`・`waiting`・止まっていれば `stop` と `stop_line`・ラッパーが上限で止めていれば `relay_max_starts` / 周回の一覧（何周目・選んだ課題・版・費用・秒・結果・止まった理由・後へ回した Issue） | 1 = 記録が無い。`--json` が無ければ文で出す |
+| `environment [--root] [--json]` | 動く場所・CPU・メモリ・計画の状態 | 実行環境の報告（`place`・`cpus`・`memory_gib`・`lanes`・`plans`・`candidates`・`current`・`reason`・`unreadable`）。宣言を書かない | 読めない項目は `unreadable` に載せ、終了コードは 0 |
+| `status <名> [--json]` / `list <名> [--json]` | 記録 | `status`・`consumed`・`budget`・`waiting`・止まっていれば `stop` と `stop_line` / 周回の一覧（何周目・選んだ課題・版・費用・秒・結果・止まった理由・後へ回した Issue） | 1 = 記録が無い。`--json` が無ければ文で出す |
 
 **止まった結果は形が決まっている。** `items` は `[{condition, values, resume}]`、`metrics` は `status: stopped`・`stop`・
 `stop_line`（`[ndf-loop] stopped <名> <condition>`）・`consumed`。止まるたびに引継ぎ文書の「次に実行するコマンド」を
@@ -249,7 +252,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 1 | `user_stop` | `.ndf/loop/<名>/stop` がある | `{at}` |
 | 2 | `mvv_changed` | プロジェクト MVV が未承認か、sha256 が開始時と違う | `{started, now}` |
 | 3 | `same_failure` | 終わった周回を新しい順に見て、`失敗` の周回が同じ `failure` の鍵で `same_failure` 回以上続く。`完了` の周回で数え直す。`same_failure` で止まった後の最後の再開（`resumed_at`）より前に始まった周回は数えない。ほかの理由の再開は区切りにしない | `{key, count}` |
-| 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わった周回の数・`cost` の和・動いていた時間（I8）が予算以上 | `{consumed, budget}` |
+| 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わった周回の数・`cost` の和・動いていた時間（I8）が、数を書いた予算以上。`null` の単位では立たない（境の判定と再開の判定は同じ `over_budget` を読む） | `{consumed, budget}` |
 
 **保留の周回（並列の計画のレーン）があるときの境の順。** `user_stop`・`mvv_changed` はすぐ止まる。次に依頼の答えを古い順に読む:
 オーガナイザーへ送った設計の承認の答え（承認ならラベル `design-approved` と `loop answer --approved` と同じ記録、直して出し直すなら指摘、
@@ -261,8 +264,8 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 先端が進めば問い直す。権限の不足など時間で解けない結果・同じ分類の未緑が 3 周回続いた・基盤待ちの再実行が同じ承認した先端で 3 回に達した
 ときは、承認した先端のまま理由を添えて利用者へ問い直す。宛先が本番の設計 PR はマージせず、`gh pr view` の状態だけを読む）。
 マージ済みになった設計 PR には `merged-steps.py cleanup <PR>` を打つ。この手は保留の周回が無いときも選定の前に打つ（`settle_approved_designs`）。
-その後、答えの無い保留の周回が `release_pending_max` 以上あれば `waiting_only`、3・4 に当たって答えの無い保留の周回があれば
-先に `waiting_only` で止まる。選べる課題が無く、保留の周回かオーガナイザーへ送った答えの無い設計の承認があれば、`no_issue` /
+その後、3・4 に当たって答えの無い保留の周回があれば
+先に `waiting_only` で止まる。保留の周回の数では止まらず、待ちを抱えたまま次の周回を選ぶ。選べる課題が無く、保留の周回かオーガナイザーへ送った答えの無い設計の承認があれば、`no_issue` /
 `outside_mvv` と見直しの代わりに `waiting_only` で止まる（`values: {why, pending, waiting}`）。
 
 選定の時点では `no_issue` / `outside_mvv` / `waiting_only`、周回の途中では `gate2_returned` / `mvv_changed` / `refused`
@@ -308,7 +311,8 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `name` / `repo` / `started_at` / `goal` | 名前・`OWNER/REPO`・開始の時刻（再開で変えない）・`/goal` で始めたか |
 | `project_mvv` | 開始時の承認済みプロジェクト MVV（`{version, sha256}`） |
 | `budget` / `budget_history` | 効いている予算と上書きの履歴 |
-| `same_failure` / `max_issues` / `release_pending_max` / `milestones` | 開始時に設定と引数から写した値 |
+| `same_failure` / `max_issues` / `milestones` | 開始時に設定と引数から写した値 |
+| `environments[]` | 実行環境の報告（`loop start` のたびに通し、候補と今の値が違うか読めない項目があるときだけ足す。追記だけ） |
 | `status` / `stop` / `stops` | `running` / `stopped`・今の止まった理由・過去の止まった理由（追記だけ） |
 | `laps[]` | 周回（追記だけ。I1） |
 | `waiting[]` | 人の判断待ち。答えは行を消さずに `answer`（`approved` / `rejected` / `revise`）・`answered_at` を足す。`approved` の行はマージを確かめた時刻 `merged_at`、だれが承認したか `by`（`user` / `mvv`）、最後の承認した設計のマージの結果 `merge`
@@ -329,7 +333,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `gates[]` | 承認ゲートの判定の写し（`{name, by, verdict, basis, pr, at}`） |
 | `retro` / `refine` | 振り返りの置き場（まとめのプランの報告）・棚卸しの結果 `{report, rank_changes, deferred[]}`（upkeep の記録の `candidates.json`・`rank.json` から） |
 | `created[]` / `deferred_issues[]` | 周回の中で起票された課題（その周回の選定に入れない）・上限で後へ回した Issue（`lap --deferred-issues`） |
-| `cost` / `seconds` | スプリント状態の計画の行の和 |
+| `cost` | 周回の費用。使用量の帳簿の和（Claude の行のうち周回のディレクトリの下のプランを指す行）とスプリント状態の計画の行の和の大きい方。conductor の会話は入らない。USD は定価の見積もりで請求額ではない |
+| `cost_parts` | 周回の費用の内訳 `{source, plans, others, unpriced}`。`source` は `ledger` か `reports`（報告の和が大きい、または帳簿を読めない）。`plans` は `supervise` の起動、`others` は cross-review・MVV 判定ほかの Claude の起動の和。`unpriced` は USD を持たない起動（Codex・Kiro など）の呼び出しの数とトークンで、和に足さない |
+| `seconds` | スプリント状態の計画の行の和 |
 | `outcome` / `failure` | `進行中` / `完了` / `失敗` / `人へ戻した` / `配布待ち` / `質問待ち`・失敗の鍵 |
 | `close_plans` | `loop sprint` が組んだまとめのプラン（保留の周回は答えの後に流す） |
 | `release` | 配布待ちの周回: `plan`・`out`・`request`・`plan_name`・`stages`（同じ queue の残り）・`close_plans`・`answer`（届いた答え）・`finish`（`started_at`・`ended_at`・`done`・`pipeline`） |
@@ -360,8 +366,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | 周回の `created[]` の書き手 | 選定は `created` を外す理由に読むが、10.21.0 の副命令には `created` を書く経路が無い。周回の中で起票された課題がその周回で選ばれないのは、`rank` が段階の付いた課題だけを並べ、段階は棚卸しが付けるためである |
 | 品質の枠の並び | 決定で挙げた「同じ手当てや失敗の繰り返しの回数」は `rank` の入力に無いため数えない（実害の観測 → 起票の古い順 → 今の順位） |
-| 予算の既定値 | 標本は 2 件（#2065・#2086 の設計と実装）で、まとめの費用を含まない。リリース後テストの実測で見直す |
-| 1 周回の費用の上限 | 予算は周回の境でだけ判定するため、超過は高々 1 周回分になる。1 周回が予算を大きく超えるなら、周回の中の上限を別の課題で考える |
+| 1 周回の費用の上限 | 費用の予算を書いたプロジェクトでも、予算は周回の境でだけ判定するため、超過は高々 1 周回分になる。1 周回が予算を大きく超えるなら、周回の中の上限を別の課題で考える |
 | 持ち越しの読み先 | upkeep の記録の置き場（`$NDF_UPKEEP_STATE_DIR`、既定は一時ディレクトリ）が同じマシンで周回をまたいで残る前提である。マシンをまたぐ置き場は #1640 が持つ |
 | `/goal` の評価役 | 止まったときの 1 行を評価役が「条件を満たした」と読んでゴールを終えるかは、評価役の解釈に任される。終わりの条件を再開のコマンドの末尾に書いて読みやすくしている（決定 12） |
 | 失敗で締めた周回の後始末 | 失敗で締めた周回のスプリントブランチと開いた Pull Request は、今の conductor の手当てのまま残る |
@@ -376,7 +381,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 2 | 選定を `rank` の出力と記録だけで決め、1 つのマイルストーンから組む | AI が範囲を広げないため。複数のマイルストーンから混ぜるとスプリント MVV が 2 つ以上になり、着手の順序を飛び越える |
 | 3 | モードと版は conductor が決め、対象外は `loop exclude` で選定へ戻す | 判断をスクリプトへ移さない。外した理由が記録に残るため、同じ入力から同じ組になる |
 | 4 | 承認ゲート 1 で人へ戻した課題は人の判断待ちとして外して続け、承認ゲート 2 で人へ戻したら止まる（承認ゲート 1 で利用者が選択） | 「レッドライン以外で承認を一切求めない」と「決められないときは人へ戻す」の両方を満たす。ループを止めて待つ案は「判定できない」1 件で全体が止まり、「判定できない」を「従う」と見なす案は共通原則に反する。ゲート 2 で止まるのは、本番を出さずに進むと次の本番に判定を通っていない変更が混ざるため |
-| 5 | 予算を周回の数・費用（USD）・経過時間の 3 つにし、既定を 3 周・60 USD・24 時間にする（同上） | 費用と秒はスプリント状態が既に埋めている量で、新しく測る仕組みが要らない。トークン数は周回の単位で集めておらず、費用で同じ目的を果たす。`/goal` の計数は `--continue` / `--resume` でリセットされ、周回ごとにセッションが替わるため使えない。既定は 1 件約 6 USD・L 2〜7 時間の実測から、1 周 3 件で約 20 USD・3 周で 60 USD、24 時間とした |
+| 5 | 予算を周回の数・費用（USD）・経過時間の 3 つにし、どれも書いたときだけ効く形にする（#2505 の承認ゲート 1 で利用者が決めた） | レーンを増やすと固定の周回の数と時間が先に尽きる。無制限を大きな数で代用すると値から意図が読めないので `null` で表す。費用の既定も同じ規則にそろえ、歯止めは同じ失敗の回数と利用プランの上限である。`/goal` の計数は `--continue` / `--resume` でリセットされ、周回ごとにセッションが替わるため使えない |
 | 6 | 記録を `.ndf/loop/<名>/` に置き、`laps.md` を描画し、引継ぎ文書は現在地だけを持つ（同上） | 引継ぎ文書と同じく後片付けで消えず、コミットが要らず、引継ぎ文書の 300 行の上限に周回を載せずに済む。課題のコメントは一覧に GitHub の検索が要り（当てにならないことは #1640 で実測）、`docs/` は周回ごとに Pull Request が要る |
 | 7 | `--loop` と `loop` 節で切り替え、`loop` 節を `read_pace` から分けて読む（同上） | 今の進め方を壊さないため。`pace: loop` を足す案は、周回の中が `auto` そのものなので承認の扱いを 2 つの節で二重に持つ |
 | 8 | 失敗の鍵を「課題の組・計画の種類・止まったところ」にし、既定 2 回で止める（同上） | 理由の文を鍵に含めると文面の揺れで別の鍵になる。2 回は「1 回は立て直してやり直す」を許す回数。Claude Code の安全弁（Tool を使わない応答の連続・Stop hook の block 8 回）はターン単位で、周回をまたぐ失敗を捕まえない |
