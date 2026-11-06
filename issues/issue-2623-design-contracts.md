@@ -6,7 +6,7 @@
 
 ### `delivery` の行に足す欄
 
-どちらも任意で、今の宣言はそのまま読める。形が違うときは宣言を読めない問題として扱い、止める側へ倒す（I4）。
+どれも任意で、今の宣言はそのまま読める。形が違うときは宣言を読めない問題として扱い、止める側へ倒す（I4）。
 
 | 欄 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
@@ -15,13 +15,15 @@
 | `result.workflow` | 文字列 | `command` と排他 | GitHub Actions のワークフローのファイル名 |
 | `result.command` | 文字列 | `workflow` と排他 | シェルで実行するコマンド。`{revision}` を 40 桁のリビジョンへ置き換える。終了コード 0 は成功、75 は待つ、1 は失敗、それ以外は未確定 |
 | `result.timeout_seconds` | 整数 | 許す | 待ちの上限。無ければ 1800 秒 |
+| `publishes_release` | 真偽値 | 許す | 公開の担い手。`kind: auto`・`versioned: true` の行でだけ読む。真なら、この行の CD がリリースタグと GitHub Release を作る。無ければ偽で、NDF の工程が作る |
 
 ### 宣言の例
 
 ```json
 [
-  {"target": "ndf プラグイン（Claude Code・Codex）", "kind": "auto", "channel": "production", "versioned": true,
+  {"target": "ndf プラグイン（Claude Code・Codex）", "kind": "auto", "branch": "main", "channel": "production", "versioned": true,
    "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
+   "publishes_release": true,
    "result": {"workflow": "release-cd.yml"}},
   {"target": "AWS（CDK スタック）", "kind": "manual", "versioned": false, "trigger": "cdk deploy",
    "manual_reason": "インフラの変更は人が差分を確かめてから反映する"}
@@ -81,7 +83,7 @@
 
 ### `publishes_by_cd(decl) -> bool`
 
-本番チャネルへのマージで自動で本番系へ届く行（`reaches_by_merge`）のうち、`versioned: true` の行があるときに真を返す。宣言を読めないときは、呼び出し元の `release_decl` がこの判定より先に止める。
+本番チャネルへのマージで自動で本番系へ届く行（`reaches_by_merge`）のうち、`versioned: true` かつ `publishes_release: true` の行があるときに真を返す。別の成果物を届ける自動の行はこの判定に数えない。宣言を読めないときは、呼び出し元の `release_decl` がこの判定より先に止める。
 
 ### CD のワークフロー
 
