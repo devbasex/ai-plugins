@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import estimate_predict as ep  # noqa: E402
+import estimate_records as er  # noqa: E402
 
 DEAD = lambda run: False  # noqa: E731
 CFG = {"models": ["opus"], "harness": "claude-p", "review": None, "test": None, "parallel": None}
@@ -169,6 +171,23 @@ def test_size_unit_from_decl_or_smallest_quarter():
     assert ep.size_unit([800, 100, 200, 300, 400, 500, 600, 700], {}) == 150
 
 
+def _script_only(rows, issue, seconds, day=1):
+    """スプリントの機械のプラン（run のステップだけ）の実行を 1 本足す。"""
+    _done(rows, issue, seconds, day=day)
+    rows[-2]["type"] = "run"
+
+
+def test_size_unit_ignores_issues_with_only_script_steps():
+    """#2433: run のステップだけの実績を基準に数えると基準が 1 秒未満になり、どの見積もりも尺度を超える。"""
+    rows: list[dict] = []
+    for i in range(20):
+        _script_only(rows, 100 + i, 0.3)
+    for i in range(8):
+        _done(rows, 40 + i, 1000 + 100 * i, day=i + 1)
+    got = ep.predict(_req(like=[47]), rows, [], {}, {}, alive=DEAD)
+    assert got["size"] == 2  # 1700 ÷ 基準 1050 = 1.6
+
+
 def test_predict_size_uses_unit():
     rows: list[dict] = []
     for i in range(4):
@@ -245,6 +264,17 @@ def test_errors_picks_latest_estimate_per_issue():
     assert [i["estimate"] for i in items] == ["new"]
     items, _ = ep.errors([_est("a", 3), _est("b", 3)], rows, alive=DEAD)
     assert [i["estimate"] for i in items] == ["b"]
+
+
+def test_errors_pairs_an_estimate_saved_with_an_old_done(tmp_path):
+    """旧い値の完了条件で書かれた見積もりは、読むときに新しい値へ寄り、新しい名前の実績と組になる。"""
+    (tmp_path / er.ESTIMATES).write_text(
+        json.dumps({**_est("old-done", 3), "done": "配布（本番）"}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    rows: list[dict] = []
+    _done(rows, 1, 200, day=5, phase="リリース")
+    items, _ = ep.errors(er.read_estimates(tmp_path), rows, alive=DEAD)
+    assert [i["estimate"] for i in items] == ["old-done"]
 
 
 def test_errors_since_drops_earlier_estimates():

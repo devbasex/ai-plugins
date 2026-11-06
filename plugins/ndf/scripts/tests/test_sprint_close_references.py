@@ -17,12 +17,12 @@ _spec.loader.exec_module(harness)
 call, issues_of, DIST_PROD = harness.call, harness.issues_of, harness.DIST_PROD
 repo, gh = harness.repo, harness.gh  # pytest の fixture
 
-PROD_ONE = "## 配布の記録\n段階: 本番（2026-10-08 承認）\n版: 1.0.0 → 1.1.0\nスプリント: PR #11\n"
+PROD_ONE = "## リリース記録\n段階: 本番（2026-10-08 承認）\n版: 1.0.0 → 1.1.0\nスプリント: PR #11\n"
 NOT_GIVEN = "--issues も無い参照"
 
 
 def run(gh, repo, *extra):
-    return call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布", *extra], gh.env, repo)
+    return call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "デプロイ", *extra], gh.env, repo)
 
 
 def issue_calls(gh, verb, n=None):
@@ -132,7 +132,7 @@ def test_given_issue_avoids_the_stop(repo, gh):
 
 
 def test_before_production_keeps_references_open_and_closes_nothing(repo, gh):
-    rec = "## 配布の記録\n段階: 検証\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n"
+    rec = "## リリース記録\n段階: 検証\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n"
     gh.set(
         records={"20": {"body": rec, "comments": []}}, bodies={"11": "Closes #1\nRefs #2"}, issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]}
     )

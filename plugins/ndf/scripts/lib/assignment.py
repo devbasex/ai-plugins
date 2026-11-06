@@ -20,9 +20,9 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 # 固定順。輪番の再現性を保つため並べ替えない。
 ALL_RUNTIMES: tuple[str, ...] = ("claude", "codex", "agy", "kiro")
 
-# ホストになりうるランタイム。4 者とも NDF の配布先であるため全員がなれる。
+# ホストになりうるランタイム。4 者とも NDF の導入先のランタイムであるため全員がなれる。
 # **名前は `ALL_RUNTIMES` へ寄せない。**「ホストになれるか」と「参加できるか」は
-# 別の問いで、配布先でない CLI が参加 CLI に加わると 2 つは再び分かれる。
+# 別の問いで、導入先のランタイムでない CLI が参加 CLI に加わると 2 つは再び分かれる。
 HOST_RUNTIMES: tuple[str, ...] = ALL_RUNTIMES
 
 # cross-review と cross-refactoring の既定の母集合の表（ホストを除いた部分）。agy はテストを

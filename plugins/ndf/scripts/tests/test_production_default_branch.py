@@ -26,7 +26,7 @@ from supervise_lib import decl as sdecl  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 RELEASE = {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]}
-NO_PROD = "承認ゲート 2 と本番は置いていない"
+NO_PROD = "リリース承認ゲートと本番は置いていない"
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
@@ -124,7 +124,7 @@ def test_without_any_source_prod_stops_naming_three_sources_and_dev_and_normal_g
 
 @pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
 def test_sprint_puts_gate_2_and_production_before_the_worktree_exists(tmp_path, pace):
-    """受け入れ条件 5: まだ作っていない worktree のパスでも、どの進め方も承認ゲート 2 と本番を置く。
+    """受け入れ条件 5: まだ作っていない worktree のパスでも、どの進め方もリリース承認ゲートと本番を置く。
     fast / auto は開発版のチャネルが要るため、起点を develop・既定ブランチを main にする。"""
     main = make_repo(tmp_path, base="develop")
     wt = main / ".worktrees" / "feat" / "m"
@@ -162,13 +162,13 @@ def new_args(main: Path, kind: str = "sprint", **kw) -> argparse.Namespace:
 
 
 def test_template_and_route_decision_use_the_same_production_branch(tmp_path, monkeypatch):
-    """受け入れ条件 7・I3: 同じ起動の中で、雛形の引数と配布の判定の宣言の本番チャネルが同じ値になる。"""
+    """受け入れ条件 7・I3: 同じ起動の中で、雛形の引数とリリースの判定の宣言の本番チャネルが同じ値になる。"""
     main = make_repo(tmp_path, "trunk")
     monkeypatch.chdir(main)
     a = new_args(main)
     sdecl.apply_decls(a)
     assert a.production_branch == "trunk"
-    a.production_branch = None  # 引数を外しても、配布の判定は同じ木から同じ既定ブランチを解く
+    a.production_branch = None  # 引数を外しても、デプロイの判定は同じ木から同じ既定ブランチを解く
     assert sdecl.delivery_decl(a).production == "trunk"
 
 

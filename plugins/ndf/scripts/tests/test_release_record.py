@@ -1,6 +1,6 @@
 """release-steps.py record と、リリース記録の書く側・読む側の契約（#1273）。
 
-本番の配布の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録をコメントで書く。
+リリースの後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録をコメントで書く。
 gh は PATH の先頭に置いた偽物で置き換え、git は origin（裸のリポジトリ）を持つ実物を使う。
 """
 
@@ -226,17 +226,17 @@ def test_sprint_close_closes_with_the_record_the_step_wrote(repo, gh, tmp_path):
     )
     env = {**gh.env, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}", "FAKE_GH_STATE": str(state)}
     code, out, err = harness.call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "40", "--repo", "o/r", "--issues", "5", "--dry-run"], env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "40", "--repo", "o/r", "--issues", "5", "--dry-run"], env, repo
     )
     assert code == 0, (out, err)
     assert harness.issues_of(out)["o/r#5"]["result"] == "would_close"
 
 
-# --- #1870: 版数を上げない配布・昇格の経路・本文の 段階: 検証 ------------------------------
+# --- #1870: 版数を上げないリリース・昇格の経路・本文の 段階: 検証 ------------------------------
 
-UNVERSIONED = """## 配布の記録
+UNVERSIONED = """## リリース記録
 
-段階: 本番（承認ゲート 2 の後、main へマージした）
+段階: 本番（リリース承認ゲートの後、main へマージした）
 版: 3.9.0 → 4.0.0（main へのマージ）
 スプリント: PR #430 / #431
 
@@ -254,7 +254,7 @@ UNVERSIONED = """## 配布の記録
 
 
 def test_an_unversioned_release_test_after_the_record_is_used():
-    """AC1: 版数を上げない配布で `版:` と `対象の版:` が違っても、記録より後のリリース後テストを選ぶ（devbase PR #432）。"""
+    """AC1: 版数を上げないリリースで `版:` と `対象の版:` が違っても、記録より後のリリース後テストを選ぶ（devbase PR #432）。"""
     got = dist_record.parse_record(UNVERSIONED)
     assert got["stage"].startswith("本番") and got["version"] == "4.0.0"
     assert got["verify_block"] and got["verify_block"].startswith("## リリース後テスト") and "main c427284" in got["verify_block"]
@@ -283,14 +283,14 @@ def _verify(ver: str, label: str) -> str:
 @pytest.mark.parametrize(
     ("dist_ver", "verify_ver", "want_ver"),
     [
-        ("10.26.1", "v10.26.1（2026-10-31 08:52 JST に配布）", "10.26.1"),
+        ("10.26.1", "v10.26.1（2026-10-31 08:52 JST にデプロイ）", "10.26.1"),
         ("v10.26.1", "10.26.1（2026-10-31）", "10.26.1"),
         ("10.17.69-dev.1", "v10.17.69-dev.1（2026-10-02）", "10.17.69-dev.1"),
     ],
 )
 def test_a_leading_v_on_either_version_still_matches(dist_ver, verify_ver, want_ver):
     """#2225 AC1〜3: 先頭の `v` の有無だけが違う本番の版と対象の版は同じ版として読み、本番の版は `v` なしで返す。"""
-    text = f"## 配布の記録\n\n段階: 本番（承認の後）\n版: 10.26.0 → {dist_ver}（タグ）\nスプリント: PR #1\n"
+    text = f"## リリース記録\n\n段階: 本番（承認の後）\n版: 10.26.0 → {dist_ver}（タグ）\nスプリント: PR #1\n"
     text += _verify(verify_ver, "一致")
     got = dist_record.parse_record(text)
     assert got["version"] == want_ver and got["verify_block"].endswith("合否: 合格（一致）")
@@ -315,8 +315,10 @@ def test_a_release_test_before_the_record_is_not_used():
 
 
 def test_a_record_comment_after_a_verification_body_reads_as_production():
-    """AC4: 本文が `段階: 検証（… 承認待ちのため未実施）` の PR に、配布の後の記録をコメントで足すと本番として読む（devbase PR #212）。"""
-    body = "## 配布の記録\n\n段階: 検証（本番は承認ゲート 2 の承認待ちのため未実施）\n版: 3.6.0 → 3.7.0\nスプリント: PR #210 / #211\n"
+    """AC4: 本文が `段階: 検証（… 承認待ちのため未実施）` の PR に、デプロイの後の記録をコメントで足すと本番として読む（devbase PR #212）。"""
+    body = (
+        "## リリース記録\n\n段階: 検証（本番はリリース承認ゲートの承認待ちのため未実施）\n版: 3.6.0 → 3.7.0\nスプリント: PR #210 / #211\n"
+    )
     assert dist_record.parse_record(body)["stage"].startswith("検証")
     comment = dist_record.format_record("3.6.0", "3.7.0", [210, 211], stage_note="承認の後", version_note="タグ")
     got = dist_record.parse_record(body + "\n" + comment)

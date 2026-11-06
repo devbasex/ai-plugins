@@ -1,7 +1,7 @@
 # playwright-kit Plugin
 
 Playwright による E2E テストの計画・実装・証跡管理を提供するプラグインです。Claude Code と Codex の
-配布物を `plugins/playwright-kit/` の 1 ディレクトリにまとめており、Skill の実体は `skills/` の
+リリース対象を `plugins/playwright-kit/` の 1 ディレクトリにまとめており、Skill の実体は `skills/` の
 1 箇所だけです。Claude Code は `.claude-plugin/` を、Codex はルートの `plugin.json`（Agent Plugins 形式）を読みます。
 
 NDF プラグイン v6.1.0 までは NDF に同梱していました。**Skill 名は変えていない**ため、
@@ -17,7 +17,7 @@ NDF プラグイン v6.1.0 までは NDF に同梱していました。**Skill �
 | `playwright-kit-ops` | `playwright_kit` のスクリプト（init、ページ役割分類、a11y / CWV スキャン）を実行する |
 
 `playwright-kit-ops` は Python パッケージ本体（`pyproject.toml` / `uv.lock` / `tests/`）を
-同梱しており、この 4 個のうち最も大きい配布物です。
+同梱しており、この 4 個のうち最も大きいリリース対象です。
 
 ## インストール
 

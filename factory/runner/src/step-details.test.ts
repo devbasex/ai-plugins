@@ -18,12 +18,12 @@ describe("フェーズの名前の写し（受け入れ条件 4・決定 1）", 
       ["設計", "設計"],
       ["実装", "実装"],
       ["検査", "検査"],
-      ["配布（開発版）", "取り込み"],
-      ["配布（本番）", "仕上げ"],
+      ["開発版のデプロイ", "取り込み"],
+      ["リリース", "仕上げ"],
       ["まとめ", "仕上げ"],
     ];
     for (const [plan, name] of cases) expect(phaseNameOf("7-release", plan)).toBe(name);
-    expect(phaseNameOf("8-release-request", "配布の依頼")).toBe("release-request");
+    expect(phaseNameOf("8-release-request", "リリースの依頼")).toBe("release-request");
     expect(phaseNameOf("5-impl-2172", null)).toBe("impl");
     const changed = phaseChanged("5-impl-2172", "実装");
     expect(changed.payload).toEqual({ phase: "実装", issues: [2172] });

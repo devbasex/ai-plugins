@@ -207,7 +207,7 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
     ).toBe(true);
   });
 
-  it("START が release は RELEASE_SEQ と RELEASE_STEP を要り、ほかの START は配布の手を許さない（#2439）", () => {
+  it("START が release は RELEASE_SEQ と RELEASE_STEP を要り、ほかの START はリリースの手を許さない（#2439）", () => {
     const release = { START: "release", ISSUES: undefined, RELEASE_SEQ: "3", RELEASE_STEP: "confirm:1" };
     expect(validateRunJobInstruction(instruction(release)).ok).toBe(true);
     expect(validateRunJobInstruction(instruction({ ...release, RELEASE_STEP: undefined })).ok).toBe(false);
@@ -316,7 +316,7 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
   it("フェーズの名前は 5 つで、isPhaseName は列挙の外を偽にする（#2172）", () => {
     expect(PHASE_NAMES).toEqual(["設計", "実装", "検査", "取り込み", "仕上げ"]);
     expect(PHASE_NAMES.every(isPhaseName)).toBe(true);
-    expect(isPhaseName("配布（本番）")).toBe(false);
+    expect(isPhaseName("リリース")).toBe(false);
     expect(isPhaseName(null)).toBe(false);
   });
 

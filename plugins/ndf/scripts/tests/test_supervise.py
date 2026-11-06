@@ -540,7 +540,7 @@ def foreign_repo(tmp_path, supervise=None):
 
 
 def run_cmds(plan):
-    """run のステップのコマンドから、配布したスクリプトの置き場（絶対パス）を除いたもの。"""
+    """run のステップのコマンドから、デプロイしたスクリプトの置き場（絶対パス）を除いたもの。"""
     return [
         s.get("cmd", "").replace(str(SCRIPTS), "<scripts>").replace(str(SCRIPTS.parent / "skills"), "<skills>")
         for s in plan["steps"]
@@ -570,7 +570,7 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
     for cmd in run_cmds(plan):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
-    # 配布したスクリプトは置き場からの絶対パスで呼ぶ
+    # デプロイしたスクリプトは置き場からの絶対パスで呼ぶ
     assert steps["merge"]["cmd"].startswith(f"python3 {SCRIPTS / 'merged-steps.py'} ")
     assert paths.PRESETS["doc-lint"].startswith(f"python3 {SCRIPTS / 'doc-lint.py'} ")
 
@@ -936,7 +936,7 @@ REPORT_EMPTY = """## フェーズの報告
 - フェーズ: 試験
 - 課題: #858 #859
 - 結果: 完了
-- 関門: 無し
+- 承認ゲート: 無し
 - 次のフェーズ: 検査
 - Pull Request: https://example/pull/9
 - 最後に記録した工程: 無し
@@ -961,7 +961,7 @@ REPORT_RICH = """## フェーズの報告
 - フェーズ: 実装
 - 課題: #1054
 - 結果: 関門
-- 関門: ステップ release（exit=10）; ステップ merge（exit=11）
+- 承認ゲート: ステップ release（exit=10）; ステップ merge（exit=11）
 - 次のフェーズ: 無し
 - Pull Request: 無し
 - 最後に記録した工程: Pull Request
@@ -988,7 +988,7 @@ REPORT_RICH = """## フェーズの報告
 
 @pytest.mark.parametrize("fill, expected", [(_report_state_empty, REPORT_EMPTY), (_report_state_rich, REPORT_RICH)], ids=["empty", "rich"])
 def test_write_report_text_of_a_state(tmp_path, fill, expected):
-    """現状固定: 報告の全文。`{dir}` は状態ディレクトリ、`{empty}` は空（行末の空白を書かないための目印）。空の状態と、関門・認証の切り替え・利用上限・遅れ・途中の報告がある状態。"""
+    """現状固定: 報告の全文。`{dir}` は状態ディレクトリ、`{empty}` は空（行末の空白を書かないための目印）。空の状態と、承認ゲート・認証の切り替え・利用上限・遅れ・途中の報告がある状態。"""
     from supervise_lib.state import RunState
 
     st = RunState(tmp_path / "state", {})
@@ -1000,7 +1000,7 @@ def test_write_report_text_of_a_state(tmp_path, fill, expected):
 
 @pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])
 def test_write_report_without_gates_or_plan_keys(tmp_path, result, gate):
-    """現状固定: 関門の記録が無いときの関門の行と、計画に鍵が無いときの行。完了でなければ次のフェーズを書かない。"""
+    """現状固定: 承認ゲートの記録が無いときの承認ゲートの行と、計画に鍵が無いときの行。完了でなければ次のフェーズを書かない。"""
     from supervise_lib.state import RunState
 
     lines = RunState(tmp_path / "state", {}).write_report({"次のフェーズ": "検査"}, result, "x").splitlines()
@@ -1008,7 +1008,7 @@ def test_write_report_without_gates_or_plan_keys(tmp_path, result, gate):
         "- フェーズ: None",
         "- 課題: ",
         f"- 結果: {result}",
-        f"- 関門: {gate}",
+        f"- 承認ゲート: {gate}",
         "- 次のフェーズ: 無し",
         "- Pull Request: 無し",
     ]
@@ -1092,7 +1092,7 @@ def test_sync_check_without_declaration_stops(tmp_path):
     assert res["status"] == "stopped" and "sync_checks" in res["summary"] and res["items"] == []
 
 
-# --- 利用上限（待ち・認証の切り替え）・関門の終了コード・ステップの作業場所・配布の雛形 ---
+# --- 利用上限（待ち・認証の切り替え）・承認ゲートの終了コード・ステップの作業場所・デプロイの雛形 ---
 
 # 呼ばれるたびに responses の次の 1 件を返す偽の claude。呼ばれた順と、足された認証の変数を記録する
 SEQ_CLAUDE = """import json, os, sys
@@ -1467,7 +1467,7 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
     assert copied.read_text() == "# 提示物\n"
     assert s.state.results["facts"]["gate"] is True and "rerun" not in s.state.results["facts"]
     assert "after" in s.state.results and "bad" not in s.state.results
-    assert "結果: 関門" in text and f"提示物: {copied}" in text and "関門: ステップ facts（exit=10）" in text
+    assert "結果: 関門" in text and f"提示物: {copied}" in text and "承認ゲート: ステップ facts（exit=10）" in text
 
 
 def test_run_gate_without_gate_next_uses_next(tmp_path):
@@ -1514,7 +1514,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert st["facts"]["presentation_to"] == "issues/approval-ndf-v10.17.11.md"
     assert st["facts"]["gate_next"] == "explain" and st["verify"]["cwd"] == "/r"
     assert "--ref develop" in st["verify"]["cmd"] and "--channel dev" in st["release"]["cmd"]
-    assert st["verify"]["stage"] == "配布"  # 開発版の導入の確認は「配布」（#2288 の AC2）
+    assert st["verify"]["stage"] == "デプロイ"  # 開発版の導入の確認は「デプロイ」（#2288 の AC2）
 
     p = cli(
         "new",
@@ -1549,7 +1549,7 @@ def test_new_release_dev_and_prod(tmp_path):
         "judge-record",
     ]
     # 導入の確認だけのステップは「リリース後テスト」と記録しない。それは仕上げの release-verify が担う（#2288 の AC1）
-    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "配布"
+    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "デプロイ"
     assert not [s for s in plan["steps"] if s.get("stage") == "リリース後テスト"]
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
     # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
@@ -1586,18 +1586,18 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert manifest["ブランチ"] == "sprint/v10-18"
     assert [w["name"] for w in manifest["ステージ"]] == [
         "設計",
-        "関門 1",
+        "設計承認ゲート",
         "設計 PR のマージ",
         "設計の結果",
         "スプリントブランチ",
         "実装",
         "検査",
-        "配布",
-        "関門 2",
+        "デプロイ",
+        "リリース承認ゲート",
         "本番",
     ]
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
+    assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
@@ -1653,12 +1653,12 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
     assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
-    # 設計 PR は Draft で作り、関門 1 の前に Draft を外す（#1908）。レビューの駆動が落ちても関門の前に通る
+    # 設計 PR は Draft で作り、設計承認ゲートの前に Draft を外す（#1908）。レビューの駆動が落ちても承認ゲートの前に通る
     assert ds["push-glossary"]["next"] == ds["review"]["on_fail"] == "ready" and ds["ready"]["next"] == "gate"
     # push は push-glossary（on_fail 無し）だけが行う。ready は送り直さない（重複の push と、レビューが落ちた経路で
     # 直しに追いついていない HEAD を送る non-fast-forward を避ける）
     assert ds["ready"]["cmd"] == "gh pr ready {pr}" and "on_fail" not in ds["ready"] and "on_fail" not in ds["push-glossary"]
-    assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 関門の数は変わらない
+    assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートの数は変わらない
     assert "glossary-recheck" in ds["gate"]["inputs"]
 
     impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
@@ -1679,7 +1679,7 @@ def test_new_sprint_without_design_skips_gate(tmp_path):
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
+    assert names == ["スプリントブランチ", "実装", "検査", "デプロイ", "リリース承認ゲート", "本番"]
 
 
 @pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
@@ -1915,7 +1915,7 @@ def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
             "形の違う行",
             w("テストが 3 件落ちた"),
             w("テストが 4 件落ちた"),
-            w("関門に当たった: 本番の配布"),
+            w("承認ゲートに当たった: リリース"),
             w("実装を 1 つ終えた"),
         ],
         sleep=0.5,
@@ -2061,7 +2061,7 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
     real, seen = flow.run_stage, {}
 
     def batch(plans, adm, args):
-        if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
+        if str(rel) in plans:  # 後続のデプロイは流さず、流す時の計画を読む
             seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
             return [{"plan": p, "result": "完了"} for p in plans]
         return real(plans, adm, args)
@@ -2119,9 +2119,9 @@ def wait_cli(done, *args):
 
 def test_wait_returns_0_on_done(tmp_path):
     done = wait_setup(tmp_path, [])
-    queue.write_text_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 関門 1"}))
+    queue.write_text_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 設計承認ゲート"}))
     code, summary, res = wait_cli(done)
-    assert code == queue.WAIT_DONE == 0 and "関門 1" in summary
+    assert code == queue.WAIT_DONE == 0 and "設計承認ゲート" in summary
     assert res["metrics"]["event"] == "done" and res["metrics"]["queue_status"] == "gate"
 
 
@@ -2552,40 +2552,40 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
-    for name in ("検査", "配布"):
+    for name in ("検査", "デプロイ"):
         for path in waves[name]["plans"]:
             assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path
-    release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
-    assert release["フェーズ"] == "配布（開発版）"
+    release = json.loads(Path(waves["デプロイ"]["plans"][0]).read_text())
+    assert release["フェーズ"] == "開発版のデプロイ"
     assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
-    # 配布は最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
-    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["配布"]["plans"][0])
-    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "スプリントブランチ"
+    # デプロイは最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
+    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["デプロイ"]["plans"][0])
+    assert "command" not in waves["デプロイ"] and waves["デプロイ"]["then_of"] == "スプリントブランチ"
 
 
 def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
-    """normal の雛形の経路は配布の後に関門 2 と本番を置き、本番は承認の後に単独で流す（#1914）。"""
+    """normal の雛形の経路はリリースの後にリリース承認ゲートと本番を置き、本番は承認の後に単独で流す（#1914）。"""
     out = tmp_path / "m"
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     index = json.loads((out / "sprint.json").read_text())["ステージ"]
-    assert [w["name"] for w in index][-3:] == ["配布", "関門 2", "本番"]
+    assert [w["name"] for w in index][-3:] == ["デプロイ", "リリース承認ゲート", "本番"]
     waves = {w["name"]: w for w in index}
-    gate, prod = waves["関門 2"], waves["本番"]
+    gate, prod = waves["リリース承認ゲート"], waves["本番"]
     assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]
     assert "then_of" not in prod and prod["plans"][0].endswith("-release-prod.json")
     assert f"queue {prod['plans'][0]} --max 3 --done " in prod["command"] and "--then" not in prod["command"]
-    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["配布"]
+    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["デプロイ"]
     plan = json.loads(Path(prod["plans"][0]).read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     assert "--channel prod" in steps["release"]["cmd"] and "--version 10.18.0 " in steps["release"]["cmd"]
     assert "--prs {queue_pr:check}" in steps["changelog"]["cmd"] and plan["課題"] == [1]
     assert not {"mvv", "note", "handoff"} & set(steps)
-    assert plan["steps"][0]["id"] == "approve"  # 承認ゲート 2 の承認の記録を先頭で書く（#1426 の AC9）
+    assert plan["steps"][0]["id"] == "approve"  # リリース承認ゲートの承認の記録を先頭で書く（#1426 の AC9）
 
 
 def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
-    """関門 2 の後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
+    """リリース承認ゲートの後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
     from supervise_lib import paths, queue
 
     out = tmp_path / "m"

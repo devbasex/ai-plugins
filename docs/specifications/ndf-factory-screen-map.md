@@ -37,7 +37,7 @@ Neural Development Factory の Web の画面の全体を 1 つの表にまとめ
 | `/accounts/:accountId/repositories/:repositoryId/sprints/new` | スプリントを始める | 個人・管理者・席 | あり | 課題の候補・選び直し・開始（runs-and-runner） |
 | `/accounts/:accountId/sprints` | スプリントの一覧 | 個人・管理者・席 | あり | 今のフェーズ（5 つの棒）と今の工程・状態・状態の絞り込み・最後の動き（[contracts-and-progress](ndf-factory-contracts-and-progress.md#スプリントの一覧と詳細の読み出し)） |
 | `/accounts/:accountId/sprints/:sprintRunId` | スプリントの詳細 | 個人・管理者・席 | あり | フェーズの欄（仕上げに振り返りと棚卸し）・課題ごとの工程の記録・工程の詳細パネル・Pull Request と CI・承認ゲート・注意（取り込みで解けない衝突など、記録された順）・使用量（contracts-and-progress「スプリントの一覧と詳細の読み出し」）・起票の依頼（[issue-requests](ndf-factory-issue-requests.md)） |
-| `/accounts/:accountId/approvals` | 承認待ちの一覧 | 個人・管理者・席 | あり | アカウントの答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、種類・ループの名前・周回の番号・リポジトリ・課題・待ち始めた日時とともに古い順に読む（読むだけ）・行からスプリントの詳細へ移る |
+| `/accounts/:accountId/approvals` | 承認待ちの一覧 | 個人・管理者・席 | あり | アカウントの答えの無い承認の依頼（設計承認ゲート・リリース承認ゲート・判断）を、種類・ループの名前・周回の番号・リポジトリ・課題・待ち始めた日時とともに古い順に読む（読むだけ）・行からスプリントの詳細へ移る |
 | `/accounts/:accountId/repositories/:repositoryId/loops` | ループ | 個人・管理者・席 | あり | 開発ループの一覧（名前・選定の対象・状態・周回の数・費用・予算の残り・最後に動いた時刻・止まった理由）・始める |
 | `/accounts/:accountId/loops/:loopId` | ループの詳細 | 個人・管理者・席 | あり | 周回・周回の実行と区間の数・利用上限の再開の時刻・人の判断待ちと答え・予算の変更・止める・次の周回を始める |
 | `/accounts/:accountId/repositories/:repositoryId/backlog` | バックログ | 個人・管理者・席 | あり | 順位の表と棚卸しの記録（読むだけ） |

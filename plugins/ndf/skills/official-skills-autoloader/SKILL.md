@@ -30,9 +30,9 @@ allowed-tools:
 
 ## 対応ランタイム
 
-**Claude Code 専用**。インストール先の `~/.claude/skills/` を読むのは Claude Code だけで、Codex は `.agents/skills/`、Kiro CLI は `.kiro/skills/` を読む。両ランタイムでは公式 Skill の自動読込は行われないため、配布するとしても Claude Code の manifest に限る。
+**Claude Code 専用**。インストール先の `~/.claude/skills/` を読むのは Claude Code だけで、Codex は `.agents/skills/`、Kiro CLI は `.kiro/skills/` を読む。両ランタイムでは公式 Skill の自動読込は行われないため、デプロイするとしても Claude Code の manifest に限る。
 
-配布先は `plugins/ndf/manifests/claude-skills.txt` のみとする。Codex / Kiro の manifest には載せない。
+導入先のランタイムは `plugins/ndf/manifests/claude-skills.txt` のみとする。Codex / Kiro の manifest には載せない。
 
 ## インストール前の同意取得（必須）
 
@@ -134,10 +134,10 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 ### ライセンス
 
-- Apache-2.0（mcp-builder, frontend-design, webapp-testing, claude-api 等）: 再配布可
+- Apache-2.0（mcp-builder, frontend-design, webapp-testing, claude-api 等）: 再頒布可
 - プロプライエタリ（docx, pptx, xlsx, pdf）: **個人環境での利用のみ**。リポジトリに含めない、社内共有しない
 
-このautoloaderが行うのは**利用者のローカル環境へのインストールのみ**で、再配布には該当しません。
+このautoloaderが行うのは**利用者のローカル環境へのインストールのみ**で、再頒布には該当しません。
 
 ### パス規約
 
@@ -151,7 +151,7 @@ Read(file_path="$HOME/.claude/skills/<SKILL_NAME>/SKILL.md")
 
 ### 手動管理したい場合
 
-スクリプトはプラグインの配布物に含まれる。`${CLAUDE_PLUGIN_ROOT}` は Claude Code が
+スクリプトはプラグインのリリース対象に含まれる。`${CLAUDE_PLUGIN_ROOT}` は Claude Code が
 インストール済みプラグインのルートに展開する環境変数で、`scripts/` はその直下にある。
 
 - 一覧表示: `bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-official-skills.sh --list`

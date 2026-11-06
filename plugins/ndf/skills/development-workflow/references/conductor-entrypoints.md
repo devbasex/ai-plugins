@@ -24,7 +24,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/supervise.py new impl` | worker の実装から始まるプランを作る |
 | `scripts/supervise.py new fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
 | `scripts/supervise.py new check` | 検査のプランを作る |
-| `scripts/supervise.py new release` | リリース（開発版・本番）のプランを作る |
+| `scripts/supervise.py new release` | デプロイ（開発版・本番）のプランを作る |
 | `scripts/supervise.py new close` | スプリントを閉じるプランを作る |
 | `scripts/supervise.py queue` | プランを同時に `--max` 本まで順に流す |
 | `scripts/supervise.py wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
@@ -40,7 +40,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/sprint-state.py update` | 終えたプランと次のプランを状態ファイルへ書く |
 | `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（承認も差し戻しも差し戻しの記録へ 1 行書く。差し戻しは承認ゲートを通さない。`reject` のステップを持つプランの差し戻しは `supervise.py run <プラン> --from reject` が書く） |
 | `scripts/gate-rejections.py record` | 状態ファイルの無い進め方で、承認ゲートの差し戻しを差し戻しの記録へ 1 行書く。打つ場面は [approval-request.md](approval-request.md) の「答えを記録する」 |
-| `scripts/gate-rejections.py count` | 承認ゲートの差し戻しを、スプリント・課題・PR ごとに承認ゲート 1・2 に分けて数える（読めなければ件数は「不明」、範囲に答えの行が無ければ「未記録」） |
+| `scripts/gate-rejections.py count` | 承認ゲートの差し戻しを、スプリント・課題・PR ごとに設計承認ゲート・リリース承認ゲートに分けて数える（読めなければ件数は「不明」、範囲に答えの行が無ければ「未記録」） |
 | `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・照合（`vet`）・承認の書き込み（`approve`）・版（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
 | `scripts/sprint-state.py status` | 今の状態を出す |
 | `scripts/sprint-state.py next` | 切れ目で引継ぎ文書へ置く ndf-next のブロックを作る |
@@ -54,9 +54,9 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | --- | --- |
 | `scripts/check-trigger.py eval` | 検査を回すかを判定する |
 | `scripts/check-trigger.py stats` | 検査のラウンド数と指摘の数を集計する |
-| `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、後片付けまで行う。宛先が自動反映の本番チャネルなら `--gate-approved user\|mvv` が無い限り CI を待たずに承認ゲート 2（終了コード 10）で止まる |
-| `scripts/merged-steps.py merge-gate` | 宛先へのマージが承認ゲート 2 に当たるかだけを判定する（0 = 進めてよい / 10 = 承認ゲート 2） |
-| `scripts/merged-steps.py promote` | 昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、承認ゲート 2 の後にマージする（後片付けはしない） |
+| `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、後片付けまで行う。宛先が自動反映の本番チャネルなら `--gate-approved user\|mvv` が無い限り CI を待たずにリリース承認ゲート（終了コード 10）で止まる |
+| `scripts/merged-steps.py merge-gate` | 宛先へのマージがリリース承認ゲートに当たるかだけを判定する（0 = 進めてよい / 10 = リリース承認ゲート） |
+| `scripts/merged-steps.py promote` | 昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、リリース承認ゲートの後にマージする（後片付けはしない） |
 | `scripts/merged-steps.py cleanup` | マージ済みの PR の worktree とブランチを片付ける |
 | `scripts/release-steps.py approval-facts` | 本番の承認資料のうち機械で作れる部分を書き出す |
 | `scripts/release-verification-steps.py verify-install` | 開発版を導入して確かめる |

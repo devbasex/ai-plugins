@@ -70,6 +70,20 @@ def github_repo_from_origin() -> Optional[str]:
     return repo_lib.owner_repo_from_url(url) if "github.com" in url else None
 
 
+def run_root(repo: str, state_id: int) -> pathlib.Path:
+    """既定の置き場の `<既定の根>/<owner--repo>/rf<ID>`。リポジトリのルートは今のディレクトリから求める。"""
+    return default_worktree_base(".") / repo_lib.slug(repo) / f"rf{state_id}"
+
+
+def prepare_parent(work: pathlib.Path) -> None:
+    """worktree の親を作る。宣言の置き場なら先に git の無視へ登録し、登録できなければ止まる。"""
+    try:
+        worktree_base.ensure_ignored(".", work)
+    except OSError as e:
+        die(str(e))
+    work.parent.mkdir(parents=True, exist_ok=True)
+
+
 def default_tmp_dir(state_id: int) -> Optional[pathlib.Path]:
     """既定の worktree の置き場の状態の置き場（`<既定の根>/<owner--repo>/rf<ID>/work/.cross_refactoring`）。
 
@@ -79,7 +93,7 @@ def default_tmp_dir(state_id: int) -> Optional[pathlib.Path]:
     repo = github_repo_from_origin()
     if not repo:
         return None
-    return default_worktree_base() / repo_lib.slug(repo) / f"rf{state_id}" / "work" / ".cross_refactoring"
+    return run_root(repo, state_id) / "work" / ".cross_refactoring"
 
 
 def _find_state(state_id: int) -> pathlib.Path:

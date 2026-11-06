@@ -217,6 +217,19 @@ def test_the_step_limit_never_drops_below_the_planned_one(tmp_path):
     assert steps_mod.fill_test_limit(ctx, {"timeout": 5}, "true") == ("true", 5)
 
 
+def test_a_container_declaration_widens_only_the_step_timeout(tmp_path):
+    """#2567 の決定 3 — テスト環境の用意の分は `timeout` だけに足し、`--limit` は変えない。余裕には重ねない。"""
+    (tmp_path / ".ndf").mkdir()
+    suite = {"name": "unit", "runner": "sh", "command": "x", "container": {"service": "app"}}
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": [suite]}}), encoding="utf-8")
+    ctx = _ctx({}, tmp_path)
+
+    cmd, timeout = steps_mod.fill_test_limit(ctx, {"timeout": 77}, "x --limit {test_limit:whole_timeout:9}")
+
+    assert (cmd, timeout) == ("x --limit 9", 77 + steps_mod.container_reach.UP_TIMEOUT)
+    assert steps_mod.fill_test_limit(ctx, {"timeout": 5}, "true") == ("true", 5)
+
+
 # ---------- cross-refactoring の着手前のテスト ----------
 
 

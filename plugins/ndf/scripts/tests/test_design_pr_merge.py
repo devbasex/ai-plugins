@@ -137,7 +137,7 @@ def test_empty_checks_merge_only_when_there_are_no_rules_and_no_workflows():
     "mwg, want",
     [
         ((4, json.dumps({"summary": "衝突"}), ""), "conflict"),
-        ((10, json.dumps({"summary": "承認ゲート 2"}), ""), "production"),
+        ((10, json.dumps({"summary": "リリース承認ゲート"}), ""), "production"),
         ((75, json.dumps({"summary": "基盤待ち"}), ""), "not_green"),
         ((1, json.dumps({"summary": "60 秒で終わらない", "items": [{"kind": "check", "result": "pending"}]}), ""), "not_green"),
         ((1, json.dumps({"summary": "権限が無い", "items": [{"kind": "pr", "result": "stopped"}]}), ""), "failed"),

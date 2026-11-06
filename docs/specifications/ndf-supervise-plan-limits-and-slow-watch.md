@@ -139,7 +139,7 @@
 | `new fix` | 14 | 実装と同じ | merge→base-return: 13 | 140 |
 | 検査（`new check`） | 11 | base-sync→fix-base: 2、test-all→judge: 3 | merge→base-return: 6 | 44 |
 | スプリントの検査 | 13 | 検査と同じ | merge→base-return: 6 | 46 |
-| 開発版の配布（`new release`・スプリント） | 11 | bump・changelog・notes・sync→judge: 各 3、release→judge: 4、verify: 5、facts: 6、explain: 7、others: 8 | 無し | 137 |
+| 開発版のデプロイ（`new release`・スプリント） | 11 | bump・changelog・notes・sync→judge: 各 3、release→judge: 4、verify: 5、facts: 6、explain: 7、others: 8 | 無し | 137 |
 
 ### 流す前の照合と数え方
 
@@ -216,7 +216,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 想定回数 3 の釣り合い | 実装のプランは 141、開発版の配布は 137 になる。上限まで回ったときの費用は測っていない。変えるなら `limits.FIX_ROUNDS` の 1 か所 |
+| 想定回数 3 の釣り合い | 実装のプランは 141、開発版のデプロイは 137 になる。上限まで回ったときの費用は測っていない。変えるなら `limits.FIX_ROUNDS` の 1 か所 |
 | 書き済みの古いプラン | この形より前に書いた設計のプラン（上限 12）は、D 15 より短いため流し始める前に止まる。理由の文が `上限` を上げるか `new` で書き直すよう示す |
 | セッションの記録の置き場 | `<CLAUDE_CONFIG_DIR>/projects/<作業場所>/<id>.jsonl` は claude 2.1.301 での実測である。claude が置き場を変えると見つからず、今までと同じく判定へ回る |
 | GitHub の上限 | drive の遅れの確認ごとに gh を 1 回呼ぶ。確認は想定の時間（下限 300 秒）ごとだが、並べた drive の数だけ増える |

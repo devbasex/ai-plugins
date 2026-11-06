@@ -14,7 +14,7 @@ import pytest
 from worktree_helpers import SCRIPTS_DIR
 
 # 対象は hook から呼ばれるスクリプトと、Skill が呼ぶシェルスクリプト全体。
-# 配布先の環境は選べないため、bash 3.2 で動くことを前提に置く。
+# デプロイ先の環境は選べないため、bash 3.2 で動くことを前提に置く。
 _PLUGIN_ROOT = SCRIPTS_DIR.parent
 TARGETS = sorted(
     set(_PLUGIN_ROOT.glob("scripts/*.sh"))

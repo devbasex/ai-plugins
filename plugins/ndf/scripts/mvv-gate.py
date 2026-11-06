@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""mvv-gate.py: 関門の材料が MVV に従うかを判定し、従えば関門を省いた記録を残す（#1078）。
+"""mvv-gate.py: 承認ゲートの材料が MVV に従うかを判定し、従えば承認ゲートを省いた記録を残す（#1078）。
 
     python3 mvv-gate.py check --sprint <スプリントの状態> --gate design|release
                               [--material <ファイル>...] [--pr N...] [--mode M]
                               [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>] [--advise]
 
-`pace: fast` と `pace: auto` の関門 1（設計の承認）と関門 2（本番への配布の承認）を、利用者が承認した MVV への事前の
-承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに関門へ戻す。
+`pace: fast` と `pace: auto` の設計承認ゲートとリリース承認ゲートを、利用者が承認した MVV への事前の
+承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに承認ゲートへ戻す。
 
 1. プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`。#1366）が 未承認・承認と一致しない・壊れている のどれでもない
-2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（関門 `MVV` の `sha256`）があり、今の MVV のファイルの
+2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（承認ゲート `MVV` の `sha256`）があり、今の MVV のファイルの
    ハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` がすべて一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV と
    状態に残したその参照（`project_mvv.sha256`）が一致すればよい（`lib/project_mvv.approval_refusal`）
 3. `--mode` が `operation` でも `documentation` でもない
@@ -21,8 +21,8 @@
 PR の先頭のコミットの中身も足す）を最小構成の claude -p に渡し、
 「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
 
-- 従う（越えない線なし）: `sprint-state.py gate` で関門の記録（`by: mvv`・判定・理由・ログ）を書き、
-  status ok（終了コード 0）。記録を書けなければ関門へ戻す。`--gate release` では判定に読んだ承認資料（`--material`）へ
+- 従う（越えない線なし）: `sprint-state.py gate` で承認ゲートの記録（`by: mvv`・判定・理由・ログ）を書き、
+  status ok（終了コード 0）。記録を書けなければ承認ゲートへ戻す。`--gate release` では判定に読んだ承認資料（`--material`）へ
   承認の記録（`by: mvv`）も書く（`lib/approved_commit.py` の record_all。#815）。`--advise` では書かない
 - それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
   利用者の承認を求める
@@ -32,11 +32,11 @@ PR の先頭のコミットの中身も足す）を最小構成の claude -p に
 結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
 コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
 
-`--advise`（助言の MVV 判定。`pace: normal` の承認ゲート 1・2 の前。#1400）: 判定の規則と機械のチェックは同じだが、
+`--advise`（助言の MVV 判定。`pace: normal` の設計承認ゲート・リリース承認ゲートの前。#1400）: 判定の規則と機械のチェックは同じだが、
 承認ゲートの記録（`by: mvv`）を書かず、どの判定でも status ok（終了コード 0）で返す。承認するのは利用者である。
 
 - プロジェクト MVV が承認済みでなければ、LLM を呼ばず、行も --note も書かずに `items[0]` を `{"verdict": "none", "status": ...}` にする
-- スプリント MVV の承認の記録（関門 `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る
+- スプリント MVV の承認の記録（承認ゲート `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る
 - 進め方の宣言（`.ndf/pace.json`）が無ければ越えない線のパスを空とする（壊れていれば今どおり外れ）
 - --note は機械のチェックで外れた・読めないときも含めて書き、外れた理由を理由の欄に載せる
 """
@@ -63,31 +63,30 @@ import clock  # noqa: E402
 import legacy_names  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
-from gate_answer import GATE_1, GATE_2  # noqa: E402
+from gate_answer import DESIGN_GATE, RELEASE_GATE  # noqa: E402
 import jsonio  # noqa: E402
 from pace import DECL_NAME, EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 
 TOOL = "mvv-gate"
-GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本番への配布の承認）"}
-GATE_NAMES = {"design": GATE_1, "release": GATE_2}  # sprint-state.py の関門の記録の名前
+GATES = {"design": DESIGN_GATE, "release": RELEASE_GATE}  # sprint-state.py の承認ゲートの記録の名前
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 VERDICTS = ("follow", "not_follow", "unknown")
 MAX_MATERIAL = 60_000  # 材料 1 件の上限の文字数（超えた分は切る）
 
 DECL_PATHS = (f"{pm.DECL_DIR}/{pm.BODY_FILE}", f"{pm.DECL_DIR}/{pm.DECL_FILE}")  # 変える PR は MVV 判定で通さない（I15）
 
-SYSTEM = """あなたは開発の関門の判定者である。利用者はプロジェクト MVV かスプリントの MVV（Mission / Vision / Value）を承認済みで、
-MVV に従う変更なら関門での個別の承認を省いてよいと決めている。材料を読み、この変更が NDF の共通原則・プロジェクト MVV・
+SYSTEM = """あなたは開発の承認ゲートの判定者である。利用者はプロジェクト MVV かスプリントの MVV（Mission / Vision / Value）を承認済みで、
+MVV に従う変更なら承認ゲートでの個別の承認を省いてよいと決めている。材料を読み、この変更が NDF の共通原則・プロジェクト MVV・
 スプリント MVV に従うかを判定する（優先順位は共通原則のとおり）。
 
 - 共通原則に反せず、Mission と Vision に沿い、Value のどれにも反しないなら follow
 - どれかに反するなら not_follow。材料から読み取れず決められないなら unknown（迷ったら unknown）
-- 配布の前に取れない実測（配布した後の効果）は判定の対象にしない。配布の後の測定へ回るものとして扱い、
+- デプロイの前に取れない実測（デプロイした後の効果）は判定の対象にしない。デプロイの後の測定へ回るものとして扱い、
   それが無いことだけを理由に unknown にしない
 - 必ず人の承認が要る操作（共通原則の C の番号・プロジェクト MVV の P の番号・スプリント MVV の越えない線）に当たる変更を
-  含むなら、boundary にその中身を書く（boundary が空でなければ関門は省かれない）
+  含むなら、boundary にその中身を書く（boundary が空でなければ承認ゲートは省かれない）
 - basis に根拠にした項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2 など）を並べる
 
 出力は次の JSON の 1 つだけ。前後に文を書かない。
@@ -95,7 +94,7 @@ MVV に従う変更なら関門での個別の承認を省いてよいと決め�
 
 
 class Back(Exception):
-    """関門へ戻す（利用者の承認を求める）理由。"""
+    """承認ゲートへ戻す（利用者の承認を求める）理由。"""
 
 
 def gh_or_back(args: list[str], repo: str | None, cwd: Path) -> str:
@@ -162,16 +161,16 @@ def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) 
 
 
 def build_prompt(project: pm.ProjectMvv, sprint: str | None, gate: str, materials: list[str]) -> str:
-    """MVV の節（共通原則 → プロジェクト MVV → スプリント MVV → 判断の決まり）→ 関門 → 材料。"""
+    """MVV の節（共通原則 → プロジェクト MVV → スプリント MVV → 判断の決まり）→ 承認ゲート → 材料。"""
     body = "\n\n".join(m[:MAX_MATERIAL] for m in materials)
-    return f"{pm.block(project, sprint)}\n# 関門\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
+    return f"{pm.block(project, sprint)}\n# 承認ゲート\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
 
 
 def well_formed(verdict) -> bool:
     """応答が契約の形か。verdict・reasons・boundary の 3 つが揃い、reasons と boundary が文字列の配列であること。
 
-    **契約の外は関門を省かない（fail closed）。** boundary を欠く・空文字・空 object を `[]` と同じに読むと、
-    越えない線の申告が無いまま関門が省かれる。"""
+    **契約の外は承認ゲートを省かない（fail closed）。** boundary を欠く・空文字・空 object を `[]` と同じに読むと、
+    越えない線の申告が無いまま承認ゲートが省かれる。"""
 
     def strings(v) -> bool:
         return isinstance(v, list) and all(isinstance(x, str) for x in v)
@@ -268,14 +267,14 @@ def write_log(path: str, record: dict) -> None:
 
 
 def record_gate(a, record: dict) -> str | None:
-    """関門の記録をスプリントの状態へ書く。書けなければ理由を返す。"""
+    """承認ゲートの記録をスプリントの状態へ書く。書けなければ理由を返す。"""
     what = "MVV 判定: " + " / ".join([*(f"#{n}" for n in a.pr), *a.material]) if (a.pr or a.material) else "MVV 判定"
     cmd = [
         sys.executable,
         str(HERE / "sprint-state.py"),
         "gate",
         a.sprint,
-        GATE_NAMES[a.gate],
+        GATES[a.gate],
         "--what",
         what,
         "--by",
@@ -299,7 +298,7 @@ def write_note(path: str, a, record: dict) -> None:
         return
     Path(path).write_text(
         f"## MVV 判定（{GATES[a.gate]}）\n\n"
-        f"- 判定: {record['verdict']}（関門を省いた。利用者が承認した MVV を事前の許可として扱う）\n"
+        f"- 判定: {record['verdict']}（承認ゲートを省いた。利用者が承認した MVV を事前の許可として扱う）\n"
         f"- 根拠: {' / '.join(record.get('basis') or [])}（プロジェクト MVV: {record['project_mvv']['status']}"
         f"{'・版 ' + str(record['project_mvv']['version']) if record['project_mvv'].get('version') else ''}）\n"
         f"- 時刻: {record['at']}\n- ログ: `{Path(a.log).expanduser()}` の {record['at']} の行\n\n"
@@ -339,7 +338,7 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
     if sprint is not None:
         record["sprint_mvv"] = {"sha256": state["mvv"]["sha256"]}
     if a.mode in EXCLUDED_MODES:
-        raise Back(f"モード {a.mode} は関門を省かない")
+        raise Back(f"モード {a.mode} は承認ゲートを省かない")
     infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
     if changed := decl_changes(infos):
         raise Back("プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed))
@@ -380,7 +379,7 @@ def new_record(a, root: Path, project) -> dict:
 
 
 def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int | None]:
-    """MVV に従うときの関門の記録と結果。記録を書けなければ関門へ落とす。"""
+    """MVV に従うときの承認ゲートの記録と結果。記録を書けなければ承認ゲートへ落とす。"""
     record.update(verdict="follow", passed=True, **usage)
     write_log(a.log, record)
     err = record_gate(a, record)
@@ -389,7 +388,7 @@ def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int
         return result(
             TOOL,
             "gate",
-            f"{GATES[a.gate]}: MVV に従うが、関門の記録を書けない（{err}）。利用者の承認を求める",
+            f"{GATES[a.gate]}: MVV に従うが、承認ゲートの記録を書けない（{err}）。利用者の承認を求める",
             [record],
             usage,
             next="利用者の承認を求める",
@@ -397,7 +396,7 @@ def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int
     if a.note:
         write_note(a.note, a, record)
     items = [record, *ac.record_all(getattr(a, "approved", {}), "mvv", clock.now_iso("utc")), *revise_items(a, root, project)]
-    return result(TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。関門を省いて進めてよい", items, usage), None
+    return result(TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。承認ゲートを省いて進めてよい", items, usage), None
 
 
 def cmd_check(a) -> tuple[dict, int | None]:

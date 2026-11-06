@@ -102,7 +102,7 @@ def test_the_report_requires_a_review_for_light(repo, tmp_path) -> None:
     state_dir = tmp_path / "state"
     env = base_env(state_dir)
     run_stage_check("record", "31", "mode", "light", cwd=repo, env=env)
-    run_stage_check("record", "31", "stage", "配布", cwd=repo, env=env)
+    run_stage_check("record", "31", "stage", "デプロイ", cwd=repo, env=env)
 
     result = run_stage_check("report", "31", cwd=repo, env=env)
 

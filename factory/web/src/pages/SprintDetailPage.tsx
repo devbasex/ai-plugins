@@ -24,7 +24,7 @@ const ATTENTION_REASON_KEYS = { base_conflict: "sprintDetail.attentionReason.bas
 // 費用は USD（usage.recorded の cost_usd）。金額は通貨とともに整形する
 const usd = (amount: number) => ({ amount, currency: "USD" });
 
-// 承認の欄（ゲート 1・ゲート 2・判断の 3 つ。承認の欄は 2 つだけ）
+// 承認の欄（設計承認ゲート・リリース承認ゲート・判断の 3 つ。承認の欄は 2 つだけ）
 function GatesView({ gates }: { gates: SprintRunDetail["gates"] }) {
   const { t } = useTranslation();
   return (

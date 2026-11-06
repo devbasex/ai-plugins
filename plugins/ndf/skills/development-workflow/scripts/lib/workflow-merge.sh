@@ -225,7 +225,7 @@ _wf_check_production_merge() {
     printf 'Pull Request #%s の宛先 %s へのマージが本番系へ出るかを決められないため止めます（%s）。\n' \
       "$num" "${base:-（不明）}" "${reason:-判定を読めない}"
   fi
-  printf '直接の gh pr merge は止めます。承認ゲート 2 の承認を得てから、次のコマンドでマージしてください。\n'
+  printf '直接の gh pr merge は止めます。リリース承認ゲートの承認を得てから、次のコマンドでマージしてください。\n'
   printf '  python3 %s merge-when-green %s --gate-approved user\n' "$merged" "$num"
   return 1
 }

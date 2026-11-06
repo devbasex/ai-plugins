@@ -7,7 +7,7 @@
   "作業場所": "<TMP>/repo",
   "リポジトリ": "<TMP>/repo",
   "Pull Request": "{queue_pr:design-16}",
-  "規則": "承認の証跡が無ければ approved が関門で止まる。マージが落ちたら止まり、conductor は queue --resume で続ける。",
+  "規則": "承認の証跡が無ければ approved が承認ゲートで止まる。マージが落ちたら止まり、conductor は queue --resume で続ける。",
   "上限": 3,
   "steps": [
     {

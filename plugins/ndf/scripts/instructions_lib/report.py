@@ -39,10 +39,10 @@ def format_finding(finding: Finding, action: str, criteria: Criteria) -> str:
     line = f"ERROR: [{action}] {where}{finding.message}"
     if action == ACTION_REPORT:
         # **報告だけで終わらせない。** 何を更新すればよいかと、助言の出どころを添える。
-        # **持っている値だけを `/` で連ねる** ── 配布元を持たない指摘で区切りだけが残らない。
+        # **持っている値だけを `/` で連ねる** ── 取得元を持たない指摘で区切りだけが残らない。
         parts: list[str] = []
         if finding.source is not None:
-            parts.append(f"配布元 {finding.source.name} {finding.source.version}")
+            parts.append(f"取得元 {finding.source.name} {finding.source.version}")
             parts.append(finding.source.origin)
             parts.append(f"更新: {finding.source.update}")
         parts.append(f"観点 {finding.criterion_id}")

@@ -13,7 +13,7 @@ import refresh as refresh_lib
 from instructions_lib.model import CheckError
 
 
-# 宣言の既定値。**配布物は閾値を持たない** ── ランタイムごとに助言の値が違い、版で動く。
+# 宣言の既定値。**リリース対象は閾値を持たない** ── ランタイムごとに助言の値が違い、版で動く。
 # 落とすのは利用者が宣言に書いたときだけである。
 DEFAULT_FILES = ["AGENTS.md", "CLAUDE.md", "KIRO.md"]
 # 即時読み込みの記法を解釈する指示書。Codex / Kiro はただの文字列として扱うため、

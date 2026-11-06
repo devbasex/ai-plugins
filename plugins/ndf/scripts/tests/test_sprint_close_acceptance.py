@@ -31,7 +31,7 @@ CLOSE = [
     "o/r",
     "--with-verification",
     "--final-stage",
-    "配布",
+    "デプロイ",
 ]  # 条件 2 を見る（条件 3 は test_sprint_close_final_stage.py）
 THREE = "# 課題\n\n## 受け入れ条件\n\n- [ ] 1. 一\n- [ ] 2. 二\n- [ ] 3. 三\n\n## 進行\n\nモード: standard\n"
 
@@ -232,8 +232,8 @@ def test_issue_without_checkboxes_is_judged_by_the_rows_only(repo, gh, body):
 @pytest.mark.parametrize(
     "args",
     [
-        ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布"],
-        ["--record-pr", "0", "--repo", "o/r", "--issues", "1", "--final-stage", "配布"],
+        ["--record-pr", "20", "--repo", "o/r", "--final-stage", "デプロイ"],
+        ["--record-pr", "0", "--repo", "o/r", "--issues", "1", "--final-stage", "デプロイ"],
     ],
 )
 def test_paths_without_verification_do_not_read_the_body(repo, gh, args):
@@ -266,7 +266,7 @@ def test_body_is_read_inside_the_issue_lock_and_a_held_lock_fails(tmp_path, monk
     """本文の読み書きは課題ごとの錠の中で行う。錠を取れなければ failed（非機能の条件）。"""
     monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path))
     mod = load_sprint_close()
-    ctx = mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布")
+    ctx = mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="デプロイ")
     seen = []
 
     def read(root, repo_, n):
@@ -297,7 +297,7 @@ def test_a_check_that_changes_more_than_the_marks_is_not_written(tmp_path, monke
     wrote = []
     monkeypatch.setattr(mod.gh_rest, "update_body", lambda *a: wrote.append(a) or True)
     it = mod._close_verified(
-        _A(), mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3}))
+        _A(), mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="デプロイ"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3}))
     )
     assert it["result"] == "failed" and not wrote
 

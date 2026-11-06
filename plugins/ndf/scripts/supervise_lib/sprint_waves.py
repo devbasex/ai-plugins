@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import legacy_names
-from gate_answer import GATE_1
+from gate_answer import DESIGN_GATE
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
@@ -24,7 +24,7 @@ from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
 RULE_DESIGN = (
-    "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、"
+    "設計の cross-review は上限 3 ラウンドで設計承認ゲートへ渡す（収束を待たない）。レビューが ok か、"
     "上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。"
 )
 
@@ -88,7 +88,7 @@ def _review_steps(n: int, copy: str) -> list:
 def _glossary_steps(glossary_check: str, push: str) -> list:
     """設計のプランの用語チェックのまとまり（glossary-check / fix-glossary / glossary-recheck / push-glossary）。"""
     return [
-        # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+        # 用語チェック。当たりは 1 回だけ直し、残った当たりは設計承認ゲートの提示へ載せる
         {
             "id": "glossary-check",
             "type": "run",
@@ -125,7 +125,7 @@ def _glossary_steps(glossary_check: str, push: str) -> list:
 
 
 def plan_sprint_design(a, n: int, repo: str) -> dict:
-    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
+    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に設計承認ゲートで止まる。"""
     branch = f"design/issue-{n}"
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
     copy = requirements_path(n)
@@ -143,7 +143,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
         "規則": RULE_DESIGN,
         "steps": [
             # 設計の工程の入口の検査（#1111 の I5）。用語集が無ければ worktree の中で起こし、設計 PR と一緒に
-            # コミットする（承認ゲートを増やさない。語の採否は承認ゲート 1 で利用者が見る）。それ以外の失敗は止まる
+            # コミットする（承認ゲートを増やさない。語の採否は設計承認ゲートで利用者が見る）。それ以外の失敗は止まる
             {
                 "id": "glossary",
                 "type": "run",
@@ -188,7 +188,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "next": "rebuild",
             },
             rebuild_step(n, doc),
-            # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（承認ゲート 1 の材料）
+            # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（設計承認ゲートの材料）
             {
                 "id": "pr",
                 "type": "pr",
@@ -216,15 +216,15 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             *_review_steps(n, copy),
             *survey_steps(n, next_id="glossary-check"),
             *_glossary_steps(glossary_check, push),
-            # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
+            # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。設計承認ゲートの前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
             {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": DESIGN_READY, "next": "gate"},
             {
                 "id": "gate",
                 "type": "judge",
                 "inputs": ["review", "glossary-recheck"],
-                "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
-                "用語チェックの当たりが残っていれば、関門 1 の提示に載せる",
+                "question": "設計承認ゲート（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
+                "用語チェックの当たりが残っていれば、設計承認ゲートの提示に載せる",
                 "choices": ["gate", "stop"],
             },
         ],
@@ -261,7 +261,7 @@ def design_read(a) -> list[int]:
 
 
 def plan_design_results(a, repo: str) -> dict:
-    """設計の結果のステージ（承認ゲート 1 の直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
+    """設計の結果のステージ（設計承認ゲートの直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
     `触るファイル`・取り込んだ課題・`実行の条件` を書く（決定 2）。LLM を呼ばない run のステップ 1 つ。"""
     manifest = sprint_out(a).resolve() / "sprint.json"
     cmd = (
@@ -338,8 +338,8 @@ def plan_sprint_check(a, repo: str) -> dict:
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
-    """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
-    単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
+    """pace: normal のデプロイ。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、リリース承認ゲートの後に単独で流す（#1914）。
     `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
     プランの版の記録から。#2164）。"""
@@ -360,13 +360,13 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         issue=a.issue,
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
-        state=getattr(a, "state", None),  # 本番の approve が承認ゲート 2 の利用者の承認の記録を読む（#1426）
+        state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
     )
     return plan_release(ns)
 
 
 def advise_design_steps(a) -> list[dict]:
-    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも関門 1 の judge（gate）へ進む。"""
+    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも設計承認ゲートの judge（gate）へ進む。"""
     state = shlex.quote(sprint_state_path(a))
     note = {
         "timeout": 300,
@@ -378,8 +378,8 @@ def advise_design_steps(a) -> list[dict]:
 
 
 def plan_advise_design(a, n: int, repo: str) -> dict:
-    """pace: normal と --state の設計: 用語チェックの後の push と関門 1 の judge の間へ助言の MVV 判定を入れる（#1400 の決定 4）。
-    判定は設計 PR へコメントし、プランは判定によらず関門 1 で止まる（承認は利用者が行う）。"""
+    """pace: normal と --state の設計: 用語チェックの後の push と設計承認ゲートの judge の間へ助言の MVV 判定を入れる（#1400 の決定 4）。
+    判定は設計 PR へコメントし、プランは判定によらず設計承認ゲートで止まる（承認は利用者が行う）。"""
     plan = plan_sprint_design(a, n, repo)
     steps = plan["steps"]
     gate = steps.pop()
@@ -387,18 +387,18 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
         if s["id"] == "ready":
             s["next"] = "mvv"
     gate["inputs"] = [*gate["inputs"], "mvv"]
-    gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
-    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}")]
+    gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、設計承認ゲートの提示に載せる（承認は利用者が行う）"
+    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), DESIGN_GATE, "mvv", pr="{pr}")]
     return plan
 
 
 def plan_mvv_design(a, n: int, repo: str) -> dict:
-    """pace: fast と auto の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
-    ラベルの付与かマージが落ちたら handoff で関門 1 の by: mvv の記録を外し、プランを関門で終える（#1370 の I8）。"""
+    """pace: fast と auto の設計: 設計承認ゲートの judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
+    ラベルの付与かマージが落ちたら handoff で設計承認ゲートの by: mvv の記録を外し、プランを承認ゲートで終える（#1370 の I8）。"""
     plan = plan_sprint_design(a, n, repo)
     state = shlex.quote(sprint_state_path(a))
     note = MVV_NOTE
-    # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
+    # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず設計承認ゲートの judge（gate）へ回す
     push = ""
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
@@ -420,18 +420,18 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
         {
             "id": "approve",
             "type": "run",
-            # 控えは mvv が従うときだけ書く。関門を利用者が承認して --from approve で続けたときは無い
+            # 控えは mvv が従うときだけ書く。承認ゲートを利用者が承認して --from approve で続けたときは無い
             "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && "
             f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
             "on_fail": "handoff",
             "next": "merge-gate",
         },
         *merge_steps(a, next="end", on_fail="handoff"),
-        handoff_step(sprint_state_path(a), GATE_1, "承認ラベルの付与かマージ"),
-        reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}"),
+        handoff_step(sprint_state_path(a), DESIGN_GATE, "承認ラベルの付与かマージ"),
+        reject_step(sprint_state_path(a), DESIGN_GATE, "mvv", pr="{pr}"),
     ]
     plan["規則"] = (
-        "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
+        "設計の cross-review は上限 3 ラウンドで設計承認ゲートの判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
     )
     return plan
 
@@ -474,7 +474,7 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
 
 
 def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
-    """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップが関門 2 を判定する。
+    """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップがリリース承認ゲートを判定する。
     prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
     `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""
     wt, branch = release_names(version)

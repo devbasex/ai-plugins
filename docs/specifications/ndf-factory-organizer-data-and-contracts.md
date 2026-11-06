@@ -6,14 +6,14 @@
 
 ### 保存する形
 
-オーガナイザーの進行の行は、今の実行の表（`pk=ACCOUNT#<accountId>`）に置く。まとめた配布と配布の実行を 1 回のトランザクションで書く（I57）ためである。
+オーガナイザーの進行の行は、今の実行の表（`pk=ACCOUNT#<accountId>`）に置く。まとめたリリースとリリースの実行を 1 回のトランザクションで書く（I57）ためである。
 
 ```mermaid
 erDiagram
     ORG ||--o{ ORGREQ : "受けた"
     ORG ||--o{ ORGBATCH : "組んだ"
     ORG ||--o{ ORGLOG : "積む"
-    ORGBATCH ||--|| SPRINT_RUN : "配布の実行"
+    ORGBATCH ||--|| SPRINT_RUN : "リリースの実行"
     ORGREQ }o--|| SPRINT_RUN : "依頼した実行"
     ORG {
         string sk PK "ORG#repositoryId"
@@ -42,8 +42,8 @@ erDiagram
 | --- | --- | --- | --- |
 | `repositoryId` | 数値 | 許さない | リポジトリの登録の識別子 |
 | `version` | 数値 | 許さない | 楽観的な排他の版（I67）。書くたびに 1 増やす |
-| `currentSeq` | 数値 | 許す | 流れているまとめた配布の連番。空は「流れていない」（I56） |
-| `nextSeq` | 数値 | 許さない | 次に組むまとめた配布の連番（1 から） |
+| `currentSeq` | 数値 | 許す | 流れているまとめたリリースの連番。空は「流れていない」（I56） |
+| `nextSeq` | 数値 | 許さない | 次に組むまとめたリリースの連番（1 から） |
 | `waitReason` | 文字列 | 許す | `external_release_open` / `legacy_run`。空は「待っていない」 |
 | `waitDetail` | 文字列 | 許す | 待ちの相手（外の Pull Request の URL・依頼を出していない古い版の実行の数） |
 | `gsi1pk`・`gsi1sk` | 文字列 | 許す | 既存の GSI `gsi1` の鍵 `ORGANIZER_ACTIVE` と `<accountId>#<sk>`。`currentSeq` があるときだけ持つ |
@@ -63,24 +63,24 @@ erDiagram
 | `deliveredAt` | 文字列 | 許す | 答えを依頼元へ届け終えた時刻。空は「届け終えていない」 |
 | `gsi1pk`・`gsi1sk` | 文字列 | 許す | `gsi1` の鍵 `ORGANIZER_ACTIVE`。`deliveredAt` が空の間だけ持ち、`deliveredAt` を書く書き込みで外す |
 
-**まとめた配布（`sk=ORGBATCH#<repositoryId>#<seq を 6 桁で 0 埋め>`）**
+**まとめたリリース（`sk=ORGBATCH#<repositoryId>#<seq を 6 桁で 0 埋め>`）**
 
 | 列 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
 | `seq` | 数値 | 許さない | 連番 |
 | `state` | 文字列 | 許さない | `composed` / `presented` / `represented` / `confirmed` / `stalled` / `released` / `rejected` |
-| `releaseRunId` | 文字列 | 許さない | 配布の実行（I57） |
+| `releaseRunId` | 文字列 | 許さない | リリースの実行（I57） |
 | `lanes` | 配列 | 許さない | 組んだ時点のレーン `{lane, sprintRunId, loopId, requestIds, issues}`。依頼の無いレーンは `requestIds` が空 |
 | `presentations` | 配列 | 許さない（空の配列は可） | 提示 `{k, sha, version, prs, lanes:[{lane, requested}], addedPrs, at, approvalRequestId}`。2 つまで（I60）で、上書きせず足す。`approvalRequestId` はその提示へ答えた承認の依頼で、古い承認の再送を次の提示の承認と取り違えないために残す |
 | `confirmedK` | 数値 | 許す | 確定した提示の番号。空は「確定していない」 |
 | `mainMerged` | 真偽 | 許さない | `main` へのマージを記録したか（I63） |
-| `result` | オブジェクト | 許す | `{version, prodPrUrl, sha, prs}`。空は「配布済みでない」 |
+| `result` | オブジェクト | 許す | `{version, prodPrUrl, sha, prs}`。空は「リリース済みでない」 |
 | `stallReason` | 文字列 | 許す | `stalled` の理由。`stalled` 以外は空 |
 | `stalledFrom` | 文字列 | 許す | 止まる前の状態（`composed` / `presented` / `represented` / `confirmed`）。「続きから流す」でこの状態へ戻す。`stalled` 以外は空 |
 
 **記録（`sk=ORGLOG#<repositoryId>#<ISO 時刻>#<種類>#<乱数 8 桁>`）**: 追記だけで書き換えない。末尾の乱数は、同じ時刻に同じ種類の記録を 2 件書いても上書きしないためである。種類は `waited` / `composed` / `presented` / `represented` / `confirmed` / `stalled` / `resolved` / `released` / `rejected`。
 
-**時系列の扱いは事象の記録と追記だけの提示の列である。** まとめた配布の `state` は上書きするが、遷移は記録の行に積み、提示は配列に足すだけにする。承認する人が何のコミットを見て答えたかを、出し直しの後も辿れるようにするためである。
+**時系列の扱いは事象の記録と追記だけの提示の列である。** まとめたリリースの `state` は上書きするが、遷移は記録の行に積み、提示は配列に足すだけにする。承認する人が何のコミットを見て答えたかを、出し直しの後も辿れるようにするためである。
 
 **スプリントの実行・ジョブ・リポジトリの枠に足した列**（既存の列は変えない。空は今の意味として読む）:
 
@@ -88,11 +88,11 @@ erDiagram
 | --- | --- | --- | --- |
 | リポジトリの枠 | `legacySeq` | 数値 | 古い版の実行を `legacyCount` へ数えに入れた回数。`legacyCount` を増やす書き込み（開始・移行の埋め戻し）で同じトランザクションで 1 増やし、減らす書き込みでは変えない。組む書き込みの条件に使う（I62） |
 | 実行 | `purpose` | 文字列 | `release`。空はスプリントの実行 |
-| 実行 | `releaseSeq` | 数値 | 配布の実行のまとめた配布 |
+| 実行 | `releaseSeq` | 数値 | リリースの実行のまとめたリリース |
 | 実行 | `awaitingReason` | 文字列 | `awaiting_approval` の理由 `release_requested` / `release_stalled`。空は承認の依頼の待ち |
 | 実行 | `releaseRequestId` | 文字列 | 手動の実行が待つ依頼の id。理由が `release_requested` のときだけ |
 | ジョブ | `start` | 文字列 | 今の値に `release` を足す |
-| ジョブ | `releaseStep` | 文字列 | `present` / `represent` / `confirm:1` / `confirm:2` / `continue`。配布の実行のジョブだけ |
+| ジョブ | `releaseStep` | 文字列 | `present` / `represent` / `confirm:1` / `confirm:2` / `continue`。リリースの実行のジョブだけ |
 | ジョブ | `releaseRequestId` | 文字列 | 手動の実行の再開で、答えの出た依頼の id |
 
 既存のデータの移行は無い。
@@ -105,7 +105,7 @@ erDiagram
 
 | 経路 | 要素・条件 | 値 | 失敗の形 |
 | --- | --- | --- | --- |
-| `GET /accounts/{accountId}/approval-requests?repository_id=` | 鍵 `repository_id` | `{repository_id, organizer: {current_seq, wait_reason, wait_detail}, items}`。`items` の 1 件は `{kind, sprint_run_id?, loop_id?, pr_url?, number?, reason?, created_at, release?}`。`kind` は `gate1` / `gate2` / `decision` / `loop_pending` / `release_stalled`。`release` は配布の実行のものだけが持つ `{seq, k, sha, lanes:[{lane, requested, prs}], added_prs, choices}` | 401・403・404 |
+| `GET /accounts/{accountId}/approval-requests?repository_id=` | 鍵 `repository_id` | `{repository_id, organizer: {current_seq, wait_reason, wait_detail}, items}`。`items` の 1 件は `{kind, sprint_run_id?, loop_id?, pr_url?, number?, reason?, created_at, release?}`。`kind` は `gate1` / `gate2` / `decision` / `loop_pending` / `release_stalled`。`release` はリリースの実行のものだけが持つ `{seq, k, sha, lanes:[{lane, requested, prs}], added_prs, choices}` | 401・403・404 |
 | `GET /accounts/{accountId}/releases?repository_id=` | 条件 `repository_id`（1 つ）と `limit`（1〜100、既定 20） | `{seq, state, release_run_id, presentations, confirmed_k, result, log}`（新しい順） | 要求全体の 400・401・403・404 |
 | `POST /accounts/{accountId}/releases/resolve` | `{repository_id, seq, choice: "continue" \| "reject", body?}`（委任の資格情報では要求全体を 403 `human_only` で断る） | `{seq, state}`。`state` は戻した状態（`composed` / `presented` / `represented` / `confirmed`）か `rejected` | 400・401・403・404・409（`not_stalled` / `release_after_main`） |
 
@@ -115,8 +115,8 @@ erDiagram
 
 | 経路 | 入力 | 成功 | 失敗の形 |
 | --- | --- | --- | --- |
-| `GET /run-jobs/organizer/answers` | 実行ジョブの token | 200 `{answers: [{request_id, result, version, release, reason, at}], ranges: [{seq, sha, version, prs, lanes}]}`。手動の実行はその実行の、ループの実行はそのループのすべての実行の依頼の答えと、リポジトリの配布済みの範囲（新しい方から 100 件のまとめた配布のうち `released` のもの） | 401・403 |
-| `GET /run-jobs/organizer/batch` | 実行ジョブの token（配布の実行のジョブだけ） | 200 `{seq, step, lanes:[{lane, requests:[{id, prs}], issues}], presentations, choices}` | 401・403・404 |
+| `GET /run-jobs/organizer/answers` | 実行ジョブの token | 200 `{answers: [{request_id, result, version, release, reason, at}], ranges: [{seq, sha, version, prs, lanes}]}`。手動の実行はその実行の、ループの実行はそのループのすべての実行の依頼の答えと、リポジトリのリリース済みの範囲（新しい方から 100 件のまとめたリリースのうち `released` のもの） | 401・403 |
+| `GET /run-jobs/organizer/batch` | 実行ジョブの token（リリースの実行のジョブだけ） | 200 `{seq, step, lanes:[{lane, requests:[{id, prs}], issues}], presentations, choices}` | 401・403・404 |
 
 答えの形は並列のオーガナイザーの `parallel-request.json` の答えと範囲にそろえる。受けた依頼の行の `prodPrUrl` は答えの `release` に写す（本番の Pull Request の URL）。レーンの中身はジョブの指示に載せず、ランナーがこの経路で読む。RunTask の `overrides` の上限（8,192 字）を避けるためである。
 
@@ -132,7 +132,7 @@ erDiagram
 
 冪等の鍵は実行の識別子を頭にする。冪等の鍵の表はサービス全体で 1 つのため、リポジトリごとの連番だけを鍵にしない。結果の鍵を種類ごとに分けるのは、同じ実行が `failed` を送った後に再開して `released` を送れるようにするためである。式は `factory/contracts/src/index.ts` の `releasePresentedKey`・`releaseProgressKey`・`releaseSettledKey` と `factory/api/src/progress/authorize.ts` だけが持ち、ランナーの送信と受け口の照合が同じ式を使う。
 
-`gate.reached` の payload に任意の `choices`（文字列の配列）がある。配布の実行が `main` へのマージの後に判断で止まったときは `["continue"]` だけを載せる（I63）。
+`gate.reached` の payload に任意の `choices`（文字列の配列）がある。リリースの実行が `main` へのマージの後に判断で止まったときは `["continue"]` だけを載せる（I63）。
 
 ### ジョブの指示（`factory/contracts/schemas/run-job-instruction.schema.json`）
 
@@ -141,15 +141,15 @@ erDiagram
 | `START` | `new` / `resume` / `loop` / `release` |
 | `RELEASE_SEQ` | 1 以上の整数の文字列。`START` が `release` のときは必須、ほかでは持たない |
 | `RELEASE_STEP` | `present` / `represent` / `confirm:1` / `confirm:2` / `continue`。`START` が `release` のときは必須、ほかでは持たない |
-| `RELEASE_REQUEST_ID` | 手動の実行の再開で、答えの出た配布の依頼の id |
+| `RELEASE_REQUEST_ID` | 手動の実行の再開で、答えの出たリリースの依頼の id |
 
 ### 実行の制御の関数
 
 | 関数 | 振る舞い |
 | --- | --- |
-| `buildReleaseRun(base, seq, ndfVersion)` | 範囲の実行を元に、目的 `release` の配布の実行とジョブ（`START=release`・`releaseStep=present`）を組む。枠の行は書かない（I64） |
+| `buildReleaseRun(base, seq, ndfVersion)` | 範囲の実行を元に、目的 `release` のリリースの実行とジョブ（`START=release`・`releaseStep=present`）を組む。枠の行は書かない（I64） |
 | `resumeForRelease(sprintRunId, requestId)` | 手動の実行が理由 `release_requested` でこの依頼を待つときだけ、`addResumeJob` の条件にその照らしを入れて再開のジョブを作る。`resumed` / `busy` / `not_waiting` を返す |
-| `resumeRelease(run, step, organizer?)` | 理由 `release_stalled` の配布の実行を `step` で再開する。`organizer` を渡すと、まとめた配布の状態の戻しを同じトランザクションで書く |
+| `resumeRelease(run, step, organizer?)` | 理由 `release_stalled` のリリースの実行を `step` で再開する。`organizer` を渡すと、まとめたリリースの状態の戻しを同じトランザクションで書く |
 | 停止の後の処理（`finalize`） | `release.requested` を受けた依頼の行として同じトランザクションへ入れ、後で `tick` を呼ぶ。手動の実行が依頼を出して `gate`（理由 `release_requested`）で終わると、理由と依頼の id を持つ `awaiting_approval` へ移す。この理由はジョブの終わりの理由（`finishReason`）には写さない |
 | 見回り（`sweep`） | 最後に `organizer.sweep()` を呼ぶ。`gsi1` の `ORGANIZER_ACTIVE` を引き、リポジトリごとに `tick` を呼ぶ |
 
@@ -159,16 +159,16 @@ erDiagram
 <NDF_ORGANIZER_DIR>/
 ├── requests/<依頼の id>.json      # NDF が書く（レーン）
 ├── answers/<依頼の id>.json       # 外のオーガナイザーが書く
-├── ranges/<連番>.json             # 外のオーガナイザーが書く（配布済みの範囲）
-├── batch.json                     # 外のオーガナイザーが書く（配布の実行だけ）
-├── presented/<連番>-<提示>.json   # NDF が書く（配布の実行）
-├── progress/<連番>.json           # NDF が書く（配布の実行）
-└── results/<連番>.json            # NDF が書く（配布の実行）
+├── ranges/<連番>.json             # 外のオーガナイザーが書く（リリース済みの範囲）
+├── batch.json                     # 外のオーガナイザーが書く（リリースの実行だけ）
+├── presented/<連番>-<提示>.json   # NDF が書く（リリースの実行）
+├── progress/<連番>.json           # NDF が書く（リリースの実行）
+└── results/<連番>.json            # NDF が書く（リリースの実行）
 ```
 
 | ファイル | 形 |
 | --- | --- |
-| `requests/` | 並列のオーガナイザーの配布の依頼（`parallel-request.json`）に `ndf_version`（空でない文字列）を足した形。ファイル名は id |
+| `requests/` | 並列のオーガナイザーのリリースの依頼（`parallel-request.json`）に `ndf_version`（空でない文字列）を足した形。ファイル名は id |
 | `answers/`・`ranges/` | 答え `{result, version, release, reason, at}`（`result` は `released` / `rejected`）と範囲 `{sha, version, prs, lanes}` |
 | `batch.json` | `{seq, step, lanes:[{lane, requests:[{id, prs}], issues}], presentations, choices}` |
 | `presented/` | `{seq, k, sha, version, prs, lanes:[{lane, requested}], added_prs, auto}`。`k` は 1 か 2 |

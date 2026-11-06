@@ -44,7 +44,7 @@ echo "exit=$rc"
 | `--stage` | いつ渡すか | 走るコマンドの `stage` |
 | --- | --- | --- |
 | `production` | 本番リリース（正式版として公開する・本番へ反映する） | `production` / `any` |
-| `verification` | 検証リリース（開発版として公開する・検証環境へ反映する） | `verification` / `any` |
+| `verification` | 開発版のデプロイ（開発版として公開する・検証環境へ反映する） | `verification` / `any` |
 
 ## 設定の項目
 
@@ -98,7 +98,7 @@ python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番�
 python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <版> --root .
 python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>... --root .
 python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --root .
-# 手順 2 の承認資料の欄を埋める（検証リリースの後）
+# 手順 2 の承認資料の欄を埋める（開発版のデプロイの後）
 python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --approval <承認資料> \
   --verified claude,codex,kiro --ref develop --root .
 # 版を上げる他のプラグインと上げ幅の候補を承認資料へ書く（変えるなら --set <名前>=MAJOR|MINOR|PATCH で書き直す）
@@ -108,12 +108,12 @@ python3 "$SCRIPTS/release-steps.py" changed-plugins --decided <承認資料> [--
 # 承認を得たら、承認資料へ承認の記録を書く（<SHA> は提示した資料を書いた approval-facts の metrics.approved_sha）
 python3 "$SCRIPTS/release-steps.py" approve --approval <承認資料> --approved-sha <SHA> --by user --root .
 # 手順 4: 公開する（bump と changelog の変更をコミットしてから）
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 検証リリース
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 開発版のデプロイ
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approved-sha <SHA> --root .  # 本番リリース（承認を得てから）
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
 ```
 
-- `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`検証への配布で確かめたこと`」を
+- `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。`metrics.approved_sha` と承認資料の
   「`承認したコミット`」が承認の対象（打った時点の `origin/<ベースブランチ>` の 40 桁）で、`next` の
@@ -130,7 +130,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   足した節・`## 未検証・残る危険` など）を見出しも中身も変えずに、前の資料で直前にあった `approval-facts` の節の
   後へ戻す（その節が無くなれば `## 同意を求めること` の前。残した見出しは `metrics.kept`）。前の資料が読めない・
   H1 が無い・同じ `## ` の見出しが 2 つあるときは、資料を書かずに `stopped`（2）で止まる。資料が無いパスは
-  新しく作る。開発版の配布のプランは `presentation_to` と同じパスを渡す
+  新しく作る。開発版のリリースプランは `presentation_to` と同じパスを渡す
 - `approve`: 承認資料の「`承認したコミット`」の行の直後へ「`承認の記録`」（SHA・承認した者・時刻）を書く。
   `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
   資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
@@ -160,7 +160,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の `## 影響` の「公開インタフェース」の行に互換なしの印（`互換なし` か `互換の経路は持たない`）
   があるか、PR の本文の `## 移行の手順` がプラグインの名前に触れれば、そのパスに触れた PR のプラグインの候補を
   MAJOR、無ければ PATCH にする（MINOR の候補は出さない）。材料を読めない PR は根拠の欄に書く。`--approval` は承認
-  資料の `## 版を上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` は承認ゲート 2 で決めた
+  資料の `## 版を上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` はリリース承認ゲートで決めた
   上げ幅へ行を書き直す（表に無い名前・知らない上げ幅は 2）。`--decided` は表の上げ幅で `to` を決め、表が無い・
   上げ幅を読めない・版や集合が差分と合わないときは PATCH へ倒さずに 1 で止まる。他のプラグインが 0 件なら表を読まない
 - `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージのコミットで取り込む。
@@ -169,23 +169,23 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
   `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
   `prod` は続けて `release/v<版>` を head にした `main` 宛の Pull Request をマージし、タグと GitHub Release を作る。
-  `main` 宛の Pull Request がマージ済みなら（途中で止まった配布の再開）、比較とマージを飛ばし、タグと GitHub Release のうち
+  `main` 宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
   無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
   （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
   `metrics.sweep_candidates` に載せる。消すのは人の承認（`ndf-ask:redline:C4`）を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
-  （[版と配布](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
+  （[版とリリース](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
 - `release --channel prod` の承認したコミット: `--approved-sha <SHA>` か `--approval <承認資料>` のどちらかが要る
   （どちらも無い・形の誤りは 2、資料・欄が無いと 3。どれも何もマージしない）。`--approval` は承認の記録の SHA が
   承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
-  配布の PR をマージした後、承認したコミットから `origin/release/v<版>` の先端（比べた先端）までに `release/v<版>` の
+  デプロイの PR をマージした後、承認したコミットから `origin/release/v<版>` の先端（比べた先端）までに `release/v<版>` の
   Pull Request の外のコミットか中身があれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。
-  承認の後に `develop` が進んでいても、`develop` は比べる相手に入らないため止まらず、進んだ分は次の配布で出る。ただし差分がすべて許可リスト
+  承認の後に `develop` が進んでいても、`develop` は比べる相手に入らないため止まらず、進んだ分は次のデプロイで出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
   マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
-  配布物に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
+  リリース対象に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
   `--channel dev` には渡さない（2）
 
   `gate` の読み方（git を照会し直さずに、結果 JSON だけで読める）:
@@ -213,20 +213,20 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 - 比べるときは両側の末尾の `（#N…）` / `(#N…)` を外し、空白の続きを 1 つにする。文が一致した箇条だけを外す
 - 指す PR は同じ版の PR（`notes` へ渡す PR）に限る。前の PR の `## 未検証・残る危険` と `## 移行の手順` は外さない
 
-## 配布の後にリリース記録を置く
+## デプロイの後にリリース記録を置く
 
-**どの配布の形でも、本番への配布を実施した後に、実施後の値で `段階: 本番` のリリース記録を置く。**
-手順 3 で本文に置いたブロックは配布の前に書いたもので、本番が承認待ちなら `段階: 検証（…）` のままである。
-読む側は Pull Request の本文とコメントのうち最後の `## 配布の記録` を読むため、配布の後の記録が無いと
+**どのリリースの形でも、リリースを実施した後に、実施後の値で `段階: 本番` のリリース記録を置く。**
+手順 3 で本文に置いたブロックはデプロイの前に書いたもので、本番が承認待ちなら `段階: 検証（…）` のままである。
+読む側は Pull Request の本文とコメントのうち最後の `## リリース記録` を読むため、デプロイの後の記録が無いと
 本番まで出たスプリントの課題が閉じられない。
 
 | 形 | 置き方 |
 | --- | --- |
 | Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
 | 昇格の Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` が昇格の Pull Request へコメントで書く。`版:` はマージのコミットである |
-| それ以外 | SKILL.md の「出力物」と同じ 3 行の `## 配布の記録` を、配布した値で記録の Pull Request へコメントで足す |
+| それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
-スプリントのプランで配布するときは、プランの `record` のステップがこれを打つ。
+スプリントのプランでデプロイするときは、プランの `record` のステップがこれを打つ。
 
 ## 退避先の回収
 
@@ -238,7 +238,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 `--yes --only <名前>...` で渡して消す。名前の外の退避先（候補を挙げた後に増えたもの）は消さない。
 承認が無ければ退避先は残す。Claude Code のプラグインの形では `release --channel prod` が候補を挙げ、`next` に
 候補の名前を並べた消す 1 行を載せる。それ以外の形では、本番へ出たコミット（タグ・本番チャネルのブランチ）を渡して打つ。
-検証リリースでは打たない。
+開発版のデプロイでは打たない。
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
