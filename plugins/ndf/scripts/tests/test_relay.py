@@ -1072,55 +1072,16 @@ def seed_starts(home, n, name="old"):
             f.write(json.dumps({"event": "start", "at": at, "section": i + 1}) + "\n")
 
 
-def test_run_max_starts_keeps_section(term):
-    t = term()
+def test_run_many_starts_of_the_day_do_not_refuse(term):
+    """同じ日の起動が何件あっても、`NDF_RELAY_MAX_STARTS` を設定しても、次の区間を起動する。"""
+    t = term(env={"NDF_RELAY_MAX_STARTS": "1"})
     seed_starts(t.env["HOME"], 20)
     t.wait_start(1)
     t.type("mark next\r")
-    t.wait(lambda: "ndf-relay: 次の区間を起動しない" in t.text, what="上限の 1 行")
-    time.sleep(0.5)
-    assert len(t.starts()) == 1
-    assert b"/exit" not in t.child_input(0)
-    assert events(t.rows(), "stop")[0]["reason"] == "max-starts"
-    assert "/exit して示されたコマンドを手で入力する" in t.text
-    t.type("quit 5\r")
-    assert t.finish() == 5
-    assert events(t.rows(), "end")[0]["ended_by"] == "no-mark"
-
-
-def test_run_max_starts_race_one_wins(tmp_path):
-    """残り 1 枠を 2 つのラッパーが取り合っても、起動するのは 1 つだけ（AC10）。"""
-    home = tmp_path / "shared-home"
-    home.mkdir()
-    ts = []
-    try:
-        for name in ("a", "b"):
-            (tmp_path / name).mkdir()
-            ts.append(Term(tmp_path / name, env={"HOME": home}))
-        seed_starts(home, 17)  # 2 つの 1 つ目の区間で 19。残り 1 枠
-        for t in ts:
-            t.wait_start(1)
-        for t in ts:
-            t.type("mark next\r")
-
-        # HOME を共有するので t.rows() は両方の記録を含む。自分のラッパーの記録だけを見る。
-        # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
-        # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
-        def own(t):
-            p = pathlib.Path(t.starts()[0]["relay_dir"]) / "log.jsonl"
-            return [json.loads(x) for x in p.read_text().splitlines()]
-
-        def decided(t):
-            return len(t.starts()) >= 2 or events(own(t), "stop")
-
-        ts[0].wait(lambda: all(decided(t) for t in ts), what="両方が決まる")
-        started = sorted(len(t.starts()) for t in ts)
-        assert started == [1, 2], [own(t) for t in ts]
-        loser = next(t for t in ts if len(t.starts()) == 1)
-        assert [r["reason"] for r in events(own(loser), "stop")] == ["max-starts"]
-    finally:
-        for t in ts:
-            t.close()
+    t.wait_start(2)
+    assert events(t.rows(), "stop") == []
+    t.type("quit 0\r")
+    t.finish()
 
 
 def test_run_spin_stops_third(term):
@@ -2416,7 +2377,7 @@ def test_question_unknown_or_missing_action_keeps_mark(tmp_path, relay, action):
 
 
 def test_guard_exit_queued_behind_question(term):
-    """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えず、count.lock を放す。
+    """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えない。
     答えの後の Stop が合図を書き直していれば、その中身で起動する。"""
     t = term(env={"FAKE_EXIT_QUESTION": "1", "NDF_RELAY_EXIT_WAIT": "1", "NDF_RELAY_TERM_WAIT": "1"})
     t.wait_start(1)
@@ -2426,9 +2387,6 @@ def test_guard_exit_queued_behind_question(term):
     time.sleep(2.5)
     pid = t.starts()[0]["pid"]
     assert not (t.fake_dir / f"sigterm-{pid}").exists()
-    with open(pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "count.lock", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別のラッパーが取れる
-        fcntl.flock(f, fcntl.LOCK_UN)
     t.type("answer mark 答えの後\r")
     t.wait_start(2)
     assert t.starts()[1]["argv"] == ["答えの後"]

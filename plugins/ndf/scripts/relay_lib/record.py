@@ -1,4 +1,4 @@
-"""ラッパーの記録: 作業ディレクトリの `log.jsonl` と合図 `next.json`、起動の上限（#895・#1142 の C6）。
+"""ラッパーの記録: 作業ディレクトリの `log.jsonl` と合図 `next.json`、再起動ループの検出（#895・#1142 の C6）。
 
 `log.jsonl` と `next.json` を書くのは `RelayRecord` だけである（I12）。`run` の `Relay` も Stop hook の `mark` も
 これを通して書くため、行とキーの形の定義は 1 か所に残る。形は版をまたいで変えない（I11）。
@@ -13,11 +13,8 @@ import random
 import time
 
 from .common import (
-    COUNT_LOCK,
     LOG_FILE,
     MARK_FILE,
-    _lock,
-    _unlock,
     env_num,
     load_json,
     parse_iso,
@@ -123,65 +120,17 @@ def make_relay_dir() -> str:
     raise OSError(errno.EEXIST, "relay dir")
 
 
-class StartLimit:
-    """次の区間を起動してよいかを、1 日の起動数と空回りで決める。`count.lock` を持つ。"""
+class SpinGuard:
+    """次の区間を起動してよいかを、再起動ループの検出だけで決める。"""
 
     def __init__(self, log_path: str):
         self.log_path = log_path
-        self.lock = None  # 取った `count.lock`（common._lock の戻り値）
-        self.max_starts = int(env_num("NDF_RELAY_MAX_STARTS", 20))
         self.spin = env_num("NDF_RELAY_SPIN", 120)
 
-    def take(self) -> bool:
-        if self.lock is not None:
-            return True
-        held = _lock(os.path.join(state_root(), COUNT_LOCK), 0)
-        if held is None:
-            return False
-        self.lock = held
-        return True
-
-    def take_within(self, seconds: float = 5) -> bool:
-        """`count.lock` を `seconds` 秒まで 0.1 秒刻みで取り直す。取れなければ False。"""
-        end = time.time() + seconds
-        while not self.take():
-            if time.time() >= end:
-                return False
-            time.sleep(0.1)
-        return True
-
-    def release(self) -> None:
-        _unlock(self.lock)
-        self.lock = None
-
     def refusal(self, written: float, started_at: float) -> tuple[str, str] | None:
-        if self.count_today() >= self.max_starts:
-            return "max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した"
         if self.spinning(written, started_at):
             return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満でカットポイントに達した"
         return None
-
-    def count_today(self) -> int:
-        today = time.localtime().tm_yday, time.localtime().tm_year
-        n = 0
-        root = state_root()
-        for name in os.listdir(root):
-            try:
-                with open(os.path.join(root, name, LOG_FILE)) as f:
-                    for line in f:
-                        try:
-                            row = json.loads(line)
-                        except ValueError:
-                            continue
-                        if row.get("event") != "start":
-                            continue
-                        t = parse_iso(row.get("at"))
-                        if t is not None:
-                            lt = time.localtime(t)
-                            n += (lt.tm_yday, lt.tm_year) == today
-            except OSError:
-                continue
-        return n
 
     def spinning(self, written: float, started_at: float) -> bool:
         ends = []
