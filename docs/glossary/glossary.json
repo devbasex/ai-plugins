@@ -2441,6 +2441,20 @@
       "pending_source": "issues/old/issue-1337-design.md"
     },
     {
+      "term": "テスト環境",
+      "context": "ndf-worktree",
+      "meaning": "1 つの worktree に対応して立ち上げる、テスト実行に必要なサービスの一式。番号で識別され、他の worktree とポート・データ保存先・ネットワークを共有しない",
+      "source": "",
+      "pending_source": "issues/issue-2567-requirements.md"
+    },
+    {
+      "term": "テスト環境の用意",
+      "context": "ndf-worktree",
+      "meaning": "到達の確認が通らないときに、テスト環境を起こして到達を確かめ直すこと",
+      "source": "",
+      "pending_source": "issues/issue-2567-requirements.md"
+    },
+    {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
