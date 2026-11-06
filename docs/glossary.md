@@ -431,9 +431,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 取り込みのコミット | — | 起点ブランチを設計 PR のブランチへ取り込むマージコミット。これだけで先頭が動いた設計 PR は、承認の依頼を送り直さない | — | — | — |
 | 前のループ | — | 同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その答えがまだの人の判断待ちは、オーガナイザーの問いの一覧に出す | — | — | — |
 | 当たらなかった答え | — | オーガナイザーの答えのうち、持ち主のループの記録の行へ当てられなかったもの。答えは耐久の記録に残し、区分 unmatched の問いとしてオーガナイザーの問いの一覧に出す | — | — | — |
-| 共有の環境 | — | NDF のスクリプトとラッパーが使う Python の環境。置き場は ~/.cache/ndf/venv/<版>（NDF_DEPS_VENV で変えられる）。プラグインの版ごとに 1 つで、同じ版のスクリプトとラッパーが共に使う | — | — | — |
-| 一覧の失敗の問い | — | 状態の一覧の失敗が停滞の区切りより長く続いたときに、並列の計画のオーガナイザーの耐久ワークフローが自分で立てる問い（kind は observe）。一覧の終了コードと標準エラーの末尾 1 行を持ち、一覧が成功に戻れば外れる | — | — | — |
-| 状態の一覧 | — | ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する | — | — | — |
+| 共有の環境 | — | NDF のスクリプトとラッパーが使う Python の環境。置き場は ~/.cache/ndf/venv/<版>（NDF_DEPS_VENV で変えられる）。プラグインの版ごとに 1 つで、同じ版のスクリプトとラッパーが共に使う | — | — | `docs/specifications/ndf-shared-venv-and-relay-ls-failure.md` |
+| 一覧の失敗の問い | — | 状態の一覧の失敗が停滞の区切りより長く続いたときに、並列の計画のオーガナイザーの耐久ワークフローが自分で立てる問い（kind は observe）。一覧の終了コードと標準エラーの末尾 1 行を持ち、一覧が成功に戻れば外れる | — | — | `docs/specifications/ndf-shared-venv-and-relay-ls-failure.md` |
+| 状態の一覧 | — | ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する | — | — | `docs/specifications/ndf-shared-venv-and-relay-ls-failure.md` |
 | 設計承認ゲート | — | 設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる | 承認ゲート 1、ゲート 1、関門 1 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリース承認ゲート | — | 本番系へ届く操作（本番へのリリース・operation の実行・自動反映の本番チャネルへのマージ）の前に人の承認を求める承認ゲート。documentation モードでは制作物承認に当たる | 承認ゲート 2、ゲート 2、関門 2 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 人へ出す文 | — | Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる | — | — | — |

@@ -137,5 +137,6 @@
 | [ndf-design-external-survey.md](ndf-design-external-survey.md) | design の外部の調査（標準・主要な製品・ライブラリとサービス）と、自前で作る決定に比べた候補の検査（design-survey.py）・レビューの観点（pr-review と cross-review）を置いた決定と理由。手順は design の references/external-survey.md が正 |
 | [ndf-loop-select-prerequisites.md](ndf-loop-select-prerequisites.md) | 開発ループの選定が閉じていない前提の課題を持つ課題を外す仕組み。順位の算出の出力 `prerequisites`・常に成り立つ条件・決定の理由・既知の限界・テスト観点。選定の規則の全体は開発ループの確定仕様が正 |
 | [cross-refactoring-test-file-detection.md](cross-refactoring-test-file-detection.md) | cross-refactoring のテストのファイルの見分け方（Python は名前の形に加えてテストの関数の定義の行で決めること、試走の候補・テストの置き場所・行数・危険フラグ・コミットの事実を同じ判定にそろえること、コミットの事実だけ前後の版を読むこと、判定の規則と既知の限界） |
+| [ndf-shared-venv-and-relay-ls-failure.md](ndf-shared-venv-and-relay-ls-failure.md) | 共有の環境を指す UV_PROJECT_ENVIRONMENT を子プロセスへ渡さない仕組みと、状態の一覧の失敗で並列の計画を終えない観測の決定・常に成り立つ条件・テスト観点。全体は ndf-parallel-organizer.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
