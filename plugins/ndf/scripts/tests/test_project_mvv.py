@@ -789,13 +789,18 @@ def test_mvv_gate_suggests_revision_after_the_unknown_streak(env):
     assert approve(env) == 0
     state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "unknown", "reasons": ["決められない"], "boundary": []}')
+
     # 判定できなかった依頼の数で数える（#2507）: 同じスプリント状態の打ち直しは 1 件、別のスプリント状態なら別の件
-    assert not any(i.get("kind") == "revise" for i in [gate_check(env, state)[1] for _ in range(3)][-1]["items"])
+    # 累計（`unknowns`）の閾値でも同じ kind の提案が出る。承認と同じ秒の行は累計に入らず、秒をまたぐと結果が変わるため、連続の提案だけを見る
+    def streak_revise(out: dict) -> bool:
+        return any(i.get("kind") == "revise" and "回続いた" in i.get("reason", "") for i in out["items"])
+
+    assert not streak_revise([gate_check(env, state)[1] for _ in range(3)][-1])
     states = [state] + [state.with_name(f"m{k}.json") for k in (2, 3)]
     for s in states[1:]:
         s.write_text(state.read_text())
     outs = [gate_check(env, s)[1] for s in states]
-    assert [any(i.get("kind") == "revise" for i in o["items"]) for o in outs] == [False, False, True]
+    assert [streak_revise(o) for o in outs] == [False, False, True]
     assert gate_check(env, state)[2][-1]["basis"] == [pm.NO_BASIS]
 
 
