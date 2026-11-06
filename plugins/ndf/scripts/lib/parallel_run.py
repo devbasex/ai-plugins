@@ -23,15 +23,14 @@ from pathlib import Path
 from typing import Optional
 
 import durable
-import legacy_values
 import parallel_lane as pl
 import parallel_plan as pp
 import parallel_release as pr
 from parallel_files import RELAY
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
 from parallel_question import cause_of
-from parallel_repo import dev_version, git_head
-from sprint_loop_names import LOOP_DIR, PENDING
+from parallel_repo import dev_version, git_head, loop_records
+from sprint_loop_names import PENDING
 
 
 def poll_seconds() -> float:
@@ -136,23 +135,7 @@ def step_held_loops(main: str, name: str, answered: list[str]) -> list[str]:
 def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
     """答えを受けたのに残りを流していない保留の周回を持つ、計画のループのレーンのループ名（異常系 11）。"""
     asked = lambda lap: (lap.get("release") or lap.get("question") or {}).get("request") if lap.get("outcome") in PENDING else None  # noqa: E731
-    return [ln.input.loop for ln, rec in _loop_records(main, name) if any(asked(lap) in answered for lap in rec.get("laps") or [])]
-
-
-def _loop_records(main: Path, name: str) -> list[tuple]:
-    """計画のループのレーンと、読めたループの記録（loop.json）の組。計画を読めなければ空。"""
-    try:
-        plan = pp.load_valid_plan(main, name)
-    except (OSError, ValueError):
-        return []
-    out = []
-    for ln in (ln for ln in plan.lanes if ln.input.kind == "loop"):
-        try:
-            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
-            out.append((ln, legacy_values.normalize_laps(rec)))
-        except (OSError, ValueError):
-            continue
-    return out
+    return [ln.input.loop for ln, rec in loop_records(main, name) if any(asked(lap) in answered for lap in rec.get("laps") or [])]
 
 
 @durable.step(name="parallel.design-held")
@@ -166,7 +149,7 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
     答え（`answer-<依頼>`）は持ち主が周回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後のリリースの
     依頼を送れないため、当てるまで計画を終えない。"""
     held = lambda rec: any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or [])  # noqa: E731
-    return [ln.name for ln, rec in _loop_records(main, name) if held(rec)]
+    return [ln.name for ln, rec in loop_records(main, name) if held(rec)]
 
 
 @durable.step(name="parallel.waiting-lanes")
@@ -182,7 +165,7 @@ def waiting_lanes(main: Path, name: str) -> list[str]:
             return False
         return any(not w.get("answer") for w in rec.get("waiting") or [])
 
-    return [ln.name for ln, rec in _loop_records(main, name) if held(rec)]
+    return [ln.name for ln, rec in loop_records(main, name) if held(rec)]
 
 
 @durable.step(name="parallel.build")

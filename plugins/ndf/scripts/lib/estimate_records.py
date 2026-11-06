@@ -288,8 +288,12 @@ def read_actuals(directory: Path | str) -> list[dict]:
 
 
 def read_estimates(directory: Path | str) -> list[dict]:
-    """見積もりの記録の行。無ければ []。"""
-    return _read_rows(Path(directory) / ESTIMATES)
+    """見積もりの記録の行。無ければ []。旧い値の完了条件（`done`）は、実績のフェーズと同じく新しい値へ寄せて返す。"""
+    rows = _read_rows(Path(directory) / ESTIMATES)
+    for row in rows:
+        if "done" in row:
+            row["done"] = legacy_values.to_current("phase", row["done"])
+    return rows
 
 
 def human_row(issues: list[int], seconds: float, what: str | None) -> dict:
