@@ -6064,7 +6064,7 @@
     {
       "term": "照合の入力",
       "context": "ndf-workflow",
-      "meaning": "1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・照合する本文からなる。1 字でも違えば別の入力である",
+      "meaning": "1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・判定の決まり・本文の種類の名前・照合する本文からなる。1 字でも違えば別の入力である",
       "source": "",
       "pending_source": "issues/issue-2614-requirements.md"
     },
