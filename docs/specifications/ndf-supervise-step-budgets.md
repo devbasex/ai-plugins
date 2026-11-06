@@ -95,7 +95,7 @@ graph TD
 - **宣言の形は、`supervise.py new` のすべての種別で、引数を渡したときも検査する**（`test` の形の検査と同じ時点）
 - **受けない種別へ渡した引数は、argparse が知らない引数として止める。** `fill_new_defaults` がその属性を `None` で埋めるため、雛形は種別をまたいで
   `getattr` で読める
-- **宣言も引数も無いプランは、`impl` の `timeout` が実績からの見込みか雛形の値で（I3）、`refactor` の cmd に `--budget-minutes` を持たず、`refactor` の `timeout` が
+- **宣言も引数も無いプランは、`impl` に `timeout` が無く `stall` が 1800 秒で（I3）、`refactor` の cmd に `--budget-minutes` を持たず、`refactor` の `timeout` が
   `with_margin(既定の予算 × 60)` になる。** 既定の予算 30 分で 1980 秒である
 - `with_margin` の式と最低 30 秒（`MARGIN_FLOOR`）・cross-refactoring の既定の予算・ほかのステップの `timeout` は変えない
 - `vocabulary.py` は読み込むときに `refactoring` の `references/vocabulary.md` を読む。読めなければ例外のまま止まり、プランを書かない
