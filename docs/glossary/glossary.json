@@ -5840,7 +5840,7 @@
     {
       "term": "周回の費用の内訳",
       "context": "ndf-workflow",
-      "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は使用量の帳簿から導く",
+      "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
       "source": "",
       "pending_source": "issues/issue-2505-design.md"
     },
