@@ -1,6 +1,6 @@
 """メインディレクトリを編集しようとしたときに、worktree で作業する旨を伝える guard（#1142 の決定 20）。
 
-結線先は `hooks/*.json`（Claude Code・Codex）。Kiro CLI と agy の分岐は、配布を終える前（#2231）に導入した手元の hook が
+結線先は `hooks/*.json`（Claude Code・Codex）。Kiro CLI と agy の分岐は、デプロイを終える前（#2231）に導入した手元の hook が
 この入口を呼び続けるために残す。
 - PreToolUse（Claude Code / Codex CLI）: 編集先のパスを見た案内を `additionalContext` でモデルへ渡す
 - プロンプト送信時（Kiro CLI）: パスを見ない案内を標準出力へ書く

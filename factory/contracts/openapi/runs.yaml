@@ -71,9 +71,9 @@ paths:
     get:
       tags: [run-jobs]
       operationId: getRunJobOrganizerAnswers
-      summary: 配布の依頼の答えと配布済みの範囲
+      summary: リリースの依頼の答えとリリース済みの範囲
       description: >-
-        実行ジョブの token で認証し、そのジョブの実行のレーン（ループならループのすべての実行）の配布の依頼の答えと、 リポジトリの配布済みの範囲を返す（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へそのまま書く。
+        実行ジョブの token で認証し、そのジョブの実行のレーン（ループならループのすべての実行）のリリースの依頼の答えと、 リポジトリのリリース済みの範囲を返す（#2439）。ランナーは NDF の置き場の answers/ と ranges/ へそのまま書く。
       security: [{ runJob: [] }]
       responses:
         "200":
@@ -85,9 +85,9 @@ paths:
     get:
       tags: [run-jobs]
       operationId: getRunJobOrganizerBatch
-      summary: 配布の実行のまとめた配布の中身
+      summary: リリースの実行のまとめたリリースの中身
       description: >-
-        配布の実行のジョブの token だけが読める（ほかの実行は 403）。レーンの一覧と依頼、提示、選択肢と、 このジョブの手（step）を返す。ランナーは NDF の置き場の batch.json へそのまま書く（#2439）。
+        リリースの実行のジョブの token だけが読める（ほかの実行は 403）。レーンの一覧と依頼、提示、選択肢と、 このジョブの手（step）を返す。ランナーは NDF の置き場の batch.json へそのまま書く（#2439）。
       security: [{ runJob: [] }]
       responses:
         "200":
@@ -490,7 +490,7 @@ paths:
       operationId: listApprovalRequests
       summary: 承認待ちの一覧
       description: >-
-        アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 待ち始めた日時の古い順（同じ日時は実行の ID の順）に返す。1 つの実行に 0 か 1 行で、状態が awaiting_approval で待つ理由が無く、 最後の gate.reached より後に同じ種類の gate.answered が無い実行だけが載る。読むだけで、承認を確定しない。分割せず 1 回で返す。
+        アカウントのスプリントの実行のうち、答えの無い承認の依頼（設計承認ゲート・リリース承認ゲート・判断）を、ループの名前と周回の番号とともに 待ち始めた日時の古い順（同じ日時は実行の ID の順）に返す。1 つの実行に 0 か 1 行で、状態が awaiting_approval で待つ理由が無く、 最後の gate.reached より後に同じ種類の gate.answered が無い実行だけが載る。読むだけで、承認を確定しない。分割せず 1 回で返す。
       x-ndf-access: read
       parameters:
         - { name: accountId, in: path, required: true, description: アカウントの ID, schema: { type: string } }
@@ -583,7 +583,7 @@ paths:
       operationId: cancelSprintRun
       summary: スプリントの実行を取り消す
       description: >-
-        動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後の配布の実行は取り消さず、止まった配布（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。
+        動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。main へマージした後のリリースの実行は取り消さず、止まったリリース（release_stalled）として残す（ジョブが無ければ 409 release_after_main）。
       x-ndf-access: write
       x-ndf-keys: [sprint_run_id]
       parameters: [{ name: accountId, in: path, required: true, description: アカウントの ID, schema: { type: string } }]
@@ -976,12 +976,12 @@ components:
       type: object
       required: [kind]
       description: >-
-        kind が gate1 / gate2 なら decision が要り、ランナーはスプリント状態ファイルへ sprint-state.py gate で gate（無ければ kind を NDF の記録の名前へ写した「関門 1」/「関門 2」）の名前で書く。rejected なら差し戻しと body を conductor の再開の指示へ渡す。decision なら body を conductor への利用者の判断として渡す。
+        kind が gate1 / gate2 なら decision が要り、ランナーはスプリント状態ファイルへ sprint-state.py gate で gate（無ければ kind を NDF の承認ゲートの記録の名前へ写した名前）で書く。rejected なら差し戻しと body を conductor の再開の指示へ渡す。decision なら body を conductor への利用者の判断として渡す。
       properties:
         kind: { type: string, enum: [gate1, gate2, decision] }
         decision: { type: string, enum: [approved, rejected] }
         body: { type: [string, "null"], description: 承認の理由か判断の本文 }
-        gate: { type: string, description: スプリントの状態に書く関門の名前（省略時は kind から「関門 1」/「関門 2」） }
+        gate: { type: string, description: スプリントの状態に書く承認ゲートの名前（省略時は kind から写す） }
     SignedUrl:
       type: object
       required: [url, expires_at]

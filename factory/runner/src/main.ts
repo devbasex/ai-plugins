@@ -99,7 +99,7 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
   let report: ReportResult = null;
   let end: SectionEnd | undefined;
   let lapAdvanced = false;
-  // このジョブで新しく出た配布の依頼があり、答えがまだ無い（手動の実行は答えを待って gate で終える。I65）
+  // このジョブで新しく出たリリースの依頼があり、答えがまだ無い（手動の実行は答えを待って gate で終える。I65）
   let releaseRequested = false;
   let releaseGate = false;
   const loopName = instruction.LOOP_NAME ?? null;
@@ -115,18 +115,18 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     await emit({ type: "job.started", payload: { ndf_version: instruction.NDF_VERSION, start: instruction.START } });
     let directive: string | null = null;
     if (instruction.START === "resume" || instruction.START === "loop" || instruction.START === "release") {
-      // ループの最初の周回と配布の実行の最初のジョブは保存した状態が無い（404）。空から始める
+      // ループの最初の周回とリリースの実行の最初のジョブは保存した状態が無い（404）。空から始める
       const state = await callApi("/run-jobs/state", { op: "get" }, instruction.START !== "resume");
       if (state) await runtime.restoreState(state.url!);
       // 承認の依頼の識別子の無い resume（利用上限の後）は答えを書かずに続ける（決定 7）
       if (instruction.START === "resume" && instruction.APPROVAL_REQUEST_ID) directive = await runtime.recordAnswer(instruction.APPROVAL_REQUEST_ID);
-      // 配布の実行の判断（承認ゲートの外の問い）への答えは本文を最初の指示へ渡す。承認ゲート 2 の答えは配布のまとめが手（step）にする
+      // リリースの実行の判断（承認ゲートの外の問い）への答えは本文を最初の指示へ渡す。リリース承認ゲートの答えはリリースのまとめが手（step）にする
       if (instruction.START === "release" && instruction.APPROVAL_REQUEST_ID) {
         const answer = await getApi<{ kind: string; body?: string | null }>(`/run-jobs/approval-requests/${instruction.APPROVAL_REQUEST_ID}/answer`);
         if (answer.kind === "decision") directive = answer.body ?? null;
       }
     }
-    // 配布の依頼の答えと範囲、配布の実行ならまとめた配布の中身を置き場へ書き、答えの無い依頼を送り直す（#2439）
+    // リリースの依頼の答えと範囲、リリースの実行ならまとめたリリースの中身を置き場へ書き、答えの無い依頼を送り直す（#2439）
     let requestsBefore = new Set<string>();
     if (organizer) {
       await writeAnswers(organizer, await getApi<OrganizerAnswers>("/run-jobs/organizer/answers"));
@@ -176,9 +176,9 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     }
     await runtime.saveState((await callApi("/run-jobs/state", { op: "put" }))!.url!);
     if (report === "判断が要る" && end?.kind !== "usage_limit" && !(releaseRequested && !loopName)) {
-      // 配布の実行が承認資料をそろえて止まったら承認ゲート 2。main へのマージの後の判断は続けるだけを選べる（I63）
-      // 配布の実行の中の止まりは、承認資料をそろえた提示のときだけ gate2。本番のプランの中の「判断が要る」を
-      // gate2 にすると、確定済みの配布への答えが差し戻しでも本番のプランを流し直す
+      // リリースの実行が承認資料をそろえて止まったらリリース承認ゲート。main へのマージの後の判断は続けるだけを選べる（I63）
+      // リリースの実行の中の止まりは、承認資料をそろえた提示のときだけ gate2。本番のプランの中の「判断が要る」を
+      // gate2 にすると、確定済みのリリースへの答えが差し戻しでも本番のプランを流し直す
       const kind = releaseGate ? "gate2" : instruction.START === "release" ? "decision" : (out.gate?.kind ?? "decision");
       gate = { kind, pr_url: out.gate?.pr_url ?? null, material: out.gate?.material ?? summary };
       if (loopName) gate.loop = { name: loopName, lap: currentLapOf(loopAfter) };

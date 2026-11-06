@@ -76,7 +76,7 @@ def test_the_new_stages_sit_where_the_design_says() -> None:
     assert result.returncode == 0
     stages = [line for line in result.stdout.splitlines() if line]
     assert stages[stages.index("設計") + 1] == "素材の収集と出典の確定"
-    assert stages[stages.index("配布") + 1] == "体裁レビュー"
+    assert stages[stages.index("デプロイ") + 1] == "体裁レビュー"
     assert len(stages) == 19
 
 

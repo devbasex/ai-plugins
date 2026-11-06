@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--report", action="store_true", help="たどった先の内訳を足す")
     parser.add_argument("--refresh", action="store_true", help="観点の出典を取得して提示する（通信する唯一の経路）")
     parser.add_argument("--refresh-timeout", type=float, default=None, help="出典 1 件あたりの待ち（秒）")
-    parser.add_argument("--criteria", default=None, help="観点のデータの位置（既定は配布物の data/ の下）")
+    parser.add_argument("--criteria", default=None, help="観点のデータの位置（既定はリリース対象の data/ の下）")
     return parser
 
 

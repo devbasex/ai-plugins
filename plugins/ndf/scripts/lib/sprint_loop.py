@@ -37,7 +37,7 @@ from sprint_loop_record import (
     RETURNED,
     QUESTION_PENDING,
     PENDING,
-    GATE_1,
+    DESIGN_GATE,
     FINISHED,
     NOT_RUN,
     LoopError,
@@ -216,7 +216,7 @@ def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | Non
         return None, nxt
     answer = gate2_answer(lap, stop.get("at"))
     if answer is None:
-        return stopped_result(env, rec, "承認ゲート 2 の答え（承認か差し戻し）がまだ無い"), nxt
+        return stopped_result(env, rec, "リリース承認ゲートの答え（承認か差し戻し）がまだ無い"), nxt
     if answer == "rejected":
         close_lap(env, rec, lap, RETURNED)
         return None, nxt
@@ -231,13 +231,13 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
             None,
             f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す）",
         )
-    # 承認ゲート 1 の後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
+    # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:
         queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
         write_record(env, rec, before)
-        return stopped_result(env, rec, f"承認ゲート 1 の後の続きをまだ組めない: {str(e)[:200]}"), nxt
+        return stopped_result(env, rec, f"設計承認ゲートの後の続きをまだ組めない: {str(e)[:200]}"), nxt
     return None, f"{queue} && {wait_lap(rec, done)}"
 
 
@@ -310,7 +310,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
             return stopped_result(env, rec, "ループは止まっている")
         if lap.get("issues_kept") is not None:
-            return refusal_order("承認ゲート 1 の後の周回は組み直さない（loop start で残した課題の続きを組む）")
+            return refusal_order("設計承認ゲートの後の周回は組み直さない（loop start で残した課題の続きを組む）")
         issues = selected_issues(lap)
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
@@ -332,7 +332,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             close = build_close(env, rec, lap, issues)
         except (LoopError, OSError, ValueError) as e:
             return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
-        lap["close_plans"] = close  # 配布待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
+        lap["close_plans"] = close  # リリース待ち・質問待ちで締めた周回は、答えの後にこのまとめを流す（#2436）
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)
@@ -397,7 +397,7 @@ def answer_after(approved: bool, revise: bool, merge: dict | None) -> str:
     if merge and merge["result"] in sprint_loop_gate.MERGED_RESULTS:
         return "設計 PR をマージした。次の周回で先頭に選ぶ"
     if merge and merge["result"] == "production":
-        return f"設計 PR をマージしない（{merge['reason']}）。承認ゲート 2 で人がマージするまで実装に選ばない"
+        return f"設計 PR をマージしない（{merge['reason']}）。リリース承認ゲートで人がマージするまで実装に選ばない"
     if merge:
         return f"設計 PR をマージできない（{merge['result']}: {merge['reason']}）。次の周回の境でマージし直す"
     return "設計 PR のマージの後の周回で選定の対象に戻る"
@@ -439,7 +439,7 @@ def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note
             str(SPRINT_STATE),
             "gate",
             state,
-            GATE_1,
+            DESIGN_GATE,
             "--by",
             "user",
             "--what",
@@ -526,7 +526,7 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
 
 
 def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None = None) -> dict:
-    """保留の周回（配布待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
+    """保留の周回（リリース待ち・質問待ち）の残りを流した done を読み、周回を 1 回だけ締め直す（#2436 の 6a・6d）。"""
     with open_record(env, name) as (rec, before):
         lap = rec["laps"][n - 1] if 1 <= n <= len(rec.get("laps", [])) else None
         if not lap or lap.get("outcome") not in PENDING:

@@ -182,7 +182,7 @@ def test_registry_role_counts_before_role_file():
     assert now.count == 1 and now.helpers == 1
 
 
-# ---- まとめた配布（I9・I14・I15） ----
+# ---- まとめたリリース（I9・I14・I15） ----
 
 
 def test_range_maps_unrequested_lane_and_orphans():
@@ -196,9 +196,9 @@ def test_range_maps_unrequested_lane_and_orphans():
 def test_answerable_and_moved():
     pending = [{"id": "a", "prs": [1]}, {"id": "b", "prs": [5]}]
     assert prl.answerable(pending, [1, 2]) == ["a"]
-    # 一部だけが範囲に入る依頼は答えない（残りを出さずに配布済みと答えない）
+    # 一部だけが範囲に入る依頼は答えない（残りを出さずにリリース済みと答えない）
     assert prl.answerable([{"id": "c", "prs": [1, 3]}, {"id": "d", "prs": []}], [1, 2]) == []
-    # 先の PR が前の配布で出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこの配布で答えない
+    # 先の PR が前のリリースで出た依頼は、今回の範囲と合わせて全部が入れば答える。前の範囲だけの依頼はこのリリースで答えない
     assert prl.answerable([{"id": "e", "prs": [1, 3]}, {"id": "f", "prs": [3]}], [1, 2], done=[3]) == ["e"]
     assert prl.moved("abc", "abc") is False and prl.moved("abc", "def") is True
 

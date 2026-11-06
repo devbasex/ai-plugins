@@ -3,10 +3,10 @@
 ループの記録は、メインディレクトリの `.ndf/loop/<名>/loop.json`（正本）と `laps.md`（描画）である。コミットしない。
 周回はスプリント状態ファイルを ID（パス）で参照し、周回を締めるときに費用・秒・承認ゲートの判定・版を写して固定する。
 止まる条件（予算・同じ失敗・止める指示）は周回の境（周回の開始の前と終わりの後）でだけ判定する。周回の途中で止めるのは、
-承認ゲート 2 を人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
+リリース承認ゲートを人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
 （`refused`）の 3 つだけで、周回は進行中のまま残す。
 
-並列の計画のレーン（#2436）では、配布の依頼を送った周回を「配布待ち」、作業の途中の問いをオーガナイザーへ送った周回を
+並列の計画のレーン（#2436）では、リリースの依頼を送った周回を「リリース待ち」、作業の途中の問いをオーガナイザーへ送った周回を
 「質問待ち」で締め、答えを待たずに次の周回へ進む。保留の周回は、周回の境で答えを読んで 1 回だけ締め直す（I1 の例外）。
 
 外の世界（gh・`upkeep.py rank`・`supervise.py`・`sprint-state.py` の別の副命令）は `Env` の関数を通して呼び、テストで
@@ -33,11 +33,13 @@ import clock
 import design_pr_merge
 import handoff_doc
 import jsonio
+import legacy_values
 import locks
 import parallel_files
 import project_mvv as pm
 import repo as repo_lib
 import step_result
+from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
@@ -65,7 +67,6 @@ SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
 SLOT_FIT = "当てた"  # upkeep_rank_config.SLOT_FIT（rank の出力をそのまま読む）
 OVER_SCALE = "尺度を超える"  # upkeep_rank_estimate.OVER_SCALE
-GATE_1, GATE_2 = "関門 1", "関門 2"
 DESIGN_PHASE = "設計"
 FINISHED = ("完了", "関門")
 NOT_RUN = "流さなかった"  # supervise_lib.queue.NOT_RUN（前のステージが完了でないときに流さなかった計画）
@@ -185,7 +186,7 @@ def loop_record_path(env: Env, name: str) -> Path:
 def read_loop_record(env: Env, name: str) -> dict:
     p = loop_record_path(env, name)
     try:
-        rec = jsonio.read(p, want=dict)
+        rec = legacy_values.normalize_laps(jsonio.read(p, want=dict))
     except jsonio.JsonReadError as e:
         raise LoopError(f"ループの記録が無いか読めない: {p}（{e.detail or e}）")
     check_laps(rec)
@@ -203,7 +204,7 @@ def check_laps(rec: dict) -> None:
 
 def write_record(env: Env, rec: dict, before: dict | None = None) -> None:
     """記録を書く。終わった周回の行を書き換える書き込みは拒む（I1）。`laps.md` も描き直す。
-    保留の周回（配布待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
+    保留の周回（リリース待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
     check_laps(rec)
     if before is not None:
         old = {lap["n"]: lap for lap in before.get("laps", []) if lap.get("outcome") not in (IN_PROGRESS, *PENDING)}
@@ -237,7 +238,7 @@ def current_lap(rec: dict) -> dict | None:
 
 
 def pending_laps(rec: dict) -> list[dict]:
-    """保留の周回（配布待ち・質問待ち）を古い順に。"""
+    """保留の周回（リリース待ち・質問待ち）を古い順に。"""
     return [lap for lap in rec.get("laps", []) if lap.get("outcome") in PENDING]
 
 
@@ -307,7 +308,7 @@ def failure_streak(rec: dict) -> tuple[dict | None, int]:
             break
         if lap.get("outcome") == DONE:
             break
-        if lap.get("outcome") != FAILED:  # 保留の周回（配布待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
+        if lap.get("outcome") != FAILED:  # 保留の周回（リリース待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
             continue
         k = lap.get("failure")
         if key is None:
@@ -487,7 +488,7 @@ def render_lap_detail(lap: dict) -> list[str]:
         )
     for g in lap.get("gates", []):
         lines.append(
-            f"\n- {g.get('name')}: {g.get('by', 'user')} {_md_cell(g.get('verdict'))}（根拠 {_md_cell(', '.join(g.get('basis') or []))}）"
+            f"\n- {canonical(g.get('name'))}: {g.get('by', 'user')} {_md_cell(g.get('verdict'))}（根拠 {_md_cell(', '.join(g.get('basis') or []))}）"
         )
     if lap.get("refine"):
         lines.append(

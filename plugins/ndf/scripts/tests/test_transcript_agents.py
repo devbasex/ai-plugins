@@ -247,7 +247,7 @@ def test_the_step_names_match_the_phase_table(mod) -> None:
     "description,phase",
     [
         ("確定仕様化: #540", "取り込み"),
-        ("配布: #540", "取り込み"),
+        ("デプロイ: #540", "取り込み"),
         ("リリース後テスト: #766", "仕上げ"),
         ("振り返り: #550", "仕上げ"),
         ("棚卸し: #842", "仕上げ"),
@@ -260,7 +260,7 @@ def test_a_step_name_maps_to_its_phase(mod, description, phase) -> None:
 
 
 def test_a_step_name_does_not_map_for_a_worker_or_the_old_form(mod) -> None:
-    assert mod.role_of("配布: 何か", "worker") == "その他"
+    assert mod.role_of("デプロイ: 何か", "worker") == "その他"
     assert mod.role_of("#541 の引継ぎ", "supervisor") == "その他"
     assert mod.role_of("実装 #540 実行計画", "supervisor") == "その他"
 

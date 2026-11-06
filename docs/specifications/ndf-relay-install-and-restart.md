@@ -433,7 +433,7 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は入力注�
 | `/exit` の後の質問のあいだ SIGTERM までの秒を数えず、シグナルファイルが無ければ起動せず、書き直されたシグナルファイルなら新しい中身で起動すること | `test_guard_exit_queued_behind_question`・`test_guard_exit_queued_then_no_mark`・`test_guard_exit_wait_resumes_after_question` |
 | `question` がラッパーの外で何もせず、ロックの保持・書けないときに拒否し、`close` が消すこと | `test_question_*` |
 | 引数の選び分けと、alias → 関数 → ラッパーを通した 2 つ目のセッションの引数 | `test_carried_args`・`test_run_carries_policy_args_through_shell_function` |
-| Skill の配布と frontmatter（`install-wrapper` に `disable-model-invocation: true`、`restart` に無い。`claude-skills.txt` にだけ載る） | `python3 scripts/check-skill-frontmatter.py` と manifests |
+| Skill のデプロイと frontmatter（`install-wrapper` に `disable-model-invocation: true`、`restart` に無い。`claude-skills.txt` にだけ載る） | `python3 scripts/check-skill-frontmatter.py` と manifests |
 | 本物の Claude Code での `/ndf:restart` の通し | 隔離した HOME・`CLAUDE_CONFIG_DIR` で 1 度通し、記録を実装の Pull Request に残した |
 
 ## 関連リンク

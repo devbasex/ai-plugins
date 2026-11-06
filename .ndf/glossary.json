@@ -16,6 +16,40 @@
       "docs/specifications/*.md",
       "plugins/*/skills/**/*.md",
       "plugins/ndf/scripts/lib/README.md"
-    ]
+    ],
+    "banned": {
+      "words": [
+        "配布"
+      ],
+      "paths": [
+        "plugins/**",
+        "factory/**",
+        "docs/**",
+        ".github/**",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        "KIRO.md",
+        ".ndf/**"
+      ],
+      "exclude": [
+        "docs/presentations/**",
+        "docs/articles/**",
+        "docs/archive/**",
+        "docs/development-history/**",
+        "docs/changelog/**",
+        "docs/metrics/**",
+        ".ndf/mvv.md",
+        ".ndf/mvv.json",
+        ".ndf/glossary.json",
+        "docs/glossary/glossary.json",
+        "docs/glossary.md",
+        "plugins/ndf/scripts/data/legacy-values.json",
+        "plugins/ndf/scripts/tests/test_legacy_values.py",
+        "plugins/ndf/scripts/tests/test_estimate_predict.py",
+        "factory/runner/src/legacy-phases.ts",
+        "factory/runner/src/legacy-phases.test.ts"
+      ]
+    }
   }
 }

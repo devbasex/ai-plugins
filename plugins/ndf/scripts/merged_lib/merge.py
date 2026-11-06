@@ -1,7 +1,7 @@
-"""merged-steps.py の merge-gate・merge-when-green・promote（承認ゲート 2 の判定を持つマージ。#1336）。
+"""merged-steps.py の merge-gate・merge-when-green・promote（リリース承認ゲートの判定を持つマージ。#1336）。
 
 判定は `lib/delivery.py` の `judge_target`。自動反映の本番チャネルか、決められない宛先へのマージは、
-`--gate-approved user|mvv` が無ければ `gh pr merge` を打たずに承認ゲート 2（status: gate・終了コード 10）で止める。
+`--gate-approved user|mvv` が無ければ `gh pr merge` を打たずにリリース承認ゲート（status: gate・終了コード 10）で止める。
 merge-gate は、PR 本文の手動確認（マージ前）に印の無い行があっても承認ゲートで止める（`lib/manual_checks.py`）。
 後片付け（`cleanup`）は merged-steps.py が持ち、呼び出しの引数で受ける。
 """
@@ -48,21 +48,21 @@ def add_wait_args(m):
     m.add_argument(
         "--gate-approved",
         choices=("user", "mvv"),
-        help="承認ゲート 2 を通した担い手（利用者 / MVV 判定）。自動反映の本番チャネルへのマージは、これが無ければ止まる",
+        help="リリース承認ゲートを通した担い手（利用者 / MVV 判定）。自動反映の本番チャネルへのマージは、これが無ければ止まる",
     )
 
 
 def add_promote_args(pm):
     """promote だけが受ける、用意と照合の引数（#1529・#2104）。"""
     pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
-    pm.add_argument("--out", help="--prepare と承認ゲート 2 の停止で書く昇格の承認資料の置き場（既定は提示物の置き場）")
+    pm.add_argument("--out", help="--prepare とリリース承認ゲートの停止で書く昇格の承認資料の置き場（既定は提示物の置き場）")
     pin = pm.add_mutually_exclusive_group()
     pin.add_argument(
         "--expect-head-from",
         metavar="資料",
         help=(
             "導入の確認の承認資料。確かめたコミットが PR の先端のときだけマージする（照合）。"
-            "食い違えば head_moved で 1、資料から読めなければ 2 で止まり、プランの handoff が承認ゲート 2 へ戻す"
+            "食い違えば head_moved で 1、資料から読めなければ 2 で止まり、プランの handoff がリリース承認ゲートへ戻す"
             "（run <プラン> --from verify から流し直す）"
         ),
     )
@@ -73,7 +73,7 @@ def add_promote_args(pm):
     )
 
 
-# --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
+# --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 GATE = "production-merge"
 GATE_ROLLBACK = (
@@ -114,7 +114,7 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", 
     path = approval_present(
         TOOL,
         f"merge-{n or target}",
-        title=f"{what} のマージ（本番系への反映。承認ゲート 2）",
+        title=f"{what} のマージ（本番系への反映。リリース承認ゲート）",
         targets=[target_row],
         change=change,
         judge=[*([approved_commit.material_row(approved_sha)] if approved_sha else []), *_judge_rows(verdict), ("宛先", target)],
@@ -134,7 +134,7 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", 
         result(
             TOOL,
             "gate",
-            f"{lead}。承認ゲート 2 の承認が要る",
+            f"{lead}。リリース承認ゲートの承認が要る",
             items,
             metrics,
             path,
@@ -145,7 +145,7 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", 
 
 def manual_gate(n, info) -> None:
     """PR 本文の「手動確認」の節に印の無いマージ前の行があれば、承認ゲート（終了コード 10）で止める（#1485 の決定 5）。
-    本文は merge_gate が宛先と 1 回で読んだもの。読めなければ何もしない（承認ゲート 2 の判定だけを行う）。"""
+    本文は merge_gate が宛先と 1 回で読んだもの。読めなければ何もしない（リリース承認ゲートの判定だけを行う）。"""
     rows = manual_checks.unchecked_before_merge((info or {}).get("body") or "")
     if not rows:
         return
@@ -163,7 +163,7 @@ def manual_gate(n, info) -> None:
 
 
 def merge_gate(a):
-    """宛先へのマージが承認ゲート 2 に当たるかを判定する（gh を呼ぶのは --pr を渡したときの 1 回だけ）。
+    """宛先へのマージがリリース承認ゲートに当たるかを判定する（gh を呼ぶのは --pr を渡したときの 1 回だけ）。
     その前に、--pr の本文に未確認のマージ前の手動確認の行があれば承認ゲートで止める。"""
     root = git_root(a.root)
     if not a.base and not a.pr:
@@ -185,7 +185,7 @@ def merge_gate(a):
         result(
             TOOL,
             "ok",
-            f"宛先 {base} へのマージは承認ゲート 2 に当たらない（{verdict.reason}）",
+            f"宛先 {base} へのマージはリリース承認ゲートに当たらない（{verdict.reason}）",
             verdict.items,
             {"verdict": verdict.value, "target": base},
         )
@@ -234,12 +234,12 @@ def _merge_pr(root, a, n, watch, items, waits):
         )
     merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha}
     if a.gate_approved:
-        merged["gate_approved"] = a.gate_approved  # 誰が承認ゲート 2 を通したか（監査で辿る。#1336 の I8）
+        merged["gate_approved"] = a.gate_approved  # 誰がリリース承認ゲートを通したか（監査で辿る。#1336 の I8）
     items.append(merged)
 
 
 def _gate_head(info):
-    """承認ゲート 2 で止まる判定に使った読みの先端（承認資料へ載せる承認したコミット）。読めなければ止まる（#2104 の I1）。"""
+    """リリース承認ゲートで止まる判定に使った読みの先端（承認資料へ載せる承認したコミット）。読めなければ止まる（#2104 の I1）。"""
     try:
         return approved_commit.parse_sha(info.get("headRefOid"))
     except ValueError as e:
@@ -247,7 +247,7 @@ def _gate_head(info):
 
 
 def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False, moved_next=None):
-    """gate_head なら、承認ゲート 2 で止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。
+    """gate_head なら、リリース承認ゲートで止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。
     moved_next は、先端が --expect-head と違って止まるときに next へ載せる続け方。"""
     root = git_root(a.root)
     n = a.pr
@@ -308,7 +308,7 @@ def _find_or_create_promote_pr(root, head, base):
     if n is not None:
         return n, False
     title = f"昇格: {head} → {base}"
-    body = f"{head} の変更を本番チャネル {base} へ入れる（merged-steps.py promote が作った）。マージは承認ゲート 2 の後に行う。"
+    body = f"{head} の変更を本番チャネル {base} へ入れる（merged-steps.py promote が作った）。マージはリリース承認ゲートの後に行う。"
     p = gh_parts.gh(["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body], cwd=root)
     if p.returncode != 0:
         err = (p.stderr or "").strip()
@@ -325,7 +325,7 @@ def _prepare_promote(root, a, n, item):
     path = approval_present(
         TOOL,
         f"promote-{n}",
-        title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
+        title=f"#{n} の昇格（{a.head} → {a.base}。リリース承認ゲート）",
         targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
         change=_change_text(info),
         judge=[approved_commit.material_row(_gate_head(info)), *_judge_rows(verdict)],
@@ -354,11 +354,11 @@ def _pin_expect_head(a, reader, path, what):
 
 
 def promote(a, cleanup):
-    """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
+    """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、リリース承認ゲートの後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
     --expect-head-from があれば、最初に導入の確認の承認資料から確かめたコミットを読み、merge-when-green の
     --expect-head と同じ照合に使う。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる（照合を飛ばさない。#1529）。
-    --approved-from があれば、昇格の承認資料の承認したコミットを同じ照合に使い、先端が違えば承認ゲート 2 から
+    --approved-from があれば、昇格の承認資料の承認したコミットを同じ照合に使い、先端が違えばリリース承認ゲートから
     やり直す打ち方を next に載せる。--gate-approved user は --approved-from 無しでは受けない（#2104 の I3〜I5）。"""
     src = getattr(a, "expect_head_from", None)
     if src:
@@ -373,7 +373,7 @@ def promote(a, cleanup):
                 "--gate-approved user に照合の材料（--approved-from の昇格の承認資料）が無いため昇格しない",
                 next=(
                     f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
-                    "（プランなら run <プラン> --from promote から流し直し、承認ゲート 2 を取り直す）"
+                    "（プランなら run <プラン> --from promote から流し直し、リリース承認ゲートを取り直す）"
                 ),
             ),
             EXIT_UNREADABLE,
@@ -381,7 +381,7 @@ def promote(a, cleanup):
     if approved_from:
         _pin_expect_head(a, approved_commit.material_sha, approved_from, "承認したコミット")
         moved_next = (
-            "承認ゲート 2 からやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）。"
+            "リリース承認ゲートからやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）。"
             "承認資料を新しい先端で作り直してから承認を求める"
         )
     root = git_root(a.root)

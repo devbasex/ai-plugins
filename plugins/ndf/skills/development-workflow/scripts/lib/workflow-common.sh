@@ -32,7 +32,7 @@ WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR\tR
 Pull Request\tR\tR\tR\tR\tR
 確定仕様化\t-\tC\t-\tR\tC
 後片付け\tR\tR\tR\tR\tR
-配布\tR\tR\tR\tR\tR
+デプロイ\tR\tR\tR\tR\tR
 体裁レビュー\t-\t-\t-\t-\tR
 リリース後テスト\t-\tC\tR\tR\tC
 振り返り\t-\tC\tR\tR\tR
@@ -66,7 +66,7 @@ WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
 WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り\n棚卸し'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
-WF_REPORT_STAGE='配布'
+WF_REPORT_STAGE='デプロイ'
 
 # Pull Request を作る時点のチェックで、終点にする工程。この工程より前の必須の工程を見る。
 WF_PR_STAGE='Pull Request'
@@ -626,10 +626,10 @@ wf_state_file() {
 #
 # **実装は `<プラグインルート>/scripts/lib/lock-common.sh` の 1 箇所にある**（#293）。
 # ここに置くのは、既存の名前で呼べるようにするための委譲と、待ちの上限の既定の上書き
-# だけである。`flock` を使わない理由・関門が 2 段である理由・陳腐化の判定は、いずれも
+# だけである。`flock` を使わない理由・承認ゲートが 2 段である理由・陳腐化の判定は、いずれも
 # 共通ファイルの同じ節にある。
 #
-# **共通ファイルは自分の位置からの相対で指す。** 4 つの配布先ランタイムのすべてで、
+# **共通ファイルは自分の位置からの相対で指す。** 4 つの導入先のランタイムのすべてで、
 # Skill のディレクトリからプラグインルートの `scripts/` へ 4 階層で戻れる（#293 の実測）。
 # `cd` で戻ってから `pwd` を取る形は採らない。Skill だけを複製する Kiro CLI の配置では
 # symlink の手前へ戻り、プラグインルートを外す。
@@ -731,9 +731,9 @@ wf_record() {
   return 0
 }
 
-# 記録された工程を、通過記録に書かれた順で 1 行 1 件返す。
+# 記録された工程を、通過記録に書かれた順で 1 行 1 件返す（旧い工程名は読み替える）。
 _wf_recorded() {
-  jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null
+  jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null | pj_normalize_stages
 }
 
 # _wf_recorded の出力から空行を除き、記録済み工程を 1 行 1 件返す。

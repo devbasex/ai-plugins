@@ -1,10 +1,14 @@
-"""並列の計画が読む配るリポジトリの状態（ベースブランチの先頭・配るプラグイン・開発版の版）。`parallel_run` が使う。"""
+"""並列の計画が読む配るリポジトリの状態（ベースブランチの先頭・配るプラグイン・開発版の版）と、ループの記録。`parallel_run` が使う。"""
 
 from __future__ import annotations
 
 import json
 import subprocess
 from pathlib import Path
+
+import legacy_values
+import parallel_plan as pp
+from sprint_loop_names import LOOP_DIR
 
 
 def base_tracking_ref(main: Path) -> str:
@@ -47,3 +51,19 @@ def dev_version(main: Path) -> str:
         return re.sub(r"-.*$", "", json.loads(got.stdout).get("version") or "") if got.returncode == 0 else ""
     except ValueError:
         return ""
+
+
+def loop_records(main: Path, name: str) -> list[tuple]:
+    """計画のループのレーンと、読めたループの記録（loop.json）の組。計画を読めなければ空。"""
+    try:
+        plan = pp.load_valid_plan(main, name)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for ln in (ln for ln in plan.lanes if ln.input.kind == "loop"):
+        try:
+            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
+            out.append((ln, legacy_values.normalize_laps(rec)))
+        except (OSError, ValueError):
+            continue
+    return out

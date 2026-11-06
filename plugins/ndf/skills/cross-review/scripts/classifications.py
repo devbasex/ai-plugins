@@ -19,7 +19,7 @@ COUNTED_CLASSIFICATIONS = ("verified_blocking", "needs_human_judgment", "unrefut
 #
 # | 分類 | 収束の条件 | 差分の渡し方 |
 # | --- | --- | --- |
-# | design | 上限 3 ラウンドで関門 1 へ渡す（収束を待たない） | 2 ラウンド目以降は前のラウンドからの変更だけ |
+# | design | 上限 3 ラウンドで設計承認ゲートへ渡す（収束を待たない） | 2 ラウンド目以降は前のラウンドからの変更だけ |
 # | code | 新しい指摘が出なくなるまで | 全差分 |
 #
 # 設計の指摘の連鎖は文書の修正が生むため、回すほど増える。実装 PR は 2 ラウンドで収束するのが普通。
@@ -81,7 +81,7 @@ def oversized_design_docs(root, paths, limit: int = DESIGN_DOC_MAX_LINES) -> lis
 #
 # 設計 PR の 1 ラウンド目はドメインモデルの節だけを見る（モデルの段）。2 ラウンド目以降は、確定した
 # モデルを前提に残りを見る（詳細の段）。設計文書にドメインモデルの節が無ければ 1 ラウンド目から詳細の段。
-# モデルの段の APPROVE では抜けない。関門の数とラウンドの上限は変えない。
+# モデルの段の APPROVE では抜けない。承認ゲートの数とラウンドの上限は変えない。
 
 REVIEW_STAGES = ("model", "detail")
 DOMAIN_MODEL_HEADING = "## ドメインモデル"

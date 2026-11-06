@@ -1,4 +1,4 @@
-"""supervise.py の `pace: auto`（#1370）: 使ってよい条件・ステージの並び・承認ゲート 1・2 の MVV 判定のステップ・
+"""supervise.py の `pace: auto`（#1370）: 使ってよい条件・ステージの並び・設計承認ゲート・リリース承認ゲートの MVV 判定のステップ・
 handoff（記録の後の失敗を承認ゲートへ落とす）・resume と、sprint-state.py gate --withdraw。
 
 実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
 
 AUTO = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
-STAGES = ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
+STAGES = ["設計", "設計承認ゲート", "設計の結果", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -77,7 +77,7 @@ def test_designed_issues_get_a_design_results_stage_without_designing(tmp_path):
     p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), "--designed", "12", design=False)
     assert p.returncode == 0, p.stdout + p.stderr
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
-    assert "設計" not in waves and "関門 1" not in waves and "command" in waves["設計の結果"]
+    assert "設計" not in waves and "設計承認ゲート" not in waves and "command" in waves["設計の結果"]
     assert all(w.get("then_of") == "設計の結果" for n, w in waves.items() if n != "設計の結果")
     cmd = steps_of(load(waves["設計の結果"]["plans"][0]))["design-results"]["cmd"]
     assert cmd.endswith("--design 12")
@@ -114,12 +114,12 @@ def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
     for path in [p for w in manifest["ステージ"] for p in w.get("plans", [])]:
         text = Path(path).read_text()
         assert "check-trigger.py eval" not in text and "check-trigger.py prepare" not in text
-    # ゲート 1: 用語チェックの後に mvv、0 なら approve → merge、落ちたら handoff
+    # 設計承認ゲート: 用語チェックの後に mvv、0 なら approve → merge、落ちたら handoff
     ds = steps_of(load(waves["設計"]["plans"][0]))
     assert ds["push-glossary"]["next"] == "mvv" and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
     assert ds["approve"]["on_fail"] == "handoff" and ds["merge"]["on_fail"] == "handoff"
-    assert '"関門 1"' in ds["handoff"]["cmd"] or "'関門 1'" in ds["handoff"]["cmd"]
-    # ゲート 2: 開発版は承認資料を gate_as_ok で写し、本番の先頭が mvv → note → bump
+    assert '"設計承認ゲート"' in ds["handoff"]["cmd"] or "'設計承認ゲート'" in ds["handoff"]["cmd"]
+    # リリース承認ゲート: 開発版は承認資料を gate_as_ok で写し、本番の先頭が mvv → note → bump
     assert steps_of(load(waves["開発版"]["plans"][0]))["facts"]["gate_as_ok"] is True
     prod = load(waves["本番"]["plans"][0])
     first, second = prod["steps"][0], prod["steps"][1]
@@ -227,7 +227,7 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
         {
             "id": "mvv",
             "type": "run",
-            "cmd": f"{PY} {SPRINT_STATE} gate {state} '関門 1' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
+            "cmd": f"{PY} {SPRINT_STATE} gate {state} '設計承認ゲート' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
             "next": "merge",
             "gate_next": "end",
         },
@@ -240,10 +240,10 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
     assert res["status"] == "gate" and res["items"][0]["result"] == "関門", res
     assert not (tmp_path / "after").exists()
     m = load(state)
-    assert not [g for g in m["gates"] if g["name"] == "関門 1"] and m["withdrawals"][0]["name"] == "関門 1"
+    assert not [g for g in m["gates"] if g["name"] == "設計承認ゲート"] and m["withdrawals"][0]["name"] == "設計承認ゲート"
     # 外した後の差し戻しは覆しとして書かれない
     p = subprocess.run(
-        [PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "差し戻し", "--outcome", "rejected", "--mvv-log", str(log)],
+        [PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--what", "差し戻し", "--outcome", "rejected", "--mvv-log", str(log)],
         capture_output=True,
         text=True,
     )
@@ -254,45 +254,47 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
 def test_a_rejection_after_an_automatic_pass_is_an_override(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
     state = sprint_state(tmp_path, "auto")
-    gate_mvv(state, "関門 2", tmp_path / "mvv-gate.jsonl")
+    gate_mvv(state, "リリース承認ゲート", tmp_path / "mvv-gate.jsonl")
     p = subprocess.run(
-        [PY, str(SPRINT_STATE), "gate", str(state), "関門 2", "--what", "差し戻し", "--outcome", "rejected"]
+        [PY, str(SPRINT_STATE), "gate", str(state), "リリース承認ゲート", "--what", "差し戻し", "--outcome", "rejected"]
         + ["--mvv-log", str(tmp_path / "mvv-gate.jsonl")],
         capture_output=True,
         text=True,
     )
     assert p.returncode == 0 and "override_reject" in json.loads(p.stdout)["summary"], p.stdout
     row = json.loads((tmp_path / "mvv-state" / "project-mvv-signals.jsonl").read_text().splitlines()[-1])
-    assert row["kind"] == "override_reject" and row["gate"] == "関門 2"
+    assert row["kind"] == "override_reject" and row["gate"] == "リリース承認ゲート"
 
 
 def test_withdraw_keeps_the_user_record_and_does_nothing_without_a_record(tmp_path):
     state = sprint_state(tmp_path, "auto")
-    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and json.loads(p.stdout)["metrics"]["withdrawn"] == 0
-    assert [w["name"] for w in load(state)["withdrawals"]] == ["関門 1"]
-    subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
-    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
-    assert p.returncode == 0 and [g["name"] for g in load(state)["gates"]].count("関門 1") == 1
-    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw", "--by", "mvv"], capture_output=True, text=True)
+    assert [w["name"] for w in load(state)["withdrawals"]] == ["設計承認ゲート"]
+    subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--what", "承認"], check=True, capture_output=True)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw"], capture_output=True, text=True)
+    assert p.returncode == 0 and [g["name"] for g in load(state)["gates"]].count("設計承認ゲート") == 1
+    p = subprocess.run(
+        [PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw", "--by", "mvv"], capture_output=True, text=True
+    )
     assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
 
 
 def test_a_parallel_design_plan_cannot_revive_a_withdrawn_gate(tmp_path):
     """並列の設計プラン: 片方の handoff が先に取り消したら、もう片方が後から書く by: mvv は断られる（#1383 の指摘）。"""
     state = sprint_state(tmp_path, "auto")
-    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0
     p = subprocess.run(
-        [PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
+        [PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
         + ["--reasons", "[]", "--log", str(tmp_path / "mvv-gate.jsonl")],
         capture_output=True,
         text=True,
     )
     assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
-    assert not [g for g in load(state).get("gates", []) if g["name"] == "関門 1"]
-    subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
-    assert [g.get("by") for g in load(state)["gates"] if g["name"] == "関門 1"] == [None]
+    assert not [g for g in load(state).get("gates", []) if g["name"] == "設計承認ゲート"]
+    subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "設計承認ゲート", "--what", "承認"], check=True, capture_output=True)
+    assert [g.get("by") for g in load(state)["gates"] if g["name"] == "設計承認ゲート"] == [None]
 
 
 def fake_gh(tmp_path, fail: bool = False) -> tuple[dict, Path]:
@@ -315,10 +317,10 @@ def test_the_release_note_comments_on_every_pr_and_a_failure_hands_off(tmp_path)
     assert [line.split()[:3] for line in log.read_text().splitlines()] == [["pr", "comment", "31"], ["pr", "comment", "32"]]
     env, _ = fake_gh(tmp_path, fail=True)
     assert subprocess.run(run, shell=True, env=env).returncode != 0
-    gate_mvv(state, "関門 2", tmp_path / "mvv-gate.jsonl")
+    gate_mvv(state, "リリース承認ゲート", tmp_path / "mvv-gate.jsonl")
     p = subprocess.run(ps["handoff"]["cmd"], shell=True, capture_output=True, text=True)
-    assert p.returncode == 10 and "関門 2" in p.stdout
-    assert not [g for g in load(state)["gates"] if g["name"] == "関門 2"]
+    assert p.returncode == 10 and "リリース承認ゲート" in p.stdout
+    assert not [g for g in load(state)["gates"] if g["name"] == "リリース承認ゲート"]
 
 
 def test_an_auto_plan_records_the_pace_before_the_first_stage(tmp_path):

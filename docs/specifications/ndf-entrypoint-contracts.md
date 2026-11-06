@@ -3,7 +3,7 @@
 ## 概要
 
 NDF のエントリポイントが受け取るもの（引数・環境変数・`.ndf/` の設定のキー・標準入力）と返すもの（標準出力の形・
-書くファイル・終了コードとその意味）は、配布物の `plugins/ndf/contracts/` の 1 か所にある（契約の一覧）。
+書くファイル・終了コードとその意味）は、リリース対象の `plugins/ndf/contracts/` の 1 か所にある（契約の一覧）。
 Skill の本文・README・docstring は契約を写さずに指す。コードと契約の一覧の食い違いは、構造チェック
 `scripts/check-ndf-contracts.py` が CI で落とす。
 
@@ -89,7 +89,7 @@ NDF は Skill の手順をスクリプトにしながら育ってきたため、
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/contracts/{entrypoints,files,settings,env}/*.json` | 契約の一覧。配布物に含まれ、実行時にも読める |
+| `plugins/ndf/contracts/{entrypoints,files,settings,env}/*.json` | 契約の一覧。リリース対象に含まれ、実行時にも読める |
 | `plugins/ndf/contracts/index.md` | 読み手と書き手の逆引き（生成物） |
 | `scripts/check-ndf-contracts.py` | 構造チェックの入口（このリポジトリの CI だけで働く） |
 | `scripts/contracts_lib/`（`model`・`extract_py`・`extract_sh`・`ratchet`・`draft`・`render`） | 項目の読み込みと形の検査・コードからの抽出・ラチェット・下書き・逆引きの生成 |
@@ -102,7 +102,7 @@ NDF は Skill の手順をスクリプトにしながら育ってきたため、
 
 ```mermaid
 graph TB
-  subgraph dist["plugins/ndf（配布する）"]
+  subgraph dist["plugins/ndf（デプロイする）"]
     C[contracts/*]
     IDX[contracts/index.md]
     D[lib/decl.py]
@@ -147,7 +147,7 @@ import と source で読まれるライブラリである。構造チェック�
 
 **1 項目 1 ファイルの JSON にする。** 並列のプランが別々のエントリポイントを触っても同じファイルを変えず、マージで
 衝突しないためである。形の検査は標準ライブラリだけで書く（CI の `script-structure` のジョブは依存を入れない素の
-`python3` で動く）。**配布物に置く**のは、実行時に `lib/decl.py` が設定の置き場を同じ一覧から読むためである。
+`python3` で動く）。**リリース対象に置く**のは、実行時に `lib/decl.py` が設定の置き場を同じ一覧から読むためである。
 
 **読み手と書き手はエントリポイントの項目だけが持つ。** ファイル・設定・環境変数の項目は自分の属性だけを持ち、
 逆引きは `--render` が `index.md` へ生成する。同じ事実を 2 か所に持たないためである。Skill の本文が読み手のときだけ、
@@ -262,7 +262,7 @@ python3 scripts/check-ndf-contracts.py --draft <エントリポイントのパ�
 
 **認可に関わる値はチームの設定でもメインディレクトリから読む。** `project.json` の `delivery`・`worktree.json` の
 `production_branch`（キーごとの `keys.<キー>.place: "main"`）と `runtimes.json`（ファイルの `place: "main"`）である。
-Pull Request の変更だけで承認ゲート 2 の判定やランタイムの制限を緩められないようにするためである。
+Pull Request の変更だけでリリース承認ゲートの判定やランタイムの制限を緩められないようにするためである。
 `read_json_setting` は `main` のキーの値をメインディレクトリのファイルの値で上書きし、そこにキーかファイルが無ければ
 キーを消す（呼ばれた木の値で補わない。補うと、メインディレクトリに無いファイルを Pull Request が足すだけで判定を
 緩められる）。メインディレクトリが解けないときと、呼ばれた木がメインディレクトリそのものなら、呼ばれた木の値を読む。
@@ -359,7 +359,7 @@ suite を 1 つ組んで渡す（#2011）。`test.no_reports`（pytest のプラ
 
 ## 関連リンク
 
-- [ndf-production-release-record.md](ndf-production-release-record.md)（本番のブランチを使う本番の配布の記録）
+- [ndf-production-release-record.md](ndf-production-release-record.md)（本番のブランチを使う本番のリリース記録）
 - [ndf-step-result-gaps-and-reading.md](ndf-step-result-gaps-and-reading.md)（結果 JSON の形）
 - [ndf-deps-require-groups-check.md](ndf-deps-require-groups-check.md)（同じ形の構造チェック `check-script-structure.py`）
 - 親の課題 #2335・この仕様の課題 #2336

@@ -1,7 +1,7 @@
 # 文書の提出先の設定
 
 **文書の提出先は git の外にある。** `.ndf/worktree.json` の `production_branch` は git の
-ブランチしか指せないため、**制作物承認（ゲート 2）はこの設定を読む**。
+ブランチしか指せないため、**制作物承認（リリース承認ゲート）はこの設定を読む**。
 
 **設定が無ければ何も起きない。** `worktree.json` と `projects.json` に続く 3 つ目の設定
 ファイルで、無いリポジトリでは提出の工程が「提出先が設定されていない」と伝えて止まる。
@@ -45,7 +45,7 @@
 | `destinations[].system` | `gdrive` / `notion` / `confluence` / `sharepoint` / `repo` |
 | `destinations[].location` | 提出先の場所（フォルダ・データベース・空間の URL） |
 | `destinations[].visibility` | 期待する公開範囲。提出の後にこの値と突き合わせる |
-| `destinations[].production` | **真なら本番系。** 届く操作が制作物承認（ゲート 2）になる |
+| `destinations[].production` | **真なら本番系。** 届く操作が制作物承認（リリース承認ゲート）になる |
 | `destinations[].draft` | 本番の提出先が指す、対になる下書き先の `name` |
 | `destinations[].auth` | 認証の**出所**。環境変数の名前や秘密情報の管理系の識別子 |
 | `index` | 索引への登録先。無ければ索引への登録を飛ばす |
@@ -77,7 +77,7 @@
 
 ## 検証への提出にあたるもの
 
-`production` が偽の提出先への操作は、開発側の「検証リリース」に当たる。**承認を求めない。**
+`production` が偽の提出先への操作は、開発側の「開発版のデプロイ」に当たる。**承認を求めない。**
 
 ## 関連
 

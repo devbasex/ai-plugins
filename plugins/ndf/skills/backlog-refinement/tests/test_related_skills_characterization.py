@@ -123,7 +123,7 @@ def run_stages(work: pathlib.Path, case: str) -> subprocess.CompletedProcess:
     ],
 )
 def test_retrospective_picks_the_branch_by_case(clone: pathlib.Path, case: str, branch: str) -> None:
-    """起点の issue を持たない変更は開発の起点を、スプリントは配布した先（origin の HEAD）を使う。"""
+    """起点の issue を持たない変更は開発の起点を、スプリントはデプロイした先（origin の HEAD）を使う。"""
     done = run_stages(clone, case)
     assert done.returncode == 0, done.stderr
     dev_base, record_base, sha = done.stdout.split()

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/release.schema.json",
-  "title": "NDF 配布のコマンドの宣言",
-  "description": "リポジトリ側の .ndf/release.json。release の手順 3 で release-steps.py が読み、配布の段階に合うコマンドを順に実行する。無ければ何もしない。",
+  "title": "NDF リリースコマンドの宣言",
+  "description": "リポジトリ側の .ndf/release.json。release の手順 3 で release-steps.py が読み、デプロイの段階に合うコマンドを順に実行する。無ければ何もしない。",
   "type": "object",
   "required": ["version", "steps"],
   "additionalProperties": false,
@@ -24,7 +24,7 @@
           "stage": {
             "type": "string",
             "enum": ["production", "verification", "any"],
-            "description": "走らせる段階。production は本番への配布、verification は検証への配布、any は両方"
+            "description": "走らせる段階。production はリリース、verification は開発版のデプロイ、any は両方"
           },
           "command": {
             "type": "array",

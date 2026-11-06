@@ -295,11 +295,11 @@ class Engine:
             return self._next_after_slow(e, sid, step)
 
     def _final_result(self, result: str, reason: str) -> tuple[str, str]:
-        """完了のまま終えても、関門を返したステップがあれば結果を関門にする。"""
+        """完了のまま終えても、承認ゲートを返したステップがあれば結果を承認ゲートにする。"""
         if result == "完了" and self.state.gates:
             result = "関門"
             if reason == "無し":
-                reason = "; ".join(f"ステップ {g['id']} が関門を返した（exit={g['exit']}）" for g in self.state.gates)
+                reason = "; ".join(f"ステップ {g['id']} が承認ゲートを返した（exit={g['exit']}）" for g in self.state.gates)
         return result, reason
 
     def _restore_pr(self) -> None:
@@ -334,7 +334,7 @@ class Engine:
         if step["type"] in ("run", "drive") and step.get("on_exit") and str(st.cur.get("exit")) in step["on_exit"]:
             return self._next_on_exit(sid, step)
         if is_run and is_gate(st.cur.get("exit")) and step.get("gate_as_ok"):
-            # 関門として数えない（MVV 判定が前もって通した関門 2 の提示物など）。提示物だけを写す
+            # 承認ゲートとして数えない（MVV 判定が前もって通したリリース承認ゲートの提示物など）。提示物だけを写す
             st.cur["presentation"] = self.copy_presentation(step)
             st.cur["gate_as_ok"] = True
             return self.next_of(sid, step), None, None
@@ -441,7 +441,7 @@ class Engine:
         return path
 
     def take_gate(self, step: dict) -> None:
-        """run のステップの関門を残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+        """run のステップの承認ゲートを残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
         cur = self.state.cur
         path = self.copy_presentation(step)
         cur["gate"] = True
@@ -449,5 +449,5 @@ class Engine:
             cur["presentation"] = path
         self.state.gates.append({"id": step["id"], "exit": cur.get("exit"), "presentation": path})
         self.state.attention(
-            "関門", f"ステップ {step['id']} が関門を返した（exit={cur.get('exit')}）" + (f"。提示物 {path}" if path else "")
+            "関門", f"ステップ {step['id']} が承認ゲートを返した（exit={cur.get('exit')}）" + (f"。提示物 {path}" if path else "")
         )

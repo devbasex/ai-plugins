@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # 配布の PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
+  # デプロイの PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
   # PR）では重いジョブを省く（#1055）。判定は scripts/ci-heavy-skip.py が差分と develop の
   # push の結果から行う。push では常に回す（develop で通ったという記録を省かない結果にするため）
   ci-scope:

@@ -166,7 +166,7 @@ def test_stages_after_the_furthest_record_are_not_listed(repo: Path, state: Path
 
     out = report(repo, state, 161).stdout
 
-    assert "配布" not in out
+    assert "デプロイ" not in out
     assert "振り返り" not in out
 
 
@@ -353,7 +353,7 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
 
 # --- #1078: 進め方 fast -------------------------------------------------------
 
-# fast で配布まで進んだ課題。構造改善・実装レビュー・確定仕様化・振り返りは記録していない。
+# fast でデプロイまで進んだ課題。構造改善・実装レビュー・確定仕様化・振り返りは記録していない。
 FAST_THROUGH_RELEASE = [
     "要求と受け入れ条件",
     "作業場所の用意",
@@ -365,7 +365,7 @@ FAST_THROUGH_RELEASE = [
     "完了判定",
     "Pull Request",
     "後片付け",
-    "配布",
+    "デプロイ",
 ]
 
 
@@ -417,7 +417,7 @@ def test_the_fast_stage_names_are_rows_of_the_workflow_table() -> None:
         "完了判定",
         "Pull Request",
         "後片付け",
-        "配布",
+        "デプロイ",
         "リリース後テスト",
         "要求と受け入れ条件",
         "設計",

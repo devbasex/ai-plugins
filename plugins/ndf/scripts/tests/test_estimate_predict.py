@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import estimate_predict as ep  # noqa: E402
+import estimate_records as er  # noqa: E402
 
 DEAD = lambda run: False  # noqa: E731
 CFG = {"models": ["opus"], "harness": "claude-p", "review": None, "test": None, "parallel": None}
@@ -245,6 +247,17 @@ def test_errors_picks_latest_estimate_per_issue():
     assert [i["estimate"] for i in items] == ["new"]
     items, _ = ep.errors([_est("a", 3), _est("b", 3)], rows, alive=DEAD)
     assert [i["estimate"] for i in items] == ["b"]
+
+
+def test_errors_pairs_an_estimate_saved_with_an_old_done(tmp_path):
+    """旧い値の完了条件で書かれた見積もりは、読むときに新しい値へ寄り、新しい名前の実績と組になる。"""
+    (tmp_path / er.ESTIMATES).write_text(
+        json.dumps({**_est("old-done", 3), "done": "配布（本番）"}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    rows: list[dict] = []
+    _done(rows, 1, 200, day=5, phase="リリース")
+    items, _ = ep.errors(er.read_estimates(tmp_path), rows, alive=DEAD)
+    assert [i["estimate"] for i in items] == ["old-done"]
 
 
 def test_errors_since_drops_earlier_estimates():

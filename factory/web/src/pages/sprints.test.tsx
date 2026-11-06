@@ -73,10 +73,10 @@ describe("スプリントの一覧（受け入れ条件 1〜3）", () => {
 const detail = `${sprints}/sr-0003`;
 
 describe("スプリントの詳細（受け入れ条件 5〜9）", () => {
-  it("承認の欄はゲート 1・ゲート 2・判断の 3 つで、ゲート 1 が承認待ち。仕上げに振り返りと棚卸しが「まだ」で並ぶ", async () => {
+  it("承認の欄は設計承認ゲート・リリース承認ゲート・判断の 3 つで、設計承認ゲートが承認待ち。仕上げに振り返りと棚卸しが「まだ」で並ぶ", async () => {
     show(detail);
     const gates = await screen.findByRole("region", { name: "承認ゲート" });
-    expect(within(gates).getAllByRole("term").map((x) => x.textContent)).toEqual(["ゲート 1", "ゲート 2", "判断"]);
+    expect(within(gates).getAllByRole("term").map((x) => x.textContent)).toEqual(["設計承認ゲート", "リリース承認ゲート", "判断"]);
     expect(within(gates).getAllByRole("definition").map((x) => x.textContent)).toEqual(["承認待ち", "まだ", "無し"]);
     const required = screen.getByLabelText("必須の工程");
     expect(within(required).getAllByRole("definition").map((x) => x.textContent)).toEqual(["まだ", "まだ"]);

@@ -144,3 +144,16 @@ pj_is_rate_limited() {
   esac
   return 1
 }
+
+# 旧い工程名を工程表の名前へ読み替える（#2620 の決定 5）。前の版のプランと版を上げる前の記録が渡す値を受ける。
+# 表の正本は `scripts/data/legacy-values.json` で、表に無い名前はそのまま返す。標準入力の 1 行 1 件を読み替える。
+pj_normalize_stages() {
+  jq -Rr --slurpfile t "$(dirname "${BASH_SOURCE[0]}")/../data/legacy-values.json" '. as $v | ($t[0].sets.stage[$v] // $v)' 2>/dev/null
+}
+
+# 工程名 1 つを読み替えて返す。jq が無ければそのまま返す。
+pj_normalize_stage() {
+  local got
+  got=$(printf '%s\n' "${1:-}" | pj_normalize_stages) || got=''
+  printf '%s\n' "${got:-${1:-}}"
+}

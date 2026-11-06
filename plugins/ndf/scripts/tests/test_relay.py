@@ -7,7 +7,7 @@
 - `stop`: 動いているラッパーに停止の合図を置く
 - `install` / `uninstall` / `status`: `/ndf:install-wrapper` の本体（#928）
 - `startup`: SessionStart hook の本体。在る複製を置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
-- `question open` / `close`: 質問の表示中の合図（関門を越えない守り）
+- `question open` / `close`: 質問の表示中の合図（承認ゲートを越えない守り）
 
 **利用者の手元の設定は書き換えない。** 導入の副命令と `run` は、テストごとの一時の HOME と
 `XDG_*`・`CLAUDE_CONFIG_DIR` の下でだけ動かす（`isolated_env`）。
@@ -2177,7 +2177,7 @@ def test_version_key(mod):
     assert k("x") is None and k(None) is None
 
 
-# ---------------------------------------------------------------- 関門を越えない守り（AC23〜AC26b）
+# ---------------------------------------------------------------- 承認ゲートを越えない守り（AC23〜AC26b）
 
 
 def question_rows(t, n=0):

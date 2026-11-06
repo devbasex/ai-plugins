@@ -113,7 +113,7 @@ export { PHASE_NAMES, CLOSING_STEPS, isPhaseName, type PhaseName } from "./phase
 export const organizerLaneName = (sprintRunId: string, loopName: string | null | undefined): string =>
   loopName ? `loop-${loopName.toLowerCase().slice(0, 27)}` : `run-${sprintRunId.toLowerCase().slice(0, 16)}`;
 
-// 配布の実行の事象の冪等の鍵（#2439）。実行の識別子を頭にする（冪等の鍵の表はサービス全体で 1 つのため、リポジトリごとの
+// リリースの実行の事象の冪等の鍵（#2439）。実行の識別子を頭にする（冪等の鍵の表はサービス全体で 1 つのため、リポジトリごとの
 // 連番だけを鍵にしない）。ランナーの送信と API の受け口の照合が同じ式を使うための唯一の定義
 export const releasePresentedKey = (sprintRunId: string, k: number) => `${sprintRunId}:presented:${k}`;
 export const releaseProgressKey = (sprintRunId: string, stage: string) => `${sprintRunId}:progress:${stage}`;
