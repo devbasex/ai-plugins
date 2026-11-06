@@ -55,7 +55,7 @@ Python の側は割り当てを書き換えない。`worktree-testenv.sh` の `e
 | I3 | 到達の結果 | 到達が確かめられていない worktree では、テストのコマンドを走らせない | `Unreachable` を送り、走らせずに止まる |
 | I4 | 到達の結果 | 1 プロセス・1 作業ディレクトリで、起動は 1 度までである | 2 度目は打たず、1 度目の失敗を送り直す |
 | I5 | 到達の結果 | 既に届く worktree と、`container` の宣言が無いリポジトリでは、起動しない | 起動のコマンドを打たずに走らせる |
-| I6 | テスト環境の割り当て | worktree を消す前に開いた公開を閉じ、破棄を試みる。閉じられない・破棄できなければ環境名を結果に残す | worktree の削除は続ける |
+| I6 | テスト環境の割り当て | worktree を消す前に開いた公開を閉じる。閉じた後に破棄を試み、破棄できなければ環境名を結果に残す | 閉じられなければ、破棄せず worktree を残す。破棄の失敗では worktree の削除を続ける |
 | I7 | 導入の確認のログ | 確認のコマンドの出力は所有者だけが読めるログへだけ書く。進みの知らせに出力の中身を載せない | ログを書けなければ `StepError` で止まる |
 
 ### ドメインイベント
@@ -144,17 +144,19 @@ Python の側は割り当てを書き換えない。`worktree-testenv.sh` の `e
 
 | 要素 | 責務 |
 | --- | --- |
-| 到達の確認（`lib/container_reach.py`） | 届かなければ 1 度だけテスト環境を起こして確かめ直す。起こした記録を持つ。公開を閉じて破棄する関数を持つ |
+| 到達の確認（`lib/container_reach.py`） | 届かなければ 1 度だけテスト環境を起こして確かめ直す。起こした記録を持つ。公開を閉じて破棄する関数を持ち、worktree を外してよいかを返す |
 | テスト環境の管理（`worktree-testenv.sh`、`lib/worktree-registry.sh`） | detached HEAD の worktree にも環境名とスロットを割り当てる。`up` で宣言のサービスの準備完了を待つ。割り当ての持ち主であることは変えない |
-| 作業用 worktree の置き場（`lib/worktree_base.py`、`lib/worktree-branch.sh`） | コンテナの宣言があるリポジトリの cross-refactoring と cross-review の worktree を、実行系から見える場所へ置く（決定 9） |
+| 作業用 worktree の置き場（`lib/worktree_base.py`、`lib/worktree-branch.sh`） | コンテナの宣言があるリポジトリの cross-refactoring と cross-review の worktree を、実行系から見える場所へ置く。置き場を git の無視へ登録する（決定 9） |
+| 置き場を求める呼び出し（7 箇所） | リポジトリのルートを渡す。`cross-review` の `review_lib/commands/init.py` の 2 箇所・`drive.py`、`cross-refactoring` の `refactor_lib/paths.py`・`refactor_lib/commands/setup.py`、`merged-steps.py` の `cleanup`、`lib/run_state.py` の `review_base`（決定 9） |
+| worktree を作る経路（`cross-review` の `review_lib/workspace.py`、`cross-refactoring` の `refactor_lib/commands/setup.py`） | `git worktree add` の前に置き場の登録を呼ぶ（決定 9） |
 | テストのエントリポイント（`test-run.py`） | 時間の予算を数え始める前にテスト環境を用意する。起こした記録と落ちたコマンドを結果へ載せる |
 | ステップの実行（`supervise_lib/steps.py`） | コンテナの宣言があるとき、テストのステップの `timeout` へ起動の上限を足す |
 | 導入の確認（`release_lib/deploy.py`） | 出力をログへ直接書き、伸びたことだけを標準エラーへ知らせる |
-| 後片付け（`merged-steps.py`、`lib/run_state.py`） | worktree を消す直前にテスト環境を破棄し、破棄できなければ環境名を結果に残す |
-| 手順書（`worktree/references/test-execution.md`、`worktree/SKILL.md`、`merged/SKILL.md`） | 自動で起こすこと・破棄の担い手・detached HEAD の環境名を書く |
+| 後片付け（`merged-steps.py`、`lib/run_state.py`） | worktree を消す直前に公開を閉じてテスト環境を破棄する。閉じられなければ worktree を残し、破棄できなければ環境名を結果に残す |
+| 手順書（`worktree/references/test-execution.md`、`worktree/SKILL.md`、`merged/SKILL.md`、`cross-review` と `cross-refactoring` の `docs/`、`lib/README.md`） | 自動で起こすこと・破棄の担い手・detached HEAD の環境名・置き場の解決の順を書く |
 | 宣言の説明（`worktree/schemas/registry.schema.json`、`project_lib/model.py`） | 環境名の形と `container` の説明を合わせる |
 
-cross-refactoring の実行は変えない。`run_with_timeout` が到達の確認の `env_for` を呼んでいるため、用意が働く。cross-refactoring と cross-review で変えるのは、置き場を求める呼び出しへリポジトリのルートを渡すことだけである（決定 9）。`worktree-testenv.sh test` も変えない。この経路は `probe` の CLI を呼ぶため、今のまま起こさずに止まる。
+cross-refactoring の実行は変えない。`run_with_timeout` が到達の確認の `env_for` を呼んでいるため、用意が働く。cross-refactoring と cross-review で変えるのは、置き場を求める呼び出しへリポジトリのルートを渡すことと、worktree を作る前に置き場を git の無視へ登録することだけである（決定 9）。`worktree-testenv.sh test` も変えない。この経路は `probe` の CLI を呼ぶため、今のまま起こさずに止まる。
 
 ### システムの文脈
 
@@ -256,7 +258,7 @@ classDiagram
         +UP_TIMEOUT: int
         +env_for(cwd) dict
         +events() list
-        +discard(worktree) str
+        +discard(worktree) tuple
         -wake(cwd, why) None
     }
     container_reach ..> Unreachable : 送る
@@ -264,7 +266,7 @@ classDiagram
 
 - `UP_TIMEOUT` は 300 秒
 - `events()` は起こした・起こせなかった記録の一覧を返す
-- `discard()` は開いた公開を閉じてから破棄し、閉じられない・破棄できないときの理由を返す。どちらも済んだか、割り当ても公開も無ければ `None` を返す
+- `discard()` は開いた公開を閉じてから破棄し、`(worktree を外してよいか, 理由)` を返す。閉じられなければ破棄せず `(False, 理由)`、破棄できなければ `(True, 理由)`、どちらも済んだか、割り当ても公開も無ければ `(True, None)` を返す
 - 「`worktree-testenv.sh up` で起こす」の案内は `probe` の CLI の経路だけへ移す。`env_for` の経路の理由に載せない（受け入れ条件 6）
 
 ## データ構造
@@ -340,7 +342,12 @@ worktree レジストリの形は変えない。detached HEAD の worktree の�
 
 ### 後片付けの結果（`/ndf:merged`）
 
-`items[].reason` に `テスト環境を破棄できない: <環境名>（<理由>）` か `テスト環境の公開を閉じられない: <環境名> <URL>（<理由>）` を足す。両方起きたら両方を載せる。`result` は変えない。
+| 場合 | `items[].result` | `items[].reason` |
+| --- | --- | --- |
+| 破棄できない | 今のまま（worktree は外れる） | `テスト環境を破棄できない: <環境名>（<理由>）` |
+| 公開を閉じられない | `kept` | `テスト環境の公開を閉じられない: <環境名> <URL>（<理由>）。close_command を直して worktree-testenv.sh unexpose <worktree のパス> を打つ` |
+
+公開を閉じられないときは破棄へ進まないため、2 つの理由は同時に出ない。残した worktree は、次の後片付けでも同じ順に試す。
 
 ## 処理の流れ
 
@@ -380,12 +387,13 @@ sequenceDiagram
 graph TD
     A[追跡ファイルの変更を確かめる] -->|ある| K[外さず kept]
     A -->|無い| P[開いた公開を閉じる]
-    P --> B[テスト環境を破棄する]
+    P -->|閉じられない| K
+    P -->|閉じた・公開が無い| B[テスト環境を破棄する]
     B --> C[worktree を外す]
     C --> D[結果を返す]
 ```
 
-最初に `unexpose` を打つ。開いた公開の記録があれば閉じる手段を実行し、記録が無ければ何もせず 0 で終わる（実行系を呼ばない）。公開の記録は割り当てを解放した後にも残るため、割り当ての有無によらず打つ。続けて `compose-env` で割り当ての有無を見て、あれば `down --volumes` を打つ。割り当てが無ければコンテナ実行系を呼ばない。閉じられなくても `down --volumes` へ進み、worktree も外す。外す直前に同じ `discard` を呼ぶ箇所は 2 つある。`merged-steps.py` の `remove_worktree` と `lib/run_state.py` の `remove_review_worktree` である。
+最初に `unexpose` を打つ。開いた公開の記録があれば閉じる手段を実行し、記録が無ければ何もせず 0 で終わる（実行系を呼ばない）。公開の記録は割り当てを解放した後にも残るため、割り当ての有無によらず打つ。続けて `compose-env` で割り当ての有無を見て、あれば `down --volumes` を打つ。割り当てが無ければコンテナ実行系を呼ばない。閉じられなければ `down --volumes` へ進まず、worktree も外さない。外す直前に同じ `discard` を呼ぶ箇所は 2 つある。`merged-steps.py` の `remove_worktree` は、最初の `git worktree remove` より前に追跡ファイルの変更を確かめてから呼ぶ。`lib/run_state.py` の `remove_review_worktree` は、状態のディレクトリを消す前に呼ぶ。
 
 ## 非機能の実現方式
 
@@ -476,7 +484,9 @@ carul の確認のコマンドは `docker compose run` で自分のコンテナ�
 
 NDF が起こすようになると、NDF が片付ける必要がある。`down` は compose の定義を worktree から読むため、外した後では打てない。追跡ファイルに変更があって外さない worktree では破棄しない。破棄に失敗しても worktree の削除は続ける。テスト環境は作り直せ、後片付けを止める方が失う物が大きい。
 
-破棄の前に開いた公開を `unexpose` で閉じる。閉じる手段は worktree へ `cd` して動くため、worktree を外した後では閉じられず、公開のエンドポイントと開いた記録が残る。閉じられなければ、環境名と URL を `items[].reason` に残して人が閉じられるようにし、削除は続ける（受け入れ条件 14 の「削除を続ける」に合わせる）。
+破棄の前に開いた公開を `unexpose` で閉じる。閉じる手段は worktree へ `cd` して動くため、worktree を外した後では閉じられない。閉じられないときは `down --volumes` も worktree の削除もせず `kept` で残し、環境名・URL・`unexpose` の打ち直しを `items[].reason` に載せる。
+
+破棄の失敗と扱いを分けるのは、失うものが違うためである。スロットを解放すると同じ番号が次の worktree へ渡り（`wt_slot_acquire`）、開いたままの `wt<スロット>.<ドメイン>` が別のテスト環境を指しうる。これは公開の基準タグの確かめを通らない。worktree を消すと `unexpose` が `cd` で止まって公開の記録を閉じられず、以後の `expose` は別の worktree の開いた記録で拒まれ続ける（`expose_record_assignment`）。受け入れ条件 14 の「削除を続ける」は破棄の失敗についての条件で、公開を閉じられない場合はこの決定で定める。
 
 定期的に止める処理は、要求の「含まない」のとおり足さない。
 
@@ -495,13 +505,19 @@ NDF が起こすようになると、NDF が片付ける必要がある。`down`
 
 cross-refactoring の既定の置き場 `/tmp` はデーモンから見えない。この開発コンテナ（DooD、Docker 29.9.2）で確かめると、`/tmp` の下のディレクトリのバインドは空で、`/work/.ndf-worktrees/volareinc--carul/rf182/work` のデーモンから見たパスのバインドでは `compose.yaml` が見えた（2026-11-06）。起動できても探りの印が読めず、受け入れ条件 4 を満たせない。
 
-`worktree_base.worktree_parent` にリポジトリのルートを渡す引数を足し、解決の順を次にする。
+`worktree_base.worktree_parent` にリポジトリのルートを渡す引数を足し、解決の順を次にする。引数は既定値を持たない必須の引数にする。省略を許すと、片付けの経路だけが一時ディレクトリを見続けても動いて見えるためである。
 
 1. `NDF_WORKTREE_BASE`（今のまま）
 2. コンテナの宣言があれば `<メインディレクトリ>/.worktrees/.ndf`
 3. `<システムの一時ディレクトリ>/ndf-worktrees`（今のまま）
 
-compose の定義を置くメインディレクトリは、テスト環境を動かすリポジトリなら実行系から見えている。`.worktrees/` は `/ndf:worktree` の初期化が git の無視へ登録する場所である。`.` で始まる語はブランチ名に使えないため、開発用の worktree と衝突しない。`wt_dev_worktrees` はこの下を一覧から外す。cross-review も同じ規則を通し、`/ndf:merged` と片付けが見る置き場を 1 つのリポジトリで 1 つに保つ。`NDF_WORKTREE_BASE` を与えている carul の置き場は変わらない。
+渡されたルートが worktree やサブディレクトリでも、メインディレクトリへ解いて `container_reach.container_suites` で宣言を読む（解き方は `wt_main_dir` と同じ）。作る経路と片付ける経路で読む宣言を同じにするためである。git のリポジトリへ解けないルートは 3 へ進む。
+
+呼び出しは 7 箇所ある。`merged-steps.py` の `cleanup` はメインディレクトリを、`lib/run_state.py` の `review_base` は受け取った `root` を渡す。`cross-review` の `init.py` の 2 箇所・`drive.py` と、`cross-refactoring` の `paths.py`・`setup.py` は、リポジトリ名を求めた今のディレクトリを渡す。cross-review も同じ規則を通し、`/ndf:merged` と片付けが見る置き場を 1 つのリポジトリで 1 つに保つ。
+
+compose の定義を置くメインディレクトリは、テスト環境を動かすリポジトリなら実行系から見えている。`.` で始まる語はブランチ名に使えないため、開発 worktree と衝突しない。`wt_dev_worktrees` はこの下を一覧から外す。`NDF_WORKTREE_BASE` を与えている carul の置き場は変わらない。
+
+`.worktrees/` を git の無視へ登録するのは `/ndf:worktree` の経路で、cross-review と cross-refactoring はそこを通らない。未登録のまま作ると、メインディレクトリの `git status` に `?? .worktrees/` が出て、`git add -A` が worktree を拾う（一時のリポジトリで確かめた。2026-11-06）。そのため `worktree_base` に登録の関数を置き、2 の置き場を使うときだけ `git worktree add` の前に呼ぶ。`git check-ignore` で登録が無ければ、共通の git ディレクトリの `info/exclude` へ `.worktrees/` を足す。追跡している `.gitignore` は変えない。足した後は `/ndf:worktree` の確かめも通る。登録できなければ worktree を作らずに止まる。`info/exclude` へ足す処理は到達の確認の `_exclude_evidence` と同じ役割のため、`worktree_base` の 1 つの関数へ寄せる。置き場を読むだけの片付けの経路では登録しない。
 
 `NDF_WORKTREE_BASE` を利用者に与えさせる形は、carul の引き継ぎ文書が queue のコマンドごとに付ける手順として残しており、人を待たない目的に合わないため採らない。全リポジトリの既定を変える形は、コンテナを使わないリポジトリから、コンテナの作り直しで自動で消える利点を除くため採らない。
 
@@ -518,7 +534,9 @@ compose の定義を置くメインディレクトリは、テスト環境を動
 | 受け入れ条件 3、I5 | 既に届く worktree で `up` が 0 回 | 確かめる前に `up` を打つと落ちる |
 | 依存の準備完了（決定 2） | `up -d` の後に宣言のサービスだけへ `--wait` が打たれる。`--wait` が 0 以外なら、テストが 0 回で受け入れ条件 5 の止まり方になる | サービスを絞らずに待つと落ちる。`--wait` の失敗を無視すると落ちる |
 | 受け入れ条件 4 | detached HEAD の作業ディレクトリで `run_with_timeout` が起こして走らせる | `reach=True` の経路の `env_for` を外すと落ちる |
-| 受け入れ条件 4（決定 9） | コンテナの宣言があると `worktree_parent` が `<メインディレクトリ>/.worktrees/.ndf` を返し、`NDF_WORKTREE_BASE` があればそれを返し、宣言が無ければ一時ディレクトリを返す。`wt_dev_worktrees` にこの下が出ない | 宣言を見ずに既定を返すと落ちる |
+| 受け入れ条件 4（決定 9） | コンテナの宣言があると `worktree_parent` が `<メインディレクトリ>/.worktrees/.ndf` を返し、`NDF_WORKTREE_BASE` があればそれを返し、宣言が無ければ一時ディレクトリを返す。worktree やサブディレクトリを渡しても同じ値を返す。`wt_dev_worktrees` にこの下が出ない。テストの共通の設定が与える `NDF_WORKTREE_BASE` を消して走らせる | 宣言を見ずに既定を返すと落ちる。渡されたルートの宣言だけを読むと落ちる |
+| 置き場の片付け（決定 9） | `NDF_WORKTREE_BASE` を消し、宣言のある fixture の新しい置き場へ detached の `pr<番号>` と `rf<番号>/work` を作る。`merged-steps.py` の `cleanup` と `run_state.sweep_states` がそれぞれ見つけ、`unexpose` と `down --volumes` を外す前に打ち、割り当てを解放する | どちらかの呼び出しへルートを渡さないと落ちる |
+| 置き場の登録（決定 9） | `.worktrees/` を無視していない fixture で cross-review と cross-refactoring の経路が worktree を作ると、`info/exclude` に登録が入り、`git status --porcelain` に `.worktrees/` が出ない。`.gitignore` は変わらない。登録済みなら足さない。登録できなければ worktree を作らない | 登録を呼ばないと落ちる。登録の失敗を無視すると落ちる |
 | 受け入れ条件 4（実物の Docker） | リリース後テストで、`NDF_WORKTREE_BASE` を与えない DooD の開発コンテナから carul の cross-refactoring の着手前のテストを走らせ、テスト環境が起きてテストが走る | 置き場が `/tmp` のままだと「起こしても届かない」で止まる |
 | 受け入れ条件 5、I3 | 起動の失敗・上限の超過・空きなし・起動後も届かないの 4 通りで、テストが 0 回、終了コード 2、`summary` にサービス名と理由 | 失敗を無視して走らせると落ちる |
 | 受け入れ条件 5、I4 | 1 プロセスで `env_for` を 2 度呼んでも `up` は 1 回 | 失敗を覚えないと落ちる |
@@ -531,7 +549,7 @@ compose の定義を置くメインディレクトリは、テスト環境を動
 | 受け入れ条件 12 | 4 本のうち 1 本が落ち JUnit に失敗が無いとき、`summary` が「4 本のうち 1 本」、`failed_commands` が 1 件 | 走らせた本数だけを出すと落ちる |
 | 受け入れ条件 13 | 全部通るときの `summary` が今と同じ文字列 | 文の形を共通にして変えると落ちる |
 | 受け入れ条件 14、I6 | `/ndf:merged` の後片付けで `down --volumes` が外す前に打たれ、解放の時刻が入る。破棄の失敗でも worktree が外れ、`reason` に環境名。`rf<番号>` の worktree も同じ | 外した後に打つと落ちる。失敗で止めると落ちる |
-| I6（公開） | 公開中の worktree の後片付けで `unexpose` が `down --volumes` より前に打たれ、公開の記録が閉じる。閉じる手段が失敗しても worktree が外れ、`reason` に環境名と URL。公開の無い worktree では閉じる手段を打たない | 破棄の後に閉じると落ちる。失敗を結果へ載せないと落ちる |
+| I6（公開） | 公開中の worktree の後片付けで `unexpose` が `down --volumes` より前に打たれ、公開の記録が閉じる。閉じる手段が失敗すると `down` を打たず、スロットを解放せず、worktree が残り、`result` が `kept` で `reason` に環境名・URL・`unexpose` の打ち直し。閉じる手段を直した次の後片付けで外れる。`rf<番号>` の worktree も同じ。公開の無い worktree では閉じる手段を打たない | 破棄の後に閉じると落ちる。閉じられないまま `down` か削除へ進むと落ちる |
 | 受け入れ条件 15 | 割り当ての無い worktree の削除で実行系を呼ばない | 割り当てを見ずに `down` を打つと落ちる |
 | ステップの上限（決定 3） | コンテナの宣言があるときだけ `timeout` が 300 秒増え、`--limit` は変わらない | 宣言を見ずに足すと落ちる |
 
@@ -541,7 +559,7 @@ compose の定義を置くメインディレクトリは、テスト環境を動
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2567 | 実装する | — | `plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/scripts/worktree-testenv.sh`、`plugins/ndf/scripts/lib/worktree-registry.sh`、`plugins/ndf/scripts/lib/worktree-branch.sh`、`plugins/ndf/scripts/lib/worktree_base.py`、`plugins/ndf/scripts/release_lib/deploy.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/lib/run_state.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/contracts/`、`plugins/ndf/skills/worktree/`、`plugins/ndf/skills/merged/SKILL.md`、`plugins/ndf/skills/cross-refactoring/scripts/`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-review/scripts/`、`plugins/ndf/skills/cross-review/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/` |
+| #2567 | 実装する | — | `plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/scripts/worktree-testenv.sh`、`plugins/ndf/scripts/lib/worktree-registry.sh`、`plugins/ndf/scripts/lib/worktree-branch.sh`、`plugins/ndf/scripts/lib/worktree_base.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/release_lib/deploy.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/lib/run_state.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/contracts/`、`plugins/ndf/skills/worktree/`、`plugins/ndf/skills/merged/SKILL.md`、`plugins/ndf/skills/cross-refactoring/scripts/`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-review/scripts/`、`plugins/ndf/skills/cross-review/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/` |
 
 ## 未確認のまま残ること
 
@@ -554,7 +572,7 @@ compose の定義を置くメインディレクトリは、テスト環境を動
 | 実物の Docker での通し | 設計の工程で確かめたのは、バインドの見え方（決定 9）と `--wait` の振る舞い（決定 2）までである。自動で起こす経路の通しは、carul の開発ループを 1 周流して確かめる |
 | 依存の準備完了の前提 | 依存が healthcheck を持たないプロジェクトでは、`--wait` は動いた時点で通るため、準備の前にテストが走って落ちることがある。carul は `db` と `cache` が healthcheck を持ち、`condition: service_healthy` で待つ。他のプロジェクトは未確認で、healthcheck の宣言を前提とする |
 | compose のバインド元の前提 | DooD でバインド元をデーモンから見たパスへ直さないプロジェクトは、起こしても届かないで止まる。carul 以外の DooD のプロジェクトの実例は未確認 |
-| 置き場の移行 | 実行中の cross-refactoring・cross-review の worktree が一時ディレクトリに残っているときに版を上げると、新しい置き場の片付けの対象から外れる。コンテナの作り直しで消えるため手当てはしない。実例は未確認 |
+| 置き場の移行 | 実行中の cross-refactoring・cross-review の worktree が一時ディレクトリに残っているときに版を上げると、新しい置き場の片付けの対象から外れる。コンテナの作り直しで消えるため手当てはしない。宣言を足した・外したリポジトリの実行中の worktree も同じである。実例は未確認 |
 | メインディレクトリで走るテスト | 宣言があるリポジトリでメインディレクトリのテストが届かないとテスト環境が起き、後片付けの対象にならないため 1 スロットが残る。プランのテストは worktree で走る前提で、実例は未確認 |
 | CI に任せる全体テストのステップ | `--limit` の印が無いため `timeout` へ起動の上限を足さない。手元の静的解析の前に起こしたときは、ステップの `timeout` で打ち切られることがある。実例は未確認 |
 | cross-refactoring の時間の見積り | 起動の秒は想定最大時間の中で消費する。着手前のテストの最初の 1 回で起きるため、見積りの式は変えない |
