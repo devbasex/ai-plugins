@@ -6053,6 +6053,20 @@
       ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "計画の台帳",
+      "context": "ndf-workflow",
+      "meaning": "1 つの並列の計画を続けるのに要る状態（受けた依頼・問い・答え・リリースの連番と状態・レーンの起動の記録・オーガナイザーの役割・使う版）を、計画の置き場へ追記した記録",
+      "source": "",
+      "pending_source": "issues/issue-2647-requirements.md"
+    },
+    {
+      "term": "耐久ワークフローの作り直し",
+      "context": "ndf-workflow",
+      "meaning": "ERROR になったか耐久の記録が失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと",
+      "source": "",
+      "pending_source": "issues/issue-2647-requirements.md"
     }
   ]
 }
