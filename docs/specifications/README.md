@@ -136,5 +136,6 @@
 | [ndf-supervise-production-default-branch.md](ndf-supervise-production-default-branch.md) | supervise.py new が本番チャネルを --production-branch → production_branch → 既定ブランチの順で決め、既定ブランチを宣言を探す木の最初に存在する git の木から解くため、まだ作っていない worktree でも本番のプランを組む理由と境界 |
 | [ndf-design-external-survey.md](ndf-design-external-survey.md) | design の外部の調査（標準・主要な製品・ライブラリとサービス）と、自前で作る決定に比べた候補の検査（design-survey.py）・レビューの観点（pr-review と cross-review）を置いた決定と理由。手順は design の references/external-survey.md が正 |
 | [ndf-loop-select-prerequisites.md](ndf-loop-select-prerequisites.md) | 開発ループの選定が閉じていない前提の課題を持つ課題を外す仕組み。順位の算出の出力 `prerequisites`・常に成り立つ条件・決定の理由・既知の限界・テスト観点。選定の規則の全体は開発ループの確定仕様が正 |
+| [cross-refactoring-test-file-detection.md](cross-refactoring-test-file-detection.md) | cross-refactoring のテストのファイルの見分け方（Python は名前の形に加えてテストの関数の定義の行で決めること、試走の候補・テストの置き場所・行数・危険フラグ・コミットの事実を同じ判定にそろえること、コミットの事実だけ前後の版を読むこと、判定の規則と既知の限界） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
