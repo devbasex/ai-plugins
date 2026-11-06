@@ -73,8 +73,8 @@ def origin_repo(tmp_path, _origin_template):
 
 def _args(tmp_path, **over):
     base = {
-        # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の関門で
-        # 止まる。関門そのものは `test_scope_gate.py` で見る。
+        # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の検査で
+        # 止まる。検査そのものは `test_scope_gate.py` で見る。
         "pr": 130,
         "scope": ["src", "tests"],
         "host": "claude",
@@ -85,7 +85,7 @@ def _args(tmp_path, **over):
         "baseline_test": "true",
         # **ラウンドのテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
         # `--round-test` が無いと提案の前に止まる。全体のテストと同じ文字列なので、
-        # 実行は 1 回で済む。関門そのものは下の AC3b のテストで見る。
+        # 実行は 1 回で済む。検査そのものは下の AC3b のテストで見る。
         "round_test": "true",
         "sync_command": None,
         "plan_file": None,
@@ -417,7 +417,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeyp
 
 
 def test_require_all_stops_without_writing_the_state(run_init, tmp_path):
-    """AC35 — 全員を要する指定では従来の関門で止め、状態ファイルを作らない。"""
+    """AC35 — 全員を要する指定では従来の検査で止め、状態ファイルを作らない。"""
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, require_all=True), probe={"kiro": "Not logged in"})
     assert e.value.code == refactor_abort()
@@ -575,7 +575,7 @@ def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
 
 
 def test_init_checks_the_scope_before_running_the_baseline_test(run_init, tmp_path, test_calls):
-    """関門は着手前のテストより先に通す。落ちる実行に時間を使わせない。"""
+    """検査は着手前のテストより先に通す。落ちる実行に時間を使わせない。"""
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, scope=["src"], baseline_test="false"))
     assert e.value.code == refactor_abort()

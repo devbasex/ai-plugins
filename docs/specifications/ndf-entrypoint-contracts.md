@@ -262,7 +262,7 @@ python3 scripts/check-ndf-contracts.py --draft <エントリポイントのパ�
 
 **認可に関わる値はチームの設定でもメインディレクトリから読む。** `project.json` の `delivery`・`worktree.json` の
 `production_branch`（キーごとの `keys.<キー>.place: "main"`）と `runtimes.json`（ファイルの `place: "main"`）である。
-Pull Request の変更だけで承認ゲート 2 の判定やランタイムの制限を緩められないようにするためである。
+Pull Request の変更だけでリリース承認ゲートの判定やランタイムの制限を緩められないようにするためである。
 `read_json_setting` は `main` のキーの値をメインディレクトリのファイルの値で上書きし、そこにキーかファイルが無ければ
 キーを消す（呼ばれた木の値で補わない。補うと、メインディレクトリに無いファイルを Pull Request が足すだけで判定を
 緩められる）。メインディレクトリが解けないときと、呼ばれた木がメインディレクトリそのものなら、呼ばれた木の値を読む。

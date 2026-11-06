@@ -310,7 +310,7 @@ def test_prod_plan_without_the_dev_record_stops(tmp_path, world):
 
 
 def test_prod_follows_a_changed_dev_record_only_before_gate_2(tmp_path, world):
-    """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、承認ゲート 2 の前は追い、後は止める。"""
+    """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、リリース承認ゲートの前は追い、後は止める。"""
     dev, prod = dev_and_prod(tmp_path, world)
     fill(prod)
     rec_path = state_dir_of(str(dev.absolute())) / queue_fill.VERSION_RECORD

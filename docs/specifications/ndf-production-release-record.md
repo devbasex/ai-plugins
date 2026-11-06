@@ -7,10 +7,10 @@
 - **書けた本番のリリースの PR は、プランの報告の `Pull Request` に載る。** まとめの `close` ステップは
   `{queue_pr:release-prod}` からその PR を `--record-pr` に受け取り、`sprint-close.py` が記録から閉じる条件 1 を判定する
 - **記録の書き込みが落ちても、リリースはやり直さない。** やり直せるのは記録を書くステップだけである
-- **`pace: normal` のスプリントでも、`new sprint` が承認ゲート 2 と本番のステージ（計画名 `release-prod`）まで目録へ書き出す。**
-  承認ゲート 2 の後に conductor が組み立てるコマンドは無く、目録の「本番」のステージの `command`（`--done` を含む。#1426）を打つだけで
+- **`pace: normal` のスプリントでも、`new sprint` がリリース承認ゲートと本番のステージ（計画名 `release-prod`）まで目録へ書き出す。**
+  リリース承認ゲートの後に conductor が組み立てるコマンドは無く、目録の「本番」のステージの `command`（`--done` を含む。#1426）を打つだけで
   リリースが流れる（#1914。「`pace: normal` のスプリントの本番のステージ」）
-- **並列の計画のレーンでは、本番のステージをリリースの依頼のプランに置き換える。** レーンは承認ゲート 2 を置かず、リリースを
+- **並列の計画のレーンでは、本番のステージをリリースの依頼のプランに置き換える。** レーンはリリース承認ゲートを置かず、リリースを
   オーガナイザーへ頼む（#2436。下の「並列の計画のレーンの本番のステージ」）
 
 例: 版 `10.17.30`（本番のリリースの PR は #1268。記録が無く、課題を手で閉じた版である）を今のプランで出したとき。
@@ -27,7 +27,7 @@
 ```markdown
 ## リリース記録
 
-段階: 本番（承認ゲート 2 の承認の後、2026-09-26 19:56 に ndf--v10.17.30 を出した）
+段階: 本番（リリース承認ゲートの承認の後、2026-09-26 19:56 に ndf--v10.17.30 を出した）
 版: 10.17.29 → 10.17.30（タグ ndf--v10.17.30。直前はタグ ndf--v10.17.29）
 スプリント: PR #1260 / #1262
 ```
@@ -58,7 +58,7 @@
 | `supervise.py new release --channel prod` が `package-plugin` から組む本番のリリースプランと、それを使うスプリントのまとめ（利用先のリポジトリでも、同じ宣言を置けば働く） | 開発版のリリースプラン（`段階: 検証` の記録は書かない。`close` ステップは本番のリリースの PR しか読まない） |
 | `release-steps.py record`・`lib/dist_record.py`・`release_lib/record.py`・ステップの鍵 `pr_from` | リリース後テストのブロック（`## リリース後テスト`）の中身。本番のリリースプランはこれを書かない（まとめの `release-verify` が `/ndf:release-verification` に書かせる。#1683・#1870） |
 | 昇格のプランの `record`（`record --promote`。#837・#1870） | 手で届ける経路・`--record-pr 0` / `unknown` の経路（merge・manual・検証の環境だけ）の記録 |
-| `pace: normal` の `new sprint` が雛形の経路で承認ゲート 2 と本番のステージを書き出すこと（#1914） | `pace: fast` / `auto` の本番のステージ（先頭が MVV 判定の本番のプラン。`fast_sprint_plans`・`auto_sprint_plans`）、雛形の無い経路（`route_waves`）・手動反映の本番系 |
+| `pace: normal` の `new sprint` が雛形の経路でリリース承認ゲートと本番のステージを書き出すこと | `pace: fast` / `auto` の本番のステージ（先頭が MVV 判定の本番のプラン。`fast_sprint_plans`・`auto_sprint_plans`）、雛形の無い経路（`route_waves`）・手動反映の本番系 |
 | | `sprint-close.py` の引数・結果 JSON・閉じる条件（変えていない） |
 
 プラグイン名・ベースブランチ・本番チャネルは `.ndf/supervise.json` の `release.plugin` と `.ndf/worktree.json` から
@@ -147,7 +147,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 | 行 | 値 |
 | --- | --- |
-| `段階:` | `本番（承認ゲート 2 の承認の後、<タグの作成時刻 JST> に <タグ> を出した）`。時刻は注釈付きタグなら作成時刻、軽量タグならコミットの時刻で、読めなければ時刻を省く |
+| `段階:` | `本番（リリース承認ゲートの承認の後、<タグの作成時刻 JST> に <タグ> を出した）`。時刻は注釈付きタグなら作成時刻、軽量タグならコミットの時刻で、読めなければ時刻を省く |
 | `版:` | `<直前の正式版> → <出した版>（タグ <タグ>。直前はタグ <直前のタグ>）`。直前の正式版は `release_tag_before` が返す前のタグから `<plugin>--v` を外した版で、無ければ `なし`（注記は「直前の正式版のタグは無い」） |
 | `スプリント:` | `PR #<番号> / #<番号>`。`--prs` を受けた順に並べる |
 
@@ -178,7 +178,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 | 昇格（`route_waves` が昇格のプランを置き、開発版のチャネルが手で届ける本番でないとき） | `{queue_pr:promote}` | 置く |
 | 経路がすべて届けない経路（none） | `0`（本番の記録なし。条件を見ずに閉じる） | 置かない |
 | それ以外（merge・manual・検証の環境だけ・手動反映の本番系の昇格） | `{queue_record}`（まとめを流し始める時点に queue が GitHub の参照から記録の PR を探して埋める。#2230） | 置く |
-| 開発ループのまとめ（`new close --pace auto`）で、経路がすべて届けない経路でないとき | 経路にかかわらず `{queue_record}`（承認ゲート 2 の後のまとめは本番のプランと別の queue にあり、`{queue_pr:…}` を解けない） | 置く |
+| 開発ループのまとめ（`new close --pace auto`）で、経路がすべて届けない経路でないとき | どの経路でも `{queue_record}`（リリース承認ゲートの後のまとめは本番のプランと別の queue にあり、`{queue_pr:…}` を解けない） | 置く |
 
 `{queue_record}` は、まとめの課題を閉じる PR とそれを参照する PR のリリース記録のうち、段階が本番かデプロイなしで `スプリント:` が
 その閉じる PR を含む記録を置いた PR の番号で埋まる（`sprint_close_lib/record_find.py`）。見つからない・2 つ以上のスプリントにある・
@@ -232,8 +232,8 @@ stateDiagram-v2
 
 | `name` | 持つキー | 中身 |
 | --- | --- | --- |
-| `デプロイ` | `plans`（`release`）・`then_of: <承認ゲート 1 の後の最初のステージ>` | 開発版のリリースプラン。`note` は持たない。`then_of` は `--design` があれば「設計 PR のマージ」、無ければ「設計の結果」か「スプリントブランチ」 |
-| `関門 2` | `gate` | 承認ゲート 2 の文（`sprint_routes.normal_gate_2_stage`） |
+| `デプロイ` | `plans`（`release`）・`then_of: <設計承認ゲートの後の最初のステージ>` | 開発版のリリースプラン。`note` は持たない。`then_of` は `--design` があれば「設計 PR のマージ」、無ければ「設計の結果」か「スプリントブランチ」 |
+| `リリース承認ゲート` | `gate` | リリース承認ゲートの文（`sprint_routes.normal_gate_2_stage`） |
 | `本番` | `plans`（`release-prod`）・`command`・`resume` | 本番のリリースプラン。`command` は `python3 <supervise.py> queue <番号>-release-prod.json --max 3 --done <出力先>/done-<番号>.json`、`resume` は同じ done の `queue --resume <done>`。先頭のステップは `approve`（下記） |
 
 本番のプランは開発版と同じ `sprint_waves.plan_sprint_release` に `channel="prod"` と `version=prod_version(--version)`（接尾辞を外した版。
@@ -247,33 +247,33 @@ stateDiagram-v2
 プランを組む時点に、ラッパーの名前（`NDF_RELAY_NAME`）が動いている並列の計画のレーンに当たれば（`supervise_lib/sprint.py` の `parallel_lane`）、
 本番のステージを組む 4 か所（`fast_sprint_plans`・`auto_sprint_plans`・`close_waves`・`sprint_plans`）はどれも `prod_plans` を通り、
 計画名 `release-prod` の本番のリリースプランの代わりに計画名 `release-request` のリリースの依頼のプラン（`parallel_release.plan_release_request`）を置く。
-`pace: normal` の `sprint_plans` は、レーンのとき `関門 2` のステージも置かない。承認ゲート 2 はオーガナイザーがまとめたリリースで出す。
+`pace: normal` の `sprint_plans` は、レーンのとき `リリース承認ゲート` のステージも置かない。リリース承認ゲートはオーガナイザーがまとめたリリースで出す。
 リリースの依頼のプランはステップ `parallel-request`（`parallel.py request`）の 1 つだけを持ち、依頼を送れば承認ゲート（終了コード 10）で終わり、
 自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。手順は `development-workflow` の
 [references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 雛形（`release_templates.plan_release`）が組んだステップを目録の側で書き換えず、`new release --version <正式版> --prs {queue_pr:check} --channel prod`
 と同じ出力に `課題` が入る（スプリントの工程は雛形に対して順応者の関係にある）。
 
-承認ゲート 2 の文は、開発版のデプロイが書いた承認資料（元のリポジトリの下の `issues/approval-<プラグイン>-v<正式版>.md` の絶対パス。版を明示しなかったときは
+リリース承認ゲートの文は、開発版のデプロイが書いた承認資料（元のリポジトリの下の `issues/approval-<プラグイン>-v<正式版>.md` の絶対パス。版を明示しなかったときは
 `v<base>` と書き、`<base>` が開発版のプラン `release` の状態ディレクトリの `version.json` の `base` であることを添える）を示して
 本番へのリリースの承認を取ることを書く。`--state` を渡さないときは、承認されたら `release-steps.py approve --approval <承認資料> --approved-sha <approval-facts の metrics.approved_sha> --by user`
 で承認の記録を書いてから「本番」のステージの `command` を打つこと（差し戻されたら打たない）を書く。`--state` を渡したときは、利用者が答えたら
-`sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を打ち、承認されたら「本番」のステージの `command` を打つことと、
+`sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打ち、承認されたら「本番」のステージの `command` を打つことと、
 助言の MVV 判定の扱いを書く。
 
 本番のプラン（MVV 判定なし）の先頭のステップ `approve` は `release-steps.py approve --approval <承認資料> --facts-from <開発版のプランの状態> [--answer-from <状態>] --by user`
 を打つ。提示した SHA は開発版の `facts` の出力の `metrics.approved_sha` から読み、承認資料に一致する承認の記録が既にあれば書かずに通し、
-無ければ `--answer-from` の承認ゲート 2 の利用者の承認の記録（`facts` の出力より後）があるときだけ書く。どれも無ければ書かずに承認ゲート（10）で終え、
+無ければ `--answer-from` のリリース承認ゲートの利用者の承認の記録（`facts` の出力より後）があるときだけ書く。どれも無ければ書かずに承認ゲート（10）で終え、
 `bump` へ進まない。開発版のプランの状態は `--dev-state` か、キューの置き場 `{queue_state:release}` で埋める。
 
 | # | 常に成り立つ条件 | 破れたときの扱い |
 | --- | --- | --- |
-| N1 | 「本番」のステージは `then_of` を持たず、どの queue の `--then` にも入らない（承認ゲート 2 は利用者が答える。連結すると承認を待たずに本番が流れる） | テストで落とす |
-| N2 | 並びは「デプロイ」→「`関門 2`」→「本番」で、間に他のステージが入らない | テストで落とす |
+| N1 | 「本番」のステージは `then_of` を持たず、どの queue の `--then` にも入らない（リリース承認ゲートは利用者が答える。連結すると承認を待たずに本番が流れる） | テストで落とす |
+| N2 | 並びは「デプロイ」→「`リリース承認ゲート`」→「本番」で、間に他のステージが入らない | テストで落とす |
 | N3 | 本番のプランの版は `--version` から接尾辞を外したもの（`--version` を省けば版の差し込みで、開発版の版の記録の `base` で埋まる）、チャネルは `prod`、出す PR は `{queue_pr:check}` | テストで落とす |
 | N4 | `--state` を渡しても、本番のプランは MVV 判定のステップ（`mvv`・`note`・`handoff`）を持たない（`advise` は `channel` が `dev` のときだけ渡す） | テストで落とす |
-| N5 | 「`関門 2`」を置くとき、承認ゲート 2 の文はその `gate` の 1 か所にだけあり、「デプロイ」の `note` に重ねない。ほかの経路（N6 と `route_waves`）では「デプロイ」か経路のステージの `note` が正本である | テストで落とす |
-| N6 | 本番のブランチが決まっていないときは「`関門 2`」と「本番」を置かず、「デプロイ」で終える（`--state` なら `note` に `normal_gate_2` の文）。`next` に置かなかった理由を 1 文足す（`no_prod_stage`） | テストで落とす |
+| N5 | 「`リリース承認ゲート`」を置くとき、リリース承認ゲートの文はその `gate` の 1 か所にだけあり、「デプロイ」の `note` に重ねない。ほかの経路（N6 と `route_waves`）では「デプロイ」か経路のステージの `note` が正本である | テストで落とす |
+| N6 | 本番のブランチが決まっていないときは「`リリース承認ゲート`」と「本番」を置かず、「デプロイ」で終える（`--state` なら `note` に `normal_gate_2` の文）。`next` に置かなかった理由を 1 文足す（`no_prod_stage`） | テストで落とす |
 
 本番のステージを承認の後に単独で流すと、`queue.fill_queue_pr` は前のステージに名前の一致する計画が無いため、同じディレクトリの
 検査の計画（`check`）の報告から PR を読んで `{queue_pr:check}` を埋める。報告が無い・PR が無いときは `0` に埋まり、開発版のデプロイと
@@ -287,12 +287,12 @@ sequenceDiagram
     participant S as new sprint
     participant Q as queue
     C->>S: new sprint（normal・--version 10.18.0-dev.1）
-    S-->>C: sprint.json（… 検査 → リリース → 関門 2 → 本番）
-    C->>Q: 承認ゲート 1 の後の最初のステージの command（--then … 検査 → デプロイ）
+    S-->>C: sprint.json（… 検査 → リリース → リリース承認ゲート→ 本番）
+    C->>Q: 設計承認ゲートの後の最初のステージの command（--then … 検査 → デプロイ）
     Q->>Q: 検査がスプリントの PR をマージ（報告に PR）
     Q->>Q: デプロイの {queue_pr:check} を埋めて開発版を流す
     Q-->>C: gate（承認資料）
-    C->>C: 関門 2 の gate を読み、承認を求める
+    C->>C: リリース承認ゲートの gate を読み、承認を求める
     alt 差し戻された
         C->>C: 本番の command を打たない
     else 承認された
@@ -314,8 +314,8 @@ sequenceDiagram
 | まとめの queue の本番が飛ばされたとき | 最終の検査で変更が無いと、まとめの queue の `release-prod` / `promote` が飛ばされて記録の PR が `0` になり、`new sprint` の本番で出たリリースのリリース後テストは見ずに閉じる |
 | `release-verify` の所要 | まとめのプランの上限とステップの `timeout`（3600 秒）に収まるかは、流したスプリントで測る |
 | 課題を閉じた後の本文 | 工程表のチェックボックスは更新しない（受け入れ条件の印は `--with-verification` の経路で閉じる前に付ける。[ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md)）。コミットの件名の closing keywords（`Closes #N` など、GitHub が課題を自動で閉じるキーワード）で GitHub が先に閉じる経路も塞がない |
-| `pace: normal` の承認の前の本番 | スクリプトは承認ゲート 2 の答えを確かめずに「本番」のステージの `command` を流せる。止めるのは本番のプランの `release --approval` が承認の記録を確かめる時点である（[ndf-release-approved-commit.md](ndf-release-approved-commit.md) の I10） |
-| `pace: normal` の本番を単独で流す初回 | 本番のプランを目録から単独で流すのは、`pace: normal` のスプリントの承認ゲート 2 の後が最初になる。検査では本番へ配らず、置き換えの処理を単独で当てて確かめた。実機はリリース後テストで見る |
+| `pace: normal` の承認の前の本番 | スクリプトはリリース承認ゲートの答えを確かめずに「本番」のステージの `command` を流せる。止めるのは本番のプランの `release --approval` が承認の記録を確かめる時点である（[ndf-release-approved-commit.md](ndf-release-approved-commit.md) の I10） |
+| `pace: normal` の本番を単独で流す初回 | 本番のプランを目録から単独で流すのは、`pace: normal` のスプリントのリリース承認ゲートの後が最初になる。検査では本番へ配らず、置き換えの処理を単独で当てて確かめた。実機はリリース後テストで見る |
 | 手で閉じていないことの確かめ | 昇格の形か版数を上げないリリースで本番まで出たスプリントで、まとめの `close` が課題を `closed` にしたかを、キューの記録と課題を閉じた主体で確かめる（リリース後テスト） |
 
 ## 決定の理由
@@ -327,15 +327,15 @@ sequenceDiagram
 | 前提にタグだけでなく GitHub Release も確かめる | `release` はタグを送った後に `gh release create` を打ち、そこで落ち得る。タグだけを見ると、Release の無いまま `--from record` で打ったときに `段階: 本番` を書き、閉じる条件 1 を通してしまう |
 | まとめへ PR を渡すのに、run のステップの汎用の鍵 `pr_from` を使う | queue とまとめの側を変えずに済み、ほかの run のステップも同じ形で使える。`sprint.py` が `gh pr list --head release/v<版>` で引く案は PR を決める規則が 2 か所になり、`queue.py` が `release_pr` を探す案は queue にデプロイの知識が入る |
 | 記録の組み方と読み方を `lib/dist_record.py` へ置き、`sprint-close.py` は同じ名前で import する | 書く側が見出しと行の名前を別に持つと、片方を変えたときに `parse_record` が `found` を偽にしても気づけない。`sprint-close.py` がタグと queue の done から値を組む案は、契約の正本が 2 つになるため採らない |
-| `段階:` の括弧には承認の時点でなくリリースの事実（タグの作成時刻とタグ）を書く | `record` は承認の時刻を持たない。プランは承認ゲート 2 の後にしか走らないため「承認ゲート 2 の承認の後」と書き、読み手が承認とリリースの順を読める。括弧は注記で、形は変えていない |
+| `段階:` の括弧には承認の時点でなくリリースの事実（タグの作成時刻とタグ）を書く | `record` は承認の時刻を持たない。プランはリリース承認ゲートの後にしか走らないため「リリース承認ゲートの承認の後」と書き、読み手が承認とリリースの順を読める。括弧は注記で、形は変えていない |
 | 直前の正式版は bump の前の `plugin.json` でなく前のタグから取る | マージ後の作業場所には bump の前の値が残らない。前のタグは `approval-facts` と `changed-plugins` が使う規則（`release_tag_before`）と同じである |
 | 承認の前には記録を書かない | リリースが止まったときに `段階: 本番` が事実と食い違う（#837 と同じ形の食い違いを作らない） |
 | 版数を上げないリリースの版の食い違いは、読む側が「最後のリリース記録より後の、版数でないブロック」へ落ちて受ける | 直す箇所が 1 関数で済み、記録を書く 2 つの手順（`release`・`release-verification`）と記録の形を変えない。版の一致を先に見るため、今読めている記録の結果は変わらない。版数のブロックを落ち先から外すのは、次の開発版のテスト（`10.17.69-dev.1`）で本番の検証を代用しないためである（スプリント PR のレビューで足した）。デプロイの識別子の規則と、`対象の版:` をリリース記録から写す新しい CLI を足す案は、スクリプト・用語・2 つの Skill の変更が要るため採らない（利用者の指摘「もっと素直にできそう」） |
 | 昇格の後の記録は、既存の `record` に `--promote` を足し、`plan_promote` のマージの後の別のステップにする | package-plugin と同じステップ・同じ `judge-record`・同じ `pr_from` を使える。`merged-steps.py promote` の中で書くと、書き込みの失敗がマージのステップの失敗になり、やり直すと開いた昇格の PR が無いため「昇格する変更が無い」で ok に終わり、記録を書かずに進む。`--promote` を `--version` と排他のフラグにしたのは、片方の形の引数だけを渡す誤りを引数の解析で止めるためである |
 | 昇格の `版:` は `<本番チャネル> <直前の短い SHA> → <本番チャネル> <マージのコミットの短い SHA>` にする | package-plugin の形（直前の版 → 出した版）と同じ並びになる。`parse_record` が読む `version` は矢印の右である |
 | LLM がデプロイする形は、`release` の手順に「デプロイの後に記録をコメントで置く」段を足すだけにする | 読む側は最後の記録を読むため、承認の前の `段階: 検証` を書き換えずに済む。承認の前に記録を置かない案は、Draft の時点で本文を用意する運用を変えるため採らない |
-| `pace: normal` でも承認ゲート 2 と本番のステージを目録へ書き出す（#1914） | 本番のプランを手で作る手当てが 5 スプリント（m1693・m1385・m744・m653・m1683）で繰り返され、m1385 ではプランを作る前にキューを打って空振りした。`fast` / `auto` は同じ雛形の経路で既に本番のステージを持つ |
-| 承認ゲート 2 の文を `関門 2` の `gate` へ移し、リリースの `note` から外す | 2 か所に置くと片方だけが直され、conductor が古い方を読む。`関門 1` が `gate` に答えを状態へ書くコマンドを持つ形とも揃う。雛形の無い経路は承認ゲート 2 のステージを持たないため `note` のまま残す |
+| `pace: normal` でもリリース承認ゲートと本番のステージを目録へ書き出す | 本番のプランを手で作る手当てが 5 スプリント（m1693・m1385・m744・m653・m1683）で繰り返され、m1385 ではプランを作る前にキューを打って空振りした。`fast` / `auto` は同じ雛形の経路で既に本番のステージを持つ |
+| リリース承認ゲートの文を `リリース承認ゲート` の `gate` へ移し、リリースの `note` から外す | 2 か所に置くと片方だけが直され、conductor が古い方を読む。`設計承認ゲート` が `gate` に答えを状態へ書くコマンドを持つ形とも揃う。雛形の無い経路はリリース承認ゲートのステージを持たないため `note` のまま残す |
 | 本番のプランは `plan_sprint_release` にチャネルと版を渡して作り、`plan_mvv_release` を使わない | リリースプランの組み立てが 1 つになる。試作を conductor が打っていた `new release --channel prod` の出力と比べると、出す PR と `課題` の欄を除いて 13 ステップが一致した。`plan_mvv_release` は `--state` を渡した normal で本番の先頭に MVV 判定の承認ゲートを入れ、利用者の承認の後にもう一度判定で止まる（N4） |
 | 本番のブランチが無ければ本番を置かず、`new sprint` は止めない（#1914） | 雛形の本番のプランは本番のブランチが無いと `DeclError` で組めない。止めると、今まで開発版まで流せたリポジトリの `new sprint` が流せなくなる |
 | 課題を閉じる場所はまとめのプランの `close` の 1 つに保ち、その前に `release-verify` を 1 つ置く | 欠けていたのはリリース後テストの記録だけである。確かめは判断を伴うため work にする。番号が `0` のときはステップの指示で何もせず終え、飛ばすための run ステップを足さない。本番のプランに `close` を置く案は閉じる場所が 2 つになり、プランを止めて記録を待つ案は待つ間に手で閉じる経路が残る |
@@ -362,9 +362,9 @@ sequenceDiagram
 | 昇格の記録（I7） | `record --promote` がマージ済みの PR があればその PR へ書き、無ければ書かずに 3 で終わること。書いた記録を `parse_record` が `本番` で読むこと。本文に `段階: 検証（… 承認待ちのため未実施）` を置いた PR に記録をコメントで足すと `本番` として読むこと |
 | 昇格のプラン | normal と fast / auto の両方で、マージの後に `record`（`pr_from: release_pr_url`・`on_fail: judge-record`）があり、`judge-record` の `choices` が `record` と `stop` だけであること |
 | まとめのプラン（I9） | 雛形と昇格の経路で、マージ → `release-verify` → `close`（`--with-verification`）がこの順で並び、昇格の `close` が `--record-pr {queue_pr:promote}` であること。none だけの経路は `0`、merge・manual・検証の環境だけの経路は `unknown` で、どちらも `release-verify` が無いこと |
-| normal の本番のステージ（N1〜N3） | 雛形・本番のブランチありの `new sprint` の `ステージ` が「… 検査・リリース・`関門 2`・本番」の順で、「本番」が `then_of` を持たず `command` を持ち、プランの名前が `release-prod`、`release` のステップが `--channel prod` と `--version 10.18.0`（`10.18.0-dev.1` を渡す）、`changelog` の `--prs` が `{queue_pr:check}` であること（`test_supervise.py` の `test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release`） |
+| normal の本番のステージ（N1〜N3） | 雛形・本番のブランチありの `new sprint` の `ステージ` が「… 検査・リリース・`リリース承認ゲート`・本番」の順で、「本番」が `then_of` を持たず `command` を持ち、プランの名前が `release-prod`、`release` のステップが `--channel prod` と `--version 10.18.0`（`10.18.0-dev.1` を渡す）、`changelog` の `--prs` が `{queue_pr:check}` であること（`test_supervise.py` の `test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release`） |
 | 本番を単独で流す | 一時ディレクトリに検査のプランとその報告（PR 番号つき）と本番のプランだけを置き、前のステージの結果を渡さずに `fill_queue_pr` を当てると、`{queue_pr:check}` がすべてその番号になること（`test_prod_plan_queued_alone_takes_the_check_pr`） |
-| 承認ゲート 2 の文（N4・N5） | `--state` ありで「`関門 2`」の `gate` が `sprint-state.py` の `gate` のコマンド（`"関門 2"`・`--by user`）を含み、「デプロイ」が `note` を持たず、本番のプランが `mvv`・`note`・`handoff` を持たないこと。`--state` なしで `gate` が `sprint-state.py` を含まないこと（`test_project_mvv_normal.py`） |
+| リリース承認ゲートの文（N4・N5） | `--state` ありで「`リリース承認ゲート`」の `gate` が `sprint-state.py` の `gate` のコマンド（`"リリース承認ゲート"`・`--by user`）を含み、「デプロイ」が `note` を持たず、本番のプランが `mvv`・`note`・`handoff` を持たないこと。`--state` なしで `gate` が `sprint-state.py` を含まないこと（`test_project_mvv_normal.py`） |
 | 本番のブランチが無いとき（N6） | 本番のブランチの無い宣言の normal の `new sprint` が成功し、最後のステージが「デプロイ」で、`--state` ありでは「デプロイ」が `normal_gate_2` の文の `note` を持つこと（`test_supervise_new.py` の `test_normal_sprint_without_a_production_branch_keeps_gate_2_on_the_release`）。雛形の無い経路と `fast` / `auto` の目録は変わらないこと |
 | 退行しない | `test_sprint_close_issues.py`・`test_sprint_close_merge_green.py`・`test_legacy_names.py` と、リリースプランの既存のテストが通ること |
 | 手動 | 本番のリリースプランを通したスプリントで、本番のリリースの PR に `## リリース記録` のコメントが付き、まとめの `close` ステップの `kept_open` の理由が「リリース記録が読めない」でないこと |

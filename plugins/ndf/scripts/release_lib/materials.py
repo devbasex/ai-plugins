@@ -304,7 +304,7 @@ def check_lines(m: Materials) -> list[str]:
         out.append(_not_ok("レビュー", m.review.status) + (f"、見送った指摘 {len(m.review.deferred)} 件" if m.review.deferred else ""))
     elif m.review is not None:
         out.append(f"- レビュー: cross-review {m.review.rounds} ラウンド、見送った指摘 {len(m.review.deferred)} 件")
-    if m.review is not None:  # 未収束（終了コード 6）でリリースへ進んだときも、残る指摘を承認ゲート 2 で確かめられるように載せる
+    if m.review is not None:  # 未収束（終了コード 6）でリリースへ進んだときも、残る指摘をリリース承認ゲートで確かめられるように載せる
         out += [f"  - {_deferred_place(d)}{d.summary}".rstrip() for d in m.review.deferred]
     if m.refactor is not None and m.refactor.status != "ok":
         out.append(_not_ok("リファクタリング", m.refactor.status))

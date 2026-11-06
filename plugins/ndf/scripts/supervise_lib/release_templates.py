@@ -6,7 +6,7 @@ import re
 import shlex
 from pathlib import Path
 
-from gate_answer import GATE_2
+from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
@@ -22,11 +22,11 @@ RULE_RELEASE_DEV = (
     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。"
 )
 RULE_RELEASE_PROD = (
-    "利用者は関門 2 を承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
+    "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
     "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
 )
 RULE_RELEASE_PROD_MVV = (
-    "関門 2 は利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
+    "リリース承認ゲートは利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
     "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
     "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
 )
@@ -133,7 +133,7 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
         "next": "explain",
     }
     if getattr(a, "mvv", None):
-        facts["gate_as_ok"] = True  # 関門 2 は本番の計画の先頭で MVV が判定する
+        facts["gate_as_ok"] = True  # リリース承認ゲートは本番の計画の先頭で MVV が判定する
     steps = [
         facts,
         {
@@ -162,9 +162,9 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
 
 
 def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, prs: str) -> None:
-    # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
+    # リリース承認ゲートを MVV で判定する。承認ゲート（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
     # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
-    # コメントが落ちたら handoff が関門 2 の by: mvv の記録を外して関門で終える（#1370 の I8）
+    # コメントが落ちたら handoff がリリース承認ゲートの by: mvv の記録を外して承認ゲートで終える（#1370 の I8）
     material = material_path(repo, approval)
     state = str(Path(a.mvv).resolve())
     steps[0:0] = mvv_gate_steps(
@@ -175,8 +175,8 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
         f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
         "bump",
     )
-    steps.append(handoff_step(state, GATE_2, "判定のコメント"))
-    steps.append(reject_step(state, GATE_2, "mvv", root=repo or "."))
+    steps.append(handoff_step(state, RELEASE_GATE, "判定のコメント"))
+    steps.append(reject_step(state, RELEASE_GATE, "mvv", root=repo or "."))
 
 
 def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str) -> list[dict]:
@@ -220,7 +220,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
 
 def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
-    承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff で関門 2 の by: mvv の
+    承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
 
     待つ PR ごとの CI の待ちの上限は `ci_wait_timeout`（マージのプランと同じ値）を `--ci-wait` で渡し、ステップの
@@ -401,7 +401,7 @@ def plan_release_package_plugin(a) -> dict:
 
 
 def approve_step(a, repo: str | None, approval: str) -> dict:
-    """本番のプラン（MVV 判定なし）の先頭: 承認ゲート 2 の承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
+    """本番のプラン（MVV 判定なし）の先頭: リリース承認ゲートの承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
     facts の出力（--dev-state か、同じディレクトリの開発版のプランの状態）から読み、利用者の承認の記録は --state から読む。
     証跡が無ければ承認ゲート（10）で終え、bump へ進まない。"""
     dev_state = getattr(a, "dev_state", None)
@@ -440,7 +440,7 @@ def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None
 
 def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
     """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
-    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の関門のままである。"""
+    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の承認ゲートのままである。"""
     material = material_path(repo, approval)
     state = shlex.quote(str(Path(a.advise).resolve()))
     args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
@@ -472,7 +472,7 @@ def bump_others_cmd(a, plugin: str, material: str) -> str:
 
 
 def mvv_gate_steps(mvv_cmd: str, note_cmd: str, next_id: str) -> list[dict]:
-    """関門 2 の MVV 判定（mvv）と、判定の記録のコメント（note。落ちたら handoff）の 2 ステップ。note の後は `next_id` へ進む。"""
+    """リリース承認ゲートの MVV 判定（mvv）と、判定の記録のコメント（note。落ちたら handoff）の 2 ステップ。note の後は `next_id` へ進む。"""
     return [
         {"id": "mvv", "type": "run", "timeout": 900, "cmd": mvv_cmd, "next": "note", "gate_next": "end"},
         {"id": "note", "type": "run", "timeout": 300, "cmd": note_cmd, "on_fail": "handoff", "next": next_id},

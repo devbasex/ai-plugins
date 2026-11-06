@@ -201,7 +201,7 @@ graph TD
 | `kind` | `gate1` / `gate2` / `decision`・必須 | 依頼の種類 |
 | `decision` | `approved` / `rejected` | ゲートの答え。判断では持たない |
 | `body` | 文字列か `null` | 承認の理由か判断の本文 |
-| `gate` | 文字列 | スプリント状態ファイルに書く関門の名前。無ければ `kind` を `関門 1` / `関門 2` へ写す |
+| `gate` | 文字列 | スプリント状態ファイルに書く承認ゲートの名前。無ければ `kind` を NDF の記録の名前へ写す（どの版の NDF でも記録できるよう旧名を渡し、新しい版の NDF が正の名前へ寄せて書く） |
 
 ### 実行の制御の値
 
@@ -256,7 +256,7 @@ graph TD
 | 3. NDF の導入 | `NDF_MARKETPLACE` を `NDF_VERSION` の ref（タグかコミット）で `<作業場所>/ndf-marketplace` へ clone し、`claude plugin marketplace add <そのディレクトリ>` と `claude plugin install ndf@<取得元の marketplace.json の name>` を打つ。入った `plugin.json` の版が `NDF_VERSION` と違えば失敗。NDF のスクリプトはこの写しから読む |
 | 4. `job.started` | `ndf_version` は `NDF_VERSION`、`start` は `START` |
 | 5. 状態の復元（`resume`） | `POST /run-jobs/state`（`get`）の URL から取り、`.ndf/tmp`・`.ndf/loop` の下の追跡しないパスだけを戻す（I42） |
-| 6. 答えの記録（`APPROVAL_REQUEST_ID` のある `resume`） | 答えの経路から読む（識別子の無い `resume` は飛ばす。利用上限の後の再開。#2347 の決定 7）。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <関門の名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
+| 6. 答えの記録（`APPROVAL_REQUEST_ID` のある `resume`） | 答えの経路から読む（識別子の無い `resume` は飛ばす。利用上限の後の再開。#2347 の決定 7）。判断は `body` を conductor への利用者の判断として渡す。ゲートは、復元した `.ndf/` の下のスプリント状態ファイル（`gates` と `plans` を持ち「ステージ」を持たない JSON のうち最後に更新したもの。目録の `sprint.json` とは別）へ `sprint-state.py gate <ファイル> <承認ゲートの名前> --by user --outcome <approved \| rejected> --what <body か既定の文>` を書く。差し戻しは状態ファイルを変えないため、差し戻しと理由を明示した指示を conductor へ渡す |
 | 7. conductor | `claude -p <指示> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch`。指示は `new` で `/ndf:development-workflow #<番号> …`、`loop` で `/ndf:development-workflow --loop <LOOP_NAME> --milestones "<LOOP_MILESTONES>"` に `LOOP_BUDGET` の `--budget-<単位> <値>` を足したもの、`resume` で「前回の続きから進めてください。」に手順 6 の指示を足したもの。`EXCLUDE_ISSUES` は `NDF_LOOP_EXCLUDE` として子へ渡す。conductor の最後の `result` の文に `ndf-next` のブロックが 1 つだけあれば、同じ作業場所でその指示の `claude -p` を起動し直す（区間。起動ごとに `section.started`。読み方は [`ndf-next-block.json`](../../plugins/ndf/contracts/forms/ndf-next-block.json)）。ループの周回が締まったか止まる条件が書かれたら次の区間を起動せず、区間が `RUNNER_SECTION_LIMIT`（既定 20）に達するか、`local` で利用上限に当たれば止まる。NDF の worktree は `NDF_WORKTREE_BASE`（`<作業場所>/worktrees`）に置く |
 | 8. 終わり | `POST /run-jobs/state`（`put`）の URL へ状態を保存 → 結果が判断が要るなら `gate.reached`（利用上限で止まったときは送らない） → `job.finished`。手順 1〜8 のどこかが失敗すれば `gate.reached` を送らず `job.finished`（`failed`） |
 
@@ -449,7 +449,7 @@ Workflows・Administration・Projects は持たない。Workflows は CI を書�
 | 翻訳 | `progress.jsonl` の `step`・`attention` が契約に合う事象になり、`REPO` の Pull Request だけが付くこと（`pr` の URL を含む）。計画の名前からフェーズと課題、`modelUsage` からモデルごとの使用量ができること。代わりの判断の記録から `decision.delegated` ができ、形の違う記録は送らないこと |
 | 切り詰め | 300 KiB の承認資料が 256 KiB 以下に切られ、案内が残ること |
 | 送信 | 5xx と接続の失敗は同じ冪等の鍵で送り直し、4xx は送り直さないこと |
-| 答えの記録 | 関門の名前が NDF の名前へ写り、差し戻しが明示され、状態ファイルが目録の `sprint.json` と見分けられること。`resume` が状態を戻し答えを記録してから続け、`gate.reached` と `job.finished`（`gate`）を送って 0 で終わること |
+| 答えの記録 | 承認ゲートの名前が NDF の名前へ写り、差し戻しが明示され、状態ファイルが目録の `sprint.json` と見分けられること。`resume` が状態を戻し答えを記録してから続け、`gate.reached` と `job.finished`（`gate`）を送って 0 で終わること |
 | 状態（I42） | 追跡する `.ndf/pace.json` と状態ディレクトリの外を含む保存の復元を断ること |
 | claude の呼び方 | `managed` は Bedrock とタスクの役割で API キーもアクセスキーも置かないこと。`local` は手元の資格を渡し受け口の token を渡さないこと。`byok` の API キーは子の環境にだけ置かれること |
 | 版と終了コード（I39・I43） | 2 本目のジョブの `NDF_VERSION` が 1 本目と同じこと。入った版が違えば `failed`、`job.finished` が送れなければ 1 であること。50 分ごとに導入の token を取り直すこと |

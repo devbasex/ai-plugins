@@ -355,7 +355,7 @@ classDiagram
 
 ## 関連リンク
 
-- [#2315](https://github.com/devbasex/ai-plugins/issues/2315) — 要求と受け入れ条件（2026-11-01 の利用者の依頼。2026-11-02 の承認ゲート 1 で、置き場・利用の記録の既定・試すプロジェクトを利用者が決めた）
+- [#2315](https://github.com/devbasex/ai-plugins/issues/2315) — 要求と受け入れ条件（2026-11-01 の利用者の依頼。2026-11-02 の設計承認ゲートで、置き場・利用の記録の既定・試すプロジェクトを利用者が決めた）
 - [#2335](https://github.com/devbasex/ai-plugins/issues/2335) — 2026-11-01 の大整理で立てた大方針（大整理の手順の元になった実例）
 - [#2342](https://github.com/devbasex/ai-plugins/issues/2342) — 持ち主の部品 `lib/lease.py`（持ち主の宣言の移り先）
 - [棚卸しを工程表の行にし、1 回の件数と書き込む先に上限を置く](ndf-backlog-refinement-stage.md) — `refine` ステップ・候補の上限・書き込む先の照合

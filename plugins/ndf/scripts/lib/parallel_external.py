@@ -28,6 +28,8 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+from gate_answer import RELEASE_GATE, canonical
+
 DIR_ENV = "NDF_ORGANIZER_DIR"
 LANE_ENV = "NDF_ORGANIZER_LANE"
 # 外のオーガナイザーのレーンの計画名の代わり。`parallel.py <副命令> --external` の形にそのままなる
@@ -209,7 +211,7 @@ def compose(main: Path, d: Path, batch: dict, supervise: str, parallel: str, ver
         }
     done = rd / "release-done.json"
     if step.startswith("confirm:"):
-        gate = f"python3 {Path(__file__).resolve().parents[1] / 'sprint-state.py'} gate {rd / 'answer.json'} '関門 2' --what 'まとめたリリース {seq} の提示 {k}' --by user --outcome approved"
+        gate = pr.record_answer_cmd(rd, seq, k)
         steps = [gate, f"{supervise} run {rd / 'present.json'} --from approve", f"{supervise} queue {rd / 'release.json'} --done {done}"]
         return {
             **out,
@@ -238,7 +240,7 @@ def present_batch(main: Path, d: Path, batch: dict, seq: int, k: int, approval: 
 
 
 def record_presented(d: Path, seq: int, k: int, auto: bool) -> dict:
-    """提示を外のオーガナイザーへ書き返す `presented/<連番>-<k>.json`。承認ゲート 2 で止まったら auto は偽、MVV 判定が通したら真。"""
+    """提示を外のオーガナイザーへ書き返す `presented/<連番>-<k>.json`。リリース承認ゲートで止まったら auto は偽、MVV 判定が通したら真。"""
     rd = batch_release_dir(d, seq, k)
     got = read_json(rd / "presented.json")
     if not isinstance(got, dict) or not got.get("sha"):
@@ -294,20 +296,18 @@ def prod_pr_url(root: Path, version: str, run=subprocess.run) -> Optional[str]:
 
 
 def mvv_passed(rd: Path) -> bool:
-    """提示の答えの記録（`answer.json`）に、MVV 判定が承認ゲート 2 を通した記録（by: mvv）があるか。
+    """提示の答えの記録（`answer.json`）に、MVV 判定がリリース承認ゲートを通した記録（by: mvv）があるか。
 
     presented.json を書いた後に MVV 判定そのものが落ちた提示を、自動で承認したと書き返さないために見る。"""
-    from gate_answer import GATE_2
-
     gates = (read_json(Path(rd) / "answer.json", {}) or {}).get("gates") or []
-    return any(isinstance(g, dict) and g.get("name") == GATE_2 and g.get("by") == "mvv" for g in gates)
+    return any(isinstance(g, dict) and canonical(g.get("name")) == RELEASE_GATE and g.get("by") == "mvv" for g in gates)
 
 
 def settle_batch(main: Path, d: Path, batch: dict, seq: int, done: dict, reason: Optional[str] = None, run=subprocess.run) -> dict:
     """本番のプランの done とリリース記録から、届いた段 `progress/<連番>.json` と結果 `results/<連番>.json` を書く。
 
     結果は done の全項目が完了なら released、承認ゲートで止まっていれば ValueError（書かない）、ほかは failed。
-    MVV 判定が通して承認ゲート 2 で止まらなかった提示は、ここで `presented/` を auto 真で書く。"""
+    MVV 判定が通してリリース承認ゲートで止まらなかった提示は、ここで `presented/` を auto 真で書く。"""
     results = [str(i.get("result")) for i in done.get("items") or [] if isinstance(i, dict)]
     if "関門" in results:
         raise ValueError("本番のプランが承認ゲートで止まっている")

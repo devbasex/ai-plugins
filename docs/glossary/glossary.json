@@ -355,7 +355,7 @@
     {
       "term": "承認ゲート",
       "context": "ndf-workflow",
-      "meaning": "人手の承認を求める点。設計 Pull Request のマージ（ゲート 1）と本番の系へ届く操作（ゲート 2）の 2 つだけ",
+      "meaning": "人手の承認を求める点。設計承認ゲート（設計 Pull Request のマージ）とリリース承認ゲート（本番の系へ届く操作）の 2 つだけ",
       "deprecated": [
         "関門"
       ],
@@ -424,7 +424,7 @@
     {
       "term": "導入の確認",
       "context": "ndf-workflow",
-      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、経路 promote では承認ゲート 2 の前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
+      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、経路 promote ではリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
       "pending_source": "issues/old/issue-1457-design.md"
     },
     {
@@ -1149,13 +1149,13 @@
     {
       "term": "企画承認",
       "context": "ndf-workflow",
-      "meaning": "documentation モードのゲート 1。構成案と体裁設計を載せた設計 Pull Request のマージ",
+      "meaning": "documentation モードの設計承認ゲート。構成案と体裁設計を載せた設計 Pull Request のマージ",
       "source": "docs/specifications/ndf-documentation-mode.md"
     },
     {
       "term": "制作物承認",
       "context": "ndf-workflow",
-      "meaning": "documentation モードのゲート 2。production が真の提出先への操作",
+      "meaning": "documentation モードのリリース承認ゲート。production が真の提出先への操作",
       "source": "docs/specifications/ndf-documentation-mode.md"
     },
     {
@@ -1786,7 +1786,7 @@
     {
       "term": "ステージ",
       "context": "ndf-workflow",
-      "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new sprint はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番）",
+      "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new sprint はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番）",
       "code": "pipeline_stage",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1831,7 +1831,7 @@
     {
       "term": "pace: auto",
       "context": "ndf-workflow",
-      "meaning": "進め方の 1 つ。工程は normal と同じで、承認ゲート 1・2 だけを MVV 判定で自動にする。「従う」でレッドラインが無いときだけ通し、ほかは利用者へ戻す",
+      "meaning": "進め方の 1 つ。工程は normal と同じで、設計承認ゲート・リリース承認ゲートだけを MVV 判定で自動にする。「従う」でレッドラインが無いときだけ通し、ほかは利用者へ戻す",
       "code": "auto",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
@@ -1965,18 +1965,6 @@
       "term": "決定",
       "context": "ndf-workflow",
       "meaning": "judge のステップが返す、次に取る手",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
-    },
-    {
-      "term": "ゲート 1",
-      "context": "ndf-workflow",
-      "meaning": "設計 Pull Request のマージ。文書では企画承認に当たる",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
-    },
-    {
-      "term": "ゲート 2",
-      "context": "ndf-workflow",
-      "meaning": "本番系へ届く操作（本番へのリリースと operation の実行）。文書では制作物承認に当たる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2652,14 +2640,14 @@
     {
       "term": "自動反映の本番チャネル",
       "context": "ndf-workflow",
-      "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる",
+      "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージはリリース承認ゲートに当たる",
       "code": "auto_production_branch",
       "pending_source": "issues/old/issue-1336-design.md"
     },
     {
       "term": "手動反映の本番系",
       "context": "ndf-workflow",
-      "meaning": "リリースの設定の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
+      "meaning": "リリースの設定の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前にリリース承認ゲートを掛ける。自動反映の本番チャネルと対になる",
       "code": "manual_production",
       "pending_source": "issues/old/issue-1454-requirements.md"
     },
@@ -2683,13 +2671,13 @@
     {
       "term": "昇格のプラン",
       "context": "ndf-release",
-      "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする",
+      "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、リリース承認ゲートの後にマージする",
       "pending_source": "issues/old/issue-1457-design.md"
     },
     {
       "term": "昇格の承認資料",
       "context": "ndf-release",
-      "meaning": "昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
+      "meaning": "昇格のリリース承認ゲートで利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote のリリース承認ゲートの停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
@@ -3378,7 +3366,7 @@
     {
       "term": "追加待ちのチェック",
       "context": "ndf-workflow",
-      "meaning": "必須にすると決めたが、ruleset へ足す承認（承認ゲート 2）を待っているチェック。突き合わせのチェックは差に数えない",
+      "meaning": "必須にすると決めたが、ruleset へ足す承認（リリース承認ゲート）を待っているチェック。突き合わせのチェックは差に数えない",
       "source": "docs/specifications/ci-required-checks-reconcile.md"
     },
     {
@@ -3555,7 +3543,7 @@
     {
       "term": "承認したコミット",
       "context": "ndf-release",
-      "meaning": "ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す",
+      "meaning": "リリース承認ゲートの承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
@@ -3579,7 +3567,7 @@
     {
       "term": "承認の記録",
       "context": "ndf-release",
-      "meaning": "承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまでリリースは通らない",
+      "meaning": "承認資料の欄の 1 つ。リリース承認ゲートを承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまでリリースは通らない",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
@@ -3994,7 +3982,7 @@
     {
       "term": "起票者の推定",
       "context": "ndf-workflow",
-      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。承認ゲート 1 で利用者が確かめるまで、利用者の決定として扱わない",
+      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで利用者が確かめるまで、利用者の決定として扱わない",
       "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md"
     },
     {
@@ -4403,7 +4391,7 @@
     {
       "term": "承認の依頼",
       "context": "ndf-factory",
-      "meaning": "実行ジョブが人の答えを待って終わったときに作る依頼。種類はゲート 1・ゲート 2・判断（止めて人へ戻した）の 3 つ",
+      "meaning": "実行ジョブが人の答えを待って終わったときに作る依頼。種類は設計承認ゲート・リリース承認ゲート・判断（止めて人へ戻した）の 3 つ",
       "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
@@ -5654,7 +5642,7 @@
     {
       "term": "出し直しの指摘",
       "context": "ndf-workflow",
-      "meaning": "承認ゲート 1 で人が「直して出し直す」と答えたときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの",
+      "meaning": "設計承認ゲートで人が「直して出し直す」と答えたときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの",
       "pending_source": "issues/issue-2510-requirements.md"
     },
     {
@@ -5672,7 +5660,7 @@
     {
       "term": "設計のプラン",
       "context": "ndf-workflow",
-      "meaning": "開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・承認ゲート 1 のステップを持つ",
+      "meaning": "開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ",
       "pending_source": "issues/issue-2510-requirements.md"
     },
     {
@@ -5696,7 +5684,7 @@
     {
       "term": "設計の承認の依頼",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のレーンが、承認ゲート 1 の判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ",
+      "meaning": "並列の計画のレーンが、設計承認ゲートの判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ",
       "pending_source": "issues/issue-2510-requirements.md"
     },
     {
@@ -5720,7 +5708,7 @@
     {
       "term": "承認待ちの一覧",
       "context": "ndf-factory",
-      "meaning": "アカウントのスプリントの実行のうち、答えの無い承認の依頼（ゲート 1・ゲート 2・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し",
+      "meaning": "アカウントのスプリントの実行のうち、答えの無い承認の依頼（設計承認ゲート・リリース承認ゲート・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し",
       "source": "docs/specifications/ndf-factory-sprint-views.md"
     },
     {
@@ -5791,13 +5779,23 @@
       "term": "設計承認ゲート",
       "context": "ndf-workflow",
       "meaning": "設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる",
-      "pending_source": "issues/issue-2619-requirements.md"
+      "deprecated": [
+        "承認ゲート 1",
+        "ゲート 1",
+        "関門 1"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "リリース承認ゲート",
       "context": "ndf-workflow",
       "meaning": "本番系へ届く操作（本番へのリリース・operation の実行・自動反映の本番チャネルへのマージ）の前に人の承認を求める承認ゲート。documentation モードでは制作物承認に当たる",
-      "pending_source": "issues/issue-2619-requirements.md"
+      "deprecated": [
+        "承認ゲート 2",
+        "ゲート 2",
+        "関門 2"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "人へ出す文",
@@ -5861,7 +5859,7 @@
     {
       "term": "リリースの依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンが承認ゲート 2 の手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
       "deprecated": [
         "配布の依頼"

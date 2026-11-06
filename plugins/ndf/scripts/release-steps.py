@@ -899,7 +899,7 @@ def cmd_approval_facts(a):
 
 
 def cmd_approve(a):
-    """ゲート 2 の承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
+    """リリース承認ゲートの承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
     try:
         emit(approval.approve(git_root(a.root), a))
     except approval.Gate as g:
@@ -1073,7 +1073,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugin", help="除くプラグイン（既定は宣言の release.plugin）")
     p.add_argument("--prs", nargs="*", type=int, metavar="PR番号", help="版に含む PR（本文と閉じる課題から上げ幅の候補。値なしは範囲だけ）")
     p.add_argument("--approval", help="承認資料。「版を上げる他のプラグイン」の節を書く")
-    p.add_argument("--set", action="append", metavar="名前=上げ幅", help="--approval: 承認ゲート 2 で決めた上げ幅へ行を書き直す")
+    p.add_argument("--set", action="append", metavar="名前=上げ幅", help="--approval: リリース承認ゲートで決めた上げ幅へ行を書き直す")
     p.add_argument("--decided", help="承認資料の表の上げ幅で上げた版を返す（本番の bump-others）")
     p.set_defaults(func=cmd_changed_plugins)
 
@@ -1107,11 +1107,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
     p.set_defaults(func=cmd_record)
 
-    p = sub.add_parser("approve", parents=[common], help="本番へのリリースの承認（ゲート 2）を承認資料へ記録する")
+    p = sub.add_parser("approve", parents=[common], help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する")
     p.add_argument("--approval", required=True, help="承認資料")
     p.add_argument("--approved-sha", metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
     p.add_argument("--facts-from", metavar="DIR", help="開発版のプランの状態ディレクトリ（facts の出力から SHA を読む。#1426）")
-    p.add_argument("--answer-from", metavar="STATE", help="--facts-from: 承認ゲート 2 の利用者の承認の記録を読むスプリント状態ファイル")
+    p.add_argument(
+        "--answer-from", metavar="STATE", help="--facts-from: リリース承認ゲートの利用者の承認の記録を読むスプリント状態ファイル"
+    )
     p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
     p.set_defaults(func=cmd_approve)
 

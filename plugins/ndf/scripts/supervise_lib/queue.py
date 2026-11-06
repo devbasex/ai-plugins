@@ -129,9 +129,9 @@ def cmd_queue(
     あるステップは、資源の枠の本数まで同時に流す（宣言は .ndf/supervise.json の queue）。
     始めに流すプランの一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
-    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
+    記録を止めて頭から流す（完了か承認ゲートの記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
     キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
-    キューの続きが渡し、そのプランは関門の記録があっても新しい実行の回で流す。"""
+    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -344,10 +344,10 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     gates = [i for i in ran if i["result"] == "関門"]
     unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
     status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
-    summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
+    summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
-    nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
+    nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
     return result(
         "supervise-queue",
         status,

@@ -4,12 +4,12 @@
 | 副命令 | 何をする |
 | --- | --- |
 | `record --gate <名> --what <要約> (--sprint <状態ファイル> \\| --issue N \\| --pr N)... [--outcome rejected\\|approved] [--repo OWNER/REPO] [--at <ISO 8601>] [--root DIR]` | 答えを 1 行追記する（既定は差し戻し）。状態ファイルのあるスプリントは `sprint-state.py gate --by user` が同じ記録へ書く |
-| `count [--sprint <状態ファイル>] [--issue N]... [--pr N]... [--repo OWNER/REPO] [--root DIR]` | 渡した範囲のどれかに当たる差し戻しの行を、関門 1・関門 2・ほかに分けて数える。範囲を渡さなければリポジトリのすべての行 |
+| `count [--sprint <状態ファイル>] [--issue N]... [--pr N]... [--repo OWNER/REPO] [--root DIR]` | 渡した範囲のどれかに当たる差し戻しの行を、設計承認ゲート・リリース承認ゲート・ほかに分けて数える。範囲を渡さなければリポジトリのすべての行 |
 
-`--gate` には `関門 1`（設計の承認）か `関門 2`（本番へのリリースの承認）を渡す。ほかの名前は `other` に数える。
+`--gate` には `設計承認ゲート`（設計の承認）か `リリース承認ゲート`（本番へのリリースの承認）を渡す。旧名は正の名前へ寄せて書き、ほかの名前は `other` に数える。
 `--repo` を省くと `--root`（既定はカレント）の `origin` の `owner/repo`、読めなければメインディレクトリの絶対パスを使う。
 
-`count` は、範囲に答えの行が 1 つも無く、`--sprint` の状態ファイルにも承認ゲート（関門 1・関門 2）の記録が無ければ、
+`count` は、範囲に答えの行が 1 つも無く、`--sprint` の状態ファイルにも承認ゲート（設計承認ゲート・リリース承認ゲート）の記録が無ければ、
 件数を 0 と書かずに「未記録」（`status: stopped`・件数は `null`・`metrics.recorded` は false）を返す。
 
 終了コード: 0 = 書いた・数えた / 1 = 記録を書けない / 2 = 引数の誤り・範囲が無い・記録を読めない（件数は `null`、
@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import clock  # noqa: E402
+import gate_answer  # noqa: E402
 import gate_rejections as gr  # noqa: E402
 import jsonio  # noqa: E402
 import step_result  # noqa: E402
@@ -38,7 +39,9 @@ def _scope_args(a) -> dict:
 def cmd_record(a) -> tuple[dict, int]:
     repo = gr.ledger_repo(a.root, a.repo)
     try:
-        row = gr.make_row(a.gate, a.what, repo=repo, at=a.at or clock.now_iso("utc"), outcome=a.outcome, **_scope_args(a))
+        row = gr.make_row(
+            gate_answer.accept(a.gate), a.what, repo=repo, at=a.at or clock.now_iso("utc"), outcome=a.outcome, **_scope_args(a)
+        )
     except ValueError as e:
         return step_result.result(TOOL, "stopped", f"記録しない: {e}"), step_result.EXIT_UNREADABLE
     try:
@@ -63,7 +66,7 @@ def cmd_count(a) -> tuple[dict, int]:
         summary = "承認ゲートの差し戻し: 未記録（範囲に承認ゲートの答えの行が無い。0 件とは読まない）"
         return step_result.result(TOOL, "stopped", summary, [], {**unknown, "recorded": False}), step_result.EXIT_PRECONDITION
     c = gr.count_by_gate(rows)
-    summary = f"承認ゲートの差し戻し: 関門 1 が {c['gate_1']} 件・関門 2 が {c['gate_2']} 件（ほか {c['other']} 件）"
+    summary = f"承認ゲートの差し戻し: 設計承認ゲートが {c['gate_1']} 件・リリース承認ゲートが {c['gate_2']} 件（ほか {c['other']} 件）"
     return step_result.result(TOOL, "ok", summary, [r for r in rows if gr.is_rejection(r)], {**c, "recorded": True}), step_result.EXIT_OK
 
 
@@ -73,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("record", "count"):
         s = sub.add_parser(name)
         if name == "record":
-            s.add_argument("--gate", required=True, help="承認ゲートの名前（関門 1 / 関門 2）")
+            s.add_argument("--gate", required=True, help="承認ゲートの名前（設計承認ゲート・リリース承認ゲート）")
             s.add_argument("--what", required=True, help="何を差し戻したか・承認したかの要約")
             s.add_argument("--at", help="答えた日時（ISO 8601。既定は今）")
             s.add_argument("--outcome", choices=gr.OUTCOMES, default=gr.REJECTED, help="利用者の答え（既定は rejected）")

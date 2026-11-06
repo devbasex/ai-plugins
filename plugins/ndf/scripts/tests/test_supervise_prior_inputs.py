@@ -25,7 +25,7 @@ PLAN = {
         {"id": "review", "type": "drive", "cmd": "true", "on_fail": "fix-review", "next": "stopper"},
         {"id": "fix-review", "type": "work", "kind": "修正", "prompt": "直す", "inputs": ["review"], "next": "review"},
         {"id": "stopper", "type": "run", "cmd": "true", "next": "gate"},
-        {"id": "gate", "type": "judge", "inputs": ["early", "review"], "question": "関門へ", "choices": ["gate", "stop"]},
+        {"id": "gate", "type": "judge", "inputs": ["early", "review"], "question": "承認ゲートへ", "choices": ["gate", "stop"]},
     ],
 }
 

@@ -133,7 +133,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 
 ### 1 スプリントの流し方
 
-**1 スプリント（実装 → 開発版 → ゲート 2 → 本番 → 後片付け）で conductor が打つのは、キューと `wait` と、承認ゲートで
+**1 スプリント（実装 → 開発版 → リリース承認ゲート→ 本番 → 後片付け）で conductor が打つのは、キューと `wait` と、承認ゲートで
 利用者の答えを書く 1 行だけである。** プランの組み立て・待ちの監視・次のプランの起動・承認の記録のために起きない。
 
 1. 実装のプランを並べ、開発版のリリースプランを `new release --channel dev --prs-from-queue` で作る
@@ -141,8 +141,8 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    報告の `Pull Request` の番号を changelog・approval-facts のステップの `--prs` へ入れる。
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する
-3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
-   利用者が答えたら `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を打つ
+3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
+   利用者が答えたら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
 4. 承認の後、本番のプランを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
    `queue <本番のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する。本番のプランの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
@@ -156,8 +156,8 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 
 ### スプリントを流すコマンド
 
-**`normal` の 1 スプリント（設計 → 承認ゲート 1 → 設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 →
-開発版 → 承認ゲート 2 → 本番）で、承認ゲート 1 の後に conductor が打つのはキュー 1 回と `wait` 1 回である（承認ゲート 2 の
+**`normal` の 1 スプリント（設計 → 設計承認ゲート→ 設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 →
+開発版 → リリース承認ゲート→ 本番）で、設計承認ゲートの後に conductor が打つのはキュー 1 回と `wait` 1 回である（リリース承認ゲートの
 後も同じ）。** 例はスプリント `m6`（課題 1052・1053、設計 Pull Request は 1052）で、
 `sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/sprint-m6`、`S=<スプリントの状態>` とする。
 キューと `wait` はバックグラウンドで起動し、キューはリポジトリの根から起動する。打つコマンドは `sprint.json` の
@@ -168,15 +168,15 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    版数は渡さず、開発版のプランを流す時点に queue が決める（明示するなら `--version`）
    設計の前に別の課題を取り込むと決めていれば `--absorb <課題>:<取り込み先>` を足す（取り込んだ課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
-3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が答えたら、設計 PR ごとに
-   `sprint-state.py gate $S "関門 1" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
+3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が答えたら、設計 PR ごとに
+   `sprint-state.py gate $S "設計承認ゲート" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
 4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json --max 3 --done $O/done-3.json
    --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
    --then $O/7-check.json --then $O/8-release.json` と `sv wait $O/done-3.json`。マージのプランは 3 の記録を見て承認ラベルを
    付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
-5. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `関門 2` のステージの `gate` に沿って
-   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "関門 2" --what <要約> --by user --outcome approved|rejected`
+5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
+   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
    を打つ。差し戻されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json --max 3 --done $O/done-10.json` と `sv wait $O/done-10.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
@@ -186,7 +186,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
   ステージは前のステージがすべて完了のときだけ流れる。承認の後に別の入口から入るステップ（`merge-approved`・`promote-approved`）
   は `--from <プラン名>=<ステップ>` を足す
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である
-- `--state` を渡さないスプリントでは、承認ゲート 1 で `gh pr edit <設計 PR> --add-label design-approved` を、承認ゲート 2 で
+- `--state` を渡さないスプリントでは、設計承認ゲートで `gh pr edit <設計 PR> --add-label design-approved` を、リリース承認ゲートで
   `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
 - 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
 - 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある

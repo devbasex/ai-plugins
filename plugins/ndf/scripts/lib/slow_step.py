@@ -212,7 +212,7 @@ def _history_key(d: dict) -> tuple:
 
 
 def keeps(exit_code) -> bool:
-    """履歴へ積む終了コード（成功と関門）。"""
+    """履歴へ積む終了コード（成功と承認ゲート）。"""
     return exit_code == 0 or (isinstance(exit_code, int) and 10 <= exit_code <= 19)
 
 
@@ -231,7 +231,7 @@ def plan_of_progress(progress: Path) -> tuple[str, str]:
 
 
 def import_progress(paths, history: Path) -> dict:
-    """progress.jsonl の step の行（run・work・drive の成功と関門）を履歴へ移す。同じ行は 2 度積まない。
+    """progress.jsonl の step の行（run・work・drive の成功と承認ゲート）を履歴へ移す。同じ行は 2 度積まない。
     返り値: {"added", "skipped", "unreadable": [パス...]}。"""
     seen = {_history_key(d) for d in _rows(history)}
     added = skipped = 0

@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 
 import project_mvv
-from gate_answer import GATE_1, GATE_2
+from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
@@ -80,19 +80,19 @@ DESIGN_RESULTS_STAGE = "設計の結果"
 
 
 def design_results_wave(a, repo: str, **then) -> list[dict]:
-    """承認ゲート 1 の直後の「設計の結果」のステージ（決定 2）。設計の課題も設計を承認済みの課題も無ければ置かない。"""
+    """設計承認ゲートの直後の「設計の結果」のステージ（決定 2）。設計の課題も設計を承認済みの課題も無ければ置かない。"""
     if not design_read(a):
         return []
     return [{"name": DESIGN_RESULTS_STAGE, "plans": {"design-results": plan_design_results(a, repo)}, **then}]
 
 
 def mvv_design_waves(a, repo: str, gate: str) -> list[dict]:
-    """MVV 判定つきの設計のステージと、その後の関門 1。設計の課題が無ければ空。"""
+    """MVV 判定つきの設計のステージと、その後の設計承認ゲート。設計の課題が無ければ空。"""
     if not a.design:
         return []
     return [
         {"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}},
-        {"name": GATE_1, "gate": gate},
+        {"name": DESIGN_GATE, "gate": gate},
     ]
 
 
@@ -102,7 +102,7 @@ def fast_sprint_plans(a) -> list[dict]:
     順に流す。検査が立てばその中でレビューも通るため、実装レビューのステージは範囲が空になり流れない。"""
     repo = str(Path(a.worktree).resolve())
     waves = mvv_design_waves(
-        a, repo, "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする"
+        a, repo, "設計の計画がすべて完了なら通過する。結果が承認ゲートの計画の Pull Request だけ、利用者の承認を取ってマージする"
     )
     # 設計の課題があれば、設計の結果のステージが実装の queue の先頭になり、実装以降はその --then で続く
     waves += design_results_wave(a, repo)
@@ -129,14 +129,14 @@ def fast_sprint_plans(a) -> list[dict]:
 
 
 AUTO_GATE_1 = (
-    "設計のプランの MVV 判定が通せばマージ済みで、このステージは通過する。設計のプランが関門を返したら、承認を取り "
-    f'`sprint-state.py gate <状態> "{GATE_1}" --by user` の後に、設計のステージの resume に `--from design-<N>=approve` を足して打つ'
+    "設計のプランの MVV 判定が通せばマージ済みで、このステージは通過する。設計のプランが承認ゲートを返したら、承認を取り "
+    f'`sprint-state.py gate <状態> "{DESIGN_GATE}" --by user` の後に、設計のステージの resume に `--from design-<N>=approve` を足して打つ'
 )
 
 
 def auto_sprint_plans(a) -> list[dict]:
-    """pace: auto のスプリントのステージ。並びは normal と同じ（設計 → 関門 1 → スプリントブランチ → 実装 → 検査）で、
-    後ろに開発版と本番（先頭が MVV 判定の関門 2）を続ける。設計と開発版・本番だけを MVV 判定つきのプランで作り、
+    """pace: auto のスプリントのステージ。並びは normal と同じ（設計 → 設計承認ゲート→ スプリントブランチ → 実装 → 検査）で、
+    後ろに開発版と本番（先頭が MVV 判定のリリース承認ゲート）を続ける。設計と開発版・本番だけを MVV 判定つきのプランで作り、
     スプリントブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
     repo = str(Path(a.worktree).resolve())
     waves = mvv_design_waves(a, repo, AUTO_GATE_1)
@@ -156,7 +156,7 @@ def auto_sprint_plans(a) -> list[dict]:
     ]
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, mvv=a.state)
-    prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（関門 2 の判定のコメントの宛先）
+    prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（リリース承認ゲートの判定のコメントの宛先）
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
         {
@@ -280,8 +280,8 @@ MERGE_STAGE = "設計 PR のマージ"
 
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
-    normal は承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → デプロイ）を、最初の
-    ステージの command 1 本に --then でつなぐ（#1426 の決定 5・I9）。承認ゲート 2 の後の本番は別の command にする。
+    normal は設計承認ゲートの後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → デプロイ）を、最初の
+    ステージの command 1 本に --then でつなぐ（#1426 の決定 5・I9）。リリース承認ゲートの後の本番は別の command にする。
     リリースの経路が雛形で組むものでなければ、経路ごとのステージ（route_waves）を最後に置く。"""
     build = PACE_PLANS.get(getattr(a, "pace", "normal"))
     if build:
@@ -292,7 +292,7 @@ def sprint_plans(a) -> list[dict]:
     waves = []
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
-        waves.append({"name": GATE_1, "gate": normal_gate_1(a, advise)})
+        waves.append({"name": DESIGN_GATE, "gate": normal_gate_1(a, advise)})
         waves.append({"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}})
     first = MERGE_STAGE if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
 
@@ -313,12 +313,14 @@ def sprint_plans(a) -> list[dict]:
             release["note"] = normal_gate_2(a)
         return waves + [release]
     prod = prod_version(a.version)
-    if parallel_lane(repo):  # レーンは承認ゲート 2 を置かず、リリースの依頼を送る（承認ゲート 2 はオーガナイザーが出す。#2436 の I17）
+    if parallel_lane(
+        repo
+    ):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（リリース承認ゲートはオーガナイザーが出す。#2436 の I17）
         # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
     return waves + [
         release,
-        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
+        {"name": RELEASE_GATE, "gate": normal_gate_2_stage(a, repo, prod, advise)},
         {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
     ]
 
@@ -477,21 +479,21 @@ def next_text(pace: str, index: list[dict], advise: bool = False, no_prod: bool 
     承認資料に助言の MVV 判定を載せ、答えを状態へ書くことを足す。`no_prod` なら本番を置かなかった理由を足す。"""
     nxt = (
         "command を持つステージを番号の順に打ち、done を wait で待つ（then_of のステージは前の command が --then で続けて流す）。"
-        "関門のステージでは承認を取ってから次へ進む。止まったらそのステージの resume を打つ"
+        "承認ゲートのステージでは承認を取ってから次へ進む。止まったらそのステージの resume を打つ"
     )
     if advise:
         nxt += (
-            "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・承認ゲート 2 の文（関門 2 のステージの gate か、"
+            "。承認資料には助言の MVV 判定を載せ、利用者が答えたら設計承認ゲートのステージの gate・リリース承認ゲートの文（リリース承認ゲートのステージの gate か、"
             "デプロイの後のステージの note）にある "
-            "sprint-state.py gate（--what と --by user。関門 1 は --pr も）を打つ"
+            "sprint-state.py gate（--what と --by user。設計承認ゲートは --pr も）を打つ"
         )
     if pace == "auto":
         nxt = (
             "最初のステージの command を打つ（後ろのステージは --then で続く）。queue が gate を返したら、承認資料に判定の理由と"
-            "根拠の項目を添えて承認を取り、関門のステージの説明に沿って続きのステージの resume を打つ"
+            "根拠の項目を添えて承認を取り、承認ゲートのステージの説明に沿って続きのステージの resume を打つ"
         )
     if no_prod:
-        nxt += f"。本番のブランチ（{PRODUCTION_SOURCES}）が無いため、承認ゲート 2 と本番は置いていない"
+        nxt += f"。本番のブランチ（{PRODUCTION_SOURCES}）が無いため、リリース承認ゲートと本番は置いていない"
     for manual in (e for e in index if "manual" in e):
         nxt += f"。{manual['name']}は {manual['manual']} で行う（{manual['note']}）"
     return nxt

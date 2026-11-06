@@ -65,7 +65,7 @@ export interface Presentation {
   lanes: { lane: string; requested: boolean }[];
   addedPrs: number[];
   at: string;
-  // この提示へ答えた承認の依頼（承認ゲート 2）。古い承認の再送を次の提示の承認と取り違えないために残す。前の記録には無い
+  // この提示へ答えた承認の依頼（リリース承認ゲート）。古い承認の再送を次の提示の承認と取り違えないために残す。前の記録には無い
   approvalRequestId?: string | null;
 }
 
@@ -157,7 +157,7 @@ export function requestsToAnswer(batch: ReleaseBatch, requests: OrgRequest[], en
 export const choicesOf = (batch: Pick<ReleaseBatch, "mainMerged">): ("continue" | "reject")[] => (batch.mainMerged ? ["continue"] : ["continue", "reject"]);
 
 // 止まる前の状態（ジョブが失敗した時点の state から）。presented は提示を受けた後にジョブが落ちたとき
-// （ランナーが release.presented を送った後の状態の保存に失敗したなど）で、承認ゲート 2 に届いていない
+// （ランナーが release.presented を送った後の状態の保存に失敗したなど）で、リリース承認ゲートに届いていない
 export function stalledFromOf(state: BatchState): StalledFrom | null {
   if (state === "composed" || state === "presented" || state === "represented" || state === "confirmed") return state;
   return null;
@@ -169,7 +169,7 @@ export function resumeStepOf(batch: ReleaseBatch, startedRelease: boolean): Rele
 }
 
 // 止まる前（か今）の状態から流し直す手。判断（承認ゲートの外の問い）への答えの再開も同じ規則で決める
-// presented は受けた最後の提示のプランを流し直す（提示 1 なら present、提示 2 なら represent。状態は presented のまま承認ゲート 2 を待つ）
+// presented は受けた最後の提示のプランを流し直す（提示 1 なら present、提示 2 なら represent。状態は presented のままリリース承認ゲートを待つ）
 export function stepFrom(state: StalledFrom | null, batch: Pick<ReleaseBatch, "mainMerged" | "confirmedK" | "presentations">, startedRelease: boolean): ReleaseStep {
   if (state === "composed") return "present";
   if (state === "represented") return "represent";

@@ -3,7 +3,7 @@
 ループの記録は、メインディレクトリの `.ndf/loop/<名>/loop.json`（正本）と `laps.md`（描画）である。コミットしない。
 周回はスプリント状態ファイルを ID（パス）で参照し、周回を締めるときに費用・秒・承認ゲートの判定・版を写して固定する。
 止まる条件（予算・同じ失敗・止める指示）は周回の境（周回の開始の前と終わりの後）でだけ判定する。周回の途中で止めるのは、
-承認ゲート 2 を人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
+リリース承認ゲートを人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
 （`refused`）の 3 つだけで、周回は進行中のまま残す。
 
 並列の計画のレーン（#2436）では、リリースの依頼を送った周回を「リリース待ち」、作業の途中の問いをオーガナイザーへ送った周回を
@@ -39,6 +39,7 @@ import parallel_files
 import project_mvv as pm
 import repo as repo_lib
 import step_result
+from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
@@ -66,7 +67,6 @@ SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
 SLOT_FIT = "当てた"  # upkeep_rank_config.SLOT_FIT（rank の出力をそのまま読む）
 OVER_SCALE = "尺度を超える"  # upkeep_rank_estimate.OVER_SCALE
-GATE_1, GATE_2 = "関門 1", "関門 2"
 DESIGN_PHASE = "設計"
 FINISHED = ("完了", "関門")
 NOT_RUN = "流さなかった"  # supervise_lib.queue.NOT_RUN（前のステージが完了でないときに流さなかった計画）
@@ -488,7 +488,7 @@ def render_lap_detail(lap: dict) -> list[str]:
         )
     for g in lap.get("gates", []):
         lines.append(
-            f"\n- {g.get('name')}: {g.get('by', 'user')} {_md_cell(g.get('verdict'))}（根拠 {_md_cell(', '.join(g.get('basis') or []))}）"
+            f"\n- {canonical(g.get('name'))}: {g.get('by', 'user')} {_md_cell(g.get('verdict'))}（根拠 {_md_cell(', '.join(g.get('basis') or []))}）"
         )
     if lap.get("refine"):
         lines.append(

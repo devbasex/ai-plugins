@@ -107,7 +107,7 @@ TodoWrite([{content: "タスク内容", status: "in_progress", activeForm: "進�
 
 **大規模タスク:**
 - Plan Modeに移行
-- 設計案を作成しユーザー承認を得る（承認ゲート 1。`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）
+- 設計案を作成しユーザー承認を得る（設計承認ゲート。`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）
 - **計画と調査結果をファイルに保存**（復帰可能にするため必須）
 
 ### フェーズ4: 実行依頼

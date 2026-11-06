@@ -595,7 +595,7 @@ def test_pr_create_body_after_the_boundary_is_not_read(repo: Path) -> None:
 
 @pytest.mark.parametrize("command", ["gh pr merge \\\n  268 --merge", "gh pr \\\nmerge 268"])
 def test_a_continued_merge_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
-    """AC13: 行末の `\\` の継続は区切りではない。hook を通して関門が働く。"""
+    """AC13: 行末の `\\` の継続は区切りではない。hook を通して承認ゲートが働く。"""
     result = guard(repo, state, command, tmp_path=tmp_path, responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"

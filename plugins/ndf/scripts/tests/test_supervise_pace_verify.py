@@ -1,4 +1,4 @@
-"""経路 merge / promote の pace: auto / fast（#1457）: 承認ゲート 2 の前に導入の確認（<節>.verify）を 1 度走らせる。
+"""経路 merge / promote の pace: auto / fast（#1457）: リリース承認ゲートの前に導入の確認（<節>.verify）を 1 度走らせる。
 
 起点 develop・本番 main で release.form を持たないリポジトリ（project-trygroup-prd の形）で、昇格のプランの先頭の verify と、
 経路 merge だけのときの「導入の確認」のステージ、verify-facts の承認資料を見る。実機の claude と gh は呼ばない。
@@ -147,7 +147,7 @@ def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
 
 def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     """#1529 の AC4・AC5: 導入の確認の承認資料が無ければ、plan の promote はマージせずに落ち、handoff が
-    承認ゲート 2 の by: mvv の記録を外して承認ゲートで終わる。"""
+    リリース承認ゲートの by: mvv の記録を外して承認ゲートで終わる。"""
     repo = make_repo(tmp_path, [STG, PRD])
     state = sprint_state(tmp_path, "auto")
     plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
@@ -155,7 +155,7 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     stub = {
         "verify": "true",  # 承認資料を書かない
         "prepare": "true",
-        "mvv": f"{PY} {SCRIPTS / 'sprint-state.py'} gate {state} '関門 2' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
+        "mvv": f"{PY} {SCRIPTS / 'sprint-state.py'} gate {state} 'リリース承認ゲート' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
         "note": "true",
         "record": f"touch {tmp_path / 'recorded'}",
     }
@@ -167,7 +167,7 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     res = queue.cmd_queue([str(path)], 1, poll=0.05)
     assert res["status"] == "gate" and res["items"][0]["result"] == "関門", res
     assert not (tmp_path / "recorded").exists()
-    assert not [g for g in load(state)["gates"] if g["name"] == "関門 2"]
+    assert not [g for g in load(state)["gates"] if g["name"] == "リリース承認ゲート"]
 
 
 def test_a_passed_verify_keeps_the_order(tmp_path):
@@ -265,7 +265,7 @@ def test_gate_2_and_the_template_keep_their_stages(tmp_path):
     import test_supervise_pace_manual as pm
 
     waves = pm.waves_of(tmp_path / "g", [pm.PRD])
-    facts = steps_of(load(wave(waves, "承認ゲート 2")["plans"][0]))["facts"]
+    facts = steps_of(load(wave(waves, "リリース承認ゲート")["plans"][0]))["facts"]
     repo = str((tmp_path / "g" / "repo").resolve())
     assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "デプロイ" and facts["next"] == "mvv"
     assert "deploy-facts --root" in facts["cmd"] and "--out {state_dir}/work/approval-deploy.md" in facts["cmd"]

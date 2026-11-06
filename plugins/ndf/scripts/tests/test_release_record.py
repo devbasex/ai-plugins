@@ -236,7 +236,7 @@ def test_sprint_close_closes_with_the_record_the_step_wrote(repo, gh, tmp_path):
 
 UNVERSIONED = """## リリース記録
 
-段階: 本番（承認ゲート 2 の後、main へマージした）
+段階: 本番（リリース承認ゲートの後、main へマージした）
 版: 3.9.0 → 4.0.0（main へのマージ）
 スプリント: PR #430 / #431
 
@@ -316,7 +316,9 @@ def test_a_release_test_before_the_record_is_not_used():
 
 def test_a_record_comment_after_a_verification_body_reads_as_production():
     """AC4: 本文が `段階: 検証（… 承認待ちのため未実施）` の PR に、デプロイの後の記録をコメントで足すと本番として読む（devbase PR #212）。"""
-    body = "## リリース記録\n\n段階: 検証（本番は承認ゲート 2 の承認待ちのため未実施）\n版: 3.6.0 → 3.7.0\nスプリント: PR #210 / #211\n"
+    body = (
+        "## リリース記録\n\n段階: 検証（本番はリリース承認ゲートの承認待ちのため未実施）\n版: 3.6.0 → 3.7.0\nスプリント: PR #210 / #211\n"
+    )
     assert dist_record.parse_record(body)["stage"].startswith("検証")
     comment = dist_record.format_record("3.6.0", "3.7.0", [210, 211], stage_note="承認の後", version_note="タグ")
     got = dist_record.parse_record(body + "\n" + comment)

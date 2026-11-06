@@ -342,7 +342,7 @@ do_up() {
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
   if [ -n "$TAG" ]; then
-    # 基準のタグは expose の関門が読む。書けないまま起動すると、載っている基準が
+    # 基準のタグは expose の判定が読む。書けないまま起動すると、載っている基準が
     # 台帳に残らず、公開の可否を判定できない（#315）。
     wt_registry_update "$(registry)" '
       .assignments |= map(
@@ -658,7 +658,7 @@ do_expose() {
   local opened
   opened=$(expose_record_assignment "$host" "$ttl") || return 1
 
-  # 記録を先に置くのは、先着 1 本の関門を通ったことを示すため。口を開けられ
+  # 記録を先に置くのは、先着 1 本の判定を通ったことを示すため。口を開けられ
   # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
   if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
         "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \

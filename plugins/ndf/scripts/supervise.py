@@ -35,19 +35,19 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new release ... --mvv <スプリントの状態>
         # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
     supervise.py new sprint --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
-        # 並列の設計 → 関門 1 → 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → デプロイ
+        # 並列の設計 → 設計承認ゲート→ 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → デプロイ
         # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。デプロイは検査の queue が --then で流す
         # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
-        # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 関門 1
+        # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 設計承認ゲート
         # release.form が無いか雛形の無い形ならリリースプランを書かず、最後のステージを「/ndf:release で行う」にする
-        # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
-        # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
+        # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（設計承認ゲートは MVV 判定）→ 実装（develop へ直接）
+        # → 検査（実行の条件）→ 開発版 → 本番（リリース承認ゲートは MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
         # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り・棚卸し
     supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
         # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
     supervise.py design-approved --pr N [--state <状態>]
-        # 設計 PR のマージのプランの入口: 承認ラベルか承認ゲート 1 の利用者の承認の記録が無ければ 10
+        # 設計 PR のマージのプランの入口: 承認ラベルか設計承認ゲートの利用者の承認の記録が無ければ 10
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
@@ -56,7 +56,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 流れる。終わると結果の JSON を --done（省けば最初の計画の
         # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧とステージの並びを done の隣（<done>.plans.json）へ書く
     supervise.py queue --resume <done> [--from <プラン名>=<ステップ>]... [--max N]
-        # キューの続き: 前の起動の止まった・関門のプランを終えたステップから続け、後続のステージも同じ条件で流す
+        # キューの続き: 前の起動の止まった・承認ゲートのプランを終えたステップから続け、後続のステージも同じ条件で流す
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
@@ -99,7 +99,7 @@ from step_result import emit  # noqa: E402  supervise_lib が lib/ を sys.path 
 
 MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き出すステップの並び・要る設定・引数を出す）:
   フェーズ                                 種別
-  設計 → 承認ゲート 1 → 実装 → 検査（スプリント）  new sprint（リリースの形に雛形があればリリースまで）
+  設計 → 設計承認ゲート→ 実装 → 検査（スプリント）  new sprint（リリースの形に雛形があればリリースまで）
   実装（1 課題の Pull Request）              new impl
   即時修正（worker の実装なしで Pull Request）  new fix
   検査（1 本の Pull Request か前回からの差分）   new check
@@ -112,7 +112,7 @@ def build_parser(sub) -> None:
     r = sub.add_parser(
         "run",
         help="プランを 1 本流す",
-        description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す（終了コード: 完了か関門 = 0 / それ以外 = 3）",
+        description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す（終了コード: 完了か承認ゲート = 0 / それ以外 = 3）",
         epilog="状態は --state-dir（省けば <プラン>-state/）に progress.jsonl・報告・ステップの出力として残る。"
         "途中で止まったら --from <ステップの id> で続きから流す",
     )
@@ -194,7 +194,7 @@ def build_parser(sub) -> None:
     d.add_argument("--design", type=int, nargs="+", required=True, help="設計の課題")
     da = sub.add_parser(
         "design-approved",
-        help="設計 PR のマージのプランの入口: 承認の証跡（承認ラベルか承認ゲート 1 の利用者の承認の記録）を確かめる",
+        help="設計 PR のマージのプランの入口: 承認の証跡（承認ラベルか設計承認ゲートの利用者の承認の記録）を確かめる",
         epilog="終了コード: 証跡あり = 0（記録だけならラベルを付ける）/ 証跡なし・PR が 0 = 10 / gh が読めない = 2",
     )
     da.add_argument("--pr", type=int, required=True, help="設計 Pull Request")

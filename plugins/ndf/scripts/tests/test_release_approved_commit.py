@@ -425,7 +425,7 @@ def approve_facts(mod, world, path, facts, answer=None):
 
 def answer_state(tmp_path: Path, at: str) -> str:
     state = tmp_path / "sprint.json"
-    state.write_text(json.dumps({"gates": [{"name": "関門 2", "what": "本番", "at": at, "by": "user", "outcome": "approved"}]}))
+    state.write_text(json.dumps({"gates": [{"name": "リリース承認ゲート", "what": "本番", "at": at, "by": "user", "outcome": "approved"}]}))
     return str(state)
 
 

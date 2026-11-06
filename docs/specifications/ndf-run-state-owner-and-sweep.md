@@ -74,7 +74,7 @@ merged の `cleanup`・テストのセッションの終わりが自動で外す
 | `KINDS` の種類ごとの持ち主と寿命の判定、片付け（`sweep_states`）と呼ぶ時点 | 開発 worktree（`.worktrees/<ブランチ名>`）の外し方（merged の `_remove_pr_worktrees` のまま） |
 | レビュー worktree の持ち主の記録（`{pr,rf}<n>.owner.json`）と、開始・動いた・終わったの書き込み | 退避した残骸（`*.stale-<時刻>`。種類 `stale-copy`）の片付け |
 | cross-review と cross-refactoring の開始が、以前の実行・別の実行の worktree を見つけたときの振る舞い | Skill の置き場（`ndf/`）・`ndf-stages`・`ndf-guards`・`ndf-checks`・`ndf-usage` などの持ち主と寿命（種類 `out-of-scope` で一覧に載せるだけ。#2243） |
-| セッションの状態ファイルと `ndf-deps.*` の持ち主（プロセス）の記録 | 承認ゲート 2 の後の別セッションのマージの扱い（#2221。[ndf-release-approved-commit.md](ndf-release-approved-commit.md)） |
+| セッションの状態ファイルと `ndf-deps.*` の持ち主（プロセス）の記録 | リリース承認ゲートの後の別セッションのマージの扱い（#2221。[ndf-release-approved-commit.md](ndf-release-approved-commit.md)） |
 | 投稿キューで今回分でない位置エラーの `review-post` を控えへ外すこと、外された今回分を取り戻すこと | 寿命の窓の設定化 |
 
 **働く範囲は利用先のリポジトリを含む**（`plugins/ndf/scripts/` と cross-review・cross-refactoring・merged のリリース対象）。片付けるレビュー

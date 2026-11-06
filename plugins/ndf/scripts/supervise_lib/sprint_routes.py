@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 
 import delivery
-from gate_answer import GATE_1, GATE_2
+from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl
@@ -67,7 +67,7 @@ def has_record(record_pr: str) -> bool:
 
 def record_pr_ref(a) -> str:
     """まとめの close が読むリリース記録の PR。経路がすべて届けない経路なら RECORD_NONE。開発ループのまとめ（pace: auto）は
-    経路にかかわらず RECORD_FOUND（承認ゲート 2 の後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
+    経路にかかわらず RECORD_FOUND（リリース承認ゲートの後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
     雛形の本番の PR か、昇格の PR（#837。route_waves が昇格のプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
     検証の環境だけ・手動反映の本番系）は RECORD_FOUND。"""
     rs = routes_of(a)
@@ -134,8 +134,8 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
 
 def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dict | None = None) -> list[dict]:
     """手動反映の本番系の形（#1454）の fast / auto の手で届ける経路: 開発版（production: false の行。あれば）→
-    承認ゲート 2（gate-2 のプラン）→ 本番（ほかの手で届ける行。production を書いていない行もここ）。開発版があれば
-    承認ゲート 2 は単独の queue（conductor が開発版の後に command を打つ）、無ければ then_of で続けて流す。"""
+    リリース承認ゲート（gate-2 のプラン）→ 本番（ほかの手で届ける行。production を書いていない行もここ）。開発版があれば
+    リリース承認ゲートは単独の queue（conductor が開発版の後に command を打つ）、無ければ then_of で続けて流す。"""
     rs = [r for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL]
     dev = [r for r in rs if r.production is False]
     prod = [r for r in rs if r.production is not False]
@@ -144,7 +144,7 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
     # auto は検査のスプリントの PR（単独の queue でも同じディレクトリの検査の報告から埋まる）、fast は前のステージの PR のすべて。
     # fast の単独の queue は前のステージの PR を集められないため、MVV 判定を打たずに利用者の承認ゲートにする（決定 6）
     prs = "{queue_pr:check}" if pace == "auto" else None if dev else QUEUE_PRS
-    gate = {"name": "承認ゲート 2", "plans": {"gate-2": plan_gate_2(a, repo, mvv, verify, prs, condition)}}
+    gate = {"name": RELEASE_GATE, "plans": {"gate-2": plan_gate_2(a, repo, mvv, verify, prs, condition)}}
     waves = []
     if dev:
         why = "。".join(r.note for r in dev if r.note)
@@ -152,7 +152,7 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
             {
                 "name": "開発版",
                 "manual": MANUAL_RELEASE,
-                "note": f"{why}。承認は要らない。検査の後に {MANUAL_RELEASE} で届け、済んだら承認ゲート 2 のステージの command を打つ",
+                "note": f"{why}。承認は要らない。検査の後に {MANUAL_RELEASE} で届け、済んだらリリース承認ゲートのステージの command を打つ",
             }
         )
     else:
@@ -163,16 +163,16 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
         {
             "name": "本番",
             "manual": MANUAL_RELEASE,
-            "note": f"{why}。承認ゲート 2 が通過（関門 2 の記録が by: mvv か by: user）してから、承認資料（承認ゲート 2 のプランの "
+            "note": f"{why}。リリース承認ゲートが通過（リリース承認ゲートの記録が by: mvv か by: user）してから、承認資料（リリース承認ゲートのプランの "
             f"{GATE_2_MATERIAL}）のコミットを checkout して {MANUAL_RELEASE} で trigger を打つ。ベースブランチの先頭がそのコミットと"
-            f"違えば、承認ゲート 2 の command からやり直す。{MANUAL_RELEASE} へはこの note と承認資料のパスを引き継ぐ",
+            f"違えば、リリース承認ゲートの command からやり直す。{MANUAL_RELEASE} へはこの note と承認資料のパスを引き継ぐ",
         },
     ]
     return waves
 
 
 def user_gate_cmd(a, gate: str, pr: bool, outcomes: str = "approved|rejected") -> str:
-    """利用者の答えを状態と差し戻しの記録へ書くコマンド（覆しの記録。#1400 の AC6・#2183）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+    """利用者の答えを状態と差し戻しの記録へ書くコマンド（覆しの記録。#1400 の AC6・#2183）。設計承認ゲートは答えた設計 PR を --pr で渡す。"""
     state = shlex.quote(sprint_state_path(a))
     return (
         f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
@@ -187,7 +187,7 @@ def reject_resume(what: str) -> str:
 
 
 def normal_gate_1(a, advise: bool = True) -> str:
-    """承認ゲート 1 の文。承認の証跡（状態の記録か承認ラベル）を書いてから、設計 PR のマージのステージの command を打つ（#1426 の決定 1）。"""
+    """設計承認ゲートの文。承認の証跡（状態の記録か承認ラベル）を書いてから、設計 PR のマージのステージの command を打つ（#1426 の決定 1）。"""
     after = "。後続のステージは --then で続けて流れる。証跡の無い設計 PR のマージは承認ゲートで止まり、後続は流れない"
     if not getattr(a, "state", None):
         return (
@@ -197,7 +197,7 @@ def normal_gate_1(a, advise: bool = True) -> str:
     return (
         "設計 Pull Request の承認を取る。"
         + ("承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を載せる。" if advise else "")
-        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, GATE_1, True, 'approved')}` を打ってから「設計 PR のマージ」のステージの command を打つ"
+        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, DESIGN_GATE, True, 'approved')}` を打ってから「設計 PR のマージ」のステージの command を打つ"
         + after
         + "。"
         + reject_resume("その設計 PR の設計のプラン")
@@ -206,13 +206,13 @@ def normal_gate_1(a, advise: bool = True) -> str:
 
 def normal_gate_2(a) -> str:
     return (
-        "承認ゲート 2: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者がリリースに答えたら、"
-        f"`{user_gate_cmd(a, GATE_2, False)}` を打つ"
+        "リリース承認ゲート: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者がリリースに答えたら、"
+        f"`{user_gate_cmd(a, RELEASE_GATE, False)}` を打つ"
     )
 
 
 def normal_gate_2_stage(a, repo: str | None, prod: str | None, advise: bool) -> str:
-    """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、リリースの note に重ねない（#1914 の決定 1）。
+    """pace: normal のリリース承認ゲートのステージの文。承認の手順はここの 1 か所に置き、リリースの note に重ねない（#1914 の決定 1）。
     承認資料は本番のプランの release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）。
     本番の版を明示していなければ、承認資料の版は開発版のプランの版の記録（状態ディレクトリの version.json）の base である（#2164）。"""
     plugin = (a.release or {}).get("plugin")
@@ -221,7 +221,7 @@ def normal_gate_2_stage(a, repo: str | None, prod: str | None, advise: bool) -> 
     if getattr(a, "state", None):  # 本番のプランの先頭の approve が状態の記録を証跡に承認の記録を書く（#1426 の決定 1）
         return (
             f"開発版のデプロイが書いた承認資料（{approval}{where}）を示して本番へのリリースの承認を取り、利用者が答えたら "
-            f"`{user_gate_cmd(a, GATE_2, False)}` を打ち、承認されたら「本番」のステージの command を打つ（差し戻されたら打たない）。"
+            f"`{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、承認されたら「本番」のステージの command を打つ（差し戻されたら打たない）。"
             "本番のプランの先頭の approve が、開発版の facts の承認したコミットとこの記録を照らして承認資料へ承認の記録を書く"
             + ("。承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）" if advise else "")
         )

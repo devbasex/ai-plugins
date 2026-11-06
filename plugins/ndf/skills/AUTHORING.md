@@ -188,7 +188,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用 | 本番デプロイ / 環境ブランチへの push / 利用者の設定ファイルの書き換え | 1（いずれも明示起動の運用が定着） |
 | `merged` | 自動発動 + 事後の報告 | worktree・ローカルブランチ・Pull Request の head のリモートブランチの削除 | なし（拒まれた対象だけ 1 に当たり、そこで止まる） |
 | `pr` | 自動発動 + 実行前確認 | push / Pull Request の作成 | 2 |
-| `release` | 自動発動 + 実行前確認 | 本番へのリリース（ゲート 2） | 1・2 |
+| `release` | 自動発動 + 実行前確認 | 本番へのリリース（リリース承認ゲート） | 1・2 |
 | `out-of-scope` | 自動発動 + 実行前確認 | 起票 | 2・3 |
 | `backlog-refinement` | 自動発動 + 実行前確認 | やらないと判断して閉じる・承認の要る前倒しと後ろ倒しを反映する | 3 |
 | `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの取得と symlink の作成 | 2 |

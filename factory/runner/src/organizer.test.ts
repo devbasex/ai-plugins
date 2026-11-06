@@ -134,7 +134,7 @@ describe("リリースの依頼とリリースの実行のジョブ（受け入�
     const t = harness(files, async () => {
       expect(files.files.get("batch.json")).toMatchObject({ seq: 1, step: "present" });
       await files.write(presented.file, presented.body);
-      return { report: "判断が要る", summary: "承認ゲート 2", gate: null };
+      return { report: "判断が要る", summary: "リリース承認ゲート", gate: null };
     });
     await t.run(inst);
     expect(t.events.map((e) => e.type)).toEqual(["job.started", "release.presented", "gate.reached", "job.finished"]);

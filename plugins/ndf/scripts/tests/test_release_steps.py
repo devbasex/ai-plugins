@@ -942,7 +942,7 @@ def test_bump_others_takes_the_decided_level(repo, tmp_path):
     assert res["metrics"]["decided"].endswith("issues/approval.md")
     code, res = others_run(root, env, "--approval", "issues/approval.md", "--set", "playwright-kit=minor")
     assert code == 0 and res["items"][0]["to"] == "2.1.0"
-    assert res["items"][0]["basis"][0] == "承認ゲート 2 で MINOR に決めた"
+    assert res["items"][0]["basis"][0] == "リリース承認ゲートで MINOR に決めた"
     code, res = others_run(root, env, "--decided", "issues/approval.md")
     assert code == 0 and res["items"][0]["to"] == "2.1.0"
 
