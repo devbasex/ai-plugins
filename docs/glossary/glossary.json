@@ -3598,6 +3598,18 @@
       "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
+      "term": "範囲の終点",
+      "context": "ndf-release",
+      "meaning": "版の節と承認資料の「含む PR」に並べる PR の範囲の、新しい側の端のコミット。出す版のコミット（リリースのブランチの先頭か、承認に出すコミット）を指す",
+      "source": ""
+    },
+    {
+      "term": "リリースタグ",
+      "context": "ndf-release",
+      "meaning": "正式版を出したときに本番チャネルのコミットへ打つタグ `<プラグイン>--v<版>`。リリースタグのある版の節は工程から書き換えない",
+      "source": ""
+    },
+    {
       "term": "子の箇条",
       "context": "ndf-release",
       "meaning": "PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む",
@@ -3921,7 +3933,7 @@
     {
       "term": "範囲の PR",
       "context": "ndf-release",
-      "meaning": "直前の正式版のタグから終点（承認したコミットか、ベースブランチの先端）までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
+      "meaning": "直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
@@ -5785,6 +5797,13 @@
       "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
       "source": "",
       "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "秘密のキャッシュ",
+      "context": "ndf-factory",
+      "meaning": "Secrets Manager から読んだ値を Lambda の実行環境の中で保持する `factory/api/` の仕組み。成功した値は以後も同じ値を返し、失敗した読み込みは捨てて次の要求で読み直す",
+      "source": "",
+      "pending_source": "issues/issue-2276-requirements.md"
     },
     {
       "term": "端末の控え",
