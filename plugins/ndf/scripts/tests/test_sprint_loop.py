@@ -1472,6 +1472,16 @@ def test_released_answer_runs_the_close_and_finish_closes_the_lap_with_the_versi
     assert sl.cmd_finish(env, "l1", 1, d)["exit"] == 1  # 締め直しは 1 回だけ
 
 
+def test_released_answer_without_a_version_runs_the_close_and_writes_no_version(env):
+    """組まずに答えた配布済み（#2616 の受け入れ条件 4）は版を持たず、まとめへ進む。"""
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": None, "reason": "stg はマージで反映する"}, "defer": None}
+    out = sl_select.cmd_select(env, "l1")
+    assert out["metrics"]["status"] == "finish" and "1-close.json" in out["metrics"]["pipeline"]
+    lap = rec(env)["laps"][0]
+    assert lap["release"]["answer"]["version"] is None and "prod" not in lap.get("versions", {})
+
+
 def test_two_answered_pending_laps_are_finished_oldest_first(env):
     request_lap(env, rid="lroot-r000000000001")
     env.rank_box["out"] = rank_out(ms("01 近い", [13, 14]))

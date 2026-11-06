@@ -47,6 +47,7 @@ import parallel_external as pe  # noqa: E402
 import parallel_external_cli as px  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
+import parallel_route  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "parallel"
@@ -105,7 +106,7 @@ def cmd_init(a) -> None:
 
 
 def cmd_check(a) -> None:
-    plan, items, metrics = checked_plan(main_of(), a.name)
+    plan, items, metrics = parallel_route.with_release_warnings(main_of(), checked_plan(main_of(), a.name))
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）", items, 1, **metrics)
     reply("ok", f"並列の計画 {a.name} の検査を通った（警告 {metrics['warnings']} 件）", items, **metrics)
