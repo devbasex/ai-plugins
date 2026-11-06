@@ -383,7 +383,7 @@ def plan_release_package_plugin(a) -> dict:
         steps.insert(0, approve_step(a, repo, approval))
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
-        "フェーズ": f"デプロイ（{'開発版' if dev else '本番'}）",
+        "フェーズ": "開発版のデプロイ" if dev else "リリース",
         "課題": a.issue,
         "モード": a.mode,
         "作業場所": a.worktree,

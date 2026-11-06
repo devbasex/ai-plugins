@@ -1549,7 +1549,7 @@ def test_new_release_dev_and_prod(tmp_path):
         "judge-record",
     ]
     # 導入の確認だけのステップは「リリース後テスト」と記録しない。それは仕上げの release-verify が担う（#2288 の AC1）
-    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース"
+    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "デプロイ"
     assert not [s for s in plan["steps"] if s.get("stage") == "リリース後テスト"]
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
     # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
@@ -1679,7 +1679,7 @@ def test_new_sprint_without_design_skips_gate(tmp_path):
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names == ["スプリントブランチ", "実装", "検査", "リリース", "関門 2", "本番"]
+    assert names == ["スプリントブランチ", "実装", "検査", "デプロイ", "関門 2", "本番"]
 
 
 @pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
@@ -2569,7 +2569,7 @@ def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     index = json.loads((out / "sprint.json").read_text())["ステージ"]
-    assert [w["name"] for w in index][-3:] == ["リリース", "関門 2", "本番"]
+    assert [w["name"] for w in index][-3:] == ["デプロイ", "関門 2", "本番"]
     waves = {w["name"]: w for w in index}
     gate, prod = waves["関門 2"], waves["本番"]
     assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]

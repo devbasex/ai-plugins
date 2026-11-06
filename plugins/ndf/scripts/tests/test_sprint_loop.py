@@ -1498,7 +1498,7 @@ def test_failed_answer_closes_the_lap_as_failed(env):
     env.answer_box[REQ] = {"answer": {"result": "failed", "reason": "CI"}, "defer": None}
     sl_select.cmd_select(env, "l1")
     lap = rec(env)["laps"][0]
-    assert lap["outcome"] == "失敗" and lap["failure"]["kind"] == "デプロイ"
+    assert lap["outcome"] == "失敗" and lap["failure"]["kind"] == "リリース"
 
 
 def test_defer_keeps_the_lap_pending(env):
