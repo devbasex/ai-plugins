@@ -261,18 +261,33 @@ def _emit_outcome(ctx: OutcomeContext) -> int:
     return code
 
 
+def _select_scope_runs(root: pathlib.Path, a, strategy: ts.Strategy, only: str | None) -> tuple[list, bool]:
+    """範囲テストで打つものを絞る。戻りは（打つものの並び, 打つものが無くても通してよいか）。"""
+    if strategy.name == ts.ROUND_ONLY:
+        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
+        return runs, only is not None and not runs
+    changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
+    runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
+    # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
+    return runs, not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
+
+
+def _split_scope_failures(runs: list, failed: list[str]) -> tuple[list[dict], bool]:
+    """落ちたコマンドを種別で分ける。戻りは（落ちた静的解析の判定の並び, テストの種別が落ちたか）。"""
+    kinds = {r.command: r.kind for r in runs}
+    lint_failed = [
+        {"suite": r.suite, "verdict": "caused", "reason": "変更したファイルで落ちた", "command": r.command}
+        for r in runs
+        if r.kind == ts.LINT and r.command in failed
+    ]
+    return lint_failed, any(kinds.get(c) == ts.TEST for c in failed)
+
+
 def cmd_scope(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
     only = getattr(a, "only_kind", None)
-    if strategy.name == ts.ROUND_ONLY:
-        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
-        nothing_to_run = only is not None and not runs
-    else:
-        changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
-        runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
-        # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
-        nothing_to_run = not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
+    runs, nothing_to_run = _select_scope_runs(root, a, strategy, only)
     if nothing_to_run:
         _emit_step(result(TOOL, "ok", f"範囲に当てる {only} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
         return 0
@@ -289,18 +304,13 @@ def cmd_scope(a) -> int:
             return _emit_launch(strategy, command, outcome, log)
         _emit_step(result(TOOL, "stopped", f"範囲テストが {limits['test_timeout']} 秒で終わらなかった", [], {}))
         return 2
-    kinds = {r.command: r.kind for r in runs}
     failed = [c for c, o, _ in done if o.status != ts.PASSED]
     seconds = round(time.monotonic() - started, 1)
     detail = f"範囲テスト {len(runs)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
     if not failed:
         return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=True, detail=detail))
-    lint_failed = [
-        {"suite": r.suite, "verdict": "caused", "reason": "変更したファイルで落ちた", "command": r.command}
-        for r in runs
-        if r.kind == ts.LINT and r.command in failed
-    ]
-    if not any(kinds.get(c) == ts.TEST for c in failed):
+    lint_failed, test_failed = _split_scope_failures(runs, failed)
+    if not test_failed:
         return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", lint=lint_failed))
     triage = (
         _classify(root, strategy, limits, a.base)
