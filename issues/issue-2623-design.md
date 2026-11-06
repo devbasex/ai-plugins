@@ -9,7 +9,7 @@
 ## 適用範囲
 
 - **働く範囲**: 工程の定義・経路の判定・CD の案内・結果の確かめは利用先のリポジトリでも働く。CD のワークフローと宣言の書き換えは ai-plugins だけで行う
-- **プロジェクトごとに違うもの**: 引数を足さず設定で受ける。`.ndf/project.json` の `delivery`（新しい任意の欄 `manual_reason`・`result`）、`.ndf/worktree.json` のブランチ、`.ndf/supervise.json` の `release.form`
+- **プロジェクトごとに違うもの**: 引数を足さず設定で受ける。設定は `.ndf/project.json` の `delivery`（新しい任意の欄 `manual_reason`・`result`）と、`.ndf/worktree.json` のブランチである。`.ndf/supervise.json` の `release.form` も設定で受ける
 - **当たるモード**: `standard`。CD の案内は `documentation` を除くすべてのモードのデプロイの工程で働く
 
 ## あるべき姿の根拠
@@ -26,6 +26,8 @@
 | PRD1 | 外部の一次情報 | マージを起点にタグと GitHub Release を作る形は広く使われている |
 
 要求と受け入れ条件は #2623 の本文にある（コピーは [issue-2623-requirements.md](issue-2623-requirements.md) ）。この文書は「どう作るか」だけを扱う。
+
+データ構造と入出力の契約は [issue-2623-design-contracts.md](issue-2623-design-contracts.md) に、決定の記録は [issue-2623-design-decisions.md](issue-2623-design-decisions.md) にある。
 
 ## ドメインモデル
 
@@ -89,49 +91,6 @@
 | 公開物 | 正式版ごとのリリースタグと GitHub Release の組 | 追加（`ndf-release`） |
 | 反映失敗 | リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態 | 追加（`ndf-release`） |
 | リリース記録 | release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request に、CD を読んだときは CD の結果を持つ | 意味の変更（`ndf-release`） |
-
-## 外部の調査
-
-| 種類 | 調べるか | 理由 |
-| --- | --- | --- |
-| 標準・仕様 | 調べる | CD の定義と、GitHub Actions の権限とイベントの規則が公開の仕様である |
-| 主要な製品 | 調べる | 版上げ・タグ・リリースをどこまで CI で行うか、CD の結果を外からどう待つかを比べる |
-| ライブラリとサービス | 調べる | タグと GitHub Release を作る部品と、実行の状態を読む部品を、自前の処理と比べる |
-
-### 標準・仕様
-
-| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| STD1 | Continuous Delivery と Continuous Deployment の定義 | Continuous Delivery は頻繁にデプロイできる状態を保ちつつ「may choose not to do it」、Continuous Deployment は変更がすべて自動で本番へ届く | NDF が担うのは「出すかの判断（リリース承認ゲート）」と「結果の確かめ」で、届ける手順は CD が持つ | https://martinfowler.com/bliki/ContinuousDelivery.html （2026-11-06） |
-| STD2 | GitHub Actions の `GITHUB_TOKEN` | トークンの権限はリポジトリの範囲に閉じ、このトークンが起こしたイベントは `workflow_dispatch`・`repository_dispatch` を除いて新しい実行を作らない | タグの作成から別のワークフローは動かない。新しい秘密は要らない | https://docs.github.com/en/actions/concepts/security/github_token （2026-11-06） |
-| STD3 | GitHub Actions の `push` と `pull_request_target` | `push` の `GITHUB_SHA` は push された先端のコミットで、`pull_request_target` にはセキュリティ上の注意がある | 書き込みの権限を持つジョブは `push` で起こし、Pull Request の head を実行しない | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows （2026-11-06。`push` の節は要約を経由して取得した） |
-
-### 主要な製品
-
-| # | 製品 | どう解いているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| PRD1 | release-please | CI が版上げの Pull Request を作り、人がマージすると CI がタグと GitHub Release を作る。パッケージの公開は扱わない | 「版の内容は Pull Request で人が見る、タグと GitHub Release はマージを起点に CI が作る」の分担に倣う | https://github.com/googleapis/release-please （2026-11-06） |
-| PRD2 | semantic-release | リリースのブランチの CI が版の決定・ノートの生成・タグ・公開をコミットのメッセージから全部行う | 版の大きさは承認資料で人が決める運用のため、版の決定は CI へ移さない | https://semantic-release.gitbook.io/semantic-release/ （2026-11-06。ページに保守の終了の記載がある） |
-| PRD3 | Argo CD の `argocd app wait` | CD の状態を外部のコマンドで待ち、`--timeout` で打ち切る | 結果の読み方にコマンドの形を持ち、待ちの上限を別に決める | https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_wait/ （2026-11-06） |
-| PRD4 | GitHub の Deployments とコミットの状態 | Deployment は `error`・`failure`・`pending`・`in_progress`・`queued`・`success` などの状態を持つ | 製品ごとに値が違うため、NDF の語は成功・失敗・未確定の 3 つに畳む | https://docs.github.com/en/rest/deployments/deployments?apiVersion=2022-11-28 （2026-11-06） |
-
-### ライブラリとサービス
-
-| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | softprops/action-gh-release | v3.0.4 | MIT | 2026-11-05 | 無し（リポジトリは archived でない） | 一部を満たす。Release は作れるが、タグが別のコミットにあるときに失敗する判定と `-dev` の判定を持たず、手元の切り戻しに使えない | https://github.com/softprops/action-gh-release ・`gh api repos/softprops/action-gh-release/releases/latest`（2026-11-06） |
-| LIB2 | GitHub CLI（`gh release create`・`gh run list`） | 2.103.2（手元）。最新は v2.103.3 | MIT | 2026-10-26 | 無し（リポジトリは archived でない） | 満たす。`--commit` と `--workflow` で実行を引け、`status`・`conclusion`・`url` を読める（`lint.yml` で実行して確かめた）。既存の依存である | https://cli.github.com/manual/gh_run_list ・`gh api repos/cli/cli/releases/latest`（2026-11-06） |
-
-### 確かめられなかったこと
-
-| 対象 | 試した手段 | 結果と理由 |
-| --- | --- | --- |
-| `push` で読むワークフローがどのコミットのファイルか | STD3 の URL | ページが長く、該当の節は要約を経由した。要約に記述が無い。CD を含む版のリリース後テストで確かめる |
-| ジョブ単位の `permissions` の原文 | STD2 の URL。workflow-syntax のページは取得していない | STD2 のページにはリンクだけがある。今のワークフローで使っている記法に揃え、CI の検査で読む |
-| REST の「List workflow runs for a workflow」の節 | https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28 | 逐語で読めたのはリポジトリ全体の一覧の節だけである。`gh run list` の実行で動きを確かめた |
-| semantic-release の後継のサイト | 試していない | PRD2 の判断に要る工程の一覧は読めた |
-
-調べた量: 候補 9 件・取得の試み 16 回。
 
 ## 機能一覧
 
@@ -274,54 +233,13 @@ classDiagram
 
 ## データ構造
 
-### `delivery` の行に足す欄
-
-どちらも任意で、今の宣言はそのまま読める。形が違うときは宣言を読めない問題として扱い、止める側へ倒す（I4）。
-
-| 欄 | 型 | 空を許すか | 意味 |
-| --- | --- | --- | --- |
-| `manual_reason` | 文字列 | 許す。空白だけは無いものとして扱う | 手動反映の理由。`kind: manual` の行でだけ読む。無ければ「CD を置かないと決めていない」を表す。手順は今の `trigger` が持つ |
-| `result` | オブジェクト | 許す | 結果の読み方。`kind: auto` の行でだけ読む。無ければ結果は未確定になる |
-| `result.workflow` | 文字列 | `command` と排他 | GitHub Actions のワークフローのファイル名 |
-| `result.command` | 文字列 | `workflow` と排他 | シェルで実行するコマンド。`{revision}` を 40 桁のリビジョンへ置き換える。終了コード 0 は成功、75 は待つ、1 は失敗、それ以外は未確定 |
-| `result.timeout_seconds` | 整数 | 許す | 待ちの上限。無ければ 1800 秒 |
-
-### 宣言の例
-
-```json
-[
-  {"target": "ndf プラグイン（Claude Code・Codex）", "kind": "auto", "channel": "production", "versioned": true,
-   "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
-   "result": {"workflow": "release-cd.yml"}},
-  {"target": "AWS（CDK スタック）", "kind": "manual", "versioned": false, "trigger": "cdk deploy",
-   "manual_reason": "インフラの変更は人が差分を確かめてから反映する"}
-]
-```
-
-### 機能とデータの対応
-
-| 機能 | `delivery` の行 | 結果のファイル | リリース記録 | タグと Release |
-| --- | --- | --- | --- | --- |
-| F2・F5 | R | — | — | — |
-| F6 | C / U（利用者）。解析は R して引き継ぐ | — | — | — |
-| F7 | R | C | C | R |
-| F8・F9 | R | — | — | C |
-
-結果のファイルは計画の状態ディレクトリの `work/cd-result.json` に置き、作り直してよい作業用の値である。過去の結果はリリース記録のコメントが追記の形で残す。宣言の変更の履歴は git が持つため、上書きで失うものは無い。既存の宣言と記録の移行は無い。形の検査は `project-decl.py` の検証と `check-ndf-contracts.py` が行う。
+データ構造は [issue-2623-design-contracts.md の「データ構造」](issue-2623-design-contracts.md#データ構造) にある。
 
 ## 入出力の契約
 
-### リリースの経路（`delivery.routes`）
+入出力の契約は [issue-2623-design-contracts.md の「入出力の契約」](issue-2623-design-contracts.md#入出力の契約) にある。宣言の形ごとの工程は、この文書の「処理の流れ」にある。
 
-変わるのは版を持つ自動の行の 2 行だけで、ほかの判定（`judge_target`・`dev_channel`）は変えない。
-
-| 宣言 | 今の経路 | 変更後の経路 |
-| --- | --- | --- |
-| `kind: auto`・`versioned: true`・本番チャネルの行 | `manual`（手で行うステージ） | `merge`・`promote`。`versioned: false` と同じ規則で決める |
-| `kind: auto`・`versioned: true`・ベースブランチの行 | `manual` | `merge`・`merged-by-check` |
-| `kind: auto`・ブランチが無いか別のブランチ | `manual` | 変えない |
-| `kind: manual` | `manual` | 変えない。`note` は `trigger` を持つ |
-| `release.form` がある | `template` | 変えない（`delivery` を読まない） |
+## 処理の流れ
 
 ### 宣言の形ごとの工程
 
@@ -332,84 +250,6 @@ classDiagram
 | 版を持つ CD の形（`release.form` なし。devbase） | プロジェクトの CD か手順が持つ | 昇格のマージの前 | プロジェクトの CD か手順が持つ | `cd-result` | 出ない |
 | 手動の形（理由あり） | `trigger` の手順 | 手で届ける前 | `trigger` の手順 | 手順の結果 | 出ない |
 | 手動の形（理由なし）・宣言なし・不明 | 上と同じ | 上と同じ | 上と同じ | 上と同じ | 出る |
-
-### `delivery.cd_guidance(decl) -> CdGuidance | None`
-
-上から順に最初に当たった行で決まる。ファイルを読まず、呼ぶたびに宣言から作る。
-
-| 条件 | 戻り値 |
-| --- | --- |
-| `decl.problems` がある | `None`（読めない理由は既存の経路の判定が示す） |
-| 行が無い・不明 | 案内 1 件。何が無いかは「`delivery` の宣言」 |
-| 理由の無い手動の行がある | 案内 1 件。`rows` にその行の `target` だけを並べる |
-| 残り（`delivery: []`・自動の行だけ・すべて理由あり） | `None` |
-
-案内の 4 つの中身: 何が無いか・CD の設定の手順の参照先（`release` の `references/cd-setup.md`）・`delivery` への記録の例・手動反映の理由を記録する方法。
-
-### コマンド
-
-| 名前 | 入力 | 出力 | 失敗の形 | 互換性 |
-| --- | --- | --- | --- | --- |
-| `release-steps.py cd-guidance` | `--root` | 結果 JSON。`items` に `kind: cd-guidance` を 0 か 1 件 | 宣言を読めなければ終了コード 3。案内の有無では常に 0 | 追加 |
-| `release-steps.py cd-result` | `--base <本番チャネル>`、`--head <ブランチ>`（任意。無ければ `origin/<本番チャネル>` の先端を読む）、`--out <ファイル>` | 結果のファイルと結果 JSON。`metrics.cd_result` は `success` / `failure` / `undetermined` / `none`（本番チャネルへ自動で届く行が無い） | 値にかかわらず 0。読み取りの失敗は `undetermined` にする | 追加 |
-| `release-steps.py publish` | `--root`、`--revision <SHA>` | 結果 JSON。`items` に `tag`・`release` の各 1 件（`created` / `pushed` / `exists`） | 接尾辞あり・別のコミットのタグ・版を読めない・`gh` の失敗は終了コード 1 | 追加 |
-| `release-steps.py record` | 今の引数に `--cd-result <ファイル>`（任意）と `--merged`（`--base`・`--prs` と組）を足す | 結果のファイルの値を `CD の結果:` の行へ書く。`--merged` は最後の `--prs` の Pull Request へ書き、版は `<本番チャネル> <短い SHA>` | 値が `failure` なら段階を「反映失敗」で書いた後に終了コード 5。プランは止まる | 引数なしは今と同じ |
-| `release-steps.py release --channel prod` | 変わらない | `publishes_by_cd` が真なら公開物を作らず、`metrics.tag` は `null`、`metrics.publisher` は `cd` | 今と同じ | 宣言が手動なら今と同じ |
-| `sprint-state.py loop sprint` | `--dev` が任意になる | 経路が版数を要らなければ `lap.versions` は空 | 経路が版数を要るのに `--dev` が無ければ断る | 指定があれば今と同じ |
-
-`publish` の版は `--revision` のコミットの `plugin.json` から、プラグインの名前は `.ndf/supervise.json` の `release.plugin` から読む。題は `<プラグイン> v<版>`、本文は変更履歴の版の節で、`--latest` で作る。
-
-### `publishes_by_cd(decl) -> bool`
-
-本番チャネルへのマージで自動で本番系へ届く行（`reaches_by_merge`）のうち、`versioned: true` の行があるときに真を返す。宣言を読めないときは、呼び出し元の `release_decl` がこの判定より先に止める。
-
-### CD のワークフロー
-
-```yaml
-name: Release CD
-on:
-  push:
-    branches: [main]
-permissions:
-  contents: read
-concurrency:
-  group: release-cd
-  cancel-in-progress: false
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - name: Publish the tag and the GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GIT_COMMITTER_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: python3 plugins/ndf/scripts/release-steps.py publish --root . --revision "$GITHUB_SHA"
-```
-
-### リリース記録
-
-```markdown
-## リリース記録
-
-段階: 本番（2026-11-07 10:00 に承認）
-版: main 1a2b3c4 → main 5d6e7f8（昇格）
-スプリント: PR #2701 / #2702
-CD の結果: 成功（リビジョン 5d6e7f8… https://github.com/.../runs/1）
-```
-
-`CD の結果:` の行は `成功` / `失敗` / `未確定` で始まる。失敗のときは段階の行を `段階: 反映失敗（<理由>）` にする。この値は `released()` が閉じてよい段階と読まないため、スプリントは開いたまま残る。読む側は最後の記録を使うため、CD を再実行して `cd-result` と `record` を打ち直すと、成功の記録で閉じられる。CD の行が無いリポジトリの記録にこの行は無い。
-
-## 処理の流れ
 
 ### 昇格の経路（CD の形）
 
@@ -465,7 +305,7 @@ graph TD
   X --> F
 ```
 
-出す場所は 2 つで、どちらも読むだけである。`release` の Skill は手順の先頭で `cd-guidance` を打つ。`supervise.py new sprint` / `new close` は `sprint.json` の `CD の案内` のキーと結果の `items` へ載せる（`--mode documentation` では載せない）。
+出す場所は 2 つで、どちらも読むだけである。`release` の Skill は手順の先頭で `cd-guidance` を打つ。`supervise.py new sprint` / `new close` は `sprint.json` の `CD の案内` のキーと結果の `items` へ載せる。`--mode documentation` では載せない。
 
 ### CD の結果の状態遷移
 
@@ -496,87 +336,7 @@ stateDiagram-v2
 
 ## 決定の記録
 
-### 決定 1: 版の有無と経路を分けるため、版を持つ自動の行を手で行うステージから外す
-
-`versioned` は版を持つかを表し、誰が届けるかを表さない。今の判定は 2 つを結び付け、CD で届く devbase の行を手で行うステージへ落としていた。経路の判定を `kind` とブランチだけで決める。経路の値を増やさないため、`judge_target`・ステージ・#2616 の判定はそのまま効く。`versioned: true` の新しい経路の値を足す形は、経路が増えて読む側がすべて変わるため採らない。
-
-根拠: Value 7 / Value 6（MVV 版 6）
-
-### 決定 2: 版の大きさを承認の対象に保つため、版上げは NDF の工程に残す
-
-`release.form` を持つ形の版上げ・変更履歴・消費の記録は、今のテンプレートが `release/v<版>` の上で行う。版の大きさはリリース承認ゲートで人が見る対象である。CD の実行環境には消費の記録の元になる手元の記録が無い。CD が `main` へコミットするには保護のルールの迂回と新しい権限が要り、受け入れ条件 20 に合わない。`release.form` を持たず版を持つリポジトリの版上げは、プロジェクトの CD か手順が持ち、NDF は打たない。
-
-CI が版を決める形（PRD2）は、承認の前に版が決まらないため採らない。
-
-- 作り方: 標準に倣う
-- 比べた候補: PRD1 / PRD2
-
-根拠: Value 2 / Value 5（MVV 版 6）
-
-### 決定 3: 公開の処理を 1 か所に保つため、タグと GitHub Release の処理を移して CD と手動の経路で共用する
-
-`release-steps.py` の公開の処理を公開の処理のモジュールへ移し、CD のワークフローが副コマンド `publish` で呼ぶ。手動の経路の `release --channel prod` も同じ処理を呼ぶ。再実行の補い・タグの照合・`-dev` の判定を 1 か所のテストで縛れる。切り戻しは同じコマンドを手元で打つだけで、別の手段を持たずに済む。
-
-ワークフローの部品だけで作る形（LIB1）は、失敗の判定を YAML の中へ書くことになり、手元の切り戻しにも使えないため採らない。処理を消して CD のテンプレートへ写す形は、切り戻しの手段を別に持つことになるため採らない。
-
-- 作り方: 自前で作る・ライブラリやサービスを使う
-- 比べた候補: LIB1 / LIB2 / PRD1
-
-根拠: Value 5 / Value 7（MVV 版 6）
-
-### 決定 4: 既存の仕組みを 2 重にしないため、テンプレート・昇格・まとめたリリースの処理は残す
-
-`release_templates.py` は版を持つ形だけが通り、`delivery_templates.py` の昇格のプランは CD の形のマージと承認を担うため、どちらも残す。まとめたリリースは #2616 の判定が `release.form` のあるリポジトリでだけ組む。行き先を変えるのは公開の処理だけである。
-
-根拠: Value 3（MVV 版 6）
-
-### 決定 5: 工程を止めずに促すため、CD の案内は読むだけの出力にし、状態を持たない
-
-案内はコマンドの結果の項目で、起票しない。課題を自動で起こすと、案内のたびに新しい作業が既定で始まる。同じ状態なら次のデプロイでも同じ案内が出る。回数を数える記録は持たない。書くと宣言の外に状態ができる。
-
-根拠: Value 2 / Value 3（MVV 版 6）
-
-### 決定 6: 手動の反映を正式な選択肢にするため、`kind` を増やさず `manual_reason` の欄を足す
-
-`kind: manual` は読み手が多く、値を足すと判定をすべて直すことになる。「理由があるか」で「まだ CD が無い」と「あえて置かない」を分ける。手順は今の `trigger` を使う。
-
-根拠: Value 6（MVV 版 6）
-
-### 決定 7: どの CD でも結果を読めるため、結果の読み方をワークフローの名前とコマンドの 2 つにする
-
-手元の 10 リポジトリには GitHub Actions と AWS の CD が両方ある。`workflow` は `gh run list --commit <SHA> --workflow <名前> --json status,conclusion,url` で読み、`command` は終了コードで読む。`status` が `completed` で `conclusion` が `success` なら成功、`completed` でそれ以外なら失敗、実行が無いか進行中なら待つ。待ちの上限の既定は 1800 秒で、行ごとに変えられる。コマンドだけにする形は、GitHub Actions の利用者が同じ変換を毎回書くことになるため採らない。
-
-- 作り方: 標準に倣う・ライブラリやサービスを使う
-- 比べた候補: PRD3 / PRD4 / LIB2
-
-根拠: Value 6 / Value 4（MVV 版 6）
-
-### 決定 8: プランの形を宣言に依らず同じにするため、`cd-result` のステップをテンプレートと昇格のプランへ常に置く
-
-判定はステップの実行時に宣言から行い、CD の行が無ければ `none` を返す。`new release` の経路は宣言の `delivery` を持たないため、組み立ての時点の分岐を避ける。結果の失敗を別の分岐にせず、`record` が書いてから終了コード 5 で止める。失敗も記録に残す受け入れ条件 7 と、工程を完了させない受け入れ条件 8 を 1 本の順序で満たす。
-
-根拠: Value 5（MVV 版 6）
-
-### 決定 9: 版を書かずに記録を残すため、ベースブランチが本番チャネルの形に「CD の結果」のステージを足す
-
-このステージが無いと、CD の形でリビジョンの記録を書く主体が無く、スプリントを閉じられない。ステージの数が増えるのは経路の違いによるもので、CD の案内の有無では増えない（I3）。
-
-根拠: Value 1（MVV 版 6）
-
-### 決定 10: 版の無いリポジトリの周回を止めないため、`loop sprint` の `--dev` を任意にする
-
-版数を要るのは経路が `template` のときだけで、判定は `needs_version` が持つ。要らない経路では `lap.versions` を空にし、`--version` を渡さない。
-
-根拠: Value 6（MVV 版 6）
-
-### 決定 11: 本番チャネルへ入った事実を起点にするため、CD の起点を `push` にし、パスで絞らない
-
-`pull_request` の `closed` の起点は head の情報を扱い、書き込みの権限と分けにくい（STD3）。パスで絞ると結果の読み取りが実行を見つけられない経路が増える。`main` へ版を上げずに入った変更は、同じタグが別のコミットにあるためワークフローの失敗として見える。この失敗は版上げの漏れの検知として働く。
-
-- 作り方: 標準に倣う
-- 比べた候補: STD2 / STD3
-
-根拠: Value 1 / Value 6（MVV 版 6）
+決定 1〜11 は [issue-2623-design-decisions.md](issue-2623-design-decisions.md) にある。
 
 ## テスト設計
 
@@ -626,3 +386,46 @@ CI が版を決める形（PRD2）は、承認の前に版が決まらないた�
 | #2616 の実装との順序 | #2616 の判定の表は「版数を持つ自動の行」を組めない側に挙げている。判定はステージから決まるため、この課題の経路の変更で組まない側へ移る。どちらが先でも整合するが、#2616 の手順書の記述は後の実装が直す |
 | `release.form` の無い版を持つリポジトリの版上げ | devbase の運用は未確認である。NDF は打たず、昇格のプランだけを流す |
 | 起票者の推定 S1〜S13 | 設計承認ゲートで利用者が確かめるまで、利用者の決定として扱わない |
+
+## 外部の調査
+
+| 種類 | 調べるか | 理由 |
+| --- | --- | --- |
+| 標準・仕様 | 調べる | CD の定義と、GitHub Actions の権限とイベントの規則が公開の仕様である |
+| 主要な製品 | 調べる | 版上げ・タグ・リリースをどこまで CI で行うか、CD の結果を外からどう待つかを比べる |
+| ライブラリとサービス | 調べる | タグと GitHub Release を作る部品と、実行の状態を読む部品を、自前の処理と比べる |
+
+### 標準・仕様
+
+| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| STD1 | Continuous Delivery と Continuous Deployment の定義 | Continuous Delivery は頻繁にデプロイできる状態を保ちつつ「may choose not to do it」、Continuous Deployment は変更がすべて自動で本番へ届く | NDF が担うのは「出すかの判断（リリース承認ゲート）」と「結果の確かめ」で、届ける手順は CD が持つ | https://martinfowler.com/bliki/ContinuousDelivery.html （2026-11-06） |
+| STD2 | GitHub Actions の `GITHUB_TOKEN` | トークンの権限はリポジトリの範囲に閉じ、このトークンが起こしたイベントは `workflow_dispatch`・`repository_dispatch` を除いて新しい実行を作らない | タグの作成から別のワークフローは動かない。新しい秘密は要らない | https://docs.github.com/en/actions/concepts/security/github_token （2026-11-06） |
+| STD3 | GitHub Actions の `push` と `pull_request_target` | `push` の `GITHUB_SHA` は push された先端のコミットで、`pull_request_target` にはセキュリティ上の注意がある | 書き込みの権限を持つジョブは `push` で起こし、Pull Request の head を実行しない | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows （2026-11-06。`push` の節は要約を経由して取得した） |
+
+### 主要な製品
+
+| # | 製品 | どう解いているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| PRD1 | release-please | CI が版上げの Pull Request を作り、人がマージすると CI がタグと GitHub Release を作る。パッケージの公開は扱わない | 「版の内容は Pull Request で人が見る、タグと GitHub Release はマージを起点に CI が作る」の分担に倣う | https://github.com/googleapis/release-please （2026-11-06） |
+| PRD2 | semantic-release | リリースのブランチの CI が版の決定・ノートの生成・タグ・公開をコミットのメッセージから全部行う | 版の大きさは承認資料で人が決める運用のため、版の決定は CI へ移さない | https://semantic-release.gitbook.io/semantic-release/ （2026-11-06。ページに保守の終了の記載がある） |
+| PRD3 | Argo CD の `argocd app wait` | CD の状態を外部のコマンドで待ち、`--timeout` で打ち切る | 結果の読み方にコマンドの形を持ち、待ちの上限を別に決める | https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_wait/ （2026-11-06） |
+| PRD4 | GitHub の Deployments とコミットの状態 | Deployment は `error`・`failure`・`pending`・`in_progress`・`queued`・`success` などの状態を持つ | 製品ごとに値が違うため、NDF の語は成功・失敗・未確定の 3 つに畳む | https://docs.github.com/en/rest/deployments/deployments?apiVersion=2022-11-28 （2026-11-06） |
+
+### ライブラリとサービス
+
+| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LIB1 | softprops/action-gh-release | v3.0.4 | MIT | 2026-11-05 | 無し（リポジトリは archived でない） | 一部を満たす。Release は作れるが、タグが別のコミットにあるときに失敗する判定と `-dev` の判定を持たず、手元の切り戻しに使えない | https://github.com/softprops/action-gh-release ・`gh api repos/softprops/action-gh-release/releases/latest`（2026-11-06） |
+| LIB2 | GitHub CLI（`gh release create`・`gh run list`） | 2.103.2（手元）。最新は v2.103.3 | MIT | 2026-10-26 | 無し（リポジトリは archived でない） | 満たす。`--commit` と `--workflow` で実行を引け、`status`・`conclusion`・`url` を読める（`lint.yml` で実行して確かめた）。既存の依存である | https://cli.github.com/manual/gh_run_list ・`gh api repos/cli/cli/releases/latest`（2026-11-06） |
+
+### 確かめられなかったこと
+
+| 対象 | 試した手段 | 結果と理由 |
+| --- | --- | --- |
+| `push` で読むワークフローがどのコミットのファイルか | STD3 の URL | ページが長く、該当の節は要約を経由した。要約に記述が無い。CD を含む版のリリース後テストで確かめる |
+| ジョブ単位の `permissions` の原文 | STD2 の URL。workflow-syntax のページは取得していない | STD2 のページにはリンクだけがある。今のワークフローで使っている記法に揃え、CI の検査で読む |
+| REST の「List workflow runs for a workflow」の節 | https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28 | 逐語で読めたのはリポジトリ全体の一覧の節だけである。`gh run list` の実行で動きを確かめた |
+| semantic-release の後継のサイト | 試していない | PRD2 の判断に要る工程の一覧は読めた |
+
+調べた量: 候補 9 件・取得の試み 16 回。
