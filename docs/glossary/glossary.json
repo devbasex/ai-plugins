@@ -2600,7 +2600,7 @@
     {
       "term": "ループの予算",
       "context": "ndf-workflow",
-      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。周回の数と経過時間は宣言に数を書いたときだけ効き、書かない・null は無制限である",
+      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。どの単位も宣言に数を書いたときだけ効き、書かない・null は無制限である",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
@@ -4625,7 +4625,7 @@
     {
       "term": "予算の既定",
       "context": "ndf-workflow",
-      "meaning": "開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は NDF の組み込みの値（周回 3・費用 60 USD・時間 24 時間）。Factory の画面で予算の欄を空にした単位はこの値へ戻る",
+      "meaning": "開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は無制限。Factory の画面で予算の欄を空にした単位はこの値へ戻る",
       "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {

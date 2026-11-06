@@ -38,6 +38,7 @@ import parallel_files
 import project_mvv as pm
 import repo as repo_lib
 import step_result
+from pace import over_budget
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
@@ -60,7 +61,6 @@ EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たっ�
 
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
 BUDGET_DEFAULT = "default"  # 予算の単位を既定（.ndf/pace.json の loop.budget）へ戻す指示。値が変わったときだけ予算の履歴に 1 行足す
-RELEASE_PENDING_MAX = 2  # 保留の周回の上限の既定（.ndf/pace.json の loop.release_pending_max）
 SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
 SLOT_FIT = "当てた"  # upkeep_rank_config.SLOT_FIT（rank の出力をそのまま読む）
@@ -340,7 +340,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
         return {"condition": "same_failure", "values": {"key": key, "count": count}}
     used, budget = consumed(rec), rec.get("budget", {})
     for unit in ("laps", "usd", "hours"):
-        if unit in budget and used[unit] >= budget[unit]:
+        if over_budget(used[unit], budget.get(unit)):
             return {"condition": f"budget_{unit}", "values": {"consumed": used[unit], "budget": budget[unit]}}
     return None
 

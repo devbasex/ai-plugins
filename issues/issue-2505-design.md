@@ -271,7 +271,7 @@ plugins/ndf/scripts/
 classDiagram
     class ProgressWatch {
         +stall
-        +hard_deadline
+        +hard
         +last_at
         +last_signal
         +observable
@@ -308,7 +308,7 @@ JSON のファイルだけで、移行は無い。読む側が新しい値と古
 | ループの記録 | `release_pending_max` | — | — | 新しい記録に書かない。古い記録の値は読まない |
 | ループの記録 | `environments[]` | 実行環境の報告の配列（`at` を持つ） | 無ければ空 | 新設。追記だけで、過去の行を書き換えない |
 | ループの記録の周回 | `cost` | 数 | — | 意味の変更（帳簿の和と報告の和の大きい方）。締めた周回の値は変えない |
-| ループの記録の周回 | `cost_parts` | `{source, plans, others, unpriced}` | 古い周回には無い | 新設 |
+| ループの記録の周回 | `cost_parts` | `{source, plans, others, unpriced}`（帳簿の読み取りが例外で失敗したときは `unreadable` も持つ） | 古い周回には無い | 新設 |
 | プランのステップ | `stall` | 秒 | 無ければ今の振る舞い | 新設。動いているプランの古いステップはそのまま動く |
 | プランのステップ | `timeout` | 秒 | 実装のステップは実装の上限を書かなければ置かない | 意味の変更 |
 | プランのステップ | `estimate` | — | — | 消す |
@@ -323,6 +323,7 @@ JSON のファイルだけで、移行は無い。読む側が新しい値と古
 | `plans` | `supervise` の起動の和（USD） |
 | `others` | cross-review・MVV 判定ほかの Claude の起動の和（USD） |
 | `unpriced` | `{"codex": {"calls", "tokens"}, "kiro": {"calls"}}`。USD を持たないため和に足さない |
+| `unreadable` | 帳簿の読み取りが例外で失敗したときだけある。理由の文（200 文字まで） |
 
 `plans` と `others` は帳簿の値である。`source` が `reports` のとき、2 つの和は `cost` と一致しない。
 
@@ -330,7 +331,7 @@ JSON のファイルだけで、移行は無い。読む側が新しい値と古
 
 | 名前 | 入力 | 出力 | 失敗の形 | 互換性 |
 | --- | --- | --- | --- | --- |
-| `sprint-state.py loop start` | 今のまま | 結果の `metrics.environment` に実行環境の報告。候補と今の値が違えば `lines` に 1 行 | 調査の失敗では止まらない | 足すだけ |
+| `sprint-state.py loop start` | 今のまま | 結果の `metrics.environment` に実行環境の報告。候補と今の値が違えば `items` に 1 項目 | 調査の失敗では止まらない | 足すだけ |
 | `sprint-state.py loop environment [--root] [--json]` | なし | 実行環境の報告 | 読めない項目は `unreadable`。終了コードは 0 | 新設 |
 | `parallel.py start` | 今のまま | 結果に実行環境の報告 | 同上 | 足すだけ |
 | `sprint-state.py loop start --budget-<単位> default` | 今のまま | 宣言の値へ戻す。宣言が無ければ `null` | 今のまま | 既定の値が変わる |
@@ -357,7 +358,7 @@ JSON のファイルだけで、移行は無い。読む側が新しい値と古
 }
 ```
 
-`place` は `factory`（`NDF_FACTORY_RUN` がある）・`container`（`/.dockerenv` がある、または cgroup の階層がコンテナの形）・`host` のどれかである。`lanes` の読み先は決定 9 にあり、上の例は並列の計画が動いていない `loop start` の値である。
+`place` は `factory`（`NDF_FACTORY_RUN` がある）・`container`（`/.dockerenv` がある、または cgroup の階層がコンテナの形）・`host` のどれかで、読めなければ `unknown` である。`lanes` の読み先は決定 9 にあり、上の例は並列の計画が動いていない `loop start` の値である。
 
 ## 処理の流れ
 

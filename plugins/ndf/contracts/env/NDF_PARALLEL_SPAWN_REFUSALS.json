@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PARALLEL_SPAWN_REFUSALS",
+  "set_by": "user",
+  "summary": "並列の計画の run がレーンの起動の断りを問うまでの回数（既定 3。plugins/ndf/scripts/lib/parallel_run.py）"
+}
