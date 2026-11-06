@@ -83,7 +83,7 @@
 | `flow._plan_steps` | 上限と比べる数を、遅れの再試行を除いて数える。耐久ステップの番号はすべての回で増やす |
 | `RunState`（`supervise_lib/state.py`） | 進捗ログの `step` の行へ `out` を書く。`prior_rows` で前の実行の範囲を切る。`session` に会話を残す claude -p のセッションの id と設定の置き場を持つ |
 | `steps.prior_results`・`StepContext.inputs_text` | 前の実行の範囲の `step` の行から、ステップごとに最後の行の `exit` と `out` の本文を引き、今の実行 → 前の実行 → 無い の順に入力を組む |
-| `claude.call_claude`（`ClaudeRunner.call` から） | `session` を渡され、`full` で `resume` でない起動なら、uuid を `--session-id` で渡して `session` に id と設定の置き場を入れる |
+| `claude.call_claude`（`ClaudeRunner.call` から） | `session` を渡され、`full` か進みの観測（`watch`）を伴う起動で `resume` でなければ、uuid を `--session-id` で渡して `session` に id と設定の置き場を入れる |
 | `SlowWatch`（`start_watch`・`slow_probe`・`session_grown`） | ステップの開始でセッションの記録の大きさを覚え、`pr_checked` に開始の時刻を入れる（gh は呼ばない）。一次の調査で work はセッションの記録の伸びを、drive は Pull Request の時刻を足して見る。`stall` を持つステップは `off` で始め、調査も判定役の呼び出しもしない |
 | `lib/slow_step.py` | `session_size`（記録の大きさ。見つからなければ 0）・`probe_worker`・`pr_latest`（最も新しい時刻。読めなければ None）・`probe_drive` |
 
@@ -197,7 +197,7 @@ graph TD
 | --- | --- |
 | 雛形が書く `上限` | `limits.step_limit` の値。`steps` の直前に置く |
 | 進捗ログの `step` の行 | 鍵 `out`（`NN-<ステップ>.out` のファイル名）を足した。ほかの鍵の意味は変えない |
-| 会話を残す claude -p の起動（`full: true`、`--resume` でない） | `--session-id <uuid>` を足した。`--resume` で起こし直すときは足さない |
+| 会話を残す claude -p の起動（`full: true` か `stall` を持つステップで、`--resume` でない） | `--session-id <uuid>` を足した。`--resume` で起こし直すときは足さない |
 
 ## エラー処理
 

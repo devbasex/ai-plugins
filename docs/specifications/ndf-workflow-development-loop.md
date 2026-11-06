@@ -21,7 +21,7 @@
 | 3 | conductor がモードと版を決め、`loop sprint --mode standard --dev 10.20.0-dev.1` が `sprint-state.py init`・`new sprint --pace auto`・`new close --pace auto` を打って `pipeline` を返す |
 | 4 | #12 の設計が承認ゲート 1 で「判定できない」。`loop lap --done` が #12 を人の判断待ちへ移し、課題の本文に `## 人の判断待ち（開発ループ l20261025）` を書き、#11 だけの続きの `pipeline` を返す |
 | 5 | 本番とまとめの後、`loop lap` が周回 1 を `完了` で締め、止まる条件に当たらないので `ndf_next` を返す。ラッパーが次のセッションを起動する |
-| 6 | 3 周を終えた境で `budget_laps` に当たり、終了コード 3 と `[ndf-loop] stopped l20261025 budget_laps` の 1 行で止まる |
+| 6 | 宣言の `loop.budget.laps` が 3 なら、3 周を終えた境で `budget_laps` に当たり、終了コード 3 と `[ndf-loop] stopped l20261025 budget_laps` の 1 行で止まる |
 
 **手順は Skill が持つ。** ここに書き写さない。
 

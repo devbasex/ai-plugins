@@ -1,6 +1,6 @@
 # AI エージェントが実施する前提の工数の見積もり（estimate）
 
-棚卸しの Size・実装のステップの上限・テストの上限・cross-refactoring の配分は、どれも「AI が実施すると
+棚卸しの Size・テストの上限・cross-refactoring の配分は、どれも「AI が実施すると
 どれだけ掛かるか」を見積もる。NDF はこれを 1 つの規約と 1 つの部品（`plugins/ndf/scripts/estimate.py`）にまとめ、
 近い条件の実績から A（AI の実行量）・H（人の作業時間）・L（完了までの時間）・C（利用費用）を値ごとに根拠付きで返す。
 入口は Skill `estimate` で、配布先のどのリポジトリでも呼べる。
