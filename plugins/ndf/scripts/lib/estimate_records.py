@@ -409,6 +409,11 @@ class IssueActual:
     finished: str | None = None
     runs: list[Run] = field(default_factory=list)
 
+    @property
+    def ai_worked(self) -> bool:
+        """スクリプトの run 以外のステップがあるか。無ければ A は AI の実行量を表さない（機械のプランの秒だけ）。"""
+        return any(s.get("type") != "run" for r in self.runs for s in r.steps)
+
 
 def _collect_issue_runs(table: dict[str, Run], done: str, since_ts: float | None) -> dict[int, IssueActual]:
     """実行を課題へ振り分ける。`since_ts` 以前に始まった実行と、完了条件より後のフェーズの実行は入れない。"""
