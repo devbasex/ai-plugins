@@ -121,7 +121,11 @@ def _reexec(python: str, launcher: str, argv: list[str]) -> None:
 
 def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
     """副命令を動かせる python で動いていれば None（続ける）。起動し直すなら戻らない。
-    環境が無くて副命令を動かさないときは、終了コードを返す（`run` は素通しして戻らない）。"""
+    環境が無くて副命令を動かさないときは、終了コードを返す（`run` は素通しして戻らない）。
+
+    共有の環境を指す `UV_PROJECT_ENVIRONMENT`（古い版の NDF のスクリプトから継いだ値）は、子の claude と hook へ継がせない（#2509 の I6）。"""
+    if deps.is_shared_venv(os.environ.get("UV_PROJECT_ENVIRONMENT")):
+        os.environ.pop("UV_PROJECT_ENVIRONMENT", None)
     if ready():
         os.environ.pop(REEXEC_ENV, None)  # 子の claude と hook へ継がせない
         return None

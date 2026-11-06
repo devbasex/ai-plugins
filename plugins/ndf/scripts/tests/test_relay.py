@@ -2840,6 +2840,18 @@ def test_run_without_env_says_then_passthrough(tmp_path, home):
     assert p.stderr.startswith("ndf-relay: ラッパーを始めない（ラッパーの環境（"), p.stderr
 
 
+@pytest.mark.parametrize("value, kept", [("shared", False), ("mine", True)])
+def test_enter_drops_a_shared_project_env_before_starting_claude(tmp_path, home, value, kept):
+    """#2509 の受け入れ条件 2・I6・I7: 共有の環境を指す UV_PROJECT_ENVIRONMENT は子の claude へ渡さず、利用者の値は渡す。"""
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "uvenv:${UV_PROJECT_ENVIRONMENT-unset}"\n')
+    claude.chmod(0o755)
+    path = str(home / ".cache" / "ndf" / "venv" / "9.9.9") if value == "shared" else str(tmp_path / "mine")
+    p = bare(tmp_path, "run -c", NDF_RELAY_CLAUDE=claude, UV_PROJECT_ENVIRONMENT=path)
+    assert p.stdout == (f"uvenv:{path}\n" if kept else "uvenv:unset\n"), p.stderr
+
+
 def test_install_prepares_env_then_copy_runs_in_it(tmp_path, home):
     """導入は、プラグインの環境を同じ lock から用意して起動し直し、複製のバージョンディレクトリにも環境を作る。
     複製のランチャーは、素の python から起動されてもバージョンディレクトリの環境の python で動く。"""

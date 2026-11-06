@@ -48,14 +48,20 @@ def relay_argv() -> list[str]:
     return alt.split() if alt else [sys.executable, str(RELAY)]
 
 
-def relay(main: Path, *args: str) -> tuple[int, dict]:
-    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+def relay_proc(main: Path, *args: str) -> tuple[subprocess.CompletedProcess, dict]:
+    """統括役の CLI を打ち、(終わったプロセス, 統一 JSON レポート) を返す。読めなければ空の dict。"""
     got = subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
     lines = [ln for ln in (got.stdout or "").splitlines() if ln.strip().startswith("{")]
     try:
-        return got.returncode, json.loads(lines[-1]) if lines else {}
+        return got, json.loads(lines[-1]) if lines else {}
     except ValueError:
-        return got.returncode, {}
+        return got, {}
+
+
+def relay(main: Path, *args: str) -> tuple[int, dict]:
+    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+    got, res = relay_proc(main, *args)
+    return got.returncode, res
 
 
 def base_tracking_ref(main: Path) -> str:
@@ -143,14 +149,15 @@ def stall_seconds() -> float:
 
 @durable.step(name="parallel.observe")
 def step_observe(main: str) -> dict:
-    """`relay.py ls --json` の行（名前 → {state, at, role}）と、観た時刻（エポック秒）。"""
-    _, res = relay(Path(main), "ls", "--json")
+    """`relay.py ls --json` の行（名前 → {state, at, role}）・観た時刻（エポック秒）・終了コード・標準エラーの末尾 1 行。"""
+    got, res = relay_proc(Path(main), "ls", "--json")
     rows = {
         it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
         for it in res.get("items") or []
         if isinstance(it, dict) and it.get("name")
     }
-    return {"now": time.time(), "rows": rows}
+    err = (got.stderr or "").strip().splitlines()[-1:]
+    return {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else ""}
 
 
 @durable.step(name="parallel.held-loops")
@@ -290,6 +297,7 @@ class _Run:
         self.revive: list[str] = []  # 問いへ答えた後、まだ動き出していない止まった 1 スプリントのレーン（6f）
         self.revive_at: dict[str, float] = {}  # revive に入れたときの最後の観測の時刻（エポック秒）。最後に動いた時刻と比べる
         self.seen_at = 0.0  # 最後に観測した時刻（エポック秒）
+        self.ls_ok = True  # 最後の観測で一覧が成功したか。失敗した回の後は全レーンが止まったと読まない（#2509 の I2）
 
     def bump(self) -> int:
         self.seq += 1
@@ -661,12 +669,15 @@ def _spawn_ready(run: _Run, main: str) -> None:
 
 def _run_finished(run: _Run) -> bool:
     """配布の途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
-    return run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
+    return run.ls_ok and run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
 
 
 def _observe_run(run: _Run, main: str) -> None:
-    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。"""
+    """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。一覧が失敗した回は何も変えない（#2509 の I1）。"""
     seen = step_observe(main)
+    run.ls_ok = int(seen.get("code") or 0) == 0  # code の無い古い記録は成功として読む（決定 5）
+    if not run.ls_ok:
+        return
     rows = seen.get("rows") or {}
     states = {n: r.get("state") for n, r in rows.items()}
     run.seen_at = float(seen.get("now") or 0)

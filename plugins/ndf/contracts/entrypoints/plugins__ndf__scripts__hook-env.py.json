@@ -9,7 +9,8 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_HOOK_PYTHON",
-    "NDF_HOOK_REEXEC"
+    "NDF_HOOK_REEXEC",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],
   "stdin": "none",
