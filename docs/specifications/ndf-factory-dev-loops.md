@@ -397,7 +397,7 @@ sequenceDiagram
 - `local` の偽の `claude` が上限の文を返すと `usage_limit` で終わって実行が `awaiting_reset` になり、時刻の後の見回りで `APPROVAL_REQUEST_ID` の無い `resume` が積まれ、時刻が読めなければ 900 秒後になること。`managed`・`byok` では `failed` になること
 - 契約の検査が新しい欄と種類を通して生成した型に現れ、`loop` に `ISSUES` を持つ指示が断られること
 - 手動の開始・一覧・取り消し・再開の既存のテストが変えずに通ること
-- 予算 `{usd: 10}` で始めたループの費用を空にした後、既定へ戻せる版の周回のジョブの指示が `LOOP_BUDGET=laps=default,usd=default,hours=default` で契約の検査を通り、ランナーが `--budget-usd default` を渡し、NDF が記録の費用を `.ndf/pace.json` の `loop.budget.usd`（宣言が無ければ組み込みの既定）へ戻して、その値で止まる条件を判定すること。値が変わらなければ予算の履歴が増えないこと
+- 予算 `{usd: 10}` で始めたループの費用を空にした後、既定へ戻せる版の周回のジョブの指示が `LOOP_BUDGET=laps=default,usd=default,hours=default` で契約の検査を通り、ランナーが `--budget-usd default` を渡し、NDF が記録の費用を `.ndf/pace.json` の `loop.budget.usd`（宣言が無ければ無制限）へ戻して、数を書いた単位はその値で止まる条件を判定すること。値が変わらなければ予算の履歴が増えないこと
 - 既定へ戻せない版の実行の指示に `default` が載らず、そのループで値のある単位を空にする変更が 409 `budget_reset_unsupported` でループの行を変えず、値を変える・空のままにする変更は通ること。今の実行が無いループはマーケットプレイスの版で判定し、下限の設定が無ければ断ること。`supportsBudgetReset` が下限と同じ・新しい版で真、古い版・開発版の接尾辞の付いた同じ版・下限が無い・読めない版で偽になること
 - 予算の残りに空の単位があると「リポジトリの既定」と出て「掛けない」を出さず、`budget_reset_unsupported` で版を差し込んだ翻訳の文が予算の欄に出ること
 - 周回の開始のトランザクションの後で止めても、2 つの呼び手が同時に `startNextLap` を呼んでも、実行が 1 本だけになること
