@@ -252,6 +252,16 @@ def _pair(issue: int, e: dict, got: er.IssueActual) -> dict:
     return {"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio}
 
 
+def _error_metrics(items: list[dict]) -> dict:
+    """組の数・比の中央値・A の順位相関。"""
+    metrics: dict = {"pairs": len(items)}
+    for k in ("A", "L", "C"):
+        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
+    both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
+    metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
+    return metrics
+
+
 def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
     """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
 
@@ -262,9 +272,4 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
         got = er.issue_actuals(rows, e.get("done") or "実装", since=e.get("at"), alive=alive).get(issue)
         if got and got.completed:
             items.append(_pair(issue, e, got))
-    metrics: dict = {"pairs": len(items)}
-    for k in ("A", "L", "C"):
-        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
-    both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
-    metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
-    return items, metrics
+    return items, _error_metrics(items)
