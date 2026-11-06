@@ -118,6 +118,11 @@ def read_loop(root) -> dict:
     return out
 
 
+def over_budget(used: float, limit: float | None) -> bool:
+    """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。周回の境の判定と再開の判定が同じこれを読む。"""
+    return limit is not None and used >= limit
+
+
 def _is_positive_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
 

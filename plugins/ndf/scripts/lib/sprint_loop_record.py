@@ -38,6 +38,7 @@ import parallel_files
 import project_mvv as pm
 import repo as repo_lib
 import step_result
+from pace import over_budget
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
@@ -325,11 +326,6 @@ def mvv_change_stop(env: Env, rec: dict) -> dict | None:
     if not project.approved or project.sha256 != started:
         return {"condition": "mvv_changed", "values": {"started": started, "now": project.sha256 if project.approved else project.status}}
     return None
-
-
-def over_budget(used: float, limit: float | None) -> bool:
-    """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。境の判定と再開の判定が同じこれを読む。"""
-    return limit is not None and used >= limit
 
 
 def boundary_stop(env: Env, rec: dict) -> dict | None:

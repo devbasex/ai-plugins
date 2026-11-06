@@ -758,3 +758,11 @@ def run_plan(main: Path, name: str) -> tuple[dict, bool]:
     if st is None:
         durable.start(durable.WorkflowRef(wid, 1, "start"), parallel_workflow, str(main), name)
     return durable.output_of(wid), resumed
+
+
+def environment_report(main: Path, plan: pp.ParallelPlan) -> tuple[dict, list[dict]]:
+    """開始のときの実行環境の報告と結果の項目。レーンがまだ動いていないので計画の数を渡す。"""
+    import run_environment
+
+    report = run_environment.survey(main, lanes=len(plan.lanes))
+    return report, run_environment.notes(report)

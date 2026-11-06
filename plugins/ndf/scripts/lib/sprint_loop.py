@@ -20,7 +20,7 @@ import run_environment
 import sprint_loop_gate
 import sprint_mvv
 import step_result
-from pace import PaceError, read_loop, read_pace
+from pace import PaceError, over_budget, read_loop, read_pace
 
 from sprint_loop_record import (
     TOOL,
@@ -30,7 +30,6 @@ from sprint_loop_record import (
     STOP_FILE,
     VERSION,
     BUDGET_DEFAULT,
-    over_budget,
     EXIT_REFUSED,
     EXIT_STOPPED,
     DONE,
@@ -127,21 +126,6 @@ def apply_budget(env: Env, rec: dict, given: dict, defaults: dict) -> None:
         rec["budget"] = new
 
 
-def note_environment(env: Env, rec: dict) -> dict:
-    """実行環境を調べる（#2505 の決定 9）。候補と今の値が違うか読めない項目があれば記録の `environments` へ足す。宣言は書かない。"""
-    report = run_environment.survey(env.main_dir())
-    if run_environment.differs(report) or report["unreadable"]:
-        rec.setdefault("environments", []).append(report)
-    return report
-
-
-def with_environment(out: dict, report: dict) -> dict:
-    """結果へ実行環境の報告を載せる。"""
-    out["metrics"]["environment"] = report
-    out["items"] = [*out["items"], *run_environment.notes(report)]
-    return out
-
-
 def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bool = True) -> dict:
     with locked(env, name):
         decl, why, project = permission(env)
@@ -153,14 +137,14 @@ def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bo
         rec = read_loop_record(env, name)
         before = json.loads(json.dumps(rec))
         apply_budget(env, rec, budget, decl["budget"])
-        report = note_environment(env, rec)
+        report = run_environment.note(env.main_dir(), rec)
         if rec.get("status") == "stopped":
-            return with_environment(resume_stopped(env, rec, before), report)
+            return run_environment.with_report(resume_stopped(env, rec, before), report)
         write_record(env, rec, before)
         lap = current_lap(rec)
         status = "in_lap" if lap else "resumed"
         nxt = f"引継ぎ文書 {handoff_path(env, name)} の「次にやること」から続ける" if lap else select_cmd(name)
-        return with_environment(loop_ok(f"開発ループ {name} を続ける（{status}）", rec, status=status, next_=nxt), report)
+        return run_environment.with_report(loop_ok(f"開発ループ {name} を続ける（{status}）", rec, status=status, next_=nxt), report)
 
 
 def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], budget: dict, goal: bool) -> dict:
@@ -185,10 +169,10 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "sprint_mvv_approvals": [],
     }
     apply_budget(env, rec, budget, decl["budget"])
-    report = note_environment(env, rec)
+    report = run_environment.note(env.main_dir(), rec)
     write_record(env, rec)
     update_handoff(env, rec, "始めた。次は選定", resume_command(rec), select_cmd(name))
-    return with_environment(loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name)), report)
+    return run_environment.with_report(loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name)), report)
 
 
 def resume_record(env: Env, rec: dict) -> None:

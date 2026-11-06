@@ -101,7 +101,7 @@
 | [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 | [lap_cost.py](lap_cost.py) | 周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
-| [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel.py` |
+| [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |
 | [estimate_records.py](estimate_records.py) | 見積もりの記録と実績の記録の置き場・行の形・追記と読み出し・課題ごとの実績の合計。`.git` を読んで置き場を決め、`git` を起動しない | `estimate.py` / `supervise_lib/actuals.py` / `backlog-refinement`（`upkeep_rank_estimate.py`） |
 | [estimate_predict.py](estimate_predict.py) | 類似の実績の選択・構成の違う実績の分離・値ごとの見込みと印・Size への丸め・誤差。係数の定数を持たない。規約は `skills/estimate/references/rules.md` | 同上と `supervise_lib/verify_steps.py` |

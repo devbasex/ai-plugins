@@ -27,7 +27,7 @@ import run_environment as re_  # noqa: E402
     ],
 )
 def test_candidates_scale_from_the_measured_point(cores, gib, lanes, want):
-    assert re_.candidates(cores, gib, lanes) == want
+    assert re_.limit_candidates(cores, gib, lanes) == want
 
 
 def write_cgroup(tmp: Path, cpu: str, memory: str) -> Path:
@@ -57,21 +57,21 @@ def test_place_tells_factory_from_container_and_host(tmp_path, monkeypatch):
     cg.write_text("0::/\n")
     none = tmp_path / "no-dockerenv"
     monkeypatch.delenv("NDF_FACTORY_RUN", raising=False)
-    assert re_.place(cg, none) == "host"
+    assert re_.run_place(cg, none) == "host"
     cg.write_text("0::/kubepods/abc\n")
-    assert re_.place(cg, none) == "container"
+    assert re_.run_place(cg, none) == "container"
     (tmp_path / "dockerenv").write_text("")
     cg.write_text("0::/\n")
-    assert re_.place(cg, tmp_path / "dockerenv") == "container"
+    assert re_.run_place(cg, tmp_path / "dockerenv") == "container"
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
-    assert re_.place(cg, none) == "factory"
+    assert re_.run_place(cg, none) == "factory"
 
 
 @pytest.fixture
 def machine(monkeypatch):
     monkeypatch.setattr(re_, "cpus", lambda: 8.0)
     monkeypatch.setattr(re_, "memory_gib", lambda: 30.0)
-    monkeypatch.setattr(re_, "running_plans", lambda: 2)
+    monkeypatch.setattr(re_, "running_plan_count", lambda: 2)
     monkeypatch.delenv("NDF_PARALLEL_MAX_PLANS", raising=False)
     monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
 
@@ -110,7 +110,7 @@ def test_unreadable_values_keep_the_current_ones(tmp_path, machine, monkeypatch)
 
     declare(tmp_path)
     monkeypatch.setattr(re_, "cpus", broken)
-    monkeypatch.setattr(re_, "place", broken)
+    monkeypatch.setattr(re_, "run_place", broken)
     r = re_.survey(tmp_path)
     assert sorted(r["unreadable"]) == ["cpus", "place"] and r["candidates"] == r["current"]
 

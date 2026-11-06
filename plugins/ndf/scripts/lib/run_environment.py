@@ -21,7 +21,7 @@ CONTAINER_CGROUP = re.compile(r"docker|kubepods|containerd|lxc")
 PARALLEL_PLANS = Path(".ndf") / "parallel"
 
 
-def place(proc_cgroup: Optional[Path] = None, dockerenv: Path = Path("/.dockerenv")) -> str:
+def run_place(proc_cgroup: Optional[Path] = None, dockerenv: Path = Path("/.dockerenv")) -> str:
     """`factory`（実行ジョブの中）・`container`・`host` のどれか。"""
     if os.environ.get("NDF_FACTORY_RUN"):
         return "factory"
@@ -64,14 +64,14 @@ def running_lanes(main: Path) -> int:
     return max(1, sum(len(pp.load_valid_plan(main, n).lanes) for n in names if pl.run_status(main, n) in pl.RUNNING))
 
 
-def running_plans() -> int:
+def running_plan_count() -> int:
     """動いているプランの数（`supervise.py queue` のプロセスの数）。"""
     import procs
 
     return procs.count_cmdline("supervise.py", "queue")
 
 
-def candidates(cores: float, gib: float, lanes: int) -> dict:
+def limit_candidates(cores: float, gib: float, lanes: int) -> dict:
     """実測の 1 点から比で導く候補。ラッパーの数は今の既定の比（3 / 6）を保ち、課題の数は 1 周回が課題ごとに 1 本のプランを
     同時に流すためレーンの数で割る。"""
     plans = max(1, min(math.floor(cores * BASE_PLANS / BASE_CORES), math.floor(round(gib) * BASE_PLANS / BASE_GIB)))
@@ -100,14 +100,14 @@ def survey(root: Path, lanes: Optional[int] = None) -> dict:
             unreadable.append(name)
             return fallback
 
-    where = read("place", place, "unknown")
+    where = read("place", run_place, "unknown")
     cores = read("cpus", cpus)
     gib = read("memory", memory_gib)
     found = lanes if lanes is not None else read("lanes", lambda: running_lanes(root), 1)
-    running = read("plans", running_plans)
+    running = read("plans", running_plan_count)
     current = read("current", lambda: current_values(root), {"max_issues": 3, "max_plans": BASE_PLANS, "max_named": 3})
     if cores and gib:
-        got = candidates(cores, gib, found)
+        got = limit_candidates(cores, gib, found)
         reason = (
             f"{cores:g} コア・{gib:g} GiB からプラン {got['max_plans']} 本。レーン {found} 本で割って課題 {got['max_issues']}。"
             "承認で読める量は別に見る"
@@ -143,3 +143,18 @@ def notes(report: dict) -> list[dict]:
         "変えるなら .ndf/pace.json の loop.max_issues と環境変数を人が直す"
     )
     return [{"kind": "environment", "name": "candidates", "result": "differs", "summary": text}]
+
+
+def note(root: Path, rec: dict) -> dict:
+    """調べる。候補と今の値が違うか読めない項目があれば開発ループの記録の `environments` へ足す。宣言は書かない。"""
+    report = survey(root)
+    if differs(report) or report["unreadable"]:
+        rec.setdefault("environments", []).append(report)
+    return report
+
+
+def with_report(out: dict, report: dict) -> dict:
+    """統一 JSON レポートへ実行環境の報告を載せる。"""
+    out["metrics"]["environment"] = report
+    out["items"] = [*out["items"], *notes(report)]
+    return out
