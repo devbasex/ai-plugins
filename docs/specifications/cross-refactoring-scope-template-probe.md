@@ -268,4 +268,5 @@ suite ごとに 1 段で、「受けません」（`defect`）か「受けるか
 - [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py)・[`refactor_lib/template_check.py`](../../plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py)・[`project_lib/model.py`](../../plugins/ndf/scripts/project_lib/model.py)
 - [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md)（着手前のテストの上限。試走はその残りの中で走る）
 - [cross-refactoring-lint-suite-and-ci-coverage.md](cross-refactoring-lint-suite-and-ci-coverage.md)（静的解析の suite の範囲テスト）
+- [cross-refactoring-test-file-detection.md](cross-refactoring-test-file-detection.md)（テストのファイルの見分け方。テストの関数を持たない `.py` を候補から外す規則）
 - 課題: #1630（由来 takemi-ohama/novel issue #32 / PR #58）。残した主題は #2095（修正のラウンドの止め方）・#2096（着手前のテストへ入れるパスの種類）

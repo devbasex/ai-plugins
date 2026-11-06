@@ -44,6 +44,9 @@ FAKE = textwrap.dedent(
     with open(log, "a") as f:
         f.write(json.dumps(sys.argv[1:]) + "\\n")
     sub = sys.argv[1]
+    if sub == "ls" and os.path.exists(os.environ.get("FAKE_LS_FAIL", "")):
+        print("ls: hub に届かない", file=sys.stderr)
+        sys.exit(3)
     if sub == "ls":
         st = json.load(open(states)) if os.path.exists(states) else {}
         rows = [{"name": n, **(s if isinstance(s, dict) else {"state": s})} for n, s in st.items()]
@@ -70,6 +73,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_PARALLEL_RELAY", f"{sys.executable} {fake}")
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.setenv("FAKE_STATES", str(states))
+    monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
     heads = {"v": "sha1"}
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
@@ -823,3 +827,68 @@ def test_a_late_request_is_answered_by_the_release_that_completed_it(monkeypatch
     run.pending = [{"id": "r1", "lane": "la", "prs": [10, 20]}, {"id": "r0", "lane": "la", "prs": [10]}]
     run.answer_from_ranges()
     assert sorted(got) == [("r0", "1.2.3", 1), ("r1", "1.2.4", 2)] and run.pending == []
+
+
+# ---------------------------------------------------------------- 状態の一覧の失敗（#2509 の I1・I2・決定 5）
+
+
+def test_a_failed_ls_keeps_lane_states_and_the_last_observation(monkeypatch):
+    """受け入れ条件 1・I1: 一覧が 0 以外で終わった回は、レーンの状態・最後に観測した時刻・起こし直しの待ち・問いを変えない。"""
+    run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb"}])
+    seen = {"now": 1_000_000.0, "rows": {"la": {"state": "running", "at": "1970-01-01T00:00:00Z"}}, "code": 0}
+    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    run.lanes["la"].update(started=True)
+    run.lanes["lb"].update(started=True)
+    prun._observe_run(run, "/m")
+    run.questions, run.stall_until = [], {}
+    run.revive, run.revive_at = ["lb"], {"lb": 1_000_000.0}
+    before = (json.dumps(run.lanes, sort_keys=True), run.seen_at, list(run.revive), dict(run.revive_at))
+    seen.update(now=1_000_060.0, rows={}, code=3, err="ls: hub に届かない")
+    prun._observe_run(run, "/m")
+    assert (json.dumps(run.lanes, sort_keys=True), run.seen_at, list(run.revive), dict(run.revive_at)) == before
+    assert run.questions == [] and run.stall_until == {}
+
+
+def test_after_a_failed_ls_the_plan_is_not_finished(monkeypatch):
+    """I2: 最後の観測が失敗した回の後は、全レーンが止まって見えていても終えない。成功に戻れば終えられる。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    seen = {"now": 1.0, "rows": {}, "code": 0}
+    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    run.lanes["la"].update(started=True)
+    prun._observe_run(run, "/m")
+    assert prun._run_finished(run)
+    seen["code"] = 3
+    prun._observe_run(run, "/m")
+    assert not prun._run_finished(run)
+    seen["code"] = 0
+    prun._observe_run(run, "/m")
+    assert prun._run_finished(run)
+
+
+def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
+    """決定 5: 足す前の版で記録した観測（`code` が無い）は成功として読み、行の無い起動済みのレーンを止まったと読む。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    monkeypatch.setattr(prun, "step_observe", lambda _m: {"now": 1.0, "rows": {}})
+    run.lanes["la"].update(started=True)
+    prun._observe_run(run, "/m")
+    assert run.lanes["la"]["state"] == "stopped" and prun._run_finished(run)
+
+
+def test_step_observe_carries_the_exit_code_and_the_last_stderr_line(env, tmp_path):
+    (tmp_path / "ls.fail").write_text("")
+    got = prun.step_observe(str(env["main"]))
+    assert got["code"] == 3 and got["err"] == "ls: hub に届かない" and got["rows"] == {}
+
+
+def test_the_plan_does_not_finish_while_ls_keeps_failing(env, tmp_path):
+    """受け入れ条件 1・2: 一覧が失敗し続ける間は、起動済みのレーンを止まったと読まず、計画を finished で終えない。"""
+    main, log = env["main"], env["log"]
+    fail = tmp_path / "ls.fail"
+    fail.write_text("")
+    start(main)
+    until(lambda: len(calls(log, "ls")) >= 5)
+    assert spawned(log) == ["la"]  # la を止まったと読まないため、lb を起動しない
+    assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    fail.unlink()  # 成功に戻ると、行の無い起動済みのレーンを止まったと読んで終える（受け入れ条件 3 の既存の振る舞い）
+    out = until(lambda: durable.status(pl.workflow_id("p1")) not in pl.RUNNING and durable.output_of(pl.workflow_id("p1")))
+    assert out["status"] == "finished" and spawned(log) == ["la", "lb"]

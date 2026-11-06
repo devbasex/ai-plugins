@@ -276,3 +276,72 @@ def test_root_declaration_pins_the_same_versions_as_the_plugin():
     for pins in root.values():
         for name, ver in re.findall(r'"([\w-]+)==([\w.]+)"', pins):
             assert f'name = "{name}"\nversion = "{ver}"' in lock
+
+
+# ---------------------------------------------------------------- 子プロセスへ UV_PROJECT_ENVIRONMENT を漏らさない（#2509 の I5〜I7）
+
+REEXEC_UV = """#!/bin/sh
+while [ "$1" != python ]; do shift; done
+shift
+PYTHONPATH="$FAKE_SITE" exec "$FAKE_PY" "$@"
+"""
+
+
+def run_reexec_child(tmp_path: Path, **env: str) -> dict[str, str]:
+    """起動し直した先で import が通る偽の uv（`PYTHONPATH` で印のパッケージを足して本物の python を起動する）で
+    require を通し、スクリプト自身と子プロセスから見た `UV_PROJECT_ENVIRONMENT` を返す。"""
+    bindir, site = tmp_path / "bin", tmp_path / "site"
+    bindir.mkdir(exist_ok=True)
+    site.mkdir(exist_ok=True)
+    (site / "ndf_reexec_mark.py").write_text("")
+    (bindir / "uv").write_text(REEXEC_UV)
+    (bindir / "uv").chmod(0o755)
+    script = tmp_path / "entry.py"
+    script.write_text(
+        f"import os, subprocess, sys\nsys.path.insert(0, {str(LIB)!r})\nimport deps\n"
+        "deps.GROUPS['t'] = ['ndf_reexec_mark']\ndeps.require('t')\n"
+        "print('SELF=' + repr(os.environ.get('UV_PROJECT_ENVIRONMENT')))\n"
+        "print('SAVED=' + repr(os.environ.get('NDF_DEPS_SAVED_UV_PROJECT_ENVIRONMENT')))\n"
+        "c = [sys.executable, '-c', \"import os; print('CHILD=' + repr(os.environ.get('UV_PROJECT_ENVIRONMENT')))\"]\n"
+        "sys.stdout.write(subprocess.run(c, capture_output=True, text=True).stdout)\n"
+    )
+    base = {k: v for k, v in os.environ.items() if k not in ("NDF_DEPS_REEXEC", "UV_PROJECT_ENVIRONMENT", "PYTHONPATH")}
+    base.update(
+        PATH=str(bindir), HOME=str(tmp_path / "home"), NDF_DEPS_VENV=str(tmp_path / "venv"),
+        FAKE_SITE=str(site), FAKE_PY=sys.executable, **env,
+    )  # fmt: skip
+    p = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=base)
+    assert p.returncode == 0, p.stderr
+    return dict(ln.split("=", 1) for ln in p.stdout.splitlines() if "=" in ln)
+
+
+def test_a_reexeced_script_does_not_pass_the_shared_venv_to_children(tmp_path):
+    """受け入れ条件 2・I5・I6: 起動し直したスクリプトの子に、NDF が設定した共有の環境が渡らない。"""
+    got = run_reexec_child(tmp_path)
+    assert got == {"SELF": "None", "SAVED": "None", "CHILD": "None"}
+
+
+def test_a_reexeced_script_gives_back_the_users_own_value(tmp_path):
+    """I7: 利用者が自分で設定した値は、起動し直した後に戻って子へ渡る。"""
+    mine = str(tmp_path / "my-project-venv")
+    got = run_reexec_child(tmp_path, UV_PROJECT_ENVIRONMENT=mine)
+    assert got == {"SELF": repr(mine), "SAVED": "None", "CHILD": repr(mine)}
+
+
+def test_a_shared_venv_inherited_from_an_old_parent_is_dropped(tmp_path):
+    """I6・決定 3: 古い版の親から共有の環境を指す値を継いでも、起動し直した後の子へ渡さない。"""
+    got = run_reexec_child(tmp_path, UV_PROJECT_ENVIRONMENT=str(tmp_path / "venv"))
+    assert got["CHILD"] == "None"
+
+
+def test_an_importable_require_drops_an_inherited_shared_venv(monkeypatch, tmp_path):
+    """I6: 起動し直さずに戻る回も、継いだ共有の環境（既定の置き場の下）を外し、利用者の値は残す。"""
+    monkeypatch.setitem(deps.GROUPS, "t", ["json"])
+    monkeypatch.delenv("NDF_DEPS_VENV", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / ".cache" / "ndf" / "venv" / "9.9.9"))
+    deps.require("t")
+    assert "UV_PROJECT_ENVIRONMENT" not in os.environ
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / "mine"))
+    deps.require("t")
+    assert os.environ["UV_PROJECT_ENVIRONMENT"] == str(tmp_path / "mine")

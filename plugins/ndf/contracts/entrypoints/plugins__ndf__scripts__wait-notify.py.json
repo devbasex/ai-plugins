@@ -21,6 +21,7 @@
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
     "SLACK_USER_MENTION",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [],
