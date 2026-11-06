@@ -6,6 +6,7 @@
 `.ndf/project.json` の所要の記録 w と、同じリポジトリで先に走った全体テストの実測 m の大きい方の 3 倍（`ceil(3·max(w, m))`）である。**
 手元の全体検証が上限の中で終わるたびに、その秒をリポジトリの git の共通ディレクトリへ 1 行追記する。範囲テストと全体テストの
 ステップは、開始の時点で上限を決め直し、同じ秒をステップの `timeout`（`with_margin(上限)`）と `test-run.py --limit` の両方に使う。
+コンテナの宣言があるときだけ、テスト環境の用意の分として `timeout` へ起動の上限 300 秒を足す（`--limit` は変えない）。
 `.ndf/project.json` は書き換えない。
 
 例: 記録が 2.7 秒（`ndf-record`）で、テストを足して全体テストが約 12 秒になったリポジトリ（#1631 の報告。takemi-ohama/novel のスプリント world）。
@@ -172,11 +173,13 @@ classDiagram
    `unbudgeted_limits` へ渡して、その時点の上限を得る
 2. 上限 = `max(作成の時点の秒, その時点の上限の <鍵>)`。決め直せない（`basis` が無い・`key` が無い・読めない）ときは作成の時点の秒
 3. 上限が作成の時点の秒を上回ったときだけ、`timeout` を `max(ステップの timeout, with_margin(上限))` にする
-4. `{test_limit:…}` を上限の秒へ置き換え、`cur.test_limit` に `key`・`planned`・`seconds`・`timeout`・`basis` を残す
+4. コンテナの宣言があるときは、`timeout` へ起動の上限（`container_reach.UP_TIMEOUT`、300 秒）を足す。`with_margin` の余裕には重ねない
+5. `{test_limit:…}` を上限の秒へ置き換え、`cur.test_limit` に `key`・`planned`・`seconds`・`timeout`・`basis` を残す
 
 `test-run.py` は `--limit` を受けたら、`scope` では `test_timeout`、`whole` では `whole_timeout` をその秒に置き換える（`LIMIT_KEY`）。
 ほかの上限（`ci_wait_timeout`、落ちたテストの分類に使う `test_timeout`）は `unbudgeted_limits` の値のままである。`--limit` を省くと
 起動の時点の `unbudgeted_limits` の値を使う。出力の `items[0].limits` は置き換えた後の値を出し、終了コードは変えない。
+テスト環境の用意の秒は、上限にも全体テストの実測にも数えない（`test-run.py` は用意の後に時間を数え始める）。
 
 ### 実測を残す条件
 
@@ -245,7 +248,7 @@ classDiagram
 
 | 置き場 | 形 |
 | --- | --- |
-| run のステップの `cmd` | `test-run.py scope … --limit {test_limit:test_timeout:<秒>}` / `test-run.py whole --pr {pr} … --limit {test_limit:whole_timeout:<秒>}`。`timeout` は `with_margin(<秒>)` |
+| run のステップの `cmd` | `test-run.py scope … --limit {test_limit:test_timeout:<秒>}` / `test-run.py whole --pr {pr} … --limit {test_limit:whole_timeout:<秒>}`。`timeout` は `with_margin(<秒>)`。開始の決め直しが、コンテナの宣言があるときだけ 300 秒足す |
 | ステップの状態の `cur.test_limit` | `{"key", "planned", "seconds", "timeout", "basis"}`。`basis` は決め直せなかったとき `null` |
 
 ## エラー処理
