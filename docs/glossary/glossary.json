@@ -5814,7 +5814,7 @@
     {
       "term": "デプロイ",
       "context": "ndf-release",
-      "meaning": "開発・本番を問わず、環境に変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある",
+      "meaning": "開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある",
       "source": "",
       "pending_source": "issues/issue-2620-requirements.md",
       "deprecated": [

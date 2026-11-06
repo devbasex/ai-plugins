@@ -122,7 +122,7 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| デプロイ | 開発・本番を問わず、環境に変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `デプロイ` | [release](../../release/SKILL.md) |
+| デプロイ | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `デプロイ` | [release](../../release/SKILL.md) |
 | リリース | 本番へのデプロイ。フェーズの名前でもある | プランの `"フェーズ"` の値は `リリース` | [release](../../release/SKILL.md) |
 | リリースプラン | リリースの手順をステップの列として持つプラン | `supervise.py new release`、`--channel dev` / `prod` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、`production: false` の行（検証の環境）へ届くことも開発版に当たる | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |

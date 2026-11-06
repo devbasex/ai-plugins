@@ -1,6 +1,6 @@
 # Runtime Plugin Distribution 仕様
 
-> **導入先のランタイムは Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+> **導入先のランタイムは Claude Code と Codex である。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
 
 ## 概要
 
@@ -42,7 +42,7 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 プラグインのマーカーはディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
 `dev.agy/plugin.json` へ置く。
 
-**この文書は配る Skill の数を書かない（#288）。** 数はランタイムごとに違い、版を上げる
+**この文書は配る Skill の数を書かない。** 数はランタイムごとに違い、版を上げる
 たびに動く。基準を持つのは `plugins/ndf/manifests/*-skills.txt` の行数だけである。確定仕様の
 側に数を写すと、`docs/specifications/` をチェックの対象へ広げない限り古いまま残る。
 

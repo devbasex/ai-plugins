@@ -41,7 +41,7 @@ def final_stage_gap(stage, body, since):
     if not ids:
         return FINAL_GAP.format(stage=stage, what="課題の本文に振り返りの記録の行が無い")
     if max(ids) < since:
-        return FINAL_GAP.format(stage=stage, what="課題の本文の振り返りの行が今回のリリース記録より前のもの")
+        return FINAL_GAP.format(stage=stage, what="課題の本文の振り返りの行が最後のリリース記録より前のもの")
     return None
 
 

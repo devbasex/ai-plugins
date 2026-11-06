@@ -1,6 +1,6 @@
 # Runtime Plugin Container Smoke Test 仕様
 
-> **導入先のランタイムは Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+> **導入先のランタイムは Claude Code と Codex である。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
 
 ## 概要
 
