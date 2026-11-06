@@ -2586,7 +2586,7 @@
     {
       "term": "ループの予算",
       "context": "ndf-workflow",
-      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる",
+      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。周回の数と経過時間は宣言に数を書いたときだけ効き、書かない・null は無制限である",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
@@ -3240,7 +3240,7 @@
     {
       "term": "実装の上限",
       "context": "ndf-workflow",
-      "meaning": "プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値",
+      "meaning": "プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い",
       "code": "impl_timeout",
       "source": "docs/specifications/ndf-supervise-step-budgets.md"
     },
@@ -5943,6 +5943,42 @@
       "meaning": "用語集の設定が、検査する範囲で新しく書くことを禁じた語",
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "無進捗の打ち切り",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること",
+      "source": "",
+      "pending_source": "issues/issue-2505-requirements.md"
+    },
+    {
+      "term": "無進捗の許容時間",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒",
+      "code": "impl_stall_seconds",
+      "source": "",
+      "pending_source": "issues/issue-2505-design.md"
+    },
+    {
+      "term": "進みの観測",
+      "context": "ndf-workflow",
+      "meaning": "実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること",
+      "source": "",
+      "pending_source": "issues/issue-2505-design.md"
+    },
+    {
+      "term": "周回の費用の内訳",
+      "context": "ndf-workflow",
+      "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
+      "source": "",
+      "pending_source": "issues/issue-2505-design.md"
+    },
+    {
+      "term": "実行環境の調査",
+      "context": "ndf-workflow",
+      "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
+      "source": "",
+      "pending_source": "issues/issue-2505-requirements.md"
     }
   ]
 }
