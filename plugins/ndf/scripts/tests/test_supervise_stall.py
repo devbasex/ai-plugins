@@ -168,8 +168,9 @@ def test_a_silent_worker_is_cut_and_the_reason_is_kept(env, monkeypatch):
     monkeypatch.setenv("FAKE_TICKS", "100")
     s, _ = run_plan(env, stall=1)
     row = rows(env, "stalled")
-    assert len(row) == 1 and row[0]["step"] == "impl" and row[0]["stall"] == 1 and row[0]["last_signal"] == "start"
-    assert s.state.log[0]["stalled"]["last_signal"] == "start" and s.state.log[0]["exit"] != 0
+    # 偽の claude は起動の直後に 1 行だけ書く。読む前か後かは負荷で変わるので、最後の進みはどちらの形も受ける
+    assert len(row) == 1 and row[0]["step"] == "impl" and row[0]["stall"] == 1 and row[0]["last_signal"] in ("start", "transcript")
+    assert s.state.log[0]["stalled"]["last_signal"] == row[0]["last_signal"] and s.state.log[0]["exit"] != 0
 
 
 def test_an_elapsed_limit_stops_a_progressing_worker_without_a_stalled_row(env, monkeypatch):

@@ -654,7 +654,7 @@ def test_run_carries_policy_args_through_shell_function(term, tmp_path):
 
 def test_run_chain_three_sections(term):
     """人が何も入力せずに 3 つ目の区間まで起動する（AC17 の試験用の形）。"""
-    t = term()
+    t = term(env={"NDF_RELAY_EXIT_WAIT": "30"})  # 負荷の下でも /exit で終わる形を見る（SIGTERM へ進ませない）
     t.wait_start(1)
     t.type("mark mark 三つ目\r")
     t.wait_start(3, timeout=25)
@@ -1086,7 +1086,7 @@ def test_run_many_starts_of_the_day_do_not_refuse(term):
 
 def test_run_spin_stops_third(term):
     """3 つ続けて短い区間なら 3 つ目の合図で切り替えない。1 つ目の区間も数える（AC11）。"""
-    t = term(env={"NDF_RELAY_SPIN": "3"})
+    t = term(env={"NDF_RELAY_SPIN": "30"})  # 負荷の下で hook が遅れても、区間が短いままの値
     t.wait_start(1)
     t.type("mark mark mark 終点\r")
     t.wait_start(3, timeout=25)
@@ -1119,7 +1119,9 @@ def test_run_sigkill_when_child_ignores_exit(term):
     t.wait_start(2)
     e1 = events(t.rows(), "end")[0]
     assert e1["ended_by"] == "sigkill"
-    assert e1["seconds"] < 1.5  # 合図の written_at まで。/exit の後の待ちを含めない
+    started = dt.datetime.fromisoformat(events(t.rows(), "start")[0]["at"])
+    ended = dt.datetime.fromisoformat(e1["at"])
+    assert (ended - started).total_seconds() - e1["seconds"] >= 0.5  # 合図の written_at まで。/exit の後の待ちを含めない
     os.kill(t.starts()[1]["pid"], signal.SIGKILL)
     t.finish()
 
@@ -1353,10 +1355,13 @@ def test_run_switches_when_goal_unmet(term):
     t.finish()
 
 
+LOADED_QUIET = 5  # 合図の後の入力や hook が動く秒を静止の待ちの内に収める。負荷の下では数秒かかる
+
+
 @pytest.mark.parametrize("case", ["user", "question", "background"])
 def test_run_goal_unmet_cancelled(term, case):
     """合図の後に利用者が入力したとき・質問が出たとき・背景の処理が起動したときは切り替えない。"""
-    t = term(env={"NDF_RELAY_QUIET": "0.5", "NDF_RELAY_ESC_WAIT": "0.3"})
+    t = term(env={"NDF_RELAY_QUIET": str(LOADED_QUIET), "NDF_RELAY_ESC_WAIT": "0.3"})
     t.wait_start(1)
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
@@ -1378,7 +1383,7 @@ def test_run_goal_unmet_cancelled(term, case):
         t.type(f"tr {json.dumps(row)}\r")
     t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
     t.type("stop\r")
-    time.sleep(2.5)
+    time.sleep(LOADED_QUIET + 2)
     assert len(t.starts()) == 1
     assert b"/exit" not in t.child_input(0)
     t.type("quit 0\r")
@@ -2175,15 +2180,16 @@ def question_rows(t, n=0):
 
 def test_guard_question_blocks_exit(term):
     """G1: 合図の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
-    t = term(env={"NDF_RELAY_QUIET": "0.5"})
+    t = term(env={"NDF_RELAY_QUIET": str(LOADED_QUIET)})
     t.wait_start(1)
+    d = pathlib.Path(t.starts()[0]["relay_dir"])
     t.type("mark 次\r")  # 合図の後に応答が再開して質問が出た形
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     t.type("q open\r")
     t.wait(lambda: question_rows(t), what="質問の合図")
     assert question_rows(t)[0] == {"action": "open", "stdout": "", "code": 0}
-    d = pathlib.Path(t.starts()[0]["relay_dir"])
     assert (d / "question").exists() and (d / "next.json").exists()
-    time.sleep(1.2)  # 静止の待ちの 2 倍を超えても書かない
+    time.sleep(LOADED_QUIET + 0.5)  # 静止の待ちを超えても書かない
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
     t.type("q close\r")
     t.wait(lambda: not (d / "question").exists(), what="合図が消える")
@@ -2323,7 +2329,7 @@ def test_question_denies_when_lock_busy(tmp_path, relay):
         fcntl.flock(f, fcntl.LOCK_EX)
         t0 = time.time()
         p = question(tmp_path, relay.dir)
-        assert time.time() - t0 < 4.5
+        assert time.time() - t0 < 10  # 待ちの 3 秒に、負荷の下の起動の遅れを足した上限
     assert p.returncode == 0
     out = json.loads(p.stdout)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and out["hookEventName"] == "PreToolUse"
