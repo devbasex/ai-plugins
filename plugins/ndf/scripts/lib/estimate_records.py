@@ -403,17 +403,9 @@ class IssueActual:
     runs: list[Run] = field(default_factory=list)
 
 
-def issue_actuals(
-    rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
-) -> dict[int, IssueActual]:
-    """課題ごとの実績の合計（確定仕様の「課題ごとの実績の合計」）。`since` があれば、その時刻より後に始まった実行だけを足す。
-
-    A は完了条件のフェーズまでの実行（失敗・中断・取り消し・再試行を含む）の `step` の秒の和で、2 つ以上の課題を
-    指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
-    C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
+def _collect_issue_runs(table: dict[str, Run], done: str, since_ts: float | None) -> dict[int, IssueActual]:
+    """実行を課題へ振り分ける。`since_ts` 以前に始まった実行と、完了条件より後のフェーズの実行は入れない。"""
     limit = _phase_index(done)
-    since_ts = ts(since) if since else None
-    table = run_table(rows, alive)
     out: dict[int, IssueActual] = {}
     for run in table.values():
         if since_ts is not None and (ts(run.started) or 0) <= since_ts:
@@ -423,28 +415,36 @@ def issue_actuals(
             continue
         for issue in run.issues:
             out.setdefault(issue, IssueActual(issue)).runs.append(run)
-    for issue, acc in out.items():
-        acc.runs.sort(key=lambda r: ts(r.started) or 0)
-        ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
-        end = ends[0] if ends else None
-        cut = ts(end.end.get("at")) if end else None
-        if end:
-            acc.completed, acc.config, acc.finished = True, end.config, end.end.get("at")
-            acc.runs = [r for r in acc.runs if (ts(r.started) or 0) <= (cut or 0)]
-        for run in acc.runs:
-            share = len(run.issues) or 1
-            acc.shared |= share > 1
-            for s in run.steps:
-                if isinstance(s.get("seconds"), (int, float)):
-                    acc.a += float(s["seconds"]) / share
-                if isinstance(s.get("cost_usd"), (int, float)):
-                    acc.c += float(s["cost_usd"]) / share
-                else:
-                    acc.cost_unknown = True
-        if end and cut is not None and acc.runs:
-            first = ts(acc.runs[0].started)
-            acc.l = round(cut - first, 1) if first is not None else None
-        acc.a, acc.c = round(acc.a, 1), round(acc.c, 4)
+    return out
+
+
+def _accumulate_issue(acc: IssueActual, done: str) -> None:
+    """1 課題の完了判定と A・C・L を `acc` へ書く。完了した課題の `runs` は完了より後に始まった実行を除く。"""
+    acc.runs.sort(key=lambda r: ts(r.started) or 0)
+    ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
+    end = ends[0] if ends else None
+    cut = ts(end.end.get("at")) if end else None
+    if end:
+        acc.completed, acc.config, acc.finished = True, end.config, end.end.get("at")
+        acc.runs = [r for r in acc.runs if (ts(r.started) or 0) <= (cut or 0)]
+    for run in acc.runs:
+        share = len(run.issues) or 1
+        acc.shared |= share > 1
+        for s in run.steps:
+            if isinstance(s.get("seconds"), (int, float)):
+                acc.a += float(s["seconds"]) / share
+            if isinstance(s.get("cost_usd"), (int, float)):
+                acc.c += float(s["cost_usd"]) / share
+            else:
+                acc.cost_unknown = True
+    if end and cut is not None and acc.runs:
+        first = ts(acc.runs[0].started)
+        acc.l = round(cut - first, 1) if first is not None else None
+    acc.a, acc.c = round(acc.a, 1), round(acc.c, 4)
+
+
+def _add_human_seconds(out: dict[int, IssueActual], rows: list[dict], since_ts: float | None) -> None:
+    """`human` の行の秒を課題の H へ足す。実行の無い課題の行は、その課題の項目を新しく作る。"""
     for r in rows:
         if r.get("kind") != "human" or not isinstance(r.get("seconds"), (int, float)):
             continue
@@ -453,4 +453,19 @@ def issue_actuals(
         for issue in r.get("issues") or []:
             acc = out.setdefault(issue, IssueActual(issue))
             acc.h = (acc.h or 0.0) + float(r["seconds"])
+
+
+def issue_actuals(
+    rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
+) -> dict[int, IssueActual]:
+    """課題ごとの実績の合計（確定仕様の「課題ごとの実績の合計」）。`since` があれば、その時刻より後に始まった実行だけを足す。
+
+    A は完了条件のフェーズまでの実行（失敗・中断・取り消し・再試行を含む）の `step` の秒の和で、2 つ以上の課題を
+    指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
+    C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
+    since_ts = ts(since) if since else None
+    out = _collect_issue_runs(run_table(rows, alive), done, since_ts)
+    for acc in out.values():
+        _accumulate_issue(acc, done)
+    _add_human_seconds(out, rows, since_ts)
     return out
