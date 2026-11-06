@@ -98,6 +98,15 @@ STALL_MINUTES = 60  # 動かないレーンを問うまでの分（設計の失�
 SPAWN_REFUSALS = 3  # 起動の断りがこの回数続いたら問う（設計の失敗の 17 番）
 
 
+def spawn_refusals() -> int:
+    """起動の断りを問うまでの回数（`NDF_PARALLEL_SPAWN_REFUSALS` で変えられる。不正な値なら既定の 3）。"""
+    try:
+        n = int(os.environ.get("NDF_PARALLEL_SPAWN_REFUSALS") or SPAWN_REFUSALS)
+    except ValueError:
+        return SPAWN_REFUSALS
+    return n if n >= 1 else SPAWN_REFUSALS
+
+
 def stall_seconds() -> float:
     """動かないレーンを問うまでの秒（`NDF_PARALLEL_STALL_MINUTES` で変えられる。既定 60 分）。"""
     try:
@@ -631,12 +640,13 @@ def _spawn_ready(run: _Run, main: str) -> None:
             run.lanes[n].update(got)
             if got.get("refused"):
                 run.refusals[n] = run.refusals.get(n, 0) + 1
-                if run.refusals[n] % SPAWN_REFUSALS == 0:  # 3 回続けて断られるたびに理由を添えて問う（異常系 17）
+                limit = spawn_refusals()
+                if run.refusals[n] % limit == 0:  # 既定 3 回続けて断られるたびに理由を添えて問う（異常系 17）
                     run.ask(
                         "spawn",
                         f"{run.name}-spawn-{n}-{run.refusals[n]}",
                         n,
-                        f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）",
+                        f"レーン {n} を {limit} 回起動できない（{got['refused']}）",
                         ["起こし直す", "止める"],
                     )
 
@@ -748,3 +758,11 @@ def run_plan(main: Path, name: str) -> tuple[dict, bool]:
     if st is None:
         durable.start(durable.WorkflowRef(wid, 1, "start"), parallel_workflow, str(main), name)
     return durable.output_of(wid), resumed
+
+
+def environment_report(main: Path, plan: pp.ParallelPlan) -> tuple[dict, list[dict]]:
+    """開始のときの実行環境の報告と結果の項目。レーンがまだ動いていないので計画の数を渡す。"""
+    import run_environment
+
+    report = run_environment.survey(main, lanes=len(plan.lanes))
+    return report, run_environment.notes(report)

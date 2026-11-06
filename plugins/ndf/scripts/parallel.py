@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -173,19 +173,20 @@ def cmd_start(a) -> None:
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがあるため、レーンを 1 本も起動しない", items, 1, **metrics)
+    import parallel_run as pr_run
+
+    env, notes = pr_run.environment_report(main, plan)
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
-        import parallel_run as pr_run
-
         marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
-        reply("ok", f"run は動いている（pid {pid}）", pid=pid, organizer=marked, next=_wait_line(a.name))
+        reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=_wait_line(a.name), environment=env)
     if pl.run_status(main, a.name) is None:
         _manual_or_none(main, plan)
     log = pp.plan_dir(main, a.name) / "run.log"
     with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
         p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
     (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
-    reply("ok", f"run を切り離して起動した（pid {p.pid}）", pid=p.pid, log=str(log), next=_wait_line(a.name))
+    reply("ok", f"run を切り離して起動した（pid {p.pid}）", notes, pid=p.pid, log=str(log), next=_wait_line(a.name), environment=env)
 
 
 def cmd_wait(a) -> None:

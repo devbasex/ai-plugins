@@ -204,7 +204,7 @@ classDiagram
 ### 境界の決まり
 
 - 変えないもの: `.ndf/project.json`（`test_duration` は今どおり宣言の解析だけが書く）、予算を持つ呼び出しの上限、`ci_wait_timeout`、
-  `with_margin` の式、`TEST_FACTOR`、実装の上限（`impl_timeout_estimate`）
+  `with_margin` の式、`TEST_FACTOR`、実装の上限
 - `{test_limit:…}` を持たないステップ（この変更の前に作ったプラン・CI に任せる戦略の全体テスト）は今どおり動く
 - `basis.key` を持たない「テストの時間」（宣言も `--test-cmd` も無く `plan_limits` が所要不明の値を出したプラン）では決め直さない
 

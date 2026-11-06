@@ -188,53 +188,6 @@ def test_size_over_scale():
 # --- 実装の上限 ---
 
 
-def test_impl_limit_needs_three_samples_and_uses_max():
-    rows: list[dict] = []
-    assert ep.impl_limit(rows)["source"] == "uncalibrated"
-    for d, a in enumerate([1000, 4000, 2000]):
-        _done(rows, 1, a, day=d + 1)
-    got = ep.impl_limit(rows)
-    assert (got["source"], got["samples"], got["high"]) == ("history", 3, 4000)
-    assert len(got["basis"]) == 3
-
-
-def test_impl_limit_includes_failures_and_skips_other_config():
-    rows: list[dict] = []
-    for d, a in enumerate([1000, 2000]):
-        _done(rows, 1, a, day=d + 1)
-    _done(rows, 2, 99999, day=3, config={**CFG, "harness": "codex"})
-    rows.append(
-        {
-            "schema": 1,
-            "kind": "run_start",
-            "at": "2026-10-04T00:00:00+00:00",
-            "run": "f",
-            "plan": "/p.json",
-            "issues": [3],
-            "phase": "実装",
-            "from": None,
-            "attempt": 1,
-            "imported": False,
-        }
-    )
-    rows.append(
-        {
-            "schema": 1,
-            "kind": "step",
-            "at": "2026-10-04T00:00:00+00:00",
-            "run": "f",
-            "step": "impl",
-            "type": "work",
-            "exit": 1,
-            "seconds": 3000,
-            "retry": 0,
-        }
-    )
-    _done(rows, 4, 500, day=5)
-    got = ep.impl_limit(rows)
-    assert (got["samples"], got["high"]) == (4, 3000)
-
-
 # --- 誤差 ---
 
 

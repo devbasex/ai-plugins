@@ -34,7 +34,8 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      生成されていなければ失敗扱い。err.log に CLI 自身の上限の文言（agy の
      `print timeout after <時間> with turn in progress`）があれば理由 `cli_timeout`（#729）
   5. **hard timeout**: 既定は `--phase` の工程で上限の表（`limits.py`）から引く
-     （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可
+     （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可。
+     `--timeout 0` は経過時間の上限が無い（無進捗と結果の判定だけで止まる）
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
      STALLED として中断。既定は agent 別で上限の表から引く。`--stall-timeout` で CLI 明示、
      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可。
@@ -230,7 +231,7 @@ def main() -> None:
         "--timeout",
         type=int,
         default=None,
-        help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / MONITOR_TIMEOUT、無ければ --phase の工程の値",
+        help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / MONITOR_TIMEOUT、無ければ --phase の工程の値。0 は上限なし",
     )
     stalls = ", ".join(f"{k}={v}" for k, v in limits.AGENT_STALL.items())
     p.add_argument(
@@ -304,7 +305,7 @@ def _run_all(agents: list[str], args: argparse.Namespace, phase: str) -> dict[st
         timeout = limits.monitor_timeout(phase, runtime, args.timeout)
         stall = limits.stall_timeout(runtime, args.stall_timeout)
         print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})", file=sys.stderr, flush=True)
-        if stall >= timeout:
+        if timeout and stall >= timeout:
             # 上書きの結果、無進捗の許容が効かない組になった。止めはしない（AC33）。
             print(
                 f"[{agent}] ⚠ 無進捗の許容 {stall}s が監視の上限 {timeout}s 以上です（無進捗では止まらず、監視の上限で止まります）",
