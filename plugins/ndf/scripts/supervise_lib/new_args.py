@@ -450,7 +450,7 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
         check(ap, a)
 
 
-def revise_notes(ap: argparse.ArgumentParser, a) -> dict[int, str]:
+def parse_revise_notes(ap: argparse.ArgumentParser, a) -> dict[int, str]:
     """`--revise-note <課題>=<パス>` を {課題: パス} にする。--design の課題の入力を読めなければ断る。"""
     import revise_note
 
@@ -477,4 +477,4 @@ def check_sprint(ap: argparse.ArgumentParser, a) -> None:
         ap.error("--name は英数字・. _ - だけで書く（ブランチ名 sprint/<名前> に使う）")
     if a.kind == "close" and not a.state:
         ap.error("new close には --state（スプリントの状態）が要る")
-    a.revise_notes = revise_notes(ap, a)
+    a.revise_notes = parse_revise_notes(ap, a)

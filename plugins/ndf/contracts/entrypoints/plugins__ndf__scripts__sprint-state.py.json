@@ -97,7 +97,9 @@
     "prs-txt",
     "request-id-txt",
     "request-txt",
-    "requests-json"
+    "requests-json",
+    "revise-json",
+    "revise-md"
   ],
   "reads": [],
   "exit": {

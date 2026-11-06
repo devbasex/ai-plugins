@@ -184,6 +184,20 @@ def test_a_refused_or_regated_loop_answer_is_unmatched(tmp_path):
     assert "答え直し" in g1.answer_prior(tmp_path, tmp_path, Q, {"result": "approved"}, run=gh)["unmatched"]
 
 
+def test_a_stale_row_stamp_is_answered_again_once(tmp_path):
+    """行の印が古い（問いは送る時点の先頭）と loop answer は答え直しを求める。先頭は確かめたので 1 回だけ打ち直す。"""
+    gh = Gh("a" * 40)
+    outs = ['{"metrics": {"status": "regated"}}', '{"metrics": {"status": "answered"}}']
+    base = gh.__call__
+
+    def run(cmd, cwd=None, stdin=None):
+        if "loop" in cmd:
+            gh.out = outs.pop(0)
+        return base(cmd, cwd, stdin)
+
+    assert g1.answer_prior(tmp_path, tmp_path, Q, {"result": "approved"}, run=run) == {} and outs == []
+
+
 def test_an_answer_to_a_replaced_question_needs_a_merge_only_move(tmp_path, monkeypatch):
     monkeypatch.setattr(g1, "merge_only", lambda *a: False)
     got = g1.answer_prior(tmp_path, tmp_path, {**Q, "stamp": "b" * 40}, {"result": "rejected"}, "a" * 40, run=Gh("b" * 40))

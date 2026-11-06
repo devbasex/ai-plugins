@@ -20,6 +20,10 @@ TABLE = "## 出し直しの指摘への対応"
 AUTO, USER = "auto", "user"
 BY_LABEL = {AUTO: "自動", USER: "人"}
 ASK = "この指摘を満たすように直す。満たせない項目は理由を書く"
+GATE_RULE = (
+    "材料の「出し直しの指摘」は人が承認ゲート 1 で送った指摘である。すべての回の項目を読み、設計が満たさない項目があれば、"
+    "直せない理由が設計に書かれ人の判断が要る場合も含めて「従う」にしない。"
+)
 CHECK_OK, CHECK_MISSING, CHECK_UNREADABLE = 0, 10, 2  # 表の突き合わせの終了コード（10 は承認ゲートの帯）
 
 _ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
@@ -35,12 +39,12 @@ def split_items(note: str) -> list[str]:
     return [m.group(1) for m in hits if m] or [text]
 
 
-def issue_rows(rec: dict, number: int) -> list[dict]:
+def revise_rows(rec: dict, number: int) -> list[dict]:
     """記録の、その課題の答えが「直して出し直す」の行（記録の順）。"""
     return [w for w in rec.get("waiting", []) if w.get("number") == number and w.get("answer") == "revise"]
 
 
-def _round(loop: str, w: dict, n: int) -> dict:
+def _row_round(loop: str, w: dict, n: int) -> dict:
     by = AUTO if w.get("by") == AUTO else USER  # `by` の無い行は人の回
     items = [] if by == AUTO else [{"id": f"{loop}:{n}-{i}", "text": t} for i, t in enumerate(split_items(w.get("note") or ""), 1)]
     missing = list(w.get("missing") or []) if by == AUTO else []
@@ -52,7 +56,7 @@ def _round(loop: str, w: dict, n: int) -> dict:
 
 def rounds_of(rec: dict, number: int) -> list[dict]:
     """1 つのループの記録の、その課題の回。回数はループごとに 1 から数える。"""
-    return [_round(rec.get("name") or "", w, w.get("revise_count") or i) for i, w in enumerate(issue_rows(rec, number), 1)]
+    return [_row_round(rec.get("name") or "", w, w.get("revise_count") or i) for i, w in enumerate(revise_rows(rec, number), 1)]
 
 
 def other_loops(main: Path, name: str) -> tuple[list[dict], list[str]]:
@@ -68,7 +72,7 @@ def other_loops(main: Path, name: str) -> tuple[list[dict], list[str]]:
     return recs, skipped
 
 
-def collect(main: Path, rec: dict, number: int) -> tuple[dict | None, list[str]]:
+def collect_rounds(main: Path, rec: dict, number: int) -> tuple[dict | None, list[str]]:
     """課題の出し直しの指摘の入力と、読めずに飛ばしたループの名前。回が無ければ入力は None。"""
     others, skipped = other_loops(main, rec.get("name") or "")
     rounds = [r for x in [rec, *others] for r in rounds_of(x, number)]
@@ -76,12 +80,16 @@ def collect(main: Path, rec: dict, number: int) -> tuple[dict | None, list[str]]
     return ({"issue": number, "rounds": rounds} if rounds else None), skipped
 
 
-def input_path(lap_dir: str | Path, number: int) -> Path:
-    return Path(lap_dir) / f"revise-{number}.json"
-
-
-def write_input(path: Path, data: dict) -> None:
-    jsonio.write_atomic(path, data, indent=1)
+def write_inputs(main: Path, rec: dict, issues: list[int], lap_dir: str | Path) -> tuple[list[str], list[str]]:
+    """出し直しの指摘を持つ課題の入力ファイルを周回のディレクトリへ書き、`new sprint` の引数と読めずに飛ばしたループの名前を返す（決定 1）。"""
+    argv, skipped = [], set()
+    for n in issues:
+        data, others = collect_rounds(main, rec, n)
+        skipped |= set(others)
+        if data is not None:
+            jsonio.write_atomic(Path(lap_dir) / f"revise-{n}.json", data, indent=1)
+            argv += ["--revise-note", f"{n}={Path(lap_dir) / f'revise-{n}.json'}"]
+    return argv, sorted(skipped)
 
 
 def read_input(path: str | Path) -> dict:
@@ -92,7 +100,7 @@ def read_input(path: str | Path) -> dict:
     return data
 
 
-def item_ids(data: dict) -> list[str]:
+def note_item_ids(data: dict) -> list[str]:
     return [i["id"] for r in data["rounds"] for i in r["items"]]
 
 
@@ -132,7 +140,7 @@ def missing_items(data: dict, section: str | None) -> list[str]:
     def filled(row: list[str] | None) -> bool:
         return bool(row) and len(row) >= 4 and row[2].strip() not in _BLANK and row[3].strip() not in _BLANK
 
-    return [i for i in item_ids(data) if not filled(rows.get(i))]
+    return [i for i in note_item_ids(data) if not filled(rows.get(i))]
 
 
 def synced_body(body: str, section: str) -> str:
@@ -150,7 +158,11 @@ def check_table(run, cwd: str, pr: int, doc_text: str, data: dict) -> dict:
         if (gh_sections.get_section(body, TABLE) or "").strip() != section.strip():
             code, _, err = run(["gh", "pr", "edit", str(pr), "--body-file", "-"], cwd=cwd, stdin=synced_body(body, section))
             if code != 0:
-                return {"code": CHECK_UNREADABLE, "missing": [], "reason": f"設計 PR #{pr} の本文へ表を写せない: {(err or '').strip()[:200]}"}
+                return {
+                    "code": CHECK_UNREADABLE,
+                    "missing": [],
+                    "reason": f"設計 PR #{pr} の本文へ表を写せない: {(err or '').strip()[:200]}",
+                }
     missing = missing_items(data, section)
     return {"code": CHECK_MISSING if missing else CHECK_OK, "missing": missing, "reason": ""}
 
@@ -160,13 +172,47 @@ def doc_at_head(run, cwd: str, pr: int, issue: int, head: str) -> str | None:
     if not head:
         return None
     path = f"issues/issue-{issue}-design.md"
-    code, text, _ = run(["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{{owner}}/{{repo}}/contents/{path}?ref={head}"], cwd=cwd)
+    code, text, _ = run(
+        ["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{{owner}}/{{repo}}/contents/{path}?ref={head}"], cwd=cwd
+    )
     return text if code == 0 else None
+
+
+def count_round(rec: dict, w: dict) -> None:
+    """直して出し直すの行の回数（ループの記録の、その課題の出し直しの行の数）を書く。"""
+    w["revise_count"] = len(revise_rows(rec, w["number"]))
+
+
+def table_check(env, rec: dict, w: dict, n: int) -> dict | None:
+    """出し直しの指摘を持つ課題の、設計文書の表を設計 PR の本文へ写して突き合わせる（`revise-note.py check` と同じ関数）。
+    指摘の回が無ければ None。"""
+    data, _ = collect_rounds(env.main_dir(), rec, n)
+    if data is None:
+        return None
+    cwd, pr = str(env.main_dir()), w.get("pr")
+    doc = doc_at_head(env.run, cwd, pr, n, w.get("stamp") or "") if pr is not None else None
+    if doc is None:
+        return {"code": CHECK_UNREADABLE, "missing": [], "reason": "設計 PR か設計文書を読めない"}
+    return check_table(env.run, cwd, pr, doc, data)
+
+
+def apply_table_check(env, rec: dict, w: dict, n: int) -> bool:
+    """人の判断待ちへ移す前の突き合わせ。欠けがあり上限の内なら行を自動の出し直しにして True（人へ問わず、依頼も送らない）。
+    上限に達したか表を読めなければ、理由を添えて人へ問う行のまま False。"""
+    got = table_check(env, rec, w, n)
+    if got is None or got["code"] == CHECK_OK:
+        return False
+    if got["code"] == CHECK_MISSING and may_return(rec, n):
+        w.update(answer="revise", answered_at=env.now(), by=AUTO, note="", missing=got["missing"])
+        return True
+    why = f"届いていない項目: {'、'.join(got['missing'])}" if got["missing"] else f"表を読めなかった: {got['reason']}"
+    w["reason"] = f"{w['reason']}／{why}"
+    return False
 
 
 def may_return(rec: dict, number: int) -> bool:
     """自動の出し直しへ戻してよいか（人の出し直し 1 回につき 1 回まで）: 記録の直前の出し直しの行が自動でない。"""
-    rows = issue_rows(rec, number)
+    rows = revise_rows(rec, number)
     return not rows or rows[-1].get("by") != AUTO
 
 

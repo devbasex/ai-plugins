@@ -56,7 +56,7 @@ sys.path.insert(0, str(HERE))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("schema", "procs", "locks")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
+deps.require("schema", "procs", "locks", "md")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
 import revise_note  # noqa: E402
 from step_result import EXIT_GATE, emit, result  # noqa: E402
 import approved_commit as ac  # noqa: E402
@@ -92,12 +92,6 @@ MVV に従う変更なら承認ゲートでの個別の承認を省いてよい�
 
 出力は次の JSON の 1 つだけ。前後に文を書かない。
 {"verdict": "follow|not_follow|unknown", "reasons": ["MVV のどの項目に照らしてそう判断したか（1〜5 件）"], "boundary": [], "basis": ["Value 1"]}"""
-
-
-REVISE_RULE = (
-    "材料の「出し直しの指摘」は人が承認ゲート 1 で送った指摘である。すべての回の項目を読み、設計が満たさない項目があれば、"
-    "直せない理由が設計に書かれ人の判断が要る場合も含めて「従う」にしない。"
-)
 
 
 class Back(Exception):
@@ -467,7 +461,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
     except Back as e:
         return back(str(e), "machine")
 
-    verdict, raw, usage = ask(build_prompt(project, sprint, a.gate, materials, REVISE_RULE if a.revise_note else ""))
+    verdict, raw, usage = ask(build_prompt(project, sprint, a.gate, materials, revise_note.GATE_RULE if a.revise_note else ""))
     if verdict is None:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
     boundary = verdict["boundary"]

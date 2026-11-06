@@ -84,6 +84,7 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
+    "revise-json",
     "state-json"
   ],
   "reads": [],

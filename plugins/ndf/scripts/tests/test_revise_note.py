@@ -55,13 +55,13 @@ def test_rounds_come_from_every_loop_in_time_order_and_ids_do_not_clash(tmp_path
     broken.parent.mkdir()
     broken.write_text("{")
     rec = {"name": "l1", "waiting": [row("- 新しい")]}
-    data, skipped = rn.collect(tmp_path, rec, 7)
+    data, skipped = rn.collect_rounds(tmp_path, rec, 7)
     assert [(r["loop"], r["round"]) for r in data["rounds"]] == [("old", 1), ("l1", 1)]
-    assert rn.item_ids(data) == ["old:1-1", "l1:1-1"] and skipped == ["bad"]
+    assert rn.note_item_ids(data) == ["old:1-1", "l1:1-1"] and skipped == ["bad"]
 
 
 def test_an_issue_without_rounds_has_no_input(tmp_path):
-    assert rn.collect(tmp_path, {"name": "l1", "waiting": []}, 7) == (None, [])
+    assert rn.collect_rounds(tmp_path, {"name": "l1", "waiting": []}, 7) == (None, [])
 
 
 TABLE = """## 出し直しの指摘への対応
@@ -129,7 +129,9 @@ def test_history_appends_keeps_the_note_and_skips_the_same_round():
 
 
 def plan_args(tmp_path, notes=None):
-    return SimpleNamespace(base="main", mode="standard", name="m1", worktree=str(tmp_path), state=str(tmp_path / "state"), revise_notes=notes)
+    return SimpleNamespace(
+        base="main", mode="standard", name="m1", worktree=str(tmp_path), state=str(tmp_path / "state"), revise_notes=notes
+    )
 
 
 def steps_of(plan):

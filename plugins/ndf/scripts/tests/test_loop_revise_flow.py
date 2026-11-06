@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -12,10 +11,22 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import parallel_lane  # noqa: E402
-from test_sprint_loop import HEAD, built_lap, design_report, env, mvv, rec, set_state, sl, sl_gate, sl_select, start, write_done  # noqa: E402,F401
+import test_sprint_loop as base  # noqa: E402
+from test_sprint_loop import (  # noqa: E402
+    built_lap,
+    design_report,
+    rec,
+    set_state,
+    sl,
+    sl_gate,
+    sl_select,
+    start,
+    write_done,
+)
 import gate1_requests as g1  # noqa: E402
 import revise_note as rn  # noqa: E402
 
+env, mvv = base.env, base.mvv  # フィクスチャを受け継ぐ
 SHA_A, SHA_B = "a" * 40, "b" * 40
 TABLE = "# 設計\n\n## 出し直しの指摘への対応\n\n| 項目 | 指摘 | 対応 | 箇所 |\n| --- | --- | --- | --- |\n| l1:1-1 | 絞る | 直した | 対象範囲 |\n"
 
@@ -157,7 +168,9 @@ def asked_row(env, monkeypatch, sent):
     closed(env)
     env.answer_box = {}
     env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
-    monkeypatch.setattr(sl_gate, "lane_gate1", lambda e, w, report, state: sent.append(w["number"]) or {"request": "la-g501-b", "stamp": SHA_B})
+    monkeypatch.setattr(
+        sl_gate, "lane_gate1", lambda e, w, report, state: sent.append(w["number"]) or {"request": "la-g501-b", "stamp": SHA_B}
+    )
     monkeypatch.setattr(parallel_lane, "lane_of", lambda main: ("p1", type("L", (), {"name": "la"})))
     return env
 
@@ -225,7 +238,7 @@ def test_an_answer_to_the_previous_request_after_another_move_is_told_once(env, 
     sl_select.cmd_select(env, "l1")
     w = rec(env)["waiting"][0]
     assert not w.get("answer") and w["requests_before"][0]["settled"] is True and [t[0] for t in told] == ["la-g501-a"]
-    assert sl_gate.answer_before(env, w, env.answer_box) is None and len(told) == 1  # 判定済みは読み直さない
+    assert g1.answer_before(env, w, env.answer_box) is None and len(told) == 1  # 判定済みは読み直さない
 
 
 def test_the_settled_previous_request_is_not_read(env):
@@ -259,7 +272,7 @@ def test_a_head_moved_merge_carries_over_a_merge_only_move(env, monkeypatch):
 
 
 def lane(monkeypatch, env, rows):
-    monkeypatch.setattr(sl_select, "lane_plan", lambda e: "p1")
+    monkeypatch.setattr(g1, "lane_plan", lambda e: "p1")
     monkeypatch.setattr(g1, "prior_rows", lambda main, plan: (rows, []))
 
 
@@ -293,7 +306,7 @@ def test_a_request_that_could_not_be_sent_is_sent_at_the_boundary(env, monkeypat
 
 def test_a_skipped_loop_appears_in_the_selection_items(env, monkeypatch):
     start(env)
-    monkeypatch.setattr(sl_select, "lane_plan", lambda e: "p1")
+    monkeypatch.setattr(g1, "lane_plan", lambda e: "p1")
     monkeypatch.setattr(g1, "prior_requests", lambda *a: ([], [{"loop": "bad", "reason": "壊れている"}]))
     monkeypatch.setattr(g1, "prior_rows", lambda *a: ([], []))
     out = sl_select.cmd_select(env, "l1")

@@ -35,7 +35,7 @@ def cmd_check(a) -> tuple[dict, int]:
         items = [{"item": i, "result": "missing"} for i in got["missing"]]
         summary = f"出し直しの指摘の項目のうち {len(items)} 件が表に示されていない"
         return result(TOOL, "gate", summary, items, {"pr": a.pr, "missing": len(items)}, next="承認ゲートで止める"), got["code"]
-    return result(TOOL, "ok", "出し直しの指摘の項目がすべて表にある", [], {"pr": a.pr, "items": len(revise_note.item_ids(data))}), 0
+    return result(TOOL, "ok", "出し直しの指摘の項目がすべて表にある", [], {"pr": a.pr, "items": len(revise_note.note_item_ids(data))}), 0
 
 
 def main() -> int:

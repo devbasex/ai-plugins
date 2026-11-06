@@ -25,6 +25,7 @@ import parallel_answer as pa  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
+import parallel_reply  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
 PLAN = {
@@ -1341,7 +1342,7 @@ def _route(monkeypatch, lanes=None):
 def test_an_answer_wakes_a_stopped_loop_lane_that_waits_on_its_record(monkeypatch):
     """記録が waiting_only で止まったループのレーンも起こす対象に入り、知らせに起こす 1 行が付く（#2474 の原因）。"""
     run, box = _route(monkeypatch)
-    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: ["la"])
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: ["la"])
     run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
     run.reply({"id": "q", "result": "approved"})
     assert box["answer-q"]["result"] == "approved" and run.revive == ["la"] and run.wake == ["la"]
@@ -1350,7 +1351,7 @@ def test_an_answer_wakes_a_stopped_loop_lane_that_waits_on_its_record(monkeypatc
 
 def test_a_stopped_loop_lane_that_does_not_wait_is_not_woken(monkeypatch):
     run, _ = _route(monkeypatch)
-    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: [])
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: [])
     run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
     run.reply({"id": "q", "result": "approved"})
     assert run.revive == [] and run.wake == []
@@ -1377,7 +1378,7 @@ def test_a_lane_notice_of_an_unmatched_answer_blocks_the_finish_until_answered(m
 
 def test_a_new_request_of_the_same_row_replaces_the_old_and_the_old_answer_wakes_the_owner(monkeypatch):
     run, box = _route(monkeypatch)
-    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: ["la"])
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: ["la"])
     run.take({"kind": "gate1", "id": "la-g1-a", "lane": "la", "pr": 1, "stamp": "a"})
     run.take({"kind": "gate1", "id": "la-g1-b", "lane": "la", "pr": 1, "stamp": "b"})
     run.take({"kind": "gate1", "id": "la-g1-c", "lane": "la", "pr": 1, "stamp": "c"})
@@ -1409,7 +1410,7 @@ def test_a_skipped_loop_is_shown_like_an_unmatched_answer(monkeypatch):
 def test_an_answer_to_a_prior_wait_goes_to_its_loop(monkeypatch):
     run, box = _route(monkeypatch)
     calls = []
-    monkeypatch.setattr(prun, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append((q["id"], a["result"], stamp)) or {})
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append((q["id"], a["result"], stamp)) or {})
     run.questions = [dict(PRIOR)]
     run.reply({"id": PRIOR["id"], "result": "approved"})
     assert calls == [(PRIOR["id"], "approved", None)] and run.questions == [] and box[f"answer-{PRIOR['id']}"]["result"] == "approved"
@@ -1419,20 +1420,20 @@ def test_an_answer_to_a_prior_wait_goes_to_its_loop(monkeypatch):
 def test_a_prior_head_that_moved_replaces_the_question_and_an_old_answer_lands_on_merge_only(monkeypatch):
     run, _ = _route(monkeypatch)
     new = {**PRIOR, "id": "lroot2-w12-l3-bbb", "stamp": "b"}
-    monkeypatch.setattr(prun, "step_prior_answer", lambda *a: {"reask": new})
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda *a: {"reask": new})
     run.questions = [dict(PRIOR)]
     run.reply({"id": PRIOR["id"], "result": "approved"})
     assert [q["id"] for q in run.questions] == [new["id"]] and run.questions[0]["replaced"] == [{"id": PRIOR["id"], "stamp": "a"}]
     run.answered.discard(PRIOR["id"])  # 置き換える前の id へ後から答えた形
     calls = []
-    monkeypatch.setattr(prun, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append(stamp) or {})
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append(stamp) or {})
     run.reply({"id": PRIOR["id"], "result": "approved"})
     assert calls == ["a"] and run.questions == []
 
 
 def test_a_prior_answer_that_cannot_land_is_unmatched(monkeypatch):
     run, _ = _route(monkeypatch)
-    monkeypatch.setattr(prun, "step_prior_answer", lambda *a: {"unmatched": "断った"})
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda *a: {"unmatched": "断った"})
     run.questions = [dict(PRIOR)]
     run.reply({"id": PRIOR["id"], "result": "rejected"})
     assert [q["kind"] for q in run.questions] == ["unmatched"] and run.questions[0]["reason"] == "断った"
@@ -1441,7 +1442,7 @@ def test_a_prior_answer_that_cannot_land_is_unmatched(monkeypatch):
 def test_a_replay_of_an_old_record_keeps_the_old_steps(monkeypatch):
     run, box = _route(monkeypatch)
     run.routed = False
-    monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: pytest.fail("古い記録の打ち直しでは打たない"))
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: pytest.fail("古い記録の打ち直しでは打たない"))
     run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
     run.reply({"id": "q", "result": "approved"})
     run.reply({"id": "unknown", "result": "approved"})
