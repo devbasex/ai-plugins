@@ -8,9 +8,9 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
      "areas": [{"name": "...", "common": true, "paths": ["<glob>", ...]}, ...],
      "boundary_paths": ["<glob>", ...],
      "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24},
-     "loop": {"enabled": false, "budget": {"laps": 3, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 3}}
+     "loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
 
-`loop` 節は `read_loop` だけが読む（`read_pace` は検証しない。#2089）。
+`loop` 節は `read_loop` だけが読む（`read_pace` は検証しない。#2089）。`loop.budget` の各単位は、書かない・`null` なら無制限である。
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 階層でもよい。
 """
@@ -90,10 +90,9 @@ def read_pace(root) -> dict:
 
 LOOP_DEFAULTS = {
     "enabled": False,
-    "budget": {"laps": 3, "usd": 60, "hours": 24},
+    "budget": {"laps": None, "usd": None, "hours": None},  # None は無制限。書いた単位だけ効く（#2505）
     "same_failure": 2,
     "max_issues": 3,
-    "release_pending_max": 2,  # 配布待ちと質問待ちの周回を合わせた上限（#2436）
 }  # #2089 の決定 5・8
 
 
@@ -108,10 +107,10 @@ def read_loop(root) -> dict:
     if not isinstance(budget, dict):
         raise PaceError(f"進め方の宣言の loop.budget はオブジェクトで書く: {path}")
     budget = {**LOOP_DEFAULTS["budget"], **budget}
-    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(_is_positive_number(v) for v in budget.values()):
-        raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数で書く: {path}")
+    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(v is None or _is_positive_number(v) for v in budget.values()):
+        raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数か null で書く: {path}")
     out = {"enabled": sec.get("enabled") is True, "budget": budget}
-    for key in ("same_failure", "max_issues", "release_pending_max"):
+    for key in ("same_failure", "max_issues"):
         v = _default(sec, key, LOOP_DEFAULTS[key])
         if isinstance(v, bool) or not isinstance(v, int) or v < 1:
             raise PaceError(f"進め方の宣言の loop.{key} は 1 以上の整数で書く: {path}")

@@ -29,6 +29,7 @@ from sprint_loop_record import (
     STOP_FILE,
     VERSION,
     BUDGET_DEFAULT,
+    over_budget,
     EXIT_REFUSED,
     EXIT_STOPPED,
     DONE,
@@ -156,7 +157,6 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "budget_history": [],
         "same_failure": decl["same_failure"],
         "max_issues": decl["max_issues"],
-        "release_pending_max": decl.get("release_pending_max", 2),
         "milestones": list(milestones or []),
         "goal": goal,
         "status": "running",
@@ -198,7 +198,7 @@ def _resume_user_stop(env: Env, rec: dict, before: dict, stop: dict, lap: dict |
 def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
     unit = stop["condition"].removeprefix("budget_")
     used = consumed(rec)[unit]
-    if used >= rec["budget"][unit]:
+    if over_budget(used, rec["budget"].get(unit)):
         write_record(env, rec, before)
         return (
             stopped_result(
@@ -569,22 +569,9 @@ def lane_plan_name(env: Env) -> str | None:
 # ---------------------------------------------------------------- status / list
 
 
-def relay_stopped(lap: dict | None) -> bool:
-    """最後の周回のラッパーの記録に起動回数の上限（max-starts）の stop の行があるか。"""
-    d = (lap or {}).get("relay_dir")
-    if not d:
-        return False
-    try:
-        rows = jsonio.read_jsonl(Path(d) / "log.jsonl", missing=[], skip_broken=True)
-    except jsonio.JsonReadError:
-        return False
-    return any(r.get("event") == "stop" and r.get("reason") == "max-starts" for r in rows)
-
-
 def cmd_status(env: Env, name: str) -> dict:
     rec = read_loop_record(env, name)
     lap = current_lap(rec)
-    last = rec["laps"][-1] if rec.get("laps") else None
     lines = [
         f"ループ: {name}（{rec.get('status')}）",
         f"周回: {len(rec.get('laps', []))}（進行中 {lap['n'] if lap else 'なし'}）",
@@ -612,9 +599,6 @@ def cmd_status(env: Env, name: str) -> dict:
     if rec.get("stop"):
         lines.append(f"止まった理由: {rec['stop']['condition']}。再開: {resume_command(rec)}")
         metrics.update(stop=rec["stop"], stop_line=stop_line(rec, rec["stop"]["condition"]))
-    if relay_stopped(last):
-        lines.append(f"ラッパーが起動回数の上限で止めた。再開: {resume_command(rec)}")
-        metrics["relay_max_starts"] = True
     return step_result.result(TOOL, "ok", lines[0], lines[1:], metrics)
 
 

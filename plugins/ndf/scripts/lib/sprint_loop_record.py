@@ -60,7 +60,6 @@ EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たっ�
 
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
 BUDGET_DEFAULT = "default"  # 予算の単位を既定（.ndf/pace.json の loop.budget）へ戻す指示。値が変わったときだけ予算の履歴に 1 行足す
-RELEASE_PENDING_MAX = 2  # 保留の周回の上限の既定（.ndf/pace.json の loop.release_pending_max）
 SELECTED, DROPPED = "選んだ", "外した"
 BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
 SLOT_FIT = "当てた"  # upkeep_rank_config.SLOT_FIT（rank の出力をそのまま読む）
@@ -328,6 +327,11 @@ def mvv_change_stop(env: Env, rec: dict) -> dict | None:
     return None
 
 
+def over_budget(used: float, limit: float | None) -> bool:
+    """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。境の判定と再開の判定が同じこれを読む。"""
+    return limit is not None and used >= limit
+
+
 def boundary_stop(env: Env, rec: dict) -> dict | None:
     """周回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
@@ -340,7 +344,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
         return {"condition": "same_failure", "values": {"key": key, "count": count}}
     used, budget = consumed(rec), rec.get("budget", {})
     for unit in ("laps", "usd", "hours"):
-        if unit in budget and used[unit] >= budget[unit]:
+        if over_budget(used[unit], budget.get(unit)):
             return {"condition": f"budget_{unit}", "values": {"consumed": used[unit], "budget": budget[unit]}}
     return None
 

@@ -502,6 +502,70 @@ def test_budget_default_returns_the_unit_to_the_repository_default_and_judges_wi
     assert out["status"] == "ok" and rec(env)["stop"] is None
 
 
+def declare(env, **loop):
+    (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {"enabled": True, **loop}}))
+
+
+def closed_laps(n, hours):
+    """1 周回が `hours` 時間かかった `n` 周の締めた周回。"""
+    return [
+        {"n": i + 1, "outcome": sl.DONE, "started_at": f"2026-10-{i + 1:02d}T00:00:00Z", "ended_at": f"2026-10-{i + 1:02d}T{hours:02d}:00:00Z"}
+        for i in range(n)
+    ]
+
+
+@pytest.mark.parametrize("budget", [{}, {"laps": None, "usd": None, "hours": None}])
+def test_units_not_written_never_stop_the_loop(env, budget):
+    """書かない宣言と null の宣言は同じ意味で、周回の数・時間・費用のどれでも止まらない。"""
+    declare(env, budget=budget)
+    start(env)
+    r = rec(env)
+    assert r["budget"] == {"laps": None, "usd": None, "hours": None}
+    r["laps"] = closed_laps(4, 7)
+    r["laps"][0]["cost"] = 100000
+    used = sl.consumed(r)
+    assert used["laps"] == 4 and used["hours"] > 25
+    assert sl_record.boundary_stop(env, r) is None
+
+
+def test_a_null_budget_passes_every_path_that_reads_the_budget(env):
+    declare(env, budget={"laps": None, "usd": None, "hours": None})
+    start(env)
+    assert run_lap(env)["status"] == "ok" and rec(env)["stop"] is None
+    assert (env.root / ".ndf/loop/l1" / sl.LAPS_MD).is_file()
+    assert sl.cmd_status(env, "l1")["metrics"]["budget"]["laps"] is None
+    r = stopped_on(env, "budget_laps")  # 版を上げる前に止まった記録を再開する
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["metrics"]["status"] == "resumed"
+
+
+def test_a_written_unit_stops_at_its_value_when_others_are_unlimited(env):
+    declare(env, budget={"laps": 2})
+    start(env)
+    run_lap(env)
+    assert rec(env)["stop"] is None
+    env.rank_box["out"] = rank_out(ms("01 近い", [12, 13]))
+    run_lap(env)
+    assert rec(env)["stop"]["condition"] == "budget_laps"
+
+
+def test_budget_override_and_default_on_an_unlimited_loop_leave_history(env):
+    declare(env)
+    start(env)
+    sl.cmd_start(env, "l1", [], {"laps": 5})
+    assert rec(env)["budget"]["laps"] == 5
+    sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT})
+    r = rec(env)
+    assert r["budget"]["laps"] is None
+    assert [h["to"]["laps"] for h in r["budget_history"]] == [5, None]
+
+
+def test_a_stale_release_pending_max_is_not_read(env):
+    declare(env, release_pending_max="何でも")
+    assert start(env)["metrics"]["status"] == "new"
+    assert "release_pending_max" not in rec(env)
+
+
 def test_budget_default_on_a_default_record_or_a_new_loop_adds_no_history(env):
     start(env, laps=sl.BUDGET_DEFAULT, usd=sl.BUDGET_DEFAULT, hours=sl.BUDGET_DEFAULT)
     assert rec(env)["budget"] == {"laps": 3, "usd": 60, "hours": 24} and rec(env)["budget_history"] == []
@@ -513,7 +577,7 @@ def test_budget_default_uses_builtin_defaults_for_undeclared_units(env):
     (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {"enabled": True, "budget": {"usd": 80}}}))
     start(env, laps=1, usd=1, hours=1)
     sl.cmd_start(env, "l1", [], {"laps": sl.BUDGET_DEFAULT, "usd": sl.BUDGET_DEFAULT, "hours": sl.BUDGET_DEFAULT})
-    assert rec(env)["budget"] == {"laps": 3, "usd": 80, "hours": 24}
+    assert rec(env)["budget"] == {"laps": None, "usd": 80, "hours": None}
 
 
 def test_cli_budget_takes_a_number_or_default_and_refuses_anything_else():
@@ -1508,13 +1572,18 @@ def test_defer_keeps_the_lap_pending(env):
     assert rec(env)["laps"][0]["outcome"] == "配布待ち" and out["metrics"]["selected"] == [13]
 
 
-def test_waiting_only_when_pending_laps_reach_the_limit(env):
+def test_unanswered_pending_laps_do_not_stop_the_next_selection(env):
+    """答えの無い保留の周回がいくつあっても、選べる課題があれば次の周回を選ぶ。"""
+    start(env, laps=100)
     request_lap(env, rid="lroot-r000000000001")
-    lap2 = lane_lap(env, nums=(13,), rid="lroot-r000000000002", rank=rank_out(ms("01 近い", [13, 14])))
-    set_state(env, lap2)
-    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap2["out"]) / "prod.json"), "result": "関門"}]), [])
+    for i, n in enumerate((13, 14), 2):
+        lap = lane_lap(env, nums=(n,), rid=f"lroot-r00000000000{i}", rank=rank_out(ms("01 近い", [13, 14, 15])))
+        set_state(env, lap)
+        sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
+    assert len(sl_record.pending_laps(rec(env))) == 3
+    env.rank_box["out"] = rank_out(ms("01 近い", [16]))
     out = sl_select.cmd_select(env, "l1")
-    assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "waiting_only" and len(rec(env)["laps"]) == 2
+    assert out["metrics"]["selected"] == [16] and "stop" not in out["metrics"]
 
 
 def test_waiting_only_instead_of_no_issue_when_only_pending_work_is_left(env):
