@@ -60,6 +60,7 @@ Python の側は割り当てを書き換えない。`worktree-testenv.sh` の `e
 | I6 | テスト環境の割り当て | worktree を消す前に開いた公開を閉じる。閉じた後に破棄を試み、破棄できなければ環境名を結果に残す | 閉じられなければ、破棄せず worktree を残す。破棄の失敗では worktree の削除を続ける |
 | I7 | 導入の確認のログ | 確認のコマンドの出力は所有者だけが読めるログへだけ書く。進みの知らせに出力の中身を載せない | ログを書けなければ `StepError` で止まる |
 | I8 | テスト環境の割り当て | 自動の破棄がボリュームを消すのは、メインディレクトリの宣言の `testenv.discard_volumes` が真偽値の `true` のときだけである | テストで落とす |
+| I9 | テスト環境の割り当て | 行に `golden_tag` が無い割り当てへタグを書くのは、同じプロジェクトのボリュームが無いと確かめられたときだけである | 残っているか確かめられなければ書かずに起こし、`expose` が拒否する |
 
 ### ドメインイベント
 
@@ -148,7 +149,7 @@ Python の側は割り当てを書き換えない。`worktree-testenv.sh` の `e
 | 要素 | 責務 |
 | --- | --- |
 | 到達の確認（`lib/container_reach.py`） | 届かなければ 1 度だけテスト環境を起こして確かめ直す。起こした記録を持つ。公開を閉じて破棄する関数を持ち、worktree を外してよいかを返す |
-| テスト環境の管理（`worktree-testenv.sh`、`lib/worktree-registry.sh`） | detached HEAD の worktree にも環境名とスロットを割り当てる。`up` で宣言のサービスの準備完了を待つ。`down` が `testenv.discard_volumes` を読む。割り当ての持ち主であることは変えない |
+| テスト環境の管理（`worktree-testenv.sh`、`lib/worktree-registry.sh`） | detached HEAD の worktree にも環境名とスロットを割り当てる。`up` で宣言のサービスの準備完了を待つ。`down` が `testenv.discard_volumes` を読む。行に `golden_tag` が無い割り当ての `up` は、残ったボリュームがあればタグを書かない（決定 7）。割り当ての持ち主であることは変えない |
 | 作業用 worktree の置き場（`lib/worktree_base.py`、`lib/worktree-branch.sh`） | コンテナの宣言があるリポジトリの cross-refactoring と cross-review の worktree を、実行系から見える場所へ置く。置き場を git の無視へ登録する（決定 9） |
 | 置き場を求める呼び出し（7 箇所） | リポジトリのルートを渡す。`cross-review` の `review_lib/commands/init.py` の 2 箇所・`drive.py`、`cross-refactoring` の `refactor_lib/paths.py`・`refactor_lib/commands/setup.py`、`merged-steps.py` の `cleanup`、`lib/run_state.py` の `review_base`（決定 9） |
 | worktree を作る経路（`cross-review` の `review_lib/workspace.py`、`cross-refactoring` の `refactor_lib/commands/setup.py`） | `git worktree add` の前に置き場の登録を呼ぶ（決定 9） |
@@ -156,7 +157,7 @@ Python の側は割り当てを書き換えない。`worktree-testenv.sh` の `e
 | ステップの実行（`supervise_lib/steps.py`） | コンテナの宣言があるとき、テストのステップの `timeout` へ起動の上限を足す |
 | 導入の確認（`release_lib/deploy.py`） | 出力をログへ直接書き、伸びたことだけを標準エラーへ知らせる |
 | 後片付け（`merged-steps.py`、`lib/run_state.py`） | worktree を消す直前に公開を閉じてテスト環境を破棄する。ボリュームを消すかは `worktree-testenv.sh down` が宣言で決める。閉じられなければ worktree を残し、破棄できなければ環境名を結果に残す |
-| 手順書（`worktree/references/test-execution.md`、`worktree/references/declaration.md`、`worktree/SKILL.md`、`merged/SKILL.md`、`cross-review` と `cross-refactoring` の `docs/`、`lib/README.md`） | 自動で起こすこと・破棄の担い手・detached HEAD の環境名・置き場の解決の順を書く。「worktree を消す前に `down --volumes` を実行する」の 2 か所を、自動の破棄・残るボリューム・`discard_volumes`・手で消す手順へ書き換える |
+| 手順書（`worktree/references/test-execution.md`、`worktree/references/declaration.md`、`worktree/SKILL.md`、`merged/SKILL.md`、`cross-review` と `cross-refactoring` の `docs/`、`lib/README.md`） | 自動で起こすこと・破棄の担い手・detached HEAD の環境名・置き場の解決の順を書く。`--volumes` を既定の破棄として書いた 4 か所（`worktree/SKILL.md` のコマンド例と「worktree を消す前に `down --volumes` を実行する」の文、`test-execution.md` の表の「破棄する」の行と同じ文）を書き換える。既定の破棄の例は `down "$WT"` にし、ボリュームを消すのは宣言か明示の指定のときだけと書く。あわせて自動の破棄・残るボリューム・`discard_volumes`・手で消す手順を書く。`test-execution.md` の `expose` の拒否の条件 2 に、残ったボリュームの上の `up` はタグを書かないことと、`down "$WT" --volumes` の後に起こし直す手順を足す |
 | 宣言の説明（`worktree/schemas/registry.schema.json`、`worktree/schemas/worktree.schema.json`、`project_lib/model.py`） | 環境名の形と `container` の説明を合わせる。`testenv.discard_volumes` を足す |
 
 cross-refactoring の実行は変えない。`run_with_timeout` が到達の確認の `env_for` を呼んでいるため、用意が働く。cross-refactoring と cross-review で変えるのは、置き場を求める呼び出しへリポジトリのルートを渡すことと、worktree を作る前に置き場を git の無視へ登録することだけである（決定 9）。`worktree-testenv.sh test` も変えない。この経路は `probe` の CLI を呼ぶため、今のまま起こさずに止まる。
@@ -304,6 +305,16 @@ worktree レジストリの形は変えない。detached HEAD の worktree の�
 | `up` / `compose-env` / `down` | 終了コード 0 | 今のまま |
 
 `up` に `--wait-service <サービス>`（複数可）を足す。`up -d` の後に `docker compose up -d --wait <サービス>…` を打ち、0 以外なら `up` の終了コードとして返す。指定が無ければ今のままである。
+
+`up` は `golden_tag` を次のとおり扱う。`compose up` の前に判定する（決定 7）。
+
+| 割り当ての行の `golden_tag` | `docker volume ls --filter label=com.docker.compose.project=<環境名>` | `up` |
+| --- | --- | --- |
+| ある | 打たない | 今のまま、新しいタグで上書きする |
+| 無い | 何も出ない | タグを書く |
+| 無い | ボリュームが出る、または 0 以外で終わる | タグを書かずに起こす。理由と `down <worktree> --volumes` の案内を標準エラーへ出す。終了コードは変えない |
+
+`expose` は変えない。`golden_tag` が無ければ今の照合が `public_tag` と一致せず、終了コード 1 で拒否する。
 
 `down` はメインディレクトリの宣言を読み、ボリュームを次のとおり扱う。読むのは `worktree-testenv.sh` の 1 か所で、`discard()` は引数を足さずに `down <worktree>` を打つ。
 
@@ -506,7 +517,7 @@ carul の確認のコマンドは `docker compose run` で自分のコンテナ�
 
 ### 決定 7: 戻せない削除を既定にしないため、自動の破棄はコンテナまでにし、ボリュームは宣言があるときだけ消す
 
-**利用者の答えで案を変えた。** 承認ゲート 1 に出した案は `down --volumes` で、ボリュームも消す形だった。利用者の答えは「コンテナだけ消す。自動では `down`（`--volumes` 無し）までにして、ボリュームは残す。残ったボリュームは宣言があるときだけ消す形を実装の前に設計へ反映する。戻せない削除を既定にしない」である（[#2567 の節](https://github.com/devbasex/ai-plugins/issues/2567)。2026-11-06）。テスト環境のデータが作り直せるかはプロジェクトごとに違い、NDF は確かめられない。受け入れ条件 14 の「コンテナとボリュームが残らず」のボリュームの部分は、この答えで変わる。
+**利用者の答えで案を変えた。** 承認ゲート 1 に出した案は `down --volumes` で、ボリュームも消す形だった。利用者の答えは「コンテナだけ消す。自動では `down`（`--volumes` 無し）までにして、ボリュームは残す。残ったボリュームは宣言があるときだけ消す形を実装の前に設計へ反映する。戻せない削除を既定にしない」である（[#2567 の節](https://github.com/devbasex/ai-plugins/issues/2567)。2026-11-06）。テスト環境のデータが作り直せるかはプロジェクトごとに違い、NDF は確かめられない。受け入れ条件 14・前提 4・S7 は、この答えへ更新済みである。
 
 NDF が起こすようになると、NDF が片付ける必要がある。破棄の持ち主を 1 つにするため、worktree を外す 2 か所の直前に置く。`down` は compose の定義を worktree から読むため、外した後では打てない。追跡ファイルに変更があって外さない worktree では破棄しない。破棄に失敗しても worktree の削除は続ける。後片付けを止める方が失う物が大きい。
 
@@ -533,9 +544,15 @@ Docker Compose v5.6.1 の実測（2026-11-06、検証用の定義）:
 
 | 影響 | 確かめたこと | 扱い |
 | --- | --- | --- |
-| ディスク | carul のボリュームは 99 個で計 18.3 GB、ホストの空きは 11.9 GB。1 環境は `db_data` と `web_node_modules` で約 390 MB で、空きは約 30 環境分である。ただし破棄の呼び出し元が無い今も自動では消えないため、この課題で増え方は悪くならない。コンテナは消えるようになる | `discard_volumes` を宣言して自動で消すか、手で消す。定期的に消す処理と容量の閾値は足さない（要求の「含まない」）。手で消す手順は `test-execution.md` に書く（下） |
-| 古いデータの読み込み | Compose のプロジェクト名は環境名で（`compose -p`）、環境名はブランチ名か（detached HEAD は）worktree のパスから作る。**スロット番号は環境名に入らないため、スロットの再利用だけでは別の環境のボリュームを読まない。同じブランチ名か同じパスの worktree を作り直すと、同じプロジェクト名になり、古いボリュームを読む。** carul の worktree レジストリの 49 の環境名のうち 2 つは、同じ worktree のパスで解放の後に割り当て直されている。carul の `db` は初期化の定義を `docker-entrypoint-initdb.d` で渡しており、保存先が空でなければ公式イメージはこれを走らせないため、古いデータのままテストが走って偽の失敗になりうる | 消さずに知らせる。起こす前に残っていたボリュームを `testenv[].reused_volumes` へ載せ、判定の worker が原因の候補として読めるようにする。止めない。自分の worktree で `stop` の後に起こしたときも載るが、走りは変わらない |
+| ディスク | carul のボリュームは 99 個で計 18.3 GB、ホストの空きは 11.9 GB。1 環境は `db_data` と `web_node_modules` で約 390 MB で、空きは約 30 環境分である。**この課題で増える。** 今は人が `up` を打った worktree にだけボリュームができるが、これからはテストを走らせる worktree のすべてに自動ででき、detached HEAD の `rf<番号>/work` も加わる。後片付けはコンテナまでなので、できた分は消えない。着手 1 件あたり feature の worktree で約 390 MB、cross-refactoring を通すと `rf<番号>/work` の分を足して約 780 MB である。cross-review の `pr<番号>` はテストを走らせないため増えない。ホストの空きは他の用途がなければ約 15〜30 着手で尽き、尽きると `up` かテストの書き込みが落ちる。コンテナは消えるようになる | `discard_volumes` を宣言して自動で消すか、手で消す。定期的に消す処理は足さない（要求の「含まない」）。空きの知らせと容量の閾値もこの設計では足さず、要否を利用者の判断として「未確認のまま残ること」に残す。手で消す手順は `test-execution.md` に書く（下） |
+| 古いデータの読み込み | Compose のプロジェクト名は環境名で（`compose -p`）、環境名はブランチ名か（detached HEAD は）worktree のパスから作る。**スロット番号は環境名に入らないため、スロットの再利用だけでは別の環境のボリュームを読まない。同じブランチ名か同じパスの worktree を作り直すと、同じプロジェクト名になり、古いボリュームを読む。** carul の worktree レジストリの 49 の環境名のうち 2 つは、同じ worktree のパスで解放の後に割り当て直されている。carul の `db` は初期化の定義を `docker-entrypoint-initdb.d` で渡しており、保存先が空でなければ公式イメージはこれを走らせないため、古いデータのままテストが走って偽の失敗になりうる | 消さずに知らせる。起こす前に残っていたボリュームを `testenv[].reused_volumes` へ載せ、判定の worker が原因の候補として読めるようにする。止めない。自分の worktree で `stop` の後に起こしたときも載るが、走りは変わらない。公開は別に塞ぐ（下の「残ったボリュームの上では公開を通さない」） |
 | 匿名ボリューム | `down` は匿名を残し、次の `up` は読まず、後の `down --volumes` でも消えない。プロジェクトのラベルも持たない | `discard_volumes: true` なら `down --volumes` が破棄の時点で消す。宣言が無ければ残る。消す手段は `docker volume ls --filter dangling=true` からの手作業で、どの環境の物かは見分けられない。carul の定義は名前付きだけを宣言している（イメージが宣言する分は未確認） |
+
+**残ったボリュームの上では公開を通さない。** 公開してよいのはマスク済みデータで焼いた基準を載せたテスト環境だけで（`test-execution.md`）、`expose` はこれを `golden_tag` と `public_tag` の照合で確かめる。ところが `up` は宣言のファイルから求めたタグを、載っているデータを見ずに書く（`do_up`）。同じ環境名で worktree を作り直すと、古いデータの上に新しいタグが書かれ、照合が通る。既定でボリュームを残すと、この経路が普通の操作で起きる。
+
+そこで、行に `golden_tag` が無い割り当ての `up` は、同じプロジェクトのボリュームが残っていればタグを書かない（I9）。新しい行は `golden_tag` を持たないため（`wt_slot_acquire`）、作り直した worktree はこの条件に当たる。条件を「割り当てを新しく取った `up`」にしないのは、`worktree/SKILL.md` の手順では `env` が割り当てを取り、後の `up` は取らないためである。`volume ls` が失敗したときも書かない。公開の関門は確かめられないときに閉じる側へ倒す。テストは止めない。`reused_volumes` と同じく古いデータでの走りは原因の候補にとどまり、止める理由にならない。
+
+公開したいときは `down <worktree> --volumes` で消してから `up` を打つ。消せばボリュームが無くなり、次の `up` がタグを書く。消す判断はこの操作を打つ人が持つため、戻せない削除を既定にしないという答えは変わらない。
 
 後片付けの結果へは残るボリュームを載せない。すべての worktree の削除に出る行は、読む側が見分けるための情報にならないためである。`reused_volumes` は影響が出る時点で知らせる。
 
@@ -553,7 +570,7 @@ docker volume ls -q --filter label=com.docker.compose.project=<環境名> | xarg
 - 作り方: 標準に倣う
 - 比べた候補: STD2 / PRD2
 
-根拠: 利用者の答え（#2567 の節）/ C3 / C4 / Value 3 / Value 2（MVV 版 6）
+根拠: 利用者の答え（#2567 の節）/ C3 / C4 / Value 1 / Value 3 / Value 2（MVV 版 6）
 
 ### 決定 8: 判定の worker が別の項目を突き合わせずに読めるよう、落ちたコマンドを `summary` と結果の両方に載せる
 
@@ -611,6 +628,7 @@ compose の定義を置くメインディレクトリは、テスト環境を動
 | 受け入れ条件 14（決定 7 の答えの形）、I6 | `/ndf:merged` の後片付けで宣言の無い fixture の `down` が `--volumes` 無しで外す前に打たれ、解放の時刻が入る。破棄の失敗でも worktree が外れ、`reason` に環境名。`rf<番号>` の worktree も同じ | `--volumes` を付けると落ちる。外した後に打つと落ちる。失敗で止めると落ちる |
 | I8（決定 7） | `testenv.discard_volumes` が `true` の `worktree-testenv.sh down` だけが `compose down --volumes` を打つ。無し・`false`・文字列の `"true"` は `compose down`。人が打つ `--volumes` はどの値でも働く。作業ブランチの宣言だけを `true` にしても消さない | 値の有無だけで判定すると落ちる。worktree の宣言を読むと落ちる |
 | 残ったボリュームの知らせ（決定 7） | 残っているボリュームを偽の実行系が返すと、`woken` の行に `reused_volumes` が載り、テストは走る。`volume ls` が失敗しても止まらず項目を載せない。既に届く worktree では `volume ls` が 0 回 | 古いボリュームを見つけて止めると落ちる。届く worktree で実行系を余分に呼ぶと落ちる |
+| 残ったボリュームと公開の関門（I9、決定 7） | 行に `golden_tag` が無く、偽の実行系の `volume ls` がボリュームを返すと、`up` はコンテナを起こして `golden_tag` を書かず、`expose` が終了コード 1 で拒否する。`env` の後に打つ `up` と、`up` が割り当てを取る場合の両方で同じになる。`volume ls` が失敗しても書かない。ボリュームが無ければ書き、`public_tag` と一致すれば `expose` が通る。`golden_tag` のある行の `up` は `volume ls` を打たずに上書きする | 残っていてもタグを書くと落ちる。割り当てを取った `up` だけを見ると落ちる。`volume ls` の失敗を「無い」と読むと落ちる |
 | 実物の Docker の振る舞い（決定 7） | リリース後テストで、テスト環境の `down` の後にボリュームが残り、同じ環境名で起こすと `reused_volumes` に載ることを見る | 宣言が無いのにボリュームが消えると落ちる |
 | I6（公開） | 公開中の worktree の後片付けで `unexpose` が `down` より前に打たれ、公開の記録が閉じる。閉じる手段が失敗すると `down` を打たず、スロットを解放せず、worktree が残り、`result` が `kept` で `reason` に環境名・URL・`unexpose` の打ち直し。閉じる手段を直した次の後片付けで外れる。`rf<番号>` の worktree も同じ。公開の無い worktree では閉じる手段を打たない | 破棄の後に閉じると落ちる。閉じられないまま `down` か削除へ進むと落ちる |
 | 受け入れ条件 15 | 割り当ての無い worktree の削除で実行系を呼ばない | 割り当てを見ずに `down` を打つと落ちる |
@@ -629,8 +647,9 @@ compose の定義を置くメインディレクトリは、テスト環境を動
 | 項目 | 内容 |
 | --- | --- |
 | 自動で起こす判断と後片付けの範囲 | 確定した（承認ゲート 1、2026-11-06）。S6 は自動で起こす。S7 はコンテナまでを自動で破棄し、ボリュームは宣言があるときだけ消す（決定 7）。正本は [#2567 の節「設計の承認ゲート 1 での利用者の答え」](https://github.com/devbasex/ai-plugins/issues/2567) |
-| 要求の文面との差 | 受け入れ条件 14・前提 4・S7 の行は、利用者の答えより前の文面のままである。要求の書き換えは設計の作業の外で、[issue-2567-requirements.md](issue-2567-requirements.md) は変えていない。ここが食い違うときは決定 7 に従う |
-| 残るボリュームの量 | 自動で消さないため、宣言の無いプロジェクトでは増え続ける。carul の実測は 18.3 GB、ホストの空きは 11.9 GB で（決定 7）、carul の宣言を変えるかは carul の側で決める（要求の「含まない」）。全プロジェクトの量は測っていない |
+| 残るボリュームの量 | 自動で消さないため、宣言の無いプロジェクトでは増え続ける。carul の実測は 18.3 GB、ホストの空きは 11.9 GB で、着手 1 件あたり約 390〜780 MB なので、空きは約 15〜30 着手分である（決定 7）。着手の頻度と全プロジェクトの量は測っていない |
+| 空きへの手当ての要否（利用者の判断） | 既定でボリュームを残す答えは変えない。そのうえで、ホストの空きが尽きる前に、carul へ `discard_volumes` を宣言するか（carul の側で決める。要求の「含まない」）と、空きが減ったことを NDF が知らせる形を足すかが決まっていない。この設計は知らせを足さない |
+| 同じ割り当ての `up` のタグ | 同じ割り当ての 2 度目以降の `up` は、今のまま新しいタグで上書きする。宣言のファイルが変わるとタグだけが変わり、データは前のままになる。この課題で増える経路ではないため変えない（決定 7） |
 | 匿名ボリュームを持つプロジェクト | 宣言の無い `down` は匿名を残し、後から消す手がかりも残らない（決定 7）。carul のイメージが宣言する分と、他のプロジェクトの実例は未確認 |
 | 導入の確認の遅れの原因 | 打ち切られた実行のログが残っておらず、パイプラインの待ちは記録からの見込みである。受け入れ条件 11 の後、次に遅れたときにログで確定する |
 | 全体テストの偽の失敗の原因 | 未確認。受け入れ条件 12 の後、次に起きたときに読める。テスト環境を起こしても再発しうる |
