@@ -227,6 +227,233 @@ def test_errors_zero_pairs():
     assert items == [] and metrics["pairs"] == 0
 
 
+# 以下は errors の現状固定テスト。期待値の根拠は今の実装の出力で、仕様の主張ではない。
+
+
+def _est(issue, eid="e", day=3, done="実装", **typical):
+    return {
+        "schema": 1,
+        "id": eid,
+        "at": f"2026-10-{day:02d}T00:00:00+00:00",
+        "issue": issue,
+        "done": done,
+        "values": {k: {"typical": v} for k, v in typical.items()},
+    }
+
+
+def _ratio(items, key="A"):
+    return [i["ratio"][key] for i in items]
+
+
+def test_errors_pair_and_metrics_shape():
+    rows: list[dict] = []
+    _done(rows, 1, 200, cost=2.0, day=5)
+    items, metrics = ep.errors([_est(1, "a", A=100, L=7200, C=0.5)], rows, alive=DEAD)
+    assert items == [
+        {
+            "kind": "pair",
+            "issue": 1,
+            "estimate": "a",
+            "predicted": {"A": 100, "L": 7200, "C": 0.5},
+            "actual": {"A": 200.0, "L": 3600.0, "C": 2.0},
+            "ratio": {"A": 2.0, "L": 0.5, "C": 4.0},
+        }
+    ]
+    assert metrics == {"pairs": 1, "ratio_median_A": 2.0, "ratio_median_L": 0.5, "ratio_median_C": 4.0, "rank_correlation_A": None}
+
+
+def test_errors_zero_pairs_metrics_are_none():
+    assert ep.errors([], [], alive=DEAD)[1] == {
+        "pairs": 0,
+        "ratio_median_A": None,
+        "ratio_median_L": None,
+        "ratio_median_C": None,
+        "rank_correlation_A": None,
+    }
+
+
+def test_errors_ratio_is_rounded_to_four_places():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    assert _ratio(ep.errors([_est(1, A=3)], rows, alive=DEAD)[0]) == [33.3333]
+
+
+def test_errors_skips_estimates_without_integer_issue():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    ests = [{**_est(1, A=1), "issue": v} for v in (None, "1", 1.0)] + [{k: v for k, v in _est(1, A=1).items() if k != "issue"}]
+    assert ep.errors(ests, rows, alive=DEAD)[0] == []
+
+
+def test_errors_since_keeps_estimates_at_the_boundary():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    ests = [_est(1, "a", day=3, A=100)]
+    assert [i["estimate"] for i in ep.errors(ests, rows, since=ests[0]["at"], alive=DEAD)[0]] == ["a"]
+    assert ep.errors(ests, rows, since="2026-10-03T00:00:01+00:00", alive=DEAD)[0] == []
+
+
+def test_errors_since_filters_before_picking_the_latest():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    ests = [_est(1, "old", day=2, A=1), _est(1, "new", day=4, A=1)]
+    assert [i["estimate"] for i in ep.errors(ests, rows, since="2026-10-03T00:00:00+00:00", alive=DEAD)[0]] == ["new"]
+
+
+@pytest.mark.parametrize("since", ["", "日時でない"])
+def test_errors_since_without_a_time_filters_nothing(since):
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    assert len(ep.errors([_est(1, A=1)], rows, since=since, alive=DEAD)[0]) == 1
+
+
+def test_errors_since_drops_estimate_with_unreadable_at():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    ests = [{**_est(1, A=1), "at": "日時でない"}]
+    assert ep.errors(ests, rows, since="2026-10-01T00:00:00+00:00", alive=DEAD)[0] == []
+    assert len(ep.errors(ests, rows, alive=DEAD)[0]) == 1
+
+
+@pytest.mark.parametrize(
+    "ests,picked",
+    [
+        pytest.param([_est(1, "first", day=3, A=1), _est(1, "second", day=3, A=1)], "second", id="same-time-later-in-list"),
+        pytest.param([_est(1, "new", day=4, A=1), _est(1, "old", day=2, A=1)], "new", id="older-later-in-list"),
+        pytest.param([_est(1, "dated", day=4, A=1), {**_est(1, "bad", A=1), "at": "日時でない"}], "dated", id="unreadable-at-is-oldest"),
+    ],
+)
+def test_errors_picks_latest_estimate_of_an_issue(ests, picked):
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    assert [i["estimate"] for i in ep.errors(ests, rows, alive=DEAD)[0]] == [picked]
+
+
+def test_errors_only_the_latest_estimate_is_paired():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    assert ep.errors([_est(1, "old", day=3, A=1), _est(1, "new", day=7, A=1)], rows, alive=DEAD)[0] == []
+
+
+def test_errors_counts_only_runs_started_after_the_estimate():
+    rows: list[dict] = []
+    _done(rows, 1, 9999, day=3)  # 見積もりと同じ時刻に始まった実行は足さない
+    _done(rows, 1, 200, day=5)
+    assert ep.errors([_est(1, A=100)], rows, alive=DEAD)[0][0]["actual"]["A"] == 200.0
+
+
+def test_errors_failed_run_is_not_a_pair():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    rows[-1]["outcome"] = "失敗"
+    assert ep.errors([_est(1, A=1)], rows, alive=DEAD)[0] == []
+
+
+def test_errors_passes_alive_to_the_actuals():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    rows.pop()
+    seen: list[str] = []
+    ep.errors([_est(1, A=1)], rows, alive=lambda run: seen.append(run.run) or False)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("done", [None, ""])
+def test_errors_empty_done_means_the_implementation_phase(done):
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5, phase="設計")
+    assert ep.errors([_est(1, done=done, A=1)], rows, alive=DEAD)[0] == []
+    _done(rows, 1, 200, day=6, phase="実装")
+    assert ep.errors([_est(1, done=done, A=1)], rows, alive=DEAD)[0][0]["actual"]["A"] == 300.0
+
+
+def test_errors_done_decides_the_completing_phase():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5, phase="実装")
+    _done(rows, 1, 200, day=6, phase="検査")
+    assert ep.errors([_est(1, done="検査", A=1)], rows, alive=DEAD)[0][0]["actual"]["A"] == 300.0
+    assert ep.errors([_est(1, done="実装", A=1)], rows, alive=DEAD)[0][0]["actual"]["A"] == 100.0
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        pytest.param({"A": {"typical": None}}, id="typical-none"),
+        pytest.param({"A": {"typical": 0}}, id="typical-zero"),
+        pytest.param({"A": {"typical": "100"}}, id="typical-text"),
+        pytest.param({"A": {}}, id="typical-missing"),
+        pytest.param({"A": None}, id="value-none"),
+        pytest.param({}, id="value-missing"),
+        pytest.param(None, id="values-none"),
+    ],
+)
+def test_errors_ratio_is_none_without_a_usable_prediction(values):
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    items, metrics = ep.errors([{**_est(1), "values": values}], rows, alive=DEAD)
+    assert _ratio(items) == [None]
+    assert metrics["ratio_median_A"] is None
+
+
+def test_errors_bool_prediction_counts_as_a_number():
+    # NOTE: 現状固定。bool も数として割る。意図した振る舞いかは確かめていない。
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    assert _ratio(ep.errors([_est(1, A=True)], rows, alive=DEAD)[0]) == [100.0]
+
+
+def test_errors_ratio_is_none_when_the_actual_lead_time_is_unknown():
+    rows: list[dict] = []
+    _done(rows, 1, 100, day=5)
+    rows[0]["at"] = "日時でない"  # 始まりが読めないと L が出ない。見積もりの at も無ければ実行は除かれない
+    est = {k: v for k, v in _est(1, A=100, L=100).items() if k != "at"}
+    item = ep.errors([est], rows, alive=DEAD)[0][0]
+    assert item["actual"]["L"] is None and item["ratio"]["L"] is None
+    assert item["ratio"]["A"] == 1.0
+
+
+def test_errors_items_are_sorted_by_issue():
+    rows: list[dict] = []
+    _done(rows, 2, 100, day=5)
+    _done(rows, 1, 100, day=6)
+    assert [i["issue"] for i in ep.errors([_est(2, A=1), _est(1, A=1)], rows, alive=DEAD)[0]] == [1, 2]
+
+
+def test_errors_median_skips_pairs_without_a_ratio():
+    rows: list[dict] = []
+    for issue, a in ((1, 100), (2, 400), (3, 900)):
+        _done(rows, issue, a, day=5)
+    ests = [_est(1, A=100), _est(2, A=100), _est(3)]
+    assert ep.errors(ests, rows, alive=DEAD)[1]["ratio_median_A"] == 2.5
+
+
+def test_errors_median_keeps_a_zero_ratio():
+    rows: list[dict] = []
+    _done(rows, 1, 0, day=5)
+    _done(rows, 2, 100, day=5)
+    assert ep.errors([_est(1, A=100), _est(2, A=100)], rows, alive=DEAD)[1]["ratio_median_A"] == 0.5
+
+
+@pytest.mark.parametrize(
+    "pairs,expected",
+    [
+        pytest.param([(10, 100), (20, 200), (30, 300)], 1.0, id="same-order"),
+        pytest.param([(10, 300), (20, 200), (30, 100)], -1.0, id="reverse-order"),
+        pytest.param([(10, 100), (10, 200)], None, id="no-variance"),
+        pytest.param([(0, 100), (10, 200)], 1.0, id="zero-prediction-still-ranked"),
+        pytest.param([("x", 300), (10, 100), (20, 200)], 1.0, id="text-prediction-dropped"),
+        pytest.param([("x", 100), (10, 200)], None, id="one-pair-left"),
+    ],
+)
+def test_errors_rank_correlation(pairs, expected):
+    rows: list[dict] = []
+    ests = []
+    for issue, (predicted, actual) in enumerate(pairs, start=1):
+        _done(rows, issue, actual, day=5)
+        ests.append(_est(issue, A=predicted))
+    assert ep.errors(ests, rows, alive=DEAD)[1]["rank_correlation_A"] == expected
+
+
 def test_no_multiplier_constants():
     src = (SCRIPTS / "lib" / "estimate_predict.py").read_text(encoding="utf-8")
     for word in ("multiplier", "speedup", "person_day", "人日"):
