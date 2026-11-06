@@ -6053,6 +6053,20 @@
       ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "分割した文書",
+      "context": "ndf-workflow",
+      "meaning": "1 つの課題の設計を複数ファイルに分けたときの、先頭以外の設計文書（`issue-<番号>-design-<名前>.md`）",
+      "source": "",
+      "pending_source": "issues/issue-2453-design.md"
+    },
+    {
+      "term": "セルの形の誤り",
+      "context": "ndf-workflow",
+      "meaning": "設計の結果の「実装する」の行の触るファイルのセルが、定めた書式から外れていること。設計の結果のステージが止まる",
+      "source": "",
+      "pending_source": "issues/issue-2453-design.md"
     }
   ]
 }
