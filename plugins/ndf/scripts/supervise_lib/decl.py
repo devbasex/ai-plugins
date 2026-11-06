@@ -20,7 +20,7 @@ from pydantic import ConfigDict, Field, StrictInt
 
 # プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は plan.py の docstring の「宣言」の節にある
 WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
-SUPERVISE_DECL = "supervise.json"  # test・sync_checks・format・release・queue・impl_timeout・refactor_budget_minutes
+SUPERVISE_DECL = "supervise.json"  # test・sync_checks・format・release・queue・impl_timeout・impl_stall_seconds・refactor_budget_minutes
 GLOSSARY_DECL = "glossary.json"  # 用語集の設定（あれば glossary.py gate で用語集が揃っているかを見る）
 
 
@@ -57,22 +57,24 @@ def supervise_shape(decl: dict) -> SuperviseDecl:
 
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
 # 宣言と引数で同じ名前（a.<名前>）を使う、ステップの時間の枠（#1916）
-STEP_BUDGETS = ("impl_timeout", "refactor_budget_minutes")
+STEP_BUDGETS = ("impl_timeout", "impl_stall_seconds", "refactor_budget_minutes")
 
 
 class StepBudgets(schema.Shape):
-    """.ndf/supervise.json の実装の上限（impl_timeout・秒）と想定最大時間（refactor_budget_minutes・分）。null は無い。"""
+    """.ndf/supervise.json の実装の上限（impl_timeout・秒）・無進捗の許容時間（impl_stall_seconds・秒）・
+    想定最大時間（refactor_budget_minutes・分）。null は書かないのと同じ。"""
 
     impl_timeout: PositiveInt | None = None
+    impl_stall_seconds: PositiveInt | None = None
     refactor_budget_minutes: PositiveInt | None = None
 
 
 def step_budgets(decl: dict) -> StepBudgets:
-    """supervise.json の 2 項目の形を見る（JSON の 1 以上の整数か null）。違えば項目の名前を含む DeclError。"""
+    """supervise.json の 3 項目の形を見る（JSON の 1 以上の整数か null）。違えば項目の名前を含む DeclError。"""
     try:
         return schema.load_shape(StepBudgets, {k: decl.get(k) for k in STEP_BUDGETS})
     except schema.ShapeError as e:
-        raise DeclError(f"supervise.json: {e}（impl_timeout と refactor_budget_minutes は 1 以上の整数で書く）") from e
+        raise DeclError(f"supervise.json: {e}（impl_timeout・impl_stall_seconds・refactor_budget_minutes は 1 以上の整数で書く）") from e
 
 
 def read_decl(roots, name: str) -> dict:
@@ -245,7 +247,8 @@ def apply_decls(a) -> None:
     - 整形（a.format）: supervise.json の format（無ければ計画に format のステップを置かない）
     - 用語集の有無（a.glossary_ready）: `glossary_ready`（真なら実装の指示に用語集と突き合わせる行を入れる）
     - 配布（a.release）: supervise.json の release
-    - 実装の上限（a.impl_timeout）と想定最大時間（a.refactor_budget_minutes）: 引数 → supervise.json の同じ名前の項目。
+    - 実装の上限（a.impl_timeout）・無進捗の許容時間（a.impl_stall_seconds）・想定最大時間（a.refactor_budget_minutes）:
+      引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
 
     リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
@@ -268,8 +271,6 @@ def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
     """引数を優先し、無ければ宣言の値をそのまま写す項目。"""
     sv_test = supervise_shape(sv).test
     budgets = step_budgets(sv)
-    if not getattr(a, "impl_timeout_source", None):  # 実装の上限の出所（#1856。スプリントは各計画へ引き継ぐ）
-        a.impl_timeout_source = "arg" if getattr(a, "impl_timeout", None) else ("decl" if budgets.impl_timeout else None)
     for k in STEP_BUDGETS:
         setattr(a, k, getattr(a, k, None) or getattr(budgets, k))
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
@@ -380,7 +381,6 @@ def decl_fields(a) -> dict:
         "test_limits",
         "test_note",
         "routes",
-        "impl_timeout_source",
         *STEP_BUDGETS,
     )
     return {k: getattr(a, k, None) for k in keys}

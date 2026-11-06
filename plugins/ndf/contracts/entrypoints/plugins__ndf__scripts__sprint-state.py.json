@@ -23,6 +23,7 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_FACTORY_RUN",
     "NDF_LOOP_EXCLUDE",
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
@@ -48,9 +49,7 @@
     {
       "file": "estimate.json",
       "keys": [
-        "min_samples",
-        "records_dir",
-        "window"
+        "records_dir"
       ]
     },
     {

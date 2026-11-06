@@ -31,7 +31,6 @@ from sprint_loop_record import (
     pending_laps,
     waiting_only,
     IMMEDIATE_STOPS,
-    RELEASE_PENDING_MAX,
     resume_command,
     stopped_result,
     stop_and_report,
@@ -366,8 +365,6 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     if got is not None:
         return got
     settle_approved_designs(env, rec)  # 選定の前に、承認済みで未マージの設計 PR をマージし直す（#2507）
-    if len(pending_laps(rec)) >= rec.get("release_pending_max", RELEASE_PENDING_MAX):
-        return stop_and_report(env, rec, before, waiting_only(rec, "release_pending_max"), "答えの無い保留の周回が上限に達した（待ちだけ）")
     stop = held_stop(rec, boundary_stop(env, rec))
     if stop:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")

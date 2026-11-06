@@ -20,7 +20,7 @@
 | オーガナイザーと一時レーンの数え方（役割 `organizer` / `helper`） | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) の決定と理由、parallel.md の「数え方」 |
 | 用語（並列の計画・レーン・オーガナイザー・配布の依頼・一時レーン・保留の周回・配布待ち・質問待ち） | [docs/glossary.md](../glossary.md)（正本は `docs/glossary/glossary.json`） |
 | 配布の依頼の形 | `plugins/ndf/contracts/forms/parallel-request.json` |
-| 環境変数の宣言 | `plugins/ndf/contracts/env/NDF_PARALLEL_MAX_PLANS.json`・`NDF_PARALLEL_STALL_MINUTES.json`・`NDF_PARALLEL_POLL.json`・`NDF_PARALLEL_RELAY.json`・`NDF_RELAY_MAX_NAMED.json` |
+| 環境変数の宣言 | `plugins/ndf/contracts/env/NDF_PARALLEL_MAX_PLANS.json`・`NDF_PARALLEL_STALL_MINUTES.json`・`NDF_PARALLEL_SPAWN_REFUSALS.json`・`NDF_PARALLEL_POLL.json`・`NDF_PARALLEL_RELAY.json`・`NDF_RELAY_MAX_NAMED.json` |
 
 ## 概要
 
@@ -83,6 +83,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | 並列の計画の下では、区分つきの問いはオーガナイザーだけが出す。レーンの問いは問いの hook が送る | レーンは問いで止まらず別の作業へ進める。conductor の手順だけで送ると、手順に書いていない場所の問いが漏れる。送れなければ今どおり通すので、DBOS が読めないときも今の振る舞いに戻る |
 | オーガナイザーは、設計の承認の答えで設計 PR をマージするほかは作業を持たない。答えの後の処理は持ち主のレーンが、持ち主のいない共有の作業は一時レーン（同時に 1 本）が行う | オーガナイザーに作業を積むと、その間は問いと配布の取りまとめが止まる。空いているレーンへ移す形は、空きの判定と他のレーンの周回への割り込みが要る |
 | 計画名での停止は `relay.py` ではなく `parallel.py stop` に置く | 統括役はリポジトリをまたぐ層で、並列の計画を知らない。統括役が知る語を役割の印だけに留める |
+| `parallel.py start` のたびに実行環境を調べ、結果の `environment` に候補を載せる | レーンの数は開始する計画の `lanes` の数を渡す（まだ動いていないため）。宣言は書かず、変えるのは人である（`loop.md`・#2505） |
 | レーンの数の上限は `NDF_RELAY_MAX_NAMED` から読み、依存のあるレーンも数える | 統括役が実際に断る値と同じにする。同時に動く本数を依存から求めると、起動の前に確かめられない |
 | プランの本数の合計の上限は `NDF_PARALLEL_MAX_PLANS`（既定 6） | 2026-09-25 の実測（8 コア・30 GB で 6 本）。マシンごとに違うため環境変数で変える（2026-11-03 の承認ゲート 1 で利用者が決めた） |
 | 異常は、耐久ワークフローの観測と依頼の印で見つけ、人が決めることは問いに、直す作業は持ち主のレーンか一時レーンへ返す | 新しい仕組みを足さず、オーガナイザーが作業を持たないまま扱える |
@@ -117,7 +118,8 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | --- | --- |
 | `plugins/ndf/scripts/parallel.py` | 並列の計画と進行の CLI。副命令を下の部品へ振り分け、統一 JSON レポートを 1 行で返す |
 | `plugins/ndf/scripts/lib/parallel_plan.py` | pydantic のモデル（`ParallelPlan`・`Lane`・`LoopInput`・`SprintInput`）と検査、`plan.md` と引継ぎ文書の描画、起動できるレーンの判定（`ready_lanes`） |
-| `plugins/ndf/scripts/lib/parallel_run.py` | 耐久ワークフロー `parallel` と耐久ステップ（起動・観測・配布を組む・停止・要約）。一時レーンが流すもの（`helper_task`） |
+| `plugins/ndf/scripts/lib/parallel_run.py` | 耐久ワークフロー `parallel` と耐久ステップ（起動・観測・配布を組む・停止・要約） |
+| `plugins/ndf/scripts/lib/parallel_helper.py` | 一時レーンの組み立て: 起こす 1 行（`helper_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`） |
 | `plugins/ndf/scripts/lib/parallel_release.py` | まとめた配布: 範囲の Pull Request をレーンへ対応づける（`present`・`map_lanes`）、先頭が進んだかを比べる 1 つの関数（`moved`）、範囲で答えられる依頼（`answerable`）、提示のプランと本番のプランの組み立て（`build_plans`・`present_gate_steps`）、配布の依頼のプラン（`plan_release_request`） |
 | `plugins/ndf/scripts/lib/parallel_lane.py` | レーンの側: 自分が属する計画の判定（`lane_of`）・送り手の資格（`sender_of`）・本番チャネルにあるかの判定（`merged_on_production`）・依頼を送る（`send_release_request`・`request_gate1`・`request_ask`・`request_gate2`）・答えを読む（`read_answer`・`answers_of`）・プランの本数（`lane_plans`・`queue_max`） |
 | `plugins/ndf/scripts/lib/parallel_files.py` | DBOS を読まずにファイルだけで、レーンか一時レーンかを決める（`lane_name_in_plans`。問いの hook の 10 秒の上限の中で使う） |
@@ -167,7 +169,7 @@ graph TD
 
 1. 最初に計画を読んで検査し、`relay.py role organizer --plan <計画名>` を打つ
 2. 停止の指示を受けていて、流れている配布が無いか `--force` なら、起動済みのレーン（`--force` なら一時レーンも）へ `relay.py stop` を打ち、`stopped` で終わる
-3. 起動の条件がそろったレーンを `relay.py spawn --name <レーン> --json -- <最初の入力>` で起動する。3 回続けて断られるたびに `kind: spawn` の問いを立てる
+3. 起動の条件がそろったレーンを `relay.py spawn --name <レーン> --json -- <最初の入力>` で起動する。`NDF_PARALLEL_SPAWN_REFUSALS`（既定 3）回続けて断られるたびに `kind: spawn` の問いを立てる
 4. 流れている配布が無く `pending` があれば、出せた配布の範囲で答えられる依頼に答える。残りがあれば、まとめた配布を組む（下の「まとめた配布」）
 5. I11 を満たせば、役割の印を消して `finished` で終わる
 6. `inbox` を最長 60 秒（`NDF_PARALLEL_POLL`。配布の途中は 30 秒）待つ。配布の途中なら `resume` も読む
@@ -265,6 +267,7 @@ stateDiagram-v2
 | `NDF_RELAY_MAX_NAMED` | 3 | レーンの数の上限（統括役の上限と同じ値）。正の整数でなければ既定を使い、検査の結果に書く |
 | `NDF_PARALLEL_MAX_PLANS` | 6 | レーンのプランの本数の合計の上限。扱いは同上 |
 | `NDF_PARALLEL_STALL_MINUTES` | 60 | 承認待ちでも止まってもいないレーンを「動かない」として問うまでの分。状態の一覧の失敗が続くことを問うまでの分と、次に問うまでの間隔にも使う |
+| `NDF_PARALLEL_SPAWN_REFUSALS` | 3 | レーンの起動の断りが何回続いたら問うか。1 以上の整数でなければ既定を使う |
 | `NDF_PARALLEL_POLL` | 60 | `inbox` と `resume` を待つ秒（テストで縮める） |
 | `NDF_PARALLEL_RELAY` | — | 統括役の CLI の打ち方の差し替え（テスト用） |
 | `NDF_RELAY_NAME`・`NDF_RELAY_DIR` | — | レーンの判定と役割のファイルの置き場（ラッパーが立てる） |
@@ -296,7 +299,7 @@ stateDiagram-v2
 | オーガナイザーのセッションが切り替わる・`run` が落ちる | 新しいセッションが同じ 1 行で始まる | `start` が動いている `run` を指すか、切り離して起動し直す。耐久ワークフローは記録から続き、居ない間に届いたメッセージを読む。`wait --after 0` が答えていない問いを返す |
 | 動かないレーン | 観測で、`relay.py ls` の `at` が `NDF_PARALLEL_STALL_MINUTES` より前で、承認待ちでも止まってもいない | `kind: stall` の問い（起こし直す / 止める / 待つ）。「待つ」の後は次の区切りまで問わない |
 | 配布の途中で一時レーンが止まる | 観測で一時レーンが `stopped`、`settle` も `gate2` の依頼も無い | `kind: helper` の問い（続きから起こし直す / 止める）。「止める」は配布を `failed` で締める |
-| レーンの起動が断られ続ける | `relay.py spawn` の断りが 3 回続く | `kind: spawn` の問い。「止める」は止まったレーンとして数える |
+| レーンの起動が断られ続ける | `relay.py spawn` の断りが `NDF_PARALLEL_SPAWN_REFUSALS`（既定 3）回続く | `kind: spawn` の問い。「止める」は止まったレーンとして数える |
 | 状態の一覧が失敗する | 観測で `relay.py ls --json` が 0 以外で終わる | その回の観測を捨て、レーンの状態・最後に観測した時刻・起こし直しの待ちを変えず、`finished` でも終えない。失敗が `NDF_PARALLEL_STALL_MINUTES` より長く続くと、区切りごとに `kind: observe` の問い（ラッパーの環境を作り直す / 待つ）を立てる。本文に一覧の終了コードと標準エラーの末尾 1 行が入る。一覧が成功に戻れば、答えていない問いを外す。問いの無い版の記録を再生する間は問わない（記録の呼び出しの順を保つ） |
 | 同じ原因の問いが複数のレーンから届く | 「依頼と答え」の正規化した鍵が同じ | 1 つにまとめ、答えを全レーンへ配る |
 | 手元が待ちだけになったループのレーン | 周回の境で、選べる課題が無く保留の周回か答えの無い設計の承認がある | ループは `waiting_only` で止まり、統括役の枠を空ける。答えの後、オーガナイザーが起こす（loop.md） |

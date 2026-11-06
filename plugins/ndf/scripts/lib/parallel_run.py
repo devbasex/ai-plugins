@@ -26,13 +26,11 @@ import durable
 import parallel_lane as pl
 import parallel_plan as pp
 import parallel_release as pr
-from parallel_repo import dev_version, git_head
+from parallel_files import RELAY
+from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
 from parallel_question import cause_of
+from parallel_repo import dev_version, git_head
 from sprint_loop_names import LOOP_DIR, PENDING
-
-HERE = Path(__file__).resolve().parent.parent
-RELAY = HERE / "relay.py"
-SUPERVISE = f"python3 {HERE / 'supervise.py'}"
 
 
 def poll_seconds() -> float:
@@ -96,6 +94,15 @@ def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
 
 STALL_MINUTES = 60  # 動かないレーンを問うまでの分（設計の失敗の 3 番の既定）
 SPAWN_REFUSALS = 3  # 起動の断りがこの回数続いたら問う（設計の失敗の 17 番）
+
+
+def spawn_refusals() -> int:
+    """起動の断りを問うまでの回数（`NDF_PARALLEL_SPAWN_REFUSALS` で変えられる。不正な値なら既定の 3）。"""
+    try:
+        n = int(os.environ.get("NDF_PARALLEL_SPAWN_REFUSALS") or SPAWN_REFUSALS)
+    except ValueError:
+        return SPAWN_REFUSALS
+    return n if n >= 1 else SPAWN_REFUSALS
 
 
 def stall_seconds() -> float:
@@ -501,57 +508,6 @@ class _Run:
             self.pause("notice", lanes=[], attach=[])
 
 
-def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None) -> str:
-    """一時レーンを起こす 1 行（`metrics.spawn`）。pending はループ名で、保留の周回の残りを流す一時レーン（異常系 11）。"""
-    what = f"pending {pending}" if pending else f"{n} {k}"
-    helper = pr.helper_name(name, n)
-    # 終わりに自分のラッパーを止める（判断 fca6fe464619 の (a)）。止めないと対話の claude が入力待ちで残り、続きの一時レーンが断られる
-    end = f"[ndf-parallel] helper-done {name} の行を出し、python3 {RELAY} stop {helper} で自分のラッパーを止めたとき"
-    first = f"/goal /ndf:development-workflow --parallel-helper {name} {what} -- 終わり: {end}"
-    return f"python3 {RELAY} spawn --name {helper} --role helper --plan {name} --json -- '{first}'"
-
-
-def present_approval(d: Path) -> str:
-    """提示のプランの承認資料の絶対パス（ステップ `present` の `--approval` と `cwd` から読む）。読めなければ空。"""
-    import re
-    import shlex
-
-    try:
-        steps = json.loads((Path(d) / "present.json").read_text(encoding="utf-8")).get("steps") or []
-    except (OSError, ValueError):
-        return ""
-    step = next((x for x in steps if isinstance(x, dict) and x.get("id") == "present"), {})
-    m = re.search(r"--approval (\S+)", step.get("cmd") or "")
-    if not m:
-        return ""
-    path = Path(shlex.split(m.group(1))[0])
-    return shlex.quote(str(path if path.is_absolute() else Path(step.get("cwd") or ".") / path))
-
-
-def helper_task(main: Path, name: str, n: int, k: int) -> dict:
-    """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
-    配布の途中の知らせに添えた `release`）が同じ連番と提示の `confirmed` なら確定の後の 3 手、そうでなければ提示。
-
-    - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランが承認ゲート 2 で
-      止まったかを見て、止まっていれば `gate2`（承認ゲート 2 の依頼を送る）、流れ切れば `settle` を打つ
-    - 確定の後（`phase: confirmed`）: `pipeline` は答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。
-      終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る"""
-    ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0) or {}
-    launch = ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
-    d = pr.release_dir(main, name, n, k)
-    py = f"python3 {HERE / 'parallel.py'}"
-    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
-    if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k:
-        done = d / "release-done.json"
-        gate = f"python3 {HERE / 'sprint-state.py'} gate {d / 'answer.json'} '関門 2' --what 'まとめた配布 {n} の提示 {k}' --by user --outcome approved"
-        steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
-        return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
-                "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
-    done = d / "done.json"
-    return {**out, "phase": "present", "pipeline": f"{pr.pipeline_cmd(SUPERVISE, d)} && {SUPERVISE} wait {done}",
-            "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
-
-
 @durable.workflow(name="parallel")
 def parallel_workflow(main: str, name: str) -> dict:
     init = step_init(main, name)
@@ -636,12 +592,13 @@ def _spawn_ready(run: _Run, main: str) -> None:
             run.lanes[n].update(got)
             if got.get("refused"):
                 run.refusals[n] = run.refusals.get(n, 0) + 1
-                if run.refusals[n] % SPAWN_REFUSALS == 0:  # 3 回続けて断られるたびに理由を添えて問う（異常系 17）
+                limit = spawn_refusals()
+                if run.refusals[n] % limit == 0:  # 既定 3 回続けて断られるたびに理由を添えて問う（異常系 17）
                     run.ask(
                         "spawn",
                         f"{run.name}-spawn-{n}-{run.refusals[n]}",
                         n,
-                        f"レーン {n} を {SPAWN_REFUSALS} 回起動できない（{got['refused']}）",
+                        f"レーン {n} を {limit} 回起動できない（{got['refused']}）",
                         ["起こし直す", "止める"],
                     )
 
@@ -775,3 +732,11 @@ def run_plan(main: Path, name: str) -> tuple[dict, bool]:
     if st is None:
         durable.start(durable.WorkflowRef(wid, 1, "start"), parallel_workflow, str(main), name)
     return durable.output_of(wid), resumed
+
+
+def environment_report(main: Path, plan: pp.ParallelPlan) -> tuple[dict, list[dict]]:
+    """開始のときの実行環境の報告と結果の項目。レーンがまだ動いていないので計画の数を渡す。"""
+    import run_environment
+
+    report = run_environment.survey(main, lanes=len(plan.lanes))
+    return report, run_environment.notes(report)
