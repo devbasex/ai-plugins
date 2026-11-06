@@ -5838,6 +5838,111 @@
       "context": "ndf-workflow",
       "meaning": "スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる",
       "pending_source": "issues/issue-2619-requirements.md"
+    },
+    {
+      "term": "デプロイ",
+      "context": "ndf-release",
+      "meaning": "開発・本番を問わず、環境に変更を届けること。本番へのデプロイだけをリリースと呼ぶ",
+      "source": "",
+      "pending_source": "issues/issue-2620-requirements.md"
+    },
+    {
+      "term": "書いた日の記録",
+      "context": "ndf-workflow",
+      "meaning": "書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録",
+      "source": "",
+      "pending_source": "issues/issue-2620-requirements.md"
+    },
+    {
+      "term": "開発版のデプロイ",
+      "context": "ndf-release",
+      "meaning": "開発版のチャネルへ版を出すことと、検証の環境への反映。フェーズの名前でもある",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "デプロイなし",
+      "context": "ndf-release",
+      "meaning": "リリース記録の段階の値。どの環境へも届けずに工程を終えたこと",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリース待ち",
+      "context": "ndf-workflow",
+      "meaning": "リリースの依頼を送り、答えを待たずに締めた周回の結果",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリースの依頼",
+      "context": "ndf-workflow",
+      "meaning": "レーンがリリース承認の手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリースの実行",
+      "context": "ndf-factory",
+      "meaning": "Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "まとめたリリース",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが複数のレーンのリリースの依頼をまとめた 1 回のリリース",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "リリース対象",
+      "context": "ndf-release",
+      "meaning": "リリースで利用者へ届くファイルの集まり。ai-plugins では plugins/ と .claude-plugin/",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "アーティファクト",
+      "context": "ndf-release",
+      "meaning": "ビルドや署名で作る、公開操作で届ける生成物（パッケージ・署名したバイナリなど）",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "導入先のランタイム",
+      "context": "ndf-release",
+      "meaning": "マーケットプレイスのプラグインを導入できる形で届けるランタイム（Claude Code と Codex）",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "利用先のリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "NDF を導入して使っているリポジトリ",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "利用者向けの変化なし",
+      "context": "ndf-release",
+      "meaning": "Pull Request の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "旧い値の読み替え",
+      "context": "ndf-workflow",
+      "meaning": "版を上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "禁止語",
+      "context": "ndf-workflow",
+      "meaning": "用語集の設定が、検査する範囲で新しく書くことを禁じた語",
+      "source": "",
+      "pending_source": "issues/issue-2620-design.md"
     }
   ]
 }
