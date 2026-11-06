@@ -21,7 +21,6 @@ from supervise_lib.verify_steps import with_margin  # noqa: E402
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
-IMPL_DEFAULT = 3600  # 変更の前の impl の timeout（#1916 の AC1・AC8 は変えないことを求める）
 
 
 def repo(tmp_path, **sv) -> Path:
@@ -67,11 +66,20 @@ def assert_budget(refactor: dict, minutes: int) -> None:
     assert refactor["timeout"] == with_margin(minutes * 60)
 
 
+@pytest.mark.parametrize("by", ["arg", "decl", "null"])
+def test_impl_stall_comes_from_the_argument_or_the_declaration(tmp_path, by):
+    root = repo(tmp_path, **({"impl_stall_seconds": 900} if by == "decl" else {"impl_stall_seconds": None} if by == "null" else {}))
+    extra = ("--impl-stall", "900") if by == "arg" else ()
+    assert new_impl(root, tmp_path / "i.json", *extra).returncode == 0
+    assert steps(tmp_path / "i.json")["impl"]["stall"] == (1800 if by == "null" else 900)
+
+
 def test_without_values_impl_and_refactor_cmd_stay_and_refactor_timeout_follows_the_default_budget(tmp_path):
-    """AC3・AC8: 値が無ければ impl の timeout と refactor の cmd は変更前のまま、refactor の timeout は既定の予算から出る。"""
+    """値が無ければ impl は経過時間の上限を持たず無進捗の許容時間 1800 秒で動き、refactor の timeout は既定の予算から出る。"""
     root = repo(tmp_path)
     assert new_impl(root, tmp_path / "i.json").returncode == 0
-    assert steps(tmp_path / "i.json")["impl"]["timeout"] == IMPL_DEFAULT
+    impl = steps(tmp_path / "i.json")["impl"]
+    assert "timeout" not in impl and impl["stall"] == 1800 and "estimate" not in impl
     assert new_check(root, tmp_path / "c.json").returncode == 0
     refactor = steps(tmp_path / "c.json")["refactor"]
     assert "--budget-minutes" not in refactor["cmd"]
@@ -135,10 +143,10 @@ def test_sprint_and_close_pass_the_same_values_to_every_child_plan(tmp_path, by)
         assert_budget(r, 45)
 
 
-def test_sprint_without_values_keeps_the_impl_timeout(tmp_path):
-    """AC8"""
+def test_sprint_without_values_has_no_elapsed_limit(tmp_path):
     plans = sprint_plans(repo(tmp_path), tmp_path / "s")
-    assert [s["timeout"] for s in plans["impl"]] == [IMPL_DEFAULT, IMPL_DEFAULT]
+    assert [s.get("timeout") for s in plans["impl"]] == [None, None]
+    assert [s["stall"] for s in plans["impl"]] == [1800, 1800]
     for r in plans["refactor"]:
         assert "--budget-minutes" not in r["cmd"]
 
@@ -177,9 +185,9 @@ def test_a_bad_declaration_stops_without_writing_the_plan_even_with_the_argument
 
 def test_help_lists_the_optional_settings(tmp_path):
     for kind, keys in {
-        "sprint": ["impl_timeout", "refactor_budget_minutes"],
+        "sprint": ["impl_timeout", "impl_stall_seconds", "refactor_budget_minutes"],
         "check": ["refactor_budget_minutes"],
-        "impl": ["impl_timeout"],
+        "impl": ["impl_timeout", "impl_stall_seconds"],
     }.items():
         out = subprocess.run([PY, str(SUPERVISE), "new", kind, "--help"], capture_output=True, text=True, cwd=tmp_path).stdout
         assert "任意の設定" in out and all(k in out for k in keys), kind

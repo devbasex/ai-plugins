@@ -7,13 +7,17 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
+import clock
 import gh_rest
+import slow_step
 import usage_aggregate
 from loop_drive import review_answer
 from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
+from supervise_lib.progress_watch import ProgressWatch
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, deliver_skills, last_json
 import project_mvv
@@ -26,6 +30,18 @@ TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足�
 
 def _timeout(step: dict) -> int:
     return step.get("timeout", DEFAULT_TIMEOUT)
+
+
+def _elapsed_limit(step: dict) -> int | None:
+    """worker の経過時間の上限（秒）。無進捗で打ち切るステップ（`stall`）は書いたときだけ持つ。"""
+    return step.get("timeout") if step.get("stall") else _timeout(step)
+
+
+def note_stalled(ctx, step: dict, stall: int, last_at: float, last_signal: str) -> None:
+    """無進捗の打ち切りを進捗ログの `stalled` の行とステップの結果の `stalled` に残す（時間切れと分ける）。"""
+    ctx.state.cur["stalled"] = {"seconds": round(time.time() - last_at, 1), "last_signal": last_signal}
+    at = clock.iso(datetime.fromtimestamp(last_at).astimezone())
+    ctx.state.progress_write({"kind": "stalled", "step": step.get("id"), "stall": stall, "last_at": at, "last_signal": last_signal})
 
 
 def note_runtimes(ctx, step: dict, started: float) -> None:
@@ -67,10 +83,11 @@ class WorkStep:
         rt = step.get("runtime")
         system = WORK_SYSTEM + block + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
-            return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), serena=bool(step.get("serena")))
+            return self.call_claude_worker(ctx, step, system, prompt, cwd)
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
         pf.write_text(system + "\n\n" + prompt)
         started = time.time()
+        limit = _elapsed_limit(step)
         cmd = [
             sys.executable,
             str(paths.EXTERNAL_AI),
@@ -85,16 +102,19 @@ class WorkStep:
             "--workdir",
             cwd,
             "--timeout",
-            str(_timeout(step)),
+            str(limit or 0),  # 0 は経過時間の上限が無い
+            *(["--stall-timeout", str(step["stall"])] if step.get("stall") else []),
         ]
         # 使用量の帳簿の呼び出し元（#1953 の決定 7）。行は external-ai.py の起動の共有処理がそのランタイムの帳簿へ書く
         env = {**os.environ, "NDF_USAGE_SOURCE": "supervise", "NDF_USAGE_KIND": "work"}
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         try:
-            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=_timeout(step) + TICK_GRACE, env=env)
+            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=limit + TICK_GRACE if limit else None, env=env)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
+        if step.get("stall") and ((out.get("items") or [{}])[0]).get("result") == "stalled":
+            note_stalled(ctx, step, step["stall"], time.time() - step["stall"], "monitor_log")
         text = of.read_text() if of.is_file() else out.get("summary", "")
         return {
             "ok": out.get("status") == "ok",
@@ -105,6 +125,19 @@ class WorkStep:
             "seconds": round(time.time() - started, 1),
             "runtime": rt,
         }
+
+    def call_claude_worker(self, ctx, step: dict, system: str, prompt: str, cwd: str):
+        """最小構成の claude -p を起動する。`stall` のステップは会話を残し、進みの観測が締め切りを動かす。"""
+        serena = bool(step.get("serena"))
+        if not step.get("stall"):
+            return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), serena=serena)
+        st = ctx.state
+        watch = ProgressWatch(step["stall"], st.session, lambda: st.pcount["worker"], lambda: slow_step.commit_count(cwd), step.get("timeout"))
+        res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, watch.first_timeout(), serena=serena, watch=watch)
+        if res.get("timed_out") and watch.stalled():
+            note_stalled(ctx, step, watch.allowance, watch.last_at, watch.last_signal)
+            res["text"] = f"無進捗で打ち切り（最後の進み: {watch.last_signal}。許容 {watch.allowance} 秒）"
+        return res
 
     def concurrent_rule(self, ctx, step: dict) -> str:
         """実装の指示文へ足す除外の行（#1248・#1674）。担当を起動する時点で走っている他のプランの `触るファイル`
