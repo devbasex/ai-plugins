@@ -47,6 +47,7 @@ EVIDENCE = ".ndf-evidence"
 EXEC_TIMEOUT = 60  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
 UP_TIMEOUT = 300  # テスト環境の起動の上限（秒）。実測の最長 49 秒の 6 倍で、遅れの見張りの既定の下限と同じ（#2567 の決定 3）
 STOP_GRACE = 5  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
+TAG_KEPT = 3  # `worktree-testenv.sh down` が基準のタグを消せず、破棄へ進まなかったときの終了コード
 TAIL_CHARS = 300  # 理由へ載せる標準エラーの末尾の文字数（伏せ字の後に数える）
 
 # 作業ディレクトリごとの、到達を確かめた後に足す環境（1 プロセスで 1 回だけ確かめる）
@@ -298,7 +299,8 @@ def discard_testenv(worktree: str | Path) -> tuple[bool, str | None]:
     """worktree を消す前に公開を閉じ、テスト環境を破棄する。(worktree を外してよいか, 理由) を返す。
 
     公開を閉じられなければ破棄せず (False, 理由)。閉じる手段は worktree で動くため、外すと閉じられない。
-    破棄できなければ (True, 理由)。割り当ても公開も無ければコンテナ実行系を呼ばず (True, None)。
+    破棄できなければ (True, 理由)。時間切れでも基準のタグは破棄の前に消えている。タグを消せなければ
+    破棄せず (False, 理由)。割り当ても公開も無ければコンテナ実行系を呼ばず (True, None)。
     ボリュームを消すかは `worktree-testenv.sh down` が宣言で決める。
     """
     wt = str(Path(worktree).resolve())
@@ -314,6 +316,8 @@ def discard_testenv(worktree: str | Path) -> tuple[bool, str | None]:
     if not environment:
         return True, None
     code, _, err = _testenv("down", wt, timeout=UP_TIMEOUT)
+    if code == TAG_KEPT:
+        return False, f"テスト環境の基準のタグを消せない: {environment}（{_tail(err)}）。台帳を直して worktree-testenv.sh down {wt} を打つ"
     if code != 0:
         return True, f"テスト環境を破棄できない: {environment}（{_tail(err) or f'{UP_TIMEOUT} 秒で終わらなかった'}）"
     return True, None

@@ -47,6 +47,7 @@ case "$1" in
     ;;
   down)
     [ ! -d "${NDF_WORKTREE:-/nonexistent}" ] || echo "down: worktree present" >> "$FAKE_STATE/calls"
+    [ -z "${FAKE_DOWN_SLEEP:-}" ] || sleep "$FAKE_DOWN_SLEEP"
     [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo "${FAKE_DOWN_MESSAGE:-device busy}" >&2; exit 1; }
     rm -f "$FAKE_STATE/running"
     ;;
@@ -637,6 +638,38 @@ def test_a_failed_down_hides_the_credentials(main_repo: Path, worktree: Path, fa
     ok, why = container_reach.discard_testenv(worktree)
 
     assert ok and "s3cret-value" not in why and "***@ghcr.io" in why
+
+
+def test_a_down_cut_off_by_the_limit_drops_the_tag_for_a_recreated_worktree(
+    main_repo: Path, worktree: Path, fake: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    declare(main_repo, {"expose": EXPOSE})
+    wt_env(["up", str(worktree), "--tag", "golden-old"], fake, main_repo)
+    monkeypatch.setattr(container_reach, "UP_TIMEOUT", 3)
+    monkeypatch.setenv("FAKE_DOWN_SLEEP", "30")
+
+    ok, why = container_reach.discard_testenv(worktree)
+
+    assert ok and "3 秒で終わらなかった" in why
+    assert tag_of(main_repo, worktree) is None and registry(main_repo)[-1]["released_at"] is None
+    git(main_repo, "worktree", "remove", "--force", str(worktree))
+    git(main_repo, "worktree", "add", "-q", str(worktree), "feature/x")
+    leftover(fake)
+    wt_env(["up", str(worktree), "--tag", "golden-public"], fake, main_repo)
+    assert wt_env(["expose", str(worktree)], fake, main_repo).returncode == 1
+
+
+def test_a_tag_that_cannot_be_dropped_keeps_the_worktree(
+    worktree: Path, monkeypatch: pytest.MonkeyPatch, main_repo: Path, fake: dict
+) -> None:
+    declare(main_repo, {})
+    assigned = json.loads(wt_env(["env", str(worktree)], fake, main_repo).stdout)
+    answers = iter([(0, "", ""), (container_reach.TAG_KEPT, "", "基準のタグを台帳から消せませんでした\n")])
+    monkeypatch.setattr(container_reach, "_testenv", lambda *a, **k: next(answers))
+
+    ok, why = container_reach.discard_testenv(worktree)
+
+    assert not ok and assigned["environment"] in why and f"worktree-testenv.sh down {worktree.resolve()}" in why
 
 
 def test_no_expose_does_not_run_the_close_command(main_repo: Path, worktree: Path, fake: dict) -> None:

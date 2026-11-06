@@ -325,7 +325,7 @@ worktree レジストリの形は変えない。detached HEAD の worktree の�
 | `false`・真偽値以外（文字列の `"true"` を含む） | `compose down`。ボリュームは残る | `compose down --volumes` |
 | 無し・`null`・`true` | `compose down --volumes` | `compose down --volumes` |
 
-破棄に失敗した `down` は、今のとおりスロットを解放せず終了コード 1 で返す。その前に行の `golden_tag` を消す（`_wt_slot_set_field` で `del(.golden_tag)`）。消せなければその旨を標準エラーへ足し、終了コードは 1 のままである。
+`down` は `compose down` の前に行の `golden_tag` を消す（`_wt_slot_set_field` で `del(.golden_tag)`）。行にタグが無ければ台帳を書かない。消せなければ破棄へ進まず、その旨を標準エラーへ出して終了コード 3 で返す。破棄に失敗した `down` は、今のとおりスロットを解放せず終了コード 1 で返す。
 
 ### 宣言（`.ndf/worktree.json`）
 
@@ -559,7 +559,7 @@ Docker Compose v5.6.1 の実測（2026-11-06、検証用の定義）:
 
 そこで、行に `golden_tag` が無い割り当ての `up` は、同じプロジェクトのボリュームが残っていればタグを書かない（I9）。新しい行は `golden_tag` を持たないため（`wt_slot_acquire`）、解放してから作り直した worktree はこの条件に当たる。条件を「割り当てを新しく取った `up`」にしないのは、`worktree/SKILL.md` の手順では `env` が割り当てを取り、後の `up` は取らないためである。`volume ls` が失敗したときも書かない。公開の関門は確かめられないときに閉じる側へ倒す。テストは止めない。`reused_volumes` と同じく古いデータでの走りは原因の候補にとどまり、止める理由にならない。
 
-破棄に失敗した worktree はこの条件から漏れる。`do_down` は失敗すると行を解放しないため、worktree を外した後に同じパスで作り直すと、`wt_slot_acquire` は `golden_tag` の付いた古い行をそのまま返し、`up` は `volume ls` を打たずに新しいタグで上書きする。古いデータのまま照合が通る。そこで、破棄に失敗した `do_down` が行の `golden_tag` を消す。消す場所を `do_down` にするのは、`discard()` の 2 か所の呼び出しが同じ 1 か所を通り、Python へ台帳の更新を増やさないためである。worktree を残したまま `down` だけが失敗したときも消える。破棄の途中で落ちた環境の中身は確かめられないため、閉じる側へ倒す。`expose` は拒否し、次の段落の `down <worktree> --volumes` で戻せる。
+破棄に失敗した worktree はこの条件から漏れる。`do_down` は失敗すると行を解放しないため、worktree を外した後に同じパスで作り直すと、`wt_slot_acquire` は `golden_tag` の付いた古い行をそのまま返し、`up` は `volume ls` を打たずに新しいタグで上書きする。古いデータのまま照合が通る。そこで、`do_down` が `compose down` の前に行の `golden_tag` を消す。破棄の後に消すと、時間切れで `_testenv` がシェルごと止めたときに消す処理へ届かず、タグが残る。ロックの待ちは 5 秒で打ち切るため、消す処理が上限の時間（`UP_TIMEOUT`）に当たることはない。消せなければ `do_down` は破棄へ進まず終了コード 3 で返し、`discard_testenv` は worktree を外さない（タグが残ったまま外すと、この経路へ戻る）。消す場所を `do_down` にするのは、`discard()` の 2 か所の呼び出しが同じ 1 か所を通り、Python へ台帳の更新を増やさないためである。worktree を残したまま `down` だけが失敗したときも消える。破棄の途中で落ちた環境の中身は確かめられないため、閉じる側へ倒す。`expose` は拒否し、次の段落の `down <worktree> --volumes` で戻せる。
 
 公開したいときは `down <worktree> --volumes` で消してから `up` を打つ。消せばボリュームが無くなり、次の `up` がタグを書く。
 

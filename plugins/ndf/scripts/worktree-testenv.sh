@@ -375,6 +375,12 @@ do_stop() {
 do_down() {
   load_assignment || return 0
   if has_docker; then
+    # 中身を確かめられない環境に基準のタグを残さない（作り直すと expose の判定を通る）。
+    # 時間切れで止められても残らないよう破棄の前に消し、消せなければ破棄へ進まない。
+    [ -z "$(current_assignment | jq -r '.golden_tag // empty')" ] || _wt_slot_set_field "$MAIN_DIR" "$TARGET" 'del(.golden_tag)' || {
+      printf '%s\n' "基準のタグを台帳から消せませんでした。破棄していません: $ENVIRONMENT" >&2
+      return 3
+    }
     local rc
     if [ "$WITH_VOLUMES" = 1 ] || wt_discards_volumes "$DECLARATION"; then
       compose down --volumes
@@ -385,9 +391,6 @@ do_down() {
     # 破棄に失敗したままスロットを返すと、コンテナとポートが残ったまま同じ
     # 番号が別の作業ツリーへ渡る。
     if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then
-      # 中身を確かめられない環境に基準のタグを残さない（作り直すと expose の判定を通る）。
-      _wt_slot_set_field "$MAIN_DIR" "$TARGET" 'del(.golden_tag)' \
-        || printf '%s\n' "基準のタグを台帳から消せませんでした: $ENVIRONMENT" >&2
       printf '%s\n' "破棄に失敗しました。スロットは解放していません: $ENVIRONMENT" >&2
       return 1
     fi
