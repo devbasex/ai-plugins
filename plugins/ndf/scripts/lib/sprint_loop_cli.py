@@ -22,6 +22,17 @@ def budget_value(text: str) -> float | str:
         raise argparse.ArgumentTypeError(f"数か {BUDGET_DEFAULT} を渡す: {text!r}") from None
 
 
+def environment_result(root: Path, as_json: bool) -> dict | None:
+    """`loop environment`: 実行環境の報告を出す。読めない項目があっても終了コードは 0。"""
+    import run_environment
+
+    report = run_environment.survey(root)
+    if not as_json:
+        print("\n".join([report["reason"], json.dumps(report, ensure_ascii=False)]))
+        return None
+    return step_result.result("sprint-state", "ok", report["reason"], run_environment.notes(report), report)
+
+
 def run_loop_command(a, update) -> dict | None:
     """`sprint-state.py loop` の副命令を振り分ける。update は周回を締める前にスプリント状態を埋める関数（`update` と同じ）。"""
     import sprint_loop as sl  # loop のときだけ読む
@@ -35,6 +46,8 @@ def run_loop_command(a, update) -> dict | None:
             name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
             ms = [m.strip() for m in (a.milestones or "").split(",") if m.strip()]
             return sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
+        if a.loop_cmd == "environment":
+            return environment_result(env.main_dir(), a.json)
         handlers = {
             "select": lambda: sl_select.cmd_select(env, a.loop_name),
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
@@ -96,7 +109,7 @@ def add_loop_parser(sub, cmd_update) -> None:
 
     s = name(ls.add_parser("start"), optional=True)
     s.add_argument("--milestones", help="選定の対象を絞るマイルストーン（, 区切り）")
-    s.add_argument("--budget-laps", type=budget_value, help="数か default（リポジトリの予算の既定へ戻す）")
+    s.add_argument("--budget-laps", type=budget_value, help="数か default（宣言の値へ戻す。宣言に無ければ無制限）")
     s.add_argument("--budget-usd", type=budget_value)
     s.add_argument("--budget-hours", type=budget_value)
     s.add_argument("--no-goal", action="store_true", help="/goal で始めていない（再開のコマンドに /goal を付けない）")
@@ -137,3 +150,6 @@ def add_loop_parser(sub, cmd_update) -> None:
     name(ls.add_parser("stop"))
     for k in ("status", "list"):
         name(ls.add_parser(k)).add_argument("--json", action="store_true")
+    s = ls.add_parser("environment", help="実行環境を調べ、同時の数の候補を出す（宣言は書かない）")
+    s.add_argument("--root", help="リポジトリの根（既定はカレント）")
+    s.add_argument("--json", action="store_true")

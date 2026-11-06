@@ -5,7 +5,7 @@
 | --- | --- |
 | `init <計画名>` | 標準入力の下書きを検査し、`plan.json`・`plan.md`・レーンごとの引継ぎ文書を書く（在る文書は上書きせず、何も書かない） |
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
-| `start <計画名>` | `run` をセッションから切り離して起動する（動いていれば今の pid を返す） |
+| `start <計画名>` | `run` をセッションから切り離して起動する（動いていれば打ったセッションへオーガナイザーの印を付け直し、今の pid を返す。`metrics.organizer` が付けられたか） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
 | `wait <計画名> [--after <seq>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions）か終わりまで待つ。上限なら 3 |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
@@ -16,7 +16,7 @@
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンが承認ゲート 2 の依頼を送る |
-| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
+| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 
 外のオーガナイザーとの `--external` の副命令（#2439）は `lib/parallel_external_cli.py` にある。
@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -173,20 +173,20 @@ def cmd_start(a) -> None:
     plan, items, metrics = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがあるため、レーンを 1 本も起動しない", items, 1, **metrics)
-    pidfile = pp.plan_dir(main, a.name) / "run.pid"
-    try:
-        pid = int(pidfile.read_text().strip())
-        os.kill(pid, 0)
-        reply("ok", f"run は動いている（pid {pid}）", pid=pid, next=_wait_line(a.name))
-    except (OSError, ValueError):
-        pass
+    import parallel_run as pr_run
+
+    env, notes = pr_run.environment_report(main, plan)
+    pid = pl.live_run_pid(main, a.name)
+    if pid is not None:
+        marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
+        reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=_wait_line(a.name), environment=env)
     if pl.run_status(main, a.name) is None:
         _manual_or_none(main, plan)
     log = pp.plan_dir(main, a.name) / "run.log"
     with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
         p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
     (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
-    reply("ok", f"run を切り離して起動した（pid {p.pid}）", pid=p.pid, log=str(log), next=_wait_line(a.name))
+    reply("ok", f"run を切り離して起動した（pid {p.pid}）", notes, pid=p.pid, log=str(log), next=_wait_line(a.name), environment=env)
 
 
 def cmd_wait(a) -> None:
@@ -401,7 +401,7 @@ def cmd_answer(a) -> None:
     q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
     nxt = pa.owner_restart(main, a.name, a.id, a.choice, items)
     tail, extra = pa.answer_with_merge(main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
-    extra.update(id=a.id, result=result, next=nxt, seq=seq)
+    extra.update(id=a.id, result=result, next=nxt, seq=seq, **pa.not_listed(a.id, items))
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
 
 

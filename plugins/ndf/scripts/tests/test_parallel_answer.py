@@ -130,3 +130,15 @@ def test_answers_in_a_row_leave_the_earlier_one_out_of_after(cli, capsys):
     cli["items"] = [gate1("lc-g701-c", lane="lc", pr=701)]  # 受け手が a・b を処理した
     _, out = answer(cli, capsys, "lc-g701-c", "--rejected")
     assert pa.sent_answers(cli["mod"].main_of(), "p1", cli["items"]) == [{"id": "lc-g701-c", "kind": "gate1", "lane": "lc", "pr": 701}]
+
+
+def test_an_answer_to_an_id_outside_the_list_warns(cli, capsys):
+    """一覧に無い依頼への答えは送って保留されるが、`parallel.py answer` が警告を返す（#2617 の受け入れ条件 2）。"""
+    code, res = answer(cli, capsys, "la-q-unknown", "--choice", "はい")
+    assert code == 0 and res["metrics"]["warning"] and "la-q-unknown" in res["metrics"]["warning"]
+    assert [s[0] for s in cli["sent"]] == ["la-q-unknown"]
+
+
+def test_an_answer_to_an_id_in_the_list_has_no_warning(cli, capsys):
+    code, res = answer(cli, capsys, "la-g501-a", "--choice", "はい")
+    assert code == 0 and "warning" not in res["metrics"]

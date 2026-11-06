@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -208,3 +209,47 @@ def test_handoff_name_follows_handoff_py(name, ok):
     plan, _, metrics = pp.check_data(variant(x=lambda d: d["lanes"][0].__setitem__("handoff", name)))
     assert (plan is not None) is ok
     assert (metrics["errors"] == 0) is ok
+
+
+def _running_plan(tmp_path: Path) -> tuple[Path, dict]:
+    """run が動いている（`run.pid` の pid が生きている）計画と、ラッパーの中のセッションの環境。"""
+    (tmp_path / "repo").mkdir()
+    main = _git_main(tmp_path / "repo")
+    assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
+    (pp.plan_dir(main, "p1") / "run.pid").write_text(f"{os.getpid()}\n")
+    return main, {k: v for k, v in os.environ.items() if k != "NDF_PARALLEL_RELAY"}
+
+
+def test_start_on_a_running_plan_marks_the_session_as_organizer(tmp_path):
+    """動いている run でも、`start` を打ったセッションのラッパーへオーガナイザーの印を付ける（#2637）。"""
+    main, env = _running_plan(tmp_path)
+    relay_dir = tmp_path / "wrapper"
+    relay_dir.mkdir()
+    got = subprocess.run(
+        [sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"],
+        cwd=main, capture_output=True, text=True, env={**env, "NDF_RELAY_DIR": str(relay_dir)},
+    )  # fmt: skip
+    res = json.loads(got.stdout.strip().splitlines()[-1])
+    assert got.returncode == 0 and res["metrics"]["pid"] == os.getpid() and res["metrics"]["organizer"] is True
+    role = json.loads((relay_dir / "role.json").read_text())
+    assert (role["role"], role["plan"]) == ("organizer", "p1")
+
+
+def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path):
+    main, env = _running_plan(tmp_path)
+    env.pop("NDF_RELAY_DIR", None)
+    got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
+    assert got.stdout, got.stderr
+    report = json.loads(got.stdout.strip().splitlines()[-1])["metrics"]["environment"]
+    lanes = len(BASE["lanes"])
+    assert report["lanes"] == lanes and report["candidates"]["max_issues"] == max(1, report["candidates"]["max_plans"] // lanes)
+
+
+def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
+    """ラッパーの外では印を付けられないが、`start` の答えは今のまま（次の 1 手を返す）で、run を増やさない。"""
+    main, env = _running_plan(tmp_path)
+    env.pop("NDF_RELAY_DIR", None)
+    got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
+    res = json.loads(got.stdout.strip().splitlines()[-1])
+    assert got.returncode == 0 and res["metrics"]["organizer"] is False and res["metrics"]["pid"] == os.getpid()
+    assert (pp.plan_dir(main, "p1") / "run.pid").read_text().strip() == str(os.getpid())

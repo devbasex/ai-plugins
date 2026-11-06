@@ -23,6 +23,13 @@ def questions(main: Path, name: str) -> tuple[int, list[dict]]:
 MVV_VERDICTS = ("unknown", "unreadable")  # レーンの判定が決まらなかった（判定できない・判定を読めない）
 
 
+def not_listed(rid: str, items: list[dict]) -> dict:
+    """今の問いの一覧に無い依頼への答えなら、結果へ足す `warning` を返す（#2617）。"""
+    if any(q.get("id") == rid for q in items):
+        return {}
+    return {"warning": f"依頼 {rid} は今の問いの一覧に無い。答えは保留され、その依頼が届いたら当たる（答え済みなら何もしない）"}
+
+
 def mvv_mark(q: dict) -> dict:
     """MVV 判定でオーガナイザーが自分で答えてよい依頼か（#2507 の決定 8）。設計の承認で、レーンの判定が決まらず、
     レッドラインが空で、利用者へ戻した依頼（印 `returned`。#2507 の決定 9）でなく、判定を打ち直す材料（レーンの周回のスプリント状態）が残るときだけ true。"""
@@ -85,14 +92,14 @@ def after_items(items: list[dict], answered: dict, earlier: list[dict] | None = 
 
 
 def owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None) -> str | None:
-    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
+    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
     restart。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた問い（`merged`）は、
     代表だけでなく全持ち主をそれぞれの依頼の id で調べ、起こす行を `; ` でつなぐ（異常系 5）。"""
     import parallel_run as pr_run
 
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
-    if q.get("kind") in ("stall", "helper", "spawn") or not q.get("lane"):
+    if q.get("kind") in ("stall", "helper", "spawn", "observe") or not q.get("lane"):
         return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
     ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
     owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]

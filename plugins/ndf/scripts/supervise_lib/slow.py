@@ -117,6 +117,7 @@ class SlowWatch:
             retries=retries,
             worker_seen=self.ctx.state.pcount["worker"],
             commits=commits,
+            off=bool(step.get("stall")),  # 無進捗の打ち切りのステップは見張りで止めず、所要の履歴だけを残す（#2505 の決定 5）
         )
 
     def end_watch(self) -> None:
