@@ -174,6 +174,25 @@ def _read_version_json(path: Path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
+def plan_finished(plan: str | None) -> bool:
+    """プランの `report.md` の結果が `完了` か。承認ゲートの後の続きの実行も report.md を書き直すため、続きで本番を出した周回も真になる。"""
+    if not plan:
+        return False
+    try:
+        return report_result((state_dir_of(str(Path(plan).absolute())) / "report.md").read_text()) == "完了"
+    except (OSError, ValueError):
+        return False
+
+
+def recorded_version(plan: str | None) -> str | None:
+    """プランの版の記録の版。パスが無い・記録が無い・読めない・文字列でなければ None（読むだけで書かない）。"""
+    if not plan:
+        return None
+    rec = _read_version_json(state_dir_of(str(Path(plan).absolute())) / VERSION_RECORD)
+    version = rec.get("version") if rec else None
+    return version if isinstance(version, str) and version else None
+
+
 def _write_version_json(path: Path, obj: dict) -> None:
     write_text_atomic(path, json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
 

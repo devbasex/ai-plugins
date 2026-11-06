@@ -462,7 +462,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         return _stop_without_issue(env, rec, before, got, rank, lap)
     new = _open_lap(env, rec, before, got, rank, n, lap)
     chosen = selected_issues(new)
-    nxt = f"モードと版を決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版> を打つ"
+    nxt = f"モードを決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> を打つ"
     update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"周回 {n} の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),

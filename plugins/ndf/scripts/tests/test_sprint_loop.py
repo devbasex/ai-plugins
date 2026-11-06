@@ -121,6 +121,7 @@ def fake_run(e):
                         plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
                         plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
                 (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
+                (out / "dev.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
                 (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
                 design = [str(plans[f"design-{n}"]) for n in issues]
                 stages = [
@@ -130,6 +131,8 @@ def fake_run(e):
                     {"name": "検査", "plans": [str(out / "check.json")], "then_of": "設計"},
                     {"name": "本番", "plans": [str(out / "prod.json")], "then_of": "設計"},
                 ]
+                if "--version" not in cmd:  # 版を渡さない周回の開発版のプラン（#2354）
+                    stages.insert(-1, {"name": "開発版", "plans": [str(out / "dev.json")], "then_of": "設計"})
             (out / "sprint.json").write_text(json.dumps({"ステージ": stages}, ensure_ascii=False))
             return 0, "{}", ""
         return 0, "{}", ""
@@ -1585,7 +1588,7 @@ def test_resume_stopped_refused_in_a_lap_asks_to_rebuild_the_sprint(env):
     r = stopped_on(env, "refused", values={"step": "new sprint"})
     out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
     nxt = out["metrics"]["next"]
-    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード> --dev <開発版>" in nxt
+    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード>（" in nxt and "--dev" not in nxt
 
 
 def test_resume_stopped_refused_continuation_rebuilds_the_queue_with_kept_issues(env, monkeypatch):
@@ -1627,7 +1630,7 @@ def test_resume_stopped_refused_continuation_failure_stays_stopped(env, monkeypa
 REQ = "lroot-r000000000001"
 
 
-def lane_lap(env, nums=(11, 12), rid=REQ, rank=None):
+def lane_lap(env, nums=(11, 12), rid=REQ, rank=None, dev="1.0.0-dev.1"):
     """並列の計画のレーンの周回: 本番のステージがリリースの依頼のプラン（フェーズ「リリースの依頼」）で、依頼の記録がある。"""
     env.rank_box["out"] = rank or rank_out(ms("01 近い", [11, 12, 13]))
     env.answer_box = {}
@@ -1635,7 +1638,7 @@ def lane_lap(env, nums=(11, 12), rid=REQ, rank=None):
     if not (env.root / ".ndf/loop/l1/loop.json").exists():
         start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sl.cmd_sprint(env, "l1", "standard", dev, None, [])
     lap = sl.current_lap(rec(env))
     prod = Path(lap["out"]) / "prod.json"
     prod.write_text(json.dumps({"フェーズ": "リリースの依頼", "課題": list(nums), "並列の計画": "p1"}, ensure_ascii=False))
@@ -2521,3 +2524,184 @@ def test_characterize_select_candidate_rows_approved_alone_does_not_take_capacit
 
 def test_characterize_select_candidate_rows_empty_candidates():
     assert sl_select._select_candidate_rows([], "M", 2, lambda r: None) == ([], [])
+
+
+# ---------------- #2354: 開発版を決めずに組み、周回の版は版の記録からコピーする ----------------
+
+
+def versionless_lap(env):
+    """--dev なしで組んだ周回。スプリント状態の版の欄は sprint-state.py init と同じく空文字である。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    out = sl.cmd_sprint(env, "l1", "standard", None, None, [])
+    assert out["status"] == "ok"
+    lap = sl.current_lap(rec(env))
+    versionless_state(lap)
+    return lap
+
+
+def versionless_state(lap, result="完了"):
+    row = {"result": result, "cost": 1.0, "seconds": 10}
+    state = {"plans": [{"kind": "実装", "issues": [11], "row": row}], "versions": {"dev": "", "prod": ""}, "gates": []}
+    Path(lap["state_path"]).write_text(json.dumps(state))
+
+
+def plan_state(plan, version=None, result=None):
+    """プランの状態ディレクトリへ版の記録と report.md を置く。"""
+    sd = Path(plan).with_name(Path(plan).stem + "-state")
+    sd.mkdir(exist_ok=True)
+    if version:
+        (sd / "version.json").write_text(json.dumps({"version": version}))
+    if result:
+        (sd / "report.md").write_text(f"- 結果: {result}\n")
+    return sd
+
+
+def lap_table(env):
+    return (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
+
+
+def test_sprint_without_dev_passes_no_version_to_init_or_new_sprint(env):
+    """受け入れ条件 1・2・I1: 省いたら版数をどのコマンドにも周回の組み立てにも持たない。"""
+    lap = versionless_lap(env)
+    init = next(c for c in env.calls if "init" in c)
+    new = next(c for c in env.calls if "new" in c and "sprint" in c)
+    assert "--dev" not in init and "--prod" not in init and "--version" not in new
+    assert "--version" not in lap["sprint_command"] and lap["versions"] == {"dev": "", "prod": ""}
+    assert lap["dev_plan"].endswith("/dev.json") and lap["prod_plan"].endswith("/prod.json")
+
+
+def test_sprint_treats_an_empty_dev_as_omitted(env):
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    assert sl.cmd_sprint(env, "l1", "standard", "", None, [])["status"] == "ok"
+    assert "--version" not in sl.current_lap(rec(env))["sprint_command"]
+
+
+@pytest.mark.parametrize("prod, want", [(None, "1.0.0"), ("1.0.1", "1.0.1")])
+def test_sprint_with_dev_keeps_the_explicit_version(env, prod, want):
+    """受け入れ条件 5・6・I2: --dev を渡す組み立てと周回の版は変わらない。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", prod, [])
+    lap = sl.current_lap(rec(env))
+    assert lap["versions"] == {"dev": "1.0.0-dev.1", "prod": want}
+    init = next(c for c in env.calls if "init" in c)
+    assert init[init.index("--dev") + 1] == "1.0.0-dev.1" and init[init.index("--prod") + 1] == want
+    assert "--version 1.0.0-dev.1" in lap["sprint_command"]
+
+
+def test_prod_without_dev_is_refused_before_anything_changes(env):
+    """受け入れ条件 7・I3: --prod だけなら 1 で断り、状態ファイルも new sprint も周回の記録の変更も無い。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    before = rec(env)
+    env.calls.clear()
+    out = sl.cmd_sprint(env, "l1", "standard", None, "1.0.0", [])
+    assert out["exit"] == 1 and out["metrics"]["status"] == "refused" and "--prod は --dev と一緒に渡す" in out["summary"]
+    assert env.calls == [] and rec(env) == before
+    assert not Path(sl.current_lap(before)["dir"], "state.json").exists()
+
+
+def test_select_next_and_rebuild_next_do_not_ask_for_a_version(env):
+    """受け入れ条件 11: 案内の 1 行は --dev を求めず、モードを埋めれば組める。"""
+    start(env)
+    nxt = sl_select.cmd_select(env, "l1")["metrics"]["next"]
+    line = re.search(r"python3 \S+ (loop sprint l1 --mode <モード>)", nxt)
+    assert line and "--dev" not in nxt
+    assert sl.cmd_sprint(env, "l1", "standard", None, None, [])["status"] == "ok"
+
+
+def test_sprint_help_shows_dev_as_optional():
+    """受け入れ条件 12。"""
+    got = subprocess.run([sys.executable, str(SCRIPTS / "sprint-state.py"), "loop", "sprint", "--help"], capture_output=True, text=True)
+    assert got.returncode == 0 and "[--dev DEV]" in " ".join(got.stdout.split())
+
+
+def test_closing_copies_the_dev_version_from_the_record(env):
+    """受け入れ条件 9・I4・I7: 版の記録の版を締めた周回が持ち、記録は変わらない。本番へ進まなければ本番の版は空。"""
+    lap = versionless_lap(env)
+    sd = plan_state(lap["dev_plan"], "10.27.7-dev.1")
+    kept = (sd / "version.json").read_text()
+    sl.cmd_lap(env, "l1", False, None, [])
+    closed = rec(env)["laps"][0]
+    assert closed["versions"] == {"dev": "10.27.7-dev.1", "prod": ""}
+    assert "10.27.7-dev.1" in lap_table(env) and (sd / "version.json").read_text() == kept
+
+
+def test_prod_version_is_not_copied_when_the_plan_stopped_at_the_release_gate(env):
+    """I4: 本番のプランの版の記録があっても、結果が完了でなければ本番を出していない。"""
+    lap = versionless_lap(env)
+    plan_state(lap["prod_plan"], "10.27.7", "関門")
+    sl.cmd_lap(env, "l1", False, None, [])
+    assert rec(env)["laps"][0]["versions"]["prod"] == ""
+
+
+def test_prod_version_is_copied_when_the_continued_plan_finished(env):
+    """I4: 続きの実行はスプリント状態の行を変えないが、report.md が完了なら本番の版が載る。"""
+    lap = versionless_lap(env)
+    versionless_state(lap, result="関門")
+    plan_state(lap["dev_plan"], "10.27.7-dev.1")
+    plan_state(lap["prod_plan"], "10.27.7", "完了")
+    sl.cmd_lap(env, "l1", False, None, [])
+    closed = rec(env)["laps"][0]
+    assert closed["versions"] == {"dev": "10.27.7-dev.1", "prod": "10.27.7"}
+    assert "10.27.7-dev.1 / 10.27.7" in lap_table(env)
+
+
+@pytest.mark.parametrize("broken", [None, "{", '{"version": 1}'])
+def test_closing_without_a_usable_record_leaves_the_version_empty(env, broken):
+    """受け入れ条件 10・I5: 版の記録が無い・読めなくても周回は締まり、版の欄は空のまま。"""
+    lap = versionless_lap(env)
+    if broken:
+        plan_state(lap["dev_plan"]).joinpath("version.json").write_text(broken)
+    out = sl.cmd_lap(env, "l1", False, None, [])
+    closed = rec(env)["laps"][0]
+    assert out["status"] == "ok" and closed["outcome"] == "完了" and closed["versions"] == {"dev": "", "prod": ""}
+
+
+def test_closing_a_lap_without_dev_plan_keeps_its_versions(env):
+    """移行性: dev_plan を持たない進行中の周回は今の値で締まる。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    path = env.root / ".ndf" / "loop" / "l1" / "loop.json"
+    r = json.loads(path.read_text())
+    del r["laps"][-1]["dev_plan"]
+    path.write_text(json.dumps(r))
+    Path(r["laps"][-1]["state_path"]).unlink()
+    sl.cmd_lap(env, "l1", False, None, [])
+    assert rec(env)["laps"][0]["versions"] == {"dev": "1.0.0-dev.1", "prod": "1.0.0"}
+
+
+def versionless_request(env):
+    lap = lane_lap(env, dev=None)
+    versionless_state(lap)
+    plan_state(lap["dev_plan"], "10.27.7-dev.1")
+    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
+    return lap
+
+
+def test_held_lap_keeps_the_copied_dev_and_the_answered_prod(env):
+    """I6: 開発版を渡さない周回のリリース待ちは、締め直しでも開発版と答えの本番の版を失わない。"""
+    versionless_request(env)
+    assert rec(env)["laps"][0]["versions"] == {"dev": "10.27.7-dev.1", "prod": ""}
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": "10.27.7"}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    d = rec(env)["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
+    sl.cmd_finish(env, "l1", 1, d)
+    closed = rec(env)["laps"][0]
+    assert closed["outcome"] == "完了" and closed["versions"] == {"dev": "10.27.7-dev.1", "prod": "10.27.7"}
+
+
+def test_held_lap_keeps_the_dev_version_when_the_record_is_gone_on_the_second_close(env):
+    """I6: 開発版を渡したかはスプリント状態で見るため、締め直しで周回の開発版を失わない。"""
+    lap = versionless_request(env)
+    (Path(lap["dev_plan"]).with_name("dev-state") / "version.json").unlink()
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": None}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    d = rec(env)["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
+    sl.cmd_finish(env, "l1", 1, d)
+    assert rec(env)["laps"][0]["versions"]["dev"] == "10.27.7-dev.1"
