@@ -24,7 +24,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/supervise.py new impl` | worker の実装から始まるプランを作る |
 | `scripts/supervise.py new fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
 | `scripts/supervise.py new check` | 検査のプランを作る |
-| `scripts/supervise.py new release` | リリース（開発版・本番）のプランを作る |
+| `scripts/supervise.py new release` | デプロイ（開発版・本番）のプランを作る |
 | `scripts/supervise.py new close` | スプリントを閉じるプランを作る |
 | `scripts/supervise.py queue` | プランを同時に `--max` 本まで順に流す |
 | `scripts/supervise.py wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |

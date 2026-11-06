@@ -93,7 +93,7 @@ sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage デプロイ|リ
 
 | 項目 | 値 |
 | --- | --- |
-| `--final-stage` | 3 つの値のどれか。省けば `振り返り`。それ以外は呼び出しの誤り（終了コード 3） |
+| `--final-stage` | 3 つの値のどれか。省けば `振り返り`。前の版のプランが渡す旧い工程名は、旧い値の読み替えの表（`scripts/data/legacy-values.json`）で `デプロイ` として受ける。それ以外は呼び出しの誤り（終了コード 3） |
 | 条件 3 を満たさない課題 | `result: kept_open`・`reason: 最終工程（<工程>）の記録が無い: <何が無いか>`。既に閉じていれば `closed_unverified`（`閉じているが閉じる条件 3 を満たさない: …`。開き直さない） |
 | 課題の本文を読めない | `result: failed`・同じ呼び出しの `cmd`。`status: stopped`・終了コード 1 |
 | `metrics.final_stage` | 判定に使った最終工程 |
