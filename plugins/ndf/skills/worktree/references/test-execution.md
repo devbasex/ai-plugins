@@ -173,7 +173,7 @@ bash "$SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 標準エラーへ出る。
 
 1. 設定の `testenv.expose.enabled` が偽（**既定**）
-2. 載っている基準の識別子が `testenv.expose.public_tag` と一致しない
+2. 載っている基準の識別子が `testenv.expose.public_tag` と一致しない。行に基準の識別子が無い割り当ての `up` は、同じプロジェクトのボリュームが残っているか確かめられないときは識別子を書かない。古いデータの上で照合を通さないためで、`down "$WT" --volumes` の後に `up` を打ち直すと書かれる
 3. 折り返しを使う公開が既に別のテスト環境で開いている
 
 **公開のエンドポイントを開ける手段は設定が持つ。** 共有のエントリポイントの設定や折り返しのラッパーの作り方はリポジトリごとに
@@ -215,7 +215,8 @@ bash "$SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 
 コンテナの中でテストを走らせるリポジトリでは、コンテナがメインディレクトリをマウントしていると、テストは
 メインディレクトリのコードで走り、worktree の変更を見ないまま通ってしまう。NDF は走らせる前に、そのコンテナが
-worktree を見ているかを確かめ（到達の確認）、見ていなければ走らせない。
+worktree を見ているかを確かめ（到達の確認）、見ていなければテスト環境を起こして確かめ直す（テスト環境の用意）。
+それでも見ていなければ走らせない。
 
 対象は次の 2 つだけである。コマンドの語からは判定しない。
 
@@ -238,13 +239,41 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
 
 | 経路 | 扱い |
 | --- | --- |
-| `test-run.py` | 走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
-| cross-refactoring | 走らせずに止まる。着手前のテストでも既存失敗として記録しない |
+| `test-run.py` | テスト環境を用意する。それでも届かなければ走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
+| cross-refactoring | テスト環境を用意する。それでも届かなければ走らせずに止まる。着手前のテストでも既存失敗として記録しない |
 | 落ちたテストの見分け（着手前の HEAD の一時の worktree） | 見分けられないとして扱う（既存失敗とみなさない） |
-| `worktree-testenv.sh test` | 走らせずに 1（実行系が無ければ 2）で終わる |
+| `worktree-testenv.sh test` | 起こさない。走らせずに 1（実行系が無ければ 2）で終わり、起こし方（`worktree-testenv.sh up <worktree>`）を出す |
 
-**テスト環境は自動で起こさない。** 届かない理由に起こし方（`worktree-testenv.sh up <worktree>`）が出る。テスト環境の
-compose の定義は `NDF_WORKTREE` をアプリのコードの位置へマウントしておく。
+**テスト環境の用意の決まり。** `test-run.py` と cross-refactoring は、テストを走らせる前に宣言のすべてのサービスを
+確かめる。コンテナが動いていない・別のディレクトリを見ている・答えないサービスが 1 つでもあれば、次を 1 度だけ行い、
+全部を確かめ直す。既に届く worktree では起動のコマンドを打たない。
+
+1. `worktree-testenv.sh env` で割り当てを取る
+2. 同じプロジェクト名で残っているボリュームを読む（`testenv[].reused_volumes` へ載せる。テストは止めない）
+3. `worktree-testenv.sh up <worktree> --wait-service <サービス>` を上限 300 秒で打つ。`up -d` の後に、宣言のサービスと
+   その依存だけが準備できるのを待つ。依存の準備を待てるのは、依存が healthcheck を持つときである
+
+コンテナの実行系が無い・テスト環境の値を読めない・探りの印を置けないときは、起こしても直らないため起こさない。
+用意の秒はテストの上限へ数えず、プランのステップの `timeout` へ 300 秒足す。起こした結果は `test-run.py` の結果の
+`items[].testenv` に環境名・結果（`woken` / `failed`）・秒・理由を持つ。
+
+起こせないときの `summary`:
+
+| 場合 | 理由 |
+| --- | --- |
+| `testenv` の宣言が無い | `.ndf/worktree.json` への宣言を求める |
+| `localenv.compose_files` が無い | `.ndf/worktree.json` への宣言を求める |
+| 空きスロットが無い・起動の失敗 | サービス名と、`worktree-testenv.sh` の標準エラーの末尾 |
+| 上限の超過 | サービス名と上限の秒 |
+| 起こしても届かない | 2 度目の到達の確認の理由 |
+
+テスト環境の compose の定義は `NDF_WORKTREE` をアプリのコードの位置へマウントしておく。ホストの Docker を共有する
+コンテナの中（DooD）では、バインド元をデーモンから見たパスにするのはプロジェクトの compose の定義の持ち物である。
+worktree をデーモンから見える場所へ置くのは NDF が行う（cross-review と cross-refactoring の worktree は、
+コンテナの宣言があるリポジトリでは `<メインディレクトリ>/.worktrees/.ndf` の下に置く）。
+
+**detached HEAD の worktree も同じに扱う。** 環境名は `<リポジトリ>-wt-detached-<worktree のディレクトリ名>-<worktree の
+パスの要約値 6 桁>` で、HEAD が動いても変わらない。worktree レジストリの行の `branch` は空である。
 
 **コンテナで走る suite のコマンドには `-p`・`-f` を書かない。** `COMPOSE_PROJECT_NAME`・`COMPOSE_FILE` は環境変数で
 渡すため、コマンドで固定すると到達の確認と実際の実行が別のコンテナを見る。環境変数の `COMPOSE_PROJECT_NAME` は
@@ -257,7 +286,8 @@ compose の定義は `NDF_WORKTREE` をアプリのコードの位置へマウ�
 | 作業を止める | `stop "$WT"` | データ。再開は保存先の再構築を伴わない |
 | 使われていないものを止める | `reap --idle 45m` | 同上 |
 | 公開を閉じる | `unexpose "$WT"` | worktree レジストリの行と URL（`expose.closed_at` に終了の時刻） |
-| 破棄する | `down "$WT" --volumes` | worktree レジストリの行（`released_at` に解放の時刻） |
+| 破棄する | `down "$WT"` | worktree レジストリの行（`released_at` に解放の時刻）。`testenv.discard_volumes` が `false` のときはボリュームも残る |
+| 宣言に関わらずボリュームも消す | `down "$WT" --volumes` | 同上。ボリュームは残らない |
 
 `reap` は、最後に使った時刻が `--idle` の期間より古い割り当てだけを対象にする。時刻は
 `up` と `test` がworktree レジストリへ記録する。**実行中の worktree はロックを握るため対象から外れる。**
@@ -265,9 +295,31 @@ compose の定義は `NDF_WORKTREE` をアプリのコードの位置へマウ�
 握られていないと読み、対象へ戻る。残ったロックのディレクトリは `reap` が取り除かず、次の
 `test` の取得が捨てる。
 
-**worktree を消す前に `down "$WT" --volumes` を実行する。** データ領域（実測でテスト環境
-1 つあたり約 400 MB）とスロットを返してから worktree を削除する。順序を逆にするとworktree レジストリから
-実体を引けなくなる。
+**worktree の削除に合わせて、NDF がテスト環境を破棄する。** `/ndf:merged` の後片付けと、持ち主の終わった状態の
+片付けは、worktree を外す直前に開いた公開を閉じ（`unexpose`）、続けて `down "$WT"` を打つ。割り当ても公開も無ければ
+コンテナの実行系を呼ばない。手で worktree を消すときは、先に `down "$WT"` を打つ。データ領域（実測でテスト環境
+1 つあたり約 400 MB）とスロットを返してから削除する。順序を逆にするとworktree レジストリから実体を引けなくなる。
+
+| 場合 | worktree | 結果 |
+| --- | --- | --- |
+| 追跡ファイルに変更がある | 外さない | 破棄もしない |
+| 公開を閉じられない | 外さない（`kept`） | `reason` に環境名・URL・打ち直しのコマンドが載る。スロットは解放しない。閉じる手段を直した次の後片付けで外れる |
+| 破棄できない | 外す | `reason` に環境名が載る。スロットは解放せず、行の `golden_tag` を消す |
+
+**`down` はボリュームも既定で消す。** 消えたデータは戻せない。`.ndf/worktree.json` の `testenv.discard_volumes` が
+無し・`null`・`true` のときに消し、`false` と真偽値以外の値のときは残す。人が打つ `down "$WT"` も同じである。データを
+残したまま止めたいときは `stop "$WT"` を打つ。`--volumes` は宣言に関わらず消す。作り直せないデータを持つプロジェクトは
+`false` を宣言する。
+
+ボリュームが残るのは、`false` の宣言・破棄の失敗・`down` を通らずに消えた worktree のときである。同じブランチ名か
+同じパスの worktree を作り直すと同じプロジェクト名になり、古いボリュームを読む。起こすときに `reused_volumes` で
+知らせる。匿名ボリュームは `false` の宣言で残り、どの環境の物かは見分けられない。残ったボリュームは手で消す。
+`down` は割り当てが無いと何もしないため、worktree を消した後も打てる形にする。
+
+```bash
+docker volume ls -q --filter label=com.docker.compose.project=<環境名>  # 残っているものを見る
+docker volume ls -q --filter label=com.docker.compose.project=<環境名> | xargs -r docker volume rm
+```
 
 依存物のハードリンク複製は worktree の削除で消える。実体はメインディレクトリ側に残る。
 

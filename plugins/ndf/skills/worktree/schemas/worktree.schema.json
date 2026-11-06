@@ -227,6 +227,10 @@
           "type": "string",
           "description": "テスト環境が相乗りするネットワーク名。空文字ならテスト環境ごとに作る"
         },
+        "discard_volumes": {
+          "type": "boolean",
+          "description": "false のとき、worktree-testenv.sh down がテスト環境のボリュームを残す。無しと true では消す。消えたデータは戻せない"
+        },
         "golden_tag_paths": {
           "type": "array",
           "description": "基準のタグを計算する資産のパス。内容が同じなら焼き直さない",

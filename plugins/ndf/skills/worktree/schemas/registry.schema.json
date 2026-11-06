@@ -17,10 +17,10 @@
         "properties": {
           "id": { "type": "string", "description": "行の識別子" },
           "worktree": { "type": "string", "description": "作業ツリーの絶対パス" },
-          "branch": { "type": "string" },
+          "branch": { "type": "string", "description": "ブランチ名。detached HEAD の worktree は空文字" },
           "environment": {
             "type": "string",
-            "description": "環境名。<リポジトリ>-wt-<ブランチ>-<要約値 6 桁> を 40 文字で切ったもの"
+            "description": "環境名。<リポジトリ>-wt-<ブランチ>-<要約値 6 桁> を 40 文字で切ったもの。detached HEAD の worktree は <リポジトリ>-wt-detached-<ディレクトリ名>-<パスの要約値 6 桁>"
           },
           "slot": {
             "type": "integer",

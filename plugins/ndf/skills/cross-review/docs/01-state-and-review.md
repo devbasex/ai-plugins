@@ -60,7 +60,7 @@ cd "$WORKTREE"
    記録は変えない）。state.json が JSON として読めなければ、上書きせずに
    `❌ レビューの状態ファイルを読めません: <パス>（<理由>）` を出して exit 1
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
-3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
+3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > コンテナの宣言があれば `<メインディレクトリ>/.worktrees/.ndf` > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
 
    **既存の worktree を流用するときは、必ず PR の head へ同期する。** `git fetch origin <head>`
    の後に worktree の中で `git reset --hard origin/<head>` を実行し、

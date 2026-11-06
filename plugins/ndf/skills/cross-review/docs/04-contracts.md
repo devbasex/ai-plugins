@@ -332,7 +332,7 @@ python3 scripts/state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID
 launcher が生成するプロンプトに以下を強制している:
 
 - **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れることがある
-- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）
+- **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は「`<worktree-base>` の解決順」の順で解決）
 - **投稿の手順を持たない**（#730）: 担当は投稿しない。判定の格下げ（`event_downgrade`）も
   担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止。2 ラウンド目以降は `start-round` が取り直す（#542）
@@ -423,7 +423,10 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 `state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
 
 1. `NDF_WORKTREE_BASE` 環境変数（明示オーバーライド）
-2. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
+2. `.ndf/project.json` にコンテナの宣言（`test.suites[].container`）があれば `<メインディレクトリ>/.worktrees/.ndf`
+   （ホストの Docker を共有する環境で一時ディレクトリはデーモンから見えないため。作る前に `.worktrees/` を共通の git
+   ディレクトリの `info/exclude` へ登録し、登録できなければ止まる）
+3. `<システム tmpdir>/ndf-worktrees`（Python `tempfile.gettempdir()`。非永続領域のため
    コンテナ再作成で自動消滅し、共有 volume を消費しない）
 
 worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
@@ -443,7 +446,7 @@ worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジ�
 | # | 対策 | スクリプト側で何をするか |
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
-| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を worktree の外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
+| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は「`<worktree-base>` の解決順」の順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を worktree の外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
 | 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で worktree を宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
 | 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、担当のプロンプトへ**内容をインライン埋め込み**する。**2 ラウンド目以降は `start-round` が `--strict` で取り直す**（1 ソースでも失敗したら前のスナップショットのまま `⚠` で続ける） |
 
