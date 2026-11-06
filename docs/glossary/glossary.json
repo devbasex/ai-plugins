@@ -6053,6 +6053,20 @@
       ],
       "source": "",
       "pending_source": "issues/issue-2620-design.md"
+    },
+    {
+      "term": "照合",
+      "context": "ndf-workflow",
+      "meaning": "スプリント MVV などの本文が、共通原則とプロジェクト MVV に従うかを LLM に判定させること。判定は「従う」「反する疑い」「判定できない」「読めない」の 4 つで、本文は書き換えない",
+      "source": "",
+      "pending_source": "issues/issue-2614-requirements.md"
+    },
+    {
+      "term": "照合の入力",
+      "context": "ndf-workflow",
+      "meaning": "1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・照合する本文からなる。1 字でも違えば別の入力である",
+      "source": "",
+      "pending_source": "issues/issue-2614-requirements.md"
     }
   ]
 }
