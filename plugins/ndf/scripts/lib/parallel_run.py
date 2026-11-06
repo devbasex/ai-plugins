@@ -108,7 +108,8 @@ def stall_seconds() -> float:
 
 @durable.step(name="parallel.observe")
 def step_observe(main: str) -> dict:
-    """`relay.py ls --json` の行（名前 → {state, at, role}）・観た時刻（エポック秒）・終了コード・標準エラーの末尾 1 行。"""
+    """`relay.py ls --json` の行（名前 → {state, at, role}）・観た時刻（エポック秒）・終了コード・標準エラーの末尾 1 行。
+    `can_ask` は一覧の失敗を問える版の記録の印で、無い記録の再生では問わない（問いの DBOS の呼び出しが記録の順を崩す。決定 5）。"""
     got, res = relay_proc(Path(main), "ls", "--json")
     rows = {
         it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
@@ -116,7 +117,7 @@ def step_observe(main: str) -> dict:
         if isinstance(it, dict) and it.get("name")
     }
     err = (got.stderr or "").strip().splitlines()[-1:]
-    return {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else ""}
+    return {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else "", "can_ask": True}
 
 
 @durable.step(name="parallel.held-loops")
@@ -691,7 +692,7 @@ def _track_ls_failure(run: _Run, seen: dict) -> None:
     now, limit = float(seen.get("now") or 0), stall_seconds()
     if run.ls_failed_since is None:
         run.ls_failed_since = now
-    if now - run.ls_failed_since < limit or now < run.ls_ask_until:
+    if now - run.ls_failed_since < limit or now < run.ls_ask_until or not seen.get("can_ask"):
         return
     run.ls_ask_until = now + limit
     mins = int((now - run.ls_failed_since) // 60)

@@ -931,7 +931,7 @@ def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
 def test_step_observe_carries_the_exit_code_and_the_last_stderr_line(env, tmp_path):
     (tmp_path / "ls.fail").write_text("")
     got = prun.step_observe(str(env["main"]))
-    assert got["code"] == 3 and got["err"] == "ls: hub に届かない" and got["rows"] == {}
+    assert got["code"] == 3 and got["err"] == "ls: hub に届かない" and got["rows"] == {} and got["can_ask"] is True
 
 
 def test_the_plan_does_not_finish_while_ls_keeps_failing(env, tmp_path):
@@ -956,7 +956,7 @@ def _failing_run(monkeypatch):
     monkeypatch.setenv("NDF_PARALLEL_STALL_MINUTES", "1")
     run = _bare_run(monkeypatch, [{"name": "la"}])
     run.lanes["la"].update(started=True, state="running")
-    seen = {"now": 1000.0, "rows": {}, "code": 3, "err": "ls: hub に届かない"}
+    seen = {"now": 1000.0, "rows": {}, "code": 3, "err": "ls: hub に届かない", "can_ask": True}
     monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
     return run, seen
 
@@ -981,6 +981,18 @@ def test_a_long_ls_failure_raises_one_question_per_limit(monkeypatch):
     assert q["commands"] == {"ラッパーの環境を作り直す": f"python3 {prun.RELAY} status"}
     assert len(_observe_at(run, seen, 1119.0)) == 1  # 同じ区切りの間は重ねない
     assert len(_observe_at(run, seen, 1120.0)) == 2  # 次の区切りで次の 1 件
+
+
+def test_replaying_a_record_from_before_the_question_keeps_the_recorded_calls(monkeypatch):
+    """決定 5: 問いを持たない版の失敗の記録の再生では問いも DBOS の呼び出しも足さない。続きの観測は続いた時間で問う。"""
+    run, seen = _failing_run(monkeypatch)
+    del seen["can_ask"]
+    calls = []
+    monkeypatch.setattr(durable, "set_event", lambda *a, **_k: calls.append(a))
+    assert _observe_at(run, seen, 1000.0) == [] and _observe_at(run, seen, 1060.0) == []
+    assert _observe_at(run, seen, 1200.0) == [] and calls == []
+    seen["can_ask"] = True
+    assert len(_observe_at(run, seen, 1201.0)) == 1 and len(calls) == 1
 
 
 def test_a_waited_ls_question_is_not_asked_again_before_the_next_limit(monkeypatch):
