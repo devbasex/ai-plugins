@@ -2,16 +2,21 @@
 
 [issue-2505-design.md](issue-2505-design.md) から分けた節である。開発ループの中で働く上限を、種類と扱いで分けて 1 か所に並べる。
 
-## 作り方
+## 区分ごとの行数
 
-要求の「調べた範囲」が指す全体の表は、課題の本文とコメントに残っていない（`gh issue view 2505 --json body,comments` で本文の種類 A の表と残すものの表だけを確かめた）。そのため 6c78fe695 の `plugins/ndf/` と `factory/` を次の形で読み直して作った。
+| 区分 | 行数 |
+| --- | ---: |
+| 種類 A | 15 |
+| 暴走止め | 4 |
+| 種類 B | 1 |
+| 配布の重複止め | 1 |
+| 種類 C | 11 |
+| 種類 D | 9 |
+| 種類 E | 7 |
+| 外 | 12 |
+| 合計 | 60 |
 
-```bash
-rg -n '^[A-Z_]+ = [0-9]' plugins/ndf/scripts/relay_lib plugins/ndf/scripts/supervise_lib plugins/ndf/scripts/hook_lib
-rg -n '^[A-Z_]+ = [0-9]' plugins/ndf/scripts/lib/parallel*.py plugins/ndf/scripts/lib/sprint_loop*.py plugins/ndf/scripts/lib/design_pr_merge.py plugins/ndf/scripts/lib/context_policy.py plugins/ndf/scripts/lib/gh_quota.py
-rg -n 'env_num\(' plugins/ndf/scripts/relay_lib
-rg -n '^[A-Z_]+ = [0-9]|DEFAULT_MAX_ROUNDS|STEP_LIMIT' plugins/ndf/skills/cross-review/scripts plugins/ndf/skills/cross-refactoring/scripts
-```
+## 種類と扱いの語
 
 種類の分け方は要求の「残すもの」の表に揃える。
 
@@ -136,19 +141,16 @@ rg -n '^[A-Z_]+ = [0-9]|DEFAULT_MAX_ROUNDS|STEP_LIMIT' plugins/ndf/skills/cross-
 | L59 | 設計の結果の取得のやり直し | 合計 120 秒 | `supervise_lib/design_stage.py:33` | 残す |
 | L60 | hook の締め切り | 3.5 秒 | `hook_lib/deadline.py:16` | 残す |
 
-## 数え直した値
+## 作り方
 
-| 区分 | 行数 |
-| --- | ---: |
-| 種類 A | 15 |
-| 暴走止め | 4 |
-| 種類 B | 1 |
-| 配布の重複止め | 1 |
-| 種類 C | 11 |
-| 種類 D | 9 |
-| 種類 E | 7 |
-| 外 | 12 |
-| 合計 | 60 |
+要求の「調べた範囲」が指す全体の表は、課題の本文とコメントに残っていない。`gh issue view 2505 --json body,comments` で確かめた範囲は、本文の種類 A の表と残すものの表だけである。そのため 6c78fe695 の `plugins/ndf/` と `factory/` を次の形で読み直して作った。
+
+```bash
+rg -n '^[A-Z_]+ = [0-9]' plugins/ndf/scripts/relay_lib plugins/ndf/scripts/supervise_lib plugins/ndf/scripts/hook_lib
+rg -n '^[A-Z_]+ = [0-9]' plugins/ndf/scripts/lib/parallel*.py plugins/ndf/scripts/lib/sprint_loop*.py plugins/ndf/scripts/lib/design_pr_merge.py plugins/ndf/scripts/lib/context_policy.py plugins/ndf/scripts/lib/gh_quota.py
+rg -n 'env_num\(' plugins/ndf/scripts/relay_lib
+rg -n '^[A-Z_]+ = [0-9]|DEFAULT_MAX_ROUNDS|STEP_LIMIT' plugins/ndf/skills/cross-review/scripts plugins/ndf/skills/cross-refactoring/scripts
+```
 
 ## 未確認・残リスク
 
