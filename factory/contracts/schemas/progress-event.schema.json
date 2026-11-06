@@ -42,7 +42,7 @@
       "minimum": 1
     },
     "GateKind": {
-      "description": "ゲート 1・ゲート 2・判断",
+      "description": "設計承認ゲート・リリース承認ゲート・判断",
       "type": "string",
       "enum": ["gate1", "gate2", "decision"]
     },
@@ -229,7 +229,7 @@
       "pattern": "^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$"
     },
     "LoopPending": {
-      "description": "人の判断待ちの課題（承認ゲート 1 で MVV 判定が「従う」以外）",
+      "description": "人の判断待ちの課題（設計承認ゲートで MVV 判定が「従う」以外）",
       "type": "object",
       "additionalProperties": false,
       "required": ["number", "reason", "lap"],
@@ -462,7 +462,7 @@
       }
     },
     "ReleasePresentedPayload": {
-      "description": "リリースの実行が承認資料をそろえた提示（#2439）。auto は MVV 判定が承認ゲート 2 を通したとき真",
+      "description": "リリースの実行が承認資料をそろえた提示（#2439）。auto は MVV 判定がリリース承認ゲートを通したとき真",
       "type": "object",
       "additionalProperties": false,
       "required": ["seq", "k", "sha", "version", "prs", "lanes", "added_prs", "auto"],

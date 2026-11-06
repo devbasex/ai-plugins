@@ -56,7 +56,7 @@ export type GateReachedEvent = EventCommon & {
   payload: GateReachedPayload;
 };
 /**
- * ゲート 1・ゲート 2・判断
+ * 設計承認ゲート・リリース承認ゲート・判断
  */
 export type GateKind = "gate1" | "gate2" | "decision";
 /**
@@ -411,7 +411,7 @@ export interface LoopLapClosedPayload {
   pending: LoopPending[];
 }
 /**
- * 人の判断待ちの課題（承認ゲート 1 で MVV 判定が「従う」以外）
+ * 人の判断待ちの課題（設計承認ゲートで MVV 判定が「従う」以外）
  */
 export interface LoopPending {
   number: number;
@@ -442,7 +442,7 @@ export interface ReleaseRequestedPayload {
   requested_at: string;
 }
 /**
- * リリースの実行が承認資料をそろえた提示（#2439）。auto は MVV 判定が承認ゲート 2 を通したとき真
+ * リリースの実行が承認資料をそろえた提示（#2439）。auto は MVV 判定がリリース承認ゲートを通したとき真
  */
 export interface ReleasePresentedPayload {
   seq: number;

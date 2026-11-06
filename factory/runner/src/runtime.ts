@@ -17,6 +17,7 @@ import {
   delegatedFromRecord,
   issueRequestFromLine,
   gateKindOf,
+  gateDisplayName,
   gateRecordName,
   isSprintState,
   phaseChanged,
@@ -231,7 +232,7 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       args.push("--what", answer.body || "Factory の画面での利用者の答え"); // sprint-state.py gate は --what が要る
       if ((await sh("python3", args, { cwd: repoDir })) !== 0) throw new Error("承認の記録を書けない");
       // 差し戻しは状態ファイルを変えないため、conductor へ差し戻しと理由を明示して渡す
-      return decision === "rejected" ? rejectionDirective(gate, answer.body) : null;
+      return decision === "rejected" ? rejectionDirective(gateDisplayName(gate), answer.body) : null;
     },
     async readLoop(name) {
       const text = await readFile(join(repoDir, ".ndf/loop", name, "loop.json"), "utf8").catch(() => null);

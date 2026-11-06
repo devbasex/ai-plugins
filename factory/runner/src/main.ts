@@ -120,7 +120,7 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
       if (state) await runtime.restoreState(state.url!);
       // 承認の依頼の識別子の無い resume（利用上限の後）は答えを書かずに続ける（決定 7）
       if (instruction.START === "resume" && instruction.APPROVAL_REQUEST_ID) directive = await runtime.recordAnswer(instruction.APPROVAL_REQUEST_ID);
-      // リリースの実行の判断（承認ゲートの外の問い）への答えは本文を最初の指示へ渡す。承認ゲート 2 の答えはリリースのまとめが手（step）にする
+      // リリースの実行の判断（承認ゲートの外の問い）への答えは本文を最初の指示へ渡す。リリース承認ゲートの答えはリリースのまとめが手（step）にする
       if (instruction.START === "release" && instruction.APPROVAL_REQUEST_ID) {
         const answer = await getApi<{ kind: string; body?: string | null }>(`/run-jobs/approval-requests/${instruction.APPROVAL_REQUEST_ID}/answer`);
         if (answer.kind === "decision") directive = answer.body ?? null;
@@ -176,7 +176,7 @@ export async function runJob(deps: RunnerDeps): Promise<0 | 1> {
     }
     await runtime.saveState((await callApi("/run-jobs/state", { op: "put" }))!.url!);
     if (report === "判断が要る" && end?.kind !== "usage_limit" && !(releaseRequested && !loopName)) {
-      // リリースの実行が承認資料をそろえて止まったら承認ゲート 2。main へのマージの後の判断は続けるだけを選べる（I63）
+      // リリースの実行が承認資料をそろえて止まったらリリース承認ゲート。main へのマージの後の判断は続けるだけを選べる（I63）
       // リリースの実行の中の止まりは、承認資料をそろえた提示のときだけ gate2。本番のプランの中の「判断が要る」を
       // gate2 にすると、確定済みのリリースへの答えが差し戻しでも本番のプランを流し直す
       const kind = releaseGate ? "gate2" : instruction.START === "release" ? "decision" : (out.gate?.kind ?? "decision");

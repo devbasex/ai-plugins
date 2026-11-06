@@ -441,7 +441,7 @@ export class OrganizerControl {
       const batch = run.releaseSeq ? await table.getBatch(run.accountId, run.repositoryId, run.releaseSeq) : null;
       if (!root || !batch) throw new ConflictError("release_not_found", "まとめたリリースが見つかりません");
       // 判断（承認ゲートの外の問い）は、止まったプランをまとめたリリースの状態から流し直す（止まったリリースの「続ける」と同じ規則）。
-      // 常に continue だと、提示のプランの中で止まったリリースが承認ゲート 2 を通らずに本番のプランへ進む
+      // 常に continue だと、提示のプランの中で止まったリリースがリリース承認ゲートを通らずに本番のプランへ進む
       if (answer.kind !== "gate2") {
         const from = stalledFromOf(batch.state);
         if (!from) throw new ConflictError("not_presented", "まとめたリリースは判断の答えで続けられる状態にありません");
@@ -450,7 +450,7 @@ export class OrganizerControl {
         return stepFrom(from, batch, started);
       }
       // 同じ答えの再送（ジョブを作る前に止まった）は、書いた状態から同じ手を返す。その提示に記録した承認の依頼と一致し、
-      // 実行が今も承認ゲート 2 で止まっているときだけにする（本番のプランの中の判断で止まった後の古い答えで流し直さない）
+      // 実行が今もリリース承認ゲートで止まっているときだけにする（本番のプランの中の判断で止まった後の古い答えで流し直さない）
       if (batch.state === "represented" || batch.state === "confirmed") {
         const k = batch.state === "represented" ? 1 : batch.confirmedK;
         const answered = batch.presentations.find((p) => p.k === k);

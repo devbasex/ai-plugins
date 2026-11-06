@@ -72,7 +72,7 @@ const currentBatch = async () => {
   return root?.currentSeq ? h.table.getBatch("acc-1", REPO_ID, root.currentSeq) : null;
 };
 
-// リリースの実行のジョブが承認資料をそろえて承認ゲート 2 で止まる（auto なら MVV 判定が通して続ける）
+// リリースの実行のジョブが承認資料をそろえてリリース承認ゲートで止まる（auto なら MVV 判定が通して続ける）
 async function present(k: 1 | 2, sha: string, prs: number[], opts: { auto?: boolean } = {}) {
   const batch = (await currentBatch())!;
   const run = await runOf(batch.releaseRunId);
@@ -257,7 +257,7 @@ describe("答えと出し直し（受け入れ条件 4、I60）", () => {
     expect((await currentBatch())!).toMatchObject({ state: "presented", confirmedK: null });
   });
 
-  it("確定した後に本番のプランの中の判断で止まったら、承認ゲート 2 の答えの再送で本番のプランを流し直さない", async () => {
+  it("確定した後に本番のプランの中の判断で止まったら、リリース承認ゲートの答えの再送で本番のプランを流し直さない", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
@@ -416,7 +416,7 @@ describe("止まったリリースと再開（受け入れ条件 12・13、I58�
     expect(await h.table.getBatch("acc-1", REPO_ID, 1)).toMatchObject({ state: "rejected" });
   });
 
-  it("提示を受けた後に承認ゲート 2 へ届かずに落ちたリリースは止まったリリースになり、続きは提示のプランを流し直して承認を待つ", async () => {
+  it("提示を受けた後にリリース承認ゲートへ届かずに落ちたリリースは止まったリリースになり、続きは提示のプランを流し直して承認を待つ", async () => {
     const a = await startRun(1);
     await requestRelease(a, [11]);
     const batch = (await currentBatch())!;
