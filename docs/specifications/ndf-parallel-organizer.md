@@ -118,7 +118,8 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | --- | --- |
 | `plugins/ndf/scripts/parallel.py` | 並列の計画と進行の CLI。副命令を下の部品へ振り分け、統一 JSON レポートを 1 行で返す |
 | `plugins/ndf/scripts/lib/parallel_plan.py` | pydantic のモデル（`ParallelPlan`・`Lane`・`LoopInput`・`SprintInput`）と検査、`plan.md` と引継ぎ文書の描画、起動できるレーンの判定（`ready_lanes`） |
-| `plugins/ndf/scripts/lib/parallel_run.py` | 耐久ワークフロー `parallel` と耐久ステップ（起動・観測・配布を組む・停止・要約）。一時レーンが流すもの（`helper_task`） |
+| `plugins/ndf/scripts/lib/parallel_run.py` | 耐久ワークフロー `parallel` と耐久ステップ（起動・観測・配布を組む・停止・要約） |
+| `plugins/ndf/scripts/lib/parallel_helper.py` | 一時レーンの組み立て: 起こす 1 行（`helper_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`） |
 | `plugins/ndf/scripts/lib/parallel_release.py` | まとめた配布: 範囲の Pull Request をレーンへ対応づける（`present`・`map_lanes`）、先頭が進んだかを比べる 1 つの関数（`moved`）、範囲で答えられる依頼（`answerable`）、提示のプランと本番のプランの組み立て（`build_plans`・`present_gate_steps`）、配布の依頼のプラン（`plan_release_request`） |
 | `plugins/ndf/scripts/lib/parallel_lane.py` | レーンの側: 自分が属する計画の判定（`lane_of`）・送り手の資格（`sender_of`）・本番チャネルにあるかの判定（`merged_on_production`）・依頼を送る（`send_release_request`・`request_gate1`・`request_ask`・`request_gate2`）・答えを読む（`read_answer`・`answers_of`）・プランの本数（`lane_plans`・`queue_max`） |
 | `plugins/ndf/scripts/lib/parallel_files.py` | DBOS を読まずにファイルだけで、レーンか一時レーンかを決める（`lane_name_in_plans`。問いの hook の 10 秒の上限の中で使う） |
