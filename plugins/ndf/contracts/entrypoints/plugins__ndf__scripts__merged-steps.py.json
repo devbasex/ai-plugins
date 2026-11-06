@@ -14,13 +14,15 @@
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_WORKTREE_BASE",
-    "UV_PROJECT_ENVIRONMENT"
+    "UV_PROJECT_ENVIRONMENT",
+    "WT_DOCKER_COMMAND"
   ],
   "settings": [
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies"
+        "ndf_policies",
+        "test"
       ]
     },
     {

@@ -1103,7 +1103,7 @@ def stub_docker(main_repo: Path, dump: Path) -> Path:
     """環境変数と引数を書き出すだけの偽のコンテナ実行系。"""
     stub = main_repo.parent / "fake-docker"
     stub.write_text(
-        f'#!/bin/sh\nenv | grep "^NDF_" | sort > "{dump}"\nprintf "%s\\n" "$*" >> "{dump}"\nexit 0\n',
+        f'#!/bin/sh\n[ "$1" = compose ] || exit 0\nenv | grep "^NDF_" | sort > "{dump}"\nprintf "%s\\n" "$*" >> "{dump}"\nexit 0\n',
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -1675,7 +1675,7 @@ def test_down_reports_when_the_release_cannot_be_recorded(main_repo: Path, workt
     assert result["rc"] == 1, result
     assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
     assert "down を再実行" in result["err"], result
-    assert dump.read_text().rstrip().endswith("down"), "破棄はしている"
+    assert dump.read_text().rstrip().endswith("down --volumes"), "破棄はしている"
     assert registry(main_repo)["assignments"][0]["released_at"] is None
 
 

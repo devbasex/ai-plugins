@@ -21,7 +21,6 @@ import jev
 import models as models_lib
 import project_mvv
 import project_decl
-import repo as repo_lib
 import run_owner
 import run_state
 import statefile
@@ -34,7 +33,8 @@ from .. import baseline as baseline_lib
 from .. import ci_coverage, pr_gate, runtime_decl, template_check, timeline
 from ..paths import (
     github_repo_from_origin,
-    default_worktree_base,
+    prepare_parent,
+    run_root,
     sh,
     state_path,
     tmp_dir_for,
@@ -507,9 +507,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 
-    root = (
-        pathlib.Path(args.worktree_root).resolve() if args.worktree_root else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
-    )
+    root = pathlib.Path(args.worktree_root).resolve() if args.worktree_root else run_root(repo, args.pr)
     work = root / "work"
     # **Pull Request の状態は作業ディレクトリを用意する前に確かめる**（#1658 I4）。止まった実行は何も作らない。
     reason = pr_gate.init_refusal(args.pr, repo, status)
@@ -890,7 +888,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         stale = work.with_name(f"work.stale-{time.strftime('%Y%m%d%H%M%S')}")
         work.rename(stale)
         info(f"⚠ 現リポジトリの作業ディレクトリではないため退避しました: {stale}")
-    work.parent.mkdir(parents=True, exist_ok=True)
+    prepare_parent(work)
     subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
     sh(["git", "fetch", "origin", head_branch])
     sh(["git", "worktree", "add", "--detach", str(work), f"origin/{head_branch}"])

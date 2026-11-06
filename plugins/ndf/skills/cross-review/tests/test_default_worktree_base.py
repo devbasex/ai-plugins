@@ -2,7 +2,8 @@
 
 優先順位:
   1. 環境変数 NDF_WORKTREE_BASE
-  2. <システム tmpdir>/ndf-worktrees (非永続領域)
+  2. コンテナの宣言があれば <メインディレクトリ>/.worktrees/.ndf
+  3. <システム tmpdir>/ndf-worktrees (非永続領域)
 
 worktree path は `<base>/<owner>--<name>/pr<N>` 形式で、他リポジトリの
 同一 PR 番号と衝突しない。
@@ -10,6 +11,7 @@ worktree path は `<base>/<owner>--<name>/pr<N>` 形式で、他リポジトリ�
 
 from __future__ import annotations
 
+import pytest
 import review_lib
 import review_lib.github
 import review_lib.workspace
@@ -19,14 +21,14 @@ import tempfile
 def test_env_override_takes_precedence(monkeypatch, tmp_path, state_mod):
     explicit = tmp_path / "custom-base"
     monkeypatch.setenv("NDF_WORKTREE_BASE", str(explicit))
-    assert review_lib.workspace._default_worktree_base() == explicit
+    assert review_lib.workspace._default_worktree_base(tmp_path) == explicit
 
 
 def test_default_is_tmpdir_ndf_worktrees(monkeypatch, tmp_path, state_mod):
     """既定では永続 volume ではなくシステム tmpdir 配下を使う。"""
     monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
-    assert review_lib.workspace._default_worktree_base() == tmp_path / "ndf-worktrees"
+    assert review_lib.workspace._default_worktree_base(tmp_path) == tmp_path / "ndf-worktrees"
 
 
 def test_repo_slug_is_path_safe(state_mod):
@@ -44,3 +46,19 @@ def test_is_registered_worktree_rejects_foreign_dir(monkeypatch, tmp_path, state
     )
     assert review_lib.workspace._is_registered_worktree(str(registered)) is True
     assert review_lib.workspace._is_registered_worktree(str(foreign)) is False
+
+
+def test_a_failed_registration_creates_no_worktree(monkeypatch, tmp_path, state_mod):
+    """#2567: 置き場を git の無視へ登録できなければ、worktree を作らずに止まる。"""
+    added = []
+
+    def refuse(root, worktree):
+        raise OSError("登録できない")
+
+    monkeypatch.setattr(review_lib.workspace.worktree_base, "ensure_ignored", refuse)
+    monkeypatch.setattr(review_lib, "_sh", lambda argv, **kw: added.append(argv))
+
+    with pytest.raises(SystemExit):
+        review_lib.workspace._create_worktree(str(tmp_path / "pr1"), 1, "feature")
+
+    assert added == [] and not (tmp_path / "pr1").exists()
