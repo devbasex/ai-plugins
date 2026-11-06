@@ -1,12 +1,12 @@
 # Skill 執筆規約
 
-`plugins/ndf/skills/` は Claude Code と Codex へ配布する Skill の編集元である。Kiro と agy へは配らないが、
+`plugins/ndf/skills/` は Claude Code と Codex へ配る Skill の編集元である。Kiro と agy へは配らないが、
 cross-refactoring が担当の worktree へ写す手順書（`refactoring` など）を相手役の Kiro・agy が Skill として読むため、
 下の表の Kiro・agy の列（可搬性の規則）は残す。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
 に委ねるが、**本文のうち、実行先のリポジトリに依存する部分は規約が扱う**（「対象リポジトリを
 仮定しない」）。手順の中身が正しいかと、その手順が ai-plugins でしか成立しないかは別の問題で、
 後者は Skill を書く人ごとに判断が分かれるためである。
-Skill を配布へ載せる手順（manifests・生成物・数の記載）は [開発ガイドの「既存プラグインへ Skill を足す」](../../../docs/plugin-development-guide.md#既存プラグインへ-skill-を足す) にある。サブエージェントへ本文の代わりに渡す抜粋の形と規則は [EXCERPTS.md](EXCERPTS.md) にある。
+Skill を配る対象へ載せる手順（manifests・生成物・数の記載）は [開発ガイドの「既存プラグインへ Skill を足す」](../../../docs/plugin-development-guide.md#既存プラグインへ-skill-を足す) にある。サブエージェントへ本文の代わりに渡す抜粋の形と規則は [EXCERPTS.md](EXCERPTS.md) にある。
 
 本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` がチェックし、
 継続的インテグレーションで実行する（`scripts/build-runtime-plugins.sh --check` /
@@ -140,7 +140,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
   （[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-8）
 - 「常時注入のみ」に相当する機能は Codex と Kiro と agy にない。3 つとも
   `user-invocable: false` を解釈せず、この分類の Skill も通常の Skill として扱う。唯一の対象で
-  ある `ndf-policies` は Codex へも配布している（`plugins/ndf/manifests/`）ため、
+  ある `ndf-policies` は Codex へもデプロイしている（`plugins/ndf/manifests/`）ため、
   Codex では暗黙起動されうる。したがってこの分類の Skill は `description` に**「知識として参照する。手順として
   実行しない」旨を明記する**（[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-10）
 - **Claude Code では** `disable-model-invocation: true` の Skill は `description` がコンテキスト
@@ -222,7 +222,7 @@ Skill 名は、自動発動（トリガ語）とは別に **明示起動の入�
 `scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。チェックが突き合わせる
 一覧（`KNOWN_EXTERNAL_SKILL_NAMES`）は**名前空間を除いた Skill 名**で持つ。組み込み Skill は
 そもそも名前空間を持たず、また `/` メニューで埋もれるかどうかを決めるのは名前空間ではなく
-Skill 名の部分だからである。ただし配布先に何が入っているかはチェック時点で分からないため、
+Skill 名の部分だからである。ただし導入先のランタイムに何が入っているかはチェック時点で分からないため、
 **一覧は手で更新する best-effort** であり網羅ではない。新しい Skill を足すときは、実際に
 `/` メニューで名前を打って確認する。
 
@@ -246,7 +246,7 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 ### チェックできるのは NDF 内の重複だけ
 
 `scripts/check-skill-frontmatter.py` の重複チェックは NDF の Skill 同士しか見ない。
-**ランタイム組み込みの Skill や他プラグインとの競合はチェックできない。** 配布先の環境に
+**ランタイム組み込みの Skill や他プラグインとの競合はチェックできない。** デプロイ先の環境に
 何が入っているかに依存するためである。
 
 実例: 旧 `review`（現 `pr-review`）は `disable-model-invocation` を外して自動発動できる
@@ -283,7 +283,7 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 | `SKILL.md` 行数 | 500 行。超えるものは補助ファイルへ分割 | 仕様の推奨、コンパクション対策 |
 | `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
 | Claude Code の初期 Skill 一覧の合計 | **27,900 文字**（10,000 トークン = コンテキストの 1%）。1 項目は `description` + `when_to_use` を合わせて 1,536 文字で切り詰め | Claude Code 公式ドキュメント。既定モデル Opus 5 のコンテキスト 1,000,000 から算出。文字数は較正した換算比による |
-| Codex の初期 Skill 一覧の合計 | **15,177 文字**（5,440 トークン = コンテキストの 2%） | Codex 公式ドキュメント。既定モデル gpt-5.6-sol のコンテキスト 272,000 から算出。**配布先の 2 ランタイムで厳しい側で、実質の制約になる** |
+| Codex の初期 Skill 一覧の合計 | **15,177 文字**（5,440 トークン = コンテキストの 2%） | Codex 公式ドキュメント。既定モデル gpt-5.6-sol のコンテキスト 272,000 から算出。**導入先のランタイムの 2 ランタイムで厳しい側で、実質の制約になる** |
 | 全 Skill の frontmatter 合計 | 20,000 文字（**警告のみ**） | リポジトリ固有の目安。ランタイムが課す制約ではないため、超過しても警告にとどめる。**plugin family をまたいだ合計**。値は Codex の予算から逆算する（[目安の決め方](#frontmatter-合計の目安は-codex-の予算から逆算する)） |
 
 ### 予算はトークンで効く
@@ -380,7 +380,7 @@ Skill の一覧 7.4k は、他のプラグインと組み込みを含む全量�
 Codex の 5,440 文字を基準に考える。
 
 Claude Code 側は `skillListingBudgetFraction` 設定または `SLASH_COMMAND_TOOL_CHAR_BUDGET`
-環境変数で予算を引き上げられるが、**配布先の環境に依存する設定に頼らない**。
+環境変数で予算を引き上げられるが、**デプロイ先の環境に依存する設定に頼らない**。
 
 ### 一覧に載るものはランタイムで違う
 
@@ -410,10 +410,10 @@ Codex は起動時に全 Skill の `name` と `description` とファイルパ�
 上限であって、全 Skill に一律で使ってよい枠ではない。** 総量が予算へ収まることを条件に配分し、
 超過分を逃がす。
 
-逃がし先は配布先で選ぶ。Claude Code だけに配布する Skill は `when_to_use` へ移してよい。
-一方 `when_to_use` は Codex では読まれないため、Codex へも配布する
+逃がし先は導入先のランタイムで選ぶ。Claude Code だけに配る Skill は `when_to_use` へ移してよい。
+一方 `when_to_use` は Codex では読まれないため、Codex へもデプロイする
 Skill のトリガ語を `when_to_use` へ移すと、Codex では一覧に載らず暗黙起動に効かなくなる。
-Codex へも配布する Skill はトリガ語を `description` に残したまま要約し、手順の説明を
+Codex へも配る Skill はトリガ語を `description` に残したまま要約し、手順の説明を
 本文へ逃がす。
 
 Claude Code のコンパクション後は、呼び出し済み Skill の先頭 5,000 トークンのみが再添付され、
@@ -430,12 +430,12 @@ Claude Code のコンパクション後は、呼び出し済み Skill の先頭 
 | `arguments` | `argument-hint` を持つ Skill。引数の手動解析を名前付き引数に置き換える |
 | `license` / `metadata` | 上流の Skill を参考にした場合に、参照元名・固定コミット・ライセンスを記録する |
 
-## 配布先を広げる際の制約
+## 導入先のランタイムを広げる際の制約
 
 `when_to_use` / `argument-hint` / `arguments` / `disable-model-invocation` / `user-invocable` /
 `paths` は Claude Code 独自である。仕様準拠のランタイムは未知の項目を無視するが、claude.ai への
 アップロードや Skills API 経由では `Unexpected key(s) in SKILL.md frontmatter` のエラーになる。
-現在の配布先 3 種では問題にならないが、配布先を広げる際の制約として記録する。
+現在の導入先のランタイム 3 種では問題にならないが、導入先のランタイムを広げる際の制約として記録する。
 
 ## 対象リポジトリを仮定しない
 
@@ -449,7 +449,7 @@ AI が自分の判断で別のものへ振り替える。**振り替えた事実
 | 適用対象 | 公開する Skill の本文（`SKILL.md` と、そこから読ませる `docs/` `references/` `prompts/`）が、対象リポジトリに対して実行を指示する記述 |
 | 求めること | **対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く** |
 | 書き方 | 探して決める、または形で分岐する（下記） |
-| 適用外 | 記述の主題が NDF 自身の配置・配布であるもの |
+| 適用外 | 記述の主題が NDF 自身の配置・デプロイであるもの |
 
 **書き方は 2 つある。**
 
@@ -458,7 +458,7 @@ AI が自分の判断で別のものへ振り替える。**振り替えた事実
   `tdd-cycle`（テスト手段を対象リポジトリから確定させる）と `quality-gates`（閾値は対象
   プロジェクトの設定を唯一の基準とする）にある
 - **形で分岐する。** その形のときだけ読む参照へ置く。既存の形は
-  `release/references/form-*.md`（配布物の形ごとに 1 ファイル）と
+  `release/references/form-*.md`（リリース対象の形ごとに 1 ファイル）と
   `refactoring/references/lang-*.md`（言語ごとに 1 ファイル）にある
 
 **「利用者のリポジトリで動くか」ではなく「対象リポジトリを指しているか」で分ける。**
@@ -467,7 +467,7 @@ AI が自分の判断で別のものへ振り替える。**振り替えた事実
 
 機械のチェックは `scripts/check-skill-repo-assumptions.py` が行う。除外はファイルと理由の対で
 同スクリプトが宣言し、**宣言した対象が走査の範囲に実在しないときはチェック自体が失敗する**。
-検知するのは語の有無だけで、書き方が正しいかは判定しない。配布するスクリプト（`scripts/`）には別の語の表を掛ける。
+検知するのは語の有無だけで、書き方が正しいかは判定しない。デプロイするスクリプト（`scripts/`）には別の語の表を掛ける。
 
 **除外のファイルは `--skills-dir` に渡すのと同じ書き方（plugin family を含むパス）で書く。**
 `--skills-dir` は family を 1 つだけ指定でき、実在のチェックは**指定した family に属する宣言

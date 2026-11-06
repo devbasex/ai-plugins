@@ -15,7 +15,7 @@
 ### Git運用ルール
 - **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
   **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのはリリースの工程だけ
-  （「版と配布の方針」）
+  （「版とリリースの方針」）
   - **起点は `.ndf/worktree.json` の `base_branch` に書く。** worktree のベースブランチと、
     宛先のチェックがこの設定を読む（`follow_branch: true` のときはメインディレクトリの追従先にも
     なる）。設定が無いリポジトリは既定ブランチのまま動く
@@ -31,12 +31,12 @@
 - ユーザーの許可なくPRを承認しない
   - `pace: fast` と `pace: auto` は MVV の承認・ハッシュの一致・判定の記録がそろったゲート 1・2 だけ、MVV の承認を許可として扱う（レッドラインは除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
 
-### 版と配布の方針
+### 版とリリースの方針
 
 **判断の基準だけをここに置く。** 版数とリリースの手順・実測・一覧は
 [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) にある（版数の扱いの正本）。
 
-**配布のチャネルは 2 つに分ける。** マージとリリースを別の操作にするためである。
+**デプロイのチャネルは 2 つに分ける。** マージとリリースを別の操作にするためである。
 
 | チャネル | ref | 何が載るか |
 | --- | --- | --- |
@@ -47,7 +47,7 @@
 置けば既存の利用者も新しい利用者も登録し直さなくてよい。
 
 **開発版の版数には接尾辞を付ける。** 接尾辞は人が読むための目印で、入れたくない利用者が版数を見て
-判断できるようにするためである。次に出す正式版の版数へ付け、正式版を出すときに外す（形の一覧は正本の「版の付け方と開発版の配布」）。
+判断できるようにするためである。次に出す正式版の版数へ付け、正式版を出すときに外す（形の一覧は正本の「版の付け方と開発版のデプロイ」）。
 
 **版を上げるのは、スプリント単位でマージが終わった後である。** Pull Request ごとには上げない。
 担い手と時期の決まりは `release` にある（`/ndf:release`）。
@@ -137,7 +137,7 @@ ai-plugins/
 |-------------|------|
 | [docs/project-overview.md](docs/project-overview.md) | プロジェクト概要・インストール方法 |
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、検証） |
-| [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版と配布（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
+| [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版とリリース（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
@@ -149,8 +149,8 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は Claude Code・Codex のどちらでも `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
-- Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/{claude,codex}-skills.txt` が決める
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は Claude Code・Codex のどちらでも `ndf` を維持し、リリース対象は `plugins/ndf/` の1ディレクトリにまとまっています。
+- Skill の実体は `plugins/ndf/skills/` の1箇所。導入先のランタイムは Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/{claude,codex}-skills.txt` が決める
 - Claude Code版は専門サブエージェントと実行主体（supervisor・worker）の定義（`plugins/ndf/agents/`）、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro CLI と agy へは何も配らない。cross-review のレビュー担当、cross-refactoring の提案・実装の担当（相手役）として、ホスト（Claude Code・Codex）から CLI プロセスで起動する。相手役が読む手順書はホストの導入先から担当の worktree へ写す（起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md`）
@@ -183,7 +183,7 @@ ai-plugins/
 ### DON'T（非推奨）
 - ファイル全体を無闇に読み込む
 - `main` / `develop` に直接コミット
-- Pull Request ごとに版数を上げる（版を上げるのはスプリント単位のマージの後。「版と配布の方針」）
+- Pull Request ごとに版数を上げる（版を上げるのはスプリント単位のマージの後。「版とリリースの方針」）
 - ドキュメントをスキップ
 - 機密情報をコミット
 - テストをスキップ

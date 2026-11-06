@@ -234,7 +234,7 @@ record_base=$dev_base
 # 指す先）で確かめる。取れないときは推測せず、記録から決まらなければ投稿を止めて報告する
 record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$record_base" ] || {
-  printf 'NOTE: スプリントを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
+  printf 'NOTE: スプリントをデプロイした先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
   exit 1
 }
 ```

@@ -150,7 +150,7 @@ pace: fast
 | Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） |
 | 後片付け | `merged` | `merged` | `merged` | `merged` | `merged` |
-| 配布 | `release` | `release` | `release` | `release` | `release` |
+| デプロイ | `release` | `release` | `release` | `release` | `release` |
 | 体裁レビュー | — | — | — | — | `layout-review` |
 | リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
 | 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
@@ -179,7 +179,7 @@ pace: fast
 | 実装（`operation`） | **実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも `refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める手順である。実行の範囲・記録・失敗したときの止め方はそちらが持つ。**「本番系へ届く操作」の承認ゲート（ゲート 2）に当たる** |
 | 構造改善 | **必ず通す。** `standard` と `legacy-refactor` のリファクタリングは `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す |
 | 実装レビュー | **5 つのモードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。`light` も、**変えないことの確認**が要る。**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの `code-review` が起動して判定の投稿経路が変わる） |
-| 配布 | `release` は 5 つのモードすべてで通す。**マージは取り込みで、リリースに数えない。** **自動で進めてよいのは検証リリースまでで、本番へのリリースは承認を得るまで進めない** |
+| デプロイ | `release` は 5 つのモードすべてで通す。**マージは取り込みで、リリースに数えない。** **自動で進めてよいのは開発版のデプロイまでで、本番へのリリースは承認を得るまで進めない** |
 
 工程ごとの理由・条件・例外は [references/stage-notes.md](references/stage-notes.md) にある。
 **起動のたびに読むのは判定の基準と工程表で、そちらは条件に当たったときだけ読む。**
@@ -206,9 +206,9 @@ pace: fast
 | | `normal` | `auto` | `fast` |
 | --- | --- | --- | --- |
 | 何のための進め方か | ウォーターフォール。各工程を検証し、人の承認を取って進める | `normal` と同じ工程で、承認だけを MVV で半自動にする | スタートアップ的。実践投入の中で検証しながら MVV で自動に進める |
-| 検証の場所 | 各工程で、配布の前（設計レビュー・テスト・リファクタリング・コードレビュー・完了判定） | 同じ | 実践投入の中（開発版の配布と利用）。検査は配布の後にトリガーでまとめて |
-| 承認 | 人が 2 回（設計・本番への配布） | MVV 判定が「従う」なら自動、ほかは人 | MVV 判定で自動（ほかは人） |
-| 判定と配布の単位 | スプリント（1 つの版として出す課題のまとまり） | スプリント | 課題ごとの Pull Request（develop へ直接入り、開発版も課題ごと） |
+| 検証の場所 | 各工程で、デプロイの前（設計レビュー・テスト・リファクタリング・コードレビュー・完了判定） | 同じ | 実践投入の中（開発版のデプロイと利用）。検査はデプロイの後にトリガーでまとめて |
+| 承認 | 人が 2 回（設計・リリース） | MVV 判定が「従う」なら自動、ほかは人 | MVV 判定で自動（ほかは人） |
+| 判定とデプロイの単位 | スプリント（1 つの版として出す課題のまとまり） | スプリント | 課題ごとの Pull Request（develop へ直接入り、開発版も課題ごと） |
 | 確定仕様化・振り返り・棚卸し | 各工程の順に | 同じ | スプリントの終わりにまとめて |
 | 向く場面 | 影響が大きい・戻しにくい変更、複数の課題を 1 版にまとめる | `normal` と同じ場面で、人の待ち時間を減らしたい | 小さく出して実践で確かめられる変更、開発版の利用者が近い |
 
@@ -222,12 +222,12 @@ pace: fast
 ## 並列開発（`--parallel`）
 
 **引数に `--parallel <計画名>` があれば、判定の手順へ進まず [references/parallel.md](references/parallel.md) の手順で進める。**
-このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、本番の配布を 1 本にまとめる。
+このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、リリースを 1 本にまとめる。
 並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
 
 **引数に `--parallel-helper <計画名> <連番> <提示>` か `--parallel-helper <計画名> pending <ループ名>` があれば、このセッションは
 オーガナイザーが起こした一時レーンである。** 判定の手順へ進まず、[references/parallel.md](references/parallel.md) の「一時レーン」の手順で
-`parallel.py helper` が返す pipeline（まとめた配布の提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
+`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
 
 ## 開発ループ（`--loop`）
 
@@ -281,7 +281,7 @@ pace: fast
 
 | 何が届くか | 何で判定するか | 規則を持つもの |
 | --- | --- | --- |
-| リリース（マージと公開） | マージ先が本番チャネルか。**チャネルは本番系の一種である** | `release`。検証リリースは提示して進めてよく、本番へのリリースは承認を得るまで進めない |
+| リリース（マージと公開） | マージ先が本番チャネルか。**チャネルは本番系の一種である** | `release`。開発版のデプロイは提示して進めてよく、本番へのリリースは承認を得るまで進めない |
 | `operation` の実行 | 操作する先が本番系か。検証用の系への操作は承認を求めない | [references/operation-run.md](references/operation-run.md)。承認を求めるのは実行の前で、単位ごとの取り消しの手段を添える。**取り消せない単位を含むときは、そのことを先に示す** |
 | **文書の提出** | 提出先の `production` が真か | [references/document-destinations.md](references/document-destinations.md) |
 
@@ -320,7 +320,7 @@ pace: fast
 | 承認ゲート | 止まり方 |
 | --- | --- |
 | 設計 Pull Request のマージ（`standard`） | 承認を得るまで実装の工程へ進まない |
-| 本番系へ届く操作 | 承認を得るまで進めない。**検証リリースまでは自動で進めてよい**。`operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない |
+| 本番系へ届く操作 | 承認を得るまで進めない。**開発版のデプロイまでは自動で進めてよい**。`operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない |
 
 **工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。**
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。
