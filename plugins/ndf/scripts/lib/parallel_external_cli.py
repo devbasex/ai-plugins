@@ -67,7 +67,7 @@ def present_external(main: Path, a, reply: Callable) -> None:
 
 def compose_external(main: Path, reply: Callable) -> None:
     """配布の実行（`--parallel-helper --external`）が `batch.json` の手で流すもの（#2439）。"""
-    from parallel_run import dev_version
+    from parallel_repo import dev_version
     from supervise_lib.paths import PARALLEL_PY, SELF
 
     d = external_dir(reply)

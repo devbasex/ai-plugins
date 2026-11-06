@@ -18,7 +18,8 @@
 
 - 置き場: `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`（`records_dir`）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`。ファイル名・executor_id・ファイルロック（`<鍵>.lock`）に使う（I17）
-- 形式の版: `FORMAT`。耐久ワークフローの中の DBOS の呼び出しの順を変えたら上げる（I18・決定 28）
+- 形式の版: `FORMAT`。耐久ワークフローの中の DBOS の呼び出しの順を変えたら上げる（I18・決定 28）。
+  途中の記録を続ける必要があるときは、上げずに `patched` で新旧の処理を分ける（#2616 の決定 2）
 - 実行の回: 耐久ワークフローの ID は `<接頭辞>-<回>`。`resolve` が続けるか新しく始めるかを決める
 - 止まりと続き: 耐久ワークフローの中で `pause`（イベントを立てて待つ）、外から `resume`（メッセージを送る）
 - 抜け方: 止まりのまま抜けるときは `exit_leaving_pending`（`os._exit`。DBOS の後始末で待たない）
@@ -205,6 +206,7 @@ def launch(
             "log_level": "WARNING",
             "executor_id": key,
             "application_version": FORMAT,
+            "enable_patching": True,
             "notification_listener_polling_interval_sec": POLL_SECONDS,
         }
         _console_to_stderr()
@@ -364,6 +366,11 @@ def resume_paused(ref: WorkflowRef, event: str = "pause") -> int:
     seq = int(ev.get("seq") or 0)
     resume(ref, seq)
     return seq
+
+
+def patched(name: str) -> bool:
+    """耐久ワークフローの中で打つ。この位置に別の記録があれば False（古い実行の打ち直し）、それ以外は印を記録して True。"""
+    return DBOS.patch(name)
 
 
 def recv(topic: str, timeout: float) -> Any:
