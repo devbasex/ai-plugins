@@ -6071,7 +6071,7 @@
     {
       "term": "停滞の問い",
       "context": "ndf-workflow",
-      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）",
+      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のときと、開発ループが止まったときに立つ",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
     },
@@ -6088,6 +6088,13 @@
       "meaning": "耐久ワークフローが、答えを待たずに自分の問いを問いの一覧から外すこと",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "再起動の試み",
+      "context": "ndf-workflow",
+      "meaning": "レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、統括役の記録に時刻と結果を残す",
+      "source": "",
+      "pending_source": "issues/issue-2649-design.md"
     }
   ]
 }
