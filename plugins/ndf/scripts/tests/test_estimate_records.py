@@ -187,6 +187,221 @@ def test_since_limits_runs():
     assert er.issue_actuals(rows, "実装", since="2026-09-15T00:00:00+00:00", alive=DEAD)[1].a == 70
 
 
+# --- 課題ごとの実績の合計: 現状固定（期待値は今のコードの出力。リファクタリングの退行検出が目的） ---
+
+
+def _at(hour: int) -> str:
+    return f"2026-10-01T{hour:02d}:00:00+00:00"
+
+
+def _human(at, issues, seconds) -> dict:
+    return {"schema": 1, "kind": "human", "at": at, "issues": issues, "seconds": seconds}
+
+
+def _ids(acc) -> list[tuple[str, str | None]]:
+    return [(r.run, r.outcome) for r in acc.runs]
+
+
+def test_empty_rows_give_no_issues():
+    assert er.issue_actuals([], "実装", alive=DEAD) == {}
+
+
+def test_run_without_issues_is_not_counted():
+    rows: list[dict] = []
+    _run(rows, "r", [], "実装", _at(0), [("x", 100, 1.0)], "成功", _at(1))
+    assert er.issue_actuals(rows, "実装", alive=DEAD) == {}
+
+
+def test_not_completed_keeps_defaults():
+    rows: list[dict] = []
+    _run(rows, "r", [1], "実装", _at(0), [("x", 1, 0.1)], "承認ゲート", _at(1), config={"harness": "h"})
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert (got.a, got.c, got.h, got.l) == (1.0, 0.1, None, None)
+    assert (got.completed, got.cost_unknown, got.shared) == (False, False, False)
+    assert got.config == {} and got.finished is None
+    assert _ids(got) == [("r", "承認ゲート")]
+
+
+def test_success_of_earlier_phase_does_not_complete():
+    rows: list[dict] = []
+    _run(rows, "d", [1], "設計", _at(0), [("x", 10, 1.0)], "成功", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert not got.completed and got.l is None and got.a == 10
+
+
+def test_first_success_decides_the_end_and_cuts_later_runs():
+    rows: list[dict] = []
+    # 行の順と開始の順を変えてある。完了は開始の順で最初の成功で決まる
+    _run(rows, "second", [1], "実装", _at(2), [("x", 10, 1.0)], "成功", _at(3), config={"harness": "h1"})
+    _run(rows, "first", [1], "実装", _at(0), [("x", 20, 2.0)], "成功", _at(1), config={"harness": "h0"})
+    _run(rows, "later", [1], "実装", _at(4), [("x", 40, 4.0)], "失敗", _at(5))
+    _run(rows, "boundary", [1], "設計", _at(1), [("x", 80, 8.0)], "失敗", _at(2))  # 終わりと同時に始まる実行は残る
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert _ids(got) == [("first", "成功"), ("boundary", "失敗")]
+    assert (got.a, got.c, got.l) == (100.0, 10.0, 3600.0)
+    assert got.config == {"harness": "h0"} and got.finished == _at(1)
+
+
+def test_later_phases_are_counted_when_done_is_later():
+    rows: list[dict] = []
+    _run(rows, "a", [1], "設計", _at(0), [("x", 1, 0.1)], "成功", _at(1))
+    _run(rows, "b", [1], "設計", _at(2), [("x", 2, 0.2)], "失敗", _at(3))
+    _run(rows, "c", [1], "配布（本番）", _at(4), [("x", 4, 0.4)], "成功", _at(5))
+    design = er.issue_actuals(rows, "設計", alive=DEAD)[1]
+    assert _ids(design) == [("a", "成功")] and (design.a, design.l) == (1.0, 3600.0)
+    prod = er.issue_actuals(rows, "配布（本番）", alive=DEAD)[1]
+    assert [r.run for r in prod.runs] == ["a", "b", "c"]
+    assert (prod.a, prod.c, prod.l) == (7.0, 0.7, 18000.0) and prod.finished == _at(5)
+
+
+def _phase_mix() -> list[dict]:
+    rows: list[dict] = []
+    _run(rows, "a", [1], "実装", _at(0), [("x", 1, 0.1)], "失敗", _at(1))
+    _run(rows, "none", [1], None, _at(1), [("x", 2, 0.2)])
+    _run(rows, "odd", [1], "不明", _at(2), [("x", 4, 0.4)], "成功", _at(3))
+    _run(rows, "c", [1], "検査", _at(4), [("x", 8, 0.8)], "成功", _at(5))
+    return rows
+
+
+def test_run_with_unknown_phase_is_not_limited():
+    got = er.issue_actuals(_phase_mix(), "実装", alive=DEAD)[1]
+    assert _ids(got) == [("a", "失敗"), ("none", "中断"), ("odd", "成功")]
+    assert (got.a, got.c, got.completed) == (7.0, 0.7, False)
+
+
+def test_done_outside_phases_limits_nothing_and_matches_by_name():
+    rows = _phase_mix()
+    unmatched = er.issue_actuals(rows, "無い", alive=DEAD)[1]
+    assert [r.run for r in unmatched.runs] == ["a", "none", "odd", "c"]
+    assert (unmatched.a, unmatched.completed, unmatched.l) == (15.0, False, None)
+    matched = er.issue_actuals(rows, "不明", alive=DEAD)[1]
+    assert [r.run for r in matched.runs] == ["a", "none", "odd"]  # 終わりの後に始まった c は切られる
+    assert (matched.a, matched.l, matched.finished) == (7.0, 10800.0, _at(3))
+
+
+def test_step_values_that_are_not_numbers():
+    rows: list[dict] = []
+    steps = [("none", None, None), ("str", "9", "1"), ("bool", True, True), ("f1", 0.04, 0.00004), ("f2", 0.04, 0.00004)]
+    _run(rows, "r", [1], "実装", _at(0), steps, "成功", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    # 数でない秒は足さず、数でない費用は不明の印を立てる。bool は 1 として足す。丸めは合計の後
+    assert (got.a, got.c) == (1.1, 1.0001) and got.cost_unknown
+
+
+def test_steps_absent_gives_zero_totals():
+    rows: list[dict] = []
+    _run(rows, "r", [1], "実装", _at(0), [], "成功", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert (got.a, got.c, got.l, got.cost_unknown, got.completed) == (0.0, 0.0, 3600.0, False, True)
+
+
+def test_shared_run_is_split_and_rounded_per_issue():
+    rows: list[dict] = []
+    _run(rows, "r", [1, 2, 3], "実装", _at(0), [("x", 100, 1.0)], "成功", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)
+    assert list(got) == [1, 2, 3]
+    assert all((v.a, v.c, v.shared, v.completed, v.l) == (33.3, 0.3333, True, True, 3600.0) for v in got.values())
+
+
+def test_duplicate_issue_in_run_is_counted_twice_and_split_by_two():
+    rows: list[dict] = []
+    _run(rows, "r", [1, 1], "実装", _at(0), [("x", 100, 1.0)], "成功", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert [r.run for r in got.runs] == ["r", "r"]
+    assert (got.a, got.c, got.shared) == (100.0, 1.0, True)
+
+
+def test_unreadable_start_of_success_gives_no_lead_time():
+    rows: list[dict] = []
+    _run(rows, "r", [1], "実装", "bad", [("x", 3, 0.5)], "成功", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert got.completed and got.l is None and got.a == 3
+
+
+def test_unreadable_start_sorts_first_and_clears_lead_time():
+    rows: list[dict] = []
+    _run(rows, "ok", [1], "実装", _at(0), [("x", 4, 0.25)], "成功", _at(2))
+    _run(rows, "bad", [1], "実装", "bad", [("x", 3, 0.5)], "失敗", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert [r.run for r in got.runs] == ["bad", "ok"]
+    assert (got.a, got.c, got.l) == (7.0, 0.75, None) and got.completed
+
+
+def test_unreadable_end_time_drops_runs_with_readable_start():
+    # NOTE: 現状固定。終わりの時刻が読めないと `cut or 0` で完了した実行自身が足されない。
+    #       妥当かは未判断で、変えるなら別の変更で行う
+    rows: list[dict] = []
+    _run(rows, "ok", [1], "実装", _at(0), [("x", 3, 0.5)], "成功", "bad")
+    _run(rows, "bad", [1], "実装", "bad", [("x", 4, 0.25)], "失敗", _at(1))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert _ids(got) == [("bad", "失敗")]
+    assert (got.a, got.c, got.l) == (4.0, 0.25, None)
+    assert got.completed and got.finished == "bad"
+
+
+def test_outcome_of_run_without_end_follows_alive_and_imported():
+    rows: list[dict] = []
+    _run(rows, "r", [1], "実装", _at(0), [("x", 1, 0.1)])
+    assert _ids(er.issue_actuals(rows, "実装", alive=lambda run: True)[1]) == [("r", "実行中")]
+    assert _ids(er.issue_actuals(rows, "実装")[1]) == [("r", "中断")]  # 既定は plan_alive（状態ディレクトリが無い）
+    imported: list[dict] = []
+    _run(imported, "r", [1], "実装", _at(0), [("x", 1, 0.1)], imported=True)
+    assert _ids(er.issue_actuals(imported, "実装", alive=DEAD)[1]) == [("r", None)]
+
+
+def _since_rows() -> list[dict]:
+    rows: list[dict] = []
+    _run(rows, "same", [1], "実装", _at(3), [("x", 1, 0.1)], "失敗", _at(4))
+    _run(rows, "after", [1], "実装", _at(5), [("x", 2, 0.2)], "成功", _at(6))
+    _run(rows, "bad", [1], "実装", "bad", [("x", 4, 0.4)], "失敗", _at(6))
+    return rows
+
+
+def test_since_excludes_same_time_and_unreadable_start():
+    got = er.issue_actuals(_since_rows(), "実装", since=_at(3), alive=DEAD)[1]
+    assert _ids(got) == [("after", "成功")]
+    assert (got.a, got.l) == (2.0, 3600.0)  # L は残った最初の実行から測る
+
+
+@pytest.mark.parametrize("since", ["bad", "", None])
+def test_since_unreadable_or_empty_limits_nothing(since):
+    got = er.issue_actuals(_since_rows(), "実装", since=since, alive=DEAD)[1]
+    assert [r.run for r in got.runs] == ["bad", "same", "after"]
+    assert (got.a, got.c, got.l) == (7.0, 0.7, None)
+
+
+def _human_rows() -> list[dict]:
+    return [
+        _human(_at(1), [1, 2], 60),
+        _human(_at(2), [1], 0.5),
+        _human(_at(3), [1], "x"),
+        _human(_at(3), [1], None),
+        _human(_at(3), None, 5),
+        _human("bad", [3], 7),
+        _human(_at(0), [4], 0),
+        _human(_at(1), [5], True),
+    ]
+
+
+def test_human_rows_make_issues_and_are_not_split():
+    got = er.issue_actuals(_human_rows(), "実装", alive=DEAD)
+    assert {k: v.h for k, v in got.items()} == {1: 60.5, 2: 60.0, 3: 7.0, 4: 0.0, 5: 1.0}
+    assert (got[1].a, got[1].c, got[1].l, got[1].runs, got[1].completed) == (0.0, 0.0, None, [], False)
+
+
+def test_human_rows_follow_since_with_same_rule_as_runs():
+    got = er.issue_actuals(_human_rows(), "実装", since=_at(1), alive=DEAD)
+    assert {k: v.h for k, v in got.items()} == {1: 0.5}
+
+
+def test_human_row_is_counted_regardless_of_phase_limit():
+    rows: list[dict] = []
+    _run(rows, "c", [1], "検査", _at(0), [("x", 1, 0.1)], "成功", _at(1))
+    rows.append(_human(_at(1), [1], 60))
+    got = er.issue_actuals(rows, "実装", alive=DEAD)[1]
+    assert got.h == 60 and got.runs == [] and got.a == 0
+
+
 # --- 取り込み ---
 
 
