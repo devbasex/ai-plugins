@@ -45,8 +45,10 @@ def released(stage) -> bool:
 
 
 def _strip_note(text):
-    """版の文字列から全角の括弧の注記を落とす。"""
-    return re.sub(r"\s*（.*$", "", text).strip()
+    """版の文字列から全角の括弧の注記と、数字の前の先頭の小文字の `v` を落とす（`v10.26.1` と `10.26.1` を同じ版に読む。#2225）。
+
+    本番の版（`版:`）と対象の版（`対象の版:`）の両方がここを通る。大文字の `V` と版数でない表記（`main c427284`）は変えない。"""
+    return re.sub(r"^v(?=\d)", "", re.sub(r"\s*（.*$", "", text).strip())
 
 
 def _read_dist_block(block):

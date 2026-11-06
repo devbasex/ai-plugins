@@ -13,7 +13,8 @@
     "NDF_DEPS_VENV",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
-    "NDF_WORKTREE_BASE"
+    "NDF_WORKTREE_BASE",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [
     {

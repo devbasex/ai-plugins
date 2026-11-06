@@ -2575,15 +2575,13 @@
       "term": "選定",
       "context": "ndf-workflow",
       "meaning": "開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す",
-      "source": "",
-      "pending_source": "issues/issue-2604-requirements.md"
+      "source": "docs/specifications/ndf-loop-select-prerequisites.md"
     },
     {
       "term": "前提の課題",
       "context": "ndf-workflow",
       "meaning": "ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない",
-      "source": "",
-      "pending_source": "issues/issue-2604-requirements.md"
+      "source": "docs/specifications/ndf-loop-select-prerequisites.md"
     },
     {
       "term": "ループの予算",
@@ -3598,6 +3596,18 @@
       "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
+      "term": "範囲の終点",
+      "context": "ndf-release",
+      "meaning": "版の節と承認資料の「含む PR」に並べる PR の範囲の、新しい側の端のコミット。出す版のコミット（リリースのブランチの先頭か、承認に出すコミット）を指す",
+      "source": ""
+    },
+    {
+      "term": "リリースタグ",
+      "context": "ndf-release",
+      "meaning": "正式版を出したときに本番チャネルのコミットへ打つタグ `<プラグイン>--v<版>`。リリースタグのある版の節は工程から書き換えない",
+      "source": ""
+    },
+    {
       "term": "子の箇条",
       "context": "ndf-release",
       "meaning": "PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む",
@@ -3921,7 +3931,7 @@
     {
       "term": "範囲の PR",
       "context": "ndf-release",
-      "meaning": "直前の正式版のタグから終点（承認したコミットか、ベースブランチの先端）までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
+      "meaning": "直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
@@ -5785,6 +5795,25 @@
       "meaning": "同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す",
       "source": "",
       "pending_source": "issues/issue-2225-requirements.md"
+    },
+    {
+      "term": "秘密のキャッシュ",
+      "context": "ndf-factory",
+      "meaning": "Secrets Manager から読んだ値を Lambda の実行環境の中で保持する `factory/api/` の仕組み。成功した値は以後も同じ値を返し、失敗した読み込みは捨てて次の要求で読み直す",
+      "source": "",
+      "pending_source": "issues/issue-2276-requirements.md"
+    },
+    {
+      "term": "端末の控え",
+      "context": "ndf-factory",
+      "meaning": "画面が最後に受け取った読み出しの応答を、暗号化して端末に残したもの。受け取った時刻と保存の期限を持つ",
+      "pending_source": "issues/issue-2383-requirements.md"
+    },
+    {
+      "term": "確定待ちの操作",
+      "context": "ndf-factory",
+      "meaning": "オフラインの間に押した取り消せない操作で、つながったときに今の状態と照らしてから確定するもの",
+      "pending_source": "issues/issue-2383-requirements.md"
     },
     {
       "term": "デプロイ",

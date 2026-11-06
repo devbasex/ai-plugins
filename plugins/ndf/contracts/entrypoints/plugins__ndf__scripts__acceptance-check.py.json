@@ -31,7 +31,8 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_LOCK_DIR",
-    "NDF_PRESENTATION_DIR"
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [
     {

@@ -47,7 +47,8 @@
     "NDF_SKIP_AUTH_CHECK",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_USAGE_KIND",
-    "NDF_USAGE_SOURCE"
+    "NDF_USAGE_SOURCE",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],
   "stdin": "none",

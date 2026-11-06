@@ -31,6 +31,7 @@
     "NDF_CONTEXT_POLICY",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [],
