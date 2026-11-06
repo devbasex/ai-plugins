@@ -418,6 +418,31 @@ def _runs_by_issue(table: dict[str, Run], done: str, since_ts: float | None) -> 
     return out
 
 
+def _accumulate_issue(acc: IssueActual, done: str) -> None:
+    """1 課題ぶんの終端を確定し、`acc.runs` の `step` から A・C を按分して積み、L を求める。"""
+    acc.runs.sort(key=lambda r: ts(r.started) or 0)
+    ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
+    end = ends[0] if ends else None
+    cut = ts(end.end.get("at")) if end else None
+    if end:
+        acc.completed, acc.config, acc.finished = True, end.config, end.end.get("at")
+        acc.runs = [r for r in acc.runs if (ts(r.started) or 0) <= (cut or 0)]
+    for run in acc.runs:
+        share = len(run.issues) or 1
+        acc.shared |= share > 1
+        for s in run.steps:
+            if isinstance(s.get("seconds"), (int, float)):
+                acc.a += float(s["seconds"]) / share
+            if isinstance(s.get("cost_usd"), (int, float)):
+                acc.c += float(s["cost_usd"]) / share
+            else:
+                acc.cost_unknown = True
+    if end and cut is not None and acc.runs:
+        first = ts(acc.runs[0].started)
+        acc.l = round(cut - first, 1) if first is not None else None
+    acc.a, acc.c = round(acc.a, 1), round(acc.c, 4)
+
+
 def issue_actuals(
     rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
 ) -> dict[int, IssueActual]:
@@ -428,28 +453,8 @@ def issue_actuals(
     C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
     since_ts = ts(since) if since else None
     out = _runs_by_issue(run_table(rows, alive), done, since_ts)
-    for issue, acc in out.items():
-        acc.runs.sort(key=lambda r: ts(r.started) or 0)
-        ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
-        end = ends[0] if ends else None
-        cut = ts(end.end.get("at")) if end else None
-        if end:
-            acc.completed, acc.config, acc.finished = True, end.config, end.end.get("at")
-            acc.runs = [r for r in acc.runs if (ts(r.started) or 0) <= (cut or 0)]
-        for run in acc.runs:
-            share = len(run.issues) or 1
-            acc.shared |= share > 1
-            for s in run.steps:
-                if isinstance(s.get("seconds"), (int, float)):
-                    acc.a += float(s["seconds"]) / share
-                if isinstance(s.get("cost_usd"), (int, float)):
-                    acc.c += float(s["cost_usd"]) / share
-                else:
-                    acc.cost_unknown = True
-        if end and cut is not None and acc.runs:
-            first = ts(acc.runs[0].started)
-            acc.l = round(cut - first, 1) if first is not None else None
-        acc.a, acc.c = round(acc.a, 1), round(acc.c, 4)
+    for acc in out.values():
+        _accumulate_issue(acc, done)
     for r in rows:
         if r.get("kind") != "human" or not isinstance(r.get("seconds"), (int, float)):
             continue
