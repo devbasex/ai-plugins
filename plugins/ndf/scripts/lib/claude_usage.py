@@ -105,6 +105,14 @@ class Usage:
         vals = [w["utilization"] for w in self.windows()]
         return float(max(vals)) if vals else None
 
+    def weekly_score(self) -> float | None:
+        """週の使用率: 週の枠・モデル別の週の枠の使用率の最大（5 時間の枠を除く）。読めなければ None。"""
+        if not self.windows_known():
+            return None
+        ws = [self.seven_day, *(self.scoped or [])]
+        vals = [w["utilization"] for w in ws if isinstance(w, dict) and isinstance(w.get("utilization"), (int, float))]
+        return float(max(vals)) if vals else None
+
     def spend_reached(self) -> bool | None:
         """支出上限に達したか（I4）: 応答の生の `spend_limit_reached`。読めなければ None。
 
