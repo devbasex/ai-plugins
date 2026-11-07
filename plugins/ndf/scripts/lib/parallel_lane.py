@@ -199,12 +199,9 @@ def lane_request_id(state: Path, lane: str) -> str:
     return rid
 
 
+# 依頼のメッセージの形の検査は parallel_request_form が持つ。従来の名前で読めるよう同じオブジェクトを指す
 REQUEST_ID_RE = prf.REQUEST_ID_RE
-
-
-def request_errors(msg: object) -> list[str]:
-    """リリースの依頼のメッセージの形の誤り（`contracts/forms/parallel-request.json`）。空なら形に合う。"""
-    return prf.request_errors(msg)
+request_errors = prf.request_errors
 
 
 def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
