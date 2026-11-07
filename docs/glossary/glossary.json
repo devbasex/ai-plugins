@@ -6108,7 +6108,7 @@
     {
       "term": "計画の閾値",
       "context": "ndf-workflow",
-      "meaning": "計画全体の答え待ちの依頼の件数の閾値。既定は 4 で、これを超えると計画のすべてのレーンを止める",
+      "meaning": "計画全体の答え待ちの依頼の件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める",
       "pending_source": "issues/issue-2707-requirements.md"
     },
     {

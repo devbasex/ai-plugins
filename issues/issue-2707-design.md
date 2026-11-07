@@ -9,18 +9,18 @@
 ## 適用範囲
 
 - **働く範囲**: 利用先のリポジトリでも働く。対象は `.ndf/parallel/<計画名>/` の計画のレーンだけである。外のオーガナイザーのレーンと Factory の実行ジョブは依頼を一覧へ送らないため、数えるものが無い
-- **プロジェクトごとに違うもの**: 2 つの閾値を宣言 `.ndf/pace.json` で受ける。宣言が無ければ既定の 4 と 3 で動く
+- **プロジェクトごとに違うもの**: 2 つの閾値を宣言 `.ndf/pace.json` で受ける。宣言が無ければ既定の 8 と 3 で動く
 - **当たるモード**: `standard`
 
 ## あるべき姿の根拠
 
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
-| 「オーケストレーターに届いた承認待ちや質問(問い)が4つを超えたらすべてのレーンを止める」「各レーンがオーケストレーターに送った問いが3つを超えたらそのレーンを止める」「人間が読み切れないためです」（#2707 の依頼の原文、2026-11-07） | 利用者の指示の原文 | 累計ではなく読む量で止める。閾値は 4 と 3 |
+| 「計画全体で8件とします」（#2707 の設計承認ゲートの答え、2026-11-07）、「各レーンがオーケストレーターに送った問いが3つを超えたらそのレーンを止める」「人間が読み切れないためです」（#2707 の依頼の原文、2026-11-07） | 利用者の指示の原文 | 累計ではなく読む量で止める。閾値は 8 と 3 |
 | STD1・PRD1 | 外部の一次情報 | 作業中の量を明示して抑え、量が下がったら新しい仕事を選ぶ形は確立している |
 | STD2・PRD2 | 外部の一次情報 | 止めるのは将来の開始だけで、動いている実行は止めない形に前例がある |
 | STD3 | 外部の一次情報 | 望む状態と今の状態を毎周突き合わせる制御ループは、通知を取りこぼしても収束する |
-| 計画 p3 の 7 件（PR 2669・2694・2696・2697・2679・2704・2703） | 実測 | 閾値の無い状態で、1 回に届く依頼は閾値 4 の 2 倍近くになる |
+| 計画 p3 の 7 件（PR 2669・2694・2696・2697・2679・2704・2703） | 実測 | 閾値の無い状態で、依頼が 1 回に 7 件届く。7 件は計画の閾値 8 以下で、今のマイルストーンでレーンへ割ると 3・2・2 件のためレーンの閾値も超えない。閾値が働くのはこの量を超えた計画である |
 
 要求と受け入れ条件は #2707 の本文にある（コピーは [issue-2707-requirements.md](issue-2707-requirements.md) ）。決定の記録は [issue-2707-design-decisions.md](issue-2707-design-decisions.md) に分けた。この文書は「どう作るか」だけを扱う。
 
@@ -80,7 +80,7 @@
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 答え待ちの依頼 | オーガナイザーに届いて、まだ答えていない依頼 | 要求の同期で追加済み |
-| 計画の閾値 | 計画全体の答え待ちの依頼の件数の閾値。既定は 4 | 要求の同期で追加済み |
+| 計画の閾値 | 計画全体の答え待ちの依頼の件数の閾値。既定は 8 | 要求の同期で追加済み |
 | レーンの閾値 | 1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 | 要求の同期で追加済み |
 | 答え待ちの停止 | 答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態 | 要求の同期で追加済み |
 | 止める指示のファイル | 耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（`answer-hold.json`）。停止が無ければファイルも無い | 追加（`ndf-workflow`） |
@@ -113,7 +113,7 @@
 | 計画の表示（`lib/parallel_plan.py`） | `plan.md` に答え待ちの停止の節を描く |
 | 進め方の宣言（`lib/pace.py`） | 節 `parallel` を読む `read_parallel` を足す |
 | 契約（`contracts/`） | `pace.json` のキー、`parallel.py` の `park`、ファイル 3 種を足す |
-| 手順書・確定仕様 | `references/parallel.md`・`asking.md`・`loop.md`・`docs/specifications/ndf-parallel-organizer.md`・`docs/specifications/ndf-workflow-development-loop.md` |
+| 手順書・確定仕様 | `references/parallel.md`・`asking.md`・`loop.md`・`docs/specifications/ndf-parallel-organizer.md`・`docs/specifications/ndf-workflow-development-loop.md`・`docs/specifications/ndf-development-loop-limits.md` |
 
 ### 止める経路
 
@@ -201,7 +201,7 @@ plugins/ndf/scripts/
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| 人が 1 回に読める依頼の件数の実測 | 試していない | 要求の対象外。閾値の 4 と 3 は利用者の指示の値である |
+| 人が 1 回に読める依頼の件数の実測 | 試していない | 要求の対象外。閾値の 8 と 3 は利用者の指示の値である |
 
 調べた量: 候補 7 件・取得の試み 11 回。
 
@@ -255,7 +255,7 @@ classDiagram
 ### 止める指示のファイル（`answer-hold.json`）
 
 ```json
-{"version": 1, "plan": true, "lanes": ["a"], "count": 5, "by_lane": {"a": 4, "b": 1}, "limits": {"plan": 4, "lane": 3}, "at": "2026-11-07T01:00:00Z"}
+{"version": 1, "plan": true, "lanes": ["a"], "count": 9, "by_lane": {"a": 4, "b": 3, "c": 2}, "limits": {"plan": 8, "lane": 3}, "at": "2026-11-07T01:00:00Z"}
 ```
 
 ### 履歴の 1 行（`answer-hold-log.jsonl`）
@@ -263,7 +263,7 @@ classDiagram
 1 つの計画で止まった回数は `change: on` の行の数で数える。
 
 ```json
-{"n": 1, "change": "on", "scope": "plan", "lanes": [], "count": 5, "limit": 4, "reason": "答え待ちの依頼が計画の閾値を超えた", "at": "2026-11-07T01:00:00Z"}
+{"n": 1, "change": "on", "scope": "plan", "lanes": [], "count": 9, "limit": 8, "reason": "答え待ちの依頼が計画の閾値を超えた", "at": "2026-11-07T01:00:00Z"}
 ```
 
 | 項目 | 値 |
@@ -287,7 +287,7 @@ classDiagram
 任意の節を足す。
 
 ```json
-{"parallel": {"answer_limit": {"plan": 4, "lane": 3}}}
+{"parallel": {"answer_limit": {"plan": 8, "lane": 3}}}
 ```
 
 ### 機能ごとの読み書き
@@ -323,7 +323,7 @@ sequenceDiagram
     participant W as 耐久ワークフロー
     participant F as 計画の置き場
     participant O as オーガナイザー
-    L->>W: 5 件目の依頼
+    L->>W: 9 件目の依頼
     W->>W: 数えて停止の範囲を導く
     W->>F: 止める指示のファイルと履歴を書く
     W-->>O: wait が answer_hold を返す
@@ -384,7 +384,7 @@ stateDiagram-v2
 
 | 足す値 | 足す先 | 変える箇所 |
 | --- | --- | --- |
-| `answer_hold` | 止まる条件 | `IMMEDIATE_STOPS`（保留の周回の処理より先に止める）・`stopped_result` の `stop_self` の条件・`_RESUME_HANDLERS`・`loop.md` の止まる条件の表 |
+| `answer_hold` | 止まる条件 | `IMMEDIATE_STOPS`（保留の周回の処理より先に止める）・`stopped_result` の `stop_self` の条件・`_RESUME_HANDLERS`・`loop.md` の止まる条件の表・`ndf-development-loop-limits.md` の止まる条件の表と、未確認の行「保留の周回が増えたときの読む量」 |
 | `answer_hold` | `wait` の `action` | `parallel.md` の表へ載せる |
 
 止まる条件 `answer_hold` は上の箇所の規則に当てはまらないため、それらを変える。次の箇所は変えない。
@@ -400,19 +400,19 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | 運用・保守性 | 止めた時刻・解いた時刻・範囲・件数が計画の記録に残り、1 つの計画で何回止まったかを後から数えられる。計画の表示（`plan.md`）に、止めているレーンと理由が載る | `answer-hold-log.jsonl` へ 1 変化 1 行で追記し、`plan.md` に節を描く。計画の要約へ回数 `holds` を足す | 流れのテストで行と節を読む |
 | 移行性 | 動いている計画の耐久ワークフローは、版を更新した後の再実行でも記録から続く（`durable.patched` の前例のとおり）。既存の `.ndf/parallel/` と宣言は書き換えない。切り戻しは版を戻すことで行う | 観測の値に閾値が無い記録の再生では新しい呼び出しを足さない。実時間へ戻ると閾値が載り、以後の 1 周で働く（決定 7）。プランの開始の判定は既存の耐久ステップの中で読むため、記録の位置が変わらない | 閾値の無い観測の記録を再生するテスト |
-| システム環境 | 閾値は宣言で受け、ai-plugins の値を既定へ埋め込まない（Value 6）。既定の 4 と 3 は利用者の指示の値である | `pace.read_parallel` が宣言を読み、値ごとに正の整数かを見る。リポジトリの宣言へは書かない | 宣言ごとの単体テスト |
+| システム環境 | 閾値は宣言で受け、ai-plugins の値を既定へ埋め込まない（Value 6）。既定の 8 と 3 は利用者の指示の値である | `pace.read_parallel` が宣言を読み、値ごとに正の整数かを見る。リポジトリの宣言へは書かない | 宣言ごとの単体テスト |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2707 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`plugins/ndf/skills/development-workflow/references/`、`docs/specifications/ndf-parallel-organizer.md`、`docs/specifications/ndf-workflow-development-loop.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2707 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`plugins/ndf/skills/development-workflow/references/`、`docs/specifications/ndf-parallel-organizer.md`、`docs/specifications/ndf-workflow-development-loop.md`、`docs/specifications/ndf-development-loop-limits.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 条件 1・2・3 / I3 | 4 件で停止の範囲が空、5 件目で計画全体、答えた後は残りの件数で数える | 閾値の比較を `>=` にする。累計で数える |
+| 条件 1・2・3 / I3 | 8 件で停止の範囲が空、9 件目で計画全体、累計 9 件のうち 2 件へ答えた後は残りの 7 件で数える | 閾値の比較を `>=` にする。累計で数える |
 | 条件 4・6 / I1 | 問いの全種類を数え、リリースの依頼を数えない | `kind` を絞る。`pending` を足す |
 | 条件 5 / I1 | まとめた問いは 1 件、同じレーンと設計 PR の新旧は 1 件。答えた設計 PR の古い依頼は件数から消え、答えの後に届いた同じ設計 PR の依頼は残る | キーから設計 PR を外す。古い依頼を一覧に残す |
 | 条件 7・8 / I2 | 3 件で止めず、4 件目でそのレーンだけ停止の範囲に入る | 計画全体へ広げる |
@@ -430,7 +430,7 @@ stateDiagram-v2
 | 条件 24 / I11 | 答えとマージは送られ、持ち主のレーンを起こす 1 行が返らず、解けた後に起きる | `owner_restart` の判定を外す |
 | 条件 25 / I8 | 件数が 0 でも再開の印があれば `finished` にならず、再開の後に終わる | `_run_finished` の判定を外す |
 | 条件 26 | 再実行の後も停止の範囲と再開の印が同じで、通知を重ねない | 停止の範囲を記録から導かない |
-| 条件 27・28 | 宣言なしで 4 と 3、値を書くとその値、不正な値は既定と警告 | 既定を埋め込む。不正な値で止める |
+| 条件 27・28 | 宣言なしで 8 と 3、値を書くとその値、不正な値は既定と警告 | 既定を埋め込む。不正な値で止める |
 | 条件 29 | 閾値以下の計画で新しい耐久ステップが呼ばれず、既存の 108 件が通る | 1 周ごとに耐久ステップを呼ぶ |
 | 条件 30 / I12 | `stop` は停止の有無に依らず終わり、ファイルと再開の印が残らない | `step_finish` の片付けを外す |
 | 条件 31・32 | 手順書と確定仕様の更新、全体テスト | `check-ndf-contracts.py`・全体テストが落ちる |
@@ -444,6 +444,8 @@ stateDiagram-v2
 | 項目 | 内容 |
 | --- | --- |
 | 閾値を超えて増える件数 | 区切りまでの間に依頼は増え続ける（要求の前提 2）。増える数の上限は置かず、実際の計画の履歴で確かめる |
+| 閾値に当たる計画の量 | 計画 p3 の 7 件は、計画の閾値 8 もレーンの閾値 3 も超えない。依頼の時点のレーンの内訳は未確認で、3・2・2 件は今のマイルストーンからの割り当てである。人が読み切れる量との関係は、止まった回数を履歴で数えて確かめる |
+| 1 回の停止で読む量 | 計画全体の停止の時点で依頼は 9 件以上あり、`AskUserQuestion` は区分ごとに 4 件ずつ呼ぶ（`parallel.md` の「問い方」）ため、1 区分に集まると 3 回以上続けて問う。1 回の件数の変更は要求の対象外である |
 | 未決 1・2 | レーンの数へ設計の承認を含めること、MVV 判定で答えられる依頼を数えることは、要求の候補どおりに設計した。利用者が設計承認ゲートで確かめる |
 | 未マージの設計との取り込み | レーンの観測の #2649（PR 2703）が先に入るなら、開発ループの止まりの問いの除外へ `answer_hold` を足す。問いの取り下げは停止の範囲を 1 周ごとに導くため、取り下げの処理の変更は要らない。計画の台帳の #2647（PR 2704）が先に入るなら、`RunState` へ停止の範囲を足し、作り直しの後の最初の 1 周で通知を重ねないようにする。ファイルと再開の印は計画の置き場にあるため台帳へ入れない |
 | 閾値の前後を行き来するとき | 再開の余白を置かない（要求の S11）ため、1 件の増減でレーンの停止と再開が続く。回数は履歴で数えられる |
