@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import worktree_deps
+from state_home import checkout_home
 from supervise_lib import decl, plan as plan_mod
 
 SELF = Path(__file__).resolve().parent.parent / "supervise.py"
@@ -187,11 +188,11 @@ def state_dir_of(plan: str) -> Path:
     プランが一時ディレクトリの下にあり、状態の置き場所がそうでないときだけ、実体を
     `<状態の置き場所>/<stem>-<プランの絶対パスの sha256 の先頭 8 字>/` に作り、`<プラン>-state` を
     そこへのシンボリックリンクにする（#1142 の不足 f。OS の再起動と /tmp の掃除で記録を失わない）。
-    実体にはプランの写し `plan.json` を置く。既にある `<プラン>-state` はそのまま使う。
+    実体にはプランの写し `plan.json` を置く。既にある `<プラン>-state` はそのまま使う（切れたリンクは指し直す）。
     """
     link = Path(plan).parent / (Path(plan).stem + "-state")
     try:
-        if link.exists() or link.is_symlink():
+        if link.exists():
             return link
         home = sv_state_home()
         if not under_temp(Path(plan)) or under_temp(home):
@@ -202,6 +203,8 @@ def state_dir_of(plan: str) -> Path:
         if Path(plan).is_file() and not (real / "plan.json").exists():
             shutil.copyfile(plan, real / "plan.json")
         link.parent.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink():  # 実体を移した（`state-home.py migrate`）後の切れたリンク。移し先の実体を指し直す
+            link.unlink()
         link.symlink_to(real, target_is_directory=True)
     except FileExistsError:
         pass  # 並行する起動が先に作った
@@ -231,11 +234,10 @@ def under_temp(path: Path) -> bool:
 
 
 def sv_state_home() -> Path:
-    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `<チェックアウトの根>/sv`（根は `state_home.checkout_home`）。"""
     if os.environ.get("NDF_SV_STATE_DIR"):
         return Path(os.environ["NDF_SV_STATE_DIR"])
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "sv"
+    return checkout_home() / "sv"
 
 
 def queue_done_path(plans: list[str], done: str | None) -> Path:

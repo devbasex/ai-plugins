@@ -54,7 +54,7 @@ import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
 import run_owner  # noqa: E402  持ち主の記録（#2229）
-from loop_drive import call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import anchor_repo_cwd, call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
@@ -521,6 +521,7 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("pr", type=int)
     a, rest = ap.parse_known_args(argv)
+    anchor_repo_cwd()
     d = Drive(a.pr, rest)
     try:
         dp.main(TOOL, d.run, dict)

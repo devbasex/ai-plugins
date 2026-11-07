@@ -101,8 +101,8 @@ def _launch(agent: str, stem: str, reason: str, started: str, ended: str, elapse
     [
         ({"NDF_METRICS_DIR": "D", "XDG_STATE_HOME": "X", "HOME": "H"}, "D"),
         ({"XDG_STATE_HOME": "X", "HOME": "H"}, "X/ndf/metrics"),
-        ({"HOME": "H"}, "H/.local/state/ndf/metrics"),
-        ({"NDF_METRICS_DIR": "", "XDG_STATE_HOME": "", "HOME": "H"}, "H/.local/state/ndf/metrics"),
+        ({"HOME": "H"}, "H/.claude/ndf/state/metrics"),
+        ({"NDF_METRICS_DIR": "", "XDG_STATE_HOME": "", "HOME": "H"}, "H/.claude/ndf/state/metrics"),
     ],
 )
 def test_metrics_dir_resolution_order(rm, tmp_path, env, expected):

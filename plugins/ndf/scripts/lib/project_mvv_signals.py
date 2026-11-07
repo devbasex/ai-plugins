@@ -139,8 +139,9 @@ def last_mvv_verdict(state: dict, sprint: str, gate: str, gate_log, pr: int | No
         and str(Path(str(legacy_names.read_key(r, "sprint") or "")).resolve()) == me
         and (pr is None or pr in (r.get("pr") or []))
     ]
-    if rows:
-        found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
+    if rows:  # 行の順は時刻の順でない（旧の置き場から足し合わせた行は末尾に付く。#2766）ため、最新の時刻を採る
+        last = max(enumerate(rows), key=lambda x: (x[1].get("at") or "", x[0]))[1]
+        found.append((last.get("at") or "", last.get("verdict")))
     # 自動の通過を取り消した（sprint-state.py gate --withdraw）なら、それより前の判定は直前の判定として読まない
     found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if gate_answer.canonical(w.get("name")) == gate]
     if not found:

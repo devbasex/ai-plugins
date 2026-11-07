@@ -80,7 +80,7 @@ gh label create design-approved --description "ドキュメントレビューを
 
 ```text
 ${CLAUDE_PLUGIN_DATA}/stages/            # 与えられていればここ
-${XDG_STATE_HOME:-$HOME/.local/state}/ndf/stages/
+$HOME/.claude/ndf/state/stages/
 ${TMPDIR:-/tmp}/ndf-stages/              # どちらも作れないとき
 ```
 

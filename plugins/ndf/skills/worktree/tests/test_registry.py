@@ -457,9 +457,9 @@ def _lock_body(path: Path, name: str) -> str:
     end = lines.index("}", start)
     kept = [" ".join(line.split()) for line in lines[start + 1 : end] if line.strip() and not line.strip().startswith("#")]
     body = "\n".join(kept)
-    # 2 つの読み込む側で違ってよいのは、接頭辞と待ちの上限の既定値と、持ち続ける上限の秒の受け渡しだけである。
+    # 2 つの読み込む側で違ってよいのは、接頭辞と待ちの上限の既定値と、持ち続ける上限の秒の受け渡し（既定値を含む）だけである。
     body = re.sub(r'timeout="\$\{2:-[^}]*\}"', "timeout=DEFAULT", body)
-    body = body.replace(' hold="${3:-}"', "").replace(' "$hold"', "")
+    body = re.sub(r' hold="\$\{3:-[^}]*\}"', "", body).replace(' "$hold"', "")
     body = re.sub(r"\bW[TF]_LOCK_", "LOCK_", body)
     return body.replace("_wt_", "_lock_").replace("_wf_", "_lock_")
 
