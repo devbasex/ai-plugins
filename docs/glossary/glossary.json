@@ -6134,6 +6134,18 @@
       "context": "ndf-workflow",
       "meaning": "答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く",
       "pending_source": "issues/issue-2707-design.md"
+    },
+    {
+      "term": "候補の枠",
+      "context": "ndf-workflow",
+      "meaning": "切り出しの境界が無いときに、開発ループの選定が順位の先頭から候補として数える課題の件数の上限。周回の設定 max_issues の値で、1 周回に選ぶ課題の上限と同じ値である",
+      "pending_source": "issues/issue-2627-requirements.md"
+    },
+    {
+      "term": "外す理由",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの選定が課題を選ばないと決めた理由。周回の選定の記録に行ごとに残る",
+      "pending_source": "issues/issue-2627-requirements.md"
     }
   ]
 }
