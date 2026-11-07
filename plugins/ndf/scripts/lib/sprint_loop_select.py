@@ -333,13 +333,6 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     return run_selection(env, rec, before, len(rec["laps"]) + 1, notes=notes)
 
 
-def resume_answer_hold(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
-    """答え待ちの停止で止まったループの再開: 停止の範囲に残っていれば同じ条件で止まり直す（#2707）。"""
-    if (again := boundary_stop(env, rec)) and again["condition"] == "answer_hold":
-        return stop_and_report(env, rec, before, again, "答え待ちの停止が続いている"), nxt
-    return None, nxt
-
-
 def has_held_work(rec: dict) -> bool:
     """答えを待つ作業があるか（保留の周回か、オーガナイザーへ送って答えの無い設計の承認）。"""
     return bool(pending_laps(rec)) or any(w.get("request") and not w.get("answer") for w in rec.get("waiting", []))

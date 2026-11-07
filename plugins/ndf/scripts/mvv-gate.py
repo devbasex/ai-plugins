@@ -48,8 +48,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
-from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -62,12 +62,13 @@ from step_result import EXIT_GATE, emit, result  # noqa: E402
 import approved_commit as ac  # noqa: E402
 import clock  # noqa: E402
 import legacy_names  # noqa: E402
+import gh_call  # noqa: E402
+import gh_rest  # noqa: E402
 from gate_answer import DESIGN_GATE, RELEASE_GATE  # noqa: E402
 import jsonio  # noqa: E402
 from pace import DECL_NAME, EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
-from mvv_gate_pr import Back, design_docs, design_material, pr_facts, pr_material  # noqa: E402
 
 TOOL = "mvv-gate"
 GATES = {"design": DESIGN_GATE, "release": RELEASE_GATE}  # sprint-state.py の承認ゲートの記録の名前
@@ -91,6 +92,73 @@ MVV に従う変更なら承認ゲートでの個別の承認を省いてよい�
 
 出力は次の JSON の 1 つだけ。前後に文を書かない。
 {"verdict": "follow|not_follow|unknown", "reasons": ["MVV のどの項目に照らしてそう判断したか（1〜5 件）"], "boundary": [], "basis": ["Value 1"]}"""
+
+
+class Back(Exception):
+    """承認ゲートへ戻す（利用者の承認を求める）理由。"""
+
+
+def gh_or_back(args: list[str], repo: str | None, cwd: Path) -> str:
+    """`gh` を 1 回呼び（`lib/gh_call.py`）、標準出力を返す。失敗は Back。"""
+    r = gh_call.gh([*args] + (["--repo", repo] if repo else []), cwd=str(cwd))
+    if r.returncode == 127:
+        raise Back("gh が無い")
+    if r.returncode != 0:
+        raise Back(f"gh {' '.join(args)}: {r.stderr.strip()[:300]}")
+    return r.stdout
+
+
+def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
+    """PR の題名・本文・先頭のコミットと、変更したファイルの全件（rename の前のパスを含む）。取れなければ Back。
+
+    REST の `pulls/<n>/files` は全ページでも 3000 件で黙って切れるため、取れた件数が `changedFiles` と
+    合わなければ全件を確かめられないとして Back にする。
+    """
+    r = gh_rest.view_json("pr", n, "title,body,headRefOid,changedFiles", repo, cwd=str(cwd))
+    if r.returncode != 0:
+        raise Back("gh が無い" if r.returncode == 127 else f"gh pr view {n}: {r.stderr.strip()[:300]}")
+    try:
+        info = json.loads(r.stdout)
+    except ValueError:
+        raise Back(f"PR #{n} の出力を読めない")
+    f = gh_rest.pr_files(n, repo, cwd=str(cwd))
+    if f.returncode != 0:
+        raise Back("gh が無い" if f.returncode == 127 else f"PR #{n} の変更したファイルを読めない: {f.stderr.strip()[:300]}")
+    files = json.loads(f.stdout)
+    changed = info.get("changedFiles") if isinstance(info, dict) else None
+    if not isinstance(changed, int) or isinstance(changed, bool) or changed != len(files):
+        raise Back(f"PR #{n} の変更したファイルを全件読めない（取れた {len(files)} 件 / changedFiles {changed}）")
+    return {**info, "files": files}
+
+
+def pr_material(n: int, info: dict) -> str:
+    files = "\n".join(f"- {f['path']} (+{f.get('additions', 0)} -{f.get('deletions', 0)})" for f in info.get("files", []))
+    return f"## Pull Request #{n}: {info.get('title', '')}\n\n{info.get('body') or ''}\n\n### 変更したファイル\n{files}"
+
+
+def design_docs(info: dict) -> list[str]:
+    """PR が足したか直した `issues/` の設計文書のパス（消しただけのものは読めないので除く）。"""
+    return [
+        f["path"]
+        for f in info.get("files", [])
+        if f.get("path", "").startswith("issues/")
+        and f["path"].endswith(".md")
+        and "design" in Path(f["path"]).name
+        and not (f.get("additions", 0) == 0 and f.get("deletions", 0) > 0)
+    ]
+
+
+def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) -> str:
+    """PR の先頭のコミットの設計文書の中身を材料の 1 件にする。取れなければ Back。"""
+    ref = info.get("headRefOid") or ""
+    if not ref:
+        raise Back(f"PR #{n} の先頭のコミットが分からず、設計文書 {path} を読めない")
+    endpoint = f"repos/{repo or '{owner}/{repo}'}/contents/{urllib.parse.quote(path)}?ref={ref}"
+    try:
+        text = gh_or_back(["api", "-H", "Accept: application/vnd.github.raw", endpoint], None, cwd)
+    except Back as e:
+        raise Back(f"PR #{n} の設計文書 {path} を読めない: {e}")
+    return f"## 設計文書 {path}（PR #{n}）\n\n{text}"
 
 
 def build_prompt(project: pm.ProjectMvv, sprint: str | None, gate: str, materials: list[str], rule: str = "") -> str:
@@ -271,16 +339,8 @@ def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
     return result(TOOL, "ok", f"{GATES[a.gate]} の MVV 判定（助言）: {pm.NO_MVV}（{pm.STATUS_LABEL[project.status]}）", [item]), None
 
 
-class Checked(NamedTuple):
-    """機械のチェックの結果。スプリント MVV の本文・材料・承認の対象（材料のパス → SHA）。"""
-
-    sprint: str | None
-    materials: list[str]
-    approved: dict[str, str]
-
-
-def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> Checked:
-    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文・材料・承認の対象を返し、外れは `Back` を投げる。"""
+def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple[str | None, list[str]]:
+    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
     state = json.loads(Path(a.sprint).read_text(encoding="utf-8"))
     if project.status in ("unapproved", "mismatch", "unreadable"):
         raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
@@ -297,13 +357,12 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> Check
     if hits := boundary_hits(root, infos, a.advise):
         raise Back("越えない線のパスに当たる: " + " / ".join(hits))
     materials = []
-    approved: dict[str, str] = {}
     for m in a.material:
         if not Path(m).is_file():
             raise Back(f"材料のファイルが無い: {m}")
         materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
         if a.gate == "release" and (sha := ac.material_sha_or_none(m)):  # 従うときに承認の記録を書く（#815 の I10）
-            approved[m] = sha
+            vars(a).setdefault("approved", {})[m] = sha
     materials += [pr_material(n, info) for n, info in infos.items()]
     if a.gate == "design":
         for n, info in infos.items():
@@ -312,7 +371,7 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> Check
                 record["material"].append(f"#{n} {path}")
     if not materials:
         raise Back("材料が無い（--material か --pr を渡す）")
-    return Checked(sprint, materials, approved)
+    return sprint, materials
 
 
 def new_record(a, root: Path, project) -> dict:
@@ -331,7 +390,7 @@ def new_record(a, root: Path, project) -> dict:
     }
 
 
-def passed(a, root: Path, project, record: dict, usage: dict, approved: dict[str, str]) -> tuple[dict, int | None]:
+def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int | None]:
     """MVV に従うときの承認ゲートの記録と結果。記録を書けなければ承認ゲートへ落とす。"""
     record.update(verdict="follow", passed=True, **usage)
     write_log(a.log, record)
@@ -348,7 +407,7 @@ def passed(a, root: Path, project, record: dict, usage: dict, approved: dict[str
         ), EXIT_GATE
     if a.note:
         write_note(a.note, a, record)
-    items = [record, *ac.record_all(approved, "mvv", clock.now_iso("utc")), *revise_items(a, root, project)]
+    items = [record, *ac.record_all(getattr(a, "approved", {}), "mvv", clock.now_iso("utc")), *revise_items(a, root, project)]
     return result(TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。承認ゲートを省いて進めてよい", items, usage), None
 
 
@@ -395,7 +454,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         ), EXIT_GATE
 
     try:
-        sprint, materials, approved = machine_checks(a, root, project, record)
+        sprint, materials = machine_checks(a, root, project, record)
         materials = [*revise_material(a.revise_note), *materials]
     except (OSError, ValueError) as e:
         return back(f"スプリントの状態を読めない: {e}", "machine")
@@ -412,7 +471,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         return advised(pm.verdict_reason(verdict), usage)
     if verdict["verdict"] != "follow" or boundary:
         return back(pm.verdict_reason(verdict), verdict["verdict"], usage=usage)
-    return passed(a, root, project, record, usage, approved)
+    return passed(a, root, project, record, usage)
 
 
 def main() -> int:

@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import delivery
-from parallel_hold import limit_items
 from parallel_repo import dev_version, loop_records
 from sprint_loop_names import PENDING
 
@@ -27,10 +26,10 @@ def check_items(main: Path) -> list[dict]:
     """起動の前の検査の警告。リリースを組めないなら 1 件。起動は断らない（レーンがリリースの依頼を送らない計画もある）。"""
     got = way_of(main)
     if got.way == delivery.REFUSE:
-        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}, *limit_items(main)]
+        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}]
     if got.way == delivery.BUILD and not dev_version(main):
-        return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}, *limit_items(main)]
-    return limit_items(main)
+        return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}]
+    return []
 
 
 def with_release_warnings(main: Path, checked: tuple) -> tuple:

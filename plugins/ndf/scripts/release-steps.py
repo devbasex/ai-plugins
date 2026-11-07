@@ -640,7 +640,11 @@ def cmd_release(a):
     except approval.Gate as g:
         emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
-    branch = _require_release_tree(root, plugin, ver)
+    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
+        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
+    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
+    bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
@@ -668,7 +672,10 @@ def cmd_release(a):
     if done and done["state"] == "MERGED":
         # 再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける
         main_pr = done["number"]
-        merge = approval.resumed_merge_commit(root, approved, prod, main_pr, merge_commit_of)
+        git(root, "fetch", "-q", "origin")
+        merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
+            raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
         metrics["approved_sha"] = approved
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
     else:
@@ -697,16 +704,6 @@ def cmd_release(a):
     metrics.update(sweep_metrics)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
     emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt))
-
-
-def _require_release_tree(root, plugin, ver):
-    """作業ツリーが release/v<版> にあり、未コミットの変更が無く、版上げが済んでいることを確かめ、ブランチ名を返す。"""
-    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
-        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
-    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
-    bump.require_bumped(root, plugin, ver)
-    return branch
 
 
 def _sweep_candidates(root, merge):

@@ -28,7 +28,6 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-import parallel_request_form as prf
 import repo
 from gate_answer import RELEASE_GATE, canonical
 
@@ -350,7 +349,9 @@ _INTS = lambda v: isinstance(v, list) and all(isinstance(x, int) and not isinsta
 
 
 def _request_errors(name: str, body: dict) -> list[str]:
-    errs = prf.request_errors(body)
+    import parallel_lane as pl
+
+    errs = pl.request_errors(body)
     if not isinstance(body.get("ndf_version"), str) or not body.get("ndf_version"):
         errs.append("ndf_version が空でない文字列でない")
     if name != f"{body.get('id')}.json":

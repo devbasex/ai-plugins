@@ -80,27 +80,6 @@ def poll_seconds() -> float:
         return 60.0
 
 
-STALL_MINUTES = 60  # 動かないレーンを問うまでの分（設計の失敗の 3 番の既定）
-SPAWN_REFUSALS = 3  # 起動の断りがこの回数続いたら問う（設計の失敗の 17 番）
-
-
-def spawn_refusals() -> int:
-    """起動の断りを問うまでの回数（`NDF_PARALLEL_SPAWN_REFUSALS` で変えられる。不正な値なら既定の 3）。"""
-    try:
-        n = int(os.environ.get("NDF_PARALLEL_SPAWN_REFUSALS") or SPAWN_REFUSALS)
-    except ValueError:
-        return SPAWN_REFUSALS
-    return n if n >= 1 else SPAWN_REFUSALS
-
-
-def stall_seconds() -> float:
-    """動かないレーンを問うまでの秒（`NDF_PARALLEL_STALL_MINUTES` で変えられる。既定 60 分）。"""
-    try:
-        return max(1.0, float(os.environ.get("NDF_PARALLEL_STALL_MINUTES") or STALL_MINUTES)) * 60
-    except ValueError:
-        return STALL_MINUTES * 60.0
-
-
 def relay_argv() -> list[str]:
     """統括役の CLI の打ち方。`NDF_PARALLEL_RELAY` があればその 1 行（テストの差し替え）。"""
     alt = os.environ.get("NDF_PARALLEL_RELAY")

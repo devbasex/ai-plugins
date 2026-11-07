@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import subprocess
 import time
@@ -21,7 +22,6 @@ from typing import Optional
 
 import parallel_external as pe
 import parallel_plan as pp
-import parallel_request_form as prf
 from parallel_files import helper_plan_of, lane_name_in_plans, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
@@ -199,9 +199,29 @@ def lane_request_id(state: Path, lane: str) -> str:
     return rid
 
 
-# 依頼のメッセージの形の検査は parallel_request_form が持つ。従来の名前で読めるよう同じオブジェクトを指す
-REQUEST_ID_RE = prf.REQUEST_ID_RE
-request_errors = prf.request_errors
+REQUEST_ID_RE = re.compile(r"^([a-z0-9][a-z0-9_-]{0,31})-r\d{12}$")
+
+
+def request_errors(msg: object) -> list[str]:
+    """リリースの依頼のメッセージの形の誤り（`contracts/forms/parallel-request.json`）。空なら形に合う。"""
+    if not isinstance(msg, dict):
+        return ["オブジェクトでない"]
+    errs = []
+    if msg.get("kind") != "request":
+        errs.append("kind が request でない")
+    m = REQUEST_ID_RE.match(str(msg.get("id") or ""))
+    if not m:
+        errs.append("id が <レーン名>-r<数字 12 桁> でない")
+    elif m.group(1) != msg.get("lane"):
+        errs.append("id のレーン名が lane と違う")
+    for k in ("prs", "issues"):
+        v = msg.get(k)
+        if not isinstance(v, list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in v):
+            errs.append(f"{k} が整数の配列でない")
+    for k in ("sprint_state", "at"):
+        if not isinstance(msg.get(k), str) or not msg.get(k):
+            errs.append(f"{k} が空でない文字列でない")
+    return errs
 
 
 def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
@@ -378,11 +398,6 @@ def send_answer(
         "merge": merge, "by": by, "at": pe.utc_stamp(),
     }  # fmt: skip
     _send_inbox(main, name, msg, f"answer:{rid}")
-
-
-def send_left_stopped(main: Path, name: str, lane: str) -> None:
-    """人が止めたままにするレーンを耐久ワークフローへ知らせる（`parallel.py park --clear`）。次の停止で打った分も届くよう、鍵に時刻を入れる。"""
-    _send_inbox(main, name, {"kind": "left_stopped", "lane": lane}, f"left-stopped:{lane}:{time.time_ns()}")
 
 
 def requests_for(main: Path, name: str) -> list[dict]:

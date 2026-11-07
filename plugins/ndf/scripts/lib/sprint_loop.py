@@ -86,7 +86,6 @@ from sprint_loop_gate import (
 )
 
 from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
-from sprint_loop_select import resume_answer_hold
 
 
 # ---------------------------------------------------------------- start
@@ -246,7 +245,6 @@ _RESUME_HANDLERS = {
     "user_stop": _resume_user_stop,
     "gate2_returned": _resume_gate2,
     "refused": _resume_refused,
-    "answer_hold": resume_answer_hold,
 }
 
 

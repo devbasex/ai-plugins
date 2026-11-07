@@ -72,8 +72,6 @@
   "stdout": "step-result",
   "writes": [
     "actuals-run-json",
-    "answer-hold-json",
-    "answer-hold-log-jsonl",
     "answer-json",
     "approved-txt",
     "breakdown-md",
@@ -86,7 +84,6 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
-    "resume-mark-json",
     "revise-json",
     "state-json"
   ],

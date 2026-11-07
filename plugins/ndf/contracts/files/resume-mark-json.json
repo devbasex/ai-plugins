@@ -1,7 +1,0 @@
-{
-  "name": "resume-mark-json",
-  "pattern": "*.mark.json",
-  "kind": "state",
-  "place": "main",
-  "skill_readers": []
-}
