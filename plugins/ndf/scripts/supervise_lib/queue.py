@@ -136,7 +136,6 @@ def cmd_queue(
     キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
-    from supervise_lib.engine import Engine
 
     stages, all_plans = _normalize_stages(plans, then)
     prepared = _prepare_queue(all_plans, plans, done, max_)
@@ -148,7 +147,7 @@ def cmd_queue(
     except durable.DurableError as e:
         return _not_started(str(e), max_, done_path)
     try:
-        Engine.queued = True
+        flow.Engine.queued = True
         ref = durable.resolve(prefix)
         if ref.action == "continue":
             print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
@@ -167,7 +166,7 @@ def cmd_queue(
             raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
         return got.value
     finally:
-        Engine.queued = False
+        flow.Engine.queued = False
         durable.close()
 
 

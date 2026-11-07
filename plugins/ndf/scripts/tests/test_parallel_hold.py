@@ -229,3 +229,15 @@ def test_the_section_of_plan_md_names_the_scope_and_the_reason():
     text = "\n".join(ph.render_hold(ph.decide_hold([*[ask(i) for i in range(4)], *[own(i) for i in range(5)]], ORDER, LIMITS).data(LIMITS)))
     assert "計画全体" in text and "| la | 4 |" in text
     assert ph.render_hold(None) == [] and ph.render_hold(ph.Hold().data(LIMITS)) == []
+
+
+def test_the_plan_check_reports_a_bad_limit_as_a_warning(tmp_path, monkeypatch):
+    import delivery
+
+    sys.path.insert(0, str(SCRIPTS))
+    import parallel_route as prt
+
+    monkeypatch.setattr(prt, "way_of", lambda _m: delivery.ReleaseWay(delivery.SKIP, ""))
+    declare(tmp_path, {"parallel": {"answer_limit": {"lane": 0}}})
+    plan, items, metrics = prt.with_release_warnings(tmp_path, ("plan", [], {"warnings": 0}))
+    assert plan == "plan" and metrics["warnings"] == 1 and items[0]["rule"] == "answer-limit"
