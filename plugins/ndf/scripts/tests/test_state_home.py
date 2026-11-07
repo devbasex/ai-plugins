@@ -1,4 +1,4 @@
-"""状態の置き場（#2766）: 持ち主ごとの 3 つの根・旧の記録の引き継ぎ・台帳の移行・シェルの同じ順。"""
+"""状態の置き場（#2766）: 持ち主ごとの 3 つの根・旧の置き場を読まないこと・migrate の移行・シェルの同じ順。"""
 
 from __future__ import annotations
 
@@ -55,75 +55,9 @@ def test_two_checkouts_of_the_same_path_do_not_share(tmp_path):
     assert sh.checkout_home(a, env) != sh.checkout_home(b, env)
 
 
-def test_legacy_entry_keeps_running_records(tmp_path):
-    env = {"HOME": str(tmp_path)}
-    new = tmp_path / "repo/.git/ndf/state/dbos/parallel-x.sqlite"
-    old = tmp_path / ".local/state/ndf/dbos/parallel-x.sqlite"
-    assert sh.legacy_entry(new, "dbos", new.name, env) == new  # 旧にも無ければ新
-    old.parent.mkdir(parents=True)
-    old.write_text("x")
-    assert sh.legacy_entry(new, "dbos", new.name, env) == old  # 旧だけにあれば旧を続ける
-    new.parent.mkdir(parents=True)
-    new.write_text("y")
-    assert sh.legacy_entry(new, "dbos", new.name, env) == new  # 新にあれば新
-    assert sh.legacy_entry(tmp_path / "z", "dbos", "parallel-x.sqlite", {**env, "XDG_STATE_HOME": "/x"}) == tmp_path / "z"
-
-
-def test_durable_record_path_follows_legacy(tmp_path, monkeypatch):
-    import durable_keys
-
-    monkeypatch.delenv("NDF_DBOS_DIR", raising=False)
-    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
-    monkeypatch.delenv("NDF_STATE_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path / "h"))
-    wt = _repo(tmp_path)
-    monkeypatch.chdir(wt)
-    key = durable_keys.launch_key("parallel", "p3")
-    new_dir = (tmp_path / "work/repo/.git/ndf/state/dbos").resolve()
-    assert durable_keys.record_path("parallel", "p3") == new_dir / f"{key}.sqlite"
-    old = tmp_path / "h/.local/state/ndf/dbos" / f"{key}.sqlite"
-    old.parent.mkdir(parents=True)
-    old.write_text("x")
-    assert durable_keys.record_path("parallel", "p3") == old
-
-
-def test_user_home_reads_legacy_ledgers_until_migrate(tmp_path):
-    """更新した直後（利用者の根が無く旧に台帳がある）は旧の根を読み書きし、migrate の後は利用者の根へ移る。"""
-    env = {"HOME": str(tmp_path)}
-    old, new = tmp_path / ".local/state/ndf", tmp_path / ".claude/ndf/state"
-    (old / "relay").mkdir(parents=True)
-    assert sh.user_home(env) == new  # コンテナの状態だけなら利用者の根
-    (old / "stages").mkdir()
-    (old / "stages/o__r__1.json").write_text("{}")
-    assert sh.user_home(env) == old  # 移す前の通過記録を見失わない
-    assert sh.migrate(env)["status"] == "migrated"
-    assert sh.user_home(env) == new
-    assert (new / "stages/o__r__1.json").exists()
-
-
-def test_user_home_falls_back_per_kind(tmp_path):
-    """`~/.claude` を共有する別のコンテナが利用者の根に別の種類を書いても、この種類の旧の記録は旧の根から読む。"""
-    env = {"HOME": str(tmp_path)}
-    old, new = tmp_path / ".local/state/ndf", tmp_path / ".claude/ndf/state"
-    (old / "stages").mkdir(parents=True)
-    (new / "usage").mkdir(parents=True)  # 別のコンテナが書いた
-    assert sh.user_home(env, ("stages",)) == old
-    assert sh.user_home(env, ("usage",)) == new
-    (new / "stages").mkdir()
-    assert sh.user_home(env, ("stages",)) == new  # 利用者の根に同じ種類があればそちら
-    out = subprocess.run(
-        ["bash", "-c", f". '{WF}' && ndf_user_state_home usage && ndf_user_state_home checks && ndf_user_state_home"],
-        env={**env, "PATH": os.environ["PATH"]},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert out.stdout.split() == [str(sh.user_home(env, (k,) if k else sh.USER_KINDS)) for k in ("usage", "checks", "")]
-
-
 def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     (old / "usage/claude").mkdir(parents=True)
     (old / "usage/claude/o__r.jsonl").write_text('{"a":1}\n')
     (old / "ask.jsonl").write_text('{"q":1}\n')
@@ -151,7 +85,7 @@ def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
 def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
     """旧の台帳は名前を外してから読む。読んだ後に旧の版が追記した行は旧の名前で作り直され、次の migrate で移る。"""
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     old.mkdir(parents=True)
     (old / "ask.jsonl").write_text('{"q":1}\n')
     real_rename = sh.os.rename
@@ -173,7 +107,7 @@ def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
 def test_migrate_resumes_a_stopped_move(tmp_path, appended):
     """名前を外した後で止まった移行の残り（`.migrating-<pid>`）は、次の migrate が欠かさず二重にせず足す。"""
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     (old / "usage/claude").mkdir(parents=True)
     (old / "ask.jsonl.migrating-999999999").write_text('{"q":1}\n')
     (old / "ask.jsonl").write_text('{"q":2}\n')  # 止まった後に旧の版が書いた
@@ -224,15 +158,6 @@ def test_cli_path_reports_three_roots(tmp_path):
     }
 
 
-@pytest.mark.parametrize("kind", sh.USER_KINDS)
-def test_shell_user_root_follows_legacy_ledger(tmp_path, kind):
-    """シェルも旧の根の台帳の種類（`USER_KINDS`）を Python と同じに見る。"""
-    (tmp_path / ".local/state/ndf" / kind).mkdir(parents=True)
-    env = {"HOME": str(tmp_path), "PATH": os.environ["PATH"]}
-    out = subprocess.run(["bash", "-c", f". '{WF}' && ndf_user_state_home"], env=env, capture_output=True, text=True, check=True)
-    assert out.stdout.strip() == str(sh.user_home(env)) == str(tmp_path / ".local/state/ndf")
-
-
 def _row(at: str, **kw) -> str:
     return json.dumps({"at": at, **kw}) + "\n"
 
@@ -240,7 +165,7 @@ def _row(at: str, **kw) -> str:
 def test_migrate_orders_rows_by_time(tmp_path):
     """旧と新の行を時刻（`at`）の順に並べて書き直す。時刻の書き方（`Z`・時差・時差なし）が混ざっても順に並び、時刻の無い行は直前の行の隣に残る。"""
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     (old / "usage/claude").mkdir(parents=True)
     (new / "usage/claude").mkdir(parents=True)
     (old / "usage/claude/o__r.jsonl").write_text(
@@ -259,7 +184,7 @@ def test_unknown_streak_counts_by_time_after_migrate(tmp_path):
     import project_mvv_signals as pms
 
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     old.mkdir(parents=True)
     new.mkdir(parents=True)
     ref = {"sha256": "s"}
@@ -277,7 +202,7 @@ def test_unknown_streak_counts_by_time_after_migrate(tmp_path):
 def test_migrate_keeps_rows_appended_while_rewriting(tmp_path, monkeypatch):
     """書き直しの間に別のプロセスが移し先へ追記した行（移し先を作り直して書く）を落とさず、末尾に残す。"""
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     old.mkdir(parents=True)
     new.mkdir(parents=True)
     (old / "ask.jsonl").write_text(_row("2026-11-01T00:00:00Z", q=1))
@@ -302,7 +227,7 @@ def test_migrate_keeps_rows_appended_while_rewriting(tmp_path, monkeypatch):
 def test_migrate_resumes_a_stopped_rewrite(tmp_path, monkeypatch, stop):
     """移し先の名前を外した後（置く前・置いた後）で止まっても、次の migrate が欠かさず二重にせず元の名前の台帳へ戻す。"""
     env = {"HOME": str(tmp_path)}
-    old, new = sh.legacy_home(env), sh.user_home(env)
+    old, new = sh.legacy_home(env), sh._user_default(env)
     (old / "checks").mkdir(parents=True)
     (new / "checks").mkdir(parents=True)
     (old / "checks/o__r.jsonl").write_text(_row("2026-11-01T00:00:00Z", c=1))
@@ -325,3 +250,166 @@ def test_migrate_resumes_a_stopped_rewrite(tmp_path, monkeypatch, stop):
     assert [json.loads(line)["c"] for line in (new / "checks/o__r.jsonl").read_text().splitlines()] == [1, 2, 3]
     assert sorted(p.name for p in (new / "checks").iterdir()) == ["o__r.jsonl"]
     assert not old.exists() or not any(old.rglob("*"))
+
+
+# ---- 旧の置き場を読まない（2026-11-07 の決定。更新したら各コンテナで一度 migrate を打つ） ----
+
+
+def test_user_home_never_reads_the_old_place(tmp_path):
+    env = {"HOME": str(tmp_path)}
+    old = tmp_path / ".local/state/ndf"
+    for kind in sh.USER_KINDS:
+        (old / kind).mkdir(parents=True)
+    assert sh.user_home(env) == tmp_path / ".claude/ndf/state"
+    out = subprocess.run(
+        ["bash", "-c", f". '{WF}' && ndf_user_state_home"],
+        env={**env, "PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == str(tmp_path / ".claude/ndf/state")
+
+
+def test_durable_record_path_never_reads_the_old_place(tmp_path, monkeypatch):
+    import durable_keys
+
+    for name in ("NDF_DBOS_DIR", "XDG_STATE_HOME", "NDF_STATE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    monkeypatch.chdir(_repo(tmp_path))
+    key = durable_keys.launch_key("parallel", "p3")
+    old = tmp_path / "h/.local/state/ndf/dbos" / f"{key}.sqlite"
+    old.parent.mkdir(parents=True)
+    old.write_text("x")
+    assert durable_keys.record_path("parallel", "p3") == (tmp_path / "work/repo/.git/ndf/state/dbos").resolve() / f"{key}.sqlite"
+
+
+# ---- migrate: チェックアウトの記録（dbos/・sv/）を打った作業ツリーのチェックアウトの根へ移す ----
+
+
+def _old_records(tmp_path: Path, env: dict) -> Path:
+    """旧の置き場の耐久の記録 2 本（1 本は -wal 付き）とプランの状態 2 つ。旧の根を返す。"""
+    old = sh.legacy_home(env)
+    (old / "dbos").mkdir(parents=True)
+    for key in ("parallel-aaaaaaaaaaaa", "exp-bbbbbbbbbbbb"):
+        (old / "dbos" / f"{key}.sqlite").write_text(key)
+        (old / "dbos" / f"{key}.lock").write_text("")
+    (old / "dbos/parallel-aaaaaaaaaaaa.sqlite-wal").write_text("wal")
+    for name in ("1-design-0e3fcff9", "plan-ca92eb3d"):
+        (old / "sv" / name / "work").mkdir(parents=True)
+        (old / "sv" / name / "state.json").write_text("{}")
+    return old
+
+
+def test_migrate_moves_checkout_records_to_the_checkout_root(tmp_path):
+    env = {"HOME": str(tmp_path / "h")}
+    wt = _repo(tmp_path)
+    old = _old_records(tmp_path, env)
+    to = (tmp_path / "work/repo/.git/ndf/state").resolve()
+    r = sh.migrate(env, cwd=wt)
+    assert r["status"] == "migrated"
+    assert r["checkout"] == {"to": str(to), "reason": None}
+    assert sorted(r["dbos"]["moved"]) == [str(to / "dbos/exp-bbbbbbbbbbbb.sqlite"), str(to / "dbos/parallel-aaaaaaaaaaaa.sqlite")]
+    assert sorted(r["sv"]["moved"]) == [str(to / "sv/1-design-0e3fcff9"), str(to / "sv/plan-ca92eb3d")]
+    assert r["dbos"]["kept"] == r["sv"]["kept"] == []
+    assert sorted(p.name for p in (to / "dbos").iterdir()) == [
+        "exp-bbbbbbbbbbbb.lock",
+        "exp-bbbbbbbbbbbb.sqlite",
+        "parallel-aaaaaaaaaaaa.lock",
+        "parallel-aaaaaaaaaaaa.sqlite",
+        "parallel-aaaaaaaaaaaa.sqlite-wal",
+    ]
+    assert (to / "sv/plan-ca92eb3d/state.json").exists() and (to / "sv/plan-ca92eb3d/work").is_dir()
+    assert not (old / "dbos").exists() and not (old / "sv").exists()
+    again = sh.migrate(env, cwd=wt)  # 2 回目は移すものが無い
+    assert again["status"] == "none" and again["dbos"]["moved"] == again["sv"]["moved"] == []
+
+
+def test_migrate_keeps_checkout_records_whose_name_is_taken(tmp_path):
+    env = {"HOME": str(tmp_path / "h")}
+    wt = _repo(tmp_path)
+    old = _old_records(tmp_path, env)
+    to = (tmp_path / "work/repo/.git/ndf/state").resolve()
+    (to / "dbos").mkdir(parents=True)
+    (to / "dbos/parallel-aaaaaaaaaaaa.lock").write_text("")  # 移し先に同じ名前の組の 1 つがある
+    (to / "sv/plan-ca92eb3d").mkdir(parents=True)
+    r = sh.migrate(env, cwd=wt)
+    assert r["status"] == "kept"
+    assert [k["path"] for k in r["dbos"]["kept"]] == [str(old / "dbos/parallel-aaaaaaaaaaaa.sqlite")]
+    assert [k["path"] for k in r["sv"]["kept"]] == [str(old / "sv/plan-ca92eb3d")]
+    assert all(k["reason"] for k in r["dbos"]["kept"] + r["sv"]["kept"])
+    assert (old / "dbos/parallel-aaaaaaaaaaaa.sqlite-wal").exists()  # 組ごと残す
+    assert (to / "dbos/exp-bbbbbbbbbbbb.sqlite").exists() and (to / "sv/1-design-0e3fcff9").is_dir()
+
+
+def test_migrate_keeps_records_of_running_workflows(tmp_path):
+    """ロックを持つプロセスが生きている耐久の記録と、ステップの子が生きているプランの状態は移さない。"""
+    import fcntl
+
+    env = {"HOME": str(tmp_path / "h")}
+    wt = _repo(tmp_path)
+    old = _old_records(tmp_path, env)
+    (old / "sv/plan-ca92eb3d/step.pid").write_text(json.dumps({"step": "s", "children": [{"pid": os.getpid()}]}))
+    (old / "sv/1-design-0e3fcff9/step.pid").write_text(json.dumps({"step": "s", "children": [{"pid": 999999999}]}))
+    with open(old / "dbos/exp-bbbbbbbbbbbb.lock", "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        r = sh.migrate(env, cwd=wt)
+    assert r["status"] == "kept"
+    assert [k["path"] for k in r["dbos"]["kept"]] == [str(old / "dbos/exp-bbbbbbbbbbbb.sqlite")]
+    assert [k["path"] for k in r["sv"]["kept"]] == [str(old / "sv/plan-ca92eb3d")]
+    assert (old / "dbos/exp-bbbbbbbbbbbb.lock").exists() and (old / "sv/plan-ca92eb3d/step.pid").exists()
+    assert len(r["dbos"]["moved"]) == len(r["sv"]["moved"]) == 1  # 子の死んだプランは移す
+    (old / "sv/plan-ca92eb3d/step.pid").unlink()  # ステップが終わった
+    assert sh.migrate(env, cwd=wt)["status"] == "migrated"  # ロックが外れ、ステップが終われば次に打てば移る
+
+
+def test_migrate_outside_a_work_tree_moves_only_ledgers(tmp_path):
+    env = {"HOME": str(tmp_path / "h")}
+    old = _old_records(tmp_path, env)
+    (old / "ask.jsonl").write_text('{"q":1}\n')
+    (tmp_path / "plain").mkdir()
+    r = sh.migrate(env, cwd=tmp_path / "plain")
+    assert r["status"] == "migrated"
+    assert r["checkout"]["to"] is None and "git の作業ツリー" in r["checkout"]["reason"]
+    assert r["dbos"] == r["sv"] == {"moved": [], "kept": []}
+    assert (old / "dbos/exp-bbbbbbbbbbbb.sqlite").exists() and (old / "sv/plan-ca92eb3d").is_dir()
+    assert (tmp_path / "h/.claude/ndf/state/ask.jsonl").exists()
+
+
+def test_cli_migrate_reports_checkout_records(tmp_path):
+    env = {"HOME": str(tmp_path / "h"), "PATH": os.environ["PATH"]}
+    wt = _repo(tmp_path)
+    _old_records(tmp_path, {"HOME": env["HOME"]})
+    out = subprocess.run([sys.executable, str(SCRIPTS / "state-home.py"), "migrate"], env=env, cwd=wt, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["metrics"]["dbos_moved"] == 2 and got["metrics"]["sv_moved"] == 2 and got["metrics"]["moved"] == 0
+    assert sorted(i["moved"] for i in got["items"] if i["kind"] == "sv") == [
+        str((tmp_path / "work/repo/.git/ndf/state/sv") / n) for n in ("1-design-0e3fcff9", "plan-ca92eb3d")
+    ]
+
+
+def test_moved_plan_state_link_is_repointed(tmp_path, monkeypatch):
+    """移す前に作った `<プラン>-state`（旧の実体を指すリンク）は、移した後の起動で移し先の実体を指し直す。"""
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib import paths
+
+    for name in ("NDF_SV_STATE_DIR", "XDG_STATE_HOME", "NDF_STATE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    wt = _repo(tmp_path)
+    monkeypatch.chdir(wt)
+    monkeypatch.setattr(paths, "under_temp", lambda p: Path(p).is_relative_to(tmp_path / "tmp"))
+    plan = tmp_path / "tmp/plan.json"
+    plan.parent.mkdir()
+    plan.write_text("{}")
+    link = plan.parent / "plan-state"
+    real = paths.sv_state_home() / f"plan-{paths.hashlib.sha256(str(plan.resolve()).encode()).hexdigest()[:8]}"
+    old_real = sh.legacy_home({"HOME": str(tmp_path / "h")}) / "sv" / real.name
+    old_real.mkdir(parents=True)
+    (old_real / "state.json").write_text("{}")
+    link.symlink_to(old_real, target_is_directory=True)
+    sh.migrate({"HOME": str(tmp_path / "h")}, cwd=wt)
+    assert paths.state_dir_of(str(plan)) == link
+    assert link.resolve() == real.resolve() and (link / "state.json").exists()

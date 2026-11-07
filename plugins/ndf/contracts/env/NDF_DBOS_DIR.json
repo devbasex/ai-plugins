@@ -1,5 +1,0 @@
-{
-  "name": "NDF_DBOS_DIR",
-  "set_by": "user",
-  "summary": "耐久の記録（DBOS の sqlite）の置き場。無ければ <チェックアウトの根>/dbos。新に無く旧 ~/.local/state/ndf/dbos にある記録は旧を使う（plugins/ndf/scripts/lib/durable_keys.py:records_dir・record_dir）"
-}

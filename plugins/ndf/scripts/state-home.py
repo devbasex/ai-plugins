@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""NDF の状態の置き場の根を出す・旧の置き場から利用者の台帳を移す（#2766）。結果は統一 JSON レポートを 1 行で標準出力へ出す。
+"""NDF の状態の置き場の根を出す・旧の置き場から台帳と記録を移す（#2766）。結果は統一 JSON レポートを 1 行で標準出力へ出す。
 
 | 副命令 | 役割 |
 | --- | --- |
 | `path` | 作業ディレクトリで使う 3 つの根（チェックアウト・利用者・コンテナ。`lib/state_home.py`）を出す |
-| `migrate` | 旧 `~/.local/state/ndf` の利用者の台帳を `~/.claude/ndf/state` へ足し合わせる（`.jsonl` は行を時刻の順に並べ直す）。何度打ってもよい |
+| `migrate` | 旧 `~/.local/state/ndf` から移す。利用者の台帳は `~/.claude/ndf/state` へ足し合わせ（`.jsonl` は行を時刻の順に並べ直す）、耐久の記録 `dbos/` とプランの状態 `sv/` は打った作業ツリーのチェックアウトの根へ移す。何度打ってもよい |
 
-終了コード: 0 移した・移すものが無い / 1 移し先に同じ名前のファイルがあり、旧に残したものがある（`items` に載せる）。
+旧の置き場は読まない。更新したら各コンテナで、主のリポジトリの作業ツリーから一度 `migrate` を打つ。
+
+終了コード: 0 移した・移すものが無い / 1 旧に残したものがある（移し先に同じ名前がある・動いている記録。`items` に載せる）。
 """
 
 from __future__ import annotations
@@ -26,15 +28,28 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="state-home.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("path", help="3 つの根を出す")
-    sub.add_parser("migrate", help="旧の根の利用者の台帳を利用者の根へ移す")
+    sub.add_parser("migrate", help="旧の根から台帳・耐久の記録・プランの状態を移す")
     args = ap.parse_args(argv)
     if args.cmd == "path":
         metrics = {"checkout": str(sh.checkout_home()), "user": str(sh.user_home()), "container": str(sh.container_home())}
         emit(result(TOOL, "ok", f"チェックアウトの根は {metrics['checkout']}、利用者の根は {metrics['user']}", metrics=metrics))
     r = sh.migrate()
     ok = r["status"] in ("migrated", "none")
-    items = [{"kept": p} for p in r["kept"]]
-    metrics = {"result": r["status"], "from": r["from"], "to": r["to"], "moved": len(r["moved"])}
+    items = [{"kind": "ledger", "kept": p} for p in r["kept"]]
+    for kind in ("dbos", "sv"):
+        items += [{"kind": kind, "moved": p} for p in r[kind]["moved"]]
+        items += [{"kind": kind, "kept": k["path"], "reason": k["reason"]} for k in r[kind]["kept"]]
+    metrics = {
+        "result": r["status"],
+        "from": r["from"],
+        "to": r["to"],
+        "moved": len(r["moved"]),
+        "checkout": r["checkout"]["to"],
+        "dbos_moved": len(r["dbos"]["moved"]),
+        "dbos_kept": len(r["dbos"]["kept"]),
+        "sv_moved": len(r["sv"]["moved"]),
+        "sv_kept": len(r["sv"]["kept"]),
+    }
     emit(result(TOOL, "ok" if ok else "stopped", r["summary"], items=items, metrics=metrics))
 
 

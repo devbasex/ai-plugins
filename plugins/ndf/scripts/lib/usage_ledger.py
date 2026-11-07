@@ -48,7 +48,7 @@ def ledger_dir(env: Optional[dict] = None) -> Path:
     if env.get("CLAUDE_PLUGIN_DATA"):
         return Path(env["CLAUDE_PLUGIN_DATA"]) / "usage"
     if env.get("NDF_STATE_HOME") or env.get("XDG_STATE_HOME") or env.get("HOME"):
-        return user_home(env, ("usage",)) / "usage"
+        return user_home(env) / "usage"
     return Path(env.get("TMPDIR") or "/tmp") / "ndf-usage"
 
 

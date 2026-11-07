@@ -16,7 +16,7 @@
     wid = durable.start(ref, plan_workflow, prefix)       # done なら何も始めない
     out = ref.output if ref.action == "done" else durable.output_of(wid)
 
-- 置き場: `NDF_DBOS_DIR` → `<チェックアウトの根>/dbos`（`records_dir`・`record_dir`。根は `state_home.checkout_home`）
+- 置き場: `NDF_DBOS_DIR` → `<チェックアウトの根>/dbos`（`records_dir`。根は `state_home.checkout_home`）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`。ファイル名・executor_id・ファイルロック（`<鍵>.lock`）に使う（I17）
 - 形式の版: `FORMAT`。耐久ワークフローの中の DBOS の呼び出しの順を変えたら上げる（I18・決定 28）。
   途中の記録を続ける必要があるときは、上げずに `patched` で新旧の処理を分ける（#2616 の決定 2）
@@ -42,7 +42,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
 
 import locks
-from durable_keys import KIND_RE, DurableError, key_hash, launch_key, record_dir, record_path, records_dir  # noqa: F401  durable の名前として出す
+from durable_keys import KIND_RE, DurableError, key_hash, launch_key, record_path, records_dir  # noqa: F401  durable の名前として出す
 
 FORMAT = "ndf-durable-1"
 POLL_SECONDS = 0.2  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
@@ -189,7 +189,7 @@ def launch(
     if _STATE["launched"] is not None:
         raise DurableError("耐久の記録はこのプロセスで開いている（1 つの起動は 1 つの耐久の記録）")
     key = launch_key(kind, identity)
-    directory = record_dir(key)
+    directory = records_dir()
     path = directory / f"{key}.sqlite"
     stack = contextlib.ExitStack()
     try:

@@ -10,13 +10,15 @@
 各置き場の個別の上書き（`NDF_DBOS_DIR` など）は呼ぶ側が先に見る。`CLAUDE_CONFIG_DIR` は使わない（relay が
 アカウントごとの子へ別の値を渡すため、置き場が割れる）。
 
-旧の置き場（`~/.local/state/ndf`）からの移り方:
+旧の置き場（`~/.local/state/ndf`）は読まない。更新したら各コンテナで、主のリポジトリの作業ツリーから一度
+`state-home.py migrate`（`migrate`）を打って旧から移す（2026-11-07 の決定。毎回旧を確かめない）:
 
-- チェックアウトの記録は、新に無く旧にある記録を旧のまま使う（`legacy_entry`。動いている耐久ワークフローを続ける）
-- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。`.jsonl` は旧と新の行を時刻（`at`）の順に並べて
-  書き直す（読み手は末尾を最新として読んでよい）。何度打ってもよい。打つまでは、台帳の種類ごとに、
-  利用者の根にその種類が無く旧の根にあれば旧の根を読み書きする（`user_home(kinds=...)`。移す前の記録を見失わない。
-  `~/.claude` を共有する別のコンテナが利用者の根に別の種類を書いても、この種類の旧の記録は読まれる）
+- 利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。`.jsonl` は旧と新の行を時刻（`at`）の順に並べて書き直す
+  （読み手は末尾を最新として読んでよい）
+- チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`_move_checkout`）。
+  作業ツリーの外で打てば移さない。動いている記録（ロックが持たれている耐久の記録・ステップの子が生きているプラン）と
+  移し先に同じ名前があるものは旧に残す
+- 何度打ってもよい（移すものが無ければ何もしない）
 
 シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_user_state_home` にある。
 """
@@ -24,6 +26,7 @@
 from __future__ import annotations
 
 import datetime
+import fcntl  # 耐久の記録のロック（filelock と同じ flock）を標準ライブラリだけで確かめる
 import json
 import os
 import shutil
@@ -45,8 +48,6 @@ USER_KINDS = (
     "estimate",
     "test-run",
 )
-# MVV の記録と ask の台帳は同じ置き場（`NDF_MVV_STATE_DIR`）を分け合うため、1 つの種類として旧へ戻るかを決める
-MVV_KINDS = ("ask.jsonl", "mvv-gate.jsonl", "project-mvv.jsonl", "project-mvv-signals.jsonl", "gate-rejections.jsonl", "project-mvv")
 _HELD = ".migrating-"  # migrate が名前を外した台帳の接尾辞（`<名前>.jsonl.migrating-<pid>`）
 _TMP = ".tmp-"  # migrate が並べ直した台帳を書く一時ファイルの接尾辞（`.<名前>.jsonl.tmp-<pid>`）
 
@@ -89,18 +90,9 @@ def _user_default(env: Optional[Mapping[str, str]] = None) -> Path:
     return _home_dir(_state_env(env)) / ".claude" / "ndf" / "state"
 
 
-def user_home(env: Optional[Mapping[str, str]] = None, kinds: Sequence[str] = USER_KINDS) -> Path:
-    """利用者の台帳の根。利用者の根に `kinds` のどれも無く旧の根にどれかがあれば、`migrate` を打つまで旧の根を使う。
-
-    呼ぶ側は読み書きする台帳の種類を `kinds` に渡す。種類ごとに決めるため、`~/.claude` を共有する別のコンテナが
-    利用者の根に別の種類を書いても、このコンテナの旧の記録を見失わない。"""
-    explicit = explicit_home(env)
-    if explicit is not None:
-        return explicit
-    new, old = _user_default(env), legacy_home(env)
-    if not any((new / kind).exists() for kind in kinds) and any((old / kind).exists() for kind in kinds):
-        return old
-    return new
+def user_home(env: Optional[Mapping[str, str]] = None) -> Path:
+    """利用者の台帳の根。旧の置き場は読まない（`migrate` で移す）。"""
+    return explicit_home(env) or _user_default(env)
 
 
 def find_git_dir(start: Path) -> tuple[Path, Path] | None:
@@ -145,14 +137,6 @@ def checkout_home(start: Optional[Path] = None, env: Optional[Mapping[str, str]]
     except OSError:
         got = None
     return got[1] / "ndf" / "state" if got else container_home(env)
-
-
-def legacy_entry(new: Path, kind: str, name: str, env: Optional[Mapping[str, str]] = None) -> Path:
-    """チェックアウトの記録 `new`（`<根>/<kind>/<name>`）が無く、旧の根の同じ記録があれば旧を返す（移行の前の記録を続ける）。"""
-    if explicit_home(env) is not None or new.exists():
-        return new
-    old = legacy_home(env) / kind / name
-    return old if old.exists() else new
 
 
 def _held_of(path: Path) -> Optional[tuple[str, int]]:
@@ -319,14 +303,105 @@ def _resume_sides(new: Path, kind: str, moved: list, kept: list) -> None:
             child.unlink()
 
 
-def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
-    """旧の根の利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。結果は `{"status", "summary", "from", "to", "moved", "kept"}`。
+def _flock_free(lock: Path) -> Optional[int]:
+    """耐久の記録のロック `lock` を待たずに取る（filelock と同じ `flock`）。取れれば開いた fd、持たれていれば None。
+    ロックのファイルが無ければ -1（誰も持てない）。"""
+    try:
+        fd = os.open(lock, os.O_RDWR)
+    except FileNotFoundError:
+        return -1
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
 
-    status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（同じ名前のファイルが両方にある・別の migrate が
-    動いていて、旧に残したものがある）。止まった migrate の残りも次に打てば足す。何度打ってもよい（旧の版のプロセスが旧へ書いた分も、次に打てば移る）。"""
+
+_DBOS_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock")  # 1 本の耐久の記録の組（`durable.purge_old` と同じ）
+
+
+def _move_dbos(old: Path, new: Path, moved: list, kept: list) -> None:
+    """旧の `dbos/` の記録を組（`<鍵>.sqlite` と `-wal`・`-shm`・`.lock`）ごと `new` へ移す。ロックを持ったまま移す。"""
+    keys = sorted({f.name[: -len(sfx)] for f in old.iterdir() for sfx in _DBOS_SUFFIXES if f.name.endswith(sfx)})
+    for key in keys:
+        group = [old / f"{key}{sfx}" for sfx in _DBOS_SUFFIXES if (old / f"{key}{sfx}").exists()]
+        name = str(old / f"{key}.sqlite") if (old / f"{key}.sqlite").exists() else str(group[0])
+        if any((new / f.name).exists() for f in group):
+            kept.append({"path": name, "reason": "移し先に同じ名前の記録がある"})
+            continue
+        fd = _flock_free(old / f"{key}.lock")
+        if fd is None:
+            kept.append({"path": name, "reason": "ロックが持たれている（動いている耐久ワークフロー）"})
+            continue
+        try:
+            new.mkdir(parents=True, exist_ok=True)
+            for f in sorted(group, key=lambda f: f.suffix == ".lock"):  # ロックのファイルは最後に移す
+                shutil.move(str(f), str(new / f.name))
+        finally:
+            if fd >= 0:
+                os.close(fd)
+        moved.append(str(new / Path(name).name))
+
+
+def _step_running(plan_state: Path) -> bool:
+    """プランの状態 `plan_state` のステップの子（`step.pid` の `children`）が生きているか。"""
+    try:
+        data = json.loads((plan_state / "step.pid").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    children = data.get("children") if isinstance(data, dict) else None
+    return any(isinstance(c, dict) and isinstance(c.get("pid"), int) and _held_running(c["pid"]) for c in children or [])
+
+
+def _move_sv(old: Path, new: Path, moved: list, kept: list) -> None:
+    """旧の `sv/` のプランの状態をディレクトリごと `new` へ移す。"""
+    for child in sorted(old.iterdir()):
+        if (new / child.name).exists() or (new / child.name).is_symlink():
+            kept.append({"path": str(child), "reason": "移し先に同じ名前のプランの状態がある"})
+        elif _step_running(child):
+            kept.append({"path": str(child), "reason": "ステップの子が生きている（動いているプラン）"})
+        else:
+            new.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(child), str(new / child.name))
+            moved.append(str(new / child.name))
+
+
+def _move_checkout(old: Path, cwd: Path) -> dict:
+    """旧の根の `dbos/`・`sv/` を `cwd` の作業ツリーのチェックアウトの根へ移す。作業ツリーの外なら移さず理由を返す。"""
+    out: dict = {"checkout": {"to": None, "reason": None}, "dbos": {"moved": [], "kept": []}, "sv": {"moved": [], "kept": []}}
+    try:
+        got = find_git_dir(cwd)
+    except OSError:
+        got = None
+    if got is None:
+        out["checkout"]["reason"] = f"{cwd} は git の作業ツリーでない。耐久の記録とプランの状態は移さない（主のリポジトリで打ち直す）"
+        return out
+    to = got[1] / "ndf" / "state"
+    out["checkout"]["to"] = str(to)
+    for kind, move in (("dbos", _move_dbos), ("sv", _move_sv)):
+        if (old / kind).is_dir() and not (old / kind).is_symlink():
+            move(old / kind, to / kind, out[kind]["moved"], out[kind]["kept"])
+            try:
+                (old / kind).rmdir()
+            except OSError:
+                pass  # 残したものがある
+    return out
+
+
+def migrate(env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> dict:
+    """旧の根から移す。利用者の台帳（`USER_KINDS`）は利用者の根へ足し合わせ、チェックアウトの記録（`dbos/`・`sv/`）は
+    `cwd`（省けば作業ディレクトリ）の作業ツリーのチェックアウトの根へ移す。
+
+    結果は `{"status", "summary", "from", "to", "moved", "kept", "checkout", "dbos", "sv"}`。`moved`・`kept` は台帳のパス、
+    `checkout` は `{"to", "reason"}`（作業ツリーの外なら `to` が None で `reason` に理由）、`dbos`・`sv` は
+    `{"moved": [パス], "kept": [{"path", "reason"}]}`。
+    status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（旧に残したものがある: 移し先に同じ名前がある・
+    別の migrate が動いている・動いている記録）。止まった migrate の残りも次に打てば足す。何度打ってもよい。"""
     env = _state_env(env)
     old, new = legacy_home(env), _user_default(env)
-    base = {"from": str(old), "to": str(new), "moved": [], "kept": []}
+    empty = {"moved": [], "kept": []}
+    base = {"from": str(old), "to": str(new), "moved": [], "kept": [], "checkout": {"to": None, "reason": None}, "dbos": empty, "sv": empty}
     if explicit_home(env) is not None:
         return {**base, "status": "none", "summary": "NDF_STATE_HOME か XDG_STATE_HOME が指定されていて、既定の置き場を使わない"}
     moved: list = []
@@ -340,13 +415,20 @@ def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
         if (old / kind).exists():
             _merge_ledger(old / kind, new / kind, moved, kept)
         _resume_sides(new, kind, moved, kept)
-    out = {**base, "moved": moved, "kept": kept}
-    if kept:
+    out = {**base, "moved": moved, "kept": kept, **_move_checkout(old, Path(cwd) if cwd is not None else Path.cwd())}
+    n_moved = len(moved) + len(out["dbos"]["moved"]) + len(out["sv"]["moved"])
+    n_kept = len(kept) + len(out["dbos"]["kept"]) + len(out["sv"]["kept"])
+    tail = f"。{out['checkout']['reason']}" if out["checkout"]["reason"] else ""
+    if n_kept:
         return {
             **out,
             "status": "kept",
-            "summary": f"{len(moved)} 件を移し、{len(kept)} 件は旧に残した（移し先に同じ名前がある・別の migrate が動いている）",
+            "summary": f"{n_moved} 件を移し、{n_kept} 件は旧に残した（移し先に同じ名前がある・動いている）{tail}",
         }
-    if moved:
-        return {**out, "status": "migrated", "summary": f"{len(moved)} 件を {new} へ移した"}
-    return {**out, "status": "none", "summary": f"{old} に移す台帳が無い"}
+    if n_moved:
+        return {
+            **out,
+            "status": "migrated",
+            "summary": f"{n_moved} 件を移した（台帳 {len(moved)}・耐久の記録 {len(out['dbos']['moved'])}・プランの状態 {len(out['sv']['moved'])}）{tail}",
+        }
+    return {**out, "status": "none", "summary": f"{old} に移すものが無い{tail}"}

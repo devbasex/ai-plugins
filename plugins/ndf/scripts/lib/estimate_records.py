@@ -200,7 +200,7 @@ def estimate_dir(root: Path | str | None = None) -> Path:
         return p if p.is_absolute() else top / p
     if got:
         return got[1] / "ndf" / "estimate"
-    return user_home(kinds=("estimate",)) / "estimate" / hashlib.sha256(str(top).encode()).hexdigest()[:12]
+    return user_home() / "estimate" / hashlib.sha256(str(top).encode()).hexdigest()[:12]
 
 
 # --- 追記と読み出し ---
