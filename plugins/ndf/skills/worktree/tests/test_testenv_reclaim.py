@@ -48,9 +48,10 @@ project=$2
 shift 2
 while [ "$1" = -f ]; do shift 2; done
 [ "$1" = down ] || exit 0
-printf '%s\t%s\t%s\n' "$(pwd)" "${COMPOSE_FILE-unset}" "${COMPOSE_PROFILES-unset}" >> "$FAKE_STATE/downs"
+printf '%s\t%s\t%s\t%s\n' "$(pwd)" "${COMPOSE_FILE-unset}" "${COMPOSE_PROFILES-unset}" "${COMPOSE_ENV_FILES-unset}" >> "$FAKE_STATE/downs"
 : > "$FAKE_STATE/started-$project"
-[ ! -f "$FAKE_STATE/hold-$project" ] || sleep 30
+i=0
+while [ -f "$FAKE_STATE/hold-$project" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
 [ ! -f "$FAKE_STATE/fail-$project" ] || { echo "device busy" >&2; exit 1; }
 [ -z "${FAKE_DOWN_SLEEP:-}" ] || sleep "$FAKE_DOWN_SLEEP"
 exit 0
@@ -158,11 +159,11 @@ def test_a_stale_assignment_is_discarded_without_the_definition(main_repo: Path,
     write_rows(main_repo, [{"worktree": wt, "environment": "e1", "golden_tag": "t"}])
     containers(fake, "e1", wt, f"{wt}/docker")
 
-    p, out = reclaim(main_repo, {**fake, "COMPOSE_FILE": "/x/compose.yml", "COMPOSE_PROFILES": "p"})
+    p, out = reclaim(main_repo, {**fake, "COMPOSE_FILE": "/x/compose.yml", "COMPOSE_PROFILES": "p", "COMPOSE_ENV_FILES": "e.env"})
 
     assert p.returncode == 0 and out["status"] == "ok" and out["tool"] == "testenv-reclaim"
     assert downs(fake) == ["compose -p e1 down --volumes"]
-    assert (Path(fake["FAKE_STATE"]) / "downs").read_text(encoding="utf-8") == "/\tunset\tunset\n"
+    assert (Path(fake["FAKE_STATE"]) / "downs").read_text(encoding="utf-8") == "/\tunset\tunset\tunset\n"
     assert released(main_repo) == {wt: True}
     assert "golden_tag" not in rows_of(main_repo)[0]
     assert out["items"] == [{"kind": "testenv", "name": "e1", "result": "reclaimed", "worktree": wt, "volumes": "discarded"}]
@@ -677,6 +678,52 @@ def test_a_row_added_before_the_reclaim_stops_the_discard(main_repo: Path, workt
     _, out = reclaim(main_repo, fake)
 
     assert out["items"][0]["result"] == "released" and downs(fake) == []
+
+
+def reclaim_two_while(main: Path, fake: dict, change) -> tuple[dict, str]:
+    """e1 の破棄の途中で change(e2 の worktree) を打ち、回収を終えて (結果, e2 の worktree) を返す。"""
+    declare(main)
+    a, b = gone(main, "a"), gone(main, "b")
+    write_rows(main, [{"worktree": a, "environment": "e1"}, {"worktree": b, "environment": "e2"}])
+    containers(fake, "e1", a)
+    containers(fake, "e2", b)
+    proc = hold_discard(main, fake, "e1")
+    try:
+        change(b)
+        (Path(fake["FAKE_STATE"]) / "hold-e1").unlink()
+        out, _ = proc.communicate(timeout=60)
+    finally:
+        if proc.poll() is None:
+            stop(proc)
+    return json.loads(out), b
+
+
+def test_a_worktree_locked_during_the_reclaim_is_left_alone(main_repo: Path, fake: dict) -> None:
+    def lock(b: str) -> None:
+        admin = main_repo / ".git" / "worktrees" / "b"
+        admin.mkdir(parents=True)
+        (admin / "gitdir").write_text(f"{b}/.git\n", encoding="utf-8")
+        (admin / "HEAD").write_text(git(main_repo, "rev-parse", "HEAD").stdout.strip() + "\n", encoding="utf-8")
+        (admin / "commondir").write_text("../..\n", encoding="utf-8")
+        (admin / "locked").write_text("moved\n", encoding="utf-8")
+        assert b in git(main_repo, "worktree", "list", "--porcelain").stdout
+
+    out, b = reclaim_two_while(main_repo, fake, lock)
+
+    assert downs(fake) == ["compose -p e1 down --volumes"]
+    assert released(main_repo)[b] is False and [i["name"] for i in out["items"]] == ["e1"]
+
+
+def test_an_expose_opened_during_the_reclaim_is_left_alone(main_repo: Path, fake: dict) -> None:
+    def open_expose(b: str) -> None:
+        rows = rows_of(main_repo)
+        rows[1]["expose"] = {"url": "https://wt1.t.example", "closed_at": None}
+        registry_file(main_repo).write_text(json.dumps({"version": 1, "assignments": rows}), encoding="utf-8")
+
+    out, b = reclaim_two_while(main_repo, fake, open_expose)
+
+    assert downs(fake) == ["compose -p e1 down --volumes"]
+    assert released(main_repo)[b] is False and by_result(out, "exposed")[0]["url"] == "https://wt1.t.example"
 
 
 def test_env_and_up_pass_while_a_test_runs(main_repo: Path, worktree: Path, fake: dict) -> None:

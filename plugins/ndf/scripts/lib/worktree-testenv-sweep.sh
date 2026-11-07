@@ -219,12 +219,15 @@ _reclaim_check_owner() {
 }
 
 # 定義を読まずにプロジェクトを破棄する。定義の無い `/` から `COMPOSE_FILE` を外して打つ（決定 2）。
+# `COMPOSE_ENV_FILES` も外す。残すと相対の指定が `/` から引かれて破棄が失敗し、指定のファイルの
+# `COMPOSE_FILE` が定義を読ませる（I7）。
 _reclaim_discard() {
   local environment=$1 volumes=$2
   local -a flags=()
   [ "$volumes" = 0 ] || flags=(--volumes)
   ( cd / && _reclaim_limited /dev/null "$RECLAIM_TMP/down.err" \
-      env -u COMPOSE_FILE -u COMPOSE_PROFILES "$RECLAIM_DOCKER" compose -p "$environment" down "${flags[@]+"${flags[@]}"}" )
+      env -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES \
+      "$RECLAIM_DOCKER" compose -p "$environment" down "${flags[@]+"${flags[@]}"}" )
 }
 
 _reclaim_release_rows() {
@@ -289,11 +292,24 @@ _reclaim_destroy() {
   _reclaim_item reclaimed "$environment" "$shown" volumes "$kept" ${why:+reason "$why"}
 }
 
+# 開いた公開の URL を今の台帳から出す。解放済みの行の公開も含める（_reclaim_plan と同じ）。
+_reclaim_open_expose() {
+  wt_registry_read "$(registry)" | jq -r --arg environment "$1" \
+    '[.assignments[] | select(.environment == $environment and .expose != null and .expose.closed_at == null) | .expose.url] | last // ""'
+}
+
 # 予約とロックを取った後に読み直し、1 つの環境を処理する。別の担当がすでに片付けていれば何も足さない。
+# 回収の開始の後に変わる `locked` と公開も、ここで読み直す（I1・I5）。公開の書き手は同じ予約を通る。
 _reclaim_locked() {
-  local environment=$1 worktree live=0 shown
+  local environment=$1 worktree live=0 shown url
   local -a stale=()
   _wt_read_lines < <(_reclaim_rows "$environment" '.released_at == null')
+  [ "${#WT_LINES[@]}" -gt 0 ] || return 0
+  if ! RECLAIM_LOCKED=$(_reclaim_locked_paths); then
+    shown=$(printf '%s, ' "${WT_LINES[@]}")
+    _reclaim_item failed "$environment" "${shown%, }" reason "worktree の一覧を読めない"
+    return 0
+  fi
   for worktree in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     _reclaim_classify "$worktree"
     if [ "$RECLAIM_CLASS" = stale ]; then
@@ -305,6 +321,11 @@ _reclaim_locked() {
   [ "${#stale[@]}" -gt 0 ] || return 0
   shown=$(printf '%s, ' "${stale[@]}")
   shown=${shown%, }
+  url=$(_reclaim_open_expose "$environment")
+  if [ -n "$url" ]; then
+    _reclaim_item exposed "$environment" "$shown" url "$url"
+    return 0
+  fi
 
   if [ "$live" = 1 ]; then
     if _reclaim_release_rows "${stale[@]}"; then

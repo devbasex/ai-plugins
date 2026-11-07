@@ -677,8 +677,13 @@ do_expose() {
     return 2
   fi
 
-  local opened
-  opened=$(expose_record_assignment "$host" "$ttl") || return 1
+  # 回収の予約を持って記録する。回収は予約の中で公開を読み直すため、読み直しの後に公開が増えない（I5）。
+  local opened rc
+  _reclaim_reserve "$ENVIRONMENT" || return 1
+  opened=$(expose_record_assignment "$host" "$ttl")
+  rc=$?
+  wt_lock_release "$(reclaim_lock "$ENVIRONMENT")"
+  [ "$rc" = 0 ] || return 1
 
   # 記録を先に置くのは、先着 1 本の判定を通ったことを示すため。口を開けられ
   # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
