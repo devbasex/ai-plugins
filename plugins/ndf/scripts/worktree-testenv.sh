@@ -566,7 +566,11 @@ do_unexpose() {
     # 使っている構成で後片付けの対象を特定できない。
     host=${url#https://}
     host=${host#http://}
-    if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
+    # worktree が消えた後もメインディレクトリで閉じる。閉じられないと台帳の公開が
+    # 開いたまま残り、回収がその割り当てを exposed で止め続ける。
+    local close_dir="$TARGET"
+    [ -d "$close_dir" ] || close_dir="$MAIN_DIR"
+    if ! (cd "$close_dir" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
       "NDF_EXPOSE_ENVIRONMENT=$environment" "NDF_EXPOSE_SLOT=$slot" \
       sh -c "$close_command"); then
       # 閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。
