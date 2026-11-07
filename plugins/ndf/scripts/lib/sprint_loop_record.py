@@ -35,7 +35,7 @@ import handoff_doc
 import jsonio
 import legacy_values
 import locks
-import parallel_files
+import parallel_hold
 import project_mvv as pm
 import repo as repo_lib
 import step_result
@@ -51,7 +51,7 @@ SUPERVISE = SCRIPTS / "supervise.py"
 UPKEEP = SCRIPTS.parent / "skills" / "backlog-refinement" / "scripts" / "upkeep.py"
 HANDOFF_TEMPLATE = SCRIPTS / "data" / "handoff-template.md"
 HANDOFF_DIR = Path(".ndf") / "handoff"
-NEXT_STEP_SECTION = "次にやること"  # 引継ぎ文書の節（loop start が in_lap のときに指す）
+NEXT_STEP_SECTION = handoff_doc.NEXT_STEP_SECTION  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
 LAPS_MD = "laps.md"
 STOP_FILE = "stop"
@@ -64,7 +64,6 @@ EXIT_STOPPED = step_result.EXIT_PRECONDITION  # 3: 止まる条件に当たっ�
 IN_PROGRESS, DONE, FAILED, RETURNED = "進行中", "完了", "失敗", "人へ戻した"
 BUDGET_DEFAULT = "default"  # 予算の単位を既定（.ndf/pace.json の loop.budget）へ戻す指示。値が変わったときだけ予算の履歴に 1 行足す
 SELECTED, DROPPED = "選んだ", "外した"
-BOUNDARY_CONDITIONS = ("user_stop", "mvv_changed", "same_failure", "budget_laps", "budget_usd", "budget_hours", "waiting_only")
 SLOT_FIT = "当てた"  # upkeep_rank_config.SLOT_FIT（rank の出力をそのまま読む）
 OVER_SCALE = "尺度を超える"  # upkeep_rank_estimate.OVER_SCALE
 DESIGN_PHASE = "設計"
@@ -334,7 +333,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
     if stop_file.exists():
         return {"condition": "user_stop", "values": {"at": stop_file.read_text(encoding="utf-8").strip()}}
-    if stop := mvv_change_stop(env, rec):
+    if stop := mvv_change_stop(env, rec) or parallel_hold.loop_stop(env.main_dir()):
         return stop
     key, count = failure_streak(rec)
     if key is not None and count >= rec.get("same_failure", 2):
@@ -346,7 +345,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     return None
 
 
-IMMEDIATE_STOPS = ("user_stop", "mvv_changed")  # 保留の周回があっても待たずに止まる条件（#2436 の境の 1）
+IMMEDIATE_STOPS = ("user_stop", "mvv_changed", "answer_hold")  # 保留の周回があっても待たずに止まる条件（#2436 の境の 1）
 
 
 def waiting_only(rec: dict, why: str) -> dict:
@@ -388,8 +387,8 @@ def stopped_result(env: Env, rec: dict, summary: str, extra_metrics: dict | None
     update_handoff(env, rec, f"止まった（{stop['condition']}）。理由が解けたら再開のコマンドで続ける", resume, resume)
     items = [{"condition": stop["condition"], "values": stop["values"], "resume": resume}]
     metrics = {"status": "stopped", "stop": stop, "stop_line": stop_line(rec, stop["condition"]), "consumed": consumed(rec)}
-    # 待ちだけで止まったレーンは、自分のラッパーを止める 1 行（stop_self）を打って終える（判断 fca6fe464619 の (a)）
-    metrics.update(extra_metrics or {}, stop_self=parallel_files.stop_self(env.main_dir()) if stop["condition"] == "waiting_only" else None)
+    # 待ちだけ・答え待ちの停止で止まったレーンは、自分のラッパーを止める 1 行（stop_self）を打って終える（判断 fca6fe464619 の (a)）
+    metrics.update(extra_metrics or {}, stop_self=parallel_hold.self_stop(env.main_dir(), stop))
     return {**step_result.result(TOOL, "stopped", summary, items, metrics), "exit": EXIT_STOPPED}
 
 

@@ -67,7 +67,7 @@ def cli(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "main_of", lambda: tmp_path)
     monkeypatch.setattr(pl, "run_status", lambda main, name: next(iter(pl.RUNNING)))
     monkeypatch.setattr(pa, "questions", lambda main, name: (7, box["items"]))
-    monkeypatch.setattr(pa, "owner_restart", lambda *a, **k: None)
+    monkeypatch.setattr(pa, "owner_next", lambda *a, **k: (None, []))
     monkeypatch.setattr(pl, "send_answer", lambda main, name, rid, result, **kw: box["sent"].append((rid, result, kw)))
     monkeypatch.setattr(
         design_pr_merge, "merge_approved", lambda root, pr, stamp, run=None: box["merges"].append((pr, stamp)) or {**box["merge"], "pr": pr}
