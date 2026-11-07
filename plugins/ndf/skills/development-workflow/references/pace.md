@@ -432,7 +432,7 @@ Pull Request のコメント）の 3 つがそろったときに限る。** レ�
 （`new check --since-last`。`scope: since`）も、PR を指す検査（`new check --pr N`。`record --target-pr N`・`scope: pr`）も、
 マージ・変更なし・落ちたのどの終わり方でも 1 行を書く。** PR を指す検査の行は `pr` と `to` を持たないため、トリガーの範囲の
 起点にも、範囲から外す PR にもならない。承認ゲートで止まった間と、計画の外から止められた計画は書かない。
-検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf` →
+検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `~/.claude/ndf/state` →
 `${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
 
 | `kind` | いつ足すか | 主な列 |

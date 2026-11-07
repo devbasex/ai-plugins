@@ -303,6 +303,31 @@ NDF_CODEX_SLACK_NOTIFY=true
 機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
 直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
 
+**NDF がリポジトリの外に書く状態は、持ち主ごとに 3 つの置き場へ分けています**（`lib/state_home.py`）。
+
+| 持ち主 | 置き場 | 置くもの |
+| --- | --- | --- |
+| チェックアウト | `<git の共通ディレクトリ>/ndf/state` | 耐久ワークフローの記録 `dbos/`・プランの状態 `sv/`。コンテナを作り直しても残り、同じパスの別のチェックアウトと混ざりません |
+| 利用者 | `~/.claude/ndf/state` | 追記だけの台帳（問いの台帳・MVV の記録・`metrics/`・`usage/`・`checks/`・`stages/` など）。`~/.claude` を共有するコンテナの間で共有します |
+| コンテナのプロセス | `~/.local/state/ndf` | relay・待ちの通知・guard・context。pid を持つため、コンテナごとに分けます |
+
+`NDF_STATE_HOME` か `XDG_STATE_HOME` を指定すると、3 つとも その置き場になります。**旧の版の置き場
+`~/.local/state/ndf` の台帳・耐久ワークフローの記録・プランの状態は読みません。** 更新したら、各コンテナで**動いているプランを止めてから**、
+主のリポジトリの作業ツリーへ移って次の 1 行を一度打ってください。台帳は利用者の置き場へ足し合わせ、`dbos/` と `sv/` はそのリポジトリの
+チェックアウトの置き場へ移します。旧の台帳は消さず `<名前>.migrated` として残し、次に打ったときに移り切ったものを消します。
+動いている耐久ワークフロー（ロックが持たれている記録）が 1 つでもあるときと、別のコンテナで migrate が動いているときは、
+何も移さずに止まります。**移行の前の `queue` は `--resume` で続けられません**（記録の鍵と中の ID が旧の置き場のパスからできているため）。
+新しく流してください。何度打ってもかまいません（移すものが無ければ何もしません）。
+
+`<ndf>` は NDF のプラグインの置き場で、導入先の版ごとのディレクトリのうち最も新しい版です（`$CLAUDE_PLUGIN_ROOT` は
+hook の中でしか値を持たず、端末と Claude Code の Bash では空です）。Claude Code では次のように探して打ちます。
+Codex では探す根を `"${CODEX_HOME:-$HOME/.codex}"` に替えます。
+
+```bash
+NDF=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/ndf/*/ | sort -V | tail -n 1)
+python3 "$NDF/scripts/state-home.py" migrate
+```
+
 ## 外部 AI 委譲
 
 `/ndf:external-ai` skill または `corder` エージェントから外部 AI 委譲を使う場合は、利用環境に
