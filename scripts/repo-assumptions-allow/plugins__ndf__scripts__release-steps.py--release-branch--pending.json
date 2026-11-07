@@ -3,6 +3,6 @@
   "name": "release-branch",
   "kind": "pending",
   "reason": "リリースの形 package-plugin の版上げのブランチ。リリースの形ごとの手順へ分けるまで残す",
-  "count": 30,
+  "count": 31,
   "issue": 2623
 }

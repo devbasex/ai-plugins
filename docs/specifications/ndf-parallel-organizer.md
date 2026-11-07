@@ -114,6 +114,11 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | I16 | 本番チャネルへ出すコミットは、すべて `develop` に含まれる | `scripts/check-pr-base.sh`（継続的統合の `pr-base-guard`）が落とす |
 | I17 | 並列の計画の下で区分つきの問いを出すのはオーガナイザーだけである | レーンと一時レーンの問いは依頼（`kind: gate1` / `gate2` / `ask`）としてオーガナイザーへ届く。レーンが答えを当てられなかったときの知らせは `kind: unmatched` で届く |
 | I18 | オーガナイザーは、設計の承認で設計 PR をマージするほかは作業を持たない。一時レーンは同時に 1 本まで | `answer --approved` は設計の承認の依頼なら、承認した先端のままで必須の検査が緑の設計 PR を待たずにマージしてから答えのメッセージを送り、ほかの答えはメッセージを送るだけである。ラベル・記録・直し・マージし直し・後片付けは持ち主のレーンが周回の境で行う |
+| I23 | 計画全体の件数は答えていない問いの一覧の件数である。同じレーンの同じ設計 PR の設計の承認は 1 件にまとめ、リリースの依頼は数えない。レーンの件数はそのレーンが送った `gate1` と `ask` だけを数え、まとめた問いは送った各レーンへ 1 件ずつ数える。答え待ちの停止の範囲は今の一覧と閾値だけから決まる | `parallel_hold.decide_hold` が 1 周ごとに導く |
+| I24 | 計画全体の答え待ちの停止の間は、レーンを起動せず、新しいリリースを組まない。流れているリリースと依頼の受け付けは続く | `_spawn_ready` と `open_release` の前で判定する |
+| I25 | 再開は再開の印のあるレーンだけに当たり、停止の範囲の外で止まっているレーンだけに行う。計画全体の停止の間はどのレーンも再開しない。人が `park --clear` で印を消したレーンは起こす 1 行と起こした後の待ちからも外し、計画の終わりを止めない | 動いているレーンの印は残す。止まったと観た後で動いたレーンの印だけを、再開せずに消す。観測は印の `at` で控え、置き直した印に引き継がない |
+| I26 | レーンは再開の印を置いてからラッパーを止める。観測は一覧の後に印を読む。印が残るレーンと起こしたばかりのレーンがある間は計画を終えず、依存の判定で止まったと数えない | 止まって見えたレーンの印を読み逃さない |
+| I27 | 閾値を載せていない観測の記録を再生する間、耐久ワークフローの呼び出しを足さない。止める指示のファイルは一時ファイルからの置き換えで書き、読めなければ止める指示なしと読む | 実時間へ戻ると閾値が載り、次の 1 周から働く。読み取りの失敗でレーンを止めない |
 | I20 | 依頼の `id` は送る側が依頼の中身から決め、受け取った数から採番しない | 打ち直しで同じ `id` になり、冪等の鍵（`<ID>:inbox:<依頼>`）が 2 度目を数えない。受け取りの前後で打ち直しても `id` が変わらない |
 | I21 | リリースの組み方は依頼を受けるたびに宣言から読み、決まらないときは「組めない」へ倒す。組まないのは、リリースの経路がマージで届く・昇格で届く・届けない（`merged-by-check`・`promote`・`none`）だけのときである | 手動の経路、宣言が無い・不明・読めない行、テンプレートの無い `release.form` は、`released` と答えず `failed` と理由を答える |
 | I22 | リリースを組めないことでは計画は止まらず、組めなかった依頼は受けている依頼に残らない | 範囲が決まる前なら受けている依頼のすべてへ、提示 2 を組めないなら範囲の依頼へ `failed` を答える。計画を止めるのは問い `kind: build` への「止める」だけである |
@@ -128,6 +133,8 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/lib/parallel_route.py` | `.ndf/` の宣言からリリースの組み方を読む（`way_of`）、起動の前の検査の警告（`check_items`）、ループのレーンの記録の読み出し（`held_loops`・`design_held`・`waiting_lanes`）、組まない・組めないの答えと組めないときの問い・組み直しの依頼（`ReleaseRouting`） |
 | `plugins/ndf/scripts/lib/parallel_reply.py` | 答えの届け方（`AnswerRouting`）: 同じ行の問いの置き換え（`replace_same`）・置き換えた依頼への答え（`reply_replaced`）・前のループの待ちへの答え（`land_prior`）・当たらなかった答えの問い（`ask_unmatched`）・止まった持ち主を起こす対象（`wake_owners`）。`_Run` が継ぐ |
 | `plugins/ndf/scripts/lib/gate1_requests.py` | 設計の承認の依頼の部品: 設計 PR の先頭の読み取り（`design_head`）・取り込みのコミットだけかの判定（`merge_only`）・前のループの待ちの読み出しと依頼の形（`prior_rows`・`prior_requests`）・前のループへの答えの当て方（`answer_prior`。`loop answer` を打ち、記録を直接書かない） |
+| `plugins/ndf/scripts/lib/parallel_hold.py` | 答え待ちの停止: 数え方と範囲の導出（`decide_hold`）・閾値の読み出し・止める指示のファイルと履歴と再開の印の読み書き・突き合わせ（`AnswerHold`）。DBOS を import しない |
+| `plugins/ndf/scripts/lib/parallel_hold_cli.py` | `parallel.py park` の本体 |
 | `plugins/ndf/scripts/lib/parallel_helper.py` | 一時レーンの組み立て: 起こす 1 行（`helper_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`） |
 | `plugins/ndf/scripts/lib/delivery.py` | 宣言とリリースの経路からリリースの組み方と理由を返す（`release_way`） |
 | `plugins/ndf/scripts/lib/parallel_release.py` | まとめたリリース: 範囲の Pull Request をレーンへ対応づける（`present`・`map_lanes`）、先頭が進んだかを比べる 1 つの関数（`moved`）、範囲で答えられる依頼（`answerable`）、提示のプランと本番のプランの組み立て（`build_plans`・`present_gate_steps`）、リリースの依頼のプラン（`plan_release_request`） |
@@ -137,7 +144,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/relay_lib/hub.py`・`hub_client.py` | 役割のファイルの読み書き（`relay.py role`・`spawn --role helper --plan`）と数え方（I13）。`ls --json` の `metrics.hub`・`metrics.tmux` |
 | `plugins/ndf/scripts/lib/sprint_loop_gate.py` | ループのレーンが設計の承認を「人の判断待ち」へ移すときに、`kind: gate1` の依頼を送る。答えを当てる前に設計 PR の先頭を比べ、取り込みのコミットだけの違いなら当てる |
 | `plugins/ndf/scripts/lib/design_pr_merge.py` | 承認した設計のマージ（`merge_approved`）。`parallel.py answer --approved`・`loop answer --approved`・周回の境が呼ぶ |
-| `plugins/ndf/scripts/lib/parallel_answer.py` | 答えの後に起こす 1 行（`owner_restart`）と、答えの後に残る依頼の一覧と除外の印（`after_items`・`mvv_mark`） |
+| `plugins/ndf/scripts/lib/parallel_answer.py` | 答えの後に起こす 1 行（`owner_next`。答え待ちの停止の範囲にある持ち主へは再開の印を置く）と、答えの後に残る依頼の一覧と除外の印（`after_items`・`mvv_mark`） |
 | `plugins/ndf/scripts/hook_lib/ask_guard.py` | 判定が通す問いを、レーンか一時レーンなら `parallel.py request-ask` で送って止める |
 
 ```mermaid
@@ -180,10 +187,11 @@ graph TD
 1. 最初に計画を読んで検査し、`relay.py role organizer --plan <計画名>` を打つ
 2. 停止の指示を受けていて、流れているリリースが無いか `--force` なら、起動済みのレーン（`--force` なら一時レーンも）へ `relay.py stop` を打ち、`stopped` で終わる
 3. 起動の条件がそろったレーンを `relay.py spawn --name <レーン> --json -- <最初の入力>` で起動する。`NDF_PARALLEL_SPAWN_REFUSALS`（既定 3）回続けて断られるたびに `kind: spawn` の問いを立てる
-4. 流れているリリースが無く `pending` があれば、出せたリリースの範囲で答えられる依頼に答える。残りがあれば、耐久ステップ `parallel.route` でリリースの組み方を読み、組むならまとめたリリースを組み、組まない・組めないならその場で答える（下の「まとめたリリース」）
-5. I11 を満たせば、役割の印を消して `finished` で終わる
+4. 流れているリリースが無く `pending` があれば、出せたリリースの範囲で答えられる依頼に答える。残りがあり、計画全体の答え待ちの停止の間でなければ、耐久ステップ `parallel.route` でリリースの組み方を読み、組むならまとめたリリースを組み、組まない・組めないならその場で答える（下の「まとめたリリース」）
+5. I11 を満たし再開の印も無ければ、役割の印を消して `finished` で終わる
 6. `inbox` を最長 60 秒（`NDF_PARALLEL_POLL`。リリースの途中は 30 秒）待つ。リリースの途中なら `resume` も読む
-7. 耐久ステップ「観測」で `relay.py ls --json` を読む。状態が `awaiting_approval` へ移ったレーンがあれば `notice` を立てる。動かないレーンと、止まった一時レーンには問いを立てる。一覧が 0 以外で終わった回は、失敗の続いた長さの追跡のほかは何も変えず、次の観測を待つ。2 へ戻る
+7. 耐久ステップ「観測」で `relay.py ls --json` を読む。状態が `awaiting_approval` へ移ったレーンがあれば `notice` を立てる。動かないレーンと、止まった一時レーンには問いを立てる。一覧が 0 以外で終わった回は、失敗の続いた長さの追跡のほかは何も変えず、次の観測を待つ
+8. 突き合わせを行う。観測の結果に閾値が無ければ何もしない。答えた設計 PR の古い依頼を一覧から外し、停止の範囲を導く。範囲が変わったら耐久ステップ `parallel.answer-hold` で止める指示のファイル・履歴・`plan.md` を書き、イベント `answer-hold` を立てる（書けなければ範囲を進めず、次の周で書き直す）。一覧が成功した周だけ、再開の印を分ける。範囲の外で止まっているレーンは耐久ステップ `parallel.resume-lanes` で `relay.py restart` を打ち、断られたら起動の断りと同じに数える。2 へ戻る
 
 ### まとめたリリース
 
@@ -250,7 +258,7 @@ stateDiagram-v2
 - 同じ原因の問いは 1 つにまとめる。対象は `ndf-ask:human-action` の問いで、区分・選択肢・文面が同じものである。文面はレーン名・パス・数字を伏せ、空白をまとめてから比べる。
   答えは依頼してきた全レーンへ `answer-<依頼>` で配る。取り消せない操作・レッドライン・費用の問いは、番号の違いで別の対象になり得るためまとめない
 - 1 スプリントのレーンの持ち主が止まっていれば、`answer` は `metrics.next` に `relay.py restart <レーン>` の 1 行を返す。
-  起こすかは、ラッパーの状態ではなくレーンの側の待ちの記録で決める（`lane_waits`）
+  起こすかは、レーンの側の待ちの記録（`lane_waits`）で決める。持ち主が答え待ちの停止の範囲にあれば、1 行を返さず再開の印を置き、`metrics.held_owners` にレーン名を返す
 - 問いの止まった持ち主は、1 スプリントのレーンに加えて、記録が `waiting_only` で答えのまだの行を持つループのレーンも起こす対象に入る（`wake_owners`）。起こす 1 行は、動き出すまで以後の知らせ（`pause` の `wake`）に添う
 
 ## データ・設定
@@ -268,6 +276,9 @@ stateDiagram-v2
 | 同 `releases/<連番>/<提示>/present.json`・`release.json`・`answer.json` | 提示のプラン・本番のプラン・提示の答えの記録（スプリントの状態ファイルの形。承認済みのプロジェクト MVV の参照を持つ） | 耐久ステップ「リリースを組む」 |
 | 同 `releases/<連番>/<提示>/presented.json`・`breakdown.md` | 提示したコミット・範囲の Pull Request・レーンの対応・レーンの無い Pull Request・出し直しで加わった範囲、承認資料へ足す内訳 | `parallel.py present` |
 | 同 `releases/<連番>/<提示>/done.json`・`release-done.json` | 提示と本番のプランの queue の done | 一時レーン |
+| 同 `answer-hold.json` | 今の答え待ちの停止の範囲。停止が無ければファイルも無い。計画の終わりに消す | 耐久ステップ `parallel.answer-hold` |
+| 同 `answer-hold-log.jsonl` | 止めた・解けたの履歴（1 変化 1 行。止まった回数は `change: on` の行で数える）。消さない | 耐久ステップ `parallel.answer-hold` |
+| 同 `resume/<レーン>.mark.json` | 再開の印（`why` は `boundary` か `answered`）。再開したとき・止まったと観た後で動いたとき・「止める」と答えたとき・計画の終わりに消す | ループの境・`park`・`answer` |
 | レーンのプランの状態ディレクトリの `work/request-id.txt`・`work/request.txt` | 依頼の `id`、送った依頼かリリース済みの結果 | `parallel.py request` |
 | ラッパーの作業ディレクトリの `role.json` | 役割（`organizer` / `helper`）と計画名 | `relay.py role`・`relay.py spawn --role helper` |
 | 耐久の記録（種類 `parallel`、識別は計画の置き場の絶対パス） | 耐久ワークフロー `parallel-<計画名>` の入力・耐久ステップの結果・メッセージ・イベント | 耐久ワークフロー（外のプロセスはメッセージを送るだけ） |
@@ -276,15 +287,21 @@ stateDiagram-v2
 
 | 種類 | 名前 | 送り手・書き手 | 読み手 | 中身 |
 | --- | --- | --- | --- | --- |
-| メッセージ | 話題 `inbox` | `request`・`request-ask`・`request-gate2`・ループのレーン（`gate1`）・`answer`・`stop` | 耐久ワークフロー | `{kind: request \| gate1 \| gate2 \| ask \| unmatched \| answer \| stop, …}`。冪等の鍵は `<ID>:inbox:<依頼>` など |
+| メッセージ | 話題 `inbox` | `request`・`request-ask`・`request-gate2`・ループのレーン（`gate1`）・`answer`・`stop`・`park --clear` | 耐久ワークフロー | `{kind: request \| gate1 \| gate2 \| ask \| unmatched \| answer \| stop \| left_stopped, …}`。冪等の鍵は `<ID>:inbox:<依頼>` など |
 | メッセージ | 話題 `resume` | `confirm`・`settle` | リリースの途中の耐久ワークフロー | `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}` |
 | イベント | `pause` | 耐久ワークフロー | `wait` | `{seq, action, …}`。`action` は `running` / `notice` / `release` / `confirmed` / `held`。`running` では `wait` は返らない。起こす 1 行（`wake`）を添える |
+| イベント | `answer-hold` | 耐久ワークフロー | `wait` | `{seq, action: "answer_hold", n, line, hold}`。`n` と `line` は最新の変化。`wait` は履歴の `n` が `--changes-after` より大きい全行を `metrics.changes` で返す。履歴を読めなければ最新の 1 件と `metrics.changes_unread: true` を返す |
 | イベント | `questions` | 耐久ワークフロー | `wait` | `{seq, items}`。答えていない問いの依頼の全件 |
 | イベント | `answer-<依頼>` | 耐久ワークフロー | `await`・周回の境（`answers_of`） | リリース: `{result, version, release, reason, at}`（リリースを組まないときと失敗では `version` が `null`）。問い: `{result, note, choice, stamp, merge, by, at}`（`merge` は設計の承認で試みたマージの結果、`by` は `user` か `mvv`） |
 | イベント | `defer-<依頼>` | 耐久ワークフロー | `await` | `{seq, reason, at}`。知らせのたびに上書きしてよい |
 | イベント | `range-<連番>` | 耐久ワークフロー | `request`（`released_version`） | 出せたリリースの `{sha, version, prs, lanes}`。差し戻し・失敗のリリースと、組まなかったリリースの連番は欠ける |
 | イベント | `lane-<レーン名>` | 耐久ワークフロー | 状態の表示 | `{received}`。依頼の `id` の採番には使わない |
-| 出力 | 耐久ワークフローの戻り値 | 耐久ワークフロー | `wait`・`run` | `{status: finished \| stopped, lanes, releases, pending, prior_waits}` |
+| 出力 | 耐久ワークフローの戻り値 | 耐久ワークフロー | `wait`・`run` | `{status: finished \| stopped, lanes, releases, pending, holds, prior_waits}` |
+
+### 宣言
+
+`.ndf/pace.json` の任意の節 `{"parallel": {"answer_limit": {"plan": 8, "lane": 3}}}` が閾値を決める。節が無ければ既定の 8 と 3 で動く。
+件数が閾値を超えるとレーンを止める。閾値を超えた依頼も受け付ける。正の整数でない値はその値だけ既定へ戻し、`check`・`start` が警告を出す。計画は止めない。
 
 ### 環境変数
 
@@ -311,7 +328,8 @@ stateDiagram-v2
 | `check` | 通った（警告だけを含む） | 誤り | 読めない | — | — |
 | `start` | 切り離して起動した・動いている `run` を指した | 計画が無い・検査の誤り | 計画を読めない | ラッパーの外・tmux が無い・統括役が居ない（`manual: true`） | — |
 | `run` | 終わった・同じ計画の `run` が動いている（`running: true`） | 計画が無い・検査の誤り | 耐久の記録を開けない | `start` と同じ | — |
-| `wait` | `notice` / `release` / `confirmed` / `held` / `questions` / 終わり | 耐久ワークフローが失敗で終わった | 耐久の記録が無い | 上限に達した・まだ変化が無い | — |
+| `park` | 止まる手順を書いた・停止が解けている（`cleared: true`）・印を消した | 計画かレーンが無い | 書けない・消せない・送れない | — | — |
+| `wait` | `notice` / `release` / `confirmed` / `held` / `questions` / `answer_hold` / 終わり | 耐久ワークフローが失敗で終わった | 耐久の記録が無い | 上限に達した・まだ変化が無い | — |
 | `request` | すでに本番チャネルにある（`released`） | 計画が動いていない | — | — | 10: 依頼を送った |
 | `await` | `released` | `failed` | 依頼の記録を読めない | 答えがまだ無い | 10: `rejected` |
 | `settle` | 送った | 計画が動いていない | done を読めない | — | 4: 本番のプランが承認ゲートで止まっている |
@@ -369,6 +387,9 @@ stateDiagram-v2
 | `check-pr-base.sh` が `develop` と、先頭が `origin/develop` の祖先の `release/v*` だけを通す（I16） | `scripts/tests/test_pr_base_guard.py` |
 | 版数を持つ箇所だけの衝突を本番の版で解き、ほかの衝突は止める | `plugins/ndf/scripts/tests/test_release_version_merge.py` |
 | ループのレーンの `リリース待ち`・`質問待ち`・`waiting_only` | `plugins/ndf/scripts/tests/test_sprint_loop.py` |
+| 答え待ちの依頼の数え方・閾値の宣言・置き場（I23・I27） | `plugins/ndf/scripts/tests/test_parallel_hold.py` |
+| 答え待ちの停止の突き合わせと流れ・`park`・打ち直し（I24〜I27） | `plugins/ndf/scripts/tests/test_parallel_hold_flow.py` |
+| ループは周回の境で、1 スプリントのレーンはキューのプランの開始で止まり、単発の `run` は止まらない | `plugins/ndf/scripts/tests/test_parallel_hold_lanes.py` |
 | 起動からリリースまでの通し | 単体テストでは縛れない。2 レーンの計画を `--parallel` で起動するリリース後テストで確かめる |
 
 ## 運用

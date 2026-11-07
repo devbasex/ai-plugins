@@ -1,0 +1,7 @@
+{
+  "name": "answer-hold-json",
+  "pattern": "answer-hold.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": []
+}

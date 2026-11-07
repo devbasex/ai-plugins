@@ -84,7 +84,7 @@
 | レーンの閾値 | 1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 | 要求の同期で追加済み |
 | 答え待ちの停止 | 答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態 | 要求の同期で追加済み |
 | 止める指示のファイル | 耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（`answer-hold.json`）。停止が無ければファイルも無い | 追加（`ndf-workflow`） |
-| 再開の印 | 答え待ちの停止が解けたら起こすレーンを示すファイル（`resume/<レーン>.json`）。レーンが止まるとき、または停止の間に答えを受けた持ち主のレーンへ置く | 追加（`ndf-workflow`） |
+| 再開の印 | 答え待ちの停止が解けたら起こすレーンを示すファイル（`resume/<レーン>.mark.json`）。レーンが止まるとき、または停止の間に答えを受けた持ち主のレーンへ置く | 追加（`ndf-workflow`） |
 
 ## 機能一覧
 
@@ -104,14 +104,17 @@
 | --- | --- |
 | 判定と置き場（新規 `lib/parallel_hold.py`） | 数え方・停止の範囲の導出・閾値の読み出し・止める指示のファイルと再開の印の読み書き・通知の 1 行の組み立て。DBOS を import しない |
 | 突き合わせ（新規 `lib/parallel_hold.py` の `AnswerHold`） | `_Run` が継ぐ。停止の範囲が変わったら耐久ステップで書き、再開の印と停止の範囲を突き合わせて再開する |
-| 耐久ワークフロー（`lib/parallel_run.py`） | 観測の結果へ閾値と再開の印を載せる。1 周の終わりに突き合わせを呼ぶ。起動・リリース・終わりの判定で停止の範囲を見る。起こす 1 行（`wake`）から停止の範囲のレーンを除く。`reply` は答えた設計の承認と同じレーン・同じ設計 PR の古い依頼の id を控える（一覧から外すのは突き合わせである）。`take` は `park --clear` のメッセージ（`kind: left_stopped`）を受けて、そのレーンを人が止めたままにするレーンとして控える。行数は許容リストの 721 を超えない（`spawn_refusals`・`stall_seconds` と定数を `parallel_repo.py` へ移して埋める） |
+| 耐久ワークフロー（`lib/parallel_run.py`） | 観測の結果へ閾値と再開の印を載せる。1 周の終わりに突き合わせを呼ぶ。起動・リリース・終わりの判定で停止の範囲を見る。起こす 1 行（`wake`）から停止の範囲のレーンを除く。`reply` は答えた設計の承認と同じレーン・同じ設計 PR の古い依頼の id を控える（一覧から外すのは突き合わせである）。`take` は `park --clear` のメッセージ（`kind: left_stopped`）を受けて、そのレーンを人が止めたままにするレーンとして控える。行数は許容リストの 721 を超えない（`spawn_refusals`・`stall_seconds` と定数を `parallel_repo.py` へ移し、`_clear_revived` を `AnswerHold` へ移し、どこからも呼ばれていない `step_render` を消して埋める） |
 | 答えの処理（`lib/parallel_answer.py`） | 停止の範囲にある持ち主のレーンへは起こす 1 行を返さず、再開の印を置く |
 | CLI（`parallel.py`、新規 `lib/parallel_hold_cli.py`） | `wait` が通知を返す。`park`（止める・`--clear`）を足す。`check`・`start` が閾値の警告を出す。`parallel.py` は 500 行以下を保つ（`_manual_or_none` を `parallel_external_cli.py` へ移す） |
-| ループの境（`lib/sprint_loop_record.py`・`lib/sprint_loop.py`） | 止まる条件 `answer_hold` を足す。止まるとき再開の印を置き、`stop_self` を返す。再開で判定し直す。`sprint_loop_record.py` は使われていない `BOUNDARY_CONDITIONS` を消して許容リストの 536 に収める |
-| プランの開始（`supervise_lib/engine.py`） | キューから流す 1 スプリントのレーンのプランは、`prepare` の先頭で止める指示を読み、停止の範囲なら流さずに終える。`supervise.py run` の単発の開始では読まない（キューが `Engine` へ渡すフラグで分ける） |
+| ループの境（`lib/sprint_loop_record.py`・`lib/sprint_loop.py`・`lib/sprint_loop_select.py`） | 止まる条件 `answer_hold` を足す。止まるとき再開の印を置き、`stop_self` を返す。再開で判定し直す（`sprint_loop_select.py` の `resume_answer_hold`）。`sprint_loop_record.py` は使われていない `BOUNDARY_CONDITIONS` を消して許容リストの 536 に収める |
+| プランの開始（`supervise_lib/engine.py`） | キューから流す 1 スプリントのレーンのプランは、`prepare` の先頭で止める指示を読み、停止の範囲なら流さずに終える。`supervise.py run` の単発の開始では読まない（キューが動く間だけ立てる `Engine.queued` で分ける） |
 | キューの結果（`supervise_lib/queue.py`） | 答え待ちの停止で流さなかったプランがあれば `status: gate` と `next`（`park` の 1 行）を返す |
 | 計画の表示（`lib/parallel_plan.py`） | `plan.md` に答え待ちの停止の節を描く |
 | 進め方の宣言（`lib/pace.py`） | 節 `parallel` を読む `read_parallel` を足す |
+| 起動の前の検査（`lib/parallel_route.py`） | `check_items` へ閾値の警告を足す |
+| レーンの送信（`lib/parallel_lane.py`） | `park --clear` のメッセージを送る `send_left_stopped` を足す |
+| 引継ぎ文書（`lib/handoff_doc.py`） | 節の名前 `NEXT_STEP_SECTION` を `sprint_loop_record.py` から移し、`park` と共有する |
 | 契約（`contracts/`） | `pace.json` のキー、`parallel.py` の `park`、ファイル 3 種を足す |
 | 手順書・確定仕様 | `references/parallel.md`・`asking.md`・`loop.md`・`docs/specifications/ndf-parallel-organizer.md`・`docs/specifications/ndf-workflow-development-loop.md`・`docs/specifications/ndf-development-loop-limits.md` |
 
@@ -155,8 +158,14 @@ plugins/ndf/scripts/
 │   ├── parallel_run.py             # 変更
 │   ├── parallel_answer.py          # 変更
 │   ├── parallel_plan.py            # 変更
+│   ├── parallel_route.py           # 変更
+│   ├── parallel_lane.py            # 変更
+│   ├── parallel_repo.py            # 変更
+│   ├── parallel_external_cli.py    # 変更
+│   ├── handoff_doc.py              # 変更
 │   ├── pace.py                     # 変更
 │   ├── sprint_loop.py              # 変更
+│   ├── sprint_loop_select.py       # 変更
 │   └── sprint_loop_record.py       # 変更
 └── supervise_lib/
     ├── engine.py                   # 変更
@@ -207,31 +216,31 @@ plugins/ndf/scripts/
 
 ## 構造
 
-`Hold` と `Limits` は不変の値で、`decide(questions, order, limits)` が `Hold` を返す純粋な関数である。
+`Hold` と `Limits` は不変の値で、`decide_hold(questions, order, limits)` が `Hold` を返す純粋な関数である。
 
 ```mermaid
 classDiagram
     class Limits {
         +int plan
         +int lane
-        +list warnings
+        +tuple warnings
     }
     class Hold {
         +bool plan
-        +list lanes
+        +tuple lanes
         +int count
         +dict by_lane
         +covers(lane) bool
-        +diff(before) list
+        +diff(before, limits) list
     }
     class AnswerHold {
         +Hold hold
-        +Limits limits
-        +list marks
+        +dict marks
         +dict seen_stopped
         +set left_stopped
         +set superseded
-        +govern_hold(main)
+        +int holds
+        +govern_hold(seen)
         +hold_lanes() set
     }
     class ReleaseRouting
@@ -250,12 +259,12 @@ classDiagram
 | --- | --- | --- | --- | --- |
 | `answer-hold.json` | 今の停止の範囲 | 耐久ステップ | ループの境・プランの開始・`answer`・`park` | 停止の範囲が空になったとき・計画の終わり |
 | `answer-hold-log.jsonl` | 止めた・解けたの履歴（追記） | 耐久ステップ | `parallel.py wait`・人・後の集計 | 消さない |
-| `resume/<レーン>.json` | 再開の印 | ループの境・`park`・`answer` | 観測 | 再開したとき・止まったと観た後で動いたレーン・「止める」と答えたレーン・計画の終わり（ここまで耐久ステップ）・人が打つ `park --clear` |
+| `resume/<レーン>.mark.json` | 再開の印 | ループの境・`park`・`answer` | 観測 | 再開したとき・止まったと観た後で動いたレーン・「止める」と答えたレーン・計画の終わり（ここまで耐久ステップ）・人が打つ `park --clear` |
 
 ### 止める指示のファイル（`answer-hold.json`）
 
 ```json
-{"version": 1, "plan": true, "lanes": ["a"], "count": 9, "by_lane": {"a": 4, "b": 3, "c": 2}, "limits": {"plan": 8, "lane": 3}, "at": "2026-11-07T01:00:00Z"}
+{"version": 1, "plan": true, "lanes": ["a"], "count": 9, "by_lane": {"a": 4, "b": 3, "c": 2}, "limits": {"plan": 8, "lane": 3}, "at": "2026-11-07T01:00:00.000000Z"}
 ```
 
 ### 履歴の 1 行（`answer-hold-log.jsonl`）
@@ -263,7 +272,7 @@ classDiagram
 1 つの計画で止まった回数は `change: on` の行の数で数える。
 
 ```json
-{"n": 1, "change": "on", "scope": "plan", "lanes": [], "count": 9, "limit": 8, "reason": "答え待ちの依頼が計画の閾値を超えた", "at": "2026-11-07T01:00:00Z"}
+{"n": 1, "change": "on", "scope": "plan", "lanes": [], "count": 9, "limit": 8, "reason": "答え待ちの依頼が計画の閾値を超えた", "at": "2026-11-07T01:00:00.000000Z"}
 ```
 
 | 項目 | 値 |
@@ -271,11 +280,13 @@ classDiagram
 | `change` | `on` / `off` |
 | `scope` | `plan` / `lane` |
 
-### 再開の印（`resume/<レーン>.json`）
+### 再開の印（`resume/<レーン>.mark.json`）
 
 ```json
-{"lane": "a", "why": "boundary", "at": "2026-11-07T01:05:00Z"}
+{"lane": "a", "why": "boundary", "at": "2026-11-07T01:05:00.000000Z"}
 ```
+
+時刻はマイクロ秒まで持つ。同じ秒に置き直した再開の印も `at` で別の印と分かる。
 
 | `why` の値 | 意味 |
 | --- | --- |
@@ -307,7 +318,7 @@ classDiagram
 | `parallel.py park <計画名> --lane <名> --clear` | 人が止めたままにするレーン | そのレーンの再開の印を消し、`inbox` へ `{kind: left_stopped, lane}` を送り、`metrics.mark_removed`（消したら `true`、無ければ `false`）を返す（0）。送るのは再開の印の有無に依らない。冪等の鍵は打った時刻を含み、次の停止で打った `--clear` も届く。`--done` は要らない | 計画やレーンが無い 1、消せない・送れない 2。再実行すると送り直す | 新規 |
 | `parallel.py answer` | 変えない | 停止の範囲にある持ち主のレーンでは `metrics.next` が持ち主のレーンを起こす 1 行を含まず、`metrics.held_owners` にレーン名を返す | 変えない | 停止の範囲が無ければ今と同じ |
 | `parallel.py check` / `start` | 変えない | 閾値の値が正の整数でなければ `items` に警告（`check` は `warnings` に数える） | 計画を止めない | 追加 |
-| `supervise.py queue` / `wait` | 変えない | 答え待ちの停止で流さなかったプランは `result: 流さなかった`・`answer_hold: true`。結果は `status: gate`・`metrics.answer_hold`（計画名とレーン）・`next`（`park` の 1 行） | 変えない | レーン以外の queue は変わらない |
+| `supervise.py queue` / `wait` | 変えない | 答え待ちの停止で流さなかったプランは `result: 流さなかった`・`answer_hold: true`。結果は `status: gate`・`metrics.answer_hold`（計画名とレーン）・`metrics.park` と `next`（`park` の 1 行。ほかのプランの停止・承認ゲートと同居しても落とさない） | 変えない | レーン以外の queue は変わらない |
 | `supervise.py run` | 変えない | 変えない。止める指示を読まない（`park` の続きは `queue --resume` で、単発の実行に続きの形が無いため） | 変えない | 変えない |
 | `sprint-state.py loop` | 変えない | 止まる条件に `answer_hold` が増える。`values` は `{plan, scope, count, limit}`。行は `[ndf-loop] stopped <名> answer_hold`。`metrics.stop_self` を返す | 終了コード 3（今の止まる条件と同じ） | 追加 |
 | イベント `answer-hold` | — | `{seq, action: "answer_hold", n, line, hold}`。`n` と `line` は最新の変化である | — | 新規。`seq` は `pause`・`questions` と同じ連番 |
@@ -364,7 +375,7 @@ sequenceDiagram
 
 1. 観測の結果に閾値が無ければ何もしない（I9）
 2. `reply` が控えた古い依頼を一覧から外し、`questions` を発行する。外した id は答えた依頼として控え、再送で一覧へ戻さない。答えのイベントは立てない（持ち主のレーンは新しい依頼の答えで進む）。控えの後に届いた依頼は外さない
-3. `decide` で今の停止の範囲を導く。今までの停止の範囲と違えば、耐久ステップ `parallel.answer-hold` でファイルと履歴と `plan.md` を書く。成功したらイベント `answer-hold` を発行する。書けなければ停止の範囲を進めず、次の 1 周で書き直す
+3. `decide_hold` で今の停止の範囲を導く。今までの停止の範囲と違えば、耐久ステップ `parallel.answer-hold` でファイルと履歴と `plan.md` を書く。成功したらイベント `answer-hold` を発行する。書けなければ停止の範囲を進めず、次の 1 周で書き直す
 4. 一覧の観測が成功した 1 周だけ、再開の印を分ける。`seen_stopped` はレーンごとに、止まったと観たときの再開の印の `at` を持つ。まず、今の再開の印と `at` が一致しない控えを捨てる（再開・消すだけ・`park --clear` で再開の印が消えたレーンの控えはここで消え、置き直した再開の印には効かない）。次に、止まって見えた再開の印のレーンを控える。停止の範囲の外で止まっているレーンは再開する。再開の耐久ステップの中で再開の印を読み直し、`park --clear` で消えていれば再開しない。動いているレーンの再開の印は残し、控えの `at` が今の再開の印と一致するレーンと「止める」と答えたレーンの再開の印は消すだけにする。計画全体の停止の間は再開も消去もしない
 5. 再開を拒否されたレーンは起動の拒否と同じに数え、`NDF_PARALLEL_SPAWN_REFUSALS` 回ごとに `kind: spawn` の問いを立てる。再開の印は残し、次の 1 周で再開し直す
 6. 再開したレーンは `revive` へ入れ、`wake` から外す。停止の範囲が空になり `wake` が残れば `notice` を発行する
@@ -449,4 +460,3 @@ stateDiagram-v2
 | 未決 1・2 | レーンの数へ設計の承認を含めること、MVV 判定で答えられる依頼を数えることは、要求の候補どおりに設計した。利用者が設計承認ゲートで確かめる |
 | 未マージの設計との取り込み | レーンの観測の #2649（PR 2703）が先に入るなら、開発ループの止まりの問いの除外へ `answer_hold` を足す。問いの取り下げは停止の範囲を 1 周ごとに導くため、取り下げの処理の変更は要らない。計画の台帳の #2647（PR 2704）が先に入るなら、`RunState` へ停止の範囲を足し、作り直しの後の最初の 1 周で通知を重ねないようにする。ファイルと再開の印は計画の置き場にあるため台帳へ入れない |
 | 閾値の前後を行き来するとき | 再開の余白を置かない（要求の S11）ため、1 件の増減でレーンの停止と再開が続く。回数は履歴で数えられる |
-| 報告の形 | `流さなかった` の結果で報告を書く経路は実装で確かめる（`report_step` と `report_result`） |

@@ -380,6 +380,11 @@ def send_answer(
     _send_inbox(main, name, msg, f"answer:{rid}")
 
 
+def send_left_stopped(main: Path, name: str, lane: str) -> None:
+    """人が止めたままにするレーンを耐久ワークフローへ知らせる（`parallel.py park --clear`）。次の停止で打った分も届くよう、鍵に時刻を入れる。"""
+    _send_inbox(main, name, {"kind": "left_stopped", "lane": lane}, f"left-stopped:{lane}:{time.time_ns()}")
+
+
 def requests_for(main: Path, name: str) -> list[dict]:
     """オーガナイザーが読める依頼（`releases/requests.json`。耐久ワークフローがリリースを組むたびに書く。無ければ空）。"""
     p = pp.plan_dir(main, name) / "releases" / "requests.json"
