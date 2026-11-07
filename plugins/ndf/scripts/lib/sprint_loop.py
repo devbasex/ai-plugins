@@ -28,7 +28,6 @@ from sprint_loop_argv import approved_issues, new_sprint_argv, sprint_state_init
 from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
-    SUPERVISE,
     LAPS_MD,
     STOP_FILE,
     VERSION,

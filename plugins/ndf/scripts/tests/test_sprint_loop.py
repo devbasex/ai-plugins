@@ -1367,7 +1367,7 @@ def test_sprint_pipeline_waits_for_hands_before_the_close(tmp_path):
         {"name": "リリース", "manual": "/ndf:release"},
     ]
     queue, pipeline = sl.sprint_pipeline(index, ["c1"], done, rec_)
-    assert queue == f"python3 {sl.SUPERVISE} queue c1 --max 3 --done {done}"
+    assert queue == f"python3 {sl_record.SUPERVISE} queue c1 --max 3 --done {done}"
     assert pipeline == f"Q1 を流し、続けて Q2 → リリース（/ndf:release で行う） を終えてから: {queue} && {sl_gate.wait_lap(rec_, done)}"
 
 
