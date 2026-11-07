@@ -23,7 +23,7 @@ import sprint_loop_gate
 import sprint_mvv
 import step_result
 from pace import PaceError, over_budget, read_loop, read_pace
-from sprint_loop_argv import approved_issues, new_sprint_argv, sprint_state_init_argv, version_needed
+from sprint_loop_argv import approved_issues, new_sprint_argv, sprint_state_init_argv, stage_plan
 
 from sprint_loop_record import (
     TOOL,
@@ -229,10 +229,7 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
     if not lap:
         return None, nxt
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
-        return (
-            None,
-            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す。版数の要らない経路は --dev を省く）",
-        )
+        return None, f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード>（モードを決め直す）"
     # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:
@@ -277,6 +274,9 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
 
 
 def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None, extra: list[str]) -> dict:
+    dev = dev or ""
+    if prod and not dev:
+        return refusal_order("--prod は --dev と一緒に渡す（版を流す時点に決めるなら両方を省く）")
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap:
@@ -290,9 +290,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
         root = str(env.main_dir())
-        if not dev and version_needed(root):
-            return refusal_order("リリースの経路が版数を要する（--dev <開発版> を渡す）")
-        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)} if dev else {}, state_path=str(state))
+        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
         mvv = d / "mvv.md"
         code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
         if code != 0:
@@ -316,7 +314,8 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)
-        lap["prod_plan"] = next((p for e in index if e.get("name") == "本番" for p in e.get("plans", [])), None)
+        lap["dev_plan"] = stage_plan(index, "開発版")
+        lap["prod_plan"] = stage_plan(index, "本番")
         done = d / "done-1.json"
         queue, pipeline = sprint_pipeline(index, close, done, rec)
         lap["dones"] = [str(done)]

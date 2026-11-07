@@ -19,7 +19,6 @@ from sprint_loop_record import (
     SELECTED,
     DROPPED,
     SLOT_FIT,
-    OVER_SCALE,
     PAUSE_RANK,
     Env,
     loop_dir,
@@ -52,6 +51,7 @@ from sprint_loop_gate import (
     select_cmd,
 )
 from sprint_loop_gate2 import pending_step
+from sprint_loop_exclusion import PENDING_REASON, PRODUCTION_REASON, exclusion_reason, prerequisite_reason  # noqa: F401
 
 
 def review_first(env: Env, rec: dict, before: dict, got: dict) -> dict:
@@ -90,11 +90,7 @@ def candidates_of(ms: dict, max_issues: int, held: set[int] = frozenset()) -> li
     return [r for r in rows if r["number"] in nums]
 
 
-PENDING_REASON = "保留の周回の課題"
-
-
 APPROVED_REASON = "承認した設計"
-PRODUCTION_REASON = "設計 PR の宛先が本番（リリース承認ゲートで人がマージする）"
 
 
 def approved_designs(rec: dict, reselecting: int | None = None) -> set[int]:
@@ -118,51 +114,6 @@ def first_issues(rec: dict, reselecting: int | None = None) -> set[int]:
     revise = {n for n, w in last.items() if w.get("answer") == "revise"}
     fixes = {n for f in rec.get("fixes", []) if not f.get("fixed_by") for n in f.get("issues") or []}
     return revise | fixes | approved_designs(rec, reselecting)
-
-
-def prerequisite_reason(row: dict) -> str:
-    """前提の課題の実装待ちの理由。open の前提の課題の番号を昇順で載せる。"""
-    return "前提の課題の実装待ち（" + " ".join(f"#{b}" for b in sorted(row["prerequisites"])) + "）"
-
-
-def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set, prior: dict | tuple = ()) -> str | None:
-    n = row["number"]
-    if n in prior:  # 問いの一覧に出ている前のループの待ち（#2510 の受け入れ条件 13）。棚卸しの判断待ちより先に見る
-        return f"人の判断待ち（開発ループ {prior[n]}）"
-    if row.get("waiting_decision"):
-        return "人の判断待ち（棚卸し）"
-    if n in pending_issues(rec):  # 締め直すまで選ばない（選ぶと保留中の実装と作業が重なる。#2436 の 6a）
-        return PENDING_REASON
-    for w in rec.get("waiting", []):
-        if w["number"] != n:
-            continue
-        if not w.get("answer"):
-            return "人の判断待ち"
-        if w["answer"] == "rejected":
-            return "差し戻し"
-        if w["answer"] == "approved" and not w.get("merged_at"):
-            if w.get("pr") and env.pr_state(int(w["pr"])) == "MERGED":
-                w["merged_at"] = env.now()
-            else:
-                return merge_wait_reason(w)
-    for e in rec.get("excluded", []):
-        if e["number"] == n and e.get("lap") == lap_n:
-            return e["reason"]
-    if row.get("prerequisites"):  # 前提の課題が閉じるまで選ばない（同じ周回に選ばれていても外す。#2604）
-        return prerequisite_reason(row)
-    if n in lap_created:
-        return "周回の中で起票された（次の周回の棚卸しの後に選ぶ）"
-    if row.get("size") == OVER_SCALE:
-        return "容量（尺度を超える）"
-    return None
-
-
-def merge_wait_reason(w: dict) -> str:
-    """承認済みで未マージの課題を外す理由。マージの結果の理由を添える（#2507）。"""
-    m = w.get("merge") or {}
-    if m.get("result") == "production":
-        return PRODUCTION_REASON
-    return f"設計 PR がマージ待ち（{m['reason']}）" if m.get("reason") else "設計 PR がマージ待ち"
 
 
 # ---------------------------------------------------------------- 承認した設計のマージし直し（#2507 の I6）
@@ -473,7 +424,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         return _stop_without_issue(env, rec, before, got, rank, lap)
     new = _open_lap(env, rec, before, got, rank, n, lap)
     chosen = selected_issues(new)
-    nxt = f"モードと版を決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版> を打つ"
+    nxt = f"モードを決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> を打つ"
     update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"周回 {n} の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),

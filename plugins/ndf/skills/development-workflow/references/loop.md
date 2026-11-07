@@ -10,7 +10,7 @@
 
 1. `sprint-state.py loop start l20261025` が使ってよい条件を確かめ、`.ndf/loop/l20261025/loop.json` を作る
 2. `loop select l20261025` が `upkeep.py rank` を打ち、#11 と #12 を選ぶ。#13 は「順位（切り出しの境界の外）」で外す
-3. conductor がモードを `standard`、版を `10.20.0-dev.1` と決め、`loop sprint l20261025 --mode standard --dev 10.20.0-dev.1` を打つ
+3. conductor がモードを `standard` と決め、`loop sprint l20261025 --mode standard` を打つ。開発版はキューが流す直前に次に空いている版で決め、周回を締めるときに周回の記録へ写す
 4. 返った `pipeline` をそのまま流す。設計 → 設計承認ゲート（MVV 判定）→ 実装 → 検査 → 開発版 → 本番（リリース承認ゲート）→
    まとめ（確定仕様化・振り返り・課題を閉じる・棚卸し）→ `loop lap`
 5. #12 の設計が設計承認ゲートで「判定できない」だった。`loop lap`（または `loop gate`）が #12 を人の判断待ちへ移し、
@@ -41,8 +41,8 @@
 | 順 | 打つもの | conductor の判断 |
 | --- | --- | --- |
 | 1 | `$SS loop start <名> [--milestones ...] [--budget-* ...]` | 1 なら断った理由と 1 スプリントの起動の形（`metrics.next`）を示して終える。3 なら下の「止まったとき」。`in_lap` なら引継ぎ文書 `loop-<名>` の「次にやること」から続ける |
-| 2 | `$SS loop select <名>` | 選んだ課題（`metrics.selected`）のモードを判定し（手順 2）、版を決める（`release` の規則）。`auto` が許さないモード・MVV に反する疑いの課題は `$SS loop exclude <名> <課題> --reason <理由>` で外す（選定をやり直す） |
-| 3 | `$SS loop sprint <名> --mode <モード> [--dev <開発版>] [--prod <本番の版>] [-- <new sprint に足す引数>]` | 判断は無い。返った `metrics.pipeline` をそのまま流す。`--dev` は経路が `release.form` の雛形で組むときだけ要る |
+| 2 | `$SS loop select <名>` | 選んだ課題（`metrics.selected`）のモードを判定する（手順 2）。`auto` が許さないモード・MVV に反する疑いの課題は `$SS loop exclude <名> <課題> --reason <理由>` で外す（選定をやり直す） |
+| 3 | `$SS loop sprint <名> --mode <モード> [-- <new sprint に足す引数>]` | 判断は無い。返った `metrics.pipeline` をそのまま流す。上げ幅は `-- --level <上げ幅>` で渡す。特定の版で出す必要があるときだけ `--dev <開発版> [--prod <本番の版>]` を足す（`--prod` だけは断る） |
 | 4 | `metrics.pipeline`（`supervise.py queue ... --done <D>` → `wait <D>` → `loop lap <名> --done <D>`）。`wait` と並べて `metrics.research`（待ち時間の調査）を背景で打つ | `wait` が attention を返したら、今の `supervise.py` の手順で扱う。調査の結果は読まない（見直しが読む） |
 | 5 | `loop lap` の結果 | 0 で `metrics.ndf_next` があれば、それを出してセッションを切る。0 で `metrics.pipeline` があれば（設計承認ゲートで課題を外した続き）それを流す。3 なら下の「止まったとき」 |
 | 2' | `loop select` が `status: finish` を返した | 答えの届いた保留の周回（`metrics.lap`）の残りの工程。新しい周回を始めず、`metrics.pipeline`（残りの queue → `wait` → `loop finish <名> <周回> --done <D>`）をそのまま流す。`loop finish` の結果は手順 5 と同じに扱う |
