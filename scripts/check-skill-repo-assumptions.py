@@ -223,11 +223,16 @@ def collect_hooks(skills_dir: pathlib.Path) -> list[str]:
 
 
 def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]) -> list[Hit]:
-    """走査対象の本文からヒットを集める。語ごとに照合するので、同じ行の 2 語は別のヒットになる。"""
+    """走査対象の本文からヒットを集める。語ごとに照合するので、同じ行の 2 語は別のヒットになる。
+
+    語の和で先に行を絞る。ほとんどの行に語が無く、語ごとの照合を全行へ掛けると CI の待ちが延びる。"""
+    any_word = re.compile("|".join(regex.pattern for _, regex in matchers))
     hits: list[Hit] = []
     for rel in rels:
         text = (base / rel).read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), start=1):
+            if not any_word.search(line):
+                continue
             for word_id, regex in matchers:
                 hits += [Hit(base, rel, lineno, word_id, m.group(0), line) for m in regex.finditer(line)]
     return hits
@@ -267,7 +272,9 @@ def read_allow(path: pathlib.Path) -> list[dict]:
     return rows
 
 
-def validate_allow(rows: list[dict], counts: collections.Counter, scanned: set[str], skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
+def validate_allow(
+    rows: list[dict], counts: collections.Counter, scanned: set[str], skills_dirs: list[pathlib.Path], exhaustive: bool
+) -> list[str]:
     """項目が走査の結果と合っているかを確かめ、合わない理由を返す。
 
     突き合わせるのは、**チェックした Skill ディレクトリに属する項目だけ**である。`--skills-dir`

@@ -199,7 +199,10 @@ def test_production_queries_fall_back_to_the_default_branch(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
-    subprocess.run(["git", "-C", str(root), "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"],
+        check=True,
+    )
     calls: list[list[str]] = []
     pe.stages_of(root, "1.2.3", _recording_run(calls))
     pe.prod_pr_url(root, "1.2.3", _recording_run(calls))

@@ -364,7 +364,8 @@ def test_detects_word_in_script_of_listed_skill(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("skill", "rel"), [(UNLISTED_SKILL, "x.py"), (LISTED_SKILL, "tests/test_x.py"), (LISTED_SKILL, "experimental/x.py"), (LISTED_SKILL, "x.txt")]
+    ("skill", "rel"),
+    [(UNLISTED_SKILL, "x.py"), (LISTED_SKILL, "tests/test_x.py"), (LISTED_SKILL, "experimental/x.py"), (LISTED_SKILL, "x.txt")],
 )
 def test_out_of_scope_skill_scripts_are_not_scanned(tmp_path: Path, skill: str, rel: str) -> None:
     skills = clean_tree(tmp_path)
@@ -495,7 +496,16 @@ def script_row(skills: Path, **kw) -> dict:
 
 @pytest.mark.parametrize(
     "kw",
-    [{"kind": "pending"}, {"count": 0}, {"count": True}, {"count": "1"}, {"name": "no-such-word"}, {"kind": "other"}, {"issue": 0}, {"issue": "2624"}],
+    [
+        {"kind": "pending"},
+        {"count": 0},
+        {"count": True},
+        {"count": "1"},
+        {"name": "no-such-word"},
+        {"kind": "other"},
+        {"issue": 0},
+        {"issue": "2624"},
+    ],
     ids=str,
 )
 def test_malformed_row_fails_the_check(tmp_path: Path, kw: dict) -> None:
