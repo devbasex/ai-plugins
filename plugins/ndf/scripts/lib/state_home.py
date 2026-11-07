@@ -15,7 +15,7 @@
 
 - 利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。`.jsonl` は旧と新の行を時刻（`at`）の順に並べて書き直す
   （読み手は末尾を最新として読んでよい）
-- チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`state_checkout.migrate`）。
+- チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`state_checkout.migrate_all`）。
   プランの状態は `plan.json` のパスから持ち主のチェックアウトが分かればそこへ移す。耐久の記録は持ち主を
   示すものを持たない（入力は空、ファイル名は識別の文字列のハッシュ）ため、打った場所へ移す。作業ツリーの外で打てば移さない。動いている記録（ロックが持たれている耐久の記録・ステップの子が生きているプラン）と
   移し先に同じ名前があるものは旧に残す。プランの状態のパスから鍵を作る queue の記録は、新しいパスの鍵へ 1 度だけ付け替える
@@ -361,7 +361,7 @@ def migrate(
     move_checkout: Optional[Callable[[Path, Path], dict]] = None,
 ) -> dict:
     """旧の根から移す。利用者の台帳（`USER_KINDS`）は利用者の根へ足し合わせ、チェックアウトの記録（`dbos/`・`sv/`）は
-    `cwd`（省けば作業ディレクトリ）の作業ツリーのチェックアウトの根へ `move_checkout` で移す（`state_checkout.migrate` が
+    `cwd`（省けば作業ディレクトリ）の作業ツリーのチェックアウトの根へ `move_checkout` で移す（`state_checkout.migrate_all` が
     `state_checkout.move_checkout` を渡す。省けば台帳だけを移す）。
 
     結果は `{"status", "summary", "from", "to", "moved", "kept", "checkout", "dbos", "sv"}`。`moved`・`kept` は台帳のパス、

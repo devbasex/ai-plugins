@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "path":
         metrics = {"checkout": str(sh.checkout_home()), "user": str(sh.user_home()), "container": str(sh.container_home())}
         emit(result(TOOL, "ok", f"チェックアウトの根は {metrics['checkout']}、利用者の根は {metrics['user']}", metrics=metrics))
-    r = state_checkout.migrate()
+    r = state_checkout.migrate_all()
     ok = r["status"] in ("migrated", "none")
     items = [{"kind": "ledger", "kept": p} for p in r["kept"]]
     for kind in ("dbos", "sv"):

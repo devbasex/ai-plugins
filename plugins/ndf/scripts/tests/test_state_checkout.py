@@ -45,11 +45,11 @@ def plan_once(x: int) -> int:
     return step_once(x)
 
 
-def _finish_plan_in_old_queue(tmp_path: Path, env: dict, monkeypatch) -> Path:
-    """旧の置き場で queue の耐久の記録を開き、プランを 1 つ済ませる。旧の sv を返す。"""
+def _finish_plan_in_old_queue(tmp_path: Path, env: dict, monkeypatch, owner: Path | None = None) -> Path:
+    """旧の置き場で queue の耐久の記録を開き、プランを 1 つ済ませる（`plan.json` の作業場所は `owner`。既定は `_repo`）。旧の sv を返す。"""
     old_sv = sh.legacy_home(env) / "sv"
     (old_sv / PLAN).mkdir(parents=True)
-    (old_sv / PLAN / "plan.json").write_text(json.dumps({"作業場所": str(_repo(tmp_path))}))
+    (old_sv / PLAN / "plan.json").write_text(json.dumps({"作業場所": str(owner or _repo(tmp_path))}))
     monkeypatch.setenv("NDF_DBOS_DIR", str(sh.legacy_home(env) / "dbos"))
     durable.launch("queue", _done(old_sv))
     try:
@@ -75,10 +75,28 @@ def test_resumed_queue_after_migrate_opens_the_moved_record(tmp_path, monkeypatc
     CALLS.clear()
     env = {"HOME": str(tmp_path / "h")}
     _finish_plan_in_old_queue(tmp_path, env, monkeypatch)
-    r = sc.migrate(env, cwd=_repo(tmp_path))
+    r = sc.migrate_all(env, cwd=_repo(tmp_path))
     to = Path(r["checkout"]["to"])
     assert r["status"] == "migrated" and len(r["dbos"]["rekeyed"]) == 1
     ref = _resume_queue(to, monkeypatch)
+    assert (ref.id, ref.action, ref.output) == ("plan-p-1", "done", 7)
+    assert CALLS == [7]
+
+
+def test_migrate_moves_rekeyed_record_to_the_plan_state_owner(tmp_path, monkeypatch):
+    """別のリポジトリのチェックアウトへ振り分けたプランの状態の queue の記録は、その持ち主の dbos/ へ新しい鍵で移り、
+    持ち主の側で打ち直すと済んだプランを開く（打った作業ツリーの dbos/ には残らない）。"""
+    CALLS.clear()
+    env = {"HOME": str(tmp_path / "h")}
+    other = _repo(tmp_path / "other")
+    _finish_plan_in_old_queue(tmp_path, env, monkeypatch, owner=other)
+    r = sc.migrate_all(env, cwd=_repo(tmp_path))
+    owner = (other / ".git/ndf/state").resolve()
+    assert r["status"] == "migrated" and r["sv"]["moved"] == [str(owner / "sv" / PLAN)]
+    [rk] = r["dbos"]["rekeyed"]
+    assert Path(rk["to"]).parent == owner / "dbos"
+    assert not list(Path(r["checkout"]["to"], "dbos").glob("*.sqlite"))
+    ref = _resume_queue(owner, monkeypatch)
     assert (ref.id, ref.action, ref.output) == ("plan-p-1", "done", 7)
     assert CALLS == [7]
 
@@ -92,10 +110,10 @@ def test_migrate_rekeys_records_moved_by_an_earlier_migrate(tmp_path, monkeypatc
     (to / "sv").mkdir(parents=True)
     os.rename(old_sv / PLAN, to / "sv" / PLAN)
     os.rename(sh.legacy_home(env) / "dbos", to / "dbos")
-    r = sc.migrate(env, cwd=_repo(tmp_path))
+    r = sc.migrate_all(env, cwd=_repo(tmp_path))
     assert r["status"] == "migrated" and r["dbos"]["moved"] == [] and len(r["dbos"]["rekeyed"]) == 1
     assert _resume_queue(to, monkeypatch).action == "done" and CALLS == [7]
-    assert sc.migrate(env, cwd=_repo(tmp_path))["status"] == "none"  # 何度打ってもよい
+    assert sc.migrate_all(env, cwd=_repo(tmp_path))["status"] == "none"  # 何度打ってもよい
 
 
 def _old_record(tmp_path: Path, env: dict) -> tuple[Path, Path, str]:
@@ -117,12 +135,12 @@ def test_migrate_keeps_a_record_whose_destination_lock_is_held(tmp_path):
     with open(to / f"{key}.lock", "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         inode = os.stat(to / f"{key}.lock").st_ino
-        r = sc.migrate(env, cwd=_repo(tmp_path))
+        r = sc.migrate_all(env, cwd=_repo(tmp_path))
         assert os.stat(to / f"{key}.lock").st_ino == inode
     assert r["status"] == "kept"
     assert [k["path"] for k in r["dbos"]["kept"]] == [str(old / f"{key}.sqlite")]
     assert (old / f"{key}.sqlite").read_text() == "old" and not (to / f"{key}.sqlite").exists()
-    r = sc.migrate(env, cwd=_repo(tmp_path))  # 起動が終われば次に打てば移る
+    r = sc.migrate_all(env, cwd=_repo(tmp_path))  # 起動が終われば次に打てば移る
     assert r["status"] == "migrated" and (to / f"{key}.sqlite").read_text() == "old"
 
 
@@ -147,7 +165,7 @@ def test_migrate_holds_the_destination_lock_while_moving(tmp_path, monkeypatch):
         return real_move(src, dst)
 
     monkeypatch.setattr(shutil, "move", move_and_try_lock)
-    assert sc.migrate(env, cwd=_repo(tmp_path))["status"] == "migrated"
+    assert sc.migrate_all(env, cwd=_repo(tmp_path))["status"] == "migrated"
     assert seen and all(seen)
 
 
@@ -162,7 +180,7 @@ def test_rekey_keeps_the_record_when_the_new_key_is_taken(tmp_path, monkeypatch,
     new_key = durable.launch_key("queue", _done(to / "sv"))
     (to / "dbos" / f"{old_key}.sqlite").write_text("old")
     (to / "dbos" / f"{new_key}{taken}").write_text("new")
-    r = sc.migrate(env, cwd=_repo(tmp_path))
+    r = sc.migrate_all(env, cwd=_repo(tmp_path))
     assert r["status"] == "kept" and r["dbos"]["rekeyed"] == []
     assert [k["path"] for k in r["dbos"]["kept"]] == [str(to / "dbos" / f"{old_key}.sqlite")]
     assert "付け替え先" in r["dbos"]["kept"][0]["reason"]

@@ -6,7 +6,8 @@
 - プランの状態は `plan.json` のパスから持ち主のチェックアウトが分かればそこへ、分からなければ打った作業ツリーのチェックアウトへ移す
 - 鍵の付け替え: queue の実行の鍵は、プランの状態の queue-done.json の解決したパスから作る（`supervise_lib/flow.launch_queue`）。
   プランの状態を移すとそのパスが変わり、移した記録を開かなくなる（済んだプランを流し直す）。そこで、移し先の `sv/` の
-  プランの状態ごとに、旧のパス（`<旧の根>/sv/<名前>`）から作る鍵の記録を、新しいパスから作る鍵へ 1 度だけ付け替える。
+  プランの状態ごとに、旧のパス（`<旧の根>/sv/<名前>`）から作る鍵の記録を、新しいパスから作る鍵へ 1 度だけ付け替え、同時に
+  そのプランの状態の持ち主のチェックアウトの `dbos/` へ移す（実行時に queue が開くのはそこ。別のリポジトリのプランの記録も届く）。
   旧の置き場は読まず、旧のパスの文字列から鍵を計算するだけなので、前に移し終えた分にも次の migrate で当たる。
   `run` の鍵の元はプランのパス（移しても変わらない）で、状態ディレクトリを元にするのはプランのパスの無い `Engine` だけ
   （その耐久ワークフローの ID も同じ元から作るため、ファイルの名前を替えても続けられない）なので付け替えない
@@ -66,20 +67,22 @@ def _move_dbos(old: Path, new: Path, moved: list, kept: list) -> None:
 
 
 def _rekey(svs: list[Path], legacy_sv: Path, dbos: list[Path], rekeyed: list, kept: list) -> None:
-    """移し先の `sv/`（`svs`）のプランの状態ごとに、旧のパスから作る queue の鍵の記録を新しいパスから作る鍵へ付け替える。
-    探す記録の置き場は、その `sv/` のチェックアウトの `dbos/` と `dbos`（打った作業ツリーのチェックアウト）。"""
+    """移し先の `sv/`（`svs`）のプランの状態ごとに、旧のパスから作る queue の鍵の記録を新しいパスから作る鍵へ付け替え、
+    そのプランの状態の持ち主のチェックアウトの `dbos/`（`sv` の親の `dbos/`。実行時に queue が開く置き場）へ移す。
+    探す記録の置き場は、その持ち主の `dbos/` と `dbos`（打った作業ツリーのチェックアウト）。"""
     for sv in svs:
+        home = sv.parent / "dbos"
         for state in sorted(sv.iterdir()) if sv.is_dir() else []:
             old_key = launch_key("queue", str((legacy_sv / state.name / QUEUE_DONE).resolve()))
             new_key = launch_key("queue", str((state / QUEUE_DONE).resolve()))
-            for d in dict.fromkeys([sv.parent / "dbos", *dbos]):
-                if old_key == new_key or not any((d / f"{old_key}{sfx}").exists() for sfx in _DBOS_SUFFIXES):
+            for d in dict.fromkeys([home, *dbos]):
+                if (d, old_key) == (home, new_key) or not any((d / f"{old_key}{sfx}").exists() for sfx in _DBOS_SUFFIXES):
                     continue
-                why = _move_group(d, old_key, d, new_key)
+                why = _move_group(d, old_key, home, new_key)
                 if why:
                     kept.append({"path": str(d / f"{old_key}.sqlite"), "reason": why})
                 else:
-                    rekeyed.append({"from": str(d / f"{old_key}.sqlite"), "to": str(d / f"{new_key}.sqlite"), "plan_state": str(state)})
+                    rekeyed.append({"from": str(d / f"{old_key}.sqlite"), "to": str(home / f"{new_key}.sqlite"), "plan_state": str(state)})
 
 
 def _step_running(plan_state: Path) -> bool:
@@ -157,6 +160,6 @@ def move_checkout(old: Path, cwd: Path) -> dict:
     return out
 
 
-def migrate(env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> dict:
+def migrate_all(env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> dict:
     """台帳とチェックアウトの記録を旧の根から移す（`state_home.migrate` に `move_checkout` を渡す。結果の形はそちら）。"""
     return state_home.migrate(env, cwd, move_checkout)
