@@ -607,11 +607,19 @@ def _observe_run(run: _Run, main: str) -> dict:
     if not run.ls_ok:
         return seen
     rows = seen.get("rows") or {}
-    states = {n: r.get("state") for n, r in rows.items()}
     run.seen_at = float(seen.get("now") or 0)
     run.clear_revived(rows)
     _ask_stalls(run, rows, run.seen_at)
     _ask_helper(run, rows)
+    noticed = _apply_observed_states(run, rows)
+    if noticed:
+        run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
+    return seen
+
+
+def _apply_observed_states(run: _Run, rows: dict) -> list[str]:
+    """一覧の状態を各レーンへ写し、承認待ちへ移ったレーンを返す。一覧に無い起動済みのレーンは止まったと読む。"""
+    states = {n: r.get("state") for n, r in rows.items()}
     noticed = []
     for n in run.order:
         st = states.get(n)
@@ -624,9 +632,7 @@ def _observe_run(run: _Run, main: str) -> dict:
                 run.revive_at.pop(n, None)
             if st == "awaiting_approval":
                 noticed.append(n)
-    if noticed:
-        run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
-    return seen
+    return noticed
 
 
 def _track_ls_failure(run: _Run, seen: dict) -> None:
