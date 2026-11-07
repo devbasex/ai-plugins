@@ -828,7 +828,7 @@ def cmd_cd_result(a):
     if decl.problems:
         got = cd_result.CdResult(cd_result.UNDETERMINED, "", "宣言を読めない: " + " / ".join(decl.problems))
     else:
-        got = cd_result.read_result(root, decl, _cd_revision(root, a) if delivery.merge_rows(decl) else "")
+        got = cd_result.read_cd(root, decl, _cd_revision(root, a) if delivery.merge_rows(decl) else "")
     cd_result.save_result(a.out, got)
     metrics = {"cd_result": got.value, "revision": got.revision, "reason": got.reason}
     emit(result(TOOL, "ok", f"CD の結果: {got.value}（{got.reason or got.revision[:7]}）", got.evidence, metrics))

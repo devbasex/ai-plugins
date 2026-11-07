@@ -46,6 +46,12 @@ def test_a_versioned_auto_row_takes_the_same_route_as_an_unversioned_one():
     assert routes_of([{**CD_BASE, "versioned": True}]) == [("merge", "merged-by-check")]
 
 
+def test_a_merge_into_a_versioned_cd_channel_stays_behind_the_release_gate():
+    """受け入れ条件 6・I2: 経路を変えても、本番チャネルへのマージは承認の無いまま通らない。"""
+    got = delivery.judge_target(decl_of([PLUGIN_CD]), "main")
+    assert got.value == delivery.PRODUCTION and got.stops
+
+
 def test_a_versioned_manual_row_stays_manual():
     assert routes_of([{**HAND, "versioned": True}]) == [("manual", "manual")]
 
@@ -170,7 +176,7 @@ def fake_runs(monkeypatch, answers):
 
 def read_with(root, rows, **kw):
     clock = FakeClock()
-    return cd_result.read_result(root, decl_of(rows), "a" * 40, clock=clock, sleep=clock.sleep, **kw)
+    return cd_result.read_cd(root, decl_of(rows), "a" * 40, clock=clock, sleep=clock.sleep, **kw)
 
 
 RUN_OK = [{"status": "completed", "conclusion": "success", "url": "https://x/runs/1"}]

@@ -109,7 +109,7 @@ def _fold(rows: list[dict]) -> tuple[str, str]:
     return value, " / ".join(r["reason"] for r in rows if r["value"] == value and r["reason"])
 
 
-def read_result(root, decl: delivery.DeliveryDecl, revision: str, *, clock=time.monotonic, sleep=time.sleep) -> CdResult:
+def read_cd(root, decl: delivery.DeliveryDecl, revision: str, *, clock=time.monotonic, sleep=time.sleep) -> CdResult:
     """`revision` に対する CD の結果を読む。本番チャネルへ自動で届く行が無ければ `none`。"""
     rows = delivery.merge_rows(decl)
     if not rows:

@@ -19,7 +19,7 @@ CD はブランチへのマージを起点に環境へ反映する、NDF の工�
 | `delivery` の宣言 | 工程の進み方 |
 | --- | --- |
 | CD がある（`kind: auto`） | 版上げ・タグ・公開の手順を NDF は打たない。昇格の Pull Request をリリース承認ゲートの後にマージし、CD の結果を読んでリリース記録へ残す |
-| `release.form` で版を上げて出す形（ai-plugins など） | 版上げと変更履歴は `release/v<版>` の Pull Request で行う。行の `publishes_release` が真なら、タグと GitHub Release は CD が作る |
+| `release.form` で版を上げて出す形 | 版上げと変更履歴は `release/v<版>` の Pull Request で行う。行の `publishes_release` が真なら、タグと GitHub Release は CD が作る |
 | CD が無い（宣言が無い・不明、または理由の無い手動の行） | CD の案内を出し、今の経路のまま手で行うステージへ進む。案内は承認ゲートを増やさず、工程を止めない |
 | あえて CD を置かない（手動の行に `manual_reason` がある） | 案内を出さず、`trigger` の手順で手で届ける |
 
