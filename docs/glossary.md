@@ -181,7 +181,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | doc-lint | — | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 引継ぎ文書 | `handoff` | 会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 引継ぎの対象 | — | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭（sprint- / milestone- / issue-）になる | — | — | — |
+| 引継ぎの対象 | — | 引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる | — | — | — |
 | 引継ぎの履歴 | — | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所の <名>-history.md | — | — | — |
 | ndf-next | — | 次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | step / alive / worker / attention | — | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -393,7 +393,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 復元の区間 | — | 再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 境界の判定 | — | 工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 適用値 | — | 優先順位を当てて解決した、そのセッションで効く再起動の方針・判断開始の値・運用上限・容量の余白と、それぞれの出所 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 作業の識別子 | — | 複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 作業の識別子 | — | 複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830）か、並列の計画のオーガナイザーなら parallel:<計画名> | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 費用の見込み | — | 判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 引継ぎの区間 | — | conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | プランの参照 | — | プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・前のプランが出した PR・承認したコミットと照らすブランチの先端）。流す直前に実行の核が値へ解決する（#2344） | — | — | — |
@@ -458,6 +458,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 止める指示のファイル | — | 耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い | — | — | — |
 | 再開の印 | — | 答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く | — | — | — |
 | オーガナイザーのカットポイント | — | オーガナイザーが知らせへの 1 手と答えの後の整理を終え、`parallel.py wait` を打ち直す時点。文脈の上限の判定はここで行う | — | — | — |
+| 起動の指示 | — | 耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。一時レーンが問いを送るか、リリースが締まると済む | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

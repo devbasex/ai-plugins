@@ -2043,7 +2043,7 @@
     {
       "term": "引継ぎの対象",
       "context": "ndf-workflow",
-      "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭（sprint- / milestone- / issue-）になる",
+      "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる",
       "pending_source": "issues/old/issue-1560-design.md"
     },
     {
@@ -5520,7 +5520,7 @@
     {
       "term": "作業の識別子",
       "context": "ndf-workflow",
-      "meaning": "複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830）",
+      "meaning": "複数のセッションを 1 つの作業として結ぶ鍵。起動の引数かスプリントに含まれる課題番号の組（#829 #830）か、並列の計画のオーガナイザーなら parallel:<計画名>",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
@@ -6206,6 +6206,12 @@
       "context": "ndf-workflow",
       "meaning": "オーガナイザーが知らせへの 1 手と答えの後の整理を終え、`parallel.py wait` を打ち直す時点。文脈の上限の判定はここで行う",
       "pending_source": "issues/issue-2595-requirements.md"
+    },
+    {
+      "term": "起動の指示",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。一時レーンが問いを送るか、リリースが締まると済む",
+      "pending_source": "issues/issue-2595-design.md"
     }
   ]
 }
