@@ -29,7 +29,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from project_mvv_body import OPERATIONS_HEADING, changes, item_ids, shape_problems  # noqa: E402,F401
 from project_mvv_decl import BODY_FILE, DECL_VERSION, DEFAULTS, decl_problems, resolve_settings  # noqa: E402,F401
 from project_mvv_body import _table_ids  # noqa: E402
-from state_home import user_home  # noqa: E402
+from state_home import MVV_KINDS, user_home  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PRINCIPLES_PATH = HERE.parent / "data" / "ndf-common-principles.md"
@@ -68,7 +68,7 @@ CONTRACT = """## 判断の決まり（NDF の共通原則）
 def mvv_state_base() -> Path:
     """記録（照合・覆し・判定）の置き場。`NDF_MVV_STATE_DIR` → `<状態の根>`（`state_home.user_home`）。"""
     env = os.environ.get("NDF_MVV_STATE_DIR")
-    return Path(env).expanduser() if env else user_home()
+    return Path(env).expanduser() if env else user_home(kinds=MVV_KINDS)
 
 
 def vet_log_path() -> Path:

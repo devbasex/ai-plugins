@@ -593,9 +593,9 @@ wf_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
-ndf_user_state_home() {  # 利用者の台帳の根（#2766）。順と旧の根の台帳（USER_KINDS）は scripts/lib/state_home.py の user_home と同じ
+ndf_user_state_home() {  # 利用者の台帳の根（#2766）。引数は台帳の種類（省けば USER_KINDS）。順は scripts/lib/state_home.py の user_home と同じ
   local r="${NDF_STATE_HOME:-${XDG_STATE_HOME:+$XDG_STATE_HOME/ndf}}" n="$HOME/.claude/ndf/state" o="$HOME/.local/state/ndf" k
-  [ -n "$r" ] || { r=$n; [ -e "$n" ] || for k in ask.jsonl mvv-gate.jsonl project-mvv.jsonl project-mvv-signals.jsonl gate-rejections.jsonl project-mvv metrics usage checks stages estimate test-run; do [ -e "$o/$k" ] && { r=$o; break; }; done; }; printf '%s\n' "$r"; }
+  [ $# -gt 0 ] || set -- ask.jsonl mvv-gate.jsonl project-mvv.jsonl project-mvv-signals.jsonl gate-rejections.jsonl project-mvv metrics usage checks stages estimate test-run; [ -n "$r" ] || { r=$n; for k; do [ -e "$n/$k" ] && { printf '%s\n' "$n"; return; }; done; for k; do [ -e "$o/$k" ] && { r=$o; break; }; done; }; printf '%s\n' "$r"; }
 
 # 通過記録の置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
@@ -603,7 +603,7 @@ wf_state_dir() {
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
     base="$CLAUDE_PLUGIN_DATA/stages"
   elif [ -n "${NDF_STATE_HOME:-}" ] || [ -n "${XDG_STATE_HOME:-}" ] || [ -n "${HOME:-}" ]; then
-    base="$(ndf_user_state_home)/stages"
+    base="$(ndf_user_state_home stages)/stages"
   fi
   if mkdir -p "$base" 2>/dev/null && [ -w "$base" ]; then
     printf '%s\n' "$base"

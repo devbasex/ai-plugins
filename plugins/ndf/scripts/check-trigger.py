@@ -180,9 +180,9 @@ def slug_of(root: Path) -> str:
 # 置き場の候補: (環境変数, その値からの置き場)。設定されている最初の環境変数で決める
 STATE_BASES = (
     ("CLAUDE_PLUGIN_DATA", Path),
-    ("NDF_STATE_HOME", lambda v: user_home()),
-    ("XDG_STATE_HOME", lambda v: user_home()),
-    ("HOME", lambda v: user_home()),
+    ("NDF_STATE_HOME", lambda v: user_home(kinds=("checks",))),
+    ("XDG_STATE_HOME", lambda v: user_home(kinds=("checks",))),
+    ("HOME", lambda v: user_home(kinds=("checks",))),
 )
 
 
@@ -216,7 +216,8 @@ def read_events(root: Path) -> list[dict]:
             continue
         if isinstance(d, dict) and d.get("kind"):
             rows.append(d)
-    return rows
+    # 時刻の順に並べる（`last_check` などは末尾を最新として読む。旧の置き場から足し合わせた行は末尾に付き、行の順は時刻の順でない。#2766）
+    return sorted(rows, key=lambda d: str(d.get("at") or ""))
 
 
 def append_event(root: Path, row: dict) -> None:

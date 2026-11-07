@@ -21,7 +21,7 @@ import os
 import uuid
 from pathlib import Path
 
-from state_home import user_home
+from state_home import MVV_KINDS, user_home
 
 FILE_NAME = "ask.jsonl"
 VERSION = 1
@@ -29,7 +29,7 @@ VERSION = 1
 
 def ask_ledger_path() -> Path:
     env = os.environ.get("NDF_MVV_STATE_DIR")
-    base = Path(env).expanduser() if env else user_home()
+    base = Path(env).expanduser() if env else user_home(kinds=MVV_KINDS)
     return base / FILE_NAME
 
 

@@ -34,7 +34,7 @@ def path(root: Path | str | None = None) -> Path:
     got = estimate_records.find_git_dir(start)
     if got:
         return got[1] / "ndf" / "test-run" / "whole.jsonl"
-    return user_home() / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
+    return user_home(kinds=("test-run",)) / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
 
 
 def record_whole(root: Path | str | None, key: str, seconds: float, source: str) -> bool:

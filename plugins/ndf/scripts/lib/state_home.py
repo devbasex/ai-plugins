@@ -13,8 +13,9 @@
 旧の置き場（`~/.local/state/ndf`）からの移り方:
 
 - チェックアウトの記録は、新に無く旧にある記録を旧のまま使う（`legacy_entry`。動いている耐久ワークフローを続ける）
-- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。何度打ってもよい。打つまでは、利用者の根が無く
-  旧の根に台帳があれば旧の根を読み書きする（`user_home`。移す前の記録を見失わない）
+- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。何度打ってもよい。打つまでは、台帳の種類ごとに、
+  利用者の根にその種類が無く旧の根にあれば旧の根を読み書きする（`user_home(kinds=...)`。移す前の記録を見失わない。
+  `~/.claude` を共有する別のコンテナが利用者の根に別の種類を書いても、この種類の旧の記録は読まれる）
 
 シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_user_state_home` にある。
 """
@@ -24,7 +25,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 # 利用者の根に置く台帳（ファイルかディレクトリの名前）。ほかはコンテナの根に残る
 USER_KINDS = (
@@ -41,6 +42,9 @@ USER_KINDS = (
     "estimate",
     "test-run",
 )
+# MVV の記録と ask の台帳は同じ置き場（`NDF_MVV_STATE_DIR`）を分け合うため、1 つの種類として旧へ戻るかを決める
+MVV_KINDS = ("ask.jsonl", "mvv-gate.jsonl", "project-mvv.jsonl", "project-mvv-signals.jsonl", "gate-rejections.jsonl", "project-mvv")
+_HELD = ".migrating-"  # migrate が名前を外した旧の台帳の接尾辞（`<名前>.jsonl.migrating-<pid>`）
 
 
 def _state_env(env: Optional[Mapping[str, str]]) -> Mapping[str, Optional[str]]:
@@ -81,13 +85,16 @@ def _user_default(env: Optional[Mapping[str, str]] = None) -> Path:
     return _home_dir(_state_env(env)) / ".claude" / "ndf" / "state"
 
 
-def user_home(env: Optional[Mapping[str, str]] = None) -> Path:
-    """利用者の台帳の根。利用者の根が無く旧の根に台帳（`USER_KINDS`）があれば、`migrate` を打つまで旧の根を使う。"""
+def user_home(env: Optional[Mapping[str, str]] = None, kinds: Sequence[str] = USER_KINDS) -> Path:
+    """利用者の台帳の根。利用者の根に `kinds` のどれも無く旧の根にどれかがあれば、`migrate` を打つまで旧の根を使う。
+
+    呼ぶ側は読み書きする台帳の種類を `kinds` に渡す。種類ごとに決めるため、`~/.claude` を共有する別のコンテナが
+    利用者の根に別の種類を書いても、このコンテナの旧の記録を見失わない。"""
     explicit = explicit_home(env)
     if explicit is not None:
         return explicit
     new, old = _user_default(env), legacy_home(env)
-    if not new.exists() and any((old / kind).exists() for kind in USER_KINDS):
+    if not any((new / kind).exists() for kind in kinds) and any((old / kind).exists() for kind in kinds):
         return old
     return new
 
@@ -144,11 +151,47 @@ def legacy_entry(new: Path, kind: str, name: str, env: Optional[Mapping[str, str
     return old if old.exists() else new
 
 
+def _held_of(path: Path) -> Optional[tuple[str, int]]:
+    """名前を外した旧の台帳（`<名前>.jsonl.migrating-<pid>`）なら (元の名前, pid)。違えば None。"""
+    name, sep, pid = path.name.rpartition(_HELD)
+    if sep and name.endswith(".jsonl") and pid.isdigit():
+        return name, int(pid)
+    return None
+
+
+def _held_running(pid: int) -> bool:
+    """名前を外した migrate のプロセスが生きているか（`os.kill(pid, 0)`。psutil を要する `procs` を読まない）。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # 権限が無い（別の利用者のプロセスが生きている）
+    return True
+
+
+def _append_held(held: Path, dst: Path, resumed: bool) -> None:
+    """名前を外した旧の台帳 `held` を `dst` へ足して消す。`resumed`（止まった migrate の残り）は、`dst` に同じまとまりが
+    既にあれば足さない（前の migrate が足した後、消す前に止まった）。"""
+    data = held.read_bytes()
+    if data and not data.endswith(b"\n"):
+        data += b"\n"
+    if data and not (resumed and dst.is_file() and data in dst.read_bytes()):
+        with dst.open("ab") as f:
+            f.write(data)
+    held.unlink()
+
+
 def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
-    """`src` を `dst` へ足し合わせる。`.jsonl` は追記、無いものは移し、同じ名前の他のファイルは旧に残す。"""
+    """`src` を `dst` へ足し合わせる。`.jsonl` は追記、無いものは移し、同じ名前の他のファイルは旧に残す。
+    止まった migrate が名前を外したまま残した台帳（`_held_of`）は、元の名前の台帳より先に足す（古い行が先）。"""
     if src.is_dir() and not src.is_symlink():
-        for child in sorted(src.iterdir()):
-            _merge_ledger(child, dst / child.name, moved, kept)
+        for child in sorted(src.iterdir(), key=lambda c: (_held_of(c) is None, c.name)):
+            held = _held_of(child)
+            if held is None:
+                _merge_ledger(child, dst / child.name, moved, kept)
+            else:
+                _resume_held(child, dst / held[0], held[1], moved, kept)
         try:
             src.rmdir()
         except OSError:
@@ -158,12 +201,9 @@ def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
     if src.suffix == ".jsonl":
         # 名前を先に外してから読む。旧の版の書き手が後から追記すると旧の名前で作り直し、次の migrate で移る
         # （読んだ後に追記された行を消さない）。移し先が別のファイルシステムでもコピーと削除の間に行を落とさない
-        held = src.with_name(f"{src.name}.migrating-{os.getpid()}")
+        held = src.with_name(f"{src.name}{_HELD}{os.getpid()}")
         os.rename(src, held)
-        data = held.read_bytes()
-        with dst.open("ab") as f:
-            f.write(data if not data or data.endswith(b"\n") else data + b"\n")
-        held.unlink()
+        _append_held(held, dst, resumed=False)
         moved.append(str(dst))
     elif not dst.exists():
         shutil.move(str(src), str(dst))
@@ -172,11 +212,21 @@ def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
         kept.append(str(src))
 
 
+def _resume_held(held: Path, dst: Path, pid: int, moved: list, kept: list) -> None:
+    """止まった migrate の残り `held` を `dst` へ足す。名前を外したプロセスが生きていれば（動いている migrate）触らない。"""
+    if pid != os.getpid() and _held_running(pid):
+        kept.append(str(held))
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    _append_held(held, dst, resumed=True)
+    moved.append(str(dst))
+
+
 def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
     """旧の根の利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。結果は `{"status", "summary", "from", "to", "moved", "kept"}`。
 
-    status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（同じ名前のファイルが両方にあり、
-    旧に残したものがある）。何度打ってもよい（旧の版のプロセスが旧へ書いた分も、次に打てば移る）。"""
+    status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（同じ名前のファイルが両方にある・別の migrate が
+    動いていて、旧に残したものがある）。止まった migrate の残りも次に打てば足す。何度打ってもよい（旧の版のプロセスが旧へ書いた分も、次に打てば移る）。"""
     env = _state_env(env)
     old, new = legacy_home(env), _user_default(env)
     base = {"from": str(old), "to": str(new), "moved": [], "kept": []}
@@ -185,11 +235,20 @@ def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
     moved: list = []
     kept: list = []
     for kind in USER_KINDS:
+        if old.is_dir():
+            for child in sorted(old.glob(f"{kind}{_HELD}*")):  # 根の直下の台帳（`ask.jsonl` など）の止まった移行の残り
+                held = _held_of(child)
+                if held is not None:
+                    _resume_held(child, new / held[0], held[1], moved, kept)
         if (old / kind).exists():
             _merge_ledger(old / kind, new / kind, moved, kept)
     out = {**base, "moved": moved, "kept": kept}
     if kept:
-        return {**out, "status": "kept", "summary": f"{len(moved)} 件を移し、{len(kept)} 件は移し先に同じ名前があるため旧に残した"}
+        return {
+            **out,
+            "status": "kept",
+            "summary": f"{len(moved)} 件を移し、{len(kept)} 件は旧に残した（移し先に同じ名前がある・別の migrate が動いている）",
+        }
     if moved:
         return {**out, "status": "migrated", "summary": f"{len(moved)} 件を {new} へ移した"}
     return {**out, "status": "none", "summary": f"{old} に移す台帳が無い"}

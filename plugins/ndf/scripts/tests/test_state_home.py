@@ -101,6 +101,26 @@ def test_user_home_reads_legacy_ledgers_until_migrate(tmp_path):
     assert (new / "stages/o__r__1.json").exists()
 
 
+def test_user_home_falls_back_per_kind(tmp_path):
+    """`~/.claude` を共有する別のコンテナが利用者の根に別の種類を書いても、この種類の旧の記録は旧の根から読む。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = tmp_path / ".local/state/ndf", tmp_path / ".claude/ndf/state"
+    (old / "stages").mkdir(parents=True)
+    (new / "usage").mkdir(parents=True)  # 別のコンテナが書いた
+    assert sh.user_home(env, ("stages",)) == old
+    assert sh.user_home(env, ("usage",)) == new
+    (new / "stages").mkdir()
+    assert sh.user_home(env, ("stages",)) == new  # 利用者の根に同じ種類があればそちら
+    out = subprocess.run(
+        ["bash", "-c", f". '{WF}' && ndf_user_state_home usage && ndf_user_state_home checks && ndf_user_state_home"],
+        env={**env, "PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.split() == [str(sh.user_home(env, (k,) if k else sh.USER_KINDS)) for k in ("usage", "checks", "")]
+
+
 def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
     env = {"HOME": str(tmp_path)}
     old, new = sh.legacy_home(env), sh.user_home(env)
@@ -147,6 +167,34 @@ def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
     assert sh.migrate(env)["status"] == "migrated"
     assert (new / "ask.jsonl").read_text() == '{"q":1}\n{"q":2}\n'
     assert not old.exists() or not any(old.iterdir())
+
+
+@pytest.mark.parametrize("appended", [False, True])
+def test_migrate_resumes_a_stopped_move(tmp_path, appended):
+    """名前を外した後で止まった移行の残り（`.migrating-<pid>`）は、次の migrate が欠かさず二重にせず足す。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    (old / "usage/claude").mkdir(parents=True)
+    (old / "ask.jsonl.migrating-999999999").write_text('{"q":1}\n')
+    (old / "ask.jsonl").write_text('{"q":2}\n')  # 止まった後に旧の版が書いた
+    (old / "usage/claude/o__r.jsonl.migrating-999999999").write_text('{"a":1}\n')
+    new.mkdir(parents=True)
+    if appended:  # 足した後、消す前に止まった
+        (new / "ask.jsonl").write_text('{"q":1}\n')
+    assert sh.migrate(env)["status"] == "migrated"
+    assert (new / "ask.jsonl").read_text() == '{"q":1}\n{"q":2}\n'
+    assert (new / "usage/claude/o__r.jsonl").read_text() == '{"a":1}\n'
+    assert not old.exists() or not any(old.rglob("*"))
+
+
+def test_migrate_leaves_a_move_in_progress(tmp_path):
+    """名前を外したプロセスが生きている（動いている migrate）残りには触らない。"""
+    env = {"HOME": str(tmp_path)}
+    old = sh.legacy_home(env)
+    old.mkdir(parents=True)
+    held = old / f"ask.jsonl.migrating-{os.getppid()}"
+    held.write_text('{"q":1}\n')
+    assert sh.migrate(env)["status"] == "kept" and held.exists()
 
 
 def test_migrate_none_with_explicit_root(tmp_path):

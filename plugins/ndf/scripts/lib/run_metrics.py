@@ -72,7 +72,7 @@ def metrics_dir(env: Optional[Mapping[str, str]] = None) -> pathlib.Path:
     env = os.environ if env is None else env
     if env.get("NDF_METRICS_DIR"):
         return pathlib.Path(env["NDF_METRICS_DIR"])
-    return user_home(env) / "metrics"
+    return user_home(env, ("metrics",)) / "metrics"
 
 
 def _disabled(env: Mapping[str, str]) -> bool:
