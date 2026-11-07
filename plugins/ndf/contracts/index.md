@@ -159,6 +159,7 @@
 | `NDF_VERSION` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_WHOLE_RUNS_DIR` | user | `plugins/ndf/scripts/estimate.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/release-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/test-run.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py` |
 | `NDF_WORKTREE_BASE` | user | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/test-run.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` |
+| `OLDPWD` | runtime | `plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py` |
 | `PATH` | runtime | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/release-verification-steps.py` |
 | `REDMINE_URL` | runtime | `plugins/ndf/scripts/wait-notify.py` |
 | `SCRIPTS` | runtime | `plugins/ndf/scripts/progress-record.sh` |

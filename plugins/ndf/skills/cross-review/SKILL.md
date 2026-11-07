@@ -132,11 +132,13 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 ## 実行
 
-Skill のディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。**値のある引数だけを
+**対象のリポジトリの中（メインディレクトリか worktree）で**、次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+`$CR` はこの Skill のディレクトリの絶対パス（読み込んだときの Base directory）である。駆動はリポジトリを作業ディレクトリから
+求めるため、**Skill のディレクトリへ `cd` しない**（`cd` したときは、`cd` する前の場所が作業ツリーならそこで続ける）。**値のある引数だけを
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+python3 "$CR/scripts/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
   [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
@@ -146,8 +148,8 @@ python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rou
 
 ```bash
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
-bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> [上と同じ引数]
-bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+bash "$CR/../../scripts/lib/bg-wait.sh" run "$RC" -- python3 "$CR/scripts/drive.py" <PR> [上と同じ引数]
+bash "$CR/../../scripts/lib/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
 待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
