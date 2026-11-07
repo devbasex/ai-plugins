@@ -244,13 +244,15 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 | `delivery` の行 | 経路 | 検査の後に置くステージ |
 | --- | --- | --- |
-| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で昇格の行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く） |
+| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で昇格の行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く）。ベースブランチが本番チャネルなら、続けて「CD の結果」: プラン `cd-result`（`cd-result` → `record --merged`） |
 | `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 昇格のプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、リリース承認ゲートの後にマージする。後片付けはしない） |
-| `kind: auto`・`branch` が無いか別のブランチ、`kind: manual`、`versioned: true` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
+| `kind: auto`・`branch` が無いか別のブランチ、`kind: manual` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
 | `delivery: []` | `none` | 置かない |
 | `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
 
-「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランは `normal` では `promote`（承認の引数無し。
+`versioned` は版を持つかを表し、経路を変えない。`kind: auto`・`versioned: true` の行も上の表のとおりに進む。
+
+「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランの `promote` の後は `cd-result` → `record` と進み、CD の結果が失敗なら `record` が書いた後に止まる。昇格のプランは `normal` では `promote`（承認の引数無し。
 リリース承認ゲートで終える）→ 承認の後に `resume` に `--from promote=promote-approved` を足して続ける、`fast` / `auto` では `verify`（導入の確認）→
 `prepare`（Pull Request と承認資料）→ `mvv`（リリース承認ゲートの MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、
 `note` か `promote` が落ちたら `handoff` が承認ゲートへ落とす。`fast` / `auto` の `promote` は、`mvv` が読んだのと同じ

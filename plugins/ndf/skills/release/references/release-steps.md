@@ -67,6 +67,8 @@ echo "exit=$rc"
 
 ## 終了コード
 
+`publish`・`cd-result`・`cd-guidance`・`record` の終了コードは本文の各節にある。
+
 | 終了コード | 意味 | どうするか |
 | --- | --- | --- |
 | 0 | 設定が無い（何も出力しない）・リリース種別に合うコマンドが無い・すべてのコマンドが通った | `guide:` の行があれば、その手引きに従う |
@@ -224,9 +226,21 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 | --- | --- |
 | Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
 | 昇格の Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` が昇格の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
 スプリントのプランでデプロイするときは、プランの `record` のステップがこれを打つ。
+
+**CD の結果は `cd-result` が読み、`record --cd-result <ファイル>` が記録へ書く。**
+
+```bash
+python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--head <ブランチ>] --out <ファイル> --root .
+```
+
+`metrics.cd_result` は `success` / `failure` / `undetermined` / `none`（本番チャネルへ自動で届く行が無い）で、値にかかわらず終了コードは 0 である。
+`--head` があれば最後にマージした `--head` → `--base` の Pull Request のコミットを、無ければ本番チャネルの先端を読む。
+`record` は値が `failure` なら `段階: 反映失敗（<理由>）` を書いた後に終了コード 5 で止まる。読む側は最後の記録を使うため、CD を直して
+`cd-result` と `record` を打ち直すと、成功の記録で閉じられる。
 
 ## 退避先の回収
 

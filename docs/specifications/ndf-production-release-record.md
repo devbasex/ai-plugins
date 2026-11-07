@@ -18,8 +18,8 @@
 
 | 順 | 起きること |
 | --- | --- |
-| 1 | `release` ステップ（`release-steps.py release --channel prod`）が本番チャネルへのマージ・タグ `ndf--v10.17.30`・GitHub Release を作る |
-| 2 | `record` ステップが `release-steps.py record --version 10.17.30 --prs 1260 1262` を打つ。タグと GitHub Release とマージ済みの `release/v10.17.30` の PR を確かめ、その PR（#1268）へ下の記録をコメントで書く |
+| 1 | `release` ステップ（`release-steps.py release --channel prod`）が本番チャネルへマージする。タグ `ndf--v10.17.30` と GitHub Release は、`delivery` の行の `publishes_release` が真なら CD（`.github/workflows/release-cd.yml`）が作り、無ければこのステップが同じ公開の処理で作る |
+| 2 | `cd-result` ステップが CD の結果を読み、`record` ステップが `release-steps.py record --version 10.17.30 --prs 1260 1262 --cd-result <ファイル>` を打つ。公開物とマージ済みの `release/v10.17.30` の PR を確かめ、その PR（#1268）へ下の記録をコメントで書く |
 | 3 | 結果 JSON の `metrics.release_pr_url` を、プランの `pr_from` がプランの `Pull Request` へ移す |
 | 4 | `verify` → `cleanup` を経て、報告に `- Pull Request: <本番のリリースの PR の URL>` が残る |
 | 5 | まとめの `close` ステップの `--record-pr` が、その PR の番号で埋まる。`sprint-close.py` が最後の記録の `段階: 本番` を読み、閉じる条件 1 を満たす |
@@ -112,9 +112,10 @@
 
 | # | 条件 | 破れそうなときの扱い |
 | --- | --- | --- |
-| I1 | リリース記録はリリースの後にだけ書く。デプロイの完了は「タグ `<plugin>--v<版>` が origin にある」と「同じタグの GitHub Release がある」の両方で判定する | `record` は投稿せずに終了コード 3 で止まる |
+| I1 | リリース記録はリリースの後にだけ書く。デプロイの完了は「タグ `<plugin>--v<版>` が origin にある」と「同じタグの GitHub Release がある」の両方で判定する。公開物を CD が作ると宣言した行があり結果のファイルがあるときは、両方の照会を CD の結果に置き換える | `record` は投稿せずに終了コード 3 で止まる |
+| I1a | 「成功」と書くのは CD の状態を読んで成功を確かめたときだけで、読めなければ「未確定」と書く。CD の結果が失敗の記録は段階を `反映失敗` にし、スプリントを閉じる条件を満たさない | `record` は `反映失敗` を書いた後に終了コード 5 で止まる。未確定の記録は本番の段階だが、閉じる条件 2 がリリース後テストの記録を別に求める |
 | I2 | 書いた記録を `parse_record` で読むと、`found` が真・`stage` が `本番` で始まり・`version` が出した版（`v` なし）・`sprint_prs` が `--prs` の並びになる | 書く側と読む側が同じモジュールの定数を使う。食い違えば契約のテストが落ちる |
-| I3 | 同じ版・同じスプリントの PR の本番の記録は、PR に 2 件以上増えない | `record` は投稿の前に PR の最後の記録を読み、同じなら投稿せずに `exists` を返す |
+| I3 | 同じ版・同じスプリントの PR・同じ CD の結果の本番の記録は、PR に 2 件以上増えない | `record` は投稿の前に PR の最後の記録を読み、同じなら投稿せずに `exists` を返す |
 | I4 | 記録を書くステップの失敗から、リリースへ戻る経路は無い | `record` の失敗は `judge-record` へ回り、選べるのは `record` と `stop` だけ。共有の `judge` の `choices` に `record` は無い |
 | I5 | 記録を書けた本番のリリースプランの報告は、本番のリリースの PR を `Pull Request` に持つ | `metrics.release_pr_url` が空・終了コードが 0 でないなら `Pull Request` を書き換えない（報告は `無し` のまま、まとめは `0`） |
 | I6 | 開発版のリリースプランは `record` と `judge-record` を持たない | 雛形の開発版の分岐で組まない（`release` の `next` は `verify`） |
@@ -139,7 +140,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 | --- | --- |
 | 前提（この順に確かめる） | タグ `<plugin>--v<版>` が origin にある（`git ls-remote --exit-code --tags`）。同じタグの GitHub Release がある（`gh release view <タグ>` が 0）。`release/v<版>` → ベースブランチの PR が MERGED で見つかる。無ければ、版数の衝突を解いて取り込んだ `release/v<版>-sync` → ベースブランチの PR を MERGED で探し、その PR へ書く |
 | 書くもの | その PR へコメント 1 件（`gh pr comment <番号> --body-file <一時ファイル>`）。`--repo` を渡さず、作業場所のリポジトリへ書く |
-| 書かないとき | PR の本文とコメントを投稿の順に並べた最後の記録が、`stage` が `本番` で始まり `version` と `sprint_prs` が同じとき |
+| 書かないとき | PR の本文とコメントを投稿の順に並べた最後の記録が、`stage` が `本番` で始まり `version`・`sprint_prs`・`cd_result` が同じとき |
 | 結果 JSON | `lib/step_result.py` の形。`items` は `{kind: "comment", name: "#<番号>", result: "posted" / "exists"}`。`metrics` は `release_pr`・`release_pr_url`・`version`・`prev_version`・`sprint_prs` |
 | 終了コード | 0 = 書いた・既にある / 1 = 投稿が失敗した（`gh pr comment` が非 0） / 2 = PR を読めない（`gh pr view` の失敗か出力が JSON でない） / 3 = 前提が無い |
 
@@ -147,7 +148,8 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 | 行 | 値 |
 | --- | --- |
-| `段階:` | `本番（リリース承認ゲートの承認の後、<タグの作成時刻 JST> に <タグ> を出した）`。時刻は注釈付きタグなら作成時刻、軽量タグならコミットの時刻で、読めなければ時刻を省く |
+| `段階:` | `本番（リリース承認ゲートの承認の後、<タグの作成時刻 JST> に <タグ> を出した）`。時刻は注釈付きタグなら作成時刻、軽量タグならコミットの時刻で、読めなければ時刻を省く。公開物を CD が作るときは `本番（リリース承認ゲートの承認の後、<タグ> の公開は CD が担う）`、CD の結果が失敗なら `反映失敗（<理由>）` |
+| `CD の結果:` | CD を読んだときだけ置く。`<成功 / 失敗 / 未確定>（リビジョン <短い SHA>… <実行の URL か理由>）`。`parse_record` は `cd_result` へ値を返す |
 | `版:` | `<直前の正式版> → <出した版>（タグ <タグ>。直前はタグ <直前のタグ>）`。直前の正式版は `release_tag_before` が返す前のタグから `<plugin>--v` を外した版で、無ければ `なし`（注記は「直前の正式版のタグは無い」） |
 | `スプリント:` | `PR #<番号> / #<番号>`。`--prs` を受けた順に並べる |
 

@@ -734,7 +734,7 @@ def cmd_record(a):
     書かずに ok（exists）を返す。組み立てと投稿は release_lib/record.py、形は lib/dist_record.py が持つ。
     """
     root = git_root(a.root)
-    cd = cd_result.read_file(a.cd_result)
+    cd = cd_result.load_result(a.cd_result)
     if a.promote:
         return record_promote(root, a, cd)
     if a.merged:
@@ -828,8 +828,8 @@ def cmd_cd_result(a):
     if decl.problems:
         got = cd_result.CdResult(cd_result.UNDETERMINED, "", "宣言を読めない: " + " / ".join(decl.problems))
     else:
-        got = cd_result.read(root, decl, _cd_revision(root, a) if delivery.merge_rows(decl) else "")
-    cd_result.write_file(a.out, got)
+        got = cd_result.read_result(root, decl, _cd_revision(root, a) if delivery.merge_rows(decl) else "")
+    cd_result.save_result(a.out, got)
     metrics = {"cd_result": got.value, "revision": got.revision, "reason": got.reason}
     emit(result(TOOL, "ok", f"CD の結果: {got.value}（{got.reason or got.revision[:7]}）", got.evidence, metrics))
 

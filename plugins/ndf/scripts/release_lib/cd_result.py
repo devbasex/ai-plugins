@@ -109,7 +109,7 @@ def _fold(rows: list[dict]) -> tuple[str, str]:
     return value, " / ".join(r["reason"] for r in rows if r["value"] == value and r["reason"])
 
 
-def read(root, decl: delivery.DeliveryDecl, revision: str, *, clock=time.monotonic, sleep=time.sleep) -> CdResult:
+def read_result(root, decl: delivery.DeliveryDecl, revision: str, *, clock=time.monotonic, sleep=time.sleep) -> CdResult:
     """`revision` に対する CD の結果を読む。本番チャネルへ自動で届く行が無ければ `none`。"""
     rows = delivery.merge_rows(decl)
     if not rows:
@@ -122,12 +122,12 @@ def read(root, decl: delivery.DeliveryDecl, revision: str, *, clock=time.monoton
     return CdResult(value, revision, reason, evidence)
 
 
-def write_file(path, got: CdResult) -> None:
+def save_result(path, got: CdResult) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     write_material(path, json.dumps(asdict(got), ensure_ascii=False, indent=2) + "\n")
 
 
-def read_file(path) -> CdResult | None:
+def load_result(path) -> CdResult | None:
     """結果のファイルを読む。渡されない・無い・`none` なら None（記録に CD の行を足さない）。壊れていれば未確定。"""
     if not path or not Path(path).is_file():
         return None

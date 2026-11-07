@@ -170,7 +170,7 @@ def fake_runs(monkeypatch, answers):
 
 def read_with(root, rows, **kw):
     clock = FakeClock()
-    return cd_result.read(root, decl_of(rows), "a" * 40, clock=clock, sleep=clock.sleep, **kw)
+    return cd_result.read_result(root, decl_of(rows), "a" * 40, clock=clock, sleep=clock.sleep, **kw)
 
 
 RUN_OK = [{"status": "completed", "conclusion": "success", "url": "https://x/runs/1"}]
@@ -234,13 +234,13 @@ def test_rows_fold_failure_first_then_all_success(tmp_path):
 
 def test_result_file_round_trip_and_none_and_broken(tmp_path):
     f = tmp_path / "work" / "cd.json"
-    cd_result.write_file(f, cd_result.CdResult(cd_result.SUCCESS, "b" * 40, "", [{"url": "u"}]))
-    assert cd_result.read_file(f).value == cd_result.SUCCESS
-    cd_result.write_file(f, cd_result.CdResult(cd_result.NONE))
-    assert cd_result.read_file(f) is None
-    assert cd_result.read_file(tmp_path / "missing.json") is None and cd_result.read_file(None) is None
+    cd_result.save_result(f, cd_result.CdResult(cd_result.SUCCESS, "b" * 40, "", [{"url": "u"}]))
+    assert cd_result.load_result(f).value == cd_result.SUCCESS
+    cd_result.save_result(f, cd_result.CdResult(cd_result.NONE))
+    assert cd_result.load_result(f) is None
+    assert cd_result.load_result(tmp_path / "missing.json") is None and cd_result.load_result(None) is None
     f.write_text("{")
-    assert cd_result.read_file(f).value == cd_result.UNDETERMINED
+    assert cd_result.load_result(f).value == cd_result.UNDETERMINED
 
 
 # ---------------- リリース記録（受け入れ条件 7・8、I14）----------------
