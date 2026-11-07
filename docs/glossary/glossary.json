@@ -5464,6 +5464,30 @@
       "pending_source": "issues/issue-2733-requirements.md"
     },
     {
+      "term": "計画の置き場",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のファイルを置くメインディレクトリの .ndf/parallel/<計画名>/。計画を作ったリポジトリに 1 つある",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
+      "term": "レーンのリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
+      "term": "計画の所在の一覧",
+      "context": "ndf-workflow",
+      "meaning": "マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
+      "term": "例外の起動",
+      "context": "ndf-workflow",
+      "meaning": "計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
       "term": "保留の周回",
       "context": "ndf-workflow",
       "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
