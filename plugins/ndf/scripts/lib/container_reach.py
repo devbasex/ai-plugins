@@ -108,6 +108,12 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
     if not worktree_base.add_exclude(wt, f"{EVIDENCE}/"):
         raise Unreachable(f"探りの印を git の無視へ登録できない（{wt}）")
     token = secrets.token_hex(16)
+    p = _run_probe(docker, service, env, wt, token)
+    return _interpret_probe(p, service, env, token)
+
+
+def _run_probe(docker: str, service: str, env: dict[str, str], wt: Path, token: str) -> subprocess.CompletedProcess:
+    """探りの印を worktree に置き、コンテナから読ませた結果を返す。印は必ず片付ける。"""
     rel = f"{EVIDENCE}/reach-{token}"
     mark = wt / rel
     try:
@@ -135,6 +141,11 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
             mark.parent.rmdir()
         except OSError:
             pass
+    return p
+
+
+def _interpret_probe(p: subprocess.CompletedProcess, service: str, env: dict[str, str], token: str) -> dict[str, str]:
+    """探りの結果を判定する。印が読めれば `env` を返し、読めなければ `Unreachable`。"""
     if p.returncode == 0 and p.stdout.strip() == token:
         return env
     if p.returncode == 0 or "No such file" in p.stdout + p.stderr:
