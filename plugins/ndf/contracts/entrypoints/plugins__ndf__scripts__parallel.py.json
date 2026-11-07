@@ -65,6 +65,16 @@
           "name"
         ]
       },
+      "park": {
+        "options": [
+          "--clear",
+          "--done",
+          "--lane"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
       "present": {
         "options": [
           "--approval",
@@ -142,6 +152,7 @@
       "wait": {
         "options": [
           "--after",
+          "--changes-after",
           "--timeout"
         ],
         "positionals": [
@@ -216,6 +227,8 @@
   "stdin": "text",
   "stdout": "step-result",
   "writes": [
+    "answer-hold-json",
+    "answer-hold-log-jsonl",
     "answer-json",
     "answers-sent-json",
     "approved-txt",
@@ -228,6 +241,7 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
+    "resume-mark-json",
     "run-log",
     "run-pid"
   ],
