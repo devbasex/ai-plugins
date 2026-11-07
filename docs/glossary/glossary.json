@@ -5948,11 +5948,17 @@
     {
       "term": "リリースの依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
       "deprecated": [
         "配布の依頼"
       ]
+    },
+    {
+      "term": "課題の差し込み",
+      "context": "ndf-workflow",
+      "meaning": "リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる",
+      "source": ""
     },
     {
       "term": "リリースの実行",
