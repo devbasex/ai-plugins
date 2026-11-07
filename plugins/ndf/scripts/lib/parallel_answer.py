@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import parallel_hold as ph
 import parallel_lane as pl
 
 
@@ -91,21 +92,41 @@ def after_items(items: list[dict], answered: dict, earlier: list[dict] | None = 
     return [{**q, "drop": drop(q), "mvv": mvv_mark(q)} for q in rest]
 
 
-def owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None) -> str | None:
-    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
-    restart。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた問い（`merged`）は、
-    代表だけでなく全持ち主をそれぞれの依頼の id で調べ、起こす行を `; ` でつなぐ（異常系 5）。"""
+def _restart_lines(lanes: list[str]) -> str | None:
     import parallel_run as pr_run
 
+    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+
+
+def owner_lanes(main: Path, name: str, rid: str, q: dict) -> list[str]:
+    """答えを待って止まった持ち主のレーン。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた
+    問い（`merged`）は、代表だけでなく全持ち主をそれぞれの依頼の id で調べる（異常系 5）。"""
+    import parallel_run as pr_run
+
+    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
+    owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
+    return list(dict.fromkeys(lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)))
+
+
+def owner_next(
+    main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None
+) -> tuple[str | None, list[str]]:
+    """答えの後の (1 行, 答え待ちの停止の範囲にある持ち主)。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、
+    ほかは止まった持ち主の restart を `; ` でつなぐ。停止の範囲にある持ち主は起こさず、再開の印を置く（#2707 の I11）。"""
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
     if q.get("kind") in ("stall", "helper", "spawn", "observe") or not q.get("lane"):
-        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
-    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
-    owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
-    lanes = [lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)]
-    lanes = list(dict.fromkeys(lanes))
-    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None), []
+    lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
+    held = [lane for lane in lanes if ph.covered(hold, lane)]
+    for lane in held:
+        ph.place_mark(main, name, lane, "answered")
+    return _restart_lines([lane for lane in lanes if lane not in held]), held
+
+
+def owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None) -> str | None:
+    """答えの後の 1 行（`owner_next` の 1 つ目）。"""
+    return owner_next(main, name, rid, choice, items)[0]
 
 
 def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:

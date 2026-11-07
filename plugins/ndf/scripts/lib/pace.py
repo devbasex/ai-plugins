@@ -118,6 +118,34 @@ def read_loop(root) -> dict:
     return out
 
 
+PARALLEL_DEFAULTS = {"plan": 8, "lane": 3}  # 答え待ちの依頼の閾値の既定（#2707 の利用者の指示の値）
+
+
+def read_parallel(root) -> dict:
+    """並列の計画の節（`parallel.answer_limit`）を読み、`{plan, lane, warnings}` を返す。例外を上げない。
+
+    閾値の誤りで計画を止めないため（#2707 の決定 6）、宣言が無ければ既定で動き、読めない宣言と正の整数でない値は既定へ戻して
+    `warnings` に残す。"""
+    out, warnings = dict(PARALLEL_DEFAULTS), []
+    if not (Path(root) / ".ndf" / DECL_NAME).is_file():
+        return {**out, "warnings": warnings}
+    try:
+        path, d = _read_pace_decl(root)
+    except PaceError as e:
+        return {**out, "warnings": [f"{e}。答え待ちの閾値は既定を使う"]}
+    sec = _default(d if isinstance(d, dict) else {}, "parallel", {})
+    limit = _default(sec, "answer_limit", {}) if isinstance(sec, dict) else None
+    if not isinstance(limit, dict):
+        return {**out, "warnings": [f"進め方の宣言の parallel.answer_limit はオブジェクトで書く: {path}。既定を使う"]}
+    for key, default in PARALLEL_DEFAULTS.items():
+        v = limit.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            warnings.append(f"進め方の宣言の parallel.answer_limit.{key} は正の整数で書く（{v!r}）: {path}。既定の {default} を使う")
+        else:
+            out[key] = v
+    return {**out, "warnings": warnings}
+
+
 def over_budget(used: float, limit: float | None) -> bool:
     """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。周回の境の判定と再開の判定が同じこれを読む。"""
     return limit is not None and used >= limit

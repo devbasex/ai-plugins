@@ -801,7 +801,7 @@ def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatc
     後へ進めば revive から外す。外さないと _finish_or_hold が設計の承認待ちを空にできず、計画が終わらない。"""
     run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}])
     seen = {"now": 1_000_000.0, "rows": {"la": {"state": "stopped", "at": "1970-01-12T13:40:00Z"}}}  # 999_600
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     run.lanes["la"].update(started=True)
     prun._observe_run(run, "/m")
     run.questions = [{"id": "q1", "kind": "ask", "lane": "la"}]
@@ -923,7 +923,7 @@ def test_a_failed_ls_keeps_lane_states_and_the_last_observation(monkeypatch):
     """受け入れ条件 1・I1: 一覧が 0 以外で終わった回は、レーンの状態・最後に観測した時刻・起こし直しの待ち・問いを変えない。"""
     run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb"}])
     seen = {"now": 1_000_000.0, "rows": {"la": {"state": "running", "at": "1970-01-01T00:00:00Z"}}, "code": 0}
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     run.lanes["la"].update(started=True)
     run.lanes["lb"].update(started=True)
     prun._observe_run(run, "/m")
@@ -940,7 +940,7 @@ def test_after_a_failed_ls_the_plan_is_not_finished(monkeypatch):
     """I2: 最後の観測が失敗した回の後は、全レーンが止まって見えていても終えない。成功に戻れば終えられる。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
     seen = {"now": 1.0, "rows": {}, "code": 0}
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     run.lanes["la"].update(started=True)
     prun._observe_run(run, "/m")
     assert prun._run_finished(run)
@@ -955,7 +955,7 @@ def test_after_a_failed_ls_the_plan_is_not_finished(monkeypatch):
 def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
     """決定 5: 足す前の版で記録した観測（`code` が無い）は成功として読み、行の無い起動済みのレーンを止まったと読む。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
-    monkeypatch.setattr(prun, "step_observe", lambda _m: {"now": 1.0, "rows": {}})
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: {"now": 1.0, "rows": {}})
     run.lanes["la"].update(started=True)
     prun._observe_run(run, "/m")
     assert run.lanes["la"]["state"] == "stopped" and prun._run_finished(run)
@@ -963,7 +963,7 @@ def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
 
 def test_step_observe_carries_the_exit_code_and_the_last_stderr_line(env, tmp_path):
     (tmp_path / "ls.fail").write_text("")
-    got = prun.step_observe(str(env["main"]))
+    got = prun.step_observe(str(env["main"]), "p1")
     assert got["code"] == 3 and got["err"] == "ls: hub に届かない" and got["rows"] == {} and got["can_ask"] is True
 
 
@@ -990,7 +990,7 @@ def _failing_run(monkeypatch):
     run = _bare_run(monkeypatch, [{"name": "la"}])
     run.lanes["la"].update(started=True, state="running")
     seen = {"now": 1000.0, "rows": {}, "code": 3, "err": "ls: hub に届かない", "can_ask": True}
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     return run, seen
 
 

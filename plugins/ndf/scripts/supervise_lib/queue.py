@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
 
 import legacy_values
+import parallel_hold
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
@@ -134,6 +136,7 @@ def cmd_queue(
     キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
+    from supervise_lib.engine import Engine
 
     stages, all_plans = _normalize_stages(plans, then)
     prepared = _prepare_queue(all_plans, plans, done, max_)
@@ -145,6 +148,7 @@ def cmd_queue(
     except durable.DurableError as e:
         return _not_started(str(e), max_, done_path)
     try:
+        Engine.queued = True
         ref = durable.resolve(prefix)
         if ref.action == "continue":
             print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
@@ -163,6 +167,7 @@ def cmd_queue(
             raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
         return got.value
     finally:
+        Engine.queued = False
         durable.close()
 
 
@@ -307,7 +312,8 @@ def plan_item(plan: str, out: dict) -> dict:
 
     前提のプランで流さなかったプランの出力（`result` が流さなかった）は、そのまま item にする。"""
     if out.get("result") == NOT_RUN:
-        return {**out, "plan": plan}
+        held = parallel_hold.skip_of(out.get("reason"))
+        return {**out, "plan": plan, **({"answer_hold": held} if held else {})}
     rep = state_dir_of(plan) / "report.md"
     if "error" in out:
         print(f"supervise-queue: {plan} が例外で終わった: {out['error']}", file=sys.stderr, flush=True)
@@ -343,19 +349,23 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
     unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
-    status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
+    held = next((i["answer_hold"] for i in items if i.get("answer_hold")), None)  # 答え待ちの停止で流さなかったプラン（#2707）
+    status = "stopped" if stopped or unfilled else "gate" if gates or held else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
     nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
-    return result(
-        "supervise-queue",
-        status,
-        summary,
-        items,
-        {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)},
-        next=nxt,
-    )
+    metrics = {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)}
+    if held:
+        metrics["answer_hold"] = held
+        nxt = _park_line(held, done_path) if status == "gate" else None
+    return result("supervise-queue", status, summary, items, metrics, next=nxt)
+
+
+def _park_line(held: dict, done_path: Path) -> str:
+    """答え待ちの停止で流さなかったレーンが打つ 1 行（`parallel.py park`）。"""
+    tool = Path(__file__).resolve().parent.parent / "parallel.py"
+    return f"python3 {shlex.quote(str(tool))} park {held['plan']} --lane {held['lane']} --done {shlex.quote(str(done_path))}"
 
 
 WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
