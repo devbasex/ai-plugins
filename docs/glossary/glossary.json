@@ -2439,6 +2439,34 @@
       "pending_source": "issues/issue-2567-requirements.md"
     },
     {
+      "term": "テスト環境のスロット",
+      "context": "ndf-worktree",
+      "meaning": "テスト環境へ割り当てる 0〜63 の番号。worktree ごとのポートの計算に使う",
+      "source": "",
+      "pending_source": "issues/issue-2660-requirements.md"
+    },
+    {
+      "term": "テスト環境の割り当て",
+      "context": "ndf-worktree",
+      "meaning": "worktree とテスト環境の環境名・スロット・ポートの対応。worktree レジストリの 1 行で、解放の時刻が空の間は有効である",
+      "source": "",
+      "pending_source": "issues/issue-2660-requirements.md"
+    },
+    {
+      "term": "残った割り当て",
+      "context": "ndf-worktree",
+      "meaning": "解放の時刻が空で、worktree のディレクトリが無く、git worktree lock もされていない割り当て",
+      "source": "",
+      "pending_source": "issues/issue-2660-requirements.md"
+    },
+    {
+      "term": "テスト環境の回収",
+      "context": "ndf-worktree",
+      "meaning": "残った割り当てのテスト環境を compose の定義なしで破棄し、解放の時刻を書くこと",
+      "source": "",
+      "pending_source": "issues/issue-2660-requirements.md"
+    },
+    {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
