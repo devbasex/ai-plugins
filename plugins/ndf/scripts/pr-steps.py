@@ -47,7 +47,7 @@ from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pr_steps_lib.gh_pr import existing_pr, pr_for_report, send_body, target_pr  # noqa: E402  PR の読み書き
+from pr_steps_lib.gh_pr import existing_pr, pr_for_report, require_base, send_body, target_pr  # noqa: E402  PR の読み書き
 
 TOOL = "pr"
 SCRIPTS = Path(__file__).resolve().parent
@@ -113,10 +113,10 @@ def diff_numbers(root, ref):
 def cmd_plan(a):
     root = git_root(a.root)
     branch = current_branch(root)
-    default = repo.default_branch(root) or "main"
+    base = require_base(root, a.base)
+    default = repo.default_branch(root)
     declared = repo.declared_base(root)
-    base = a.base or declared or default
-    allowed = {default} | ({declared} if declared else set())
+    allowed = {b for b in (default, declared) if b}
     items = [{"kind": "branch", "name": branch, "result": "ok"}, {"kind": "base", "name": base, "result": "ok"}]
     if branch in allowed:
         items[0]["result"] = "redirect"

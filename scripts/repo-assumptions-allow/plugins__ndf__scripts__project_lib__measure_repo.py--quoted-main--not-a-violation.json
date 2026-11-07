@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/project_lib/measure_repo.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "リポジトリを解析するときの候補の一覧。解析の結果を宣言の案にするだけで、ai-plugins の値を既定にしていない",
+  "count": 1
+}

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/parallel_lane.py",
+  "name": "spec-dir",
+  "kind": "not-a-violation",
+  "reason": "コメントが NDF 自身の確定仕様を指している。実行の経路に現れず、対象リポジトリを指していない",
+  "count": 1
+}
