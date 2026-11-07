@@ -711,7 +711,7 @@ case "$SUBCOMMAND" in
   down) do_down ;;
   expose) do_expose ;;
   unexpose) do_unexpose ;;
-  reap) do_reap ;;
+  reap) do_reap "$IDLE" ;;
   reclaim) do_reclaim ;;
   *)
     printf '使い方: worktree-testenv.sh <env|tag|bake|up|test|compose-env|stop|down|expose|unexpose|reap|reclaim> [対象] [オプション]\n' >&2

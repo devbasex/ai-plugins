@@ -45,7 +45,7 @@ reap_environment() {
 
 do_reap() {
   local idle_seconds
-  idle_seconds=$(wt_duration_seconds "$IDLE") || {
+  idle_seconds=$(wt_duration_seconds "$1") || {
     printf '%s\n' '--idle に期間を指定してください（例: 45m）' >&2
     return 1
   }
