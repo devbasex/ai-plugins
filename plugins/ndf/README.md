@@ -319,8 +319,13 @@ NDF_CODEX_SLACK_NOTIFY=true
 何も移さずに止まります。**移行の前の `queue` は `--resume` で続けられません**（記録の鍵と中の ID が旧の置き場のパスからできているため）。
 新しく流してください。何度打ってもかまいません（移すものが無ければ何もしません）。
 
+`<ndf>` は NDF のプラグインの置き場で、導入先の版ごとのディレクトリのうち最も新しい版です（`$CLAUDE_PLUGIN_ROOT` は
+hook の中でしか値を持たず、端末と Claude Code の Bash では空です）。Claude Code では次のように探して打ちます。
+Codex では探す根を `"${CODEX_HOME:-$HOME/.codex}"` に替えます。
+
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state-home.py" migrate
+NDF=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/ndf/*/ | sort -V | tail -n 1)
+python3 "$NDF/scripts/state-home.py" migrate
 ```
 
 ## 外部 AI 委譲

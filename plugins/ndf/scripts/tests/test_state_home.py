@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -382,14 +384,30 @@ def test_durable_record_path_never_reads_the_old_place(tmp_path, monkeypatch):
 # ---- migrate: チェックアウトの記録（dbos/・sv/）を打った作業ツリーのチェックアウトの根へ移す ----
 
 
+def _wal_db(db: Path, rows: int) -> None:
+    """確定済みの行が WAL にだけある sqlite の記録 `db`（と `-wal`）を作る（開いている間に写した形）。"""
+    work = db.parent / f".make-{db.name}"
+    work.mkdir()
+    con = sqlite3.connect(work / "t.sqlite")
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA wal_autocheckpoint=0")
+    con.execute("CREATE TABLE t (n INTEGER)")
+    con.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(rows)])
+    con.commit()
+    shutil.copy(work / "t.sqlite", db)
+    shutil.copy(work / "t.sqlite-wal", db.with_name(db.name + "-wal"))
+    con.close()
+    shutil.rmtree(work)
+
+
 def _old_records(tmp_path: Path, env: dict) -> Path:
-    """旧の置き場の耐久の記録 2 本（1 本は -wal 付き）とプランの状態 2 つ。旧の根を返す。"""
+    """旧の置き場の耐久の記録 2 本（1 本は確定済みの行を -wal に持つ）とプランの状態 2 つ。旧の根を返す。"""
     old = sh.legacy_home(env)
     (old / "dbos").mkdir(parents=True)
+    _wal_db(old / "dbos/parallel-aaaaaaaaaaaa.sqlite", 3)
+    sqlite3.connect(old / "dbos/exp-bbbbbbbbbbbb.sqlite").close()
     for key in ("parallel-aaaaaaaaaaaa", "exp-bbbbbbbbbbbb"):
-        (old / "dbos" / f"{key}.sqlite").write_text(key)
         (old / "dbos" / f"{key}.lock").write_text("")
-    (old / "dbos/parallel-aaaaaaaaaaaa.sqlite-wal").write_text("wal")
     for name in ("1-design-0e3fcff9", "plan-ca92eb3d"):
         (old / "sv" / name / "work").mkdir(parents=True)
         (old / "sv" / name / "state.json").write_text("{}")
@@ -412,8 +430,9 @@ def test_migrate_moves_checkout_records_to_the_checkout_root(tmp_path):
         "exp-bbbbbbbbbbbb.sqlite",
         "parallel-aaaaaaaaaaaa.lock",
         "parallel-aaaaaaaaaaaa.sqlite",
-        "parallel-aaaaaaaaaaaa.sqlite-wal",
     ]
+    with sqlite3.connect(to / "dbos/parallel-aaaaaaaaaaaa.sqlite") as con:  # WAL の行は本体へ書き戻して移す
+        assert con.execute("SELECT count(*) FROM t").fetchone()[0] == 3
     assert (to / "sv/plan-ca92eb3d/state.json").exists() and (to / "sv/plan-ca92eb3d/work").is_dir()
     assert not (old / "dbos").exists() and not (old / "sv").exists()
     again = sc.migrate_all(env, cwd=wt)  # 2 回目は移すものが無い

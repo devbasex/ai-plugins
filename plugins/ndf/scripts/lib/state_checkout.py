@@ -2,8 +2,10 @@
 
 - 移し先は、打った作業ツリーのチェックアウトの根（`<git の共通ディレクトリ>/ndf/state`）。実行時に `dbos/`・`sv/` を探す規則
   （作業ディレクトリの `state_home.checkout_home`）と同じである
-- 耐久の記録は組（`<鍵>.sqlite` と `-wal`・`-shm`）ごと移す。移し元と移し先の同じ鍵の `.lock` を待たずに取り、衝突の
-  再確認から一式の移動の完了まで持つ（取れなければ移さず `kept`）。移し先のロックの実体は置き換えず、移し元のロックは移した後に消す
+- 耐久の記録は本体 `<鍵>.sqlite` だけを移す。移し元と移し先の同じ鍵の `.lock` を待たずに取り、衝突の再確認から移動の
+  完了まで持つ（取れなければ移さず `kept`）。持っている間に移し元の WAL を本体へ書き戻し（`wal_checkpoint(TRUNCATE)`）、
+  空になった `-wal`・`-shm` を消してから、本体を移し先の一時名へ写して名前を替え、移し元を消す。途中で止まっても完全な
+  記録が旧か新の一方に残る。書き戻せなければ（読めない・busy）移さず `kept`。移し先のロックの実体は置き換えず、移し元のロックは移した後に消す
 - 動いているプランは移さない: 旧の `dbos/` のロックが 1 つでも持たれていれば、`state_home.migrate` が何も移さず止まる
 - 鍵は付け替えない。queue の鍵と耐久ワークフローの ID は旧の置き場のパスからできているため、移行の前の queue は
   `--resume` で続けられない（新しく流す）
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -22,8 +25,29 @@ from state_home import _flock_free, find_git_dir
 _DBOS_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm")  # 1 本の耐久の記録の組（`durable.purge_old` と同じ）。ロックは別に扱う
 
 
+def _fold_wal(src: Path, key: str) -> Optional[str]:
+    """`src/<key>.sqlite` の WAL を本体へ書き戻し、空の `-wal`・`-shm` を消す。書き戻せなければ理由を返す。"""
+    db, wal, shm = (src / f"{key}{sfx}" for sfx in _DBOS_SUFFIXES)
+    if db.exists():
+        try:
+            con = sqlite3.connect(f"{db.resolve().as_uri()}?mode=rw", uri=True, timeout=0)
+            try:
+                busy = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                con.close()
+        except sqlite3.Error as e:
+            return f"WAL を本体へ書き戻せない（{e}）"
+        if busy:
+            return "WAL を本体へ書き戻せない（busy）"
+    if wal.exists() and wal.stat().st_size:
+        return "WAL が本体へ書き戻されずに残っている" if db.exists() else "本体の無い WAL がある"
+    wal.unlink(missing_ok=True)
+    shm.unlink(missing_ok=True)
+    return None
+
+
 def _move_group(src: Path, key: str, dst: Path) -> Optional[str]:
-    """耐久の記録 `src/<key>` の組を `dst/<key>` へ移す。両方のロックを持ったまま移す。移さなければ理由を返す。"""
+    """耐久の記録 `src/<key>` を `dst/<key>` へ移す。両方のロックを持ったまま、WAL を書き戻した本体だけを移す。移さなければ理由を返す。"""
     fd = _flock_free(src / f"{key}.lock")
     if fd is None:
         return "ロックが持たれている（動いている耐久ワークフロー）"
@@ -35,8 +59,14 @@ def _move_group(src: Path, key: str, dst: Path) -> Optional[str]:
         try:
             if any((dst / f"{key}{sfx}").exists() for sfx in _DBOS_SUFFIXES):
                 return "移し先に同じ鍵の記録がある"
-            for sfx in [sfx for sfx in _DBOS_SUFFIXES if (src / f"{key}{sfx}").exists()]:
-                shutil.move(str(src / f"{key}{sfx}"), str(dst / f"{key}{sfx}"))
+            why = _fold_wal(src, key)
+            if why:
+                return why
+            if (src / f"{key}.sqlite").exists():  # 写し終えた一時名を替えて公開し、それから移し元を消す
+                tmp = dst / f".{key}.sqlite.migrating"
+                shutil.copy2(src / f"{key}.sqlite", tmp)
+                os.replace(tmp, dst / f"{key}.sqlite")
+                (src / f"{key}.sqlite").unlink()
             (src / f"{key}.lock").unlink(missing_ok=True)  # 移し先のロックは持ったまま残す（実体を置き換えない）
         finally:
             os.close(to_fd)
