@@ -119,7 +119,7 @@
 | 記録の形（`lib/dist_record.py`・`release_lib/record.py`）【変更】 | `CD の結果:` の行と段階の値「反映失敗」を組む |
 | リリースプランのテンプレート（`supervise_lib/release_templates.py`・`delivery_templates.py`）【変更】 | 本番のマージと記録の間に `cd-result` のステップを置く |
 | スプリントのステージ（`supervise_lib/sprint_routes.py`・`sprint.py`）【変更】 | ベースブランチが本番チャネルの CD の形に「CD の結果」のステージを足す。`sprint.json` へ案内を載せる |
-| 開発ループ（`lib/sprint_loop.py`・`sprint_loop_cli.py`）【変更】 | `--dev` を任意にし、経路が版数を要するときだけ求める |
+| 開発ループ（`lib/sprint_loop.py`・`sprint_loop_cli.py`・`sprint_loop_argv.py`）【変更】 | `--dev` を任意にし、経路が版数を要するときだけ求める |
 | CD のワークフロー（`.github/workflows/release-cd.yml`）【新設】 | `main` への push で公開の処理を呼ぶ |
 | ai-plugins の宣言（`.ndf/project.json`）【変更】 | `delivery` を CD の行へ書き換える |
 | 工程の手順（`development-workflow`・`release`・`release-verification`・`progress-tracking` の Skill と参照）【変更】 | CD を前提に書き直す。`release/references/cd-setup.md` を新設する。今の値だけを想定した規則として、`pace.md` の経路の表（`versioned: true` を手で行う経路に挙げる行）、`project-analysis.md` の `delivery` の形、`release` の手順 3 の版上げと、`form-service.md`・`form-package-plugin.md` の公開の手順、`progress-tracking` のリリース記録の表を直す |
@@ -192,13 +192,15 @@ plugins/ndf/scripts/
 │   ├── delivery.py                     # 経路・案内・公開の担い手
 │   ├── dist_record.py                  # 記録の行と段階の値
 │   ├── sprint_loop.py                  # 版数を任意に
+│   ├── sprint_loop_argv.py             # 新設（周回が打つコマンドの組み立てと版数の要否）
 │   └── sprint_loop_cli.py
 ├── project_lib/{model,merge}.py        # 欄の追加と引き継ぎ
 └── supervise_lib/
     ├── delivery_templates.py           # 昇格のプランへ cd-result
     ├── release_templates.py            # 本番のプランへ cd-result
     ├── sprint.py                       # 案内を sprint.json へ
-    └── sprint_routes.py                # CD の結果のステージ
+    ├── sprint_routes.py                # CD の結果のステージ
+    └── verify_steps.py                 # cd-result のステップ（2 つのテンプレートが共用する）
 plugins/ndf/skills/release/references/cd-setup.md   # 新設
 ```
 
@@ -355,7 +357,7 @@ stateDiagram-v2
 | 11 | 全行に理由があると案内が出ず、手で行うステージへ進む | 理由を見ないと落ちる |
 | 12 | `[]`・CD の形で出ず、混在は理由の無い行だけ | 自動の行を案内すると落ちる |
 | 13・I3 | 案内の有無の 2 つの宣言で問い・ステージ・終了コードが同じで、宣言のファイルが変わらない | 案内で終了コードを変えると落ちる |
-| 14・I4 | 壊れた宣言で案内を出さず、今の止まり方になる。`test_delivery.py` の 30 件が通る | 例外を握りつぶして案内すると落ちる |
+| 14・I4 | 壊れた宣言で案内を出さず、今の止まり方になる。`test_delivery.py` がすべて通る | 例外を握りつぶして案内すると落ちる |
 | 15 | ai-plugins の宣言が CD の行を持ち、`trigger` がワークフローのファイルを指す | ファイルの名前を変えると落ちる |
 | 16 | `publish` が `plugin.json` の版でタグと Release を作り、題・本文・Latest が要件どおり | 版の読み先を HEAD へ変えると落ちる。本番はリリース後テストで見る |
 | 17 | ワークフローの起点が `main` の `push` だけである | `develop` を足すと落ちる |

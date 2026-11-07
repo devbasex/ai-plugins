@@ -7,8 +7,7 @@
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
 | `start <計画名>` | `run` をセッションから切り離して起動する（動いていれば打ったセッションへオーガナイザーの印を付け直し、今の pid を返す。`metrics.organizer` が付けられたか） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3 |
-| `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
+| `wait <計画名> [--after <seq>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions）か終わりまで待つ。上限なら 3 |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
@@ -46,11 +45,10 @@ import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
 import parallel_external as pe  # noqa: E402
 import parallel_external_cli as px  # noqa: E402
-import parallel_hold as ph  # noqa: E402
-import parallel_hold_cli as phc  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
+from parallel_repo import relay_unavailable  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "parallel"
@@ -118,6 +116,19 @@ def cmd_check(a) -> None:
 # ---- 進行 ----
 
 
+def _manual_or_none(main: Path, plan: pp.ParallelPlan) -> None:
+    """ラッパーの外・tmux が無いときは、レーンごとの手で起動する 1 行を返して 3 で終える（受け入れ条件 9）。"""
+    if why := relay_unavailable(main):
+        lines = pp.manual_commands(plan)
+        reply(
+            "stopped",
+            f"{why}ため、レーンを起動しない。手で起動する 1 行を items に並べた",
+            [{"lane": ln.name, "command": c} for ln, c in zip(plan.lanes, lines)],
+            3,
+            manual=True,
+        )
+
+
 def _wait_line(name: str) -> str:
     return f"python3 {SELF} wait {name}"
 
@@ -129,7 +140,7 @@ def cmd_run(a) -> None:
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがあるため、レーンを 1 本も起動しない", items, 1, **metrics)
     if pl.run_status(main, a.name) is None:
-        px.manual_or_none(main, plan, reply)
+        _manual_or_none(main, plan)
     import durable
     import parallel_run as pr_run
 
@@ -155,13 +166,12 @@ def cmd_start(a) -> None:
     import parallel_run as pr_run
 
     env, notes = pr_run.environment_report(main, plan)
-    notes = [*notes, *ph.limit_items(main)]
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
         marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
         reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=_wait_line(a.name), environment=env)
     if pl.run_status(main, a.name) is None:
-        px.manual_or_none(main, plan, reply)
+        _manual_or_none(main, plan)
     log = pp.plan_dir(main, a.name) / "run.log"
     with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
         p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
@@ -175,30 +185,34 @@ def cmd_wait(a) -> None:
     main = main_of()
     if not pl.record_exists(main, a.name):
         reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
-    keys = ["pause", "questions", "answer-hold"]
-    got = durable.wait_from(pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout)
+    got = durable.wait_from(pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), ["pause", "questions"], a.after, a.timeout)
     if got.kind == "timeout":
         reply(
             "stopped",
             f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
             code=3,
             seq=a.after,
-            next=_wait_line(a.name) + f" --after {a.after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
+            next=_wait_line(a.name) + f" --after {a.after}",
         )
     if got.kind == "event":
         ev = dict(got.value)
         key = ev.pop("key")
-        action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
+        action = ev.pop("action", None) if key == "pause" else "questions"  # reply の action と重ねない
         if action == "running":
             reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"))
         items = ev.pop("items", None) or []
-        if action == ph.CONDITION:
-            ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
         reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **ev)
     if got.kind == "done":
         o = got.value or {}
         lanes = [{"lane": n, **st} for n, st in sorted((o.get("lanes") or {}).items())]
-        reply("ok", f"並列の計画 {a.name} は {o.get('status')} で終わった", lanes, action=o.get("status"), releases=o.get("releases"))
+        reply(
+            "ok",
+            f"並列の計画 {a.name} は {o.get('status')} で終わった",
+            lanes,
+            action=o.get("status"),
+            releases=o.get("releases"),
+            prior_waits=o.get("prior_waits") or [],
+        )
     reply("stopped", f"耐久ワークフローが {got.kind} で終わった: {got.value}", code=1, action=got.kind)
 
 
@@ -382,14 +396,10 @@ def cmd_answer(a) -> None:
     result = "approved" if a.approved else "revise" if a.revise else "rejected" if a.rejected else "answered"
     seq, items = pa.questions(main, a.name)
     q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
-    nxt, held = pa.owner_next(main, a.name, a.id, a.choice, items)
+    nxt = pa.owner_restart(main, a.name, a.id, a.choice, items)
     tail, extra = pa.answer_with_merge(main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
-    extra.update(id=a.id, result=result, next=nxt, seq=seq, **({"held_owners": held} if held else {}), **pa.not_listed(a.id, items))
+    extra.update(id=a.id, result=result, next=nxt, seq=seq, **pa.not_listed(a.id, items))
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
-
-
-def cmd_park(a) -> None:
-    phc.cmd_park(main_of(), a, reply)
 
 
 def cmd_helper(a) -> None:
@@ -421,7 +431,6 @@ def build_parser() -> argparse.ArgumentParser:
     w = sub.add_parser("wait")
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
-    w.add_argument("--changes-after", type=int, default=0, help="出した答え待ちの停止の変化の最後の番号")
     w.add_argument("--timeout", type=float, default=3600)
     p = sub.add_parser("present")
     p.add_argument("name", nargs="?")
@@ -472,12 +481,6 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--choice", nargs="+")
     an.add_argument("--note")
     an.add_argument("--by", choices=("user", "mvv"), default="user", help="--approved の担い手（MVV 判定で自分で答えたら mvv）")
-    pk = sub.add_parser("park")
-    pk.add_argument("name")
-    pk.add_argument("--lane", required=True)
-    pg = pk.add_mutually_exclusive_group(required=True)
-    pg.add_argument("--done")
-    pg.add_argument("--clear", action="store_true")
     hp = sub.add_parser("helper")
     hp.add_argument("name")
     hp.add_argument("n", type=int)

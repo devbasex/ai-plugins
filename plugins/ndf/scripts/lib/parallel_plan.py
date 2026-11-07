@@ -19,7 +19,6 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-import parallel_hold
 from parallel_files import PARALLEL_DIR  # noqa: F401  置き場の正本（問いの hook も読む）
 
 VERSION = 1
@@ -314,7 +313,6 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
             lines += ["", "## まとめたリリース", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]
             for r in rels:
                 lines.append(f"| {r.get('n')} | {r.get('state')} | {r.get('version') or '-'} | {(r.get('sha') or '-')[:12]} |")
-        lines += parallel_hold.render_hold(progress.get("hold"))
     return "\n".join(lines) + "\n"
 
 

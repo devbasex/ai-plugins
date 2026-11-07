@@ -325,10 +325,14 @@
   "delivery": [
     {
       "target": "ndf プラグイン（Claude Code・Codex）",
-      "kind": "manual",
-      "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
+      "kind": "auto",
+      "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
       "channel": "production",
-      "versioned": true
+      "versioned": true,
+      "publishes_release": true,
+      "result": {
+        "workflow": "release-cd.yml"
+      }
     }
   ],
   "issues": {

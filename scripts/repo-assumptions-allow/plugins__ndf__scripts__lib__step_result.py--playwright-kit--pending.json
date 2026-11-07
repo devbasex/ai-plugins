@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/lib/step_result.py",
+  "name": "playwright-kit",
+  "kind": "pending",
+  "reason": "プラグインの置き場をプラグインの名前で決め打ちしている。置き場を宣言で受けるまで残す",
+  "count": 1,
+  "issue": 1756
+}

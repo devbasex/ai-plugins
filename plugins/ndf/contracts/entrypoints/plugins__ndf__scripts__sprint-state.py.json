@@ -82,8 +82,6 @@
   "stdin": "none",
   "stdout": "json",
   "writes": [
-    "answer-hold-json",
-    "answer-hold-log-jsonl",
     "answer-json",
     "applied-json",
     "approved-txt",
@@ -100,7 +98,8 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
-    "resume-mark-json"
+    "revise-json",
+    "revise-md"
   ],
   "reads": [],
   "exit": {

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/official-skills-autoloader/SKILL.md",
+  "name": "manifests-dir",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身の配布先の指定。対象リポジトリを指していない",
+  "count": 1
+}

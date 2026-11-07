@@ -45,6 +45,7 @@ from supervise_lib.sprint_routes import (
     record_pr_ref,
     route_rows,
     route_waves,
+    with_cd_guidance,
 )
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
@@ -386,14 +387,14 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     index = write_stage_index(waves, out)
     add_resume(index)
     manifest = out / "sprint.json"
-    head = manifest_head(a, pace, closing)
+    head, guidance = with_cd_guidance(a, manifest_head(a, pace, closing))
     manifest.write_text(json.dumps({**head, "リリースの経路": route_rows(a), "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result(
         "supervise-new",
         "ok",
         f"スプリント {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
-        index,
+        index + guidance,
         {"waves": len(index), "plans": plans, "manifest": str(manifest)},
         next=next_text(pace, index, advise=pace == "normal" and advises(a, closing), no_prod=no_prod_stage(a, pace, closing)),
     )

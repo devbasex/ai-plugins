@@ -10,7 +10,16 @@ from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, reject_step, with_margin
+from supervise_lib.verify_steps import (
+    CD_FAILED_STOP,
+    CD_RESULT_FILE,
+    INFRA_WAIT_STOP,
+    cd_result_step,
+    handoff_step,
+    plan_limits,
+    reject_step,
+    with_margin,
+)
 from supervise_lib.procedures import with_record
 from supervise_lib.queue_fill import RELEASE_BASE, RELEASE_VERSION  # 版の差し込み（キューが流す直前に版の記録で埋める。#2164 の決定 7）
 
@@ -235,7 +244,7 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
         "cmd": f"{STEPS_PY} release --version {v} --ci-wait {ci_wait} --channel {a.channel}",
         "on_exit": dict(INFRA_WAIT_STOP),
         "on_fail": "judge",
-        "next": "verify" if dev else "record",
+        "next": "verify" if dev else "cd-result",
         # リリースの PR（release/v<版> → 起点）と、本番では続く release/v<版> → 本番 の PR のチェックを調べる（#2436 の R1）
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
@@ -253,8 +262,9 @@ def _record_step(v: str, prs: str) -> dict:
         "type": "run",
         "stage": "デプロイ",
         "timeout": 300,
-        "cmd": f"{STEPS_PY} record --version {v} --prs {prs}",
+        "cmd": f"{STEPS_PY} record --version {v} --prs {prs} --cd-result {CD_RESULT_FILE}",
         "pr_from": "release_pr_url",
+        "on_exit": dict(CD_FAILED_STOP),
         "on_fail": "judge-record",
         "next": "verify",
     }
@@ -295,7 +305,7 @@ def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts:
     """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。"""
     return [
         _release_step(a, v, dev, repo, approval),
-        *([] if dev else [_record_step(v, prs)]),
+        *([] if dev else [cd_result_step(repo, a.production_branch, release_names(v)[1]), _record_step(v, prs)]),
         {
             "id": "verify",
             "type": "run",
@@ -340,8 +350,8 @@ def plan_release_package_plugin(a) -> dict:
     dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
     → 提示物の欄 → 他のプラグインの上げ幅の候補（changed-plugins --prs --approval）。prod: bump → bump-others
     （前のタグからの差分のある他のプラグインを、承認資料の表の上げ幅で上げる。changed-plugins --decided）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
-    （本番のブランチ）→ 後片付け。本番は release の後に record（本番のリリースの PR へリリース記録）を挟み、落ちたら
-    judge-record（record か stop）へ回す。sync-check は同期とチェックの宣言があるときだけ置く。
+    （本番のブランチ）→ 後片付け。本番は release の後に cd-result（CD の結果）と record（本番のリリースの PR へリリース記録）を
+    挟み、record が落ちたら judge-record（record か stop）へ回す。sync-check は同期とチェックの宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
     dev = a.channel == "dev"
     plugin, runtimes = _validate_release_decl(a.release, dev, a)

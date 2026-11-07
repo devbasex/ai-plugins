@@ -39,6 +39,12 @@ def _material(root, material) -> Path:
     return path if path.is_absolute() else root / path
 
 
+def approved_by(root, a) -> str:
+    """本番のリリースを承認した担い手。承認資料の記録の担い手で、--approved-sha で受けたときは利用者とする。"""
+    material = getattr(a, "approval", None)
+    return (ac.recorded_by(_material(root, material)) if material else None) or "user"
+
+
 def approved_of(root, a, plugin):
     """リリースが受け取る承認したコミット（#815 の I1・I10）。dev は None。何もマージする前に呼ぶ。
 

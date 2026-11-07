@@ -16,6 +16,7 @@
           "--note",
           "--pr",
           "--repo",
+          "--revise-note",
           "--root",
           "--sprint"
         ],
@@ -67,7 +68,9 @@
   ],
   "stdin": "none",
   "stdout": "step-result",
-  "writes": [],
+  "writes": [
+    "revise-json"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",

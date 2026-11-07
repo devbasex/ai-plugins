@@ -24,7 +24,6 @@ from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeholders, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
-from supervise_lib.queue import NOT_RUN
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
 from supervise_lib.steps import COND_RUN, COND_SKIP, JudgeStep, RunStep, StepContext, is_gate, last_json, run_condition
@@ -61,10 +60,6 @@ class PolicyClaudeRunner(ClaudeRunner):
 
 class Engine:
     """1 本のプランの実行。`state` が記録を、`ctx` がハンドラーへ渡す文脈を持つ。"""
-
-    queued = (
-        False  # キューが流す間だけ真。`supervise.py run` の単発の開始は答え待ちの停止を読まない（`park` の続きが `queue --resume` のため）
-    )
 
     def __init__(self, plan: dict, state_dir: Path, slow_args: list[str] | None = None, plan_path: str | None = None) -> None:
         self.plan = normalize_plan(plan)
@@ -221,8 +216,6 @@ class Engine:
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
         self.actuals.start(start, self.state.run_line(start))
-        if self.queued and (held := self.answer_held()):
-            return NOT_RUN, held
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
@@ -231,12 +224,6 @@ class Engine:
         if err:
             return "止まった", err
         return None
-
-    def answer_held(self) -> str | None:
-        """自分が 1 スプリントのレーンで答え待ちの停止の範囲にあれば、流さない理由を返す（#2707）。"""
-        import parallel_hold
-
-        return parallel_hold.plan_skip(os.environ.get("NDF_RELAY_NAME"))
 
     def after_prepare(self) -> None:
         """worktree ができた後の、ファイルを書かない準備（遅れの見張りの履歴の置き場）。"""

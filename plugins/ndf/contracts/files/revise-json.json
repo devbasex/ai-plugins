@@ -1,6 +1,6 @@
 {
-  "name": "answer-hold-json",
-  "pattern": "answer-hold.json",
+  "name": "revise-json",
+  "pattern": "revise-*.json",
   "kind": "state",
   "place": "main",
   "skill_readers": []

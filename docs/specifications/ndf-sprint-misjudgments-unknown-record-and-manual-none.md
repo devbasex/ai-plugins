@@ -42,7 +42,7 @@
 
 | 含む | 含まない |
 | --- | --- |
-| まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
+| まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`。`versioned` は経路を変えず、`kind: auto` の行は昇格か `merged-by-check` になる）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
 | `sprint-close.py --record-pr unknown` の振る舞い・結果 JSON | 雛形（`{queue_pr:release-prod}`）と昇格（`{queue_pr:promote}`）の経路の振る舞い |
 | 要求から手動確認の行を読む規則（`lib/manual_checks.py` の `rows_of`） | merge-gate（`merged_lib/merge.py` の `manual_gate`）と `unchecked_before_merge` の判定、要求の雛形の文 |
 

@@ -1,6 +1,6 @@
 {
-  "name": "resume-mark-json",
-  "pattern": "*.mark.json",
+  "name": "revise-md",
+  "pattern": "revise-*.md",
   "kind": "state",
   "place": "main",
   "skill_readers": []
