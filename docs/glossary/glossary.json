@@ -5948,11 +5948,17 @@
     {
       "term": "リリースの依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
       "deprecated": [
         "配布の依頼"
       ]
+    },
+    {
+      "term": "課題の差し込み",
+      "context": "ndf-workflow",
+      "meaning": "リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる",
+      "source": ""
     },
     {
       "term": "リリースの実行",
@@ -6176,6 +6182,24 @@
       "context": "ndf-workflow",
       "meaning": "答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.mark.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く",
       "pending_source": "issues/issue-2707-design.md"
+    },
+    {
+      "term": "tmux の専用サーバー",
+      "context": "ndf-relay",
+      "meaning": "中継のレーンを動かす tmux サーバー（tmux -L ndf-relay）。利用者の既定の tmux サーバーとは別である",
+      "pending_source": "issues/issue-2656-requirements.md"
+    },
+    {
+      "term": "親のセッションの環境",
+      "context": "ndf-relay",
+      "meaning": "動いている claude のセッションとそのラッパーに固有の環境変数。別のプロセスへ継がれると、そのプロセスを親のセッションの中にいると誤らせる",
+      "pending_source": "issues/issue-2656-requirements.md"
+    },
+    {
+      "term": "アカウントの選定",
+      "context": "ndf-relay",
+      "meaning": "ラッパーが区間を起動するときに、指定・残量・上限から使うアカウントを決める手順",
+      "pending_source": "issues/issue-2656-requirements.md"
     }
   ]
 }
