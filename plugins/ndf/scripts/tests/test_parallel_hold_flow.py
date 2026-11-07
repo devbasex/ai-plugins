@@ -545,6 +545,15 @@ def test_an_answer_for_a_held_owner_places_a_mark_instead_of_the_restart_line(en
     assert ph.read_marks(main, "p1")["la"]["why"] == "answered"
 
 
+def test_a_release_helper_lane_is_restarted_even_while_the_whole_plan_is_held(env, monkeypatch):
+    main = env["main"]
+    hold_file(main, plan=True)
+    monkeypatch.setattr(pa, "owner_lanes", lambda *_a: ["la", "p1-rel1"])
+    nxt, held = pa.owner_next(main, "p1", "q1", None, [{"id": "q1", "kind": "ask", "lane": "p1-rel1"}])
+    assert held == ["la"] and nxt == f"python3 {prun.RELAY} restart p1-rel1"
+    assert set(ph.read_marks(main, "p1")) == {"la"}
+
+
 def test_without_a_hold_the_answer_returns_the_restart_lines(env, monkeypatch):
     main = env["main"]
     monkeypatch.setattr(pa, "owner_lanes", lambda *_a: ["la"])

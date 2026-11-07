@@ -281,6 +281,12 @@ def _lane_kind(main: Path, name: str, lane: str) -> Optional[str]:
     return ((found[0].get("input") or {}).get("kind") or "") if found else None
 
 
+def plan_held(main: Path, name: str, hold: Optional[dict], lane: Optional[str]) -> bool:
+    """計画 `name` の停止の範囲にある計画のレーンか。計画に載らないレーン（リリースの一時レーン）は停止の範囲に入れない。
+    耐久ワークフローの再開の印の突き合わせ（`govern_hold`）が計画のレーンだけを扱うため、印を置いても起こされない。"""
+    return covered(hold, lane) and _lane_kind(main, name, lane) is not None
+
+
 def lane_hold(main: Path, lane: Optional[str], kind: str) -> Optional[dict]:
     """レーン `lane`（入力の種類 `kind`）を覆う答え待ちの停止 `{plan, scope, count, limit}`。ファイルだけで見る。"""
     if not lane:
