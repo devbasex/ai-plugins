@@ -116,7 +116,7 @@ worktree は、実行したリポジトリの slug の下（`<base>/<slug>/`）�
 | `scripts/lib/run_owner.py` | 寿命の窓 `WINDOW`（24 時間）、持ち主の記録の読み書き（`read_owner`・`claim_owner`・`touch_owner`・`finish_owner`）、開始と `drive.py` が共有する `adopt_owner`・`mark_owner`・`run_args`、生存の判定 `alive`（窓は引数 `window`。既定は `WINDOW`。記録に `pid` と `host` があれば同じホストでは `owner_pid_alive` で pid の生死も見る）と理由の文 `alive_reason`。`owner_path` は `.json` で終わるパスをそのまま使う（棚卸しの見直しの持ち主の宣言 `.ndf/backlog/owner.json` が窓を `depths.owner.ttl` で渡して使う。#2315） |
 | `scripts/lib/run_state.py` | レビュー worktree の外し方（`remove_review_worktree`・`remove_pr_dir`・`remove_run_dir`）、作業の判定（`worktree_work`）、PR の照会（`view_pr`）、開始の判定（`check_start`・`begin_review`）、片付け（`sweep_states`）。`python3 run_state.py sweep` で単独でも呼べる |
 | `scripts/lib/worktree_base.py` | 作業用 worktree の置き場の解決の唯一の場所。`run_state` と merged が使う |
-| `scripts/merged-steps.py` の `cleanup` | PR ごとに `pr<n>` と `rf<n>` を `run_state` で外し、最後に `sweep_states` を呼んで結果を `items` へ足す |
+| `scripts/merged-steps.py` の `cleanup` | PR ごとに `pr<n>` と `rf<n>` を `run_state` で外し、`sweep_states` を呼んで結果を `items` へ足す。メインディレクトリの取り込みの後に、消えた worktree のテスト環境を回収する |
 | cross-review の `review_lib/commands/init.py`・`drive.py` | `init` が `begin_review` で片付けと既存の `pr<n>` の判定を行い、`adopt_owner` で記録を書き、`RUN`・`SWEPT` を出す。`drive.py` は `init` に `--run` を足し、起動のたびに `touch`、終わりで `finish` を書き、`SWEPT` を結果の `items` へ載せる |
 | cross-refactoring の `refactor_lib/commands/setup.py`・`refactor.py`・`drive.py` | `init`（`setup.py`）が `begin_review` と `adopt_owner` を `rf<n>` で行い、`RUN`・`SWEPT` を出す。`refactor.py init` は `--run` を受ける。`drive.py` は `init` の後に `touch`、終わり（`finalize` の後）に `finish` を書き、`SWEPT` を結果の `items` へ載せる |
 | `scripts/hook_lib/worktree.py` | セッションの状態ファイルに持ち主（`session_owner()`。hook の親をたどって最初に当たるランタイムのプロセスの pid と開始時刻）を書く。持ち主の無い既存のファイルには、次に読んだときに 1 度だけ足す |
@@ -283,6 +283,7 @@ remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict | None
 - `metrics` の既存のキー（`removed_worktrees`・`deleted_branches`・`absent_branches`・`kept`・`stopped`）は PR ごとの片付けの行だけを
   数え、`sweep_states` の行は `swept_removed`・`swept_kept` で別に数える
 - 開発 worktree（`.worktrees/<ブランチ名>`）の外し方（未追跡と無視されたファイルを退避してから外す）は変えない
+- メインディレクトリの取り込みの後に `container_reach.reclaim_testenv` で消えた worktree のテスト環境を回収し、結果を `items` へ足す。件数は `reclaimed_testenvs`・`reclaim_failed`・`reclaim_deferred` で別に数え、回収の失敗で `status` と終了コードは変わらない（結果の読み方は [references/test-execution.md](../../plugins/ndf/skills/worktree/references/test-execution.md) の「後片付け」）
 
 #### 開始（cross-review の `state.py init`・cross-refactoring の `refactor.py init`）
 
@@ -470,7 +471,7 @@ sequenceDiagram
 | 止まる失敗（I9） | 先頭の項目が 429・5xx で送れないとき外れず `waitable` が真であること。位置エラーでない 422・400・404 の `review-post` では止まること |
 | 外された今回分（I10） | 今回分を別の流しに外させた後の `post_review` が総評へ移して送り、`queued` を返さないこと |
 | 開始の判定（I11・I12） | 以前の実行の記録を持つ作業の無い `pr<n>`・`rf<n>/work` で開始が成功し、作業のあるものでは止まり中身が残ること。窓の中の記録で `--run` 無し・違う `--run` の開始が止まり、HEAD と記録が変わらないこと。一致する `--run` で再開すること。違う `run` の `touch_owner` / `finish_owner` が記録を変えないこと |
-| 結果の形 | `cleanup` の `items` のキーと `result` の値が今までの集合に収まること |
+| 結果の形 | `cleanup` の `items` のキーと `result` の値が、テスト環境の回収の行（`kind` が `testenv` か `testenv-reclaim`）を除いて、作業ツリーの片付けの集合に収まること |
 | 全体テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` が通ること |
 
 テストは [`scripts/tests/test_run_state.py`](../../plugins/ndf/scripts/tests/test_run_state.py)・[`test_post_queue.py`](../../plugins/ndf/scripts/tests/test_post_queue.py)・
