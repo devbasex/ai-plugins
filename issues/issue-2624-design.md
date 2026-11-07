@@ -348,7 +348,7 @@ HEAD 7db74dfa6 で語を足した試作を走らせた結果である。組の�
 | `tag-form` | #1756 | 5 | `release-steps.py` ほかのタグの形（行 3） |
 | `plugin-manifest` | 違反でない | 7 | NDF 自身の版を読む箇所と解析の候補 |
 | `plugin-manifest` | #1756 | 5 | リリースの形 package-plugin の版の読み書き（行 3） |
-| `plugin-manifest` | #2616 | 3 | `parallel_external.py`・`parallel_repo.py`・`parallel_run.py`（行 1） |
+| `plugin-manifest` | #2616 | 3 | `parallel_external.py`・`parallel_repo.py`・`parallel_route.py`（行 1） |
 | `release-branch` | #2616 | 2 | `parallel_external.py`・`parallel_release.py`（行 1） |
 | `release-branch` | #2623 | 7 | リリースの形 package-plugin のブランチ（行 6） |
 | `spec-dir` | 違反でない | 4 | コメントが NDF 自身の確定仕様を指す箇所 |

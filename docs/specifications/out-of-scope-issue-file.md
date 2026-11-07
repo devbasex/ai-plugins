@@ -61,7 +61,7 @@
 | `plugins/ndf/scripts/lib/gh_rest.py`（`issue_search`・`issue_create`・`comment`） | GitHub の検索・作成・コメント。下は `gh_call` |
 | `plugins/ndf/scripts/lib/gh_sections.py`（`get_section`・`replace_section`） | 本文の節の取得と置換 |
 | `plugins/ndf/scripts/lib/step_result.py`（`result`・`emit`・`approval_present`・`EXIT_*`） | 結果 JSON・承認資料・終了コード |
-| `scripts/check-skill-repo-assumptions.py` の `EXCLUSIONS` | `issue-file.py` が `plugins/ndf/` で NDF の実体を持つ clone を見分けることを、対象リポジトリの決め打ちとして数えない |
+| `scripts/repo-assumptions-allow/` の `issue-file.py` の項目 | `issue-file.py` が `plugins/ndf/` で NDF の実体を持つ clone を見分けることを、対象リポジトリの決め打ちとして数えない |
 
 ```mermaid
 flowchart LR
