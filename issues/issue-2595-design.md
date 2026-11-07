@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 文脈の上限の判定は工程の起動でしか働かず、オーガナイザーの 1 手はどれも対象に入らない。2026-11-04 15:00 JST に起動した計画 p3 のオーガナイザーは、判定を起動直後の 1 回しか受けずに文脈が 800k トークンを超えた。切り替えの手順が指す引継ぎ文書 `parallel-p1` は `handoff.py` が名の形の違いで断り（終了コード 2）、切り替えの後に受けた古い起動の知らせは、済んだ提示を流し直す
+- **今どうなっているか**: 文脈の上限の判定は工程の起動でしか働かず、オーガナイザーの 1 手はどれも対象に入らない。2026-11-04 15:00 JST に起動した計画 p3 のオーガナイザーは、判定を起動直後の 1 回しか受けずに文脈が 800k トークンを超えた。切り替えの手順が指す引継ぎ文書 `parallel-p1` は、名の形が違うため `handoff.py` が断る（終了コード 2）。切り替えの後に受けた古い起動の指示は、済んだ起動の指示を流し直す
 - **誰に効くか**: 並列の計画を動かす利用者と、そのオーガナイザーの conductor
 - **変えると何が成り立つか**: オーガナイザーは `wait` を打ち直す時点で上限の判定を受け、1 回の Bash で引継ぎを済ませて `ndf-next` を出す。新しいセッションは動いている耐久ワークフローをそのまま使い、済んだ作業を流し直さずに続ける
 
@@ -17,7 +17,7 @@
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
 | 「オーガナイザーもconductorの1種である以上、他と同じルールでセッション再起動できるようにissueを起こして修正してください」（ https://github.com/devbasex/ai-plugins/issues/2595 ） | 利用者の指示の原文 | 判定の関数と上限を分けず、同じ規則を当てる |
-| 文脈 800k で `parallel.py wait`・`answer`・`relay.py restart` を判定すると、3 件とも鍵なし・拒否なし（要求の「今の振る舞いの確認」） | 実測 | 判定に入らないことが原因で、上限の値の問題ではない |
+| 文脈 800k で `parallel.py wait`・`answer`・`relay.py restart` を判定すると、3 件とも起動のキーなし・拒否なし（要求の「今の振る舞いの確認」） | 実測 | 判定に入らないことが原因で、上限の値の問題ではない |
 | `handoff.py init parallel-p1 --title x` が終了コード 2、「名が loop-<名>・sprint-<名>・milestone-<番号>・issue-<番号> の形でない」（2026-11-07、一時のリポジトリで実行） | 実測 | 判定を足すだけでは、手順書どおりに切り替えられない |
 | STD1 | 外部の一次情報 | 拒否の理由が Claude へ渡り、案内の文を次の 1 手へ使える |
 | PRD1 | 外部の一次情報 | 実行が長くなる処理は、受信中の処理が終わった時点で新しい実行へ切り替える |
@@ -25,7 +25,7 @@
 
 要求と受け入れ条件は #2595 の本文にある（コピーは `issues/issue-2595-requirements.md`）。この文書は「どう作るか」だけを扱う。
 
-要求の未決のうち、2（古い起動の知らせを見分ける手段）は決定 5、3（記録を出すエントリポイント）は決定 4 で決める。未決 1（今動いている計画の切り替えの時期）はリリース承認ゲートへ残す。
+要求の未決のうち、2（古い起動の指示を見分ける手段）は決定 5、3（記録を出すエントリポイント）は決定 4 で決める。未決 1（今動いている計画の切り替えの時期）はリリース承認ゲートへ残す。
 
 ## ドメインモデル
 
@@ -36,18 +36,18 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | オーガナイザー・カットポイント・判定の記録・引継ぎ文書・一時レーン・起動の指示 |
 | NDF のラッパー（`ndf-relay`） | `ndf-next`・切り替え・直接の子 |
 
-2 つの関係は共有カーネルとする。どちらも同じリポジトリが持ち、共有するのは「`ndf-next` のブロックを受けてセッションを切り替える」約束と、ラッパーの下かどうかの判定（`relay.py notice`）の 2 つである。
+2 つの関係は共有カーネルとする。どちらも同じリポジトリが持つ。共有するのは、`ndf-next` のブロックを受けてセッションを切り替える約束と、ラッパーの下かどうかの判定（`relay.py notice`）の 2 つである。
 
 ### 集約
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 文脈の判定 | 文脈の上限の hook（`hook_lib/token_guard.py`） | 起動 1 回の判定 | — | 起動の鍵・計画名・方針の適用値 |
+| 文脈の判定 | 文脈の上限の hook（`hook_lib/token_guard.py`） | 起動 1 回の判定 | — | 起動のキー・計画名・方針の適用値 |
 | 判定の記録 | `lib/context_decisions.py` | 記録のファイル | 行 | 工程の列の値・作業の識別子 |
 | 並列の進行 | 耐久ワークフロー（`lib/parallel_run.py` の `_Run` と、その基底の `lib/parallel_route.py`） | 計画の 1 実行 | リリース | 起動の指示 |
 | 引継ぎ文書 | `handoff.py` | 本体 | 節 | 名・再開コマンド |
 
-`handoff.py cut-organizer` は引継ぎ文書を書き換え、判定の記録へ追記する。記録の行の形は `lib/context_decisions.py` が作り、失敗しても引継ぎを止めないため、2 つの集約は結果整合で揃う（`sprint-state.py next` と同じ形）。
+`handoff.py cut-organizer` は引継ぎ文書を書き換え、判定の記録へ追記する。記録の行の形は `lib/context_decisions.py` が作る。記録に失敗しても引継ぎを止めないため、2 つの集約は結果整合で揃う（`sprint-state.py next` と同じ形）。
 
 ### 不変条件
 
@@ -64,7 +64,7 @@
 | I9 | 引継ぎ文書 | `cut-organizer` は引継ぎ文書を書けなくても再開コマンドを返す | 警告を返し、終了コードは 0 |
 | I10 | 並列の進行 | 済んだ起動の指示は、`wait` の知らせに起動の 1 行を持たない | 空の知らせで上書きし、添えるときは起動の 1 行を除く |
 | I11 | 並列の進行 | 一時レーンが読む流すもの（`helper_task` の `phase`）は、起動の指示が済んでも変わらない | 添える値は `action`・`n`・`k` を保つ |
-| I12 | 並列の進行 | 古い記録の打ち直しは同じ道を通る。空の知らせは新しい実行だけが出す | `durable.patched` が偽なら出さない |
+| I12 | 並列の進行 | 古い記録のリプレイは同じ道を通る。空の知らせは新しい実行だけが出す | `durable.patched` が偽なら出さない |
 
 ### ドメインイベント
 
@@ -79,7 +79,7 @@
 | E7 | ラッパーがプラグインを更新し、新しいセッションを起動した | ラッパー | 新しいセッション |
 | E8 | 新しいセッションがオーガナイザーの印を付け直した | `parallel.py start` | 統括役 |
 | E9 | 新しいセッションが答えていない問いを受け取った | `parallel.py wait` | 新しいセッション |
-| E10 | 新しいセッションが古い起動の知らせを受けた | `parallel.py wait` | 新しいセッション |
+| E10 | 新しいセッションが古い起動の指示を受けた | `parallel.py wait` | 新しいセッション |
 | E11 | 起動の指示が済んだ | 耐久ワークフロー | オーガナイザー（`wait`）。E10 の知らせを上書きする |
 
 ### 用語
@@ -89,44 +89,7 @@
 | オーガナイザーのカットポイント | オーガナイザーが知らせへの 1 手と答えの後の整理を終え、`parallel.py wait` を打ち直す時点。文脈の上限の判定はここで行う | 追加（要求の変更で反映済み） |
 | 起動の指示 | 耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。一時レーンが問いを送るか、リリースが締まると済む | 追加 |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか） | 意味の変更（並列の計画を足す） |
-| 作業の識別子 | 複数のセッションを 1 つの作業として結ぶ鍵。課題番号の組（`#829 #830`）か、並列の計画のオーガナイザーなら `parallel:<計画名>` | 意味の変更（計画の形を足す） |
-
-## 外部の調査
-
-| 種類 | 調べるか | 理由 |
-| --- | --- | --- |
-| 標準・仕様 | 調べる | hook の拒否の振る舞いは Claude Code の仕様で決まる |
-| 主要な製品 | 調べる | 長く動く処理の切り替えと、知らせの再配信の扱いに定着した形がある |
-| ライブラリとサービス | 調べる | 耐久ワークフローへ知らせを足すとき、依存している DBOS の版の分岐を使えるかを確かめる |
-
-### 標準・仕様
-
-| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| STD1 | Claude Code の hooks の PreToolUse | `deny` は呼び出しを止め、`permissionDecisionReason` は Claude に示される。PreToolUse は permission の要否に依らず毎回の呼び出しの前に動く | 案内は拒否の文に載せる。背景の起動（`run_in_background: true`）も Bash の呼び出しとして判定に入る | https://code.claude.com/docs/en/hooks （2026-11-07）。ページ末尾の約 1 万字は読んでいない |
-
-### 主要な製品
-
-| # | 製品 | どう解いているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| PRD1 | Temporal の Continue-As-New | 履歴が長くなった実行は、同じ Workflow Id の新しい実行へ切り替える。判断は `is_continue_as_new_suggested()` を実行の中で読む。切り替えは受信の処理が終わるのを待ってから行い、状態は引数で明示して渡す | 切る時点を「知らせの処理が終わり `wait` を打ち直す前」に置く。状態は耐久の記録が持つので、再開コマンドは計画名だけでよい | https://docs.temporal.io/develop/python/continue-as-new （2026-11-07） |
-| PRD2 | Kubernetes のコントローラ | コントローラは今の状態を望ましい状態へ近づける。出来事の列でなく状態を見て動く | 古い知らせの処理を受け手の推定に任せず、知らせの値そのものを今の状態へ合わせる | https://kubernetes.io/docs/concepts/architecture/controller/ （2026-11-07。取得は本文の要約で、原文の確認は未） |
-
-### ライブラリとサービス
-
-| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | DBOS の `patch`（依存にある） | 3.1.0（固定）。最新 3.4.0 | MIT | 3.1.0 は 2026-09-24、3.4.0 は 2026-10-28 | 無し（PyPI の分類は Production/Stable） | 満たす。記録の位置に別の行があれば偽を返して何も足さず、無ければ印を書いて真を返す。`patch-` の印は `parallel_run.py` の `parallel-route` で使っている | https://docs.dbos.dev/python/tutorials/upgrading-workflows ・ https://pypi.org/pypi/dbos/json （2026-11-07）・`dbos/_dbos.py` の `patch`（venv の 3.1.0） |
-
-### 確かめられなかったこと
-
-| 対象 | 試した手段 | 結果と理由 |
-| --- | --- | --- |
-| 背景の起動が PreToolUse を通ることの文書の明記 | https://code.claude.com/docs/en/hooks | 明記は無い。「すべての Tool の呼び出しの前」からの読みである。今の `guard_sleep` が `tool_input.run_in_background` を読んでいる。受け入れ条件 16 の通し確認で実物を見る |
-| `set_event` が DBOS の記録のステップか | 上の DBOS の文書 | 文書に記載が無い。今のコードで `pause` の呼び出しの追加を `patched` で分けているので、結論に依らない形にした |
-| Temporal の Idempotency の記述 | https://docs.temporal.io/activity-execution | 取得したページに冪等の鍵の節が無い。設計はこの記述に依らない |
-
-調べた量: 候補 4 件・取得の試み 6 回。
+| 作業の識別子 | 複数のセッションを 1 つの作業として結ぶキー。課題番号の組（`#829 #830`）か、並列の計画のオーガナイザーなら `parallel:<計画名>` | 意味の変更（計画の形を足す） |
 
 ## 機能一覧
 
@@ -137,30 +100,40 @@
 | F3 | 切り替えの後に済んだ起動を重ねない | 新しいオーガナイザーのセッション |
 | F4 | オーガナイザーの判定と再起動を記録から読む | 利用者・再起動の方針の見直し |
 
+## 決定の記録
+
+[issue-2595-design-decisions.md](issue-2595-design-decisions.md) にある。
+
 ## 構成要素
+
+### 要素と責務
 
 | 要素 | 責務 |
 | --- | --- |
 | `wait` の判別（`hook_lib/shell_checks.py` の `parallel_wait`） | コマンドの位置で起動する `parallel.py wait` を見つけ、計画名を返す。`supervise.py` の判別と同じ走査を共有する |
-| 文脈の上限の hook（`hook_lib/token_guard.py`） | 起動の鍵に `parallel` の種を足し、オーガナイザーの拒否の文を作る。判定の関数と排他は共有する |
+| 文脈の上限の hook（`hook_lib/token_guard.py`） | 起動のキーに `parallel` の種を足し、オーガナイザーの拒否の文を作る。判定の関数と排他は共有する |
 | 計画の小さな部品（`lib/parallel_files.py`） | 計画名の形（`PLAN_RE`）と計画の起動の 1 行（`organizer_line`）の唯一の定義。pydantic と DBOS を import しない |
-| 判定の記録（`lib/context_decisions.py`） | `stage_of` が `parallel:wait` を返す。印の 1 行を書く `record_mark` を足し、`record_restart` が書き手の名を受ける |
+| 判定の記録（`lib/context_decisions.py`） | `stage_of` が `parallel:wait` を返す。引継ぎ開始の印の 1 行を書く `record_mark` を足し、`record_restart` が書き手の名を受ける |
 | 較正（`lib/context_calibrate.py`） | 工程の区切りから `parallel:wait` の行を除く |
 | 引継ぎの CLI（`handoff.py`） | 名の形に `parallel-<計画名>` を足す。`cut-organizer` を足す。`find` の照合の規則を足す |
-| 並列の進行（`lib/parallel_route.py`・`lib/parallel_run.py`） | 起動の指示が済んだ印を立て、知らせを今の状態へ合わせる。`step_finish` が引継ぎ文書を消す |
+| 並列の進行（`lib/parallel_route.py`・`lib/parallel_run.py`） | 起動の指示の済みの印を立て、知らせを今の状態へ合わせる。`step_finish` が引継ぎ文書を消す |
 | 手順書（`references/parallel.md`・`context-window.md`・`handoff.md`・`conductor-entrypoints.md`、`restart` の `SKILL.md`、`parallel-plan.md`、`plugins/ndf/README.md` の hook の表） | オーガナイザーのカットポイント、止められたときの 3 手、文書の名と再開コマンドの例外 |
 
 変えないもの: `parallel.py` の引数と出力の形、ラッパー（`relay.py`）、上限の値と再起動の方針の解決。
 
-**値の集合へ足す値と、既存の規則の判定。** 当てはまらない規則だけを変える対象として上の表へ載せた。
+### 足す値と、当てはまらない既存の規則
+
+当てはまらない規則だけを変える対象として、要素と責務の表へ載せた。
 
 | 足す値 | 当てはまらない既存の規則 | 変える先 |
 | --- | --- | --- |
-| 起動の鍵の種 `parallel` | `stage_of` は知らない種を `plan` と読む | `lib/context_decisions.py` |
+| 起動のキーの種 `parallel` | `stage_of` は知らない種を `plan` と読む | `lib/context_decisions.py` |
 | 工程の列 `parallel:wait` | 較正の全工程（`*`）の見込みが、他の conductor の費用の判定へ効く | `lib/context_calibrate.py` |
 | 引継ぎ文書の名 `parallel-<計画名>` | `NAME_RE`・名の誤りの文・`handoff.md` の名の表・`parallel-plan.md` の名の形。`match_words` は知らない頭を `sprint-` の規則で読み、入力の `p1` の語だけで一致する | `handoff.py`・手順書 |
 | 引継ぎ文書の名 `parallel-<計画名>` | 再開コマンドは文書のパスを含める規則。オーガナイザーの再開コマンドは起動の 1 行である | `handoff.md`・`restart` の `SKILL.md`・`parallel.md` |
 | 作業の識別子 `parallel:<計画名>` | `work_id` は数字の並びだけを通す | 文脈の上限の hook が `work_id` を通さずに渡す。`report --work`・`fill_work`・`last_denial`・`works` は文字列の一致なので当てはまる |
+
+### 構成要素の関係
 
 ```mermaid
 graph TD
@@ -191,9 +164,9 @@ graph TD
     O --> W
 ```
 
-計画の小さな部品は呼ばれる関数だけ、手順書はコードから読まれないので、どちらも図に入れない。ラッパーは変えないので、次の文脈の図に置く。
+計画の小さな部品は呼ばれる関数だけ、手順書はコードから読まれないので、どちらも図に入れない。ラッパーは変えないので、次のシステムの文脈の図に置く。
 
-**文脈。**
+### システムの文脈
 
 ```mermaid
 graph TD
@@ -203,7 +176,9 @@ graph TD
     Wrap --> Next[新しいセッション]
 ```
 
-**配置。** 判定は Bash の呼び出しごとに動く hook のプロセス、`cut-organizer` は Bash の前景のプロセス、耐久ワークフローはセッションから切り離した `parallel.py run` のプロセスで動く。セッションをまたぐものは耐久の記録（SQLite）と引継ぎ文書だけである。
+### 配置
+
+判定は Bash の呼び出しごとに動く hook のプロセスで動く。`cut-organizer` は Bash の前景のプロセスで動く。耐久ワークフローはセッションから切り離した `parallel.py run` のプロセスで動く。セッションをまたぐものは耐久の記録（SQLite）と引継ぎ文書だけである。
 
 ```mermaid
 graph TD
@@ -228,14 +203,14 @@ graph TD
     Run -->|イベントを書く| Db
 ```
 
-**置き場。**
+### 置き場
 
 ```text
 plugins/ndf/scripts/
 ├── handoff.py                    # 名の形・cut-organizer・match_words
 ├── hook_lib/
 │   ├── shell_checks.py           # parallel_wait
-│   └── token_guard.py            # 起動の鍵・拒否の文
+│   └── token_guard.py            # 起動のキー・拒否の文
 ├── lib/
 │   ├── context_calibrate.py      # 工程の区切り
 │   ├── context_decisions.py      # stage_of・record_mark・record_restart
@@ -246,7 +221,13 @@ plugins/ndf/scripts/
 └── tests/
 ```
 
-**検査の手段。** `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_token_guard.py plugins/ndf/scripts/tests/test_context_policy_hook.py plugins/ndf/scripts/tests/test_parallel_run.py plugins/ndf/scripts/tests/test_handoff.py -q`。`parallel_run.py` は行数の例外に載っているため、起動の指示の処理は基底の `parallel_route.py` に置き、例外の上限を増やさない。
+### 検査の手段
+
+```bash
+uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_token_guard.py plugins/ndf/scripts/tests/test_context_policy_hook.py plugins/ndf/scripts/tests/test_parallel_run.py plugins/ndf/scripts/tests/test_handoff.py -q
+```
+
+`parallel_run.py` は行数の例外に載っているため、起動の指示の処理は基底の `parallel_route.py` に置き、例外の上限を増やさない。
 
 ## 構造
 
@@ -273,11 +254,11 @@ classDiagram
 
 | 型 | 変更 |
 | --- | --- |
-| `Launch`（`hook_lib/token_guard.py`。新規の `NamedTuple`） | 起動の鍵・課題番号を探す文・計画名の組。計画名がある起動はオーガナイザーの `wait` である |
+| `Launch`（`hook_lib/token_guard.py`。新規の `NamedTuple`） | 起動のキー・課題番号を探す文・計画名の組。計画名がある起動はオーガナイザーの `wait` である |
 | `ReleaseRouting`（`lib/parallel_route.py`） | `take_launch`・`launch_view` を足す |
 | `_Run`（`lib/parallel_run.py`） | `launch` の辞書に `taken: true` を持てるようにする。列を増やさない |
 
-`_Run.launch` の中に印を持つのは、#2647 の台帳が `launch` を丸ごと保存するためである。新しい属性にすると、台帳の列を足す手間が増える。
+`_Run.launch` の中に済みの印を持つのは、#2647 の台帳が `launch` を丸ごと保存するためである。新しい属性にすると、台帳の列を足す手間が増える。
 
 ## データ構造
 
@@ -331,7 +312,10 @@ classDiagram
 {plan} が <計画名> のままなら、動かしている計画の名前を補う。規約: {PARALLEL_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）
 ```
 
-実際の文は 1 行で、`{over}` はほかの conductor と同じ `_trial_cause` の解決から作る。ラッパーの外では「ラッパーの下なので…」の文の代わりに「このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る」を置き、手順 3 の 1 文を除く。
+実際の文は 1 行で、`{over}` はほかの conductor と同じ `_trial_cause` の解決から作る。ラッパーの外では次の 2 点が変わる。
+
+- 「ラッパーの下なので…」の文の代わりに「このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る」を置く
+- 手順 3 の 1 文を除く
 
 ### `handoff.py cut-organizer <計画名> [--reason <理由>]`
 
@@ -363,7 +347,7 @@ classDiagram
 
 ## 処理の流れ
 
-**切り替え。**
+### 切り替え
 
 ```mermaid
 sequenceDiagram
@@ -382,14 +366,14 @@ sequenceDiagram
         O->>W: ndf-next のブロックで応答を終える
         W->>N: プラグインを更新して起動
         N->>N: 引継ぎ文書があれば読む
-        N->>N: parallel.py start p1（印を付け直す）
+        N->>N: parallel.py start p1（オーガナイザーの印を付け直す）
         N->>N: parallel.py wait p1（--after 0）
     end
 ```
 
 背景の作業が残っていれば、ラッパーの Stop hook は切り替えない（今の振る舞い）。`wait` は拒否で起動しないため、切り替えの時点で動く背景の `wait` は無い。
 
-**起動の指示が済む。**
+### 起動の指示が済む
 
 ```mermaid
 sequenceDiagram
@@ -410,7 +394,7 @@ sequenceDiagram
     end
 ```
 
-**起動の指示の状態。**
+### 起動の指示の状態
 
 ```mermaid
 stateDiagram-v2
@@ -418,7 +402,7 @@ stateDiagram-v2
     未済 --> 済み: 一時レーンが問いを送る
     未済 --> 締まった: settle
     済み --> 締まった: settle
-    済み --> 未済: 次の提示か confirmed を知らせる
+    済み --> 未済: 次の release か confirmed を知らせる
     締まった --> [*]
 ```
 
@@ -431,38 +415,7 @@ stateDiagram-v2
 | 可用性 | hook の判定が失敗しても `wait` を塞がない。塞ぐのは上限を超えたと判定できたときだけである | 量を読めない・排他を取れない・構文を読めないときは今の経路で `None` を返す | 3 つの場合の単体テスト |
 | 性能・拡張性 | `parallel.py` の語を含まない Bash の起動に、構文の解析を足さない | `parallel_wait` の先頭で語の照合を行い、無ければ返す | 解析の関数を呼ぶと失敗する偽物でテストする |
 | 運用・保守性 | 判定の記録の増加は `wait` 1 回につき 1 行に収める | 判定 1 回に `append_decision` 1 回の今の経路を通す | 行数を数えるテスト |
-| 移行性 | 判定の記録の形を変えない。動いている計画は、リリースの後の次の切り替えから新しい判定を受ける（前提 5） | 列を足さない。`pause` の追加は `durable.patched` で分け、古い記録の打ち直しは同じ道を通す | 記録を読むテストと、印の無い記録の打ち直しのテスト |
-
-## 決定の記録
-
-[issue-2595-design-decisions.md](issue-2595-design-decisions.md) にある。
-
-## テスト設計
-
-| 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
-| --- | --- | --- |
-| 1 / I1 | ラッパーの下で上限を超えた `wait` が `deny` になる | `wait` を鍵から外すと落ちる |
-| 2 | 上限以下の `wait` は拒否されない | 上限の比べ方を逆にすると落ちる |
-| 3 | 背景・`env`・代入・`&&`・`;`・`"$NDF_SCRIPTS/parallel.py"`・`--after` が前の形で同じに判定し、計画名を返す。`echo` の引数と `my-parallel.py` は対象外 | 文字列の部分一致にすると落ちる |
-| 4 / I2 | `start`・`answer`・`confirm`・`settle`・`await`・`relay.py` の 3 つは上限を超えても通る | 判定を `parallel.py` の語だけにすると落ちる |
-| 5 | ラッパーの下は同じコマンドを打ち直しても拒否、外は 2 回目を 1 度だけ通す | 鍵に時刻を混ぜると外で落ち、止め続けを外すと下で落ちる |
-| 6 / I3 | 量を読めない・排他を取れない・構文を読めないときに通り、次の `wait` で判定する | 量が無いときに拒否すると落ちる |
-| 7 / I4 | 判定 1 回で 1 行増え、`stage` が `parallel:wait`、`work` が `parallel:p1`。その記録で `calibrate` が成功する | `stage_of` の分岐を外すと `plan` になって落ちる |
-| I5 | 語の無い Bash では構文解析を呼ばない | 語の照合を消すと落ちる |
-| 8 / I6 | 文が起動の 1 行と `parallel-p1` を持ち、`<課題番号>` を持たない。読めない計画名では `<計画名>` になる | ほかの conductor の文を流用すると落ちる |
-| 9 | 試行方式の理由の句と `NDF_CONTEXT_LIMIT` の値が文に載る | 上限を固定の文字にすると落ちる |
-| 10 | `NDF_CONTEXT_GUARD=0` とサブエージェントの中で判定も記録もしない | 判定を環境変数の検査より前に置くと落ちる |
-| I7 | `parallel:wait` の行を足しても `stage_calls` の `*` が変わらない | 除外を外すと落ちる |
-| 11 | 動いている耐久ワークフローへ `start` を打つと 2 本目を起動せず今の pid、`metrics.organizer` が true | 印を付け直さないと落ちる |
-| 12 | 答えていない問いが残る状態で `wait --after 0` から `seq` で打ち直し、全件が届く | `wait_from` を最新の 1 件だけ返す形にすると落ちる |
-| 13 / I10 | 一時レーンの問い・リリース承認ゲートの依頼・`settle` の後に、知らせへ `spawn` が残らない。一時レーンから何も届いていない指示には `spawn` が残る。`held` の古い 1 行は `loop pending` が `none` で終える | 印を立てないと落ち、起動の前に印を立てると未済の指示を失って落ちる |
-| I11 | 問いの後の知らせでも `helper_task` が `confirmed` を返す | `release` ごと消すと `present` になって落ちる |
-| I12 | `parallel-route` より前の形の記録を打ち直しても `DBOSUnexpectedStepError` にならない | `patched` を外すと落ちる |
-| 14 / I8 | スプリントの状態ファイルなしで `cut-organizer` が 2 行を残し、理由を直前の拒否から引き継ぐ | 書き手を `sprint-state` の経路に戻すと落ちる |
-| I9 | `.ndf/` が無い・書けないときも 0 で `block` を返す | 文書の失敗を終了コードへ流すと落ちる |
-| 15 | `parallel.md` と `context-window.md` のカットポイントの節を、人が読んで問いに答える（文言のテストは書かない） | 完了判定で読み手の確認が通らない |
-| 16 | 使い捨てのラッパーの下で、大きな文脈の記録を渡したオーガナイザーの判定から `ndf-next`・次のセッションの `start`・`wait --after 0` までを 1 回通し、問いが届く | 実装の通し確認。背景の `wait` の拒否もここで見る |
-| 17 | リリース後に動いている計画で 1 回切り替わり、判定の記録に複数の判定の行と再起動の行が残り、計画が続く | リリース後テスト（人が記録と `relay.py ls` を見る） |
+| 移行性 | 判定の記録の形を変えない。動いている計画は、リリースの後の次の切り替えから新しい判定を受ける（前提 5） | 列を足さない。`pause` の追加は `durable.patched` で分け、古い記録のリプレイは同じ道を通す | 記録を読むテストと、`patch-` の印の無い記録のリプレイのテスト |
 
 ## 設計の結果
 
@@ -470,12 +423,76 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | #2595 | 実装する | — | `plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/shell_checks.py`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/lib/context_decisions.py`、`plugins/ndf/scripts/lib/context_calibrate.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`plugins/ndf/skills/restart/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/README.md`、`docs/glossary.md`、`docs/glossary/glossary.json` |
 
+## テスト設計
+
+| 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
+| --- | --- | --- |
+| 1 / I1 | ラッパーの下で上限を超えた `wait` が `deny` になる | `wait` を起動のキーから外すと落ちる |
+| 2 | 上限以下の `wait` は拒否されない | 上限の比べ方を逆にすると落ちる |
+| 3 | 背景・`env`・代入・`&&`・`;`・`"$NDF_SCRIPTS/parallel.py"`・`--after` が前の形で同じに判定し、計画名を返す。`echo` の引数と `my-parallel.py` は対象外 | 文字列の部分一致にすると落ちる |
+| 4 / I2 | `start`・`answer`・`confirm`・`settle`・`await`・`relay.py` の 3 つは上限を超えても通る | 判定を `parallel.py` の語だけにすると落ちる |
+| 5 | ラッパーの下は同じコマンドを打ち直しても拒否、外は 2 回目を 1 度だけ通す | 起動のキーに時刻を混ぜると外で落ち、止め続けを外すと下で落ちる |
+| 6 / I3 | 量を読めない・排他を取れない・構文を読めないときに通り、次の `wait` で判定する | 量が無いときに拒否すると落ちる |
+| 7 / I4 | 判定 1 回で 1 行増え、`stage` が `parallel:wait`、`work` が `parallel:p1`。その記録で `calibrate` が成功する | `stage_of` の分岐を外すと `plan` になって落ちる |
+| I5 | 語の無い Bash では構文解析を呼ばない | 語の照合を消すと落ちる |
+| 8 / I6 | 文が起動の 1 行と `parallel-p1` を持ち、`<課題番号>` を持たない。読めない計画名では `<計画名>` になる | ほかの conductor の文を流用すると落ちる |
+| 9 | 試行方式の理由の句と `NDF_CONTEXT_LIMIT` の値が文に載る | 上限を固定の文字にすると落ちる |
+| 10 | `NDF_CONTEXT_GUARD=0` とサブエージェントの中で判定も記録もしない | 判定を環境変数の検査より前に置くと落ちる |
+| I7 | `parallel:wait` の行を足しても `stage_calls` の `*` が変わらない | 除外を外すと落ちる |
+| 11 | 動いている耐久ワークフローへ `start` を打つと 2 本目を起動せず今の pid、`metrics.organizer` が true | オーガナイザーの印を付け直さないと落ちる |
+| 12 | 答えていない問いが残る状態で `wait --after 0` から `seq` で打ち直し、全件が届く | `wait_from` を最新の 1 件だけ返す形にすると落ちる |
+| 13 / I10 | 一時レーンの問い・リリース承認ゲートの依頼・`settle` の後に、知らせへ `spawn` が残らない。一時レーンから何も届いていない指示には `spawn` が残る。`held` の古い 1 行は `loop pending` が `none` で終える | 済みの印を立てないと落ち、起動の前に済みの印を立てると未済の指示を失って落ちる |
+| I11 | 問いの後の知らせでも `helper_task` が `confirmed` を返す | `release` ごと消すと `present` になって落ちる |
+| I12 | `parallel-route` より前の形の記録をリプレイしても `DBOSUnexpectedStepError` にならない | `patched` を外すと落ちる |
+| 14 / I8 | スプリントの状態ファイルなしで `cut-organizer` が 2 行を残し、理由を直前の拒否から引き継ぐ | 書き手を `sprint-state` の経路に戻すと落ちる |
+| I9 | `.ndf/` が無い・書けないときも 0 で `block` を返す | 文書の失敗を終了コードへ流すと落ちる |
+| 15 | `parallel.md` と `context-window.md` のカットポイントの節を、人が読んで問いに答える（文言のテストは書かない） | 完了判定で読み手の確認が通らない |
+| 16 | 使い捨てのラッパーの下で、大きな文脈の記録を渡したオーガナイザーの判定から `ndf-next`・次のセッションの `start`・`wait --after 0` までを 1 回通し、問いが届く | 実装の通し確認。背景の `wait` の拒否もここで見る |
+| 17 | リリース後に動いている計画で 1 回切り替わり、判定の記録に複数の判定の行と再起動の行が残り、計画が続く | リリース後テスト（人が記録と `relay.py ls` を見る） |
+
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 今動いている計画の切り替えの時期 | 動いているオーガナイザーのセッションと `run` のプロセスは、リリースの後も古いコードで動く。人が `/ndf:restart` を打つと新しい判定へ移るが、`run` は古いままなので、最初の切り替えの後は古い起動の知らせを打つと流し直しが起きうる。時期はリリース承認ゲートで利用者が決める（要求の未決 1） |
+| 今動いている計画の切り替えの時期 | 動いているオーガナイザーのセッションと `run` のプロセスは、リリースの後も古いコードで動く。人が `/ndf:restart` を打つと新しい判定へ移るが、`run` は古いままなので、最初の切り替えの後は古い起動の指示を打つと流し直しが起きうる。時期はリリース承認ゲートで利用者が決める（要求の未決 1） |
 | `/ndf:restart` の再開コマンド | `restart` の表に計画の起動の 1 行を足す。実行の確認はリリースの前に受け入れ条件 16 の通し確認で行う |
 | 送った直後の切り替えの競合 | `settle` か問いを送った直後は、耐久ワークフローが受けるまで最長で約 60 秒（`recv` の 2 回分）の間、古い `pause` が残る。この間に新しいセッションが `wait --after 0` を打つと、流し直しが起きうる。起きる頻度は未測定で、測った結果で扱いを決める |
 | 空の `notice` の増分 | リリース 1 本につき 2 回、オーガナイザーの 1 手が増える。増える費用は未測定である |
-| #2647 との衝突 | #2647 の設計は `_Run` の値を台帳へ保存し、観測を別のモジュールへ移す。印は `launch` の辞書の中なので列は増えない。どちらが先でも、後からマージする側が `parallel_run.py` の差分を取り込み直す |
+| #2647 との衝突 | #2647 の設計は `_Run` の値を台帳へ保存し、観測を別のモジュールへ移す。済みの印は `launch` の辞書の中なので列は増えない。どちらが先でも、後からマージする側が `parallel_run.py` の差分を取り込み直す |
+
+## 外部の調査
+
+| 種類 | 調べるか | 理由 |
+| --- | --- | --- |
+| 標準・仕様 | 調べる | hook の拒否の振る舞いは Claude Code の仕様で決まる |
+| 主要な製品 | 調べる | 長く動く処理の切り替えと、知らせの再配信の扱いに定着した形がある |
+| ライブラリとサービス | 調べる | 耐久ワークフローへ知らせを足すとき、依存している DBOS の版の分岐を使えるかを確かめる |
+
+### 標準・仕様
+
+| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| STD1 | Claude Code の hooks の PreToolUse | `deny` は呼び出しを止め、`permissionDecisionReason` は Claude に示される。PreToolUse は permission の要否に依らず毎回の呼び出しの前に動く | 案内は拒否の文に載せる。背景の起動（`run_in_background: true`）も Bash の呼び出しとして判定に入る | https://code.claude.com/docs/en/hooks （2026-11-07）。ページ末尾の約 1 万字は読んでいない |
+
+### 主要な製品
+
+| # | 製品 | どう解いているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| PRD1 | Temporal の Continue-As-New | 履歴が長くなった実行は、同じ Workflow Id の新しい実行へ切り替える。判断は `is_continue_as_new_suggested()` を実行の中で読む。切り替えは受信の処理が終わるのを待ってから行い、状態は引数で明示して渡す | 切る時点を「知らせの処理が終わり `wait` を打ち直す前」に置く。状態は耐久の記録が持つので、再開コマンドは計画名だけでよい | https://docs.temporal.io/develop/python/continue-as-new （2026-11-07） |
+| PRD2 | Kubernetes のコントローラ | コントローラは今の状態を望ましい状態へ近づける。出来事の列でなく状態を見て動く | 古い知らせの処理を受け手の推定に任せず、知らせの値そのものを今の状態へ合わせる | https://kubernetes.io/docs/concepts/architecture/controller/ （2026-11-07。取得は本文の要約で、原文の確認は未） |
+
+### ライブラリとサービス
+
+| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LIB1 | DBOS の `patch`（依存にある） | 3.1.0（固定）。最新 3.4.0 | MIT | 3.1.0 は 2026-09-24、3.4.0 は 2026-10-28 | 無し（PyPI の分類は Production/Stable） | 満たす。記録の位置に別の行があれば偽を返して何も足さず、無ければ印を書いて真を返す。`patch-` の印は `parallel_run.py` の `parallel-route` で使っている | https://docs.dbos.dev/python/tutorials/upgrading-workflows ・ https://pypi.org/pypi/dbos/json （2026-11-07）・`dbos/_dbos.py` の `patch`（venv の 3.1.0） |
+
+### 確かめられなかったこと
+
+| 対象 | 試した手段 | 結果と理由 |
+| --- | --- | --- |
+| 背景の起動が PreToolUse を通ることの文書の明記 | https://code.claude.com/docs/en/hooks | 明記は無い。「すべての Tool の呼び出しの前」からの読みである。今の `guard_sleep` が `tool_input.run_in_background` を読んでいる。受け入れ条件 16 の通し確認で実物を見る |
+| `set_event` が DBOS の記録のステップか | 上の DBOS の文書 | 文書に記載が無い。今のコードで `pause` の呼び出しの追加を `patched` で分けているので、結論に依らない形にした |
+| Temporal の Idempotency の記述 | https://docs.temporal.io/activity-execution | 取得したページに冪等キーの節が無い。設計はこの記述に依らない |
+
+調べた量: 候補 4 件・取得の試み 6 回。
