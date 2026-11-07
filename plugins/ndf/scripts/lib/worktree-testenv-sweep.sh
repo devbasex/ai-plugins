@@ -338,11 +338,64 @@ _reclaim_environment() {
 
 # --- 回収の本体 ---------------------------------------------------------------
 
+# 実行系の事前確認。接続できない Docker で行を解放しない（決定 10）。`compose ls` は Compose と接続を 1 回で確かめる。
+# 失敗したら回収しなかった結果を出して 1 を返す。使い方: _reclaim_preflight <台帳のパス>
+# 控えを消す trap は呼び手の部分シェルで張られる（reclaim_run は部分シェルの中で呼ばれる）。
+_reclaim_preflight() {
+  local path=$1
+  has_docker || { _reclaim_not_run "コンテナ実行系が見つかりません"; return 1; }
+  RECLAIM_DOCKER=$(command -v "$(docker_command)")
+  # 標準エラーの控えは台帳の隣に置き、回収の終わりに消す。
+  RECLAIM_TMP="$(dirname "$path")/reclaim-$$-${RANDOM:-0}.d"
+  mkdir "$RECLAIM_TMP" 2>/dev/null || { _reclaim_not_run "控えのディレクトリを作れない: $RECLAIM_TMP"; return 1; }
+  trap 'rm -rf "$RECLAIM_TMP"' EXIT
+  RECLAIM_LOCKED=$(_reclaim_locked_paths) || { _reclaim_not_run "worktree の一覧を読めない"; return 1; }
+  _reclaim_limited /dev/null "$RECLAIM_TMP/ls.err" "$RECLAIM_DOCKER" compose ls -q || {
+    _reclaim_not_run "コンテナ実行系へ繋がらない: $(_reclaim_error_line "$RECLAIM_TMP/ls.err")"
+    return 1
+  }
+}
+
+# 行を分類し、置き場を確かめられない worktree を unseen として記録する。stale は RECLAIM_STALE へ入れる。
+# 使い方: _reclaim_split_rows <台帳の内容> <worktree…>
+_reclaim_split_rows() {
+  local snapshot=$1 worktree
+  shift
+  RECLAIM_STALE=()
+  for worktree in "$@"; do
+    _reclaim_classify "$worktree"
+    case "$RECLAIM_CLASS" in
+      stale) RECLAIM_STALE+=("$worktree") ;;
+      unseen)
+        _reclaim_item unseen "$(printf '%s' "$snapshot" | jq -r --arg wt "$worktree" \
+          '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .environment')" "$worktree" \
+          reason "回収を打った位置から worktree の置き場を確かめられない"
+        ;;
+    esac
+  done
+}
+
+# 環境ごとの計画を 1 行 1 環境のタブ区切り（環境名・worktree の一覧・公開の URL）で出す。
+# 公開は解放の後にも閉じられる。解放済みの行の公開が開いていても破棄しない。
+# 使い方: _reclaim_plan <台帳の内容> <stale の worktree…>
+_reclaim_plan() {
+  local snapshot=$1
+  shift
+  printf '%s' "$snapshot" | jq -r --argjson stale \
+    "$(printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0))')" '
+    .assignments as $all
+    | [$all[] | . as $row | select(.released_at == null and any($stale[]; . == $row.worktree))]
+    | group_by(.environment)[]
+    | .[0].environment as $e
+    | ([$all[] | select(.environment == $e and .expose != null and .expose.closed_at == null) | .expose.url] | last // "") as $url
+    | "\($e)\t\(map(.worktree) | unique | join(", "))\t\($url)"'
+}
+
 # 残った割り当てを回収し、結果の JSON を標準出力へ出す。第 1 引数が 1 なら、1 環境を空けたら止める。
 # `TARGET` などの変数を書き換えるため、**部分シェルの中で呼ぶ。**
 reclaim_run() {
   local one_only=${1:-0} path snapshot worktree missing=0 line environment url shown
-  local -a rows plan stale=()
+  local -a rows plan
   RECLAIM_ITEMS=""
   RECLAIM_FREED=0
   RECLAIM_DEADLINE=$(($(date +%s) + ${WT_RECLAIM_SECONDS:-$RECLAIM_SECONDS}))
@@ -364,40 +417,9 @@ reclaim_run() {
     return
   fi
 
-  # 接続できない Docker で行を解放しない（決定 10）。`compose ls` は Compose と接続を 1 回で確かめる。
-  has_docker || { _reclaim_not_run "コンテナ実行系が見つかりません"; return 1; }
-  RECLAIM_DOCKER=$(command -v "$(docker_command)")
-  # 標準エラーの控えは台帳の隣に置き、回収の終わりに消す。
-  RECLAIM_TMP="$(dirname "$path")/reclaim-$$-${RANDOM:-0}.d"
-  mkdir "$RECLAIM_TMP" 2>/dev/null || { _reclaim_not_run "控えのディレクトリを作れない: $RECLAIM_TMP"; return 1; }
-  trap 'rm -rf "$RECLAIM_TMP"' EXIT
-  RECLAIM_LOCKED=$(_reclaim_locked_paths) || { _reclaim_not_run "worktree の一覧を読めない"; return 1; }
-  _reclaim_limited /dev/null "$RECLAIM_TMP/ls.err" "$RECLAIM_DOCKER" compose ls -q || {
-    _reclaim_not_run "コンテナ実行系へ繋がらない: $(_reclaim_error_line "$RECLAIM_TMP/ls.err")"
-    return 1
-  }
-
-  for worktree in "${rows[@]+"${rows[@]}"}"; do
-    _reclaim_classify "$worktree"
-    case "$RECLAIM_CLASS" in
-      stale) stale+=("$worktree") ;;
-      unseen)
-        _reclaim_item unseen "$(printf '%s' "$snapshot" | jq -r --arg wt "$worktree" \
-          '[.assignments[] | select(.released_at == null and .worktree == $wt)] | last | .environment')" "$worktree" \
-          reason "回収を打った位置から worktree の置き場を確かめられない"
-        ;;
-    esac
-  done
-
-  # 公開は解放の後にも閉じられる。解放済みの行の公開が開いていても破棄しない。
-  _wt_read_lines < <(printf '%s' "$snapshot" | jq -r --argjson stale \
-    "$(printf '%s\n' "${stale[@]+"${stale[@]}"}" | jq -Rsc 'split("\n") | map(select(length > 0))')" '
-    .assignments as $all
-    | [$all[] | . as $row | select(.released_at == null and any($stale[]; . == $row.worktree))]
-    | group_by(.environment)[]
-    | .[0].environment as $e
-    | ([$all[] | select(.environment == $e and .expose != null and .expose.closed_at == null) | .expose.url] | last // "") as $url
-    | "\($e)\t\(map(.worktree) | unique | join(", "))\t\($url)"')
+  _reclaim_preflight "$path" || return 1
+  _reclaim_split_rows "$snapshot" "${rows[@]+"${rows[@]}"}"
+  _wt_read_lines < <(_reclaim_plan "$snapshot" "${RECLAIM_STALE[@]+"${RECLAIM_STALE[@]}"}")
   plan=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
   for line in "${plan[@]+"${plan[@]}"}"; do
