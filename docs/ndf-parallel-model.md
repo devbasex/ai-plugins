@@ -21,6 +21,8 @@
 
 ## 全体の図
 
+**図の色:** 橙は AI エージェント（`claude` のセッションと `claude -p`）、青はスクリプト（判断に LLM を呼ばないプロセス）、紫は両方を含むもの、灰は人とマシンである。
+
 ```mermaid
 flowchart TB
     H["人"]
@@ -51,9 +53,16 @@ flowchart TB
     C1 --> Q1 --> PL1 --> W1
     HUB -.->|"起動"| L1
     HUB -.->|"起動"| L2
+    classDef ai fill:#ffe0b2,stroke:#e65100,color:#000
+    classDef script fill:#bbdefb,stroke:#0d47a1,color:#000
+    classDef mixed fill:#e1bee7,stroke:#4a148c,color:#000
+    classDef other fill:#eeeeee,stroke:#616161,color:#000
+    class O,C1,C2,C3,W1 ai
+    class HUB,DW,Q1,PL1 script
+    class H other
 ```
 
-点線はプロセスの起動、実線は仕事の依頼と問いの流れである。**統括役とオーガナイザーは別物である。**
+点線はプロセスの起動、実線は仕事の依頼と問いの流れである。AI は判断し、スクリプトは起こす・運ぶ・流すだけを行う。**統括役とオーガナイザーは別物である。**
 統括役はプロセスを起こすだけで仕事の中身を知らず、オーガナイザーは仕事を見るがプロセスの管理を持たない。
 
 ## 層はいくつあるか
@@ -73,13 +82,21 @@ flowchart TB
     SE -.->|"載る"| CO
     PR -.->|"載る"| WO
     DW["耐久ワークフロー<br/>parallel.py run"] --- OR
+    classDef ai fill:#ffe0b2,stroke:#e65100,color:#000
+    classDef script fill:#bbdefb,stroke:#0d47a1,color:#000
+    classDef mixed fill:#e1bee7,stroke:#4a148c,color:#000
+    classDef other fill:#eeeeee,stroke:#616161,color:#000
+    class SE,PR,OR,CO,WO ai
+    class HUB,WR,DW script
+    class SU mixed
+    class M other
 ```
 
 | 語 | 列 | 何を足した特殊形か |
 | --- | --- | --- |
 | レーン | 入れ物と流れの組 | 名前つきのラッパー 1 本 + その上で続くループかスプリント |
 | 一時レーン | 同じ | レーンのうち、持ち主のいない共有の作業だけを行い、終えると止まるもの |
-| オーガナイザー | 役割 | **セッションの上の conductor のうち、計画を持ち、人への窓口になるもの。** レーンと同じくラッパーの中のセッションで動く |
+| オーガナイザー | 役割 | **セッションの上の conductor のうち、計画を持ち、人への窓口になるもの。** レーンと同じくラッパーの中のセッションで動く。Factory のオーガナイザーは AI でなく、API の handler と見回りのサーバーのコードである |
 | 1 つのスプリントの conductor | 役割 | 計画に属さない。問いを自分で人へ出す |
 | relay / parallel の機構 | 仕組み | 判断を持たない。relay の統括役はプロセスを起こし、`parallel.py run` は依頼と答えを運ぶ |
 
@@ -114,11 +131,19 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
+    box rgb(255,224,178) AI エージェント
     participant W as worker
     participant C as レーンの conductor
+    end
+    box rgb(187,222,251) スクリプト
     participant D as 耐久ワークフロー
+    end
+    box rgb(255,224,178) AI エージェント
     participant O as オーガナイザー
+    end
+    box rgb(238,238,238) 人
     participant H as 人
+    end
     W->>C: 判断が要る（プランが承認ゲートで終わる）
     C->>D: 依頼を送り、別の作業へ進む
     O->>D: wait
@@ -133,7 +158,7 @@ sequenceDiagram
 
 ## 実行の形ごとの違い
 
-**語の定義は 4 つの形で共通で、挙動だけが変わる。** 役割（オーガナイザー・conductor・supervisor・worker）と流れの単位は
+**語の定義は 4 つの形で共通で、挙動だけが変わる。** オーガナイザーだけは実体も変わり、1 台の形では AI、Factory の形ではスクリプトである。 役割（オーガナイザー・conductor・supervisor・worker）と流れの単位は
 どの形でも同じである。変わるのは、役割を載せる入れ物と、人への窓口・状態の置き場・資源の守り方である。
 Factory の形の「今」は確定仕様の定義で、「予定」は #2710・#2711 と nd-factory の決定 12 が決めたばかりの向きである。
 
@@ -148,6 +173,14 @@ flowchart LR
     subgraph D["D: Factory と ECS"]
         D1["人（Web）"] --> D2["Factory のオーガナイザー"] --> D3["ECS のタスク<br/>実行ジョブ"]
     end
+    classDef ai fill:#ffe0b2,stroke:#e65100,color:#000
+    classDef script fill:#bbdefb,stroke:#0d47a1,color:#000
+    classDef mixed fill:#e1bee7,stroke:#4a148c,color:#000
+    classDef other fill:#eeeeee,stroke:#616161,color:#000
+    class A2 ai
+    class B2,D2 script
+    class A3,B3,D3 mixed
+    class A1,B1,D1 other
 ```
 
 | 観点 | A: 1 台 | B: Factory + 手元のマシン 1 台 | C: Factory + 複数のマシン | D: Factory + ECS |
