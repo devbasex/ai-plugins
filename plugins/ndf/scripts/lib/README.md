@@ -102,6 +102,9 @@
 | [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・途中の記録を続ける新旧の分岐（`patched`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
 | [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
+| [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
+| [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
+| [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
 | [lap_cost.py](lap_cost.py) | 周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
 | [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |

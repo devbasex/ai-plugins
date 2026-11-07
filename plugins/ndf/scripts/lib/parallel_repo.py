@@ -100,3 +100,15 @@ def relay(main: Path, *args: str) -> tuple[int, dict]:
     """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
     got, res = relay_proc(main, *args)
     return got.returncode, res
+
+
+def relay_unavailable(main: Path) -> str | None:
+    """統括役の CLI でレーンを起動できない理由。起動できれば None（ラッパーの外・tmux が無い・統括役が居ない）。"""
+    if not os.environ.get("NDF_RELAY_DIR"):
+        return "ラッパーの外（NDF_RELAY_DIR が無い）"
+    metrics = relay(main, "ls", "--json")[1].get("metrics") or {}
+    if not metrics.get("tmux"):
+        return "tmux が無い"
+    if not metrics.get("hub"):
+        return "統括役が居ない"
+    return None

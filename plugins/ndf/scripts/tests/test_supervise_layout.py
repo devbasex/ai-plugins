@@ -61,6 +61,7 @@ MODULES = [
     "verify_steps",
     "release_templates",
     "delivery_templates",
+    "sprint_revise",
     "sprint_waves",
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
@@ -90,6 +91,7 @@ NO_ENGINE = [
     "templates",
     "release_templates",
     "delivery_templates",
+    "sprint_revise",
     "sprint_waves",
     "sprint_routes",
     "sprint_inputs",

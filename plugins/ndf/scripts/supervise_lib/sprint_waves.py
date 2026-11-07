@@ -17,6 +17,7 @@ from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, 
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.procedures import survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
+from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
@@ -132,7 +133,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
     doc = f"issues/issue-{n}-design.md"  # 設計文書の頭のファイル（#1289 の決定 2）。題はこの H1 から作る
     # 設計を送った後に題を H1 へ合わせ直す（レビューの直しで H1 が変わる。#1289 の決定 9）
     push = f"{PUSH_DESIGN} && python3 {shlex.quote(str(SELF))} sync-title --pr {{pr}} --doc {doc}"
-    return {
+    plan = {
         "フェーズ": "設計",
         "課題": [n],
         "モード": a.mode,
@@ -229,6 +230,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             },
         ],
     }
+    return with_revise_note(plan, a, n, doc)
 
 
 def plan_sprint_branch(a, repo: str) -> dict:
@@ -367,14 +369,13 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
 
 def advise_design_steps(a) -> list[dict]:
     """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも設計承認ゲートの judge（gate）へ進む。"""
-    state = shlex.quote(sprint_state_path(a))
     note = {
         "timeout": 300,
         "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}'",
         "on_fail": "gate",
         "next": "gate",
     }
-    return advise_steps(state, "design", f"--pr {{pr}} --mode {a.mode} --root .", note, {"stage": "設計"})
+    return advise_steps(shlex.quote(sprint_state_path(a)), "design", f"--pr {{pr}} --mode {a.mode} --root .", note, {"stage": "設計"})
 
 
 def plan_advise_design(a, n: int, repo: str) -> dict:
@@ -397,7 +398,6 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
     ラベルの付与かマージが落ちたら handoff で設計承認ゲートの by: mvv の記録を外し、プランを承認ゲートで終える（#1370 の I8）。"""
     plan = plan_sprint_design(a, n, repo)
     state = shlex.quote(sprint_state_path(a))
-    note = MVV_NOTE
     # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず設計承認ゲートの judge（gate）へ回す
     push = ""
     for s in plan["steps"]:
@@ -413,7 +413,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "type": "run",
             "stage": "設計",
             "timeout": 900,
-            "cmd": f"{MVV_PY} check --sprint {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
+            "cmd": f"{MVV_PY} check --sprint {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {MVV_NOTE}",
             "next": "approve",
             "gate_next": "end",
         },
@@ -422,7 +422,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "type": "run",
             # 控えは mvv が従うときだけ書く。承認ゲートを利用者が承認して --from approve で続けたときは無い
             "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && "
-            f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
+            f"{{ [ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}; }} && gh pr ready {{pr}}'",
             "on_fail": "handoff",
             "next": "merge-gate",
         },
@@ -433,7 +433,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで設計承認ゲートの判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
     )
-    return plan
+    return with_revise_mvv(plan, a, n)
 
 
 def plan_fast_impl(a, n: int, repo: str) -> dict:

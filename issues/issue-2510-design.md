@@ -448,7 +448,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-決定 1〜11 は [issue-2510-design-decisions.md](issue-2510-design-decisions.md) にある。
+決定 1〜12 は [issue-2510-design-decisions.md](issue-2510-design-decisions.md) にある。
 
 ## テスト設計
 

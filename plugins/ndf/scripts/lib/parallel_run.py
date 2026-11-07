@@ -3,7 +3,7 @@
 耐久ワークフローの中の分岐は耐久ステップの結果とメッセージだけで決まる。時刻・外のコマンド・ファイルを読むのは
 すべて耐久ステップである（打ち直しで同じ道を通るため。#1142 の I18）。外へ見せるのはイベントと出力だけである。
 
-- メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | answer | stop, ...}`（レーン・一時レーン・オーガナイザーの答え・`stop`）
+- メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | unmatched | answer | stop, ...}`（レーン・一時レーン・オーガナイザーの答え・`stop`）
 - メッセージ `resume`: `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}`（`confirm`・`settle`）
 - リリースの組み方は依頼を受けるたびに耐久ステップ `parallel.route` が宣言から読む。組まないなら `released`、組めないなら
   `failed` と理由を依頼へ答え、計画を止めるかは問い（`kind: build`）への人の答えで決まる（#2616）
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -32,6 +31,7 @@ import parallel_route as prt
 from parallel_files import RELAY
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
 from parallel_question import cause_of
+from parallel_reply import AnswerRouting, step_prior_waits, step_waiting_lanes
 from parallel_repo import dev_version, git_head, poll_seconds, relay, relay_proc
 
 
@@ -109,11 +109,6 @@ def step_design_held(main: str, name: str, answered: list[str]) -> list[str]:
     return prt.design_held(Path(main), name, answered)
 
 
-@durable.step(name="parallel.waiting-lanes")
-def step_waiting_lanes(main: str, name: str) -> list[str]:
-    return prt.waiting_lanes(Path(main), name)
-
-
 @durable.step(name="parallel.route")
 def step_route(main: str) -> dict:
     """宣言からリリースの組み方を読む。耐久ワークフローの分岐を記録した値だけで決めるため、耐久ステップにする（#2616 の決定 2）。"""
@@ -178,7 +173,7 @@ def render_progress(main: str, name: str, progress: dict) -> None:
 # ---- 耐久ワークフロー ----
 
 
-class _Run(prt.ReleaseRouting):
+class _Run(prt.ReleaseRouting, AnswerRouting):
     """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。"""
 
     def __init__(self, main: str, name: str, lanes: list[dict]):
@@ -209,6 +204,7 @@ class _Run(prt.ReleaseRouting):
         self.ls_failed_since: Optional[float] = None  # 一覧の失敗が始まった時刻（エポック秒）。成功に戻ると None
         self.ls_ask_until = 0.0  # 一覧の失敗を次に問うてよい時刻（エポック秒）
         self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
+        self.routed = True  # 答えの届け先の耐久ステップを打ってよいか。古い記録の打ち直しでは False（#2510）
 
     def bump(self) -> int:
         self.seq += 1
@@ -232,7 +228,8 @@ class _Run(prt.ReleaseRouting):
         return {"lanes": self.lanes, "releases": [{k: v for k, v in r.items() if k != "presented"} for r in self.releases]}
 
     def summary(self, status: str) -> dict:
-        return {"status": status, "lanes": self.lanes, "releases": self.progress()["releases"], "pending": [r["id"] for r in self.pending]}
+        rows = {"releases": self.progress()["releases"], "pending": [r["id"] for r in self.pending]}
+        return {"status": status, "lanes": self.lanes, **rows, "prior_waits": [q for q in self.questions if q.get("loop")]}
 
     def stopped(self) -> set[str]:
         return {n for n, st in self.lanes.items() if st.get("started") and st.get("state") == "stopped"}
@@ -251,7 +248,7 @@ class _Run(prt.ReleaseRouting):
                 self.pending.append(msg)
                 self.received[msg.get("lane", "")] = self.received.get(msg.get("lane", ""), 0) + 1
                 durable.set_event(f"lane-{msg.get('lane')}", {"received": self.received[msg.get("lane", "")]})
-        elif kind in ("gate1", "gate2", "ask"):
+        elif kind in ("gate1", "gate2", "ask", "unmatched"):
             self.receive_question(msg)
         elif kind == "answer":
             self.reply(msg)
@@ -270,13 +267,15 @@ class _Run(prt.ReleaseRouting):
             return
         if msg.get("source") == "ndf-ask:human-action":  # 代われない操作: レーンへ入る 1 行を添える（6d）
             msg = {**msg, "attach": f"python3 {RELAY} attach {msg.get('lane')}"}
+        msg = self.replace_same(msg)
         self.questions.append({**msg, "cause": key} if key else msg)
         self.publish_questions()
         self.apply_held(msg.get("id"))
 
     def apply_held(self, rid, target=None) -> None:
-        """保留した依頼 `rid` への答えを、届いた問い（まとめた先があれば `target`）へ当てる。"""
+        """保留した依頼 `rid` への答えを、届いた問い（まとめた先があれば `target`）へ当てる。保留の知らせは役目を終える。"""
         if (msg := self.held.pop(rid, None)) is not None:
+            self.questions = [q for q in self.questions if q.get("id") != f"{rid}-unmatched"]
             self.reply({**msg, "id": target or rid})
 
     def publish_questions(self) -> None:
@@ -284,27 +283,24 @@ class _Run(prt.ReleaseRouting):
 
     def reply(self, msg: dict) -> None:
         """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。
-        一覧に無い依頼への答えは捨てずに保留し、run.log へ警告を残す（#2617）。"""
+        置き換えた依頼への答えは今の問いの持ち主へ流す。どちらでもない依頼への答えは捨てずに保留し、run.log へ警告を残し、
+        区分 `unmatched` の問いでオーガナイザーへ知らせる（#2617・#2510 の I9）。"""
         rid = msg.get("id")
         if rid in self.answered:
             return
         q = next((q for q in self.questions if q.get("id") == rid), None)
         if q is None:
-            if rid and rid not in self.held:
-                self.held[rid] = msg
-                print(f"parallel: 一覧に無い依頼 {rid} への答えを保留した（届いたら当てる）", file=sys.stderr, flush=True)
+            self.reply_unlisted(msg)
             return
         for each in [rid, *q.get("also", [])]:
             self.answered.add(each)
             durable.set_event(f"answer-{each}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "merge", "by", "at")})
         self.questions = [q for q in self.questions if q.get("id") != rid]
         self.publish_questions()
-        owners = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))} & self.sprint & self.stopped()
-        self.revive = sorted({*self.revive, *owners})  # 止まった持ち主を起こして答えを当てるまで計画を終えない
-        self.revive_at.update({o: self.seen_at for o in owners})  # 止まったと観た時刻。これより後に動いたら起きたと数える
-        if owners - set(self.wake):  # 保留中の持ち主の後に依存先を起こさないため、全レーンが止まるのを待たずに起こす 1 行を添える
-            self.wake = sorted({*self.wake, *owners})
-            self.pause("notice", lanes=[], attach=[])
+        if q.get("loop"):
+            self.land_prior(q, msg)
+            return
+        self.wake_owners(q)
         self.apply_own(q, list(msg.get("choice") or []))
 
     def apply_own(self, q: dict, choice: list[str]) -> None:
@@ -493,7 +489,10 @@ def parallel_workflow(main: str, name: str) -> dict:
     if not init.get("ok"):
         return {"status": "stopped", "lanes": {}, "releases": [], "pending": [], "errors": init.get("items")}
     run = _Run(main, name, init["lanes"])
+    run.routed = durable.patched("parallel-answers")
     run.pause("running")
+    if run.routed:
+        run.receive_prior(step_prior_waits(main, name))
     wait = poll_seconds()
     while True:
         if run.stop and (run.current is None or run.force):  # --force はリリースの settle を待たず、一時レーンも止める
@@ -583,8 +582,8 @@ def _spawn_ready(run: _Run, main: str) -> None:
 
 
 def _run_finished(run: _Run) -> bool:
-    """リリースの途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。"""
-    return run.ls_ok and run.current is None and not run.pending and not run.questions and len(run.stopped()) == len(run.order)
+    """リリースの途中でも残りでもなく、答えていない問いも無く、全レーンが止まっている（I11）。前のループの待ちの問いは終わりを止めない（#2510 の I12）。"""
+    return run.ls_ok and run.current is None and not run.pending and not run.blocking() and len(run.stopped()) == len(run.order)
 
 
 def _observe_run(run: _Run, main: str) -> None:

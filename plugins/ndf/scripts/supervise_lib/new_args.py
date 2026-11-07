@@ -286,6 +286,16 @@ NEW_ARGS = [
         "sprint",
     ),
     (
+        "--revise-note",
+        {
+            "action": "append",
+            "default": [],
+            "metavar": "<課題>=<パス>",
+            "help": "課題の出し直しの指摘の入力（繰り返し可）。--design の課題の設計のプランへ指摘を入れ、要求のステップを必ず流す",
+        },
+        "sprint",
+    ),
+    (
         "--pace",
         {
             "choices": ["normal", "fast", "auto"],
@@ -440,6 +450,25 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
         check(ap, a)
 
 
+def parse_revise_notes(ap: argparse.ArgumentParser, a) -> dict[int, str]:
+    """`--revise-note <課題>=<パス>` を {課題: パス} にする。--design の課題の入力を読めなければ断る。"""
+    import revise_note
+
+    out: dict[int, str] = {}
+    for raw in getattr(a, "revise_note", None) or []:
+        n, _, path = raw.partition("=")
+        if not (n.isdigit() and path):
+            ap.error(f"--revise-note は <課題>=<パス> で書く: {raw}")
+        if int(n) not in a.design:
+            continue
+        try:
+            revise_note.read_input(path)
+        except (OSError, ValueError) as e:
+            ap.error(f"--revise-note の入力を読めない: {e}")
+        out[int(n)] = path
+    return out
+
+
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
     """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければデプロイのステップを流す時点に決める（#2164）。"""
     if not (a.name and a.issue):
@@ -448,3 +477,4 @@ def check_sprint(ap: argparse.ArgumentParser, a) -> None:
         ap.error("--name は英数字・. _ - だけで書く（ブランチ名 sprint/<名前> に使う）")
     if a.kind == "close" and not a.state:
         ap.error("new close には --state（スプリントの状態）が要る")
+    a.revise_notes = parse_revise_notes(ap, a)

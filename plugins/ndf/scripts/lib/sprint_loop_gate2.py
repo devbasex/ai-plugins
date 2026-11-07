@@ -107,8 +107,12 @@ def pending_requests(rec: dict) -> dict[str, list[str]]:
         if part and part.get("request"):
             out.setdefault(part.get("plan_name") or "", []).append(part["request"])
     for w in rec.get("waiting", []):
-        if w.get("request") and not w.get("answer"):
-            out.setdefault(w.get("plan") or "", []).append(w["request"])
+        if w.get("answer"):
+            continue
+        before = [b["id"] for b in w.get("requests_before") or [] if not b.get("settled")]
+        ids = [*([w["request"]] if w.get("request") else []), *before]
+        if ids:
+            out.setdefault(w.get("plan") or "", []).extend(ids)
     return out
 
 
