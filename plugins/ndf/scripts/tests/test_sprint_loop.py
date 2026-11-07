@@ -949,6 +949,32 @@ def test_created_issues_are_not_selected_in_the_same_lap(env):
     assert sl_select.exclusion_reason(env, r, {"number": 99}, 1, {99}).startswith("周回の中で起票された")
 
 
+def test_exclusion_reason_reads_each_pr_once_in_rank_order(env):
+    """候補ごとに 1 回、順位の順に PR の状態を読み、マージ済みの行にだけ merged_at を書く。"""
+    start(env)
+    r = rec(env)
+    r["waiting"] = [{"number": 11, "answer": "approved", "pr": 501}, {"number": 12, "answer": "approved", "pr": 502}]
+    env.prs[502] = "MERGED"
+    seen, read = [], env.pr_state
+    env.pr_state = lambda n: seen.append(n) or read(n)
+    cands = [{"number": 12, "rank": 1}, {"number": 11, "rank": 2}]
+    picked, _ = sl_select._select_candidate_rows(cands, "M", 2, lambda row: sl_select.exclusion_reason(env, r, row, 2, set()))
+    assert seen == [502, 501] and picked == [12]
+    assert r["waiting"][1]["merged_at"] and "merged_at" not in r["waiting"][0]
+
+
+def test_exclusion_reason_keeps_scanning_rows_of_the_same_issue(env):
+    """マージ済みの承認の行は理由にならず、同じ課題の後ろの行と次の段階へ進む。"""
+    start(env)
+    r = rec(env)
+    merged = {"number": 11, "answer": "approved", "merged_at": "t"}
+    r["waiting"] = [merged, {"number": 11}]
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "人の判断待ち"
+    r["waiting"] = [merged]
+    r["excluded"] = [{"number": 11, "lap": 2, "reason": "対象外"}]
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "対象外"
+
+
 # ---------------- 受け入れ条件 14・15・16・21 ----------------
 
 
