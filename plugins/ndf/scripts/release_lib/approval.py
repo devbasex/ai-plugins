@@ -102,6 +102,16 @@ def release_pr_allowed(root, n, pr_view):
     return ac.AllowedPR(n, head, commits, (d.get("mergeCommit") or {}).get("oid"))
 
 
+def resumed_merge_commit(root, approved, prod, main_pr, merge_commit_of):
+    """再開の経路: マージ済みの本番の PR のコミット（読めなければ本番チャネルの先端）を返す。
+    承認したコミットを含まなければ止める（マージは取り消せないため、比べ直さずに包含だけを確かめる）。"""
+    git(root, "fetch", "-q", "origin")
+    merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
+        raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
+    return merge
+
+
 def check_approved(root, approved, ref, allowed):
     """origin/<ref>（リリースでは release/v<版>。#2436 の R2）の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
     差分がすべて許可リスト（UNGATED）の下に収まる承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
