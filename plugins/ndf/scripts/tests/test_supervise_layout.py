@@ -161,6 +161,17 @@ def test_example_is_a_plan():
     assert p.returncode == 0 and plan["steps"] and "作業場所" in plan
 
 
+def test_example_embeds_no_project_values(tmp_path):
+    """見本にテストのコマンドとブランチ名を埋め込まない（どのリポジトリでも写せる形）。プランの読み込みは通る。"""
+    p = run("example")
+    assert "pytest" not in p.stdout
+    plan = json.loads(p.stdout)
+    assert all("base" not in s for s in plan["steps"] if s["type"] == "pr")
+    f = tmp_path / "plan.json"
+    f.write_text(p.stdout, encoding="utf-8")
+    assert run("expected", str(f)).returncode == 0
+
+
 def test_new_without_required_exits_2():
     assert run("new", "impl", "--worktree", ".").returncode == 2
 

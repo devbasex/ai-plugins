@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
 
 PY = sys.executable
+EXIT_PRECONDITION = 3
 
 FAKE_GH = """#!{py}
 import json, os, sys
@@ -153,6 +154,27 @@ def test_plan_collects_branch_base_and_changes(repo, env):
     assert m["branch"] == "feature/x" and m["base"] == "develop" and m["draft"] is True
     assert m["existing_pr"] is None and m["uncommitted"] == 1 and m["commits"] == 1 and m["files"] == 1
     assert [i["result"] for i in out["items"] if i["kind"] == "existing_pr"] == ["create"]
+
+
+def _without_base(root):
+    """宣言・`origin/HEAD`・`main`・`master` のどれからも起点が決まらない作業ツリーにする。"""
+    (root / ".ndf" / "worktree.json").unlink()
+    git(root, "branch", "-m", "develop", "trunk")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "宣言を外す")
+
+
+@pytest.mark.parametrize("command", ["plan", "create"])
+def test_undecided_base_stops_without_creating_a_pr(repo, env, tmp_path, command):
+    _without_base(repo)
+    body = tmp_path / "body.md"
+    body.write_text("本文\n", encoding="utf-8")
+    args = ["plan"] if command == "plan" else ["create", "--title", "t", "--body-file", str(body)]
+    rc, out, err = call(args, env, repo)
+    assert rc == EXIT_PRECONDITION, err
+    assert out["status"] == "stopped" and "base_branch" in out["summary"]
+    log = Path(env["FAKE_GH_LOG"])
+    assert not log.exists() or not any(c[:2] == ["pr", "create"] for c in gh_calls(env))
 
 
 def test_plan_counts_only_this_branch_when_base_moved_on(repo, env):
