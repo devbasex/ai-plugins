@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,8 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import release_version as rv  # noqa: E402
+import sprint_loop as sl  # noqa: E402
+import sprint_loop_record as sl_record  # noqa: E402
 from supervise_lib import queue, queue_fill  # noqa: E402
 from supervise_lib.paths import state_dir_of  # noqa: E402
 
@@ -341,3 +344,109 @@ def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code,
     plan.write_text(json.dumps({**info, "実行の条件": {"cmd": f"exit {code}", "skip_code": 3}}, ensure_ascii=False))
     skipped, runnable = queue.fill_stage(True, [str(plan)], [])
     assert (runnable == [str(plan)] and skipped == []) if runs else (runnable == [] and skipped[0]["unfilled"] is True)
+
+
+# ---- 開発ループが組むプラン（#2354） ----
+
+
+def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
+    """開発ループと同じコマンドで実物の開発版のプランを組み、周回の行を返す（dev_plan・prod_plan を持つ）。"""
+    ndf = world.repo / ".ndf"
+    (ndf / "supervise.json").write_text((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
+    auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
+    (ndf / "pace.json").write_text(json.dumps({"version": 1, "auto": auto}))
+    d = tmp / "lap"
+    d.mkdir()
+    (d / "mvv.md").write_text("## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n")
+    lap = {
+        "versions": {"dev": dev, "prod": prod},
+        "state_path": str(d / "state.json"),
+        "sprint": "s1",
+        "dir": str(d),
+        "out": str(d / "sprint"),
+        "mode": "standard",
+        "milestone": "01 近い",
+        "selection": [{"number": 11, "decision": sl_record.SELECTED}],
+    }
+    rec = {"name": "l1", "waiting": []}
+    root = str(world.repo)
+    gate = [sys.executable, str(sl.SPRINT_STATE), "gate", lap["state_path"], "MVV", "--what", "MVV を承認"]
+    for cmd in (sl.sprint_state_init_argv(root, rec, lap, [11]), gate, sl.new_sprint_argv(root, rec, lap, list(extra))):
+        p = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout + p.stderr
+    index = json.loads((Path(lap["out"]) / "sprint.json").read_text())["ステージ"]
+    return {**lap, "dev_plan": sl.stage_plan(index, "開発版"), "prod_plan": sl.stage_plan(index, "本番")}
+
+
+def version_field(lap: dict) -> dict:
+    return json.loads(Path(lap["dev_plan"]).read_text())["版"]
+
+
+def test_loop_plan_without_dev_holds_no_version_number(tmp_path, world):
+    """受け入れ条件 1: --dev なしで組むとプランにも sprint.json にも版数が無い。"""
+    lap = looped(tmp_path, world)
+    assert version_field(lap)["明示"] is None
+    for f in (lap["dev_plan"], lap["prod_plan"], Path(lap["out"]) / "sprint.json"):
+        assert not re.search(r"\d+\.\d+\.\d+", Path(f).read_text())
+
+
+def test_loop_plan_without_dev_takes_the_next_free_version(tmp_path, world):
+    """受け入れ条件 3: 組んだ後に別のスプリントが版を出しても、作り直さずに次に空いている版で埋まる。"""
+    lap = looped(tmp_path, world)
+    world.publish("10.27.6", "develop", "main", tag=True)
+    plan = Path(lap["dev_plan"])
+    assert fill(plan) == (None, None)
+    assert record(plan)["version"] == "10.27.7-dev.1" and record(plan)["how"] == "decided"
+    assert queue_fill.recorded_version(lap["dev_plan"]) == "10.27.7-dev.1"
+
+
+def test_loop_plan_without_dev_redecides_on_a_rerun(tmp_path, world, monkeypatch):
+    """受け入れ条件 4: 記録の版を別のスプリントが先に出すと、周回を止めずに決め直す。"""
+    lap = looped(tmp_path, world)
+    plan = Path(lap["dev_plan"])
+    fill(plan)
+    (state_dir_of(str(plan.absolute())) / "state.json").write_text('{"log": [{"id": "bump", "exit": 3}]}')
+    world.publish("10.27.6", "develop", "main", tag=True)
+    own(monkeypatch, False)
+    assert fill(plan) == (None, None)
+    assert record(plan)["version"] == "10.27.7-dev.1" and len(record(plan)["history"]) == 1
+
+
+def test_loop_plan_with_dev_stays_explicit_and_stops_when_taken(tmp_path, world):
+    """受け入れ条件 5: --dev の版が既出なら流さず taken になる。"""
+    lap = looped(tmp_path, world, dev="10.27.5-dev.1", prod="10.27.5")
+    assert version_field(lap)["明示"] == "10.27.5-dev.1"
+    why, info = fill(Path(lap["dev_plan"]))
+    assert why and info["cause"] == "taken"
+
+
+def test_loop_plan_takes_the_level_after_the_separator(tmp_path, world):
+    """受け入れ条件 8: `--` より後の --level が開発版のプランの上げ幅になる。"""
+    assert version_field(looped(tmp_path, world, extra=("--level", "minor")))["上げ幅"] == "minor"
+
+
+def test_recorded_version_reads_only_a_usable_record(tmp_path, world):
+    """読み取りは記録が無い・壊れている・版が文字列でないときも例外を投げず、書かない。"""
+    plan = write_plan(tmp_path, world)
+    assert queue_fill.recorded_version(None) is None and queue_fill.recorded_version(str(plan)) is None
+    fill(plan)
+    f = state_dir_of(str(plan.absolute())) / queue_fill.VERSION_RECORD
+    kept = f.read_text()
+    assert queue_fill.recorded_version(str(plan)) == "10.27.6-dev.1" and f.read_text() == kept
+    for broken in ("{", "[]", '{"version": 1}'):
+        f.write_text(broken)
+        assert queue_fill.recorded_version(str(plan)) is None
+
+
+@pytest.mark.parametrize(
+    "report, want",
+    [("- 結果: 完了\n", True), ("- 結果: 関門\n", False), ("- 結果: 止まった\n", False), ("本文だけ\n", False), (None, False)],
+)
+def test_plan_finished_reads_the_result_of_the_report(tmp_path, world, report, want):
+    plan = write_plan(tmp_path, world)
+    if report is not None:
+        sd = state_dir_of(str(plan.absolute()))
+        sd.mkdir(parents=True, exist_ok=True)
+        (sd / "report.md").write_text(report)
+    assert queue_fill.plan_finished(str(plan)) is want
+    assert queue_fill.plan_finished(None) is False
