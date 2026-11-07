@@ -16,7 +16,7 @@
 | `p3-rel13` | 一時レーン | リリース 13 の本番のプラン | v10.27.38 のリリース |
 | `factory1` | 計画の外のセッション | `nd-factory` のスプリント | Factory のインフラ。問いは自分の画面に出る |
 
-`lroot2` の中では、conductor がスプリントのプランをキューへ流し、プランが worker（`claude -p`）を
+`lroot2` の中では、conductor がスプリントのプランを `supervise.py` のキューへ渡し、`supervise.py` が worker（`claude -p`）を
 1 回ずつ起動する。レーンの問いは人へ届かず、オーガナイザーを通る。
 
 ## 全体の図
@@ -128,7 +128,7 @@ flowchart TB
 | --- | --- | --- |
 | ラッパー | マシンに複数 | 同時に動かせる数（`NDF_RELAY_MAX_NAMED`、既定 3）。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる |
 | セッション | ラッパーに 1 つずつ順に | 切り替えは `ndf-next` |
-| プラン | レーンに複数 | 計画の `plans`（p3 は 2 本）。同時に 6 本まで |
+| `supervise.py` の実行（プラン 1 本ごと） | レーンに複数 | レーンごとの同時の本数は計画の宣言の `plans`（p3 は各レーン 2 本）。計画全体で同時に 6 本まで（`NDF_PARALLEL_MAX_PLANS`） |
 
 ## 問いの流れ
 
@@ -147,7 +147,7 @@ sequenceDiagram
     box rgb(238,238,238) 人
     participant H as 人
     end
-    W->>C: 判断が要る（プランが承認ゲートで終わる）
+    W->>C: 判断が要る（supervise.py の実行が承認ゲートで終わる）
     C->>D: 依頼を送り、別の作業へ進む
     O->>D: wait
     D-->>O: 届いた依頼
