@@ -34,7 +34,7 @@ flowchart TB
             subgraph L1["レーン lroot2（ラッパー 1 本）"]
                 C1["conductor"]
                 Q1["キュー"]
-                PL1["プラン<br/>supervisor の代わり<br/>耐久ワークフロー supervise.py"]
+                PL1["supervise.py<br/>プランを流す・supervisor の代わり<br/>耐久ワークフロー"]
                 W1["worker"]
             end
             subgraph L2["一時レーン p3-rel13"]
@@ -76,7 +76,7 @@ flowchart TB
         M["マシン"] --> HUB["リレーハブ（relay）"] --> WR["ラッパー"] --> SE["セッション"] --> PR["プロセス（claude -p）"]
     end
     subgraph RO["役割の列"]
-        OR["オーガナイザー<br/>計画を持つ"] --> CO["conductor<br/>スプリントを持つ"] --> SU["supervisor またはプラン<br/>フェーズを持つ"] --> WO["worker<br/>作業を持つ"]
+        OR["オーガナイザー<br/>計画を持つ"] --> CO["conductor<br/>スプリントを持つ"] --> SU["supervisor または supervise.py<br/>フェーズを持つ"] --> WO["worker<br/>作業を持つ"]
     end
     SE -.->|"載る"| OR
     SE -.->|"載る"| CO
@@ -99,7 +99,7 @@ flowchart TB
 | オーガナイザー | 役割 | **セッションの上の conductor のうち、計画を持ち、人への窓口になるもの。** レーンと同じくラッパーの中のセッションで動く。Factory のオーガナイザーは AI でなく、API の handler と見回りのサーバーのコードである。**チーム開発の形（E）では、開発者の操作の窓口は Factory の Web 画面であり、開発者の手元のマシンで 1 台の中のオーガナイザー（`parallel.py`）を起動しない。** 手元で対話の `claude` を起動しても、それはオーガナイザーではない（確定仕様 `ndf-factory-organizer.md` の I68 のとおり） |
 | 1 つのスプリントの conductor | 役割 | 計画に属さない。問いを自分で人へ出す |
 | relay / parallel の機構 | 仕組み | 判断を持たない。リレーハブ（`relay.py`）はプロセスを起こし、`parallel.py run` は依頼と答えを運ぶ |
-| プランと supervisor | 役割（フェーズを持つ） | **プランは耐久ワークフローで動く**（`supervise.py` の `plan_workflow`・`queue_workflow`）。止まっても同じコマンドを打ち直すと、記録のある耐久ステップを飛ばして続きから進む。cross-review・cross-refactoring の `drive.py` も同じである。`Agent` で起こす supervisor は会話の中で動き、耐久ではない。止まると最初からやり直す |
+| `supervise.py` と supervisor | 役割（フェーズを持つ） | **`supervise.py` はプラン（フェーズの手順を書いた JSON）を耐久ワークフローで流す**（ `plan_workflow`・`queue_workflow`）。止まっても同じコマンドを打ち直すと、記録のある耐久ステップを飛ばして続きから進む。cross-review・cross-refactoring の `drive.py` も同じである。`Agent` で起こす supervisor は会話の中で動き、耐久ではない。止まると最初からやり直す |
 
 **オーガナイザーとレーンは包含に近い。** どちらも「ラッパーの中のセッションで動く conductor」が共通の形で、持つ単位（計画かスプリントか）と
 問いの窓口の有無だけが違う。上下関係は役割の列にだけあり、入れ物の列では並ぶ。上限の数え方が別なのはこのためである（オーガナイザーは同時に動かせる数に数えない）。
@@ -111,7 +111,7 @@ flowchart TB
 | 軸 | 問い | 語 |
 | --- | --- | --- |
 | 実行の入れ物 | どのプロセスで動くか | マシン → ラッパー → セッション → プロセス（`claude -p`） |
-| 仕事の役割 | 誰が何を決めるか | オーガナイザー → conductor → supervisor（またはプラン） → worker |
+| 仕事の役割 | 誰が何を決めるか | オーガナイザー → conductor → supervisor（または `supervise.py`） → worker |
 | 流れの単位 | 何の流れか | ライン → レーン → ループ → 周回 → スプリント → フェーズ → 作業 |
 
 | 役割 | 入れ物 | 持つ流れの単位 | 人へ問えるか | 起動する相手 | 寿命 |
@@ -119,7 +119,7 @@ flowchart TB
 | オーガナイザー | 人が起動したセッション 1 つ | 計画全体 | 問える（レーンの問いもまとめて問う） | 一時レーン | 計画の終わりまで。セッションは切り替わる |
 | conductor（レーン） | ラッパーの中のセッション | スプリント | 問えない。オーガナイザーへ送る | プラン（キュー）、supervisor | セッションごと。引継ぎ文書で続く |
 | conductor（計画の外） | 人が起動したセッション | スプリント | 問える | プラン（キュー）、supervisor | セッションごと |
-| supervisor（またはプラン） | サブエージェント、または `supervise.py` | フェーズ | 問えない | worker | フェーズの間 |
+| supervisor（または `supervise.py`） | サブエージェント、または `supervise.py`（プランを流す） | フェーズ | 問えない | worker | フェーズの間 |
 | worker | `claude -p`、またはサブエージェント | 1 つの作業 | 問えない | 起動しない | 1 回 |
 
 | 入れ物 | 1 つの何に何個あるか | 上限 |
