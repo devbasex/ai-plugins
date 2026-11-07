@@ -114,6 +114,27 @@ def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
     assert (new / "usage/claude/o__r.jsonl").read_text() == '{"b":2}\n{"a":1}\n'
 
 
+def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
+    """旧の台帳は名前を外してから読む。読んだ後に旧の版が追記した行は旧の名前で作り直され、次の migrate で移る。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    old.mkdir(parents=True)
+    (old / "ask.jsonl").write_text('{"q":1}\n')
+    real_rename = sh.os.rename
+
+    def rename_then_append(src, dst):
+        real_rename(src, dst)
+        Path(src).write_text('{"q":2}\n')  # 名前を外した直後に旧の版が追記する
+
+    monkeypatch.setattr(sh.os, "rename", rename_then_append)
+    assert sh.migrate(env)["status"] == "migrated"
+    monkeypatch.setattr(sh.os, "rename", real_rename)
+    assert (old / "ask.jsonl").read_text() == '{"q":2}\n'  # 追記された行は消えない
+    assert sh.migrate(env)["status"] == "migrated"
+    assert (new / "ask.jsonl").read_text() == '{"q":1}\n{"q":2}\n'
+    assert not old.exists() or not any(old.iterdir())
+
+
 def test_migrate_none_with_explicit_root(tmp_path):
     (tmp_path / ".local/state/ndf").mkdir(parents=True)
     (tmp_path / ".local/state/ndf/ask.jsonl").write_text("x\n")

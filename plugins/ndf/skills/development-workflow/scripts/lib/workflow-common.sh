@@ -593,22 +593,16 @@ wf_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
-# 利用者の台帳の根（#2766）。順は scripts/lib/state_home.py の user_home と同じ:
-# NDF_STATE_HOME → $XDG_STATE_HOME/ndf → ~/.claude/ndf/state。
-ndf_user_state_home() {
-  local r="${NDF_STATE_HOME:-${XDG_STATE_HOME:+$XDG_STATE_HOME/ndf}}"
-  printf '%s\n' "${r:-$HOME/.claude/ndf/state}"
-}
+ndf_user_state_home() {  # 利用者の台帳の根（#2766）。順は scripts/lib/state_home.py の user_home と同じ
+  local r="${NDF_STATE_HOME:-${XDG_STATE_HOME:+$XDG_STATE_HOME/ndf}}"; printf '%s\n' "${r:-$HOME/.claude/ndf/state}"; }
 
 # 通過記録の置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
-  local base fallback="${TMPDIR:-/tmp}/ndf-stages"
+  local fallback="${TMPDIR:-/tmp}/ndf-stages" base="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
     base="$CLAUDE_PLUGIN_DATA/stages"
   elif [ -n "${NDF_STATE_HOME:-}" ] || [ -n "${XDG_STATE_HOME:-}" ] || [ -n "${HOME:-}" ]; then
     base="$(ndf_user_state_home)/stages"
-  else
-    base="$fallback"
   fi
   if mkdir -p "$base" 2>/dev/null && [ -w "$base" ]; then
     printf '%s\n' "$base"

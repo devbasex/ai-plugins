@@ -42,7 +42,7 @@ USER_KINDS = (
 )
 
 
-def _env(env: Optional[Mapping[str, str]]) -> Mapping[str, Optional[str]]:
+def _state_env(env: Optional[Mapping[str, str]]) -> Mapping[str, Optional[str]]:
     if env is not None:
         return env
     return {  # 読む変数を名前で書く（契約の検査が読みを拾う）
@@ -54,7 +54,7 @@ def _env(env: Optional[Mapping[str, str]]) -> Mapping[str, Optional[str]]:
 
 def explicit_home(env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
     """明示した根（`NDF_STATE_HOME` → `$XDG_STATE_HOME/ndf`）。無ければ None。空の値は無いものとする。"""
-    env = _env(env)
+    env = _state_env(env)
     if env.get("NDF_STATE_HOME"):
         return Path(env["NDF_STATE_HOME"])
     if env.get("XDG_STATE_HOME"):
@@ -62,13 +62,13 @@ def explicit_home(env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
     return None
 
 
-def _home(env: Mapping[str, Optional[str]]) -> Path:
+def _home_dir(env: Mapping[str, Optional[str]]) -> Path:
     return Path(env.get("HOME") or Path.home())
 
 
 def legacy_home(env: Optional[Mapping[str, str]] = None) -> Path:
     """旧の根（`~/.local/state/ndf`）。コンテナの根の既定と同じ場所である。"""
-    return _home(_env(env)) / ".local" / "state" / "ndf"
+    return _home_dir(_state_env(env)) / ".local" / "state" / "ndf"
 
 
 def container_home(env: Optional[Mapping[str, str]] = None) -> Path:
@@ -78,7 +78,7 @@ def container_home(env: Optional[Mapping[str, str]] = None) -> Path:
 
 def user_home(env: Optional[Mapping[str, str]] = None) -> Path:
     """利用者の台帳の根。"""
-    return explicit_home(env) or _home(_env(env)) / ".claude" / "ndf" / "state"
+    return explicit_home(env) or _home_dir(_state_env(env)) / ".claude" / "ndf" / "state"
 
 
 def find_git_dir(start: Path) -> tuple[Path, Path] | None:
@@ -133,26 +133,29 @@ def legacy_entry(new: Path, kind: str, name: str, env: Optional[Mapping[str, str
     return old if old.exists() else new
 
 
-def _merge(src: Path, dst: Path, moved: list, kept: list) -> None:
+def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
     """`src` を `dst` へ足し合わせる。`.jsonl` は追記、無いものは移し、同じ名前の他のファイルは旧に残す。"""
     if src.is_dir() and not src.is_symlink():
         for child in sorted(src.iterdir()):
-            _merge(child, dst / child.name, moved, kept)
+            _merge_ledger(child, dst / child.name, moved, kept)
         try:
             src.rmdir()
         except OSError:
             pass  # 残したものがある
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if not dst.exists():
-        shutil.move(str(src), str(dst))
+    if src.suffix == ".jsonl":
+        # 名前を先に外してから読む。旧の版の書き手が後から追記すると旧の名前で作り直し、次の migrate で移る
+        # （読んだ後に追記された行を消さない）。移し先が別のファイルシステムでもコピーと削除の間に行を落とさない
+        held = src.with_name(f"{src.name}.migrating-{os.getpid()}")
+        os.rename(src, held)
+        data = held.read_bytes()
+        with dst.open("ab") as f:
+            f.write(data if not data or data.endswith(b"\n") else data + b"\n")
+        held.unlink()
         moved.append(str(dst))
-    elif src.suffix == ".jsonl":
-        data = src.read_bytes()
-        if data:
-            with dst.open("ab") as f:
-                f.write(data if data.endswith(b"\n") else data + b"\n")
-        src.unlink()
+    elif not dst.exists():
+        shutil.move(str(src), str(dst))
         moved.append(str(dst))
     else:
         kept.append(str(src))
@@ -163,7 +166,7 @@ def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
 
     status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（同じ名前のファイルが両方にあり、
     旧に残したものがある）。何度打ってもよい（旧の版のプロセスが旧へ書いた分も、次に打てば移る）。"""
-    env = _env(env)
+    env = _state_env(env)
     old, new = legacy_home(env), user_home(env)
     base = {"from": str(old), "to": str(new), "moved": [], "kept": []}
     if explicit_home(env) is not None:
@@ -172,7 +175,7 @@ def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
     kept: list = []
     for kind in USER_KINDS:
         if (old / kind).exists():
-            _merge(old / kind, new / kind, moved, kept)
+            _merge_ledger(old / kind, new / kind, moved, kept)
     out = {**base, "moved": moved, "kept": kept}
     if kept:
         return {**out, "status": "kept", "summary": f"{len(moved)} 件を移し、{len(kept)} 件は移し先に同じ名前があるため旧に残した"}
