@@ -16,7 +16,7 @@
 - 利用者の根のロック（`LOCK`）で直列化する。取れなければ何も移さず止まる。旧の `dbos/` のロックが 1 つでも持たれていれば
   （動いている耐久ワークフロー）、台帳も含めて何も移さず止まる
 - 利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。`.jsonl` は新に無い行を足し、時刻（`at`）の順に並べて書き直す
-  （読み手は末尾を最新として読んでよい）。旧の台帳は消さず `<名前>.migrated` へ改名して残し、次の migrate が
+  （読み手は末尾を最新として読んでよい）。旧の台帳は消さず `<名前>.migrated`（既にあれば `-<n>` を付ける）へ改名して残し、次の migrate が
   新に中身がすべて入ったものを消す
 - チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`state_checkout.migrate_all`）。
   実行時の探し方（作業ディレクトリの `checkout_home`）と同じ規則である。作業ツリーの外で打てば移さない。移し先に同じ名前が
@@ -34,6 +34,7 @@ from __future__ import annotations
 import collections
 import datetime
 import fcntl  # 耐久の記録のロック（filelock と同じ flock）を標準ライブラリだけで確かめる
+import glob
 import json
 import os
 import shutil
@@ -67,7 +68,7 @@ FIXED_KINDS = (
 )
 _SIDE = ".migrating-"  # migrate が名前を外した移し先の台帳の接尾辞（`<名前>.jsonl.migrating-<n>`）
 _TMP = ".tmp"  # migrate が並べ直した台帳を書く一時ファイルの接尾辞（`.<名前>.jsonl.tmp`）
-MIGRATED = ".migrated"  # 足し合わせた旧の台帳を旧の置き場に残す名前（`<名前>.jsonl.migrated`）
+MIGRATED = ".migrated"  # 足し合わせた旧の台帳を旧の置き場に残す名前（`<名前>.jsonl.migrated`。既にあれば `-<n>` を付ける）
 LOCK = ".migrate.lock"  # migrate を直列化するロック（利用者の根の下。共有する置き場の別のコンテナとも排他になる）
 NOTE = "移行の前に動いているプランを止める。移行の前の queue は --resume で続けられない（新しく流す）"
 
@@ -281,28 +282,48 @@ def _merge_into(dst: Path, sources: Sequence[Path]) -> int:
     return sum(len(rows) for rows in chunks)
 
 
+def _migrated(src: Path) -> list[Path]:
+    """旧の台帳 `src` を前の migrate が名前を外して残したもの（`<名前>.migrated`・`<名前>.migrated-<n>`）。"""
+    return (
+        sorted(p for p in src.parent.glob(f"{glob.escape(src.name)}{MIGRATED}*") if _migrated_of(p.name) == src.name)
+        if src.parent.is_dir()
+        else []
+    )
+
+
+def _migrated_of(name: str) -> Optional[str]:
+    """`<名前>.jsonl.migrated` か `<名前>.jsonl.migrated-<n>` なら元の名前。違えば None。"""
+    base, sep, n = name.rpartition(MIGRATED)
+    ok = sep and base.endswith(".jsonl") and (n == "" or (n[:1] == "-" and n[1:].isdigit()))
+    return base if ok else None
+
+
 def _merge_jsonl(src: Path, dst: Path, moved: list) -> None:
-    """旧の台帳 `src` を `dst` へ足し合わせ、旧は `<名前>.migrated` へ改名して残す（既にあれば中身を後ろに足す）。
-    旧の版の書き手が開いた fd へ後から足した行は `.migrated` に残り、次の migrate が足す。前の migrate が残した
-    `.migrated` は、`dst` に中身がすべて入っていれば消す（この回に旧の台帳を足したものは、次の回まで残す）。"""
-    mig = src.with_name(src.name + MIGRATED)
-    earlier, appended = mig.exists(), src.exists()
-    if appended and earlier:
-        with mig.open("ab") as f:
-            f.write(b"".join(_read_lines(src)))
-        src.unlink()
-    elif appended:
+    """旧の台帳 `src` の名前を外して `<名前>.migrated`（既にあれば `<名前>.migrated-<n>`）で残し、前の回から残るものと
+    ともに `dst` へ足し合わせる。名前を外した後も、それ以前に開いた書き手の fd はその実体へ足すため、この回のものは
+    次の回まで消さない。前の回から残るものは、`dst` に中身がすべて入っていれば消す（次の回が読み直して足す）。"""
+    earlier = _migrated(src)
+    sources = list(earlier)
+    if src.exists():
+        n = 0
+        mig = src.with_name(src.name + MIGRATED)
+        while mig.exists():
+            n += 1
+            mig = src.with_name(f"{src.name}{MIGRATED}-{n}")
         os.rename(src, mig)
-    if _merge_into(dst, [mig]) or appended:
+        sources.append(mig)
+    if _merge_into(dst, sources) or len(sources) > len(earlier):
         moved.append(str(dst))
-    if earlier and not appended and not _missing(_read_lines(dst), _read_lines(mig)):
-        mig.unlink()
+    have = _read_lines(dst)
+    for mig in earlier:
+        if not _missing(have, _read_lines(mig)):
+            mig.unlink()
 
 
 def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
     """`src` を `dst` へ足し合わせる。`.jsonl` は `_merge_jsonl`、ほかは無ければ移し、同じ名前があれば旧に残す。"""
     if src.is_dir() and not src.is_symlink():
-        names = {c.name[: -len(MIGRATED)] if c.name.endswith(".jsonl" + MIGRATED) else c.name for c in src.iterdir()}
+        names = {_migrated_of(c.name) or c.name for c in src.iterdir()}
         for name in sorted(names):
             _merge_ledger(src / name, dst / name, moved, kept)
         try:
@@ -437,7 +458,7 @@ def _migrate_locked(
     kept: list = []
     for kind in kinds:
         _resume_sides(new, kind, moved)
-        if (old / kind).exists() or (old / f"{kind}{MIGRATED}").exists():
+        if (old / kind).exists() or _migrated(old / kind):
             _merge_ledger(old / kind, new / kind, moved, kept)
     out = {**base, "moved": list(dict.fromkeys(moved)), "kept": kept}
     if move_checkout is not None:  # relay が写すこのファイルは標準ライブラリだけを読むため、移す処理は呼ぶ側が渡す

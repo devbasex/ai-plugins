@@ -103,7 +103,8 @@ def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
     assert (old / "ask.jsonl").read_text() == '{"q":2}\n'  # 追記された行は消えない
     assert sh.migrate(env)["status"] == "migrated"
     assert (new / "ask.jsonl").read_text() == '{"q":1}\n{"q":2}\n'
-    assert (old / "ask.jsonl.migrated").read_text() == '{"q":1}\n{"q":2}\n'  # 旧の台帳を足した回は残す
+    assert not (old / "ask.jsonl.migrated").exists()  # 前の回の残りは新に入り切ったので消す
+    assert (old / "ask.jsonl.migrated-1").read_text() == '{"q":2}\n'  # 旧の台帳を足した回は残す
     assert sh.migrate(env)["status"] == "none"
     assert not any(old.iterdir())
 
@@ -122,6 +123,33 @@ def test_migrate_keeps_rows_written_to_an_open_old_ledger_after_migrate(tmp_path
     assert sh.migrate(env)["status"] == "migrated"
     assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2]
     assert not (old / "ask.jsonl.migrated").exists()
+
+
+def test_migrate_keeps_rows_written_to_an_old_ledger_opened_while_a_migrated_one_exists(tmp_path, monkeypatch):
+    """`.migrated` が既にあっても旧の台帳は名前を外して残す。読んだ後に、それ以前に開いた fd へ足された行は
+    次の migrate で新の台帳へ入る（消さない）。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh._user_default(env)
+    old.mkdir(parents=True)
+    (old / "ask.jsonl.migrated").write_text(_row("2026-11-01T00:00:00Z", q=1))
+    (old / "ask.jsonl").write_text(_row("2026-11-02T00:00:00Z", q=2))
+    writer = (old / "ask.jsonl").open("a")  # 旧の版の書き手（migrate の前から開いたまま）
+    real_merge = sh._merge_into
+
+    def merge_then_append(dst, sources):
+        added = real_merge(dst, sources)
+        writer.write(_row("2026-11-03T00:00:00Z", q=3))  # 読んだ後に足す
+        writer.close()
+        return added
+
+    monkeypatch.setattr(sh, "_merge_into", merge_then_append)
+    assert sh.migrate(env)["status"] == "migrated"
+    monkeypatch.setattr(sh, "_merge_into", real_merge)
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2]
+    assert sh.migrate(env)["status"] == "migrated"
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3]
+    assert sh.migrate(env)["status"] == "none"
+    assert not any(old.iterdir())
 
 
 def test_migrate_keeps_a_migrated_ledger_not_yet_in_the_new_one(tmp_path, monkeypatch):
