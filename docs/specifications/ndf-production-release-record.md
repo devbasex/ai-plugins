@@ -19,7 +19,7 @@
 | 順 | 起きること |
 | --- | --- |
 | 1 | `release` ステップ（`release-steps.py release --channel prod`）が本番チャネルへマージする。タグ `ndf--v10.17.30` と GitHub Release は、`delivery` の行の `publishes_release` が真なら CD（`.github/workflows/release-cd.yml`）が作り、無ければこのステップが同じ公開の処理で作る |
-| 2 | `cd-result` ステップが CD の結果を読み、`record` ステップが `release-steps.py record --version 10.17.30 --prs 1260 1262 --cd-result <ファイル>` を打つ。公開物とマージ済みの `release/v10.17.30` の PR を確かめ、その PR（#1268）へ下の記録をコメントで書く |
+| 2 | `cd-result` ステップが CD の結果を読み、`record` ステップが `release-steps.py record --version 10.17.30 --prs 1260 1262 --cd-result <ファイル>` を打つ。公開物とマージ済みの `release/v10.17.30` の PR を確かめ、その PR へ下の記録をコメントで書く |
 | 3 | 結果 JSON の `metrics.release_pr_url` を、プランの `pr_from` がプランの `Pull Request` へ移す |
 | 4 | `verify` → `cleanup` を経て、報告に `- Pull Request: <本番のリリースの PR の URL>` が残る |
 | 5 | まとめの `close` ステップの `--record-pr` が、その PR の番号で埋まる。`sprint-close.py` が最後の記録の `段階: 本番` を読み、閉じる条件 1 を満たす |
