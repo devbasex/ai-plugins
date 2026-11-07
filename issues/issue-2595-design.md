@@ -65,6 +65,7 @@
 | I10 | 並列の進行 | 済んだ起動の指示は、`wait` の知らせに起動の 1 行を持たない | 空の知らせで上書きし、添えるときは起動の 1 行を除く |
 | I11 | 並列の進行 | 一時レーンが読む流すもの（`helper_task` の `phase`）は、起動の指示が済んでも変わらない | 添える値は `action`・`n`・`k` を保つ |
 | I12 | 並列の進行 | 古い記録のリプレイは同じ道を通る。空の知らせは新しい実行だけが出す | `durable.patched` が偽なら出さない |
+| I13 | 並列の進行 | 一時レーンは、問い・リリース承認ゲートの依頼・`settle` を送った後、知らせ（`pause`）から自分の起動の 1 行が消えたことを `parallel.py helper-sync` で確かめてから自分のラッパーを止める | 90 秒で確かめられなければ警告を作業の報告へ書いて止まる |
 
 ### ドメインイベント
 
@@ -80,14 +81,14 @@
 | E8 | 新しいセッションがオーガナイザーの印を付け直した | `parallel.py start` | 統括役 |
 | E9 | 新しいセッションが答えていない問いを受け取った | `parallel.py wait` | 新しいセッション |
 | E10 | 新しいセッションが古い起動の指示を受けた | `parallel.py wait` | 新しいセッション |
-| E11 | 起動の指示が済んだ | 耐久ワークフロー | オーガナイザー（`wait`）。E10 の知らせを上書きする |
+| E11 | 起動の指示が済んだ | 耐久ワークフロー | オーガナイザー（`wait`）と一時レーン（`helper-sync`）。E10 の知らせを上書きし、一時レーンはこの上書きを確かめてから止まる |
 
 ### 用語
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | オーガナイザーのカットポイント | オーガナイザーが知らせへの 1 手と答えの後の整理を終え、`parallel.py wait` を打ち直す時点。文脈の上限の判定はここで行う | 追加（要求の変更で反映済み） |
-| 起動の指示 | 耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。一時レーンが問いを送るか、リリースが締まると済む | 追加 |
+| 起動の指示 | 耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。耐久ワークフローが一時レーンの問いを受けるか、リリースが締まると済む | 追加 |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか） | 意味の変更（並列の計画を足す） |
 | 作業の識別子 | 複数のセッションを 1 つの作業として結ぶキー。課題番号の組（`#829 #830`）か、並列の計画のオーガナイザーなら `parallel:<計画名>` | 意味の変更（計画の形を足す） |
 
@@ -117,9 +118,10 @@
 | 較正（`lib/context_calibrate.py`） | 工程の区切りから `parallel:wait` の行を除く |
 | 引継ぎの CLI（`handoff.py`） | 名の形に `parallel-<計画名>` を足す。`cut-organizer` を足す。`find` の照合の規則を足す |
 | 並列の進行（`lib/parallel_route.py`・`lib/parallel_run.py`） | 起動の指示の済みの印を立て、知らせを今の状態へ合わせる。`step_finish` が引継ぎ文書を消す |
+| 一時レーンの確かめ（`parallel.py` の `helper-sync`、`lib/parallel_helper.py`、`hook_lib/ask_guard.py`） | 知らせから起動の 1 行が消えるのを待つ。リリースの手順では `helper` の `metrics.sync`、問いの保留の手順では hook の文がその 1 行を渡す |
 | 手順書（`references/parallel.md`・`context-window.md`・`handoff.md`・`conductor-entrypoints.md`、`restart` の `SKILL.md`、`parallel-plan.md`、`plugins/ndf/README.md` の hook の表） | オーガナイザーのカットポイント、止められたときの 3 手、文書の名と再開コマンドの例外 |
 
-変えないもの: `parallel.py` の引数と出力の形、ラッパー（`relay.py`）、上限の値と再起動の方針の解決。
+変えないもの: `parallel.py` の既存の副コマンドの引数と出力の形（足すのは副コマンド `helper-sync` と `helper` の `metrics.sync` だけ）、ラッパー（`relay.py`）、上限の値と再起動の方針の解決。
 
 ### 足す値と、当てはまらない既存の規則
 
@@ -208,13 +210,16 @@ graph TD
 ```text
 plugins/ndf/scripts/
 ├── handoff.py                    # 名の形・cut-organizer・match_words
+├── parallel.py                   # helper-sync
 ├── hook_lib/
+│   ├── ask_guard.py              # 問いの保留の手順へ helper-sync の 1 行を足す
 │   ├── shell_checks.py           # parallel_wait
 │   └── token_guard.py            # 起動のキー・拒否の文
 ├── lib/
 │   ├── context_calibrate.py      # 工程の区切り
 │   ├── context_decisions.py      # stage_of・record_mark・record_restart
 │   ├── parallel_files.py         # PLAN_RE を移す・organizer_line を足す
+│   ├── parallel_helper.py        # helper の metrics.sync
 │   ├── parallel_plan.py          # PLAN_RE を parallel_files から読む
 │   ├── parallel_route.py         # 起動の指示の済みの印
 │   └── parallel_run.py           # 呼び出しと step_finish
@@ -345,6 +350,21 @@ classDiagram
 | `lanes` が空の `notice` | `metrics.wake` があれば打ち、`--after <metrics.seq>` で打ち直す |
 | `release`・`confirmed`・`held` と `metrics.release.spawn` | 打っていないものとして `spawn` の 1 行を 1 度打つ。断りの `name-taken` は同じ一時レーンが動いているので、打ち直さずに `wait` へ戻る |
 
+### `parallel.py helper-sync <計画名> <連番>`
+
+一時レーンが自分のラッパーを止める直前に打つ。耐久ワークフローの `pause` は、問いや `settle` を受けて `spawn` を除いた値へ上書きされるので、この値を確かめの印に使う。新しいイベントは足さない。
+
+| 状態 | 返すもの | 一時レーンの次の手 |
+| --- | --- | --- |
+| `pause` の起動の指示（`pause` 自体か、添えた `release`）が別の連番か、`spawn` を持たない | `ok`（0） | 自分のラッパーを止める |
+| 耐久ワークフローが終わっている | `ok`（0） | 自分のラッパーを止める |
+| 90 秒を過ぎても `spawn` が残る | `stopped`（3）と警告 | 警告を作業の報告へ書き、自分のラッパーを止める |
+| 耐久の記録を読めない | `stopped`（2） | 警告を作業の報告へ書き、自分のラッパーを止める |
+
+上限の 90 秒は、受信を待つ最長の約 60 秒（`recv` の 2 回分）に観測の処理の分を足した値で、Bash の既定の上限 120 秒に収まる。止まる前の一時レーンは `name-taken` で重ねて起動されないため、待つ間に新しいセッションが古い `spawn` を打っても流し直しは起きない。古いコードの `run` の下では `spawn` が消えず、上限まで待って今の振る舞いと同じに止まる。
+
+`helper` の出力の `metrics.sync` はこの 1 行を持つ。問いの保留の手順は、hook が一時レーンの名から連番を読んで同じ 1 行を組み、レーンの問いには足さない。
+
 ## 処理の流れ
 
 ### 切り替え
@@ -392,6 +412,8 @@ sequenceDiagram
     else 一時レーンが何も送らずに止まった
         R-->>O: questions（続きから起こし直す / 止める）
     end
+    Note over Y,R: 送った場合は helper-sync で起動の 1 行が消えたのを確かめる
+    Y->>Y: relay.py stop（自分のラッパーを止める）
 ```
 
 ### 起動の指示の状態
@@ -399,7 +421,7 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> 未済: release か confirmed を知らせる
-    未済 --> 済み: 一時レーンが問いを送る
+    未済 --> 済み: 耐久ワークフローが一時レーンの問いを受ける
     未済 --> 締まった: settle
     済み --> 締まった: settle
     済み --> 未済: 次の release か confirmed を知らせる
@@ -421,7 +443,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2595 | 実装する | — | `plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/shell_checks.py`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/lib/context_decisions.py`、`plugins/ndf/scripts/lib/context_calibrate.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`plugins/ndf/skills/restart/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/README.md`、`docs/glossary.md`、`docs/glossary/glossary.json` |
+| #2595 | 実装する | — | `plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/shell_checks.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/context_decisions.py`、`plugins/ndf/scripts/lib/context_calibrate.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_helper.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`plugins/ndf/skills/restart/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/README.md`、`docs/glossary.md`、`docs/glossary/glossary.json` |
 
 ## テスト設計
 
@@ -442,6 +464,7 @@ stateDiagram-v2
 | 11 | 動いている耐久ワークフローへ `start` を打つと 2 本目を起動せず今の pid、`metrics.organizer` が true | オーガナイザーの印を付け直さないと落ちる |
 | 12 | 答えていない問いが残る状態で `wait --after 0` から `seq` で打ち直し、全件が届く | `wait_from` を最新の 1 件だけ返す形にすると落ちる |
 | 13 / I10 | 一時レーンの問い・リリース承認ゲートの依頼・`settle` の後に、知らせへ `spawn` が残らない。一時レーンから何も届いていない指示には `spawn` が残る。`held` の古い 1 行は `loop pending` が `none` で終える | 済みの印を立てないと落ち、起動の前に済みの印を立てると未済の指示を失って落ちる |
+| 13 / I13 | `helper-sync` は `spawn` が残る間は返らず、`pause` の上書きか耐久ワークフローの終わりで `ok` を返す。別の連番の起動の指示では待たない。90 秒で `stopped`（3）を返し、`metrics.sync` と問いの保留の手順がこの 1 行を持つ | `spawn` を見ずに返すと落ち、自分の連番と別の連番を区別しないと次のリリースで待ち続けて落ちる |
 | I11 | 問いの後の知らせでも `helper_task` が `confirmed` を返す | `release` ごと消すと `present` になって落ちる |
 | I12 | `parallel-route` より前の形の記録をリプレイしても `DBOSUnexpectedStepError` にならない | `patched` を外すと落ちる |
 | 14 / I8 | スプリントの状態ファイルなしで `cut-organizer` が 2 行を残し、理由を直前の拒否から引き継ぐ | 書き手を `sprint-state` の経路に戻すと落ちる |
@@ -456,7 +479,7 @@ stateDiagram-v2
 | --- | --- |
 | 今動いている計画の切り替えの時期 | 動いているオーガナイザーのセッションと `run` のプロセスは、リリースの後も古いコードで動く。人が `/ndf:restart` を打つと新しい判定へ移るが、`run` は古いままなので、最初の切り替えの後は古い起動の指示を打つと流し直しが起きうる。時期はリリース承認ゲートで利用者が決める（要求の未決 1） |
 | `/ndf:restart` の再開コマンド | `restart` の表に計画の起動の 1 行を足す。実行の確認はリリースの前に受け入れ条件 16 の通し確認で行う |
-| 送った直後の切り替えの競合 | `settle` か問いを送った直後は、耐久ワークフローが受けるまで最長で約 60 秒（`recv` の 2 回分）の間、古い `pause` が残る。この間に新しいセッションが `wait --after 0` を打つと、流し直しが起きうる。起きる頻度は未測定で、測った結果で扱いを決める |
+| 確かめきれない切り替えの競合 | `helper-sync` が 90 秒で確かめられずに一時レーンが止まると、古い `spawn` が残り、次の `wait --after 0` で流し直しが起きうる。`wait` が古い `spawn` を返してからオーガナイザーが打つまでの間に一時レーンが止まった場合も同じである。どちらも起きる頻度は未測定で、測った結果で扱いを決める |
 | 空の `notice` の増分 | リリース 1 本につき 2 回、オーガナイザーの 1 手が増える。増える費用は未測定である |
 | #2647 との衝突 | #2647 の設計は `_Run` の値を台帳へ保存し、観測を別のモジュールへ移す。済みの印は `launch` の辞書の中なので列は増えない。どちらが先でも、後からマージする側が `parallel_run.py` の差分を取り込み直す |
 

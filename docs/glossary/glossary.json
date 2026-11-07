@@ -6210,7 +6210,7 @@
     {
       "term": "起動の指示",
       "context": "ndf-workflow",
-      "meaning": "耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。一時レーンが問いを送るか、リリースが締まると済む",
+      "meaning": "耐久ワークフローがオーガナイザーへ一時レーンの起動を求める知らせ（`release`・`confirmed`）。起動の 1 行を持つ。耐久ワークフローが一時レーンの問いを受けるか、リリースが締まると済む",
       "pending_source": "issues/issue-2595-design.md"
     }
   ]
