@@ -16,7 +16,8 @@
 - 利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。`.jsonl` は旧と新の行を時刻（`at`）の順に並べて書き直す
   （読み手は末尾を最新として読んでよい）
 - チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`_move_checkout`）。
-  作業ツリーの外で打てば移さない。動いている記録（ロックが持たれている耐久の記録・ステップの子が生きているプラン）と
+  プランの状態は `plan.json` のパスから持ち主のチェックアウトが分かればそこへ移す（`_sv_owner`）。耐久の記録は持ち主を
+  示すものを持たない（入力は空、ファイル名は識別の文字列のハッシュ）ため、打った場所へ移す。作業ツリーの外で打てば移さない。動いている記録（ロックが持たれている耐久の記録・ステップの子が生きているプラン）と
   移し先に同じ名前があるものは旧に残す
 - 何度打ってもよい（移すものが無ければ何もしない）
 
@@ -187,8 +188,8 @@ def _by_time(chunks: Sequence[Sequence[bytes]]) -> list[bytes]:
     return [line for _, line in keyed]
 
 
-def _ledger_lines(path: Path) -> list[bytes]:
-    return [line + b"\n" for line in path.read_bytes().splitlines() if line.strip()]
+def _lines_of(data: bytes) -> list[bytes]:
+    return [line + b"\n" for line in data.splitlines() if line.strip()]
 
 
 def _side(dst: Path) -> Path:
@@ -201,35 +202,68 @@ def _side(dst: Path) -> Path:
         n += 1
 
 
+def _mode_of(paths: Sequence[Path]) -> int:
+    """台帳 `paths` の権限の厳しい方（ビットの積）。問いと答えを持つ `ask.jsonl` の 0600 を広げない。"""
+    mode = 0o777
+    for path in paths:
+        mode &= path.stat().st_mode & 0o777
+    return mode
+
+
+def _drain(read: dict[Path, int], dst: Path) -> None:
+    """名前を外した台帳 `read`（パス → 読んだ大きさ）に、読んだ後で足された行を `dst` の末尾へ足す。
+    名前を外す前に開いた書き手の fd は外した台帳へ書き続けるため、消す前に拾う。大きさが変わらなくなるまで繰り返す。"""
+    while True:
+        grown = False
+        for path, size in read.items():
+            data = path.read_bytes()
+            if len(data) > size:
+                with dst.open("ab") as f:
+                    f.write(b"".join(_lines_of(data[size:])))
+                read[path] = len(data)
+                grown = True
+        if not grown:
+            return
+
+
 def _rewrite_by_time(dst: Path, sources: Sequence[tuple[Path, bool]]) -> None:
     """旧の台帳 `sources`（(パス, 止まった移行の残りか)）を `dst` と合わせ、時刻の順に並べて `dst` を書き直し、`sources` を消す。
 
     `dst` も名前を外してから読み（`<dst>.migrating-<pid>`）、並べたものを一時ファイルへ書いて `os.link` で元の名前へ置く。
+    一時ファイルは作る時点から、移行元・移行先の台帳の厳しい方の権限にする（umask によらない）。
     間に別のプロセスが `dst` を作り直して追記していれば、その名前も外して末尾へ足してから置き直す（追記を落とさない）。
+    置いた後、名前を外した台帳を既に開いていた書き手の追記を `_drain` で末尾へ足してから消す。最後の確かめから
+    消すまでの間（ファイルを 1 つ読んで消すだけの間）の追記は拾えないが、その間はごく短い。
     止まった移行の残りは、`dst` に既にある行を足さない（前の移行が足した後、消す前に止まった）。
     途中で止まっても、名前を外した `dst` は次の migrate が `_resume_held` で元の名前へ戻す。"""
-    sides: list[Path] = []
+    read: dict[Path, int] = {}
     current: list[bytes] = []
     if dst.exists():
         side = _side(dst)
         os.rename(dst, side)
-        sides.append(side)
-        current = _ledger_lines(side)
+        data = side.read_bytes()
+        read[side] = len(data)
+        current = _lines_of(data)
     have: dict[bytes, int] = {}
     for line in current:
         have[line] = have.get(line, 0) + 1
     chunks: list[list[bytes]] = []
     for src, resumed in sources:
+        data = src.read_bytes()
+        read[src] = len(data)
         rows = []
-        for line in _ledger_lines(src):
+        for line in _lines_of(data):
             if resumed and have.get(line, 0) > 0:
                 have[line] -= 1
                 continue
             rows.append(line)
         chunks.append(rows)
+    mode = _mode_of(list(read))
     tmp = dst.with_name(f".{dst.name}{_TMP}{os.getpid()}")  # `.jsonl` で終わらない（読み手が拾わない）
     tmp.unlink(missing_ok=True)  # 止まった前の書き直しの残りは移し先と同じ実体のことがある。書き込む前に切り離す
-    with tmp.open("wb") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    os.fchmod(fd, mode)  # umask で削られた分を戻す（広げるのは移行元・移行先の権限まで）
+    with os.fdopen(fd, "wb") as f:
         f.write(b"".join(_by_time([current, *chunks])))
     while True:
         try:
@@ -238,11 +272,14 @@ def _rewrite_by_time(dst: Path, sources: Sequence[tuple[Path, bool]]) -> None:
         except FileExistsError:
             side = _side(dst)
             os.rename(dst, side)  # 書き直しの間に作り直された台帳。行は並べたものより新しい
-            sides.append(side)
+            data = side.read_bytes()
+            read[side] = len(data)
+            os.chmod(tmp, _mode_of([tmp, side]))
             with tmp.open("ab") as f:
-                f.write(b"".join(_ledger_lines(side)))
+                f.write(b"".join(_lines_of(data)))
     tmp.unlink()
-    for path in [*sides, *(src for src, _ in sources)]:
+    _drain(read, dst)
+    for path in read:
         path.unlink()
 
 
@@ -354,17 +391,43 @@ def _step_running(plan_state: Path) -> bool:
     return any(isinstance(c, dict) and isinstance(c.get("pid"), int) and _held_running(c["pid"]) for c in children or [])
 
 
+_PLAN_PATHS = ("リポジトリ", "作業場所")  # プランの状態の持ち主を確かめるパス（`plan.json` の写し。この順に見る）
+
+
+def _sv_owner(plan_state: Path) -> Optional[Path]:
+    """プランの状態 `plan_state` の持ち主のチェックアウトの根（`<git の共通ディレクトリ>/ndf/state`）。
+    `plan.json` のパスのうち、今ある作業ツリーの最初のもので決める。決まらなければ None。"""
+    try:
+        plan = json.loads((plan_state / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for key in _PLAN_PATHS:
+        value = plan.get(key) if isinstance(plan, dict) else None
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            continue
+        try:
+            got = find_git_dir(Path(value)) if Path(value).is_dir() else None
+        except OSError:
+            got = None
+        if got is not None:
+            return got[1] / "ndf" / "state"
+    return None
+
+
 def _move_sv(old: Path, new: Path, moved: list, kept: list) -> None:
-    """旧の `sv/` のプランの状態をディレクトリごと `new` へ移す。"""
+    """旧の `sv/` のプランの状態をディレクトリごと、持ち主のチェックアウトの根（`_sv_owner`）の `sv/` へ移す。
+    持ち主が決まらない（パスを持たない・作業ツリーが無くなった・git の外）ものは `new`（打った作業ツリーのチェックアウト）へ移す。"""
     for child in sorted(old.iterdir()):
-        if (new / child.name).exists() or (new / child.name).is_symlink():
-            kept.append({"path": str(child), "reason": "移し先に同じ名前のプランの状態がある"})
+        owner = _sv_owner(child)
+        to = owner / "sv" if owner is not None else new
+        if (to / child.name).exists() or (to / child.name).is_symlink():
+            kept.append({"path": str(child), "reason": f"移し先 {to} に同じ名前のプランの状態がある"})
         elif _step_running(child):
             kept.append({"path": str(child), "reason": "ステップの子が生きている（動いているプラン）"})
         else:
-            new.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(child), str(new / child.name))
-            moved.append(str(new / child.name))
+            to.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(child), str(to / child.name))
+            moved.append(str(to / child.name))
 
 
 def _move_checkout(old: Path, cwd: Path) -> dict:

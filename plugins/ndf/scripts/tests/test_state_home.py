@@ -413,3 +413,79 @@ def test_moved_plan_state_link_is_repointed(tmp_path, monkeypatch):
     sh.migrate({"HOME": str(tmp_path / "h")}, cwd=wt)
     assert paths.state_dir_of(str(plan)) == link
     assert link.resolve() == real.resolve() and (link / "state.json").exists()
+
+
+def test_migrate_moves_plan_states_to_their_owner_checkout(tmp_path):
+    """プランの状態は、`plan.json` のパス（`リポジトリ`・`作業場所`）の作業ツリーのチェックアウトへ移す。
+    持ち主が決まらない（パスが無い・無くなった・git の外）ものは打った作業ツリーのチェックアウトへ移す。"""
+    env = {"HOME": str(tmp_path / "h")}
+    wt = _repo(tmp_path)
+    other = _repo(tmp_path / "other")  # 別のリポジトリ（旧の置き場に同居していた）
+    to = (tmp_path / "work/repo/.git/ndf/state/sv").resolve()
+    owner = (tmp_path / "other/work/repo/.git/ndf/state/sv").resolve()
+    old = sh.legacy_home(env) / "sv"
+    plans = {
+        "1-design-aaaaaaaa": {"リポジトリ": str(tmp_path / "other/work/repo"), "作業場所": str(tmp_path / "other/gone")},
+        "6-impl-bbbbbbbb": {"作業場所": str(other)},
+        "7-check-cccccccc": {"作業場所": str(wt)},
+        "dev-dddddddd": {"課題": [1]},
+        "ex-eeeeeeee": {"作業場所": "/abs/worktree"},
+    }
+    for name, plan in plans.items():
+        (old / name).mkdir(parents=True)
+        (old / name / "plan.json").write_text(json.dumps(plan, ensure_ascii=False))
+    (old / "close-ffffffff").mkdir()  # plan.json の無い状態
+    r = sh.migrate(env, cwd=wt)
+    assert r["status"] == "migrated"
+    assert sorted(r["sv"]["moved"]) == sorted(
+        [str(owner / "1-design-aaaaaaaa"), str(owner / "6-impl-bbbbbbbb")]
+        + [str(to / n) for n in ("7-check-cccccccc", "dev-dddddddd", "ex-eeeeeeee", "close-ffffffff")]
+    )
+    assert (owner / "6-impl-bbbbbbbb/plan.json").exists() and not old.exists()
+
+
+def test_migrate_keeps_restricted_mode_of_ledgers(tmp_path):
+    """並べ直した台帳は、移行元・移行先の厳しい方の権限を保つ（umask によらない。問いと答えを持つ ask.jsonl は 0600）。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh._user_default(env)
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    for root, at in ((old, "2026-11-01T00:00:00Z"), (new, "2026-11-02T00:00:00Z")):
+        (root / "ask.jsonl").write_text(_row(at))
+        (root / "ask.jsonl").chmod(0o600)
+    (old / "metrics").mkdir()
+    (old / "metrics/m.jsonl").write_text(_row("2026-11-01T00:00:00Z"))
+    (old / "metrics/m.jsonl").chmod(0o640)
+    mask = os.umask(0o022)
+    try:
+        assert sh.migrate(env)["status"] == "migrated"
+    finally:
+        os.umask(mask)
+    assert (new / "ask.jsonl").stat().st_mode & 0o777 == 0o600
+    assert (new / "metrics/m.jsonl").stat().st_mode & 0o777 == 0o640  # 移し先が無いときは移行元の権限
+
+
+def test_migrate_keeps_rows_appended_to_open_ledgers_after_reading(tmp_path, monkeypatch):
+    """読んだ後に、名前を外した台帳（移し先・旧）を既に開いていた書き手が足した行を、消さずに新しい台帳へ残す。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh._user_default(env)
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    (old / "ask.jsonl").write_text(_row("2026-11-01T00:00:00Z", q=1))
+    (new / "ask.jsonl").write_text(_row("2026-11-02T00:00:00Z", q=2))
+    writer_new = (new / "ask.jsonl").open("a")  # 現行の版の書き手（移し先を開いたまま）
+    writer_old = (old / "ask.jsonl").open("a")  # 旧の版の書き手
+    real_link = sh.os.link
+
+    def link_then_append(src, dst):
+        real_link(src, dst)
+        if writer_new.closed:
+            return
+        for w, q in ((writer_new, 3), (writer_old, 4)):  # 並べ直したものを置いた直後に、開いた fd へ追記する
+            w.write(_row("2026-11-07T00:00:00Z", q=q))
+            w.close()
+
+    monkeypatch.setattr(sh.os, "link", link_then_append)
+    assert sh.migrate(env)["status"] == "migrated"
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3, 4]
+    assert sorted(p.name for p in new.iterdir()) == ["ask.jsonl"]
