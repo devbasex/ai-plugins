@@ -168,7 +168,7 @@
     {
       "id": "merge",
       "type": "run",
-      "timeout": 3960,
+      "timeout": 4290,
       "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
@@ -182,7 +182,7 @@
     {
       "id": "merge-approved",
       "type": "run",
-      "timeout": 3960,
+      "timeout": 4290,
       "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
