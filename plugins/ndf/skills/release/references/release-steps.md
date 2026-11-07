@@ -171,9 +171,10 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
   `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
   `prod` は続けて `release/v<版>` を head にした `main` 宛の Pull Request をマージし、タグと GitHub Release を作る。
+  `delivery` の行が `publishes_release: true` なら、この 2 つは CD が作り、`release` は作らない（`metrics.tag` は `null`、`metrics.publisher` は `cd`）。
   `main` 宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
   無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
-  （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。
+  （マージした Pull Request と、`release` が作ったときのタグ・GitHub Release）がリリース完了の確認で照会した結果である。
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
   `metrics.sweep_candidates` に載せる。消すのは人の承認（`ndf-ask:redline:C4`）を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す

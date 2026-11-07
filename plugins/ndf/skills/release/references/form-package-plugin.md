@@ -264,6 +264,11 @@ git rev-parse HEAD                            # 送ったコミット
 | 取得元ごとタグへ固定 | `marketplace add <owner>/<repo>@<名前>--v<版>` | **同じ取得元の他のプラグインも過去の状態になる** |
 | 対象だけを固定 | 別名のマーケットプレイスを 1 つ作り、`git-subdir` で対象のパスと `ref` / `sha` を直接指す | 利用者が定義ファイルを持つ必要がある |
 
+`delivery` の行が `publishes_release: true` のリポジトリでは、CD を外す手順も承認資料の「取り消しの手段」へ書く。
+ワークフローを無効にし、`.ndf/project.json` の `delivery` を手動の行へ戻し、手元で
+`python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <SHA>` を打つ。
+この手順はリリースタグと GitHub Release の作り方を戻すもので、利用者へ届いた版は戻らない。
+
 ```json
 {"name": "<別名>", "owner": {"name": "<所有者>"},
  "plugins": [{"name": "<プラグイン名>",
