@@ -53,7 +53,7 @@
 | I2 | 記録の項目 | スクリプトが使う `.ndf/`・`issues/` の下のパスは、契約のパターンか設定のファイルに当たる | 検査が `path-undeclared` で落ちる |
 | I3 | 作業の記録の実体 | 片付けは追跡ファイルを消さない | そのパスを消さず、理由を結果へ並べる |
 | I4 | 作業の記録の実体 | 片付けの対象はメインディレクトリの契約に載るパスだけで、`..`・絶対パス・シンボリックリンクの先をたどらない | そのパスを消さず、理由を結果へ並べる。リンクはリンク自体だけを消す |
-| I5 | 作業の記録の実体 | 進行中・保留の周回と、答えの無い待ちの行が指す周回の中身は減らない | その周回を飛ばす |
+| I5 | 作業の記録の実体 | 進行中・保留の周回と、答えの無い待ちの行か承認済みでマージが済んでいない待ちの行が指す周回の中身は減らない | その周回を飛ばす |
 | I6 | ループの記録 | 自動の片付けの対象は `mvv_changed` で止まったループだけである | 対象の判定で飛ばす |
 | I7 | ループの記録 | 進行中の周回・保留の周回・答えの無い待ちの行があるループは閉じない。`running` のループは閉じない | `loop close` が 0 以外で断り、`items` に理由を並べる |
 | I8 | ループの記録 | 閉じたループは再開しない | `loop start` と周回の副命令が 0 以外で断る |
@@ -71,7 +71,7 @@
 | E3 | 周回の残す統計以外を消した | 周回の片付け | 結果の `metrics.records` |
 | E4 | ループが終わった | `mvv_changed` の止まり・`loop close` | ループの片付け |
 | E5 | ループの記録を片付けた | ループの片付け | 結果の `items`・`laps.md` |
-| E6 | 並列の計画が終わった | `step_finish` | 並列の計画の片付け |
+| E6 | 並列の計画が終わった | `_finish_or_hold` の `finished` の経路 | 並列の計画の片付け |
 | E7 | 並列の計画の記録を片付けた | 並列の計画の片付け | 計画の終わりの要約（`run.summary`） |
 | E8 | 承認資料を消した | リリースのプランの最後のステップ | プランの報告 |
 | E9 | 実行計画を PR へ投稿して消した | `records.py close-plan` | conductor |
@@ -161,7 +161,7 @@
 | 一覧（新設 `plugins/ndf/scripts/lib/work_records_list.py`） | 置き場を走査し、終わりを判定して一覧を作る。読めない項目は「未確認」にする |
 | 片付けのエントリポイント（新設 `plugins/ndf/scripts/records.py`） | 副命令 `list`・`drop-approval`・`close-plan` |
 | ループの記録（`lib/sprint_loop.py`・`sprint_loop_record.py`・`sprint_loop_gate.py`・`sprint_loop_cli.py`） | `after_close` が周回を片付ける。`loop start` が `mvv_changed` のループを片付ける。`loop close` を足す。`closed` の状態を持つ |
-| 並列の計画（`lib/parallel_run.py`） | `step_finish` が片付けを呼ぶ |
+| 並列の計画（`lib/parallel_run.py`） | `_finish_or_hold` の `finished` の経路だけが片付けを呼ぶ。`_handle_stop` は呼ばない |
 | 引継ぎ文書（`scripts/handoff.py`・`lib/parallel_plan.py`） | 受ける名を増やし、再開の探索は今の名に限る。ループの文書と履歴とレーン用の文書をまとめて消す関数を持つ |
 | プランの置き場（`supervise_lib/procedures.py`・`new_args.py`・`sprint.py`・`queue.py`） | 既定の置き場を返し、`--out` を検査する。まとめのプランへ `片付け` の欄を書き、キューの終わりで片付ける |
 | スプリント状態（`scripts/sprint-state.py`） | 名前を決まったパスへ解決し、ファイルが無ければ錠を取る前に断る |
@@ -281,10 +281,10 @@ classDiagram
 
 | `end` | 判定 | 片付ける者 |
 | --- | --- | --- |
-| `lap-closed` | 周回が保留でなく締まり、答えの無い待ちの行に指されていない | 周回の片付け |
+| `lap-closed` | 周回が保留でなく締まり、答えの無い待ちの行にも、`answer` が `approved` で `pr` があり `merged_at` が無い待ちの行にも指されていない | 周回の片付け |
 | `loop-ended` | `status` が `closed`、または `mvv_changed` で止まって I7 に当たらない | ループの片付け |
 | `plan-finished` | 耐久の記録の出力が `finished`（`parallel.py wait` と同じものを読む） | 並列の計画の片付け |
-| `sprint-closed` | まとめのプランが完了した | キューの終わり |
+| `sprint-closed` | `.ndf/sprints/<名>/` のまとめのプランが完了した。引継ぎ文書 `sprint-<名>.md` は名から同じ置き場を引き、置き場かプランが無ければ判定せず `unverified` にする | 置き場はキューの終わり。引継ぎ文書は一覧で出し、AI が確かめて `handoff.py remove` |
 | `released` | 版のタグがある、または同じプラグインのより新しい版の承認資料がある | リリースのプラン |
 | `subject-closed` | 課題かマイルストーンが閉じた | 一覧で出し、AI が確かめて `handoff.py remove` |
 | `receiver-ended` | 受け手のループが閉じたか終わった | 一覧で出し、AI が確かめて `handoff.py remove` |
@@ -308,7 +308,8 @@ classDiagram
 
 | 名前 | `paths` | `owner` | `end` | `keep` |
 | --- | --- | --- | --- | --- |
-| `handoff-conductor` | `.ndf/handoff/issue-*.md`・`milestone-*.md`・`sprint-*.md` | `conductor` | `subject-closed` | — |
+| `handoff-conductor` | `.ndf/handoff/issue-*.md`・`milestone-*.md` | `conductor` | `subject-closed` | — |
+| `handoff-sprint` | `.ndf/handoff/sprint-*.md` | `conductor` | `sprint-closed` | — |
 | `handoff-loop` | `.ndf/handoff/loop-*.md` | `loop` | `loop-ended` | — |
 | `handoff-parallel` | `.ndf/handoff/parallel-*.md` | `parallel` | `plan-finished` | — |
 | `handoff-notice` | `.ndf/handoff/notice-*.md` | `receiver` | `receiver-ended` | — |
@@ -344,7 +345,7 @@ classDiagram
 
 | 副命令 | 入力 | 成功 | 失敗の形 |
 | --- | --- | --- | --- |
-| `list [--sweep] [--root D]` | `--sweep` は一覧の前に、`mvv_changed` のループと、閉じたループ・`finished` の計画の消し残しを片付ける | 0。`items` は 1 件ずつ `{path, owner, bytes, state, reason}`。`state` は `ended`・`owner_unknown`・`unverified`。動いている記録は並べない。`metrics` は件数とバイト数 | 2 引数・`.ndf/` が無い。読めない項目は 0 のまま `unverified` |
+| `list [--sweep] [--root D]` | `--sweep` は一覧の前に、`mvv_changed` のループと、閉じたループ・`finished` の計画の消し残しを片付ける | 0。`items` は 1 件ずつ `{path, owner, bytes, state, reason}`。`state` は `ended`・`owner_unknown`・`unverified`・`blocked`。`blocked` は片付けを止める理由がある記録で、I7 に当たる `mvv_changed` のループと `stop` で終えた並列の計画を指し、`reason` に理由を書く。動いているループ・計画と、再開で解けるループは並べない。`metrics` は件数とバイト数 | 2 引数・`.ndf/` が無い。読めない項目は 0 のまま `unverified` |
 | `drop-approval --path P [--root D]` | 承認資料のパス | 0。無ければ消さず 0。追跡・契約外は消さず `items` に理由を並べて 0（プランを止めない） | 2 引数 |
 | `close-plan <キー> --pr N [--root D]` | 実行計画のキーと、最後にマージした PR | 0。`items` にコメントの URL と消したパス | 1 投稿の失敗（ファイルは残す）。2 ファイルが無い |
 
@@ -389,11 +390,11 @@ sequenceDiagram
     S-->>S: metrics.records を足して続ける
 ```
 
-片付けは `after_close` と `stop_and_report` の書き込みの後に、そのループの締まった周回をすべて見る。消し残しと、答えが入って待ちを外れた周回が次の締めで拾われる。周回の締めの結果の終了コードは変えない。
+片付けは `after_close` と `stop_and_report` の書き込みの後に、そのループの締まった周回をすべて見る。消し残しと、答えが入ってマージまで済み、待ちを外れた周回が次の締めで拾われる。周回の締めの結果の終了コードは変えない。
 
 ### 並列の計画・スプリント・リリース
 
-- **並列の計画**: `_finish_or_hold` が `step_finish` を呼ぶ時点で、全レーンが止まり、答えの無い提示と問いと保留の周回が無い（`_run_finished`）。`step_finish` の最後で片付け、結果と消せなかったパスを終わりの要約へ載せる。例外は要約へ理由を載せて進む。`stop` で終えた計画は片付けず、一覧に出す
+- **並列の計画**: `_finish_or_hold` が `step_finish` を呼ぶ時点で、全レーンが止まり、答えの無い提示と問いと保留の周回が無い（`_run_finished`）。片付けは `_finish_or_hold` の中で、`step_finish` の後・`run.summary("finished")` の前に、独立した耐久ステップとして打つ。`step_finish` の中には置かない（`_handle_stop` からも呼ばれるため）。結果と消せなかったパスを終わりの要約へ載せる。例外は要約へ理由を載せて進む。`stop` で終えた計画は片付けず、一覧に `blocked` で出す
 - **スプリント**: `new close` が既定の置き場のとき、まとめのプランへ欄 `片付け`（スプリントの置き場）を書く。`supervise.py queue` は `write_done` の直前に、すべての項目が `完了` なら片付ける。先に片付けるのは、`wait` が done を見た時点で最終の状態にするためである。周回の中の `new close` には欄を書かない
 - **リリース**: 本番のプランで `cleanup` の `next` を `drop-approval` にする。`on_fail` を置かず、`records.py` は 0 で返る。承認を待つ間はこのステップへ届かない（ステップの順序で満たす）
 
@@ -453,19 +454,19 @@ stateDiagram-v2
 | 受け入れ条件 7 | 無い名前で `gate` を打ってもリポジトリ直下に `*.lock` ができない | 錠を存在の確認より先に取る |
 | 受け入れ条件 8 | `handoff.py path` が 2 つの名で 0。`find` は `notice-to-*` を返さない | 名の規則を 1 つにまとめる |
 | 受け入れ条件 9 | 完了の周回を締めると `report.md` だけが残る | 片付けの呼び出しを外す |
-| 受け入れ条件 10・I5 | 保留の周回と、答えの無い待ちが指す周回の中身が減らない。`loop answer` が動く | 待ちの行の判定を外す |
+| 受け入れ条件 10・I5 | 保留の周回と、答えの無い待ちが指す周回の中身が減らない。`loop answer` が動く。承認済みでマージが済んでいない待ちの行が指す周回も減らず、問い直しで答えが外れた後の `loop answer` が承認を記録できる | 待ちの行の判定を外す。`merged_at` の判定を外す |
 | 受け入れ条件 11 | 別の名の `loop start` で `mvv_changed` のループが残す統計だけになり、引継ぎ文書と履歴とレーン用の文書が消える | 片付けを同じ名だけにする |
 | 受け入れ条件 12・I6 | 再開で解ける各条件のループが `loop start` と `list --sweep` で減らない | 判定を `stopped` にする |
 | 受け入れ条件 13・I8 | `loop close` で同じ形に片付き、`running` は断る。閉じた名の `loop start` は断る | `closed` の判定を外す |
 | 受け入れ条件 14・I7 | 進行中・保留・待ちの 3 つのどれかがあるとファイルが減らず `items` に理由が出る | 3 つのどれかの判定を外す |
-| 受け入れ条件 15 | `finished` で残す統計だけになり、並列の引継ぎ文書が消える | `step_finish` から呼び出しを外す |
-| 受け入れ条件 16・I12 | 動いている計画と、答えの無い提示がある計画のファイルが減らない | 提示の判定を外す |
+| 受け入れ条件 15 | `finished` で残す統計だけになり、並列の引継ぎ文書が消える | `_finish_or_hold` の `finished` の経路から呼び出しを外す |
+| 受け入れ条件 16・I12 | 動いている計画と、答えの無い提示がある計画のファイルが減らない。`stop` で終えた計画のファイルも減らない | 提示の判定を外す。片付けの呼び出しを `step_finish` の中へ動かす |
 | 受け入れ条件 17 | `new close` が完了すると残す統計だけが残る。周回の中のまとめは片付けない | 欄 `片付け` の条件を外す |
 | 受け入れ条件 18 | 本番のプランの最後に `drop-approval` があり、`-parallel-` の資料も消える | `cleanup` の `next` を戻す |
 | 受け入れ条件 19 | 承認ゲートで止まったプランで承認資料が残る | ステップを承認の前へ動かす |
 | 受け入れ条件 20・I11 | 投稿の後に消える。投稿の失敗で残り 0 以外 | 消す順を入れ替える |
-| 受け入れ条件 21 | 棚卸しのプランに一覧のステップがあり、結果にパス・持ち主・大きさ・理由の 4 つの欄が並ぶ | ステップを外す |
-| 受け入れ条件 22 | 2026-11-07 の `.ndf/handoff/` と同じ名前で、終わった・持ち主つき・持ち主不明に分かれる | パターンの順を崩す |
+| 受け入れ条件 21 | 棚卸しのプランに一覧のステップがあり、結果にパス・持ち主・大きさ・理由の 4 つの欄が並ぶ。I7 に当たる `mvv_changed` のループと `stop` で終えた計画が `blocked` で理由つきで並ぶ | ステップを外す。`blocked` の判定を外す |
+| 受け入れ条件 22 | 2026-11-07 の `.ndf/handoff/` と同じ名前で、終わった・持ち主つき・持ち主不明に分かれる。`sprint-<名>.md` は `.ndf/sprints/<名>/` のまとめのプランの完了で終わったと判定し、置き場が無ければ `unverified` になる | パターンの順を崩す。名から置き場を引く処理を外す |
 | 受け入れ条件 23 | 閉じた課題の追跡文書が並ぶ。`gh` が失敗すると `unverified` | 追跡ファイルを走査から外す |
 | 受け入れ条件 24 | worktree の消えた割り当てのコンテナとボリュームが並ぶ。接続できないと `unverified` で最後まで出る | 例外で一覧が止まる |
 | 受け入れ条件 25・I3 | 追跡ファイルを置いたディレクトリで片付けても消えない | `git ls-files` の確認を外す |
@@ -485,7 +486,7 @@ stateDiagram-v2
 
 | 項目 | 内容 |
 | --- | --- |
-| 自動削除の規則の承認（要求の未決 2） | 作業の記録の削除は追跡外で git では戻せず、共通原則の C4 に当たる扱いにする。決定 2・3・5・6 の規則（持ち主の状態で消す・周回の締めで片付ける・自動の片付けを `mvv_changed` に絞る・答えの無い待ちの行が指す周回を残す）を設計承認ゲートで人が見る。MVV 判定に任せない |
+| 自動削除の規則の承認（要求の未決 2） | 作業の記録の削除は追跡外で git では戻せず、共通原則の C4 に当たる扱いにする。決定 2・3・5・6 の規則（持ち主の状態で消す・周回の締めで片付ける・自動の片付けを `mvv_changed` に絞る・答えの無い待ちの行と承認済みで未マージの待ちの行が指す周回を残す）を設計承認ゲートで人が見る。MVV 判定に任せない |
 | ボリュームの回収（要求の未決 1） | 一覧に並べるところまでとし、消す手段は #2660（worktree を消した後もテスト環境の割り当てとコンテナが残る）へ寄せる（決定 15）。#2660 の本文へボリュームの語を足すかは設計承認ゲートで決まる |
 | スプリントの分け方（要求の未決 3） | `implementation-plan` が案を出す |
 | 進行中の周回を持つ `mvv_changed` のループ | 2026-11-07 のメインディレクトリで 9 本のうち 3 本（`lcarul` は進行中の周回、`lcarul2` は待ちの行、`lroot4` はその両方と保留の周回）が I7 に当たり、自動では減らない。`mvv_changed` は再開しないため、進行中の周回を解く手段が要るかは未確認。一覧に理由つきで出して人が判断する |
