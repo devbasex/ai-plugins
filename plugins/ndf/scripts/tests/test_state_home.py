@@ -13,6 +13,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
+import state_checkout as sc  # noqa: E402
 import state_home as sh  # noqa: E402
 
 WF = SCRIPTS.parent / "skills" / "development-workflow" / "scripts" / "lib" / "workflow-common.sh"
@@ -307,7 +308,7 @@ def test_migrate_moves_checkout_records_to_the_checkout_root(tmp_path):
     wt = _repo(tmp_path)
     old = _old_records(tmp_path, env)
     to = (tmp_path / "work/repo/.git/ndf/state").resolve()
-    r = sh.migrate(env, cwd=wt)
+    r = sc.migrate(env, cwd=wt)
     assert r["status"] == "migrated"
     assert r["checkout"] == {"to": str(to), "reason": None}
     assert sorted(r["dbos"]["moved"]) == [str(to / "dbos/exp-bbbbbbbbbbbb.sqlite"), str(to / "dbos/parallel-aaaaaaaaaaaa.sqlite")]
@@ -322,7 +323,7 @@ def test_migrate_moves_checkout_records_to_the_checkout_root(tmp_path):
     ]
     assert (to / "sv/plan-ca92eb3d/state.json").exists() and (to / "sv/plan-ca92eb3d/work").is_dir()
     assert not (old / "dbos").exists() and not (old / "sv").exists()
-    again = sh.migrate(env, cwd=wt)  # 2 回目は移すものが無い
+    again = sc.migrate(env, cwd=wt)  # 2 回目は移すものが無い
     assert again["status"] == "none" and again["dbos"]["moved"] == again["sv"]["moved"] == []
 
 
@@ -332,9 +333,9 @@ def test_migrate_keeps_checkout_records_whose_name_is_taken(tmp_path):
     old = _old_records(tmp_path, env)
     to = (tmp_path / "work/repo/.git/ndf/state").resolve()
     (to / "dbos").mkdir(parents=True)
-    (to / "dbos/parallel-aaaaaaaaaaaa.lock").write_text("")  # 移し先に同じ名前の組の 1 つがある
+    (to / "dbos/parallel-aaaaaaaaaaaa.sqlite-shm").write_text("")  # 移し先に同じ鍵の組の 1 つがある（ロックだけなら移す）
     (to / "sv/plan-ca92eb3d").mkdir(parents=True)
-    r = sh.migrate(env, cwd=wt)
+    r = sc.migrate(env, cwd=wt)
     assert r["status"] == "kept"
     assert [k["path"] for k in r["dbos"]["kept"]] == [str(old / "dbos/parallel-aaaaaaaaaaaa.sqlite")]
     assert [k["path"] for k in r["sv"]["kept"]] == [str(old / "sv/plan-ca92eb3d")]
@@ -354,14 +355,14 @@ def test_migrate_keeps_records_of_running_workflows(tmp_path):
     (old / "sv/1-design-0e3fcff9/step.pid").write_text(json.dumps({"step": "s", "children": [{"pid": 999999999}]}))
     with open(old / "dbos/exp-bbbbbbbbbbbb.lock", "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        r = sh.migrate(env, cwd=wt)
+        r = sc.migrate(env, cwd=wt)
     assert r["status"] == "kept"
     assert [k["path"] for k in r["dbos"]["kept"]] == [str(old / "dbos/exp-bbbbbbbbbbbb.sqlite")]
     assert [k["path"] for k in r["sv"]["kept"]] == [str(old / "sv/plan-ca92eb3d")]
     assert (old / "dbos/exp-bbbbbbbbbbbb.lock").exists() and (old / "sv/plan-ca92eb3d/step.pid").exists()
     assert len(r["dbos"]["moved"]) == len(r["sv"]["moved"]) == 1  # 子の死んだプランは移す
     (old / "sv/plan-ca92eb3d/step.pid").unlink()  # ステップが終わった
-    assert sh.migrate(env, cwd=wt)["status"] == "migrated"  # ロックが外れ、ステップが終われば次に打てば移る
+    assert sc.migrate(env, cwd=wt)["status"] == "migrated"  # ロックが外れ、ステップが終われば次に打てば移る
 
 
 def test_migrate_outside_a_work_tree_moves_only_ledgers(tmp_path):
@@ -369,10 +370,10 @@ def test_migrate_outside_a_work_tree_moves_only_ledgers(tmp_path):
     old = _old_records(tmp_path, env)
     (old / "ask.jsonl").write_text('{"q":1}\n')
     (tmp_path / "plain").mkdir()
-    r = sh.migrate(env, cwd=tmp_path / "plain")
+    r = sc.migrate(env, cwd=tmp_path / "plain")
     assert r["status"] == "migrated"
     assert r["checkout"]["to"] is None and "git の作業ツリー" in r["checkout"]["reason"]
-    assert r["dbos"] == r["sv"] == {"moved": [], "kept": []}
+    assert r["sv"] == {"moved": [], "kept": []} and r["dbos"] == {"moved": [], "kept": [], "rekeyed": []}
     assert (old / "dbos/exp-bbbbbbbbbbbb.sqlite").exists() and (old / "sv/plan-ca92eb3d").is_dir()
     assert (tmp_path / "h/.claude/ndf/state/ask.jsonl").exists()
 
@@ -410,7 +411,7 @@ def test_moved_plan_state_link_is_repointed(tmp_path, monkeypatch):
     old_real.mkdir(parents=True)
     (old_real / "state.json").write_text("{}")
     link.symlink_to(old_real, target_is_directory=True)
-    sh.migrate({"HOME": str(tmp_path / "h")}, cwd=wt)
+    sc.migrate({"HOME": str(tmp_path / "h")}, cwd=wt)
     assert paths.state_dir_of(str(plan)) == link
     assert link.resolve() == real.resolve() and (link / "state.json").exists()
 
@@ -435,7 +436,7 @@ def test_migrate_moves_plan_states_to_their_owner_checkout(tmp_path):
         (old / name).mkdir(parents=True)
         (old / name / "plan.json").write_text(json.dumps(plan, ensure_ascii=False))
     (old / "close-ffffffff").mkdir()  # plan.json の無い状態
-    r = sh.migrate(env, cwd=wt)
+    r = sc.migrate(env, cwd=wt)
     assert r["status"] == "migrated"
     assert sorted(r["sv"]["moved"]) == sorted(
         [str(owner / "1-design-aaaaaaaa"), str(owner / "6-impl-bbbbbbbb")]

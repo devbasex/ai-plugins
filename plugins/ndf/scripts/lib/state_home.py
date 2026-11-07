@@ -15,10 +15,10 @@
 
 - 利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。`.jsonl` は旧と新の行を時刻（`at`）の順に並べて書き直す
   （読み手は末尾を最新として読んでよい）
-- チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`_move_checkout`）。
-  プランの状態は `plan.json` のパスから持ち主のチェックアウトが分かればそこへ移す（`_sv_owner`）。耐久の記録は持ち主を
+- チェックアウトの記録（`dbos/`・`sv/`）を、打った作業ツリーのチェックアウトの根へ移す（`state_checkout.migrate`）。
+  プランの状態は `plan.json` のパスから持ち主のチェックアウトが分かればそこへ移す。耐久の記録は持ち主を
   示すものを持たない（入力は空、ファイル名は識別の文字列のハッシュ）ため、打った場所へ移す。作業ツリーの外で打てば移さない。動いている記録（ロックが持たれている耐久の記録・ステップの子が生きているプラン）と
-  移し先に同じ名前があるものは旧に残す
+  移し先に同じ名前があるものは旧に残す。プランの状態のパスから鍵を作る queue の記録は、新しいパスの鍵へ 1 度だけ付け替える
 - 何度打ってもよい（移すものが無ければ何もしない）
 
 シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_user_state_home` にある。
@@ -32,7 +32,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Mapping, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 # 利用者の根に置く台帳（ファイルかディレクトリの名前）。ほかはコンテナの根に残る
 USER_KINDS = (
@@ -340,11 +340,11 @@ def _resume_sides(new: Path, kind: str, moved: list, kept: list) -> None:
             child.unlink()
 
 
-def _flock_free(lock: Path) -> Optional[int]:
+def _flock_free(lock: Path, create: bool = False) -> Optional[int]:
     """耐久の記録のロック `lock` を待たずに取る（filelock と同じ `flock`）。取れれば開いた fd、持たれていれば None。
-    ロックのファイルが無ければ -1（誰も持てない）。"""
+    ロックのファイルが無ければ -1（誰も持てない）。`create` なら無いときに作って取る（移し先の鍵を移す間持つ）。"""
     try:
-        fd = os.open(lock, os.O_RDWR)
+        fd = os.open(lock, os.O_RDWR | (os.O_CREAT if create else 0), 0o644)
     except FileNotFoundError:
         return -1
     try:
@@ -355,116 +355,31 @@ def _flock_free(lock: Path) -> Optional[int]:
     return fd
 
 
-_DBOS_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock")  # 1 本の耐久の記録の組（`durable.purge_old` と同じ）
-
-
-def _move_dbos(old: Path, new: Path, moved: list, kept: list) -> None:
-    """旧の `dbos/` の記録を組（`<鍵>.sqlite` と `-wal`・`-shm`・`.lock`）ごと `new` へ移す。ロックを持ったまま移す。"""
-    keys = sorted({f.name[: -len(sfx)] for f in old.iterdir() for sfx in _DBOS_SUFFIXES if f.name.endswith(sfx)})
-    for key in keys:
-        group = [old / f"{key}{sfx}" for sfx in _DBOS_SUFFIXES if (old / f"{key}{sfx}").exists()]
-        name = str(old / f"{key}.sqlite") if (old / f"{key}.sqlite").exists() else str(group[0])
-        if any((new / f.name).exists() for f in group):
-            kept.append({"path": name, "reason": "移し先に同じ名前の記録がある"})
-            continue
-        fd = _flock_free(old / f"{key}.lock")
-        if fd is None:
-            kept.append({"path": name, "reason": "ロックが持たれている（動いている耐久ワークフロー）"})
-            continue
-        try:
-            new.mkdir(parents=True, exist_ok=True)
-            for f in sorted(group, key=lambda f: f.suffix == ".lock"):  # ロックのファイルは最後に移す
-                shutil.move(str(f), str(new / f.name))
-        finally:
-            if fd >= 0:
-                os.close(fd)
-        moved.append(str(new / Path(name).name))
-
-
-def _step_running(plan_state: Path) -> bool:
-    """プランの状態 `plan_state` のステップの子（`step.pid` の `children`）が生きているか。"""
-    try:
-        data = json.loads((plan_state / "step.pid").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    children = data.get("children") if isinstance(data, dict) else None
-    return any(isinstance(c, dict) and isinstance(c.get("pid"), int) and _held_running(c["pid"]) for c in children or [])
-
-
-_PLAN_PATHS = ("リポジトリ", "作業場所")  # プランの状態の持ち主を確かめるパス（`plan.json` の写し。この順に見る）
-
-
-def _sv_owner(plan_state: Path) -> Optional[Path]:
-    """プランの状態 `plan_state` の持ち主のチェックアウトの根（`<git の共通ディレクトリ>/ndf/state`）。
-    `plan.json` のパスのうち、今ある作業ツリーの最初のもので決める。決まらなければ None。"""
-    try:
-        plan = json.loads((plan_state / "plan.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    for key in _PLAN_PATHS:
-        value = plan.get(key) if isinstance(plan, dict) else None
-        if not isinstance(value, str) or not Path(value).is_absolute():
-            continue
-        try:
-            got = find_git_dir(Path(value)) if Path(value).is_dir() else None
-        except OSError:
-            got = None
-        if got is not None:
-            return got[1] / "ndf" / "state"
-    return None
-
-
-def _move_sv(old: Path, new: Path, moved: list, kept: list) -> None:
-    """旧の `sv/` のプランの状態をディレクトリごと、持ち主のチェックアウトの根（`_sv_owner`）の `sv/` へ移す。
-    持ち主が決まらない（パスを持たない・作業ツリーが無くなった・git の外）ものは `new`（打った作業ツリーのチェックアウト）へ移す。"""
-    for child in sorted(old.iterdir()):
-        owner = _sv_owner(child)
-        to = owner / "sv" if owner is not None else new
-        if (to / child.name).exists() or (to / child.name).is_symlink():
-            kept.append({"path": str(child), "reason": f"移し先 {to} に同じ名前のプランの状態がある"})
-        elif _step_running(child):
-            kept.append({"path": str(child), "reason": "ステップの子が生きている（動いているプラン）"})
-        else:
-            to.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(child), str(to / child.name))
-            moved.append(str(to / child.name))
-
-
-def _move_checkout(old: Path, cwd: Path) -> dict:
-    """旧の根の `dbos/`・`sv/` を `cwd` の作業ツリーのチェックアウトの根へ移す。作業ツリーの外なら移さず理由を返す。"""
-    out: dict = {"checkout": {"to": None, "reason": None}, "dbos": {"moved": [], "kept": []}, "sv": {"moved": [], "kept": []}}
-    try:
-        got = find_git_dir(cwd)
-    except OSError:
-        got = None
-    if got is None:
-        out["checkout"]["reason"] = f"{cwd} は git の作業ツリーでない。耐久の記録とプランの状態は移さない（主のリポジトリで打ち直す）"
-        return out
-    to = got[1] / "ndf" / "state"
-    out["checkout"]["to"] = str(to)
-    for kind, move in (("dbos", _move_dbos), ("sv", _move_sv)):
-        if (old / kind).is_dir() and not (old / kind).is_symlink():
-            move(old / kind, to / kind, out[kind]["moved"], out[kind]["kept"])
-            try:
-                (old / kind).rmdir()
-            except OSError:
-                pass  # 残したものがある
-    return out
-
-
-def migrate(env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> dict:
+def migrate(
+    env: Optional[Mapping[str, str]] = None,
+    cwd: Optional[Path] = None,
+    move_checkout: Optional[Callable[[Path, Path], dict]] = None,
+) -> dict:
     """旧の根から移す。利用者の台帳（`USER_KINDS`）は利用者の根へ足し合わせ、チェックアウトの記録（`dbos/`・`sv/`）は
-    `cwd`（省けば作業ディレクトリ）の作業ツリーのチェックアウトの根へ移す。
+    `cwd`（省けば作業ディレクトリ）の作業ツリーのチェックアウトの根へ `move_checkout` で移す（`state_checkout.migrate` が
+    `state_checkout.move_checkout` を渡す。省けば台帳だけを移す）。
 
     結果は `{"status", "summary", "from", "to", "moved", "kept", "checkout", "dbos", "sv"}`。`moved`・`kept` は台帳のパス、
     `checkout` は `{"to", "reason"}`（作業ツリーの外なら `to` が None で `reason` に理由）、`dbos`・`sv` は
-    `{"moved": [パス], "kept": [{"path", "reason"}]}`。
+    `{"moved": [パス], "kept": [{"path", "reason"}]}`（`dbos` は付け替えた鍵 `rekeyed: [{"from", "to", "plan_state"}]` も持つ）。
     status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（旧に残したものがある: 移し先に同じ名前がある・
     別の migrate が動いている・動いている記録）。止まった migrate の残りも次に打てば足す。何度打ってもよい。"""
     env = _state_env(env)
     old, new = legacy_home(env), _user_default(env)
-    empty = {"moved": [], "kept": []}
-    base = {"from": str(old), "to": str(new), "moved": [], "kept": [], "checkout": {"to": None, "reason": None}, "dbos": empty, "sv": empty}
+    base = {
+        "from": str(old),
+        "to": str(new),
+        "moved": [],
+        "kept": [],
+        "checkout": {"to": None, "reason": None},
+        "dbos": {"moved": [], "kept": [], "rekeyed": []},
+        "sv": {"moved": [], "kept": []},
+    }
     if explicit_home(env) is not None:
         return {**base, "status": "none", "summary": "NDF_STATE_HOME か XDG_STATE_HOME が指定されていて、既定の置き場を使わない"}
     moved: list = []
@@ -478,8 +393,10 @@ def migrate(env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None)
         if (old / kind).exists():
             _merge_ledger(old / kind, new / kind, moved, kept)
         _resume_sides(new, kind, moved, kept)
-    out = {**base, "moved": moved, "kept": kept, **_move_checkout(old, Path(cwd) if cwd is not None else Path.cwd())}
-    n_moved = len(moved) + len(out["dbos"]["moved"]) + len(out["sv"]["moved"])
+    out = {**base, "moved": moved, "kept": kept}
+    if move_checkout is not None:  # relay が写すこのファイルは標準ライブラリだけを読むため、移す処理は呼ぶ側が渡す
+        out.update(move_checkout(old, Path(cwd) if cwd is not None else Path.cwd()))
+    n_moved = len(moved) + len(out["dbos"]["moved"]) + len(out["sv"]["moved"]) + len(out["dbos"]["rekeyed"])
     n_kept = len(kept) + len(out["dbos"]["kept"]) + len(out["sv"]["kept"])
     tail = f"。{out['checkout']['reason']}" if out["checkout"]["reason"] else ""
     if n_kept:
@@ -492,6 +409,6 @@ def migrate(env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None)
         return {
             **out,
             "status": "migrated",
-            "summary": f"{n_moved} 件を移した（台帳 {len(moved)}・耐久の記録 {len(out['dbos']['moved'])}・プランの状態 {len(out['sv']['moved'])}）{tail}",
+            "summary": f"{n_moved} 件を移した（台帳 {len(moved)}・耐久の記録 {len(out['dbos']['moved'])}・プランの状態 {len(out['sv']['moved'])}・鍵の付け替え {len(out['dbos']['rekeyed'])}）{tail}",
         }
     return {**out, "status": "none", "summary": f"{old} に移すものが無い{tail}"}

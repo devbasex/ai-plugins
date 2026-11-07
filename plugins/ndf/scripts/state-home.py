@@ -4,7 +4,7 @@
 | 副命令 | 役割 |
 | --- | --- |
 | `path` | 作業ディレクトリで使う 3 つの根（チェックアウト・利用者・コンテナ。`lib/state_home.py`）を出す |
-| `migrate` | 旧 `~/.local/state/ndf` から移す。利用者の台帳は `~/.claude/ndf/state` へ足し合わせ（`.jsonl` は行を時刻の順に並べ直す）、耐久の記録 `dbos/` とプランの状態 `sv/` は打った作業ツリーのチェックアウトの根へ移す。何度打ってもよい |
+| `migrate` | 旧 `~/.local/state/ndf` から移す。利用者の台帳は `~/.claude/ndf/state` へ足し合わせ（`.jsonl` は行を時刻の順に並べ直す）、耐久の記録 `dbos/` とプランの状態 `sv/` は打った作業ツリーのチェックアウトの根へ移し、プランの状態のパスから作る queue の鍵を新しいパスの鍵へ付け替える（前に移した分にも当たる）。何度打ってもよい |
 
 旧の置き場は読まない。更新したら各コンテナで、主のリポジトリの作業ツリーから一度 `migrate` を打つ。
 
@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import state_checkout  # noqa: E402
 import state_home as sh  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
@@ -33,12 +34,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "path":
         metrics = {"checkout": str(sh.checkout_home()), "user": str(sh.user_home()), "container": str(sh.container_home())}
         emit(result(TOOL, "ok", f"チェックアウトの根は {metrics['checkout']}、利用者の根は {metrics['user']}", metrics=metrics))
-    r = sh.migrate()
+    r = state_checkout.migrate()
     ok = r["status"] in ("migrated", "none")
     items = [{"kind": "ledger", "kept": p} for p in r["kept"]]
     for kind in ("dbos", "sv"):
         items += [{"kind": kind, "moved": p} for p in r[kind]["moved"]]
         items += [{"kind": kind, "kept": k["path"], "reason": k["reason"]} for k in r[kind]["kept"]]
+    items += [{"kind": "rekey", "moved": k["to"], "from": k["from"], "plan_state": k["plan_state"]} for k in r["dbos"]["rekeyed"]]
     metrics = {
         "result": r["status"],
         "from": r["from"],
@@ -47,6 +49,7 @@ def main(argv: list[str] | None = None) -> None:
         "checkout": r["checkout"]["to"],
         "dbos_moved": len(r["dbos"]["moved"]),
         "dbos_kept": len(r["dbos"]["kept"]),
+        "dbos_rekeyed": len(r["dbos"]["rekeyed"]),
         "sv_moved": len(r["sv"]["moved"]),
         "sv_kept": len(r["sv"]["kept"]),
     }
