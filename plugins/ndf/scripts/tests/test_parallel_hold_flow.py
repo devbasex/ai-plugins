@@ -204,6 +204,21 @@ def test_an_answered_design_retires_older_requests_at_the_next_round(run):
     assert [q["id"] for q in run.questions] == ["later"]  # 再送で一覧へ戻さない
 
 
+def test_a_request_made_in_the_same_second_is_ordered_by_arrival(run):
+    """依頼の `at` は秒までなので、同じ秒の新旧は届いた順で決める。古い方への答えで新しい依頼を外さない。"""
+    old = {"id": "old", "kind": "gate1", "lane": "la", "pr": 5, "at": "1"}
+    now = {"id": "now", "kind": "gate1", "lane": "la", "pr": 5, "at": "1"}
+    run.questions = [old, now]
+    run.reply({"id": "old", "result": "approved"})
+    govern(run)
+    assert [q["id"] for q in run.questions] == ["now"]
+    run.questions = [old, now]
+    run.answered.clear()
+    run.reply({"id": "now", "result": "approved"})
+    govern(run)
+    assert run.questions == []
+
+
 def test_wake_lines_skip_the_held_lanes_and_appear_when_the_hold_clears(run):
     state(run, la="stopped")
     run.wake = ["la"]

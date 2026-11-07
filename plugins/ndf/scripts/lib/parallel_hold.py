@@ -371,8 +371,9 @@ class AnswerHold:
         self.left_stopped -= _senders(q)
         if q.get("kind") != "gate1" or not q.get("pr"):
             return
-        same = lambda o: o is not q and o.get("kind") == "gate1" and (o.get("lane"), o.get("pr")) == (q.get("lane"), q.get("pr"))  # noqa: E731
-        self.superseded |= {o["id"] for o in self.questions if same(o) and str(o.get("at") or "") <= str(q.get("at") or "")}
+        older = self.questions[: self.questions.index(q)]  # 依頼の `at` は秒までなので、新旧は届いた順で決める
+        same = lambda o: o.get("kind") == "gate1" and (o.get("lane"), o.get("pr")) == (q.get("lane"), q.get("pr"))  # noqa: E731
+        self.superseded |= {o["id"] for o in older if same(o)}
 
     def govern_hold(self, seen: dict) -> None:
         """観測の後の突き合わせ。閾値の載らない古い観測の記録の再生では何もしない（記録の順を変えないため）。"""
