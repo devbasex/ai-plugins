@@ -237,7 +237,14 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--head <ブランチ>] --out <ファイル> --root .
 ```
 
-`metrics.cd_result` は `success` / `failure` / `undetermined` / `none`（本番チャネルへ自動で届く行が無い）で、値にかかわらず終了コードは 0 である。
+| 値 | 意味 | 続き |
+| --- | --- | --- |
+| `success`（成功） | CD の状態を読んで成功を確かめた | リリース後テストへ進む |
+| `failure`（失敗） | CD が成功以外で終わった | デプロイの工程は完了にならず、スプリントは閉じられない |
+| `undetermined`（未確定） | 読む手段が宣言されていないか、待ちの上限に当たった | 未確定と書いてリリース後テストへ進む。リリース後テストが本番の状態を直接確かめ、その記録が無ければスプリントは閉じられない |
+| `none` | 本番チャネルへ自動で届く行が無い | 記録に CD の行を足さない |
+
+値は `metrics.cd_result` に出し、値にかかわらず終了コードは 0 である。
 `--head` があれば最後にマージした `--head` → `--base` の Pull Request のコミットを、無ければ本番チャネルの先端を読む。
 `record` は値が `failure` なら `段階: 反映失敗（<理由>）` を書いた後に終了コード 5 で止まる。読む側は最後の記録を使うため、CD を直して
 `cd-result` と `record` を打ち直すと、成功の記録で閉じられる。
