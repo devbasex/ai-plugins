@@ -32,6 +32,7 @@ import parallel_release as pr
 import parallel_route as prt
 from parallel_files import RELAY
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
+from parallel_observe import apply_observed_states
 from parallel_question import cause_of
 from parallel_repo import dev_version, git_head, poll_seconds, relay, relay_proc, spawn_refusals, stall_seconds
 
@@ -611,28 +612,10 @@ def _observe_run(run: _Run, main: str) -> dict:
     run.clear_revived(rows)
     _ask_stalls(run, rows, run.seen_at)
     _ask_helper(run, rows)
-    noticed = _apply_observed_states(run, rows)
+    noticed = apply_observed_states(run, rows)
     if noticed:
         run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
     return seen
-
-
-def _apply_observed_states(run: _Run, rows: dict) -> list[str]:
-    """一覧の状態を各レーンへ写し、承認待ちへ移ったレーンを返す。一覧に無い起動済みのレーンは止まったと読む。"""
-    states = {n: r.get("state") for n, r in rows.items()}
-    noticed = []
-    for n in run.order:
-        st = states.get(n)
-        if st is None and run.lanes[n].get("started"):
-            st = "stopped"
-        if st and st != run.lanes[n].get("state"):
-            run.lanes[n]["state"] = st
-            if st != "stopped" and n in run.revive:  # 起こしたレーンが動き出したら待ちを外す
-                run.revive = [x for x in run.revive if x != n]
-                run.revive_at.pop(n, None)
-            if st == "awaiting_approval":
-                noticed.append(n)
-    return noticed
 
 
 def _track_ls_failure(run: _Run, seen: dict) -> None:
