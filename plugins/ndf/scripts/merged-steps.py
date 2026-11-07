@@ -67,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.cleanup_metrics import cleanup_metrics as _cleanup_metrics  # noqa: E402
 from merged_lib.main_lock import main_dir_lock  # noqa: E402
 from merged_lib.pr_info import merged_pr_info  # noqa: E402
 from merged_lib.probe_table import PROBE_ACTIONS, PROBE_CLASSES, PROBE_REMEDIED_SUMMARY, PROBE_TABLE  # noqa: E402
@@ -230,25 +231,6 @@ def _update_main_dir(main_dir, add):
         return pull_err
     add("main_dir", main_dir, "pulled")
     return None
-
-
-def _cleanup_metrics(items, reclaim):
-    """記録から swept の印を外し、自分の分と掃除の分を数えた metrics を返す。"""
-    # 値の一致でなく印で分ける（同じパスの kept が両方に並んでも、片方へ寄せない）
-    marks = [i.pop("swept", False) for i in items]
-    swept = [i for i, m in zip(items, marks) if m]
-    own = [i for i, m in zip(items, marks) if not m]
-    count = {k: sum(1 for i in own if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
-    return {
-        "removed_worktrees": count["removed"],
-        "deleted_branches": count["deleted"],
-        "absent_branches": count["absent"],
-        "kept": count["kept"],
-        "stopped": count["stopped"],
-        "swept_removed": sum(1 for i in swept if i["result"] == "removed"),
-        "swept_kept": sum(1 for i in swept if i["result"] == "kept"),
-        **reclaim,
-    }
 
 
 def _force_delete_gate(prs, need_force, summary, items, metrics):
