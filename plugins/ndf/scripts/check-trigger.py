@@ -37,7 +37,7 @@
 範囲を決められない = 2。`finish` と `changed` の 3 は「変更なし」。eval は立ったかどうかにかかわらず
 検査の記録へ 1 行を足す（閾値を見直す材料）。
 
-検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf`
+検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → 状態の根（`lib/state_home.py`）
 → `${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
 前回の検査は result が merged か no_change の check の最新の行で、無ければ --since、リポジトリのリリースの設定
 （`.ndf/supervise.json` の release）が決める正式版のタグの最新、起点のブランチとの分岐点の順に使う。
@@ -66,6 +66,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, result  # noqa: E402
 from pace import PaceError, matches, read_pace  # noqa: E402
+from state_home import state_home  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
@@ -177,7 +178,12 @@ def slug_of(root: Path) -> str:
 
 
 # 置き場の候補: (環境変数, その値からの置き場)。設定されている最初の環境変数で決める
-STATE_BASES = (("CLAUDE_PLUGIN_DATA", Path), ("XDG_STATE_HOME", lambda v: Path(v, "ndf")), ("HOME", lambda v: Path(v, ".local/state/ndf")))
+STATE_BASES = (
+    ("CLAUDE_PLUGIN_DATA", Path),
+    ("NDF_STATE_HOME", lambda v: state_home()),
+    ("XDG_STATE_HOME", lambda v: state_home()),
+    ("HOME", lambda v: state_home()),
+)
 
 
 def state_base() -> Path:

@@ -593,15 +593,27 @@ wf_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
+# NDF の状態の置き場の根（#2766）。順は scripts/lib/state_home.py の state_home と同じ:
+# NDF_STATE_HOME → $XDG_STATE_HOME/ndf → ~/.claude/ndf/state（無く旧 ~/.local/state/ndf があれば旧）。
+ndf_state_home() {
+  if [ -n "${NDF_STATE_HOME:-}" ]; then
+    printf '%s\n' "$NDF_STATE_HOME"
+  elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s\n' "$XDG_STATE_HOME/ndf"
+  elif [ ! -e "$HOME/.claude/ndf/state" ] && [ -d "$HOME/.local/state/ndf" ]; then
+    printf '%s\n' "$HOME/.local/state/ndf"
+  else
+    printf '%s\n' "$HOME/.claude/ndf/state"
+  fi
+}
+
 # 通過記録の置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
   local base fallback="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
     base="$CLAUDE_PLUGIN_DATA/stages"
-  elif [ -n "${XDG_STATE_HOME:-}" ]; then
-    base="$XDG_STATE_HOME/ndf/stages"
-  elif [ -n "${HOME:-}" ]; then
-    base="$HOME/.local/state/ndf/stages"
+  elif [ -n "${NDF_STATE_HOME:-}" ] || [ -n "${XDG_STATE_HOME:-}" ] || [ -n "${HOME:-}" ]; then
+    base="$(ndf_state_home)/stages"
   else
     base="$fallback"
   fi

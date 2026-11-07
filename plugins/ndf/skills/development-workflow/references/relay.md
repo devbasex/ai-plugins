@@ -90,7 +90,7 @@
 
 副命令の一覧は `relay.py --help` が、1 つの副命令の書式と役割は `relay.py <副命令> --help` が出す（副命令は動かさない。`run --help` は claude の help）。
 
-作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
+作業ディレクトリは `~/.claude/ndf/state/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。セッションの中では環境変数 `NDF_RELAY_DIR` が指す。
 
 ## 複数のループを並べる（統括役）
@@ -130,7 +130,7 @@
 - **tmux が PATH に無い**（`NDF_RELAY_TMUX` で実行ファイルを替えられる）ときは、2 本目は 1 行出して今の前景の起動になる
 - **承認待ちの知らせ**は各ラッパーの待ち通知が出し、名前つきのラッパーなら `ラッパー: <名前>（relay.py attach <名前>）` の 1 行が付く
 - tmux は専用のソケット `-L ndf-relay` だけを使い、利用者の tmux サーバに触れない。統括役の置き場は
-  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動の依頼 `requests/`・結果 `results/`・
+  `~/.claude/ndf/state/relay/hub/`（登録簿 `registry.json`・起動の依頼 `requests/`・結果 `results/`・
   記録 `hub-log.jsonl`。所有者だけが読み書きできる）
 
 ## 好きな時点で切り替える（`/ndf:restart`）
@@ -227,7 +227,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 
-1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<テンプレート>`（テンプレートは次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**テンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** テンプレートは次のスプリントでも使うため、文書のパスを文字のまま書かない
+1. プランを作った後に 1 度: `sprint-state.py init ~/.claude/ndf/state/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<テンプレート>`（テンプレートは次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**テンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** テンプレートは次のスプリントでも使うため、文書のパスを文字のまま書かない
 2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "リリース承認ゲート" --what "本番 <版>"`
    - `pace: fast` と `pace: auto` のスプリントは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。設計承認ゲート・リリース承認ゲートの記録は、MVV 判定が
@@ -243,7 +243,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 **本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。リリース承認ゲートの承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。本番のキューは、目録（`$O/sprint.json`）の `本番` のステージの `command` に `--done` を足したものである（例の `9` はステージの番号）。
 
 ```bash
-O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
+O=~/.claude/ndf/state/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
 DOC=$(python3 $H path $N | python3 -c 'import json, sys; print(json.load(sys.stdin)["items"][0]["path"])')
 python3 $H init $N --title "<表示名>" >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py queue $O/9-release-prod.json --max 3 --done $O/done-9.json >/dev/null &&
@@ -321,8 +321,8 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 | `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `spin` / `update-failed` / `start-failed` / `error` / `handover`（入れ替えた後に申し送りを読めない）） |
 
 ```bash
-cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
-cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "prose_wait")'   # 止めた回数
+cat ~/.claude/ndf/state/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
+cat ~/.claude/ndf/state/relay/*/log.jsonl | jq -c 'select(.event == "prose_wait")'   # 止めた回数
 ```
 
 入出力の契約と決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。

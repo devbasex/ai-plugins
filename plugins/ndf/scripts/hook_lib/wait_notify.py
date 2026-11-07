@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import wait_notice as wn
+from state_home import state_home
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 ENTRY = SCRIPTS / "wait-notify.py"
@@ -100,8 +101,7 @@ def read_transcript(path: str | None) -> tuple[str, str] | None:
 
 
 def state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "wait-notify"
+    return state_home() / "wait-notify"
 
 
 def _session_file(session: str) -> Path:

@@ -24,6 +24,7 @@ if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
 import clock  # noqa: E402
 import jsonio  # noqa: E402
+from state_home import state_home  # noqa: E402
 
 MARK_FILE = "next.json"
 # 子の応答が API の失敗（利用上限など）で終わったときに StopFailure hook が書くシグナルファイル（#1389）
@@ -84,8 +85,7 @@ def write_json_atomic(path: str, data) -> None:
 
 
 def state_root() -> str:
-    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    return os.path.join(base, "ndf", "relay")
+    return str(state_home() / "relay")
 
 
 def data_dir() -> str:

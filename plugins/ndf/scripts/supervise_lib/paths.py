@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import worktree_deps
+from state_home import state_home
 from supervise_lib import decl, plan as plan_mod
 
 SELF = Path(__file__).resolve().parent.parent / "supervise.py"
@@ -231,11 +232,10 @@ def under_temp(path: Path) -> bool:
 
 
 def sv_state_home() -> Path:
-    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `<状態の根>/sv`（根は `state_home`）。"""
     if os.environ.get("NDF_SV_STATE_DIR"):
         return Path(os.environ["NDF_SV_STATE_DIR"])
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "sv"
+    return state_home() / "sv"
 
 
 def queue_done_path(plans: list[str], done: str | None) -> Path:

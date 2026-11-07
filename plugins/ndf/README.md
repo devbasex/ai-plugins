@@ -301,7 +301,17 @@ NDF_CODEX_SLACK_NOTIFY=true
 | `DEBUG_SLACK_NOTIFY` | 任意。`true` なら `~/.claude/logs/wait-notify-<日付>.log` へ判定の理由を書きます |
 
 機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
-直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
+直前の 1 件）は `~/.claude/ndf/state/wait-notify/` にセッションごとに置き、7 日で消します。
+
+**NDF がリポジトリの外に書く状態（耐久ワークフローの記録・プランの状態・relay・台帳）の根は `~/.claude/ndf/state` です**
+（`NDF_STATE_HOME` → `${XDG_STATE_HOME}/ndf` → `~/.claude/ndf/state` の順。`lib/state_home.py`）。Claude Code の
+ログインと同じ木に置き、コンテナを作り直しても残るようにしています。旧の置き場 `~/.local/state/ndf` が残っている間は
+旧を使い続けます。動いている耐久ワークフローとラッパーを止めてから、次の 1 行で移してください（旧を使っている
+プロセスがあれば、何も変えずに pid を出して終わります）。
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state-home.py" migrate
+```
 
 ## 外部 AI 委譲
 

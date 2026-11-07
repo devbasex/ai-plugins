@@ -4,7 +4,7 @@
 予算なしのテストの上限（`test_strategy.unbudgeted_limits`）が、所要の記録に加えて直近の実測を読む。
 
 置き場は `<git の共通ディレクトリ>/ndf/test-run/whole.jsonl`（worktree の間で 1 つ）。git でなければ
-`${XDG_STATE_HOME:-~/.local/state}/ndf/test-run/<リポジトリの根の sha256 の先頭 12 文字>/whole.jsonl`。
+`<状態の根>/test-run/<リポジトリの根の sha256 の先頭 12 文字>/whole.jsonl`。
 `NDF_WHOLE_RUNS_DIR` が先に効く。利用者の設定（`.ndf/`）には置かない。読み書きの失敗は例外にしない（書けなければ知らせて続け、読めなければ無し）。
 """
 
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 import estimate_records
+from state_home import state_home
 
 SCHEMA = 1
 RECENT_ROWS = 5  # 直近 = 同じ鍵の最新 5 行のうち最大の秒
@@ -33,8 +34,7 @@ def path(root: Path | str | None = None) -> Path:
     got = estimate_records.find_git_dir(start)
     if got:
         return got[1] / "ndf" / "test-run" / "whole.jsonl"
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
+    return state_home() / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
 
 
 def record_whole(root: Path | str | None, key: str, seconds: float, source: str) -> bool:

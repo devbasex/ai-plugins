@@ -1,6 +1,6 @@
 """問い合わせの記録 `ask.jsonl`（#2206）。hook の判定の行と、AI の代わりの判断の行を追記だけで持つ。
 
-置き場は `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`（承認ゲートの差し戻しの記録と同じ置き場。設計の決定 3）。
+置き場は `${NDF_MVV_STATE_DIR:-<状態の根>}/ask.jsonl`（根は `state_home`）（承認ゲートの差し戻しの記録と同じ置き場。設計の決定 3）。
 1 行 1 件の JSON で、行を書き換えない（I9）。行は列の一覧から作り、hook の入力のほかの欄を写さない（I11）。
 
 | 列 | 判定の行（`kind: verdict`） | 代わりの判断の行（`kind: decision`） |
@@ -21,13 +21,15 @@ import os
 import uuid
 from pathlib import Path
 
+from state_home import state_home
+
 FILE_NAME = "ask.jsonl"
 VERSION = 1
 
 
 def ask_ledger_path() -> Path:
     env = os.environ.get("NDF_MVV_STATE_DIR")
-    base = Path(env).expanduser() if env else Path("~/.local/state/ndf").expanduser()
+    base = Path(env).expanduser() if env else state_home()
     return base / FILE_NAME
 
 

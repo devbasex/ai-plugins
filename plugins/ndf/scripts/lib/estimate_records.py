@@ -1,7 +1,7 @@
 """見積もりの記録と実績の記録（#1856）。置き場の解決・行の形の検査・追記と読み出し・課題ごとの実績の合計・取り込み。
 
 置き場は `NDF_ESTIMATE_DIR` → `.ndf/estimate.json` の `records_dir` → `<git の共通ディレクトリ>/ndf/estimate` →
-`$XDG_STATE_HOME/ndf/estimate/<リポジトリの絶対パスの sha256 の先頭 12 文字>`。git の共通ディレクトリは
+`<状態の根>/estimate/<リポジトリの絶対パスの sha256 の先頭 12 文字>`（根は `state_home`）。git の共通ディレクトリは
 `.git` を読んで決め、`git` を起動しない（部品は subprocess を使わない。設計の非機能の条件）。
 
 どちらの記録も追記だけで、既存の行を書き換えない（I3・I4）。実績の記録は 4 種類の行（`run_start`・`step`・
@@ -22,6 +22,7 @@ from typing import Callable, Literal
 import clock
 import legacy_values
 import schema
+from state_home import state_home
 
 SCHEMA = 1
 ACTUALS = "actuals.jsonl"
@@ -231,8 +232,7 @@ def estimate_dir(root: Path | str | None = None) -> Path:
         return p if p.is_absolute() else top / p
     if got:
         return got[1] / "ndf" / "estimate"
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "estimate" / hashlib.sha256(str(top).encode()).hexdigest()[:12]
+    return state_home() / "estimate" / hashlib.sha256(str(top).encode()).hexdigest()[:12]
 
 
 # --- 追記と読み出し ---

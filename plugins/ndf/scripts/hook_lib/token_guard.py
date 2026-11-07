@@ -30,6 +30,8 @@ from typing import Iterator
 
 import jsonio
 
+from state_home import state_home
+
 from . import payload as pl
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -68,10 +70,8 @@ def guards_dir() -> Path | None:
     fallback = Path(os.environ.get("TMPDIR") or "/tmp") / "ndf-guards"
     if os.environ.get("CLAUDE_PLUGIN_DATA"):
         base = Path(os.environ["CLAUDE_PLUGIN_DATA"]) / "guards"
-    elif os.environ.get("XDG_STATE_HOME"):
-        base = Path(os.environ["XDG_STATE_HOME"]) / "ndf" / "guards"
-    elif os.environ.get("HOME"):
-        base = Path(os.environ["HOME"]) / ".local" / "state" / "ndf" / "guards"
+    elif os.environ.get("NDF_STATE_HOME") or os.environ.get("XDG_STATE_HOME") or os.environ.get("HOME"):
+        base = state_home() / "guards"
     else:
         base = fallback
     for d in (base, fallback):

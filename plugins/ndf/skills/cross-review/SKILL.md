@@ -166,7 +166,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
 振動を検知したときは、メインが正しい状態を決めてから打ち直す。
 
-再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
+再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.claude/ndf/state/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status` / `ci` / `ci_reason`）である。`ci` は最後のラウンドの
 継続的統合の判定（`ci.verdict`。無ければ `null`）、`ci_reason` はその判定が `unverified`・`meta_only`・`pending` のときの理由

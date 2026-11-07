@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/state-home.py",
+  "summary": "NDF の状態の置き場の根を出す・旧の置き場から移す（#2766）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "HOME",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）。移した・移すものが無い・根を出した",
+    "1": "何も変えずに止めた（status stopped）。旧を使っているプロセスがある・新と旧が両方ある",
+    "2": "呼び出しの誤り"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/state_home.py"
+  ]
+}

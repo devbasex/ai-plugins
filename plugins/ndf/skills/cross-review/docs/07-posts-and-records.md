@@ -132,7 +132,7 @@ CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` の
 レビュアーの扱い」にある。
 
 **要約の置き場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
-`$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
+`$HOME/.claude/ndf/state/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
 の最後の行が、書いた要約のパスか書かなかった理由を出す。集約するのは共通ライブラリの `run_metrics.py aggregate`
 （`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason|pair`）である。
 `--by pair` は cross-review のラウンドをレビューの組（`rounds[].seats` のランタイムを辞書順に `+` でつなぐ。

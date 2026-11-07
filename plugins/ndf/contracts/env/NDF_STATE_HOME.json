@@ -1,0 +1,5 @@
+{
+  "name": "NDF_STATE_HOME",
+  "set_by": "user",
+  "summary": "NDF の状態の置き場の根。無ければ ${XDG_STATE_HOME}/ndf → ~/.claude/ndf/state（旧 ~/.local/state/ndf だけがあれば旧）（plugins/ndf/scripts/lib/state_home.py:state_home）"
+}
