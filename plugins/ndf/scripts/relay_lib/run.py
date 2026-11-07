@@ -353,9 +353,18 @@ class Relay(AccountSwitch, ho.Swapper):
             fb, cwd = cwd, fallback_cwd(cwd)
         return cwd, fb
 
+    def update_before_first_section(self) -> None:
+        """最初の区間も最新の版で始める。更新に失敗しても起動は止めない（切り替えと違い、続きの作業を失わないため）。"""
+        got = cl.update_plugin(self.claude, self.marketplace)
+        if got is None:
+            cl.say("プラグインを更新できなかった。今の版で起動する")
+            return
+        self.version, self.install_path = got
+
     def loop(self, first_args: list[str]) -> int:
         self.first_args = first_args
         self.tell_relogin()  # 起動時の知らせ（E1）。入れ替えた後の版（from_handover）は起動ではないので呼ばない
+        self.update_before_first_section()
         code = self._start_first_section(first_args)
         if code is not None:
             return code
