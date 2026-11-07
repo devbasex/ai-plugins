@@ -55,18 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("waits", "durable", "md", "procs", "locks")
-from step_result import (
-    StepError,
-    approval_present,
-    common_parser,
-    emit,
-    git,  # noqa: E402
-    git_root,
-    main_with,
-    repo_slug,
-    result,
-    run,
-)
+from step_result import StepError, approval_present, common_parser, emit, git, git_root, main_with, repo_slug, result, run  # noqa: E402
 import container_reach  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
@@ -245,6 +234,7 @@ def _update_main_dir(main_dir, add):
 
 def _cleanup_result(items, prs, pull_err):
     """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
+    reclaim, reclaim_note = container_reach.reclaim_summary(items)
     # 値の一致でなく印で分ける（同じパスの kept が両方に並んでも、片方へ寄せない）
     marks = [i.pop("swept", False) for i in items]
     swept = [i for i, m in zip(items, marks) if m]
@@ -258,10 +248,11 @@ def _cleanup_result(items, prs, pull_err):
         "stopped": count["stopped"],
         "swept_removed": sum(1 for i in swept if i["result"] == "removed"),
         "swept_kept": sum(1 for i in swept if i["result"] == "kept"),
+        **reclaim,
     }
     summary = (
         f"作業ツリー {count['removed']} 件を外し、ブランチ {count['deleted']} 件を消した"
-        f"（残した {count['kept']} 件・止まった {count['stopped']} 件）"
+        f"（残した {count['kept']} 件・止まった {count['stopped']} 件）{reclaim_note}"
     )
     if pull_err:
         return "stopped", pull_err, items, metrics, None, None
@@ -304,6 +295,8 @@ def cleanup(root, prs):
     git(root, "worktree", "prune", check=False)
     with main_dir_lock(main_dir):
         pull_err = _update_main_dir(main_dir, add)
+    # 排他の外で走らせる。中に置くと、並列のレーンの後片付けが最大 300 秒待つ（#2660 の決定 8）
+    items.extend(container_reach.reclaim_testenv(main_dir))
     return _cleanup_result(items, prs, pull_err)
 
 
