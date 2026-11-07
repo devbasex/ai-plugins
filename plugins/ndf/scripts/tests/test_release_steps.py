@@ -261,6 +261,18 @@ def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
     assert "--watch" not in cmd
 
 
+def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
+    """自動反映の本番チャネルへのマージは --gate-approved が無ければ止まる。開発版の経路には渡さない（#2623 の I2）。"""
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+    out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
+    mod.wait_and_merge(".", 5)
+    mod.wait_and_merge(".", 5, gate_approved="mvv")
+    assert "--gate-approved" not in calls[0] and calls[1][-2:] == ["--gate-approved", "mvv"]
+
+
 def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
     """merge-when-green が止まったら、その summary を持って止まる（上限なしで待ち続けない）。"""
     mod = _release_steps_module(monkeypatch)
@@ -1085,6 +1097,27 @@ def test_release_publishes_only_when_no_row_declares_the_cd_does(monkeypatch, tm
     assert tagged is (not by_cd)
     assert out["metrics"]["tag"] == (None if by_cd else "ndf--v1.2.3")
     assert out["metrics"]["publisher"] == ("cd" if by_cd else "ndf")
+
+
+@pytest.mark.parametrize(("by", "use_material", "expected"), [("mvv", True, "mvv"), ("user", True, "user"), (None, False, "user")])
+def test_the_production_merge_carries_who_approved(monkeypatch, tmp_path, by, use_material, expected):
+    """受け入れ条件 6・I2: 照合を通った本番のマージは、承認の担い手を渡して CD で届く本番チャネルのゲートを通る。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    sha = "a" * 40
+    material = tmp_path / "approval.md"
+    material.write_text(f"| 項目 | 値 |\n| --- | --- |\n| 承認したコミット | {sha} |\n", encoding="utf-8")
+    if by:
+        mod.ac.record_approval(material, sha, by, "2026-11-07T10:00")
+    seen = []
+    monkeypatch.setattr(mod, "find_pr", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: seen.append(kw) or "m")
+    a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=str(material) if use_material else None)
+    verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
+    mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
+    assert seen[0]["gate_approved"] == expected and seen[0]["expect"] == "b" * 40
 
 
 def _record(monkeypatch, root, **args):

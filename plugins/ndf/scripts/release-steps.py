@@ -91,21 +91,8 @@ import approved_commit as ac  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import (
-    approval,
-    bump,
-    carry,
-    cd_result,
-    changed,
-    deploy,
-    included,
-    instructions,
-    materials,
-    others,
-    publish,
-    record,
-    replaced,
-)  # noqa: E402
+from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
+from release_lib import others, publish, record, replaced  # noqa: E402
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
@@ -484,14 +471,17 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None, ci_wait=3600.0):
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None):
     """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
     CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
-    PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。
+    PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。gate_approved はリリース承認ゲートを通した担い手で、
+    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
-    p = run(cmd + (["--expect-head", expect] if expect else []), cwd=root, check=False)
+    cmd += ["--expect-head", expect] if expect else []
+    cmd += ["--gate-approved", gate_approved] if gate_approved else []
+    p = run(cmd, cwd=root, check=False)
     try:
         out = json.loads((p.stdout or "").strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -620,9 +610,11 @@ def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed,
     title = f"Release: {plugin} v{a.version} を {prod} へ"
     body = f"{plugin} v{a.version} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     main_pr = mp["number"] if mp else create_pr(root, prod, branch, title, body)
+    by = approval.approved_by(root, a)  # ここへ来た時点で承認の記録を照合済み。CD で届く本番チャネルへのマージにこの担い手が要る
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
         try:
-            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
+            # 比べた先端だけを本番チャネルへ入れる
+            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait, gate_approved=by)
             break
         except HeadMoved:
             moved = approval.check_approved(root, approved, branch, allowed)

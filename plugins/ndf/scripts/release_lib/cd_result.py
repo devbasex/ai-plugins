@@ -20,7 +20,7 @@ from release_lib.deploy import write_material
 
 SUCCESS, FAILURE, UNDETERMINED, NONE = "success", "failure", "undetermined", "none"
 WAIT = "wait"
-POLL_SECONDS = 15  # 照会の間隔（release の references/completion-check.md の既定）
+POLL_SECONDS = 15  # 照会の間隔（#2623 の設計。GitHub の実行の状態は秒単位で変わらない）
 COMMAND_WAIT = 75  # result.command の「待つ」の終了コード
 
 

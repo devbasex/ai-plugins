@@ -221,7 +221,7 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 ### 昇格の経路の照合（#1529）
 
 `pace: fast` / `auto` の昇格のプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）は
-`verify` → `prepare` → `mvv` → `note` → `promote` → `record` の順に流れ、`note` か `promote` が落ちたら `handoff` へ進む。
+`verify` → `prepare` → `mvv` → `note` → `promote` → `cd-result` → `record` の順に流れ、`note` か `promote` が落ちたら `handoff` へ進む。
 `promote` ステップは `merged-steps.py promote ... --expect-head-from {state_dir}/work/approval-verify.md --gate-approved mvv` を打つ。
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | 値オブジェクト |
@@ -358,6 +358,9 @@ sequenceDiagram
 `stopped`（1）で止まり、`items[]` に `{"kind": "pr", "name": "#<番号>", "result": "head_moved", "head": <今の先端>, "expected": <SHA>}`
 を載せる。待つ間に別の先端でマージされた PR へタグを打たないためである。一致すれば `gh pr merge --match-head-commit <SHA>`
 でマージする。渡さないときは緑を確かめた先端を `--match-head-commit` に渡す。
+
+`release --channel prod` は承認したコミットを照合した後に、承認の担い手を `--gate-approved` で渡す（承認資料の承認の記録の担い手。
+`--approved-sha` で受けたときは `user`）。宛先が自動反映の本番チャネルでも、マージがリリース承認ゲートで止まらないためである。
 
 ### `merged-steps.py promote --expect-head-from <導入の確認の承認資料>`
 
