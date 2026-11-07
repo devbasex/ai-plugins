@@ -37,9 +37,7 @@ def _write_next(main: Path, lane: pp.Lane, command: str) -> None:
     path = handoff.paths_of(main, lane.handoff_name())[0]
     text = path.read_text(encoding="utf-8")
     fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", command)), default=0) + 1)
-    path.write_text(
-        handoff_doc.replace_body(text, handoff_doc.NEXT_STEP_SECTION, f"\n{fence}text\n{command}\n{fence}\n\n") or text, encoding="utf-8"
-    )
+    handoff.write_doc(path, handoff_doc.replace_body(text, handoff_doc.NEXT_STEP_SECTION, f"\n{fence}text\n{command}\n{fence}\n\n") or text)
 
 
 def _clear(main: Path, a, reply) -> None:
@@ -64,7 +62,7 @@ def cmd_park(main: Path, a, reply) -> None:
     try:
         _write_next(main, lane, resume)
         ph.place_mark(main, a.name, a.lane, "boundary")
-    except OSError as exc:
+    except (OSError, handoff.Failure) as exc:
         reply("stopped", f"引継ぎ文書か再開の印を書けない: {exc}", code=2)
     stop = pf.stop_self(main) or f"python3 {shlex.quote(str(pf.RELAY))} stop {shlex.quote(a.lane)}"
     reply("ok", f"レーン {a.lane} の続きを書いた。自分のラッパーを止める", next=stop, resume=resume)

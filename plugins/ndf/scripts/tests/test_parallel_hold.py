@@ -35,14 +35,14 @@ def own(i):
 
 @pytest.mark.parametrize("n, stopped", [(8, False), (9, True)], ids=["閾値ちょうどでは止めない", "超えたら計画全体を止める"])
 def test_the_plan_limit_stops_only_when_exceeded(n, stopped):
-    got = ph.decide([own(i) for i in range(n)], ORDER, LIMITS)
+    got = ph.decide_hold([own(i) for i in range(n)], ORDER, LIMITS)
     assert got.plan is stopped and got.count == n
 
 
 def test_only_unanswered_requests_count():
     items = [own(i) for i in range(9)]
-    assert ph.decide(items, ORDER, LIMITS).plan
-    assert ph.decide(items[2:], ORDER, LIMITS).count == 7
+    assert ph.decide_hold(items, ORDER, LIMITS).plan
+    assert ph.decide_hold(items[2:], ORDER, LIMITS).count == 7
 
 
 def test_every_kind_in_the_list_counts_and_a_decided_request_is_counted_until_answered():
@@ -56,20 +56,20 @@ def test_every_kind_in_the_list_counts_and_a_decided_request_is_counted_until_an
         {"id": "f", "kind": "observe"},
         {"id": "g", "kind": "build"},
     ]
-    assert ph.decide(items, ORDER, LIMITS).count == 8
+    assert ph.decide_hold(items, ORDER, LIMITS).count == 8
 
 
 def test_a_merged_question_and_new_and_old_requests_of_one_design_count_once():
     merged = ask(1, merged=[{"id": "q2", "lane": "lb"}], also=["q2"])
     old, new = ({"id": i, "kind": "gate1", "lane": "la", "pr": 7} for i in ("old", "new"))
     other = {"id": "x", "kind": "gate1", "lane": "lb", "pr": 7}
-    assert ph.decide([merged, old, new, other], ORDER, LIMITS).count == 3
+    assert ph.decide_hold([merged, old, new, other], ORDER, LIMITS).count == 3
 
 
 def test_the_lane_limit_stops_only_that_lane():
     three = [ask(i) for i in range(3)]
-    assert ph.decide(three, ORDER, LIMITS).empty
-    got = ph.decide([*three, ask(4), ask(5, "lb")], ORDER, LIMITS)
+    assert ph.decide_hold(three, ORDER, LIMITS).empty
+    got = ph.decide_hold([*three, ask(4), ask(5, "lb")], ORDER, LIMITS)
     assert got.lanes == ("la",) and not got.plan and got.covers("la") and not got.covers("lb")
 
 
@@ -77,7 +77,7 @@ def test_a_merged_question_counts_for_every_sender_and_own_questions_for_no_lane
     merged = [ask(i, merged=[{"id": f"m{i}", "lane": "lb"}]) for i in range(2)]
     design = {"id": "d", "kind": "gate1", "lane": "la", "pr": 3}
     helper = ask(9, "p1-rel1")
-    got = ph.decide([*merged, design, own(1), helper, {"id": "g2", "kind": "gate2", "lane": "la"}], ORDER, LIMITS)
+    got = ph.decide_hold([*merged, design, own(1), helper, {"id": "g2", "kind": "gate2", "lane": "la"}], ORDER, LIMITS)
     assert got.by_lane == {"la": 3, "lb": 2}
 
 
@@ -126,25 +126,25 @@ def write_change(main, before, now):
 
 def test_on_and_off_write_the_file_and_the_history(tmp_path):
     plan_file(tmp_path)
-    on = ph.decide([own(i) for i in range(9)], ORDER, LIMITS)
+    on = ph.decide_hold([own(i) for i in range(9)], ORDER, LIMITS)
     got = write_change(tmp_path, ph.Hold(), on)
     assert got["n"] == 1 and "計画全体" in got["line"] and "9 件" in got["line"]
     assert ph.read_hold(tmp_path, "p1")["plan"] is True
-    off = ph.decide([], ORDER, LIMITS)
+    off = ph.decide_hold([], ORDER, LIMITS)
     assert write_change(tmp_path, on, off)["n"] == 2
     assert ph.read_hold(tmp_path, "p1") is None
     assert [(r["n"], r["change"], r["scope"]) for r in ph.read_log(tmp_path, "p1")] == [(1, "on", "plan"), (2, "off", "plan")]
 
 
 def test_each_lane_is_one_row_with_its_own_count(tmp_path):
-    now = ph.decide([*[ask(i) for i in range(4)], *[ask(i + 10, "lb") for i in range(5)]], ORDER, ph.Limits(20, 3))
+    now = ph.decide_hold([*[ask(i) for i in range(4)], *[ask(i + 10, "lb") for i in range(5)]], ORDER, ph.Limits(20, 3))
     rows = now.diff(ph.Hold(), LIMITS)
     assert [(r["lanes"], r["count"]) for r in rows] == [(["la"], 4), (["lb"], 5)]
 
 
 def test_wait_changes_return_all_rows_after_the_given_number(tmp_path):
     plan_file(tmp_path)
-    on, off = ph.decide([own(i) for i in range(9)], ORDER, LIMITS), ph.Hold()
+    on, off = ph.decide_hold([own(i) for i in range(9)], ORDER, LIMITS), ph.Hold()
     for i in range(6):
         before, after = (off, on) if i % 2 == 0 else (on, off)
         write_change(tmp_path, before, after)
@@ -226,6 +226,6 @@ def test_skip_reason_round_trip_and_other_reasons(tmp_path, monkeypatch):
 
 
 def test_the_section_of_plan_md_names_the_scope_and_the_reason():
-    text = "\n".join(ph.render_hold(ph.decide([*[ask(i) for i in range(4)], *[own(i) for i in range(5)]], ORDER, LIMITS).data(LIMITS)))
+    text = "\n".join(ph.render_hold(ph.decide_hold([*[ask(i) for i in range(4)], *[own(i) for i in range(5)]], ORDER, LIMITS).data(LIMITS)))
     assert "計画全体" in text and "| la | 4 |" in text
     assert ph.render_hold(None) == [] and ph.render_hold(ph.Hold().data(LIMITS)) == []

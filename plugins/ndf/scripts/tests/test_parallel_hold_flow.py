@@ -17,7 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_parallel_run import SCRIPTS, calls, env, event, questions, spawned, start, stop, until  # noqa: E402,F401
+import test_parallel_run as tpr  # noqa: E402
+from test_parallel_run import SCRIPTS, calls, event, questions, spawned, start, stop, until  # noqa: E402
 
 import durable  # noqa: E402
 import handoff  # noqa: E402
@@ -28,6 +29,7 @@ import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
+env = tpr.env
 SEEN = {"limits": {"plan": 2, "lane": 1}, "marks": {}}
 LANES = [
     {"name": "la", "input": {"kind": "sprint"}},

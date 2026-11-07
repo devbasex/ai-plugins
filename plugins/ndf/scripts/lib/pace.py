@@ -31,6 +31,10 @@ class PaceError(Exception):
     """宣言が無い・読めない・形が誤っている。"""
 
 
+class PaceMissing(PaceError):
+    """宣言が無い。"""
+
+
 def glob_re(pattern: str) -> re.Pattern:
     out, i = "", 0
     while i < len(pattern):
@@ -57,7 +61,7 @@ def _read_pace_decl(root) -> tuple[Path, object]:
     try:
         return path, json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise PaceError(f"進め方の宣言が無い: {path}")
+        raise PaceMissing(f"進め方の宣言が無い: {path}")
     except (OSError, ValueError) as e:
         raise PaceError(f"進め方の宣言を読めない: {path}: {e}")
 
@@ -127,10 +131,10 @@ def read_parallel(root) -> dict:
     閾値の誤りで計画を止めないため（#2707 の決定 6）、宣言が無ければ既定で動き、読めない宣言と正の整数でない値は既定へ戻して
     `warnings` に残す。"""
     out, warnings = dict(PARALLEL_DEFAULTS), []
-    if not (Path(root) / ".ndf" / DECL_NAME).is_file():
-        return {**out, "warnings": warnings}
     try:
         path, d = _read_pace_decl(root)
+    except PaceMissing:
+        return {**out, "warnings": warnings}
     except PaceError as e:
         return {**out, "warnings": [f"{e}。答え待ちの閾値は既定を使う"]}
     sec = _default(d if isinstance(d, dict) else {}, "parallel", {})

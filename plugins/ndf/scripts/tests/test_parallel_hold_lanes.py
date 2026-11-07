@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,9 +13,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import parallel_hold as ph  # noqa: E402
-from test_sprint_loop import env, mvv, rec, sl, sl_record, sl_select, start  # noqa: E402,F401
+import test_sprint_loop as tsl  # noqa: E402
+from test_sprint_loop import rec, sl, sl_record, sl_select, start  # noqa: E402
 from test_supervise_queue import PY, SUPERVISE, Queue, run_step  # noqa: E402
 
+env, mvv = tsl.env, tsl.mvv
 HOLD = {"plan": True, "lanes": [], "count": 9, "by_lane": {}, "limits": {"plan": 8, "lane": 3}}
 
 
@@ -26,7 +29,7 @@ def plan_dir(root: Path, kind: str) -> Path:
 
 
 @pytest.fixture
-def lane(env, monkeypatch):  # noqa: F811
+def lane(env, monkeypatch):
     d = plan_dir(env.root, "loop")
     monkeypatch.setenv("NDF_RELAY_NAME", "la")
     env.hold = d / ph.HOLD_FILE
@@ -82,8 +85,6 @@ def test_a_process_that_is_not_the_lane_does_not_read_the_hold(lane, monkeypatch
 def queue(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_SV_STATE_DIR", str(tmp_path / "sv"))
     monkeypatch.setenv("NDF_RELAY_NAME", "la")
-    import os
-
     return Queue(tmp_path, os.environ.copy())
 
 

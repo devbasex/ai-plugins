@@ -2,10 +2,10 @@
 
 レーンと問いの hook からも読むため、DBOS を import しない。`AnswerHold` の耐久ステップと耐久ワークフローのイベントは `parallel_run` が渡す。
 
-- 数え方と停止の範囲: `decide` は今の問いの一覧と閾値だけから決まる（累計・時刻・止めた履歴に依らない）
+- 数え方と停止の範囲: `decide_hold` は今の問いの一覧と閾値だけから決まる（累計・時刻・止めた履歴に依らない）
 - 止める指示のファイル `answer-hold.json`: 今の停止の範囲。停止が無ければファイルも無い。読めなければ止める指示なしと読む
 - 履歴 `answer-hold-log.jsonl`: 止めた・解けたの 1 変化 1 行。止まった回数は `change: on` の行で数える
-- 再開の印 `resume/<レーン>.json`: 停止が解けたら起こすレーン。止まる前に置く（観測は一覧の後に読むため、止まって見えたレーンの印を読み逃さない）
+- 再開の印 `resume/<レーン>.mark.json`: 停止が解けたら起こすレーン。止まる前に置く（観測は一覧の後に読むため、止まって見えたレーンの印を読み逃さない）
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/` で、コミットしない。
 """
@@ -25,7 +25,9 @@ import jsonio
 import pace
 import parallel_files as pf
 
-HOLD_FILE, LOG_FILE, RESUME_DIR = "answer-hold.json", "answer-hold-log.jsonl", "resume"
+HOLD_FILE = "answer-hold.json"
+LOG_FILE = "answer-hold-log.jsonl"
+RESUME_DIR = "resume"
 LANE_KINDS = ("gate1", "ask")  # レーンが送った依頼。耐久ワークフローの問いとリリース承認ゲートはレーンの数へ入らない
 CONDITION = "answer_hold"  # 開発ループの止まる条件と `parallel.py wait` の action
 SKIP_REASON = "答え待ちの停止のため流さなかった"  # プランの開始で流さなかった理由の頭
@@ -93,7 +95,7 @@ def _senders(q: dict) -> set:
     return {q.get("lane"), *(m.get("lane") for m in q.get("merged") or [])}
 
 
-def decide(questions: list[dict], order: list[str], limits: Limits) -> Hold:
+def decide_hold(questions: list[dict], order: list[str], limits: Limits) -> Hold:
     """今の問いの一覧と閾値から停止の範囲を導く。同じレーンの同じ設計 PR の設計の承認は 1 件と数える（人が 1 回で答えるため）。
     リリースの依頼は問いの一覧に入らないため数えない。"""
     seen, by_lane = set(), {}
@@ -175,11 +177,11 @@ def change_line(row: dict) -> str:
 
 def write_state(main: Path, name: str, data: dict, changes: list[dict]) -> dict:
     """止める指示のファイルと履歴を書き、最後の行の番号と 1 行を返す。停止の範囲が空ならファイルを消す。書けなければ OSError。"""
-    path, at = _plan_root(main, name) / HOLD_FILE, _stamp()
+    at = _stamp()
     if data["plan"] or data["lanes"]:
-        jsonio.write_atomic(path, {**data, "at": at})
+        jsonio.write_atomic(_plan_root(main, name) / HOLD_FILE, {**data, "at": at})
     else:
-        path.unlink(missing_ok=True)
+        (_plan_root(main, name) / HOLD_FILE).unlink(missing_ok=True)
     start = max([int(r.get("n") or 0) for r in read_log(main, name)], default=0)
     rows = [{"n": start + i, **c, "at": at} for i, c in enumerate(changes, 1)]
     with open(_plan_root(main, name) / LOG_FILE, "a", encoding="utf-8") as f:
@@ -223,23 +225,22 @@ def _mark_dir(main: Path, name: str) -> Path:
 
 def place_mark(main: Path, name: str, lane: str, why: str) -> dict:
     """再開の印を置く。`why` は boundary（区切りで止まった）か answered（停止の間に答えを受けた持ち主）。"""
-    d = _mark_dir(main, name)
-    d.mkdir(parents=True, exist_ok=True)
+    _mark_dir(main, name).mkdir(parents=True, exist_ok=True)
     mark = {"lane": lane, "why": why, "at": _stamp()}
-    jsonio.write_atomic(d / f"{lane}.json", mark)
+    jsonio.write_atomic(_mark_dir(main, name) / f"{lane}.mark.json", mark)
     return mark
 
 
 def read_marks(main: Path, name: str) -> dict[str, dict]:
     """レーン名 → 再開の印。"""
     d = _mark_dir(main, name)
-    got = {p.stem: jsonio.read(p, missing=None, broken=None, want=dict) for p in sorted(d.glob("*.json"))} if d.is_dir() else {}
-    return {n: m for n, m in got.items() if m}
+    got = [jsonio.read(p, missing=None, broken=None, want=dict) for p in sorted(d.glob("*.mark.json"))] if d.is_dir() else []
+    return {m["lane"]: m for m in got if m and m.get("lane")}
 
 
 def drop_mark(main: Path, name: str, lane: str) -> bool:
     """再開の印を消す。消したら True、無ければ False。"""
-    p = _mark_dir(main, name) / f"{lane}.json"
+    p = _mark_dir(main, name) / f"{lane}.mark.json"
     there = p.exists()
     p.unlink(missing_ok=True)
     return there
@@ -393,7 +394,7 @@ class AnswerHold:
             self.publish_questions()
 
     def _update_hold(self, limits: Limits) -> None:
-        now = decide(self.questions, self.order, limits)
+        now = decide_hold(self.questions, self.order, limits)
         if now.scope() == self.hold.scope():
             self.hold = now
             return
