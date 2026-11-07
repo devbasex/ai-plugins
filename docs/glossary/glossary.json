@@ -5446,6 +5446,48 @@
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
+      "term": "別のリポジトリのレーン",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す",
+      "pending_source": "issues/issue-2733-requirements.md"
+    },
+    {
+      "term": "計画の外のセッション",
+      "context": "ndf-workflow",
+      "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
+      "pending_source": "issues/issue-2733-requirements.md"
+    },
+    {
+      "term": "レーン数の上限",
+      "context": "ndf-workflow",
+      "meaning": "同時に動かせる名前つきのラッパーの数。値はマシンの設定（$XDG_STATE_HOME/ndf/relay/hub/limits.json）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まる。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
+      "pending_source": "issues/issue-2733-requirements.md"
+    },
+    {
+      "term": "計画の置き場",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。依頼・答えの記録のキーと計画の所在の一覧は、このメインディレクトリの絶対パスで持つ",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
+      "term": "レーンのリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
+      "term": "計画の所在の一覧",
+      "context": "ndf-workflow",
+      "meaning": "マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
+      "term": "例外の起動",
+      "context": "ndf-workflow",
+      "meaning": "計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る",
+      "pending_source": "issues/issue-2733-design.md"
+    },
+    {
       "term": "保留の周回",
       "context": "ndf-workflow",
       "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
