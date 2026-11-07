@@ -84,7 +84,7 @@
 | worker のステップ（`supervise_lib/worker_steps.py`） | `stall` のステップへ進みの観測を付け、打ち切りの理由を残す |
 | 遅れの見張り（`supervise_lib/slow.py`） | `stall` のステップでは所要の履歴だけを残す |
 | 監視（`lib/monitor.py`）と外部 AI の起動（`external-ai.py`） | `--timeout 0` を「経過時間の上限が無い」として受ける |
-| 並列の計画の実行（`lib/parallel_run.py`・`parallel.py`） | 起動の断りの回数の上書きを読み、開始で実行環境の調査を載せる |
+| 並列の計画の実行（`lib/parallel_repo.py`・`lib/parallel_run.py`・`parallel.py`） | 起動の断りの回数の上書きを読み、開始で実行環境の調査を載せる |
 
 ```mermaid
 graph TD
@@ -259,14 +259,15 @@ Codex と Kiro は USD を持たないため和に足さず、内訳の `unprice
 | --- | --- | --- | --- |
 | ループの予算: 周回の数・経過時間 | 既定は無制限 | `lib/pace.py` | 書いたときだけ効く |
 | 実装のステップの打ち切り | 無進捗の許容 1800 秒。実装の上限は既定で無し | `supervise_lib/verify_steps.py`・`supervise_lib/progress_watch.py` | 進みが途絶えたときだけ打ち切る |
-| レーンの起動の断りを問う回数 | 3 回 | `lib/parallel_run.py` | `NDF_PARALLEL_SPAWN_REFUSALS` で変える |
+| レーンの起動の断りを問う回数 | 3 回 | `lib/parallel_repo.py` | `NDF_PARALLEL_SPAWN_REFUSALS` で変える |
+| 答えを待つ依頼の閾値 | 計画全体 8・レーン 3 | `lib/pace.py`・`.ndf/pace.json` | 超えるとレーンが区切りで止まり、閾値以下へ戻ると再開する（`ndf-parallel-organizer.md`） |
 | 同じ失敗の繰り返し | 2 回 | `lib/pace.py` | 残す（決定 12） |
 | merge から取り込みへ戻る回数 | 3 回 | `merged_lib/base_sync.py` | 残す（決定 13） |
 | リリースで先端が動いたときの入れ直し | 3 回 | `release-steps.py` | 残す（決定 13） |
 | 耐久ワークフローの止まりの待ち | 30 日 | `lib/durable.py` | 残す（決定 15） |
 | Factory の区間の上限 | 20（`RUNNER_SECTION_LIMIT`） | `factory/runner/src/sections.ts` | この仕様の範囲の外（決定 14） |
 | 1 周回で選ぶ課題の数 | 3 | `lib/pace.py` | 残す。実行環境の調査が候補を出す |
-| 動かないレーンを問うまで | 60 分 | `lib/parallel_run.py` | 残す。止めずに問うだけ |
+| 動かないレーンを問うまで | 60 分 | `lib/parallel_repo.py` | 残す。止めずに問うだけ |
 
 #### 費用とリリースの重複止め
 
@@ -353,6 +354,7 @@ JSON のファイルだけで、スキーマの移行は無い。読む側が古
 | ファイル | 項目 | 型 | 空の値 |
 | --- | --- | --- | --- |
 | `.ndf/pace.json` | `loop.budget.laps` / `hours` / `usd` | 正の数か `null` | `null` と省略は無制限 |
+| `.ndf/pace.json` | `parallel.answer_limit.plan` / `lane` | 正の整数 | 省略は 8 と 3 |
 | `.ndf/supervise.json` | `impl_stall_seconds` | 1 以上の整数か `null` | `null` と省略は 1800。無進捗の打ち切りは外せない |
 | `.ndf/supervise.json` | `impl_timeout` | 1 以上の整数か `null` | 無ければ経過時間の上限が無い |
 | ループの記録（`loop.json`） | `budget.<単位>` | 数か `null` | `null` は無制限 |
@@ -408,6 +410,7 @@ JSON のファイルだけで、スキーマの移行は無い。読む側が古
 | 状況 | 振る舞い |
 | --- | --- |
 | 予算の値が 0・負の数・文字列・真偽値 | `PaceError` でループを断る |
+| 答えを待つ依頼の閾値が正の整数でない | その値だけ既定へ戻し、`parallel.py check`・`start` が警告を出す。計画は止めない |
 | `loop.release_pending_max` に不正な値が書かれている | 読まないので断らない |
 | 実行環境の項目を読めない | `unreadable` に載せて進む |
 | 帳簿を読めない | 報告の和で周回を締める |
