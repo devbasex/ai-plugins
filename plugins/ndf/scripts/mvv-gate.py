@@ -50,6 +50,7 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -339,8 +340,16 @@ def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
     return result(TOOL, "ok", f"{GATES[a.gate]} の MVV 判定（助言）: {pm.NO_MVV}（{pm.STATUS_LABEL[project.status]}）", [item]), None
 
 
-def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple[str | None, list[str]]:
-    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
+class Checked(NamedTuple):
+    """機械のチェックの結果。スプリント MVV の本文・材料・承認の対象（材料のパス → SHA）。"""
+
+    sprint: str | None
+    materials: list[str]
+    approved: dict[str, str]
+
+
+def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> Checked:
+    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文・材料・承認の対象を返し、外れは `Back` を投げる。"""
     state = json.loads(Path(a.sprint).read_text(encoding="utf-8"))
     if project.status in ("unapproved", "mismatch", "unreadable"):
         raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
@@ -357,12 +366,13 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
     if hits := boundary_hits(root, infos, a.advise):
         raise Back("越えない線のパスに当たる: " + " / ".join(hits))
     materials = []
+    approved: dict[str, str] = {}
     for m in a.material:
         if not Path(m).is_file():
             raise Back(f"材料のファイルが無い: {m}")
         materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
         if a.gate == "release" and (sha := ac.material_sha_or_none(m)):  # 従うときに承認の記録を書く（#815 の I10）
-            vars(a).setdefault("approved", {})[m] = sha
+            approved[m] = sha
     materials += [pr_material(n, info) for n, info in infos.items()]
     if a.gate == "design":
         for n, info in infos.items():
@@ -371,7 +381,7 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
                 record["material"].append(f"#{n} {path}")
     if not materials:
         raise Back("材料が無い（--material か --pr を渡す）")
-    return sprint, materials
+    return Checked(sprint, materials, approved)
 
 
 def new_record(a, root: Path, project) -> dict:
@@ -390,7 +400,7 @@ def new_record(a, root: Path, project) -> dict:
     }
 
 
-def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int | None]:
+def passed(a, root: Path, project, record: dict, usage: dict, approved: dict[str, str]) -> tuple[dict, int | None]:
     """MVV に従うときの承認ゲートの記録と結果。記録を書けなければ承認ゲートへ落とす。"""
     record.update(verdict="follow", passed=True, **usage)
     write_log(a.log, record)
@@ -407,7 +417,7 @@ def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int
         ), EXIT_GATE
     if a.note:
         write_note(a.note, a, record)
-    items = [record, *ac.record_all(getattr(a, "approved", {}), "mvv", clock.now_iso("utc")), *revise_items(a, root, project)]
+    items = [record, *ac.record_all(approved, "mvv", clock.now_iso("utc")), *revise_items(a, root, project)]
     return result(TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。承認ゲートを省いて進めてよい", items, usage), None
 
 
@@ -454,7 +464,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         ), EXIT_GATE
 
     try:
-        sprint, materials = machine_checks(a, root, project, record)
+        sprint, materials, approved = machine_checks(a, root, project, record)
         materials = [*revise_material(a.revise_note), *materials]
     except (OSError, ValueError) as e:
         return back(f"スプリントの状態を読めない: {e}", "machine")
@@ -471,7 +481,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         return advised(pm.verdict_reason(verdict), usage)
     if verdict["verdict"] != "follow" or boundary:
         return back(pm.verdict_reason(verdict), verdict["verdict"], usage=usage)
-    return passed(a, root, project, record, usage)
+    return passed(a, root, project, record, usage, approved)
 
 
 def main() -> int:
