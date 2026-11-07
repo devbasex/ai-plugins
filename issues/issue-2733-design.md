@@ -22,7 +22,12 @@
 | STD1 | 外部の一次情報 | マシンの利用者ごとの、再起動をまたいで残す状態の置き場の標準 |
 | PRD1・PRD2 | 外部の一次情報 | 「ランナー」をジョブを動かすマシンと呼ぶ製品と、アプリケーションと呼ぶ製品の両方がある |
 
-要求と受け入れ条件は #2733 の本文にある（コピーは [issue-2733-requirements.md](issue-2733-requirements.md) ）。決定の記録は [issue-2733-design-decisions.md](issue-2733-design-decisions.md) に、語の置き換え・欠けているレーンの規定・実行の形の追加は [issue-2733-design-terms.md](issue-2733-design-terms.md) に分けた。この文書は「どう作るか」だけを扱う。
+要求と受け入れ条件は #2733 の本文にある（コピーは [issue-2733-requirements.md](issue-2733-requirements.md) ）。この文書は「どう作るか」だけを扱い、次の 2 つを別の文書に分けた。
+
+| 中身 | 文書 |
+| --- | --- |
+| 決定の記録 | [issue-2733-design-decisions.md](issue-2733-design-decisions.md) |
+| 語の置き換え・欠けているレーンの規定・実行の形の追加 | [issue-2733-design-terms.md](issue-2733-design-terms.md) |
 
 ## ドメインモデル
 
@@ -51,8 +56,8 @@ Factory（`ndf-factory`）の語は、語の決定（ランナー）で意味を
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 並列の計画の宣言 | レーンの `repo` を省くと、計画の置き場のリポジトリのレーンとして扱う。省いた計画は今と同じに検査・起動・リリースされる | テストで落とす |
-| I2 | 並列の計画の宣言 | `repo` は絶対パスで、Git のメインディレクトリ（`decl.main_dir` が自分自身を返す）を指す。指さなければ検査が `I20` で断る | 検査が終了コード 1 で断る |
-| I3 | 並列の計画の宣言 | 課題・マイルストーンの重なり（`I19`）・触る場所の重なり（`I4`）・引継ぎ文書の名前の重なりは、同じリポジトリのレーンの間だけで判定する | テストで落とす |
+| I2 | 並列の計画の宣言 | `repo` は絶対パスで、Git のメインディレクトリ（`decl.main_dir` が自分自身を返す）を指す。指さなければ検査の規則 `I20` で断る | 検査が終了コード 1 で断る |
+| I3 | 並列の計画の宣言 | 課題・マイルストーンの重なり（検査の規則 `I19`）・触る場所の重なり（検査の規則 `I4`。不変条件の I4 とは別）・引継ぎ文書の名前の重なりは、同じリポジトリのレーンの間だけで判定する | テストで落とす |
 | I4 | 計画の所在の一覧 | 一覧は計画の置き場を指すだけで、計画の中身を写さない。指す先に計画が無い所在は、読む側が読み飛ばす | テストで落とす |
 | I5 | 並列の進行 | レーンの側が依頼を送る・答えを読む・止める指示を読むときは、レーンのリポジトリではなく計画の置き場を使う。耐久ワークフローの記録のキーは変えない | テストで落とす |
 | I6 | 並列の進行 | オーガナイザーの側がレーンの記録（ループの記録・引継ぎ文書）を読み書きするときと、レーンの設計 PR をマージするときは、そのレーンのリポジトリを使う | テストで落とす |
@@ -146,7 +151,7 @@ Factory（`ndf-factory`）の語は、語の決定（ランナー）で意味を
 
 | 要素 | 責務 |
 | --- | --- |
-| 計画の宣言（`lib/parallel_plan.py`） | `Lane` に任意の `repo` を足し、`repo_dir(home)` で解く。`I20`（`repo` の形）を足し、`I19`・`I4`・引継ぎ文書の重なりをリポジトリごとに判定する。`write_all` は引継ぎ文書をレーンのリポジトリへ書く。`plan.md` の表にリポジトリの列を足す。上限の値は `relay_lib.limits` から読む |
+| 計画の宣言（`lib/parallel_plan.py`） | `Lane` に任意の `repo` を足し、`repo_dir(home)` で解く。`I20`（`repo` の形）を足し、検査の規則 `I19`・`I4`・引継ぎ文書の重なりをリポジトリごとに判定する。`write_all` は引継ぎ文書をレーンのリポジトリへ書く。`plan.md` の表にリポジトリの列を足す。上限の値は `relay_lib.limits` から読む |
 | 計画の所在の一覧（新規 `lib/parallel_homes.py`） | 所在の書き込み・一覧の読み出し（ファイルだけ。pydantic と DBOS を import しない）。指す先に計画が無い所在は読み飛ばす |
 | レーンの判定（`lib/parallel_files.py`・`lib/parallel_lane.py`） | 探す先を「自分のメインディレクトリ + 計画の所在の一覧」にする。`lane_of` は計画の置き場とレーンのリポジトリを持つ `LaneRef` を返す。レーンのリポジトリと自分のメインディレクトリが一致する計画だけを当てる |
 | レーンの側の送受信（`lib/parallel_lane.py`・`lib/sprint_loop_record.py`・`lib/sprint_loop_gate.py`・`lib/sprint_loop.py`・`lib/parallel_hold.py`・`supervise_lib/sprint.py`・`supervise_lib/engine.py`・`hook_lib/ask_guard.py`・`parallel.py` の `request-ask`・`await`） | 依頼・答え・止める指示の置き場を `LaneRef.home`（計画の置き場）から求める |
@@ -325,11 +330,17 @@ classDiagram
 
 | 足す値 | 足す先 | 変える箇所 |
 | --- | --- | --- |
-| レーンの `repo` | 計画の宣言のキー | `I19`・`I4`・引継ぎ文書の重なりの判定、`write_all`、`render`（`plan.md`）、`check` の `release` の警告（レーンのリポジトリごとに見る）、`map_lanes`、`lane_waits`・`loop_records`、`step_spawn`（`relay_proc` の `cwd`）、`parallel_answer` の設計 PR のマージ、`contracts/files` の `plan.json` |
+| レーンの `repo` | 計画の宣言のキー | 検査の規則 `I19`・`I4`・引継ぎ文書の重なりの判定、`write_all`、`render`（`plan.md`）、`check` の `release` の警告（レーンのリポジトリごとに見る）、`map_lanes`、`lane_waits`・`loop_records`、`step_spawn`（`relay_proc` の `cwd`）、`parallel_answer` の設計 PR のマージ、`contracts/files` の `plan.json` |
 | `lanes_changed` | inbox の `kind` | `_Run.take`、`parallel.md` の inbox の表 |
 | `blocked` の終了コード 3 | `loop start`・`new sprint` の終了の形 | 両方の契約の `exit`、`loop.md` の起動の節 |
 
-変えない箇所: 外のオーガナイザーの経路（`parallel_external.py`。`NDF_ORGANIZER_DIR` は計画の所在の一覧より先に判定する）、耐久ワークフローの記録のキー（`record_identity`）、答え待ちの停止の数え方（`parallel_hold` の数え方はレーン名で数え、リポジトリに依らない）。
+変えない箇所は次の 3 つである。
+
+| 箇所 | 変えない中身 |
+| --- | --- |
+| 外のオーガナイザーの経路（`parallel_external.py`） | `NDF_ORGANIZER_DIR` は計画の所在の一覧より先に判定する |
+| 耐久ワークフローの記録のキー（`record_identity`） | — |
+| 答え待ちの停止の数え方（`parallel_hold`） | レーン名で数え、リポジトリに依らない |
 
 ## 処理の流れ
 
