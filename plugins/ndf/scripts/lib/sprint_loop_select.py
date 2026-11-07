@@ -122,12 +122,8 @@ def prerequisite_reason(row: dict) -> str:
     return "前提の課題の実装待ち（" + " ".join(f"#{b}" for b in sorted(row["prerequisites"])) + "）"
 
 
-def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
-    n = row["number"]
-    if row.get("waiting_decision"):
-        return "人の判断待ち（棚卸し）"
-    if n in pending_issues(rec):  # 締め直すまで選ばない（選ぶと保留中の実装と作業が重なる。#2436 の 6a）
-        return PENDING_REASON
+def waiting_reason(env: Env, rec: dict, n: int) -> str | None:
+    """課題 n の待ち行から外す理由を読む。承認済みで未マージの行は PR の状態を読み、マージ済みなら merged_at を書く。"""
     for w in rec.get("waiting", []):
         if w["number"] != n:
             continue
@@ -140,6 +136,17 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
                 w["merged_at"] = env.now()
             else:
                 return merge_wait_reason(w)
+    return None
+
+
+def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
+    n = row["number"]
+    if row.get("waiting_decision"):
+        return "人の判断待ち（棚卸し）"
+    if n in pending_issues(rec):  # 締め直すまで選ばない（選ぶと保留中の実装と作業が重なる。#2436 の 6a）
+        return PENDING_REASON
+    if why := waiting_reason(env, rec, n):
+        return why
     for e in rec.get("excluded", []):
         if e["number"] == n and e.get("lap") == lap_n:
             return e["reason"]
