@@ -49,7 +49,7 @@ def registry(main_repo: Path) -> dict:
 # --- 受け入れ条件 39: 宣言が無いリポジトリでは何もしない --------------------
 
 
-@pytest.mark.parametrize("args", [["env"], ["tag"], ["stop"], ["unexpose"]])
+@pytest.mark.parametrize("args", [["env"], ["tag"], ["stop"], ["unexpose"], ["reclaim"]])
 def test_no_declaration_is_silent(main_repo: Path, worktree: Path, args: list[str]) -> None:
     result = run([*args, str(worktree)], cwd=main_repo)
     assert result["rc"] == 0, result
