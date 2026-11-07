@@ -119,7 +119,9 @@
 | 引継ぎの CLI（`handoff.py`） | 名の形に `parallel-<計画名>` を足す。`cut-organizer` を足す。`find` の照合の規則を足す |
 | 並列の進行（`lib/parallel_route.py`・`lib/parallel_run.py`） | 起動の指示の済みの印を立て、知らせを今の状態へ合わせる。`step_finish` が引継ぎ文書を消す |
 | 一時レーンの確かめ（`parallel.py` の `helper-sync`、`lib/parallel_helper.py`、`hook_lib/ask_guard.py`） | 知らせから起動の 1 行が消えるのを待つ。リリースの手順では `helper` の `metrics.sync`、問いの保留の手順では hook の文がその 1 行を渡す |
+| 問いと一時レーンの CLI（`lib/parallel_helper_cli.py`） | `request-ask`・`request-gate2`・`helper`・`helper-sync` の副コマンドの本体。`lib/parallel_external_cli.py` と同じく、結果を出す関数 `reply` を受け取る。`parallel.py` には引数の定義と本体を呼ぶ 2 行だけを残す |
 | 手順書（`references/parallel.md`・`context-window.md`・`handoff.md`・`conductor-entrypoints.md`、`restart` の `SKILL.md`、`parallel-plan.md`、`plugins/ndf/README.md` の hook の表） | オーガナイザーのカットポイント、止められたときの 3 手、文書の名と再開コマンドの例外 |
+| 一時レーンの終わり方の手順書（`references/parallel.md` の「一時レーン」の手順 4、`references/asking.md` の保留の表） | 手順 4 は `relay.py stop` の前に `metrics.sync` の 1 行を打ち、`stopped` なら警告を作業の報告へ書く。保留の周回は `helper` を打たず `metrics.sync` を持たないので、問いを送っていなければ打たない。保留の表は 1 スプリントのレーンと一時レーンの行を分け、一時レーンの行に、`relay.py stop` の前に保留の手順が返す `helper-sync` の 1 行を打つことを足す |
 
 変えないもの: `parallel.py` の既存の副コマンドの引数と出力の形（足すのは副コマンド `helper-sync` と `helper` の `metrics.sync` だけ）、ラッパー（`relay.py`）、上限の値と再起動の方針の解決。
 
@@ -210,7 +212,7 @@ graph TD
 ```text
 plugins/ndf/scripts/
 ├── handoff.py                    # 名の形・cut-organizer・match_words
-├── parallel.py                   # helper-sync
+├── parallel.py                   # helper-sync の引数の定義。問いと一時レーンの副コマンドの本体を外へ移す
 ├── hook_lib/
 │   ├── ask_guard.py              # 問いの保留の手順へ helper-sync の 1 行を足す
 │   ├── shell_checks.py           # parallel_wait
@@ -219,7 +221,8 @@ plugins/ndf/scripts/
 │   ├── context_calibrate.py      # 工程の区切り
 │   ├── context_decisions.py      # stage_of・record_mark・record_restart
 │   ├── parallel_files.py         # PLAN_RE を移す・organizer_line を足す
-│   ├── parallel_helper.py        # helper の metrics.sync
+│   ├── parallel_helper.py        # helper の metrics.sync・helper-sync の確かめ
+│   ├── parallel_helper_cli.py    # 問いと一時レーンの副コマンドの本体（新規）
 │   ├── parallel_plan.py          # PLAN_RE を parallel_files から読む
 │   ├── parallel_route.py         # 起動の指示の済みの印
 │   └── parallel_run.py           # 呼び出しと step_finish
@@ -230,9 +233,12 @@ plugins/ndf/scripts/
 
 ```bash
 uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_token_guard.py plugins/ndf/scripts/tests/test_context_policy_hook.py plugins/ndf/scripts/tests/test_parallel_run.py plugins/ndf/scripts/tests/test_handoff.py -q
+python3 scripts/check-script-structure.py
 ```
 
 `parallel_run.py` は行数の例外に載っているため、起動の指示の処理は基底の `parallel_route.py` に置き、例外の上限を増やさない。
+
+`parallel.py` は 500 行ちょうどで、行数の検査の上限 500 に例外が無い。`helper-sync` を足すと、説明の 1 行・引数の定義の 3 行・本体を呼ぶ 4 行・import の 1 行の計 9 行が増える。`parallel_run.py` と同じく例外を増やさないため、`request-ask`・`request-gate2`・`helper` の本体を `parallel_helper_cli.py` へ移して 20 行を減らし、489 行の見込みとする。`helper` と同じく `parallel_run` と `durable` は関数の中で import し、副コマンドの引数と出力の形は変えない。
 
 ## 構造
 
@@ -363,7 +369,7 @@ classDiagram
 
 上限の 90 秒は、受信を待つ最長の約 60 秒（`recv` の 2 回分）に観測の処理の分を足した値で、Bash の既定の上限 120 秒に収まる。止まる前の一時レーンは `name-taken` で重ねて起動されないため、待つ間に新しいセッションが古い `spawn` を打っても流し直しは起きない。古いコードの `run` の下では `spawn` が消えず、上限まで待って今の振る舞いと同じに止まる。
 
-`helper` の出力の `metrics.sync` はこの 1 行を持つ。問いの保留の手順は、hook が一時レーンの名から連番を読んで同じ 1 行を組み、レーンの問いには足さない。
+`helper` の出力の `metrics.sync` はこの 1 行を持つ。問いの保留の手順は、hook が一時レーンの名から連番を読んで同じ 1 行を組み、レーンの問いには足さない。保留の周回の一時レーンは `helper` を打たないので `metrics.sync` を持たず、問いを送ったときだけ hook の文の 1 行を打つ。
 
 ## 処理の流れ
 
@@ -443,7 +449,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2595 | 実装する | — | `plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/shell_checks.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/context_decisions.py`、`plugins/ndf/scripts/lib/context_calibrate.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_helper.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`plugins/ndf/skills/restart/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/README.md`、`docs/glossary.md`、`docs/glossary/glossary.json` |
+| #2595 | 実装する | — | `plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/shell_checks.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/context_decisions.py`、`plugins/ndf/scripts/lib/context_calibrate.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_helper.py`、`plugins/ndf/scripts/lib/parallel_helper_cli.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`plugins/ndf/skills/restart/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/README.md`、`docs/glossary.md`、`docs/glossary/glossary.json` |
 
 ## テスト設計
 
@@ -470,6 +476,7 @@ stateDiagram-v2
 | 14 / I8 | スプリントの状態ファイルなしで `cut-organizer` が 2 行を残し、理由を直前の拒否から引き継ぐ | 書き手を `sprint-state` の経路に戻すと落ちる |
 | I9 | `.ndf/` が無い・書けないときも 0 で `block` を返す | 文書の失敗を終了コードへ流すと落ちる |
 | 15 | `parallel.md` と `context-window.md` のカットポイントの節を、人が読んで問いに答える（文言のテストは書かない） | 完了判定で読み手の確認が通らない |
+| 15 / I13 | `parallel.md` の一時レーンの手順 4 と `asking.md` の保留の表を、人が読んで「`relay.py stop` の前に何を打つか」「保留の周回で打つか」に答える（文言のテストは書かない） | 完了判定で読み手の確認が通らない |
 | 16 | 使い捨てのラッパーの下で、大きな文脈の記録を渡したオーガナイザーの判定から `ndf-next`・次のセッションの `start`・`wait --after 0` までを 1 回通し、問いが届く | 実装の通し確認。背景の `wait` の拒否もここで見る |
 | 17 | リリース後に動いている計画で 1 回切り替わり、判定の記録に複数の判定の行と再起動の行が残り、計画が続く | リリース後テスト（人が記録と `relay.py ls` を見る） |
 
