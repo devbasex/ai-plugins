@@ -384,7 +384,7 @@ def cmd_answer(a) -> None:
     q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
     nxt, held = pa.owner_next(main, a.name, a.id, a.choice, items)
     tail, extra = pa.answer_with_merge(main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
-    extra.update(id=a.id, result=result, next=nxt, seq=seq, held_owners=held, **pa.not_listed(a.id, items))
+    extra.update(id=a.id, result=result, next=nxt, seq=seq, **({"held_owners": held} if held else {}), **pa.not_listed(a.id, items))
     reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
 
 

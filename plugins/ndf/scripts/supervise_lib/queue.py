@@ -312,8 +312,7 @@ def plan_item(plan: str, out: dict) -> dict:
 
     前提のプランで流さなかったプランの出力（`result` が流さなかった）は、そのまま item にする。"""
     if out.get("result") == NOT_RUN:
-        held = parallel_hold.skip_of(out.get("reason"))
-        return {**out, "plan": plan, **({"answer_hold": held} if held else {})}
+        return {**out, "plan": plan, **({"answer_hold": True} if parallel_hold.skip_of(out.get("reason")) else {})}
     rep = state_dir_of(plan) / "report.md"
     if "error" in out:
         print(f"supervise-queue: {plan} が例外で終わった: {out['error']}", file=sys.stderr, flush=True)
@@ -349,7 +348,7 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
     unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
-    held = next((i["answer_hold"] for i in items if i.get("answer_hold")), None)  # 答え待ちの停止で流さなかったプラン（#2707）
+    held = next((parallel_hold.skip_of(i.get("reason")) for i in items if i.get("answer_hold")), None)  # 答え待ちの停止（#2707）
     status = "stopped" if stopped or unfilled else "gate" if gates or held else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
