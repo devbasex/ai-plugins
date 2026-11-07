@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/release-steps.py",
+  "name": "ndf-dir",
+  "kind": "pending",
+  "reason": "リリースのときに ai-plugins の README の例を書き換える。README の書き換えを宣言で受けるまで残す",
+  "count": 3,
+  "issue": 1756
+}
