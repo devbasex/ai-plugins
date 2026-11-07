@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/hook_lib/token_guard.py",
+  "name": "admin-merge",
+  "kind": "pending",
+  "reason": "案内の文が gh pr merge --admin を前提に書かれている。マージを gh pr merge --admin に固定している。マージの方法を宣言で受けるまで残す",
+  "count": 1,
+  "issue": 1338
+}

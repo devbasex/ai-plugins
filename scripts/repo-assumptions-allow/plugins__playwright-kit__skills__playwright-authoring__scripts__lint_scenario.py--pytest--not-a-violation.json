@@ -1,0 +1,7 @@
+{
+  "path": "plugins/playwright-kit/skills/playwright-authoring/scripts/lint_scenario.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "playwright-kit が生成と検査の対象にするテストの形。対象リポジトリのテストのコマンドを埋め込んでいない",
+  "count": 8
+}
