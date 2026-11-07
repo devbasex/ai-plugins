@@ -816,6 +816,17 @@ def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatc
     assert run.revive == []
 
 
+def test_stopping_a_lane_that_cannot_start_leaves_wake_and_revive(monkeypatch):
+    """起動の断りの問いへ「止める」と答えたら、reply が加えた再開待ちと起こす 1 行からそのレーンを外す。
+    残すと _finish_or_hold が計画を終えられず、利用者が止めたレーンの再開を案内し続ける。"""
+    run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}])
+    run.lanes["la"].update(started=True, state="stopped")
+    run.ask("spawn", "s1", "la", "起動できない", ["起こし直す", "止める"])
+    run.reply({"id": "s1", "result": "answered", "choice": ["止める"]})
+    assert run.lanes["la"].get("given_up") is True
+    assert "la" not in run.revive and "la" not in run.wake and "la" not in run.revive_at
+
+
 def _answers(monkeypatch):
     """立った答えのイベントを {キー: 値} で集める。"""
     box = {}

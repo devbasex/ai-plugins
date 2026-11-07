@@ -327,7 +327,12 @@ class _Run(prt.ReleaseRouting, ph.AnswerHold):
         if prt.STOP_PLAN not in choice:
             return
         if q.get("kind") == "spawn" and q.get("lane") in self.lanes:
-            self.lanes[q["lane"]].update(started=True, state="stopped", given_up=True)
+            lane = q["lane"]
+            self.lanes[lane].update(started=True, state="stopped", given_up=True)
+            # reply が持ち主を再開待ちへ加えた後でも、止めたレーンを起こす 1 行と再開待ちから外す（計画を終えられるように）
+            self.wake = [n for n in self.wake if n != lane]
+            self.revive = [n for n in self.revive if n != lane]
+            self.revive_at.pop(lane, None)
         elif q.get("kind") == "helper" and (rel := self.current) is not None and q.get("n") == rel["n"]:
             if not rel.get("prs"):  # 提示の前に止まったなら、このリリースへ入れた依頼の Pull Request を範囲として締める
                 own = {n for r in self.pending if r["id"] in rel.get("requests", []) for n in r.get("prs") or []}
