@@ -335,7 +335,7 @@ docker volume ls -q --filter label=com.docker.compose.project=<環境名> | xarg
 `down` と同じく宣言で決め、`--volumes` は宣言より優先する。手で確かめるときはリポジトリの中から打つ。
 
 ```bash
-bash "$SCRIPTS/worktree-testenv.sh" reclaim "$MAIN"          # 結果を 1 行の JSON で出す
+bash "$SCRIPTS/worktree-testenv.sh" reclaim <メインディレクトリ>  # 結果を 1 行の JSON で出す
 ```
 
 環境ごとの結果は `items[].result` に載る。終了コードを 1 にするのは `failed` と、何も回収しなかったとき（`not_run`）だけである。

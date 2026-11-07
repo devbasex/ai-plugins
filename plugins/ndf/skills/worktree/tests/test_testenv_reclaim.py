@@ -102,9 +102,7 @@ def registry_file(main: Path) -> Path:
 def write_rows(main: Path, rows: list[dict]) -> None:
     f = registry_file(main)
     f.parent.mkdir(parents=True, exist_ok=True)
-    full = [
-        {"slot": i, "assigned_at": "2026-11-06T00:00:00Z", "released_at": None, "expose": None, **row} for i, row in enumerate(rows)
-    ]
+    full = [{"slot": i, "assigned_at": "2026-11-06T00:00:00Z", "released_at": None, "expose": None, **row} for i, row in enumerate(rows)]
     f.write_text(json.dumps({"version": 1, "assignments": full}), encoding="utf-8")
 
 
@@ -170,6 +168,7 @@ def test_a_stale_assignment_is_discarded_without_the_definition(main_repo: Path,
     assert out["items"] == [{"kind": "testenv", "name": "e1", "result": "reclaimed", "worktree": wt, "volumes": "discarded"}]
     assert out["metrics"]["reclaimed"] == 1
     assert out["summary"] == "テスト環境 1 件を回収した（失敗 0 件・残した 0 件）"
+    assert sorted(x.name for x in registry_file(main_repo).parent.iterdir()) == ["worktree-registry.json"]
 
 
 @pytest.mark.parametrize("value", [False, "false"], ids=["bool", "text"])
@@ -251,7 +250,9 @@ def test_two_rows_of_one_environment_are_discarded_once(main_repo: Path, fake: d
 def test_a_container_of_an_already_released_row_counts_as_own(main_repo: Path, fake: dict) -> None:
     declare(main_repo)
     a, b = gone(main_repo, "a"), gone(main_repo, "b")
-    write_rows(main_repo, [{"worktree": a, "environment": "e1", "released_at": "2026-11-06T01:00:00Z"}, {"worktree": b, "environment": "e1"}])
+    write_rows(
+        main_repo, [{"worktree": a, "environment": "e1", "released_at": "2026-11-06T01:00:00Z"}, {"worktree": b, "environment": "e1"}]
+    )
     containers(fake, "e1", a)
 
     _, out = reclaim(main_repo, fake)
@@ -528,7 +529,9 @@ def test_no_seconds_left_before_the_discard_defers_it(main_repo: Path, fake: dic
     bindir = Path(fake["PATH"].split(":")[0])
     real_date, real_mktemp = shutil.which("date"), shutil.which("mktemp")
     clock, write_hook = bindir / "date", bindir / "mktemp"
-    clock.write_text(f'#!/bin/sh\n[ -f "$FAKE_STATE/late" ] && expr "$({real_date} +%s)" + 1000 || exec {real_date} "$@"\n', encoding="utf-8")
+    clock.write_text(
+        f'#!/bin/sh\n[ -f "$FAKE_STATE/late" ] && expr "$({real_date} +%s)" + 1000 || exec {real_date} "$@"\n', encoding="utf-8"
+    )
     write_hook.write_text(
         f'#!/bin/sh\ncase "$1" in *worktree-registry.json.*) : > "$FAKE_STATE/late" ;; esac\nexec {real_mktemp} "$@"\n', encoding="utf-8"
     )
@@ -591,7 +594,9 @@ def test_stopping_the_reclaim_stops_the_discard(main_repo: Path, fake: dict) -> 
     write_rows(main_repo, [{"worktree": wt, "environment": "e1"}])
     stubborn(fake)
 
-    with subprocess.Popen(["bash", str(TESTENV), "reclaim", str(main_repo)], env=fake, stdout=subprocess.DEVNULL, start_new_session=True) as p:
+    with subprocess.Popen(
+        ["bash", str(TESTENV), "reclaim", str(main_repo)], env=fake, stdout=subprocess.DEVNULL, start_new_session=True
+    ) as p:
         numbers = pids(fake)
         os.killpg(p.pid, signal.SIGKILL)
         p.wait()

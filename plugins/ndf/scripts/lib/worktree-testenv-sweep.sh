@@ -367,7 +367,9 @@ reclaim_run() {
   # 接続できない Docker で行を解放しない（決定 10）。`compose ls` は Compose と接続を 1 回で確かめる。
   has_docker || { _reclaim_not_run "コンテナ実行系が見つかりません"; return 1; }
   RECLAIM_DOCKER=$(command -v "$(docker_command)")
-  RECLAIM_TMP=$(mktemp -d 2>/dev/null) || { _reclaim_not_run "一時ディレクトリを作れない"; return 1; }
+  # 標準エラーの控えは台帳の隣に置き、回収の終わりに消す。
+  RECLAIM_TMP="$(dirname "$path")/reclaim-$$-${RANDOM:-0}.d"
+  mkdir "$RECLAIM_TMP" 2>/dev/null || { _reclaim_not_run "控えのディレクトリを作れない: $RECLAIM_TMP"; return 1; }
   trap 'rm -rf "$RECLAIM_TMP"' EXIT
   RECLAIM_LOCKED=$(_reclaim_locked_paths) || { _reclaim_not_run "worktree の一覧を読めない"; return 1; }
   _reclaim_limited /dev/null "$RECLAIM_TMP/ls.err" "$RECLAIM_DOCKER" compose ls -q || {
