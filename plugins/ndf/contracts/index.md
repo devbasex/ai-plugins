@@ -31,6 +31,8 @@
 | 名前 | 型 | 種類 | 置き場 | 書くエントリポイント | 読むエントリポイント・Skill |
 | --- | --- | --- | --- | --- | --- |
 | `actuals-run-json` | `actuals-run.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
+| `answer-hold-json` | `answer-hold.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `answer-hold-log-jsonl` | `answer-hold-log.jsonl` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `answer-json` | `answer.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `answers-sent-json` | `answers-sent.json` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `applied-json` | `*.applied.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
@@ -59,6 +61,7 @@
 | `requests-json` | `requests.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `research-calls-jsonl` | `calls.jsonl` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `research-item-json` | `*--*.item.json` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `resume-mark-json` | `*.mark.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `run-log` | `run.log` | report | main | `plugins/ndf/scripts/parallel.py` | — |
 | `run-pid` | `run.pid` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `snapshot-json` | `snapshot.json` | record | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |

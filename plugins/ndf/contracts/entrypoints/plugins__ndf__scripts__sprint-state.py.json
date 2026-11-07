@@ -82,6 +82,8 @@
   "stdin": "none",
   "stdout": "json",
   "writes": [
+    "answer-hold-json",
+    "answer-hold-log-jsonl",
     "answer-json",
     "applied-json",
     "approved-txt",
@@ -97,7 +99,8 @@
     "prs-txt",
     "request-id-txt",
     "request-txt",
-    "requests-json"
+    "requests-json",
+    "resume-mark-json"
   ],
   "reads": [],
   "exit": {
