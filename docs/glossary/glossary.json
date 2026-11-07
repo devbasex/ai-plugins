@@ -6176,6 +6176,30 @@
       "context": "ndf-workflow",
       "meaning": "答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く",
       "pending_source": "issues/issue-2707-design.md"
+    },
+    {
+      "term": "作業マシン",
+      "context": "ndf-workflow",
+      "meaning": "NDF の作業を動かす 1 台のマシン。同じカーネルとメモリを共有する範囲を指し、手元のマシンと開発コンテナの基盤のホストを含む。Factory のプログラムである「ランナー」とは別",
+      "pending_source": "issues/issue-2711-requirements.md"
+    },
+    {
+      "term": "重い処理",
+      "context": "ndf-workflow",
+      "meaning": "作業マシンの CPU とメモリを多く使うテストの実行。宣言のテストのコマンドによる全体テストと、並列の指定を持つ範囲テストを指す。静的解析は含まない",
+      "pending_source": "issues/issue-2711-requirements.md"
+    },
+    {
+      "term": "テストの枠",
+      "context": "ndf-workflow",
+      "meaning": "1 台の作業マシンで同時に走らせてよい重い処理の本数の上限と、その数え方",
+      "pending_source": "issues/issue-2711-requirements.md"
+    },
+    {
+      "term": "メモリの下限",
+      "context": "ndf-workflow",
+      "meaning": "使えるメモリがこの値を割ると、重い処理を始めず、動いているものを止める境の値",
+      "pending_source": "issues/issue-2711-requirements.md"
     }
   ]
 }
