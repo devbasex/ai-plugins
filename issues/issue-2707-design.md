@@ -318,7 +318,7 @@ classDiagram
 | `parallel.py park <計画名> --lane <名> --clear` | 人が止めたままにするレーン | そのレーンの再開の印を消し、`inbox` へ `{kind: left_stopped, lane}` を送り、`metrics.mark_removed`（消したら `true`、無ければ `false`）を返す（0）。送るのは再開の印の有無に依らない。冪等の鍵は打った時刻を含み、次の停止で打った `--clear` も届く。`--done` は要らない | 計画やレーンが無い 1、消せない・送れない 2。再実行すると送り直す | 新規 |
 | `parallel.py answer` | 変えない | 停止の範囲にある持ち主のレーンでは `metrics.next` が持ち主のレーンを起こす 1 行を含まず、`metrics.held_owners` にレーン名を返す | 変えない | 停止の範囲が無ければ今と同じ |
 | `parallel.py check` / `start` | 変えない | 閾値の値が正の整数でなければ `items` に警告（`check` は `warnings` に数える） | 計画を止めない | 追加 |
-| `supervise.py queue` / `wait` | 変えない | 答え待ちの停止で流さなかったプランは `result: 流さなかった`・`answer_hold: true`。結果は `status: gate`・`metrics.answer_hold`（計画名とレーン）・`next`（`park` の 1 行） | 変えない | レーン以外の queue は変わらない |
+| `supervise.py queue` / `wait` | 変えない | 答え待ちの停止で流さなかったプランは `result: 流さなかった`・`answer_hold: true`。結果は `status: gate`・`metrics.answer_hold`（計画名とレーン）・`metrics.park` と `next`（`park` の 1 行。ほかのプランの停止・承認ゲートと同居しても落とさない） | 変えない | レーン以外の queue は変わらない |
 | `supervise.py run` | 変えない | 変えない。止める指示を読まない（`park` の続きは `queue --resume` で、単発の実行に続きの形が無いため） | 変えない | 変えない |
 | `sprint-state.py loop` | 変えない | 止まる条件に `answer_hold` が増える。`values` は `{plan, scope, count, limit}`。行は `[ndf-loop] stopped <名> answer_hold`。`metrics.stop_self` を返す | 終了コード 3（今の止まる条件と同じ） | 追加 |
 | イベント `answer-hold` | — | `{seq, action: "answer_hold", n, line, hold}`。`n` と `line` は最新の変化である | — | 新規。`seq` は `pause`・`questions` と同じ連番 |

@@ -134,3 +134,34 @@ def test_a_single_run_is_not_held(queue):
     got = subprocess.run([PY, str(SUPERVISE), "run", plan], capture_output=True, text=True, timeout=120, env=queue.env, cwd=queue.tmp)
     assert got.returncode == 0, got.stderr[-1000:]
     assert (queue.tmp / "ran").exists()
+
+
+def held_item() -> dict:
+    return {"plan": "b", "result": "流さなかった", "answer_hold": True, "reason": f"{ph.SKIP_REASON}: p1 la"}
+
+
+@pytest.mark.parametrize(
+    "other, status",
+    [({"plan": "a", "result": "止まった"}, "stopped"), ({"plan": "a", "result": "関門"}, "gate")],
+)
+def test_the_park_line_is_kept_with_a_stopped_plan_or_a_gate(other, status, tmp_path):
+    from supervise_lib import queue as q
+
+    res = q._queue_result([other, held_item()], 1, tmp_path / "done.json")
+    park = res["metrics"]["park"]
+    assert res["status"] == status and "park p1 --lane la --done" in park and park in res["next"]
+    assert res["next"].startswith("承認ゲート") == (status == "gate")
+
+
+def test_the_queue_flag_is_on_from_before_the_launch_until_after_the_close(queue, monkeypatch):
+    import durable
+    from supervise_lib import flow
+    from supervise_lib import queue as q
+
+    seen = []
+    monkeypatch.setattr(flow, "launch_queue", lambda *a: seen.append(("launch", flow.Engine.queued)) or "p")
+    monkeypatch.setattr(q, "_drive_queue", lambda *a: {"status": "ok"})
+    monkeypatch.setattr(durable, "close", lambda: seen.append(("close", flow.Engine.queued)))
+    plan = queue.plan("a", [run_step("true")])
+    assert q.cmd_queue([plan], 1, done=str(queue.tmp / "done.json")) == {"status": "ok"}
+    assert seen == [("launch", True), ("close", True)] and flow.Engine.queued is False

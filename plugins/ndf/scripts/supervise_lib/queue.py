@@ -142,32 +142,45 @@ def cmd_queue(
     if isinstance(prepared, dict):
         return prepared
     decl, done_path, seen, listing = prepared
+    # launch の直後に回復したプランも prepare で答え待ちの停止を読むよう、launch の前から close の後まで立てる（#2707）
+    flow.Engine.queued = True
     try:
-        prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
-    except durable.DurableError as e:
-        return _not_started(str(e), max_, done_path)
-    try:
-        flow.Engine.queued = True
-        ref = durable.resolve(prefix)
-        if ref.action == "continue":
-            print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
-        args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
-        args["starts"] = starts or {}
-        args["rerun"] = list(rerun or [])
-        wid = durable.start(ref, flow.queue_workflow, args)
-        while True:
-            got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
-            for p in all_plans:
-                seen[p] = notify_attention(p, seen[p])
-            if got.kind != "timeout":
-                break
-        if got.kind != "done":
-            durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
-            raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
-        return got.value
+        try:
+            prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
+        except durable.DurableError as e:
+            return _not_started(str(e), max_, done_path)
+        try:
+            return _drive_queue(durable, flow, prefix, _queue_args(stages, max_, done_path, decl, starts, rerun), all_plans, seen, poll)
+        finally:
+            durable.close()
     finally:
         flow.Engine.queued = False
-        durable.close()
+
+
+def _queue_args(stages: list[list[str]], max_: int, done_path: Path, decl: dict, starts, rerun) -> dict:
+    """`queue_workflow` へ渡す入力。"""
+    args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
+    args["starts"] = starts or {}
+    args["rerun"] = list(rerun or [])
+    return args
+
+
+def _drive_queue(durable, flow, prefix: str, args: dict, all_plans: list[str], seen: dict, poll: float) -> dict:
+    """耐久ワークフロー `queue_workflow` を始めるか続け、終わるまで attention を知らせながら待つ。"""
+    ref = durable.resolve(prefix)
+    if ref.action == "continue":
+        print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
+    wid = durable.start(ref, flow.queue_workflow, args)
+    while True:
+        got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
+        for p in all_plans:
+            seen[p] = notify_attention(p, seen[p])
+        if got.kind != "timeout":
+            break
+    if got.kind != "done":
+        durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
+        raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
+    return got.value
 
 
 def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[str]], list[str]]:
@@ -354,9 +367,10 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
     nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
     metrics = {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)}
-    if held:
+    if held:  # park の 1 行は status（止まった・承認ゲートの同居）に依らず metrics.park と next で渡す
         metrics["answer_hold"] = held
-        nxt = _park_line(held, done_path) if status == "gate" else None
+        metrics["park"] = park = _park_line(held, done_path)
+        nxt = f"{nxt}。続けて {park} を打つ" if gates else park
     return result("supervise-queue", status, summary, items, metrics, next=nxt)
 
 

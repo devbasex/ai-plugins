@@ -170,7 +170,7 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
 | レーン | 止まり方 |
 | --- | --- |
 | 開発ループ | `loop select` か `loop lap` が `answer_hold` で止まる（[loop.md](loop.md) の「止まる条件」） |
-| 1 スプリント | `supervise.py queue` がプランを `流さなかった` として `status: gate` と `metrics.answer_hold` を返す。`next` の `parallel.py park p1 --lane <レーン> --done <D>` を打つ。止まる手順なら `metrics.next` の自分のラッパーを止める 1 行を最後に打って終える。`metrics.cleared` が `true` なら停止は解けているので、`metrics.next` の `supervise.py queue --resume <D>` で続ける |
+| 1 スプリント | `supervise.py queue` がプランを `流さなかった` として `status: gate` と `metrics.answer_hold` を返す（ほかのプランが止まっていれば `status: stopped`）。`metrics.park` の `parallel.py park p1 --lane <レーン> --done <D>` を打つ（`next` にも載る。承認ゲートと同居したら `next` は report.md の提示の後にこの 1 行を続ける）。止まる手順なら `metrics.next` の自分のラッパーを止める 1 行を最後に打って終える。`metrics.cleared` が `true` なら停止は解けているので、`metrics.next` の `supervise.py queue --resume <D>` で続ける |
 
 ## 外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）
 
