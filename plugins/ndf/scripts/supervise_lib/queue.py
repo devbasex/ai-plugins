@@ -365,12 +365,13 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
-    nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
+    present = "承認ゲートの計画の report.md を読んで提示する"
+    nxt = present if status == "gate" else None
     metrics = {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)}
     if held:  # park の 1 行は status（止まった・承認ゲートの同居）に依らず metrics.park と next で渡す
         metrics["answer_hold"] = held
         metrics["park"] = park = _park_line(held, done_path)
-        nxt = f"{nxt}。続けて {park} を打つ" if gates else park
+        nxt = f"{present}。続けて {park} を打つ" if gates else park  # 止まったプランと同居しても提示の指示を落とさない
     return result("supervise-queue", status, summary, items, metrics, next=nxt)
 
 

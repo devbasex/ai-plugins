@@ -493,6 +493,21 @@ def test_park_writes_the_next_step_and_the_mark_then_returns_the_stop_line(env):
     assert ph.read_marks(main, "p1")["la"]["why"] == "boundary"
 
 
+def test_park_keeps_the_request_id_written_in_the_next_step(env):
+    main = env["main"]
+    hold_file(main, plan=True)
+    doc = handoff.paths_of(main, pp.load_valid_plan(main, "p1").lane("la").handoff_name())[0]
+    text = doc.read_text()
+    head = "## 次にやること"
+    assert head in text
+    doc.write_text(text.replace(head, f"{head}\n\nparallel.py await --from req-123\n", 1))
+    park(main)
+    park(main)
+    section = doc.read_text().split(head)[1].split("\n## ")[0]
+    assert "req-123" in section and section.count("queue --resume /d/done.json") == 1
+    assert section.index("queue --resume") < section.index("req-123")
+
+
 def test_park_after_the_hold_cleared_writes_nothing_and_returns_the_resume_line(env):
     main = env["main"]
     got = park(main)

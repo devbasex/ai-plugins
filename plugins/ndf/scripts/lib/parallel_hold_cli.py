@@ -33,11 +33,22 @@ def _lane_or_stop(main: Path, a, reply) -> pp.Lane:
 
 
 def _write_next(main: Path, lane: pp.Lane, command: str) -> None:
-    """引継ぎ文書の「次にやること」を続きの 1 行へ置き換える。"""
+    """引継ぎ文書の「次にやること」の先頭へ続きの 1 行を足す。
+
+    既存の本文は残す（承認ゲートの保留の手順が同じ節へ書いた続きのコマンドと依頼の id を、答えの後に
+    `parallel_lane.lane_waits` が読むため）。同じ 1 行が既にあれば足さない。"""
     path = handoff.paths_of(main, lane.handoff_name())[0]
     text = path.read_text(encoding="utf-8")
+    found = handoff_doc.find_section(text, handoff_doc.NEXT_STEP_SECTION)
+    if found is None:
+        return
+    body = text[found.body_start : found.body_end]
+    if command in body:
+        return
     fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", command)), default=0) + 1)
-    handoff.write_doc(path, handoff_doc.replace_body(text, handoff_doc.NEXT_STEP_SECTION, f"\n{fence}text\n{command}\n{fence}\n\n") or text)
+    rest = body.lstrip("\r\n")
+    block = f"\n{fence}text\n{command}\n{fence}\n\n"
+    handoff.write_doc(path, handoff_doc.replace_body(text, handoff_doc.NEXT_STEP_SECTION, block + rest) or text)
 
 
 def _clear(main: Path, a, reply) -> None:

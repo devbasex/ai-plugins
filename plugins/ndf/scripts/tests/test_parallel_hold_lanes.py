@@ -153,6 +153,15 @@ def test_the_park_line_is_kept_with_a_stopped_plan_or_a_gate(other, status, tmp_
     assert res["next"].startswith("承認ゲート") == (status == "gate")
 
 
+def test_the_park_line_follows_the_gate_presentation_even_with_a_stopped_plan(tmp_path):
+    from supervise_lib import queue as q
+
+    items = [{"plan": "a", "result": "止まった"}, {"plan": "c", "result": "関門"}, held_item()]
+    res = q._queue_result(items, 1, tmp_path / "done.json")
+    assert res["status"] == "stopped" and res["next"].startswith("承認ゲート")
+    assert res["metrics"]["park"] in res["next"] and "None" not in res["next"]
+
+
 def test_the_queue_flag_is_on_from_before_the_launch_until_after_the_close(queue, monkeypatch):
     import durable
     from supervise_lib import flow
