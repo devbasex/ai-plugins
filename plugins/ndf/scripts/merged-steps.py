@@ -232,15 +232,14 @@ def _update_main_dir(main_dir, add):
     return None
 
 
-def _cleanup_result(items, prs, pull_err):
-    """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
-    reclaim, reclaim_note = container_reach.reclaim_summary(items)
+def _cleanup_metrics(items, reclaim):
+    """記録から swept の印を外し、自分の分と掃除の分を数えた metrics を返す。"""
     # 値の一致でなく印で分ける（同じパスの kept が両方に並んでも、片方へ寄せない）
     marks = [i.pop("swept", False) for i in items]
     swept = [i for i, m in zip(items, marks) if m]
     own = [i for i, m in zip(items, marks) if not m]
     count = {k: sum(1 for i in own if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
-    metrics = {
+    return {
         "removed_worktrees": count["removed"],
         "deleted_branches": count["deleted"],
         "absent_branches": count["absent"],
@@ -250,26 +249,37 @@ def _cleanup_result(items, prs, pull_err):
         "swept_kept": sum(1 for i in swept if i["result"] == "kept"),
         **reclaim,
     }
+
+
+def _force_delete_gate(prs, need_force, summary, items, metrics):
+    """未マージのブランチの削除の承認資料を作り、gate の結果を返す。"""
+    names = [i["name"] for i in need_force]
+    path = approval_present(
+        TOOL,
+        "-".join(str(n) for n in prs),
+        title="未マージのコミットを持つブランチの削除",
+        targets=[{"url": f"{i['name']}（{i['sha'][:8]}）"} for i in need_force],
+        change=f"ブランチ {len(names)} 件",
+        judge=[(i["name"], i["reason"]) for i in need_force],
+        consent=[f"`git branch -D {n}` で消す" for n in names],
+        rollback="\n".join(f"- `git branch {i['name']} {i['sha']}`" for i in need_force),
+    )
+    return "gate", summary, items, metrics, path, "同意を得たら git branch -D " + " ".join(names)
+
+
+def _cleanup_result(items, prs, pull_err):
+    """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
+    reclaim, reclaim_note = container_reach.reclaim_summary(items)
+    metrics = _cleanup_metrics(items, reclaim)
     summary = (
-        f"作業ツリー {count['removed']} 件を外し、ブランチ {count['deleted']} 件を消した"
-        f"（残した {count['kept']} 件・止まった {count['stopped']} 件）{reclaim_note}"
+        f"作業ツリー {metrics['removed_worktrees']} 件を外し、ブランチ {metrics['deleted_branches']} 件を消した"
+        f"（残した {metrics['kept']} 件・止まった {metrics['stopped']} 件）{reclaim_note}"
     )
     if pull_err:
         return "stopped", pull_err, items, metrics, None, None
     need_force = [i for i in items if i["kind"] == "branch" and i["result"] == "stopped"]
     if need_force:
-        names = [i["name"] for i in need_force]
-        path = approval_present(
-            TOOL,
-            "-".join(str(n) for n in prs),
-            title="未マージのコミットを持つブランチの削除",
-            targets=[{"url": f"{i['name']}（{i['sha'][:8]}）"} for i in need_force],
-            change=f"ブランチ {len(names)} 件",
-            judge=[(i["name"], i["reason"]) for i in need_force],
-            consent=[f"`git branch -D {n}` で消す" for n in names],
-            rollback="\n".join(f"- `git branch {i['name']} {i['sha']}`" for i in need_force),
-        )
-        return "gate", summary, items, metrics, path, "同意を得たら git branch -D " + " ".join(names)
+        return _force_delete_gate(prs, need_force, summary, items, metrics)
     return "ok", summary, items, metrics, None, None
 
 
