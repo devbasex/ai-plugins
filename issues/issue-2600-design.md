@@ -88,6 +88,26 @@
 | 持ち主不明 | 名の形が契約のどのパターンにも当たらない作業の記録 | 追加（`ndf-workflow`） |
 | 閉じたループ | 片付けを済ませ、再開しないと決まった開発ループ。記録の状態は `closed` | 追加（`ndf-workflow`） |
 
+## 機能一覧
+
+| # | 機能 | 誰が使うか |
+| --- | --- | --- |
+| F1 | 契約の項目に持ち主・終わり・パス・残す名前を持たせ、欠けと契約外のパスを検査で落とす | NDF の開発者 |
+| F2 | スプリントのプランの置き場を固定し、外を指す `--out` を断る | conductor |
+| F3 | 周回を締めると、その周回の残す統計以外が消える | 開発ループ |
+| F4 | `mvv_changed` のループを次の `loop start` と棚卸しが片付ける | 開発ループ・棚卸し |
+| F5 | `loop close <名>` で再開で解けるループを閉じる | conductor・利用者 |
+| F6 | 並列の計画が `finished` になると記録が片付く | オーガナイザー |
+| F7 | ループの外のスプリントのまとめが最後まで通ると記録が片付く | conductor |
+| F8 | リリースのプランの最後のステップが承認資料を消す | リリースのプラン |
+| F9 | 実行計画を PR へ投稿してから消す | conductor |
+| F10 | 棚卸しのプランが終わった記録の一覧を出す | 棚卸しの AI |
+| F11 | Factory のランナーが新しい置き場を保存する | Factory |
+
+## 決定の記録
+
+決定の記録は [issue-2600-design-decisions.md](issue-2600-design-decisions.md) にある。
+
 ## 外部の調査
 
 | 種類 | 調べるか | 理由 |
@@ -109,7 +129,7 @@
 | --- | --- | --- | --- | --- |
 | PRD1 | Kubernetes の TTL-after-finished | 終わった Job を、完了か失敗の時点から一定の秒の後に消す。消えるのは持ち主の状態が終わった後である | 持ち主の状態を引き金にする形を採る | https://kubernetes.io/docs/concepts/workloads/controllers/ttlafterfinished/ （2026-11-07） |
 | PRD2 | Kubernetes の owner reference とガベージコレクション | 依存するものが持ち主を指し、持ち主が消えると連鎖して消える。持ち主の無いものも回収の対象になる | 持ち主の無いものを「持ち主不明」として一覧へ出す | https://kubernetes.io/docs/concepts/architecture/garbage-collection/ （2026-11-07） |
-| PRD3 | Argo Workflows の `ttlStrategy`・`podGC` | 完了から一定の秒の後に実行の記録を消し、Pod はより早く、完了と同時にも消せる | 重い部分（作業の置き場）を先に、記録の本体を後で消す 2 段を採る | https://raw.githubusercontent.com/argoproj/argo-workflows/main/docs/cost-optimisation.md （2026-11-07） |
+| PRD3 | Argo Workflows の `ttlStrategy`・`podGC` | 完了から一定の秒の後に実行の記録を消し、Pod はより早く、完了と同時にも消せる | 重い部分（作業の置き場）を先に、記録の本体を後で消す順を採る | https://raw.githubusercontent.com/argoproj/argo-workflows/main/docs/cost-optimisation.md （2026-11-07） |
 | PRD4 | Jenkins の `buildDiscarder` | 直近の実行の数で成果物とログを保持し、古いものを捨てる | 件数で切る形は採らない（再開で要る周回が件数で決まらない） | https://www.jenkins.io/doc/book/pipeline/syntax/ （2026-11-07） |
 | PRD5 | GitHub Actions の成果物の保持期間 | 成果物に保持期間を持たせ、期限で消す。消した成果物は戻せない | 戻せない削除である点を受け入れ、残す統計を先に決める | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/remove-workflow-artifacts （2026-11-07） |
 | PRD6 | Docker の `prune` | 使われていないものを種類ごとの命令で片付ける。ラベルで絞れる | ボリュームの一覧は compose のラベルで絞る | https://docs.docker.com/engine/manage-resources/pruning/ （2026-11-07） |
@@ -131,27 +151,11 @@
 
 調べた量: 候補 12 件・取得の試み 13 回。
 
-## 機能一覧
-
-| # | 機能 | 誰が使うか |
-| --- | --- | --- |
-| F1 | 契約の項目に持ち主・終わり・パス・残す名前を持たせ、欠けと契約外のパスを検査で落とす | NDF の開発者 |
-| F2 | スプリントのプランの置き場を固定し、外を指す `--out` を断る | conductor |
-| F3 | 周回を締めると、その周回の残す統計以外が消える | 開発ループ |
-| F4 | `mvv_changed` のループを次の `loop start` と棚卸しが片付ける | 開発ループ・棚卸し |
-| F5 | `loop close <名>` で再開で解けるループを閉じる | conductor・利用者 |
-| F6 | 並列の計画が `finished` になると記録が片付く | オーガナイザー |
-| F7 | ループの外のスプリントのまとめが最後まで通ると記録が片付く | conductor |
-| F8 | リリースのプランの最後のステップが承認資料を消す | リリースのプラン |
-| F9 | 実行計画を PR へ投稿してから消す | conductor |
-| F10 | 棚卸しのプランが終わった記録の一覧を出す | 棚卸しの AI |
-| F11 | Factory のランナーが新しい置き場を保存する | Factory |
-
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
-| 記録の項目（`plugins/ndf/contracts/files/*.json`） | 34 項目へ `owner`・`end` を足す。新しい項目（下の表）を足す |
+| 記録の項目（`plugins/ndf/contracts/files/*.json`） | 34 項目へ `owner`・`end` を足す。新しい項目（「新設する記録の項目」の章）を足す |
 | 契約の検査（`scripts/contracts_lib/model.py`・`extract_py.py`・`extract_sh.py`・`render.py`、`scripts/check-ndf-contracts.py`） | 欄の欠けを `ContractError` で落とす。`path-undeclared` を足す。一覧へ持ち主・終わり・パスの列を描く |
 | 片付けの核（新設 `plugins/ndf/scripts/lib/work_records.py`） | 契約の読み込み、対象の検査（I3・I4）、残す名前で消す、結果の組み立て。消す操作はここだけが持つ |
 | 一覧（新設 `plugins/ndf/scripts/lib/work_records_list.py`） | 置き場を走査し、終わりを判定して一覧を作る。読めない項目は「未確認」にする |
@@ -168,7 +172,20 @@
 | Factory のランナー（`factory/runner/src/state.ts`） | 保存の対象へ `.ndf/sprints` を足す |
 | 手順書（`handoff.md`・`loop.md`・`parallel.md`・`parallel-plan.md`・`waiting.md`・`development-workflow/SKILL.md`・`execution-plan.md`・`backlog-refinement/SKILL.md`・`issues/README.md`）と確定仕様（Factory の 3 本） | 置き場と片付けをスクリプトの呼び出しへ書き換える。消す操作の指示を残さない |
 
-### システムの文脈
+### 置き場所
+
+```text
+plugins/ndf/
+├── contracts/files/          # 既存 34 項目へ欄を足し、項目を新設
+├── scripts/
+│   ├── records.py            # 新設
+│   └── lib/
+│       ├── work_records.py       # 新設
+│       └── work_records_list.py  # 新設
+scripts/contracts_lib/        # 欄の検査と path-undeclared
+```
+
+## システムの文脈と配置
 
 ```mermaid
 graph LR
@@ -181,7 +198,9 @@ graph LR
 
 GitHub と Docker は変えられない外部の系で、読むだけである（コメントの投稿を除く）。Factory のランナーは同じ変更で保存の対象を変える。
 
-### 構成要素の関係
+実行の単位は既存のままで、新しいプロセスを増やさない。片付けは `sprint-state.py`・`parallel.py run`・`supervise.py queue`・`records.py` の各プロセスの中で同期で動く。触るのはメインディレクトリのファイルだけである。
+
+## 構成要素の関係
 
 ```mermaid
 graph TD
@@ -194,7 +213,7 @@ graph TD
     subgraph 実行時
         核[片付けの核]
         一覧[一覧]
-        入口[片付けの<br/>エントリポイント]
+        EP[片付けの<br/>エントリポイント]
     end
     subgraph 呼び出し元
         ループ[ループの記録]
@@ -205,32 +224,15 @@ graph TD
     検査 --> 項目
     核 --> 項目
     一覧 --> 核
-    入口 --> 一覧
-    入口 --> 核
+    EP --> 一覧
+    EP --> 核
     ループ --> 核
     並列 --> 核
     キュー --> 核
-    計画 --> 入口
+    計画 --> EP
 ```
 
 図に含めない要素: 引継ぎ文書・スプリント状態・テストの実行・待ち時間の調査・Factory のランナー・手順書（片付けの核を呼ばないか、呼ぶ関数が 1 つだけで関係が表の記述で足りる）。
-
-### 配置
-
-実行の単位は既存のままで、新しいプロセスを増やさない。片付けは `sprint-state.py`・`parallel.py run`・`supervise.py queue`・`records.py` の各プロセスの中で同期で動き、メインディレクトリのファイルだけを触る。
-
-### 置き場所
-
-```text
-plugins/ndf/
-├── contracts/files/          # 既存 34 項目へ欄を足し、下の表の項目を新設
-├── scripts/
-│   ├── records.py            # 新設
-│   └── lib/
-│       ├── work_records.py       # 新設
-│       └── work_records_list.py  # 新設
-scripts/contracts_lib/        # 欄の検査と path-undeclared
-```
 
 ## 構造
 
@@ -274,7 +276,7 @@ classDiagram
 | --- | --- | --- | --- |
 | `owner` | 文字列（列挙） | 許さない | 持ち主の種類: `loop`・`lap`・`parallel`・`sprint`・`plan`・`release`・`conductor`・`receiver`・`backlog`・`test-run`・`organizer`・`run` |
 | `end` | 文字列（列挙） | 許さない | 終わりの種類（下の表） |
-| `paths` | 文字列の配列 | 省ける | メインディレクトリからの相対の glob。省いた項目は `place` が `main` でないか、入れ物の項目の中にある |
+| `paths` | 文字列の配列 | 省ける | メインディレクトリからの相対の glob。省いた項目は `place` が `main` でないか、親ディレクトリの項目の中にある |
 | `keep` | 文字列の配列 | 省ける | 片付けの後も残すファイルのベース名の glob。省くと項目全体を消す |
 
 | `end` | 判定 | 片付ける者 |
@@ -286,11 +288,23 @@ classDiagram
 | `released` | 版のタグがある、または同じプラグインのより新しい版の承認資料がある | リリースのプラン |
 | `subject-closed` | 課題かマイルストーンが閉じた | 一覧で出し、AI が確かめて `handoff.py remove` |
 | `receiver-ended` | 受け手のループが閉じたか終わった | 一覧で出し、AI が確かめて `handoff.py remove` |
-| `container` | 入れ物の項目に従う | 入れ物の片付け |
+| `container` | 親ディレクトリの項目に従う | 親ディレクトリの片付け |
 | `temp` | 一時の置き場の掃除に従う（`run_state_kinds.KINDS`） | `run_state.py sweep` |
 | `never` | 続けて使う | 片付けない |
 
-新設の項目（受け入れ条件 2 の 6 種を含む）:
+既存の 34 項目は `end` を `container`（`place` が `main`・`state-dir`）か `temp`（`place` が `tmp`）にする。`owner` は親ディレクトリの持ち主を書く。
+
+### ループの記録
+
+`status` の値へ `closed` を足し、欄 `closed_at`（UTC の ISO 8601。空は「閉じていない」）を足す。上書きで失うのは周回の中の実行の詳細で、費用・秒・結果・承認ゲートは周回を締めるときに `loop.json` へコピーしてある（`close_lap`）。失ってよい理由は「残す統計」の定義と決定 3 にある。
+
+### 移行
+
+既存の `.ndf/tmp/` は自動で移さず、一覧に持ち主不明で出す。`loop close` と一覧の順に片付ける。
+
+## 新設する記録の項目
+
+この表は受け入れ条件 2 の 6 種を含む。
 
 | 名前 | `paths` | `owner` | `end` | `keep` |
 | --- | --- | --- | --- | --- |
@@ -309,13 +323,7 @@ classDiagram
 | `execution-plan-doc` | `issues/execution-plan-*.md` | `conductor` | `subject-closed` | — |
 | `issue-doc` | `issues/issue-*.md` | `conductor` | `subject-closed` | — |
 
-既存の 34 項目は `end` を `container`（`place` が `main`・`state-dir`）か `temp`（`place` が `tmp`）にする。`owner` は入れ物の持ち主を書く。
-
-### ループの記録
-
-`status` の値へ `closed` を足し、欄 `closed_at`（UTC の ISO 8601。空は「閉じていない」）を足す。上書きで失うのは周回の中の実行の詳細で、費用・秒・結果・承認ゲートは周回を締めるときに `loop.json` へ写してある（`close_lap`）。失ってよい理由は「残す統計」の定義と決定 3 にある。
-
-### 機能とデータの対応
+## 機能とデータの対応
 
 | 機能 | 周回 | ループの記録 | 引継ぎ文書 | 並列の計画 | スプリント | 承認資料 | 実行計画 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -327,10 +335,6 @@ classDiagram
 | F8 承認資料 | — | — | — | — | — | D | — |
 | F9 実行計画 | — | — | — | — | — | — | D |
 | F10 一覧 | R | R | R | R | R | R | R |
-
-### 移行
-
-既存の `.ndf/tmp/` は自動で移さず、一覧に持ち主不明で出す。`loop close` と一覧の順に片付ける。
 
 ## 入出力の契約
 
@@ -360,7 +364,7 @@ classDiagram
 | `sprint-state.py loop start` | `metrics.records` と、片付けられなかったループの `items`（`{loop, reason}`）が増える。閉じたループの名前は 1 で断る | 互換 |
 | `sprint-state.py` の周回を締める副命令 | `metrics.records` が増える | 互換 |
 | `sprint-state.py <副命令> <状態>` | `/` を含まず `.json` で終わらない引数を `.ndf/sprints/<名>/sprint-state.json` へ解決する。`init` 以外はファイルが無ければ錠を取らずに断る | 互換 |
-| `handoff.py` | `path`・`init`・`next`・`check`・`remove` が `parallel-<名>`・`notice-to-<名>`・`notice-version-<名>` を受ける。`find` は今の 4 種に限り、`-lane` を候補にしない | 互換 |
+| `handoff.py` | `path`・`init`・`next`・`check`・`remove` が `parallel-<名>`・`notice-to-<名>`・`notice-version-<名>` を受ける。`find` は `issue-`・`milestone-`・`sprint-`・`loop-` の 4 種に限り、`-lane` を候補にしない | 互換 |
 | `test-run.py` | ログの置き場が `<root>/.ndf/test-run/` になり、置き場の中へ `*` の 1 行の `.gitignore` を置く | 結果の JSON の `log` のパスだけが変わる |
 
 ## 処理の流れ
@@ -372,7 +376,7 @@ sequenceDiagram
     participant S as 周回の締め
     participant R as ループの記録
     participant W as 片付けの核
-    S->>R: 周回の値を写して締める
+    S->>R: 周回の値をコピーして締める
     S->>R: 境の判定を書く
     S->>W: 締まった周回を渡す
     W->>W: 保留と待ちの周回を飛ばす
@@ -386,6 +390,14 @@ sequenceDiagram
 ```
 
 片付けは `after_close` と `stop_and_report` の書き込みの後に、そのループの締まった周回をすべて見る。消し残しと、答えが入って待ちを外れた周回が次の締めで拾われる。周回の締めの結果の終了コードは変えない。
+
+### 並列の計画・スプリント・リリース
+
+- **並列の計画**: `_finish_or_hold` が `step_finish` を呼ぶ時点で、全レーンが止まり、答えの無い提示と問いと保留の周回が無い（`_run_finished`）。`step_finish` の最後で片付け、結果と消せなかったパスを終わりの要約へ載せる。例外は要約へ理由を載せて進む。`stop` で終えた計画は片付けず、一覧に出す
+- **スプリント**: `new close` が既定の置き場のとき、まとめのプランへ欄 `片付け`（スプリントの置き場）を書く。`supervise.py queue` は `write_done` の直前に、すべての項目が `完了` なら片付ける。先に片付けるのは、`wait` が done を見た時点で最終の状態にするためである。周回の中の `new close` には欄を書かない
+- **リリース**: 本番のプランで `cleanup` の `next` を `drop-approval` にする。`on_fail` を置かず、`records.py` は 0 で返る。承認を待つ間はこのステップへ届かない（ステップの順序で満たす）
+
+## ループの片付けの流れ
 
 ### ループを片付ける
 
@@ -418,12 +430,6 @@ stateDiagram-v2
 
 `running` から `closed` へは移らない。`closed` から他の状態へは移らない。
 
-### 並列の計画・スプリント・リリース
-
-- **並列の計画**: `_finish_or_hold` が `step_finish` を呼ぶ時点で、全レーンが止まり、答えの無い提示と問いと保留の周回が無い（`_run_finished`）。`step_finish` の最後で片付け、結果と消せなかったパスを終わりの要約へ載せる。例外は要約へ理由を載せて進む。`stop` で終えた計画は片付けず、一覧に出す
-- **スプリント**: `new close` が既定の置き場のとき、まとめのプランへ欄 `片付け`（スプリントの置き場）を書く。`supervise.py queue` は `write_done` の直前に、すべての項目が `完了` なら片付ける。先に片付けるのは、`wait` が done を見た時点で最終の状態にするためである。周回の中の `new close` には欄を書かない
-- **リリース**: 本番のプランで `cleanup` の `next` を `drop-approval` にする。`on_fail` を置かず、`records.py` は 0 で返る。承認を待つ間はこのステップへ届かない（ステップの順序で満たす）
-
 ## 非機能の実現方式
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
@@ -433,10 +439,6 @@ stateDiagram-v2
 | 移行性 | 既存の残骸は `loop close` と一覧の順に片付けられる。旧い `.ndf/tmp/` の中身を自動で移さない。Factory の保存済みの状態に含まれる `.ndf/tmp` は復元できる | `.ndf/tmp` を `STATE_PATHS` に残し、在るときだけ保存する。一覧が持ち主不明で出す | Factory のテストで `.ndf/tmp` を含む保存を復元する |
 | セキュリティ | 片付けの対象はメインディレクトリの契約に載るパスに限り、`..` と絶対パスを含む名前を断る。シンボリックリンクはリンク自体だけを消し、リンク先をたどらない | 対象の検査を `work_records.py` の 1 か所に置く。ループの名は既存の `loop_dir` の検査を通す。消すときは `os.lstat` で見て、リンクは `unlink` にする | `..` の名・リンク入りのディレクトリのテスト |
 | システム環境 | ai-plugins の形に固定しない。ベースブランチやデプロイの手段に依存せず、`.ndf/` を持つどのリポジトリでも同じに動く（Value 6） | 判定に使うのは契約・`loop.json`・`git ls-files`・タグの名だけにする。タグの形は `release_version` の関数を使う | `.ndf/` だけを持つ一時のリポジトリでテストする |
-
-## 決定の記録
-
-分量のため [issue-2600-design-decisions.md](issue-2600-design-decisions.md) に分けた。
 
 ## テスト設計
 
@@ -452,7 +454,7 @@ stateDiagram-v2
 | 受け入れ条件 8 | `handoff.py path` が 2 つの名で 0。`find` は `notice-to-*` を返さない | 名の規則を 1 つにまとめる |
 | 受け入れ条件 9 | 完了の周回を締めると `report.md` だけが残る | 片付けの呼び出しを外す |
 | 受け入れ条件 10・I5 | 保留の周回と、答えの無い待ちが指す周回の中身が減らない。`loop answer` が動く | 待ちの行の判定を外す |
-| 受け入れ条件 11 | 別の名の `loop start` で `mvv_changed` のループが残す統計だけになり、3 種の文書が消える | 片付けを同じ名だけにする |
+| 受け入れ条件 11 | 別の名の `loop start` で `mvv_changed` のループが残す統計だけになり、引継ぎ文書と履歴とレーン用の文書が消える | 片付けを同じ名だけにする |
 | 受け入れ条件 12・I6 | 再開で解ける各条件のループが `loop start` と `list --sweep` で減らない | 判定を `stopped` にする |
 | 受け入れ条件 13・I8 | `loop close` で同じ形に片付き、`running` は断る。閉じた名の `loop start` は断る | `closed` の判定を外す |
 | 受け入れ条件 14・I7 | 進行中・保留・待ちの 3 つのどれかがあるとファイルが減らず `items` に理由が出る | 3 つのどれかの判定を外す |
@@ -462,7 +464,7 @@ stateDiagram-v2
 | 受け入れ条件 18 | 本番のプランの最後に `drop-approval` があり、`-parallel-` の資料も消える | `cleanup` の `next` を戻す |
 | 受け入れ条件 19 | 承認ゲートで止まったプランで承認資料が残る | ステップを承認の前へ動かす |
 | 受け入れ条件 20・I11 | 投稿の後に消える。投稿の失敗で残り 0 以外 | 消す順を入れ替える |
-| 受け入れ条件 21 | 棚卸しのプランに一覧のステップがあり、結果に 4 つの欄が並ぶ | ステップを外す |
+| 受け入れ条件 21 | 棚卸しのプランに一覧のステップがあり、結果にパス・持ち主・大きさ・理由の 4 つの欄が並ぶ | ステップを外す |
 | 受け入れ条件 22 | 2026-11-07 の `.ndf/handoff/` と同じ名前で、終わった・持ち主つき・持ち主不明に分かれる | パターンの順を崩す |
 | 受け入れ条件 23 | 閉じた課題の追跡文書が並ぶ。`gh` が失敗すると `unverified` | 追跡ファイルを走査から外す |
 | 受け入れ条件 24 | worktree の消えた割り当てのコンテナとボリュームが並ぶ。接続できないと `unverified` で最後まで出る | 例外で一覧が止まる |
@@ -483,8 +485,8 @@ stateDiagram-v2
 
 | 項目 | 内容 |
 | --- | --- |
-| 自動削除の規則の承認（要求の未決 2） | 作業の記録の削除は追跡外で git では戻せず、共通原則の C4 に当たる扱いにする。決定 2・3・5・6 の規則を設計承認ゲートで人が見る。MVV 判定に任せない |
-| ボリュームの回収（要求の未決 1） | 一覧に並べるところまでとし、消す手段は #2660 へ寄せる（決定 15）。#2660 の本文へボリュームの語を足すかは設計承認ゲートで決まる |
+| 自動削除の規則の承認（要求の未決 2） | 作業の記録の削除は追跡外で git では戻せず、共通原則の C4 に当たる扱いにする。決定 2・3・5・6 の規則（持ち主の状態で消す・周回の締めで片付ける・自動の片付けを `mvv_changed` に絞る・答えの無い待ちの行が指す周回を残す）を設計承認ゲートで人が見る。MVV 判定に任せない |
+| ボリュームの回収（要求の未決 1） | 一覧に並べるところまでとし、消す手段は #2660（worktree を消した後もテスト環境の割り当てとコンテナが残る）へ寄せる（決定 15）。#2660 の本文へボリュームの語を足すかは設計承認ゲートで決まる |
 | スプリントの分け方（要求の未決 3） | `implementation-plan` が案を出す |
 | 進行中の周回を持つ `mvv_changed` のループ | 2026-11-07 のメインディレクトリで 9 本のうち 3 本（`lcarul` は進行中の周回、`lcarul2` は待ちの行、`lroot4` はその両方と保留の周回）が I7 に当たり、自動では減らない。`mvv_changed` は再開しないため、進行中の周回を解く手段が要るかは未確認。一覧に理由つきで出して人が判断する |
 | 周回の中で読まれるファイルの網羅 | 締めた周回を読む箇所は、周回の欄（`state_path`・`out`・`dir`・`dev_plan`・`prod_plan`・`dones`）の検索で `apply_answer`（`sprint_loop.py:447`）だけと確かめた。文字列を組み立てて読む経路は検索に掛からない。実装のテストで確かめる |
