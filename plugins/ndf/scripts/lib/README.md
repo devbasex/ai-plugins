@@ -177,6 +177,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 | 2 | `stopped` | 読めない・呼び出しの誤り。「一致」「0 件」と読まない |
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
 | 4 | `stopped` | PR がベースブランチと衝突している（`merge-when-green`・`promote`。値の持ち主は `step_result.py` の `EXIT_BASE_CONFLICT`。#1917） |
+| 5 | `stopped` | CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。値の持ち主は `step_result.py` の `EXIT_CD_FAILED`。#2623） |
 | 6 | `stopped` | 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた。「0 件」「一致」と読まない（値の持ち主は `step_result.py` の `EXIT_INCOMPLETE`） |
 | 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |

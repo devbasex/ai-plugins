@@ -1,0 +1,35 @@
+name: Release CD
+
+# main へ入ったコミットの版で、リリースタグと GitHub Release のうち足りないものを作る。
+# 版上げは release の工程が Pull Request の中で行い、ここでは行わない。判定は release-steps.py publish が持つ。
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cd
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Publish the tag and the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: python3 plugins/ndf/scripts/release-steps.py publish --root . --revision "$GITHUB_SHA"

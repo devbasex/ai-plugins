@@ -146,7 +146,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `start [<名>] [--milestones] [--budget-*] [--no-goal]` | `loop` 節・`auto` 節・プロジェクト MVV・記録 | `status`（`new` / `resumed` / `in_lap`）・`next`（`in_lap` は引継ぎ文書の「次にやること」を指す。`resumed` は `loop select` か、止まった理由ごとの続き） | 1 = 使ってよい条件に当たらない（`items` に理由、`next` に `/ndf:development-workflow #<課題>`。記録を作らない）/ 3 = 止まった理由が解けていない |
 | `select <名>` | `upkeep.py rank`（その場で打つ）・マイルストーンの説明・記録・並列の計画の依頼の答え（待たずに読む） | `status: selected`・`selected`・`excluded`・`milestone`・`rank_digest`（候補 0 件で見直しを挟むときは `status: review_first`・`next`。答えの届いた保留の周回があれば `status: finish`・`lap`・`pipeline`） | 1 = 進行中の周回がある・`rank` が 0 と 20 以外を返した / 3 = 止まったまま・境の判定で止まった・`no_issue` / `outside_mvv` / `waiting_only` |
 | `exclude <名> <課題> --reason <文>` | 選定の後・`sprint` の前の進行中の周回 | `select` と同じ形（選定をやり直す） | 1 = スプリントを組む前の周回が無い / 3 = すべて外れた（その周回を取り下げ、除外の行は残す） |
-| `sprint <名> --mode M --dev V [--prod V] [-- <new sprint に足す引数>]` | 進行中の周回の選定・前の周回の `refine.deferred` | `status: sprint`・`state_path`・`out`・`manifest`・`close_command`・`queue`・`pipeline`（出し直しの指摘を持つ課題は、すべてのループの記録から回を集めて `<周回のディレクトリ>/revise-<課題>.json` へ書き、`new sprint --revise-note` で渡す。読めなかったループは `items` に `skipped_loop` で出る） | 1 = 進行中の周回が無い・設計承認ゲートの後の周回 / 3 = `init`・`new sprint`・`new close` のどれかが断った（`refused`） |
+| `sprint <名> --mode M [--dev V] [--prod V] [-- <new sprint に足す引数>]`（`--dev` はリリースの経路が版数を要るときだけ要る） | 進行中の周回の選定・前の周回の `refine.deferred` | `status: sprint`・`state_path`・`out`・`manifest`・`close_command`・`queue`・`pipeline`（出し直しの指摘を持つ課題は、すべてのループの記録から回を集めて `<周回のディレクトリ>/revise-<課題>.json` へ書き、`new sprint --revise-note` で渡す。読めなかったループは `items` に `skipped_loop` で出る） | 1 = 進行中の周回が無い・設計承認ゲートの後の周回 / 3 = `init`・`new sprint`・`new close` のどれかが断った、または経路が版数を要るのに `--dev` が無い（`refused`） |
 | `gate <名> --done <D>` | 承認ゲートで止まった done・`mvv-gate.jsonl`・スプリント状態 | `status: continue`・`gate: 1`・`waiting`・`pipeline`（残りで続く）、または周回を締めて `ndf_next` | 1 = 組んだ周回が無い・done に承認ゲートが無い / 3 = `gate2_returned`・`mvv_changed`・続きを組めない（`refused`）・締めた後の境の判定 |
 | `answer <名> <課題> --approved\|--rejected\|--revise --note <F> [--pr N]` | 答えの無い人の判断待ちの行 | `status: answered`（`--revise` は行に `note` と `revise_count` を書き、課題の本文の節 `## 出し直しの指摘の履歴` へ 1 回分を追記する） | 1 = 待っていない課題・指摘ファイルを読めない |
 | `finish <名> <周回> --done <D>` | 保留の周回・残りの工程の done | `lap` と同じ（周回を `完了` か `失敗` で締め直す。質問待ちの続きがリリースの依頼で止まれば `リリース待ち` へ移す） | 1 = 保留の周回でない（締め直しは 1 回だけ） / 3 = 境の判定で止まった |
@@ -202,7 +202,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 
 | 打つもの | 契約 |
 | --- | --- |
-| `sprint-state.py init <state> --name <名>-<n> --pace auto --issue ... --dev V --prod V --goal <再開のコマンド> [--mvv mvv.md --milestone M]` | `--prod` を省けば開発版の接尾辞を外した版 |
+| `sprint-state.py init <state> --name <名>-<n> --pace auto --issue ... [--dev V --prod V] --goal <再開のコマンド> [--mvv mvv.md --milestone M]` | `--prod` を省けば開発版の接尾辞を外した版。`--dev` を受けなかった周回は版を渡さない |
 | `supervise.py new sprint --pace auto --issue <選んだ課題> --design <承認済みでない課題> [--designed <approved の課題>] ... [<-- の後の引数>]` | `loop answer --approved` で答えた課題は設計のプランを作らず、設計の結果のステージが設計 PR の設計の結果を読む |
 | `supervise.py new close --pace auto --issue <選んだ課題> --state <state> --loop <名> --lap <n> [--carry <前の周回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 振り返り → 課題を閉じる → 棚卸し。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
 
@@ -329,7 +329,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | `n` / `sprint` / `dir` / `state_path` / `out` / `manifest` | 番号・スプリントの名前（`<ループ名>-<n>`）・周回のディレクトリ・状態ファイル・プランの出力・マニフェスト |
 | `milestone` / `rank_digest` / `selection[]` | 選んだマイルストーン・選定に使った `rank` の digest・`{number, milestone, rank, decision: 選んだ\|外した, reason}` |
-| `mode` / `versions` | conductor が決めたモードと `{dev, prod}` |
+| `mode` / `versions` | conductor が決めたモードと `{dev, prod}`（経路が版数を要らなければ空） |
 | `sprint_command` / `close_command` / `dones[]` / `prod_plan` / `gate2_plan` / `issues_kept` | 打ったコマンド・done のパス・本番のプラン・リリース承認ゲートで止まった計画・設計承認ゲートの後に残した課題 |
 | `gates[]` | 承認ゲートの判定の写し（`{name, by, verdict, basis, pr, at}`） |
 | `retro` / `refine` | 振り返りの置き場（まとめのプランの報告）・棚卸しの結果 `{report, rank_changes, deferred[]}`（upkeep の記録の `candidates.json`・`rank.json` から） |

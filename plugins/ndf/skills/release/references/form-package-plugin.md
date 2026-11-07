@@ -40,10 +40,11 @@
 触れれば MAJOR、無ければ PATCH である。リリース承認ゲートで上げ幅を変えるときは、承認の前に
 `changed-plugins --approval <承認資料> --set <名前>=<上げ幅>` で表を書き直す（表を手で直さない）。
 
-**本番のリリースプランは、リリース（`release`）の後に `record` のステップで本番のリリースの PR
-（`release/v<版>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `record` → `verify` →
-`cleanup` で、`record` は `release-steps.py record` を打つ。タグと GitHub Release が無ければ書かずに止まり、同じ記録が
-既にあれば書かない。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、デプロイはやり直さない。書けたら
+**本番のリリースプランは、リリース（`release`）の後に `cd-result` で CD の結果を読み、`record` のステップで本番のリリースの PR
+（`release/v<版>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `cd-result` → `record` → `verify` →
+`cleanup` で、`record` は `release-steps.py record` を打つ。本番チャネルへ自動で届く行が無ければ `cd-result` は `none` を書き、記録に CD の行は入らない。
+タグと GitHub Release を CD が作ると宣言した行（`publishes_release`）があれば、その存在の照会は CD の結果に置き換わる。それ以外でタグと GitHub Release が無ければ書かずに止まり、同じ記録が
+既にあれば書かない。CD の結果が失敗なら `段階: 反映失敗` を書いて終了コード 5 で止まる。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、デプロイはやり直さない。書けたら
 本番のリリースの PR がプランの報告の `Pull Request` に載り、まとめの `close` ステップが `--record-pr` に受け取る。
 開発版のプランは記録を書かない。
 
@@ -223,6 +224,15 @@ rm -rf "$ISO"
 
 ### リリースタグを打つ
 
+**公開の処理は `release-steps.py publish --revision <SHA>` が持つ。** `--revision` のコミットの `plugin.json` の版で、リリースタグと
+GitHub Release（題は `<プラグイン> v<版>`、本文は変更履歴の版の節、Latest）のうち足りないものを作り、そろっていれば何も変えない。
+版に接尾辞があるとき、同じ名前のタグが別のコミットにあるときは何も作らず 1 で終わり、既存のタグを書き換えない。
+CD のワークフローはこのコマンドを呼び、CD を外したときは手元で同じコマンドを打つ。
+
+`delivery` の行が `publishes_release: true` なら CD が作り、無ければ `release --channel prod` が同じ処理で作る。
+
+手で打つときの形:
+
 ```bash
 claude plugin tag <アーティファクトのディレクトリ> --dry-run   # 打つ内容を確認する
 claude plugin tag <アーティファクトのディレクトリ> --push      # {名前}--v{版} を作って送る
@@ -253,6 +263,11 @@ git rev-parse HEAD                            # 送ったコミット
 | --- | --- | --- |
 | 取得元ごとタグへ固定 | `marketplace add <owner>/<repo>@<名前>--v<版>` | **同じ取得元の他のプラグインも過去の状態になる** |
 | 対象だけを固定 | 別名のマーケットプレイスを 1 つ作り、`git-subdir` で対象のパスと `ref` / `sha` を直接指す | 利用者が定義ファイルを持つ必要がある |
+
+`delivery` の行が `publishes_release: true` のリポジトリでは、CD を外す手順も承認資料の「取り消しの手段」へ書く。
+ワークフローを無効にし、`.ndf/project.json` の `delivery` を手動の行へ戻し、手元で
+`python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <SHA>` を打つ。
+この手順はリリースタグと GitHub Release の作り方を戻すもので、利用者へ届いた版は戻らない。
 
 ```json
 {"name": "<別名>", "owner": {"name": "<所有者>"},

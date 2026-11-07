@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | 1 | `$SS loop start <名> [--milestones ...] [--budget-* ...]` | 1 なら断った理由と 1 スプリントの起動の形（`metrics.next`）を示して終える。3 なら下の「止まったとき」。`in_lap` なら引継ぎ文書 `loop-<名>` の「次にやること」から続ける |
 | 2 | `$SS loop select <名>` | 選んだ課題（`metrics.selected`）のモードを判定し（手順 2）、版を決める（`release` の規則）。`auto` が許さないモード・MVV に反する疑いの課題は `$SS loop exclude <名> <課題> --reason <理由>` で外す（選定をやり直す） |
-| 3 | `$SS loop sprint <名> --mode <モード> --dev <開発版> [--prod <本番の版>] [-- <new sprint に足す引数>]` | 判断は無い。返った `metrics.pipeline` をそのまま流す |
+| 3 | `$SS loop sprint <名> --mode <モード> [--dev <開発版>] [--prod <本番の版>] [-- <new sprint に足す引数>]` | 判断は無い。返った `metrics.pipeline` をそのまま流す。`--dev` は経路が `release.form` の雛形で組むときだけ要る |
 | 4 | `metrics.pipeline`（`supervise.py queue ... --done <D>` → `wait <D>` → `loop lap <名> --done <D>`）。`wait` と並べて `metrics.research`（待ち時間の調査）を背景で打つ | `wait` が attention を返したら、今の `supervise.py` の手順で扱う。調査の結果は読まない（見直しが読む） |
 | 5 | `loop lap` の結果 | 0 で `metrics.ndf_next` があれば、それを出してセッションを切る。0 で `metrics.pipeline` があれば（設計承認ゲートで課題を外した続き）それを流す。3 なら下の「止まったとき」 |
 | 2' | `loop select` が `status: finish` を返した | 答えの届いた保留の周回（`metrics.lap`）の残りの工程。新しい周回を始めず、`metrics.pipeline`（残りの queue → `wait` → `loop finish <名> <周回> --done <D>`）をそのまま流す。`loop finish` の結果は手順 5 と同じに扱う |

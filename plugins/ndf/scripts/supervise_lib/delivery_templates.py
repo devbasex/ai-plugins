@@ -14,7 +14,7 @@ from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.release_templates import MVV_NOTE, judge_record_step, mvv_gate_steps
-from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step, reject_step
+from supervise_lib.verify_steps import CD_FAILED_STOP, CD_RESULT_FILE, MARGIN_FLOOR, cd_result_step, handoff_step, reject_step
 
 
 VERIFY_MATERIAL = "{state_dir}/work/approval-verify.md"  # verify-facts が書く承認資料（#1457）
@@ -56,6 +56,28 @@ def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dic
     )
 
 
+def record_step(repo: str, how: str) -> dict:
+    """昇格・直接のマージの経路のリリース記録のステップ。`how` は `record` の経路の引数。CD の結果が失敗なら 5 で止まる。"""
+    return {
+        "id": "record",
+        "type": "run",
+        "stage": "デプロイ",
+        "timeout": 300,
+        "cwd": repo,
+        "cmd": f"{STEPS_PY} record {how} --prs {QUEUE_PRS} --cd-result {CD_RESULT_FILE}",
+        "pr_from": "release_pr_url",
+        "on_exit": dict(CD_FAILED_STOP),
+        "on_fail": "judge-record",
+        "next": "end",
+    }
+
+
+def plan_cd_result(a, repo: str, production: str, condition: dict | None = None) -> dict:
+    """ベースブランチが本番チャネルの CD の形（昇格のプランが無い）のプラン: cd-result → record --merged（#2623 の決定 9）。"""
+    steps = [cd_result_step(repo, production, None), record_step(repo, f"--merged --base {shlex.quote(production)}"), judge_record_step()]
+    return release_plan(a, repo, "リリース（CD の結果）", RULE_CD_RESULT, steps, condition)
+
+
 @dataclass(frozen=True)
 class PromoteParams:
     """昇格のプランに固有の入力。mvv はスプリントの状態（fast / auto）、production は本番チャネル、verify は導入の確認のコマンド。"""
@@ -68,8 +90,9 @@ class PromoteParams:
 def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromoteParams(), condition: dict | None = None) -> dict:
     """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、リリース承認ゲートの後にマージする。後片付けはしない（head はベースブランチ）。
-    マージの後に record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、その PR を計画の
-    Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進む。
+    マージの後に cd-result が CD の結果を読み、record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、
+    その PR を計画の Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進み、
+    CD の結果が失敗なら record が書いた後に止まる（#2623）。
 
     - normal（`mvv` 無し）: promote（承認の引数無し。昇格の承認資料 PROMOTE_MATERIAL へ先端を載せてリリース承認ゲートで終える）→
       promote-approved（`--from` でだけ入る。PROMOTE_MATERIAL の承認したコミットのときだけマージする。#2104）
@@ -90,20 +113,11 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
         "stage": "デプロイ",
         "timeout": timeout,
         "cmd": promote + wait + f" --approved-from {PROMOTE_MATERIAL} --gate-approved user",
-        "next": "record",
+        "next": "cd-result",
     }
     record = [
-        {
-            "id": "record",
-            "type": "run",
-            "stage": "デプロイ",
-            "timeout": 300,
-            "cwd": repo,
-            "cmd": f"{STEPS_PY} record --promote --head {shlex.quote(head)} --base {shlex.quote(base)} --prs {QUEUE_PRS}",
-            "pr_from": "release_pr_url",
-            "on_fail": "judge-record",
-            "next": "end",
-        },
+        cd_result_step(repo, base, head),
+        record_step(repo, f"--promote --head {shlex.quote(head)} --base {shlex.quote(base)}"),
         judge_record_step(),
     ]
     if not mvv:
@@ -123,7 +137,7 @@ def _promote_steps_normal(promote: str, wait: str, timeout: int, approved: dict,
             "timeout": timeout,
             "cmd": promote + wait + f" --out {PROMOTE_MATERIAL}",
             "gate_next": "end",
-            "next": "record",
+            "next": "cd-result",
         },
         approved,
         *record,
@@ -162,7 +176,7 @@ def _promote_steps_mvv(
             "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
             "on_fail": "handoff",
             "gate_next": "end",
-            "next": "record",
+            "next": "cd-result",
         },
         approved,
         *record,
@@ -212,6 +226,8 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
 RULE_GATE_2 = "本番のデプロイの前のリリース承認ゲート。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
 
 RULE_VERIFY = "開発版のチャネルへの反映の後の導入の確認。落ちたら直さずに止める。"
+
+RULE_CD_RESULT = "本番チャネルへのマージの後に CD の結果を読み、リリース記録へ残す。結果が失敗なら記録を書いて止まる。"
 
 RULE_PROMOTE = (
     "昇格の Pull Request のマージは本番系への反映で、リリース承認ゲートに当たる。承認の無いマージは merged-steps.py が止める。"

@@ -334,7 +334,7 @@ stateDiagram-v2
 | 止まったレーンの保留の周回が残る | I11 を満たした時点で、`released` を受けたのにまとめを流していない保留の周回がある | `action: held` で一時レーン（`--parallel-helper <計画名> pending <ループ名>`）を 1 本ずつ起こし、流し終えてから終える |
 | リリースの途中の `stop` | 一時レーンが動いていて `settle` がまだ | `settle` が届くまで待ってから `stopped` で終える。`--force` は待たずに一時レーンも止め、本番のプランの状態ディレクトリを残す |
 | 複数のレーンがメインディレクトリで git を動かす | — | 後片付け・worktree の作成・メインディレクトリの追従を `<メインディレクトリ>/.git/ndf-main.lock` の排他で 1 本ずつにする（`merged_lib/main_lock.py`・`worktree-session.sh`） |
-| `main` へのマージの後にリリースが止まる | — | `release-steps.py release` が、マージ済みならマージを飛ばし、無いタグと GitHub Release だけを作って続ける |
+| `main` へのマージの後にリリースが止まる | — | `release-steps.py release` が、マージ済みならマージを飛ばし、無いタグと GitHub Release だけを作って続ける（`publishes_release` の行があれば CD が作るため、ここでは作らない） |
 | 耐久の記録が読めない・消えた | `run` が `DurableError` | `run` が 2 で止まる。計画は新しい計画名で始め直す。レーンは計画に属さなくなり（I12）、今の本番のプランを流す |
 | 同じ課題で設計の「直して出し直す」が続く | `loop answer --revise` が人の判断待ちの行へ `revise_count`（その課題の「直して出し直す」の回数）を書く | 回数を記録するだけで、問いの選択肢は変えない |
 

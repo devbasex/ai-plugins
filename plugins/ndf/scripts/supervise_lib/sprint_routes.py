@@ -11,7 +11,7 @@ from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl
 from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
-from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_gate_2, plan_promote, plan_verify
+from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_cd_result, plan_gate_2, plan_promote, plan_verify
 from supervise_lib.release_templates import RELEASE_FORMS, material_path
 from supervise_lib.verify_steps import plan_limits
 
@@ -29,6 +29,23 @@ def dev_channel_of(a) -> delivery.DevChannel:
 
 
 MANUAL_RELEASE = "/ndf:release"
+CD_RESULT_STAGE = "CD の結果"
+
+
+def with_cd_guidance(a, head: dict) -> tuple[dict, list[dict]]:
+    """目録の頭へ CD の案内を載せ、(頭, 結果の items に足す並び) を返す。読むだけで、ステージにも終了コードにも効かない（I3）。
+    `documentation` の提出と、宣言を読んでいない経路では出さない（I7）。"""
+    decl = getattr(a, "delivery", None)
+    got = None if decl is None or getattr(a, "mode", None) == "documentation" else delivery.cd_guidance(decl)
+    return ({**head, "CD の案内": got.as_item()}, [got.as_item()]) if got else (head, [])
+
+
+def direct_production(a, rs: list) -> str | None:
+    """ベースブランチへのマージがそのまま本番系へ届く形の本番チャネル（無ければ None）。昇格のプランが無く、記録を書く主体が要る。"""
+    decl = getattr(a, "delivery", None)
+    production = decl.production if decl else None
+    hit = any(r.stage == delivery.STAGE_MERGED_BY_CHECK and r.production is not False and r.branch == production for r in rs)
+    return production if production and hit else None
 
 
 def apply_routes(a) -> None:
@@ -107,6 +124,7 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     """雛形で組まない経路のステージ（#1336）。昇格の経路（promote）があれば「本番」（昇格のプラン）を、手で届ける経路
     （manual）があれば「リリース」（手で行う）をこの順に置く。fast / auto（mvv あり）では、昇格のプランの先頭で導入の確認を
     走らせ、昇格が無くベースブランチへのマージで届く経路（merged-by-check）があれば「導入の確認」のステージを置く（#1457）。
+    その経路のブランチが本番チャネルなら、続けて「CD の結果」のステージを置く（#2623 の決定 9）。
     normal の merged-by-check と、届けない経路（none）はステージを置かない。"""
     if mvv and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION:
         return manual_production_waves(a, repo, then_of, mvv, condition)
@@ -125,6 +143,11 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     elif verify:
         wave = {"name": "導入の確認", "plans": {"verify": plan_verify(a, repo, verify, condition)}, "then_of": then_of}
         if note:
+            wave["note"] = note
+        waves.append(wave)
+    if not promote and (production := direct_production(a, rs)):
+        wave = {"name": CD_RESULT_STAGE, "plans": {"cd-result": plan_cd_result(a, repo, production, condition)}, "then_of": then_of}
+        if note and not waves:
             wave["note"] = note
         waves.append(wave)
     if any(r.stage == delivery.STAGE_MANUAL for r in rs):
