@@ -22,6 +22,8 @@
   実行時の探し方（作業ディレクトリの `checkout_home`）と同じ規則である。作業ツリーの外で打てば移さない。移し先に同じ名前が
   あるものは旧に残す。移行の前の queue は `--resume` で続けられない（耐久の記録の鍵と中の ID が旧の置き場のパスから
   できている）。新しく流す
+- `XDG_STATE_HOME` を指定していれば、旧の版が XDG を見ずに `~/.local/state/ndf` へ書いていた台帳（`FIXED_KINDS`）だけを
+  `$XDG_STATE_HOME/ndf` へ足し合わせる（ほかは旧の版も XDG の下に書いていた）。`NDF_STATE_HOME` を指定していれば移さない
 - 何度打ってもよい（移すものが無ければ何もしない）
 
 シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_user_state_home` にある。
@@ -52,6 +54,16 @@ USER_KINDS = (
     "stages",
     "estimate",
     "test-run",
+)
+# 旧の版が XDG_STATE_HOME を見ずに固定の `~/.local/state/ndf` へ書いていた台帳（`ask_ledger.ask_ledger_path` と
+# `project_mvv.mvv_state_base` の下）。XDG_STATE_HOME を指定していても、これだけは旧の根から移す
+FIXED_KINDS = (
+    "ask.jsonl",
+    "mvv-gate.jsonl",
+    "project-mvv.jsonl",
+    "project-mvv-signals.jsonl",
+    "gate-rejections.jsonl",
+    "project-mvv",
 )
 _SIDE = ".migrating-"  # migrate が名前を外した移し先の台帳の接尾辞（`<名前>.jsonl.migrating-<n>`）
 _TMP = ".tmp"  # migrate が並べ直した台帳を書く一時ファイルの接尾辞（`.<名前>.jsonl.tmp`）
@@ -370,9 +382,16 @@ def migrate(
     理由のロックのパス、`moved`・`kept` は台帳のパス、`checkout` は `{"to", "reason"}`（作業ツリーの外なら `to` が None で
     `reason` に理由）、`dbos`・`sv` は `{"moved": [パス], "kept": [{"path", "reason"}]}`。
     status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（移し先に同じ名前があって旧に残したものがある）・
-    `busy`（上の 2 つの前提で止まった）。何度打ってもよい。"""
+    `busy`（上の 2 つの前提で止まった）。何度打ってもよい。
+
+    `XDG_STATE_HOME` を指定していれば（`NDF_STATE_HOME` は無い）、移し先は `$XDG_STATE_HOME/ndf` で、移すのは旧の版が XDG を
+    見ずに旧の根へ書いていた台帳（`FIXED_KINDS`）だけ。チェックアウトの記録は移さず、確かめる耐久の記録のロックは旧の版が
+    書いた `$XDG_STATE_HOME/ndf/dbos` のもの。`NDF_STATE_HOME` を指定しているか、XDG の根が旧の根と同じなら `none`。"""
     env = _state_env(env)
-    old, new = legacy_home(env), _user_default(env)
+    old, new, kinds, dbos = legacy_home(env), _user_default(env), USER_KINDS, legacy_home(env) / "dbos"
+    explicit = explicit_home(env)
+    if explicit is not None and not env.get("NDF_STATE_HOME"):
+        new, kinds, dbos, move_checkout = explicit, FIXED_KINDS, explicit / "dbos", None
     base = {
         "from": str(old),
         "to": str(new),
@@ -384,8 +403,10 @@ def migrate(
         "dbos": {"moved": [], "kept": []},
         "sv": {"moved": [], "kept": []},
     }
-    if explicit_home(env) is not None:
-        return {**base, "status": "none", "summary": "NDF_STATE_HOME か XDG_STATE_HOME が指定されていて、既定の置き場を使わない"}
+    if env.get("NDF_STATE_HOME"):
+        return {**base, "status": "none", "summary": "NDF_STATE_HOME が指定されていて、既定の置き場を使わない"}
+    if new.resolve() == old.resolve():
+        return {**base, "status": "none", "summary": "XDG_STATE_HOME の根が旧の根と同じで、移すものが無い"}
     new.mkdir(parents=True, exist_ok=True)
     lock = _flock_free(new / LOCK, create=True)
     if lock is None:
@@ -396,7 +417,7 @@ def migrate(
             "summary": "別の migrate が動いている。何も移さない（終わってから打つ）",
         }
     try:
-        held = _held_locks(old / "dbos")
+        held = _held_locks(dbos)
         if held:
             return {
                 **base,
@@ -404,15 +425,17 @@ def migrate(
                 "held": held,
                 "summary": f"動いている耐久ワークフローのロックが {len(held)} 件ある。何も移さない（{NOTE}）",
             }
-        return _migrate_locked(old, new, base, cwd, move_checkout)
+        return _migrate_locked(old, new, kinds, base, cwd, move_checkout)
     finally:
         os.close(lock)
 
 
-def _migrate_locked(old: Path, new: Path, base: dict, cwd: Optional[Path], move_checkout: Optional[Callable[[Path, Path], dict]]) -> dict:
+def _migrate_locked(
+    old: Path, new: Path, kinds: Sequence[str], base: dict, cwd: Optional[Path], move_checkout: Optional[Callable[[Path, Path], dict]]
+) -> dict:
     moved: list = []
     kept: list = []
-    for kind in USER_KINDS:
+    for kind in kinds:
         _resume_sides(new, kind, moved)
         if (old / kind).exists() or (old / f"{kind}{MIGRATED}").exists():
             _merge_ledger(old / kind, new / kind, moved, kept)

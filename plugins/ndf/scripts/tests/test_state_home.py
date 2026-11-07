@@ -170,8 +170,38 @@ def test_migrate_stops_while_another_migrate_holds_the_lock(tmp_path):
 def test_migrate_none_with_explicit_root(tmp_path):
     (tmp_path / ".local/state/ndf").mkdir(parents=True)
     (tmp_path / ".local/state/ndf/ask.jsonl").write_text("x\n")
-    assert sh.migrate({"HOME": str(tmp_path), "XDG_STATE_HOME": "/x"})["status"] == "none"
+    assert sh.migrate({"HOME": str(tmp_path), "NDF_STATE_HOME": str(tmp_path / "n")})["status"] == "none"
+    # XDG_STATE_HOME が旧の根と同じなら、旧の版も新の版も同じ置き場に書いている
+    assert sh.migrate({"HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / ".local/state")})["status"] == "none"
+    assert (tmp_path / ".local/state/ndf/ask.jsonl").read_text() == "x\n"
     assert sh.migrate({"HOME": str(tmp_path / "empty")})["status"] == "none"
+
+
+def test_migrate_with_xdg_moves_ledgers_the_old_version_wrote_to_the_fixed_place(tmp_path):
+    """旧の版の問い・MVV の記録は XDG_STATE_HOME を見ずに `~/.local/state/ndf` へ書いていた。XDG を指定していても移す。"""
+    env = {"HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "xdg")}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    (old / "project-mvv/r").mkdir(parents=True)
+    (old / "project-mvv/r/v1.md").write_text("mvv")
+    for name in sh.FIXED_KINDS:
+        if name.endswith(".jsonl"):
+            (old / name).write_text('{"at":"2026-11-01T00:00:00Z","old":1}\n')
+    (old / "usage").mkdir()  # XDG を見ていた台帳は旧の版も XDG の下に書いた。固定の置き場のものは動かさない
+    (old / "usage/u.jsonl").write_text('{"u":1}\n')
+    new.mkdir(parents=True)
+    (new / "ask.jsonl").write_text('{"at":"2026-11-02T00:00:00Z","new":1}\n')
+
+    r = sh.migrate(env)
+    assert r["status"] == "migrated" and r["to"] == str(new)
+    assert (new / "ask.jsonl").read_text() == '{"at":"2026-11-01T00:00:00Z","old":1}\n{"at":"2026-11-02T00:00:00Z","new":1}\n'
+    for name in sh.FIXED_KINDS:
+        if name.endswith(".jsonl"):
+            assert '"old":1' in (new / name).read_text()
+    assert (new / "project-mvv/r/v1.md").read_text() == "mvv"
+    assert (old / "usage/u.jsonl").exists() and not (new / "usage").exists()
+    assert r["checkout"] == {"to": None, "reason": None}  # 耐久の記録・プランの状態は旧の版も XDG の下にあった
+    assert sh.migrate(env)["status"] == "none"  # 打ち直しても足し直さない
+    assert (new / "ask.jsonl").read_text().count("\n") == 2
 
 
 @pytest.mark.parametrize("extra", [{}, {"XDG_STATE_HOME": "/x"}, {"XDG_STATE_HOME": "/x", "NDF_STATE_HOME": "/n"}])

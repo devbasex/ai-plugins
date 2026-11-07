@@ -654,9 +654,10 @@ WF_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 # 食い違う。
 WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
 
+WF_LOCK_HOLD=60  # 持ち続ける上限の秒。PID 名前空間を書く。stages/ は複数のコンテナが共有し、別のコンテナの生きたロックを PID で捨てない（#2766）
 wf_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-$WF_LOCK_TIMEOUT}"
-  ndf_lock_acquire "$dir" "$timeout"
+  local dir="${1:-}" timeout="${2:-$WF_LOCK_TIMEOUT}" hold="${3:-$WF_LOCK_HOLD}"
+  ndf_lock_acquire "$dir" "$timeout" "$hold"
 }
 
 wf_lock_release() {
