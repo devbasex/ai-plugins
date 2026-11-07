@@ -5446,6 +5446,24 @@
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
+      "term": "別のリポジトリのレーン",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す",
+      "pending_source": "issues/issue-2733-requirements.md"
+    },
+    {
+      "term": "計画の外のセッション",
+      "context": "ndf-workflow",
+      "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
+      "pending_source": "issues/issue-2733-requirements.md"
+    },
+    {
+      "term": "レーン数の上限",
+      "context": "ndf-workflow",
+      "meaning": "同時に動かせる名前つきのラッパーの数（NDF_RELAY_MAX_NAMED、既定 3）。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
+      "pending_source": "issues/issue-2733-requirements.md"
+    },
+    {
       "term": "保留の周回",
       "context": "ndf-workflow",
       "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
