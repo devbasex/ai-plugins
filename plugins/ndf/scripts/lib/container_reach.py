@@ -108,11 +108,11 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
     if not worktree_base.add_exclude(wt, f"{EVIDENCE}/"):
         raise Unreachable(f"探りの印を git の無視へ登録できない（{wt}）")
     token = secrets.token_hex(16)
-    p = _run_probe(docker, service, env, wt, token)
+    p = _exec_marker_probe(docker, service, env, wt, token)
     return _interpret_probe(p, service, env, token)
 
 
-def _run_probe(docker: str, service: str, env: dict[str, str], wt: Path, token: str) -> subprocess.CompletedProcess:
+def _exec_marker_probe(docker: str, service: str, env: dict[str, str], wt: Path, token: str) -> subprocess.CompletedProcess:
     """探りの印を worktree に置き、コンテナから読ませた結果を返す。印は必ず片付ける。"""
     rel = f"{EVIDENCE}/reach-{token}"
     mark = wt / rel
