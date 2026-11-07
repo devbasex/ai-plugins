@@ -6133,6 +6133,13 @@
       "meaning": "名の形が契約のどのパターンにも当たらない作業の記録",
       "source": "",
       "pending_source": "issues/issue-2600-requirements.md"
+    },
+    {
+      "term": "閉じたループ",
+      "context": "ndf-workflow",
+      "meaning": "片付けを済ませ、再開しないと決まった開発ループ。記録の状態は closed",
+      "source": "",
+      "pending_source": "issues/issue-2600-design.md"
     }
   ]
 }
