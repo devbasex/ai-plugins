@@ -2474,6 +2474,13 @@
       "pending_source": "issues/issue-2660-design.md"
     },
     {
+      "term": "回収の予約",
+      "context": "ndf-worktree",
+      "meaning": "環境名ごとのロック。回収が環境名の共有を確かめてから解放を終えるまで持ち、割り当ての追加と使い始めが短く取って通る",
+      "source": "",
+      "pending_source": "issues/issue-2660-design.md"
+    },
+    {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
