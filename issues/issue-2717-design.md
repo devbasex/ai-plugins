@@ -60,11 +60,11 @@
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | 周回のプランを組んだ | `loop sprint` | conductor（pipeline を流す） |
+| E1 | 周回のプランを組んだ | `loop sprint` | conductor（パイプラインを流す） |
 | E2 | 課題を人の判断待ちへ移した | `loop gate`（`move_to_waiting`） | 続きの組み立て（`continuation`） |
 | E3 | 続きのプランから外した課題を除いた | `drop_issues` | ステップの実行（`{plan_issues}` を埋める） |
 | E4 | 残った課題のまとめを組み直した | `build_close` | 周回の `close_plans` |
-| E5 | 本番のステージが流れた | queue | テンプレートの経路はオーガナイザー、昇格の経路は `loop lap` |
+| E5 | 本番のステージが流れた | キュー | テンプレートの経路はオーガナイザー、昇格の経路は `loop lap` |
 | E6 | 周回をリリース待ちで締めた | `handle_release_pending` | 周回の境の `loop select` |
 | E7 | 答えの後にまとめを流した | `finish_pipeline` | `loop finish` |
 
@@ -75,10 +75,6 @@
 | 課題の差し込み | リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる | 追加（`ndf-workflow`） |
 | リリースの依頼 | レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ。テンプレートで出すリポジトリのレーンだけが送る | 意味の変更（`ndf-workflow`） |
 
-## 外部の調査
-
-省く: プランの差し込みは既存の `{state_dir}` と同じ形の項目を 1 つ足すもので、レーンの本番のステージの扱いは利用者の答えとプロジェクトの中の取り決めだけで決まる。外部の標準・製品・ライブラリの判断が要らない。
-
 ## 機能一覧
 
 | # | 機能 | 誰が使うか |
@@ -88,6 +84,8 @@
 | F3 | 設計承認ゲートで課題を外した周回で、リリースの後のまとめが残った課題だけに掛かる | レーンの conductor と利用者 |
 
 ## 構成要素
+
+文脈と配置は変わらない。レーンがオーガナイザーへ依頼を送る経路も、昇格の Pull Request を本番チャネルへ出す経路も、今のままである。
 
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
@@ -121,58 +119,16 @@ graph TD
 
 手順書・確定仕様・用語集は実行に関わらないため、図に載せない。
 
-文脈と配置は変わらない。レーンがオーガナイザーへ依頼を送る経路も、昇格の Pull Request を本番チャネルへ出す経路も、今のままである。
-
-## 入出力の契約
-
-| 約束 | 変更 |
-| --- | --- |
-| `parallel.py request` の引数 | 変えない |
-| リリースの依頼の形（`contracts/forms/parallel-request.json`） | 変えない。`issues` の値だけが残った課題になる |
-| プランのステップの `cmd` | 差し込み `{plan_issues}` を足す。埋まる値はプランの `課題` の番号の空白区切りで、`課題` が空なら空文字である |
-
-## 処理の流れ
-
-設計承認ゲートで課題を外した周回の、続きの流れ（テンプレートで出すリポジトリ）。
-
-```mermaid
-sequenceDiagram
-    participant G as loop gate
-    participant P as プランのファイル
-    participant Q as queue と RunStep
-    participant O as オーガナイザー
-    G->>P: drop_issues で課題を外す
-    G->>P: 残った課題のまとめを組む
-    G-->>Q: 続きの queue を返す
-    Q->>P: 流す時点に課題を読む
-    alt 自分の Pull Request がすでに main にある
-        Q->>Q: 依頼を送らず 0 で終える
-    else まだ main に無い
-        Q->>O: request --issues 残った課題
-        Q-->>G: 10 で終わり、loop lap がリリース待ちで締める
-        O-->>G: released の答え
-        G->>Q: 残った課題のまとめを流す
-    end
-```
-
-差し込みを埋めた後の `request` が失敗したときは、今と同じくステップの失敗として止まる。昇格の経路は差し込みを持たず、昇格のプランの `課題` を `drop_issues` が書き換えるだけである。判定が通らなければ `gate2_returned` で止まる。
-
-レーンの本番のステージは、手順書に次の表で書く。行の値は今のコードの振る舞いである。
-
-| リリースの経路 | 本番のステージ | レーンがすること | 周回の締め方 |
-| --- | --- | --- | --- |
-| テンプレートで出す | リリースの依頼のプラン | 依頼を送る | リリース待ち。答えの後にまとめを流す |
-| 昇格 | 昇格のプラン | そのまま流す | 同じ queue でまとめを流して締める |
-| マージで届く | 導入の確認のプラン | そのまま流す | 同じ queue でまとめを流して締める |
-| 手で届ける | 手で行うリリースのステージ | 今のまま変えない（要求の「含まない」） | 今のまま変えない |
-
 ## 決定の記録
 
 ### 決定 1: 課題の一覧の置き場を 1 つにするため、リリースの依頼のコマンドは番号の代わりに差し込みを持つ
 
 依頼のコマンドに番号を埋めると、プランの `課題` と 2 か所に一覧が残り、片方だけが書き換わる。差し込みなら `drop_issues` を変えずに、流す時点の `課題` がコマンドへ入る。`{state_dir}` と同じ形で、`steps.py` の 1 行で済む。
 
-`drop_issues` がコマンドの文字列から番号を消す形は採らない。シェルのコマンドを文字列として編集することになり、一覧のコピーも残る。`sprint_loop_gate.py` は行数の例外を持つファイルで、要求が例外を上げないと定めている。`loop gate` がプランを組み直す形も採らない。組み立ての引数が周回の記録に無い。
+| 採らなかった形 | 理由 |
+| --- | --- |
+| `drop_issues` がコマンドの文字列から番号を消す | シェルのコマンドを文字列として編集することになり、一覧のコピーも残る。`sprint_loop_gate.py` は行数の例外を持つファイルで、要求が例外を上げないと定めている |
+| `loop gate` がプランを組み直す | 組み立ての引数が周回の記録に無い |
 
 根拠: Value 7 / Value 8（MVV 版 6）
 
@@ -202,7 +158,16 @@ sequenceDiagram
 
 ### 決定 5: オーガナイザーの範囲の判定は変えない
 
-依頼の `issues` で範囲を決めるコードは無い。`lib/parallel*.py` と `parallel.py` を `\[.issues.\]|get\(.issues.\)|\.issues\b` で検索すると、当たるのは依頼を書く側の引数（`a.issues`）と、計画のレーンの入力（`input.issues`・外のオーガナイザーのレーンの `ln.get("issues")`）だけである。依頼の鍵を見るのは、`parallel_lane.py` の形の検査（`for k in ("prs", "issues")`）だけである。範囲の内訳は計画のレーンの `input.issues` と Pull Request の閉じる課題から決まる（`parallel_release.py` の 46 行目）。要求の境界の「確認してから行う」に当たる変更は無い。
+依頼の `issues` で範囲を決めるコードは無い。範囲の内訳は計画のレーンの `input.issues` と Pull Request の閉じる課題から決まる（`parallel_release.py` の 46 行目）。要求の境界の「確認してから行う」に当たる変更は無い。
+
+`lib/parallel*.py` と `parallel.py` を `\[.issues.\]|get\(.issues.\)|\.issues\b` で検索すると、当たるのは次の 2 種類だけである。
+
+| 当たった箇所 | 値 |
+| --- | --- |
+| 依頼を書く側の引数 | `a.issues` |
+| 計画のレーンの入力 | `input.issues`・外のオーガナイザーのレーンの `ln.get("issues")` |
+
+依頼の鍵を見るのは、`parallel_lane.py` の形の検査（`for k in ("prs", "issues")`）だけである。
 
 根拠: Value 7（MVV 版 6）
 
@@ -211,6 +176,69 @@ sequenceDiagram
 この課題の手順書の変更は、`parallel.md` の「レーンの側」と外のオーガナイザーのレーンの 1 行、`loop.md` の「並列の計画のレーン」に閉じる。#2623 と #2707 は同じファイルの別の節を主に変えるため、先に入れて、衝突は後から入る側の取り込みで解く。リリースの工程を CD へ移す #2623 が経路の扱いを変えるときは、この表の行を直す。
 
 根拠: Value 1（MVV 版 6）
+
+## 外部の調査
+
+省く: プランの差し込みは既存の `{state_dir}` と同じ形の項目を 1 つ足すもので、レーンの本番のステージの扱いは利用者の答えとプロジェクトの中の取り決めだけで決まる。外部の標準・製品・ライブラリの判断が要らない。
+
+## 入出力の契約
+
+| 約束 | 変更 |
+| --- | --- |
+| `parallel.py request` の引数 | 変えない |
+| リリースの依頼の形（`contracts/forms/parallel-request.json`） | 変えない。`issues` の値だけが残った課題になる |
+| プランのステップの `cmd` | 差し込み `{plan_issues}` を足す。埋まる値はプランの `課題` の番号の空白区切りで、`課題` が空なら空文字である |
+
+## 処理の流れ
+
+### リリースの経路ごとのレーンの本番のステージ
+
+レーンの本番のステージは、手順書に次の表で書く。行の値は今のコードの振る舞いである。
+
+| リリースの経路 | 本番のステージ | レーンがすること | 周回の締め方 |
+| --- | --- | --- | --- |
+| テンプレートで出す | リリースの依頼のプラン | 依頼を送る | リリース待ち。答えの後にまとめを流す |
+| 昇格 | 昇格のプラン | そのまま流す | 同じキューでまとめを流して締める |
+| マージで届く | 導入の確認のプラン | そのまま流す | 同じキューでまとめを流して締める |
+| 手で届ける | 手で行うリリースのステージ | 今のまま変えない（要求の「含まない」） | 今のまま変えない |
+
+### 課題を外した周回の続きの流れ
+
+設計承認ゲートで課題を外した周回の、続きの流れ（テンプレートで出すリポジトリ）。
+
+```mermaid
+sequenceDiagram
+    participant G as loop gate
+    participant P as プランのファイル
+    participant Q as キューと RunStep
+    participant O as オーガナイザー
+    G->>P: drop_issues で課題を外す
+    G->>P: 残った課題のまとめを組む
+    G-->>Q: 続きのキューを返す
+    Q->>P: 流す時点に課題を読む
+    alt 自分の Pull Request がすでに main にある
+        Q->>Q: 依頼を送らず 0 で終える
+    else まだ main に無い
+        Q->>O: request --issues 残った課題
+        Q-->>G: 10 で終わり、loop lap がリリース待ちで締める
+        O-->>G: released の答え
+        G->>Q: 残った課題のまとめを流す
+    end
+```
+
+シーケンス図に載せていない場合の動きは次のとおりである。
+
+| 場合 | 動き |
+| --- | --- |
+| 差し込みを埋めた後の `request` が失敗した | 今と同じくステップの失敗として止まる |
+| 昇格の経路 | 差し込みを持たず、昇格のプランの `課題` を `drop_issues` が書き換えるだけである |
+| 昇格の経路で MVV 判定が通らなかった | `gate2_returned` で止まる |
+
+## 設計の結果
+
+| 課題 | 扱い | 取り込み先 | 触るファイル |
+| --- | --- | --- | --- |
+| #2717 | 実装する | — | `plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`docs/specifications/ndf-production-release-record.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## テスト設計
 
@@ -221,8 +249,8 @@ sequenceDiagram
 | 受け入れ条件 3 / I4 | 昇格の経路の周回で 3 件中 2 件を外すと、昇格のプランの `課題` は 1 件である | `drop_issues` が昇格のプランを飛ばすと落ちる |
 | 受け入れ条件 4 / I3 | 3 件の周回で 2 件を外して依頼のステップを流すと、打ったコマンドの `--issues` は 1 件である。組んだプランの `cmd` に課題の番号が無い | 組み立てが番号を埋め戻す、`RunStep` が差し込みを埋めないと落ちる |
 | 受け入れ条件 5 / I3 | 同じ周回の依頼の記録の `issues` は 1 件である | コマンド以外の経路で元の一覧を渡すと落ちる |
-| 受け入れ条件 6 / I4 | 同じ周回の続きの queue のまとめの `課題` は 1 件である（既存の `test_gate_1_points_the_held_close_at_the_close_without_the_waiting_issue` を保つ） | `continuation` がまとめを組み直さないと落ちる |
-| 受け入れ条件 7 / I5 | 同じ周回をリリース待ちで締め、`released` の答えで組まれる pipeline のまとめの `課題` は 1 件である | `handle_release_pending` が組み直す前のまとめを控えると落ちる |
+| 受け入れ条件 6 / I4 | 同じ周回の続きのキューのまとめの `課題` は 1 件である（既存の `test_gate_1_points_the_held_close_at_the_close_without_the_waiting_issue` を保つ） | `continuation` がまとめを組み直さないと落ちる |
+| 受け入れ条件 7 / I5 | 同じ周回をリリース待ちで締め、`released` の答えで組まれるパイプラインのまとめの `課題` は 1 件である | `handle_release_pending` が組み直す前のまとめを控えると落ちる |
 | 受け入れ条件 8 / I6 | 課題を外さなかった周回では、3 種類のプランの `課題` と、依頼の `--issues` が組んだときの全件である | 差し込みが `課題` 以外を読むと落ちる |
 | 差し込みの境界 | `課題` が空のプランでは `--issues` の値が空で、`request` が断らない | 差し込みが `None` などの文字を埋めると落ちる |
 | 受け入れ条件 9〜11 | レビューで文書を読んで確かめる。`.md` の文言を照合するテストは書かない | — |
@@ -230,17 +258,11 @@ sequenceDiagram
 
 既存の `test_release_request_plan_has_one_gate_step` は、番号の代わりに差し込みを期待する形へ直す。
 
-## 設計の結果
-
-| 課題 | 扱い | 取り込み先 | 触るファイル |
-| --- | --- | --- | --- |
-| #2717 | 実装する | — | `plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/`、`docs/specifications/ndf-production-release-record.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
-
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | レーンの昇格を直接流すか（要求の未決 1） | 設計承認ゲートで利用者が決める。この設計は利用者の 2026-11-07 の答えのとおり直接流す形で書いた。覆るときは、オーガナイザーが昇格を組む変更が加わる |
-| レーンの直接の昇格で判定が通らなかったときの問い | コードを読んだ範囲では、`handle_gate2` にレーンの分岐は無く、ループは `gate2_returned` で止まる。問いが `ndf-gate:2` としてオーガナイザーへ届き、`loop hold-question` で質問待ちへ移れるかは、動かしていない。実例の周回か、リリース後テストで確かめる |
+| レーンの直接の昇格で MVV 判定が通らなかったときの問い | コードを読んだ範囲では、`handle_gate2` にレーンの分岐は無く、ループは `gate2_returned` で止まる。問いが `ndf-gate:2` としてオーガナイザーへ届き、`loop hold-question` で質問待ちへ移れるかは、動かしていない。実例の周回か、リリース後テストで確かめる |
 | 他のレーンの `develop` の変更が直接の昇格に入ること | 要求の「含まない」にある。未決 1 の材料として残す |
 | 設計の結果のステージの `--design` に外した課題が残ること | `continuation` は `--design` の番号を書き換えない。外した課題の設計 PR はマージされていないため「読めなかった設計の課題」として報告に載り、実装のプランは今の振る舞いで流れる。報告の文だけに表れる。課題の一覧のコピーが残る箇所として、確定仕様化のときに見直す |
