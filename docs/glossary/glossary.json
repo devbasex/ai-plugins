@@ -6200,6 +6200,12 @@
       "context": "ndf-workflow",
       "meaning": "使えるメモリがこの値を割ると、重い処理を始めず、動いているものを止める境の値",
       "pending_source": "issues/issue-2711-requirements.md"
+    },
+    {
+      "term": "枠の置き場",
+      "context": "ndf-workflow",
+      "meaning": "テストの枠のロックと記録を置くディレクトリ。同じ置き場を見る実行どうしが同じ上限を共有する",
+      "pending_source": "issues/issue-2711-design.md"
     }
   ]
 }
