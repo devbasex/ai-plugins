@@ -78,9 +78,11 @@ def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
     assert r["kept"] == [str(old / "stages/o__r__1.json")]  # 上書きの形は旧に残す
     assert (new / "stages/o__r__1.json").read_text() == '{"newer":1}'
     assert (old / "relay/hub.json").exists()  # コンテナの状態は動かさない
-    assert not (old / "usage").exists() and not (old / "ask.jsonl").exists()
+    assert not (old / "usage/claude/o__r.jsonl").exists() and not (old / "ask.jsonl").exists()
+    assert (old / "ask.jsonl.migrated").read_text() == '{"q":1}\n'  # 旧の台帳は消さずに名前を変えて残す
     assert sh.migrate(env)["status"] == "kept"  # 打ち直しても足し直さない
     assert (new / "usage/claude/o__r.jsonl").read_text() == '{"b":2}\n{"a":1}\n'
+    assert not (old / "usage").exists() and not (old / "ask.jsonl.migrated").exists()  # 移り切った残りは次の回に消す
 
 
 def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
@@ -101,35 +103,68 @@ def test_migrate_takes_ledger_name_off_before_reading(tmp_path, monkeypatch):
     assert (old / "ask.jsonl").read_text() == '{"q":2}\n'  # 追記された行は消えない
     assert sh.migrate(env)["status"] == "migrated"
     assert (new / "ask.jsonl").read_text() == '{"q":1}\n{"q":2}\n'
-    assert not old.exists() or not any(old.iterdir())
+    assert (old / "ask.jsonl.migrated").read_text() == '{"q":1}\n{"q":2}\n'  # 旧の台帳を足した回は残す
+    assert sh.migrate(env)["status"] == "none"
+    assert not any(old.iterdir())
 
 
-@pytest.mark.parametrize("appended", [False, True])
-def test_migrate_resumes_a_stopped_move(tmp_path, appended):
-    """名前を外した後で止まった移行の残り（`.migrating-<pid>`）は、次の migrate が欠かさず二重にせず足す。"""
+def test_migrate_keeps_rows_written_to_an_open_old_ledger_after_migrate(tmp_path):
+    """旧の版の書き手が migrate の後に開いた fd へ足した行は `.migrated` に残り、次の migrate が足す（重複させない）。
+    新の台帳に中身がすべて入った `.migrated` だけを消す。"""
     env = {"HOME": str(tmp_path)}
     old, new = sh.legacy_home(env), sh._user_default(env)
-    (old / "usage/claude").mkdir(parents=True)
-    (old / "ask.jsonl.migrating-999999999").write_text('{"q":1}\n')
-    (old / "ask.jsonl").write_text('{"q":2}\n')  # 止まった後に旧の版が書いた
-    (old / "usage/claude/o__r.jsonl.migrating-999999999").write_text('{"a":1}\n')
-    new.mkdir(parents=True)
-    if appended:  # 足した後、消す前に止まった
-        (new / "ask.jsonl").write_text('{"q":1}\n')
-    assert sh.migrate(env)["status"] == "migrated"
-    assert (new / "ask.jsonl").read_text() == '{"q":1}\n{"q":2}\n'
-    assert (new / "usage/claude/o__r.jsonl").read_text() == '{"a":1}\n'
-    assert not old.exists() or not any(old.rglob("*"))
-
-
-def test_migrate_leaves_a_move_in_progress(tmp_path):
-    """名前を外したプロセスが生きている（動いている migrate）残りには触らない。"""
-    env = {"HOME": str(tmp_path)}
-    old = sh.legacy_home(env)
     old.mkdir(parents=True)
-    held = old / f"ask.jsonl.migrating-{os.getppid()}"
-    held.write_text('{"q":1}\n')
-    assert sh.migrate(env)["status"] == "kept" and held.exists()
+    (old / "ask.jsonl").write_text(_row("2026-11-01T00:00:00Z", q=1))
+    with (old / "ask.jsonl").open("a") as writer:  # 旧の版の書き手（開いたまま）
+        assert sh.migrate(env)["status"] == "migrated"
+        writer.write(_row("2026-11-02T00:00:00Z", q=2))
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1]
+    assert sh.migrate(env)["status"] == "migrated"
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2]
+    assert not (old / "ask.jsonl.migrated").exists()
+
+
+def test_migrate_keeps_a_migrated_ledger_not_yet_in_the_new_one(tmp_path, monkeypatch):
+    """足し合わせた後で `.migrated` に行が足されれば（新に入り切っていない）消さず、次の migrate で足してから消す。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh._user_default(env)
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    (old / "ask.jsonl.migrated").write_text(_row("2026-11-01T00:00:00Z", q=1) + _row("2026-11-02T00:00:00Z", q=2))
+    (new / "ask.jsonl").write_text(_row("2026-11-01T00:00:00Z", q=1))
+    real_merge = sh._merge_into
+
+    def merge_then_append(dst, sources):
+        added = real_merge(dst, sources)
+        with sources[0].open("a") as f:  # 足し合わせた直後に旧の版の書き手が足す
+            f.write(_row("2026-11-03T00:00:00Z", q=3))
+        return added
+
+    monkeypatch.setattr(sh, "_merge_into", merge_then_append)
+    assert sh.migrate(env)["status"] == "migrated"
+    monkeypatch.setattr(sh, "_merge_into", real_merge)
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2]  # q=1 を 2 度足さない
+    assert (old / "ask.jsonl.migrated").exists()
+    assert sh.migrate(env)["status"] == "migrated"
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3]
+    assert not (old / "ask.jsonl.migrated").exists()
+
+
+def test_migrate_stops_while_another_migrate_holds_the_lock(tmp_path):
+    """別の migrate（共有する利用者の置き場の別のコンテナを含む）がロックを持っていれば、待たずに止まり何も移さない。"""
+    import fcntl
+
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh._user_default(env)
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    (old / "ask.jsonl").write_text('{"q":1}\n')
+    with open(new / sh.LOCK, "a") as other:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        r = sh.migrate(env)
+    assert r["status"] == "busy" and r["held"] == [str(new / sh.LOCK)] and r["moved"] == []
+    assert (old / "ask.jsonl").read_text() == '{"q":1}\n' and not (new / "ask.jsonl").exists()
+    assert sh.migrate(env)["status"] == "migrated"  # ロックが外れれば移す
 
 
 def test_migrate_none_with_explicit_root(tmp_path):
@@ -221,7 +256,7 @@ def test_migrate_keeps_rows_appended_while_rewriting(tmp_path, monkeypatch):
     assert sh.migrate(env)["status"] == "migrated"
     assert len(calls) == 2
     assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3]
-    assert sorted(p.name for p in new.iterdir()) == ["ask.jsonl"]  # 名前を外した台帳も一時ファイルも残さない
+    assert sorted(p.name for p in new.iterdir()) == [sh.LOCK, "ask.jsonl"]  # 名前を外した台帳も一時ファイルも残さない
 
 
 @pytest.mark.parametrize("stop", ["before_link", "after_link"])
@@ -344,25 +379,21 @@ def test_migrate_keeps_checkout_records_whose_name_is_taken(tmp_path):
     assert (to / "dbos/exp-bbbbbbbbbbbb.sqlite").exists() and (to / "sv/1-design-0e3fcff9").is_dir()
 
 
-def test_migrate_keeps_records_of_running_workflows(tmp_path):
-    """ロックを持つプロセスが生きている耐久の記録と、ステップの子が生きているプランの状態は移さない。"""
+def test_migrate_moves_nothing_while_a_durable_record_is_locked(tmp_path):
+    """旧の dbos/ のロックが 1 つでも持たれていれば（動いているプラン）、台帳も含めて何も移さず止まり、持たれている鍵を出す。"""
     import fcntl
 
     env = {"HOME": str(tmp_path / "h")}
     wt = _repo(tmp_path)
     old = _old_records(tmp_path, env)
-    (old / "sv/plan-ca92eb3d/step.pid").write_text(json.dumps({"step": "s", "children": [{"pid": os.getpid()}]}))
-    (old / "sv/1-design-0e3fcff9/step.pid").write_text(json.dumps({"step": "s", "children": [{"pid": 999999999}]}))
+    (old / "ask.jsonl").write_text('{"q":1}\n')
     with open(old / "dbos/exp-bbbbbbbbbbbb.lock", "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         r = sc.migrate_all(env, cwd=wt)
-    assert r["status"] == "kept"
-    assert [k["path"] for k in r["dbos"]["kept"]] == [str(old / "dbos/exp-bbbbbbbbbbbb.sqlite")]
-    assert [k["path"] for k in r["sv"]["kept"]] == [str(old / "sv/plan-ca92eb3d")]
-    assert (old / "dbos/exp-bbbbbbbbbbbb.lock").exists() and (old / "sv/plan-ca92eb3d/step.pid").exists()
-    assert len(r["dbos"]["moved"]) == len(r["sv"]["moved"]) == 1  # 子の死んだプランは移す
-    (old / "sv/plan-ca92eb3d/step.pid").unlink()  # ステップが終わった
-    assert sc.migrate_all(env, cwd=wt)["status"] == "migrated"  # ロックが外れ、ステップが終われば次に打てば移る
+    assert r["status"] == "busy" and r["held"] == [str(old / "dbos/exp-bbbbbbbbbbbb.lock")]
+    assert r["moved"] == r["dbos"]["moved"] == r["sv"]["moved"] == []
+    assert (old / "ask.jsonl").exists() and (old / "dbos/parallel-aaaaaaaaaaaa.sqlite").exists() and (old / "sv/plan-ca92eb3d").is_dir()
+    assert sc.migrate_all(env, cwd=wt)["status"] == "migrated"  # 止めてから打てば移る
 
 
 def test_migrate_outside_a_work_tree_moves_only_ledgers(tmp_path):
@@ -373,7 +404,7 @@ def test_migrate_outside_a_work_tree_moves_only_ledgers(tmp_path):
     r = sc.migrate_all(env, cwd=tmp_path / "plain")
     assert r["status"] == "migrated"
     assert r["checkout"]["to"] is None and "git の作業ツリー" in r["checkout"]["reason"]
-    assert r["sv"] == {"moved": [], "kept": []} and r["dbos"] == {"moved": [], "kept": [], "rekeyed": []}
+    assert r["sv"] == {"moved": [], "kept": []} and r["dbos"] == {"moved": [], "kept": []}
     assert (old / "dbos/exp-bbbbbbbbbbbb.sqlite").exists() and (old / "sv/plan-ca92eb3d").is_dir()
     assert (tmp_path / "h/.claude/ndf/state/ask.jsonl").exists()
 
@@ -416,33 +447,18 @@ def test_moved_plan_state_link_is_repointed(tmp_path, monkeypatch):
     assert link.resolve() == real.resolve() and (link / "state.json").exists()
 
 
-def test_migrate_moves_plan_states_to_their_owner_checkout(tmp_path):
-    """プランの状態は、`plan.json` のパス（`リポジトリ`・`作業場所`）の作業ツリーのチェックアウトへ移す。
-    持ち主が決まらない（パスが無い・無くなった・git の外）ものは打った作業ツリーのチェックアウトへ移す。"""
+def test_migrate_moves_plan_states_to_the_checkout_it_runs_in(tmp_path):
+    """プランの状態は、`plan.json` のパスによらず打った作業ツリーのチェックアウトへ移す（実行時の `sv_state_home` と同じ規則）。"""
     env = {"HOME": str(tmp_path / "h")}
     wt = _repo(tmp_path)
-    other = _repo(tmp_path / "other")  # 別のリポジトリ（旧の置き場に同居していた）
+    _repo(tmp_path / "other")  # 別のリポジトリ（旧の置き場に同居していた）
     to = (tmp_path / "work/repo/.git/ndf/state/sv").resolve()
-    owner = (tmp_path / "other/work/repo/.git/ndf/state/sv").resolve()
     old = sh.legacy_home(env) / "sv"
-    plans = {
-        "1-design-aaaaaaaa": {"リポジトリ": str(tmp_path / "other/work/repo"), "作業場所": str(tmp_path / "other/gone")},
-        "6-impl-bbbbbbbb": {"作業場所": str(other)},
-        "7-check-cccccccc": {"作業場所": str(wt)},
-        "dev-dddddddd": {"課題": [1]},
-        "ex-eeeeeeee": {"作業場所": "/abs/worktree"},
-    }
-    for name, plan in plans.items():
-        (old / name).mkdir(parents=True)
-        (old / name / "plan.json").write_text(json.dumps(plan, ensure_ascii=False))
-    (old / "close-ffffffff").mkdir()  # plan.json の無い状態
+    (old / "6-impl-bbbbbbbb").mkdir(parents=True)
+    (old / "6-impl-bbbbbbbb/plan.json").write_text(json.dumps({"作業場所": str(tmp_path / "other/work/repo")}, ensure_ascii=False))
     r = sc.migrate_all(env, cwd=wt)
-    assert r["status"] == "migrated"
-    assert sorted(r["sv"]["moved"]) == sorted(
-        [str(owner / "1-design-aaaaaaaa"), str(owner / "6-impl-bbbbbbbb")]
-        + [str(to / n) for n in ("7-check-cccccccc", "dev-dddddddd", "ex-eeeeeeee", "close-ffffffff")]
-    )
-    assert (owner / "6-impl-bbbbbbbb/plan.json").exists() and not old.exists()
+    assert r["status"] == "migrated" and r["sv"]["moved"] == [str(to / "6-impl-bbbbbbbb")]
+    assert not (tmp_path / "other/work/repo/.git/ndf").exists()
 
 
 def test_migrate_keeps_restricted_mode_of_ledgers(tmp_path):
@@ -488,5 +504,7 @@ def test_migrate_keeps_rows_appended_to_open_ledgers_after_reading(tmp_path, mon
 
     monkeypatch.setattr(sh.os, "link", link_then_append)
     assert sh.migrate(env)["status"] == "migrated"
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3]
+    assert sorted(p.name for p in new.iterdir()) == [sh.LOCK, "ask.jsonl"]
+    assert sh.migrate(env)["status"] == "migrated"  # 旧の版の書き手の行は `.migrated` に残り、次の回に足す
     assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3, 4]
-    assert sorted(p.name for p in new.iterdir()) == ["ask.jsonl"]

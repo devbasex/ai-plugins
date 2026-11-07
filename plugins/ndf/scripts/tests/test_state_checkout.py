@@ -1,119 +1,23 @@
-"""チェックアウトの記録の移行（#2766）: queue の耐久の記録の鍵の付け替えと、移し先の鍵のロック。"""
+"""チェックアウトの記録の移行（#2766）: 移し先の鍵のロック。"""
 
 from __future__ import annotations
 
 import fcntl
-import json
 import os
 import sys
 from pathlib import Path
 
-import pytest
-
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
-import durable  # noqa: E402
 import state_checkout as sc  # noqa: E402
 import state_home as sh  # noqa: E402
-
-PLAN = "q-aaaaaaaa"  # プランの状態の名前（`<stem>-<プランのパスの鍵>`）
 
 
 def _repo(tmp_path: Path) -> Path:
     main = tmp_path / "work" / "repo"
     (main / ".git").mkdir(parents=True, exist_ok=True)
     return main
-
-
-def _done(sv: Path) -> str:
-    """queue の実行の鍵の元（`flow.launch_queue` と同じ: 状態ディレクトリの queue-done.json の解決したパス）。"""
-    return str((sv / PLAN / "queue-done.json").resolve())
-
-
-CALLS: list[int] = []
-
-
-@durable.step
-def step_once(x: int) -> int:
-    CALLS.append(x)
-    return x
-
-
-@durable.workflow
-def plan_once(x: int) -> int:
-    return step_once(x)
-
-
-def _finish_plan_in_old_queue(tmp_path: Path, env: dict, monkeypatch, owner: Path | None = None) -> Path:
-    """旧の置き場で queue の耐久の記録を開き、プランを 1 つ済ませる（`plan.json` の作業場所は `owner`。既定は `_repo`）。旧の sv を返す。"""
-    old_sv = sh.legacy_home(env) / "sv"
-    (old_sv / PLAN).mkdir(parents=True)
-    (old_sv / PLAN / "plan.json").write_text(json.dumps({"作業場所": str(owner or _repo(tmp_path))}))
-    monkeypatch.setenv("NDF_DBOS_DIR", str(sh.legacy_home(env) / "dbos"))
-    durable.launch("queue", _done(old_sv))
-    try:
-        assert durable.output_of(durable.start(durable.resolve("plan-p"), plan_once, 7)) == 7
-    finally:
-        durable.close()
-    assert CALLS == [7]
-    return old_sv
-
-
-def _resume_queue(to: Path, monkeypatch) -> durable.WorkflowRef:
-    """移した後の queue の打ち直し（新しい置き場の鍵で開く）。済んだプランの実行の回を返す。"""
-    monkeypatch.setenv("NDF_DBOS_DIR", str(to / "dbos"))
-    durable.launch("queue", _done(to / "sv"))
-    try:
-        return durable.resolve("plan-p", finished=lambda out: True)
-    finally:
-        durable.close()
-
-
-def test_resumed_queue_after_migrate_opens_the_moved_record(tmp_path, monkeypatch):
-    """移した後に同じ queue を打ち直すと、移す前の記録（済んだプラン）を開き、流し直さない。"""
-    CALLS.clear()
-    env = {"HOME": str(tmp_path / "h")}
-    _finish_plan_in_old_queue(tmp_path, env, monkeypatch)
-    r = sc.migrate_all(env, cwd=_repo(tmp_path))
-    to = Path(r["checkout"]["to"])
-    assert r["status"] == "migrated" and len(r["dbos"]["rekeyed"]) == 1
-    ref = _resume_queue(to, monkeypatch)
-    assert (ref.id, ref.action, ref.output) == ("plan-p-1", "done", 7)
-    assert CALLS == [7]
-
-
-def test_migrate_moves_rekeyed_record_to_the_plan_state_owner(tmp_path, monkeypatch):
-    """別のリポジトリのチェックアウトへ振り分けたプランの状態の queue の記録は、その持ち主の dbos/ へ新しい鍵で移り、
-    持ち主の側で打ち直すと済んだプランを開く（打った作業ツリーの dbos/ には残らない）。"""
-    CALLS.clear()
-    env = {"HOME": str(tmp_path / "h")}
-    other = _repo(tmp_path / "other")
-    _finish_plan_in_old_queue(tmp_path, env, monkeypatch, owner=other)
-    r = sc.migrate_all(env, cwd=_repo(tmp_path))
-    owner = (other / ".git/ndf/state").resolve()
-    assert r["status"] == "migrated" and r["sv"]["moved"] == [str(owner / "sv" / PLAN)]
-    [rk] = r["dbos"]["rekeyed"]
-    assert Path(rk["to"]).parent == owner / "dbos"
-    assert not list(Path(r["checkout"]["to"], "dbos").glob("*.sqlite"))
-    ref = _resume_queue(owner, monkeypatch)
-    assert (ref.id, ref.action, ref.output) == ("plan-p-1", "done", 7)
-    assert CALLS == [7]
-
-
-def test_migrate_rekeys_records_moved_by_an_earlier_migrate(tmp_path, monkeypatch):
-    """付け替えの前の版で移し終えた記録（新の sv と旧の鍵の記録）も、もう一度 migrate を打てば付け替える。"""
-    CALLS.clear()
-    env = {"HOME": str(tmp_path / "h")}
-    old_sv = _finish_plan_in_old_queue(tmp_path, env, monkeypatch)
-    to = (tmp_path / "work/repo/.git/ndf/state").resolve()
-    (to / "sv").mkdir(parents=True)
-    os.rename(old_sv / PLAN, to / "sv" / PLAN)
-    os.rename(sh.legacy_home(env) / "dbos", to / "dbos")
-    r = sc.migrate_all(env, cwd=_repo(tmp_path))
-    assert r["status"] == "migrated" and r["dbos"]["moved"] == [] and len(r["dbos"]["rekeyed"]) == 1
-    assert _resume_queue(to, monkeypatch).action == "done" and CALLS == [7]
-    assert sc.migrate_all(env, cwd=_repo(tmp_path))["status"] == "none"  # 何度打ってもよい
 
 
 def _old_record(tmp_path: Path, env: dict) -> tuple[Path, Path, str]:
@@ -167,21 +71,3 @@ def test_migrate_holds_the_destination_lock_while_moving(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "move", move_and_try_lock)
     assert sc.migrate_all(env, cwd=_repo(tmp_path))["status"] == "migrated"
     assert seen and all(seen)
-
-
-@pytest.mark.parametrize("taken", [".sqlite", ".sqlite-wal"])
-def test_rekey_keeps_the_record_when_the_new_key_is_taken(tmp_path, monkeypatch, taken):
-    """付け替え先の鍵の記録が既にあれば付け替えず、理由つきで残す。"""
-    env = {"HOME": str(tmp_path / "h")}
-    to = (tmp_path / "work/repo/.git/ndf/state").resolve()
-    (to / "sv" / PLAN).mkdir(parents=True)
-    (to / "dbos").mkdir()
-    old_key = durable.launch_key("queue", _done(sh.legacy_home(env) / "sv"))
-    new_key = durable.launch_key("queue", _done(to / "sv"))
-    (to / "dbos" / f"{old_key}.sqlite").write_text("old")
-    (to / "dbos" / f"{new_key}{taken}").write_text("new")
-    r = sc.migrate_all(env, cwd=_repo(tmp_path))
-    assert r["status"] == "kept" and r["dbos"]["rekeyed"] == []
-    assert [k["path"] for k in r["dbos"]["kept"]] == [str(to / "dbos" / f"{old_key}.sqlite")]
-    assert "付け替え先" in r["dbos"]["kept"][0]["reason"]
-    assert (to / "dbos" / f"{old_key}.sqlite").read_text() == "old"
