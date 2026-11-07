@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
 
 import legacy_values
+import parallel_hold
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
@@ -140,30 +142,45 @@ def cmd_queue(
     if isinstance(prepared, dict):
         return prepared
     decl, done_path, seen, listing = prepared
+    # launch の直後に回復したプランも prepare で答え待ちの停止を読むよう、launch の前から close の後まで立てる（#2707）
+    flow.Engine.queued = True
     try:
-        prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
-    except durable.DurableError as e:
-        return _not_started(str(e), max_, done_path)
-    try:
-        ref = durable.resolve(prefix)
-        if ref.action == "continue":
-            print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
-        args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
-        args["starts"] = starts or {}
-        args["rerun"] = list(rerun or [])
-        wid = durable.start(ref, flow.queue_workflow, args)
-        while True:
-            got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
-            for p in all_plans:
-                seen[p] = notify_attention(p, seen[p])
-            if got.kind != "timeout":
-                break
-        if got.kind != "done":
-            durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
-            raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
-        return got.value
+        try:
+            prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
+        except durable.DurableError as e:
+            return _not_started(str(e), max_, done_path)
+        try:
+            return _drive_queue(durable, flow, prefix, _queue_args(stages, max_, done_path, decl, starts, rerun), all_plans, seen, poll)
+        finally:
+            durable.close()
     finally:
-        durable.close()
+        flow.Engine.queued = False
+
+
+def _queue_args(stages: list[list[str]], max_: int, done_path: Path, decl: dict, starts, rerun) -> dict:
+    """`queue_workflow` へ渡す入力。"""
+    args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
+    args["starts"] = starts or {}
+    args["rerun"] = list(rerun or [])
+    return args
+
+
+def _drive_queue(durable, flow, prefix: str, args: dict, all_plans: list[str], seen: dict, poll: float) -> dict:
+    """耐久ワークフロー `queue_workflow` を始めるか続け、終わるまで attention を知らせながら待つ。"""
+    ref = durable.resolve(prefix)
+    if ref.action == "continue":
+        print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
+    wid = durable.start(ref, flow.queue_workflow, args)
+    while True:
+        got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
+        for p in all_plans:
+            seen[p] = notify_attention(p, seen[p])
+        if got.kind != "timeout":
+            break
+    if got.kind != "done":
+        durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
+        raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
+    return got.value
 
 
 def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[str]], list[str]]:
@@ -307,7 +324,7 @@ def plan_item(plan: str, out: dict) -> dict:
 
     前提のプランで流さなかったプランの出力（`result` が流さなかった）は、そのまま item にする。"""
     if out.get("result") == NOT_RUN:
-        return {**out, "plan": plan}
+        return {**out, "plan": plan, **({"answer_hold": True} if parallel_hold.skip_of(out.get("reason")) else {})}
     rep = state_dir_of(plan) / "report.md"
     if "error" in out:
         print(f"supervise-queue: {plan} が例外で終わった: {out['error']}", file=sys.stderr, flush=True)
@@ -343,19 +360,25 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
     unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
-    status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
+    held = next((parallel_hold.skip_of(i.get("reason")) for i in items if i.get("answer_hold")), None)  # 答え待ちの停止（#2707）
+    status = "stopped" if stopped or unfilled else "gate" if gates or held else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
-    nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
-    return result(
-        "supervise-queue",
-        status,
-        summary,
-        items,
-        {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)},
-        next=nxt,
-    )
+    present = "承認ゲートの計画の report.md を読んで提示する"
+    nxt = present if status == "gate" else None
+    metrics = {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)}
+    if held:  # park の 1 行は status（止まった・承認ゲートの同居）に依らず metrics.park と next で渡す
+        metrics["answer_hold"] = held
+        metrics["park"] = park = _park_line(held, done_path)
+        nxt = f"{present}。続けて {park} を打つ" if gates else park  # 止まったプランと同居しても提示の指示を落とさない
+    return result("supervise-queue", status, summary, items, metrics, next=nxt)
+
+
+def _park_line(held: dict, done_path: Path) -> str:
+    """答え待ちの停止で流さなかったレーンが打つ 1 行（`parallel.py park`）。"""
+    tool = Path(__file__).resolve().parent.parent / "parallel.py"
+    return f"python3 {shlex.quote(str(tool))} park {held['plan']} --lane {held['lane']} --done {shlex.quote(str(done_path))}"
 
 
 WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
