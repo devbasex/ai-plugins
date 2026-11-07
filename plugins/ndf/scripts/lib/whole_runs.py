@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 import estimate_records
-from state_home import state_home
+from state_home import user_home
 
 SCHEMA = 1
 RECENT_ROWS = 5  # 直近 = 同じ鍵の最新 5 行のうち最大の秒
@@ -34,7 +34,7 @@ def path(root: Path | str | None = None) -> Path:
     got = estimate_records.find_git_dir(start)
     if got:
         return got[1] / "ndf" / "test-run" / "whole.jsonl"
-    return state_home() / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
+    return user_home() / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
 
 
 def record_whole(root: Path | str | None, key: str, seconds: float, source: str) -> bool:

@@ -301,13 +301,19 @@ NDF_CODEX_SLACK_NOTIFY=true
 | `DEBUG_SLACK_NOTIFY` | 任意。`true` なら `~/.claude/logs/wait-notify-<日付>.log` へ判定の理由を書きます |
 
 機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
-直前の 1 件）は `~/.claude/ndf/state/wait-notify/` にセッションごとに置き、7 日で消します。
+直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
 
-**NDF がリポジトリの外に書く状態（耐久ワークフローの記録・プランの状態・relay・台帳）の根は `~/.claude/ndf/state` です**
-（`NDF_STATE_HOME` → `${XDG_STATE_HOME}/ndf` → `~/.claude/ndf/state` の順。`lib/state_home.py`）。Claude Code の
-ログインと同じ木に置き、コンテナを作り直しても残るようにしています。旧の置き場 `~/.local/state/ndf` が残っている間は
-旧を使い続けます。動いている耐久ワークフローとラッパーを止めてから、次の 1 行で移してください（旧を使っている
-プロセスがあれば、何も変えずに pid を出して終わります）。
+**NDF がリポジトリの外に書く状態は、持ち主ごとに 3 つの置き場へ分けています**（`lib/state_home.py`）。
+
+| 持ち主 | 置き場 | 置くもの |
+| --- | --- | --- |
+| チェックアウト | `<git の共通ディレクトリ>/ndf/state` | 耐久ワークフローの記録 `dbos/`・プランの状態 `sv/`。コンテナを作り直しても残り、同じパスの別のチェックアウトと混ざりません |
+| 利用者 | `~/.claude/ndf/state` | 追記だけの台帳（問いの台帳・MVV の記録・`metrics/`・`usage/`・`checks/`・`stages/` など）。`~/.claude` を共有するコンテナの間で共有します |
+| コンテナのプロセス | `~/.local/state/ndf` | relay・待ちの通知・guard・context。pid を持つため、コンテナごとに分けます |
+
+`NDF_STATE_HOME` か `XDG_STATE_HOME` を指定すると、3 つとも その置き場になります。旧の版が `~/.local/state/ndf` に
+始めた耐久ワークフローは、そのまま旧の記録で続きます。旧の台帳は次の 1 行で利用者の置き場へ足し合わせます（何度打っても
+かまいません）。
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state-home.py" migrate

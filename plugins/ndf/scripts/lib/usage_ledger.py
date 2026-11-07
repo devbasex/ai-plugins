@@ -6,7 +6,7 @@
 
 1. `NDF_USAGE_DIR`（テストと、置き場所を明示したいとき）
 2. `${CLAUDE_PLUGIN_DATA}/usage`
-3. `<状態の根>/usage`（根は `state_home`）
+3. `<状態の根>/usage`（根は `state_home.user_home`）
 
 帳簿のディレクトリの直下の `<owner>__<repo>.jsonl` は版 1（#1142）の行で、読むときに claude の行とみなす。
 
@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
-from state_home import state_home
+from state_home import user_home
 
 LIB = Path(__file__).resolve().parent
 RUNTIMES = ("claude", "codex", "kiro", "agy", "jev")  # 帳簿のランタイム（cross-review の席順の ALL_RUNTIMES とは別）
@@ -48,7 +48,7 @@ def ledger_dir(env: Optional[dict] = None) -> Path:
     if env.get("CLAUDE_PLUGIN_DATA"):
         return Path(env["CLAUDE_PLUGIN_DATA"]) / "usage"
     if env.get("NDF_STATE_HOME") or env.get("XDG_STATE_HOME") or env.get("HOME"):
-        return state_home(env) / "usage"
+        return user_home(env) / "usage"
     return Path(env.get("TMPDIR") or "/tmp") / "ndf-usage"
 
 

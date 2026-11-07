@@ -29,13 +29,8 @@ NOTE_COLOR='\033[0;33m'
 session_id=$(echo "$input" | jq -r '.session_id // empty' 2>/dev/null)
 [ -n "$session_id" ] || { [ -n "$transcript" ] && session_id=$(basename "$transcript" .jsonl); }
 case "$session_id" in *[!A-Za-z0-9_-]*) session_id="" ;; esac
-# 状態の根の順は lib/state_home.py と同じ（#2766）
-ndf_state="${NDF_STATE_HOME:-${XDG_STATE_HOME:+$XDG_STATE_HOME/ndf}}"
-if [ -z "$ndf_state" ]; then
-  ndf_state="$HOME/.claude/ndf/state"
-  [ ! -e "$ndf_state" ] && [ -d "$HOME/.local/state/ndf" ] && ndf_state="$HOME/.local/state/ndf"
-fi
-ctx_sessions="${NDF_CONTEXT_DIR:-$ndf_state/context}"
+# コンテナの状態の根。順は lib/state_home.py の container_home と同じ（#2766）
+ctx_sessions="${NDF_CONTEXT_DIR:-${NDF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/ndf}/context}"
 ctx_sessions="$ctx_sessions/sessions"
 policy="" decide_from="" policy_limit="" policy_margin=""
 if [ -n "$session_id" ]; then

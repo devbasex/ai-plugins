@@ -1,6 +1,6 @@
 """ラッパーのファイル名の定数と、どのモジュールも使う小さな関数（#895・#1142 の C6）。
 
-読み込みのときは標準ライブラリと、バージョンディレクトリにも入る `lib/clock.py`・`lib/jsonio.py` だけを import する
+読み込みのときは標準ライブラリと、バージョンディレクトリにも入る `lib/clock.py`・`lib/jsonio.py`・`lib/state_home.py`（状態の置き場。#2766）だけを import する
 （I2。ラッパーを動かす python を選ぶ `venv` と、素通しの `claude` より前に読まれるため）。排他はファイルロックの包み
 `lib/locks.py`（filelock）を、使う関数の中で import する（決定 20）。
 時刻と JSON の読みはライブラリの 1 つの実装を使う（決定 6）。JSON の書き込みだけは、権限 0600 と
@@ -24,7 +24,7 @@ if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
 import clock  # noqa: E402
 import jsonio  # noqa: E402
-from state_home import state_home  # noqa: E402
+from state_home import container_home  # noqa: E402
 
 MARK_FILE = "next.json"
 # 子の応答が API の失敗（利用上限など）で終わったときに StopFailure hook が書くシグナルファイル（#1389）
@@ -85,7 +85,7 @@ def write_json_atomic(path: str, data) -> None:
 
 
 def state_root() -> str:
-    return str(state_home() / "relay")
+    return str(container_home() / "relay")
 
 
 def data_dir() -> str:

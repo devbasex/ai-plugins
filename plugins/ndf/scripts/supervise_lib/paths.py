@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 import worktree_deps
-from state_home import state_home
+from state_home import checkout_home, legacy_entry
 from supervise_lib import decl, plan as plan_mod
 
 SELF = Path(__file__).resolve().parent.parent / "supervise.py"
@@ -198,7 +198,8 @@ def state_dir_of(plan: str) -> Path:
         if not under_temp(Path(plan)) or under_temp(home):
             return link
         digest = hashlib.sha256(str(Path(plan).resolve()).encode()).hexdigest()[:8]
-        real = home / f"{Path(plan).stem}-{digest}"
+        name = f"{Path(plan).stem}-{digest}"
+        real = home / name if os.environ.get("NDF_SV_STATE_DIR") else legacy_entry(home / name, "sv", name)
         real.mkdir(parents=True, exist_ok=True)
         if Path(plan).is_file() and not (real / "plan.json").exists():
             shutil.copyfile(plan, real / "plan.json")
@@ -232,10 +233,10 @@ def under_temp(path: Path) -> bool:
 
 
 def sv_state_home() -> Path:
-    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `<状態の根>/sv`（根は `state_home`）。"""
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `<チェックアウトの根>/sv`（根は `state_home.checkout_home`）。"""
     if os.environ.get("NDF_SV_STATE_DIR"):
         return Path(os.environ["NDF_SV_STATE_DIR"])
-    return state_home() / "sv"
+    return checkout_home() / "sv"
 
 
 def queue_done_path(plans: list[str], done: str | None) -> Path:

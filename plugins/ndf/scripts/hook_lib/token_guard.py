@@ -30,7 +30,7 @@ from typing import Iterator
 
 import jsonio
 
-from state_home import state_home
+from state_home import container_home
 
 from . import payload as pl
 
@@ -66,12 +66,13 @@ def _field(raw: dict, *path: str) -> str:
 
 
 def guards_dir() -> Path | None:
-    """記録の置き場所。順は workflow-common.sh の wf_state_dir と同じ（あちらは stages/、こちらは guards/）。"""
+    """記録の置き場所。順は workflow-common.sh の wf_state_dir と同じ（あちらは stages/、こちらは guards/）。ただし既定の根は
+    分かれる: こちらはコンテナの根（`state_home.container_home`）、あちらは利用者の根（#2766）。"""
     fallback = Path(os.environ.get("TMPDIR") or "/tmp") / "ndf-guards"
     if os.environ.get("CLAUDE_PLUGIN_DATA"):
         base = Path(os.environ["CLAUDE_PLUGIN_DATA"]) / "guards"
     elif os.environ.get("NDF_STATE_HOME") or os.environ.get("XDG_STATE_HOME") or os.environ.get("HOME"):
-        base = state_home() / "guards"
+        base = container_home() / "guards"
     else:
         base = fallback
     for d in (base, fallback):

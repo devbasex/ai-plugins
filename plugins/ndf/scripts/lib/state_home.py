@@ -1,17 +1,21 @@
-"""NDF の状態の置き場の根（#2766）。リポジトリの外に書く状態（耐久ワークフローの記録・プランの状態・relay・台帳など）は
-すべてこの根の下の `<種類>/` に置く。各置き場の個別の上書き（`NDF_DBOS_DIR` など）は呼ぶ側が先に見る。
+"""NDF の状態の置き場（#2766）。リポジトリの外に書く状態を、持ち主ごとに 3 つの根へ分ける。
 
-解決の順:
+| 持ち主 | 根（既定） | 置くもの | 理由 |
+| --- | --- | --- | --- |
+| チェックアウト | `<git の共通ディレクトリ>/ndf/state`（`checkout_home`） | 耐久の記録 `dbos/`・プランの状態 `sv/` | 絶対パスから鍵を作る。永続で、チェックアウトごとに別になる（同じパスの別のチェックアウトと混ざらない） |
+| 利用者 | `~/.claude/ndf/state`（`user_home`） | 追記だけの台帳（`ask.jsonl`・MVV の記録・`metrics/`・`usage/`・`checks/`・`stages/` など。`USER_KINDS`） | Claude Code のログインと同じ永続の木。複数のコンテナで共有して集計に使う |
+| コンテナのプロセス | `~/.local/state/ndf`（`container_home`） | relay・待ちの通知・guard・context（pid とセッションを持つもの） | pid の名前空間はコンテナごとに別。プロセスはコンテナとともに消える |
 
-1. `NDF_STATE_HOME`
-2. `$XDG_STATE_HOME/ndf`
-3. `$HOME/.claude/ndf/state`（既定）。ただし既定が無く旧 `$HOME/.local/state/ndf` があれば旧（移行の前）
+`NDF_STATE_HOME` か `$XDG_STATE_HOME/ndf` を指定すると、3 つとも その 1 つの根になる（テストと明示の指定）。
+各置き場の個別の上書き（`NDF_DBOS_DIR` など）は呼ぶ側が先に見る。`CLAUDE_CONFIG_DIR` は使わない（relay が
+アカウントごとの子へ別の値を渡すため、置き場が割れる）。
 
-既定を `~/.claude` の下に置くのは、Claude Code のログインを保つ構成なら永続化されているためである（`~/.local` は
-コンテナの書き込み層にあり、作り直しで消える）。`CLAUDE_CONFIG_DIR` は使わない（relay がアカウントごとの子へ
-別の値を渡すため、置き場が割れる）。旧から新への移行は `state-home.py migrate` が 1 回だけ行う（`migrate`）。
-シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_state_home`・`statusline.sh`・
-`hooks/claude.json` にある。
+旧の置き場（`~/.local/state/ndf`）からの移り方:
+
+- チェックアウトの記録は、新に無く旧にある記録を旧のまま使う（`legacy_entry`。動いている耐久ワークフローを続ける）
+- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。何度打ってもよい
+
+シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_user_state_home` にある。
 """
 
 from __future__ import annotations
@@ -21,8 +25,24 @@ import shutil
 from pathlib import Path
 from typing import Mapping, Optional
 
+# 利用者の根に置く台帳（ファイルかディレクトリの名前）。ほかはコンテナの根に残る
+USER_KINDS = (
+    "ask.jsonl",
+    "mvv-gate.jsonl",
+    "project-mvv.jsonl",
+    "project-mvv-signals.jsonl",
+    "gate-rejections.jsonl",
+    "project-mvv",
+    "metrics",
+    "usage",
+    "checks",
+    "stages",
+    "estimate",
+    "test-run",
+)
 
-def _env(env: Optional[Mapping[str, str]]) -> Mapping[str, str | None]:
+
+def _env(env: Optional[Mapping[str, str]]) -> Mapping[str, Optional[str]]:
     if env is not None:
         return env
     return {  # 読む変数を名前で書く（契約の検査が読みを拾う）
@@ -32,83 +52,130 @@ def _env(env: Optional[Mapping[str, str]]) -> Mapping[str, str | None]:
     }
 
 
-def _home(env: Mapping[str, str | None]) -> Path:
-    return Path(env.get("HOME") or Path.home())
-
-
-def default_home(env: Optional[Mapping[str, str]] = None) -> Path:
-    """既定の根（移行の後の置き場）。"""
-    return _home(_env(env)) / ".claude" / "ndf" / "state"
-
-
-def legacy_home(env: Optional[Mapping[str, str]] = None) -> Path:
-    """旧の根（`~/.local/state/ndf`）。"""
-    return _home(_env(env)) / ".local" / "state" / "ndf"
-
-
-def state_home(env: Optional[Mapping[str, str]] = None) -> Path:
-    """状態の置き場の根（モジュールの docstring の順）。空の値は無いものとして次へ進む。"""
+def explicit_home(env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
+    """明示した根（`NDF_STATE_HOME` → `$XDG_STATE_HOME/ndf`）。無ければ None。空の値は無いものとする。"""
     env = _env(env)
     if env.get("NDF_STATE_HOME"):
         return Path(env["NDF_STATE_HOME"])
     if env.get("XDG_STATE_HOME"):
         return Path(env["XDG_STATE_HOME"]) / "ndf"
-    new, old = default_home(env), legacy_home(env)
-    if not new.exists() and old.is_dir():
-        return old
-    return new
+    return None
 
 
-def holders(root: Path, proc: Path = Path("/proc")) -> list[dict]:
-    """`root` の下のファイルを開いている・作業ディレクトリにしているプロセス（自分を除く）。/proc が無ければ空。"""
-    root = root.resolve()
-    me = os.getpid()
-    out = []
-    for p in proc.glob("[0-9]*"):
-        if int(p.name) == me:
-            continue
-        links = [p / "cwd", *(p / "fd").glob("*")] if (p / "fd").is_dir() else [p / "cwd"]
-        hit = None
-        for link in links:
+def _home(env: Mapping[str, Optional[str]]) -> Path:
+    return Path(env.get("HOME") or Path.home())
+
+
+def legacy_home(env: Optional[Mapping[str, str]] = None) -> Path:
+    """旧の根（`~/.local/state/ndf`）。コンテナの根の既定と同じ場所である。"""
+    return _home(_env(env)) / ".local" / "state" / "ndf"
+
+
+def container_home(env: Optional[Mapping[str, str]] = None) -> Path:
+    """コンテナのプロセスの状態の根。"""
+    return explicit_home(env) or legacy_home(env)
+
+
+def user_home(env: Optional[Mapping[str, str]] = None) -> Path:
+    """利用者の台帳の根。"""
+    return explicit_home(env) or _home(_env(env)) / ".claude" / "ndf" / "state"
+
+
+def find_git_dir(start: Path) -> tuple[Path, Path] | None:
+    """(リポジトリの根, git の共通ディレクトリ)。`.git` を上へ探して読む（`git` を起動しない）。git でなければ None。"""
+    start = Path(start).resolve()
+    for d in (start, *start.parents):
+        dot = d / ".git"
+        if dot.is_dir():
+            return d, _common_of(dot)
+        if dot.is_file():
             try:
-                target = Path(os.readlink(link))
+                text = dot.read_text(encoding="utf-8").strip()
             except OSError:
-                continue
-            if target == root or root in target.parents:
-                hit = str(target)
-                break
-        if hit:
-            try:
-                cmd = (p / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
-            except OSError:
-                cmd = ""
-            out.append({"pid": int(p.name), "path": hit, "cmd": cmd[:200]})
-    return out
+                return None
+            if not text.startswith("gitdir:"):
+                return None
+            gitdir = Path(text[len("gitdir:") :].strip())
+            gitdir = gitdir if gitdir.is_absolute() else (d / gitdir)
+            return d, _common_of(gitdir.resolve())
+    return None
 
 
-def migrate(env: Optional[Mapping[str, str]] = None, proc: Path = Path("/proc")) -> dict:
-    """旧の根を既定の根へ移す。結果は `{"status", "summary", "from", "to", "holders"}`。
+def _common_of(gitdir: Path) -> Path:
+    f = gitdir / "commondir"
+    if f.is_file():
+        try:
+            rel = f.read_text(encoding="utf-8").strip()
+        except OSError:
+            return gitdir
+        p = Path(rel)
+        return (p if p.is_absolute() else gitdir / p).resolve()
+    return gitdir
 
-    status: `migrated`（移した）・`none`（移すものが無い・既に移した・上書きの指定で既定を使わない）・
-    `held`（旧を開いているプロセスがある。何も変えない）・`conflict`（新と旧が両方ある。何も変えない）。
-    `<新>.partial` へ写してから改名し、最後に旧を消す。途中で落ちても旧は残り、解決は旧を指したままになる。"""
+
+def checkout_home(start: Optional[Path] = None, env: Optional[Mapping[str, str]] = None) -> Path:
+    """チェックアウトの記録の根。`start`（省けば作業ディレクトリ）の git の共通ディレクトリの下。git の外はコンテナの根。"""
+    explicit = explicit_home(env)
+    if explicit is not None:
+        return explicit
+    try:
+        got = find_git_dir(Path(start) if start is not None else Path.cwd())
+    except OSError:
+        got = None
+    return got[1] / "ndf" / "state" if got else container_home(env)
+
+
+def legacy_entry(new: Path, kind: str, name: str, env: Optional[Mapping[str, str]] = None) -> Path:
+    """チェックアウトの記録 `new`（`<根>/<kind>/<name>`）が無く、旧の根の同じ記録があれば旧を返す（移行の前の記録を続ける）。"""
+    if explicit_home(env) is not None or new.exists():
+        return new
+    old = legacy_home(env) / kind / name
+    return old if old.exists() else new
+
+
+def _merge(src: Path, dst: Path, moved: list, kept: list) -> None:
+    """`src` を `dst` へ足し合わせる。`.jsonl` は追記、無いものは移し、同じ名前の他のファイルは旧に残す。"""
+    if src.is_dir() and not src.is_symlink():
+        for child in sorted(src.iterdir()):
+            _merge(child, dst / child.name, moved, kept)
+        try:
+            src.rmdir()
+        except OSError:
+            pass  # 残したものがある
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.exists():
+        shutil.move(str(src), str(dst))
+        moved.append(str(dst))
+    elif src.suffix == ".jsonl":
+        data = src.read_bytes()
+        if data:
+            with dst.open("ab") as f:
+                f.write(data if data.endswith(b"\n") else data + b"\n")
+        src.unlink()
+        moved.append(str(dst))
+    else:
+        kept.append(str(src))
+
+
+def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
+    """旧の根の利用者の台帳（`USER_KINDS`）を利用者の根へ足し合わせる。結果は `{"status", "summary", "from", "to", "moved", "kept"}`。
+
+    status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（同じ名前のファイルが両方にあり、
+    旧に残したものがある）。何度打ってもよい（旧の版のプロセスが旧へ書いた分も、次に打てば移る）。"""
     env = _env(env)
-    new, old = default_home(env), legacy_home(env)
-    base = {"from": str(old), "to": str(new), "holders": []}
-    if env.get("NDF_STATE_HOME") or env.get("XDG_STATE_HOME"):
+    old, new = legacy_home(env), user_home(env)
+    base = {"from": str(old), "to": str(new), "moved": [], "kept": []}
+    if explicit_home(env) is not None:
         return {**base, "status": "none", "summary": "NDF_STATE_HOME か XDG_STATE_HOME が指定されていて、既定の置き場を使わない"}
-    if not old.is_dir():
-        return {**base, "status": "none", "summary": f"旧の置き場 {old} が無い（移すものが無い）"}
-    if new.exists():
-        return {**base, "status": "conflict", "summary": f"{new} と {old} が両方ある。中身を確かめて片方へまとめる"}
-    held = holders(old, proc)
-    if held:
-        return {**base, "status": "held", "holders": held, "summary": f"{len(held)} 個のプロセスが {old} を使っている。止めてから打ち直す"}
-    partial = new.with_name(new.name + ".partial")
-    if partial.exists():
-        shutil.rmtree(partial)
-    partial.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(old, partial, symlinks=True)
-    partial.rename(new)
-    shutil.rmtree(old)
-    return {**base, "status": "migrated", "summary": f"{old} を {new} へ移した"}
+    moved: list = []
+    kept: list = []
+    for kind in USER_KINDS:
+        if (old / kind).exists():
+            _merge(old / kind, new / kind, moved, kept)
+    out = {**base, "moved": moved, "kept": kept}
+    if kept:
+        return {**out, "status": "kept", "summary": f"{len(moved)} 件を移し、{len(kept)} 件は移し先に同じ名前があるため旧に残した"}
+    if moved:
+        return {**out, "status": "migrated", "summary": f"{len(moved)} 件を {new} へ移した"}
+    return {**out, "status": "none", "summary": f"{old} に移す台帳が無い"}

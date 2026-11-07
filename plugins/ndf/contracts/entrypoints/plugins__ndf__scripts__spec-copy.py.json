@@ -10,6 +10,7 @@
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "HOME",
+    "NDF_DBOS_DIR",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_LOCK_DIR",

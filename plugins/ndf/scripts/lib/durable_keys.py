@@ -3,7 +3,7 @@
 記録が有るかを確かめるだけの呼び出し（空の投稿キューの `count()` など）が、DBOS の import と
 耐久ワークフローの登録を起こさずに答えられるように分ける。`durable.py` はここの名前をそのまま出す。
 
-- 置き場: `NDF_DBOS_DIR` → `<状態の根>/dbos`（`records_dir`。根は `state_home`）
+- 置き場: `NDF_DBOS_DIR` → `<チェックアウトの根>/dbos`（`records_dir`。根は `state_home.checkout_home`。新に無く旧にある記録は旧を使う: `record_dir`）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`（I17）
 """
 
@@ -14,7 +14,7 @@ import os
 import re
 from pathlib import Path
 
-from state_home import state_home
+from state_home import checkout_home, legacy_entry
 from typing import Mapping, Optional
 
 KIND_RE = re.compile(r"^[a-z][a-z0-9]*$")
@@ -29,7 +29,7 @@ def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
     env = os.environ if env is None else env
     if env.get("NDF_DBOS_DIR"):
         return Path(env["NDF_DBOS_DIR"])
-    return state_home(env) / "dbos"
+    return checkout_home(env=env) / "dbos"
 
 
 def key_hash(text: str, n: int = 12) -> str:
@@ -46,4 +46,13 @@ def launch_key(kind: str, identity: str) -> str:
 
 def record_path(kind: str, identity: str) -> Path:
     """耐久の記録のファイル。無ければ DBOS を起動せずに「積んでいない」と答えられる。"""
-    return records_dir() / f"{launch_key(kind, identity)}.sqlite"
+    key = launch_key(kind, identity)
+    return record_dir(key) / f"{key}.sqlite"
+
+
+def record_dir(key: str) -> Path:
+    """実行の鍵 `key` の記録を置くディレクトリ。新に無く旧の根にあれば旧（移行の前に始めた耐久ワークフローを続ける）。"""
+    d = records_dir()
+    if os.environ.get("NDF_DBOS_DIR"):
+        return d
+    return legacy_entry(d / f"{key}.sqlite", "dbos", f"{key}.sqlite").parent

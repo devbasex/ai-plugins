@@ -49,7 +49,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
-from state_home import state_home  # noqa: E402
+from state_home import user_home  # noqa: E402
 import monitor_outcome  # noqa: E402
 
 SCHEMA = 1
@@ -66,13 +66,13 @@ Extra = Callable[[pathlib.Path, dict, list], dict]
 def metrics_dir(env: Optional[Mapping[str, str]] = None) -> pathlib.Path:
     """要約の置き場所。**`NDF_METRICS=0` は見ない**（集計は止めた後も読める）。
 
-    `NDF_METRICS_DIR` → `<状態の根>/metrics`（根は `state_home`）。
+    `NDF_METRICS_DIR` → `<状態の根>/metrics`（根は `state_home.user_home`）。
     空の値は無いものとして次へ進む。
     """
     env = os.environ if env is None else env
     if env.get("NDF_METRICS_DIR"):
         return pathlib.Path(env["NDF_METRICS_DIR"])
-    return state_home(env) / "metrics"
+    return user_home(env) / "metrics"
 
 
 def _disabled(env: Mapping[str, str]) -> bool:

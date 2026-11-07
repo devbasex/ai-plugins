@@ -1,6 +1,6 @@
 """境界の判定の記録・費用の見込み・窓と適用値の受け渡し・作業ごとの集計（#2262）。
 
-状態ディレクトリは `NDF_CONTEXT_DIR` → `<状態の根>/context` の順（根は `state_home`。決定 12。
+状態ディレクトリは `NDF_CONTEXT_DIR` → `<状態の根>/context` の順（根は `state_home.container_home`。決定 12。
 `CLAUDE_PLUGIN_DATA` は statusline に渡らないため使わない）。
 
 | ファイル | 中身 | 保持 |
@@ -28,7 +28,7 @@ from typing import Iterator, Mapping
 import clock
 import context_policy as cp
 import jsonio
-from state_home import state_home
+from state_home import container_home
 from context_policy import REASONS  # noqa: F401  sprint-state.py の --reason の選択肢
 from usage_ledger import cache_writes, now_utc
 
@@ -55,7 +55,7 @@ def context_state_dir(env: Mapping | None = None) -> Path:
         }
     if env.get("NDF_CONTEXT_DIR"):
         return Path(env["NDF_CONTEXT_DIR"])
-    return state_home({**env, "HOME": env.get("HOME") or "/tmp"}) / "context"
+    return container_home({**env, "HOME": env.get("HOME") or "/tmp"}) / "context"
 
 
 def decisions_repo(root) -> str:
