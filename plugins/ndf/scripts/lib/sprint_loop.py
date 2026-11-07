@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+import delivery
 import design_pr_merge
 import jsonio
 import project_mvv as pm
@@ -229,7 +230,7 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
         return (
             None,
-            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す）",
+            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す。版数の要らない経路は --dev を省く）",
         )
     # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
@@ -277,7 +278,9 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
 def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -> list[str]:
     """sprint-state.py init のコマンド。周回のディレクトリに mvv.md があればスプリント MVV を渡す。"""
     init = [sys.executable, str(SPRINT_STATE), "init", lap["state_path"], "--name", lap["sprint"], "--pace", "auto", "--root", root]
-    init += [x for n in issues for x in ("--issue", str(n))] + ["--dev", lap["versions"]["dev"], "--prod", lap["versions"]["prod"]]
+    init += [x for n in issues for x in ("--issue", str(n))]
+    if versions := lap.get("versions"):
+        init += ["--dev", versions["dev"], "--prod", versions["prod"]]
     init += ["--goal", resume_command(rec)]
     mvv = Path(lap["dir"]) / "mvv.md"
     if mvv.is_file():
@@ -291,9 +294,10 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
     issues = selected_issues(lap)
     approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
     design = [n for n in issues if n not in approved]
-    dev = lap["versions"]["dev"]
     new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
-    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"], "--version", dev, "--out", lap["out"]]
+    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"], "--out", lap["out"]]
+    if lap.get("versions"):
+        new += ["--version", lap["versions"]["dev"]]
     if design:
         new += ["--design", *map(str, design)]
     if designed := [n for n in issues if n in approved]:
@@ -302,7 +306,15 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
     return new
 
 
-def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra: list[str]) -> dict:
+def version_needed(root: str) -> bool:
+    """周回に版数が要るか（リリースの経路が雛形で組むか）。宣言を読めなければ要る側へ倒す（今の止まり方のまま）。"""
+    from supervise_lib.release_templates import RELEASE_FORMS
+
+    decl = delivery.load_delivery(root)
+    return bool(decl.problems) or delivery.needs_version(delivery.routes(decl, tuple(RELEASE_FORMS)))
+
+
+def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None, extra: list[str]) -> dict:
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap:
@@ -315,8 +327,10 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
-        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
         root = str(env.main_dir())
+        if not dev and version_needed(root):
+            return refusal_order("リリースの経路が版数を要する（--dev <開発版> を渡す）")
+        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)} if dev else {}, state_path=str(state))
         mvv = d / "mvv.md"
         code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
         if code != 0:

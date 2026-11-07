@@ -9,6 +9,8 @@
 - `dev_channel`: 開発版のチャネルの形（`separate-branch` / `manual-production` / 無し）。`pace: fast` / `auto` の使ってよい
   条件とスプリントのステージの組み立てが読む（#1454）
 - `release_way`: リリースの依頼を受けたときのリリースの組み方（組む / 組まない / 組めない）。並列の計画が読む（#2616）
+- `cd_guidance`: CD が無いリポジトリへ出す案内。状態を持たず、呼ぶたびに宣言から作る（#2623）
+- `publishes_by_cd`: リリースタグと GitHub Release を CD が作ると宣言しているか（#2623 の決定 12）
 """
 
 from __future__ import annotations
@@ -39,6 +41,10 @@ BUILD, SKIP, REFUSE = "build", "skip", "refuse"  # まとめたリリースを�
 SEPARATE_BRANCH = "separate-branch"  # 起点と本番チャネルが違う
 MANUAL_PRODUCTION = "manual-production"  # 起点と本番チャネルが同じで、本番系へ届く行がすべて手動（手動反映の本番系）
 
+# CD の結果の待ちの上限（秒）。行の宣言が無ければ DEFAULT_RESULT_TIMEOUT。1 回の読み取りの合計は RESULT_TOTAL_LIMIT で切る
+DEFAULT_RESULT_TIMEOUT, RESULT_TOTAL_LIMIT = 1800, 7200
+
+CD_SETUP_REF = "ndf の release の Skill の references/cd-setup.md"
 WT = f".ndf/{repo.WORKTREE_DECL.name}"
 PJ = str(project_decl.DECL)
 SV = ".ndf/supervise.json"
@@ -112,6 +118,56 @@ class ReleaseWay:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class CdGuidance:
+    """CD の案内。`missing` は何が無いか、`rows` は理由の無い手動の行の `target`（宣言そのものが無ければ空）。"""
+
+    missing: str
+    rows: tuple[str, ...] = ()
+    steps_ref: str = CD_SETUP_REF
+    example: str = (
+        '{"target": "<届け先>", "kind": "auto", "trigger": "<CD の名前>", "channel": "production", "versioned": false, '
+        '"result": {"workflow": "<ワークフローのファイル名>"}}'
+    )
+    manual_reason_how: str = f"あえて CD を置かないなら、{PJ} の delivery の手動の行に manual_reason（理由）と trigger（手順）を書く"
+
+    def as_item(self) -> dict:
+        return {
+            "kind": "cd-guidance",
+            "name": "CD の案内",
+            "result": "guided",
+            "missing": self.missing,
+            "rows": list(self.rows),
+            "steps_ref": self.steps_ref,
+            "example": self.example,
+            "manual_reason_how": self.manual_reason_how,
+        }
+
+
+def _result_problem(v: dict, where: str) -> str | None:
+    """`result`（結果の読み方）の形の誤り。合えば None。"""
+    if not isinstance(v, dict):
+        return f"{where}.result がオブジェクトでない"
+    ways = [k for k in ("workflow", "command") if v.get(k) is not None]
+    if len(ways) > 1:
+        return f"{where}.result の workflow と command は同時に書けない"
+    if ways and not (isinstance(v[ways[0]], str) and v[ways[0]].strip()):
+        return f"{where}.result.{ways[0]} が空か文字列でない"
+    limit = v.get("timeout_seconds")
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
+        return f"{where}.result.timeout_seconds が正の整数でない"
+    return None
+
+
+def _row_problem(row: dict, where: str) -> str | None:
+    """#2623 で足した任意の欄の形の誤り。読めない宣言として止める側へ倒す（I4）。"""
+    if row.get("manual_reason") is not None and not isinstance(row["manual_reason"], str):
+        return f"{where}.manual_reason が文字列でない"
+    if row.get("publishes_release") is not None and not isinstance(row["publishes_release"], bool):
+        return f"{where}.publishes_release が真偽値でない"
+    return _result_problem(row["result"], where) if row.get("result") is not None else None
+
+
 def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str | None]:
     if "delivery" not in project or project.get("delivery") is None:
         return None, None
@@ -127,6 +183,9 @@ def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str
             return None, None
         if row.get("channel") is not None and row["channel"] not in ("production", "base"):
             problems.append(f"{PJ} の delivery[{i}]: channel が production / base でない")
+            return None, None
+        if why := _row_problem(row, f"delivery[{i}]"):
+            problems.append(f"{PJ} の {why}")
             return None, None
     return v, None
 
@@ -231,6 +290,28 @@ def reaches_by_merge(row: dict, production: str | None) -> bool:
     return row.get("kind") == "auto" and bool(production) and row.get("branch") == production and row.get("production") is not False
 
 
+def merge_rows(decl: DeliveryDecl) -> list[dict]:
+    """本番チャネルへのマージで自動で本番系へ届く行のすべて（CD の結果を読む対象）。"""
+    return [r for r in decl.rows or [] if reaches_by_merge(r, decl.production)]
+
+
+def publishes_by_cd(decl: DeliveryDecl) -> bool:
+    """リリースタグと GitHub Release を CD が作ると宣言しているか。別の成果物を届ける自動の行は数えない（I11）。"""
+    return any(r.get("versioned") is True and r.get("publishes_release") is True for r in merge_rows(decl))
+
+
+def cd_guidance(decl: DeliveryDecl) -> CdGuidance | None:
+    """CD の案内。上から順に最初に当たった条件で決まる。読めない宣言には出さない（理由は経路の判定が示す。I4）。"""
+    if decl.problems:
+        return None
+    if decl.rows is None:
+        return CdGuidance(f"{PJ} の delivery の宣言")
+    rows = [r for r in decl.rows if r.get("kind") == "manual" and not str(r.get("manual_reason") or "").strip()]
+    if rows:
+        return CdGuidance("CD か、CD を置かない理由（manual_reason）", tuple(str(r.get("target") or "") for r in rows))
+    return None
+
+
 def _first_merge_row(decl: DeliveryDecl) -> tuple[int, dict] | None:
     """本番チャネルへのマージで自動で本番系へ届く最初の行（番号と行）。"""
     return next(((i, row) for i, row in enumerate(decl.rows) if reaches_by_merge(row, decl.production)), None)
@@ -308,7 +389,7 @@ def _row_route(row: dict, decl: DeliveryDecl) -> Route:
     """delivery の 1 行から経路を 1 つ作る。"""
     target, branch = str(row.get("target") or ""), row.get("branch") or None
     prod = row.get("production") if isinstance(row.get("production"), bool) else None
-    if row.get("kind") == "auto" and not row.get("versioned"):
+    if row.get("kind") == "auto":  # 版の有無（versioned）と誰が届けるかは別の話で、経路は kind とブランチだけで決める（#2623 の決定 1）
         if branch and branch == decl.base:
             return Route(MERGE, target, branch, STAGE_MERGED_BY_CHECK, production=prod)
         if branch and branch == decl.production:

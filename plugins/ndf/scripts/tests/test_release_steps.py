@@ -742,6 +742,7 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
         return subprocess.CompletedProcess(args, rc, out, "")
 
     monkeypatch.setattr(mod, "git", git)
+    monkeypatch.setattr(mod.publish, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: root)
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))

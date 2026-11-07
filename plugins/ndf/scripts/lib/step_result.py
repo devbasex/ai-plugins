@@ -52,6 +52,8 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 # PR がベースブランチと衝突している（mergeStateStatus が DIRTY か、gh pr merge がマージのコミットを作れずに拒んだ）。
 # merge-when-green が返し、プランの merge はベースブランチの取り込みへ戻る（#1917）
 EXIT_BASE_CONFLICT = 4
+# CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。#2623）
+EXIT_CD_FAILED = 5
 # 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた（`stopped` だけ。#2227）
 EXIT_INCOMPLETE = 6
 EXIT_GATE = 10  # 10〜19: 承認ゲート（人の同意が要る）
@@ -81,6 +83,7 @@ def code_matches(status: str, code: int) -> bool:
         EXIT_UNREADABLE,
         EXIT_PRECONDITION,
         EXIT_BASE_CONFLICT,
+        EXIT_CD_FAILED,
         EXIT_INCOMPLETE,
         EXIT_DEPS_MISSING,
         EXIT_INFRA_WAIT,

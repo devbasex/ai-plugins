@@ -119,7 +119,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--reason", required=True)
     s = name(ls.add_parser("sprint"))
     s.add_argument("--mode", required=True)
-    s.add_argument("--dev", required=True)
+    s.add_argument("--dev", help="開発版の版数。リリースの経路が雛形で組むときだけ要る")
     s.add_argument("--prod")
     s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて supervise.py new sprint へそのまま渡す
     s = name(ls.add_parser("gate"))
