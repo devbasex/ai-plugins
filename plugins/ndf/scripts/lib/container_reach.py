@@ -108,28 +108,12 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
     if not worktree_base.add_exclude(wt, f"{EVIDENCE}/"):
         raise Unreachable(f"探りの印を git の無視へ登録できない（{wt}）")
     token = secrets.token_hex(16)
-    p = _exec_marker_probe(docker, service, env, wt, token)
-    return _interpret_probe(p, service, env, token)
-
-
-def _exec_marker_probe(docker: str, service: str, env: dict[str, str], wt: Path, token: str) -> subprocess.CompletedProcess:
-    """探りの印を worktree に置き、コンテナから読ませた結果を返す。印は必ず片付ける。"""
     rel = f"{EVIDENCE}/reach-{token}"
     mark = wt / rel
     try:
         mark.parent.mkdir(exist_ok=True)
         mark.write_text(token, encoding="utf-8")
-        p = subprocess.run(
-            [docker, "compose", "exec", "-T", service, "cat", rel],
-            cwd=wt,
-            env={**os.environ, **env},
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=EXEC_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise Unreachable(f"サービス {service} のコンテナが {EXEC_TIMEOUT} 秒で答えない", wakeable=True) from None
+        p = _exec_marker_probe(docker, service, env, wt, rel)
     except OSError as e:
         raise Unreachable(f"サービス {service} のコンテナを探れない: {e}") from None
     finally:
@@ -141,7 +125,23 @@ def _exec_marker_probe(docker: str, service: str, env: dict[str, str], wt: Path,
             mark.parent.rmdir()
         except OSError:
             pass
-    return p
+    return _interpret_probe(p, service, env, token)
+
+
+def _exec_marker_probe(docker: str, service: str, env: dict[str, str], wt: Path, rel: str) -> subprocess.CompletedProcess:
+    """コンテナに探りの印 `rel` を読ませた結果を返す。"""
+    try:
+        return subprocess.run(
+            [docker, "compose", "exec", "-T", service, "cat", rel],
+            cwd=wt,
+            env={**os.environ, **env},
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=EXEC_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise Unreachable(f"サービス {service} のコンテナが {EXEC_TIMEOUT} 秒で答えない", wakeable=True) from None
 
 
 def _interpret_probe(p: subprocess.CompletedProcess, service: str, env: dict[str, str], token: str) -> dict[str, str]:
