@@ -20,7 +20,7 @@
 | [worktree-branch.sh](worktree-branch.sh) | worktree の一覧・追従先・ブランチの判定（`wt_current_branch` ほか） | 同上 |
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
-| [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293）。持ち続ける上限の秒を受け、別の PID 名前空間の持ち主のロックをその時刻まで捨てない（#2660） | 上の 2 つと `development-workflow` |
+| [lock-common.sh](lock-common.sh) | 排他の取得と解放。持ち続ける上限の秒を受け、別の PID 名前空間の持ち主のロックをその時刻まで捨てない | 上の 2 つと `development-workflow` |
 | [worktree-testenv-sweep.sh](worktree-testenv-sweep.sh) | テスト環境の片付け（使われていない環境の停止、残った割り当ての回収、回収の予約） | `worktree-testenv.sh` |
 | [run-limited.sh](run-limited.sh) | コマンドを別のプロセスグループで走らせ、期限か呼び出し元の消失で止める。`timeout` の有無に左右されない | `worktree-testenv-sweep.sh` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける。`main()` が `deps.require("procs", "locks")` を呼ぶ | 収束ループの 2 つ / `external-ai.py` |
