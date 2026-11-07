@@ -1,7 +1,7 @@
 """キューの続き（`supervise.py queue --resume <done>`。#1426 の決定 2）。
 
 前の起動が done の隣に残した一覧（`<done>.plans.json` の `stages`・`max`）からステージの並びを読み、done の `items` の
-完了していないプラン（結果が 止まった・報告なし・関門）を、それぞれが終えたステップから続ける。後続のステージは今の
+完了していないプラン（結果が 止まった・報告なし・承認ゲート）を、それぞれが終えたステップから続ける。後続のステージは今の
 queue と同じ条件（前のステージがすべて完了）で流れる。完了したプランは耐久の記録から結果を返し、流し直さない（I4）。
 一覧が無い・`stages` が無いときは何も流さない（I6）。
 """
@@ -77,7 +77,7 @@ def resume_targets(done: Path, overrides: dict[str, str] | None = None) -> tuple
     if prev is None:
         found = kept
     else:
-        # 続けないプラン（完了など）も前の開始のステップを保つ。落とすと別の実行の回になり、元の関門の結果を拾う
+        # 続けないプラン（完了など）も前の開始のステップを保つ。落とすと別の実行の回になり、元の承認ゲートの結果を拾う
         items = [i for i in prev.get("items") or [] if isinstance(i, dict) and i.get("result") in RESUMABLE]
         found = kept + [ResumeTarget(i["plan"], last_step(i["plan"]), i["result"]) for i in items if i.get("plan") in plans]
     by_plan = {t.plan: t for t in found}
@@ -99,8 +99,8 @@ def cmd_queue_resume(done: str, from_: list[str], max_: int | None, poll: float,
         metrics = {"plans": 0, "stopped": 0, "gate": 0, "not_run": 0, "done": str(done_path)}
         return result(TOOL, "stopped", f"続きを組めない: {e}。何も流さない", [], metrics, next="元の queue のコマンドを打ち直す")
     starts = {t.plan: t.step for t in found if t.step}
-    # 続ける対象（前の結果か --from）は、関門の記録があっても新しい実行の回で流す。同じ開始のステップでも、
-    # 承認を記録した後に過去の関門の結果を返し続けないため
+    # 続ける対象（前の結果か --from）は、承認ゲートの記録があっても新しい実行の回で流す。同じ開始のステップでも、
+    # 承認を記録した後に過去の承認ゲートの結果を返し続けないため
     rerun = [t.plan for t in found if t.reason != KEPT]
     for t in found:
         print(f"supervise-queue: {t.plan} を {t.step or '頭'} から続ける（{t.reason}）", file=sys.stderr, flush=True)

@@ -181,7 +181,9 @@
 ```
 
 - `<worktree-base>` の解決順は `cross-review` と同じ（`NDF_WORKTREE_BASE` >
-  `<システム tmpdir>/ndf-worktrees`）
+  コンテナの宣言があれば `<メインディレクトリ>/.worktrees/.ndf` > `<システム tmpdir>/ndf-worktrees`）
+- 着手前のテストと以後のテストは、テスト環境が止まっていれば自動で起こす（`worktree` Skill の
+  `references/test-execution.md` の「テスト環境の用意の決まり」）。作業ディレクトリは detached HEAD でよい
 - **同一ブランチを 2 つの作業ディレクトリへ checkout できない**という git の制約が
   あるため、提案用は必ず `--detach` にする
 - 読み取り専用でも分ける理由は 3 つ。提案の担当がテストを実行できること、

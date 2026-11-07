@@ -65,8 +65,8 @@ describe("承認待ちの一覧の画面", () => {
       .slice(1)
       .map((tr) => within(tr).getAllByRole("cell").map((td) => td.textContent));
     expect(cells).toEqual([
-      ["ゲート 1", "lfactory2", "3", "org-a/repo-a", "#1", "2026/11/4 9:00:01"],
-      ["ゲート 2", "lfactory3", "1", "org-a/repo-b", "#2", "2026/11/4 9:00:02"],
+      ["設計承認ゲート", "lfactory2", "3", "org-a/repo-a", "#1", "2026/11/4 9:00:01"],
+      ["リリース承認ゲート", "lfactory3", "1", "org-a/repo-b", "#2", "2026/11/4 9:00:02"],
       ["判断", "—", "—", "org-a/repo-a", "#3 #4", "2026/11/4 9:00:03"],
     ]);
     // 読むだけで、承認と差し戻しのボタンを置かない

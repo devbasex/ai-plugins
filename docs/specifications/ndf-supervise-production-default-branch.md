@@ -5,7 +5,7 @@
 **`supervise.py new` の `release`・`sprint`・`close` は、本番チャネルを `--production-branch` → `.ndf/worktree.json` の
 `production_branch` → 既定ブランチの順で決める。** 既定ブランチは、宣言を探す木の並びのうち最初に存在する git の木から解く。
 そのため、`--worktree` にまだ作っていない worktree のパスを渡しても、`production_branch` を宣言しないリポジトリで
-リリースプラン・承認ゲート 2・本番のステージが組まれる。リリースの経路の判定（`lib/delivery.py`）も同じ木から既定ブランチを
+リリースプラン・リリース承認ゲート・本番のステージが組まれる。リリースの経路の判定（`lib/delivery.py`）も同じ木から既定ブランチを
 解き、プランと同じ本番チャネルを使う。
 
 例: origin の HEAD が `main` で、`.ndf/worktree.json` が `{"base_branch":"main"}` だけのリポジトリで、
@@ -36,7 +36,7 @@ worktree を作った後に同じコマンドを打っても、同じステッ�
 
 - **既定ブランチを本番にしているリポジトリで、本番のプランを組めなかった（#2097）。** `production_branch` を書かないリポジトリでは、
   雛形が既定ブランチを `--worktree` のパスから解こうとする。そのパスはまだ無いため、`git -C <存在しないパス>` が終了コード 128 で
-  失敗する。結果として、`new release --channel prod` は「本番の配布に要る本番のブランチが無い」で止まり（終了コード 2）、
+  失敗する。結果として、`new release --channel prod` は「リリースに要る本番のブランチが無い」で止まり（終了コード 2）、
   `new sprint` は本番のステージを置かなかった。同じ宣言で、リリースの経路の判定は既定ブランチを本番チャネルにして経路を雛形と判定しており、
   2 つの判定が食い違っていた
 - origin の HEAD はリポジトリで 1 つのため、メインディレクトリから解いても、そのリポジトリの worktree から解いても同じ値になる
@@ -46,7 +46,7 @@ worktree を作った後に同じコマンドを打っても、同じステッ�
 | # | 決定 | 理由 |
 | --- | --- | --- |
 | 決定 1 | 既定ブランチは、宣言を探す木の並び（`decl_roots`）から最初に存在する git の木を選んで解く（`first_git_tree`）。git の木かどうかはメインディレクトリを解けるか（`decl.main_dir`）で判定する | 並びは宣言を探す順として既に決まっている。worktree が存在するときは今までどおり `--worktree` の木を使い、存在しないときだけ次の木へ進む。git の木の判定を別に作らない |
-| 決定 2 | 配布の判定の宣言（`delivery_decl`）も、同じ `first_git_tree` の木から既定ブランチを解く | 雛形の側だけを直すと、存在しない worktree ではリリースの経路の判定が本番チャネルを持たないまま残る。昇格のプラン（`plan_promote`）も同じ補完を受け、worktree の有無で昇格の有無が変わらない |
+| 決定 2 | リリースの判定の宣言（`delivery_decl`）も、同じ `first_git_tree` の木から既定ブランチを解く | 雛形の側だけを直すと、存在しない worktree ではリリースの経路の判定が本番チャネルを持たないまま残る。昇格のプラン（`plan_promote`）も同じ補完を受け、worktree の有無で昇格の有無が変わらない |
 | 決定 3 | 本番チャネルの 3 つの出所を並べた文面は、定数 `PRODUCTION_SOURCES`（`supervise_lib/decl.py`）1 つに置く | 文面はリリースプランのエラー・昇格のエラー・スプリントの案内・引数の help の 4 か所で使う。1 か所でも古い並びが残ると、既定ブランチへの後退が無いと読まれる。利用者へ「どこで直すか」を示すのは雛形の側の役割なので、`lib/repo.py` ではなく雛形の側に置く |
 
 ## 仕様
@@ -84,9 +84,9 @@ graph TD
 | --- | --- | --- |
 | I1 | 本番チャネルは、`--production-branch` → `production_branch` の宣言 → 既定ブランチの順で、最初に決まった値である | 結合のテストで落ちる |
 | I2 | 既定ブランチは、宣言を探す木の並びのうち最初に存在する git の木から解く。worktree のパスが存在しないことで結果が変わらない | 結合のテストで落ちる |
-| I3 | 同じ起動の中で、雛形の引数の本番チャネル（`a.production_branch`）と、配布の判定の宣言の本番チャネル（`delivery_decl(a).production`）は同じ値である | 結合のテストで落ちる |
+| I3 | 同じ起動の中で、雛形の引数の本番チャネル（`a.production_branch`）と、リリースの判定の宣言の本番チャネル（`delivery_decl(a).production`）は同じ値である | 結合のテストで落ちる |
 | I4 | `production_branch` の宣言か引数があるときは、木の選択も既定ブランチの問い合わせも行わない | 単体のテストで落ちる |
-| I5 | 3 つの出所のどれでも決まらないとき、止まるのは本番のプランを組む経路（`new release --channel prod`・昇格のプラン・fast / auto の `new sprint`・`new close`）だけである。開発版のリリース（`--channel dev`）は本番チャネルを使わずにプランを書き、normal の `new sprint` は承認ゲート 2 と本番のステージを置かずに案内を出してプランを書く | 結合のテストで落ちる |
+| I5 | 3 つの出所のどれでも決まらないとき、止まるのは本番のプランを組む経路（`new release --channel prod`・昇格のプラン・fast / auto の `new sprint`・`new close`）だけである。開発版のデプロイ（`--channel dev`）は本番チャネルを使わずにプランを書き、normal の `new sprint` はリリース承認ゲートと本番のステージを置かずに案内を出してプランを書く | 結合のテストで落ちる |
 
 ### 処理の流れ
 
@@ -143,11 +143,11 @@ ai-plugins は `production_branch` を宣言しているため、既定ブラン
 3 つの出所のどれでも本番チャネルが決まらないとき、`new release --channel prod` は終了コード 2 で止まり、次の文面を出す。
 
 ```text
-supervise.py: error: 本番の配布に要る本番のブランチが無い（--production-branch・.ndf/worktree.json の production_branch・既定ブランチ（origin/HEAD → main / master））
+supervise.py: error: リリースに要る本番のブランチが無い（--production-branch・.ndf/worktree.json の production_branch・既定ブランチ（origin/HEAD → main / master））
 ```
 
 昇格のプランは「昇格に要る本番チャネルが無い（…）」、normal の `new sprint` は結果 JSON の `next` に
-「本番のブランチ（…）が無いため、承認ゲート 2 と本番は置いていない」を出す。括弧の中はどれも `PRODUCTION_SOURCES` である。
+「本番のブランチ（…）が無いため、リリース承認ゲートと本番は置いていない」を出す。括弧の中はどれも `PRODUCTION_SOURCES` である。
 
 ## 運用
 
@@ -167,9 +167,9 @@ supervise.py: error: 本番の配布に要る本番のブランチが無い（--
   `verify` の ref が既定ブランチ（`main` と `main` 以外の名前の両方）であること。worktree を作った後も同じステップの並びになること（I1・I2）
 - origin の HEAD もローカルの `main` / `master` も無いとき、`--channel prod` が終了コード 2 で 3 つの出所を挙げ、`--channel dev` と normal の
   `new sprint` は終了コード 0 でプランを書くこと（I5）
-- まだ作っていない worktree のパスで、`new sprint` の normal・fast・auto が承認ゲート 2 と本番のステージを置き、本番を置かない案内を出さないこと
+- まだ作っていない worktree のパスで、`new sprint` の normal・fast・auto がリリース承認ゲートと本番のステージを置き、本番を置かない案内を出さないこと
 - `production_branch` の宣言（既定ブランチと違う値を含む）と `--production-branch` が既定ブランチより先に効くこと（I1）
-- 同じ起動で、雛形の引数と配布の判定の宣言の本番チャネルが一致すること（I3）
+- 同じ起動で、雛形の引数とリリースの判定の宣言の本番チャネルが一致すること（I3）
 - `production_branch` を宣言した組で、既定ブランチと木の選択を問い合わせないこと（I4）
 - `first_git_tree` が存在しないパスと git でないディレクトリを飛ばし、無ければ `None` を返すこと（I2）
 - 起点が既定ブランチと違い `production_branch` の無い組で、worktree の有無で `new sprint` のステージ（昇格を含む）が変わらないこと（決定 2）
@@ -177,5 +177,5 @@ supervise.py: error: 本番の配布に要る本番のブランチが無い（--
 ## 関連リンク
 
 - [ndf-entrypoint-contracts.md](ndf-entrypoint-contracts.md) — 宣言の読み方と、本番チャネルを 1 か所へ寄せた値
-- [ndf-production-release-record.md](ndf-production-release-record.md) — 本番の配布の記録
+- [ndf-production-release-record.md](ndf-production-release-record.md) — 本番のリリース記録
 - #2097

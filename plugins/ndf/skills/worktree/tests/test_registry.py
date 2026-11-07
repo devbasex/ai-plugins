@@ -323,7 +323,7 @@ def test_a_lock_that_changed_hands_is_never_moved_out(tmp_path: Path, lib: Path,
     """#297-1 / 2: 判定と違うロックは、いっとき外へ出すこともしない。
 
     外へ出している間はロックの名前が空く。持ち主が臨界区間にいるまま、別の担当が
-    関門を通れてしまう。**戻せば済むという扱いにはできない。** 戻すより先に取られると
+    判定を通れてしまう。**戻せば済むという扱いにはできない。** 戻すより先に取られると
     戻せず、持ち主のロックは捨てられる。
     """
     holder = tmp_path / "holder"
@@ -340,7 +340,7 @@ def test_a_lock_that_changed_hands_is_never_moved_out(tmp_path: Path, lib: Path,
     assert "rc=1" in got.stdout, got.stdout
     assert lock.is_dir(), "判定と違うロックを取り除いた"
     # 名前の付け替えは、外へ出す側も戻す側も親のディレクトリの更新時刻を動かす。
-    # ロックの中へ関門を置く手は動かさないため、外へ出したことだけを拾える。
+    # ロックの中へ排他の判定を置く手は動かさないため、外へ出したことだけを拾える。
     assert holder.stat().st_mtime_ns == parent_before, "外へ出した跡が親のディレクトリに残った"
     assert (lock / "held").exists(), "持ち主の握りの目印が失われた"
     assert (lock / "token").read_text(encoding="utf-8").strip() == "new-owner"
@@ -375,7 +375,7 @@ def test_a_discard_shuts_out_another_discard_of_the_same_lock(tmp_path: Path, li
 
     確かめることと取り除くことが別々だと、その間に別の担当が同じロックを捨てて取り直す。
     取り除く側は、確かめたものとは別の、**持ち主が臨界区間にいるロック**を取り除く。
-    取り除きにも関門を置き、同じロックの取り除きを 1 つに限ることで塞ぐ。
+    取り除きにも判定を置き、同じロックの取り除きを 1 つに限ることで塞ぐ。
     """
     shim_dir = tmp_path / "bin"
     shim_dir.mkdir()

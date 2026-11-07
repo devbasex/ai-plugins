@@ -1,6 +1,6 @@
 # プランの実行の核が「リリース後テスト」の進行の印を、記録を投稿したステップが ok で終わった後に付ける
 
-課題の本文の「進行」の「リリース後テスト」の印は、受け入れ条件ごとに確かめた記録（配布の記録の Pull Request への
+課題の本文の「進行」の「リリース後テスト」の印は、受け入れ条件ごとに確かめた記録（リリース記録の Pull Request への
 `## リリース後テスト` のコメント）があることの印である。プランの実行の核は、この工程の印だけをステップが ok で
 終わった後に付け、ほかの工程の印は今までどおりステップの始めに付ける（#2288。#2356 と同じ振る舞い）。
 
@@ -19,8 +19,8 @@
 
 | プラン | 何をするか | 「リリース後テスト」の印 |
 | --- | --- | --- |
-| まとめのプラン（`supervise.py new close`） | スプリントの仕上げで `merge →（配布の記録があれば）release-verify → retro → close → refine` を流す。`release-verify` のステップ（stage「リリース後テスト」）で worker が `/ndf:release-verification` を通す | ステップが ok で終わった後に付く |
-| 本番の配布のプラン（`release-prod`） | 本番へ配布し、`verify` のステップで版の導入だけを確かめる | 付かない（`verify` の stage は「配布」） |
+| まとめのプラン（`supervise.py new close`） | スプリントの仕上げで `merge →（リリース記録があれば）release-verify → retro → close → refine` を流す。`release-verify` のステップ（stage「リリース後テスト」）で worker が `/ndf:release-verification` を通す | ステップが ok で終わった後に付く |
+| 本番のリリースプラン（`release-prod`） | 本番へリリースし、`verify` のステップで版の導入だけを確かめる | 付かない（`verify` の stage は「デプロイ」） |
 
 印を付けるのは実行の核の 1 か所（`RunState.record_stage`）である。そこで工程の名前から印の時点を決めるため、
 どのプランのどのステップでも同じ規則になる。プランの JSON の形は変えない。
@@ -40,7 +40,7 @@
 | `plugins/ndf/scripts/supervise_lib/engine.py` の `Engine._run_step` | ステップの始めに `record_stage(stage, …)` を呼ぶ |
 | `plugins/ndf/scripts/supervise_lib/engine.py` の `Engine._next_after_step` | ok の分岐（`if ok:`）で `record_stage(stage, …, after_ok=True)` を呼ぶ |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` の `release_verify_step` | まとめのプランの `release-verify` の worker への指示に「進捗記録は打たない（このステップが ok で終わった後にプランが打つ）」を含める |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_release_verify_steps` | 本番と開発版の `verify` を stage「配布」で組む。導入の確認だけを流すステップを「リリース後テスト」と記録しない |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_release_verify_steps` | 本番と開発版の `verify` を stage「デプロイ」で組む。導入の確認だけを流すステップを「リリース後テスト」と記録しない |
 
 ## 仕様
 
@@ -69,7 +69,7 @@ sequenceDiagram
     核->>状: record_stage(リリース後テスト, 始め)
     状-->>核: 何もしない
     核->>W: /ndf:release-verification
-    W->>W: 受け入れ条件ごとに確かめ、<br/>配布の記録の PR へ投稿
+    W->>W: 受け入れ条件ごとに確かめ、<br/>リリース記録の PR へ投稿
     alt ok で終わった
         W-->>核: ok
         核->>状: record_stage(リリース後テスト, ok の後)
@@ -109,14 +109,14 @@ worker への起動指示と手順の本文が食い違うときは、起動指�
 
 ## 運用
 
-印が付いていれば配布の記録の Pull Request に記録がある、という読み方は、worker が記録を投稿し終えてから ok を
+印が付いていればリリース記録の Pull Request に記録がある、という読み方は、worker が記録を投稿し終えてから ok を
 返すことを前提にする。次の 2 つの経路では記録が無いまま印が付きうる。どちらでもスプリントを閉じる工程は記録を
 読んで課題を残すため、確かめていない課題は閉じない。
 
 | 経路 | 塞ぐ課題 |
 | --- | --- |
 | worker が投稿に失敗したことを ok で返す | #2337（結果の契約をそろえ、失敗・未収束・判定できないを ok で返す経路を無くす） |
-| 配布の記録の番号が実行の時点で 0 になる（`queue_fill.py` の `_fill_prs` が `{queue_pr:release-prod}` を `0` に置き換え、指示が「番号が 0 なら何もせずに終える」と定める） | #2408（ステップを置く条件を直す） |
+| リリース記録の番号が実行の時点で 0 になる（`queue_fill.py` の `_fill_prs` が `{queue_pr:release-prod}` を `0` に置き換え、指示が「番号が 0 なら何もせずに終える」と定める） | #2408（ステップを置く条件を直す） |
 
 ok の後に印を付けた直後、耐久ステップの出力が書かれる前にプロセスが落ちると、`--from` の再開がステップを
 流し直して印をもう一度打つ。進行の記録（`progress-record.sh`）は同じ工程の 2 度目の記録で時刻を書き換えないため、
@@ -138,8 +138,8 @@ ok の後に印を付けた直後、耐久ステップの出力が書かれる�
 | I5 | 記録のスクリプトが落ちても、ok の後の印でもプランを止めず `process` に残すこと |
 | 工程名の一致 | `STAGES_AFTER_OK` の各要素が工程表の工程名として `workflow-common.sh` の `wf_is_stage` を通り、`release_verify_step` が組む stage と一致すること |
 | 印の書き手 | まとめのプランの `release-verify` の指示に、進捗記録を打たないことが含まれること |
-| 本番の `verify` | テンプレートが組む本番と開発版のプランで、`verify` の stage が「配布」であること |
-| 閉じる判定 | 記録の無い配布の記録の Pull Request で `sprint-close.py --with-verification --dry-run` が課題を `kept_open` にすること |
+| 本番の `verify` | テンプレートが組む本番と開発版のプランで、`verify` の stage が「デプロイ」であること |
+| 閉じる判定 | 記録の無いリリース記録の Pull Request で `sprint-close.py --with-verification --dry-run` が課題を `kept_open` にすること |
 
 ## 関連リンク
 

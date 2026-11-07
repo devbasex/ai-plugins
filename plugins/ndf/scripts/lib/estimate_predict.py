@@ -18,8 +18,6 @@ SCALE = (1, 2, 3, 5, 8, 13, 20)
 OVER_SCALE = "尺度を超える"
 MAX_CANDIDATES = stats.WINDOW
 P_BREAK = 5  # この件数以上なら中央値と 80 分位、未満なら中央値と最大（決定 5）
-IMPL_MIN_SAMPLES = 3  # 実装の上限を実績から出す最少の件数（決定 10。遅れの見張りの min_samples の既定と揃える）
-TIMED_OUT_EXIT = 124  # ステップの `timeout` で打ち切られた終了コード（supervise_lib/steps.py・engine.py）
 VALUE_KEYS = ("A", "H", "L", "C")
 
 
@@ -128,6 +126,11 @@ def size_unit(a_values: list[float], decl: dict) -> float | None:
     return stats.median_value(xs[: math.ceil(len(xs) / 4)])
 
 
+def size_unit_of(actuals, decl: dict) -> float | None:
+    """課題ごとの実績から Size 1 の基準を決める。完了した実績のうち、AI が働いたものだけを数える（#2433）。"""
+    return size_unit([a.a for a in actuals if a.completed and a.ai_worked], decl)
+
+
 def to_size(a_seconds: float | None, unit: float | None, scale=SCALE):
     """A を Size 1 の基準との比で尺度へ丸める。境界は隣り合う段階の中点、最大を超えたら「尺度を超える」（I7・決定 9）。"""
     if a_seconds is None or not unit:
@@ -178,7 +181,7 @@ def predict(
             notes + ([] if any(a.h is not None for a in same) else ["人の作業時間の記録が無い"]),
         ),
     }
-    unit = size_unit([a.a for a in actuals.values() if a.completed], decl)
+    unit = size_unit_of(actuals.values(), decl)
     a_val = values["A"]
     size = to_size(a_val["typical"], unit, decl.get("scale") or SCALE) if a_val["mark"] == "実績" else None
     return {
@@ -194,34 +197,6 @@ def predict(
         "other_config": other,
         "materials": materials,
     }
-
-
-# --- 実装の上限 ---
-
-
-def impl_limit(rows: list[dict], window: int = stats.WINDOW, min_samples: int = IMPL_MIN_SAMPLES, alive: Callable | None = None) -> dict:
-    """同じ構成でフェーズ `実装`・ステップ `impl` の `step` の行の直近 window 件（失敗を含む）の最大（決定 10）。
-
-    返り値: {"source": "history"|"uncalibrated", "samples", "high", "basis": [実行の識別子...]}。`history` のときだけ
-    `timed_out`（最大が打ち切り（終了コード 124。秒は前の上限と同じ値）の標本か）を足す。余裕は呼び出し側が掛け、
-    `timed_out` が真なら足さない（打ち切りのたびに上限が伸び続けないように）。"""
-    cur = current_config(rows)
-    table = er.run_table(rows, alive or (lambda run: False))
-    picked: list[tuple[float, str, float, bool]] = []
-    for run in table.values():
-        if run.phase != "実装" or config_diff(cur, run.config)[0]:
-            continue
-        for s in run.steps:
-            if s.get("step") == "impl" and isinstance(s.get("seconds"), (int, float)):
-                at = er.ts(s.get("at")) or er.ts(run.started) or 0
-                picked.append((at, run.run, float(s["seconds"]), s.get("exit") == TIMED_OUT_EXIT))
-    picked = stats.recent(sorted(picked), window)
-    basis = [r for _, r, _, _ in picked]
-    if len(picked) < min_samples:
-        return {"source": "uncalibrated", "samples": len(picked), "high": None, "basis": basis}
-    high = stats.maximum(v for _, _, v, _ in picked)
-    timed_out = all(t for _, _, v, t in picked if v == high)
-    return {"source": "history", "samples": len(picked), "high": high, "basis": basis, "timed_out": timed_out}
 
 
 # --- 誤差 ---
@@ -253,11 +228,8 @@ def spearman(xs: list[float], ys: list[float]) -> float | None:
     return round(sxy / (sx * sy), 4) if sx and sy else None
 
 
-def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
-    """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
-
-    組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
-    since_ts = er.ts(since) if since else None
+def _latest_estimates(estimates: list[dict], since_ts: float | None) -> dict[int, dict]:
+    """課題を指す見積もりのうち、課題ごとの最新の 1 件。`since_ts` より前は除き、同時刻なら後の行を採る。"""
     latest: dict[int, dict] = {}
     for e in estimates:
         if not isinstance(e.get("issue"), int):
@@ -267,6 +239,33 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
             continue
         if e["issue"] not in latest or (er.ts(latest[e["issue"]].get("at")) or 0) <= t:
             latest[e["issue"]] = e
+    return latest
+
+
+def _pair_ratios(actual: dict, predicted: dict) -> dict:
+    """1 組の項目ごとの比（実績 ÷ 予測）。予測が 0・数でない・無いか、実績が None の項目は None。"""
+    out = {}
+    for k, p in predicted.items():
+        comparable = isinstance(p, (int, float)) and p and actual[k] is not None
+        out[k] = round(actual[k] / p, 4) if comparable else None
+    return out
+
+
+def _error_metrics(items: list[dict]) -> dict:
+    """組の一覧から、比の中央値と A の順位相関を求める。"""
+    metrics: dict = {"pairs": len(items)}
+    for k in ("A", "L", "C"):
+        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
+    both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
+    metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
+    return metrics
+
+
+def errors(estimates: list[dict], rows: list[dict], since: str | None = None, alive: Callable | None = None) -> tuple[list[dict], dict]:
+    """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
+
+    組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
+    latest = _latest_estimates(estimates, er.ts(since) if since else None)
     items = []
     for issue, e in sorted(latest.items()):
         got = er.issue_actuals(rows, e.get("done") or "実装", since=e.get("at"), alive=alive).get(issue)
@@ -274,18 +273,6 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
             continue
         actual = {"A": got.a, "L": got.l, "C": got.c}
         predicted = {k: ((e.get("values") or {}).get(k) or {}).get("typical") for k in ("A", "L", "C")}
-        ratio = {
-            k: (
-                round(actual[k] / predicted[k], 4)
-                if isinstance(predicted[k], (int, float)) and predicted[k] and actual[k] is not None
-                else None
-            )
-            for k in ("A", "L", "C")
-        }
+        ratio = _pair_ratios(actual, predicted)
         items.append({"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio})
-    metrics: dict = {"pairs": len(items)}
-    for k in ("A", "L", "C"):
-        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
-    both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
-    metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
-    return items, metrics
+    return items, _error_metrics(items)

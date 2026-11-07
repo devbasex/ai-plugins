@@ -1,6 +1,6 @@
 {
   "file": "release.json",
-  "summary": "配布の手順",
+  "summary": "リリースの手順",
   "place": "worktree",
   "scope": "team",
   "readers": [

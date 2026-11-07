@@ -32,7 +32,7 @@ stateDiagram-v2
 
 `RUNNING` の知らせを取りこぼしたときは `starting` から終わりの状態や `awaiting_approval` へ直に移る。`running` への移りは `starting` のときだけ書く。
 
-Factory のオーガナイザーの配布の依頼と配布の実行では、`awaiting_approval` に理由（`awaitingReason`）が付く。手動の実行が配布の依頼を出して終わると、理由 `release_requested` の `awaiting_approval` で枠を持ったまま依頼の答えを待つ（ループの実行は `done` で終わる）。配布の実行（目的 `release`）は枠を持たず、配布済みなら `done`、承認ゲートか判断なら理由の無い `awaiting_approval`、それ以外の終わり方（失敗・打ち切り）でも終わりの状態にせず理由 `release_stalled` の `awaiting_approval` へ移る。配布の実行が終わりの状態の `stopped` になるのは、まとめた配布が差し戻されたときである。取り消しも、まとめた配布が main へマージした後なら終わりの状態にせず、取り消しの印を外して理由 `release_stalled` の `awaiting_approval` へ移す（続きから流して配布を仕上げる）。ジョブの無いときの取り消しは `release_after_main` で断る。
+Factory のオーガナイザーのリリースの依頼とリリースの実行では、`awaiting_approval` に理由（`awaitingReason`）が付く。手動の実行がリリースの依頼を出して終わると、理由 `release_requested` の `awaiting_approval` で枠を持ったまま依頼の答えを待つ（ループの実行は `done` で終わる）。リリースの実行（目的 `release`）は枠を持たず、リリース済みなら `done`、承認ゲートか判断なら理由の無い `awaiting_approval`、それ以外の終わり方（失敗・打ち切り）でも終わりの状態にせず理由 `release_stalled` の `awaiting_approval` へ移る。リリースの実行が終わりの状態の `stopped` になるのは、まとめたリリースが差し戻されたときである。取り消しも、まとめたリリースが main へマージした後なら終わりの状態にせず、取り消しの印を外して理由 `release_stalled` の `awaiting_approval` へ移す（続きから流してリリースを仕上げる）。ジョブの無いときの取り消しは `release_after_main` で断る。
 
 **失敗の理由**（実行の `failureReason`）:
 

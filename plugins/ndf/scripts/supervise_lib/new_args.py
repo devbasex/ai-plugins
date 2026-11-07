@@ -15,14 +15,15 @@ DECL_WORDS = {
     "base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
     "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
     "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
-    "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout）",
+    "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout。書いたときだけ効く）",
+    "impl_stall_seconds": "無進捗の許容時間（--impl-stall か .ndf/supervise.json の impl_stall_seconds。既定 1800 秒）",
     "refactor_budget_minutes": "構造改善の想定最大時間（--refactor-budget-minutes か .ndf/supervise.json の refactor_budget_minutes）",
 }
 # 任意の設定（--help の「任意の設定」に出す。無くてもプランを書ける）
 OPTIONAL_DECLS = {
-    "impl": ("impl_timeout",),
+    "impl": ("impl_timeout", "impl_stall_seconds"),
     "check": ("refactor_budget_minutes",),
-    "sprint": ("release", "impl_timeout", "refactor_budget_minutes"),
+    "sprint": ("release", "impl_timeout", "impl_stall_seconds", "refactor_budget_minutes"),
     "close": ("release", "refactor_budget_minutes"),
 }
 
@@ -66,14 +67,14 @@ NEW_KINDS = {
     "sprint": (
         "スプリントのステージごとのプランと sprint.json を書き出す",
         "ステージ: 設計（--design の課題ごと。用語集 → 要求と受け入れ条件 → 設計 → 設計 Pull Request → "
-        "cross-review → 用語チェック）→ 承認ゲート 1 → スプリントブランチ → 実装（課題ごと。スプリントの"
+        "cross-review → 用語チェック）→ 設計承認ゲート→ スプリントブランチ → 実装（課題ごと。スプリントの"
         "ブランチへ集める）→ 検査 1 回 → リリース（開発版）。ステージの中は queue --max 3 で流す。\n"
         "リリースの形（release.form）が無いか雛形の無い形なら、リリースのプランを書かず、最後のステージに"
         "「/ndf:release で行う」を置く。\n"
         "--state <状態>（normal）: 設計の用語チェックの後と開発版の承認資料の後に助言の MVV 判定（mvv-gate.py check --advise）を置く。"
         "承認は利用者が行う。\n"
-        "--pace fast --state <状態>: 使ってよい条件を確かめ、設計（承認ゲート 1 は MVV 判定）→ 実装（起点の"
-        "ブランチへ直接）→ 検査（実行の条件）→ 開発版 → 本番（承認ゲート 2 は MVV 判定）を書く",
+        "--pace fast --state <状態>: 使ってよい条件を確かめ、設計（設計承認ゲートは MVV 判定）→ 実装（起点の"
+        "ブランチへ直接）→ 検査（実行の条件）→ 開発版 → 本番（リリース承認ゲートは MVV 判定）を書く",
     ),
     "close": (
         "スプリントの終わりのプラン",
@@ -164,7 +165,21 @@ NEW_ARGS = [
     ),
     (
         "--impl-timeout",
-        {"type": positive_int, "metavar": "SECONDS", "help": "実装のステップの上限（秒）。既定は .ndf/supervise.json の impl_timeout"},
+        {
+            "type": positive_int,
+            "metavar": "SECONDS",
+            "help": "実装のステップの経過時間の上限（秒）。既定は .ndf/supervise.json の impl_timeout。どちらも無ければ上限なし",
+        },
+        "impl sprint",
+    ),
+    (
+        "--impl-stall",
+        {
+            "type": positive_int,
+            "dest": "impl_stall_seconds",
+            "metavar": "SECONDS",
+            "help": "実装のステップの無進捗の許容時間（秒）。既定は .ndf/supervise.json の impl_stall_seconds、無ければ 1800",
+        },
         "impl sprint",
     ),
     (
@@ -226,8 +241,8 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "配る版（例 10.17.11-dev.1）",
-                "sprint": "開発版の明示の版（例 3.8.0-dev.1。省けば配布のステップを流す時点に origin から次に空いている版を決める）",
-                "close": "開発版の明示の版（最終の検査で変更があったときに配る。省けば配布のステップを流す時点に決める）",
+                "sprint": "開発版の明示の版（例 3.8.0-dev.1。省けばデプロイのステップを流す時点に origin から次に空いている版を決める）",
+                "close": "開発版の明示の版（最終の検査で変更があったときに配る。省けばデプロイのステップを流す時点に決める）",
             }
         },
         "release sprint close",
@@ -241,7 +256,7 @@ NEW_ARGS = [
     ("--channel", {"choices": ["dev", "prod"], "help": "開発版（dev）か本番（prod）か"}, "release"),
     ("--prev-tag", {"help": "dev: approval-facts の前のタグ。prod: 他のプラグインの差分の起点（省略時は自動）"}, "release"),
     ("--repo", {"help": "元のリポジトリ（省略時は作業場所の /.worktrees/ より前）"}, "release"),
-    ("--mvv", {"help": "承認ゲート 2 を MVV で判定する（スプリントの状態）"}, "release"),
+    ("--mvv", {"help": "リリース承認ゲートを MVV で判定する（スプリントの状態）"}, "release"),
     (
         "--dev-state",
         {
@@ -256,7 +271,7 @@ NEW_ARGS = [
             "type": int,
             "nargs": "+",
             "default": [],
-            "help": "設計のプラン（設計 Pull Request と承認ゲート 1）を作る課題。省けば設計と承認ゲート 1 のステージを置かない",
+            "help": "設計のプラン（設計 Pull Request と設計承認ゲート）を作る課題。省けば設計と設計承認ゲートのステージを置かない",
         },
         "sprint",
     ),
@@ -276,7 +291,7 @@ NEW_ARGS = [
             "choices": ["normal", "fast", "auto"],
             "default": "normal",
             "help": {
-                "*": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で承認ゲート 1・2 を MVV 判定にする）",
+                "*": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で設計承認ゲート・リリース承認ゲートを MVV 判定にする）",
                 "close": "auto なら最終の検査・開発版・本番を置かず、まとめのステージだけを組む（開発ループの周回。#2089）。"
                 "省けば今の形（fast のスプリントの終わり）",
             },
@@ -288,9 +303,9 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "スプリントの状態（sprint-state.py のファイル）",
-                "sprint": "スプリントの状態（sprint-state.py のファイル）。--pace fast / auto では要る。normal で渡すと承認ゲート 1・2 の前に"
+                "sprint": "スプリントの状態（sprint-state.py のファイル）。--pace fast / auto では要る。normal で渡すと設計承認ゲート・リリース承認ゲートの前に"
                 "助言の MVV 判定を置き、worker と judge が状態のスプリント MVV を読む",
-                "release": "prod: 承認ゲート 2 の利用者の承認の記録を読むスプリントの状態（先頭の approve が読む）",
+                "release": "prod: リリース承認ゲートの利用者の承認の記録を読むスプリントの状態（先頭の approve が読む）",
             }
         },
         "sprint close release",
@@ -317,7 +332,7 @@ NEW_ARGS = [
     ),
     (
         "--record-pr",
-        {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けば配布の経路から導く。#2089）"},
+        {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けばリリースの経路から導く。#2089）"},
         "close",
     ),
     (
@@ -426,7 +441,7 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
 
 
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
-    """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければ配布のステップを流す時点に決める（#2164）。"""
+    """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければデプロイのステップを流す時点に決める（#2164）。"""
     if not (a.name and a.issue):
         ap.error(f"new {a.kind} には --name・--issue が要る")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):

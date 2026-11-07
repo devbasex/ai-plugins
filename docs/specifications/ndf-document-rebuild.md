@@ -65,7 +65,7 @@ docs/specifications/ndf-slide-generation.md（確定仕様）
 | 2 | `document-style` と `document-rebuild` は統合せず、呼び出しの関係を強める。規則の正本は `document-style`、組み直しの手順・構成・文章量の目安の正本は `document-rebuild` とする | 統合すると本文が `SKILL.md` の上限（5,000 トークン）を超える。書いている最中に規則だけを読みたい場面（Pull Request の本文・コミットメッセージ）が残る |
 | 3 | 共通ルールには、形式か目的によって成り立たない決まりを入れない。判断を求める前に経緯・前提・材料を示す決まりは、決議依頼と議論の目的別ガイドへ置く | 判断を求めない文書（小説・手順書）に当たらない決まりを「関わらず守る」と書くと、共通ルールの定義と食い違う |
 | 4 | 共通ルールは、読み手に何が成り立つか（目的）を規則にし、手段は例として添える。パス・URL は「表示先でリンクとして認識される形で書く」を規則とし、半角スペースは例とする | 手段だけを規則にすると、表示先や形式が変わったときに規則が目的を外れる |
-| 5 | キーワードの確かめは `document-rebuild` の `keyword-check.md` に置き、社外向けに限らずすべての文書に掛ける。`form-slide.md` と `document-drafting` はこのファイルを指す | 組み直しは設計文書にも提出物にも掛かり、題がゲート 1 の前に一度確かめられる。`form-slide.md` に置くとスライド以外に、`document-drafting` に置くと `documentation` モードの外に掛からない。社内の文書にも訳語・造語が残る |
+| 5 | キーワードの確かめは `document-rebuild` の `keyword-check.md` に置き、社外向けに限らずすべての文書に掛ける。`form-slide.md` と `document-drafting` はこのファイルを指す | 組み直しは設計文書にも提出物にも掛かり、題が設計承認ゲートの前に一度確かめられる。`form-slide.md` に置くとスライド以外に、`document-drafting` に置くと `documentation` モードの外に掛からない。社内の文書にも訳語・造語が残る |
 | 6 | `document-drafting` の手順 4（見直す）の中で組み直しを呼ぶ。工程表には行を足さない | 工程「ドキュメント再構成」は設計文書にだけ掛かり、提出物に掛からない。工程名を読むスクリプトとテストを変えずに済む |
 | 7 | 実測の無い目安も置き、根拠に「未実測」と書く | 目安を置かないと手順 1 と手順 4 が測るものを持たない。根拠を書かないと、実測の値と同じ重さで読まれる |
 | 8 | 議論用の文書の提案の言い回しは `purpose-discussion.md` にだけ置く | 確定事項を伝える文書では断定が正しい。目的に依る決まりを書き方の規則に置くと、どの文書にも条件付きの規則が混ざる |
@@ -199,8 +199,8 @@ I7 を成り立たせるためにある。** 規則の点検を測り直しの�
 ## テスト観点
 
 `.md` の文言を照合するテストは書かない（`AGENTS.md`）。参照のつながりは既存の検査、手順の効き目は試行で見る。
-工程名と配布の基準は
-[test_document_rebuild_stage.py](../../plugins/ndf/skills/development-workflow/tests/test_document_rebuild_stage.py) と配布のテストが見る。
+工程名とデプロイの基準は
+[test_document_rebuild_stage.py](../../plugins/ndf/skills/development-workflow/tests/test_document_rebuild_stage.py) とデプロイのテストが見る。
 
 - 共通ルール・文書系 Skill の表・形式別ガイドが指す節が実在すること（`scripts/check-markdown-links.py`・`scripts/check-cross-skill-refs.py`）。見出しを変えると落ちること（I1）
 - `layout-slide.md` と `format-slide.md` から `form-slide.md` の「ページの文言を書く」へのリンクが通ること（I1）

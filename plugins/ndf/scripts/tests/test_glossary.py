@@ -1062,3 +1062,81 @@ def test_merge_treats_a_missing_base_as_empty():
     gm = import_merge()
     m = gm.merge_glossaries({"version": 1}, _g(_t("a")), _g(_t("b")))
     assert [t["term"] for t in m.glossary["terms"]] == ["b", "a"] and m.glossary["contexts"] == [{"id": "ordering"}]
+
+
+# ---------------- 禁止語の規則（check.banned）----------------
+
+BANNED = {"words": ["禁句"], "paths": ["src/**", "README.md"], "exclude": ["src/legacy/**"]}
+
+
+def declare_banned(repo, banned=BANNED):
+    config = json.loads((repo / ".ndf/glossary.json").read_text(encoding="utf-8"))
+    config["check"]["banned"] = banned
+    write_json(repo, ".ndf/glossary.json", config)
+    commit(repo)
+
+
+@pytest.mark.parametrize(
+    "rel,line",
+    [("README.md", "`禁句` を書く"), ("src/a.py", "# 禁句のコメント"), ("src/a.ts", 'const a = "禁句";'), ("src/a.md", "```\n禁句\n```")],
+)
+def test_banned_fails_on_added_lines_of_any_kind(repo, rel, line):
+    """コードのコメント・文字列・コードブロックとインラインのコードも照らす。`--rules structure` の CI でも走る。"""
+    declare_banned(repo)
+    write(repo, rel, line + "\n")
+    code, out, err = run(repo, "check", "--diff", "develop", "--rules", "structure")
+    assert code == 1
+    assert [(it["rule"], it["path"], it["term"]) for it in out["items"]] == [("banned", rel, "禁句")]
+    n = out["items"][0]["line"]
+    assert f"ERROR: {rel}:{n}: banned: 禁句" in err
+
+
+def test_banned_skips_excluded_and_undeclared_paths_and_old_lines(repo):
+    declare_banned(repo)
+    write(repo, "src/old.md", "禁句\n")
+    commit(repo)
+    git(repo, "branch", "-f", "develop")
+    write(repo, "src/old.md", "禁句\n足した行\n")
+    write(repo, "src/legacy/a.py", "# 禁句\n")
+    write(repo, "other/a.md", "禁句\n")
+    code, out, _ = run(repo, "check", "--diff", "develop", "--rules", "structure")
+    assert code == 0, out
+
+
+def test_banned_does_not_run_without_a_declaration(repo):
+    write(repo, "src/a.py", "# 禁句\n")
+    assert run(repo, "check", "--diff", "develop", "--rules", "structure")[0] == 0
+
+
+def test_banned_file_mode_reads_every_line_and_names_the_replacement(repo):
+    g = shop_glossary()
+    g["terms"].append({"term": "良い語", "context": "ordering", "meaning": "置き換え先", "deprecated": ["禁句"]})
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    declare_banned(repo)
+    write(repo, "README.md", "禁句\n")
+    commit(repo)
+    code, out, _ = run(repo, "check", "--file", str(repo / "README.md"))
+    assert code == 1
+    hit = next(it for it in out["items"] if it["rule"] == "banned")
+    assert hit["path"] == "README.md" and "良い語" in hit["detail"]
+
+
+def test_banned_word_in_a_meaning_fails_structure_but_deprecated_column_does_not(repo):
+    declare_banned(repo)
+    g = shop_glossary()
+    g["terms"].append({"term": "良い語", "context": "ordering", "meaning": "置き換え先", "deprecated": ["禁句"]})
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    assert run(repo, "check", "--rules", "structure")[0] == 0
+    g["terms"][-1]["meaning"] = "禁句の言い換え"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and [it["rule"] for it in out["items"]] == ["banned"]
+
+
+@pytest.mark.parametrize("banned", [{"words": "禁句", "paths": ["a"]}, {"words": ["禁句"]}, {"words": [], "paths": ["a"]}, "禁句"])
+def test_banned_declaration_of_a_bad_shape_stops(repo, banned):
+    declare_banned(repo, banned)
+    assert run(repo, "check", "--rules", "structure")[0] == 2

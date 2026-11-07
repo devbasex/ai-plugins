@@ -21,13 +21,13 @@ QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致す�
 QUEUE_RECORD = "{queue_record}"  # 計画の `課題` のリリース記録を置いた PR（#2230）
 QUEUE_STATE = re.compile(r"\{queue_state(\??):([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）。`?` 付きは無ければ空
 # 名前の一致する完了した計画の状態ディレクトリの `work/prs.txt`（空白区切りの Pull Request）・`work/approved.txt`（承認したコミット）。
-# まとめた配布の本番のプランが、提示のプランの結果を読む（#2436）
+# まとめたリリースの本番のプランが、提示のプランの結果を読む（#2436）
 QUEUE_WORK = re.compile(r"\{queue_(prs|approved):([A-Za-z0-9._-]+)\}")
 WORK_FILES = {"prs": "prs.txt", "approved": "approved.txt"}
 
 
 def plan_pr(item: dict) -> str:
-    """完了か関門で終えた計画の報告の Pull Request の番号（設計のプランは承認ゲート 1 の関門で終わる。#1426 の決定 4）。無ければ空。"""
+    """完了か承認ゲートで終えた計画の報告の Pull Request の番号（設計のプランは設計承認ゲートで終わる。#1426 の決定 4）。無ければ空。"""
     rep = Path(item.get("report") or "")
     if item.get("result") not in FINISHED or not rep.is_file():
         return ""
@@ -41,7 +41,7 @@ def named(plan: str, name: str) -> bool:
 
 
 def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
-    """名前の一致する計画の結果。`items` に無ければ、`plan` と同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。"""
+    """名前の一致する計画の結果。`items` に無ければ、`plan` と同じディレクトリの計画の報告を読む（承認ゲートの後に単独で流すとき）。"""
     hits = [i for i in items if named(i.get("plan", ""), name)]
     if hits:
         return hits
@@ -57,13 +57,13 @@ def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
 
 
 def _fill_prs(text: str, names: list[str], items: list[dict], plan: str) -> tuple[str, list[str]]:
-    """{queue_pr:<名>} を完了か関門で終えた結果の PR の番号（無ければ 0）で置き換える。そうした結果が無い名前は欠けの文で返す。
-    設計のプランは承認ゲート 1 の関門で終わるため、関門も受ける（plan_pr と同じ FINISHED）。"""
+    """{queue_pr:<名>} を完了か承認ゲートで終えた結果の PR の番号（無ければ 0）で置き換える。そうした結果が無い名前は欠けの文で返す。
+    設計のプランは設計承認ゲートで終わるため、承認ゲートも受ける（plan_pr と同じ FINISHED）。"""
     missing = []
     for name in names:
         done = [i for i in results_named(name, items, plan) if i.get("result") in FINISHED]
         if not done:
-            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了か関門で終えた報告が無い）")
+            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了か承認ゲートで終えた報告が無い）")
             continue
         prs = [n for n in (plan_pr(i) for i in done) if n]
         text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
@@ -117,7 +117,7 @@ def _fill_record(text: str, plan: str) -> tuple[str, list[str]]:
 
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
-    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。完了して PR が無い・飛ばされたなら 0。
+    前のステージに無ければ同じディレクトリの計画の報告を読む（承認ゲートの後に単独で流すとき）。完了して PR が無い・飛ばされたなら 0。
     {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（#1488）。結果（完了した報告・
     状態ディレクトリ）が見つからなければ、0・空文字で埋めずに計画を書き換えず理由を返す（#2079）。
     {queue_state?:<名>} だけは、無いことを読む側が扱うと明示した差し込みで、無ければ空文字で埋める（単独で流す本番の approve）。
@@ -157,7 +157,7 @@ VERSION_RECORD = "version.json"  # 版の記録
 VERSION_PLAN = "version-plan.json"  # 差し込み前のプランの写し
 SUPERSEDED = "superseded"  # 決め直した前の版のステップの記録の退避先
 KEEP_ON_REDECIDE = {VERSION_RECORD, VERSION_PLAN, SUPERSEDED, "plan.json"}  # 決め直しで退避しないもの（plan.json は状態の実体の写し）
-GATE_2_STEPS = ("approve", "mvv")  # 本番のプランの先頭で承認ゲート 2 を通すステップ
+GATE_2_STEPS = ("approve", "mvv")  # 本番のプランの先頭でリリース承認ゲートを通すステップ
 
 
 def _version_now() -> str:
@@ -172,6 +172,25 @@ def _read_version_json(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return d if isinstance(d, dict) else None
+
+
+def plan_finished(plan: str | None) -> bool:
+    """プランの `report.md` の結果が `完了` か。承認ゲートの後の続きの実行も report.md を書き直すため、続きで本番を出した周回も真になる。"""
+    if not plan:
+        return False
+    try:
+        return report_result((state_dir_of(str(Path(plan).absolute())) / "report.md").read_text()) == "完了"
+    except (OSError, ValueError):
+        return False
+
+
+def recorded_version(plan: str | None) -> str | None:
+    """プランの版の記録の版。パスが無い・記録が無い・読めない・文字列でなければ None（読むだけで書かない）。"""
+    if not plan:
+        return None
+    rec = _read_version_json(state_dir_of(str(Path(plan).absolute())) / VERSION_RECORD)
+    version = rec.get("version") if rec else None
+    return version if isinstance(version, str) and version else None
 
 
 def _write_version_json(path: Path, obj: dict) -> None:
@@ -191,7 +210,7 @@ def _stopped(cause: str, version: str | None = None, existing: str | None = None
         "taken": f"版 {version} はすでに出ている（{existing}。次に空いている版は {next_free}）。別の版で黙って進めない",
         "unreadable": f"版を決める値を読めない: {'・'.join(info['unreadable'])}。推定で決めない",
         "no_series": "本番が版を読む開発版のプランの版の記録が無い",
-        "series_changed": f"承認ゲート 2 の後に、本番が読む開発版の記録の版が変わった（{existing} → {version}）",
+        "series_changed": f"リリース承認ゲートの後に、本番が読む開発版の記録の版が変わった（{existing} → {version}）",
     }[cause]
     return f"版の差し込みを埋められない: {why}", info
 
@@ -301,7 +320,7 @@ class _Fill:
         return rec, f
 
     def approved(self) -> bool:
-        """本番のプランの状態に承認ゲート 2 の通過（approve か mvv のステップが 0 で終えた記録）があるか。"""
+        """本番のプランの状態にリリース承認ゲートの通過（approve か mvv のステップが 0 で終えた記録）があるか。"""
         state = _read_version_json(self.sd / "state.json") or {}
         return any(e.get("id") in GATE_2_STEPS and e.get("exit") == 0 for e in state.get("log") or [] if isinstance(e, dict))
 
@@ -372,12 +391,12 @@ def _fill_prod(f: _Fill, rec: dict | None):
 
 
 def fill_release_version(plan: str, items: list[dict]) -> tuple[str | None, dict | None]:
-    """配布のプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
+    """リリースプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
     (埋められない理由, キューの項目に載せる `version`) を返す。どちらも None なら流してよい。「版」の欄を持たないプランは触らない。
 
     開発版は、記録が無ければ origin から次に空いている版を決めて（明示の版はまだ出ていないかを確かめて）記録を書く。記録が
-    あれば記録の版を使い、それがもう出ていて自分の配布のマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
-    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。承認ゲート 2 の後に開発版の記録の版が変わったら止める。"""
+    あれば記録の版を使い、それがもう出ていて自分のリリースのマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
+    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。リリース承認ゲートの後に開発版の記録の版が変わったら止める。"""
     try:
         text = Path(plan).read_text()
         info = json.loads(text)

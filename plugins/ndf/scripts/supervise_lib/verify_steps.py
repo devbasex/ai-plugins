@@ -49,34 +49,7 @@ def with_margin(seconds: int) -> int:
     return int(seconds) + max(MARGIN_FLOOR, math.ceil(int(seconds) * MARGIN_SHARE))
 
 
-IMPL_TIMEOUT_DEFAULT = 3600  # 実装の上限の既定（引数・宣言・実績のどれも無いとき）
-
-
-def impl_timeout_estimate(a) -> tuple[int, dict]:
-    """実装のステップの (timeout, 根拠)。引数 → 宣言 → 実績の見込み（同じ構成の直近の最大 + 余裕。最大が打ち切りなら余裕を足さない。
-    3600 を下限にする）→ 3600（#1856 の決定 10）。
-
-    根拠はステップの `estimate` の欄の形 `{source: arg|decl|history|uncalibrated, samples, high, basis}`。"""
-    if getattr(a, "impl_timeout", None):
-        source = getattr(a, "impl_timeout_source", None) or "arg"
-        return int(a.impl_timeout), {"source": source, "samples": 0, "high": None, "basis": []}
-    import estimate_predict as ep
-    import estimate_records as er
-
-    root = getattr(a, "repo", None) or getattr(a, "worktree", None) or "."
-    try:
-        decl = er.load_estimate_decl(root)
-        window, least = decl.get("window") or ep.stats.WINDOW, decl.get("min_samples") or ep.IMPL_MIN_SAMPLES
-        got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)), window, least)
-    except (er.DeclError, OSError) as e:
-        got = {"source": "uncalibrated", "samples": 0, "high": None, "basis": [], "note": str(e)[:200]}
-    timed_out = got.pop("timed_out", False)  # ステップの `estimate` の欄の形には載せない
-    if got["source"] == "history" and got["high"]:
-        high = math.ceil(got["high"])
-        # 最大が打ち切りの標本（秒は前の上限）なら余裕を足さない。足すと打ち切りのたびに上限が伸び続ける。
-        # 既定より下げない: 短い実績で上限が下がると、それより長い実装が同じ秒で打ち切られ続け、上限が戻らない
-        return max(IMPL_TIMEOUT_DEFAULT, high if timed_out else with_margin(high)), got
-    return IMPL_TIMEOUT_DEFAULT, got
+IMPL_STALL_DEFAULT = 1800  # 無進捗の許容時間の既定（秒）。実測の記録の間隔の最大 706 秒を十分に上回る値（#2505 の決定 7）
 
 
 def _template_arg(a) -> str:
@@ -135,7 +108,7 @@ def refactor_template_arg(a) -> str:
 def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
-    - `merge-gate`: 宛先が承認ゲート 2（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
+    - `merge-gate`: 宛先がリリース承認ゲート（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
     - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
@@ -168,7 +141,7 @@ def handoff_step(state: str, gate: str, what: str) -> dict:
     """MVV 判定で通した後のステップ（ラベル・マージ・判定のコメント）が落ちたときに承認ゲートへ落とすステップ（#1370 の I8）。
     `mvv` のステップが書いた `by: mvv` の記録を外し、理由を 1 行出して終了コード 10（承認ゲート）を返す。外せなくても 10 を返す。"""
     st, g = shlex.quote(state), shlex.quote(gate)
-    why = shlex.quote(f"{what}が失敗した。{gate} は自動で通さず、利用者の承認を求める")
+    why = shlex.quote(f"{what}が失敗した。{gate}は自動で通さず、利用者の承認を求める")
     cmd = (
         f'sh -c \'{SPRINT_STATE_PY} gate "$1" "$2" --withdraw >/dev/null || echo "$2 の MVV 判定の記録を外せなかった"; '
         f'echo "$3"; exit 10\' handoff {st} {g} {why}'
@@ -183,7 +156,7 @@ def reject_step(state: str, gate: str, next_id: str, root: str = ".", pr: str | 
     """承認ゲートで差し戻された後の続き（#2183）。直した後に `run <計画> --from reject` で流すと、差し戻しを差し戻しの記録
     （`gate-rejections.jsonl`）へ 1 行書いてから `next_id`（再提示のステップ）へ進む。記録を書けなければ止まる。
     conductor は `sprint-state.py gate ... --outcome rejected` を手で打たない。"""
-    what = shlex.quote(f"{gate} で差し戻された（直して再提示する）")
+    what = shlex.quote(f"{gate}で差し戻された（直して再提示する）")
     cmd = (
         f"{SPRINT_STATE_PY} gate {shlex.quote(state)} {shlex.quote(gate)} --what {what} --by user --outcome rejected "
         f"--root {shlex.quote(root)}" + (f" --pr {pr}" if pr else "")

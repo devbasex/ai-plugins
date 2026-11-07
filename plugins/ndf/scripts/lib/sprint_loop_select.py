@@ -31,7 +31,6 @@ from sprint_loop_record import (
     pending_laps,
     waiting_only,
     IMMEDIATE_STOPS,
-    RELEASE_PENDING_MAX,
     resume_command,
     stopped_result,
     stop_and_report,
@@ -92,7 +91,7 @@ PENDING_REASON = "保留の周回の課題"
 
 
 APPROVED_REASON = "承認した設計"
-PRODUCTION_REASON = "設計 PR の宛先が本番（承認ゲート 2 で人がマージする）"
+PRODUCTION_REASON = "設計 PR の宛先が本番（リリース承認ゲートで人がマージする）"
 
 
 def approved_designs(rec: dict, reselecting: int | None = None) -> set[int]:
@@ -110,7 +109,7 @@ def approved_designs(rec: dict, reselecting: int | None = None) -> set[int]:
 
 
 def first_issues(rec: dict, reselecting: int | None = None) -> set[int]:
-    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・配布を差し戻された周回の直し・
+    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・デプロイを差し戻された周回の直し・
     承認とマージが済んだ設計の課題。"""
     last = {w["number"]: w for w in rec.get("waiting", [])}
     revise = {n for n, w in last.items() if w.get("answer") == "revise"}
@@ -123,12 +122,8 @@ def prerequisite_reason(row: dict) -> str:
     return "前提の課題の実装待ち（" + " ".join(f"#{b}" for b in sorted(row["prerequisites"])) + "）"
 
 
-def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
-    n = row["number"]
-    if row.get("waiting_decision"):
-        return "人の判断待ち（棚卸し）"
-    if n in pending_issues(rec):  # 締め直すまで選ばない（選ぶと保留中の実装と作業が重なる。#2436 の 6a）
-        return PENDING_REASON
+def waiting_reason(env: Env, rec: dict, n: int) -> str | None:
+    """課題 n の待ち行から外す理由を読む。承認済みで未マージの行は PR の状態を読み、マージ済みなら merged_at を書く。"""
     for w in rec.get("waiting", []):
         if w["number"] != n:
             continue
@@ -141,6 +136,17 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
                 w["merged_at"] = env.now()
             else:
                 return merge_wait_reason(w)
+    return None
+
+
+def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: set) -> str | None:
+    n = row["number"]
+    if row.get("waiting_decision"):
+        return "人の判断待ち（棚卸し）"
+    if n in pending_issues(rec):  # 締め直すまで選ばない（選ぶと保留中の実装と作業が重なる。#2436 の 6a）
+        return PENDING_REASON
+    if why := waiting_reason(env, rec, n):
+        return why
     for e in rec.get("excluded", []):
         if e["number"] == n and e.get("lap") == lap_n:
             return e["reason"]
@@ -195,7 +201,7 @@ def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
         return None
     if res in ("head_moved", "no_stamp"):
         return f"#{w['number']} の設計 PR #{pr} を新しい先端で問い直した" if reask_design(env, rec, w, design_head(env, w)) else None
-    if res == "production":  # 宛先は周回を重ねても変わらない。人が承認ゲート 2 でマージしたかだけを読む
+    if res == "production":  # 宛先は周回を重ねても変わらない。人がリリース承認ゲートでマージしたかだけを読む
         if env.pr_state(pr) == "MERGED":
             w["merged_at"] = env.now()
         return None
@@ -272,7 +278,7 @@ def _select_candidate_rows(
     cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset(), approved: set[int] = frozenset()
 ) -> tuple[list[int], list[dict]]:
     """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。
-    max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・配布の直し）→ 品質の枠の課題 → 順位の順に割り当てる
+    max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・デプロイの直し）→ 品質の枠の課題 → 順位の順に割り当てる
     （品質の枠の最低件数を容量で削らない）。"""
     whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
     open_ = [i for i, w in enumerate(whys) if w is None]
@@ -366,8 +372,6 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     if got is not None:
         return got
     settle_approved_designs(env, rec)  # 選定の前に、承認済みで未マージの設計 PR をマージし直す（#2507）
-    if len(pending_laps(rec)) >= rec.get("release_pending_max", RELEASE_PENDING_MAX):
-        return stop_and_report(env, rec, before, waiting_only(rec, "release_pending_max"), "答えの無い保留の周回が上限に達した（待ちだけ）")
     stop = held_stop(rec, boundary_stop(env, rec))
     if stop:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
@@ -465,7 +469,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         return _stop_without_issue(env, rec, before, got, rank, lap)
     new = _open_lap(env, rec, before, got, rank, n, lap)
     chosen = selected_issues(new)
-    nxt = f"モードと版を決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版> を打つ"
+    nxt = f"モードを決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> を打つ"
     update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"周回 {n} の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),

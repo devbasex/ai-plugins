@@ -9,7 +9,7 @@
 
 読み手は `status`（と終了コード）だけで次の手を決め、成功と読むのは `ok`（終了コード 0）だけである。
 `ok` は欠け（`gaps`）が無いときだけ返せ、欠けが残るなら `stopped` と終了コード 6 で返す（#2227）。
-`items[].result` の語彙はスクリプトごとに持ってよい。承認の関門の提示物は `approval_present()` が書き出す。
+`items[].result` の語彙はスクリプトごとに持ってよい。承認ゲートの提示物は `approval_present()` が書き出す。
 シェルのスクリプトは `python3 step_result.py emit ...`（`step-result.sh` の `sr_emit`）で同じ形を出す。
 
 後半は、手順のスクリプトが共通に使う小さな関数（git / gh の呼び出し、版の形、plugin の置き場所）。
@@ -54,7 +54,7 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 EXIT_BASE_CONFLICT = 4
 # 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた（`stopped` だけ。#2227）
 EXIT_INCOMPLETE = 6
-EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
+EXIT_GATE = 10  # 10〜19: 承認ゲート（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
 # 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
 EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING
@@ -200,7 +200,7 @@ def emit(obj: dict, code: int | None = None, stream=None) -> "NoReturn":  # noqa
     raise SystemExit(code)
 
 
-# --- 承認の関門の提示物 --------------------------------------------------------
+# --- 承認ゲートの提示物 --------------------------------------------------------
 
 
 def presentation_dir() -> Path:
@@ -251,7 +251,7 @@ def approval_present(
     change: 変更量（コミット数・ファイル数・行数など）
     judge: [(項目, 内容)]（判断に使うもの）
     consent: 同意を求める項目の列
-    rollback: 戻し方（配布では取り消しの手段とその限界）
+    rollback: 戻し方（デプロイでは取り消しの手段とその限界）
     sections: [(見出し, 行の列)]。`## 同意を求めること` の前へ、この順で置く
     """
     _validate_present_args(targets, consent, rollback)

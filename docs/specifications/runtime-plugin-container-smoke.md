@@ -1,10 +1,10 @@
 # Runtime Plugin Container Smoke Test 仕様
 
-> **配布先は Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI への配布・導入物・生成・検査・スモークの記述は配布先を 4 つにしていた時点のもので、配布先については [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+> **導入先のランタイムは Claude Code と Codex である。** この文書に残る agy・Kiro CLI へのデプロイ・導入物・生成・検査・スモークの記述は導入先のランタイムを 4 つにしていた時点のもので、導入先のランタイムについては [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
 
 ## 概要
 
-runtime 分離後の Claude Code / Codex / Kiro 向け plugin 配布物を、ホスト環境を汚染しない Docker コンテナ内で smoke test する仕様。
+runtime 分離後の Claude Code / Codex / Kiro 向け plugin リリース対象を、ホスト環境を汚染しない Docker コンテナ内で smoke test する仕様。
 
 入口は `scripts/runtime-smoke-test.sh` である。runtime ごとに専用 container image を build し、コンテナ内の空 project に `ndf` と代表 MCP plugin を導入して、Skill / MCP / hook / agent config の配置と非認証・認証付き smoke を検証する。
 
@@ -12,7 +12,7 @@ runtime 分離後の Claude Code / Codex / Kiro 向け plugin 配布物を、ホ
 
 対象 runtime:
 
-| runtime | 配布物 | adapter |
+| runtime | リリース対象 | adapter |
 |---|---|---|
 | Claude Code | `plugins/ndf`, `plugins/mcp/*` | `tests/runtime-smoke/adapters/claude.sh` |
 | Codex | `plugins/ndf`, `plugins/mcp/*` | `tests/runtime-smoke/adapters/codex.sh` |
@@ -164,7 +164,7 @@ app-server が応答前に終わった・30 秒を超えたときに終了コー
 
 陽性対照は `tests/runtime-smoke/fixtures/hooks-positive-control/` に置く。Claude Code 向けの
 `hooks.json` はマッチャーグループに `description` を、Codex 向けの `codex.json` は読めない `type`
-（`cmd`）を持つ。`plugins/` の外に置くのは、`validate-runtime-plugins.sh` の走査と配布物に入れない
+（`cmd`）を持つ。`plugins/` の外に置くのは、`validate-runtime-plugins.sh` の走査とリリース対象に入れない
 ためである。
 
 | 決定 | 理由 |
@@ -174,7 +174,7 @@ app-server が応答前に終わった・30 秒を超えたときに終了コー
 | Codex は app-server の `hooks/list` で報告を受け取る | 読み込みの失敗を非対話で返す経路は、確かめた範囲ではこれだけである（`codex exec` / `plugin list` は hooks について何も出さない）。app-server は experimental だが、応答の形が変われば陽性対照と取得のチェックが落ちる |
 | 陽性対照を毎回先に読ませる | 本物の判定は「報告 0 件」で通る。報告を出さない版（Claude Code 2.1.261）や報告の形が変わった版では、何もチェックしないまま通る。最小の版を決めて `--version` と比べる形は、警告の入った版を特定できず、文言の変化にも効かない |
 | 読ませるたびに空の設定ディレクトリを作る | アダプタが導入済みの設定へ `--plugin-dir` を重ねると、導入済みの定義も読まれて数が混ざり、他のチェックが見る設定にも書き込む |
-| 対象はマーケットプレイス定義から実行時に見つける | ファイルを列挙すると、hooks 定義を持つプラグインを足したときに書き足しを忘れる。マーケットプレイス定義は配布の唯一の入口である |
+| 対象はマーケットプレイス定義から実行時に見つける | ファイルを列挙すると、hooks 定義を持つプラグインを足したときに書き足しを忘れる。マーケットプレイス定義はデプロイの唯一の入口である |
 | 「読まれた」ことを読み込みの行で確かめる | 報告 0 件でも、プラグインがそもそも読まれていなければチェックにならない |
 | agy と Kiro CLI を対象に入れない | agy はプラグイン配下の `hooks.json` を読まず `install-hooks.sh` が利用者の設定へ差し込む。Kiro CLI は変換したエージェント定義を読み、元の定義のキーを見ない |
 
@@ -250,7 +250,7 @@ artifact は既定で `tmp/runtime-smoke/<runtime>/` に出力する。`--artifa
 | secret mode | `--with-secrets=auto` |
 | artifact | `tmp/runtime-smoke` |
 
-最新の版のスモークは `.github/workflows/runtime-plugin-smoke-latest.yml` で実行する。その時点の最新の CLI との食い違いを、配布の経路（develop・main 宛の PR と push）の外で先に見つける。
+最新の版のスモークは `.github/workflows/runtime-plugin-smoke-latest.yml` で実行する。その時点の最新の CLI との食い違いを、リリースの経路（develop・main 宛の PR と push）の外で先に見つける。
 
 | 項目 | 仕様 |
 |---|---|

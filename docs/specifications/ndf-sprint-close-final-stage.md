@@ -39,7 +39,7 @@ Pull Request の本文には GitHub がマージで課題を閉じる closing ke
 | --- | --- |
 | `plugins/ndf/scripts/sprint-close.py` | 引数 `--final-stage` を受け、課題ごとに閉じる条件 1〜3 を判定して閉じる |
 | `plugins/ndf/scripts/sprint_close_lib/final_stage.py` | 閉じる条件 3 の判定 `final_stage_gap(stage, body, since)` と、満たさない課題の項目 `gap_item` |
-| `plugins/ndf/scripts/lib/dist_record.py` | `parse_record(text, parts)` が、最後の配布の記録のコメントの識別子 `dist_comment_id` を返す |
+| `plugins/ndf/scripts/lib/dist_record.py` | `parse_record(text, parts)` が、最後のリリース記録のコメントの識別子 `dist_comment_id` を返す |
 | `plugins/ndf/scripts/sprint_close_lib/collect.py` | `read_record` が記録の PR を 1 回読み、本文とコメントを連結した文字列と部分ごとの（先頭の行の番号, コメントの識別子）を返す |
 | `plugins/ndf/scripts/lib/closing.py` | 閉じる予定の参照の語 `DEFERRED`（`最終工程の後に閉じる`）、置き換え `defer_closing`、2 つの形を読む `closing_issues` / `closing_refs` / `closing_numbers`、closing keywords だけを読む `closing_words` |
 | `plugins/ndf/scripts/lib/closing-issues.sh` | シェルの読み手。閉じる予定の参照も取り出す。出力の形（`<リポジトリ>\t<番号>`）は変わらない |
@@ -87,13 +87,13 @@ graph LR
 ### `sprint-close.py` の入出力
 
 ```text
-sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage 配布|リリース後テスト|振り返り]
+sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage デプロイ|リリース後テスト|振り返り]
                 [--prs 1,2] [--issues 3,4] [--with-verification] [--label …] [--dry-run] [--root <dir>] [--repo <owner/name>]
 ```
 
 | 項目 | 値 |
 | --- | --- |
-| `--final-stage` | 3 つの値のどれか。省けば `振り返り`。それ以外は呼び出しの誤り（終了コード 3） |
+| `--final-stage` | 3 つの値のどれか。省けば `振り返り`。前の版のプランが渡す旧い工程名は、旧い値の読み替えの表（`scripts/data/legacy-values.json`）で `デプロイ` として受ける。それ以外は呼び出しの誤り（終了コード 3） |
 | 条件 3 を満たさない課題 | `result: kept_open`・`reason: 最終工程（<工程>）の記録が無い: <何が無いか>`。既に閉じていれば `closed_unverified`（`閉じているが閉じる条件 3 を満たさない: …`。開き直さない） |
 | 課題の本文を読めない | `result: failed`・同じ呼び出しの `cmd`。`status: stopped`・終了コード 1 |
 | `metrics.final_stage` | 判定に使った最終工程 |
@@ -104,7 +104,7 @@ sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage 配布|リリー
 
 | 最終工程 | 最終工程の記録 | 読む置き場 |
 | --- | --- | --- |
-| `配布` | 閉じる条件 1（最後の配布の記録の `段階:` が `本番` か `配布なし`。`--record-pr 0` は満たす） | 記録の PR |
+| `デプロイ` | 閉じる条件 1（最後のリリース記録の `段階:` が `本番` か `デプロイなし`。`--record-pr 0` は満たす） | 記録の PR |
 | `リリース後テスト` | 閉じる条件 2（`--with-verification` を付けたのと同じ判定） | 記録の PR |
 | `振り返り` | 課題の本文に、行頭から `振り返り: https://github.com/<所有者>/<リポジトリ>/(issues|pull)/<番号>#issuecomment-<識別子>` の行があり、そのうち最大の `<識別子>` が比べる基準（`dist_comment_id`）以上である | 課題の本文と記録の PR |
 
@@ -112,20 +112,20 @@ sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage 配布|リリー
 
 | 状態 | `<何が無いか>` |
 | --- | --- |
-| 比べる基準が `None` | `比べる配布の記録のコメントが無い` |
+| 比べる基準が `None` | `比べるリリース記録のコメントが無い` |
 | 行が 1 つも無い | `課題の本文に振り返りの記録の行が無い` |
-| 行の識別子がすべて基準より小さい | `課題の本文の振り返りの行が今回の配布の記録より前のもの` |
+| 行の識別子がすべて基準より小さい | `課題の本文の振り返りの行が最後のリリース記録より前のもの` |
 
 ### 比べる基準（`dist_comment_id`）
 
 振り返りの行は課題の本文に残り続ける。前のスプリントで振り返りを通り、開いたまま持ち越した課題が、
-今回の振り返りの前に条件 3 を満たさないよう、行が指すコメントの識別子を記録の PR の最後の配布の記録と比べる。
+持ち越した先のスプリントの振り返りの前に条件 3 を満たさないよう、行が指すコメントの識別子を記録の PR の最後のリリース記録と比べる。
 
-| 最後の配布の記録の置き場 | 基準 |
+| 最後のリリース記録の置き場 | 基準 |
 | --- | --- |
 | 記録の PR のコメント | そのコメントの識別子（`comments[].url` の `#issuecomment-<識別子>` の数字） |
 | 記録の PR の本文 | 記録の PR の最初のコメントの識別子。コメントが 1 件も無ければ `None` |
-| `--record-pr 0` | `0`（`NO_BASE`。配布の記録が無いため、行があれば満たす） |
+| `--record-pr 0` | `0`（`NO_BASE`。リリース記録が無いため、行があれば満たす） |
 
 比べ方は「以上」である。本文にある記録で、今回の振り返りを記録の PR の最初のコメントとして投稿したとき、
 その識別子が基準と等しくなるためである。記録の PR は条件 1 と同じ 1 回の `gh pr view --json body,comments` で読み、
@@ -157,15 +157,15 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  M[merge] -->|配布の記録あり| RV[release-verify<br/>課題を閉じない]
-  M -->|配布の記録なし| RT
+  M[merge] -->|リリース記録あり| RV[release-verify<br/>課題を閉じない]
+  M -->|リリース記録なし| RT
   RV --> RT[retro<br/>課題を閉じない]
   RT --> CL[close<br/>sprint-close.py --final-stage 振り返り --with-verification]
   CL -->|0 で終わったときだけ| RF[refine]
 ```
 
 まとめのプランはどのモードでも `retro` を持つため、プランの中の最終工程はどのモードでも振り返りになる。
-`配布` と `リリース後テスト` は、プランの外で最終工程を担う Skill（`light` の `release`、振り返りを通らない
+`デプロイ` と `リリース後テスト` は、プランの外で最終工程を担う Skill（`light` の `release`、振り返りを通らない
 `operation` の `release-verification` か `release`）だけが渡す。
 
 ### 閉じる予定の参照と本文の置き換え
@@ -196,7 +196,7 @@ flowchart LR
 
 ## 決定の理由
 
-- **最終工程の記録は GitHub に残った記録から読む。** 配布の記録・リリース後テストの行・課題の本文の振り返りの行は
+- **最終工程の記録は GitHub に残った記録から読む。** リリース記録・リリース後テストの行・課題の本文の振り返りの行は
   どれも GitHub にあり、conductor・supervisor・別の機械のどこから打っても同じものを読む。プランの状態ディレクトリと
   通過記録は手元のファイルで、別の機械や手打ちの経路からは読めない。振り返りの行は記録の PR ではなく課題の本文から
   読む（#2086 の行は記録の PR と違う PR を指していた）
@@ -230,7 +230,7 @@ flowchart LR
 | 項目 | 内容 |
 | --- | --- |
 | コメントの識別子の大小と投稿の順 | 識別子が投稿の順に大きくなることに頼る（#2086 と記録の PR 2109 の 1 組で確かめた）。順に並ばない例が出たら投稿時刻の比較へ替える |
-| 配布の記録が本文だけにある記録の PR | 最初のコメントを基準にする。コメントの無い記録の PR では、振り返りを最終工程とする課題が閉じない（安全側）。実例は確かめていない |
+| リリース記録が本文だけにある記録の PR | 最初のコメントを基準にする。コメントの無い記録の PR では、振り返りを最終工程とする課題が閉じない（安全側）。実例は確かめていない |
 | `--record-pr 0` の前の実行の行 | 比べる基準が無く、前のスプリントの行を持つ持ち越しの課題は、その実行の振り返りの前に条件 3 を満たしうる |
 | 振り返りの行の中身 | 行の URL のコメントが実在するかは読まない |
 | `--with-verification` を省いた振り返りの経路 | 条件 2 を見ずに閉じうる（#2293） |
@@ -242,8 +242,8 @@ flowchart LR
 
 - 本文に振り返りの行が無い課題は、`--final-stage` を省いて打つと `--with-verification` の有無の両方で `kept_open` と
   「振り返り」を含む `reason` が返り、閉じる・ボードを書く `gh` の呼び出しが無いこと
-- 振り返りの行の識別子が最後の配布の記録のコメントの識別子より小さい課題は閉じず、大きい行を足すと閉じること
-- 最後の配布の記録がコメントにあればその識別子、本文にあれば最初のコメントの識別子、コメントが無ければ `None` が
+- 振り返りの行の識別子が最後のリリース記録のコメントの識別子より小さい課題は閉じず、大きい行を足すと閉じること
+- 最後のリリース記録がコメントにあればその識別子、本文にあれば最初のコメントの識別子、コメントが無ければ `None` が
   基準になり、`None` では閉じないこと。基準と等しい識別子を数えること。記録の PR を読む `gh` の呼び出しが 1 回であること
 - 課題の本文の読みが失敗すると `failed`・`status: stopped`・終了コード 1 になること
 - 行がすべて合格で振り返りの行がある課題で、印・`Done`・閉じるが同じ順で起きること。`--record-pr 0` で行があれば閉じ、

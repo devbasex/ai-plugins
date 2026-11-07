@@ -100,7 +100,7 @@ def _validate_pid_cmdline(pid: int, agent: str, alive: bool, validated: bool) ->
 
 
 def _timeout_outcome(elapsed: float, timeout: int, alive: bool, pid: int) -> monitor_types.MonitorOutcome | None:
-    if elapsed < timeout:
+    if not timeout or elapsed < timeout:  # 0 は経過時間の上限が無い
         return None
     if alive:
         monitor_proc._kill_pid(pid)

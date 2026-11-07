@@ -35,7 +35,7 @@ marketplace 定義はこの 1 つだけです。Codex は専用の定義を持�
 同じ `source` を読みます。`policy` / `category` / `interface` は Codex が要求する項目で、同じ entry へ
 含めます（Claude Code はこれらを読み込み時に無視し、`claude plugin validate` は warning 付きで通ります）。
 
-配布先は Claude Code と Codex の 2 つです。Kiro CLI と agy へはどのプラグインも配りません。この 2 つは
+導入先のランタイムは Claude Code と Codex の 2 つです。Kiro CLI と agy へはどのプラグインも配りません。この 2 つは
 cross-review / cross-refactoring の相手役として CLI を起動するだけで、導入物を持ちません（`dev.kiro/`・`dev.agy/`・
 `kiro-skills.txt`・`agy-skills.txt` を足すと `scripts/tests/test_distribution_runtimes.py` が落とします）。
 
@@ -57,7 +57,7 @@ plugins/{plugin-name}/
 ├── skills/                      # Skill の実体（オプション）
 │   └── {skill-name}/
 │       └── SKILL.md
-├── manifests/                   # ランタイム別の配布 Skill 一覧（Skill を配る場合）
+├── manifests/                   # ランタイム別の配る Skill 一覧（Skill を配る場合）
 │   └── {claude,codex}-skills.txt
 ├── hooks/                       # フック（オプション）
 │   ├── claude.json              # Claude Code 用
@@ -99,9 +99,9 @@ plugins/{plugin-name}/
 }
 ```
 
-## 版と配布
+## 版とリリース
 
-版数の付け方（セマンティックバージョニングと接尾辞）、正式版と開発版のリリース、版を上げるときの手順、
+版数の付け方（セマンティックバージョニングと接尾辞）、正式版のリリースと開発版のデプロイ、版を上げるときの手順、
 版数を書いた箇所は [versioning-and-distribution.md](versioning-and-distribution.md) にあります
 （版数の扱いの正本）。
 
@@ -178,7 +178,7 @@ frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHOR
 | 5 | `README.md` の概要「公開Skills」とプラグイン一覧表の `ndf` 行（2 行） | `Claude Code向け core 45個` の形で 2 ランタイム | `check-doc-staleness.py` |
 | 6 | `README.md` の「元Skills（N個）」 | 実体の数 | `check-doc-staleness.py` |
 | 7 | `README.md` のカテゴリ内訳 | `- 運用 (2): skill-stats, statusline` の形。名前と括弧の数 | `check-doc-staleness.py`（合計だけ。どのカテゴリに入れるかは判断） |
-| 8 | `plugins/ndf/README.md` の配布先の表 2 行 | `\| Claude Code \| 45 個 \|` の形 | `check-doc-staleness.py` |
+| 8 | `plugins/ndf/README.md` の導入先のランタイムの表 2 行 | `\| Claude Code \| 45 個 \|` の形 | `check-doc-staleness.py` |
 | 9 | `plugins/ndf/README.md` のレイアウト図 | `唯一の実体（45 個）` | `check-doc-staleness.py` |
 | 10 | `plugin.json` 2 本（claude・codex）の `description` | `45 focused NDF skills` の形 | `validate-runtime-plugins.sh` |
 | 11 | `.claude-plugin/marketplace.json` の `ndf` の `description` | 10 と同じ形（Claude Code の数） | `validate-runtime-plugins.sh` |

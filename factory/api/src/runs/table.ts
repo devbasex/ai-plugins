@@ -21,12 +21,12 @@ import type { IdempotencyClaim, IdempotencyRef } from "../idempotency.ts";
 export interface RunTransitionExtras {
   finishReason?: FinishReason | null;
   loop?: LoopWrite;
-  // 受けた配布の依頼の行（#2439 の I59）。無い行だけを渡す。実行の移りと同じトランザクションで書く
+  // 受けたリリースの依頼の行（#2439 の I59）。無い行だけを渡す。実行の移りと同じトランザクションで書く
   requests?: OrgRequest[];
-  // 承認待ちの理由と、手動の実行が待つ配布の依頼（I65。awaitApproval だけが読む）
+  // 承認待ちの理由と、手動の実行が待つリリースの依頼（I65。awaitApproval だけが読む）
   awaitingReason?: AwaitingReason | null;
   releaseRequestId?: string | null;
-  // 取り消しの印を外す（main へマージした後に取り消しを受けた配布の実行を、止まった配布として残すとき。awaitApproval だけが読む）
+  // 取り消しの印を外す（main へマージした後に取り消しを受けたリリースの実行を、止まったリリースとして残すとき。awaitApproval だけが読む）
   clearCancel?: boolean;
 }
 
@@ -35,11 +35,11 @@ export interface ResumeOptions {
   from?: "awaiting_approval" | "awaiting_reset";
   loop?: LoopWrite;
   expectAwaiting?: { reason: AwaitingReason; releaseRequestId?: string };
-  // まとめた配布の根と配布の書き込み（止まった配布を続けるとき。状態の戻しとジョブの作成を同じトランザクションで書く）
+  // まとめたリリースの根とリリースの書き込み（止まったリリースを続けるとき。状態の戻しとジョブの作成を同じトランザクションで書く）
   organizer?: OrganizerWrite;
 }
 
-// まとめた配布と配布の実行を 1 回で書く（I57）。legacySeq はリポジトリの枠の legacySeq を照らした値（無ければ null。I62）
+// まとめたリリースとリリースの実行を 1 回で書く（I57）。legacySeq はリポジトリの枠の legacySeq を照らした値（無ければ null。I62）
 export interface ComposeRelease {
   write: OrganizerWrite & { batch: ReleaseBatch; log: OrgLog };
   run: SprintRun;
@@ -87,7 +87,7 @@ export interface RunsTable {
   // リセット時刻が before 以前のリセット待ちの実行（見回りが引く）
   listResetRuns(before: string): Promise<SprintRun[]>;
   // 終わりの状態へ移し、2 つの枠を 1 ずつ減らす。課題の持ち分を消し、古い版の実行なら legacyCount も減らす。
-  // 配布の実行は枠を持たないため減らさない（I64）。既に終わりの状態なら false（I34・I47・I48）
+  // リリースの実行は枠を持たないため減らさない（I64）。既に終わりの状態なら false（I34・I47・I48）
   finishRun(sprintRunId: string, state: RunState, reason: FailureReason | null, now: string, extras?: RunTransitionExtras): Promise<boolean>;
 
   getJob(jobId: string): Promise<RunJob | null>;
@@ -131,9 +131,9 @@ export interface RunsTable {
 
   // ---- Factory のオーガナイザー（#2439） ----
   getOrganizer(accountId: string, repositoryId: number): Promise<OrganizerRoot | null>;
-  // 根（と、渡せばまとめた配布・記録）を条件つきで書く（I56・I67）。条件で落ちれば false
+  // 根（と、渡せばまとめたリリース・記録）を条件つきで書く（I56・I67）。条件で落ちれば false
   writeOrganizer(write: OrganizerWrite): Promise<boolean>;
-  // まとめた配布・配布の実行とジョブ・根・記録を 1 回で書く（I57・I62）。条件で落ちれば false
+  // まとめたリリース・リリースの実行とジョブ・根・記録を 1 回で書く（I57・I62）。条件で落ちれば false
   composeRelease(input: ComposeRelease): Promise<boolean>;
   listOrgRequests(accountId: string, repositoryId: number): Promise<OrgRequest[]>;
   // 答えがまだ無いときだけ書く（I58）。書いたら true
@@ -146,6 +146,6 @@ export interface RunsTable {
   appendOrgLog(log: OrgLog): Promise<void>;
   // 時刻の古い順
   listOrgLogs(accountId: string, repositoryId: number): Promise<OrgLog[]>;
-  // 流れているまとめた配布を持つ根か、答えを届け終えていない依頼のあるリポジトリ（見回りが引く）
+  // 流れているまとめたリリースを持つ根か、答えを届け終えていない依頼のあるリポジトリ（見回りが引く）
   listOrganizerActive(): Promise<{ accountId: string; repositoryId: number }[]>;
 }

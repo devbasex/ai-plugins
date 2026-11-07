@@ -3,8 +3,8 @@
 PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・リファクタリング・
 完了判定）、Docker container access、statusline、外部 AI 委譲、Slack 通知を提供します。
 
-配布物は `plugins/ndf/` の 1 ディレクトリにまとまっています。Skill の実体は `skills/` の
-1 箇所だけで、どのランタイムへ配るかは `manifests/*-skills.txt` が決めます。配布先は Claude Code と
+リリース対象は `plugins/ndf/` の 1 ディレクトリにまとまっています。Skill の実体は `skills/` の
+1 箇所だけで、どのランタイムへ配るかは `manifests/*-skills.txt` が決めます。導入先のランタイムは Claude Code と
 Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-refactoring の相手役として起動するだけです。
 
 | ランタイム | 公開 Skill | マニフェスト |
@@ -18,9 +18,9 @@ Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（49 個）
+├── skills/                      # 配る Skill の唯一の実体（49 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
-├── manifests/                   # ランタイム別の配布 Skill 一覧
+├── manifests/                   # ランタイム別の配る Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
 ├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook
 ├── hooks/codex.json             # Codex の PreToolUse / SessionStart / Stop hook
@@ -52,10 +52,10 @@ codex plugin marketplace add https://github.com/devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
 
-### agy・Kiro CLI への配布の終了
+### agy・Kiro CLI へのデプロイの終了
 
 agy と Kiro CLI へは配りません。最後に配ったのは v10.27.4 です。cross-review と cross-refactoring は、
-Claude Code か Codex をホストにして agy・Kiro CLI を相手役として今までどおり起動します。相手役に配布物は要りません。
+Claude Code か Codex をホストにして agy・Kiro CLI を相手役として今までどおり起動します。相手役にリリース対象は要りません。
 
 前の版で入れた手元は、こちらからは消しません。残すか消すかを選べます。
 
@@ -92,7 +92,7 @@ codex plugin add playwright-kit@ai-plugins            # Codex
 | メインディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` |
 | メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。worktree の設定の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` |
 
-前の版で agy・Kiro CLI へ入れた手元の hook も、同じ `scripts/` の入口を呼び続けます（「agy・Kiro CLI への配布の終了」）。
+前の版で agy・Kiro CLI へ入れた手元の hook も、同じ `scripts/` の入口を呼び続けます（「agy・Kiro CLI へのデプロイの終了」）。
 
 **この仕組みはリポジトリ側の設定ファイル `.ndf/worktree.json` があるときだけ動きます。**
 設定が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
@@ -350,7 +350,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.27.31-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.27.38/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -372,14 +372,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.31-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.38/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.27.31-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.27.38  <path>
 ```
 
 抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
@@ -392,12 +392,12 @@ codex plugin list | grep 'ndf@ai-plugins'
 |------|------|------|
 | 暗黙起動の抑止 (ワークスペース) | `.agents/skills/` の probe に対し「Available skills のうち probe で始まるものを列挙」と依頼 | `probe-open` のみ。`probe-explicit` は **載らない**。エラー・警告は出ない |
 | 明示起動 (ワークスペース) | `codex exec '$probe-explicit'` | **起動した**。セッションログに `<skill><name>probe-explicit</name><path>…</path>` + SKILL.md 本文が注入される |
-| 暗黙起動の抑止 (プラグイン) | v5.0.0 インストール後に skill 一覧を列挙 | 配布 23 個のうち **21 個**。`deploy` / `cherry-pick-pr` は載らない |
+| 暗黙起動の抑止 (プラグイン) | v5.0.0 インストール後に skill 一覧を列挙 | 配る 23 個のうち **21 個**。`deploy` / `cherry-pick-pr` は載らない |
 | 明示起動 (プラグイン・抑止なし) | `codex exec '$markdown-writing'` | **展開された**。SKILL.md 本文が注入される |
 | 明示起動 (プラグイン・抑止あり) | `codex exec '$deploy'` / `codex exec '$cherry-pick-pr'` | **展開されない**。「利用可能 skill 一覧に見当たらない」と返る |
 
 `.agents/skills/` に置いた Skill は抑止しても `$` で起動できますが、**プラグインとして
-配布した Skill は抑止すると `$` も効きません**。この差は codex-cli 0.146.1 で実測した
+配った Skill は抑止すると `$` も効きません**。この差は codex-cli 0.146.1 で実測した
 もので、公式ドキュメントには記載がありません。
 
 ## 実機検証の記録

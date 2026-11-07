@@ -1,4 +1,4 @@
-"""配布の版の判定（#2164）。次に空いている開発版を決め、ある版がもう出ているかを判定する。
+"""デプロイの版の判定（#2164）。次に空いている開発版を決め、ある版がもう出ているかを判定する。
 
 キューの版の差し込み（`supervise_lib/queue_fill.py` の `fill_release_version`）と `release-steps.py bump` が呼ぶ 1 か所で、
 開発版と本番・キューと `bump` で版の規則を分けない（#2164 の決定 4）。ファイルを書かない。
@@ -153,7 +153,7 @@ def taken(obs: Observed, version: str, how: str = "explicit", level: str = "patc
 
 
 def own_released(repo: str | Path, branch: str, base: str) -> bool | None:
-    """`branch` → `base` のマージ済みの PR があるか（自分の配布か）。1 回だけ照会し、照会できなければ None。"""
+    """`branch` → `base` のマージ済みの PR があるか（自分のデプロイか）。1 回だけ照会し、照会できなければ None。"""
     import gh_call
 
     r = gh_call.gh(["pr", "list", "--head", branch, "--base", base, "--state", "merged", "--json", "number", "--limit", "1"], cwd=str(repo))
@@ -177,9 +177,9 @@ class BumpStop:
 def bump_check(repo: str | Path, plugin: str, old: str, new: str, base: str, rel: str) -> tuple[str | None, BumpStop | None]:
     """`bump` が書き換える前の判定（#2164 の I7）。打ち直しなら (origin のベースブランチの版, None)、書き換えてよければ (None, None)。
     新しい版がベースブランチの版以下か、正式版でそのタグがあれば終了コード 3 で止める（版を戻さない）。
-    版の形が違う・ベースブランチの版を読めない・自分の配布の照会ができなければ、推定で進めずに終了コード 2 で止める。
+    版の形が違う・ベースブランチの版を読めない・自分のデプロイの照会ができなければ、推定で進めずに終了コード 2 で止める。
     作業場所がすでに新しい版で、ベースブランチの版が等しいときだけ `release/v<新しい版>` → ベースブランチのマージ済みの
-    PR を 1 回照会し、あれば自分の配布の後の流し直しとして打ち直しにする。"""
+    PR を 1 回照会し、あれば自分のデプロイの後の流し直しとして打ち直しにする。"""
     if versions.parse_version(new) is None:
         return None, BumpStop(f"版の形が違う: {new}（X.Y.Z / X.Y.Z-dev.N / X.Y.Z-rc.N）", {"plugin": plugin, "to": new}, 2)
     obs = observe(repo, plugin, base, None, rel=rel)

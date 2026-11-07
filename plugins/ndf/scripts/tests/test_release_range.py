@@ -76,7 +76,7 @@ def make_world(tmp_path: Path) -> dict:
     git(seed, "tag", "foo--v1.0.0")
     git(seed, "push", "-q", "origin", "foo--v1.0.0")
     merge_into(seed, 21, "feat/direct", "trunk", "plugins/playwright-kit/skills/x.md")  # develop へ直接（移行の手順あり）
-    merge_into(seed, 22, "spec/none", "trunk")  # 配布物の変化なし（「なし」）
+    merge_into(seed, 22, "spec/none", "trunk")  # 利用者向けの変化なし（「なし」）
     add_sprint(seed)
     commit_file(seed, "release.txt")
     git(seed, "commit", "-q", "--amend", "-m", "release: v1.0.1-dev.1 (#40)")
@@ -222,8 +222,8 @@ def test_approval_lists_every_pr_with_marks_once(monkeypatch, world):
     rows = included_rows(out["presentation_path"])
     assert code == 10 and numbers(rows) == [21, 22, 30, 31, 32]
     by = dict(zip(numbers(rows), rows))
-    assert "スプリント PR #30 経由" in by[31] and "スプリント PR #30 経由" in by[32] and "配布物の変化なし" in by[32]
-    assert "配布物の変化なし" in by[22] and "経由" not in by[21] and "配布物の変化なし" not in by[21]
+    assert "スプリント PR #30 経由" in by[31] and "スプリント PR #30 経由" in by[32] and "利用者向けの変化なし" in by[32]
+    assert "利用者向けの変化なし" in by[22] and "経由" not in by[21] and "利用者向けの変化なし" not in by[21]
     assert mod.included.read_included_rows(out["presentation_path"])[3] == mod.included.IncludedPr(31, 30)
     assert mod.reads == [[21, 22, 30, 31, 32]]
 

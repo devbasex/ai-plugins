@@ -1,4 +1,4 @@
-"""本番の配布が受け取る承認したコミットの読み取り・比較・止め方（`release-steps.py` の release と approve から分けた。#815）。
+"""リリースが受け取る承認したコミットの読み取り・比較・止め方（`release-steps.py` の release と approve から分けた。#815）。
 
 比べる本体は `lib/approved_commit.py`。ここは引数・承認資料の読み替えと、承認ゲートの結果（`step_result.result` の形）を
 作るところまでを持ち、出す（emit）のは呼び手である。
@@ -18,7 +18,7 @@ from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, git, resu
 
 TOOL = "release"
 # 承認を取り直さずに通すパス（許可リスト）。承認の外のコミットの差分がすべてこの下に収まれば通す（#2221）。
-# 拒否リスト（配布物だけ）にすると、秘密を渡すワークフローが実行する scripts/・.github/ などの未承認の変更が main へ入る（C1）
+# 拒否リスト（リリース対象だけ）にすると、秘密を渡すワークフローが実行する scripts/・.github/ などの未承認の変更が main へ入る（C1）
 UNGATED = ("docs/", "issues/")
 
 
@@ -40,10 +40,10 @@ def _material(root, material) -> Path:
 
 
 def approved_of(root, a, plugin):
-    """本番の配布が受け取る承認したコミット（#815 の I1・I10）。dev は None。何もマージする前に呼ぶ。
+    """リリースが受け取る承認したコミット（#815 の I1・I10）。dev は None。何もマージする前に呼ぶ。
 
     --approved-sha の形の誤り・どちらも無い・dev に渡した → 2。--approval の資料・欄が無い・形の誤り → 3。
-    --approval の資料に承認の記録が無いか SHA が違う → Gate（承認ゲート 10）。"""
+    --approval の資料に承認の記録が無いか SHA が違う → Gate（承認ゲート。終了コード 10）。"""
     sha, material = getattr(a, "approved_sha", None), getattr(a, "approval", None)
     if a.channel == "dev":
         if sha or material:
@@ -68,7 +68,7 @@ def approved_of(root, a, plugin):
             result(
                 TOOL,
                 "gate",
-                f"{plugin} v{a.version} の本番への配布を止めた: 承認資料の承認したコミット {e.sha[:8]} に"
+                f"{plugin} v{a.version} のリリースを止めた: 承認資料の承認したコミット {e.sha[:8]} に"
                 + ("承認の記録が無い" if e.recorded is None else f"承認の記録 {e.recorded[:8]} と違う"),
                 [item],
                 metrics,
@@ -82,7 +82,7 @@ def approved_of(root, a, plugin):
 
 
 def release_pr_allowed(root, n, pr_view):
-    """配布の PR の先端・コミット・mergeCommit（承認したコミットの後に入ってよいもの）。読めなければ None。"""
+    """デプロイの PR の先端・コミット・mergeCommit（承認したコミットの後に入ってよいもの）。読めなければ None。"""
     try:
         d = pr_view(root, n, "headRefOid,commits,mergeCommit") or {}
     except StepError:
@@ -97,7 +97,7 @@ def release_pr_allowed(root, n, pr_view):
 
 
 def check_approved(root, approved, ref, allowed):
-    """origin/<ref>（本番の配布では release/v<版>。#2436 の R2）の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
+    """origin/<ref>（リリースでは release/v<版>。#2436 の R2）の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
     差分がすべて許可リスト（UNGATED）の下に収まる承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
     git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
     tip = git(root, "rev-parse", f"origin/{ref}").stdout.strip()
@@ -128,13 +128,13 @@ GATE_LEADS = {
 
 
 def tolerated_items(verdict) -> list[dict]:
-    """配布物に触れないので承認を取り直さずに通した、承認の外のコミット（#2221）。"""
+    """リリース対象に触れないので承認を取り直さずに通した、承認の外のコミット（#2221）。"""
     return [{"kind": "commit", "name": o.sha, "result": "outside_unshipped", "subject": o.subject} for o in verdict.tolerated]
 
 
 def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
-    """承認の外の変更で本番への配布を止める結果（status: gate。出すのは呼び手で終了コード 10。#815 の I2〜I6）。
-    base は比べた参照（本番の配布では release/v<版>）の名前で、文言にだけ使う。"""
+    """承認の外の変更でリリースを止める結果（status: gate。出すのは呼び手で終了コード 10。#815 の I2〜I6）。
+    base は比べた参照（リリースでは release/v<版>）の名前で、文言にだけ使う。"""
     reason = "head_moved" if moved and verdict.ok else verdict.reason
     out = []
     for o in verdict.outside:
@@ -155,7 +155,7 @@ def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
     return result(
         TOOL,
         "gate",
-        f"{plugin} v{a.version} の本番への配布を止めた: {lead}",
+        f"{plugin} v{a.version} のリリースを止めた: {lead}",
         items + out,
         metrics,
         None,
@@ -191,7 +191,7 @@ def _approve_gate(path, why: str, metrics: dict, nxt: str) -> Gate:
 
 def approve_from_facts(root, a) -> dict:
     """本番のプランの先頭の approve（#1426 の決定 7）。提示した SHA は開発版の facts の出力から読み（資料を読み直さない）、
-    承認資料に一致する承認の記録が既にあれば書かずに通す。無ければ承認ゲート 2 の利用者の承認の記録（facts の出力より後）が
+    承認資料に一致する承認の記録が既にあれば書かずに通す。無ければリリース承認ゲートの利用者の承認の記録（facts の出力より後）が
     `--answer-from` にあるときだけ書く。どれかが欠ければ書かずに承認ゲート（10）で止まる（I2・I3）。"""
     import gate_answer
 
@@ -200,7 +200,7 @@ def approve_from_facts(root, a) -> dict:
     path = _material(root, a.approval)
     sha, facts_at = _facts_of(a.facts_from)
     metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by}
-    retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.GATE_2}" --what <要約> --by user --outcome approved を書いてから続ける'
+    retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.RELEASE_GATE}" --what <要約> --by user --outcome approved を書いてから続ける'
     if not sha:
         # facts を読めなくても（--dev-state を省いた単発の本番のプランなど）、資料に一致する承認の記録が既にあれば通す（決定 7）
         try:
@@ -237,9 +237,9 @@ def approve_from_facts(root, a) -> dict:
             )
     except ValueError as e:
         raise _approve_gate(path, str(e), metrics, "開発版のプランを流し直す")
-    answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.GATE_2, after=facts_at)
+    answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.RELEASE_GATE, after=facts_at)
     if answer is None:
-        raise _approve_gate(path, "承認ゲート 2 の利用者の承認の記録が facts の出力より後に無い", metrics, retry)
+        raise _approve_gate(path, "リリース承認ゲートの利用者の承認の記録が facts の出力より後に無い", metrics, retry)
     at = clock.now_iso("utc")
     ac.record_approval(path, sha, a.by, at)
     metrics.update({"at": at, "answer_at": answer.at})
@@ -254,7 +254,7 @@ def approve_from_facts(root, a) -> dict:
 
 
 def approve(root, a) -> dict:
-    """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
+    """リリース承認ゲートの承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
     metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
     --facts-from なら approve_from_facts（#1426）。"""
     # 空の --facts-from（queue が {queue_state?:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す

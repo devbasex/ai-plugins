@@ -375,7 +375,7 @@ def test_still_reverted_reads_reverts_of_reverts(refactor):
 def _default_place(tmp_path, monkeypatch):
     """既定の worktree の置き場を一時ディレクトリへ向け、環境変数と現在地からは探せないようにする。"""
     paths = _mod("paths")
-    monkeypatch.setattr(paths, "default_worktree_base", lambda: tmp_path / "worktrees")
+    monkeypatch.setattr(paths, "default_worktree_base", lambda root: tmp_path / "worktrees")
     monkeypatch.setattr(paths, "github_repo_from_origin", lambda: "acme/demo")
     monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
     elsewhere = tmp_path / "elsewhere"

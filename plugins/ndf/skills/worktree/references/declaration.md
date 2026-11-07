@@ -209,6 +209,7 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
     "port_roles": { "http": 0, "db": 1, "mail": 2, "object": 4, "search": 6 },
     "profiles": { "core": ["app", "mysql"], "browser": ["app", "mysql", "nginx"] },
     "shared_network": "",
+    "discard_volumes": true,
     "golden_tag_paths": ["database/migrations", "database/seeders"],
     "golden_volumes": { "sail-mysql": "ndf-golden-mysql" },
     "test_kinds": {
@@ -232,6 +233,7 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | --- | --- |
 | `port_band` | 他の用途と重ならない帯。スロット 1 つあたり 20 番を使う |
 | `port_roles` | 役割ごとの番号。ポートは `帯の下限 + スロット*20 + 役割番号` |
+| `discard_volumes` | `false` のとき、`worktree-testenv.sh down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの宣言を読む |
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |

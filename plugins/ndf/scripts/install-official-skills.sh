@@ -92,7 +92,7 @@ if [ "$DO_LIST" = true ]; then
     printf "  %-25s [%s]\n" "$name" "$license"
   done
   echo ""
-  echo "Proprietary Skillは各自の環境にインストール可能ですが、再配布は禁止です。"
+  echo "Proprietary Skillは各自の環境にインストール可能ですが、再頒布は禁止です。"
   exit 0
 fi
 

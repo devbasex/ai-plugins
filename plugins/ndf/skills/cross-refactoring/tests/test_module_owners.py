@@ -132,6 +132,6 @@ def test_the_clock_keeps_the_offset_of_the_state_file(refactor):
 
 
 def test_the_repo_slug_is_the_library_slug(refactor):
-    setup = sys.modules["refactor_lib.commands.setup"]
-    assert "repo_slug" not in vars(sys.modules["refactor_lib.paths"])
-    assert setup.repo_lib.slug("o/r") == "o--r"
+    paths = sys.modules["refactor_lib.paths"]
+    assert "repo_slug" not in vars(paths)
+    assert paths.repo_lib.slug("o/r") == "o--r"

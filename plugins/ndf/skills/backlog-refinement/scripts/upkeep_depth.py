@@ -443,7 +443,7 @@ def add_depth_parsers(sub, common, state_dir) -> None:
     dr.add_argument("--step", default="refine", help="--progress で読むステップの id")
     dr.set_defaults(func=cmd_record, state_dir_of=state_dir)
     dc = dp.add_parser("compare", parents=[common])
-    dc.add_argument("--since-ref", required=True, help="この ref のコミットの時刻より後の行だけを使う（配布した正式版のタグ）")
+    dc.add_argument("--since-ref", required=True, help="この ref のコミットの時刻より後の行だけを使う（リリースした正式版のタグ）")
     dc.add_argument("--seconds-under", type=float, required=True)
     dc.add_argument("--cost-under", type=float, required=True)
     dc.add_argument("--count", type=int, default=3)

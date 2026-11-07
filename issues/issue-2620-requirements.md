@@ -85,7 +85,7 @@ E5 の失敗の経路は受け入れ条件 7 へ、E6 は受け入れ条件 2 �
 
 ## 受け入れ条件
 
-- [ ] 1. 次の検索の結果が、受け入れ条件 6・7 の互換のコードとそのテスト、用語集の別名の欄だけになる: `git grep -nF 配布 -- plugins factory docs AGENTS.md CLAUDE.md README.md .ndf ':!docs/presentations' ':!docs/articles' ':!docs/archive' ':!docs/development-history' ':!docs/changelog'`
+- [ ] 1. ~~次の検索の結果が、受け入れ条件 6・7 の互換のコードとそのテスト、用語集の別名の欄だけになる: `git grep -nF 配布 -- plugins factory docs AGENTS.md CLAUDE.md README.md .ndf ':!docs/presentations' ':!docs/articles' ':!docs/archive' ':!docs/development-history' ':!docs/changelog'`~~ → 次の検索の結果が、受け入れ条件 6・7 の互換のコードとそのテスト、用語集の別名の欄、`.ndf/glossary.json` の禁止語の宣言、`.ndf/mvv.md`・`.ndf/mvv.json`、`docs/metrics/` だけになる: `git grep -nF 配布 -- plugins factory docs .github AGENTS.md CLAUDE.md README.md KIRO.md .ndf ':!docs/presentations' ':!docs/articles' ':!docs/archive' ':!docs/development-history' ':!docs/changelog'`（2026-11-06、設計の承認ゲート 1 の利用者の答えで `.github/` を範囲に足し、MVV と計測の記録を例外にした。`KIRO.md` と禁止語の宣言は承認された設計の検査の範囲に合わせた）
 - [ ] 2. 対象範囲のファイルへ `配布` を含む行を足したプルリクエストは、継続的統合の検査が失敗し、失敗の出力にファイルと行が出る。1 の例外の場所へ足した行では失敗しない
 - [ ] 3. 用語集に「デプロイ」（開発・本番を問わず環境に変更を届けること）と「リリース」（本番へのデプロイだけ）が載り、`glossary.py check` で「配布」「検証リリース」「本番の配布」「開発版の配布」を含む文書を調べると、廃止した語として当たり、置き換え先の語が出る
 - [ ] 4. 開発版のチャネルへ版を出す操作と検証の環境への反映を指す文は「デプロイ」、正式版のチャネルへ出してタグを打つ操作を指す文は「リリース」で書かれている。「検証リリース」の語が受け入れ条件 1 の範囲に残らない
@@ -95,6 +95,7 @@ E5 の失敗の経路は受け入れ条件 7 へ、E6 は受け入れ条件 2 �
 - [ ] 8. Skill の名前・スラッシュコマンド・スクリプトの副命令の名前が変わっていない（`plugins/ndf/manifests/` の行が変更の前後で同じ）
 - [ ] 9. 全体テストが通る
 - [ ] 10. S4 の書いた日の記録のファイルに差分が無い
+<!-- ndf:section-end -->
 
 ## 非機能の条件
 

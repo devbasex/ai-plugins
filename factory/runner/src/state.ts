@@ -1,11 +1,11 @@
-// 状態の保存と復元（受け入れ条件 28・32、I42）。保存は NDF の状態ディレクトリと配布の承認資料（追跡しないパス）だけを tar にし、
+// 状態の保存と復元（受け入れ条件 28・32、I42）。保存は NDF の状態ディレクトリとリリースの承認資料（追跡しないパス）だけを tar にし、
 // 復元は追跡するパスを 1 つでも含む保存を捨てる。取り込んだリポジトリの .ndf/ を上書きしない
 import { execFileSync } from "node:child_process";
 
 // .ndf/organizer は Factory のオーガナイザーとの置き場（#2439）。依頼と答えを周回と再開をまたいで残す
 export const STATE_PATHS = [".ndf/tmp", ".ndf/loop", ".ndf/organizer"];
 
-// 名前で決まる状態のファイル。配布の提示のプランが作る承認資料（parallel_release.py の plan_parallel_release が
+// 名前で決まる状態のファイル。リリースの提示のプランが作る承認資料（parallel_release.py の plan_parallel_release が
 // issues/approval-<プラグイン>-v<版>-parallel-<連番>-<提示>.md に書く）は、承認の後の新しいコンテナで confirm のプランが
 // --from approve で読むため、追跡していなければ保存と復元の対象にする
 export const STATE_FILE_PATTERNS = [/^issues\/approval-[^/]+-parallel-\d+-\d+\.md$/];

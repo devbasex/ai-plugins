@@ -31,7 +31,7 @@ erDiagram
 | ループ | `loopId` | 文字列 | 不可 | 32 字（実行と同じ作り方） |
 | ループ | `repositoryId`・`name` | 数・文字列 | 不可 | 属する登録と、NDF のループ名（`^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$`） |
 | ループ | `milestones` | 文字列の並び | 不可 | 1〜10 件。題に `,` を含まない（NDF の `--milestones` の区切り） |
-| ループ | `budget` | `{laps, usd, hours}` | 各値は可 | 空はリポジトリの予算の既定（NDF の `.ndf/pace.json` の `loop.budget`）に従う |
+| ループ | `budget` | `{laps, usd, hours}` | 各値は可 | 空はリポジトリの予算の既定（NDF の `.ndf/pace.json` の `loop.budget`。宣言の無い単位は無制限）に従う |
 | ループ | `state` | 文字列 | 不可 | `running` / `between_laps` / `awaiting_approval` / `stopped` / `cancelled`。後ろの 2 つが終わりの状態 |
 | ループ | `waitReason` | 文字列 | 可 | `between_laps` の理由: `slots`（枠）・`legacy_version`・`user_start`（`local`）。空は「起こす途中」 |
 | ループ | `currentRunId` | 文字列 | 可 | 終わりの状態でない実行（I44）。空は「動く実行が無い」 |
