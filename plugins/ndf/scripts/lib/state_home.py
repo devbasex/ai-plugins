@@ -13,7 +13,8 @@
 旧の置き場（`~/.local/state/ndf`）からの移り方:
 
 - チェックアウトの記録は、新に無く旧にある記録を旧のまま使う（`legacy_entry`。動いている耐久ワークフローを続ける）
-- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。何度打ってもよい。打つまでは、台帳の種類ごとに、
+- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。`.jsonl` は旧と新の行を時刻（`at`）の順に並べて
+  書き直す（読み手は末尾を最新として読んでよい）。何度打ってもよい。打つまでは、台帳の種類ごとに、
   利用者の根にその種類が無く旧の根にあれば旧の根を読み書きする（`user_home(kinds=...)`。移す前の記録を見失わない。
   `~/.claude` を共有する別のコンテナが利用者の根に別の種類を書いても、この種類の旧の記録は読まれる）
 
@@ -22,6 +23,8 @@
 
 from __future__ import annotations
 
+import datetime
+import json
 import os
 import shutil
 from pathlib import Path
@@ -44,7 +47,8 @@ USER_KINDS = (
 )
 # MVV の記録と ask の台帳は同じ置き場（`NDF_MVV_STATE_DIR`）を分け合うため、1 つの種類として旧へ戻るかを決める
 MVV_KINDS = ("ask.jsonl", "mvv-gate.jsonl", "project-mvv.jsonl", "project-mvv-signals.jsonl", "gate-rejections.jsonl", "project-mvv")
-_HELD = ".migrating-"  # migrate が名前を外した旧の台帳の接尾辞（`<名前>.jsonl.migrating-<pid>`）
+_HELD = ".migrating-"  # migrate が名前を外した台帳の接尾辞（`<名前>.jsonl.migrating-<pid>`）
+_TMP = ".tmp-"  # migrate が並べ直した台帳を書く一時ファイルの接尾辞（`.<名前>.jsonl.tmp-<pid>`）
 
 
 def _state_env(env: Optional[Mapping[str, str]]) -> Mapping[str, Optional[str]]:
@@ -152,9 +156,10 @@ def legacy_entry(new: Path, kind: str, name: str, env: Optional[Mapping[str, str
 
 
 def _held_of(path: Path) -> Optional[tuple[str, int]]:
-    """名前を外した旧の台帳（`<名前>.jsonl.migrating-<pid>`）なら (元の名前, pid)。違えば None。"""
-    name, sep, pid = path.name.rpartition(_HELD)
-    if sep and name.endswith(".jsonl") and pid.isdigit():
+    """名前を外した台帳（`<名前>.jsonl.migrating-<pid>` か `<名前>.jsonl.migrating-<pid>-<n>`）なら (元の名前, pid)。違えば None。"""
+    name, sep, tag = path.name.rpartition(_HELD)
+    pid = tag.split("-", 1)[0]
+    if sep and name.endswith(".jsonl") and pid.isdigit() and (tag == pid or tag[len(pid) + 1 :].isdigit()):
         return name, int(pid)
     return None
 
@@ -170,21 +175,96 @@ def _held_running(pid: int) -> bool:
     return True
 
 
-def _append_held(held: Path, dst: Path, resumed: bool) -> None:
-    """名前を外した旧の台帳 `held` を `dst` へ足して消す。`resumed`（止まった migrate の残り）は、`dst` に同じまとまりが
-    既にあれば足さない（前の migrate が足した後、消す前に止まった）。"""
-    data = held.read_bytes()
-    if data and not data.endswith(b"\n"):
-        data += b"\n"
-    if data and not (resumed and dst.is_file() and data in dst.read_bytes()):
-        with dst.open("ab") as f:
-            f.write(data)
-    held.unlink()
+def _row_time(line: bytes) -> Optional[datetime.datetime]:
+    """台帳の 1 行の時刻（`at`。実物の台帳はどれもこのキーを持つ）。無い・読めなければ None。時差の無い値は UTC とみなす。"""
+    try:
+        at = json.loads(line).get("at")
+        d = datetime.datetime.fromisoformat(at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
+
+
+def _by_time(chunks: Sequence[Sequence[bytes]]) -> list[bytes]:
+    """まとまり（移し先 → 旧の台帳。これまでの追記の並び）の行を、時刻の順に並べる（安定。同じ時刻は元の並び）。
+    時刻の無い行は、同じまとまりの直前の行（先頭なら直後の行）の時刻を借り、元の隣り合いを保つ。
+    時刻の無い行だけのまとまりは、それまでの最も新しい時刻を借りて末尾に残る（追記と同じ並び）。"""
+    keyed: list[tuple[datetime.datetime, bytes]] = []
+    last = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    for lines in chunks:
+        times = [_row_time(line) for line in lines]
+        head = next((t for t in times if t is not None), last)
+        cur = head
+        for t, line in zip(times, lines):
+            cur = t if t is not None else cur
+            keyed.append((cur, line))
+        last = max([last, *(t for t in times if t is not None)])
+    keyed.sort(key=lambda kv: kv[0])
+    return [line for _, line in keyed]
+
+
+def _ledger_lines(path: Path) -> list[bytes]:
+    return [line + b"\n" for line in path.read_bytes().splitlines() if line.strip()]
+
+
+def _side(dst: Path) -> Path:
+    """`dst` の名前を外した先。止まった前の移行の残り（同じ pid の名前）を上書きしない名前を選ぶ。"""
+    n = 0
+    while True:
+        side = dst.with_name(f"{dst.name}{_HELD}{os.getpid()}" + (f"-{n}" if n else ""))
+        if not side.exists():
+            return side
+        n += 1
+
+
+def _rewrite_by_time(dst: Path, sources: Sequence[tuple[Path, bool]]) -> None:
+    """旧の台帳 `sources`（(パス, 止まった移行の残りか)）を `dst` と合わせ、時刻の順に並べて `dst` を書き直し、`sources` を消す。
+
+    `dst` も名前を外してから読み（`<dst>.migrating-<pid>`）、並べたものを一時ファイルへ書いて `os.link` で元の名前へ置く。
+    間に別のプロセスが `dst` を作り直して追記していれば、その名前も外して末尾へ足してから置き直す（追記を落とさない）。
+    止まった移行の残りは、`dst` に既にある行を足さない（前の移行が足した後、消す前に止まった）。
+    途中で止まっても、名前を外した `dst` は次の migrate が `_resume_held` で元の名前へ戻す。"""
+    sides: list[Path] = []
+    current: list[bytes] = []
+    if dst.exists():
+        side = _side(dst)
+        os.rename(dst, side)
+        sides.append(side)
+        current = _ledger_lines(side)
+    have: dict[bytes, int] = {}
+    for line in current:
+        have[line] = have.get(line, 0) + 1
+    chunks: list[list[bytes]] = []
+    for src, resumed in sources:
+        rows = []
+        for line in _ledger_lines(src):
+            if resumed and have.get(line, 0) > 0:
+                have[line] -= 1
+                continue
+            rows.append(line)
+        chunks.append(rows)
+    tmp = dst.with_name(f".{dst.name}{_TMP}{os.getpid()}")  # `.jsonl` で終わらない（読み手が拾わない）
+    tmp.unlink(missing_ok=True)  # 止まった前の書き直しの残りは移し先と同じ実体のことがある。書き込む前に切り離す
+    with tmp.open("wb") as f:
+        f.write(b"".join(_by_time([current, *chunks])))
+    while True:
+        try:
+            os.link(tmp, dst)
+            break
+        except FileExistsError:
+            side = _side(dst)
+            os.rename(dst, side)  # 書き直しの間に作り直された台帳。行は並べたものより新しい
+            sides.append(side)
+            with tmp.open("ab") as f:
+                f.write(b"".join(_ledger_lines(side)))
+    tmp.unlink()
+    for path in [*sides, *(src for src, _ in sources)]:
+        path.unlink()
 
 
 def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
-    """`src` を `dst` へ足し合わせる。`.jsonl` は追記、無いものは移し、同じ名前の他のファイルは旧に残す。
-    止まった migrate が名前を外したまま残した台帳（`_held_of`）は、元の名前の台帳より先に足す（古い行が先）。"""
+    """`src` を `dst` へ足し合わせる。`.jsonl` は両方の行を時刻の順に並べて書き直し（`_rewrite_by_time`）、無いものは移し、
+    同じ名前の他のファイルは旧に残す。止まった migrate が名前を外したまま残した台帳（`_held_of`）も足す。"""
     if src.is_dir() and not src.is_symlink():
         for child in sorted(src.iterdir(), key=lambda c: (_held_of(c) is None, c.name)):
             held = _held_of(child)
@@ -201,9 +281,9 @@ def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
     if src.suffix == ".jsonl":
         # 名前を先に外してから読む。旧の版の書き手が後から追記すると旧の名前で作り直し、次の migrate で移る
         # （読んだ後に追記された行を消さない）。移し先が別のファイルシステムでもコピーと削除の間に行を落とさない
-        held = src.with_name(f"{src.name}{_HELD}{os.getpid()}")
+        held = _side(src)
         os.rename(src, held)
-        _append_held(held, dst, resumed=False)
+        _rewrite_by_time(dst, [(held, False)])
         moved.append(str(dst))
     elif not dst.exists():
         shutil.move(str(src), str(dst))
@@ -213,13 +293,30 @@ def _merge_ledger(src: Path, dst: Path, moved: list, kept: list) -> None:
 
 
 def _resume_held(held: Path, dst: Path, pid: int, moved: list, kept: list) -> None:
-    """止まった migrate の残り `held` を `dst` へ足す。名前を外したプロセスが生きていれば（動いている migrate）触らない。"""
+    """止まった migrate の残り `held`（旧の台帳か、名前を外した移し先）を `dst` へ足す。
+    名前を外したプロセスが生きていれば（動いている migrate）触らない。"""
     if pid != os.getpid() and _held_running(pid):
         kept.append(str(held))
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    _append_held(held, dst, resumed=True)
+    _rewrite_by_time(dst, [(held, True)])
     moved.append(str(dst))
+
+
+def _resume_sides(new: Path, kind: str, moved: list, kept: list) -> None:
+    """書き直しの途中で止まった移し先（名前を外した `dst`）を元の名前へ戻し、止まったプロセスの一時ファイルを消す
+    （一時ファイルの行は、名前を外した台帳か移し先に必ずある）。"""
+    found = [*new.glob(f"{kind}{_HELD}*"), *new.glob(f".{kind}{_TMP}*")] if new.is_dir() else []
+    if (new / kind).is_dir():
+        found += [*(new / kind).rglob(f"*{_HELD}*"), *(new / kind).rglob(f".*{_TMP}*")]
+    for child in sorted(found):
+        held = _held_of(child)
+        if held is not None:
+            _resume_held(child, child.with_name(held[0]), held[1], moved, kept)
+            continue
+        pid = child.name.rpartition(_TMP)[2]
+        if pid.isdigit() and int(pid) != os.getpid() and not _held_running(int(pid)):
+            child.unlink()
 
 
 def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
@@ -242,6 +339,7 @@ def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
                     _resume_held(child, new / held[0], held[1], moved, kept)
         if (old / kind).exists():
             _merge_ledger(old / kind, new / kind, moved, kept)
+        _resume_sides(new, kind, moved, kept)
     out = {**base, "moved": moved, "kept": kept}
     if kept:
         return {

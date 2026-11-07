@@ -138,7 +138,7 @@ def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
 
     r = sh.migrate(env)
     assert r["status"] == "kept"
-    assert (new / "usage/claude/o__r.jsonl").read_text() == '{"b":2}\n{"a":1}\n'  # 追記で足し合わせる
+    assert (new / "usage/claude/o__r.jsonl").read_text() == '{"b":2}\n{"a":1}\n'  # 時刻の無い行は追記の並び（新 → 旧）
     assert (new / "ask.jsonl").read_text() == '{"q":1}\n'
     assert r["kept"] == [str(old / "stages/o__r__1.json")]  # 上書きの形は旧に残す
     assert (new / "stages/o__r__1.json").read_text() == '{"newer":1}'
@@ -231,3 +231,97 @@ def test_shell_user_root_follows_legacy_ledger(tmp_path, kind):
     env = {"HOME": str(tmp_path), "PATH": os.environ["PATH"]}
     out = subprocess.run(["bash", "-c", f". '{WF}' && ndf_user_state_home"], env=env, capture_output=True, text=True, check=True)
     assert out.stdout.strip() == str(sh.user_home(env)) == str(tmp_path / ".local/state/ndf")
+
+
+def _row(at: str, **kw) -> str:
+    return json.dumps({"at": at, **kw}) + "\n"
+
+
+def test_migrate_orders_rows_by_time(tmp_path):
+    """旧と新の行を時刻（`at`）の順に並べて書き直す。時刻の書き方（`Z`・時差・時差なし）が混ざっても順に並び、時刻の無い行は直前の行の隣に残る。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    (old / "usage/claude").mkdir(parents=True)
+    (new / "usage/claude").mkdir(parents=True)
+    (old / "usage/claude/o__r.jsonl").write_text(
+        _row("2026-11-01T00:00:00Z", n=1) + '{"n":"1b"}\n' + _row("2026-11-03T09:00:00+09:00", n=3)
+    )
+    (new / "usage/claude/o__r.jsonl").write_text(_row("2026-11-02T00:00:00", n=2) + _row("2026-11-05T00:00:00Z", n=5))
+    assert sh.migrate(env)["status"] == "migrated"
+    got = [json.loads(line)["n"] for line in (new / "usage/claude/o__r.jsonl").read_text().splitlines()]
+    assert got == [1, "1b", 2, 3, 5]
+    assert sh.migrate(env)["status"] == "none"  # 打ち直しても足し直さない
+    assert len((new / "usage/claude/o__r.jsonl").read_text().splitlines()) == 5
+
+
+def test_unknown_streak_counts_by_time_after_migrate(tmp_path):
+    """旧の台帳の古い「判定できない」は、新の台帳の新しい判定より前に並ぶ。連続の回数は新しい判定で途切れる（PR 2767 の round 4）。"""
+    import project_mvv_signals as pms
+
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    ref = {"sha256": "s"}
+    (old / "mvv-gate.jsonl").write_text(
+        "".join(_row(f"2026-11-0{i}T00:00:00Z", verdict="unknown", sprint=f"sp{i}", gate="design", project_mvv=ref) for i in (1, 2, 3))
+    )
+    (new / "mvv-gate.jsonl").write_text(_row("2026-11-06T00:00:00Z", verdict="follow", sprint="sp9", gate="design", project_mvv=ref))
+    assert sh.migrate(env)["status"] == "migrated"
+    path = new / "mvv-gate.jsonl"
+    assert pms.unknown_streak(pms.read_jsonl(path), "s") == 0
+    pms.append_jsonl(path, {"at": "2026-11-07T00:00:00Z", "verdict": "unknown", "sprint": "sp10", "gate": "design", "project_mvv": ref})
+    assert pms.unknown_streak(pms.read_jsonl(path), "s") == 1
+
+
+def test_migrate_keeps_rows_appended_while_rewriting(tmp_path, monkeypatch):
+    """書き直しの間に別のプロセスが移し先へ追記した行（移し先を作り直して書く）を落とさず、末尾に残す。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    (old / "ask.jsonl").write_text(_row("2026-11-01T00:00:00Z", q=1))
+    (new / "ask.jsonl").write_text(_row("2026-11-02T00:00:00Z", q=2))
+    real_link = sh.os.link
+    calls = []
+
+    def write_then_link(src, dst):
+        if not calls:  # 一時ファイルを置く直前に、新の版が移し先を作り直して追記する
+            Path(dst).write_text(_row("2026-11-07T00:00:00Z", q=3))
+        calls.append(dst)
+        real_link(src, dst)
+
+    monkeypatch.setattr(sh.os, "link", write_then_link)
+    assert sh.migrate(env)["status"] == "migrated"
+    assert len(calls) == 2
+    assert [json.loads(line)["q"] for line in (new / "ask.jsonl").read_text().splitlines()] == [1, 2, 3]
+    assert sorted(p.name for p in new.iterdir()) == ["ask.jsonl"]  # 名前を外した台帳も一時ファイルも残さない
+
+
+@pytest.mark.parametrize("stop", ["before_link", "after_link"])
+def test_migrate_resumes_a_stopped_rewrite(tmp_path, monkeypatch, stop):
+    """移し先の名前を外した後（置く前・置いた後）で止まっても、次の migrate が欠かさず二重にせず元の名前の台帳へ戻す。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = sh.legacy_home(env), sh.user_home(env)
+    (old / "checks").mkdir(parents=True)
+    (new / "checks").mkdir(parents=True)
+    (old / "checks/o__r.jsonl").write_text(_row("2026-11-01T00:00:00Z", c=1))
+    (new / "checks/o__r.jsonl").write_text(_row("2026-11-02T00:00:00Z", c=2))
+    real_link = sh.os.link
+
+    def stopped(src, dst):
+        if stop == "after_link":
+            real_link(src, dst)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sh.os, "link", stopped)
+    with pytest.raises(KeyboardInterrupt):
+        sh.migrate(env)
+    monkeypatch.setattr(sh.os, "link", real_link)
+    (new / "checks/o__r.jsonl").parent.mkdir(exist_ok=True)
+    with (new / "checks/o__r.jsonl").open("a") as f:  # 止まった後に新の版が書いた
+        f.write(_row("2026-11-07T00:00:00Z", c=3))
+    assert sh.migrate(env)["status"] == "migrated"
+    assert [json.loads(line)["c"] for line in (new / "checks/o__r.jsonl").read_text().splitlines()] == [1, 2, 3]
+    assert sorted(p.name for p in (new / "checks").iterdir()) == ["o__r.jsonl"]
+    assert not old.exists() or not any(old.rglob("*"))
