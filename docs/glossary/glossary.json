@@ -6200,6 +6200,12 @@
       "context": "ndf-relay",
       "meaning": "ラッパーが区間を起動するときに、指定・残量・上限から使うアカウントを決める手順",
       "pending_source": "issues/issue-2656-requirements.md"
+    },
+    {
+      "term": "オーガナイザーのカットポイント",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが知らせへの 1 手と答えの後の整理を終え、`parallel.py wait` を打ち直す時点。文脈の上限の判定はここで行う",
+      "pending_source": "issues/issue-2595-requirements.md"
     }
   ]
 }
