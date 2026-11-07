@@ -313,7 +313,8 @@ NDF_CODEX_SLACK_NOTIFY=true
 
 `NDF_STATE_HOME` か `XDG_STATE_HOME` を指定すると、3 つとも その置き場になります。旧の版が `~/.local/state/ndf` に
 始めた耐久ワークフローは、そのまま旧の記録で続きます。旧の台帳は次の 1 行で利用者の置き場へ足し合わせます（何度打っても
-かまいません）。
+かまいません）。打つまでは、利用者の置き場がまだ無ければ旧の置き場の台帳をそのまま読み書きするため、更新しただけで記録が
+見えなくなることはありません。
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state-home.py" migrate

@@ -13,7 +13,8 @@
 旧の置き場（`~/.local/state/ndf`）からの移り方:
 
 - チェックアウトの記録は、新に無く旧にある記録を旧のまま使う（`legacy_entry`。動いている耐久ワークフローを続ける）
-- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。何度打ってもよい
+- 利用者の台帳は `state-home.py migrate`（`migrate`）が旧から足し合わせる。何度打ってもよい。打つまでは、利用者の根が無く
+  旧の根に台帳があれば旧の根を読み書きする（`user_home`。移す前の記録を見失わない）
 
 シェルの同じ順は `skills/development-workflow/scripts/lib/workflow-common.sh` の `ndf_user_state_home` にある。
 """
@@ -76,9 +77,19 @@ def container_home(env: Optional[Mapping[str, str]] = None) -> Path:
     return explicit_home(env) or legacy_home(env)
 
 
+def _user_default(env: Optional[Mapping[str, str]] = None) -> Path:
+    return _home_dir(_state_env(env)) / ".claude" / "ndf" / "state"
+
+
 def user_home(env: Optional[Mapping[str, str]] = None) -> Path:
-    """利用者の台帳の根。"""
-    return explicit_home(env) or _home_dir(_state_env(env)) / ".claude" / "ndf" / "state"
+    """利用者の台帳の根。利用者の根が無く旧の根に台帳（`USER_KINDS`）があれば、`migrate` を打つまで旧の根を使う。"""
+    explicit = explicit_home(env)
+    if explicit is not None:
+        return explicit
+    new, old = _user_default(env), legacy_home(env)
+    if not new.exists() and any((old / kind).exists() for kind in USER_KINDS):
+        return old
+    return new
 
 
 def find_git_dir(start: Path) -> tuple[Path, Path] | None:
@@ -167,7 +178,7 @@ def migrate(env: Optional[Mapping[str, str]] = None) -> dict:
     status: `migrated`（移した）・`none`（移すものが無い・明示の根を使う）・`kept`（同じ名前のファイルが両方にあり、
     旧に残したものがある）。何度打ってもよい（旧の版のプロセスが旧へ書いた分も、次に打てば移る）。"""
     env = _state_env(env)
-    old, new = legacy_home(env), user_home(env)
+    old, new = legacy_home(env), _user_default(env)
     base = {"from": str(old), "to": str(new), "moved": [], "kept": []}
     if explicit_home(env) is not None:
         return {**base, "status": "none", "summary": "NDF_STATE_HOME か XDG_STATE_HOME が指定されていて、既定の置き場を使わない"}

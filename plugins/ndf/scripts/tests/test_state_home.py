@@ -87,6 +87,20 @@ def test_durable_record_path_follows_legacy(tmp_path, monkeypatch):
     assert durable_keys.record_path("parallel", "p3") == old
 
 
+def test_user_home_reads_legacy_ledgers_until_migrate(tmp_path):
+    """更新した直後（利用者の根が無く旧に台帳がある）は旧の根を読み書きし、migrate の後は利用者の根へ移る。"""
+    env = {"HOME": str(tmp_path)}
+    old, new = tmp_path / ".local/state/ndf", tmp_path / ".claude/ndf/state"
+    (old / "relay").mkdir(parents=True)
+    assert sh.user_home(env) == new  # コンテナの状態だけなら利用者の根
+    (old / "stages").mkdir()
+    (old / "stages/o__r__1.json").write_text("{}")
+    assert sh.user_home(env) == old  # 移す前の通過記録を見失わない
+    assert sh.migrate(env)["status"] == "migrated"
+    assert sh.user_home(env) == new
+    assert (new / "stages/o__r__1.json").exists()
+
+
 def test_migrate_merges_ledgers_and_leaves_container_state(tmp_path):
     env = {"HOME": str(tmp_path)}
     old, new = sh.legacy_home(env), sh.user_home(env)
@@ -160,3 +174,12 @@ def test_cli_path_reports_three_roots(tmp_path):
         "user": str(tmp_path / "h/.claude/ndf/state"),
         "container": str(tmp_path / "h/.local/state/ndf"),
     }
+
+
+@pytest.mark.parametrize("kind", sh.USER_KINDS)
+def test_shell_user_root_follows_legacy_ledger(tmp_path, kind):
+    """シェルも旧の根の台帳の種類（`USER_KINDS`）を Python と同じに見る。"""
+    (tmp_path / ".local/state/ndf" / kind).mkdir(parents=True)
+    env = {"HOME": str(tmp_path), "PATH": os.environ["PATH"]}
+    out = subprocess.run(["bash", "-c", f". '{WF}' && ndf_user_state_home"], env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == str(sh.user_home(env)) == str(tmp_path / ".local/state/ndf")
