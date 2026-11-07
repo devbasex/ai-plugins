@@ -5031,7 +5031,7 @@
       "term": "例外リスト",
       "code": "allow_list",
       "context": "ndf-workflow",
-      "meaning": "構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。構造チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
+      "meaning": "構造チェックとリポジトリ前提の検査が違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/・scripts/repo-assumptions-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
       "deprecated": [
         "許可の一覧"
       ],
@@ -5994,37 +5994,32 @@
       "term": "無進捗の打ち切り",
       "context": "ndf-workflow",
       "meaning": "実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること",
-      "source": "",
-      "pending_source": "issues/issue-2505-requirements.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "無進捗の許容時間",
       "context": "ndf-workflow",
       "meaning": "実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒",
       "code": "impl_stall_seconds",
-      "source": "",
-      "pending_source": "issues/issue-2505-design.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "進みの観測",
       "context": "ndf-workflow",
       "meaning": "実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること",
-      "source": "",
-      "pending_source": "issues/issue-2505-design.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "周回の費用の内訳",
       "context": "ndf-workflow",
       "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
-      "source": "",
-      "pending_source": "issues/issue-2505-design.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "実行環境の調査",
       "context": "ndf-workflow",
       "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
-      "source": "",
-      "pending_source": "issues/issue-2505-requirements.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "リリースの設定",
@@ -6089,6 +6084,20 @@
       "context": "ndf-release",
       "meaning": "リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態",
       "pending_source": "issues/issue-2623-design.md"
+    },
+    {
+      "term": "リポジトリ前提の検査",
+      "context": "repo-dev-checks",
+      "meaning": "リリース対象の Skill とスクリプトに ai-plugins にしか無い語が無いかを見る CI のジョブ `skill-repo-assumptions-check`",
+      "source": "",
+      "pending_source": "issues/issue-2624-requirements.md"
+    },
+    {
+      "term": "既知の当たり",
+      "context": "repo-dev-checks",
+      "meaning": "リポジトリ前提の検査に当たるが、NDF 自身の置き場を読むなど違反でない箇所か、行き先の課題が直すまで残す箇所。語とファイルの組ごとに当たりの数を例外リストへ宣言する",
+      "source": "",
+      "pending_source": "issues/issue-2624-requirements.md"
     }
   ]
 }

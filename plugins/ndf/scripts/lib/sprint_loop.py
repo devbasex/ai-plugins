@@ -227,10 +227,7 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
     if not lap:
         return None, nxt
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
-        return (
-            None,
-            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版>（モードと版を決め直す）",
-        )
+        return None, f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード>（モードを決め直す）"
     # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:
@@ -277,7 +274,9 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
 def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -> list[str]:
     """sprint-state.py init のコマンド。周回のディレクトリに mvv.md があればスプリント MVV を渡す。"""
     init = [sys.executable, str(SPRINT_STATE), "init", lap["state_path"], "--name", lap["sprint"], "--pace", "auto", "--root", root]
-    init += [x for n in issues for x in ("--issue", str(n))] + ["--dev", lap["versions"]["dev"], "--prod", lap["versions"]["prod"]]
+    init += [x for n in issues for x in ("--issue", str(n))]
+    if lap["versions"]["dev"]:
+        init += ["--dev", lap["versions"]["dev"], "--prod", lap["versions"]["prod"]]
     init += ["--goal", resume_command(rec)]
     mvv = Path(lap["dir"]) / "mvv.md"
     if mvv.is_file():
@@ -287,13 +286,17 @@ def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -
 
 def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[str]:
     """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外して --designed へ入れ、
-    設計の結果のステージ（supervise.py design-results）で設計の結果を読んで実装のプランへ渡す。"""
+    設計の結果のステージ（supervise.py design-results）で設計の結果を読んで実装のプランへ渡す。
+    開発版が無ければ --version を渡さず、キューが流す直前に版を決める（#2164）。"""
     issues = selected_issues(lap)
     approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
     design = [n for n in issues if n not in approved]
     dev = lap["versions"]["dev"]
     new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
-    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"], "--version", dev, "--out", lap["out"]]
+    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"]]
+    if dev:
+        new += ["--version", dev]
+    new += ["--out", lap["out"]]
     if design:
         new += ["--design", *map(str, design)]
     if designed := [n for n in issues if n in approved]:
@@ -302,7 +305,15 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
     return new
 
 
-def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra: list[str]) -> dict:
+def stage_plan(index: list[dict], stage: str) -> str | None:
+    """マニフェストのステージの先頭のプラン。ステージが無ければ None。"""
+    return next((p for e in index if e.get("name") == stage for p in e.get("plans", [])), None)
+
+
+def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None, extra: list[str]) -> dict:
+    dev = dev or ""
+    if prod and not dev:
+        return refusal_order("--prod は --dev と一緒に渡す（版を流す時点に決めるなら両方を省く）")
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap:
@@ -336,7 +347,8 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)
-        lap["prod_plan"] = next((p for e in index if e.get("name") == "本番" for p in e.get("plans", [])), None)
+        lap["dev_plan"] = stage_plan(index, "開発版")
+        lap["prod_plan"] = stage_plan(index, "本番")
         done = d / "done-1.json"
         queue, pipeline = sprint_pipeline(index, close, done, rec)
         lap["dones"] = [str(done)]
