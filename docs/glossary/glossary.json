@@ -2467,6 +2467,13 @@
       "pending_source": "issues/issue-2660-requirements.md"
     },
     {
+      "term": "見えない位置の割り当て",
+      "context": "ndf-worktree",
+      "meaning": "worktree のパスがメインディレクトリの下に無く、親のディレクトリも無い割り当て。回収を打った位置から存在を確かめられないため、残った割り当てとして判定しない",
+      "source": "",
+      "pending_source": "issues/issue-2660-design.md"
+    },
+    {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
