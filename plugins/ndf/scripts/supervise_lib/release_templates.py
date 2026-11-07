@@ -305,7 +305,7 @@ def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts:
     """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。"""
     return [
         _release_step(a, v, dev, repo, approval),
-        *([] if dev else [cd_result_step(repo, a.production_branch, f"release/v{v}"), _record_step(v, prs)]),
+        *([] if dev else [cd_result_step(repo, a.production_branch, release_names(v)[1]), _record_step(v, prs)]),
         {
             "id": "verify",
             "type": "run",
