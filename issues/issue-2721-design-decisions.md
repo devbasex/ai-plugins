@@ -1,6 +1,6 @@
 # #2721 の決定の記録
 
-設計文書の本体は [issue-2721-design.md](issue-2721-design.md) にある。番号（`M1` などの資料の行・`STD1` などの調査の行・`I1` などの不変条件）は本体の表を指す。
+設計文書の本体は [issue-2721-design.md](issue-2721-design.md) にある。番号のうち `M1` などの資料の行は [issue-2721-design-materials.md](issue-2721-design-materials.md) の表を指す。`STD1` などの調査の行と `I1` などの不変条件は本体の表を指す。
 
 ## 決定の記録
 
