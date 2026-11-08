@@ -212,6 +212,7 @@ cross-refactoring の送信は `push_fix` を通らず、整形しない。
 | すべて読めた・PR が無い・表が無い | `ok` | 0 | 実装のプランと `design-results.json`（`rows[].doc` を持つ）。`metrics` は `rows`・`unread`・`design_prs` |
 | 打ち直しても `gh` / `git` が 0 以外 | `stopped` | 2 | 何も書かない。`summary` に読めなかった課題・コマンド・出力の末尾 300 文字・読んでいない課題。`metrics` は `failed_issue`・`not_read` |
 | 取り込み先に流れる実装のプランが無い | `stopped` | 2 | 何も書かない（`DesignResultsError`） |
+| 同じ課題の設計の結果が 2 本の設計文書で違う（扱い・取り込み先・触るファイルのどれか。触るファイルの順序は問わない） | `stopped` | 2 | 何も書かない（`DesignResultsError`）。`summary` は 1 行で、課題・2 本の設計文書のパス（先 / 後。パスが空なら `パスの記録なし`）・違う項目ごとの両方の値を扱い → 取り込み先 → 触るファイルの順に載せる。触るファイルは個数と、片方にしか無いファイル（重なりを数えて取り、数を切らない）を出す |
 
 ## 運用
 
