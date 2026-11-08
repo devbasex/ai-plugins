@@ -480,6 +480,12 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | #2721 | 実装する | — | `plugins/ndf/skills/design/references/approval-materials.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/references/system-architecture.md`、`plugins/ndf/skills/design/references/interface-ui.md`、`plugins/ndf/skills/design/references/data-structure.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/scripts/design-materials.py`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
+## 出し直しの指摘への対応
+
+| 項目 | 指摘 | 対応 | 直した箇所・直せない理由 |
+| --- | --- | --- | --- |
+| lproc:1-1 | 要求文書の検査（requirements-check）が終了コード 2 で止まった原因を確かめて直す。検査の側の不具合なら PR 本文に書き、別の課題へ回す。決定 6 は設計のとおりでよい | 直した | 原因: 設計の工程は要求を書く前に検査を打ち、要求のコピーがまだ無いと終了コード 2 を返して要求を書く工程へ進む。終了コード 2 はこの想定どおりの分岐である。設計のブランチで `spec-copy.py check 2721 issues/issue-2721-requirements.md` を打ち直すと終了コード 0（本文と一致）を返す。要求文書に直す箇所は無い。分岐の終了コード 2 を PR 本文と MVV 判定が失敗として扱うのは検査の側の不具合で、既存の課題 #1502 に回した。PR #2818 の本文の「テスト」の節に記載した。決定 6 は変えず、[決定の記録](issue-2721-design-decisions.md) の決定 6 の S6 の記述を「利用者が採った（2026-11-09）」にした |
+
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
