@@ -77,6 +77,26 @@ def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _closing_numbers(fields: Optional[dict]) -> list[int]:
+    """まとめて読んだ 1 本分の欄から、閉じる課題の番号を取り出す。"""
+    refs = (fields or {}).get("closingIssuesReferences") or []
+    return [int(i["number"]) for i in refs if "number" in i]
+
+
+def _closes_one(root: Path, n: int, run: Callable) -> list[int]:
+    """`gh pr view` を 1 本分打って閉じる課題の番号を読む。読めなければ空。"""
+    got = run(
+        ["gh", "pr", "view", str(n), "--json", "closingIssuesReferences", "-q", "[.closingIssuesReferences[].number]"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        return [int(x) for x in json.loads(got.stdout or "[]")] if got.returncode == 0 else []
+    except ValueError:
+        return []
+
+
 def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bulk: Optional[Callable] = None) -> dict[int, list[int]]:
     """Pull Request が閉じる課題（`closingIssuesReferences`）。読めないものは空にする。
 
@@ -86,20 +106,8 @@ def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bul
             from release_lib.included import pr_fields as bulk
         got, _ = bulk(prs, cwd=str(root))
         if got is not None:
-            return {n: [int(i["number"]) for i in (got.get(n) or {}).get("closingIssuesReferences") or [] if "number" in i] for n in prs}
-    out: dict[int, list[int]] = {}
-    for n in prs:
-        got = run(
-            ["gh", "pr", "view", str(n), "--json", "closingIssuesReferences", "-q", "[.closingIssuesReferences[].number]"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        )
-        try:
-            out[n] = [int(x) for x in json.loads(got.stdout or "[]")] if got.returncode == 0 else []
-        except ValueError:
-            out[n] = []
-    return out
+            return {n: _closing_numbers(got.get(n)) for n in prs}
+    return {n: _closes_one(root, n, run) for n in prs}
 
 
 def present(
