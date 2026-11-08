@@ -290,8 +290,8 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 
 ### Factory の契約との対応
 
-`plugins/` は `factory/` を参照せず、名前と形だけを揃える（[ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)・
-[ndf-factory-runs-state-and-data.md](ndf-factory-runs-state-and-data.md)）。
+`plugins/` は `factory/` を参照せず、名前と形だけを揃える（サービスの確定仕様 `ndf-factory-contracts-and-progress.md`・
+サービスの確定仕様 `ndf-factory-runs-state-and-data.md`）。
 
 | relay の項目 | Factory の項目（`factory/contracts/schemas/`） | 扱い |
 | --- | --- | --- |
@@ -360,4 +360,4 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — 導入・`/ndf:restart`
 - [#1587](https://github.com/devbasex/ai-plugins/issues/1587) — ラッパーの入れ替え（入れ替えた後に統括役を取り直す）
 - [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のマシンで動くランナー。起動・一覧・停止の名前と形を揃える相手
-- [ndf-factory-runs-and-runner.md](ndf-factory-runs-and-runner.md) — Factory の実行ジョブと実行の枠
+- サービスの確定仕様 `ndf-factory-runs-and-runner.md` — Factory の実行ジョブと実行の枠
