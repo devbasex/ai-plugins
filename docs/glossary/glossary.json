@@ -6215,6 +6215,69 @@
       "meaning": "照合のたびに 1 行を足す JSONL のファイル（project-mvv.jsonl）。機械ごとに 1 つある",
       "source": "",
       "pending_source": "issues/issue-2614-design.md"
+    },
+    {
+      "term": "Issue の種類",
+      "context": "ndf-issue-upkeep",
+      "meaning": "不具合・機能・調査・運用など、記載すべき項目の組を決める Issue の区分",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "記載項目",
+      "context": "ndf-issue-upkeep",
+      "meaning": "Issue の本文（または課題の置き場の欄）に書く 1 つの事柄。例: 受け入れ条件・再現手順・担当者",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "必須の項目",
+      "context": "ndf-issue-upkeep",
+      "meaning": "その種類の Issue で、欠けると起票の前の検査で止まる項目",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "該当時の項目",
+      "context": "ndf-issue-upkeep",
+      "meaning": "条件に当たるときだけ書く項目。当たる条件を定義に書く",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "記載の水準",
+      "context": "ndf-issue-upkeep",
+      "meaning": "記載項目に何を書けば満たしたことになるかの基準",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "記載項目の定義",
+      "context": "ndf-issue-upkeep",
+      "meaning": "種類ごとの記載項目・区分・記載の水準をまとめた 1 か所の正本",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "起票の前の検査",
+      "context": "ndf-issue-upkeep",
+      "meaning": "AI が Issue を作る前に、本文が記載項目の定義を満たすかを判定する検査",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "起票の後の検査",
+      "context": "ndf-issue-upkeep",
+      "meaning": "作られた open の Issue の本文が記載項目の定義を満たすかを判定する検査",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "課題の置き場",
+      "context": "ndf-issue-upkeep",
+      "meaning": "Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す",
+      "source": "",
+      "pending_source": "issues/issue-2737-requirements.md"
     }
   ]
 }
