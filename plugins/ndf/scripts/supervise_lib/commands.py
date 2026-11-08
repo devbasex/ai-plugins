@@ -216,24 +216,36 @@ def cmd_review_settled(state: str, step: str, fix_step: str, max_attempts: int, 
         return out(2, "U1", f"{step} の最後の終了コードが 6 でない（{last.get('exit')}）")
     if not isinstance(n, int) or isinstance(n, bool):
         return out(2, "U1", f"{step} の未解決の件数を読めない（{n!r}）")
-    fixes = [e for e in log if e.get("id") == fix_step]
-    attempts = sum(1 for e in fixes if e.get("exit") == 0)
-    llms = [e.get("llm") or {} for e in fixes]
-    cost = sum(float(m.get("cost") or 0.0) for m in llms)
-    first = next((i for i, e in enumerate(log) if e.get("id") == fix_step), None)
-    seconds = sum(float(e.get("seconds") or 0.0) for e in (log[first:] if first is not None else []) if e.get("id") in (step, fix_step))
-    vals = {"unresolved": n, "attempts": attempts, "cost": cost, "seconds": seconds}
+    fix = fix_totals(log, step, fix_step)
+    vals = {"unresolved": n, "attempts": fix["attempts"], "cost": fix["cost"], "seconds": fix["seconds"]}
     if n == 0:
         return out(0, None, "通常の経路へ進む", **vals)
-    if attempts >= max_attempts:
+    if fix["attempts"] >= max_attempts:
         return out(2, "U2", f"解決のフローの直しが上限 {max_attempts} 回に達した", **vals)
-    if fixes and len(reviews) >= 2 and isinstance(prev := (reviews[-2].get("counts") or {}).get("unresolved"), int) and n >= prev:
+    if fix["ran"] and len(reviews) >= 2 and isinstance(prev := (reviews[-2].get("counts") or {}).get("unresolved"), int) and n >= prev:
         return out(2, "U3", f"未解決の件数が減っていない（{prev} → {n}）", **vals)
-    if any(m.get("cost_unknown") for m in llms) or cost > max_cost:
+    if fix["cost_unknown"] or fix["cost"] > max_cost:
         return out(2, "U4", f"直しの費用が上限 ${max_cost} を超えたか不明", **vals)
-    if seconds > max_seconds:
+    if fix["seconds"] > max_seconds:
         return out(2, "U5", f"解決のフローの秒が上限 {max_seconds} 秒を超えた", **vals)
     return out(1, None, "解決のフローを続ける", **vals)
+
+
+def fix_totals(log: list[dict], step: str, fix_step: str) -> dict:
+    """解決のフロー（`fix_step`）の集計。attempts は成功した直しの回数、cost は直しの費用の和（`step` の費用は足さない）、
+    seconds は最初の直し以降の `step` と `fix_step` の秒の和。ran は直しが 1 度でも記録にあるか。"""
+    fixes = [e for e in log if e.get("id") == fix_step]
+    llms = [e.get("llm") or {} for e in fixes]
+    first = next((i for i, e in enumerate(log) if e.get("id") == fix_step), None)
+    return {
+        "ran": bool(fixes),
+        "attempts": sum(1 for e in fixes if e.get("exit") == 0),
+        "cost": sum(float(m.get("cost") or 0.0) for m in llms),
+        "seconds": sum(
+            float(e.get("seconds") or 0.0) for e in (log[first:] if first is not None else []) if e.get("id") in (step, fix_step)
+        ),
+        "cost_unknown": any(m.get("cost_unknown") for m in llms),
+    }
 
 
 def note_row(report: str, next_text: str) -> str:
