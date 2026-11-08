@@ -23,10 +23,8 @@
     "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
-    "NDF_LEASE_DIR",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
-    "NDF_RUNTIME_SESSION",
     "NDF_STATE_HOME",
     "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
@@ -43,9 +41,7 @@
   ],
   "stdin": "none",
   "stdout": "step-result",
-  "writes": [
-    "lease-json"
-  ],
+  "writes": [],
   "reads": [],
   "exit": {
     "0": "成功: 閉じる対象をすべて閉じた（status ok）",

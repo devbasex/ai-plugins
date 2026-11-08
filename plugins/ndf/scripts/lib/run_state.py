@@ -189,7 +189,7 @@ def review_holder(path: Path | str, now: float | None = None) -> str | None:
         return None
     key = f"{_REVIEW_TOOLS[m.group(1)]}:pr={m.group(2)}"
     try:
-        record = lease.read(key, path.parent.name)
+        record = lease.read_lease(key, path.parent.name)
     except lease.LeaseError as e:
         return f"判定できない: {e}"
     if record is None or not lease.holder_alive(record, WINDOW, now):

@@ -243,10 +243,10 @@ def close() -> None:
 def exit_leaving_pending(code: int) -> None:
     """止まり（pause）のまま耐久ワークフローを残してプロセスを抜ける。出力を流してから `os._exit` で抜ける。
 
-    `os._exit` は atexit を通らないため、実行の核の持ち主の段が取った鍵を先に返す（#2342）。"""
-    core = sys.modules.get("run_core")
-    if core is not None:
-        core.release_held()
+    `os._exit` は atexit を通らないため、持ち主の段（`lease_stage`）が取った鍵を先に返す（#2342）。"""
+    stage = sys.modules.get("lease_stage")
+    if stage is not None:
+        stage.release_held()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(code)

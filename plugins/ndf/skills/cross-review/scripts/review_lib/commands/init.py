@@ -12,11 +12,9 @@ from typing import Any, NamedTuple
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
 import review_criteria  # noqa: E402
-import run_core  # noqa: E402
+import lease_stage  # noqa: E402
 import run_state  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
-ENTRY = "skills/cross-review/scripts/state.py"  # 持ち主の契約を引く入口（プラグインの根からのパス。#2342）
-
 from review_lib import (  # noqa: E402
     categories as categories_mod,
     findings as findings_mod,
@@ -246,11 +244,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    # 持ち主の鍵を取り（別の実行が持っていれば止まる。#2342）、持ち主の終わった残る状態を片付け（開始する pr<n> は
-    # 見ない）、既存の pr<n> を使ってよいかを決める（#2229）
-    owned = not args.worktree  # 置き場を渡した worktree は呼び出し元が持つ。持ち主の鍵を取らない
+    owned = not args.worktree  # 置き場を渡せば呼び出し元が持つ。持ち主の鍵を取り（#2342）、片付けて使ってよいかを決める（#2229）
     if owned:
-        run_core.hold(ENTRY, "init", pr=int(str(pr)))
+        lease_stage.hold("skills/cross-review/scripts/state.py", "init", pr=int(str(pr)))
     swept, stop = run_state.begin_review(worktree, owned=owned)
     if stop:
         review_lib.die(stop)

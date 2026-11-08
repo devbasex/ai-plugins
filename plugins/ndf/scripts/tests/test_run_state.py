@@ -583,7 +583,7 @@ def test_cross_review_init_claims_after_a_finished_run(place, tmp_path) -> None:
     p, _ = _cr_init(place, tmp_path)
 
     assert p.returncode == 0, p.stderr
-    record = lease.read("cross-review:pr=7", SLUG)
+    record = lease.read_lease("cross-review:pr=7", SLUG)
     assert record["run"] != old["run"] and record["finished_at"] and "SWEPT=" in p.stdout
 
 
@@ -598,4 +598,4 @@ def test_cross_review_init_reclaims_a_dead_owner(place, tmp_path) -> None:
     got, _ = _cr_init(place, tmp_path)
 
     assert got.returncode == 0, got.stderr
-    assert lease.read("cross-review:pr=7", SLUG)["run"] != old["run"]
+    assert lease.read_lease("cross-review:pr=7", SLUG)["run"] != old["run"]

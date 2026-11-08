@@ -119,8 +119,7 @@ def launch_run(engine: Engine, start: str | None) -> str:
 def launch_queue(done: Path, max_: int, resources: dict, fresh: bool) -> str:
     """`queue` の耐久の記録を開く（実行の鍵は done の絶対パスから決める）。接頭辞 `queue-<done の鍵>` を返す。
 
-    `fresh` なら、途中の耐久ワークフローを launch の前に子ごと止める（流すプランの並びを変えて打ち直したとき・
-    `--resume` に `--from` を渡したとき。#2325）。"""
+    `fresh`（並びを変えた・`--resume` に `--from` を渡した。#2325）なら、途中の耐久ワークフローを launch の前に子ごと止める。"""
     queues = {PLANS: {"worker_concurrency": max_}, **_queues(resources)}
     actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     launched = durable.launch("queue", str(Path(done).resolve()), queues=queues, keep=() if fresh else None)

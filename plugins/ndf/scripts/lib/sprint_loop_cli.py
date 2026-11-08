@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 
 import clock
-import run_core
 import step_result
 
 ENTRY = "scripts/sprint-state.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
@@ -42,7 +41,9 @@ def run_loop_command(a, update) -> dict | None:
     先に開発ループの持ち主（単位 session）を取る。宣言の無い副命令（答える・読むだけ）は何もしない（#2342）。"""
     if a.loop_cmd == "start":
         a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
-    held = run_core.hold(ENTRY, f"loop {a.loop_cmd}", name=getattr(a, "loop_name", None))
+    import lease_stage  # loop のときだけ読む（filelock と psutil を要する）
+
+    held = lease_stage.hold(ENTRY, f"loop {a.loop_cmd}", name=getattr(a, "loop_name", None))
     out = _dispatch(a, update)
     if held is not None and isinstance(out, dict):
         out = {**out, "lease": held.as_json()}

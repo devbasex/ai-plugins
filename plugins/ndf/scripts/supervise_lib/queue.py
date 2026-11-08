@@ -15,18 +15,17 @@ import sys
 import time
 from pathlib import Path
 
+import lease_stage
 import legacy_values
 import parallel_hold
-import run_core
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
-from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
+from supervise_lib.paths import queue_done_key, queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
 
-ENTRY = "scripts/supervise.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
 RELEASE_PHASES = frozenset(legacy_values.legacy_table()["phase"].values())  # リリースプランのフェーズの名前
 
 
@@ -118,14 +117,7 @@ NO_REPORT = "報告なし"
 
 
 def cmd_queue(
-    plans: list[str],
-    max_: int,
-    poll: float = 1.0,
-    then: list | None = None,
-    done: str | None = None,
-    starts=None,
-    rerun=None,
-    restart: bool = False,
+    plans: list[str], max_: int, poll: float = 1.0, then=None, done: str | None = None, starts=None, rerun=None, restart=False
 ) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
@@ -142,24 +134,20 @@ def cmd_queue(
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
     記録を止めて頭から流す（完了か承認ゲートの記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
     キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
-    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。`restart`（`--resume` に `--from` を
-    渡したとき）なら、前の起動の途中を子ごと止めて新しい実行の回で流す（#2325）。
-    流す前に done ごとの持ち主の鍵を取り、別の実行が同じ done を流していれば止まる（#2342）。"""
+    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。`restart`（`--from`）なら前の途中を止める（#2325）。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
-    run_core.hold(ENTRY, "queue", done=done_key(queue_done_path(plans, done)))
     stages, all_plans = _normalize_stages(plans, then)
     prepared = _prepare_queue(all_plans, plans, done, max_)
     if isinstance(prepared, dict):
         return prepared
-    decl, done_path, seen, listing = prepared
+    decl, done_path, seen, changed = prepared
     # launch の直後に回復したプランも prepare で答え待ちの停止を読むよう、launch の前から close の後まで立てる（#2707）
     flow.Engine.queued = True
     try:
         try:
-            fresh = restart or (listing is not None and listing.get("plans") != all_plans)
-            prefix = flow.launch_queue(done_path, max_, decl["resources"], fresh)
+            prefix = flow.launch_queue(done_path, max_, decl["resources"], restart or changed)
         except durable.DurableError as e:
             return _not_started(str(e), max_, done_path)
         try:
@@ -168,17 +156,6 @@ def cmd_queue(
             durable.close()
     finally:
         flow.Engine.queued = False
-
-
-def done_key(done_path: Path) -> str:
-    """持ち主の鍵に使う done のパス。リポジトリの根からの相対にし、worktree の違いで鍵を割らない。git の外は絶対パス。"""
-    import state_home
-
-    path = Path(done_path).resolve()
-    got = state_home.find_git_dir(path.parent if path.parent.exists() else Path.cwd())
-    if got is not None and path.is_relative_to(got[0]):
-        return path.relative_to(got[0]).as_posix()
-    return str(path)
 
 
 def _queue_args(stages: list[list[str]], max_: int, done_path: Path, decl: dict, starts, rerun) -> dict:
@@ -215,8 +192,9 @@ def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[st
 
 
 def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max_: int):
-    """宣言を読み、done を消して知らせ始める位置と前の一覧を読む。宣言の形が違えば _not_started の結果を返す。"""
+    """done の持ち主の鍵を取り（#2342）、宣言・知らせ始める位置・並びが変わったかを読む。宣言が違えば _not_started の結果。"""
     done_path = queue_done_path(plans, done)
+    lease_stage.hold("scripts/supervise.py", "queue", done=queue_done_key(done_path))
     try:
         decl = queue_decl_of([_read_plan(p) for p in all_plans])
     except DeclError as e:
@@ -224,7 +202,7 @@ def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
     seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
     listing = _read_listing(queue_plans_path(done_path))
-    return decl, done_path, seen, listing
+    return decl, done_path, seen, listing is not None and listing.get("plans") != all_plans
 
 
 def _read_plan(plan: str) -> dict:

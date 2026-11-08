@@ -53,7 +53,7 @@ import durable  # noqa: E402
 import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
-import run_core  # noqa: E402  持ち主の段（#2342）
+import lease_stage  # noqa: E402  持ち主の段（#2342）
 from loop_drive import anchor_repo_cwd, call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
@@ -284,7 +284,7 @@ class Drive(AssigneeLaunch):
         self.rf("init", str(self.pr), *self.init_args)
         if "TMP_DIR" not in self.v or "ID" not in self.v:
             raise Stop("refactor.py init が TMP_DIR / ID を返さない", 2)
-        run_core.touch()
+        lease_stage.touch_held()
         if self.v.get("BUDGET_SOURCE") == "floor":  # 下限まで上げた想定最大時間で、親のステップの締め切りを延ばす（#2047 の決定 4）
             minutes = int(self.v.get("BUDGET_MINUTES") or 0)
             dp.write_extension(minutes * 60, f"想定最大時間を下限の {minutes} 分へ上げた")
@@ -518,7 +518,7 @@ def main(argv: list[str] | None = None) -> None:
     a, rest = ap.parse_known_args(argv)
     anchor_repo_cwd()
     if not any(x.split("=", 1)[0] == "--worktree-root" for x in rest):  # 置き場を渡した実行は呼び出し元が持つ（init と同じ）
-        run_core.hold(ENTRY, pr=a.pr)  # 同じ PR の改修計画実行を 2 本流さない。終わりで返す（#2342）
+        lease_stage.hold(ENTRY, pr=a.pr)  # 同じ PR の改修計画実行を 2 本流さない。終わりで返す（#2342）
     d = Drive(a.pr, rest)
     try:
         dp.main(TOOL, d.run, dict)

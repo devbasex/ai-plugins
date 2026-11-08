@@ -33,7 +33,7 @@ deps.require("durable", "waits", "procs", "schema")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
-import run_core  # noqa: E402  持ち主の段（#2342）
+import lease_stage  # noqa: E402  持ち主の段（#2342）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
@@ -275,7 +275,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         起動のたびに持ち主の記録へ動いた時刻を書く（#2342）。"""
         self.v.update(iv)
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
-        run_core.touch()
+        lease_stage.touch_held()
 
     def review_round(self) -> str:
         """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ posts（投稿だけが残った）/ done。"""
@@ -490,7 +490,7 @@ def main(argv: list[str] | None = None) -> None:
     a, rest = ap.parse_known_args(argv)
     anchor_repo_cwd()
     if not any(x.split("=", 1)[0] == "--worktree" for x in rest):  # 置き場を渡した実行は呼び出し元が持つ（init と同じ）
-        run_core.hold(ENTRY, pr=a.pr)  # 同じ PR の収束ループを 2 本流さない。終わりで返す（#2342）
+        lease_stage.hold(ENTRY, pr=a.pr)  # 同じ PR の収束ループを 2 本流さない。終わりで返す（#2342）
     d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
         out, code = d.run()

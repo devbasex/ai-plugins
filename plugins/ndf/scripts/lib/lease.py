@@ -4,22 +4,21 @@
 `%2F`・`%3A`・`%3D` にしてファイル名にする。排他は同じ名前に `.lock` を付けた錠のファイルで取り、錠は消さない（`locks.py`）。
 
     out = lease.acquire(decl, key, entry, run, repo)   # acquired / reclaimed / inherited / refused / no_session
-    lease.touch(key, holder, repo)                      # 最後に動いた時刻
-    lease.release(key, holder, repo)                    # 終わった時刻（持ち主のプロセスが holder のときだけ）
-    lease.read(key, repo)                               # 記録か None
+    lease.touch_lease(key, holder, repo)                # 最後に動いた時刻
+    lease.release_lease(key, holder, repo)              # 終わった時刻（持ち主のプロセスが holder のときだけ）
+    lease.read_lease(key, repo)                         # 記録か None
     lease.prune(days)                                   # 終わった時刻から days 日を過ぎた記録（.lease.json）を消す
 
 生死の判定（I4）: 同じホストでは記録の pid が動いていて、その開始時刻が 1 秒未満で一致するときだけ生きている。
 別のホストでは最後に動いた時刻から寿命の窓の中を生きているとみなす。記録の持ち主のプロセスが自分か自分の祖先なら、
 鍵を取り直さずに使う（`inherited`。I6）。生きた持ち主がいても例外を投げず、`refused` を返す。外部コマンドを起こさない。
 
-使う側は `deps.require("locks", "procs")` を先に呼ぶ。実行の核（`run_core.hold`）だけが取る・返すを呼ぶ。
+使う側は `deps.require("locks", "procs")` を先に呼ぶ。取る・返すを呼ぶのは持ち主の段（`lease_stage.py`）だけである。
 """
 
 from __future__ import annotations
 
 import configparser
-import datetime as _dt
 import json
 import os
 import socket
@@ -28,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import clock
 import jsonio
 import locks
 import procs
@@ -103,7 +103,7 @@ def _origin_url(common: Path) -> str:
         return ""
 
 
-def repo_slug(start: Path | str | None = None) -> str:
+def lease_repo(start: Path | str | None = None) -> str:
     """`start`（省けば作業ディレクトリ）のリポジトリの `<owner>--<repo>`。origin が無ければ根の名前、git の外は `_none`。
 
     git を起動せずに `.git` と config を読む（同じリポジトリの別の clone と worktree で同じ値になる）。"""
@@ -127,26 +127,21 @@ def path_of(key: str, repo: str) -> Path:
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return clock.now(utc=True).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _epoch(value: Any) -> float | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return _dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=_dt.timezone.utc).timestamp()
-    except ValueError:
-        return None
+def _epoch_of(value: Any) -> float | None:
+    return clock.epoch_seconds(value, naive="utc") if isinstance(value, str) and value else None
 
 
-def _check(record: dict[str, Any]) -> None:
+def _check_fields(record: dict[str, Any]) -> None:
     """I5: 記録が持つのは FIELDS だけ。余分な鍵・欠けた鍵は書かない。"""
     extra, missing = set(record) - set(FIELDS), set(FIELDS) - set(record)
     if extra or missing:
         raise LeaseError(f"持ち主の記録の形が違う（余分 {sorted(extra)}・欠け {sorted(missing)}）")
 
 
-def _load(path: Path) -> dict[str, Any] | None:
+def _load_lease(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
@@ -159,17 +154,17 @@ def _load(path: Path) -> dict[str, Any] | None:
 
 
 def _store(path: Path, record: dict[str, Any]) -> None:
-    _check(record)
+    _check_fields(record)
     # 書き先は file_name の名前と同じ。契約の検査が書くファイルの形（*.lease.json）を読めるよう、形を式に残す
     jsonio.write_atomic(path.parent / f"{path.name.removesuffix('.lease.json')}.lease.json", record)
 
 
-def read(key: str, repo: str) -> dict[str, Any] | None:
+def read_lease(key: str, repo: str) -> dict[str, Any] | None:
     """鍵の記録。無ければ None、壊れていれば LeaseError。"""
-    return _load(path_of(key, repo))
+    return _load_lease(path_of(key, repo))
 
 
-def _same(pid_started: Any, started: float | None) -> bool:
+def _same_start(pid_started: Any, started: float | None) -> bool:
     return isinstance(pid_started, (int, float)) and started is not None and abs(float(pid_started) - started) < START_SLACK
 
 
@@ -178,10 +173,10 @@ def holder_alive(record: dict[str, Any], window: float, now: float | None = None
     if record.get("finished_at"):
         return False
     if record.get("host") != socket.gethostname():
-        seen = _epoch(record.get("seen_at")) or _epoch(record.get("started_at")) or 0.0
+        seen = _epoch_of(record.get("seen_at")) or _epoch_of(record.get("started_at")) or 0.0
         return (time.time() if now is None else now) - seen < window
     pid = record.get("pid")
-    return isinstance(pid, int) and procs.pid_alive(pid) and _same(record.get("pid_started"), procs.start_time(pid))
+    return isinstance(pid, int) and procs.pid_alive(pid) and _same_start(record.get("pid_started"), procs.start_time(pid))
 
 
 def _own_line(holder: tuple[int, float]) -> list[tuple[int, float]]:
@@ -197,7 +192,7 @@ def _own_line(holder: tuple[int, float]) -> list[tuple[int, float]]:
 def _is_own(record: dict[str, Any], line: list[tuple[int, float]]) -> bool:
     if record.get("host") != socket.gethostname():
         return False
-    return any(record.get("pid") == pid and _same(record.get("pid_started"), started) for pid, started in line)
+    return any(record.get("pid") == pid and _same_start(record.get("pid_started"), started) for pid, started in line)
 
 
 def runtime_session() -> tuple[int, float] | None:
@@ -235,7 +230,7 @@ def acquire(decl: Decl, key: str, entry: str, run: str, repo: str) -> Outcome:
 
 
 def _acquire_locked(decl: Decl, key: str, entry: str, run: str, repo: str, holder: tuple[int, float], path: Path) -> Outcome:
-    record = _load(path)
+    record = _load_lease(path)
     now = _now_iso()
     if record is not None and not record.get("finished_at"):
         if _is_own(record, _own_line(holder)):
@@ -272,8 +267,8 @@ def _update(key: str, holder: tuple[int, float] | None, repo: str, finished: boo
     path = path_of(key, repo)
     try:
         with locks.exclusive(path, timeout=LOCK_TIMEOUT):
-            record = _load(path)
-            if record is None or record.get("pid") != holder[0] or not _same(record.get("pid_started"), holder[1]):
+            record = _load_lease(path)
+            if record is None or record.get("pid") != holder[0] or not _same_start(record.get("pid_started"), holder[1]):
                 return False
             if record.get("finished_at"):
                 return False
@@ -287,12 +282,12 @@ def _update(key: str, holder: tuple[int, float] | None, repo: str, finished: boo
         return False
 
 
-def touch(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
+def touch_lease(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
     """記録の持ち主のプロセスが holder のときだけ、最後に動いた時刻を書く。書いたか。"""
     return _update(key, holder, repo, finished=False)
 
 
-def release(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
+def release_lease(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
     """記録の持ち主のプロセスが holder のときだけ、終わった時刻を書く（E7）。書いたか。"""
     return _update(key, holder, repo, finished=True)
 
@@ -306,8 +301,8 @@ def prune(days: float = KEEP_DAYS, now: float | None = None) -> list[str]:
     for f in sorted(base.glob("*/*.lease.json")):
         try:
             with locks.exclusive(f, timeout=0):
-                record = _load(f)
-                done = _epoch((record or {}).get("finished_at"))
+                record = _load_lease(f)
+                done = _epoch_of((record or {}).get("finished_at"))
                 if done is not None and done < limit:
                     f.unlink(missing_ok=True)
                     removed.append(str(f))

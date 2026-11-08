@@ -1,4 +1,4 @@
-"""持ち主の部品（lib/lease.py）と実行の核の持ち主の段（run_core.hold）（#2342）。
+"""持ち主の部品（lib/lease.py）と実行の核の持ち主の段（lib/lease_stage.py）（#2342）。
 
 終わり方（正常・例外・終了コード・SIGTERM・時間切れ・SIGKILL）ごとの記録、pid の使い回し、取り合い、祖先からの継承、
 古い記録の削除、記録の形、ランタイムのセッションの外を確かめる。入口のプロセスの振る舞いは、契約を差し替えた小さな
@@ -24,6 +24,7 @@ sys.path.insert(0, str(LIB))
 
 import lease  # noqa: E402
 import procs  # noqa: E402
+import lease_stage  # noqa: E402
 import run_core  # noqa: E402
 
 KEY = "test:pr={pr}"
@@ -34,14 +35,14 @@ DRIVER = textwrap.dedent(
     """
     import os, signal, subprocess, sys, time
     sys.path.insert(0, {lib!r})
-    import lease, run_core, step_result
-    lease.repo_slug = lambda start=None: {repo!r}
+    import lease, lease_stage, run_core, step_result
+    lease.lease_repo = lambda start=None: {repo!r}
     decl = {{"key": {key!r}, "unit": "run", "window_seconds": 60}}
     run_core.contract_of = lambda e: {{"stdout": "step-result", "exit": {{"0": "x", "1": "x", "3": "x", "4": "x"}}, "lease": {{"": decl}}}}
     mode, marker = sys.argv[1], sys.argv[2]
 
     def body():
-        out = run_core.hold("", pr=7)
+        out = lease_stage.hold("", pr=7)
         open(marker, "w").write(out.outcome)
         if mode == "child":
             subprocess.run([sys.executable, __file__, "plain", marker + ".child"], check=True)
@@ -81,7 +82,7 @@ def driver(tmp_path):
 
 
 def record() -> dict | None:
-    return lease.read("test:pr=7", REPO)
+    return lease.read_lease("test:pr=7", REPO)
 
 
 def ready(marker: Path) -> None:
@@ -165,7 +166,13 @@ def test_a_live_holder_is_refused_with_its_fields(sleeper) -> None:
     write(*sleeper)
     before = lease.path_of("test:pr=7", REPO).read_text()
     out = lease.acquire(lease.Decl(KEY, "run", 60), "test:pr=7", "t", "new", REPO)
-    assert out.as_json() == {"key": "test:pr=7", "outcome": "refused", "holder_run": "old", "holder_pid": sleeper[0], "holder_seen_at": "2026-11-08T00:00:00Z"}
+    assert out.as_json() == {
+        "key": "test:pr=7",
+        "outcome": "refused",
+        "holder_run": "old",
+        "holder_pid": sleeper[0],
+        "holder_seen_at": "2026-11-08T00:00:00Z",
+    }
     assert lease.path_of("test:pr=7", REPO).read_text() == before
 
 
@@ -180,9 +187,9 @@ def test_release_and_touch_write_only_for_the_holder(sleeper) -> None:
     write(*sleeper)
     before = lease.path_of("test:pr=7", REPO).read_text()
     me = (os.getpid(), procs.start_time(os.getpid()))
-    assert not lease.release("test:pr=7", me, REPO) and not lease.touch("test:pr=7", me, REPO)
+    assert not lease.release_lease("test:pr=7", me, REPO) and not lease.touch_lease("test:pr=7", me, REPO)
     assert lease.path_of("test:pr=7", REPO).read_text() == before
-    assert lease.release("test:pr=7", sleeper, REPO) and record()["finished_at"]
+    assert lease.release_lease("test:pr=7", sleeper, REPO) and record()["finished_at"]
 
 
 # ---------------- 取り合い（受け入れ条件 4・5・I1・I2） ----------------
@@ -241,7 +248,7 @@ def test_prune_removes_only_old_finished_records_and_keeps_the_locks() -> None:
     removed = lease.prune(30)
 
     assert removed == [str(path)] and not path.exists() and lease.locks.lock_path(path).exists()
-    assert lease.read("test:pr=8", REPO) is not None
+    assert lease.read_lease("test:pr=8", REPO) is not None
 
 
 def test_a_record_with_extra_keys_is_not_written() -> None:
@@ -258,11 +265,11 @@ def test_no_session_stops_a_taking_subcommand_and_lets_a_releasing_one_run(monke
     decls = {"loop start": {"key": "loop:name={name}", "unit": "session", "window_seconds": 60}}
     decls["loop stop"] = {**decls["loop start"], "release": True}
     monkeypatch.setattr(run_core, "contract_of", lambda e: {"stdout": "json", "lease": decls})
-    monkeypatch.setattr(run_core, "_hook_standalone", lambda e: None)
-    monkeypatch.setattr(run_core, "_HELD", [])
+    monkeypatch.setattr(lease_stage, "_hook_standalone", lambda e: None)
+    monkeypatch.setattr(lease_stage, "_HELD", [])
 
     with pytest.raises(SystemExit) as e:
-        run_core.hold("x", "loop start", name="l1")
+        lease_stage.hold("x", "loop start", name="l1")
     assert e.value.code == 1
-    assert run_core.hold("x", "loop stop", name="l1").outcome == "no_session"
+    assert lease_stage.hold("x", "loop stop", name="l1").outcome == "no_session"
     assert not lease.root().exists()

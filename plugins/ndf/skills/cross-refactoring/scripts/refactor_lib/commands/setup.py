@@ -21,7 +21,7 @@ import jev
 import models as models_lib
 import project_mvv
 import project_decl
-import run_core
+import lease_stage
 import run_state
 import statefile
 import test_strategy as ts
@@ -517,7 +517,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     # 見ない）、既存の rf<n> を使ってよいかを決める（#2229）
     owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。持ち主の鍵を取らない
     if owned:
-        run_core.hold(ENTRY, "init", pr=args.pr)
+        lease_stage.hold(ENTRY, "init", pr=args.pr)
     swept, stop = run_state.begin_review(root, owned=owned)
     if stop:
         die(stop)
