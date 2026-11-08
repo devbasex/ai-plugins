@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 import gh_parts
+import limits
 import waits
 from merged_lib.reading import CheckReading, read_checks
 from step_result import EXIT_BASE_CONFLICT, EXIT_INFRA_WAIT, emit, gh_json, result
@@ -189,14 +190,8 @@ class GreenWatch:
     def wait(self):
         """終わるまで読み直す。読んだ中身（先頭のコミットとチェックの状態）が変わらない間は、間隔を 1.5 倍ずつ
         --interval の 6 倍まで伸ばす。"""
-        waits.wait_until(
-            self.poll,
-            lambda v: v[0] == "done",
-            max_wait=float("inf"),
-            interval=self.a.interval,
-            max_interval=self.a.interval * 6,
-            sleep=self.sleep,
-        )
+        policy = limits.policy("merged.green-wait")._replace(seconds=float("inf"), interval=self.a.interval, max_interval=self.a.interval * 6)
+        waits.wait_until(self.poll, lambda v: v[0] == "done", policy=policy, sleep=self.sleep)
 
     def sleep(self, gap):
         self.waits += 1

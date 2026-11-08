@@ -70,7 +70,7 @@ def test_a_duplicated_name_is_refused(limits, tmp_path) -> None:
     path.write_text('{"version": 1, "policies": {"a.b": {"summary": "s", "seconds": 1}, "a.b": {"summary": "s", "seconds": 2}}}', encoding="utf-8")
     limits.use(path)
     with pytest.raises(limits.LimitsError, match="同じ名前"):
-        limits.load()
+        limits.read_table()
 
 
 @pytest.mark.parametrize("call", ["policy", "seconds"])

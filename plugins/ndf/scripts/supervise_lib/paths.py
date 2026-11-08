@@ -60,10 +60,6 @@ PRESETS = {
 TEST_RUN_PY = f"python3 {HERE / 'test-run.py'}"
 
 
-WORKTREE_LOCK_RETRIES = 5  # .git/config の lock で落ちたときのやり直しの回数
-WORKTREE_LOCK_WAIT = 1.0  # やり直しの間隔（秒）
-
-
 def is_config_lock(stderr: str) -> bool:
     return "could not lock config file" in stderr or "File exists" in stderr
 
@@ -91,11 +87,12 @@ def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
 
 
 def _add_worktree_with_retry(repo: str, wt: Path, branch: str, base: str, sleep) -> subprocess.CompletedProcess:
-    """作業ツリーを作る。.git/config の lock で落ちたら途中の生成物を片付けてやり直す。最後の結果を返す。"""
-    p = None
-    for i in range(WORKTREE_LOCK_RETRIES + 1):
-        if i:
-            sleep(WORKTREE_LOCK_WAIT)
+    """作業ツリーを作る。.git/config の lock で落ちたら途中の生成物を片付けてやり直す（上限の宣言の方針
+    `supervise.worktree-lock`。打ち直しは lib/waits.py）。最後の結果を返す。"""
+    import limits
+    import waits
+
+    def attempt() -> subprocess.CompletedProcess:
         has = (
             subprocess.run(
                 ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], capture_output=True, text=True
@@ -104,20 +101,28 @@ def _add_worktree_with_retry(repo: str, wt: Path, branch: str, base: str, sleep)
         )
         cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
         p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode == 0 or not is_config_lock(p.stderr):
-            return p
-        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
-        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
-        if wt.exists() and not any(wt.iterdir()):
-            wt.rmdir()
-    return p
+        if p.returncode != 0 and is_config_lock(p.stderr):
+            # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
+            subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
+            if wt.exists() and not any(wt.iterdir()):
+                wt.rmdir()
+        return p
+
+    got = waits.retry_call(
+        attempt,
+        lambda p: p.returncode != 0 and is_config_lock(p.stderr),
+        policy=limits.policy("supervise.worktree-lock"),
+        reason=lambda p: p.stderr,
+        sleep=sleep,
+    )
+    return got.value
 
 
 def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
 
     run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
-    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
+    上限の宣言の方針 `supervise.worktree-lock` の間隔と回数でやり直す。
     """
     plan = plan_mod.normalize_plan(dict(plan))
     branch = plan.get("branch")

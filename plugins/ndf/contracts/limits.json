@@ -15,6 +15,14 @@
     "monitor.stall.kiro": {"summary": "kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある", "seconds": 480},
     "monitor.stall.claude": {"summary": "claude の無進捗の許容。--output-format json は完了まで 1 バイトも出さない", "seconds": 900},
     "monitor.stall-default": {"summary": "表に無い担当の無進捗の許容", "seconds": 180},
-    "monitor.cli-margin": {"summary": "CLI の上限 = 監視の上限 + この秒数。監視の 1 周期と停止の猶予より十分長くし、監視が止める前に CLI が打ち切らないようにする", "seconds": 120}
+    "monitor.cli-margin": {"summary": "CLI の上限 = 監視の上限 + この秒数。監視の 1 周期と停止の猶予より十分長くし、監視が止める前に CLI が打ち切らないようにする", "seconds": 120},
+    "post-queue.rate-limit": {"summary": "上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒", "seconds": 900, "interval": 30, "same_cause": 31},
+    "post-queue.transient-reflush": {"summary": "一時的な失敗で残った投稿キューの流し直し。上限の再実行の合計を超えない", "seconds": 300, "interval": 30, "same_cause": 11},
+    "post-queue.sync-wait": {"summary": "投稿キューの耐久ステップを同期で待つ問い合わせの間隔", "interval": 0.01},
+    "supervise.design-stage-read": {"summary": "設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち", "seconds": 120, "per_call": 30, "interval": 15, "same_cause": 3},
+    "supervise.worktree-lock": {"summary": ".git/config の lock で落ちた worktree の作成の打ち直し", "seconds": 5, "attempts": 6, "interval": 1, "same_cause": 6},
+    "supervise.step-rerun": {"summary": "判定役が返すステップの打ち直しの同じ原因の上限", "same_cause": 2},
+    "test-triage.check-wait": {"summary": "CI のチェックの結論の待ちの間隔。合計の秒は呼ぶ側が予算から渡す", "interval": 10, "factor": 1.5, "max_interval": 120},
+    "merged.green-wait": {"summary": "merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout", "factor": 1.5}
   }
 }

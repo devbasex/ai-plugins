@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/project_decl.py", "name": "policy", "kind": "same-name", "reason": "上限の部品（lib/limits.py）の policy と名前が重なる別の概念（プロジェクトの宣言の方針）。寄せない"}

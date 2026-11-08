@@ -70,6 +70,7 @@ import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17�
 import durable_keys  # noqa: E402  記録の有無を DBOS を読まずに確かめる
 import gh_graphql  # noqa: E402  未解決のスレッドの問い合わせ（#1142 の L0）
 import gh_quota  # noqa: E402  上限の語（#1142 の L0）
+import limits  # noqa: E402  上限の宣言（#2343）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 from post_requests import request_for  # noqa: E402  種別ごとの送る内容と冪等の照合条件
 
@@ -111,8 +112,7 @@ TRANSIENT_STATUSES = (500, 502, 503, 504)
 _EMPTY_BODY_WORDS = ("unexpected end of json input", "unexpected eof")
 _NETWORK_WORDS = ("error connecting to", "dial tcp", "connection refused", "connection reset", "i/o timeout", "tls handshake timeout")
 _NETWORK_WORDS += ("context deadline exceeded",)
-# 流し直す待ちの合計と間隔（秒）。上限の再実行の既定（900 秒・30 秒）を超えない（#1843 の決定 4）。
-TRANSIENT_MAX_WAIT, TRANSIENT_INTERVAL = 300.0, 30.0
+# 流し直す待ちの合計と間隔は上限の宣言の方針 post-queue.transient-reflush。上限の再実行（方針 post-queue.rate-limit）を超えない（#1843 の決定 4）。
 
 
 class Attempt(NamedTuple):
@@ -546,7 +546,7 @@ class Queue:
     def _run(self, fl: dict[str, Any], func: Any, name: str, n: int, *args: Any) -> dict[str, Any]:
         wid = f"post-{name}-a{n}"
         fl["durable"].start(fl["durable"].WorkflowRef(wid, n, "start"), func, *args)
-        if (got := fl["durable"].wait(wid, poll=0.01)).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
+        if (got := fl["durable"].wait(wid, poll=limits.value("post-queue.sync-wait", "interval"))).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
             raise fl["durable"].DurableError(f"{wid} が終わらなかった: {got.value}")
         return got.value
 
@@ -697,8 +697,9 @@ def post(
 # ---------------- 上限のときに待って再実行する ----------------
 
 
-def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin: str | None = None, sleep=time.sleep) -> Attempt:
-    """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。
+def retry(cmd: list[str], policy: limits.Policy | None = None, stdin: str | None = None, sleep=time.sleep) -> Attempt:
+    """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。待ちの合計と間隔は方針（省けば宣言の
+    `post-queue.rate-limit`）。
 
     **Pull Request の作成は積めない。** 作成が終わるまで新しい番号が決まらず、番号が
     決まらないと以降のすべての項目の宛先が決まらない。巻き直しの 3 種（作成・close・
@@ -707,12 +708,17 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin
     """
     import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
 
-    def announce(_seconds: float, _next: int) -> None:
-        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
+    def announce(seconds: float, _next: int) -> None:
+        print(f"⏳ 上限のため {seconds:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
 
     retried = lambda a: not a.ok and is_rate_limited(a)  # noqa: E731
     return waits.retry_call(
-        lambda: run(cmd, stdin=stdin), retried, max_wait=max_wait, interval=interval, sleep=sleep, on_wait=announce
+        lambda: run(cmd, stdin=stdin),
+        retried,
+        policy=policy or limits.policy("post-queue.rate-limit"),
+        reason=lambda a: a.summary(),
+        sleep=sleep,
+        on_wait=announce,
     ).value
 
 
@@ -721,7 +727,7 @@ _sleep = time.sleep  # `reflush` の待ち。テストが差し替える
 
 def reflush(flush: Any) -> dict[str, str]:
     """`flush()`（`PENDING_REMAINING=` と `PENDING_TRANSIENT=` を読んだ dict）を、一時的な失敗で残る間だけ
-    `TRANSIENT_INTERVAL` 秒おきに合計 `TRANSIENT_MAX_WAIT` 秒まで打ち直し、最後の結果を返す。上限では待たない（#1843 の決定 4・5）。"""
+    方針 `post-queue.transient-reflush` の間隔で合計の秒まで打ち直し、最後の結果を返す。上限では待たない（#1843 の決定 4・5）。"""
     import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
 
     def announce(seconds: float, _next: int) -> None:
@@ -730,7 +736,12 @@ def reflush(flush: Any) -> dict[str, str]:
     left = lambda v: v.get("PENDING_REMAINING", "0") not in ("", "0") and v.get("PENDING_TRANSIENT") == "1"  # noqa: E731
     return (
         waits.retry_call(
-            flush, left, max_wait=TRANSIENT_MAX_WAIT, interval=TRANSIENT_INTERVAL, sleep=lambda s: _sleep(s), on_wait=announce
+            flush,
+            left,
+            policy=limits.policy("post-queue.transient-reflush"),
+            reason=lambda v: f"積んだ投稿が残った（一時的な失敗）: 残り {v.get('PENDING_REMAINING')} 件",
+            sleep=lambda s: _sleep(s),
+            on_wait=announce,
         ).value
         or {}
     )
@@ -778,7 +789,12 @@ def cmd_count(args: argparse.Namespace) -> int:
 def cmd_retry(args: argparse.Namespace) -> int:
     deps.require("waits")  # 標準入力を読む前に起動し直す
     stdin = None if sys.stdin.isatty() else sys.stdin.read()
-    attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval, stdin=stdin)
+    policy = limits.policy("post-queue.rate-limit")
+    if args.max_wait is not None:
+        policy = policy._replace(seconds=args.max_wait)
+    if args.interval is not None:
+        policy = policy._replace(interval=args.interval)
+    attempt = retry(args.command, policy, stdin=stdin)
     sys.stdout.write(attempt.stdout)
     sys.stderr.write(attempt.stderr)
     return attempt.code
@@ -806,8 +822,8 @@ def main() -> None:
     sp.set_defaults(func=cmd_count)
 
     sp = sub.add_parser("retry", help="上限のときだけ待って再実行する")
-    sp.add_argument("--max-wait", type=float, default=900.0)
-    sp.add_argument("--interval", type=float, default=30.0)
+    sp.add_argument("--max-wait", type=float, default=None, help="待ちの合計の秒（省けば上限の宣言の post-queue.rate-limit）")
+    sp.add_argument("--interval", type=float, default=None, help="待ちの間隔の秒（省けば上限の宣言の post-queue.rate-limit）")
     sp.add_argument("command", nargs=argparse.REMAINDER)
     sp.set_defaults(func=cmd_retry)
 

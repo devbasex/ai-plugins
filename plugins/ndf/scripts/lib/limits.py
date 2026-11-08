@@ -89,7 +89,7 @@ def use(path) -> None:
     _cache = None
 
 
-def _no_duplicates(pairs: list) -> dict:
+def _refuse_duplicate_names(pairs: list) -> dict:
     keys = [k for k, _ in pairs]
     dup = sorted({k for k in keys if keys.count(k) > 1})
     if dup:
@@ -105,7 +105,7 @@ def _number_ok(value, integer: bool, low: float) -> bool:
     return (math.isinf(value) and value > 0) or (not math.isnan(value) and value >= low)
 
 
-def parse(raw: dict, where: str) -> dict[str, Policy]:
+def validate(raw: dict, where: str) -> dict[str, Policy]:
     """宣言の中身を確かめて方針の表にする（不変条件 I1）。形の誤りは `LimitsError`。"""
     if not isinstance(raw, dict) or raw.get("version") != VERSION or not isinstance(raw.get("policies"), dict) or not raw["policies"]:
         raise LimitsError(f"上限の宣言 {where} の形が違う（version {VERSION} と空でない policies が要る）")
@@ -126,7 +126,7 @@ def parse(raw: dict, where: str) -> dict[str, Policy]:
     return out
 
 
-def load() -> dict[str, Policy]:
+def read_table() -> dict[str, Policy]:
     """宣言を 1 プロセスに 1 回読む。"""
     global _cache
     if _cache is None:
@@ -135,16 +135,16 @@ def load() -> dict[str, Policy]:
         except OSError as exc:
             raise LimitsError(f"上限の宣言 {_path} を読めない: {exc.strerror or exc}") from None
         try:
-            raw = json.loads(text, object_pairs_hook=_no_duplicates)
+            raw = json.loads(text, object_pairs_hook=_refuse_duplicate_names)
         except ValueError as exc:
             raise LimitsError(f"上限の宣言 {_path} が JSON として壊れている: {exc}") from None
-        _cache = parse(raw, str(_path))
+        _cache = validate(raw, str(_path))
     return _cache
 
 
 def policy(name: str) -> Policy:
     """方針の名前で 1 行を引く。無ければ `LimitsError`。"""
-    table = load()
+    table = read_table()
     if name not in table:
         raise LimitsError(f"上限の宣言 {_path} に方針 {name} が無い")
     return table[name]
@@ -163,18 +163,18 @@ def seconds(name: str):
     return value(name, "seconds")
 
 
-def _prefixed(prefix: str) -> dict:
-    return {name[len(prefix) :]: p.seconds for name, p in load().items() if name.startswith(prefix)}
+def _seconds_by_prefix(prefix: str) -> dict:
+    return {name[len(prefix) :]: p.seconds for name, p in read_table().items() if name.startswith(prefix)}
 
 
 def phases() -> dict[str, int]:
     """工程 → 監視の上限（秒）。"""
-    return _prefixed(PHASE_PREFIX)
+    return _seconds_by_prefix(PHASE_PREFIX)
 
 
 def stalls() -> dict[str, int]:
     """担当 → 無進捗の許容（秒）。"""
-    return _prefixed(STALL_PREFIX)
+    return _seconds_by_prefix(STALL_PREFIX)
 
 
 def stall_default() -> int:
@@ -299,7 +299,7 @@ def check() -> list[tuple[str, str, int, int, int]]:
     return broken
 
 
-def _run(argv: list[str]) -> int:
+def _dispatch(argv: list[str]) -> int:
     if argv[:1] == ["check"] and len(argv) == 1:
         broken = check()
         for phase, agent, stall, monitor, cli in broken:
@@ -327,7 +327,7 @@ def _run(argv: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     try:
-        return _run(argv)
+        return _dispatch(argv)
     except LimitsError as exc:
         print(f"limits.py: {exc}", file=sys.stderr)
         return 1
