@@ -139,7 +139,9 @@ def _read_file(value: str | None, cwd: str) -> str | None:
 
 def origin_repo(cwd: str) -> str | None:
     try:
-        p = subprocess.run(["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=limits.seconds("hook.git-remote"))
+        p = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=limits.seconds("hook.git-remote")
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     m = REPO_IN_URL.search(p.stdout.strip()) if p.returncode == 0 else None
