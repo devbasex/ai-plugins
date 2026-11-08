@@ -483,4 +483,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    run_core.main("plugins/ndf/scripts/sprint-close.py", main)
+    run_core.main("scripts/sprint-close.py", main)

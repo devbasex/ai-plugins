@@ -195,8 +195,8 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 ### 実行の核
 
 エントリポイントは実行の核（[run_core.py](run_core.py)）を通る。Python は `__main__` の中身を
-`run_core.main("<契約の path>", main)` の 1 文に、シェルは先頭の実行文を
-`. "<lib>/run-core.sh"; rc_enter "<契約の path>" "$@"` にする（契約の検査 `core-entry`）。hook とランタイムが直接
+`run_core.main("<id>", main)` の 1 文に、シェルは先頭の実行文を `. "<lib>/run-core.sh"; rc_enter "<id>" "$@"` にする
+（契約の検査 `core-entry`）。id はプラグインの根からのパス（例 `scripts/handoff.py`）で、契約の一覧の項目を引く。hook とランタイムが直接
 起動するエントリポイントは、契約の一覧の `core` に `hook` か `runtime` の印と根拠を書いて外す（`core-exempt`）。
 
 | 本体の終わり方 | 結果 | 終了コード |

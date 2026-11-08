@@ -5,12 +5,13 @@
 
     # Python のエントリポイント（`__main__` の中身はこの 1 文）
     if __name__ == "__main__":
-        run_core.main("plugins/ndf/scripts/<名前>.py", main)
+        run_core.main("scripts/<名前>.py", main)
 
     # シェルのエントリポイント（先頭の実行文）
-    . "$(dirname "$0")/lib/run-core.sh"; rc_enter "plugins/ndf/scripts/<名前>.sh" "$@"
+    . "$(dirname "$0")/lib/run-core.sh"; rc_enter "scripts/<名前>.sh" "$@"
 
-- id は契約の一覧（`plugins/ndf/contracts/entrypoints/`）の `path`。契約の `stdout` と `exit` を核が読む
+- id はプラグインの根からのパス。契約の一覧（プラグインの根の `contracts/entrypoints/`）の項目を引き、`stdout` と
+  `exit` を核が読む（項目のファイル名は契約の `path` の `/` を `__` にしたもの）
 - 契約の `stdout` が `step-result` なら、核が確かめた結果を標準出力へ 1 行出す。それ以外は標準出力へ何も足さず、
   止まった理由を標準エラーへ 1 行出す
 - 呼ぶ側が `NDF_RESULT_FILE` でファイルを渡せば、最終の結果 JSON をそこへ 1 行で書く
@@ -45,6 +46,8 @@ import step_result  # noqa: E402
 
 PLUGIN_ROOT = LIB.parents[1]
 CONTRACTS = PLUGIN_ROOT / "contracts" / "entrypoints"
+# 契約の項目のファイル名の頭（契約の path はマーケットプレイスの根からのパスで、プラグインの根は plugins の下の ndf）
+CONTRACT_FILE_HEAD = "plugins__ndf__"
 ENTRY_ENV = "NDF_RUN_ENTRY"
 TIMEOUT_ENV = "NDF_RUN_TIMEOUT"
 RESULT_ENV = "NDF_RESULT_FILE"
@@ -83,7 +86,8 @@ class _Interrupt(BaseException):
 
 
 def contract_of(entry_id: str) -> dict | None:
-    f = CONTRACTS / (entry_id.replace("/", "__") + ".json")
+    """id（プラグインの根からのパス）の契約の項目。無い・読めなければ None。"""
+    f = CONTRACTS / (CONTRACT_FILE_HEAD + entry_id.replace("/", "__") + ".json")
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -96,9 +100,9 @@ def _exit_codes(contract: dict) -> frozenset[int]:
 
 
 def entry_of_script(script: str) -> str:
-    """スクリプトのパスから契約の id（`plugins/ndf/<プラグインの根からの相対>`）を決める。根の外なら空。"""
+    """スクリプトのパスから id（プラグインの根からのパス）を決める。根の外なら空。"""
     try:
-        return "plugins/ndf/" + Path(script).resolve().relative_to(PLUGIN_ROOT).as_posix()
+        return Path(script).resolve().relative_to(PLUGIN_ROOT).as_posix()
     except ValueError:
         return ""
 

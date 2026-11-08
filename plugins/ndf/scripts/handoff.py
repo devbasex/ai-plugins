@@ -255,7 +255,9 @@ def cmd_check(a) -> int:
     if found:
         return emit_result(f"節の形の違反が {len(found)} 件: {body}", [item], code=step_result.EXIT_VIOLATION)
     if lines > a.max_lines:
-        return emit_result(f"本体が {lines} 行で上限 {a.max_lines} 行を {lines - a.max_lines} 行超える: {body}", [item], code=step_result.EXIT_VIOLATION)
+        return emit_result(
+            f"本体が {lines} 行で上限 {a.max_lines} 行を {lines - a.max_lines} 行超える: {body}", [item], code=step_result.EXIT_VIOLATION
+        )
     return emit_result(f"節の形と行数（{lines}/{a.max_lines}）が通る: {body}", [item])
 
 
@@ -310,4 +312,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    run_core.main("plugins/ndf/scripts/handoff.py", main)
+    run_core.main("scripts/handoff.py", main)

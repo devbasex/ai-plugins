@@ -80,8 +80,12 @@ def _stop(msg: str, groups: Sequence[str] = ()) -> NoReturn:
     print(f"❌ [ndf deps] {msg}", file=sys.stderr)
     if str(Path(__file__).resolve().parent) not in sys.path:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import run_core  # 循環を避けて止まるときだけ読む（run_core → step_result → deps）
-
+    # 止まるときだけ読む（run_core → step_result → deps の循環を避ける）。ラッパーのバージョンディレクトリ
+    # （relay_lib/version_dir.py）は核を写さないため、読めなければ結果を出さずに 69 で終える
+    try:
+        run_core = importlib.import_module("run_core")
+    except ImportError:
+        sys.exit(EXIT_DEPS_MISSING)
     gaps = [{"kind": "deps", "name": g, "reason": msg} for g in groups] or [{"kind": "deps", "name": "uv", "reason": msg}]
     run_core.exit_early(msg, EXIT_DEPS_MISSING, gaps)
 

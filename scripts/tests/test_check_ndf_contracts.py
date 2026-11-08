@@ -40,7 +40,7 @@ def main():
 
 
 if __name__ == "__main__":
-    run_core.main("plugins/ndf/scripts/tool.py", main)
+    run_core.main("scripts/tool.py", main)
 '''
 REPO_LIB = """import json
 from pathlib import Path
@@ -274,7 +274,7 @@ def test_renaming_an_allow_item_with_the_same_kind_and_name_passes(tree: Path):
     (tree / "scripts/contract-allow" / allow_file_name(old)).unlink()
     (tree / "plugins/ndf/scripts/tool.py").rename(tree / "plugins/ndf/scripts/tool2.py")
     t2 = tree / "plugins/ndf/scripts/tool2.py"
-    t2.write_text(t2.read_text().replace("scripts/tool.py", "scripts/tool2.py"))
+    t2.write_text(t2.read_text().replace('"scripts/tool.py"', '"scripts/tool2.py"'))
     for f in (tree / "plugins/ndf/contracts/entrypoints").glob("*.json"):
         f.unlink()
     wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool2.py.json", dict(ENTRY, path="plugins/ndf/scripts/tool2.py"))
@@ -918,16 +918,16 @@ def test_load_stops_at_the_first_bad_item_in_name_order(tmp_path: Path):
 
 
 def test_entrypoint_that_does_not_go_through_the_core_fails_by_name(tree: Path):
-    edit(tree, 'run_core.main("plugins/ndf/scripts/tool.py", main)', "sys.exit(main())")
+    edit(tree, 'run_core.main("scripts/tool.py", main)', "sys.exit(main())")
     code, r = run(tree)
     assert code == 1 and ("core-entry", "") in kinds(r)
     assert _item(r, "core-entry")["path"] == "plugins/ndf/scripts/tool.py"
 
 
 def test_core_entry_id_must_be_the_contract_path(tree: Path):
-    edit(tree, 'run_core.main("plugins/ndf/scripts/tool.py"', 'run_core.main("plugins/ndf/scripts/other.py"')
+    edit(tree, 'run_core.main("scripts/tool.py"', 'run_core.main("scripts/other.py"')
     code, r = run(tree)
-    assert code == 1 and "契約の path" in _item(r, "core-entry")["detail"]
+    assert code == 1 and "プラグインの根からのパス" in _item(r, "core-entry")["detail"]
 
 
 def test_shell_entrypoint_must_call_rc_enter_first(tree: Path):
@@ -938,7 +938,7 @@ def test_shell_entrypoint_must_call_rc_enter_first(tree: Path):
     wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__t.sh.json", entry)
     run(tree, "--render")
     assert ("core-entry", "") in [(i["kind"], i["name"]) for i in run(tree)[1]["items"] if i["path"].endswith("t.sh")]
-    sh.write_text('#!/usr/bin/env bash\n# 説明\n. "$(dirname "$0")/lib/run-core.sh"; rc_enter "plugins/ndf/scripts/t.sh" "$@"\necho hi\n')
+    sh.write_text('#!/usr/bin/env bash\n# 説明\n. "$(dirname "$0")/lib/run-core.sh"; rc_enter "scripts/t.sh" "$@"\necho hi\n')
     assert not [i for i in run(tree)[1]["items"] if i["path"].endswith("t.sh") and i["kind"] == "core-entry"]
 
 
@@ -949,7 +949,7 @@ def test_hook_mark_needs_evidence(tree: Path):
     assert code == 1 and ("core-exempt", "hook") in kinds(r)
     (tree / "plugins/ndf/hooks").mkdir(parents=True)
     (tree / "plugins/ndf/hooks/claude.json").write_text('{"command": "python3 scripts/tool.py"}')
-    edit(tree, 'run_core.main("plugins/ndf/scripts/tool.py", main)', "sys.exit(main())")
+    edit(tree, 'run_core.main("scripts/tool.py", main)', "sys.exit(main())")
     assert run(tree)[0] == 0
 
 

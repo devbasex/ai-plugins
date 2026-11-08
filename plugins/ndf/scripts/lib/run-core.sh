@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # NDF plugin: シェルのエントリポイントを実行の核（run_core.py）の子として動かす（#2337）。
 #
-#   . "$(dirname "$0")/lib/run-core.sh"; rc_enter "plugins/ndf/scripts/<名前>.sh" "$@"
+#   . "$(dirname "$0")/lib/run-core.sh"; rc_enter "scripts/<名前>.sh" "$@"
 #
 # `rc_enter` は、核の子として動いていなければ（`NDF_RUN_ENTRY` が自分の id でなければ）
-# `python3 run_core.py exec <id> -- "$0" <引数>` で自分を再実行する。核の子として動いていれば印を外して戻る
+# `python3 run_core.py exec <id> -- "$0" <引数>` で自分を再実行する（id はプラグインの根からのパス）。核の子として動いていれば印を外して戻る
 # （印を外すのは、このスクリプトが起こすほかのシェルのエントリポイントが自分の核へ入れるようにするため）。
 # 結果と終了コードの規則は同じディレクトリの run_core.py にある。
 

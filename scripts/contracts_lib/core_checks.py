@@ -1,7 +1,8 @@
 """実行の核に関わる契約の検査（#2337 の決定 5・6・12、不変条件 I4・I5・I7・I13）。標準ライブラリだけで書く。
 
 - `core-entry`: 核の対象外の印を持たないエントリポイントが核を通る（Python は `__main__` の中身が
-  `run_core.main("<契約の path>", <本体>)` の 1 文、シェルは先頭の実行文が `rc_enter "<契約の path>" "$@"`）
+  `run_core.main("<id>", <本体>)` の 1 文、シェルは先頭の実行文が `rc_enter "<id>" "$@"`。id は契約の path から
+  `plugins/ndf/` を除いたプラグインの根からのパス）
 - `core-exempt`: `hook` の印は hook の定義か hook のエントリポイントからの呼び出しを根拠に持つ。`runtime` の印は
   ベースブランチより増えない
 - `exit-meaning`: 契約の `exit` の値は終了コードの表の見出しで始まり、エントリポイントとその部品は `EXIT_` で始まる
@@ -28,6 +29,12 @@ import step_result  # noqa: E402
 EXIT_OWNERS = ("plugins/ndf/scripts/lib/step_result.py", "plugins/ndf/scripts/lib/deps.py")
 READER = "plugins/ndf/scripts/lib/step_read.py"
 KINDS = ("core-entry", "core-exempt", "exit-meaning", "result-read")
+PLUGIN_HEAD = "plugins/ndf/"
+
+
+def entry_id(rel: str) -> str:
+    """契約の path から核の id（プラグインの根からのパス）を作る。"""
+    return rel.removeprefix(PLUGIN_HEAD)
 
 
 def _main_block(tree: ast.Module) -> ast.If | None:
@@ -42,6 +49,7 @@ def _main_block(tree: ast.Module) -> ast.If | None:
 
 def py_core_entry(text: str, rel: str) -> str | None:
     """Python のエントリポイントが核を通るか。通らなければ理由を返す。"""
+    rel = entry_id(rel)
     try:
         block = _main_block(ast.parse(text))
     except SyntaxError as e:
@@ -63,12 +71,13 @@ def py_core_entry(text: str, rel: str) -> str | None:
         return f'__main__ の中身を run_core.main("{rel}", main) の 1 文にする'
     first = body[0].value.args[0]
     if not (isinstance(first, ast.Constant) and first.value == rel):
-        return f"run_core.main の id を契約の path（{rel}）にする"
+        return f"run_core.main の id をプラグインの根からのパス（{rel}）にする"
     return None
 
 
 def sh_core_entry(text: str, rel: str) -> str | None:
-    """シェルのエントリポイントの先頭の実行文が `rc_enter "<path>" "$@"` か。通らなければ理由を返す。"""
+    """シェルのエントリポイントの先頭の実行文が `rc_enter "<id>" "$@"` か。通らなければ理由を返す。"""
+    rel = entry_id(rel)
     for line in text.splitlines()[1:]:
         s = line.strip()
         if not s or s.startswith("#"):
@@ -77,7 +86,7 @@ def sh_core_entry(text: str, rel: str) -> str | None:
         if not m:
             return f'先頭の実行文を . "<lib>/run-core.sh"; rc_enter "{rel}" "$@" にする'
         if m.group(2) != rel:
-            return f"rc_enter の id を契約の path（{rel}）にする"
+            return f"rc_enter の id をプラグインの根からのパス（{rel}）にする"
         return None
     return "実行文が無い"
 

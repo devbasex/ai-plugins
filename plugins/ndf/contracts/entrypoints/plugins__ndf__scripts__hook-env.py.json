@@ -10,7 +10,6 @@
     "NDF_DEPS_VENV",
     "NDF_HOOK_PYTHON",
     "NDF_HOOK_REEXEC",
-    "NDF_PRESENTATION_DIR",
     "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],

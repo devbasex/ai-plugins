@@ -19,7 +19,7 @@ LIB = Path(__file__).resolve().parents[1] / "lib"
 sys.path.insert(0, str(LIB))
 import step_result  # noqa: E402
 
-ENTRY = "plugins/ndf/scripts/tool.py"
+ENTRY = "scripts/tool.py"
 EXITS = {"0": "成功", "1": "失敗", "2": "読めない・呼び出しの誤り", "6": "欠けが残る", "10": "承認ゲート"}
 
 PY = """import json, os, signal, sys, time
@@ -82,8 +82,8 @@ BODY = """    if how == "ok":
 def setup(tmp_path: Path, stdout: str = "step-result", entry: str = ENTRY) -> Path:
     c = tmp_path / "contracts"
     c.mkdir(exist_ok=True)
-    item = {"path": entry, "stdout": stdout, "exit": EXITS}
-    (c / (entry.replace("/", "__") + ".json")).write_text(json.dumps(item, ensure_ascii=False))
+    item = {"path": "plugins/ndf/" + entry, "stdout": stdout, "exit": EXITS}
+    (c / ("plugins__ndf__" + entry.replace("/", "__") + ".json")).write_text(json.dumps(item, ensure_ascii=False))
     script = tmp_path / "tool.py"
     script.write_text(PY.format(lib=str(LIB), contracts=str(c), body=BODY, entry=entry))
     return script
@@ -152,7 +152,7 @@ def test_emit_is_not_swallowed_by_except_exception(tmp_path):
 
 def test_unknown_entrypoint_stops_with_2(tmp_path):
     script = setup(tmp_path)
-    script.write_text(script.read_text().replace(f"run_core.main({ENTRY!r}", 'run_core.main("plugins/ndf/scripts/nope.py"'))
+    script.write_text(script.read_text().replace(f"run_core.main({ENTRY!r}", 'run_core.main("scripts/nope.py"'))
     p = run(script, "ok")
     r = last(p)
     assert (r["status"], p.returncode) == ("stopped", 2) and r["gaps"][0]["kind"] == "contract"
@@ -219,10 +219,11 @@ esac
 
 
 def sh_setup(tmp_path: Path, stdout: str = "step-result") -> Path:
-    entry = "plugins/ndf/scripts/tool.sh"
+    entry = "scripts/tool.sh"
     c = tmp_path / "contracts"
     c.mkdir(exist_ok=True)
-    (c / (entry.replace("/", "__") + ".json")).write_text(json.dumps({"path": entry, "stdout": stdout, "exit": EXITS}))
+    item = {"path": "plugins/ndf/" + entry, "stdout": stdout, "exit": EXITS}
+    (c / ("plugins__ndf__" + entry.replace("/", "__") + ".json")).write_text(json.dumps(item))
     # 核の契約の置き場を一時ディレクトリへ向けた複製を使う
     lib = tmp_path / "lib"
     lib.mkdir()
@@ -286,7 +287,7 @@ def _entries() -> list[str]:
     for f in sorted(run_core.CONTRACTS.glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
         if not d.get("core"):
-            out.append(d["path"])
+            out.append(d["path"].removeprefix("plugins/ndf/"))
     return out
 
 
