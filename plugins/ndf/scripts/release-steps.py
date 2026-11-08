@@ -1181,7 +1181,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cd-result", parents=[common], help="本番チャネルへのマージの後に CD の結果を読み、ファイルへ書く")
     p.add_argument("--base", required=True, help="本番チャネル")
     p.add_argument("--head", help="本番チャネルへマージした Pull Request の head（無ければ本番チャネルの先端を読む）")
-    p.add_argument("--prs", nargs="+", type=int, metavar="PR番号", help="本番チャネルへ直接マージした PR（最後の PR のマージのコミットを読む）")
+    p.add_argument(
+        "--prs", nargs="+", type=int, metavar="PR番号", help="本番チャネルへ直接マージした PR（最後の PR のマージのコミットを読む）"
+    )
     p.add_argument("--out", required=True, help="結果のファイル")
     p.set_defaults(func=cmd_cd_result)
 
