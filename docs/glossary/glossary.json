@@ -6278,6 +6278,27 @@
       "meaning": "Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す",
       "source": "",
       "pending_source": "issues/issue-2737-requirements.md"
+    },
+    {
+      "term": "一致の検査",
+      "context": "ndf-issue-upkeep",
+      "meaning": "記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く",
+      "source": "",
+      "pending_source": "issues/issue-2737-design.md"
+    },
+    {
+      "term": "工程が足す節",
+      "context": "ndf-issue-upkeep",
+      "meaning": "起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの答え・閉じた理由・再発など）。起票者は書かない",
+      "source": "",
+      "pending_source": "issues/issue-2737-design.md"
+    },
+    {
+      "term": "置き場ごとの表し方",
+      "context": "ndf-issue-upkeep",
+      "meaning": "記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応",
+      "source": "",
+      "pending_source": "issues/issue-2737-design.md"
     }
   ]
 }
