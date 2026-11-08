@@ -219,7 +219,7 @@ graph LR
 | --- | --- | --- | --- |
 | 既存の機能 | 外部の調査の検査（`design-survey.py`）・用語チェック・本文の決定の同期（`pr-body-decisions.sh`） | 同じ設計文書を読む。互いの出力は使わない | 無し。スプリントの設計のプランで、外部の調査の検査の後に並ぶ |
 | 外部の系 | GitHub（`gh pr view` で head ブランチと URL を読む） | 読むだけ。書き込まない | `links` が読む。`gh` が使えないときは URL の代わりにリポジトリの中のパスを出す |
-| セキュリティ（認証・認可・秘密） | `ui_mock.location` | URL かパスを書く欄で、秘密を書かない | 既存の秘密の除去は解析の項目（`ITEM_KEYS`）を巡回するときだけ働き、`ui_mock` は対象の外である。そこで `merge_project()` が巡回の後に `ui_mock` へ同じ判定（`has_secret`）を掛け、秘密の形なら `{"unknown": "秘密の形"}` に置き換えて値を出さない。置き換えたことは `project-decl.py write` の出力の 1 行（`ui_mock: 秘密の形の値を捨てて不明にした`）で利用者へ知らせ、欄の名前だけを示して値は出さない。この置き換えは利用者の宣言（C7）を書き換えるが、秘密を漏らさない守り（C1）として利用者が設計承認ゲートで認めた（2026-11-08）。解析で値を補完しない方針は変えない。新しい認証・認可は無い |
+| セキュリティ（認証・認可・秘密） | `ui_mock.location` | URL かパスを書く欄で、秘密を書かない | 既存の秘密の除去は解析の項目（`ITEM_KEYS`）を巡回するときだけ働き、`ui_mock` は対象の外である。そこで `merge_project()` が巡回の後に `ui_mock` へ同じ判定（`has_secret`）を掛け、秘密の形なら `{"unknown": "秘密の形"}` に置き換えて値を出さない。置き換えたことは `project-decl.py write` の出力の 1 行（`ui_mock: 秘密の形の値を捨てて不明にした`）で利用者へ知らせ、欄の名前だけを示して値は出さない。この置き換えは利用者の宣言（C7）を書き換えるが、秘密を漏らさない守り（C1）として利用者が設計承認ゲートで認めた（2026-11-08）。解析で値を補完しない方針は変えない。利用者が手で書いて保存を通らない宣言は、`design-materials.py check` が同じ判定を掛け、秘密の形なら値を出さずに `ui_mock_secret` で止める（宣言は書き換えない）。新しい認証・認可は無い |
 | データ分析（計測・集計） | 承認の答えの記録（`gate-rejections.jsonl`） | 変えない | 無し（提示の形だけが変わり、答えの記録の形は変わらない） |
 | ログ出力とアラート | スクリプトの結果の 1 行の JSON（`step_result`） | 既存の形で出す | 無し（新しいログとアラートは足さない） |
 
@@ -266,14 +266,15 @@ python3 design-materials.py links (--issue N... | --file PATH...) [--pr N] [--ou
 - `--issue` / `--file` の読み方は `design-survey.py` と同じである。`--issue` は HEAD の `issues/` から番号でつながる設計文書と仕様のコピーを読み、`--file` は worktree から読む。文書を読む部分は `lib/design_docs.py` を共有する
 - 一覧の表は `design/references/approval-materials.md` から読む（スクリプトからの相対パス）
 - 触る領域の行は、設計文書の「適用範囲」の節の `触る領域` で始まる箇条（`- **触る領域**: 画面・永続データ`）から読む。区切りは `・`・`、`・`,`。値 `無し` は該当時の資料が無いことを表す
-- 画面モックの表現方法は `project_decl.read_project_decl(root)` の `ui_mock` から読む
+- 設計文書を分けたとき（本体の `issue-<番号>-design.md` と分割先の `issue-<番号>-design-<名前>.md`）は、まとまりの全ファイルを 1 つの設計文書として読む。資料の置き場の節はまとまりの全ファイルから探し、同じ見出しの節が複数あれば中身を持つ方（分割先へのリンクだけの節でない方）を採る。I2 の「本文を持つ」は、採った節で判定する。要旨の件数はまとまり全体で数え、`url` は採った節のファイルとアンカーで作る
+- 画面モックの表現方法は `project_decl.read_project_decl(root)` の `ui_mock` から読む。宣言は利用者が手で書くため、保存時の置き換え（`project-decl.py write`）を通っていないことがある。そこで `check` は読んだ `ui_mock` へ `has_secret` を掛け、秘密の形なら値を出さずに `ui_mock_secret` を挙げて終了コード 1 で終わる
 
 `check` の結果（`lib/step_result.py` の形の 1 行の JSON）:
 
 | 終了コード | status | items の `rule` |
 | --- | --- | --- |
 | 0 | ok | 無し |
-| 1 | stopped | `missing`（該当する資料の節が無いか本文が空）・`mock_link_missing`（画面モックの節にリンクもパスも無い）・`ui_mock_undeclared`（画面を変える設計で表現方法が未宣言）・`unknown_area`（触る領域の行に 7 語の外の語がある） |
+| 1 | stopped | `missing`（該当する資料の節が無いか本文が空）・`mock_link_missing`（画面モックの節にリンクもパスも無い）・`ui_mock_undeclared`（画面を変える設計で表現方法が未宣言）・`unknown_area`（触る領域の行に 7 語の外の語がある）・`ui_mock_secret`（宣言の `ui_mock` が秘密の形。`text` は `ui_mock` の欄の名前だけで、値は出さない） |
 | 2 | stopped | `catalog_broken`（一覧の表が I1 を満たさない）・文書か git を読めない |
 | 3 | stopped | `--issue` で文書が 1 つも見つからない |
 
@@ -376,7 +377,7 @@ sequenceDiagram
 
 図は実行する要素だけを描く。構成要素の表のうち参照の文書（`.md`）・生成物（スキーマと契約）・テスト・用語集は実行の順序を持たないため図に現れない。`project_lib/model.py` は `design-materials.py` が宣言を読むときに通る。
 
-スプリントの設計のプランでは、`--mode standard` のときだけ `survey-recheck` の後に `materials-check` を打つ。落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`--mode legacy-refactor` では検査の 3 ステップを足さず、`materials-links` だけを足す。`light` / `operation` / `documentation` のプランは変えない（受け入れ条件 14）。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる）。
+スプリントの設計のプランでは、`--mode standard` のときだけ `survey-recheck` の後に `materials-check` を打つ。落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`--mode legacy-refactor` では検査の 3 ステップを足さず、`materials-links` だけを足す。`light` / `operation` / `documentation` のプランは変えない（受け入れ条件 14）。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` と `ui_mock_secret` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる。`ui_mock_secret` は秘密にも触れる C1 に当たる）。
 
 ## 非機能の実現方式
 
@@ -396,6 +397,7 @@ sequenceDiagram
 | 1・2・3・5・I1 | 出荷する `approval-materials.md` を `check` が読むと終了コード 2 にならず、表の資料名が重複せず、水準と作る段階が 2 値で、該当時の行が既知の領域を持つ | 表の行を重ねる・水準に 3 つ目の値を書く・該当時の行の領域を消すと、`catalog_broken` で 2 になる |
 | 4・6・14・15 | 設計承認ゲートで承認する人が、[issue-2721-design-materials.md](issue-2721-design-materials.md) の「今の定義との対応」の表と、この文書の外部の調査の表、`deliverables.md` の差分（`light` / `operation` / `legacy-refactor` の列が変わらない）を見る | （文書の対応で、テストで縛らない。`.md` の文言を照合するテストを書かない） |
 | 7・I2 | 該当する資料の節が無い設計文書を `check` に渡すと、資料名ごとに `missing` が出て終了コード 1。すべてあれば 0 | 節の有無を見ずに 0 を返す・欠けを 1 件にまとめると落ちる |
+| 7・10・I2 | 決定の記録を分割先に置き、本体には分割先へのリンクだけの同じ見出しの節を置いた設計文書を `check` と `links` に渡すと、`missing` が出ず、`決定の記録` の要旨が分割先の決定の件数になり、`url` が分割先のファイルの節のアンカーを指す。分割先の節も空なら `missing` で 1 | 本体の節だけを読む・リンクだけの節で本文ありと判定する・件数を本体だけで数えると落ちる |
 | 7・I3 | 触る領域の行が無い設計文書では、該当時の 5 行もすべて `missing` の対象になる | 行が無いときに該当時を外すと落ちる |
 | 8・I4 | `ui_mock` の無い宣言で、触る領域に画面がある設計を渡すと `ui_mock_undeclared` で 1 | 宣言を見ずに通すと落ちる |
 | 9・I4 | `ui_mock` の無い宣言で、画面の無い設計を渡すと `ui_mock_undeclared` が出ない | 画面の有無によらず挙げると落ちる |
@@ -407,6 +409,7 @@ sequenceDiagram
 | `ui_mock` の形 | `project-decl.py check` が `kind` の 4 値の外と空の `location` を拒み、欄の無い宣言を通す | 欄を必須にすると、今の宣言が落ちる |
 | スプリントの設計のプラン | `--mode standard` で組んだプランで `survey-recheck` の次が `materials-check` で、`gate` の入力に `materials-links` がある。`--mode light` で組んだプランに `materials-check` と `materials-links` が無い。`--mode legacy-refactor` で組んだプランに `materials-links` があり `materials-check` が無い | 検査のステップを足さない・モードを見ずに足すと落ちる |
 | `ui_mock` の秘密の除去 | 既存の宣言の `ui_mock.location` が資格情報入りの URL のとき、`project-decl.py write` の後の宣言で `ui_mock` が `{"unknown": "秘密の形"}` になり、結果の行に `{"kind": "secret", "key": "ui_mock"}` があり、表示に `ui_mock: 秘密の形の値を捨てて不明にした` が出て、出力のどこにも元の値が出ない | `ui_mock` を巡回の外に置いたままにする・知らせる行を出さない・行に値を入れると落ちる |
+| `ui_mock` の秘密の検査 | 利用者が手で書いた宣言の `ui_mock.location` が資格情報入りの URL のとき、`design-materials.py check` が `ui_mock_secret` を挙げて終了コード 1 で終わり、出力のどこにも元の値が出ない | `check` が `ui_mock` を検査せずに通す・`text` に値を入れると落ちる |
 
 ## 設計の結果
 
