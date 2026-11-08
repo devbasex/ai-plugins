@@ -6131,37 +6131,37 @@
       "term": "答え待ちの依頼",
       "context": "ndf-workflow",
       "meaning": "オーガナイザーに届いて、まだ答えていない依頼。設計の承認・リリース承認ゲート・承認ゲートの外の問い・耐久ワークフローが自分で立てた問いの 4 種類",
-      "pending_source": "issues/issue-2707-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "計画の閾値",
       "context": "ndf-workflow",
       "meaning": "計画全体の答え待ちの依頼の件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める",
-      "pending_source": "issues/issue-2707-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "レーンの閾値",
       "context": "ndf-workflow",
       "meaning": "1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 で、これを超えるとそのレーンを止める",
-      "pending_source": "issues/issue-2707-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "答え待ちの停止",
       "context": "ndf-workflow",
       "meaning": "答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
-      "pending_source": "issues/issue-2707-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "止める指示のファイル",
       "context": "ndf-workflow",
       "meaning": "耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い",
-      "pending_source": "issues/issue-2707-design.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "再開の印",
       "context": "ndf-workflow",
       "meaning": "答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.mark.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く",
-      "pending_source": "issues/issue-2707-design.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "tmux の専用サーバー",
