@@ -581,6 +581,26 @@ def test_run_signal_exit_code(term):
     assert t.finish() == 143
 
 
+def test_run_updates_plugin_before_first_section(term):
+    """最初の起動でもプラグインを更新し、新しい版で区間を始める。手で起動したレーンが古い版で動かないようにする。"""
+    t = term(env={"FAKE_VERSION_AFTER": "2.0.0"})
+    t.wait_start(1)
+    assert t.calls()[:4] == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.rows()[0]["event"] == "start" and t.rows()[0]["plugin_version"] == "2.0.0"
+    os.kill(t.starts()[0]["pid"], signal.SIGKILL)
+    t.finish()
+
+
+def test_run_first_update_failed_still_starts(term):
+    """最初の起動の更新に失敗しても、今の版で起動し、そのことを 1 行で知らせる。"""
+    t = term(env={"FAKE_FAIL": "update"})
+    t.wait_start(1)
+    assert "プラグインを更新できなかった" in t.text
+    assert t.rows()[0]["plugin_version"] == "1.0.0"
+    os.kill(t.starts()[0]["pid"], signal.SIGKILL)
+    t.finish()
+
+
 def test_run_switches_to_next_section(term, tmp_path):
     """合図を受けると /exit と \\r を入力し、更新して次の区間を起動する（AC6・AC8・AC19）。"""
     t = term("--model", "haiku", env={"FAKE_VERSION_AFTER": "2.0.0"})
@@ -590,7 +610,15 @@ def test_run_switches_to_next_section(term, tmp_path):
     first, second = t.starts()[:2]
     assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
-    assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]  # 最初の起動と切り替えの 2 回
     assert "── ndf-relay: 区間 2 ──" in t.text
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
@@ -599,7 +627,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s1["relay_version_dir"] is None and s2["relay_version_dir"] is None  # プラグインのキャッシュから起動（#1587 の AC13）
     assert not events(rows, "reexec") and not events(rows, "reexec_skipped")  # キャッシュからの起動は入れ替えない（AC12）
     assert s1["command"] == "--model haiku"
-    assert s1["plugin_version"] == "1.0.0"
+    assert s1["plugin_version"] == "2.0.0"  # 最初の起動で更新する
     assert s2["plugin_version"] == "2.0.0"
     assert s2["command"] == "/goal 次のステップ"
     assert s2["from_session"] == f"s{first['pid']}"
@@ -1152,7 +1180,7 @@ def test_run_next_start_failed(term):
     copy = t.fake_dir / "claude-copy.py"
     copy.write_bytes(FAKE.read_bytes())
     copy.chmod(0o755)
-    t2 = term(env={"FAKE_BREAK_ON_LIST": "2", "NDF_RELAY_CLAUDE": copy})
+    t2 = term(env={"FAKE_BREAK_ON_LIST": "3", "NDF_RELAY_CLAUDE": copy})
     t2.wait_start(1)
     t2.type("mark /goal 続き\r")
     assert t2.finish() == 2
@@ -4312,7 +4340,15 @@ def test_swap_keeps_next_session_input(tmp_path, term, swap):
     assert second["argv"] == ["--model", "haiku", "/goal 次"]
     assert second["cwd"] == str(tmp_path)
     assert [r for r in rows if r["event"] == "start"][1]["carried"] == ["--model", "haiku"]
-    assert sw.t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert sw.t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]
     assert bool(events(rows, "reexec")) is swap and not events(rows, "reexec_skipped")
     sw.t.type("quit 0\r")
     assert sw.t.finish() == 0
