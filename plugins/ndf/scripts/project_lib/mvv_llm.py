@@ -2,6 +2,10 @@
 
 LLM は `supervise_lib/claude.py` の `call_claude` を Tool なしで 1 回呼ぶ（NDF_SUPERVISE_CLAUDE で差し替えられる）。
 呼び出しごとに `call_claude` が使用量の帳簿へ 1 行を足す。照合は本文を書き換えず、判定と箇所を `project-mvv.jsonl` へ残すだけである（I14）。
+
+LLM の行は照合の入力（判定の指示とプロンプト全体）の sha256 を `input_sha256` に持つ。呼ぶ側が再利用を求めたとき（`reuse`。
+スプリント MVV の照合だけ）は、同じ入力の最新の判定が「従う」なら LLM を呼ばず、`reused_from`（元の LLM の判定の時刻）を持つ行を
+足す（#2614）。共通原則を読めないときは入力を見分けられないため、再利用せず `input_sha256` も書かない。
 """
 
 from __future__ import annotations
@@ -66,10 +70,37 @@ def vet_prompt(kind: str, body: str, mvv: pm.ProjectMvv) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def vet_body(root: Path, body: str, kind: str) -> tuple[dict, dict]:
-    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。"""
-    mvv = pm.load_mvv(root)
-    rec = {
+def input_sha256(prompt: str) -> str:
+    """照合の入力の sha256。判定の指示とプロンプト全体（共通原則・プロジェクト MVV・判定の決まり・種類・本文）から作る。"""
+    return pm.sha256_text(VET_SYSTEM + "\0" + prompt)
+
+
+def principles_readable() -> bool:
+    """共通原則のファイルを読めるか。読めないと `pm.principles()` は毎回同じ代わりの文を返し、入力で見分けられない。"""
+    try:
+        pm.PRINCIPLES_PATH.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def latest_vet_where(pred) -> dict | None:
+    """照合の記録のうち `pred` を満たす最新の行（時刻が最も後、同じなら後ろの行）。読めない・壊れた行は飛ばす。
+
+    旧の置き場から足し合わせた行は末尾に付くため、行の順は時刻の順でない（#2766）。
+    """
+    rows = [r for r in pms.read_jsonl(pm.vet_log_path()) if pred(r)]
+    return max(enumerate(rows), key=lambda x: (str(x[1].get("at") or ""), x[0]))[1] if rows else None
+
+
+def latest_vet(key: str) -> dict | None:
+    """同じ照合の入力の最新の判定（時刻が最も後、同じなら後ろの行）。`repo` では絞らない。"""
+    return latest_vet_where(lambda r: r.get("input_sha256") == key)
+
+
+def _base_record(root: Path, body: str, kind: str, mvv) -> dict:
+    """照合の記録の基礎。判定は「読めない」から始める。"""
+    return {
         "at": clock.now_iso("utc"),
         "repo": pm.mvv_repo_key(root),
         "kind": kind,
@@ -79,23 +110,55 @@ def vet_body(root: Path, body: str, kind: str) -> tuple[dict, dict]:
         "verdict": "unreadable",
         "locations": [],
     }
-    usage: dict = {}
+
+
+def _machine_prechecks(rec: dict, kind: str, body: str, mvv) -> bool:
+    """候補・改訂の形の検査と改訂の前提の検査を記録へ書く。LLM に回さず決まったら真。"""
     if kind in ("candidate", "revision"):
         probs = pm.shape_problems(body)
         if probs:
             rec.update(verdict="suspect", locations=probs, machine=True)
-    if kind == "revision" and not mvv.approved and rec["verdict"] == "unreadable":
+            return True
+    if kind == "revision" and not mvv.approved:
         rec["locations"] = [
             {"item": "project_mvv", "reason": f"改訂には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）"}
         ]
-    elif rec["verdict"] == "unreadable":
-        data, raw, usage = call_llm_json(VET_SYSTEM, vet_prompt(kind, body, mvv), root, "mvv-vet")
-        if data is None or data.get("verdict") not in VET_VERDICTS:
-            rec.update(raw=raw)
-        else:
-            locs = [x for x in data.get("locations") or [] if isinstance(x, dict)]
-            rec.update(verdict=data["verdict"], locations=locs)
-        rec.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
+        return True
+    return False
+
+
+def _resolve_verdict(root: Path, prompt: str, key: str | None, reuse: bool) -> tuple[dict, dict]:
+    """(記録へ足す項目, 使用量)。再利用が成り立てば LLM を呼ばない。LLM の答えが読めなければ判定を足さない。"""
+    prev = latest_vet(key) if reuse and key else None
+    if prev is not None and prev.get("verdict") == "follow":
+        # 再利用の行は費用と秒を持たない。元の判定は常に LLM の行の時刻を指す（I3）
+        locs = [x for x in prev.get("locations") or [] if isinstance(x, dict)]
+        return {"verdict": "follow", "locations": locs, "input_sha256": key, "reused_from": prev.get("reused_from") or prev.get("at")}, {}
+    data, raw, usage = call_llm_json(VET_SYSTEM, prompt, root, "mvv-vet")
+    fields: dict = {}
+    if data is None or data.get("verdict") not in VET_VERDICTS:
+        fields["raw"] = raw
+    else:
+        fields["verdict"] = data["verdict"]
+        fields["locations"] = [x for x in data.get("locations") or [] if isinstance(x, dict)]
+    if key:
+        fields["input_sha256"] = key
+    fields.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
+    return fields, usage
+
+
+def vet_body(root: Path, body: str, kind: str, reuse: bool = False) -> tuple[dict, dict]:
+    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。
+
+    `reuse` が真なら、同じ照合の入力の最新の判定が「従う」のとき LLM を呼ばずにその判定を使う（#2614）。"""
+    mvv = pm.load_mvv(root)
+    rec = _base_record(root, body, kind, mvv)
+    usage: dict = {}
+    if not _machine_prechecks(rec, kind, body, mvv):
+        prompt = vet_prompt(kind, body, mvv)
+        key = input_sha256(prompt) if principles_readable() else None
+        fields, usage = _resolve_verdict(root, prompt, key, reuse)
+        rec.update(fields)
     pms.append_jsonl(pm.vet_log_path(), rec)
     return rec, usage
 
