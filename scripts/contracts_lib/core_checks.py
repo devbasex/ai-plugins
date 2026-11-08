@@ -125,7 +125,8 @@ def exempt_violations(root: Path, entries: dict, reached) -> list[tuple[str, str
 
 
 def base_runtime_count(root: Path, sha: str | None) -> int | None:
-    """ベースブランチの契約の一覧の runtime の印の数（決められなければ None）。"""
+    """ベースブランチの契約の一覧の runtime の印の数（決められなければ None）。
+    git は一覧の取得と中身の一括読み（`cat-file --batch`）の 2 回だけ起こす。"""
     if not sha:
         return None
     ls = subprocess.run(
@@ -133,11 +134,27 @@ def base_runtime_count(root: Path, sha: str | None) -> int | None:
     )
     if ls.returncode != 0:
         return None
-    n = 0
-    for p in ls.stdout.splitlines():
-        show = subprocess.run(["git", "-C", str(root), "show", f"{sha}:{p}"], capture_output=True, text=True)
+    names = ls.stdout.splitlines()
+    if not names:
+        return 0
+    cat = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "--batch"],
+        input="".join(f"{sha}:{p}\n" for p in names).encode(),
+        capture_output=True,
+    )
+    if cat.returncode != 0:
+        return None
+    n, buf, i = 0, cat.stdout, 0
+    while i < len(buf):
+        j = buf.index(b"\n", i)
+        head = buf[i:j].split()
+        i = j + 1
+        if len(head) != 3:  # "<名前> missing" など中身の無い行
+            continue
+        size = int(head[2])
+        body, i = buf[i : i + size], i + size + 1
         try:
-            d = json.loads(show.stdout)
+            d = json.loads(body)
         except ValueError:
             continue
         if isinstance(d, dict) and core_exempt(d) == "runtime":

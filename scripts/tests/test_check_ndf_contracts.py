@@ -1001,3 +1001,25 @@ def test_base_knows_runs_once_per_kind(monkeypatch):
     now = [{"kind": k, "name": f"N{i}", "path": f"p{i}"} for i, k in enumerate(["a", "a", "b", "a", "b"])]
     assert len(ratchet.added(Path("."), "sha", "x", now, lambda r: f"{r['path']}.json")) == 5
     assert sorted(calls) == ["a", "b"]
+
+
+def test_base_runtime_count_reads_the_base_with_two_git_processes(tmp_path: Path, monkeypatch):
+    """ベースの runtime の印は、契約の数によらず git 2 回（一覧と一括読み）で数える。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import core_checks
+
+    d = tmp_path / "plugins/ndf/contracts/entrypoints"
+    d.mkdir(parents=True)
+    for i, ex in enumerate(["runtime", "hook", None, "runtime"]):
+        wj(d / f"e{i}.json", {"path": f"e{i}.py", **({"core": {"exempt": ex}} if ex else {})})
+    (d / "broken.json").write_text("{")
+    g = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*g[:3], "init", "-q"], check=True)
+    subprocess.run([*g, "add", "-A"], check=True)
+    subprocess.run([*g, "commit", "-qm", "c"], check=True)
+    sha = subprocess.run([*g[:3], "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    calls = []
+    real = subprocess.run
+    monkeypatch.setattr(core_checks.subprocess, "run", lambda *a, **k: calls.append(a[0]) or real(*a, **k))
+    assert core_checks.base_runtime_count(tmp_path, sha) == 2
+    assert len(calls) == 2

@@ -419,9 +419,10 @@ def _ratchet_and_core(root: Path, allow_dir: Path, allow, base_arg: str | None, 
         if os.environ.get("CI"):
             raise
         return [], None, "skipped"
-    if base and state == "checked" and ratchet.base_knows(root, base.rsplit("@", 1)[1], "core-exempt"):
+    now = sum(1 for e in c.entrypoints.values() if core_exempt(e) == "runtime")
+    # 今の木に runtime の印が無ければ増えようがないため、ベースを読まない
+    if now and base and state == "checked" and ratchet.base_knows(root, base.rsplit("@", 1)[1], "core-exempt"):
         n = core_checks.base_runtime_count(root, base.rsplit("@", 1)[1])
-        now = sum(1 for e in c.entrypoints.values() if core_exempt(e) == "runtime")
         if n is not None and now > n:
             added.append(
                 v("core-exempt", CONTRACTS, "runtime", f"runtime の印がベースブランチより増えた（{n} → {now}）。承認ゲートで人が見る")
