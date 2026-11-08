@@ -26,5 +26,9 @@
     "plugins/ndf/scripts/wait-notify.py",
     "plugins/ndf/scripts/worktree-session.sh",
     "plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "hook のエントリポイント worktree-session.sh が起動する"
+  }
 }

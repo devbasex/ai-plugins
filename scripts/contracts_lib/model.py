@@ -14,6 +14,8 @@ FILE_PLACES = ("worktree", "main", "tmp", "state-dir", "home")
 SETTING_PLACES = ("worktree", "main")
 SCOPES = ("team", "personal")
 SET_BY = ("user", "runtime", "ci", "ndf")
+# 核の対象外の印（#2337 の決定 5）。hook は hook の定義から起動される、runtime はランタイムが直接起動して標準出力を使う
+CORE_EXEMPT = ("hook", "runtime")
 
 
 class ContractError(Exception):
@@ -97,7 +99,7 @@ def _check_entry(f: Path, d: dict) -> None:
             "reads": list,
             "exit": dict,
         },
-        {"callers": list, "external": str},
+        {"callers": list, "external": str, "core": dict},
     )
     if ("callers" in d) == ("external" in d):
         raise ContractError(f"{f.name}: callers と external はどちらか 1 つ")
@@ -113,6 +115,17 @@ def _check_entry(f: Path, d: dict) -> None:
             raise ContractError(f"{f.name}: settings の要素は file と keys を持つ")
     if not d["exit"] or not all(isinstance(v, str) and v.strip() for v in d["exit"].values()):
         raise ContractError(f"{f.name}: exit は終了コード → 意味（unknown なら理由）")
+    if "core" in d:
+        core = d["core"]
+        if set(core) != {"exempt", "evidence"} or core["exempt"] not in CORE_EXEMPT:
+            raise ContractError(f"{f.name}: core は exempt（{'/'.join(CORE_EXEMPT)}）と evidence を持つ")
+        if not isinstance(core["evidence"], str) or not core["evidence"].strip():
+            raise ContractError(f"{f.name}: core.evidence は根拠の文")
+
+
+def core_exempt(entry: dict) -> str | None:
+    """核の対象外の印（hook / runtime）。対象なら None。"""
+    return entry.get("core", {}).get("exempt")
 
 
 def load(root: Path) -> Contracts:
@@ -138,7 +151,9 @@ def _load_entrypoints(root: Path, base: Path, c: Contracts) -> None:
 def _load_files(base: Path, c: Contracts) -> None:
     for f in sorted((base / "files").glob("*.json")):
         d = _read(f)
-        _need(f, d, {"name": str, "pattern": str, "kind": str, "place": str, "skill_readers": list})
+        # writers: 呼ぶ側が渡したパスへ書く関数（`<path>:<関数>`）。書き先を静的に拾えなくても file-dynamic にしない（#2337）
+        _need(f, d, {"name": str, "pattern": str, "kind": str, "place": str, "skill_readers": list}, {"writers": list})
+        _strs(f, d, "writers")
         _one_of(f, d, "kind", FILE_KINDS)
         _one_of(f, d, "place", FILE_PLACES)
         if f.name != d["name"] + ".json":

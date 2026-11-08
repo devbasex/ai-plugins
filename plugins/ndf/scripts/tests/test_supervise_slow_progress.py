@@ -25,7 +25,11 @@ import gh_call  # noqa: E402
 import slow_step as ss  # noqa: E402
 from supervise_lib import engine  # noqa: E402
 
-FAKE_CLAUDE = r"""
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+FAKE_CLAUDE = (
+    r"""
 import json, os, pathlib, sys, time
 argv = sys.argv[1:]
 prompt = sys.stdin.read()
@@ -43,8 +47,13 @@ for _ in range(40 if grow else 15):  # 標準エラーへも作業の行へも�
         with open(path, "a") as f:
             f.write('{"type": "assistant"}\n')
     time.sleep(0.1)
-print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": sid}))
+text = "## 作業の報告\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET
+    + r"""
+print(json.dumps({"result": text, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": sid}))
+"""
+)
 
 DRIVE = r"""
 import json, sys, time

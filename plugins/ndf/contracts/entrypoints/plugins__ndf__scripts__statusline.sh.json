@@ -27,5 +27,9 @@
   "callers": [
     "plugins/ndf/scripts/statusline-switch.sh",
     "plugins/ndf/skills/statusline/SKILL.md"
-  ]
+  ],
+  "core": {
+    "exempt": "runtime",
+    "evidence": "ランタイムの statusLine が直接起動し、標準出力を表示に使う"
+  }
 }

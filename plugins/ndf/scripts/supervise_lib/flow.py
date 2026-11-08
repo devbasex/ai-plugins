@@ -42,7 +42,7 @@ import durable
 from supervise_lib import actuals, admission, limits, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
-from supervise_lib.engine import Engine
+from supervise_lib.engine import Engine, write_phase_result
 from supervise_lib.queue import FINISHED, NO_REPORT
 from supervise_lib.state import RunState
 
@@ -137,6 +137,7 @@ def run_engine(engine: Engine, start: str | None = None) -> str:
     try:
         ref = durable.resolve(prefix, finished=_finished)
         if ref.action == "done":
+            write_phase_result(engine.state.dir, engine.plan, ref.output.get("result"), ref.output.get("reason") or "")  # report の代わり
             if ref.output.get("result") == "関門":
                 engine.state.retell_gates(ref.output.get("gates") or [])
             return ref.output["report"]

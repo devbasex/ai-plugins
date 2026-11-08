@@ -2442,43 +2442,37 @@
       "term": "テスト環境のスロット",
       "context": "ndf-worktree",
       "meaning": "テスト環境へ割り当てる 0〜63 の番号。worktree ごとのポートの計算に使う",
-      "source": "",
-      "pending_source": "issues/issue-2660-requirements.md"
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
     },
     {
       "term": "テスト環境の割り当て",
       "context": "ndf-worktree",
       "meaning": "worktree とテスト環境の環境名・スロット・ポートの対応。worktree レジストリの 1 行で、解放の時刻が空の間は有効である",
-      "source": "",
-      "pending_source": "issues/issue-2660-requirements.md"
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
     },
     {
       "term": "残った割り当て",
       "context": "ndf-worktree",
       "meaning": "解放の時刻が空で、worktree のディレクトリが無く、git worktree lock もされていない割り当て",
-      "source": "",
-      "pending_source": "issues/issue-2660-requirements.md"
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
     },
     {
       "term": "テスト環境の回収",
       "context": "ndf-worktree",
       "meaning": "残った割り当てのテスト環境を compose の定義なしで破棄し、解放の時刻を書くこと",
-      "source": "",
-      "pending_source": "issues/issue-2660-requirements.md"
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
     },
     {
       "term": "見えない位置の割り当て",
       "context": "ndf-worktree",
       "meaning": "worktree のパスがメインディレクトリの下に無く、親のディレクトリが無いか、親のディレクトリがメインディレクトリと別のファイルシステムにある割り当て。回収を打った位置から存在を確かめられないため、残った割り当てとして判定しない",
-      "source": "",
-      "pending_source": "issues/issue-2660-design.md"
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
     },
     {
       "term": "回収の予約",
       "context": "ndf-worktree",
       "meaning": "環境名ごとのロック。回収が環境名の共有を確かめてから解放を終えるまで持ち、割り当ての追加と使い始めが短く取って通る",
-      "source": "",
-      "pending_source": "issues/issue-2660-design.md"
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
     },
     {
       "term": "到達の確認",

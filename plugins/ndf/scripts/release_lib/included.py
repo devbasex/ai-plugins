@@ -61,11 +61,6 @@ def release_range(root: Path, prev: str, to: str) -> list[IncludedPr]:
     return sorted(out.values(), key=lambda p: p.number)
 
 
-def range_prs(root: Path, prev: str, to: str) -> list[int]:
-    """`prev..to` の範囲の PR の番号。"""
-    return [p.number for p in release_range(root, prev, to)]
-
-
 def with_extra(found, extra) -> list[IncludedPr]:
     """範囲の PR と `--prs` の和（同じ番号は 1 つ。範囲にある番号は範囲の経由を保つ）を番号の昇順で。"""
     out = {p.number: p for p in found}

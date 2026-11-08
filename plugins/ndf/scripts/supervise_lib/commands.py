@@ -14,9 +14,10 @@ import formatting
 import mdtable
 import report_fields
 import slow_step as ss
-from step_result import result
+import step_read
+from step_result import EXIT_GATE, EXIT_OK, EXIT_VIOLATION, result
 from supervise_lib.decl import SUPERVISE_DECL, DeclError, decl_roots, read_decl, sync_checks_of
-from supervise_lib.engine import Engine
+from supervise_lib.engine import PHASE_RESULT, Engine
 from supervise_lib.paths import HERE, state_dir_of
 from supervise_lib.plan import expand_parts, normalize_plan
 
@@ -344,8 +345,16 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
     ), None
 
 
+PHASE_CODES = {"ok": EXIT_OK, "gate": EXIT_GATE}
+
+
+def phase_exit_code(state: Path) -> int:
+    """フェーズの結果（`phase-result.json`）の status から `supervise.py run` の終了コードを決める（ok 0・gate 10・stopped 1）。"""
+    return PHASE_CODES.get(step_read.read_result_file(state / PHASE_RESULT, tool="supervise-run")["status"], EXIT_VIOLATION)
+
+
 def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str | None) -> int:
-    """プランを 1 本流し、報告を標準出力へ出す。終了コードは完了か承認ゲートなら 0、それ以外は 3。
+    """プランを 1 本流し、報告を標準出力へ出す。終了コードはフェーズの結果の status から決まる（ok 0・gate 10・stopped 1）。
 
     落ちた後に同じコマンドを打ち直すと、耐久の記録から流れていたステップで続ける。完了か承認ゲートの記録があれば流さずに同じ報告を返す。"""
     import durable
@@ -358,10 +367,10 @@ def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str |
         flow.launch_run(engine, start)  # 実行の鍵はプランの絶対パスから決める（run-<12 字>）
     except durable.DurableError as e:
         print(f"supervise-run: 止まった: {e}", file=sys.stderr)
-        return 3
+        return EXIT_VIOLATION
     try:
         text = engine.run(start)
     finally:
         durable.close()
     print(text)
-    return 0 if "結果: 完了" in text or "結果: 関門" in text else 3
+    return phase_exit_code(state)

@@ -1,0 +1,11 @@
+{
+  "name": "result-file",
+  "pattern": "*-result.json",
+  "kind": "result",
+  "place": "state-dir",
+  "skill_readers": [],
+  "writers": [
+    "plugins/ndf/scripts/lib/run_core.py:_write_result_file",
+    "plugins/ndf/scripts/lib/step_result.py:_write_out"
+  ]
+}

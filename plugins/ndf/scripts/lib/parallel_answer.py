@@ -125,11 +125,6 @@ def owner_next(
     return _restart_lines([lane for lane in lanes if lane not in held]), held
 
 
-def owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None) -> str | None:
-    """答えの後の 1 行（`owner_next` の 1 つ目）。"""
-    return owner_next(main, name, rid, choice, items)[0]
-
-
 def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:
     """`parallel.py answer` の引数の組み合わせの誤り。誤りが無ければ None。"""
     if revise and not note:

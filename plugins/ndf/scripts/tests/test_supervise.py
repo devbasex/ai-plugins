@@ -27,6 +27,9 @@ import claude_accounts as ca  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_step, procedures, queue  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
 from supervise_lib.prompts import PR_SYSTEM  # noqa: E402
 import gh_call  # noqa: E402
 
@@ -43,12 +46,18 @@ if a[:2] == ["issue", "view"]:
 sys.exit(1)
 """
 
-FAKE_CLAUDE = """#!{py}
+FAKE_CLAUDE = (
+    """#!{py}
 import json, os, sys
-open(os.environ["FAKE_CLAUDE_LOG"], "a").write(sys.stdin.read() + "\\n=====\\n")
-print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01,
-                  "num_turns": 1}}))
+prompt = sys.stdin.read()
+open(os.environ["FAKE_CLAUDE_LOG"], "a").write(prompt + "\\n=====\\n")
+text = "## 作業の報告\\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET.replace("{", "{{").replace("}", "}}")
+    + """
+print(json.dumps({{"result": text, "usage": {{}}, "total_cost_usd": 0.01, "num_turns": 1}}))
+"""
+)
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -1100,13 +1109,22 @@ state = os.environ["SEQ_DIR"]
 n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exists(os.path.join(state, "calls")) else 0
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
-sys.stdin.read()
+prompt = sys.stdin.read()
+_saved = os.path.join(state, "rfile")
+if "作業の結果ファイル: " in prompt:
+    open(_saved, "w").write(prompt.split("作業の結果ファイル: ", 1)[1].split()[0])
+elif os.path.exists(_saved):
+    prompt = "作業の結果ファイル: " + open(_saved).read()
+text = str(r["out"].get("result", "")) if isinstance(r.get("out"), dict) else ""
+if r.get("result") == "ok":
+    text += "\\n結果: 完了"
 open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN"), "argv": sys.argv[1:]}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
 sys.exit(r.get("code", 0))
 """
+SEQ_CLAUDE = SEQ_CLAUDE.replace('print(json.dumps(r["out"]))', worker_fake.SNIPPET + '\nprint(json.dumps(r["out"]))')
 LIMIT = {"out": {"result": "You've hit your session limit · resets 3pm (UTC)", "is_error": True, "api_error_status": 429}, "code": 1}
 LIMIT_NO_TIME = {"out": {"result": "API Error: 429", "is_error": True}, "stderr": "HTTP/1.1 429 Too Many Requests\n", "code": 1}
 OK = {"out": {"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}}
@@ -1909,8 +1927,11 @@ def test_work_prompt_has_progress_instructions(tmp_path, fakes):
 
 
 def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
-    def w(t):
-        return json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+    """conductor へ知らせるかは state だけで決め、文の語（「止まった」「落ちた」）は読まない（#2337 の I12）。"""
+
+    def w(t, state=None):
+        d = {"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t, **({"state": state} if state else {})}
+        return json.dumps(d, ensure_ascii=False)
 
     fake_worker(
         tmp_path,
@@ -1918,9 +1939,9 @@ def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
         [
             w("課題の本文を読み終えた"),
             "形の違う行",
-            w("テストが 3 件落ちた"),
-            w("テストが 4 件落ちた"),
-            w("承認ゲートに当たった: リリース"),
+            w("止まった・落ちたと書いても working なら知らせない"),
+            w("テストが 4 件落ちた", "failing"),
+            w("リリース", "gate"),
             w("実装を 1 つ終えた"),
         ],
         sleep=0.5,
@@ -1979,7 +2000,7 @@ def test_queue_notifies_attention(tmp_path):
     prog = tmp_path / "p-state" / "progress.jsonl"
     prog.parent.mkdir()
     prog.write_text(json.dumps({"kind": "attention", "reason": "前の実行"}) + "\n")
-    line = json.dumps({"kind": "worker", "at": "x", "text": "進めない: 権限が無い"}, ensure_ascii=False)
+    line = json.dumps({"kind": "worker", "at": "x", "state": "stopped", "text": "権限が無い"}, ensure_ascii=False)
     f.write_text(
         json.dumps(
             {
@@ -2732,9 +2753,16 @@ def test_work_report_not_done_fails_the_step(tmp_path, seq, result):
     assert "next" not in s.state.results
 
 
-def test_work_without_report_keeps_cli_result(tmp_path, seq):
-    """報告の無い応答（judge・fix の短い応答）は、今までどおり CLI の終わり方で決める。"""
+def test_work_without_a_result_file_fails_even_if_the_cli_ended_well(tmp_path, seq):
+    """作業の結果ファイルが無ければ、CLI が正常に終わってもステップは失敗する（#2337 の I10）。"""
     seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}})
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
+    assert s.state.results["impl"]["exit"] == 1 and "結果ファイルが無い" in s.state.results["impl"]["text"]
+
+
+def test_work_succeeds_on_an_ok_result_file_without_the_report_words(tmp_path, seq):
+    """報告の文に「結果: 完了」が無くても、作業の結果ファイルが ok なら成功する（#2337 の I10）。"""
+    seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}, "result": "ok"})
     s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
     assert s.state.results["impl"]["exit"] == 0
 
@@ -2823,14 +2851,22 @@ def test_full_without_report_resumes_up_to_three_times(tmp_path, seq, replies, r
     assert _resumes(calls) == resumes and s.state.results["design"]["exit"] == code
 
 
-def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
-    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
+def _gone(pid: int, timeout: float) -> bool:
+    """pid が終わる（ゾンビを含む）まで最大 timeout 秒待つ。"""
     import procs
 
+    deadline = time.monotonic() + timeout
+    while procs.pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return not procs.pid_alive(pid)
+
+
+def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
+    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
     pidfile = tmp_path / "pid"
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; exit 0", shell=True, timeout=1)
-    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+    assert _gone(int(pidfile.read_text()), timeout=3)
 
 
 def _pidfd_einval(procs_, timeout=None):
@@ -2846,7 +2882,7 @@ def test_run_ticking_timeout_stays_a_timeout_when_waiting_raises_einval(tmp_path
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; wait", shell=True, timeout=1)
     monkeypatch.undo()
-    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+    assert _gone(int(pidfile.read_text()), timeout=3)
 
 
 def test_run_ticking_stall_cut_keeps_its_own_error_when_waiting_raises_einval(monkeypatch):

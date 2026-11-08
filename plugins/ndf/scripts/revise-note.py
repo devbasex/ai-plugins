@@ -17,6 +17,7 @@ import deps  # noqa: E402
 deps.require("md")
 import design_pr_merge  # noqa: E402
 import revise_note  # noqa: E402
+import run_core  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "revise-note"
@@ -51,4 +52,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    main()
+    run_core.main("scripts/revise-note.py", main)

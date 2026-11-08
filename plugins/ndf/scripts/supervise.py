@@ -114,7 +114,7 @@ def build_parser(sub) -> None:
     r = sub.add_parser(
         "run",
         help="プランを 1 本流す",
-        description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す（終了コード: 完了か承認ゲート = 0 / それ以外 = 3）",
+        description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す（終了コードはフェーズの結果 phase-result.json の status から: 完了 = 0 / 承認ゲート = 10 / 止まった = 1）",
         epilog="状態は --state-dir（省けば <プラン>-state/）に progress.jsonl・報告・ステップの出力として残る。"
         "途中で止まったら --from <ステップの id> で続きから流す",
     )

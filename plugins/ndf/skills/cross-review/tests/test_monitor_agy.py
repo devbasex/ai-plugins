@@ -45,7 +45,7 @@ def test_the_monitor_rejects_the_old_name() -> None:
 
 def test_the_new_name_has_a_stall_default(monitor_mod) -> None:
     assert "agy" in monitor_mod.DEFAULT_STALL_AGENT_BUILTIN
-    assert monitor_mod._agent_stall_default("agy") == 480
+    assert monitor_mod.limits.stall_timeout(monitor_mod._agent_runtime("agy")) == 480
 
 
 # ---------- 受け入れ条件 20（無くなった早期エラーの判定） ----------
