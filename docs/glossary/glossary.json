@@ -6194,6 +6194,42 @@
       "meaning": "設計の結果の「実装する」の行の触るファイルのセルが、定めた書式から外れていること。設計の結果のステージが止まる",
       "source": "",
       "pending_source": "issues/issue-2453-design.md"
+    },
+    {
+      "term": "承認資料の一覧",
+      "context": "ndf-workflow",
+      "meaning": "設計承認ゲートで示しうる資料を、資料名・判断する問い・水準・該当の判定とともに並べた正本の表",
+      "pending_source": "issues/issue-2721-requirements.md"
+    },
+    {
+      "term": "画面モック",
+      "context": "ndf-workflow",
+      "meaning": "画面を変える変更で、承認する人が実際に操作して挙動を確かめられる試作の画面。見た目だけを示すデザインイメージとは別の資料",
+      "pending_source": "issues/issue-2721-requirements.md"
+    },
+    {
+      "term": "デザインイメージ",
+      "context": "ndf-workflow",
+      "meaning": "画面の見た目を示す画像か、見た目の値（色・寸法・字面）の記述",
+      "pending_source": "issues/issue-2721-requirements.md"
+    },
+    {
+      "term": "技術スタックの一覧",
+      "context": "ndf-workflow",
+      "meaning": "変更が使うインフラ・外部サービス・ライブラリと、それぞれを採った理由（新規のものは比べた候補、自作するものは既存のライブラリを採らなかった理由）を並べた表",
+      "pending_source": "issues/issue-2721-requirements.md"
+    },
+    {
+      "term": "周辺システムとの関係",
+      "context": "ndf-workflow",
+      "meaning": "変更が接する既存の機能と外部の系（セキュリティ・データ分析・ログ出力とアラートを含む）と、その接し方",
+      "pending_source": "issues/issue-2721-requirements.md"
+    },
+    {
+      "term": "リンク集",
+      "context": "ndf-workflow",
+      "meaning": "承認の提示の本体の形。資料 1 件につき 1 行で、資料名・要旨・開くリンクを並べる",
+      "pending_source": "issues/issue-2721-requirements.md"
     }
   ]
 }
