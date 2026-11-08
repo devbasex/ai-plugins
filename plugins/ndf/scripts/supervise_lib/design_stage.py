@@ -126,6 +126,22 @@ def _parsed(docs: list[tuple[str, str]], problems: list[dr.CellProblem]) -> list
     return [row for rs in found for row in rs] if found else None
 
 
+def _rows_for_issue(root: str, base: str, n: int, budget: Budget, res: dr.DesignResults, problems: list[dr.CellProblem]):
+    """課題 n の設計 PR と表の行を返す（PR が無ければ `(None, None)`）。PR が変えた文書に表が無ければ、
+    課題と番号でつながるベースブランチの設計文書から表を探す（#2453 の決定 8）。`res.base_docs` を更新する。"""
+    pr = merged_design_pr(root, base, n, budget)
+    if pr is None:
+        return None, None
+    changed, base_docs = changed_design_docs(root, base, pr, budget)
+    res.base_docs = base_docs
+    rows = _parsed(changed, problems)
+    if rows is None:
+        seen = {f for f, _ in changed}
+        linked = [f for f in connected_docs(base_docs, [n]) if f not in seen]
+        rows = _parsed([(f, show_base(root, base, f, budget)) for f in linked], problems)
+    return pr, rows
+
+
 def read_results(root: str, base: str, design: list[int], budget: Budget | None = None) -> dr.DesignResults:
     """設計の課題ごとに設計の結果を読んで合わせる。PR が無い・表が無い課題は `unread` へ入れる。
     PR が変えた文書に表が無ければ、課題と番号でつながるベースブランチの設計文書から表を探す（#2453 の決定 8）。
@@ -136,16 +152,7 @@ def read_results(root: str, base: str, design: list[int], budget: Budget | None 
     problems: list[dr.CellProblem] = []
     for i, n in enumerate(design):
         try:
-            pr = merged_design_pr(root, base, n, budget)
-            rows = None
-            if pr is not None:
-                changed, base_docs = changed_design_docs(root, base, pr, budget)
-                res.base_docs = base_docs
-                rows = _parsed(changed, problems)
-                if rows is None:
-                    seen = {f for f, _ in changed}
-                    linked = [f for f in connected_docs(base_docs, [n]) if f not in seen]
-                    rows = _parsed([(f, show_base(root, base, f, budget)) for f in linked], problems)
+            pr, rows = _rows_for_issue(root, base, n, budget, res, problems)
         except ReadFailed as e:
             raise ReadFailed(e.command, e.tail, n, list(design[i + 1 :])) from e
         if pr is not None:
