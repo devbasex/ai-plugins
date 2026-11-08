@@ -167,7 +167,7 @@ graph TD
 - **開始のステップが違えば別の実行の回になる。** 実行の鍵（`prefix_of`）は `plan-<パス鍵>-<中身鍵>-<開始>` で、続けた回は新しい耐久ワークフローとして
   `run --from` と同じく前の実行の結果を読む（[ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md)）
 - **`--from` があれば、前の起動の途中を続けない。** 前の起動のキューの耐久ワークフローが途中で残っていても子ごと止め、新しい実行の回で
-  指定のステップから流す（#2325）。`--from` が無ければ前の起動を続ける
+  指定のステップから流す。`--from` が無ければ前の起動を続ける
 - **同じ done のキューは同時に 1 本だけ流れる。** `queue` は持ち主の鍵 `supervise.queue:done=<done のリポジトリの根からの相対パス>` を取り、
   生きた持ち主がいれば `stopped`・終了コード 3 で止まる（[ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md) の「持ち主の記録」）
 - **続ける対象（`rerun`）は、結果 `関門` の記録があっても新しい実行の回で流す。** 承認を記録した後に、過去の `関門` の結果を返し続けないためである。
