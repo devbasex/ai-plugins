@@ -111,16 +111,11 @@ def _snapshot_step(plugin: str, v: str, after_notes: str) -> dict:
 
 
 def _cleanup_step(v: str, prs: str, repo: str | None) -> dict:
-    return {
-        "id": "cleanup",
-        "type": "run",
-        "stage": "後片付け",
-        "cwd": repo,
-        "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
-        f'--jq ".[] | select(.headRefName | startswith(\\"release/v{v}\\")) | .number") {prs}\'',
-        "on_fail": "judge",
-        "next": "end",
-    }
+    cmd = (
+        f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
+        f'--jq ".[] | select(.headRefName | startswith(\\"release/v{v}\\")) | .number") {prs}\''
+    )
+    return {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo, "cmd": cmd, "on_fail": "judge", "next": "end"}
 
 
 def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) -> list[dict]:
@@ -195,6 +190,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
         f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
         f'(git diff --cached --quiet || git commit -q -m "Release: {plugin} v{v}")\''
     )
+    others = {"id": "bump-others", "type": "run", "stage": "デプロイ", "cmd": bump_others_cmd(a, plugin, material_path(repo, approval))}
     steps = [
         {
             "id": "bump",
@@ -205,20 +201,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
             "on_fail": "judge",
             "next": "changelog" if dev else "bump-others",
         },
-        *(
-            []
-            if dev
-            else [
-                {
-                    "id": "bump-others",
-                    "type": "run",
-                    "stage": "デプロイ",
-                    "cmd": bump_others_cmd(a, plugin, material_path(repo, approval)),
-                    "on_fail": "judge",
-                    "next": "changelog",
-                }
-            ]
-        ),
+        *([] if dev else [{**others, "on_fail": "judge", "next": "changelog"}]),
         {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}", "on_fail": "judge", "next": "notes"},
         {"id": "notes", "type": "run", "stage": "デプロイ", "cmd": notes, "on_fail": "judge", "next": after_notes if dev else "snapshot"},
     ]
@@ -282,6 +265,29 @@ def judge_record_step() -> dict:
     }
 
 
+# 起動指示に足す、利用者の設定ディレクトリで導入しないことの要点。正本は release-verification の Skill の節（#2401 の決定 7）
+NO_USER_INSTALL = (
+    "導入の確かめは verify-install だけで行い、利用者の設定ディレクトリ（CLAUDE_CONFIG_DIR か ~/.claude、CODEX_HOME か ~/.codex）で"
+    "導入の操作（claude plugin install / update / marketplace add / update、codex plugin add / marketplace add）を打たない。"
+    "隔離のつもりで環境変数を付けて手で打つことも含む。利用者の設定ディレクトリへの導入が要る条件は、導入せずに記録の表のその行を"
+    "「保留（理由: 利用者の設定ディレクトリへの導入が要る）」とし、作業の報告を「判断が要る」で返す"
+    "（/ndf:release-verification の「利用者の設定ディレクトリで導入しない」）。"
+)
+
+
+def release_verify_steps(sprint: str, refs: str, record_pr: str) -> list[dict]:
+    """控えを取る（config-save）→ リリース後テスト → 控えと比べる（config-check）。リリース後テストが失敗したら config-check-on-fail で
+    比べ、変わっていなくても止まる。3 つの run は on_fail を持たず 0 以外で止まる（#2401 の決定 1・2）。"""
+    run = {"type": "run", "timeout": 120}  # 控えは {state_dir}/user-config-before.json（名前はスクリプトが決める）
+    check = {**run, "cmd": f"{VERIFY_PY} user-config-check --dir {{state_dir}}"}
+    return [
+        {"id": "config-save", **run, "cmd": f"{VERIFY_PY} user-config-save --dir {{state_dir}}", "next": "release-verify"},
+        release_verify_step(sprint, refs, record_pr),
+        {"id": "config-check", **check, "next": "retro"},
+        {"id": "config-check-on-fail", **check, "on_exit": {"0": "stop"}},
+    ]
+
+
 def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
     """リリース後テスト（/ndf:release-verification）。記録をリリース記録の PR へ置き、振り返りの後のまとめの close がそれを読む（#1683）。"""
     return {
@@ -296,8 +302,9 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
         "マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。"
         "課題は閉じない（次の close が閉じる）。"
         "進捗記録（progress-record.sh・projects-sync.sh）は打たない（このステップが ok で終わった後にプランが打つ）。"
-        "番号が 0 なら本番へ出ていないため、何もせずに終える。",
-        "next": "retro",
+        "番号が 0 なら本番へ出ていないため、何もせずに終える。" + NO_USER_INSTALL,
+        "on_fail": "config-check-on-fail",
+        "next": "config-check",
     }
 
 
@@ -362,13 +369,8 @@ def plan_release_package_plugin(a) -> dict:
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
     sync = bool(getattr(a, "sync_checks", None))
     after_notes = "sync" if sync else "release"
-    run_ids = (
-        ["bump", *([] if dev else ["bump-others"]), "changelog", "notes"]
-        + ([] if dev else ["snapshot"])
-        + (["sync"] if sync else [])
-        + ["release", "verify"]
-        + (["facts", "explain", "others"] if dev else [])
-    )
+    run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes", *([] if dev else ["snapshot"]), *(["sync"] if sync else [])]
+    run_ids += ["release", "verify", *(["facts", "explain", "others"] if dev else [])]
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
