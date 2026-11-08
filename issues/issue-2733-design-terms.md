@@ -45,7 +45,7 @@ PR 2723 のレビューか設計承認ゲートで利用者が差し戻した語
 
 **`glossary.py check` は、日本語の廃止語を前後の文字を見ずに部分一致で拾う**（`glossary.py:357` の `word_pattern`）。生きた語の内側の一致だけは読み飛ばす。ラインを廃止語にすると、用語集に無い複合語（ガイドライン・ステータスライン・タイムライン・オンライン など）が設計の文書で「レーン と書く」と出る。
 
-**カタカナだけの廃止語は、前後がカタカナ（長音符 `ー` を含む）のときに一致させない。** `word_pattern` に、ASCII の語と同じ形で前後の否定の先読み・後読みを足す。漢字の廃止語（周回・統括役）は今のまま部分一致で拾う。今の廃止語のうちカタカナだけの語は、`チェイン`・`ミッション`・`ミッションブランチ` の 3 つで、同じ規則に入る（2026-11-08 に `glossary.json` の `deprecated` から数えた）。`ミッションブランチ` は長い語から先に当てるため、規則を変えても拾われる。3 語とも、複合語の内側の一致を拾う必要は無い。
+**カタカナだけの廃止語は、前後がカタカナ（長音符 `ー` を含む）のときに一致させない。** `word_pattern` に、ASCII の語と同じ形で前後の否定の先読み・後読みを足す。漢字の廃止語（周回・統括役）は今のまま部分一致で拾う。2026-11-08 に `glossary.json` の `deprecated` から数えると、今の廃止語のうちカタカナだけの語は `チェイン`・`ミッション`・`ミッションブランチ` の 3 つである。3 語とも同じ規則に入る。`ミッションブランチ` は長い語から先に当てるため、規則を変えても拾われる。3 語とも、複合語の内側の一致を拾う必要は無い。
 
 ## 置き換えの対象と量
 
@@ -53,7 +53,11 @@ PR 2723 のレビューか設計承認ゲートで利用者が差し戻した語
 
 ### 統括役（187 行）
 
-コマンド: `grep -rnI 統括役 plugins docs/specifications docs/glossary docs/glossary.md | wc -l`
+数えたコマンド:
+
+```bash
+grep -rnI 統括役 plugins docs/specifications docs/glossary docs/glossary.md | wc -l
+```
 
 | 区分 | 行 | 置き換え |
 | --- | --- | --- |
@@ -71,7 +75,11 @@ PR 2723 のレビューか設計承認ゲートで利用者が差し戻した語
 
 ### ランナー（322 行）
 
-コマンド: `grep -rnI ランナー plugins docs/specifications docs/glossary docs/glossary.md | wc -l`
+数えたコマンド:
+
+```bash
+grep -rnI ランナー plugins docs/specifications docs/glossary docs/glossary.md | wc -l
+```
 
 | 意味 | 主な置き場 | 行の目安 | 置き換え |
 | --- | --- | --- | --- |
@@ -84,7 +92,11 @@ PR 2723 のレビューか設計承認ゲートで利用者が差し戻した語
 
 ### 周回（651 行）
 
-コマンド: `grep -rnI 周回 plugins docs/specifications docs/glossary docs/glossary.md | wc -l`
+数えたコマンド:
+
+```bash
+grep -rnI 周回 plugins docs/specifications docs/glossary docs/glossary.md | wc -l
+```
 
 | 区分 | 行 | 置き換え |
 | --- | --- | --- |
@@ -128,7 +140,11 @@ PR 2723 のレビューか設計承認ゲートで利用者が差し戻した語
 
 ## supervisor の定義（受け入れ条件 9a）
 
-**定義は語の決定 7 の 1 文にそろえ、`supervise.py` を「supervisor の代わり」と書いた箇所を主と代行の向きへ直す。** 2026-11-08 に `grep -rnIE 'supervise\.py[^。]{0,40}(代わり|代行|代替)|(代わり|代行|代替)[^。]{0,30}supervise\.py|supervisor の代わり' plugins docs/specifications docs/glossary*` で探し、向きが逆の箇所は次の 2 行だった（`waiting.md:105` の「until ループの代わりに」は別の意味で、直さない）。
+**定義は語の決定 7 の 1 文にそろえ、`supervise.py` を「supervisor の代わり」と書いた箇所を主と代行の向きへ直す。** 2026-11-08 に次のコマンドで探し、向きが逆の箇所は次の 2 行だった。`waiting.md:105` の「until ループの代わりに」は別の意味で、直さない。
+
+```bash
+grep -rnIE 'supervise\.py[^。]{0,40}(代わり|代行|代替)|(代わり|代行|代替)[^。]{0,30}supervise\.py|supervisor の代わり' plugins docs/specifications docs/glossary*
+```
 
 | 置き場 | 今 | 直し |
 | --- | --- | --- |
