@@ -130,5 +130,8 @@
 | [ndf-loop-human-answer-delivery.md](ndf-loop-human-answer-delivery.md) | 承認ゲート 1 の人の答え（出し直しの指摘・承認・前のループの待ち）を読んで動く側へ届ける仕組みの理由と境界（全ループの記録から指摘を集めて設計のプランへ渡す、指摘への対応の表の突き合わせと自動の出し直しは 1 回まで、取り込みのコミットだけなら承認を引き継ぐ、当たらなかった答えは問いにする）、出し直しの指摘の入力と `revise-note.py check` と問いの一覧の契約。手順は `development-workflow` の `references/loop.md` が正 |
 | [ndf-release-via-cd.md](ndf-release-via-cd.md) | 環境へ届ける手順を CD に任せ、NDF はマージ・リリース承認ゲート・CD の結果の確かめを受け持つ理由と境界（経路は `delivery` の宣言だけで決める、CD の案内は読むだけで状態を持たない、手動反映の理由と公開の担い手の宣言、公開の処理を CD と手動の経路で共用する）、`delivery` の任意の欄と `cd-guidance` / `cd-result` / `publish` / `record --cd-result` の契約、ai-plugins の CD（`.github/workflows/release-cd.yml`）の起点と権限。手順は `release` の SKILL.md と `references/cd-setup.md` が正 |
 | [ndf-repo-assumptions-check.md](ndf-repo-assumptions-check.md) | リポジトリ前提の検査の理由と境界（語とファイルの組ごとに当たりの数で宣言し、超えたら 1・減ったら 2 で落とす）、検査のコマンドの引数と終了コード・例外リストの項目の形・CI のジョブ `skill-repo-assumptions-check`・宣言を読む 4 か所の契約、既知の違反の行き先。書き方は `AUTHORING.md` の「対象リポジトリを仮定しない」が正 |
+| [ndf-relay-lane-parent-session-env.md](ndf-relay-lane-parent-session-env.md) | 中継の専用サーバーが親の claude のセッションの環境を持っていても、起動の印を持つ relay.py run が判定の前にその環境を外し、アカウントを選んでレーンを起動すること（外す変数の 3 区分・役割の出所の確かめ方・判定の順序） |
+| [ndf-lease-stage-and-concurrent-runs.md](ndf-lease-stage-and-concurrent-runs.md) | 実行の持ち主の段: 持ち主の鍵を宣言した 6 つの入口が鍵を取り・返し、生きた持ち主がいれば止まること（結果 JSON の lease・断りの案内・単位 run と session）、キューの再開で --from が前の途中に勝つこと。持ち主の記録の形と片付けは ndf-run-state-owner-and-sweep.md が正 |
+| [ndf-limits-declaration-and-retry-policy.md](ndf-limits-declaration-and-retry-policy.md) | 上限の宣言（contracts/limits.json）と方針の名前での引き方、待ちの部品の同じ原因の上限と最後の照会、判定役が返すステップの打ち直しの上限、構造チェック limit-literal / sleep-loop。値の一覧は宣言と契約の一覧が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
