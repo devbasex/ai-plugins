@@ -440,9 +440,10 @@ def _lane_env() -> dict[str, str]:
     """起動の `-e` で付いた役割と計画（tmux のセッションの環境にある値）。環境に役割の値があるときだけ tmux に問う。
     読めないときは空（役割を持たないレーンとして起動する。#2656 の I3）。"""
     name = os.environ.get("NDF_RELAY_NAME")
-    if not name or not any(k in os.environ for k in cl.LANE_ENV):
+    seen = {"NDF_RELAY_ROLE": os.environ.get("NDF_RELAY_ROLE"), "NDF_RELAY_PLAN": os.environ.get("NDF_RELAY_PLAN")}  # cl.LANE_ENV
+    if not name:
         return {}
-    got = {k: tmux.session_value(name, k) for k in cl.LANE_ENV if k in os.environ}
+    got = {k: tmux.session_value(name, k) for k, v in seen.items() if v is not None}
     return {k: v for k, v in got.items() if v is not None}
 
 
