@@ -96,7 +96,8 @@ from release_lib import others, publish, record, replaced  # noqa: E402
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged_sections, require_untagged, tagged  # noqa: E402
+from release_lib.names import drop_untagged, release_tag, require_untagged  # noqa: E402
+from release_lib.included import outside_items, outside_note  # noqa: E402
 from step_result import (
     EXIT_CD_FAILED,
     EXIT_GATE,
@@ -266,11 +267,6 @@ def cmd_bump(a):
     )
 
 
-def release_tag(plugin, version) -> str:
-    """基底の版のリリースタグ（version が空ならタグの接頭辞）。"""
-    return f"{plugin}--v{base_of(version)}"
-
-
 def release_tag_before(root, plugin, current=None):
     """<plugin>--v で始まり接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
     head = f"{plugin}--v"
@@ -391,13 +387,7 @@ def _update_changelog(root, a, items, since=None) -> list[dict]:
     lines = cl.read_text(encoding="utf-8").split("\n")
     a.plugin = plugin_of(root, a)
     require_untagged(root, release_tag(a.plugin, a.version), a.version)
-    removed = []
-    if "-" not in a.version and since:
-        prev, has_tag = since.removeprefix(release_tag(a.plugin, "")), lambda v: tagged(root, release_tag(a.plugin, v))
-        removed = [
-            {"kind": "section", "name": "CHANGELOG.md", "result": "removed", "heading": h}
-            for h in drop_untagged_sections(lines, a.plugin, prev, a.version, has_tag)
-        ]
+    removed = drop_untagged(root, lines, a.plugin, since, a.version)
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
         section = _add_changelog_section(lines, head, items)
@@ -1041,14 +1031,6 @@ def unmerged_items(skipped):
 
 def unmerged_note(skipped):
     return f"（マージされていない {' '.join(f'#{n}' for n in skipped)} は載せない）" if skipped else ""
-
-
-def outside_items(outside):
-    return [{"kind": "pr", "name": f"#{n}", "result": "skipped", "reason": "範囲の終点に入っていない"} for n in outside]
-
-
-def outside_note(outside):
-    return f"（範囲の終点に入っていない {' '.join(f'#{n}' for n in outside)} は載せない）" if outside else ""
 
 
 def notes_prs(root, a):

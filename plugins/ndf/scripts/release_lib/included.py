@@ -186,6 +186,16 @@ def drop_outside(root: Path, prs: list[IncludedPr], data: dict, to: str, extra_o
     return [p for p in prs if p.number not in gone]
 
 
+def outside_items(outside) -> list[dict]:
+    """drop_outside が外した番号の結果の項目。"""
+    return [{"kind": "pr", "name": f"#{n}", "result": "skipped", "reason": "範囲の終点に入っていない"} for n in outside]
+
+
+def outside_note(outside) -> str:
+    """drop_outside が外した番号の要約の注記（無ければ空）。"""
+    return f"（範囲の終点に入っていない {' '.join(f'#{n}' for n in outside)} は載せない）" if outside else ""
+
+
 def as_included(prs) -> list[IncludedPr]:
     """番号の列か IncludedPr の列を IncludedPr の列にする（`--prs` だけを渡す古い呼び方も受ける）。"""
     return [p if isinstance(p, IncludedPr) else IncludedPr(int(p)) for p in prs]

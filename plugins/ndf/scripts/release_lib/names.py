@@ -33,6 +33,11 @@ def changelog_span(lines, plugin, version):
     return (None, None) if at is None else (at, next_h2(lines, at))
 
 
+def release_tag(plugin, version) -> str:
+    """基底の版のリリースタグ（version が空ならタグの接頭辞）。"""
+    return f"{plugin}--v{base_of(version)}"
+
+
 def tagged(root, tag) -> bool:
     """手元にタグ tag があるか（呼び手が先にタグを fetch する）。"""
     return proc.git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0
@@ -66,6 +71,16 @@ def drop_untagged_sections(lines, plugin, prev, version, has_tag) -> list[str]:
             gone.append(lines[at])
             del lines[at : next_h2(lines, at)]
     return gone[::-1]
+
+
+def drop_untagged(root, lines, plugin, since, version) -> list[dict]:
+    """正式版 version なら、前のリリースタグ since より新しくタグの無い版の節を lines から消し、消した節の結果の項目を返す
+    （drop_untagged_sections。開発版と since の無いときは消さない。#2555 の I4）。"""
+    if "-" in version or not since:
+        return []
+    prev = since.removeprefix(release_tag(plugin, ""))
+    gone = drop_untagged_sections(lines, plugin, prev, version, lambda v: tagged(root, release_tag(plugin, v)))
+    return [{"kind": "section", "name": "CHANGELOG.md", "result": "removed", "heading": h} for h in gone]
 
 
 def plugin_of(root, a) -> str:
