@@ -5460,13 +5460,13 @@
     {
       "term": "レーン数の上限",
       "context": "ndf-workflow",
-      "meaning": "同時に動かせる名前つきのラッパーの数（NDF_RELAY_MAX_NAMED、既定 3）。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
+      "meaning": "同時に動かせる名前つきのラッパーの数。値はマシンの設定（$XDG_STATE_HOME/ndf/relay/hub/limits.json）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まる。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
       "pending_source": "issues/issue-2733-requirements.md"
     },
     {
       "term": "計画の置き場",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のファイルを置くメインディレクトリの .ndf/parallel/<計画名>/。計画を作ったリポジトリに 1 つある",
+      "meaning": "並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。依頼・答えの記録のキーと計画の所在の一覧は、このメインディレクトリの絶対パスで持つ",
       "pending_source": "issues/issue-2733-design.md"
     },
     {
