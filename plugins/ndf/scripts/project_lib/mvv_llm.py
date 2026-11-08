@@ -90,12 +90,9 @@ def latest_vet(key: str) -> dict | None:
     return max(enumerate(rows), key=lambda x: (str(x[1].get("at") or ""), x[0]))[1] if rows else None
 
 
-def vet_body(root: Path, body: str, kind: str, reuse: bool = False) -> tuple[dict, dict]:
-    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。
-
-    `reuse` が真なら、同じ照合の入力の最新の判定が「従う」のとき LLM を呼ばずにその判定を使う（#2614）。"""
-    mvv = pm.load_mvv(root)
-    rec = {
+def _base_record(root: Path, body: str, kind: str, mvv) -> dict:
+    """照合の記録の基礎。判定は「読めない」から始める。"""
+    return {
         "at": clock.now_iso("utc"),
         "repo": pm.mvv_repo_key(root),
         "kind": kind,
@@ -105,33 +102,55 @@ def vet_body(root: Path, body: str, kind: str, reuse: bool = False) -> tuple[dic
         "verdict": "unreadable",
         "locations": [],
     }
-    usage: dict = {}
+
+
+def _machine_prechecks(rec: dict, kind: str, body: str, mvv) -> bool:
+    """候補・改訂の形の検査と改訂の前提の検査を記録へ書く。LLM に回さず決まったら真。"""
     if kind in ("candidate", "revision"):
         probs = pm.shape_problems(body)
         if probs:
             rec.update(verdict="suspect", locations=probs, machine=True)
-    if kind == "revision" and not mvv.approved and rec["verdict"] == "unreadable":
+            return True
+    if kind == "revision" and not mvv.approved:
         rec["locations"] = [
             {"item": "project_mvv", "reason": f"改訂には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）"}
         ]
-    elif rec["verdict"] == "unreadable":
+        return True
+    return False
+
+
+def _resolve_verdict(root: Path, prompt: str, key: str | None, reuse: bool) -> tuple[dict, dict]:
+    """(記録へ足す項目, 使用量)。再利用が成り立てば LLM を呼ばない。LLM の答えが読めなければ判定を足さない。"""
+    prev = latest_vet(key) if reuse and key else None
+    if prev is not None and prev.get("verdict") == "follow":
+        # 再利用の行は費用と秒を持たない。元の判定は常に LLM の行の時刻を指す（I3）
+        locs = [x for x in prev.get("locations") or [] if isinstance(x, dict)]
+        return {"verdict": "follow", "locations": locs, "input_sha256": key, "reused_from": prev.get("reused_from") or prev.get("at")}, {}
+    data, raw, usage = call_llm_json(VET_SYSTEM, prompt, root, "mvv-vet")
+    fields: dict = {}
+    if data is None or data.get("verdict") not in VET_VERDICTS:
+        fields["raw"] = raw
+    else:
+        fields["verdict"] = data["verdict"]
+        fields["locations"] = [x for x in data.get("locations") or [] if isinstance(x, dict)]
+    if key:
+        fields["input_sha256"] = key
+    fields.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
+    return fields, usage
+
+
+def vet_body(root: Path, body: str, kind: str, reuse: bool = False) -> tuple[dict, dict]:
+    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。
+
+    `reuse` が真なら、同じ照合の入力の最新の判定が「従う」のとき LLM を呼ばずにその判定を使う（#2614）。"""
+    mvv = pm.load_mvv(root)
+    rec = _base_record(root, body, kind, mvv)
+    usage: dict = {}
+    if not _machine_prechecks(rec, kind, body, mvv):
         prompt = vet_prompt(kind, body, mvv)
         key = input_sha256(prompt) if principles_readable() else None
-        prev = latest_vet(key) if reuse and key else None
-        if prev is not None and prev.get("verdict") == "follow":
-            # 再利用の行は費用と秒を持たない。元の判定は常に LLM の行の時刻を指す（I3）
-            locs = [x for x in prev.get("locations") or [] if isinstance(x, dict)]
-            rec.update(verdict="follow", locations=locs, input_sha256=key, reused_from=prev.get("reused_from") or prev.get("at"))
-        else:
-            data, raw, usage = call_llm_json(VET_SYSTEM, prompt, root, "mvv-vet")
-            if data is None or data.get("verdict") not in VET_VERDICTS:
-                rec.update(raw=raw)
-            else:
-                locs = [x for x in data.get("locations") or [] if isinstance(x, dict)]
-                rec.update(verdict=data["verdict"], locations=locs)
-            if key:
-                rec.update(input_sha256=key)
-            rec.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
+        fields, usage = _resolve_verdict(root, prompt, key, reuse)
+        rec.update(fields)
     pms.append_jsonl(pm.vet_log_path(), rec)
     return rec, usage
 
