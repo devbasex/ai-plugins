@@ -414,7 +414,7 @@ sequenceDiagram
 | `ui_mock` の形 | `project-decl.py check` が `kind` の 4 値の外と空の `location` を拒み、欄の無い宣言を通す | 欄を必須にすると、今の宣言が落ちる |
 | スプリントの設計のプラン | `--mode standard` で組んだプランで `survey-recheck` の次が `materials-check` で、`gate` の入力に `materials-links` がある。`--mode light` で組んだプランに `materials-check` と `materials-links` が無い。`--mode legacy-refactor` で組んだプランに `materials-links` があり `materials-check` が無い。`--mode standard` と `--mode legacy-refactor` で組んだプランで `rebuild` の次が `materials-secret` で、`materials-secret` が `pr` より前にあり、落ちたときの行き先が `pr` でない。`--mode light` で組んだプランに `materials-secret` が無い | 検査のステップを足さない・モードを見ずに足す・秘密の判定を `pr` の後に置くと落ちる |
 | `ui_mock` の秘密の除去 | 既存の宣言の `ui_mock.location` が資格情報入りの URL のとき、`project-decl.py write` の後の宣言で `ui_mock` が `{"unknown": "秘密の形"}` になり、結果の行に `{"kind": "secret", "key": "ui_mock"}` があり、表示に `ui_mock: 秘密の形の値を捨てて不明にした` が出て、出力のどこにも元の値が出ない | `ui_mock` を巡回の外に置いたままにする・知らせる行を出さない・行に値を入れると落ちる |
-| `ui_mock` の秘密の検査 | 利用者が手で書いた宣言の `ui_mock.location` が資格情報入りの URL のとき、`design-materials.py check` が `ui_mock_secret` を挙げて終了コード 1 で終わり、出力のどこにも元の値が出ない | `check --secret-only` も設計文書を渡さずに同じ結果になり、秘密の形でない `ui_mock` では終了コード 0 で終わる | `check` が `ui_mock` を検査せずに通す・`text` に値を入れる・`--secret-only` が設計文書を求めると落ちる |
+| `ui_mock` の秘密の検査 | 利用者が手で書いた宣言の `ui_mock.location` が資格情報入りの URL のとき、`design-materials.py check` が `ui_mock_secret` を挙げて終了コード 1 で終わり、出力のどこにも元の値が出ない。`check --secret-only` も設計文書を渡さずに同じ結果になり、秘密の形でない `ui_mock` では終了コード 0 で終わる | `check` が `ui_mock` を検査せずに通す・`text` に値を入れる・`--secret-only` が設計文書を求めると落ちる |
 
 ## 設計の結果
 
