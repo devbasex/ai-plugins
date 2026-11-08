@@ -159,13 +159,13 @@ def test_check_line_limit_and_trim_moves_demoted_section(main):
     long = text.replace("## 課題の順\n", "## 課題の順\n" + "- 行\n" * 290)
     body_of(main, "issue-1").write_text(long)
     code, out = run(main, "check", "issue-1")
-    assert code == 5 and out["items"][0]["lines"] > 300
+    assert code == 1 and out["items"][0]["lines"] > 300
     history = main / ".ndf" / "handoff" / "issue-1-history.md"
     history.write_text("# 履歴\n\n古い\n")
     demoted = long.replace("## 運用の知見", "## 前の会話の進み（1）\n\n| 計画 |\n\n## 運用の知見")
     body_of(main, "issue-1").write_text(demoted)
     code, out = run(main, "check", "issue-1", "--trim")
-    assert out["items"][0]["moved"] == ["前の会話の進み（1）"] and code == 5
+    assert out["items"][0]["moved"] == ["前の会話の進み（1）"] and code == 1
     assert "前の会話の進み" not in body_of(main, "issue-1").read_text()
     assert history.read_text() == "# 履歴\n\n古い\n\n## 前の会話の進み（1）\n\n| 計画 |\n"
     assert run(main, "check", "issue-1", "--max-lines", "400")[0] == 0
@@ -179,7 +179,7 @@ def test_check_line_limit_and_trim_moves_demoted_section(main):
         ("マイルストーン 26 を進める", ["milestone-2", "milestone-26"], 0, ["milestone-26"]),
         ("Milestone26", ["milestone-26"], 0, ["milestone-26"]),
         ("m1142c の続き", ["sprint-m1142c", "sprint-m1142"], 0, ["sprint-m1142c"]),
-        ("マイルストーン 26 の #1560", ["issue-1560", "milestone-26"], 4, ["issue-1560", "milestone-26"]),
+        ("マイルストーン 26 の #1560", ["issue-1560", "milestone-26"], 10, ["issue-1560", "milestone-26"]),
     ],
 )
 def test_find_match_rules(main, text, names, code, hits):
