@@ -31,10 +31,14 @@ HEADING = "### supervisor → worker"
 SUPERVISORS = ("ndf:supervisor", "ndf:supervisor-waits")
 FIELD = "読む Skill"
 # 行の先頭の箇条書きの記号・表の区切り・見出しの記号・強調を除いたところに欄の名前があり、区切りか行末が続く
-_FIELD_RE = re.compile(r"^[\s>]*(?:(?:[-*+]|\d+[.)]|#+|\|)\s*)*(?:\*\*|__)?" + re.escape(FIELD) + r"(?:\*\*|__)?\s*(?:[:：|](?P<rest>.*))?$")
+_FIELD_RE = re.compile(
+    r"^[\s>]*(?:(?:[-*+]|\d+[.)]|#+|\|)\s*)*(?:\*\*|__)?" + re.escape(FIELD) + r"(?:\*\*|__)?\s*(?:[:：|](?P<rest>.*))?$"
+)
 _NONE_RE = re.compile(r"^[\s|*_`「」]*(?:無し|なし)")
 # lookup の前の stage-skills.py のパス（引用符で囲んだものと囲まないもの）
-_LOOKUP_RE = re.compile(r"(?:\"(?P<dq>[^\"]*stage-skills\.py)\"|'(?P<sq>[^']*stage-skills\.py)'|(?P<bare>[^\s\"';|&()<>]*stage-skills\.py))\s+lookup\b")
+_LOOKUP_RE = re.compile(
+    r"(?:\"(?P<dq>[^\"]*stage-skills\.py)\"|'(?P<sq>[^']*stage-skills\.py)'|(?P<bare>[^\s\"';|&()<>]*stage-skills\.py))\s+lookup\b"
+)
 
 
 def field_value(prompt: str) -> str | None:
@@ -137,7 +141,7 @@ def _not_looked_up() -> dict:
     return deny(
         f"ndf:worker の起動指示の「{FIELD}」に Skill を挙げたが、この supervisor は読み込まれた NDF の対応表を引いていない"
         f"（別の場所の stage-skills.py や、変数・相対パスで打った lookup は数えない）。"
-        f"先に python3 \"{STAGE_SKILLS}\" lookup <工程> をこの絶対パスのまま打ち、出力の items の name と path をそのまま並べてから起動し直す"
+        f'先に python3 "{STAGE_SKILLS}" lookup <工程> をこの絶対パスのまま打ち、出力の items の name と path をそのまま並べてから起動し直す'
         f"（工程は、いま通している工程の名前）。規約: {DOC} の「{HEADING.lstrip('# ')}」。止めるなら NDF_WORKER_SKILLS_GUARD=0"
     )
 
