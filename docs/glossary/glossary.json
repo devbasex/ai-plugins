@@ -6230,6 +6230,12 @@
       "context": "ndf-workflow",
       "meaning": "承認の提示の本体の形。資料 1 件につき 1 行で、資料名・要旨・開くリンクを並べる",
       "pending_source": "issues/issue-2721-requirements.md"
+    },
+    {
+      "term": "触る領域",
+      "context": "ndf-workflow",
+      "meaning": "設計の手順 1 で決める、変更が触る設計の領域。構成要素・型と振る舞い・永続データ・呼び出される約束・画面・非機能・ドメインモデルの 7 つに限る",
+      "pending_source": "issues/issue-2721-design.md"
     }
   ]
 }
