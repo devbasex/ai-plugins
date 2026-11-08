@@ -239,6 +239,7 @@
 | `hook.wait-notify-lock` | seconds 5 | 待ちの知らせの記録の排他を待つ上限 | `plugins/ndf/scripts/hook_lib/wait_notify.py:claim` |
 | `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
 | `jev.probe` | seconds 10 | JEV に届くかの確かめの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
+| `lease.lock` | seconds 10 | 持ち主の鍵の排他を待つ上限。読んで書くだけの短い区間なので、超えるのは錠の持ち主が止まったとき | `plugins/ndf/scripts/lib/lease.py:<module>` |
 | `locks.append` | seconds 5 | 排他つきで 1 行足すときの錠の待ちの上限 | `plugins/ndf/scripts/lib/locks.py:append_locked` |
 | `merged.green-wait` | factor 1.5 | merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout | `plugins/ndf/scripts/merged_lib/checks.py:GreenWatch.wait` |
 | `merged.main-lock` | seconds 600 | メインディレクトリの排他を待つ上限。後片付け 1 件と pull は数十秒で終わる | `plugins/ndf/scripts/merged_lib/main_lock.py:<module>` |

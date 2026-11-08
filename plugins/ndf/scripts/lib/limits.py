@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-# 置き場はプラグインからの相対で固定する: 配布物ではプラグインの `contracts/`、ラッパーの複製（バージョンディレクトリ。
+# 置き場はプラグインからの相対で固定する: リリースしたプラグインでは `contracts/`、ラッパーの複製（バージョンディレクトリ。
 # `relay_lib/version_dir.py`）では `lib/` と並ぶ `contracts/`。上書きの環境変数は持たない（決定 2）
 _LIB_DIR = Path(__file__).resolve().parent
 DECLARATION = next(
@@ -89,7 +89,7 @@ _cache: Optional[dict[str, Policy]] = None
 
 
 def use(path) -> None:
-    """読み込み先を差し替え、読んだ宣言を捨てる（テストが使う）。`None` で配布物の宣言へ戻す。"""
+    """読み込み先を差し替え、読んだ宣言を捨てる（テストが使う）。`None` でプラグインの宣言へ戻す。"""
     global _path, _cache
     _path = Path(path) if path is not None else DECLARATION
     _cache = None
@@ -305,7 +305,7 @@ def check() -> list[tuple[str, str, int, int, int]]:
     return broken
 
 
-def _dispatch(argv: list[str]) -> int:
+def _run_cli(argv: list[str]) -> int:
     if argv[:1] == ["check"] and len(argv) == 1:
         broken = check()
         for phase, agent, stall, monitor, cli in broken:
@@ -333,7 +333,7 @@ def _dispatch(argv: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     try:
-        return _dispatch(argv)
+        return _run_cli(argv)
     except LimitsError as exc:
         print(f"limits.py: {exc}", file=sys.stderr)
         return 1

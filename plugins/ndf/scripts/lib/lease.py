@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import clock
+import limits
 import jsonio
 import locks
 import procs
@@ -39,7 +40,7 @@ RUNTIME_SESSION_ENV = "NDF_RUNTIME_SESSION"  # `<pid>:<開始時刻>`。ラン�
 KEEP_DAYS = 30  # 終わった記録を消すまでの日数（`durable.KEEP_DAYS` と同じ値）
 UNITS = ("run", "session")
 FIELDS = ("version", "key", "entry", "run", "started_at", "seen_at", "finished_at", "pid", "pid_started", "host")
-LOCK_TIMEOUT = 10.0  # 鍵の排他を待つ上限の秒（読んで書くだけの短い区間なので、超えるのは錠の持ち主が止まったとき）
+LOCK_TIMEOUT = float(limits.value("lease.lock", "seconds"))  # 鍵の排他を待つ上限の秒
 START_SLACK = 1.0  # 開始時刻の一致を見る幅の秒（I4）
 _QUOTE = {"%": "%25", "/": "%2F", ":": "%3A", "=": "%3D"}
 

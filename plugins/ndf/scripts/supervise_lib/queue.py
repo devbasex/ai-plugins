@@ -119,7 +119,7 @@ QUEUE_POLL, WAIT_POLL = limits.value("supervise.queue-poll", "interval"), limits
 
 
 def cmd_queue(
-    plans: list[str], max_: int, poll: float = QUEUE_POLL, then: list | None = None, done: str | None = None, starts=None, rerun=None, restart=False
+    plans: list[str], max_: int, poll: float = QUEUE_POLL, then=None, done: str | None = None, starts=None, rerun=None, restart=False
 ) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 

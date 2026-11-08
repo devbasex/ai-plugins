@@ -52,6 +52,7 @@
     "jev.ask": {"summary": "JEV への問い合わせの上限", "seconds": 20},
     "jev.probe": {"summary": "JEV に届くかの確かめの上限", "seconds": 10},
     "locks.append": {"summary": "排他つきで 1 行足すときの錠の待ちの上限", "seconds": 5},
+    "lease.lock": {"summary": "持ち主の鍵の排他を待つ上限。読んで書くだけの短い区間なので、超えるのは錠の持ち主が止まったとき", "seconds": 10},
     "monitor-types.poll": {"summary": "監視の見回りの間隔（MONITOR_POLL で上書きできる）", "interval": 15},
     "monitor-types.result-age-grace": {"summary": "結果ファイルを書いた後もプロセスが残るとき、完了とみなすまでの秒", "seconds": 30},
     "monitor-types.thread-join": {"summary": "監視の読み取りのスレッドの終わりを待つ上限", "seconds": 1},

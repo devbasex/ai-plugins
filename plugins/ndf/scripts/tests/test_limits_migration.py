@@ -64,6 +64,7 @@ BEFORE = {
     "jev.ask": {"seconds": 20},
     "jev.probe": {"seconds": 10},
     "locks.append": {"seconds": 5},
+    "lease.lock": {"seconds": 10},
     "monitor-types.poll": {"interval": 15},
     "monitor-types.result-age-grace": {"seconds": 30},
     "monitor-types.thread-join": {"seconds": 1},
