@@ -58,6 +58,7 @@ from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError
 from project_lib import mvv_candidates as mc  # noqa: E402
 from project_lib import mvv_collect as mcol  # noqa: E402
 from project_lib import mvv_llm  # noqa: E402
+from project_lib import mvv_propose_io as mio  # noqa: E402
 
 TOOL = "project-mvv"
 EXIT_MISMATCH = 4
@@ -159,40 +160,9 @@ def cmd_collect(a):
 # ---------------------------------------------------------------- propose
 
 
-def _load_materials(a, root):
-    """材料を読み、--current の有無から現行の本文と種別（new / revision）を決める。"""
-    mpath = Path(a.materials).resolve()
-    try:
-        mats = json.loads(mpath.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise StepError(f"材料を読めない: {mpath}: {e}", EXIT_UNREADABLE) from None
-    current = None
-    kind = "new"
-    if a.current:
-        mvv = pm.load_mvv(root)
-        if not mvv.approved:
-            raise StepError(f"--current には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）", EXIT_PRECONDITION)
-        current, kind = mvv.body, "revision"
-    return mpath, mats, current, kind
-
-
-def _write_candidates(out_dir, mpath, kind, current, mats, data):
-    """候補ごとの本文・candidates.json・candidates.md を書き出す。"""
-    bodies = {}
-    for c in data["candidates"]:
-        p = out_dir / f"candidate-{re.sub(r'[^0-9A-Za-z_-]+', '', str(c.get('id') or len(bodies) + 1))}.md"
-        p.write_text(mc.candidate_body(c), encoding="utf-8")
-        bodies[c.get("id")] = str(p)
-    cj = out_dir / "candidates.json"
-    jsonio.write_atomic(cj, {"materials": str(mpath), "kind": kind, **data, "bodies": bodies})
-    cm = out_dir / "candidates.md"
-    cm.write_text(mc.candidates_md(data, mats, kind, current, bodies), encoding="utf-8")
-    return bodies, cj, cm
-
-
 def cmd_propose(a):
     root = _root(a)
-    mpath, mats, current, kind = _load_materials(a, root)
+    mpath, mats, current, kind = mio.load_materials(a, root)
     reason = Path(a.reason_file).read_text(encoding="utf-8") if a.reason_file else None
     data, raw, usage = mvv_llm.call_llm_json(mc.PROPOSE_SYSTEM, mc.propose_prompt(mats, current, reason), root, "mvv-propose")
     known = {s["id"] for s in mats.get("sources", [])}
@@ -210,7 +180,7 @@ def cmd_propose(a):
             1,
         )
     out_dir = _work_dir(root, a.out_dir or str(mpath.parent))
-    bodies, cj, cm = _write_candidates(out_dir, mpath, kind, current, mats, data)
+    bodies, cj, cm = mio.write_candidates(out_dir, mpath, kind, current, mats, data)
     print(f"候補: {cm}（{len(data['candidates'])} 案）")
     emit(
         result(
