@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -18,7 +19,7 @@ KINDS = (IMPLEMENT, ABSORB, CLOSE)
 
 
 class DesignResultsError(ValueError):
-    """設計の結果どうしが食い違う（同じ課題に違う扱い）か、取り込み先が無い。"""
+    """設計の結果どうしが食い違う（同じ課題に違う扱い・取り込み先・触るファイル）か、取り込み先が無い。"""
 
 
 @dataclass
@@ -56,13 +57,14 @@ class DesignResults:
         return list(r.files) if r and r.kind == IMPLEMENT else []
 
     def add(self, rows: list[Row]) -> None:
-        """別の設計文書の行を足す。同じ課題に違う扱いを書いていれば DesignResultsError。"""
+        """別の設計文書の行を足す。同じ課題に違う設計の結果を書いていれば DesignResultsError（食い違い。#2361）。"""
         for r in rows:
             old = self.row_of(r.issue)
             if old is None:
                 self.rows.append(r)
-            elif (old.kind, old.host, sorted(old.files)) != (r.kind, r.host, sorted(r.files)):
-                raise DesignResultsError(f"#{r.issue} に違う扱いが書かれている（{old.kind} と {r.kind}）")
+            elif parts := _differences(old, r):
+                head = f"#{r.issue} の設計の結果が 2 本の設計文書で違う（先: {old.doc or NO_DOC} / 後: {r.doc or NO_DOC} ）"
+                raise DesignResultsError("。".join([head, *parts]))
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -74,6 +76,40 @@ class DesignResults:
             for r in data.get("rows") or []
         ]
         return cls(rows, [int(n) for n in data.get("design_prs") or []], [int(n) for n in data.get("unread") or []])
+
+
+NO_DOC = "パスの記録なし"  # 行が設計文書のパスを持たないとき（#2361 の決定 3）
+
+
+def _host(host: int | None) -> str:
+    return f"#{host}" if host is not None else "—"
+
+
+def _only_in(mine: list[str], other: list[str]) -> list[str]:
+    """`mine` にだけある分を書かれた順で。重なりを数えて取る（#2361 の決定 2）。"""
+    extra = Counter(mine) - Counter(other)
+    listed = []
+    for f in mine:
+        if extra[f] > 0:
+            extra[f] -= 1
+            listed.append(f)
+    return listed
+
+
+def _differences(old: Row, new: Row) -> list[str]:
+    """違う項目ごとの文（扱い → 取り込み先 → 触るファイル）。値は先 / 後の順。"""
+    parts = []
+    if old.kind != new.kind:
+        parts.append(f"扱い: {old.kind} / {new.kind}")
+    if old.host != new.host:
+        parts.append(f"取り込み先: {_host(old.host)} / {_host(new.host)}")
+    if sorted(old.files) != sorted(new.files):
+        only = []
+        for side, mine, other in (("先", old.files, new.files), ("後", new.files, old.files)):
+            if listed := _only_in(mine, other):
+                only.append(f"{side}にだけある: {', '.join(listed)}")
+        parts.append(f"触るファイル: {len(old.files)} 個 / {len(new.files)} 個（{' / '.join(only)} ）")
+    return parts
 
 
 def load_results(path) -> DesignResults | None:

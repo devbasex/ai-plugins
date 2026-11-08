@@ -106,9 +106,12 @@ def test_rewrite_with_the_glossary_adds_one_line():
 class Fake:
     """gh と git の偽物。`fails` は先頭から何回 0 以外で終わるか（コマンドの頭の語ごと）。"""
 
-    def __init__(self, fails: dict[str, int] | None = None, pr: str = "40\n", files: str = f"{DOC}\nissues/gone.md\n"):
+    def __init__(
+        self, fails: dict[str, int] | None = None, pr: str = "40\n", files: str = f"{DOC}\nissues/gone.md\n", shows: list[str] | None = None
+    ):
         self.fails = dict(fails or {})
         self.pr, self.files, self.calls = pr, files, []
+        self.shows = list(shows or [])  # git show が順に返す文書（尽きたら TABLE）
 
     def _fail(self, key: str):
         if self.fails.get(key, 0) > 0:
@@ -130,7 +133,8 @@ class Fake:
         bad = self._fail(key)
         if bad:
             return bad
-        out = {"git fetch": "", "git ls-tree": f"{DOC}\0", "git show": TABLE}[key]
+        show = self.shows.pop(0) if key == "git show" and self.shows else TABLE
+        out = {"git fetch": "", "git ls-tree": f"{DOC}\0", "git show": show}[key]
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
 
@@ -229,3 +233,70 @@ def test_rewrite_stops_when_the_absorb_host_does_not_implement(row):
     with pytest.raises(dr.DesignResultsError, match="#13 の取り込み先 #11"):
         design_stage.rewrite(plans, results(table))
     assert json.dumps(plans, ensure_ascii=False) == before
+
+
+# ---------- 設計の結果の食い違いのメッセージ（#2361） ----------
+
+HEAD_FMT = "#{n} の設計の結果が 2 本の設計文書で違う（先: {a} / 後: {b} ）"
+
+
+def mismatch(old: dr.Row, new: dr.Row) -> str:
+    res = dr.DesignResults(rows=[old])
+    with pytest.raises(dr.DesignResultsError) as e:
+        res.add([new])
+    assert res.rows == [old]  # I1: 行を足さない
+    return str(e.value)
+
+
+def test_mismatch_of_kind_names_every_field_in_order():
+    """受け入れ条件 1・4・5、I3・I4: 3 つとも違えば扱い → 取り込み先 → 触るファイルの順で先 / 後。空のパスは記録なしと出す。"""
+    msg = mismatch(dr.Row(12, dr.IMPLEMENT, None, ["pkg/a.py"], DOC), dr.Row(12, dr.ABSORB, 11))
+    assert msg == (
+        HEAD_FMT.format(n=12, a=DOC, b="パスの記録なし")
+        + "。扱い: 実装する / 取り込む。取り込み先: — / #11。触るファイル: 1 個 / 0 個（先にだけある: pkg/a.py ）"
+    )
+
+
+def test_mismatch_of_host_only():
+    """受け入れ条件 2・4: 取り込み先だけが違えば、その項目だけが載り、扱いは載らない。"""
+    msg = mismatch(dr.Row(13, dr.ABSORB, 11, doc=DOC), dr.Row(13, dr.ABSORB, 12, doc="issues/issue-12-design.md"))
+    assert msg == HEAD_FMT.format(n=13, a=DOC, b="issues/issue-12-design.md") + "。取り込み先: #11 / #12"
+
+
+def test_mismatch_of_files_shows_counts_and_the_difference():
+    """受け入れ条件 3・4: 実例の 5 個と 18 個。個数と、各設計文書にしか無いファイルを書かれた順で出す。"""
+    common = [f"pkg/c{i}.py" for i in range(4)]
+    old_files = [*common, "pkg/old.py"]
+    new_files = [f"pkg/n{i}.py" for i in range(14)] + common[::-1]
+    a, b = "issues/issue-2335-design.md", "issues/issue-2336-design.md"
+    msg = mismatch(dr.Row(2336, dr.IMPLEMENT, None, old_files, a), dr.Row(2336, dr.IMPLEMENT, None, new_files, b))
+    news = ", ".join(f"pkg/n{i}.py" for i in range(14))
+    assert msg == HEAD_FMT.format(n=2336, a=a, b=b) + f"。触るファイル: 5 個 / 18 個（先にだけある: pkg/old.py / 後にだけある: {news} ）"
+    assert "扱い:" not in msg
+
+
+def test_mismatch_counts_duplicated_files():
+    """決定 2: 片方で 2 回書いたファイルは、多く書いた側にだけあるとして出す。"""
+    msg = mismatch(dr.Row(11, dr.IMPLEMENT, None, ["pkg/a.py"], DOC), dr.Row(11, dr.IMPLEMENT, None, ["pkg/a.py", "pkg/a.py"], DOC))
+    assert msg.endswith("。触るファイル: 1 個 / 2 個（後にだけある: pkg/a.py ）")
+
+
+def test_same_results_in_another_order_do_not_stop():
+    """受け入れ条件 6・I2: 触るファイルの順序だけが違う・すべて同じなら止まらず、行は 1 つのまま。"""
+    res = dr.DesignResults(rows=[dr.Row(11, dr.IMPLEMENT, None, ["a", "b"], DOC)])
+    res.add([dr.Row(11, dr.IMPLEMENT, None, ["b", "a"], "issues/issue-12-design.md")])
+    res.add([dr.Row(11, dr.IMPLEMENT, None, ["a", "b"], DOC)])
+    assert len(res.rows) == 1
+
+
+def test_mismatch_stops_the_stage_and_writes_nothing(tmp_path, fake):
+    """受け入れ条件 7・I5: 食い違いなら stopped・2、要約の前後は変えず、プランも design-results.json も書かない。"""
+    a, paths = sprint(tmp_path)
+    before = {p.name: p.read_text() for p in paths.values()}
+    fake(shows=[TABLE, TABLE.replace("`pkg/a.py`、`pkg/b.py`", "`pkg/a.py`")])
+    res, code = design_stage.cmd_design_results(a)
+    assert code == 2 and res["status"] == "stopped", res
+    assert res["summary"].startswith("設計の結果を書けない: #11 の設計の結果が 2 本の設計文書で違う")
+    assert res["summary"].endswith("触るファイル: 2 個 / 1 個（先にだけある: pkg/b.py ）。人へ戻す")
+    assert {p.name: p.read_text() for p in paths.values()} == before
+    assert not (tmp_path / "design-results.json").exists()
