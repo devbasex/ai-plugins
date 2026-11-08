@@ -80,6 +80,7 @@
 | [gate_rejections.py](gate_rejections.py) | 承認ゲートの差し戻しの記録（`gate-rejections.jsonl`。覆しの記録と同じ置き場）の 1 行の形・追記・読み取り・設計承認ゲート・リリース承認ゲートごとの件数 | `gate-rejections.py` / `sprint-state.py` |
 | [sprint_mvv.py](sprint_mvv.py) | `sprint-state.py init --pace fast` のスプリント MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `sprint-state.py` |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
+| [run_core.py](run_core.py) / [run-core.sh](run-core.sh) | 実行の核。エントリポイントの本体の終わり方を `ok` / `gate` / `stopped` と決まった終了コードへ変える（「実行の核」） | すべてのエントリポイント（核の対象外を除く） |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
@@ -187,8 +188,34 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 - **同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から値を採るのは、`status` が `ok` の試行のうち番号の最も大きいものだけである。** 落ちた試行の値を採らない。採れなければ理由（`ok` の試行が無い・試行が無い・置き場が無い・読めない）を返す
 - **置き場が無い・読めないことと、材料が 0 件であることを分ける。** 置き場が無ければ 3、読めなければ 2 の `stopped` で返し、0 件・「無し」とは返さない。置き場があって空のときだけ 0 件として `ok` を返してよい
 - 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、置き場を開く前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
-- 子プロセスとして打った手順のスクリプトの結果は `step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない
+- 子プロセスとして打った手順のスクリプトの結果は `step_read.read_completed`・`step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない。結果ファイル（worker の作業の結果ファイル・`NDF_RESULT_FILE`）は `step_read.read_result_file` で読む。どちらも無い・読めない・形が違うときは理由つきの `stopped` を返す
+- 最後の行を `json.loads(<出力>.splitlines()[-1])` で読む書き方と、名前に `last_json` を含む関数は `step_read.py` の外に置かない（契約の検査 `result-read`）。要約・件数を写すだけの箇所は `step_read.last_json` を使う
 - 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）が `ok` 以外を返しても、呼ぶ側は工程を止めない。`supervise_lib` の `record_stage` はフェーズレポートへ、`sprint-close.py` は `board_note` の項目へ、LLM は作業の報告の「見つけたもの」へ、`summary` と `gaps[].reason` を載せる
+
+### 実行の核
+
+エントリポイントは実行の核（[run_core.py](run_core.py)）を通る。Python は `__main__` の中身を
+`run_core.main("<id>", main)` の 1 文に、シェルは先頭の実行文を `. "<lib>/run-core.sh"; rc_enter "<id>" "$@"` にする
+（契約の検査 `core-entry`）。id はプラグインの根からのパス（例 `scripts/handoff.py`）で、契約の一覧の項目を引く。hook とランタイムが直接
+起動するエントリポイントは、契約の一覧の `core` に `hook` か `runtime` の印と根拠を書いて外す（`core-exempt`）。
+
+| 本体の終わり方 | 結果 | 終了コード |
+| --- | --- | --- |
+| `step_result.emit` で出した | 形・欠け・状態と終了コード・契約の `exit` を確かめた結果 | 本体の値 |
+| `ok` に `gaps` を添えた | `stopped`（`gaps` はそのまま） | 6 |
+| 形の違い・状態と終了コードの食い違い・契約に無い終了コード・`step-result` の本体が結果 JSON を出さずに返った | `stopped`（`gaps` の `kind` は `result-shape`） | 1 |
+| 例外 | `stopped`（`kind` は `exception`。例外の跡は標準エラー） | 1 |
+| SIGTERM | `stopped`（`kind` は `interrupted`） | 1 |
+| 時間切れ（`NDF_RUN_TIMEOUT` 秒） | `stopped`（`kind` は `timeout`） | 1 |
+| 契約の一覧に無い | `stopped`（`kind` は `contract`） | 2 |
+| optional extras が無い（`deps.require` が `run_core.exit_early` を通す） | `stopped`（`kind` は `deps`、`name` はグループ） | 69 |
+| `SystemExit`（`--help`・引数の誤りを含む）か終了コードを返した | 結果 JSON を足さない | 本体の値 |
+
+- 契約の `stdout` が `step-result` なら、核が確かめた結果を標準出力へ 1 行出す（`run_id` を足す）。それ以外の形の標準出力は変えず、止まった理由を標準エラーへ 1 行出す
+- 呼ぶ側が `NDF_RESULT_FILE` でファイルを渡せば、最終の結果 JSON をそこへ 1 行で書く。`NDF_RESULT_FILE` と `NDF_RUN_TIMEOUT` は子プロセスへ継がない
+- 核が動いている間の `step_result.emit` は出力せずに `Emitted`（`SystemExit` の子クラス）を投げ、核が確かめてから出す。テストが本体を直に呼ぶときは今までどおり出す
+- 中断したときに耐久の記録が開いていれば、DBOS を閉じずに `durable.exit_leaving_pending` で抜ける
+- 契約の `exit` の値は終了コードの表の見出し（`step_result.EXIT_LABELS`）で始め、エントリポイントとその部品は `EXIT_` で始まる整数の定数を持たない（契約の検査 `exit-meaning`）
 
 承認資料は `development-workflow/references/approval-request.md` の 2 層（対象を開くもの・判断に
 使うもの）に、同意を求めること・戻し方を足した形で書く。置き場所は `NDF_PRESENTATION_DIR`

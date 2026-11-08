@@ -30,6 +30,9 @@ def load(name: str, path: Path):
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import claude, engine, paths, prompts  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
 mvv = load("mvv_gate_for_ledger", SCRIPTS / "mvv-gate.py")
 
 USAGE = {
@@ -61,7 +64,9 @@ CLAUDE_OUT = {
 
 def fake_claude(tmp_path: Path, out: dict) -> Path:
     f = tmp_path / "fake_claude.py"
-    f.write_text(f"import sys\nsys.stdin.read()\nprint({json.dumps(json.dumps(out, ensure_ascii=False))})\n")
+    text = json.dumps(str(out.get("result", "")), ensure_ascii=False)
+    body = f"import json, sys\nprompt = sys.stdin.read()\ntext = {text}\n" + worker_fake.SNIPPET
+    f.write_text(body + f"\nprint({json.dumps(json.dumps(out, ensure_ascii=False))})\n")
     return f
 
 

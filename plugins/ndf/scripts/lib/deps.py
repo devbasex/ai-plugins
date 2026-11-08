@@ -27,7 +27,8 @@
 5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 69
 
 依存の欠け（2・5 と、`pyproject.toml` と `uv.lock` が無いとき）の終了コードは `EXIT_DEPS_MISSING`（69。`sysexits.h` の
-`EX_UNAVAILABLE`）で、値の持ち主はこのファイルだけである（#1654）。共通の契約の 3（前提が無い・飛ばしてよい）とは
+`EX_UNAVAILABLE`）で、値の持ち主はこのファイルだけである（#1654）。止まるときは実行の核の早い出口（`run_core.exit_early`）を
+通し、例外の跡を出さずに `stopped` と足りないグループ（`gaps` の `kind` が `deps`）の結果を返す（#2337）。共通の契約の 3（前提が無い・飛ばしてよい）とは
 分け、supervise の `skip_code` に読ませない。`uv run` 自身が環境を作れないときは `os.execve` の後なので uv の終了コード
 （1）で終わる。
 
@@ -74,9 +75,19 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_HINT = f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh"
 
 
-def _stop(msg: str) -> NoReturn:
+def _stop(msg: str, groups: Sequence[str] = ()) -> NoReturn:
+    """依存の欠けで止める。結果は実行の核の早い出口（`run_core.exit_early`）が出す（#2337 の決定 11）。"""
     print(f"❌ [ndf deps] {msg}", file=sys.stderr)
-    sys.exit(EXIT_DEPS_MISSING)
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    # 止まるときだけ読む（run_core → step_result → deps の循環を避ける）。ラッパーのバージョンディレクトリ
+    # （relay_lib/version_dir.py）は核を写さないため、読めなければ結果を出さずに 69 で終える
+    try:
+        run_core = importlib.import_module("run_core")
+    except ImportError:
+        sys.exit(EXIT_DEPS_MISSING)
+    gaps = [{"kind": "deps", "name": g, "reason": msg} for g in groups] or [{"kind": "deps", "name": "uv", "reason": msg}]
+    run_core.exit_early(msg, EXIT_DEPS_MISSING, gaps)
 
 
 def importable(group: str) -> bool:
@@ -174,11 +185,11 @@ def _normalize_groups(group: str, more: tuple[str, ...]) -> list[str]:
     return groups
 
 
-def _resolve_uv_or_stop() -> str:
+def _resolve_uv_or_stop(groups: Sequence[str] = ()) -> str:
     """uv を探し、無ければ入れる。入れられなければ止める。"""
     uv = ensure_uv("[ndf deps]")
     if not uv:
-        _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
+        _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}", groups)
     return uv
 
 
@@ -201,11 +212,12 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
         mods = ", ".join(m for g in missing for m in GROUPS[g])
         _stop(
             f"uv の環境へ起動し直したが {' / '.join(missing)} のパッケージ（{mods}）を import できない。"
-            f"{root / 'uv.lock'} に載っているかを見る"
+            f"{root / 'uv.lock'} に載っているかを見る",
+            missing,
         )
     if not (root / "pyproject.toml").is_file() or not (root / "uv.lock").is_file():
-        _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock")
-    uv = _resolve_uv_or_stop()
+        _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock", missing)
+    uv = _resolve_uv_or_stop(missing)
     venv = venv_dir() if root == PLUGIN_ROOT else str(root / ".venv")
     env = {k: v for k, v in os.environ.items() if k != SAVED_ENV}
     if PROJECT_ENV in os.environ:  # 利用者の値は起動し直した後に戻す（release_project_env）

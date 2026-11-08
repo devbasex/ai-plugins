@@ -46,6 +46,9 @@ def durable_in_process(monkeypatch):
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, paths, templates, worker_steps  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
 
 def run_main(mod, argv, capsys):
     with pytest.raises(SystemExit) as e:
@@ -155,16 +158,21 @@ print(json.dumps({{"tool": "t", "status": "gate", "summary": "fix", "next": "fix
 sys.exit(20)
 """
 
-FAKE_CLAUDE = """#!{py}
+FAKE_CLAUDE = (
+    """#!{py}
 import json, os, re, sys
 text = sys.stdin.read()
 open(os.environ["FAKE_CLAUDE_LOG"], "a").write(text + "\\nCWD=" + os.getcwd() + "\\n=====\\n")
 m = re.search(r"結果ファイル (\\S+) を書く", text)
 if m and os.environ.get("FAKE_CLAUDE_WRITE", "1") == "1":
     open(m.group(1), "w").write("{{}}")
-print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{"output_tokens": 5}},
-                  "total_cost_usd": 0.01, "num_turns": 2}}))
+prompt, text = text, "## 作業の報告\\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET.replace("{", "{{").replace("}", "}}")
+    + """
+print(json.dumps({{"result": text, "usage": {{"output_tokens": 5}}, "total_cost_usd": 0.01, "num_turns": 2}}))
+"""
+)
 
 
 @pytest.fixture
@@ -257,13 +265,19 @@ def test_drive_step_resolves_known_drive(tmp_path):
 
 def test_work_step_with_runtime_uses_external_ai(tmp_path, monkeypatch):
     fake = tmp_path / "external-ai.py"
-    fake.write_text("""import json, sys
+    fake.write_text(
+        """import json, sys
 a = sys.argv[1:]
 out = a[a.index("--output-file") + 1]
 prompt = open(a[a.index("--prompt-file") + 1]).read()
 open(out, "w").write("## 作業の報告\\n- 結果: 完了\\n" + a[1] + "\\n" + prompt[-20:])
+text = "結果: 完了"
+"""
+        + worker_fake.SNIPPET
+        + """
 print(json.dumps({"tool": "external-ai", "status": "ok", "summary": "ok", "items": [], "metrics": {}}))
-""")
+"""
+    )
     monkeypatch.setattr(paths, "EXTERNAL_AI", fake)
     s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "runtime": "codex", "prompt": "実装する", "next": "end"}])
     assert "結果: 完了" in text
