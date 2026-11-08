@@ -865,8 +865,8 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | 寿命の窓 | — | 持ち主の記録が終わっていなくても、最後に動いた時刻からこの長さを過ぎた持ち主を死んでいるとみなす長さ。持ち主の部品（leases/）の記録では別のホストの記録にだけ使い、同じホストの生死は pid と開始時刻で決める。値は持ち主の契約の window_seconds に置く。レビュー worktree は 24 時間（#2229・#2342）、見直しの持ち主は既定 15 分（#2315） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 片付け | — | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep_states）。git が拒めば止まる操作だけで行う（#2229） | — | — | `docs/specifications/ndf-run-state-owner-and-sweep.md` |
 | 持ち主の鍵 | `lease_key` | 持ち主の記録を取り合う単位。入口の契約が、解決した入力から作る形を宣言する（例 cross-refactoring:pr=2301。#2335） | — | — | — |
-| 持ち主の契約 | — | 入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342） | — | — | — |
-| 持ち主の単位 | — | 持ち主の記録を誰が持つか。run は入口の 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返す入口が呼ばれるかセッションが終わるまで持つ（#2342） | — | — | — |
+| 持ち主の契約 | — | 入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342） | — | — | `docs/specifications/ndf-lease-stage-and-concurrent-runs.md` |
+| 持ち主の単位 | — | 持ち主の記録を誰が持つか。run は入口の 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返す入口が呼ばれるかセッションが終わるまで持つ（#2342） | — | — | `docs/specifications/ndf-lease-stage-and-concurrent-runs.md` |
 
 ## mcp-serena（`mcp-serena`）
 
