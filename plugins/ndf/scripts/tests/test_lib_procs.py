@@ -62,6 +62,8 @@ def test_empty_cmdline_of_an_exiting_process_is_unreadable(monkeypatch):
 
 
 def test_memory_and_cgroup(tmp_path: Path):
+    avail, total = procs.memory_available()
+    assert 0 < avail <= total
     (tmp_path / "memory.max").write_text("1048576\n")
     (tmp_path / "memory.current").write_text("524288\n")
     (tmp_path / "memory.events").write_text("low 0\nmax 3\noom_kill 2\n")

@@ -76,7 +76,7 @@ NDF のスクリプトが共有の環境へ起動し直すときに設定した 
 | 同 `_observe_run` | 終了コードを `ls_ok` に控え、先に `_track_ls_failure` を呼ぶ。失敗の回はそこで戻る |
 | 同 `_track_ls_failure` | 失敗の回は始まりの時刻を持ち、区切りを超えたら区切りごとに 1 回問う。成功の回は追跡を解き、答えていない一覧の失敗の問いを外す |
 | 同 `_run_finished` | `ls_ok` が偽の間は偽を返す |
-| `plugins/ndf/scripts/lib/parallel_answer.py` の `owner_restart` | `observe` の問いへの答えでは、選んだ答えの `commands` を返す |
+| `plugins/ndf/scripts/lib/parallel_answer.py` の `owner_next` | `observe` の問いへの答えでは、1 つ目の値に選んだ答えの `commands` を返す |
 
 `plugins/ndf/scripts/hook-env.py` の環境の用意と `relay_lib/runtime.py` の `sync` は、`uv sync` の子にだけ `UV_PROJECT_ENVIRONMENT` を渡す。
 どちらも自分の `os.environ` を書き換えない。

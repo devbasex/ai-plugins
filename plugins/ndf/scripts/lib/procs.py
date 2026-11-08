@@ -202,6 +202,12 @@ def _signal_all(procs: list[psutil.Process], pid: int, group: bool, sig: int) ->
             pass
 
 
+def memory_available() -> tuple[int, int]:
+    """(使える量, 全体) をバイトで返す（`/proc/meminfo` の MemAvailable と MemTotal に当たる）。"""
+    vm = psutil.virtual_memory()
+    return vm.available, vm.total
+
+
 def cgroup_dir(root: Path = CGROUP_ROOT, proc_cgroup: Path = PROC_SELF_CGROUP) -> Path:
     """自分の cgroup（v2）の位置。根に `memory.events` があればそこ（コンテナの中）、無ければ `0::<path>` の下。"""
     if (root / "memory.events").exists():
