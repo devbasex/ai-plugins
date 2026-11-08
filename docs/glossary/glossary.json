@@ -6167,19 +6167,19 @@
       "term": "tmux の専用サーバー",
       "context": "ndf-relay",
       "meaning": "中継のレーンを動かす tmux サーバー（tmux -L ndf-relay）。利用者の既定の tmux サーバーとは別である",
-      "pending_source": "issues/issue-2656-requirements.md"
+      "source": "docs/specifications/ndf-relay-lane-parent-session-env.md"
     },
     {
       "term": "親のセッションの環境",
       "context": "ndf-relay",
       "meaning": "動いている claude のセッションとそのラッパーに固有の環境変数。別のプロセスへ継がれると、そのプロセスを親のセッションの中にいると誤らせる",
-      "pending_source": "issues/issue-2656-requirements.md"
+      "source": "docs/specifications/ndf-relay-lane-parent-session-env.md"
     },
     {
       "term": "アカウントの選定",
       "context": "ndf-relay",
       "meaning": "ラッパーが区間を起動するときに、指定・残量・上限から使うアカウントを決める手順",
-      "pending_source": "issues/issue-2656-requirements.md"
+      "source": "docs/specifications/ndf-relay-lane-parent-session-env.md"
     },
     {
       "term": "分割した文書",
