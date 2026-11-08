@@ -33,19 +33,13 @@ def changelog_span(lines, plugin, version):
     return (None, None) if at is None else (at, next_h2(lines, at))
 
 
-def release_tag(plugin, version) -> str:
-    """基底の版のリリースタグ `<plugin>--v<基底の版>`。"""
-    return f"{plugin}--v{base_of(version)}"
-
-
 def tagged(root, tag) -> bool:
     """手元にタグ tag があるか（呼び手が先にタグを fetch する）。"""
     return proc.git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0
 
 
-def require_untagged(root, plugin, version):
-    """リリースタグのある版の節は書き換えない（#2555 の I3）。タグがあれば書き込む前に止める。"""
-    tag = release_tag(plugin, version)
+def require_untagged(root, tag, version):
+    """リリースタグのある版の節は書き換えない（#2555 の I3）。基底の版のリリースタグ tag があれば書き込む前に止める。"""
     if tagged(root, tag):
         raise StepError(f"{base_of(version)} はリリースタグ {tag} があるため版の節へ書かない", EXIT_PRECONDITION)
 
@@ -57,9 +51,9 @@ def _base_key(v):
         return None
 
 
-def drop_untagged_sections(root, lines, plugin, prev, version) -> list[str]:
-    """前のリリースタグの版 prev より新しく出す正式版 version より古い、リリースタグの無い版の節を lines から消し
-    （その場で書き換える）、消した見出しを返す（#2555 の I4）。prev が無ければ消さない。"""
+def drop_untagged_sections(lines, plugin, prev, version, has_tag) -> list[str]:
+    """前のリリースタグの版 prev より新しく出す正式版 version より古い、リリースタグの無い版（has_tag(版) が偽）の節を
+    lines から消し（その場で書き換える）、消した見出しを返す（#2555 の I4）。prev が無ければ消さない。"""
     lo, hi = _base_key(prev or ""), _base_key(version)
     if lo is None or hi is None:
         return []
@@ -68,7 +62,7 @@ def drop_untagged_sections(root, lines, plugin, prev, version) -> list[str]:
     for at in reversed(h2_lines(lines)):
         m = re.match(rf"{re.escape(head)}([^\]\s]+)\]", lines[at])
         key = m and _base_key(m.group(1))
-        if key and lo < key < hi and not tagged(root, release_tag(plugin, m.group(1))):
+        if key and lo < key < hi and not has_tag(m.group(1)):
             gone.append(lines[at])
             del lines[at : next_h2(lines, at)]
     return gone[::-1]

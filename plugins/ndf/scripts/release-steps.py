@@ -96,7 +96,7 @@ from release_lib import others, publish, record, replaced  # noqa: E402
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged_sections, require_untagged  # noqa: E402
+from release_lib.names import drop_untagged_sections, require_untagged, tagged  # noqa: E402
 from step_result import (
     EXIT_CD_FAILED,
     EXIT_GATE,
@@ -266,6 +266,11 @@ def cmd_bump(a):
     )
 
 
+def release_tag(plugin, version) -> str:
+    """基底の版のリリースタグ（version が空ならタグの接頭辞）。"""
+    return f"{plugin}--v{base_of(version)}"
+
+
 def release_tag_before(root, plugin, current=None):
     """<plugin>--v で始まり接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
     head = f"{plugin}--v"
@@ -360,7 +365,7 @@ def section_prs(root, a):
         plugin = plugin_of(root, a)
     except StepError:
         return included.with_extra([], a.prs), None, None, []
-    prev = release_tag_before(root, plugin, f"{plugin}--v{base_of(a.version)}")
+    prev = release_tag_before(root, plugin, release_tag(plugin, a.version))
     head = git(root, "rev-parse", "HEAD", check=False)
     if head.returncode:  # コミットの無いリポジトリ: 範囲も終点も無い
         return included.with_extra([], a.prs), prev, None, []
@@ -385,13 +390,13 @@ def _update_changelog(root, a, items, since=None) -> list[dict]:
     cl = root / "CHANGELOG.md"
     lines = cl.read_text(encoding="utf-8").split("\n")
     a.plugin = plugin_of(root, a)
-    require_untagged(root, a.plugin, a.version)
+    require_untagged(root, release_tag(a.plugin, a.version), a.version)
     removed = []
     if "-" not in a.version and since:
-        prev = since[len(f"{a.plugin}--v") :]
+        prev, has_tag = since.removeprefix(release_tag(a.plugin, "")), lambda v: tagged(root, release_tag(a.plugin, v))
         removed = [
             {"kind": "section", "name": "CHANGELOG.md", "result": "removed", "heading": h}
-            for h in drop_untagged_sections(root, lines, a.plugin, prev, a.version)
+            for h in drop_untagged_sections(lines, a.plugin, prev, a.version, has_tag)
         ]
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
@@ -1019,7 +1024,7 @@ def write_notes(root, version, plugin, bullets, migration=()):
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
-    require_untagged(root, plugin, version)
+    require_untagged(root, release_tag(plugin, version), version)
     lines = cl.read_text(encoding="utf-8").split("\n")
     head = f"## [{plugin} {base_of(version)}]"
     at = changelog_span(lines, plugin, version)[0]
