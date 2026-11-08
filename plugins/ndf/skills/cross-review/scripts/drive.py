@@ -392,7 +392,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
         durable.launch("review", identity)
-        return dp.unless_misaligned(lambda: self.run_once(identity))  # 並びのずれで落ちた回は新しい実行の回で 1 度だけ流し直す
+        return dp.unless_misaligned(lambda: self.run_once(identity), Stop)  # 並びのずれで落ちた回は新しい実行の回で 1 度だけ流し直す
 
     def run_once(self, identity: str) -> tuple[dict, int]:
         ref = durable.resolve(f"review-{durable.key_hash(identity)}", finished=self.finished)
@@ -417,14 +417,15 @@ NAME = f"{__name__}:review_drive"
 @durable.step(name=f"{NAME}.act")
 def act(d: Drive, method: str, *args):
     """`Drive` のメソッドを 1 つ流し、出力を記録する。Stop は例外にせず出力として残す（打ち直しで終了コードを保つ）。"""
+    key = dp.call_key(method, args)
     try:
-        return {"method": method, "ok": getattr(d, method)(*args)}
+        return {"method": key, "ok": getattr(d, method)(*args)}
     except Stop as e:
-        return {"method": method, "stop": str(e), "code": e.code}
+        return {"method": key, "stop": str(e), "code": e.code}
 
 
 def run_act(d: Drive, method: str, *args):
-    return dp.recorded(act(d, method, *args), method, Held)
+    return dp.recorded(act(d, method, *args), dp.call_key(method, args), Held)
 
 
 def advance(d: Drive, stage: str) -> tuple[str, tuple | None, dict | None]:

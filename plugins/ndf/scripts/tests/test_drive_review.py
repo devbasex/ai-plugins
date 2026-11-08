@@ -260,10 +260,12 @@ def test_review_drive_restarts_when_the_replay_is_misaligned(tmp_path, monkeypat
         adopt(self, iv)
 
     monkeypatch.setattr(cr.Drive, "adopt", adopt_once)
-    code, out = run_main(cr, ["5"], capsys)
+    code, text = fork_main(cr, ["5"])
+    out = json.loads(text.strip().splitlines()[-1])
     assert not flag.exists()  # 打ち直しの中で投げた
     # 新しい実行の回が頭から流れ、状態のラウンドの続き（開始が上限で done）から最終スイープで止まる
     assert code == 21 and out["items"][0]["pause"] == "sweep"
+    assert [c[:2] for c in fake.calls].count(("state.py", "init")) == 2  # 新しい実行の回だけが init を打ち直す
 
 
 def test_misaligned_records_are_named():
@@ -276,6 +278,40 @@ def test_misaligned_records_are_named():
         drive_pause.recorded({"method": "init", "stop": "止めた", "code": 1}, "init", cr.Held)
     with pytest.raises(drive_pause.Misaligned):
         drive_pause.shown("fix")
+    with pytest.raises(drive_pause.Misaligned):  # 同じ名前どうしのずれ（段階の種類が違う）
+        drive_pause.recorded({"method": "has_result:fix", "ok": True}, drive_pause.call_key("has_result", ("sweep",)), cr.Held)
+    with pytest.raises(drive_pause.Misaligned):  # 中身の無い記録
+        drive_pause.recorded({"method": "init"}, "init", cr.Held)
+
+
+def test_unless_misaligned_retries_once_and_only_for_misaligned(capsys):
+    """並びのずれで落ちた回だけを 1 度流し直し、2 度目と、ずれ以外の失敗は上げる（#2782）。"""
+    calls = []
+
+    def run(fails):
+        def go():
+            calls.append(1)
+            if len(calls) <= fails:
+                raise cr.Stop("駆動の耐久ワークフロー r-1 が error で終わった: Misaligned: 並びが合わない", 1)
+            return {"status": "ok"}, 0
+
+        return go
+
+    assert drive_pause.unless_misaligned(run(1), cr.Stop) == ({"status": "ok"}, 0) and len(calls) == 2
+    assert "流し直す" in capsys.readouterr().err
+    calls.clear()
+    with pytest.raises(cr.Stop):
+        drive_pause.unless_misaligned(run(2), cr.Stop)
+    assert len(calls) == 2
+    calls.clear()
+
+    def other():
+        calls.append(1)
+        raise cr.Stop("駆動の耐久ワークフロー r-1 が error で終わった: ValueError: x", 1)
+
+    with pytest.raises(cr.Stop):
+        drive_pause.unless_misaligned(other, cr.Stop)
+    assert len(calls) == 1
 
 
 def test_both_drives_share_the_pause_table():

@@ -139,10 +139,15 @@ class Misaligned(Exception):
     """打ち直しで、耐久の記録の並びが今の呼び出しと合わない（step の外の分岐が前の実行と違う道を通った・版をまたいだ。#2782）。"""
 
 
+def call_key(method: str, args: tuple) -> str:
+    """記録を見分ける鍵。段階の種類を最初の引数に取る呼び出し（has_result・pause）は種類まで含める（同じ名前どうしのずれを見る）。"""
+    return f"{method}:{args[0]}" if method != "stopped" and args and isinstance(args[0], str) else method
+
+
 def recorded(res: Any, method: str, held: Callable[[str, int], Exception]) -> Any:
-    """耐久ステップの記録が `method` のものか確かめ、中身を返す（止まりの記録は `held` で上げる）。
-    名前を持たない前の版の記録は確かめずに読む。"""
-    if not isinstance(res, dict) or res.get("method", method) != method:
+    """耐久ステップの記録が鍵 `method`（`call_key`）のものか確かめ、中身を返す（止まりの記録は `held` で上げる）。
+    名前を持たない前の版の記録は名前を確かめずに読む。"""
+    if not isinstance(res, dict) or res.get("method", method) != method or not ("ok" in res or "stop" in res):
         got = res.get("method") if isinstance(res, dict) else type(res).__name__
         raise Misaligned(f"耐久の記録の並びが今の呼び出しと合わない（{method} の位置に {got} の記録がある）")
     if "stop" in res:
@@ -157,11 +162,12 @@ def shown(res: Any) -> dict:
     return res
 
 
-def unless_misaligned(run: Callable[[], tuple]) -> tuple:
-    """`run` を流し、耐久ワークフローが `Misaligned` で落ちたときだけ 1 度流し直す（落ちた回は終わり、次は新しい実行の回）。"""
+def unless_misaligned(run: Callable[[], tuple], stop: type[Exception]) -> tuple:
+    """`run` を流し、耐久ワークフローが `Misaligned` で落ちた（`stop` の文面に名前がある）ときだけ 1 度流し直す。
+    落ちた回は終わり、次は新しい実行の回で頭から流れる（状態ファイルは残る）。2 度目は上げる。"""
     try:
         return run()
-    except Exception as e:  # noqa: BLE001  駆動の Stop は種類を問わず、並びのずれの名前で見分ける
+    except stop as e:
         if f"{Misaligned.__name__}:" not in str(e):
             raise
         print(f"[ndf drive] {e}。新しい実行の回で流し直す", file=sys.stderr)
