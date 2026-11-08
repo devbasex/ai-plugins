@@ -1596,7 +1596,8 @@ def plugin_root(tmp_path, version, name="plugin"):
     (root / "scripts" / "lib").mkdir(exist_ok=True)
     for rel in relay_version_dir.LIB_FILES:
         shutil.copyfile(ROOT / "scripts" / rel, root / "scripts" / rel)
-    for rel in relay_version_dir.PROJECT_FILES:
+    for rel in relay_version_dir.PROJECT_FILES + relay_version_dir.DECL_FILES:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / rel, root / rel)
     return root / "scripts" / "relay.py"
 

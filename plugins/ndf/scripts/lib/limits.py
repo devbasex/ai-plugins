@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """上限の宣言の読み手（#2343 の決定 1〜3。収束ループ共通層 #598 / #537 の表を含む）。
 
-上限の秒・再試行の回数・待ちの間隔の **既定値は上限の宣言（`plugins/ndf/contracts/limits.json`）だけが持つ。**
+上限の秒・再試行の回数・待ちの間隔の **既定値は上限の宣言（プラグインの `contracts/limits.json`）だけが持つ。**
 部品は値をコピーして持たず、方針の名前で引く（`policy("<名前>")`・`seconds("<名前>")`・`value("<名前>", "<キー>")`）。
 宣言は標準ライブラリの `json` だけで 1 プロセスに 1 回読む（hook の経路でも読むため）。宣言が無い・壊れている・
 方針やその値が無いときは、組み込みの値へ戻らずに `LimitsError`（理由に宣言のパスと方針の名前）を投げる。
@@ -38,7 +38,13 @@ import sys
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-DECLARATION = Path(__file__).resolve().parents[2] / "contracts" / "limits.json"
+# 置き場はプラグインからの相対で固定する: 配布物ではプラグインの `contracts/`、ラッパーの複製（バージョンディレクトリ。
+# `relay_lib/version_dir.py`）では `lib/` と並ぶ `contracts/`。上書きの環境変数は持たない（決定 2）
+_LIB_DIR = Path(__file__).resolve().parent
+DECLARATION = next(
+    (p for p in (_LIB_DIR.parents[1] / "contracts" / "limits.json", _LIB_DIR.parent / "contracts" / "limits.json") if p.is_file()),
+    _LIB_DIR.parents[1] / "contracts" / "limits.json",
+)
 VERSION = 1
 PHASE_PREFIX = "monitor.phase."
 STALL_PREFIX = "monitor.stall."
