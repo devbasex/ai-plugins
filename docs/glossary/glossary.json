@@ -3978,6 +3978,20 @@
       "source": "docs/specifications/ndf-production-release-record.md"
     },
     {
+      "term": "課題の表",
+      "context": "ndf-release",
+      "meaning": "リリース後テストの記録のうち、見出しに `課題` と `結果` の両方の列を持つ表。スプリントの課題を閉じる判定とリリースの承認資料が、課題ごとの合否をここから読む",
+      "source": "",
+      "pending_source": "issues/issue-2803-requirements.md"
+    },
+    {
+      "term": "補足の表",
+      "context": "ndf-release",
+      "meaning": "リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない",
+      "source": "",
+      "pending_source": "issues/issue-2803-requirements.md"
+    },
+    {
       "term": "版数を上げないリリース",
       "context": "ndf-release",
       "meaning": "版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース",
