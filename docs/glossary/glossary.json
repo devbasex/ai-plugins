@@ -95,6 +95,11 @@
       "id": "ndf-document",
       "name": "NDF の文書の組み直し",
       "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-rebuild が持つ"
+    },
+    {
+      "id": "ndf-factory",
+      "name": "Neural Development Factory",
+      "meaning": "Neural Development Factory（別のリポジトリのサービス）が NDF を呼ぶときの API・入出力の規約の語。規約は plugins/ndf/contracts/ が持つ"
     }
   ],
   "terms": [
@@ -4404,6 +4409,30 @@
       "source": "docs/specifications/runtime-plugin-distribution.md"
     },
     {
+      "term": "Neural Development Factory",
+      "context": "ndf-factory",
+      "meaning": "NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う",
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
+    },
+    {
+      "term": "ランナー",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム",
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
+    },
+    {
+      "term": "実行ジョブ",
+      "context": "ndf-factory",
+      "meaning": "実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる",
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
+    },
+    {
+      "term": "進捗の事象",
+      "context": "ndf-factory",
+      "meaning": "ランナーがサービスへ送る 1 件の出来事。サービスは追記だけで持つ",
+      "source": "docs/specifications/ndf-factory-service-boundary.md"
+    },
+    {
       "term": "依存グループ",
       "context": "ndf-workflow",
       "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
@@ -4464,6 +4493,18 @@
       "code": "whole_key"
     },
     {
+      "term": "起票の依頼",
+      "context": "ndf-factory",
+      "meaning": "実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない",
+      "source": ""
+    },
+    {
+      "term": "起票の依頼の結果",
+      "context": "ndf-factory",
+      "meaning": "起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ",
+      "source": ""
+    },
+    {
       "term": "予算の反映",
       "context": "ndf-workflow",
       "meaning": "開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない",
@@ -4517,7 +4558,7 @@
     {
       "term": "問い合わせの記録",
       "context": "ndf-workflow",
-      "meaning": "状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと外のサービスのランナーが読む（#2206）",
+      "meaning": "状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206）",
       "source": "docs/specifications/ndf-ask-guard.md",
       "code": "ask_ledger"
     },
@@ -4843,6 +4884,12 @@
       "context": "ndf-workflow",
       "meaning": "手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376）",
       "source": "docs/specifications/ndf-worker-stage-skills.md"
+    },
+    {
+      "term": "区間",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る",
+      "source": "docs/specifications/ndf-factory-dev-loops.md"
     },
     {
       "term": "差分の棚卸し",
@@ -5483,6 +5530,15 @@
       "context": "ndf-workflow",
       "meaning": "リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+    },
+    {
+      "term": "リリースの実行",
+      "context": "ndf-factory",
+      "meaning": "Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
+      "source": "docs/specifications/ndf-factory-organizer.md",
+      "deprecated": [
+        "配布の実行"
+      ]
     },
     {
       "term": "まとめたリリース",
