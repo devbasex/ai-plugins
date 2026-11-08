@@ -10,11 +10,12 @@
     1   欠けのある open の Issue・食い違いが 1 件以上
     2   GitHub・テンプレート・定義を読めない、引数の誤り（「0 件」と読ませない）
 
-`audit` は open の Issue だけを読み、本文とラベルを `judge(本文, ラベル, {})` で判定する（起票した者が AI かは GitHub から
+`audit` は open の Issue だけを読み、本文とラベルを `judge_body(本文, ラベル, {})` で判定する（起票した者が AI かは GitHub から
 決められないので、必須の項目・種類・順序だけを見る）。課題の置き場は `.ndf/project.json` の `issues.primary`（無ければ `github`）。
 
-`templates` は `.github/ISSUE_TEMPLATE/*.yml`（`config.yml` を除く）のフォームと、`out-of-scope` の本文の骨格・
-`requirements-design` の仕様のテンプレート（` ```markdown ` のブロックの見出し）を読む。フォームは `labels` の種類のラベルで
+`templates` は `<root>/.github/ISSUE_TEMPLATE/*.yml`（`config.yml` を除く）のフォームと、NDF が持つ `out-of-scope` の本文の
+骨格・`requirements-design` の仕様のテンプレート（このスクリプトと同じプラグインの `skills/` の下。` ```markdown ` のブロックの
+見出し）を読む。フォームは `labels` の種類のラベルで
 受け持つ種類を決め、その種類の必須の項目を必須欄に持つかを見る。骨格と仕様のテンプレートは 4 種類を受け持ち、どれかの種類で
 必須の項目をすべて見出しに持つかを見る。どのテンプレートも、項目名に当たらない欄・見出しを持たない。
 """
@@ -22,14 +23,18 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("md", "yamlio")
 import issue_items  # noqa: E402
+import md  # noqa: E402
 import proc  # noqa: E402
 import project_decl  # noqa: E402
+import run_core  # noqa: E402
 from step_result import EXIT_OK, EXIT_UNREADABLE, EXIT_VIOLATION, emit, result  # noqa: E402
 
 TOOL = "issue-items"
@@ -37,12 +42,8 @@ AUDIT_LIMIT = 2000  # open の Issue を読む上限
 ERROR_EXCERPT = 300
 FORMS_DIR = Path(".github") / "ISSUE_TEMPLATE"
 FORM_SKIP = ("config.yml",)
-MARKDOWN_TEMPLATES = (
-    Path("plugins/ndf/skills/out-of-scope/SKILL.md"),
-    Path("plugins/ndf/skills/requirements-design/references/spec-template.md"),
-)
-_BLOCK = re.compile(r"^```markdown[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
-_HEAD = re.compile(r"^(#{2,3})[ \t]+(.+?)[ \t]*$", re.M)
+SKILLS = Path(__file__).resolve().parents[1] / "skills"
+MARKDOWN_TEMPLATES = (Path("out-of-scope/SKILL.md"), Path("requirements-design/references/spec-template.md"))
 
 
 class _Parser(argparse.ArgumentParser):
@@ -50,11 +51,11 @@ class _Parser(argparse.ArgumentParser):
         emit(result(TOOL, "stopped", f"引数の誤り: {message}"), EXIT_UNREADABLE)
 
 
-def _stop(summary: str, code: int = EXIT_UNREADABLE, items=None, metrics=None) -> "NoReturn":  # noqa: F821
+def _stop_items(summary: str, code: int = EXIT_UNREADABLE, items=None, metrics=None) -> "NoReturn":  # noqa: F821
     emit(result(TOOL, "stopped", summary, items, metrics), code)
 
 
-def _root(given: str | None) -> Path:
+def _items_root(given: str | None) -> Path:
     if given:
         return Path(given).resolve()
     return Path(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or ".").resolve()
@@ -62,9 +63,9 @@ def _root(given: str | None) -> Path:
 
 def _definition(root: Path) -> issue_items.Definition:
     try:
-        return issue_items.load(root)
+        return issue_items.load_definition(root)
     except issue_items.DefinitionError as exc:
-        _stop(f"記載項目の定義を読めない: {exc}")
+        _stop_items(f"記載項目の定義を読めない: {exc}")
 
 
 # --- audit -------------------------------------------------------------------------------
@@ -81,14 +82,14 @@ def audit_rows(rows: list[dict], definition: issue_items.Definition) -> list[dic
     out = []
     for row in rows:
         labels = [lab.get("name") for lab in row.get("labels") or [] if isinstance(lab, dict)]
-        _kind, gaps = issue_items.judge(row.get("body") or "", labels, {}, definition)
+        _kind, gaps = issue_items.judge_body(row.get("body") or "", labels, {}, definition)
         if gaps:
             out.append({"kind": "issue", "name": f"#{row.get('number')}", "result": "missing", "missing": [g.heading for g in gaps]})
     return out
 
 
 def cmd_audit(a) -> None:
-    root = _root(None)
+    root = _items_root(None)
     store = store_of(root)
     if store != "github":
         metrics = {"checked": None, "missing": None, "store": store}
@@ -99,13 +100,13 @@ def cmd_audit(a) -> None:
     try:
         got = gh_rest.issue_list(a.repo, "number,title,body,labels", "open", None, AUDIT_LIMIT)
     except ValueError as exc:  # リポジトリを決められない
-        _stop(f"GitHub を読めなかった: {exc}")
+        _stop_items(f"GitHub を読めなかった: {exc}")
     if not got.ok or not isinstance(got.value, list):
-        _stop(f"GitHub を読めなかった: {str(got.error or '一覧が並びでない')[:ERROR_EXCERPT]}")
+        _stop_items(f"GitHub を読めなかった: {str(got.error or '一覧が並びでない')[:ERROR_EXCERPT]}")
     items = audit_rows(got.value, definition)
     metrics = {"checked": len(got.value), "missing": len(items), "store": store}
     if items:
-        _stop(f"open の Issue {len(got.value)} 件のうち {len(items)} 件に欠けがある", EXIT_VIOLATION, items, metrics)
+        _stop_items(f"open の Issue {len(got.value)} 件のうち {len(items)} 件に欠けがある", EXIT_VIOLATION, items, metrics)
     emit(result(TOOL, "ok", f"open の Issue {len(got.value)} 件に欠けは無い", [], metrics), EXIT_OK)
 
 
@@ -149,7 +150,8 @@ def form_mismatches(rel: str, form: dict, definition: issue_items.Definition) ->
 
 def markdown_mismatches(rel: str, text: str, definition: issue_items.Definition) -> list[dict]:
     """骨格・仕様のテンプレートの食い違い。見出しは ` ```markdown ` のブロックの中の H2 と H3。"""
-    heads = [m.group(2) for block in _BLOCK.findall(text) for m in _HEAD.finditer(block)]
+    blocks = [t.content for t in md.md_tokens(text) if t.type == "fence" and t.info.strip() == "markdown"]
+    heads = [h.title for block in blocks for h in md.headings(block) if h.level in (2, 3)]
     out, seen = [], set()
     for h in heads:
         it = definition.item_for_heading(h)
@@ -168,42 +170,40 @@ def _load_form(path: Path, rel: str) -> dict:
     try:
         form = yamlio.load_yaml(path.read_text(encoding="utf-8"), rel)
     except (OSError, UnicodeDecodeError, yamlio.YamlError) as exc:
-        _stop(f"テンプレートを読めない: {rel}（{exc}）")
+        _stop_items(f"テンプレートを読めない: {rel}（{exc}）")
     if not isinstance(form, dict):
-        _stop(f"テンプレートの最上位がオブジェクトでない: {rel}")
+        _stop_items(f"テンプレートの最上位がオブジェクトでない: {rel}")
     return form
 
 
 def cmd_templates(a) -> None:
-    import deps
-
-    deps.require("yamlio")
-    root = _root(a.root)
+    root = _items_root(a.root)
     definition = _definition(root)
     forms = sorted(p for p in (root / FORMS_DIR).glob("*.yml") if p.name not in FORM_SKIP)
     if not forms:
-        _stop(f"フォームが無い: {root / FORMS_DIR}")
+        _stop_items(f"フォームが無い: {root / FORMS_DIR}")
     items: list[dict] = []
     for p in forms:
         rel = str(p.relative_to(root))
         items += form_mismatches(rel, _load_form(p, rel), definition)
     for rel in MARKDOWN_TEMPLATES:
+        path = SKILLS / rel
         try:
-            text = (root / rel).read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            _stop(f"テンプレートを読めない: {rel}（{exc}）")
-        items += markdown_mismatches(str(rel), text, definition)
+            _stop_items(f"テンプレートを読めない: {path}（{exc}）")
+        items += markdown_mismatches(f"skills/{rel}", text, definition)
     metrics = {"templates": len(forms) + len(MARKDOWN_TEMPLATES), "mismatches": len(items), "definition": str(definition.path)}
     if items:
         names = "・".join(f"{it['name']} の {it['item']}（{it['result']}）" for it in items[:10])
-        _stop(f"記載項目の定義とテンプレートが {len(items)} か所で食い違う: {names}", EXIT_VIOLATION, items, metrics)
+        _stop_items(f"記載項目の定義とテンプレートが {len(items)} か所で食い違う: {names}", EXIT_VIOLATION, items, metrics)
     emit(result(TOOL, "ok", f"テンプレート {metrics['templates']} 個が記載項目の定義と一致する", [], metrics), EXIT_OK)
 
 
 # --- 入口 ---------------------------------------------------------------------------
 
 
-def parser() -> argparse.ArgumentParser:
+def items_cli_parser() -> argparse.ArgumentParser:
     ap = _Parser(prog="issue-items.py", description="Issue の記載項目の定義に照らした検査")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("audit", help="open の Issue のうち必須の項目が欠けたものを並べる")
@@ -216,9 +216,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> None:
-    a = parser().parse_args(argv)
+    a = items_cli_parser().parse_args(argv)
     a.func(a)
 
 
 if __name__ == "__main__":
-    main()
+    run_core.main("scripts/issue-items.py", main)

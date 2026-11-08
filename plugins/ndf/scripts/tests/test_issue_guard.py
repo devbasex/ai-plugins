@@ -1,0 +1,158 @@
+"""起票の guard（hook_lib/issue_guard.py、#2737 の受け入れ条件 11・12 と I6〜I8）。
+
+hook.py の振り分け（`dispatch`）に Claude Code の PreToolUse（Bash）の入力を渡し、拒否の有無と理由を見る。
+GitHub は呼ばない。`-R` の判定に使う origin は一時ディレクトリの git リポジトリに置く。
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(SCRIPTS / "lib"))
+import hook  # noqa: E402
+
+REPO = "o/r"
+FEATURE = """## 目的
+
+今は X。Y が困る。Z が成り立つ。
+
+## 対象範囲
+
+含む: A
+含まない: B
+
+## 受け入れ条件
+
+- [ ] C になる
+
+## 起票者の推定
+
+無し
+"""
+
+
+@pytest.fixture()
+def repo(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", f"https://github.com/{REPO}.git"], check=True)
+    monkeypatch.setenv("NDF_CONTEXT_GUARD", "0")
+    monkeypatch.setenv("NDF_SLEEP_GUARD", "0")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def decide(cwd: Path, command: str, runtime: str = "claude"):
+    raw = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd), "session_id": "s"}
+    return hook.dispatch("", runtime, raw)
+
+
+def reason(out) -> str | None:
+    spec = (out or {}).get("hookSpecificOutput") or {}
+    return spec.get("permissionDecisionReason") if spec.get("permissionDecision") == "deny" else None
+
+
+def write(cwd: Path, text: str, name: str = "body.md") -> str:
+    (cwd / name).write_text(text, encoding="utf-8")
+    return name
+
+
+def test_a_complete_body_file_passes(repo):
+    assert reason(decide(repo, f"gh issue create --title t --label enhancement --body-file {write(repo, FEATURE)}")) is None
+
+
+def test_a_missing_required_item_is_denied_with_the_item_and_the_means(repo):
+    body = FEATURE.replace("## 対象範囲\n\n含む: A\n含まない: B\n", "")
+    why = reason(decide(repo, f"gh issue create --title t -l enhancement -F {write(repo, body)}"))
+    assert why is not None
+    assert "対象範囲" in why and "issue-file.py create" in why and "--body-file" in why and "issue-items.json" in why
+
+
+def test_the_presumption_is_required_for_an_ai_filing(repo):
+    body = FEATURE.replace("## 起票者の推定\n\n無し\n", "")
+    assert "起票者の推定" in reason(decide(repo, f"gh issue create -t t -l enhancement -F {write(repo, body)}"))
+
+
+@pytest.mark.parametrize("labels", ["", "--label bug --label enhancement", "--label bug,enhancement", "--label documentation"])
+def test_a_body_without_exactly_one_kind_is_denied_as_kind_unknown(repo, labels):
+    why = reason(decide(repo, f"gh issue create -t t {labels} -F {write(repo, FEATURE)}"))
+    assert why is not None and "種類（不明）" in why
+
+
+def test_a_body_string_is_read(repo):
+    body = FEATURE.replace("'", "")
+    assert reason(decide(repo, f"gh issue create -t t --label=enhancement --body '{body}'")) is None
+    assert reason(decide(repo, "gh issue create -t t --label enhancement --body '## 目的\n\nx\n'")) is not None
+
+
+def test_a_quoted_heredoc_body_is_read(repo):
+    ok = f"gh issue create -t t -l enhancement --body \"$(cat <<'EOF'\n{FEATURE}EOF\n)\""
+    assert reason(decide(repo, ok)) is None
+    bad = "gh issue create -t t -l enhancement --body \"$(cat <<'EOF'\n## 目的\n\nx\nEOF\n)\""
+    assert "対象範囲" in reason(decide(repo, bad))
+
+
+@pytest.mark.parametrize(
+    "tail",
+    ["--body-file -", '--body "$BODY"', "--web", "-F missing.md", "-b"],
+)
+def test_a_body_in_an_unreadable_form_is_denied(repo, tail):
+    why = reason(decide(repo, f"gh issue create -t t -l enhancement {tail}"))
+    assert why is not None and "読めない形" in why
+
+
+def test_another_repository_is_not_judged(repo):
+    assert reason(decide(repo, "gh issue create -R other/repo -t t --body-file -")) is None
+    assert reason(decide(repo, f"gh issue create --repo {REPO} -t t --body-file -")) is not None
+
+
+def test_wrappers_and_lists_are_seen(repo):
+    name = write(repo, "## 目的\n\nx\n")
+    assert reason(decide(repo, f"cd . && env GH_TOKEN=x gh issue create -t t -l enhancement -F {name}")) is not None
+    assert reason(decide(repo, f"FOO=1 command gh issue create -t t -l enhancement -F {name} | cat")) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo gh issue create",
+        "gh issue list --label bug",
+        "gh pr create --title t --body x",
+        "cat <<'EOF'\ngh issue create -t t\nEOF",
+    ],
+)
+def test_other_commands_pass(repo, command):
+    assert reason(decide(repo, command)) is None
+
+
+def test_other_runtimes_are_not_judged(repo):
+    assert reason(decide(repo, "gh issue create -t t --body-file -", runtime="codex")) is None
+
+
+def test_the_guard_does_not_call_github(repo, monkeypatch):
+    """判定は本文とラベルだけで決まり、gh を起動しない（I8）。"""
+    import gh_call
+
+    def boom(*a, **k):
+        raise AssertionError("gh を呼んだ")
+
+    monkeypatch.setattr(gh_call, "RUNNER", boom)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    assert reason(decide(repo, f"gh issue create -t t -l enhancement -F {write(repo, '## 目的')}")) is not None
+
+
+def test_the_hook_entrypoint_denies(repo):
+    """hook.py を PreToolUse の入力で起動すると、拒否が 1 行の JSON で出る（配線の確かめ）。"""
+    raw = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(repo), "session_id": "s"}
+    raw["tool_input"] = {"command": "gh issue create -t t --body-file -"}
+    p = subprocess.run(
+        [sys.executable, str(SCRIPTS / "hook.py")], input=json.dumps(raw), capture_output=True, text=True, cwd=repo, timeout=60
+    )
+    assert p.returncode == 0
+    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"

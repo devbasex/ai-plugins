@@ -17,9 +17,7 @@
     10  承認資料を書いた。同意の後に `--approved <metrics.digest>` を足して打ち直す（create と、打つ先が開発対象リポジトリと別の note）
     20  上流リポジトリを 1 つに絞れない。候補を示して利用者に選んでもらう（resolve-target）
 
-`create` は起票の前に本文を記載項目の定義（`lib/issue_items.py`。既定は `data/issue-items.json`）で判定する。種類は
-`--label` のうち種類のラベル（`bug`・`enhancement`・`investigation`・`operation`）で読み、その種類の必須の項目と、
-起票者の推定・由来（AI が作業の途中で起票するため）がそろい空でないかを見る。
+`create` は起票の前に本文を記載項目の定義（`lib/issue_items.py`。種類は `--label` の種類のラベル）で判定する。
 
 由来は `PR #<番号>` か `issue #<番号>`、リポジトリは `<所有者>/<リポジトリ>`、相手の課題は `<所有者>/<リポジトリ>#<番号>`。
 形が違えば GitHub を呼ばずに 2 で終える。GitHub は `lib/gh_rest.py`（下は `gh_call`）だけを通して呼ぶ。
@@ -357,11 +355,10 @@ def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
 def body_gaps(body: str, labels: list[str]) -> list[dict]:
     """記載項目の定義に照らした欠け（`heading` と `result`）。定義を読めなければ 2 で終える。"""
     try:
-        definition = issue_items.load(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or None)
+        definition = issue_items.load_definition(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or None)
     except issue_items.DefinitionError as exc:
         _stop_with(f"記載項目の定義を読めない: {exc}", EXIT_UNREADABLE)
-    _kind, gaps = issue_items.judge(body, labels, CREATE_CONTEXT, definition)
-    return [g.to_dict() for g in gaps]
+    return [g.to_dict() for g in issue_items.judge_body(body, labels, CREATE_CONTEXT, definition)[1]]
 
 
 def _digest(shown: dict) -> str:

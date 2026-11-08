@@ -3,12 +3,12 @@
 定義は `data/issue-items.json`（種類ごとの必須・該当時・不要と水準）、置き場ごとの表し方は `data/issue-stores.json` にある。
 プロジェクトの `.ndf/issue-items.json` があれば、既定の定義の代わりにそのまま読む（表し方のファイルは置き換えない）。
 
-- `load(root)`: 定義と表し方を読み、不変条件（各項目が 4 種類の区分と水準を持つ・該当時の項目は条件を持つ・
+- `load_definition(root)`: 定義と表し方を読み、不変条件（各項目が 4 種類の区分と水準を持つ・該当時の項目は条件を持つ・
   3 つの置き場で表し方を 1 つに解決できる）を確かめる。破れていれば `DefinitionError`
-- `judge(body, labels, context, definition)`: 本文とラベルから欠けを返す純粋な関数。`context` は機械で決まる
+- `judge_body(body, labels, context, definition)`: 本文とラベルから欠けを返す純粋な関数。`context` は機械で決まる
   該当時の条件のキー（`ai`・`origin`）の真偽を持つ
 
-hook の経路（`hook_lib/issue_guard.py`）から呼ぶため、標準ライブラリと `decl` だけで書く。
+hook の経路（`hook_lib/issue_guard.py`）から呼ぶため、標準ライブラリと `decl`・`gh_sections` だけで書く。
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
+import gh_sections
+
 DATA = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_ITEMS = DATA / "issue-items.json"
 STORES = DATA / "issue-stores.json"
@@ -28,7 +30,6 @@ STORE_NAMES = ("github", "markdown", "redmine")
 CONTEXT_KEYS = ("ai", "origin")
 SECTION = "section"
 EMPTY_MARKS = ("_No response_", "<!-- ndf:section-end -->")
-_FENCE = re.compile(r"^\s*(```|~~~)")
 _HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$")
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 
@@ -103,7 +104,7 @@ def heading_matches(text: str, name: str) -> bool:
 # --- 読み込み ----------------------------------------------------------------------------
 
 
-def _read_json(path: Path) -> dict:
+def _definition_json(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -113,7 +114,7 @@ def _read_json(path: Path) -> dict:
     return data
 
 
-def _item(raw: dict, kinds: list[str], path: Path) -> Item:
+def _read_item(raw: dict, kinds: list[str], path: Path) -> Item:
     """1 項目を読み、区分と水準と条件を確かめる。"""
     iid, name = raw.get("id"), raw.get("name")
     if not isinstance(iid, str) or not iid or not isinstance(name, str) or not name:
@@ -160,17 +161,17 @@ def items_path(root) -> Path:
     return DEFAULT_ITEMS
 
 
-def load(root=None) -> Definition:
+def load_definition(root=None) -> Definition:
     path = items_path(root)
-    raw = _read_json(path)
+    raw = _definition_json(path)
     kinds = raw.get("kinds")
     if not isinstance(kinds, list) or not kinds or not all(isinstance(k, str) and k for k in kinds):
         raise DefinitionError(f"{path}: kinds が文字列の並びでない")
     rows = raw.get("items")
     if not isinstance(rows, list) or not rows:
         raise DefinitionError(f"{path}: items が無い")
-    items = [_item(r if isinstance(r, dict) else {}, kinds, path) for r in rows]
-    st = _read_json(STORES)
+    items = [_read_item(r if isinstance(r, dict) else {}, kinds, path) for r in rows]
+    st = _definition_json(STORES)
     stores = st.get("stores") if isinstance(st.get("stores"), dict) else {}
     _check_stores(stores, items)
     heads = [h for h in st.get("record_headings") or [] if isinstance(h, str)]
@@ -187,15 +188,11 @@ class Heading(NamedTuple):
     text: str
 
 
-def headings(lines: list[str]) -> list[Heading]:
+def body_headings(lines: list[str]) -> list[Heading]:
     """コードブロックの外にある見出し。"""
-    out, fence = [], None
-    for i, line in enumerate(lines):
-        m = _FENCE.match(line)
-        if m:
-            fence = None if fence == m.group(1) else (fence or m.group(1))
-            continue
-        h = _HEADING.match(line) if fence is None else None
+    out = []
+    for i, line in gh_sections.unfenced_lines(lines):
+        h = _HEADING.match(line)
         if h:
             out.append(Heading(i, len(h.group(1)), h.group(2).strip()))
     return out
@@ -245,10 +242,10 @@ def _order_gap(heads: list[Heading], definition: Definition) -> Gap | None:
     return None
 
 
-def judge(body: str, labels, context: dict | None, definition: Definition) -> tuple[str | None, list[Gap]]:
+def judge_body(body: str, labels, context: dict | None, definition: Definition) -> tuple[str | None, list[Gap]]:
     """`(決まった種類か None, 欠け)`。種類が決まらなければ必須の項目は見ない（種類の欠けと順序だけを返す）。"""
     lines = (body or "").replace("\r\n", "\n").split("\n")
-    heads = headings(lines)
+    heads = body_headings(lines)
     kind = kind_of(labels, definition)
     gaps: list[Gap] = []
     if kind is None:
@@ -266,7 +263,7 @@ def judge(body: str, labels, context: dict | None, definition: Definition) -> tu
     return kind, gaps
 
 
-def describe(gaps: list[Gap]) -> str:
+def describe_gaps(gaps: list[Gap]) -> str:
     """欠けを 1 行で（`影響（無い）・種類（不明）`）。"""
     word = {"missing": "無い", "empty": "空", "order": "後ろに書き手の節がある", "kind": "不明"}
     return "・".join(f"{g.heading}（{word.get(g.result, g.result)}）" for g in gaps)

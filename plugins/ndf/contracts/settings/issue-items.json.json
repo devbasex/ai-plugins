@@ -1,0 +1,23 @@
+{
+  "file": "issue-items.json",
+  "summary": "Issue の記載項目の定義（種類ごとの必須・該当時・不要と水準）。あれば NDF の既定（scripts/data/issue-items.json）の代わりにそのまま読む（#2737）",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/issue_items.py:items_path"
+  ],
+  "keys": {
+    "version": {
+      "summary": "形の版。今は 1"
+    },
+    "kinds": {
+      "summary": "Issue の種類の並び（既定は不具合・機能・調査・運用）"
+    },
+    "last": {
+      "summary": "書き手が書く節の最後に置く項目の識別子（既定は request＝依頼（原文））"
+    },
+    "items": {
+      "summary": "記載項目の並び。id・name・need（種類 → 必須 / 該当時 / 不要）・level（水準）・when（該当する条件の text と、機械で判定する key の ai / origin）"
+    }
+  }
+}
