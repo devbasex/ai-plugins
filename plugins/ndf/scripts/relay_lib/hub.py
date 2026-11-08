@@ -83,8 +83,11 @@ def ensure_dirs() -> None:
 
 
 def max_named() -> int:
-    """同時に動かすラッパーの数の上限（`NDF_RELAY_MAX_NAMED`。既定 3。決定 5）。"""
-    return max(1, int(env_num("NDF_RELAY_MAX_NAMED", 3)))
+    """同時に動かすラッパーの数の上限（レーン数の上限）。マシンの設定 → `NDF_RELAY_MAX_NAMED` → 既定 3 の順で、
+    毎回読む（`relay.py cap` で変えた値をハブの起動し直し無しで使う。#2733 の決定 8）。"""
+    import relay_limit
+
+    return relay_limit.max_named()[0]
 
 
 def launch_check_seconds() -> float:

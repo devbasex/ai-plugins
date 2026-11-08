@@ -11,6 +11,7 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 | `role organizer\|helper --plan <計画名>` / `role --clear` | 作業ディレクトリへ役割のファイルを書く・消す。オーガナイザーの印を持つ 1 本は同時に動かせる数に数えない（#2436） |
 | `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
+| `cap [--named <n>]` | レーン数の上限（同時に動かせる名前つきのラッパーの数）を読む・マシンの設定へ書く（#2733）。値はマシンの設定 → `NDF_RELAY_MAX_NAMED` → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。1 行の JSON を出す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
 | `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` / `account use <名前>\|--clear` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す・次の区間から使うアカウントを指定する（#1389・#1453・#1468・#2460。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
@@ -86,6 +87,7 @@ def main(argv: list[str]) -> int:
         "is-child": lambda: 0 if proc.under_relay() else 1,
         "notice": mark.cmd_notice,
         "account": lambda: accounts.cmd_account(rest),
+        "cap": lambda: _cap_cmd(rest),
     }
     if sub in commands:
         return commands[sub]()
@@ -126,6 +128,28 @@ def _help(subs: list[str], out=sys.stdout) -> int:
         lines = ["usage: relay.py <副命令> [引数 ...]", ""] + lines + ["", "relay.py <副命令> --help でその副命令だけを出す"]
     print("\n".join(lines), file=out)
     return 0
+
+
+def _cap_cmd(rest: list[str]) -> int:
+    """`cap [--named <n>]`: レーン数の上限を読む（省いたとき）・書く。正の整数でなければ 1（#2733 の決定 8）。"""
+    import json
+
+    import relay_limit
+
+    def out(status: str, summary: str, code: int, **metrics) -> int:
+        print(json.dumps({"tool": "relay-cap", "status": status, "summary": summary, "items": [], "metrics": metrics}, ensure_ascii=False))
+        return code
+
+    if rest:
+        if len(rest) != 2 or rest[0] != "--named":
+            return out("stopped", "使い方: relay.py cap [--named <正の整数>]", 1)
+        try:
+            relay_limit.write_max_named(int(rest[1]))
+        except ValueError:
+            return out("stopped", f"上限は正の整数: {rest[1]}", 1)
+    n, source, note = relay_limit.max_named()
+    summary = f"レーン数の上限は {n}（出所: {source}）" + (f"。{note}" if note else "")
+    return out("ok", summary, 0, max_named=n, source=source, path=str(relay_limit.limits_path()))
 
 
 def _stop_cmd(rest: list[str]) -> int:

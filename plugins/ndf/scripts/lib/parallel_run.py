@@ -12,7 +12,7 @@
   最後の起動の指示を `release` に添える）、`questions`: `{seq, items}`
 - イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次のリリースへ回した知らせ）・`range-<連番>`・`lane-<名>`
 
-統括役の CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
+リレーハブの CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
     out = {}
     for n in lanes:
         ln = plan.lane(n)
-        code, res = relay(Path(main), "spawn", "--name", n, "--json", "--", pp.first_input(ln))
+        code, res = relay(ln.repo_dir(Path(main)), "spawn", "--name", n, "--json", "--", pp.first_input(ln))  # cwd はレーンのリポジトリ
         why = ((res.get("items") or [{}])[0] or {}).get("result")
         if code == 0 or why == "name-taken":
             out[n] = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -261,6 +261,8 @@ class _Run(prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
             self.reply(msg)
         elif kind == "left_stopped":
             self.keep_stopped(msg.get("lane"))
+        elif kind == "lanes_changed":  # parallel.py lane add / set の後（#2733 の決定 9）
+            self.take_lanes_changed()
 
     def receive_question(self, msg: dict) -> None:
         """レーンからの問い（gate1 / gate2 / ask）を一覧へ受け付ける。打ち直しは数えず、同じ原因の問いは 1 つにまとめる。"""

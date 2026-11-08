@@ -5,6 +5,10 @@
 （#2439。依頼と答えは置き場のファイルで受け渡す。`parallel_external.py`）。外のレーンは設計の承認と承認ゲートの外の問いを
 依頼にせず、今どおり止まって人へ戻す。
 
+別のリポジトリのレーン（計画の宣言のレーンの `repo`。#2733）は、自分のメインディレクトリと計画の所在の一覧
+（`parallel_homes`）の置き場を探して判定する。判定は `LaneRef`（(計画名, レーン) の 2 つ組として読め、計画の置き場 `home` と
+レーンのリポジトリ `repo` を持つ）を返し、依頼・答え・止める指示は `home` の側で読み書きする（I5）。
+
 耐久の記録は外のプロセスとして `durable.py` の `send_to`・`event_of`・`status_of` で開く（DBOS を起動しない）。
 DBOS を読まずに済む判定（計画の有無・本数）は、耐久の記録のファイルが無ければ DBOS を import しない。
 """
@@ -22,7 +26,7 @@ from typing import Optional
 
 import parallel_external as pe
 import parallel_plan as pp
-from parallel_files import helper_plan_of, lane_name_in_plans, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
+from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
 RUNNING = ("PENDING", "ENQUEUED")
@@ -74,23 +78,62 @@ def external_lane() -> Optional[tuple[str, pp.Lane]]:
     return pe.EXTERNAL, lane
 
 
+class LaneRef(tuple):
+    """レーンの判定の結果。(計画名, レーン) の 2 つ組として読め、計画の置き場 `home` とレーンのリポジトリ `repo` を持つ（#2733）。"""
+
+    def __new__(cls, plan: str, lane, home: Path, repo: Optional[Path] = None):
+        obj = super().__new__(cls, (plan, lane))
+        obj.plan, obj.lane, obj.home = plan, lane, Path(home)
+        obj.repo = Path(repo) if repo is not None else Path(home)
+        return obj
+
+    def own_release(self) -> bool:
+        """別のリポジトリのレーンか（自分のリポジトリの設定で本番を出す。I7）。"""
+        return _resolved(self.repo) != _resolved(self.home)
+
+
+def _resolved(p: Path) -> str:
+    try:
+        return str(Path(p).resolve())
+    except OSError:
+        return str(p)
+
+
+def home_of(got, main: Path) -> Path:
+    """判定の結果の計画の置き場（外のオーガナイザーのレーンの 2 つ組は置き場を持たないため `main`）。"""
+    return getattr(got, "home", None) or Path(main)
+
+
 def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Optional[tuple[str, pp.Lane]]:
-    """`NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない計画のレーンにあれば (計画名, レーン)。無ければ None（I12）。
-    外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）なら、名前を渡さない判定で (`--external`, レーン) を返す（#2439）。"""
+    """`NDF_RELAY_NAME` の名前が、耐久ワークフローが終わっていない計画のレーンにあれば `LaneRef`（(計画名, レーン)）。
+    無ければ None（I12）。自分のメインディレクトリ `main` と計画の所在の一覧の置き場を探し、レーンのリポジトリが `main` と
+    一致する計画だけを当てる（#2733 の I5）。外のオーガナイザーのレーン（`NDF_ORGANIZER_DIR`）なら、名前を渡さない判定で
+    (`--external`, レーン) を返す（#2439。所在の一覧より先に見る）。"""
     if lane is None and (ext := external_lane()):
         return ext
     lane = lane if lane is not None else os.environ.get("NDF_RELAY_NAME")
     if not lane:
         return None
-    for name in plans_in(main):
-        try:
-            plan = pp.load_valid_plan(main, name)
-        except (OSError, ValueError):
-            continue
-        hit = plan.lane(lane)
-        if hit is not None and status(main, name) in RUNNING:
-            return name, hit
+    import parallel_homes
+
+    me = _resolved(Path(main))
+    for home in parallel_homes.search_homes(Path(main)):
+        for name in plans_in(home):
+            try:
+                plan = pp.load_valid_plan(home, name)
+            except (OSError, ValueError):
+                continue
+            hit = plan.lane(lane)
+            if hit is not None and _resolved(hit.repo_dir(home)) == me and status(home, name) in RUNNING:
+                return LaneRef(name, hit, home, hit.repo_dir(home))
     return None
+
+
+def record_home(main: Path) -> None:
+    """計画の置き場を計画の所在の一覧へ書く（`parallel.py start`。#2733 の決定 1）。"""
+    import parallel_homes
+
+    parallel_homes.record(main)
 
 
 def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
@@ -108,11 +151,12 @@ def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
         code, got = relay_ls()
         state = next((i.get("state") for i in got.get("items") or [] if i.get("name") == lane), None) if code == 0 else None
         return state not in ("running", "awaiting_approval")
+    repo = hit.repo_dir(main)  # ループの記録と引継ぎ文書はレーンのリポジトリにある（#2733 の I6）
     try:
         if isinstance(hit.input, pp.LoopInput):
-            rec = json.loads((Path(main) / LOOP_DIR / hit.input.loop / "loop.json").read_text(encoding="utf-8"))
+            rec = json.loads((repo / LOOP_DIR / hit.input.loop / "loop.json").read_text(encoding="utf-8"))
             return rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") == "waiting_only"
-        return rid in (Path(main) / ".ndf" / "handoff" / f"{hit.handoff_name()}.md").read_text(encoding="utf-8")
+        return rid in (repo / ".ndf" / "handoff" / f"{hit.handoff_name()}.md").read_text(encoding="utf-8")
     except (OSError, ValueError, AttributeError):
         return False
 
@@ -267,7 +311,7 @@ def write_request(state: Path, data: dict) -> Path:
 
 
 def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
-    """依頼ごとの {"answer": `answer-<依頼>`, "defer": `defer-<依頼>`} を待たずに読む（周回の境で読む。#2436 の 6a・6e）。
+    """依頼ごとの {"answer": `answer-<依頼>`, "defer": `defer-<依頼>`} を待たずに読む（ループの 1 回の境で読む。#2436 の 6a・6e）。
     耐久の記録が無ければ、どれも答えの無いものとして返す（DBOS を import しない）。"""
     if pe.is_external(name):
         d = pe.organizer_dir()
@@ -290,15 +334,16 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
 
 def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=run_status) -> Optional[tuple[str, str]]:
     """問いを送ってよい送り手か: 動いている計画のレーン（`lane_of`）か、役割のファイルが `helper` で、その計画の
-    耐久ワークフローが終わっていない一時レーン。(計画名, 送り手の名前) か None。外のオーガナイザーのレーンは問いを送らない（#2439）。"""
+    耐久ワークフローが終わっていない一時レーン。`LaneRef`（(計画名, 送り手の名前)。`home` は計画の置き場）か None。
+    外のオーガナイザーのレーンは問いを送らない（#2439）。"""
     if pe.organizer_dir() is not None:
         return None
     got = lane_of(main, name, status) if name else None
     if got:
-        return got[0], name
+        return LaneRef(got[0], name, got.home, got.repo)
     plan = helper_plan_of(relay_dir)
     if name and plan and status(main, plan) in RUNNING:
-        return plan, name
+        return LaneRef(plan, name, Path(main))
     return None
 
 

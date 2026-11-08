@@ -405,7 +405,7 @@ def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", sta
         stamp = stamp or design_head(env, w)
         reasons = [x for x in (w.get("reason"), w.get("returned")) if x]
         rid = parallel_lane.request_gate1(
-            env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
+            parallel_lane.home_of(got, env.main_dir()), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
             verdict=w.get("verdict"), reasons=reasons, boundary=list(w.get("boundary") or []), suffix=suffix,
             **({"returned": True} if w.get("returned") else {}),
         )  # fmt: skip

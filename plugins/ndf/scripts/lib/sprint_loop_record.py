@@ -152,7 +152,7 @@ class Env:
         try:
             import parallel_lane
 
-            return parallel_lane.answers_of(self.main_dir(), plan, ids)
+            return parallel_lane.answers_of(parallel_lane.plan_home(self.main_dir(), plan), plan, ids)
         except Exception:  # noqa: BLE001 — 耐久の記録が無い・読めないときは答えがまだ無いものとして続ける
             return {i: {"answer": None, "defer": None} for i in ids}
 

@@ -321,6 +321,15 @@ NEW_ARGS = [
         "sprint close release",
     ),
     (
+        "--outside-plan",
+        {
+            "metavar": "理由",
+            "help": "動いている並列の計画の外で、例外としてスプリントを始める（理由はマシンの記録に残る。#2733）。省くと、動いている計画が"
+            "あるマシンで計画の外なら終了コード 3 で止まる",
+        },
+        "sprint",
+    ),
+    (
         "--absorb",
         {
             "type": absorb_arg,

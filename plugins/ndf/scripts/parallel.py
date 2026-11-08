@@ -19,6 +19,7 @@
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
 | `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
+| `lane <計画名> add --from <JSON>` / `lane <計画名> set --lane <名> --from <JSON>` | 動いている計画へレーンを足す・レーンの入力を書き換える（上限を含む検査を通ったときだけ書き、耐久ワークフローへ知らせる。`lib/parallel_lane_cli.py`。#2733） |
 
 外のオーガナイザーとの `--external` の副命令（#2439）は `lib/parallel_external_cli.py` にある。
 
@@ -49,6 +50,7 @@ import parallel_external_cli as px  # noqa: E402
 import parallel_hold as ph  # noqa: E402
 import parallel_hold_cli as phc  # noqa: E402
 import parallel_lane as pl  # noqa: E402
+from parallel_lane_cli import cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
 from step_result import emit, result  # noqa: E402
@@ -79,7 +81,7 @@ def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[di
         reply("stopped", f"並列の計画 {name} が無い（置き場: {pp.plan_dir(main, name)}/plan.json）", code=1)
     except (OSError, ValueError) as exc:
         reply("stopped", f"並列の計画 {name} を読めない: {exc}", code=2)
-    return pp.check_data(data)
+    return pp.check_data(data, home=main)
 
 
 def cmd_init(a) -> None:
@@ -92,7 +94,7 @@ def cmd_init(a) -> None:
     if not isinstance(raw, dict):
         reply("stopped", "下書きが JSON のオブジェクトでない", code=2)
     raw = {**raw, "name": a.name}
-    plan, items, metrics = pp.check_data(raw)
+    plan, items, metrics = pp.check_data(raw, home=main)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
     import handoff
@@ -156,6 +158,7 @@ def cmd_start(a) -> None:
 
     env, notes = pr_run.environment_report(main, plan)
     notes = [*notes, *ph.limit_items(main)]
+    pl.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
         marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
@@ -191,7 +194,7 @@ def cmd_wait(a) -> None:
         action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
         if action == "running":
             reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"))
-        items = ev.pop("items", None) or []
+        items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
         if action == ph.CONDITION:
             ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
         reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **ev)
@@ -225,13 +228,8 @@ def cmd_present(a) -> None:
         reply("stopped", f"承認資料に承認したコミットが無い: {exc}", code=1)
     except OSError as exc:
         reply("stopped", f"読めない: {exc}", code=2)
-    reply(
-        "ok",
-        f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）",
-        [{"lane": n, **r} for n, r in got["lanes"].items()],
-        sha=got["sha"],
-        orphans=got["orphans"],
-    )
+    summary = f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）"
+    reply("ok", summary, [{"lane": n, **r} for n, r in got["lanes"].items()], sha=got["sha"], orphans=got["orphans"])
 
 
 def cmd_compose(a) -> None:
@@ -356,6 +354,7 @@ def cmd_request_ask(a) -> None:
         reply("stopped", f"{a.lane} は動いている計画のレーンでも一時レーンでもない（問いは通す）", code=4)
     if who[0] != a.name:
         reply("stopped", f"{a.lane} は計画 {who[0]} の送り手で、{a.name} の送り手でない", code=4)
+    main = who.home  # 計画の置き場（別のリポジトリのレーンでは自分のリポジトリと違う。#2733）
     rid = pl.request_ask(main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or ""))
     reply("ok", f"問いの依頼 {rid} をオーガナイザーへ送った", id=rid)
 
@@ -483,6 +482,11 @@ def build_parser() -> argparse.ArgumentParser:
     hp.add_argument("name")
     hp.add_argument("n", type=int)
     hp.add_argument("k", type=int)
+    ln = sub.add_parser("lane", help="動いている計画のレーンを足す（add）・書き換える（set）。lib/parallel_lane_cli.py（#2733）")
+    ln.add_argument("name")
+    ln.add_argument("action", choices=("add", "set"))
+    ln.add_argument("--lane", help="set で書き換えるレーンの名前")
+    ln.add_argument("--from", dest="src", required=True, help="JSON のファイル（- は標準入力）")
     return ap
 
 
