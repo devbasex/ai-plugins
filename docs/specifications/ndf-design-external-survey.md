@@ -50,7 +50,7 @@ carul はプロジェクトの MVV に調査の項目を足して補ったが、
 | `design` の SKILL.md の手順 2 | 外部の調査を通すか省くかを決め、調べた結果を設計文書に残す |
 | `design` の `references/external-survey.md` | 外部の調査の手順と上限の値の正本 |
 | `design-survey.py check` | 設計文書を読むだけで、自前で作る決定の比べた候補を検査する |
-| `plugins/ndf/scripts/lib/design_docs.py` | 設計文書の名前の規則と、課題の番号から HEAD の文書を読む処理。`design-survey.py` と `design-match.py` が共有する |
+| `plugins/ndf/scripts/lib/design_docs.py` | 設計文書の名前の規則と、課題の番号から HEAD の文書を読む処理。番号でつながる文書を選ぶ処理（`connected_docs`）は、設計の結果のステージも使う。`design-survey.py` と `design-match.py` が共有する |
 | `supervise_lib/procedures.py` の `survey_steps` | スプリントの設計のプランに `survey-check` / `fix-survey` / `survey-recheck` を置く |
 | `pr-review` の SKILL.md の `### 外部の調査の確認` | レビューの観点の正本。`pr-review` の委譲のプロンプトは `## 観点` を丸ごと写すため、ここに置けば届く |
 | `cross-review` の `review_lib/review_focus.py` | 上の節を読み、分類 `design` か `code` を持つ PR の自動レビュー観点の後ろに足す |
