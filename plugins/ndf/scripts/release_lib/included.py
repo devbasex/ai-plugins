@@ -1,7 +1,7 @@
 """範囲の PR と承認資料の「含む PR」の組み立て（#1274・#1885）。`release-steps.py` の changelog・notes・
 changed-plugins・approval-facts が同じものを使う（範囲を求めるのはここだけ）。
 
-範囲の PR は、直前の正式版のタグから終点までにベースブランチへ入った PR（`lib/merged_range.py` の `merges_in`）と、
+範囲の PR は、直前の正式版のタグから範囲の終点（出す版のコミット。#2555）までにベースブランチへ入った PR（`lib/merged_range.py` の `merges_in`）と、
 そのうち merge commit で入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR
 （スプリント経由の PR。`merged_range.nested_merges`）の和。版上げの PR（head が `release/` で始まる）と PR でない
 番号を外し、`--prs` との和を番号の昇順に並べる。notes --approval は承認資料の「含む PR」の欄から番号と経由を読み、
@@ -164,13 +164,36 @@ def no_change(d) -> bool:
     return isinstance(d, dict) and gh_sections.says_none(d.get("body") or "", CHANGES_HEADING)
 
 
-def section_range(root: Path, prev: str | None, base: str | None, extra) -> list[IncludedPr]:
-    """CHANGELOG の版の節に並べる PR の候補: 直前の正式版のタグ prev から `origin/<base>` までの範囲の PR と extra
-    （`--prs`）の和（#1885）。正式版のタグが無ければ（初めての版）extra だけ。"""
-    if not prev:
-        return with_extra([], extra)
-    proc.git(root, "fetch", "-q", "origin", check=False)
-    return with_extra(release_range(root, prev, f"origin/{base}"), extra)
+def section_range(root: Path, prev: str | None, to: str, extra) -> tuple[list[IncludedPr], list[int]]:
+    """版の節と「含む PR」に並べる PR の候補: 直前の正式版のタグ prev から範囲の終点 to（出す版のコミット）までの
+    範囲の PR と extra（`--prs`）の和、と範囲の PR に無い extra の番号（範囲の外の `--prs`。#1885・#2555）。
+    正式版のタグが無ければ（初めての版）範囲の PR は空。fetch はしない（呼び手が済ませる）。"""
+    found = release_range(root, prev, to) if prev else []
+    inside = {p.number for p in found}
+    return with_extra(found, extra), [n for n in dict.fromkeys(int(n) for n in extra or ()) if n not in inside]
+
+
+def drop_outside(root: Path, prs: list[IncludedPr], data: dict, to: str, extra_outside, outside: list) -> list[IncludedPr]:
+    """範囲の外の `--prs` のうち、マージコミット（data の `mergeCommit`）が範囲の終点 to の祖先でない番号を prs から外し、
+    outside へ足す（#2555）。マージされていない番号とマージコミットの無い番号は外さない（マージされていない PR は titles_of・notes_of が外す）。"""
+    gone = []
+    for n in extra_outside:
+        d = data.get(n)
+        oid = (d.get("mergeCommit") or {}).get("oid") if isinstance(d, dict) and not unmerged(d) else None
+        if oid and proc.git(root, "merge-base", "--is-ancestor", oid, to, check=False).returncode != 0:
+            gone.append(n)
+    outside.extend(gone)
+    return [p for p in prs if p.number not in gone]
+
+
+def outside_items(outside) -> list[dict]:
+    """drop_outside が外した番号の結果の項目。"""
+    return [{"kind": "pr", "name": f"#{n}", "result": "skipped", "reason": "範囲の終点に入っていない"} for n in outside]
+
+
+def outside_note(outside) -> str:
+    """drop_outside が外した番号の要約の注記（無ければ空）。"""
+    return f"（範囲の終点に入っていない {' '.join(f'#{n}' for n in outside)} は載せない）" if outside else ""
 
 
 def as_included(prs) -> list[IncludedPr]:

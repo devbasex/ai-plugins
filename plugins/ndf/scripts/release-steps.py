@@ -96,6 +96,8 @@ from release_lib import others, publish, record, replaced  # noqa: E402
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
+from release_lib.names import drop_untagged, release_tag, require_untagged  # noqa: E402
+from release_lib.included import outside_items, outside_note  # noqa: E402
 from step_result import (
     EXIT_CD_FAILED,
     EXIT_GATE,
@@ -351,34 +353,48 @@ def pr_many(root, prs, fields="title,body,state", comments=False):
 
 
 def section_prs(root, a):
-    """CHANGELOG の版の節に並べる PR の候補と前のタグ（included.section_range。#1885）。配るプラグインが決まらなければ
-    --prs だけ（止めるのは版の節を書く側。PR の読み出しの失敗を先に返す）。"""
+    """CHANGELOG の版の節に並べる PR の候補・前のタグ・範囲の終点・範囲の外の --prs（included.section_range。
+    #1885・#2555）。範囲の終点は worktree の先頭（出す版のコミット）。配るプラグインが決まらなければ --prs だけで
+    終点なし（止めるのは版の節を書く側。PR の読み出しの失敗を先に返す）。"""
+    git(root, "fetch", "-q", "origin", "--tags", check=False)
     try:
         plugin = plugin_of(root, a)
     except StepError:
-        return included.with_extra([], a.prs), None
-    prev = release_tag_before(root, plugin, f"{plugin}--v{base_of(a.version)}")
-    return included.section_range(root, prev, prev and release_decl(root, a)[0], a.prs), prev
+        return included.with_extra([], a.prs), None, None, []
+    prev = release_tag_before(root, plugin, release_tag(plugin, a.version))
+    head = git(root, "rev-parse", "HEAD", check=False)
+    if head.returncode:  # コミットの無いリポジトリ: 範囲も終点も無い
+        return included.with_extra([], a.prs), prev, None, []
+    to = head.stdout.strip()
+    prs, extra_out = included.section_range(root, prev, to, a.prs)
+    return prs, prev, to, extra_out
 
 
-def pr_titles(root, prs, skipped=None):
-    """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と利用者向けの変化なしの PR は箇条にしない）。"""
+def pr_titles(root, prs, skipped=None, to=None, extra_out=(), outside=None):
+    """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と利用者向けの変化なしの PR は箇条にしない）。
+    終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    return included.titles_of(prs, pr_many(root, [p.number for p in prs], "title,body,state"), skipped)
+    data = pr_many(root, [p.number for p in prs], "title,body,state" + (",mergeCommit" if to else ""))
+    if to:
+        prs = included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else [])
+    return included.titles_of(prs, data, skipped)
 
 
-def _update_changelog(root, a, items) -> dict:
-    """CHANGELOG.md へこの版の節を足すか、既存の節へ PR を挿す（見出しは基底の版。開発版の接尾辞は載せない）。"""
+def _update_changelog(root, a, items, since=None) -> list[dict]:
+    """CHANGELOG.md へこの版の節を足すか、既存の節へ PR を挿す（見出しは基底の版。開発版の接尾辞は載せない）。
+    リリースタグのある版の節へは書かずに止める。正式版なら、前のリリースタグ since より新しくタグの無い版の節を消す（#2555）。"""
     cl = root / "CHANGELOG.md"
     lines = cl.read_text(encoding="utf-8").split("\n")
     a.plugin = plugin_of(root, a)
+    require_untagged(root, release_tag(a.plugin, a.version), a.version)
+    removed = drop_untagged(root, lines, a.plugin, since, a.version)
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
         section = _add_changelog_section(lines, head, items)
     else:
         section = _insert_into_changelog_section(lines, at, end, items)
     cl.write_text("\n".join(lines), encoding="utf-8")
-    return section
+    return [section, *removed]
 
 
 def _add_changelog_section(lines, head, items) -> dict:
@@ -412,17 +428,17 @@ def cmd_changelog(a):
     root = git_root(a.root)
     if not (root / "CHANGELOG.md").is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
-    skipped = []
-    prs, since = section_prs(root, a)
-    items = pr_titles(root, prs, skipped)
-    sections = [_update_changelog(root, a, items)]
+    skipped, outside = [], []
+    prs, since, to, extra_out = section_prs(root, a)
+    items = pr_titles(root, prs, skipped, to, extra_out, outside)
+    sections = _update_changelog(root, a, items, since)
     emit(
         result(
             TOOL,
             "ok",
-            f"{len(items)} 件の PR を {len(sections)} 箇所へ並べた{unmerged_note(skipped)}",
-            sections + unmerged_items(skipped),
-            {"version": a.version, "prs": len(items), "unmerged": skipped, "range": len(prs), "since": since},
+            f"{len(items)} 件の PR を 1 箇所へ並べた{unmerged_note(skipped)}{outside_note(outside)}",
+            sections + unmerged_items(skipped) + outside_items(outside),
+            {"version": a.version, "prs": len(items), "unmerged": skipped, "outside": outside, "range": len(prs), "since": since},
         )
     )
 
@@ -902,10 +918,12 @@ def cmd_approval_facts(a):
     dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, dev)
-    prs = included.with_extra(included.release_range(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
+    prs, extra_out = included.section_range(root, prev, dev, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
     data = pr_many(root, [p.number for p in prs], "number,title,body,state,mergeCommit,url")
+    outside = []
+    prs = included.drop_outside(root, prs, data, dev, extra_out, outside)  # 終点は承認に出すコミット（#2555 の I2）
 
-    stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
+    stat = git(root, "diff", "--shortstat", f"origin/{prod}...{dev}").stdout.strip()
     files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
     ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
@@ -940,9 +958,10 @@ def cmd_approval_facts(a):
         result(
             TOOL,
             "gate",
-            f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(items)} 件）",
-            items,
+            f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(items)} 件）{outside_note(outside)}",
+            items + outside_items(outside),
             {
+                "outside": outside,
                 "files": files,
                 "insertions": ins,
                 "deletions": dels,
@@ -972,10 +991,14 @@ RISKS_HEADING = materials.RISKS_HEADING
 NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用者向けの変化」から書く）"
 
 
-def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None):
-    """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。"""
+def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None, to=None, extra_out=(), outside=None):
+    """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。
+    終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = data if data is not None else pr_many(root, [p.number for p in prs])
+    fields = "title,body,state" + (",mergeCommit" if to else "")
+    data = data if data is not None else pr_many(root, [p.number for p in prs], fields)
+    if to:
+        prs = included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else [])
     return included.notes_of(prs, data, skipped, replacing, unreadable)
 
 
@@ -991,6 +1014,7 @@ def write_notes(root, version, plugin, bullets, migration=()):
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
+    require_untagged(root, release_tag(plugin, version), version)
     lines = cl.read_text(encoding="utf-8").split("\n")
     head = f"## [{plugin} {base_of(version)}]"
     at = changelog_span(lines, plugin, version)[0]
@@ -1010,17 +1034,19 @@ def unmerged_note(skipped):
 
 
 def notes_prs(root, a):
-    """notes が欄を書く PR。--approval なら承認資料の「含む PR」（--prs はそこに無い番号があれば止まる。#1274）、
+    """notes が欄を書く PR・承認資料・範囲の終点・範囲の外の --prs。--approval なら承認資料の「含む PR」
+    （--prs はそこに無い番号があれば止まる。#1274。終点は渡さない: approval-facts が絞り込み済み。#2555）、
     無ければ changelog と同じ範囲の PR と --prs の和（#1885。出し直しでも前の開発版の PR を節に残す）。"""
     if not a.approval:
-        return section_prs(root, a)[0], None
+        prs, _, to, extra_out = section_prs(root, a)
+        return prs, None, to, extra_out
     path = Path(a.approval)
     path = path if path.is_absolute() else root / path
     listed = included.read_included_rows(path)
     if missing := [n for n in a.prs if n not in {p.number for p in listed}]:
         names = " ".join(f"#{n}" for n in missing)
         raise StepError(f"--prs の {names} が承認資料の「含む PR」に無い（approval-facts で承認資料を作り直す）", EXIT_PRECONDITION)
-    return listed, path
+    return listed, path, None, []
 
 
 def issue_body(root, n, repo=None):
@@ -1040,11 +1066,11 @@ def cmd_notes(a):
     root = git_root(a.root)
     if getattr(a, "check_state", None) is not None and not a.approval:
         raise StepError("--check-state は --approval と使う", 2)
-    skipped = []
-    prs, path = notes_prs(root, a)
+    skipped, outside = [], []
+    prs, path, to, extra_out = notes_prs(root, a)
     reps, bad = [], []
     data = pr_many(root, [p.number for p in prs], "title,body,state,closingIssuesReferences", comments=True) if path else None
-    notes = pr_notes(root, prs, skipped, reps, bad, data)
+    notes = pr_notes(root, prs, skipped, reps, bad, data, to, extra_out, outside)
     before = {n: items for n, items, *_ in notes}
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
@@ -1061,9 +1087,9 @@ def cmd_notes(a):
         result(
             TOOL,
             "ok",
-            f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}",
-            items,
-            _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback),
+            f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}{outside_note(outside)}",
+            items + outside_items(outside),
+            _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback, outside=outside),
         )
     )
 

@@ -164,7 +164,7 @@ def test_compare_and_changes_stay_and_later_merges_are_not_listed(monkeypatch, w
     monkeypatch.setattr(mod.included, "release_range", moved)
     out, _ = facts(mod, world, [13])
     m = out["metrics"]
-    stat = git(work, "diff", "--shortstat", "origin/live...origin/trunk")
+    stat = git(work, "diff", "--shortstat", f"origin/live...{approved}")
     assert m["approved_sha"] == approved and m["compare"] == f"https://github.com/o/n/compare/foo--v1.0.0...{approved}"
     assert m["prev_tag"] == "foo--v1.0.0" and f"{m['files']} files changed" in stat
     assert 50 not in numbers(included_rows(out["presentation_path"]))
