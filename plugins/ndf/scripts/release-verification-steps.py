@@ -91,7 +91,7 @@ def config_dirs() -> tuple[Path, Path]:
     return Path(env("CLAUDE_CONFIG_DIR") or home("~/.claude")), Path(env("CODEX_HOME") or home("~/.codex"))
 
 
-def _load(p: Path, bad: list, parse) -> dict:
+def _read_user_config(p: Path, bad: list, parse) -> dict:
     """設定のファイルを表で読む。無ければ空（導入していない）。読めない・形が違えば bad へ足して空。"""
     try:
         obj = parse(p) if p.exists() else {}
@@ -132,16 +132,16 @@ def user_config_snapshot() -> Snapshot:
     """利用者の設定ディレクトリを読むだけで控える。時刻・置き場所・autoUpdate と config.toml のほかの表は写さない（#2401）。"""
     claude, codex = config_dirs()
     bad = []
-    items = _load(claude / "plugins" / "installed_plugins.json", bad, _claude_plugins)
-    for n, m in _load(claude / "plugins" / "known_marketplaces.json", bad, _json).items():
+    items = _read_user_config(claude / "plugins" / "installed_plugins.json", bad, _claude_plugins)
+    for n, m in _read_user_config(claude / "plugins" / "known_marketplaces.json", bad, _json).items():
         src = m.get("source") if isinstance(m, dict) else None
         items[f"claude:marketplace:{n}"] = json.dumps(_mask(src), sort_keys=True, ensure_ascii=False)
-    conf = _load(codex / "config.toml", bad, _toml)
+    conf = _read_user_config(codex / "config.toml", bad, _toml)
     markets, plugins = (x if isinstance(x, dict) else {} for x in (conf.get("marketplaces"), conf.get("plugins")))
     for n, m in markets.items():
         m = m if isinstance(m, dict) else {}
         items[f"codex:marketplace:{n}"] = json.dumps(_mask({k: m.get(k) for k in ("source_type", "source", "ref")}), sort_keys=True)
-    versions = _load(codex / "plugins" / "cache", bad, _codex_versions)
+    versions = _read_user_config(codex / "plugins" / "cache", bad, _codex_versions)
     for n in set(versions) | set(plugins):
         en = plugins[n].get("enabled") if isinstance(plugins.get(n), dict) else None
         items[f"codex:plugin:{n}"] = f"enabled={'-' if en is None else str(en).lower()} versions={versions.get(n, '')}"
@@ -460,7 +460,7 @@ def cmd_user_config_save(a):
 def cmd_user_config_check(a):
     """--before の控えと今を比べる。変わっていれば 1、控えか設定のファイルが読めなければ 2（#2401）。"""
     snap, bad = user_config_snapshot(), []
-    before = _load(Path(a.before), bad, _json) if Path(a.before).is_file() else bad.append(f"{a.before}: 控えが無い")
+    before = _read_user_config(Path(a.before), bad, _json) if Path(a.before).is_file() else bad.append(f"{a.before}: 控えが無い")
     bad += snap.unreadable
     if bad:
         _config_out("stopped", f"利用者の設定と控えを比べられない（{'; '.join(bad)}）", bad, len(snap.items), 2)
