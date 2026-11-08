@@ -5726,67 +5726,67 @@
       "term": "出し直しの指摘",
       "context": "ndf-workflow",
       "meaning": "設計承認ゲートで人が「直して出し直す」と答えたときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "出し直しの指摘の履歴",
       "context": "ndf-workflow",
       "meaning": "課題の本文に置く、出し直しの指摘を回ごとに追記する節。人の判断待ちの節を書き直しても消えない",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "指摘への対応の表",
       "context": "ndf-workflow",
       "meaning": "出し直しの設計 PR の本文に置く表。出し直しの指摘の項目ごとに、直した / 直せない、直した箇所か直せない理由を 1 行で持つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "設計のプラン",
       "context": "ndf-workflow",
       "meaning": "開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "答えの種類",
       "context": "ndf-workflow",
       "meaning": "人が承認ゲートや問いに返す答えの区分。承認・直して出し直す・やらない・予算・止めるの 5 つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "自動の出し直し",
       "context": "ndf-workflow",
       "meaning": "出し直しの設計が出し直しの指摘の項目を指摘への対応の表に示していないとき、人へ問わずに開発ループが自分で付ける「直して出し直す」の答え。届いていない項目を名指しする。人の出し直しの 1 回につき 1 回まで",
-      "pending_source": "issues/issue-2510-design.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "出し直しの指摘の入力",
       "context": "ndf-workflow",
       "meaning": "開発ループが周回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
-      "pending_source": "issues/issue-2510-design.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "設計の承認の依頼",
       "context": "ndf-workflow",
       "meaning": "並列の計画のレーンが、設計承認ゲートの判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "取り込みのコミット",
       "context": "ndf-workflow",
       "meaning": "起点ブランチを設計 PR のブランチへ取り込むマージコミット。これだけで先頭が動いた設計 PR は、承認の依頼を送り直さない",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "前のループ",
       "context": "ndf-workflow",
       "meaning": "同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その答えがまだの人の判断待ちは、オーガナイザーの問いの一覧に出す",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "当たらなかった答え",
       "context": "ndf-workflow",
       "meaning": "オーガナイザーの答えのうち、持ち主のループの記録の行へ当てられなかったもの。答えは耐久の記録に残し、区分 unmatched の問いとしてオーガナイザーの問いの一覧に出す",
-      "pending_source": "issues/issue-2510-design.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "承認待ちの一覧",

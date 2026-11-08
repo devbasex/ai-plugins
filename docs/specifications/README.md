@@ -143,5 +143,6 @@
 | [ndf-approval-gate-names.md](ndf-approval-gate-names.md) | 2 つの承認ゲートの呼び名（設計承認ゲート・リリース承認ゲート）、旧名 `関門 1` / `関門 2` の記録を読むときに正の名前へ寄せる規則、値を変えない機械が読む識別子、Factory のランナーが旧名を渡し続ける理由。語の定義は用語集が正 |
 | [ndf-deploy-and-release-terms.md](ndf-deploy-and-release-terms.md) | 環境へ届ける操作を「デプロイ」、本番へのデプロイを「リリース」と呼び分ける規則、旧い値の読み替えの表（`legacy-values.json`）、ボードの旧い選択肢への書き込みと案内、用語チェックの禁止語の規則（`check.banned`）。語の定義は用語集が正 |
 | [ndf-testenv-reclaim.md](ndf-testenv-reclaim.md) | 消えた worktree のテスト環境の割り当てとコンテナを定義なしで回収する理由と境界（判定をテスト環境の管理の 1 か所に置く、見えない位置の割り当てと別の位置から起動されたコンテナを消さない、環境ごとの回収の予約と持ち続ける上限の秒、破棄の打ち切り、後片付けとスロットの枯渇からの呼び出し）、reclaim の結果 JSON の契約。手順は `worktree` の `references/test-execution.md` が正 |
+| [ndf-loop-human-answer-delivery.md](ndf-loop-human-answer-delivery.md) | 承認ゲート 1 の人の答え（出し直しの指摘・承認・前のループの待ち）を読んで動く側へ届ける仕組みの理由と境界（全ループの記録から指摘を集めて設計のプランへ渡す、指摘への対応の表の突き合わせと自動の出し直しは 1 回まで、取り込みのコミットだけなら承認を引き継ぐ、当たらなかった答えは問いにする）、出し直しの指摘の入力と `revise-note.py check` と問いの一覧の契約。手順は `development-workflow` の `references/loop.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
