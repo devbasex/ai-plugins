@@ -446,7 +446,7 @@ CELL_2436 = (
     "ループの側の触るファイルは [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md)、"
     "異常系の側は [issue-2436-design-failures.md](issue-2436-design-failures.md)、"
     "承認ゲート 1 の側は [issue-2436-design-approvals.md](issue-2436-design-approvals.md)、"
-    "配布の規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある"
+    "リリースの規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある"
 )
 
 
