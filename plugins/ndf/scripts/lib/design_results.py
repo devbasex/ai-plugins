@@ -168,6 +168,58 @@ SEPARATORS = "、,"
 EMPTY_CELLS = ("", "—", "-")
 
 
+class _CellScan:
+    """触るファイルのセルを読む途中の状態。採ったパス・読めなかった部分・読みかけの語・括弧の深さを持つ。"""
+
+    def __init__(self) -> None:
+        self.files: list[str] = []
+        self.bad: list[str] = []
+        self.word: list[str] = []
+        self.depth = 0
+
+    def flush(self) -> None:
+        """読みかけの語を読めなかった部分へ移す。"""
+        if self.word:
+            self.bad.append("".join(self.word))
+            self.word.clear()
+
+    def code(self, content: str) -> None:
+        """コードスパンの中身を、括弧の外ならパスとして採る。"""
+        self.flush()
+        if self.depth == 0 and content.strip():
+            self.files.append(content.strip())
+
+    def text(self, content: str) -> None:
+        """本文を 1 文字ずつ読む。括弧の中は読み飛ばし、区切りで語を切る。"""
+        for ch in content:
+            if ch in OPEN:
+                self.flush()
+                self.depth += 1
+            elif ch in CLOSE_PAREN:
+                if self.depth:
+                    self.depth -= 1
+                else:
+                    self.word.append(ch)
+            elif self.depth:
+                continue
+            elif ch in SEPARATORS or ch.isspace():
+                self.flush()
+            else:
+                self.word.append(ch)
+
+    def other(self, part: str) -> None:
+        """読めない種類のトークンを、括弧の外なら読めなかった部分にする。"""
+        if self.depth == 0:
+            self.flush()
+            self.bad.append(part)
+
+    def result(self) -> tuple[list[str], list[str]]:
+        self.flush()
+        if self.depth:
+            self.bad.append("閉じていない括弧")
+        return self.files, self.bad
+
+
 def _files(cell: str) -> tuple[list[str], list[str]]:
     """触るファイルのセルを読み、括弧の外のコードスパンの中身（パス）と、読めなかった部分を返す（#2453 の決定 3・5）。
 
@@ -176,55 +228,26 @@ def _files(cell: str) -> tuple[list[str], list[str]]:
 
     if cell.strip() in EMPTY_CELLS:
         return [], []
-    files: list[str] = []
-    bad: list[str] = []
-    word: list[str] = []
-    depth = 0
+    scan = _CellScan()
     in_link = False
-
-    def flush() -> None:
-        if word:
-            bad.append("".join(word))
-            word.clear()
-
     kids = [c for t in md.md_tokens(cell) if t.type == "inline" for c in t.children or []]
     for c in kids:
         if in_link:
             in_link = c.type != "link_close"
             continue
         if c.type == "link_open":
-            flush()
-            bad.append(str(c.attrs.get("href", "")))
+            scan.flush()
+            scan.bad.append(str(c.attrs.get("href", "")))
             in_link = True
         elif c.type == "code_inline":
-            flush()
-            if depth == 0 and c.content.strip():
-                files.append(c.content.strip())
+            scan.code(c.content)
         elif c.type == "text":
-            for ch in c.content:
-                if ch in OPEN:
-                    flush()
-                    depth += 1
-                elif ch in CLOSE_PAREN:
-                    if depth:
-                        depth -= 1
-                    else:
-                        word.append(ch)
-                elif depth:
-                    continue
-                elif ch in SEPARATORS or ch.isspace():
-                    flush()
-                else:
-                    word.append(ch)
+            scan.text(c.content)
         elif c.type in ("softbreak", "hardbreak"):
-            flush()
-        elif depth == 0:
-            flush()
-            bad.append(c.content or c.markup or c.type)
-    flush()
-    if depth:
-        bad.append("閉じていない括弧")
-    return files, bad
+            scan.flush()
+        else:
+            scan.other(c.content or c.markup or c.type)
+    return scan.result()
 
 
 def parse_results(text: str, doc: str = "") -> list[Row] | None:
