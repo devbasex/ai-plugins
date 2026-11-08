@@ -1856,6 +1856,18 @@
       "pending_source": "issues/old/issue-1366-design.md"
     },
     {
+      "term": "この設計の MVV",
+      "context": "ndf-workflow",
+      "meaning": "設計文書の冒頭の節。Mission はこの設計で目指すこと、Vision はこの設計で達成する姿、Value はこの設計の価値。MVV 判定の基準ではない",
+      "pending_source": "issues/issue-2741-requirements.md"
+    },
+    {
+      "term": "承認する人が読む欄",
+      "context": "ndf-workflow",
+      "meaning": "設計文書のうち、設計承認ゲートで承認する人が判断に使う節の並び。正本は design の design-template.md の同名の節",
+      "pending_source": "issues/issue-2741-requirements.md"
+    },
+    {
       "term": "MVV 判定",
       "context": "ndf-workflow",
       "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
