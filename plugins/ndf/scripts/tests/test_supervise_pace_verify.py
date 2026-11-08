@@ -336,8 +336,8 @@ def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
     比べて止まり、比べるステップは on_fail を持たない（0 以外で振り返りへ進まない）。起動指示は導入しないことの要点を持つ。"""
     by = {s["id"]: s for s in close_steps(tmp_path, rows)}
     save, check, on_fail = by["config-save"], by["config-check"], by["config-check-on-fail"]
-    assert "user-config-save --out {state_dir}/user-config-before.json" in save["cmd"]
-    assert check["cmd"] == on_fail["cmd"] and "user-config-check --before {state_dir}/user-config-before.json" in check["cmd"]
+    assert save["cmd"].endswith("user-config-save --dir {state_dir}")
+    assert check["cmd"] == on_fail["cmd"] and check["cmd"].endswith("user-config-check --dir {state_dir}")
     assert by["release-verify"]["on_fail"] == "config-check-on-fail" and on_fail["on_exit"] == {"0": "stop"}
     assert all(s["type"] == "run" and "on_fail" not in s and "stage" not in s for s in (save, check, on_fail))
     assert release_templates.NO_USER_INSTALL in by["release-verify"]["prompt"]

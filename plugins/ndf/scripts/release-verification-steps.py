@@ -3,8 +3,8 @@
 
     python3 release-verification-steps.py verify-install --ref <ベースブランチ|本番チャネル> --expect <版>
         [--plugins <名前>,...] [--runtimes claude,codex] [--root <dir>]
-    python3 release-verification-steps.py user-config-save --out <控えのファイル>
-    python3 release-verification-steps.py user-config-check --before <控えのファイル>
+    python3 release-verification-steps.py user-config-save --dir <控えを置くディレクトリ>
+    python3 release-verification-steps.py user-config-check --dir <控えを置くディレクトリ>
 
 隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が
 ref と一致するかを確かめる。利用者の HOME の設定が変わっていないことも確かめる。
@@ -75,6 +75,7 @@ def user_env_snapshot():
 
 
 Snapshot = NamedTuple("Snapshot", [("items", dict), ("unreadable", list)])  # 控えの鍵と値・読めないファイル（#2401）
+USER_CONFIG_FILE = "user-config-before.json"  # 控えのファイルの名前（置くディレクトリは --dir）
 _USERINFO = re.compile(r"([A-Za-z][\w+.-]*://)[^/@\s]+@")
 
 
@@ -87,8 +88,8 @@ def _mask(v):
 
 def config_dirs() -> tuple[Path, Path]:
     """利用者の設定ディレクトリ: (CLAUDE_CONFIG_DIR か ~/.claude, CODEX_HOME か ~/.codex)。"""
-    env, home = os.environ.get, os.path.expanduser
-    return Path(env("CLAUDE_CONFIG_DIR") or home("~/.claude")), Path(env("CODEX_HOME") or home("~/.codex"))
+    claude = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return Path(claude), Path(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
 
 
 def _read_user_config(p: Path, bad: list, parse) -> dict:
@@ -443,24 +444,24 @@ def _config_out(status: str, summary: str, items: list, n: int, code=None, **ext
 
 
 def cmd_user_config_save(a):
-    """控えを --out へ書く。読めない・書けないなら「変わっていない」と言えないため 2 で止まる（#2401 の決定 6）。"""
+    """控えを --dir の下へ書く。読めない・書けないなら「変わっていない」と言えないため 2 で止まる（#2401 の決定 6）。"""
     snap = user_config_snapshot()
-    bad = list(snap.unreadable)
+    bad, out = list(snap.unreadable), Path(a.dir) / USER_CONFIG_FILE
     if not bad:
         try:
-            Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-            Path(a.out).write_text(json.dumps(snap.items, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            Path(a.dir).mkdir(parents=True, exist_ok=True)
+            (Path(a.dir) / USER_CONFIG_FILE).write_text(json.dumps(snap.items, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         except OSError as e:
-            bad.append(f"{a.out}: {e}")
+            bad.append(f"{out}: {e}")
     if bad:
-        _config_out("stopped", f"利用者の設定の控えを取れない（{'; '.join(bad)}）", bad, len(snap.items), 2, out=a.out)
-    _config_out("ok", f"利用者の設定の控えを取った（{len(snap.items)} 件）", [], len(snap.items), out=a.out)
+        _config_out("stopped", f"利用者の設定の控えを取れない（{'; '.join(bad)}）", bad, len(snap.items), 2, out=str(out))
+    _config_out("ok", f"利用者の設定の控えを取った（{len(snap.items)} 件）", [], len(snap.items), out=str(out))
 
 
 def cmd_user_config_check(a):
-    """--before の控えと今を比べる。変わっていれば 1、控えか設定のファイルが読めなければ 2（#2401）。"""
-    snap, bad = user_config_snapshot(), []
-    before = _read_user_config(Path(a.before), bad, _json) if Path(a.before).is_file() else bad.append(f"{a.before}: 控えが無い")
+    """--dir の下の控えと今を比べる。変わっていれば 1、控えか設定のファイルが読めなければ 2（#2401）。"""
+    snap, bad, path = user_config_snapshot(), [], Path(a.dir) / USER_CONFIG_FILE
+    before = _read_user_config(path, bad, _json) if path.is_file() else bad.append(f"{path}: 控えが無い")
     bad += snap.unreadable
     if bad:
         _config_out("stopped", f"利用者の設定と控えを比べられない（{'; '.join(bad)}）", bad, len(snap.items), 2)
@@ -483,10 +484,10 @@ def build_parser():
     p.add_argument("--runtimes", default="claude,codex", help="カンマ区切り（claude,codex）")
     p.set_defaults(func=cmd_verify_install)
     p = sub.add_parser("user-config-save", parents=[common_parser()], help="利用者の設定ディレクトリの控えを取る（読むだけ）")
-    p.add_argument("--out", required=True, help="控えを書くファイル")
+    p.add_argument("--dir", required=True, help=f"控え（{USER_CONFIG_FILE}）を置くディレクトリ")
     p.set_defaults(func=cmd_user_config_save)
     p = sub.add_parser("user-config-check", parents=[common_parser()], help="控えと今の利用者の設定ディレクトリを比べる")
-    p.add_argument("--before", required=True, help="user-config-save が書いた控え")
+    p.add_argument("--dir", required=True, help=f"user-config-save が控え（{USER_CONFIG_FILE}）を置いたディレクトリ")
     p.set_defaults(func=cmd_user_config_check)
     return ap
 

@@ -278,10 +278,10 @@ NO_USER_INSTALL = (
 def release_verify_steps(sprint: str, refs: str, record_pr: str) -> list[dict]:
     """控えを取る（config-save）→ リリース後テスト → 控えと比べる（config-check）。リリース後テストが失敗したら config-check-on-fail で
     比べ、変わっていなくても止まる。3 つの run は on_fail を持たず 0 以外で止まる（#2401 の決定 1・2）。"""
-    before, run = "{state_dir}/user-config-before.json", {"type": "run", "timeout": 120}
-    check = {**run, "cmd": f"{VERIFY_PY} user-config-check --before {before}"}
+    run = {"type": "run", "timeout": 120}  # 控えは {state_dir}/user-config-before.json（名前はスクリプトが決める）
+    check = {**run, "cmd": f"{VERIFY_PY} user-config-check --dir {{state_dir}}"}
     return [
-        {"id": "config-save", **run, "cmd": f"{VERIFY_PY} user-config-save --out {before}", "next": "release-verify"},
+        {"id": "config-save", **run, "cmd": f"{VERIFY_PY} user-config-save --dir {{state_dir}}", "next": "release-verify"},
         release_verify_step(sprint, refs, record_pr),
         {"id": "config-check", **check, "next": "retro"},
         {"id": "config-check-on-fail", **check, "on_exit": {"0": "stop"}},

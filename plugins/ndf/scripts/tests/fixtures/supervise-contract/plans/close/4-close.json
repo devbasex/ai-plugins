@@ -76,7 +76,7 @@
       "id": "config-save",
       "type": "run",
       "timeout": 120,
-      "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-save --out {state_dir}/user-config-before.json",
+      "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-save --dir {state_dir}",
       "next": "release-verify"
     },
     {
@@ -94,14 +94,14 @@
       "id": "config-check",
       "type": "run",
       "timeout": 120,
-      "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-check --before {state_dir}/user-config-before.json",
+      "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-check --dir {state_dir}",
       "next": "retro"
     },
     {
       "id": "config-check-on-fail",
       "type": "run",
       "timeout": 120,
-      "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-check --before {state_dir}/user-config-before.json",
+      "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-check --dir {state_dir}",
       "on_exit": {
         "0": "stop"
       }

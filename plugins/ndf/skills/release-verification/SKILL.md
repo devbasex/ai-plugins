@@ -83,6 +83,29 @@ ref と一致するか、利用者の HOME の設定が変わっていないか�
 ほかの形では、導入状況を表示するコマンドでリリースした版との一致を確かめ、再インストール・
 再取得・再起動のうち利用者が実際に行うものを行う。
 
+#### 利用者の設定ディレクトリで導入しない
+
+**Claude Code・Codex のプラグインの導入の確かめは `verify-install` だけで行う。** 利用者の設定ディレクトリ
+（Claude Code は `CLAUDE_CONFIG_DIR`、無ければ `~/.claude`。Codex は `CODEX_HOME`、無ければ `~/.codex`）で、
+導入の操作（`claude plugin install` / `update` / `marketplace add` / `marketplace update`、`codex plugin add` /
+`marketplace add`）を打たない。隔離のつもりで環境変数を付けて手で打つことも含む。打つと、利用者が導入した版と
+取得元の登録が黙って変わり、戻すには前の版を入れ直す操作が要る。`verify-install` は一時ディレクトリの設定と
+`env -i` で導入するため、利用者の設定ディレクトリを変えない。
+
+**確かめるのに利用者の設定ディレクトリへの導入が要る条件は、導入しない。** 記録の表のその行を
+`保留（理由: 利用者の設定ディレクトリへの導入が要る）` とし、作業の報告を「判断が要る」で返す。導入するかは人が決める。
+
+**プランの外でこの Skill を使うときは、手順 1 の前に控えを取り、記録を投稿した後に比べる。** まとめのプランでは、
+前後のステップ（`config-save`・`config-check`）が同じことを打つため、worker は打たない。
+
+```bash
+python3 "$SCRIPTS/release-verification-steps.py" user-config-save --dir <控えを置くディレクトリ>   # 手順 1 の前
+python3 "$SCRIPTS/release-verification-steps.py" user-config-check --dir <控えを置くディレクトリ>   # 記録の後
+```
+
+`user-config-check` が 0 なら変わっていない。1 なら変わった項目（プラグインか取得元の名前）と前後の値が `items[]`
+に載る。2 なら控えか設定のファイルが読めず、比べられない。0 以外のときは、結果を添えて人へ戻す。
+
 ### 2. 受け入れ条件ごとに確かめる
 
 条件 1 つずつに、実行したコマンドと結果を対応させる。証跡の書き方は `quality-gates` の
