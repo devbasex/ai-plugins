@@ -42,6 +42,10 @@ git_root = proc.git_root
 STATUSES = ("ok", "gate", "stopped")
 REQUIRED = ("tool", "status", "summary", "items", "metrics")
 OPTIONAL = ("presentation_path", "next", "run_id")
+# オブジェクトの任意の項目。`lease` は持ち主の鍵を宣言した入口の持ち主の記録の結果（#2342）
+OPTIONAL_OBJECTS = ("lease",)
+# 核の外で動く入口へ、実行の核が結果に足す項目（`run_core.hold` が `lease` を置く）。`emit` が出す前に足す
+ATTACH: dict = {}
 # 欠け・過程・判断の項目（任意）。各要素はオブジェクトで、この鍵を空でない文字列で持つ（#2227 の I3）
 RECORD_KEYS = {"gaps": ("kind", "name", "reason"), "process": ("run", "result"), "decisions": ("decision", "basis")}
 
@@ -164,6 +168,9 @@ def _check_field_types(obj: dict, errs: list[str]) -> None:
     for k in OPTIONAL:
         if k in obj and obj[k] is not None and not isinstance(obj[k], str):
             errs.append(f"{k} は文字列で書く")
+    for k in OPTIONAL_OBJECTS:
+        if k in obj and not isinstance(obj[k], dict):
+            errs.append(f"{k} はオブジェクトで書く")
 
 
 def _check_status_code(obj: dict, code: int | None, errs: list[str]) -> None:
@@ -183,7 +190,7 @@ def validate_result(obj, code: int | None = None) -> list[str]:
     if not isinstance(obj, dict):
         return ["結果はオブジェクトで書く"]
     errs = [f"{k} が無い" for k in REQUIRED if k not in obj]
-    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL) - set(RECORD_KEYS)
+    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL) - set(RECORD_KEYS) - set(OPTIONAL_OBJECTS)
     if unknown:
         errs.append(f"知らない項目: {', '.join(sorted(unknown))}")
     _check_field_types(obj, errs)
@@ -229,6 +236,8 @@ def emit(obj: dict, code: int | None = None, stream=None) -> "NoReturn":  # noqa
             code = EXIT_INCOMPLETE
     if CAPTURE and stream is None:
         raise Emitted(obj, EXIT_VIOLATION if code is None else code)
+    if ATTACH and isinstance(obj, dict):
+        obj = {**obj, **ATTACH}
     errs = validate_result(obj, code)
     if errs:
         print("結果の形が誤っている: " + " / ".join(errs), file=sys.stderr)

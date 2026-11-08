@@ -15,12 +15,13 @@ import sys
 import time
 from pathlib import Path
 
+import lease_stage
 import legacy_values
 import parallel_hold
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
-from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
+from supervise_lib.paths import queue_done_key, queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
@@ -116,7 +117,7 @@ NO_REPORT = "報告なし"
 
 
 def cmd_queue(
-    plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None, starts=None, rerun=None
+    plans: list[str], max_: int, poll: float = 1.0, then=None, done: str | None = None, starts=None, rerun=None, restart=False
 ) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
@@ -133,7 +134,7 @@ def cmd_queue(
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
     記録を止めて頭から流す（完了か承認ゲートの記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
     キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
-    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
+    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。`restart`（`--from`）なら前の途中を止める（#2325）。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -141,12 +142,12 @@ def cmd_queue(
     prepared = _prepare_queue(all_plans, plans, done, max_)
     if isinstance(prepared, dict):
         return prepared
-    decl, done_path, seen, listing = prepared
+    decl, done_path, seen, changed = prepared
     # launch の直後に回復したプランも prepare で答え待ちの停止を読むよう、launch の前から close の後まで立てる（#2707）
     flow.Engine.queued = True
     try:
         try:
-            prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
+            prefix = flow.launch_queue(done_path, max_, decl["resources"], restart or changed)
         except durable.DurableError as e:
             return _not_started(str(e), max_, done_path)
         try:
@@ -191,8 +192,9 @@ def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[st
 
 
 def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max_: int):
-    """宣言を読み、done を消して知らせ始める位置と前の一覧を読む。宣言の形が違えば _not_started の結果を返す。"""
+    """done の持ち主の鍵を取り（#2342）、宣言・知らせ始める位置・並びが変わったかを読む。宣言が違えば _not_started の結果。"""
     done_path = queue_done_path(plans, done)
+    lease_stage.hold("scripts/supervise.py", "queue", done=queue_done_key(done_path))
     try:
         decl = queue_decl_of([_read_plan(p) for p in all_plans])
     except DeclError as e:
@@ -200,7 +202,7 @@ def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
     seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
     listing = _read_listing(queue_plans_path(done_path))
-    return decl, done_path, seen, listing
+    return decl, done_path, seen, listing is not None and listing.get("plans") != all_plans
 
 
 def _read_plan(plan: str) -> dict:
@@ -354,7 +356,7 @@ def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dic
 
 
 def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
-    """items から status・summary・metrics を組み立てる。"""
+    """items から status・summary・metrics と持ち主の鍵（`lease`。標準出力の結果と同じ形にする。#2342）を組み立てる。"""
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in FINISHED]
@@ -372,7 +374,7 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
         metrics["answer_hold"] = held
         metrics["park"] = park = _park_line(held, done_path)
         nxt = f"{present}。続けて {park} を打つ" if gates else park  # 止まったプランと同居しても提示の指示を落とさない
-    return result("supervise-queue", status, summary, items, metrics, next=nxt)
+    return lease_stage.with_lease(result("supervise-queue", status, summary, items, metrics, next=nxt))
 
 
 def _park_line(held: dict, done_path: Path) -> str:

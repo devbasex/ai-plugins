@@ -16,6 +16,9 @@ SCOPES = ("team", "personal")
 SET_BY = ("user", "runtime", "ci", "ndf")
 # 核の対象外の印（#2337 の決定 5）。hook は hook の定義から起動される、runtime はランタイムが直接起動して標準出力を使う
 CORE_EXEMPT = ("hook", "runtime")
+# 持ち主の契約（入口の行の `lease`。#2342）の単位と鍵
+LEASE_UNITS = ("run", "session")
+LEASE_KEYS = {"key": str, "unit": str, "window_seconds": int}
 
 
 class ContractError(Exception):
@@ -99,7 +102,7 @@ def _check_entry(f: Path, d: dict) -> None:
             "reads": list,
             "exit": dict,
         },
-        {"callers": list, "external": str, "core": dict},
+        {"callers": list, "external": str, "core": dict, "lease": dict},
     )
     if ("callers" in d) == ("external" in d):
         raise ContractError(f"{f.name}: callers と external はどちらか 1 つ")
@@ -115,12 +118,30 @@ def _check_entry(f: Path, d: dict) -> None:
             raise ContractError(f"{f.name}: settings の要素は file と keys を持つ")
     if not d["exit"] or not all(isinstance(v, str) and v.strip() for v in d["exit"].values()):
         raise ContractError(f"{f.name}: exit は終了コード → 意味（unknown なら理由）")
+    if "lease" in d:
+        _check_lease(f, d["lease"])
     if "core" in d:
         core = d["core"]
         if set(core) != {"exempt", "evidence"} or core["exempt"] not in CORE_EXEMPT:
             raise ContractError(f"{f.name}: core は exempt（{'/'.join(CORE_EXEMPT)}）と evidence を持つ")
         if not isinstance(core["evidence"], str) or not core["evidence"].strip():
             raise ContractError(f"{f.name}: core.evidence は根拠の文")
+
+
+def _check_lease(f: Path, lease: dict) -> None:
+    """`lease` は副命令の名前（無ければ空）→ 鍵の形・単位・寿命の窓・返す副命令か。"""
+    for sub, decl in lease.items():
+        where = f"{f.name}: lease[{sub!r}]"
+        if not isinstance(decl, dict) or not set(LEASE_KEYS) <= set(decl) or not set(decl) <= {*LEASE_KEYS, "release"}:
+            raise ContractError(f"{where} は key・unit・window_seconds と任意の release を持つ")
+        if not isinstance(decl["key"], str) or "{" not in decl["key"]:
+            raise ContractError(f"{where}.key は入力の名前を {{}} で埋める鍵の形")
+        if decl["unit"] not in LEASE_UNITS:
+            raise ContractError(f"{where}.unit は {'/'.join(LEASE_UNITS)}")
+        if not isinstance(decl["window_seconds"], int) or isinstance(decl["window_seconds"], bool) or decl["window_seconds"] <= 0:
+            raise ContractError(f"{where}.window_seconds は正の整数")
+        if not isinstance(decl.get("release", False), bool):
+            raise ContractError(f"{where}.release は真偽値")
 
 
 def core_exempt(entry: dict) -> str | None:
