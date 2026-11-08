@@ -5757,22 +5757,19 @@
       "term": "照合",
       "context": "ndf-workflow",
       "meaning": "スプリント MVV などの本文が、共通原則とプロジェクト MVV に従うかを LLM に判定させること。判定は「従う」「反する疑い」「判定できない」「読めない」の 4 つで、本文は書き換えない",
-      "source": "",
-      "pending_source": "issues/issue-2614-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mvv-vet-reuse.md"
     },
     {
       "term": "照合の入力",
       "context": "ndf-workflow",
       "meaning": "1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・判定の決まり・本文の種類の名前・照合する本文からなる。1 字でも違えば別の入力である",
-      "source": "",
-      "pending_source": "issues/issue-2614-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mvv-vet-reuse.md"
     },
     {
       "term": "照合の記録",
       "context": "ndf-workflow",
       "meaning": "照合のたびに 1 行を足す JSONL のファイル（project-mvv.jsonl）。機械ごとに 1 つある",
-      "source": "",
-      "pending_source": "issues/issue-2614-design.md"
+      "source": "docs/specifications/ndf-sprint-mvv-vet-reuse.md"
     },
     {
       "term": "Issue の種類",
