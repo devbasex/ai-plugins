@@ -392,6 +392,9 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
         durable.launch("review", identity)
+        return dp.unless_misaligned(lambda: self.run_once(identity))  # 並びのずれで落ちた回は新しい実行の回で 1 度だけ流し直す
+
+    def run_once(self, identity: str) -> tuple[dict, int]:
         ref = durable.resolve(f"review-{durable.key_hash(identity)}", finished=self.finished)
         if ref.action == "done":
             return ref.output["result"], ref.output["code"]
@@ -415,46 +418,44 @@ NAME = f"{__name__}:review_drive"
 def act(d: Drive, method: str, *args):
     """`Drive` のメソッドを 1 つ流し、出力を記録する。Stop は例外にせず出力として残す（打ち直しで終了コードを保つ）。"""
     try:
-        return {"ok": getattr(d, method)(*args)}
+        return {"method": method, "ok": getattr(d, method)(*args)}
     except Stop as e:
-        return {"stop": str(e), "code": e.code}
+        return {"method": method, "stop": str(e), "code": e.code}
 
 
-def ok(res: dict):
-    if "stop" in res:
-        raise Held(res["stop"], res["code"])
-    return res["ok"]
+def run_act(d: Drive, method: str, *args):
+    return dp.recorded(act(d, method, *args), method, Held)
 
 
 def advance(d: Drive, stage: str) -> tuple[str, tuple | None, dict | None]:
     """段階を 1 歩進める。戻り値: (次の段階, 見せる止まり (種類, 新しく入ったか) か None, 終わりの結果か None)。"""
     if stage == "init":
-        d.adopt(ok(act(d, "init")))
+        d.adopt(run_act(d, "init"))
         return "round", None, None
     if stage in ("round", "posts"):
-        nxt = ok(act(d, "review_round" if stage == "round" else "flush_posts"))
+        nxt = run_act(d, "review_round" if stage == "round" else "flush_posts")
         if nxt == "fix":
             return "fix", ("fix", True), None
         return (nxt if nxt in ("round", "posts") else "sweep-start"), None, None
     if stage == "sweep-start":
         return "sweep", ("sweep", True), None
     if stage == "rotate":
-        nxt = ok(act(d, "rotate_prepare"))
+        nxt = run_act(d, "rotate_prepare")
         return nxt, (("newtext", True) if nxt == "newtext" else None), None
     if stage == "execute":
-        d.rotated = ok(act(d, "rotate_execute"))
+        d.rotated = run_act(d, "rotate_execute")
         return "set-current", None, None
     if stage == "set-current":
-        ok(act(d, "set_current", d.rotated))
+        run_act(d, "set_current", d.rotated)
         return "round", None, None
     # fix / sweep / newtext: 結果ファイルがあれば進み、無ければ同じ止まりをもう一度見せる
-    if not ok(act(d, "has_result", stage)):
+    if not run_act(d, "has_result", stage):
         return stage, (stage, False), None
     if stage == "fix":
-        return ok(act(d, "merge_fix")), None, None
+        return run_act(d, "merge_fix"), None, None
     if stage == "newtext":
         return "execute", None, None
-    return "done", None, ok(act(d, "finish"))
+    return "done", None, run_act(d, "finish")
 
 
 @durable.workflow(name=NAME)
@@ -470,15 +471,15 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
         try:
             stage, show, final = advance(d, stage)
             if final is not None:
-                return outcome(final, ok(act(d, "pr_head")))
-            shown = ok(act(d, "pause", *show)) if show else None
+                return outcome(final, run_act(d, "pr_head"))
+            shown = dp.shown(run_act(d, "pause", *show)) if show else None
         except Held as h:
-            shown = ok(act(d, "stopped", h.msg, h.code))  # 同じ段階を続きでやり直す
+            shown = dp.shown(run_act(d, "stopped", h.msg, h.code))  # 同じ段階を続きでやり直す
         if shown is not None:
             seq += 1
             if durable.pause(seq, result=shown, code=dp.exit_code(shown)) is None:
-                return outcome(ok(act(d, "stopped", "止まりの待ちが上限を過ぎた", 1)))
-    return outcome(ok(act(d, "stopped", "段階の数が上限を超えた", 1)))
+                return outcome(run_act(d, "stopped", "止まりの待ちが上限を過ぎた", 1))
+    return outcome(run_act(d, "stopped", "段階の数が上限を超えた", 1))
 
 
 def main(argv: list[str] | None = None) -> None:

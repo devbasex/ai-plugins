@@ -39,8 +39,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import step_result as sr
 
@@ -132,6 +133,39 @@ def read_extension(path: Path | str) -> Optional[tuple[float, str]]:
 
 def stopped(tool: str, msg: str, metrics: dict, code: int) -> dict:
     return sr.result(tool, "stopped", msg, [], {**metrics, "exit": code})
+
+
+class Misaligned(Exception):
+    """打ち直しで、耐久の記録の並びが今の呼び出しと合わない（step の外の分岐が前の実行と違う道を通った・版をまたいだ。#2782）。"""
+
+
+def recorded(res: Any, method: str, held: Callable[[str, int], Exception]) -> Any:
+    """耐久ステップの記録が `method` のものか確かめ、中身を返す（止まりの記録は `held` で上げる）。
+    名前を持たない前の版の記録は確かめずに読む。"""
+    if not isinstance(res, dict) or res.get("method", method) != method:
+        got = res.get("method") if isinstance(res, dict) else type(res).__name__
+        raise Misaligned(f"耐久の記録の並びが今の呼び出しと合わない（{method} の位置に {got} の記録がある）")
+    if "stop" in res:
+        raise held(res["stop"], res["code"])
+    return res["ok"]
+
+
+def shown(res: Any) -> dict:
+    """止まりの結果は dict。前の版の記録で並びがずれると、別のステップの値（str など）が来る（#2782）。"""
+    if not isinstance(res, dict):
+        raise Misaligned(f"耐久の記録の並びが今の呼び出しと合わない（止まりの位置に {type(res).__name__} の記録がある）")
+    return res
+
+
+def unless_misaligned(run: Callable[[], tuple]) -> tuple:
+    """`run` を流し、耐久ワークフローが `Misaligned` で落ちたときだけ 1 度流し直す（落ちた回は終わり、次は新しい実行の回）。"""
+    try:
+        return run()
+    except Exception as e:  # noqa: BLE001  駆動の Stop は種類を問わず、並びのずれの名前で見分ける
+        if f"{Misaligned.__name__}:" not in str(e):
+            raise
+        print(f"[ndf drive] {e}。新しい実行の回で流し直す", file=sys.stderr)
+        return run()
 
 
 def exit_code(out: dict) -> int:
