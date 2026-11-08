@@ -168,6 +168,8 @@ def deliver(obj: dict, *, stdout_kind: str, print_result: bool, result_file: str
     """結果を出す。`step-result` で print_result なら標準出力へ 1 行。それ以外で stopped なら理由を標準エラーへ 1 行。"""
     if run_id:
         obj = dict(obj, run_id=run_id)
+    if "lease" not in obj and (held := _lease_json()) is not None:
+        obj = dict(obj, lease=held)
     if print_result and stdout_kind == STEP_RESULT:
         print(json.dumps(obj, ensure_ascii=False), flush=True)
     elif print_result and obj.get("status") == "stopped":
@@ -265,6 +267,152 @@ def _begin(entry_id: str, argv: list[str]) -> tuple[RunContext | None, tuple[dic
     return _CTX, None
 
 
+# --- 持ち主の段（#2342） ------------------------------------------------------------
+
+
+@dataclass
+class _Held:
+    outcome: object  # lease.Outcome
+    unit: str
+    release: bool
+    done: bool = False
+
+
+_HELD: list[_Held] = []
+_STANDALONE_RUN: str | None = None
+_STANDALONE_HOOKED = False
+LEASE_REFUSED = step_result.EXIT_PRECONDITION
+NO_SESSION_SUMMARY = "ランタイムのセッション（Claude Code・Codex）の外では、セッション単位の鍵を取れない"
+
+
+def lease_decl(entry_id: str, sub: str = "") -> dict | None:
+    """入口の契約の `lease` のうち、副命令 `sub` の宣言。無ければ None。"""
+    got = ((contract_of(entry_id) or {}).get("lease") or {}).get(sub)
+    return got if isinstance(got, dict) else None
+
+
+def _run_id() -> str:
+    global _STANDALONE_RUN
+    if _CTX is not None:
+        return _CTX.run_id
+    _STANDALONE_RUN = _STANDALONE_RUN or uuid.uuid4().hex[:12]
+    return _STANDALONE_RUN
+
+
+def _lease_json() -> dict | None:
+    return _HELD[-1].outcome.as_json() if _HELD else None
+
+
+def _refusal_summary(out) -> str:
+    return (
+        f"持ち主の鍵 {out.key} は別の実行 {out.holder_run} が持っている"
+        f"（pid {out.holder_pid}・最後に動いた時刻 {out.holder_seen_at}）"
+    )
+
+
+def _stop_lease(entry_id: str, summary: str, code: int, name: str, nxt: str | None = None, lease_json: dict | None = None) -> NoReturn:
+    """持ち主の段の止まり。核の中なら本体の止まりとして核へ返し、核の外なら結果を出して終える。"""
+    obj = step_result.result(_tool(entry_id), "stopped", summary, gaps=[{"kind": "lease", "name": name, "reason": summary}], next=nxt)
+    if lease_json:
+        obj["lease"] = lease_json
+    if step_result.CAPTURE:
+        raise step_result.Emitted(obj, code)
+    kind = _CTX.stdout_kind if _CTX else (contract_of(entry_id) or {}).get("stdout", "")
+    result_file = _CTX.result_file if _CTX else os.environ.pop(RESULT_ENV, None)
+    deliver(obj, stdout_kind=kind, print_result=True, result_file=result_file, run_id=_run_id())
+    _flush()
+    raise SystemExit(code)
+
+
+def hold(entry_id: str, sub: str = "", **inputs) -> object | None:
+    """入口の本体が入力を解いた後に呼ぶ持ち主の段（E1〜E5）。契約に `lease` の宣言が無ければ何もしない。
+
+    生きた持ち主がいれば stopped・3、鍵を取る副命令でランタイムのセッションが無ければ stopped・1 で終える。
+    取った鍵は、核の中なら本体の終わりで、核の外なら終了時（atexit・SIGTERM・`durable.exit_leaving_pending`）に返す。"""
+    raw = lease_decl(entry_id, sub)
+    if raw is None:
+        return None
+    try:
+        import lease  # filelock と psutil を要する
+    except ImportError as e:
+        import deps
+
+        exit_early(f"持ち主の記録に要るパッケージが無い: {e}", deps.EXIT_DEPS_MISSING, [{"kind": "deps", "name": "locks", "reason": str(e)}])
+    decl = lease.Decl.of(raw)
+    try:
+        key = decl.key_of(inputs)
+    except (KeyError, IndexError) as e:
+        _stop_lease(entry_id, f"持ち主の鍵 {decl.key} を作る入力が無い: {e}", step_result.EXIT_UNREADABLE, "input")
+    try:
+        out = lease.acquire(decl, key, f"{entry_id} {sub}".strip(), _run_id(), lease.repo_slug())
+    except lease.LeaseError as e:
+        _stop_lease(entry_id, str(e), step_result.EXIT_VIOLATION, "record")
+    if out.outcome == "refused":
+        nxt = "持ち主の実行が終わってから同じコマンドを打ち直す。待てなければ、止まった理由と持ち主の pid を添えて人へ戻す"
+        _stop_lease(entry_id, _refusal_summary(out), LEASE_REFUSED, "refused", nxt, out.as_json())
+    if out.outcome == "no_session" and not decl.release:
+        _stop_lease(entry_id, NO_SESSION_SUMMARY, step_result.EXIT_VIOLATION, "no_session", lease_json=out.as_json())
+    _HELD.append(_Held(out, decl.unit, decl.release))
+    step_result.ATTACH["lease"] = out.as_json()
+    if _CTX is None or _CTX.entry_id != entry_id:
+        _hook_standalone(entry_id)
+    return out
+
+
+def touch() -> None:
+    """長く動く本体が最後に動いた時刻を書く（持ち主の記録の持ち主が自分のときだけ）。"""
+    if not _HELD:
+        return
+    import lease
+
+    for h in _HELD:
+        if not h.done and h.outcome.holder is not None:
+            lease.touch(h.outcome.key, h.outcome.holder, h.outcome.repo)
+
+
+def release_held() -> None:
+    """取った鍵を返す（E7）。2 回目は何もしない。単位 run は取った（引き取った）鍵だけ、単位 session は返す副命令だけ返す。"""
+    if not _HELD:
+        return
+    import lease
+
+    for h in _HELD:
+        if h.done:
+            continue
+        h.done = True
+        out = h.outcome
+        if h.unit == "run" and out.outcome in ("acquired", "reclaimed"):
+            lease.release(out.key, out.holder, out.repo)
+        elif h.unit == "session" and h.release:
+            lease.release(out.key, out.holder, out.repo)
+        elif h.unit == "session":
+            lease.touch(out.key, out.holder, out.repo)
+
+
+def _hook_standalone(entry_id: str) -> None:
+    """核の外で動く入口の返し方。自分がその入口のプロセスのときだけ atexit と SIGTERM の受け手を置く。"""
+    global _STANDALONE_HOOKED
+    if _STANDALONE_HOOKED or entry_of_script(sys.argv[0]) != entry_id:
+        return
+    _STANDALONE_HOOKED = True
+    import atexit
+
+    atexit.register(release_held)
+    if threading.current_thread() is not threading.main_thread():
+        return
+    prev = signal.getsignal(signal.SIGTERM)
+
+    def _on_term(signum, frame):
+        release_held()
+        if callable(prev):
+            prev(signum, frame)
+            return
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, _on_term)
+
+
 # --- Python のエントリポイント ----------------------------------------------------
 
 
@@ -314,6 +462,7 @@ def run_body(entry_id: str, body: Callable, argv: list[str] | None = None) -> tu
         return (*core_stopped(entry_id, "exception", type(e).__name__, text), True, False)
     finally:
         step_result.CAPTURE = False
+        release_held()
     if ret is not None and (isinstance(ret, bool) or not isinstance(ret, int)):
         return (*core_stopped(entry_id, "result-shape", "return", f"本体の戻り値が終了コードでない: {type(ret).__name__}"), True, False)
     if ctx.stdout_kind == STEP_RESULT:
