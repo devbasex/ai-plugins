@@ -209,15 +209,32 @@ def monitor_argv(a, run_id: int, tdir: pathlib.Path) -> list[str]:
     return mon
 
 
+OK_REASONS = ("ok", "missing")  # 終わりを記録した監視の理由のうち、失敗を示さないもの（#2337 の I12）
+REASON_OUTCOME = {"timeout": "timeout", "cli_timeout": "timeout", "stalled": "stalled"}
+
+
+def _readable(path: str | None) -> bool:
+    """結果ファイルが空でなく読めるか。"""
+    try:
+        return bool(path) and bool(pathlib.Path(path).read_text(encoding="utf-8", errors="replace").strip())
+    except OSError:
+        return False
+
+
 def run_outcome(runtime: str, rec: dict, source: str | None, path: str | None) -> tuple[str, str, str | None]:
-    """監視の記録と回収元から `(結末, 説明, next)` を決める。副作用を持たない。"""
-    mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
-    if mstatus in ("OK", "NO_RESULT") and source in ("file", "stdout"):
+    """監視の記録と回収元から `(結末, 説明, next)` を決める。ファイルを読むだけで書かない。
+
+    `ok` は、監視の状態が OK か NO_RESULT で、理由が ok か missing で、回収した結果ファイルが空でなく読めるときだけ。
+    結果ファイルがあっても、監視の状態か理由が失敗を示せば `ok` にしない（#2337 の I12）。"""
+    mstatus = rec.get("status", "PIDFILE_BAD")
+    ended = mstatus in ("OK", "NO_RESULT")
+    reason = rec.get("reason", "ok" if ended else "pidfile_bad")
+    if ended and reason in OK_REASONS and source in ("file", "stdout") and _readable(path):
         return "ok", f"{runtime} の結果を回収した（{source}）: {path}", None
     hint = f"stderr の末尾を読む: {path}" if path else None
-    if mstatus in ("OK", "NO_RESULT"):
+    if ended and reason in OK_REASONS:
         return "no_result", f"{runtime} は終わったが結果が無い（理由: {reason}）", hint
-    outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
+    outcome = REASON_OUTCOME.get(reason, "early_error") if ended else MONITOR_OUTCOME.get(mstatus, "launch_failed")
     if reason == "usage_limit":
         outcome = "usage_limit"
     elif reason == "auth_expired" or (outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", ""))):

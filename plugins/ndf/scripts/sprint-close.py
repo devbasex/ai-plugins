@@ -83,6 +83,7 @@ from dist_record import parse_record, released  # noqa: E402  記録の形は li
 
 sys.path.insert(0, str(HERE))
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
+from sprint_close_lib.summary import close_summary, not_closed_gaps  # noqa: E402
 from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
     NO_BASE,
     STAGE_RETRO,
@@ -341,20 +342,6 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
     return close_one(ctx, repo, n)
 
 
-def _close_summary(items, prs, dry_run, referenced):
-    kinds = ("closed", "already_closed", "failed", "closed_unverified", "kept_open", "would_close")
-    count = {k: sum(1 for i in items if i["result"] == k) for k in kinds}
-    metrics = {"issues": len(items), **count, "referenced_only": referenced, "prs": len(prs)}
-    summary = (
-        f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
-        f"失敗 {count['failed']} 件・閉じているが条件を満たさない {count['closed_unverified']} 件・"
-        f"開いたまま {count['kept_open']} 件（うち参照だけ {referenced} 件）"
-    )
-    if dry_run:
-        summary += f"（試行。閉じる予定 {count['would_close']} 件）"
-    return count, metrics, summary
-
-
 def _stop_no_issues(prs, refs):
     """スプリントの PR を読んだのに閉じる課題が 0 件。課題もボードも書かずに止まる（参照の状態は読まない）。"""
     seen = f"（PR が参照した番号: {' '.join(f'#{n}' for n in refs)}）" if refs else ""
@@ -386,21 +373,9 @@ def _collect_close_issues(a, root, record_repo, prs):
     return issues, refs
 
 
-NOT_CLOSED = ("kept_open", "closed_unverified", "failed")
-
-
-def _not_closed_gaps(targets):
-    """閉じる対象のうち閉じなかった課題の欠け（参照だけの課題は渡さない。#2337 の I14）。"""
-    return [
-        {"kind": "issue", "name": f"{i['repo']}#{i['number']}", "reason": i.get("reason") or i["result"]}
-        for i in targets
-        if i["result"] in NOT_CLOSED
-    ]
-
-
 def _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions):
     """結果を出す: 失敗があれば止める（1）→ 記録の置き場が分からない・閉じなかった課題があれば承認ゲート（10）→ ok。"""
-    gaps = _not_closed_gaps(targets)
+    gaps = not_closed_gaps(targets)
     out = items + notes
     if count["failed"]:
         nxt = "失敗した課題の cmd でやり直す。棚卸しへ進まない"
@@ -437,7 +412,7 @@ def cmd_close(a):
     refs_items = referenced_items(root, record_repo, refs, issues)
     items += refs_items
 
-    count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
+    count, metrics, summary = close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     metrics["final_stage"] = a.final_stage
     decisions = [
         {"decision": f"最終工程を {a.final_stage} として判定した", "basis": f"--final-stage {a.final_stage}（省略時は{STAGE_RETRO}）"}

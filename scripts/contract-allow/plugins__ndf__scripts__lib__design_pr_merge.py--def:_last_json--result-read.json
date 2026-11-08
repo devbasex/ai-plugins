@@ -1,6 +1,0 @@
-{
-  "path": "plugins/ndf/scripts/lib/design_pr_merge.py",
-  "name": "def:_last_json",
-  "kind": "result-read",
-  "reason": "結果 JSON の最後の行を共通の読み手の外で読む（#2337）。移す Pull Request が step_read.read_completed へ置き換えて消す"
-}

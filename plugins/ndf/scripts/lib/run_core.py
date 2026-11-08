@@ -66,7 +66,7 @@ class RunContext:
 _CTX: RunContext | None = None
 
 
-def context() -> RunContext | None:
+def run_context() -> RunContext | None:
     """動いている実行の文脈（核の外では None）。"""
     return _CTX
 
@@ -118,7 +118,7 @@ def _tool(entry_id: str) -> str:
     return Path(entry_id).stem or "run-core"
 
 
-def stopped(entry_id: str, kind: str, name: str, summary: str, code: int = step_result.EXIT_VIOLATION) -> tuple[dict, int]:
+def core_stopped(entry_id: str, kind: str, name: str, summary: str, code: int = step_result.EXIT_VIOLATION) -> tuple[dict, int]:
     gap = {"kind": kind, "name": name or kind, "reason": summary}
     return step_result.result(_tool(entry_id), "stopped", summary, gaps=[gap]), code
 
@@ -127,24 +127,24 @@ def _from_code(entry_id: str, code: int) -> tuple[dict, int]:
     """本体が結果 JSON を出さずに終えたとき、終了コードから結果を組む（標準出力へは出さない）。"""
     st = status_of_code(code)
     if st is None:
-        return stopped(entry_id, "result-shape", "exit", f"終了コード {code} は終了コードの表に無い")
+        return core_stopped(entry_id, "result-shape", "exit", f"終了コード {code} は終了コードの表に無い")
     summary = f"終了コード {code}（{step_result.label_of(code)}）"
     if st == "gate":
         return step_result.result(_tool(entry_id), st, summary, next=f"{summary}。本体の出力を読む"), code
     if code == step_result.EXIT_INCOMPLETE:
-        return stopped(entry_id, "incomplete", "exit", summary, code)
+        return core_stopped(entry_id, "incomplete", "exit", summary, code)
     return step_result.result(_tool(entry_id), st, summary), code
 
 
-def settle(entry_id: str, obj, code: int, exit_codes: frozenset[int] | None) -> tuple[dict, int, bool]:
+def verify_emitted(entry_id: str, obj, code: int, exit_codes: frozenset[int] | None) -> tuple[dict, int, bool]:
     """本体の結果を確かめ、(結果, 終了コード, 置き換えたか) を返す。I2（ok に欠け）と I3（形・食い違い・契約に無い終了コード）。"""
     if isinstance(obj, dict) and obj.get("status") == "ok" and isinstance(obj.get("gaps"), list) and obj["gaps"]:
         obj, code = dict(obj, status="stopped"), step_result.EXIT_INCOMPLETE
     errs = step_result.validate_result(obj, code)
     if errs:
-        return (*stopped(entry_id, "result-shape", "result", "結果の形が誤っている: " + " / ".join(errs)), True)
+        return (*core_stopped(entry_id, "result-shape", "result", "結果の形が誤っている: " + " / ".join(errs)), True)
     if exit_codes is not None and code not in exit_codes:
-        return (*stopped(entry_id, "result-shape", "exit", f"終了コード {code} は契約の exit に無い"), True)
+        return (*core_stopped(entry_id, "result-shape", "exit", f"終了コード {code} は契約の exit に無い"), True)
     return obj, code, False
 
 
@@ -255,7 +255,7 @@ def _begin(entry_id: str, argv: list[str]) -> tuple[RunContext | None, tuple[dic
     if contract is None:
         stub = RunContext(entry_id, uuid.uuid4().hex[:12], argv, None, STEP_RESULT, frozenset(), result_file)
         _CTX = stub
-        return stub, stopped(entry_id, "contract", entry_id, f"契約の一覧に無い: {entry_id}", step_result.EXIT_UNREADABLE)
+        return stub, core_stopped(entry_id, "contract", entry_id, f"契約の一覧に無い: {entry_id}", step_result.EXIT_UNREADABLE)
     deadline = time.monotonic() + timeout if timeout else None
     _CTX = RunContext(entry_id, uuid.uuid4().hex[:12], argv, deadline, contract.get("stdout", ""), _exit_codes(contract), result_file)
     return _CTX, None
@@ -281,7 +281,7 @@ def _system_exit_code(e: SystemExit) -> int:
     return 1
 
 
-def run(entry_id: str, body: Callable, argv: list[str] | None = None) -> tuple[dict, int, bool, bool]:
+def run_body(entry_id: str, body: Callable, argv: list[str] | None = None) -> tuple[dict, int, bool, bool]:
     """本体を核の上で動かし、(結果, 終了コード, 標準出力へ出すか, 中断したか) を返す（出さない）。"""
     argv = list(sys.argv[1:] if argv is None else argv)
     ctx, early = _begin(entry_id, argv)
@@ -294,12 +294,12 @@ def run(entry_id: str, body: Callable, argv: list[str] | None = None) -> tuple[d
             try:
                 ret = _call(body, argv)
             except step_result.Emitted as e:
-                obj, code, _ = settle(entry_id, e.result, e.code, ctx.exit_codes)
+                obj, code, _ = verify_emitted(entry_id, e.result, e.code, ctx.exit_codes)
                 return obj, code, True, False
     except _Interrupt as e:
-        return (*stopped(entry_id, e.kind, e.kind, e.summary), True, True)
+        return (*core_stopped(entry_id, e.kind, e.kind, e.summary), True, True)
     except step_result.Emitted as e:  # 受け手を戻す間に届いた結果
-        obj, code, _ = settle(entry_id, e.result, e.code, ctx.exit_codes)
+        obj, code, _ = verify_emitted(entry_id, e.result, e.code, ctx.exit_codes)
         return obj, code, True, False
     except SystemExit as e:
         code = _system_exit_code(e)
@@ -307,13 +307,13 @@ def run(entry_id: str, body: Callable, argv: list[str] | None = None) -> tuple[d
     except BaseException as e:  # noqa: BLE001 例外は結果に変え、例外の跡を標準エラーへ出す
         traceback.print_exc()
         text = secret_redact.redact_output(f"{type(e).__name__}: {e}", max_lines=3)
-        return (*stopped(entry_id, "exception", type(e).__name__, text), True, False)
+        return (*core_stopped(entry_id, "exception", type(e).__name__, text), True, False)
     finally:
         step_result.CAPTURE = False
     if ret is not None and (isinstance(ret, bool) or not isinstance(ret, int)):
-        return (*stopped(entry_id, "result-shape", "return", f"本体の戻り値が終了コードでない: {type(ret).__name__}"), True, False)
+        return (*core_stopped(entry_id, "result-shape", "return", f"本体の戻り値が終了コードでない: {type(ret).__name__}"), True, False)
     if ctx.stdout_kind == STEP_RESULT:
-        return (*stopped(entry_id, "result-shape", "result", "本体が結果 JSON を出さずに返った"), True, False)
+        return (*core_stopped(entry_id, "result-shape", "result", "本体が結果 JSON を出さずに返った"), True, False)
     return _no_result(entry_id, ctx, 0 if ret is None else ret)
 
 
@@ -321,14 +321,14 @@ def _no_result(entry_id: str, ctx: RunContext, code: int) -> tuple[dict, int, bo
     """結果 JSON の無い終わり方。終了コードが表か契約から外れれば stopped・1 を標準出力の規則どおり出す。"""
     if status_of_code(code) is None or (ctx.exit_codes and code not in ctx.exit_codes):
         where = "終了コードの表" if status_of_code(code) is None else "契約の exit"
-        return (*stopped(entry_id, "result-shape", "exit", f"終了コード {code} は{where}に無い"), True, False)
+        return (*core_stopped(entry_id, "result-shape", "exit", f"終了コード {code} は{where}に無い"), True, False)
     obj, code = _from_code(entry_id, code)
     return obj, code, False, False
 
 
 def main(entry_id: str, body: Callable, argv: list[str] | None = None) -> NoReturn:
     """エントリポイントの `__main__` が呼ぶ。本体を動かし、結果を出して終える。"""
-    obj, code, show, interrupted = run(entry_id, body, argv)
+    obj, code, show, interrupted = run_body(entry_id, body, argv)
     ctx = _CTX
     deliver(obj, stdout_kind=ctx.stdout_kind, print_result=show, result_file=ctx.result_file, run_id=ctx.run_id)
     _leave(code, interrupted)
@@ -379,17 +379,17 @@ def run_shell(entry_id: str, script: str, args: list[str]) -> tuple[dict, int, b
         _kill_group(p)
         if held:
             sys.stdout.write(held.pop())
-        return (*stopped(entry_id, e.kind, e.kind, e.summary), True, True)
+        return (*core_stopped(entry_id, e.kind, e.kind, e.summary), True, True)
     last = held[-1] if held else ""
     obj = _json_line(last)
     if capture and obj is not None:
-        res, code, _ = settle(entry_id, obj, rc, ctx.exit_codes)
+        res, code, _ = verify_emitted(entry_id, obj, rc, ctx.exit_codes)
         return res, code, True, False
     if last:
         sys.stdout.write(last)
         sys.stdout.flush()
     if rc < 0:
-        return (*stopped(entry_id, "interrupted", "signal", f"シグナル {-rc} で終わった"), True, False)
+        return (*core_stopped(entry_id, "interrupted", "signal", f"シグナル {-rc} で終わった"), True, False)
     return _no_result(entry_id, ctx, rc)
 
 

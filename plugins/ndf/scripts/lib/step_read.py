@@ -3,6 +3,7 @@
 - `result_line` / `not_ok_reason`: 子プロセスの標準出力の最後の行を結果 JSON として読み、`ok`（終了コード 0）で
   なければ理由の 1 行を返す。結果 JSON が無い・形が誤っていることも成功と読まない
 - `read_result_file`: 結果ファイル（worker の作業の結果ファイル・`NDF_RESULT_FILE`）を読む
+- `last_json`: 出力の最後の JSON の行を、形を確かめずに読む（要約・件数を写すだけの箇所。成否の判定には使わない）
 - `read_completed`: 子プロセス（`subprocess.CompletedProcess`）の結果を読む
   どちらも結果 JSON を返し、無い・読めない・形が違う・状態と終了コードが食い違うときは理由つきの `stopped` を返す
 
@@ -20,6 +21,19 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import step_result  # noqa: E402
+
+
+def last_json(text: str) -> dict | None:
+    """出力の最後の JSON の行を読む（形は確かめない）。成否は `read_completed` / `not_ok_reason` で決める。"""
+    for line in reversed((text or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            return obj if isinstance(obj, dict) else None
+    return None
 
 
 def result_line(stdout: str) -> dict | None:
@@ -49,7 +63,7 @@ def process_if_not_ok(run: str, completed) -> list[dict]:
     return [{"run": run, "result": why}] if why else []
 
 
-def _stopped(tool: str, kind: str, name: str, reason: str) -> dict:
+def _stopped_result(tool: str, kind: str, name: str, reason: str) -> dict:
     return step_result.result(tool, "stopped", reason, gaps=[{"kind": kind, "name": name, "reason": reason}])
 
 
@@ -59,12 +73,12 @@ def read_result_file(path: str | os.PathLike, tool: str = "result-file") -> dict
     try:
         text = p.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return _stopped(tool, "result-missing", str(p), f"結果ファイルが無い: {p}")
+        return _stopped_result(tool, "result-missing", str(p), f"結果ファイルが無い: {p}")
     except OSError as e:
-        return _stopped(tool, "result-unreadable", str(p), f"結果ファイルを読めない: {p}: {e}")
+        return _stopped_result(tool, "result-unreadable", str(p), f"結果ファイルを読めない: {p}: {e}")
     obj = result_line(text)
     if obj is None:
-        return _stopped(tool, "result-shape", str(p), f"結果ファイルが結果 JSON の形でない: {p}")
+        return _stopped_result(tool, "result-shape", str(p), f"結果ファイルが結果 JSON の形でない: {p}")
     return obj
 
 
@@ -74,9 +88,9 @@ def read_completed(completed, tool: str = "child") -> dict:
     code = completed.returncode
     if obj is None:
         why = f"結果 JSON が無い（exit={code}）: {(completed.stderr or '').strip()[:200]}"
-        return _stopped(tool, "result-missing", tool, why)
+        return _stopped_result(tool, "result-missing", tool, why)
     if not step_result.code_matches(obj["status"], code):
-        return _stopped(obj.get("tool") or tool, "result-shape", tool, f"状態 {obj['status']} と終了コード {code} が食い違う")
+        return _stopped_result(obj.get("tool") or tool, "result-shape", tool, f"状態 {obj['status']} と終了コード {code} が食い違う")
     return obj
 
 

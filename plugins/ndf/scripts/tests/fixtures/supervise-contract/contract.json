@@ -24,11 +24,11 @@
       "result": "- 結果: 完了"
     },
     "run gate": {
-      "exit": 0,
+      "exit": 10,
       "result": "- 結果: 関門"
     },
     "run stop": {
-      "exit": 3,
+      "exit": 1,
       "result": "- 結果: 止まった"
     },
     "example": {

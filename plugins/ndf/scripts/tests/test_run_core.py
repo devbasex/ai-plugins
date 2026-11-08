@@ -226,7 +226,7 @@ def sh_setup(tmp_path: Path, stdout: str = "step-result") -> Path:
     # 核の契約の置き場を一時ディレクトリへ向けた複製を使う
     lib = tmp_path / "lib"
     lib.mkdir()
-    for f in ("run_core.py", "run-core.sh", "step_result.py", "deps.py", "proc.py", "secret_redact.py"):
+    for f in ("run_core.py", "run-core.sh", "step_result.py", "deps.py", "proc.py", "secret_redact.py", "jsonio.py"):
         (lib / f).write_text((LIB / f).read_text())
     core = lib / "run_core.py"
     core.write_text(core.read_text().replace('CONTRACTS = PLUGIN_ROOT / "contracts" / "entrypoints"', f"CONTRACTS = Path({str(c)!r})"))
@@ -274,3 +274,40 @@ def test_shell_child_receives_sigterm_through_the_core(tmp_path):
     out, _ = p.communicate(timeout=30)
     r = json.loads(out.strip().splitlines()[-1])
     assert (r["status"], p.returncode, r["gaps"][0]["kind"]) == ("stopped", 1, "interrupted")
+
+
+# --- すべてのエントリポイント（受け入れ条件 5） ---------------------------------------
+
+
+def _entries() -> list[str]:
+    import run_core
+
+    out = []
+    for f in sorted(run_core.CONTRACTS.glob("*.json")):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        if not d.get("core"):
+            out.append(d["path"])
+    return out
+
+
+def _gaps_body(argv):
+    step_result.emit(
+        {"tool": "t", "status": "ok", "summary": "x", "items": [], "metrics": {}, "gaps": [{"kind": "k", "name": "n", "reason": "r"}]}
+    )
+
+
+def _raise_body(argv):
+    raise RuntimeError("壊れた")
+
+
+def test_no_entrypoint_returns_ok_for_a_body_with_gaps_or_an_exception():
+    """契約の一覧の核の対象外を除くすべての id で、欠けのある本体と例外を投げる本体を核に通して ok が出ない。"""
+    import run_core
+
+    entries = _entries()
+    assert len(entries) >= 60
+    for entry in entries:
+        for body in (_gaps_body, _raise_body):
+            obj, code, _, _ = run_core.run_body(entry, body, [])
+            assert obj["status"] != "ok" and code != 0, (entry, body.__name__, obj)
+            assert step_result.code_matches(obj["status"], code)

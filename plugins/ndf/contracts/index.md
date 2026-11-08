@@ -49,6 +49,7 @@
 | `laps-md` | `laps.md` | report | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `phase-result-json` | `phase-result.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `plan-json` | `plan.json` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `plan-md` | `plan.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `present-json` | `present.json` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |

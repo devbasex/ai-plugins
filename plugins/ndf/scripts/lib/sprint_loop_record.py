@@ -38,6 +38,7 @@ import locks
 import parallel_hold
 import project_mvv as pm
 import repo as repo_lib
+import step_read
 import step_result
 from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
@@ -89,10 +90,8 @@ _run_loop_cmd = design_pr_merge.run_cmd  # 起動の本体は 1 つ（#2507）
 
 def _upkeep_rank(root: Path) -> tuple[int, dict]:
     code, out, err = _run_loop_cmd([sys.executable, str(UPKEEP), "rank", "--root", str(root)])
-    try:
-        return code, json.loads(out.strip().splitlines()[-1]) if out.strip() else {"summary": err.strip()[:300]}
-    except ValueError:
-        return code, {"summary": (out or err).strip()[:300]}
+    got = step_read.last_json(out)
+    return code, got if got is not None else {"summary": (out or err).strip()[:300]}
 
 
 def _milestones(repo: str, cwd: str | None = None) -> dict:

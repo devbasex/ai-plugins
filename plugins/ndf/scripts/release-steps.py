@@ -86,6 +86,7 @@ import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable", "waits")
 import approved_commit as ac  # noqa: E402
+import step_read  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
@@ -475,10 +476,7 @@ def wait_and_merge(root, n, expect=None, ci_wait=3600.0):
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     p = run(cmd + (["--expect-head", expect] if expect else []), cwd=root, check=False)
-    try:
-        out = json.loads((p.stdout or "").strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        out = {}
+    out = step_read.last_json(p.stdout) or {}
     if p.returncode != 0:
         if any(isinstance(i, dict) and i.get("result") == "head_moved" for i in out.get("items") or []):
             raise HeadMoved(out.get("summary") or "")

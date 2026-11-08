@@ -20,7 +20,11 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine  # noqa: E402
 
-FAKE_CLAUDE = r"""
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+FAKE_CLAUDE = (
+    r"""
 import json, os, sys, time
 prompt = sys.stdin.read()
 log = os.environ["FAKE_CLAUDE_LOG"]
@@ -41,8 +45,13 @@ if counter and not os.path.exists(counter):
     print(json.dumps({"result": "Claude AI usage limit reached|%d" % int(time.time()), "is_error": True}))
     sys.exit(1)
 time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
-print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}))
+text = "## 作業の報告\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET
+    + r"""
+print(json.dumps({"result": text, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}))
+"""
+)
 
 PROBE = r"""
 import json, sys
