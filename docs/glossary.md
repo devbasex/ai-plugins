@@ -313,14 +313,14 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 予算の反映 | — | 開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない | — | — | — |
-| 予算の既定 | — | 開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は無制限。Factory の画面で予算の欄を空にした単位はこの値へ戻る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 既定へ戻す指示 | — | 開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする。Factory は予算の欄が空の単位をこの指示として実行ジョブの指示に載せる | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
+| 予算の既定 | — | 開発ループの予算の単位ごとの既定の値。リポジトリの .ndf/pace.json の loop.budget の値で、宣言が無い単位は無制限。既定へ戻す指示を受けた単位はこの値へ戻る | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| 既定へ戻す指示 | — | 開発ループの予算の単位に、数の代わりに渡す値 default（`--budget-usd default`）。NDF が反映の時点の予算の既定でその単位を上書きする | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 予算の履歴 | — | 開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す | — | — | — |
 | 人の判断待ちの行 | — | 開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語 | — | — | — |
 | 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
-| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと外のサービスのランナーが読む（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 試行 | — | 同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 欠けの残る結果 | — | 手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 結果の置き場 | — | 読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
@@ -978,87 +978,3 @@ AI エージェントが実施する前提で、作業の A・H・L・C を類�
 | 形式別ガイド | — | 文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md） | — | — | `docs/specifications/ndf-document-rebuild.md` |
 | 目的別ガイド | — | 文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md） | — | — | `docs/specifications/ndf-document-rebuild.md` |
 | 読み手役 | — | 組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI） | — | — | `plugins/ndf/skills/document-rebuild/SKILL.md` |
-
-## Neural Development Factory（`ndf-factory`）
-
-NDF を Web UI から操作できるサービスとして提供するときの語。サービスのディレクトリ・境界の検査・実行基盤
-
-| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
-| --- | --- | --- | --- | --- | --- |
-| Neural Development Factory | — | NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| サービスのディレクトリ | — | Web サービスのコードを置く、プラグインと分けた 1 つのディレクトリ | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 境界の検査 | — | サービスのディレクトリとプラグイン・リリース対象・インフラの境目が守られているかを CI で見る検査 | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 実行基盤 | — | Web サービスからスプリントを動かす、コンテナとジョブの仕組み | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| ランナー | — | 1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 実行ジョブ | — | 実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| スプリントの実行 | — | サービスが動かす NDF のスプリント 1 つ（sprint.json 1 つ）と、それを進める実行ジョブの列 | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 進捗の事象 | — | ランナーと GitHub の通知から受け取り、追記だけで持つ 1 件の出来事。一覧・詳細・通知・課金はここから導く | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 承認の依頼 | — | 実行ジョブが人の答えを待って終わったときに作る依頼。種類は設計承認ゲート・リリース承認ゲート・判断（止めて人へ戻した）の 3 つ | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 進捗の受け口 | — | ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路 | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
-| 実行ジョブの token | — | 実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、Pull Request の参照はそのジョブの取り込むリポジトリのものだけを残せる。承認の依頼の答えを読める | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
-| 冪等の鍵 | — | 進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
-| アカウント | — | Neural Development Factory で、料金プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 席 | — | チームのアカウントの中で、1 人の利用者に割り当てる枠。種類は standard と premium | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 料金プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 使える量 | — | 料金プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 利用者 | — | Google か GitHub の 1 つのアカウントで Neural Development Factory にログインした人。Cognito の `sub` を利用者の ID として持つ。同じ人でも IdP が違えば別の利用者である | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| チームの持ち主 | — | チームのアカウントを作った利用者。席を足す・種類を変える・外すことができる唯一の利用者 | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 使える量の判定 | — | 呼び出す側が渡した今の値（動いているスプリントの実行の数・その月の token の数）を使える量の上限と照らし、許すか断るかと理由を返すこと | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| GitHub の仲立ち | — | GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 実行の形態 | — | アカウントのランナーが Claude をどう呼ぶか。`local`（手元のマシン）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
-| 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない | — | — | — |
-| 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
-| 起票の代行 | — | 記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理 | — | — | — |
-| 下書き（起票の依頼） | — | サービスが起票しなかった起票の依頼の題と本文。人が相手先の流儀に沿って起票するために回る | — | — | — |
-| リポジトリの登録 | — | アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 再開のジョブ | — | `START=resume` の実行ジョブ。承認の答えで起こすものと、利用上限のリセット時刻の後に起こすものがある。保存した状態を復元して前回の続きから進める | — | — | — |
-| 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
-| 同じ役割の写し | — | リファクタリングの対象と同じ処理・同じ判断を、別の場所に書き写したもの。対象と同じ変更で 1 か所へ寄せる（#2199） | — | — | — |
-| 保存の契約 | — | アカウントの保存（AccountStore）の interface と、その引数・失敗の型。DynamoDB とメモリの 2 つの実装が満たし、AWS SDK を読まない（accounts/port.ts） | — | — | — |
-| スプリントの一覧 | — | アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
-| スプリントの詳細 | — | 1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
-| 詳細パネル | — | スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
-| バックログの画面 | — | 取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172） | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
-| フェーズの名前 | — | phase.changed と step.recorded の phase が運ぶ、設計・実装・検査・取り込み・仕上げの 5 つ。factory/contracts/src/phases.ts の列挙が正。ほかの名前も捨てずに残し、画面は「その他（<名前>）」と出す（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 工程の記録 | — | スプリントの詳細に並ぶ step.recorded の 1 件ずつの行。NDF のプランのステップ 1 つが 1 行になる（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 工程の中身 | — | 1 件の工程の記録の、触ったファイル・コミットの範囲・決めたこと・出力（作業の報告かログ）。詳細パネルが出す（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| スプリント全体の欄 | — | スプリントの詳細で、課題の番号を持たない工程の記録を並べる欄（#2172） | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 区間 | — | 1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 区間の上限 | — | 1 つの実行ジョブで起動してよい区間の数の上限（既定 20）。超えたジョブは section_limit で終わる | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 同時のジョブの数 | `max_jobs` | 手元のマシンが同時に動かす実行ジョブの数の上限。手元のマシンが登録と心拍で申告し、サービスはそれを超えて指示を渡さない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| マイルストーンの持ち分 | — | 終わりの状態でない開発ループが、リポジトリのマイルストーン 1 つを選定の対象として占めていることを表す実行の枠の行。同じリポジトリのループどうしで重ならない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 課題の持ち分 | — | 終わりの状態でない手動のスプリントの実行が、リポジトリの課題 1 つを持っていることを表す実行の枠の行。同じ課題を 2 つの実行に入れない | — | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 手元のマシンの枠 | — | 1 つの手元のマシンが running で持つ local の実行ジョブの数を数えた実行の枠の行。同時のジョブの数を超えて受け取らせない | 手元のランナーの枠 | — | `docs/specifications/ndf-factory-dev-loops.md` |
-| 手元のマシン | — | 利用者の環境に登録し、同時のジョブの数まで実行ジョブを受け取るマシン。受け取った実行ジョブごとに別のランナーが動く | 手元のランナー | — | `docs/specifications/ndf-factory-organizer.md` |
-| Factory のオーガナイザー | — | 同じリポジトリで並行する Factory の実行をまとめる役割。1 台の中のオーガナイザーの仕事すべて（デプロイを 1 本にまとめる・問いを集める・答えの後の作業を持ち主へ返す・共有の作業を一時のレーンへ渡す）に、Factory 固有の仕事（実行ジョブの起動・停止・答えでの再開、実行の枠と手元のマシンの枠、ジョブをまたぐ状態の置き場）を足したもの。API の handler と見回りの中で動き、常駐しない。1 台の中のオーガナイザーと同じ層の別の実装で、互いに排他 | — | — | `docs/specifications/ndf-factory-organizer.md` |
-| 画面の地図 | — | Factory の全画面の経路・役割ごとの主な動線・確定仕様の機能との対応を 1 つにまとめた表 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| 予定の画面 | — | 画面の地図で状態が「予定」の行。経路がまだ無く、載る機能だけが決まっている画面 | — | — | `docs/specifications/ndf-factory-screen-map.md` |
-| 作る課題 | — | 予定の画面を作り、画面の地図のその行を「あり」へ変える GitHub の課題。#2382 は「持ち主の課題」と書く | — | — | `docs/specifications/ndf-factory-screen-map.md` |
-| デザインのトークン | — | 色・文字・余白の値に名前を付け、画面の部品がその名前で参照する値の集合 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| ダミーの API クライアント | — | 画面が呼ぶ API クライアントのインタフェースを満たし、決まったデータを返す実装。本物の API クライアントと差し替えられる | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| 翻訳のファイル | — | 言語ごとに、画面の文言のキーと文言を持つファイル | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| 見本の画面 | — | 土台の部品だけで組み、ダミーデータで動かす画面の 1 組（スプリントの一覧と詳細）。後続の課題が中身を置き換える出発点 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| つながりの状態 | — | 画面が今サーバーへつながっているか・最後に受け取った時刻・つながってから確定する操作の数の組 | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| 言語と地域の設定 | — | 画面の文言の言語・日時と数の書式の地域・表示の時刻帯の組。今はブラウザの設定から決める | — | — | `docs/specifications/ndf-factory-ui-components.md` |
-| 委任の資格情報 | — | 人が画面で発行し、エージェントかクライアントに渡す、期限と範囲つきの資格情報。だれの委任か（利用者）と、どのクライアントかを持ち、人が取り消せる（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 人だけが確定できる操作 | — | 承認ゲートの承認・判断の依頼への答えと、共通原則の C1〜C8・プロジェクト MVV の P に当たる Factory の操作。契約に印を持ち、委任の資格情報からは断る（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 操作の記録 | — | Factory の利用者向けの操作 1 回ごとに 1 件追記する記録。だれが・いつ・どの呼び出し元から・何を行ったかを持ち、書き換えと削除の経路を持たない（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 呼び出し元の種類 | — | 操作の記録に残す、操作がどこから来たかの区分。画面・API・MCP の 3 つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 機能から起こした契約 | — | 経路と入出力を、画面の 1 枚でなくエンティティと操作から決めた API の契約。取得・作成・更新・削除とも配列で受け渡す（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 操作の扱い | — | Factory の利用者向けの操作が要る範囲。読み取り（read）・書き込み（write）・人だけ（human）の 3 つで、契約の各操作に x-ndf-access として持つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 操作の表 | — | Factory の契約から生成する、利用者向けの操作の一覧（operationId・メソッド・経路・操作の扱い・入力の定義）。画面・API・MCP がここから要求を組み、経路を登録する（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 要素の結果 | — | Factory の配列で受け渡す操作の応答の 1 要素。入力と同じ順に並び、成功なら値を、失敗なら状態と理由（code）を持つ（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 作成の冪等の鍵 | — | Factory で新しい識別子を作る作成の要素に、呼ぶ側が付ける鍵。同じ利用者・同じ操作・同じ鍵の作成を 1 件にする。進捗の事象の冪等の鍵とは別（#2384） | — | — | `docs/specifications/ndf-factory-agent-access.md` |
-| 承認待ちの一覧 | — | アカウントのスプリントの実行のうち、答えの無い承認の依頼（設計承認ゲート・リリース承認ゲート・判断）を、ループの名前と周回の番号とともに 1 つに並べた、読むだけの画面と API の読み出し | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
-| 取り込みの衝突 | — | ベースブランチの取り込みで解けずにスプリントの実行が止まったこと。進捗の事象では attention の理由 base_conflict で届く | — | — | `docs/specifications/ndf-factory-sprint-views.md` |
-| 秘密のキャッシュ | — | Secrets Manager から読んだ値を Lambda の実行環境の中で保持する `factory/api/` の仕組み。成功した値は以後も同じ値を返し、失敗した読み込みは捨てて次の要求で読み直す | — | — | — |
-| 端末の控え | — | 画面が最後に受け取った読み出しの応答を、暗号化して端末に残したもの。受け取った時刻と保存の期限を持つ | — | — | — |
-| 確定待ちの操作 | — | オフラインの間に押した取り消せない操作で、つながったときに今の状態と照らしてから確定するもの | — | — | — |
-| リリースの実行 | — | Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで | 配布の実行 | — | `docs/specifications/ndf-factory-organizer.md` |
