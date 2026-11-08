@@ -35,7 +35,7 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | 承認資料・承認資料の一覧・リンク集・画面モック・デザインイメージ・技術スタックの一覧・周辺システムとの関係・触る領域 |
 | Factory（`ndf-factory`） | 承認の依頼の事象・承認の画面 |
 
-`ndf-workflow` と `ndf-factory` の関係は公開された言語とする。リンク集の 1 行の形（資料名・要旨・リンク・作る段階）を先に固め、NDF はその形で出し、Factory はその形で受ける。互いの実装は独立して変えられる。
+`ndf-workflow` と `ndf-factory` の関係は公開された言語（Published Language）とする。リンク集の 1 行の形（資料名・要旨・リンク・作る段階）を先に固め、NDF はその形で出し、Factory はその形で受ける。互いの実装は独立して変えられる。
 
 ### 集約
 
@@ -131,6 +131,14 @@
 
 調べた量: 候補 14 件・取得の試み 13 回。
 
+## 技術スタックの一覧
+
+| # | 種類 | 名前 | 新規か既存か | 使う理由 | 比べた候補 |
+| --- | --- | --- | --- | --- | --- |
+| T1 | ライブラリ | `lib/md.py`・`lib/design_docs.py`・`lib/step_result.py`・`lib/project_decl.py` | 既存 | 節・表・アンカーの読み取り、文書のまとまり、結果の形、宣言の読み取りを既に持つ | LIB1・LIB6 |
+| T2 | 自作 | `design-materials.py` | 新規 | 一覧の表と設計文書の節を突き合わせる検査は、手元の取り決め（一覧の列・触る領域の語）に依り、既存のツールに当たるものが無い | LIB1・LIB6・STD3 |
+| T3 | インフラ・サービス | GitHub（`gh`） | 既存 | Pull Request の head ブランチを読み、URL を作る | — |
+
 ## 機能一覧
 
 | # | 機能 | 誰が使うか |
@@ -188,7 +196,7 @@ graph TB
   SW -->|打つ| DM
 ```
 
-### 承認資料の一覧
+## 承認資料の一覧
 
 `approval-materials.md` に置く表の中身である（受け入れ条件 1〜5）。列「置き場の節」の `設計:` は設計文書、`要求:` は仕様のコピーの見出しで、見出しの階層は問わない。`—` は承認時に conductor が足す行である。
 
@@ -407,14 +415,6 @@ items の 1 件は `{"name": "<資料名>", "rule": "<上の値>", "text": "<置
 
 開くの列は新しいタブで開く。見えるのは、今のスプリントの詳細を見られる人と同じである。
 
-## 技術スタックの一覧
-
-| # | 種類 | 名前 | 新規か既存か | 使う理由 | 比べた候補 |
-| --- | --- | --- | --- | --- | --- |
-| T1 | ライブラリ | `lib/md.py`・`lib/design_docs.py`・`lib/step_result.py`・`lib/project_decl.py` | 既存 | 節・表・アンカーの読み取り、文書のまとまり、結果の形、宣言の読み取りを既に持つ | LIB1・LIB6 |
-| T2 | 自作 | `design-materials.py` | 新規 | 一覧の表と設計文書の節を突き合わせる検査は、手元の取り決め（一覧の列・触る領域の語）に依り、既存のツールに当たるものが無い | LIB1・LIB6・STD3 |
-| T3 | インフラ・サービス | GitHub（`gh`） | 既存 | Pull Request の head ブランチを読み、URL を作る | — |
-
 ## 処理の流れ
 
 ```mermaid
@@ -443,7 +443,7 @@ sequenceDiagram
 
 図は実行する要素だけを描く。構成要素の表のうち参照の文書（`.md`）・生成物（スキーマと契約）・テスト・用語集は実行の順序を持たないため図に現れない。`project_lib/model.py` は `design-materials.py` が宣言を読むときに通る。
 
-スプリントの設計のプランでは、`survey-recheck` の後に `materials-check` を打ち、落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる）。
+スプリントの設計のプランでは、`survey-recheck` の後に `materials-check` を打つ。落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる）。
 
 ## 非機能の実現方式
 
