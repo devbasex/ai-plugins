@@ -240,7 +240,10 @@ stateDiagram-v2
 **exec の成否は close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をパイプへ
 書いて終わる。親は何も読まずに閉じれば成功とする。失敗した起動は `start` も `end` も書かない。
 
-**子の環境からは `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、
+**子の環境からは Claude Code のセッションごとの値（`relay_lib/session_env.py` の `DROP_ENV`。
+`CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` / `CLAUDE_CODE_BRIDGE_SESSION_ID` /
+`CLAUDE_CODE_CHILD_SESSION` / `CLAUDE_CODE_EXECPATH` / `CLAUDE_CODE_MESSAGING_SOCKET` /
+`CLAUDE_CODE_MESSAGING_TOKEN` / `CLAUDE_CODE_SESSION_ATTENDED` / `CLAUDE_EFFORT` / `CLAUDE_PID`）を外し、
 `NDF_RELAY_DIR` を置き、`NDF_RELAY_DEPTH` を 1 増やす。** Claude Code の中から起こしたプロセスは
 これらを継ぐためである。`claude plugin ...` の呼び出しは、同じ変数と `NDF_RELAY_DIR` を外し、
 標準入力を `/dev/null` にして行う。打ち切りは `list` が 15 秒、`marketplace update` と `plugin update`
