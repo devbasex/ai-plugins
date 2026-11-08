@@ -47,7 +47,7 @@ def lane_unmatched(env, rid: str, reason: str) -> None:
 
         got = parallel_lane.lane_of(env.main_dir())
         if got:
-            parallel_lane.send_unmatched(env.main_dir(), got[0], got[1].name, rid, reason)
+            parallel_lane.send_unmatched(parallel_lane.home_of(got, env.main_dir()), got[0], got[1].name, rid, reason)
     except Exception:  # noqa: BLE001 — 知らせを送れなくても周回は止めない
         return
 
@@ -183,7 +183,7 @@ def lane_sends(env, rec: dict, send_gate1) -> list[dict]:
     msgs, skipped = prior_requests(main, plan, env.now(), env.run)
     try:
         for msg in msgs:
-            parallel_lane.send_prior(main, plan, msg)
+            parallel_lane.send_prior(parallel_lane.plan_home(main, plan), plan, msg)
     except Exception as e:  # noqa: BLE001 — 送れなければ次の境で送り直す（周回は止めない）
         skipped = [*skipped, {"loop": msg["loop"], "reason": f"依頼を送れない: {e}"[:200]}]
     return [{"skipped_loop": s["loop"], "reason": s["reason"]} for s in skipped]

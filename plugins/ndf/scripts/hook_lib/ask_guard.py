@@ -137,7 +137,8 @@ def forward_to_organizer(ev, row_id: str) -> dict | None:
     payload = {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id}
     deadline = time.monotonic() + FORWARD_TIMEOUT
     # 同じレーン名を持つ終わった計画を飛ばす: 送り手でない計画（終了コード 4）なら次の候補へ（全体で FORWARD_TIMEOUT 秒まで）
-    for plan in parallel_files.lane_plans_in(main, name, os.environ.get("NDF_RELAY_DIR")):
+    # 別のリポジトリのレーンの計画も、計画の所在の一覧から探す（#2733）
+    for _home, plan in parallel_files.lane_homes_in(main, name, os.environ.get("NDF_RELAY_DIR")):
         left = deadline - time.monotonic()
         if left <= 0:
             return None

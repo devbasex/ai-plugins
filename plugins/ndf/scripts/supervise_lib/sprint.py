@@ -52,17 +52,17 @@ from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
-    """動いている並列の計画のレーンなら (計画名, レーン名)。プランを組む時点に 1 度だけ判定する（#2436 の I12）。"""
+    """動いている並列の計画のレーンで、まとめたリリースに入るものなら (計画名, レーン名)。プランを組む時点に 1 度だけ判定する
+    （#2436 の I12）。別のリポジトリのレーンは自分のリポジトリの設定で本番を出すため None（#2733 の I7）。"""
     import decl
     import parallel_lane as pl
 
-    main = decl.main_dir(repo) or Path(repo)
-    got = pl.lane_of(main)
-    return (got[0], got[1].name) if got else None
+    got = pl.lane_of(decl.main_dir(repo) or Path(repo))
+    return (got[0], got[1].name) if got and not (hasattr(got, "own_release") and got.own_release()) else None
 
 
 def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。並列の計画のレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
     lane = parallel_lane(repo)
     if lane:
         from parallel_release import plan_release_request

@@ -288,15 +288,18 @@ def plan_held(main: Path, name: str, hold: Optional[dict], lane: Optional[str]) 
 
 
 def lane_hold(main: Path, lane: Optional[str], kind: str) -> Optional[dict]:
-    """レーン `lane`（入力の種類 `kind`）を覆う答え待ちの停止 `{plan, scope, count, limit}`。ファイルだけで見る。"""
+    """レーン `lane`（入力の種類 `kind`）を覆う答え待ちの停止 `{plan, scope, count, limit}`。ファイルだけで見る。
+    別のリポジトリのレーンも数えるよう、計画の所在の一覧の置き場も探す（計画の置き場が自分のリポジトリと違えば `home` を足す。#2733）。"""
     if not lane:
         return None
-    for name in pf.plans_in(main):
-        hold = read_hold(main, name)
-        if covered(hold, lane) and _lane_kind(main, name, lane) == kind:
+    for home, name in pf.lane_homes_in(main, lane, None):
+        hold = read_hold(home, name)
+        if covered(hold, lane) and _lane_kind(home, name, lane) == kind:
             scope = "plan" if hold.get("plan") is True else "lane"
             count = hold.get("count") if scope == "plan" else (hold.get("by_lane") or {}).get(lane)
-            return {"plan": name, "scope": scope, "count": count, "limit": (hold.get("limits") or {}).get(scope)}
+            limit = (hold.get("limits") or {}).get(scope)
+            other = {"home": str(home)} if pf._resolved(home) != pf._resolved(Path(main)) else {}  # 別のリポジトリのレーンだけ
+            return {"plan": name, "scope": scope, "count": count, "limit": limit, **other}
     return None
 
 
@@ -309,7 +312,7 @@ def loop_stop(main: Path) -> Optional[dict]:
 def self_stop(main: Path, stop: dict) -> Optional[str]:
     """止まったレーンが自分のラッパーを止める 1 行。答え待ちの停止では、止まる前に再開の印を置く。"""
     if stop["condition"] == CONDITION and (lane := os.environ.get("NDF_RELAY_NAME")):
-        place_mark(main, stop["values"]["plan"], lane, "boundary")
+        place_mark(Path(stop["values"].get("home") or main), stop["values"]["plan"], lane, "boundary")
     return pf.stop_self(main) if stop["condition"] in ("waiting_only", CONDITION) else None
 
 

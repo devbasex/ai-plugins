@@ -41,6 +41,10 @@ def run_loop_command(a, update) -> dict | None:
     先に開発ループの持ち主（単位 session）を取る。宣言の無い副命令（答える・読むだけ）は何もしない（#2342）。"""
     if a.loop_cmd == "start":
         a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+        import parallel_guard
+
+        if (blocked := parallel_guard.entry_check(a.root, getattr(a, "outside_plan", None), "sprint-state.py loop start")) is not None:
+            return blocked
     import lease_stage  # loop のときだけ読む（filelock と psutil を要する）
 
     # 鍵のリポジトリはループの記録と同じ --root から決める（カレントから決めると、別の場所から同じループを別の鍵で進められる）
@@ -130,6 +134,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--budget-usd", type=budget_value)
     s.add_argument("--budget-hours", type=budget_value)
     s.add_argument("--no-goal", action="store_true", help="/goal で始めていない（再開のコマンドに /goal を付けない）")
+    s.add_argument("--outside-plan", metavar="理由", help="動いている並列の計画の外で例外として始める（理由はマシンの記録に残る。#2733）")
     name(ls.add_parser("select"))
     s = name(ls.add_parser("exclude"))
     s.add_argument("issue", type=int)
