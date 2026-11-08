@@ -43,7 +43,8 @@ def run_loop_command(a, update) -> dict | None:
         a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
     import lease_stage  # loop のときだけ読む（filelock と psutil を要する）
 
-    held = lease_stage.hold(ENTRY, f"loop {a.loop_cmd}", name=getattr(a, "loop_name", None))
+    # 鍵のリポジトリはループの記録と同じ --root から決める（カレントから決めると、別の場所から同じループを別の鍵で進められる）
+    held = lease_stage.hold(ENTRY, f"loop {a.loop_cmd}", repo_root=getattr(a, "root", None), name=getattr(a, "loop_name", None))
     out = _dispatch(a, update)
     if held is not None and isinstance(out, dict):
         out = {**out, "lease": held.as_json()}

@@ -103,8 +103,10 @@ def _stop_lease(entry_id: str, summary: str, code: int, name: str, nxt: str | No
     raise SystemExit(code)
 
 
-def hold(entry_id: str, sub: str = "", **inputs) -> lease.Outcome | None:
-    """持ち主の鍵を取る（E1〜E5）。契約に宣言が無ければ None。止まるときは戻らない。"""
+def hold(entry_id: str, sub: str = "", *, repo_root: Path | str | None = None, **inputs) -> lease.Outcome | None:
+    """持ち主の鍵を取る（E1〜E5）。契約に宣言が無ければ None。止まるときは戻らない。
+
+    鍵のリポジトリは `repo_root`（入口の `--root`）から決める。省けば作業ディレクトリ。"""
     raw = lease_decl(entry_id, sub)
     if raw is None:
         return None
@@ -114,7 +116,7 @@ def hold(entry_id: str, sub: str = "", **inputs) -> lease.Outcome | None:
     except (KeyError, IndexError) as e:
         _stop_lease(entry_id, f"持ち主の鍵 {decl.key} を作る入力が無い: {e}", step_result.EXIT_UNREADABLE, "input")
     try:
-        out = lease.acquire(decl, key, f"{entry_id} {sub}".strip(), _stage_run_id(), lease.lease_repo())
+        out = lease.acquire(decl, key, f"{entry_id} {sub}".strip(), _stage_run_id(), lease.lease_repo(repo_root))
     except lease.LeaseError as e:
         _stop_lease(entry_id, str(e), step_result.EXIT_VIOLATION, "record")
     if out.outcome == "refused":

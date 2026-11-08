@@ -191,7 +191,7 @@ def _own_line(holder: tuple[int, float]) -> list[tuple[int, float]]:
     return line
 
 
-def _is_own(record: dict[str, Any], line: list[tuple[int, float]]) -> bool:
+def _is_own_record(record: dict[str, Any], line: list[tuple[int, float]]) -> bool:
     if record.get("host") != socket.gethostname():
         return False
     return any(record.get("pid") == pid and _same_start(record.get("pid_started"), started) for pid, started in line)
@@ -235,7 +235,7 @@ def _acquire_locked(decl: Decl, key: str, entry: str, run: str, repo: str, holde
     record = _load_lease(path)
     now = _now_iso()
     if record is not None and not record.get("finished_at"):
-        if _is_own(record, _own_line(holder)):
+        if _is_own_record(record, _own_line(holder)):
             record["seen_at"] = now
             _store(path, record)
             return Outcome(key, "inherited", holder=holder, repo=repo, path=path)

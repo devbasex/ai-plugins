@@ -273,3 +273,18 @@ def test_no_session_stops_a_taking_subcommand_and_lets_a_releasing_one_run(monke
     assert e.value.code == 1
     assert lease_stage.hold("x", "loop stop", name="l1").outcome == "no_session"
     assert not lease.root().exists()
+
+
+def test_the_key_repo_comes_from_the_given_root(monkeypatch, tmp_path) -> None:
+    """鍵のリポジトリは入口の --root（repo_root）から決め、作業ディレクトリから決めない。"""
+    seen: list = []
+    monkeypatch.setattr(lease, "lease_repo", lambda start=None: seen.append(start) or REPO)
+    monkeypatch.setattr(
+        run_core, "contract_of", lambda e: {"stdout": "json", "lease": {"": {"key": KEY, "unit": "run", "window_seconds": 60}}}
+    )
+    monkeypatch.setattr(lease_stage, "_hook_standalone", lambda e: None)
+    monkeypatch.setattr(lease_stage, "_HELD", [])
+
+    assert lease_stage.hold("x", repo_root=tmp_path, pr=7).repo == REPO
+    assert seen == [tmp_path]
+    lease_stage.release_held()
