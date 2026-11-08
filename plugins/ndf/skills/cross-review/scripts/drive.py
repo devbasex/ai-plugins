@@ -37,7 +37,7 @@ import run_owner  # noqa: E402  持ち主の記録（#2229）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import anchor_repo_cwd, call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
 
 TOOL = "cross-review-drive"
@@ -493,6 +493,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--reopen", action="store_true", help="差分を足さずに、終わった収束ループへラウンドを足す")
     ap.add_argument("--result-file", help="ok で終わったとき最終ステータスを書く回答ファイル（loop_drive.write_review_answer。#1656）")
     a, rest = ap.parse_known_args(argv)
+    anchor_repo_cwd()
     d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
         out, code = d.run()

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/state_home.py", "name": "fcntl", "kind": "wrapped", "reason": "#2766 の migrate が、動いている耐久の記録（filelock の flock が持たれている `<鍵>.lock`）を移さないために待たずに flock を試す。state_home.py と state-home.py は別のコンテナへ写して標準ライブラリだけの python3 で打てる形を保つ（2026-11-07 の決定）ため、filelock を要する lib/locks.py を読まない"}

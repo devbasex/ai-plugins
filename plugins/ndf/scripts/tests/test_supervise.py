@@ -566,7 +566,7 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     assert plan["テストの戦略"]["name"] == "local-full" and "supervise.json" in plan["テストの戦略"]["note"]
     assert plan["テストの時間"]["basis"]["unknown_duration"] is True
     assert steps["test-limited"]["timeout"] == 990 and steps["test-all"]["timeout"] == 1980
-    assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 3960
+    assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 4290
     assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
     for cmd in run_cmds(plan):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
@@ -2919,7 +2919,7 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert limits["basis"]["unknown_duration"] is False
     ci_wait = limits["ci_wait_timeout"]
     assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
-    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] > ci_wait
+    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
     for fixed in (900, 1800, 3600):
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
 

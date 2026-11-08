@@ -118,7 +118,7 @@ def test_slug_comes_from_origin(tmp_path):
 
 def test_ledger_dir_order(tmp_path):
     env = {"HOME": str(tmp_path)}
-    assert usage_ledger.ledger_dir(env) == tmp_path / ".local/state/ndf/usage"
+    assert usage_ledger.ledger_dir(env) == tmp_path / ".claude/ndf/state/usage"  # 利用者の根（#2766）
     assert usage_ledger.ledger_dir({**env, "XDG_STATE_HOME": "/x"}) == Path("/x/ndf/usage")
     assert usage_ledger.ledger_dir({**env, "XDG_STATE_HOME": "/x", "CLAUDE_PLUGIN_DATA": "/d"}) == Path("/d/usage")
     assert usage_ledger.ledger_dir({**env, "CLAUDE_PLUGIN_DATA": "/d", "NDF_USAGE_DIR": "/n"}) == Path("/n")

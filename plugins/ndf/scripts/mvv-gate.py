@@ -27,7 +27,7 @@ PR の先頭のコミットの中身も足す）を最小構成の claude -p に
 - それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
   利用者の承認を求める
 
-判定は毎回 --log（既定 ~/.local/state/ndf/mvv-gate.jsonl）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
+判定は毎回 --log（既定 <状態の根>/mvv-gate.jsonl。根は lib/state_home.py）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
 スプリントの状態の進め方 `pace`・判定に渡したスプリント MVV の `sprint_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
 結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
 コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。

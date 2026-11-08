@@ -142,6 +142,80 @@ def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
     assert out["metrics"]["removed_worktrees"] == 1 and out["metrics"]["deleted_branches"] == 1
 
 
+FAKE_DOCKER = """#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_CALLS"
+case "$*" in
+  *" down"*) [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo "device busy" >&2; exit 1; } ;;
+esac
+"""
+
+
+def testenv_repo(repo, env, tmp_path, *, stale=True):
+    """テスト環境を宣言し、マージ済みの PR 1 件と（`stale` なら）残った割り当て 1 行を用意する。"""
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "main", "testenv": {}}))
+    git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
+    docker = tmp_path / "bin" / "docker"
+    docker.write_text(FAKE_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    env["FAKE_DOCKER_CALLS"] = str(tmp_path / "docker-calls")
+    rows = [{"worktree": str(repo / ".worktrees" / "gone"), "environment": "e1", "slot": 0, "released_at": None, "expose": None}]
+    write(repo, ".git/ndf/worktree-registry.json", json.dumps({"version": 1, "assignments": rows if stale else []}))
+
+
+def test_cleanup_reclaims_a_stale_assignment(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["status"] == "ok"
+    by = {(i["kind"], i["name"]): i for i in out["items"]}
+    assert by[("testenv", "e1")]["result"] == "reclaimed"
+    assert out["metrics"]["reclaimed_testenvs"] == 1 and out["metrics"]["reclaim_failed"] == 0 and out["metrics"]["reclaim_deferred"] == 0
+    assert out["metrics"]["removed_worktrees"] == 1
+    assert out["summary"].endswith("テスト環境 1 件を回収した（失敗 0 件・残した 0 件）")
+
+
+def test_a_failed_reclaim_does_not_change_the_cleanup(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    env["FAKE_DOWN_FAIL"] = "1"
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["status"] == "ok" and not (tmp_path / "wx").exists() and "feature/x" not in git(repo, "branch", "--list")
+    failed = [i for i in out["items"] if i["result"] == "failed"]
+    assert failed[0]["name"] == "e1" and "device busy" in failed[0]["reason"]
+    assert out["metrics"]["reclaim_failed"] == 1
+    assert "失敗 1 件" in out["summary"]
+
+
+def test_a_reclaim_that_does_not_run_is_reported(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    env["WT_DOCKER_COMMAND"] = "no-such-runtime"
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["status"] == "ok"
+    assert [i["kind"] for i in out["items"] if i["result"] == "not_run"] == ["testenv-reclaim"]
+    assert out["metrics"]["reclaim_failed"] == 1
+
+
+def test_no_stale_assignment_leaves_the_cleanup_as_it_was(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path, stale=False)
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert {i["kind"] for i in out["items"]} == {"worktree", "branch", "main_dir"}
+    assert out["summary"] == "作業ツリー 1 件を外し、ブランチ 1 件を消した（残した 1 件・止まった 0 件）"
+    assert out["metrics"]["reclaimed_testenvs"] == 0
+    assert not (tmp_path / "docker-calls").exists()
+
+
+def test_a_pull_failure_still_reclaims(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "testenv": {}}))
+    git(repo, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert out["status"] == "stopped", err
+    assert [i["result"] for i in out["items"] if i["kind"] == "testenv"] == ["reclaimed"]
+
+
 def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
     """#2436 の異常系 8: 別のレーンがメインディレクトリの排他（.git/ndf-main.lock）を持つ間は、後片付けは待ってから進む。"""
     import threading

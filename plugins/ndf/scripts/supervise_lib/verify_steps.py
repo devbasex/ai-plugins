@@ -24,6 +24,10 @@ INFRA_WAIT_STOP = {"75": "stop"}
 MARGIN_SHARE = 0.1
 MARGIN_FLOOR = 30
 
+# マージに続く後片付けのテスト環境の回収の上限（秒）。`lib/container_reach.py` の RECLAIM_LIMIT と同じ値である。
+# `lib/container_reach.py` はプランを作る側が読まない環境変数と設定を読むため、ここへは import しない（#2660 の決定 8）
+RECLAIM_LIMIT = 330
+
 
 def plan_strategy(a) -> dict | None:
     """宣言から解いた戦略（`apply_decls` が載せる）。無ければ `--test-cmd` の雛形から解く。"""
@@ -129,7 +133,8 @@ def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
     - `merge-gate`: 宛先がリリース承認ゲート（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
-    - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
+    - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕と、
+      マージに続く後片付けのテスト環境の回収の上限を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
     `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。`on_conflict` を渡すと、
@@ -144,7 +149,7 @@ def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     merge = {
         "id": "merge",
         "type": "run",
-        "timeout": with_margin(ci_wait),
+        "timeout": with_margin(ci_wait) + RECLAIM_LIMIT,
         "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
         "probe": MERGE_PROBE,
         "on_exit": {**INFRA_WAIT_STOP, **({str(EXIT_BASE_CONFLICT): on_conflict} if on_conflict else {})},

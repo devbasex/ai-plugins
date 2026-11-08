@@ -1,7 +1,7 @@
 """見積もりの記録と実績の記録（#1856）。置き場の解決・行の形の検査・追記と読み出し・課題ごとの実績の合計・取り込み。
 
 置き場は `NDF_ESTIMATE_DIR` → `.ndf/estimate.json` の `records_dir` → `<git の共通ディレクトリ>/ndf/estimate` →
-`$XDG_STATE_HOME/ndf/estimate/<リポジトリの絶対パスの sha256 の先頭 12 文字>`。git の共通ディレクトリは
+`<状態の根>/estimate/<リポジトリの絶対パスの sha256 の先頭 12 文字>`（根は `state_home.user_home`）。git の共通ディレクトリは
 `.git` を読んで決め、`git` を起動しない（部品は subprocess を使わない。設計の非機能の条件）。
 
 どちらの記録も追記だけで、既存の行を書き換えない（I3・I4）。実績の記録は 4 種類の行（`run_start`・`step`・
@@ -22,6 +22,7 @@ from typing import Callable, Literal
 import clock
 import legacy_values
 import schema
+from state_home import _common_of, find_git_dir, user_home  # noqa: F401  find_git_dir は ここの名前としても出す
 
 SCHEMA = 1
 ACTUALS = "actuals.jsonl"
@@ -156,38 +157,6 @@ def check_estimate(row: dict) -> None:
 # --- 置き場 ---
 
 
-def find_git_dir(start: Path) -> tuple[Path, Path] | None:
-    """(リポジトリの根, git の共通ディレクトリ)。`.git` を上へ探して読む。git でなければ None。"""
-    start = Path(start).resolve()
-    for d in (start, *start.parents):
-        dot = d / ".git"
-        if dot.is_dir():
-            return d, _common_of(dot)
-        if dot.is_file():
-            try:
-                text = dot.read_text(encoding="utf-8").strip()
-            except OSError:
-                return None
-            if not text.startswith("gitdir:"):
-                return None
-            gitdir = Path(text[len("gitdir:") :].strip())
-            gitdir = gitdir if gitdir.is_absolute() else (d / gitdir)
-            return d, _common_of(gitdir.resolve())
-    return None
-
-
-def _common_of(gitdir: Path) -> Path:
-    f = gitdir / "commondir"
-    if f.is_file():
-        try:
-            rel = f.read_text(encoding="utf-8").strip()
-        except OSError:
-            return gitdir
-        p = Path(rel)
-        return (p if p.is_absolute() else gitdir / p).resolve()
-    return gitdir
-
-
 def repo_top(start: Path | str | None = None) -> Path:
     """リポジトリの根（git でなければ start そのもの）。"""
     start = Path(start or Path.cwd()).resolve()
@@ -231,8 +200,7 @@ def estimate_dir(root: Path | str | None = None) -> Path:
         return p if p.is_absolute() else top / p
     if got:
         return got[1] / "ndf" / "estimate"
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "estimate" / hashlib.sha256(str(top).encode()).hexdigest()[:12]
+    return user_home() / "estimate" / hashlib.sha256(str(top).encode()).hexdigest()[:12]
 
 
 # --- 追記と読み出し ---

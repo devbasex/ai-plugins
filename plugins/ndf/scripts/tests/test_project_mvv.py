@@ -902,3 +902,17 @@ def test_unknown_streak_counts_each_sprint_gate_and_pr_once():
     assert pms.unknown_streak([a, b, a], "s") == 2
     assert pms.unknown_streak([a, {**b, "verdict": "follow"}, b, a], "s") == 2
     assert pms.unknown_streak([{**ref}, {**ref}], "s") == 2  # スプリント状態の無い行は 1 行を 1 件と数える
+
+
+def test_last_vet_takes_latest_time_not_last_line(tmp_path, monkeypatch):
+    """旧の置き場から足し合わせた古い判定が末尾に付いても、最新の時刻の判定を採る（#2766）。"""
+    import importlib.util
+
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "st"))
+    spec = importlib.util.spec_from_file_location("project_mvv_cli_last_vet", MVV_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    key = pm.mvv_repo_key(tmp_path)
+    for at, verdict in (("2026-11-07T10:00:00Z", "not_follow"), ("2026-11-01T10:00:00Z", "follow")):
+        pms.append_jsonl(pm.vet_log_path(), {"repo": key, "sha256": "s", "kind": "candidate", "at": at, "verdict": verdict})
+    assert mod.last_vet(tmp_path, "s")["verdict"] == "not_follow"

@@ -101,7 +101,7 @@ hook が `parallel.py request-ask` でオーガナイザーへ送り、問いを
 
 ## 記録
 
-hook の判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl` へ 1 行ずつ追記する。振り返りでは次で数える。
+hook の判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.claude/ndf/state}/ask.jsonl` へ 1 行ずつ追記する。振り返りでは次で数える。
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ask.py" summary [--since <ISO 8601>] [--cwd <パス>]
