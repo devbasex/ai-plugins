@@ -520,7 +520,10 @@ def test_cell_errors_stop_the_stage_and_a_fixed_doc_passes(tmp_path, repo):
 @pytest.mark.parametrize(
     ("cell", "part"),
     [
-        ("`a.py`。ループの側は [issue-1-design-loop.md](issue-1-design-loop.md) にある", "。ループの側は / issue-1-design-loop.md / にある"),
+        (
+            "`a.py`。ループの側は [issue-1-design-loop.md](issue-1-design-loop.md) にある",
+            "。ループの側は / issue-1-design-loop.md / にある",
+        ),
         ("`a.py`（[l](x.md)）と語", "x.md / と語"),
         ("`a.py`, b.py", "b.py"),
         ("`a.py`（新設", "閉じていない括弧"),
