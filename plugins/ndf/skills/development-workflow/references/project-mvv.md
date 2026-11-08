@@ -150,3 +150,5 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 `project-mvv.py signals` は現行の版の承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
 流出不具合 3）と比べる。照合の履歴は `~/.claude/ndf/state/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。
+LLM で判定した行は照合の入力の sha256（`input_sha256`）を持ち、`sprint-state.py init` がスプリント MVV の判定を再利用した行は
+`reused_from`（元の LLM の判定の時刻）を持ち、費用と秒を持たない（[pace.md](pace.md)）。
