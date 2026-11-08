@@ -6,8 +6,8 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 | --- | --- |
 | `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。合図を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
 | `stop [<名前>] [--json]` | 名前が無ければ動いているラッパーすべてに停止の合図を置く。名前があればその 1 本だけを止める（#2346） |
-| `spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | 統括役に頼み、tmux の中に端末の結び付いていない名前つきのラッパーを起動する（#2346）。`--role helper` は一時レーンで、1 本だけ上限を超えて通る（#2436） |
-| `ls [--json]` | 同じコンテナのラッパーの名前・状態・承認待ち・区間・時刻・アカウント・役割を 1 つの表（`--json` は 1 行の JSON）で出す（#2346）。`--json` の `metrics` に統括役と tmux の有無（#2436） |
+| `spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | リレーハブに頼み、tmux の中に端末の結び付いていない名前つきのラッパーを起動する（#2346）。`--role helper` は一時レーンで、1 本だけ上限を超えて通る（#2436） |
+| `ls [--json]` | 同じコンテナのラッパーの名前・状態・承認待ち・区間・時刻・アカウント・役割を 1 つの表（`--json` は 1 行の JSON）で出す（#2346）。`--json` の `metrics` にリレーハブと tmux の有無（#2436） |
 | `role organizer\|helper --plan <計画名>` / `role --clear` | 作業ディレクトリへ役割のファイルを書く・消す。オーガナイザーの印を持つ 1 本は同時に動かせる数に数えない（#2436） |
 | `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
@@ -34,7 +34,7 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 `login`（OAuth の登録）・`bedrock`（Bedrock の登録と確かめ）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
 `shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）・
-`hub`（統括役）・`hub_client`（統括役への依頼の口と一覧）・`tmux`（tmux の包み）。
+`hub`（リレーハブ）・`hub_client`（リレーハブへの依頼の口と一覧）・`tmux`（tmux の包み）。
 
 規約は skills/development-workflow/references/relay.md にある。
 """

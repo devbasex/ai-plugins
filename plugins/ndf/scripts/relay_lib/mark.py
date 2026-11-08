@@ -207,7 +207,7 @@ def cmd_mark() -> int:
     remove(question)
     record = RelayRecord(d)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
-    try:  # 起動のブロック（`ndf-spawn <名前>`）は統括役へ依頼を置くだけで、区間を終えない（#2346 の決定 6）
+    try:  # 起動のブロック（`ndf-spawn <名前>`）はリレーハブへ依頼を置くだけで、区間を終えない（#2346 の決定 6）
         from . import hub_client
 
         hub_client.place_blocks(str(data.get("last_assistant_message") or ""), str(data.get("cwd") or ""), d)

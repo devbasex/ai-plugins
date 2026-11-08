@@ -1,4 +1,4 @@
-"""並列の計画が読む配るリポジトリの状態（ベースブランチの先頭・配るプラグイン・開発版の版）・ループの記録と、統括役の CLI の呼び出し・待つ秒。`parallel_run` が使う。"""
+"""並列の計画が読む配るリポジトリの状態（ベースブランチの先頭・配るプラグイン・開発版の版）・ループの記録と、リレーハブの CLI の呼び出し・待つ秒。`parallel_run` が使う。"""
 
 from __future__ import annotations
 
@@ -103,13 +103,13 @@ def stall_seconds() -> float:
 
 
 def relay_argv() -> list[str]:
-    """統括役の CLI の打ち方。`NDF_PARALLEL_RELAY` があればその 1 行（テストの差し替え）。"""
+    """リレーハブの CLI の打ち方。`NDF_PARALLEL_RELAY` があればその 1 行（テストの差し替え）。"""
     alt = os.environ.get("NDF_PARALLEL_RELAY")
     return alt.split() if alt else [sys.executable, str(RELAY)]
 
 
 def relay_proc(main: Path, *args: str) -> tuple[subprocess.CompletedProcess, dict]:
-    """統括役の CLI を打ち、(終わったプロセス, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+    """リレーハブの CLI を打ち、(終わったプロセス, 統一 JSON レポート) を返す。読めなければ空の dict。"""
     got = subprocess.run([*relay_argv(), *args], cwd=main, capture_output=True, text=True)
     lines = [ln for ln in (got.stdout or "").splitlines() if ln.strip().startswith("{")]
     try:
@@ -119,18 +119,18 @@ def relay_proc(main: Path, *args: str) -> tuple[subprocess.CompletedProcess, dic
 
 
 def relay(main: Path, *args: str) -> tuple[int, dict]:
-    """統括役の CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
+    """リレーハブの CLI を打ち、(終了コード, 統一 JSON レポート) を返す。読めなければ空の dict。"""
     got, res = relay_proc(main, *args)
     return got.returncode, res
 
 
 def relay_unavailable(main: Path) -> str | None:
-    """統括役の CLI でレーンを起動できない理由。起動できれば None（ラッパーの外・tmux が無い・統括役が居ない）。"""
+    """リレーハブの CLI でレーンを起動できない理由。起動できれば None（ラッパーの外・tmux が無い・リレーハブが居ない）。"""
     if not os.environ.get("NDF_RELAY_DIR"):
         return "ラッパーの外（NDF_RELAY_DIR が無い）"
     metrics = relay(main, "ls", "--json")[1].get("metrics") or {}
     if not metrics.get("tmux"):
         return "tmux が無い"
     if not metrics.get("hub"):
-        return "統括役が居ない"
+        return "リレーハブが居ない"
     return None
