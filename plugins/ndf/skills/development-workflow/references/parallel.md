@@ -14,7 +14,7 @@
 ## 手順
 
 1. `python3 "$NDF_SCRIPTS/parallel.py" start p1` を打つ。検査に誤りがあればレーンを 1 本も起動せずに 1 で終わる。
-   ラッパーの外・tmux が無い・統括役が居ないときは 3 で終わり、`items` にレーンごとの手で起動する 1 行が並ぶ。
+   ラッパーの外・tmux が無い・リレーハブが居ないときは 3 で終わり、`items` にレーンごとの手で起動する 1 行が並ぶ。
    その 1 行を示して終える
 2. `metrics.next` の `parallel.py wait p1` を背景で打ち、完了の通知を待つ（[waiting.md](waiting.md) の形。前景の sleep で待たない）
 3. 返った `metrics.action` ごとに次の 1 手を打ち、`wait p1 --after <metrics.seq>` を背景で打ち直す。どの `action` でも、

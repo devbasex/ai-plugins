@@ -449,7 +449,7 @@ def _lane_env() -> dict[str, str]:
 
 def cmd_run(args: list[str]) -> int:
     path = os.environ.pop(ho.HANDOVER_ENV, None)  # 入れ替えた後（#1587）。子の claude と hook へ継がせない
-    if path:  # exec で `hub.lock` は放されている。入れ替えた後の版で取り直し、取れなければ統括役を兼ねずに続ける
+    if path:  # exec で `hub.lock` は放されている。入れ替えた後の版で取り直し、取れなければリレーハブを兼ねずに続ける
         with hub_client.serving(hub_client.claim_hub(), os.path.dirname(path)):
             return Relay.from_handover(path, serve_terminal)
     if os.environ.get("NDF_RELAY_SPAWNED"):  # 起動の印を持つのはラッパーの子の claude でない（child_env が渡さない）
