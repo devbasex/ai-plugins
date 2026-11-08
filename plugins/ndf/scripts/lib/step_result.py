@@ -75,6 +75,7 @@ EXIT_LABELS = {
     EXIT_UNREADABLE: "読めない・呼び出しの誤り",
     EXIT_PRECONDITION: "前提が無い",
     EXIT_BASE_CONFLICT: "ベースブランチと衝突",
+    EXIT_CD_FAILED: "CD の結果が失敗",
     EXIT_INCOMPLETE: "欠けが残る",
     **{c: "承認ゲート" for c in GATE_CODES},
     **{c: "判断待ち" for c in PAUSE_CODES},
