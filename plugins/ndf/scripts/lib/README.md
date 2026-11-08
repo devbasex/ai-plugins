@@ -40,8 +40,7 @@
 | [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番、結果を残さなかった担当を起動し直すか振り替えるかの規則（`after_no_result`。リトライ可否 `relaunch_same_agent` と、結果なしの記録から導く外した担当・今のアカウントを含む） | 同上 |
 | [assignee_env.py](assignee_env.py) | 担当の起動の環境（claude の席にアカウントがあれば `claude_accounts.account_env` の環境）と、振り替え先のアカウントを選ぶ `pick_account`（`claude_accounts.choose_env` を包み、名前だけを返す）。状態ファイルへは名前だけを書く | 収束ループの 2 つ |
-| [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
-| [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
+| [models.py](models.py) | `--model` の解析、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
 | [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの宣言（`.ndf/review.json`。重点と、`version: 2` の 1 つか `version: 3` の名前つきの複数のレビューのプロファイル）の読み取りと、変更ファイルのパスによるプロファイルの選択。レビュー担当への節・修正担当への節（要求の変更が要る指摘は写しを直さずに止めて返す節を含む）・見送りの返信・振り分けで許す値・プロファイルの分類の照合（glob は `pace.py` の `matches`）を組む。宣言が読めなくても例外を上げず既定の基準で返す。基準 2 と、`version: 3` の最上位の `criteria`（宣言の側で外せない基準）は、どのプロファイルを選んでも外せない | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [review_criteria_decl.py](review_criteria_decl.py) | レビューの宣言のプロファイル（`version: 2` の `profile`・`version: 3` の `profiles` の各要素）の形の検査と `Profile` の型。既定の基準・節の組み立て・選択は持たない | `review_criteria.py` |
@@ -52,7 +51,7 @@
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
 | [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
-| [step_read.py](step_read.py) | 結果を読む側の共通の規則。同じステップの試行から `ok` の最も新しい試行だけを採る `pick_ok_attempt`、置き場の無い・読めない・空・ありを分ける `open_place` と、無い・読めないときの結果を組む `place_stop`、子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` / 子の課題の読み手（承認資料・差し戻しの件数ほか） |
+| [step_read.py](step_read.py) | 結果を読む側の共通の規則。子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` |
 | [step-result.sh](step-result.sh) | シェルの手順のスクリプトが結果 JSON を 1 行出すための関数（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric` で値を溜め、`sr_emit` が `step_result.py emit` を呼ぶ。`sr_gh` は `gh` の失敗の要旨を `SR_GH_ERR` に残す。`sr_absorb` は別のスクリプトの結果 JSON を取り込む）。JSON をシェルで組まない | `progress-record.sh` / `projects-sync.sh` |
 | [dist_record.py](dist_record.py) | リリース記録（`## リリース記録`）の組み立て（`format_record`）と読み取り（`parse_record`）。形は `progress-tracking` の「リリース記録」が定める | `release-steps.py`（`record`） / `sprint-close.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`review_lib/` の未解決のスレッドと checks） |
@@ -89,14 +88,14 @@
 | [glossary_merge.py](glossary_merge.py) | 用語集の 3 方向の取り込み（祖先・自分・相手を語は `(context, term)`、コンテキストは `id` で突き合わせ、片側だけの変更を採り、両側の食い違いを語の衝突として返す）と、`git ls-files -u -z` の段の読み取り。ファイルも git も触らない。標準ライブラリだけ | `glossary.py merge` |
 | [merged_range.py](merged_range.py) | 範囲の first-parent のログから、merge commit と squash merge（件名の末尾 `(#N)`）でベースブランチへ入った PR を拾う。squash の head のブランチは GitHub から 100 件ずつ読む。どの PR を外すかは持たない（呼び手が決める） | `check-trigger.py`・`release_lib/included.py` |
 | [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
-| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
+| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直す | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
 | [versions.py](versions.py) | 版数（`X.Y.Z`・`-dev.N`・`-rc.N`）の比較と次の版、bump-my-version の `replace`。semver と bump-my-version を呼ぶのはここだけ | 同上 |
 | [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
-| [textparse.py](textparse.py) | unified diff の足した行の番号と、コードのコメントを空白へ置き換える処理。unidiff と pygments を呼ぶのはここだけ | 同上 |
+| [textparse.py](textparse.py) | unified diff の足した行の番号。unidiff を呼ぶのはここだけ | 同上 |
 | [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
 | [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
-| [notify.py](notify.py) | HTTP の 1 回の要求・Slack の Web API・`.env` の読み取り。httpx・slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
+| [notify.py](notify.py) | Slack の Web API・`.env` の読み取り。slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
 | [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py`・`hook_lib/wait_notify.py` |
 | [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
@@ -185,9 +184,9 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 ### 読む側の規則
 
 - **成功と読むのは `status` が `ok`（終了コード 0）だけである。** 6 を含め、ほかの値・終了コードを成功と読まない。結果 JSON が無い・形が誤っているときも成功と読まない（`supervise_lib` は `on_fail` へ回すか止まる）
-- **同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から値を採るのは、`status` が `ok` の試行のうち番号の最も大きいものだけである。** 落ちた試行の値を採らない。`step_read.pick_ok_attempt(dir, step, tool)` を使い、採れなければ `Pick.outcome`（`no_ok_attempt` / `no_attempt` / `no_place` / `unreadable`）を理由として返す
-- **置き場が無い・読めないことと、材料が 0 件であることを分ける。** `step_read.open_place(path)` の `Place.state` が `missing` なら 3、`unreadable` なら 2 の `stopped` で返し（`place_stop` が組む）、0 件・「無し」とは返さない。`empty` のときだけ 0 件として `ok` を返してよい
-- 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、`open_place` の前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
+- **同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から値を採るのは、`status` が `ok` の試行のうち番号の最も大きいものだけである。** 落ちた試行の値を採らない。採れなければ理由（`ok` の試行が無い・試行が無い・置き場が無い・読めない）を返す
+- **置き場が無い・読めないことと、材料が 0 件であることを分ける。** 置き場が無ければ 3、読めなければ 2 の `stopped` で返し、0 件・「無し」とは返さない。置き場があって空のときだけ 0 件として `ok` を返してよい
+- 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、置き場を開く前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
 - 子プロセスとして打った手順のスクリプトの結果は `step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない
 - 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）が `ok` 以外を返しても、呼ぶ側は工程を止めない。`supervise_lib` の `record_stage` はフェーズレポートへ、`sprint-close.py` は `board_note` の項目へ、LLM は作業の報告の「見つけたもの」へ、`summary` と `gaps[].reason` を載せる
 
@@ -252,7 +251,6 @@ Skill の下にライブラリを置くと、その Skill を配らない導入�
 | `limits.py` | 使う | `critique.sh` が使う（監視の上限は `monitor.py` がライブラリの表から引く） |
 | `assignment.py` / `auth.py` / `statefile.py` / `run_metrics.py` / `monitor_outcome.py` / `assignee_env.py` | 使う | 使う（`review_lib/` / `drive.py`） |
 | `models.py` | 使う | 未移行 |
-| `metrics.py` | 未移行 | 未移行 |
 | `post_queue.py` / `result_posts.py` | 未移行（リファクタリング計画のコメントは `refactor_lib/plan.py` が `gh` で書く） | 使う（`review_lib/` / `rotate-pr.sh` / `drive.py`） |
 | `git-credential.sh` | 使う（`refactor_lib/publish.py`） | 使わない |
 | `bg-wait.sh` | Codex / Kiro / agy で `drive.py` を待つ（SKILL.md の「実行」） | Codex / Kiro / agy で `drive.py` を待つ（SKILL.md の「実行」）。手順の監視の待ち（`docs/01-state-and-review.md`） |

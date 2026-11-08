@@ -853,18 +853,18 @@ def test_carried_args(mod, args, expected):
 
 
 @pytest.mark.parametrize("tasks", [None, {"status": "running"}, "running"])
-def test_background_running_ignores_non_list_inputs(mod, tasks):
-    assert relay_mark.background_running(tasks) is False
+def test_running_tasks_ignores_non_list_inputs(mod, tasks):
+    assert bool(relay_mark.running_tasks(tasks)) is False
 
 
-def test_background_running_ignores_non_dict_items(mod):
-    assert relay_mark.background_running(["running", 1, None]) is False
+def test_running_tasks_ignores_non_dict_items(mod):
+    assert bool(relay_mark.running_tasks(["running", 1, None])) is False
 
 
-def test_background_running_detects_running_dict(mod):
+def test_running_tasks_detects_running_dict(mod):
     tasks = [{"status": "queued"}, {"status": "running"}]
 
-    assert relay_mark.background_running(tasks) is True
+    assert bool(relay_mark.running_tasks(tasks)) is True
 
 
 def test_fallback_cwd_uses_nearest_existing_parent(mod, tmp_path):
@@ -3694,7 +3694,7 @@ def test_account_add_stops_on_macos(monkeypatch, capsys):
     from relay_lib import accounts as relay_accounts
 
     monkeypatch.setattr(relay_accounts.sys, "platform", "darwin")
-    assert relay_accounts.cmd_add("work1") == 2
+    assert relay_accounts.cmd_account(["add", "work1"]) == 2
     assert "macOS" in capsys.readouterr().err
 
 

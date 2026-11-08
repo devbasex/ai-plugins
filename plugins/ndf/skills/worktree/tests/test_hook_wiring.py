@@ -27,7 +27,7 @@ def guard_entries(runtime: str) -> list[dict]:
 def test_pretooluse_matcher_matches_the_library(runtime: str) -> None:
     """hook.py を起動する PreToolUse の matcher が、guard の Tool の名前の一覧をすべて含む。"""
     matchers = [set(e.get("matcher", "").split("|")) for e in guard_entries(runtime)]
-    assert any(set(payload.tool_matcher().split("|")) <= m for m in matchers), matchers
+    assert any({*payload.EDIT_TOOLS, *payload.PATCH_TOOLS, *payload.SHELL_TOOLS} <= m for m in matchers), matchers
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])

@@ -62,20 +62,6 @@ def test_tables_unescape_pipes_and_links_keep_the_line():
     assert md.links("x\ny [a](#b)\n")[0].line == 1
 
 
-def test_fences_follow_commonmark():
-    text = "````md\n```\ninner\n```\n````\n    ```\n    indented\n~~~\nopen to the end\n"
-    assert md.fences(text) == [("md", 0, 5), ("", 7, 9)]
-    mask = md.fenced_lines(text)
-    assert mask[:5] == [True] * 5 and mask[7:] == [True, True]
-    assert mask[5] and mask[6]  # 4 桁の字下げはコードブロック（囲みではないが地の文でもない）
-
-
-def test_prose_lines_drop_code_and_html_blocks():
-    prose = [ln for _, ln in md.prose_lines(DOC)]
-    assert "echo '## これも'" not in prose and "## HTML の中" not in prose
-    assert "前書き" in prose and "### 細目" in prose
-
-
 def test_heading_anchor_follows_github():
     assert md.heading_anchor("Sub `code` (x)!") == "sub-code-x"
     assert md.heading_anchor("決定 19: 包み（ラッパー）") == "決定-19-包みラッパー"

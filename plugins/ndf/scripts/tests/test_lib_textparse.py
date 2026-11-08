@@ -1,4 +1,4 @@
-"""unified diff の解釈とコメントの除去の包み（lib/textparse.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
+"""unified diff の解釈の包み（lib/textparse.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import unidiff  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
-import pygments  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import textparse  # noqa: E402
 
 DIFF = """diff --git a/a.md b/a.md
@@ -50,13 +49,3 @@ def test_added_lines_per_file_on_the_new_side():
 def test_unreadable_diff_is_an_error():
     with pytest.raises(textparse.DiffParseError):
         textparse.diff_added_lines("--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n+only one\n")
-
-
-def test_comments_become_spaces_and_strings_stay():
-    py = ['x = "#a"  # c', 's = """', "# docstring", '"""']
-    assert textparse.blank_comments(py, ".py") == ['x = "#a"     ', 's = """', "# docstring", '"""']
-    assert textparse.blank_comments(["#!/bin/sh", 'echo "#x" # c', "a#b"], ".sh") == ["         ", 'echo "#x"    ', "a#b"]
-    js = ["a = '//s' // c /* d", "/* b", "c */ x", "`#{t}`"]
-    assert textparse.blank_comments(js, ".ts") == ["a = '//s'          ", "    ", "     x", "`#{t}`"]
-    assert textparse.blank_comments(["# keep"], ".unknownext") == ["# keep"]
-    assert textparse.blank_comments([], ".py") == []

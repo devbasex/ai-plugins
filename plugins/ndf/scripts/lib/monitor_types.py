@@ -64,24 +64,6 @@ DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in
 _safe_int_env = limits.safe_int_env
 
 
-def _agent_stall_default(agent: str) -> int:
-    """agent ごとの既定 stall timeout を解決する。
-
-    解決順（`limits.stall_timeout`）:
-      1. env `MONITOR_STALL_<AGENT>` (per-agent 明示)
-      2. env `MONITOR_STALL` (全 agent 共通)
-      3. 上限の表の `AGENT_STALL[agent]`
-      4. `DEFAULT_STALL` (表に無い agent)
-
-    env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
-
-    **席の名前はランタイム名へ直してから引く**（#727）。上限の表も担当別の環境変数も
-    ランタイム名で引くため、`claude-2` のまま渡すと表に無い担当として `DEFAULT_STALL`
-    へ落ち、1 席目より早く無進捗と判定される。
-    """
-    return limits.stall_timeout(_agent_runtime(agent))
-
-
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
 # 収束ループごとに一時ディレクトリが違うため（cross-review は `.cross_review/`、
 # cross-refactoring は `work/.cross_refactoring/`）、呼び出し側が明示できる経路を持つ。
