@@ -610,7 +610,15 @@ def test_run_switches_to_next_section(term, tmp_path):
     first, second = t.starts()[:2]
     assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
-    assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]  # 最初の起動と切り替えの 2 回
+    assert t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]  # 最初の起動と切り替えの 2 回
     assert "── ndf-relay: 区間 2 ──" in t.text
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
@@ -4307,7 +4315,15 @@ def test_swap_keeps_next_session_input(tmp_path, term, swap):
     assert second["argv"] == ["--model", "haiku", "/goal 次"]
     assert second["cwd"] == str(tmp_path)
     assert [r for r in rows if r["event"] == "start"][1]["carried"] == ["--model", "haiku"]
-    assert sw.t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert sw.t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]
     assert bool(events(rows, "reexec")) is swap and not events(rows, "reexec_skipped")
     sw.t.type("quit 0\r")
     assert sw.t.finish() == 0
