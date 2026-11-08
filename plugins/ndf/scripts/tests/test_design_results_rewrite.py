@@ -151,12 +151,7 @@ def fake(monkeypatch):
 
 
 def sprint(tmp_path: Path) -> tuple[argparse.Namespace, dict[int, Path]]:
-    paths = {n: tmp_path / f"5-impl-{n}.json" for n in (11, 12)}
-    for n, p in paths.items():
-        p.write_text(json.dumps(plan_of(n), ensure_ascii=False))
-    manifest = tmp_path / "sprint.json"
-    manifest.write_text(json.dumps({"ステージ": [{"name": "実装", "plans": [str(p) for p in paths.values()]}]}))
-    return argparse.Namespace(manifest=str(manifest), base="develop", root=str(tmp_path), design=[11, 12]), paths
+    return stage(tmp_path, issues=(11, 12))
 
 
 def test_a_transient_failure_is_retried(tmp_path, fake):
