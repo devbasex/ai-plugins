@@ -128,7 +128,7 @@ ai-plugins/
 └── README.md                     # プロジェクト説明
 ```
 
-**このリポジトリの範囲は、NDF などのプラグイン（`plugins/`）とマーケットプレイス（`.claude-plugin/marketplace.json`）である。** Web サービスのコードは別のリポジトリで開発し、ここには置かない。
+**このリポジトリの範囲は、NDF などのプラグイン（`plugins/`）とマーケットプレイス（`.claude-plugin/marketplace.json`）である。** Web サービス（Neural Development Factory）のコードは別のリポジトリで開発し、ここには置かない。そのサービスが NDF を呼ぶときの API・入出力の規約（`NDF_FACTORY_RUN`・`parallel-external.json` など）は、NDF の側の規約として `plugins/ndf/contracts/` が持つ。
 
 ## ドキュメント
 
