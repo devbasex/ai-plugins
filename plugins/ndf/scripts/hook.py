@@ -119,35 +119,53 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
 
     dl = deadline.Deadline()
     dl.start()
+    is_claude_pretool = not command and runtime == "claude" and ev.event == "PreToolUse"
     try:
         if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
-            dl.current = "worktree-guard"
-            from hook_lib import worktree
-
-            outs.append(worktree.notice(ev))
-        if command == "token-guard" or (not command and runtime == "claude" and ev.event == "PreToolUse"):
-            dl.current = "token-guard"
-            from hook_lib import token_guard
-
-            if ev.tool in token_guard.TOOLS:
-                outs.append(token_guard.decision(ev))
-        if not command and runtime == "claude" and ev.event == "PreToolUse" and ev.tool in ("Agent", "Task"):
-            dl.current = "worker-skills"
-            from hook_lib import worker_skills
-
-            try:
-                outs.append(worker_skills.skills_decision(ev))
-            except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-                pass
-        if not command and runtime == "claude" and ev.event == "PreToolUse" and ev.tool == "AskUserQuestion":
-            dl.current = "ask-guard"
-            from hook_lib import ask_guard
-
-            outs.append(ask_guard.ask_decision(ev))
+            _run_guard(dl, "worktree-guard", _worktree_guard, ev, outs)
+        if command == "token-guard" or is_claude_pretool:
+            _run_guard(dl, "token-guard", _token_guard, ev, outs)
+        if is_claude_pretool and ev.tool in ("Agent", "Task"):
+            _run_guard(dl, "worker-skills", _worker_skills_guard, ev, outs)
+        if is_claude_pretool and ev.tool == "AskUserQuestion":
+            _run_guard(dl, "ask-guard", _ask_guard, ev, outs)
     except deadline.HookDeadlineExceeded as e:
         print(dl.notice(e.name), file=sys.stderr)
     finally:
         dl.cancel()
+
+
+def _run_guard(dl, name: str, guard, ev, outs: list) -> None:
+    """締め切りの今の判定を `name` にして guard を 1 本打ち、返った出力を `outs` へ足す。"""
+    dl.current = name
+    outs.extend(guard(ev))
+
+
+def _worktree_guard(ev) -> list:
+    from hook_lib import worktree
+
+    return [worktree.notice(ev)]
+
+
+def _token_guard(ev) -> list:
+    from hook_lib import token_guard
+
+    return [token_guard.decision(ev)] if ev.tool in token_guard.TOOLS else []
+
+
+def _worker_skills_guard(ev) -> list:
+    from hook_lib import worker_skills
+
+    try:
+        return [worker_skills.skills_decision(ev)]
+    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
+        return []
+
+
+def _ask_guard(ev) -> list:
+    from hook_lib import ask_guard
+
+    return [ask_guard.ask_decision(ev)]
 
 
 def _opt(argv: list[str], name: str) -> str | None:
