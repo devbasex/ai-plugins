@@ -10,11 +10,12 @@ from __future__ import annotations
 import time
 from typing import Callable
 
+import limits
 import slow_step as ss
 
 OBSERVE_EVERY = 60  # 信号を読む間隔（秒）
-TRANSCRIPT_GRACE = 60  # 起動からこの秒を過ぎても会話の記録が見つからなければ、読めないものとして扱う
-BLIND_STALL = 7200  # 会話の記録を読めないときの許容時間。進捗ログの行の間隔の実測の最大 6479 秒を上回る値（決定 7）
+TRANSCRIPT_GRACE = limits.seconds("supervise.transcript-grace")
+BLIND_STALL = limits.seconds("supervise.blind-stall")
 
 
 class ProgressWatch:

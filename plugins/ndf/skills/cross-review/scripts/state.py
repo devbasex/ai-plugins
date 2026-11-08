@@ -111,11 +111,7 @@ def _add_init_parser(sub: _Subparsers) -> None:
         help="この収束ループを起動している CLI。省略時は環境変数から推定する",
     )
     sp.add_argument("--worktree", default=None)
-    sp.add_argument(
-        "--run",
-        default=None,
-        help="この実行の識別子（drive.py が渡す）。既存の pr<n> の持ち主の記録と一致すれば同じ実行の続きとして使う（#2229）",
-    )
+    sp.add_argument("--run", default=None, help=argparse.SUPPRESS)  # 旧い呼び出し元の互換。受けて捨てる（#2342）
     sp.add_argument(
         "--verify-command",
         action="append",
@@ -290,6 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if getattr(args, "run", None):
+        print("[cross-review] --run は使わない。実行の識別子は実行の核が振る（#2342）", file=sys.stderr)
     args.func(args)
 
 

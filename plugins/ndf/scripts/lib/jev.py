@@ -29,6 +29,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping, Optional
 
+import limits
 import usage_capture
 
 ENDPOINT = "https://ai-gateway.vercel.sh/v1/evaluate"
@@ -37,9 +38,9 @@ KEY_ENV = "AI_GATEWAY_API_KEY"
 # `0` で無効にする。鍵がある環境でも、使わない実行を選べるようにする。
 SWITCH_ENV = "NDF_JEV"
 # 疎通の確認の上限（秒）。設計の「init の疎通の確認（固定の boolean の問い 1 回、10 秒）」。
-PROBE_TIMEOUT = 10
+PROBE_TIMEOUT = limits.seconds("jev.probe")
 # 1 問の上限（秒）。応答は実測で 0.3〜0.5 秒。
-ASK_TIMEOUT = 20
+ASK_TIMEOUT = limits.seconds("jev.ask")
 
 # 使わなかった理由（状態ファイルの `judge.reason`）。
 NO_KEY = "no_key"

@@ -2750,3 +2750,34 @@ def test_held_lap_keeps_the_dev_version_when_the_record_is_gone_on_the_second_cl
     Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
     sl.cmd_finish(env, "l1", 1, d)
     assert rec(env)["laps"][0]["versions"]["dev"] == "10.27.7-dev.1"
+
+
+def test_cli_a_second_session_cannot_take_the_same_loop_until_the_first_stops(tmp_path):
+    """受け入れ条件 6（#2316）: 別のセッションが生きた持ち主の間、loop start・loop pending は stopped・3 で止まる。
+    読むだけ・答える副命令は止まらない。持ち主のセッションの loop stop が返した後は取れる。"""
+    import os
+
+    import procs
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".ndf").mkdir()
+    sp = SCRIPTS / "sprint-state.py"
+    other = subprocess.Popen(["sleep", "60"])
+    session_a = {**os.environ, "NDF_RUNTIME_SESSION": f"{other.pid}:{procs.start_time(other.pid)}"}
+
+    def loop(*args, env=None):
+        return subprocess.run([sys.executable, str(sp), "loop", *args, "--root", str(tmp_path)], capture_output=True, text=True, env=env)
+
+    try:
+        assert loop("start", "x1", env=session_a).returncode != 3
+        for args in (("start", "x1"), ("pending", "x1")):
+            p = loop(*args)
+            assert p.returncode == 3, p.stderr
+            assert str(other.pid) in p.stdout + p.stderr
+        assert loop("status", "x1", "--json").returncode != 3
+        assert loop("answer", "x1", "1", "--approved").returncode != 3
+        assert loop("stop", "x1", env=session_a).returncode != 3
+        assert loop("start", "x1").returncode != 3
+    finally:
+        other.kill()
+        other.wait()

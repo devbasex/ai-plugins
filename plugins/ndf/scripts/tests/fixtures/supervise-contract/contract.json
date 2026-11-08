@@ -86,6 +86,7 @@
       "exit": 0,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -113,6 +114,7 @@
       "exit": 0,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -120,6 +122,7 @@
       ],
       "item_keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -135,6 +138,7 @@
       "exit": 1,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -165,6 +169,7 @@
       "exit": 10,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "next",
         "status",
@@ -211,6 +216,7 @@
       "exit": 20,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "next",
         "status",
@@ -235,6 +241,7 @@
       "exit": 3,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "next",
         "status",

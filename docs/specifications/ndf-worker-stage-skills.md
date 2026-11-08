@@ -205,6 +205,12 @@ sequenceDiagram
 「無し」と書く。1 つの作業が 2 つの工程にまたがるときは、工程ごとに作業を分けて渡す。終了コードが 0 以外なら
 欄を空にせず、supervisor が `結果: 判断が要る` で返す。
 
+supervisor（`ndf:supervisor`・`ndf:supervisor-waits`）が `ndf:worker` を起動する Agent の呼び出しは、
+PreToolUse の hook（読む Skill の guard、`plugins/ndf/scripts/hook_lib/worker_skills.py`）が見る。`prompt` に
+「読む Skill」の欄が無い起動は止め、理由に `agent-layers.md` の「supervisor → worker」の節を添える。欄に Skill を
+挙げたのに、supervisor の会話の記録に読み込まれた NDF の `stage-skills.py` を絶対パスで指した `lookup` の実行が
+無い起動も止め、引き方を返す。欄の値が「無し」の起動は通す。`NDF_WORKER_SKILLS_GUARD=0` で外せる。
+
 ## データ・設定
 
 ### 対応表のファイル
@@ -311,7 +317,7 @@ Skill が 0 件のときは節ごと入れない。
 | 費用の上限（$0.10・+2 秒）の実測 | 設計の時点の測定（2026-11-02、Claude Code v2.1.316、問い 1 つの起動）では、本文を入れた起動はキャッシュへ書き込む 1 回目で $0.0868（届けない起動 $0.0115〜0.0185）、秒は 3.1〜3.7 秒（届けない起動 3.1〜4.1 秒）だった。実在のステップで上限に収まるかは測っていない |
 | 10 工程の外で `document-style` が要る工程 | 実装・コードレビューなどの worker が他者の読む文書を書くかは、工程ごとに数えていない。見つかったら対応表に 1 行足す |
 | full の worker での重なり | full の worker はプラグインを読み込むため、本文を持ったうえで同じ Skill を Skill のツールで読み直すことがありうる |
-| `ndf:worker` の「読む Skill」 | supervisor は LLM のため、欄を引くコマンドで決めるかは振る舞いで縛れない |
+| `ndf:worker` の「読む Skill」 | 読む Skill の guard が縛るのは、欄の有無と、Skill を挙げた起動の前に `lookup` を打ったかまでである。挙げた名前とパスが `lookup` の出力と一致するかは見ない。工程に入っているのに欄に「無し」と書いた起動は止められない |
 
 ## テスト観点
 

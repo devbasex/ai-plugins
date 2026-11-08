@@ -179,7 +179,9 @@ graph TB
 ### パススルーの条件
 
 `run` は上から順に見る。パススルーは下の「本物の claude」の絶対パスを `os.execve` に渡し、引数を
-そのまま渡す。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える。**
+そのまま渡す。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える。** ただし、統括役が tmux で起動した印
+`NDF_RELAY_SPAWNED` を持つ `run` は、下の表を見る前に親のセッションの環境（`relay_lib/session_env.py` の `drop_parent_env`）を外す。
+そのため深さと `NDF_RELAY_DIR` の条件には当たらず、パススルーするときも外した後の環境で起動する（[統括役の仕様](ndf-relay-multi-session-supervisor.md)）。
 
 | # | 条件 | すること |
 | ---: | --- | --- |
@@ -240,7 +242,10 @@ stateDiagram-v2
 **exec の成否は close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をパイプへ
 書いて終わる。親は何も読まずに閉じれば成功とする。失敗した起動は `start` も `end` も書かない。
 
-**子の環境からは `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、
+**子の環境からは Claude Code のセッションごとの値（`relay_lib/session_env.py` の `DROP_ENV`。
+`CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` / `CLAUDE_CODE_BRIDGE_SESSION_ID` /
+`CLAUDE_CODE_CHILD_SESSION` / `CLAUDE_CODE_EXECPATH` / `CLAUDE_CODE_MESSAGING_SOCKET` /
+`CLAUDE_CODE_MESSAGING_TOKEN` / `CLAUDE_CODE_SESSION_ATTENDED` / `CLAUDE_EFFORT` / `CLAUDE_PID`）を外し、
 `NDF_RELAY_DIR` を置き、`NDF_RELAY_DEPTH` を 1 増やす。** Claude Code の中から起こしたプロセスは
 これらを継ぐためである。`claude plugin ...` の呼び出しは、同じ変数と `NDF_RELAY_DIR` を外し、
 標準入力を `/dev/null` にして行う。打ち切りは `list` が 15 秒、`marketplace update` と `plugin update`

@@ -39,6 +39,7 @@ import parallel_hold
 import project_mvv as pm
 import repo as repo_lib
 import step_read
+import limits
 import step_result
 from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
@@ -220,7 +221,7 @@ def locked(env: Env, name: str):
     """同じループの記録を 2 つのセッションが同時に書かない（`sprint-state.py gate` と同じ排他）。"""
     d = loop_dir(env, name)
     d.mkdir(parents=True, exist_ok=True)
-    return locks.exclusive(d / RECORD, timeout=60)
+    return locks.exclusive(d / RECORD, timeout=limits.seconds("sprint-loop-record.lock"))
 
 
 @contextmanager

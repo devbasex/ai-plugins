@@ -19,6 +19,7 @@ from typing import Callable
 
 import design_results as dr
 import gh_call
+from design_docs import connected_docs, name_numbers
 from step_result import result
 from supervise_lib.decl import glossary_ready
 from supervise_lib.procedures import DESIGN_RESULTS, absorbed_condition, closed_condition, with_touched
@@ -27,10 +28,9 @@ from supervise_lib.templates import impl_prompt
 TOOL = "supervise-design-results"
 IMPL_STAGE = "実装"
 
-# 一時的な失敗の打ち直し（#1941 の決定 9）: 15 秒おき・1 コマンドの待ちは 30 秒まで（3 回打つ）・1 回の実行の待ちの合計は 120 秒まで
-RETRY_INTERVAL = 15.0
-RETRY_PER_CALL = 30.0
-RETRY_TOTAL = 120.0
+# 一時的な失敗の打ち直し（#1941 の決定 9）: 間隔・1 コマンドの待ち・1 回の実行の待ちの合計は上限の宣言の方針
+# supervise.design-stage-read（#2343）
+POLICY = "supervise.design-stage-read"
 TAIL = 300  # 要約へ出す出力の末尾の文字数
 SLEEP: Callable[[float], None] = time.sleep  # テストが差し替える
 
@@ -47,24 +47,28 @@ class ReadFailed(Exception):
 class Budget:
     """1 回の実行の打ち直しの待ちの残り（秒）。"""
 
-    def __init__(self, total: float = RETRY_TOTAL):
-        self.left = total
+    def __init__(self, total: float | None = None):
+        import limits
+
+        self.left = limits.seconds(POLICY) if total is None else total
 
 
 def _retrying(run: Callable[[], object], command: str, budget: Budget):
-    """`run()`（returncode を持つ結果）を、0 以外の間 `RETRY_INTERVAL` 秒おきに打ち直す。待ちは 1 コマンドで
-    `RETRY_PER_CALL` 秒・残りの `budget` まで。打ち直しても 0 以外なら ReadFailed。"""
+    """`run()`（returncode を持つ結果）を、0 以外の間、方針 `POLICY` の間隔で打ち直す。待ちは 1 コマンドで
+    方針の `per_call` 秒・残りの `budget` まで。打ち直しても 0 以外なら ReadFailed。"""
+    import limits
     import waits
 
     def sleep(seconds: float) -> None:
         budget.left -= seconds
         SLEEP(seconds)
 
+    policy = limits.policy(POLICY)
     got = waits.retry_call(
         run,
         lambda p: p.returncode != 0,
-        max_wait=max(0.0, min(RETRY_PER_CALL, budget.left)),
-        interval=RETRY_INTERVAL,
+        policy=policy._replace(seconds=max(0.0, min(policy.per_call, budget.left))),
+        reason=lambda p: p.stderr or p.stdout,
         sleep=sleep,
     )
     p = got.value
@@ -91,41 +95,77 @@ def merged_design_pr(root: str, base: str, n: int, budget: Budget | None = None)
     return int(text) if text.isdigit() else None
 
 
-def changed_design_docs(root: str, base: str, pr: int, budget: Budget | None = None) -> list[tuple[str, str]]:
-    """PR が変えた `issues/*.md` の、`origin/<base>` でのパスと中身。起点から消えたパスは読み飛ばす（決定 11）。
-    打ち直しても `gh` / `git` が 0 以外なら ReadFailed。"""
+def changed_design_docs(root: str, base: str, pr: int, budget: Budget | None = None) -> tuple[list[tuple[str, str]], list[str]]:
+    """PR が変えた `issues/*.md` の、`origin/<base>` でのパスと中身と、`origin/<base>` の `issues/` の直下の設計文書の
+    一覧（#2453 の決定 1）。起点から消えたパスは読み飛ばす（決定 11）。打ち直しても `gh` / `git` が 0 以外なら ReadFailed。"""
     budget = budget or Budget()
     p = _gh_retrying(root, ["pr", "view", str(pr), "--json", "files", "--jq", ".files[].path"], budget)
     paths = [f for f in p.stdout.split() if re.fullmatch(r"issues/[^/]+\.md", f)]
-    if not paths:
-        return []
     _git_retrying(root, ["fetch", "-q", "origin", base], budget)
     # -z: core.quotePath で引用された名前は gh の実パスと一致しないため、NUL 区切りで実際の名前を読む
     listed = _git_retrying(root, ["ls-tree", "-r", "-z", "--name-only", f"origin/{base}", "--", "issues/"], budget).stdout
     present = {f for f in listed.split("\0") if f}
-    return [(f, _git_retrying(root, ["show", f"origin/{base}:{f}"], budget).stdout) for f in paths if f in present]
+    base_docs = sorted(f for f in present if re.fullmatch(r"issues/[^/]+", f) and name_numbers(f) is not None)
+    return [(f, show_base(root, base, f, budget)) for f in paths if f in present], base_docs
+
+
+def show_base(root: str, base: str, path: str, budget: Budget) -> str:
+    return _git_retrying(root, ["show", f"origin/{base}:{path}"], budget).stdout
+
+
+def _parsed(docs: list[tuple[str, str]], problems: list[dr.CellProblem]) -> list[dr.Row] | None:
+    """文書ごとに表を読み、行を合わせる。読める表が 1 本も無ければ None。セルの形の誤りは `problems` へ集める
+    （誤りのある文書も表を持つ文書として数える。#2453 の決定 4）。"""
+    found: list[list[dr.Row]] = []
+    for f, t in docs:
+        try:
+            rows = dr.parse_results(t, f)
+        except dr.DesignCellError as e:
+            problems.extend(e.problems)
+            found.append([])
+            continue
+        if rows is not None:
+            found.append(rows)
+    return [row for rs in found for row in rs] if found else None
+
+
+def _rows_for_issue(root: str, base: str, n: int, budget: Budget, res: dr.DesignResults, problems: list[dr.CellProblem]):
+    """課題 n の設計 PR と表の行を返す（PR が無ければ `(None, None)`）。PR が変えた文書に表が無ければ、
+    課題と番号でつながるベースブランチの設計文書から表を探す（#2453 の決定 8）。`res.base_docs` を更新する。"""
+    pr = merged_design_pr(root, base, n, budget)
+    if pr is None:
+        return None, None
+    changed, base_docs = changed_design_docs(root, base, pr, budget)
+    res.base_docs = base_docs
+    rows = _parsed(changed, problems)
+    if rows is None:
+        seen = {f for f, _ in changed}
+        linked = [f for f in connected_docs(base_docs, [n]) if f not in seen]
+        rows = _parsed([(f, show_base(root, base, f, budget)) for f in linked], problems)
+    return pr, rows
 
 
 def read_results(root: str, base: str, design: list[int], budget: Budget | None = None) -> dr.DesignResults:
     """設計の課題ごとに設計の結果を読んで合わせる。PR が無い・表が無い課題は `unread` へ入れる。
-    一時的な失敗が打ち直しの後も残れば、その課題で止めて ReadFailed（読んでいない課題を `unread` に持つ。決定 10）。"""
+    PR が変えた文書に表が無ければ、課題と番号でつながるベースブランチの設計文書から表を探す（#2453 の決定 8）。
+    一時的な失敗が打ち直しの後も残れば、その課題で止めて ReadFailed（読んでいない課題を `unread` に持つ。決定 10）。
+    触るファイルのセルの形の誤りは、すべての課題と文書から集めてから DesignCellError（#2453 の決定 4）。"""
     budget = budget or Budget()
     res = dr.DesignResults()
+    problems: list[dr.CellProblem] = []
     for i, n in enumerate(design):
         try:
-            pr = merged_design_pr(root, base, n, budget)
-            rows = None
-            if pr is not None:
-                found = [r for r in (dr.parse_results(t, f) for f, t in changed_design_docs(root, base, pr, budget)) if r is not None]
-                rows = [row for rs in found for row in rs] if found else None
+            pr, rows = _rows_for_issue(root, base, n, budget, res, problems)
         except ReadFailed as e:
             raise ReadFailed(e.command, e.tail, n, list(design[i + 1 :])) from e
         if pr is not None:
             res.design_prs.append(pr)
         if rows is None:
             res.unread.append(n)
-        else:
+        elif not problems:
             res.add(rows)
+    if problems:
+        raise dr.DesignCellError(problems)
     return res
 
 

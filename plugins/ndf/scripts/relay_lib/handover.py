@@ -33,6 +33,7 @@ from .terminal import Terminal
 from .version_dir import VersionDir, plugin_version
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
+import limits
 
 SCHEMA = 1
 HANDOVER_FILE = "handover.json"
@@ -52,7 +53,7 @@ REQUIRED = ("shown", "from_dir", "to_dir", "written_at", "claude", "marketplace"
 STATE_KEYS = ("section", "account", "multi", "auth_section")
 NEXT_KEYS = ("args", "cwd", "command", "from_session", "cwd_fallback", "carried", "plan")
 # 環境の用意を含む startup の上限の秒（決定 10。中の uv sync と同じ値）
-PREPARE_TIMEOUT = 600
+PREPARE_TIMEOUT = limits.seconds("relay.handover-prepare")
 
 
 @dataclass

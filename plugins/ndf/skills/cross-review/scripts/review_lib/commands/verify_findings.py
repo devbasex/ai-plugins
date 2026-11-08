@@ -9,11 +9,12 @@ import subprocess
 from typing import Any, Optional
 
 import review_lib  # noqa: E402
+import limits  # noqa: E402  上限の宣言（#2343）
 from review_lib import findings as findings_mod, matching, store  # noqa: E402
 
 
 # 実行検証の上限。実測が無いため、まず 300 秒で置く（#156 の 3 本目）。
-VERIFY_TIMEOUT_SECONDS = 300
+VERIFY_TIMEOUT_SECONDS = limits.seconds("cross-review.verify")
 
 # 再現とみなす終了コードの既定。**「0 でない」を再現としない。** pytest は対象が無い
 # ときに 4、収集 0 件で 5 を返し、バグの再現と指摘の書き誤りが別の値で分かれる。

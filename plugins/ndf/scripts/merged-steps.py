@@ -48,7 +48,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -59,7 +58,6 @@ from step_result import StepError, approval_present, common_parser, emit, git, g
 import container_reach  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
-import run_owner  # noqa: E402
 import run_state  # noqa: E402
 import worktree_base  # noqa: E402
 
@@ -161,9 +159,8 @@ def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
         path = wt_dir / name
         if not path.exists():
             continue
-        record, err = run_owner.read_owner(path)
-        if err or (record is not None and run_owner.alive(path, record, time.time())):
-            add("run-dir" if name.startswith("rf") else "worktree", str(path), "kept", err or run_owner.alive_reason(path, record))
+        if why := run_state.review_holder(path):
+            add("run-dir" if name.startswith("rf") else "worktree", str(path), "kept", why)
             continue
         state = state or run_state.view_pr(root, n) or {}
         for it in remove(root, path, state):

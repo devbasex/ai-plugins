@@ -417,8 +417,10 @@ def install_script(root: Path) -> Path:
     (dest / "lib").mkdir(parents=True, exist_ok=True)
     (dest / "data").mkdir(parents=True, exist_ok=True)
     (dest / "instructions-check.py").write_bytes(SCRIPT.read_bytes())
-    for name in ("refresh.py", "deps.py", "md.py", "pathmatch.py"):
+    for name in ("refresh.py", "deps.py", "md.py", "pathmatch.py", "limits.py"):
         (dest / "lib" / name).write_bytes((SCRIPT.parent / "lib" / name).read_bytes())
+    (dest.parent / "contracts").mkdir(exist_ok=True)  # 上限の宣言（lib/limits.py が読む）
+    (dest.parent / "contracts" / "limits.json").write_bytes((SCRIPT.parents[1] / "contracts" / "limits.json").read_bytes())
     shutil.copytree(
         SCRIPT.parent / "instructions_lib", dest / "instructions_lib", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__")
     )

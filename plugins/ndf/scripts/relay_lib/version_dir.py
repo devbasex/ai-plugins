@@ -5,7 +5,7 @@
     relay.py                     ランチャー（プラグインの scripts/relay.py と同じバイト列）
     relay.version                複製の版
     relay.current                使うバージョンディレクトリの名前 1 行。原子的に書き換える
-    relay-<版>-<digest 8 字>/    relay_lib/・lib/（LIB_FILES）・pyproject.toml・uv.lock・MANIFEST・.venv/・inuse-<持ち主>-<pid>
+    relay-<版>-<digest 8 字>/    relay_lib/・lib/（LIB_FILES）・contracts/limits.json・pyproject.toml・uv.lock・MANIFEST・.venv/・inuse-<持ち主>-<pid>
 
 digest は MANIFEST（ファイルごとの sha256 と相対パス）の sha256 である。バージョンディレクトリは書き終えてから
 `relay.current` を替え（I9）、動いている run が使うもの（使用中の印 `inuse-<持ち主>-<pid>`）は消さない。
@@ -59,6 +59,7 @@ LIB_FILES = (
     "lib/clock.py",
     "lib/deps.py",
     "lib/jsonio.py",
+    "lib/limits.py",
     "lib/locks.py",
     "lib/md.py",
     "lib/procs.py",
@@ -68,6 +69,7 @@ LIB_FILES = (
 )
 # 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
+DECL_FILES = ("contracts/limits.json",)  # 上限の宣言（lib/limits.py が読む。#2343）
 DIR_RE = re.compile(r"^relay-(.+)-[0-9a-f]{8}$")
 TMP_RE = re.compile(r"^relay-.+-[0-9a-f]{8}\.tmp-(\d+)$")
 INUSE_RE = re.compile(r"^inuse-(?:(?P<owner>.+)-)?(?P<pid>\d+)$")
@@ -194,11 +196,11 @@ class VersionDir:
         """バージョンディレクトリに入れるファイルの相対パス。"""
         pkg = os.path.join(self.source, "relay_lib")
         mods = sorted(f"relay_lib/{n}" for n in os.listdir(pkg) if n.endswith(".py"))
-        return mods + list(LIB_FILES) + list(PROJECT_FILES)
+        return mods + list(LIB_FILES) + list(DECL_FILES) + list(PROJECT_FILES)
 
     def src(self, rel: str) -> str:
         """`rel` の元のファイル。環境の宣言と lock は、元がプラグインならプラグインの根から取る。"""
-        if rel in PROJECT_FILES and not runtime.is_version_dir(self.source):
+        if rel in PROJECT_FILES + DECL_FILES and not runtime.is_version_dir(self.source):
             return os.path.join(os.path.dirname(self.source), rel)
         return os.path.join(self.source, rel)
 

@@ -41,6 +41,7 @@ from relay_lib import mark as relay_mark  # noqa: E402
 from relay_lib import proc as relay_proc  # noqa: E402
 from relay_lib import record as relay_record  # noqa: E402
 from relay_lib import run as relay_run  # noqa: E402
+from relay_lib import session_env as relay_session_env  # noqa: E402
 from relay_lib import shellrc as relay_shellrc  # noqa: E402
 from relay_lib import version_dir as relay_version_dir  # noqa: E402
 
@@ -1025,6 +1026,142 @@ def test_run_nested_stops_127(tmp_path):
     assert p.stderr.startswith("ndf-relay: 起動が入れ子になっている（") and p.stderr.count("\n") == 1
 
 
+# 親の claude のセッションの環境（#2656）。専用サーバーのグローバルな環境がこれらを持ち続ける
+PARENT_SESSION = {
+    "CLAUDECODE": "1",
+    "CLAUDE_CODE_SESSION_ID": "parent-session-MARK",
+    "CLAUDE_CODE_ENTRYPOINT": "cli",
+    "CLAUDE_PID": "4242",
+    "NDF_RELAY_DEPTH": "2",
+    "NDF_USAGE_SOURCE": "supervise",
+    "NDF_USAGE_KIND": "work",
+    "NDF_USAGE_PLAN": "parent-plan-MARK",
+    "NDF_USAGE_STEP": "3",
+    "NDF_RELAY_ROLE": "helper",
+    "NDF_RELAY_PLAN": "parent-plan-MARK",
+    "NDF_CLAUDE_ACCOUNT": "main",
+}
+# 利用者の設定と認証の宣言。親のセッションの環境に当たらず、外す処理の前後で値が変わらない（#2656 の I2）
+USER_ENV = {"NDF_ACCOUNT_SWITCH_AT": "80", "CLAUDE_CODE_OAUTH_TOKEN": "user-token", "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "x"}
+
+
+def _set_env(monkeypatch, env):
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+
+@pytest.mark.parametrize("depth", ["1", "2"])
+def test_run_spawned_drops_parent_env_before_judging(mod, tmp_path, monkeypatch, capsys, depth):
+    """#2656 の I1・I2: 起動の印を持つ `run` は、親のセッションの環境（`NDF_RELAY_DIR`・深さ 2 を含む）があっても
+    パススルーの判定にも終了コード 127 にも当たらない。外すのは親のセッションの環境だけで、利用者の設定は残す。
+    ここでは `-p` の素通しで、判定の後の環境を exec の引数から読む。"""
+    claude = real_claude(tmp_path)
+    shared = tmp_path / "shared"
+    _set_env(monkeypatch, {**PARENT_SESSION, **USER_ENV, "NDF_RELAY_DEPTH": depth, "NDF_RELAY_SPAWNED": "1"})
+    _set_env(monkeypatch, {"NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_CLAUDE": str(claude)})
+    _set_env(monkeypatch, {"CLAUDE_CONFIG_DIR": str(tmp_path / "main"), "NDF_SHARED_CONFIG_DIR": str(shared)})
+    monkeypatch.setattr(relay_run.tmux, "session_value", lambda name, key: None)
+    with pytest.raises(Execd):
+        relay_run.cmd_run(["-p", "hi"])
+    env = mod.calls[0][2]
+    assert env["NDF_RELAY_DEPTH"] == "1"
+    gone = set(PARENT_SESSION) - {"NDF_RELAY_DEPTH"} | {"NDF_RELAY_DIR", "NDF_SHARED_CONFIG_DIR"}
+    assert not gone & set(env), gone & set(env)
+    assert env["CLAUDE_CONFIG_DIR"] == str(shared)
+    assert {k: env.get(k) for k in USER_ENV} == USER_ENV
+    assert "MARK" not in capsys.readouterr().err  # 外した値を画面へ出さない（I6）
+
+
+def test_run_without_spawned_mark_keeps_env(mod, tmp_path, monkeypatch):
+    """#2656 の I4: 起動の印が無ければ環境は変わらず、今と同じくパススルーになる。"""
+    claude = real_claude(tmp_path)
+    _set_env(monkeypatch, {**PARENT_SESSION, "NDF_RELAY_DEPTH": "1", "NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_CLAUDE": str(claude)})
+    before = dict(os.environ)
+    with pytest.raises(Execd):
+        relay_run.cmd_run(["--model", "haiku"])
+    env = mod.calls[0][2]
+    assert {k: v for k, v in env.items() if k != "NDF_RELAY_DEPTH"} == {k: v for k, v in before.items() if k != "NDF_RELAY_DEPTH"}
+    assert env["NDF_RELAY_DEPTH"] == "2"
+
+
+def test_drop_parent_env_keeps_only_launched_role(monkeypatch):
+    """#2656 の I3: 役割と計画は起動で付いた値だけが残る。起動で付いていなければ外す。"""
+    _set_env(monkeypatch, PARENT_SESSION)
+    relay_session_env.drop_parent_env({"NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": "p1"})
+    assert (os.environ.get("NDF_RELAY_ROLE"), os.environ.get("NDF_RELAY_PLAN")) == ("helper", "p1")
+    _set_env(monkeypatch, PARENT_SESSION)
+    relay_session_env.drop_parent_env({})
+    assert not set(relay_session_env.PARENT_ENV + relay_session_env.LANE_ENV) & set(os.environ)
+
+
+@pytest.mark.parametrize(
+    "has, value, kind",
+    [(True, "/k/x", "value"), (True, "", "empty"), (False, None, "none")],
+)
+def test_lane_env_asks_tmux_only_for_role_in_env(monkeypatch, has, value, kind):
+    """#2656 の決定 4: 環境に役割の値があるときだけ tmux に問い、tmux のセッションの環境にある値だけを返す。"""
+    asked = []
+
+    def session_value(name, key):
+        asked.append((name, key))
+        return {"value": "helper", "empty": "", "none": None}[kind]
+
+    monkeypatch.setattr(relay_run.tmux, "session_value", session_value)
+    monkeypatch.setenv("NDF_RELAY_NAME", "l1")
+    monkeypatch.delenv("NDF_RELAY_PLAN", raising=False)
+    monkeypatch.delenv("NDF_RELAY_ROLE", raising=False)
+    assert relay_run._lane_env() == {} and asked == []
+    monkeypatch.setenv("NDF_RELAY_ROLE", "helper")
+    got = relay_run._lane_env()
+    assert asked == [("l1", "NDF_RELAY_ROLE")]
+    assert got == ({} if kind == "none" else {"NDF_RELAY_ROLE": {"value": "helper", "empty": ""}[kind]})
+
+
+def test_leave_account_restores_original_config(monkeypatch, tmp_path):
+    """#2656 の I5: 元の値・空・変数なしの 3 通りで元の `CLAUDE_CONFIG_DIR` に戻し、NDF が足した値を外す。"""
+    import claude_accounts as ca
+
+    orig = str(tmp_path / "orig")
+    base = {"CLAUDE_CONFIG_DIR": "/acc/main", "NDF_CLAUDE_ACCOUNT": "main", **USER_ENV}
+    env = {**base, "NDF_SHARED_CONFIG_DIR": orig, "CLAUDE_CODE_PLUGIN_CACHE_DIR": os.path.join(orig, "plugins")}
+    ca.leave_account(env)
+    assert env == {**USER_ENV, "CLAUDE_CONFIG_DIR": orig}
+    env = {**base, "NDF_SHARED_CONFIG_DIR": "", "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/mine"}
+    ca.leave_account(env)
+    assert env == {**USER_ENV, "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/mine"}  # 利用者が置いたプラグインの置き場は残す
+    assert ca.shared_dir(env) == os.path.join(os.path.expanduser("~"), ".claude")  # 受け入れ条件 9: 空なら ~/.claude
+    env = {"CLAUDE_CONFIG_DIR": "/user/own", **USER_ENV}
+    ca.leave_account(env)
+    assert env == {"CLAUDE_CONFIG_DIR": "/user/own", **USER_ENV}  # アカウントの子でなければ利用者の値
+
+
+def test_leave_account_drops_metered_declaration(monkeypatch, tmp_path):
+    """#2656 の決定 5: 親が従量の接続なら、名前を外す前に宣言のキーを外す。宣言でないキーは残す（I2）。"""
+    import claude_accounts as ca
+
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1")
+    env = {"NDF_CLAUDE_ACCOUNT": "metered", "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1", "NDF_ACCOUNT_SWITCH_AT": "80"}
+    env["NDF_SUPERVISE_CLAUDE_FALLBACK"] = os.environ["NDF_SUPERVISE_CLAUDE_FALLBACK"]
+    ca.leave_account(env)
+    assert env == {"NDF_ACCOUNT_SWITCH_AT": "80", "NDF_SUPERVISE_CLAUDE_FALLBACK": "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"}
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_leave_account_with_unreadable_declaration_keeps_keys(monkeypatch, tmp_path, broken):
+    """#2656 の I5: 保存した宣言が消えた・壊れたときは例外を出さず、宣言のキーを残して設定ディレクトリと名前を戻す。"""
+    import claude_accounts as ca
+
+    store = tmp_path / "store"
+    store.mkdir()
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    monkeypatch.delenv("NDF_SUPERVISE_CLAUDE_FALLBACK", raising=False)
+    if broken:
+        (store / ca.METERED_FILE).write_text("{not json")
+    env = {"NDF_CLAUDE_ACCOUNT": "metered", "CLAUDE_CODE_USE_BEDROCK": "1", "NDF_SHARED_CONFIG_DIR": "/o", "CLAUDE_CONFIG_DIR": "/acc"}
+    ca.leave_account(env)
+    assert env == {"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CONFIG_DIR": "/o"}
+
+
 def test_run_no_real_claude_127(tmp_path):
     e = isolated_env(tmp_path, PATH=str(tmp_path / "empty"))
     p = subprocess.run([sys.executable, str(RELAY), "run", "-p", "x"], capture_output=True, text=True, env=e, timeout=20)
@@ -1459,7 +1596,8 @@ def plugin_root(tmp_path, version, name="plugin"):
     (root / "scripts" / "lib").mkdir(exist_ok=True)
     for rel in relay_version_dir.LIB_FILES:
         shutil.copyfile(ROOT / "scripts" / rel, root / "scripts" / rel)
-    for rel in relay_version_dir.PROJECT_FILES:
+    for rel in relay_version_dir.PROJECT_FILES + relay_version_dir.DECL_FILES:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / rel, root / rel)
     return root / "scripts" / "relay.py"
 

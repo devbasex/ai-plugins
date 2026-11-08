@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 from pathlib import Path
 
+import limits
 import locks
 from step_result import StepError, git
 
-MAIN_LOCK_WAIT = 600.0  # メインディレクトリの排他を待つ上限（秒）。後片付け 1 件と pull は数十秒で終わる
+MAIN_LOCK_WAIT = limits.seconds("merged.main-lock")  # メインディレクトリの排他を待つ上限（秒）。後片付け 1 件と pull は数十秒で終わる
 
 
 @contextlib.contextmanager

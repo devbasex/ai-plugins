@@ -20,11 +20,12 @@ import json
 import os
 import subprocess
 import sys
+import limits
 from pathlib import Path
 
 ASK_PY = Path(__file__).resolve().parent.parent / "ask.py"
 PARALLEL_PY = Path(__file__).resolve().parent.parent / "parallel.py"
-FORWARD_TIMEOUT = 8  # 秒。hook の 10 秒の上限の中に収める
+FORWARD_TIMEOUT = limits.seconds("hook.ask-forward")  # 秒。hook の 10 秒の上限の中に収める
 ASKING_MD = Path(__file__).resolve().parent.parent.parent / "skills" / "development-workflow" / "references" / "asking.md"
 
 STOP_REASONS = {
