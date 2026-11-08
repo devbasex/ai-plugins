@@ -169,7 +169,7 @@ def _issue_guard(ev) -> list:
     from hook_lib import issue_guard
 
     try:
-        return [issue_guard.decision(ev)]
+        return [issue_guard.issue_decision(ev)]
     except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
         return []
 

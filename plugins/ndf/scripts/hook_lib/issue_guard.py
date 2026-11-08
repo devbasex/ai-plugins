@@ -22,9 +22,11 @@ import subprocess
 from pathlib import Path
 
 import issue_items
+import limits
 import shparse as sp
 
 from . import payload as pl
+from .token_guard import deny
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 WRAPPERS = frozenset({"env", "command", "builtin", "nohup", "exec", "time"})
@@ -38,11 +40,7 @@ WEB_OPTS = ("--web", "-w")
 CONTEXT = {"ai": True}
 
 
-def deny(reason: str) -> dict:
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
-
-
-def _command_words(n: sp.Node) -> list[sp.Node]:
+def _call_words(n: sp.Node) -> list[sp.Node]:
     return [c for c in n.children if sp.field_of(n, c) in ("name", "argument")]
 
 
@@ -62,7 +60,7 @@ def creates(root: sp.Node) -> list[sp.Node]:
         if n.type == "heredoc_body":
             continue
         if n.type == "command":
-            words = [sp.unquote(w) for w in _command_words(n)]
+            words = [sp.unquote(w) for w in _call_words(n)]
             i = _start(words)
             if words[i : i + 3] == ["gh", "issue", "create"]:
                 out.append(n)
@@ -80,7 +78,7 @@ def _heredoc_text(node: sp.Node) -> str | None:
         return None
     body = inner[0].child_by_field_name("body")
     redirects = [c for c in inner[0].children if c.type == "heredoc_redirect"]
-    if body is None or len(redirects) != 1 or [sp.unquote(w) for w in _command_words(body)] != ["cat"]:
+    if body is None or len(redirects) != 1 or [sp.unquote(w) for w in _call_words(body)] != ["cat"]:
         return None
     r = redirects[0]
     text = next((c for c in r.children if c.type == "heredoc_body"), None)
@@ -91,7 +89,7 @@ def _heredoc_text(node: sp.Node) -> str | None:
     return sp.node_text(text)
 
 
-def _value(node: sp.Node) -> str | None:
+def _arg_value(node: sp.Node) -> str | None:
     """引数の値。展開を含む語は読めない形（`None`）。"""
     here = _heredoc_text(node)
     if here is not None:
@@ -103,7 +101,7 @@ def _value(node: sp.Node) -> str | None:
     return sp.unquote(node)
 
 
-def parse_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], str | None]:
+def create_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], str | None]:
     """`gh issue create` の引数から `(本文, ラベル, --repo)`。本文を読めない形なら本文は `None`。"""
     body, labels, repo, unreadable = None, [], None, False
     i = 0
@@ -114,7 +112,7 @@ def parse_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], s
         value: str | None = inline
         if name in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS and not eq:
             i += 1
-            value = _value(nodes[i]) if i < len(nodes) else None
+            value = _arg_value(nodes[i]) if i < len(nodes) else None
         if name in BODY_OPTS:
             body = value
             unreadable |= value is None
@@ -141,7 +139,7 @@ def _read_file(value: str | None, cwd: str) -> str | None:
 
 def origin_repo(cwd: str) -> str | None:
     try:
-        p = subprocess.run(["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=limits.seconds("hook.git-remote"))
     except (OSError, subprocess.SubprocessError):
         return None
     m = REPO_IN_URL.search(p.stdout.strip()) if p.returncode == 0 else None
@@ -178,7 +176,7 @@ def _gap_text(gaps, definition: issue_items.Definition) -> str:
     )
 
 
-def decision(ev: pl.Event) -> dict | None:
+def issue_decision(ev: pl.Event) -> dict | None:
     cmd = ev.command_text()
     if "gh" not in cmd or "create" not in cmd or "issue" not in cmd:
         return None
@@ -194,9 +192,9 @@ def decision(ev: pl.Event) -> dict | None:
     except issue_items.DefinitionError:
         return None
     for node in found:
-        words = _command_words(node)
+        words = _call_words(node)
         start = _start([sp.unquote(w) for w in words]) + 3
-        body, labels, repo = parse_args(words[start:], cwd)
+        body, labels, repo = create_args(words[start:], cwd)
         if _other_repo(repo, cwd):
             continue
         if body is None:
