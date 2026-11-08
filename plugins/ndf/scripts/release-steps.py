@@ -33,7 +33,7 @@
     python3 release-steps.py record         --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
     python3 release-steps.py record         --merged --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
     python3 release-steps.py publish        --revision <SHA> [--root <dir>]   # リリースタグと GitHub Release を作る（CD と切り戻し）
-    python3 release-steps.py cd-result      --base <本番チャネル> [--head <ブランチ>] --out <ファイル> [--root <dir>]
+    python3 release-steps.py cd-result      --base <本番チャネル> [--head <ブランチ> | --prs <PR番号>...] --out <ファイル> [--root <dir>]
     python3 release-steps.py cd-guidance    [--root <dir>]   # CD の案内
     python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
     python3 release-steps.py approve        --approval <承認資料> --facts-from <開発版の状態> [--answer-from <状態>] --by user
@@ -803,7 +803,13 @@ def cmd_publish(a):
 
 
 def _cd_revision(root, a):
-    """CD の結果を読むリビジョン。--head があれば最後にマージした head → base の PR のコミット、無ければ本番チャネルの先端。"""
+    """CD の結果を読むリビジョン。--prs があれば最後の PR のマージのコミット（record --merged が記録するもの。読めなければ空で未確定）、
+    --head があれば最後にマージした head → base の PR のコミット、どちらも無ければ本番チャネルの先端。"""
+    if a.prs:
+        try:
+            return merge_commit_of(root, a.prs[-1]) or ""
+        except StepError:
+            return ""  # 先端で代えると別の PR のリビジョンを読むため、未確定にする
     git(root, "fetch", "-q", "origin", a.base, check=False)
     try:
         pr = find_pr(root, a.head, a.base, states=("MERGED",)) if a.head else None
@@ -1175,6 +1181,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cd-result", parents=[common], help="本番チャネルへのマージの後に CD の結果を読み、ファイルへ書く")
     p.add_argument("--base", required=True, help="本番チャネル")
     p.add_argument("--head", help="本番チャネルへマージした Pull Request の head（無ければ本番チャネルの先端を読む）")
+    p.add_argument("--prs", nargs="+", type=int, metavar="PR番号", help="本番チャネルへ直接マージした PR（最後の PR のマージのコミットを読む）")
     p.add_argument("--out", required=True, help="結果のファイル")
     p.set_defaults(func=cmd_cd_result)
 

@@ -197,12 +197,19 @@ def test_completed_without_success_is_a_failure(tmp_path, monkeypatch):
     assert got.value == cd_result.FAILURE and "failure" in got.reason
 
 
-@pytest.mark.parametrize("answer", [RUN_GOING, [], (1, "", "boom"), (0, "not json", "")])
+@pytest.mark.parametrize("answer", [RUN_GOING, []])
 def test_reaching_the_limit_is_undetermined_and_never_success(tmp_path, monkeypatch, answer):
     fake_runs(monkeypatch, [answer])
     row = {**PLUGIN_CD, "result": {"workflow": "release-cd.yml", "timeout_seconds": 60}}
     got = read_with(tmp_path, [row])
     assert got.value == cd_result.UNDETERMINED and "待ちの上限" in got.reason
+
+
+@pytest.mark.parametrize("answer", [(1, "", "boom"), (0, "not json", "")])
+def test_a_failed_query_is_undetermined_without_waiting(tmp_path, monkeypatch, answer):
+    calls = fake_runs(monkeypatch, [answer])
+    got = read_with(tmp_path, [PLUGIN_CD])
+    assert got.value == cd_result.UNDETERMINED and len(calls) == 1 and "待ちの上限" not in got.reason
 
 
 def test_a_row_without_a_way_to_read_is_undetermined(tmp_path):
@@ -410,6 +417,17 @@ def test_a_suffixed_version_makes_nothing_and_fails(pub):
     set_version(root, "1.2.4-dev.1")
     git(root, "commit", "-qam", "dev")
     code, _, p = publish(root, env)
+    assert code == 1 and not (tmp / "release.json").exists()
+    assert git(root, "ls-remote", "--tags", "origin") == ""
+
+
+def test_a_local_only_tag_on_another_commit_is_not_pushed(pub):
+    root, env, tmp = pub
+    old = git(root, "rev-parse", "HEAD")
+    git(root, "commit", "-q", "--allow-empty", "-m", "next")
+    head = git(root, "rev-parse", "HEAD")
+    git(root, "tag", "-a", "ndf--v1.2.3", old, "-m", "x")
+    code, _, _ = publish(root, env, head)
     assert code == 1 and not (tmp / "release.json").exists()
     assert git(root, "ls-remote", "--tags", "origin") == ""
 

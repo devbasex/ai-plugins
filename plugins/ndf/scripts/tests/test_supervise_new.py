@@ -958,7 +958,7 @@ def test_direct_production_branch_gets_the_cd_result_stage(tmp_path):
     manifest, plans, _ = cd_sprint(tmp_path, ONE_BRANCH, [CD_ROW])
     assert [w["name"] for w in manifest["ステージ"]][-1] == "CD の結果"
     steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（CD の結果）")["steps"]}
-    assert "cd-result --base main --out" in steps["cd-result"]["cmd"] and "--head" not in steps["cd-result"]["cmd"]
+    assert "cd-result --base main --prs {queue_prs} --out" in steps["cd-result"]["cmd"] and "--head" not in steps["cd-result"]["cmd"]
     assert "record --merged --base main" in steps["record"]["cmd"]
 
 

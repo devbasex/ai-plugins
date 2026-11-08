@@ -1194,3 +1194,17 @@ def test_record_by_cd_replaces_the_tag_check_with_the_result(monkeypatch, tmp_pa
 
     with pytest.raises(step_result.StepError):
         _record(monkeypatch, tmp_path, version="1.2.3")
+
+
+def test_cd_result_reads_the_merge_commit_of_the_last_pr_not_the_branch_tip(monkeypatch):
+    """直接本番へマージする経路は record --merged と同じリビジョン（最後の PR のマージのコミット）を読む。読めなければ先端で代えない。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod, "git", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "tip\n", ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: f"merge-{n}")
+    a = argparse.Namespace(base="main", head=None, prs=[3, 7])
+    assert mod._cd_revision(".", a) == "merge-7"
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: None)
+    assert mod._cd_revision(".", a) == ""
+    assert mod._cd_revision(".", argparse.Namespace(base="main", head=None, prs=None)) == "tip"

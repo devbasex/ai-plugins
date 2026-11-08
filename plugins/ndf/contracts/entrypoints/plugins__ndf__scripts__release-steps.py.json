@@ -42,7 +42,8 @@
         "options": [
           "--base",
           "--head",
-          "--out"
+          "--out",
+          "--prs"
         ],
         "positionals": []
       },

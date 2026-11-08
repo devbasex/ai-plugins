@@ -37,14 +37,17 @@ def _notes_at(root, plugin, ver, revision) -> str:
 
 
 def _ensure_tag(root, plugin, ver, tag, revision) -> dict:
-    """origin のタグが `revision` を指すことを確かめ、無ければ作って push する。別のコミットを指していれば止める。"""
+    """origin のタグが `revision` を指すことを確かめ、無ければ作って push する。origin か手元の同名タグが別のコミットを指していれば止める。"""
     if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode == 0:
         git(root, "fetch", "-q", "origin", f"+refs/tags/{tag}:refs/tags/{tag}")
         if (at := git(root, "rev-parse", f"refs/tags/{tag}^{{commit}}").stdout.strip()) != revision:
             raise StepError(f"origin のタグ {tag} が本番チャネルのコミット {revision[:8]} でなく {at[:8]} を指す")
         return {"kind": "tag", "name": tag, "result": "exists"}
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode != 0:
+    local = git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}", check=False)
+    if local.returncode != 0:
         git(root, "tag", "-a", tag, revision, "-m", f"{plugin} v{ver}")
+    elif (at := local.stdout.strip()) != revision:
+        raise StepError(f"手元のタグ {tag} が本番チャネルのコミット {revision[:8]} でなく {at[:8]} を指す")
     git(root, "push", "-q", "origin", tag)
     return {"kind": "tag", "name": tag, "result": "pushed"}
 

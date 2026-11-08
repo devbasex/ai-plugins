@@ -74,7 +74,7 @@ def record_step(repo: str, how: str) -> dict:
 
 def plan_cd_result(a, repo: str, production: str, condition: dict | None = None) -> dict:
     """ベースブランチが本番チャネルの CD の形（昇格のプランが無い）のプラン: cd-result → record --merged（#2623 の決定 9）。"""
-    steps = [cd_result_step(repo, production, None), record_step(repo, f"--merged --base {shlex.quote(production)}"), judge_record_step()]
+    steps = [cd_result_step(repo, production, None, QUEUE_PRS), record_step(repo, f"--merged --base {shlex.quote(production)}"), judge_record_step()]
     return release_plan(a, repo, "リリース（CD の結果）", RULE_CD_RESULT, steps, condition)
 
 

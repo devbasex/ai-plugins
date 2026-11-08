@@ -195,11 +195,14 @@ def prior_issues(env) -> dict[int, str]:
     return {w["number"]: loop for loop, w in prior_rows(env.main_dir(), plan)[0]} if plan else {}
 
 
-def _loop_answer(run, main: Path, q: dict, args: list[str]) -> str | None:
+def _loop_answer(run, main: Path, q: dict, args: list[str], expect: str | None = None) -> str | None:
     """そのループの `loop answer` を打つ。当たらなかった理由を返す（当たれば None）。先頭は呼び出し側が確かめたので、行の印が古く
-    答え直しを求められたら（`status: regated`。印は今の先頭へ書き換わる）1 回だけ打ち直す。"""
+    答え直しを求められたら（`status: regated`。印は今の先頭へ書き換わる）1 回だけ打ち直す。`expect` は呼び出し側が確かめた先頭で、
+    打ち直す前に今の先頭がそれと同じかを確かめ直す（確かめた後に動いた先頭を、人の答えなしに承認しないため）。"""
     cmd = [sys.executable, str(SPRINT_STATE), "loop", "answer", q["loop"], str(q["issue"]), *args]
-    for _ in range(2):
+    for attempt in range(2):
+        if attempt and expect and (now := design_pr_head(run, main, q["pr"])) != expect:
+            return f"設計 PR #{q['pr']} の先頭が確かめた {expect[:HEAD_LEN]} から {now[:HEAD_LEN] or '（読めない）'} へ動いた。新しい先頭で答え直す"
         code, so, se = run(cmd, cwd=str(main))
         if code != 0:
             return f"loop answer が断った（{code}）: {(se or so).strip()[:200]}"
@@ -216,7 +219,7 @@ def answer_prior(main: str | Path, plan_dir: Path, q: dict, answer: dict, stamp:
     """前のループの待ちの問いへの答えを、そのループの記録へ当てる。`stamp` は置き換えた問いへ答えたときのその問いの印。
     当たれば {}、問い直すなら {"reask": 新しい問い}、当てられなければ {"unmatched": 理由} を返す。"""
     main, result = Path(main), answer.get("result")
-    moved = None
+    moved = head = None
     if stamp is not None or result == "approved":
         head, old = design_pr_head(run, main, q["pr"]), stamp if stamp is not None else q.get("stamp") or ""
         if not head:
@@ -237,5 +240,5 @@ def answer_prior(main: str | Path, plan_dir: Path, q: dict, answer: dict, stamp:
         args = ["--rejected"]
     else:
         return {"unmatched": f"答え {result} は前のループの待ちへ当てられない"}
-    why = _loop_answer(run, main, q, args)
+    why = _loop_answer(run, main, q, args, head)
     return {"unmatched": why} if why else {}

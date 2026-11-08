@@ -33,15 +33,16 @@ class CdResult:
 
 
 def _read_workflow(root, name: str, revision: str, _limit: float) -> tuple[str, str, str]:
-    """GitHub Actions の実行を読む。(値か WAIT, 説明, URL) を返す。実行が無いか進行中なら待つ。"""
+    """GitHub Actions の実行を読む。(値か WAIT, 説明, URL) を返す。実行が無いか進行中なら待つ。照会そのものの失敗（gh の
+    起動・認証の失敗、出力を読めない）は待っても戻らないことが多いため、待たずに未確定にする。"""
     args = ["run", "list", "--commit", revision, "--workflow", name, "--json", "status,conclusion,url", "--limit", "1"]
     p = gh_parts.gh(args, cwd=root)
     if p.returncode != 0:
-        return WAIT, f"gh run list が失敗: {p.stderr.strip()[:200]}", ""
+        return UNDETERMINED, f"gh run list が失敗: {p.stderr.strip()[:200]}", ""
     try:
         runs = json.loads(p.stdout or "[]")
     except ValueError:
-        return WAIT, "gh run list の出力を読めない", ""
+        return UNDETERMINED, "gh run list の出力を読めない", ""
     if not runs:
         return WAIT, f"{revision[:7]} の {name} の実行が無い", ""
     run = runs[0]

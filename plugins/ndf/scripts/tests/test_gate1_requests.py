@@ -198,6 +198,21 @@ def test_a_stale_row_stamp_is_answered_again_once(tmp_path):
     assert g1.answer_prior(tmp_path, tmp_path, Q, {"result": "approved"}, run=run) == {} and outs == []
 
 
+def test_a_head_moved_after_the_check_is_not_approved_on_the_retry(tmp_path):
+    """先頭を確かめた後に設計 PR が動き、loop answer が答え直しを求めたら、動いた先頭を打ち直しで承認しない。"""
+    gh = Gh("a" * 40)
+    gh.out = '{"metrics": {"status": "regated"}}'
+    base = gh.__call__
+
+    def run(cmd, cwd=None, stdin=None):
+        if "loop" in cmd:
+            gh.head = "b" * 40
+        return base(cmd, cwd, stdin)
+
+    got = g1.answer_prior(tmp_path, tmp_path, Q, {"result": "approved"}, run=run)
+    assert "動いた" in got["unmatched"] and sum("loop" in c for c in gh.calls) == 1
+
+
 def test_an_answer_to_a_replaced_question_needs_a_merge_only_move(tmp_path, monkeypatch):
     monkeypatch.setattr(g1, "merge_only", lambda *a: False)
     got = g1.answer_prior(tmp_path, tmp_path, {**Q, "stamp": "b" * 40}, {"result": "rejected"}, "a" * 40, run=Gh("b" * 40))

@@ -58,10 +58,10 @@ CD_RESULT_FILE = "{state_dir}/work/cd-result.json"  # cd-result が書き record
 CD_FAILED_STOP = {"5": "stop"}  # CD の結果が失敗（record が記録を書いた後の 5）なら judge-record を通らずに止める
 
 
-def cd_result_step(repo: str | None, base: str, head: str | None) -> dict:
+def cd_result_step(repo: str | None, base: str, head: str | None, prs: str | None = None) -> dict:
     """本番チャネルへのマージの後に CD の結果を読むステップ。宣言に依らず常に置き、CD の行が無ければ `none` を書く（#2623 の決定 8）。
-    結果は 0 で返り、record が書いた後に失敗を止める。"""
-    head_arg = f" --head {shlex.quote(head)}" if head else ""
+    結果は 0 で返り、record が書いた後に失敗を止める。`prs` があれば最後の PR のマージのコミットを読む（record --merged と同じリビジョン）。"""
+    head_arg = (f" --head {shlex.quote(head)}" if head else "") + (f" --prs {prs}" if prs else "")
     return {
         "id": "cd-result",
         "type": "run",
