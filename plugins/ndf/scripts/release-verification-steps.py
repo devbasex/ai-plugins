@@ -3,6 +3,8 @@
 
     python3 release-verification-steps.py verify-install --ref <ベースブランチ|本番チャネル> --expect <版>
         [--plugins <名前>,...] [--runtimes claude,codex] [--root <dir>]
+    python3 release-verification-steps.py user-config-save --dir <控えを置くディレクトリ>
+    python3 release-verification-steps.py user-config-check --dir <控えを置くディレクトリ>
 
 隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が
 ref と一致するかを確かめる。利用者の HOME の設定が変わっていないことも確かめる。
@@ -10,7 +12,7 @@ ref と一致するかを確かめる。利用者の HOME の設定が変わっ�
 2 = 呼び出しの誤り（未知の runtime・宣言に無い ref）/ 3 = plugin が無い。
 導入元の owner/repo は origin の URL、マーケットプレイスの名前は `.claude-plugin/marketplace.json` の name、ref の
 候補（ベースブランチ・本番チャネル）は `.ndf/worktree.json`、プラグインとタグの接頭辞は --plugins → 宣言の
-release.plugin から読む（#1336）。
+release.plugin から読む（#1336）。user-config-save / check は利用者の設定ディレクトリを読むだけで控え・比べる（#2401）。
 """
 
 from __future__ import annotations
@@ -44,8 +46,10 @@ from step_result import (
 import limits
 import delivery  # noqa: E402
 import repo as repo_lib  # noqa: E402
+from release_lib.user_config import _json, _read_user_config, config_dirs, user_config_snapshot  # noqa: E402
 
 TOOL = "release-verification"
+USER_CONFIG_FILE = "user-config-before.json"  # 控えのファイルの名前（置くディレクトリは --dir）
 
 
 def market_of(root, slug):
@@ -64,13 +68,22 @@ def rc_digest(path):
 
 
 def user_env_snapshot():
+    """rc ファイル・リンクと、利用者の設定ディレクトリの控え（#2401 の I6）。読めない設定は `<claude|codex>:unreadable` の値で比べる。"""
     home = Path(os.path.expanduser("~"))
     link = home / ".local" / "bin" / "claude"
-    return {
+    env = {
         ".bashrc": rc_digest(home / ".bashrc"),
         ".zshrc": rc_digest(home / ".zshrc"),
         ".local/bin/claude": os.readlink(link) if link.is_symlink() else ("file" if link.exists() else None),
     }
+    snap = user_config_snapshot()
+    env.update(snap.items)
+    claude = str(config_dirs()[0])
+    for side in ("claude", "codex"):
+        bad = [b for b in snap.unreadable if b.startswith(claude + os.sep) == (side == "claude")]
+        if bad:
+            env[f"{side}:unreadable"] = "; ".join(sorted(bad))
+    return env
 
 
 def isolated_env(tmp):
@@ -88,16 +101,7 @@ def isolated_env(tmp):
         "NPM_CONFIG_PREFIX": str(h / ".npm-global"),
         "LANG": os.environ.get("LANG", "C.UTF-8"),
     }
-    for k in (
-        "HOME",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_CACHE_HOME",
-        "XDG_STATE_HOME",
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "NPM_CONFIG_PREFIX",
-    ):
+    for k in set(env) - {"PATH", "LANG"}:
         Path(env[k]).mkdir(parents=True, exist_ok=True)
     return env
 
@@ -300,13 +304,14 @@ def _runtime_result(r, expect) -> str:
 
 
 def _env_items(before, after) -> list[dict]:
-    """利用者の環境の差分を、変わった鍵ごとの項目にする。"""
+    """利用者の環境の差分を、変わった鍵ごとの項目にする。片方にしか無い鍵も載せ、無い側は None（#2401 の決定 5）。"""
     if before == after:
         return []
+    keys = [*before, *(k for k in after if k not in before)]
     return [
-        {"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]}
-        for k in before
-        if before[k] != after[k]
+        {"kind": "user_env", "name": k, "result": "changed", "before": before.get(k), "after": after.get(k)}
+        for k in keys
+        if before.get(k) != after.get(k)
     ]
 
 
@@ -368,6 +373,41 @@ def cmd_verify_install(a):
     emit(_build_result(ctx, runtimes_res, mismatch, before, after))
 
 
+def _config_out(status: str, summary: str, items: list, n: int, code=None, **extra):
+    """控えの副命令の結果を出す。items の文字列（読めないファイルの `<パス>: <理由>`）は kind: unreadable の項目にする。"""
+    items = [{"kind": "unreadable", "name": (b := i.partition(": "))[0], "reason": b[2]} if isinstance(i, str) else i for i in items]
+    claude, codex = config_dirs()
+    emit(result(TOOL, status, summary, items, {"keys": n, "claude_config_dir": str(claude), "codex_home": str(codex), **extra}), code)
+
+
+def cmd_user_config_save(a):
+    """控えを --dir の下へ書く。読めない・書けないなら「変わっていない」と言えないため 2 で止まる（#2401 の決定 6）。"""
+    snap = user_config_snapshot()
+    bad, out = list(snap.unreadable), Path(a.dir) / USER_CONFIG_FILE
+    if not bad:
+        try:
+            Path(a.dir).mkdir(parents=True, exist_ok=True)
+            (Path(a.dir) / USER_CONFIG_FILE).write_text(json.dumps(snap.items, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        except OSError as e:
+            bad.append(f"{out}: {e}")
+    if bad:
+        _config_out("stopped", f"利用者の設定の控えを取れない（{'; '.join(bad)}）", bad, len(snap.items), 2, out=str(out))
+    _config_out("ok", f"利用者の設定の控えを取った（{len(snap.items)} 件）", [], len(snap.items), out=str(out))
+
+
+def cmd_user_config_check(a):
+    """--dir の下の控えと今を比べる。変わっていれば 1、控えか設定のファイルが読めなければ 2（#2401）。"""
+    snap, bad, path = user_config_snapshot(), [], Path(a.dir) / USER_CONFIG_FILE
+    before = _read_user_config(path, bad, _json) if path.is_file() else bad.append(f"{path}: 控えが無い")
+    bad += snap.unreadable
+    if bad:
+        _config_out("stopped", f"利用者の設定と控えを比べられない（{'; '.join(bad)}）", bad, len(snap.items), 2)
+    items = _env_items(before, snap.items)
+    head = ", ".join(f"{i['name']}: {i['before'] or '無し'} → {i['after'] or '無し'}" for i in items[:3])
+    summary = f"利用者の設定ディレクトリが変わった（{len(items)} 件: {head}）" if items else "利用者の設定ディレクトリは変わっていない"
+    _config_out("stopped" if items else "ok", summary, items, len(snap.items), unchanged=not items, changed=len(items))
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="release-verification-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -380,6 +420,12 @@ def build_parser():
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin）")
     p.add_argument("--runtimes", default="claude,codex", help="カンマ区切り（claude,codex）")
     p.set_defaults(func=cmd_verify_install)
+    p = sub.add_parser("user-config-save", parents=[common_parser()], help="利用者の設定ディレクトリの控えを取る（読むだけ）")
+    p.add_argument("--dir", required=True, help=f"控え（{USER_CONFIG_FILE}）を置くディレクトリ")
+    p.set_defaults(func=cmd_user_config_save)
+    p = sub.add_parser("user-config-check", parents=[common_parser()], help="控えと今の利用者の設定ディレクトリを比べる")
+    p.add_argument("--dir", required=True, help=f"user-config-save が控え（{USER_CONFIG_FILE}）を置いたディレクトリ")
+    p.set_defaults(func=cmd_user_config_check)
     return ap
 
 

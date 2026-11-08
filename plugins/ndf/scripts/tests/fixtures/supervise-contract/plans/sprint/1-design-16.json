@@ -8,8 +8,8 @@
   "branch": "design/issue-16",
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
-  "規則": "設計の cross-review は上限 3 ラウンドで設計承認ゲートへ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
-  "上限": 19,
+  "規則": "設計の cross-review は上限 3 ラウンドで打ち切る（収束を待たない）。上限に達して未解決の指摘が 0 件なら、収束と同じ経路（直しの取り込み → 仕様のコピーの照合 → 用語チェック）を通って gate。未解決が残れば解決のフロー（直し → 再レビュー）を回し、解決できない（review-settled の判定）か駆動そのものが失敗したら gate。",
+  "上限": 35,
   "steps": [
     {
       "id": "glossary",
@@ -84,29 +84,76 @@
       "next": "review"
     },
     {
-      "id": "review",
       "type": "drive",
-      "drive": "cross-review",
-      "kind": "ドキュメントレビュー",
       "stage": "ドキュメントレビュー",
       "timeout": 3600,
+      "id": "review",
+      "drive": "cross-review",
+      "kind": "ドキュメントレビュー",
       "args": "{pr}",
+      "on_exit": {
+        "6": "review-settled"
+      },
       "on_fail": "ready",
       "next": "sync-review"
     },
     {
-      "id": "sync-review",
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 120,
+      "id": "review-settled",
+      "cmd": "python3 <NDF>/scripts/supervise.py review-settled --state {state_dir}/state.json --step review --fix-step resolve --max-attempts 2 --max-cost 1.5 --max-seconds 3600",
+      "on_exit": {
+        "1": "resolve-sync",
+        "2": "ready"
+      },
+      "on_fail": "ready",
+      "next": "sync-review"
+    },
+    {
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "id": "resolve-sync",
+      "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+      "on_fail": "ready",
+      "next": "resolve"
+    },
+    {
+      "id": "resolve",
+      "type": "work",
+      "kind": "修正",
+      "stage": "ドキュメントレビュー",
+      "inputs": [
+        "review"
+      ],
+      "timeout": 1800,
+      "prompt": "cross-review が上限のラウンドで終わり、未解決の指摘が残った。review の報告（結果の items[0].report）が示す未解決の指摘を直してコミットする（push しない）。直せない指摘は理由を PR のスレッドへ返信する。",
+      "on_fail": "ready",
+      "next": "push-resolve"
+    },
+    {
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 300,
+      "id": "push-resolve",
+      "cmd": "git push -q && bash <NDF>/scripts/pr-body-decisions.sh sync {pr} && python3 <NDF>/scripts/supervise.py sync-title --pr {pr} --doc issues/issue-16-design.md",
+      "on_fail": "ready",
+      "next": "review"
+    },
+    {
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "id": "sync-review",
       "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
       "next": "requirements-recheck"
     },
     {
-      "id": "requirements-recheck",
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 120,
+      "id": "requirements-recheck",
       "cmd": "python3 <NDF>/scripts/spec-copy.py check 16 issues/issue-16-requirements.md",
       "next": "survey-check"
     },

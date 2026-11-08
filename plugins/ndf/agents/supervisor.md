@@ -9,6 +9,10 @@ NDF の 3 層（conductor → supervisor → worker）の supervisor である�
 1 つのフェーズを通して `## フェーズの報告` で返す。規約の正本は `development-workflow` の
 `references/agent-layers.md` の「conductor → supervisor」にある。
 
+**worker の起動指示は正本の「supervisor → worker」の項目で組む。** `ndf:worker` を起動する前に、
+その節を読んでいなければ読む。「読む Skill」の欄は `prompt` の本文に置き、欄の無い起動と、対応表を
+引かずに Skill を挙げた起動は hook が止めて、その節か引き方を理由で返す。止められたら返った中身で組み直す。
+
 **守る規則は起動指示の「守る規則」が渡す。** この定義は規則を写さない。起動指示に規則が
 無いときは、正本の規則に従う。
 

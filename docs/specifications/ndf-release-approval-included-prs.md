@@ -2,16 +2,17 @@
 
 ## 概要
 
-**範囲の PR は、直前の正式版のタグから終点までにベースブランチへ merge commit か squash merge で入った PR と、そのうち
+**範囲の PR は、直前の正式版のタグから範囲の終点（出す版のコミット）までにベースブランチへ merge commit か squash merge で入った PR と、そのうち
 merge commit で入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR（スプリント経由の PR）の和である。**
 版上げの PR（head が `release/` で始まる PR）と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は外す。
 `release-steps.py` の `approval-facts`・`changelog`・`notes`・`changed-plugins` は、この範囲の PR と `--prs` の和を材料にする。
 求めるのは [`release_lib/included.py`](../../plugins/ndf/scripts/release_lib/included.py) の `release_range` だけである。
+範囲の PR に無い `--prs` の番号は、マージコミットが範囲の終点の祖先にあるときだけ載せる（マージされていない番号は今のとおり状態つきで扱う）。
 
 | コマンド | 終点 | 範囲の PR をどう使うか |
 | --- | --- | --- |
 | `approval-facts` | 承認したコミット（打った時点の `origin/<base>` の 40 桁） | 「含む PR」に番号の昇順で 1 行ずつ並べ、スプリント経由と利用者向けの変化なしの印を付ける |
-| `changelog`・`notes`（`--approval` なし） | `origin/<base>`（`git fetch` の後） | CHANGELOG の版の節の箇条にする。スプリント経由の PR と利用者向けの変化なしの PR は箇条にしない |
+| `changelog`・`notes`（`--approval` なし） | worktree の先頭（`HEAD`。本番のプランでは承認したコミットから作ったリリースのブランチの先頭） | CHANGELOG の版の節の箇条にする。スプリント経由の PR と利用者向けの変化なしの PR は箇条にしない |
 | `notes --approval` | — （範囲を求め直さない） | 承認資料の「含む PR」の欄から番号と経由の印を読み、「配る中身」「未検証・残る危険」「移行の手順」を書く |
 | `changed-plugins --prs` | `HEAD`（起点は `--since` か前のタグ） | 範囲の PR の本文から他のプラグインの上げ幅の候補を出す |
 
@@ -31,7 +32,7 @@ merge commit で入った PR の 2 つ目の親の側（スプリントブラン
 の `approval-facts`・`changelog`・`notes`・`changed-plugins` の項を読む。承認したコミットそのものの扱いは [ndf-release-approved-commit.md](ndf-release-approved-commit.md) が、
 承認資料の `## 検査の結果` と `## 未検証・残る危険` の材料は [ndf-release-approval-materials.md](ndf-release-approval-materials.md) が持つ。
 
-決定の番号は、1〜6 が #1274 の設計、7〜10 が #1885（#1686 #1488 を取り込んだ）の設計の番号である。
+決定の番号は、1〜6 が #1274 の設計、7〜10 が #1885（#1686 #1488 を取り込んだ）の設計、11〜13 が #2555 の設計の番号である。
 
 ## 用語
 
@@ -67,6 +68,9 @@ merge commit で入った PR の 2 つ目の親の側（スプリントブラン
 | 8 | スプリント経由の PR は `merges_in` と別の関数（`nested_merges`）で拾い、件名 `Merge pull request #N` だけを読む | first-parent を外すと、`merges_in` を使う `check-trigger.py` の検査の起動の範囲まで変わる。2 つ目の親の側の squash の件名 `(#N)` は課題番号を指すことが多い | スプリント PR の本文の「集めた実装の PR」を読む（本文は書き換えられるが、git の履歴は入った事実である） |
 | 9 | スプリント経由の PR の変化と移行の手順はスプリント PR の本文に任せ、危険だけを足す | スプリント PR の本文は `pr_materials.collect_changes` が実装 PR から変化と移行の手順を集めて持つ。危険は集めないため実装 PR から読む | 箇条の文面の一致で重複を消す（`（#n）` の付き方と文面の差で一致しなくなり、#1637 の重複が戻る） |
 | 10 | `## 利用者向けの変化` が「無し」か「なし」だけの PR（利用者向けの変化なし）を CHANGELOG の版の節と「配る中身」から外し、「含む PR」に印を付ける。節の無い本文は今どおり題名で代える | CHANGELOG は利用者が版を選ぶ文書で、リリース対象の外の変更は判断に効かない。判定の語は `section_items` が箇条なしとする語（`NO_ITEMS`）と同じにする。節の無い本文まで外すと書き忘れを黙って落とす | PR のラベルや変えたパスで決める（本文の節は `/ndf:pr` が必ず書かせており、書き手の判断が入る唯一の場所である） |
+| 11 | `changelog`・`notes` の範囲の終点を worktree の先頭、`approval-facts` の終点を承認に出すコミットにし、`section_range` の引数で渡す。範囲の外の `--prs` は終点の祖先にあるものだけを載せる（`drop_outside`） | 終点を `origin/<base>` にすると、承認したコミットより後にベースブランチへ入った PR が、リリースタグに入らないまま版の節と GitHub Release に載る（10.27.21 の #2542・#2543）。前のリリースタグからリリースするコミットまでを範囲にするのは git-cliff・release-please・semantic-release と同じ形である | 終点を承認資料の「承認したコミット」から読む（開発版のプランには承認資料が無く、決め方が 2 通りに分かれる）。範囲の計算を git-cliff へ置き換える |
+| 12 | リリースタグ `<プラグイン>--v<基底の版>` のある版の節へは、`changelog`・`notes` が書き込む前に 3 で止まる | 書き飛ばすと、版の上げの誤り（リリースタグのある版を基底にした開発版）が誤った版数のまま配られる。後から足した行はタグの中身と食い違う（10.27.2 の #2279・#2283・#2290） | 書き込みを飛ばして続ける |
+| 13 | 正式版の `changelog` は、前のリリースタグの版より新しく出す版より古い、リリースタグの無い版の節を消す | その節の箇条は前のリリースタグから出す版のコミットまでの範囲に必ず入り、同じ実行で正式版の節に並ぶ。Keep a Changelog が未リリースの節をリリース時に版の節へ移すのと同じ結果になる | 開発版の節を 1 つの未リリースの節にまとめる（版の節の見出しと開発版の版数の対応が変わる） |
 
 ## 仕様
 
@@ -76,9 +80,9 @@ merge commit で入った PR の 2 つ目の親の側（スプリントブラン
 | --- | --- |
 | `plugins/ndf/scripts/lib/merged_range.py` | `<起点>..<終点>` の first-parent のログから、merge commit（件名 `Merge pull request #N from <owner>/<branch>`、親が 2 つ）と squash merge（件名の末尾 `(#N)`、親が 1 つ）で入った PR を `Merge(sha, number, branch)` で返す（`merges_in`）。squash の head は GitHub からまとめて読む（`with_heads`）。`nested_merges` は merge commit の `<sha>^1..<sha>^2` の first-parent のログから、merge commit で入った PR だけを返す（squash の `Merge` には空）。**外す規則は持たない** |
 | `plugins/ndf/scripts/lib/gh_sections.py` の `says_none` | 節があり、箇条が `NO_ITEMS`（「無し」・「なし」）だけかを返す。節が無い・空の節は偽 |
-| `plugins/ndf/scripts/release_lib/included.py` | 範囲の PR（`release_range` が `IncludedPr(number, via)` の列を返す。`release/` の外しは入れ子の PR にも当てる）・`--prs` との和（`with_extra` / `included_prs`）・CHANGELOG の版の節の候補（`section_range`）・「含む PR」の行と印（`included_row`・定数 `VIA`・`NO_CHANGE`）と読み取り（`read_included` / `read_included_rows`）・PR の中身のまとめ読み（`pr_fields` / `read_prs`）・利用者向けの変化なしの判定（`no_change`）・版の節の箇条（`titles_of`）と配る中身・危険・移行の手順（`notes_of`） |
-| `release-steps.py approval-facts` | 「含む PR」・結果 JSON の `kind: pr` の items（`via`・`no_change` を足した）・要約の件数を、組み立てた集合から書く |
-| `release-steps.py changelog`・`notes` | `section_prs` で候補を決め、`changelog` は版の節に無い番号だけを挿し、`notes` は版の節を候補から書き直す。`changelog` の `metrics` に `range`（候補の数）と `since`（前のタグ）を足した |
+| `plugins/ndf/scripts/release_lib/included.py` | 範囲の PR（`release_range` が `IncludedPr(number, via)` の列を返す。`release/` の外しは入れ子の PR にも当てる）・`--prs` との和（`with_extra` / `included_prs`）・CHANGELOG の版の節の候補（`section_range`。範囲の終点を引数で受け、和と範囲の外の `--prs` を返す）・終点に入っていない `--prs` の外し（`drop_outside`）・「含む PR」の行と印（`included_row`・定数 `VIA`・`NO_CHANGE`）と読み取り（`read_included` / `read_included_rows`）・PR の中身のまとめ読み（`pr_fields` / `read_prs`）・利用者向けの変化なしの判定（`no_change`）・版の節の箇条（`titles_of`）と配る中身・危険・移行の手順（`notes_of`） |
+| `release-steps.py approval-facts` | 承認に出すコミットを範囲の終点にして、「含む PR」・結果 JSON の `kind: pr` の items（`via`・`no_change` を足した）・要約の件数を、組み立てた集合から書く |
+| `release-steps.py changelog`・`notes` | `section_prs` で候補を決め（タグを fetch し、終点は `HEAD`）、終点に入っていない `--prs` を外して `items`（`reason` が「範囲の終点に入っていない」）と `metrics.outside` に出す。`changelog` は版の節に無い番号だけを挿し、`notes` は版の節を候補から書き直す。`changelog` の `metrics` に `range`（候補の数）と `since`（前のタグ）を足した。リリースタグのある版の節へは書かずに 3 で止まり（`names.require_untagged`）、正式版の `changelog` はタグの無い途中の版の節を消して `result: removed` の items に出す（`names.drop_untagged_sections`） |
 | `release-steps.py notes --approval` | 承認資料の「含む PR」の番号と経由から「配る中身」「未検証・残る危険」「移行の手順」を書く |
 | `release-steps.py changed-plugins` | `--prs` があれば、範囲の PR と `--prs` の和の本文（`pr_fields`）から上げ幅の候補を出す（`changed.candidate_rows`） |
 | `check-trigger.py` | 拾い出しを `merged_range.merges_in`・`with_heads` へ任せ、外す規則（`SKIP_BRANCHES`・記録の番号）・点数・行数は自分で持つ。`nested_merges` は使わない |
@@ -104,7 +108,7 @@ graph TD
 
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
-| I1 | 「含む PR」と CHANGELOG の版の節の候補は、範囲の PR と `--prs` の和である。同じ番号は 1 つだけ並ぶ。範囲にある番号は範囲の経由を保つ | テストが落とす |
+| I1 | 「含む PR」と CHANGELOG の版の節の候補は、範囲の PR と `--prs` の和から、マージコミットが範囲の終点の祖先でない `--prs` の番号を除いたものである。同じ番号は 1 つだけ並ぶ。範囲にある番号は範囲の経由を保ち、祖先の確かめを打たない | テストが落とす |
 | I2 | 範囲の PR は、`<前のタグ>..<終点>` の first-parent のログで merge commit か squash merge として入った PR と、その merge commit の `^1..^2` の first-parent のログで merge commit として入った PR の和から、版上げの PR と PR でない番号を除いたものである | テストが落とす |
 | I3 | `merged_range.merges_in` の返す値は入れ子のマージを含まない（`check-trigger.py` の起動の範囲は変わらない） | テストが落とす |
 | I4 | 「含む PR」の終点は承認したコミットで、compare の URL・変更量・`approved_sha` と同じ範囲である。この 3 つの値は範囲の PR の数に左右されない | テストが落とす |
@@ -115,6 +119,8 @@ graph TD
 | I9 | 結果 JSON の `kind: pr` の items と要約の「PR N 件」は、「含む PR」の行と同じ番号・同じ件数である | テストが落とす |
 | I10 | 1 つのコマンドの中で、範囲の PR の中身を GitHub から 100 件ずつ 1 回でまとめて読む（`pr_fields`）。まとめて読めない・PR でない番号が混ざるときだけ PR ごとの `gh pr view` へ倒す | テストが落とす |
 | I11 | 範囲の PR を集められないとき（git のログ・GitHub の読み取りの失敗）、承認資料と CHANGELOG を書かない | 0 以外で止まり、既存のファイルはそのまま残る |
+| I12 | `changelog`・`notes` はリリースタグのある版の節を書き換えない | 書き込む前に 3 で止まり、`CHANGELOG.md` はそのまま残る |
+| I13 | 正式版の `changelog` の後、前のリリースタグの版より新しく出す版より古い版の節は、すべてリリースタグを持つ | テストが落とす |
 
 ### 部品の失敗の形
 
@@ -124,6 +130,7 @@ graph TD
 | `merged_range.with_heads` | squash の head を読めない: `StepError(…, 1)` |
 | `included.pr_fields` | 例外を投げず `(None, 理由)` を返す。`read_prs` が PR ごとの読み出し（`release-steps.py` の `pr_view`）へ倒し、そちらが `StepError`（失敗は 1・gh が無いと 3・出力を読めないと 2）を投げる |
 | `included.read_included_rows` | 承認資料が無い・欄が無い: `StepError(…, 3)`。`#N` で始まらない行がある: `StepError(…, 2)`。欄が `—` なら空 |
+| `names.require_untagged` | 基底の版のリリースタグがある: `StepError(…, 3)`（理由にタグの名前が入る） |
 | `included.titles_of`・`notes_of` | マージ済みが 0 件: `StepError(…, 3)`（既存の節や欄を空で上書きしない）。出力の題名を読めない: `StepError(…, 2)` |
 
 `check-trigger.py` は `merged_range` の `StepError` を自分の `Stop` へ読み替え、終了コードをそのまま使う。
@@ -136,7 +143,7 @@ graph TD
 ## エラー処理
 
 前のタグが無いとき、`approval-facts` は 3 で止まる（`--prev-tag` を渡して打ち直す）。`changelog`・`notes` は初めての版として
-`--prs` だけを候補にする。配るプラグインが決まらないときも `--prs` だけを候補にし、止めるのは版の節を書く側である。
+`--prs` だけを候補にし、範囲の終点の確かめだけを当てる。配るプラグインが決まらないときとコミットの無いリポジトリでは `--prs` だけを候補にして終点の確かめも当てず、止めるのは版の節を書く側である。
 
 ## 運用
 
@@ -152,7 +159,7 @@ graph TD
 
 ## テスト観点
 
-範囲の PR の組み立てと 4 つのコマンドは `plugins/ndf/scripts/tests/test_release_range.py`、「含む PR」の行と欄は `test_release_included.py`、
+範囲の PR の組み立てと 4 つのコマンドは `plugins/ndf/scripts/tests/test_release_range.py`、「含む PR」の行と欄は `test_release_included.py`、範囲の終点とリリースタグのある版の節は `test_release_section_end.py`、
 検査の側の退行は `test_check_trigger.py` にある。一時の git リポジトリと `gh` の差し替えで再現する。
 
 - タグの後に直接マージ 1 本・スプリントブランチへの実装 PR 2 本（merge commit）・スプリント PR・版上げの PR を置くと、範囲の PR に直接マージとスプリント PR と実装 PR 2 本（経由つき）が入り、版上げの PR が入らないこと（I2）
@@ -166,6 +173,9 @@ graph TD
 - 範囲の外のマージ前の PR を `--prs` に渡すとその行が状態（`OPEN`）つきで並ぶこと。squash の head が `release/` の PR と件名の `(#N)` が課題を指す番号は並ばないこと
 - 結果 JSON の `kind: pr` の items の番号の並びが「含む PR」の行と等しく、要約の件数が items の件数と等しいこと（I9）
 - 「含む PR」に無い PR を `notes --approval --prs` に渡すと 3 で止まり、欄が変わらないこと。範囲の git のログか squash の head の読み取りが失敗すると、承認資料を作らないこと（I8・I11）
+- 承認したコミットからリリースのブランチを作った後にベースブランチへ入った PR は、`--prs` で渡しても版の節と「含む PR」に載らず、`metrics.outside` に出ること。範囲の PR の番号には祖先の確かめを打たないこと（I1・I4）
+- リリースタグのある版を基底にした開発版で `changelog`・`notes` を打つと 3 で止まり、`CHANGELOG.md` が変わらないこと（I12）
+- 正式版の `changelog` がタグの無い途中の版の節を消し、その PR を正式版の節に並べること。開発版では消さないこと（I13）
 - compare の URL・`metrics.files`・`insertions`・`deletions`・`approved_sha` が範囲の PR の数に左右されないこと（I4）。ベースブランチを `develop` 以外にしても同じ結果になること
 
 ## 関連リンク
@@ -173,4 +183,4 @@ graph TD
 - [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)（4 つのコマンドの打ち方・終了コードの正）
 - [`lib/merged_range.py`](../../plugins/ndf/scripts/lib/merged_range.py)・[`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py)・[`release_lib/included.py`](../../plugins/ndf/scripts/release_lib/included.py)・[`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)・[`check-trigger.py`](../../plugins/ndf/scripts/check-trigger.py)・[`supervise_lib/pr_materials.py`](../../plugins/ndf/scripts/supervise_lib/pr_materials.py)
 - [ndf-release-approval-materials.md](ndf-release-approval-materials.md)（承認の材料）・[ndf-release-approved-commit.md](ndf-release-approved-commit.md)（承認したコミット）・[ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md)（作り直しと置き換える箇条）・[ndf-release-readme-update-info.md](ndf-release-readme-update-info.md)（CHANGELOG の版の節の書き方）
-- #1274（「含む PR」の範囲）、#1885（CHANGELOG の版の節と上げ幅の候補の漏れ）、#1686（スプリント経由の PR と利用者向けの変化なし）、#1637（箇条の重複）
+- #1274（「含む PR」の範囲）、#1885（CHANGELOG の版の節と上げ幅の候補の漏れ）、#1686（スプリント経由の PR と利用者向けの変化なし）、#1637（箇条の重複）、#2555（範囲の終点とリリースタグのある版の節）

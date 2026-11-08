@@ -190,6 +190,65 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
     ), None
 
 
+def cmd_review_settled(state: str, step: str, fix_step: str, max_attempts: int, max_cost: float, max_seconds: float) -> tuple[dict, int]:
+    """設計のプランの review-settled（#2388 の決定 1・3）。実行の記録の `log` から、上限到達（終了コード 6）で終わった
+    `step` の未解決の件数と、解決のフロー（`fix_step`）の回数・費用・秒を読み、行き先を終了コードで返す。
+    0 = 未解決 0 件 / 1 = 解決を続ける / 2 = 解決できない（U1 読めない・U2 回数・U3 繰り返し・U4 費用・U5 時間）。"""
+    tool = "review-settled"
+
+    def out(code: int, reason: str | None, why: str, unresolved=None, attempts=0, cost=0.0, seconds=0.0) -> tuple[dict, int]:
+        metrics = {"unresolved": unresolved, "attempts": attempts, "cost": round(cost, 4), "seconds": round(seconds, 1), "reason": reason}
+        head = "" if unresolved is None else f"未解決 {unresolved} 件。"
+        return result(tool, "ok" if code == 0 else "stopped", f"{head}{reason or '解決を続けるか通常の経路'}: {why}", [], metrics), code
+
+    try:
+        log = json.loads(Path(state).read_text()).get("log")
+    except (OSError, ValueError, AttributeError) as e:
+        return out(2, "U1", f"実行の記録を読めない（{e}）")
+    if not isinstance(log, list):
+        return out(2, "U1", "実行の記録に log が無い")
+    log = [e for e in log if isinstance(e, dict)]
+    reviews = [e for e in log if e.get("id") == step]
+    if not reviews:
+        return out(2, "U1", f"{step} の結果が無い")
+    last = reviews[-1]
+    n = (last.get("counts") or {}).get("unresolved")
+    if last.get("exit") != 6:
+        return out(2, "U1", f"{step} の最後の終了コードが 6 でない（{last.get('exit')}）")
+    if not isinstance(n, int) or isinstance(n, bool):
+        return out(2, "U1", f"{step} の未解決の件数を読めない（{n!r}）")
+    fix = fix_totals(log, step, fix_step)
+    vals = {"unresolved": n, "attempts": fix["attempts"], "cost": fix["cost"], "seconds": fix["seconds"]}
+    if n == 0:
+        return out(0, None, "通常の経路へ進む", **vals)
+    if fix["attempts"] >= max_attempts:
+        return out(2, "U2", f"解決のフローの直しが上限 {max_attempts} 回に達した", **vals)
+    if fix["ran"] and len(reviews) >= 2 and isinstance(prev := (reviews[-2].get("counts") or {}).get("unresolved"), int) and n >= prev:
+        return out(2, "U3", f"未解決の件数が減っていない（{prev} → {n}）", **vals)
+    if fix["cost_unknown"] or fix["cost"] > max_cost:
+        return out(2, "U4", f"直しの費用が上限 ${max_cost} を超えたか不明", **vals)
+    if fix["seconds"] > max_seconds:
+        return out(2, "U5", f"解決のフローの秒が上限 {max_seconds} 秒を超えた", **vals)
+    return out(1, None, "解決のフローを続ける", **vals)
+
+
+def fix_totals(log: list[dict], step: str, fix_step: str) -> dict:
+    """解決のフロー（`fix_step`）の集計。attempts は成功した直しの回数、cost は直しの費用の和（`step` の費用は足さない）、
+    seconds は最初の直し以降の `step` と `fix_step` の秒の和。ran は直しが 1 度でも記録にあるか。"""
+    fixes = [e for e in log if e.get("id") == fix_step]
+    llms = [e.get("llm") or {} for e in fixes]
+    first = next((i for i, e in enumerate(log) if e.get("id") == fix_step), None)
+    return {
+        "ran": bool(fixes),
+        "attempts": sum(1 for e in fixes if e.get("exit") == 0),
+        "cost": sum(float(m.get("cost") or 0.0) for m in llms),
+        "seconds": sum(
+            float(e.get("seconds") or 0.0) for e in (log[first:] if first is not None else []) if e.get("id") in (step, fix_step)
+        ),
+        "cost_unknown": any(m.get("cost_unknown") for m in llms),
+    }
+
+
 def note_row(report: str, next_text: str) -> str:
     def field(name: str) -> str:
         return report_fields.report_field(report, name)
