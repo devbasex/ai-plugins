@@ -21,7 +21,7 @@ import runtime_policy
 import slow_step as ss
 import stage_skills
 import step_result
-from supervise_lib import decl, limits, paths
+from supervise_lib import decl, limits, paths, rerun
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeholders, normalize_plan, on_exit_error
@@ -355,6 +355,8 @@ class Engine:
         if dec == "gate":
             return None, "関門", d.get("reason", "")
         if dec in self.steps:
+            if why := rerun.stop_reason(self.state, dec):
+                return None, "止まった", why
             self.gh_limit_wait(dec)
             return dec, None, None
         return None, "止まった", f"判断が知らない値を返した: {dec}"
