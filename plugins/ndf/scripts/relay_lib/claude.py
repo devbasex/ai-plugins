@@ -11,6 +11,7 @@ import sys
 import time
 
 from .common import PluginInfo, config_dir, data_dir, env_num, launcher_path, parse_iso
+from .session_env import DROP_ENV  # handover と login も claude から読む
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
 from claude_settings import metered_settings  # noqa: E402,F401  区間の引数へ宣言を足す（#1543。run.py が呼ぶ）
@@ -131,8 +132,6 @@ SECTION_FLAGS = {
     "-w",
     "--worktree",
 }
-# 子へ継がせない Claude Code の環境変数（中から起こしたプロセスが継ぐもの）
-DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")
 
 
 def _is_self(path: str) -> bool:
