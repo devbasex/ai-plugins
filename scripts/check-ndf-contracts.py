@@ -385,6 +385,50 @@ def allow_ratchet(root: Path, allow_dir: Path, allow, base_arg: str | None) -> t
     return added, base, state
 
 
+def _render(c: Contracts, root: Path) -> int:
+    """逆引き（`INDEX`）を書き直す（`--render`）。"""
+    text, idx = render(c), root / INDEX
+    changed = not idx.is_file() or idx.read_text(encoding="utf-8") != text
+    if changed:
+        idx.write_text(text, encoding="utf-8")
+    emit(
+        "ok",
+        "逆引きを書き直した" if changed else "逆引きは変わらない",
+        [{"path": INDEX, "result": "changed" if changed else "unchanged"}],
+        {},
+    )
+    return 0
+
+
+def _draft(ck: Checker, root: Path, path: str) -> int:
+    """エントリポイントの項目の下書きを標準出力へ出す（`--draft`）。"""
+    rel = Path(path).resolve().relative_to(root).as_posix() if Path(path).is_absolute() else path
+    if rel not in candidates(root) or not is_entry(root, rel):
+        emit("stopped", f"エントリポイントでない: {rel}", [], {})
+        return 2
+    print(json.dumps(ck.draft(rel), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _ratchet_and_core(root: Path, allow_dir: Path, allow, base_arg: str | None, c: Contracts) -> tuple[list[dict], str | None, str]:
+    """例外リストのラチェットと、runtime の印のベースブランチとの比較で足す違反・起点・状態を返す。
+    CI の中で起点が決まらないときは RatchetError をそのまま投げる。"""
+    try:
+        added, base, state = allow_ratchet(root, allow_dir, allow, base_arg)
+    except ratchet.RatchetError:
+        if os.environ.get("CI"):
+            raise
+        return [], None, "skipped"
+    if base and state == "checked" and ratchet.base_knows(root, base.rsplit("@", 1)[1], "core-exempt"):
+        n = core_checks.base_runtime_count(root, base.rsplit("@", 1)[1])
+        now = sum(1 for e in c.entrypoints.values() if core_exempt(e) == "runtime")
+        if n is not None and now > n:
+            added.append(
+                v("core-exempt", CONTRACTS, "runtime", f"runtime の印がベースブランチより増えた（{n} → {now}）。承認ゲートで人が見る")
+            )
+    return added, base, state
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
@@ -403,43 +447,19 @@ def main(argv: list[str] | None = None) -> int:
         emit("stopped", str(e), [], {})
         return 2
     if a.render:
-        text, idx = render(c), root / INDEX
-        changed = not idx.is_file() or idx.read_text(encoding="utf-8") != text
-        if changed:
-            idx.write_text(text, encoding="utf-8")
-        emit(
-            "ok",
-            "逆引きを書き直した" if changed else "逆引きは変わらない",
-            [{"path": INDEX, "result": "changed" if changed else "unchanged"}],
-            {},
-        )
-        return 0
+        return _render(c, root)
     ck = Checker(root, c)
     if a.draft:
-        rel = Path(a.draft).resolve().relative_to(root).as_posix() if Path(a.draft).is_absolute() else a.draft
-        if rel not in candidates(root) or not is_entry(root, rel):
-            emit("stopped", f"エントリポイントでない: {rel}", [], {})
-            return 2
-        print(json.dumps(ck.draft(rel), ensure_ascii=False, indent=2))
-        return 0
+        return _draft(ck, root, a.draft)
     found, metrics = ck.run()
     targets = {rel_target(root, t) for t in a.files}
     items, allowed, outside = judge(root, found, allow, targets, ck.reached)
     try:
-        added, base, state = allow_ratchet(root, allow_dir, allow, a.base)
+        added, base, state = _ratchet_and_core(root, allow_dir, allow, a.base, c)
     except ratchet.RatchetError as e:
-        if os.environ.get("CI"):
-            emit("stopped", str(e), [], metrics)
-            return 3
-        added, base, state = [], None, "skipped"
+        emit("stopped", str(e), [], metrics)
+        return 3
     items.extend(added)
-    if base and state == "checked" and ratchet.base_knows(root, base.rsplit("@", 1)[1], "core-exempt"):
-        n = core_checks.base_runtime_count(root, base.rsplit("@", 1)[1])
-        now = sum(1 for e in c.entrypoints.values() if core_exempt(e) == "runtime")
-        if n is not None and now > n:
-            items.append(
-                v("core-exempt", CONTRACTS, "runtime", f"runtime の印がベースブランチより増えた（{n} → {now}）。承認ゲートで人が見る")
-            )
     metrics.update(allowed=allowed, violations=len(items), base=base, ratchet=state)
     if targets:
         metrics.update(targets=len(targets), outside=outside)
