@@ -7,6 +7,7 @@
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],
   "awaiting": [
+    {"name": "repo-secrets-check", "reason": "秘密・.env・インフラの定義の検査（#2169 の境界の検査から #2646 で factory/ に依存しない種類を残したもの）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
     {"name": "ndf-contracts-check", "reason": "エントリポイントの契約の一覧の構造チェック（#2336）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
   ]
 }

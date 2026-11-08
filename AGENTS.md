@@ -104,6 +104,7 @@
 - 認証情報は環境変数で管理
 - `.env.example`でテンプレートを提供
 - `.gitignore`に機密ファイルを追加
+- 秘密らしい値・`.env` の実ファイル・インフラの定義は `python3 scripts/check-repo-secrets.py`（CI のジョブ `repo-secrets-check`）が落とす。テストの偽の値は `scripts/repo-secrets-allow.json` へ足す
 
 ### 最小限のコード実装
 - 要件を満たす最小限のコードのみを記述

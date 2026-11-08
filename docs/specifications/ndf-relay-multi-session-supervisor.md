@@ -350,7 +350,6 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 | tmux が無いと 2 本目は前景で動く | 同上の `test_no_tmux_runs_second_in_foreground` |
 | 1 本目と名前の無い `stop` の振る舞いが変わらない | `plugins/ndf/scripts/tests/test_relay.py` の既存のテスト一式 |
 | 新しい環境変数が契約に宣言されている | 契約の検査（`python3 scripts/check-ndf-contracts.py`） |
-| `plugins/` から `factory/` を参照しない | `python3 scripts/check-service-boundary.py` が 0 で終わる |
 | 実際の端末エミュレータで tmux の画面が崩れず、キー入力が claude に届く | リリース後テストで人が見る（端末が既に tmux の中なら `TMUX` を外して入れ子で結び付く） |
 
 ## 関連リンク

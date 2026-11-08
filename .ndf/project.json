@@ -125,6 +125,16 @@
         ]
       },
       {
+        "name": "repo-secrets-check",
+        "runner": "check-repo-secrets",
+        "kind": "lint",
+        "command": "python3 scripts/check-repo-secrets.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#repo-secrets-check"
+        ]
+      },
+      {
         "name": "runtime-plugin-validate",
         "runner": "validate-runtime-plugins",
         "kind": "lint",
