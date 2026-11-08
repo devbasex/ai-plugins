@@ -56,7 +56,7 @@ IMPL_RULES = (
 
 
 GLOSSARY_RULE = f"- 文書に語を足したら `{GLOSSARY_PY} check --file <文書>` を打ち、新しい語は用語集へ足す"
-DESIGN_DOCS_LINE = "設計文書: {docs}（決定の記録と「設計の結果」を読んでから実装する）"
+DESIGN_DOCS_LINE = "設計文書: {docs}（載せた文書をすべて読んでから実装する）"
 
 
 def impl_prompt(a) -> str:
