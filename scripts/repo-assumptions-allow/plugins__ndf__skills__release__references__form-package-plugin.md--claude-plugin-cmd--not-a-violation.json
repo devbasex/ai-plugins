@@ -3,5 +3,5 @@
   "name": "claude-plugin-cmd",
   "kind": "not-a-violation",
   "reason": "リリースの形がプラグインのときだけ読む参照。形で分岐済み",
-  "count": 9
+  "count": 8
 }

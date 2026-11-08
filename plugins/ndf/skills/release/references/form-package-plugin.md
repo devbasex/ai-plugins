@@ -231,14 +231,12 @@ CD のワークフローはこのコマンドを呼び、CD を外したとき�
 
 `delivery` の行が `publishes_release: true` なら CD が作り、無ければ `release --channel prod` が同じ処理で作る。
 
-手で打つときの形:
+手で打つときの形（`claude plugin tag` で手元の HEAD へ打たない。CD の公開が別のコミットを指すタグで止まる）:
 
 ```bash
-claude plugin tag <アーティファクトのディレクトリ> --dry-run   # 打つ内容を確認する
-claude plugin tag <アーティファクトのディレクトリ> --push      # {名前}--v{版} を作って送る
+python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <本番チャネルのコミット>
 ```
 
-**`plugin.json` の版とマーケットプレイスの項目が食い違っていないかを、打つ前にチェックする。**
 タグは起点の決定（この文書の前半）と、利用者が過去の版へ戻るときの目印を兼ねる。
 
 ### リリース完了を確認する

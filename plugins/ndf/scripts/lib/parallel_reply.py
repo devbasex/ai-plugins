@@ -37,7 +37,7 @@ class AnswerRouting:
 
     def replace_same(self, msg: dict) -> dict:
         """同じ行の設計の承認の問い（`lane` か `loop` と `pr` が同じで id が違う）を一覧から外し、`replaced` に引き継ぐ（I11）。"""
-        if msg.get("kind") != "gate1":
+        if msg.get("kind") != "gate1" or not self.routed:  # 古い記録の打ち直しは置き換えずに従来どおり両方を残す
             return msg
         owner = "loop" if msg.get("loop") else "lane"
         old = [q for q in self.questions if q.get("kind") == "gate1" and q.get(owner) == msg.get(owner) and q.get("pr") == msg.get("pr")]

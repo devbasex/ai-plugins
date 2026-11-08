@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: release-cd
   cancel-in-progress: false
+  queue: max  # 待ちの実行を後続の push で取り消さない（取り消すとその版のタグと GitHub Release が作られない）
 
 jobs:
   publish:
