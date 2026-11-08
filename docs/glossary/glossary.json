@@ -4412,25 +4412,25 @@
       "term": "Neural Development Factory",
       "context": "ndf-factory",
       "meaning": "NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う",
-      "source": "docs/specifications/ndf-factory-service-boundary.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "ランナー",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム",
-      "source": "docs/specifications/ndf-factory-service-boundary.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "実行ジョブ",
       "context": "ndf-factory",
       "meaning": "実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる",
-      "source": "docs/specifications/ndf-factory-service-boundary.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "進捗の事象",
       "context": "ndf-factory",
       "meaning": "ランナーがサービスへ送る 1 件の出来事。サービスは追記だけで持つ",
-      "source": "docs/specifications/ndf-factory-service-boundary.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "依存グループ",
@@ -4508,7 +4508,7 @@
       "term": "予算の反映",
       "context": "ndf-workflow",
       "meaning": "開発ループの記録の予算を、渡した単位の値で上書きすること（`sprint-state.py loop budget`）。変わったときだけ予算の履歴に 1 行足し、止まった記録の解除や周回の締めを伴わない",
-      "pending_source": "issues/issue-2405-design.md"
+      "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "予算の既定",
@@ -4526,13 +4526,13 @@
       "term": "予算の履歴",
       "context": "ndf-workflow",
       "meaning": "開発ループの記録が持つ、予算の上書きの記録（`budget_history`）。予算が変わったときだけ、時刻・前の値・後の値の 1 行を足す",
-      "pending_source": "issues/issue-2405-design.md"
+      "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "人の判断待ちの行",
       "context": "ndf-workflow",
       "meaning": "開発ループの記録が持つ、人の答え（承認・差し戻し・直して出し直す）を待つ課題の行（`waiting`）。`sprint-state.py loop answer` で答えを書く。着手の前の課題の状態を指す「人の判断待ち」とは別の語",
-      "pending_source": "issues/issue-2405-design.md"
+      "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "問い合わせの区分",
@@ -4889,7 +4889,7 @@
       "term": "区間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る",
-      "source": "docs/specifications/ndf-factory-dev-loops.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "差分の棚卸し",
@@ -5535,7 +5535,7 @@
       "term": "リリースの実行",
       "context": "ndf-factory",
       "meaning": "Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで",
-      "source": "docs/specifications/ndf-factory-organizer.md",
+      "source": "docs/specifications/ndf-parallel-organizer.md",
       "deprecated": [
         "配布の実行"
       ]
