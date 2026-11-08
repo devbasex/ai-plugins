@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import claude_account_dir as account_files
+import limits
 from claude_usage import Usage, epoch, get_usage, iso_utc, refresh_oauth
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
@@ -71,11 +72,10 @@ USAGE_FILE = "usage.json"
 CRED_FILE = ".credentials.json"
 LOCKS_DIR = ".locks"
 REFRESH_LOCK = ".oauth_refresh.lock"  # claude と同じ更新の排他（設定ディレクトリの中のディレクトリ）
-EXPIRY_MARGIN = 60.0  # 残りがこの秒数以下のアクセストークンは期限切れとみなす
-REFRESH_TIMEOUT = 3.0  # 更新の排他の中の宛先の待ちの上限（秒。#1576 の決定 12）
+EXPIRY_MARGIN = limits.seconds("claude-accounts.expiry-margin")  # 残りがこの秒数以下のアクセストークンは期限切れとみなす
 OLD_LOCK_AGE = 60.0  # 置き場の直下の古い形の排他ファイルを消す古さ（秒。これより新しいものは古い版が使っている）
 AUTH_FAILED_HOLD = 3600.0  # 認証の失敗の観測を候補から外す秒数（#1576 の決定 13。仮の値）
-LOCK_WAIT = 30.0
+REFRESH_TIMEOUT, LOCK_WAIT = limits.seconds("claude-accounts.refresh"), limits.seconds("claude-accounts.lock")  # #1576 の決定 12
 NO_RESET_HOLD = 5 * 3600.0  # リセット時刻の読めない上限の観測を候補から外す秒数
 # 枠の大きさの対応表（`rateLimitTier` → 枠ごとの USD 換算）。根拠は issues/old/relay-capacity-estimate-2026-09-28.md。
 # Max 5x の週の枠は非公式の比（1,100 × 3.5 / 6）による仮の値（#1453 の決定 1）。表に無い tier は宣言だけで決まる
@@ -808,11 +808,24 @@ def account_env(name: str, base: dict, note=None) -> dict | None:
 
 def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
     """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。
-
-    アカウントの子の中（`NDF_SHARED_CONFIG_DIR` がある）なら、`CLAUDE_CONFIG_DIR` を元の値へ戻し（元に無ければ外し）、
-    NDF が足したプラグインの置き場の変数を外す。"""
+    親のアカウントの環境は `leave_account` が元の値へ戻す。"""
     for k in STRIPPED_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
+    leave_account(env)
+    env.update(declared)
+    env[NAME_ENV] = METERED
+    return env
+
+
+def leave_account(env) -> None:
+    """`env` から親のアカウントの環境を外し、元の値へ戻す（その場で書き換える。#2656 の決定 5）。
+
+    親が従量の接続（`NDF_CLAUDE_ACCOUNT=metered`）なら、名前を外す前に、そのとき読める宣言のキーを外す。
+    アカウントの子の中（`NDF_SHARED_CONFIG_DIR` がある）なら、`CLAUDE_CONFIG_DIR` を元の値へ戻し（元に無ければ外し）、
+    NDF が足したプラグインの置き場の変数を外す。読めない宣言は無いものとして扱い、例外を出さない。"""
+    if env.get(NAME_ENV) == METERED:
+        for k in fallback_env(env):
+            env.pop(k, None)
     if SHARED_ENV in env:
         shared = shared_dir(env)
         orig = env.pop(SHARED_ENV)
@@ -822,9 +835,7 @@ def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
             env.pop(CONFIG_ENV, None)
         if env.get(PLUGIN_CACHE_ENV) == os.path.join(shared, "plugins"):
             env.pop(PLUGIN_CACHE_ENV)
-    env.update(declared)
-    env[NAME_ENV] = METERED
-    return env
+    env.pop(NAME_ENV, None)
 
 
 def _account_env(env: dict, declared: dict, name: str) -> dict:

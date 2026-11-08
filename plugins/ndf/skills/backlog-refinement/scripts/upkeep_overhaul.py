@@ -20,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 import clock
+import limits
 import jsonio
 from step_result import EXIT_UNREADABLE, StepError, emit, git_root, result
 import upkeep_depth as D
@@ -122,7 +123,14 @@ def measure_code(root) -> tuple[list[dict], bool]:
     out = []
     for m in rows:
         try:
-            p = subprocess.run(m["command"], shell=True, cwd=str(root), capture_output=True, text=True, timeout=600)
+            p = subprocess.run(
+                m["command"],
+                shell=True,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=limits.seconds("backlog-refinement.overhaul-command"),
+            )
             out.append({"name": m.get("name"), "types": m.get("types") or [], "code": p.returncode, "value": p.stdout.strip()[-2000:]})
         except (OSError, subprocess.SubprocessError, KeyError) as e:
             out.append({"name": m.get("name"), "types": m.get("types") or [], "code": None, "error": str(e)})

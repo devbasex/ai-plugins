@@ -275,7 +275,7 @@ def estimate_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    deps.require("schema")
+    deps.require("schema", "waits")  # waits は supervise_lib.paths の worktree の作成が使う
     import estimate_records as er
     import schema
     from step_result import emit, result

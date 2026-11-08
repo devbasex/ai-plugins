@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import limits
 import legacy_values
 import parallel_plan as pp
 from parallel_files import RELAY
@@ -80,7 +81,7 @@ def poll_seconds() -> float:
         return 60.0
 
 
-STALL_MINUTES = 60  # 動かないレーンを問うまでの分（設計の失敗の 3 番の既定）
+STALL_MINUTES = int(limits.seconds("parallel-repo.stall") // 60)  # 動かないレーンを問うまでの分（設計の失敗の 3 番の既定）
 SPAWN_REFUSALS = 3  # 起動の断りがこの回数続いたら問う（設計の失敗の 17 番）
 
 

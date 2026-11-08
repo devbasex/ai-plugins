@@ -32,13 +32,14 @@ import uuid
 from pathlib import Path
 
 import locks
+import limits
 import run_owner
 from step_result import EXIT_GATE, EXIT_PRECONDITION, emit, git_root, result
 import upkeep_depth as D
 
 TOOL = "backlog-refinement"
 WHATS = ("research", "review", "overhaul")
-LOCK_WAIT = 5
+LOCK_WAIT = limits.seconds("backlog-refinement.owner-lock")
 
 
 def owner_file(root) -> Path:

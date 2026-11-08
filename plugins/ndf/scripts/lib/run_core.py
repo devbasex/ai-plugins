@@ -40,6 +40,7 @@ from typing import Callable, NoReturn
 LIB = Path(__file__).resolve().parent
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
+import limits
 import jsonio  # noqa: E402
 import secret_redact  # noqa: E402
 import step_result  # noqa: E402
@@ -51,7 +52,7 @@ CONTRACT_FILE_HEAD = "plugins__ndf__"
 ENTRY_ENV = "NDF_RUN_ENTRY"
 TIMEOUT_ENV = "NDF_RUN_TIMEOUT"
 RESULT_ENV = "NDF_RESULT_FILE"
-KILL_GRACE = 5.0
+KILL_GRACE = limits.seconds("run-core.kill-grace")
 STEP_RESULT = "step-result"
 
 
@@ -168,6 +169,9 @@ def deliver(obj: dict, *, stdout_kind: str, print_result: bool, result_file: str
     """結果を出す。`step-result` で print_result なら標準出力へ 1 行。それ以外で stopped なら理由を標準エラーへ 1 行。"""
     if run_id:
         obj = dict(obj, run_id=run_id)
+    stage = sys.modules.get("lease_stage")  # 持ち主の段（読まれているときだけ見る。#2342）
+    if "lease" not in obj and stage is not None and (held := stage.lease_json()) is not None:
+        obj = dict(obj, lease=held)
     if print_result and stdout_kind == STEP_RESULT:
         print(json.dumps(obj, ensure_ascii=False), flush=True)
     elif print_result and obj.get("status") == "stopped":
@@ -276,6 +280,13 @@ def _call(body: Callable, argv: list[str]):
     return body(argv) if params else body()
 
 
+def _end_stages() -> None:
+    """本体の終わり（finally・SIGTERM・時間切れ）で、持ち主の段が取った鍵を返す（読まれているときだけ。#2342）。"""
+    stage = sys.modules.get("lease_stage")
+    if stage is not None:
+        stage.release_held()
+
+
 def _system_exit_code(e: SystemExit) -> int:
     if e.code is None:
         return 0
@@ -314,6 +325,7 @@ def run_body(entry_id: str, body: Callable, argv: list[str] | None = None) -> tu
         return (*core_stopped(entry_id, "exception", type(e).__name__, text), True, False)
     finally:
         step_result.CAPTURE = False
+        _end_stages()
     if ret is not None and (isinstance(ret, bool) or not isinstance(ret, int)):
         return (*core_stopped(entry_id, "result-shape", "return", f"本体の戻り値が終了コードでない: {type(ret).__name__}"), True, False)
     if ctx.stdout_kind == STEP_RESULT:

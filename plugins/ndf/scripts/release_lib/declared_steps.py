@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import jsonio
+import limits
 import proc
 import schema
 from release_lib import step_run
@@ -20,7 +21,7 @@ from step_result import StepError
 DECLARATION = ".ndf/release.json"
 
 SUPPORTED_VERSIONS = (1,)
-DEFAULT_TIMEOUT = 600
+DEFAULT_TIMEOUT = limits.seconds("release.declared-step")
 
 
 class DeclarationError(Exception):

@@ -501,7 +501,9 @@ def test_ensure_worktree_gives_up_after_retries(tmp_path, monkeypatch):
     waits = []
     err = paths.ensure_worktree(wt_plan(repo, "feat/a"), sleep=waits.append)
     assert err.startswith("作業ツリーを作れない") and "could not lock config file" in err
-    assert len(waits) == paths.WORKTREE_LOCK_RETRIES
+    import limits
+
+    assert len(waits) == limits.policy("supervise.worktree-lock").attempts - 1
 
 
 def test_ensure_worktree_other_error_does_not_retry(tmp_path):

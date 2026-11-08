@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions", "procs")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402

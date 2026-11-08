@@ -14,11 +14,12 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, NamedTuple
 
+import limits
 import gh_call
 
 _RATE_LIMIT_MARKERS = ("rate limit", "RATE_LIMIT", "unknown owner type")
 RESOURCES = ("graphql", "core")  # core は REST の枠
-MAX_WAIT = 3600
+MAX_WAIT = limits.seconds("gh-quota.max-wait")
 
 
 def is_rate_limited(text: str) -> bool:

@@ -14,6 +14,7 @@ import time
 from typing import Optional
 
 import container_reach
+import limits
 import monitor_types
 
 from . import info
@@ -145,7 +146,7 @@ def _process_group_alive(pgid: int) -> bool:
         return True
 
 
-def _kill_process_group(proc: "subprocess.Popen[bytes]", grace: float = 5.0) -> None:
+def _kill_process_group(proc: "subprocess.Popen[bytes]", grace: float = limits.seconds("cross-refactoring.kill-grace")) -> None:
     """プロセスグループごと止める。SIGTERM のあと、残っていれば SIGKILL。
 
     **親シェルの終了で打ち切らない。** 親が終わっても、SIGTERM を無視する子は

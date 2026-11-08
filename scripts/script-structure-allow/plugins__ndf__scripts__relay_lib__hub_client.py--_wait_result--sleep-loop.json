@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/relay_lib/hub_client.py", "name": "_wait_result", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: 中継の結果のファイルが現れるのを待つ"}

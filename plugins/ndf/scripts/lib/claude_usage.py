@@ -24,12 +24,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import limits
 import clock
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-HTTP_TIMEOUT = 10.0
+HTTP_TIMEOUT = limits.seconds("claude-usage.http")
 REFRESH_REJECTED = frozenset({400, 401, 403})  # リフレッシュトークンが取り消されたと読む状態
 KINDS = ("five_hour", "seven_day", "spend", "unknown")
 # claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）と、`resets 3pm (UTC)` の形
@@ -282,7 +283,7 @@ def get_usage(access_token: str, now: float) -> tuple[int, Usage]:
     return 200, parse_usage(d, now)
 
 
-def refresh_oauth(o: dict, now: float, timeout: float = 30) -> tuple[str, dict | None]:
+def refresh_oauth(o: dict, now: float, timeout: float = limits.seconds("claude-usage.oauth-refresh")) -> tuple[str, dict | None]:
     """リフレッシュトークンで更新する。("ok", 新しい claudeAiOauth) / ("rejected", None) / ("error", None)。
 
     `timeout` は宛先の待ちの上限（秒）。"""

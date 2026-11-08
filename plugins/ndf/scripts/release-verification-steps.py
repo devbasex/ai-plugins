@@ -43,6 +43,7 @@ from step_result import (
     result,
     version_arg,
 )
+import limits
 import delivery  # noqa: E402
 import repo as repo_lib  # noqa: E402
 from release_lib.user_config import _json, _read_user_config, config_dirs, user_config_snapshot  # noqa: E402
@@ -105,7 +106,7 @@ def isolated_env(tmp):
     return env
 
 
-def run_env_i(cmd, env, cwd=None, timeout=600):
+def run_env_i(cmd, env, cwd=None, timeout=limits.seconds("release-verification-steps.env-i")):
     """env -i で環境を空にし、渡した変数だけで動かす。"""
     full = ["env", "-i", *[f"{k}={v}" for k, v in env.items()], *cmd]
     try:

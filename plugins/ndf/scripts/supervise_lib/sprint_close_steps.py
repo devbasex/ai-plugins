@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shlex
 
+import limits
 from supervise_lib.paths import HERE
 
 
@@ -103,7 +104,7 @@ def _refine_step(a, refs: str) -> dict:
     }
 
 
-DEPTH_WORK_TIMEOUT = 5400  # 見直し・大整理の work ステップの打ち切り（秒）。持ち主の見張りも同じ秒数で止まる
+DEPTH_WORK_TIMEOUT = limits.seconds("supervise.depth-work")
 
 
 def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:

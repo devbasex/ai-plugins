@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
+import limits
 import usage_capture
 import usage_ledger
 
@@ -250,7 +251,7 @@ def issues_on_github(root: Path) -> bool:
 
 def _gh(root: Path, args: list) -> Optional[str]:
     try:
-        p = subprocess.run(["gh", *args], cwd=root, capture_output=True, text=True, timeout=60)
+        p = subprocess.run(["gh", *args], cwd=root, capture_output=True, text=True, timeout=limits.seconds("usage-aggregate.gh"))
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout if p.returncode == 0 else None

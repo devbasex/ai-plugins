@@ -287,8 +287,8 @@
 （`timeout` / `stalled`）から読み（`gitfacts.note_stopped`）、`phases.<手順>.stopped` に残して
 報告に「監視が止めた手順」の 1 行を出す。
 
-**ライブラリの上限の表（`plugins/ndf/scripts/lib/limits.py`）は cross-review と共有するため、値を
-変えない。** cross-refactoring の手順の名前（`plan` / `add-tests` / `implement`）を表に足したのは、
+**ライブラリの上限の宣言（`plugins/ndf/contracts/limits.json`。`plugins/ndf/scripts/lib/limits.py` が引く）は
+cross-review と共有するため、値を変えない。** cross-refactoring の手順の名前（`plan` / `add-tests` / `implement`）を表に足したのは、
 `start-phase` を通らない起動の既定の下限としてである。
 
 **固定のまま残す値**（`timeline.FIXED_VALUES`。報告に並ぶ）。OS の後始末と通信の待ちで、予算と

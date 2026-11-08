@@ -20,10 +20,11 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+import limits
 
 # 出典 1 件あたりの待ちの既定（秒）。宣言の `refresh_timeout_seconds` と
 # 引数 `--refresh-timeout` が上書きする。
-DEFAULT_TIMEOUT_SECONDS = 10
+DEFAULT_TIMEOUT_SECONDS = limits.seconds("refresh.http")
 
 # 1 度に読み取る大きさ。残りの待ちを計り直す間隔でもある。
 CHUNK_BYTES = 65536

@@ -10,11 +10,12 @@ NDF が配る PreToolUse と userPromptSubmit の hook の上限は 5 秒か 10 
 
 from __future__ import annotations
 
+import limits
 import signal
 import threading
 
-DEADLINE_SECONDS = 3.5
-MARGIN_SECONDS = 1.5
+DEADLINE_SECONDS = limits.seconds("hook.deadline")
+MARGIN_SECONDS = limits.seconds("hook.deadline-margin")
 
 
 class HookDeadlineExceeded(BaseException):

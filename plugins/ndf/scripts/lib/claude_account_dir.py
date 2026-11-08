@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import limits
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 
@@ -38,7 +39,7 @@ LOCAL_NAMES = (
 )
 SHARED_KEYS = ("projects", "mcpServers")
 ONBOARDING_KEYS = ("hasCompletedOnboarding", "lastOnboardingVersion")
-LOCK_WAIT = 2.0  # `.claude.json` の排他の待ちの上限（秒）
+LOCK_WAIT = limits.seconds("claude-account-dir.lock")  # `.claude.json` の排他の待ちの上限（秒）
 LOCK_STALE = 10.0  # 本体と同じく、これより古い排他は残骸とみなす
 _MISSING = object()
 

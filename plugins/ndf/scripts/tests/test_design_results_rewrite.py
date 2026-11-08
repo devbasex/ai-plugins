@@ -192,7 +192,9 @@ def test_the_total_wait_is_bounded(fake):
     for _ in range(5):
         with pytest.raises(design_stage.ReadFailed):
             design_stage.merged_design_pr(".", "develop", 11, budget)
-    assert budget.left >= 0 and budget.left < design_stage.RETRY_INTERVAL
+    import limits
+
+    assert budget.left >= 0 and budget.left < limits.value(design_stage.POLICY, "interval")
 
 
 def test_no_pr_and_no_table_stay_unread(tmp_path, fake):

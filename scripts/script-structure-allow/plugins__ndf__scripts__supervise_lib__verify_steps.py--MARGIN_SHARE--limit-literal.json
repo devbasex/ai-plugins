@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/supervise_lib/verify_steps.py", "name": "MARGIN_SHARE", "kind": "limit-literal", "reason": "#2343 の決定 4。上限でない数字: 上限に足す余裕の割合"}

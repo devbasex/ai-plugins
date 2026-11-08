@@ -17,9 +17,10 @@ from dataclasses import dataclass
 from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
 
 import claude_accounts as ca  # noqa: E402,I001
+import limits
 
 PROVIDER = "bedrock"
-TIMEOUT = 60
+TIMEOUT = limits.seconds("relay.bedrock")
 ERROR_RE = re.compile(r"An error occurred \(([A-Za-z0-9_.]+)\)")
 REASONS = {
     "auth_expired": "認証切れ",

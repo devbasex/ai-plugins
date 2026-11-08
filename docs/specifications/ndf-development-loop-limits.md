@@ -308,9 +308,9 @@ Codex と Kiro は USD を持たないため和に足さず、内訳の `unprice
 | cross-review のラウンドの上限 | 設計 3・コード 12 | `skills/cross-review/scripts/classifications.py` |
 | cross-review が読む設計文書の行数 | 1000 行 | `skills/cross-review/scripts/classifications.py` |
 | 振動の検知 | 検知で止まる | `lib/drive_pause.py` |
-| cross-refactoring の時間予算の既定 | 30 分 | `skills/cross-refactoring/scripts/refactor_lib/vocabulary.py` |
-| 監視の上限（工程ごと） | 1200 秒・3600 秒。実装のステップを外部のランタイムで動かすときは実装の上限が無ければ渡さない | `lib/limits.py` |
-| 無進捗の許容（担当ごと） | 180〜900 秒。実装のステップは引数で渡す | `lib/limits.py` |
+| cross-refactoring の時間予算の既定 | 30 分 | `contracts/limits.json` の方針 `cross-refactoring.default-budget`（`skills/cross-refactoring/scripts/refactor_lib/vocabulary.py` が引く） |
+| 監視の上限（工程ごと） | 1200 秒・3600 秒。実装のステップを外部のランタイムで動かすときは実装の上限が無ければ渡さない | `contracts/limits.json` の方針 `monitor.phase.<工程>`（`lib/limits.py` が引く） |
+| 無進捗の許容（担当ごと） | 180〜900 秒。実装のステップは引数で渡す | `contracts/limits.json` の方針 `monitor.stall.<担当>`（`lib/limits.py` が引く） |
 | 駆動が pause で止まってよい回数 | 12 回 | `supervise_lib/worker_steps.py` |
 | 遅れの見張りの判定・待ち直し・打ち直しの回数 | 2 回・3 回・1 回。`stall` のステップには働かない | `lib/slow_step.py` |
 | 報告が無い Skill のステップの起こし直し | 3 回 | `supervise_lib/worker_steps.py` |

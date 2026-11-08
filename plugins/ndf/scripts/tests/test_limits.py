@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import itertools
+import json
 import os
 import pathlib
 import subprocess
@@ -56,16 +57,16 @@ def _run(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_the_phase_table_holds_the_contract_values(limits) -> None:
-    assert limits.PHASE_TIMEOUT == PHASES
+    assert limits.phases() == PHASES
 
 
 def test_five_phases_take_1200_and_four_take_3600(limits) -> None:
-    values = sorted(limits.PHASE_TIMEOUT.values())
+    values = sorted(limits.phases().values())
     assert values.count(1200) == 5 and values.count(3600) == 4
 
 
 def test_the_agent_table_holds_the_contract_values(limits) -> None:
-    assert limits.AGENT_STALL == STALLS
+    assert limits.stalls() == STALLS
 
 
 @pytest.mark.parametrize("phase", sorted(PHASES))
@@ -85,16 +86,19 @@ def test_stall_is_below_monitor_is_below_cli(limits, phase: str, agent: str) -> 
 
 
 def test_all_36_pairs_are_covered(limits) -> None:
-    assert len(list(itertools.product(limits.PHASE_TIMEOUT, limits.AGENT_STALL))) == 36
+    assert len(list(itertools.product(limits.phases(), limits.stalls()))) == 36
 
 
 def test_check_passes_on_the_table(limits) -> None:
     assert limits.check() == []
 
 
-def test_check_reports_a_broken_pair(limits, monkeypatch) -> None:
-    """表を崩すと、崩れた組を返す。上書きではなく表そのものを見ている。"""
-    monkeypatch.setitem(limits.AGENT_STALL, "claude", 1200)
+def test_check_reports_a_broken_pair(limits, tmp_path) -> None:
+    """宣言を崩すと、崩れた組を返す。上書きではなく宣言そのものを見ている。"""
+    raw = json.loads(limits.DECLARATION.read_text(encoding="utf-8"))
+    raw["policies"]["monitor.stall.claude"]["seconds"] = 1200
+    (tmp_path / "limits.json").write_text(json.dumps(raw), encoding="utf-8")
+    limits.use(tmp_path / "limits.json")
     broken = limits.check()
     assert ("review", "claude") in [(b[0], b[1]) for b in broken]
 
@@ -170,7 +174,7 @@ def test_the_stall_resolution_keeps_its_order(limits, monkeypatch) -> None:
 
 
 def test_an_unknown_agent_takes_the_fallback_stall(limits) -> None:
-    assert limits.stall_timeout("unknown") == limits.DEFAULT_STALL
+    assert limits.stall_timeout("unknown") == limits.stall_default() == 180
 
 
 # ---------- コマンド ----------

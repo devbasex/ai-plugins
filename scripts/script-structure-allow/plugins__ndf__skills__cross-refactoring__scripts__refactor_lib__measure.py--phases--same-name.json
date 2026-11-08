@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/measure.py", "name": "phases", "kind": "same-name", "reason": "上限の部品（lib/limits.py）の phases と名前が重なる別の概念（計測の工程の並び）。寄せない"}

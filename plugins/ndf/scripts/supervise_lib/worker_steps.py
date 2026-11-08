@@ -20,14 +20,15 @@ from loop_drive import review_answer
 from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.progress_watch import ProgressWatch
+import limits
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, deliver_skills, last_json
 import project_mvv
 
 # worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
-DEFAULT_TIMEOUT = 1800
+DEFAULT_TIMEOUT = limits.seconds("supervise.worker-step")
 DEFAULT_MAX_PAUSES = 12
-TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足す余裕（秒）
+TICK_GRACE = limits.seconds("supervise.worker-tick-grace")  # worker 自身の上限に、外側で打ち切るまで足す余裕（秒）
 RESUMES = 3  # 作業の結果ファイルが無いまま応答を終えた full のステップを起こし直す回数
 STEP_RESULT_PY = paths.HERE / "lib" / "step_result.py"
 

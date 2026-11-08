@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +74,9 @@ SETTING = {
 }
 
 
+LIMITS = {"version": 1, "policies": {"monitor.cli-margin": {"summary": "CLI の上限の差", "seconds": 120}}}
+
+
 def wj(p: Path, d: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
@@ -104,6 +108,8 @@ def tree(tmp_path: Path) -> Path:
     wj(c / "settings/worktree.json.json", SETTING)
     wj(c / "env/NDF_X.json", {"name": "NDF_X", "set_by": "user", "summary": "x"})
     wj(c / "files/out.json", {"name": "out", "pattern": "out.json", "kind": "result", "place": "worktree", "skill_readers": []})
+    wj(c / "limits.json", LIMITS)
+    shutil.copy(REPO / "plugins/ndf/scripts/lib/limits.py", s / "lib/limits.py")
     assert run(tmp_path, "--render")[0] == 0
     return tmp_path
 
@@ -1023,3 +1029,44 @@ def test_base_runtime_count_reads_the_base_with_two_git_processes(tmp_path: Path
     monkeypatch.setattr(core_checks.subprocess, "run", lambda *a, **k: calls.append(a[0]) or real(*a, **k))
     assert core_checks.base_runtime_count(tmp_path, sha) == 2
     assert len(calls) == 2
+
+
+# ---------- 上限の宣言（#2343 の決定 13・不変条件 I1・I4） ----------
+
+
+def _limits(tree: Path, policies: dict) -> None:
+    wj(tree / "plugins/ndf/contracts/limits.json", {"version": 1, "policies": {**LIMITS["policies"], **policies}})
+
+
+def test_a_policy_name_the_declaration_lacks_fails(tree: Path):
+    (tree / "plugins/ndf/scripts/lib/part.py").write_text('import limits\n\n\ndef f():\n    return limits.seconds("part.wait")\n')
+    code, r = run(tree)
+    assert code == 1 and ("limits-unknown", "part.wait") in kinds(r)
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": 5}})
+    assert run(tree, "--render")[0] == 0
+    code, r = run(tree)
+    assert code == 0, r
+    assert "`plugins/ndf/scripts/lib/part.py:f`" in (tree / "plugins/ndf/contracts/index.md").read_text()
+
+
+def test_a_policy_no_code_reads_fails(tree: Path):
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": 5}})
+    run(tree, "--render")
+    code, r = run(tree)
+    assert code == 1 and kinds(r) == [("limits-unused", "part.wait")]
+
+
+def test_a_name_kept_in_a_module_constant_counts_and_a_computed_name_fails(tree: Path):
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": 5}})
+    run(tree, "--render")
+    part = tree / "plugins/ndf/scripts/lib/part.py"
+    part.write_text('import limits as lim\n\nPOLICY = "part.wait"\n\n\ndef f(x):\n    return lim.policy(POLICY), lim.value(x, "seconds")\n')
+    run(tree, "--render")
+    code, r = run(tree)
+    assert code == 1 and [k for k, _ in kinds(r)] == ["limits-unknown"]
+
+
+def test_a_malformed_declaration_fails(tree: Path):
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": -1}})
+    code, r = run(tree)
+    assert code == 1 and ("limits-shape", "") in kinds(r)

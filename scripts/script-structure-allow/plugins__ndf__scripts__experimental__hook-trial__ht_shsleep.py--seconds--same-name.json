@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/experimental/hook-trial/ht_shsleep.py", "name": "seconds", "kind": "same-name", "reason": "実験版。上限の部品（lib/limits.py）の seconds と名前が重なる別の概念（sleep の引数の秒）。寄せない"}

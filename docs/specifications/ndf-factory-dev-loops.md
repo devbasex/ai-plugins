@@ -263,7 +263,7 @@ sequenceDiagram
 
 - `local` で利用上限に当たったジョブは `job.finished`（`stopped`・`usage_limit`・`resets_at`）で終え、実行は `awaiting_reset` になる。`awaiting_reset` は終わりの状態でなく、枠を数え、承認待ちと同じく今のジョブは空である
 - 見回りがリセット時刻を過ぎた実行に `START=resume` のジョブを作る。`APPROVAL_REQUEST_ID` の無い `resume` は答えを書かずに続け、ランナーは conductor へ「前回の続きから進めてください。」だけを渡す。新しい `START` の値を足さないのは、状態の復元と conductor の起動が `resume` と同じで、違いが答えの有無だけのためである
-- リセット時刻を読めないときの待ちは `USAGE_LIMIT_RETRY_SECONDS`（既定 900 秒）である。NDF の `supervise_lib/claude.py` の `LIMIT_RETRY` と同じ値にし、同じ利用者の機械で同じ上限に当たったときの振る舞いを揃える
+- リセット時刻を読めないときの待ちは `USAGE_LIMIT_RETRY_SECONDS`（既定 900 秒）である。NDF の上限の宣言（`plugins/ndf/contracts/limits.json`）の方針 `supervise.limit-retry` と同じ値にし、同じ利用者の機械で同じ上限に当たったときの振る舞いを揃える
 - 検出は NDF と同じ文言の規則（`usage limit reached|<UNIX 時刻>`・`resets <時刻> (<時間帯>)`）と、`result` の `is_error` で読む
 - `managed`・`byok` では同じ文が来ても今の `failed` の扱いになる。アカウントの切り替えは手元で行い、サービスはアカウントを知らない
 - リセット時刻の後の自動の再開は、`local` でサービスがジョブを自動で起こす唯一の例外である。次の周回の自動の起動は `LOCAL_LOOP_AUTOSTART`（既定 `false`）が許すときだけである

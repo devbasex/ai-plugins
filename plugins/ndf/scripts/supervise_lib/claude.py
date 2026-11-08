@@ -23,6 +23,7 @@ from pathlib import Path
 import claude_accounts as ca
 from claude_settings import metered_settings
 import procs
+import limits
 import usage_capture
 from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
@@ -68,8 +69,6 @@ SERENA_MCP = {
 }
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch," + WEB_TOOLS
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
-LIMIT_RETRY = 900  # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
-LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
 TICK = 5.0  # 子プロセスの待ちを区切って見る秒数の上限
 
 
@@ -80,7 +79,7 @@ def kill_group(p: subprocess.Popen) -> None:
     with contextlib.suppress(OSError):
         os.killpg(p.pid, signal.SIGKILL)
     with contextlib.suppress(subprocess.TimeoutExpired, ValueError, OSError):
-        p.communicate(timeout=5)
+        p.communicate(timeout=limits.seconds("supervise.claude-reap"))
 
 
 _STEP = threading.local()  # このスレッドで起こす子を知らせる先（RunState.note_child。耐久ステップを流すスレッドごと）
@@ -321,8 +320,8 @@ class ClaudeRunner:
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
         """
         ctx, st = self.ctx, self.ctx.state
-        retry = ctx.plan.get("limit_retry_seconds", LIMIT_RETRY)
-        wait_max = ctx.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
+        retry = ctx.plan.get("limit_retry_seconds", limits.seconds("supervise.limit-retry"))
+        wait_max = ctx.plan.get("limit_wait_max", limits.seconds("supervise.limit-wait-max"))
         fallback = ca.fallback_env()
         self._tell_metered_problem()
         multi = ca.registered() >= 2
