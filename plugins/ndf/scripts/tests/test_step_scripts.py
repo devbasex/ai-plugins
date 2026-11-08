@@ -951,3 +951,48 @@ def test_verify_install_all_ok_emits_ok(tmp_path, monkeypatch):
     assert out["metrics"]["prev_tag"] is None and out["metrics"]["mismatch"] == 0
     assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [("runtime", "codex", "ok")]
     assert "develop（abcdef12）" in out["summary"] and "v1.2.0" in out["summary"]
+
+
+@pytest.mark.parametrize(
+    ("change", "key"),
+    [
+        (lambda c, x: write(c, "plugins/installed_plugins.json", installed_json("1.0.1")), "claude:plugin:ndf@ai-plugins"),
+        (lambda c, x: (x / "plugins/cache/ai-plugins/new/2.0.0").mkdir(parents=True), "codex:plugin:new@ai-plugins"),
+        (lambda c, x: write(c, "plugins/installed_plugins.json", "{"), "claude:unreadable"),
+    ],
+)
+def test_verify_install_stops_when_user_config_changes(tmp_path, monkeypatch, change, key):
+    """受け入れ条件 5・I6（#2401）: 導入の途中で利用者の設定ディレクトリが変わると user_env_unchanged が false で止まる。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+    claude, codex = tmp_path / "claude", tmp_path / "codex"
+    write(claude, "plugins/installed_plugins.json", installed_json())
+    (codex / "plugins" / "cache" / "ai-plugins" / "ndf" / "1.0.0").mkdir(parents=True)
+    for k, v in {"HOME": tmp_path / "home", "CLAUDE_CONFIG_DIR": claude, "CODEX_HOME": codex}.items():
+        monkeypatch.setenv(k, str(v))
+
+    def verify_codex(*a):
+        change(claude, codex)
+        return {"exit": 0, "version": "1.2.0"}, {"ndf": tmp_path}
+
+    def fake_git(root, *args):
+        out = {"rev-parse": "abcdef1234567890\n", "tag": "ndf--v1.2.0\n"}.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    emitted = []
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf"]))
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod.subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {})
+    monkeypatch.setattr(mod, "verify_codex", verify_codex)
+    monkeypatch.setattr(mod, "compare_files", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "emit", emitted.append)
+
+    mod.cmd_verify_install(argparse.Namespace(root=None, ref="develop", expect="1.2.0", runtimes="codex", plugins=None))
+    out = emitted[0]
+    assert out["status"] == "stopped" and out["metrics"]["user_env_unchanged"] is False
+    assert key in [i["name"] for i in out["items"] if i["kind"] == "user_env"]

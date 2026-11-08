@@ -65,13 +65,22 @@ def rc_digest(path):
 
 
 def user_env_snapshot():
+    """rc ファイル・リンクと、利用者の設定ディレクトリの控え（#2401 の I6）。読めない設定は `<claude|codex>:unreadable` の値で比べる。"""
     home = Path(os.path.expanduser("~"))
     link = home / ".local" / "bin" / "claude"
-    return {
+    env = {
         ".bashrc": rc_digest(home / ".bashrc"),
         ".zshrc": rc_digest(home / ".zshrc"),
         ".local/bin/claude": os.readlink(link) if link.is_symlink() else ("file" if link.exists() else None),
     }
+    snap = user_config_snapshot()
+    env.update(snap.items)
+    claude = str(config_dirs()[0])
+    for side in ("claude", "codex"):
+        bad = [b for b in snap.unreadable if b.startswith(claude + os.sep) == (side == "claude")]
+        if bad:
+            env[f"{side}:unreadable"] = "; ".join(sorted(bad))
+    return env
 
 
 Snapshot = NamedTuple("Snapshot", [("items", dict), ("unreadable", list)])  # 控えの鍵と値・読めないファイル（#2401）
