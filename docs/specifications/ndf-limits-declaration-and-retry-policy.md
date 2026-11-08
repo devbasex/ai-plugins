@@ -351,6 +351,6 @@ stateDiagram-v2
 - [ndf-development-loop-limits.md](ndf-development-loop-limits.md): 開発ループの各上限の値の意味と置き場
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md): cross-refactoring の時間予算と手順の監視の上限
 - [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md): 投稿キューの一時的な失敗の流し直し（方針 `post-queue.transient-reflush`）
-- [ndf-factory-dev-loops.md](ndf-factory-dev-loops.md): Factory の開発ループの利用上限の待ち（方針 `supervise.limit-retry` と揃える値）
+- サービスの確定仕様 `ndf-factory-dev-loops.md`: Factory の開発ループの利用上限の待ち（方針 `supervise.limit-retry` と揃える値）
 - [ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md): 期限で打ち切った実行の状態の持ち主と片付け
 - [用語集](../glossary.md)

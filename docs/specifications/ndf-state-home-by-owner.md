@@ -107,7 +107,7 @@ EC2 の再起動や `docker stop` → `start` では残るが、コンテナを�
 - NDF を更新したら、各コンテナで動いているプラン（`supervise.py`・`parallel.py run`）を止めてから、主のリポジトリの作業ツリーで
   `state-home.py migrate` を一度打つ。打ち方は NDF の README にある
 - 旧の版のまま動いているセッションは、更新されるまで旧の置き場へ書き続ける。更新した後にもう一度打てば、その分も移る
-- `~/.cache/ndf`・`/tmp/ndf*`・`mcp-serena` の置き場、`context/` の判定の記録の扱い、Factory（ECS）での保存はこの仕様の範囲の外で、#2606 が扱う
+- `~/.cache/ndf`・`/tmp/ndf*`・`mcp-serena` の置き場、`context/` の判定の記録の扱い、外のサービスの実行ジョブでの保存はこの仕様の範囲の外で、#2606 が扱う
 
 ## テスト観点
 

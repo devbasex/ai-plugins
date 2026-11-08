@@ -1,6 +1,6 @@
 # AI Plugins
 
-Claude Code / Codex で使うプラグインを配るマーケットプレイスです。
+Claude Code / Codex で使うプラグインを配るマーケットプレイスです。このリポジトリは NDF などのプラグインとマーケットプレイスだけを持ちます。
 入れると、Pull Request の作成・レビュー・修正といった開発の作業を、手順どおりに AI へ任せられます。
 よく使う外部サービス（Notion・BigQuery・データベースなど）へつなぐ設定も入ります。
 
@@ -99,12 +99,11 @@ Skill のほかに、次のものが入ります。
 | 質問・不具合の報告・要望 | [SUPPORT.md](./SUPPORT.md) |
 | 脆弱性の報告 | [SECURITY.md](./SECURITY.md)。**公開の issue には書かないでください** |
 | 開発に参加する | [CONTRIBUTING.md](./CONTRIBUTING.md)、[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)、[GOVERNANCE.md](./GOVERNANCE.md) |
+| Web サービス | 別のリポジトリ（volareinc/nd-factory）へ移しました |
 
 ## ライセンス
 
 MIT License。詳細は [LICENSE](./LICENSE) にあります。
-
-Web サービスのディレクトリ [factory/](./factory/README.md)（Neural Development Factory）は、自分の [LICENSE](./factory/LICENSE) を持ちます。今は根と同じ MIT License です。ライセンスを差し替えるときは `factory/LICENSE` とこの節だけを書き換え、プラグインのリリース対象は変わりません。
 
 ---
 

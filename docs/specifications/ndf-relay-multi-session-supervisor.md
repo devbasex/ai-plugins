@@ -290,8 +290,8 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 
 ### Factory の契約との対応
 
-`plugins/` は `factory/` を参照せず、名前と形だけを揃える（[ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)・
-[ndf-factory-runs-state-and-data.md](ndf-factory-runs-state-and-data.md)）。
+`plugins/` は `factory/` を参照せず、名前と形だけを揃える（サービスの確定仕様 `ndf-factory-contracts-and-progress.md`・
+サービスの確定仕様 `ndf-factory-runs-state-and-data.md`）。
 
 | relay の項目 | Factory の項目（`factory/contracts/schemas/`） | 扱い |
 | --- | --- | --- |
@@ -350,7 +350,6 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 | tmux が無いと 2 本目は前景で動く | 同上の `test_no_tmux_runs_second_in_foreground` |
 | 1 本目と名前の無い `stop` の振る舞いが変わらない | `plugins/ndf/scripts/tests/test_relay.py` の既存のテスト一式 |
 | 新しい環境変数が契約に宣言されている | 契約の検査（`python3 scripts/check-ndf-contracts.py`） |
-| `plugins/` から `factory/` を参照しない | `python3 scripts/check-service-boundary.py` が 0 で終わる |
 | 実際の端末エミュレータで tmux の画面が崩れず、キー入力が claude に届く | リリース後テストで人が見る（端末が既に tmux の中なら `TMUX` を外して入れ子で結び付く） |
 
 ## 関連リンク
@@ -360,4 +359,4 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — 導入・`/ndf:restart`
 - [#1587](https://github.com/devbasex/ai-plugins/issues/1587) — ラッパーの入れ替え（入れ替えた後に統括役を取り直す）
 - [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のマシンで動くランナー。起動・一覧・停止の名前と形を揃える相手
-- [ndf-factory-runs-and-runner.md](ndf-factory-runs-and-runner.md) — Factory の実行ジョブと実行の枠
+- サービスの確定仕様 `ndf-factory-runs-and-runner.md` — Factory の実行ジョブと実行の枠
