@@ -5854,6 +5854,27 @@
       "meaning": "記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応",
       "source": "",
       "pending_source": "issues/issue-2737-design.md"
+    },
+    {
+      "term": "棚卸しの実行",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しを 1 回流すまとまり。持ち主を持つ実行は owner claim が返した識別子（run）で区別する",
+      "source": "",
+      "pending_source": "issues/issue-2847-requirements.md"
+    },
+    {
+      "term": "棚卸しの記録の置き場",
+      "context": "ndf-issue-upkeep",
+      "meaning": "upkeep.py が候補・反映・順位の記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置く",
+      "source": "",
+      "pending_source": "issues/issue-2847-requirements.md"
+    },
+    {
+      "term": "候補の記録",
+      "context": "ndf-issue-upkeep",
+      "meaning": "candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む",
+      "source": "",
+      "pending_source": "issues/issue-2847-requirements.md"
     }
   ]
 }
