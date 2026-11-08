@@ -144,6 +144,28 @@ graph LR
     耐久ワークフロー -->|ファイルを読む| 開発ループ
 ```
 
+## 構造
+
+`_Run` へ足す値だけを描く。問いと観測の値の形は「データ構造」の節にある。
+
+```mermaid
+classDiagram
+    class _Run {
+        +judging
+        +loop_until
+        +drain()
+    }
+    class parallel_watch {
+        +withdraw_settled()
+        +ask_loop_stops()
+        +ask_stalls()
+        +ask_helper()
+    }
+    parallel_watch ..> _Run: 読み書きする
+```
+
+`parallel_watch` は `_Run` の属性と `ask`・`publish_questions`・`drain` だけを使い、`parallel_run` を import しない（循環を作らないため）。区切りの秒は `_observe_run` が引数で渡す。
+
 ## 決定の記録
 
 ### 決定 1: 届く途中の依頼で誤報を出さないよう、途中停止の問いの直前にインボックスを読み切る
@@ -247,28 +269,6 @@ graph LR
 | DBOS の `recv` が古い順に受け取ること | https://docs.dbos.dev/python/tutorials/workflow-communication | 文書に順序の明記は無かった。手元の `_sys_db.py` の `recv_consume` は `created_at_epoch_ms` の昇順で読み、実測も送った順に受け取った。読み切る形は順序に依らない |
 
 調べた量: 候補 6 件・取得の試み 17 回。
-
-## 構造
-
-`_Run` へ足す値だけを描く。問いと観測の値の形は「データ構造」の節にある。
-
-```mermaid
-classDiagram
-    class _Run {
-        +judging
-        +loop_until
-        +drain()
-    }
-    class parallel_watch {
-        +withdraw_settled()
-        +ask_loop_stops()
-        +ask_stalls()
-        +ask_helper()
-    }
-    parallel_watch ..> _Run: 読み書きする
-```
-
-`parallel_watch` は `_Run` の属性と `ask`・`publish_questions`・`drain` だけを使い、`parallel_run` を import しない（循環を作らないため）。区切りの秒は `_observe_run` が引数で渡す。
 
 ## データ構造
 
