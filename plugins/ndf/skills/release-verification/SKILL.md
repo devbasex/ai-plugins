@@ -87,8 +87,8 @@ ref と一致するか、利用者の HOME の設定が変わっていないか�
 
 **Claude Code・Codex のプラグインの導入の確かめは `verify-install` だけで行う。** 利用者の設定ディレクトリ
 （Claude Code は `CLAUDE_CONFIG_DIR`、無ければ `~/.claude`。Codex は `CODEX_HOME`、無ければ `~/.codex`）で、
-導入の操作（`claude plugin install` / `update` / `marketplace add` / `marketplace update`、`codex plugin add` /
-`marketplace add`）を打たない。隔離のつもりで環境変数を付けて手で打つことも含む。打つと、利用者が導入した版と
+導入の操作（プラグインの導入・更新と取得元の登録・更新。`claude` と `codex` の `plugin` の副命令 `install` /
+`add` / `update` / `marketplace add` / `marketplace update`）を打たない。隔離のつもりで環境変数を付けて手で打つことも含む。打つと、利用者が導入した版と
 取得元の登録が黙って変わり、戻すには前の版を入れ直す操作が要る。`verify-install` は一時ディレクトリの設定と
 `env -i` で導入するため、利用者の設定ディレクトリを変えない。
 
