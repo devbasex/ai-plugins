@@ -142,5 +142,6 @@
 | [ndf-development-loop-limits.md](ndf-development-loop-limits.md) | 開発ループの中で働く上限の全体の表と、回数・時間の固定の上限で止めない判断。ラッパーの起動の判定、ループの予算の null、保留の周回、実行環境の調査と候補の式、周回の費用（帳簿と報告の大きい方）と費用の実測。予算の宣言と止まる条件は ndf-workflow-development-loop.md、無進捗の打ち切りの振る舞いは ndf-supervise-step-budgets.md が正 |
 | [ndf-approval-gate-names.md](ndf-approval-gate-names.md) | 2 つの承認ゲートの呼び名（設計承認ゲート・リリース承認ゲート）、旧名 `関門 1` / `関門 2` の記録を読むときに正の名前へ寄せる規則、値を変えない機械が読む識別子、Factory のランナーが旧名を渡し続ける理由。語の定義は用語集が正 |
 | [ndf-deploy-and-release-terms.md](ndf-deploy-and-release-terms.md) | 環境へ届ける操作を「デプロイ」、本番へのデプロイを「リリース」と呼び分ける規則、旧い値の読み替えの表（`legacy-values.json`）、ボードの旧い選択肢への書き込みと案内、用語チェックの禁止語の規則（`check.banned`）。語の定義は用語集が正 |
+| [ndf-testenv-reclaim.md](ndf-testenv-reclaim.md) | 消えた worktree のテスト環境の割り当てとコンテナを定義なしで回収する理由と境界（判定をテスト環境の管理の 1 か所に置く、見えない位置の割り当てと別の位置から起動されたコンテナを消さない、環境ごとの回収の予約と持ち続ける上限の秒、破棄の打ち切り、後片付けとスロットの枯渇からの呼び出し）、reclaim の結果 JSON の契約。手順は `worktree` の `references/test-execution.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
