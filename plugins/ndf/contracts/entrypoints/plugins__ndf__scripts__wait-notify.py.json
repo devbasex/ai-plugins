@@ -16,6 +16,7 @@
     "NDF_DEPS_VENV",
     "NDF_HOOK_PYTHON",
     "NDF_HOOK_REEXEC",
+    "NDF_PRESENTATION_DIR",
     "NDF_SLACK_API_BASE",
     "NDF_SLACK_NOTIFY_DONE",
     "NDF_STATE_HOME",
@@ -38,5 +39,9 @@
     "plugins/ndf/scripts/hook_lib/wait_notify.py",
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/wait_notice.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "hook のエントリポイント（hook_lib/wait_notify.py を使う hook.py）が起動する"
+  }
 }

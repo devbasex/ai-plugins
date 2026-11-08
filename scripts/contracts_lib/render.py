@@ -41,7 +41,7 @@ def render(c: Contracts) -> str:
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for name, f in sorted(c.files.items()):
-        writers = [p for p, e in sorted(c.entrypoints.items()) if name in e["writes"]]
+        writers = [p for p, e in sorted(c.entrypoints.items()) if name in e["writes"]] + list(f.get("writers", []))
         readers = [p for p, e in sorted(c.entrypoints.items()) if name in e["reads"]] + list(f["skill_readers"])
         lines.append(f"| `{name}` | `{f['pattern']}` | {f['kind']} | {f['place']} | {_cell(writers)} | {_cell(readers)} |")
     lines += ["", "## 環境変数", "", "| 名前 | 誰が設定するか | 読むエントリポイント |", "| --- | --- | --- |"]

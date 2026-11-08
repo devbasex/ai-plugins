@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/lib/sprint_loop_record.py",
+  "name": "_upkeep_rank:last-line",
+  "kind": "result-read",
+  "reason": "結果 JSON の最後の行を共通の読み手の外で読む（#2337）。移す Pull Request が step_read.read_completed へ置き換えて消す"
+}

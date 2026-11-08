@@ -30,6 +30,7 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deps  # noqa: E402
+import jsonio  # noqa: E402
 import proc  # noqa: E402
 
 # 子プロセスと git の起動は `proc` が持つ（#1142 の L0）。ここの名前は同じものを指す
@@ -443,9 +444,7 @@ def _write_out(path: str, obj: dict, code: int | None) -> None:
         code = EXIT_INCOMPLETE if obj["status"] == "stopped" and obj.get("gaps") else default_code(obj["status"])
     if validate_result(obj, code):
         return
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
+    jsonio.write_atomic(path, obj, indent=None)
 
 
 def main(argv=None) -> "NoReturn":  # noqa: F821

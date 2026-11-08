@@ -29,10 +29,19 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 from allowlist import AllowError, allow_file_name, load_allow, rel_target, under  # noqa: E402
-from contracts_lib import extract_sh, ratchet  # noqa: E402
+from contracts_lib import core_checks, extract_sh, ratchet  # noqa: E402
 from contracts_lib.draft import Callers, draft  # noqa: E402
 from contracts_lib.extract_py import PyExtractor, is_runnable  # noqa: E402
-from contracts_lib.model import CONTRACTS, ContractError, Contracts, entry_file_name, flat_args, load, positional_order  # noqa: E402
+from contracts_lib.model import (  # noqa: E402
+    CONTRACTS,
+    ContractError,
+    Contracts,
+    core_exempt,
+    entry_file_name,
+    flat_args,
+    load,
+    positional_order,
+)
 from contracts_lib.render import render  # noqa: E402
 
 REPO = HERE.parent
@@ -54,6 +63,9 @@ ALLOW_KINDS = (
     "env-undeclared",
     "setting-undeclared",
     "file-undeclared",
+    "core-entry",
+    "exit-meaning",
+    "result-read",
 )
 
 
@@ -172,12 +184,13 @@ class Checker:
         for name in sorted(set(e["env"]) - set(f["env"])):
             out.append(v("contract-stale", rel, f"env:{name}", f"契約の env の {name} をコードが読まない。{cf} から消す"))
 
-    @staticmethod
-    def collect_code_items(f: dict, code: set) -> None:
+    def collect_code_items(self, f: dict, code: set) -> None:
+        declared = {w for item in self.c.files.values() for w in item.get("writers", [])}
         for (mod, fn), _ in f["env_dynamic"].items():
             code.add(("env-dynamic", mod, fn, "名前を組み立てる・走査する環境変数の読み"))
         for (mod, fn), _ in f.get("file_dynamic", {}).items():
-            code.add(("file-dynamic", mod, fn, "名前を組み立てて書く（書き先のファイル名を静的に拾えない）"))
+            if f"{mod}:{fn}" not in declared:
+                code.add(("file-dynamic", mod, fn, "名前を組み立てて書く（書き先のファイル名を静的に拾えない）"))
         for (mod, file, fn), via in f["setting_opens"].items():
             code.add(("setting-open-outside-reader", mod, file, f"読み手の関数の外で .ndf/{file} を開く（{fn}。{via}）"))
 
@@ -239,6 +252,25 @@ class Checker:
             if not self.callers.contains(c, rel):
                 out.append(v("caller-stale", rel, c, f"呼び手 {c} が {Path(rel).name} を含まない。{cf} の callers を直す"))
 
+    def core(self, entries: list[str], out: list[dict]) -> None:
+        """実行の核に関わる検査（core-entry・core-exempt・exit-meaning・result-read。#2337）。"""
+        declared = {r: self.c.entrypoints[r] for r in entries if r in self.c.entrypoints}
+        for rel, e in sorted(declared.items()):
+            if core_exempt(e):
+                continue
+            text = (self.root / rel).read_text(errors="ignore")
+            why = core_checks.sh_core_entry(text, rel) if rel.endswith(".sh") else core_checks.py_core_entry(text, rel)
+            if why:
+                out.append(v("core-entry", rel, "", f"核を通らない。{why}"))
+        for path, name, why in core_checks.exempt_violations(self.root, declared, self.reached):
+            out.append(v("core-exempt", path, name, why))
+        for path, name, why in core_checks.exit_label_violations(declared):
+            out.append(v("exit-meaning", path, name, why))
+        for path, name, why in core_checks.exit_const_violations(self.root, declared, self.reached):
+            out.append(v("exit-meaning", path, name, why))
+        for path, name, why in core_checks.result_read_violations(self.root):
+            out.append(v("result-read", path, name, why))
+
     def run(self) -> tuple[list[dict], dict]:
         out: list[dict] = []
         cands = candidates(self.root)
@@ -262,6 +294,7 @@ class Checker:
             out.append(v("entry-stale", rel, "", f"エントリポイントでないファイルの項目。{self.c.entry_files[rel]} を消す"))
         for kind, path, name, detail in sorted(code):
             out.append(v(kind, path, name, detail))
+        self.core(entries, out)
         for file, s in sorted(self.c.settings.items()):
             for key, k in s["keys"].items():
                 if "duplicates" in k:
@@ -272,6 +305,7 @@ class Checker:
         for name in sorted(set(self.c.env) - used_env):
             out.append(v("contract-stale", f"{CONTRACTS}/env/{name}.json", name, "どのエントリポイントも読まない環境変数の項目。消す"))
         used_files = {n for e in self.c.entrypoints.values() for n in e["writes"] + e["reads"]}
+        used_files |= {n for n, item in self.c.files.items() if item.get("writers")}
         for name in sorted(set(self.c.files) - used_files):
             out.append(
                 v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す")
@@ -399,6 +433,13 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         added, base, state = [], None, "skipped"
     items.extend(added)
+    if base and state == "checked" and ratchet.base_knows(root, base.rsplit("@", 1)[1], "core-exempt"):
+        n = core_checks.base_runtime_count(root, base.rsplit("@", 1)[1])
+        now = sum(1 for e in c.entrypoints.values() if core_exempt(e) == "runtime")
+        if n is not None and now > n:
+            items.append(
+                v("core-exempt", CONTRACTS, "runtime", f"runtime の印がベースブランチより増えた（{n} → {now}）。承認ゲートで人が見る")
+            )
     metrics.update(allowed=allowed, violations=len(items), base=base, ratchet=state)
     if targets:
         metrics.update(targets=len(targets), outside=outside)

@@ -25,5 +25,9 @@
     "plugins/ndf/scripts/hook-env.py",
     "plugins/ndf/scripts/hook_lib/worktree.py",
     "plugins/ndf/scripts/lib/README.md"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json・codex.json が起動する"
+  }
 }

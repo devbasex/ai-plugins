@@ -59,15 +59,24 @@ def initial(root: Path, sha: str) -> bool:
     return CHECKER not in text
 
 
+def base_knows(root: Path, sha: str, kind: str) -> bool:
+    """merge-base の検査（`scripts/check-ndf-contracts.py`）が種類 `kind` を知っているか。"""
+    return f'"{kind}"' in (_git(root, "show", f"{sha}:scripts/{CHECKER}") or "")
+
+
 def added(root: Path, sha: str, allow_rel: str, now: list[dict], name_of) -> list[dict]:
-    """merge-base に無く今の木にある項目。同じ差分で同じ kind・name の項目を消した付け替えは数えない。"""
+    """merge-base に無く今の木にある項目。同じ差分で同じ kind・name の項目を消した付け替えは数えない。
+    merge-base の検査が知らない種類の項目は数えない（その種類を入れる変更が初めて置く行のため。#2337 の決定 6）。"""
     before = _names_at(root, sha, allow_rel)
     now_names = {name_of(r) for r in now}
     gone = [_row_at(root, sha, allow_rel, f) for f in sorted(before - now_names)]
     removed = Counter((r.get("kind"), r.get("name")) for r in gone)
+    known: dict[str, bool] = {}
     out = []
     for r in now:
         if name_of(r) in before:
+            continue
+        if not known.setdefault(r["kind"], base_knows(root, sha, r["kind"])):
             continue
         if removed[(r["kind"], r["name"])] > 0:
             removed[(r["kind"], r["name"])] -= 1

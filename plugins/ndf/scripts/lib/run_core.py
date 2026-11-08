@@ -39,6 +39,7 @@ from typing import Callable, NoReturn
 LIB = Path(__file__).resolve().parent
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
+import jsonio  # noqa: E402
 import secret_redact  # noqa: E402
 import step_result  # noqa: E402
 
@@ -154,9 +155,7 @@ def _write_result_file(path: str | None, obj: dict) -> None:
     if not path:
         return
     try:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
+        jsonio.write_atomic(path, obj, indent=None)
     except OSError as e:
         print(f"[ndf run-core] 結果ファイルへ書けない: {path}: {e}", file=sys.stderr)
 
