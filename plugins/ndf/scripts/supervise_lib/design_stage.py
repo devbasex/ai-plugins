@@ -19,6 +19,7 @@ from typing import Callable
 
 import design_results as dr
 import gh_call
+from design_docs import connected_docs, name_numbers
 from step_result import result
 from supervise_lib.decl import glossary_ready
 from supervise_lib.procedures import DESIGN_RESULTS, absorbed_condition, closed_condition, with_touched
@@ -91,41 +92,77 @@ def merged_design_pr(root: str, base: str, n: int, budget: Budget | None = None)
     return int(text) if text.isdigit() else None
 
 
-def changed_design_docs(root: str, base: str, pr: int, budget: Budget | None = None) -> list[tuple[str, str]]:
-    """PR が変えた `issues/*.md` の、`origin/<base>` でのパスと中身。起点から消えたパスは読み飛ばす（決定 11）。
-    打ち直しても `gh` / `git` が 0 以外なら ReadFailed。"""
+def changed_design_docs(root: str, base: str, pr: int, budget: Budget | None = None) -> tuple[list[tuple[str, str]], list[str]]:
+    """PR が変えた `issues/*.md` の、`origin/<base>` でのパスと中身と、`origin/<base>` の `issues/` の直下の設計文書の
+    一覧（#2453 の決定 1）。起点から消えたパスは読み飛ばす（決定 11）。打ち直しても `gh` / `git` が 0 以外なら ReadFailed。"""
     budget = budget or Budget()
     p = _gh_retrying(root, ["pr", "view", str(pr), "--json", "files", "--jq", ".files[].path"], budget)
     paths = [f for f in p.stdout.split() if re.fullmatch(r"issues/[^/]+\.md", f)]
-    if not paths:
-        return []
     _git_retrying(root, ["fetch", "-q", "origin", base], budget)
     # -z: core.quotePath で引用された名前は gh の実パスと一致しないため、NUL 区切りで実際の名前を読む
     listed = _git_retrying(root, ["ls-tree", "-r", "-z", "--name-only", f"origin/{base}", "--", "issues/"], budget).stdout
     present = {f for f in listed.split("\0") if f}
-    return [(f, _git_retrying(root, ["show", f"origin/{base}:{f}"], budget).stdout) for f in paths if f in present]
+    base_docs = sorted(f for f in present if re.fullmatch(r"issues/[^/]+", f) and name_numbers(f) is not None)
+    return [(f, show_base(root, base, f, budget)) for f in paths if f in present], base_docs
+
+
+def show_base(root: str, base: str, path: str, budget: Budget) -> str:
+    return _git_retrying(root, ["show", f"origin/{base}:{path}"], budget).stdout
+
+
+def _parsed(docs: list[tuple[str, str]], problems: list[dr.CellProblem]) -> list[dr.Row] | None:
+    """文書ごとに表を読み、行を合わせる。読める表が 1 本も無ければ None。セルの形の誤りは `problems` へ集める
+    （誤りのある文書も表を持つ文書として数える。#2453 の決定 4）。"""
+    found: list[list[dr.Row]] = []
+    for f, t in docs:
+        try:
+            rows = dr.parse_results(t, f)
+        except dr.DesignCellError as e:
+            problems.extend(e.problems)
+            found.append([])
+            continue
+        if rows is not None:
+            found.append(rows)
+    return [row for rs in found for row in rs] if found else None
+
+
+def _rows_for_issue(root: str, base: str, n: int, budget: Budget, res: dr.DesignResults, problems: list[dr.CellProblem]):
+    """課題 n の設計 PR と表の行を返す（PR が無ければ `(None, None)`）。PR が変えた文書に表が無ければ、
+    課題と番号でつながるベースブランチの設計文書から表を探す（#2453 の決定 8）。`res.base_docs` を更新する。"""
+    pr = merged_design_pr(root, base, n, budget)
+    if pr is None:
+        return None, None
+    changed, base_docs = changed_design_docs(root, base, pr, budget)
+    res.base_docs = base_docs
+    rows = _parsed(changed, problems)
+    if rows is None:
+        seen = {f for f, _ in changed}
+        linked = [f for f in connected_docs(base_docs, [n]) if f not in seen]
+        rows = _parsed([(f, show_base(root, base, f, budget)) for f in linked], problems)
+    return pr, rows
 
 
 def read_results(root: str, base: str, design: list[int], budget: Budget | None = None) -> dr.DesignResults:
     """設計の課題ごとに設計の結果を読んで合わせる。PR が無い・表が無い課題は `unread` へ入れる。
-    一時的な失敗が打ち直しの後も残れば、その課題で止めて ReadFailed（読んでいない課題を `unread` に持つ。決定 10）。"""
+    PR が変えた文書に表が無ければ、課題と番号でつながるベースブランチの設計文書から表を探す（#2453 の決定 8）。
+    一時的な失敗が打ち直しの後も残れば、その課題で止めて ReadFailed（読んでいない課題を `unread` に持つ。決定 10）。
+    触るファイルのセルの形の誤りは、すべての課題と文書から集めてから DesignCellError（#2453 の決定 4）。"""
     budget = budget or Budget()
     res = dr.DesignResults()
+    problems: list[dr.CellProblem] = []
     for i, n in enumerate(design):
         try:
-            pr = merged_design_pr(root, base, n, budget)
-            rows = None
-            if pr is not None:
-                found = [r for r in (dr.parse_results(t, f) for f, t in changed_design_docs(root, base, pr, budget)) if r is not None]
-                rows = [row for rs in found for row in rs] if found else None
+            pr, rows = _rows_for_issue(root, base, n, budget, res, problems)
         except ReadFailed as e:
             raise ReadFailed(e.command, e.tail, n, list(design[i + 1 :])) from e
         if pr is not None:
             res.design_prs.append(pr)
         if rows is None:
             res.unread.append(n)
-        else:
+        elif not problems:
             res.add(rows)
+    if problems:
+        raise dr.DesignCellError(problems)
     return res
 
 
