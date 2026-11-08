@@ -20,6 +20,7 @@ import gh_call
 import stage_skills
 import step_read
 import test_strategy as ts
+from step_result import GATE_CODES
 from supervise_lib import decl, paths, plan as plan_mod
 import limits
 from supervise_lib.claude import TAIL, run_ticking
@@ -29,7 +30,7 @@ import project_mvv
 
 def is_gate(code: int | None) -> bool:
     """run のステップの終了コード 10〜19 は共通の契約の承認ゲート（lib/step_result.py の EXIT_GATE）。"""
-    return code is not None and 10 <= code <= 19
+    return code is not None and code in GATE_CODES
 
 
 def parse_decision(text: str) -> dict:
