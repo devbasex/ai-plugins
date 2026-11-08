@@ -5002,43 +5002,37 @@
       "term": "方針の名前",
       "context": "ndf-workflow",
       "meaning": "上限の宣言の 1 行を指す名前。入口の契約と部品の呼び出しが、値でなくこの名前で上限を引く（#2343）",
-      "source": "",
-      "pending_source": "issues/issue-2343-requirements.md"
+      "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "原因の鍵",
       "context": "ndf-workflow",
       "meaning": "失敗が前回と同じ原因かを見る値。例外の型と、数字・時刻・パスを伏せた失敗の理由の文から作る（#2343）",
-      "source": "",
-      "pending_source": "issues/issue-2343-requirements.md"
+      "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "再試行",
       "context": "ndf-workflow",
       "meaning": "失敗した同じ呼び出しを、同じプロセスの中で間隔を置いて打ち直すこと。条件が揃うまで問い合わせる待ちとは別である（#2343）",
-      "source": "",
-      "pending_source": "issues/issue-2343-requirements.md"
+      "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "ステップの打ち直し",
       "context": "ndf-workflow",
       "meaning": "プランの判定役（judge）が、失敗したステップを同じステップのまま流し直すと返すこと（#2343）",
-      "source": "",
-      "pending_source": "issues/issue-2343-requirements.md"
+      "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "眠りのループ",
       "context": "ndf-workflow",
       "meaning": "本体（入れ子の関数を除く）で sleep を呼ぶ for / while のループ。再試行と待ちの両方が当たり、lib/waits.py の外では構造チェックが落とす（#2343）",
-      "source": "",
-      "pending_source": "issues/issue-2343-design.md"
+      "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "最後の照会",
       "context": "ndf-workflow",
       "meaning": "待ちの次の眠りが上限を超えるとき、残りの秒だけ眠った後に上限の時刻に打つ 1 回の照会（#2343）",
-      "source": "",
-      "pending_source": "issues/issue-2343-design.md"
+      "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
       "term": "名前の対応表",

@@ -148,5 +148,6 @@
 | [ndf-repo-assumptions-check.md](ndf-repo-assumptions-check.md) | リポジトリ前提の検査の理由と境界（語とファイルの組ごとに当たりの数で宣言し、超えたら 1・減ったら 2 で落とす）、検査のコマンドの引数と終了コード・例外リストの項目の形・CI のジョブ `skill-repo-assumptions-check`・宣言を読む 4 か所の契約、既知の違反の行き先。書き方は `AUTHORING.md` の「対象リポジトリを仮定しない」が正 |
 | [ndf-relay-lane-parent-session-env.md](ndf-relay-lane-parent-session-env.md) | 中継の専用サーバーが親の claude のセッションの環境を持っていても、起動の印を持つ relay.py run が判定の前にその環境を外し、アカウントを選んでレーンを起動すること（外す変数の 3 区分・役割の出所の確かめ方・判定の順序） |
 | [ndf-lease-stage-and-concurrent-runs.md](ndf-lease-stage-and-concurrent-runs.md) | 実行の持ち主の段: 持ち主の鍵を宣言した 6 つの入口が鍵を取り・返し、生きた持ち主がいれば止まること（結果 JSON の lease・断りの案内・単位 run と session）、キューの再開で --from が前の途中に勝つこと。持ち主の記録の形と片付けは ndf-run-state-owner-and-sweep.md が正 |
+| [ndf-limits-declaration-and-retry-policy.md](ndf-limits-declaration-and-retry-policy.md) | 上限の宣言（contracts/limits.json）と方針の名前での引き方、待ちの部品の同じ原因の上限と最後の照会、判定役が返すステップの打ち直しの上限、構造チェック limit-literal / sleep-loop。値の一覧は宣言と契約の一覧が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
