@@ -132,11 +132,17 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 ## 実行
 
-Skill のディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。**値のある引数だけを
+**対象のリポジトリの中（メインディレクトリか worktree）で**、次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+駆動の位置は解決のエントリポイント（`resolve.sh`）が導入先から求める（[scripts-lookup.md](../development-workflow/references/scripts-lookup.md)）。
+駆動はリポジトリを作業ディレクトリから求めるため、**Skill のディレクトリへ `cd` しない**（`cd` したときは、`cd` する前の場所が作業ツリーならそこで続ける）。
+シェルの変数は呼び出しをまたいで残らないため、各ブロックを 1 回の呼び出しとして打つ。**値のある引数だけを
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
   [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
@@ -145,9 +151,22 @@ python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rou
 124 が返るあいだ**別の呼び出しとして**打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
 
 ```bash
+# 起動（1 回の呼び出し）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
-bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> [上と同じ引数]
-bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$CR/drive.py" <PR> [上と同じ引数]
+```
+
+```bash
+# 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
+bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
 待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
@@ -166,7 +185,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
 振動を検知したときは、メインが正しい状態を決めてから打ち直す。
 
-再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
+再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`<git の共通ディレクトリ>/ndf/state/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status` / `ci` / `ci_reason`）である。`ci` は最後のラウンドの
 継続的統合の判定（`ci.verdict`。無ければ `null`）、`ci_reason` はその判定が `unverified`・`meta_only`・`pending` のときの理由

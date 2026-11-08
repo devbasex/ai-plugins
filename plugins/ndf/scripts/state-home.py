@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""NDF の状態の置き場の根を出す・旧の置き場から台帳と記録を移す（#2766）。結果は統一 JSON レポートを 1 行で標準出力へ出す。
+
+| 副命令 | 役割 |
+| --- | --- |
+| `path` | 作業ディレクトリで使う 3 つの根（チェックアウト・利用者・コンテナ。`lib/state_home.py`）を出す |
+| `migrate` | 旧 `~/.local/state/ndf` から移す。利用者の台帳は `~/.claude/ndf/state` へ足し合わせ（`.jsonl` は行を時刻の順に並べ直し、旧は `<名前>.migrated` で残す）、耐久の記録 `dbos/` とプランの状態 `sv/` は打った作業ツリーのチェックアウトの根へ移す。別の migrate が動いている・旧の耐久の記録のロックが持たれていれば何も移さず止まる。何度打ってもよい |
+
+旧の置き場は読まない。更新したら各コンテナで、動いているプランを止めてから、主のリポジトリの作業ツリーから一度 `migrate` を打つ。
+移行の前の queue は `--resume` で続けられない（新しく流す）。
+
+終了コード: 0 移した・移すものが無い / 1 旧に残したものがある（移し先に同じ名前がある。`items` に載せる）・何も移さず止まった
+（別の migrate が動いている・動いている耐久ワークフローのロックがある。持たれているロックを `items` に載せる）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import state_checkout  # noqa: E402
+import state_home as sh  # noqa: E402
+from step_result import emit, result  # noqa: E402
+
+TOOL = "state-home"
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="state-home.py", description=__doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("path", help="3 つの根を出す")
+    sub.add_parser("migrate", help="旧の根から台帳・耐久の記録・プランの状態を移す")
+    args = ap.parse_args(argv)
+    if args.cmd == "path":
+        metrics = {"checkout": str(sh.checkout_home()), "user": str(sh.user_home()), "container": str(sh.container_home())}
+        emit(result(TOOL, "ok", f"チェックアウトの根は {metrics['checkout']}、利用者の根は {metrics['user']}", metrics=metrics))
+    r = state_checkout.migrate_all()
+    ok = r["status"] in ("migrated", "none")
+    items = [{"kind": "lock", "held": p} for p in r["held"]]
+    items += [{"kind": "ledger", "kept": p} for p in r["kept"]]
+    for kind in ("dbos", "sv"):
+        items += [{"kind": kind, "moved": p} for p in r[kind]["moved"]]
+        items += [{"kind": kind, "kept": k["path"], "reason": k["reason"]} for k in r[kind]["kept"]]
+    metrics = {
+        "result": r["status"],
+        "from": r["from"],
+        "to": r["to"],
+        "moved": len(r["moved"]),
+        "checkout": r["checkout"]["to"],
+        "dbos_moved": len(r["dbos"]["moved"]),
+        "dbos_kept": len(r["dbos"]["kept"]),
+        "sv_moved": len(r["sv"]["moved"]),
+        "sv_kept": len(r["sv"]["kept"]),
+        "note": r["note"],
+    }
+    emit(result(TOOL, "ok" if ok else "stopped", r["summary"], items=items, metrics=metrics))
+
+
+if __name__ == "__main__":
+    main()

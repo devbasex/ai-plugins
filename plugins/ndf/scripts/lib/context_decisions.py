@@ -1,6 +1,6 @@
 """境界の判定の記録・費用の見込み・窓と適用値の受け渡し・作業ごとの集計（#2262）。
 
-状態ディレクトリは `NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context` の順（決定 12。
+状態ディレクトリは `NDF_CONTEXT_DIR` → `<状態の根>/context` の順（根は `state_home.container_home`。決定 12。
 `CLAUDE_PLUGIN_DATA` は statusline に渡らないため使わない）。
 
 | ファイル | 中身 | 保持 |
@@ -28,6 +28,7 @@ from typing import Iterator, Mapping
 import clock
 import context_policy as cp
 import jsonio
+from state_home import container_home
 from context_policy import REASONS  # noqa: F401  sprint-state.py の --reason の選択肢
 from usage_ledger import cache_writes, now_utc
 
@@ -48,14 +49,13 @@ def context_state_dir(env: Mapping | None = None) -> Path:
     if env is None:  # 読む変数を名前で書く（契約の検査が読みを拾う）
         env = {
             "NDF_CONTEXT_DIR": os.environ.get("NDF_CONTEXT_DIR"),
+            "NDF_STATE_HOME": os.environ.get("NDF_STATE_HOME"),
             "XDG_STATE_HOME": os.environ.get("XDG_STATE_HOME"),
             "HOME": os.environ.get("HOME"),
         }
     if env.get("NDF_CONTEXT_DIR"):
         return Path(env["NDF_CONTEXT_DIR"])
-    if env.get("XDG_STATE_HOME"):
-        return Path(env["XDG_STATE_HOME"]) / "ndf" / "context"
-    return Path(env.get("HOME") or "/tmp") / ".local" / "state" / "ndf" / "context"
+    return container_home({**env, "HOME": env.get("HOME") or "/tmp"}) / "context"
 
 
 def decisions_repo(root) -> str:

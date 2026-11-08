@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -281,6 +282,25 @@ def test_a_record_that_cannot_take_the_lock_changes_nothing(repo: Path, state: P
     assert result.returncode == 0
     assert path.read_bytes() == before
     assert len(result.stderr.strip().splitlines()) == 1
+
+
+def test_a_record_keeps_a_live_lock_of_another_container(repo: Path, state: Path) -> None:
+    """通過記録は複数のコンテナが共有する置き場にある。ロックは PID 名前空間を書き、別のコンテナの生きたロックを
+    PID で消えたと読んで捨てない。"""
+    record(repo, state, 221, "stage", "設計")
+    path = state_file(state, 221)
+    lock = Path(str(path) + ".lockdir")
+    assert run_lib(f'wf_lock_acquire "{lock}" 1').returncode == 0
+    scope, until = (lock / "owner_scope").read_text(encoding="utf-8").splitlines()
+    assert scope == run_lib("_ndf_lock_scope").stdout.strip() and int(until) > time.time()
+
+    # 別のコンテナの持ち主: その PID はこちらに無い
+    (lock / "owner_scope").write_text(f"pid:[4026500000]\n{until}\n", encoding="utf-8")
+    (lock / "pid").write_text("4194000\n", encoding="utf-8")
+    before = path.read_bytes()
+    result = record(repo, state, 221, "stage", "計画")
+
+    assert result.returncode == 0 and path.read_bytes() == before and lock.exists()
 
 
 def test_a_wrong_argument_returns_two(repo: Path, state: Path) -> None:

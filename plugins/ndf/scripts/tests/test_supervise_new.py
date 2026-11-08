@@ -21,6 +21,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import commands, engine, pr as pr_step  # noqa: E402
+from supervise_lib.verify_steps import RECLAIM_LIMIT, with_margin  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sprint_args import new_sprint_args  # noqa: E402
@@ -710,6 +711,9 @@ def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
     assert approved["next"] == merge["next"] == "end"
     # CI の基盤待ちは judge を通らずに止まり（#1645）、ベースブランチとの衝突は取り込みへ戻る（#1917）
     assert merge["on_exit"] == approved["on_exit"] == {"75": "stop", "4": "base-return"}
+    # マージに続く後片付けのテスト環境の回収の分を足す（#2660 の決定 8）
+    ci_wait = int(merge["cmd"].split("--timeout ")[1].split()[0])
+    assert merge["timeout"] == approved["timeout"] == with_margin(ci_wait) + RECLAIM_LIMIT
 
 
 def test_plan_promote_with_mvv_judges_before_merging(tmp_path):

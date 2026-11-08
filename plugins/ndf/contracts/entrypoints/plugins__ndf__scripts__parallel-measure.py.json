@@ -45,11 +45,14 @@
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
-    "UV_PROJECT_ENVIRONMENT"
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {

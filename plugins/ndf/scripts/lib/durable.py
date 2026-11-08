@@ -16,7 +16,7 @@
     wid = durable.start(ref, plan_workflow, prefix)       # done なら何も始めない
     out = ref.output if ref.action == "done" else durable.output_of(wid)
 
-- 置き場: `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`（`records_dir`）
+- 置き場: `NDF_DBOS_DIR` → `<チェックアウトの根>/dbos`（`records_dir`。根は `state_home.checkout_home`）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`。ファイル名・executor_id・ファイルロック（`<鍵>.lock`）に使う（I17）
 - 形式の版: `FORMAT`。耐久ワークフローの中の DBOS の呼び出しの順を変えたら上げる（I18・決定 28）。
   途中の記録を続ける必要があるときは、上げずに `patched` で新旧の処理を分ける（#2616 の決定 2）

@@ -20,7 +20,9 @@
 | [worktree-branch.sh](worktree-branch.sh) | worktree の一覧・追従先・ブランチの判定（`wt_current_branch` ほか） | 同上 |
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
-| [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
+| [lock-common.sh](lock-common.sh) | 排他の取得と解放。持ち続ける上限の秒を受け、別の PID 名前空間の持ち主のロックをその時刻まで捨てない | 上の 2 つと `development-workflow` |
+| [worktree-testenv-sweep.sh](worktree-testenv-sweep.sh) | テスト環境の片付け（使われていない環境の停止、残った割り当ての回収、回収の予約） | `worktree-testenv.sh` |
+| [run-limited.sh](run-limited.sh) | コマンドを別のプロセスグループで走らせ、期限か呼び出し元の消失で止める。`timeout` の有無に左右されない | `worktree-testenv-sweep.sh` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける。`main()` が `deps.require("procs", "locks")` を呼ぶ | 収束ループの 2 つ / `external-ai.py` |
 | [monitor_patterns.py](monitor_patterns.py) | 監視の照合の表（利用上限・致命・警告・無害・CLI の上限・codex の終わりの印）。標準ライブラリだけを読む | `monitor.py` / `supervise_lib/claude.py`（`USAGE_LIMIT_FATAL`） |
 | [monitor_scan.py](monitor_scan.py) | 監視のログの末尾の読み取りと、照合の表による致命・警告・利用上限の判定 | `monitor.py` |
@@ -99,7 +101,7 @@
 | [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
 | [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | `hook_lib/`（token の guard・待ちの通知） |
-| [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・途中の記録を続ける新旧の分岐（`patched`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
+| [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `<git の共通ディレクトリ>/ndf/state/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・途中の記録を続ける新旧の分岐（`patched`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
 | [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 | [lap_cost.py](lap_cost.py) | 周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
@@ -137,7 +139,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 
 | 項目 | 必須 | 形 | 意味 |
 | --- | --- | --- | --- |
-| `tool` | はい | 文字列 | 呼んだ Skill かスクリプトの名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close`、`progress-record.sh` は `progress-record`、`projects-sync.sh` は `projects-sync` |
+| `tool` | はい | 文字列 | 呼んだ Skill かスクリプトの名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close`、`progress-record.sh` は `progress-record`、`projects-sync.sh` は `projects-sync`、`worktree-testenv.sh reclaim` は `testenv-reclaim` |
 | `status` | はい | `ok` / `gate` / `stopped` | 3 値に固定する |
 | `summary` | はい | 文字列 | 1 行の要約。報告へそのまま写せる |
 | `items` | はい | オブジェクトの配列 | 対象ごとの結果。`kind` / `name` / `result` を持つ。`result` の語彙はスクリプトごとに決めてよい |

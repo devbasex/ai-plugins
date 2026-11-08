@@ -65,6 +65,16 @@
           "name"
         ]
       },
+      "park": {
+        "options": [
+          "--clear",
+          "--done",
+          "--lane"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
       "present": {
         "options": [
           "--approval",
@@ -142,6 +152,7 @@
       "wait": {
         "options": [
           "--after",
+          "--changes-after",
           "--timeout"
         ],
         "positionals": [
@@ -155,6 +166,7 @@
     "CODEX_HOME",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
@@ -177,6 +189,7 @@
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -216,6 +229,8 @@
   "stdin": "text",
   "stdout": "step-result",
   "writes": [
+    "answer-hold-json",
+    "answer-hold-log-jsonl",
     "answer-json",
     "answers-sent-json",
     "approved-txt",
@@ -228,6 +243,7 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
+    "resume-mark-json",
     "run-log",
     "run-pid"
   ],

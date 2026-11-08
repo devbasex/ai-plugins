@@ -126,6 +126,7 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 - **退避先は、そのブランチを含む版が本番へ出たときに `release` の後片付けが回収の候補として挙げ、人の承認（`ndf-ask:redline:C4`）を得てから消す**（`merged-steps.py sweep-trash --ref <本番に出たコミット>` が候補を挙げ、承認の後に `--yes --only <承認した退避先>...` を付けて、その名前の退避先だけを消す。候補を挙げた後に増えた退避先は消さない）。退避先は Git に無い利用者のファイルを含み消すと戻せないため、本番の承認だけでは消さない（共通原則の C3・C4）。それまでは残す。退避先とブランチの対応は退避先の隣の台帳 `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば候補になる。台帳の無い退避先は消さずに件数だけを報告する
 - 追跡ファイルの未コミットの変更（modified / staged / 削除）は退避の対象でなく `--force` が消すため、残っていれば外さず `kept` にする（`reason` に件数とファイル名）。コミットするか捨ててから、もう一度実行する
 - worktree を外す直前に開いた公開を閉じ、テスト環境を破棄する（ボリュームも既定で消す。`.ndf/worktree.json` の `testenv.discard_volumes` が `false` なら残す）。公開を閉じられなければ `kept` で、`reason` に環境名・URL・打ち直しのコマンドが載る。破棄できなければ worktree は外れ、`reason` に環境名が載る
+- メインディレクトリの取り込みの後に、worktree の消えた割り当てのテスト環境を回収する（全体で 300 秒まで。ボリュームは上の破棄と同じ宣言に従う）。結果は `kind` が `testenv` の行で `items` に載り（`reclaimed` / `released` / `failed` / `foreign` / `exposed` / `deferred` / `unseen`）、件数は `metrics` の `reclaimed_testenvs`・`reclaim_failed`・`reclaim_deferred` に載る。走らなかったときは `kind` が `testenv-reclaim` で `result` が `not_run` の行が 1 つ載る。回収の失敗で `status` と終了コードは変わらない。結果の読み方は `worktree` の `references/test-execution.md` の「後片付け」にある
 - レビュー worktree（`<worktree-base>/<owner>--<repo>` の下の `pr<PR番号>`。`<worktree-base>` はコンテナの宣言があるリポジトリでは `<メインディレクトリ>/.worktrees/.ndf`、無ければシステムの一時ディレクトリ配下）もスクリプトが外す。cross-review / cross-refactoring の実行の要約は worktree の外にあり、消えない
 
 ### マージから行うとき

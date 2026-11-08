@@ -72,3 +72,6 @@ reports/
 # スライドの生成スクリプトの依存と生成物（#2065）
 node_modules/
 *.pptx
+
+# 承認資料。配布の工程が書く記録で、コミットしない（#2009）
+issues/approval-*.md
