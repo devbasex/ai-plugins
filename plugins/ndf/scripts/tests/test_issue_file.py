@@ -304,7 +304,21 @@ def test_note_and_create_agree_on_the_other_repo_flag(fake, tmp_path, target):
 
 def test_create_without_consent_writes_the_approval_material_and_stops(fake, tmp_path):
     target_is(fake, "example/app")
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "題", "--body-file", body_file(tmp_path), "--origin", "PR #1900", "--label", "bug")
+    code, obj = run(
+        "create",
+        "--label",
+        "bug",
+        "--repo",
+        REPO,
+        "--title",
+        "題",
+        "--body-file",
+        body_file(tmp_path),
+        "--origin",
+        "PR #1900",
+        "--label",
+        "bug",
+    )
     assert code == step_result.EXIT_GATE and obj["status"] == "gate"
     assert len(obj["metrics"]["digest"]) == 64
     assert obj["metrics"]["other_repo"] is True
@@ -405,7 +419,9 @@ def test_create_passes_only_the_labels_it_was_given(fake, tmp_path):
 def test_create_keeps_an_origin_already_written(fake, tmp_path):
     target_is(fake, REPO)
     text = BODY + "PR #1900\n"
-    _, gate = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1900")
+    _, gate = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1900"
+    )
     body = Path(gate["metrics"]["body_path"]).read_text(encoding="utf-8")
     assert body.count("PR #1900") == 1
 
@@ -413,7 +429,9 @@ def test_create_keeps_an_origin_already_written(fake, tmp_path):
 def test_an_origin_with_a_longer_number_is_not_the_same_origin(fake, tmp_path):
     target_is(fake, REPO)
     text = BODY + "PR #19000 の続き\n"
-    _, gate = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1900")
+    _, gate = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1900"
+    )
     section = Path(gate["metrics"]["body_path"]).read_text(encoding="utf-8").split("## 由来")[1]
     assert section.strip().splitlines()[0] == "PR #1900"
 
@@ -445,7 +463,9 @@ def test_a_stale_digest_does_not_file(fake, tmp_path):
 @pytest.mark.parametrize("heading", BUG_REQUIRED)
 def test_a_missing_heading_stops_before_github(fake, tmp_path, heading):
     text = BODY.replace(f"## {heading}\n", "")
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1"
+    )
     assert code == 1
     assert {"heading": heading, "result": "missing"} in obj["items"]
     assert fake.calls == []
@@ -453,20 +473,26 @@ def test_a_missing_heading_stops_before_github(fake, tmp_path, heading):
 
 def test_a_missing_origin_heading_is_not_added(fake, tmp_path):
     text = BODY.replace("## 由来\n", "")
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1"
+    )
     assert code == 1 and [g["heading"] for g in obj["items"]] == ["由来"]
 
 
 def test_an_empty_section_stops(fake, tmp_path):
     text = BODY.replace("利用者が止まる。", "   ")
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1"
+    )
     assert code == 1
     assert obj["items"] == [{"heading": "影響", "result": "empty"}]
 
 
 def test_an_empty_presumption_section_stops_before_github(fake, tmp_path):
     text = BODY.replace("## 起票者の推定\n\n無し\n", "## 起票者の推定\n\n")
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1"
+    )
     assert (code, obj["items"], fake.calls) == (1, [{"heading": "起票者の推定", "result": "empty"}], [])
 
 
@@ -478,7 +504,9 @@ def test_a_presumption_section_of_none_does_not_stop(fake, tmp_path):
 
 def test_a_heading_inside_a_fence_is_not_counted(fake, tmp_path):
     text = BODY.replace("## 再現手順\n\n`a.py:3` を入力 A で打つ。\n", "```markdown\n## 再現手順\n```\n")
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1"
+    )
     assert code == 1 and {"heading": "再現手順", "result": "missing"} in obj["items"]
 
 
@@ -493,7 +521,9 @@ def test_a_body_without_exactly_one_kind_stops_as_kind_unknown(fake, tmp_path, l
 
 def test_the_kind_decides_the_required_items(fake, tmp_path):
     """機能の本文には目的・対象範囲・受け入れ条件が要り、不具合の 4 節は要らない。"""
-    code, obj = run("create", "--label", "enhancement", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "enhancement", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path), "--origin", "PR #1"
+    )
     assert code == 1
     assert [g["heading"] for g in obj["items"]] == ["目的", "対象範囲", "受け入れ条件"]
 
@@ -508,13 +538,17 @@ def test_the_body_judgement_does_not_call_github(fake, tmp_path):
 def test_the_old_six_section_body_is_not_accepted(fake, tmp_path):
     old = "## 何を見つけたか\n\nA\n\n## どこで見つけたか\n\nB\n\n## なぜこの変更の範囲外なのか\n\nC\n\n"
     old += "## 直さないと何が起きるか\n\nD\n\n## 起票者の推定\n\n無し\n\n## 由来\n"
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, old), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, old), "--origin", "PR #1"
+    )
     assert code == 1 and {"heading": "事象", "result": "missing"} in obj["items"]
 
 
 def test_a_section_after_the_request_that_is_not_a_record_stops(fake, tmp_path):
     text = BODY + "\n## 依頼（原文）\n\n> 直して\n\n## 補足\n\nほか\n"
-    code, obj = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    code, obj = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1"
+    )
     assert code == 1 and obj["items"] == [{"heading": "依頼（原文）", "result": "order"}]
 
 
