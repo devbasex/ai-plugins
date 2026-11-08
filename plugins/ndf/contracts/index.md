@@ -209,7 +209,7 @@
 | `claude-account-dir.lock` | seconds 2 | .claude.json の排他の待ちの上限 | `plugins/ndf/scripts/lib/claude_account_dir.py:<module>` |
 | `claude-accounts.expiry-margin` | seconds 60 | 残りがこの秒数以下のアクセストークンは期限切れとみなす | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
 | `claude-accounts.lock` | seconds 30 | アカウントの置き場の排他を待つ上限 | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
-| `claude-accounts.refresh` | seconds 3 | トークンの更新の排他の中の宛先の待ちの上限（#1576 の決定 12） | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
+| `claude-accounts.refresh` | seconds 3 | トークンの更新の排他の中の宛先の待ちの上限 | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
 | `claude-training.call` | seconds 3 | claude の学習の設定を読み書きするコマンドの上限 | `plugins/ndf/scripts/lib/claude_training.py:<module>` |
 | `claude-training.keychain` | seconds 2 | キーチェーンを読むコマンドの上限 | `plugins/ndf/scripts/lib/claude_training.py:<module>` |
 | `claude-usage.http` | seconds 10 | 使用量の取得先への HTTP の上限 | `plugins/ndf/scripts/lib/claude_usage.py:<module>` |
@@ -218,7 +218,7 @@
 | `codex-training.call` | seconds 3 | codex の学習の設定を読み書きするコマンドの上限 | `plugins/ndf/scripts/lib/codex_training.py:<module>` |
 | `container-reach.exec` | seconds 60 | compose exec の上限。コンテナの中の cat 1 回で足りる | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
 | `container-reach.stop-grace` | seconds 5 | 打ち切った起動の、SIGTERM から SIGKILL までの猶予 | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
-| `container-reach.up` | seconds 300 | テスト環境の起動の上限。実測の最長 49 秒の 6 倍（#2567 の決定 3） | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
+| `container-reach.up` | seconds 300 | テスト環境の起動の上限。実測の最長 49 秒の 6 倍 | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
 | `context-decisions.git` | seconds 5 | worktree の根を調べる git の上限 | `plugins/ndf/scripts/lib/context_decisions.py:toplevel` |
 | `cross-refactoring.default-budget` | seconds 1800 | 想定最大時間の既定（分で引数に出す） | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py:<module>` |
 | `cross-refactoring.kill-grace` | seconds 5 | プロセスグループを止めるときの SIGTERM から SIGKILL までの猶予 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/measure.py:<module>`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/process.py:_kill_process_group` |
@@ -290,7 +290,7 @@
 | `supervise.depth-work` | seconds 5400 | 見直し・大整理の work ステップの打ち切り。持ち主の見張りも同じ秒数で止まる | `plugins/ndf/scripts/supervise_lib/sprint_close_steps.py:<module>` |
 | `supervise.design-merge-gh` | seconds 120 | 設計の Pull Request のマージの gh の上限 | `plugins/ndf/scripts/supervise_lib/design_merge.py:_gh_out` |
 | `supervise.design-stage-read` | seconds 120 / interval 15 / per_call 30 / same_cause 3 | 設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち | `plugins/ndf/scripts/supervise_lib/design_stage.py:Budget.__init__`<br>`plugins/ndf/scripts/supervise_lib/design_stage.py:_retrying` |
-| `supervise.impl-stall` | seconds 1800 | 実装のステップの無進捗の許容の既定。実測の記録の間隔の最大 706 秒を十分に上回る値（#2505 の決定 7） | `plugins/ndf/scripts/supervise_lib/verify_steps.py:<module>` |
+| `supervise.impl-stall` | seconds 1800 | 実装のステップの無進捗の許容の既定。実測の記録の間隔の最大 706 秒を十分に上回る値 | `plugins/ndf/scripts/supervise_lib/verify_steps.py:<module>` |
 | `supervise.judge-step` | seconds 600 | 判定役（judge）の呼び出しの上限。ステップの timeout で上書きする | `plugins/ndf/scripts/supervise_lib/pr.py:PrStep._llm_body`<br>`plugins/ndf/scripts/supervise_lib/steps.py:JudgeStep.execute` |
 | `supervise.limit-retry` | seconds 900 | claude の利用上限のリセット時刻が読めないときの待ち。計画の limit_retry_seconds で上書きする | `plugins/ndf/scripts/supervise_lib/claude.py:ClaudeRunner.call` |
 | `supervise.limit-wait-max` | seconds 10800 | claude の利用上限の待ちの最大。計画の limit_wait_max で上書きする | `plugins/ndf/scripts/supervise_lib/claude.py:ClaudeRunner.call` |

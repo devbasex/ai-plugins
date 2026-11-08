@@ -29,7 +29,7 @@
 | [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・停止（プロセスグループごと）。生死とゾンビの判定・cmdline の照合は `procs.py` へ渡す（使う関数の中で import する） | `monitor.py` |
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
-| [limits.py](limits.py) | 上限の宣言（`plugins/ndf/contracts/limits.json`）の読み手。上限の秒・再試行の回数・待ちの間隔を方針の名前で引き（`policy`・`seconds`・`value`）、宣言が読めなければ組み込みの値へ戻らずに止まる（#2343）。監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + `monitor.cli-margin`）も宣言の `monitor.*` から引く（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
+| [limits.py](limits.py) | 上限の宣言（`plugins/ndf/contracts/limits.json`）の読み手。上限の秒・再試行の回数・待ちの間隔を方針の名前で引き（`policy`・`seconds`・`value`）、宣言が読めなければ組み込みの値へ戻らずに止まる。監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + `monitor.cli-margin`）も宣言の `monitor.*` から引く（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）、結果ファイル・監視の記録の読み書き、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`、担当 1 者の結末を書く `_record_outcome` | 同上 |
 | [bg-wait.sh](bg-wait.sh) | 600 秒を超える待ちを、背景の起動（`run`）と 540 秒以内に区切った待ち（`wait`）に分ける。終了コードは rc ファイルに残る | 収束ループの 2 つ（Codex / Kiro / agy で `drive.py` を待つ）/ `cross-review` の手順の監視 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する。起動の直前に `runtime_policy.py check` で作業ディレクトリのリポジトリの宣言と照らし、外なら起動せずに終了コード 3 | 同上 |
@@ -95,7 +95,7 @@
 | [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
 | [textparse.py](textparse.py) | unified diff の足した行の番号。unidiff を呼ぶのはここだけ | 同上 |
 | [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
-| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。上限・間隔・回数は方針で受け、同じ原因（[cause_key.py](cause_key.py) の原因の鍵）の失敗が方針の回数に達したら止まり、期限の時刻に最後の照会を打ってから止まる。止まった理由は結果に載る（#2343）。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
+| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。上限・間隔・回数は方針で受け、同じ原因（[cause_key.py](cause_key.py) の原因の鍵）の失敗が方針の回数に達したら止まり、期限の時刻に最後の照会を打ってから止まる。止まった理由は結果に載る。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
 | [notify.py](notify.py) | Slack の Web API・`.env` の読み取り。slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
 | [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py`・`hook_lib/wait_notify.py` |
 | [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
