@@ -95,7 +95,7 @@ Factory（`ndf-factory`）の語は、語の決定（ランナー）で意味を
 | 計画の所在の一覧 | マシンにある計画の置き場を指す一覧（`$XDG_STATE_HOME/ndf/parallel/homes/`）。別のリポジトリのセッションがレーンの判定と計画の外の判定に使う | 追加（`ndf-workflow`） |
 | 例外の起動 | 計画の外のセッションが、理由を添えた明示の指定（`--outside-plan <理由>`）で開発ループかスプリントを始めること。理由はマシンの記録に残る | 追加（`ndf-workflow`） |
 
-語の決定で意味を変える語（リレーハブ・ランナー・ライン・周回・supervisor・conductor など）は [issue-2733-design-terms.md](issue-2733-design-terms.md) の「用語集の変更」にある。
+語の決定で意味を変える語は、[issue-2733-design-terms.md](issue-2733-design-terms.md) の「用語集の変更」にある。リレーハブ・ランナー・ライン・周回・supervisor・conductor などが当たる。
 
 ## 外部の調査
 
