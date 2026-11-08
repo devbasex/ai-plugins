@@ -370,13 +370,23 @@ def section_prs(root, a):
     return prs, prev, to, extra_out
 
 
+def _pr_fields(to):
+    """PR の読み出しの欄。終点 to があれば絞り込みに使うマージコミットも読む。"""
+    return "title,body,state" + (",mergeCommit" if to else "")
+
+
+def _within_end(root, prs, data, to, extra_out, outside):
+    """終点 to が無ければ prs をそのまま、あれば範囲の外の --prs のうち終点に入っていない番号を外す（included.drop_outside。
+    外した番号は outside へ足す。None なら捨てる）。"""
+    return included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else []) if to else prs
+
+
 def pr_titles(root, prs, skipped=None, to=None, extra_out=(), outside=None):
     """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と利用者向けの変化なしの PR は箇条にしない）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = pr_many(root, [p.number for p in prs], "title,body,state" + (",mergeCommit" if to else ""))
-    if to:
-        prs = included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else [])
+    data = pr_many(root, [p.number for p in prs], _pr_fields(to))
+    prs = _within_end(root, prs, data, to, extra_out, outside)
     return included.titles_of(prs, data, skipped)
 
 
@@ -921,7 +931,7 @@ def cmd_approval_facts(a):
     prs, extra_out = included.section_range(root, prev, dev, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
     data = pr_many(root, [p.number for p in prs], "number,title,body,state,mergeCommit,url")
     outside = []
-    prs = included.drop_outside(root, prs, data, dev, extra_out, outside)  # 終点は承認に出すコミット（#2555 の I2）
+    prs = _within_end(root, prs, data, dev, extra_out, outside)  # 終点は承認に出すコミット（#2555 の I2）
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...{dev}").stdout.strip()
     files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
@@ -995,10 +1005,8 @@ def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None
     """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    fields = "title,body,state" + (",mergeCommit" if to else "")
-    data = data if data is not None else pr_many(root, [p.number for p in prs], fields)
-    if to:
-        prs = included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else [])
+    data = data if data is not None else pr_many(root, [p.number for p in prs], _pr_fields(to))
+    prs = _within_end(root, prs, data, to, extra_out, outside)
     return included.notes_of(prs, data, skipped, replacing, unreadable)
 
 
