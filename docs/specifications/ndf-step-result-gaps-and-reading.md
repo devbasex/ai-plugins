@@ -68,7 +68,7 @@ Factory（`factory/`）は結果 JSON を読まない。
 | 試行の選び方と置き場の区別の共通の関数（`lib/step_read.py`） | 実験版（`plugins/ndf/scripts/experimental/`）のスクリプト |
 | シェルから同じ形を出す CLI と関数（`step_result.py emit`・`lib/step-result.sh`） | hook・statusline・利用者が手で打つだけの補助 |
 | 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）の返し方と、呼ぶ側（`record_stage`・`sprint-close.py`）の読み方 | Factory の進行のイベントの語彙（`factory/contracts` の `result`） |
-| 状態と終了コードの表を `lib/README.md` だけに置くこと | `handoff.py` の終了コード 4・5（共通の表と違う意味で返し、`emit` を通らない。別の Issue で扱う） |
+| 状態と終了コードの表を `lib/README.md` だけに置くこと | — |
 
 **働く範囲は利用先のリポジトリを含む**（`plugins/ndf/scripts/lib/` はリリース対象）。プロジェクトごとに変わる設定は無い。
 

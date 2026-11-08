@@ -201,7 +201,7 @@ sequenceDiagram
 
 ### `sprint-close.py --record-pr`
 
-`<PR番号|0|unknown>` を受ける。`unknown` は課題を理由つきの `kept_open` で返して終了コード 0 で終わる。まとめの
+`<PR番号|0|unknown>` を受ける。`unknown` は課題を理由つきの `kept_open` で返し、承認ゲート（`gate`・終了コード 10）で終わる。まとめの
 プランは `unknown` を組まないため、`unknown` を渡すのは手で打つ入口と、#2230 より前に組んだまとめのプランだけである。
 閉じる条件の判定は `dist_record.released` を使う。
 
