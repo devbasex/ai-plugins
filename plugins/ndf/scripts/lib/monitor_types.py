@@ -40,9 +40,9 @@ def _agent_runtime(agent: str) -> str:
 # import / 監視プロセスがクラッシュしないようにする。
 # (codex round 5 指摘: import 時の `int(os.environ.get(...))` は
 #  `MONITOR_STALL=abc` のような誤設定で落ちてしまうため)
-DEFAULT_TIMEOUT = limits.PHASE_TIMEOUT[limits.DEFAULT_PHASE]
-DEFAULT_STALL = limits.DEFAULT_STALL
-DEFAULT_STALL_AGENT_BUILTIN = limits.AGENT_STALL
+DEFAULT_TIMEOUT = limits.phases()[limits.DEFAULT_PHASE]
+DEFAULT_STALL = limits.stall_default()
+DEFAULT_STALL_AGENT_BUILTIN = limits.stalls()
 DEFAULT_POLL = 15  # 15 sec — env `MONITOR_POLL` で上書き可
 # 心拍の間隔（秒）。待つ側が心拍のファイルの更新時刻を今にする間隔で、見回りの間隔（`DEFAULT_POLL` / `MONITOR_POLL`）とは
 # 別の定数である（cross-refactoring の #1743 決定 3）。`monitor.py` と cross-refactoring の `process.py` がここから読む。
