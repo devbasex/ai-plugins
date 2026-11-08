@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/release-verification-steps.py",
+  "name": "plugin-manifest",
+  "kind": "pending",
+  "reason": "リリースの形 package-plugin の版を plugin.json で読み書きする。別の配置のプラグインを宣言で受けるまで残す",
+  "count": 2,
+  "issue": 1756
+}

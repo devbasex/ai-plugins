@@ -156,7 +156,7 @@ sequenceDiagram
       R->>M: 一致すれば進んだ先端で入れ直す（3 回まで）。一致しなければ gate（10）
     else 先端が同じ
       M->>G: gh pr merge --match-head-commit <比べた先端>
-      R->>G: タグと GitHub Release
+      R->>G: タグと GitHub Release（CD が作ると宣言した行があれば作らない）
       R-->>P: ok（0）
     end
   end
@@ -170,7 +170,7 @@ sequenceDiagram
 | リリース承認ゲートを承認した（承認の記録を書いた） | 人（conductor が `approve --by user`。`--state` の `normal` では本番のプランの先頭の `approve --facts-from` が利用者の承認の記録から書く）か MVV 判定（`mvv-gate.py check --gate release`。`--advise` では書かない） | conductor・リリース |
 | ほかの変更がベースブランチへマージされた | 利用者か別のプラン | リリース（`release/v<版>` を切る前なら比較で見つける。切った後なら比べる相手に入らない） |
 | 承認したコミットから `release/v<版>` の先端までを比べた | `lib/approved_commit.py` の `compare_approved` | `release --channel prod`（一致なら本番チャネルへ、違えば承認ゲート） |
-| 比べた先端を本番チャネルへマージした | `merged-steps.py merge-when-green --expect-head` | `release --channel prod`（タグと GitHub Release へ） |
+| 比べた先端を本番チャネルへマージした | `merged-steps.py merge-when-green --expect-head` | `release --channel prod`（タグと GitHub Release へ。`publishes_release` の行があれば CD の結果へ） |
 
 ### 比較の順序（`compare_approved`）
 
@@ -221,7 +221,7 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 ### 昇格の経路の照合（#1529）
 
 `pace: fast` / `auto` の昇格のプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）は
-`verify` → `prepare` → `mvv` → `note` → `promote` → `record` の順に流れ、`note` か `promote` が落ちたら `handoff` へ進む。
+`verify` → `prepare` → `mvv` → `note` → `promote` → `cd-result` → `record` の順に流れ、`note` か `promote` が落ちたら `handoff` へ進む。
 `promote` ステップは `merged-steps.py promote ... --expect-head-from {state_dir}/work/approval-verify.md --gate-approved mvv` を打つ。
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | 値オブジェクト |
@@ -358,6 +358,9 @@ sequenceDiagram
 `stopped`（1）で止まり、`items[]` に `{"kind": "pr", "name": "#<番号>", "result": "head_moved", "head": <今の先端>, "expected": <SHA>}`
 を載せる。待つ間に別の先端でマージされた PR へタグを打たないためである。一致すれば `gh pr merge --match-head-commit <SHA>`
 でマージする。渡さないときは緑を確かめた先端を `--match-head-commit` に渡す。
+
+`release --channel prod` は承認したコミットを照合した後に、承認の担い手を `--gate-approved` で渡す（承認資料の承認の記録の担い手。
+`--approved-sha` で受けたときは `user`）。宛先が自動反映の本番チャネルでも、マージがリリース承認ゲートで止まらないためである。
 
 ### `merged-steps.py promote --expect-head-from <導入の確認の承認資料>`
 

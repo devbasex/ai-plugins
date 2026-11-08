@@ -51,7 +51,7 @@ def test_referenced_issue_is_not_closed(repo, gh):
     )
     code, out, err = run(gh, repo)
     res = issues_of(out)
-    assert code == 0, (out, err)
+    assert code == 0 and out["status"] == "ok" and "gaps" not in out, (out, err)  # 参照だけの課題は状態に入れない
     assert res["o/r#1"]["result"] == "closed" and res["o/r#2"]["result"] == "kept_open"
     assert gh.get()["closed"] == ["o/r#1"] and not issue_calls(gh, "close", 2)
     # 参照だけの課題 1 件あたり issue view は 1 回（close_one を通らない）、PR 1 本あたり pr view は 1 回
@@ -138,7 +138,8 @@ def test_before_production_keeps_references_open_and_closes_nothing(repo, gh):
     )
     code, out, err = run(gh, repo)
     res = issues_of(out)
-    assert code == 0 and res["o/r#1"]["result"] == "kept_open" and res["o/r#2"]["result"] == "kept_open"
+    assert code == 10 and res["o/r#1"]["result"] == "kept_open" and res["o/r#2"]["result"] == "kept_open"
+    assert out["status"] == "gate" and [g["name"] for g in out["gaps"]] == ["o/r#1"]
     assert NOT_GIVEN in res["o/r#2"]["reason"] and "closed" not in gh.get()
 
 

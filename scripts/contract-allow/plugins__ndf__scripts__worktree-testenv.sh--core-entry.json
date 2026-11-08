@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/worktree-testenv.sh",
+  "name": "",
+  "kind": "core-entry",
+  "reason": "実行の核へまだ移していない（#2337）。移す Pull Request が末尾を run_core.main の 1 文（シェルは rc_enter）にして消す"
+}

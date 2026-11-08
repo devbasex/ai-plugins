@@ -183,9 +183,9 @@ def test_gate_returns_the_same_report_until_from_continues(tmp_path, env):
         {"id": "release", "type": "run", "cmd": note(t, "release"), "next": "end"},
     ])  # fmt: skip
     first = plan.run()
-    assert first.returncode == 0 and "- 結果: 関門" in first.stdout, first.stderr
+    assert first.returncode == 10 and "- 結果: 関門" in first.stdout, first.stderr
     again = plan.run()  # 承認の無い打ち直しは同じ所で止まったまま
-    assert again.returncode == 0 and "- 結果: 関門" in again.stdout
+    assert again.returncode == 10 and "- 結果: 関門" in again.stdout
     assert plan.visits() == ["ready"]
     assert plan.step_lines() == ["ready"]
     attention = [json.loads(l) for l in (plan.state / "progress.jsonl").read_text().splitlines() if '"attention"' in l]
@@ -193,6 +193,9 @@ def test_gate_returns_the_same_report_until_from_continues(tmp_path, env):
     cont = plan.run(start="release")  # 承認の後は --from で続く
     assert cont.returncode == 0 and "- 結果: 完了" in cont.stdout, cont.stderr
     assert plan.visits() == ["ready", "release"]
+    told = plan.run()  # 記録から返す経路も、その実行の結果で終了コードを決める（--from の実行の ok を拾わない）
+    assert told.returncode == 10 and "- 結果: 関門" in told.stdout, told.stderr
+    assert json.loads((plan.state / "phase-result.json").read_text())["status"] == "gate"
 
 
 def test_stop_runs_again_from_the_top(tmp_path, env):
@@ -203,7 +206,7 @@ def test_stop_runs_again_from_the_top(tmp_path, env):
         {"id": "b", "type": "run", "cmd": note(t, "b", f"[ -f {flag} ]"), "next": "end"},
     ])  # fmt: skip
     p = plan.run()
-    assert p.returncode == 3 and "- 結果: 止まった" in p.stdout
+    assert p.returncode == 1 and "- 結果: 止まった" in p.stdout
     flag.touch()
     p = plan.run()  # 止まったの記録は続けず、次の実行の回で頭から流す
     assert p.returncode == 0 and "- 結果: 完了" in p.stdout, p.stderr
@@ -225,7 +228,9 @@ def test_the_orphan_group_of_the_killed_step_is_stopped_before_the_step_runs_aga
     p = plan.run()
     assert p.returncode == 0, p.stderr
     assert "子のプロセスグループ" in p.stderr
-    procs.wait_gone(orphan, 10)
+    deadline = time.monotonic() + 10
+    while procs.pid_alive(orphan) and time.monotonic() < deadline:
+        time.sleep(0.1)
     assert not procs.pid_alive(orphan)
     assert not (plan.state / "step.pid").exists()
     logged = plan.logged()
@@ -320,7 +325,8 @@ def test_supervise_py_run_keeps_its_exit_codes(tmp_path, env):
     plan = Plan(t, env, [{"id": "a", "type": "run", "cmd": note(t, "a", "exit 10"), "gate_next": "end"}])
     for _ in range(2):
         p = subprocess.run([PY, str(SUPERVISE), "run", str(plan.path)], capture_output=True, text=True, env=env, cwd=t, timeout=120)
-        assert p.returncode == 0 and "- 結果: 関門" in p.stdout, p.stderr
+        assert p.returncode == 10 and "- 結果: 関門" in p.stdout, p.stderr
+        assert json.loads((plan.state / "phase-result.json").read_text())["status"] == "gate"
     assert plan.visits() == ["a"]
 
 

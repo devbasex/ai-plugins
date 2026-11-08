@@ -17,7 +17,6 @@ class Step(schema.Shape):
     id: str
     retries: int = 0
     kind: Literal["work", "judge"] = "work"
-    severity: schema.lenient_choice(("high", "medium", "low"), "low") = "low"
     next: list[str] = []
 
 
@@ -32,14 +31,9 @@ def test_errors_become_one_japanese_line_with_the_place():
     assert e.value.problems[0] == ("steps[0].id", "必須の項目が無い")
 
 
-def test_lenient_choice_lowers_unknown_values_and_round_trips():
-    s = schema.load_shape(Step, {"id": "a", "severity": " HIGH "})
-    assert s.severity == "high"
-    assert schema.load_shape(Step, {"id": "a", "severity": "critical"}).severity == "low"
-    assert schema.load_shape(Step, {"id": "a", "severity": 3}).severity == "low"
-    assert schema.dump_shape(s) == {"id": "a", "retries": 0, "kind": "work", "severity": "high", "next": []}
-    with pytest.raises(ValueError):
-        schema.lenient_choice(("a",), "b")
+def test_dump_round_trips():
+    s = schema.load_shape(Step, {"id": "a"})
+    assert schema.dump_shape(s) == {"id": "a", "retries": 0, "kind": "work", "next": []}
 
 
 def test_where_defaults_to_the_whole_and_assignment_is_checked():

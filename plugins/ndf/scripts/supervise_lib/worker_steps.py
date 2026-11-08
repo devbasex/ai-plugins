@@ -13,12 +13,14 @@ from pathlib import Path
 import clock
 import gh_rest
 import slow_step
+import step_read
+from step_result import EXIT_INCOMPLETE
 import usage_aggregate
 from loop_drive import review_answer
 from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.progress_watch import ProgressWatch
-from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
+from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, deliver_skills, last_json
 import project_mvv
 
@@ -26,6 +28,18 @@ import project_mvv
 DEFAULT_TIMEOUT = 1800
 DEFAULT_MAX_PAUSES = 12
 TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足す余裕（秒）
+RESUMES = 3  # 作業の結果ファイルが無いまま応答を終えた full のステップを起こし直す回数
+STEP_RESULT_PY = paths.HERE / "lib" / "step_result.py"
+
+
+def result_file_of(ctx, step: dict) -> Path:
+    """作業の結果ファイルの置き場（プランの状態ディレクトリの `<ステップの id>-result.json`。#2337 の決定 7）。"""
+    # worker の作業場所は別の worktree のことがあるため、supervise の起動ディレクトリで絶対パスにして渡す
+    return (Path(ctx.state.dir) / f"{step['id']}-result.json").resolve()
+
+
+def result_prompt(path: Path) -> str:
+    return RESULT_PROMPT.format(path=path, step_result=STEP_RESULT_PY)
 
 
 def _timeout(step: dict) -> int:
@@ -110,7 +124,7 @@ class WorkStep:
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         try:
             p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=limit + TICK_GRACE if limit else None, env=env)
-            out = last_json(p.stdout) or {}
+            out = step_read.read_completed(p, tool="external-ai")
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
         if step.get("stall") and ((out.get("items") or [{}])[0]).get("result") == "stalled":
@@ -163,6 +177,9 @@ class WorkStep:
         issues = self.issue_text(ctx, step)
         cwd = step.get("cwd", ctx.cwd)
         rule = self.concurrent_rule(ctx, step)
+        # 作業の結果ファイルは前の試行の分を消してから起動する（前の試行の ok を読まない）
+        rfile = result_file_of(ctx, step)
+        rfile.unlink(missing_ok=True)
         prompt = (
             f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
             + (f"{issues}\n\n## 指示\n" if issues else "")
@@ -175,6 +192,7 @@ class WorkStep:
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
+        prompt += "\n\n" + result_prompt(rfile)
         full = bool(step.get("full"))
         system = FULL_SYSTEM + block + self.mvv_system(ctx)
         if full:
@@ -183,21 +201,24 @@ class WorkStep:
             res = self.call_worker(ctx, step, prompt, cwd, step["id"], block)
         if not res.get("runtime"):  # runtime を指定した work は claude -p に数えない（帳簿から集める）
             ctx.claude.record_usage("work", res)
-        # 報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
-        # 続けさせていたのと同じ。3 回まで）。「判断が要る / できなかった」を報告して止まった worker は、
-        # 続けさせても判断が変わらないため起こし直さず、下の判定で失敗にして conductor へ戻す
-        for _ in range(3):
-            text = res["text"] or ""
-            if not full or REPORT_DONE.search(text) or REPORT_NOT_DONE.search(text) or not res.get("session"):
+        # 作業の結果ファイルが無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（3 回まで）。
+        # ファイルを書いた worker は gate・stopped でも起こし直さない（続けさせても判断は変わらない）
+        for _ in range(RESUMES):
+            if not full or rfile.exists() or not res.get("session"):
                 break
             res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)
-        if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
-            res["ok"] = False
+        out = step_read.read_result_file(rfile, tool="worker")
+        ctx.state.cur["work_result"] = {k: out[k] for k in ("status", "summary", "gaps", "next") if k in out}
+        ok = bool(res["ok"]) and step_read.is_ok(out)
+        text = res["text"] or ""
+        if not step_read.is_ok(out):
+            reasons = "; ".join(g["reason"] for g in out.get("gaps", []))
+            text += f"\n作業の結果: {out['status']}: {out['summary']}" + (f"（{reasons}）" if reasons else "")
         if res.get("runtime"):
             note_runtimes(ctx, step, started)
-        ctx.state.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
-        return res["ok"], res["text"]
+        ctx.state.cur.update(exit=0 if ok else 1, text=text, seconds=res["seconds"])
+        return ok, text
 
 
 class DriveStep:
@@ -308,8 +329,8 @@ class DriveStep:
             if inner:
                 ctx.state.cur["counts"]["inner"] = inner[-1]
         # 欠けの残る終わり（stopped と gaps。収束しなかったなど）は終了コード 6 として控え、on_exit で分けられるようにする
-        code = 0 if ok else (6 if out and out.get("status") == "stopped" and out.get("gaps") else 1)
-        if code == 6:
+        code = 0 if ok else (EXIT_INCOMPLETE if out and out.get("status") == "stopped" and out.get("gaps") else 1)
+        if code == EXIT_INCOMPLETE:
             ctx.state.cur["gaps"] = list(out.get("gaps") or [])  # フェーズレポートの「欠けを残して進んだステップ」（#2047 の決定 5）
         ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return ok, text

@@ -20,6 +20,9 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import monitor_loop  # noqa: E402
 from supervise_lib import claude, engine, paths, progress_watch, worker_steps  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
 from supervise_lib.progress_watch import ProgressWatch  # noqa: E402
 
 
@@ -121,7 +124,8 @@ def test_a_restarted_call_counts_from_its_own_start(sig):
     assert w.deadline(sig.t) == sig.t + 1800 and w.stalled()
 
 
-FAKE_CLAUDE = r"""
+FAKE_CLAUDE = (
+    r"""
 import json, os, pathlib, sys, time
 argv = sys.argv[1:]
 prompt = sys.stdin.read()
@@ -134,8 +138,13 @@ for i in range(int(os.environ.get("FAKE_TICKS", "20"))):
         with open(path, "a") as f:
             f.write("{}\n")
     time.sleep(0.1)
-print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": sid}))
+text = "## 作業の報告\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET
+    + r"""
+print(json.dumps({"result": text, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": sid}))
+"""
+)
 
 
 @pytest.fixture
@@ -218,8 +227,12 @@ def external_ctx(tmp: Path):
 def fake_external(tmp: Path, monkeypatch, result: str) -> Path:
     log = tmp / "argv.json"
     script = tmp / "external.py"
-    body = {"status": "ok" if result == "ok" else "stopped", "summary": result, "items": [{"result": result}]}
-    script.write_text(f"import json, sys\nopen({str(log)!r}, 'w').write(json.dumps(sys.argv[1:]))\nprint(json.dumps({body!r}))\n")
+    status = "ok" if result == "ok" else "stopped"
+    body = {"tool": "external-ai", "status": status, "summary": result, "items": [{"result": result}], "metrics": {}}
+    code = 0 if status == "ok" else 1
+    script.write_text(
+        f"import json, sys\nopen({str(log)!r}, 'w').write(json.dumps(sys.argv[1:]))\nprint(json.dumps({body!r}))\nsys.exit({code})\n"
+    )
     monkeypatch.setattr(paths, "EXTERNAL_AI", script)
     return log
 

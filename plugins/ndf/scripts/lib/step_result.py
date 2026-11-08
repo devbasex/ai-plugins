@@ -30,6 +30,7 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deps  # noqa: E402
+import jsonio  # noqa: E402
 import proc  # noqa: E402
 
 # 子プロセスと git の起動は `proc` が持つ（#1142 の L0）。ここの名前は同じものを指す
@@ -40,7 +41,7 @@ git_root = proc.git_root
 
 STATUSES = ("ok", "gate", "stopped")
 REQUIRED = ("tool", "status", "summary", "items", "metrics")
-OPTIONAL = ("presentation_path", "next")
+OPTIONAL = ("presentation_path", "next", "run_id")
 # 欠け・過程・判断の項目（任意）。各要素はオブジェクトで、この鍵を空でない文字列で持つ（#2227 の I3）
 RECORD_KEYS = {"gaps": ("kind", "name", "reason"), "process": ("run", "result"), "decisions": ("decision", "basis")}
 
@@ -52,6 +53,8 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 # PR がベースブランチと衝突している（mergeStateStatus が DIRTY か、gh pr merge がマージのコミットを作れずに拒んだ）。
 # merge-when-green が返し、プランの merge はベースブランチの取り込みへ戻る（#1917）
 EXIT_BASE_CONFLICT = 4
+# CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。#2623）
+EXIT_CD_FAILED = 5
 # 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた（`stopped` だけ。#2227）
 EXIT_INCOMPLETE = 6
 EXIT_GATE = 10  # 10〜19: 承認ゲート（人の同意が要る）
@@ -64,6 +67,37 @@ EXIT_INFRA_WAIT = 75
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
+
+# 終了コードの見出し。契約の一覧の `exit` の値はこの見出しで始める（#2337 の決定 4・検査 `exit-meaning`）
+EXIT_LABELS = {
+    EXIT_OK: "成功",
+    EXIT_VIOLATION: "失敗",
+    EXIT_UNREADABLE: "読めない・呼び出しの誤り",
+    EXIT_PRECONDITION: "前提が無い",
+    EXIT_BASE_CONFLICT: "ベースブランチと衝突",
+    EXIT_CD_FAILED: "CD の結果が失敗",
+    EXIT_INCOMPLETE: "欠けが残る",
+    **{c: "承認ゲート" for c in GATE_CODES},
+    **{c: "判断待ち" for c in PAUSE_CODES},
+    EXIT_DEPS_MISSING: "依存の欠け",
+    EXIT_INFRA_WAIT: "基盤待ち",
+}
+
+# 実行の核（`run_core.py`）が動いている間は真。`emit` は出力せずに `Emitted` を投げ、核が確かめてから出す（決定 3）
+CAPTURE = False
+
+
+class Emitted(SystemExit):
+    """核が動いている間の `emit` の結果。本体の `except Exception` に握られないよう SystemExit の子にする。"""
+
+    def __init__(self, result, code: int):
+        super().__init__(code)
+        self.result = result
+
+
+def label_of(code: int) -> str:
+    """終了コードの見出し（表に無ければ空）。"""
+    return EXIT_LABELS.get(code, "")
 
 
 def default_code(status: str) -> int:
@@ -81,6 +115,7 @@ def code_matches(status: str, code: int) -> bool:
         EXIT_UNREADABLE,
         EXIT_PRECONDITION,
         EXIT_BASE_CONFLICT,
+        EXIT_CD_FAILED,
         EXIT_INCOMPLETE,
         EXIT_DEPS_MISSING,
         EXIT_INFRA_WAIT,
@@ -185,12 +220,15 @@ def emit(obj: dict, code: int | None = None, stream=None) -> "NoReturn":  # noqa
     """結果を 1 行の JSON で出し、終了コードで終える。
 
     code を省くと status から決める（ok=0 / gate=10 / stopped=1。`stopped` で gaps があれば 6）。形が誤っていれば、
-    誤りを標準エラーへ出して 2 で終える（誤った結果を「通った」と読ませない）。
+    誤りを標準エラーへ出して 2 で終える（誤った結果を「通った」と読ませない）。実行の核が動いている間は出さずに
+    `Emitted` を投げ、核が形と終了コードを確かめてから出す。
     """
     if code is None and isinstance(obj, dict) and obj.get("status") in STATUSES:
         code = default_code(obj["status"])
         if obj["status"] == "stopped" and isinstance(obj.get("gaps"), list) and obj["gaps"]:
             code = EXIT_INCOMPLETE
+    if CAPTURE and stream is None:
+        raise Emitted(obj, EXIT_VIOLATION if code is None else code)
     errs = validate_result(obj, code)
     if errs:
         print("結果の形が誤っている: " + " / ".join(errs), file=sys.stderr)
@@ -400,12 +438,25 @@ def cli_parser() -> argparse.ArgumentParser:
     e.add_argument("--metric", nargs=2, action="append", default=[], metavar=("KEY", "VALUE"))
     e.add_argument("--next", default=None)
     e.add_argument("--presentation-path", default=None)
+    e.add_argument("--out", default=None, help="同じ 1 行をこのファイルへも書く（worker の作業の結果ファイル）")
     return ap
+
+
+def _write_out(path: str, obj: dict, code: int | None) -> None:
+    """形を確かめてから 1 行をファイルへ書く。誤っていれば書かない（emit が 2 で終える）。"""
+    if code is None and obj.get("status") in STATUSES:
+        code = EXIT_INCOMPLETE if obj["status"] == "stopped" and obj.get("gaps") else default_code(obj["status"])
+    if validate_result(obj, code):
+        return
+    jsonio.write_atomic(path, obj, indent=None)
 
 
 def main(argv=None) -> "NoReturn":  # noqa: F821
     a = cli_parser().parse_args(argv)  # 引数の誤りは argparse が 2 で終える
-    emit(_cli_result(a), a.code)
+    obj = _cli_result(a)
+    if a.out:
+        _write_out(a.out, obj, a.code)
+    emit(obj, a.code)
 
 
 if __name__ == "__main__":

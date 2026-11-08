@@ -80,6 +80,7 @@
     "answer-json",
     "approved-txt",
     "breakdown-md",
+    "phase-result-json",
     "plan-json",
     "plan-md",
     "present-json",
@@ -90,13 +91,16 @@
     "request-txt",
     "requests-json",
     "resume-mark-json",
+    "revise-json",
     "state-json"
   ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
+    "1": "失敗: run のフェーズが止まった（phase-result.json の status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）",
+    "10": "承認ゲート: run のフェーズが承認ゲートで終わった（phase-result.json の status gate）"
   },
   "callers": [
     "plugins/ndf/scripts/hook_lib/shell_checks.py",

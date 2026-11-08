@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics_read.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "コードの区分（本番のコードとテストのコード）の名前。ブランチ名でない",
+  "count": 1
+}

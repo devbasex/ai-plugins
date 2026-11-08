@@ -16,6 +16,7 @@
           "--note",
           "--pr",
           "--repo",
+          "--revise-note",
           "--root",
           "--sprint"
         ],
@@ -70,12 +71,14 @@
   ],
   "stdin": "none",
   "stdout": "step-result",
-  "writes": [],
+  "writes": [
+    "revise-json"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "10": "利用者の承認待ち（status gate。機械のチェックの不成立・MVV 判定の差し戻し・承認ゲートの記録を書けない）"
+    "10": "承認ゲート: 利用者の承認待ち（status gate。機械のチェックの不成立・MVV 判定の差し戻し・承認ゲートの記録を書けない）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/README.md",

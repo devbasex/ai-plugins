@@ -244,17 +244,18 @@
     "request-txt",
     "requests-json",
     "resume-mark-json",
+    "revise-md",
     "run-log",
     "run-pid"
   ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "計画が無い・検査に誤り・動いていない・承認したコミットが無い（status stopped）",
+    "1": "失敗: 計画が無い・検査に誤り・動いていない・承認したコミットが無い（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "3": "まだ変化が無い・答えがまだ無い（status stopped）",
+    "3": "前提が無い（正常な否定の結果）: まだ変化が無い・答えがまだ無い（status stopped）",
     "4": "本番のプランが承認ゲートで止まっている（status stopped）",
-    "10": "リリースの依頼を送った・依頼が退けられた（status gate）"
+    "10": "承認ゲート: リリースの依頼を送った・依頼が退けられた（status gate）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/parallel_lane.py",

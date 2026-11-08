@@ -27,12 +27,16 @@ def test_trailing_redirect_of_a_list_is_reattached_to_the_last_command():
     assert not r.reattach  # 複合コマンドのリダイレクトは入る前の位置で開く
 
 
+def _words(n, extra=()):
+    return [shparse.unquote(c) for c in shparse.command_parts(n, extra)[0]]
+
+
 def test_words_after_a_redirect_operand_are_command_arguments():
     r = shparse.split_redirects(first("echo x > f extra args"))
-    assert shparse.command_words(r.body, r.redirects) == ["echo", "x", "extra", "args"]
+    assert _words(r.body, r.redirects) == ["echo", "x", "extra", "args"]
     n = first("cat <<EOF more\nbody\nEOF")
     r = shparse.split_redirects(n)
-    assert shparse.command_words(r.body, r.redirects) == ["cat", "more"]
+    assert _words(r.body, r.redirects) == ["cat", "more"]
 
 
 def test_read_write_operator_is_joined():
@@ -43,7 +47,7 @@ def test_read_write_operator_is_joined():
 
 
 def test_time_command_and_builtin_are_skipped_for_the_name():
-    words = shparse.command_words(first("time command -p cp a b"))
+    words = _words(first("time command -p cp a b"))
     assert words[shparse.command_name_index(words)] == "cp"
     assert shparse.command_name_index(["builtin", "--", "cd", "x"]) == 2
 
@@ -56,9 +60,9 @@ def test_heredoc_body_skips_arithmetic_and_reads_backticks():
 
 
 def test_unreadable_forms():
-    assert shparse.has_parse_error("! case x in a) ;; esac")
-    assert not shparse.has_parse_error("! true")
-    words = shparse.command_words(first("cp a.txt $(basename b).txt"))
+    assert shparse.parse_bash("! case x in a) ;; esac").has_error
+    assert not shparse.parse_bash("! true").has_error
+    words = _words(first("cp a.txt $(basename b).txt"))
     assert words[-1].startswith("$")  # 展開を含む語は `$` を含んだまま返る
 
 

@@ -13,19 +13,21 @@ from pathlib import Path
 from typing import Callable
 
 import design_pr_merge
+import gate1_requests
 import jsonio
 import project_mvv as pm
 import repo as repo_lib
+import revise_note
 import run_environment
 import sprint_loop_gate
 import sprint_mvv
 import step_result
 from pace import PaceError, over_budget, read_loop, read_pace
+from sprint_loop_argv import approved_issues, new_sprint_argv, sprint_state_init_argv, stage_plan
 
 from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
-    SUPERVISE,
     LAPS_MD,
     STOP_FILE,
     VERSION,
@@ -273,45 +275,6 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
 # ---------------------------------------------------------------- sprint
 
 
-def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -> list[str]:
-    """sprint-state.py init のコマンド。周回のディレクトリに mvv.md があればスプリント MVV を渡す。"""
-    init = [sys.executable, str(SPRINT_STATE), "init", lap["state_path"], "--name", lap["sprint"], "--pace", "auto", "--root", root]
-    init += [x for n in issues for x in ("--issue", str(n))]
-    if lap["versions"]["dev"]:
-        init += ["--dev", lap["versions"]["dev"], "--prod", lap["versions"]["prod"]]
-    init += ["--goal", resume_command(rec)]
-    mvv = Path(lap["dir"]) / "mvv.md"
-    if mvv.is_file():
-        init += ["--mvv", str(mvv), "--milestone", lap["milestone"]]
-    return init
-
-
-def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[str]:
-    """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外して --designed へ入れ、
-    設計の結果のステージ（supervise.py design-results）で設計の結果を読んで実装のプランへ渡す。
-    開発版が無ければ --version を渡さず、キューが流す直前に版を決める（#2164）。"""
-    issues = selected_issues(lap)
-    approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
-    design = [n for n in issues if n not in approved]
-    dev = lap["versions"]["dev"]
-    new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
-    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"]]
-    if dev:
-        new += ["--version", dev]
-    new += ["--out", lap["out"]]
-    if design:
-        new += ["--design", *map(str, design)]
-    if designed := [n for n in issues if n in approved]:
-        new += ["--designed", *map(str, designed)]
-    new += list(extra)
-    return new
-
-
-def stage_plan(index: list[dict], stage: str) -> str | None:
-    """マニフェストのステージの先頭のプラン。ステージが無ければ None。"""
-    return next((p for e in index if e.get("name") == stage for p in e.get("plans", [])), None)
-
-
 def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None, extra: list[str]) -> dict:
     dev = dev or ""
     if prod and not dev:
@@ -328,15 +291,19 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
-        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
         root = str(env.main_dir())
+        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
         mvv = d / "mvv.md"
         code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
         if code != 0:
             return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip())
         if mvv.is_file():
             copy_mvv_gate(rec, lap, state, mvv)
-        new = new_sprint_argv(root, rec, lap, extra)
+        try:
+            notes, skipped = revise_note.write_inputs(env.main_dir(), rec, [n for n in issues if n not in approved_issues(rec)], lap["dir"])
+        except OSError as e:
+            return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e))
+        new = new_sprint_argv(root, rec, lap, [*notes, *extra])
         code, so, se = env.run(new, cwd=root)
         lap["sprint_command"] = shlex.join(new)
         if code != 0:
@@ -361,7 +328,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         return loop_ok(
             f"周回 {lap['n']} のスプリント {lap['sprint']} を pace: auto で組んだ",
             rec,
-            [{"command": lap["sprint_command"]}, {"command": lap["close_command"]}],
+            [{"command": lap["sprint_command"]}, {"command": lap["close_command"]}, *({"skipped_loop": x} for x in skipped)],
             status="sprint",
             next_=pipeline,
             state_path=str(state),
@@ -422,7 +389,7 @@ def regated_answer(env: Env, w: dict) -> str | None:
     答えを当てずに行の承認した先端を今の先端へ書き換え、答え直しを促す 1 行を返す。読めなければ比べない（マージの部品が読み直す）。"""
     head = sprint_loop_gate.design_head(env, w)
     stamp = w.get("stamp") or ""
-    if not head or head == stamp:
+    if not head or head == stamp or (stamp.strip("0") and gate1_requests.carried_over(env, w, head)):
         return None
     w.update(stamp=head, restamped=stamp)
     if not stamp.strip("0"):
@@ -441,7 +408,7 @@ def apply_answer(env: Env, rec: dict, w: dict, answer: str, pr: int | None, note
     notes: list[str] = []
     if answer == "revise":
         w["note"] = note or ""
-        w["revise_count"] = sum(1 for x in rec.get("waiting", []) if x["number"] == w["number"] and x.get("answer") == "revise")
+        revise_note.count_round(rec, w)
         if err := mark_issue(env, rec, w):
             notes.append(err)
         return notes
@@ -473,6 +440,8 @@ def apply_gate1_answers(env: Env, rec: dict, answers: dict) -> None:
     承認ならラベル design-approved を付けて承認を書き、直して出し直すなら指摘を、やらないなら差し戻しを書く。"""
     for w in [w for w in rec.get("waiting", []) if w.get("request") and not w.get("answer")]:
         a = (answers.get(w["request"]) or {}).get("answer")
+        if not isinstance(a, dict):  # 問い直した行は、前の依頼への答えも読む（#2510 の I10）
+            a = gate1_requests.answer_before(env, w, answers)
         if not isinstance(a, dict):
             continue
         result = a.get("result")

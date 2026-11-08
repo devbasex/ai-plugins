@@ -67,6 +67,8 @@ echo "exit=$rc"
 
 ## 終了コード
 
+`publish`・`cd-result`・`cd-guidance`・`record` の終了コードは本文の各節にある。
+
 | 終了コード | 意味 | どうするか |
 | --- | --- | --- |
 | 0 | 設定が無い（何も出力しない）・リリース種別に合うコマンドが無い・すべてのコマンドが通った | `guide:` の行があれば、その手引きに従う |
@@ -169,9 +171,10 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
   `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
   `prod` は続けて `release/v<版>` を head にした `main` 宛の Pull Request をマージし、タグと GitHub Release を作る。
+  `delivery` の行が `publishes_release: true` なら、この 2 つは CD が作り、`release` は作らない（`metrics.tag` は `null`、`metrics.publisher` は `cd`）。
   `main` 宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
   無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
-  （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。
+  （マージした Pull Request と、`release` が作ったときのタグ・GitHub Release）がリリース完了の確認で照会した結果である。
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
   `metrics.sweep_candidates` に載せる。消すのは人の承認（`ndf-ask:redline:C4`）を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
@@ -224,9 +227,28 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 | --- | --- |
 | Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
 | 昇格の Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` が昇格の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
 スプリントのプランでデプロイするときは、プランの `record` のステップがこれを打つ。
+
+**CD の結果は `cd-result` が読み、`record --cd-result <ファイル>` が記録へ書く。**
+
+```bash
+python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--head <ブランチ>] --out <ファイル> --root .
+```
+
+| 値 | 意味 | 続き |
+| --- | --- | --- |
+| `success`（成功） | CD の状態を読んで成功を確かめた | リリース後テストへ進む |
+| `failure`（失敗） | CD が成功以外で終わった | デプロイの工程は完了にならず、スプリントは閉じられない |
+| `undetermined`（未確定） | 読む手段が宣言されていないか、待ちの上限に当たった | 未確定と書いてリリース後テストへ進む。リリース後テストが本番の状態を直接確かめ、その記録が無ければスプリントは閉じられない |
+| `none` | 本番チャネルへ自動で届く行が無い | 記録に CD の行を足さない |
+
+値は `metrics.cd_result` に出す。`cd-result` の終了コードは 4 つの値のどれでも 0 である。
+`--head` があれば最後にマージした `--head` → `--base` の Pull Request のコミットを、無ければ本番チャネルの先端を読む。
+`record` は値が `failure` なら `段階: 反映失敗（<理由>）` を書いた後に終了コード 5 で止まる。読む側は最後の記録を使うため、CD を直して
+`cd-result` と `record` を打ち直すと、成功の記録で閉じられる。
 
 ## 退避先の回収
 

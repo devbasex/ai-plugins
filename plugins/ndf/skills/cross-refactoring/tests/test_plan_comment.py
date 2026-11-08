@@ -93,7 +93,7 @@ def test_the_first_publish_creates_a_comment(plan, tmp_path, gh):
     responses["issues/130/comments"] = json.dumps({"id": 999, "html_url": COMMENT_URL})
     _, state = _state(tmp_path)
 
-    url = plan.publish_plan_comment(state)
+    url = plan.write_plan_comment(state)[1]
 
     assert url == COMMENT_URL
     assert state["plan_comment"] == {"id": 999, "url": COMMENT_URL}
@@ -107,7 +107,7 @@ def test_the_second_publish_edits_the_same_comment(plan, tmp_path, gh):
     responses["issues/comments/999"] = json.dumps({"id": 999, "html_url": COMMENT_URL})
     _, state = _state(tmp_path, plan_comment={"id": 999, "url": COMMENT_URL})
 
-    plan.publish_plan_comment(state)
+    plan.write_plan_comment(state)[1]
 
     assert not [c for c in calls if "POST" in c]
     patched = [c for c in calls if "PATCH" in c]
@@ -123,7 +123,7 @@ def test_a_lost_record_is_recovered_from_the_marker(plan, tmp_path, gh):
     responses["--paginate"] = json.dumps([{"id": 12, "body": "別のコメント"}, {"id": 999, "body": f"{marker}\n\n# 改修計画"}])
     responses["issues/comments/999"] = json.dumps({"id": 999, "html_url": COMMENT_URL})
 
-    plan.publish_plan_comment(state)
+    plan.write_plan_comment(state)[1]
 
     assert not [c for c in calls if "POST" in c]
     assert [c for c in calls if "PATCH" in c]
@@ -139,14 +139,14 @@ def test_the_body_carries_the_marker_and_the_plan(plan, tmp_path):
 def test_a_failed_post_does_not_stop_the_run(plan, tmp_path, gh):
     """記録が残らないことと、変更が検証を通っていないことは別である。"""
     _, state = _state(tmp_path)
-    assert plan.publish_plan_comment(state) is None
+    assert plan.write_plan_comment(state)[1] is None
     assert state.get("plan_comment") in (None, {})
 
 
 def test_the_file_mode_does_not_post_a_comment(plan, tmp_path, gh):
     calls, _ = gh
     _, state = _state(tmp_path, plan_mode="file", plan_file="issues/plan.md")
-    assert plan.publish_plan_comment(state) is None
+    assert plan.write_plan_comment(state)[1] is None
     assert calls == []
 
 

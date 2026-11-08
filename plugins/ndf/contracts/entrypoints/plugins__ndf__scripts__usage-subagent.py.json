@@ -23,5 +23,9 @@
   "callers": [
     "plugins/ndf/hooks/claude.json",
     "plugins/ndf/scripts/lib/usage_capture.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json・codex.json が起動する"
+  }
 }

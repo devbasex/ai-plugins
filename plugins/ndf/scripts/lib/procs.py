@@ -322,13 +322,3 @@ def swap_io_pages(path: Path = PROC_VMSTAT) -> int | None:
     if pages_in is None or pages_out is None:
         return None
     return pages_in + pages_out
-
-
-def wait_gone(pid: int, timeout: float, poll: float = 0.1) -> bool:
-    """pid が終わる（ゾンビを含む）まで最大 `timeout` 秒待つ。終われば真。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not pid_alive(pid):
-            return True
-        time.sleep(poll)
-    return not pid_alive(pid)

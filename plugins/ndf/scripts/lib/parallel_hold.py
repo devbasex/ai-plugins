@@ -344,9 +344,6 @@ class AnswerHold:
         self.superseded: set[str] = set()  # 答えた設計 PR の古い依頼の id。次の突き合わせで一覧から外す
         self.holds = 0  # 止めた回数
 
-    def hold_lanes(self) -> set[str]:
-        return set(self.order) if self.hold.plan else set(self.hold.lanes)
-
     def wake_lanes(self) -> list[str]:
         """起こす 1 行を添えるレーン。停止の範囲と、人が止めたままにしたレーンを除く。"""
         return [n for n in self.wake if not self.hold.covers(n) and n not in self.left_stopped]

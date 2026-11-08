@@ -38,5 +38,9 @@
     "plugins/ndf/scripts/hook_lib/wait_notify.py",
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/wait_notice.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "hook のエントリポイント（hook_lib/wait_notify.py を使う hook.py）が起動する"
+  }
 }

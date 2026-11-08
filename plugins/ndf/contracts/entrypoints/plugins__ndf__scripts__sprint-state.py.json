@@ -101,7 +101,9 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
-    "resume-mark-json"
+    "resume-mark-json",
+    "revise-json",
+    "revise-md"
   ],
   "reads": [],
   "exit": {

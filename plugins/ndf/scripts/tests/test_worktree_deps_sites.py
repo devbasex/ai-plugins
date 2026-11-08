@@ -1,5 +1,5 @@
 """依存の用意を worktree の作成箇所から呼ぶ（#1337）。3 層の `ensure_worktree`（W2）と、
-着手前の HEAD の一時の worktree（`test_triage.failing_at`。W6）と、Python の包み（`lib/worktree_deps.py`）を見る。
+着手前の HEAD の一時の worktree（`test_triage._failing_at`。W6）と、Python の包み（`lib/worktree_deps.py`）を見る。
 """
 
 from __future__ import annotations
@@ -105,6 +105,11 @@ def _strategy() -> ts.Strategy:
     return ts.Strategy("declared", "test", [suite])
 
 
+def _baseline(repo: Path, sha: str, timeout: int, log_dir: Path, run):
+    ctx = test_triage.RerunContext(_strategy(), timeout, log_dir, run, time.monotonic())
+    return test_triage._failing_at(ctx, str(repo), sha, ["t/a.py::x"])
+
+
 def test_failing_at_prepares_the_baseline_tree(tmp_path: Path) -> None:
     repo = repo_with_vendor(tmp_path, {"copy_from_main": ["vendor"]})
     sha = git(repo, "rev-parse", "HEAD").strip()
@@ -114,7 +119,7 @@ def test_failing_at_prepares_the_baseline_tree(tmp_path: Path) -> None:
         seen.append(pint_runs(Path(cwd)))
         return 0, False
 
-    test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, run)
+    _baseline(repo, sha, 60, tmp_path, run)
     assert seen == [True]
 
 
@@ -122,7 +127,7 @@ def test_failing_at_cannot_tell_when_preparation_fails(tmp_path: Path) -> None:
     repo = repo_with_vendor(tmp_path, {"run": ["false"]})
     sha = git(repo, "rev-parse", "HEAD").strip()
     ran: list[str] = []
-    out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, lambda *a: ran.append("x") or (1, False))
+    out = _baseline(repo, sha, 60, tmp_path, lambda *a: ran.append("x") or (1, False))
     assert out is None and ran == []
 
 
@@ -132,7 +137,7 @@ def test_failing_at_bounds_preparation_by_the_triage_limit(tmp_path: Path) -> No
     sha = git(repo, "rev-parse", "HEAD").strip()
     ran: list[str] = []
     t0 = time.monotonic()
-    out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 2, tmp_path, lambda *a: ran.append("x") or (1, False))
+    out = _baseline(repo, sha, 2, tmp_path, lambda *a: ran.append("x") or (1, False))
     assert out is None and ran == []
     assert time.monotonic() - t0 < 20
 
@@ -144,7 +149,7 @@ def test_failing_at_skips_preparation_when_suites_run_in_containers(tmp_path: Pa
     sha = git(repo, "rev-parse", "HEAD").strip()
     monkeypatch.setattr(test_triage.container_reach, "container_suites", lambda root: [("app", ())])
     ran: list[str] = []
-    out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, lambda *a: ran.append("x") or (1, False))
+    out = _baseline(repo, sha, 60, tmp_path, lambda *a: ran.append("x") or (1, False))
     assert out is None and ran == []
     assert not counter.exists()
 

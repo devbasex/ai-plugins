@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/plan-to-spec-steps.py",
+  "name": "spec-dir",
+  "kind": "pending",
+  "reason": "確定仕様の置き場を docs/specifications に固定している。置き場を宣言で受けるまで残す",
+  "count": 1,
+  "issue": 2725
+}
