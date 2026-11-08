@@ -159,6 +159,13 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `environment [--root] [--json]` | 動く場所・CPU・メモリ・計画の状態 | 実行環境の報告（`place`・`cpus`・`memory_gib`・`lanes`・`plans`・`candidates`・`current`・`reason`・`unreadable`）。宣言を書かない | 読めない項目は `unreadable` に載せ、終了コードは 0 |
 | `status <名> [--json]` / `list <名> [--json]` | 記録 | `status`・`consumed`・`budget`・`waiting`・止まっていれば `stop` と `stop_line` / 周回の一覧（何周目・選んだ課題・版・費用・秒・結果・止まった理由・後へ回した Issue） | 1 = 記録が無い。`--json` が無ければ文で出す |
 
+**1 つのループ名を進めるのは、1 つのランタイムのセッション（Claude Code・Codex）だけである。** 利用者が答える副命令（`answer`・`approve-mvv`）と
+読むだけの副命令（`status`・`list`・`environment`）を除く副命令は、副命令の本体の前に持ち主の鍵 `supervise.loop:name=<名>` を単位 `session` で取る。
+同じセッションの副命令は持ち主を継いで通る。別のセッションに生きた持ち主がいれば `stopped`・終了コード 3 で止まり、`lease` に持ち主の実行の識別子・pid・
+最後に動いた時刻を出す。ランタイムのセッションの外では、鍵を取る副命令は `stopped`・終了コード 1 で止まる。`stop` と `finish` は鍵を返し、
+セッションの外でも本体を走らせる（`lease.outcome` は `no_session`）。持ち主の記録の形は
+[ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md) の「持ち主の記録」にある。
+
 **止まった結果は形が決まっている。** `items` は `[{condition, values, resume}]`、`metrics` は `status: stopped`・`stop`・
 `stop_line`（`[ndf-loop] stopped <名> <condition>`）・`consumed`。止まるたびに引継ぎ文書の「次に実行するコマンド」を
 再開のコマンドへ置き換える。

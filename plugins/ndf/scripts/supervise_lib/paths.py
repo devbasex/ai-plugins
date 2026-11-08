@@ -250,6 +250,17 @@ def queue_done_path(plans: list[str], done: str | None) -> Path:
     return Path(done) if done else state_dir_of(plans[0]) / "queue-done.json"
 
 
+def queue_done_key(done_path: Path) -> str:
+    """持ち主の鍵に使う done のパス（#2342）。リポジトリの根からの相対にし、worktree の違いで鍵を割らない。git の外は絶対パス。"""
+    import state_home
+
+    path = Path(done_path).resolve()
+    got = state_home.find_git_dir(path.parent if path.parent.exists() else Path.cwd())
+    if got is not None and path.is_relative_to(got[0]):
+        return path.relative_to(got[0]).as_posix()
+    return str(path)
+
+
 def queue_plans_path(done: Path) -> Path:
     """queue が始めに流す計画の一覧を書く所（done の隣）。wait が読む。"""
     return done.with_suffix(".plans.json")

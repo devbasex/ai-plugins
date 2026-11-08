@@ -24,6 +24,7 @@
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
     "NDF_FACTORY_RUN",
+    "NDF_LEASE_DIR",
     "NDF_LOOP_EXCLUDE",
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
@@ -33,6 +34,7 @@
     "NDF_RELAY_DIR",
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
+    "NDF_RUNTIME_SESSION",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
@@ -92,6 +94,7 @@
     "cost-estimates-json",
     "decisions-jsonl",
     "laps-md",
+    "lease-json",
     "loop-json",
     "plan-json",
     "plan-md",
@@ -108,7 +111,9 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "1": "失敗: ランタイムのセッションの外では開発ループの鍵を取れない（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い: 持ち主の鍵を別の実行が持っている（status stopped）"
   },
   "callers": [
     "plugins/ndf/scripts/gate-rejections.py",
@@ -116,5 +121,59 @@
     "plugins/ndf/scripts/lib/gate_answer.py",
     "plugins/ndf/scripts/lib/gate_rejections.py",
     "plugins/ndf/scripts/lib/handoff_doc.py"
-  ]
+  ],
+  "lease": {
+    "loop start": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop select": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop exclude": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop sprint": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop gate": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop lap": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop finish": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400,
+      "release": true
+    },
+    "loop pending": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop hold-question": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop stop": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400,
+      "release": true
+    }
+  }
 }

@@ -120,6 +120,30 @@ def ancestor_pids(pid: int, limit: int = 64) -> list[int]:
         return []
 
 
+# ランタイム（Claude Code・Codex など）のプロセスの名前の頭。hook の持ち主の探し方（#2229）と同じ並び
+RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
+
+
+def ancestors(pid: int | None = None) -> list[tuple[int, float]]:
+    """pid（既定は自分）の親から順に、祖先の (pid, 開始時刻)。開始時刻を読めない祖先は飛ばす。"""
+    out = []
+    for a in ancestor_pids(os.getpid() if pid is None else pid):
+        started = start_time(a)
+        if started is not None:
+            out.append((a, started))
+    return out
+
+
+def runtime_ancestor() -> tuple[int, float] | None:
+    """自分の親をたどって最初に当たるランタイムのプロセスの (pid, 開始時刻)。見つからなければ None。"""
+    for pid in ancestor_pids(os.getpid()):
+        got = parent_and_name(pid)
+        if got and got[1].lower().startswith(RUNTIME_NAMES):
+            started = start_time(pid)
+            return (pid, started) if started is not None else None
+    return None
+
+
 def child_pids(pid: int, recursive: bool = True) -> list[int]:
     p = _process(pid)
     if p is None:

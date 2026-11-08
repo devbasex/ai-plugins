@@ -156,24 +156,17 @@ def _save_state(path: str, data: dict[str, Any]) -> None:
 
 
 # セッションの持ち主として探すランタイムのプロセスの名前（先頭の一致）。
-_RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
-
-
 def session_owner() -> dict[str, Any] | None:
     """hook の親をたどって最初に当たるランタイムのプロセス（`{"pid", "started"}`）。見つからなければ None（#2229）。
 
     片付け（`lib/run_state.py`）は、この pid が開始時刻ごと生きている間は状態ファイルを消さない。記録が無ければ
-    最終更新から寿命の窓で判定する。"""
+    最終更新から寿命の窓で判定する。探し方の正本は `procs.runtime_ancestor`。"""
     try:
         import procs  # psutil を要する。無い環境では記録を書かない
     except Exception:  # noqa: BLE001
         return None
-    for pid in procs.ancestor_pids(os.getpid()):
-        got = procs.parent_and_name(pid)
-        if got and got[1].lower().startswith(_RUNTIME_NAMES):
-            started = procs.start_time(pid)
-            return {"pid": pid, "started": started} if started is not None else None
-    return None
+    got = procs.runtime_ancestor()
+    return {"pid": got[0], "started": got[1]} if got else None
 
 
 def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:

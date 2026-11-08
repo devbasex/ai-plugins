@@ -47,6 +47,7 @@
 | `drive-prx-report-md` | `drive-pr*-report.md` | report | tmp | `plugins/ndf/skills/cross-review/scripts/drive.py` | — |
 | `estimates-json` | `estimates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `laps-md` | `laps.md` | report | main | `plugins/ndf/scripts/sprint-state.py` | — |
+| `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `phase-result-json` | `phase-result.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
@@ -117,6 +118,7 @@
 | `NDF_HOOK_PYTHON` | user | `plugins/ndf/scripts/hook-env.py`<br>`plugins/ndf/scripts/token-guard.sh`<br>`plugins/ndf/scripts/wait-notify.py`<br>`plugins/ndf/scripts/worktree-guard.sh` |
 | `NDF_HOOK_REEXEC` | user | `plugins/ndf/scripts/hook-env.py`<br>`plugins/ndf/scripts/wait-notify.py` |
 | `NDF_ISSUE_REQUEST_FILE` | user | `plugins/ndf/scripts/issue-file.py` |
+| `NDF_LEASE_DIR` | user | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` |
 | `NDF_LOCK_DIR` | user | `plugins/ndf/scripts/acceptance-check.py`<br>`plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/parallel-measure.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/release-steps.py`<br>`plugins/ndf/scripts/spec-copy.py`<br>`plugins/ndf/scripts/sprint-close.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `NDF_LOOP_EXCLUDE` | runtime | `plugins/ndf/scripts/sprint-state.py` |
 | `NDF_MVV_CLAUDE` | user | `plugins/ndf/scripts/mvv-gate.py` |
@@ -142,6 +144,7 @@
 | `NDF_RELAY_SPAWNED` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_TMUX` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_UV` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
+| `NDF_RUNTIME_SESSION` | user | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` |
 | `NDF_SHARED_CONFIG_DIR` | user | `plugins/ndf/scripts/gate-rejections.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/project-mvv.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/training-optout.py`<br>`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/external-ai/scripts/external-ai.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `NDF_SKILL_REPO` | user | `plugins/ndf/scripts/issue-file.py` |
 | `NDF_SKIP_AUTH_CHECK` | user | `plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/external-ai/scripts/external-ai.py` |
