@@ -31,8 +31,8 @@ from relay_lib import tmux as tx  # noqa: E402
 from test_relay import FAKE, RELAY, Term, fence, isolated_env, stop_input  # noqa: E402
 from account_fake import accounts, window  # noqa: E402,F401
 import claude_accounts as ca  # noqa: E402
-from relay_lib import claude as relay_claude  # noqa: E402
 from relay_lib import pin  # noqa: E402
+from relay_lib import session_env as relay_session_env  # noqa: E402
 
 
 @pytest.fixture()
@@ -652,7 +652,7 @@ def test_all_limited_choice_is_the_same_with_parent_env(accounts, monkeypatch): 
     clean = ca.choose()
     for k, v in {**PARENT_SERVER, "CLAUDE_CONFIG_DIR": str(accounts.root / "main"), "NDF_SHARED_CONFIG_DIR": str(accounts.shared)}.items():
         monkeypatch.setenv(k, v)
-    relay_claude.drop_parent_env({})
+    relay_session_env.drop_parent_env({})
     assert os.environ["CLAUDE_CONFIG_DIR"] == str(accounts.shared)
     got = ca.choose()
     assert (got.name, got.earliest and got.earliest[0]) == (clean.name, clean.earliest and clean.earliest[0])

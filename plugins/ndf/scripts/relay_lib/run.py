@@ -17,7 +17,7 @@ from dataclasses import replace
 
 from . import claude as cl
 from . import handover as ho
-from . import hub_client, record, tmux, version_dir
+from . import hub_client, record, session_env, tmux, version_dir
 from .common import (
     CHILD_FILE,
     LIMIT_FILE,
@@ -440,7 +440,7 @@ def _lane_env() -> dict[str, str]:
     """起動の `-e` で付いた役割と計画（tmux のセッションの環境にある値）。環境に役割の値があるときだけ tmux に問う。
     読めないときは空（役割を持たないレーンとして起動する。#2656 の I3）。"""
     name = os.environ.get("NDF_RELAY_NAME")
-    seen = {"NDF_RELAY_ROLE": os.environ.get("NDF_RELAY_ROLE"), "NDF_RELAY_PLAN": os.environ.get("NDF_RELAY_PLAN")}  # cl.LANE_ENV
+    seen = {"NDF_RELAY_ROLE": os.environ.get("NDF_RELAY_ROLE"), "NDF_RELAY_PLAN": os.environ.get("NDF_RELAY_PLAN")}  # session_env.LANE_ENV
     if not name:
         return {}
     got = {k: tmux.session_value(name, k) for k, v in seen.items() if v is not None}
@@ -453,7 +453,7 @@ def cmd_run(args: list[str]) -> int:
         with hub_client.serving(hub_client.claim_hub(), os.path.dirname(path)):
             return Relay.from_handover(path, serve_terminal)
     if os.environ.get("NDF_RELAY_SPAWNED"):  # 起動の印を持つのはラッパーの子の claude でない（child_env が渡さない）
-        cl.drop_parent_env(_lane_env())  # 専用サーバーのグローバルな環境が持つ親のセッションの環境を外す（#2656）
+        session_env.drop_parent_env(_lane_env())  # 専用サーバーのグローバルな環境が持つ親のセッションの環境を外す（#2656）
     if os.environ.get("NDF_RELAY") == "0":
         claude = cl.resolve_claude()
         if claude is None:

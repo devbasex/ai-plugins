@@ -55,7 +55,7 @@ tmux が PATH に無い環境では、2 本目は `ndf-relay: tmux が PATH に�
 | 統括役は `hub.lock` のファイルロックを待たずに取れた前景のラッパーにする。`hub.json` の pid の生死では判定しない | ロックは OS がプロセスの終了で放すため、統括役が kill されても次の `claude` が取れ、同時に 2 つ始まっても取れるのは 1 つだけになる。pid は再利用で死んだ統括役を生きていると読む |
 | tmux の中で起動された印 `NDF_RELAY_SPAWNED` を持つ `run` は統括役を取りに行かない | 取りに行くと、統括役が落ちた後に tmux の中のラッパーが統括役になり、「次に端末で打った `claude` が統括役になる」と食い違う |
 | tmux のセッションは統括役が作り、依頼には名前・作業ディレクトリ・引数だけを載せる。window へ足すのは `NDF_RELAY_NAME` と `NDF_RELAY_SPAWNED` と、役割を付けた起動の `NDF_RELAY_ROLE`・`NDF_RELAY_PLAN` だけ | window の環境は専用サーバーのグローバルな環境を継ぐため、環境変数に入った token を依頼のファイルとしてディスクへ残さずに済む。統括役の環境が届くのは統括役が専用サーバーを起こしたときだけで、別のプロセスが先に起こしていればそのプロセスの環境が届く |
-| `NDF_RELAY_SPAWNED` を持つ `run` は、入れ子とパススルーの判定より先に親のセッションの環境（`relay_lib/claude.py` の `PARENT_ENV`・`LANE_ENV` と、`lib/claude_accounts.py` の `leave_account` が戻すアカウントの環境）を外す。役割と計画は tmux のセッションの環境（起動の `-e`）にある値だけを残す | 専用サーバーは最初に起こした claude のセッションの環境をグローバルな環境として持ち続け、そのまま継ぐとラッパーがパススルーし、上限に達したアカウントのまま起動する（#2656）。受け取る側の 1 か所で外せば、統括役の起動と手で打つ `new-session` のどちらにも効き、動いている専用サーバーの環境を変えない。`NDF_RELAY_SPAWNED` は子の claude へ渡らないため、これを持つプロセスはラッパーの子ではない |
+| `NDF_RELAY_SPAWNED` を持つ `run` は、入れ子とパススルーの判定より先に親のセッションの環境（`relay_lib/session_env.py` の `PARENT_ENV`・`LANE_ENV` と、`lib/claude_accounts.py` の `leave_account` が戻すアカウントの環境）を外す。役割と計画は tmux のセッションの環境（起動の `-e`）にある値だけを残す | 専用サーバーは最初に起こした claude のセッションの環境をグローバルな環境として持ち続け、そのまま継ぐとラッパーがパススルーし、上限に達したアカウントのまま起動する（#2656）。受け取る側の 1 か所で外せば、統括役の起動と手で打つ `new-session` のどちらにも効き、動いている専用サーバーの環境を変えない。`NDF_RELAY_SPAWNED` は子の claude へ渡らないため、これを持つプロセスはラッパーの子ではない |
 | 名前つきのラッパー 1 本に tmux のセッション 1 つを割り当て、専用のソケット `-L ndf-relay` に置く | 1 つのセッションに window を並べると、ある端末で window を選ぶと同じセッションのほかの端末の表示も切り替わる。専用のソケットなら利用者の tmux サーバの一覧と操作に混ざらない |
 | 依頼はファイルの受付箱で渡し、登録簿を書くのは統括役だけにする。Unix ドメインソケットは使わない | 名前の重複と上限の判定が入口ごとに分かれない。統括役が居ない間に置かれた依頼が残り、次の統括役が処理できる |
 | 同時に動かす数の上限は環境変数 `NDF_RELAY_MAX_NAMED`（既定 3）で受け、`.ndf/` に置かない | 上限が守るのは同じコンテナ・同じアカウントの資源である。そのため値はリポジトリごとに持たず、統括役の環境から 1 つに決まる |
@@ -97,7 +97,7 @@ tmux が PATH に無い環境では、2 本目は `ndf-relay: tmux が PATH に�
 | 統括役（`plugins/ndf/scripts/relay_lib/hub.py` の `Hub`） | `hub.lock` の取得（`claim`）と保持、受付箱の依頼の処理（`serve_once` → `handle` → `process`：名前の形・重複・上限の判定 `judge`、tmux の起動 `launch`、登録簿の更新、結果の書き込み）、統括役の記録。作業ディレクトリの読み取り（`scan_wrappers`・`by_name`・`live`）は依頼の口と共有する |
 | 依頼の口（`relay_lib/hub_client.py`） | 依頼を受付箱へ置いて結果を待つ（`send_request`）。副命令 `spawn`・`ls`・`attach`・`restart` と名前つきの `stop` の本体、端末の 2 本目の依頼（`ask_hub`）、起動のブロックの拾い（`place_blocks`）、統括役の取得と解放（`claim_hub`・`serving`）、作業ディレクトリの名前の書き込み（`write_name`） |
 | tmux の包み（`relay_lib/tmux.py`） | tmux を呼ぶ唯一のモジュール。専用のソケット `-L ndf-relay` で `new-session`・`has-session`・`list-sessions`・`show-environment`・`kill-session` を呼び、`attach-session` へ exec する。呼ぶときは環境から `TMUX` を外す |
-| ラッパーの起動（`relay_lib/run.py` の `cmd_run`） | `NDF_RELAY_SPAWNED` があれば、判定より先に親のセッションの環境を外す（`claude.py` の `drop_parent_env`）。パススルーと擬似端末の判定の後で、統括役を取る・依頼する・今の前景の起動に戻るを選ぶ。統括役なら前景のラッパーが動く間だけ受付箱を回す |
+| ラッパーの起動（`relay_lib/run.py` の `cmd_run`） | `NDF_RELAY_SPAWNED` があれば、判定より先に親のセッションの環境を外す（`session_env.py` の `drop_parent_env`）。パススルーと擬似端末の判定の後で、統括役を取る・依頼する・今の前景の起動に戻るを選ぶ。統括役なら前景のラッパーが動く間だけ受付箱を回す |
 | Stop hook（`relay_lib/mark.py` の `cmd_mark`） | 応答の起動のブロックごとに依頼を置く（待たない。失敗しても Stop を止めない） |
 | 副命令の表（`relay_lib/__init__.py`） | `spawn`・`ls`・`attach`・`restart` を足し、`stop` に名前があれば `cmd_stop_named`、無ければ `cmd_stop` へ渡す |
 | 子の環境（`relay_lib/claude.py` の `child_env`） | 子の claude へ `NDF_RELAY_SPAWNED` を渡さない。`NDF_RELAY_NAME` は tmux の中の名前つきのラッパーの子にだけ渡す |

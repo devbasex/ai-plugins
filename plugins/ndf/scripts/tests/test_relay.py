@@ -41,6 +41,7 @@ from relay_lib import mark as relay_mark  # noqa: E402
 from relay_lib import proc as relay_proc  # noqa: E402
 from relay_lib import record as relay_record  # noqa: E402
 from relay_lib import run as relay_run  # noqa: E402
+from relay_lib import session_env as relay_session_env  # noqa: E402
 from relay_lib import shellrc as relay_shellrc  # noqa: E402
 from relay_lib import version_dir as relay_version_dir  # noqa: E402
 
@@ -1086,11 +1087,11 @@ def test_run_without_spawned_mark_keeps_env(mod, tmp_path, monkeypatch):
 def test_drop_parent_env_keeps_only_launched_role(monkeypatch):
     """#2656 の I3: 役割と計画は起動で付いた値だけが残る。起動で付いていなければ外す。"""
     _set_env(monkeypatch, PARENT_SESSION)
-    relay_claude.drop_parent_env({"NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": "p1"})
+    relay_session_env.drop_parent_env({"NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": "p1"})
     assert (os.environ.get("NDF_RELAY_ROLE"), os.environ.get("NDF_RELAY_PLAN")) == ("helper", "p1")
     _set_env(monkeypatch, PARENT_SESSION)
-    relay_claude.drop_parent_env({})
-    assert not set(relay_claude.PARENT_ENV + relay_claude.LANE_ENV) & set(os.environ)
+    relay_session_env.drop_parent_env({})
+    assert not set(relay_session_env.PARENT_ENV + relay_session_env.LANE_ENV) & set(os.environ)
 
 
 @pytest.mark.parametrize(

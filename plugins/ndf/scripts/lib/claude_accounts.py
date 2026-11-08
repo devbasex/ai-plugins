@@ -808,9 +808,7 @@ def account_env(name: str, base: dict, note=None) -> dict | None:
 
 def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
     """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。
-
-    アカウントの子の中（`NDF_SHARED_CONFIG_DIR` がある）なら、`CLAUDE_CONFIG_DIR` を元の値へ戻し（元に無ければ外し）、
-    NDF が足したプラグインの置き場の変数を外す。"""
+    親のアカウントの環境は `leave_account` が元の値へ戻す。"""
     for k in STRIPPED_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
     leave_account(env)
