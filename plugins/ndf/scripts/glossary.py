@@ -56,6 +56,7 @@ INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
 ASCII_WORD = re.compile(r"^[A-Za-z0-9_\-]+$")
+KATAKANA_WORD = re.compile(r"^[ァ-ヺー]+$")  # カタカナだけの語（長音符を含む）
 CODE_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 CODE_SUFFIXES = (".py", ".sh", ".js", ".ts")
 MAX_CODE_BYTES = 1_000_000
@@ -350,12 +351,21 @@ def stale_findings(g: dict, decl: Declaration) -> list[dict]:
 # --- 文書の中の語 --------------------------------------------------------------------
 
 
-def word_pattern(words) -> re.Pattern | None:
+def _word_part(w: str, katakana: bool) -> str:
+    if ASCII_WORD.match(w):
+        return rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])"
+    if katakana and KATAKANA_WORD.match(w):
+        return rf"(?<![ァ-ヺー]){re.escape(w)}(?![ァ-ヺー])"
+    return re.escape(w)
+
+
+def word_pattern(words, katakana: bool = False) -> re.Pattern | None:
+    """語の並びの正規表現。ASCII の語は語の境界で当てる。`katakana` なら、カタカナだけの語も前後がカタカナのときに当てない
+    （廃止語のラインがガイドライン・ステータスラインの内側に当たらないため。#2733 の決定 12）。"""
     words = sorted({w for w in words if w}, key=len, reverse=True)
     if not words:
         return None
-    parts = [rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])" if ASCII_WORD.match(w) else re.escape(w) for w in words]
-    return re.compile("|".join(parts))
+    return re.compile("|".join(_word_part(w, katakana) for w in words))
 
 
 def mask_inline_code(line: str) -> str:
@@ -668,7 +678,7 @@ def cmd_render(a):
 def _build_word_patterns(g):
     """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
     dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
-    dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
+    dep_re, live_re = word_pattern(dep_words, katakana=True), word_pattern(live_words(g))
     live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
     dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
     return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)
