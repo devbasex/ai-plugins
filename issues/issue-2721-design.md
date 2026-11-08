@@ -165,7 +165,7 @@
 | `plugins/ndf/skills/development-workflow/references/project-analysis.md` | 変更 | `ui_mock` は解析で書かず利用者が書く、と答え方の表に 1 行足す |
 | `plugins/ndf/scripts/design-materials.py` | 新設 | `check`（欠けの検査）と `links`（リンク集の設計時の行）。一覧の表を実行時に読む |
 | `plugins/ndf/scripts/project_lib/model.py` | 変更 | `UiMock`（`kind`・`location`）を足し、`ProjectDecl` に省略できる `ui_mock` を足す |
-| `plugins/ndf/scripts/project_lib/merge.py` | 変更 | `merge_project()` が解析の項目を巡回した後に、既存の宣言の `ui_mock` へ秘密の検査を掛ける。秘密の形なら `{"unknown": "秘密の形"}` に置き換え、`secret` の行を出す。値は補完しない |
+| `plugins/ndf/scripts/project_lib/merge.py` | 変更 | `merge_project()` が解析の項目を巡回した後に、既存の宣言の `ui_mock` へ秘密の検査を掛ける。秘密の形なら `{"unknown": "秘密の形"}` に置き換え、`secret` の行（`{"kind": "secret", "key": "ui_mock"}`）を出す。`project-decl.py write` はこの行を `ui_mock: 秘密の形の値を捨てて不明にした` と表示し、置き換えた欄の名前だけを利用者へ知らせて値は出さない。値は補完しない。置き換えは利用者が承認した（C7・C1、2026-11-08） |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 変更（生成物） | `project-decl.py schema` で作り直す |
 | `plugins/ndf/scripts/supervise_lib/procedures.py`・`plugins/ndf/scripts/supervise_lib/sprint_waves.py`・`plugins/ndf/scripts/supervise_lib/paths.py` | 変更 | スプリントの設計のプランに、欠けの検査（`materials-check`・`fix-materials`・`materials-recheck`）とリンク集の組み立て（`materials-links`）を足す。検査の 3 ステップは `a.mode == "standard"` のときだけ足し、`materials-links` は `standard` と `legacy-refactor` のときに足して `gate` の入力に加える。ほかのモードのプランは変えない |
 | `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__design-materials.py.json` | 新設（生成物） | エントリポイントの契約。既存の生成の手順で作る |
@@ -291,7 +291,7 @@ graph LR
 | --- | --- | --- | --- |
 | 既存の機能 | 外部の調査の検査（`design-survey.py`）・用語チェック・本文の決定の同期（`pr-body-decisions.sh`） | 同じ設計文書を読む。互いの出力は使わない | 無し。スプリントの設計のプランで、外部の調査の検査の後に並ぶ |
 | 外部の系 | GitHub（`gh pr view` で head ブランチと URL を読む） | 読むだけ。書き込まない | `links` が読む。`gh` が使えないときは URL の代わりにリポジトリの中のパスを出す |
-| セキュリティ（認証・認可・秘密） | `ui_mock.location` | URL かパスを書く欄で、秘密を書かない | 既存の秘密の除去は解析の項目（`ITEM_KEYS`）を巡回するときだけ働き、`ui_mock` は対象の外である。そこで `merge_project()` が巡回の後に `ui_mock` へ同じ判定（`has_secret`）を掛け、秘密の形なら `{"unknown": "秘密の形"}` に置き換えて値を出さない。解析で値を補完しない方針は変えない。新しい認証・認可は無い |
+| セキュリティ（認証・認可・秘密） | `ui_mock.location` | URL かパスを書く欄で、秘密を書かない | 既存の秘密の除去は解析の項目（`ITEM_KEYS`）を巡回するときだけ働き、`ui_mock` は対象の外である。そこで `merge_project()` が巡回の後に `ui_mock` へ同じ判定（`has_secret`）を掛け、秘密の形なら `{"unknown": "秘密の形"}` に置き換えて値を出さない。置き換えたことは `project-decl.py write` の出力の 1 行（`ui_mock: 秘密の形の値を捨てて不明にした`）で利用者へ知らせ、欄の名前だけを示して値は出さない。この置き換えは利用者の宣言（C7）を書き換えるが、秘密を漏らさない守り（C1）として利用者が設計承認ゲートで認めた（2026-11-08）。解析で値を補完しない方針は変えない。新しい認証・認可は無い |
 | データ分析（計測・集計） | 承認の答えの記録（`gate-rejections.jsonl`） | 変えない | 無し（提示の形だけが変わり、答えの記録の形は変わらない） |
 | ログ出力とアラート | スクリプトの結果の 1 行の JSON（`step_result`） | 既存の形で出す | 無し（新しいログとアラートは足さない） |
 
@@ -387,7 +387,11 @@ items の 1 件は `{"name": "<資料名>", "rule": "<上の値>", "text": "<置
 | `kind` | `artifact` / `storybook` / `preview` / `other` | 表現方法の種類（LIB5 / LIB2・LIB3 / LIB4 / それ以外） |
 | `location` | 文字列（1 字以上） | 画面モックを置く場所。URL のテンプレートかリポジトリの中のパス。`{pr}` と `{branch}` を差し込める |
 
-欄は省略できる（今の宣言はそのまま読める）。`{"unknown": "<理由>"}` と空の欄は未宣言として扱う。`location` が秘密の形（資格情報を含む URL など）なら、`project-decl.py write` の保存で `{"unknown": "秘密の形"}` に置き換わる。
+欄は省略できる（今の宣言はそのまま読める）。`{"unknown": "<理由>"}` と空の欄は未宣言として扱う。`location` が秘密の形（資格情報を含む URL など）なら、`project-decl.py write` の保存で `{"unknown": "秘密の形"}` に置き換わり、出力に次の 1 行が出る。値は出さない。
+
+```text
+  ui_mock: 秘密の形の値を捨てて不明にした
+```
 
 ### Factory の承認の画面
 
@@ -474,7 +478,7 @@ sequenceDiagram
 | 16 | 全体テストと Skill の frontmatter の検査が通る | （CI と手元の実行で確かめる） |
 | `ui_mock` の形 | `project-decl.py check` が `kind` の 4 値の外と空の `location` を拒み、欄の無い宣言を通す | 欄を必須にすると、今の宣言が落ちる |
 | スプリントの設計のプラン | `--mode standard` で組んだプランで `survey-recheck` の次が `materials-check` で、`gate` の入力に `materials-links` がある。`--mode light` で組んだプランに `materials-check` と `materials-links` が無い。`--mode legacy-refactor` で組んだプランに `materials-links` があり `materials-check` が無い | 検査のステップを足さない・モードを見ずに足すと落ちる |
-| `ui_mock` の秘密の除去 | 既存の宣言の `ui_mock.location` が資格情報入りの URL のとき、`project-decl.py write` の後の宣言で `ui_mock` が `{"unknown": "秘密の形"}` になり、出力の行に `secret` があって値が出ない | `ui_mock` を巡回の外に置いたままにすると落ちる |
+| `ui_mock` の秘密の除去 | 既存の宣言の `ui_mock.location` が資格情報入りの URL のとき、`project-decl.py write` の後の宣言で `ui_mock` が `{"unknown": "秘密の形"}` になり、結果の行に `{"kind": "secret", "key": "ui_mock"}` があり、表示に `ui_mock: 秘密の形の値を捨てて不明にした` が出て、出力のどこにも元の値が出ない | `ui_mock` を巡回の外に置いたままにする・知らせる行を出さない・行に値を入れると落ちる |
 
 ## 設計の結果
 
@@ -486,7 +490,9 @@ sequenceDiagram
 
 | 項目 | 指摘 | 対応 | 直した箇所・直せない理由 |
 | --- | --- | --- | --- |
-| lproc:1-1 | 要求文書の検査（requirements-check）が終了コード 2 で止まった原因を確かめて直す。検査の側の不具合なら PR 本文に書き、別の課題へ回す。決定 6 は設計のとおりでよい | 直した | 原因: 設計の工程は要求を書く前に検査を打ち、要求のコピーがまだ無いと終了コード 2 を返して要求を書く工程へ進む。終了コード 2 はこの想定どおりの分岐である。設計のブランチで `spec-copy.py check 2721 issues/issue-2721-requirements.md` を打ち直すと終了コード 0（本文と一致）を返す。要求文書に直す箇所は無い。分岐の終了コード 2 を PR 本文と MVV 判定が失敗として扱うのは検査の側の不具合で、既存の課題 #1502 に回した。PR #2818 の本文の「テスト」の節に記載した。決定 6 は変えず、[決定の記録](issue-2721-design-decisions.md) の決定 6 の S6 の記述を「利用者が採った（2026-11-09）」にした |
+| lproc:1-1 | 要求文書の検査（requirements-check）が終了コード 2 で止まった原因を確かめて直す。検査の側の不具合なら PR 本文に書き、別の課題へ回す。決定 6 は設計のとおりでよい | 直した | 原因: 設計の工程は要求を書く前に検査を打ち、要求のコピーがまだ無いと終了コード 2 を返して要求を書く工程へ進む。終了コード 2 はこの想定どおりの分岐である。設計のブランチで `spec-copy.py check 2721 issues/issue-2721-requirements.md` を打ち直すと終了コード 0（本文と一致）を返す。要求文書に直す箇所は無い。分岐の終了コード 2 を PR 本文と MVV 判定が失敗として扱うのは検査の側の不具合で、既存の課題 #1502 に回した。PR #2818 の本文の「テスト」の節に、原因・打ち直した結果・回し先を記載した（lproc:2-1）。決定 6 は変えず、[決定の記録](issue-2721-design-decisions.md) の決定 6 の S6 の記述を「利用者が採った（2026-11-09）」にした |
+| lproc:2-1 | PR 本文の「テスト」の節に、要求文書の検査が終了コード 2 で終わった原因・打ち直した結果（終了コード 0）・#1502 への回し先を書き、この表の記載先と実物を一致させる | 直した | PR #2818 の本文の「テスト」の節に、要求文書の検査（`spec-copy.py check 2721 issues/issue-2721-requirements.md`）の行を足した。原因（要求のコピーを書く前に打つ分岐の終了コード 2）・打ち直した結果（2026-11-08 に終了コード 0、本文と一致）・回し先（#1502。分岐の終了コード 2 を失敗として読む検査の側の不具合）を書いた |
+| lproc:2-2 | `ui_mock` の値が秘密の形のとき `{"unknown": "秘密の形"}` へ置き換える変更は利用者が認めた（C7・C1）。設計に承認を記録し、置き換えたことを値を出さずに知らせる出力を持たせる | 直した | 承認の記録: [決定の記録](issue-2721-design-decisions.md) の決定 6 と、周辺システムとの関係のセキュリティの行。知らせる出力: 構成要素の表の `merge.py` の行と、入出力の契約の `ui_mock` の節に、`project-decl.py write` が出す 1 行（`ui_mock: 秘密の形の値を捨てて不明にした`。欄の名前だけで値は出さない）を書いた。テスト設計の `ui_mock` の秘密の除去の行で、この行が出ることと値が出ないことを縛る |
 
 ## 未確認のまま残ること
 
