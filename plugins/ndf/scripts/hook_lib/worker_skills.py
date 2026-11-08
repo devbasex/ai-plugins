@@ -8,7 +8,7 @@
 | 4 | `prompt` に「読む Skill」の欄が無い | 止める（理由に正本の「supervisor → worker」の節） |
 | 5 | 欄の値が「無し」 | 通す |
 | 6 | 呼び手の会話の記録が読めない | 通す |
-| 7 | 呼び手の会話の記録に `stage-skills.py lookup` の実行が無い | 止める（理由に対応表の引き方） |
+| 7 | 呼び手の会話の記録に、この hook のプラグインの `scripts/stage-skills.py`（絶対パス。シンボリックリンクは解決して比べる）で打った `lookup` の実行が無い | 止める（理由に対応表の引き方） |
 | 8 | 上のどれにも当たらない | 通す |
 
 規約（欄の決め方）の正本は `development-workflow` の `references/agent-layers.md` の「supervisor → worker」にあり、
@@ -25,6 +25,7 @@ from . import payload as pl
 from .token_guard import _field, _off, deny
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+STAGE_SKILLS = SCRIPTS / "stage-skills.py"
 DOC = SCRIPTS.parent / "skills" / "development-workflow" / "references" / "agent-layers.md"
 HEADING = "### supervisor → worker"
 SUPERVISORS = ("ndf:supervisor", "ndf:supervisor-waits")
@@ -32,7 +33,8 @@ FIELD = "読む Skill"
 # 行の先頭の箇条書きの記号・表の区切り・見出しの記号・強調を除いたところに欄の名前があり、区切りか行末が続く
 _FIELD_RE = re.compile(r"^[\s>]*(?:(?:[-*+]|\d+[.)]|#+|\|)\s*)*(?:\*\*|__)?" + re.escape(FIELD) + r"(?:\*\*|__)?\s*(?:[:：|](?P<rest>.*))?$")
 _NONE_RE = re.compile(r"^[\s|*_`「」]*(?:無し|なし)")
-_LOOKUP_RE = re.compile(r"stage-skills\.py[\"']?\s+lookup\b")
+# lookup の前の stage-skills.py のパス（引用符で囲んだものと囲まないもの）
+_LOOKUP_RE = re.compile(r"(?:\"(?P<dq>[^\"]*stage-skills\.py)\"|'(?P<sq>[^']*stage-skills\.py)'|(?P<bare>[^\s\"';|&()<>]*stage-skills\.py))\s+lookup\b")
 
 
 def field_value(prompt: str) -> str | None:
@@ -65,8 +67,23 @@ def _commands(row: dict) -> list[str]:
     ]
 
 
+def _is_own(path: str) -> bool:
+    """絶対パスで、シンボリックリンクを解決すると この hook のプラグインの stage-skills.py になるか。変数や相対パスは数えない。"""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        return False
+    try:
+        return p.resolve() == STAGE_SKILLS.resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
+def _own_lookup(command: str) -> bool:
+    return any(_is_own(m.group("dq") or m.group("sq") or m.group("bare")) for m in _LOOKUP_RE.finditer(command))
+
+
 def looked_up(transcript: Path) -> bool:
-    """会話の記録の assistant の Bash の呼び出しに `stage-skills.py lookup` があるか（Tool の結果や指示の文は数えない）。"""
+    """会話の記録の assistant の Bash の呼び出しに、この hook のプラグインの stage-skills.py の lookup があるか（Tool の結果や指示の文は数えない）。"""
     with transcript.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             if "stage-skills" not in line:
@@ -75,7 +92,7 @@ def looked_up(transcript: Path) -> bool:
                 row = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(row, dict) and any(_LOOKUP_RE.search(c) for c in _commands(row)):
+            if isinstance(row, dict) and any(_own_lookup(c) for c in _commands(row)):
                 return True
     return False
 
@@ -118,8 +135,9 @@ def _missing_field() -> dict:
 
 def _not_looked_up() -> dict:
     return deny(
-        f"ndf:worker の起動指示の「{FIELD}」に Skill を挙げたが、この supervisor は対応表を引いていない。"
-        f"先に python3 \"{SCRIPTS}/stage-skills.py\" lookup <工程> を打ち、出力の items の name と path をそのまま並べてから起動し直す"
+        f"ndf:worker の起動指示の「{FIELD}」に Skill を挙げたが、この supervisor は読み込まれた NDF の対応表を引いていない"
+        f"（別の場所の stage-skills.py や、変数・相対パスで打った lookup は数えない）。"
+        f"先に python3 \"{STAGE_SKILLS}\" lookup <工程> をこの絶対パスのまま打ち、出力の items の name と path をそのまま並べてから起動し直す"
         f"（工程は、いま通している工程の名前）。規約: {DOC} の「{HEADING.lstrip('# ')}」。止めるなら NDF_WORKER_SKILLS_GUARD=0"
     )
 

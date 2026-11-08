@@ -66,7 +66,7 @@ def run(data, tmp_path, env=None) -> str | None:
     return spec.get("permissionDecisionReason") if spec.get("permissionDecision") == "deny" else None
 
 
-LOOKUP = bash('python3 "/x/scripts/stage-skills.py" lookup 設計')
+LOOKUP = bash(f'python3 "{SCRIPTS}/stage-skills.py" lookup 設計')
 
 
 @pytest.mark.parametrize("agent_type", ["ndf:supervisor", "ndf:supervisor-waits"])
@@ -84,6 +84,12 @@ def test_missing_field_is_denied_with_section(tmp_path, agent_type):
         ([bash("ls")], True),
         # 指示の文や Tool の結果に lookup の字があっても、Bash の実行でなければ数えない
         ([{"type": "user", "message": {"content": "stage-skills.py lookup 設計 を打つ"}}], True),
+        # 別の checkout の stage-skills.py で引いた記録だけでは通さない
+        ([bash('python3 "/tmp/other-checkout/plugins/ndf/scripts/stage-skills.py" lookup 設計')], True),
+        ([bash('python3 "$SCRIPTS/stage-skills.py" lookup 設計')], True),
+        ([bash(f"cd {SCRIPTS} && python3 stage-skills.py lookup 設計")], True),
+        ([bash('python3 "/tmp/other/stage-skills.py" lookup 設計'), LOOKUP], False),
+        ([bash(f"python3 {SCRIPTS}/stage-skills.py lookup 設計 | jq .")], False),
     ],
 )
 def test_listed_skills_need_lookup(tmp_path, rows, stop):
@@ -91,6 +97,13 @@ def test_listed_skills_need_lookup(tmp_path, rows, stop):
     assert (reason is not None) is stop
     if stop:
         assert "stage-skills.py" in reason and str(SCRIPTS) in reason
+
+
+def test_lookup_through_symlink_passes(tmp_path):
+    link = tmp_path / "linked-scripts"
+    link.symlink_to(SCRIPTS, target_is_directory=True)
+    rows = [bash(f'python3 "{link}/stage-skills.py" lookup 設計')]
+    assert run(payload(transcript(tmp_path, rows), WITH_SKILL), tmp_path) is None
 
 
 def test_none_passes_without_lookup(tmp_path):
