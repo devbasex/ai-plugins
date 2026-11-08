@@ -15,7 +15,7 @@
 | `--parallel` / `--parallel-helper` の振り分け | `plugins/ndf/skills/development-workflow/SKILL.md` の「並列開発（`--parallel`）」 |
 | レーンの問いを問いの hook がオーガナイザーへ送る判定と、送られたときの保留の手順 | `plugins/ndf/skills/development-workflow/references/asking.md` の「並列の計画のレーン」と [ndf-ask-guard.md](ndf-ask-guard.md) の「並列の計画のレーンの問い」 |
 | ループのレーンの `リリース待ち`・`質問待ち`・`waiting_only`・周回の境で答えを読む順 | `plugins/ndf/skills/development-workflow/references/loop.md` の「並列の計画のレーン」と [ndf-workflow-development-loop.md](ndf-workflow-development-loop.md) |
-| レーンの本番のステージをリリースの依頼のプラン（`parallel-request`）へ置き換える | [ndf-production-release-record.md](ndf-production-release-record.md) の「並列の計画のレーンの本番のステージ」 |
+| リリースの雛形で出す経路で、レーンの本番のステージをリリースの依頼のプラン（`parallel-request`）へ置き換える。昇格の経路ではレーンも昇格のプランをそのまま流す | [ndf-production-release-record.md](ndf-production-release-record.md) の「並列の計画のレーンの本番のステージ」 |
 | 本番チャネルへの Pull Request の規則（head が `release/v<版>`・承認したコミットから切る・`release/v<版>-sync` で版数の衝突を解く・`scripts/check-pr-base.sh`） | [docs/versioning-and-distribution.md](../versioning-and-distribution.md) の「正式版を出す」の前後と、`plugins/ndf/skills/release/references/release-steps.md` の `release` の項 |
 | オーガナイザーと一時レーンの数え方（役割 `organizer` / `helper`） | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) の決定と理由、parallel.md の「数え方」 |
 | 用語（並列の計画・レーン・オーガナイザー・リリースの依頼・一時レーン・保留の周回・リリース待ち・質問待ち） | [docs/glossary.md](../glossary.md)（正本は `docs/glossary/glossary.json`） |
@@ -74,7 +74,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `run` は `start` がセッションから切り離して起動する（`start_new_session=True`、出力は `run.log`、pid は `run.pid`） | Bash の背景の子は、セッションの切り替えで消える恐れがある。2 本目の `run` は実行の鍵の排他で動いている `run` を指して 0 で終わる |
 | オーガナイザーと一時レーンの印を、作業ディレクトリの役割のファイル（`role.json`）で持つ | 統括役は作業ディレクトリのファイルだけを読んで数える。環境変数は統括役から読めない。登録簿は名前の無い前景のラッパーを表せない |
 | レーンかどうかを、ラッパーの名前（`NDF_RELAY_NAME`）と終わっていない計画のレーン名の照合で決める（`parallel_lane.lane_of`） | レーンの最初の入力（`--loop`・`#<課題>`）に引数を足さずに済む。ループの記録・再開のコマンド・スプリントの状態の 3 か所へ引数を引き継がなくてよい |
-| 本番のステージを組む 1 つの関数だけが、レーンのときにリリースの依頼のプランを返す | `supervise_lib/sprint.py` の 4 か所の組み立てに同時に効き、ループでないスプリントのレーンにも効く |
+| 本番のステージを組む 1 つの関数だけが、レーンのときにリリースの依頼のプランを返す（リリースの雛形で出す経路。昇格の経路の本番のステージはこの関数を通らず、レーンでも昇格のプランになる） | `supervise_lib/sprint.py` の 4 か所の組み立てに同時に効き、ループでないスプリントのレーンにも効く |
 | デプロイの中身を、承認資料を作る時点の `origin/develop` のコミットの範囲で決める | 依頼を送った時点で、他のレーンの変更もすでに `develop` にある。依頼の集合で中身を決めると、実際に出る中身と一致しない |
 | 依頼が届いた時点で流れているリリースが無ければ、他のレーンを待たずに直ちにリリースを組む。リリースは 1 本ずつ直列にする | まとめるための待ち時間を置かない。範囲に入らない依頼は、今のリリースの直後に組む次のリリースになる |
 | リリースの組み方（組む・組まない・組めない）を、依頼を受けるたびにリリースの経路の宣言から読む。判定は `delivery.release_way` の 1 か所に置き、耐久ワークフローの分岐は耐久ステップ `parallel.route` の結果で決める | `release.plugin` の有無で判定すると、手で反映するリポジトリも組まない側に入り、届いていない変更へリリース済みと答える。計画の開始時に一度だけ読むと、宣言を直して組み直しても読み直されない |

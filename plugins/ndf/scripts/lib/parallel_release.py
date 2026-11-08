@@ -77,6 +77,26 @@ def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _closing_numbers(fields: Optional[dict]) -> list[int]:
+    """まとめて読んだ 1 本分の欄から、閉じる課題の番号を取り出す。"""
+    refs = (fields or {}).get("closingIssuesReferences") or []
+    return [int(i["number"]) for i in refs if "number" in i]
+
+
+def _closes_one(root: Path, n: int, run: Callable) -> list[int]:
+    """`gh pr view` を 1 本分打って閉じる課題の番号を読む。読めなければ空。"""
+    got = run(
+        ["gh", "pr", "view", str(n), "--json", "closingIssuesReferences", "-q", "[.closingIssuesReferences[].number]"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        return [int(x) for x in json.loads(got.stdout or "[]")] if got.returncode == 0 else []
+    except ValueError:
+        return []
+
+
 def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bulk: Optional[Callable] = None) -> dict[int, list[int]]:
     """Pull Request が閉じる課題（`closingIssuesReferences`）。読めないものは空にする。
 
@@ -86,20 +106,8 @@ def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bul
             from release_lib.included import pr_fields as bulk
         got, _ = bulk(prs, cwd=str(root))
         if got is not None:
-            return {n: [int(i["number"]) for i in (got.get(n) or {}).get("closingIssuesReferences") or [] if "number" in i] for n in prs}
-    out: dict[int, list[int]] = {}
-    for n in prs:
-        got = run(
-            ["gh", "pr", "view", str(n), "--json", "closingIssuesReferences", "-q", "[.closingIssuesReferences[].number]"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        )
-        try:
-            out[n] = [int(x) for x in json.loads(got.stdout or "[]")] if got.returncode == 0 else []
-        except ValueError:
-            out[n] = []
-    return out
+            return {n: _closing_numbers(got.get(n)) for n in prs}
+    return {n: _closes_one(root, n, run) for n in prs}
 
 
 def present(
@@ -253,15 +261,15 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
     ステップは `parallel-request` の 1 つで、依頼を送れば 10（承認ゲート）で終わり、自分の Pull Request が
     すでに `main` にあれば送らずに 0 で終わる（I15）。`prs` は出す版の Pull Request（`{queue_pr:<名>}` でもよい）。"""
     from supervise_lib.paths import PARALLEL_PY
+    from supervise_lib.plan import PLAN_ISSUES
     from supervise_lib.procedures import with_record
 
-    issues = " ".join(str(n) for n in (a.issue or []))
     pr_args = " ".join(prs or [])
+    # 課題の一覧はプランの `課題` だけに持ち、流す時点に `{plan_issues}` で埋める（#2717 の決定 1）
     cmd = (
         f"{PARALLEL_PY} request {shlex.quote(plan_name)} --lane {shlex.quote(lane)}"
         + (f" --prs {pr_args}" if pr_args else "")
-        + (f" --issues {issues}" if issues else "")
-        + " --state {state_dir}"
+        + f" --issues {PLAN_ISSUES} --state {{state_dir}}"
     )
     return with_record(
         {

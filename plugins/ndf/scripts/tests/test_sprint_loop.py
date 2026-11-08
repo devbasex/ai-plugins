@@ -1746,6 +1746,23 @@ def test_released_answer_without_a_version_runs_the_close_and_writes_no_version(
     assert lap["release"]["answer"]["version"] is None and "prod" not in lap.get("versions", {})
 
 
+def test_released_answer_after_gate_1_runs_the_close_of_the_kept_issue_only(env):
+    """#2717 の受け入れ条件 7 / I5: 設計承認ゲートで課題を外した周回をリリース待ちで締めると、答えの後のまとめは残った課題だけ。"""
+    lap = lane_lap(env)
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    prod = Path(lap["out"]) / "prod.json"
+    assert json.loads(prod.read_text())["課題"] == [12]  # 依頼の --issues はこの `課題` で埋まる
+    set_state(env, sl.current_lap(rec(env)))
+    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(prod), "result": "関門"}]), [])
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": None}, "defer": None}
+    pipe = sl_select.cmd_select(env, "l1")["metrics"]["pipeline"]
+    closes = [w for w in pipe.split() if w.endswith("1-close.json")]
+    assert len(closes) == 1
+    # 偽の new close は --issue の後の数字をすべて拾うため、そのまとめを組んだ呼び出しの --issue を読む
+    built = next(c for c in env.calls if "close" in c and str(Path(closes[0]).parent) in c)
+    assert built[built.index("--issue") + 1 : built.index("--state")] == ["12"]
+
+
 def test_two_answered_pending_laps_are_finished_oldest_first(env):
     request_lap(env, rid="lroot-r000000000001")
     env.rank_box["out"] = rank_out(ms("01 近い", [13, 14]))
