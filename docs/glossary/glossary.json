@@ -6071,7 +6071,7 @@
     {
       "term": "停滞の問い",
       "context": "ndf-workflow",
-      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のときと、開発ループが止まったときに立つ",
+      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ",
       "source": "",
       "pending_source": "issues/issue-2649-requirements.md"
     },
