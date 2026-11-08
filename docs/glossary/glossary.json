@@ -1868,6 +1868,12 @@
       "pending_source": "issues/issue-2741-requirements.md"
     },
     {
+      "term": "利用者が判断すること",
+      "context": "ndf-workflow",
+      "meaning": "設計文書の節。要求の未決と起票者の推定の 1 行ずつに、この設計での扱いを書く",
+      "pending_source": "issues/issue-2741-design.md"
+    },
+    {
       "term": "MVV 判定",
       "context": "ndf-workflow",
       "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",

@@ -154,6 +154,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | MVV | — | Mission / Vision / Value。プロジェクト MVV とスプリント MVV の 2 層があり、下位は上位の範囲で具体化する | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | この設計の MVV | — | 設計文書の冒頭の節。Mission はこの設計で目指すこと、Vision はこの設計で達成する姿、Value はこの設計の価値。MVV 判定の基準ではない | — | — | — |
 | 承認する人が読む欄 | — | 設計文書のうち、設計承認ゲートで承認する人が判断に使う節の並び。正本は design の design-template.md の同名の節 | — | — | — |
+| 利用者が判断すること | — | 設計文書の節。要求の未決と起票者の推定の 1 行ずつに、この設計での扱いを書く | — | — | — |
 | MVV 判定 | — | 承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 助言の MVV 判定 | — | 承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である | — | — | `plugins/ndf/skills/development-workflow/references/pace.md` |
 | 上位の原則 | — | 「人を守り、人の発展を支える」。NDF の共通原則の最上位の 1 文 | — | — | — |
