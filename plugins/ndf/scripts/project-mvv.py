@@ -180,7 +180,15 @@ def cmd_propose(a):
             1,
         )
     out_dir = _work_dir(root, a.out_dir or str(mpath.parent))
-    bodies, cj, cm = mio.write_candidates(out_dir, mpath, kind, current, mats, data)
+    bodies = {}
+    for c in data["candidates"]:
+        p = out_dir / f"candidate-{re.sub(r'[^0-9A-Za-z_-]+', '', str(c.get('id') or len(bodies) + 1))}.md"
+        p.write_text(mc.candidate_body(c), encoding="utf-8")
+        bodies[c.get("id")] = str(p)
+    cj = out_dir / "candidates.json"
+    jsonio.write_atomic(cj, {"materials": str(mpath), "kind": kind, **data, "bodies": bodies})
+    cm = out_dir / "candidates.md"
+    cm.write_text(mc.candidates_md(data, mats, kind, current, bodies), encoding="utf-8")
     print(f"候補: {cm}（{len(data['candidates'])} 案）")
     emit(
         result(
