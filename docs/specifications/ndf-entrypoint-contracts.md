@@ -155,7 +155,7 @@ import と source で読まれるライブラリである。構造チェック�
 
 | 項目 | 置き場 | キー |
 | --- | --- | --- |
-| エントリポイント | `entrypoints/<パスの / を __ にした名前>.json` | `version`（1）・`path`・`summary`・`callers` か `external`（択一）・`args`・`env`・`settings`・`stdin`・`stdout`・`writes`・`reads`・`exit` |
+| エントリポイント | `entrypoints/<パスの / を __ にした名前>.json` | `version`（1）・`path`・`summary`・`callers` か `external`（択一）・`args`・`env`・`settings`・`stdin`・`stdout`・`writes`・`reads`・`exit`・任意の `lease` |
 | 受け渡しのファイル | `files/<name>.json` | `name`・`pattern`（glob）・`kind`・`place`・`skill_readers` |
 | 設定ファイル | `settings/<.ndf/ の下の名前>.json` | `file`・`summary`・`place`・`scope`・`readers`・`keys` |
 | 環境変数 | `env/<名前>.json` | `name`・`set_by`・`summary` |
@@ -167,6 +167,7 @@ import と source で読まれるライブラリである。構造チェック�
 | `settings` | `[{"file": "project.json", "keys": ["test", "ci"]}]`。最上位のキーだけ |
 | `stdin` | `none`・`json`・`text`・`hook-json` |
 | `stdout` | `step-result`（1 行 JSON）・`json`・`kv`（`eval` する KEY=VALUE）・`text`・`markdown`・`none` |
+| `lease` | 持ち主の鍵の宣言。副命令の名前（副命令の無い入口は `""`）→ `{"key": "<鍵の形。{入力の名前} を埋める>", "unit": "run" か "session", "window_seconds": <正の整数>, "release": <真偽値。任意>}`。宣言した入口は `lease_stage.hold` で鍵を取り、生きた持ち主がいれば `stopped`・終了コード 3 で止まる（[ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md)。#2342） |
 | `exit` | `{"0": "<意味>", ...}`。読み取れなければ `{"unknown": "<理由>"}`（例外の項目 `exit-unknown` が要る） |
 | ファイルの `kind` | `state`・`record`・`result`・`report` |
 | ファイルの `place` | `worktree`・`main`・`tmp`・`state-dir`（XDG の状態の置き場）・`home` |

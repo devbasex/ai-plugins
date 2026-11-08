@@ -82,7 +82,7 @@ conductor が打つコマンドをキューと `wait` だけにすることを�
 | --- | --- |
 | [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) | `sprint_plans` が `normal` の設計承認ゲートの後のステージ（`MERGE_STAGE` = 「設計 PR のマージ」からデプロイまで）を最初のステージの `then_of` に並べる。`_stage_entry` が `command` に `--done` を書き、`add_resume` が `command` を持つステージと `then_of` のステージへ `resume` を書く。`--absorb` の拒否（`absorb_refusal`）・`--issue` への追加・プランへの適用を組み立ての前後で呼ぶ |
 | [`supervise_lib/design_merge.py`](../../plugins/ndf/scripts/supervise_lib/design_merge.py) | `plan_design_merge` が `design-merge-<N>` のプラン（`approved` → `merge_steps`）を組む。`cmd_design_approved` が副命令 `design-approved` の本体 |
-| [`supervise_lib/queue_resume.py`](../../plugins/ndf/scripts/supervise_lib/queue_resume.py) | `resume_targets` が前の起動の一覧と done から、ステージの並び・`--max`・続けるプランと開始のステップ（`ResumeTarget`）を決める。`cmd_queue_resume` が `queue.cmd_queue` へ `starts`・`rerun` を渡す |
+| [`supervise_lib/queue_resume.py`](../../plugins/ndf/scripts/supervise_lib/queue_resume.py) | `resume_targets` が前の起動の一覧と done から、ステージの並び・`--max`・続けるプランと開始のステップ（`ResumeTarget`）を決める。`cmd_queue_resume` が `queue.cmd_queue` へ `starts`・`rerun` を渡し、`--from` があれば前の起動の途中を子ごと止める指示（`restart`）も渡す |
 | [`supervise_lib/queue.py`](../../plugins/ndf/scripts/supervise_lib/queue.py) | 一覧 `<done>.plans.json` を書く（`start_listing`）。`plan_pr` が結果 `完了` か `関門` のプランの PR で `{queue_pr:<名>}` を埋める。結果の `items` に `resumed_from` を足す |
 | [`supervise_lib/flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py) | `admit_step` がプランごとの開始のステップで実行の回（`prefix_of` の `start`）を選び、`rerun` のプランは結果 `関門` の記録を終わりと扱わない |
 | [`supervise_lib/absorb.py`](../../plugins/ndf/scripts/supervise_lib/absorb.py) | `--absorb` の形の確認（`absorb_arg`）・拒否の理由（`absorb_refusal`）・プランへの適用（`apply_absorb`） |
@@ -166,6 +166,10 @@ graph TD
   プランが無ければ `stopped`。承認の後に別の入口から入るステップ（`merge-approved`・`promote-approved`・`auto` の `approve`）に使う
 - **開始のステップが違えば別の実行の回になる。** 実行の鍵（`prefix_of`）は `plan-<パス鍵>-<中身鍵>-<開始>` で、続けた回は新しい耐久ワークフローとして
   `run --from` と同じく前の実行の結果を読む（[ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md)）
+- **`--from` があれば、前の起動の途中を続けない。** 前の起動のキューの耐久ワークフローが途中で残っていても子ごと止め、新しい実行の回で
+  指定のステップから流す（#2325）。`--from` が無ければ前の起動を続ける
+- **同じ done のキューは同時に 1 本だけ流れる。** `queue` は持ち主の鍵 `supervise.queue:done=<done のリポジトリの根からの相対パス>` を取り、
+  生きた持ち主がいれば `stopped`・終了コード 3 で止まる（[ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md) の「持ち主の記録」）
 - **続ける対象（`rerun`）は、結果 `関門` の記録があっても新しい実行の回で流す。** 承認を記録した後に、過去の `関門` の結果を返し続けないためである。
   続けないプランも一覧の `starts` に残した前の開始のステップを保ち、元の実行の回の結果を拾う
 - **done が無い（前の起動が落ちて書けなかった）ときは、一覧の `starts` をそのまま使い、同じ耐久の記録から続く。**
