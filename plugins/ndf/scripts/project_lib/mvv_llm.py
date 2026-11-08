@@ -84,10 +84,18 @@ def principles_readable() -> bool:
     return True
 
 
-def latest_vet(key: str) -> dict | None:
-    """同じ照合の入力の最新の判定（時刻が最も後、同じなら後ろの行）。`repo` では絞らない。読めない・壊れた行は飛ばす。"""
-    rows = [r for r in pms.read_jsonl(pm.vet_log_path()) if r.get("input_sha256") == key]
+def latest_vet_where(pred) -> dict | None:
+    """照合の記録のうち `pred` を満たす最新の行（時刻が最も後、同じなら後ろの行）。読めない・壊れた行は飛ばす。
+
+    旧の置き場から足し合わせた行は末尾に付くため、行の順は時刻の順でない（#2766）。
+    """
+    rows = [r for r in pms.read_jsonl(pm.vet_log_path()) if pred(r)]
     return max(enumerate(rows), key=lambda x: (str(x[1].get("at") or ""), x[0]))[1] if rows else None
+
+
+def latest_vet(key: str) -> dict | None:
+    """同じ照合の入力の最新の判定（時刻が最も後、同じなら後ろの行）。`repo` では絞らない。"""
+    return latest_vet_where(lambda r: r.get("input_sha256") == key)
 
 
 def _base_record(root: Path, body: str, kind: str, mvv) -> dict:

@@ -253,13 +253,9 @@ def cmd_vet(a):
 
 def last_vet(root: Path, sha: str) -> dict | None:
     key = pm.mvv_repo_key(root)
-    rows = [
-        r
-        for r in pms.read_jsonl(pm.vet_log_path())
-        if r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")
-    ]
-    # 最新の時刻の判定を採る（旧の置き場から足し合わせた行は末尾に付くため、行の順は時刻の順でない。#2766）
-    return max(enumerate(rows), key=lambda x: (x[1].get("at") or "", x[0]))[1] if rows else None
+    return mvv_llm.latest_vet_where(
+        lambda r: r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")
+    )
 
 
 def _approvable_vet(root: Path, sha: str, accept_unknown: bool) -> dict:
