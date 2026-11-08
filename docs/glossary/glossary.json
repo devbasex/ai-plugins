@@ -5949,7 +5949,7 @@
       "term": "課題の差し込み",
       "context": "ndf-workflow",
       "meaning": "リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる",
-      "source": ""
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "リリースの実行",
