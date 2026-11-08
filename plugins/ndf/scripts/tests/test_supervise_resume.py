@@ -193,6 +193,9 @@ def test_gate_returns_the_same_report_until_from_continues(tmp_path, env):
     cont = plan.run(start="release")  # 承認の後は --from で続く
     assert cont.returncode == 0 and "- 結果: 完了" in cont.stdout, cont.stderr
     assert plan.visits() == ["ready", "release"]
+    told = plan.run()  # 記録から返す経路も、その実行の結果で終了コードを決める（--from の実行の ok を拾わない）
+    assert told.returncode == 10 and "- 結果: 関門" in told.stdout, told.stderr
+    assert json.loads((plan.state / "phase-result.json").read_text())["status"] == "gate"
 
 
 def test_stop_runs_again_from_the_top(tmp_path, env):

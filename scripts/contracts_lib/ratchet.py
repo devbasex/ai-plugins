@@ -76,7 +76,9 @@ def added(root: Path, sha: str, allow_rel: str, now: list[dict], name_of) -> lis
     for r in now:
         if name_of(r) in before:
             continue
-        if not known.setdefault(r["kind"], base_knows(root, sha, r["kind"])):
+        if r["kind"] not in known:  # setdefault の既定値は毎回評価されるため、種類ごとに 1 回だけ git show する
+            known[r["kind"]] = base_knows(root, sha, r["kind"])
+        if not known[r["kind"]]:
             continue
         if removed[(r["kind"], r["name"])] > 0:
             removed[(r["kind"], r["name"])] -= 1

@@ -988,3 +988,16 @@ def test_declared_writer_of_a_passed_file_is_not_file_dynamic(tree: Path):
     wj(tree / "plugins/ndf/contracts/files/res.json", dict(item, writers=["plugins/ndf/scripts/tool.py:main"]))
     run(tree, "--render")
     assert run(tree)[0] == 0
+
+
+def test_base_knows_runs_once_per_kind(monkeypatch):
+    """merge-base の検査を読む git show は、種類ごとに 1 回だけ起こす。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import ratchet
+
+    calls = []
+    monkeypatch.setattr(ratchet, "_names_at", lambda *a: set())
+    monkeypatch.setattr(ratchet, "base_knows", lambda root, sha, kind: calls.append(kind) or True)
+    now = [{"kind": k, "name": f"N{i}", "path": f"p{i}"} for i, k in enumerate(["a", "a", "b", "a", "b"])]
+    assert len(ratchet.added(Path("."), "sha", "x", now, lambda r: f"{r['path']}.json")) == 5
+    assert sorted(calls) == ["a", "b"]

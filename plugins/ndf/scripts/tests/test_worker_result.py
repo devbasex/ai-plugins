@@ -77,3 +77,10 @@ def test_a_full_step_that_wrote_gate_is_not_resumed(tmp_path):
     ctx = ctx_of(tmp_path, FakeClaude(["## 作業の報告\n- 結果: 判断が要る"]))
     got, _ = worker_steps.WorkStep().execute(ctx, {"id": "w", "prompt": "/ndf:design #1", "full": True})
     assert not got and len(ctx.claude.calls) == 1 and ctx.state.cur["work_result"]["status"] == "gate"
+
+
+def test_the_result_file_is_an_absolute_path_even_for_a_relative_state_dir(tmp_path, monkeypatch):
+    """相対の状態ディレクトリでも、worker へ渡す結果ファイルは起動ディレクトリで解決した絶対パスにする。"""
+    monkeypatch.chdir(tmp_path)
+    ctx = SimpleNamespace(state=SimpleNamespace(dir=Path("sv")))
+    assert worker_steps.result_file_of(ctx, {"id": "w"}) == tmp_path.resolve() / "sv" / "w-result.json"

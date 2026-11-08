@@ -34,7 +34,8 @@ STEP_RESULT_PY = paths.HERE / "lib" / "step_result.py"
 
 def result_file_of(ctx, step: dict) -> Path:
     """作業の結果ファイルの置き場（プランの状態ディレクトリの `<ステップの id>-result.json`。#2337 の決定 7）。"""
-    return Path(ctx.state.dir) / f"{step['id']}-result.json"
+    # worker の作業場所は別の worktree のことがあるため、supervise の起動ディレクトリで絶対パスにして渡す
+    return (Path(ctx.state.dir) / f"{step['id']}-result.json").resolve()
 
 
 def result_prompt(path: Path) -> str:

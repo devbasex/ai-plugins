@@ -132,7 +132,12 @@ def test_a_row_held_by_another_running_plan_is_left_to_it(tmp_path, monkeypatch)
 
 class Gh:
     def __init__(self, head):
-        self.head, self.calls, self.code, self.out = head, [], 0, '{"tool": "sprint-state", "status": "ok", "summary": "x", "items": [], "metrics": {"status": "answered"}}'
+        self.head, self.calls, self.code, self.out = (
+            head,
+            [],
+            0,
+            '{"tool": "sprint-state", "status": "ok", "summary": "x", "items": [], "metrics": {"status": "answered"}}',
+        )
 
     def __call__(self, cmd, cwd=None, stdin=None):
         self.calls.append(cmd)
@@ -187,7 +192,10 @@ def test_a_refused_or_regated_loop_answer_is_unmatched(tmp_path):
 def test_a_stale_row_stamp_is_answered_again_once(tmp_path):
     """行の印が古い（問いは送る時点の先頭）と loop answer は答え直しを求める。先頭は確かめたので 1 回だけ打ち直す。"""
     gh = Gh("a" * 40)
-    outs = ['{"tool": "sprint-state", "status": "ok", "summary": "x", "items": [], "metrics": {"status": "regated"}}', '{"tool": "sprint-state", "status": "ok", "summary": "x", "items": [], "metrics": {"status": "answered"}}']
+    outs = [
+        '{"tool": "sprint-state", "status": "ok", "summary": "x", "items": [], "metrics": {"status": "regated"}}',
+        '{"tool": "sprint-state", "status": "ok", "summary": "x", "items": [], "metrics": {"status": "answered"}}',
+    ]
     base = gh.__call__
 
     def run(cmd, cwd=None, stdin=None):
