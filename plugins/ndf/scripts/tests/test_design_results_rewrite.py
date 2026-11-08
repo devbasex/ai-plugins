@@ -512,3 +512,44 @@ def test_cell_errors_stop_the_stage_and_a_fixed_doc_passes(tmp_path, repo):
     r.base = {D1: table_of(ROW1), d2: table_of("| #2 | 実装する | — | `b.py`、`c.py` |")}
     res, code = design_stage.cmd_design_results(a)
     assert code == 0 and written(paths)[2]["触るファイル"][:2] == ["b.py", "c.py"], res
+
+
+# ---------- 現状固定: 触るファイルのセルの読み方（_files の分割の前に固定する） ----------
+
+
+@pytest.mark.parametrize(
+    ("cell", "part"),
+    [
+        ("`a.py`。ループの側は [issue-1-design-loop.md](issue-1-design-loop.md) にある", "。ループの側は / issue-1-design-loop.md / にある"),
+        ("`a.py`（[l](x.md)）と語", "x.md / と語"),
+        ("`a.py`, b.py", "b.py"),
+        ("`a.py`（新設", "閉じていない括弧"),
+        ("`a.py`）、`b.py`", "）"),
+        ("`a.py` **太字** `b.py`", "** / 太字 / **"),
+        ("`a.py`<br>`b.py`", "<br>"),
+        ("語1　語2,語3、`d.py`", "語1 / 語2 / 語3"),
+        ("[`x.py`](x.py)", "x.py"),
+    ],
+    ids=["link-and-words", "link-in-parens", "bare-path", "unclosed", "stray-close", "emphasis", "html", "separators", "code-in-link"],
+)
+def test_characterize_the_unreadable_parts_of_a_cell(cell, part):
+    """現状固定: 読めなかった部分は出た順に ` / ` で結ばれ、行の課題と文書が添う。"""
+    with pytest.raises(dr.DesignCellError) as e:
+        dr.parse_results(table_of(f"| #1 | 実装する | — | {cell} |"), D1)
+    assert [(p.issue, p.doc, p.part) for p in e.value.problems] == [(1, D1, part)]
+    assert str(e.value) == f"#1（{D1}）の触るファイルのセルを読めない: {part}。{dr.CELL_FIX}"
+
+
+@pytest.mark.parametrize(
+    ("cell", "files"),
+    [
+        ("`a.py`（注（入れ子）記）`b.py`", ["a.py", "b.py"]),
+        ("`  `、`c.py`", ["c.py"]),
+        ("`a.py`（`b.py`）`c.py`", ["a.py", "c.py"]),
+        ("` d.py `", ["d.py"]),
+    ],
+    ids=["nested-parens", "blank-code-span", "code-in-parens", "stripped"],
+)
+def test_characterize_the_files_of_a_cell(cell, files):
+    """現状固定: 入れ子の括弧は深さで読み飛ばし、空のコードスパンは捨て、中身は前後の空白を落とす。"""
+    assert dr.parse_results(table_of(f"| #1 | 実装する | — | {cell} |"), D1)[0].files == files
