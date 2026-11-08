@@ -579,6 +579,117 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
     assert out == ["codex: p/skills/a/SKILL.md"]
 
 
+# --- 利用者の設定の控えと比較（user-config-save / user-config-check。#2401） ------------------------
+
+
+def installed_json(version="1.0.0", sha="abcdef1234567890", **extra):
+    row = {"scope": "user", "version": version, "gitCommitSha": sha, "installPath": "/x", "installedAt": "t0", "lastUpdated": "t0", **extra}
+    return json.dumps({"version": 2, "plugins": {"ndf@ai-plugins": [row]}})
+
+
+@pytest.fixture
+def user_config(tmp_path, env):
+    """一時ディレクトリを利用者の設定ディレクトリ（CLAUDE_CONFIG_DIR・CODEX_HOME）にする。"""
+    claude, codex = tmp_path / "claude", tmp_path / "codex"
+    write(claude, "plugins/installed_plugins.json", installed_json())
+    known = {
+        "ai-plugins": {"source": {"source": "git", "url": "https://u:SECRET1@github.com/a/b.git"}, "lastUpdated": "t0", "autoUpdate": True}
+    }
+    write(claude, "plugins/known_marketplaces.json", json.dumps(known))
+    write(
+        codex,
+        "config.toml",
+        '[marketplaces.ai-plugins]\nsource_type = "git"\nsource = "https://x:SECRET2@h/r"\nref = "develop"\n'
+        '[plugins."ndf@ai-plugins"]\nenabled = true\n[model]\nname = "SECRET3"\n',
+    )
+    write(codex, "auth.json", '{"token": "SECRET4"}')
+    (codex / "plugins" / "cache" / "ai-plugins" / "ndf" / "1.0.0").mkdir(parents=True)
+    env.update(CLAUDE_CONFIG_DIR=str(claude), CODEX_HOME=str(codex))
+    return claude, codex, tmp_path / "state" / "user-config-before.json"
+
+
+def config_call(sub, flag, path, env):
+    return call("release-verification-steps.py", [f"user-config-{sub}", flag, str(path)], env)
+
+
+def test_user_config_unchanged_is_ok_and_hides_secrets(user_config, env):
+    claude, codex, before = user_config
+    code, out, _ = config_call("save", "--out", before, env)
+    assert code == 0 and out["status"] == "ok" and out["metrics"]["keys"] == 4
+    code, out2, _ = config_call("check", "--before", before, env)
+    assert code == 0 and out2["status"] == "ok" and out2["metrics"]["unchanged"] is True and out2["items"] == []
+    shown = before.read_text(encoding="utf-8") + json.dumps(out) + json.dumps(out2)
+    assert not any(f"SECRET{i}" in shown for i in range(1, 5))
+
+
+@pytest.mark.parametrize(
+    ("change", "key", "after"),
+    [
+        (
+            lambda c, x: write(c, "plugins/installed_plugins.json", installed_json("1.0.1")),
+            "claude:plugin:ndf@ai-plugins",
+            "user:1.0.1@abcdef12",
+        ),
+        (
+            lambda c, x: (x / "plugins/cache/ai-plugins/ndf/1.0.1").mkdir(),
+            "codex:plugin:ndf@ai-plugins",
+            "enabled=true versions=1.0.0,1.0.1",
+        ),
+        (
+            lambda c, x: (x / "plugins/cache/ai-plugins/new/2.0.0").mkdir(parents=True),
+            "codex:plugin:new@ai-plugins",
+            "enabled=- versions=2.0.0",
+        ),
+    ],
+)
+def test_user_config_change_stops_with_the_key_and_both_values(user_config, env, change, key, after):
+    """版が上がる・版が足される・新しいプラグインが入ると 1 で止まり、鍵と前後の値を載せる（新しい鍵の前は null）。"""
+    claude, codex, before = user_config
+    assert config_call("save", "--out", before, env)[0] == 0
+    change(claude, codex)
+    code, out, _ = config_call("check", "--before", before, env)
+    assert code == 1 and out["status"] == "stopped" and out["metrics"] == {**out["metrics"], "unchanged": False, "changed": 1}
+    [item] = out["items"]
+    assert item["kind"] == "user_env" and item["name"] == key and item["after"] == after
+    assert (item["before"] is None) == key.startswith("codex:plugin:new") and key in out["summary"]
+
+
+def test_user_config_ignores_times_places_and_auto_update(user_config, env):
+    claude, _, before = user_config
+    assert config_call("save", "--out", before, env)[0] == 0
+    write(claude, "plugins/installed_plugins.json", installed_json(installPath="/y", installedAt="t1", lastUpdated="t1"))
+    known = {
+        "ai-plugins": {"source": {"source": "git", "url": "https://u:SECRET1@github.com/a/b.git"}, "lastUpdated": "t1", "autoUpdate": False}
+    }
+    write(claude, "plugins/known_marketplaces.json", json.dumps({k: {**v, "installLocation": "/z"} for k, v in known.items()}))
+    code, out, _ = config_call("check", "--before", before, env)
+    assert code == 0 and out["status"] == "ok"
+
+
+@pytest.mark.parametrize("broken", ["no-before", "bad-before", "bad-config"])
+def test_user_config_unreadable_is_2(user_config, env, broken):
+    """控えが無い・壊れている、設定のファイルが壊れていると「変わっていない」と言えないため 2 で止まる。"""
+    claude, _, before = user_config
+    if broken != "no-before":
+        assert config_call("save", "--out", before, env)[0] == 0
+    if broken == "bad-before":
+        before.write_text("{", encoding="utf-8")
+    if broken == "bad-config":
+        write(claude, "plugins/installed_plugins.json", "{")
+        code, out, _ = config_call("save", "--out", before, env)
+        assert code == 2 and out["status"] == "stopped" and out["items"][0]["kind"] == "unreadable"
+    code, out, _ = config_call("check", "--before", before, env)
+    assert code == 2 and out["status"] == "stopped" and "unchanged" not in out["metrics"]
+    assert out["items"] and all(i["kind"] == "unreadable" for i in out["items"])
+
+
+def test_user_config_missing_dirs_are_empty_not_unreadable(tmp_path, env):
+    """設定ディレクトリが無いのは導入していない状態で、読めないこととは分ける。"""
+    env.update(CLAUDE_CONFIG_DIR=str(tmp_path / "none-c"), CODEX_HOME=str(tmp_path / "none-x"))
+    code, out, _ = config_call("save", "--out", tmp_path / "b.json", env)
+    assert code == 0 and out["metrics"]["keys"] == 0
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
