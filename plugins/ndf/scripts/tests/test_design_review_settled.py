@@ -228,3 +228,39 @@ def test_the_cli_prints_the_result_and_returns_the_code(tmp_path):
     )  # fmt: skip
     out = json.loads(p.stdout.strip().splitlines()[-1])
     assert p.returncode == 2 and out["tool"] == "review-settled" and out["metrics"]["reason"] == "U3"
+
+
+def test_the_first_limit_in_order_wins_when_several_are_hit(tmp_path):
+    """現状固定: 複数の上限へ同時に当たると、未解決 0 件 → U2 → U3 → U4 → U5 の順で先のものを返す。"""
+
+    def fix(**kw):
+        return rec("resolve", 0, seconds=4000, cost=2.0, **kw)
+
+    def reason(*log):
+        return settle(tmp_path, *log)[1]["reason"]
+
+    assert settle(tmp_path, rec("review", 6, 3), fix(), fix(), rec("review", 6, 0))[0] == 0
+    assert reason(rec("review", 6, 2), fix(), fix(), rec("review", 6, 2)) == "U2"
+    assert reason(rec("review", 6, 2), fix(), rec("review", 6, 2)) == "U3"
+    assert reason(rec("review", 6, 3), fix(), rec("review", 6, 2)) == "U4"
+    assert reason(rec("review", 6, 3), rec("resolve", 0, seconds=4000), rec("review", 6, 2)) == "U5"
+
+
+def test_the_result_summary_and_metrics_for_each_reason(tmp_path):
+    """現状固定: 入口が返す status・summary・metrics の形。"""
+    path = tmp_path / "state.json"
+
+    def run(*log):
+        path.write_text(json.dumps({"log": list(log)}))
+        return commands.cmd_review_settled(str(path), "review", "resolve", **LIMITS)
+
+    res, code = run(rec("review", 6, 0))
+    assert (code, res["status"], res["summary"]) == (0, "ok", "未解決 0 件。解決を続けるか通常の経路: 通常の経路へ進む")
+    res, code = run(rec("review", 6, 3), rec("resolve", 0, seconds=12.34, cost=0.12345), rec("review", 6, 2, seconds=1.0))
+    assert (code, res["status"], res["summary"]) == (1, "stopped", "未解決 2 件。解決を続けるか通常の経路: 解決のフローを続ける")
+    assert res["metrics"] == {"unresolved": 2, "attempts": 1, "cost": 0.1235, "seconds": 13.3, "reason": None}
+    res, code = run(rec("review", 1, 0))
+    assert (code, res["summary"]) == (2, "U1: review の最後の終了コードが 6 でない（1）")
+    assert res["metrics"] == {"unresolved": None, "attempts": 0, "cost": 0.0, "seconds": 0.0, "reason": "U1"}
+    res, code = run(rec("review", 6, 3), rec("resolve", 0, cost=1.6), rec("review", 6, 2))
+    assert res["summary"] == "未解決 2 件。U4: 直しの費用が上限 $1.5 を超えたか不明"
