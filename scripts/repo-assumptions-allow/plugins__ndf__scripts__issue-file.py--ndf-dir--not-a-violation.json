@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/issue-file.py",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "上流リポジトリ（NDF の実体を持つ clone）を plugins/ndf/ で見分ける部品。対象リポジトリを指していない",
+  "count": 1
+}

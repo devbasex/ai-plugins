@@ -106,6 +106,14 @@ def pr_for_report(root, number):
     )
 
 
+def require_base(root, given=None) -> str:
+    """宛先のブランチ。`--base` → `.ndf/worktree.json` の `base_branch` → 既定ブランチの順。決まらなければ止まる。"""
+    base = given or repo.base_branch(root)
+    if not base:
+        raise StepError("起点のブランチを決められない（.ndf/worktree.json の base_branch か --base を渡す）", EXIT_PRECONDITION)
+    return base
+
+
 def target_pr(root, branch, a, must_exist):
     """書く先の PR と宛先。(既存の PR か None, 宛先のブランチか None) を返す。
 
@@ -119,7 +127,7 @@ def target_pr(root, branch, a, must_exist):
         raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
     if not a.title:
         raise StepError("--title が要る", EXIT_UNREADABLE)
-    return None, a.base or repo.base_branch(root) or "main"
+    return None, require_base(root, a.base)
 
 
 def send_body(root, branch, body, body_path, a, pr, base):

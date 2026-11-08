@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/worktree-setup.sh",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身の宣言の形（worktree.schema.json）の URL。対象リポジトリを指していない",
+  "count": 1
+}

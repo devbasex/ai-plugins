@@ -139,9 +139,10 @@ def judge_plan(env, decision, monkeypatch, cmd="sleep 3", **step):
 
 
 def test_judge_stop_stops_plan_with_reason(env, monkeypatch):
+    # 打ち切らなければ 30 秒かかる。上限をコマンドの長さで取り、負荷で起動が遅れても落ちないようにする
     started = time.time()
-    s, text = judge_plan(env, "stop", monkeypatch)
-    assert time.time() - started < 2.5
+    s, text = judge_plan(env, "stop", monkeypatch, cmd="sleep 30")
+    assert time.time() - started < 30
     assert "結果: 止まった" in text and "遅れ: 理由の目印 stop" in text
     slow = lines(env, "slow")[-1]
     assert (slow["by"], slow["act"], slow["llm"]["reason"]) == ("llm", "stop", "理由の目印 stop")

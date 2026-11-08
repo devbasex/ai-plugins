@@ -173,7 +173,7 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
 def test_a_passed_verify_keeps_the_order(tmp_path):
     """AC4: 確認が 0 なら今と同じ順で続き、マージの後にリリース記録を書く（#1870）。"""
     res, ran = run_promote(tmp_path, "true")
-    assert ran == ["prepare", "mvv", "note", "promote", "record"] and res["items"][0]["result"] == "完了", res
+    assert ran == ["prepare", "mvv", "note", "promote", "cd-result", "record"] and res["items"][0]["result"] == "完了", res
 
 
 @pytest.mark.parametrize("pace", ["auto", "fast"])
@@ -221,7 +221,7 @@ def test_normal_keeps_the_promote_plan(tmp_path):
     """AC11・I6: --pace 無しの昇格のプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), None)
     ids = [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]]
-    assert ids == ["promote", "promote-approved", "record", "judge-record"]
+    assert ids == ["promote", "promote-approved", "cd-result", "record", "judge-record"]
     assert verify_steps(waves) == [] and "導入の確認" not in [w["name"] for w in waves]
 
 
@@ -281,7 +281,8 @@ def test_the_promote_plan_records_after_the_merge(tmp_path, pace):
     """#1870 AC2: 昇格の PR のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
     steps = {s["id"]: s for s in load(wave(waves, "本番")["plans"][0])["steps"]}
-    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "record"
+    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
+    assert steps["cd-result"]["next"] == "record"
     rec = steps["record"]
     assert "release-steps.py record --promote --head develop --base main --prs " in rec["cmd"]
     assert rec["on_fail"] == "judge-record" and rec["pr_from"] == "release_pr_url"

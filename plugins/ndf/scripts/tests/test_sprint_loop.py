@@ -1049,6 +1049,25 @@ def test_new_sprint_refusal_stops_with_refused_and_resume_retries(env):
     assert res["metrics"]["status"] == "resumed" and "loop sprint l1" in res["metrics"]["next"]
 
 
+def test_sprint_without_a_version_runs_when_no_template_route_needs_it(env):
+    """#2623 の受け入れ条件 4: 版数の要らない経路では --dev なしで周回を始め、状態にも new sprint にも版を渡さない。"""
+    (env.main_dir() / ".ndf" / "project.json").write_text(json.dumps({"delivery": []}))
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    seen = []
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        seen.append(cmd)
+        return base(cmd, cwd=cwd, stdin=stdin)
+
+    env.run = run
+    out = sl.cmd_sprint(env, "l1", "standard", None, None, [])
+    assert out["status"] == "ok", out
+    assert not rec(env)["laps"][-1]["versions"]["dev"]
+    assert not [c for c in seen if "--dev" in c or "--version" in c or "--prod" in c]
+
+
 # ---------------- I1 ----------------
 
 
@@ -1367,7 +1386,7 @@ def test_sprint_pipeline_waits_for_hands_before_the_close(tmp_path):
         {"name": "リリース", "manual": "/ndf:release"},
     ]
     queue, pipeline = sl.sprint_pipeline(index, ["c1"], done, rec_)
-    assert queue == f"python3 {sl.SUPERVISE} queue c1 --max 3 --done {done}"
+    assert queue == f"python3 {sl_record.SUPERVISE} queue c1 --max 3 --done {done}"
     assert pipeline == f"Q1 を流し、続けて Q2 → リリース（/ndf:release で行う） を終えてから: {queue} && {sl_gate.wait_lap(rec_, done)}"
 
 
