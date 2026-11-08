@@ -271,6 +271,7 @@ class RunStep:
                 return 2, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）"
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(ctx.state.dir))
+        cmd = cmd.replace("{plan_issues}", " ".join(str(int(i)) for i in ctx.plan.get("課題") or []))
         cmd, timeout = fill_test_limit(ctx, step, cmd)
         env = dict(os.environ)
         # 親の run のステップから受け継いだ no_reports は、reports: true なら外す

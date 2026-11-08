@@ -255,13 +255,12 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
     from supervise_lib.paths import PARALLEL_PY
     from supervise_lib.procedures import with_record
 
-    issues = " ".join(str(n) for n in (a.issue or []))
     pr_args = " ".join(prs or [])
+    # 課題の一覧はプランの `課題` だけに持ち、流す時点に `{plan_issues}` で埋める（#2717 の決定 1）
     cmd = (
         f"{PARALLEL_PY} request {shlex.quote(plan_name)} --lane {shlex.quote(lane)}"
         + (f" --prs {pr_args}" if pr_args else "")
-        + (f" --issues {issues}" if issues else "")
-        + " --state {state_dir}"
+        + " --issues {plan_issues} --state {state_dir}"
     )
     return with_record(
         {
