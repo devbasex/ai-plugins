@@ -667,10 +667,10 @@ def cmd_release(a):
     # 本番: release/v<版> → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
     tag = f"{plugin}--v{ver}"
     git(root, "fetch", "-q", "origin", "--tags")
-    prod_pr = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if prod_pr and prod_pr["state"] == "MERGED":
+    done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
+    if done and done["state"] == "MERGED":
         # 再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける
-        main_pr = prod_pr["number"]
+        main_pr = done["number"]
         git(root, "fetch", "-q", "origin")
         merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
         if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
@@ -701,8 +701,8 @@ def cmd_release(a):
     swept, sweep_metrics, nxt = _sweep_candidates(root, merge)
     items += swept
     metrics.update(sweep_metrics)
-    publish_summary = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
-    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{publish_summary}", items, metrics, None, nxt))
+    done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
+    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt))
 
 
 def _sweep_candidates(root, merge):

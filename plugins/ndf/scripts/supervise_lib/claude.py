@@ -186,42 +186,6 @@ def claude_kind(system: str, full: bool) -> str:
     return "pr" if system.startswith(PR_SYSTEM) else {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow"}.get(system, "work")
 
 
-def build_run_env(env, child_env, caller, session, full, watch, resume, cmd) -> tuple[dict | None, list[str]]:
-    """子の環境（`child_env` は置き換え・`env` は足す・プランとステップは `NDF_USAGE_*`）と、会話を残すときの `--session-id` を決める。"""
-    run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
-    # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
-    usage_env = {f"NDF_USAGE_{k.upper()}": str(v) for k, v in (caller or {}).items() if k in ("plan", "step") and v is not None}
-    run_env = {**(run_env if run_env is not None else os.environ), **usage_env} if usage_env else run_env
-    if session is not None and (full or watch) and not resume:  # 遅れの見張りと進みの観測がセッションの記録の伸びを進みに数える
-        session.update(id=str(uuid.uuid4()), config=(run_env or os.environ).get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude"))
-        cmd = [arg for arg in cmd if arg != "--no-session-persistence"] + ["--session-id", session["id"]]
-    return run_env, cmd
-
-
-def interpret_result(p: subprocess.CompletedProcess, started: float, system: str, full: bool, cwd: str, who: dict) -> ClaudeCall:
-    """終わった claude -p の出力を読み、ok・利用上限・認証の失敗を判定して帳簿へ 1 行を書き、結果を返す。"""
-    try:
-        data = json.loads(p.stdout)
-    except json.JSONDecodeError:
-        data = None
-    if not isinstance(data, dict):
-        data = {"result": p.stdout, "is_error": p.returncode != 0}
-    ok = p.returncode == 0 and not data.get("is_error")
-    text = data.get("result") or p.stderr[-TAIL:]
-    result = str(data.get("result") or "")
-    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
-    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
-    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
-    usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
-    model_usage = data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None
-    return ClaudeCall(
-        ok=ok, text=text, usage=data.get("usage") or {}, model_usage=model_usage, kind=claude_kind(system, full),
-        cost=data.get("total_cost_usd"), turns=data.get("num_turns"), session=data.get("session_id"),
-        seconds=round(time.time() - started, 1), limit=limit, auth=auth,
-        resets_at=limit_reset_at("\n".join([result, p.stderr])) if limit else None,
-    )  # fmt: skip
-
-
 def call_claude(
     system: str,
     prompt: str,
@@ -251,7 +215,14 @@ def call_claude(
     started = time.time()
     who = {"kind": claude_kind(system, full), **(caller or {})}
     cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
-    run_env, cmd = build_run_env(env, child_env, caller, session, full, watch, resume, cmd)
+    run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
+    # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
+    usage_env = {f"NDF_USAGE_{k.upper()}": str(v) for k, v in (caller or {}).items() if k in ("plan", "step") and v is not None}
+    if usage_env:
+        run_env = {**(run_env if run_env is not None else os.environ), **usage_env}
+    if session is not None and (full or watch) and not resume:  # 遅れの見張りと進みの観測がセッションの記録の伸びを進みに数える
+        session.update(id=str(uuid.uuid4()), config=(run_env or os.environ).get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude"))
+        cmd = [arg for arg in cmd if arg != "--no-session-persistence"] + ["--session-id", session["id"]]
     try:
         p = run_ticking(
             metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
@@ -270,7 +241,35 @@ def call_claude(
         kind, waited = claude_kind(system, full), round(e.timeout)  # 締め切りを動かしたときは動かした後の秒
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=waited, status="timeout")
         return ClaudeCall(ok=False, text=f"打ち切り（{waited} 秒）", usage={}, seconds=waited, kind=kind, model_usage=None, timed_out=True)
-    return interpret_result(p, started, system, full, cwd, who)
+    try:
+        data = json.loads(p.stdout)
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict):
+        data = {"result": p.stdout, "is_error": p.returncode != 0}
+    ok = p.returncode == 0 and not data.get("is_error")
+    text = data.get("result") or p.stderr[-TAIL:]
+    result = str(data.get("result") or "")
+    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
+    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
+    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
+    return ClaudeCall(
+        {
+            "ok": ok,
+            "text": text,
+            "usage": data.get("usage") or {},
+            "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
+            "kind": claude_kind(system, full),
+            "cost": data.get("total_cost_usd"),
+            "turns": data.get("num_turns"),
+            "session": data.get("session_id"),
+            "seconds": round(time.time() - started, 1),
+            "limit": limit,
+            "auth": auth,
+            "resets_at": limit_reset_at("\n".join([result, p.stderr])) if limit else None,
+        }
+    )
 
 
 def is_usage_limit(text: str) -> bool:
