@@ -65,11 +65,11 @@ def test_the_counts_survive_a_resume(tmp_path):
     plan = {"フェーズ": "試験", "作業場所": str(tmp_path), "steps": []}
     before = RunState(tmp_path / "a", plan)
     failed = {"exit": 1, "text": json.dumps({"status": "stopped", "summary": "CI が失敗: runtime-smoke（run 1）"})}
-    rerun.count(before.cause_counts, "release", failed)
+    rerun.count_failure(before.cause_counts, "release", failed)
     after = RunState(tmp_path / "b", plan)
     after.replay({"n": 1, "sid": "release", "cur": failed, "acc": before.snapshot()})
     assert rerun.stop_reason(after, "release") is None  # 1 回目の後はまだ流す
-    rerun.count(after.cause_counts, "release", {**failed, "text": failed["text"].replace("run 1", "run 2")})
+    rerun.count_failure(after.cause_counts, "release", {**failed, "text": failed["text"].replace("run 1", "run 2")})
     assert "2 回失敗した" in rerun.stop_reason(after, "release")
 
 
@@ -78,6 +78,6 @@ def test_a_rate_limited_failure_is_left_to_the_recovery_wait(tmp_path):
     st = RunState(tmp_path / "a", plan)
     limited = {"exit": 1, "text": "GraphQL: API rate limit already exceeded for user ID 1."}
     for _ in range(3):
-        rerun.count(st.cause_counts, "t", limited)
+        rerun.count_failure(st.cause_counts, "t", limited)
     st.results["t"] = limited
     assert st.cause_counts == {} and rerun.stop_reason(st, "t") is None

@@ -94,7 +94,7 @@ def _key_of(rs: RetryCallState, reason: Optional[Callable[[Any], str]]) -> Optio
     return cause_key.make("result", reason(v) if reason is not None else str(v))
 
 
-def _finish(retrying: Retrying, out, run: _Run) -> Waited:
+def _waited_of(retrying: Retrying, out, run: _Run) -> Waited:
     attempts = int(retrying.statistics.get("attempt_number", 1))
     if isinstance(out, RetryCallState):  # 打ち切った
         o = out.outcome
@@ -171,7 +171,7 @@ def retry_call(
         retry_error_callback=lambda rs: rs,
         reraise=False,
     )
-    return _finish(retrying, retrying(fn), run)
+    return _waited_of(retrying, retrying(fn), run)
 
 
 def wait_until(
@@ -209,4 +209,4 @@ def wait_until(
         retry_error_callback=lambda rs: rs,
         reraise=True,
     )
-    return _finish(retrying, retrying(fn), run)
+    return _waited_of(retrying, retrying(fn), run)

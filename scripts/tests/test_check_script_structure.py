@@ -660,3 +660,64 @@ def test_broken_allow_list_stops_even_with_files(tmp_path: Path):
     (tmp_path / "allow" / "x.json").write_text("{")
     code, _ = run(tmp_path, None, "--allow", str(tmp_path / "allow"), "plugins/ndf/scripts/clean.py")
     assert code == 2
+
+
+# ---------- 上限の数字と眠りのループ（#2343 の受け入れ条件 2・3、不変条件 I3・I6・I7） ----------
+
+
+@pytest.mark.parametrize(
+    ("text", "name"),
+    [
+        ("import subprocess\n\n\ndef f():\n    subprocess.run(['x'], timeout=600)\n", "timeout"),
+        ("FOO_TIMEOUT = 5\n", "FOO_TIMEOUT"),
+        ("def f(timeout=5):\n    return timeout\n", "timeout"),
+        ("def f(d):\n    return d.get('poll', 2.5)\n", "poll"),
+        ("A_WAIT, B = 30.0, 'x'\n", "A_WAIT"),
+        ("HOUR_BUDGET = 60 * 60\n", "HOUR_BUDGET"),
+    ],
+)
+def test_a_limit_literal_fails(tmp_path: Path, text: str, name: str):
+    put(tmp_path, "scripts/a.py", text)
+    code, r = run(tmp_path, [])
+    assert code == 1 and kinds(r) == {("limit-literal", f"plugins/ndf/scripts/a.py:{name}")}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "import subprocess\n\n\ndef f():\n    subprocess.run(['x'], timeout=0)\n",
+        "EXIT_WAIT = 75\nRETRY_CODE = 3\n",
+        "import limits\n\nTIMEOUT = limits.seconds('a.b')\n",
+    ],
+)
+def test_zero_exit_codes_and_declared_values_pass(tmp_path: Path, text: str):
+    put(tmp_path, "scripts/a.py", text)
+    assert run(tmp_path, [])[0] == 0
+
+
+def test_limit_literals_in_the_reader_tests_and_experiments_pass(tmp_path: Path):
+    put(tmp_path, "scripts/lib/limits.py", "X_TIMEOUT = 5\n")
+    put(tmp_path, "scripts/tests/test_a.py", "X_TIMEOUT = 5\n")
+    put(tmp_path, "scripts/experimental/a.py", "X_TIMEOUT = 5\n")
+    assert run(tmp_path, [])[0] == 0
+
+
+def test_a_sleep_loop_outside_waits_fails_unless_allowed(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "import time\n\n\ndef poll():\n    while True:\n        time.sleep(1)\n")
+    put(tmp_path, "scripts/lib/waits.py", "import time\n\n\ndef w(n):\n    for _ in range(n):\n        time.sleep(2)\n")
+    code, r = run(tmp_path, [])
+    assert code == 1 and kinds(r) == {("sleep-loop", "plugins/ndf/scripts/a.py:poll")}
+    row = {"path": "plugins/ndf/scripts/a.py", "name": "poll", "kind": "sleep-loop", "reason": "プロセスの終わりを待つ"}
+    assert run(tmp_path, [row])[0] == 0
+
+
+def test_a_sleep_only_in_a_nested_function_is_not_a_loop(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "import time\n\n\ndef f(xs):\n    for x in xs:\n        def g():\n            time.sleep(1)\n        x(g)\n")
+    assert run(tmp_path, [])[0] == 0
+
+
+def test_tenacity_is_wrapped_by_waits(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "import tenacity\n")
+    put(tmp_path, "scripts/lib/waits.py", "import tenacity\n")
+    code, r = run(tmp_path, [])
+    assert code == 1 and kinds(r) == {("wrapped", "plugins/ndf/scripts/a.py:tenacity")}

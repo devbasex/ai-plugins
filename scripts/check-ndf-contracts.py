@@ -5,6 +5,7 @@
 `if __name__ == "__main__":` を持つ `.py` と 1 行目が `#!` の `.sh`（テストと `experimental/` を除く）。
 コードから拾った引数・環境変数の読み・`.ndf/` の設定のキーの読み・受け渡しのファイルの書きが契約にあるか、
 契約にあるものがコードから拾えるか、呼び手がいるか、逆引き（`contracts/index.md`）が項目と一致するかを見る。
+上限の宣言（`contracts/limits.json`）の形と、コードが引く方針の名前との対応も見る（`contracts_lib/limits_decl.py`。#2343）。
 今の外れは例外リスト（`scripts/contract-allow/`。1 項目 1 ファイル）に載せ、ベースブランチとの merge-base より
 項目が増えた変更を `allow-added` で落とす。形と規則の理由は `docs/specifications/ndf-entrypoint-contracts.md`。
 
@@ -29,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 from allowlist import AllowError, allow_file_name, load_allow, rel_target, under  # noqa: E402
-from contracts_lib import core_checks, extract_sh, ratchet  # noqa: E402
+from contracts_lib import core_checks, extract_sh, limits_decl, ratchet  # noqa: E402
 from contracts_lib.draft import Callers, draft  # noqa: E402
 from contracts_lib.extract_py import PyExtractor, is_runnable  # noqa: E402
 from contracts_lib.model import (  # noqa: E402
@@ -270,6 +271,8 @@ class Checker:
             out.append(v("exit-meaning", path, name, why))
         for path, name, why in core_checks.result_read_violations(self.root):
             out.append(v("result-read", path, name, why))
+        for kind, path, name, why in limits_decl.violations(self.root, limits_decl.code_files(self.root)):
+            out.append(v(kind, path, name, why))
 
     def run(self) -> tuple[list[dict], dict]:
         out: list[dict] = []
@@ -311,7 +314,7 @@ class Checker:
                 v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す")
             )
         idx = self.root / INDEX
-        if not idx.is_file() or idx.read_text(encoding="utf-8") != render(self.c):
+        if not idx.is_file() or idx.read_text(encoding="utf-8") != render(self.c, self.root):
             out.append(v("index-stale", INDEX, "", "逆引きが項目と一致しない。python3 scripts/check-ndf-contracts.py --render を打つ"))
         metrics = {
             "entrypoints": len(entries),
@@ -387,7 +390,7 @@ def allow_ratchet(root: Path, allow_dir: Path, allow, base_arg: str | None) -> t
 
 def _render(c: Contracts, root: Path) -> int:
     """逆引き（`INDEX`）を書き直す（`--render`）。"""
-    text, idx = render(c), root / INDEX
+    text, idx = render(c, root), root / INDEX
     changed = not idx.is_file() or idx.read_text(encoding="utf-8") != text
     if changed:
         idx.write_text(text, encoding="utf-8")

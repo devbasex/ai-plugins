@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/backlog-refinement/scripts/upkeep_gh.py", "name": "Gh.call", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: GitHub の上限の回復の時刻（retry-after・reset）まで待って同じ照会を打つ（要求の前提 6）"}

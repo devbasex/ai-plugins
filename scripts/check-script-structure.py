@@ -12,7 +12,7 @@
 
 - `wrapped`: 汎用の処理の包み（`lib/` の包み。決定 19）が受け持つ標準ライブラリの部品を、包みの外の Python の
   モジュールが使う（I14）。部品と持ち主は `WRAPPED` の表で、`fcntl`・`pty`・`termios`・`urllib.request`・`dbos`
-  （耐久の記録の包み `lib/durable.py`。I16）の import、
+  （耐久の記録の包み `lib/durable.py`。I16）・`tenacity`（待ちの部品 `lib/waits.py`。#2343 の I7）の import、
   `/proc/` の読み取り（docstring を除く文字列）、囲み（```` ``` ```` / `~~~`）を追う正規表現と `startswith` を見る。
   例外リストの `name` は部品の名前（`fcntl` など）
 - `hook-deps`: hook の経路が `deps.require()` を呼ぶ（I13・決定 20）。hook の経路は、hook のエントリポイント
@@ -39,6 +39,11 @@
   `find_spec("<名前>")` / `deps.importable("<グループ>")` の確かめが成り立つときだけ通る枝（真で入る `if` の本体と、
   偽で入り `return` / `raise` で終わる `if` の後の同じブロックの文）。互いに import し合うモジュールは、
   たどっている途中のものを空として扱う。例外リストの `name` はグループの名前
+- `limit-literal`: 上限・再試行の回数・待ちの間隔を数字のリテラルで書く（#2343 の I3）。値は上限の宣言
+  （`plugins/ndf/contracts/limits.json`）から `lib/limits.py` で引く。規則は `structure_checks/limits_rules.py`。
+  例外リストの `name` は定数か引数の名前
+- `sleep-loop`: `lib/waits.py` の外で眠るループ（#2343 の I6）。再試行と待ちは `lib/waits.py` を通し、
+  それ以外の待ちのループは例外リストに理由（何を待つか）つきで載せる。例外リストの `name` はループを持つ関数の名前
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -76,6 +81,8 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "structure_checks"))
+import limits_rules  # noqa: E402
 from allowlist import AllowError, allow_file_name, under  # noqa: E402
 from allowlist import rel_target as _rel  # noqa: E402
 from allowlist import load_allow as _load_rows  # noqa: E402
@@ -87,8 +94,9 @@ REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 SELF = "scripts/check-script-structure.py"
 SHARED_LIB = "scripts/lib"
+RULES_LIB = "scripts/structure_checks"
 MAX_LINES = 500
-KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary", "require-groups")
+KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary", "require-groups", "limit-literal", "sleep-loop")
 LIB = "plugins/ndf/scripts/"
 # I14: 部品 → 使ってよい包み（決定 19。擬似端末は relay_lib/terminal.py が包みを兼ねる）
 WRAPPED = {
@@ -99,9 +107,10 @@ WRAPPED = {
     "proc-fs": (LIB + "lib/procs.py",),
     "fence-regex": (LIB + "lib/md.py",),
     "dbos": (LIB + "lib/durable.py",),
+    "tenacity": (LIB + "lib/waits.py",),
 }
 # I14 のうち import で見る部品（I16 の dbos を含む）
-IMPORT_PARTS = ("fcntl", "pty", "termios", "urllib.request", "dbos")
+IMPORT_PARTS = ("fcntl", "pty", "termios", "urllib.request", "dbos", "tenacity")
 # I13: hook のエントリポイント（決定 20）。ここから import でたどれるモジュールは deps を import しない
 HOOK_ENTRIES = (LIB + "hook.py",)
 RE_FUNCS = {"compile", "match", "search", "fullmatch", "finditer", "findall", "sub", "subn", "split"}
@@ -287,6 +296,7 @@ def _scan_file(root: Path, rel: str, defs: dict[str, list[tuple[str, str, str]]]
                         "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）",
                     }
                 )
+        violations += limits_rules.violations(rel, text)
     found = py_functions(text) if lang == "py" else sh_functions(text)
     if found is None:
         return False
@@ -804,7 +814,7 @@ class Scope:
         self.targets = {_rel(root, t) for t in targets}
         allow_rel = _rel(root, str(allow_dir.resolve()))
         # 例外リストの置き場と、チェッカ自身とその部品（scripts/lib/）の変更は木全体の結果を変える
-        self.everything = under(SELF, self.targets) or under(allow_rel, self.targets) or any(under(t, (SHARED_LIB,)) for t in self.targets)
+        self.everything = under(SELF, self.targets) or under(allow_rel, self.targets) or any(under(t, (SHARED_LIB, RULES_LIB)) for t in self.targets)
         self.allow_files = {Path(t).name for t in self.targets if t.startswith(allow_rel + "/")}
 
     def row(self, r: dict) -> bool:

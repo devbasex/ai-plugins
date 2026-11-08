@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/monitor_proc.py", "name": "_kill_pid", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: SIGTERM の後にプロセスが終わるのを待つ"}

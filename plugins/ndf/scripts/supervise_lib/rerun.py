@@ -19,7 +19,7 @@ from supervise_lib.steps import last_json
 POLICY = "supervise.step-rerun"
 
 
-def _failed(result: dict) -> bool:
+def _is_failure(result: dict) -> bool:
     return result.get("exit") not in (0, None)
 
 
@@ -32,9 +32,9 @@ def key_of(result: dict) -> str | None:
     return cause_key.make(f"exit={result.get('exit')}", summary)
 
 
-def count(cause_counts: dict, sid: str, result: dict) -> None:
+def count_failure(cause_counts: dict, sid: str, result: dict) -> None:
     """落ちたステップの原因の鍵を数える。GitHub の上限の失敗は数えない。"""
-    if not _failed(result) or gh_quota.is_rate_limited(result.get("text", "") or ""):
+    if not _is_failure(result) or gh_quota.is_rate_limited(result.get("text", "") or ""):
         return
     per = cause_counts.setdefault(sid, {})
     key = key_of(result) or ""
@@ -44,7 +44,7 @@ def count(cause_counts: dict, sid: str, result: dict) -> None:
 def stop_reason(state, sid: str) -> str | None:
     """判定役が `sid` の打ち直しを返したとき、同じ原因の上限に達していれば止める理由（進捗の記録へも 1 行書く）。"""
     last = state.results.get(sid) or {}
-    if not _failed(last) or gh_quota.is_rate_limited(last.get("text", "") or ""):
+    if not _is_failure(last) or gh_quota.is_rate_limited(last.get("text", "") or ""):
         return None
     key = key_of(last)
     n = (state.cause_counts.get(sid) or {}).get(key or "", 0)

@@ -7,7 +7,7 @@
 方針やその値が無いときは、組み込みの値へ戻らずに `LimitsError`（理由に宣言のパスと方針の名前）を投げる。
 
 監視の工程 × 担当の表は、宣言の `monitor.phase.<工程>`・`monitor.stall.<担当>`・`monitor.stall-default`・
-`monitor.cli-margin` の方針で持つ。
+`monitor.cli-margin` の方針で持つ。監視（`monitor.py`）と起動（`launch-cli.sh`）はここから引く。
 
 - 監視の上限は **工程** で決める。レビューと適用では必要な時間の桁が違う
 - 無進捗の許容は **担当** で決める。ログの出し方が担当で違う（claude は完了まで出さない）

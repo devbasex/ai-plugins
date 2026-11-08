@@ -189,3 +189,33 @@
 | `XDG_DATA_HOME` | runtime | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `XDG_STATE_HOME` | runtime | `plugins/ndf/scripts/acceptance-check.py`<br>`plugins/ndf/scripts/ask.py`<br>`plugins/ndf/scripts/check-trigger.py`<br>`plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/estimate.py`<br>`plugins/ndf/scripts/gate-rejections.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/parallel-measure.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/project-decl.py`<br>`plugins/ndf/scripts/project-mvv.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/release-steps.py`<br>`plugins/ndf/scripts/spec-copy.py`<br>`plugins/ndf/scripts/sprint-close.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/state-home.py`<br>`plugins/ndf/scripts/statusline.sh`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/test-run.py`<br>`plugins/ndf/scripts/usage-report.py`<br>`plugins/ndf/scripts/usage-subagent.py`<br>`plugins/ndf/scripts/wait-notify.py`<br>`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/external-ai/scripts/external-ai.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` |
 | `ZDOTDIR` | runtime | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
+
+## 上限の宣言
+
+`plugins/ndf/contracts/limits.json` の方針。部品は方針の名前で `lib/limits.py` から引く。
+
+| 方針 | 値 | 何の上限か | 引く関数 |
+| --- | --- | --- | --- |
+| `merged.green-wait` | factor 1.5 | merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout | `plugins/ndf/scripts/merged_lib/checks.py:GreenWatch.wait` |
+| `monitor.cli-margin` | seconds 120 | CLI の上限 = 監視の上限 + この秒数。監視の 1 周期と停止の猶予より十分長くし、監視が止める前に CLI が打ち切らないようにする | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.add-tests` | seconds 3600 | cross-refactoring のテストの追加の工程の監視の上限の下限。駆動が予算から導いた上限を --timeout で渡す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.critique` | seconds 1200 | 批評の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.final-fix` | seconds 3600 | cross-refactoring の最後の修正の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.fix` | seconds 3600 | cross-refactoring の修正の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.implement` | seconds 3600 | cross-refactoring の実装の工程の監視の上限の下限。駆動が予算から導いた上限を --timeout で渡す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.judge-test-changes` | seconds 1200 | cross-refactoring のテストの変更の判定の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.plan` | seconds 1200 | cross-refactoring の計画の工程の監視の上限。提案と同じ桁 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.propose` | seconds 1200 | 提案の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.review` | seconds 1200 | レビューの工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.stall-default` | seconds 180 | 表に無い担当の無進捗の許容 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.stall.agy` | seconds 480 | agy の無進捗の許容。err.log がほぼ無音 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.stall.claude` | seconds 900 | claude の無進捗の許容。--output-format json は完了まで 1 バイトも出さない | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.stall.codex` | seconds 180 | codex の無進捗の許容。推論ログを逐次出す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.stall.kiro` | seconds 480 | kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `post-queue.rate-limit` | seconds 900 / interval 30 / same_cause 31 | 上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒 | `plugins/ndf/scripts/lib/post_queue.py:retry`<br>`plugins/ndf/scripts/lib/post_queue.py:cmd_retry` |
+| `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |
+| `post-queue.transient-reflush` | seconds 300 / interval 30 / same_cause 11 | 一時的な失敗で残った投稿キューの流し直し。上限の再実行の合計を超えない | `plugins/ndf/scripts/lib/post_queue.py:reflush` |
+| `supervise.design-stage-read` | seconds 120 / interval 15 / per_call 30 / same_cause 3 | 設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち | `plugins/ndf/scripts/supervise_lib/design_stage.py:Budget.__init__`<br>`plugins/ndf/scripts/supervise_lib/design_stage.py:_retrying` |
+| `supervise.step-rerun` | same_cause 2 | 判定役が返すステップの打ち直しの同じ原因の上限 | `plugins/ndf/scripts/supervise_lib/rerun.py:stop_reason` |
+| `supervise.worktree-lock` | seconds 5 / interval 1 / attempts 6 / same_cause 6 | .git/config の lock で落ちた worktree の作成の打ち直し | `plugins/ndf/scripts/supervise_lib/paths.py:_add_worktree_with_retry` |
+| `test-triage.check-wait` | interval 10 / factor 1.5 / max_interval 120 | CI のチェックの結論の待ちの間隔。合計の秒は呼ぶ側が予算から渡す | `plugins/ndf/scripts/lib/test_triage.py:wait_check` |

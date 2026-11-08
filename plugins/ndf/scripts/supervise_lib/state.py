@@ -341,7 +341,7 @@ class RunState:
             and (self.cur.get("slow") or {}).get("act") != "retry"
         ):
             fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
-            rerun.count(self.cause_counts, sid, self.cur)
+            rerun.count_failure(self.cause_counts, sid, self.cur)
             if fails >= 2 and next_type == "judge":
                 self.attention(
                     "judge のステップで stop が出そう",
