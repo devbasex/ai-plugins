@@ -168,7 +168,56 @@ def _presented(d: Path, k: int = 1) -> None:
     )
 
 
+def _declare(root: Path, **branches) -> None:
+    (root / ".ndf").mkdir(exist_ok=True)
+    (root / ".ndf" / "worktree.json").write_text(json.dumps(branches), encoding="utf-8")
+
+
+def _recording_run(calls: list[list[str]], merged: bool = True):
+    fake = _fake_run(merged)
+
+    def run(argv, **kw):
+        calls.append(list(argv))
+        return fake(argv, **kw)
+
+    return run
+
+
+def _bases(calls: list[list[str]]) -> list[str]:
+    return [c[c.index("--base") + 1] for c in calls if c[:3] == ["gh", "pr", "list"]]
+
+
+def test_production_queries_use_the_declared_branch(tmp_path):
+    _declare(tmp_path, production_branch="prod")
+    calls: list[list[str]] = []
+    assert pe.stages_of(tmp_path, "1.2.3", _recording_run(calls)) == ["release_branch", "prod_pr_opened", "main_merged"]
+    assert pe.prod_pr_url(tmp_path, "1.2.3", _recording_run(calls)) == "https://github.com/o/r/pull/900"
+    assert _bases(calls) == ["prod", "prod"]
+
+
+def test_production_queries_fall_back_to_the_default_branch(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i"],
+        check=True,
+    )
+    calls: list[list[str]] = []
+    pe.stages_of(root, "1.2.3", _recording_run(calls))
+    pe.prod_pr_url(root, "1.2.3", _recording_run(calls))
+    assert _bases(calls) == ["main", "main"]
+
+
+def test_undecided_production_branch_does_not_query_pull_requests(tmp_path):
+    calls: list[list[str]] = []
+    assert pe.stages_of(tmp_path, "1.2.3", _recording_run(calls)) == ["release_branch"]
+    assert pe.prod_pr_url(tmp_path, "1.2.3", _recording_run(calls)) is None
+    assert _bases(calls) == [] and [c[:2] for c in calls] == [["git", "ls-remote"]]
+
+
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):
+    _declare(tmp_path, production_branch="main")
     d = tmp_path / "org"
     _presented(d)
     pe.put_json(

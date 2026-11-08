@@ -436,16 +436,16 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 状態の一覧 | — | ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する | — | — | `docs/specifications/ndf-shared-venv-and-relay-ls-failure.md` |
 | 設計承認ゲート | — | 設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる | 承認ゲート 1、ゲート 1、関門 1 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリース承認ゲート | — | 本番系へ届く操作（本番へのリリース・operation の実行・自動反映の本番チャネルへのマージ）の前に人の承認を求める承認ゲート。documentation モードでは制作物承認に当たる | 承認ゲート 2、ゲート 2、関門 2 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 人へ出す文 | — | Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる | — | — | — |
-| 機械が読む識別子 | — | スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる | — | — | — |
-| 書いた日の記録 | — | 書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録 | — | — | — |
+| 人へ出す文 | — | Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
+| 機械が読む識別子 | — | スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
+| 書いた日の記録 | — | 書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録 | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | リリース待ち | — | リリースの依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない | 配布待ち | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | リリースの依頼 | — | レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る | 配布の依頼 | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 課題の差し込み | — | リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる | — | — | — |
 | まとめたリリース | — | オーガナイザーが複数のレーンの Pull Request を 1 つの版として出すリリース。提示のプランと本番のプランからなる | まとめた配布 | — | — |
-| 利用先のリポジトリ | — | NDF を導入して使っているリポジトリ | 配布先のリポジトリ | — | — |
-| 旧い値の読み替え | — | 版を上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること | — | — | — |
-| 禁止語 | — | 用語集の設定が、検査する範囲で新しく書くことを禁じた語 | — | — | — |
+| 利用先のリポジトリ | — | NDF を導入して使っているリポジトリ | 配布先のリポジトリ | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| 旧い値の読み替え | — | 版を上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| 禁止語 | — | 用語集の設定が、検査する範囲で新しく書くことを禁じた語 | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 無進捗の打ち切り | — | 実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | 無進捗の許容時間 | `impl_stall_seconds` | 実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒 | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | 進みの観測 | — | 実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること | — | — | `docs/specifications/ndf-development-loop-limits.md` |
@@ -733,17 +733,17 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 対象の版 | — | リリース後テストの記録の `対象の版:` の行に書く版。全角の括弧から後ろは注記として読まない。先頭の小文字の `v` の有無は同じ版として扱う | — | — | — |
 | 本番の版 | — | リリース記録の `版:` の行の `→` の右に書く、本番へ出した版。全角の括弧から後ろは注記として読まない。読み取った値は先頭の `v` を付けない形にそろえる | — | — | — |
 | 版の表記の揺れ | — | 同じ版を指す書き方の違いのうち、リリース記録とリリース後テストの記録の読み取りが吸収するもの。先頭の小文字の `v` の有無だけを指す | — | — | — |
-| デプロイ | — | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | 配布 | — | — |
+| デプロイ | — | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | 配布 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 開発版のデプロイ | — | 開発版のチャネルへ版を出すことと、検証の環境への反映。フェーズの名前でもある | 検証リリース、検証への配布、開発版の配布 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| デプロイなし | — | リリース記録の段階の値。どの環境へも届けずに工程を終えたこと | 配布なし | — | — |
-| リリース対象 | — | リリースで利用者へ届くファイルの集まり。ai-plugins では plugins/ と .claude-plugin/ | 配布物 | — | — |
-| アーティファクト | — | ビルドや署名で作る、公開操作で届ける生成物（パッケージ・署名したバイナリなど） | — | — | — |
+| デプロイなし | — | リリース記録の段階の値。どの環境へも届けずに工程を終えたこと | 配布なし | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| リリース対象 | — | リリースで利用者へ届くファイルの集まり。ai-plugins では plugins/ と .claude-plugin/ | 配布物 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| アーティファクト | — | ビルドや署名で作る、公開操作で届ける生成物（パッケージ・署名したバイナリなど） | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 導入先のランタイム | — | マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231） | 配布先のランタイム | — | `docs/specifications/ndf-distribution-runtimes.md` |
 | 利用者向けの変化なし | — | PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う | 配布物の変化なし | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| リリースの設定 | — | `.ndf/` に書く、そのリポジトリのリリースの宣言（`.ndf/supervise.json` の release と `.ndf/release.json`） | 配布の宣言 | — | — |
-| リリースの形 | — | リリースの設定の release.form が表す、版の出し方の雛形の種類 | 配布の形 | — | — |
-| リリースの手順 | — | 版を上げてから公開するまでの手順。`release` が持つ | 配布の手順 | — | — |
-| 取得元 | — | プラグインを取得するマーケットプレイスの登録が指す先 | 配布元 | — | — |
+| リリースの設定 | — | `.ndf/` に書く、そのリポジトリのリリースの宣言（`.ndf/supervise.json` の release と `.ndf/release.json`） | 配布の宣言 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| リリースの形 | — | リリースの設定の release.form が表す、版の出し方の雛形の種類 | 配布の形 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| リリースの手順 | — | 版を上げてから公開するまでの手順。`release` が持つ | 配布の手順 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| 取得元 | — | プラグインを取得するマーケットプレイスの登録が指す先 | 配布元 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | CD の結果 | — | 本番チャネルへのマージの後に NDF が読んだ CD の状態。成功・失敗・未確定の 3 つで、リリース記録に残す | — | — | — |
 | 結果の読み方 | — | CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す | — | — | — |
 | 公開物 | — | 正式版ごとのリリースタグと GitHub Release の組 | — | — | — |

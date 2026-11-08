@@ -1559,6 +1559,7 @@ def test_new_release_dev_and_prod(tmp_path):
         "snapshot",
         "sync",
         "release",
+        "cd-result",
         "record",
         "verify",
         "cleanup",

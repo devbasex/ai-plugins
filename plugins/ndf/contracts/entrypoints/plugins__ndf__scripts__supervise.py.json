@@ -91,6 +91,7 @@
     "request-txt",
     "requests-json",
     "resume-mark-json",
+    "revise-json",
     "state-json"
   ],
   "reads": [],

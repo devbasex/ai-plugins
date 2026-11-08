@@ -243,7 +243,7 @@ PLUGIN = {"form": "package-plugin"}
         ({"delivery": [AUTO_PROD]}, None, delivery.SKIP, "昇格の Pull Request で届く"),
         ({"delivery": []}, None, delivery.SKIP, "デプロイしない"),
         ({"delivery": [AUTO_BASE, HAND]}, None, delivery.REFUSE, "手で流す"),
-        ({"delivery": [{**AUTO_PROD, "versioned": True}]}, None, delivery.REFUSE, "版数を持つ経路"),
+        ({"delivery": [{**AUTO_PROD, "versioned": True}]}, None, delivery.SKIP, "昇格の Pull Request で届く"),
         ({"delivery": [{"kind": "auto", "branch": "other", "target": "x"}]}, None, delivery.REFUSE, "手で届ける"),
         ({"delivery": {"unknown": "調べていない"}}, None, delivery.REFUSE, "調べていない"),
         ({}, None, delivery.REFUSE, "delivery も"),

@@ -581,6 +581,26 @@ def test_run_signal_exit_code(term):
     assert t.finish() == 143
 
 
+def test_run_updates_plugin_before_first_section(term):
+    """最初の起動でもプラグインを更新し、新しい版で区間を始める。手で起動したレーンが古い版で動かないようにする。"""
+    t = term(env={"FAKE_VERSION_AFTER": "2.0.0"})
+    t.wait_start(1)
+    assert t.calls()[:4] == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.rows()[0]["event"] == "start" and t.rows()[0]["plugin_version"] == "2.0.0"
+    os.kill(t.starts()[0]["pid"], signal.SIGKILL)
+    t.finish()
+
+
+def test_run_first_update_failed_still_starts(term):
+    """最初の起動の更新に失敗しても、今の版で起動し、そのことを 1 行で知らせる。"""
+    t = term(env={"FAKE_FAIL": "update"})
+    t.wait_start(1)
+    assert "プラグインを更新できなかった" in t.text
+    assert t.rows()[0]["plugin_version"] == "1.0.0"
+    os.kill(t.starts()[0]["pid"], signal.SIGKILL)
+    t.finish()
+
+
 def test_run_switches_to_next_section(term, tmp_path):
     """合図を受けると /exit と \\r を入力し、更新して次の区間を起動する（AC6・AC8・AC19）。"""
     t = term("--model", "haiku", env={"FAKE_VERSION_AFTER": "2.0.0"})
@@ -590,7 +610,15 @@ def test_run_switches_to_next_section(term, tmp_path):
     first, second = t.starts()[:2]
     assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
-    assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]  # 最初の起動と切り替えの 2 回
     assert "── ndf-relay: 区間 2 ──" in t.text
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
@@ -599,7 +627,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s1["relay_version_dir"] is None and s2["relay_version_dir"] is None  # プラグインのキャッシュから起動（#1587 の AC13）
     assert not events(rows, "reexec") and not events(rows, "reexec_skipped")  # キャッシュからの起動は入れ替えない（AC12）
     assert s1["command"] == "--model haiku"
-    assert s1["plugin_version"] == "1.0.0"
+    assert s1["plugin_version"] == "2.0.0"  # 最初の起動で更新する
     assert s2["plugin_version"] == "2.0.0"
     assert s2["command"] == "/goal 次のステップ"
     assert s2["from_session"] == f"s{first['pid']}"
@@ -1152,7 +1180,7 @@ def test_run_next_start_failed(term):
     copy = t.fake_dir / "claude-copy.py"
     copy.write_bytes(FAKE.read_bytes())
     copy.chmod(0o755)
-    t2 = term(env={"FAKE_BREAK_ON_LIST": "2", "NDF_RELAY_CLAUDE": copy})
+    t2 = term(env={"FAKE_BREAK_ON_LIST": "3", "NDF_RELAY_CLAUDE": copy})
     t2.wait_start(1)
     t2.type("mark /goal 続き\r")
     assert t2.finish() == 2
@@ -3758,6 +3786,16 @@ def test_pick_compares_remaining_over_threshold(accounts, other, to):
     assert (name, reason) == (to, "threshold" if to == "b" else None)
 
 
+@pytest.mark.parametrize("util7, to", [(92, "b"), (89, "a")])
+def test_pick_prefers_other_plan_when_weekly_over_threshold(accounts, util7, to):
+    """週の使用率が閾値以上なら、閾値未満の他のプランを残りの量に依らず選ぶ。5 時間の枠の無いプラン（週 92% の残り 88）と、
+    使用率 0% の Max 5x（5 時間の枠の残り 52.5）の組。閾値未満なら今を残す。"""
+    accounts.add("a", tier="default_claude_max_20x", util7=util7, extra={"five_hour": None})
+    accounts.add("b", tier="default_claude_max_5x", util5=0, util7=0)
+    name, reason, _ = _picker("a").pick(None)
+    assert (name, reason) == (to, "threshold" if to == "b" else None)
+
+
 def test_pick_keeps_current_when_candidate_usage_is_higher(accounts):
     accounts.add("a", util5=92, util7=0)
     accounts.add("b", util5=95, util7=0)
@@ -3812,11 +3850,14 @@ class _Acc:
 
 
 class _Use:
-    def __init__(self, score):
-        self.s = score
+    def __init__(self, score, weekly=None):
+        self.s, self.w = score, weekly
 
     def score(self):
         return self.s
+
+    def weekly_score(self):
+        return self.w
 
 
 def _fake_ca(monkeypatch, *, choice, usage=None, acc=None, thr=90.0):
@@ -3909,13 +3950,25 @@ def test_pick_section_start_characterization(monkeypatch, cur, acc, score, due, 
 
 
 @pytest.mark.parametrize(
-    "left, c_left, c_score, want",
-    [(100.0, 100.0, 10.0, "a"), (100.0, 101.0, 99.0, "b"), (None, 500.0, 96.0, "a"), (None, 500.0, 94.0, "b"), (None, None, None, "b")],
+    "left, c_left, c_score, weekly, want",
+    [
+        (100.0, 100.0, 10.0, None, "a"),
+        (100.0, 100.0, 10.0, 80.0, "a"),
+        (100.0, 100.0, 10.0, 95.0, "b"),
+        (88.0, 52.5, 0.0, 95.0, "b"),
+        (100.0, 100.0, 95.0, 95.0, "a"),
+        (100.0, 50.0, None, 95.0, "a"),
+        (100.0, 101.0, 99.0, None, "b"),
+        (None, 500.0, 96.0, None, "a"),
+        (None, 500.0, 94.0, None, "b"),
+        (None, None, None, None, "b"),
+    ],
 )
-def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, want):
-    """現状固定: 閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。"""
+def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, weekly, want):
+    """閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。ただし今の週の使用率が閾値以上で
+    候補の使用率が閾値未満なら、残りの量に依らず候補を選ぶ（週 95% の残り 88 より、0% の残り 52.5 を選ぶ）。"""
     c = relay_switch.ca.Choice("b", score=c_score, remaining=c_left)
-    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0), acc=_Acc(left=left))
+    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0, weekly), acc=_Acc(left=left))
     assert _pk("a").pick(None) == ((want, "threshold", c) if want == "b" else ("a", None, c))
 
 
@@ -4287,7 +4340,15 @@ def test_swap_keeps_next_session_input(tmp_path, term, swap):
     assert second["argv"] == ["--model", "haiku", "/goal 次"]
     assert second["cwd"] == str(tmp_path)
     assert [r for r in rows if r["event"] == "start"][1]["carried"] == ["--model", "haiku"]
-    assert sw.t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert sw.t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]
     assert bool(events(rows, "reexec")) is swap and not events(rows, "reexec_skipped")
     sw.t.type("quit 0\r")
     assert sw.t.finish() == 0

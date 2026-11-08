@@ -21,7 +21,7 @@
 
 ```json
 [
-  {"target": "ndf プラグイン（Claude Code・Codex）", "kind": "auto", "branch": "main", "channel": "production", "versioned": true,
+  {"target": "ndf プラグイン（Claude Code・Codex）", "kind": "auto", "channel": "production", "versioned": true,
    "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
    "publishes_release": true,
    "result": {"workflow": "release-cd.yml"}},
@@ -74,9 +74,9 @@
 | --- | --- | --- | --- | --- |
 | `release-steps.py cd-guidance` | `--root` | 結果 JSON。`items` に `kind: cd-guidance` を 0 か 1 件 | 宣言を読めなければ終了コード 3。案内の有無では常に 0 | 追加 |
 | `release-steps.py cd-result` | `--base <本番チャネル>`、`--head <ブランチ>`（任意。無ければ `origin/<本番チャネル>` の先端を読む）、`--out <ファイル>` | 結果のファイルと結果 JSON。`metrics.cd_result` は `success` / `failure` / `undetermined` / `none`（本番チャネルへ自動で届く行が無い） | 値にかかわらず 0。読み取りの失敗は `undetermined` にする | 追加 |
-| `release-steps.py publish` | `--root`、`--revision <SHA>` | 結果 JSON。`items` に `tag`・`release` の各 1 件（`created` / `pushed` / `exists`） | 接尾辞あり・別のコミットのタグ・版を読めない・`gh` の失敗は終了コード 1 | 追加 |
+| `release-steps.py publish` | `--root`、`--revision <SHA>`、`--plugin <名前>`（任意。無ければ宣言の `release.plugin`） | 結果 JSON。`items` に `tag`・`release` の各 1 件（`created` / `pushed` / `exists`） | 接尾辞あり・別のコミットのタグ・版を読めない・`gh` の失敗は終了コード 1 | 追加 |
 | `release-steps.py record` | 今の引数に `--cd-result <ファイル>`（任意）と `--merged`（`--base`・`--prs` と組）を足す | 結果のファイルの値を `CD の結果:` の行へ書く。`--merged` は最後の `--prs` の Pull Request へ書き、版は `<本番チャネル> <短い SHA>` | 値が `failure` なら段階を「反映失敗」で書いた後に終了コード 5。プランは止まる | 引数なしは今と同じ |
-| `release-steps.py release --channel prod` | 変わらない | `publishes_by_cd` が真なら公開物を作らず、`metrics.tag` は `null`、`metrics.publisher` は `cd` | 今と同じ | 宣言が手動なら今と同じ |
+| `release-steps.py release --channel prod` | 変わらない | 本番チャネルのマージへ承認の担い手を `--gate-approved` で渡す（承認資料の記録の担い手。`--approved-sha` で受けたときは `user`）。`publishes_by_cd` が真なら公開物を作らず、`metrics.tag` は `null`、`metrics.publisher` は `cd` | 今と同じ | 宣言が手動なら今と同じ |
 | `sprint-state.py loop sprint` | `--dev` が任意になる | 経路が版数を要らなければ `lap.versions` は空 | 経路が版数を要るのに `--dev` が無ければ断る | 指定があれば今と同じ |
 
 `publish` の版は `--revision` のコミットの `plugin.json` から、プラグインの名前は `.ndf/supervise.json` の `release.plugin` から読む。題は `<プラグイン> v<版>`、本文は変更履歴の版の節で、`--latest` で作る。
@@ -100,6 +100,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

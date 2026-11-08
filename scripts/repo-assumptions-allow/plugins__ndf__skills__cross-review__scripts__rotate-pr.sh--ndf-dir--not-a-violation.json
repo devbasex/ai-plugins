@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/cross-review/scripts/rotate-pr.sh",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "コメントが NDF 自身の置き場を指している。実行の経路に現れず、対象リポジトリを指していない",
+  "count": 1
+}

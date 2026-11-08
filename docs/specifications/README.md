@@ -140,5 +140,7 @@
 | [cross-refactoring-test-file-detection.md](cross-refactoring-test-file-detection.md) | cross-refactoring のテストのファイルの見分け方（Python は名前の形に加えてテストの関数の定義の行で決めること、試走の候補・テストの置き場所・行数・危険フラグ・コミットの事実を同じ判定にそろえること、コミットの事実だけ前後の版を読むこと、判定の規則と既知の限界） |
 | [ndf-shared-venv-and-relay-ls-failure.md](ndf-shared-venv-and-relay-ls-failure.md) | 共有の環境を指す UV_PROJECT_ENVIRONMENT を子プロセスへ渡さない仕組みと、状態の一覧の失敗で並列の計画を終えない観測の決定・常に成り立つ条件・テスト観点。全体は ndf-parallel-organizer.md が正 |
 | [ndf-development-loop-limits.md](ndf-development-loop-limits.md) | 開発ループの中で働く上限の全体の表と、回数・時間の固定の上限で止めない判断。ラッパーの起動の判定、ループの予算の null、保留の周回、実行環境の調査と候補の式、周回の費用（帳簿と報告の大きい方）と費用の実測。予算の宣言と止まる条件は ndf-workflow-development-loop.md、無進捗の打ち切りの振る舞いは ndf-supervise-step-budgets.md が正 |
+| [ndf-approval-gate-names.md](ndf-approval-gate-names.md) | 2 つの承認ゲートの呼び名（設計承認ゲート・リリース承認ゲート）、旧名 `関門 1` / `関門 2` の記録を読むときに正の名前へ寄せる規則、値を変えない機械が読む識別子、Factory のランナーが旧名を渡し続ける理由。語の定義は用語集が正 |
+| [ndf-deploy-and-release-terms.md](ndf-deploy-and-release-terms.md) | 環境へ届ける操作を「デプロイ」、本番へのデプロイを「リリース」と呼び分ける規則、旧い値の読み替えの表（`legacy-values.json`）、ボードの旧い選択肢への書き込みと案内、用語チェックの禁止語の規則（`check.banned`）。語の定義は用語集が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

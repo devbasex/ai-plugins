@@ -1,0 +1,7 @@
+{
+  "path": "plugins/playwright-kit/skills/playwright-kit-ops/scripts/classify_page_role.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "HTML のランドマークの main。ブランチ名でない",
+  "count": 2
+}
