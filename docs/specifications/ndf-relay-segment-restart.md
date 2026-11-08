@@ -180,9 +180,8 @@ graph TB
 
 `run` は上から順に見る。パススルーは下の「本物の claude」の絶対パスを `os.execve` に渡し、引数を
 そのまま渡す。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える。** ただし、統括役が tmux で起動した印
-`NDF_RELAY_SPAWNED` を持つ `run` は、下の表を見る前に親のセッションの環境（`relay_lib/session_env.py` の
-`drop_parent_env`）を外す。そのため深さと `NDF_RELAY_DIR` の条件には当たらず、パススルーするときも外した後の環境で
-起動する（[統括役の仕様](ndf-relay-multi-session-supervisor.md)）。
+`NDF_RELAY_SPAWNED` を持つ `run` は、下の表を見る前に親のセッションの環境（`relay_lib/session_env.py` の `drop_parent_env`）を外す。
+そのため深さと `NDF_RELAY_DIR` の条件には当たらず、パススルーするときも外した後の環境で起動する（[統括役の仕様](ndf-relay-multi-session-supervisor.md)）。
 
 | # | 条件 | すること |
 | ---: | --- | --- |
