@@ -498,6 +498,7 @@ def main(argv: list[str] | None = None) -> None:
         out, code = dp.stopped(TOOL, str(e), {}, getattr(e, "code", 1)), dp.EXIT_STOPPED
     if a.result_file:
         write_review_answer(Path(a.result_file), out)
+    lease_stage.release_held()  # 結果を出す前に返す（同じプロセスで続けて呼ぶ呼び出し元も次に取れる）
     try:
         sr.emit(out, code)
     except SystemExit as e:

@@ -356,7 +356,7 @@ def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dic
 
 
 def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
-    """items から status・summary・metrics を組み立てる。"""
+    """items から status・summary・metrics と持ち主の鍵（`lease`。標準出力の結果と同じ形にする。#2342）を組み立てる。"""
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in FINISHED]
@@ -374,7 +374,7 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
         metrics["answer_hold"] = held
         metrics["park"] = park = _park_line(held, done_path)
         nxt = f"{present}。続けて {park} を打つ" if gates else park  # 止まったプランと同居しても提示の指示を落とさない
-    return result("supervise-queue", status, summary, items, metrics, next=nxt)
+    return lease_stage.with_lease(result("supervise-queue", status, summary, items, metrics, next=nxt))
 
 
 def _park_line(held: dict, done_path: Path) -> str:

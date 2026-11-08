@@ -39,6 +39,13 @@ def _own_start() -> float:
         return round(time.time(), 2)
 
 
+def _reset_lease_stage() -> None:
+    """前のテストが同じプロセスで取った鍵の控えを捨てる（後のテストの結果に `lease` を足さず、別の置き場へ返さない）。"""
+    stage = sys.modules.get("lease_stage")
+    if stage is not None:
+        stage.reset()
+
+
 _RUNTIME_SESSION = f"{os.getpid()}:{_own_start()}"  # pytest のプロセスを持ち主のランタイムのセッションにする
 
 REAL_LEDGER = usage_ledger.ledger_dir({k: v for k, v in os.environ.items() if k != "NDF_USAGE_DIR"})
@@ -66,7 +73,9 @@ def _isolated_usage_dirs(_ndf_isolated_base: Path, request: pytest.FixtureReques
     monkeypatch.setenv("TMPDIR", str(tmp))
     monkeypatch.setattr(tempfile, "tempdir", str(tmp))
     before = usage_ledger.ledger_snapshot(REAL_LEDGER)
+    _reset_lease_stage()
     yield
+    _reset_lease_stage()
     leaked = usage_ledger.marked_rows(REAL_LEDGER, before, request.node.nodeid)
     if leaked:
         after = usage_ledger.ledger_snapshot(REAL_LEDGER)

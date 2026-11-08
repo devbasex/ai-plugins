@@ -528,6 +528,8 @@ def main(argv: list[str] | None = None) -> None:
             durable.exit_leaving_pending(int(e.code or 0))
         durable.close()
         raise
+    finally:
+        lease_stage.release_held()  # 本体の終わりで返す（同じプロセスで続けて呼ぶ呼び出し元も次に取れる）
 
 
 if __name__ == "__main__":

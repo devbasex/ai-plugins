@@ -64,6 +64,18 @@ def _stage_run_id() -> str:
     return _STANDALONE_RUN
 
 
+def with_lease(obj: dict) -> dict:
+    """結果に取った鍵（`lease`）を足した写し。取っていなければそのまま（記録へ書く結果を標準出力の結果と同じ形にする）。"""
+    held = lease_json()
+    return {**obj, "lease": held} if held else obj
+
+
+def reset() -> None:
+    """取った鍵の控えを空にする（1 つのプロセスで入口の本体を何度も呼ぶテストが、前の呼び出しの鍵を持ち越さない）。"""
+    _HELD.clear()
+    step_result.ATTACH.pop("lease", None)
+
+
 def lease_json() -> dict | None:
     """結果 JSON の `lease`（最後に取った鍵）。取っていなければ None。"""
     return _HELD[-1].outcome.as_json() if _HELD else None
@@ -121,7 +133,7 @@ def touch_held() -> None:
     """長く動く本体が最後に動いた時刻を書く（持ち主の記録の持ち主が自分のときだけ）。"""
     for h in _HELD:
         if not h.done and h.outcome.holder is not None:
-            lease.touch_lease(h.outcome.key, h.outcome.holder, h.outcome.repo)
+            lease.touch_lease(h.outcome.key, h.outcome.holder, h.outcome.repo, h.outcome.path)
 
 
 def release_held() -> None:
@@ -132,9 +144,9 @@ def release_held() -> None:
         h.done = True
         out = h.outcome
         if (h.unit == "run" and out.outcome in ("acquired", "reclaimed")) or (h.unit == "session" and h.release):
-            lease.release_lease(out.key, out.holder, out.repo)
+            lease.release_lease(out.key, out.holder, out.repo, out.path)
         elif h.unit == "session":
-            lease.touch_lease(out.key, out.holder, out.repo)
+            lease.touch_lease(out.key, out.holder, out.repo, out.path)
 
 
 def _hook_standalone(entry_id: str) -> None:

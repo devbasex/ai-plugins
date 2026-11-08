@@ -77,6 +77,7 @@ class Outcome:
     holder_seen_at: str | None = None
     holder: tuple[int, float] | None = field(default=None, repr=False)  # 返すときの持ち主のプロセス（自分が持ち主のときだけ）
     repo: str = field(default="", repr=False)
+    path: Path | None = field(default=None, repr=False)  # 取ったときの記録の置き場（返すときに置き場の指定が変わっても同じ記録を書く）
 
     def as_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"key": self.key, "outcome": self.outcome}
@@ -236,7 +237,7 @@ def _acquire_locked(decl: Decl, key: str, entry: str, run: str, repo: str, holde
         if _is_own(record, _own_line(holder)):
             record["seen_at"] = now
             _store(path, record)
-            return Outcome(key, "inherited", holder=holder, repo=repo)
+            return Outcome(key, "inherited", holder=holder, repo=repo, path=path)
         held = Outcome(key, "refused", record.get("run"), record.get("pid"), record.get("seen_at"), repo=repo)
         if holder_alive(record, decl.window_seconds):
             return held
@@ -257,14 +258,14 @@ def _acquire_locked(decl: Decl, key: str, entry: str, run: str, repo: str, holde
     }
     _store(path, fresh)
     if held is not None:
-        return Outcome(key, outcome, held.holder_run, held.holder_pid, held.holder_seen_at, holder=holder, repo=repo)
-    return Outcome(key, outcome, holder=holder, repo=repo)
+        return Outcome(key, outcome, held.holder_run, held.holder_pid, held.holder_seen_at, holder=holder, repo=repo, path=path)
+    return Outcome(key, outcome, holder=holder, repo=repo, path=path)
 
 
-def _update(key: str, holder: tuple[int, float] | None, repo: str, finished: bool) -> bool:
-    if holder is None:
+def _update(key: str, holder: tuple[int, float] | None, repo: str, finished: bool, path: Path | None) -> bool:
+    path = path or path_of(key, repo)
+    if holder is None or not path.exists():
         return False
-    path = path_of(key, repo)
     try:
         with locks.exclusive(path, timeout=LOCK_TIMEOUT):
             record = _load_lease(path)
@@ -282,14 +283,14 @@ def _update(key: str, holder: tuple[int, float] | None, repo: str, finished: boo
         return False
 
 
-def touch_lease(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
+def touch_lease(key: str, holder: tuple[int, float] | None, repo: str, path: Path | None = None) -> bool:
     """記録の持ち主のプロセスが holder のときだけ、最後に動いた時刻を書く。書いたか。"""
-    return _update(key, holder, repo, finished=False)
+    return _update(key, holder, repo, False, path)
 
 
-def release_lease(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
+def release_lease(key: str, holder: tuple[int, float] | None, repo: str, path: Path | None = None) -> bool:
     """記録の持ち主のプロセスが holder のときだけ、終わった時刻を書く（E7）。書いたか。"""
-    return _update(key, holder, repo, finished=True)
+    return _update(key, holder, repo, True, path)
 
 
 def prune(days: float = KEEP_DAYS, now: float | None = None) -> list[str]:
