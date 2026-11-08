@@ -795,11 +795,8 @@ def cmd_publish(a):
     if not sha:
         raise StepError(f"コミット {a.revision} を読めない")
     ver, tag, items = publish.publish(root, plugin, sha)
-    emit(
-        result(
-            TOOL, "ok", f"{tag} を確かめた（タグと GitHub Release がそろっている）", items, {"version": ver, "tag": tag, "revision": sha}
-        )
-    )
+    metrics = {"version": ver, "tag": tag, "revision": sha}
+    emit(result(TOOL, "ok", f"{tag} を確かめた（タグと GitHub Release がそろっている）", items, metrics))
 
 
 def _cd_revision(root, a):

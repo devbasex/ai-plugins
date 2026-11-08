@@ -211,15 +211,18 @@ git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空で
 `docs/metrics/ndf-token-usage/<集計日>.md` / `.json` を書く。前の行との比が ±30% を超えた版の
 読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。開発版のデプロイでは残さない。
 
-**正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
+**正式版のリリースタグと GitHub Release は CD が作る。** タグは利用者が過去の版へ戻るときの目印になる。
+`main` へのマージで `.github/workflows/release-cd.yml` が `release-steps.py publish --revision <マージのコミット>` を走らせ、
+そのコミットの `plugin.json` の版で `ndf--v<版>` のタグと、`CHANGELOG.md` の版の節を本文にした GitHub Release の
+うち足りないものを作る。版に接尾辞（開発版）があれば何も作らない。宣言は `.ndf/project.json` の `delivery` にある。
+
+**手元からタグを打たない。** 同じ名前のタグが別のコミットを指して origin にあると、CD の publish は
+「origin のタグが別のコミットを指す」で止まり、直すにはタグの付け替え（強制 push）が要る。
+手で動かすのは CD が失敗したときと CD を外したときだけで、`main` のコミットを指定して同じ処理を呼ぶ。
 
 ```bash
-claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
-claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ送る
+python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <main のコミット>
 ```
-
-`{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
-食い違っていないかをチェックする。
 
 ## 版数を持つ箇所
 
@@ -322,7 +325,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
    指示書に残っていないかを見る。落ちた段落はその主題の確定仕様（`docs/specifications/`）へ移す
 7. 破壊的変更がある場合は明示
 8. テストを実行
-9. **正式版として `main` を進めた後、リリースタグを打つ**
+9. **正式版として `main` を進めた後、CD がリリースタグと GitHub Release を作ったことを確かめる**（手で打たない。上の「正式版を出す」）
 
 **すべての版数を機械的に置換しない。** 履歴（`docs/archive/version-decisions/`、確定仕様、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
