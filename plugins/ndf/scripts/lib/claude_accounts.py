@@ -813,6 +813,21 @@ def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
     NDF が足したプラグインの置き場の変数を外す。"""
     for k in STRIPPED_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
+    leave_account(env)
+    env.update(declared)
+    env[NAME_ENV] = METERED
+    return env
+
+
+def leave_account(env) -> None:
+    """`env` から親のアカウントの環境を外し、元の値へ戻す（その場で書き換える。#2656 の決定 5）。
+
+    親が従量の接続（`NDF_CLAUDE_ACCOUNT=metered`）なら、名前を外す前に、そのとき読める宣言のキーを外す。
+    アカウントの子の中（`NDF_SHARED_CONFIG_DIR` がある）なら、`CLAUDE_CONFIG_DIR` を元の値へ戻し（元に無ければ外し）、
+    NDF が足したプラグインの置き場の変数を外す。読めない宣言は無いものとして扱い、例外を出さない。"""
+    if env.get(NAME_ENV) == METERED:
+        for k in fallback_env(env):
+            env.pop(k, None)
     if SHARED_ENV in env:
         shared = shared_dir(env)
         orig = env.pop(SHARED_ENV)
@@ -822,9 +837,7 @@ def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
             env.pop(CONFIG_ENV, None)
         if env.get(PLUGIN_CACHE_ENV) == os.path.join(shared, "plugins"):
             env.pop(PLUGIN_CACHE_ENV)
-    env.update(declared)
-    env[NAME_ENV] = METERED
-    return env
+    env.pop(NAME_ENV, None)
 
 
 def _account_env(env: dict, declared: dict, name: str) -> dict:
