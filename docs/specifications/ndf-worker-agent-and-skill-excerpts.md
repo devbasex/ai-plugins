@@ -218,7 +218,7 @@ supervisor の守る規則のうち、この仕様に関わるのは 2 つであ
 | 項目 | 中身 |
 | --- | --- |
 | 手順 | 作業に要る手順の抜粋（呼び出し・結果の読み方・判断の基準）。抜粋の元の Skill の `references/excerpt.md` を写す。抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけを写す |
-| 読む Skill | 作業の前に読む規則の Skill の名前と `SKILL.md` の絶対パス。supervisor は、いま通している工程の名前で `stage-skills.py lookup <工程>` を打ち、出力をそのまま並べる。工程と Skill の組は対応表（`plugins/ndf/scripts/lib/stage-skills.json`）にだけあり、対応表に置けるのは規則の Skill だけである |
+| 読む Skill | 作業の前に読む規則の Skill の名前と `SKILL.md` の絶対パス。supervisor は、いま通している工程の名前で `stage-skills.py lookup <工程>` を打ち、出力をそのまま並べる。工程と Skill の組は対応表（`plugins/ndf/scripts/lib/stage-skills.json`）にだけあり、対応表に置けるのは規則の Skill だけである。欄は `prompt` の本文に置き、欄の無い起動と、読み込まれた NDF の `stage-skills.py` を絶対パスで指した `lookup` を打たずに Skill を挙げた起動は、hook（読む Skill の guard）が止める |
 | 置き場所 | 長い出力と報告コピーを書くファイルの絶対パス。supervisor が必ず渡し、worker はコピーを書き終えた後に完了マーカー `<置き場所>.done` を作る（#901。理由は [待ち方の仕様](ndf-token-waits-and-context-cut.md) の「中間通知を受けたとき」） |
 
 worker の規則 6 は「Skill を起動しない。工程 Skill の `SKILL.md` を読まない。手順は起動指示の『手順』に従い、
