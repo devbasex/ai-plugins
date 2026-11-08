@@ -327,7 +327,8 @@ def test_the_hold_and_the_resume_run_without_the_organizer(env):
         pl.send_answer(main, "p1", rid, "answered", choice=[])
     until(lambda: ph.read_hold(main, "p1") is None)
     until(lambda: calls(log, "restart"))
-    assert calls(log, "restart")[0][:2] == ["restart", "la"] and ph.read_marks(main, "p1") == {}
+    until(lambda: ph.read_marks(main, "p1") == {})  # 印は restart が返った後に消える。記録と印の間を待つ
+    assert calls(log, "restart")[0][:2] == ["restart", "la"]
     assert [r["change"] for r in ph.read_log(main, "p1")] == ["on", "off"]
     states.write_text(json.dumps({"la": "running"}))
     time.sleep(0.5)
