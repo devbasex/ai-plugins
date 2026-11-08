@@ -94,12 +94,11 @@ def _read_sections(a, missing_hint: str = "") -> tuple[str | None, str | None]:
     return text, None
 
 
-def _copy_beside_state(a, text: str) -> dict:
-    """状態のファイルの隣の `mvv.md` へ書き、その `_ref` を返す。"""
+def _beside_state(a) -> Path:
+    """状態のファイルの隣の `mvv.md` のパス（親のディレクトリを作っておく）。書くのは呼び手。"""
     path = Path(a.sprint).resolve().parent / "mvv.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return _ref(path)
+    return path
 
 
 def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
@@ -114,7 +113,9 @@ def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
     text, why = _read_sections(a)
     if text is None:
         return None, None, {"kind": "sprint_mvv", "result": "none", "reason": f"{why}。スプリント MVV なしで進める"}
-    return _copy_beside_state(a, text), None, None
+    path = _beside_state(a)
+    path.write_text(text, encoding="utf-8")
+    return _ref(path), None, None
 
 
 def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
@@ -128,7 +129,9 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     text, why = _read_sections(a, "。説明を直してから打ち直す")
     if text is None:
         return None, (why, EXIT_PRECONDITION, [])
-    return _copy_beside_state(a, text), None
+    path = _beside_state(a)
+    path.write_text(text, encoding="utf-8")
+    return _ref(path), None
 
 
 def withdraw(m: dict, name: str, at: str) -> int:
