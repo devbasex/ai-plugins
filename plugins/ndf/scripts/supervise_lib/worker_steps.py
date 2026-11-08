@@ -14,6 +14,7 @@ import clock
 import gh_rest
 import slow_step
 import step_read
+from step_result import EXIT_INCOMPLETE
 import usage_aggregate
 from loop_drive import review_answer
 from supervise_lib import paths, running
@@ -327,8 +328,8 @@ class DriveStep:
             if inner:
                 ctx.state.cur["counts"]["inner"] = inner[-1]
         # 欠けの残る終わり（stopped と gaps。収束しなかったなど）は終了コード 6 として控え、on_exit で分けられるようにする
-        code = 0 if ok else (6 if out and out.get("status") == "stopped" and out.get("gaps") else 1)
-        if code == 6:
+        code = 0 if ok else (EXIT_INCOMPLETE if out and out.get("status") == "stopped" and out.get("gaps") else 1)
+        if code == EXIT_INCOMPLETE:
             ctx.state.cur["gaps"] = list(out.get("gaps") or [])  # フェーズレポートの「欠けを残して進んだステップ」（#2047 の決定 5）
         ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return ok, text
