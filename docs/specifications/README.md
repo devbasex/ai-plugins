@@ -135,5 +135,6 @@
 | [ndf-limits-declaration-and-retry-policy.md](ndf-limits-declaration-and-retry-policy.md) | 上限の宣言（contracts/limits.json）と方針の名前での引き方、待ちの部品の同じ原因の上限と最後の照会、判定役が返すステップの打ち直しの上限、構造チェック limit-literal / sleep-loop。値の一覧は宣言と契約の一覧が正 |
 | [ndf-supervisor-worker-skills-guard.md](ndf-supervisor-worker-skills-guard.md) | supervisor が起動する ndf:worker の起動指示に「読む Skill」の欄を持たせる hook（読む Skill の guard）の判定の規則・構成要素・決定の理由。起動指示の正本は development-workflow の references/agent-layers.md |
 | [ndf-design-results-docs-and-cell-format.md](ndf-design-results-docs-and-cell-format.md) | 設計の結果のステージが課題の設計文書をすべて載せる組み方（分割した文書・番号のつながり）、触るファイルのセルの書式とセルの形の誤りでの停止、食い違いのメッセージの形と決定の理由。結果の表は ndf-supervise-impl-prompt-format-and-transient-failures.md が正 |
+| [ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) | 並列の計画のレーンの本番のステージをリリースの経路ごとに組み、手で置き換えずに流すこと、リリースの依頼の課題の一覧をプランの課題だけに持つ課題の差し込み（{plan_issues}）、設計承認ゲートで外した課題を続きのプランから外す常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
