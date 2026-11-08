@@ -13,6 +13,7 @@
 | --- | --- |
 | PreToolUse（編集・パッチ・シェルの Tool） | worktree の guard（`hook_lib/worktree.py`） |
 | PreToolUse（Bash・Read・Skill・Agent・Task。Claude Code だけ） | token の guard（`hook_lib/token_guard.py`） |
+| PreToolUse（Agent・Task。Claude Code だけ） | 読む Skill の guard（`hook_lib/worker_skills.py`。supervisor が「読む Skill」の欄の無い・対応表を引かない `ndf:worker` を起動するのを止める。#2399） |
 | PreToolUse（AskUserQuestion。Claude Code だけ） | 問い合わせの guard（`hook_lib/ask_guard.py`。区分の無い・許されない問いを止める。#2206） |
 | PreToolUse（AskUserQuestion。止めなかったとき）・Stop・Notification・PermissionRequest | 待ちの Slack 通知（`hook_lib/wait_notify.py`） |
 | userPromptSubmit（Kiro CLI） | worktree の guard の、パスを見ない案内 |
@@ -21,7 +22,7 @@
 起動は `uv run` を挟まず、SessionStart が用意した環境の python を直に使う（`lib/hook_python.py`）。**どの失敗も
 終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。PreToolUse と userPromptSubmit の
 guard は締め切り（`hook_lib/deadline.py`）の中で打ち、過ぎたら残りを飛ばして標準エラーへ 1 行残す。拒否を返すのは token の guard と
-問い合わせの guard だけで、拒否があればそれだけを出す（問い合わせを止めたときは待ちの通知も送らない）。案内は `additionalContext` に並べる。
+読む Skill の guard と問い合わせの guard だけで、拒否があればそれだけを出す（問い合わせを止めたときは待ちの通知も送らない）。案内は `additionalContext` に並べる。
 """
 
 from __future__ import annotations
@@ -108,7 +109,7 @@ def _denied(outs: list) -> bool:
 
 
 def _guards(command: str, runtime: str, ev, outs: list) -> None:
-    """worktree の guard と token の guard を締め切りの中で打ち、結果を `outs` へ足す（#1340 の I11・I12）。
+    """worktree の guard・token の guard・読む Skill の guard・問い合わせの guard を締め切りの中で打ち、結果を `outs` へ足す（#1340 の I11・I12）。
 
     guard が走るのは PreToolUse と userPromptSubmit（agy の入力は事象の名前を持たない）だけで、事象の名前を問わずに掛ける。
     締め切りを過ぎたら残りの判定を飛ばし、標準エラーへ 1 行残す。それまでに終わった判定の結果（拒否を含む）は
@@ -130,6 +131,14 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
 
             if ev.tool in token_guard.TOOLS:
                 outs.append(token_guard.decision(ev))
+        if not command and runtime == "claude" and ev.event == "PreToolUse" and ev.tool in ("Agent", "Task"):
+            dl.current = "worker-skills"
+            from hook_lib import worker_skills
+
+            try:
+                outs.append(worker_skills.decision(ev))
+            except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
+                pass
         if not command and runtime == "claude" and ev.event == "PreToolUse" and ev.tool == "AskUserQuestion":
             dl.current = "ask-guard"
             from hook_lib import ask_guard
