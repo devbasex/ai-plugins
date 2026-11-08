@@ -136,7 +136,7 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
             from hook_lib import worker_skills
 
             try:
-                outs.append(worker_skills.decision(ev))
+                outs.append(worker_skills.skills_decision(ev))
             except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
                 pass
         if not command and runtime == "claude" and ev.event == "PreToolUse" and ev.tool == "AskUserQuestion":

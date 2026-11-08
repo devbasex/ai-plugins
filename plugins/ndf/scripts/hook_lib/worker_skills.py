@@ -101,7 +101,7 @@ def looked_up(transcript: Path) -> bool:
     return False
 
 
-def section(doc: Path | None = None) -> str | None:
+def skills_section(doc: Path | None = None) -> str | None:
     """正本の「supervisor → worker」の節（見出しから次の同じか上の階層の見出しの前まで）。読めなければ None。"""
     try:
         lines = (doc or DOC).read_text(encoding="utf-8").splitlines()
@@ -124,7 +124,7 @@ def _own_transcript(raw: dict) -> Path | None:
 
 
 def _missing_field() -> dict:
-    body = section()
+    body = skills_section()
     where = f"正本: {DOC} の「{HEADING.lstrip('# ')}」"
     if body is None:
         text = f"正本の節を読めなかった。{where} を読んで組み直す。"
@@ -146,7 +146,7 @@ def _not_looked_up() -> dict:
     )
 
 
-def decision(ev: pl.Event) -> dict | None:
+def skills_decision(ev: pl.Event) -> dict | None:
     """判定のエントリポイント（hook.py の振り分けからだけ呼ぶ）。どの失敗も通す側へ倒す（呼び手の hook が拾う）。"""
     raw = ev.raw
     if _off("NDF_WORKER_SKILLS_GUARD"):
