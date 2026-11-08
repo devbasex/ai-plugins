@@ -436,8 +436,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 状態の一覧 | — | ラッパーの relay.py ls --json が返す、名前つきのラッパーごとの状態（running・awaiting_approval・stopped など）と最後に動いた時刻の一覧。オーガナイザーはこれでレーンの状態を観測する | — | — | `docs/specifications/ndf-shared-venv-and-relay-ls-failure.md` |
 | 設計承認ゲート | — | 設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる | 承認ゲート 1、ゲート 1、関門 1 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリース承認ゲート | — | 本番系へ届く操作（本番へのリリース・operation の実行・自動反映の本番チャネルへのマージ）の前に人の承認を求める承認ゲート。documentation モードでは制作物承認に当たる | 承認ゲート 2、ゲート 2、関門 2 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 人へ出す文 | — | Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる | — | — | — |
-| 機械が読む識別子 | — | スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる | — | — | — |
+| 人へ出す文 | — | Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
+| 機械が読む識別子 | — | スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
 | 書いた日の記録 | — | 書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録 | — | — | — |
 | リリース待ち | — | リリースの依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない | 配布待ち | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | リリースの依頼 | — | レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る | 配布の依頼 | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
