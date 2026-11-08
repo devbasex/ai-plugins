@@ -2,7 +2,9 @@
 
 1. テストごとに、使用量の帳簿（`NDF_USAGE_DIR`）・プランの状態の実体（`NDF_SV_STATE_DIR`）・耐久の記録
    （`NDF_DBOS_DIR`）・レビュー worktree の置き場（`NDF_WORKTREE_BASE`）・一時の置き場（`TMPDIR`）を別の一時ディレクトリへ向ける。帳簿を読むテストが、ほかのテストの書いた行を読まない。
-   どれも書く時に作るため、ここではパスを決めるだけでディレクトリを作らない
+   どれも書く時に作るため、ここではパスを決めるだけでディレクトリを作らない。持ち主の記録（`NDF_LEASE_DIR`）も
+   一時ディレクトリへ向け、ランタイムのセッション（`NDF_RUNTIME_SESSION`）を pytest のプロセスにする。ランタイムの
+   いない CI でも、サブプロセスで起動した入口がセッション単位の鍵を取れる（#2342）
 2. テストの終わりに、本物の帳簿（`NDF_USAGE_DIR` を外したときに決まる置き場所）へそのテストの印（`pytest`）の
    付いた行が増えていたら、そのテストを落とす（I9）。増えたファイルと大きさを失敗の文に出す。印の無い行
    （利用者の会話のサブエージェントの hook が書く行など）では落とさない
@@ -24,6 +26,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "lib"))
 import usage_ledger  # noqa: E402
 
+
+def _own_start() -> float:
+    """pytest のプロセスの開始時刻（psutil が無ければ今の時刻。持ち主の記録の生死の判定が開始時刻の一致を見る）。"""
+    try:
+        import procs
+
+        return procs.start_time(os.getpid()) or 0.0
+    except ImportError:
+        import time
+
+        return round(time.time(), 2)
+
+
+_RUNTIME_SESSION = f"{os.getpid()}:{_own_start()}"  # pytest のプロセスを持ち主のランタイムのセッションにする
+
 REAL_LEDGER = usage_ledger.ledger_dir({k: v for k, v in os.environ.items() if k != "NDF_USAGE_DIR"})
 
 
@@ -43,6 +60,8 @@ def _isolated_usage_dirs(_ndf_isolated_base: Path, request: pytest.FixtureReques
     # レビュー worktree と一時の置き場も別にする。開始と merged の片付け（lib/run_state.py の sweep）が、手元の
     # /tmp/ndf-worktrees と /tmp の残る状態に触れない（#2229）
     monkeypatch.setenv("NDF_WORKTREE_BASE", str(base / "worktrees"))
+    monkeypatch.setenv("NDF_LEASE_DIR", str(base / "leases"))
+    monkeypatch.setenv("NDF_RUNTIME_SESSION", _RUNTIME_SESSION)
     (tmp := base / "tmp").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("TMPDIR", str(tmp))
     monkeypatch.setattr(tempfile, "tempdir", str(tmp))

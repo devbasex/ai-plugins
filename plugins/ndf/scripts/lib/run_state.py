@@ -28,11 +28,13 @@ from typing import Any, Callable, Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import container_reach  # noqa: E402
 import worktree_base  # noqa: E402
-from run_owner import NDF_STATE_DIRS, WINDOW, alive, alive_reason, last_seen_iso, mtime, owner_path, read_owner, utc_iso  # noqa: E402, F401
+from run_owner import NDF_STATE_DIRS, WINDOW, mtime, owner_path, utc_iso  # noqa: E402, F401
 from run_state_kinds import KINDS, SWEPT_KINDS, Kind  # noqa: E402, F401
 
 TOOL = "run-state"
 _REVIEW_NAME = re.compile(r"^(pr|rf)(\d+)$")
+# レビュー worktree の名前の頭 → 持ち主の鍵の入口（#2342）
+_REVIEW_TOOLS = {"pr": "cross-review", "rf": "cross-refactoring"}
 _FIX_NAME = re.compile(r"^fix-pr(\d+)-")
 _LIMIT_NAMES = 5
 
@@ -174,6 +176,27 @@ def remove_pr_dir(root: Path | str, path: Path | str, pr_state: dict[str, Any] |
     return [_item("worktree", path, ok, why)]
 
 
+def review_holder(path: Path | str, now: float | None = None) -> str | None:
+    """レビュー worktree（`<base>/<slug>/{pr,rf}<n>`）の持ち主が生きていれば残す理由を、いなければ None を返す。
+
+    持ち主は鍵 `cross-review:pr=<n>`・`cross-refactoring:pr=<n>` の持ち主の記録（`lease`。#2342）で決める。
+    記録が無い・終わっている・持ち主が死んでいれば None。記録が壊れていれば判定できない理由を返す。"""
+    import lease  # filelock と psutil を要する。レビュー worktree を片付けるときだけ読む
+
+    path = Path(path)
+    m = _REVIEW_NAME.match(path.name)
+    if not m:
+        return None
+    key = f"{_REVIEW_TOOLS[m.group(1)]}:pr={m.group(2)}"
+    try:
+        record = lease.read(key, path.parent.name)
+    except lease.LeaseError as e:
+        return f"判定できない: {e}"
+    if record is None or not lease.holder_alive(record, WINDOW, now):
+        return None
+    return f"持ち主の実行 {record.get('run')} が動いている（pid {record.get('pid')}・最後に動いた時刻 {record.get('seen_at')}）"
+
+
 def view_pr(root: Path | str, pr: int) -> dict[str, Any] | None:
     """Pull Request の状態と head（`gh pr view --json state,headRefOid`）。照会に失敗すれば None。テストが差し替える。"""
     r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "state,headRefOid"], cwd=str(root), capture_output=True, text=True)
@@ -186,21 +209,12 @@ def view_pr(root: Path | str, pr: int) -> dict[str, Any] | None:
     return got if isinstance(got, dict) and got.get("state") else None
 
 
-def check_start(state: Path | str, run: str | None, head_oid: str | None = None) -> str | None:
-    """開始が既存のレビュー worktree（`pr<n>` か `rf<n>/work`）を使ってよいか。止める理由か None を返す（I11・I12）。
+def check_start(state: Path | str, head_oid: str | None = None) -> str | None:
+    """開始が既存のレビュー worktree（`pr<n>` か `rf<n>/work`）を使ってよいか。止める理由か None を返す（I11）。
 
-    `state` は記録の置き場を決めるパス（`pr<n>` か `rf<n>`）、作業を見るのは `state` か `state/work`。"""
+    持ち主の生死は、開始が先に取った持ち主の鍵（`run_core.hold`。#2342）が決める。ここは作業の残りだけを見る。
+    `state` は `pr<n>` か `rf<n>`、作業を見るのは `state` か `state/work`。"""
     state = Path(state)
-    record, err = read_owner(state)
-    if err:
-        return f"{err}。手で確かめてから記録を直すか消す"
-    if record is not None and alive(state, record, time.time()):
-        if run and record.get("run") == run:
-            return None
-        return (
-            f"別の実行 {record.get('run')} が {state} を使っている（最後に動いた時刻 {last_seen_iso(state, record)}）。"
-            f"その実行の続きなら --run {record.get('run')} を渡す。終わっていれば寿命の窓（24 時間）を過ぎるか finish の後に開始する"
-        )
     work = state / "work" if state.name.startswith("rf") else state
     if not work.is_dir() or not (work / ".git").exists():
         return None
@@ -210,12 +224,12 @@ def check_start(state: Path | str, run: str | None, head_oid: str | None = None)
     return None
 
 
-def begin_review(state: Path | str, run: str | None, *, owned: bool) -> tuple[list[dict[str, Any]], str | None]:
+def begin_review(state: Path | str, *, owned: bool) -> tuple[list[dict[str, Any]], str | None]:
     """開始の片付けと判定。cross-review（`pr<n>`）と cross-refactoring（`rf<n>`）の init が共有する。
 
     持ち主の終わった残る状態を外し（開始する `state` は見ない）、`owned`（置き場を NDF が持つ。呼び出し元が置き場を
-    渡したときは偽で、記録を見も書きもしない）なら既存の `state` を使ってよいかを決める。(片付けの結果, 止める理由か None)。"""
-    return sweep_states(Path.cwd(), skip=[state]), (check_start(state, run) if owned else None)
+    渡したときは偽で、作業の残りを見ない）なら既存の `state` を使ってよいかを決める。(片付けの結果, 止める理由か None)。"""
+    return sweep_states(Path.cwd(), skip=[state]), (check_start(state) if owned else None)
 
 
 # ---------------- 片付け ----------------
@@ -238,11 +252,8 @@ def _sweep_review(root: Path, base: Path, skip: set[str], now: float, view: Call
 
 def _sweep_one_review(root: Path, path: Path, kind: str, pr: int, now: float, view: Callable[[Path, int], Any]) -> list[dict[str, Any]]:
     label = "run-dir" if kind == "rf" else "worktree"
-    record, err = read_owner(path)
-    if err:
-        return [_item(label, path, False, f"判定できない: {err}")]
-    if alive(path, record, now):
-        return [_item(label, path, False, alive_reason(path, record))]
+    if why := review_holder(path, now):
+        return [_item(label, path, False, why)]
     trees = sorted(p for p in path.iterdir() if p.is_dir()) if kind == "rf" else [path]
     for tree in trees:
         if (tree / ".git").exists() and (why := _local_work(tree)):
@@ -407,10 +418,19 @@ def sweep_states(
         if base is not None:
             skipped = {str(Path(p).resolve()) for p in skip}
             items += _guarded("worktree", base, lambda: _sweep_review(Path(root), base, skipped, now, view or view_pr))
+    if "lease-record" in wanted and not tmp_only:
+        items += _guarded("lease-record", "leases", _sweep_leases)
     for name, fn in (("session-state", _sweep_session), ("deps-work", _sweep_deps), ("fix-files", _sweep_fix), ("test-tmp", _sweep_tests)):
         if name in wanted:
             items += _guarded(name, tmp, lambda fn=fn: fn(tmp, now))
     return items
+
+
+def _sweep_leases() -> list[dict[str, Any]]:
+    """終わった時刻から 30 日を過ぎた持ち主の記録を消す（記録を書き換えるのは持ち主の部品だけ。#2342）。"""
+    import lease
+
+    return [_item("lease-record", p, True) for p in lease.prune(lease.KEEP_DAYS)]
 
 
 def counts(items: list[dict[str, Any]]) -> dict[str, int]:

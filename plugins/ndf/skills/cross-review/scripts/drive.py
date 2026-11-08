@@ -33,7 +33,7 @@ deps.require("durable", "waits", "procs", "schema")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
-import run_owner  # noqa: E402  持ち主の記録（#2229）
+import run_core  # noqa: E402  持ち主の段（#2342）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
@@ -41,6 +41,7 @@ from loop_drive import anchor_repo_cwd, call, durable_identity, keep_finished_ou
 from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
 
 TOOL = "cross-review-drive"
+ENTRY = "skills/cross-review/scripts/drive.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
@@ -262,10 +263,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return durable_identity(self.known_tmp(), self.pr)
 
     def init(self) -> dict:
-        run = run_owner.run_args(self.init_args)  # 実行の識別子（#2229）
-        out = self.must(
-            call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args, *run], self.env), "state.py init"
-        )
+        out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args], self.env), "state.py init")
         iv = parse_vars(out)
         if "TMP_DIR" not in iv:
             raise Stop("state.py init が TMP_DIR を返さない", 2)
@@ -274,11 +272,10 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
     def adopt(self, iv: dict) -> None:
         """init の出力（耐久ステップの記録）を持つ。打ち直しでは記録から組み直し、init を打たない（I19）。
 
-        起動のたびに pr<n> の持ち主の記録へ動いた時刻を書く。別の実行が引き継いでいれば止まる（#2229 の I12）。"""
+        起動のたびに持ち主の記録へ動いた時刻を書く（#2342）。"""
         self.v.update(iv)
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
-        if why := run_owner.mark_owner(self.v.get("WORKTREE"), self.v.get("RUN"), "touch"):
-            raise Held(f"持ち主の記録を更新できない: {why}", 1)
+        run_core.touch()
 
     def review_round(self) -> str:
         """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ posts（投稿だけが残った）/ done。"""
@@ -383,8 +380,6 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             {"kind": "deferred", **{k: d.get(k) for k in ("path", "line", "summary", "round")}} for d in ds if not d.get("waived")
         ]
         res["items"] += json.loads(self.v.get("SWEPT") or "[]")  # 開始の片付けの結果（#2229）
-        if why := run_owner.mark_owner(self.v.get("WORKTREE"), self.v.get("RUN"), "finish"):
-            raise Stop(f"持ち主の記録に終わりを書けない: {why}", 1)
         return res
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
@@ -494,6 +489,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--result-file", help="ok で終わったとき最終ステータスを書く回答ファイル（loop_drive.write_review_answer。#1656）")
     a, rest = ap.parse_known_args(argv)
     anchor_repo_cwd()
+    if not any(x.split("=", 1)[0] == "--worktree" for x in rest):  # 置き場を渡した実行は呼び出し元が持つ（init と同じ）
+        run_core.hold(ENTRY, pr=a.pr)  # 同じ PR の収束ループを 2 本流さない。終わりで返す（#2342）
     d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
         out, code = d.run()

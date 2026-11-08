@@ -1,0 +1,5 @@
+{
+  "name": "NDF_LEASE_DIR",
+  "set_by": "user",
+  "summary": "持ち主の記録の置き場を指定する（テストの隔離）。無ければ <コンテナの状態の根>/leases（plugins/ndf/scripts/lib/lease.py）"
+}

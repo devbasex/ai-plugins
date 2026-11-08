@@ -52,10 +52,15 @@
     }
   },
   "env": [
+    "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
+    "NDF_LEASE_DIR",
     "NDF_PRESENTATION_DIR",
-    "UV_PROJECT_ENVIRONMENT"
+    "NDF_RUNTIME_SESSION",
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
@@ -67,7 +72,9 @@
   ],
   "stdin": "text",
   "stdout": "step-result",
-  "writes": [],
+  "writes": [
+    "lease-json"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",

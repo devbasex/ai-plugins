@@ -21,7 +21,7 @@ import jev
 import models as models_lib
 import project_mvv
 import project_decl
-import run_owner
+import run_core
 import run_state
 import statefile
 import test_strategy as ts
@@ -51,6 +51,7 @@ from ..vocabulary import (
 
 # 状態ファイルの版（#933）。無い状態ファイルは v10.17.x までのラウンド制の形である。
 SCHEMA = 2
+ENTRY = "skills/cross-refactoring/scripts/refactor.py"  # 持ち主の契約を引く入口（プラグインの根からのパス。#2342）
 
 # 廃止した引数（決定 5・決定 24）。この変更を含む版では知らせて無視し、その次の版で外す。
 # 修正の回数（`--max-fix-rounds`）とテスト 1 回の上限（`--test-timeout`）は、想定最大
@@ -426,8 +427,8 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def _emit_run(prep: "_InitPreparation") -> None:
-    """持ち主の記録の実行の識別子と、開始の片付けの結果を出す（#2229）。"""
-    statefile.emit(RUN=prep.run, SWEPT=json.dumps(prep.swept, ensure_ascii=False))
+    """開始の片付けの結果を出す（#2229）。"""
+    statefile.emit(SWEPT=json.dumps(prep.swept, ensure_ascii=False))
 
 
 def _normalize_args(args: argparse.Namespace) -> None:
@@ -474,7 +475,6 @@ class _InitPreparation:
     decl: dict[str, Any]
     ci_coverage: dict[str, Any]
     template_checks: list[dict[str, Any]] = field(default_factory=list)
-    run: str = ""  # 持ち主の記録の実行の識別子（#2229）
     swept: list[dict[str, Any]] = field(default_factory=list)  # 開始の片付けの結果
 
 
@@ -513,13 +513,15 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     reason = pr_gate.init_refusal(args.pr, repo, status)
     if reason:
         die(reason)
-    # 持ち主の終わった残る状態を片付け（開始する rf<n> は見ない）、既存の rf<n> を使ってよいかを決める（#2229）
-    owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。記録を書かない
-    swept, stop = run_state.begin_review(root, getattr(args, "run", None), owned=owned)
+    # 持ち主の鍵を取り（別の実行が持っていれば止まる。#2342）、持ち主の終わった残る状態を片付け（開始する rf<n> は
+    # 見ない）、既存の rf<n> を使ってよいかを決める（#2229）
+    owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。持ち主の鍵を取らない
+    if owned:
+        run_core.hold(ENTRY, "init", pr=args.pr)
+    swept, stop = run_state.begin_review(root, owned=owned)
     if stop:
         die(stop)
     _ensure_work_worktree(work, head_branch)
-    run = run_owner.adopt_owner(root, tool="cross-refactoring", pr=args.pr, run=getattr(args, "run", None)) if owned else ""
 
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
     # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。引数の雛形の種別は `--test-kind`（#1483 I1）。
@@ -564,7 +566,6 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         strategy=strategy,
         decl=decl,
         ci_coverage=coverage.as_state(),
-        run=run,
         swept=swept,
     )
 

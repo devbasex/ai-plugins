@@ -1,13 +1,13 @@
 """持ち主の部品（#2342）。持ち主の鍵ごとに 1 つの持ち主の記録を、鍵ごとの排他の中で取り・返し・引き取る。
 
-置き場は `NDF_LEASE_DIR`（無ければ `<コンテナの状態の根>/leases`）の `<owner>--<repo>/<鍵>.json` で、鍵の `/`・`:`・`=` は
+置き場は `NDF_LEASE_DIR`（無ければ `<コンテナの状態の根>/leases`）の `<owner>--<repo>/<鍵>.lease.json` で、鍵の `/`・`:`・`=` は
 `%2F`・`%3A`・`%3D` にしてファイル名にする。排他は同じ名前に `.lock` を付けた錠のファイルで取り、錠は消さない（`locks.py`）。
 
     out = lease.acquire(decl, key, entry, run, repo)   # acquired / reclaimed / inherited / refused / no_session
     lease.touch(key, holder, repo)                      # 最後に動いた時刻
     lease.release(key, holder, repo)                    # 終わった時刻（持ち主のプロセスが holder のときだけ）
     lease.read(key, repo)                               # 記録か None
-    lease.prune(days)                                   # 終わった時刻から days 日を過ぎた記録（.json）を消す
+    lease.prune(days)                                   # 終わった時刻から days 日を過ぎた記録（.lease.json）を消す
 
 生死の判定（I4）: 同じホストでは記録の pid が動いていて、その開始時刻が 1 秒未満で一致するときだけ生きている。
 別のホストでは最後に動いた時刻から寿命の窓の中を生きているとみなす。記録の持ち主のプロセスが自分か自分の祖先なら、
@@ -35,6 +35,7 @@ import state_home
 
 VERSION = 1
 LEASE_DIR_ENV = "NDF_LEASE_DIR"
+RUNTIME_SESSION_ENV = "NDF_RUNTIME_SESSION"  # `<pid>:<開始時刻>`。ランタイムのセッションを祖先の探索より先に決める（テストと CI）
 KEEP_DAYS = 30  # 終わった記録を消すまでの日数（`durable.KEEP_DAYS` と同じ値）
 UNITS = ("run", "session")
 FIELDS = ("version", "key", "entry", "run", "started_at", "seen_at", "finished_at", "pid", "pid_started", "host")
@@ -115,7 +116,7 @@ def repo_slug(start: Path | str | None = None) -> str:
 
 
 def file_name(key: str) -> str:
-    return "".join(_QUOTE.get(c, c) for c in key) + ".json"
+    return "".join(_QUOTE.get(c, c) for c in key) + ".lease.json"
 
 
 def path_of(key: str, repo: str) -> Path:
@@ -159,7 +160,8 @@ def _load(path: Path) -> dict[str, Any] | None:
 
 def _store(path: Path, record: dict[str, Any]) -> None:
     _check(record)
-    jsonio.write_atomic(path, record)
+    # 書き先は file_name の名前と同じ。契約の検査が書くファイルの形（*.lease.json）を読めるよう、形を式に残す
+    jsonio.write_atomic(path.parent / f"{path.name.removesuffix('.lease.json')}.lease.json", record)
 
 
 def read(key: str, repo: str) -> dict[str, Any] | None:
@@ -198,10 +200,22 @@ def _is_own(record: dict[str, Any], line: list[tuple[int, float]]) -> bool:
     return any(record.get("pid") == pid and _same(record.get("pid_started"), started) for pid, started in line)
 
 
+def runtime_session() -> tuple[int, float] | None:
+    """自分のランタイムのセッションの (pid, 開始時刻)。`NDF_RUNTIME_SESSION` があれば先に返す。無ければ祖先から探す。"""
+    raw = os.environ.get(RUNTIME_SESSION_ENV, "")
+    if raw:
+        pid, _, started = raw.partition(":")
+        try:
+            return int(pid), float(started)
+        except ValueError:
+            pass
+    return procs.runtime_ancestor()
+
+
 def holder_of(unit: str) -> tuple[int, float] | None:
     """単位ごとの持ち主のプロセス。`run` は自分、`session` はランタイムのセッション（無ければ None）。"""
     if unit == "session":
-        return procs.runtime_session()
+        return runtime_session()
     me = os.getpid()
     started = procs.start_time(me)
     return (me, started if started is not None else round(time.time(), 2))
@@ -284,12 +298,12 @@ def release(key: str, holder: tuple[int, float] | None, repo: str) -> bool:
 
 
 def prune(days: float = KEEP_DAYS, now: float | None = None) -> list[str]:
-    """終わった時刻から days 日を過ぎた記録（`.json`）を消し、消したパスを返す。錠の `.lock` は残す。"""
+    """終わった時刻から days 日を過ぎた記録（`.lease.json`）を消し、消したパスを返す。錠の `.lock` は残す。"""
     base, limit = root(), (time.time() if now is None else now) - days * 86400
     removed: list[str] = []
     if not base.is_dir():
         return removed
-    for f in sorted(base.glob("*/*.json")):
+    for f in sorted(base.glob("*/*.lease.json")):
         try:
             with locks.exclusive(f, timeout=0):
                 record = _load(f)

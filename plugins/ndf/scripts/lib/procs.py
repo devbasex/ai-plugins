@@ -121,7 +121,6 @@ def ancestor_pids(pid: int, limit: int = 64) -> list[int]:
 
 # ランタイム（Claude Code・Codex など）のプロセスの名前の頭。hook の持ち主の探し方（#2229）と同じ並び
 RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
-RUNTIME_SESSION_ENV = "NDF_RUNTIME_SESSION"
 
 
 def ancestors(pid: int | None = None) -> list[tuple[int, float]]:
@@ -142,18 +141,6 @@ def runtime_ancestor() -> tuple[int, float] | None:
             started = start_time(pid)
             return (pid, started) if started is not None else None
     return None
-
-
-def runtime_session() -> tuple[int, float] | None:
-    """自分のランタイムのセッションの (pid, 開始時刻)。`NDF_RUNTIME_SESSION`（`<pid>:<開始時刻>`）があれば先に返す。"""
-    raw = os.environ.get(RUNTIME_SESSION_ENV, "")
-    if raw:
-        pid, _, started = raw.partition(":")
-        try:
-            return int(pid), float(started)
-        except ValueError:
-            pass
-    return runtime_ancestor()
 
 
 def child_pids(pid: int, recursive: bool = True) -> list[int]:

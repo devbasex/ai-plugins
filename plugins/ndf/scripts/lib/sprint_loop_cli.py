@@ -7,7 +7,10 @@ import json
 from pathlib import Path
 
 import clock
+import run_core
 import step_result
+
+ENTRY = "scripts/sprint-state.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
 
 
 def budget_value(text: str) -> float | str:
@@ -34,7 +37,19 @@ def environment_result(root: Path, as_json: bool) -> dict | None:
 
 
 def run_loop_command(a, update) -> dict | None:
-    """`sprint-state.py loop` の副命令を振り分ける。update は周回を締める前にスプリント状態を埋める関数（`update` と同じ）。"""
+    """`sprint-state.py loop` の副命令を振り分ける。update は周回を締める前にスプリント状態を埋める関数（`update` と同じ）。
+
+    先に開発ループの持ち主（単位 session）を取る。宣言の無い副命令（答える・読むだけ）は何もしない（#2342）。"""
+    if a.loop_cmd == "start":
+        a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+    held = run_core.hold(ENTRY, f"loop {a.loop_cmd}", name=getattr(a, "loop_name", None))
+    out = _dispatch(a, update)
+    if held is not None and isinstance(out, dict):
+        out = {**out, "lease": held.as_json()}
+    return out
+
+
+def _dispatch(a, update) -> dict | None:
     import sprint_loop as sl  # loop のときだけ読む
     import sprint_loop_gate as sl_gate
     import sprint_loop_select as sl_select
@@ -43,7 +58,7 @@ def run_loop_command(a, update) -> dict | None:
     budget = {"laps": getattr(a, "budget_laps", None), "usd": getattr(a, "budget_usd", None), "hours": getattr(a, "budget_hours", None)}
     try:
         if a.loop_cmd == "start":
-            name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+            name = a.loop_name
             ms = [m.strip() for m in (a.milestones or "").split(",") if m.strip()]
             return sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
         if a.loop_cmd == "environment":
