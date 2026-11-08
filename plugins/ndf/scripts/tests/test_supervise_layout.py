@@ -33,6 +33,7 @@ SUBCOMMANDS = [
     "sync-check",
     "format",
     "sync-title",
+    "review-settled",
 ]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
