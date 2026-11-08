@@ -373,7 +373,7 @@ def pr_titles(root, prs, skipped=None, to=None, extra_out=(), outside=None):
     """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と利用者向けの変化なしの PR は箇条にしない）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = pr_many(root, [p.number for p in prs], "title,body,state,mergeCommit" if to else "title,body,state")
+    data = pr_many(root, [p.number for p in prs], "title,body,state" + (",mergeCommit" if to else ""))
     if to:
         prs = included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else [])
     return included.titles_of(prs, data, skipped)
@@ -1000,7 +1000,8 @@ def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None
     """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = data if data is not None else pr_many(root, [p.number for p in prs], "title,body,state,mergeCommit" if to else "title,body,state")
+    fields = "title,body,state" + (",mergeCommit" if to else "")
+    data = data if data is not None else pr_many(root, [p.number for p in prs], fields)
     if to:
         prs = included.drop_outside(root, prs, data, to, extra_out, outside if outside is not None else [])
     return included.notes_of(prs, data, skipped, replacing, unreadable)
