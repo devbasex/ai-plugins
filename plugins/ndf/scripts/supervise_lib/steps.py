@@ -20,6 +20,7 @@ import gh_call
 import stage_skills
 import step_read
 import test_strategy as ts
+from step_result import GATE_CODES
 from supervise_lib import decl, paths, plan as plan_mod
 import limits
 from supervise_lib.claude import TAIL, run_ticking
@@ -29,7 +30,7 @@ import project_mvv
 
 def is_gate(code: int | None) -> bool:
     """run のステップの終了コード 10〜19 は共通の契約の承認ゲート（lib/step_result.py の EXIT_GATE）。"""
-    return code is not None and 10 <= code <= 19
+    return code is not None and code in GATE_CODES
 
 
 def parse_decision(text: str) -> dict:
@@ -256,30 +257,47 @@ class RunStep:
                 write({"kind": "extend", "step": step.get("id"), "timeout": longer, "planned": int(timeout), "reason": got[1]})
         return longer
 
-    def run_cmd(self, ctx, step: dict, extend_file: Path | None = None) -> tuple[int, str]:
-        """コマンドを締め切りまで待つ。`extend_file` を渡すと（drive のステップ）、子へ `NDF_STEP_EXTEND_FILE` で置き場を渡し、
-        子が書いた見込みの秒で締め切りを後ろへずらす（#2047 の決定 4）。"""
-        cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
-        if not cmd:
-            return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
+    @staticmethod
+    def _substitute(ctx, step: dict, cmd: str) -> tuple[str, str | None, Any]:
+        """cmd のプレースホルダ（{pr}・{base}・{state_dir}・{plan_issues}・test_limit）を置き換える。
+        (cmd, err, timeout) を返す。置き換えられないときは err に理由が入る。"""
         cmd, err = ctx.fill_pr(cmd)
         if err:
-            return 2, err
+            return cmd, err, None
         if "{base}" in cmd:
             base = ctx.base_branch()
             if not base:
-                return 2, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）"
+                return cmd, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）", None
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(ctx.state.dir))
+        cmd = cmd.replace(plan_mod.PLAN_ISSUES, " ".join(str(int(i)) for i in ctx.plan.get("課題") or []))
         cmd, timeout = fill_test_limit(ctx, step, cmd)
-        env = dict(os.environ)
-        # 親の run のステップから受け継いだ no_reports は、reports: true なら外す
+        return cmd, None, timeout
+
+    def _pytest_env(self, ctx, step: dict, env: dict) -> None:
+        """env の PYTEST_ADDOPTS を組み立てる。親の run のステップから受け継いだ no_reports は、reports: true なら外す。"""
         no_reports = self.no_reports(ctx)
         inherited = env.get("PYTEST_ADDOPTS", "")
         addopts = [(inherited.replace(no_reports, "") if no_reports else inherited).strip()]
         if no_reports and not step.get("reports"):
             addopts.append(no_reports)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+
+    def _extend_hook(self, ctx, step: dict, extend_file: Path, timeout):
+        """延長の締め切りを返す関数を作る。子が書いた見込みの秒で締め切りを後ろへずらす。"""
+        return lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t
+
+    def run_cmd(self, ctx, step: dict, extend_file: Path | None = None) -> tuple[int, str]:
+        """コマンドを締め切りまで待つ。`extend_file` を渡すと（drive のステップ）、子へ `NDF_STEP_EXTEND_FILE` で置き場を渡し、
+        子が書いた見込みの秒で締め切りを後ろへずらす（#2047 の決定 4）。"""
+        cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
+        if not cmd:
+            return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
+        cmd, err, timeout = self._substitute(ctx, step, cmd)
+        if err:
+            return 2, err
+        env = dict(os.environ)
+        self._pytest_env(ctx, step, env)
         # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         extend = None
@@ -287,7 +305,7 @@ class RunStep:
             import drive_pause
 
             env[drive_pause.EXTEND_ENV] = str(extend_file)
-            extend = lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t  # noqa: E731
+            extend = self._extend_hook(ctx, step, extend_file, timeout)
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
             p = run_ticking(

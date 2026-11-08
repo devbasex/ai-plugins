@@ -150,21 +150,35 @@ class ParallelPlan(BaseModel):
     @model_validator(mode="after")
     def _whole(self, info: ValidationInfo) -> "ParallelPlan":
         ctx = info.context or {}
-        names = [ln.name for ln in self.lanes]
-        dup = sorted({n for n in names if names.count(n) > 1})
+        self._check_unique()
+        self._check_limits(ctx)
+        self._check_deps()
+        overlap = _issue_overlap(self.lanes)
+        if overlap:
+            raise PydanticCustomError("I19", "レーンの間で課題かマイルストーンが重なる: {pairs}", {"pairs": overlap})
+        return self
+
+    def _check_unique(self) -> None:
+        """レーン名と引継ぎ文書の重なり（I1）。"""
+        dup = _dups([ln.name for ln in self.lanes])
         if dup:
             raise PydanticCustomError("I1", "レーン名が重なる: {names}", {"names": ", ".join(dup)})
-        docs = [ln.handoff_name() for ln in self.lanes]
-        dup = sorted({d for d in docs if docs.count(d) > 1})
+        dup = _dups([ln.handoff_name() for ln in self.lanes])
         if dup:  # 同じ引継ぎ文書へ書くと、後のレーンの文書が先のレーンの文書を上書きする
             raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
+
+    def _check_limits(self, ctx: dict) -> None:
+        """レーン数とプラン本数の合計の上限（I2）。"""
         cap = int(ctx.get("max_named") or DEFAULT_MAX_NAMED)
         if len(self.lanes) > cap:
             raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(self.lanes), "cap": cap})
         total, limit = sum(ln.plans for ln in self.lanes), int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
         if total > limit:
             raise PydanticCustomError("I2", "プランの本数の合計 {n} が上限 {cap} を超える", {"n": total, "cap": limit})
-        known = set(names)
+
+    def _check_deps(self) -> None:
+        """依存先の存在と循環（I3）。"""
+        known = {ln.name for ln in self.lanes}
         for ln in self.lanes:
             missing = [a for a in ln.after if a not in known]
             if missing:
@@ -174,13 +188,14 @@ class ParallelPlan(BaseModel):
         except graphlib.CycleError as exc:
             cyc = " → ".join(exc.args[1]) if len(exc.args) > 1 else ""
             raise PydanticCustomError("I3", "依存が循環する: {cycle}", {"cycle": cyc}) from None
-        overlap = _issue_overlap(self.lanes)
-        if overlap:
-            raise PydanticCustomError("I19", "レーンの間で課題かマイルストーンが重なる: {pairs}", {"pairs": overlap})
-        return self
 
     def lane(self, name: str) -> Optional[Lane]:
         return next((ln for ln in self.lanes if ln.name == name), None)
+
+
+def _dups(values: list[str]) -> list[str]:
+    """2 回以上現れる値を整列して返す。"""
+    return sorted({v for v in values if values.count(v) > 1})
 
 
 def _issue_overlap(lanes: list[Lane]) -> str:
@@ -301,7 +316,8 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     lines += [
         f"- 同時に流すプランの本数はレーンごとに上の表のとおり（合計 {sum(ln.plans for ln in plan.lanes)} 本）",
         "- 触る場所は上の表のとおり。取り込みの衝突は base-sync で解く",
-        f"- リリースはオーガナイザーが 1 本にまとめる。レーンは本番を自分で出さず、リリースの依頼を送る（`parallel.py request {plan.name}`）",
+        f"- リリースの雛形で出すリポジトリでは、オーガナイザーがリリースを 1 本にまとめる。レーンは本番を自分で出さず、リリースの依頼を送る（`parallel.py request {plan.name}`）",
+        "- 昇格で出すリポジトリでは、レーンは昇格のプランをそのまま流す。組み上がったプランを手で置き換えない",
         "- 承認ゲートと区分つきの問いはオーガナイザーだけが出す。レーンは問いで止まらず、別の作業へ進む",
     ]
     lines += [f"- {r}" for r in plan.rules]
@@ -328,7 +344,8 @@ def render_handoff(plan: ParallelPlan, lane: Lane, plan_md: Path) -> str:
             "## 進め方（利用者の指示）",
             "",
             f"- 並列の計画 `{plan.name}` のレーン `{lane.name}` として進める。共通の決まりは [plan.md]({plan_md}) にあり、ここへは写さない",
-            "- リリースは自分で出さず、オーガナイザーへリリースの依頼を送る。承認ゲートと区分つきの問いはオーガナイザーへ送り、待たずに別の作業へ進む",
+            "- リリースの雛形で出すリポジトリでは、リリースを自分で出さずオーガナイザーへリリースの依頼を送る。昇格で出すリポジトリでは昇格のプランをそのまま流す。組み上がったプランを手で置き換えない",
+            "- 承認ゲートと区分つきの問いはオーガナイザーへ送り、待たずに別の作業へ進む",
             "",
             "## 次にやること",
             "",
