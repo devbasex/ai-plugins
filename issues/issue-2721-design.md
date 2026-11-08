@@ -101,7 +101,7 @@
 | STD3 | ADR（Architectural Decision Record） | 「captures a single AD and its rationale」。MADR・Nygard・Y-Statement のテンプレート | 決定の記録を 1 行に保ち、採らなかった案と理由を同じ行の資料にする | https://adr.github.io/ と https://adr.github.io/adr-templates/ （2026-11-08） |
 | STD4 | Nygard の ADR の書式 | title・context・decision・status・consequences | 決定の記録の行の根拠 | https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions （2026-11-08） |
 | STD5 | Design Tokens Format Module 2025.10 | 見た目の値の交換形式（`$value` が必須、`$type`・`$description` は任意）。W3C の標準の過程に無い Community Group の文書 | デザインイメージの「見た目の値の記述」の形として指す（`interface-ui.md` の既存の記述を引き継ぐ） | https://www.designtokens.org/tr/drafts/format/ （2026-11-08） |
-| STD6 | GitHub の見出しへのリンク | 小文字にし、空白をハイフンへ、ほかの空白と記号を除く。重なれば `-1` から番号を足す | リンク集の URL のアンカーを、既存の `md.heading_anchor` で作る | https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax （2026-11-08） |
+| STD6 | GitHub の見出しへのリンク | 小文字にし、空白をハイフンへ、ほかの空白と記号を除く。重なれば `-1` から番号を足す | リンク集の URL のアンカーを、文書全体を読んだ既存の `md.headings` が返す見出しの `anchor` で作る | https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax （2026-11-08） |
 
 ### 主要な製品
 
@@ -165,8 +165,9 @@
 | `plugins/ndf/skills/development-workflow/references/project-analysis.md` | 変更 | `ui_mock` は解析で書かず利用者が書く、と答え方の表に 1 行足す |
 | `plugins/ndf/scripts/design-materials.py` | 新設 | `check`（欠けの検査）と `links`（リンク集の設計時の行）。一覧の表を実行時に読む |
 | `plugins/ndf/scripts/project_lib/model.py` | 変更 | `UiMock`（`kind`・`location`）を足し、`ProjectDecl` に省略できる `ui_mock` を足す |
+| `plugins/ndf/scripts/project_lib/merge.py` | 変更 | `merge_project()` が解析の項目を巡回した後に、既存の宣言の `ui_mock` へ秘密の検査を掛ける。秘密の形なら `{"unknown": "秘密の形"}` に置き換え、`secret` の行を出す。値は補完しない |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 変更（生成物） | `project-decl.py schema` で作り直す |
-| `plugins/ndf/scripts/supervise_lib/procedures.py`・`plugins/ndf/scripts/supervise_lib/sprint_waves.py`・`plugins/ndf/scripts/supervise_lib/paths.py` | 変更 | スプリントの設計のプランに、欠けの検査（`materials-check`・`fix-materials`・`materials-recheck`）とリンク集の組み立て（`materials-links`）を足す。`gate` の入力に `materials-links` を足す |
+| `plugins/ndf/scripts/supervise_lib/procedures.py`・`plugins/ndf/scripts/supervise_lib/sprint_waves.py`・`plugins/ndf/scripts/supervise_lib/paths.py` | 変更 | スプリントの設計のプランに、欠けの検査（`materials-check`・`fix-materials`・`materials-recheck`）とリンク集の組み立て（`materials-links`）を足す。検査の 3 ステップは `a.mode == "standard"` のときだけ足し、`materials-links` は `standard` と `legacy-refactor` のときに足して `gate` の入力に加える。ほかのモードのプランは変えない |
 | `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__design-materials.py.json` | 新設（生成物） | エントリポイントの契約。既存の生成の手順で作る |
 | `plugins/ndf/scripts/tests/test_design_materials.py` | 新設 | 検査とリンク集の入出力のテスト |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更 | 用語の 7 語の正本を `approval-materials.md` に向け（`pending_source` を `source` へ）、`glossary.py render` で作り直す |
@@ -290,7 +291,7 @@ graph LR
 | --- | --- | --- | --- |
 | 既存の機能 | 外部の調査の検査（`design-survey.py`）・用語チェック・本文の決定の同期（`pr-body-decisions.sh`） | 同じ設計文書を読む。互いの出力は使わない | 無し。スプリントの設計のプランで、外部の調査の検査の後に並ぶ |
 | 外部の系 | GitHub（`gh pr view` で head ブランチと URL を読む） | 読むだけ。書き込まない | `links` が読む。`gh` が使えないときは URL の代わりにリポジトリの中のパスを出す |
-| セキュリティ（認証・認可・秘密） | `ui_mock.location` | URL かパスを書く欄で、秘密を書かない | `project-decl.py write` の秘密の形の値を捨てる既存の規則がそのまま掛かる。新しい認証・認可は無い |
+| セキュリティ（認証・認可・秘密） | `ui_mock.location` | URL かパスを書く欄で、秘密を書かない | 既存の秘密の除去は解析の項目（`ITEM_KEYS`）を巡回するときだけ働き、`ui_mock` は対象の外である。そこで `merge_project()` が巡回の後に `ui_mock` へ同じ判定（`has_secret`）を掛け、秘密の形なら `{"unknown": "秘密の形"}` に置き換えて値を出さない。解析で値を補完しない方針は変えない。新しい認証・認可は無い |
 | データ分析（計測・集計） | 承認の答えの記録（`gate-rejections.jsonl`） | 変えない | 無し（提示の形だけが変わり、答えの記録の形は変わらない） |
 | ログ出力とアラート | スクリプトの結果の 1 行の JSON（`step_result`） | 既存の形で出す | 無し（新しいログとアラートは足さない） |
 
@@ -386,7 +387,7 @@ items の 1 件は `{"name": "<資料名>", "rule": "<上の値>", "text": "<置
 | `kind` | `artifact` / `storybook` / `preview` / `other` | 表現方法の種類（LIB5 / LIB2・LIB3 / LIB4 / それ以外） |
 | `location` | 文字列（1 字以上） | 画面モックを置く場所。URL のテンプレートかリポジトリの中のパス。`{pr}` と `{branch}` を差し込める |
 
-欄は省略できる（今の宣言はそのまま読める）。`{"unknown": "<理由>"}` と空の欄は未宣言として扱う。
+欄は省略できる（今の宣言はそのまま読める）。`{"unknown": "<理由>"}` と空の欄は未宣言として扱う。`location` が秘密の形（資格情報を含む URL など）なら、`project-decl.py write` の保存で `{"unknown": "秘密の形"}` に置き換わる。
 
 ### Factory の承認の画面
 
@@ -443,7 +444,7 @@ sequenceDiagram
 
 図は実行する要素だけを描く。構成要素の表のうち参照の文書（`.md`）・生成物（スキーマと契約）・テスト・用語集は実行の順序を持たないため図に現れない。`project_lib/model.py` は `design-materials.py` が宣言を読むときに通る。
 
-スプリントの設計のプランでは、`survey-recheck` の後に `materials-check` を打つ。落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる）。
+スプリントの設計のプランでは、`--mode standard` のときだけ `survey-recheck` の後に `materials-check` を打つ。落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`--mode legacy-refactor` では検査の 3 ステップを足さず、`materials-links` だけを足す。`light` / `operation` / `documentation` のプランは変えない（受け入れ条件 14）。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる）。
 
 ## 非機能の実現方式
 
@@ -466,19 +467,20 @@ sequenceDiagram
 | 7・I3 | 触る領域の行が無い設計文書では、該当時の 5 行もすべて `missing` の対象になる | 行が無いときに該当時を外すと落ちる |
 | 8・I4 | `ui_mock` の無い宣言で、触る領域に画面がある設計を渡すと `ui_mock_undeclared` で 1 | 宣言を見ずに通すと落ちる |
 | 9・I4 | `ui_mock` の無い宣言で、画面の無い設計を渡すと `ui_mock_undeclared` が出ない | 画面の有無によらず挙げると落ちる |
-| 10・I6 | `links` が該当する資料ごとに 1 件を出し、URL が設計文書の節のアンカーか画面モックのリンクを指す。要旨は改行を含まず 120 字以内 | アンカーを付けない・要旨に節の本文を写すと落ちる |
+| 10・I6 | `links` が該当する資料ごとに 1 件を出し、URL が設計文書の節のアンカーか画面モックのリンクを指す。要旨は改行を含まず 120 字以内。同じ見出しが 2 つある設計文書では、2 つ目の節を指す URL のアンカーに `-1` が付く | アンカーを付けない・見出しの文字列だけからアンカーを作る・要旨に節の本文を写すと落ちる |
 | 11・I5 | 該当しない資料の行を出さず、必須の節が `無し（<理由>）` なら要旨がその 1 行になる | 該当しない行を出す・`無し` の行を落とすと落ちる |
 | 12 | 承認の依頼の事象の `links` の 1 件と、`links` の結果の 1 件が同じキーを持つ | （#2815 の契約テストで縛る） |
 | 13 | #2815 が起票され、この文書から番号で指されている | （起票の事実。テストで縛らない） |
 | 16 | 全体テストと Skill の frontmatter の検査が通る | （CI と手元の実行で確かめる） |
 | `ui_mock` の形 | `project-decl.py check` が `kind` の 4 値の外と空の `location` を拒み、欄の無い宣言を通す | 欄を必須にすると、今の宣言が落ちる |
-| スプリントの設計のプラン | 組んだプランで `survey-recheck` の次が `materials-check` で、`gate` の入力に `materials-links` がある | 検査のステップを足さないと落ちる |
+| スプリントの設計のプラン | `--mode standard` で組んだプランで `survey-recheck` の次が `materials-check` で、`gate` の入力に `materials-links` がある。`--mode light` で組んだプランに `materials-check` と `materials-links` が無い。`--mode legacy-refactor` で組んだプランに `materials-links` があり `materials-check` が無い | 検査のステップを足さない・モードを見ずに足すと落ちる |
+| `ui_mock` の秘密の除去 | 既存の宣言の `ui_mock.location` が資格情報入りの URL のとき、`project-decl.py write` の後の宣言で `ui_mock` が `{"unknown": "秘密の形"}` になり、出力の行に `secret` があって値が出ない | `ui_mock` を巡回の外に置いたままにすると落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2721 | 実装する | — | `plugins/ndf/skills/design/references/approval-materials.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/references/system-architecture.md`、`plugins/ndf/skills/design/references/interface-ui.md`、`plugins/ndf/skills/design/references/data-structure.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/scripts/design-materials.py`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2721 | 実装する | — | `plugins/ndf/skills/design/references/approval-materials.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/references/system-architecture.md`、`plugins/ndf/skills/design/references/interface-ui.md`、`plugins/ndf/skills/design/references/data-structure.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/scripts/design-materials.py`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/scripts/project_lib/merge.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 出し直しの指摘への対応
 
