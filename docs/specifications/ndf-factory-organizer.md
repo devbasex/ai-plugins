@@ -253,7 +253,7 @@ sequenceDiagram
 
 ### NDF の切り替え口
 
-NDF は環境変数 `NDF_ORGANIZER_DIR` があるときだけ、リリースを自分で組まずに、外のオーガナイザーへ置き場のファイルで依頼を出す。切り替え口は Factory を名指しせず、手元の別のまとめ役からも同じ形で使える（`plugins/` は `factory/` を参照しない）。手順の正本は `plugins/ndf/skills/development-workflow/references/parallel.md` の「外のオーガナイザーのレーン」、副命令の終了コードは `plugins/ndf/scripts/lib/parallel_external_cli.py` の冒頭の表、置き場の形は [データと契約](ndf-factory-organizer-data-and-contracts.md) にある。
+NDF は環境変数 `NDF_ORGANIZER_DIR` があるときだけ、リリースを自分で組まずに、外のオーガナイザーへ置き場のファイルで依頼を出す（リリースの雛形で出す経路。昇格の経路ではレーンも昇格のプランをそのまま流す）。切り替え口は Factory を名指しせず、手元の別のまとめ役からも同じ形で使える（`plugins/` は `factory/` を参照しない）。手順の正本は `plugins/ndf/skills/development-workflow/references/parallel.md` の「外のオーガナイザーのレーン」、副命令の終了コードは `plugins/ndf/scripts/lib/parallel_external_cli.py` の冒頭の表、置き場の形は [データと契約](ndf-factory-organizer-data-and-contracts.md) にある。
 
 例: Factory のループ `l20261102` の周回の実行ジョブで、ランナーが `NDF_ORGANIZER_LANE=loop-l20261102` を渡す。NDF は本番のステージを組む時点で、依頼を `requests/<依頼の id>.json` へ書いて周回をリリース待ちで締める。ランナーはそれを `release.requested` として送る。次の周回のジョブの開始で、ランナーは `answers/<依頼の id>.json`（`released`・版）を書き、NDF は周回の境でそれを読んで残りの工程を流す。
 
@@ -262,7 +262,7 @@ NDF は環境変数 `NDF_ORGANIZER_DIR` があるときだけ、リリースを�
 | レーンの判定 | `NDF_ORGANIZER_DIR` があれば、外のオーガナイザーのレーン（名前は `NDF_ORGANIZER_LANE`）として判定し、計画名の代わりに `--external` を付ける |
 | 依頼 | `parallel.py request --external` は依頼を書いて 10 で終わる。自分の Pull Request がすべてすでに `main` にあれば、書かずに 0 で終わる |
 | 答え | `parallel.py await --external` は答えのファイルを読み、`released` で 0、`rejected` で 10、まだ無ければ 3 で終わる |
-| 問い | 設計の承認と承認ゲートの外の問いは依頼にせず、今どおり止まって人へ戻す |
+| 問い | 設計の承認、昇格の経路のリリース承認ゲート、承認ゲートの外の問いは依頼にせず、今どおり止まって人へ戻す |
 | リリースの実行 | `/goal /ndf:development-workflow --parallel-helper --external` で始め、`batch.json` の手（`step`）ごとに 1 手を打つ。`present` / `represent` は提示のプランと本番のプランを流し、リリース承認ゲートで止まれば提示を書いて「判断が要る」で終える。`confirm:<k>` は確定した提示 k の本番のプランだけを流す。`continue` は止まったプランを続ける。終わりに `parallel.py settle --external` が届いた段と結果を書く |
 
 置き場は取り込んだリポジトリの `.ndf/organizer` で、ランナーが保存する NDF の状態に入り、周回と再開をまたいで残る。ランナーは NDF へ `NDF_FACTORY_RUN=1`・`NDF_ORGANIZER_DIR`・`NDF_ORGANIZER_LANE`・`NDF_VERSION`（入れた NDF の版）を渡す。

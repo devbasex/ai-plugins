@@ -240,6 +240,80 @@ def test_review_drive_stops_when_init_fails(tmp_path, monkeypatch, capsys):
     assert code == 1 and out["status"] == "stopped" and out["metrics"]["exit"] == 3
 
 
+def test_review_drive_restarts_when_the_replay_is_misaligned(tmp_path, monkeypatch, capsys):
+    """打ち直しで step の並びがずれたら、AttributeError で落ちずに新しい実行の回で流し直す（#2782）。
+
+    2 回目のプロセスの打ち直しで、step の外の adopt が 1 回だけ Held を投げる（10.27.42 の持ち主の記録の失敗の形）。"""
+    fake = FakeReview(tmp_path, judges=[2])
+    monkeypatch.setattr(cr, "call", fake)
+    code, out = run_main(cr, ["5"], capsys)
+    assert code == 20 and out["items"][0]["pause"] == "fix"
+
+    flag = tmp_path / "raise-once"
+    flag.touch()
+    adopt = cr.Drive.adopt
+
+    def adopt_once(self, iv):
+        if flag.exists():
+            flag.unlink()
+            raise cr.Held("持ち主の記録を更新できない", 1)
+        adopt(self, iv)
+
+    monkeypatch.setattr(cr.Drive, "adopt", adopt_once)
+    code, text = fork_main(cr, ["5"])
+    out = json.loads(text.strip().splitlines()[-1])
+    assert not flag.exists()  # 打ち直しの中で投げた
+    # 新しい実行の回が頭から流れ、状態のラウンドの続き（開始が上限で done）から最終スイープで止まる
+    assert code == 21 and out["items"][0]["pause"] == "sweep"
+    assert [c[:2] for c in fake.calls].count(("state.py", "init")) == 2  # 新しい実行の回だけが init を打ち直す
+
+
+def test_misaligned_records_are_named():
+    """記録の名前が違う、または止まりの結果が dict でなければ、並びのずれとして読める理由で止める（#2782）。"""
+    with pytest.raises(drive_pause.Misaligned, match="review_round"):
+        drive_pause.recorded({"method": "review_round", "ok": "fix"}, "stopped", cr.Held)
+    assert drive_pause.recorded({"method": "init", "ok": {"PR": "5"}}, "init", cr.Held) == {"PR": "5"}
+    assert drive_pause.recorded({"ok": "fix"}, "review_round", cr.Held) == "fix"  # 名前を持たない前の版の記録はそのまま読む
+    with pytest.raises(cr.Held):
+        drive_pause.recorded({"method": "init", "stop": "止めた", "code": 1}, "init", cr.Held)
+    with pytest.raises(drive_pause.Misaligned):
+        drive_pause.shown("fix")
+    with pytest.raises(drive_pause.Misaligned):  # 同じ名前どうしのずれ（段階の種類が違う）
+        drive_pause.recorded({"method": "has_result:fix", "ok": True}, drive_pause.call_key("has_result", ("sweep",)), cr.Held)
+    with pytest.raises(drive_pause.Misaligned):  # 中身の無い記録
+        drive_pause.recorded({"method": "init"}, "init", cr.Held)
+
+
+def test_unless_misaligned_retries_once_and_only_for_misaligned(capsys):
+    """並びのずれで落ちた回だけを 1 度流し直し、2 度目と、ずれ以外の失敗は上げる（#2782）。"""
+    calls = []
+
+    def run(fails):
+        def go():
+            calls.append(1)
+            if len(calls) <= fails:
+                raise cr.Stop("駆動の耐久ワークフロー r-1 が error で終わった: Misaligned: 並びが合わない", 1)
+            return {"status": "ok"}, 0
+
+        return go
+
+    assert drive_pause.unless_misaligned(run(1), cr.Stop) == ({"status": "ok"}, 0) and len(calls) == 2
+    assert "流し直す" in capsys.readouterr().err
+    calls.clear()
+    with pytest.raises(cr.Stop):
+        drive_pause.unless_misaligned(run(2), cr.Stop)
+    assert len(calls) == 2
+    calls.clear()
+
+    def other():
+        calls.append(1)
+        raise cr.Stop("駆動の耐久ワークフロー r-1 が error で終わった: ValueError: x", 1)
+
+    with pytest.raises(cr.Stop):
+        drive_pause.unless_misaligned(other, cr.Stop)
+    assert len(calls) == 1
+
+
 def test_both_drives_share_the_pause_table():
     assert cr.dp is rf.dp
     assert cr.Stop is cr.dp.Stop and rf.Stop is rf.dp.Stop
