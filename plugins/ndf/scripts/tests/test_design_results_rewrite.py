@@ -300,3 +300,215 @@ def test_mismatch_stops_the_stage_and_writes_nothing(tmp_path, fake):
     assert res["summary"].endswith("触るファイル: 2 個 / 1 個（先にだけある: pkg/b.py ）。人へ戻す")
     assert {p.name: p.read_text() for p in paths.values()} == before
     assert not (tmp_path / "design-results.json").exists()
+
+
+# ---------- 分割した設計文書と触るファイルのセルの形（#2453） ----------
+
+
+def table_of(*rows: str) -> str:
+    return "# 設計\n\n## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n" + "\n".join(rows) + "\n"
+
+
+D1, LOOP, FAIL = "issues/issue-1-design.md", "issues/issue-1-design-loop.md", "issues/issue-1-design-fail.md"
+SPLIT = "# 分割した文書\n\n## ループの側\n\n本文\n"
+ROW1 = "| #1 | 実装する | — | `pkg/a.py` |"
+
+
+class Repo:
+    """ベースブランチ（`base`: パス → 中身）と、課題ごとのマージした設計 PR が変えたパス（`changed`）を持つ gh と git の偽物。"""
+
+    def __init__(self, base: dict[str, str], changed: dict[int, list[str]]):
+        self.base, self.changed = base, changed
+
+    def gh(self, args, stdin=None, cwd=None):
+        if args[1] == "list":
+            n = int(args[args.index("--head") + 1].split("-")[-1])
+            return gh_call.GhResult(0, f"{100 + n}\n" if n in self.changed else "", "")
+        return gh_call.GhResult(0, "\n".join(self.changed[int(args[2]) - 100]) + "\n", "")
+
+    def run(self, cmd, **kw):
+        sub = cmd[3]
+        if sub == "ls-tree":
+            out = "".join(f"{p}\0" for p in self.base)
+        elif sub == "show":
+            out = self.base[cmd[4].split(":", 1)[1]]
+        else:
+            out = ""
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+
+@pytest.fixture
+def repo(monkeypatch):
+    def use(base: dict[str, str], changed: dict[int, list[str]]) -> Repo:
+        r = Repo(base, changed)
+        monkeypatch.setattr(gh_call, "RUNNER", r.gh)
+        monkeypatch.setattr(design_stage, "subprocess", types.SimpleNamespace(run=r.run))
+        return r
+
+    return use
+
+
+def stage(tmp_path: Path, issues=(1,)) -> tuple[argparse.Namespace, dict[int, Path]]:
+    paths = {n: tmp_path / f"5-impl-{n}.json" for n in issues}
+    for n, p in paths.items():
+        p.write_text(json.dumps(plan_of(n), ensure_ascii=False))
+    manifest = tmp_path / "sprint.json"
+    manifest.write_text(json.dumps({"ステージ": [{"name": "実装", "plans": [str(p) for p in paths.values()]}]}))
+    return argparse.Namespace(manifest=str(manifest), base="develop", root=str(tmp_path), design=list(issues)), paths
+
+
+def written(paths: dict[int, Path]) -> dict[int, dict]:
+    return {n: json.loads(p.read_text()) for n, p in paths.items()}
+
+
+def split_base(**extra: str) -> dict[str, str]:
+    base = {D1: table_of(ROW1), LOOP: SPLIT, FAIL: SPLIT, "issues/issue-1-requirements.md": "# 要求\n", "issues/issue-99-design.md": SPLIT}
+    base.update(extra)
+    return base
+
+
+@pytest.mark.parametrize("changed", [[D1, LOOP, FAIL], [D1, "issues/issue-1-design-gone.md"]], ids=["all-in-pr", "head-only-fix"])
+def test_every_design_doc_of_the_issue_is_listed(tmp_path, repo, changed):
+    """2453 受け入れ条件 1〜4・6・I1・I2: プランの `設計文書` と指示文の行に 3 本が載り、表を持つ文書が先頭で残りは昇順。
+    要求のコピー・番号を共有しない文書・ベースブランチから消えた文書は載らない。"""
+    a, paths = stage(tmp_path)
+    repo(split_base(), {1: changed})
+    res, code = design_stage.cmd_design_results(a)
+    assert code == 0, res
+    docs = [D1, FAIL, LOOP]
+    plan = written(paths)[1]
+    assert plan["設計文書"] == docs
+    lines = [ln for ln in impl_prompt_of(plan).splitlines() if ln.startswith("設計文書:")]
+    assert lines == [templates.DESIGN_DOCS_LINE.format(docs="、".join(docs))]
+    assert json.loads((tmp_path / "design-results.json").read_text())["base_docs"] == sorted(split_base())[:3] + [
+        "issues/issue-99-design.md"
+    ]
+
+
+def test_the_head_is_the_doc_with_the_table():
+    """2453 受け入れ条件 5: 表を分割した文書が持てば、その文書が先頭で、表の無い先頭の名前の文書も載る。"""
+    ndf = "issues/issue-1-design-ndf.md"
+    res = dr.DesignResults(base_docs=[D1, ndf])
+    res.add(dr.parse_results(table_of(ROW1), ndf))
+    assert res.docs_of([1]) == [ndf, D1]
+
+
+def test_rows_of_two_issues_share_the_list():
+    """2453 受け入れ条件 7: 1 つの表の #1・#2 は同じ一覧になり、#2 を #1 へ取り込むと #1 のプランに両方の課題の文書が載る。"""
+    d2 = "issues/issue-2-design.md"
+    res = dr.DesignResults(base_docs=[D1, LOOP, d2, "issues/issue-3-design.md"])
+    res.add(dr.parse_results(table_of(ROW1, "| #2 | 実装する | — | `pkg/b.py` |"), D1))
+    assert res.docs_of([1]) == res.docs_of([2]) == [D1, LOOP, d2]
+    absorbed = dr.DesignResults(base_docs=[D1, LOOP, d2])
+    absorbed.add(dr.parse_results(table_of(ROW1), D1))
+    absorbed.add(dr.parse_results(table_of("| #2 | 取り込む | #1 | — |"), d2))
+    plans = {1: plan_of(1), 2: plan_of(2)}
+    design_stage.rewrite(plans, absorbed)
+    assert plans[1]["設計文書"] == [D1, d2, LOOP]
+
+
+@pytest.mark.parametrize("changed", [[LOOP], ["plugins/x.py"]], ids=["split-only-fix", "no-issue-docs"])
+def test_the_table_is_found_in_the_base_docs(tmp_path, repo, changed):
+    """2453 I6（決定 8）: PR が分割した文書だけを変えた・`issues/` を変えなかった課題も、ベースブランチの文書から表を読む。"""
+    a, paths = stage(tmp_path)
+    repo(split_base(), {1: changed})
+    res, code = design_stage.cmd_design_results(a)
+    assert code == 0 and res["metrics"]["unread"] == [], res
+    assert written(paths)[1]["設計文書"] == [D1, FAIL, LOOP]
+    assert written(paths)[1]["触るファイル"][0] == "pkg/a.py"
+
+
+def test_no_table_anywhere_stays_unread_and_single_docs_stay_single(tmp_path, repo):
+    """2453 受け入れ条件 8・9: 表がどこにも無い課題は unread で `設計文書` を書かない。分割していない課題は 1 本で、
+    2 回打っても変わらず、補正の行は残り、「設計文書:」の行は 1 行である。"""
+    a, paths = stage(tmp_path, (1, 2))
+    plan1 = with_fixes(plan_of(1))
+    paths[1].write_text(json.dumps(plan1, ensure_ascii=False))
+    repo({D1: table_of(ROW1), "issues/issue-2-design.md": SPLIT}, {1: [D1], 2: ["issues/issue-2-design.md"]})
+    res, _ = design_stage.cmd_design_results(a)
+    assert res["metrics"]["unread"] == [2]
+    once = written(paths)
+    assert once[1]["設計文書"] == [D1] and "設計文書" not in once[2]
+    design_stage.cmd_design_results(a)
+    assert written(paths) == once
+    prompt = impl_prompt_of(once[1])
+    assert prompt.count("設計文書:") == 1 and FIX_A in prompt and FIX_B in prompt
+
+
+CELL_2436 = (
+    "`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_run.py`、"
+    "`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/durable.py`、"
+    "`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、"
+    "`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、"
+    "`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、"
+    "`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/forms/parallel-request.json`、"
+    "`plugins/ndf/skills/issue-plan-strategy/`、`plugins/ndf/skills/development-workflow/`、`docs/glossary/glossary.json`、`docs/glossary.md`。"
+    "ループの側の触るファイルは [issue-2436-design-lane-loop.md](issue-2436-design-lane-loop.md)、"
+    "異常系の側は [issue-2436-design-failures.md](issue-2436-design-failures.md)、"
+    "承認ゲート 1 の側は [issue-2436-design-approvals.md](issue-2436-design-approvals.md)、"
+    "配布の規則の側は [issue-2436-design-release-rule.md](issue-2436-design-release-rule.md) の「触るファイル」にある"
+)
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "`a.py`。ループの側は [issue-1-design-loop.md](issue-1-design-loop.md) にある",
+        "`a.py`（[issue-1-design-loop.md](issue-1-design-loop.md)）",
+        "`a.py`。残りは別の文書にある",
+        "`a.py`, b.py",
+        "`a.py`（新設",
+        CELL_2436,
+    ],
+    ids=["link", "link-in-parens", "words", "bare-path", "unclosed", "issue-2436"],
+)
+def test_cells_out_of_the_form_stop(cell):
+    """2453 受け入れ条件 10・11・14: リンク（括弧の中を含む）と括弧の外の語は形の誤りで、表の最後まで読んでから止まる。"""
+    with pytest.raises(dr.DesignCellError) as e:
+        dr.parse_results(table_of(f"| #1 | 実装する | — | {cell} |", f"| #2 | 実装する | — | {cell} |"), D1)
+    assert [(p.issue, p.doc) for p in e.value.problems] == [(1, D1), (2, D1)]
+
+
+@pytest.mark.parametrize(
+    ("cell", "files"),
+    [
+        ("`a.py`（新設）、`b/`", ["a.py", "b/"]),
+        ("`a.py`, `b.py`", ["a.py", "b.py"]),
+        ("`app/(g)/p.tsx`（`c.py` は読まない）", ["app/(g)/p.tsx"]),
+        ("—", []),
+        ("", []),
+    ],
+    ids=["note", "comma", "parens-in-path", "dash", "empty"],
+)
+def test_cells_in_the_form_give_only_the_code_spans(cell, files):
+    """2453 受け入れ条件 15・I4: 区切り・括弧の注記・空・— は止まらず、`files` は括弧の外のコードスパンの中身だけ。"""
+    assert dr.parse_results(table_of(f"| #1 | 実装する | — | {cell} |"), D1)[0].files == files
+
+
+def test_cells_of_absorbed_and_closed_rows_are_not_checked():
+    """2453 受け入れ条件 16・I5: 「取り込む」「閉じる」の行のセルは読まない。"""
+    rows = dr.parse_results(table_of(ROW1, "| #2 | 取り込む | #1 | 残りは [x](x.md) |", "| #3 | 閉じる | — | 語 |"), D1)
+    assert [r.files for r in rows] == [["pkg/a.py"], [], []]
+
+
+def test_cell_errors_stop_the_stage_and_a_fixed_doc_passes(tmp_path, repo):
+    """2453 受け入れ条件 12・13・I3: 2 本の文書の誤りを 1 つの要約に並べ、何も書かずに止まる。直した文書の後は通る。"""
+    a, paths = stage(tmp_path, (1, 2))
+    before = {p.name: p.read_text() for p in paths.values()}
+    d2 = "issues/issue-2-design.md"
+    bad = {
+        D1: table_of("| #1 | 実装する | — | `a.py`。残りは [l](issue-1-design-loop.md) |"),
+        d2: table_of("| #2 | 実装する | — | `b.py`, c.py |"),
+    }
+    r = repo(bad, {1: [D1], 2: [d2]})
+    res, code = design_stage.cmd_design_results(a)
+    assert code == 2 and res["status"] == "stopped", res
+    summary = res["summary"]
+    assert f"#1（{D1}）の触るファイルのセルを読めない: " in summary and "issue-1-design-loop.md" in summary
+    assert f"#2（{d2}）の触るファイルのセルを読めない: c.py" in summary
+    assert summary.count(dr.CELL_FIX) == 1 and summary.endswith(dr.CELL_FIX + "。人へ戻す")
+    assert {p.name: p.read_text() for p in paths.values()} == before
+    assert not (tmp_path / "design-results.json").exists()
+    r.base = {D1: table_of(ROW1), d2: table_of("| #2 | 実装する | — | `b.py`、`c.py` |")}
+    res, code = design_stage.cmd_design_results(a)
+    assert code == 0 and written(paths)[2]["触るファイル"][:2] == ["b.py", "c.py"], res
