@@ -49,7 +49,7 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 利用者の依頼（#2206、2026-10-31）は「承認ゲート以外のユーザー問い合わせは原則hookで止めてAIが判断するように強制する」
 「どうしても判断が不可能な場合(金銭的コストがかかるなど)の場合のみ、AskUserQuestionを出して判断を求めます」である。
 それまで `hook.py` は `AskUserQuestion` を待ちの Slack 通知にだけ使い、判定していなかった。AI が自分で決められる問いで
-セッションが止まり、Factory のランナーでは問い合わせ 1 件ごとに実行ジョブが終わる（[ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) の I8）ため、
+セッションが止まり、Factory のランナーでは問い合わせ 1 件ごとに実行ジョブが終わる（サービスの確定仕様 `ndf-factory-service-boundary.md` の I8）ため、
 人の答えまでスプリントが止まっていた。
 
 前提として確かめたこと（Claude Code 2.1.314、2026-10-31）:
@@ -404,7 +404,7 @@ erDiagram
 
 `—` はその種類の行に列を置かないことを表す。保存の期間は決めず、消すのは利用者である（ほかの状態の記録と同じ）。
 Factory のランナーは実行ジョブの中で同じパスを読み、`session` と `at` で自分の実行の行を選ぶ（事象への翻訳は
-[ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) の `decision.delegated`）。
+サービスの確定仕様 `ndf-factory-service-boundary.md` の `decision.delegated`）。
 
 | 名前 | 置き場所 | 値・形 |
 | --- | --- | --- |
@@ -493,7 +493,7 @@ hook の判定は PreToolUse の入力 JSON を `hook.py` へ標準入力で渡�
 - [PR #2249](https://github.com/devbasex/ai-plugins/pull/2249) — 実装
 - [`development-workflow` の `references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) — 区分と手順の正本
 - [docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../ndf-plugin-reference.md#承認ゲートの外の問い合わせ)
-- [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) — Factory の実行ジョブ（I8）と `decision.delegated` の事象
+- サービスの確定仕様 `ndf-factory-service-boundary.md` — Factory の実行ジョブ（I8）と `decision.delegated` の事象
 - [cross-review-reopen-and-hook-deadline.md](cross-review-reopen-and-hook-deadline.md) — hook の締め切り
 - [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) — 本文で承認を待って終えた応答の差し戻し（`WAIT_REASON`）
 - [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) — 同じ置き場の差し戻しの記録
