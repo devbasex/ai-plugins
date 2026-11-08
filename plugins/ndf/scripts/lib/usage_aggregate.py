@@ -206,10 +206,9 @@ def claude_views(
     """Claude の帳簿の「サブエージェントだけ」「全体」「会話の記録だけ」と、数えられない範囲の注記。"""
     subs = [r for r in rows if r.get("kind") == "subagent"]
     calls = [r for r in rows if r.get("kind") != "subagent"]
-    known_agents = {r.get("agent_id") for r in all_rows if r.get("kind") == "subagent"}
     known_sessions = {r.get("session_id") for r in all_rows if r.get("kind") != "subagent"}
     found = transcripts(projects, since, until, repo) if projects else {"sdk": {}, "agents": {}}
-    extra_agents = {a: v for a, v in found["agents"].items() if a not in known_agents}
+    extra_agents = _extra_agents(found, all_rows)
     sub_only, total, only = bucket(), bucket(), bucket()
     for r in subs:
         count_row(sub_only, r)
@@ -217,11 +216,7 @@ def claude_views(
     for parent, usage in extra_agents.values():
         for b in (sub_only, total, only):
             count_row(b, {"usage": usage})
-    children = defaultdict(list)
-    for r in subs:
-        children[r.get("parent_session_id")].append(r.get("usage"))
-    for parent, usage in extra_agents.values():
-        children[parent].append(usage)
+    children = _children_by_parent(subs, extra_agents)
     for r in calls:
         count_row(total, r)
         add_into(total["usage"], residual(r, children.get(r.get("session_id"), []) if r.get("session_id") else []))
@@ -229,13 +224,38 @@ def claude_views(
         if session not in known_sessions:
             count_row(total, {"usage": usage})
             count_row(only, {"usage": usage})
+    return {
+        "subagent_only": sub_only,
+        "total": total,
+        "transcript_only": only,
+        "uncountable_note": _uncountable_note(all_rows),
+    }
+
+
+def _extra_agents(found: dict, all_rows: list) -> dict:
+    """会話の記録にあって帳簿に無いサブエージェント（agent_id → (親の session_id, usage)）。"""
+    known_agents = {r.get("agent_id") for r in all_rows if r.get("kind") == "subagent"}
+    return {a: v for a, v in found["agents"].items() if a not in known_agents}
+
+
+def _children_by_parent(subs: list, extra_agents: dict) -> dict:
+    """親の session_id ごとの、サブエージェントの usage の一覧。"""
+    children = defaultdict(list)
+    for r in subs:
+        children[r.get("parent_session_id")].append(r.get("usage"))
+    for parent, usage in extra_agents.values():
+        children[parent].append(usage)
+    return children
+
+
+def _uncountable_note(all_rows: list) -> str:
+    """数えられない範囲（会話の記録を残さない claude -p）の注記。"""
     first = min((r.get("at") for r in all_rows if r.get("at")), default=None)
-    note = (
+    return (
         f"{first} より前の、会話の記録を残さない claude -p は含まない（帳簿の最初の行の時刻）"
         if first
         else "帳簿が無い。会話の記録を残さない claude -p は含まない"
     )
-    return {"subagent_only": sub_only, "total": total, "transcript_only": only, "uncountable_note": note}
 
 
 # --- 閉じた課題の数とスプリントの期間 ---
