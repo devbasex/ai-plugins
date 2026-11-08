@@ -5694,25 +5694,25 @@
       "term": "扱い",
       "context": "ndf-workflow",
       "meaning": "設計の結果の列。課題ごとに `実装する` / `取り込む` / `閉じる` のどれかを書く",
-      "pending_source": "issues/issue-2361-requirements.md"
+      "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "取り込み先",
       "context": "ndf-workflow",
       "meaning": "設計の結果の列。扱いが `取り込む` の課題を、どの課題の実装へ含めるかを課題の番号で書く",
-      "pending_source": "issues/issue-2361-requirements.md"
+      "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "触るファイル",
       "context": "ndf-workflow",
       "meaning": "設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる",
-      "pending_source": "issues/issue-2361-requirements.md"
+      "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "食い違い",
       "context": "ndf-workflow",
       "meaning": "同じ課題について、2 本の設計文書が違う設計の結果（扱い・取り込み先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す",
-      "pending_source": "issues/issue-2361-design.md"
+      "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "出し直しの指摘",
@@ -6177,15 +6177,13 @@
       "term": "分割した文書",
       "context": "ndf-workflow",
       "meaning": "1 つの課題の設計を複数ファイルに分けたときの、先頭以外の設計文書（`issue-<番号>-design-<名前>.md`）",
-      "source": "",
-      "pending_source": "issues/issue-2453-design.md"
+      "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "セルの形の誤り",
       "context": "ndf-workflow",
       "meaning": "設計の結果の「実装する」の行の触るファイルのセルが、定めた書式から外れていること。設計の結果のステージが止まる",
-      "source": "",
-      "pending_source": "issues/issue-2453-design.md"
+      "source": "docs/specifications/ndf-design-results-docs-and-cell-format.md"
     },
     {
       "term": "照合",
