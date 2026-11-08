@@ -31,7 +31,7 @@ from supervise_lib.sprint_waves import (
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
-from supervise_lib.release_templates import release_verify_step, strip_suffix
+from supervise_lib.release_templates import release_verify_steps, strip_suffix
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
@@ -169,7 +169,7 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。"""
+    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）控え → リリース後テスト → 比較 → 振り返り → 課題を閉じる → 棚卸し。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
@@ -188,8 +188,8 @@ def close_plan(a, repo: str) -> dict:
             "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="release-verify" if has_record(record_pr) else "retro"),
-                *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
+                *merge_steps(a, next="config-save" if has_record(record_pr) else "retro"),
+                *(release_verify_steps(a.name, refs, record_pr) if has_record(record_pr) else []),
                 _retro_step(a, refs, stats),
                 _close_step(a, repo, record_pr, issues),
                 *refine_steps(a, refs, repo),

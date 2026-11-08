@@ -23,7 +23,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib import queue  # noqa: E402
+from supervise_lib import queue, release_templates  # noqa: E402
 from test_supervise_pace_auto import load, sprint_state, steps_of  # noqa: E402
 from test_supervise_pace_manual import commit_all  # noqa: E402
 
@@ -326,7 +326,21 @@ def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
     """#1875 1875-3: 届けない経路（delivery が []）だけなら今どおり --record-pr 0 で、リリース後テストを置かない。"""
     steps = close_steps(tmp_path, [])
     close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr 0 " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
+    assert "--record-pr 0 " in close["cmd"]
+    assert not {"config-save", "release-verify", "config-check", "config-check-on-fail"} & {s["id"] for s in steps}
+
+
+@pytest.mark.parametrize("rows", [[STG, PRD], [STG]], ids=["record", "queue-record"])
+def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
+    """#2401 の受け入れ条件 2・4（I4・I5）: リリース後テストの前に控えを取り、後で比べる。リリース後テストが失敗しても
+    比べて止まり、比べるステップは on_fail を持たない（0 以外で振り返りへ進まない）。起動指示は導入しないことの要点を持つ。"""
+    by = {s["id"]: s for s in close_steps(tmp_path, rows)}
+    save, check, on_fail = by["config-save"], by["config-check"], by["config-check-on-fail"]
+    assert "user-config-save --out {state_dir}/user-config-before.json" in save["cmd"]
+    assert check["cmd"] == on_fail["cmd"] and "user-config-check --before {state_dir}/user-config-before.json" in check["cmd"]
+    assert by["release-verify"]["on_fail"] == "config-check-on-fail" and on_fail["on_exit"] == {"0": "stop"}
+    assert all(s["type"] == "run" and "on_fail" not in s and "stage" not in s for s in (save, check, on_fail))
+    assert release_templates.NO_USER_INSTALL in by["release-verify"]["prompt"]
 
 
 def chain(steps) -> list[str]:
@@ -356,9 +370,9 @@ DEPTH_TAIL = [
 @pytest.mark.parametrize(
     "rows, want",
     [
-        ([STG, PRD], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([STG, PRD], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
         ([], ["merge", "retro", "close", "refine"]),
-        ([STG], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([STG], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
     ],
     ids=["record", "no-delivery", "queue-record"],
 )
