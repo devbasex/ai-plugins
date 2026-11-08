@@ -2721,13 +2721,13 @@
       "term": "CD の案内",
       "context": "ndf-release",
       "meaning": "CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない",
-      "pending_source": "issues/issue-2623-requirements.md"
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "手動反映の理由",
       "context": "ndf-release",
       "meaning": "delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない",
-      "pending_source": "issues/issue-2623-requirements.md"
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "昇格の Pull Request",
@@ -6095,25 +6095,25 @@
       "term": "CD の結果",
       "context": "ndf-release",
       "meaning": "本番チャネルへのマージの後に NDF が読んだ CD の状態。成功・失敗・未確定の 3 つで、リリース記録に残す",
-      "pending_source": "issues/issue-2623-design.md"
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "結果の読み方",
       "context": "ndf-release",
       "meaning": "CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す",
-      "pending_source": "issues/issue-2623-design.md"
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "公開物",
       "context": "ndf-release",
       "meaning": "正式版ごとのリリースタグと GitHub Release の組",
-      "pending_source": "issues/issue-2623-design.md"
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "反映失敗",
       "context": "ndf-release",
       "meaning": "リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態",
-      "pending_source": "issues/issue-2623-design.md"
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "リポジトリ前提の検査",
