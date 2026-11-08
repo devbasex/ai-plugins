@@ -216,6 +216,8 @@ from pathlib import Path
 
 # queue が --then のプランを流す前に、先行のプランの Pull Request の番号へ置き換える印
 QUEUE_PRS = "{queue_prs}"
+# run のステップの cmd を流す時点に、計画の `課題` の番号の空白区切りへ置き換える印
+PLAN_ISSUES = "{plan_issues}"
 # queue が名前の一致する計画の結果とリリース記録で置き換える差し込み（{queue_pr:<名>}・{queue_state:<名>}・{queue_record}）
 QUEUE_NAMED = re.compile(r"\{queue_(?:pr|state):[A-Za-z0-9._-]+\}|\{queue_record\}")
 

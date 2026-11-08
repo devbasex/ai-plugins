@@ -253,6 +253,7 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
     ステップは `parallel-request` の 1 つで、依頼を送れば 10（承認ゲート）で終わり、自分の Pull Request が
     すでに `main` にあれば送らずに 0 で終わる（I15）。`prs` は出す版の Pull Request（`{queue_pr:<名>}` でもよい）。"""
     from supervise_lib.paths import PARALLEL_PY
+    from supervise_lib.plan import PLAN_ISSUES
     from supervise_lib.procedures import with_record
 
     pr_args = " ".join(prs or [])
@@ -260,7 +261,7 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
     cmd = (
         f"{PARALLEL_PY} request {shlex.quote(plan_name)} --lane {shlex.quote(lane)}"
         + (f" --prs {pr_args}" if pr_args else "")
-        + " --issues {plan_issues} --state {state_dir}"
+        + f" --issues {PLAN_ISSUES} --state {{state_dir}}"
     )
     return with_record(
         {
