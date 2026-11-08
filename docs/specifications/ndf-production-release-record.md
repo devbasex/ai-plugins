@@ -255,6 +255,13 @@ stateDiagram-v2
 リリースの依頼のプランはステップ `parallel-request`（`parallel.py request`）の 1 つだけを持ち、依頼を送れば承認ゲート（終了コード 10）で終わり、
 自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。手順は `development-workflow` の
 [references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
+ステップのコマンドは課題の番号を持たず、`--issues {plan_issues}` を持つ。`{plan_issues}` は流す時点に、プランの `課題` の番号の空白区切り
+（空なら空文字）で埋まる（`supervise_lib/steps.py` の `RunStep`）。設計承認ゲートで課題を外した周回では、`loop gate` の `drop_issues` が
+書き換えた `課題` がそのまま依頼の `issues` になる。
+
+この置き換えは、リリースの雛形（`release.form`）で出す経路だけが対象である。昇格の経路など雛形の無い経路の本番のステージは
+`prod_plans` を通らず、`sprint_routes.route_waves` が組む。`route_waves` はレーンを判定しないため、レーンでも昇格のプラン 1 本
+（ステージ「本番」）を置き、レーンはそれをそのまま流す。組み上がった昇格のプランをリリースの依頼のプランへ手で置き換えない。
 雛形（`release_templates.plan_release`）が組んだステップを目録の側で書き換えず、`new release --version <正式版> --prs {queue_pr:check} --channel prod`
 と同じ出力に `課題` が入る（スプリントの工程は雛形に対して順応者の関係にある）。
 

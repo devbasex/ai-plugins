@@ -132,7 +132,7 @@ run のステップ:
   `"presentation_to": "<パス>"` があれば提示物をそのパス（ステップの作業場所から）へ写し、そちらを載せる
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
-  `{state_dir}` は計画の状態ディレクトリに置き換わる
+  `{state_dir}` は計画の状態ディレクトリに、`{plan_issues}` は流す時点の計画の `課題` の番号の空白区切り（空なら空文字）に置き換わる
 - `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`（run と drive。drive は 0・1 と、欠けの残る終わりの 6）: 終了コードを読んだら `skip_to` の次・承認ゲート（10〜19）の
   前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
   <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
