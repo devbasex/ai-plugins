@@ -20,13 +20,14 @@ import procs
 import step_read
 import usage_aggregate
 import usage_ledger
+import limits
 from sprint_mvv import MVV_PACES
 from supervise_lib import rerun
 from supervise_lib.claude import TICK, watch_children
 
 STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
 USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output"))
-REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
+REPORT_INTERVAL = limits.seconds("supervise.report-interval")
 # worker の途中の報告の state と、conductor へ知らせる理由（文の語は読まない。#2337 の I12）。state が無い行は working
 PROGRESS_ATTENTION = {"gate": "関門", "stopped": "止まった", "failing": "同じ失敗の繰り返し"}
 REPEAT_LIMIT = 3  # 同じ文がこの回数続いたら止まりとして知らせる
@@ -91,8 +92,7 @@ class RunState:
         self.gates: list[dict] = []  # run のステップが返した承認ゲート（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
-        self.fail_counts: dict[str, int] = {}
-        self.cause_counts: dict[str, dict[str, int]] = {}  # ステップ → 原因の鍵 → 回数（supervise_lib/rerun.py。#2343）
+        self.fail_counts, self.cause_counts = {}, {}  # ステップ → 失敗の回数 / ステップ → 原因の鍵 → 回数（rerun.py。#2343）
         self.failed_step: str | None = None  # 最後に落ちて on_fail へ回ったステップ（fix の後に戻る先。#1315）
         self.applied = 0  # 記録した（流したか組み直した）最後のステップの番号
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける

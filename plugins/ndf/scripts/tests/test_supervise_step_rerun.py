@@ -11,17 +11,22 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_supervise import progress, run_plan, seq  # noqa: E402,F401
+import test_supervise  # noqa: E402
+from test_supervise import progress, run_plan  # noqa: E402
+
+seq = test_supervise.seq  # 判定役の答えを順に返す fixture を、このファイルのテストへも出す
 
 import limits  # noqa: E402
 from supervise_lib import rerun  # noqa: E402
 from supervise_lib.state import RunState  # noqa: E402
 
-JUDGE_RERUN = {"out": {"result": '{"decision": "release", "reason": "外部の待ちの揺れなのでもう 1 度"}', "usage": {}, "total_cost_usd": 0.0}}
+JUDGE_RERUN = {
+    "out": {"result": '{"decision": "release", "reason": "外部の待ちの揺れなのでもう 1 度"}', "usage": {}, "total_cost_usd": 0.0}
+}
 
 # #1983: release のステップが同じ CI の失敗（run の番号だけが違う）で落ち続ける
 SAME_CI_FAILURE = (
-    'n=$(cat count 2>/dev/null || echo 0); n=$((n+1)); echo $n > count; '
+    "n=$(cat count 2>/dev/null || echo 0); n=$((n+1)); echo $n > count; "
     'echo "{\\"status\\": \\"stopped\\", \\"summary\\": \\"PR #1976 の CI が失敗: runtime-smoke (agy)（run 3835337858$n）\\"}"; exit 1'
 )
 

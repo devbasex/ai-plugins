@@ -42,12 +42,12 @@ import durable
 from supervise_lib import actuals, admission, limits, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
+import limits as limit_decl  # 上限の宣言（#2343）。supervise_lib.limits と分ける
 from supervise_lib.engine import Engine, write_phase_result
 from supervise_lib.queue import FINISHED, NO_REPORT
 from supervise_lib.state import RunState
 
-PLANS = "plans"  # queue が流すプランの耐久キュー
-PARENT_WAIT = 120.0  # 回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限（秒）
+PLANS, PARENT_WAIT = "plans", limit_decl.seconds("supervise.parent-wait")  # queue が流すプランの耐久キュー / plan_workflow の回復を待つ上限
 _ENGINES: dict[str, Engine] = {}
 _TURN: dict[str, int] = {}  # plan_workflow の接頭辞 → 資源の枠を待っているステップの番号
 _READY = threading.Condition()  # 登録簿と _TURN の排他と、slot_workflow への合図

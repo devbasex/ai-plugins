@@ -41,11 +41,12 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 
 from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
 
+import limits
 import locks
 from durable_keys import KIND_RE, DurableError, key_hash, launch_key, record_path, records_dir  # noqa: F401  durable の名前として出す
 
 FORMAT = "ndf-durable-1"
-POLL_SECONDS = 0.2  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
+POLL_SECONDS = limits.value("durable.poll", "interval")  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
 KEEP_DAYS = 30  # 使われていない耐久の記録を消すまでの日数
 PAUSE_SECONDS = 30 * 86400  # 止まり（pause）の待ちの上限
 RUNNING = ("PENDING", "ENQUEUED")
@@ -427,7 +428,7 @@ def wait_from(
     keys: Iterable[str],
     after: Mapping[str, int] | int = 0,
     timeout: Optional[float] = None,
-    poll: float = 1.0,
+    poll: float = limits.value("durable.wait-from-poll", "interval"),
 ) -> Outcome:
     """`wait` と同じ判定を外から行う。終わりか、`keys` のどれかのイベントの `seq` が `after` を超えるまで待つ。
     超えたイベントが複数あれば `seq` の最も小さいものを返す（`keys` の `seq` は同じ連番を共有する前提）。

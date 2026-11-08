@@ -21,6 +21,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
+import limits
 import jsonio
 
 from . import payload as pl
@@ -62,7 +63,9 @@ class Place:
 
 def _git_lines(cwd: str, *args: str) -> list[str] | None:
     try:
-        p = subprocess.run(["git", "-C", cwd, "rev-parse", *args], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", *args], capture_output=True, text=True, timeout=limits.seconds("hook.git-rev-parse")
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout.split("\n") if p.returncode == 0 else None

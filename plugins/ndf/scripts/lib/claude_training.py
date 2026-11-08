@@ -15,6 +15,7 @@ import sys
 import time
 from pathlib import Path
 
+import limits
 import claude_accounts as ca
 from claude_usage import http_json, new_request
 
@@ -24,8 +25,8 @@ from training_common import LOCAL_HOSTS, NETWORK, NOT_LOCAL, Reading, http_reaso
 URL = "https://api.anthropic.com/api/oauth/account/settings"
 URL_ENV = "NDF_TRAINING_SETTINGS_URL"  # 試験用の差し替え（手元のホストだけを受ける）
 SOURCE = "oauth/account/settings.grove_enabled"
-TIMEOUT = 3.0
-KEYCHAIN_TIMEOUT = 2.0
+TIMEOUT = limits.seconds("claude-training.call")
+KEYCHAIN_TIMEOUT = limits.seconds("claude-training.keychain")
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 NO_TOKEN = "OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）"

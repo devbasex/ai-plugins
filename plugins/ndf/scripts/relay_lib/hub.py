@@ -44,6 +44,8 @@ from .common import (
 )
 from .record import _start_rows
 
+import limits  # noqa: E402,I001  common が lib/ を sys.path に置く
+
 HUB_DIR = "hub"
 HUB_LOCK = "hub.lock"
 HUB_JSON = "hub.json"
@@ -53,7 +55,7 @@ RESULTS = "results"
 HUB_LOG = "hub-log.jsonl"
 # 名前の形（I7・決定 13）。tmux はセッション名の `.` を `_` へ置き換え、`:` を対象の区切りに使う
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
-POLL = 0.5
+POLL = limits.value("relay.hub-poll", "interval")
 RESULT_TTL = 600  # 結果のファイルを残す秒数（頼む側が読まずに終わった分を消す）
 
 # 断りの理由（結果の items[].result と hub-log の reason）

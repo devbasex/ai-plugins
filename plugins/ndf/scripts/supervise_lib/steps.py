@@ -21,6 +21,7 @@ import stage_skills
 import step_read
 import test_strategy as ts
 from supervise_lib import decl, paths, plan as plan_mod
+import limits
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
 import project_mvv
@@ -83,7 +84,14 @@ def run_condition(cond: dict, plan: dict, state_dir: str | Path) -> tuple[str, i
     cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(state_dir))
     started = time.time()
     try:
-        p = subprocess.run(cmd, shell=True, cwd=condition_cwd(plan), capture_output=True, text=True, timeout=cond.get("timeout", 900))
+        p = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=condition_cwd(plan),
+            capture_output=True,
+            text=True,
+            timeout=cond.get("timeout", limits.seconds("supervise.condition")),
+        )
         code, text = p.returncode, p.stdout + p.stderr
     except subprocess.TimeoutExpired as e:
         code, text = 124, f"打ち切り（{e.timeout} 秒）"
@@ -121,7 +129,7 @@ def fill_test_limit(ctx, step: dict, cmd: str) -> tuple[str, Any]:
     コンテナの宣言があるときは、テスト環境の用意の分として `timeout` だけへ起動の上限を足す（`--limit` は変えない）。"""
     from supervise_lib.verify_steps import with_margin
 
-    timeout = step.get("timeout", 3600)
+    timeout = step.get("timeout", limits.seconds("supervise.run-step"))
     m = TEST_LIMIT.search(cmd)
     if not m:
         return cmd, timeout
@@ -323,7 +331,7 @@ class JudgeStep:
             + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
             + f"\n## 規則\n{ctx.plan.get('規則', '（無し）')}\n\n## 結果\n{ctx.inputs_text(step)}"
         )
-        res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", 600))
+        res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", limits.seconds("supervise.judge-step")))
         ctx.claude.record_usage("judge", res)
         d = parse_decision(res["text"]) if res["ok"] else {"decision": "stop", "reason": res["text"][:200]}
         d["basis"] = project_mvv.basis(d.get("basis"), mvv, sprint=sprint)  # 返されなければ「根拠なし」か「MVV なし」（止めない）

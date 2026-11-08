@@ -196,7 +196,52 @@
 
 | 方針 | 値 | 何の上限か | 引く関数 |
 | --- | --- | --- | --- |
+| `auth.probe` | seconds 120 | 認証の確かめのコマンドの上限 | `plugins/ndf/scripts/lib/auth.py:<module>` |
+| `backlog-refinement.gh-limit` | per_call 900 / attempts 9 | 棚卸しの gh が上限に当たったときの 1 回の待ちの上限（per_call）と、打つ回数（最初の 1 回を含む） | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_gh.py:<module>` |
+| `backlog-refinement.hotspots-git` | seconds 120 | 変更の多いファイルを数える git log の上限 | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py:hotspots` |
+| `backlog-refinement.overhaul-command` | seconds 600 | 大整理の宣言のコマンドの上限 | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_overhaul.py:measure_code` |
+| `backlog-refinement.owner-lock` | seconds 5 | 棚卸しの持ち主の宣言の排他を待つ上限 | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_owner.py:<module>` |
+| `backlog-refinement.research-grace` | seconds 300 | 調べの項目が動かないとみなすまでの秒の既定（設定の research.grace で上書きする） | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py:_ticker.tick` |
+| `backlog-refinement.research-poll` | interval 30 | 棚卸しの調べの並列の空きを見回る間隔 | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py:<module>` |
+| `claude-account-dir.lock` | seconds 2 | .claude.json の排他の待ちの上限 | `plugins/ndf/scripts/lib/claude_account_dir.py:<module>` |
+| `claude-accounts.expiry-margin` | seconds 60 | 残りがこの秒数以下のアクセストークンは期限切れとみなす | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
+| `claude-accounts.lock` | seconds 30 | アカウントの置き場の排他を待つ上限 | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
+| `claude-accounts.refresh` | seconds 3 | トークンの更新の排他の中の宛先の待ちの上限（#1576 の決定 12） | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
+| `claude-training.call` | seconds 3 | claude の学習の設定を読み書きするコマンドの上限 | `plugins/ndf/scripts/lib/claude_training.py:<module>` |
+| `claude-training.keychain` | seconds 2 | キーチェーンを読むコマンドの上限 | `plugins/ndf/scripts/lib/claude_training.py:<module>` |
+| `claude-usage.http` | seconds 10 | 使用量の取得先への HTTP の上限 | `plugins/ndf/scripts/lib/claude_usage.py:<module>` |
+| `claude-usage.oauth-refresh` | seconds 30 | OAuth のトークンの更新の HTTP の上限 | `plugins/ndf/scripts/lib/claude_usage.py:refresh_oauth` |
+| `codex-training.budget` | seconds 7 | codex の学習の設定の確かめ全体の上限 | `plugins/ndf/scripts/lib/codex_training.py:<module>` |
+| `codex-training.call` | seconds 3 | codex の学習の設定を読み書きするコマンドの上限 | `plugins/ndf/scripts/lib/codex_training.py:<module>` |
+| `container-reach.exec` | seconds 60 | compose exec の上限。コンテナの中の cat 1 回で足りる | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
+| `container-reach.stop-grace` | seconds 5 | 打ち切った起動の、SIGTERM から SIGKILL までの猶予 | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
+| `container-reach.up` | seconds 300 | テスト環境の起動の上限。実測の最長 49 秒の 6 倍（#2567 の決定 3） | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
+| `context-decisions.git` | seconds 5 | worktree の根を調べる git の上限 | `plugins/ndf/scripts/lib/context_decisions.py:toplevel` |
+| `cross-refactoring.default-budget` | seconds 1800 | 想定最大時間の既定（分で引数に出す） | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py:<module>` |
+| `cross-refactoring.kill-grace` | seconds 5 | プロセスグループを止めるときの SIGTERM から SIGKILL までの猶予 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/measure.py:<module>`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/process.py:_kill_process_group` |
+| `cross-refactoring.resume-grace` | seconds 300 | 中断から再開するときに上限へ足す猶予 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/timeline.py:<module>` |
+| `cross-review.verify` | seconds 300 | 指摘の確かめのコマンドの上限 | `plugins/ndf/skills/cross-review/scripts/review_lib/commands/verify_findings.py:<module>` |
+| `delivery.cd-result` | seconds 1800 | CD の結果の待ちの上限。行の宣言が無いときの既定 | `plugins/ndf/scripts/lib/delivery.py:<module>` |
+| `delivery.cd-result-total` | seconds 7200 | CD の結果の 1 回の読み取りの合計の上限 | `plugins/ndf/scripts/lib/delivery.py:<module>` |
+| `durable.poll` | interval 0.2 | 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める） | `plugins/ndf/scripts/lib/durable.py:<module>` |
+| `durable.wait-from-poll` | interval 1 | 外から耐久ワークフローを待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/durable.py:wait_from` |
+| `gh-quota.max-wait` | seconds 3600 | GitHub の上限の回復を待つ上限 | `plugins/ndf/scripts/lib/gh_quota.py:<module>` |
+| `google-workspace.call` | seconds 120 | gws のコマンドの上限 | `plugins/ndf/skills/google-workspace/scripts/gws-check.py:<module>` |
+| `google-workspace.install` | seconds 600 | gws の導入（npm install）の上限 | `plugins/ndf/skills/google-workspace/scripts/gws-check.py:<module>` |
+| `google-workspace.thumbnails` | seconds 120 | スライドのサムネイルを取るコマンドの上限 | `plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py:<module>` |
+| `hook.ask-forward` | seconds 8 | AskUserQuestion の転送を待つ上限。hook の 10 秒の上限の中に収める | `plugins/ndf/scripts/hook_lib/ask_guard.py:<module>` |
+| `hook.deadline` | seconds 3.5 | hook の処理を打ち切る期限 | `plugins/ndf/scripts/hook_lib/deadline.py:<module>` |
+| `hook.deadline-margin` | seconds 1.5 | hook の期限の手前に残す余白 | `plugins/ndf/scripts/hook_lib/deadline.py:<module>` |
+| `hook.git-rev-parse` | seconds 5 | hook が worktree を調べる git rev-parse の上限 | `plugins/ndf/scripts/hook_lib/worktree.py:_git_lines` |
+| `hook.wait-notify-lock` | seconds 5 | 待ちの知らせの記録の排他を待つ上限 | `plugins/ndf/scripts/hook_lib/wait_notify.py:claim` |
+| `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
+| `jev.probe` | seconds 10 | JEV に届くかの確かめの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
+| `locks.append` | seconds 5 | 排他つきで 1 行足すときの錠の待ちの上限 | `plugins/ndf/scripts/lib/locks.py:append_locked` |
 | `merged.green-wait` | factor 1.5 | merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout | `plugins/ndf/scripts/merged_lib/checks.py:GreenWatch.wait` |
+| `merged.main-lock` | seconds 600 | メインディレクトリの排他を待つ上限。後片付け 1 件と pull は数十秒で終わる | `plugins/ndf/scripts/merged_lib/main_lock.py:<module>` |
+| `monitor-types.poll` | interval 15 | 監視の見回りの間隔（MONITOR_POLL で上書きできる） | `plugins/ndf/scripts/lib/monitor_types.py:<module>` |
+| `monitor-types.result-age-grace` | seconds 30 | 結果ファイルを書いた後もプロセスが残るとき、完了とみなすまでの秒 | `plugins/ndf/scripts/lib/monitor_types.py:<module>` |
+| `monitor-types.thread-join` | seconds 1 | 監視の読み取りのスレッドの終わりを待つ上限 | `plugins/ndf/scripts/lib/monitor_types.py:heartbeat` |
 | `monitor.cli-margin` | seconds 120 | CLI の上限 = 監視の上限 + この秒数。監視の 1 周期と停止の猶予より十分長くし、監視が止める前に CLI が打ち切らないようにする | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.add-tests` | seconds 3600 | cross-refactoring のテストの追加の工程の監視の上限の下限。駆動が予算から導いた上限を --timeout で渡す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.critique` | seconds 1200 | 批評の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
@@ -212,10 +257,53 @@
 | `monitor.stall.claude` | seconds 900 | claude の無進捗の許容。--output-format json は完了まで 1 バイトも出さない | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.stall.codex` | seconds 180 | codex の無進捗の許容。推論ログを逐次出す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.stall.kiro` | seconds 480 | kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `notify.slack` | seconds 10 | Slack へ送る HTTP の上限 | `plugins/ndf/scripts/lib/notify.py:<module>` |
+| `parallel-repo.stall` | seconds 3600 | 動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる） | `plugins/ndf/scripts/lib/parallel_repo.py:<module>` |
 | `post-queue.rate-limit` | seconds 900 / interval 30 / same_cause 31 | 上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒 | `plugins/ndf/scripts/lib/post_queue.py:retry`<br>`plugins/ndf/scripts/lib/post_queue.py:cmd_retry` |
 | `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |
 | `post-queue.transient-reflush` | seconds 300 / interval 30 / same_cause 11 | 一時的な失敗で残った投稿キューの流し直し。上限の再実行の合計を超えない | `plugins/ndf/scripts/lib/post_queue.py:reflush` |
+| `procs.stop-tree` | seconds 3 / interval 0.1 | プロセスの木を止めるときの SIGTERM から SIGKILL までの猶予と、終わりを見る間隔 | `plugins/ndf/scripts/lib/procs.py:stop_tree` |
+| `project.git` | seconds 60 | プロジェクトの指紋を取る git の上限 | `plugins/ndf/scripts/project_lib/fingerprint.py:_git_text` |
+| `refresh.http` | seconds 10 | トークンの更新の宛先への HTTP の上限 | `plugins/ndf/scripts/lib/refresh.py:<module>` |
+| `relay.bedrock` | seconds 60 | 従量の接続（Bedrock）を確かめるコマンドの上限 | `plugins/ndf/scripts/relay_lib/bedrock.py:<module>` |
+| `relay.claude-auth` | seconds 30 | claude auth の副命令の上限 | `plugins/ndf/scripts/relay_lib/login.py:_auth` |
+| `relay.handover-prepare` | seconds 600 | 引き継ぎの用意の上限 | `plugins/ndf/scripts/relay_lib/handover.py:<module>` |
+| `relay.hub-poll` | interval 0.5 | 中継の置き場の問い合わせの間隔 | `plugins/ndf/scripts/relay_lib/hub.py:<module>` |
+| `relay.login-exit` | seconds 60 | ログインの 2 回目が待機中のログインの終了を待つ上限 | `plugins/ndf/scripts/relay_lib/login.py:<module>` |
+| `relay.login-url` | seconds 30 | ログインの 1 回目が認可の URL を待つ上限 | `plugins/ndf/scripts/relay_lib/login.py:<module>` |
+| `relay.runtime-install` | seconds 600 | ラッパーの実行環境を用意するコマンドの上限 | `plugins/ndf/scripts/relay_lib/runtime.py:sync` |
+| `release-steps.head-moved` | attempts 4 | 先端が動いたときに比べ直して入れ直す回数（最初の 1 回を含む） | `plugins/ndf/scripts/release-steps.py:<module>` |
+| `release-verification-steps.env-i` | seconds 600 | リリース後テストの素の環境のコマンドの上限 | `plugins/ndf/scripts/release-verification-steps.py:run_env_i` |
+| `release.cd-poll` | interval 15 | CD の結果の照会の間隔（#2623。GitHub の実行の状態は秒単位で変わらない） | `plugins/ndf/scripts/release_lib/cd_result.py:<module>` |
+| `release.declared-step` | seconds 600 | 宣言したリリースの手順のコマンドの上限の既定 | `plugins/ndf/scripts/release_lib/declared_steps.py:<module>` |
+| `run-core.kill-grace` | seconds 5 | 実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予 | `plugins/ndf/scripts/lib/run_core.py:<module>` |
+| `sprint-close.issue-lock` | seconds 30 | 課題ごとの錠の待ち（body-lock の既定と同じ） | `plugins/ndf/scripts/sprint-close.py:<module>` |
+| `sprint-loop-record.lock` | seconds 60 | 開発ループの記録の排他を待つ上限 | `plugins/ndf/scripts/lib/sprint_loop_record.py:locked` |
+| `sprint-state.sprint-lock` | seconds 60 | スプリントの状態の排他を待つ上限 | `plugins/ndf/scripts/sprint-state.py:cmd_gate` |
+| `supervise.blind-stall` | seconds 7200 | 会話の記録を読めないときの無進捗の許容。進捗ログの行の間隔の実測の最大 6479 秒を上回る値（決定 7） | `plugins/ndf/scripts/supervise_lib/progress_watch.py:<module>` |
+| `supervise.claude-reap` | seconds 5 | 止めた claude の子の出力を回収する待ちの上限 | `plugins/ndf/scripts/supervise_lib/claude.py:kill_group` |
+| `supervise.condition` | seconds 900 | ステップの条件のコマンドの上限の既定 | `plugins/ndf/scripts/supervise_lib/steps.py:run_condition` |
+| `supervise.depth-work` | seconds 5400 | 見直し・大整理の work ステップの打ち切り。持ち主の見張りも同じ秒数で止まる | `plugins/ndf/scripts/supervise_lib/sprint_close_steps.py:<module>` |
+| `supervise.design-merge-gh` | seconds 120 | 設計の Pull Request のマージの gh の上限 | `plugins/ndf/scripts/supervise_lib/design_merge.py:_gh_out` |
 | `supervise.design-stage-read` | seconds 120 / interval 15 / per_call 30 / same_cause 3 | 設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち | `plugins/ndf/scripts/supervise_lib/design_stage.py:Budget.__init__`<br>`plugins/ndf/scripts/supervise_lib/design_stage.py:_retrying` |
+| `supervise.impl-stall` | seconds 1800 | 実装のステップの無進捗の許容の既定。実測の記録の間隔の最大 706 秒を十分に上回る値（#2505 の決定 7） | `plugins/ndf/scripts/supervise_lib/verify_steps.py:<module>` |
+| `supervise.judge-step` | seconds 600 | 判定役（judge）の呼び出しの上限。ステップの timeout で上書きする | `plugins/ndf/scripts/supervise_lib/pr.py:PrStep._llm_body`<br>`plugins/ndf/scripts/supervise_lib/steps.py:JudgeStep.execute` |
+| `supervise.limit-retry` | seconds 900 | claude の利用上限のリセット時刻が読めないときの待ち。計画の limit_retry_seconds で上書きする | `plugins/ndf/scripts/supervise_lib/claude.py:ClaudeRunner.call` |
+| `supervise.limit-wait-max` | seconds 10800 | claude の利用上限の待ちの最大。計画の limit_wait_max で上書きする | `plugins/ndf/scripts/supervise_lib/claude.py:ClaudeRunner.call` |
+| `supervise.parent-wait` | seconds 120 | 回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限 | `plugins/ndf/scripts/supervise_lib/flow.py:<module>` |
+| `supervise.pr-decisions` | seconds 120 | Pull Request の本文の決定の節を描くコマンドの上限 | `plugins/ndf/scripts/supervise_lib/pr.py:PrStep.with_decisions` |
+| `supervise.queue-poll` | interval 1 | queue が流しているプランを見回る間隔 | `plugins/ndf/scripts/supervise_lib/queue.py:<module>` |
+| `supervise.queue-wait-poll` | interval 5 | queue の終わりを待つ問い合わせの間隔 | `plugins/ndf/scripts/supervise_lib/queue.py:<module>` |
+| `supervise.report-interval` | seconds 600 | 最後の行から動きが無いときに「まだ動いている」を足すまでの秒。計画の report_interval で上書きする | `plugins/ndf/scripts/supervise_lib/state.py:<module>` |
+| `supervise.run-step` | seconds 3600 | run のステップの上限の既定。ステップの timeout で上書きする | `plugins/ndf/scripts/supervise_lib/steps.py:fill_test_limit` |
 | `supervise.step-rerun` | same_cause 2 | 判定役が返すステップの打ち直しの同じ原因の上限 | `plugins/ndf/scripts/supervise_lib/rerun.py:stop_reason` |
+| `supervise.transcript-grace` | seconds 60 | 起動からこの秒を過ぎても会話の記録が見つからなければ、読めないものとして扱う | `plugins/ndf/scripts/supervise_lib/progress_watch.py:<module>` |
+| `supervise.verify-margin-floor` | seconds 30 | 検査のステップの余裕の下限 | `plugins/ndf/scripts/supervise_lib/verify_steps.py:<module>` |
+| `supervise.worker-step` | seconds 1800 | worker のステップの上限の既定 | `plugins/ndf/scripts/supervise_lib/worker_steps.py:<module>` |
+| `supervise.worker-tick-grace` | seconds 120 | worker 自身の上限に、外側で打ち切るまで足す余裕 | `plugins/ndf/scripts/supervise_lib/worker_steps.py:<module>` |
 | `supervise.worktree-lock` | seconds 5 / interval 1 / attempts 6 / same_cause 6 | .git/config の lock で落ちた worktree の作成の打ち直し | `plugins/ndf/scripts/supervise_lib/paths.py:_add_worktree_with_retry` |
 | `test-triage.check-wait` | interval 10 / factor 1.5 / max_interval 120 | CI のチェックの結論の待ちの間隔。合計の秒は呼ぶ側が予算から渡す | `plugins/ndf/scripts/lib/test_triage.py:wait_check` |
+| `usage-aggregate.gh` | seconds 60 | 使用量の集計の gh の上限 | `plugins/ndf/scripts/lib/usage_aggregate.py:_gh` |
+| `usage-ledger.git` | seconds 10 | 使用量の台帳がリポジトリの URL を読む git の上限 | `plugins/ndf/scripts/lib/usage_ledger.py:repo_key` |
+| `wait-notify.gh` | seconds 5 | 待ちの知らせが読む gh の上限 | `plugins/ndf/scripts/wait-notify.py:<module>` |
+| `wait-notify.slack` | seconds 10 | 待ちの知らせが Slack へ送る HTTP の上限 | `plugins/ndf/scripts/wait-notify.py:<module>` |

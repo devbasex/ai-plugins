@@ -814,7 +814,9 @@ class Scope:
         self.targets = {_rel(root, t) for t in targets}
         allow_rel = _rel(root, str(allow_dir.resolve()))
         # 例外リストの置き場と、チェッカ自身とその部品（scripts/lib/）の変更は木全体の結果を変える
-        self.everything = under(SELF, self.targets) or under(allow_rel, self.targets) or any(under(t, (SHARED_LIB, RULES_LIB)) for t in self.targets)
+        self.everything = (
+            under(SELF, self.targets) or under(allow_rel, self.targets) or any(under(t, (SHARED_LIB, RULES_LIB)) for t in self.targets)
+        )
         self.allow_files = {Path(t).name for t in self.targets if t.startswith(allow_rel + "/")}
 
     def row(self, r: dict) -> bool:

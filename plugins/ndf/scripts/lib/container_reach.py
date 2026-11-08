@@ -40,17 +40,18 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+import limits
 import secret_redact
 import worktree_base
 
 TESTENV = Path(__file__).resolve().parent.parent / "worktree-testenv.sh"
 EVIDENCE = ".ndf-evidence"
-EXEC_TIMEOUT = 60  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
-UP_TIMEOUT = 300  # テスト環境の起動の上限（秒）。実測の最長 49 秒の 6 倍で、遅れの見張りの既定の下限と同じ（#2567 の決定 3）
+EXEC_TIMEOUT = limits.seconds("container-reach.exec")  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
+UP_TIMEOUT = limits.seconds("container-reach.up")
 # 回収の外の上限（秒）。`worktree-testenv.sh` の内側の 300 秒に、打ち切りの猶予 5 秒と worktree レジストリの排他の待ちを足した値で、
 # 回収の予約を持ち続ける上限（`lib/worktree-testenv-sweep.sh` の RECLAIM_HOLD）と同じである（#2660 の決定 7）
 RECLAIM_LIMIT = 330
-STOP_GRACE = 5  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
+STOP_GRACE = limits.seconds("container-reach.stop-grace")  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
 TAG_KEPT = 3  # `worktree-testenv.sh down` が基準のタグを消せず、破棄へ進まなかったときの終了コード
 TAIL_CHARS = 300  # 理由へ載せる標準エラーの末尾の文字数（伏せ字の後に数える）
 

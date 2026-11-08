@@ -37,6 +37,7 @@ LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
 
+import limits  # noqa: E402  上限の宣言（#2343）
 import step_result as sr  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -45,7 +46,7 @@ from gws_common import emit_stopped, output_tail  # noqa: E402
 TOOL = "slides-thumbnails"
 EXIT_UNAUTHENTICATED = sr.EXIT_GATE + 1
 SIZES = ("SMALL", "MEDIUM", "LARGE")
-TIMEOUT = 120
+TIMEOUT = limits.seconds("google-workspace.thumbnails")
 CURL = "curl"
 
 

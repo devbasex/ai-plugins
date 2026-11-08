@@ -712,7 +712,11 @@ def test_a_sleep_loop_outside_waits_fails_unless_allowed(tmp_path: Path):
 
 
 def test_a_sleep_only_in_a_nested_function_is_not_a_loop(tmp_path: Path):
-    put(tmp_path, "scripts/a.py", "import time\n\n\ndef f(xs):\n    for x in xs:\n        def g():\n            time.sleep(1)\n        x(g)\n")
+    put(
+        tmp_path,
+        "scripts/a.py",
+        "import time\n\n\ndef f(xs):\n    for x in xs:\n        def g():\n            time.sleep(1)\n        x(g)\n",
+    )
     assert run(tmp_path, [])[0] == 0
 
 

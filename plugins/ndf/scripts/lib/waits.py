@@ -81,7 +81,9 @@ class _Run:
     def waited(self, value, attempts: int, done: bool, error=None) -> Waited:
         if done:
             return Waited(value, attempts, self.elapsed(), True, error, "done", self.cause, self.counts.get(self.cause, 0))
-        return Waited(value, attempts, self.elapsed(), False, error, self.stop, self.cause, self.counts.get(self.cause, 0), self.reason(attempts))
+        return Waited(
+            value, attempts, self.elapsed(), False, error, self.stop, self.cause, self.counts.get(self.cause, 0), self.reason(attempts)
+        )
 
 
 def _key_of(rs: RetryCallState, reason: Optional[Callable[[Any], str]]) -> Optional[str]:

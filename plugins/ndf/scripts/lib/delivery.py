@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import limits
 import decl
 import project_decl
 import repo
@@ -42,7 +43,7 @@ SEPARATE_BRANCH = "separate-branch"  # 起点と本番チャネルが違う
 MANUAL_PRODUCTION = "manual-production"  # 起点と本番チャネルが同じで、本番系へ届く行がすべて手動（手動反映の本番系）
 
 # CD の結果の待ちの上限（秒）。行の宣言が無ければ DEFAULT_RESULT_TIMEOUT。1 回の読み取りの合計は RESULT_TOTAL_LIMIT で切る
-DEFAULT_RESULT_TIMEOUT, RESULT_TOTAL_LIMIT = 1800, 7200
+DEFAULT_RESULT_TIMEOUT, RESULT_TOTAL_LIMIT = limits.seconds("delivery.cd-result"), limits.seconds("delivery.cd-result-total")
 
 CD_SETUP_REF = "ndf の release の Skill の references/cd-setup.md"
 WT = f".ndf/{repo.WORKTREE_DECL.name}"

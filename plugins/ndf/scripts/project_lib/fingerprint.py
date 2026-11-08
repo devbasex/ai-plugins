@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 from project_lib import WORKTREE_FILE
+import limits
 
 WORKFLOWS = ".github/workflows/*"
 # 根と 1 段下のファイル名で当てる表
@@ -49,7 +50,7 @@ KNOWN_BRANCHES = ("main", "master", "develop")
 
 def _git_text(root, *args) -> str | None:
     try:
-        p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=60)
+        p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=limits.seconds("project.git"))
     except (OSError, subprocess.TimeoutExpired):
         return None
     return p.stdout if p.returncode == 0 else None

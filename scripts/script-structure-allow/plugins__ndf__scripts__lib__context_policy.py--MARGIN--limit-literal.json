@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/context_policy.py", "name": "MARGIN", "kind": "limit-literal", "reason": "#2343 の決定 4。上限でない数字: 文脈の容量の余白（token の量）で、秒・回数・間隔でない"}

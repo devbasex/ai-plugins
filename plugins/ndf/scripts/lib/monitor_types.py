@@ -43,13 +43,13 @@ def _agent_runtime(agent: str) -> str:
 DEFAULT_TIMEOUT = limits.phases()[limits.DEFAULT_PHASE]
 DEFAULT_STALL = limits.stall_default()
 DEFAULT_STALL_AGENT_BUILTIN = limits.stalls()
-DEFAULT_POLL = 15  # 15 sec — env `MONITOR_POLL` で上書き可
+DEFAULT_POLL = limits.value("monitor-types.poll", "interval")  # 15 sec — env `MONITOR_POLL` で上書き可
 # 心拍の間隔（秒）。待つ側が心拍のファイルの更新時刻を今にする間隔で、見回りの間隔（`DEFAULT_POLL` / `MONITOR_POLL`）とは
 # 別の定数である（cross-refactoring の #1743 決定 3）。`monitor.py` と cross-refactoring の `process.py` がここから読む。
 HEARTBEAT_SECONDS = 15
 # result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
-RESULT_AGE_GRACE = 30
+RESULT_AGE_GRACE = limits.seconds("monitor-types.result-age-grace")
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
     "1",
@@ -229,4 +229,4 @@ def heartbeat(path: "Optional[os.PathLike[str] | str]"):
         yield
     finally:
         stop.set()
-        thread.join(timeout=1.0)
+        thread.join(timeout=limits.seconds("monitor-types.thread-join"))

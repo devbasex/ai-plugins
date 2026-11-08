@@ -190,7 +190,9 @@ class GreenWatch:
     def wait(self):
         """終わるまで読み直す。読んだ中身（先頭のコミットとチェックの状態）が変わらない間は、間隔を 1.5 倍ずつ
         --interval の 6 倍まで伸ばす。"""
-        policy = limits.policy("merged.green-wait")._replace(seconds=float("inf"), interval=self.a.interval, max_interval=self.a.interval * 6)
+        policy = limits.policy("merged.green-wait")._replace(
+            seconds=float("inf"), interval=self.a.interval, max_interval=self.a.interval * 6
+        )
         waits.wait_until(self.poll, lambda v: v[0] == "done", policy=policy, sleep=self.sleep)
 
     def sleep(self, gap):

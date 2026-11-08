@@ -546,7 +546,9 @@ class Queue:
     def _run(self, fl: dict[str, Any], func: Any, name: str, n: int, *args: Any) -> dict[str, Any]:
         wid = f"post-{name}-a{n}"
         fl["durable"].start(fl["durable"].WorkflowRef(wid, n, "start"), func, *args)
-        if (got := fl["durable"].wait(wid, poll=limits.value("post-queue.sync-wait", "interval"))).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
+        if (
+            got := fl["durable"].wait(wid, poll=limits.value("post-queue.sync-wait", "interval"))
+        ).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
             raise fl["durable"].DurableError(f"{wid} が終わらなかった: {got.value}")
         return got.value
 

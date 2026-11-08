@@ -20,6 +20,7 @@ import parallel_hold
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
+import limits
 from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
@@ -113,10 +114,11 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
 
 NOT_RUN = "流さなかった"
 NO_REPORT = "報告なし"
+QUEUE_POLL, WAIT_POLL = limits.value("supervise.queue-poll", "interval"), limits.value("supervise.queue-wait-poll", "interval")
 
 
 def cmd_queue(
-    plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None, starts=None, rerun=None
+    plans: list[str], max_: int, poll: float = QUEUE_POLL, then: list | None = None, done: str | None = None, starts=None, rerun=None
 ) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
@@ -384,7 +386,7 @@ def _park_line(held: dict, done_path: Path) -> str:
 WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
 
 
-def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
+def cmd_wait(done: str, timeout: float, poll: float = WAIT_POLL, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
     """queue の終わり（done）か、queue が流す計画の attention の行まで待つ。(要約, 結果, 終了コード) を返す。
 
     計画の一覧と読み始める所は queue が done の隣に書いた <done>.plans.json から読む。知らせた attention の

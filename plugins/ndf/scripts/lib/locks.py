@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+import limits
 from filelock import FileLock, Timeout
 
 
@@ -63,7 +64,7 @@ def try_exclusive(target: os.PathLike[str] | str) -> FileLock | None:
     return lock
 
 
-def append_locked(target: os.PathLike[str] | str, line: str, timeout: float | None = 5.0) -> None:
+def append_locked(target: os.PathLike[str] | str, line: str, timeout: float | None = limits.seconds("locks.append")) -> None:
     """排他を取って 1 行を末尾へ足す（改行は無ければ付ける）。並列に書く記録（jsonl）に使う。"""
     data = (line if line.endswith("\n") else line + "\n").encode("utf-8")
     with exclusive(target, timeout=timeout):

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import ast
+import operator
 import re
 
 LIB = "plugins/ndf/scripts/"
@@ -27,9 +28,23 @@ LIMITS_READER = LIB + "lib/limits.py"
 WAITS = LIB + "lib/waits.py"
 NAME_WORDS = ("TIMEOUT", "RETRY", "RETRIES", "WAIT", "INTERVAL", "BUDGET", "DEADLINE", "POLL", "STALL", "MARGIN", "GRACE", "ATTEMPTS")
 KEYS = frozenset(
-    ("timeout", "max_wait", "interval", "max_interval", "wait", "deadline", "retries", "attempts", "grace", "per_call", "poll", "stall_timeout")
+    (
+        "timeout",
+        "max_wait",
+        "interval",
+        "max_interval",
+        "wait",
+        "deadline",
+        "retries",
+        "attempts",
+        "grace",
+        "per_call",
+        "poll",
+        "stall_timeout",
+    )
 )
 _CONST = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_OPS = {ast.Mult: operator.mul, ast.Add: operator.add, ast.Sub: operator.sub, ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv}
 
 
 def applies(rel: str) -> bool:
@@ -44,14 +59,11 @@ def _number(node: ast.AST | None) -> float | None:
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _number(node.operand)
         return None if v is None else (-v if isinstance(node.op, ast.USub) else v)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Add, ast.Sub, ast.Div, ast.FloorDiv)):
+    if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
         a, b = _number(node.left), _number(node.right)
-        if a is None or b is None:
+        if a is None or b is None or (b == 0 and isinstance(node.op, (ast.Div, ast.FloorDiv))):
             return None
-        try:
-            return {ast.Mult: a * b, ast.Add: a + b, ast.Sub: a - b}.get(type(node.op)) if not isinstance(node.op, (ast.Div, ast.FloorDiv)) else a / b
-        except ZeroDivisionError:
-            return None
+        return _OPS[type(node.op)](a, b)
     return None
 
 
