@@ -122,7 +122,7 @@ def run_release(
         created.append((base, head))
         return {("trunk", f"release/v{VER}"): 1, ("live", f"release/v{VER}"): 2, ("trunk", SYNC): 3}[(base, head)]
 
-    def wait_and_merge(r, n, expect=None, ci_wait=3600.0):
+    def wait_and_merge(r, n, expect=None, ci_wait=3600.0, gate_approved=None):
         merged.append((n, expect))
         if n in (1, 3):
             git(other, "fetch", "-q", "origin")

@@ -9,7 +9,7 @@
 
 1. 手順 0 で `project-mvv.py check` が終了コード 2（「プロジェクト MVV が無い」）を返す。LLM も `gh` も呼ばず、何も書かない
 2. `project-mvv.py collect` がコミット 3787 件・課題 574 件で履歴モードを選び、出典つきの材料 `materials.json` を
-   リポジトリの外（`~/.local/state/ndf/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
+   リポジトリの外（`~/.claude/ndf/state/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
 3. `project-mvv.py propose --materials <materials.json>` が候補 A・B と「利用者に決めてもらう点」を `candidates.md` に書く
 4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で問い、答えから本文を固める。
    ai-plugins では利用者が承認した `issues/mvv-ai-plugins.md` の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
@@ -144,9 +144,9 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 | 兆候 | 記録 | 書き手 |
 | --- | --- | --- |
-| 覆し（承認ゲートで「従う」を退けた `override_reject`・「反する疑い」か「判定できない」を通した `override_pass`） | `~/.local/state/ndf/project-mvv-signals.jsonl` | `sprint-state.py gate <状態> <承認ゲート> --what <要約> --by user [--pr N] [--outcome approved\|rejected]`（直前の MVV 判定と食い違うときだけ 1 行。`--pr` を渡せばその PR の判定と比べる。助言の MVV 判定も同じ） |
+| 覆し（承認ゲートで「従う」を退けた `override_reject`・「反する疑い」か「判定できない」を通した `override_pass`） | `~/.claude/ndf/state/project-mvv-signals.jsonl` | `sprint-state.py gate <状態> <承認ゲート> --what <要約> --by user [--pr N] [--outcome approved\|rejected]`（直前の MVV 判定と食い違うときだけ 1 行。`--pr` を渡せばその PR の判定と比べる。助言の MVV 判定も同じ） |
 | 「判定できない」 | `mvv-gate.jsonl`（`pace` で進め方を分けられる。集計は分けずに数える） | `mvv-gate.py` |
 | 流出不具合 | 検査の記録の `kind: escape` | `check-trigger.py escape` |
 
 `project-mvv.py signals` は現行の版の承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
-流出不具合 3）と比べる。照合の履歴は `~/.local/state/ndf/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。
+流出不具合 3）と比べる。照合の履歴は `~/.claude/ndf/state/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。

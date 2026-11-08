@@ -350,6 +350,19 @@ def request_gate1(
     return rid
 
 
+def send_prior(main: Path, name: str, msg: dict) -> None:
+    """前のループの待ちの依頼（`kind: gate1` と `loop`）を送る。id は行から決まり、同じ行の打ち直しは 1 つにまとまる。"""
+    _send_inbox(main, name, msg, msg["id"])
+
+
+def send_unmatched(main: Path, name: str, lane: str, answered: str, reason: str) -> None:
+    """当たらなかった答えの知らせ（`kind: unmatched`）を送る。"""
+    rid = f"{answered}-unmatched"
+    text = f"依頼 {answered} への答えを当てられなかった: {reason}"
+    msg = {"kind": "unmatched", "id": rid, "answered": answered, "lane": lane, "reason": reason, "question": text, "options": ["確かめた"]}
+    _send_inbox(main, name, {**msg, "at": pe.utc_stamp()}, rid)
+
+
 def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
     """一時レーンが提示のプランのリリース承認ゲートで止まったときの依頼（`kind: gate2`）。id は `<計画名>-p<連番>-<提示>`、
     stamp は提示したコミット（`presented.json`）。"""
@@ -385,6 +398,11 @@ def send_answer(
         "merge": merge, "by": by, "at": pe.utc_stamp(),
     }  # fmt: skip
     _send_inbox(main, name, msg, f"answer:{rid}")
+
+
+def send_left_stopped(main: Path, name: str, lane: str) -> None:
+    """人が止めたままにするレーンを耐久ワークフローへ知らせる（`parallel.py park --clear`）。次の停止で打った分も届くよう、鍵に時刻を入れる。"""
+    _send_inbox(main, name, {"kind": "left_stopped", "lane": lane}, f"left-stopped:{lane}:{time.time_ns()}")
 
 
 def requests_for(main: Path, name: str) -> list[dict]:

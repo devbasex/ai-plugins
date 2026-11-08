@@ -20,7 +20,11 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine  # noqa: E402
 
-FAKE_CLAUDE = r"""
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+FAKE_CLAUDE = (
+    r"""
 import json, os, sys, time
 prompt = sys.stdin.read()
 log = os.environ["FAKE_CLAUDE_LOG"]
@@ -41,8 +45,13 @@ if counter and not os.path.exists(counter):
     print(json.dumps({"result": "Claude AI usage limit reached|%d" % int(time.time()), "is_error": True}))
     sys.exit(1)
 time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
-print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}))
+text = "## 作業の報告\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET
+    + r"""
+print(json.dumps({"result": text, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}))
+"""
+)
 
 PROBE = r"""
 import json, sys
@@ -139,9 +148,10 @@ def judge_plan(env, decision, monkeypatch, cmd="sleep 3", **step):
 
 
 def test_judge_stop_stops_plan_with_reason(env, monkeypatch):
+    # 打ち切らなければ 30 秒かかる。上限をコマンドの長さで取り、負荷で起動が遅れても落ちないようにする
     started = time.time()
-    s, text = judge_plan(env, "stop", monkeypatch)
-    assert time.time() - started < 2.5
+    s, text = judge_plan(env, "stop", monkeypatch, cmd="sleep 30")
+    assert time.time() - started < 30
     assert "結果: 止まった" in text and "遅れ: 理由の目印 stop" in text
     slow = lines(env, "slow")[-1]
     assert (slow["by"], slow["act"], slow["llm"]["reason"]) == ("llm", "stop", "理由の目印 stop")

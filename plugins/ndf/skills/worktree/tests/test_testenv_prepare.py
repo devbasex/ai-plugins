@@ -259,14 +259,14 @@ def test_a_wake_over_the_limit_stops_and_is_not_retried(
 ) -> None:
     declare(main_repo, {})
     monkeypatch.setenv("FAKE_UP_SLEEP", "30")
-    monkeypatch.setattr(container_reach, "UP_TIMEOUT", 1)
+    monkeypatch.setattr(container_reach, "UP_TIMEOUT", 4)
 
     with pytest.raises(container_reach.Unreachable) as first:
         container_reach.env_for(worktree)
     with pytest.raises(container_reach.Unreachable) as second:
         container_reach.env_for(worktree)
 
-    assert "1 秒で終わらなかった" in first.value.reason and second.value is first.value
+    assert "4 秒で終わらなかった" in first.value.reason and second.value is first.value
     assert len(ups(fake)) == 1
 
 

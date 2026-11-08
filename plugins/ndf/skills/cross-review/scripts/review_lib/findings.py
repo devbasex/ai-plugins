@@ -6,7 +6,6 @@ from typing import Any
 
 import review_lib  # noqa: E402
 import body_findings  # noqa: E402
-from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
 from review_lib import github  # noqa: E402
 
 
@@ -170,22 +169,6 @@ def _apply_classification(finding: dict[str, Any]) -> str:
         reasons = [str(c.get("reason") or "") for c in finding.get("critiques") or [] if c.get("verdict") == "refute"]
         finding["rejection_reason"] = "refute: " + " / ".join(f"{a}: {r}" for a, r in zip(agents, reasons))
     return classification
-
-
-def _counted_finding_ids(st: dict[str, Any], round_no: int) -> list[str]:
-    """新規性が数える指摘の `finding_id`（#156）。
-
-    **数えるのは `verified_blocking` と `needs_human_judgment` と `unrefuted` の 3 つ
-    である。** 棄却した指摘を数えると、そのぶんラウンドが増える（#69 で同じ論点が
-    5 ラウンド続いた事象）。いずれも `major` 以上で、修正の工程へ渡る。
-    """
-    ids: list[str] = []
-    for finding in st.get("review_findings") or []:
-        if finding.get("round") != round_no or finding.get("merged_into"):
-            continue
-        if _apply_classification(finding) in COUNTED_CLASSIFICATIONS:
-            ids.append(str(finding.get("finding_id")))
-    return ids
 
 
 def _absorb(rep: dict[str, Any], other: dict[str, Any]) -> None:

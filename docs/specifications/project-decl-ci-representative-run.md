@@ -120,7 +120,7 @@
 | 関数 | 契約 |
 | --- | --- |
 | `_carry_walls(cur, new)` → `(new', rows)` | 前の値と新しい値がどちらも不明でない `ci` のとき、新しい値の `wall_seconds` の無い行に、前の値の同じ `path` の行の `wall_seconds` を引き継ぐ。引き継いだ行ごとに `{"kind": "unknown", "key": "ci#<パス>", "reason": "新しい解析に壁時計が無い", "kept_previous": true}` を返す。前の値の行に `wall_seconds` が無ければ何もしない。純粋な関数 |
-| `merge_item(key, ...)` | 前の値が解析の値（`analysis.written` の指紋が一致）で、新しい値が不明でないときだけ、キーが `ci` なら `_carry_walls` を通す。手の値・新しい値が不明の分岐は変更の前と同じ |
+| `merge_item(key, ...)` | 前の値が解析の値（`analysis.written` の指紋が一致）で、新しい値が不明でないときだけ、キーが `ci` なら `_carry_walls` を通し、`delivery` なら同じ `target` の行の利用者の欄（`manual_reason`・`result`・`publishes_release`）を `_carry_delivery` で引き継ぐ。手の値・新しい値が不明の分岐は変更の前と同じ |
 
 出力の行のキー `ci#<パス>` は、`#` の前で項目（P4）に分類される。
 

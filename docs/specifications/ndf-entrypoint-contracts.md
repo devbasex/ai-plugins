@@ -315,6 +315,40 @@ suite を 1 つ組んで渡す（#2011）。`test.no_reports`（pytest のプラ
 `callers` の各ファイルがエントリポイントの名前を含むかを見る（I8）。呼び手の無い関数の棚卸しは `uvx vulture` で
 1 回だけ行う。CI の常設の検査にしないのは、動的な呼び出しの誤検出が多く、例外の項目が増えるためである。
 
+棚卸しは次のコマンドで行う（vulture 2.16 で確かめた。版で結果が変わりうる）。対象は `plugins/ndf/scripts` と
+`plugins/ndf/skills/*/scripts` の下の `.py` で、テストと実験版を除く。呼び手はテストを除いて数え、テストだけが呼ぶ関数は
+呼び手 0 として、その関数だけを確かめるテストと一緒に消す。
+
+```bash
+uvx vulture plugins/ndf/scripts plugins/ndf/skills/*/scripts scripts/ndf-vulture-keep.txt \
+  --exclude '*/tests/*,*/experimental/*' --min-confidence 60 | grep -E 'unused (function|method)'
+```
+
+出力が 0 行なら、呼び手の無い関数は無い。呼び手が vulture に見えない関数は、残す関数の一覧
+[`scripts/ndf-vulture-keep.txt`](../../scripts/ndf-vulture-keep.txt) に 1 行ずつ載せる。行の形は
+`<名前の式>  # <理由の種類>: <理由の本文>（<定義のあるファイル>）` で、名前の式は関数なら名前、メソッドなら `_.<名前>`
+（`vulture --make-whitelist` の形）である。拡張子が `.txt` なのは、`.py` にすると lint が名前の行を未定義の名前（F821）として
+落とすためである。
+
+| 理由の種類 | 当たる呼ばれ方 |
+| --- | --- |
+| 名前で呼ばれる | `getattr`・`globals()`・名前の辞書で関数を引く |
+| 枠組みが呼ぶ | ライブラリ（urllib・pydantic など）が上書きのメソッドや検証の関数を呼ぶ |
+| 範囲の外から呼ばれる | 棚卸しの対象の外（リポジトリ直下の `scripts/` など）が import して呼ぶ |
+| テストの基盤が呼ぶ | `conftest.py` や、確定仕様が定める契約の検査が呼ぶ |
+| 利用者が手で打つ | 利用者が直に打つ入口 |
+| 呼び手を確かめられない | 名前の検索で呼び出しの形かを決められない |
+
+当たらない呼ばれ方が見つかったら、種類を足してこの表を直す。一覧の古い行は、同じ名前の呼び手の無い関数を棚卸しから隠す。
+棚卸しのたびに、行の括弧のファイルにその名前の `def` があるかを確かめ、無い行を消す。
+
+```bash
+grep -v '^#' scripts/ndf-vulture-keep.txt | while read -r line; do
+  n=$(echo "$line" | sed -E 's/^(_\.)?([A-Za-z0-9_]+).*/\2/'); f=$(echo "$line" | sed -E 's/.*（([^（）]+)）$/\1/')
+  grep -qE "def $n\(" "$f" || echo "古い行: $n（$f）"
+done
+```
+
 ## データ・設定
 
 | 設定 | 中身 |

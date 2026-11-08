@@ -1,4 +1,4 @@
-"""モデル指定の解析・フラグ生成・実測値の突き合わせ（収束ループ共通層）。
+"""モデル指定の解析・実測値の突き合わせ（収束ループ共通層）。
 
 「どのランタイムのどのモデルが優れているか」を測るために、**指定値を固定し、
 実際に動いたモデルを可能な限り記録する**。指定値は初期化時に確定して以後変えない
@@ -20,15 +20,6 @@ from typing import Any, Iterable, Optional
 
 import clock
 from assignment import ALL_RUNTIMES
-
-# モデルを渡すフラグ。4 CLI すべてで実在を確認済み
-# （codex は `-m` の別名も持つが、長い方で統一する）。
-MODEL_FLAGS: dict[str, str] = {
-    "claude": "--model",
-    "codex": "--model",
-    "agy": "--model",
-    "kiro": "--model",
-}
 
 # 既定モデルで走ったラウンドを報告で区別するための表示名。
 DEFAULT_MODEL_LABEL = "default"
@@ -100,16 +91,6 @@ def parse_model_args(pairs: Optional[Iterable[str]]) -> dict[str, Optional[str]]
     return parsed
 
 
-def model_flag(runtime: str, model: Optional[str]) -> list[str]:
-    """CLI へ渡すモデル指定フラグ。未指定なら空リスト（CLI の既定へ委ねる）。"""
-    if not model:
-        return []
-    flag = MODEL_FLAGS.get(runtime)
-    if flag is None:
-        raise ModelSpecError(f"モデル指定に対応していないランタイムです: {runtime}")
-    return [flag, model]
-
-
 def label(model: Optional[str]) -> str:
     """報告で使う表示名。既定モデルで走ったラウンドを区別できるようにする。"""
     return model or DEFAULT_MODEL_LABEL
@@ -147,24 +128,6 @@ def foreseen_separation(runtime: str, model: Optional[str]) -> Optional[str]:
     if runtime in OBSERVABLE_RUNTIMES:
         return None
     return separation_reason(runtime, model)
-
-
-def assumption_note(runtime: str, model: Optional[str], observed: Optional[str] = None) -> Optional[str]:
-    """指定値で代用したことを報告へ残す注記。代用でないなら `None`。
-
-    分離ではない。指定があれば何を渡したかは分かるため集計へ入れるが、
-    実測で裏付けたわけではないことを読み手が知る必要がある。
-    """
-    if observed or not model:
-        return None
-    if separation_reason(runtime, model, observed):
-        return None
-    return f"{runtime} は指定した {model} で動いた前提で数える（実測不可）"
-
-
-def is_measurable(runtime: str, model: Optional[str], observed: Optional[str] = None) -> bool:
-    """その実行を計測に使えるか。分離の理由が無いことと同じである。"""
-    return separation_reason(runtime, model, observed) is None
 
 
 _CLAUDE_MODEL_USAGE = re.compile(r'"modelUsage"\s*:\s*\{')
@@ -358,7 +321,7 @@ def mismatch_warning(runtime: str, requested: Optional[str], observed: Optional[
     """指定値と実測値の食い違いを警告文にする。食い違いが無ければ `None`。
 
     実測値が無ければ常に `None` になる。「取れない」ことと「一致した」ことを
-    混同しないよう、呼び出し側は分離を `is_measurable()` で別に区別する。
+    混同しないよう、呼び出し側は分離を `separation_reason()` で別に区別する。
     """
     if not observed or not requested:
         return None

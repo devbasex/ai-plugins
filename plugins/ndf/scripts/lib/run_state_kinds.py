@@ -75,7 +75,7 @@ KINDS: tuple[Kind, ...] = (
     ),
     Kind(
         "relay-hub-request",
-        "${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/requests/<id>.json と results/<id>.json（0700 のディレクトリ・0600 のファイル）",
+        "<状態の根（lib/state_home.py）>/relay/hub/requests/<id>.json と results/<id>.json（0700 のディレクトリ・0600 のファイル）",
         "依頼は頼む側（relay.py の run・spawn・restart・Stop hook の起動のブロック）、結果は統括役（#2346）",
         "依頼は統括役が受け取った時点で消す。結果は頼む側が読んで消し、読まれずに 10 分を過ぎたものは次の統括役が消す",
         "統括役の受け取り・統括役の起動の直後",

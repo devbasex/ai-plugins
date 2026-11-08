@@ -67,6 +67,21 @@ def _carry_walls(cur: Any, new: Any) -> tuple[Any, list[dict]]:
     return ({**new, "workflows": workflows} if rows else new), rows
 
 
+DELIVERY_KEPT = ("manual_reason", "result", "publishes_release")  # 利用者が書く欄。解析の答えに無ければ残す（#2623 の I6）
+
+
+def _carry_delivery(cur: Any, new: Any) -> Any:
+    """`delivery` の新しい値で、前の値の同じ `target` の行にある利用者の欄を引き継ぐ。"""
+    if not isinstance(cur, list) or not isinstance(new, list):
+        return new
+    before = {r.get("target"): r for r in cur if isinstance(r, dict)}
+    out = []
+    for row in new:
+        old = before.get(row.get("target")) if isinstance(row, dict) else None
+        out.append({**{k: old[k] for k in DELIVERY_KEPT if k in old and k not in row}, **row} if old else row)
+    return out
+
+
 def merge_item(key: str, cur: Any, has_cur: bool, new: Any, origin: str, written: dict) -> tuple[Any, list[dict], bool]:
     """1 項目を決める。返すのは (書く値, 出力の行, 解析の値か)。解析の値なら呼ぶ側が `written` に指紋を持つ。"""
     if has_cur and has_secret(cur):
@@ -92,6 +107,8 @@ def merge_item(key: str, cur: Any, has_cur: bool, new: Any, origin: str, written
     if key == "ci":
         new, carried = _carry_walls(cur, new)
         rows += carried
+    if key == "delivery":
+        new = _carry_delivery(cur, new)
     return new, rows + [put(new)], True
 
 

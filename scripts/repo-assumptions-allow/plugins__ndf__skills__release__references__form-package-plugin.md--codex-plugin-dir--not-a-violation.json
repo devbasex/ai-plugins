@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/release/references/form-package-plugin.md",
+  "name": "codex-plugin-dir",
+  "kind": "not-a-violation",
+  "reason": "リリースの形がプラグインのときだけ読む参照。形で分岐済み",
+  "count": 1
+}

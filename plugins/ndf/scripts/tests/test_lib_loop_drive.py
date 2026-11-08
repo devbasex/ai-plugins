@@ -153,3 +153,44 @@ def test_both_drives_share_the_finished_comparison(path):
     assert drive.keep_finished_output is loop_drive.keep_finished_output
     assert drive.result_args is loop_drive.result_args
     assert drive.PLACE_ARGS
+
+
+def _git_repo(path: Path) -> Path:
+    import subprocess
+
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    return path.resolve()
+
+
+def test_anchor_repo_cwd_moves_to_oldpwd_when_outside_work_tree(tmp_path, monkeypatch):
+    """Skill のディレクトリ（作業ツリーの外）へ cd してから打っても、cd する前のリポジトリで続ける。"""
+    repo = _git_repo(tmp_path / "repo")
+    outside = tmp_path / "skill"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    monkeypatch.setenv("OLDPWD", str(repo))
+    assert loop_drive.anchor_repo_cwd() == str(repo)
+    assert Path.cwd().resolve() == repo
+
+
+def test_anchor_repo_cwd_stays_inside_work_tree(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("OLDPWD", str(tmp_path))
+    assert loop_drive.anchor_repo_cwd() is None
+    assert Path.cwd().resolve() == repo
+
+
+@pytest.mark.parametrize("oldpwd", [None, "outside", "missing"])
+def test_anchor_repo_cwd_does_nothing_without_repo_to_return_to(tmp_path, monkeypatch, capsys, oldpwd):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    if oldpwd is None:
+        monkeypatch.delenv("OLDPWD", raising=False)
+    else:
+        monkeypatch.setenv("OLDPWD", str(tmp_path / oldpwd))
+    assert loop_drive.anchor_repo_cwd() is None
+    assert Path.cwd().resolve() == outside.resolve()
+    assert "作業ツリーの外" in capsys.readouterr().err

@@ -26,10 +26,9 @@ from supervise_lib.claude import TICK, watch_children
 STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
 USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output"))
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
-# worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
-PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
-PROGRESS_GATE = re.compile(r"承認ゲート|関門|承認が要る|承認を待つ")  # 関門: 旧い版の worker が書いた行
-PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
+# worker の途中の報告の state と、conductor へ知らせる理由（文の語は読まない。#2337 の I12）。state が無い行は working
+PROGRESS_ATTENTION = {"gate": "関門", "stopped": "止まった", "failing": "同じ失敗の繰り返し"}
+REPEAT_LIMIT = 3  # 同じ文がこの回数続いたら止まりとして知らせる
 DICT_LISTS = ("gates", "process", "slow_events", "attention_log")  # ステップをまたいで積むオブジェクトの列（snapshot / replay）
 STAGES_AFTER_OK = ("リリース後テスト",)  # 印を ok の後に付ける工程（工程表の行名）。記録より先に付けない（#2288 の決定 1）
 
@@ -167,17 +166,13 @@ class RunState:
         self.attention_log.append(rec)
         self.progress_write({"kind": "attention", **rec})
 
-    def classify_worker(self, text: str) -> None:
-        """worker の 1 行を語と繰り返しで分け、conductor の判断が要るものだけを attention にする。"""
+    def classify_worker(self, text: str, state: str = "working") -> None:
+        """worker の 1 行を state と同じ文の繰り返しだけで分け、conductor の判断が要るものだけを attention にする。"""
         norm = re.sub(r"(?<![#\d])\d+", "N", text.strip())  # 件数や秒は畳み、課題番号（#906）は残す
         n = self.worker_counts[norm] = self.worker_counts.get(norm, 0) + 1
-        if PROGRESS_GATE.search(text):
-            self.attention("関門", text)
-        elif PROGRESS_STOP.search(text):
-            self.attention("止まった", text)
-        elif PROGRESS_FAIL.search(text) and n >= 2:
-            self.attention("同じ失敗の繰り返し", text)
-        elif n >= 3:
+        if state in PROGRESS_ATTENTION:
+            self.attention(PROGRESS_ATTENTION[state], text)
+        elif n >= REPEAT_LIMIT:
             self.attention("止まった（同じ報告の繰り返し）", text)
 
     def read_worker_lines(self) -> None:
@@ -211,7 +206,7 @@ class RunState:
             self.worker_last = d["text"].strip()[:300]
             self.worker_last_at = time.time()
             self.worker_recent = (self.worker_recent + [self.worker_last])[-5:]
-            self.classify_worker(self.worker_last)
+            self.classify_worker(self.worker_last, str(d.get("state") or "working"))
 
     def run_last_output(self) -> str | None:
         """run のステップが stderr へ書いた最後の空でない行（run のステップの待ちの間だけ）。"""

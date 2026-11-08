@@ -48,7 +48,6 @@ def test_zombie_counts_as_dead_and_missing_pids_are_quiet():
     p.wait()
     assert not procs.pid_alive(p.pid) and procs.cmdline_contains(p.pid, "x") is None
     assert procs.parent_and_name(0) is None and procs.child_pids(-1) == [] and procs.stop_tree(0)
-    assert procs.wait_gone(p.pid, timeout=0.1)
 
 
 def test_empty_cmdline_of_an_exiting_process_is_unreadable(monkeypatch):

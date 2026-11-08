@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/pr_mode.py",
+  "name": "quoted-develop",
+  "kind": "not-a-violation",
+  "reason": "Pull Request の宛先の区分の名前。ブランチ名として使っていない",
+  "count": 1
+}

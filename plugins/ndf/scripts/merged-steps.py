@@ -55,18 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("waits", "durable", "md", "procs", "locks")
-from step_result import (
-    StepError,
-    approval_present,
-    common_parser,
-    emit,
-    git,  # noqa: E402
-    git_root,
-    main_with,
-    repo_slug,
-    result,
-    run,
-)
+from step_result import StepError, approval_present, common_parser, emit, git, git_root, main_with, repo_slug, result, run  # noqa: E402
 import container_reach  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
@@ -78,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.cleanup_metrics import cleanup_metrics as _cleanup_metrics  # noqa: E402
 from merged_lib.main_lock import main_dir_lock  # noqa: E402
 from merged_lib.pr_info import merged_pr_info  # noqa: E402
 from merged_lib.probe_table import PROBE_ACTIONS, PROBE_CLASSES, PROBE_REMEDIED_SUMMARY, PROBE_TABLE  # noqa: E402
@@ -243,42 +233,35 @@ def _update_main_dir(main_dir, add):
     return None
 
 
+def _force_delete_gate(prs, need_force, summary, items, metrics):
+    """未マージのブランチの削除の承認資料を作り、gate の結果を返す。"""
+    names = [i["name"] for i in need_force]
+    path = approval_present(
+        TOOL,
+        "-".join(str(n) for n in prs),
+        title="未マージのコミットを持つブランチの削除",
+        targets=[{"url": f"{i['name']}（{i['sha'][:8]}）"} for i in need_force],
+        change=f"ブランチ {len(names)} 件",
+        judge=[(i["name"], i["reason"]) for i in need_force],
+        consent=[f"`git branch -D {n}` で消す" for n in names],
+        rollback="\n".join(f"- `git branch {i['name']} {i['sha']}`" for i in need_force),
+    )
+    return "gate", summary, items, metrics, path, "同意を得たら git branch -D " + " ".join(names)
+
+
 def _cleanup_result(items, prs, pull_err):
     """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
-    # 値の一致でなく印で分ける（同じパスの kept が両方に並んでも、片方へ寄せない）
-    marks = [i.pop("swept", False) for i in items]
-    swept = [i for i, m in zip(items, marks) if m]
-    own = [i for i, m in zip(items, marks) if not m]
-    count = {k: sum(1 for i in own if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
-    metrics = {
-        "removed_worktrees": count["removed"],
-        "deleted_branches": count["deleted"],
-        "absent_branches": count["absent"],
-        "kept": count["kept"],
-        "stopped": count["stopped"],
-        "swept_removed": sum(1 for i in swept if i["result"] == "removed"),
-        "swept_kept": sum(1 for i in swept if i["result"] == "kept"),
-    }
+    reclaim, reclaim_note = container_reach.reclaim_summary(items)
+    metrics = _cleanup_metrics(items, reclaim)
     summary = (
-        f"作業ツリー {count['removed']} 件を外し、ブランチ {count['deleted']} 件を消した"
-        f"（残した {count['kept']} 件・止まった {count['stopped']} 件）"
+        f"作業ツリー {metrics['removed_worktrees']} 件を外し、ブランチ {metrics['deleted_branches']} 件を消した"
+        f"（残した {metrics['kept']} 件・止まった {metrics['stopped']} 件）{reclaim_note}"
     )
     if pull_err:
         return "stopped", pull_err, items, metrics, None, None
     need_force = [i for i in items if i["kind"] == "branch" and i["result"] == "stopped"]
     if need_force:
-        names = [i["name"] for i in need_force]
-        path = approval_present(
-            TOOL,
-            "-".join(str(n) for n in prs),
-            title="未マージのコミットを持つブランチの削除",
-            targets=[{"url": f"{i['name']}（{i['sha'][:8]}）"} for i in need_force],
-            change=f"ブランチ {len(names)} 件",
-            judge=[(i["name"], i["reason"]) for i in need_force],
-            consent=[f"`git branch -D {n}` で消す" for n in names],
-            rollback="\n".join(f"- `git branch {i['name']} {i['sha']}`" for i in need_force),
-        )
-        return "gate", summary, items, metrics, path, "同意を得たら git branch -D " + " ".join(names)
+        return _force_delete_gate(prs, need_force, summary, items, metrics)
     return "ok", summary, items, metrics, None, None
 
 
@@ -304,6 +287,8 @@ def cleanup(root, prs):
     git(root, "worktree", "prune", check=False)
     with main_dir_lock(main_dir):
         pull_err = _update_main_dir(main_dir, add)
+    # 排他の外で走らせる。中に置くと、並列のレーンの後片付けが最大 300 秒待つ（#2660 の決定 8）
+    items.extend(container_reach.reclaim_testenv(main_dir))
     return _cleanup_result(items, prs, pull_err)
 
 

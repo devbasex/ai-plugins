@@ -10,14 +10,14 @@ r"""引継ぎ文書（`.ndf/handoff/<名>.md`）のパスの解決・作る・�
 | --- | --- | --- |
 | `path <名かパス> [--exists]` | 本体と履歴の絶対パス | 0 解決した / 1 `--exists` で本体が無い |
 | `init <名> --title <表示名>` | 本体が無ければ雛形から作る。あれば変えない | 0 |
-| `find --text <再開の入力>` | 入力の語に一致する本体を探す | 0 ちょうど 1 本 / 1 0 本 / 4 2 本以上 |
+| `find --text <再開の入力>` | 入力の語に一致する本体を探す | 0 ちょうど 1 本 / 1 0 本 / 10 2 本以上（承認ゲート。利用者へ聞く） |
 | `next <名>` | 標準入力の再開コマンドで「次に実行するコマンド」の節を置き換える | 0 置き換えた / 1 節が無い |
-| `check <名> [--trim] [--max-lines N]` | 節の形と行数（既定 300）を確かめる。`--trim` は先に「前の会話の進み」を履歴へ移す | 0 通る / 1 形の違反 / 5 行数だけ超える |
+| `check <名> [--trim] [--max-lines N]` | 節の形と行数（既定 300）を確かめる。`--trim` は先に「前の会話の進み」を履歴へ移す | 0 通る / 1 形の違反か行数の超過 |
 | `remove <名>` | 本体と履歴を消し、消したパスを返す | 0 |
 
 共通: 名が `loop-<名>`・`sprint-<名>`・`milestone-<番号>`・`issue-<番号>` の形でない・パスが `.ndf/handoff/` の下でない・
 読めない・書けない → 2。git の中でない・メインディレクトリに `.ndf/` が無い → 3。
-出力は `lib/step_result.py` の形の 1 行の JSON（`tool` は `handoff`）。
+出力は `lib/step_result.py` の形の 1 行の JSON（`tool` は `handoff`）。実行の核（`lib/run_core.py`）を通る。
 
     python3 handoff.py init milestone-26 --title "マイルストーン 26"
     printf '%s\n' '/goal /ndf:development-workflow .ndf/handoff/milestone-26.md の続きから' | python3 handoff.py next milestone-26
@@ -27,7 +27,6 @@ r"""引継ぎ文書（`.ndf/handoff/<名>.md`）のパスの解決・作る・�
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
@@ -38,6 +37,7 @@ import deps  # noqa: E402
 deps.require("md")
 import handoff_doc  # noqa: E402
 import repo  # noqa: E402
+import run_core  # noqa: E402
 import step_result  # noqa: E402
 
 TOOL = "handoff"
@@ -48,9 +48,6 @@ NAME_RE = re.compile(r"^(?:issue-[0-9]+|milestone-[0-9]+|sprint-[0-9A-Za-z][0-9A
 OPTIONAL_MARK = "<!-- 任意"
 DEFAULT_MAX_LINES = 300
 
-EXIT_FOUND_MANY = 4
-EXIT_TOO_LONG = 5
-
 
 class Failure(Exception):
     def __init__(self, summary: str, code: int = step_result.EXIT_UNREADABLE):
@@ -58,11 +55,10 @@ class Failure(Exception):
         self.code = code
 
 
-def emit_result(summary: str, items=None, metrics=None, code: int = 0) -> int:
-    """結果の 1 行の JSON を出して終了コードを返す。0 以外は `stopped`（4・5 は各副命令の定めた否定の結果）。"""
-    status = "ok" if code == 0 else "stopped"
-    print(json.dumps(step_result.result(TOOL, status, summary, items, metrics), ensure_ascii=False))
-    return code
+def emit_result(summary: str, items=None, metrics=None, code: int = 0, next: str | None = None) -> "NoReturn":  # noqa: F821
+    """結果の 1 行の JSON を出して終える。0 は `ok`、10〜19 は `gate`（`next` に聞くこと）、ほかは `stopped`。"""
+    status = "ok" if code == 0 else "gate" if code in step_result.GATE_CODES else "stopped"
+    step_result.emit(step_result.result(TOOL, status, summary, items, metrics, next=next), code)
 
 
 # --- 名とパス -----------------------------------------------------------------
@@ -159,7 +155,9 @@ def cmd_find(a) -> int:
         return emit_result(f"一致した: {hits[0]}", items)
     if not hits:
         return emit_result("一致する本体が無い", items, code=step_result.EXIT_VIOLATION)
-    return emit_result(f"一致する本体が {len(hits)} 本ある（読まずに利用者へ聞く）", items, code=EXIT_FOUND_MANY)
+    return emit_result(
+        f"一致する本体が {len(hits)} 本ある", items, code=step_result.EXIT_GATE, next="どの本体を使うかを読まずに利用者へ聞く"
+    )
 
 
 def command_block(stdin_text: str) -> str:
@@ -257,7 +255,9 @@ def cmd_check(a) -> int:
     if found:
         return emit_result(f"節の形の違反が {len(found)} 件: {body}", [item], code=step_result.EXIT_VIOLATION)
     if lines > a.max_lines:
-        return emit_result(f"本体が {lines} 行で上限 {a.max_lines} 行を {lines - a.max_lines} 行超える: {body}", [item], code=EXIT_TOO_LONG)
+        return emit_result(
+            f"本体が {lines} 行で上限 {a.max_lines} 行を {lines - a.max_lines} 行超える: {body}", [item], code=step_result.EXIT_VIOLATION
+        )
     return emit_result(f"節の形と行数（{lines}/{a.max_lines}）が通る: {body}", [item])
 
 
@@ -312,4 +312,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_core.main("scripts/handoff.py", main)

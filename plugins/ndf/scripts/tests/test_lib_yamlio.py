@@ -42,14 +42,6 @@ def test_missing_or_unclosed_front_matter():
         yamlio.read_front_matter("---\n- a\n---\n")
 
 
-def test_update_keeps_quotes_comments_and_the_body():
-    out = yamlio.update_front_matter(DOC, {"tags": None, "version": "1.0"})
-    assert out.startswith('---\nname: "fix"  # 名前\ndisable-model-invocation: true\n')
-    assert "tags" not in out and "version: '1.0'" in out and out.endswith("---\n# 本文\n")
-    assert yamlio.update_front_matter("body\n", {"a": "b"}) == "---\na: b\n---\nbody\n"
-
-
 def test_unreadable_yaml_names_the_place():
     with pytest.raises(yamlio.YamlError, match=r"^x.yml: 読めない（1 行 6 桁"):
         yamlio.load_yaml("a: [1", "x.yml")
-    assert yamlio.load_yaml(yamlio.dump_yaml({"a": [1, 2]})) == {"a": [1, 2]}

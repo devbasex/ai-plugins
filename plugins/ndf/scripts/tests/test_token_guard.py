@@ -393,15 +393,20 @@ def test_lock_held_passes(tmp_path, state):
 
 
 @pytest.mark.parametrize(
-    "env,expect",
+    "env,expect,wf_expect",
     [
-        ({"CLAUDE_PLUGIN_DATA": "{d}/pd"}, "{d}/pd/guards"),
-        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "{d}/xdg"}, "{d}/xdg/ndf/guards"),
-        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "{d}/home"}, "{d}/home/.local/state/ndf/guards"),
-        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "", "TMPDIR": "{d}/tmp"}, "{d}/tmp/ndf-guards"),
+        ({"CLAUDE_PLUGIN_DATA": "{d}/pd"}, "{d}/pd/guards", None),
+        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "{d}/xdg"}, "{d}/xdg/ndf/guards", None),
+        # 既定では guard はコンテナの根、通過記録は利用者の根へ分かれる（#2766）
+        (
+            {"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "{d}/home"},
+            "{d}/home/.local/state/ndf/guards",
+            "{d}/home/.claude/ndf/state/stages",
+        ),
+        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "", "TMPDIR": "{d}/tmp"}, "{d}/tmp/ndf-guards", None),
     ],
 )
-def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
+def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect, wf_expect):
     env = {k: v.format(d=tmp_path) for k, v in env.items()}
     (tmp_path / "tmp").mkdir()
     f = tmp_path / "x.txt"
@@ -415,7 +420,10 @@ def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
     wf = subprocess.run(
         ["bash", "-c", f". '{WF_DOCS}/scripts/lib/workflow-common.sh'; wf_state_dir"], text=True, capture_output=True, env=e
     ).stdout.strip()
-    assert pathlib.Path(wf).parent == pathlib.Path(expect.format(d=tmp_path)).parent
+    if wf_expect:
+        assert pathlib.Path(wf) == pathlib.Path(wf_expect.format(d=tmp_path))
+    else:
+        assert pathlib.Path(wf).parent == pathlib.Path(expect.format(d=tmp_path)).parent
 
 
 # ---------------------------------------------------------------- 文脈量（AC12〜AC16）

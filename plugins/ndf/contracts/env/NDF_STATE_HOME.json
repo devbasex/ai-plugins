@@ -1,0 +1,5 @@
+{
+  "name": "NDF_STATE_HOME",
+  "set_by": "user",
+  "summary": "NDF の状態の置き場の根を 1 つに指定する（チェックアウト・利用者・コンテナの 3 つとも）。無ければ ${XDG_STATE_HOME}/ndf、それも無ければ持ち主ごとの既定（plugins/ndf/scripts/lib/state_home.py）"
+}

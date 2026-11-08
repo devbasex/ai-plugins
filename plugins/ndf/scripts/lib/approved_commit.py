@@ -122,6 +122,13 @@ def recorded_sha(path) -> str | None:
     return _recorded_sha_of(rows)
 
 
+def recorded_by(path) -> str | None:
+    """承認資料の「承認の記録」の担い手（`user` / `mvv`）。無ければ None。"""
+    _, rows = _cells(path)
+    m = _RECORD_RE.match(rows.get(RECORD, (0, ""))[1])
+    return m.group(2) if m else None
+
+
 def from_material(path) -> str:
     """承認資料から承認したコミットを読む。承認の記録が無いか SHA が違えば Unapproved（I10）。"""
     _, rows = _cells(path)
