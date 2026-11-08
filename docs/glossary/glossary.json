@@ -5865,9 +5865,9 @@
     {
       "term": "棚卸しの記録の置き場",
       "context": "ndf-issue-upkeep",
-      "meaning": "upkeep.py が候補・反映・順位の記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置く",
+      "meaning": "upkeep.py が記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置き、回をまたぐ記録と、実行の識別子を渡さない棚卸しの回（共有の置き場）と、実行ごとの置き場を持つ",
       "source": "",
-      "pending_source": "issues/issue-2847-requirements.md"
+      "pending_source": "issues/issue-2847-design.md"
     },
     {
       "term": "候補の記録",
@@ -5875,6 +5875,20 @@
       "meaning": "candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む",
       "source": "",
       "pending_source": "issues/issue-2847-requirements.md"
+    },
+    {
+      "term": "棚卸しの回",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の candidates から始まり、続く apply・rank・report が読み書きする候補・反映・順位の記録のまとまり。実行の識別子を渡した candidates は、その実行の回を実行ごとの置き場に始める",
+      "source": "",
+      "pending_source": "issues/issue-2847-design.md"
+    },
+    {
+      "term": "実行ごとの置き場",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しの記録の置き場の下に、実行の識別子ごとに置く棚卸しの回のディレクトリ（runs/<run>/）",
+      "source": "",
+      "pending_source": "issues/issue-2847-design.md"
     }
   ]
 }
