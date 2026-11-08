@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/revise-note.py",
+  "summary": "revise-note.py: 出し直しの設計の指摘への対応の表を、設計 PR の本文へ写して突き合わせる（#2510）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [
+          "--doc",
+          "--notes",
+          "--pr"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "revise-json"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り: PR・設計文書・入力を読めない（status stopped）",
+    "10": "承認ゲート: 表が無い・行の無い項目がある・対応か箇所の欄が空の項目がある（status gate）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/revise_note.py",
+    "plugins/ndf/scripts/supervise_lib/sprint_revise.py",
+    "plugins/ndf/skills/development-workflow/references/loop.md",
+    "plugins/ndf/skills/pr/SKILL.md"
+  ]
+}

@@ -9,13 +9,16 @@
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
     "NDF_WORKTREE_BASE",
     "UV_PROJECT_ENVIRONMENT",
-    "WT_DOCKER_COMMAND"
+    "WT_DOCKER_COMMAND",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
@@ -46,11 +49,11 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "取り込み・CI・マージが失敗した（status stopped）",
+    "1": "失敗: 取り込み・CI・マージが失敗した（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "4": "PR がベースブランチと衝突している（merge-when-green・promote。mergeStateStatus が DIRTY か、マージの拒否）",
-    "10": "リリース承認ゲートで止まる（metrics.gate が production-merge）か、git branch -D が要るブランチがある（同意が要る。どちらも提示物を書く）",
-    "75": "CI の基盤待ち（merge-when-green・promote。items[].result: infra_wait）"
+    "4": "ベースブランチと衝突: PR がベースブランチと衝突している（merge-when-green・promote。mergeStateStatus が DIRTY か、マージの拒否）",
+    "10": "承認ゲート: リリース承認ゲートで止まる（metrics.gate が production-merge）か、git branch -D が要るブランチがある（同意が要る。どちらも提示物を書く）",
+    "75": "基盤待ち: CI の基盤待ち（merge-when-green・promote。items[].result: infra_wait）"
   },
   "callers": [
     "plugins/ndf/scripts/hook_lib/token_guard.py",

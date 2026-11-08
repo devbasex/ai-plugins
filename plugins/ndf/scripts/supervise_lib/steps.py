@@ -18,6 +18,7 @@ from typing import Any, Protocol
 import container_reach
 import gh_call
 import stage_skills
+import step_read
 import test_strategy as ts
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
@@ -40,16 +41,8 @@ def parse_decision(text: str) -> dict:
     return {"decision": "stop", "reason": f"判断の答えを読めない: {(text or '')[:200]}"}
 
 
-def last_json(text: str) -> dict | None:
-    """出力の最後の JSON の行（step_result の形）を読む。"""
-    for line in reversed((text or "").splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    return None
+# 出力の最後の JSON の行の読みは共通の読み手が持つ（#2337 の決定 12）
+last_json = step_read.last_json
 
 
 SKILLS_FORM = "本文"  # プランの worker への Skill の渡し方（本文を system プロンプトへ入れる。#2376 の決定 4）

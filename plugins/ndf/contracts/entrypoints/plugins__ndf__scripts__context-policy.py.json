@@ -50,6 +50,7 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
     "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
@@ -64,7 +65,7 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok。publish は常に 0）",
-    "1": "記録か見込みのファイルへ書けない（status stopped）",
+    "1": "失敗: 記録か見込みのファイルへ書けない（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）"
   },
   "callers": [

@@ -19,18 +19,28 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, plan as plan_mod, pr as pr_step, procedures  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
 # bad というファイルがあれば落ちる pre-push フック。指摘は標準出力へ書く（決定 8）
 HOOK = "#!/bin/sh\nif git ls-files --error-unmatch bad >/dev/null 2>&1; then echo 'ERROR: bad が残っている（目印の検査）'; exit 1; fi\n"
 
 # 修正の worker の偽物。FAKE_FIX=1 なら bad を消してコミットする
-FAKE_CLAUDE = """#!{py}
+FAKE_CLAUDE = (
+    """#!{py}
 import json, os, subprocess, sys
-open(os.environ["FAKE_CLAUDE_LOG"], "a").write(sys.stdin.read() + "\\n=====\\n")
+prompt = sys.stdin.read()
+open(os.environ["FAKE_CLAUDE_LOG"], "a").write(prompt + "\\n=====\\n")
 if os.environ.get("FAKE_FIX") == "1" and os.path.exists("bad"):
     subprocess.run(["git", "rm", "-q", "bad"], check=True)
     subprocess.run(["git", "commit", "-q", "-m", "fix: bad を消す"], check=True)
-print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01, "num_turns": 1}}))
+text = "## 作業の報告\\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET.replace("{", "{{").replace("}", "}}")
+    + """
+print(json.dumps({{"result": text, "usage": {{}}, "total_cost_usd": 0.01, "num_turns": 1}}))
+"""
+)
 
 FAKE_GH = """#!{py}
 import sys

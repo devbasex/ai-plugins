@@ -1115,7 +1115,7 @@
     {
       "term": "リリース記録",
       "context": "ndf-release",
-      "meaning": "release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request を持つ",
+      "meaning": "release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request に、CD を読んだときは CD の結果を持つ",
       "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md",
       "deprecated": [
         "リリースの記録",
@@ -2439,6 +2439,42 @@
       "pending_source": "issues/issue-2567-requirements.md"
     },
     {
+      "term": "テスト環境のスロット",
+      "context": "ndf-worktree",
+      "meaning": "テスト環境へ割り当てる 0〜63 の番号。worktree ごとのポートの計算に使う",
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
+    },
+    {
+      "term": "テスト環境の割り当て",
+      "context": "ndf-worktree",
+      "meaning": "worktree とテスト環境の環境名・スロット・ポートの対応。worktree レジストリの 1 行で、解放の時刻が空の間は有効である",
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
+    },
+    {
+      "term": "残った割り当て",
+      "context": "ndf-worktree",
+      "meaning": "解放の時刻が空で、worktree のディレクトリが無く、git worktree lock もされていない割り当て",
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
+    },
+    {
+      "term": "テスト環境の回収",
+      "context": "ndf-worktree",
+      "meaning": "残った割り当てのテスト環境を compose の定義なしで破棄し、解放の時刻を書くこと",
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
+    },
+    {
+      "term": "見えない位置の割り当て",
+      "context": "ndf-worktree",
+      "meaning": "worktree のパスがメインディレクトリの下に無く、親のディレクトリが無いか、親のディレクトリがメインディレクトリと別のファイルシステムにある割り当て。回収を打った位置から存在を確かめられないため、残った割り当てとして判定しない",
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
+    },
+    {
+      "term": "回収の予約",
+      "context": "ndf-worktree",
+      "meaning": "環境名ごとのロック。回収が環境名の共有を確かめてから解放を終えるまで持ち、割り当ての追加と使い始めが短く取って通る",
+      "source": "docs/specifications/ndf-testenv-reclaim.md"
+    },
+    {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
@@ -2678,8 +2714,20 @@
     {
       "term": "CD",
       "context": "ndf-release",
-      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映をリポジトリの外の仕組みが行うこと。delivery の kind: auto で宣言する",
+      "meaning": "継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映を NDF の工程の外の仕組みが行うこと。delivery の kind: auto で宣言する",
       "pending_source": "issues/issue-2616-requirements.md"
+    },
+    {
+      "term": "CD の案内",
+      "context": "ndf-release",
+      "meaning": "CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない",
+      "source": "docs/specifications/ndf-release-via-cd.md"
+    },
+    {
+      "term": "手動反映の理由",
+      "context": "ndf-release",
+      "meaning": "delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない",
+      "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
       "term": "昇格の Pull Request",
@@ -5019,7 +5067,7 @@
       "term": "例外リスト",
       "code": "allow_list",
       "context": "ndf-workflow",
-      "meaning": "構造チェックが違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。構造チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
+      "meaning": "構造チェックとリポジトリ前提の検査が違反として数えない今の外れを 1 項目 1 ファイルで持つ置き場。チェックごとに置く（scripts/script-structure-allow/・scripts/contract-allow/・scripts/repo-assumptions-allow/）。違反に当たらなくなった項目は落ち、減る方向にだけ変える",
       "deprecated": [
         "許可の一覧"
       ],
@@ -5678,67 +5726,67 @@
       "term": "出し直しの指摘",
       "context": "ndf-workflow",
       "meaning": "設計承認ゲートで人が「直して出し直す」と答えたときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "出し直しの指摘の履歴",
       "context": "ndf-workflow",
       "meaning": "課題の本文に置く、出し直しの指摘を回ごとに追記する節。人の判断待ちの節を書き直しても消えない",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "指摘への対応の表",
       "context": "ndf-workflow",
       "meaning": "出し直しの設計 PR の本文に置く表。出し直しの指摘の項目ごとに、直した / 直せない、直した箇所か直せない理由を 1 行で持つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "設計のプラン",
       "context": "ndf-workflow",
       "meaning": "開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "答えの種類",
       "context": "ndf-workflow",
       "meaning": "人が承認ゲートや問いに返す答えの区分。承認・直して出し直す・やらない・予算・止めるの 5 つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "自動の出し直し",
       "context": "ndf-workflow",
       "meaning": "出し直しの設計が出し直しの指摘の項目を指摘への対応の表に示していないとき、人へ問わずに開発ループが自分で付ける「直して出し直す」の答え。届いていない項目を名指しする。人の出し直しの 1 回につき 1 回まで",
-      "pending_source": "issues/issue-2510-design.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "出し直しの指摘の入力",
       "context": "ndf-workflow",
       "meaning": "開発ループが周回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
-      "pending_source": "issues/issue-2510-design.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "設計の承認の依頼",
       "context": "ndf-workflow",
       "meaning": "並列の計画のレーンが、設計承認ゲートの判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "取り込みのコミット",
       "context": "ndf-workflow",
       "meaning": "起点ブランチを設計 PR のブランチへ取り込むマージコミット。これだけで先頭が動いた設計 PR は、承認の依頼を送り直さない",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "前のループ",
       "context": "ndf-workflow",
       "meaning": "同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その答えがまだの人の判断待ちは、オーガナイザーの問いの一覧に出す",
-      "pending_source": "issues/issue-2510-requirements.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "当たらなかった答え",
       "context": "ndf-workflow",
       "meaning": "オーガナイザーの答えのうち、持ち主のループの記録の行へ当てられなかったもの。答えは耐久の記録に残し、区分 unmatched の問いとしてオーガナイザーの問いの一覧に出す",
-      "pending_source": "issues/issue-2510-design.md"
+      "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
       "term": "承認待ちの一覧",
@@ -5836,20 +5884,19 @@
       "term": "人へ出す文",
       "context": "ndf-workflow",
       "meaning": "Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる",
-      "pending_source": "issues/issue-2619-requirements.md"
+      "source": "docs/specifications/ndf-approval-gate-names.md"
     },
     {
       "term": "機械が読む識別子",
       "context": "ndf-workflow",
       "meaning": "スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる",
-      "pending_source": "issues/issue-2619-requirements.md"
+      "source": "docs/specifications/ndf-approval-gate-names.md"
     },
     {
       "term": "デプロイ",
       "context": "ndf-release",
       "meaning": "開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある",
-      "source": "",
-      "pending_source": "issues/issue-2620-requirements.md",
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md",
       "deprecated": [
         "配布"
       ]
@@ -5858,8 +5905,7 @@
       "term": "書いた日の記録",
       "context": "ndf-workflow",
       "meaning": "書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録",
-      "source": "",
-      "pending_source": "issues/issue-2620-requirements.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "開発版のデプロイ",
@@ -5876,8 +5922,7 @@
       "term": "デプロイなし",
       "context": "ndf-release",
       "meaning": "リリース記録の段階の値。どの環境へも届けずに工程を終えたこと",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md",
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md",
       "deprecated": [
         "配布なし"
       ]
@@ -5894,11 +5939,17 @@
     {
       "term": "リリースの依頼",
       "context": "ndf-workflow",
-      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）",
+      "meaning": "レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
       "deprecated": [
         "配布の依頼"
       ]
+    },
+    {
+      "term": "課題の差し込み",
+      "context": "ndf-workflow",
+      "meaning": "リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる",
+      "source": ""
     },
     {
       "term": "リリースの実行",
@@ -5923,8 +5974,7 @@
       "term": "リリース対象",
       "context": "ndf-release",
       "meaning": "リリースで利用者へ届くファイルの集まり。ai-plugins では plugins/ と .claude-plugin/",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md",
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md",
       "deprecated": [
         "配布物"
       ]
@@ -5933,8 +5983,7 @@
       "term": "アーティファクト",
       "context": "ndf-release",
       "meaning": "ビルドや署名で作る、公開操作で届ける生成物（パッケージ・署名したバイナリなど）",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "導入先のランタイム",
@@ -5949,8 +5998,7 @@
       "term": "利用先のリポジトリ",
       "context": "ndf-workflow",
       "meaning": "NDF を導入して使っているリポジトリ",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md",
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md",
       "deprecated": [
         "配布先のリポジトリ"
       ]
@@ -5968,51 +6016,44 @@
       "term": "旧い値の読み替え",
       "context": "ndf-workflow",
       "meaning": "版を上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "禁止語",
       "context": "ndf-workflow",
       "meaning": "用語集の設定が、検査する範囲で新しく書くことを禁じた語",
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "無進捗の打ち切り",
       "context": "ndf-workflow",
       "meaning": "実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること",
-      "source": "",
-      "pending_source": "issues/issue-2505-requirements.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "無進捗の許容時間",
       "context": "ndf-workflow",
       "meaning": "実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒",
       "code": "impl_stall_seconds",
-      "source": "",
-      "pending_source": "issues/issue-2505-design.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "進みの観測",
       "context": "ndf-workflow",
       "meaning": "実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること",
-      "source": "",
-      "pending_source": "issues/issue-2505-design.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "周回の費用の内訳",
       "context": "ndf-workflow",
       "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
-      "source": "",
-      "pending_source": "issues/issue-2505-design.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "実行環境の調査",
       "context": "ndf-workflow",
       "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
-      "source": "",
-      "pending_source": "issues/issue-2505-requirements.md"
+      "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "リリースの設定",
@@ -6021,8 +6062,7 @@
       "deprecated": [
         "配布の宣言"
       ],
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "リリースの形",
@@ -6031,8 +6071,7 @@
       "deprecated": [
         "配布の形"
       ],
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "リリースの手順",
@@ -6041,8 +6080,7 @@
       "deprecated": [
         "配布の手順"
       ],
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
     },
     {
       "term": "取得元",
@@ -6051,8 +6089,97 @@
       "deprecated": [
         "配布元"
       ],
-      "source": "",
-      "pending_source": "issues/issue-2620-design.md"
+      "source": "docs/specifications/ndf-deploy-and-release-terms.md"
+    },
+    {
+      "term": "CD の結果",
+      "context": "ndf-release",
+      "meaning": "本番チャネルへのマージの後に NDF が読んだ CD の状態。成功・失敗・未確定の 3 つで、リリース記録に残す",
+      "source": "docs/specifications/ndf-release-via-cd.md"
+    },
+    {
+      "term": "結果の読み方",
+      "context": "ndf-release",
+      "meaning": "CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す",
+      "source": "docs/specifications/ndf-release-via-cd.md"
+    },
+    {
+      "term": "公開物",
+      "context": "ndf-release",
+      "meaning": "正式版ごとのリリースタグと GitHub Release の組",
+      "source": "docs/specifications/ndf-release-via-cd.md"
+    },
+    {
+      "term": "反映失敗",
+      "context": "ndf-release",
+      "meaning": "リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態",
+      "source": "docs/specifications/ndf-release-via-cd.md"
+    },
+    {
+      "term": "リポジトリ前提の検査",
+      "context": "repo-dev-checks",
+      "meaning": "リリース対象の Skill とスクリプトに ai-plugins にしか無い語が無いかを見る CI のジョブ `skill-repo-assumptions-check`",
+      "source": "docs/specifications/ndf-repo-assumptions-check.md"
+    },
+    {
+      "term": "既知の当たり",
+      "context": "repo-dev-checks",
+      "meaning": "リポジトリ前提の検査に当たるが、NDF 自身の置き場を読むなど違反でない箇所か、行き先の課題が直すまで残す箇所。語とファイルの組ごとに当たりの数を例外リストへ宣言する",
+      "source": "docs/specifications/ndf-repo-assumptions-check.md"
+    },
+    {
+      "term": "答え待ちの依頼",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーに届いて、まだ答えていない依頼。設計の承認・リリース承認ゲート・承認ゲートの外の問い・耐久ワークフローが自分で立てた問いの 4 種類",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "計画の閾値",
+      "context": "ndf-workflow",
+      "meaning": "計画全体の答え待ちの依頼の件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "レーンの閾値",
+      "context": "ndf-workflow",
+      "meaning": "1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 で、これを超えるとそのレーンを止める",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "答え待ちの停止",
+      "context": "ndf-workflow",
+      "meaning": "答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
+      "pending_source": "issues/issue-2707-requirements.md"
+    },
+    {
+      "term": "止める指示のファイル",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い",
+      "pending_source": "issues/issue-2707-design.md"
+    },
+    {
+      "term": "再開の印",
+      "context": "ndf-workflow",
+      "meaning": "答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.mark.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く",
+      "pending_source": "issues/issue-2707-design.md"
+    },
+    {
+      "term": "tmux の専用サーバー",
+      "context": "ndf-relay",
+      "meaning": "中継のレーンを動かす tmux サーバー（tmux -L ndf-relay）。利用者の既定の tmux サーバーとは別である",
+      "pending_source": "issues/issue-2656-requirements.md"
+    },
+    {
+      "term": "親のセッションの環境",
+      "context": "ndf-relay",
+      "meaning": "動いている claude のセッションとそのラッパーに固有の環境変数。別のプロセスへ継がれると、そのプロセスを親のセッションの中にいると誤らせる",
+      "pending_source": "issues/issue-2656-requirements.md"
+    },
+    {
+      "term": "アカウントの選定",
+      "context": "ndf-relay",
+      "meaning": "ラッパーが区間を起動するときに、指定・残量・上限から使うアカウントを決める手順",
+      "pending_source": "issues/issue-2656-requirements.md"
     },
     {
       "term": "分割した文書",

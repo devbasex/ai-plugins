@@ -52,7 +52,7 @@ def test_an_issue_without_the_retro_record_is_kept_open(repo, gh, verify):
     args = ["--record-pr", "20", "--repo", "o/r"] + (["--with-verification"] if verify else [])
     code, out, err = call("sprint-close.py", args, gh.env, repo)
     it = issues_of(out)["o/r#1"]
-    assert code == 0 and it["result"] == "kept_open" and "振り返り" in it["reason"], err
+    assert code == 10 and it["result"] == "kept_open" and "振り返り" in it["reason"], err
     assert not wrote(gh)
     assert out["metrics"]["final_stage"] == "振り返り"
     assert out["decisions"][0]["decision"] == "最終工程を 振り返り として判定した"
@@ -124,7 +124,7 @@ def test_record_zero_closes_with_a_retro_line_and_keeps_without(repo, gh):
 def test_record_unknown_does_not_read_the_body(repo, gh):
     setup(gh, retro(5))
     code, out, _ = call("sprint-close.py", ["--record-pr", "unknown", "--repo", "o/r", "--issues", "1"], gh.env, repo)
-    assert code == 0 and issues_of(out)["o/r#1"]["result"] == "kept_open"
+    assert code == 10 and issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert not any(c[:2] == ["issue", "view"] for c in gh.get().get("calls", []))
 
 
@@ -133,7 +133,7 @@ def test_the_verification_stage_always_reads_the_rows(repo, gh):
     args = ["--record-pr", "20", "--repo", "o/r", "--final-stage", "リリース後テスト"]
     code, out, _ = call("sprint-close.py", args, gh.env, repo)
     it = issues_of(out)["o/r#1"]
-    assert code == 0 and it["result"] == "kept_open" and "合格でない" in it["reason"]
+    assert code == 10 and it["result"] == "kept_open" and "合格でない" in it["reason"]
     assert out["metrics"]["final_stage"] == "リリース後テスト"
 
 
@@ -146,7 +146,7 @@ def test_the_distribution_stage_closes_without_a_retro_line(repo, gh):
 def test_an_unknown_final_stage_is_a_call_error(repo, gh):
     setup(gh, "本文")
     code, _, _ = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "棚卸し"], gh.env, repo)
-    assert code == 3
+    assert code == 2
 
 
 def test_a_pr_with_only_deferred_references_collects_its_issue(repo, gh):

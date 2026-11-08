@@ -163,10 +163,14 @@ def kill(proc: subprocess.Popen) -> None:
 # ---- 置き場と鍵 ----
 
 
-def test_records_dir_follows_the_env_then_xdg_then_home():
+def test_records_dir_follows_the_env_then_xdg_then_checkout(tmp_path, monkeypatch):
     assert durable.records_dir({"NDF_DBOS_DIR": "/x/d", "XDG_STATE_HOME": "/s", "HOME": "/h"}) == Path("/x/d")
     assert durable.records_dir({"XDG_STATE_HOME": "/s", "HOME": "/h"}) == Path("/s/ndf/dbos")
-    assert durable.records_dir({"HOME": "/h"}) == Path("/h/.local/state/ndf/dbos")
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path / "repo")
+    assert durable.records_dir({"HOME": "/h"}) == (tmp_path / "repo/.git/ndf/state/dbos").resolve()  # チェックアウトの根（#2766）
+    monkeypatch.chdir(tmp_path)
+    assert durable.records_dir({"HOME": "/h"}) == Path("/h/.local/state/ndf/dbos")  # git の外はコンテナの根
 
 
 def test_the_tests_write_records_under_a_temporary_directory():

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/decl.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "宣言の置き場の値（メインディレクトリ）。ブランチ名でない",
+  "count": 3
+}

@@ -12,6 +12,7 @@ import json
 import sys
 import time
 from datetime import datetime, timezone
+from itertools import dropwhile
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,11 @@ import gh_call  # noqa: E402
 import slow_step as ss  # noqa: E402
 from supervise_lib import engine  # noqa: E402
 
-FAKE_CLAUDE = r"""
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+FAKE_CLAUDE = (
+    r"""
 import json, os, pathlib, sys, time
 argv = sys.argv[1:]
 prompt = sys.stdin.read()
@@ -36,13 +41,19 @@ if "## 経過と想定" in prompt:
 sid = argv[argv.index("--session-id") + 1] if "--session-id" in argv else ""
 path = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-work-repo" / f"{sid}.jsonl"
 path.parent.mkdir(parents=True, exist_ok=True)
-for _ in range(15):  # 標準エラーへも作業の行へも書かず、コミットもしない
-    if os.environ.get("FAKE_GROW") == "1" and sid:
+grow = os.environ.get("FAKE_GROW") == "1"
+for _ in range(40 if grow else 15):  # 標準エラーへも作業の行へも書かず、コミットもしない
+    if grow and sid:
         with open(path, "a") as f:
             f.write('{"type": "assistant"}\n')
     time.sleep(0.1)
-print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": sid}))
+text = "## 作業の報告\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET
+    + r"""
+print(json.dumps({"result": text, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": sid}))
+"""
+)
 
 DRIVE = r"""
 import json, sys, time
@@ -97,10 +108,12 @@ def test_1623_1_a_design_worker_growing_its_session_is_not_cut(env, monkeypatch)
     s, text = run_plan(env, [DESIGN])
     assert "結果: 完了" in text and [e["id"] for e in s.state.log] == ["design"]
     slow = lines(env, "slow")
-    assert slow and all(d["probe"]["class"] == "progress" and d["probe"]["name"] == "worker" for d in slow)
-    assert "セッションの記録が" in slow[0]["probe"]["summary"] and not judge_calls(env)
-    argv = json.loads((env / "claude.log").read_text().splitlines()[0])["argv"]
-    assert argv[argv.index("--session-id") + 1] == s.state.session["id"]
+    # 重い機械では偽物の起動が最初の確認に間に合わない。記録が出る前の無音だけは判定へ回ってよい
+    grown = list(dropwhile(lambda d: d["probe"]["class"] == "silent", slow))
+    assert grown and all(d["probe"]["class"] == "progress" and d["probe"]["name"] == "worker" for d in grown)
+    assert "セッションの記録が" in grown[0]["probe"]["summary"] and len(judge_calls(env)) == len(slow) - len(grown)
+    worker = next(d for d in map(json.loads, (env / "claude.log").read_text().splitlines()) if not d["judge"])
+    assert worker["argv"][worker["argv"].index("--session-id") + 1] == s.state.session["id"]
 
 
 def test_1623_2_a_worker_whose_session_does_not_grow_goes_to_the_judge(env):

@@ -31,7 +31,7 @@ from supervise_lib.sprint_waves import (
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
-from supervise_lib.release_templates import release_verify_step, strip_suffix
+from supervise_lib.release_templates import release_verify_steps, strip_suffix
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
@@ -45,6 +45,7 @@ from supervise_lib.sprint_routes import (
     record_pr_ref,
     route_rows,
     route_waves,
+    with_cd_guidance,
 )
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
@@ -168,7 +169,7 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。"""
+    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）控え → リリース後テスト → 比較 → 振り返り → 課題を閉じる → 棚卸し。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
@@ -187,8 +188,8 @@ def close_plan(a, repo: str) -> dict:
             "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="release-verify" if has_record(record_pr) else "retro"),
-                *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
+                *merge_steps(a, next="config-save" if has_record(record_pr) else "retro"),
+                *(release_verify_steps(a.name, refs, record_pr) if has_record(record_pr) else []),
                 _retro_step(a, refs, stats),
                 _close_step(a, repo, record_pr, issues),
                 *refine_steps(a, refs, repo),
@@ -386,14 +387,14 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     index = write_stage_index(waves, out)
     add_resume(index)
     manifest = out / "sprint.json"
-    head = manifest_head(a, pace, closing)
+    head, guidance = with_cd_guidance(a, manifest_head(a, pace, closing))
     manifest.write_text(json.dumps({**head, "リリースの経路": route_rows(a), "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result(
         "supervise-new",
         "ok",
         f"スプリント {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
-        index,
+        index + guidance,
         {"waves": len(index), "plans": plans, "manifest": str(manifest)},
         next=next_text(pace, index, advise=pace == "normal" and advises(a, closing), no_prod=no_prod_stage(a, pace, closing)),
     )

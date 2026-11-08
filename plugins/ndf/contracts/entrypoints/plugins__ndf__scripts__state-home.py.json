@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/state-home.py",
+  "summary": "NDF の状態の置き場の根を出す・旧の置き場から台帳と記録を移す（#2766）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "HOME",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）。根を出した・移した・移すものが無い",
+    "1": "失敗: 旧に残したものがある（移し先に同じ名前がある・別の migrate が動いている・動いている耐久の記録やプラン。status stopped）",
+    "2": "読めない・呼び出しの誤り（呼び出しの誤り）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/state_home.py"
+  ]
+}

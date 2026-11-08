@@ -20,5 +20,9 @@
   },
   "callers": [
     "plugins/ndf/scripts/lib/hook_python.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "Kiro CLI・agy の hook の定義が直に結ぶ古いエントリポイント"
+  }
 }

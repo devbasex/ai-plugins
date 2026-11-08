@@ -39,11 +39,14 @@
     }
   },
   "env": [
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
-    "UV_PROJECT_ENVIRONMENT"
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
@@ -65,7 +68,7 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "違反があった・手順が失敗した（status stopped）",
+    "1": "失敗: 違反があった・手順が失敗した（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）"
   },
   "callers": [

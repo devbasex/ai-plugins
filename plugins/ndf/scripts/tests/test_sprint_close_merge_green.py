@@ -240,7 +240,7 @@ def test_sprint_close_kept_open_before_production(repo, gh):
         issues={"o/r#1": ["OPEN"]},
     )
     code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
-    assert code == 0 and out["status"] == "ok"
+    assert code == 10 and out["status"] == "gate"
     assert issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert "closed" not in gh.get()
 
@@ -261,7 +261,7 @@ def test_sprint_close_verification_per_issue(repo, gh):
     assert res["o/r#1"]["result"] == "closed"
     assert res["o/r#2"]["result"] == "kept_open" and "合格でない" in res["o/r#2"]["reason"]
     assert res["o/r#3"]["result"] == "kept_open" and "行が無い" in res["o/r#3"]["reason"]
-    assert code == 0 and gh.get()["closed"] == ["o/r#1"]
+    assert code == 10 and gh.get()["closed"] == ["o/r#1"]
 
 
 def test_sprint_close_no_verification_record_keeps_all(repo, gh):
@@ -269,7 +269,7 @@ def test_sprint_close_no_verification_record_keeps_all(repo, gh):
     code, out, err = call(
         "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
     )
-    assert code == 0 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
+    assert code == 10 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
 
 
 def test_sprint_close_empty_list_is_2(repo, gh):
@@ -342,9 +342,9 @@ def load_sprint_close():
     return mod
 
 
-def test_sprint_close_bad_call_is_3(repo, gh):
+def test_sprint_close_bad_call_is_2(repo, gh):
     p = subprocess.run([PY, str(SCRIPTS / "sprint-close.py")], capture_output=True, text=True, env=gh.env, cwd=repo)
-    assert p.returncode == 3
+    assert p.returncode == 2
 
 
 # --- merge-when-green ----------------------------------------------------------

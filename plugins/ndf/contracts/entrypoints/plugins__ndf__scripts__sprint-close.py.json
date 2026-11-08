@@ -20,11 +20,14 @@
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
-    "UV_PROJECT_ENVIRONMENT"
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
@@ -41,8 +44,11 @@
   "writes": [],
   "reads": [],
   "exit": {
-    "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "0": "成功: 閉じる対象をすべて閉じた（status ok）",
+    "1": "失敗: 閉じる処理が失敗した課題がある（status stopped。gaps に課題ごとの理由）",
+    "2": "読めない・呼び出しの誤り: 一覧が取れない・閉じる課題が 0 件・--issues が無い（status stopped）",
+    "3": "前提が無い: 記録のリポジトリを決められない（status stopped）",
+    "10": "承認ゲート: 閉じなかった課題がある・記録の置き場が分からない（status gate。gaps に課題ごとの理由）"
   },
   "callers": [
     "plugins/ndf/scripts/acceptance-check.py",

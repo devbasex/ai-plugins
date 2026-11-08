@@ -25,6 +25,7 @@ import parallel_answer as pa  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
+import parallel_reply  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
 PLAN = {
@@ -424,7 +425,7 @@ def test_gate1_answer_event_carries_the_merge_result_and_who_approved(env, tmp_p
     rid = pl.request_gate1(main, "p1", "la", 11, 501, "r.md", "s.json", "a" * 40, verdict="unknown")
     again = pl.request_gate1(main, "p1", "la", 11, 501, "r.md", "s.json", "a" * 40, suffix="-m3")
     assert again == f"{rid}-m3"
-    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == again])  # 同じ行の新しい依頼が前の依頼を置き換える（#2510 の I11）
     pl.send_answer(main, "p1", rid, "approved", merge={"result": "merged"}, by="mvv")
     ans = until(lambda: pl.answers_of(main, "p1", [rid])[rid]["answer"])
     assert ans["merge"] == {"result": "merged"} and ans["by"] == "mvv"
@@ -716,8 +717,8 @@ def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_p
     spec.loader.exec_module(cli)
     item = {"id": "h1", "kind": "helper", "lane": "p1-rel1", "commands": {"続きから起こし直す": "SPAWN"}}
     monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": [item]})
-    assert pa.owner_restart(tmp_path, "p1", "h1", ["続きから起こし直す"]) == "SPAWN"
-    assert pa.owner_restart(tmp_path, "p1", "h1", ["止める"]) is None
+    assert pa.owner_next(tmp_path, "p1", "h1", ["続きから起こし直す"])[0] == "SPAWN"
+    assert pa.owner_next(tmp_path, "p1", "h1", ["止める"])[0] is None
 
 
 def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
@@ -748,19 +749,19 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     loop.mkdir(parents=True)
     handoff = tmp_path / ".ndf" / "handoff"
     handoff.mkdir(parents=True)
-    assert pa.owner_restart(tmp_path, "p1", "qa") is None and pa.owner_restart(tmp_path, "p1", "qb") is None
+    assert pa.owner_next(tmp_path, "p1", "qa")[0] is None and pa.owner_next(tmp_path, "p1", "qb")[0] is None
     (loop / "loop.json").write_text(json.dumps({"status": "running"}))
     (handoff / "issue-7.md").write_text("## 次にやること\n- 別の作業\n")
-    assert pa.owner_restart(tmp_path, "p1", "qa") is None and pa.owner_restart(tmp_path, "p1", "qb") is None
+    assert pa.owner_next(tmp_path, "p1", "qa")[0] is None and pa.owner_next(tmp_path, "p1", "qb")[0] is None
     (loop / "loop.json").write_text(json.dumps({"status": "stopped", "stop": {"condition": "waiting_only"}}))
     (handoff / "issue-7.md").write_text("## 次にやること\n- 依頼 qb の答えを読んで続ける\n")
-    assert pa.owner_restart(tmp_path, "p1", "qa") == f"python3 {prun.RELAY} restart la"
-    assert pa.owner_restart(tmp_path, "p1", "qb") == f"python3 {prun.RELAY} restart lb"
+    assert pa.owner_next(tmp_path, "p1", "qa")[0] == f"python3 {prun.RELAY} restart la"
+    assert pa.owner_next(tmp_path, "p1", "qb")[0] == f"python3 {prun.RELAY} restart lb"
     items.append({"id": "qh", "kind": "ask", "lane": "p1-rel1"})  # 記録を持たない一時レーンはラッパーが止まっているかで決める
-    assert pa.owner_restart(tmp_path, "p1", "qh") == f"python3 {prun.RELAY} restart p1-rel1"
+    assert pa.owner_next(tmp_path, "p1", "qh")[0] == f"python3 {prun.RELAY} restart p1-rel1"
     # 同じ原因としてまとめた問いは、merged の持ち主もそれぞれの依頼の id で調べて起こす（異常系 5）
     items.append({"id": "qm", "kind": "ask", "lane": "la", "merged": [{"id": "qb", "lane": "lb"}]})
-    assert pa.owner_restart(tmp_path, "p1", "qm") == f"python3 {prun.RELAY} restart la; python3 {prun.RELAY} restart lb"
+    assert pa.owner_next(tmp_path, "p1", "qm")[0] == f"python3 {prun.RELAY} restart la; python3 {prun.RELAY} restart lb"
 
 
 def test_a_helper_ends_by_stopping_its_own_wrapper():
@@ -801,7 +802,7 @@ def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatc
     後へ進めば revive から外す。外さないと _finish_or_hold が設計の承認待ちを空にできず、計画が終わらない。"""
     run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}])
     seen = {"now": 1_000_000.0, "rows": {"la": {"state": "stopped", "at": "1970-01-12T13:40:00Z"}}}  # 999_600
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     run.lanes["la"].update(started=True)
     prun._observe_run(run, "/m")
     run.questions = [{"id": "q1", "kind": "ask", "lane": "la"}]
@@ -814,6 +815,17 @@ def test_a_revived_lane_that_stops_between_observations_leaves_revive(monkeypatc
     seen["now"] = 1_000_120.0
     prun._observe_run(run, "/m")
     assert run.revive == []
+
+
+def test_stopping_a_lane_that_cannot_start_leaves_wake_and_revive(monkeypatch):
+    """起動の断りの問いへ「止める」と答えたら、reply が加えた再開待ちと起こす 1 行からそのレーンを外す。
+    残すと _finish_or_hold が計画を終えられず、利用者が止めたレーンの再開を案内し続ける。"""
+    run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}])
+    run.lanes["la"].update(started=True, state="stopped")
+    run.ask("spawn", "s1", "la", "起動できない", ["起こし直す", "止める"])
+    run.reply({"id": "s1", "result": "answered", "choice": ["止める"]})
+    assert run.lanes["la"].get("given_up") is True
+    assert "la" not in run.revive and "la" not in run.wake and "la" not in run.revive_at
 
 
 def _answers(monkeypatch):
@@ -923,7 +935,7 @@ def test_a_failed_ls_keeps_lane_states_and_the_last_observation(monkeypatch):
     """受け入れ条件 1・I1: 一覧が 0 以外で終わった回は、レーンの状態・最後に観測した時刻・起こし直しの待ち・問いを変えない。"""
     run = _bare_run(monkeypatch, [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb"}])
     seen = {"now": 1_000_000.0, "rows": {"la": {"state": "running", "at": "1970-01-01T00:00:00Z"}}, "code": 0}
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     run.lanes["la"].update(started=True)
     run.lanes["lb"].update(started=True)
     prun._observe_run(run, "/m")
@@ -940,7 +952,7 @@ def test_after_a_failed_ls_the_plan_is_not_finished(monkeypatch):
     """I2: 最後の観測が失敗した回の後は、全レーンが止まって見えていても終えない。成功に戻れば終えられる。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
     seen = {"now": 1.0, "rows": {}, "code": 0}
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     run.lanes["la"].update(started=True)
     prun._observe_run(run, "/m")
     assert prun._run_finished(run)
@@ -955,7 +967,7 @@ def test_after_a_failed_ls_the_plan_is_not_finished(monkeypatch):
 def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
     """決定 5: 足す前の版で記録した観測（`code` が無い）は成功として読み、行の無い起動済みのレーンを止まったと読む。"""
     run = _bare_run(monkeypatch, [{"name": "la"}])
-    monkeypatch.setattr(prun, "step_observe", lambda _m: {"now": 1.0, "rows": {}})
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: {"now": 1.0, "rows": {}})
     run.lanes["la"].update(started=True)
     prun._observe_run(run, "/m")
     assert run.lanes["la"]["state"] == "stopped" and prun._run_finished(run)
@@ -963,7 +975,7 @@ def test_an_observation_recorded_without_code_reads_as_success(monkeypatch):
 
 def test_step_observe_carries_the_exit_code_and_the_last_stderr_line(env, tmp_path):
     (tmp_path / "ls.fail").write_text("")
-    got = prun.step_observe(str(env["main"]))
+    got = prun.step_observe(str(env["main"]), "p1")
     assert got["code"] == 3 and got["err"] == "ls: hub に届かない" and got["rows"] == {} and got["can_ask"] is True
 
 
@@ -990,7 +1002,7 @@ def _failing_run(monkeypatch):
     run = _bare_run(monkeypatch, [{"name": "la"}])
     run.lanes["la"].update(started=True, state="running")
     seen = {"now": 1000.0, "rows": {}, "code": 3, "err": "ls: hub に届かない", "can_ask": True}
-    monkeypatch.setattr(prun, "step_observe", lambda _m: seen)
+    monkeypatch.setattr(prun, "step_observe", lambda *_a: seen)
     return run, seen
 
 
@@ -1069,8 +1081,8 @@ def test_a_recovered_ls_lets_the_plan_finish_with_the_question_gone(env, tmp_pat
 
 def test_answering_rebuild_returns_the_status_command(tmp_path):
     item = {"id": "p1-observe-1", "kind": "observe", "commands": {"ラッパーの環境を作り直す": "python3 relay.py status"}}
-    assert pa.owner_restart(tmp_path, "p1", item["id"], ["ラッパーの環境を作り直す"], [item]) == "python3 relay.py status"
-    assert pa.owner_restart(tmp_path, "p1", item["id"], ["待つ"], [item]) is None
+    assert pa.owner_next(tmp_path, "p1", item["id"], ["ラッパーの環境を作り直す"], [item])[0] == "python3 relay.py status"
+    assert pa.owner_next(tmp_path, "p1", item["id"], ["待つ"], [item])[0] is None
 
 
 # ---- リリースの組み方（#2616） ----
@@ -1325,3 +1337,126 @@ def test_new_record_replays_to_the_same_values(env, tmp_path):
     prun.open_parallel_record(main, "p1")
     out = stop(main)
     assert out["status"] == "stopped" and [(r["n"], r["state"], r["requests"]) for r in out["releases"]] == [(1, "released", [rid])]
+
+
+# ---- 答えの届け方（#2510） ----
+
+
+def _route(monkeypatch, lanes=None):
+    run = _bare_run(monkeypatch, lanes or [{"name": "la", "input": {"kind": "loop"}}, {"name": "lb", "input": {"kind": "loop"}}])
+    box = _answers(monkeypatch)
+    for ln in run.lanes.values():
+        ln.update(started=True, state="stopped")
+    return run, box
+
+
+def test_an_answer_wakes_a_stopped_loop_lane_that_waits_on_its_record(monkeypatch):
+    """記録が waiting_only で止まったループのレーンも起こす対象に入り、知らせに起こす 1 行が付く（#2474 の原因）。"""
+    run, box = _route(monkeypatch)
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: ["la"])
+    run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
+    run.reply({"id": "q", "result": "approved"})
+    assert box["answer-q"]["result"] == "approved" and run.revive == ["la"] and run.wake == ["la"]
+    assert "restart la" in box["pause"]["wake"][0]
+
+
+def test_a_stopped_loop_lane_that_does_not_wait_is_not_woken(monkeypatch):
+    run, _ = _route(monkeypatch)
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: [])
+    run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
+    run.reply({"id": "q", "result": "approved"})
+    assert run.revive == [] and run.wake == []
+
+
+def test_an_unknown_answer_is_held_and_shown_as_unmatched_until_the_question_arrives(monkeypatch):
+    run, box = _route(monkeypatch)
+    run.take({"kind": "answer", "id": "q1", "result": "approved"})
+    q = run.questions[0]
+    assert (q["kind"], q["id"], q["answered"], q["options"]) == ("unmatched", "q1-unmatched", "q1", ["確かめた"])
+    assert q["reason"] and box["questions"]["items"] == [q]
+    run.take({"kind": "ask", "id": "q1", "lane": "la", "question": "?"})
+    assert run.questions == [] and box["answer-q1"]["result"] == "approved"
+
+
+def test_a_lane_notice_of_an_unmatched_answer_blocks_the_finish_until_answered(monkeypatch):
+    run, _ = _route(monkeypatch)
+    run.take({"kind": "unmatched", "id": "a-unmatched", "answered": "a", "lane": "la", "reason": "動いた", "question": "?"})
+    run.ls_ok = True
+    assert not prun._run_finished(run)
+    run.reply({"id": "a-unmatched", "result": "answered", "choice": ["確かめた"]})
+    assert prun._run_finished(run)
+
+
+def test_a_new_request_of_the_same_row_replaces_the_old_and_the_old_answer_wakes_the_owner(monkeypatch):
+    run, box = _route(monkeypatch)
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: ["la"])
+    run.take({"kind": "gate1", "id": "la-g1-a", "lane": "la", "pr": 1, "stamp": "a"})
+    run.take({"kind": "gate1", "id": "la-g1-b", "lane": "la", "pr": 1, "stamp": "b"})
+    run.take({"kind": "gate1", "id": "la-g1-c", "lane": "la", "pr": 1, "stamp": "c"})
+    run.take({"kind": "gate1", "id": "lb-g2-a", "lane": "lb", "pr": 2, "stamp": "z"})
+    q = run.questions[0]
+    assert [x["id"] for x in run.questions] == ["la-g1-c", "lb-g2-a"]
+    assert q["replaced"] == [{"id": "la-g1-b", "stamp": "b"}, {"id": "la-g1-a", "stamp": "a"}]
+    run.reply({"id": "la-g1-a", "result": "approved"})
+    assert box["answer-la-g1-a"]["result"] == "approved" and run.wake == ["la"] and len(run.questions) == 2
+
+
+PRIOR = {"kind": "gate1", "id": "lroot2-w12-l3", "loop": "lroot2", "issue": 12, "pr": 412, "lap": 3, "stamp": "a"}
+
+
+def test_prior_waits_enter_the_list_once_and_do_not_block_the_finish(monkeypatch):
+    run, _ = _route(monkeypatch)
+    run.receive_prior({"requests": [PRIOR], "skipped": []})
+    run.take(dict(PRIOR))  # レーンの周回の境からの同じ行
+    assert [q["id"] for q in run.questions] == ["lroot2-w12-l3"] and prun._run_finished(run)
+    assert [q["id"] for q in run.summary("finished")["prior_waits"]] == ["lroot2-w12-l3"]
+
+
+def test_a_skipped_loop_is_shown_like_an_unmatched_answer(monkeypatch):
+    run, _ = _route(monkeypatch)
+    run.receive_prior({"requests": [], "skipped": [{"loop": "bad", "reason": "壊れている"}]})
+    assert run.questions[0]["kind"] == "unmatched" and "bad" in run.questions[0]["question"]
+
+
+def test_an_answer_to_a_prior_wait_goes_to_its_loop(monkeypatch):
+    run, box = _route(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        parallel_reply, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append((q["id"], a["result"], stamp)) or {}
+    )
+    run.questions = [dict(PRIOR)]
+    run.reply({"id": PRIOR["id"], "result": "approved"})
+    assert calls == [(PRIOR["id"], "approved", None)] and run.questions == [] and box[f"answer-{PRIOR['id']}"]["result"] == "approved"
+    assert run.revive == []
+
+
+def test_a_prior_head_that_moved_replaces_the_question_and_an_old_answer_lands_on_merge_only(monkeypatch):
+    run, _ = _route(monkeypatch)
+    new = {**PRIOR, "id": "lroot2-w12-l3-bbb", "stamp": "b"}
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda *a: {"reask": new})
+    run.questions = [dict(PRIOR)]
+    run.reply({"id": PRIOR["id"], "result": "approved"})
+    assert [q["id"] for q in run.questions] == [new["id"]] and run.questions[0]["replaced"] == [{"id": PRIOR["id"], "stamp": "a"}]
+    run.answered.discard(PRIOR["id"])  # 置き換える前の id へ後から答えた形
+    calls = []
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda m, n, q, a, stamp=None: calls.append(stamp) or {})
+    run.reply({"id": PRIOR["id"], "result": "approved"})
+    assert calls == ["a"] and run.questions == []
+
+
+def test_a_prior_answer_that_cannot_land_is_unmatched(monkeypatch):
+    run, _ = _route(monkeypatch)
+    monkeypatch.setattr(parallel_reply, "step_prior_answer", lambda *a: {"unmatched": "断った"})
+    run.questions = [dict(PRIOR)]
+    run.reply({"id": PRIOR["id"], "result": "rejected"})
+    assert [q["kind"] for q in run.questions] == ["unmatched"] and run.questions[0]["reason"] == "断った"
+
+
+def test_a_replay_of_an_old_record_keeps_the_old_steps(monkeypatch):
+    run, box = _route(monkeypatch)
+    run.routed = False
+    monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: pytest.fail("古い記録の打ち直しでは打たない"))
+    run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
+    run.reply({"id": "q", "result": "approved"})
+    run.reply({"id": "unknown", "result": "approved"})
+    assert run.questions == [] and "unknown" in run.held

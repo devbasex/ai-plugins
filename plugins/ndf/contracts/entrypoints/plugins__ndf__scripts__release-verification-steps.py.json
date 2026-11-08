@@ -8,6 +8,18 @@
     ],
     "positionals": [],
     "subcommands": {
+      "user-config-check": {
+        "options": [
+          "--dir"
+        ],
+        "positionals": []
+      },
+      "user-config-save": {
+        "options": [
+          "--dir"
+        ],
+        "positionals": []
+      },
       "verify-install": {
         "options": [
           "--expect",
@@ -20,6 +32,8 @@
     }
   },
   "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
     "LANG",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
@@ -49,7 +63,9 @@
   ],
   "stdin": "none",
   "stdout": "step-result",
-  "writes": [],
+  "writes": [
+    "user-config-before-json"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",

@@ -97,10 +97,12 @@ def run_request_ask(main: Path, plan: str, lane: str, payload: dict, timeout: fl
         cwd=str(main),
         timeout=timeout,
     )
-    try:
-        return got.returncode, json.loads(got.stdout.strip().splitlines()[-1]) if got.stdout.strip() else {}
-    except ValueError:
+    import step_read  # hook の起動で読まないよう、問い合わせるときだけ読む
+
+    out = step_read.last_json(got.stdout)
+    if out is None and got.stdout.strip():
         return got.returncode or 2, {}
+    return got.returncode, out or {}
 
 
 def hold_text(rid: str, plan: str) -> str:

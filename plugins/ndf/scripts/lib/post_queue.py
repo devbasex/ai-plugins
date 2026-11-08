@@ -212,24 +212,6 @@ def is_rate_limited(attempt: Attempt) -> bool:
     return False
 
 
-def is_position_unresolved(attempt: Attempt) -> bool:
-    """この失敗が「指した位置を差分の中に見つけられない」ことによるものか。
-
-    **レビューの作成は要求ごとに全件が拒まれる。** 差分の外の行やファイルを指した
-    インラインが 1 件でもあると、正しいインラインも総評も作られない（実測、
-    2026-09-22）。応答は語をつないだ 1 つの文字列で、どの項目かは指さないため、
-    呼び出し側は要求のインラインをまとめて総評へ移して送り直す。
-
-    **同じ状態で返る別の拒まれ方と分ける。** 判定の値の誤り
-    （`Variable $event ... was provided invalid value`）と基準のコミットの誤り
-    （`The commitOID is not part of the pull request`）はこの語を持たない。
-    区別しないと、別の不具合が退避として飲み込まれる。
-    """
-    if attempt.ok or attempt.http != 422:
-        return False
-    return _POSITION_WORD in f"{attempt.message} {attempt.stderr}".lower()
-
-
 def is_transient_failure(attempt: Attempt) -> bool:
     """この失敗が一時的なもの（送り直せば届く見込みがある）か（#1843）。上限の語を持たず、状態が 5xx か、状態が無く
     本文が空で応答を読めなかったか、状態が無くネットワークの失敗のとき真。`gh` を呼ばない（残り回数を引かない）。"""
@@ -245,7 +227,7 @@ def is_transient_failure(attempt: Attempt) -> bool:
 # 要求が受け付けられない）。401 / 403 は項目ではなく認証か上限の問題であり、後ろの
 # 項目も同じく送れないため含めない。
 PERMANENT_STATUSES = (400, 404, 410, 422)
-# 飛ばさない種別。レビューの拒否は呼び出し側が退避（`is_position_unresolved`）か
+# 飛ばさない種別。レビューの拒否は呼び出し側が退避（`rejected_by_position`）か
 # 失敗かを決めるため、先頭で止めて返す。ただし今回分でない位置エラーは `Queue.flush` が控えへ外す（#2084）。
 _NOT_DROPPED_KINDS = ("review-post",)
 
@@ -425,7 +407,7 @@ def read_item(path: pathlib.Path) -> dict[str, Any] | None:
 
 
 def rejected_by_position(item: dict[str, Any]) -> bool:
-    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか（`is_position_unresolved` を項目の状態と説明で行う）。"""
+    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか（状態が 422 で、説明が位置を解決できない語を持つ）。"""
     if int(item.get("last_status") or 0) != 422:
         return False
     return _POSITION_WORD in str(item.get("last_error") or "").lower()
@@ -621,13 +603,6 @@ class Queue:
         if seq is None or self._dormant():
             return False
         return self._close_item(lambda _n, item: item.get("seq") == seq, "withdrawn") is not None
-
-    def set_aside(self, path: pathlib.Path) -> pathlib.Path:
-        """送れない項目を待ち行列から外し、控えを `dropped/` へ残す。`path` は `paths()` の 1 つ。"""
-        got = self._close_item(lambda n, _item: n == pathlib.Path(path).stem, "dropped")
-        if got is None:
-            raise FileNotFoundError(str(path))
-        return _aside(self.dir, got.pop("name"), got)
 
     def add(self, item: dict[str, Any], ident: str | int) -> dict[str, Any]:
         """項目を 1 件足し、連番を入れた項目を返す。連番は記録のある名前の最大 + 1（実行の鍵の排他の中で決める）。"""

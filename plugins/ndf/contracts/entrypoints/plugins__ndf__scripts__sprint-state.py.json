@@ -34,6 +34,7 @@
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -82,6 +83,8 @@
   "stdin": "none",
   "stdout": "json",
   "writes": [
+    "answer-hold-json",
+    "answer-hold-log-jsonl",
     "answer-json",
     "applied-json",
     "approved-txt",
@@ -97,7 +100,10 @@
     "prs-txt",
     "request-id-txt",
     "request-txt",
-    "requests-json"
+    "requests-json",
+    "resume-mark-json",
+    "revise-json",
+    "revise-md"
   ],
   "reads": [],
   "exit": {

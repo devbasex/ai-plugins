@@ -61,7 +61,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ask.py" decide --ref <id> --answer "<選�
 hook が `parallel.py request-ask` でオーガナイザーへ送り、問いを止めて保留の手順を返す。止める問い（区分が無い・許されていない）は今どおり止まり、送らない。
 送れないとき（計画が動いていない・送り手でない・上限を越えた）は今どおり問いを通す。
 
-送られたら、その作業を保留して別の作業へ進む。答えはオーガナイザーが送り、持ち主が読んで続ける。
+送られたら、その作業を保留して別の作業へ進む。答えはオーガナイザーが送り、持ち主が読んで続ける。答えていない依頼が閾値を超えると、
+レーンは区切りで止まり、閾値以下へ戻ると起きる（[parallel.md](parallel.md) の「答え待ちの停止」）。依頼そのものは止めない。
 
 | 送り手 | 保留の仕方 | 答えが届いたとき |
 | --- | --- | --- |
@@ -101,7 +102,7 @@ hook が `parallel.py request-ask` でオーガナイザーへ送り、問いを
 
 ## 記録
 
-hook の判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl` へ 1 行ずつ追記する。振り返りでは次で数える。
+hook の判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.claude/ndf/state}/ask.jsonl` へ 1 行ずつ追記する。振り返りでは次で数える。
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ask.py" summary [--since <ISO 8601>] [--cwd <パス>]

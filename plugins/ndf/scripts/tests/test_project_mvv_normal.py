@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+OK_LINE = '{"tool": "external-ai", "status": "ok", "summary": "s", "items": [], "metrics": {}}'
 
 from test_project_mvv import BODY, GATE_PY, MVV_PY, STATE_PY, answer, approve, body_file, calls, env, run, sha  # noqa: F401
 from test_supervise_pace import assert_transitions_exist, cli, load, steps_of
@@ -224,11 +230,12 @@ def test_context_adds_the_sprint_mvv_only_with_a_source(env):
 
 class FakeClaude:
     def __init__(self, texts: list[str]):
-        self.texts, self.calls = list(texts), []
+        self.texts, self.calls, self.rfile = list(texts), [], None
 
     def call(self, system, prompt, tools, cwd, timeout, **kw):
         self.calls.append({"system": system, "prompt": prompt, **kw})
         text = self.texts.pop(0) if self.texts else "## 作業の報告\n- 結果: 完了"
+        self.rfile = worker_fake.write_result(prompt, text, self.rfile)
         return {"ok": True, "text": text, "seconds": 0, "session": "s1", "usage": {}}
 
     def record_usage(self, kind, res):
@@ -258,7 +265,7 @@ def test_worker_gets_the_same_block_in_all_three_calls(env, monkeypatch):
     ctx = work_ctx(env["root"], env["tmp"], texts=["途中"])
     step.execute(ctx, {"id": "w", "prompt": "/ndf:design #1", "full": True})
     assert [c["system"] for c in ctx.claude.calls] == [FULL_SYSTEM + "\n\n" + pm.block(mvv)] * 2  # 再開も同じ 1 回分
-    monkeypatch.setattr(worker_steps, "run_ticking", lambda *a, **k: SimpleNamespace(stdout='{"status": "ok"}'))
+    monkeypatch.setattr(worker_steps, "run_ticking", lambda *a, **k: SimpleNamespace(stdout=OK_LINE, returncode=0, stderr=""))
     ctx = work_ctx(env["root"], env["tmp"])
     step.execute(ctx, {"id": "w", "prompt": "直す", "runtime": "codex"})
     assert (ctx.state.dir / "w-prompt.md").read_text().startswith(WORK_SYSTEM + "\n\n" + pm.block(mvv) + "\n\n")
