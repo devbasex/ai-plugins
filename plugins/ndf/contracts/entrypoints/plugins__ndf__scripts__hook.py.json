@@ -25,6 +25,7 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
     "NDF_RELAY",
     "NDF_RELAY_CLAUDE",
     "NDF_RELAY_DEPTH",
@@ -91,5 +92,9 @@
     "plugins/ndf/hooks/codex.json",
     "plugins/ndf/scripts/hook_lib/goal_skill.py",
     "plugins/ndf/scripts/hook_lib/words.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json・codex.json が起動する"
+  }
 }

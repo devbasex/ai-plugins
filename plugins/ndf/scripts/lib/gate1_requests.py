@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import design_pr_merge
 import jsonio
+import step_read
 from sprint_loop_names import LOOP_DIR
 
 SPRINT_STATE = Path(__file__).resolve().parents[1] / "sprint-state.py"
@@ -206,10 +206,7 @@ def _loop_answer(run, main: Path, q: dict, args: list[str], expect: str | None =
         code, so, se = run(cmd, cwd=str(main))
         if code != 0:
             return f"loop answer が断った（{code}）: {(se or so).strip()[:200]}"
-        try:
-            status = (json.loads(so.strip().splitlines()[-1]).get("metrics") or {}).get("status")
-        except (ValueError, IndexError, AttributeError):
-            status = None
+        status = ((step_read.result_line(so) or {}).get("metrics") or {}).get("status")
         if status != "regated":
             return None
     return "loop answer が新しい先頭での答え直しを求めた"

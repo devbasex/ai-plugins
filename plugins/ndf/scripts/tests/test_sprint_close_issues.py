@@ -88,7 +88,7 @@ def test_record_unknown_keeps_the_given_issues_open_with_a_reason(repo, gh):
     gh.set(issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
     args = ["--record-pr", "unknown", "--issues", "1,2", "--repo", "o/r", "--with-verification"]
     code, out, err = call("sprint-close.py", args, gh.env, repo)
-    assert code == 0 and out["status"] == "ok", (out, err)
+    assert code == 10 and out["status"] == "gate", (out, err)
     res = issues_of(out)
     assert sorted(res) == ["o/r#1", "o/r#2"]
     assert all(i["result"] == "kept_open" and "置き場が分からない" in i["reason"] for i in res.values())
@@ -112,7 +112,7 @@ def test_record_pr_rejects_other_values(repo, gh, value):
     code, _, _ = call(
         "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", value, "--issues", "1", "--repo", "o/r"], gh.env, repo
     )
-    assert code == 3
+    assert code == 2
 
 
 def test_issues_are_added_to_the_closing_words_of_the_prs(repo, gh):

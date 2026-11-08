@@ -21,6 +21,7 @@ from typing import Callable
 import ci_workflows
 import clock
 import delivery
+import step_read
 
 MERGED_STEPS = Path(__file__).resolve().parents[1] / "merged-steps.py"
 RESULTS = ("merged", "already_merged", "head_moved", "no_stamp", "not_green", "conflict", "production", "failed")
@@ -39,15 +40,9 @@ def run_cmd(cmd: list[str], cwd: str | None = None, stdin: str | None = None) ->
     return p.returncode, p.stdout, p.stderr
 
 
-def _last_json(text: str) -> dict:
-    for line in reversed((text or "").strip().splitlines()):
-        try:
-            got = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(got, dict):
-            return got
-    return {}
+def _child_result(text: str) -> dict:
+    """子の出力の最後の JSON の行（共通の読み手 `step_read.last_json`）。無ければ空。"""
+    return step_read.last_json(text) or {}
 
 
 def _res(result: str, pr: int, head: str = "", reason: str = "", cls: str | None = None, **extra) -> dict:
@@ -121,7 +116,7 @@ def _try_merge(root: str, pr: int, stamp: str, run: Run, budget: int) -> dict:
     if why := _checks_registered(root, base, stamp, info.get("statusCheckRollup") or [], run):
         return _res("not_green", pr, head, why, UNREGISTERED, **ctx)
     code, so, se = run([sys.executable, str(MERGED_STEPS), "probe", "--pr", str(pr), "--act"], cwd=root)
-    cls = (_last_json(so).get("metrics") or {}).get("class")
+    cls = (_child_result(so).get("metrics") or {}).get("class")
     if code != 0 or not cls:
         return _res("failed", pr, head, f"検査を分類できない（probe {code}）: {(se or so).strip()[:200]}", **ctx)
     if cls not in ("passed", "infra"):
@@ -132,7 +127,7 @@ def _try_merge(root: str, pr: int, stamp: str, run: Run, budget: int) -> dict:
             return _res("not_green", pr, head, f"CI の基盤待ちが再実行 {INFRA_RERUNS} 回で解けない", cls, **ctx)
         argv += ["--infra-gap", "0", "--infra-reruns", str(budget)]
     code, so, se = run(argv, cwd=root)
-    got = _last_json(so)
+    got = _child_result(so)
     ctx["infra_rerun"] = sum(1 for i in got.get("items") or [] if isinstance(i, dict) and i.get("result") == "infra_rerun")
     return _from_merge(pr, head, cls, code, got, se, ctx)
 

@@ -236,7 +236,17 @@ python3 "$SCRIPTS/sprint-close.py" --record-pr <記録のPR番号> [--final-stag
 | `closed_unverified` | 既に閉じていたが閉じる条件 2 か 3 を満たさない。開き直さない | 番号と `reason`（満たさない理由と番号）。受け入れ条件を確かめて印を付けるか、開き直すかを人が決める |
 | `kept_open` | 閉じる条件に当たらない（条件 3 では `reason` が「最終工程（<工程>）の記録が無い: <何が無いか>」）。または参照だけの課題（`reason` が「closing keywords（…）も --issues も無い参照」。状態を読めなければ先頭に「状態を読めない」） | 番号と `reason`（いつ閉じるか。参照だけの課題は、閉じるなら `--issues` で渡す） |
 
-**`kept_open` と `closed_unverified` は止める理由にしない。** 棚卸しへ進んでよい。
+結果の状態と終了コードは閉じる対象（参照だけの課題を除く）の内訳で決まる。閉じなかった課題は `gaps` に 1 件ずつ
+（`name` は `<リポジトリ>#<番号>`、`reason` は項目の理由）載る。参照だけの課題は `gaps` と状態に入れない。
+
+| 閉じる対象の内訳 | `status` | 終了コード |
+| --- | --- | --- |
+| すべて `closed` か `already_closed`（`--dry-run` では `would_close`） | `ok` | 0 |
+| `failed` が 1 件以上 | `stopped` | 1（棚卸しへ進まない） |
+| `failed` が無く、`kept_open` か `closed_unverified` が 1 件以上。または `--record-pr unknown` | `gate` | 10 |
+
+**承認ゲートの 10 は止める理由にしない。** プランは棚卸しへ進み、フェーズの結果が承認ゲートになる。人は `gaps` で
+閉じなかった課題と理由を読み、条件を満たす工程を通してから打ち直すか、確かめて手で閉じる。呼び出しの誤りは 2 で返る。
 
 ### 閉じる条件
 
@@ -250,7 +260,7 @@ python3 "$SCRIPTS/sprint-close.py" --record-pr <記録のPR番号> [--final-stag
 確かめていないことが終わったように見える。
 
 `--record-pr 0`（本番の記録なし）は条件 1・2 を見ない。`--record-pr unknown`（記録の置き場が分からない）は
-本文を読まずにすべて `kept_open` で返す。まとめのプランは `unknown` を組まず、記録の PR を流す時点に `{queue_record}` で探す
+本文を読まずにすべて `kept_open` で返す（承認ゲート・10）。まとめのプランは `unknown` を組まず、記録の PR を流す時点に `{queue_record}` で探す
 （`development-workflow` の `references/pace.md` の「スプリントの終わり」）。`unknown` を渡すのは手で打つ入口と、前の版で組んだまとめのプランだけである。
 
 ### 閉じる予定の参照

@@ -68,7 +68,7 @@ Factory（`factory/`）は結果 JSON を読まない。
 | 試行の選び方と置き場の区別の共通の関数（`lib/step_read.py`） | 実験版（`plugins/ndf/scripts/experimental/`）のスクリプト |
 | シェルから同じ形を出す CLI と関数（`step_result.py emit`・`lib/step-result.sh`） | hook・statusline・利用者が手で打つだけの補助 |
 | 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）の返し方と、呼ぶ側（`record_stage`・`sprint-close.py`）の読み方 | Factory の進行のイベントの語彙（`factory/contracts` の `result`） |
-| 状態と終了コードの表を `lib/README.md` だけに置くこと | `handoff.py` の終了コード 4・5（共通の表と違う意味で返し、`emit` を通らない。別の Issue で扱う） |
+| 状態と終了コードの表を `lib/README.md` だけに置くこと | — |
 
 **働く範囲は利用先のリポジトリを含む**（`plugins/ndf/scripts/lib/` はリリース対象）。プロジェクトごとに変わる設定は無い。
 
@@ -94,7 +94,7 @@ Factory（`factory/`）は結果 JSON を読まない。
 | --- | --- | --- | --- | --- |
 | 結果 JSON | 手順のスクリプト 1 本（形の検査は `lib/step_result.py` の `validate_result` / `emit` だけが行う） | 結果 JSON | — | 状態と終了コードの組・`items`・欠け（`gaps`）・過程の項目（`process`）・判断の項目（`decisions`） |
 | 試行 | `supervise_lib` の `RunState`（プランの実行の記録に `NN-<ステップ>.out` を書く） | 試行 | — | 番号・ステップの名前・結果 JSON |
-| 読み取りの結果 | `lib/step_read.py`（読むだけで、試行も置き場も書き換えない） | 採った試行（`Pick`）/ 開いた置き場（`Place`） | — | 採り方の結果（`Pick.outcome`）・置き場の状態（`Place.state`） |
+| 読み取りの結果 | 読む側（読むだけで、試行も置き場も書き換えない） | 採った試行 / 開いた置き場 | — | 採り方の結果・置き場の状態（無い・読めない・空・ある） |
 
 試行は結果 JSON を番号とステップの名前で指し、読み取りの結果は試行を番号で指す。読み取りの結果が試行や置き場を書き換える経路は無い。
 
@@ -104,7 +104,7 @@ Factory（`factory/`）は結果 JSON を読まない。
 | --- | --- |
 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) の「手順のスクリプトの結果」 | 結果 JSON の形・状態と終了コードの表・`ok` の条件・読む側の規則の正本 |
 | [`plugins/ndf/scripts/lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | 形の検査（`validate_result`）、結果の組み立て（`result`）、1 行の出力と終了（`emit`）、シェルから呼ぶ CLI（副命令 `emit`。`cli_parser`・`main`）、終了コードの定数（`EXIT_INCOMPLETE = 6` ほか）、欠け・過程・判断の要素の鍵（`RECORD_KEYS`） |
-| [`plugins/ndf/scripts/lib/step_read.py`](../../plugins/ndf/scripts/lib/step_read.py) | 試行の選び方（`pick_ok_attempt`）、置き場の開き方（`open_place`・`place_stop`）、子プロセスの結果の読み方（`result_line`・`not_ok_reason`・`process_if_not_ok`）。標準ライブラリだけで書く |
+| [`plugins/ndf/scripts/lib/step_read.py`](../../plugins/ndf/scripts/lib/step_read.py) | 子プロセスの結果の読み方（`result_line`・`not_ok_reason`・`process_if_not_ok`）。標準ライブラリだけで書く |
 | [`plugins/ndf/scripts/lib/step-result.sh`](../../plugins/ndf/scripts/lib/step-result.sh) | シェルが source する関数。値を溜める（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric`）、`gh` を走らせて失敗の要旨を残す（`sr_gh`・`sr_brief`）、別の手順のスクリプトの結果を取り込む（`sr_absorb`）、出して終える（`sr_emit`・`sr_bad_args`） |
 | [`plugins/ndf/scripts/progress-record.sh`](../../plugins/ndf/scripts/progress-record.sh) | Issue の本文の `## 進行` へ書いた成否を 1 行の結果 JSON で返す。錠の内側で走った自分の結果を外側の 1 行へまとめる |
 | [`plugins/ndf/scripts/projects-sync.sh`](../../plugins/ndf/scripts/projects-sync.sh) | `progress-record.sh` の結果とボードへ書いた成否を 1 行の結果 JSON にまとめる |
@@ -116,7 +116,7 @@ graph LR
   subgraph lib["plugins/ndf/scripts/lib"]
     README["README.md<br>手順のスクリプトの結果"]
     SR["step_result.py<br>validate_result / result / emit / CLI emit"]
-    RD["step_read.py<br>pick_ok_attempt / open_place / place_stop<br>not_ok_reason / process_if_not_ok"]
+    RD["step_read.py<br>result_line / not_ok_reason / process_if_not_ok"]
     SH["step-result.sh<br>sr_gh / sr_absorb / sr_emit"]
   end
   PY["手順のスクリプト（Python）"] -->|emit| SR
@@ -145,34 +145,13 @@ classDiagram
     +cli_parser() ArgumentParser
     +main(argv) NoReturn
   }
-  class Pick {
-    +outcome: str
-    +result: dict | None = None
-    +number: int | None = None
-    +attempts: tuple = ()
-  }
-  class Place {
-    +path: Path
-    +state: str
-    +text: str | None = None
-    +entries: tuple = ()
-    +reason: str = ""
-  }
   class step_read {
-    +pick_ok_attempt(dir, step, tool) Pick
-    +open_place(path) Place
-    +place_stop(tool, place, what) tuple | None
     +result_line(stdout) dict | None
     +not_ok_reason(stdout, code, stderr="") str | None
     +process_if_not_ok(run, completed) list~dict~
   }
-  step_read ..> Pick
-  step_read ..> Place
-  step_read ..> step_result : validate_result / result
+  step_read ..> step_result : validate_result
 ```
-
-`Pick` と `Place` は凍結した dataclass である。`Pick.outcome` は `ok` / `no_ok_attempt` / `no_attempt` / `no_place` / `unreadable`、
-`Place.state` は `missing` / `unreadable` / `empty` / `present` で、語彙はそれぞれ `PICK_*`・`PLACE_*` の定数が持つ。
 
 ### 常に成り立つ条件
 
@@ -182,8 +161,8 @@ classDiagram
 | I2 | 結果 JSON | 終了コード 6 は `status` が `stopped` で `gaps` が 1 件以上のときだけである（`gaps` 付きの `stopped` を 1 で返すことは許す） | 同上 |
 | I3 | 結果 JSON | `gaps` / `process` / `decisions` は配列で、各要素はオブジェクトで、`RECORD_KEYS` の鍵（`gaps`: `kind`・`name`・`reason`、`process`: `run`・`result`、`decisions`: `decision`・`basis`）を空白だけでない文字列で持つ。ほかの鍵は持ってよい | 同上 |
 | I4 | 結果 JSON | 読む側が成功とするのは `status` が `ok` で終了コード 0 のときだけである。6 を含むほかの値、結果 JSON が無い・形が誤っていることを成功と読まない | `supervise_lib` は `on_exit` に一致する行き先か `on_fail` へ回し、どちらも無ければ止まる |
-| I5 | 読み取りの結果 | 試行から値を採るのは `status` が `ok` の試行だけで、その中で番号の最も大きいものを採る | `ok` の試行が無ければ `result` を返さず、`Pick.outcome` で理由を返す（落ちた試行の値を返さない） |
-| I6 | 読み取りの結果 | 置き場が存在しない・読めないことと、置き場はあるが材料が 0 件であることを別の値で返す | 存在しない・読めないときに `empty` を返さない。`place_stop` はそれぞれ終了コード 3・2 の `stopped` を組む |
+| I5 | 読み取りの結果 | 試行から値を採るのは `status` が `ok` の試行だけで、その中で番号の最も大きいものを採る | `ok` の試行が無ければ値を採らず、理由を返す（落ちた試行の値を返さない） |
+| I6 | 読み取りの結果 | 置き場が存在しない・読めないことと、置き場はあるが材料が 0 件であることを別の値で返す | 存在しない・読めないときに 0 件と返さない。それぞれ終了コード 3・2 の `stopped` で返す |
 | I7 | 結果 JSON | `progress-record.sh`・`projects-sync.sh` は 1 回の呼び出しで標準出力へ結果 JSON を 1 行だけ出し、その行は `validate_result` を通る。中の `gh` が失敗したら `ok` でなく、`gh` の標準エラーの要旨を `summary` か `gaps[].reason` に入れ、終了コードは 0 以外である | `sr_emit` が形を確かめ、破れていれば何も出さず 2。テストが落ちる |
 | I8 | 結果 JSON | 記録のスクリプトが `ok` 以外を返しても、`record_stage` はプランを次のステップへ進め、`sprint-close.py` は Issue を閉じる処理を続ける | テストが落ちる |
 
@@ -194,8 +173,8 @@ classDiagram
 | E1 | 手順のスクリプトが処理を終えた | 手順のスクリプト | 同じスクリプトの結果の組み立て | 例外・打ち切りで結果 JSON を出さずに終わる → 読む側は結果 JSON が無いことを成功と読まない（I4） |
 | E2 | 結果を成功・収束 / 欠けの残る結果 / 失敗 / 判断待ちのどれかに分けた | 手順のスクリプト | `validate_result` | 分けた結果と書いた状態が食い違う（欠けがあるのに `ok`）→ `emit` が 2 で終える（I1・I2） |
 | E3 | 結果 JSON を 1 行出し、状態に合った終了コードで終えた | `emit` / `sr_emit` | `supervise_lib`・LLM・承認資料の組み立て | 形の誤り → 終了コード 2 |
-| E4 | 読む側が結果の置き場を開いた | `step_read.open_place` / `pick_ok_attempt` | 呼んだ読み手 | 置き場が無い・読めない → 0 件と読まず 3・2 で返す（I6） |
-| E5 | 読む側が採る試行を選んだ | `step_read.pick_ok_attempt` | 呼んだ読み手 | `ok` の試行が無い → 値を採らない（I5） |
+| E4 | 読む側が結果の置き場を開いた | 読む側（`release_lib/materials.py` の `last_result` ほか） | 読む側の呼び手 | 置き場が無い・読めない → 0 件と読まず 3・2 で返す（I6） |
+| E5 | 読む側が採る試行を選んだ | 読む側（`release_lib/materials.py` の `last_result` ほか） | 読む側の呼び手 | `ok` の試行が無い → 値を採らない（I5） |
 | E6 | 読む側が次の工程へ進んだか、止まった | `supervise_lib`・LLM | プランの次のステップ・フェーズレポート | 記録のスクリプトの失敗では止まらない（I8） |
 
 ### `validate_result(obj, code=None)` の規則
@@ -249,14 +228,11 @@ bash 3.2 で動く形で書く（`mapfile` を使わず、NUL 区切りをプロ
 
 | 関数 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `pick_ok_attempt(dir, step, tool)` | プランの実行の記録のディレクトリ・ステップの id・採る結果 JSON の `tool` | `dir` の `NN-<step>.out`（名前が `^(\d+)-(.+)\.out$` で `<step>` が一致するファイル）ごとに、最後の「`tool` が一致し `validate_result` を通る行」をその試行の結果とする。`ok` の試行があれば `outcome="ok"`・番号の最も大きい `ok` の試行の `result` と `number`。無ければ `result=None` で、ディレクトリが無い → `no_place`、列挙できない → `unreadable`、`.out` が無い → `no_attempt`、`ok` の試行が無い → `no_ok_attempt`。`attempts` は全試行の（番号, `status`）の組で、結果 JSON の無い試行は `"none"` | 例外を投げない。読めない個々の `.out` は `"none"` にして続ける |
-| `open_place(path)` | ファイルかディレクトリのパス | 無い → `missing`。読めない（権限・デコード・列挙の失敗）→ `unreadable`（`reason` に例外の文）。ファイルが空白だけ・ディレクトリに項目が無い → `empty`。ある → `present`（ファイルは `text`、ディレクトリは並べた `entries`） | 例外を投げない |
-| `place_stop(tool, place, what)` | 結果 JSON の `tool`・`Place`・材料の名前 | `missing` → （`stopped`・summary「<what> の置き場が無い: <path>」, 3）。`unreadable` → （同「<what> の置き場を読めない: <path>（<reason>）」, 2）。`empty`・`present` → `None`（呼ぶ側が読み、`empty` は 0 件の `ok` にしてよい） | — |
 | `result_line(stdout)` | 子プロセスの標準出力 | 最後の空でない行を JSON として読み、`validate_result` を通れば dict、無い・読めない・形が誤っていれば `None` | — |
 | `not_ok_reason(stdout, code, stderr="")` | 標準出力・終了コード・標準エラー | 結果 JSON が `ok` で終了コード 0 なら `None`。結果 JSON が無ければ「結果 JSON が無い（exit=<code>）: <標準エラーの先頭 200 文字>」。ほかは「<status>（exit=<code>）: <summary>（<gaps の reason を「; 」でつないだもの>）」 | — |
 | `process_if_not_ok(run, completed)` | 打ったコマンドの表記・`subprocess.CompletedProcess` | `ok` でなければ過程の項目 1 件 `[{"run": run, "result": <not_ok_reason>}]`、`ok` なら `[]` | — |
 
-置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）では、`open_place` の前に宣言の有無で分け、無いことを欠けとも
+置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）では、置き場を開く前に宣言の有無で分け、無いことを欠けとも
 前提の欠けとも読まない。
 
 ### 記録のスクリプトの返し方（`progress-record.sh` / `projects-sync.sh`）
@@ -294,13 +270,13 @@ sequenceDiagram
     E-->>R: 1 行の結果 JSON・終了コード（E3）
   end
   R->>R: ok かつ 0 だけを成功、ほかは on_exit・on_fail か停止（E6）
-  R->>P: pick_ok_attempt / open_place（E4・E5）
+  R->>R: 置き場を開き、採る試行を選ぶ（E4・E5）
   alt 置き場が無い・読めない
-    P-->>R: no_place・missing / unreadable（stopped の 3 / 2 で返す）
+    R->>R: stopped の 3 / 2 で返す
   else ok の試行が無い
-    P-->>R: no_ok_attempt（値を採らない）
+    R->>R: 値を採らない
   else
-    P-->>R: 番号の最も大きい ok の試行の結果 JSON
+    R->>R: 番号の最も大きい ok の試行の結果 JSON を採る
   end
 ```
 
@@ -359,7 +335,6 @@ sequenceDiagram
 | --- | --- | --- |
 | `EXIT_INCOMPLETE` | `lib/step_result.py` | `6`。値の持ち主 |
 | `RECORD_KEYS` | `lib/step_result.py` | `gaps`・`process`・`decisions` の要素の鍵 |
-| `PICK_*`・`PLACE_*` | `lib/step_read.py` | `Pick.outcome`・`Place.state` の語彙 |
 | `NDF_PROGRESS_LOCKED` | 環境変数（`progress-record.sh` が錠の内側へ渡す） | 内側の印。利用者は設定しない |
 | `NDF_PROGRESS_LOCK_TIMEOUT` | 環境変数 | 本文の錠を待つ秒。既定 `30` |
 
@@ -369,7 +344,7 @@ sequenceDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| 共通の関数の呼び手 | `pick_ok_attempt`・`open_place`・`place_stop` を製品のコードから呼ぶ箇所はまだ無い（呼ぶのはテストだけ）。承認資料の組み立ては `release_lib/materials.py` の `last_result(prefer_ok=True)` が自前で試行を選び、`ok` の試行が無ければ最後の試行を読んで「`ok` で終わっていない」と書く。`gate-rejections.py count` と `release-steps.py notes --check-state` も置き場の区別を自前で持つ。新しく試行や置き場を読む箇所は `step_read` を使う |
+| 試行と置き場の読み方 | 試行と置き場を読む規則（I5・I6）は読む側がそれぞれ持ち、共通の関数を持たない。承認資料の組み立ては `release_lib/materials.py` の `last_result(prefer_ok=True)` が自前で試行を選び、`ok` の試行が無ければ最後の試行を読んで「`ok` で終わっていない」と書く。`gate-rejections.py count` と `release-steps.py notes --check-state` も置き場の区別を自前で持つ |
 | 過程・判断の項目の埋まり方 | 任意の項目で、書き足したのは記録のスクリプトと子の Issue の箇所だけである。`gaps` が無いことは「書き手が欠けは無いと述べた」と読む |
 | `python3` が無い環境 | `progress-record.sh`・`projects-sync.sh` は結果 JSON を出せず、`sr_emit` が標準エラーへ理由を出して 2 で終える |
 | シェルの対象 | 記録のスクリプト 2 本だけである（決定 8）。ほかのシェルのスクリプトの標準出力は今のまま |
@@ -377,7 +352,7 @@ sequenceDiagram
 
 ## テスト観点
 
-形の検査・試行の選び方・置き場の区別は単体テスト、記録のスクリプトは偽の `gh` を `PATH` の先頭に置く結合テストで確かめる。
+形の検査と子プロセスの結果の読み方は単体テスト、記録のスクリプトは偽の `gh` を `PATH` の先頭に置く結合テストで確かめる。
 `.md` の文言は固定しない（状態と終了コードの表が `lib/README.md` だけにあることは、`status` と `終了コード` を同じ見出し行に持つ表を
 `plugins/ndf` の `.md` から `grep` して見る）。
 
@@ -387,9 +362,7 @@ sequenceDiagram
 | 終了コード 6（I2） | `stopped` / 6 で `gaps` が空なら誤り、1 件なら通る。`ok` / 6・`gate` / 6 は不一致。`stopped` で `gaps` があり終了コードを省くと 6 | 同上 |
 | 要素の鍵（I3） | `gaps` の要素に `reason` が無い・空・文字列でない、`process` の要素がオブジェクトでないと誤り。決めた鍵とほかの鍵を持つ要素は通る。空の配列は `result()` が置かない | 同上 |
 | CLI | `emit` の副命令が Python の `emit` と同じ結果を出し、`ok` に `--gap` を付けると 2 | 同上 |
-| 試行の選び方（I5） | 番号 1 が `ok`・2 が `stopped` → 1 の結果。全試行が `stopped` → `result` が無く `no_ok_attempt`。`.out` が無い → `no_attempt`。ディレクトリが無い → `no_place`。別の `tool`・別のステップ・壊れた行は採らない | [`tests/test_step_read.py`](../../plugins/ndf/scripts/tests/test_step_read.py) |
-| 置き場の区別（I6） | ファイルとディレクトリのそれぞれで、無い → `missing` と 3、読めない（デコード・権限）→ `unreadable` と 2、空 → `empty` と `None`、ある → `present` | 同上 |
-| 子プロセスの結果 | 最後の行の結果 JSON が `ok` でなければ過程の項目が 1 件返る | 同上 |
+| 子プロセスの結果 | 最後の行の結果 JSON が `ok` でなければ過程の項目が 1 件返る | [`tests/test_step_read.py`](../../plugins/ndf/scripts/tests/test_step_read.py) |
 | 既存の読み手（I4） | run のステップが終了コード 6 で終わると `on_fail` へ回り、`on_fail` が無ければ止まり、`on_exit` に `"6"` があればその行き先へ回る | [`tests/test_step_result_readers.py`](../../plugins/ndf/scripts/tests/test_step_result_readers.py)・[`tests/test_supervise.py`](../../plugins/ndf/scripts/tests/test_supervise.py) |
 | 記録のスクリプト（I7） | 偽の `gh` が失敗するとき、`progress-record.sh` と `projects-sync.sh` が 1 行の結果 JSON を出し、それが `validate_result` を通り、`ok` でなく、`gaps` か `summary` に偽の `gh` の標準エラーの文が入り、終了コードが 0 以外。錠の内側でも `projects-sync.sh` からでも標準出力は 1 行 | [`tests/test_progress_record.py`](../../plugins/ndf/scripts/tests/test_progress_record.py)・[`tests/test_projects_sync_record.py`](../../plugins/ndf/scripts/tests/test_projects_sync_record.py) |
 | 記録の無い工程 | `デプロイ` の記録で、記録の無い必須の工程が `items` の `kind: "stage-missing"` の要素になる | [`tests/test_progress_record_stages.py`](../../plugins/ndf/scripts/tests/test_progress_record_stages.py) |

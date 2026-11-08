@@ -235,3 +235,17 @@ def test_cli_emit_refuses_ok_with_gap(capsys):
     with pytest.raises(SystemExit) as e:
         sr.main(["emit", "--tool", "t", "--status", "ok", "--summary", "s", "--gap", "k", "n", "r"])
     assert e.value.code == 2 and capsys.readouterr().out == ""
+
+
+def test_emit_out_writes_the_same_line_to_the_file(tmp_path):
+    import subprocess
+    import sys
+
+    out = tmp_path / "w" / "result.json"
+    lib = Path(__file__).resolve().parents[1] / "lib"
+    cmd = [sys.executable, str(lib / "step_result.py"), "emit", "--tool", "worker", "--status", "gate", "--summary", "s"]
+    p = subprocess.run([*cmd, "--next", "判断が要る", "--out", str(out)], capture_output=True, text=True)
+    assert p.returncode == 10 and json.loads(out.read_text()) == json.loads(p.stdout)
+    bad = tmp_path / "bad.json"
+    p = subprocess.run([*cmd, "--out", str(bad)], capture_output=True, text=True)  # gate に next が無い
+    assert p.returncode == 2 and not bad.exists()

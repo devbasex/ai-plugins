@@ -50,8 +50,8 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "PR・設計文書・入力を読めない（status stopped）",
-    "10": "表が無い・行の無い項目がある・対応か箇所の欄が空の項目がある（status gate）"
+    "2": "読めない・呼び出しの誤り: PR・設計文書・入力を読めない（status stopped）",
+    "10": "承認ゲート: 表が無い・行の無い項目がある・対応か箇所の欄が空の項目がある（status gate）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/README.md",

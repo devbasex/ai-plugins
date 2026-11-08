@@ -97,19 +97,6 @@ def test_files_under(path: str, work: str) -> list[str]:
     ]
 
 
-def is_test_location(path: str, work: str) -> bool:
-    """その `--scope` の 1 件がテストの置き場所かどうか。
-
-    名前で当たる → 配下の 1 階層にテストの名前のディレクトリがある → 配下の追跡ファイルにテストの名前の形が
-    ある（テストを本体と同じ場所に置く構成。決定 12）の順に見る。
-    """
-    if _matches_by_name(path, work):
-        return True
-    if _child_test_location(path, work) is not None:
-        return True
-    return bool(test_files_under(path, work))
-
-
 def test_locations(scope: Iterable[str], work: str) -> list[str]:
     """`--scope` のうち、テストの置き場所とみなせるもの。
 

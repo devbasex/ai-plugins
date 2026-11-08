@@ -70,7 +70,7 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "違反があった・手順が失敗した（status stopped）",
+    "1": "失敗: 違反があった・手順が失敗した（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）",
     "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
   },

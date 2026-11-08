@@ -204,7 +204,7 @@ def test_a_raising_hook_does_not_break_save(tmp_path, capsys, refactor):
     try:
         statefile.save(tmp_path / "s.json", {"a": 1})
     finally:
-        statefile.unregister_after_save(hook)
+        statefile._AFTER_SAVE.remove(hook)
     assert json.loads((tmp_path / "s.json").read_text()) == {"a": 1}
     assert "差し込み口が壊れた" in capsys.readouterr().err
 

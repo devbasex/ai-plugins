@@ -8,13 +8,13 @@ hook の 1 本のエントリポイント（決定 20）が、書き込み先の
 | 癖 | 包みの扱い |
 | --- | --- |
 | 並び（`&&` / `||`）とパイプの末尾のリダイレクトが並び全体に付く | `split_redirects()` が本体とリダイレクトに分け、`reattach` で最後のコマンドへ付け直すかを返す |
-| リダイレクトの被演算子の後ろの語が destination / argument として並ぶ | `command_words()` がコマンドの引数に戻す |
+| リダイレクトの被演算子の後ろの語が destination / argument として並ぶ | `command_parts()` がコマンドの引数に戻す |
 | `<>` が ERROR になる | `redirect_operator()` が演算子の字面をつないで読む |
 | `time` がコマンド名になる | `command_name_index()` が `time`・`command`・`builtin` を飛ばす |
 | ヒアドキュメントの本文の `$((…))` をコマンド置換と読み、バッククォートは読まない | `substitutions()` が算術展開を飛ばし、本文のバッククォートを読み直す |
 
-読めない形（試行で食い違った 2 件）: `! case … esac` は否定した複合コマンドが ERROR になる（`has_parse_error()` が
-真になるので、呼び出し側は判定を控える）。`cp a.txt $(basename b).txt` の展開を含む語は `$` を含んだまま返る
+読めない形（試行で食い違った 2 件）: `! case … esac` は否定した複合コマンドが ERROR になる（構文木の根の
+`has_error` が真になるので、呼び出し側は判定を控える）。`cp a.txt $(basename b).txt` の展開を含む語は `$` を含んだまま返る
 （書き込み先にしない）。
 
 hook の経路で使うため、`deps.require()` は呼ばない（決定 20。hook は用意済みの環境の python から起動する）。
@@ -64,11 +64,6 @@ def _bash_parser() -> ts.Parser:
 def parse_bash(cmd: str) -> Node:
     """コマンドの文字列の構文木の根（`program`）。"""
     return _bash_parser().parse(cmd.encode("utf-8")).root_node
-
-
-def has_parse_error(cmd: str) -> bool:
-    """tree-sitter-bash が読めない箇所（ERROR・欠けた字句）を含むか。"""
-    return parse_bash(cmd).has_error
 
 
 def _read_write_quirk(n: Node) -> bool:
@@ -198,11 +193,6 @@ def command_parts(n: Node, extra_redirects: list[Node] = ()) -> tuple[list[Node]
     words += trailing_words(rs)
     words.sort(key=lambda c: c.start_byte)
     return words, rs, assigns
-
-
-def command_words(n: Node, extra_redirects: list[Node] = ()) -> list[Word]:
-    """`command` の語を引用を外して返す。"""
-    return [unquote(c) for c in command_parts(n, extra_redirects)[0]]
 
 
 def command_name_index(words: list[str]) -> int:

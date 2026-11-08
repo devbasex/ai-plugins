@@ -28,7 +28,7 @@ import pytest
     ],
 )
 def test_a_test_location_is_recognized(scope, tmp_path, path):
-    assert scope.is_test_location(path, str(tmp_path)) is True
+    assert bool(scope.test_locations([path], str(tmp_path))) is True
 
 
 @pytest.mark.parametrize(
@@ -41,12 +41,12 @@ def test_a_test_location_is_recognized(scope, tmp_path, path):
     ],
 )
 def test_a_non_test_location_is_not_recognized(scope, tmp_path, path):
-    assert scope.is_test_location(path, str(tmp_path)) is False
+    assert bool(scope.test_locations([path], str(tmp_path))) is False
 
 
 def test_the_judgement_does_not_need_the_directory_to_exist(scope, tmp_path):
     """`--scope` は範囲の宣言である。まだ無いディレクトリを指すことがある。"""
-    assert scope.is_test_location("tests/not-created-yet", str(tmp_path)) is True
+    assert bool(scope.test_locations(["tests/not-created-yet"], str(tmp_path))) is True
 
 
 def test_everything_is_covered_when_nothing_limits_the_search(scope):
@@ -96,18 +96,18 @@ def test_the_gate_passes_a_valid_scope(scope, tmp_path):
 def test_a_parent_holding_tests_is_recognized(scope, tmp_path):
     """名前で当たらなくても、配下に実体があれば置き場所として扱う。"""
     (tmp_path / "skills" / "development-workflow" / "tests").mkdir(parents=True)
-    assert scope.is_test_location("skills/development-workflow", str(tmp_path)) is True
+    assert bool(scope.test_locations(["skills/development-workflow"], str(tmp_path))) is True
 
 
 def test_a_parent_without_tests_is_still_not_recognized(scope, tmp_path):
     (tmp_path / "skills" / "development-workflow" / "docs").mkdir(parents=True)
-    assert scope.is_test_location("skills/development-workflow", str(tmp_path)) is False
+    assert bool(scope.test_locations(["skills/development-workflow"], str(tmp_path))) is False
 
 
 def test_the_scan_does_not_go_deeper_than_one_level(scope, tmp_path):
     """深く潜ると、無関係な階層のテストを根拠にして検査が素通りする。"""
     (tmp_path / "src" / "a" / "b" / "tests").mkdir(parents=True)
-    assert scope.is_test_location("src", str(tmp_path)) is False
+    assert bool(scope.test_locations(["src"], str(tmp_path))) is False
 
 
 def test_the_returned_location_is_the_one_that_matched(scope, tmp_path):
@@ -145,7 +145,7 @@ def _git_repo(tmp_path, files):
 def test_a_directory_holding_spec_files_is_a_test_location(scope, tmp_path):
     """`src/**/*.spec.ts` だけでテストのディレクトリが無い構成で、`--scope src` の検査が通る（AC12）。"""
     _git_repo(tmp_path, ["src/app.ts", "src/app.spec.ts", "src/lib/util.ts"])
-    assert scope.is_test_location("src", str(tmp_path)) is True
+    assert bool(scope.test_locations(["src"], str(tmp_path))) is True
     assert scope.test_locations(["src"], str(tmp_path)) == ["src"]
     assert scope.scope_problem(["src"], str(tmp_path)) is None
     assert scope.test_files_under("src", str(tmp_path)) == ["src/app.spec.ts"]
@@ -154,5 +154,5 @@ def test_a_directory_holding_spec_files_is_a_test_location(scope, tmp_path):
 def test_a_directory_without_test_named_files_stays_outside(scope, tmp_path):
     """追跡ファイルの名前がテストの形でなければ置き場所に数えない（数えると検査が素通りする）。"""
     _git_repo(tmp_path, ["src/app.ts", "src/lib/util.ts"])
-    assert scope.is_test_location("src", str(tmp_path)) is False
+    assert bool(scope.test_locations(["src"], str(tmp_path))) is False
     assert scope.scope_problem(["src"], str(tmp_path)) is not None

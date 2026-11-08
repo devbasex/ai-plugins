@@ -206,8 +206,8 @@ def test_claude_stdout_scan_ignores_missing_file(monitor_mod, tmp_path):
 
 def test_stall_defaults_cover_claude_and_kiro(monitor_mod):
     """`claude -p` は完了まで無出力なので、最も長い既定を持つこと。"""
-    assert monitor_mod._agent_stall_default("claude") == 900
-    assert monitor_mod._agent_stall_default("kiro") == 480
+    assert monitor_mod.limits.stall_timeout(monitor_mod._agent_runtime("claude")) == 900
+    assert monitor_mod.limits.stall_timeout(monitor_mod._agent_runtime("kiro")) == 480
 
 
 # ---------- 6. 移設シム ----------
