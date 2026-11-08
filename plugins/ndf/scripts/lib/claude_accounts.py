@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import claude_account_dir as account_files
+import limits
 from claude_usage import Usage, epoch, get_usage, iso_utc, refresh_oauth
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
@@ -71,11 +72,10 @@ USAGE_FILE = "usage.json"
 CRED_FILE = ".credentials.json"
 LOCKS_DIR = ".locks"
 REFRESH_LOCK = ".oauth_refresh.lock"  # claude と同じ更新の排他（設定ディレクトリの中のディレクトリ）
-EXPIRY_MARGIN = 60.0  # 残りがこの秒数以下のアクセストークンは期限切れとみなす
-REFRESH_TIMEOUT = 3.0  # 更新の排他の中の宛先の待ちの上限（秒。#1576 の決定 12）
+EXPIRY_MARGIN = limits.seconds("claude-accounts.expiry-margin")  # 残りがこの秒数以下のアクセストークンは期限切れとみなす
 OLD_LOCK_AGE = 60.0  # 置き場の直下の古い形の排他ファイルを消す古さ（秒。これより新しいものは古い版が使っている）
 AUTH_FAILED_HOLD = 3600.0  # 認証の失敗の観測を候補から外す秒数（#1576 の決定 13。仮の値）
-LOCK_WAIT = 30.0
+REFRESH_TIMEOUT, LOCK_WAIT = limits.seconds("claude-accounts.refresh"), limits.seconds("claude-accounts.lock")  # #1576 の決定 12
 NO_RESET_HOLD = 5 * 3600.0  # リセット時刻の読めない上限の観測を候補から外す秒数
 # 枠の大きさの対応表（`rateLimitTier` → 枠ごとの USD 換算）。根拠は issues/old/relay-capacity-estimate-2026-09-28.md。
 # Max 5x の週の枠は非公式の比（1,100 × 3.5 / 6）による仮の値（#1453 の決定 1）。表に無い tier は宣言だけで決まる

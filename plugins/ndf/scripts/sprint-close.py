@@ -82,6 +82,7 @@ import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#222
 from dist_record import parse_record, released  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 sys.path.insert(0, str(HERE))
+import limits  # noqa: E402  上限の宣言（#2343）
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
 from sprint_close_lib.summary import close_summary, not_closed_gaps  # noqa: E402
 from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
@@ -96,7 +97,7 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
 UNKNOWN_REASON = "リリース記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
-LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
+LOCK_TIMEOUT = limits.seconds("sprint-close.issue-lock")  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
 IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）

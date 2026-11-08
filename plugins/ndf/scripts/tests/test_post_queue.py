@@ -419,12 +419,7 @@ def test_retry_waits_and_re_runs_until_it_succeeds(
     waits: list[float] = []
     monkeypatch.setattr(post_queue, "run", _run_returning([_RATE, _RATE, _OK], calls))
 
-    result = post_queue.retry(
-        ["gh", "pr", "create"],
-        max_wait=900.0,
-        interval=30.0,
-        sleep=_recording_sleep(waits),
-    )
+    result = post_queue.retry(["gh", "pr", "create"], sleep=_recording_sleep(waits))
 
     assert result is _OK
     assert len(calls) == 3
@@ -442,12 +437,8 @@ def test_retry_returns_the_last_rate_limited_attempt_when_the_wait_cap_is_reache
     responses = [_RATE, _RATE, _RATE, last_rate]
     monkeypatch.setattr(post_queue, "run", _run_returning(responses, calls))
 
-    result = post_queue.retry(
-        ["gh", "pr", "create"],
-        max_wait=90.0,
-        interval=30.0,
-        sleep=_recording_sleep(waits),
-    )
+    policy = post_queue.limits.policy("post-queue.rate-limit")._replace(seconds=90.0, interval=30.0)
+    result = post_queue.retry(["gh", "pr", "create"], policy, sleep=_recording_sleep(waits))
 
     assert result is last_rate
     assert len(calls) == 4
@@ -464,11 +455,8 @@ def test_retry_returns_the_first_rate_limited_attempt_when_interval_is_zero(
     first_rate = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
     monkeypatch.setattr(post_queue, "run", _run_returning([first_rate], calls))
 
-    result = post_queue.retry(
-        ["gh", "pr", "create"],
-        interval=0,
-        sleep=_recording_sleep(waits),
-    )
+    policy = post_queue.limits.policy("post-queue.rate-limit")._replace(interval=0)
+    result = post_queue.retry(["gh", "pr", "create"], policy, sleep=_recording_sleep(waits))
 
     assert result is first_rate
     assert calls == [["gh", "pr", "create"]]
@@ -837,7 +825,8 @@ def test_other_failures_are_not_transient(attempt: post_queue.Attempt, monkeypat
 
 
 def test_the_wait_for_transient_failures_stays_within_the_rate_limit_retry() -> None:
-    assert 0 < post_queue.TRANSIENT_INTERVAL <= post_queue.TRANSIENT_MAX_WAIT <= 900.0
+    reflush, rate = post_queue.limits.policy("post-queue.transient-reflush"), post_queue.limits.policy("post-queue.rate-limit")
+    assert 0 < reflush.interval <= reflush.seconds <= rate.seconds
 
 
 @pytest.mark.parametrize("failure", _TRANSIENT_FAILURES[:1] + _TRANSIENT_FAILURES[4:6])

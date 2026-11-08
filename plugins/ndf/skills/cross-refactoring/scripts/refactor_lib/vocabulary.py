@@ -9,6 +9,7 @@ import pathlib
 from typing import Any
 
 import md
+import limits
 
 
 # 兆候と手法の呼び名は `refactoring` が持つ（#444）。**ここでは読むだけで、自分では
@@ -104,7 +105,7 @@ def vocabulary() -> dict[str, Any]:
 
 
 # 想定最大時間の既定（分）。2026-09-24 利用者の指示で 30 分（#754 の指針「60 分以内」の中に収める）。
-DEFAULT_BUDGET_MINUTES = 30
+DEFAULT_BUDGET_MINUTES = int(limits.seconds("cross-refactoring.default-budget") // 60)
 
 # 改修計画へ渡す候補の上限（決定 17）。`path` + `symbol` の組を上位から 30 組、組の中は
 # 上位 3 件まで。改修計画の入力と Jev の「同じ変更か」の問いの数（最大 90 回）を抑える。

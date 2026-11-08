@@ -33,6 +33,7 @@ _LIB = os.path.join(PKG_ROOT, "lib")
 if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
 import deps  # noqa: E402
+import limits
 
 # ラッパーが使うグループ（pyproject.toml の extra）。import できるかは deps.GROUPS の名前で見る
 GROUPS = ("procs", "locks", "md", "versions", "terminal")
@@ -103,7 +104,7 @@ def sync(project: str, venv: str, inexact: bool = False) -> str:
     for pin in (["--no-managed-python"], []):
         cmd = [uv, "sync", "--frozen", "--quiet", *pin, "--project", project, *extras, *(["--inexact"] if inexact else [])]
         try:
-            p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
+            p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=limits.seconds("relay.runtime-install"))
         except (OSError, subprocess.SubprocessError) as e:
             raise EnvUnavailable(f"uv sync を起動できない（{e}）") from None
         if p.returncode == 0:

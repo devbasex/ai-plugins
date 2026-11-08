@@ -27,6 +27,7 @@ from pathlib import Path
 import clock
 import jsonio
 import secret_redact
+import limits
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git_root, result
 import upkeep_depth as D
 import upkeep_owner as O
@@ -60,7 +61,7 @@ SYSTEM = (
     "あなたは NDF の調査の supervisor である。渡した 1 つの調査の項目だけを調べる。外部へ書き込まない・Issue を作らない・"
     "人へ問わない。秘密と個人情報を書かない。"
 )
-POLL = 30
+POLL = limits.value("backlog-refinement.research-poll", "interval")
 WEB_ASPECTS = ("needs.market", "seeds.library", "seeds.alternatives", "seeds.environment")
 FAIL_LIMIT = 3
 
@@ -218,7 +219,10 @@ def tools_of(aspect: str) -> str:
 def hotspots(root, limit: int = 30) -> str:
     """変更の多いファイル（直近 500 コミット）。git はスクリプトが打ち、結果だけを渡す。"""
     p = subprocess.run(
-        ["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"], capture_output=True, text=True, timeout=120
+        ["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"],
+        capture_output=True,
+        text=True,
+        timeout=limits.seconds("backlog-refinement.hotspots-git"),
     )
     counts: dict = {}
     for f in p.stdout.splitlines():
@@ -323,7 +327,7 @@ def _ticker(root, run_id, until: str | None, cfg: dict):
         # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
         if until and Path(until).exists():
             seen = beat["until_seen"] = beat["until_seen"] or time.time()
-            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
+            if time.time() - seen >= float(cfg["research"].get("grace", limits.seconds("backlog-refinement.research-grace"))):
                 raise GraceOver
 
     return tick

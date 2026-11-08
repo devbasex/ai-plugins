@@ -94,6 +94,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
 from release_lib import others, publish, record, replaced  # noqa: E402
+import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
@@ -128,7 +129,7 @@ from release_lib.declared_steps import DECLARATION, DeclarationError, load_steps
 
 TOOL = "release"
 # 本番チャネルへのマージを待つ間にベースブランチが許可リスト（UNGATED）の下に収まるコミットだけで進んだとき、比べ直して入れ直す回数（#2221）
-HEAD_MOVED_RETRIES = 3
+HEAD_MOVED_RETRIES = limits.value("release-steps.head-moved", "attempts") - 1
 
 
 def run_staleness(root, expected=()):

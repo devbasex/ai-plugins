@@ -247,8 +247,8 @@ def cmd_run(a) -> None:
     prompt = pathlib.Path(a.prompt_file)
     if not prompt.is_file() or prompt.stat().st_size == 0:
         finish(runtime, "launch_failed", f"プロンプトが無いか空: {prompt}", {}, sr.EXIT_PRECONDITION)
-    if a.phase not in limits.PHASE_TIMEOUT:
-        finish(runtime, "launch_failed", f"上限の表に無い工程: {a.phase}（{' / '.join(limits.PHASE_TIMEOUT)}）", {}, sr.EXIT_UNREADABLE)
+    if a.phase not in limits.phases():
+        finish(runtime, "launch_failed", f"上限の表に無い工程: {a.phase}（{' / '.join(limits.phases())}）", {}, sr.EXIT_UNREADABLE)
     workdir = pathlib.Path(a.workdir or os.getcwd()).resolve()
     if not workdir.is_dir():
         finish(runtime, "launch_failed", f"作業ディレクトリが無い: {workdir}", {}, sr.EXIT_PRECONDITION)
@@ -267,7 +267,7 @@ def cmd_run(a) -> None:
     prompt_copy = pathlib.Path(f"{stem}-prompt.md")
     prompt_copy.write_text(with_output_instruction(prompt.read_text(encoding="utf-8"), output), encoding="utf-8")
 
-    cli_limit = str(a.timeout + limits.CLI_MARGIN) if a.timeout else a.phase
+    cli_limit = str(a.timeout + limits.cli_margin()) if a.timeout else a.phase
     launch = [str(LIB / "launch-cli.sh"), runtime, str(workdir), str(prompt_copy), str(stem), a.model or "", str(output.parent), cli_limit]
     # 帳簿の呼び出し元（#1953 の決定 7）。呼び出し元が名乗っていればそれを継ぎ、無ければ external-ai の run
     usage_env = {**os.environ, "NDF_USAGE_SOURCE": os.environ.get("NDF_USAGE_SOURCE") or "external-ai"}
@@ -317,7 +317,7 @@ def main(argv=None) -> None:
     r.add_argument("runtime", choices=RUNTIMES)
     r.add_argument("--prompt-file", required=True)
     r.add_argument("--output-file", required=True)
-    r.add_argument("--phase", default=limits.DEFAULT_PHASE, help=f"上限の表の工程（{' / '.join(limits.PHASE_TIMEOUT)}）")
+    r.add_argument("--phase", default=limits.DEFAULT_PHASE, help=f"上限の表の工程（{' / '.join(limits.phases())}）")
     r.add_argument("--model", default=None)
     r.add_argument("--workdir", default=None, help="CLI の作業ディレクトリ（既定はカレント）")
     r.add_argument("--timeout", type=int, default=None, help="監視の上限（秒）。既定は工程の値。0 は上限なし")

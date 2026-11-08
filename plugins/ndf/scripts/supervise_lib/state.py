@@ -20,12 +20,14 @@ import procs
 import step_read
 import usage_aggregate
 import usage_ledger
+import limits
 from sprint_mvv import MVV_PACES
+from supervise_lib import rerun
 from supervise_lib.claude import TICK, watch_children
 
 STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
 USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output"))
-REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
+REPORT_INTERVAL = limits.seconds("supervise.report-interval")
 # worker の途中の報告の state と、conductor へ知らせる理由（文の語は読まない。#2337 の I12）。state が無い行は working
 PROGRESS_ATTENTION = {"gate": "関門", "stopped": "止まった", "failing": "同じ失敗の繰り返し"}
 REPEAT_LIMIT = 3  # 同じ文がこの回数続いたら止まりとして知らせる
@@ -90,7 +92,7 @@ class RunState:
         self.gates: list[dict] = []  # run のステップが返した承認ゲート（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
-        self.fail_counts: dict[str, int] = {}
+        self.fail_counts, self.cause_counts = {}, {}  # ステップ → 失敗の回数 / ステップ → 原因の鍵 → 回数（rerun.py。#2343）
         self.failed_step: str | None = None  # 最後に落ちて on_fail へ回ったステップ（fix の後に戻る先。#1315）
         self.applied = 0  # 記録した（流したか組み直した）最後のステップの番号
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
@@ -339,6 +341,7 @@ class RunState:
             and (self.cur.get("slow") or {}).get("act") != "retry"
         ):
             fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
+            rerun.count_failure(self.cause_counts, sid, self.cur)
             if fails >= 2 and next_type == "judge":
                 self.attention(
                     "judge のステップで stop が出そう",
@@ -359,6 +362,7 @@ class RunState:
             "llm": dict(self.llm),
             **{k: [dict(x) for x in getattr(self, k)] for k in DICT_LISTS},
             "fail_counts": dict(self.fail_counts),
+            "cause_counts": {k: dict(v) for k, v in self.cause_counts.items()},
             "failed_step": self.failed_step,
             "last_stage": self.last_stage,
             "pace_recorded": self.pace_recorded,
@@ -384,6 +388,7 @@ class RunState:
         for k in DICT_LISTS:
             setattr(self, k, [dict(x) for x in acc.get(k, getattr(self, k))])
         self.fail_counts = dict(acc.get("fail_counts", self.fail_counts))
+        self.cause_counts = {k: dict(v) for k, v in acc.get("cause_counts", self.cause_counts).items()}
         self.failed_step = acc.get("failed_step", self.failed_step)
         self.last_stage = acc.get("last_stage", self.last_stage)
         self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)

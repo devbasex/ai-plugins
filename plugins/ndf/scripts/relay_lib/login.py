@@ -21,11 +21,12 @@ from .ask import Fail
 from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
 
 import claude_accounts as ca  # noqa: E402,I001
+import limits
 from claude_usage import iso_utc  # noqa: E402
 
 AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
-URL_WAIT = 30.0  # 1 回目が認可の URL を待つ秒数
-EXIT_WAIT = 60.0  # 2 回目が待機中のログインの終了を待つ秒数
+URL_WAIT = limits.seconds("relay.login-url")  # 1 回目が認可の URL を待つ秒数
+EXIT_WAIT = limits.seconds("relay.login-exit")  # 2 回目が待機中のログインの終了を待つ秒数
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -40,7 +41,12 @@ def _auth(claude: str, config_dir: str, *args: str) -> subprocess.CompletedProce
     """専用の設定ディレクトリで `claude auth <副命令>` を起動する。起動できなければ None。"""
     try:
         return subprocess.run(
-            [claude, "auth", *args], env=_claude_env(config_dir), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
+            [claude, "auth", *args],
+            env=_claude_env(config_dir),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=limits.seconds("relay.claude-auth"),
         )
     except (OSError, subprocess.SubprocessError):
         return None

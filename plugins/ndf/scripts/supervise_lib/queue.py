@@ -21,6 +21,7 @@ import parallel_hold
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
+import limits
 from supervise_lib.paths import queue_done_key, queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
@@ -114,10 +115,11 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
 
 NOT_RUN = "流さなかった"
 NO_REPORT = "報告なし"
+QUEUE_POLL, WAIT_POLL = limits.value("supervise.queue-poll", "interval"), limits.value("supervise.queue-wait-poll", "interval")
 
 
 def cmd_queue(
-    plans: list[str], max_: int, poll: float = 1.0, then=None, done: str | None = None, starts=None, rerun=None, restart=False
+    plans: list[str], max_: int, poll: float = QUEUE_POLL, then=None, done: str | None = None, starts=None, rerun=None, restart=False
 ) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
@@ -264,7 +266,6 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
 
 def _release_skipped_by_condition(plan: str) -> bool:
     """「版」と「実行の条件」を持つリリースプランで、条件がデプロイ不要（skip_code）を返すか。
-
     条件で飛ぶデプロイは版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
     判定できないときと流すときは False（版を埋めてから流し、engine が条件を打ち直す）。"""
     try:
@@ -323,7 +324,6 @@ def blocked(plan: str, deps: list[str], items: list[dict], queued: list[str]) ->
 
 def plan_item(plan: str, out: dict) -> dict:
     """プランの耐久ワークフローの出力から、結果の JSON の items の 1 件を作り、報告を <プラン>.log へ書く。
-
     前提のプランで流さなかったプランの出力（`result` が流さなかった）は、そのまま item にする。"""
     if out.get("result") == NOT_RUN:
         return {**out, "plan": plan, **({"answer_hold": True} if parallel_hold.skip_of(out.get("reason")) else {})}
@@ -386,7 +386,7 @@ def _park_line(held: dict, done_path: Path) -> str:
 WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
 
 
-def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
+def cmd_wait(done: str, timeout: float, poll: float = WAIT_POLL, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
     """queue の終わり（done）か、queue が流す計画の attention の行まで待つ。(要約, 結果, 終了コード) を返す。
 
     計画の一覧と読み始める所は queue が done の隣に書いた <done>.plans.json から読む。知らせた attention の

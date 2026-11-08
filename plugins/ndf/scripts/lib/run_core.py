@@ -40,6 +40,7 @@ from typing import Callable, NoReturn
 LIB = Path(__file__).resolve().parent
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
+import limits
 import jsonio  # noqa: E402
 import secret_redact  # noqa: E402
 import step_result  # noqa: E402
@@ -51,7 +52,7 @@ CONTRACT_FILE_HEAD = "plugins__ndf__"
 ENTRY_ENV = "NDF_RUN_ENTRY"
 TIMEOUT_ENV = "NDF_RUN_TIMEOUT"
 RESULT_ENV = "NDF_RESULT_FILE"
-KILL_GRACE = 5.0
+KILL_GRACE = limits.seconds("run-core.kill-grace")
 STEP_RESULT = "step-result"
 
 

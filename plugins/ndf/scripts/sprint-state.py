@@ -37,11 +37,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "schema", "locks", "durable", "versions", "procs")  # schema は supervise_lib.paths → decl が使う
+deps.require("md", "mdtable", "schema", "locks", "durable", "versions", "procs", "waits")  # schema・waits は supervise_lib.paths が使う
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
-import gate_answer, jsonio, legacy_values, locks  # noqa: E402,E401
+import gate_answer, jsonio, legacy_values, limits, locks  # noqa: E402,E401
 from handoff_doc import COMMAND_SECTION, PROGRESS_SECTION, find_section, heading_text  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
@@ -260,7 +260,7 @@ def cmd_update(a) -> dict:
 
 def cmd_gate(a) -> dict:
     # 並列の設計プランが同じ承認ゲートを書く（mvv の記録と handoff の取り消し）ため、読んで書く間を排他にする
-    with locks.exclusive(a.sprint, timeout=60):
+    with locks.exclusive(a.sprint, timeout=limits.seconds("sprint-state.sprint-lock")):
         return gate_locked(a)
 
 

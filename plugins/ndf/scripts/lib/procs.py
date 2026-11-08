@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+import limits
 import psutil
 
 CGROUP_ROOT = Path("/sys/fs/cgroup")
@@ -171,7 +172,9 @@ def leads_own_group(pid: int) -> bool:
     return pgid == pid and pgid != os.getpgrp()
 
 
-def stop_tree(pid: int, grace: float = 3.0, poll: float = 0.1) -> bool:
+def stop_tree(
+    pid: int, grace: float = limits.seconds("procs.stop-tree"), poll: float = limits.value("procs.stop-tree", "interval")
+) -> bool:
     """pid とその子を止める（SIGTERM → 猶予の後に SIGKILL）。止まった（元から無い）なら真。"""
     root = _process(pid)
     if root is None or pid_is_zombie(pid):

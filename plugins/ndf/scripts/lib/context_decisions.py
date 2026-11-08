@@ -27,6 +27,7 @@ from typing import Iterator, Mapping
 
 import clock
 import context_policy as cp
+import limits
 import jsonio
 from state_home import container_home
 from context_policy import REASONS  # noqa: F401  sprint-state.py の --reason の選択肢
@@ -70,7 +71,12 @@ def decisions_repo(root) -> str:
 def toplevel(cwd: str | None) -> str | None:
     """作業ディレクトリの git の根。git の外か、git が無ければ None。"""
     try:
-        p = subprocess.run(["git", "-C", cwd or ".", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(
+            ["git", "-C", cwd or ".", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=limits.seconds("context-decisions.git"),
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     return (p.stdout.strip() or None) if p.returncode == 0 else None
