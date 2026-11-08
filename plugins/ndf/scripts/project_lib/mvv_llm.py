@@ -2,6 +2,10 @@
 
 LLM は `supervise_lib/claude.py` の `call_claude` を Tool なしで 1 回呼ぶ（NDF_SUPERVISE_CLAUDE で差し替えられる）。
 呼び出しごとに `call_claude` が使用量の帳簿へ 1 行を足す。照合は本文を書き換えず、判定と箇所を `project-mvv.jsonl` へ残すだけである（I14）。
+
+LLM の行は照合の入力（判定の指示とプロンプト全体）の sha256 を `input_sha256` に持つ。呼ぶ側が再利用を求めたとき（`reuse`。
+スプリント MVV の照合だけ）は、同じ入力の最新の判定が「従う」なら LLM を呼ばず、`reused_from`（元の LLM の判定の時刻）を持つ行を
+足す（#2614）。共通原則を読めないときは入力を見分けられないため、再利用せず `input_sha256` も書かない。
 """
 
 from __future__ import annotations
@@ -66,8 +70,30 @@ def vet_prompt(kind: str, body: str, mvv: pm.ProjectMvv) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def vet_body(root: Path, body: str, kind: str) -> tuple[dict, dict]:
-    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。"""
+def input_sha256(prompt: str) -> str:
+    """照合の入力の sha256。判定の指示とプロンプト全体（共通原則・プロジェクト MVV・判定の決まり・種類・本文）から作る。"""
+    return pm.sha256_text(VET_SYSTEM + "\0" + prompt)
+
+
+def principles_readable() -> bool:
+    """共通原則のファイルを読めるか。読めないと `pm.principles()` は毎回同じ代わりの文を返し、入力で見分けられない。"""
+    try:
+        pm.PRINCIPLES_PATH.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def latest_vet(key: str) -> dict | None:
+    """同じ照合の入力の最新の判定（時刻が最も後、同じなら後ろの行）。`repo` では絞らない。読めない・壊れた行は飛ばす。"""
+    rows = [r for r in pms.read_jsonl(pm.vet_log_path()) if r.get("input_sha256") == key]
+    return max(enumerate(rows), key=lambda x: (str(x[1].get("at") or ""), x[0]))[1] if rows else None
+
+
+def vet_body(root: Path, body: str, kind: str, reuse: bool = False) -> tuple[dict, dict]:
+    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。
+
+    `reuse` が真なら、同じ照合の入力の最新の判定が「従う」のとき LLM を呼ばずにその判定を使う（#2614）。"""
     mvv = pm.load_mvv(root)
     rec = {
         "at": clock.now_iso("utc"),
@@ -89,13 +115,23 @@ def vet_body(root: Path, body: str, kind: str) -> tuple[dict, dict]:
             {"item": "project_mvv", "reason": f"改訂には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）"}
         ]
     elif rec["verdict"] == "unreadable":
-        data, raw, usage = call_llm_json(VET_SYSTEM, vet_prompt(kind, body, mvv), root, "mvv-vet")
-        if data is None or data.get("verdict") not in VET_VERDICTS:
-            rec.update(raw=raw)
+        prompt = vet_prompt(kind, body, mvv)
+        key = input_sha256(prompt) if principles_readable() else None
+        prev = latest_vet(key) if reuse and key else None
+        if prev is not None and prev.get("verdict") == "follow":
+            # 再利用の行は費用と秒を持たない。元の判定は常に LLM の行の時刻を指す（I3）
+            locs = [x for x in prev.get("locations") or [] if isinstance(x, dict)]
+            rec.update(verdict="follow", locations=locs, input_sha256=key, reused_from=prev.get("reused_from") or prev.get("at"))
         else:
-            locs = [x for x in data.get("locations") or [] if isinstance(x, dict)]
-            rec.update(verdict=data["verdict"], locations=locs)
-        rec.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
+            data, raw, usage = call_llm_json(VET_SYSTEM, prompt, root, "mvv-vet")
+            if data is None or data.get("verdict") not in VET_VERDICTS:
+                rec.update(raw=raw)
+            else:
+                locs = [x for x in data.get("locations") or [] if isinstance(x, dict)]
+                rec.update(verdict=data["verdict"], locations=locs)
+            if key:
+                rec.update(input_sha256=key)
+            rec.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
     pms.append_jsonl(pm.vet_log_path(), rec)
     return rec, usage
 

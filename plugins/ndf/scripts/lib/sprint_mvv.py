@@ -6,7 +6,8 @@
   状態のファイルの隣の `mvv.md` へ写し、`mvv.path`・`mvv.sha256` を返す。見出しが 1 つでも無い・取得できないときは止まる（3）。
   `--mvv` を渡せば写さずにそのファイルを使う。どちらも無ければ 2（承認済みのプロジェクト MVV があれば、スプリント MVV なしで進める）
 - 承認済みのプロジェクト MVV（`--root` の `.ndf/`）があれば、スプリント MVV を照合（`project-mvv.py vet --kind sprint` と同じ）に通し、
-  「従う」でなければ箇所を示して止まる（1）。状態には参照（`project_mvv`: 版・sha256）を書く
+  「従う」でなければ箇所を示して止まる（1）。照合の入力が同じで最新の判定が「従う」なら、LLM を呼ばずにその判定を使う（#2614）。
+  状態には参照（`project_mvv`: 版・sha256）を書く
 
 止まるときは `(理由, 終了コード, items)` を返し、`sprint-state.py` が結果の形にする。
 """
@@ -141,10 +142,11 @@ def withdrawn(m: dict, name: str) -> bool:
 
 
 def vet_stop(root: Path, path: str) -> tuple | None:
-    """スプリント MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。"""
+    """スプリント MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。
+    同じ照合の入力の最新の判定が「従う」なら再利用する（`vet_body` の `reuse`。#2614）。"""
     from project_lib import mvv_llm
 
-    rec, _ = mvv_llm.vet_body(root, Path(path).read_text(encoding="utf-8"), "sprint")
+    rec, _ = mvv_llm.vet_body(root, Path(path).read_text(encoding="utf-8"), "sprint", reuse=True)
     if rec["verdict"] == "follow":
         return None
     where = "／".join(f"{x.get('item')}: {x.get('reason')}" for x in rec["locations"])

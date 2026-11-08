@@ -20,7 +20,8 @@
 - `propose`: 最小構成の claude -p を 1 回呼び、候補 2 案以上と分かれる点を `candidates.json`・`candidates.md` へ書く。
   形が足りなければ 1
 - `vet`: 本文を NDF の共通原則（と承認済みのプロジェクト MVV）に照らす。0 = 従う / 10 = 反する疑い・判定できない・読めない。
-  照合は `<状態の根>/project-mvv.jsonl`（根は `lib/state_home.py`） に残す
+  照合は `<状態の根>/project-mvv.jsonl`（根は `lib/state_home.py`） に残す。種類によらず毎回 LLM で判定し、前の判定を再利用しない
+  （再利用するのは `sprint-state.py init` のスプリント MVV の照合だけ。#2614）
 - `approve`: 利用者の承認の後に打つ。同じ本文への直近の照合が「従う」（か `--accept-unknown` で人が引き受けた「判定できない」）
   のときだけ宣言を書く。書くのはこの副命令だけである
 - `show`: 版の本文、または版 M から N への差分
