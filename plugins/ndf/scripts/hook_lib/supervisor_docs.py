@@ -10,7 +10,7 @@
 | 6 | Bash で、コマンドに外の規約の文書のパスがある | 止める（理由に中のプラグインルートと、中にあれば同じ文書の絶対パス） |
 | 7 | 判定の途中で失敗した | 通す（呼び手の hook が拾う） |
 
-読む先の候補は、Read は `file_path`、Bash はコマンドを語の並びへ分けて `/` を含む語（変数を含む語は除く）。`~` は展開し、
+読む先の候補は、Read は `file_path`、Bash はコマンドを語の並びへ分けて `/` を含む語（変数を含む語は除く。リダイレクトの語は記述子と演算子を外す）。`~` は展開し、
 相対パスは入力の `cwd` から解く。**外の規約の文書**は、パス自身とその祖先のうち `.claude-plugin/plugin.json` を持つ最も近い
 ディレクトリをプラグインルートとみなし、その `name` が読み込まれたプラグインと同じで、ルートが hook 自身のプラグインルートと違い
 （シンボリックリンクは解決して比べる）、相対パスがルート自身・`skills`・`skills/<Skill>`・`skills/<Skill>/SKILL.md`・
@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from . import payload as pl
@@ -29,6 +30,7 @@ from .worker_skills import SUPERVISORS
 OWN_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(".claude-plugin") / "plugin.json"
 ENV = "NDF_SUPERVISOR_DOCS_GUARD"
+REDIRECT = re.compile(r"^\d*[<>&|]+")
 
 
 def _name(root: Path) -> str | None:
@@ -86,6 +88,7 @@ def doc_candidates(ev: pl.Event) -> list[Path]:
 
     out: list[Path] = []
     for w in command_stream(_field(ev.raw, "tool_input", "command")):
+        w = REDIRECT.sub("", w)  # リダイレクトの語（`</x`・`2>/x`）は記述子と演算子を外す
         for part in {w, w.split("=", 1)[-1]}:
             if "/" in part and (p := _abs_doc_path(part, ev.cwd)):
                 out.append(p)

@@ -75,6 +75,13 @@ def test_bash_cat_outside_doc_gives_inner_path(tmp_path, other):
     assert str(OWN / REL) in reason
 
 
+@pytest.mark.parametrize("cmd", ["cat < {p}", "cat <{p}", "wc -l 0<{p}"])
+def test_bash_input_redirect_outside_doc_is_denied(tmp_path, other, cmd):
+    reason = run(bash(cmd.format(p=other / REL)), tmp_path)
+    assert reason is not None
+    assert str(OWN / REL) in reason
+
+
 def test_relative_path_resolves_from_cwd(tmp_path, other):
     assert run(bash("cat skills/development-workflow/references/agent-layers.md", cwd=other), tmp_path) is not None
 
