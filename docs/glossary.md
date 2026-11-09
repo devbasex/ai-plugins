@@ -737,6 +737,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | CD | — | 継続的デリバリー（Continuous Delivery）。ブランチへのマージを起点に、環境への反映を NDF の工程の外の仕組みが行うこと。delivery の kind: auto で宣言する | — | — | — |
 | CD の案内 | — | CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 手動反映の理由 | — | delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない | — | — | `docs/specifications/ndf-release-via-cd.md` |
+| リリースの Pull Request | — | 本番チャネルへ変更を入れる Pull Request。リリースの雛形では `release/v<版>` が、経路 merge ではベースブランチが head になる | — | — | — |
+| リリースの承認資料 | — | リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持ち、本番チャネルへマージしてよいのは、この欄の SHA がリリースの Pull Request の先端のときだけである | — | — | — |
 | 昇格の Pull Request | `promotion_pr` | ベースブランチから本番チャネルへ変更を入れる Pull Request | — | — | — |
 | 昇格のプラン | — | リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、リリース承認ゲートの後にマージする | — | — | — |
 | 昇格の承認資料 | — | 昇格のリリース承認ゲートで利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote のリリース承認ゲートの停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする | — | — | `docs/specifications/ndf-release-approved-commit.md` |
