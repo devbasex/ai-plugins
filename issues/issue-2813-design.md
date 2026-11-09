@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: Agent の 3 層で回すフェーズの supervisor（`ndf:supervisor` / `ndf:supervisor-waits`）が、worker の起動指示を組むための規約の文書を、読み込まれたプラグインでなく別の checkout（開発中のリポジトリのメインディレクトリ `/work/ai-plugins/plugins/ndf` など）から読むことがある。supervisor の定義は文書を相対の名前で指すだけで、プラグインルートを渡していない
+- **今どうなっているか**: Agent の 3 層で回すフェーズの supervisor（`ndf:supervisor` / `ndf:supervisor-waits`）は、worker の起動指示を組むために規約の文書を読む。その文書を、読み込まれたプラグインでなく別の checkout から読むことがある。別の checkout とは、開発中のリポジトリのメインディレクトリ（`/work/ai-plugins/plugins/ndf` など）である。supervisor の定義は文書を相対の名前で指すだけで、プラグインルートを渡していない
 - **誰に効くか**: `--plugin-dir` か導入したキャッシュの NDF で 3 層を回す利用者。読み込まれたプラグインと読んだ checkout の版が違うと、違う版の規則で組んだ起動指示が worker へ届く
 - **変えると何が成り立つか**: supervisor は定義に展開されたプラグインルートから規約の文書を絶対パスで読む。外の規約の文書を読もうとすると hook が止め、読み込まれたプラグインの中の同じ文書の絶対パスを返す
 
@@ -116,10 +116,12 @@
 | --- | --- |
 | supervisor の定義（`plugins/ndf/agents/supervisor.md`・`supervisor-waits.md`） | 変える。本文に段落を 1 つ足し、プラグインルート `${CLAUDE_PLUGIN_ROOT}` から規約の文書を絶対パスで読むこと・得られないときの返し方・hook に止められたときの読み直しを書く（F1・F2） |
 | 規約の文書の guard（`plugins/ndf/scripts/hook_lib/supervisor_docs.py`、新設） | 作る。PreToolUse の Read と Bash を見て、supervisor が外の規約の文書を読むなら `deny` を返す。判定だけを持ち、入力を書き換えない（F3・F4） |
-| hook の振り分け（`plugins/ndf/scripts/hook.py`） | 変える。Claude Code の PreToolUse の Read と Bash で規約の文書の guard を締め切りの中で打ち、途中の失敗は通す。冒頭の表に行を足す |
+| hook の振り分け（`plugins/ndf/scripts/hook.py`） | 変える。Claude Code の PreToolUse の Read と Bash で規約の文書の guard を hook の締め切りの中で打ち、途中の失敗は通す。冒頭の表に行を足す |
 | 読む Skill の guard（`plugins/ndf/scripts/hook_lib/worker_skills.py`） | 変えない。呼び手の一覧 `SUPERVISORS` を規約の文書の guard が読み込んで使う（同じ役割の定数を 2 つ持たない） |
 | hook の登録（`plugins/ndf/hooks/claude.json`） | 変えない。PreToolUse の matcher に Read と Bash が既にある |
 | 用語集（`docs/glossary/glossary.json`・`docs/glossary.md`） | 変える。「規約の文書の guard」を足し、`glossary.py render` で作り直す |
+
+### 構成要素図
 
 ```mermaid
 graph TD
@@ -144,9 +146,11 @@ graph TD
     SD -.->|読む先が当たれば止める| OUT
 ```
 
-システムの文脈と配置: 変更はすべて読み込まれたプラグインの中で動く。外部の系は Claude Code（エージェントの本文の展開と hook の起動）だけで、ネットワークや別のプロセスを足さない。外の checkout は判定の対象として読まれるパスであり、hook はそこへ書き込まない。
+### システムの文脈と配置
 
-パッケージ構成:
+変更はすべて読み込まれたプラグインの中で動く。外部の系は Claude Code（エージェントの本文の展開と hook の起動）だけで、ネットワークや別のプロセスを足さない。外の checkout は判定の対象として読まれるパスであり、hook はそこへ書き込まない。
+
+### パッケージ構成
 
 ```text
 plugins/ndf/
@@ -326,7 +330,15 @@ conductor の起動指示の項目に足す形は採らない。conductor が書
 
 ### 決定 4: 規約の文書でないファイルと別のプラグインを止めないため、判定の範囲を同じ名前のプラグインの `skills/` の下に限る
 
-読む先の祖先に `.claude-plugin/plugin.json` があり、その `name` が読み込まれたプラグインと同じ `ndf` で、相対パスが `skills/<Skill>/SKILL.md`・`references/` の下（Bash の探索ではプラグインルート・`skills`・Skill のディレクトリ自身も）のときだけを規約の文書とする。プラグインルートの形をパスの文字列（`plugins/ndf/skills/`）で決めないのは、導入したキャッシュ（`~/.claude/plugins/cache/ai-plugins/ndf/<版>/`）の形がリポジトリの形と違うためである。
+規約の文書とするのは、次の 3 つをすべて満たすときだけである。
+
+| # | 条件 |
+| --- | --- |
+| 1 | 読む先の祖先に `.claude-plugin/plugin.json` がある |
+| 2 | その `name` が、読み込まれたプラグインと同じ `ndf` である |
+| 3 | 相対パスが `skills/<Skill>/SKILL.md`・`references/` の下にある（Bash の探索ではプラグインルート・`skills`・Skill のディレクトリ自身も） |
+
+プラグインルートの形は、パスの文字列（`plugins/ndf/skills/`）で決めない。導入したキャッシュ（`~/.claude/plugins/cache/ai-plugins/ndf/<版>/`）の形が、リポジトリの形と違うためである。
 
 `scripts/` の下は対象にしない。supervisor が打つ `stage-skills.py` の出どころは読む Skill の guard が見ている。ほかのプラグイン（`playwright-kit` など）と `~/.claude/skills/` の Skill は、名前が違うか `plugin.json` を持たないため対象にならない。
 
