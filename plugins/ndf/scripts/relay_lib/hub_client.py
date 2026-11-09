@@ -99,7 +99,7 @@ def no_hub(kind: str, name, why: str) -> dict:
 def terminal_request(args: list[str]) -> tuple[str, dict | None]:
     """リレーハブへ端末の 2 本目の起動を頼む。(`attach` / `refused` / `timeout`, 結果)。"""
     name = os.environ.get("NDF_RELAY_NAME") or None
-    res = send_request("spawn", name, os.getcwd(), list(args), "terminal")
+    res = send_request("spawn", name, os.getcwd(), list(args), hb.TERMINAL)
     if res is None:
         return "timeout", None
     return ("attach" if res.get("status") == "ok" else "refused"), res
@@ -154,6 +154,10 @@ def ask_hub(args: list[str], say) -> int | None:
     if kind == "refused":
         say(f"起動しない（{res.get('summary', '')}）")
         return exit_code_of(res)
+    items = res.get("items") or []
+    notice = items[0].get("notice") if items and isinstance(items[0], dict) else None
+    if notice:
+        say(notice)  # 上限を超えた人の起動の知らせ。文はリレーハブが作る（#2862 の決定 5）
     tmux.exec_attach(first_name(res) or "")
     return 1
 

@@ -66,6 +66,8 @@ NOT_FOUND = "not-found"
 NO_TMUX = "no-tmux"
 TMUX_FAILED = "tmux-failed"
 
+TERMINAL = "terminal"  # 人の起動（端末の 2 本目）の依頼の `by`。上限で断らず、上限に数えない（#2862）
+
 
 def hub_dir() -> str:
     return os.path.join(state_root(), HUB_DIR)
@@ -109,13 +111,15 @@ def name_ok(name) -> bool:
     return isinstance(name, str) and bool(NAME_RE.match(name))
 
 
-def hub_log(event: str, name: str | None = None, reason: str | None = None) -> None:
-    """リレーハブの記録へ 1 行足す（非機能の運用・保守性）。最初の入力は書かない（I10）。"""
+def hub_log(event: str, name: str | None = None, reason: str | None = None, over_limit: dict | None = None) -> None:
+    """リレーハブの記録へ 1 行足す（I10）。`over_limit` は上限を超えた人の起動のときだけ足す（#2862）。"""
     import locks  # 外部パッケージ（filelock）を使う。読み込みのときには import しない
 
     try:
         os.makedirs(hub_dir(), mode=0o700, exist_ok=True)
         row = {"at": stamp(), "event": event, "name": name, "reason": reason}
+        if over_limit is not None:
+            row["over_limit"] = over_limit
         locks.append_locked(hub_path(HUB_LOG), json.dumps(row, ensure_ascii=False))
     except Exception:  # noqa: BLE001 — 記録の失敗で起動・停止を止めない
         pass
@@ -237,6 +241,7 @@ class Live(NamedTuple):
     names: list[str]
     taken: set[str]  # 名前つきで動いている・起動した直後の名前
     helpers: int = 0  # 役割 `helper` の動いているラッパーの数（#2436 の I13）
+    humans: int = 0  # 人の起動（`by: terminal`）で動いていて `count` から外したラッパーの数（#2862）
 
 
 def _role_of(w: Wrapper, registry: dict[str, dict]) -> str | None:
@@ -247,21 +252,30 @@ def _role_of(w: Wrapper, registry: dict[str, dict]) -> str | None:
     return row.get("role") if row.get("role") in ROLES else None
 
 
+def _human(name: str | None, registry: dict[str, dict], sessions: dict[str, dict]) -> bool:
+    """人の起動で動いているか。登録簿の行の `by` が `terminal` で、その行の tmux のセッションが在るときだけ（#2862 の I3）。"""
+    row = registry.get(name or "")
+    return bool(row) and row.get("by") == TERMINAL and row.get("session", name) in sessions
+
+
 def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]) -> Live:
     """`relay.lock` が取られている作業ディレクトリと、登録簿の行のうち tmux のセッションが在るのに同じ名前の
     作業ディレクトリがまだ `relay.lock` を取っていないもの（起動した直後）の和。重複は名前で除く。
 
-    数（`count`）からは、オーガナイザーの印を持つ動いているラッパーを 1 本だけ外し、役割 `helper` のラッパーも
-    外して `helpers` に数える（#2436 の I13。`helper` の上限は `Hub.judge` が見る）。"""
+    数（`count`）からは、人の起動のラッパーをすべて外して `humans` に数え（#2862）、役割 `helper` のラッパーも
+    外して `helpers` に数え（#2436 の I13。`helper` の上限は `Hub.judge` が見る）、人の起動でないオーガナイザーの
+    印を持つラッパーを 1 本だけ外す。1 本は 2 つ以上に当てはまっても 1 回だけ外す（#2862 の I1）。"""
     running = [w for w in ws if w.running]
     taken = {w.name for w in running if w.name}
     pending = sorted(n for n, row in registry.items() if n not in taken and row.get("session", n) in sessions)
     names = [w.name or "-" for w in running] + pending
     roles = [_role_of(w, registry) for w in running] + [registry[n].get("role") for n in pending]
+    human = [_human(n, registry, sessions) for n in [w.name for w in running] + pending]
     helpers = roles.count("helper")
-    organizer = 1 if "organizer" in roles else 0
+    humans = sum(1 for h, r in zip(human, roles) if h and r != "helper")
+    organizer = 1 if any(r == "organizer" and not h for h, r in zip(human, roles)) else 0
     # tmux のセッションの名前も重ねない（tmux が `duplicate session` で断る）
-    return Live(len(running) + len(pending) - helpers - organizer, names, taken | set(sessions), helpers)
+    return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans)
 
 
 def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[str]]:
@@ -281,7 +295,7 @@ def spawn_input(req: dict) -> tuple[str, list[str]]:
     """新しく起こす (cwd, 引数)。cwd は無い・ディレクトリでなければホームへ寄せる。"""
     cwd = req.get("cwd") if isinstance(req.get("cwd"), str) and os.path.isdir(req["cwd"]) else os.path.expanduser("~")
     args = [a for a in req.get("args") or [] if isinstance(a, str)]
-    if req.get("by") != "terminal" and args:
+    if req.get("by") != TERMINAL and args:
         # 端末で利用者が打った引数のほかは、`--` の後の最初の入力 1 つだけを受ける（選択肢を足させない）。
         # 受付箱は所有者だけが書けるため、`by` は信頼の境界でなく入口の区別である（I8）
         args = prompt_args(" ".join(args[1:] if args[0] == "--" else args))
@@ -408,11 +422,14 @@ class Hub:
             role = req.get("role") if req.get("role") == "helper" else None
         else:
             return self.refuse(kind, name, Refusal("bad-request", f"知らない依頼の種類: {kind}", 2))
-        refusal = self.judge(name, now, role)
+        by = str(req.get("by") or "")
+        refusal = self.judge(name, now, role, by)
         if refusal:
             return self.refuse(kind, name, refusal)
         plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
-        return self.launch(kind, name, cwd, args, str(req.get("by") or ""), registry, role, plan)
+        cap = max_named()  # 人の起動で、人の起動を外す前の数が上限以上なら記録と通知に載せる（#2862 の I6）
+        over = {"cap": cap, "running": list(now.names)} if by == TERMINAL and now.count + now.humans >= cap else None
+        return self.launch(kind, name, cwd, args, by, registry, role, plan, over)
 
     @staticmethod
     def auto_name(taken: set[str]) -> str:
@@ -423,10 +440,11 @@ class Hub:
         return f"t{n}"
 
     @staticmethod
-    def judge(name, now: Live, role: str | None = None) -> Refusal | None:
+    def judge(name, now: Live, role: str | None = None, by: str | None = None) -> Refusal | None:
         """名前の形（I7）・重複（I2）・上限（I3）。入口に依らず、ここだけで判定する。
 
-        役割 `helper` は動いている `helper` が無いときだけ、上限を 1 本超えて通す（#2436 の I13）。"""
+        役割 `helper` は動いている `helper` が無いときだけ、上限を 1 本超えて通す（#2436 の I13）。
+        人の起動（`by` が `terminal`）は上限を見ない（#2862 の I2）。"""
         if not name_ok(name):
             return Refusal(BAD_NAME, f"名前の形が違う（{NAME_RE.pattern}）: {name}", 3)
         if name in now.taken:
@@ -435,15 +453,13 @@ class Hub:
         if role == "helper":
             if now.helpers >= 1:
                 return Refusal(LIMIT, "一時レーン（役割 helper）は同時に 1 本まで", 3)
-        elif now.count >= cap:
+        elif by != TERMINAL and now.count >= cap:
             return Refusal(LIMIT, f"同時に動かすラッパーの上限 {cap} に達した（動いている: {', '.join(now.names)}）", 3)
         if tmux.binary() is None:
             return Refusal(NO_TMUX, "tmux が PATH に無い", 3)
         return None
 
-    def launch(
-        self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role: str | None = None, plan: str | None = None
-    ) -> dict:
+    def launch(self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role=None, plan=None, over=None) -> dict:
         argv = [sys.executable, launcher_path(), "run", *args]
         env = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1"}
         if role:
@@ -459,8 +475,14 @@ class Hub:
         if role:
             registry[name].update(role=role, plan=plan)
         write_json_atomic(hub_path(REGISTRY), {"version": 1, "entries": registry})
-        hub_log("started" if kind == "spawn" else "restarted", name, by or None)
-        return hub_result(kind, "ok", f"{name} を起動した（relay.py attach {name} で結び付ける）", name, "started", 0)
+        hub_log("started" if kind == "spawn" else "restarted", name, by or None, over)
+        res = hub_result(kind, "ok", f"{name} を起動した（relay.py attach {name} で結び付ける）", name, "started", 0)
+        if over:
+            res["items"][0]["notice"] = (
+                f"同時に動かすラッパーの上限 {over['cap']} を超えて起動する（動いている: {', '.join(over['running'])}）。"
+                "端末から起動したものは上限に数えない"
+            )
+        return res
 
     @staticmethod
     def refuse(kind, name, r: Refusal) -> dict:

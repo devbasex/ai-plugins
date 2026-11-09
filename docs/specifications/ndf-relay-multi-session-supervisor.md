@@ -61,6 +61,7 @@ tmux が PATH に無い環境では、2 本目は `ndf-relay: tmux が PATH に�
 | 同時に動かす数の上限はマシンの設定（`<状態の根>/relay/hub/limits.json`。`relay.py cap --named <n>` が書く）→ 環境変数 `NDF_RELAY_MAX_NAMED` → 既定 3 の順で決め、`.ndf/` に置かない。リレーハブは判定のたびに読む | 上限が守るのは同じコンテナ・同じアカウントの資源である。そのため値はリポジトリごとに持たず、マシンに 1 つに決まる。判定のたびにファイルから読むため、リレーハブを兼ねるラッパーを起動し直さずに変えられる |
 | 上限はリレーハブ・名前つき・名前の無い今のラッパーを合わせて数え、起動した直後でロックの前のものも数える | 1 回の応答に上限を超える数の起動のブロックを置いても、先に起動したものがロックを取る前に次を通さない |
 | 並列の計画のオーガナイザーの印（役割 `organizer`）を持つ動いているラッパーは 1 本だけ数から外し、一時レーン（役割 `helper`）は数から外して同時に 1 本までに限る | オーガナイザーが上限の 1 本を使うと、既定の 3 でレーンを 3 本起動できない。外す経路を 1 本ずつに限り、印を置けば上限を越えられる道を増やさない |
+| 人の起動（依頼の `by` が `terminal`）は上限で断らず、上限の数にも入れない。人の起動かは登録簿の行の `by` と tmux のセッションの有無で引く。上限を超えて起動したら、結果の `items[0].notice` の 1 行と記録の `started` の行の `over_limit` に残す | 上限は AI が自分で起動を増やす経路にだけ効く歯止めで、利用者が端末で打った起動は通す。数に入れると人が 1 本起動するたびに AI の起動の余地が減る。`by: terminal` を置くのは端末の 2 本目の経路だけで、新しい印を足さずに見分けられる。起動した直後の数えと同じ登録簿の行から引くため、ロックの前と後で判定が変わらない |
 | 起動のブロックは情報文字列 `ndf-spawn <名前>` の囲みにし、`ndf-next` と同じ包み（`lib/md.py`）で拾う | 拾う規則が 1 つに残り、conductor の書き方も分かれない。区間を終えないので `next.json` を書かず、Stop hook の 5 秒の上限の中で依頼を置くだけにする |
 | 承認待ち通知は各ラッパーの待ち通知が名前を付けて出し、リレーハブは見回さない | リレーハブが落ちて次の `claude` が来るまでの間も通知が出る。リレーハブが見回すと今の通知と 2 重になる。端末の結び付きは見ずに常に付ける（hook の中で tmux を呼ばない） |
 | 一覧の状態は作業ディレクトリの今のファイルから導き、語は Factory の `awaiting_approval` に揃える | ラッパーの状態機械に書き込みを足さずに済み、kill された後も正しく止まったと出る。Factory の実行の状態と同じ名前になる |
@@ -80,7 +81,7 @@ tmux が PATH に無い環境では、2 本目は `ndf-relay: tmux が PATH に�
 
 - **同じコンテナでリレーハブは高々 1 つである。** `hub.lock` の排他を持つプロセスだけがリレーハブで、取れなかった `run` は依頼する側になる
 - **動いている名前つきのラッパーの名前は重ならない。** tmux のセッションが在る名前も取られているものとして扱う
-- **動いているラッパーの数は上限以下である。** 数えるのは「`relay.lock` が取られている作業ディレクトリ（名前の無いものを含む）」と「登録簿の行のうち、tmux のセッションが在るのに同じ名前の作業ディレクトリがまだ `relay.lock` を取っていないもの」の和で、重複は名前で除く（`hub.py` の `live`）。この和から、役割 `organizer` のものを 1 本だけと、役割 `helper` のものすべてを外す。役割 `helper` の動いているラッパーは 1 本以下である
+- **動いているラッパーの数は上限以下である。** 数えるのは「`relay.lock` が取られている作業ディレクトリ（名前の無いものを含む）」と「登録簿の行のうち、tmux のセッションが在るのに同じ名前の作業ディレクトリがまだ `relay.lock` を取っていないもの」の和で、重複は名前で除く（`hub.py` の `live`）。この和から、人の起動で動いているもの（登録簿の行の `by` が `terminal` で tmux のセッションが在るもの）すべて・役割 `helper` のものすべて・人の起動でない役割 `organizer` のものを 1 本だけ外す。1 本は 2 つ以上に当てはまっても 1 回だけ外す。役割 `helper` の動いているラッパーは 1 本以下である。上限で断るのは AI の起動（`by` が `spawn`・`restart`・`block:<作業ディレクトリ>`）だけで、人の起動は名前の形・重複・tmux の有無だけで判定する
 - **登録簿（`registry.json`）を書くのはリレーハブだけである。** 頼む側（`hub_client.py`）は受付箱へ依頼を置くだけにする
 - **リレーハブは名前つきのラッパーの区間の切り替え・`ndf-next` の拾い方・アカウントの選び方に触れない。** tmux の中で動くのは今の `Relay` である
 - **リレーハブが終わっても名前つきのラッパーは止まらない。** window の親は tmux のサーバで、リレーハブの終了は届かない
@@ -229,7 +230,7 @@ stateDiagram-v2
 | `tool` | `relay-spawn` / `relay-restart` / `relay-stop`。知らない種類の依頼への答えは `relay-hub` |
 | `status` | `ok` / `stopped` |
 | `summary` | 1 行の説明。断りでは理由（上限なら上限の数と動いている名前の並び。名前の無いものは `-`） |
-| `items` | 1 件。`name`（文字列か null）と `result` |
+| `items` | 1 件。`name`（文字列か null）と `result`。人の起動で上限を超えて起動したときだけ `notice`（上限の数と動いている名前の並びを含む 1 行。端末の 2 本目が結び付く前に出す） |
 | `items[0].result` | `started`（起動・起動し直し）・`stopped`（名前つきの `stop` の成功）・`bad-name`・`name-taken`・`limit`・`not-found`・`no-tmux`・`tmux-failed`・`no-hub`・`hub_self`・`bad-request`（知らない種類の依頼。終了コード 2） |
 | `metrics.exit_code` | 頼む側が終える終了コード |
 
@@ -265,14 +266,14 @@ stateDiagram-v2
 | `registry.json` | `version`（1）と `entries.<名前>`（`session`・`cwd`・`args`・`created_at`・`by`。`spawn --role helper` で起動した行は `role`・`plan` も持つ） | リレーハブだけ | —（名前ごとの行を上書きする。止まった行は同じ名前で起動し直すまで残る） |
 | `requests/<id>.json` | `kind`（`spawn` / `restart`）・`name`（null は自動で付ける）・`cwd`・`args`・`by`・`at`、`spawn --role helper` なら `role`・`plan`。環境変数は載せない | 頼む側（0600） | リレーハブが `<id>.taken` へ `rename` して受け取った時点。待ちを切った頼む側 |
 | `results/<id>.json` | 結果（上の「結果の形」） | リレーハブ | 頼む側が読んで消す。読まれずに 10 分を過ぎたものは次のリレーハブが消す |
-| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed`）・`name`・`reason` を 1 行ずつ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
+| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed`）・`name`・`reason` を 1 行ずつ。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
 
 `id` は `<時刻のナノ秒 20 桁>-<pid>-<乱数 6 桁>` で、ファイル名の順が置いた順になる。`by` は `terminal`（端末の 2 本目）・
 `spawn`・`restart`・`block:<作業ディレクトリ>`（起動のブロック）のどれか。
 
 **作業ディレクトリの `name`。** 名前つきのラッパーとリレーハブのラッパーが起動の最初に 1 行で書く（0600）。登録簿の行から
 作業ディレクトリを引く鍵で、登録簿は作業ディレクトリのパスを持たない。`name` の無い作業ディレクトリは名前の無い今のラッパーで、
-一覧には `-` で出て、上限には数える。
+一覧には `-` で出て、上限には数える。人の起動で動いているラッパーも一覧には出し、上限には数えない。
 
 ### 環境変数
 
@@ -345,7 +346,14 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 | 名前つきのラッパーの待ち通知に名前と `relay.py attach <名前>` の 1 行が入る | 同上の `test_wait_notice_names_wrapper_and_attach` |
 | `spawn` で起動した端末の無いラッパーが最初の入力を受け、`ndf-next` で区間 2 へ進む。重複は 3。リレーハブを kill しても名前つきは動き、次の `claude` がリレーハブになって一覧に既存が出る。`stop <名前>` で止まる | 同上の `test_spawn_ls_stop_and_hub_handover`（使い捨ての tmux サーバと擬似端末） |
 | 2 本目の `claude` が `t2` へ結び付き、端末を閉じてもラッパーが動き続ける | 同上の `test_second_claude_attaches_and_survives_terminal_close` |
-| 上限で端末の 2 本目と `spawn` のどちらも 3 で断る | 同上の `test_limit_refuses_from_terminal_and_spawn` |
+| 上限で `spawn` を 3 で断り、端末の 2 本目は断らずに知らせの 1 行を出して起動し、一覧に出る | 同上の `test_limit_refuses_from_terminal_and_spawn` |
+| 上限に達していても人の起動は起動し、`notice` と記録の `over_limit` を残す。上限未満では残さない | 同上の `test_terminal_request_is_started_over_the_limit_with_notice`・`test_terminal_request_under_the_limit_has_no_notice` |
+| AI の起動（`spawn`・`restart`・`block:<作業ディレクトリ>`）は上限で `limit`・3 で断る | 同上の `test_ai_requests_are_refused_at_the_limit` |
+| 人の起動で動いているラッパーは数えず、セッションの無い行は人の起動として外さない。人の起動の `organizer` は 1 回だけ外す | 同上の `test_human_wrappers_are_not_counted`・`test_human_organizer_is_taken_once` |
+| 人の起動でも名前の形・重複・tmux の有無では断る | 同上の `test_terminal_request_keeps_other_refusals` |
+| 人の起動で始めた名前を `restart` すると行の `by` が `restart` になり、数える | 同上の `test_restart_of_a_human_wrapper_counts_it_again` |
+| `spawn`・`restart`・起動のブロックの依頼の `by` は `terminal` にならず、`by: terminal` は起動の印・`NDF_RELAY_DIR` が無く標準入力と標準出力が端末のときだけ置く | 同上の `test_ai_paths_never_put_terminal`・`test_terminal_request_only_from_a_human_terminal` |
+| 通った結果の `notice` を結び付く前に 1 行出す | 同上の `test_ask_hub_says_the_notice_before_attach` |
 | 名前つきのラッパーを kill すると `stopped`、リレーハブは `running` | 同上の `test_killed_named_wrapper_shows_stopped` |
 | tmux が無いと 2 本目は前景で動く | 同上の `test_no_tmux_runs_second_in_foreground` |
 | 1 本目と名前の無い `stop` の振る舞いが変わらない | `plugins/ndf/scripts/tests/test_relay.py` の既存のテスト一式 |
