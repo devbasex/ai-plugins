@@ -296,24 +296,33 @@ class _Scan:
 
 def _noncontinuing(n: sp.Node) -> bool:
     """`exit`・`return`・`break`・`continue`（か、それで終わる `{ …; }`）か。"""
-    while n.type == "redirected_statement" and n.child_by_field_name("body") is not None:
-        n = n.child_by_field_name("body")
+    n = _strip_redirects(n)
     if n.type == "command":
-        name = n.child_by_field_name("name")
-        return name is not None and sp.unquote(name) in NONCONT
+        return _is_noncontinuing_command(n)
     if n.type == "compound_statement":
         for c, bg in sp.statement_list(n):
             if bg:
                 continue
             while c.type == "list":
                 c = c.children[0]
-            while c.type == "redirected_statement" and c.child_by_field_name("body") is not None:
-                c = c.child_by_field_name("body")
-            if c.type == "command":
-                name = c.child_by_field_name("name")
-                if name is not None and sp.unquote(name) in NONCONT:
-                    return True
+            if _is_noncontinuing_command(_strip_redirects(c)):
+                return True
     return False
+
+
+def _strip_redirects(n: sp.Node) -> sp.Node:
+    """リダイレクトを剥がした本体の文を返す。"""
+    while n.type == "redirected_statement" and n.child_by_field_name("body") is not None:
+        n = n.child_by_field_name("body")
+    return n
+
+
+def _is_noncontinuing_command(n: sp.Node) -> bool:
+    """単一の command で、名前が `exit`・`return`・`break`・`continue` のどれかか。"""
+    if n.type != "command":
+        return False
+    name = n.child_by_field_name("name")
+    return name is not None and sp.unquote(name) in NONCONT
 
 
 def _apply_cd(st: _Place, args: list[str]) -> None:
