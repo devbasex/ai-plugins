@@ -245,13 +245,16 @@ def origin_repo(cwd) -> str | None:
     return m.group(1) if m else None
 
 
+def differs(here: str | None, want: str) -> bool:
+    """`want` が `here` と別のリポジトリか（大文字小文字は区別しない）。`here` を読めない（`None`）ときは別とみなす（C5 の側へ倒す）。"""
+    return here is None or here.lower() != want.lower()
+
+
 def other_repo(repo: str | None, cwd) -> bool:
     """起票先 `repo` が `cwd` のリポジトリ（origin）と別か。`repo` が無ければ同じ、origin を読めなければ別とみなす。"""
     if not repo:
         return False
-    here = origin_repo(cwd)
-    want = repo.split("github.com/")[-1].removesuffix(".git").strip("/")
-    return here is None or here.lower() != want.lower()
+    return differs(origin_repo(cwd), repo.split("github.com/")[-1].removesuffix(".git").strip("/"))
 
 
 def definition_for(root, repo: str | None) -> Definition:
