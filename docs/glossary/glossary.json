@@ -6145,6 +6145,30 @@
       "context": "ndf-workflow",
       "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
       "source": "docs/specifications/ndf-supervisor-docs-guard.md"
+    },
+    {
+      "term": "文書のファイル",
+      "context": "ndf-workflow",
+      "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と用語集の機械向けの形で、プロジェクトの設定で変えられる",
+      "pending_source": "issues/issue-2925-requirements.md"
+    },
+    {
+      "term": "コードのファイル",
+      "context": "ndf-workflow",
+      "meaning": "差分のうち文書のファイルでないもの。スクリプト・設定・テスト・ワークフローを含む",
+      "pending_source": "issues/issue-2925-requirements.md"
+    },
+    {
+      "term": "テストが読む文書",
+      "context": "ndf-workflow",
+      "meaning": "文書のファイルのうち、テストが中身を読むもの（用語集・Skill の本文など）",
+      "pending_source": "issues/issue-2925-requirements.md"
+    },
+    {
+      "term": "振る舞いの確認",
+      "context": "ndf-workflow",
+      "meaning": "Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること",
+      "pending_source": "issues/issue-2925-requirements.md"
     }
   ]
 }
