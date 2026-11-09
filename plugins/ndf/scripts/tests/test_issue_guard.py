@@ -72,6 +72,8 @@ def test_a_missing_required_item_is_denied_with_the_item_and_the_means(repo):
     why = reason(decide(repo, f"gh issue create --title t -l enhancement -F {write(repo, body)}"))
     assert why is not None
     assert "対象範囲" in why and "issue-file.py create" in why and "--body-file" in why and "issue-items.json" in why
+    # 既定の種類のラベルが起票先に無いときの行き止まりを避け、ラベルを作らずに利用者へ戻す道を示す
+    assert "ラベルを作らずに止め" in why and ".ndf/issue-items.json の kind_labels" in why
 
 
 def test_the_presumption_is_required_for_an_ai_filing(repo):

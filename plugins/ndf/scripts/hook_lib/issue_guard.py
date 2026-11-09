@@ -200,7 +200,10 @@ def _means(definition: issue_items.Definition) -> str:
     labels = "・".join(f"`{lab}`（{kind}）" for lab, kind in definition.kind_labels().items())
     return (
         f"範囲外の課題は python3 {SCRIPTS}/issue-file.py create で起票する（out-of-scope の手順）。それ以外は本文をファイルに書き、"
-        f"gh issue create --label <種類のラベル> --body-file <ファイル> で打つ。種類のラベルは {labels} のどれか 1 つ"
+        f"gh issue create --label <種類のラベル> --body-file <ファイル> で打つ。種類のラベルは {labels} のどれか 1 つ。"
+        "起票先にそのラベルが無ければ（gh issue create が could not add label で失敗する）、ラベルを作らずに止め、"
+        f".ndf/{issue_items.SETTING} の kind_labels で"
+        "起票先のラベルの名前に合わせるよう利用者へ戻す（C7: 利用者の設定の書き換えは利用者の承認が要る）"
     )
 
 
