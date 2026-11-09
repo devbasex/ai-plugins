@@ -112,13 +112,13 @@ def name_ok(name) -> bool:
     return isinstance(name, str) and bool(NAME_RE.match(name))
 
 
-def hub_log(event: str, name: str | None = None, reason: str | None = None, over_limit: dict | None = None) -> None:
-    """リレーハブの記録へ 1 行足す（I10）。`over_limit` は上限を超えた人の起動のときだけ足す（#2862）。"""
+def hub_log(event: str, name: str | None = None, reason: str | None = None, over_limit: dict | None = None, kind=None) -> None:
+    """リレーハブの記録へ 1 行足す（I10）。`over_limit` は上限を超えた人の起動のときだけ足す（#2862）。`kind` は起動の種類（#2649）。"""
     import locks  # 外部パッケージ（filelock）を使う。読み込みのときには import しない
 
     try:
         os.makedirs(hub_dir(), mode=0o700, exist_ok=True)
-        row = {"at": stamp(), "event": event, "name": name, "reason": reason}
+        row = {"at": stamp(), "event": event, "name": name, "reason": reason, **({"kind": kind} if kind else {})}
         if over_limit is not None:
             row["over_limit"] = over_limit
         locks.append_locked(hub_path(HUB_LOG), json.dumps(row, ensure_ascii=False))
@@ -477,7 +477,7 @@ class Hub:
         if role:
             registry[name].update(role=role, plan=plan)
         write_json_atomic(hub_path(REGISTRY), {"version": 1, "entries": registry})
-        hub_log("started" if kind == "spawn" else "restarted", name, by or None, over)
+        hub_log("started" if kind == "spawn" else "restarted", name, by or None, over, kind)
         res = hub_result(kind, "ok", f"{name} を起動した（relay.py attach {name} で結び付ける）", name, "started", 0)
         if over:
             res["items"][0]["notice"] = (
@@ -488,7 +488,7 @@ class Hub:
 
     @staticmethod
     def refuse(kind, name, r: Refusal) -> dict:
-        hub_log("refused", name if isinstance(name, str) else None, r.reason)
+        hub_log("refused", name if isinstance(name, str) else None, r.reason, kind=kind if kind in ("spawn", "restart") else None)
         return hub_result(kind, "stopped", r.message, name, r.reason, r.code)
 
 

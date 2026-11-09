@@ -19,6 +19,7 @@ import time
 from . import hub as hb
 from . import pin, tmux
 from .common import NAME_FILE, PID_FILE, STOP_FILE, _write_file, env_num, read_text, relay_running, remove, stamp, write_json_atomic
+from .common import parse_iso
 
 import md  # noqa: E402,I001  common が lib/ を sys.path に置く
 
@@ -282,6 +283,26 @@ def _iso(epoch: float | None) -> str | None:
     return _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def restart_attempts() -> dict[str, list[dict]]:
+    """リレーハブの記録から、名前ごとの再起動の試み `{at, result}` を古い順に読む（#2649 の I9）。`result` は起動できれば
+    `started`、断られれば理由。`kind` の無い古い行は `restarted` だけを試みと数える。読めない記録・行は飛ばす。"""
+    import jsonio
+
+    out: dict[str, list[dict]] = {}
+    for row in jsonio.read_jsonl(hb.hub_path(hb.HUB_LOG), missing=[], broken=[], skip_broken=True):
+        tried = row.get("kind") == "restart" or (row.get("kind") is None and row.get("event") == "restarted")
+        if tried and isinstance(row.get("name"), str):
+            result = "started" if row.get("event") == "restarted" else str(row.get("reason") or row.get("event"))
+            out.setdefault(row["name"], []).append({"at": row.get("at"), "result": result})
+    return out
+
+
+def _restarts_after(tries: list[dict], at: str | None) -> list[dict]:
+    """行の時刻より後の試み。行に時刻が無ければ全件（観測の値が増え続けないよう、最後に動いた後だけを載せる）。"""
+    since = parse_iso(at) if at else None
+    return [t for t in tries if since is None or (parse_iso(t.get("at")) or 0) > since]
+
+
 def _ls_item(name: str, w: hb.Wrapper | None, session: dict | None, pending: bool, hub_dir: str | None, role: str | None = None) -> dict:
     running = bool(w and w.running) or pending
     waiting = bool(w and w.running and w.question)
@@ -317,6 +338,9 @@ def list_items() -> list[dict]:
         pending = session is not None and not (w and w.running) and n in registry
         items.append(_ls_item(n, w, session, pending, hub_dir, (registry.get(n) or {}).get("role")))
     items += [_ls_item("-", w, None, False, hub_dir) for w in ws if w.running and not w.name]
+    tries = restart_attempts()
+    for it in items:
+        it["restarts"] = _restarts_after(tries.get(it["name"], []), it["at"])
     return items
 
 
@@ -430,7 +454,7 @@ def cmd_restart(argv: list[str]) -> int:
     if not row and not (w and w.running):
         return print_result(_not_found("restart", name), as_json)
     if not hb.hub_running():
-        return print_result(no_hub("restart", name, "リレーハブが居ない（端末で claude を起動するとリレーハブになる）"), as_json)
+        return _no_hub_restart(name, "リレーハブが居ない（端末で claude を起動するとリレーハブになる）", as_json)
     hub_dir = hb.hub_relay_dir()
     if w and hub_dir and os.path.realpath(w.dir) == os.path.realpath(hub_dir):
         # リレーハブ自身を止めると、起動し直す依頼を受ける者が居なくなり停止だけが起きる。止めずに、区間の切り替えへ回す
@@ -445,7 +469,13 @@ def cmd_restart(argv: list[str]) -> int:
         return print_result(res, as_json)
     stop_named(name)
     res = send_request("restart", name, os.getcwd(), [], "restart")
-    return print_result(res or no_hub("restart", name, "リレーハブが答えない"), as_json)
+    return print_result(res, as_json) if res else _no_hub_restart(name, "リレーハブが答えない", as_json)
+
+
+def _no_hub_restart(name: str, why: str, as_json: bool) -> int:
+    """リレーハブへ届かなかった再起動も試みとして記録へ残す（#2649 の決定 3。残さないと断られた回が 0 回と読まれる）。"""
+    hb.hub_log("refused", name, "no-hub", kind="restart")
+    return print_result(no_hub("restart", name, why), as_json)
 
 
 def cmd_attach(argv: list[str]) -> int:

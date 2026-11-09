@@ -37,7 +37,9 @@ def not_listed(rid: str, items: list[dict]) -> dict:
     """今の問いの一覧に無い依頼への答えなら、結果へ足す `warning` を返す（#2617）。"""
     if any(q.get("id") == rid for q in items):
         return {}
-    return {"warning": f"依頼 {rid} は今の問いの一覧に無い。答えは保留され、その依頼が届いたら当たる（答え済みなら何もしない）"}
+    return {
+        "warning": f"依頼 {rid} は今の問いの一覧に無い。答えは保留され、その依頼が届いたら当たる（答え済み・取り下げ済みなら何もしない）"
+    }
 
 
 def mvv_mark(q: dict) -> dict:

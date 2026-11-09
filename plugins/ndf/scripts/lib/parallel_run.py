@@ -30,12 +30,14 @@ import parallel_ledger as plg
 import parallel_plan as pp
 import parallel_release as pr
 import parallel_route as prt
+import parallel_watch as pw
 from parallel_files import RELAY
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
-from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
+from parallel_observe import _asking_lanes, _plan_view, apply_observed_states
 from parallel_question import cause_of
 from parallel_reply import AnswerRouting, step_prior_waits, step_waiting_lanes
 from parallel_repo import dev_version, git_head, mark_organizer, poll_seconds, relay, relay_proc, spawn_refusals, stall_seconds
+from parallel_repo import loop_records
 
 
 # ---- 耐久ステップ ----
@@ -71,16 +73,26 @@ def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
 def step_observe(main: str, name: str) -> dict:
     """`relay.py ls --json` の行（名前 → {state, at, role}）・観た時刻（エポック秒）・終了コード・標準エラーの末尾 1 行。
     `can_ask` は一覧の失敗を問える版の記録の印で、無い記録の再生では問わない（問いの DBOS の呼び出しが記録の順を崩す。決定 5）。
-    `limits`・`marks` も同じで、再開の印は一覧の後に読む（止まって見えたレーンの印を読み逃さない。#2707 の I7・I9）。"""
+    `limits`・`marks` も同じで、再開の印は一覧の後に読む（止まって見えたレーンの印を読み逃さない。#2707 の I7・I9）。
+    `can_judge` は行の `restarts`（再起動の試み）と `loops`（止まった開発ループの記録。レーン名 → {loop, condition, at}）で
+    見回りを判定できる版の印で、無い記録の再生では取り下げ・開発ループの止まり・読み切りを通らない（#2649 の決定 4）。"""
     got, res = relay_proc(Path(main), "ls", "--json")
     rows = {
-        it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
+        it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role"), "restarts": it.get("restarts")}
         for it in res.get("items") or []
         if isinstance(it, dict) and it.get("name")
     }
     err = (got.stderr or "").strip().splitlines()[-1:]
-    seen = {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else "", "can_ask": True}
-    return {**seen, "limits": ph.limit_values(Path(main)), "marks": ph.read_marks(Path(main), name)}
+    seen = {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else "", "can_ask": True, "can_judge": True}
+    recs = [(ln, rec.get("stop") or {}) for ln, rec in loop_records(Path(main), name) if rec.get("status") == "stopped"]
+    stops = {ln.name: {"loop": ln.input.loop, "condition": st.get("condition"), "at": st.get("at")} for ln, st in recs}
+    return {**seen, "loops": stops, "limits": ph.limit_values(Path(main)), "marks": ph.read_marks(Path(main), name)}
+
+
+@durable.step(name="parallel.clock")
+def step_clock() -> float:
+    """一時レーンの起動を指示する時刻（エポック秒）。今の起動より前の行を見分ける（#2649 の決定 2）。"""
+    return time.time()
 
 
 @durable.step(name="parallel.held-loops")
@@ -223,6 +235,9 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         self.ls_ask_until = 0.0  # 一覧の失敗を次に問うてよい時刻（エポック秒）
         self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
         self.routed = True  # 答えの届け先の耐久ステップを打ってよいか。古い記録の打ち直しでは False（#2510）
+        self.judging = False  # 最後の観測が版の印 can_judge を持つか（#2649 の決定 4）
+        self.loop_until: dict[str, float] = {}  # レーン → 次に開発ループの止まりを問える時刻（エポック秒。決定 6）
+        self.halted: list[str] = []  # 再起動を断られた問いへ「止める」と答えたレーン（決定 3）
         self.init_answer_hold()
         self.init_run_state(False)
 
@@ -235,8 +250,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。リリースの答えを受けた止まっている
         レーンを起こす行（`wake`）も、そのレーンが動き出すまでどの知らせにも添える。"""
         seq = self.bump()
-        if action in ("release", "confirmed"):
-            self.launch = {"seq": seq, "action": action, **fields}
+        if action in ("release", "confirmed"):  # 版の印のある観測の後は、指示の時刻を添える（#2649 の決定 2）
+            self.launch = {"seq": seq, "action": action, **fields, **({"at": step_clock()} if self.judging else {})}
         elif self.current is not None and self.launch:
             fields = {**fields, "release": self.launch}
         stopped = self.stopped()
@@ -269,6 +284,14 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         return {n for n, st in self.lanes.items() if st.get("started") and st.get("state") == "stopped"}
 
     # -- 受け取り --
+
+    def drain(self) -> None:
+        """話題 `inbox` を空になるまで読み、続けてリリースが流れている間は `resume` を空になるまで読む（#2649 の決定 1）。"""
+        for topic in ("inbox", "resume"):
+            while topic == "inbox" or self.current is not None:
+                if (msg := durable.recv(topic, 0)) is None:
+                    break
+                self.receive(msg, topic)
 
     def take(self, msg) -> None:
         if not isinstance(msg, dict):
@@ -348,6 +371,11 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。"""
         if q.get("kind") == "build":
             self.apply_build(q, choice)
+            return
+        if q.get("loop_stop") and q.get("lane") in self.lanes:  # 答えの観測から区切り 1 つ分は同じレーンへ問わない（#2649 の決定 6）
+            self.loop_until[q["lane"]] = self.stall_until[q["lane"]] = self.seen_at + stall_seconds()
+        if q.get("refused_at") and q.get("lane") in self.lanes:
+            pw.answer_refused(self, q["lane"], prt.STOP_PLAN in choice)
             return
         if prt.STOP_PLAN not in choice:
             return
@@ -573,7 +601,8 @@ def parallel_workflow(main: str, name: str) -> dict:
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
-    designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped)
+    held = {*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())}
+    designs = sorted(held - run.left_stopped - set(run.halted))
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
         if set(designs) - set(run.wake):
             run.wake = sorted({*run.wake, *designs})
@@ -618,7 +647,7 @@ def _spawn_ready(run: _Run, main: str) -> None:
     stopped = run.stopped() - _asking_lanes(run) - set(run.revive) - set(run.marks)
     ready = pp.ready_lanes(view, started, stopped)
     if ready and any(a in stopped for ln in ready for a in ln.after):  # 依存で起こすときだけループの記録を読む
-        ready = pp.ready_lanes(view, started, stopped - set(step_waiting_lanes(main, run.name)))
+        ready = pp.ready_lanes(view, started, stopped - (set(step_waiting_lanes(main, run.name)) - set(run.halted)))
     if ready:
         for n, got in step_spawn(main, run.name, [ln.name for ln in ready]).items():
             run.lanes[n].update(got)
@@ -636,57 +665,17 @@ def _observe_run(run: _Run, main: str) -> dict:
     """レーンの状態を観測して反映し、承認待ちへ移ったレーンを知らせる。一覧が失敗した回は、一覧の失敗の追跡のほかは何も変えない（#2509 の I1）。"""
     seen = step_observe(main, run.name)
     run.ls_ok = int(seen.get("code") or 0) == 0  # code の無い古い記録は成功として読む（決定 5）
-    _track_ls_failure(run, seen)
+    pw.track_ls_failure(run, seen, stall_seconds())
     if not run.ls_ok:
         return seen
     rows = seen.get("rows") or {}
-    run.seen_at = float(seen.get("now") or 0)
+    run.seen_at, run.judging = float(seen.get("now") or 0), bool(seen.get("can_judge"))
     run.clear_revived(rows)
-    _ask_stalls(run, rows, run.seen_at)
-    _ask_helper(run, rows)
+    pw.watch(run, seen, rows, run.seen_at, stall_seconds())
     noticed = apply_observed_states(run, rows)
     if noticed:
         run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
     return seen
-
-
-def _track_ls_failure(run: _Run, seen: dict) -> None:
-    """一覧の失敗が停滞の区切りより長く続いたら、区切りごとに 1 回問う（#2509 の I3）。成功に戻ったら追跡を解き、答えていない
-    一覧の失敗の問いを外す（I4。残すと答えを待って計画が終われない）。"""
-    if run.ls_ok:
-        run.ls_failed_since, run.ls_ask_until = None, 0.0
-        if any(q.get("kind") == "observe" for q in run.questions):
-            run.questions = [q for q in run.questions if q.get("kind") != "observe"]
-            run.publish_questions()
-        return
-    now, limit = float(seen.get("now") or 0), stall_seconds()
-    if run.ls_failed_since is None:
-        run.ls_failed_since = now
-    if now - run.ls_failed_since < limit or now < run.ls_ask_until or not seen.get("can_ask"):
-        return
-    run.ls_ask_until = now + limit
-    mins = int((now - run.ls_failed_since) // 60)
-    rebuild, rid = "ラッパーの環境を作り直す", f"{run.name}-observe-{int(now)}"
-    text = f"レーンの状態の一覧（relay.py ls）が {mins} 分続けて失敗している（終了コード {seen.get('code')}: {seen.get('err') or ''}）"
-    run.ask("observe", rid, None, text, [rebuild, "待つ"], commands={rebuild: f"python3 {RELAY} status"})
-
-
-def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
-    """承認待ちでも止まってもいないのに最後に動いた時刻が区切りより前のレーンを、区切りごとに 1 回だけ問う（異常系 3）。"""
-    import clock
-
-    limit = stall_seconds()
-    for n in run.order:
-        r = rows.get(n) or {}
-        at = clock.parse(r.get("at"), naive="utc") if r.get("at") else None
-        if r.get("state") != "running" or at is None or now - at.timestamp() < limit or now < run.stall_until.get(n, 0):
-            continue
-        run.stall_until[n] = now + limit
-        mins = int((now - at.timestamp()) // 60)
-        run.ask(
-            "stall", f"{n}-s{int(now)}", n, f"レーン {n} が {mins} 分動いていない", ["起こし直す", "止める", "待つ"],
-            commands={"起こし直す": f"python3 {RELAY} restart {n}", "止める": f"python3 {RELAY} stop {n}"},
-        )  # fmt: skip
 
 
 # ---- 外の入口 ----

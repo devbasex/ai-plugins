@@ -27,6 +27,7 @@ import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_reply  # noqa: E402
 import parallel_run as prun  # noqa: E402
+import parallel_watch as pw  # noqa: E402
 
 PLAN = {
     "version": 1,
@@ -126,6 +127,13 @@ def calls(log: Path, sub: str) -> list[list[str]]:
 
 def event(main, name, key):
     return durable.event(pl.workflow_id(name), key)
+
+
+def _iso_now(delta: float = 0.0) -> str:
+    """一覧の行の時刻（今の起動の指示より後の時刻として書く）。"""
+    import datetime as dt
+
+    return (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=delta)).isoformat()
 
 
 def until(pred, timeout=30):
@@ -570,7 +578,7 @@ def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
     start(main)
     pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
-    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper"}}))
+    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper", "at": _iso_now()}}))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "helper"])[0]
     assert item["options"] == ["続きから起こし直す", "止める"] and "p1-rel1" in item["question"]
 
@@ -581,7 +589,7 @@ def test_stop_answer_to_a_stopped_helper_fails_the_release(env, tmp_path):
     start(main)
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
-    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper"}}))
+    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper", "at": _iso_now()}}))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "helper"])[0]
     pl.send_answer(main, "p1", item["id"], "answered", choice=["止める"])
     ans = until(lambda: pl.read_answer(main, "p1", rid)[0])
@@ -894,10 +902,10 @@ def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     run.current, run.launch = {"n": 1}, {"seq": 3, "spawn": "SPAWN"}
     helper = prl.helper_name("p1", 1)
     run.questions = [{"id": "qa", "kind": "ask", "lane": helper}]
-    prun._ask_helper(run, {helper: {"state": "stopped"}})
+    pw.ask_helper(run, {helper: {"state": "stopped"}})
     assert [q["kind"] for q in run.questions] == ["ask"]
     run.questions = []
-    prun._ask_helper(run, {helper: {"state": "stopped"}})
+    pw.ask_helper(run, {helper: {"state": "stopped"}})
     assert [q["kind"] for q in run.questions] == ["helper"]
 
 
