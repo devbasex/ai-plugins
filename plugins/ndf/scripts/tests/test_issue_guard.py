@@ -118,6 +118,22 @@ def test_wrappers_and_lists_are_seen(repo):
     assert reason(decide(repo, f"FOO=1 command gh issue create -t t -l enhancement -F {name} | cat")) is not None
 
 
+def test_the_body_file_is_read_from_the_directory_after_cd(repo):
+    sub = repo / "sub"
+    sub.mkdir()
+    write(sub, FEATURE)
+    assert reason(decide(repo, "cd sub && gh issue create -t t -l enhancement -F body.md")) is None
+    assert reason(decide(repo, "(cd sub && gh issue create -t t -l enhancement -F body.md)")) is None
+    why = reason(decide(repo, "cd sub; cd ..; gh issue create -t t -l enhancement -F body.md"))
+    assert why is not None and "読めない形" in why
+
+
+@pytest.mark.parametrize("tail", ['--body="$EMPTY"', '--body="## 目的\n\n$X\n"', "--body=$(cat body.md)", '--body-file="$F"'])
+def test_an_inline_body_value_with_an_expansion_is_unreadable(repo, tail):
+    why = reason(decide(repo, f"gh issue create -t t -l enhancement {tail}"))
+    assert why is not None and "読めない形" in why
+
+
 @pytest.mark.parametrize(
     "command",
     [

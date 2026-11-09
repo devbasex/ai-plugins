@@ -6,10 +6,10 @@
 | 本文の渡し方 | 読み方 |
 | --- | --- |
 | `--body` / `-b` の文字列 | 引用を外した字面（展開を含む語は読めない形） |
-| `--body-file` / `-F` のファイル | コマンドの実行ディレクトリからの相対で読む（`-` の標準入力は読めない形） |
+| `--body-file` / `-F` のファイル | その `gh issue create` を打つときの現在地（前の `cd` を `write_target.command_dirs()` で追う。字面から決められなければコマンドの実行ディレクトリ）からの相対で読む（`-` の標準入力は読めない形） |
 | `--body "$(cat <<'EOF' … EOF)"` | ヒアドキュメントの本文（区切りを引用しないときは展開を含まない本文だけ） |
 
-ラベルは `--label` / `-l`（繰り返しとカンマ区切り）。`-R` / `--repo` が今のリポジトリ（`git remote get-url origin`）と
+ラベルは `--label` / `-l`（繰り返しとカンマ区切り）。定義と origin も同じ現在地から読む。`-R` / `--repo` が今のリポジトリ（`git remote get-url origin`）と
 違うときは判定しない。欠けがある・本文を上の形で読めない（標準入力・変数・`--web`）ときは拒否し、理由に欠けた項目名・
 定義のファイル・正しい手段を書く。GitHub は呼ばない。構文木を読み切れない・定義を読めないときは判定せずに通す。
 `bash -c` の中や `gh api` での起票は見ない（起票の後の検査 `issue-items.py audit` が拾う）。
@@ -26,6 +26,7 @@ import limits
 import shparse as sp
 
 from . import payload as pl
+from . import write_target
 from .token_guard import deny
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -38,6 +39,7 @@ LABEL_OPTS = ("--label", "-l")
 REPO_OPTS = ("--repo", "-R")
 WEB_OPTS = ("--web", "-w")
 CONTEXT = {"ai": True}
+EXPANSIONS = ("command_substitution", "simple_expansion", "expansion", "process_substitution")
 
 
 def _call_words(n: sp.Node) -> list[sp.Node]:
@@ -109,9 +111,7 @@ def _arg_value(node: sp.Node) -> str | None:
     here = _heredoc_text(node)
     if here is not None:
         return here
-    if node.type in ("command_substitution", "simple_expansion", "expansion") or any(
-        c.type in ("command_substitution", "simple_expansion", "expansion", "process_substitution") for c in node.children
-    ):
+    if node.type in EXPANSIONS or any(c.type in EXPANSIONS for c in node.children):
         return None
     return sp.unquote(node)
 
@@ -136,7 +136,20 @@ def _opt_value(nodes: list[sp.Node], i: int, name: str, eq: str, inline: str) ->
     if name in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS and not eq:
         i += 1
         return (_arg_value(nodes[i]) if i < len(nodes) else None), i
+    if eq and _has_expansion(nodes[i]):
+        return None, i
     return inline, i
+
+
+def _has_expansion(node: sp.Node) -> bool:
+    """語のどこかに展開（変数・コマンド置換・プロセス置換）を含むか。`--body=…` のように値が語の一部のときに使う。"""
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if n.type in EXPANSIONS:
+            return True
+        stack.extend(n.children)
+    return False
 
 
 def _apply_arg(acc: dict, name: str, value: str | None, cwd: str) -> bool:
@@ -215,12 +228,14 @@ def issue_decision(ev: pl.Event) -> dict | None:
     found = creates(root)
     if not found:
         return None
-    cwd = ev.command_cwd() or ev.cwd
-    try:
-        definition = issue_items.load_definition(cwd)
-    except issue_items.DefinitionError:
-        return None
+    base = ev.command_cwd() or ev.cwd
+    dirs = write_target.command_dirs(root, base)
     for node in found:
+        cwd = dirs.get((node.start_byte, node.end_byte)) or base
+        try:
+            definition = issue_items.load_definition(cwd)
+        except issue_items.DefinitionError:
+            continue
         words = _call_words(node)
         start = _start([sp.unquote(w) for w in words]) + 3
         body, labels, repo = create_args(words[start:], cwd)

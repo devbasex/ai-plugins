@@ -16,6 +16,9 @@
     "last": {
       "summary": "書き手が書く節の最後に置く項目の識別子（既定は request＝依頼（原文））"
     },
+    "record_headings": {
+      "summary": "工程が足す節の見出しの語の並び（任意）。NDF の既定（scripts/data/issue-stores.json の record_headings）に足し、last の項目の後ろに置いてよい節にする"
+    },
     "items": {
       "summary": "記載項目の並び。id・name・need（種類 → 必須 / 該当時 / 不要）・level（水準）・when（該当する条件の text と、機械で判定する key の ai / origin）"
     }

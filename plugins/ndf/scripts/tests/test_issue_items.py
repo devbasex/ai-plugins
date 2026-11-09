@@ -156,6 +156,18 @@ def test_only_process_sections_may_follow_the_request():
     assert ii.judge_body(bad, ["bug"], {}, d)[1] == [ii.Gap("依頼（原文）", "order")]
 
 
+def test_a_project_definition_adds_its_own_process_section_headings(tmp_path):
+    got = ii.load_definition(project(tmp_path, defined(record_headings=["作業記録"])))
+    body = BUG + "\n## 依頼（原文）\n\n> 直して\n\n## 作業記録\n\nx\n\n## 進行\n\n- [x] 要求\n"
+    assert ii.judge_body(body, ["bug"], {}, got)[1] == []
+    assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == [ii.Gap("依頼（原文）", "order")]
+
+
+def test_process_section_headings_that_are_not_strings_stop_reading(tmp_path):
+    with pytest.raises(ii.DefinitionError, match="record_headings"):
+        ii.load_definition(project(tmp_path, defined(record_headings="作業記録")))
+
+
 def test_headings_in_a_fence_are_not_sections():
     body = BUG.replace("## 影響\n\n止まる。\n", "```\n## 影響\n```\n")
     assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == [ii.Gap("影響", "missing")]

@@ -2,6 +2,7 @@
 
 定義は `data/issue-items.json`（種類ごとの必須・該当時・不要と水準）、置き場ごとの表し方は `data/issue-stores.json` にある。
 プロジェクトの `.ndf/issue-items.json` があれば、既定の定義の代わりにそのまま読む（表し方のファイルは置き換えない）。
+工程が足す節の見出しの語は、表し方のファイルの `record_headings` に、定義の `record_headings`（あれば）を足したものである。
 
 - `load_definition(root)`: 定義と表し方を読み、不変条件（各項目が 4 種類の区分と水準を持つ・該当時の項目は条件を持つ・
   3 つの置き場で表し方を 1 つに解決できる）を確かめる。破れていれば `DefinitionError`
@@ -174,7 +175,11 @@ def load_definition(root=None) -> Definition:
     st = _definition_json(STORES)
     stores = st.get("stores") if isinstance(st.get("stores"), dict) else {}
     _check_stores(stores, items)
+    own = raw.get("record_headings")
+    if own is not None and (not isinstance(own, list) or not all(isinstance(h, str) and h.strip() for h in own)):
+        raise DefinitionError(f"{path}: record_headings が文字列の並びでない")
     heads = [h for h in st.get("record_headings") or [] if isinstance(h, str)]
+    heads += [h for h in own or [] if h not in heads]
     last = raw.get("last") if isinstance(raw.get("last"), str) else None
     return Definition(kinds, items, last, stores, heads, path)
 

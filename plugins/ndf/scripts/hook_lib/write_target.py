@@ -80,6 +80,7 @@ class _Scan:
     def __init__(self, base: str | None) -> None:
         self.out: list[str] = []
         self.root = _Place(base or None)
+        self.dirs: dict[tuple[int, int], str | None] = {}
 
     def emit(self, v: str, st: _Place) -> None:
         if v in NOT_TARGET or v.startswith(("&", "|")) or "$" in v:
@@ -269,6 +270,7 @@ class _Scan:
             self.seq(s, st.copy())
 
     def command(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        self.dirs[(n.start_byte, n.end_byte)] = st.cwd
         nodes, rs, assigns = sp.command_parts(n, redirs)
         for a in assigns:
             self.substs(a, st)
@@ -400,6 +402,13 @@ def shell_targets(cmd: str, base: str = "") -> list[str]:
     scan = _Scan(base)
     scan.seq(root, scan.root)
     return scan.out
+
+
+def command_dirs(root: sp.Node, base: str) -> dict[tuple[int, int], str | None]:
+    """構文木の各 `command` のノード（`(start_byte, end_byte)`）を実行するときの現在地。字面から決められなければ None。"""
+    scan = _Scan(base)
+    scan.seq(root, scan.root)
+    return scan.dirs
 
 
 def patch_targets(patch: str) -> list[str]:
