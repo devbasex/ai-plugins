@@ -393,6 +393,12 @@ class AnswerHold:
         if (now := self.wake_lanes()) and set(now) - set(shown):
             self.pause("notice", lanes=[], attach=[])
 
+    def restore_hold(self, limits: Optional[dict]) -> None:
+        """作り直しの直後に、戻した問いと閾値から停止の範囲を戻す。止める指示のファイルと履歴は止めた周に書いてあるため書かない。
+        閾値が無い（台帳を読まない途中の記録・閾値を載せない古い作り直しの記録）なら何もしない。"""
+        if limits:
+            self.hold = decide_hold(self.questions, self.order, Limits(**limits))
+
     def _retire_superseded(self) -> None:
         gone, self.superseded = self.superseded, set()
         if any(q.get("id") in gone for q in self.questions):

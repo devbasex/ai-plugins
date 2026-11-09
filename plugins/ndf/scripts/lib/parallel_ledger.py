@@ -88,7 +88,7 @@ def append_ledger_row(
            "by": by or "", "ver": ndf_version(), "msg": msg}  # fmt: skip
     with locks.exclusive(p, timeout=limits.seconds("locks.append")):
         data = p.read_bytes() if p.exists() else b""
-        if any(r.get("key") == key for _, r in _ledger_lines(data, 0)):
+        if any(isinstance(r, dict) and r.get("key") == key for _, r in _ledger_lines(data, 0)):  # 読めない行は飛ばす（I4）
             return False
         line = (b"\n" if data and not data.endswith(b"\n") else b"") + json.dumps(row, ensure_ascii=False).encode() + b"\n"
         fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)

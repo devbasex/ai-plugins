@@ -241,3 +241,17 @@ def test_the_plan_check_reports_a_bad_limit_as_a_warning(tmp_path, monkeypatch):
     declare(tmp_path, {"parallel": {"answer_limit": {"lane": 0}}})
     plan, items, metrics = prt.with_release_warnings(tmp_path, ("plan", [], {"warnings": 0}))
     assert plan == "plan" and metrics["warnings"] == 1 and items[0]["rule"] == "answer-limit"
+
+
+def test_a_rebuilt_run_restores_the_plan_hold_before_spawning():
+    """作り直しの直後に、戻した問いと閾値から計画全体の停止を戻す。閾値の無い記録では空のまま。"""
+
+    class Run(ph.AnswerHold):
+        order, questions = ORDER, [own(i) for i in range(9)]
+
+    run = Run()
+    run.init_answer_hold()
+    run.restore_hold(None)
+    assert run.hold.empty
+    run.restore_hold({"plan": 8, "lane": 3})
+    assert run.hold.plan and run.hold.count == 9

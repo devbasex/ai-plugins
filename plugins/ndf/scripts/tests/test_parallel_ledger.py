@@ -50,6 +50,8 @@ def test_a_cut_line_becomes_one_broken_row_and_does_not_mix_with_the_next(tmp_pa
     got = plg.read_ledger_rows(tmp_path, "p1")
     assert [r["id"] for r in got.rows] == [_req(1)["id"], _req(2)["id"]] and got.broken == 1
     assert plg.restore(tmp_path, "p1")["broken"] == 1
+    assert _add(tmp_path, _req(3)) is True  # 閉じた壊れた行が中ほどに残っても、重複の確かめで落ちない
+    assert _add(tmp_path, _req(3)) is False
 
 
 def test_an_unterminated_last_line_is_left_for_the_next_read(tmp_path):
