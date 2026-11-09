@@ -211,18 +211,27 @@ def test_handoff_name_follows_handoff_py(name, ok):
     assert (metrics["errors"] == 0) is ok
 
 
-def _running_plan(tmp_path: Path) -> tuple[Path, dict]:
+@pytest.fixture()
+def run_proc():
+    """`parallel.py run p1` の起動の引数を持つ、動き続けるプロセス（`run.pid` の確かめが読む。#2647 の決定 9）。"""
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "parallel.py", "run", "p1"])
+    yield p
+    p.kill()
+    p.wait()
+
+
+def _running_plan(tmp_path: Path, pid: int) -> tuple[Path, dict]:
     """run が動いている（`run.pid` の pid が生きている）計画と、ラッパーの中のセッションの環境。"""
     (tmp_path / "repo").mkdir()
     main = _git_main(tmp_path / "repo")
     assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
-    (pp.plan_dir(main, "p1") / "run.pid").write_text(f"{os.getpid()}\n")
+    (pp.plan_dir(main, "p1") / "run.pid").write_text(f"{pid}\n")
     return main, {k: v for k, v in os.environ.items() if k != "NDF_PARALLEL_RELAY"}
 
 
-def test_start_on_a_running_plan_marks_the_session_as_organizer(tmp_path):
+def test_start_on_a_running_plan_marks_the_session_as_organizer(tmp_path, run_proc):
     """動いている run でも、`start` を打ったセッションのラッパーへオーガナイザーの印を付ける（#2637）。"""
-    main, env = _running_plan(tmp_path)
+    main, env = _running_plan(tmp_path, run_proc.pid)
     relay_dir = tmp_path / "wrapper"
     relay_dir.mkdir()
     got = subprocess.run(
@@ -230,13 +239,13 @@ def test_start_on_a_running_plan_marks_the_session_as_organizer(tmp_path):
         cwd=main, capture_output=True, text=True, env={**env, "NDF_RELAY_DIR": str(relay_dir)},
     )  # fmt: skip
     res = json.loads(got.stdout.strip().splitlines()[-1])
-    assert got.returncode == 0 and res["metrics"]["pid"] == os.getpid() and res["metrics"]["organizer"] is True
+    assert got.returncode == 0 and res["metrics"]["pid"] == run_proc.pid and res["metrics"]["organizer"] is True
     role = json.loads((relay_dir / "role.json").read_text())
     assert (role["role"], role["plan"]) == ("organizer", "p1")
 
 
-def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path):
-    main, env = _running_plan(tmp_path)
+def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path, run_proc):
+    main, env = _running_plan(tmp_path, run_proc.pid)
     env.pop("NDF_RELAY_DIR", None)
     got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
     assert got.stdout, got.stderr
@@ -245,14 +254,14 @@ def test_start_divides_the_issue_candidate_by_the_lanes_of_the_plan(tmp_path):
     assert report["lanes"] == lanes and report["candidates"]["max_issues"] == max(1, report["candidates"]["max_plans"] // lanes)
 
 
-def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path):
+def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path, run_proc):
     """ラッパーの外では印を付けられないが、`start` の答えは今のまま（次の 1 手を返す）で、run を増やさない。"""
-    main, env = _running_plan(tmp_path)
+    main, env = _running_plan(tmp_path, run_proc.pid)
     env.pop("NDF_RELAY_DIR", None)
     got = subprocess.run([sys.executable, str(SCRIPTS / "parallel.py"), "start", "p1"], cwd=main, capture_output=True, text=True, env=env)
     res = json.loads(got.stdout.strip().splitlines()[-1])
-    assert got.returncode == 0 and res["metrics"]["organizer"] is False and res["metrics"]["pid"] == os.getpid()
-    assert (pp.plan_dir(main, "p1") / "run.pid").read_text().strip() == str(os.getpid())
+    assert got.returncode == 0 and res["metrics"]["organizer"] is False and res["metrics"]["pid"] == run_proc.pid
+    assert (pp.plan_dir(main, "p1") / "run.pid").read_text().strip() == str(run_proc.pid)
 
 
 # ---- 起動の前のリリースの検査（#2616 の受け入れ条件 16・17） ----
@@ -304,3 +313,47 @@ def test_check_cli_counts_the_warning_and_exits_zero(tmp_path):
     _declare(main, AUTO)
     code, res = _cli(main, "check", "p1")
     assert code == 0 and res["metrics"]["warnings"] == warned - 1 and all(i.get("rule") != "release" for i in res["items"])
+
+
+def test_a_reused_run_pid_is_not_read_as_a_running_run(tmp_path, run_proc):
+    """`run.pid` の pid が `parallel.py run <計画名>` 以外のプロセスに使い回されていれば、動いていると読まない（#2647 の条件 15）。"""
+    import parallel_lane as pl
+
+    pp.plan_dir(tmp_path, "p1").mkdir(parents=True)
+    (pp.plan_dir(tmp_path, "p1") / "run.pid").write_text(f"{os.getpid()}\n")
+    assert pl.live_run_pid(tmp_path, "p1") is None
+    (pp.plan_dir(tmp_path, "p1") / "run.pid").write_text(f"{run_proc.pid}\n")
+    assert pl.live_run_pid(tmp_path, "p1") == run_proc.pid
+
+
+class _Reply(Exception):
+    pass
+
+
+def test_start_with_a_dead_run_pid_marks_the_session_before_continuing(tmp_path, monkeypatch):
+    """`run.pid` の pid が死んでいて耐久ワークフローが途中の計画でも、`start` が打ったセッションへ印を付けて続ける（#2647 の条件 15）。"""
+    import parallel_cli as pcli
+    import parallel_lane as pl
+    import parallel_run as pr_run
+
+    main = _git_main(tmp_path)
+    assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
+    marked, spawned, out = [], [], {}
+    monkeypatch.setattr(pr_run, "mark_organizer", lambda m, n, clear=False: marked.append((n, clear)) or True)
+    monkeypatch.setattr(pr_run, "environment_report", lambda m, p: ({}, []))
+    monkeypatch.setattr(pl, "live_run_pid", lambda m, n: None)
+    monkeypatch.setattr(pl, "run_status", lambda m, n: "PENDING")
+    monkeypatch.setattr(pcli.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or type("P", (), {"pid": 4321})())
+
+    def reply(status, summary, items=None, code=None, **metrics):
+        out.update(status=status, metrics=metrics)
+        raise _Reply
+
+    def checked(m, n):
+        return pp.check_data(pp.load_plan(m, n), home=m)
+
+    a = type("A", (), {"name": "p1"})()
+    with pytest.raises(_Reply):
+        pcli.start(a, reply, main, checked, SCRIPTS / "parallel.py")
+    assert marked == [("p1", False)] and out["metrics"]["organizer"] is True
+    assert spawned and spawned[0][-2:] == ["run", "p1"]

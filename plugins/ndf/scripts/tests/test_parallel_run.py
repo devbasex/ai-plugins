@@ -174,7 +174,7 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
     out = durable.output_of(pl.workflow_id("p1"))
     assert out["status"] == "finished" and out["releases"][0]["state"] == "released"
     assert spawned(log) == ["la", "lb"]  # 1 本のレーンは 1 回だけ起動する（I7）
-    assert ["role", "--clear"] in calls(log, "role")
+    assert ["role", "--clear", "--plan-dir", str(pp.plan_dir(main, "p1").resolve())] in calls(log, "role")
 
 
 def test_moved_head_represents_once(env, tmp_path):
@@ -247,7 +247,9 @@ def test_char_lane_missing_from_ls_counts_as_stopped_and_finishes(env):
     assert out["status"] == "finished" and spawned(log) == ["la", "lb"]
     assert {n: st["state"] for n, st in out["lanes"].items()} == {"la": "stopped", "lb": "stopped"}
     assert out["releases"] == [] and out["pending"] == []
-    assert calls(log, "role")[0] == ["role", "organizer", "--plan", "p1"] and ["role", "--clear"] in calls(log, "role")
+    plan_dir = str(pp.plan_dir(main, "p1").resolve())
+    assert calls(log, "role")[0] == ["role", "organizer", "--plan", "p1", "--plan-dir", plan_dir]
+    assert ["role", "--clear", "--plan-dir", plan_dir] in calls(log, "role")
 
 
 def test_char_awaiting_approval_pauses_with_notice(env):

@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -45,11 +44,10 @@ deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
+import parallel_cli as pcli  # noqa: E402
 import parallel_external as pe  # noqa: E402
 import parallel_external_cli as px  # noqa: E402
-import parallel_hold as ph  # noqa: E402
 import parallel_hold_cli as phc  # noqa: E402
-import parallel_homes  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 from parallel_lane_cli import add_lane_parser, cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
 import parallel_plan as pp  # noqa: E402
@@ -122,7 +120,7 @@ def cmd_check(a) -> None:
 
 
 def _wait_line(name: str) -> str:
-    return f"python3 {SELF} wait {name}"
+    return pcli.wait_line(SELF, name)
 
 
 def cmd_run(a) -> None:
@@ -136,6 +134,7 @@ def cmd_run(a) -> None:
     import durable
     import parallel_run as pr_run
 
+    marked = pr_run.mark_organizer(main, a.name)  # 直接打った run・動いていると返る経路も打ったセッションへ付ける（#2637）
     pl.clear_settled(main, a.name)  # 終わった印を残したまま動かすと、計画の外の判定が動いていないと読む
     try:
         got, resumed = pr_run.run_plan(main, a.name)
@@ -143,7 +142,7 @@ def cmd_run(a) -> None:
         if "動いている" in str(exc):
             # 設計の終了コード 5 は統一 JSON レポートの終了コードの決まり（step_result.code_matches）に無いため、
             # 動いている run を続ける答え（ok・running）として返す
-            reply("ok", f"同じ計画の run が動いている。wait で待つ: {exc}", running=True, next=_wait_line(a.name))
+            reply("ok", f"同じ計画の run が動いている。wait で待つ: {exc}", running=True, organizer=marked, next=_wait_line(a.name))
         reply("stopped", f"耐久の記録を開けない: {exc}", code=2)
     status = got.get("status") if isinstance(got, dict) else None
     lanes = [{"lane": n, **st} for n, st in sorted((got or {}).get("lanes", {}).items())]
@@ -151,64 +150,11 @@ def cmd_run(a) -> None:
 
 
 def cmd_start(a) -> None:
-    px.refuse_in_factory_run(reply)
-    main = main_of()
-    plan, items, metrics = checked_plan(main, a.name)
-    if plan is None:
-        reply("stopped", f"並列の計画 {a.name} の検査に誤りがあるため、レーンを 1 本も起動しない", items, 1, **metrics)
-    import parallel_run as pr_run
-
-    env, notes = pr_run.environment_report(main, plan)
-    notes = [*notes, *ph.limit_items(main)]
-    parallel_homes.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
-    pid = pl.live_run_pid(main, a.name)
-    if pid is not None:
-        marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
-        reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=_wait_line(a.name), environment=env)
-    if pl.run_status(main, a.name) is None:
-        px.manual_or_none(main, plan, reply)
-    log = pp.plan_dir(main, a.name) / "run.log"
-    pl.clear_settled(main, a.name)  # 切り離した run が消す前に判定が読んでも、動いていないと読まない
-    with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
-        p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
-    (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
-    reply("ok", f"run を切り離して起動した（pid {p.pid}）", notes, pid=p.pid, log=str(log), next=_wait_line(a.name), environment=env)
+    pcli.start(a, reply, main_of(), checked_plan, SELF)
 
 
 def cmd_wait(a) -> None:
-    import durable
-
-    main = main_of()
-    if not pl.record_exists(main, a.name):
-        reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
-    keys = ["pause", "questions", "answer-hold"]
-    got = durable.wait_from(
-        pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout, start=pl.record_start(main)
-    )
-    if got.kind == "timeout":
-        reply(
-            "stopped",
-            f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
-            code=3,
-            seq=a.after,
-            next=_wait_line(a.name) + f" --after {a.after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
-        )
-    if got.kind == "event":
-        ev = dict(got.value)
-        key = ev.pop("key")
-        action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
-        if action == "running":
-            reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"))
-        items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
-        if action == ph.CONDITION:
-            ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
-        reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **ev)
-    if got.kind == "done":
-        o = got.value or {}
-        lanes = [{"lane": n, **st} for n, st in sorted((o.get("lanes") or {}).items())]
-        rows = {"releases": o.get("releases"), "prior_waits": o.get("prior_waits") or []}
-        reply("ok", f"並列の計画 {a.name} は {o.get('status')} で終わった", lanes, action=o.get("status"), **rows)
-    reply("stopped", f"耐久ワークフローが {got.kind} で終わった: {got.value}", code=1, action=got.kind)
+    pcli.wait(a, reply, main_of(), SELF)
 
 
 def cmd_present(a) -> None:

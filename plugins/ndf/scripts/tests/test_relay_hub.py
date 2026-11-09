@@ -1163,3 +1163,57 @@ def test_hub_refuses_when_neither_its_python_nor_relay_current_exists(dirs, tmp_
     _, res = _launch(monkeypatch, base)
     assert res["items"][0]["result"] == hb.TMUX_FAILED and res["metrics"]["exit_code"] == 1
     assert "lane1" not in hb.read_registry()
+
+
+# ---------------------------------------------------------------- オーガナイザーの役割の引き継ぎ（#2647 の条件 16・I13）
+
+
+def _organizer(d, plan_dir=None, plan="p1"):
+    (d.path / hb.ROLE_FILE).write_text(json.dumps({"role": "organizer", "plan": plan, **({"plan_dir": plan_dir} if plan_dir else {})}))
+
+
+def _organizers():
+    return sorted(w.name for w in hb.scan_wrappers() if w.role == "organizer")
+
+
+def _role(monkeypatch, capsys, relay_dir, *argv):
+    if relay_dir is None:
+        monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+    else:
+        monkeypatch.setenv("NDF_RELAY_DIR", str(relay_dir))
+    capsys.readouterr()
+    code = hc.cmd_role(list(argv))
+    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_role_organizer_moves_the_mark_of_the_same_plan_dir_only(dirs, monkeypatch, capsys, tmp_path):
+    """新しいセッションへ付けた時点で、同じ計画の置き場の前の印は外れる。別のリポジトリの同じ名前の計画と旧い形の印は残る。"""
+    here, there = str(tmp_path / "a" / ".ndf" / "parallel" / "p1"), str(tmp_path / "b" / ".ndf" / "parallel" / "p1")
+    old, other, legacy, new = dirs("old", name="old"), dirs("other", name="other"), dirs("legacy", name="legacy"), dirs("new", name="new")
+    _organizer(old, here)
+    _organizer(other, there)
+    _organizer(legacy)
+    code, res = _role(monkeypatch, capsys, new.path, "organizer", "--plan", "p1", "--plan-dir", here)
+    assert code == 0 and res["items"][0]["cleared"] == 1
+    assert _organizers() == ["legacy", "new", "other"]
+    assert hb.read_role(str(new.path))["plan_dir"] == here
+
+
+def test_role_clear_with_plan_dir_works_outside_a_wrapper(dirs, monkeypatch, capsys, tmp_path):
+    """計画の終わりの `role --clear --plan-dir` は、ラッパーの外からでも同じ計画の印をすべて消す。"""
+    here, there = str(tmp_path / "a" / "p1"), str(tmp_path / "b" / "p1")
+    one, two, other = dirs("one", name="one"), dirs("two", name="two"), dirs("other", name="other")
+    _organizer(one, here)
+    _organizer(two, here)
+    _organizer(other, there)
+    code, res = _role(monkeypatch, capsys, None, "--clear", "--plan-dir", here)
+    assert code == 0 and res["items"][0]["cleared"] == 2
+    assert _organizers() == ["other"]
+    assert _role(monkeypatch, capsys, None, "--clear")[0] == 1  # 指定が無ければ今どおりラッパーの外を断る
+
+
+def test_role_organizer_without_plan_dir_keeps_other_marks(dirs, monkeypatch, capsys, tmp_path):
+    old, new = dirs("old", name="old"), dirs("new", name="new")
+    _organizer(old, str(tmp_path / "p1"))
+    code, res = _role(monkeypatch, capsys, new.path, "organizer", "--plan", "p1")
+    assert code == 0 and res["items"][0]["cleared"] == 0 and _organizers() == ["new", "old"]

@@ -55,13 +55,18 @@ def record_exists(main: Path, name: str) -> bool:
 
 
 def live_run_pid(main: Path, name: str) -> Optional[int]:
-    """`run.pid` の run が動いていればその pid。"""
+    """`run.pid` の run が動いていればその pid。
+
+    生きていても起動の引数が `parallel.py run <計画名>` でなければ、使い回された別のプロセスとして動いていないと読む
+    （#2647 の決定 9）。引数を読めないときは二重起動を避けて動いていると読む（重なっても `launch` の排他が止める）。"""
+    import procs
+
     try:
         pid = int((pp.plan_dir(main, name) / "run.pid").read_text().strip())
         os.kill(pid, 0)
     except (OSError, ValueError):
         return None
-    return pid
+    return None if procs.cmdline_contains(pid, f"parallel.py run {name}") is False else pid
 
 
 def run_status(main: Path, name: str) -> Optional[str]:

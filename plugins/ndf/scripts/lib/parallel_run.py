@@ -34,7 +34,7 @@ from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  
 from parallel_observe import apply_observed_states
 from parallel_question import cause_of
 from parallel_reply import AnswerRouting, step_prior_waits, step_waiting_lanes
-from parallel_repo import dev_version, git_head, poll_seconds, relay, relay_proc, spawn_refusals, stall_seconds
+from parallel_repo import dev_version, git_head, mark_organizer, poll_seconds, relay, relay_proc, spawn_refusals, stall_seconds
 
 
 # ---- 耐久ステップ ----
@@ -46,7 +46,7 @@ def step_init(main: str, name: str) -> dict:
     plan, items, _ = pp.check_data(pp.load_plan(Path(main), name))
     if plan is None:
         return {"ok": False, "items": items}
-    relay(Path(main), "role", "organizer", "--plan", name)
+    mark_organizer(Path(main), name)
     return {"ok": True, "lanes": [ln.model_dump(mode="json") for ln in plan.lanes]}
 
 
@@ -136,7 +136,7 @@ def step_stop_lanes(main: str, names: list[str]) -> list[str]:
 @durable.step(name="parallel.finish")
 def step_finish(main: str, name: str, progress: dict) -> None:
     """役割の印を消し、止める指示のファイルと再開の印を消し、`plan.md` を描画し直す。"""
-    relay(Path(main), "role", "--clear")
+    mark_organizer(Path(main), name, clear=True)
     ph.clear_plan(Path(main), name)
     render_progress(main, name, progress)
 
