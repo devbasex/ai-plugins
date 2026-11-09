@@ -2733,6 +2733,18 @@
       "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
+      "term": "リリースの Pull Request",
+      "context": "ndf-release",
+      "meaning": "本番チャネルへ変更を入れる Pull Request。リリースの雛形では `release/v<版>` が、経路 merge ではベースブランチが head になる",
+      "pending_source": "issues/issue-2748-design.md"
+    },
+    {
+      "term": "リリースの承認資料",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持つ。経路 merge では、この欄の SHA がリリースの Pull Request の先端のときだけ本番チャネルへマージする。リリースの雛形では、承認したコミットから比べた先端までに版上げなど許可した差分のほかが無いことを確かめ、比べた先端をマージする",
+      "pending_source": "issues/issue-2748-design.md"
+    },
+    {
       "term": "昇格の Pull Request",
       "context": "ndf-release",
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
@@ -3984,15 +3996,13 @@
       "term": "課題の表",
       "context": "ndf-release",
       "meaning": "リリース後テストの記録のうち、見出しに `課題` と `結果` の両方の列を持つ表。スプリントの課題を閉じる判定とリリースの承認資料が、課題ごとの合否をここから読む",
-      "source": "",
-      "pending_source": "issues/issue-2803-requirements.md"
+      "source": "docs/specifications/ndf-sprint-close-acceptance-criteria.md"
     },
     {
       "term": "補足の表",
       "context": "ndf-release",
       "meaning": "リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない",
-      "source": "",
-      "pending_source": "issues/issue-2803-requirements.md"
+      "source": "docs/specifications/ndf-sprint-close-acceptance-criteria.md"
     },
     {
       "term": "版数を上げないリリース",
@@ -5860,121 +5870,109 @@
       "term": "Issue の種類",
       "context": "ndf-issue-upkeep",
       "meaning": "不具合・機能・調査・運用など、記載すべき項目の組を決める Issue の区分",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "記載項目",
       "context": "ndf-issue-upkeep",
       "meaning": "Issue の本文（または課題の置き場の欄）に書く 1 つの事柄。例: 受け入れ条件・再現手順・担当者",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "必須の項目",
       "context": "ndf-issue-upkeep",
       "meaning": "その種類の Issue で、欠けると起票の前の検査で止まる項目",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "該当時の項目",
       "context": "ndf-issue-upkeep",
       "meaning": "条件に当たるときだけ書く項目。当たる条件を定義に書く",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "記載の水準",
       "context": "ndf-issue-upkeep",
       "meaning": "記載項目に何を書けば満たしたことになるかの基準",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "記載項目の定義",
       "context": "ndf-issue-upkeep",
       "meaning": "種類ごとの記載項目・区分・記載の水準をまとめた 1 か所の正本",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "起票の前の検査",
       "context": "ndf-issue-upkeep",
       "meaning": "AI が Issue を作る前に、本文が記載項目の定義を満たすかを判定する検査",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "起票の後の検査",
       "context": "ndf-issue-upkeep",
       "meaning": "作られた open の Issue の本文が記載項目の定義を満たすかを判定する検査",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "課題の置き場",
       "context": "ndf-issue-upkeep",
       "meaning": "Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す",
-      "source": "",
-      "pending_source": "issues/issue-2737-requirements.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "一致の検査",
       "context": "ndf-issue-upkeep",
       "meaning": "記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く",
-      "source": "",
-      "pending_source": "issues/issue-2737-design.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "工程が足す節",
       "context": "ndf-issue-upkeep",
       "meaning": "起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの答え・閉じた理由・再発など）。起票者は書かない",
-      "source": "",
-      "pending_source": "issues/issue-2737-design.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "置き場ごとの表し方",
       "context": "ndf-issue-upkeep",
       "meaning": "記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応",
-      "source": "",
-      "pending_source": "issues/issue-2737-design.md"
+      "source": "docs/specifications/ndf-issue-items.md"
     },
     {
       "term": "サブスクリプション",
       "context": "ndf-relay",
       "meaning": "利用者が Anthropic と結ぶ Claude の契約（Max・Ultra・Team）。利用上限（5 時間・週）と月の API クレジットを持つ。supervise.py の「プラン」とは別の物",
-      "pending_source": "issues/issue-2855-requirements.md"
+      "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
       "term": "API クレジット",
       "context": "ndf-relay",
       "meaning": "サブスクリプションにリンクした Console 組織へ毎月付く API の残高。利用上限と別枠で、未使用分は請求の周期の終わりで消える",
-      "pending_source": "issues/issue-2855-requirements.md"
+      "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
       "term": "登録済み API キー",
       "context": "ndf-relay",
       "meaning": "利用者が `relay.py account` の副命令で預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持ち、worker の `claude -p` にだけ使う",
-      "pending_source": "issues/issue-2855-requirements.md"
+      "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
       "term": "残高切れ",
       "context": "ndf-relay",
       "meaning": "API キーの要求が \"credit balance is too low\" で失敗した状態。そのキーは解除の条件を満たすまで候補から外れる",
-      "pending_source": "issues/issue-2855-requirements.md"
+      "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
       "term": "API キーの使い方の宣言",
       "context": "ndf-relay",
       "meaning": "登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」",
-      "pending_source": "issues/issue-2855-requirements.md"
+      "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
       "term": "API キーの登録簿",
       "context": "ndf-relay",
       "meaning": "登録済み API キーと API キーの使い方の宣言を持つ、アカウントの置き場の 1 つのファイル（0600）",
-      "pending_source": "issues/issue-2855-design.md"
+      "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
       "term": "物理層",

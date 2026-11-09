@@ -7,16 +7,13 @@ hook.py を PreToolUse の入力で起動して、拒否の有無と理由を見
 from __future__ import annotations
 
 import json
-import os
 import pathlib
-import subprocess
-import sys
 
 import pytest
+from hook_run import deny_reason as run
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
-SCRIPT = SCRIPTS / "hook.py"
 AGENT_ID = "w1x2y3"
 WITH_SKILL = "作業: 設計文書を書く\n入力: 無し\n読む Skill:\n- some-rule — /abs/some-rule/SKILL.md\n返す形: 作業の報告"
 WITH_NONE = "作業: 作業場所を用意する\n| 読む Skill | 無し |\n返す形: 作業の報告"
@@ -52,18 +49,6 @@ def payload(tp, prompt, agent_type="ndf:supervisor", subagent="ndf:worker", tool
     if agent_type is not None:
         p["agent_type"] = agent_type
     return p
-
-
-def run(data, tmp_path, env=None) -> str | None:
-    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
-    e["CLAUDE_PLUGIN_DATA"] = str(tmp_path / "plugin-data")
-    e.update(env or {})
-    proc = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(data), capture_output=True, text=True, env=e, timeout=20)
-    assert proc.returncode == 0, proc.stderr
-    if not proc.stdout.strip():
-        return None
-    spec = json.loads(proc.stdout).get("hookSpecificOutput") or {}
-    return spec.get("permissionDecisionReason") if spec.get("permissionDecision") == "deny" else None
 
 
 LOOKUP = bash(f'python3 "{SCRIPTS}/stage-skills.py" lookup 設計')

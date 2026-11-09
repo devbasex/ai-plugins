@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/hook_lib/supervisor_docs.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "読み込まれたプラグインの根を .claude-plugin/plugin.json で見分ける。プラグインの置き場の規約であり、対象リポジトリの形を仮定していない",
+  "count": 3
+}

@@ -14,6 +14,7 @@
 | PreToolUse（編集・パッチ・シェルの Tool） | worktree の guard（`hook_lib/worktree.py`） |
 | PreToolUse（Bash・Read・Skill・Agent・Task。Claude Code だけ） | token の guard（`hook_lib/token_guard.py`） |
 | PreToolUse（Agent・Task。Claude Code だけ） | 読む Skill の guard（`hook_lib/worker_skills.py`。supervisor が「読む Skill」の欄の無い・対応表を引かない `ndf:worker` を起動するのを止める。#2399） |
+| PreToolUse（Read・Bash。Claude Code だけ） | 規約の文書の guard（`hook_lib/supervisor_docs.py`。supervisor が読み込まれたプラグインの外の規約の文書を読むのを止め、中の同じ文書の絶対パスを返す。#2813） |
 | PreToolUse（Bash。Claude Code だけ） | 起票の guard（`hook_lib/issue_guard.py`。AI が直接打つ `gh issue create` の本文が記載項目の定義を満たさなければ止める。#2737） |
 | PreToolUse（AskUserQuestion。Claude Code だけ） | 問い合わせの guard（`hook_lib/ask_guard.py`。区分の無い・許されない問いを止める。#2206） |
 | PreToolUse（AskUserQuestion。止めなかったとき）・Stop・Notification・PermissionRequest | 待ちの Slack 通知（`hook_lib/wait_notify.py`） |
@@ -23,7 +24,7 @@
 起動は `uv run` を挟まず、SessionStart が用意した環境の python を直に使う（`lib/hook_python.py`）。**どの失敗も
 終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。PreToolUse と userPromptSubmit の
 guard は締め切り（`hook_lib/deadline.py`）の中で打ち、過ぎたら残りを飛ばして標準エラーへ 1 行残す。拒否を返すのは token の guard と
-読む Skill の guard と起票の guard と問い合わせの guard だけで、拒否があればそれだけを出す（問い合わせを止めたときは待ちの通知も送らない）。案内は `additionalContext` に並べる。
+読む Skill の guard と規約の文書の guard と起票の guard と問い合わせの guard だけで、拒否があればそれだけを出す（問い合わせを止めたときは待ちの通知も送らない）。案内は `additionalContext` に並べる。
 """
 
 from __future__ import annotations
@@ -110,7 +111,7 @@ def _denied(outs: list) -> bool:
 
 
 def _guards(command: str, runtime: str, ev, outs: list) -> None:
-    """worktree の guard・token の guard・読む Skill の guard・起票の guard・問い合わせの guard を締め切りの中で打ち、結果を `outs` へ足す（#1340 の I11・I12）。
+    """worktree の guard・token の guard・読む Skill の guard・規約の文書の guard・起票の guard・問い合わせの guard を締め切りの中で打ち、結果を `outs` へ足す（#1340 の I11・I12）。
 
     guard が走るのは PreToolUse と userPromptSubmit（agy の入力は事象の名前を持たない）だけで、事象の名前を問わずに掛ける。
     締め切りを過ぎたら残りの判定を飛ばし、標準エラーへ 1 行残す。それまでに終わった判定の結果（拒否を含む）は
@@ -128,6 +129,8 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
             _run_guard(dl, "token-guard", _token_guard, ev, outs)
         if is_claude_pretool and ev.tool in ("Agent", "Task"):
             _run_guard(dl, "worker-skills", _worker_skills_guard, ev, outs)
+        if is_claude_pretool and ev.tool in ("Read", "Bash"):
+            _run_guard(dl, "supervisor-docs", _supervisor_docs_guard, ev, outs)
         if is_claude_pretool and ev.tool == "Bash":
             _run_guard(dl, "issue-guard", _issue_guard, ev, outs)
         if is_claude_pretool and ev.tool == "AskUserQuestion":
@@ -161,6 +164,15 @@ def _worker_skills_guard(ev) -> list:
 
     try:
         return [worker_skills.skills_decision(ev)]
+    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
+        return []
+
+
+def _supervisor_docs_guard(ev) -> list:
+    from hook_lib import supervisor_docs
+
+    try:
+        return [supervisor_docs.docs_decision(ev)]
     except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
         return []
 
