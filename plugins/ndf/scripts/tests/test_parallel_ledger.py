@@ -130,6 +130,18 @@ def test_restore_reads_only_rows_after_the_checkpoint(tmp_path):
     assert len(broken["rows"]) == 2 and broken["state"] is None and broken["warning"]
 
 
+def test_rebuilding_a_legacy_plan_skips_rows_before_the_first_opened_row(tmp_path):
+    """台帳を読まない途中の記録が処理した行（最初の `opened` より前）は、チェックポイントが無くても戻さない。"""
+    _add(tmp_path, _req(1))
+    _add(tmp_path, {"kind": "answer", "id": "la-q1"})
+    pp.plan_dir(tmp_path, "p1").mkdir(parents=True, exist_ok=True)
+    plg.open_run(tmp_path, "p1", tmp_path / "x.retired-1")
+    _add(tmp_path, _req(2))
+    got = plg.restore(tmp_path, "p1")
+    assert [r["id"] for r in got["rows"]] == [_req(2)["id"]] and got["rebuilds"] == 1
+    assert plg.restored_counts(got)["requests"] == 1
+
+
 def test_rows_of_an_unknown_form_are_kept_and_reported(tmp_path):
     """条件 12・I5: 知らない形の行は状態へ反映せずに残り、件数と依頼の id が出る。読める版では反映する。"""
     _add(tmp_path, _req(1))
@@ -197,8 +209,10 @@ def test_pending_questions_are_empty_for_a_plan_without_an_opened_ledger(tmp_pat
     _add(tmp_path, {"kind": "ask", "id": "la-q1", "lane": "la"})
     assert plg.pending_questions(tmp_path, "p1") == []
     _ledger(tmp_path, "opened")
-    assert [q["id"] for q in plg.pending_questions(tmp_path, "p1")] == ["la-q1"]
-    _add(tmp_path, {"kind": "answer", "id": "la-q1"})
+    assert plg.pending_questions(tmp_path, "p1") == []  # 開く前の問いは途中の記録が処理した（戻らない）
+    _add(tmp_path, {"kind": "ask", "id": "la-q2", "lane": "la"})
+    assert [q["id"] for q in plg.pending_questions(tmp_path, "p1")] == ["la-q2"]
+    _add(tmp_path, {"kind": "answer", "id": "la-q2"})
     assert plg.pending_questions(tmp_path, "p1") == []
 
 

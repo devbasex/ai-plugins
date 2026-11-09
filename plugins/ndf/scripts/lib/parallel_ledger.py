@@ -172,10 +172,14 @@ def save_checkpoint(main: Path, name: str, state: dict) -> None:
 
 
 def restore(main: Path, name: str) -> dict:
-    """作り直しの材料: チェックポイントの状態・その後の行（と読める版で分かった `unread` の行）・作り直しの回数・壊れた行数。"""
+    """作り直しの材料: チェックポイントの状態・その後の行（と読める版で分かった `unread` の行）・作り直しの回数・壊れた行数。
+
+    チェックポイントが無ければ最初の `opened` の行から読む。それより前の行は台帳を読まない途中の記録
+    （古い耐久ワークフロー）がすでに処理したもので、戻さない（設計の「それまでの依頼と問いは戻らない」）。"""
     cp, warning = load_checkpoint(main, name)
     every = read_ledger_rows(main, name, 0)
-    offset = int((cp or {}).get("offset") or 0)
+    opened = next((r["_pos"] for r in every.rows if r["kind"] == "opened"), 0)
+    offset = int(cp.get("offset") or 0) if cp else opened
     late = [r for r in every.rows if r["_pos"] >= offset]
     found, still = read_at(main, name, list((cp or {}).get("unread") or []))
     rows = sorted([*found, *late], key=lambda r: r["_pos"])
