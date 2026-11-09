@@ -415,11 +415,6 @@ def shell_targets(cmd: str, base: str = "") -> list[str]:
     return scan.out
 
 
-def command_dirs(root: sp.Node, base: str) -> dict[tuple[int, int], str | None]:
-    """構文木の各 `command` のノード（`(start_byte, end_byte)`）を実行するときの現在地。字面から決められなければ None。"""
-    return command_places(root, base)[0]
-
-
 def command_places(root: sp.Node, base: str) -> tuple[dict[tuple[int, int], str | None], dict[tuple[int, int], frozenset[str]]]:
     """`(各 command の現在地, 各 command が読み始めるまでに書き込まれる先)`。後者はそのコマンド自身のリダイレクトと語の書き込み先を含む絶対パス。"""
     scan = _Scan(base)

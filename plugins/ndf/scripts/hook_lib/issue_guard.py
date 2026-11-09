@@ -6,7 +6,7 @@
 | 本文の渡し方 | 読み方 |
 | --- | --- |
 | `--body` / `-b` の文字列 | 引用を外した字面（展開を含む語は読めない形） |
-| `--body-file` / `-F` のファイル | その `gh issue create` を打つときの現在地（前の `cd` を `write_target.command_dirs()` で追う。字面から決められなければコマンドの実行ディレクトリ）からの相対で読む（`-` の標準入力は読めない形） |
+| `--body-file` / `-F` のファイル | その `gh issue create` を打つときの現在地（前の `cd` を `write_target.command_places()` で追う。字面から決められなければコマンドの実行ディレクトリ）からの相対で読む（`-` の標準入力は読めない形） |
 | `--body "$(cat <<'EOF' … EOF)"` | ヒアドキュメントの本文（区切りを引用しないときは展開を含まない本文だけ） |
 
 同じ Bash の中でその `gh issue create` より先に本文のファイルへ書き込む形（`printf … > body.md; gh issue create -F body.md`。
