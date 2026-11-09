@@ -161,6 +161,70 @@ def test_headings_in_a_fence_are_not_sections():
     assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == [ii.Gap("影響", "missing")]
 
 
+
+# --- judge_body の現状固定（リファクタリング前の振る舞い） ----------------------------------
+
+
+def test_an_empty_body_lists_every_required_section_as_missing_in_definition_order():
+    d = ii.load_definition()
+    want = [ii.Gap(n, "missing") for n in ("事象", "期待する結果", "再現手順", "環境", "影響")]
+    assert ii.judge_body(None, ["bug"], None, d) == ("不具合", want)
+    assert ii.judge_body("", ["bug"], {}, d) == ("不具合", want)
+
+
+def test_a_crlf_body_is_read_like_lf():
+    assert ii.judge_body(BUG.replace("\n", "\r\n"), ["bug"], {}, ii.load_definition()) == ("不具合", [])
+
+
+def test_a_level_one_heading_does_not_fill_an_item():
+    body = BUG.replace("## 影響", "# 影響")
+    assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == [ii.Gap("影響", "missing")]
+
+
+def test_a_repeated_heading_is_empty_only_when_every_copy_is_empty():
+    d = ii.load_definition()
+    one_filled = BUG + "\n## 影響\n\n<!-- 空 -->\n"
+    assert ii.judge_body(one_filled, ["bug"], {}, d)[1] == []
+    both_empty = BUG.replace("止まる。", "_No response_") + "\n## 影響\n\n<!-- ndf:section-end -->\n"
+    assert ii.judge_body(both_empty, ["bug"], {}, d)[1] == [ii.Gap("影響", "empty")]
+
+
+def test_text_under_a_deeper_heading_fills_the_section():
+    body = BUG.replace("## 影響\n\n止まる。\n", "## 影響\n\n#### 詳しく\n\n止まる。\n")
+    assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == []
+
+
+def test_a_context_key_that_is_false_or_unknown_adds_nothing():
+    d = ii.load_definition()
+    assert ii.judge_body(BUG, ["bug"], {"ai": False, "origin": False, "scope": True}, d)[1] == []
+
+
+def test_gaps_keep_the_definition_order_and_the_order_gap_comes_last():
+    body = BUG.replace("## 事象\n\nA になる。\n\n", "").replace("止まる。", "")
+    body += "\n## 依頼（原文）\n\n> 直して\n\n## 対象範囲\n\nx\n"
+    got = ii.judge_body(body, ["bug"], {"origin": True}, ii.load_definition())
+    assert got == (
+        "不具合",
+        [
+            ii.Gap("事象", "missing"),
+            ii.Gap("影響", "empty"),
+            ii.Gap("由来", "missing"),
+            ii.Gap("依頼（原文）", "order"),
+        ],
+    )
+
+
+def test_an_unknown_kind_still_reports_the_order_gap_after_the_kind_gap():
+    body = BUG + "\n## 依頼（原文）\n\n> 直して\n\n## 対象範囲\n\nx\n"
+    got = ii.judge_body(body, [], {}, ii.load_definition())
+    assert got == (None, [ii.Gap("種類", "kind"), ii.Gap("依頼（原文）", "order")])
+
+
+def test_a_definition_without_the_kind_item_names_the_gap_kind():
+    d = ii.load_definition()
+    d.by_id.pop("kind")
+    assert ii.judge_body(BUG, ["bug"], {}, d) == (None, [ii.Gap("種類", "kind")])
+
 # --- audit（受け入れ条件 13〜15・18、I9・I10） ----------------------------------------------
 
 
