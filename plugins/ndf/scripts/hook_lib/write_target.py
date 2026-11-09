@@ -41,6 +41,11 @@ def normalize_path(path: str, cwd: str) -> str:
 
     字面で畳むのは、存在しないパスで `..` が残ると前方一致の「配下か」の判定をすり抜けるためである
     （`<対象>/a/../../外` が `<対象>/` で始まって見える）。"""
+    return _realpath_prefix(_collapse_parts(path, cwd))
+
+
+def _collapse_parts(path: str, cwd: str) -> list[str]:
+    """`cwd` を起点に絶対化し、`.` と `..` を字面で畳んだ構成要素を返す。"""
     if not path.startswith("/"):
         path = f"{cwd}/{path}"
     parts: list[str] = []
@@ -52,6 +57,11 @@ def normalize_path(path: str, cwd: str) -> str:
                 parts.pop()
         else:
             parts.append(part)
+    return parts
+
+
+def _realpath_prefix(parts: list[str]) -> str:
+    """実在する最も深い祖先だけを実体のパスへ直し、残りを継ぎ足す。"""
     d, suffix = "/" + "/".join(parts), ""
     while d and d != "/":
         if os.path.isdir(d):
