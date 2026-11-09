@@ -37,7 +37,7 @@
 
 - `grep -rn "モック" plugins/ndf/skills/design plugins/ndf/skills/development-workflow` → 0 件
 - `grep -n "モック\|mock" plugins/ndf/skills/development-workflow/schemas/project.schema.json` → 0 件（プロジェクトの設定に画面モックの表現方法を書く欄が無い）
-- Factory の承認待ちの一覧（起票時の観測。画面のコードは volareinc/nd-factory の `factory/web/src/pages/ApprovalsPage.tsx` にある）の列は、種類・ループ・周回・リポジトリ・課題・待ち始めた日時の 6 つで、資料へのリンクを持たない
+- Factory の承認待ちの一覧（起票時の観測。画面のコードは volareinc/nd-factory の `factory/web/src/pages/ApprovalsPage.tsx` にある）の列は、種類・ループ・ループの 1 回・リポジトリ・課題・待ち始めた日時の 6 つで、資料へのリンクを持たない
 
 `approval-request.md` の設計 Pull Request の「判断に使うもの」は、目的・用語・適用範囲・根拠・起票者の推定・決めたこと・作るもの・満たすこと・未確認・収束の状態・本文との一致・MVV 判定である。設計で書く成果物の多く（ER 図・画面・技術の選定・非機能・構成図）が、承認の提示に現れない。
 
@@ -183,7 +183,7 @@ Factory での見せ方:
 
 ## 優先（2026-11-07）
 
-利用者の指示: 「#2721 は優先課題です」。レーン lflow が次の周回で選ぶ。
+利用者の指示: 「#2721 は優先課題です」。レーン lflow が次のループの 1 回で選ぶ。
 
 ## 依頼（原文）
 
