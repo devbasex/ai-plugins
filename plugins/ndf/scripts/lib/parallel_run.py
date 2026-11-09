@@ -148,7 +148,7 @@ def step_restore(main: str, name: str) -> dict:
     """作り直しの材料（`parallel_ledger.restore_run`）。一覧に居るレーンを添える（チェックポイントの無い計画の I10）。"""
     items = relay_proc(Path(main), "ls", "--json")[1].get("items") or []
     got = plg.restore_run(Path(main), name, [it["name"] for it in items if isinstance(it, dict) and it.get("name")])
-    return {**got, "limits": ph.limit_values(Path(main))}  # 戻した問いから答え待ちの停止を戻すための閾値
+    return {**got, "limits": ph.limit_values(Path(main)), "hold_file": {"hold": ph.read_hold(Path(main), name)}}  # 停止を戻す材料
 
 
 @durable.step(name="parallel.ledger-read")
@@ -546,7 +546,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.routed = durable.patched("parallel-answers")
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問い・知らせを立てる
-    run.restore_hold((restored or {}).get("limits"))  # 最初のレーン起動・リリースの前に答え待ちの停止を戻す
+    run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す
     if run.routed:
         run.receive_prior(step_prior_waits(main, name))
     wait = poll_seconds()

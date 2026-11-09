@@ -255,3 +255,35 @@ def test_a_rebuilt_run_restores_the_plan_hold_before_spawning():
     assert run.hold.empty
     run.restore_hold({"plan": 8, "lane": 3})
     assert run.hold.plan and run.hold.count == 9
+
+
+def test_a_rebuilt_run_rewrites_a_hold_file_left_from_before_the_answers():
+    """失われている間に答えて閾値以下へ戻ったら、作り直しで残った止める指示のファイルを解く。同じ範囲なら書かない。"""
+
+    class Run(ph.AnswerHold):
+        order, questions, main, name = ORDER, [own(i) for i in range(3)], Path("."), "p1"
+        writes: list = []
+        emitted: list = []
+
+        def write_hold(self, main, name, data, changes, progress):
+            self.writes.append((data, changes))
+            return {"ok": True, "n": 2, "line": "解いた"}
+
+        def emit_hold(self, event):
+            self.emitted.append(event)
+
+        def bump(self):
+            return 7
+
+        def progress(self):
+            return {}
+
+    left = ph.decide_hold([own(i) for i in range(9)], ORDER, LIMITS).data(LIMITS)
+    run = Run()
+    run.init_answer_hold()
+    run.restore_hold({"plan": 8, "lane": 3}, {"hold": left})
+    assert run.hold.empty and run.writes[0][0]["plan"] is False and run.writes[0][1][0]["change"] == "off"
+    assert run.emitted[0]["seq"] == 7
+    run.writes.clear()
+    run.restore_hold({"plan": 8, "lane": 3}, {"hold": None})
+    assert run.hold.empty and run.writes == []

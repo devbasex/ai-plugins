@@ -202,6 +202,46 @@ def test_a_waiting_request_written_before_the_opened_row_is_an_orphan(tmp_path):
     assert rep["orphans"] == [_req(1)["id"]]
 
 
+def test_a_request_written_before_the_opened_row_can_be_sent_again(tmp_path):
+    """開く前の行の依頼は作り直しで戻らないため、同じ id の再送は開いた後へ足す。開いた後の重複は足さない（I2）。"""
+    _add(tmp_path, _req(1))
+    _ledger(tmp_path, "opened")
+    assert _add(tmp_path, _req(1)) is True
+    assert _add(tmp_path, _req(1)) is False
+    assert plg.append_ledger_row(tmp_path, "p1", "opened", "opened") is False
+    rows = plg.read_ledger_rows(tmp_path, "p1").rows
+    assert [r["kind"] for r in rows] == ["request", "opened", "request"]
+    assert plg.ledger_report(tmp_path, "p1", [("la", _req(1)["id"])]).get("orphans") is None
+
+
+@pytest.mark.parametrize("kind", ["timeout", "running"])
+def test_a_wait_without_change_still_reports_the_orphans(tmp_path, monkeypatch, kind):
+    """変化の無い wait（上限・running）の応答にも orphans を載せ、送り直す id を利用者へ届ける。"""
+    import durable
+    import parallel_cli as pc
+    import parallel_lane as pl
+    import parallel_route as prt
+
+    class Got:
+        def __init__(self, k, v):
+            self.kind, self.value = k, v
+
+    got = Got("timeout", None) if kind == "timeout" else Got("event", {"key": "pause", "action": "running", "seq": 4})
+    monkeypatch.setattr(pl, "record_exists", lambda *_: True)
+    monkeypatch.setattr(prt, "waiting_requests", lambda *_: [("la", "la-r9")])
+    monkeypatch.setattr(durable, "wait_from", lambda *a, **k: got)
+    out = {}
+
+    def reply(status, summary, items=None, code=None, **metrics):
+        out.update(status=status, code=code, **metrics)
+        raise SystemExit(code)
+
+    a = type("A", (), {"name": "p1", "after": 3, "timeout": 1.0, "changes_after": 0})()
+    with pytest.raises(SystemExit):
+        pc.wait_plan(a, reply, tmp_path, Path("parallel.py"))
+    assert out["code"] == 3 and out["orphans"] == ["la-r9"]
+
+
 def _ledger(main, *kinds):
     for k in kinds:
         plg.append_ledger_row(main, "p1", k, k)

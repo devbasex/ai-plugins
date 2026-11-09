@@ -110,13 +110,14 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
             code=3,
             seq=a.after,
             next=wait_line(self_path, a.name) + f" --after {a.after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
+            **extra,
         )
     if got.kind == "event":
         ev = dict(got.value)
         key = ev.pop("key")
         action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
         if action == "running":
-            reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"))
+            reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"), **extra)
         items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
         if action == ph.CONDITION:
             ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))

@@ -147,6 +147,15 @@ def read_hold(main: Path, name: str) -> Optional[dict]:
     return jsonio.read(_plan_root(main, name) / HOLD_FILE, missing=None, broken=None, want=dict)
 
 
+def hold_of(data: Optional[dict]) -> Hold:
+    """止める指示のファイルの中身から停止の範囲を作る。無い・形の違う値は停止なし。"""
+    d = data if isinstance(data, dict) else {}
+    lanes = d.get("lanes") if isinstance(d.get("lanes"), list) else []
+    by_lane = d.get("by_lane") if isinstance(d.get("by_lane"), dict) else {}
+    count = d.get("count") if isinstance(d.get("count"), int) else 0
+    return Hold(d.get("plan") is True, tuple(str(n) for n in lanes), count, dict(by_lane))
+
+
 def covered(hold: Optional[dict], lane: Optional[str]) -> bool:
     return bool(hold) and (hold.get("plan") is True or lane in (hold.get("lanes") or []))
 
@@ -393,11 +402,18 @@ class AnswerHold:
         if (now := self.wake_lanes()) and set(now) - set(shown):
             self.pause("notice", lanes=[], attach=[])
 
-    def restore_hold(self, limits: Optional[dict]) -> None:
-        """作り直しの直後に、戻した問いと閾値から停止の範囲を戻す。止める指示のファイルと履歴は止めた周に書いてあるため書かない。
-        閾値が無い（台帳を読まない途中の記録・閾値を載せない古い作り直しの記録）なら何もしない。"""
-        if limits:
+    def restore_hold(self, limits: Optional[dict], written: Optional[dict] = None) -> None:
+        """作り直しの直後に、戻した問いと閾値から停止の範囲を戻す。閾値が無い（台帳を読まない途中の記録・閾値を載せない
+        古い作り直しの記録）なら何もしない。`written` は作り直しで読んだ止める指示のファイル（`{"hold": 中身か None}`）。
+        失われている間に答えて範囲が変わったら、ファイルの範囲から突き合わせて書き直す（レーンが解けた停止を読み続けない）。
+        `written` の無い古い作り直しの記録では書かない（記録の順を変えないため）。"""
+        if not limits:
+            return
+        if written is None:
             self.hold = decide_hold(self.questions, self.order, Limits(**limits))
+            return
+        self.hold = hold_of(written.get("hold"))
+        self._update_hold(Limits(**limits))
 
     def _retire_superseded(self) -> None:
         gone, self.superseded = self.superseded, set()

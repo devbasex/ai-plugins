@@ -78,6 +78,7 @@ def append_ledger_row(
     main: Path, name: str, kind: str, key: str, msg: Optional[dict] = None, by: Optional[str] = None, rid: str = ""
 ) -> bool:
     """行を 1 行足す。同じキーの行があれば何も足さずに False（I2）。書けなければ `OSError`・`LockTimeout`。
+    最初の `opened` の行より前の行（作り直しで戻さない古い途中の記録の行）は重複に数えず、同じ id の再送を受ける。
 
     排他の中で重複のキーと末尾の改行を確かめてから `O_APPEND` で書く（I3・決定 2）。改行で終わらない末尾（落ちた書き手の
     切れた行）には改行を足して閉じ、次の行と混ざらないようにする。"""
@@ -88,7 +89,9 @@ def append_ledger_row(
            "by": by or "", "ver": ndf_version(), "msg": msg}  # fmt: skip
     with locks.exclusive(p, timeout=limits.seconds("locks.append")):
         data = p.read_bytes() if p.exists() else b""
-        if any(isinstance(r, dict) and r.get("key") == key for _, r in _ledger_lines(data, 0)):  # 読めない行は飛ばす（I4）
+        lines = [(at, r) for at, r in _ledger_lines(data, 0) if isinstance(r, dict)]  # 読めない行は飛ばす（I4）
+        since = next((at for at, r in lines if r.get("kind") == "opened"), 0)  # 開く前の行は戻らないため、再送を受ける
+        if any(at >= since and r.get("key") == key for at, r in lines):
             return False
         line = (b"\n" if data and not data.endswith(b"\n") else b"") + json.dumps(row, ensure_ascii=False).encode() + b"\n"
         fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
