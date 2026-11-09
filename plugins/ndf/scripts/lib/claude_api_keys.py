@@ -218,10 +218,13 @@ def _raw_state() -> dict:
 
 
 def _write_key_state(name: str, generation: str, state: str, now: float, checked: bool = False) -> None:
-    """排他の中で呼ぶ。同じ状態なら `since` を変えない。"""
+    """排他の中で呼ぶ。同じ状態なら `since` を変えない。
+
+    残高切れは観測し直すたびに `since` を今へ進める。保留を最後の観測から数え、保留が過ぎた後に試して尽きたままなら
+    また保留の間は選ばないためである（「過ぎたら 1 回だけ試す」。#2855 の決定 7）。"""
     rows = _raw_state()
     old = rows.get(name) if isinstance(rows.get(name), dict) else {}
-    same = old.get("generation") == generation and old.get("state") == state
+    same = old.get("generation") == generation and old.get("state") == state and state != CREDIT_LOW
     row = {"generation": generation, "state": state, "since": old.get("since") if same else iso_utc(now)}
     row["checked_at"] = iso_utc(now) if checked else (old.get("checked_at") if old.get("generation") == generation else None)
     rows[name] = row

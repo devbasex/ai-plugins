@@ -176,6 +176,8 @@ def test_pick_by_name_and_state(accounts):  # noqa: F811
     rows["a"]["since"] = cu.iso_utc(time.time() - ak.CREDIT_HOLD - 1)  # 保留が過ぎた
     (accounts.root / ak.STATE_FILE).write_text(json.dumps(rows))
     assert ak.pick_key().name == "a"
+    ak.note_state("a", a.generation, ak.CREDIT_LOW)  # 保留が過ぎて 1 回試し、尽きたまま
+    assert ak.pick_key().name == "b"
     ak.note_state("a", a.generation, ak.AUTH_FAILED)
     assert ak.pick_key().name == "b" and ak.pick_key(exclude={"b"}) is None
 

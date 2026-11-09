@@ -80,7 +80,7 @@
 | 周回の費用（`lib/lap_cost.py`） | 帳簿の和と報告の和を比べて周回の費用を決め、内訳を導く |
 | 実行環境の調査（`lib/run_environment.py`） | 実行環境を読み、候補を返す。ファイルへ書かない |
 | 進みの観測（`supervise_lib/progress_watch.py`） | 信号を読み、無進捗の締め切りを返す |
-| 待ちの部品（`supervise_lib/claude.py`） | 締め切りの関数を受け、待ちの周期ごとに締め切りを動かす |
+| 待ちの部品（`supervise_lib/children.py`） | 締め切りの関数を受け、待ちの周期ごとに締め切りを動かす |
 | worker のステップ（`supervise_lib/worker_steps.py`） | `stall` のステップへ進みの観測を付け、打ち切りの理由を残す |
 | 遅れの見張り（`supervise_lib/slow.py`） | `stall` のステップでは所要の履歴だけを残す |
 | 監視（`lib/monitor.py`）と外部 AI の起動（`external-ai.py`） | `--timeout 0` を「経過時間の上限が無い」として受ける |
