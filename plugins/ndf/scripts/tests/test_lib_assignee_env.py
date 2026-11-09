@@ -54,3 +54,19 @@ def test_registered_api_key_is_not_passed_to_any_seat(accounts):  # noqa: F811
         assert not any(n in env for n in assignee_env.API_KEY_ENV), seat
     own = {"PATH": "/bin", "ANTHROPIC_API_KEY": "sk-own"}
     assert assignee_env.seat_env("claude", None, own) == own
+
+
+def test_keyed_claude_seat_without_account_returns_to_a_registered_account(accounts):  # noqa: F811
+    """キーを外した claude の席は、アカウントが無くても登録済みアカウントのログインへ戻る（共有の設定で起動しない）。"""
+    accounts.add("work2")
+    keyed = {"PATH": "/bin", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    env = assignee_env.seat_env("claude", None, keyed)
+    assert env[ca.CONFIG_ENV] == ca.account_dir("work2")
+    assert not any(n in env for n in assignee_env.API_KEY_ENV)
+    assert assignee_env.seat_env("codex", None, keyed).get(ca.CONFIG_ENV) is None
+
+
+def test_keyed_claude_seat_without_registered_accounts_keeps_the_stripped_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "none"))
+    keyed = {"PATH": "/bin", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    assert assignee_env.seat_env("claude", None, keyed) == {"PATH": "/bin"}

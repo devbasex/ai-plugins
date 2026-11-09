@@ -35,16 +35,25 @@ def seat_env(seat: str, account: Optional[str], base: Optional[Mapping[str, str]
     """担当の起動の環境。claude の席にアカウントがあればその環境、無い・用意できなければ元の環境の写し。
 
     supervise.py が worker へ入れた登録済み API キー（名前の変数がそろうもの）は、どの席にも渡さない。担当は
-    API キーを使う範囲の外で（#2855 の決定 2）、外した claude の席はサブスクリプションのログインで起動する。"""
+    API キーを使う範囲の外で（#2855 の決定 2）、外した claude の席はサブスクリプションのログインで起動する。
+    キーの環境は親のアカウントを外している（`claude_api_keys.env_with_key`）ため、アカウントの無い席は、登録済み
+    アカウントがあれば選定で選んだアカウントの環境へ戻す（`KeyTry.env` と同じ戻し方）。"""
     env = dict(os.environ if base is None else base)
-    if env.get(API_KEY_ENV[1]):
+    keyed = bool(env.get(API_KEY_ENV[1]))
+    if keyed:
         for name in API_KEY_ENV:
             env.pop(name, None)
-    if not account or not seat.startswith("claude"):
+    if not seat.startswith("claude") or not (account or keyed):
         return env
     import claude_accounts as ca
 
-    return ca.account_env(account, env) or env
+    if account:
+        return ca.account_env(account, env) or env
+    if ca.registered():
+        _, chosen = ca.choose_env(base=env)
+        if chosen is not None:
+            return chosen
+    return env
 
 
 def pick_account(tried: frozenset[str], base: Optional[Mapping[str, str]] = None) -> Optional[str]:
