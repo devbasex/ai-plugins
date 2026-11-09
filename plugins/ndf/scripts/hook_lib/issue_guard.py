@@ -38,7 +38,8 @@ FILE_OPTS = ("--body-file", "-F")
 LABEL_OPTS = ("--label", "-l")
 REPO_OPTS = ("--repo", "-R")
 WEB_OPTS = ("--web", "-w")
-SHORT_VALUED = tuple(o for o in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS if not o.startswith("--"))
+VALUED_OPTS = BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS
+SHORT_VALUED = tuple(o for o in VALUED_OPTS if not o.startswith("--"))
 CONTEXT = {"ai": True}
 EXPANSIONS = ("command_substitution", "simple_expansion", "expansion", "process_substitution")
 
@@ -150,7 +151,7 @@ def _split_opt(word: str) -> tuple[str, str, str]:
 
 def _opt_value(nodes: list[sp.Node], i: int, name: str, eq: str, inline: str) -> tuple[str | None, int]:
     """オプションの値と、値を読んだ位置。`=` が無い値付きオプションは次の語から読む。"""
-    if name in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS and not eq:
+    if name in VALUED_OPTS and not eq:
         i += 1
         return (_arg_value(nodes[i]) if i < len(nodes) else None), i
     if eq and _has_expansion(nodes[i]):
