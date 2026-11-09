@@ -41,6 +41,7 @@ import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
 import glossary_banned  # noqa: E402
 import glossary_merge  # noqa: E402
+from glossary_write import write_merge_outputs  # noqa: E402
 from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
 import ndf_tracking  # noqa: E402
 
@@ -781,16 +782,6 @@ def _merge_source_stages(root, decl, have):
     return glossary_merge.merge_glossaries(*versions)
 
 
-def _write_merge_outputs(writes):
-    """(path, text) の組を順に書き出す。書けなければ unreadable を投げる。"""
-    try:
-        for path, text in writes:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-    except OSError as e:
-        raise unreadable(f"用語集を書けない: {e}")
-
-
 def cmd_merge(a):
     root = Path(a.root)
     decl = require_declaration(root)
@@ -824,7 +815,7 @@ def cmd_merge(a):
     else:
         g = load_glossary(decl)
     writes.append((decl.document_path, render_text(g, decl.source)))
-    _write_merge_outputs(writes)
+    write_merge_outputs(writes)
     git_checked(root, "add", "--", *[it["name"] for it in items])
     if left := unresolved():
         stop(f"用語集を解いた。用語集の外の衝突が {len(left)} 件残る", left, counts)

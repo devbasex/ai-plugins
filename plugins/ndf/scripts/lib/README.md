@@ -87,6 +87,7 @@
 | [glossary_banned.py](glossary_banned.py) | 禁止語の宣言（`.ndf/glossary.json` の `check.banned`）の形の確かめと、検査する範囲・行の照合。特定のプロジェクトの語を持たない。標準ライブラリと `pathmatch` だけ | `glossary.py check` |
 | [legacy_values.py](legacy_values.py) | 旧い値の読み替え。`scripts/data/legacy-values.json` を読み、記録の値を読む時点で新しい値へ変換する（`to_current`・`normalize_laps`）。標準ライブラリだけ | 記録を読むスクリプト |
 | [glossary_merge.py](glossary_merge.py) | 用語集の 3 方向の取り込み（祖先・自分・相手を語は `(context, term)`、コンテキストは `id` で突き合わせ、片側だけの変更を採り、両側の食い違いを語の衝突として返す）と、`git ls-files -u -z` の段の読み取り。ファイルも git も触らない。標準ライブラリだけ | `glossary.py merge` |
+| [glossary_write.py](glossary_write.py) | 用語集の取り込みの書き出し（`(path, text)` の組を順に書き、書けなければ読めないとして止める） | `glossary.py merge` |
 | [merged_range.py](merged_range.py) | 範囲の first-parent のログから、merge commit と squash merge（件名の末尾 `(#N)`）でベースブランチへ入った PR を拾う。squash の head のブランチは GitHub から 100 件ずつ読む。どの PR を外すかは持たない（呼び手が決める） | `check-trigger.py`・`release_lib/included.py` |
 | [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
 | [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直す | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
