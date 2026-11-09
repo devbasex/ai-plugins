@@ -273,9 +273,7 @@ NORMALIZE_REAL_CASES = [
     ("path", "cwd", "expected"),
     [pytest.param(*case[1:], id=case[0]) for case in NORMALIZE_REAL_CASES],
 )
-def test_normalize_path_resolves_deepest_existing_dir(
-    tmp_path: pathlib.Path, path: str, cwd: str, expected: str
-) -> None:
+def test_normalize_path_resolves_deepest_existing_dir(tmp_path: pathlib.Path, path: str, cwd: str, expected: str) -> None:
     t = str(tmp_path.resolve())
     (tmp_path / "real" / "sub").mkdir(parents=True)
     (tmp_path / "real" / "file.md").write_text("x")
