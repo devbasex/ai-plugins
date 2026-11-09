@@ -252,6 +252,7 @@ stateDiagram-v2
 | `attached` | bool か null | 端末が結び付いているか。tmux のセッションが無ければ null |
 | `hub` | bool | リレーハブを兼ねるラッパー（動いていて、作業ディレクトリが `hub.json` の `dir`）か |
 | `role` | str か null | 役割（`organizer` / `helper`）。作業ディレクトリの `role.json`、無ければ登録簿の行の `role` |
+| `restarts` | list | 再起動の試み `{at, result}` を古い順に並べたもの。リレーハブの記録から、`at`（最後に動いた時刻）より後の試みだけを載せる（`at` が null なら全件）。`result` は起動できれば `started`、断られれば理由（`limit`・`no-hub` など）。`kind` の無い古い記録の行は `restarted` だけを試みと数える |
 
 `metrics` は `running`・`awaiting_approval`・`stopped` の数と `limit`（同時に動かす数の上限。マシンの設定 → `NDF_RELAY_MAX_NAMED` → 既定 3 の順で決まる値）、`hub`（リレーハブが動いているか）・`tmux`（tmux が PATH にあるか）を持つ。
 
@@ -268,7 +269,7 @@ stateDiagram-v2
 | `registry.json` | `version`（1）と `entries.<名前>`（`session`・`cwd`・`args`・`created_at`・`by`。`spawn --role helper` で起動した行は `role`・`plan` も持つ） | リレーハブだけ | —（名前ごとの行を上書きする。止まった行は同じ名前で起動し直すまで残る） |
 | `requests/<id>.json` | `kind`（`spawn` / `restart`）・`name`（null は自動で付ける）・`cwd`・`args`・`by`・`at`、`spawn --role helper` なら `role`・`plan`。環境変数は載せない | 頼む側（0600） | リレーハブが `<id>.taken` へ `rename` して受け取った時点。待ちを切った頼む側 |
 | `results/<id>.json` | 結果（上の「結果の形」） | リレーハブ | 頼む側が読んで消す。読まれずに 10 分を過ぎたものは次のリレーハブが消す |
-| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed` / `version-switched`）・`name`・`reason` を 1 行ずつ。`version-switched` は、リレーハブを起こした python のバージョンディレクトリが消え、`relay.current` の仮想環境でレーンを起こしたときの行である。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
+| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed` / `version-switched`）・`name`・`reason` を 1 行ずつ。`version-switched` は、リレーハブを起こした python のバージョンディレクトリが消え、`relay.current` の仮想環境でレーンを起こしたときの行である。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ。起動の依頼から書いた `started` / `restarted` / `refused` の行は依頼の種類 `kind`（`spawn` / `restart`）も持つ。リレーハブへ届かなかった `restart`（リレーハブが居ない・答えない）は、頼む側が `refused`・`reason: no-hub`・`kind: restart` の行を書く | リレーハブ・名前つきの `stop`・リレーハブへ届かなかった `restart`（`lib/locks.py` の `append_locked`） | — |
 
 `id` は `<時刻のナノ秒 20 桁>-<pid>-<乱数 6 桁>` で、ファイル名の順が置いた順になる。`by` は `terminal`（端末の 2 本目）・
 `spawn`・`restart`・`block:<作業ディレクトリ>`（起動のブロック）のどれか。
