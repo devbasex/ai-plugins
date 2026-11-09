@@ -18,6 +18,10 @@ import claude_api_keys as ak  # noqa: E402
 from claude_usage import KeyCheck, check_api_key  # noqa: E402
 
 STATE_LABEL = {ak.OK: "使える", ak.CREDIT_LOW: "残高切れ", ak.AUTH_FAILED: "認証の失敗"}
+ARG_ERROR = (
+    "引数を読めない（引数は表示しない）。usage: relay.py account add-api-key <名前> --account <アカウント> [--key-file <パス>]"
+    "（キーの値は標準入力か --key-file で渡す）"
+)
 PURCHASED_NOTE = (
     "組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる"
     "（NDF は検出しない。Console の spend limit で抑える）"

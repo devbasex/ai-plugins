@@ -373,7 +373,8 @@ def cmd_account(args: list[str]) -> int:
     try:
         a = _account_parser().parse_args(args)
     except Fail as e:  # 読めない引数は usage と 2（今と同じ。決定 9）
-        print(e.message, file=sys.stderr)
+        # add-api-key の余った引数はキーの値でありうるので、引数を写さない（#2855 の I4）
+        print(keys.ARG_ERROR if args[:1] == ["add-api-key"] else e.message, file=sys.stderr)
         return 2
     if a.sub is None:
         print(USAGE, file=sys.stderr)

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -309,3 +310,119 @@ def rows() -> list[dict]:
         s = state_of(k, states)
         out.append({"name": k.name, "kind": "api_key", "account": k.account, "state": s.state, "since": s.since})
     return out
+
+
+# ---------------------------------------------------------------- 起動口の持ち方
+
+
+def near_limit(keep=()) -> bool:
+    """登録済みアカウントの選定が候補を返さないか、選んだ候補の使用率が切り替えの閾値以上か（near-limit の条件 1・2。決定 9）。"""
+    if ca.registered() == 0:
+        return False
+    c = ca.choose(keep=keep)
+    return c.name is None or (c.score is not None and c.score >= ca.switch_at())
+
+
+class KeyRoute:
+    """`supervise.py` の起動口（`ClaudeRunner`）の 1 プロセスの API キーの持ち方。
+
+    `state` はプランの状態（`cur`・`switched`・`progress_write`）。`key` は直前の起動の API キーの名前（無ければ None）。
+    `inherited` は起動したときの環境が持つキー（入れ子の起動）で、使えなくなったら `dropped` にして以後の子から外す。"""
+
+    def __init__(self, state, environ=None):
+        self.state = state
+        self.key: str | None = None
+        environ = os.environ if environ is None else environ
+        got = inherited(environ)
+        self.inherited = ApiKey(got[0], "", "", got[1], environ[KEY_ENV]) if got else None
+        self.dropped = False
+        self.told = False
+
+    def use(self) -> str:
+        """使い方の宣言。登録簿が壊れていれば最初の 1 回だけ標準エラーと進捗ログへ 1 行出し、`off` として動く（I6）。"""
+        if not self.told:
+            self.told = True
+            bad = problem()
+            if bad:
+                print("supervise: " + bad, file=sys.stderr)
+                self.state.progress_write({"kind": "api_keys_invalid", "detail": bad})
+        return use()
+
+    def attempt(self, keep) -> KeyTry:
+        """1 回の呼び出しの API キーの試し方。`keep()` はトークンを更新しないアカウントの名前（near-limit の判定へ渡す）。"""
+        return KeyTry(self, self.use(), keep)
+
+    def note_switch(self, k: ApiKey | None) -> None:
+        """使うキーが替わったら、プランの状態（`auth`・`switched`）と進捗ログの `account` の行に残す（E3・E7）。"""
+        name = k.name if k is not None else None
+        if name == self.key:
+            return
+        st, (before, self.key) = self.state, (self.key, name)
+        if name is not None:
+            st.cur["auth"] = f"API キー {name}"
+            if st.cur["auth"] not in st.switched:
+                st.switched.append(st.cur["auth"])
+        st.progress_write({"kind": "account", "step": st.cur.get("id"), "reason": "api_key", "from_key": before, "to_key": name})
+
+    def result(self, k: ApiKey, res: dict, exclude: set) -> bool:
+        """キーで起動した結果を読む。残高切れ・認証の失敗・上限ならキーを外して真（同じ呼び出しを起動し直す）。
+
+        残高切れと認証の失敗は状態に記録する（起動の時の世代が今の登録と一致するときだけ。I10）。上限と 429 は
+        この呼び出しでだけ外す（決定 6）。受け継いだキーは使えなくなったら以後の子から外す。"""
+        if res.get("ok"):
+            if k is not self.inherited:
+                note_success(k)
+            return False
+        failure = CREDIT_LOW if res.get("credit") else AUTH_FAILED if res.get("auth") else None
+        if failure is None and not res.get("limit"):
+            return False
+        exclude.add(k.name)
+        if k is self.inherited:
+            self.dropped = True
+        if failure is not None:
+            reason = failure if note(k.name, k.generation, failure) else "stale_generation"
+            self.state.progress_write({"kind": "api_key", "step": self.state.cur.get("id"), "name": k.name, "reason": reason})
+        return True
+
+
+class KeyTry:
+    """1 回の呼び出しの中の API キーの試し方（外したキーと、上限に当たって替えるアカウントが無かったか）。"""
+
+    def __init__(self, route: KeyRoute, how: str, keep):
+        self.route, self.how, self.keep = route, how, keep
+        self.tried: set[str] = set()
+        self.limit_hit = False  # near-limit の条件 3
+
+    def pick(self) -> ApiKey | None:
+        """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。"""
+        r = self.route
+        if not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep())))):
+            if (k := pick(exclude=self.tried)) is not None:
+                return k
+        return r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
+
+    def run(self, call):
+        """キーで起動する（`call(環境)`）。キーで決着したらその結果、使うキーが無くなったら None を返す。"""
+        while (k := self.pick()) is not None:
+            self.route.note_switch(k)
+            res = call(child_env(k, dict(os.environ)) if k is not self.route.inherited else None)
+            if not self.route.result(k, res, self.tried):
+                return res
+        self.route.note_switch(None)
+        return None
+
+    def env(self, child: dict | None) -> dict | None:
+        """キーを使わない起動の環境。受け継いだキーを外したなら、キーの変数を外す。"""
+        return without_key(child if child is not None else dict(os.environ)) if self.route.dropped else child
+
+    def left(self) -> bool:
+        """上限に当たって替えるアカウントが無いとき、試せるキーが残っていれば真（以後 near-limit でもキーを使う）。"""
+        if self.how == "off" or pick(exclude=self.tried) is None:
+            return False
+        self.limit_hit = True
+        return True
+
+    def reset(self) -> None:
+        """解除を待った後は、上限で外したキーを選び直せる。"""
+        self.tried.clear()
+        self.limit_hit = False
