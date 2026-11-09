@@ -4860,7 +4860,7 @@
     {
       "term": "実行の記録",
       "context": "ndf-workflow",
-      "meaning": "1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines のファイル（#2335）",
+      "meaning": "1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines の行の並び。既定の出力先はファイル（#2335・#2338）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
       "code": "run_log"
@@ -4883,6 +4883,13 @@
       "term": "診断",
       "context": "ndf-workflow",
       "meaning": "スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "出力先",
+      "context": "ndf-workflow",
+      "meaning": "実行の記録の行を書く先。既定はファイルで、1 つの設定で別の出力先（Factory の CloudWatch Logs など）へ差し替える（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-requirements.md"
     },
