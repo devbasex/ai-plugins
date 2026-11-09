@@ -282,7 +282,7 @@ def _state_values(a, root) -> dict:
         repo = target_repo(root, getattr(a, "repo", None))
     except StepError:
         return {}
-    sd = S.state_dir(getattr(a, "state_dir", None), repo)
+    sd = S.repo_state_dir(getattr(a, "state_dir", None), repo)
     cands = (jsonio.read(sd / "candidates.json", missing={}, broken={}, want=dict).get("metrics")) or {}
     applied = (jsonio.read(sd / "apply.json", missing={}, broken={}, want=dict).get("metrics")) or {}
     out = {}

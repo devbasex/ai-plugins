@@ -210,7 +210,7 @@ def cmd_rank(a, ctx):
     root = git_root(a.root)
     repo = target_repo(root, a.repo)
     gh = Gh(repo)
-    sd = S.state_dir(a.state_dir, repo)
+    sd = S.repo_state_dir(a.state_dir, repo)
     rd = S.round_dir(sd, a.run)  # 順位の記録は回の置き場、見積もり・退けた移動は共有の置き場（I4）
     try:
         cfg = R.build_config(config_args(a), read_backlog_decl(root))

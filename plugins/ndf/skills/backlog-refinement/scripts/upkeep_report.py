@@ -17,7 +17,7 @@ def cmd_report(a, ctx):
     root = git_root(a.root)
     repo = target_repo(root, a.repo)
     run = report_run(root, a)
-    sd = S.round_dir(S.state_dir(a.state_dir, repo), run)  # 実行の回が始まっていればその回だけを読む（#2847 の I2）
+    sd = S.round_dir(S.repo_state_dir(a.state_dir, repo), run)  # 実行の回が始まっていればその回だけを読む（#2847 の I2）
     cand, app, rank = (ctx.read_state(sd / f) for f in S.ROUND_FILES)
     if cand is None and app is None and rank is None:
         raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)

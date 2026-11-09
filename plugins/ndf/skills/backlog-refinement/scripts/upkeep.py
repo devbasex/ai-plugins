@@ -213,7 +213,7 @@ def cmd_candidates(a):
     _route_sub_issues(gh, repo, closed, open_issues, routes, notes)
     _route_commits(root, a.since_ref, routes)
     _route_manual(a, routes, notes)
-    sd = S.state_dir(a.state_dir, repo)
+    sd = S.repo_state_dir(a.state_dir, repo)
     # 差分の棚卸しが見積の段階を付けるのは起点より後に作られた課題だけ（#2315 の決定 1・決定 6）。見直しは絞らない
     pool = open_issues if a.depth == "review" else [i for i in open_issues if (i.get("created_at") or "") > since]
     for n in RC.unscored(sd, _read_state, pool, snapshot_digest) if has_milestones else []:
@@ -384,7 +384,7 @@ def cmd_apply(a):
     root = git_root(a.root)
     plan, wrong = A.precheck_depth(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
     repo = target_repo(root, a.repo)
-    sd = S.state_dir(a.state_dir, repo)
+    sd = S.repo_state_dir(a.state_dir, repo)
     # 見直し・大整理は持ち主の実行の回を読み書きする。回が始まっていなければ共有の置き場（#2847 の決定 2）
     rd = S.round_dir(sd, plan.get("owner") if plan["depth"] != "diff" else None)
     # 記録のリポジトリ（保存した candidates.json の metrics.repo）の外へ書かない（#842 の決定 7）。

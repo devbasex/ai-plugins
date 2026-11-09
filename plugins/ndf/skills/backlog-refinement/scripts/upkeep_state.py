@@ -1,6 +1,6 @@
 """upkeep_state.py: 棚卸しの記録の置き場を決める唯一の部品（#2847）。
 
-    $NDF_UPKEEP_STATE_DIR/<owner>--<name>/       共有の置き場（state_dir）
+    $NDF_UPKEEP_STATE_DIR/<owner>--<name>/       共有の置き場（repo_state_dir）
     ├── candidates.json・apply.json・rank.json    識別子を渡さない実行の棚卸しの回
     ├── ledger.json・estimates.json・rejected.json 回をまたぐ記録（実行ごとに分けない）
     └── runs/<run>/                               実行ごとの置き場（candidates --run で回を始める）
@@ -24,7 +24,7 @@ ROUND_FILES = ("candidates.json", "apply.json", "rank.json")
 _RUN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
-def state_dir(arg, repo: str) -> Path:
+def repo_state_dir(arg, repo: str) -> Path:
     """共有の置き場。`--state-dir` → `$NDF_UPKEEP_STATE_DIR` → 一時ディレクトリの順に採り、リポジトリごとに分ける。"""
     base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "backlog-refinement")
     d = Path(base) / repo.replace("/", "--")
