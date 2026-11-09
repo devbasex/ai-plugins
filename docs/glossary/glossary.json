@@ -5212,6 +5212,12 @@
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
+      "term": "復元の量",
+      "context": "ndf-workflow",
+      "meaning": "再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q",
+      "pending_source": "issues/issue-2908-requirements.md"
+    },
+    {
       "term": "境界の判定",
       "context": "ndf-workflow",
       "meaning": "工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る",
