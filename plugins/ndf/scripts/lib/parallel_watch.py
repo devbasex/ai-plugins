@@ -48,20 +48,24 @@ def _tries_text(tries: Optional[list]) -> str:
     return f"。その後の再起動の試み {len(tries)} 回{last}"
 
 
+def _withdraw_reason(q: dict, r: dict, loops: dict) -> str:
+    """停滞の問い q を取り下げる理由（取り下げないなら空文字）。開発ループの止まりの問いは、記録が止まった状態でなくなるか、
+    行が `running` でなくなったときに外す（一覧の時刻では外さない。両方なら記録の側を理由にする）。
+    ほかは一覧の時刻が問いを出した時刻より進んだときに外す。"""
+    if q.get("loop_stop"):
+        why = "レーンが running でない" if r.get("state") != "running" else ""
+        return "開発ループの記録が止まっていない" if q["lane"] not in loops else why
+    return "レーンが動き出した" if (_seconds_of(r.get("at")) or 0) > float(q["asked_at"]) else ""
+
+
 def withdraw_settled(run, rows: dict, loops: dict) -> None:
-    """前提が消えた停滞の問いを取り下げる（決定 5）。開発ループの止まりの問いは、記録が止まった状態でなくなるか、
-    行が `running` でなくなったときに外す（一覧の時刻では外さない）。ほかは一覧の時刻が問いを出した時刻より進んだときに外す。
+    """前提が消えた停滞の問いを取り下げる（決定 5。理由の判定は `_withdraw_reason`）。
     外した id は答え済みへ入れ、後から届いた答えを捨てる（I5）。"""
     gone = []
     for q in run.questions:
         if q.get("kind") != "stall" or not q.get("lane") or q.get("asked_at") is None:
             continue
-        r = rows.get(q["lane"]) or {}
-        if q.get("loop_stop"):
-            why = "レーンが running でない" if r.get("state") != "running" else ""
-            why = "開発ループの記録が止まっていない" if q["lane"] not in loops else why
-        else:
-            why = "レーンが動き出した" if (_seconds_of(r.get("at")) or 0) > float(q["asked_at"]) else ""
+        why = _withdraw_reason(q, rows.get(q["lane"]) or {}, loops)
         if why:
             gone.append((q["id"], why))
     if not gone:
