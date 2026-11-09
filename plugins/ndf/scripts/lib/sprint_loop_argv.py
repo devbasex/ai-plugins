@@ -42,6 +42,8 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
         new += ["--design", *map(str, design)]
     if designed := [n for n in issues if n in approved]:
         new += ["--designed", *map(str, designed)]
+    if rec.get("outside_plan"):  # 例外として始めたループは、内側の起動の判定でも同じ理由で通す（#2733）
+        new += ["--outside-plan", rec["outside_plan"]]
     new += list(extra)
     return new
 

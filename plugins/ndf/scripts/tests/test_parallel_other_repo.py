@@ -376,3 +376,74 @@ def test_notify_skips_finished_plan(two_repos, monkeypatch):
     pl.clear_settled(x, "p3")
     monkeypatch.setattr(pl, "run_status", lambda h, n: None)
     assert plc.notify(x, "p3") == (False, None)
+
+
+# ---- 第 3 ラウンドの指摘（例外の起動の引き継ぎ・別のリポジトリの前のループの答え・保留したループの一時レーン） ----
+
+
+def test_outside_plan_reason_carries_to_sprint_command():
+    import sprint_loop_argv as sla
+
+    lap = {"versions": {"dev": ""}, "state_path": "/s.json", "sprint": "s1", "mode": "auto", "out": "/o", "issues": [1]}
+    lap["selected"] = [{"number": 1}]
+    got = sla.new_sprint_argv("/r", {"outside_plan": "急ぎの修正", "waiting": []}, lap, [])
+    assert got[got.index("--outside-plan") + 1] == "急ぎの修正"
+    assert "--outside-plan" not in sla.new_sprint_argv("/r", {"waiting": []}, lap, [])
+
+
+def test_loop_start_reuses_stored_reason(tmp_path):
+    import sprint_loop_cli as slc
+
+    root = _git(tmp_path / "z")
+    d = root / ".ndf" / "loop" / "l1"
+    d.mkdir(parents=True)
+    (d / "loop.json").write_text(json.dumps({"name": "l1", "laps": [], "outside_plan": "急ぎの修正"}))
+    assert slc.stored_outside_plan(str(root), "l1") == "急ぎの修正"
+    assert slc.stored_outside_plan(str(root), "none") is None
+
+
+def test_prior_request_from_other_repo_lane_routes_to_lane_repo(two_repos, monkeypatch):
+    import gate1_requests as g1
+    import parallel_reply as prp
+
+    x, y = two_repos
+    q = g1.prior_request("lold", {"number": 4, "pr": 40, "lap": 1}, "abc", "t", via="lfactory")
+    assert q["via"] == "lfactory" and "lane" not in q
+    assert "via" not in g1.prior_request("lold", {"number": 4, "pr": 40, "lap": 1}, "abc", "t")
+    assert pa.with_repo(x, "p3", [q])[0]["repo"] == str(y)
+    seen = {}
+    monkeypatch.setattr(g1, "answer_prior", lambda main, plan_dir, *_a, **_k: seen.update(main=main) or {})
+    prp.step_prior_answer(str(x), "p3", q, {"result": "rejected"})
+    assert seen["main"] == y
+
+
+def test_held_loop_helper_spawns_in_loop_repo(tmp_path):
+    import parallel_helper as phelp
+    import parallel_route as prt
+
+    x, y = _git(tmp_path / "x"), _git(tmp_path / "y")
+    lanes = [
+        {"name": "lloop", "input": {"kind": "loop", "loop": "lloop"}, "plans": 1, "touches": ["a/"], "repo": str(y)},
+        {"name": "lhome", "input": {"kind": "loop", "loop": "lhome"}, "plans": 1, "touches": ["b/"]},
+    ]
+    _plan(x, lanes)
+    assert prt.loop_repo(x, "p3", "lloop") == str(y)
+    assert prt.loop_repo(x, "p3", "lhome") is None
+    line = phelp.helper_spawn("p3", 1, 0, pending="lloop", cwd=str(y))
+    assert line.startswith(f"cd {y} && ") and "pending lloop" in line
+    assert phelp.helper_spawn("p3", 1, 0, pending="lhome").startswith("python3 ")
+
+
+def test_loop_start_keeps_reason_in_record(tmp_path):
+    import sprint_loop as sl
+    import sprint_loop_cli as slc
+
+    root = _git(tmp_path / "z")
+    d = root / ".ndf" / "loop" / "l1"
+    d.mkdir(parents=True)
+    (d / "loop.json").write_text(json.dumps({"name": "l1", "laps": []}))
+    env = sl.Env(root)
+    slc.keep_outside_plan(env, "l1", " 急ぎの修正 ")
+    assert slc.stored_outside_plan(str(root), "l1") == "急ぎの修正"
+    slc.keep_outside_plan(env, "none", "理由")  # 記録が無ければ作らない
+    assert not (root / ".ndf" / "loop" / "none").exists()

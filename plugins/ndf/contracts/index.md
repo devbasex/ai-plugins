@@ -68,6 +68,7 @@
 | `resume-mark-json` | `*.mark.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `revise-json` | `revise-*.json` | state | main | `plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/revise-note.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `revise-md` | `revise-*.md` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py` | — |
+| `run-done` | `run.done` | record | main | `plugins/ndf/scripts/lib/parallel_lane.py:settled_status` | — |
 | `run-log` | `run.log` | report | main | `plugins/ndf/scripts/parallel.py` | — |
 | `run-pid` | `run.pid` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `snapshot-json` | `snapshot.json` | record | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |

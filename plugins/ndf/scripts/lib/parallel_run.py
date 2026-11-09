@@ -558,7 +558,8 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     if todo and not set(run.held_spawned) & set(held):
         run.held_spawned.append(todo[0])
         seq = len(run.releases) + len(run.held_spawned)
-        run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
+        spawn = helper_spawn(name, seq, 0, pending=todo[0], cwd=prt.step_loop_repo(main, name, todo[0]))  # 別リポジトリはそこで（#2733）
+        run.pause("held", loops=[todo[0]], spawn=spawn)
     return None
 
 

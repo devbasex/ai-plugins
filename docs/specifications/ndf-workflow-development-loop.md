@@ -332,6 +332,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `fixes[]` | デプロイを差し戻されたループの 1 回の直し `{lap, issues, reason, at}`。直しのループの 1 回で課題を選ぶと `fixed_by` にループの回の番号を書く |
 | `excluded[]` | `{number, reason, lap}`（`loop exclude`） |
 | `sprint_mvv_approvals[]` | `{milestone, sha256, at, by}` |
+| `outside_plan` | 動いている並列の計画の外で例外として始めた理由（`loop start --outside-plan <理由>`。#2733）。再開の `loop start` が理由を省いても記録の理由で判定し、ループが組む `supervise.py new sprint` へ `--outside-plan` で渡す。無ければ項目ごと無い |
 
 ループの 1 回（`laps[]` の 1 行）の主な項目:
 

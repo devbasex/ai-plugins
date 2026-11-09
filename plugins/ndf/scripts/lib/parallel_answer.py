@@ -145,9 +145,14 @@ def lane_repo(main: Path, name: str, lane: str | None) -> Path:
     return hit.repo_dir(main) if hit is not None else Path(main)
 
 
+def repo_lane(q: dict) -> str | None:
+    """問いのリポジトリを決めるレーン: レーンの問いは `lane`、別のリポジトリのレーンが送った前のループの待ちは `via`（#2733）。"""
+    return q.get("lane") or q.get("via")
+
+
 def with_repo(main: Path, name: str, items: list[dict]) -> list[dict]:
     """問いの一覧の各行へ、計画の宣言から導いたレーンのリポジトリ `repo` を足す（依頼の本文から読まない。#2733 の I8）。"""
-    return [{**q, "repo": str(lane_repo(main, name, q.get("lane")))} if isinstance(q, dict) else q for q in items]
+    return [{**q, "repo": str(lane_repo(main, name, repo_lane(q)))} if isinstance(q, dict) else q for q in items]
 
 
 def merge_design(main: Path, q: dict, name: str | None = None) -> dict | None:
@@ -157,7 +162,7 @@ def merge_design(main: Path, q: dict, name: str | None = None) -> dict | None:
         return None
     import design_pr_merge
 
-    repo = lane_repo(main, name, q.get("lane")) if name else Path(main)
+    repo = lane_repo(main, name, repo_lane(q)) if name else Path(main)
     return design_pr_merge.merge_approved(repo, int(q["pr"]), q.get("stamp"))
 
 

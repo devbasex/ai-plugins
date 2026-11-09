@@ -23,8 +23,12 @@ def step_prior_waits(main: str, name: str) -> dict:
 
 @durable.step(name="parallel.prior-answer")
 def step_prior_answer(main: str, name: str, q: dict, answer: dict, stamp: Optional[str] = None) -> dict:
-    """前のループの待ちの問いへの答えを、そのループの `loop answer` で当てる。"""
-    return g1.answer_prior(main, pp.plan_dir(Path(main), name), q, answer, stamp)
+    """前のループの待ちの問いへの答えを、そのループの `loop answer` で当てる。ループの記録と設計 PR は、送ったレーン（`via`）の
+    リポジトリから引く（別のリポジトリのレーン。#2733）。"""
+    import parallel_answer as pa
+
+    repo = pa.lane_repo(Path(main), name, pa.repo_lane(q))
+    return g1.answer_prior(repo, pp.plan_dir(Path(main), name), q, answer, stamp)
 
 
 @durable.step(name="parallel.reload-lanes")

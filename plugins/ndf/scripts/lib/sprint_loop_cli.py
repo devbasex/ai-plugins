@@ -43,7 +43,9 @@ def run_loop_command(a, update) -> dict | None:
         a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
         import parallel_guard
 
-        if (blocked := parallel_guard.entry_check(a.root, getattr(a, "outside_plan", None), "sprint-state.py loop start")) is not None:
+        if getattr(a, "outside_plan", None) is None:  # 空の理由は渡したものとして判定で断る
+            a.outside_plan = stored_outside_plan(a.root, a.loop_name)
+        if (blocked := parallel_guard.entry_check(a.root, a.outside_plan, "sprint-state.py loop start")) is not None:
             return blocked
     import lease_stage  # loop のときだけ読む（filelock と psutil を要する）
 
@@ -53,6 +55,32 @@ def run_loop_command(a, update) -> dict | None:
     if held is not None and isinstance(out, dict):
         out = {**out, "lease": held.as_json()}
     return out
+
+
+def stored_outside_plan(root: str | None, name: str) -> str | None:
+    """ループの記録に残した例外の起動の理由（`--outside-plan`。#2733）。記録が無い・読めなければ None。
+    再開の `loop start` が理由を渡さなくても、例外として始めたループは例外のまま続ける。"""
+    import sprint_loop as sl
+
+    try:
+        got = sl.read_loop_record(sl.Env(Path(root or ".").resolve()), name).get("outside_plan")
+    except Exception:  # noqa: BLE001 — 記録が無い・読めなければ理由なし（判定は通常どおり）
+        return None
+    return got if isinstance(got, str) and got.strip() else None
+
+
+def keep_outside_plan(env, name: str, reason: str | None) -> None:
+    """例外の起動の理由をループの記録の `outside_plan` へ残す（#2733）。ループが組む `supervise.py new sprint` へ引き継ぐ。
+    理由が無い・記録が無い（始めるのを断った）・同じ理由なら何もしない。"""
+    import sprint_loop_record as slr
+
+    reason = (reason or "").strip()
+    if not reason or not slr.loop_record_path(env, name).is_file():
+        return
+    with slr.open_record(env, name) as (rec, before):
+        if rec.get("outside_plan") != reason:
+            rec["outside_plan"] = reason
+            slr.write_record(env, rec, before)
 
 
 def _dispatch(a, update) -> dict | None:
@@ -66,7 +94,9 @@ def _dispatch(a, update) -> dict | None:
         if a.loop_cmd == "start":
             name = a.loop_name
             ms = [m.strip() for m in (a.milestones or "").split(",") if m.strip()]
-            return sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
+            out = sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
+            keep_outside_plan(env, name, getattr(a, "outside_plan", None))
+            return out
         if a.loop_cmd == "environment":
             return environment_result(env.main_dir(), a.json)
         handlers = {

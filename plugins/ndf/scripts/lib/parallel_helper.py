@@ -15,14 +15,18 @@ HERE = RELAY.parent
 SUPERVISE = f"python3 {HERE / 'supervise.py'}"
 
 
-def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None) -> str:
-    """一時レーンを起こす 1 行（`metrics.spawn`）。pending はループ名で、保留したループの 1 回の残りを流す一時レーン（異常系 11）。"""
+def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None, cwd: Optional[str] = None) -> str:
+    """一時レーンを起こす 1 行（`metrics.spawn`）。pending はループ名で、保留したループの 1 回の残りを流す一時レーン（異常系 11）。
+    cwd は別のリポジトリのループのリポジトリで、一時レーンをそこで起こす（`loop pending` がそのループの記録を読む。#2733）。"""
+    import shlex
+
     what = f"pending {pending}" if pending else f"{n} {k}"
     helper = pr.helper_name(name, n)
     # 終わりに自分のラッパーを止める（判断 fca6fe464619 の (a)）。止めないと対話の claude が入力待ちで残り、続きの一時レーンが断られる
     end = f"[ndf-parallel] helper-done {name} の行を出し、python3 {RELAY} stop {helper} で自分のラッパーを止めたとき"
     first = f"/goal /ndf:development-workflow --parallel-helper {name} {what} -- 終わり: {end}"
-    return f"python3 {RELAY} spawn --name {helper} --role helper --plan {name} --json -- '{first}'"
+    line = f"python3 {RELAY} spawn --name {helper} --role helper --plan {name} --json -- '{first}'"
+    return f"cd {shlex.quote(cwd)} && {line}" if cwd else line
 
 
 def present_approval(d: Path) -> str:
