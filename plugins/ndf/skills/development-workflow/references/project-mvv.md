@@ -120,7 +120,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | cross-review の担当・修正担当・見送りの返信 | `init` が状態ファイルの `review_criteria.mvv_block` へコピーし、`reviewer_block` / `fixer_block` の後ろに付く | 状態の `review_criteria.project_mvv`。振り分けの `mvv_basis`・見送りの返信の末尾の「根拠: Value 1（MVV 版 1）」 |
 | cross-refactoring の提案と改修計画 | 状態の `project_mvv.block` を `RF_MVV` で | 状態の `project_mvv.ref`。候補・項目・見送りの `mvv_basis`（改修計画の見送りの表の「根拠（MVV）」） |
 | supervise の judge | プロンプトの先頭（`work` のステップと同じ節） | `state.json` の `project_mvv`・`log[].basis` |
-| 範囲外の起票（`out-of-scope`） | 3 択の前に `project-mvv.py context` を読む | 起票の本文の「なぜこの変更の範囲外なのか」の節に根拠の項目と版 |
+| 範囲外の起票（`out-of-scope`） | 3 択の前に `project-mvv.py context` を読む | 起票の本文の「由来」の節（範囲外とした理由）に根拠の項目と版 |
 
 根拠の項目は `Mission` / `Vision` / `Value 3` / `C4` / `P1` / `R2` / `スプリント Value 4` の形で、本文に無い番号は落とす。
 返されなければ「根拠なし」、プロジェクト MVV が無ければ「MVV なし」と入り、欠けても止めない。宣言が 未承認・承認と一致しない・
