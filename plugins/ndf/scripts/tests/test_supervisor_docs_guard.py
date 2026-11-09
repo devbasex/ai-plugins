@@ -7,15 +7,12 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
-import subprocess
-import sys
 
 import pytest
+from hook_run import deny_reason as run
 
 OWN = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = OWN / "scripts" / "hook.py"
 REL = pathlib.Path("skills/development-workflow/references/agent-layers.md")
 ONLY_OUT = pathlib.Path("skills/development-workflow/references/only-outside-2813.md")
 
@@ -49,18 +46,6 @@ def payload(tool, tool_input, agent_type, cwd) -> dict:
     if cwd is not None:
         p["cwd"] = str(cwd)
     return p
-
-
-def run(data, tmp_path, env=None) -> str | None:
-    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
-    e["CLAUDE_PLUGIN_DATA"] = str(tmp_path / "plugin-data")
-    e.update(env or {})
-    proc = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(data), capture_output=True, text=True, env=e, timeout=20)
-    assert proc.returncode == 0, proc.stderr
-    if not proc.stdout.strip():
-        return None
-    spec = json.loads(proc.stdout).get("hookSpecificOutput") or {}
-    return spec.get("permissionDecisionReason") if spec.get("permissionDecision") == "deny" else None
 
 
 @pytest.mark.parametrize("agent_type", ["ndf:supervisor", "ndf:supervisor-waits"])
