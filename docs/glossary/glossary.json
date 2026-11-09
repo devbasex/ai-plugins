@@ -2733,6 +2733,18 @@
       "source": "docs/specifications/ndf-release-via-cd.md"
     },
     {
+      "term": "リリースの Pull Request",
+      "context": "ndf-release",
+      "meaning": "本番チャネルへ変更を入れる Pull Request。リリースの雛形では `release/v<版>` が、経路 merge ではベースブランチが head になる",
+      "pending_source": "issues/issue-2748-design.md"
+    },
+    {
+      "term": "リリースの承認資料",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持つ。経路 merge では、この欄の SHA がリリースの Pull Request の先端のときだけ本番チャネルへマージする。リリースの雛形では、承認したコミットから比べた先端までに版上げなど許可した差分のほかが無いことを確かめ、比べた先端をマージする",
+      "pending_source": "issues/issue-2748-design.md"
+    },
+    {
       "term": "昇格の Pull Request",
       "context": "ndf-release",
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
