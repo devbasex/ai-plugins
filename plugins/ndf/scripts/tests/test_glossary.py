@@ -459,16 +459,16 @@ def test_deprecated_inside_live_term_is_not_matched(repo):
 def test_katakana_deprecated_word_skips_katakana_compounds(repo):
     """カタカナだけの廃止語は、前後がカタカナの複合語の内側に当てない。漢字の廃止語は今のまま部分一致で当てる（#2733 の決定 12）。"""
     g = shop_glossary()
-    g["terms"][1]["deprecated"] = ["ライン", "周回"]
+    g["terms"][1]["deprecated"] = ["ライン", "旧呼称"]
     g["terms"][2]["deprecated"] = []
     write_json(repo, DEFAULT_SOURCE, g)
     code, _, err = run(repo, "render")
     assert code == 0, err
     write(repo, "issues/a.md", "ガイドラインとステータスラインを読む。\n")
     assert run(repo, "check", "--diff", "develop")[0] == 0
-    write(repo, "issues/a.md", "ラインを足す。次の周回で読む。\n")
+    write(repo, "issues/a.md", "ラインを足す。旧呼称で呼ぶ。\n")
     code, out, _ = run(repo, "check", "--diff", "develop")
-    assert code == 1 and sorted(i["term"] for i in out["items"]) == ["ライン", "周回"]
+    assert code == 1 and sorted(i["term"] for i in out["items"]) == ["ライン", "旧呼称"]
 
 
 def test_deprecated_live_in_other_context_is_not_matched(repo):

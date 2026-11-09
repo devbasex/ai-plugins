@@ -125,8 +125,8 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | `areas[].name` / `common` / `paths` | 文字列 / bool / glob の配列 | name と paths は許さない | 領域。`common` が真なら重点領域で、触った Pull Request は `common_weight` 点。流出不具合の重なりはこの単位で数える |
 | `boundary_paths` | glob の配列 | 機械のチェックは無し | レッドラインに当たるファイル |
 | `triggers.score` / `common_weight` / `lines` / `escapes` / `hours` | 数 | 15 / 2 / 5000 / 2 / 24 | トリガーの閾値 |
-| `loop.enabled` | bool | 偽（ループを断る） | 開発ループ（`--loop`）を許すか。周回は `auto` で組むため `auto` 節も要る。手順は [loop.md](loop.md) |
-| `loop.budget.laps` / `usd` / `hours` | 正の数か `null` | 無制限（書かない・`null`） | ループの予算（周回の数・費用・動いていた時間）。書いた単位だけ効き、予算以上になった周回の境で止まる |
+| `loop.enabled` | bool | 偽（ループを断る） | 開発ループ（`--loop`）を許すか。ループの 1 回は `auto` で組むため `auto` 節も要る。手順は [loop.md](loop.md) |
+| `loop.budget.laps` / `usd` / `hours` | 正の数か `null` | 無制限（書かない・`null`） | ループの予算（ループの回数・費用・動いていた時間）。書いた単位だけ効き、予算以上になったループの 1 回の境で止まる |
 | `loop.same_failure` | 1 以上の整数 | 2 | 同じ失敗（課題の組・計画の種類・止まったところ）が続いたら止まる回数 |
 | `loop.max_issues` | 1 以上の整数 | 3 | 1 周の課題の上限。候補は `loop start` の実行環境の調査が出し、書くのは人である |
 | `parallel.answer_limit.plan` / `lane` | 正の整数 | 8 / 3（正の整数でない値は既定へ戻して警告を出す） | 並列の計画の答え待ちの閾値。超えるとレーンが区切りで止まる。手順は [parallel.md](parallel.md) の「答え待ちの停止」 |
@@ -216,7 +216,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 届けない経路だけでなければ経路にかかわらず `{queue_record}` になる。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
 課題を閉じる PR とそれを参照する PR から、段階が本番かデプロイなしのリリース記録を置いた PR を探して埋め、`release-verify` と `close` が
 同じ番号を受ける。見つからない・2 つ以上のスプリントにある・GitHub を読めなければ、まとめを流さずに止まり（queue の結果は `stopped`、
-開発ループの周回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
+開発ループの 1 回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
 
 ## リリースの経路からステージを組む
 

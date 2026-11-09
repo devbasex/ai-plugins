@@ -49,7 +49,7 @@ def _plan(home: Path, lanes: list[dict], name: str = "p3") -> Path:
 def two_repos(tmp_path):
     x, y = _git(tmp_path / "x"), _git(tmp_path / "y")
     _plan(x, [_lane("la", [1]), _lane("lfactory", [1], repo=y)])
-    parallel_homes.record(x)
+    parallel_homes.record_home(x)
     return x, y
 
 
@@ -58,11 +58,11 @@ def two_repos(tmp_path):
 
 def test_limit_file_then_env_then_default(monkeypatch):
     monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
-    assert relay_limit.max_named()[:2] == (3, "default")
+    assert relay_limit.named_cap()[:2] == (3, "default")
     monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "5")
-    assert relay_limit.max_named()[:2] == (5, "env")
+    assert relay_limit.named_cap()[:2] == (5, "env")
     relay_limit.write_max_named(4)
-    assert relay_limit.max_named()[:2] == (4, "file")
+    assert relay_limit.named_cap()[:2] == (4, "file")
     assert pp.named_limit()[0] == 4  # 計画の検査も同じ値を読む
     import relay_lib.hub as hb
 
@@ -116,11 +116,11 @@ def test_render_and_handoff_go_to_lane_repo(tmp_path):
 
 
 def test_homes_skip_missing_plan_dirs(tmp_path):
-    parallel_homes.record(tmp_path / "gone")
+    parallel_homes.record_home(tmp_path / "gone")
     keep = _git(tmp_path / "keep")
     _plan(keep, [_lane("la", [1])])
-    parallel_homes.record(keep)
-    parallel_homes.record(keep)
+    parallel_homes.record_home(keep)
+    parallel_homes.record_home(keep)
     assert parallel_homes.homes() == [keep]
 
 
@@ -189,7 +189,7 @@ def test_lane_add_over_limit_suggests_cap(monkeypatch, two_repos):
     assert err is None and name == "lc"
     plan, items, _ = pp.check_data({**new, "lanes": [*new["lanes"], _lane("ld", [4])]}, home=x)
     assert plan is None
-    hint = plc.limit_items(items, 4)
+    hint = plc.cap_hint_items(items, 4)
     assert any("cap --named 4" in (it.get("next") or "") for it in hint)
 
 
@@ -228,7 +228,7 @@ def test_guard_blocks_outside_session(two_repos, tmp_path):
     x, _y = two_repos
     other = _git(tmp_path / "z")
     env = {}
-    got = pg.judge(other, "loop start", None, env=env, status=RUNNING, is_lane=lambda: False)
+    got = pg.judge_entry(other, "loop start", None, env=env, status=RUNNING, is_lane=lambda: False)
     assert got["status"] == "stopped" and got["metrics"]["blocked"] and "--outside-plan" in got["next"]
     assert f"{x}:p3" in got["metrics"]["running"]
     assert not pg.outside_log().exists()
@@ -236,17 +236,17 @@ def test_guard_blocks_outside_session(two_repos, tmp_path):
 
 def test_guard_passes_exception_and_logs(two_repos, tmp_path):
     other = _git(tmp_path / "z")
-    assert pg.judge(other, "loop start", "急ぎの修正", env={}, status=RUNNING, is_lane=lambda: False) is None
+    assert pg.judge_entry(other, "loop start", "急ぎの修正", env={}, status=RUNNING, is_lane=lambda: False) is None
     row = json.loads(pg.outside_log().read_text().splitlines()[-1])
     assert row["reason"] == "急ぎの修正" and row["repo"] == str(other)
 
 
 def test_guard_passes_without_running_plan_lane_or_factory(two_repos, tmp_path):
     other = _git(tmp_path / "z")
-    assert pg.judge(other, "loop start", None, env={}, status=lambda _h, _n: "SUCCESS", is_lane=lambda: False) is None
-    assert pg.judge(other, "loop start", None, env={}, status=RUNNING, is_lane=lambda: True) is None
-    assert pg.judge(other, "loop start", None, env={"NDF_ORGANIZER_DIR": "/o"}, status=RUNNING, is_lane=lambda: False) is None
-    assert pg.judge(other, "loop start", None, env={"NDF_FACTORY_RUN": "1"}, status=RUNNING, is_lane=lambda: False) is None
+    assert pg.judge_entry(other, "loop start", None, env={}, status=lambda _h, _n: "SUCCESS", is_lane=lambda: False) is None
+    assert pg.judge_entry(other, "loop start", None, env={}, status=RUNNING, is_lane=lambda: True) is None
+    assert pg.judge_entry(other, "loop start", None, env={"NDF_ORGANIZER_DIR": "/o"}, status=RUNNING, is_lane=lambda: False) is None
+    assert pg.judge_entry(other, "loop start", None, env={"NDF_FACTORY_RUN": "1"}, status=RUNNING, is_lane=lambda: False) is None
 
 
 def test_guard_treats_unreadable_plan_as_running(two_repos, tmp_path):
@@ -255,9 +255,9 @@ def test_guard_treats_unreadable_plan_as_running(two_repos, tmp_path):
     def broken(_h, _n):
         raise RuntimeError("壊れた記録")
 
-    got = pg.judge(other, "loop start", None, env={}, status=broken, is_lane=lambda: False)
+    got = pg.judge_entry(other, "loop start", None, env={}, status=broken, is_lane=lambda: False)
     assert got["metrics"]["unreadable"] and got["metrics"]["blocked"]
-    assert pg.judge(other, "loop start", "理由", env={}, status=broken, is_lane=lambda: False) is None
+    assert pg.judge_entry(other, "loop start", "理由", env={}, status=broken, is_lane=lambda: False) is None
 
 
 def test_guard_passes_organizer_role(two_repos, tmp_path):
@@ -265,7 +265,7 @@ def test_guard_passes_organizer_role(two_repos, tmp_path):
     relay_dir = tmp_path / "relay"
     relay_dir.mkdir()
     (relay_dir / pf.ROLE_FILE).write_text(json.dumps({"role": "organizer", "plan": "p3"}))
-    assert pg.judge(other, "loop start", None, env={"NDF_RELAY_DIR": str(relay_dir)}, status=RUNNING, is_lane=lambda: False) is None
+    assert pg.judge_entry(other, "loop start", None, env={"NDF_RELAY_DIR": str(relay_dir)}, status=RUNNING, is_lane=lambda: False) is None
 
 
 def test_loop_start_refuses_empty_reason(tmp_path):

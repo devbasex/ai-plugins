@@ -358,5 +358,5 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — 1 本のラッパーの入出力と区間の切り替え
 - [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — 導入・`/ndf:restart`
 - [#1587](https://github.com/devbasex/ai-plugins/issues/1587) — ラッパーの入れ替え（入れ替えた後にリレーハブを取り直す）
-- [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のマシンで動くランナー。起動・一覧・停止の名前と形を揃える相手
+- [#2189](https://github.com/devbasex/ai-plugins/issues/2189) — Factory の手元のマシンで動くランナーのエージェント。起動・一覧・停止の名前と形を揃える相手
 - サービスの確定仕様 `ndf-factory-runs-and-runner.md` — Factory の実行ジョブと実行の枠

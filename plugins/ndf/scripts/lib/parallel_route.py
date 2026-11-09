@@ -43,7 +43,7 @@ def with_release_warnings(main: Path, checked: tuple) -> tuple:
 
 
 def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
-    """答えを受けたのに残りを流していない保留の周回を持つ、計画のループのレーンのループ名（異常系 11）。"""
+    """答えを受けたのに残りを流していない保留したループの 1 回を持つ、計画のループのレーンのループ名（異常系 11）。"""
     asked = lambda lap: (lap.get("release") or lap.get("question") or {}).get("request") if lap.get("outcome") in PENDING else None  # noqa: E731
     return [ln.input.loop for ln, rec in loop_records(main, name) if any(asked(lap) in answered for lap in rec.get("laps") or [])]
 
@@ -51,7 +51,7 @@ def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
 def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
     """設計の承認の依頼に答えたのに、持ち主のループのレーンが答えをまだ当てていないレーンの名前（#2436 の 6f）。
 
-    答え（`answer-<依頼>`）は持ち主が周回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後のリリースの
+    答え（`answer-<依頼>`）は持ち主がループの 1 回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後のリリースの
     依頼を送れないため、当てるまで計画を終えない。"""
     held = lambda rec: any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or [])  # noqa: E731
     return [ln.name for ln, rec in loop_records(main, name) if held(rec)]

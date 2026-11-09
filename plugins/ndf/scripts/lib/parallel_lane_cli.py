@@ -22,12 +22,12 @@ SET_KEYS = ("input", "plans", "touches", "after", "handoff")
 FIXED_KEYS = ("name", "repo")
 
 
-def _read_json(src: str) -> object:
+def _read_lane_json(src: str) -> object:
     text = sys.stdin.read() if src == "-" else Path(src).read_text(encoding="utf-8")
     return json.loads(text)
 
 
-def limit_items(items: list[dict], lanes: int) -> list[dict]:
+def cap_hint_items(items: list[dict], lanes: int) -> list[dict]:
     """レーンの数が上限を超えた誤り（I2）があれば、上限の変え方の 1 行を足す（受け入れ条件 8）。"""
     if not any(it.get("rule") == "I2" and "レーンの数" in str(it.get("message")) for it in items):
         return items
@@ -92,7 +92,7 @@ def notify(main: Path, name: str) -> bool:
     return True
 
 
-def reply(status: str, summary: str, items=None, code: int | None = None, next_step: str | None = None, **metrics):
+def emit_reply(status: str, summary: str, items=None, code: int | None = None, next_step: str | None = None, **metrics):
     """結果を出して終える（`parallel.py` の `reply` と同じ形）。"""
     from step_result import emit, result
 
@@ -110,33 +110,33 @@ def cmd_lane(a) -> None:
     main = decl.main_dir(cwd) or Path(cwd)
     try:
         raw = pp.load_plan(main, a.name)
-        body = _read_json(a.src)
+        body = _read_lane_json(a.src)
     except FileNotFoundError as exc:
-        reply("stopped", f"並列の計画 {a.name} か --from のファイルが無い: {exc}", code=2)
+        emit_reply("stopped", f"並列の計画 {a.name} か --from のファイルが無い: {exc}", code=2)
     except (OSError, ValueError) as exc:
-        reply("stopped", f"並列の計画 {a.name} か --from を読めない: {exc}", code=2)
+        emit_reply("stopped", f"並列の計画 {a.name} か --from を読めない: {exc}", code=2)
     if not isinstance(raw, dict):
-        reply("stopped", f"並列の計画 {a.name} が JSON のオブジェクトでない", code=2)
+        emit_reply("stopped", f"並列の計画 {a.name} が JSON のオブジェクトでない", code=2)
     new, lane_name, err = updated(raw, a.action, a.lane, body)
     if err:
-        reply("stopped", err, code=1)
+        emit_reply("stopped", err, code=1)
     plan, items, metrics = pp.check_data(new, home=main)
     if plan is None:
-        items = limit_items(items, len(new.get("lanes") or []))
-        reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
+        items = cap_hint_items(items, len(new.get("lanes") or []))
+        emit_reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
     try:
         written = write_lane(main, plan, new, lane_name, a.action)
-        parallel_homes.record(main)
+        parallel_homes.record_home(main)
     except FileExistsError as exc:
-        reply("stopped", f"在る引継ぎ文書を上書きしないため何も書いていない: {exc}", items, 1)
+        emit_reply("stopped", f"在る引継ぎ文書を上書きしないため何も書いていない: {exc}", items, 1)
     except handoff.Failure as exc:
-        reply("stopped", f"引継ぎ文書を書けない: {exc}", items, exc.code)
+        emit_reply("stopped", f"引継ぎ文書を書けない: {exc}", items, exc.code)
     except OSError as exc:
-        reply("stopped", f"書けない: {exc}", items, 2)
+        emit_reply("stopped", f"書けない: {exc}", items, 2)
     sent = notify(main, a.name)
     wait = f"python3 {Path(__file__).resolve().parent.parent / 'parallel.py'} wait {a.name}"
     verb = "足した" if a.action == "add" else "書き換えた"
     summary = f"並列の計画 {a.name} のレーン {lane_name} を{verb}" + (
         "。耐久ワークフローへ知らせた" if sent else "（計画はまだ動いていない）"
     )
-    reply("ok", summary, [{"path": str(p)} for p in written] + items, lane=lane_name, notified=sent, next_step=wait, **metrics)
+    emit_reply("ok", summary, [{"path": str(p)} for p in written] + items, lane=lane_name, notified=sent, next_step=wait, **metrics)

@@ -25,16 +25,16 @@ def homes_dir(env: Optional[Mapping[str, str]] = None) -> Path:
     return container_home(env) / "parallel" / "homes"
 
 
-def _abs(p: Path) -> Path:
+def _home_path(p: Path) -> Path:
     try:
         return Path(p).resolve()
     except OSError:
         return Path(os.path.abspath(p))
 
 
-def record(home: Path, env: Optional[Mapping[str, str]] = None) -> Path:
+def record_home(home: Path, env: Optional[Mapping[str, str]] = None) -> Path:
     """計画の置き場 `home`（メインディレクトリ）を一覧へ書く（同じ置き場は 1 ファイルを書き直す）。"""
-    home = _abs(home)
+    home = _home_path(home)
     d = homes_dir(env)
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     p = d / f"{hashlib.sha256(str(home).encode('utf-8')).hexdigest()[:12]}.json"
@@ -78,5 +78,5 @@ def homes(env: Optional[Mapping[str, str]] = None) -> list[Path]:
 
 def search_homes(main: Optional[Path], env: Optional[Mapping[str, str]] = None) -> list[Path]:
     """レーンの判定で探す置き場: 自分のメインディレクトリ（`main`）を先に、一覧の置き場を後に並べる（重なりは 1 つ）。"""
-    first = [_abs(Path(main))] if main is not None else []
+    first = [_home_path(Path(main))] if main is not None else []
     return [*first, *[h for h in homes(env) if h not in first]]

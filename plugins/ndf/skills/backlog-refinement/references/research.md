@@ -50,7 +50,7 @@
 
 ```bash
 # Bash の run_in_background: true で、wait と並べて起動する
-python3 "$UPKEEP/upkeep.py" research run --until <done のパス> --queue <done>.plans.json --lap <周回> --loop <名>
+python3 "$UPKEEP/upkeep.py" research run --until <done のパス> --queue <done>.plans.json --lap <ループの 1 回> --loop <名>
 ```
 
 | 決まり | 中身 |
@@ -59,7 +59,7 @@ python3 "$UPKEEP/upkeep.py" research run --until <done のパス> --queue <done>
 | 空き | queue の一覧で走っているプランの本数 + 調査 1 本が `--max`（既定 6。開発ループはまとめの queue と同じ 3 を渡す）以下のときだけ項目を始める |
 | 止め方 | 完了のファイル（`--until`）が出たら新しい項目を始めない。調べている項目も、完了のファイルが出てから `depths.research.grace`（300 秒）を過ぎたら止める。項目の途中の結果は書かない |
 | 1 回の量 | `--max-items`（既定 3）項目まで。1 項目の費用と秒は `depths.research.item_usd`（1 ドル）・`item_seconds`（900 秒）まで。超えた結果は捨てる |
-| 記録 | 出典（`url` / `path` / `command`）と調べた日時のそろった結果だけを `<側面>--<対象>.item.json` に書く。費用と秒は結果を捨てた呼び出しも含めて呼び出しごとに `research/calls.jsonl` へ残し、周回の記録の `research` 行に入れて予算に数える。周回を締めた後に終わった調査の費用は、次に周回を締めるときにその周回へ精算する |
+| 記録 | 出典（`url` / `path` / `command`）と調べた日時のそろった結果だけを `<側面>--<対象>.item.json` に書く。費用と秒は結果を捨てた呼び出しも含めて呼び出しごとに `research/calls.jsonl` へ残し、ループの 1 回の記録の `research` 行に入れて予算に数える。ループの 1 回を締めた後に終わった調査の費用は、次にループの 1 回を締めるときにそのループの 1 回へ精算する |
 | 外部 | Web は読み取りだけ（WebFetch・WebSearch）。外部へ書き込まない |
 
 次の待ちは、記録の無い項目から続ける。見直しの中では `research run --run <持ち主の run> --since <前の見直しの at>` で、

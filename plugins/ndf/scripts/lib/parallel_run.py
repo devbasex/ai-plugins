@@ -542,7 +542,7 @@ def parallel_workflow(main: str, name: str) -> dict:
 
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
-    """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留の周回があれば None。"""
+    """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
     designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped)
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
         if set(designs) - set(run.wake):
@@ -553,7 +553,7 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     if not held:
         step_finish(main, name, run.progress())
         return run.summary("finished")
-    # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
+    # 止まったレーンの保留したループの 1 回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
     todo = [x for x in held if x not in run.held_spawned]
     if todo and not set(run.held_spawned) & set(held):
         run.held_spawned.append(todo[0])

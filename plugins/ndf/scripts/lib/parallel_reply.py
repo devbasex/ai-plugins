@@ -93,7 +93,7 @@ class AnswerRouting:
                 self.ask_unmatched(rid, "問いの一覧に無い依頼への答え。その依頼が届いたら当たる")
 
     def reply_replaced(self, holder: dict, msg: dict) -> None:
-        """置き換えた依頼への答え。答えのイベントを立て、今の問いの持ち主へ流す: レーンは起こす（当てるかは周回の境で判定する）、
+        """置き換えた依頼への答え。答えのイベントを立て、今の問いの持ち主へ流す: レーンは起こす（当てるかはループの 1 回の境で判定する）、
         前のループは置き換えた問いの印と今の先頭を比べて当てる。"""
         rid = msg.get("id")
         self.answered.add(rid)

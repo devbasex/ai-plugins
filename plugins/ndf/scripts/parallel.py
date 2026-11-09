@@ -49,6 +49,7 @@ import parallel_external as pe  # noqa: E402
 import parallel_external_cli as px  # noqa: E402
 import parallel_hold as ph  # noqa: E402
 import parallel_hold_cli as phc  # noqa: E402
+import parallel_homes  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 from parallel_lane_cli import cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
 import parallel_plan as pp  # noqa: E402
@@ -158,7 +159,7 @@ def cmd_start(a) -> None:
 
     env, notes = pr_run.environment_report(main, plan)
     notes = [*notes, *ph.limit_items(main)]
-    pl.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
+    parallel_homes.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
         marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）

@@ -26,7 +26,7 @@ from typing import Optional
 
 import parallel_external as pe
 import parallel_plan as pp
-from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
+from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in, resolved_path  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
 RUNNING = ("PENDING", "ENQUEUED")
@@ -89,14 +89,7 @@ class LaneRef(tuple):
 
     def own_release(self) -> bool:
         """別のリポジトリのレーンか（自分のリポジトリの設定で本番を出す。I7）。"""
-        return _resolved(self.repo) != _resolved(self.home)
-
-
-def _resolved(p: Path) -> str:
-    try:
-        return str(Path(p).resolve())
-    except OSError:
-        return str(p)
+        return resolved_path(self.repo) != resolved_path(self.home)
 
 
 def home_of(got, main: Path) -> Path:
@@ -116,7 +109,7 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
         return None
     import parallel_homes
 
-    me = _resolved(Path(main))
+    me = resolved_path(Path(main))
     for home in parallel_homes.search_homes(Path(main)):
         for name in plans_in(home):
             try:
@@ -124,16 +117,9 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
             except (OSError, ValueError):
                 continue
             hit = plan.lane(lane)
-            if hit is not None and _resolved(hit.repo_dir(home)) == me and status(home, name) in RUNNING:
+            if hit is not None and resolved_path(hit.repo_dir(home)) == me and status(home, name) in RUNNING:
                 return LaneRef(name, hit, home, hit.repo_dir(home))
     return None
-
-
-def record_home(main: Path) -> None:
-    """計画の置き場を計画の所在の一覧へ書く（`parallel.py start`。#2733 の決定 1）。"""
-    import parallel_homes
-
-    parallel_homes.record(main)
 
 
 def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
@@ -173,7 +159,7 @@ QUEUE_MAX = 3  # 並列の計画のレーンでないときの `queue --max` の
 def queue_max(cwd: Optional[str] = None) -> int:
     """`queue` の同時に流す本数。並列の計画のレーンならレーンのプランの本数、そうでなければ 3（#2436）。
 
-    `queue` の `--max` の既定と、スプリント・周回の続きが組む queue の 1 行が同じ値を使う（レーンの本数を超えない）。"""
+    `queue` の `--max` の既定と、スプリント・ループの 1 回の続きが組む queue の 1 行が同じ値を使う（レーンの本数を超えない）。"""
     import sys
 
     import decl
