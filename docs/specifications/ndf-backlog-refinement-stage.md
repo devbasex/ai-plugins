@@ -26,7 +26,7 @@ conductor が打ち切った。今の形では次のように動く。
 | 時点 | 振る舞い |
 | --- | --- |
 | 振り返りの記録を投稿した | `retrospective` は棚卸しを指示しない。フェーズの表の「通す工程」の次が `棚卸し` である |
-| スプリントを閉じた（`sprint-close.py` が `ok`） | 仕上げの担当が進捗記録 `stage 棚卸し` を打つ。`stopped` なら棚卸しへ進まない |
+| スプリントを閉じた（`sprint-close.py` が `ok`、または閉じなかった課題を返す `gate`） | 仕上げの担当が進捗記録 `stage 棚卸し` を打つ。`stopped` なら棚卸しへ進まない |
 | 候補を集める | `upkeep.py candidates` が上限 10 件で切る。残る 11 件は `metrics.deferred` に番号だけが載る（終了コード 20） |
 | 反映する | `upkeep.py apply` は記録のリポジトリ（devbasex/devbase）の課題とマイルストーンにだけ書く |
 | 「やらない」の承認が要る（終了コード 10） | 無人の経路では承認を求めず、承認資料のパスと番号を報告に載せて終える |
@@ -62,7 +62,7 @@ conductor が打ち切った。今の形では次のように動く。
 
 - **`棚卸し` は、フェーズの表のちょうど 1 つのフェーズ（仕上げ）の「通す工程」の最後にある。** 工程名から
   フェーズを引く対応（`plugins/ndf/scripts/lib/transcript_agents.py` の `STEP_PHASES`）も `"棚卸し": "仕上げ"` である
-- **棚卸しは、スプリントを閉じた（`sprint-close.py` が `ok`）後にだけ始まる**
+- **棚卸しは、スプリントを閉じた（`sprint-close.py` が `ok` か `gate`）後にだけ始まる。** `stopped`（失敗あり）では始まらない
 - **`candidates` が区分を求める候補の数は、候補の上限以下である。** 上限は常に 1 以上の整数である
 - **`apply` が書き込むのは、記録のリポジトリの課題とマイルストーンだけである**
 
@@ -109,7 +109,7 @@ conductor が打ち切った。今の形では次のように動く。
 | `type` | `work`（`full: true`） |
 | `kind` / `stage` | `棚卸し` |
 | `timeout` | 3600 |
-| `prompt` | `/ndf:backlog-refinement --depth diff スプリント <名前>（<課題>）。差分の棚卸しの工程として無人で通す。` に、（`new close --carry <番号...>` で組んだときだけ）前の周回の持ち越しを `upkeep.py` の `--add` で候補へ渡す 1 文と、`--limit` を上げて打ち直さない・終了コード 10 は承認を求めず `presentation_path` と番号を報告して終える・`--repo` を渡さない・親 issue の起票と結び付けを行わず「人の判断待ち」に載せて終える、の 4 点を続ける |
+| `prompt` | `/ndf:backlog-refinement --depth diff スプリント <名前>（<課題>）。差分の棚卸しの工程として無人で通す。` に、（`new close --carry <番号...>` で組んだときだけ）ループの前の 1 回の持ち越しを `upkeep.py` の `--add` で候補へ渡す 1 文と、`--limit` を上げて打ち直さない・終了コード 10 は承認を求めず `presentation_path` と番号を報告して終える・`--repo` を渡さない・親 issue の起票と結び付けを行わず「人の判断待ち」に載せて終える、の 4 点を続ける |
 | `next` | `refine-record` |
 
 `refine` の後ろには、深さの記録（`refine-record`。`upkeep.py depth record --depth diff`）と、大整理・見直しの
@@ -117,7 +117,7 @@ conductor が打ち切った。今の形では次のように動く。
 ステップが続く。判定が起動しない（3）ときはその深さを飛ばし、見直しの後に `end` へ着く。大整理を見直しより先に置く
 （`supervise_lib/sprint_close_steps.py` の `refine_steps`。#2315）。
 
-`refine` へは、`close`（`sprint-close.py`）のステップが 0 で終わったときだけ届く。`timeout` は止まった
+`refine` へは、`close`（`sprint-close.py`）のステップが 0 か承認ゲートの 10 で終わったときだけ届く（10 は閉じなかった課題があることを示し、フェーズの結果が承認ゲートになる）。`timeout` は止まった
 worker の歯止めで、費用の上限は件数が持つ。プランの `上限`（実行するステップの数の歯止め）は、書き出しがプランの
 遷移から求める（`supervise_lib/limits.py`。ループを通らない最長の経路に、修正のループのそれぞれを 3 回ずつ足した長さ）。
 

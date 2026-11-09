@@ -286,13 +286,13 @@ def test_a_second_seat_gets_the_allowance_of_its_runtime(monitor_mod, no_limit_e
     席の名前のまま上限の表を引くと表に無い担当として既定（180 秒）へ落ち、1 席目より
     早く無進捗と判定される。
     """
-    assert monitor_mod._agent_stall_default(seat) == expected
+    assert monitor_mod.limits.stall_timeout(monitor_mod._agent_runtime(seat)) == expected
 
 
 def test_a_second_seat_reads_the_environment_variable_of_its_runtime(monkeypatch, monitor_mod, no_limit_env):
     """担当別の環境変数もランタイム名で引く（`MONITOR_STALL_CLAUDE-2` は書けない）。"""
     monkeypatch.setenv("MONITOR_STALL_CLAUDE", "777")
-    assert monitor_mod._agent_stall_default("claude-2") == 777
+    assert monitor_mod.limits.stall_timeout(monitor_mod._agent_runtime("claude-2")) == 777
 
 
 def test_both_seats_of_a_runtime_are_monitored_with_the_same_limits(monkeypatch, monitor_mod, no_limit_env):

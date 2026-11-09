@@ -112,11 +112,6 @@ def _find_plan_comment(state: dict[str, Any]) -> Optional[dict[str, Any]]:
     return None
 
 
-def publish_plan_comment(state: dict[str, Any], unpublished: Optional[bool] = None) -> Optional[str]:
-    """改修計画のコメントを作るか、既にあるものを編集して URL を返す（`write_plan_comment` の URL）。"""
-    return write_plan_comment(state, unpublished)[1]
-
-
 def write_plan_comment(state: dict[str, Any], unpublished: Optional[bool] = None) -> tuple[str, Optional[str]]:
     """改修計画のコメントを作るか編集し、`(結果, URL)` を返す。結果は `created`・`updated`・`skipped`・`failed`。
 

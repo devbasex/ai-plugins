@@ -1,2 +1,9 @@
 # 個人の宣言。各自の機械の値を書き、コミットしない（worktree Skill の references/declaration.md）
 worktree.local.json
+
+# 工程が書く実行の記録。コミットしない（課題 #2600 が置き場と消す時点を決める）
+backlog/
+handoff/
+loop/
+parallel/
+sprints/

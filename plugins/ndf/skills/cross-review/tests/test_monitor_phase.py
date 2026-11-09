@@ -169,8 +169,8 @@ def test_the_monitor_defaults_point_at_the_table(monitor_mod) -> None:
     spec = importlib.util.spec_from_file_location("ndf_lib_limits_t", _LIB / "limits.py")
     limits = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(limits)
-    assert monitor_mod.DEFAULT_TIMEOUT == limits.PHASE_TIMEOUT["review"]
-    assert monitor_mod.DEFAULT_STALL_AGENT_BUILTIN == limits.AGENT_STALL
+    assert monitor_mod.DEFAULT_TIMEOUT == limits.phases()["review"]
+    assert monitor_mod.DEFAULT_STALL_AGENT_BUILTIN == limits.stalls()
 
 
 def test_the_monitor_source_has_no_numeric_limit_of_its_own() -> None:

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/claude_account_dir.py", "name": "_claude_lock", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: .claude.json の排他のディレクトリが空くのを待つ"}

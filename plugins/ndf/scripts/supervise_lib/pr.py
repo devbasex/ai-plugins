@@ -17,6 +17,7 @@ from repo import defer_for_base
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
+import limits
 from supervise_lib.prompts import DESIGN_DIFF_HEADING, DESIGN_DIFF_NONE, PR_SYSTEM
 from supervise_lib.steps import deliver_skills
 from step_result import result
@@ -172,7 +173,7 @@ class PrStep:
                 ["bash", str(DECISIONS_SH), "render", "--base", base, "--body", path],
                 cwd=ctx.cwd,
                 capture_output=True,
-                timeout=120,
+                timeout=limits.seconds("supervise.pr-decisions"),
             )
         except (OSError, subprocess.TimeoutExpired):
             return body
@@ -315,7 +316,7 @@ class PrStep:
             + f"\n## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
             None,
             ctx.cwd,
-            step.get("timeout", 600),
+            step.get("timeout", limits.seconds("supervise.judge-step")),
         )
         ctx.claude.record_usage("judge", res)
         if res["ok"] and res["text"].strip():

@@ -286,13 +286,23 @@ NEW_ARGS = [
         "sprint",
     ),
     (
+        "--revise-note",
+        {
+            "action": "append",
+            "default": [],
+            "metavar": "<課題>=<パス>",
+            "help": "課題の出し直しの指摘の入力（繰り返し可）。--design の課題の設計のプランへ指摘を入れ、要求のステップを必ず流す",
+        },
+        "sprint",
+    ),
+    (
         "--pace",
         {
             "choices": ["normal", "fast", "auto"],
             "default": "normal",
             "help": {
                 "*": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で設計承認ゲート・リリース承認ゲートを MVV 判定にする）",
-                "close": "auto なら最終の検査・開発版・本番を置かず、まとめのステージだけを組む（開発ループの周回。#2089）。"
+                "close": "auto なら最終の検査・開発版・本番を置かず、まとめのステージだけを組む（開発ループの 1 回。#2089）。"
                 "省けば今の形（fast のスプリントの終わり）",
             },
         },
@@ -309,6 +319,15 @@ NEW_ARGS = [
             }
         },
         "sprint close release",
+    ),
+    (
+        "--outside-plan",
+        {
+            "metavar": "理由",
+            "help": "動いている並列の計画の外で、例外としてスプリントを始める（理由はマシンの記録に残る。#2733）。省くと、動いている計画が"
+            "あるマシンで計画の外なら終了コード 3 で止まる",
+        },
+        "sprint",
     ),
     (
         "--absorb",
@@ -337,12 +356,12 @@ NEW_ARGS = [
     ),
     (
         "--carry",
-        {"type": int, "nargs": "+", "default": [], "help": "前の周回の棚卸しの持ち越し。棚卸しのステップへ --add で渡す（#2089）"},
+        {"type": int, "nargs": "+", "default": [], "help": "ループの前の 1 回の棚卸しの持ち越し。棚卸しのステップへ --add で渡す（#2089）"},
         "close",
     ),
     ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
     ("--loop", {"help": "まとめを組む開発ループの名前（差分の棚卸しの深さの記録の行に残す。#2315）"}, "close"),
-    ("--lap", {"type": int, "help": "まとめを組む開発ループの周回の番号（--loop と組）"}, "close"),
+    ("--lap", {"type": int, "help": "まとめを組む開発ループの 1 回の番号（--loop と組）"}, "close"),
 ]
 NEW_REQUIRED = {
     "impl": "--issue・--tests・--title",
@@ -440,6 +459,25 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
         check(ap, a)
 
 
+def parse_revise_notes(ap: argparse.ArgumentParser, a) -> dict[int, str]:
+    """`--revise-note <課題>=<パス>` を {課題: パス} にする。--design の課題の入力を読めなければ断る。"""
+    import revise_note
+
+    out: dict[int, str] = {}
+    for raw in getattr(a, "revise_note", None) or []:
+        n, _, path = raw.partition("=")
+        if not (n.isdigit() and path):
+            ap.error(f"--revise-note は <課題>=<パス> で書く: {raw}")
+        if int(n) not in a.design:
+            continue
+        try:
+            revise_note.read_input(path)
+        except (OSError, ValueError) as e:
+            ap.error(f"--revise-note の入力を読めない: {e}")
+        out[int(n)] = path
+    return out
+
+
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
     """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければデプロイのステップを流す時点に決める（#2164）。"""
     if not (a.name and a.issue):
@@ -448,3 +486,4 @@ def check_sprint(ap: argparse.ArgumentParser, a) -> None:
         ap.error("--name は英数字・. _ - だけで書く（ブランチ名 sprint/<名前> に使う）")
     if a.kind == "close" and not a.state:
         ap.error("new close には --state（スプリントの状態）が要る")
+    a.revise_notes = parse_revise_notes(ap, a)

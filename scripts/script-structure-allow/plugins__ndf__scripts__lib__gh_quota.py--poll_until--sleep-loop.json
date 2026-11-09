@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/gh_quota.py", "name": "poll_until", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: GitHub の本文が条件を満たすまで ETag つきで読み直す（上限の回復の時刻も見る）"}

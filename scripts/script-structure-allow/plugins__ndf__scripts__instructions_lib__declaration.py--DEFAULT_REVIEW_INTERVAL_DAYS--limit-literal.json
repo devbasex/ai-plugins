@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/instructions_lib/declaration.py", "name": "DEFAULT_REVIEW_INTERVAL_DAYS", "kind": "limit-literal", "reason": "#2343 の決定 4。上限でない数字: 指示書を見直す周期（日）で、待ち・再試行の上限でない"}

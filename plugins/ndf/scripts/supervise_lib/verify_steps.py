@@ -10,10 +10,12 @@ from __future__ import annotations
 import math
 import shlex
 
+import delivery
 import test_strategy as ts
+import limits
 from step_result import EXIT_BASE_CONFLICT
 from supervise_lib.decl import scope_paths, test_kind
-from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
+from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, STEPS_PY, TEST_RUN_PY
 
 # merge-when-green と release が CI の基盤待ち（75。lib/step_result.py の EXIT_INFRA_WAIT）で止まったら、judge を通らず
 # プランを止める（修正へ回さない。#1645 の決定 6）
@@ -21,7 +23,11 @@ INFRA_WAIT_STOP = {"75": "stop"}
 
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
 MARGIN_SHARE = 0.1
-MARGIN_FLOOR = 30
+MARGIN_FLOOR = limits.seconds("supervise.verify-margin-floor")
+
+# マージに続く後片付けのテスト環境の回収の上限（秒）。`lib/container_reach.py` の RECLAIM_LIMIT と同じ値である。
+# `lib/container_reach.py` はプランを作る側が読まない環境変数と設定を読むため、ここへは import しない（#2660 の決定 8）
+RECLAIM_LIMIT = 330
 
 
 def plan_strategy(a) -> dict | None:
@@ -49,7 +55,26 @@ def with_margin(seconds: int) -> int:
     return int(seconds) + max(MARGIN_FLOOR, math.ceil(int(seconds) * MARGIN_SHARE))
 
 
-IMPL_STALL_DEFAULT = 1800  # 無進捗の許容時間の既定（秒）。実測の記録の間隔の最大 706 秒を十分に上回る値（#2505 の決定 7）
+CD_RESULT_FILE = "{state_dir}/work/cd-result.json"  # cd-result が書き record が読む結果のファイル（#2623）
+CD_FAILED_STOP = {"5": "stop"}  # CD の結果が失敗（record が記録を書いた後の 5）なら judge-record を通らずに止める
+
+
+def cd_result_step(repo: str | None, base: str, head: str | None, prs: str | None = None) -> dict:
+    """本番チャネルへのマージの後に CD の結果を読むステップ。宣言に依らず常に置き、CD の行が無ければ `none` を書く（#2623 の決定 8）。
+    結果は 0 で返り、record が書いた後に失敗を止める。`prs` があれば最後の PR のマージのコミットを読む（record --merged と同じリビジョン）。"""
+    head_arg = (f" --head {shlex.quote(head)}" if head else "") + (f" --prs {prs}" if prs else "")
+    return {
+        "id": "cd-result",
+        "type": "run",
+        "stage": "デプロイ",
+        "timeout": with_margin(delivery.RESULT_TOTAL_LIMIT),
+        **({"cwd": repo} if repo else {}),
+        "cmd": f"{STEPS_PY} cd-result --base {shlex.quote(base)}{head_arg} --out {CD_RESULT_FILE}",
+        "next": "record",
+    }
+
+
+IMPL_STALL_DEFAULT = limits.seconds("supervise.impl-stall")
 
 
 def _template_arg(a) -> str:
@@ -109,7 +134,8 @@ def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
     - `merge-gate`: 宛先がリリース承認ゲート（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
-    - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
+    - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕と、
+      マージに続く後片付けのテスト環境の回収の上限を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
     `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。`on_conflict` を渡すと、
@@ -124,7 +150,7 @@ def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     merge = {
         "id": "merge",
         "type": "run",
-        "timeout": with_margin(ci_wait),
+        "timeout": with_margin(ci_wait) + RECLAIM_LIMIT,
         "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
         "probe": MERGE_PROBE,
         "on_exit": {**INFRA_WAIT_STOP, **({str(EXIT_BASE_CONFLICT): on_conflict} if on_conflict else {})},

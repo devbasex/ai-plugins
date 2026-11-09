@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/experimental/hook-trial/ht_shparse.py", "name": "value", "kind": "same-name", "reason": "実験版。上限の部品（lib/limits.py）の value と名前が重なる別の概念（シェルの語の値）。寄せない"}

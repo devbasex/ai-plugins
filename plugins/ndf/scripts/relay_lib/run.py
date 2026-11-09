@@ -17,7 +17,7 @@ from dataclasses import replace
 
 from . import claude as cl
 from . import handover as ho
-from . import hub_client, record, version_dir
+from . import hub_client, record, session_env, tmux, version_dir
 from .common import (
     CHILD_FILE,
     LIMIT_FILE,
@@ -353,9 +353,18 @@ class Relay(AccountSwitch, ho.Swapper):
             fb, cwd = cwd, fallback_cwd(cwd)
         return cwd, fb
 
+    def update_before_first_section(self) -> None:
+        """最初の区間も最新の版で始める。更新に失敗しても起動は止めない（切り替えと違い、続きの作業を失わないため）。"""
+        got = cl.update_plugin(self.claude, self.marketplace)
+        if got is None:
+            cl.say("プラグインを更新できなかった。今の版で起動する")
+            return
+        self.version, self.install_path = got
+
     def loop(self, first_args: list[str]) -> int:
         self.first_args = first_args
         self.tell_relogin()  # 起動時の知らせ（E1）。入れ替えた後の版（from_handover）は起動ではないので呼ばない
+        self.update_before_first_section()
         code = self._start_first_section(first_args)
         if code is not None:
             return code
@@ -427,11 +436,24 @@ class Relay(AccountSwitch, ho.Swapper):
         self.lock = None
 
 
+def _lane_env() -> dict[str, str]:
+    """起動の `-e` で付いた役割と計画（tmux のセッションの環境にある値）。環境に役割の値があるときだけ tmux に問う。
+    読めないときは空（役割を持たないレーンとして起動する。#2656 の I3）。"""
+    name = os.environ.get("NDF_RELAY_NAME")
+    seen = {"NDF_RELAY_ROLE": os.environ.get("NDF_RELAY_ROLE"), "NDF_RELAY_PLAN": os.environ.get("NDF_RELAY_PLAN")}  # session_env.LANE_ENV
+    if not name:
+        return {}
+    got = {k: tmux.session_value(name, k) for k, v in seen.items() if v is not None}
+    return {k: v for k, v in got.items() if v is not None}
+
+
 def cmd_run(args: list[str]) -> int:
     path = os.environ.pop(ho.HANDOVER_ENV, None)  # 入れ替えた後（#1587）。子の claude と hook へ継がせない
-    if path:  # exec で `hub.lock` は放されている。入れ替えた後の版で取り直し、取れなければ統括役を兼ねずに続ける
+    if path:  # exec で `hub.lock` は放されている。入れ替えた後の版で取り直し、取れなければリレーハブを兼ねずに続ける
         with hub_client.serving(hub_client.claim_hub(), os.path.dirname(path)):
             return Relay.from_handover(path, serve_terminal)
+    if os.environ.get("NDF_RELAY_SPAWNED"):  # 起動の印を持つのはラッパーの子の claude でない（child_env が渡さない）
+        session_env.drop_parent_env(_lane_env())  # 専用サーバーのグローバルな環境が持つ親のセッションの環境を外す（#2656）
     if os.environ.get("NDF_RELAY") == "0":
         claude = cl.resolve_claude()
         if claude is None:

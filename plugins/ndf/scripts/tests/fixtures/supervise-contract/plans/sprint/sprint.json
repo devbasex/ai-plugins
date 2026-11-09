@@ -1,6 +1,16 @@
 {
   "スプリント": "m9",
   "ブランチ": "sprint/m9",
+  "CD の案内": {
+    "kind": "cd-guidance",
+    "name": "CD の案内",
+    "result": "guided",
+    "missing": ".ndf/project.json の delivery の宣言",
+    "rows": [],
+    "steps_ref": "ndf の release の Skill の references/cd-setup.md",
+    "example": "{\"target\": \"<届け先>\", \"kind\": \"auto\", \"trigger\": \"<CD の名前>\", \"channel\": \"production\", \"versioned\": false, \"result\": {\"workflow\": \"<ワークフローのファイル名>\"}}",
+    "manual_reason_how": "あえて CD を置かないなら、.ndf/project.json の delivery の手動の行に manual_reason（理由）と trigger（手順）を書く"
+  },
   "リリースの経路": [
     {
       "route": "template",

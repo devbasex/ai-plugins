@@ -1,0 +1,5 @@
+{
+  "name": "NDF_RUNTIME_SESSION",
+  "set_by": "user",
+  "summary": "ランタイムのセッションを `<pid>:<開始時刻>` で指定する（テストと CI）。無ければ祖先のプロセスから Claude Code・Codex を探す（plugins/ndf/scripts/lib/lease.py）"
+}

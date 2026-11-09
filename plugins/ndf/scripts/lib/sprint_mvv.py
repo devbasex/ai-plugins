@@ -6,7 +6,8 @@
   状態のファイルの隣の `mvv.md` へ写し、`mvv.path`・`mvv.sha256` を返す。見出しが 1 つでも無い・取得できないときは止まる（3）。
   `--mvv` を渡せば写さずにそのファイルを使う。どちらも無ければ 2（承認済みのプロジェクト MVV があれば、スプリント MVV なしで進める）
 - 承認済みのプロジェクト MVV（`--root` の `.ndf/`）があれば、スプリント MVV を照合（`project-mvv.py vet --kind sprint` と同じ）に通し、
-  「従う」でなければ箇所を示して止まる（1）。状態には参照（`project_mvv`: 版・sha256）を書く
+  「従う」でなければ箇所を示して止まる（1）。照合の入力が同じで最新の判定が「従う」なら、LLM を呼ばずにその判定を使う（#2614）。
+  状態には参照（`project_mvv`: 版・sha256）を書く
 
 止まるときは `(理由, 終了コード, items)` を返し、`sprint-state.py` が結果の形にする。
 """
@@ -74,27 +75,45 @@ def _ref(path: Path) -> dict:
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
+def _given_ref(a) -> tuple[dict | None, tuple | None]:
+    """`--mvv` のファイルの写し。(状態へ書く mvv, ファイルが無いときに止まる (理由, 終了コード, items))。"""
+    path = Path(a.mvv).resolve()
+    if not path.is_file():
+        return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, [])
+    return _ref(path), None
+
+
+def _read_sections(a, missing_hint: str = "") -> tuple[str | None, str | None]:
+    """マイルストーンの説明の MVV の節。(本文, 読めない・見出しがそろわないときの理由)。見出しがそろわないときは理由へ `missing_hint` を足す。"""
+    try:
+        text = mvv_sections(milestone_description(a.milestone, a.repo))
+    except OSError as e:
+        return None, f"マイルストーン {a.milestone} の説明を読めない: {e}"
+    if text is None:
+        return None, f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない{missing_hint}"
+    return text, None
+
+
+def _beside_state(a) -> Path:
+    """状態のファイルの隣の `mvv.md` のパス（親のディレクトリを作っておく）。書くのは呼び手。"""
+    path = Path(a.sprint).resolve().parent / "mvv.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
     """pace: normal の写し（#1400 の決定 13）。(状態へ書く mvv, 止まるときの (理由, 終了コード, items), 特定できなかった理由の 1 件)。
 
     `--mvv` のファイルが無いときだけ止まる（明示の指定の誤り）。`--milestone` の説明を読めない・見出しがそろわないときは
     止めずに理由を返す。照合（vet）は呼び手もしない。"""
     if a.mvv:
-        path = Path(a.mvv).resolve()
-        if not path.is_file():
-            return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, []), None
-        return _ref(path), None, None
+        return (*_given_ref(a), None)
     if not a.milestone:
         return None, None, None
-    try:
-        text = mvv_sections(milestone_description(a.milestone, a.repo))
-        why = None if text else f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
-    except OSError as e:
-        text, why = None, f"マイルストーン {a.milestone} の説明を読めない: {e}"
+    text, why = _read_sections(a)
     if text is None:
         return None, None, {"kind": "sprint_mvv", "result": "none", "reason": f"{why}。スプリント MVV なしで進める"}
-    path = Path(a.sprint).resolve().parent / "mvv.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = _beside_state(a)
     path.write_text(text, encoding="utf-8")
     return _ref(path), None, None
 
@@ -104,21 +123,13 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     if a.pace not in MVV_PACES or (not a.mvv and not a.milestone and project.approved):
         return None, None
     if a.mvv:
-        path = Path(a.mvv).resolve()
-        if not path.is_file():
-            return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, [])
-        return _ref(path), None
+        return _given_ref(a)
     if not a.milestone:
         return None, (f"--pace {a.pace} には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
-    try:
-        text = mvv_sections(milestone_description(a.milestone, a.repo))
-    except (OSError, FileNotFoundError) as e:
-        return None, (f"マイルストーン {a.milestone} の説明を読めない: {e}", EXIT_PRECONDITION, [])
+    text, why = _read_sections(a, "。説明を直してから打ち直す")
     if text is None:
-        why = f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない。説明を直してから打ち直す"
         return None, (why, EXIT_PRECONDITION, [])
-    path = Path(a.sprint).resolve().parent / "mvv.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = _beside_state(a)
     path.write_text(text, encoding="utf-8")
     return _ref(path), None
 
@@ -141,10 +152,11 @@ def withdrawn(m: dict, name: str) -> bool:
 
 
 def vet_stop(root: Path, path: str) -> tuple | None:
-    """スプリント MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。"""
+    """スプリント MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。
+    同じ照合の入力の最新の判定が「従う」なら再利用する（`vet_body` の `reuse`。#2614）。"""
     from project_lib import mvv_llm
 
-    rec, _ = mvv_llm.vet_body(root, Path(path).read_text(encoding="utf-8"), "sprint")
+    rec, _ = mvv_llm.vet_body(root, Path(path).read_text(encoding="utf-8"), "sprint", reuse=True)
     if rec["verdict"] == "follow":
         return None
     where = "／".join(f"{x.get('item')}: {x.get('reason')}" for x in rec["locations"])

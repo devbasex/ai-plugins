@@ -21,5 +21,9 @@
     "plugins/ndf/skills/development-workflow/SKILL.md",
     "plugins/ndf/skills/development-workflow/references/production-merge.md",
     "plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "development-workflow の frontmatter が hook として登録する"
+  }
 }

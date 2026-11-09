@@ -3,9 +3,11 @@
 `上限 = D + FIX_ROUNDS × Σ 修正のループ + FIX_ROUNDS × Σ 戻りの輪`。
 - D（ループを通らない最長の経路）: すべての遷移のうち、プランの並びで後ろのステップへ行くものだけをたどった
   最長の経路のステップの数。流し始めるステップを含む
-- 修正のループ: 検査のステップ `c` の失敗の遷移 `c → f` 1 本ごとに 1 つ。長さは `f` から成功の遷移だけを通って
-  `c` へ戻る単純な輪のうち、修正の work を 1 つ以上含む最も長いもののステップの数
+- 修正のループ: 検査のステップ `c` の失敗の遷移 `c → f` 1 本ごとに 1 つ。長さは `f` から成功の遷移と `on_exit` の
+  遷移だけを通って `c` へ戻る単純な輪のうち、修正の work を 1 つ以上含む最も長いもののステップの数
 - 戻りの輪: 修正の work を含む輪が無く、`kind` が「戻り」のステップを含む輪（数え方は修正のループと同じ）
+- 同じステップの集まりから成る輪は、修正のループと戻りの輪の全体で 1 つとして数える（始まりの失敗の遷移が
+  違っても同じ輪を重ねて数えない。#2388）
 
 書き出し（`supervise.py new` / `new sprint`）が `fill` でプランの `上限` を埋め、`run` は流す前に `run_error` で
 `上限` と D を照らす。手で書いたプランの `上限` は書き換えない。
@@ -111,6 +113,12 @@ def _graph(steps: list[dict]) -> dict[str, list[tuple[str, bool]]]:
     return {s["id"]: [(d, ok) for _, d, ok in _targets(steps, s) if d in ids] for s in steps}
 
 
+def _return_edges(steps: list[dict], through_exit: bool) -> dict[str, list[str]]:
+    """輪の戻りの道に通せる遷移（成功の遷移。through_exit なら `on_exit` の遷移も）。"""
+    ids = {s["id"] for s in steps}
+    return {s["id"]: [d for key, d, ok in _targets(steps, s) if d in ids and (ok or (through_exit and key == "on_exit"))] for s in steps}
+
+
 def longest_path(plan: dict, start: str | None = None) -> int:
     """ループを通らない最長の経路（並びで後ろへ行く遷移だけ）のステップの数。start が無ければ最初のステップから。"""
     steps = _steps(plan)
@@ -132,17 +140,17 @@ def _is_fix(step: dict) -> bool:
     return step.get("type") == "work" and step.get("kind", "修正") == "修正"
 
 
-def _loop_length(steps: list[dict], check: str, first: str, want) -> int:
-    """`check → first` の失敗の遷移から成功の遷移だけで `check` へ戻る単純な輪のうち、`want` に当たるステップを
-    含む最も長いもののステップの数。無ければ 0。探索が SEARCH_CAP を超えたら、first から行けて check へ戻れる
-    ステップの数で代える。"""
+def _loop_length(steps: list[dict], check: str, first: str, want, through_exit: bool = True) -> tuple[int, frozenset]:
+    """`check → first` の失敗の遷移から成功の遷移と `on_exit` の遷移だけで `check` へ戻る単純な輪のうち、`want` に
+    当たるステップを含む最も長いものの (ステップの数, ステップの集まり)。無ければ (0, 空)。探索が SEARCH_CAP を
+    超えたら、first から行けて check へ戻れるステップで代える。"""
     by = {s["id"]: s for s in steps}
-    succ = {sid: [d for d, ok in edges if ok] for sid, edges in _graph(steps).items()}
+    succ = _return_edges(steps, through_exit)
     # `back_to_failed` の work は、直した後にこのループの検査のステップへ戻る
     for s in steps:
         if s.get("back_to_failed") and check not in succ[s["id"]]:
             succ[s["id"]] = [*succ[s["id"]], check]
-    best, expanded = 0, 0
+    best, members, expanded = 0, frozenset(), 0
     stack = [(first, (first,), want(by[first]))]
     while stack:
         sid, path, hit = stack.pop()
@@ -151,15 +159,15 @@ def _loop_length(steps: list[dict], check: str, first: str, want) -> int:
             return _reachable_loop(succ, check, first)
         for d in succ[sid]:
             if d == check:
-                if hit:
-                    best = max(best, len(path) + 1)
+                if hit and len(path) + 1 > best:
+                    best, members = len(path) + 1, frozenset((*path, check))
             elif d not in path:
                 stack.append((d, (*path, d), hit or want(by[d])))
-    return best
+    return best, members
 
 
-def _reachable_loop(succ: dict[str, list[str]], check: str, first: str) -> int:
-    """first から行けて check へ戻れるステップの数（check を含む）。輪の探索が打ち切られたときの多めの見積もり。"""
+def _reachable_loop(succ: dict[str, list[str]], check: str, first: str) -> tuple[int, frozenset]:
+    """first から行けて check へ戻れるステップ（check を含む）。輪の探索が打ち切られたときの多めの見積もり。"""
     fwd, todo = {first}, [first]
     while todo:
         for d in succ[todo.pop()]:
@@ -174,24 +182,32 @@ def _reachable_loop(succ: dict[str, list[str]], check: str, first: str) -> int:
             if sid not in back and any(d in back for d in succ[sid]):
                 back.add(sid)
                 changed = True
-    return len(fwd & back) + 1
+    members = frozenset(fwd & back) | {check}
+    return len(members), members
 
 
 def loops(plan: dict) -> tuple[dict[str, int], dict[str, int]]:
-    """(修正のループ, 戻りの輪)。鍵は `<検査のステップ>→<失敗の行き先>`、値は輪の長さ。"""
+    """(修正のループ, 戻りの輪)。鍵は `<検査のステップ>→<失敗の行き先>`、値は輪の長さ。同じステップの集まりの輪は
+    1 つの鍵だけに数える。鍵は、成功の遷移だけで戻れる輪を持つ失敗の遷移を先に、その中はプランの並びで選ぶ。"""
     steps = _steps(plan)
-    fixes: dict[str, int] = {}
-    returns: dict[str, int] = {}
+    found = []
     for check, edges in _graph(steps).items():
         for first, ok in edges:
             if ok:
                 continue
-            key = f"{check}→{first}"
-            n = _loop_length(steps, check, first, _is_fix)
-            if n:
-                fixes[key] = n
-            elif n := _loop_length(steps, check, first, lambda s: s.get("kind") == RETURN_KIND):
-                returns[key] = n
+            for want, kind in ((_is_fix, "fix"), (lambda s: s.get("kind") == RETURN_KIND, "return")):
+                n, members = _loop_length(steps, check, first, want)
+                if n:
+                    plain = _loop_length(steps, check, first, want, through_exit=False)[0] > 0
+                    found.append((not plain, f"{check}→{first}", n, members, kind))
+                    break
+    fixes: dict[str, int] = {}
+    returns: dict[str, int] = {}
+    seen: set[frozenset] = set()
+    for _, key, n, members, kind in sorted(found, key=lambda f: f[0]):
+        if members not in seen:
+            seen.add(members)
+            (fixes if kind == "fix" else returns)[key] = n
     return fixes, returns
 
 

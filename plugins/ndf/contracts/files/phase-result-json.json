@@ -1,0 +1,7 @@
+{
+  "name": "phase-result-json",
+  "pattern": "phase-result.json",
+  "kind": "result",
+  "place": "state-dir",
+  "skill_readers": []
+}

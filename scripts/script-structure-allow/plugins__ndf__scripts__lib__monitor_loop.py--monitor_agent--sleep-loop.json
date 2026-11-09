@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/monitor_loop.py", "name": "monitor_agent", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: 担当のプロセスの終わり・結果・無進捗を見回る"}

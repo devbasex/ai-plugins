@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import parallel_hold as ph
 import parallel_lane as pl
 
 
@@ -16,7 +17,9 @@ def questions(main: Path, name: str) -> tuple[int, list[dict]]:
     """耐久ワークフローの今の依頼の一覧 (seq, items)。読めなければ (0, [])。"""
     import durable
 
-    got = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0) or {}
+    got = (
+        durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0, start=pl.record_start(main)) or {}
+    )
     return int(got.get("seq") or 0), list(got.get("items") or [])
 
 
@@ -32,7 +35,7 @@ def not_listed(rid: str, items: list[dict]) -> dict:
 
 def mvv_mark(q: dict) -> dict:
     """MVV 判定でオーガナイザーが自分で答えてよい依頼か（#2507 の決定 8）。設計の承認で、レーンの判定が決まらず、
-    レッドラインが空で、利用者へ戻した依頼（印 `returned`。#2507 の決定 9）でなく、判定を打ち直す材料（レーンの周回のスプリント状態）が残るときだけ true。"""
+    レッドラインが空で、利用者へ戻した依頼（印 `returned`。#2507 の決定 9）でなく、判定を打ち直す材料（レーンのループの 1 回のスプリント状態）が残るときだけ true。"""
     if q.get("kind") != "gate1":
         return {"eligible": False, "why": "設計の承認の依頼でない"}
     if q.get("boundary"):
@@ -91,21 +94,37 @@ def after_items(items: list[dict], answered: dict, earlier: list[dict] | None = 
     return [{**q, "drop": drop(q), "mvv": mvv_mark(q)} for q in rest]
 
 
-def owner_restart(main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None) -> str | None:
-    """答えの後の 1 行。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、ほかは答えを待って止まった持ち主の
-    restart。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた問い（`merged`）は、
-    代表だけでなく全持ち主をそれぞれの依頼の id で調べ、起こす行を `; ` でつなぐ（異常系 5）。"""
+def _restart_lines(lanes: list[str]) -> str | None:
     import parallel_run as pr_run
 
+    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+
+
+def owner_lanes(main: Path, name: str, rid: str, q: dict) -> list[str]:
+    """答えを待って止まった持ち主のレーン。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた
+    問い（`merged`）は、代表だけでなく全持ち主をそれぞれの依頼の id で調べる（異常系 5）。"""
+    import parallel_run as pr_run
+
+    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
+    owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
+    return list(dict.fromkeys(lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)))
+
+
+def owner_next(
+    main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None
+) -> tuple[str | None, list[str]]:
+    """答えの後の (1 行, 答え待ちの停止の範囲にある持ち主)。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、
+    ほかは止まった持ち主の restart を `; ` でつなぐ。停止の範囲にある計画のレーンは起こさず、再開の印を置く（#2707 の I11）。
+    リリースの一時レーンは計画全体の停止の間も restart の 1 行で起こす（再開の印を突き合わせるのは計画のレーンだけのため）。"""
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
     if q.get("kind") in ("stall", "helper", "spawn", "observe") or not q.get("lane"):
-        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
-    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
-    owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
-    lanes = [lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)]
-    lanes = list(dict.fromkeys(lanes))
-    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None), []
+    lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
+    held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane)]
+    for lane in held:
+        ph.place_mark(main, name, lane, "answered")
+    return _restart_lines([lane for lane in lanes if lane not in held]), held
 
 
 def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:
@@ -117,13 +136,34 @@ def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) ->
     return None
 
 
-def merge_design(main: Path, q: dict) -> dict | None:
-    """設計の承認（gate1）の問いなら、承認した設計 PR をマージしてみる（#2507）。それ以外の問いは None。"""
+def lane_repo(main: Path, name: str, lane: str | None) -> Path:
+    """計画の宣言から導いたレーンのリポジトリ（宣言に無い・読めなければ計画の置き場 `main`。#2733 の I6・I8）。"""
+    try:
+        hit = pl.pp.load_valid_plan(main, name).lane(lane or "")
+    except (OSError, ValueError):
+        hit = None
+    return hit.repo_dir(main) if hit is not None else Path(main)
+
+
+def repo_lane(q: dict) -> str | None:
+    """問いのリポジトリを決めるレーン: レーンの問いは `lane`、別のリポジトリのレーンが送った前のループの待ちは `via`（#2733）。"""
+    return q.get("lane") or q.get("via")
+
+
+def with_repo(main: Path, name: str, items: list[dict]) -> list[dict]:
+    """問いの一覧の各行へ、計画の宣言から導いたレーンのリポジトリ `repo` を足す（依頼の本文から読まない。#2733 の I8）。"""
+    return [{**q, "repo": str(lane_repo(main, name, repo_lane(q)))} if isinstance(q, dict) else q for q in items]
+
+
+def merge_design(main: Path, q: dict, name: str | None = None) -> dict | None:
+    """設計の承認（gate1）の問いなら、承認した設計 PR をマージしてみる（#2507）。それ以外の問いは None。
+    マージはレーンのリポジトリで行う（別のリポジトリのレーンの PR を計画の置き場で探さない。#2733 の I6）。"""
     if q.get("kind") != "gate1" or not q.get("pr"):
         return None
     import design_pr_merge
 
-    return design_pr_merge.merge_approved(main, int(q["pr"]), q.get("stamp"))
+    repo = lane_repo(main, name, repo_lane(q)) if name else Path(main)
+    return design_pr_merge.merge_approved(repo, int(q["pr"]), q.get("stamp"))
 
 
 def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[dict], **kw) -> tuple[str, dict]:
@@ -131,7 +171,7 @@ def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[d
     返すのは (要約へ足す 1 文, 出力へ足す `merge`（`merge_note`）と `after`)。`after` は今の一覧 `items` から、今の答えと、
     前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）。"""
     earlier = sent_answers(main, name, items)
-    merge = merge_design(main, q) if result == "approved" else None
+    merge = merge_design(main, q, name) if result == "approved" else None
     pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
     remember_answers(main, name, [*earlier, q])
     tail, extra = merge_note(merge)

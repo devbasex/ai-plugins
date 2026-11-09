@@ -5,9 +5,9 @@
       "フェーズ": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
-      "起点": "origin/main",                # branch から作るときの起点（既定 origin/<base_branch>）。版の判定もこのブランチを読む
+      "起点": "origin/<起点のブランチ>",    # branch から作るときの起点（既定 origin/<base_branch>）。版の判定もこのブランチを読む
       "起点のコミット": "<sha>",            # 省略可。作業ツリーだけをこのコミットから作る（起点より先に読む）
-      "base_branch": "main",                # 起点のブランチ。pr のステップの宛先と preset の {base}（既定は .ndf/worktree.json）
+      "base_branch": "<起点のブランチ>",     # 起点のブランチ。pr のステップの宛先と preset の {base}（既定は .ndf/worktree.json）
       "no_reports": "-p no:x",              # run のステップの PYTEST_ADDOPTS に足す（既定は .ndf/supervise.json の test.no_reports）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
@@ -19,7 +19,7 @@
                                             # 短いか、遷移の行き先が知らないステップなら、ステップを流さずに止まる。
                                             # 遅れの見張りの再試行（retry）は数えない
       "steps": [
-        {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定",
+        {"id": "test", "type": "run", "cmd": "<テストのコマンド>", "stage": "完了判定",
          "timeout": 1800, "on_fail": "judge-test", "next": "end"},
         {"id": "judge-test", "type": "judge", "inputs": ["test"],
          "question": "テストの失敗を直すか、止めるか", "choices": ["fix", "stop"]},
@@ -132,7 +132,7 @@ run のステップ:
   `"presentation_to": "<パス>"` があれば提示物をそのパス（ステップの作業場所から）へ写し、そちらを載せる
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
-  `{state_dir}` は計画の状態ディレクトリに置き換わる
+  `{state_dir}` は計画の状態ディレクトリに、`{plan_issues}` は流す時点の計画の `課題` の番号の空白区切り（空なら空文字）に置き換わる
 - `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`（run と drive。drive は 0・1 と、欠けの残る終わりの 6）: 終了コードを読んだら `skip_to` の次・承認ゲート（10〜19）の
   前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
   <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
@@ -216,6 +216,8 @@ from pathlib import Path
 
 # queue が --then のプランを流す前に、先行のプランの Pull Request の番号へ置き換える印
 QUEUE_PRS = "{queue_prs}"
+# run のステップの cmd を流す時点に、計画の `課題` の番号の空白区切りへ置き換える印
+PLAN_ISSUES = "{plan_issues}"
 # queue が名前の一致する計画の結果とリリース記録で置き換える差し込み（{queue_pr:<名>}・{queue_state:<名>}・{queue_record}）
 QUEUE_NAMED = re.compile(r"\{queue_(?:pr|state):[A-Za-z0-9._-]+\}|\{queue_record\}")
 
@@ -333,7 +335,7 @@ EXAMPLE = {
     "規則": "テストが落ちたら、失敗が変更に起因するなら fix、環境や揺れなら stop。",
     "上限": 10,
     "steps": [
-        {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定", "on_fail": "judge-test", "next": "pr"},
+        {"id": "test", "type": "run", "cmd": "<テストのコマンド>", "stage": "完了判定", "on_fail": "judge-test", "next": "pr"},
         {"id": "judge-test", "type": "judge", "inputs": ["test"], "question": "テストの失敗を直すか止めるか", "choices": ["fix", "stop"]},
         {
             "id": "fix",
@@ -347,7 +349,6 @@ EXAMPLE = {
             "id": "pr",
             "type": "pr",
             "stage": "Pull Request",
-            "base": "main",
             "title": "変更の要約（#0）",
             "summary": "何を変えたかの 1〜2 文",
             "docs": ["issues/issue-0-design.md"],

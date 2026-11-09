@@ -8,6 +8,7 @@
   "env": [
     "CLAUDE_CONFIG_DIR",
     "DEVBASE_SHELLRC_DIR",
+    "HOME",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
@@ -18,6 +19,7 @@
     "NDF_RELAY_CLAUDE",
     "NDF_RELAY_DEPTH",
     "NDF_RELAY_DIR",
+    "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
     "NDF_RELAY_PLAN",
     "NDF_RELAY_REEXEC",
@@ -26,6 +28,7 @@
     "NDF_RELAY_TMUX",
     "NDF_RELAY_UV",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "PATH",
     "SHELL",
@@ -48,5 +51,9 @@
     "plugins/ndf/scripts/hook_lib/token_guard.py",
     "plugins/ndf/scripts/lib/claude_accounts.py",
     "plugins/ndf/scripts/lib/clock.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json が起動する。ランタイムの起動を包むラッパーでもあり、子の端末の入出力をそのまま流す"
+  }
 }

@@ -27,6 +27,27 @@ _ndf_lock_sleep() {
 # `mkdir` に成功した直後、目印を書く前に落ちた持ち主を救うために使う。
 NDF_LOCK_STALE_MINUTES=5
 
+# 持ち主の番号が通じる範囲。別の PID 名前空間の番号は `kill -0` で読めない。ホスト名は
+# compose の `hostname:` で同じ値を付けられるため、読めないときの代わりにだけ使う。
+_ndf_lock_scope() {
+  readlink /proc/self/ns/pid 2>/dev/null || uname -n 2>/dev/null
+}
+
+# 持ち続ける上限の秒を渡された持ち主のロックを読む。`owner_scope` が無いか PID 名前空間が
+# 同じなら 1 を返し、判定を番号の `kill -0` へ任せる。別の名前空間なら上限の時刻までは
+# held、過ぎたら expired を出して 0 を返す（#2660 の決定 4）。
+_ndf_lock_foreign_state() {
+  local file="$1/owner_scope" scope until
+  [ -f "$file" ] || return 1
+  { IFS= read -r scope; IFS= read -r until; } <"$file" 2>/dev/null
+  [ "$scope" != "$(_ndf_lock_scope)" ] || return 1
+  if [ "$(date +%s)" -lt "${until:-0}" ]; then
+    printf 'held\n'
+  else
+    printf 'expired\n'
+  fi
+}
+
 # 2 段目の判定。**`set -C` は部分シェルの中だけで張る。** 裸で書くと呼び出し側の
 # シェルの `$-` に `C` が残り、以後の上書きの向き先が変わる。元へ戻す処理を書かずに
 # 同じ結果になり、費用も 1 段目の `mkdir` コマンドより小さい（#293 の実測）。
@@ -75,10 +96,16 @@ _ndf_lock_discard() {
 # 取り直していれば、いま置かれているのは別のロックである。番号だけを見て捨ててよいと
 # 読むと、生きているロックを外すことになる（#297）。
 _ndf_lock_is_stale() {
-  local dir="$1" seen="${2-}" owner
+  local dir="$1" seen="${2-}" owner foreign
   owner=$(cat "$dir/pid" 2>/dev/null)
   if [ -n "$owner" ]; then
-    kill -0 "$owner" 2>/dev/null && return 1
+    # 別の名前空間の番号へ `kill -0` を打つと、生きた持ち主を消えたと読むか、無関係の
+    # プロセスを持ち主と読む。名前空間で読み分ける。
+    foreign=$(_ndf_lock_foreign_state "$dir") || foreign=""
+    [ "$foreign" != held ] || return 1
+    if [ -z "$foreign" ]; then
+      kill -0 "$owner" 2>/dev/null && return 1
+    fi
     [ "$(cat "$dir/token" 2>/dev/null)" = "$seen" ] || return 1
     [ "$(cat "$dir/pid" 2>/dev/null)" = "$owner" ] || return 1
     return 0
@@ -89,13 +116,15 @@ _ndf_lock_is_stale() {
 }
 
 # ロックを取る。取れなければ 1 を返す。第 2 引数は待ちの上限の秒数（既定 5）。
+# 第 3 引数は持ち続ける上限の秒数で、別のコンテナの持ち主が消えたかを読めないロックにだけ
+# 渡す。渡すと、別の PID 名前空間からはその時刻まで捨てられない。
 #
 # **`mkdir` の成功だけでは持ち主を 1 つに絞れない。** 2 段目の判定を通った 1 つだけが
 # 目印と持ち主の番号を書く。目印を書いてから読み直す手は採らない。長さの違う目印が同じ
 # ファイルへ同時に書かれると、どの担当のものとも一致しない値が残り、作成に成功した
 # 全員が競り負ける（#308）。
 ndf_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}" token seen deadline
+  local dir="${1:-}" timeout="${2:-5}" hold="${3:-}" token seen deadline
   [ -n "$dir" ] || return 1
   # ロックの位置にディレクトリ以外があれば、ロックとして成立しない。取り除く。
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then rm -f "$dir" 2>/dev/null; fi
@@ -108,6 +137,9 @@ ndf_lock_acquire() {
     if mkdir "$dir" 2>/dev/null; then
       if _ndf_lock_hold "$dir"; then
         printf '%s\n' "$token" >"$dir/token" 2>/dev/null
+        # `pid` より先に書く。逆の順では、書き終わるまでの間に別のコンテナが持ち主の消えた
+        # ロックと読む。
+        [ -z "$hold" ] || printf '%s\n%s\n' "$(_ndf_lock_scope)" "$(($(date +%s) + hold))" >"$dir/owner_scope" 2>/dev/null
         printf '%s\n' "$$" >"$dir/pid" 2>/dev/null
         return 0
       fi

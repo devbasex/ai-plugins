@@ -155,7 +155,7 @@ import と source で読まれるライブラリである。構造チェック�
 
 | 項目 | 置き場 | キー |
 | --- | --- | --- |
-| エントリポイント | `entrypoints/<パスの / を __ にした名前>.json` | `version`（1）・`path`・`summary`・`callers` か `external`（択一）・`args`・`env`・`settings`・`stdin`・`stdout`・`writes`・`reads`・`exit` |
+| エントリポイント | `entrypoints/<パスの / を __ にした名前>.json` | `version`（1）・`path`・`summary`・`callers` か `external`（択一）・`args`・`env`・`settings`・`stdin`・`stdout`・`writes`・`reads`・`exit`・任意の `lease` |
 | 受け渡しのファイル | `files/<name>.json` | `name`・`pattern`（glob）・`kind`・`place`・`skill_readers` |
 | 設定ファイル | `settings/<.ndf/ の下の名前>.json` | `file`・`summary`・`place`・`scope`・`readers`・`keys` |
 | 環境変数 | `env/<名前>.json` | `name`・`set_by`・`summary` |
@@ -167,6 +167,7 @@ import と source で読まれるライブラリである。構造チェック�
 | `settings` | `[{"file": "project.json", "keys": ["test", "ci"]}]`。最上位のキーだけ |
 | `stdin` | `none`・`json`・`text`・`hook-json` |
 | `stdout` | `step-result`（1 行 JSON）・`json`・`kv`（`eval` する KEY=VALUE）・`text`・`markdown`・`none` |
+| `lease` | 持ち主の鍵の宣言。副命令の名前（副命令の無い入口は `""`）→ `{"key": "<鍵の形。{入力の名前} を埋める>", "unit": "run" か "session", "window_seconds": <正の整数>, "release": <真偽値。任意>}`。宣言した入口は `lease_stage.hold` で鍵を取り、生きた持ち主がいれば `stopped`・終了コード 3 で止まる（[ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md)。#2342） |
 | `exit` | `{"0": "<意味>", ...}`。読み取れなければ `{"unknown": "<理由>"}`（例外の項目 `exit-unknown` が要る） |
 | ファイルの `kind` | `state`・`record`・`result`・`report` |
 | ファイルの `place` | `worktree`・`main`・`tmp`・`state-dir`（XDG の状態の置き場）・`home` |
@@ -314,6 +315,40 @@ suite を 1 つ組んで渡す（#2011）。`test.no_reports`（pytest のプラ
 `.github/workflows/`・ほかのスクリプトを検索して決め、項目の `callers` に書く（テストを除く）。以後は構造チェックが
 `callers` の各ファイルがエントリポイントの名前を含むかを見る（I8）。呼び手の無い関数の棚卸しは `uvx vulture` で
 1 回だけ行う。CI の常設の検査にしないのは、動的な呼び出しの誤検出が多く、例外の項目が増えるためである。
+
+棚卸しは次のコマンドで行う（vulture 2.16 で確かめた。版で結果が変わりうる）。対象は `plugins/ndf/scripts` と
+`plugins/ndf/skills/*/scripts` の下の `.py` で、テストと実験版を除く。呼び手はテストを除いて数え、テストだけが呼ぶ関数は
+呼び手 0 として、その関数だけを確かめるテストと一緒に消す。
+
+```bash
+uvx vulture plugins/ndf/scripts plugins/ndf/skills/*/scripts scripts/ndf-vulture-keep.txt \
+  --exclude '*/tests/*,*/experimental/*' --min-confidence 60 | grep -E 'unused (function|method)'
+```
+
+出力が 0 行なら、呼び手の無い関数は無い。呼び手が vulture に見えない関数は、残す関数の一覧
+[`scripts/ndf-vulture-keep.txt`](../../scripts/ndf-vulture-keep.txt) に 1 行ずつ載せる。行の形は
+`<名前の式>  # <理由の種類>: <理由の本文>（<定義のあるファイル>）` で、名前の式は関数なら名前、メソッドなら `_.<名前>`
+（`vulture --make-whitelist` の形）である。拡張子が `.txt` なのは、`.py` にすると lint が名前の行を未定義の名前（F821）として
+落とすためである。
+
+| 理由の種類 | 当たる呼ばれ方 |
+| --- | --- |
+| 名前で呼ばれる | `getattr`・`globals()`・名前の辞書で関数を引く |
+| 枠組みが呼ぶ | ライブラリ（urllib・pydantic など）が上書きのメソッドや検証の関数を呼ぶ |
+| 範囲の外から呼ばれる | 棚卸しの対象の外（リポジトリ直下の `scripts/` など）が import して呼ぶ |
+| テストの基盤が呼ぶ | `conftest.py` や、確定仕様が定める契約の検査が呼ぶ |
+| 利用者が手で打つ | 利用者が直に打つ入口 |
+| 呼び手を確かめられない | 名前の検索で呼び出しの形かを決められない |
+
+当たらない呼ばれ方が見つかったら、種類を足してこの表を直す。一覧の古い行は、同じ名前の呼び手の無い関数を棚卸しから隠す。
+棚卸しのたびに、行の括弧のファイルにその名前の `def` があるかを確かめ、無い行を消す。
+
+```bash
+grep -v '^#' scripts/ndf-vulture-keep.txt | while read -r line; do
+  n=$(echo "$line" | sed -E 's/^(_\.)?([A-Za-z0-9_]+).*/\2/'); f=$(echo "$line" | sed -E 's/.*（([^（）]+)）$/\1/')
+  grep -qE "def $n\(" "$f" || echo "古い行: $n（$f）"
+done
+```
 
 ## データ・設定
 

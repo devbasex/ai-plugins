@@ -7,11 +7,36 @@ KEY=VALUE の読み取り・最終ステータスの決定・回答ファイル�
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
+
+
+def _inside_work_tree(path: str) -> bool:
+    r = subprocess.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False)
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def anchor_repo_cwd() -> str | None:
+    """作業ディレクトリが git の作業ツリーの外なら、`cd` する前の場所（`OLDPWD`）へ移る。移った先を返す。
+
+    drive はリポジトリ名・置き場を作業ディレクトリから求める。`cd <Skill のディレクトリ> && python3 scripts/drive.py`
+    と打つと、導入先の Skill のディレクトリはリポジトリの外なので、init が「リポジトリを決められません」で止まっていた。
+    どちらも作業ツリーの外なら何もしない（呼び出し側のエラーがそのまま出る）。
+    """
+    if _inside_work_tree("."):
+        return None
+    old = os.environ.get("OLDPWD") or ""
+    if not old or not os.path.isdir(old) or not _inside_work_tree(old):
+        print("⚠ 作業ディレクトリが git の作業ツリーの外です。対象リポジトリの中で打ち直してください", file=sys.stderr)
+        return None
+    os.chdir(old)
+    os.environ["PWD"] = old
+    print(f"ℹ 作業ディレクトリがリポジトリの外のため、cd する前の場所で続けます: {old}", file=sys.stderr)
+    return old
 
 
 def durable_identity(tmp: Path | None, pr: int) -> str:

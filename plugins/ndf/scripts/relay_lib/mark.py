@@ -66,10 +66,6 @@ def running_tasks(tasks) -> list[dict]:
     ]
 
 
-def background_running(tasks) -> bool:
-    return bool(running_tasks(tasks))
-
-
 def hold_reason(tasks: list[dict]) -> str:
     """背景の作業が残っていて合図を書けないときに、Stop を止めて conductor へ渡す文。"""
     rows = [f"- {t['id'] or '(id 不明)'}: {t['command'] or '(コマンド不明)'}" for t in tasks]
@@ -211,7 +207,7 @@ def cmd_mark() -> int:
     remove(question)
     record = RelayRecord(d)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
-    try:  # 起動のブロック（`ndf-spawn <名前>`）は統括役へ依頼を置くだけで、区間を終えない（#2346 の決定 6）
+    try:  # 起動のブロック（`ndf-spawn <名前>`）はリレーハブへ依頼を置くだけで、区間を終えない（#2346 の決定 6）
         from . import hub_client
 
         hub_client.place_blocks(str(data.get("last_assistant_message") or ""), str(data.get("cwd") or ""), d)

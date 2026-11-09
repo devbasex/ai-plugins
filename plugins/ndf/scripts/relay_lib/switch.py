@@ -199,14 +199,14 @@ class AccountSwitch:
     def _pick_for_section(self, cur: str | None, thr: float, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
         """区間の起動で、今のアカウント（か既定のログイン）から次を選ぶ。"""
         due = self.watch.due if self.watch is not None else None
-        usable, score, left = False, None, None
+        usable, score, left, weekly = False, None, None, None
         if cur is not None:
-            usable, score, left = self._current_standing(cur)
+            usable, score, left, weekly = self._current_standing(cur)
             if usable and due is None and (score is None or score < thr):
                 return cur, None, None
         c = ca.choose(exclude={cur} if cur else set(), keep=self.keep())
         if c.name:
-            if usable and self.no_better(c, score, left):
+            if usable and self.no_better(c, score, left, weekly, thr):
                 return cur, None, c
             return c.name, REASON_THRESHOLD if usable else (REASON_START if cur is None else REASON_UNUSABLE), c
         if usable:
@@ -268,21 +268,26 @@ class AccountSwitch:
         return ca.METERED, None, c
 
     @staticmethod
-    def _current_standing(cur: str) -> tuple[bool, float | None, float | None]:
-        """今のアカウントの (使えるか, 使用率, 残りの量)。トークンは更新しない（claude が更新する）。"""
+    def _current_standing(cur: str) -> tuple[bool, float | None, float | None, float | None]:
+        """今のアカウントの (使えるか, 使用率, 残りの量, 週の使用率)。トークンは更新しない（claude が更新する）。"""
         u = ca.usage(cur, False)
         acc = ca.load_account(cur)
         now = time.time()
         usable = acc is not None and not acc.needs_relogin and not acc.auth_held(now) and acc.limited_until(now) is None
         score = u.score() if u else None
         left = acc.remaining() if acc is not None else None
-        return usable, score, left
+        weekly = u.weekly_score() if u else None
+        return usable, score, left, weekly
 
     @staticmethod
-    def no_better(c: ca.Choice, score: float | None, left: float | None) -> bool:
-        """候補 `c` が今のアカウント（使用率 `score`・残りの量 `left`）より良くないか（#1453 の I9）。
+    def no_better(c: ca.Choice, score: float | None, left: float | None, weekly: float | None, thr: float) -> bool:
+        """候補 `c` が今のアカウント（使用率 `score`・残りの量 `left`・週の使用率 `weekly`）より良くないか（#1453 の I9）。
 
-        両方の残りの量が分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
+        今の週の使用率が閾値 `thr` 以上で候補の使用率が閾値未満なら、残りの量に依らず候補を良いとする（週の枠は数日
+        戻らないため、他のプランを優先する。週の枠の大きなプランの残りが小さなプランの 5 時間の枠を上回っても替える）。
+        それ以外は、両方の残りの量が分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
+        if weekly is not None and weekly >= thr and c.score is not None and c.score < thr:
+            return False
         if left is not None and c.remaining is not None:
             return c.remaining <= left
         return score is not None and c.score is not None and c.score >= score

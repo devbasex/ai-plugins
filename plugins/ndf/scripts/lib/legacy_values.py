@@ -79,7 +79,7 @@ def current_plan(data):
 
 
 def normalize_laps(rec: dict) -> dict:
-    """ループの記録（loop.json）の周回の結果と失敗の種類を新しい値へ読み替えた `rec` を返す（その場で書き換える）。"""
+    """ループの記録（loop.json）のループの 1 回の結果と失敗の種類を新しい値へ読み替えた `rec` を返す（その場で書き換える）。"""
     for lap in rec.get("laps") or []:
         if not isinstance(lap, dict):
             continue

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/supervise_lib/flow.py", "name": "await_step", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: 前提のプランの耐久ワークフローの終わりを待つ"}

@@ -127,6 +127,7 @@
 # テスト終了時に
 import zipfile
 import re
+
 with zipfile.ZipFile("trace.zip") as zf:
     for name in zf.namelist():
         content = zf.read(name).decode("utf-8", errors="ignore")

@@ -6,8 +6,7 @@
 
 1. `NDF_USAGE_DIR`（テストと、置き場所を明示したいとき）
 2. `${CLAUDE_PLUGIN_DATA}/usage`
-3. `${XDG_STATE_HOME}/ndf/usage`
-4. `~/.local/state/ndf/usage`
+3. `<状態の根>/usage`（根は `state_home.user_home`）
 
 帳簿のディレクトリの直下の `<owner>__<repo>.jsonl` は版 1（#1142）の行で、読むときに claude の行とみなす。
 
@@ -32,6 +31,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
+import limits
+from state_home import user_home
+
 LIB = Path(__file__).resolve().parent
 RUNTIMES = ("claude", "codex", "kiro", "agy", "jev")  # 帳簿のランタイム（cross-review の席順の ALL_RUNTIMES とは別）
 STATUSES = ("ok", "error", "timeout", "killed")
@@ -46,10 +48,8 @@ def ledger_dir(env: Optional[dict] = None) -> Path:
         return Path(env["NDF_USAGE_DIR"])
     if env.get("CLAUDE_PLUGIN_DATA"):
         return Path(env["CLAUDE_PLUGIN_DATA"]) / "usage"
-    if env.get("XDG_STATE_HOME"):
-        return Path(env["XDG_STATE_HOME"]) / "ndf" / "usage"
-    if env.get("HOME"):
-        return Path(env["HOME"]) / ".local" / "state" / "ndf" / "usage"
+    if env.get("NDF_STATE_HOME") or env.get("XDG_STATE_HOME") or env.get("HOME"):
+        return user_home(env) / "usage"
     return Path(env.get("TMPDIR") or "/tmp") / "ndf-usage"
 
 
@@ -58,7 +58,11 @@ def repo_key(root: str) -> str:
     """origin の URL から `<owner>__<repo>`。決められなければ `unknown`。"""
     try:
         url = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"], cwd=root, capture_output=True, text=True, timeout=10
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=limits.seconds("usage-ledger.git"),
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return UNKNOWN

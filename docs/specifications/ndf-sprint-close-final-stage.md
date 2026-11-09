@@ -45,7 +45,7 @@ Pull Request の本文には GitHub がマージで課題を閉じる closing ke
 | `plugins/ndf/scripts/lib/closing-issues.sh` | シェルの読み手。閉じる予定の参照も取り出す。出力の形（`<リポジトリ>\t<番号>`）は変わらない |
 | `plugins/ndf/scripts/lib/repo.py` | `merge_closes_issues(root, base)`（宛先のマージで GitHub が閉じるか）と `defer_for_base(root, base, text)`（当たるときだけ `defer_closing` に通す） |
 | `plugins/ndf/scripts/pr-steps.py`・`plugins/ndf/scripts/supervise_lib/pr.py` | 本文を送る前に `defer_for_base` を通す |
-| `plugins/ndf/scripts/supervise_lib/sprint.py`・`sprint_close_steps.py`・`release_templates.py` | まとめのプランを `merge →（release-verify）→ retro → close → refine` の順に組む（`refine` の後ろに深さの記録と、起動するときだけの大整理・見直しが続く。#2315） |
+| `plugins/ndf/scripts/supervise_lib/sprint.py`・`sprint_close_steps.py`・`release_templates.py` | まとめのプランを `merge →（config-save → release-verify → config-check）→ retro → close → refine` の順に組む（`config-save` と `config-check` は利用者の設定ディレクトリの控えを取って比べる。#2401。`refine` の後ろに深さの記録と、起動するときだけの大整理・見直しが続く。#2315） |
 
 ```mermaid
 graph LR
@@ -62,7 +62,7 @@ graph LR
     SC --> FS[sprint_close_lib/final_stage.py]
   end
   subgraph まとめのプラン
-    RV[release-verify] --> RT[retro] --> CL[close] --> RF[refine]
+    RV[release-verify] --> CC[config-check] --> RT[retro] --> CL[close] --> RF[refine]
   end
   CL --> SC
 ```
@@ -93,12 +93,12 @@ sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage デプロイ|リ
 
 | 項目 | 値 |
 | --- | --- |
-| `--final-stage` | 3 つの値のどれか。省けば `振り返り`。前の版のプランが渡す旧い工程名は、旧い値の読み替えの表（`scripts/data/legacy-values.json`）で `デプロイ` として受ける。それ以外は呼び出しの誤り（終了コード 3） |
+| `--final-stage` | 3 つの値のどれか。省けば `振り返り`。前の版のプランが渡す旧い工程名は、旧い値の読み替えの表（`scripts/data/legacy-values.json`）で `デプロイ` として受ける。それ以外は呼び出しの誤り（終了コード 2） |
 | 条件 3 を満たさない課題 | `result: kept_open`・`reason: 最終工程（<工程>）の記録が無い: <何が無いか>`。既に閉じていれば `closed_unverified`（`閉じているが閉じる条件 3 を満たさない: …`。開き直さない） |
 | 課題の本文を読めない | `result: failed`・同じ呼び出しの `cmd`。`status: stopped`・終了コード 1 |
 | `metrics.final_stage` | 判定に使った最終工程 |
 | `decisions` | `{"decision": "最終工程を <工程> として判定した", "basis": "--final-stage <値>（省略時は振り返り）"}` を 1 件 |
-| 終了コード | 0 / 1 / 2 / 3 の意味は条件 3 の前と同じ |
+| 終了コード | 0（すべて閉じた）/ 1（失敗あり）/ 2（一覧が取れない・閉じる課題が 0 件・呼び出しの誤り）/ 10（条件 3 を満たさない課題など、閉じなかった課題がある。承認ゲートで、プランは棚卸しへ進む）。正は `sprint-close.py` の冒頭の説明 |
 
 最終工程ごとの記録と読む置き場:
 
@@ -157,9 +157,12 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  M[merge] -->|リリース記録あり| RV[release-verify<br/>課題を閉じない]
+  M[merge] -->|リリース記録あり| CS[config-save<br/>利用者の設定の控え]
   M -->|リリース記録なし| RT
-  RV --> RT[retro<br/>課題を閉じない]
+  CS --> RV[release-verify<br/>課題を閉じない]
+  RV --> CC[config-check<br/>変わっていれば止まる]
+  RV -->|失敗| CF[config-check-on-fail<br/>どの結果でも止まる]
+  CC --> RT[retro<br/>課題を閉じない]
   RT --> CL[close<br/>sprint-close.py --final-stage 振り返り --with-verification]
   CL -->|0 で終わったときだけ| RF[refine]
 ```
@@ -249,7 +252,7 @@ flowchart LR
 - 行がすべて合格で振り返りの行がある課題で、印・`Done`・閉じるが同じ順で起きること。`--record-pr 0` で行があれば閉じ、
   `unknown` では本文を読まずにすべて `kept_open` になること
 - `--final-stage リリース後テスト` で `--with-verification` を付けずに打つと、不合格の行を持つ課題が閉じないこと
-- まとめのプランの `next` をたどった並びが `release-verify → retro → close → refine`（記録なしでは `retro → close → refine`）で、
+- まとめのプランの `next` をたどった並びが `config-save → release-verify → config-check → retro → close → refine`（記録なしでは `retro → close → refine`）で、
   どのモードでも `close` が `retro` の後、`refine` の前にあること
 - 既定ブランチと起点が同じ一時のリポジトリで `pr-steps.py create` / `update` と `supervise_lib/pr.py` の `_publish` が
   `gh` に渡す本文に closing keywords が無く、閉じる予定の参照が同じ指し先で残ること。既定ブランチを決められない構成でも

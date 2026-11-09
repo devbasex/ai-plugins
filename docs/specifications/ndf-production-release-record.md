@@ -18,8 +18,8 @@
 
 | 順 | 起きること |
 | --- | --- |
-| 1 | `release` ステップ（`release-steps.py release --channel prod`）が本番チャネルへのマージ・タグ `ndf--v10.17.30`・GitHub Release を作る |
-| 2 | `record` ステップが `release-steps.py record --version 10.17.30 --prs 1260 1262` を打つ。タグと GitHub Release とマージ済みの `release/v10.17.30` の PR を確かめ、その PR（#1268）へ下の記録をコメントで書く |
+| 1 | `release` ステップ（`release-steps.py release --channel prod`）が本番チャネルへマージする。タグ `ndf--v10.17.30` と GitHub Release は、`delivery` の行の `publishes_release` が真なら CD（`.github/workflows/release-cd.yml`）が作り、無ければこのステップが同じ公開の処理で作る |
+| 2 | `cd-result` ステップが CD の結果を読み、`record` ステップが `release-steps.py record --version 10.17.30 --prs 1260 1262 --cd-result <ファイル>` を打つ。公開物とマージ済みの `release/v10.17.30` の PR を確かめ、その PR へ下の記録をコメントで書く |
 | 3 | 結果 JSON の `metrics.release_pr_url` を、プランの `pr_from` がプランの `Pull Request` へ移す |
 | 4 | `verify` → `cleanup` を経て、報告に `- Pull Request: <本番のリリースの PR の URL>` が残る |
 | 5 | まとめの `close` ステップの `--record-pr` が、その PR の番号で埋まる。`sprint-close.py` が最後の記録の `段階: 本番` を読み、閉じる条件 1 を満たす |
@@ -36,9 +36,9 @@
 
 | 何を | 正本 |
 | --- | --- |
-| リリース記録の形（見出しと 3 行）・置く側・置き場所 | [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md) の「リリース記録」 |
+| リリース記録の形（見出しと 3 行。CD の結果を読んだときは `CD の結果:` の行が足される）・置く側・置き場所 | [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md) の「リリース記録」 |
 | スプリントを閉じる手順と閉じる条件（条件 1 = `段階:` が `本番` か `デプロイなし`、条件 2 = リリース後テスト） | 同上の「スプリントを閉じる」「閉じる条件」。決定の理由は [ndf-cleanup-and-bundle-closing.md](ndf-cleanup-and-bundle-closing.md) |
-| 本番のリリースプランのステップの並び（`release` → `record` → `verify` → `cleanup`）と `judge-record` | `release` の [`references/form-package-plugin.md`](../../plugins/ndf/skills/release/references/form-package-plugin.md) |
+| 本番のリリースプランのステップの並び（`release` → `cd-result` → `record` → `verify` → `cleanup`）と `judge-record` | `release` の [`references/form-package-plugin.md`](../../plugins/ndf/skills/release/references/form-package-plugin.md) |
 | 手で `/ndf:release` を通す経路の記録の書き方 | [`release` の SKILL.md](../../plugins/ndf/skills/release/SKILL.md) の「リリース記録」 |
 | プランのステップの鍵 `pr_from` の書き方 | [`supervise_lib/plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) のプランの書き方の説明 |
 | `dist_record.py` の位置づけと呼び手 | [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md) |
@@ -91,9 +91,9 @@
 | 要素 | 責務 |
 | --- | --- |
 | [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) | リリース記録の見出しと行の名前（`DIST`・`STAGE`・`VERSION`・`SPRINT` ほか）を 1 か所に持ち、組む（`format_record`）と読む（`parse_record`）を提供する |
-| [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) | タグの作成時刻（JST）・PR の本文とコメントの読み取り・同じ記録の有無の判定（`exists`）・コメントの投稿（`post_comment`）・判定と投稿をまとめて結果の値を返す（`write`）・昇格の形の本文（`promote_body_of`）と直前の版（`parent_of`）。結果を出す（emit）のは呼び手 |
+| [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) | タグの作成時刻（JST）・PR の本文とコメントの読み取り・同じ記録の有無の判定（`exists`）・コメントの投稿（`post_comment`）・判定と投稿をまとめて結果の値を返す（`write`）・昇格の形の本文（`promote_body_of`）・本番チャネルへ直接マージした形の本文（`merged_body_of`）と直前の版（`parent_of`）。結果を出す（emit）のは呼び手 |
 | [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の `record` | 前提を確かめ、記録を組んで投稿し、PR の番号と URL を結果に出す |
-| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 本番のプランに `record`（`pr_from: release_pr_url`）と `judge-record` を組む。昇格のプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）も、マージの後に同じ `judge-record` と `record --promote` を組む |
+| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 本番のプランに `cd-result`・`record`（`pr_from: release_pr_url`）と `judge-record` を組む。昇格のプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）も、マージの後に `cd-result`・`record --promote` と同じ `judge-record` を組む。ベースブランチが本番チャネルの CD の形は、「CD の結果」のステージ（`plan_cd_result`）が `cd-result` → `record --merged` を組む |
 | [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py) の `take_pr` | run のステップの `pr_from` を読み、プランの `Pull Request` を埋める |
 | [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py) | `parse_record` を `lib/dist_record.py` から同じ名前で import する。読み方は変わらない |
 
@@ -112,9 +112,10 @@
 
 | # | 条件 | 破れそうなときの扱い |
 | --- | --- | --- |
-| I1 | リリース記録はリリースの後にだけ書く。デプロイの完了は「タグ `<plugin>--v<版>` が origin にある」と「同じタグの GitHub Release がある」の両方で判定する | `record` は投稿せずに終了コード 3 で止まる |
+| I1 | リリース記録はリリースの後にだけ書く。デプロイの完了は「タグ `<plugin>--v<版>` が origin にある」と「同じタグの GitHub Release がある」の両方で判定する。公開物を CD が作ると宣言した行があり結果のファイルがあるときは、両方の照会を CD の結果に置き換える | `record` は投稿せずに終了コード 3 で止まる |
+| I1a | 「成功」と書くのは CD の状態を読んで成功を確かめたときだけで、読めなければ「未確定」と書く。CD の結果が失敗の記録は段階を `反映失敗` にし、スプリントを閉じる条件を満たさない | `record` は `反映失敗` を書いた後に終了コード 5 で止まる。未確定の記録は本番の段階だが、閉じる条件 2 がリリース後テストの記録を別に求める |
 | I2 | 書いた記録を `parse_record` で読むと、`found` が真・`stage` が `本番` で始まり・`version` が出した版（`v` なし）・`sprint_prs` が `--prs` の並びになる | 書く側と読む側が同じモジュールの定数を使う。食い違えば契約のテストが落ちる |
-| I3 | 同じ版・同じスプリントの PR の本番の記録は、PR に 2 件以上増えない | `record` は投稿の前に PR の最後の記録を読み、同じなら投稿せずに `exists` を返す |
+| I3 | 同じ版・同じスプリントの PR・同じ CD の結果の本番の記録は、PR に 2 件以上増えない | `record` は投稿の前に PR の最後の記録を読み、同じなら投稿せずに `exists` を返す |
 | I4 | 記録を書くステップの失敗から、リリースへ戻る経路は無い | `record` の失敗は `judge-record` へ回り、選べるのは `record` と `stop` だけ。共有の `judge` の `choices` に `record` は無い |
 | I5 | 記録を書けた本番のリリースプランの報告は、本番のリリースの PR を `Pull Request` に持つ | `metrics.release_pr_url` が空・終了コードが 0 でないなら `Pull Request` を書き換えない（報告は `無し` のまま、まとめは `0`） |
 | I6 | 開発版のリリースプランは `record` と `judge-record` を持たない | 雛形の開発版の分岐で組まない（`release` の `next` は `verify`） |
@@ -139,7 +140,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 | --- | --- |
 | 前提（この順に確かめる） | タグ `<plugin>--v<版>` が origin にある（`git ls-remote --exit-code --tags`）。同じタグの GitHub Release がある（`gh release view <タグ>` が 0）。`release/v<版>` → ベースブランチの PR が MERGED で見つかる。無ければ、版数の衝突を解いて取り込んだ `release/v<版>-sync` → ベースブランチの PR を MERGED で探し、その PR へ書く |
 | 書くもの | その PR へコメント 1 件（`gh pr comment <番号> --body-file <一時ファイル>`）。`--repo` を渡さず、作業場所のリポジトリへ書く |
-| 書かないとき | PR の本文とコメントを投稿の順に並べた最後の記録が、`stage` が `本番` で始まり `version` と `sprint_prs` が同じとき |
+| 書かないとき | PR の本文とコメントを投稿の順に並べた最後の記録が、`stage` が `本番` で始まり `version`・`sprint_prs`・`cd_result` が同じとき |
 | 結果 JSON | `lib/step_result.py` の形。`items` は `{kind: "comment", name: "#<番号>", result: "posted" / "exists"}`。`metrics` は `release_pr`・`release_pr_url`・`version`・`prev_version`・`sprint_prs` |
 | 終了コード | 0 = 書いた・既にある / 1 = 投稿が失敗した（`gh pr comment` が非 0） / 2 = PR を読めない（`gh pr view` の失敗か出力が JSON でない） / 3 = 前提が無い |
 
@@ -147,7 +148,8 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 | 行 | 値 |
 | --- | --- |
-| `段階:` | `本番（リリース承認ゲートの承認の後、<タグの作成時刻 JST> に <タグ> を出した）`。時刻は注釈付きタグなら作成時刻、軽量タグならコミットの時刻で、読めなければ時刻を省く |
+| `段階:` | `本番（リリース承認ゲートの承認の後、<タグの作成時刻 JST> に <タグ> を出した）`。時刻は注釈付きタグなら作成時刻、軽量タグならコミットの時刻で、読めなければ時刻を省く。公開物を CD が作るときは `本番（リリース承認ゲートの承認の後、<タグ> の公開は CD が担う）`、CD の結果が失敗なら `反映失敗（<理由>）` |
+| `CD の結果:` | CD を読んだときだけ置く。`<成功 / 失敗 / 未確定>（リビジョン <短い SHA>… <実行の URL か理由>）`。`parse_record` は `cd_result` へ値を返す |
 | `版:` | `<直前の正式版> → <出した版>（タグ <タグ>。直前はタグ <直前のタグ>）`。直前の正式版は `release_tag_before` が返す前のタグから `<plugin>--v` を外した版で、無ければ `なし`（注記は「直前の正式版のタグは無い」） |
 | `スプリント:` | `PR #<番号> / #<番号>`。`--prs` を受けた順に並べる |
 
@@ -182,14 +184,14 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 `{queue_record}` は、まとめの課題を閉じる PR とそれを参照する PR のリリース記録のうち、段階が本番かデプロイなしで `スプリント:` が
 その閉じる PR を含む記録を置いた PR の番号で埋まる（`sprint_close_lib/record_find.py`）。見つからない・2 つ以上のスプリントにある・
-GitHub を読めなければ、まとめを流さずに止まる（queue の結果は `stopped`、開発ループの周回は失敗で締まる）。まとめのプランは
+GitHub を読めなければ、まとめを流さずに止まる（queue の結果は `stopped`、開発ループの 1 回は失敗で締まる）。まとめのプランは
 `sprint-close.py --record-pr unknown` を組まず、`unknown` を渡すのは手で打つ入口と #2230 より前に組んだプランだけである。
 
 `release-verify` は、記録の PR にリリース後テストの記録をコメントで置き、課題は閉じない。実行時に番号が `0` になったとき
 （最終の検査で変更が無く、まとめの queue の本番が飛ばされたとき）は何もせずに終える。
 
-昇格のプランは normal が `promote` → `promote-approved` → `record`、`pace: fast` / `auto` が `verify` → `prepare` → `mvv` → `note` →
-`promote` → `record` の並びで、`record` は `record --promote --head <ベースブランチ> --base <本番チャネル> --prs {queue_prs}`・
+昇格のプランは normal が `promote` → `promote-approved` → `cd-result` → `record`、`pace: fast` / `auto` が `verify` → `prepare` → `mvv` → `note` →
+`promote` → `cd-result` → `record` の並びで、`record` は `record --promote --head <ベースブランチ> --base <本番チャネル> --prs {queue_prs} --cd-result <ファイル>`・
 `pr_from: release_pr_url`・`on_fail: judge-record` を持つ。ブランチは `merged-steps.py promote` へ渡す値と同じものを渡す。
 
 LLM がリリースするほかの形では、`release` の手順がリリースの後に実施後の値で `段階: 本番` の記録をコメントで足す
@@ -211,8 +213,10 @@ run のステップが終了コード 0 で終わり、出力の最後の JSON �
 stateDiagram-v2
   [*] --> release
   release --> judge: 失敗
-  release --> record: 成功
+  release --> cd_result: 成功
+  cd_result --> record
   record --> verify: 成功
+  record --> 止まった: CD の結果が失敗（5）
   record --> judge_record: 失敗
   judge_record --> record: やり直す
   judge_record --> 止まった: stop
@@ -251,6 +255,13 @@ stateDiagram-v2
 リリースの依頼のプランはステップ `parallel-request`（`parallel.py request`）の 1 つだけを持ち、依頼を送れば承認ゲート（終了コード 10）で終わり、
 自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。手順は `development-workflow` の
 [references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
+ステップのコマンドは課題の番号を持たず、`--issues {plan_issues}` を持つ。`{plan_issues}` は流す時点に、プランの `課題` の番号の空白区切り
+（空なら空文字）で埋まる（`supervise_lib/steps.py` の `RunStep`）。設計承認ゲートで課題を外したループの 1 回では、`loop gate` の `drop_issues` が
+書き換えた `課題` がそのまま依頼の `issues` になる。
+
+この置き換えは、リリースの雛形（`release.form`）で出す経路だけが対象である。昇格の経路など雛形の無い経路の本番のステージは
+`prod_plans` を通らず、`sprint_routes.route_waves` が組む。`route_waves` はレーンを判定しないため、レーンでも昇格のプラン 1 本
+（ステージ「本番」）を置き、レーンはそれをそのまま流す。組み上がった昇格のプランをリリースの依頼のプランへ手で置き換えない。
 雛形（`release_templates.plan_release`）が組んだステップを目録の側で書き換えず、`new release --version <正式版> --prs {queue_pr:check} --channel prod`
 と同じ出力に `課題` が入る（スプリントの工程は雛形に対して順応者の関係にある）。
 
@@ -351,7 +362,7 @@ sequenceDiagram
 
 | 観点 | 満たすこと |
 | --- | --- |
-| プランの並び（I6・I4） | 本番の `new release` のプランが `release` → `record` → `verify` の順で、`record` が `pr_from: release_pr_url` と `on_fail: judge-record` を持つこと。`judge-record` の `choices` が `record` と `stop` だけで、共有の `judge` が `record` を選べないこと。開発版のプランに `record` と `judge-record` が無いこと |
+| プランの並び（I6・I4） | 本番の `new release` のプランが `release` → `cd-result` → `record` → `verify` の順で、`record` が `pr_from: release_pr_url` と `on_fail: judge-record` を持つこと。`judge-record` の `choices` が `record` と `stop` だけで、共有の `judge` が `record` を選べないこと。開発版のプランに `record` と `judge-record` が無いこと |
 | 書く側と読む側の契約（I2） | `format_record` の出力を `parse_record` に通すと、`found`・`stage`・`version`（`v` なし）・`sprint_prs` が期待どおりになること |
 | リリースの後にだけ書く（I1） | タグと GitHub Release があるとき本番のリリースの PR へコメントが 1 件投稿されること。タグが無い、またはタグはあり GitHub Release が無いとき、投稿せず 3 で終わること |
 | 重ねて書かない（I3） | 同じ PR に 2 度打っても投稿は 1 件で、2 度目は `exists` になること |
@@ -360,7 +371,7 @@ sequenceDiagram
 | まとめが閉じる（条件 1） | `record` が書いた記録を持つ PR を `--record-pr` に渡し、`--with-verification` なしの `sprint-close.py --dry-run` で `--issues` の OPEN の課題が `would_close` になること |
 | 版の食い違い（I8） | PR #432 の形の組で `verify_block` が後のブロックになること。リリース記録より前にだけブロックがある PR・版数の違うブロックだけが後にある PR では None。版の一致するブロックとその後ろの別の版のブロックがある PR では一致する方を選び、`版: 10.17.67 → 10.17.68` の組で結果が直す前と同じであること。先頭の `v` の有無だけが違う組（`版:` と `対象の版:` のどちらに付いても）ではそのブロックを選び、`version` が `v` なしになること。`V10.26.1` と `main c427284` は読み替えないこと |
 | 昇格の記録（I7） | `record --promote` がマージ済みの PR があればその PR へ書き、無ければ書かずに 3 で終わること。書いた記録を `parse_record` が `本番` で読むこと。本文に `段階: 検証（… 承認待ちのため未実施）` を置いた PR に記録をコメントで足すと `本番` として読むこと |
-| 昇格のプラン | normal と fast / auto の両方で、マージの後に `record`（`pr_from: release_pr_url`・`on_fail: judge-record`）があり、`judge-record` の `choices` が `record` と `stop` だけであること |
+| 昇格のプラン | normal と fast / auto の両方で、マージの後に `cd-result` と `record`（`pr_from: release_pr_url`・`on_fail: judge-record`）があり、`judge-record` の `choices` が `record` と `stop` だけであること |
 | まとめのプラン（I9） | 雛形と昇格の経路で、マージ → `release-verify` → `close`（`--with-verification`）がこの順で並び、昇格の `close` が `--record-pr {queue_pr:promote}` であること。none だけの経路は `0`、merge・manual・検証の環境だけの経路は `unknown` で、どちらも `release-verify` が無いこと |
 | normal の本番のステージ（N1〜N3） | 雛形・本番のブランチありの `new sprint` の `ステージ` が「… 検査・リリース・`リリース承認ゲート`・本番」の順で、「本番」が `then_of` を持たず `command` を持ち、プランの名前が `release-prod`、`release` のステップが `--channel prod` と `--version 10.18.0`（`10.18.0-dev.1` を渡す）、`changelog` の `--prs` が `{queue_pr:check}` であること（`test_supervise.py` の `test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release`） |
 | 本番を単独で流す | 一時ディレクトリに検査のプランとその報告（PR 番号つき）と本番のプランだけを置き、前のステージの結果を渡さずに `fill_queue_pr` を当てると、`{queue_pr:check}` がすべてその番号になること（`test_prod_plan_queued_alone_takes_the_check_pr`） |

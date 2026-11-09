@@ -71,12 +71,12 @@ NDF のスクリプトが共有の環境へ起動し直すときに設定した 
 | 同 `release_project_env` | 自分を起動し直した回なら退避した値を戻す（無ければ外す）。続けて、値が共有の環境を指していれば外す。退避の変数も外す |
 | 同 `is_shared_venv` | 渡したパスが共有の環境の置き場か（`NDF_DEPS_VENV` と同じか、親が `~/.cache/ndf/venv`）を返す。標準ライブラリだけで判定する |
 | `plugins/ndf/scripts/relay_lib/runtime.py` の `enter` | 振り分けの前に、`UV_PROJECT_ENVIRONMENT` が共有の環境を指していれば外す。古い版の NDF のスクリプトから継いだ値を含む |
-| `plugins/ndf/scripts/lib/parallel_repo.py` の `relay_proc` | 統括役の CLI を打ち、終わったプロセスと統一 JSON レポートを返す。`relay` はこれを使い、戻り値の形を保つ |
+| `plugins/ndf/scripts/lib/parallel_repo.py` の `relay_proc` | リレーハブの CLI を打ち、終わったプロセスと統一 JSON レポートを返す。`relay` はこれを使い、戻り値の形を保つ |
 | `plugins/ndf/scripts/lib/parallel_run.py` の `step_observe` | 観測の結果に、一覧の終了コード（`code`）・標準エラーの末尾 1 行（`err`）・問える版の記録の印（`can_ask`）を足す |
 | 同 `_observe_run` | 終了コードを `ls_ok` に控え、先に `_track_ls_failure` を呼ぶ。失敗の回はそこで戻る |
 | 同 `_track_ls_failure` | 失敗の回は始まりの時刻を持ち、区切りを超えたら区切りごとに 1 回問う。成功の回は追跡を解き、答えていない一覧の失敗の問いを外す |
 | 同 `_run_finished` | `ls_ok` が偽の間は偽を返す |
-| `plugins/ndf/scripts/lib/parallel_answer.py` の `owner_restart` | `observe` の問いへの答えでは、選んだ答えの `commands` を返す |
+| `plugins/ndf/scripts/lib/parallel_answer.py` の `owner_next` | `observe` の問いへの答えでは、1 つ目の値に選んだ答えの `commands` を返す |
 
 `plugins/ndf/scripts/hook-env.py` の環境の用意と `relay_lib/runtime.py` の `sync` は、`uv sync` の子にだけ `UV_PROJECT_ENVIRONMENT` を渡す。
 どちらも自分の `os.environ` を書き換えない。
@@ -141,7 +141,7 @@ graph TD
 | 決定 3 | 共有の環境を指す値は、退避の有無に依らず外す。判定は置き場の親と `NDF_DEPS_VENV` で行い、版の名前に依らない | 古い版の NDF から起動されたレーンは退避の変数を持たずに値を継ぐ。ラッパーの複製からは版を読めない。利用者が共有の環境を自分で指した値も外れる。その使い方は共有の環境を壊すため残さない |
 | 決定 4 | 一覧の失敗の回は観測の全体を捨て、成功した観測だけでレーンの状態と時刻を動かす | 失敗した回は行を持たず、止まったレーンの判定・停滞の問い・起こし直しの解除がどれも誤った入力で動く。前回の行の使い回しは、停滞の判定を実際の動きと食い違わせる |
 | 決定 5 | 観測の結果の `code` が無い記録は成功として読み、`can_ask` が無い記録の再生では問わない。形式の版（`durable.FORMAT`）は上げない | 記録の時点の振る舞いを保つため。問いは `DBOS.set_event` を呼ぶので、問いの無い版の記録の再生中に立てると呼び出しの順が衝突する。形式の版を上げると全種類の記録に効き、更新前の計画が回復されず待ち続ける。失敗の始まりの追跡は続けるので、再生の後の最初の観測で失敗が続いていれば問う |
-| 決定 6 | 一覧が成功に戻ったら、答えていない一覧の失敗の問いを外す | 一覧が戻れば問いの前提が無くなり、残すと計画が終われない。外した後に届いた答えは既存の `reply` が保留し、警告を残す。`id` は時刻を含み同じ問いが立たないため、計画の終わりを止めない |
+| 決定 6 | 一覧が成功に戻ったら、答えていない一覧の失敗の問いを外す | 一覧が戻れば問いの前提が無くなり、残すと計画が終われない。外した後に届いた答えは既存の `reply` が保留し、警告を残し、区分 `unmatched` の問いで知らせる。`id` は時刻を含み同じ問いが立たないため、保留した答えは計画の終わりを止めず、終わりを止めるのはこの知らせに答えるまでである |
 | 決定 7 | 問うまでの長さと問いの間隔に、停滞の区切り（`stall_seconds()`、`NDF_PARALLEL_STALL_MINUTES`、既定 60 分）を使う | 新しい設定値を足さない。停滞の問いの「区切りごとに 1 回」と同じ形にそろう |
 | 決定 8 | 変更は観測に限り、ほかの `relay.py ls` の読み手（`parallel.py` の起動前の確かめ・`parallel_lane.lane_waits`）は変えない | 取り消せない `finished` を作るのは観測だけである。ほかの読み手は耐久の記録に何も残さず、打ち直せば読み直す |
 

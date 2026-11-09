@@ -24,12 +24,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
+import limits  # noqa: E402  上限の宣言（#2343）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 import wait_notice as wn  # noqa: E402
 from hook_lib.wait_notify import RUNTIMES, log  # noqa: E402
 
-GH_TIMEOUT = 5
-SLACK_TIMEOUT = 10
+GH_TIMEOUT = limits.seconds("wait-notify.gh")
+SLACK_TIMEOUT = limits.seconds("wait-notify.slack")
 DELETE_DELAY = 0.5
 
 

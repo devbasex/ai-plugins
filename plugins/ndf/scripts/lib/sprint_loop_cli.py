@@ -9,6 +9,8 @@ from pathlib import Path
 import clock
 import step_result
 
+ENTRY = "scripts/sprint-state.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
+
 
 def budget_value(text: str) -> float | str:
     """`--budget-*` の値: 数か既定へ戻す指示 `default`（#2406）。どちらでもなければ引数の誤り（終了コード 2）。"""
@@ -34,7 +36,54 @@ def environment_result(root: Path, as_json: bool) -> dict | None:
 
 
 def run_loop_command(a, update) -> dict | None:
-    """`sprint-state.py loop` の副命令を振り分ける。update は周回を締める前にスプリント状態を埋める関数（`update` と同じ）。"""
+    """`sprint-state.py loop` の副命令を振り分ける。update はループの 1 回を締める前にスプリント状態を埋める関数（`update` と同じ）。
+
+    先に開発ループの持ち主（単位 session）を取る。宣言の無い副命令（答える・読むだけ）は何もしない（#2342）。"""
+    if a.loop_cmd == "start":
+        a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+        import parallel_guard
+
+        if getattr(a, "outside_plan", None) is None:  # 空の理由は渡したものとして判定で断る
+            a.outside_plan = stored_outside_plan(a.root, a.loop_name)
+        if (blocked := parallel_guard.entry_check(a.root, a.outside_plan, "sprint-state.py loop start")) is not None:
+            return blocked
+    import lease_stage  # loop のときだけ読む（filelock と psutil を要する）
+
+    # 鍵のリポジトリはループの記録と同じ --root から決める（カレントから決めると、別の場所から同じループを別の鍵で進められる）
+    held = lease_stage.hold(ENTRY, f"loop {a.loop_cmd}", repo_root=getattr(a, "root", None), name=getattr(a, "loop_name", None))
+    out = _dispatch(a, update)
+    if held is not None and isinstance(out, dict):
+        out = {**out, "lease": held.as_json()}
+    return out
+
+
+def stored_outside_plan(root: str | None, name: str) -> str | None:
+    """ループの記録に残した例外の起動の理由（`--outside-plan`。#2733）。記録が無い・読めなければ None。
+    再開の `loop start` が理由を渡さなくても、例外として始めたループは例外のまま続ける。"""
+    import sprint_loop as sl
+
+    try:
+        got = sl.read_loop_record(sl.Env(Path(root or ".").resolve()), name).get("outside_plan")
+    except Exception:  # noqa: BLE001 — 記録が無い・読めなければ理由なし（判定は通常どおり）
+        return None
+    return got if isinstance(got, str) and got.strip() else None
+
+
+def keep_outside_plan(env, name: str, reason: str | None) -> None:
+    """例外の起動の理由をループの記録の `outside_plan` へ残す（#2733）。ループが組む `supervise.py new sprint` へ引き継ぐ。
+    理由が無い・記録が無い（始めるのを断った）・同じ理由なら何もしない。"""
+    import sprint_loop_record as slr
+
+    reason = (reason or "").strip()
+    if not reason or not slr.loop_record_path(env, name).is_file():
+        return
+    with slr.open_record(env, name) as (rec, before):
+        if rec.get("outside_plan") != reason:
+            rec["outside_plan"] = reason
+            slr.write_record(env, rec, before)
+
+
+def _dispatch(a, update) -> dict | None:
     import sprint_loop as sl  # loop のときだけ読む
     import sprint_loop_gate as sl_gate
     import sprint_loop_select as sl_select
@@ -43,9 +92,11 @@ def run_loop_command(a, update) -> dict | None:
     budget = {"laps": getattr(a, "budget_laps", None), "usd": getattr(a, "budget_usd", None), "hours": getattr(a, "budget_hours", None)}
     try:
         if a.loop_cmd == "start":
-            name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+            name = a.loop_name
             ms = [m.strip() for m in (a.milestones or "").split(",") if m.strip()]
-            return sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
+            out = sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
+            keep_outside_plan(env, name, getattr(a, "outside_plan", None))
+            return out
         if a.loop_cmd == "environment":
             return environment_result(env.main_dir(), a.json)
         handlers = {
@@ -95,7 +146,7 @@ def parse_args(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Nam
 
 
 def add_loop_parser(sub, cmd_update) -> None:
-    """`sprint-state.py` の副命令 `loop` の引数を足す。cmd_update は `sprint-state.py update` の本体（周回を締める前に呼ぶ）。"""
+    """`sprint-state.py` の副命令 `loop` の引数を足す。cmd_update は `sprint-state.py update` の本体（ループの 1 回を締める前に呼ぶ）。"""
     lp = sub.add_parser("loop", help="開発ループ（#2089）")
     lp.set_defaults(
         loop_run=lambda a: run_loop_command(a, lambda state, dones: cmd_update(argparse.Namespace(sprint=state, done=dones, next=None)))
@@ -113,14 +164,15 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--budget-usd", type=budget_value)
     s.add_argument("--budget-hours", type=budget_value)
     s.add_argument("--no-goal", action="store_true", help="/goal で始めていない（再開のコマンドに /goal を付けない）")
+    s.add_argument("--outside-plan", metavar="理由", help="動いている並列の計画の外で例外として始める（理由はマシンの記録に残る。#2733）")
     name(ls.add_parser("select"))
     s = name(ls.add_parser("exclude"))
     s.add_argument("issue", type=int)
     s.add_argument("--reason", required=True)
     s = name(ls.add_parser("sprint"))
     s.add_argument("--mode", required=True)
-    s.add_argument("--dev", required=True)
-    s.add_argument("--prod")
+    s.add_argument("--dev", help="明示の開発版。省くと流す直前に次に空いている版を決める")
+    s.add_argument("--prod", help="明示の本番の版（--dev と一緒に渡す）")
     s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて supervise.py new sprint へそのまま渡す
     s = name(ls.add_parser("gate"))
     s.add_argument("--done", required=True)
@@ -129,17 +181,17 @@ def add_loop_parser(sub, cmd_update) -> None:
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--approved", action="store_true")
     g.add_argument("--rejected", action="store_true")
-    g.add_argument("--revise", action="store_true", help="直して出し直す（--note の指摘を課題の本文に書き、次の周回で先頭に選ぶ）")
+    g.add_argument("--revise", action="store_true", help="直して出し直す（--note の指摘を課題の本文に書き、ループの次の 1 回で先頭に選ぶ）")
     s.add_argument("--pr", type=int)
     s.add_argument("--note", help="--revise: 指摘を書いたファイル")
     s = name(ls.add_parser("approve-mvv"))
     s.add_argument("--milestone", required=True)
     s = name(ls.add_parser("lap"))
-    s.add_argument("--failed", action="store_true", help="その周回を先へ進められない（失敗で締める）")
-    s.add_argument("--done", help="周回の queue の done（承認ゲートで止まっていれば loop gate と同じに扱う）")
+    s.add_argument("--failed", action="store_true", help="そのループの 1 回を先へ進められない（失敗で締める）")
+    s.add_argument("--done", help="ループの 1 回の queue の done（承認ゲートで止まっていれば承認ゲートの副命令と同じに扱う）")
     s.add_argument("--deferred-issues", type=int, nargs="+", help="上限に達して Issue へ回した指摘の Issue 番号（決定 13）")
     s = name(ls.add_parser("finish"))
-    s.add_argument("lap", type=int, help="締め直す保留の周回（リリース待ち・質問待ち）")
+    s.add_argument("lap", type=int, help="締め直す保留したループの 1 回（リリース待ち・質問待ち）")
     s.add_argument("--done", required=True, help="残りの工程（まとめ）の queue の done")
     name(ls.add_parser("pending"))
     s = name(ls.add_parser("hold-question"))

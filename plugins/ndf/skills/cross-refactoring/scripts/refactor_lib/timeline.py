@@ -18,6 +18,7 @@ import math
 from typing import Any, Optional
 
 import test_strategy as ts
+import limits as limit_decl  # 上限の宣言（#2343）。引数の limits と分ける
 
 from . import budget, clock
 
@@ -28,7 +29,7 @@ MARGIN_SHARE = 0.05  # 余裕 = 0.05·B（手順の上限と CLI の上限に足
 MEASURE_SHARE = 0.05  # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
 MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
 # 枠が想定最大時間に収まらずに止めた後、人が `init` を打ち直すまでの見込み（秒）。要る想定最大時間の下限に足す（#1385 決定 2）。
-RESUME_GRACE_SECONDS = 300
+RESUME_GRACE_SECONDS = limit_decl.seconds("cross-refactoring.resume-grace")
 # テストと CI の待ちの係数は `test_strategy` が持つ（cross-refactoring と supervise で同じ値）。
 INIT_TEST_SHARE = ts.INIT_TEST_SHARE
 TEST_FACTOR = ts.TEST_FACTOR

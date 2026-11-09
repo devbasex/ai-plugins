@@ -16,14 +16,17 @@ from pathlib import Path
 
 import gh_call
 import gh_quota
+import jsonio
 import runtime_policy
 import slow_step as ss
 import stage_skills
-from supervise_lib import decl, limits, paths
+import step_result
+from supervise_lib import decl, limits, paths, rerun
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeholders, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
+from supervise_lib.queue import NOT_RUN
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
 from supervise_lib.steps import COND_RUN, COND_SKIP, JudgeStep, RunStep, StepContext, is_gate, last_json, run_condition
@@ -58,8 +61,30 @@ class PolicyClaudeRunner(ClaudeRunner):
         return super().call(system, prompt, tools, cwd, timeout, **kw)
 
 
+PHASE_RESULT = "phase-result.json"
+PHASE_STATUS = {"完了": "ok", "関門": "gate"}  # 報告の結果 → フェーズの結果の status（ほかは stopped）
+
+
+def write_phase_result(state_dir: Path, plan: dict, result: str, reason: str) -> dict:
+    """報告と同じ時点で、フェーズの結果（`phase-result.json`）を結果 JSON の形で書く（#2337 の I11）。"""
+    status = PHASE_STATUS.get(result, "stopped")
+    summary = f"フェーズ {plan.get('フェーズ') or '?'} の結果: {result}（{reason}）"
+    if status == "gate":
+        obj = step_result.result("supervise-run", "gate", summary, next=reason or "承認ゲート")
+    elif status == "stopped":
+        obj = step_result.result("supervise-run", "stopped", summary, gaps=[{"kind": "phase", "name": result, "reason": reason or result}])
+    else:
+        obj = step_result.result("supervise-run", "ok", summary)
+    jsonio.write_atomic(Path(state_dir) / PHASE_RESULT, obj, indent=None)
+    return obj
+
+
 class Engine:
     """1 本のプランの実行。`state` が記録を、`ctx` がハンドラーへ渡す文脈を持つ。"""
+
+    queued = (
+        False  # キューが流す間だけ真。`supervise.py run` の単発の開始は答え待ちの停止を読まない（`park` の続きが `queue --resume` のため）
+    )
 
     def __init__(self, plan: dict, state_dir: Path, slow_args: list[str] | None = None, plan_path: str | None = None) -> None:
         self.plan = normalize_plan(plan)
@@ -154,7 +179,9 @@ class Engine:
 
     def report(self, result: str, reason: str) -> str:
         self.actuals.end(result)
-        return self.state.write_report(self.plan, result, reason)
+        text = self.state.write_report(self.plan, result, reason)
+        write_phase_result(self.state.dir, self.plan, result, reason)
+        return text
 
     def run(self, start: str | None = None) -> str:
         """プランを流して `## フェーズの報告` を返す。ステップの遷移は耐久ワークフロー（`flow.plan_workflow`）が持つ。"""
@@ -216,6 +243,8 @@ class Engine:
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
         self.actuals.start(start, self.state.run_line(start))
+        if self.queued and (held := self.answer_held()):
+            return NOT_RUN, held
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
@@ -224,6 +253,12 @@ class Engine:
         if err:
             return "止まった", err
         return None
+
+    def answer_held(self) -> str | None:
+        """自分が 1 スプリントのレーンで答え待ちの停止の範囲にあれば、流さない理由を返す（#2707）。"""
+        import parallel_hold
+
+        return parallel_hold.plan_skip(os.environ.get("NDF_RELAY_NAME"))
 
     def after_prepare(self) -> None:
         """worktree ができた後の、ファイルを書かない準備（遅れの見張りの履歴の置き場）。"""
@@ -320,6 +355,8 @@ class Engine:
         if dec == "gate":
             return None, "関門", d.get("reason", "")
         if dec in self.steps:
+            if why := rerun.stop_reason(self.state, dec):
+                return None, "止まった", why
             self.gh_limit_wait(dec)
             return dec, None, None
         return None, "止まった", f"判断が知らない値を返した: {dec}"

@@ -27,7 +27,7 @@ PR の先頭のコミットの中身も足す）を最小構成の claude -p に
 - それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
   利用者の承認を求める
 
-判定は毎回 --log（既定 ~/.local/state/ndf/mvv-gate.jsonl）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
+判定は毎回 --log（既定 <状態の根>/mvv-gate.jsonl。根は lib/state_home.py）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
 スプリントの状態の進め方 `pace`・判定に渡したスプリント MVV の `sprint_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
 結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
 コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
@@ -56,7 +56,8 @@ sys.path.insert(0, str(HERE))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("schema", "procs", "locks")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
+deps.require("schema", "procs", "locks", "md")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
+import revise_note  # noqa: E402
 from step_result import EXIT_GATE, emit, result  # noqa: E402
 import approved_commit as ac  # noqa: E402
 import clock  # noqa: E402
@@ -160,10 +161,21 @@ def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) 
     return f"## 設計文書 {path}（PR #{n}）\n\n{text}"
 
 
-def build_prompt(project: pm.ProjectMvv, sprint: str | None, gate: str, materials: list[str]) -> str:
+def build_prompt(project: pm.ProjectMvv, sprint: str | None, gate: str, materials: list[str], rule: str = "") -> str:
     """MVV の節（共通原則 → プロジェクト MVV → スプリント MVV → 判断の決まり）→ 承認ゲート → 材料。"""
     body = "\n\n".join(m[:MAX_MATERIAL] for m in materials)
-    return f"{pm.block(project, sprint)}\n# 承認ゲート\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
+    asked = f"{GATES[gate]}\n\n{rule}" if rule else GATES[gate]
+    return f"{pm.block(project, sprint)}\n# 承認ゲート\n\n{asked}\n\n# 材料\n\n{body}\n"
+
+
+def revise_material(path: str | None) -> list[str]:
+    """`--revise-note` の入力を材料の 1 件にする（無ければ空）。読めなければ Back（承認ゲートへ戻す）。"""
+    if not path:
+        return []
+    try:
+        return [revise_note.prompt_text(revise_note.read_input(path))]
+    except (OSError, ValueError, KeyError) as e:
+        raise Back(f"出し直しの指摘の入力を読めない: {e}")
 
 
 def well_formed(verdict) -> bool:
@@ -443,12 +455,13 @@ def cmd_check(a) -> tuple[dict, int | None]:
 
     try:
         sprint, materials = machine_checks(a, root, project, record)
+        materials = [*revise_material(a.revise_note), *materials]
     except (OSError, ValueError) as e:
         return back(f"スプリントの状態を読めない: {e}", "machine")
     except Back as e:
         return back(str(e), "machine")
 
-    verdict, raw, usage = ask(build_prompt(project, sprint, a.gate, materials))
+    verdict, raw, usage = ask(build_prompt(project, sprint, a.gate, materials, revise_note.GATE_RULE if a.revise_note else ""))
     if verdict is None:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
     boundary = verdict["boundary"]
@@ -473,6 +486,7 @@ def main() -> int:
     c.add_argument("--log", default=str(pm.gate_log_path()))
     c.add_argument("--repo")
     c.add_argument("--root", help="進め方の宣言を読むリポジトリの根（既定はカレント）")
+    c.add_argument("--revise-note", help="出し直しの指摘の入力。材料の先頭へ足し、指摘の項目を満たさない設計を従うにしない条件を問いへ足す")
     c.add_argument("--note", help="従うとき（--advise ではプロジェクト MVV が承認済みのすべての判定）に、判定の記録を Markdown で書く所")
     c.add_argument(
         "--advise", action="store_true", help="助言の MVV 判定: 承認ゲートの記録を書かず、どの判定でも 0 で返す（pace: normal。#1400）"

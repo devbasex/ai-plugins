@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/lib/repo.py",
+  "name": "quoted-main",
+  "kind": "pending",
+  "reason": "既定ブランチを origin/HEAD の次に main・master から探し、本番の宣言が無いと本番とみなす。ブランチの運用を宣言で受けるまで残す",
+  "count": 1,
+  "issue": 1338
+}

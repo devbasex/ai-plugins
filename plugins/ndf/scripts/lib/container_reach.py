@@ -16,6 +16,7 @@
 テストのステップの経路（`env_for`）は、起こせば直りうる理由で届かないと、テスト環境を 1 度だけ起こして確かめ直す
 （テスト環境の用意。#2567）。起こす対象は宣言のサービスだけで、起動は `worktree-testenv.sh` を通す。起こした・
 起こせなかった記録は `wake_events()` が返す。`discard_testenv` は worktree を消す前に公開を閉じてテスト環境を破棄する。
+`reclaim_testenv` は worktree の消えた割り当てのテスト環境を回収し、結果の行を返す（#2660）。
 
 CLI（シェルから呼ぶ）は起こさない:
 
@@ -39,14 +40,18 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+import limits
 import secret_redact
 import worktree_base
 
 TESTENV = Path(__file__).resolve().parent.parent / "worktree-testenv.sh"
 EVIDENCE = ".ndf-evidence"
-EXEC_TIMEOUT = 60  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
-UP_TIMEOUT = 300  # テスト環境の起動の上限（秒）。実測の最長 49 秒の 6 倍で、遅れの見張りの既定の下限と同じ（#2567 の決定 3）
-STOP_GRACE = 5  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
+EXEC_TIMEOUT = limits.seconds("container-reach.exec")  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
+UP_TIMEOUT = limits.seconds("container-reach.up")
+# 回収の外の上限（秒）。`worktree-testenv.sh` の内側の 300 秒に、打ち切りの猶予 5 秒と worktree レジストリの排他の待ちを足した値で、
+# 回収の予約を持ち続ける上限（`lib/worktree-testenv-sweep.sh` の RECLAIM_HOLD）と同じである（#2660 の決定 7）
+RECLAIM_LIMIT = 330
+STOP_GRACE = limits.seconds("container-reach.stop-grace")  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
 TAG_KEPT = 3  # `worktree-testenv.sh down` が基準のタグを消せず、破棄へ進まなかったときの終了コード
 TAIL_CHARS = 300  # 理由へ載せる標準エラーの末尾の文字数（伏せ字の後に数える）
 
@@ -109,17 +114,7 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
     try:
         mark.parent.mkdir(exist_ok=True)
         mark.write_text(token, encoding="utf-8")
-        p = subprocess.run(
-            [docker, "compose", "exec", "-T", service, "cat", rel],
-            cwd=wt,
-            env={**os.environ, **env},
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=EXEC_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise Unreachable(f"サービス {service} のコンテナが {EXEC_TIMEOUT} 秒で答えない", wakeable=True) from None
+        p = _exec_marker_probe(docker, service, env, wt, rel)
     except OSError as e:
         raise Unreachable(f"サービス {service} のコンテナを探れない: {e}") from None
     finally:
@@ -131,6 +126,27 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
             mark.parent.rmdir()
         except OSError:
             pass
+    return _interpret_probe(p, service, env, token)
+
+
+def _exec_marker_probe(docker: str, service: str, env: dict[str, str], wt: Path, rel: str) -> subprocess.CompletedProcess:
+    """コンテナに探りの印 `rel` を読ませた結果を返す。"""
+    try:
+        return subprocess.run(
+            [docker, "compose", "exec", "-T", service, "cat", rel],
+            cwd=wt,
+            env={**os.environ, **env},
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=EXEC_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise Unreachable(f"サービス {service} のコンテナが {EXEC_TIMEOUT} 秒で答えない", wakeable=True) from None
+
+
+def _interpret_probe(p: subprocess.CompletedProcess, service: str, env: dict[str, str], token: str) -> dict[str, str]:
+    """探りの結果を判定する。印が読めれば `env` を返し、読めなければ `Unreachable`。"""
     if p.returncode == 0 and p.stdout.strip() == token:
         return env
     if p.returncode == 0 or "No such file" in p.stdout + p.stderr:
@@ -178,7 +194,7 @@ def _stop_group(p: "subprocess.Popen[str]") -> None:
             pass
 
 
-def _testenv(*args: str, timeout: int | None = None) -> tuple[int | None, str, str]:
+def _testenv(*args: str, timeout: float | None = None) -> tuple[int | None, str, str]:
     """`worktree-testenv.sh` を打ち、(終了コード, 標準出力, 標準エラー) を返す。上限を超えたらグループごと止めて終了コードは None。"""
     with subprocess.Popen(
         ["bash", str(TESTENV), *args],
@@ -214,7 +230,10 @@ def leftover_volumes(environment: str) -> list[str]:
 def _wake(cwd: Path, services: list[str], missed: list[str]) -> tuple[str, list[str]]:
     """テスト環境を起こし、(環境名, 起こす前から残っていたボリューム) を返す。起こせなければ `Unreachable`。"""
     names = "、".join(missed)
-    code, out, err = _testenv("env", str(cwd))
+    started = time.monotonic()
+    code, out, err = _testenv("env", str(cwd), timeout=UP_TIMEOUT)
+    if code is None:
+        raise Unreachable(f"サービス {names} のテスト環境の割り当てが {UP_TIMEOUT} 秒で終わらなかった")
     if code != 0:
         raise Unreachable(f"サービス {names} のテスト環境を起こせない: {_tail(err)}")
     if not out.strip():
@@ -225,7 +244,9 @@ def _wake(cwd: Path, services: list[str], missed: list[str]) -> tuple[str, list[
     reused = leftover_volumes(environment)
     print(f"テスト環境を起こす: {environment}（サービス {names}。上限 {UP_TIMEOUT} 秒）", file=sys.stderr, flush=True)
     waits = [arg for service in services for arg in ("--wait-service", service)]
-    code, _, err = _testenv("up", str(cwd), *waits, timeout=UP_TIMEOUT)
+    # スロットの枯渇の回収は `env` の中で走る。ステップの上限へ足す起動の分は 300 秒だけのため分け合う（#2660 の決定 5）
+    left = UP_TIMEOUT - (time.monotonic() - started)
+    code, _, err = _testenv("up", str(cwd), *waits, timeout=left) if left > 0 else (None, "", "")
     if code is None:
         raise Unreachable(f"サービス {names} のテスト環境の起動が {UP_TIMEOUT} 秒で終わらなかった")
     if code != 0:
@@ -321,6 +342,45 @@ def discard_testenv(worktree: str | Path) -> tuple[bool, str | None]:
     if code != 0:
         return True, f"テスト環境を破棄できない: {environment}（{_tail(err) or f'{UP_TIMEOUT} 秒で終わらなかった'}）"
     return True, None
+
+
+def _reclaim_not_run(main_dir: str, reason: str) -> list[dict]:
+    return [{"kind": "testenv-reclaim", "name": main_dir, "result": "not_run", "reason": secret_redact.redact_output(reason)}]
+
+
+def reclaim_testenv(main_dir: str | Path) -> list[dict]:
+    """worktree の消えた割り当てのテスト環境を回収し、結果の行を返す。判定は `worktree-testenv.sh reclaim` が持つ。
+
+    後片付けを止めないよう例外を上げない。上限の超過・読めない結果は `not_run` の 1 行にする。残った割り当てが無ければ空。
+    """
+    main = str(main_dir)
+    try:
+        code, out, err = _testenv("reclaim", main, timeout=RECLAIM_LIMIT)
+    except OSError as e:
+        return _reclaim_not_run(main, f"テスト環境の回収を起動できない: {e}")
+    if code is None:
+        return _reclaim_not_run(main, f"テスト環境の回収が {RECLAIM_LIMIT} 秒で終わらなかった")
+    if code not in (0, 1):
+        return _reclaim_not_run(main, f"テスト環境の回収が終了コード {code} で終わった: {_tail(err)}")
+    if code == 0 and not out.strip():
+        return []  # testenv の宣言が無い
+    try:
+        items = json.loads(out)["items"]
+    except (ValueError, KeyError, TypeError):
+        return _reclaim_not_run(main, f"テスト環境の回収の結果を読めない: {_tail(err)}")
+    if not isinstance(items, list) or not all(isinstance(i, dict) and "result" in i for i in items):
+        return _reclaim_not_run(main, "テスト環境の回収の結果の形が違う")
+    return [{**i, "reason": secret_redact.redact_output(i["reason"])} if "reason" in i else i for i in items]
+
+
+def reclaim_summary(items: list[dict]) -> tuple[dict[str, int], str]:
+    """後片付けの記録から、回収の件数と要約の末尾を返す。回収の行の `result` は作業ツリーの語彙と重ならない。"""
+    rows = [i["result"] for i in items if i["kind"] in ("testenv", "testenv-reclaim")]
+    reclaimed, failed = rows.count("reclaimed"), rows.count("failed") + rows.count("not_run")
+    deferred = rows.count("deferred")
+    metrics = {"reclaimed_testenvs": reclaimed, "reclaim_failed": failed, "reclaim_deferred": deferred}
+    note = f"。テスト環境 {reclaimed} 件を回収した（失敗 {failed} 件・残した {deferred} 件）" if reclaimed or failed or deferred else ""
+    return metrics, note
 
 
 def main(argv: list[str] | None = None) -> int:

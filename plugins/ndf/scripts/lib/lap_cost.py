@@ -1,6 +1,6 @@
-"""周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方を周回の費用にする（#2505 の決定 11）。
+"""ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方をループの 1 回の費用にする（#2505 の決定 11）。
 
-帳簿の和は Claude の行のうち、周回のプランを指す行の和で、cross-review・MVV 判定を含む。報告の和を残すのは、Factory の実行ジョブの
+帳簿の和は Claude の行のうち、ループの 1 回のプランを指す行の和で、cross-review・MVV 判定を含む。報告の和を残すのは、Factory の実行ジョブの
 再開で帳簿の行が欠けるためである（帳簿はホームの下にあり、報告は `.ndf/` の下で復元される）。Codex と Kiro は USD を持たないので
 和に足さず、内訳に呼び出しの数とトークンを残す。USD は定価の見積もりで請求額ではない。
 """
@@ -36,7 +36,7 @@ def _unpriced(prefix: str, directory: Optional[Path]) -> dict:
 
 
 def lap_cost(lap: dict, reports: float, directory: Optional[Path] = None) -> tuple[float, dict]:
-    """(周回の費用, 周回の費用の内訳)。`reports` はスプリントの報告の和。帳簿を読めなければ報告の和を使い、周回の締めを止めない。"""
+    """(ループの 1 回の費用, ループの 1 回の費用の内訳)。`reports` はスプリントの報告の和。帳簿を読めなければ報告の和を使い、ループの 1 回の締めを止めない。"""
     parts: dict = {"source": "reports", "plans": 0.0, "others": 0.0, "unpriced": {}}
     if not lap.get("out"):
         return reports, parts

@@ -1,0 +1,7 @@
+{
+  "name": "user-config-before-json",
+  "pattern": "user-config-before.json",
+  "kind": "state",
+  "place": "state-dir",
+  "skill_readers": []
+}

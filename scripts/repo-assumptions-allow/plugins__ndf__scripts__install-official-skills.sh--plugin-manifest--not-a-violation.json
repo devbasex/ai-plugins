@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/install-official-skills.sh",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "リポジトリの根を見分ける候補の 1 つ。ai-plugins の値を既定にしていない",
+  "count": 1
+}

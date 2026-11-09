@@ -176,11 +176,6 @@ def select_and_notify(decl: ReviewDecl, paths, notify) -> ReviewDecl:
     return decl
 
 
-def load_focus(root) -> Focus:
-    """`<root>/.ndf/review.json` の重点だけを読む。例外を上げない。"""
-    return load_review_decl(root).focus
-
-
 def focus_from(status, names, error=None) -> Focus:
     """状態ファイル・振り分けの JSON に写した値から `Focus` を組み直す（形が違えば宣言なし）。"""
     names = tuple(x for x in (names or []) if isinstance(x, str) and x.strip())

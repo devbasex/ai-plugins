@@ -554,7 +554,7 @@ def test_posts_left_by_a_transient_failure_are_flushed_again_without_relaunching
     assert fake.count("launch-reviewer.sh") == 1
     assert fake.count("state.py", "start-round") == 1
     assert fake.count("state.py", "flush") == 2
-    assert fake.sleeps == [cr.post_queue.TRANSIENT_INTERVAL]
+    assert fake.sleeps == [cr.post_queue.limits.policy("post-queue.transient-reflush").interval]
 
 
 def test_posts_that_stay_unsent_stop_as_waiting_and_resume_without_relaunching(tmp_path, monkeypatch, capsys):
@@ -567,8 +567,8 @@ def test_posts_that_stay_unsent_stop_as_waiting_and_resume_without_relaunching(t
     assert out["summary"].startswith("投稿待ち:")
     assert "2 件" in out["summary"] and "unexpected end of JSON input" in out["summary"]
     assert out["metrics"]["exit"] == 8 and out["metrics"]["final"] is None
-    assert sum(fake.sleeps) <= cr.post_queue.TRANSIENT_MAX_WAIT
-    assert sum(fake.sleeps) + cr.post_queue.TRANSIENT_INTERVAL > cr.post_queue.TRANSIENT_MAX_WAIT
+    reflush = cr.post_queue.limits.policy("post-queue.transient-reflush")
+    assert sum(fake.sleeps) == reflush.seconds  # 待ちの合計の上限を使い切ってから止まる（#2343 の決定 9）
     assert fake.count("launch-reviewer.sh") == 1
 
     fake.judges, fake.flushes = [0], [_ALL_SENT]

@@ -1,12 +1,12 @@
-"""承認した設計のマージ（#2507）。設計の承認の答えと周回の境が、承認した設計 PR を宛先へ待たずに 1 回だけマージしてみる。
+"""承認した設計のマージ（#2507）。設計の承認の答えとループの 1 回の境が、承認した設計 PR を宛先へ待たずに 1 回だけマージしてみる。
 
-呼ぶのは `parallel.py answer --approved`（並列の計画）・`sprint-state.py loop answer --approved`（1 本のループ）・周回の境
+呼ぶのは `parallel.py answer --approved`（並列の計画）・`sprint-state.py loop answer --approved`（1 本のループ）・ループの 1 回の境
 （`sprint_loop_select.settle_approved_designs`）の 3 か所で、どれもこの関数だけを使う（設計 #2507 の決定 2）。
 
 - 承認した先端（問いの時点の設計 PR の先頭のコミット）のままのときだけマージする（`merge-when-green --expect-head`）
 - 宛先が本番チャネルに当たるか決められないときはマージしない（リリース承認ゲートを設計承認ゲートの答えで通さない。決定 3）
 - 必須の検査が緑のときだけマージする。検査の完了は待たない（`probe` で分類し、`passed` と `infra` のときだけ呼ぶ。決定 1）
-- 後片付けは持ち主の周回の境が打つ（`--no-cleanup`。決定 5）
+- 後片付けは持ち主のループの 1 回の境が打つ（`--no-cleanup`。決定 5）
 - 例外を投げず、終了コードを持たない。結果は「マージの結果」の 1 つ（`RESULTS`）にして返す
 """
 
@@ -21,6 +21,7 @@ from typing import Callable
 import ci_workflows
 import clock
 import delivery
+import step_read
 
 MERGED_STEPS = Path(__file__).resolve().parents[1] / "merged-steps.py"
 RESULTS = ("merged", "already_merged", "head_moved", "no_stamp", "not_green", "conflict", "production", "failed")
@@ -34,20 +35,14 @@ Run = Callable[..., tuple]
 
 
 def run_cmd(cmd: list[str], cwd: str | None = None, stdin: str | None = None) -> tuple[int, str, str]:
-    """コマンドを起動して (終了コード, 標準出力, 標準エラー) を返す。周回のコマンド（`sprint_loop_record`）もこれを使う。"""
+    """コマンドを起動して (終了コード, 標準出力, 標準エラー) を返す。ループの 1 回のコマンド（`sprint_loop_record`）もこれを使う。"""
     p = subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr
 
 
-def _last_json(text: str) -> dict:
-    for line in reversed((text or "").strip().splitlines()):
-        try:
-            got = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(got, dict):
-            return got
-    return {}
+def _child_result(text: str) -> dict:
+    """子の出力の最後の JSON の行（共通の読み手 `step_read.last_json`）。無ければ空。"""
+    return step_read.last_json(text) or {}
 
 
 def _res(result: str, pr: int, head: str = "", reason: str = "", cls: str | None = None, **extra) -> dict:
@@ -86,7 +81,7 @@ def merge_approved(root, pr: int, stamp: str | None, run: Run | None = None, inf
     """設計 PR `pr` を、承認した先端 `stamp` のままで検査が緑なら宛先へマージする。結果は `RESULTS` の値の 1 つ。
 
     出力: {result, class, reason, pr, head, at, branch, infra_rerun}。`infra_rerun` は基盤待ちのジョブを実際に再実行した
-    回数（merge-when-green の items の `infra_rerun` の数）。周回の境が同じ承認した先端での累計に足す。
+    回数（merge-when-green の items の `infra_rerun` の数）。ループの 1 回の境が同じ承認した先端での累計に足す。
     `infra_budget` は再実行の残りの回数で、merge-when-green の `--infra-reruns` に渡す。0 以下で基盤待ちなら
     merge-when-green を呼ばずに not_green（infra）を返す。"""
     run = run or run_cmd
@@ -121,7 +116,7 @@ def _try_merge(root: str, pr: int, stamp: str, run: Run, budget: int) -> dict:
     if why := _checks_registered(root, base, stamp, info.get("statusCheckRollup") or [], run):
         return _res("not_green", pr, head, why, UNREGISTERED, **ctx)
     code, so, se = run([sys.executable, str(MERGED_STEPS), "probe", "--pr", str(pr), "--act"], cwd=root)
-    cls = (_last_json(so).get("metrics") or {}).get("class")
+    cls = (_child_result(so).get("metrics") or {}).get("class")
     if code != 0 or not cls:
         return _res("failed", pr, head, f"検査を分類できない（probe {code}）: {(se or so).strip()[:200]}", **ctx)
     if cls not in ("passed", "infra"):
@@ -132,7 +127,7 @@ def _try_merge(root: str, pr: int, stamp: str, run: Run, budget: int) -> dict:
             return _res("not_green", pr, head, f"CI の基盤待ちが再実行 {INFRA_RERUNS} 回で解けない", cls, **ctx)
         argv += ["--infra-gap", "0", "--infra-reruns", str(budget)]
     code, so, se = run(argv, cwd=root)
-    got = _last_json(so)
+    got = _child_result(so)
     ctx["infra_rerun"] = sum(1 for i in got.get("items") or [] if isinstance(i, dict) and i.get("result") == "infra_rerun")
     return _from_merge(pr, head, cls, code, got, se, ctx)
 

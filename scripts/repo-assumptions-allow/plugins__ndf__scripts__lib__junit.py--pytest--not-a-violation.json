@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/junit.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "テストの Tool の名前を説明か判定の材料として挙げている。テストのコマンドを埋め込んでいない",
+  "count": 1
+}

@@ -21,8 +21,8 @@ class Kind:
 KINDS: tuple[Kind, ...] = (
     Kind(
         "review-worktree",
-        "<base>/<slug>/pr<n> と <base>/<slug>/rf<n>/{work,<ランタイム>}。記録は <base>/<slug>/{pr,rf}<n>.owner.json",
-        "cross-review・cross-refactoring の実行（記録の run）",
+        "<base>/<slug>/pr<n> と <base>/<slug>/rf<n>/{work,<ランタイム>}。持ち主の記録は leases/<slug>/ の鍵 cross-review:pr=<n>・cross-refactoring:pr=<n>",
+        "cross-review・cross-refactoring の実行（持ち主の記録の pid と開始時刻）",
         "持ち主が終わり、Pull Request が open でなく、作業（変更・未追跡・未 push のコミット）が無い",
         "merged の cleanup・cross-review と cross-refactoring の開始の sweep",
         (
@@ -32,6 +32,14 @@ KINDS: tuple[Kind, ...] = (
             "skills/cross-review/scripts/review_lib/workspace.py",
             "skills/cross-refactoring/scripts/refactor_lib/commands/setup.py",
         ),
+    ),
+    Kind(
+        "lease-record",
+        "<コンテナの状態の根>/leases/<slug>/*.lease.json（錠の .lock は対象外で、消さずに残す）",
+        "持ち主の部品（lease.py）",
+        "終わった時刻から 30 日",
+        "merged の cleanup・cross-review と cross-refactoring の開始の sweep（lease.prune を呼ぶ）",
+        ("scripts/lib/lease.py",),
     ),
     Kind(
         "session-state",
@@ -75,10 +83,10 @@ KINDS: tuple[Kind, ...] = (
     ),
     Kind(
         "relay-hub-request",
-        "${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/requests/<id>.json と results/<id>.json（0700 のディレクトリ・0600 のファイル）",
-        "依頼は頼む側（relay.py の run・spawn・restart・Stop hook の起動のブロック）、結果は統括役（#2346）",
-        "依頼は統括役が受け取った時点で消す。結果は頼む側が読んで消し、読まれずに 10 分を過ぎたものは次の統括役が消す",
-        "統括役の受け取り・統括役の起動の直後",
+        "<状態の根（lib/state_home.py）>/relay/hub/requests/<id>.json と results/<id>.json（0700 のディレクトリ・0600 のファイル）",
+        "依頼は頼む側（relay.py の run・spawn・restart・Stop hook の起動のブロック）、結果はリレーハブ（#2346）",
+        "依頼はリレーハブが受け取った時点で消す。結果は頼む側が読んで消し、読まれずに 10 分を過ぎたものは次のリレーハブが消す",
+        "リレーハブの受け取り・リレーハブの起動の直後",
         (),
     ),
     Kind(
@@ -117,4 +125,4 @@ KINDS: tuple[Kind, ...] = (
         ),
     ),
 )
-SWEPT_KINDS = ("review-worktree", "session-state", "deps-work", "fix-files", "test-tmp")
+SWEPT_KINDS = ("review-worktree", "lease-record", "session-state", "deps-work", "fix-files", "test-tmp")

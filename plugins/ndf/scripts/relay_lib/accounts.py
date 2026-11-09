@@ -32,11 +32,6 @@ USAGE = (
 AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
 
 
-def cmd_add(name: str, code: str | None = None, yes: bool = False, as_json: bool = False, swept: set[str] | None = None) -> int:
-    """`account add`（関数として呼ぶ形。入口は `cmd_account`）。"""
-    return _respond("add", as_json, lambda: _add(Asker(yes), name, code, as_json, swept or set()))
-
-
 def _add(asker: Asker, name: str | None, code: str | None, as_json: bool, swept: set[str]) -> dict:
     name = asker.value("<名前>", "アカウントの名前", name)
     if code is not None:

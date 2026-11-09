@@ -142,6 +142,80 @@ def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
     assert out["metrics"]["removed_worktrees"] == 1 and out["metrics"]["deleted_branches"] == 1
 
 
+FAKE_DOCKER = """#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_CALLS"
+case "$*" in
+  *" down"*) [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo "device busy" >&2; exit 1; } ;;
+esac
+"""
+
+
+def testenv_repo(repo, env, tmp_path, *, stale=True):
+    """テスト環境を宣言し、マージ済みの PR 1 件と（`stale` なら）残った割り当て 1 行を用意する。"""
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "main", "testenv": {}}))
+    git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
+    docker = tmp_path / "bin" / "docker"
+    docker.write_text(FAKE_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    env["FAKE_DOCKER_CALLS"] = str(tmp_path / "docker-calls")
+    rows = [{"worktree": str(repo / ".worktrees" / "gone"), "environment": "e1", "slot": 0, "released_at": None, "expose": None}]
+    write(repo, ".git/ndf/worktree-registry.json", json.dumps({"version": 1, "assignments": rows if stale else []}))
+
+
+def test_cleanup_reclaims_a_stale_assignment(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["status"] == "ok"
+    by = {(i["kind"], i["name"]): i for i in out["items"]}
+    assert by[("testenv", "e1")]["result"] == "reclaimed"
+    assert out["metrics"]["reclaimed_testenvs"] == 1 and out["metrics"]["reclaim_failed"] == 0 and out["metrics"]["reclaim_deferred"] == 0
+    assert out["metrics"]["removed_worktrees"] == 1
+    assert out["summary"].endswith("テスト環境 1 件を回収した（失敗 0 件・残した 0 件）")
+
+
+def test_a_failed_reclaim_does_not_change_the_cleanup(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    env["FAKE_DOWN_FAIL"] = "1"
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["status"] == "ok" and not (tmp_path / "wx").exists() and "feature/x" not in git(repo, "branch", "--list")
+    failed = [i for i in out["items"] if i["result"] == "failed"]
+    assert failed[0]["name"] == "e1" and "device busy" in failed[0]["reason"]
+    assert out["metrics"]["reclaim_failed"] == 1
+    assert "失敗 1 件" in out["summary"]
+
+
+def test_a_reclaim_that_does_not_run_is_reported(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    env["WT_DOCKER_COMMAND"] = "no-such-runtime"
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["status"] == "ok"
+    assert [i["kind"] for i in out["items"] if i["result"] == "not_run"] == ["testenv-reclaim"]
+    assert out["metrics"]["reclaim_failed"] == 1
+
+
+def test_no_stale_assignment_leaves_the_cleanup_as_it_was(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path, stale=False)
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert code == 0, err
+    assert {i["kind"] for i in out["items"]} == {"worktree", "branch", "main_dir"}
+    assert out["summary"] == "作業ツリー 1 件を外し、ブランチ 1 件を消した（残した 1 件・止まった 0 件）"
+    assert out["metrics"]["reclaimed_testenvs"] == 0
+    assert not (tmp_path / "docker-calls").exists()
+
+
+def test_a_pull_failure_still_reclaims(repo, env, tmp_path):
+    testenv_repo(repo, env, tmp_path)
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "testenv": {}}))
+    git(repo, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
+    assert out["status"] == "stopped", err
+    assert [i["result"] for i in out["items"] if i["kind"] == "testenv"] == ["reclaimed"]
+
+
 def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
     """#2436 の異常系 8: 別のレーンがメインディレクトリの排他（.git/ndf-main.lock）を持つ間は、後片付けは待ってから進む。"""
     import threading
@@ -505,6 +579,118 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
     assert out == ["codex: p/skills/a/SKILL.md"]
 
 
+# --- 利用者の設定の控えと比較（user-config-save / user-config-check。#2401） ------------------------
+
+
+def installed_json(version="1.0.0", sha="abcdef1234567890", **extra):
+    row = {"scope": "user", "version": version, "gitCommitSha": sha, "installPath": "/x", "installedAt": "t0", "lastUpdated": "t0", **extra}
+    return json.dumps({"version": 2, "plugins": {"ndf@ai-plugins": [row]}})
+
+
+@pytest.fixture
+def user_config(tmp_path, env):
+    """一時ディレクトリを利用者の設定ディレクトリ（CLAUDE_CONFIG_DIR・CODEX_HOME）にする。"""
+    claude, codex = tmp_path / "claude", tmp_path / "codex"
+    write(claude, "plugins/installed_plugins.json", installed_json())
+    known = {
+        "ai-plugins": {"source": {"source": "git", "url": "https://u:SECRET1@github.com/a/b.git"}, "lastUpdated": "t0", "autoUpdate": True}
+    }
+    write(claude, "plugins/known_marketplaces.json", json.dumps(known))
+    write(
+        codex,
+        "config.toml",
+        '[marketplaces.ai-plugins]\nsource_type = "git"\nsource = "https://x:SECRET2@h/r"\nref = "develop"\n'
+        '[plugins."ndf@ai-plugins"]\nenabled = true\n[model]\nname = "SECRET3"\n',
+    )
+    write(codex, "auth.json", '{"token": "SECRET4"}')
+    (codex / "plugins" / "cache" / "ai-plugins" / "ndf" / "1.0.0").mkdir(parents=True)
+    env.update(CLAUDE_CONFIG_DIR=str(claude), CODEX_HOME=str(codex))
+    return claude, codex, tmp_path / "state" / "user-config-before.json"
+
+
+def config_call(sub, before, env):
+    """控えのファイル before の置き場（--dir）を渡して打つ。"""
+    return call("release-verification-steps.py", [f"user-config-{sub}", "--dir", str(before.parent)], env)
+
+
+def test_user_config_unchanged_is_ok_and_hides_secrets(user_config, env):
+    claude, codex, before = user_config
+    code, out, _ = config_call("save", before, env)
+    assert code == 0 and out["status"] == "ok" and out["metrics"]["keys"] == 4
+    code, out2, _ = config_call("check", before, env)
+    assert code == 0 and out2["status"] == "ok" and out2["metrics"]["unchanged"] is True and out2["items"] == []
+    shown = before.read_text(encoding="utf-8") + json.dumps(out) + json.dumps(out2)
+    assert not any(f"SECRET{i}" in shown for i in range(1, 5))
+
+
+@pytest.mark.parametrize(
+    ("change", "key", "after"),
+    [
+        (
+            lambda c, x: write(c, "plugins/installed_plugins.json", installed_json("1.0.1")),
+            "claude:plugin:ndf@ai-plugins",
+            "user:1.0.1@abcdef12",
+        ),
+        (
+            lambda c, x: (x / "plugins/cache/ai-plugins/ndf/1.0.1").mkdir(),
+            "codex:plugin:ndf@ai-plugins",
+            "enabled=true versions=1.0.0,1.0.1",
+        ),
+        (
+            lambda c, x: (x / "plugins/cache/ai-plugins/new/2.0.0").mkdir(parents=True),
+            "codex:plugin:new@ai-plugins",
+            "enabled=- versions=2.0.0",
+        ),
+    ],
+)
+def test_user_config_change_stops_with_the_key_and_both_values(user_config, env, change, key, after):
+    """版が上がる・版が足される・新しいプラグインが入ると 1 で止まり、鍵と前後の値を載せる（新しい鍵の前は null）。"""
+    claude, codex, before = user_config
+    assert config_call("save", before, env)[0] == 0
+    change(claude, codex)
+    code, out, _ = config_call("check", before, env)
+    assert code == 1 and out["status"] == "stopped" and out["metrics"] == {**out["metrics"], "unchanged": False, "changed": 1}
+    [item] = out["items"]
+    assert item["kind"] == "user_env" and item["name"] == key and item["after"] == after
+    assert (item["before"] is None) == key.startswith("codex:plugin:new") and key in out["summary"]
+
+
+def test_user_config_ignores_times_places_and_auto_update(user_config, env):
+    claude, _, before = user_config
+    assert config_call("save", before, env)[0] == 0
+    write(claude, "plugins/installed_plugins.json", installed_json(installPath="/y", installedAt="t1", lastUpdated="t1"))
+    known = {
+        "ai-plugins": {"source": {"source": "git", "url": "https://u:SECRET1@github.com/a/b.git"}, "lastUpdated": "t1", "autoUpdate": False}
+    }
+    write(claude, "plugins/known_marketplaces.json", json.dumps({k: {**v, "installLocation": "/z"} for k, v in known.items()}))
+    code, out, _ = config_call("check", before, env)
+    assert code == 0 and out["status"] == "ok"
+
+
+@pytest.mark.parametrize("broken", ["no-before", "bad-before", "bad-config"])
+def test_user_config_unreadable_is_2(user_config, env, broken):
+    """控えが無い・壊れている、設定のファイルが壊れていると「変わっていない」と言えないため 2 で止まる。"""
+    claude, _, before = user_config
+    if broken != "no-before":
+        assert config_call("save", before, env)[0] == 0
+    if broken == "bad-before":
+        before.write_text("{", encoding="utf-8")
+    if broken == "bad-config":
+        write(claude, "plugins/installed_plugins.json", "{")
+        code, out, _ = config_call("save", before, env)
+        assert code == 2 and out["status"] == "stopped" and out["items"][0]["kind"] == "unreadable"
+    code, out, _ = config_call("check", before, env)
+    assert code == 2 and out["status"] == "stopped" and "unchanged" not in out["metrics"]
+    assert out["items"] and all(i["kind"] == "unreadable" for i in out["items"])
+
+
+def test_user_config_missing_dirs_are_empty_not_unreadable(tmp_path, env):
+    """設定ディレクトリが無いのは導入していない状態で、読めないこととは分ける。"""
+    env.update(CLAUDE_CONFIG_DIR=str(tmp_path / "none-c"), CODEX_HOME=str(tmp_path / "none-x"))
+    code, out, _ = config_call("save", tmp_path / "b" / "user-config-before.json", env)
+    assert code == 0 and out["metrics"]["keys"] == 0
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
@@ -765,3 +951,48 @@ def test_verify_install_all_ok_emits_ok(tmp_path, monkeypatch):
     assert out["metrics"]["prev_tag"] is None and out["metrics"]["mismatch"] == 0
     assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [("runtime", "codex", "ok")]
     assert "develop（abcdef12）" in out["summary"] and "v1.2.0" in out["summary"]
+
+
+@pytest.mark.parametrize(
+    ("change", "key"),
+    [
+        (lambda c, x: write(c, "plugins/installed_plugins.json", installed_json("1.0.1")), "claude:plugin:ndf@ai-plugins"),
+        (lambda c, x: (x / "plugins/cache/ai-plugins/new/2.0.0").mkdir(parents=True), "codex:plugin:new@ai-plugins"),
+        (lambda c, x: write(c, "plugins/installed_plugins.json", "{"), "claude:unreadable"),
+    ],
+)
+def test_verify_install_stops_when_user_config_changes(tmp_path, monkeypatch, change, key):
+    """受け入れ条件 5・I6（#2401）: 導入の途中で利用者の設定ディレクトリが変わると user_env_unchanged が false で止まる。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+    claude, codex = tmp_path / "claude", tmp_path / "codex"
+    write(claude, "plugins/installed_plugins.json", installed_json())
+    (codex / "plugins" / "cache" / "ai-plugins" / "ndf" / "1.0.0").mkdir(parents=True)
+    for k, v in {"HOME": tmp_path / "home", "CLAUDE_CONFIG_DIR": claude, "CODEX_HOME": codex}.items():
+        monkeypatch.setenv(k, str(v))
+
+    def verify_codex(*a):
+        change(claude, codex)
+        return {"exit": 0, "version": "1.2.0"}, {"ndf": tmp_path}
+
+    def fake_git(root, *args):
+        out = {"rev-parse": "abcdef1234567890\n", "tag": "ndf--v1.2.0\n"}.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    emitted = []
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf"]))
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod.subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {})
+    monkeypatch.setattr(mod, "verify_codex", verify_codex)
+    monkeypatch.setattr(mod, "compare_files", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "emit", emitted.append)
+
+    mod.cmd_verify_install(argparse.Namespace(root=None, ref="develop", expect="1.2.0", runtimes="codex", plugins=None))
+    out = emitted[0]
+    assert out["status"] == "stopped" and out["metrics"]["user_env_unchanged"] is False
+    assert key in [i["name"] for i in out["items"] if i["kind"] == "user_env"]

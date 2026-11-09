@@ -15,7 +15,7 @@
     "系列": null
   },
   "規則": "リリース承認ゲートは利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。",
-  "上限": 100,
+  "上限": 107,
   "steps": [
     {
       "id": "mvv",
@@ -87,21 +87,33 @@
         "75": "stop"
       },
       "on_fail": "judge",
-      "next": "record",
+      "next": "cd-result",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --head {branch} --head {base} --act"
       },
       "gate_next": "handoff"
     },
     {
+      "id": "cd-result",
+      "type": "run",
+      "stage": "デプロイ",
+      "timeout": 7920,
+      "cmd": "python3 <NDF>/scripts/release-steps.py cd-result --base main --head release/v1.2.0 --out {state_dir}/work/cd-result.json",
+      "next": "record",
+      "cwd": "<TMP>/repo"
+    },
+    {
       "id": "record",
       "type": "run",
       "stage": "デプロイ",
       "timeout": 300,
-      "cmd": "python3 <NDF>/scripts/release-steps.py record --version 1.2.0 --prs {queue_prs}",
+      "cmd": "python3 <NDF>/scripts/release-steps.py record --version 1.2.0 --prs {queue_prs} --cd-result {state_dir}/work/cd-result.json",
       "pr_from": "release_pr_url",
       "on_fail": "judge-record",
-      "next": "verify"
+      "next": "verify",
+      "on_exit": {
+        "5": "stop"
+      }
     },
     {
       "id": "verify",

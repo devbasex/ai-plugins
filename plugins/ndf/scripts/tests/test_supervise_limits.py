@@ -121,12 +121,16 @@ def reason_of(text: str) -> str:
 
 
 def _failing_sets(plans: dict[str, dict]) -> dict[frozenset, tuple[str, dict]]:
-    """修正のループの入口の組ごとに、最初のプランを 1 つ（総当たりを代表の組に絞る。修正のループの無いプランは除く）。"""
+    """修正のループの入口の組ごとに、最初のプランを 1 つ（総当たりを代表の組に絞る。修正のループの無いプランは除く）。
+    入口は on_fail で入るループだけ（on_exit で入るループは終了コード 1 で入れない。設計のプランの解決のフローは
+    test_design_review_settled が流す）。"""
     reps: dict[frozenset, tuple[str, dict]] = {}
     for name, plan in plans.items():
         fixes, _ = limits.loops(plan)
-        failing = {k.split("→")[0] for k in fixes}
-        failing = frozenset(c for c in failing if any(s["id"] == c and s.get("on_fail") for s in plan["steps"]))
+        by = {s["id"]: s for s in plan["steps"]}
+        failing = frozenset(
+            c for c, f in (k.split("→") for k in fixes) if by[c].get("on_fail") and f not in (by[c].get("on_exit") or {}).values()
+        )
         if failing:
             reps.setdefault(failing, (name, plan))
     return reps
@@ -328,6 +332,8 @@ def test_1676_1_the_design_route_with_a_retry_reaches_the_gate(plans, tmp_path):
 
 def test_1623_3_two_slow_retries_do_not_use_up_the_limit(plans, tmp_path):
     route = _with_retries(DESIGN_ROUTE, "requirements", "design")
-    ran, text, _ = drive(tmp_path, plans["sprint/1-design-16"], scripted(route))
-    assert len(ran) == len(DESIGN_ROUTE) + 2 > plans["sprint/1-design-16"]["上限"]
+    # 上限をループを通らない最長の経路まで下げ、再試行を数えれば上限を超える流れにする
+    plan = {**plans["sprint/1-design-16"], "上限": limits.longest_path(plans["sprint/1-design-16"])}
+    ran, text, _ = drive(tmp_path, plan, scripted(route))
+    assert len(ran) == len(DESIGN_ROUTE) + 2 > plan["上限"]
     assert "結果: 関門" in text
