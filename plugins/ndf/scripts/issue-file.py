@@ -12,10 +12,12 @@
 結果は `lib/step_result.py` の形の 1 行の JSON（`tool` は `issue-file`）。終了コード:
 
     0   済んだ（0 件の検索も含む）
-    1   本文の骨格が欠ける・提示の要約値が合わない・書き込みが失敗した（create / note）
-    2   引数の形の誤り・GitHub か git を読めない
+    1   本文が記載項目の定義を満たさない・提示の要約値が合わない・書き込みが失敗した（create / note）
+    2   引数の形の誤り・GitHub か git を読めない・記載項目の定義を読めない
     10  承認資料を書いた。同意の後に `--approved <metrics.digest>` を足して打ち直す（create と、打つ先が開発対象リポジトリと別の note）
     20  上流リポジトリを 1 つに絞れない。候補を示して利用者に選んでもらう（resolve-target）
+
+`create` は起票の前に本文を記載項目の定義（`lib/issue_items.py`。種類は `--label` の種類のラベル）で判定する。
 
 由来は `PR #<番号>` か `issue #<番号>`、リポジトリは `<所有者>/<リポジトリ>`、相手の課題は `<所有者>/<リポジトリ>#<番号>`。
 形が違えば GitHub を呼ばずに 2 で終える。GitHub は `lib/gh_rest.py`（下は `gh_call`）だけを通して呼ぶ。
@@ -55,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
 import gh_sections  # noqa: E402
+import issue_items  # noqa: E402
 import proc  # noqa: E402
 import runner_issue_request  # noqa: E402
 from step_result import EXIT_GATE, EXIT_OK, EXIT_PAUSE, EXIT_UNREADABLE, EXIT_VIOLATION  # noqa: E402
@@ -66,7 +69,7 @@ REPO_RE = re.compile(rf"^{_REPO_FORM}$")
 ORIGIN_RE = re.compile(r"^(PR|issue) #[1-9][0-9]*$")
 COUNTERPART_RE = re.compile(rf"^(?P<repo>{_REPO_FORM})#(?P<number>[1-9][0-9]*)$")
 GITHUB_URL_RE = re.compile(r"github\.com[:/]")
-SKELETON = ("何を見つけたか", "どこで見つけたか", "なぜこの変更の範囲外なのか", "直さないと何が起きるか", "起票者の推定", "由来")
+CREATE_CONTEXT = {"ai": True, "origin": True}  # create は AI が作業の途中で起票する
 ORIGIN_HEADING = "## 由来"
 # 取得元の clone の置き場所（HOME からの相対）。Claude Code と Codex の順
 MARKETPLACE_DIRS = (".claude/plugins/marketplaces", ".codex/.tmp/marketplaces")
@@ -261,7 +264,7 @@ def _note_line(a) -> str:
 
 def _is_other_repo(repo: str, target: str | None) -> bool:
     """`repo` が開発対象リポジトリ `target` と別か。読めない（`None`）ときは別とみなす（C5 の側へ倒す）。"""
-    return target is None or target.lower() != repo.lower()
+    return issue_items.repo_differs(target, repo)
 
 
 def _note_gate(repo: str, number: int, line: str, target: str | None, digest: str) -> "NoReturn":  # noqa: F821
@@ -327,9 +330,10 @@ def _line_with(lines: list[str], text: str) -> int | None:
     return next((i for i, line in enumerate(lines) if pat.search(line)), None)
 
 
-def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
-    """「由来」の節に由来（と上流リポジトリの側の課題）が無ければ入れる。節が無ければ変えない。"""
-    section = gh_sections.get_section(body, ORIGIN_HEADING)
+def assemble(body: str, origin: str, counterpart: str | None, definition: issue_items.Definition) -> str:
+    """「由来」の節（本文の判定と同じ見出しの規則）に由来と上流リポジトリの側の課題が無ければ入れる。節が無ければ変えない。"""
+    heading = issue_items.heading_line(body, definition, "origin") or ORIGIN_HEADING
+    section = gh_sections.get_section(body, heading)
     if section is None:
         return body
     lines = section.split("\n") if section.strip() else []
@@ -343,22 +347,10 @@ def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
         changed = True
     if not changed:
         return body
-    out = gh_sections.replace_section(body, ORIGIN_HEADING, "\n".join(lines))
+    out = gh_sections.replace_section(body, heading, "\n".join(lines))
     if gh_sections.SECTION_END not in body:  # 置換が足す節の終わりの目印は、元の本文に無ければ残さない（本文の形を変えない）
         out = "\n".join(line for line in out.split("\n") if line.strip() != gh_sections.SECTION_END)
     return out
-
-
-def skeleton_gaps(body: str) -> list[dict]:
-    """骨格の 6 つの見出しのうち、無いもの・中身が空のもの。囲みの中の `#` は見出しに数えない。"""
-    gaps = []
-    for name in SKELETON:
-        content = gh_sections.get_section(body, f"## {name}")
-        if content is None:
-            gaps.append({"heading": name, "result": "missing"})
-        elif not content.replace(gh_sections.SECTION_END, "").strip():
-            gaps.append({"heading": name, "result": "empty"})
-    return gaps
 
 
 def _digest(shown: dict) -> str:
@@ -412,18 +404,22 @@ def _gate(repo: str, title: str, body: str, labels: list[str], digest: str, othe
 
 
 def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[str]]:
-    """起票の入力 `(起票先, 由来, 相手の課題, 題, 本文, ラベル)` を確かめて確定する。骨格が欠ければ 1 で終える。"""
+    """起票の入力 `(起票先, 由来, 相手の課題, 題, 本文, ラベル)` を確かめて確定する。本文に欠けがあれば 1 で終える。"""
     repo = _require_form(a.repo, REPO_RE, "起票先")
     origin = _require_form(a.origin, ORIGIN_RE, "由来")
     counterpart = _counterpart(a.counterpart) if a.counterpart else None
     if not a.title.strip():
         _stop_with("題が空", EXIT_UNREADABLE)
     labels = list(a.label or [])
-    body = assemble(_read_body_file(a.body_file), origin, a.counterpart)
-    gaps = skeleton_gaps(body)
+    try:  # 今のリポジトリと別の起票先には、今のリポジトリの宣言を当てない（GitHub は呼ばない）
+        definition = issue_items.definition_for(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or None, repo)
+    except issue_items.DefinitionError as exc:
+        _stop_with(f"記載項目の定義を読めない: {exc}", EXIT_UNREADABLE)
+    body = assemble(_read_body_file(a.body_file), origin, a.counterpart, definition)
+    gaps = [g.to_dict() for g in issue_items.judge_body(body, labels, CREATE_CONTEXT, definition)[1]]
     if gaps:
         names = "・".join(g["heading"] for g in gaps)
-        _stop_with(f"本文の骨格が欠ける: {names}。課題は作っていない", EXIT_VIOLATION, gaps)
+        _stop_with(f"本文が記載項目の定義を満たさない: {names}。課題は作っていない", EXIT_VIOLATION, gaps)
     return repo, origin, counterpart, a.title, body, labels
 
 
@@ -474,7 +470,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--counterpart")
     p.add_argument("--approved")
     p.set_defaults(func=cmd_note)
-    p = sub.add_parser("create", help="骨格を検査し、承認資料を示し、同意の後に由来を付けて起票する")
+    p = sub.add_parser("create", help="本文を記載項目の定義で検査し、承認資料を示し、同意の後に由来を付けて起票する")
     p.add_argument("--repo", required=True)
     p.add_argument("--title", required=True)
     p.add_argument("--body-file", required=True)

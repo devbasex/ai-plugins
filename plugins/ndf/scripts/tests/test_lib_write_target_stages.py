@@ -152,3 +152,85 @@ def test_a_leading_tilde_is_the_home_directory(
     # `~user` は利用者の家を引かないと決められないため出さない。
     monkeypatch.setenv("HOME", "/home/u")
     assert _extract(command, "/base") == (targets, rc)
+
+
+# `cmd || <止める文>` の右辺の判定（`_noncontinuing`）を公開入口から固定する。
+# 期待値は現状の実装を動かして採った値で、正しさを主張しない。
+# 右辺を止める文と見なすと、続く書き込みは `cd` の後の位置になる（`/base/x/a.md`）。
+# 見なさないと、`cd` が走ったかを決められず何も出さない（`[]`）。
+NONCONTINUING_CASES = [
+    # --- 単独の命令（`redirected_statement` の剥がしと、命令名の照合） ---
+    ("exit_redirected", "cd x || exit 1 2>/dev/null\necho hi > a.md", ["/base/x/a.md"]),
+    ("return", "cd x || return\necho hi > a.md", ["/base/x/a.md"]),
+    ("break", "cd x || break\necho hi > a.md", ["/base/x/a.md"]),
+    ("continue", "cd x || continue\necho hi > a.md", ["/base/x/a.md"]),
+    ("quoted_exit", 'cd x || "exit" 1\necho hi > a.md', ["/base/x/a.md"]),
+    ("other_command", "cd x || echo ng\necho hi > a.md", []),
+    ("subshell_exit", "cd x || ( exit 1 )\necho hi > a.md", []),
+    ("chained_or", "false || cd x || exit 1\necho hi > a.md", []),
+    ("exit_writes_on_failure", "cd x || exit 1 > err.md\necho hi > a.md", ["/base/err.md", "/base/x/a.md"]),
+    # --- `{ …; }`（中の文ごとの剥がしと、命令名の照合） ---
+    ("group_redirected", "cd x || { echo ng; exit 1; } 2>/dev/null\necho hi > a.md", ["/base/x/a.md"]),
+    ("group_inner_redirected", "cd x || { echo ng >&2; exit 1 >&2; }\necho hi > a.md", ["/base/x/a.md"]),
+    # 末尾でなくても、中のどれかの文が止める命令なら止める文と見なす（現状の振る舞い）。
+    ("group_exit_first", "cd x || { exit 1; echo ng; }\necho hi > a.md", ["/base/x/a.md"]),
+    # `&&` の連なりは先頭の命令だけを見る（現状の振る舞い）。
+    ("group_list_exit_first", "cd x || { exit 1 && echo ng; }\necho hi > a.md", ["/base/x/a.md"]),
+    ("group_list_exit_last", "cd x || { echo ng && exit 1; }\necho hi > a.md", []),
+    ("group_background_exit", "cd x || { exit 1 & }\necho hi > a.md", []),
+    ("group_no_exit", "cd x || { echo ng; }\necho hi > a.md", []),
+    ("group_writes_on_failure", "cd x || { echo ng > err.md; exit 1; }\necho hi > a.md", ["/base/err.md", "/base/x/a.md"]),
+]
+
+
+@pytest.mark.parametrize(
+    ("command", "targets"),
+    [pytest.param(*case[1:], id=case[0]) for case in NONCONTINUING_CASES],
+)
+def test_the_right_side_of_or_that_stops_keeps_its_output(command: str, targets: list[str]) -> None:
+    assert write_target.shell_targets(command, "/base") == targets
+
+
+# リダイレクトの読み方（`_Scan.redirects`）の各枝を公開入口から固定する。
+# 期待値は現状の実装を動かして採った値で、正しさを主張しない。
+REDIRECT_CASES = [
+    # --- 書き込みの演算子（WRITE_OPS） ---
+    ("amp_gt", "make &> a.md", ["/base/a.md"]),
+    ("amp_gtgt", "make &>> a.md", ["/base/a.md"]),
+    ("clobber", "echo hi >| a.md", ["/base/a.md"]),
+    ("read_write", "exec 3<> a.md", ["/base/a.md"]),
+    ("fd_prefix_write", "make 2> err.md", ["/base/err.md"]),
+    ("multiple_in_order", "echo hi > a.md 2> b.md >> c.md", ["/base/a.md", "/base/b.md", "/base/c.md"]),
+    ("after_cd", "cd x\necho hi 2> a.md", ["/base/x/a.md"]),
+    ("parent_dir", "echo hi > ../a.md", ["/a.md"]),
+    # --- 読み込みの演算子は書き込み先にならない ---
+    ("read_redirect", "cat < a.md", []),
+    ("read_redirect_subst", "cat < $(echo hi > a.md)", []),
+    # --- `>&` の記述子の複製と閉じる形は出さず、ファイル名なら出す ---
+    ("dup_file", "echo hi >& a.md", ["/base/a.md"]),
+    ("dup_close", "echo hi >&-", []),
+    ("dup_digit", "echo hi 1>&2", []),
+    # --- 書き込み先に数えない宛先 ---
+    ("dev_null", "echo hi > /dev/null", []),
+    ("dev_stderr", "echo hi > /dev/stderr", []),
+    ("variable_dest", "echo hi > $OUT", []),
+    ("newline_after_operator", "echo hi >\na.md", []),
+    # --- 宛先の中の置換は部分シェルとして読む ---
+    ("dest_subst", 'echo hi > "$(echo hi > a.md; echo b.md)"', ["/base/a.md"]),
+    # --- file_redirect 以外（ヒアストリング）は中の置換だけを見る ---
+    ("herestring_subst", 'cat <<< "$(echo hi > a.md)"', ["/base/a.md"]),
+    ("herestring_plain", "cat <<< hi", []),
+    # --- ヒアドキュメント（付いたリダイレクトと本文の置換） ---
+    ("heredoc_redirect_after", "cat <<EOS > a.md\nx\nEOS", ["/base/a.md"]),
+    ("heredoc_subst", "cat <<EOS > a.md\n$(echo hi > b.md)\nEOS", ["/base/a.md", "/base/b.md"]),
+    ("heredoc_quoted_no_subst", "cat <<'EOS' > a.md\n$(echo hi > b.md)\nEOS", ["/base/a.md"]),
+    ("heredoc_subst_cd_isolated", "cat <<EOS\n$(cd x; echo hi > b.md)\nEOS\necho hi > c.md", ["/base/x/b.md", "/base/c.md"]),
+]
+
+
+@pytest.mark.parametrize(
+    ("command", "targets"),
+    [pytest.param(*case[1:], id=case[0]) for case in REDIRECT_CASES],
+)
+def test_each_kind_of_redirect_keeps_its_output(command: str, targets: list[str]) -> None:
+    assert write_target.shell_targets(command, "/base") == targets

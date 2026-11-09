@@ -9,12 +9,30 @@ body:
         [plugins/ndf/README.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/README.md)
         にあります。執筆の規約は
         [plugins/ndf/skills/AUTHORING.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/AUTHORING.md)
+        にあります。欄の名前と書く水準は、記載項目の定義
+        [plugins/ndf/scripts/data/issue-items.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/scripts/data/issue-items.json)
         にあります。
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: 今どうなっているか・誰に効くか・この Skill で何が成り立つかを書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: difference
+    attributes:
+      label: "目的: 既存 Skill との違い"
+      description: 近い Skill があれば名前を挙げ、そこへ足すのではなく分ける理由を書いてください。
+    validations:
+      required: true
 
   - type: input
     id: name
     attributes:
-      label: 提案する Skill 名
+      label: "対象範囲: Skill 名"
       placeholder: "release-notes"
     validations:
       required: true
@@ -22,23 +40,15 @@ body:
   - type: textarea
     id: stage
     attributes:
-      label: 対象の工程
+      label: "対象範囲: 対象の工程"
       description: 開発のどの工程で使うものかを書いてください。工程表は `development-workflow` にあります。
-    validations:
-      required: true
-
-  - type: textarea
-    id: difference
-    attributes:
-      label: 既存 Skill との違い
-      description: 近い Skill があれば名前を挙げ、そこへ足すのではなく分ける理由を書いてください。
     validations:
       required: true
 
   - type: dropdown
     id: runtime
     attributes:
-      label: 導入先のランタイム
+      label: "対象範囲: 導入先のランタイム"
       multiple: true
       options:
         - Claude Code (claude)
@@ -49,7 +59,15 @@ body:
       required: true
 
   - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+      description: この Skill で何ができると完成と言えるかを、1 行 1 条件の観測できる結果で書いてください。
+    validations:
+      required: true
+
+  - type: textarea
     id: outline
     attributes:
-      label: 手順の骨子
+      label: "直し方の案: 手順の骨子"
       description: 何をどの順で行う Skill かを、箇条書きで書いてください。
