@@ -109,6 +109,7 @@ NOT_PASSED = "リリース後テストに合格でない条件がある（不合
 UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
 UNREADABLE_BODY = "本文を読めない（最終工程の記録を確かめられない）"
 NO_MAPPING = "条件と課題の対応が読めない"
+NO_ISSUE_TABLE = "リリース後テストの記録に `課題` と `結果` の列を持つ表が無い"
 
 
 def judge_acceptance(rows, criteria, pre_merge=frozenset()):
@@ -245,8 +246,10 @@ def _verify_verdicts(rec, record_repo):
     verdicts = verification_verdicts(blk, record_repo)
     if verdicts is not None:
         return None, verdicts
-    # 課題を指す行が無い表: すべての条件をマージ前に確かめた課題だけ判定へ進める（#2144）
-    return NO_MAPPING, ({} if acceptance.verdict_table_readable(blk) else None)
+    if not acceptance.verdict_table_readable(blk):
+        return NO_ISSUE_TABLE, None  # 課題の表が無い: 全件を開いたまま残す（#2803 の決定 3）
+    # 課題を指す行が無い課題の表: すべての条件をマージ前に確かめた課題だけ判定へ進める（#2144）
+    return NO_MAPPING, {}
 
 
 def _closing_blocker(a, rec, record_repo):

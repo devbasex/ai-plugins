@@ -145,40 +145,40 @@ _CRITERION_CELL = re.compile(r"^(\d+)\.")
 
 
 def verification_verdicts(block, record_repo):
-    """表を課題でまとめ、{(repo, number): IssueRows} を返す。表が読めない・課題を指す行が無ければ None。
+    """課題の表を課題でまとめ、{(repo, number): IssueRows} を返す。課題の表が無い・課題を指す行が無ければ None。
 
-    表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、`結果` の欠けた行は合格でない。
-    `課題` の列の頭が課題の参照でない行（導入の確認の `—`・`PR 1869` など）は飛ばす（#1683 の I1）。
-    `受け入れ条件` の列の頭の `<番号>.` を受け入れ条件の番号として読む。使う側は `deps.require("md")` を先に呼ぶ。"""
-    import md
-
-    found = md.tables(block)
-    if not found:
-        return None
-    cols = _column_indices(found[0].header)
-    if cols is None:
-        return None
+    課題の表は見出しに `課題` と `結果` の列を持つ表で、ブロックの中のすべてを現れる順に読み、行を 1 つの表の行として
+    合わせる。ほかの表（補足の表）は読まない（#2803）。表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、
+    `結果` の欠けた行は合格でない。`課題` の列の頭が課題の参照でない行（導入の確認の `—`・`PR 1869` など）は飛ばす
+    （#1683 の I1）。`受け入れ条件` の列の頭の `<番号>.` を受け入れ条件の番号として読む。使う側は `deps.require("md")` を先に呼ぶ。"""
     acc = {}
-    for row in found[0].rows:
-        parsed = _parse_verdict_row(row, cols, record_repo)
-        if parsed is None:
-            continue
-        key, ok, num = parsed
-        all_pass, passed, failed = acc.get(key, (True, set(), set()))
-        if num is not None:
-            (passed if ok else failed).add(num)
-        acc[key] = (all_pass and ok, passed, failed)
+    for table, cols in _issue_tables(block):
+        for row in table.rows:
+            parsed = _parse_verdict_row(row, cols, record_repo)
+            if parsed is None:
+                continue
+            key, ok, num = parsed
+            all_pass, passed, failed = acc.get(key, (True, set(), set()))
+            if num is not None:
+                (passed if ok else failed).add(num)
+            acc[key] = (all_pass and ok, passed, failed)
     if not acc:
         return None
     return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
 
 
 def verdict_table_readable(block):
-    """表があり、見出しに課題と結果の列があるか。verification_verdicts の None が「課題を指す行が無い」だけかを分ける。"""
+    """課題の表（見出しに課題と結果の列を持つ表）が 1 つ以上あるか。verification_verdicts の None が
+    「課題を指す行が無い」だけかを分ける。"""
+    return bool(_issue_tables(block))
+
+
+def _issue_tables(block):
+    """ブロックの表のうち、見出しに課題と結果の列を持つ表と列の位置の組を、現れる順にすべて返す。"""
     import md
 
-    found = md.tables(block)
-    return bool(found) and _column_indices(found[0].header) is not None
+    found = [(t, _column_indices(t.header)) for t in md.tables(block)]
+    return [(t, cols) for t, cols in found if cols is not None]
 
 
 def _column_indices(header):
