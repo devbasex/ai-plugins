@@ -183,7 +183,7 @@ def add_key(name: str, key: str, account: str, now: float | None = None) -> bool
     if name == ca.METERED or name in ca.names():
         raise Refused("name_conflict", f"名前が登録済みアカウントか予約の名前と重なる: {name}")
     if not ca.valid_name(name):
-        raise Refused("invalid_name", f"名前は英小文字・数字・- と _ の 32 字まで: {name}")
+        raise Refused("invalid_name", "名前は英小文字・数字・- と _ の 32 字まで（入力値は表示しない）")
     if account not in ca.names():
         raise Refused("not_registered", f"登録済みアカウントでない: {account}")
     now = time.time() if now is None else now
@@ -445,12 +445,22 @@ class KeyTry:
         self.limit_hit = False  # near-limit の条件 3
 
     def pick(self) -> ApiKey | None:
-        """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。"""
+        """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。
+
+        送り先が Anthropic でなければ、登録済みのキーも受け継いだキーも使わない。受け継いだキーは外し（`dropped`）、
+        キーの変数を除いたログインの環境で起動させる（`env`）。"""
         r = self.route
-        if not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep())))):
-            if sends_to_anthropic(dict(os.environ), self.cwd) and (k := pick_key(exclude=self.tried)) is not None:
-                return k
-        return r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
+        wanted = not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep()))))
+        kept = r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
+        if not wanted and kept is None:
+            return None
+        if not sends_to_anthropic(dict(os.environ), self.cwd):
+            if kept is not None:
+                r.dropped = True
+            return None
+        if wanted and (k := pick_key(exclude=self.tried)) is not None:
+            return k
+        return kept
 
     def run(self, call):
         """キーで起動する（`call(環境)`）。キーで決着したらその結果、使うキーが無くなったら None を返す。"""

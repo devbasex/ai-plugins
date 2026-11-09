@@ -282,6 +282,7 @@ def test_cli_add_check_failure_saves_nothing(tmp_path, accounts, aws, messages, 
     ("args", "stdin", "code", "reason"),
     [
         (["k", KEY_A, "--account", "main"], KEY_A + "\n", 2, "invalid_name"),  # 値を引数で渡すと引数の誤り
+        ([KEY_A, "--account", "main"], KEY_A + "\n", 2, "invalid_name"),  # 値を名前の位置へ渡しても値を写さない
         (["main", "--account", "main"], KEY_A + "\n", 1, "name_conflict"),
         (["metered", "--account", "main"], KEY_A + "\n", 1, "name_conflict"),
         (["k", "--account", "ghost"], KEY_A + "\n", 1, "not_registered"),

@@ -192,6 +192,19 @@ def test_key_is_not_sent_to_a_foreign_base_url(tmp_path, seq, accounts, monkeypa
     assert "結果: 完了" in text and [c["api_key"] for c in calls()] == [None]
 
 
+def test_inherited_key_is_not_sent_to_a_foreign_base_url(tmp_path, seq, accounts, monkeypatch):  # noqa: F811
+    """入れ子でも送り先が Anthropic の外なら、受け継いだキーを外し、戻り先のログインで起動する。"""
+    set_responses, calls = setup(tmp_path, seq, accounts, "always", ("k", KEY_A, "main"))
+    k = ak.get("k")
+    for name, value in ((ak.KEY_ENV, KEY_A), (ak.NAME_ENV, "k"), (ak.GENERATION_ENV, k.generation), (ak.BACK_ENV, "main")):
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(ak.BASE_URL_ENV, "https://gateway.example.com")
+    set_responses(OK)
+    s, text = run_plan(tmp_path, STEP)
+    assert "結果: 完了" in text
+    assert [(c["api_key"], c["account"]) for c in calls()] == [(None, "main")]
+
+
 def test_failure_of_a_replaced_key_is_not_recorded(accounts, monkeypatch):  # noqa: F811
     """I10: 置き換える前の世代で起動した worker の 401 は、置き換えた後のキーの状態に書かない。"""
     from supervise_lib import claude as sc

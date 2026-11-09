@@ -83,7 +83,8 @@ def _precheck(name: str, account: str) -> None:
     if name == ca.METERED or name in ca.names():
         raise Fail("name_conflict", f"名前が登録済みアカウントか予約の名前と重なる: {name}")
     if not ca.valid_name(name):
-        raise Fail("invalid_name", f"名前は英小文字・数字・- と _ の 32 字まで: {name}", 2)
+        # 入力値を写さない（キーを誤って名前の位置へ渡したとき、値が標準エラーと --json へ出るため）
+        raise Fail("invalid_name", "名前は英小文字・数字・- と _ の 32 字まで（入力値は表示しない）", 2)
     if account not in ca.names():
         raise Fail("not_registered", f"登録済みアカウントでない: {account}")
     try:
