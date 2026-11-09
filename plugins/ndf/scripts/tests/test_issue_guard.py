@@ -321,3 +321,88 @@ def test_create_args_reads_an_absolute_body_file(tmp_path):
     f = tmp_path / "abs.md"
     f.write_text("abs\n", encoding="utf-8")
     assert _create_args(f"-F {f} -l x", tmp_path / "elsewhere") == ("abs\n", ["x"], None)
+
+
+# --- issue_decision の分岐の現状固定（cross-refactoring I-002） ---
+
+
+def _decision(where: Path, command: str, **tool_input):
+    from hook_lib import issue_guard as guard
+    from hook_lib import payload as pl
+
+    raw = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(where), "session_id": "s"}
+    raw["tool_input"] = {"command": command, **tool_input}
+    return guard.issue_decision(pl.event_of(raw))
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["gh issue list", "gh pr create -t t", "ls issue create", "gh issue create -t t --body-file - &&"],
+)
+def test_issue_decision_returns_none_without_a_readable_filing(repo, command):
+    """語が欠ける・`gh issue create` が無い・構文木を読み切れないときは判定しない。"""
+    assert _decision(repo, command) is None
+
+
+def test_issue_decision_denies_a_gap_with_the_deny_shape(repo):
+    out = _decision(repo, f"gh issue create -t t -l enhancement -F {write(repo, '## 目的')}")
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "記載項目の定義を満たさない" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_issue_decision_passes_when_the_definition_cannot_be_read(repo, monkeypatch):
+    from hook_lib import issue_guard as guard
+
+    def broken(cwd=None):
+        raise guard.issue_items.DefinitionError("壊れた定義")
+
+    monkeypatch.setattr(guard.issue_items, "load_definition", broken)
+    assert _decision(repo, "gh issue create -t t --body-file -") is None
+
+
+def test_issue_decision_skips_only_the_filing_whose_definition_cannot_be_read(repo, monkeypatch):
+    from hook_lib import issue_guard as guard
+
+    real = guard.issue_items.load_definition
+    (repo / "sub").mkdir()
+
+    def per_dir(cwd=None):
+        if Path(cwd).name == "sub":
+            raise guard.issue_items.DefinitionError("壊れた定義")
+        return real(cwd)
+
+    monkeypatch.setattr(guard.issue_items, "load_definition", per_dir)
+    assert _decision(repo, "(cd sub && gh issue create -t t --body-file -)") is None
+    why = reason(_decision(repo, "(cd sub && gh issue create -t t --body-file -); gh issue create -t t --body-file -"))
+    assert why is not None and "読めない形" in why
+
+
+def test_issue_decision_judges_every_filing_in_the_command(repo):
+    """先の起票が通っても、後の起票の欠けで拒否する。"""
+    good = write(repo, FEATURE)
+    bad = write(repo, "## 目的\n\nx\n", "bad.md")
+    assert _decision(repo, f"gh issue create -t t -l enhancement -F {good} && gh issue create -t t -l enhancement -F {good}") is None
+    why = reason(_decision(repo, f"gh issue create -t t -l enhancement -F {good}; gh issue create -t t -l enhancement -F {bad}"))
+    assert why is not None and "対象範囲" in why
+
+
+def test_issue_decision_skips_another_repository_and_judges_the_rest(repo):
+    assert _decision(repo, "gh issue create -R other/repo -t t --body-file -") is None
+    why = reason(_decision(repo, "gh issue create -R other/repo -t t --body-file -; gh issue create -t t --body-file -"))
+    assert why is not None and "読めない形" in why
+
+
+def test_issue_decision_rewritten_body_is_reported_before_the_repository_check(repo):
+    """本文のファイルを先に書き込む形は、`-R` が他のリポジトリでも拒否する。"""
+    write(repo, FEATURE)
+    why = reason(_decision(repo, "printf x > body.md; gh issue create -R other/repo -t t -F body.md"))
+    assert why is not None and "別の Tool 呼び出し" in why
+
+
+def test_issue_decision_reads_the_body_file_from_the_tool_input_directory(repo, tmp_path_factory):
+    """Tool の入力にコマンドの実行ディレクトリがあれば、イベントの cwd より優先する。"""
+    other = tmp_path_factory.mktemp("other")
+    write(other, FEATURE)
+    command = "gh issue create -t t -l enhancement -F body.md"
+    assert reason(_decision(repo, command)) is not None
+    assert _decision(repo, command, cwd=str(other)) is None
