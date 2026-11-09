@@ -370,6 +370,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 統括役 | `relay_hub` | 同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 名前つきのラッパー | `named_relay` | 統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 人の起動 | `human_launch` | 端末で利用者が打った claude が、統括役へ by: terminal で頼んだ起動（端末の 2 本目）。上限で断らず、上限の数にも入れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| AI の起動 | `ai_launch` | 依頼の by が spawn・restart・block:<作業ディレクトリ> の起動。統括役が上限で判定する | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 登録簿 | `relay_registry` | 統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 起動の依頼 | `spawn_request` | 頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
