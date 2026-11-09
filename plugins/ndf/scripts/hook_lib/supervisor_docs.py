@@ -66,7 +66,7 @@ def outside_doc(path: Path, own: Path = OWN_ROOT) -> tuple[Path, Path] | None:
     return (root, rel) if _is_doc(rel.parts) else None
 
 
-def _abs(word: str, cwd: str) -> Path | None:
+def _abs_doc_path(word: str, cwd: str) -> Path | None:
     if not word or "$" in word:
         return None
     p = Path(word).expanduser()
@@ -77,17 +77,17 @@ def _abs(word: str, cwd: str) -> Path | None:
     return p
 
 
-def candidates(ev: pl.Event) -> list[Path]:
+def doc_candidates(ev: pl.Event) -> list[Path]:
     """読む先の候補（絶対パス）。"""
     if ev.tool == "Read":
-        p = _abs(_field(ev.raw, "tool_input", "file_path"), ev.cwd)
+        p = _abs_doc_path(_field(ev.raw, "tool_input", "file_path"), ev.cwd)
         return [p] if p else []
     from .words import command_stream
 
     out: list[Path] = []
     for w in command_stream(_field(ev.raw, "tool_input", "command")):
         for part in {w, w.split("=", 1)[-1]}:
-            if "/" in part and (p := _abs(part, ev.cwd)):
+            if "/" in part and (p := _abs_doc_path(part, ev.cwd)):
                 out.append(p)
     return out
 
@@ -121,7 +121,7 @@ def docs_decision(ev: pl.Event) -> dict | None:
         return None
     own = OWN_ROOT.resolve()
     hits = []
-    for c in candidates(ev):
+    for c in doc_candidates(ev):
         found = outside_doc(c, own)
         if found:
             hits.append((c, found[1]))
