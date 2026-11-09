@@ -6149,8 +6149,8 @@
     {
       "term": "文書のファイル",
       "context": "ndf-workflow",
-      "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と用語集の機械向けの形で、プロジェクトの設定で変えられる",
-      "pending_source": "issues/issue-2925-requirements.md"
+      "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の宣言が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
+      "pending_source": "issues/issue-2925-design.md"
     },
     {
       "term": "コードのファイル",
@@ -6161,14 +6161,20 @@
     {
       "term": "テストが読む文書",
       "context": "ndf-workflow",
-      "meaning": "文書のファイルのうち、テストが中身を読むもの（用語集・Skill の本文など）",
-      "pending_source": "issues/issue-2925-requirements.md"
+      "meaning": "文書のファイルのうち、プロジェクトの設定でテストとの対応を宣言したもの（用語集・Skill の本文など）",
+      "pending_source": "issues/issue-2925-design.md"
     },
     {
       "term": "振る舞いの確認",
       "context": "ndf-workflow",
       "meaning": "Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること",
       "pending_source": "issues/issue-2925-requirements.md"
+    },
+    {
+      "term": "振る舞いを決める文書",
+      "context": "ndf-workflow",
+      "meaning": "文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown",
+      "pending_source": "issues/issue-2925-design.md"
     }
   ]
 }
