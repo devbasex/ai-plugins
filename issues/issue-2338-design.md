@@ -122,9 +122,10 @@
 
 | 要素 | 責務 | 新設 / 変更 | Pull Request |
 | --- | --- | --- | --- |
-| 書き口（`lib/run_log.py`） | 出力先を決めて開く。専用の logger `ndf.run` に出力先のハンドラを 1 つ足す。行を伏せ、32,000 バイトを超える文字列を全文ファイルへ移し、出力先へ渡す。診断を標準エラーと記録の両方へ出す。表示を切る前に全文を記録へ書く（`clip`）。核の外では、親の文脈を受け継いだときだけ子の実行として記録を開く（決定 8）。標準ライブラリだけを使う | 新設 | 1 |
+| 書き口（`lib/run_log.py`） | 出力先を決めて開く。専用の logger `ndf.run` に出力先のハンドラを 1 つ足す。記録を開くときに、伏せる秘密の名前を環境変数の契約から自分で読む（決定 9）。行を伏せ、32,000 バイトを超える文字列を全文ファイルへ移し、出力先へ渡す。診断を標準エラーと記録の両方へ出す。表示を切る前に全文を記録へ書く（`clip`）。核の外では、親の文脈を受け継いだときだけ子の実行として記録を開く（決定 8）。標準ライブラリだけを使う | 新設 | 1 |
 | ファイルの出力先（`lib/run_log.py` の中の `logging.Handler` の派生） | 置き場を決め、排他の中で書きかけの行を閉じてから 1 行を書き切る。全文ファイルを書く。起点の実行の起動で寿命の掃除をする | 新設 | 1 |
 | 実行の核（`lib/run_core.py`） | E1 で親の識別子と出力先の位置を受け、書き口を開き、子へ渡す環境変数を書き換える。`ctx.log` を書き口へつなぐ。E7 で理由を受け、E8 で `end` を書く。書けなかったら結果を `stopped` にする。例外の理由を切らない | 変更 | 1 |
+| 結果の契約（`lib/step_result.py`） | 結果の任意の鍵へ `original_result`（オブジェクトか null）を足し、`validate_result` が知らない項目として拒否しないようにする。共通の読み手（`lib/step_read.py` の `read_completed`・`read_result_file`）は検証を通った結果をそのまま返すため、元の結果が呼ぶ側まで届く（決定 3・I7） | 変更 | 1 |
 | 秘密を伏せる部品（`lib/secret_redact.py`） | 伏せる処理（`redact`）と短く縮める処理を分ける。`redact_output` は 2 つを順に呼ぶ形で残す | 変更 | 1 |
 | 上限の宣言（`contracts/limits.json`・`lib/limits.py`） | `run-log.line` の方針に `bytes: 32000` を置く。`limits.py` が持てる値に `bytes`（整数・下限 1）を足す | 変更 | 1 |
 | 寿命の値（`lib/durable_keys.py`・`lib/durable.py`） | `KEEP_DAYS = 30` を `durable_keys.py` へ移し、`durable.py` と書き口がここから引く | 変更 | 1 |
@@ -168,7 +169,7 @@ graph TD
     RL --> LM
     RL --> FS
     FS --> KD
-    EC[環境変数の契約] -->|秘密の名前| K
+    EC[環境変数の契約] -->|秘密の名前| RL
 ```
 
 ### 配置
@@ -211,6 +212,7 @@ plugins/ndf/
         ├── run_log.py               # 新設
         ├── run_core.py              # 変更
         ├── secret_redact.py         # 変更
+        ├── step_result.py           # 変更（original_result）
         ├── limits.py                # 変更（bytes）
         ├── durable_keys.py          # 変更（KEEP_DAYS）
         ├── durable.py               # 変更（KEEP_DAYS を引く）
@@ -255,7 +257,7 @@ classDiagram
         +log(event, fields)
     }
     class run_log {
-        +open_run(entry, run_id, parent_id, location, secrets) RunLog
+        +open_run(entry, run_id, parent_id, location) RunLog
         +current() RunLog
         +diag(text, short, fields)
         +clip(text, limit, what) str
@@ -270,11 +272,11 @@ classDiagram
 
 ### 操作の約束
 
-- **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・ライブラリとして読み込んだとき）では `None` である。そのとき `diag`・`clip` は、`NDF_RUN_ID` と `NDF_RUN_LOG` の両方を受け継いでいれば、最初の 1 行の前に子の実行として記録を開く（決定 8）。`start` の `fields` に `outside_core: true` を書き、`end` は `atexit` で `how: "exit"`・`result: null` として書く。どちらかが無ければ、`diag` は標準エラーへ書くだけ、`clip` は切るだけになる
+- **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・ライブラリとして読み込んだとき）では `None` である。そのとき `diag`・`clip` は、`NDF_RUN_ID` と `NDF_RUN_LOG` の両方を受け継いでいれば、最初の 1 行の前に子の実行として記録を開く（決定 8）。`start` の `fields` に `outside_core: true` を書き、`end` は `atexit` で `how: "exit"`・`result: null` として書く。監視の CLI は担当ごとのスレッドから最初の診断を出すため、この遅延の開き方はモジュールに 1 つの `threading.Lock`（開くための排他。行を書く排他とは別）の中で一度だけ行う。手順は、排他を取る → `current()` を見直し、開いていればそれを使って排他を返す → 開いていなければ記録を開いて `start` を書く → `current()` へ公開する → `atexit` へ `end` を登録する → 排他を返す、の順である。開くのに失敗したときも、失敗したことをモジュールの変数に持って排他を返し、以後のスレッドは開き直さない（標準エラーへ理由を出すのは 1 回だけ）。どちらかが無ければ、`diag` は標準エラーへ書くだけ、`clip` は切るだけになる
 - **出力先は `logging.Handler` の派生の `Sink` である**: 書き口は専用の logger `ndf.run`（`propagate` は偽。ルートの logger にハンドラを足さない）に出力先を 1 つだけ足す。`open` は置き場を用意して位置（子へ渡す文字列）を返す。`emit` は `record.msg` に入った改行を含まない 1 行を書き切る。`put_text` は全文を置いて参照の文字列を返す。どれも書けなければ `OSError` を投げ、`emit` は `logging` の既定の `handleError` で握りつぶさずに書き口へ返す（`raiseExceptions` に頼らない）。伏せる処理と 32,000 バイトの判定は `RunLog` が先に済ませ、出力先は受け取った文字列を書くだけにする（I5・I8）。#2608 は、既存のハンドラ（LIB5・LIB6）を包んで `Sink` にできる（決定 1）
 - **`register_sink(name, factory)`**: 名前と出力先の作り方を登録する。既定で登録するのは `file` だけである。テストは偽物を登録し、#2608 は CloudWatch Logs の出力先を登録する
 - **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種だけを受け、ほかは `ValueError`。8 種は `start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end` である。`event` が `diag` のときは `run_log.diag` へ渡し、標準エラーへ先に出す経路を 1 つにする（I6）。渡す形は `run_log.diag(fields["text"], short=fields.get("display"), **残りの鍵)` である
-- **`run_log.diag(text, short=None, **fields)`**: 標準エラーへは `short` があれば `short`、無ければ `text` を 1 行で書く。記録へは `{"text": text, **fields}` を書き、`short` があれば `"display": short` も書く
+- **`run_log.diag(text, short=None, **fields)`**: 標準エラーへは `short` があれば `short`、無ければ `text` を、改行の有無も含めて渡された文のまま書く。改行を潰さず、足さない（行末の改行は呼ぶ側が決める）。`print(*args, sep=s, end=e, file=sys.stderr)` を置き換える箇所は `s.join(map(str, args)) + e` を渡す（既定では末尾に `\n` を含める）。`short` を渡す箇所は、先頭を切った文に全文と同じ行末の改行を付けて渡す。核の `exec` の読み手も、子の行を行末の改行を残して渡す。記録へは `{"text": text, **fields}` を書き、`short` があれば `"display": short` も書く
 - **`run_log.clip(text, limit, what)`**: `text` が `limit` 字以下ならそのまま返す。超えるときは、開いた記録があれば `diag` の行を書いてから、先頭 `limit` 字を返す。書く行は `{"text": 全文, "display": 切った文, "what": what, "stderr": false}` である。標準エラーへは書かない（呼ぶ側が切った文を出す）
 - **`write` が書けなかったとき**: 例外を投げず、`failed` に理由を持ち、標準エラーへ理由を 1 回だけ出す。以後の `write` は出力先へ渡さない。核は E8 の前と後の 2 回 `failed` を見る（「処理の流れ」）
 
@@ -355,7 +357,7 @@ classDiagram
 | --- | --- |
 | 子へ渡す環境変数 | 核は E1 の後に `NDF_RUN_ID` を自分の識別子へ、`NDF_RUN_LOG` を起点の実行の出力先の位置へ書き換える。子の核は起動時の `NDF_RUN_ID` を `parent_id` に取り、`NDF_RUN_LOG` の位置へ書く |
 | 受け継いだ位置が無い | ファイルの出力先で `NDF_RUN_LOG` のファイルが無いか置き場の根の外を指すとき、子は起点の実行として自分のファイルを作り、`start` の `fields` に `inherited_log_missing` を書く |
-| 標準エラー | 診断の表示用の文を 1 行ずつ出す。2 ファイルの文は移す前と同じ（受け入れ条件 6）。記録へ書けなかった理由は 1 回だけ `[ndf run-log] 実行の記録へ書けない（<位置>: <理由>）` の形で出す |
+| 標準エラー | 診断の表示用の文を、改行の有無も含めて渡された文のまま出す（`run_log.diag` は改行を潰さず、足さない）。2 ファイルの文は移す前と同じ（受け入れ条件 6）。記録へ書けなかった理由は 1 回だけ `[ndf run-log] 実行の記録へ書けない（<位置>: <理由>）` の形で出す |
 | 標準出力・結果 JSON | 鍵は変えない。`summary`・`gaps` と例外の理由は、核が切らずに出す（今の核は例外の理由を 3 行・500 字へ縮めている） |
 | 記録へ書けなかったとき | 結果は `stopped`・終了コード 1、`gaps` に `{"kind": "run-log-unwritable", "name": <出力先の名前>, "reason": <理由>}` |
 | 途中で書けなくなったときの結果 JSON | 本体の元の結果 JSON（本体が例外で終わったときは `null`）を、`stopped` の結果の鍵 `original_result` へ切らずに入れる。始まりで書けないときは本体を動かさないため、鍵を持たない |
@@ -412,7 +414,7 @@ sequenceDiagram
 | --- | --- |
 | 秘密を伏せる部品・上限の宣言 | 書き口が出力先へ渡す前に使う |
 | 寿命の値 | ファイルの出力先の E3 で使う |
-| 環境変数の契約・契約の読み手 | E1 の前に、核が秘密の名前を読む |
+| 環境変数の契約・契約の読み手 | 書き口が記録を開くとき（核の E2 と、核の外で子の実行として開くとき）に、秘密の名前を自分で読む（決定 9） |
 | ファイルの契約・`check-trigger.py` の契約の項目・実行の核の説明 | 契約の検査と読み手のための記述で、実行の流れに入らない |
 | テストの置き場 | テストの実行中だけ、起動の前に置き場の根を一時ディレクトリへ向け、受け継いだ環境変数を外す |
 | 早期の検知・監視のループ・検査のトリガー・検査の記録の行の説明 | 本体の中身（[issue-2338-design-delivery.md](issue-2338-design-delivery.md) の「2 ファイルの直し方」） |
@@ -487,7 +489,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2338 | 実装する | — | `conftest.py`、`plugins/ndf/conftest.py`、`plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/limits.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/contracts/env/`、`plugins/ndf/contracts/files/`、`plugins/ndf/contracts/entrypoints/`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/pace.md`、`scripts/contracts_lib/model.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__run_log.py--fcntl--wrapped.json`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/tests/` |
+| #2338 | 実装する | — | `conftest.py`、`plugins/ndf/conftest.py`、`plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/limits.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/contracts/env/`、`plugins/ndf/contracts/files/`、`plugins/ndf/contracts/entrypoints/`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/pace.md`、`scripts/contracts_lib/model.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__run_log.py--fcntl--wrapped.json`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/tests/` |
 
 ## 未確認のまま残ること
 
