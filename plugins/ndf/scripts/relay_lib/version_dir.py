@@ -187,6 +187,23 @@ def _mark_live(mark: str, owner: str | None, pid: int) -> bool:
         return False
 
 
+def launch_python(python: str | None = None, base: str | None = None) -> tuple[str | None, str | None]:
+    """リレーハブがレーンを起こす python と、切り替えた先のバージョンディレクトリの名前（#2647 の決定 10・I14）。
+
+    リレーハブの python（`sys.executable`）の置き場が消えていれば、`relay.current` が指すバージョンディレクトリの
+    仮想環境へ切り替える。どちらも無ければ (None, None) を返す。
+    """
+    import sys
+
+    python = python or sys.executable
+    if os.path.isfile(python):
+        return python, None
+    base = base or os.path.dirname(launcher_path())
+    cur = VersionDir(base).current()
+    alt = runtime.python_of(runtime.version_env(os.path.join(base, cur))) if cur else None
+    return (alt, cur) if alt and os.path.isfile(alt) else (None, None)
+
+
 class VersionDir:
     """`base` の下のバージョンディレクトリと、使うものを指す `relay.current`。中身の元は `source`。"""
 

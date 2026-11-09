@@ -5,9 +5,9 @@
 | --- | --- |
 | `init <計画名>` | 標準入力の下書きを検査し、`plan.json`・`plan.md`・レーンごとの引継ぎ文書を書く（在る文書は上書きせず、何も書かない） |
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
-| `start <計画名>` | `run` をセッションから切り離して起動する（動いていれば打ったセッションへオーガナイザーの印を付け直し、今の pid を返す。`metrics.organizer` が付けられたか） |
+| `start <計画名>` | `run` をセッションから切り離して起動する（どの経路でも打ったセッションへオーガナイザーの印を付け直す。`metrics.organizer` が付けられたか。動いていれば今の pid を返す。失われた計画は作り直し、`metrics.rebuilt`・`metrics.restored` を返す。#2647） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3 |
+| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3。失われた計画は 1 で `metrics.next` に `start` の 1 行 |
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -45,12 +44,12 @@ deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
+import parallel_cli as pcli  # noqa: E402
 import parallel_external as pe  # noqa: E402
 import parallel_external_cli as px  # noqa: E402
-import parallel_hold as ph  # noqa: E402
 import parallel_hold_cli as phc  # noqa: E402
-import parallel_homes  # noqa: E402
 import parallel_lane as pl  # noqa: E402
+import parallel_ledger as plg  # noqa: E402
 from parallel_lane_cli import add_lane_parser, cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
@@ -122,7 +121,27 @@ def cmd_check(a) -> None:
 
 
 def _wait_line(name: str) -> str:
-    return f"python3 {SELF} wait {name}"
+    return pcli.wait_line(SELF, name)
+
+
+QUEUED = "。耐久ワークフローが動いていないため、台帳に残し作り直しの後に反映する"
+
+
+def accepting(main: Path, name: str) -> dict:
+    """依頼・問い・答えを受け付ける計画か（動いているか失われた。#2647 の決定 8）。受け付けなければ 1 で終える。
+    失われた計画なら `{"queued": True}`（結果の `metrics` へ足す）を返す。"""
+    st = plg.plan_state(main, name, pl.run_status(main, name))
+    if not plg.accepts(st):
+        reply("stopped", f"並列の計画 {name} が動いていない", code=1)
+    return {"queued": True} if st == "lost" else {}
+
+
+def sent(fn, *args, **kw):
+    """台帳へ書いて送る。台帳を書けなければ 2 で終える（送ったと扱わない。I1）。"""
+    try:
+        return fn(*args, **kw)
+    except OSError as exc:  # LockTimeout も OSError（TimeoutError）
+        reply("stopped", f"計画の台帳へ書けない: {exc}", code=2)
 
 
 def cmd_run(a) -> None:
@@ -136,6 +155,7 @@ def cmd_run(a) -> None:
     import durable
     import parallel_run as pr_run
 
+    marked = pr_run.mark_organizer(main, a.name)  # 直接打った run・動いていると返る経路も打ったセッションへ付ける（#2637）
     pl.clear_settled(main, a.name)  # 終わった印を残したまま動かすと、計画の外の判定が動いていないと読む
     try:
         got, resumed = pr_run.run_plan(main, a.name)
@@ -143,7 +163,7 @@ def cmd_run(a) -> None:
         if "動いている" in str(exc):
             # 設計の終了コード 5 は統一 JSON レポートの終了コードの決まり（step_result.code_matches）に無いため、
             # 動いている run を続ける答え（ok・running）として返す
-            reply("ok", f"同じ計画の run が動いている。wait で待つ: {exc}", running=True, next=_wait_line(a.name))
+            reply("ok", f"同じ計画の run が動いている。wait で待つ: {exc}", running=True, organizer=marked, next=_wait_line(a.name))
         reply("stopped", f"耐久の記録を開けない: {exc}", code=2)
     status = got.get("status") if isinstance(got, dict) else None
     lanes = [{"lane": n, **st} for n, st in sorted((got or {}).get("lanes", {}).items())]
@@ -151,64 +171,11 @@ def cmd_run(a) -> None:
 
 
 def cmd_start(a) -> None:
-    px.refuse_in_factory_run(reply)
-    main = main_of()
-    plan, items, metrics = checked_plan(main, a.name)
-    if plan is None:
-        reply("stopped", f"並列の計画 {a.name} の検査に誤りがあるため、レーンを 1 本も起動しない", items, 1, **metrics)
-    import parallel_run as pr_run
-
-    env, notes = pr_run.environment_report(main, plan)
-    notes = [*notes, *ph.limit_items(main)]
-    parallel_homes.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
-    pid = pl.live_run_pid(main, a.name)
-    if pid is not None:
-        marked = pr_run.relay(main, "role", "organizer", "--plan", a.name)[0] == 0  # 打ったセッションへ付け直す（#2637）
-        reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=_wait_line(a.name), environment=env)
-    if pl.run_status(main, a.name) is None:
-        px.manual_or_none(main, plan, reply)
-    log = pp.plan_dir(main, a.name) / "run.log"
-    pl.clear_settled(main, a.name)  # 切り離した run が消す前に判定が読んでも、動いていないと読まない
-    with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
-        p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
-    (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
-    reply("ok", f"run を切り離して起動した（pid {p.pid}）", notes, pid=p.pid, log=str(log), next=_wait_line(a.name), environment=env)
+    pcli.start_plan(a, reply, main_of(), checked_plan, SELF)
 
 
 def cmd_wait(a) -> None:
-    import durable
-
-    main = main_of()
-    if not pl.record_exists(main, a.name):
-        reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
-    keys = ["pause", "questions", "answer-hold"]
-    got = durable.wait_from(
-        pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout, start=pl.record_start(main)
-    )
-    if got.kind == "timeout":
-        reply(
-            "stopped",
-            f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
-            code=3,
-            seq=a.after,
-            next=_wait_line(a.name) + f" --after {a.after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
-        )
-    if got.kind == "event":
-        ev = dict(got.value)
-        key = ev.pop("key")
-        action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
-        if action == "running":
-            reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"))
-        items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
-        if action == ph.CONDITION:
-            ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
-        reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **ev)
-    if got.kind == "done":
-        o = got.value or {}
-        lanes = [{"lane": n, **st} for n, st in sorted((o.get("lanes") or {}).items())]
-        rows = {"releases": o.get("releases"), "prior_waits": o.get("prior_waits") or []}
-        reply("ok", f"並列の計画 {a.name} は {o.get('status')} で終わった", lanes, action=o.get("status"), **rows)
-    reply("stopped", f"耐久ワークフローが {got.kind} で終わった: {got.value}", code=1, action=got.kind)
+    pcli.wait_plan(a, reply, main_of(), SELF)
 
 
 def cmd_present(a) -> None:
@@ -243,11 +210,9 @@ def cmd_compose(a) -> None:
 
 def cmd_confirm(a) -> None:
     main = main_of()
-    if pl.run_status(main, a.name) not in pl.RUNNING:
-        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
-    wid = pl.workflow_id(a.name)
-    pl.resume_plan(main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"{wid}:resume:confirm:{a.n}:{a.take or '-'}")
-    reply("ok", f"リリース {a.n} の承認を送った", n=a.n, take=a.take)
+    q = accepting(main, a.name)
+    sent(pl.resume_plan, main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"confirm:{a.n}:{a.take or '-'}")
+    reply("ok", f"リリース {a.n} の承認を送った{QUEUED if q else ''}", n=a.n, take=a.take, **q)
 
 
 def cmd_settle(a) -> None:
@@ -255,8 +220,7 @@ def cmd_settle(a) -> None:
     main = main_of()
     if a.external:
         px.settle_external(main, a, reply)
-    if pl.run_status(main, a.name) not in pl.RUNNING:
-        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
+    q = accepting(main, a.name)
     if a.rejected:
         res, version = "rejected", None
     else:
@@ -269,24 +233,24 @@ def cmd_settle(a) -> None:
             reply("stopped", "本番のプランが承認ゲートで止まっている（送らない）", code=4)
         res = "released" if results and all(r == "完了" for r in results) else "failed"
         version = done.get("version") or (done.get("metrics") or {}).get("version")
-    wid = pl.workflow_id(a.name)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
-    pl.resume_plan(main, a.name, msg, f"{wid}:resume:settle:{a.n}")
-    reply("ok", f"リリース {a.n} の結果 {res} を送った", result=res, version=version)
+    sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}")
+    reply("ok", f"リリース {a.n} の結果 {res} を送った{QUEUED if q else ''}", result=res, version=version, **q)
 
 
 def cmd_stop(a) -> None:
-    import durable
     import parallel_run as pr_run
 
     main = main_of()
     plan, items, _ = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある", items, 1)
-    if pl.run_status(main, a.name) in pl.RUNNING:
-        wid = pl.workflow_id(a.name)
-        msg, key = ({"kind": "stop", "force": True}, f"{wid}:inbox:stop:force") if a.force else ({"kind": "stop"}, f"{wid}:inbox:stop")
-        durable.send_to(pl.KIND, pl.record_identity(main, a.name), wid, msg, "inbox", key, start=pl.record_start(main))
+    st = plg.plan_state(main, a.name, pl.run_status(main, a.name))
+    if st == "running":
+        msg, key = ({"kind": "stop", "force": True}, "stop:force") if a.force else ({"kind": "stop"}, "stop")
+        sent(pl.deliver_message, main, a.name, msg, "inbox", key)
+    elif st == "lost":  # 失われた計画は閉じる（作り直さない。I11）
+        sent(plg.append_ledger_row, main, a.name, "closed", "closed", by="organizer")
     left = [ln.name for ln in plan.lanes if pr_run.relay(main, "stop", ln.name, "--json")[0] not in (0, 3)]
     if left:
         reply("stopped", f"止まらないレーンがある: {', '.join(left)}", [{"lane": n} for n in left], 1, not_stopped=left)
@@ -301,32 +265,31 @@ def cmd_request(a) -> None:
     main = main_of()
     if a.external:
         px.request_external(main, a, reply, SELF)
-    if pl.run_status(main, a.name) not in pl.RUNNING:
-        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
+    q = accepting(main, a.name)
     if a.prs and pl.merged_on_production(main, a.prs):
         version = pl.released_version(main, a.name, a.prs)
         pl.write_request(Path(a.state), {"result": "released", "version": version, "prs": a.prs})
         reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
-    rid = pl.send_release_request(main, a.name, a.lane, a.prs, a.issues, Path(a.state))
+    rid = sent(pl.send_release_request, main, a.name, a.lane, a.prs, a.issues, Path(a.state))
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    summary = f"リリースの依頼 {rid} を送った（リリース待ち）。答えは parallel.py await で読む"
-    reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested")
+    summary = f"リリースの依頼 {rid} を送った（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
+    reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested", **q)
 
 
 def cmd_await(a) -> None:
     main = main_of()
     try:
-        sent = json.loads(Path(getattr(a, "from")).read_text(encoding="utf-8"))
+        record = json.loads(Path(getattr(a, "from")).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         reply("stopped", f"依頼の記録を読めない: {exc}", code=2)
-    if sent.get("result") == "released" and not sent.get("id"):
-        reply("ok", "リリース済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
-    if a.external or pe.is_external(sent.get("plan")):
-        ans, dfr = pe.read_answer_file(px.external_dir(reply), sent["id"]), None
+    if record.get("result") == "released" and not record.get("id"):
+        reply("ok", "リリース済み（依頼を送っていない）", result="released", version=record.get("version"), deferred=None)
+    if a.external or pe.is_external(record.get("plan")):
+        ans, dfr = pe.read_answer_file(px.external_dir(reply), record["id"]), None
     else:
         require_name(a)
-        ans, dfr = pl.read_answer(main, a.name, sent["id"], a.timeout)
+        ans, dfr = pl.read_answer(main, a.name, record["id"], a.timeout)
     if ans is None:
         reply("stopped", "答えがまだ無い", code=3, deferred=dfr)
     res = ans.get("result")
@@ -334,7 +297,7 @@ def cmd_await(a) -> None:
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
     reply(
         status,
-        f"リリースの依頼 {sent['id']} の答え: {res}",
+        f"リリースの依頼 {record['id']} の答え: {res}",
         code=code,
         next_step="今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None,
         result=res,
@@ -360,22 +323,23 @@ def cmd_request_ask(a) -> None:
     if who[0] != a.name:
         reply("stopped", f"{a.lane} は計画 {who[0]} の送り手で、{a.name} の送り手でない", code=4)
     main = who.home  # 計画の置き場（別のリポジトリのレーンでは自分のリポジトリと違う。#2733）
-    rid = pl.request_ask(main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or ""))
-    reply("ok", f"問いの依頼 {rid} をオーガナイザーへ送った", id=rid)
+    q = accepting(main, a.name)
+    rid = sent(
+        pl.request_ask, main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or "")
+    )
+    reply("ok", f"問いの依頼 {rid} をオーガナイザーへ送った{QUEUED if q else ''}", id=rid, **q)
 
 
 def cmd_request_gate2(a) -> None:
     main = main_of()
-    if pl.run_status(main, a.name) not in pl.RUNNING:
-        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
-    rid = pl.request_gate2(main, a.name, a.n, a.k, a.report)
-    reply("ok", f"リリース承認ゲートの依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる", id=rid)
+    q = accepting(main, a.name)
+    rid = sent(pl.request_gate2, main, a.name, a.n, a.k, a.report)
+    reply("ok", f"リリース承認ゲートの依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる{QUEUED if q else ''}", id=rid, **q)
 
 
 def cmd_answer(a) -> None:
     main = main_of()
-    if pl.run_status(main, a.name) not in pl.RUNNING:
-        reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
+    queued = accepting(main, a.name)
     note = None
     if err := pa.answer_arg_error(a.revise, a.note, a.approved, a.by):
         reply("stopped", err, code=1)
@@ -388,9 +352,11 @@ def cmd_answer(a) -> None:
     seq, items = pa.questions(main, a.name)
     q = next((q for q in items if q.get("id") == a.id), {"id": a.id})
     nxt, held = pa.owner_next(main, a.name, a.id, a.choice, items)
-    tail, extra = pa.answer_with_merge(main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
-    extra.update(id=a.id, result=result, next=nxt, seq=seq, **({"held_owners": held} if held else {}), **pa.not_listed(a.id, items))
-    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}", **extra)
+    tail, extra = sent(pa.answer_with_merge, main, a.name, q, result, items=items, note=note, choice=a.choice, by=a.by)
+    extra.update(
+        id=a.id, result=result, next=nxt, seq=seq, **({"held_owners": held} if held else {}), **pa.not_listed(a.id, items), **queued
+    )
+    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}{QUEUED if queued else ''}", **extra)
 
 
 def cmd_park(a) -> None:

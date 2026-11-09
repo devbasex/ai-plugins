@@ -24,11 +24,17 @@ _PATTERNS = (
 )
 
 
-def redact_output(text: str, max_lines: int = MAX_LINES, max_chars: int = MAX_CHARS) -> str:
-    """認証情報を `***` に置き換え、空でない末尾の `max_lines` 行・`max_chars` 字までに縮める。"""
+def redact_text(text: str) -> str:
+    """認証情報を `***` に置き換える（縮めない。並列の計画の台帳の値に使う。#2647 の I12）。"""
     out = str(text or "")
     for pattern, repl in _PATTERNS:
         out = pattern.sub(repl, out)
+    return out
+
+
+def redact_output(text: str, max_lines: int = MAX_LINES, max_chars: int = MAX_CHARS) -> str:
+    """認証情報を `***` に置き換え、空でない末尾の `max_lines` 行・`max_chars` 字までに縮める。"""
+    out = redact_text(text)
     lines = [line.rstrip() for line in out.splitlines() if line.strip()]
     out = "\n".join(lines[-max_lines:]) if max_lines > 0 else ""
     return out if len(out) <= max_chars else "…" + out[-(max_chars - 1) :]

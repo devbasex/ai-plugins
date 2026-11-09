@@ -43,6 +43,7 @@ from .common import (
     write_json_atomic,
 )
 from .record import _start_rows
+from .version_dir import launch_python
 
 import limits  # noqa: E402,I001  common が lib/ を sys.path に置く
 
@@ -437,10 +438,7 @@ class Hub:
     @staticmethod
     def auto_name(taken: set[str]) -> str:
         """端末の 2 本目の名前。`t2`・`t3`… のうち動いていない最小の番号（決定 13）。"""
-        n = 2
-        while f"t{n}" in taken:
-            n += 1
-        return f"t{n}"
+        return next(f"t{n}" for n in range(2, len(taken) + 3) if f"t{n}" not in taken)
 
     @staticmethod
     def judge(name, now: Live, role: str | None = None, by: str | None = None) -> Refusal | None:
@@ -463,10 +461,11 @@ class Hub:
         return None
 
     def launch(self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role=None, plan=None, over=None) -> dict:
-        argv = [sys.executable, launcher_path(), "run", *args]
-        env = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1"}
-        if role:
-            env.update(NDF_RELAY_ROLE=role, NDF_RELAY_PLAN=plan or "")
+        py, switched = launch_python()  # 置き場が消えたら relay.current の仮想環境。どちらも無ければ下の確かめで落ちる
+        if switched:
+            hub_log("version-switched", name, f"{sys.executable} が無いため {switched} の仮想環境で起こす")
+        argv = [py or sys.executable, launcher_path(), "run", *args]
+        env = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", **({"NDF_RELAY_ROLE": role, "NDF_RELAY_PLAN": plan or ""} if role else {})}
         why = tmux.new_session(name, cwd, argv, env)
         if why:
             return self.refuse(kind, name, Refusal(TMUX_FAILED, why, 1))

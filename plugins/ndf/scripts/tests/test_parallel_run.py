@@ -92,16 +92,20 @@ def env(tmp_path, monkeypatch):
     durable.close()
 
 
+_SEND_TO = durable.send_to  # テストの monkeypatch に左右されない後片付けの送り手
+
+
 def _stop_running(main):
     """テストが残した耐久ワークフローを止め、スレッドが抜けるのを待つ。
 
     close() は DBOS を止めてもワークフローのスレッドを止めない。残すと次のテストの同じ ID（parallel-p1）の起動が
-    重複として打ち切られ、前のテストのスレッドが次のテストの記録を読み書きする。"""
+    重複として打ち切られ、前のテストのスレッドが次のテストの記録を読み書きする。
+    env の後片付けは monkeypatch を戻す前に走るため、テストが差し替えた `durable.send_to` ではなく元の関数で送る。"""
     wid = pl.workflow_id("p1")
     try:
         if durable.status(wid) not in pl.RUNNING:
             return
-        durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
+        _SEND_TO(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
         end = time.monotonic() + 15
         while time.monotonic() < end and durable.status(wid) in pl.RUNNING:
             time.sleep(0.1)
@@ -174,7 +178,7 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
     out = durable.output_of(pl.workflow_id("p1"))
     assert out["status"] == "finished" and out["releases"][0]["state"] == "released"
     assert spawned(log) == ["la", "lb"]  # 1 本のレーンは 1 回だけ起動する（I7）
-    assert ["role", "--clear"] in calls(log, "role")
+    assert ["role", "--clear", "--plan-dir", str(pp.plan_dir(main, "p1").resolve())] in calls(log, "role")
 
 
 def test_moved_head_represents_once(env, tmp_path):
@@ -247,7 +251,9 @@ def test_char_lane_missing_from_ls_counts_as_stopped_and_finishes(env):
     assert out["status"] == "finished" and spawned(log) == ["la", "lb"]
     assert {n: st["state"] for n, st in out["lanes"].items()} == {"la": "stopped", "lb": "stopped"}
     assert out["releases"] == [] and out["pending"] == []
-    assert calls(log, "role")[0] == ["role", "organizer", "--plan", "p1"] and ["role", "--clear"] in calls(log, "role")
+    plan_dir = str(pp.plan_dir(main, "p1").resolve())
+    assert calls(log, "role")[0] == ["role", "organizer", "--plan", "p1", "--plan-dir", plan_dir]
+    assert ["role", "--clear", "--plan-dir", plan_dir] in calls(log, "role")
 
 
 def test_char_awaiting_approval_pauses_with_notice(env):
@@ -1202,8 +1208,9 @@ def test_same_build_cause_keeps_one_question_across_releases(env, tmp_path, monk
     states.write_text(json.dumps({"la": "running"}))
     start(main)
     r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    assert read(main, r1)["release"] == 1  # 台帳の行はループの 1 周でまとめて読むため、答えの後に次の依頼を送る
     r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
-    assert (read(main, r1)["release"], read(main, r2)["release"]) == (1, 2)
+    assert read(main, r2)["release"] == 2
     q = until(lambda: len((got := build_question(main))["requests"]) == 2 and got)
     assert q["id"] == "p1-build-1" and [r["id"] for r in q["requests"]] == [r1, r2]
     assert len([x for x in event(main, "p1", "questions")["items"] if x.get("kind") == "build"]) == 1
@@ -1326,6 +1333,7 @@ def test_recorded_run_of_the_old_steps_continues_with_the_new_code(env, tmp_path
     ans = read(main, r2)
     assert (ans["result"], ans["version"], ans["release"]) == ("released", None, 2)
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    assert not (pp.plan_dir(main, "p1") / "checkpoint.json").exists()  # 途中の記録は台帳を読まない今までの道を通る（#2647 の条件 19）
 
 
 def test_new_record_replays_to_the_same_values(env, tmp_path):
