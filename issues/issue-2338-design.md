@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: NDF の配布物の実行の核を通るエントリポイントすべてと、移す 2 ファイルである。核は `plugins/ndf/scripts/lib/run_core.py`、2 ファイルは `lib/monitor_loop.py`・`check-trigger.py` である。配布先のリポジトリでも同じ書き口が動く
+- **働く範囲**: NDF のリリース対象の実行の核を通るエントリポイントすべてと、移す 2 ファイルである。核は `plugins/ndf/scripts/lib/run_core.py`、2 ファイルは `lib/monitor_loop.py`・`check-trigger.py` である。利用先のリポジトリでも同じ書き口が動く
 - **プロジェクトごとに違うもの**: 無い。記録の置き場の根は利用者の根（`lib/state_home.py` の `user_home`）から取り、リポジトリごとの値は置き場のパスの 1 階層（`<所有者>__<リポジトリ>`）にだけ現れる。出力先は動く場所（手元か Factory か）で変わるため、リポジトリの設定ではなく環境変数で受ける（決定 4）
 - **当たるモード**: `standard`。柱 P1（#2337）の核を拡張する柱である。実装は 1 スプリント・Pull Request 2 本（[issue-2338-design-delivery.md](issue-2338-design-delivery.md) の「Pull Request の分け方」）に収める。**実装は #2337 の核が develop に入った後に始める**（2026-11-09 の時点で PR 2786 がマージ済み）
 
@@ -123,7 +123,7 @@
 | 環境変数の契約（`contracts/env/`） | `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_RUN_LOG_SINK` の行を足す。`GH_TOKEN`・`GITHUB_TOKEN`・`AI_GATEWAY_API_KEY`・`SLACK_BOT_TOKEN` の行へ `secret: true` を足す | 変更 | 1 |
 | 契約の読み手（`scripts/contracts_lib/model.py`） | 環境変数の行の任意の鍵 `secret`（bool）を受けて確かめる | 変更 | 1 |
 | ファイルの契約（`contracts/files/`） | 実行の記録と全文ファイルの行を足す（書き手は `run_log.py`） | 変更 | 1 |
-| `check-trigger.py` の契約の項目（`contracts/entrypoints/`） | 読む環境変数の一覧へ、核と書き口が読む `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_RUN_LOG_SINK`・`NDF_RUNS_DIR` を足す（契約の検査が求める分） | 変更 | 2 |
+| `check-trigger.py` の契約の項目（`contracts/entrypoints/`） | 読む環境変数の一覧へ、核と書き口が読む `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_RUN_LOG_SINK`・`NDF_RUNS_DIR` を足す（契約の検査が求める分）。終了コードの表（`exit`）へ、本体が今返している `1`（`EXIT_VIOLATION`。`record --failed`・gh の失敗・記録へ書けない）と `3`（`EXIT_PRECONDITION`。トリガーが立たない・変更なし）を足す。足さないと、核は契約に無い終了コードを `stopped`・1 へ置き換え（`run_core.verify_emitted`）、プランの実行条件（`skip_code: 3`）が飛ばさずに失敗になり、`record --failed` の結果も消える | 変更 | 2 |
 | テストの置き場（ルートの `conftest.py`・`plugins/ndf/conftest.py`） | テストごとに `NDF_RUNS_DIR` を一時ディレクトリへ向け、`NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_RUN_LOG_SINK` を外す | 変更 | 1 |
 | 実行の核の説明（`lib/README.md` の「実行の核」） | 実行の記録・出力先・子の実行の約束を足す | 変更 | 1 |
 | 早期の検知（`lib/monitor_scan.py`） | 警告を種類（`stderr`・`denials`）ごとの組で返す関数を足す。`_early_error` は今の戻り値の形のまま残す | 変更 | 2 |
