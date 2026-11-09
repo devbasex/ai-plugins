@@ -242,6 +242,16 @@ def _order_gap(heads: list[Heading], definition: Definition) -> Gap | None:
     return None
 
 
+def _item_gap(item: Item, lines: list[str], heads: list[Heading], definition: Definition) -> Gap | None:
+    """1 項目の欠け。節が無ければ missing、どの節も空なら empty、そうでなければ None。"""
+    at = [n for n, h in enumerate(heads) if h.level >= 2 and definition.item_for_heading(h.text) is item]
+    if not at:
+        return Gap(item.name, "missing")
+    if all(_empty(lines, heads, n) for n in at):
+        return Gap(item.name, "empty")
+    return None
+
+
 def judge_body(body: str, labels, context: dict | None, definition: Definition) -> tuple[str | None, list[Gap]]:
     """`(決まった種類か None, 欠け)`。種類が決まらなければ必須の項目は見ない（種類の欠けと順序だけを返す）。"""
     lines = (body or "").replace("\r\n", "\n").split("\n")
@@ -252,11 +262,9 @@ def judge_body(body: str, labels, context: dict | None, definition: Definition) 
         gaps.append(Gap(definition.by_id["kind"].name if "kind" in definition.by_id else "種類", "kind"))
     else:
         for it in _needed(definition, kind, context or {}):
-            at = [n for n, h in enumerate(heads) if h.level >= 2 and definition.item_for_heading(h.text) is it]
-            if not at:
-                gaps.append(Gap(it.name, "missing"))
-            elif all(_empty(lines, heads, n) for n in at):
-                gaps.append(Gap(it.name, "empty"))
+            gap = _item_gap(it, lines, heads, definition)
+            if gap is not None:
+                gaps.append(gap)
     order = _order_gap(heads, definition)
     if order is not None:
         gaps.append(order)
