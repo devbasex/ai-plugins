@@ -20,7 +20,7 @@ from parallel_observe import _asking_lanes
 STARTED = "started"
 
 
-def _epoch(value) -> Optional[float]:
+def _seconds_of(value) -> Optional[float]:
     """ISO 8601 の文字列をエポック秒へ。文字列でない・読めないなら None。"""
     if not isinstance(value, str) or not value:
         return None
@@ -31,7 +31,7 @@ def _epoch(value) -> Optional[float]:
     return got.timestamp() if got is not None else None
 
 
-def _commands(n: str, stop: bool = True) -> dict:
+def _lane_commands(n: str, stop: bool = True) -> dict:
     out = {"起こし直す": f"python3 {RELAY} restart {n}"}
     return {**out, "止める": f"python3 {RELAY} stop {n}"} if stop else out
 
@@ -61,7 +61,7 @@ def withdraw_settled(run, rows: dict, loops: dict) -> None:
             why = "レーンが running でない" if r.get("state") != "running" else ""
             why = "開発ループの記録が止まっていない" if q["lane"] not in loops else why
         else:
-            why = "レーンが動き出した" if (_epoch(r.get("at")) or 0) > float(q["asked_at"]) else ""
+            why = "レーンが動き出した" if (_seconds_of(r.get("at")) or 0) > float(q["asked_at"]) else ""
         if why:
             gone.append((q["id"], why))
     if not gone:
@@ -89,7 +89,7 @@ def ask_loop_stops(run, rows: dict, loops: dict, now: float, limit: float) -> No
             continue
         if n in run.sprint or stop.get("condition") == "waiting_only" or (rows.get(n) or {}).get("state") != "running":
             continue
-        started, stopped_at = _epoch(run.lanes[n].get("started")), _epoch(stop.get("at"))
+        started, stopped_at = _seconds_of(run.lanes[n].get("started")), _seconds_of(stop.get("at"))
         if started is not None and stopped_at is not None and stopped_at <= started:
             continue  # 前の起動のときの止まり（続きから引き継いだレーン）
         if now < run.loop_until.get(n, 0) or any(q.get("lane") == n and q.get("loop_stop") for q in run.questions):
@@ -97,7 +97,7 @@ def ask_loop_stops(run, rows: dict, loops: dict, now: float, limit: float) -> No
         run.loop_until[n] = run.stall_until[n] = now + limit
         text = f"レーン {n} の開発ループ {stop.get('loop')} が止まった（条件: {stop.get('condition')}）。一覧の状態は running のまま"
         run.ask(
-            "stall", f"{n}-l{int(now)}", n, text, ["起こし直す", "止める", "待つ"], commands=_commands(n),
+            "stall", f"{n}-l{int(now)}", n, text, ["起こし直す", "止める", "待つ"], commands=_lane_commands(n),
             loop_stop={"loop": stop.get("loop"), "condition": stop.get("condition")}, asked_at=now,
         )  # fmt: skip
 
@@ -112,8 +112,8 @@ def ask_stalls(run, rows: dict, now: float, limit: float) -> None:
         if r.get("state") == "stopped" and tries and tries[-1].get("result") != STARTED:
             _ask_refused(run, n, tries, now)
             continue
-        at = _epoch(r.get("at"))
-        ok = [_epoch(t.get("at")) for t in tries or [] if t.get("result") == STARTED]
+        at = _seconds_of(r.get("at"))
+        ok = [_seconds_of(t.get("at")) for t in tries or [] if t.get("result") == STARTED]
         base = max([x for x in (at, *ok) if x is not None], default=None)
         if r.get("state") != "running" or base is None or now - base < limit or now < run.stall_until.get(n, 0):
             continue
@@ -121,7 +121,7 @@ def ask_stalls(run, rows: dict, now: float, limit: float) -> None:
             continue  # 答えていない開発ループの止まりの問いに重ねない（I7）
         run.stall_until[n] = now + limit
         text = f"レーン {n} が {int((now - base) // 60)} 分動いていない（最後に動いた時刻: {r.get('at')}{_tries_text(tries)}）"
-        run.ask("stall", f"{n}-s{int(now)}", n, text, ["起こし直す", "止める", "待つ"], commands=_commands(n), asked_at=now)
+        run.ask("stall", f"{n}-s{int(now)}", n, text, ["起こし直す", "止める", "待つ"], commands=_lane_commands(n), asked_at=now)
 
 
 def _ask_refused(run, n: str, tries: list, now: float) -> None:
@@ -132,7 +132,7 @@ def _ask_refused(run, n: str, tries: list, now: float) -> None:
     last = tries[-1]
     text = f"レーン {n} の再起動が断られ、止まったまま（再起動の試み {len(tries)} 回、最後の結果: {_result_text(last.get('result'))}）"
     run.ask(
-        "stall", f"{n}-r{last.get('at')}", n, text, ["起こし直す", "止める"], commands=_commands(n, stop=False),
+        "stall", f"{n}-r{last.get('at')}", n, text, ["起こし直す", "止める"], commands=_lane_commands(n, stop=False),
         refused_at=last.get("at"), asked_at=now,
     )  # fmt: skip
 
@@ -156,7 +156,7 @@ def ask_helper(run, rows: dict) -> None:
     if name is None:
         return
     if run.judging:
-        at, launched = _epoch((rows.get(name) or {}).get("at")), run.launch.get("at")
+        at, launched = _seconds_of((rows.get(name) or {}).get("at")), run.launch.get("at")
         if at is None or (launched is not None and at <= float(launched)):
             return  # 時刻の無い行・前の起動の行
         run.drain()
