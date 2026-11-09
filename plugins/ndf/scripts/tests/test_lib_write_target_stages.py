@@ -234,3 +234,58 @@ REDIRECT_CASES = [
 )
 def test_each_kind_of_redirect_keeps_its_output(command: str, targets: list[str]) -> None:
     assert write_target.shell_targets(command, "/base") == targets
+
+
+# --- normalize_path（字面の畳み込みと、実在する最も深い祖先の実体化） ---
+# 期待値は今の実装を動かして採った値。`T` は実体のパスへ直した一時ディレクトリ、
+# `/nonexistent-zz` は実在しない前提の起点（祖先が `/` まで実在しない経路を通す）。
+NORMALIZE_LITERAL_CASES = [
+    ("root", "/", "", "/"),
+    ("dotdot_above_root", "/..", "/x", "/"),
+    ("relative_joined_to_cwd", "a/b", "/nonexistent-zz", "/nonexistent-zz/a/b"),
+    ("dot_and_dotdot_folded", "/nonexistent-zz/a/../b/./c", "", "/nonexistent-zz/b/c"),
+    ("relative_dotdot_beyond_root", "../../../x", "/nonexistent-zz/q", "/x"),
+    ("repeated_and_trailing_slashes", "//nonexistent-zz//a/", "", "/nonexistent-zz/a"),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "cwd", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in NORMALIZE_LITERAL_CASES],
+)
+def test_normalize_path_without_existing_ancestor(path: str, cwd: str, expected: str) -> None:
+    assert write_target.normalize_path(path, cwd) == expected
+
+
+# (名前, パス（`T` を一時ディレクトリへ置き換える）, 起点, 期待値)
+NORMALIZE_REAL_CASES = [
+    ("symlink_dir_itself", "T/link", "", "T/real"),
+    ("missing_suffix_under_symlink", "T/link/sub/new/f.md", "", "T/real/sub/new/f.md"),
+    ("existing_file_is_not_dir", "T/link/file.md", "", "T/real/file.md"),
+    ("dotdot_folded_before_resolving", "T/link/x/../sub", "", "T/real/sub"),
+    ("relative_from_real_cwd", "link/new.md", "T", "T/real/new.md"),
+    ("dot_is_cwd", ".", "T", "T"),
+    ("empty_is_cwd", "", "T", "T"),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "cwd", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in NORMALIZE_REAL_CASES],
+)
+def test_normalize_path_resolves_deepest_existing_dir(
+    tmp_path: pathlib.Path, path: str, cwd: str, expected: str
+) -> None:
+    t = str(tmp_path.resolve())
+    (tmp_path / "real" / "sub").mkdir(parents=True)
+    (tmp_path / "real" / "file.md").write_text("x")
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    got = write_target.normalize_path(path.replace("T", t, 1), cwd.replace("T", t, 1))
+    assert got == expected.replace("T", t, 1)
+
+
+def test_normalize_path_dotdot_escapes_above_target(tmp_path: pathlib.Path) -> None:
+    t = tmp_path.resolve()
+    (t / "real").mkdir()
+    got = write_target.normalize_path(f"{t}/real/a/../../../out", "")
+    assert got == f"{t.parent}/out"
