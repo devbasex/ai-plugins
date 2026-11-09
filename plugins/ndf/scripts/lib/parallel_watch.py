@@ -25,9 +25,10 @@ def _epoch(value) -> Optional[float]:
     if not isinstance(value, str) or not value:
         return None
     try:
-        return clock.parse(value, naive="utc").timestamp()
+        got = clock.parse(value, naive="utc")
     except (TypeError, ValueError):
         return None
+    return got.timestamp() if got is not None else None
 
 
 def _commands(n: str, stop: bool = True) -> dict:
