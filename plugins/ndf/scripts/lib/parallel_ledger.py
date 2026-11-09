@@ -291,18 +291,10 @@ class RunState:
             return
         st = got.get("state")
         if st:
-            for k in FIELDS:
-                if k in st:
-                    setattr(self, k, set(st[k]) if k in SETS else st[k])
-            self.lanes = {n: dict((st.get("lanes") or {}).get(n) or {}) for n in self.order}
+            self._adopt_state(st)
         elif got.get("rebuilds"):  # チェックポイントの無い作り直し: 一覧に居るレーンは起動済みと読む（I10）
-            for n in got.get("ls") or []:
-                if n in self.lanes:
-                    self.lanes[n].setdefault("started", "restored")
-        self.current = next((r for r in self.releases if r.get("state") in ("presented", "confirmed")), None)
-        have = {r.get("n") for r in self.releases}
-        self.releases += [{"n": n, "state": "lost"} for n in range(1, max(got.get("release_dirs") or [0]) + 1) if n not in have]
-        self.releases.sort(key=lambda r: int(r.get("n") or 0))  # 置き場のある連番を使い回さない（I9）
+            self._adopt_listed_lanes(got.get("ls") or [])
+        self._adopt_releases(got.get("release_dirs") or [0])
         self.seq = int(got.get("rebuilds") or 0) * REBUILD_SEQ  # 作り直しをまたいで増え続ける（I8・決定 5）
         self.offset, self.unread, self.published = (
             int(got.get("offset") or 0),
@@ -316,6 +308,26 @@ class RunState:
             self.publish_questions()
         if self.current is not None:
             self.pause("notice", lanes=[], attach=[])
+
+    def _adopt_state(self, st: dict) -> None:
+        """チェックポイントの `FIELDS` の値とレーンを戻す。"""
+        for k in FIELDS:
+            if k in st:
+                setattr(self, k, set(st[k]) if k in SETS else st[k])
+        self.lanes = {n: dict((st.get("lanes") or {}).get(n) or {}) for n in self.order}
+
+    def _adopt_listed_lanes(self, names: list) -> None:
+        """一覧に居るレーンを起動済みと読む（I10）。"""
+        for n in names:
+            if n in self.lanes:
+                self.lanes[n].setdefault("started", "restored")
+
+    def _adopt_releases(self, release_dirs: list) -> None:
+        """流れているリリースを決め、置き場のある連番の欠番を `lost` で埋める（I9）。"""
+        self.current = next((r for r in self.releases if r.get("state") in ("presented", "confirmed")), None)
+        have = {r.get("n") for r in self.releases}
+        self.releases += [{"n": n, "state": "lost"} for n in range(1, max(release_dirs) + 1) if n not in have]
+        self.releases.sort(key=lambda r: int(r.get("n") or 0))  # 置き場のある連番を使い回さない（I9）
 
     def receive(self, msg, topic: str) -> None:
         """受け取り。台帳の計画は台帳の行だけを入力にし、メッセージは読みを早める知らせとして扱う（決定 3）。"""
