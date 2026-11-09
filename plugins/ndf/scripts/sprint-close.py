@@ -97,7 +97,9 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
 
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
-UNKNOWN_REASON = "リリース記録の置き場が分からない（リリースの経路が雛形でもリリースの Pull Request でもない。リリース記録を確かめて手で閉じる）"
+UNKNOWN_REASON = (
+    "リリース記録の置き場が分からない（リリースの経路が雛形でもリリースの Pull Request でもない。リリース記録を確かめて手で閉じる）"
+)
 LOCK_TIMEOUT = limits.seconds("sprint-close.issue-lock")  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
