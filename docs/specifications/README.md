@@ -141,5 +141,6 @@
 | [ndf-relay-api-keys.md](ndf-relay-api-keys.md) | 登録済み API キー（サブスクリプションの API クレジット）で supervise.py の worker の claude -p を動かす仕組みの常に成り立つ条件・登録簿と状態の形・副命令の契約・決定と理由（#2855）。使い方は development-workflow の references/relay-accounts.md が正 |
 | [ndf-issue-items.md](ndf-issue-items.md) | Issue の記載項目の定義（種類ごとの必須・該当時・不要と水準）と置き場ごとの表し方、テンプレートとの一致の検査、起票の前の検査（issue-file.py create と Claude Code の起票の guard）と起票の後の検査（issue-items.py audit）の常に成り立つ条件・決定の理由・テスト観点。項目の中身は data/issue-items.json が正 |
 | [ndf-supervisor-docs-guard.md](ndf-supervisor-docs-guard.md) | supervisor が規約の文書を読み込まれたプラグインから読む決まりと、外の規約の文書の読み込みを止める hook（規約の文書の guard）の判定の規則・構成要素・扱わないもの |
+| [ndf-release-pr-and-merge-route-terms.md](ndf-release-pr-and-merge-route-terms.md) | ベースブランチから本番チャネルへ変更を入れる道筋もリリースと呼ぶ規則、リリースの Pull Request とリリースの承認資料の語、変えない識別子（promote）、フェーズ名の旧い値の読み替え、禁止語の外すパス。語の定義は用語集が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
