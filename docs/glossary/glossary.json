@@ -4774,10 +4774,45 @@
     {
       "term": "実行の記録",
       "context": "ndf-workflow",
-      "meaning": "1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines のファイル（#2335）",
+      "meaning": "1 回の起動（子の実行を含む）の始まりから終わりまでを、実行の識別子つきで書く JSON Lines の行の並び。既定の出力先はファイル（#2335・#2338）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
       "code": "run_log"
+    },
+    {
+      "term": "起点の実行",
+      "context": "ndf-workflow",
+      "meaning": "親の実行の識別子を持たない実行。実行の記録のファイル名になる（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "子の実行",
+      "context": "ndf-workflow",
+      "meaning": "実行の核を通る入口が子プロセスとして起こした、核を通る入口の実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "診断",
+      "context": "ndf-workflow",
+      "meaning": "スクリプトが人へ向けて標準エラーへ出す文（警告・進み具合・失敗の理由）。結果 JSON とは別の出力で、実行の記録にも残す（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "出力先",
+      "context": "ndf-workflow",
+      "meaning": "実行の記録の行を書く先。既定はファイルで、1 つの設定で別の出力先（Factory の CloudWatch Logs など）へ差し替える（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-requirements.md"
+    },
+    {
+      "term": "全文ファイル",
+      "context": "ndf-workflow",
+      "meaning": "実行の記録の 1 行の上限を超える文字列を、切らずに全文で置くファイル。実行の記録と同じ日付のディレクトリに置き、行にはパス・文字数・sha256 を残す（#2338）",
+      "source": "",
+      "pending_source": "issues/issue-2338-design.md"
     },
     {
       "term": "上限の宣言",
