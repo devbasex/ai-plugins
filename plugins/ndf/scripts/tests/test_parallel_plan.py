@@ -354,6 +354,6 @@ def test_start_with_a_dead_run_pid_marks_the_session_before_continuing(tmp_path,
 
     a = type("A", (), {"name": "p1"})()
     with pytest.raises(_Reply):
-        pcli.start(a, reply, main, checked, SCRIPTS / "parallel.py")
+        pcli.start_plan(a, reply, main, checked, SCRIPTS / "parallel.py")
     assert marked == [("p1", False)] and out["metrics"]["organizer"] is True
     assert spawned and spawned[0][-2:] == ["run", "p1"]

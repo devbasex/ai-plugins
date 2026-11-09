@@ -543,9 +543,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run = _Run(main, name, init["lanes"])
     run.init_run_state(ledgered)
     run.routed = durable.patched("parallel-answers")
-    if ledgered:
-        run.adopt(step_restore(main, name))
-    run.pause("running")
+    run.adopt(step_restore(main, name) if ledgered else None)  # 台帳から戻し、running と戻した問い・知らせを立てる
     if run.routed:
         run.receive_prior(step_prior_waits(main, name))
     wait = poll_seconds()

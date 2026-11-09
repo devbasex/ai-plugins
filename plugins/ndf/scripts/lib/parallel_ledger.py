@@ -74,7 +74,9 @@ def message_key(msg: dict, topic: str, fallback: str = "") -> tuple[str, str]:
     return kind, f"{kind}:{msg['id']}" if msg.get("id") else f"{kind}:{fallback or uuid.uuid4().hex}"
 
 
-def append_ledger_row(main: Path, name: str, kind: str, key: str, msg: Optional[dict] = None, by: Optional[str] = None, rid: str = "") -> bool:
+def append_ledger_row(
+    main: Path, name: str, kind: str, key: str, msg: Optional[dict] = None, by: Optional[str] = None, rid: str = ""
+) -> bool:
     """行を 1 行足す。同じキーの行があれば何も足さずに False（I2）。書けなければ `OSError`・`LockTimeout`。
 
     排他の中で重複のキーと末尾の改行を確かめてから `O_APPEND` で書く（I3・決定 2）。改行で終わらない末尾（落ちた書き手の
@@ -281,8 +283,12 @@ class RunState:
         out = {k: sorted(getattr(self, k)) if k in SETS else getattr(self, k) for k in FIELDS}
         return {**out, "offset": self.offset, "unread": list(self.unread), "published": dict(self.published)}
 
-    def adopt(self, got: dict) -> None:
-        """`restore` の値を戻す（設計の「作り直す」の順）。"""
+    def adopt(self, got: Optional[dict]) -> None:
+        """`restore` の値を戻し（設計の「作り直す」の順）、`running` と戻した問い・流れているリリースの知らせを立てる。
+        `got` が None（台帳を読まない途中の記録）なら `running` を立てるだけにする。"""
+        if got is None:
+            self.pause("running")
+            return
         st = got.get("state")
         if st:
             for k in FIELDS:
@@ -303,6 +309,7 @@ class RunState:
             list(got.get("unread") or []),
             dict(got.get("published") or {}),
         )
+        self.pause("running")
         for row in got.get("rows") or []:
             self.apply(row)
         if self.questions:

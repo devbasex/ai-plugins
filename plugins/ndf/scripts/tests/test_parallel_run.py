@@ -1329,6 +1329,7 @@ def test_recorded_run_of_the_old_steps_continues_with_the_new_code(env, tmp_path
     ans = read(main, r2)
     assert (ans["result"], ans["version"], ans["release"]) == ("released", None, 2)
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
+    assert not (pp.plan_dir(main, "p1") / "checkpoint.json").exists()  # 途中の記録は台帳を読まない今までの道を通る（#2647 の条件 19）
 
 
 def test_new_record_replays_to_the_same_values(env, tmp_path):
