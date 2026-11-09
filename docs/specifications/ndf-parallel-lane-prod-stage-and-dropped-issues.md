@@ -131,7 +131,7 @@ sequenceDiagram
 リリースの依頼の形（`contracts/forms/parallel-request.json`）と `parallel.py request` の引数は変わらない。設計承認ゲートで課題を外したループの 1 回では、
 依頼の `issues` が残った課題だけになる。
 
-オーガナイザーの範囲の内訳は `lib/parallel_release.py` の `map_lanes` が、レーンの `input.issues` と Pull Request の閉じる課題から決める。
+オーガナイザーの範囲の内訳は `lib/parallel_release.py` の `map_lanes` が、レーンの `input.issues` と Pull Request の閉じる課題から決める。計画の置き場と違うリポジトリのレーン（別のリポジトリのレーン）は自分のリポジトリの設定で本番を出すため、対応づけない。
 
 | オーガナイザー | レーンの `input.issues` の出所 | 依頼の `issues` の影響 |
 | --- | --- | --- |

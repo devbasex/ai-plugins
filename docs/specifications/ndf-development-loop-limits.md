@@ -291,7 +291,7 @@ Codex と Kiro は USD を持たないため和に足さず、内訳の `unprice
 
 | 上限 | 値 | 定義の場所 |
 | --- | --- | --- |
-| 同時に動かすラッパーの数 | 3（`NDF_RELAY_MAX_NAMED`。実行環境の調査が候補を出す） | `relay_lib/hub.py`・`lib/parallel_plan.py` |
+| 同時に動かすラッパーの数 | 3（マシンの設定 `relay.py cap --named <n>` → `NDF_RELAY_MAX_NAMED` → 既定の順。実行環境の調査が候補を出す） | `lib/relay_limit.py`（`relay_lib/hub.py`・`lib/parallel_plan.py` が読む） |
 | プランの本数の合計 | 6（実行環境の調査が候補を出す） | `lib/parallel_plan.py` |
 | 並列の計画の外の `queue --max` の既定 | 3 | `lib/parallel_lane.py` |
 | 文脈の量の運用上限 | 200,000（試行は 400,000） | `lib/context_policy.py` |
@@ -418,7 +418,7 @@ JSON のファイルだけで、スキーマの移行は無い。読む側が古
 
 ## 運用
 
-宣言に数を書いているプロジェクトでは、その値が効く。ai-plugins の `.ndf/pace.json` のループの 1000 回目・時間 10000・費用 200 ドルも宣言なので効く。実行環境の調査の候補を反映するときは、人が `.ndf/pace.json` の `loop.max_issues` と環境変数（`NDF_RELAY_MAX_NAMED` など）を直す。
+宣言に数を書いているプロジェクトでは、その値が効く。ai-plugins の `.ndf/pace.json` のループの 1000 回目・時間 10000・費用 200 ドルも宣言なので効く。実行環境の調査の候補を反映するときは、人が `.ndf/pace.json` の `loop.max_issues` と環境変数（`NDF_PARALLEL_MAX_PLANS` など）を直す。同時に動かすラッパーの数は `relay.py cap --named <n>` でマシンの設定へ書く。
 
 版を戻すと、`null` が入ったループの記録を古い版が読んで予算の比較で例外になる。戻した後は新しいループを始める。
 
