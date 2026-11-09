@@ -4992,6 +4992,20 @@
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
+      "term": "人の起動",
+      "code": "human_launch",
+      "context": "ndf-workflow",
+      "meaning": "端末で利用者が打った claude が、リレーハブへ by: terminal で頼んだ起動（端末の 2 本目）。上限で断らず、上限の数にも入れない",
+      "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
+    },
+    {
+      "term": "AI の起動",
+      "code": "ai_launch",
+      "context": "ndf-workflow",
+      "meaning": "依頼の by が spawn・restart・block:<作業ディレクトリ> の起動。リレーハブが上限で判定する",
+      "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
+    },
+    {
       "term": "端末の結び付け",
       "code": "attach",
       "context": "ndf-workflow",
