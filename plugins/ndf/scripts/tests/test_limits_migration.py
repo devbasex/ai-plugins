@@ -41,6 +41,7 @@ BEFORE = {
     "hook.deadline-margin": {"seconds": 1.5},
     "hook.wait-notify-lock": {"seconds": 5},
     "hook.git-rev-parse": {"seconds": 5},
+    "hook.git-remote": {"seconds": 5},
     "auth.probe": {"seconds": 120},
     "claude-account-dir.lock": {"seconds": 2},
     "claude-accounts.expiry-margin": {"seconds": 60},

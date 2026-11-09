@@ -817,7 +817,7 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 再検討条件 | — | 「やらない」で閉じた課題を再び考える条件 | 再燃の条件 | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 起票先 | — | issue-file.py create が課題を作るリポジトリ | — | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 由来 | — | 範囲外の課題を見つけた元。PR #<番号> か issue #<番号> の形で書く。Pull Request がまだ無ければ起点の issue | — | — | `plugins/ndf/skills/out-of-scope/SKILL.md` |
-| 本文の骨格 | — | 範囲外の課題の本文が持つ 6 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・起票者の推定・由来） | — | — | `docs/specifications/out-of-scope-issue-file.md` |
+| 本文の骨格 | — | 範囲外の課題の本文が持つ見出し。Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）の項目名で書き、種類ごとの必須の項目・起票者の推定・由来を含む | — | — | `docs/specifications/out-of-scope-issue-file.md` |
 | 提示の要約値 | — | 承認資料に載せた内容から作る sha256。issue-file.py の create では起票先・題・本文・ラベル、note では打つ先・番号・1 行から作り、同意の後の --approved に渡して、示した内容と打つ内容が同じことを確かめる | — | — | `docs/specifications/out-of-scope-issue-file.md` |
 | 上流リポジトリ | — | NDF の Skill・エージェント・hook の実体を持つリポジトリ | 配布元のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 開発対象リポジトリ | — | NDF を使って開発している側のリポジトリ。gh repo view が返すもの | 開発対象のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
@@ -1024,7 +1024,7 @@ Neural Development Factory（別のリポジトリのサービス）が NDF を�
 | Neural Development Factory | — | NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | ランナーのエージェント | — | 1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 実行ジョブ | — | 実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる | — | — | `docs/specifications/ndf-development-loop-limits.md` |
-| 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーのエージェントが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーのエージェントは自分では起票しない | — | — | — |
+| 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーのエージェントが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文・種類のラベルを持ち、ランナーのエージェントは自分では起票しない | — | — | — |
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
 | 区間 | — | 1 つの実行ジョブの中でランナーのエージェントが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | リリースの実行 | — | Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで | 配布の実行 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |

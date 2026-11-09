@@ -128,6 +128,19 @@ def test_all_materials_land_in_the_approval(monkeypatch, tmp_path):
     assert {i["name"]: i["result"] for i in out["items"] if i["kind"] == "material"} == {n: "written" for n in mod.materials.NAMES.values()}
 
 
+def test_a_supplement_table_before_the_issue_table_is_skipped(monkeypatch, tmp_path):
+    """#2803 の受け入れ条件 3: 補足の表が先にあっても、課題の表で合格の条件 1 は未実施に載らない。"""
+    supplement = "| 記号 | 実行したこと | 結果 |\n| --- | --- | --- |\n| T1 | pytest | 合格 |\n\n"
+    said = VERIFY.replace("| 課題 |", supplement + "| 課題 |", 1)
+    w = world_with_design(tmp_path)
+    path, _ = run(load(monkeypatch, w, said=[said]), w, check_state(tmp_path), "1.0.1-dev.1")
+    risks = section(path.read_text(encoding="utf-8"), "## 未検証・残る危険")
+    assert [r.split(":")[0] for r in risks if r.startswith("- 未実施のリリース後テスト")] == [
+        "- 未実施のリリース後テスト #7 の条件 2",
+        "- 未実施のリリース後テスト #7 の条件 4",
+    ]
+
+
 def test_without_a_table_every_criterion_is_unverified(monkeypatch, tmp_path):
     """1488-5: リリース後テストの表が無ければ、印の無い条件がすべて並ぶ。"""
     w = world_with_design(tmp_path)

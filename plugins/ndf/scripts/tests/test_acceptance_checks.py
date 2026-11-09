@@ -125,6 +125,18 @@ def test_read_check_kinds_skips_rows_without_means_or_kind():
     assert acceptance.read_check_kinds(BODY) == {}
 
 
+def test_read_check_kinds_reads_the_first_table_by_header_names_and_keeps_the_last_row():
+    body = (
+        BODY
+        + "\n## 受け入れ条件の確認\n\n| 手段 | 条件 | 区分 |\n| --- | --- | --- |\n"
+        + "| `a` | 1. 一つ目 | マージ前 |\n| `` | 2 | マージ前 |\n| `b` | 1 | マージ前 |\n| x | n | マージ前 |\n"
+        + "\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 3 | マージ前 | c |\n"
+    )
+    assert acceptance.read_check_kinds(body) == {1: acceptance.Check("マージ前", "`b`")}
+    other = BODY + "\n## 受け入れ条件の確認\n\n| 条件 | 区分 |\n| --- | --- |\n| 1 | リリース後 |\n"
+    assert acceptance.read_check_kinds(other) == {}
+
+
 # --- 承認資料（受け入れ条件 2・3） ---------------------------------------------------
 
 
