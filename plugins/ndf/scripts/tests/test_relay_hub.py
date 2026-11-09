@@ -469,7 +469,8 @@ class TestWithTmux:
         hub.wait(lambda: ls_rows(hub)["t2"]["attached"] is False, 20, "端末が外れる")
         assert ls_rows(hub)["t2"]["state"] == "running"
 
-    def test_limit_refuses_from_terminal_and_spawn(self, hubenv):
+    def test_limit_refuses_spawn_but_starts_from_terminal(self, hubenv):
+        """上限は AI の起動（spawn）を断り、端末から打った起動は断らずに知らせの 1 行を出して起動する（#2862 の AC1・AC9）。"""
         hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
         hub.wait_start(1)
         assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
@@ -477,8 +478,8 @@ class TestWithTmux:
         res = json.loads(p.stdout)
         assert p.returncode == 3 and res["items"][0]["result"] == "limit" and "上限 2" in res["summary"]
         third = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
-        assert third.finish() == 3
-        assert "上限 2" in third.text
+        third.wait(lambda: "上限 2 を超えて起動する" in third.text, 40, "上限を超えた知らせの 1 行")
+        hub.wait(lambda: (ls_rows(hub).get("t2") or {}).get("state") == "running", 40, "端末の 2 本目が一覧に出る")
 
     def test_killed_named_wrapper_shows_stopped(self, hubenv):
         hub = hubenv()
@@ -912,3 +913,179 @@ def test_write_name_keeps_the_spawned_role(tmp_path, monkeypatch):
     monkeypatch.delenv("NDF_RELAY_ROLE")
     hc.write_name(str(other), None)
     assert hb.read_role(str(other)) is None
+
+
+# ---------------------------------------------------------------- 人の起動（#2862）
+
+
+SESSION = {"attached": False, "activity": None, "pid": None}
+
+
+def _row(by, **extra):
+    return {"session": extra.pop("session", None), "cwd": "/", "args": [], "created_at": "x", "by": by, **extra}
+
+
+def _full(dirs):
+    """上限 3 に数えるラッパーが 3 本（リレーハブ・名前つき・名前の無いもの）。"""
+    dirs("front", name="t1")
+    dirs("named", name="lcore")
+    dirs("plain")
+
+
+def _hub_log():
+    return [json.loads(x) for x in pathlib.Path(hb.hub_path(hb.HUB_LOG)).read_text().splitlines()]
+
+
+def test_terminal_request_is_started_over_the_limit_with_notice(launched, dirs):
+    """AC1・AC8: 上限に達していても人の起動は起動し、知らせと記録の `over_limit` を残す。"""
+    _full(dirs)
+    res = hb.Hub(None).process({"kind": "spawn", "cwd": "/", "args": [], "by": "terminal"})
+    assert res["status"] == "ok" and res["metrics"]["exit_code"] == 0
+    item = res["items"][0]
+    assert item["result"] == "started" and item["name"] == "t2"
+    assert "上限 3" in item["notice"] and "t1, lcore, -" in item["notice"]
+    started = _hub_log()[-1]
+    assert started["event"] == "started" and started["reason"] == "terminal"
+    assert started["over_limit"] == {"cap": 3, "running": ["t1", "lcore", "-"]}
+    assert hb.read_registry()["t2"]["by"] == "terminal"
+
+
+def test_terminal_request_under_the_limit_has_no_notice(launched, dirs):
+    dirs("front", name="t1")
+    res = hb.Hub(None).process({"kind": "spawn", "cwd": "/", "args": [], "by": "terminal"})
+    assert res["items"] == [{"name": "t2", "result": "started"}]
+    assert "over_limit" not in _hub_log()[-1]
+
+
+@pytest.mark.parametrize("by", ["spawn", "restart", "block:/x"])
+def test_ai_requests_are_refused_at_the_limit(launched, dirs, by):
+    """AC2: AI の起動は今と同じく `limit`・終了コード 3 で断る。記録に `over_limit` を書かない。"""
+    _full(dirs)
+    _write_registry({"r": _row("spawn", session="r")})
+    kind = "restart" if by == "restart" else "spawn"
+    res = hb.Hub(None).process({"kind": kind, "name": "r", "cwd": "/", "args": [], "by": by})
+    assert res["items"][0]["result"] == hb.LIMIT and res["metrics"]["exit_code"] == 3 and launched == []
+    assert all("over_limit" not in row for row in _hub_log())
+
+
+def test_human_wrappers_are_not_counted(dirs, monkeypatch):
+    """AC3・I3: 登録簿の行の `by` が `terminal` でセッションの在るラッパーは数えない。セッションが無ければ外さない。"""
+    dirs("front", name="t1")
+    dirs("lane", name="lcore")
+    dirs("h2", name="t2")
+    dirs("h3", name="t3")
+    hb.ensure_dirs()
+    _write_registry({"lcore": _row("spawn", session="lcore"), "t2": _row("terminal", session="t2"), "t3": _row("terminal", session="t3")})
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true")
+    now = hb.live(hb.scan_wrappers(), hb.read_registry(), {"lcore": SESSION, "t2": SESSION, "t3": SESSION})
+    assert now.count == 2 and now.humans == 2 and sorted(now.names) == ["lcore", "t1", "t2", "t3"]
+    assert hb.Hub.judge("lproc", now, by="spawn") is None
+    # 行が残っていてもセッションが無ければ人の起動として外さない
+    gone = hb.live(hb.scan_wrappers(), hb.read_registry(), {"lcore": SESSION})
+    assert gone.count == 4 and gone.humans == 0
+    assert hb.Hub.judge("lproc", gone, by="spawn").reason == hb.LIMIT
+
+
+def _w(name, role=None):
+    return hb.Wrapper(f"/x/{name}", name, True, False, None, None, role)
+
+
+def test_human_organizer_is_taken_once(state):
+    """I1: 人の起動の `organizer` は人の起動として 1 回だけ外し、`organizer` の 1 本は人の起動でないものから外す。"""
+    reg = {"t2": _row("terminal", session="t2")}
+    sessions = {"t2": SESSION}
+    now = hb.live([_w("t1"), _w("t2", "organizer"), _w("a"), _w("b")], reg, sessions)
+    assert now.count == 3 and now.humans == 1
+    assert hb.Hub.judge("c", now, by="spawn").reason == hb.LIMIT
+    # 人の起動でない organizer が 2 本あっても、外すのは 1 本だけ
+    two = hb.live([_w("t1"), _w("t2", "organizer"), _w("o1", "organizer"), _w("o2", "organizer"), _w("a")], reg, sessions)
+    assert two.count == 3 and two.humans == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "taken", "tmux_ok", "reason"),
+    [("Bad.Name", False, True, hb.BAD_NAME), ("t1", True, True, hb.NAME_TAKEN), ("t2", False, False, hb.NO_TMUX)],
+)
+def test_terminal_request_keeps_other_refusals(state, monkeypatch, name, taken, tmux_ok, reason):
+    """AC5: 人の起動でも名前の形・重複・tmux の有無では断る。"""
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true" if tmux_ok else None)
+    now = hb.Live(5, ["t1"], {"t1"} if taken else set())
+    assert hb.Hub.judge(name, now, by="terminal").reason == reason
+
+
+def test_restart_of_a_human_wrapper_counts_it_again(launched, tmp_path):
+    """I4: 人の起動で始めた名前を restart で起動し直すと、行の `by` は `restart` になり数える。"""
+    _write_registry({"t2": _row("terminal", session="t2", cwd=str(tmp_path))})
+    hb.Hub(None).process({"kind": "restart", "name": "t2", "by": "restart"})
+    reg = hb.read_registry()
+    assert reg["t2"]["by"] == "restart"
+    now = hb.live([], reg, {"t2": SESSION})
+    assert now.count == 1 and now.humans == 0
+
+
+def test_ai_paths_never_put_terminal(state, monkeypatch, tmp_path):
+    """AC6・I5: `relay.py spawn`・`restart`・起動のブロックが置く依頼の `by` は `terminal` でない。"""
+    seen = []
+    monkeypatch.setattr(hc, "send_request", lambda kind, name, cwd, args, by, extra=None: seen.append(by) or None)
+    monkeypatch.setattr(hb, "hub_running", lambda: True)
+    hc.cmd_spawn(["--name", "a", "--", "x"])
+    hb.ensure_dirs()
+    _write_registry({"a": _row("spawn", session="a")})
+    hc.cmd_restart(["a"])
+    hc.place_blocks(fence("/goal x", "ndf-spawn lb"), "/", str(tmp_path))
+    box = pathlib.Path(hb.hub_path(hb.REQUESTS))
+    seen += [json.loads(f.read_text())["by"] for f in box.iterdir()]
+    assert seen[:2] == ["spawn", "restart"] and seen[2] == f"block:{tmp_path}"
+    assert hb.TERMINAL not in seen
+
+
+def test_ask_hub_says_the_notice_before_attach(monkeypatch):
+    """AC1: 通った結果に知らせがあれば、結び付く前に 1 行出す。"""
+    order = []
+    res = hb.hub_result("spawn", "ok", "x", "t2", "started", 0)
+    res["items"][0]["notice"] = "上限 3 を超えて起動する"
+    monkeypatch.delenv("NDF_RELAY_SPAWNED", raising=False)
+    monkeypatch.setattr(hc.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hc, "terminal_request", lambda args: ("attach", res))
+    monkeypatch.setattr(hc.tmux, "exec_attach", lambda name: order.append(("attach", name)))
+    hc.ask_hub([], lambda msg: order.append(("say", msg)))
+    assert order == [("say", "上限 3 を超えて起動する"), ("attach", "t2")]
+
+
+class _Passthrough(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("spawned", "relay_dir", "tty0", "tty1", "asked"),
+    [
+        (False, False, True, True, True),
+        (True, False, True, True, False),
+        (False, True, True, True, False),
+        (False, False, False, True, False),
+        (False, False, True, False, False),
+    ],
+)
+def test_terminal_request_only_from_a_human_terminal(state, monkeypatch, spawned, relay_dir, tty0, tty1, asked):
+    """AC7・I5: `by: terminal` の依頼は、起動の印も `NDF_RELAY_DIR` も無く、標準入力と標準出力が端末のときだけ置く。"""
+    from relay_lib import run as rr
+
+    seen = []
+    for k in ("NDF_RELAY_SPAWNED", "NDF_RELAY_DIR", "NDF_RELAY", "NDF_RELAY_DEPTH", rr.ho.HANDOVER_ENV):
+        monkeypatch.delenv(k, raising=False)
+    if spawned:
+        monkeypatch.setenv("NDF_RELAY_SPAWNED", "1")
+    if relay_dir:
+        monkeypatch.setenv("NDF_RELAY_DIR", "/x")
+    monkeypatch.setattr(rr.session_env, "drop_parent_env", lambda env: None)
+    monkeypatch.setattr(rr.cl, "resolve_claude", lambda: "/bin/claude")
+    monkeypatch.setattr(rr.cl, "passthrough", lambda claude, args: (_ for _ in ()).throw(_Passthrough()))
+    monkeypatch.setattr(rr.os, "isatty", lambda fd: {0: tty0, 1: tty1}.get(fd, False))
+    monkeypatch.setattr(rr, "pty_available", lambda: True)
+    monkeypatch.setattr(hc, "claim_hub", lambda: None)
+    monkeypatch.setattr(hc.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hc, "send_request", lambda kind, name, cwd, args, by, extra=None: seen.append(by) or None)
+    monkeypatch.setattr(rr.cl, "read_plugin", lambda claude: (_ for _ in ()).throw(_Passthrough()))
+    with pytest.raises(_Passthrough):
+        rr.cmd_run([])
+    assert seen == ([hb.TERMINAL] if asked else [])
