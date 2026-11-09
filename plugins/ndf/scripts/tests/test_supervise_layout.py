@@ -39,6 +39,7 @@ NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
     "progress_watch",  # 実装のステップの進みの観測（#2505）
+    "rerun",  # ステップの打ち直しの同じ原因の上限（#2343）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
     "pr_materials",
     "design_stage",
@@ -48,6 +49,7 @@ MODULES = [
     "limits",  # ステップの上限をプランの遷移から求める（#1909）
     "prompts",
     "claude",
+    "children",  # 子プロセスの待ち（#2855 で claude から分けた）
     "state",
     "slow",
     "steps",
@@ -84,6 +86,7 @@ NO_ENGINE = [
     "limits",
     "prompts",
     "claude",
+    "children",
     "state",
     "slow",
     "steps",

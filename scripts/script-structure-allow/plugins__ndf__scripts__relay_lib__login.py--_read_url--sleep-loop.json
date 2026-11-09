@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/relay_lib/login.py", "name": "_read_url", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: ログインの子プロセスの出力に URL が出るのを待つ"}

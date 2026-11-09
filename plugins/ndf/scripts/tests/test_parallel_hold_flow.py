@@ -327,7 +327,8 @@ def test_the_hold_and_the_resume_run_without_the_organizer(env):
         pl.send_answer(main, "p1", rid, "answered", choice=[])
     until(lambda: ph.read_hold(main, "p1") is None)
     until(lambda: calls(log, "restart"))
-    assert calls(log, "restart")[0][:2] == ["restart", "la"] and ph.read_marks(main, "p1") == {}
+    until(lambda: ph.read_marks(main, "p1") == {})  # 印は restart が通った後に消す
+    assert calls(log, "restart")[0][:2] == ["restart", "la"]
     assert [r["change"] for r in ph.read_log(main, "p1")] == ["on", "off"]
     states.write_text(json.dumps({"la": "running"}))
     time.sleep(0.5)
@@ -347,7 +348,8 @@ def test_a_mark_with_no_requests_left_keeps_the_plan_until_the_restart(env):
     until(lambda: "lb" in spawned(log))  # 印の無い la は止まったと数える
     until(lambda: calls(log, "restart"))
     assert durable.status(pl.workflow_id("p1")) in (*pl.RUNNING, "SUCCESS")
-    assert calls(log, "restart")[0][1] == "lb" and "lb" not in ph.read_marks(main, "p1")
+    until(lambda: "lb" not in ph.read_marks(main, "p1"))  # 印は restart が通った後に消す
+    assert calls(log, "restart")[0][1] == "lb"
 
 
 def test_stop_ends_the_workflow_with_a_hold_and_leaves_no_files(env):

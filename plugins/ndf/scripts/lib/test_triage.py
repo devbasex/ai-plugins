@@ -432,9 +432,11 @@ def wait_check(
     上限に届いた・照会に失敗した（`None`）ときは `None` を返し、呼ぶ側は通さない（fail-closed）。
     `sleep` を省けばモジュールの `SLEEP`（テストが差し替える）。
     """
+    import limits
     import waits
 
-    waited = waits.wait_until(fetch, lambda v: v != "pending", max_wait=max_wait, sleep=sleep or SLEEP, on_wait=on_wait)
+    policy = limits.policy("test-triage.check-wait")._replace(seconds=max_wait)
+    waited = waits.wait_until(fetch, lambda v: v != "pending", policy=policy, sleep=sleep or SLEEP, on_wait=on_wait)
     value = waited.value if waited.done else None
     return (value if value != "pending" else None), float(waited.waited), int(waited.attempts)
 

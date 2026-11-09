@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shlex
 
+import limits
 from supervise_lib.paths import HERE
 
 
@@ -53,12 +54,12 @@ def _close_step(a, repo: str, record_pr: str, issues: str) -> dict:
 
 
 def carry_text(a) -> str:
-    """棚卸しの指示へ足す、前の周回の持ち越しの 1 文（--carry が無ければ空）。"""
+    """棚卸しの指示へ足す、ループの前の 1 回の持ち越しの 1 文（--carry が無ければ空）。"""
     carry = getattr(a, "carry", None) or []
     if not carry:
         return ""
     nums = " ".join(f"#{n}" for n in carry)
-    return f"前の周回の持ち越し {nums} を `upkeep.py` の `--add` で候補へ渡す（{' '.join(map(str, carry))}）。"
+    return f"ループの前の 1 回の持ち越し {nums} を `upkeep.py` の `--add` で候補へ渡す（{' '.join(map(str, carry))}）。"
 
 
 def _retro_step(a, refs: str, stats: str) -> dict:
@@ -103,7 +104,7 @@ def _refine_step(a, refs: str) -> dict:
     }
 
 
-DEPTH_WORK_TIMEOUT = 5400  # 見直し・大整理の work ステップの打ち切り（秒）。持ち主の見張りも同じ秒数で止まる
+DEPTH_WORK_TIMEOUT = limits.seconds("supervise.depth-work")
 
 
 def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
@@ -174,8 +175,8 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
 def refine_steps(a, refs: str, repo: str) -> list[dict]:
     """棚卸し: 差分の棚卸し → 深さの記録 → 大整理（起動するときだけ）→ 見直し（起動するときだけ）。
 
-    大整理を見直しより先に置く。両方が起動する周回では、組み直した後の課題で順位を付けるため。"""
-    # 秒・ドル・言語モデルは同じプランの進行の記録の refine の行から写す（#2315 の決定 2）。開発ループと周回は引数で受ける（決定 3）
+    大整理を見直しより先に置く。両方が起動するループの 1 回では、組み直した後の課題で順位を付けるため。"""
+    # 秒・ドル・言語モデルは同じプランの進行の記録の refine の行から写す（#2315 の決定 2）。開発ループとループの 1 回は引数で受ける（決定 3）
     scope = [x for k in ("loop", "lap") if getattr(a, k, None) is not None for x in (f"--{k}", str(getattr(a, k)))]
     record = {
         "id": "refine-record",

@@ -1,6 +1,6 @@
-"""統括役（#2346）: 同じコンテナの複数のラッパーを 1 つの統括役から起動し、1 つの表で見て 1 本ずつ止める。
+"""リレーハブ（#2346）: 同じコンテナの複数のラッパーを 1 つのリレーハブから起動し、1 つの表で見て 1 本ずつ止める。
 
-前半は統括役の判定（名前・重複・上限・引き継ぎ・権限）を状態ディレクトリだけで確かめる。後半は擬似端末と
+前半はリレーハブの判定（名前・重複・上限・引き継ぎ・権限）を状態ディレクトリだけで確かめる。後半は擬似端末と
 使い捨ての tmux（`TMUX_TMPDIR` を一時のディレクトリへ向け、利用者の tmux サーバに触れない）で、起動・一覧・停止・
 引き継ぎを確かめる。
 """
@@ -28,7 +28,11 @@ from relay_lib import hub as hb  # noqa: E402
 from relay_lib import hub_client as hc  # noqa: E402
 from relay_lib import tmux as tx  # noqa: E402
 
-from test_relay import RELAY, Term, fence, isolated_env, stop_input  # noqa: E402
+from test_relay import FAKE, RELAY, Term, fence, isolated_env, stop_input  # noqa: E402
+from account_fake import accounts, window  # noqa: E402,F401
+import claude_accounts as ca  # noqa: E402
+from relay_lib import pin  # noqa: E402
+from relay_lib import session_env as relay_session_env  # noqa: E402
 
 
 @pytest.fixture()
@@ -104,7 +108,7 @@ def test_running_name_is_taken(dirs):
 
 
 def test_default_limit_is_three_and_counts_every_running_wrapper(dirs):
-    """上限の既定は 3。統括役・名前つき・名前の無い今のラッパーを、動いているものすべてで数える。"""
+    """上限の既定は 3。リレーハブ・名前つき・名前の無い今のラッパーを、動いているものすべてで数える。"""
     assert hb.max_named() == 3
     dirs("front", name="t1")
     dirs("named", name="lroot")
@@ -132,7 +136,7 @@ def test_auto_name_takes_smallest_free_number():
     assert hb.Hub.auto_name({"t1", "t2", "t4"}) == "t3"
 
 
-# ---------------------------------------------------------------- 統括役の役目（I1・AC21・AC22）
+# ---------------------------------------------------------------- リレーハブの役目（I1・AC21・AC22）
 
 
 def test_only_one_hub_claims(state):
@@ -150,7 +154,7 @@ def test_only_one_hub_claims(state):
 
 
 def test_hub_dir_is_not_a_relay_dir(state):
-    """統括役の置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
+    """リレーハブの置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
     h = hb.Hub.claim()
     try:
         assert hb.scan_wrappers() == []
@@ -329,7 +333,7 @@ def test_stop_name_stops_only_that_one(dirs, capsys):
 
 
 def test_restart_of_the_hub_itself_does_not_stop_it(dirs, capsys, monkeypatch):
-    # 統括役を止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
+    # リレーハブを止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
     t1 = dirs("t1", name="t1")
     monkeypatch.setattr(hb, "hub_running", lambda: True)
     monkeypatch.setattr(hb, "hub_relay_dir", lambda: str(t1.path))
@@ -367,7 +371,7 @@ def test_wait_notice_names_wrapper_and_attach():
 
 @pytest.fixture()
 def hubenv(tmp_path):
-    """統括役を擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
+    """リレーハブを擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
     sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
     made = []
     # CI には TERM が無く、tmux の attach が端末の種類を決められずに失敗する。擬似端末に実際の端末と同じく TERM を与える
@@ -421,7 +425,7 @@ def hb_scan(t):
 
 
 class TestWithTmux:
-    """tmux を使う 4 件。tmux の有無は根の `conftest.py` の前提のコマンドの一覧がこのクラスの単位で決める。"""
+    """tmux を使う振る舞い。tmux の有無は根の `conftest.py` の前提のコマンドの一覧がこのクラスの単位で決める。"""
 
     def test_spawn_ls_stop_and_hub_handover(self, hubenv):
         hub = hubenv()
@@ -441,13 +445,13 @@ class TestWithTmux:
         dup = relay_cli(hub, "spawn", "--name", "lroot", "--", "x")
         assert dup.returncode == 3 and "名前が重なる" in dup.stderr
 
-        # 統括役を kill しても名前つきは動き続け、次の claude が統括役になる（AC21）
+        # リレーハブを kill しても名前つきは動き続け、次の claude がリレーハブになる（AC21）
         hub.proc.kill()
         hub.proc.wait(5)
-        hub.wait(lambda: "t1" not in ls_rows(hub), 20, "統括役のラッパーが一覧から消える")
+        hub.wait(lambda: "t1" not in ls_rows(hub), 20, "リレーハブのラッパーが一覧から消える")
         assert ls_rows(hub)["lroot"]["state"] == "running"
         nxt = hubenv()
-        nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude が統括役になる")
+        nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude がリレーハブになる")
         assert "lroot" in ls_rows(nxt)
 
         st = relay_cli(nxt, "stop", "lroot")
@@ -466,6 +470,7 @@ class TestWithTmux:
         assert ls_rows(hub)["t2"]["state"] == "running"
 
     def test_limit_refuses_from_terminal_and_spawn(self, hubenv):
+        """上限は AI の起動（spawn）を断り、端末から打った起動は断らずに知らせの 1 行を出して起動する（#2862 の AC1・AC9）。"""
         hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
         hub.wait_start(1)
         assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
@@ -473,8 +478,8 @@ class TestWithTmux:
         res = json.loads(p.stdout)
         assert p.returncode == 3 and res["items"][0]["result"] == "limit" and "上限 2" in res["summary"]
         third = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
-        assert third.finish() == 3
-        assert "上限 2" in third.text
+        third.wait(lambda: "上限 2 を超えて起動する" in third.text, 40, "上限を超えた知らせの 1 行")
+        hub.wait(lambda: (ls_rows(hub).get("t2") or {}).get("state") == "running", 40, "端末の 2 本目が一覧に出る")
 
     def test_killed_named_wrapper_shows_stopped(self, hubenv):
         hub = hubenv()
@@ -487,6 +492,191 @@ class TestWithTmux:
         os.kill(int((d / "relay.pid").read_text()), 9)
         wait_state(hub, "a", "stopped")
         assert ls_rows(hub)["t1"]["state"] == "running"
+
+    # 親の claude のセッションの環境を持つ専用サーバー（#2656）。グローバルな環境にこれらを持ったまま、レーンを起動する
+
+    def test_parent_env_server_spawn_and_manual_choose_pinned_account(self, hubenv, accounts, tmp_path):  # noqa: F811
+        """#2656 の受け入れ条件 1・3・4・8・13: `spawn` と手で打つ `new-session` が新しい区間 1 で始まり、指定の
+        アカウントで起動する。環境の `NDF_RELAY_DIR` は動いているリレーハブのラッパーを指す。グローバルな環境の役割と
+        費用の記録先はレーンへ残らない。"""
+        accounts.add("main", util5=10)
+        accounts.add("gmail", util5=20)
+        pin.set_pinned("gmail")
+        hub = _account_hub(hubenv, accounts, tmp_path)
+        hub.wait_start(1)
+        hub_dir = hub.starts()[0]["relay_dir"]
+        _parent_server(hub, accounts, NDF_RELAY_DIR=hub_dir, NDF_RELAY_DEPTH="1")
+        p = relay_cli(hub, "spawn", "--name", "lspawn", "--json", "--", "x")
+        assert p.returncode == 0, p.stdout + p.stderr
+        _manual(hub, "lman")
+        for name in ("lspawn", "lman"):
+            _assert_lane_chose(hub, name, "gmail", hub_dir)
+
+    def test_parent_env_server_restart_depth2_and_limited_pinned(self, hubenv, accounts, tmp_path):  # noqa: F811
+        """#2656 の受け入れ条件 2・5・6・13: 深さ 2 のグローバルな環境でも終了コード 127 にならず、指定の `main` が上限なら
+        `gmail` で起動する。止めたレーンの `restart` も同じ結果になる。"""
+        accounts.add("main", util5=100)
+        accounts.add("gmail", util5=20)
+        pin.set_pinned("main")
+        hub = _account_hub(hubenv, accounts, tmp_path)
+        hub.wait_start(1)
+        hub_dir = hub.starts()[0]["relay_dir"]
+        _parent_server(hub, accounts, NDF_RELAY_DIR=hub_dir, NDF_RELAY_DEPTH="2")
+        assert relay_cli(hub, "spawn", "--name", "lspawn", "--", "x").returncode == 0
+        _manual(hub, "lman")
+        first = _assert_lane_chose(hub, "lspawn", "gmail", hub_dir)
+        _assert_lane_chose(hub, "lman", "gmail", hub_dir)
+        assert relay_cli(hub, "stop", "lspawn").returncode == 0
+        wait_state(hub, "lspawn", "stopped")
+        p = relay_cli(hub, "restart", "lspawn")
+        assert p.returncode == 0, p.stdout + p.stderr
+        hub.wait(lambda: len(_lane_dirs(hub, "lspawn")) == 2, 40, "restart の新しい作業ディレクトリ")
+        again = _assert_lane_chose(hub, "lspawn", "gmail", hub_dir)
+        assert again != first
+
+    def test_parent_env_server_keeps_user_settings_without_accounts(self, hubenv, tmp_path):
+        """#2656 の受け入れ条件 9・10: アカウントを登録していない構成で、利用者の設定と認証の宣言は子まで届き、
+        元の設定ディレクトリが空なら `CLAUDE_CONFIG_DIR` を持たない（親のアカウントの設定ディレクトリにならない）。"""
+        hub = hubenv(env={"NDF_RELAY_CLAUDE": _env_dump_claude(tmp_path), "NDF_ACCOUNTS_DIR": str(tmp_path / "no-accounts")})
+        hub.wait_start(1)
+        hub_dir = hub.starts()[0]["relay_dir"]
+        user = {"NDF_ACCOUNT_SWITCH_AT": "80", "CLAUDE_CODE_OAUTH_TOKEN": "user-token", "CLAUDE_CODE_USE_BEDROCK": "1"}
+        _parent_server(hub, None, NDF_RELAY_DIR=hub_dir, NDF_RELAY_DEPTH="1", **user)
+        assert relay_cli(hub, "spawn", "--name", "lspawn", "--", "x").returncode == 0
+        _manual(hub, "lman")
+        for name in ("lspawn", "lman"):
+            hub.wait(lambda n=name: _lane_start(hub, n) is not None, 40, f"{name} の区間 1")
+            env = _child_env(hub, _lane_start(hub, name))
+            assert {k: env.get(k) for k in user} == user
+            assert "CLAUDE_CONFIG_DIR" not in env and "NDF_CLAUDE_ACCOUNT" not in env
+
+
+# 親の claude のセッションの環境（#2656 の受け入れ条件の「親の環境を持つサーバー」）。値に目印 MARK を入れ、画面と記録に出ないかを見る
+PARENT_SERVER = {
+    "CLAUDECODE": "1",
+    "CLAUDE_CODE_SESSION_ID": "parent-session-MARK",
+    "CLAUDE_CODE_ENTRYPOINT": "cli",
+    "NDF_CLAUDE_ACCOUNT": "main",
+    "NDF_RELAY_ROLE": "helper",
+    "NDF_RELAY_PLAN": "parent-plan-MARK",
+    "NDF_USAGE_PLAN": "parent-plan-MARK",
+    "NDF_USAGE_STEP": "3",
+}
+LANE_DROPPED = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "NDF_RELAY_ROLE", "NDF_RELAY_PLAN", "NDF_USAGE_PLAN", "NDF_USAGE_STEP")
+
+
+def _env_dump_claude(tmp_path):
+    """偽の claude の前に、起動ごとの環境を `FAKE_DIR/envs.jsonl` へ書く包み。pid は exec の後も同じ。"""
+    p = tmp_path / "env-dump" / "claude"
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        "if sys.argv[1:2] != ['plugin']:\n"
+        "    with open(os.path.join(os.environ['FAKE_DIR'], 'envs.jsonl'), 'a') as f:\n"
+        "        f.write(json.dumps({'pid': os.getpid(), 'env': dict(os.environ)}) + '\\n')\n"
+        f"os.execv(sys.executable, [sys.executable, {str(FAKE)!r}, *sys.argv[1:]])\n"
+    )
+    p.chmod(0o755)
+    return p
+
+
+def _account_hub(hubenv, accounts, tmp_path):  # noqa: F811
+    return hubenv(env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1", "NDF_RELAY_CLAUDE": _env_dump_claude(tmp_path)})
+
+
+def _parent_server(hub, accounts, **extra):  # noqa: F811
+    """親のセッションの環境を持つ専用サーバーを、リレーハブより先に起こす（サーバーを起こした側の環境がグローバルな環境になる）。"""
+    env = {k: v for k, v in hub.env.items() if k != "TMUX"}
+    env.update(PARENT_SERVER)
+    if accounts is not None:
+        env.update(CLAUDE_CONFIG_DIR=str(accounts.root / "main"), NDF_SHARED_CONFIG_DIR=str(accounts.shared))
+    else:
+        env.update(CLAUDE_CONFIG_DIR="/parent/accounts/main", NDF_SHARED_CONFIG_DIR="")
+    env.update({k: str(v) for k, v in extra.items()})
+    p = subprocess.run(
+        ["tmux", "-L", tx.SOCKET, "new-session", "-d", "-s", "parent", "--", "sleep", "600"], env=env, capture_output=True, text=True
+    )
+    assert p.returncode == 0, p.stderr
+    shown = subprocess.run(["tmux", "-L", tx.SOCKET, "show-environment", "-g", "NDF_RELAY_DIR"], env=env, capture_output=True, text=True)
+    assert shown.stdout.strip() == f"NDF_RELAY_DIR={extra['NDF_RELAY_DIR']}"
+
+
+def _manual(hub, name):
+    """手で起動する形（受け入れ条件 3）。クライアントの環境はサーバーへ届かないため、何を持っていても同じである。"""
+    argv = [sys.executable, str(RELAY), "run", "--", "x"]
+    opts = ["-e", f"NDF_RELAY_NAME={name}", "-e", "NDF_RELAY_SPAWNED=1"]
+    env = {k: v for k, v in hub.env.items() if k != "TMUX"}
+    p = subprocess.run(
+        ["tmux", "-L", tx.SOCKET, "new-session", "-d", "-s", name, *opts, "--", *argv], env=env, capture_output=True, text=True
+    )
+    assert p.returncode == 0, p.stderr
+
+
+def _lane_dirs(hub, name):
+    return sorted((d for d, n in hb_scan(hub) if n == name), key=lambda d: d.stat().st_mtime)
+
+
+def _lane_start(hub, name):
+    """名前 `name` の最新の作業ディレクトリで起動した区間 1。無ければ None。"""
+    dirs = _lane_dirs(hub, name)
+    if not dirs:
+        return None
+    return next((s for s in hub.starts() if s["relay_dir"] == str(dirs[-1])), None)
+
+
+def _child_env(hub, start):
+    p = hub.fake_dir / "envs.jsonl"
+    rows = [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+    return next(r["env"] for r in rows if r["pid"] == start["pid"])
+
+
+def _assert_lane_chose(hub, name, account, parent_dir):
+    """レーン `name` が新しい作業ディレクトリの区間 1 を `account` で始め、親のセッションの環境を子へ残さない。"""
+    hub.wait(lambda: _lane_start(hub, name) is not None, 40, f"{name} の区間 1")
+    s = _lane_start(hub, name)
+    assert s["relay_dir"] != parent_dir and s["depth"] == "1"
+    assert s["account"] == account
+    hub.wait(lambda: (ls_rows(hub).get(name) or {}).get("sections") == 1, 20, f"{name} の区間の数が 1")
+    env = _child_env(hub, s)
+    assert not set(LANE_DROPPED) & set(env), set(LANE_DROPPED) & set(env)
+    assert not (pathlib.Path(s["relay_dir"]) / hb.ROLE_FILE).exists()
+    logs = "".join(p.read_text() for p in pathlib.Path(s["relay_dir"]).glob("*.jsonl"))
+    assert "MARK" not in logs and "MARK" not in hub.text  # 外した値を記録と画面へ出さない（I6）
+    return s["relay_dir"]
+
+
+def test_all_limited_choice_is_the_same_with_parent_env(accounts, monkeypatch):  # noqa: F811
+    """#2656 の受け入れ条件 7: すべて上限のとき、親のセッションの環境を外した後の選び方の結果は、持たないときと同じ。"""
+    monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
+    accounts.add("main", util5=100)
+    accounts.add("gmail", util5=100)
+    clean = ca.choose()
+    for k, v in {**PARENT_SERVER, "CLAUDE_CONFIG_DIR": str(accounts.root / "main"), "NDF_SHARED_CONFIG_DIR": str(accounts.shared)}.items():
+        monkeypatch.setenv(k, v)
+    relay_session_env.drop_parent_env({})
+    assert os.environ["CLAUDE_CONFIG_DIR"] == str(accounts.shared)
+    got = ca.choose()
+    assert (got.name, got.earliest and got.earliest[0]) == (clean.name, clean.earliest and clean.earliest[0])
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
+def test_session_value_reads_only_the_launch_env(tmp_path, monkeypatch):
+    """#2656 の決定 4: `session_value` は起動の `-e` で付いた値だけを読み、グローバルな環境の値は読まない。"""
+    sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
+    monkeypatch.setenv("TMUX_TMPDIR", sock)
+    monkeypatch.setenv("NDF_RELAY_TMUX", "tmux")
+    monkeypatch.setenv("NDF_TEST_GLOBAL", "glob")  # サーバーを起こす側の環境（グローバルな環境へ入る）
+    try:
+        assert tx.new_session("a", str(tmp_path), ["sleep", "30"], {"NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": ""}) is None
+        assert tx.new_session("b", str(tmp_path), ["sleep", "30"], {}) is None
+        assert tx.session_value("a", "NDF_RELAY_ROLE") == "helper"
+        assert tx.session_value("a", "NDF_RELAY_PLAN") == ""
+        assert tx.session_value("b", "NDF_RELAY_ROLE") is None
+        assert tx.session_value("a", "NDF_TEST_GLOBAL") is None
+        assert tx.session_value("zz", "NDF_RELAY_ROLE") is None
+    finally:
+        subprocess.run(["tmux", "-L", tx.SOCKET, "kill-server"], env={**os.environ, "TMUX_TMPDIR": sock}, capture_output=True)
+        shutil.rmtree(sock, ignore_errors=True)
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
@@ -516,7 +706,7 @@ def test_session_gone_is_false_when_tmux_cannot_be_asked(monkeypatch):
 
 
 def test_tmux_class_has_no_skip_of_its_own():
-    """tmux の有無は根の前提のコマンドの一覧だけが決め、4 件は自分で読み飛ばさない（#2346）。"""
+    """tmux の有無は根の前提のコマンドの一覧だけが決め、クラスの各件は自分で読み飛ばさない（#2346）。"""
     holders = [sys.modules[__name__], TestWithTmux, *(v for k, v in vars(TestWithTmux).items() if k.startswith("test_"))]
     names = [m.name for h in holders for m in getattr(h, "pytestmark", [])]
     assert not {"skip", "skipif"} & set(names), names
@@ -723,3 +913,179 @@ def test_write_name_keeps_the_spawned_role(tmp_path, monkeypatch):
     monkeypatch.delenv("NDF_RELAY_ROLE")
     hc.write_name(str(other), None)
     assert hb.read_role(str(other)) is None
+
+
+# ---------------------------------------------------------------- 人の起動（#2862）
+
+
+SESSION = {"attached": False, "activity": None, "pid": None}
+
+
+def _row(by, **extra):
+    return {"session": extra.pop("session", None), "cwd": "/", "args": [], "created_at": "x", "by": by, **extra}
+
+
+def _full(dirs):
+    """上限 3 に数えるラッパーが 3 本（リレーハブ・名前つき・名前の無いもの）。"""
+    dirs("front", name="t1")
+    dirs("named", name="lcore")
+    dirs("plain")
+
+
+def _hub_log():
+    return [json.loads(x) for x in pathlib.Path(hb.hub_path(hb.HUB_LOG)).read_text().splitlines()]
+
+
+def test_terminal_request_is_started_over_the_limit_with_notice(launched, dirs):
+    """AC1・AC8: 上限に達していても人の起動は起動し、知らせと記録の `over_limit` を残す。"""
+    _full(dirs)
+    res = hb.Hub(None).process({"kind": "spawn", "cwd": "/", "args": [], "by": "terminal"})
+    assert res["status"] == "ok" and res["metrics"]["exit_code"] == 0
+    item = res["items"][0]
+    assert item["result"] == "started" and item["name"] == "t2"
+    assert "上限 3" in item["notice"] and "t1, lcore, -" in item["notice"]
+    started = _hub_log()[-1]
+    assert started["event"] == "started" and started["reason"] == "terminal"
+    assert started["over_limit"] == {"cap": 3, "running": ["t1", "lcore", "-"]}
+    assert hb.read_registry()["t2"]["by"] == "terminal"
+
+
+def test_terminal_request_under_the_limit_has_no_notice(launched, dirs):
+    dirs("front", name="t1")
+    res = hb.Hub(None).process({"kind": "spawn", "cwd": "/", "args": [], "by": "terminal"})
+    assert res["items"] == [{"name": "t2", "result": "started"}]
+    assert "over_limit" not in _hub_log()[-1]
+
+
+@pytest.mark.parametrize("by", ["spawn", "restart", "block:/x"])
+def test_ai_requests_are_refused_at_the_limit(launched, dirs, by):
+    """AC2: AI の起動は今と同じく `limit`・終了コード 3 で断る。記録に `over_limit` を書かない。"""
+    _full(dirs)
+    _write_registry({"r": _row("spawn", session="r")})
+    kind = "restart" if by == "restart" else "spawn"
+    res = hb.Hub(None).process({"kind": kind, "name": "r", "cwd": "/", "args": [], "by": by})
+    assert res["items"][0]["result"] == hb.LIMIT and res["metrics"]["exit_code"] == 3 and launched == []
+    assert all("over_limit" not in row for row in _hub_log())
+
+
+def test_human_wrappers_are_not_counted(dirs, monkeypatch):
+    """AC3・I3: 登録簿の行の `by` が `terminal` でセッションの在るラッパーは数えない。セッションが無ければ外さない。"""
+    dirs("front", name="t1")
+    dirs("lane", name="lcore")
+    dirs("h2", name="t2")
+    dirs("h3", name="t3")
+    hb.ensure_dirs()
+    _write_registry({"lcore": _row("spawn", session="lcore"), "t2": _row("terminal", session="t2"), "t3": _row("terminal", session="t3")})
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true")
+    now = hb.live(hb.scan_wrappers(), hb.read_registry(), {"lcore": SESSION, "t2": SESSION, "t3": SESSION})
+    assert now.count == 2 and now.humans == 2 and sorted(now.names) == ["lcore", "t1", "t2", "t3"]
+    assert hb.Hub.judge("lproc", now, by="spawn") is None
+    # 行が残っていてもセッションが無ければ人の起動として外さない
+    gone = hb.live(hb.scan_wrappers(), hb.read_registry(), {"lcore": SESSION})
+    assert gone.count == 4 and gone.humans == 0
+    assert hb.Hub.judge("lproc", gone, by="spawn").reason == hb.LIMIT
+
+
+def _w(name, role=None):
+    return hb.Wrapper(f"/x/{name}", name, True, False, None, None, role)
+
+
+def test_human_organizer_is_taken_once(state):
+    """I1: 人の起動の `organizer` は人の起動として 1 回だけ外し、`organizer` の 1 本は人の起動でないものから外す。"""
+    reg = {"t2": _row("terminal", session="t2")}
+    sessions = {"t2": SESSION}
+    now = hb.live([_w("t1"), _w("t2", "organizer"), _w("a"), _w("b")], reg, sessions)
+    assert now.count == 3 and now.humans == 1
+    assert hb.Hub.judge("c", now, by="spawn").reason == hb.LIMIT
+    # 人の起動でない organizer が 2 本あっても、外すのは 1 本だけ
+    two = hb.live([_w("t1"), _w("t2", "organizer"), _w("o1", "organizer"), _w("o2", "organizer"), _w("a")], reg, sessions)
+    assert two.count == 3 and two.humans == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "taken", "tmux_ok", "reason"),
+    [("Bad.Name", False, True, hb.BAD_NAME), ("t1", True, True, hb.NAME_TAKEN), ("t2", False, False, hb.NO_TMUX)],
+)
+def test_terminal_request_keeps_other_refusals(state, monkeypatch, name, taken, tmux_ok, reason):
+    """AC5: 人の起動でも名前の形・重複・tmux の有無では断る。"""
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true" if tmux_ok else None)
+    now = hb.Live(5, ["t1"], {"t1"} if taken else set())
+    assert hb.Hub.judge(name, now, by="terminal").reason == reason
+
+
+def test_restart_of_a_human_wrapper_counts_it_again(launched, tmp_path):
+    """I4: 人の起動で始めた名前を restart で起動し直すと、行の `by` は `restart` になり数える。"""
+    _write_registry({"t2": _row("terminal", session="t2", cwd=str(tmp_path))})
+    hb.Hub(None).process({"kind": "restart", "name": "t2", "by": "restart"})
+    reg = hb.read_registry()
+    assert reg["t2"]["by"] == "restart"
+    now = hb.live([], reg, {"t2": SESSION})
+    assert now.count == 1 and now.humans == 0
+
+
+def test_ai_paths_never_put_terminal(state, monkeypatch, tmp_path):
+    """AC6・I5: `relay.py spawn`・`restart`・起動のブロックが置く依頼の `by` は `terminal` でない。"""
+    seen = []
+    monkeypatch.setattr(hc, "send_request", lambda kind, name, cwd, args, by, extra=None: seen.append(by) or None)
+    monkeypatch.setattr(hb, "hub_running", lambda: True)
+    hc.cmd_spawn(["--name", "a", "--", "x"])
+    hb.ensure_dirs()
+    _write_registry({"a": _row("spawn", session="a")})
+    hc.cmd_restart(["a"])
+    hc.place_blocks(fence("/goal x", "ndf-spawn lb"), "/", str(tmp_path))
+    box = pathlib.Path(hb.hub_path(hb.REQUESTS))
+    seen += [json.loads(f.read_text())["by"] for f in box.iterdir()]
+    assert seen[:2] == ["spawn", "restart"] and seen[2] == f"block:{tmp_path}"
+    assert hb.TERMINAL not in seen
+
+
+def test_ask_hub_says_the_notice_before_attach(monkeypatch):
+    """AC1: 通った結果に知らせがあれば、結び付く前に 1 行出す。"""
+    order = []
+    res = hb.hub_result("spawn", "ok", "x", "t2", "started", 0)
+    res["items"][0]["notice"] = "上限 3 を超えて起動する"
+    monkeypatch.delenv("NDF_RELAY_SPAWNED", raising=False)
+    monkeypatch.setattr(hc.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hc, "terminal_request", lambda args: ("attach", res))
+    monkeypatch.setattr(hc.tmux, "exec_attach", lambda name: order.append(("attach", name)))
+    hc.ask_hub([], lambda msg: order.append(("say", msg)))
+    assert order == [("say", "上限 3 を超えて起動する"), ("attach", "t2")]
+
+
+class _Passthrough(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("spawned", "relay_dir", "tty0", "tty1", "asked"),
+    [
+        (False, False, True, True, True),
+        (True, False, True, True, False),
+        (False, True, True, True, False),
+        (False, False, False, True, False),
+        (False, False, True, False, False),
+    ],
+)
+def test_terminal_request_only_from_a_human_terminal(state, monkeypatch, spawned, relay_dir, tty0, tty1, asked):
+    """AC7・I5: `by: terminal` の依頼は、起動の印も `NDF_RELAY_DIR` も無く、標準入力と標準出力が端末のときだけ置く。"""
+    from relay_lib import run as rr
+
+    seen = []
+    for k in ("NDF_RELAY_SPAWNED", "NDF_RELAY_DIR", "NDF_RELAY", "NDF_RELAY_DEPTH", rr.ho.HANDOVER_ENV):
+        monkeypatch.delenv(k, raising=False)
+    if spawned:
+        monkeypatch.setenv("NDF_RELAY_SPAWNED", "1")
+    if relay_dir:
+        monkeypatch.setenv("NDF_RELAY_DIR", "/x")
+    monkeypatch.setattr(rr.session_env, "drop_parent_env", lambda env: None)
+    monkeypatch.setattr(rr.cl, "resolve_claude", lambda: "/bin/claude")
+    monkeypatch.setattr(rr.cl, "passthrough", lambda claude, args: (_ for _ in ()).throw(_Passthrough()))
+    monkeypatch.setattr(rr.os, "isatty", lambda fd: {0: tty0, 1: tty1}.get(fd, False))
+    monkeypatch.setattr(rr, "pty_available", lambda: True)
+    monkeypatch.setattr(hc, "claim_hub", lambda: None)
+    monkeypatch.setattr(hc.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hc, "send_request", lambda kind, name, cwd, args, by, extra=None: seen.append(by) or None)
+    monkeypatch.setattr(rr.cl, "read_plugin", lambda claude: (_ for _ in ()).throw(_Passthrough()))
+    with pytest.raises(_Passthrough):
+        rr.cmd_run([])
+    assert seen == ([hb.TERMINAL] if asked else [])

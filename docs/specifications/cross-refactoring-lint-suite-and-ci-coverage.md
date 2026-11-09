@@ -147,7 +147,7 @@ cross-refactoring は範囲テストを作業ディレクトリの根で走ら�
 | `runtime-plugin-build-check` ほか 9 本 | `lint` | ワークフローの `run` の行と同じ文 / 持たない | 持たない | `.github/workflows/runtime-plugin-validate.yml#<ジョブ>`（1 本に 1 ジョブ） |
 
 `runtime-plugin-validate.yml` の 9 本の suite は、ジョブ `runtime-plugin-build-check`・`skill-frontmatter-check`・
-`skill-repo-assumptions-check`・`skill-shell-vars-check`・`service-boundary-check`・`runtime-plugin-validate`・
+`skill-repo-assumptions-check`・`skill-shell-vars-check`・`repo-secrets-check`・`runtime-plugin-validate`・
 `markdown-link-check`・`doc-line-limit-check`・`instruction-files-check` を 1 つずつ受け持つ。どれも検査のスクリプトが
 ファイルのパスを受けないため `scope_command` と `paths` を持たず、範囲テストでは走らず、最終ゲートで 1 本ずつ判定される。
 `name` は継続的統合のジョブ id と同じにし、最終ゲートの記録と継続的統合のチェックの名前を同じ語で読めるようにする。`runner` は呼ぶスクリプトの

@@ -267,7 +267,7 @@ def test_run_discards_unsourced_or_over_budget_results(root, tmp_path, monkeypat
     monkeypatch.setattr(R, "call_llm", _Fake(cost=5))
     m = R.run_research(root, str(tmp_path / "done.json"), None, 6, 3)
     assert m["items"] == [] and not list((root / ".ndf" / "backlog" / "research").glob("*.item.json"))
-    # 結果を捨てた呼び出しも、支払った費用を呼び出しの記録に残す（周回の調査費用はここから集める）
+    # 結果を捨てた呼び出しも、支払った費用を呼び出しの記録に残す（ループの 1 回の調査費用はここから集める）
     calls = [json.loads(x) for x in (root / ".ndf" / "backlog" / "research" / "calls.jsonl").read_text().splitlines()]
     assert calls and not any(c["ok"] for c in calls) and sum(c["cost"] for c in calls) == m["cost"] + 0.3
 

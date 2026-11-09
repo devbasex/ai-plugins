@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CLAUDE_KEY_ACCOUNT",
+  "set_by": "runtime",
+  "summary": "API キーで起動した子が、キーを外したときに戻る登録済みアカウントの名前（#2855）。supervise.py がキーの環境へ入れ、入れ子の supervise.py と担当の環境（assignee_env.seat_env）が読む（plugins/ndf/scripts/lib/claude_api_keys.py）"
+}

@@ -18,9 +18,10 @@ import os
 from pathlib import Path
 from typing import Callable
 
+import limits
 from dotenv import dotenv_values
 
-SLACK_TIMEOUT = 10
+SLACK_TIMEOUT = limits.seconds("notify.slack")
 
 
 def slack_call(

@@ -301,6 +301,9 @@ TMUX_TESTS = (
     "test_second_claude_attaches_and_survives_terminal_close",
     "test_limit_refuses_from_terminal_and_spawn",
     "test_killed_named_wrapper_shows_stopped",
+    "test_parent_env_server_spawn_and_manual_choose_pinned_account",
+    "test_parent_env_server_restart_depth2_and_limited_pinned",
+    "test_parent_env_server_keeps_user_settings_without_accounts",
 )
 
 
@@ -314,7 +317,7 @@ def test_a_missing_tmux_fails_the_relay_hub_tests(tmp_path: Path) -> None:
 
 
 def test_the_opt_in_skips_only_the_tmux_class(tmp_path: Path) -> None:
-    """読み飛ばしの指定があれば、飛ぶのはクラスの 4 件だけで、キーの外の項目は走る。"""
+    """読み飛ばしの指定があれば、飛ぶのはクラスの項目だけで、キーの外の項目は走る。"""
     outside = f"{TMUX_FILE}::test_bad_name_is_refused[A]"
     result = _run_pytest(
         TMUX_KEY,
@@ -326,7 +329,7 @@ def test_the_opt_in_skips_only_the_tmux_class(tmp_path: Path) -> None:
     out = result.stdout + result.stderr
 
     assert result.returncode == 0, out
-    assert "1 passed, 4 skipped" in out, out
+    assert f"1 passed, {len(TMUX_TESTS)} skipped" in out, out
     for name in TMUX_TESTS:
         assert f"{TMUX_KEY}::{name} SKIPPED" in out, name
     assert f"{outside} PASSED" in out

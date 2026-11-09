@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
+import limits
 from state_home import user_home
 
 LIB = Path(__file__).resolve().parent
@@ -57,7 +58,11 @@ def repo_key(root: str) -> str:
     """origin の URL から `<owner>__<repo>`。決められなければ `unknown`。"""
     try:
         url = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"], cwd=root, capture_output=True, text=True, timeout=10
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=limits.seconds("usage-ledger.git"),
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return UNKNOWN

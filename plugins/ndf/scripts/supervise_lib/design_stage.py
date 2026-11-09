@@ -28,10 +28,9 @@ from supervise_lib.templates import impl_prompt
 TOOL = "supervise-design-results"
 IMPL_STAGE = "実装"
 
-# 一時的な失敗の打ち直し（#1941 の決定 9）: 15 秒おき・1 コマンドの待ちは 30 秒まで（3 回打つ）・1 回の実行の待ちの合計は 120 秒まで
-RETRY_INTERVAL = 15.0
-RETRY_PER_CALL = 30.0
-RETRY_TOTAL = 120.0
+# 一時的な失敗の打ち直し（#1941 の決定 9）: 間隔・1 コマンドの待ち・1 回の実行の待ちの合計は上限の宣言の方針
+# supervise.design-stage-read（#2343）
+POLICY = "supervise.design-stage-read"
 TAIL = 300  # 要約へ出す出力の末尾の文字数
 SLEEP: Callable[[float], None] = time.sleep  # テストが差し替える
 
@@ -48,24 +47,28 @@ class ReadFailed(Exception):
 class Budget:
     """1 回の実行の打ち直しの待ちの残り（秒）。"""
 
-    def __init__(self, total: float = RETRY_TOTAL):
-        self.left = total
+    def __init__(self, total: float | None = None):
+        import limits
+
+        self.left = limits.seconds(POLICY) if total is None else total
 
 
 def _retrying(run: Callable[[], object], command: str, budget: Budget):
-    """`run()`（returncode を持つ結果）を、0 以外の間 `RETRY_INTERVAL` 秒おきに打ち直す。待ちは 1 コマンドで
-    `RETRY_PER_CALL` 秒・残りの `budget` まで。打ち直しても 0 以外なら ReadFailed。"""
+    """`run()`（returncode を持つ結果）を、0 以外の間、方針 `POLICY` の間隔で打ち直す。待ちは 1 コマンドで
+    方針の `per_call` 秒・残りの `budget` まで。打ち直しても 0 以外なら ReadFailed。"""
+    import limits
     import waits
 
     def sleep(seconds: float) -> None:
         budget.left -= seconds
         SLEEP(seconds)
 
+    policy = limits.policy(POLICY)
     got = waits.retry_call(
         run,
         lambda p: p.returncode != 0,
-        max_wait=max(0.0, min(RETRY_PER_CALL, budget.left)),
-        interval=RETRY_INTERVAL,
+        policy=policy._replace(seconds=max(0.0, min(policy.per_call, budget.left))),
+        reason=lambda p: p.stderr or p.stdout,
         sleep=sleep,
     )
     p = got.value

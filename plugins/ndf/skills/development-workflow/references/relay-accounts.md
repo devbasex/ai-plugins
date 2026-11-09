@@ -170,3 +170,52 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 
 替えるたびに画面へ `ndf-relay:` の 1 行（例: `利用上限（five_hour）に達したため、アカウントを work1 から work2（b@example.com）へ替えて続ける`）
 が出て、`log.jsonl` に `account` の行が残る。
+
+## worker の claude -p を API キーで動かす
+
+**サブスクリプション（Max・Ultra・Team）にリンクした Console 組織の API キーを登録すると、`supervise.py` が起動する
+`claude -p`（work・worker・判定・遅れの判定・Pull Request）を月の API クレジットで動かせる。** API クレジットは
+利用上限（5 時間・週）と別枠なので、使った分だけ利用上限の消費を逃がせる。ラッパーが起こす対話のセッションには使わない
+（対話の Claude Code は API クレジットで払えない）。cross-review の担当の CLI にも使わない。Console 組織の作成・
+リンク・キーの発行は利用者が Console で行う。
+
+```bash
+printf '%s\n' "$KEY" | python3 ~/.claude/ndf/relay.py account add-api-key key-main --account main   # 確かめてから保存する
+python3 ~/.claude/ndf/relay.py account add-api-key key-gmail --account gmail --key-file ~/gmail.key
+python3 ~/.claude/ndf/relay.py account api-key-use always   # 使い方の宣言（off・always・near-limit）。省くと今の値を出す
+python3 ~/.claude/ndf/relay.py account list                 # キーごとに名前・結び付いたアカウント・状態
+python3 ~/.claude/ndf/relay.py account check key-main       # 確かめ直し、通れば状態を「使える」へ戻す
+python3 ~/.claude/ndf/relay.py account remove key-gmail
+```
+
+- **キーの値は標準入力の 1 行目か `--key-file` で渡す。** 端末から打つと表示しない入力で聞く。引数では受けない（`ps` と
+  シェルの履歴に残るため）。値はアカウントの置き場の `api-keys.json`（0600）にだけ置き、画面・進捗ログ・`account list` には出ない
+- **登録の前に Messages API へ `max_tokens` 1 の要求を 1 回打って確かめる。** 認証の失敗・残高切れ・通信の失敗なら、理由
+  （`reason` は `auth_failed`・`credit_low`・`network`・`unclassified`）を出して終了コード 1 で終わり、何も保存しない
+- **1 つの登録済みアカウントに結び付けられるキーは 1 本である。** 名前を変えれば 2 本以上を登録でき、同じ名前で登録し直すと
+  置き換わる。登録済みアカウントの名前・`metered` と重なる名前は `name_conflict`、登録に無いアカウントは `not_registered`、
+  別のキーが結び付いたアカウントは `account_taken` で断る（どれも終了コード 1）。`account add` も API キーの名前を断る
+- 組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる。NDF は検出しない
+  ので、費用の上限は Console の workspace の spend limit で決める（登録のときにも 1 行出る）
+
+**使い方の宣言**は置き場の `api-keys.json` の `use` に 1 つだけ持ち、無い・読めないときは `off` として動く。
+
+| 宣言 | API キーで起動する条件 |
+| --- | --- |
+| `off`（既定） | 起動しない。起動の環境・アカウントの選び方・上限の後の切り替えは登録が無いときと同じ |
+| `always` | 使えるキーがあれば、すべての呼び出しで |
+| `near-limit` | 登録済みアカウントの選び方が候補を返さないか、選んだアカウントの使用率が `NDF_ACCOUNT_SWITCH_AT` 以上のとき。上限に当たって替えるアカウントが無いときも、従量の接続へ移る前と解除を待つ前に試す |
+
+使えるキーが 2 本以上あれば、名前の順の先頭を選ぶ。子の環境には `ANTHROPIC_API_KEY` に選んだ 1 本を入れ、OAuth の
+トークン・`ANTHROPIC_AUTH_TOKEN`・Bedrock と Vertex の変数・従量の接続の宣言は外す。`ANTHROPIC_BASE_URL` が
+`https://api.anthropic.com` の外（ゲートウェイなど）を指すときは、キーを別のサービスへ送らないよう、登録済みのキーを使わずに今の認証で起動する。
+
+| 起動の結果 | 扱い |
+| --- | --- |
+| 残高切れ（"credit balance" と "too low"） | 状態を `残高切れ` にし、次のキー、無ければ登録済みアカウントの選び方で同じ呼び出しを起動し直す。24 時間（上限の宣言の `claude-api-keys.credit-hold`）は選ばず、過ぎたら 1 回だけ試す |
+| 認証の失敗（401） | 状態を `認証の失敗` にし、残高切れと同じく起動し直す。時間では戻らず、`account check <名前>` が通ったときだけ戻る |
+| 利用上限・429 | その呼び出しでだけキーを外し、状態には残さない |
+
+ステップは止まらない。進捗ログには、使うキーが替わったときの `account` の行（`to_key`）と、残高切れ・認証の失敗の
+`api_key` の行（キーの名前と理由）が残る。起動の後にキーを置き換えていたら状態は書かず、理由を `stale_generation` とする。
+`api-keys.json` が壊れていれば、キーを使わずに動き、最初の呼び出しの前に 1 行出す。

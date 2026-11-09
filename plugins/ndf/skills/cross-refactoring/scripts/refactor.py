@@ -216,11 +216,7 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         help="提案の前に対象範囲の指標（循環的複雑度・行数・重複）を測る。--no-code-metrics で測らない (default: 測る)",
     )
     init.add_argument("--worktree-root", default=None)
-    init.add_argument(
-        "--run",
-        default=None,
-        help="この実行の識別子（drive.py が渡す）。既存の rf<n> の持ち主の記録と一致すれば同じ実行の続きとして使う（#2229）",
-    )
+    init.add_argument("--run", default=None, help=argparse.SUPPRESS)  # 旧い呼び出し元の互換。受けて捨てる（#2342）
     init.set_defaults(func=cmd_init)
 
 
@@ -318,6 +314,8 @@ def main() -> None:
     add_report_parser(sub)
 
     args = p.parse_args()
+    if getattr(args, "run", None):
+        print("[cross-refactoring] --run は使わない。実行の識別子は実行の核が振る（#2342）", file=sys.stderr)
     _set_alive_file(args)
     # 使用量の帳簿の呼び出し元（Jev の要求の行。#1953 の決定 7）。起動の包みが名乗っていればそれを継ぐ
     os.environ.setdefault("NDF_USAGE_SOURCE", "cross-refactoring")

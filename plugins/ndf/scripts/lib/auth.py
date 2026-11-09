@@ -23,6 +23,7 @@ from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional
 
 import assignment
 import claude_settings
+import limits
 import monitor_patterns
 import secret_redact
 import usage_capture
@@ -95,7 +96,7 @@ CLAUDE_DEFAULT_MODEL = "default"
 PROBE_PROMPT = "Reply with the single word OK."
 
 # 1 者の持ち時間（秒）。3 種類の確認で共有する（#1290 の決定 8）
-AUTH_PROBE_TIMEOUT = 120
+AUTH_PROBE_TIMEOUT = limits.seconds("auth.probe")
 
 # **終了コード 0 でも未認証を示すことがある。** kiro は成否を終了コードで表さない。
 UNAUTHENTICATED_MARKERS = (

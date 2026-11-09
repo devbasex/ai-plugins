@@ -29,7 +29,7 @@
 | [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・停止（プロセスグループごと）。生死とゾンビの判定・cmdline の照合は `procs.py` へ渡す（使う関数の中で import する） | `monitor.py` |
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
-| [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
+| [limits.py](limits.py) | 上限の宣言（`plugins/ndf/contracts/limits.json`）の読み手。上限の秒・再試行の回数・待ちの間隔を方針の名前で引き（`policy`・`seconds`・`value`）、宣言が読めなければ組み込みの値へ戻らずに止まる。監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + `monitor.cli-margin`）も宣言の `monitor.*` から引く（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）、結果ファイル・監視の記録の読み書き、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`、担当 1 者の結末を書く `_record_outcome` | 同上 |
 | [bg-wait.sh](bg-wait.sh) | 600 秒を超える待ちを、背景の起動（`run`）と 540 秒以内に区切った待ち（`wait`）に分ける。終了コードは rc ファイルに残る | 収束ループの 2 つ（Codex / Kiro / agy で `drive.py` を待つ）/ `cross-review` の手順の監視 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する。起動の直前に `runtime_policy.py check` で作業ディレクトリのリポジトリの宣言と照らし、外なら起動せずに終了コード 3 | 同上 |
@@ -59,7 +59,7 @@
 | [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
 | [gh_fields.py](gh_fields.py) | REST の応答を GraphQL の `--json` の形へ変える対応表 | `gh_rest` |
 | [gh_rest.py](gh_rest.py) | PR と課題の単発の読み書き（読み取り・一覧・検索・作成・編集・コメント・マージ）。REST で行い、REST が上限なら `gh pr` / `gh issue` で代わる（検索の `issue_search` は `gh issue list --search` の 1 回）。値は `Attempt`（`value`・`error`・`via`） | `gh_parts` / `issue-file.py` |
-| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
+| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーのエージェントの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
 | [gh_graphql.py](gh_graphql.py) | 入れ子の読み取り（未解決のスレッド）と GraphQL の 1 回の要求（`graphql`） | `gh_parts` / `gh_pr_info` |
 | [gh_checks.py](gh_checks.py) | チェックジョブの読み取りと、名前ごとの最新の実行への畳み方・失敗のログの保存 | `gh_parts` / `gh_pr_info` |
 | [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` |
@@ -95,19 +95,21 @@
 | [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
 | [textparse.py](textparse.py) | unified diff の足した行の番号。unidiff を呼ぶのはここだけ | 同上 |
 | [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
-| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
+| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。上限・間隔・回数は方針で受け、同じ原因（[cause_key.py](cause_key.py) の原因の鍵）の失敗が方針の回数に達したら止まり、期限の時刻に最後の照会を打ってから止まる。止まった理由は結果に載る。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
 | [notify.py](notify.py) | Slack の Web API・`.env` の読み取り。slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
 | [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py`・`hook_lib/wait_notify.py` |
 | [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
 | [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | `hook_lib/`（token の guard・待ちの通知） |
+| [lease.py](lease.py) | 持ち主の部品。持ち主の鍵ごとの持ち主の記録（`<コンテナの状態の根>/leases/<owner>--<repo>/<鍵>.lease.json`。`NDF_LEASE_DIR` で置き場を変える）を鍵ごとの排他の中で取り・返し・死んだ持ち主を引き取る（`acquire`・`release_lease`・`touch_lease`・`read_lease`・`prune`）。同じホストの生死は pid と開始時刻、別のホストは寿命の窓で決め、持ち主のプロセスが自分の祖先なら取り直さずに使う。ランタイムのセッションは `NDF_RUNTIME_SESSION` を先に読む | `lease_stage.py`・`run_state.py`（レビュー worktree の持ち主の判定・古い記録の削除） |
+| [lease_stage.py](lease_stage.py) | 入口が持ち主の鍵を取り・返す手順（実行の核が呼ぶ部分）。契約の行の `lease` を宣言した入口が入力を解いた後に `hold` を呼び、生きた持ち主がいれば stopped・3 で止まる。取った鍵は本体の終わり（核の finally、核の外の入口は atexit・SIGTERM・`durable.exit_leaving_pending`）で返し、結果 JSON の `lease` に出す | cross-review・cross-refactoring の `drive.py` と init・`supervise.py queue`・`sprint-state.py loop` |
 | [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `<git の共通ディレクトリ>/ndf/state/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・途中の記録を続ける新旧の分岐（`patched`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
 | [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 | [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
 | [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
 | [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
-| [lap_cost.py](lap_cost.py) | 周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
+| [lap_cost.py](lap_cost.py) | ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
 | [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |
 | [estimate_records.py](estimate_records.py) | 見積もりの記録と実績の記録の置き場・行の形・追記と読み出し・課題ごとの実績の合計。`.git` を読んで置き場を決め、`git` を起動しない | `estimate.py` / `supervise_lib/actuals.py` / `backlog-refinement`（`upkeep_rank_estimate.py`） |

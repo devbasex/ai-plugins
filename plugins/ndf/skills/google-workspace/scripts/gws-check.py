@@ -32,6 +32,7 @@ LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
 
+import limits  # noqa: E402  上限の宣言（#2343）
 import step_result as sr  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -43,8 +44,8 @@ PACKAGE_URL = "https://www.npmjs.com/package/@googleworkspace/cli"
 INSTALL_CMD = ["npm", "install", "-g", PACKAGE]
 PROBE_KEYS = ("credential_source", "auth_method", "client_config_exists")
 EXIT_UNAUTHENTICATED = sr.EXIT_GATE + 1
-TIMEOUT = 120
-INSTALL_TIMEOUT = 600
+TIMEOUT = limits.seconds("google-workspace.call")
+INSTALL_TIMEOUT = limits.seconds("google-workspace.install")
 
 
 def _run(cmd: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:

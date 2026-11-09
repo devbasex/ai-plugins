@@ -82,8 +82,10 @@ import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#222
 from dist_record import parse_record, released  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 sys.path.insert(0, str(HERE))
+import limits  # noqa: E402  上限の宣言（#2343）
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
 from sprint_close_lib.summary import close_summary, not_closed_gaps  # noqa: E402
+from sprint_close_lib.unaccepted import unaccepted_item  # noqa: E402  閉じる条件 2 を満たさない項目
 from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
     NO_BASE,
     STAGE_RETRO,
@@ -96,7 +98,7 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
 UNKNOWN_REASON = "リリース記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
-LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
+LOCK_TIMEOUT = limits.seconds("sprint-close.issue-lock")  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
 IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）
@@ -105,9 +107,9 @@ verification_verdicts = acceptance.verification_verdicts
 
 NO_ROWS = "リリース後テストの行が無い"
 NOT_PASSED = "リリース後テストに合格でない条件がある（不合格・保留）"
-UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
 UNREADABLE_BODY = "本文を読めない（最終工程の記録を確かめられない）"
 NO_MAPPING = "条件と課題の対応が読めない"
+NO_ISSUE_TABLE = "リリース後テストの記録に `課題` と `結果` の列を持つ表が無い"
 
 
 def judge_acceptance(rows, criteria, pre_merge=frozenset()):
@@ -244,8 +246,10 @@ def _verify_verdicts(rec, record_repo):
     verdicts = verification_verdicts(blk, record_repo)
     if verdicts is not None:
         return None, verdicts
-    # 課題を指す行が無い表: すべての条件をマージ前に確かめた課題だけ判定へ進める（#2144）
-    return NO_MAPPING, ({} if acceptance.verdict_table_readable(blk) else None)
+    if not acceptance.verdict_table_readable(blk):
+        return NO_ISSUE_TABLE, None  # 課題の表が無い: 全件を開いたまま残す（#2803 の決定 3）
+    # 課題を指す行が無い課題の表: すべての条件をマージ前に確かめた課題だけ判定へ進める（#2144）
+    return NO_MAPPING, {}
 
 
 def _closing_blocker(a, rec, record_repo):
@@ -280,12 +284,8 @@ def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
     state, body = got
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
-    if not ok and kept:
-        return {**base, "result": "kept_open", "reason": kept}, []
     if not ok:
-        if state == "CLOSED":
-            return {**base, "result": "closed_unverified", "reason": UNVERIFIED + why}, []
-        return {**base, "result": "kept_open", "reason": why}, []
+        return unaccepted_item(base, state, why, kept), []
     gap = final_stage_gap(ctx.final_stage, body, ctx.since)
     if gap:  # 条件 3 を満たさない課題の本文は書かない
         return gap_item(base, state, gap), []
@@ -294,10 +294,16 @@ def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
         return ({**out, "would_check": to_check} if own and to_check else out), []
     if not (own and to_check):
         return None, []
+    failed = _write_marks(ctx, base, body, to_check)
+    return (failed, []) if failed is not None else (None, to_check)
+
+
+def _write_marks(ctx, base, body, to_check):
+    """印を反映した本文を検査して書く。書けなければ失敗の項目、書ければ None を返す。呼び手の錠の中で呼ぶ。"""
     new = acceptance.check_criteria(body, to_check)
-    if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
-        return _failed(base, "受け入れ条件の印を書けない", ctx), []
-    return None, to_check
+    if not acceptance.only_marks(body, new) or not gh_rest.update_body(base["repo"], base["number"], new):
+        return _failed(base, "受け入れ条件の印を書けない", ctx)
+    return None
 
 
 def _close_verified(a, ctx, repo, n, rows, kept=None):

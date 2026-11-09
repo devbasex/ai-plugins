@@ -35,7 +35,7 @@ BRANCH_PREFIXES = {"sprint/": "mission/"}
 RECORD_LABELS = {"スプリント: ": ("ミッション: ", "まとまり: ")}
 # 承認ゲートの記録の名前: 種類 → 旧名の並び（#2619）。正の名前は lib/gate_answer.py が持ち、`canonical` がこの表で寄せる。
 # 読み取りの種類で `MODE` に関わらず読む。`sprint-state.py gate` と `gate-rejections.py record` は `MODE` に関わらず旧名を受ける
-# （Factory のランナーが、どの版の NDF でも記録できるよう旧名を渡し続ける。#2619 の決定 5）
+# （Factory のランナーのエージェントが、どの版の NDF でも記録できるよう旧名を渡し続ける。#2619 の決定 5）
 GATE_NAMES = {"design": ("関門 1",), "release": ("関門 2",)}
 
 WHEN = "旧名の受け付けは、改名を載せた正式版の次の正式版でやめる"

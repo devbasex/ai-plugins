@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/supervise_lib/queue.py", "name": "WAIT_TIMEOUT", "kind": "limit-literal", "reason": "#2343 の決定 4。上限でない数字: supervise.py wait の終了コード（前提が無い）"}

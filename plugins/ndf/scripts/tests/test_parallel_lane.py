@@ -46,7 +46,7 @@ def test_queue_max_default(tmp_path, monkeypatch):
 
 
 def test_generated_queue_lines_use_lane_plans(tmp_path, monkeypatch):
-    """スプリントのステージと周回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
+    """スプリントのステージとループの 1 回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
     import sprint_loop_gate as gate
     from supervise_lib import sprint
 
@@ -81,7 +81,8 @@ def test_release_request_plan_has_one_gate_step():
 
     plan = parallel_release.plan_release_request(argparse.Namespace(issue=[2436], mode="standard"), "/r", "p1", "la", ["{queue_pr:check}"])
     assert plan["フェーズ"] == "リリースの依頼" and [s["id"] for s in plan["steps"]] == ["parallel-request"]
-    assert "request p1 --lane la --prs {queue_pr:check} --issues 2436" in plan["steps"][0]["cmd"]
+    # 課題の番号はプランの `課題` だけに持ち、コマンドは流す時点に埋める差し込みを持つ（#2717 の I3）
+    assert plan["課題"] == [2436] and "request p1 --lane la --prs {queue_pr:check} --issues {plan_issues} " in plan["steps"][0]["cmd"]
 
 
 def test_present_gate_puts_approve_after_mvv(tmp_path):

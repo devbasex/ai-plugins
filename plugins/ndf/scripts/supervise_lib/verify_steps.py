@@ -12,6 +12,7 @@ import shlex
 
 import delivery
 import test_strategy as ts
+import limits
 from step_result import EXIT_BASE_CONFLICT
 from supervise_lib.decl import scope_paths, test_kind
 from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, STEPS_PY, TEST_RUN_PY
@@ -22,7 +23,7 @@ INFRA_WAIT_STOP = {"75": "stop"}
 
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
 MARGIN_SHARE = 0.1
-MARGIN_FLOOR = 30
+MARGIN_FLOOR = limits.seconds("supervise.verify-margin-floor")
 
 # マージに続く後片付けのテスト環境の回収の上限（秒）。`lib/container_reach.py` の RECLAIM_LIMIT と同じ値である。
 # `lib/container_reach.py` はプランを作る側が読まない環境変数と設定を読むため、ここへは import しない（#2660 の決定 8）
@@ -73,7 +74,7 @@ def cd_result_step(repo: str | None, base: str, head: str | None, prs: str | Non
     }
 
 
-IMPL_STALL_DEFAULT = 1800  # 無進捗の許容時間の既定（秒）。実測の記録の間隔の最大 706 秒を十分に上回る値（#2505 の決定 7）
+IMPL_STALL_DEFAULT = limits.seconds("supervise.impl-stall")
 
 
 def _template_arg(a) -> str:

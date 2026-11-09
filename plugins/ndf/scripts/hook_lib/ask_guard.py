@@ -20,11 +20,12 @@ import json
 import os
 import subprocess
 import sys
+import limits
 from pathlib import Path
 
 ASK_PY = Path(__file__).resolve().parent.parent / "ask.py"
 PARALLEL_PY = Path(__file__).resolve().parent.parent / "parallel.py"
-FORWARD_TIMEOUT = 8  # 秒。hook の 10 秒の上限の中に収める
+FORWARD_TIMEOUT = limits.seconds("hook.ask-forward")  # 秒。hook の 10 秒の上限の中に収める
 ASKING_MD = Path(__file__).resolve().parent.parent.parent / "skills" / "development-workflow" / "references" / "asking.md"
 
 STOP_REASONS = {
@@ -113,8 +114,8 @@ def hold_text(rid: str, plan: str) -> str:
     loop = f'python3 "{Path(__file__).resolve().parent.parent / "sprint-state.py"}" loop hold-question <ループ> --ref {rid} --plan <止まったプラン> --step <続きのステップ> --parallel {plan}'
     return "\n".join(
         [
-            f"ndf: 並列の計画 {plan} のレーンの問いをオーガナイザーへ送った（依頼 {rid}）。この作業を保留し、別の作業へ進め。答えは周回の境で届く。",
-            f"開発ループのレーン: {loop} を打ち、周回を質問待ちで締めて次の周回へ進む。",
+            f"ndf: 並列の計画 {plan} のレーンの問いをオーガナイザーへ送った（依頼 {rid}）。この作業を保留し、別の作業へ進め。答えはループの 1 回の境で届く。",
+            f"開発ループのレーン: {loop} を打ち、ループの 1 回を質問待ちで締めてループの次の 1 回へ進む。",
             f"1 スプリントのレーン・一時レーン: 引継ぎ文書の「次にやること」に続きのコマンドと依頼 {rid} を書き、ndf-next を出さずに、"
             f"最後に {stop} を打って自分のラッパーを止めてセッションを終える（オーガナイザーが起こす）。",
             f"正本: {ASKING_MD}",
@@ -136,7 +137,8 @@ def forward_to_organizer(ev, row_id: str) -> dict | None:
     payload = {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id}
     deadline = time.monotonic() + FORWARD_TIMEOUT
     # 同じレーン名を持つ終わった計画を飛ばす: 送り手でない計画（終了コード 4）なら次の候補へ（全体で FORWARD_TIMEOUT 秒まで）
-    for plan in parallel_files.lane_plans_in(main, name, os.environ.get("NDF_RELAY_DIR")):
+    # 別のリポジトリのレーンの計画も、計画の所在の一覧から探す（#2733）
+    for _home, plan in parallel_files.lane_homes_in(main, name, os.environ.get("NDF_RELAY_DIR")):
         left = deadline - time.monotonic()
         if left <= 0:
             return None

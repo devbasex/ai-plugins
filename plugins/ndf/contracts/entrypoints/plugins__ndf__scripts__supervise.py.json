@@ -6,6 +6,7 @@
     "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
+    "ANTHROPIC_API_KEY",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "GH_TOKEN",
@@ -15,10 +16,16 @@
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
+    "NDF_API_KEY_CHECK_MODEL",
+    "NDF_API_KEY_CHECK_URL",
     "NDF_CLAUDE_ACCOUNT",
+    "NDF_CLAUDE_API_KEY_GENERATION",
+    "NDF_CLAUDE_API_KEY_NAME",
+    "NDF_CLAUDE_KEY_ACCOUNT",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_LEASE_DIR",
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
     "NDF_ORGANIZER_LANE",
@@ -26,6 +33,7 @@
     "NDF_PRESENTATION_DIR",
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
+    "NDF_RUNTIME_SESSION",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
     "NDF_STEP_EXTEND_FILE",
@@ -80,6 +88,8 @@
     "answer-json",
     "approved-txt",
     "breakdown-md",
+    "lease-json",
+    "outside-plan-jsonl",
     "phase-result-json",
     "plan-json",
     "plan-md",
@@ -108,5 +118,12 @@
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/claude_accounts.py",
     "plugins/ndf/scripts/lib/claude_settings.py"
-  ]
+  ],
+  "lease": {
+    "queue": {
+      "key": "supervise.queue:done={done}",
+      "unit": "run",
+      "window_seconds": 86400
+    }
+  }
 }

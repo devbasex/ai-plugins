@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/release_lib/cd_result.py", "name": "_read_row", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: CD の結果の行が届くのを待つ"}

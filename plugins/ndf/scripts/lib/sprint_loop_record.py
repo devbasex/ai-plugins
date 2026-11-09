@@ -1,18 +1,18 @@
 """sprint_loop_record.py: 開発ループの記録・消費・止まる条件・引継ぎ文書（#2089）。`sprint-state.py loop` の副命令だけが呼ぶ。LLM を呼ばない。
 
 ループの記録は、メインディレクトリの `.ndf/loop/<名>/loop.json`（正本）と `laps.md`（描画）である。コミットしない。
-周回はスプリント状態ファイルを ID（パス）で参照し、周回を締めるときに費用・秒・承認ゲートの判定・版を写して固定する。
-止まる条件（予算・同じ失敗・止める指示）は周回の境（周回の開始の前と終わりの後）でだけ判定する。周回の途中で止めるのは、
-リリース承認ゲートを人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
-（`refused`）の 3 つだけで、周回は進行中のまま残す。
+ループの 1 回はスプリント状態ファイルを ID（パス）で参照し、ループの 1 回を締めるときに費用・秒・承認ゲートの判定・版を写して固定する。
+止まる条件（予算・同じ失敗・止める指示）はループの 1 回の境（ループの 1 回の開始の前と終わりの後）でだけ判定する。ループの 1 回の途中で止めるのは、
+リリース承認ゲートを人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・ループの 1 回を組めなかった
+（`refused`）の 3 つだけで、ループの 1 回は進行中のまま残す。
 
-並列の計画のレーン（#2436）では、リリースの依頼を送った周回を「リリース待ち」、作業の途中の問いをオーガナイザーへ送った周回を
-「質問待ち」で締め、答えを待たずに次の周回へ進む。保留の周回は、周回の境で答えを読んで 1 回だけ締め直す（I1 の例外）。
+並列の計画のレーン（#2436）では、リリースの依頼を送ったループの 1 回を「リリース待ち」、作業の途中の問いをオーガナイザーへ送ったループの 1 回を
+「質問待ち」で締め、答えを待たずにループの次の 1 回へ進む。保留したループの 1 回は、ループの 1 回の境で答えを読んで 1 回だけ締め直す（I1 の例外）。
 
 外の世界（gh・`upkeep.py rank`・`supervise.py`・`sprint-state.py` の別の副命令）は `Env` の関数を通して呼び、テストで
 差し替える。
 
-各副命令は `sprint_loop.py`、周回の締めと承認ゲートは `sprint_loop_gate.py`、選定は `sprint_loop_select.py` が持つ。
+各副命令は `sprint_loop.py`、ループの 1 回の締めと承認ゲートは `sprint_loop_gate.py`、選定は `sprint_loop_select.py` が持つ。
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ import parallel_hold
 import project_mvv as pm
 import repo as repo_lib
 import step_read
+import limits
 import step_result
 from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
@@ -151,7 +152,7 @@ class Env:
         try:
             import parallel_lane
 
-            return parallel_lane.answers_of(self.main_dir(), plan, ids)
+            return parallel_lane.answers_of(parallel_lane.plan_home(self.main_dir(), plan), plan, ids)
         except Exception:  # noqa: BLE001 — 耐久の記録が無い・読めないときは答えがまだ無いものとして続ける
             return {i: {"answer": None, "defer": None} for i in ids}
 
@@ -192,24 +193,24 @@ def read_loop_record(env: Env, name: str) -> dict:
 
 
 def check_laps(rec: dict) -> None:
-    """周回の番号は 1 から 1 ずつ増え、進行中は高々 1 つ（I1・I2）。破れていれば LoopError。"""
+    """ループの回の番号は 1 から 1 ずつ増え、進行中は高々 1 つ（I1・I2）。破れていれば LoopError。"""
     laps = rec.get("laps", [])
     if [lap.get("n") for lap in laps] != list(range(1, len(laps) + 1)):
-        raise LoopError("ループの記録が壊れている（周回の番号が 1 から続いていない）")
+        raise LoopError("ループの記録が壊れている（ループの回の番号が 1 から続いていない）")
     if sum(1 for lap in laps if lap.get("outcome") == IN_PROGRESS) > 1:
-        raise LoopError("ループの記録が壊れている（進行中の周回が 2 つ以上ある）")
+        raise LoopError("ループの記録が壊れている（進行中のループの 1 回が 2 つ以上ある）")
 
 
 def write_record(env: Env, rec: dict, before: dict | None = None) -> None:
-    """記録を書く。終わった周回の行を書き換える書き込みは拒む（I1）。`laps.md` も描き直す。
-    保留の周回（リリース待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
+    """記録を書く。終わったループの 1 回の行を書き換える書き込みは拒む（I1）。`laps.md` も描き直す。
+    保留したループの 1 回（リリース待ち・質問待ち）の行は、答えを読んで締め直すまで書き換えてよい（I1 の例外）。"""
     check_laps(rec)
     if before is not None:
         old = {lap["n"]: lap for lap in before.get("laps", []) if lap.get("outcome") not in (IN_PROGRESS, *PENDING)}
         new = {lap["n"]: lap for lap in rec.get("laps", [])}
         changed = [n for n, lap in old.items() if new.get(n) != lap]
         if changed:
-            raise LoopError(f"終わった周回の行は書き換えない（周回 {changed}）")
+            raise LoopError(f"終わったループの 1 回の行は書き換えない（ループの {changed} 回目）")
     d = loop_dir(env, rec["name"])
     d.mkdir(parents=True, exist_ok=True)
     jsonio.write_atomic(d / RECORD, rec, indent=1)
@@ -220,7 +221,7 @@ def locked(env: Env, name: str):
     """同じループの記録を 2 つのセッションが同時に書かない（`sprint-state.py gate` と同じ排他）。"""
     d = loop_dir(env, name)
     d.mkdir(parents=True, exist_ok=True)
-    return locks.exclusive(d / RECORD, timeout=60)
+    return locks.exclusive(d / RECORD, timeout=limits.seconds("sprint-loop-record.lock"))
 
 
 @contextmanager
@@ -236,12 +237,12 @@ def current_lap(rec: dict) -> dict | None:
 
 
 def pending_laps(rec: dict) -> list[dict]:
-    """保留の周回（リリース待ち・質問待ち）を古い順に。"""
+    """保留したループの 1 回（リリース待ち・質問待ち）を古い順に。"""
     return [lap for lap in rec.get("laps", []) if lap.get("outcome") in PENDING]
 
 
 def pending_issues(rec: dict) -> set[int]:
-    """保留の周回の課題（締め直すまで選定から外す）。"""
+    """保留したループの 1 回の課題（締め直すまで選定から外す）。"""
     return {n for lap in pending_laps(rec) for n in (lap.get("issues_kept") or selected_issues(lap))}
 
 
@@ -258,8 +259,8 @@ def _overlap(a0, a1, b0, b1) -> float:
 
 
 def lap_spans(lap: dict) -> list[tuple]:
-    """周回の動いていた区間（開始と終了の組。時刻は文字列のまま）。保留の周回は、締めるまでの区間（held_at まで）と、
-    答えの後に残りを流した区間（release.finish、無ければ question.finish）を返す。周回の境で答えを待つ時間は数えない（#2436）"""
+    """ループの 1 回の動いていた区間（開始と終了の組。時刻は文字列のまま）。保留したループの 1 回は、締めるまでの区間（held_at まで）と、
+    答えの後に残りを流した区間（release.finish、無ければ question.finish）を返す。ループの 1 回の境で答えを待つ時間は数えない（#2436）"""
     spans = [(lap.get("started_at"), lap.get("held_at") or lap.get("ended_at"))]
     if lap.get("held_at"):
         fin = (lap.get("release") or {}).get("finish") or (lap.get("question") or {}).get("finish") or {}
@@ -277,15 +278,15 @@ def span_active_seconds(start, end, stops: list[tuple]) -> float:
 
 
 def active_seconds(rec: dict) -> float:
-    """動いていた時間（I8）: 終わった周回の区間の和から、周回の途中で止まっていた時間（stops の at〜resumed_at と
-    周回の区間の重なり）を引く。周回の境で止まった時間は周回の区間の外にあるため引かない。"""
+    """動いていた時間（I8）: 終わったループの 1 回の区間の和から、ループの 1 回の途中で止まっていた時間（stops の at〜resumed_at と
+    ループの 1 回の区間の重なり）を引く。ループの 1 回の境で止まった時間はループの 1 回の区間の外にあるため引かない。"""
     stops = [(_loop_time(s.get("at")), _loop_time(s.get("resumed_at"))) for s in rec.get("stops", [])]
     spans = ((_loop_time(a), _loop_time(b)) for lap in rec.get("laps", []) for a, b in lap_spans(lap))
     return sum((span_active_seconds(s, e, stops) for s, e in spans if s and e), 0.0)
 
 
 def consumed(rec: dict) -> dict:
-    """予算の消費（周回の数・費用・動いていた時間）。書き込まない。"""
+    """予算の消費（ループの回数・費用・動いていた時間）。書き込まない。"""
     closed = [lap for lap in rec.get("laps", []) if lap.get("outcome") != IN_PROGRESS]
     usd = sum(
         float(lap.get("cost") or 0) + float((lap.get("research") or {}).get("cost") or 0) for lap in closed
@@ -294,8 +295,8 @@ def consumed(rec: dict) -> dict:
 
 
 def failure_streak(rec: dict) -> tuple[dict | None, int]:
-    """直近の失敗の周回が同じ鍵で何回続くか（決定 8）。完了の周回で数え直し、same_failure で止まった後の最後の再開より
-    前に始まった周回は数えない。"""
+    """直近の失敗のループの 1 回が同じ鍵で何回続くか（決定 8）。完了のループの 1 回で数え直し、same_failure で止まった後の最後の再開より
+    前に始まったループの 1 回は数えない。"""
     cut = None
     for s in rec.get("stops", []):
         if s.get("condition") == "same_failure" and s.get("resumed_at"):
@@ -306,7 +307,7 @@ def failure_streak(rec: dict) -> tuple[dict | None, int]:
             break
         if lap.get("outcome") == DONE:
             break
-        if lap.get("outcome") != FAILED:  # 保留の周回（リリース待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
+        if lap.get("outcome") != FAILED:  # 保留したループの 1 回（リリース待ち・質問待ち）は完了でも失敗でもないものとして読み飛ばす
             continue
         k = lap.get("failure")
         if key is None:
@@ -319,7 +320,7 @@ def failure_streak(rec: dict) -> tuple[dict | None, int]:
 
 
 def mvv_change_stop(env: Env, rec: dict) -> dict | None:
-    """プロジェクト MVV が周回の開始時から改訂されたか（未承認を含む）。改訂されていれば止まる理由を返す。"""
+    """プロジェクト MVV がループの 1 回の開始時から改訂されたか（未承認を含む）。改訂されていれば止まる理由を返す。"""
     project = pm.load_mvv(env.main_dir())
     started = (rec.get("project_mvv") or {}).get("sha256")
     if not project.approved or project.sha256 != started:
@@ -328,7 +329,7 @@ def mvv_change_stop(env: Env, rec: dict) -> dict | None:
 
 
 def boundary_stop(env: Env, rec: dict) -> dict | None:
-    """周回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
+    """ループの 1 回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
     if stop_file.exists():
         return {"condition": "user_stop", "values": {"at": stop_file.read_text(encoding="utf-8").strip()}}
@@ -344,7 +345,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     return None
 
 
-IMMEDIATE_STOPS = ("user_stop", "mvv_changed", "answer_hold")  # 保留の周回があっても待たずに止まる条件（#2436 の境の 1）
+IMMEDIATE_STOPS = ("user_stop", "mvv_changed", "answer_hold")  # 保留したループの 1 回があっても待たずに止まる条件（#2436 の境の 1）
 
 
 def waiting_only(rec: dict, why: str) -> dict:
@@ -355,8 +356,8 @@ def waiting_only(rec: dict, why: str) -> dict:
 
 
 def held_stop(rec: dict, stop: dict | None) -> dict | None:
-    """止まる条件（same_failure・予算）に当たっても、答えの無い保留の周回があれば先に waiting_only で止まる（境の 8）。
-    保留の周回のまとめを流さないまま止まると、課題が閉じずに残るためである。"""
+    """止まる条件（same_failure・予算）に当たっても、答えの無い保留したループの 1 回があれば先に waiting_only で止まる（境の 8）。
+    保留したループの 1 回のまとめを流さないまま止まると、課題が閉じずに残るためである。"""
     if stop and stop["condition"] not in IMMEDIATE_STOPS and pending_laps(rec):
         return waiting_only(rec, stop["condition"])
     return stop
@@ -415,7 +416,7 @@ def update_handoff(env: Env, rec: dict, now_text: str, command: str, next_step: 
         else HANDOFF_TEMPLATE.read_text(encoding="utf-8").replace("{title}", f"開発ループ {rec['name']}")
     )
     lap = current_lap(rec)
-    where = f"\n- ループ: {rec['name']}（{rec.get('status')}）。周回 {lap['n'] if lap else len(rec.get('laps', []))}。{now_text}\n"
+    where = f"\n- ループ: {rec['name']}（{rec.get('status')}）。ループの {lap['n'] if lap else len(rec.get('laps', []))} 回目。{now_text}\n"
     where += f"- 記録: `{loop_dir(env, rec['name']) / LAPS_MD}`\n\n"
     text = handoff_doc.replace_body(text, "現在地", where) or text
     if next_step:
@@ -437,7 +438,7 @@ def selected_issues(lap: dict) -> list[int]:
 
 
 def lap_rows(rec: dict) -> list[dict]:
-    """周回の一覧（何周目・選んだ課題・版・費用・止まった理由）。"""
+    """ループの 1 回の一覧（何周目・選んだ課題・版・費用・止まった理由）。"""
     stops = {s.get("lap"): s.get("condition") for s in [*rec.get("stops", []), *([rec["stop"]] if rec.get("stop") else [])]}
     rows = []
     for lap in rec.get("laps", []):
@@ -458,7 +459,7 @@ def lap_rows(rec: dict) -> list[dict]:
 
 def render_lap_overview(rec: dict) -> list[str]:
     lines = [
-        "| 周回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |",
+        "| ループの 1 回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for r in lap_rows(rec):
@@ -475,7 +476,7 @@ def render_lap_overview(rec: dict) -> list[str]:
 def render_lap_detail(lap: dict) -> list[str]:
     lines = [
         "",
-        f"## 周回 {lap['n']}（{lap.get('sprint', '')}）",
+        f"## ループの {lap['n']} 回目（{lap.get('sprint', '')}）",
         "",
         "| 課題 | マイルストーン | 順位 | 選定 | 理由 |",
         "| --- | --- | --- | --- | --- |",

@@ -104,4 +104,6 @@ def cmd_queue_resume(done: str, from_: list[str], max_: int | None, poll: float,
     rerun = [t.plan for t in found if t.reason != KEPT]
     for t in found:
         print(f"supervise-queue: {t.plan} を {t.step or '頭'} から続ける（{t.reason}）", file=sys.stderr, flush=True)
-    return run_queue(stages[0], max_ or prev_max, poll, then=stages[1:], done=str(done_path), starts=starts, rerun=rerun)
+    # --from があれば、前の起動の途中を続けず子ごと止めて新しい実行の回で流す（#2325）
+    kw = {"restart": True} if from_ else {}
+    return run_queue(stages[0], max_ or prev_max, poll, then=stages[1:], done=str(done_path), starts=starts, rerun=rerun, **kw)

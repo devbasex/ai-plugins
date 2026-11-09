@@ -6,6 +6,7 @@
     "unparsed": "sys.argv を手で読む（_args が副命令と --runtime を、_opt が --base・--root を拾う）"
   },
   "env": [
+    "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
@@ -17,7 +18,12 @@
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
+    "NDF_API_KEY_CHECK_MODEL",
+    "NDF_API_KEY_CHECK_URL",
     "NDF_CLAUDE_ACCOUNT",
+    "NDF_CLAUDE_API_KEY_GENERATION",
+    "NDF_CLAUDE_API_KEY_NAME",
+    "NDF_CLAUDE_KEY_ACCOUNT",
     "NDF_CODEX_SLACK_NOTIFY",
     "NDF_CONTEXT_DIR",
     "NDF_CONTEXT_LIMIT",
@@ -30,6 +36,7 @@
     "NDF_RELAY_CLAUDE",
     "NDF_RELAY_DEPTH",
     "NDF_RELAY_DIR",
+    "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
     "NDF_RELAY_PLAN",
     "NDF_RELAY_REEXEC",

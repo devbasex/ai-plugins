@@ -6,6 +6,7 @@
     "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
   },
   "env": [
+    "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
@@ -16,7 +17,12 @@
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
+    "NDF_API_KEY_CHECK_MODEL",
+    "NDF_API_KEY_CHECK_URL",
     "NDF_CLAUDE_ACCOUNT",
+    "NDF_CLAUDE_API_KEY_GENERATION",
+    "NDF_CLAUDE_API_KEY_NAME",
+    "NDF_CLAUDE_KEY_ACCOUNT",
     "NDF_CONTEXT_DIR",
     "NDF_CONTEXT_LIMIT",
     "NDF_CONTEXT_POLICY",
@@ -24,6 +30,7 @@
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
     "NDF_FACTORY_RUN",
+    "NDF_LEASE_DIR",
     "NDF_LOOP_EXCLUDE",
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
@@ -33,6 +40,7 @@
     "NDF_RELAY_DIR",
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
+    "NDF_RUNTIME_SESSION",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
@@ -92,7 +100,9 @@
     "cost-estimates-json",
     "decisions-jsonl",
     "laps-md",
+    "lease-json",
     "loop-json",
+    "outside-plan-jsonl",
     "plan-json",
     "plan-md",
     "present-json",
@@ -108,7 +118,9 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "1": "失敗: ランタイムのセッションの外では開発ループの鍵を取れない（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い: 持ち主の鍵を別の実行が持っている（status stopped）"
   },
   "callers": [
     "plugins/ndf/scripts/gate-rejections.py",
@@ -116,5 +128,59 @@
     "plugins/ndf/scripts/lib/gate_answer.py",
     "plugins/ndf/scripts/lib/gate_rejections.py",
     "plugins/ndf/scripts/lib/handoff_doc.py"
-  ]
+  ],
+  "lease": {
+    "loop start": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop select": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop exclude": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop sprint": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop gate": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop lap": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop finish": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400,
+      "release": true
+    },
+    "loop pending": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop hold-question": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400
+    },
+    "loop stop": {
+      "key": "supervise.loop:name={name}",
+      "unit": "session",
+      "window_seconds": 86400,
+      "release": true
+    }
+  }
 }

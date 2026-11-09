@@ -151,7 +151,7 @@ def read_parallel(root) -> dict:
 
 
 def over_budget(used: float, limit: float | None) -> bool:
-    """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。周回の境の判定と再開の判定が同じこれを読む。"""
+    """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。ループの 1 回の境の判定と再開の判定が同じこれを読む。"""
     return limit is not None and used >= limit
 
 

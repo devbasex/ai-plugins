@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/relay_lib/hub_client.py", "name": "stop_named", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: 止めたレーンの relay.lock が放されるのを待つ"}

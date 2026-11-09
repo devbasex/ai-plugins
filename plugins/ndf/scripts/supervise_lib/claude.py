@@ -1,4 +1,4 @@
-"""claude -p の起動と、利用上限・使用量の帳簿への記録（#1142 の C1・#1953）。`lib/` と `prompts` だけを import する。
+"""claude -p の起動と、利用上限・使用量の帳簿への記録（#1142 の C1・#1953）。`lib/` と `prompts`・`children` だけを import する。
 
 `ClaudeRunner.call` が claude -p を呼ぶ唯一の口である（work / drive の worker / judge / slow / pr）。
 ハンドラーと遅れの見張りは、`Engine` が渡す `ctx` の `claude` を通して呼ぶ。
@@ -6,26 +6,25 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import math
 import os
 import shlex
-import signal
 import subprocess
 import sys
-import threading
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import claude_accounts as ca
+import claude_api_keys as ak
 from claude_settings import metered_settings
-import procs
+import limits
 import usage_capture
-from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
+from claude_usage import LIMIT_EPOCH, is_credit_low, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
+from supervise_lib.children import TICK, kill_group, run_ticking, watch_children  # noqa: F401  子の待ちは children が持つ
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
 
 
@@ -68,84 +67,6 @@ SERENA_MCP = {
 }
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch," + WEB_TOOLS
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
-LIMIT_RETRY = 900  # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
-LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
-TICK = 5.0  # 子プロセスの待ちを区切って見る秒数の上限
-
-
-def kill_group(p: subprocess.Popen) -> None:
-    """子をプロセスグループごと止める（shell=True のステップの孫も残さない。lib/procs.py）。止まらなければ 5 秒で見切る。"""
-    procs.stop_tree(p.pid, grace=0)
-    # 先頭が先に終わった（ゾンビの）グループの残りを procs.stop_tree は止めない。孫を残さないためグループへも送る
-    with contextlib.suppress(OSError):
-        os.killpg(p.pid, signal.SIGKILL)
-    with contextlib.suppress(subprocess.TimeoutExpired, ValueError, OSError):
-        p.communicate(timeout=5)
-
-
-_STEP = threading.local()  # このスレッドで起こす子を知らせる先（RunState.note_child。耐久ステップを流すスレッドごと）
-
-
-def watch_children(note) -> None:
-    """このスレッドで `run_ticking` が起こす子を `note(pid, 起きたか)` へ知らせる。None で外す（孤児の片付け）。"""
-    _STEP.note = note
-
-
-def run_ticking(
-    cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None, err_path: Path | None = None, **kw
-) -> subprocess.CompletedProcess:
-    """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長いステップの待ちの中で進行を書く）。
-
-    err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
-    子は新しいセッションで起こし、`watch_children` の知らせる先へ渡す（孤児の片付け）。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
-    tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。
-    kw の extend(開始の時刻) は待ちの周期ごとに呼び、返した時刻が締め切りより後なら後ろへずらす（#2047 の I7）。kw の follow が真なら前へも動かす（#2505）。"""
-    extend, follow = kw.pop("extend", None), kw.pop("follow", False)
-    with open(err_path, "w", encoding="utf-8") if err_path else contextlib.nullcontext() as errf:  # 閉じ済みでも閉じ直してよい
-        p = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=errf or subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-            **kw,
-        )
-        note = getattr(_STEP, "note", None)
-        if note:
-            note(p.pid, True)
-        deadline = time.time() + timeout if timeout else None
-        try:
-            return _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend, follow)
-        finally:
-            if note:
-                note(p.pid, False)
-
-
-def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend, follow) -> subprocess.CompletedProcess:
-    """every 秒ごとに tick() を呼びながら p の終わりを待つ。打ち切りと tick() の例外では子のプロセスグループを止める。"""
-    first = True
-    while True:
-        wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
-        try:
-            out, err = p.communicate(input if first else None, timeout=wait)
-            if errf:
-                errf.close()
-                err = Path(err_path).read_text(encoding="utf-8", errors="replace")
-            return subprocess.CompletedProcess(cmd, p.returncode, out, err)
-        except subprocess.TimeoutExpired:
-            first = False
-            if extend and deadline is not None and (later := extend(deadline - timeout)) and (follow or later > deadline):
-                deadline, timeout = later, timeout + later - deadline
-            if deadline is not None and time.time() >= deadline:
-                kill_group(p)
-                raise subprocess.TimeoutExpired(cmd, timeout) from None
-            if tick:
-                try:
-                    tick()
-                except BaseException:
-                    kill_group(p)
-                    raise
 
 
 def minimal_args(system: str) -> list[str]:
@@ -187,6 +108,27 @@ def claude_kind(system: str, full: bool) -> str:
     return "pr" if system.startswith(PR_SYSTEM) else {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow"}.get(system, "work")
 
 
+def _output_data(stdout: str, returncode: int) -> dict:
+    """claude -p の出力を辞書へそろえる。JSON の辞書でなければ本文を `result` に、終了コードの失敗を `is_error` に置く。"""
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict):
+        data = {"result": stdout, "is_error": returncode != 0}
+    return data
+
+
+def _failure_kinds(data: dict, result: str, p: subprocess.CompletedProcess, ok: bool) -> tuple[bool, bool, bool]:
+    """失敗の分類（残高切れ・利用上限・認証の失敗）。互いに排他で、この順に先に当たったほうを採る。"""
+    # API クレジットの残高切れ（#2855 の決定 6）。上限と認証の失敗より先に読む
+    credit = not ok and is_credit_low("\n".join([result, p.stderr]))
+    limit = not ok and not credit and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
+    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
+    auth = not ok and not credit and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    return credit, limit, auth
+
+
 def call_claude(
     system: str,
     prompt: str,
@@ -214,7 +156,8 @@ def call_claude(
     `watch`（進みの観測）を渡すと、最小構成でも会話を残し、締め切りを `watch.deadline` で動かす。打ち切りは結果の `timed_out` に残す（#2505）。
     帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
-    who = {"kind": claude_kind(system, full), **(caller or {})}
+    kind = claude_kind(system, full)
+    who = {"kind": kind, **(caller or {})}
     cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
     run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
     # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
@@ -239,21 +182,14 @@ def call_claude(
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="error")
         raise
     except subprocess.TimeoutExpired as e:
-        kind, waited = claude_kind(system, full), round(e.timeout)  # 締め切りを動かしたときは動かした後の秒
+        waited = round(e.timeout)  # 締め切りを動かしたときは動かした後の秒
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=waited, status="timeout")
         return ClaudeCall(ok=False, text=f"打ち切り（{waited} 秒）", usage={}, seconds=waited, kind=kind, model_usage=None, timed_out=True)
-    try:
-        data = json.loads(p.stdout)
-    except json.JSONDecodeError:
-        data = None
-    if not isinstance(data, dict):
-        data = {"result": p.stdout, "is_error": p.returncode != 0}
+    data = _output_data(p.stdout, p.returncode)
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
     result = str(data.get("result") or "")
-    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
-    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
-    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    credit, limit, auth = _failure_kinds(data, result, p, ok)
     usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
     return ClaudeCall(
         {
@@ -261,13 +197,14 @@ def call_claude(
             "text": text,
             "usage": data.get("usage") or {},
             "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
-            "kind": claude_kind(system, full),
+            "kind": kind,
             "cost": data.get("total_cost_usd"),
             "turns": data.get("num_turns"),
             "session": data.get("session_id"),
             "seconds": round(time.time() - started, 1),
             "limit": limit,
             "auth": auth,
+            "credit": credit,
             "resets_at": limit_reset_at("\n".join([result, p.stderr])) if limit else None,
         }
     )
@@ -309,6 +246,8 @@ class ClaudeRunner:
         self.account = self.section
         self.metered_told = False  # 壊れた保存の宣言の 1 行を出したか
         self.running: list[str | None] = []  # 実行中の呼び出しのアカウント
+        # 登録済み API キー（#2855）。`account` とは別に持ち、外したら元のアカウントの選定へそのまま戻る
+        self.keys = ak.KeyRoute(ctx.state, account=lambda: self.account)
 
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
@@ -319,46 +258,84 @@ class ClaudeRunner:
         その変数を足して 1 度だけ起動し直す。それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）
         まで待って同じ呼び出しを起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
+        API キーは宣言に従って先に試し、上限で替えるアカウントが無ければ従量の接続と待ちの前に試す（#2855。`KeyRoute`）。
         """
         ctx, st = self.ctx, self.ctx.state
-        retry = ctx.plan.get("limit_retry_seconds", LIMIT_RETRY)
-        wait_max = ctx.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
+        retry = ctx.plan.get("limit_retry_seconds", limits.seconds("supervise.limit-retry"))
+        wait_max = ctx.plan.get("limit_wait_max", limits.seconds("supervise.limit-wait-max"))
         fallback = ca.fallback_env()
         self._tell_metered_problem()
         multi = ca.registered() >= 2
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
+        keys = self.keys.attempt(self.keep, cwd)
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
+        direct = lambda env: call_claude(system, prompt, tools, cwd, timeout, child_env=env, **kw)  # noqa: E731
+        once = lambda env: self._call_running(lambda: direct(env))  # noqa: E731
         while True:
+            if (res := keys.run(once)) is not None:  # API キーで決着した
+                return res
+            self._return_from_key(multi)
             try:
-                child = self.child_env(fallback) if multi else None
+                child = keys.env(self.child_env(fallback) if multi else None)
             except AccountsLimited as e:
-                waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
+                if not keys.left():
+                    waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
                 continue
-            res = self._call_running(lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw))
-            if res.get("auth") and multi and self.account not in (None, ca.METERED) and self.account not in auth_failed:
-                # 認証の失敗の観測を残し、次の child_env が今のアカウントを除いて選び直す（上限のときと同じ経路。#1576 の E9）
-                auth_failed.add(self.account)
-                ca.note_auth_failed(self.account)
+            res = once(child)
+            if self._retry_on_auth(res, multi, auth_failed):
                 continue
             if res.get("limit"):
-                self.note_limit(res)
-                if multi and self.account != ca.METERED:
-                    if self._switch_after_limit(res, tried, fallback):
-                        continue
-                elif not multi and fallback and not tried_fallback:
-                    tried_fallback = True
-                    # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
-                    metered = ca.account_env(ca.METERED, dict(os.environ))
-                    res = self._try_fallback_once(
-                        fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=metered, **kw)
-                    )
+                res, tried_fallback = self._handle_limit(res, multi, tried, fallback, keys, tried_fallback, direct)
+                if res is None:
+                    continue
             if not res.get("limit"):
                 return res
+            if keys.left():
+                continue
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+            keys.reset()
+
+    def _return_from_key(self, multi: bool) -> None:
+        """受け継いだキーを外した入れ子で、アカウントを持たなければ親が残した戻り先（`KeyRoute.back`）へ替える。
+
+        キーの環境は親のアカウントを外している（`claude_api_keys.env_with_key`）。今のアカウントとして持つことで、
+        戻り先のログインが通らないときも認証の失敗の振り替え（`_retry_on_auth`）と上限の切り替えが働く。"""
+        back = self.keys.back
+        if multi and self.keys.dropped and self.account is None and back and back in ca.names():
+            self.switch(back, "api_key")
+
+    def _retry_on_auth(self, res: dict, multi: bool, auth_failed: set[str]) -> bool:
+        """認証が通らなかった登録済みのアカウントを記録する。同じ呼び出しを別のアカウントでやり直すなら真。"""
+        if res.get("auth") and multi and self.account not in (None, ca.METERED) and self.account not in auth_failed:
+            # 認証の失敗の観測を残し、次の child_env が今のアカウントを除いて選び直す（上限のときと同じ経路。#1576 の E9）
+            auth_failed.add(self.account)
+            ca.note_auth_failed(self.account)
+            return True
+        return False
+
+    def _handle_limit(
+        self, res: dict, multi: bool, tried: set[str], fallback: dict, keys, tried_fallback: bool, direct
+    ) -> tuple[ClaudeCall | None, bool]:
+        """上限に当たった後の替え先を選ぶ。返すのは（結果, FALLBACK を試したか）で、結果が None ならやり直す。
+
+        結果に上限が残っていれば呼び手が API キーか解除の待ちへ進む。登録が 2 つ以上ならアカウント・API キー・従量の
+        接続の順に替え、1 つ以下なら API キー、次に FALLBACK を 1 度だけ試す。
+        """
+        self.note_limit(res)
+        if multi and self.account != ca.METERED:
+            if self._switch_after_limit(res, tried, fallback, keys.left):
+                return None, tried_fallback
+        elif not multi and keys.left():
+            return None, tried_fallback
+        elif not multi and fallback and not tried_fallback:
+            # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
+            metered = ca.account_env(ca.METERED, dict(os.environ))
+            return self._try_fallback_once(fallback, lambda: direct(metered)), True
+        return res, tried_fallback
 
     def _tell_metered_problem(self) -> None:
         """保存した従量の接続の宣言が壊れていれば、最初の呼び出しの前に標準エラーと進捗ログへ 1 行出す（#1468 の I5）。"""
@@ -370,8 +347,8 @@ class ClaudeRunner:
             print("supervise: " + bad, file=sys.stderr)
             self.ctx.state.progress_write({"kind": "metered_invalid", "detail": bad})
 
-    def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict) -> bool:
-        """上限に当たったアカウントを記録し、登録済みのアカウントか従量の接続へ替える。替えたら真。"""
+    def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict, key_left=None) -> bool:
+        """上限に当たったアカウントを記録し、登録済みのアカウント・API キー（`key_left()` が真）・従量の接続の順に替える。替えたら真。"""
         kind = kind_of_text(res.get("text") or "")
         if self.account:
             ca.note_limit(self.account, kind, res.get("resets_at"))
@@ -379,6 +356,8 @@ class ClaudeRunner:
         nxt = ca.choose(exclude=tried, keep=self.keep())
         if nxt.name:
             self.switch(nxt.name, kind)
+            return True
+        if key_left is not None and key_left():
             return True
         if fallback:
             self.switch(ca.METERED, kind, keys=list(fallback))

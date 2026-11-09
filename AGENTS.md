@@ -104,6 +104,7 @@
 - 認証情報は環境変数で管理
 - `.env.example`でテンプレートを提供
 - `.gitignore`に機密ファイルを追加
+- 秘密らしい値・`.env` の実ファイル・インフラの定義は `python3 scripts/check-repo-secrets.py`（CI のジョブ `repo-secrets-check`）が落とす。テストの偽の値は `scripts/repo-secrets-allow.json` へ足す
 
 ### 最小限のコード実装
 - 要件を満たす最小限のコードのみを記述
@@ -122,14 +123,13 @@ ai-plugins/
 │   └── mcp/
 │       └── mcp-*/               # MCPプラグイン10個（Claude Code・Codex 共通）
 ├── docs/                         # リポジトリ知識
-├── factory/                      # Web サービス（Neural Development Factory）。プラグインと分け、自分の LICENSE を持つ
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定
 ├── KIRO.md                       # 相手役として起動される Kiro CLI の説明
 └── README.md                     # プロジェクト説明
 ```
 
-`plugins/` と `.claude-plugin/marketplace.json` は `factory/` を参照しない。インフラの定義（CDK など）と秘密は private リポジトリに置き、このリポジトリに入れない。どちらも `python3 scripts/check-service-boundary.py`（CI のジョブ `service-boundary-check`）が落とす。
+**このリポジトリの範囲は、NDF などのプラグイン（`plugins/`）とマーケットプレイス（`.claude-plugin/marketplace.json`）である。** Web サービス（Neural Development Factory）のコードは別のリポジトリで開発し、ここには置かない。そのサービスが NDF を呼ぶときの API・入出力の規約（`NDF_FACTORY_RUN`・`parallel-external.json` など）は、NDF の側の規約として `plugins/ndf/contracts/` が持つ。
 
 ## ドキュメント
 
@@ -139,6 +139,7 @@ ai-plugins/
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、検証） |
 | [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版とリリース（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
+| [docs/ndf-parallel-model.md](docs/ndf-parallel-model.md) | NDF の並行開発の役割と用語（レーン・オーガナイザー・conductor などの関係を図と表で示す） |
 | [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料。生成スクリプト（pptxgenjs）・台本・構成メモを資料ごとのディレクトリに置く（作り方は `release` の `form-slide.md`）。**発表日時点の記録で、以後の構成変更には追随しない** |
