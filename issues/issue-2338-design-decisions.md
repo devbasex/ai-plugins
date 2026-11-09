@@ -1,6 +1,6 @@
 # #2338 の設計: 決定の記録
 
-設計文書の本体は [issue-2338-design.md](issue-2338-design.md) にある。番号 `STD<数>`・`PRD<数>`・`LIB<数>` は [issue-2338-design-research.md](issue-2338-design-research.md) の「外部の調査」の表を指す。
+設計文書の本体は [issue-2338-design.md](issue-2338-design.md) にある。番号 `STD<数>`・`PRD<数>`・`LIB<数>`・`MSR<数>` は [issue-2338-design-research.md](issue-2338-design-research.md) の「外部の調査」の表を指す。
 
 ## 決定の記録
 
@@ -11,7 +11,9 @@
 そろえると、#2608 が既存のハンドラを書き直さずに足せる。OpenTelemetry へ送る `LoggingHandler`（LIB5）と、CloudWatch Logs へ送る watchtower（LIB6）である。
 秘密を伏せる処理と 1 行の上限の判定は、出力先へ渡す前に書き口が済ませる（決定 4）。
 
-自前で作るのは、ファイルの出力先の `Handler` 1 つである。記録のファイルを `O_APPEND` で開き、`fcntl.flock(LOCK_EX)` の中で 1 行の全バイトを
+自前で作るのは、ファイルの出力先の `Handler` 1 つである。Python の公式の手引き（LIB1）は、複数のプロセスから 1 ファイルへ書く道の 1 つに、
+書き込みを直列化するハンドラを自分で書く形を挙げる。この `Handler` はその道に当たる。手引きの例の `multiprocessing` の `Lock` は
+`subprocess` で起こした子へ届かないため、直列化には `fcntl.flock` を使う。記録のファイルを `O_RDWR|O_APPEND` で開き、`fcntl.flock(LOCK_EX)` の中で 1 行の全バイトを
 書き切るまで `os.write` を呼ぶ（STD4・STD5）。書き切れないときは、排他を持ったまま追記前の長さへ戻す。強制終了で残った書きかけの行は、
 次に書く者が改行で閉じる（決定 14）。行の形は #2335 の JSON Lines（STD1）のままにし、親子の関係を `run_id` と `parent_id` で持つ。
 この 2 つは OpenTelemetry の TraceId と SpanId（STD2）と同じ役割を持つ。OpenTelemetry へ送る出力先は、送るときに `trace_id`・`span_id`（STD6）へ写す。
@@ -21,14 +23,29 @@
 | 候補 | 採らない理由 |
 | --- | --- |
 | `QueueHandler` / `QueueListener`（LIB1） | 公式の手引きが、複数のプロセスから 1 ファイルへのログを非対応と書く。キューを共有できるのは同じプロセスのスレッドと `multiprocessing` の子だけで、`subprocess` で起こす別のエントリポイントには届かない。手引きの代わりの形（全員が `SocketHandler` で送り、受け手のプロセスが書く）は、起点の実行が先に終わる場合と子が別のリポジトリで動く場合に受け手を常駐させる運用が要る |
-| concurrent-log-handler（LIB4） | 別々のプロセスから排他で書ける点は要件に合う。ただし extras（portalocker）が要り、依存が欠けた環境で依存の検査 `deps.py` の止まりを記録へ残せない。書き切れなかった行を戻す処理と、強制終了の後の行の連結を防ぐ処理を持たない。主な機能のファイルの回転は、日付のディレクトリと 30 日の寿命で足りる |
+| concurrent-log-handler（LIB4） | 別々のプロセスから排他で書ける点は要件に合う。ただし書き切れなかった行を戻す処理と、強制終了で残った書きかけの行を閉じる処理を持たない。別のロックファイルを介すため、短命のプロセスでは LIB7 と同じく遅い。依存の検査（`lib/deps.py`）が依存の欠けで止めたことも記録へ残すには、書き口が標準ライブラリだけで動く必要がある。主な機能のファイルの回転は、日付のディレクトリと 30 日の寿命で足りる |
+| filelock（LIB7） | NDF の extra `locks` で導入済みだが、短命のプロセスの 1 行に 113 ms かかる（import 82 ms と 0.05 秒間隔の試し直し。`fcntl.flock` は 0.21 ms。MSR2）。書きかけの行を閉じない（MSR3）。依存の欠けで止めたことを記録へ残せない点は LIB4 と同じ |
+| portalocker（LIB8） | `fcntl.flock` を包むだけで、書き切れなかった行を戻す処理と書きかけの行を閉じる処理は自分で書くことになる。extras が要り、LIB4 と同じく依存の欠けで止めたことを記録へ残せない |
+| SQLite の WAL（LIB9） | 8 プロセスの並行で壊れた行 0（MSR1）だが、短命のプロセスの 1 行に 13.2 ms かかり、`fcntl.flock` の約 60 倍である（MSR2）。読むのに SQL が要り、`jq`・`grep` と、ファイルを読む収集の仕組み（PRD2・PRD3）が使えない。WAL は同じホストが前提である |
+| SQLite の DELETE journal（LIB9） | 読むのに SQL が要る点は WAL と同じである。書くたびに journal のファイルを作って消すため、WAL より遅い。POSIX の助言ロックに頼り、NFS では壊れる |
+| DuckDB（LIB10） | 書けるのは 1 つのプロセスだけで、別々に起動したプロセスから同じ記録へ書けない |
+| LMDB（LIB11） | extras が要り、読むのに専用の API が要る。リモートのファイルシステムでは使えない |
+| Redis Streams（LIB12） | サーバーの常駐が要る。起点の実行が先に終わる場合と、利用先のリポジトリで動く子にも受け手を用意する運用が要る |
+| syslog とソケットの受け手（PRD5） | 手元のコンテナに `/dev/log` が無く、受け手の常駐が要る。`QueueHandler` の行の受け手の形と同じ運用が要る |
+| Fluent Bit の forward と Vector の socket（PRD6） | 受け手の常駐が要る。手元の既定は受け手が無くても書けるファイルにし、受け手へ送る形は出力先の 1 つとして #2608 が足す |
+| ローカルの OpenTelemetry Collector（PRD7） | 受け手の常駐が要る。LIB5 と同じく送る出力先の 1 つとして残す |
+| 実行ごとの別ファイル | 排他は要らなくなるが、1 回の起動（子の実行を含む）を 1 つの記録から読めない（F1・受け入れ条件 1a） |
 | structlog（LIB2） | 書き出しを LIB1 のハンドラへ任せるため、加えても複数のプロセスの排他は解けない。行の形は #2335 が決めており、処理の連鎖を足す理由が無い。extras が要る |
 | loguru（LIB3） | `enqueue` が守るのは `multiprocessing` で起こした子に logger を渡した場合だけで、`subprocess` の子と別のコンテナを守らない。extras が要る |
 | opentelemetry-sdk（LIB5）を書き口にする | 送り先（Collector か OTLP の受け手）の運用が前提で、手元の既定のファイルを持たない。LIB1 の `Handler` として足せるため、送る出力先の 1 つとして残す |
 | journald（PRD4）へ書く | 手元のコンテナに journald が無い |
 
+`fcntl` を import してよいのは `lib/locks.py` だけである（構造の検査 `scripts/check-script-structure.py` の I14）。`lib/locks.py` は filelock を要するため、
+`run_log.py` は読まない。`run_log.py` が `fcntl` を直に使う許可を `scripts/script-structure-allow/` に置き、理由に「標準ライブラリだけで書く・filelock の遅さ」を書く
+（前例は `lib/state_home.py` の許可）。
+
 - 作り方: ライブラリやサービスを使う・自前で作る
-- 比べた候補: STD1 / STD2 / STD4 / STD5 / STD6 / LIB1 / LIB2 / LIB3 / LIB4 / LIB5 / LIB6 / PRD4
+- 比べた候補: STD1 / STD2 / STD4 / STD5 / STD6 / LIB1 / LIB2 / LIB3 / LIB4 / LIB5 / LIB6 / LIB7 / LIB8 / LIB9 / LIB10 / LIB11 / LIB12 / PRD4 / PRD5 / PRD6 / PRD7
 
 根拠: Value 6 / Value 7（MVV 版 5）。プロジェクトの方針「基盤は既存ライブラリを使う」に従い、枠組みは標準の `logging` を使い、要件を満たす既存のハンドラが無い 1 つだけを自前で作る
 
@@ -40,6 +57,9 @@ Fluent Bit の入力 `tail` は、1 ファイルの読み込みの領域の既�
 多くとも 5,787 バイト）であり、上限はその 5 倍を超える。通常の行は全文ファイルを作らずに済み、外部コマンドの失敗の出力のような長い理由だけが移る。
 移す単位は行ではなく文字列にし、移した値の位置へ参照（パス・文字数・sha256）を置く。行の残りの鍵は行に残り、`grep` と `jq` で行を絞れる。
 値は上限の宣言（`contracts/limits.json` の `run-log.line`）に置く。`limits.py` が持てる値に `bytes` を足す。
+
+32,000 バイトの理由が効く範囲は、ファイルの出力先と、そのファイルを後から集める場合である。書き口は出力先によらず同じ上限で判定するため、
+ほかの出力先も 32,000 バイトを超える行を受け取らない。
 
 上限を置かない形は採らない。外部コマンドの出力の長さには上限が無く、記録の 1 ファイルを読むツール（`jq`・エディタ・収集の仕組み）が重くなるか、
 読むのをやめる。
@@ -180,10 +200,11 @@ SIGKILL は受け手を動かさないため、決定 1 の戻す処理は働か
 つながり、止めていない実行の行まで JSON として読めなくなる（受け入れ条件 1j）。ファイルの出力先は、排他を取った後に最後の 1 バイトを読み、
 改行でなければ先に改行を書く。書きかけの行は JSON として読めない 1 行として残り、読む側が飛ばして数える。止めた実行は `end` が無いことで判別する（前提 6）。
 Fluent Bit と Vector も行を改行で区切るため（PRD2・PRD3）、後から集める仕組みでも同じ 1 行だけが読めない行になる。
+8 プロセスで書き続ける書き手を SIGKILL で計 320 回止めた実測で、この形は書きかけの行が次の行とつながらなかった（MSR3）。
 
 書きかけの行を消す形は採らない。消すには行の始まりを探して切り詰めることになり、その間に別の書き手が待つうえ、残った手がかりを失う。
 
 - 作り方: 自前で作る
-- 比べた候補: LIB4 / PRD2 / PRD3 / STD1
+- 比べた候補: LIB4 / LIB7 / PRD2 / PRD3 / STD1
 
 根拠: Value 7（MVV 版 5）

@@ -20,7 +20,8 @@
 | 利用者の指示（2026-11-06）「手元はファイル、FactoryならCloudWatch Logsなど、ログの出力方法は統一した上で切り替えられるようにする必要があります」 | 利用者の指示の原文 | 書き口を 1 つにし、出力先だけを差し替える形にすること（決定 4） |
 | 手元のプランの状態の記録 293 ファイル・1,778 行の長さ: 中央値 199 バイト・99 パーセンタイル 507 バイト・最大 570 バイト。使用量の帳簿の最長の行は 1,929 文字 | 実測（2026-11-04、`LC_ALL=C awk '{print length($0)}'`） | 1 行の上限 32,000 バイトは今の最長の行（UTF-8 で多くとも 5,787 バイト）の 5 倍を超える余裕を持ち、通常の行は全文ファイルへ逃がさずに済むこと（決定 2） |
 | Fluent Bit の入力 `tail` の 1 ファイルの読み込みの領域は既定 32k で、超える行に当たるとそのファイルの監視をやめる（PRD2）。Vector の 1 行の既定の上限は 102,400 バイト（PRD3）。CloudWatch Logs の 1 イベントの上限は 1,024 KB（PRD1） | 外部の一次情報 | 32,000 バイトの行は、既存の収集の仕組みが既定の設定のまま読め、差し替えた出力先でも 1 イベントとして送れること（決定 2） |
-| Python の公式の手引きは、複数のプロセスから 1 ファイルへのログを非対応と書く。複数のプロセスから排他で書く既存のハンドラ（LIB4）は extras が要る（LIB1・LIB4） | 外部の一次情報 | 枠組みは標準の `logging` を使い、別々に起動したプロセスから 1 ファイルへ書くハンドラだけを自前で作ること（決定 1） |
+| Python の公式の手引きは、複数のプロセスから 1 ファイルへのログを標準では非対応と書き、道の 1 つに直列化するハンドラを自分で書く形を挙げる。既存のハンドラ（LIB4・LIB7）は書きかけの行を閉じず、短命のプロセスで遅い（LIB1・LIB4・LIB7） | 外部の一次情報 | 枠組みは標準の `logging` を使い、別々に起動したプロセスから 1 ファイルへ書くハンドラだけを自前で作ること（決定 1） |
+| 8 プロセスの並行で `O_APPEND` と `fcntl.flock` の JSON Lines は欠け・混ざり 0（22,521 行/秒）。短命のプロセスの 1 行は中央値 0.21 ms で、SQLite の WAL の約 60 分の 1。SIGKILL 320 回で書きかけの行が次の行とつながらない | 実測（2026-11-09、MSR1〜MSR3） | 手元の既定の出力先を、ロックで書き込みを直列化する JSON Lines のファイルにすること（決定 1・決定 14） |
 | 利用者の答え（2026-11-09、設計承認ゲート）「技術調査が足りていない。マルチプロセス二対応した堅牢なログ出力、収集、保管の仕組みを調査」 | 利用者の指示の原文 | 出力・形式と相関・収集と保管の既存の仕組みを 8 つの観点で比べ、採否を決めること（外部の調査） |
 | 利用者の根 `~/.claude/ndf/state` は、ホストの docker のボリュームの ext4 上にあり、同じホストの複数のコンテナが共有する（`findmnt -T ~/.claude/ndf/state`、2026-11-09） | 実測 | 複数のコンテナが同じ日付のディレクトリへ書くことが実際に起きること（決定 6） |
 
@@ -89,14 +90,16 @@
 ## 外部の調査
 
 外部の調査は [issue-2338-design-research.md](issue-2338-design-research.md) にある。複数のプロセスに対応したログの出力・形式と相関・収集と保管の既存の仕組み
-16 件を、8 つの観点で比べた。観点は、並行の書き込みの安全さ・プロセスの親子と別のコンテナ・中断に強いか・依存の重さ・出力先の切り替え・
-保管と寿命・秘密の伏せ方・運用の実績である。結論は次の 3 つである。
+を、8 つの観点で比べた。観点は、並行の書き込みの安全さ・プロセスの親子と別のコンテナ・中断に強いか・依存の重さ・出力先の切り替え・
+保管と寿命・秘密の伏せ方・運用の実績である。手元でロックして書く機構（filelock・portalocker・SQLite・DuckDB・LMDB）と受け手へ送る機構
+（syslog・Fluent Bit の forward・Vector の socket・OpenTelemetry Collector・Redis Streams）も比べ、3 つの実測を添えた。候補は合わせて 26 件である。
+結論は次の 3 つである。
 
 | 層 | 採るもの | 自前で作るもの |
 | --- | --- | --- |
-| 出力 | 標準の `logging`（専用の logger と `Handler` による出力先の差し替え） | 別々に起動したプロセスから 1 ファイルへ排他で書くファイルの出力先の `Handler` 1 つ。標準の手引きが非対応と書き、既存のハンドラ（concurrent-log-handler）は extras が要るため（決定 1） |
+| 出力 | 標準の `logging`（専用の logger と `Handler` による出力先の差し替え） | 別々に起動したプロセスから 1 ファイルへ排他で書くファイルの出力先の `Handler` 1 つ。標準の手引きが挙げる「直列化するハンドラを自分で書く」道に当たる。既存のハンドラ（concurrent-log-handler・filelock）は書きかけの行を閉じず、短命のプロセスで遅く、依存の欠けで止めたことを記録へ残せないため（決定 1） |
 | 形式と相関 | JSON Lines と、OpenTelemetry の親子のつなぎ方・環境変数による文脈の伝搬 | 無し。鍵は #2335 の `run_id`・`parent_id` のまま、OpenTelemetry へ送る出力先が `trace_id`・`span_id` へ写す |
-| 収集と保管 | 手元はファイルと 30 日の寿命。後から集めるなら Fluent Bit・Vector が既定の設定のまま読める 1 行の上限（決定 2）。Factory の CloudWatch Logs は #2608 | 無し。収集の仕組みはこの課題で作らない |
+| 収集と保管 | 手元はファイルと 30 日の寿命。後から集めるなら Fluent Bit・Vector が既定の設定のまま読める 1 行の上限（決定 2）。Factory の CloudWatch Logs は #2608（候補は watchtower と FireLens の forward） | 無し。収集の仕組みはこの課題で作らない |
 
 ## 機能一覧
 
@@ -121,6 +124,7 @@
 | 上限の宣言（`contracts/limits.json`・`lib/limits.py`） | `run-log.line` の方針に `bytes: 32000` を置く。`limits.py` が持てる値に `bytes`（整数・下限 1）を足す | 変更 | 1 |
 | 寿命の値（`lib/durable_keys.py`・`lib/durable.py`） | `KEEP_DAYS = 30` を `durable_keys.py` へ移し、`durable.py` と書き口がここから引く | 変更 | 1 |
 | 環境変数の契約（`contracts/env/`） | `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_RUN_LOG_SINK` の行を足す。`GH_TOKEN`・`GITHUB_TOKEN`・`AI_GATEWAY_API_KEY`・`SLACK_BOT_TOKEN` の行へ `secret: true` を足す | 変更 | 1 |
+| 構造の検査の許可（`scripts/script-structure-allow/plugins__ndf__scripts__lib__run_log.py--fcntl--wrapped.json`） | `run_log.py` が `fcntl` を直に import する許可を置く。構造の検査の I14 は `fcntl` を `lib/locks.py` だけに許すが、`lib/locks.py` は filelock を要する。書き口は標準ライブラリだけで書き（依存の欠けで止めたことも記録へ残すため）、filelock は短命のプロセスで遅い（MSR2）。理由にこの 2 つを書く（決定 1。前例は `lib/state_home.py` の許可） | 新設 | 1 |
 | 契約の読み手（`scripts/contracts_lib/model.py`） | 環境変数の行の任意の鍵 `secret`（bool）を受けて確かめる | 変更 | 1 |
 | ファイルの契約（`contracts/files/`） | 実行の記録と全文ファイルの行を足す（書き手は `run_log.py`） | 変更 | 1 |
 | `check-trigger.py` の契約の項目（`contracts/entrypoints/`） | 読む環境変数の一覧へ、核と書き口が読む `NDF_RUN_ID`・`NDF_RUN_LOG`・`NDF_RUN_LOG_SINK`・`NDF_RUNS_DIR` を足す（契約の検査が求める分）。終了コードの表（`exit`）へ、本体が今返している `1`（`EXIT_VIOLATION`。`record --failed`・gh の失敗・記録へ書けない）と `3`（`EXIT_PRECONDITION`。トリガーが立たない・変更なし）を足す。足さないと、核は契約に無い終了コードを `stopped`・1 へ置き換え（`run_core.verify_emitted`）、プランの実行条件（`skip_code: 3`）が飛ばさずに失敗になり、`record --failed` の結果も消える | 変更 | 2 |
@@ -210,6 +214,8 @@ plugins/ndf/
         └── README.md                # 変更
 conftest.py                          # 変更
 scripts/contracts_lib/model.py       # 変更（secret）
+scripts/script-structure-allow/
+└── plugins__ndf__scripts__lib__run_log.py--fcntl--wrapped.json  # 新設
 ```
 
 ## 構造
@@ -417,7 +423,7 @@ sequenceDiagram
 
 ファイルの出力先の `emit` は次の順で書き切る。
 
-1. 記録のファイルを `O_APPEND` で開き、`fcntl.flock(LOCK_EX)` を取り、追記前の長さ（`os.fstat`）を控える
+1. 記録のファイルを `O_RDWR|O_APPEND` で開き、`fcntl.flock(LOCK_EX)` を取り、追記前の長さ（`os.fstat`）を控える。手順 2 で最後の 1 バイトを読むため、読み書きの両方で開く（`O_WRONLY` で開くと `os.pread` が `EBADF` で落ちる）
 2. 長さが 0 でなく、最後の 1 バイト（`os.pread`）が改行でなければ、SIGKILL で止まった実行の書きかけの行が残っている。先に改行を 1 つ書いて閉じる（決定 14）
 3. 排他を持ったまま、行の全バイトを書き切るまで `os.write` を呼ぶ。戻り値を確かめ、残りを続けて書く（STD5）
 4. `os.write` が例外を投げたか 0 を返したときは、`os.ftruncate` で閉じた後の長さへ戻してから `OSError` を投げる。途中まで書いた行が残ると、次に書く子の行が同じ行へつながるためである
@@ -472,14 +478,14 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2338 | 実装する | — | `conftest.py`、`plugins/ndf/conftest.py`、`plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/limits.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/contracts/env/`、`plugins/ndf/contracts/files/`、`plugins/ndf/contracts/entrypoints/`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/pace.md`、`scripts/contracts_lib/model.py`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/tests/` |
+| #2338 | 実装する | — | `conftest.py`、`plugins/ndf/conftest.py`、`plugins/ndf/scripts/lib/run_log.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/secret_redact.py`、`plugins/ndf/scripts/lib/limits.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/contracts/env/`、`plugins/ndf/contracts/files/`、`plugins/ndf/contracts/entrypoints/`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/pace.md`、`scripts/contracts_lib/model.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__run_log.py--fcntl--wrapped.json`、`scripts/tests/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/tests/` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | Codex の hook と Bash の子 | `NDF_RUN_ID` が Claude Code の hook へ届くことは 2026-11-04 に確かめた（Claude Code 2.1.318）。Codex と、エージェントの Bash ツールが起こす子プロセスへ届くかは未確認。届かないときも、子は起点の実行として自分のファイルを作るだけで、記録は失われない |
-| NFS 上の利用者の根 | 排他は同じカーネルの上の `flock` を前提にする。利用者の根を NFS に置いた環境では、`flock` が `fcntl` の鍵として模される（STD4）。同じファイルへ書くのは同じコンテナの親子だけ（決定 6）のため影響は小さいと見るが、NFS で動かしてはいない |
+| NFS 上の利用者の根 | 排他は同じカーネルの上の `flock` を前提にする。利用者の根を NFS に置いた環境では、`flock` が `fcntl` の鍵として模される（STD4）。同じファイルへ書くのは同じコンテナの親子だけ（決定 6）のため影響は小さいと見るが、NFS で動かしてはいない。出力先を SQLite に替えても、この制約は解けない（WAL は同じホストが前提で、DELETE journal は NFS の助言ロックに頼る。LIB9） |
 | 収集の仕組みでの読み込み | Fluent Bit と Vector が既定の設定のまま 32,000 バイトの行を読むことは、文書の既定値（PRD2・PRD3）から決めた。実物の Fluent Bit と Vector で記録のファイルを読ませてはいない。収集を足すときに確かめる |
 | 正規表現に当たらない切る箇所 | 要求の「調べ方」の正規表現に当たらない書き方（`textwrap.shorten` など）で 2 ファイルが切る箇所は数えていない |
 | 監視のループを動かす CLI | 監視のループを動かす CLI（`lib/monitor.py`。cross-review の `scripts/monitor.py` が読み込む）は、2026-11-09 の develop で核を通っていない（`git show origin/develop:plugins/ndf/scripts/lib/monitor.py \| grep -n run_core` が 0 件）。核から起動されたときは決定 8 で子の実行として記録へ書き、核の外から人が起動したときは標準エラーにだけ出す（前提 10）。cross-review が監視の CLI を起こすときに `NDF_RUN_ID`・`NDF_RUN_LOG` が届くかは、Codex の行と同じく未確認 |
@@ -493,5 +499,11 @@ stateDiagram-v2
 | lcore:1-3 | 形式と相関: OpenTelemetry の logs と trace の相関・実行の識別子の伝え方、JSON Lines を比べる | 直した | 外部の調査の STD1〜STD3・STD6・LIB5。決定 1（`trace_id`・`span_id` へ写す）と決定 5（環境変数で伝える） |
 | lcore:1-4 | 収集と保管: Fluent Bit・Vector・journald・CloudWatch Logs を比べる | 直した | 外部の調査の PRD1〜PRD4。1 行の上限を収集の仕組みの既定に合わせて 32,000 バイトにした（決定 2）。記録の行を標準出力・標準エラーへ混ぜない理由（決定 4）。書きかけの行を閉じる（決定 14、受け入れ条件 1j） |
 | lcore:1-5 | 決定 1 の「依存を足さずに自前で作る」を調査の結果で決め直し、自前を残すなら比べた候補と採らない理由を書く | 直した | 決定 1 を、枠組みに標準の `logging` を採り、ファイルの出力先の `Handler` だけを自前で作る形へ決め直した。比べた 6 つの候補の採らない理由を決定 1 の表に書いた |
-| lcore:1-6 | 直した設計で設計レビュー（cross-review）から通し直し、用語の検査も通す | 直した | 用語の検査（`glossary.py check`）を 4 ファイルで実行し、当たりは 0 件だった。cross-review は、この設計を載せた設計 Pull Request の上で、次の設計レビューの工程が通す（このステップは push しない） |
+| lcore:1-6 | 直した設計で設計レビュー（cross-review）から通し直し、用語の検査も通す | 直した | 用語の検査（`glossary.py check`）を設計の 5 ファイルと要求のコピーで 1 ファイルずつ実行し、当たりは 0 件だった（2026-11-09）。cross-review は、この設計を載せた設計 Pull Request の上で、次の設計レビューの工程が通す（このステップは push しない） |
 | lcore:1-7 | 受け入れ条件 2c の扱いを調査の結果の形に合わせて決め直してよい | 直した | 要求の前提 10 に合わせ、監視の CLI が核から起動されたときは子の実行として記録へ書く形にした（決定 8、「操作の約束」、テスト設計の 2c の 2 行） |
+| lcore:2-1 | 「1 行の書き方」の手順 1 は `O_WRONLY\|O_APPEND` だと `os.pread` が `EBADF` で落ちる。`O_RDWR\|O_APPEND` で開くと書く | 直した | 「1 行の書き方」の手順 1 と決定 1 を `O_RDWR\|O_APPEND` にし、理由を書き添えた。`O_WRONLY` で `EBADF`、`O_RDWR` で読めることを手元で確かめた（2026-11-09） |
+| lcore:2-2 | 構造の検査 I14 は `fcntl` を `lib/locks.py` だけに許す。`run_log.py` の許可の定義を置き、触るファイルと理由に足す | 直した | 「構成要素」に許可の定義のファイルの行、「置き場所」と「設計の結果」の触るファイルに同じパスを足した。理由（標準ライブラリだけで書く・filelock の遅さ）は決定 1 の末尾 |
+| lcore:2-3 | 決定 1 の比べた表に、SQLite の WAL・DELETE journal・DuckDB・filelock・portalocker・syslog とソケットの受け手・Fluent Bit の forward と Vector の socket・ローカルの OTel Collector・LMDB・Redis Streams・実行ごとの別ファイルを足す | 直した | 決定 1 の表に 12 行を足した。出典と実測は外部の調査の「手元でロックして書く機構と受け手へ送る機構」（LIB7〜LIB12・PRD5〜PRD7・MSR1〜MSR3） |
+| lcore:2-4 | concurrent-log-handler を採らない理由を、書きかけの行を閉じない・遅さ・依存の欠けを記録へ残すには標準ライブラリだけで書く必要がある、に差し替え、logging-cookbook の「自分でハンドラを書いて直列化する」道を根拠に足す | 直した | 決定 1 の LIB4 の行を差し替え、本文に手引きの道と `fcntl.flock` を使う理由を足した。「あるべき姿の根拠」と「外部の調査」の結論の表、外部の調査の LIB1 の行も合わせた |
+| lcore:2-5 | 決定 4 は直さない。#2608 の候補に、watchtower に加えて FireLens（Fluent Bit）の forward で送る形を足す | 直した | 決定 4 は変えていない。外部の調査の PRD1・LIB6 の行と、本体の「外部の調査」の結論の表に、FireLens の forward（PRD6）を #2608 の候補として足した |
+| lcore:2-6 | 決定 2 の 32,000 バイトの理由の範囲を書き添え、決定 14 に kill 320 回の実測を足し、NFS の行に SQLite でも解けないことを書き添える | 直した | 決定 2 の末尾に範囲（ファイルの出力先と後から集める場合）、決定 14 に MSR3、「未確認のまま残ること」の NFS の行に LIB9 を書き添えた |
