@@ -19,7 +19,8 @@
     ],
     "banned": {
       "words": [
-        "配布"
+        "配布",
+        "昇格"
       ],
       "paths": [
         "plugins/**",
@@ -45,7 +46,9 @@
         "docs/glossary.md",
         "plugins/ndf/scripts/data/legacy-values.json",
         "plugins/ndf/scripts/tests/test_legacy_values.py",
-        "plugins/ndf/scripts/tests/test_estimate_predict.py"
+        "plugins/ndf/scripts/tests/test_estimate_predict.py",
+        "plugins/ndf/skills/qa-security-scan/02-auth-checklist.md",
+        "plugins/ndf/skills/qa-security-scan/03-report-template.md"
       ]
     }
   }

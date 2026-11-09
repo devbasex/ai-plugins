@@ -198,7 +198,7 @@ def test_first_git_tree_skips_missing_and_non_git_paths(tmp_path):
 
 
 def test_sprint_stages_do_not_depend_on_whether_the_worktree_exists(tmp_path):
-    """受け入れ条件 6（昇格）・決定 2: 起点が既定ブランチと違い production_branch の無い組で、worktree の有無でステージが変わらない。"""
+    """受け入れ条件 6（リリースの Pull Request で届く経路）・決定 2: 起点が既定ブランチと違い production_branch の無い組で、worktree の有無でステージが変わらない。"""
     main = make_repo(tmp_path, base="develop")
     wt = main / ".worktrees" / "feat" / "m"
 

@@ -41,7 +41,7 @@ def with_cd_guidance(a, head: dict) -> tuple[dict, list[dict]]:
 
 
 def direct_production(a, rs: list) -> str | None:
-    """ベースブランチへのマージがそのまま本番系へ届く形の本番チャネル（無ければ None）。昇格のプランが無く、記録を書く主体が要る。"""
+    """ベースブランチへのマージがそのまま本番系へ届く形の本番チャネル（無ければ None）。本番チャネルへ入れるリリースプランが無く、記録を書く主体が要る。"""
     decl = getattr(a, "delivery", None)
     production = decl.production if decl else None
     hit = any(r.stage == delivery.STAGE_MERGED_BY_CHECK and r.production is not False and r.branch == production for r in rs)
@@ -85,7 +85,7 @@ def has_record(record_pr: str) -> bool:
 def record_pr_ref(a) -> str:
     """まとめの close が読むリリース記録の PR。経路がすべて届けない経路なら RECORD_NONE。開発ループのまとめ（pace: auto）は
     経路にかかわらず RECORD_FOUND（リリース承認ゲートの後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
-    雛形の本番の PR か、昇格の PR（#837。route_waves が昇格のプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
+    雛形の本番の PR か、リリースの Pull Request（#837。route_waves が本番チャネルへ入れるリリースプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
     検証の環境だけ・手動反映の本番系）は RECORD_FOUND。"""
     rs = routes_of(a)
     if all(r.stage == delivery.STAGE_NONE for r in rs):
@@ -121,9 +121,9 @@ def pace_verify(a) -> str:
 
 
 def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
-    """雛形で組まない経路のステージ（#1336）。昇格の経路（promote）があれば「本番」（昇格のプラン）を、手で届ける経路
-    （manual）があれば「リリース」（手で行う）をこの順に置く。fast / auto（mvv あり）では、昇格のプランの先頭で導入の確認を
-    走らせ、昇格が無くベースブランチへのマージで届く経路（merged-by-check）があれば「導入の確認」のステージを置く（#1457）。
+    """雛形で組まない経路のステージ（#1336）。リリースの Pull Request で届く経路（promote）があれば「本番」（本番チャネルへ入れるリリースプラン）を、手で届ける経路
+    （manual）があれば「リリース」（手で行う）をこの順に置く。fast / auto（mvv あり）では、本番チャネルへ入れるリリースプランの先頭で導入の確認を
+    走らせ、リリースの Pull Request が無くベースブランチへのマージで届く経路（merged-by-check）があれば「導入の確認」のステージを置く（#1457）。
     その経路のブランチが本番チャネルなら、続けて「CD の結果」のステージを置く（#2623 の決定 9）。
     normal の merged-by-check と、届けない経路（none）はステージを置かない。"""
     if mvv and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION:

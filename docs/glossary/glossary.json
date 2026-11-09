@@ -386,12 +386,13 @@
     {
       "term": "リリース",
       "context": "ndf-workflow",
-      "meaning": "本番へのデプロイ。フェーズの名前でもある。工程の名前は「デプロイ」である",
+      "meaning": "本番へのデプロイ。フェーズの名前でもある。工程の名前は「デプロイ」である。ベースブランチから本番チャネルへ変更を入れることもリリースと呼び、道筋の違いはリリースの経路の値が持つ",
       "code": "release",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
         "配布",
-        "本番の配布"
+        "本番の配布",
+        "昇格"
       ]
     },
     {
@@ -399,7 +400,8 @@
       "context": "ndf-workflow",
       "meaning": "リリースの手順をステップの列として持つプラン",
       "deprecated": [
-        "配布の計画"
+        "配布の計画",
+        "昇格のプラン"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -424,7 +426,7 @@
     {
       "term": "導入の確認",
       "context": "ndf-workflow",
-      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、経路 promote ではリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
+      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、リリースの Pull Request で届くときはリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
       "pending_source": "issues/old/issue-1457-design.md"
     },
     {
@@ -2736,32 +2738,19 @@
       "term": "リリースの Pull Request",
       "context": "ndf-release",
       "meaning": "本番チャネルへ変更を入れる Pull Request。リリースの雛形では `release/v<版>` が、経路 merge ではベースブランチが head になる",
-      "pending_source": "issues/issue-2748-design.md"
+      "pending_source": "issues/issue-2748-design.md",
+      "deprecated": [
+        "昇格の Pull Request"
+      ]
     },
     {
       "term": "リリースの承認資料",
       "context": "ndf-release",
       "meaning": "リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持つ。経路 merge では、この欄の SHA がリリースの Pull Request の先端のときだけ本番チャネルへマージする。リリースの雛形では、承認したコミットから比べた先端までに版上げなど許可した差分のほかが無いことを確かめ、比べた先端をマージする",
-      "pending_source": "issues/issue-2748-design.md"
-    },
-    {
-      "term": "昇格の Pull Request",
-      "context": "ndf-release",
-      "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
-      "code": "promotion_pr",
-      "pending_source": "issues/old/issue-1336-design.md"
-    },
-    {
-      "term": "昇格のプラン",
-      "context": "ndf-release",
-      "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、リリース承認ゲートの後にマージする",
-      "pending_source": "issues/old/issue-1457-design.md"
-    },
-    {
-      "term": "昇格の承認資料",
-      "context": "ndf-release",
-      "meaning": "昇格のリリース承認ゲートで利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote のリリース承認ゲートの停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
-      "source": "docs/specifications/ndf-release-approved-commit.md"
+      "pending_source": "issues/issue-2748-design.md",
+      "deprecated": [
+        "昇格の承認資料"
+      ]
     },
     {
       "term": "プロダクトバックログ",
@@ -3632,13 +3621,13 @@
     {
       "term": "比べた先端",
       "context": "ndf-release",
-      "meaning": "リリースが承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（リリースでは `release/v<版>`、昇格の経路ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである",
+      "meaning": "リリースが承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（リリースの雛形では `release/v<版>`、経路 merge ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "確かめたコミット",
       "context": "ndf-release",
-      "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る",
+      "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto でリリースの Pull Request をマージしてよい先端はこのコミットに限る",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
