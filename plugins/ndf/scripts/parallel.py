@@ -51,7 +51,7 @@ import parallel_hold as ph  # noqa: E402
 import parallel_hold_cli as phc  # noqa: E402
 import parallel_homes  # noqa: E402
 import parallel_lane as pl  # noqa: E402
-from parallel_lane_cli import cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
+from parallel_lane_cli import add_lane_parser, cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
 from step_result import emit, result  # noqa: E402
@@ -487,11 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     hp.add_argument("name")
     hp.add_argument("n", type=int)
     hp.add_argument("k", type=int)
-    ln = sub.add_parser("lane", help="動いている計画のレーンを足す（add）・書き換える（set）。lib/parallel_lane_cli.py（#2733）")
-    ln.add_argument("name")
-    ln.add_argument("action", choices=("add", "set"))
-    ln.add_argument("--lane", help="set で書き換えるレーンの名前")
-    ln.add_argument("--from", dest="src", required=True, help="JSON のファイル（- は標準入力）")
+    add_lane_parser(sub)
     return ap
 
 

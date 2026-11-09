@@ -132,6 +132,15 @@ def emit_reply(status: str, summary: str, items=None, code: int | None = None, n
     emit(result("parallel", status, summary, items, metrics, next=next_step), code)
 
 
+def add_lane_parser(sub) -> None:
+    """`parallel.py` の副命令 lane の引数を足す。"""
+    ln = sub.add_parser("lane", help="動いている計画のレーンを足す（add）・書き換える（set）。lib/parallel_lane_cli.py（#2733）")
+    ln.add_argument("name")
+    ln.add_argument("action", choices=("add", "set"))
+    ln.add_argument("--lane", help="set で書き換えるレーンの名前")
+    ln.add_argument("--from", dest="src", required=True, help="JSON のファイル（- は標準入力）")
+
+
 def cmd_lane(a) -> None:
     import decl
     import handoff
