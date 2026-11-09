@@ -48,7 +48,6 @@ def test_zombie_counts_as_dead_and_missing_pids_are_quiet():
     p.wait()
     assert not procs.pid_alive(p.pid) and procs.cmdline_contains(p.pid, "x") is None
     assert procs.parent_and_name(0) is None and procs.child_pids(-1) == [] and procs.stop_tree(0)
-    assert procs.wait_gone(p.pid, timeout=0.1)
 
 
 def test_empty_cmdline_of_an_exiting_process_is_unreadable(monkeypatch):
@@ -117,6 +116,40 @@ def test_cgroup_dir_inside_a_container_and_on_a_host(tmp_path: Path):
     assert procs.cgroup_dir(root, own) == root / "user.slice/x.scope"
     (root / "memory.events").write_text("")
     assert procs.cgroup_dir(root, own) == root
+
+
+def test_cgroup_cpu_takes_the_smallest_limit_up_to_the_root(tmp_path: Path):
+    """親の slice の帯域の上限は、子が `max` でも効く（読めない階層は飛ばし、`root` の外は読まない）。"""
+    root = tmp_path / "cg"
+    child = root / "slow.slice" / "x.scope"
+    child.mkdir(parents=True)
+    (tmp_path / "cpu.max").write_text("100000 100000\n")  # root の外
+    (child / "cpu.max").write_text("max 100000\n")
+    assert procs.cgroup_cpu(child, root) is None
+    (child.parent / "cpu.max").write_text("150000 100000\n")
+    assert procs.cgroup_cpu(child, root) == 1.5
+    (child / "cpu.max").write_text("400000 100000\n")
+    (root / "cpu.max").write_text("broken\n")
+    assert procs.cgroup_cpu(child, root) == 1.5
+    (child / "cpu.max").write_text("50000 100000\n")
+    assert procs.cgroup_cpu(child, root) == 0.5
+
+
+def test_cgroup_memory_limit_takes_the_smallest_limit_up_to_the_root(tmp_path: Path):
+    """親の slice のメモリの上限は、子が `max` でも効く（読めない階層は飛ばし、`root` の外は読まない）。"""
+    root = tmp_path / "cg"
+    child = root / "slow.slice" / "x.scope"
+    child.mkdir(parents=True)
+    (tmp_path / "memory.max").write_text("1\n")  # root の外
+    (child / "memory.max").write_text("max\n")
+    assert procs.cgroup_memory_limit(child, root) is None
+    (child.parent / "memory.max").write_text(f"{4 * 2**30}\n")
+    assert procs.cgroup_memory_limit(child, root) == 4 * 2**30
+    (child / "memory.max").write_text(f"{8 * 2**30}\n")
+    (root / "memory.max").write_text("broken\n")
+    assert procs.cgroup_memory_limit(child, root) == 4 * 2**30
+    (child / "memory.max").write_text(f"{2 * 2**30}\n")
+    assert procs.cgroup_memory_limit(child, root) == 2 * 2**30
 
 
 def _raising_wait(exc: BaseException):

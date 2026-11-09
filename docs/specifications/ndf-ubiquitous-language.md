@@ -15,7 +15,7 @@ NDF の開発ワークフローは、要求と設計の前に、そのプロジ�
 | 用語集の設定と用語集の JSON の形・用語チェックの規則・副命令の一覧 | `plugins/ndf/skills/requirements-design/references/glossary-format.md` |
 | 要求の工程の手順 0（用語集を用意する）・3a（ドメインイベント）・3b（語の突き合わせ）・7（課題の本文とコピー） | `plugins/ndf/skills/requirements-design/SKILL.md` |
 | ドメインモデルの節の書き方・コンテキストマップの 5 つの関係・集約の 4 つの規則・エンティティと値オブジェクトの区別 | `plugins/ndf/skills/design/references/domain-model.md` |
-| 設計の工程の手順 0（入口の検査）・2（語の突き合わせ）・5（コピーの確かめ） | `plugins/ndf/skills/design/SKILL.md` |
+| 設計の工程の手順 0（入口の検査）・3（語の突き合わせ）・6（コピーの確かめ） | `plugins/ndf/skills/design/SKILL.md` |
 | 不変条件のテストを先に書く手順 | `plugins/ndf/skills/tdd-cycle/SKILL.md` の手順 1 |
 | ai-plugins の語 | [docs/glossary.md](../glossary.md)（`docs/glossary/glossary.json` から作る） |
 
@@ -75,7 +75,7 @@ ai-plugins の設計 Pull Request #742 は、返信を除いたインライン�
 | 語を扱う処理は `glossary.py` にまとめ、既存の検査に足さない | `instructions-check.py` と `doc-lint.py` は読む設定も規則の出所も違う。追加した行の差分の取り方だけを `doc-lint.py` と揃える |
 | 語の候補は決まった 3 つの形からスクリプトが集め、領域の語かを LLM が選び、利用者が採る | 表の 1 列目・繰り返す短い太字・型の名前は、言語やリポジトリを問わず機械的に取り出せる。リポジトリ全体を LLM に読ませると、同じ入力で違う候補が出て、所要も大きい |
 | 要求の工程に足した手順 0・3a・3b は `standard` のときだけ通す | 要求の工程は `light` / `operation` / `documentation` も通る。絞らないとこの 3 モードの工程と所要が変わる。`legacy-refactor` は要求の工程を通らないため、`gate` が手順 0 だけを指す |
-| ドメインモデルの節は `standard` で必須、ほかのモードで該当時にする | `legacy-refactor` の設計文書は 3 節でできており、振る舞いを変えないため不変条件とドメインイベントは変わらない。`light` / `operation` に求めると、1 節で足りる設計が増える |
+| ドメインモデルの節は `standard` で必須、ほかのモードで該当時にする | `legacy-refactor` の設計文書は 4 節でできており、振る舞いを変えないため不変条件とドメインイベントは変わらない。`light` / `operation` に求めると、1 節で足りる設計が増える |
 | 当たった規則を止める項目を用語集の設定に持たない | 当たった規則はすべて落とす。プロジェクトが変えられるのは、どの文書を見るか（`check.paths`）と、どの表を語とみなすか（`check.term_sections`）と、正本に認める置き場（`check.source_paths`）である |
 | 設計の工程で足す語は `source` を空にし、`pending_source` に設計文書を書く | 設計文書は確定前で、承認の後も確定仕様になるまで書き換わり、確定の時点で消える。正本にすると、消えた文書を指す |
 | 語ごとにコードの識別子を用語集に持たせ、基本形（snake_case）を 1 つだけ持ち、ほかの書き方は機械で導く | 日本語のプロジェクトでは語と識別子が別に決まり、同じ概念が場所ごとに別の名前になる（承認ゲートが `gate` / `approval` / `checkpoint`）。書き方ごとに持つと、同じ事実を 4 か所に持ち、ずれる |
@@ -144,9 +144,9 @@ stateDiagram-v2
 | 要求の手順 3b | `standard` | 受け入れ条件を書く前に、下書きへ `check --file` を打ち、当たった語を採るか言い換えるかに分けて 0 件にする |
 | 要求の手順 7 | すべて | 要求の全文を課題の本文へ書く。`standard` では `spec-copy.py write` でコピーを作る |
 | 設計の手順 0 | `standard` / `legacy-refactor` | `gate --mode <モード>` が 0 以外なら作る手順を示して止まる |
-| 設計の手順 2 | すべて | ドメインモデルの節（コンテキスト・集約・不変条件・ドメインイベント・用語）を最初に書く。コンテキストが 2 つ以上にまたがるなら、関係を 1 つ宣言する。書いた後に `check --file <設計文書>` を打ち、新しい語・意味の変わった語・廃止する語を同じ変更で用語集へ反映して `render` する |
-| 設計の手順 4 | すべて | 7 つ目の突き合わせる対「不変条件 ↔ テスト設計」: 不変条件ごとにテスト設計の行がある |
-| 設計の手順 5 | `standard` | `spec-copy.py check` が 0 であることを確かめてから設計 Pull Request を出す。1 なら `write` でコピーを作り直す（本文が正） |
+| 設計の手順 3 | すべて | ドメインモデルの節（コンテキスト・集約・不変条件・ドメインイベント・用語）を最初に書く。コンテキストが 2 つ以上にまたがるなら、関係を 1 つ宣言する。書いた後に `check --file <設計文書>` を打ち、新しい語・意味の変わった語・廃止する語を同じ変更で用語集へ反映して `render` する |
+| 設計の手順 5 | すべて | 7 つ目の突き合わせる対「不変条件 ↔ テスト設計」: 不変条件ごとにテスト設計の行がある |
+| 設計の手順 6 | `standard` | `spec-copy.py check` が 0 であることを確かめてから設計 Pull Request を出す。1 なら `write` でコピーを作り直す（本文が正） |
 | テスト駆動の手順 1 | すべて | 設計文書に不変条件の表があれば、不変条件 1 つにつきテストを 1 つ、受け入れ条件のテストより先に書く。テストの名前か docstring に不変条件の番号を書く |
 | 振り返り | すべて | その変更の起点と終点で `diff` を打ち、「用語集の変化」の節にコンテキストごとに 1 行ずつ載せる。0 件なら節を書かない |
 | `backlog-refinement` | — | 起点（直近の本番のタグ）と終点（`HEAD`）で `diff` を打ち、完了報告の表の「用語集の変化」の行に、足された語の数・廃止された語の数と語の並びを載せる |
@@ -188,6 +188,7 @@ stateDiagram-v2
 | `deprecated` | 追加した行（`--file` ならファイル全体） | 廃止した語が現れ、その語がどのコンテキストの生きた語にも無い |
 | `unregistered` | 追加した行のうち、見出しが `term_sections` の節の表の 1 列目（見出し行と区切り行を除く） | 生きた語としてどのコンテキストにも無い |
 | `deprecated_code` | コード（`.py` / `.sh` / `.js` / `.ts`）の追加した行（`--file` ならファイル全体） | 廃止した識別子か、その書き方を変えた形がコメントの外（`.py` / `.sh` の `#`、`.js` / `.ts` の `//` と `/* */` の外。文字列の中は当てる）に現れ、その形がどの生きた識別子の書き方にも無い |
+| `banned` | `check.banned.paths` に当たり `exclude` に当たらないファイルの追加した行（`--file` ならファイル全体）と、用語集の語と意味の欄 | 禁止語が部分一致で現れる。ファイルの種類を問わず、コードのコメント・文字列・コードブロック・インラインコードも見る。`--rules structure` でも走る。`check.banned` が無ければ走らない |
 
 - 用語の表の 1 列目は、前後の `**` / `__` / `` ` `` を外した語で照合する。節は、同じか浅い見出しが来るまで続く
 - 照合から外すもの: コードブロック・インラインコード・用語集の設定の `document` の文書。廃止した語を説明のために
@@ -233,17 +234,21 @@ stateDiagram-v2
 | `design` | work | `/ndf:design #<課題>` | `pr` |
 | `pr` | pr | 設計 Pull Request を出す | `review` |
 | `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `ready`） |
-| `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `glossary-check` |
+| `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `requirements-recheck` |
+| `requirements-recheck` | run | `spec-copy.py check <課題> <コピー>`（レビューの直しの後も、コピーが課題の本文と一致するか） | `survey-check`。0 以外は `on_fail` を置かずに止まる |
+| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか） | 0 → `glossary-check`。0 以外 → `fix-survey` |
+| `fix-survey` | work | 指摘の決定の作り方・比べた候補を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずに直せない指摘は直さずに「判断が要る」と報告する | `survey-recheck` |
+| `survey-recheck` | run | `survey-check` と同じ | 0 → `glossary-check`。0 以外は `on_fail` を置かずに止まる |
 | `glossary-check` | run | `glossary.py check --diff origin/<base> --root .` | 0 → `push-glossary`。1 → `fix-glossary` |
 | `fix-glossary` | work | 未登録の語は用語集へ足す（`source` を空にし `pending_source` に設計文書を書く）か言い換え、廃止した語は言い換える。用語集を変えたら `render` してコミットする（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する | `glossary-recheck` |
 | `glossary-recheck` | run | `glossary-check` と同じ | 0 / 1 とも `push-glossary`（fast は 1 → `push-glossary-gate`） |
 | `push-glossary` | run | 設計のブランチを push し、`pr-body-decisions.sh sync` で設計 Pull Request の本文を揃える（直しが無ければ何も送らない） | `ready`（fast は `mvv`） |
 | `push-glossary-gate` | run | fast だけのステップ。`push-glossary` と同じ | `ready` |
 | `ready` | run | `sh -c 'git push -q && gh pr ready <PR>'`（`pr` は設計 Pull Request を Draft で作る。push が落ちたら Draft を外さずに止まる） | `gate`（normal で `--state` があるときは `mvv`） |
-| `gate` | judge | ゲート 1。`review` と `glossary-recheck` を入力に持ち、当たりが残っていればゲート 1 の承認資料に載せる | — |
+| `gate` | judge | 設計承認ゲート。`review` と `glossary-recheck` を入力に持ち、当たりが残っていれば設計承認ゲートの承認資料に載せる | — |
 
 **語の直しは 1 回だけ試す。** 残った当たりは語を採るかという利用者の判断であることが多く、往復させても
-減らない。`pace: fast` で当たりが残ると、`mvv` の判定へ渡さずにゲート 1 の judge へ回して利用者の承認を
+減らない。`pace: fast` で当たりが残ると、`mvv` の判定へ渡さずに設計承認ゲートの judge へ回して利用者の承認を
 求める（`mvv-gate.py` は用語チェックの結果を読まない）。
 
 ### モデルレビューと詳細レビュー（`cross-review`）
@@ -261,7 +266,7 @@ stateDiagram-v2
 | モデルレビュー | ドメインモデルの節と用語集の差分だけ | コンテキストをまたぐのに関係の宣言が無くないか。集約の持ち主が 1 つに決まっているか。不変条件どうしが矛盾しないか・1 行 1 条件か。ドメインイベントに受け手があり、要求の番号を引き継いでいるか。用語の表が同じ変更の用語集に反映されているか。節の外への指摘は書かない |
 | 詳細レビュー | 残りの節 | 設計の観点に、用語集どおりか（用語集に無い語・廃止した語で書いていないか）・不変条件を破っていないか・コンテキストの境界を越えていないか（宣言した関係の外で、ほかのコンテキストの集約を書き換えていないか）を足す。ドメインモデルの節は確定したものとして扱う |
 
-「確定」は、1 ラウンド目のモデルレビューが終わった時点を指す。ゲート 1 は詳細レビューの後の 1 回だけである。
+「確定」は、1 ラウンド目のモデルレビューが終わった時点を指す。設計承認ゲートは詳細レビューの後の 1 回だけである。
 
 ### 入出力の契約（`spec-copy.py`）
 
@@ -288,6 +293,7 @@ stateDiagram-v2
 | `check.paths` | 文字列の配列 | 許す | 追加した行を見る文書の glob。空は「どの文書も語を見ない」（用語集の形と文書の一致は見る） |
 | `check.term_sections` | 文字列の配列 | 許す | 未登録の語とみなす表を持つ節の見出し。無いときは `["用語"]` |
 | `check.source_paths` | 文字列の配列 | 許す | 語の正本（`terms[].source`）に認めるパスの glob。確定した文書（確定仕様・リリースした手順）だけを書く。空か無いときは正本の置き場を見ない |
+| `check.banned` | オブジェクト | 許す | 禁止語の宣言。`words`（禁止語の配列）・`paths`（検査する範囲の glob）・`exclude`（外す範囲の glob。無くてよい）。無ければ規則 `banned` を走らせない |
 
 `init` が書く用語集の設定は、`check.paths` に `issues/*-requirements.md`・`issues/*-design.md`・
 `issues/*-design-decisions.md`、`check.term_sections` に `["用語"]` を持ち、`check.source_paths` を持たない。

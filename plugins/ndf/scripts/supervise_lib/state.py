@@ -20,16 +20,17 @@ import procs
 import step_read
 import usage_aggregate
 import usage_ledger
+import limits
 from sprint_mvv import MVV_PACES
+from supervise_lib import rerun
 from supervise_lib.claude import TICK, watch_children
 
 STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
 USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output"))
-REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
-# worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
-PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
-PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
-PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
+REPORT_INTERVAL = limits.seconds("supervise.report-interval")
+# worker の途中の報告の state と、conductor へ知らせる理由（文の語は読まない。#2337 の I12）。state が無い行は working
+PROGRESS_ATTENTION = {"gate": "関門", "stopped": "止まった", "failing": "同じ失敗の繰り返し"}
+REPEAT_LIMIT = 3  # 同じ文がこの回数続いたら止まりとして知らせる
 DICT_LISTS = ("gates", "process", "slow_events", "attention_log")  # ステップをまたいで積むオブジェクトの列（snapshot / replay）
 STAGES_AFTER_OK = ("リリース後テスト",)  # 印を ok の後に付ける工程（工程表の行名）。記録より先に付けない（#2288 の決定 1）
 
@@ -88,10 +89,10 @@ class RunState:
         self.pace_recorded = False
         self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
         self.process: list[dict] = []  # 進行の記録で書けなかったもの（結果 JSON の process の形）。止めずに報告へ載せる（#2227）
-        self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
+        self.gates: list[dict] = []  # run のステップが返した承認ゲート（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
-        self.fail_counts: dict[str, int] = {}
+        self.fail_counts, self.cause_counts = {}, {}  # ステップ → 失敗の回数 / ステップ → 原因の鍵 → 回数（rerun.py。#2343）
         self.failed_step: str | None = None  # 最後に落ちて on_fail へ回ったステップ（fix の後に戻る先。#1315）
         self.applied = 0  # 記録した（流したか組み直した）最後のステップの番号
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
@@ -104,7 +105,7 @@ class RunState:
         self.worker_last = ""
         self.worker_counts: dict[str, int] = {}
         self.attention_keys: set[str] = set()
-        self.attention_log: list[dict] = []  # 書いた attention の行（関門で打ち直したときに知らせ直す）
+        self.attention_log: list[dict] = []  # 書いた attention の行（承認ゲートで打ち直したときに知らせ直す）
         self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0, "llm_cost": 0.0}
         self.slow_events: list[dict] = []
         self.worker_recent: list[str] = []
@@ -167,17 +168,13 @@ class RunState:
         self.attention_log.append(rec)
         self.progress_write({"kind": "attention", **rec})
 
-    def classify_worker(self, text: str) -> None:
-        """worker の 1 行を語と繰り返しで分け、conductor の判断が要るものだけを attention にする。"""
+    def classify_worker(self, text: str, state: str = "working") -> None:
+        """worker の 1 行を state と同じ文の繰り返しだけで分け、conductor の判断が要るものだけを attention にする。"""
         norm = re.sub(r"(?<![#\d])\d+", "N", text.strip())  # 件数や秒は畳み、課題番号（#906）は残す
         n = self.worker_counts[norm] = self.worker_counts.get(norm, 0) + 1
-        if PROGRESS_GATE.search(text):
-            self.attention("関門", text)
-        elif PROGRESS_STOP.search(text):
-            self.attention("止まった", text)
-        elif PROGRESS_FAIL.search(text) and n >= 2:
-            self.attention("同じ失敗の繰り返し", text)
-        elif n >= 3:
+        if state in PROGRESS_ATTENTION:
+            self.attention(PROGRESS_ATTENTION[state], text)
+        elif n >= REPEAT_LIMIT:
             self.attention("止まった（同じ報告の繰り返し）", text)
 
     def read_worker_lines(self) -> None:
@@ -211,7 +208,7 @@ class RunState:
             self.worker_last = d["text"].strip()[:300]
             self.worker_last_at = time.time()
             self.worker_recent = (self.worker_recent + [self.worker_last])[-5:]
-            self.classify_worker(self.worker_last)
+            self.classify_worker(self.worker_last, str(d.get("state") or "working"))
 
     def run_last_output(self) -> str | None:
         """run のステップが stderr へ書いた最後の空でない行（run のステップの待ちの間だけ）。"""
@@ -344,6 +341,7 @@ class RunState:
             and (self.cur.get("slow") or {}).get("act") != "retry"
         ):
             fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
+            rerun.count_failure(self.cause_counts, sid, self.cur)
             if fails >= 2 and next_type == "judge":
                 self.attention(
                     "judge のステップで stop が出そう",
@@ -364,6 +362,7 @@ class RunState:
             "llm": dict(self.llm),
             **{k: [dict(x) for x in getattr(self, k)] for k in DICT_LISTS},
             "fail_counts": dict(self.fail_counts),
+            "cause_counts": {k: dict(v) for k, v in self.cause_counts.items()},
             "failed_step": self.failed_step,
             "last_stage": self.last_stage,
             "pace_recorded": self.pace_recorded,
@@ -389,6 +388,7 @@ class RunState:
         for k in DICT_LISTS:
             setattr(self, k, [dict(x) for x in acc.get(k, getattr(self, k))])
         self.fail_counts = dict(acc.get("fail_counts", self.fail_counts))
+        self.cause_counts = {k: dict(v) for k, v in acc.get("cause_counts", self.cause_counts).items()}
         self.failed_step = acc.get("failed_step", self.failed_step)
         self.last_stage = acc.get("last_stage", self.last_stage)
         self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
@@ -399,7 +399,7 @@ class RunState:
         return True
 
     def retell_gates(self, recorded: list[dict]) -> None:
-        """関門の記録を返す打ち直しで、記録した関門の attention を進捗ログへ書き直す（conductor へもう一度知らせる）。"""
+        """承認ゲートの記録を返す打ち直しで、記録した承認ゲートの attention を進捗ログへ書き直す（conductor へもう一度知らせる）。"""
         for rec in recorded:
             self.progress_write({"kind": "attention", **rec})
 
@@ -477,7 +477,7 @@ class RunState:
 - フェーズ: {plan.get("フェーズ")}
 - 課題: {" ".join("#" + str(i) for i in plan.get("課題", []))}
 - 結果: {result}
-- 関門: {gate_line}
+- 承認ゲート: {gate_line}
 - 次のフェーズ: {plan.get("次のフェーズ", "無し") if result == "完了" else "無し"}
 - Pull Request: {plan.get("Pull Request", "無し")}
 - 最後に記録した工程: {self.last_stage}

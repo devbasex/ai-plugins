@@ -7,7 +7,10 @@
     "positionals": []
   },
   "env": [
-    "CODEX_HOME"
+    "CODEX_HOME",
+    "HOME",
+    "NDF_STATE_HOME",
+    "XDG_STATE_HOME"
   ],
   "settings": [],
   "stdin": "hook-json",
@@ -20,5 +23,9 @@
   "callers": [
     "plugins/ndf/hooks/claude.json",
     "plugins/ndf/scripts/lib/usage_capture.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json・codex.json が起動する"
+  }
 }

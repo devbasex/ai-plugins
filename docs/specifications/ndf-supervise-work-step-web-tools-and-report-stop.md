@@ -4,14 +4,14 @@
 
 **`supervise.py` が claude -p で起動する work のステップ（`full` と最小構成）は、`WebFetch` と `WebSearch` を許可して起動する。**
 外部の文書（規約・API の仕様・ライブラリの文書・一次情報の記事）を、プランごとの手当て無しに原文で読める。
-取得できなかった worker は、取得できなかった URL（または検索の語）と理由を作業の報告に書いて `結果: 判断が要る` で終える。
+取得できなかった worker は、取得できなかった URL（または検索の語）と理由を作業の報告に書き、作業の結果ファイルを `gate` で書いて `結果: 判断が要る` で終える。
 
-**作業の報告が `結果: 判断が要る` か `結果: できなかった` のステップは、起こし直さずにその 1 回で失敗になる。** `on_fail` が無ければ
-計画は「止まった」になり、worker の作業の報告は状態の `text` にそのまま残って conductor へ戻る。judge は通さない。
+**worker の成否は作業の結果ファイル（`<プランの状態ディレクトリ>/<ステップの id>-result.json`）の `status` だけで決め、作業の報告の文は読まない。** 結果ファイルが `gate`（判断が要る）か `stopped`（できなかった）のステップは、起こし直さずにその 1 回で失敗になる。`on_fail` が無ければ
+計画は「止まった」になり、worker の作業の報告は状態の `text` にそのまま残って conductor へ戻る。judge は通さない。結果ファイルの形と書き方は `development-workflow` の [references/agent-layers.md](../../plugins/ndf/skills/development-workflow/references/agent-layers.md) の「作業の結果ファイル」が正である。
 
 例: 設計のプラン（`full` の `design` → `pr`、`on_fail` 無し）で、`/ndf:design` が投稿先の規約の URL を読もうとして取得できなかった。
 worker は「見つけたもの」に URL と理由を書いて `結果: 判断が要る` で終える。`supervise.py` は `--resume` を 1 度も打たずに
-`design` を exit 1 にし、`pr` のステップを流さずに計画を止める。設計 PR（承認ゲート 1）は作られない。
+`design` を exit 1 にし、`pr` のステップを流さずに計画を止める。設計 PR（設計承認ゲート）は作られない。
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・既知の限界・テスト観点）を残す。
 
@@ -46,7 +46,7 @@ work のステップの許可の一覧に `WebFetch`・`WebSearch` が無く、�
 | # | 決定 | 理由 | 採らなかった案 |
 | ---: | --- | --- | --- |
 | 1 | `WEB_TOOLS`（`"WebFetch,WebSearch"`）を 1 か所に置き、`WORK_TOOLS` と `FULL_TOOLS` の両方をそこから組む | 2 つの一覧へ別々に書くと片方だけ直す変更が通る。worker は既に Bash（curl）を許可されており、足しても外へ読みに行ける範囲は広がらない | プランの `prompt` の既定文へ curl の指示を足す（プランごとに手当てが残り、Skill の本文が WebFetch を前提に書いた箇所で拒否が続く）。ステップに `web: true` を書いたときだけ載せる（要るかはステップの定義の時点で分からず、書き忘れると同じ拒否が起きる） |
-| 2 | 起こし直しのループを、作業の報告が `判断が要る` / `できなかった` に当たった時点で抜ける | 起こし直しは報告が無いまま終わったときのためのもので、報告を書いて意図して止まった worker に「続けて」を送っても判断は変わらない。行き先は今の失敗と同じで、judge は通さない（判断を求めた worker の問いを別の AI が代わりに答えない） | 抜けた理由を状態へ新しい鍵で残す（理由は状態の `text` の作業の報告に残り、新しい鍵は結果 JSON とフェーズレポートの読み手を増やす）。judge に止めさせる |
+| 2 | 起こし直しのループを、worker が作業の結果ファイルを書いた時点で抜ける（`gate` / `stopped` でも） | 起こし直しは結果ファイルが無いまま終わったときのためのもので、結果ファイルを書いて意図して止まった worker に「続けて」を送っても判断は変わらない。行き先は今の失敗と同じで、judge は通さない（判断を求めた worker の問いを別の AI が代わりに答えない） | 抜けた理由を状態へ新しい鍵で残す（理由は状態の `text` の作業の報告に残り、新しい鍵は結果 JSON とフェーズレポートの読み手を増やす）。judge に止めさせる |
 | 3 | 外部の文書の取り決め（`EXTERNAL_DOC_RULE`）を起動指示 `WORK_SYSTEM`・`FULL_SYSTEM` の両方へ差し込む | 拒否が起きたのは supervise の起動の形で、起動指示へ置けば設計・要求・実装・drive の pause のどのステップにも同じ文が効く | `design` / `requirements-design` の Skill の本文へ置く（Skill を通らない worker に効かず、Skill ごとに同じ文を写すことになる） |
 | 4 | 取得できなかったときの結果は、最小構成でも `full` でも `判断が要る` にそろえる | 次の手（許可を足して流し直す・文書を渡す・読まずに進めてよいと決める）は conductor と利用者が決める。`できなかった` は作業の失敗に読め、そのまま打ち直す判断を招く | ステップの種類で分ける（設計は `判断が要る`、実装は `できなかった`。同じ失敗が種類で別の語になる） |
 
@@ -66,9 +66,9 @@ work のステップの許可の一覧に `WebFetch`・`WebSearch` が無く、�
 | I1 | claude -p で起動する work のステップの許可の一覧は `WebFetch` と `WebSearch` を含む。最小構成では `--tools` と `--allowed-tools` の両方に含む（`serena` を付けても） | テストが落とす |
 | I2 | Tool を持たない呼び出し（judge・遅れの判定・PR の本文）の引数は `--tools ""` のままで、`--allowed-tools` を持たない | テストが落とす |
 | I3 | 前の許可の一覧へ足した Tool は `WebFetch`・`WebSearch` の 2 つだけで、`--permission-mode acceptEdits` は変わらない | テストが落とす（前の一覧との差分で縛る） |
-| I4 | 作業の報告が `判断が要る` か `できなかった` の応答を受けたら、それ以後 `--resume` で起動しない（最初の応答でも、起こし直しの途中の応答でも） | テストが落とす |
-| I5 | 作業の報告が無いまま終わった `full` の応答は、報告が出るまで最大 3 回起こし直す（会話の `session_id` が無ければ起こし直さない） | テストが落とす |
-| I6 | 最後の応答が次のどちらかに当たるステップは exit 1 になる: `full` で作業の報告が `完了` でない（報告が無い場合を含む）、または `full` か最小構成かによらず作業の報告が `判断が要る` / `できなかった`。最小構成で作業の報告が無い応答は CLI の成否をそのまま保つ。どの場合も状態の `text` は最後の応答の本文をそのまま持つ | テストが落とす |
+| I4 | 作業の結果ファイルが書かれたら、`status` が何であってもそれ以後 `--resume` で起動しない（最初の応答でも、起こし直しの途中の応答でも） | テストが落とす |
+| I5 | 作業の結果ファイルが無いまま終わった `full` の応答は、結果ファイルが書かれるまで最大 3 回起こし直す（会話の `session_id` が無ければ起こし直さない） | テストが落とす |
+| I6 | ステップが exit 0 になるのは、CLI が正常に終わり、かつ作業の結果ファイルが `ok` のときだけである（`full` と最小構成で同じ）。結果ファイルが無い・読めない・形が違う・`gate`・`stopped` なら exit 1 で、作業の報告の文に `結果: 完了` があっても成功にしない。状態の `text` は最後の応答の本文を持ち、`ok` でなければ末尾に `作業の結果: <状態>: <要約>` を足す | テストが落とす |
 
 ### 構成要素と責務
 
@@ -78,8 +78,8 @@ work のステップの許可の一覧に `WebFetch`・`WebSearch` が無く、�
 | `WORK_TOOLS` / `FULL_TOOLS`（同） | 最小構成・`full` の許可の一覧。どちらも末尾に `WEB_TOOLS` を足して組む |
 | `claude_cmd`（同） | 起動の引数を組む。最小構成は渡された `tools` を `--tools` と `--allowed-tools` へ、`full` は `FULL_TOOLS` を `--allowed-tools` へ入れる。`tools` が無ければ `--tools ""` |
 | `EXTERNAL_DOC_RULE`（`supervise_lib/prompts.py`） | 外部の文書の取り決め。`WORK_SYSTEM`・`FULL_SYSTEM` の「最後に次の形で終える」の前へ同じ文を差し込む |
-| `REPORT_DONE` / `REPORT_NOT_DONE`（同） | 作業の報告の `結果` が `完了` か、`判断が要る` / `できなかった` かを読む |
-| `WorkStep.execute`（`supervise_lib/worker_steps.py`） | ステップを 1 回起動し、`full` で報告が無ければ `RESUME_PROMPT` で起こし直す。`REPORT_NOT_DONE` に当たればループを抜け、成否を決めて状態へ `exit`・`text` を書く |
+| `RESULT_PROMPT`（同） | 起動指示の末尾に作業の結果ファイルの置き場と書き方（`step_result.py emit ... --out <置き場>`）を渡す |
+| `WorkStep.execute`（`supervise_lib/worker_steps.py`） | 起動の前に前の試行の作業の結果ファイルを消してからステップを 1 回起動し、`full` で結果ファイルが無ければ `RESUME_PROMPT` で起こし直す。結果ファイルが書かれたらループを抜け、`step_read.read_result_file` で読んで成否を決め、状態へ `exit`・`text`・`work_result` を書く |
 | `WorkStep.call_worker`（同） | 最小構成の worker を `WORK_TOOLS` で起動する。drive の pause（`DriveStep._delegate_pause`）もここを通る |
 | `Engine._next_after_step`（`supervise_lib/engine.py`） | 失敗したステップに `on_fail` が無ければ計画を「止まった」にする（この変更では変えていない） |
 
@@ -94,17 +94,17 @@ work のステップの許可の一覧に `WebFetch`・`WebSearch` が無く、�
 ```mermaid
 stateDiagram-v2
   [*] --> 応答を受けた
-  応答を受けた --> 完了: 報告が「完了」
-  応答を受けた --> 失敗: 報告が「判断が要る / できなかった」
-  応答を受けた --> 失敗: 報告が無く session も無い
-  応答を受けた --> 起こし直し: 報告が無く session があり、回数 < 3
-  応答を受けた --> 失敗: 報告が無く、回数 = 3
+  応答を受けた --> 完了: 結果ファイルが ok
+  応答を受けた --> 失敗: 結果ファイルが gate / stopped
+  応答を受けた --> 失敗: 結果ファイルが無く session も無い
+  応答を受けた --> 起こし直し: 結果ファイルが無く session があり、回数 < 3
+  応答を受けた --> 失敗: 結果ファイルが無く、回数 = 3
   起こし直し --> 応答を受けた: --resume の応答
   完了 --> [*]
   失敗 --> [*]
 ```
 
-最小構成の work は起こし直しを持たない。`REPORT_NOT_DONE` に当たる応答は成否の判定で失敗になる。失敗したステップの行き先は
+最小構成の work は起こし直しを持たない。作業の結果ファイルが `ok` でない応答は成否の判定で失敗になる。失敗したステップの行き先は
 `on_fail` があればそのステップ、無ければ計画の結果「止まった」である。
 
 ## データ・設定
@@ -116,9 +116,10 @@ stateDiagram-v2
 
 | 場合 | 振る舞い |
 | --- | --- |
-| 外部の文書を取得できなかった（拒否・HTTP の誤り・ネットワーク） | worker が URL と理由を「見つけたもの」に書いて `結果: 判断が要る` で終える。ステップは exit 1 |
-| 作業の報告が `判断が要る` / `できなかった` | 起こし直さずに exit 1。状態の `text` に作業の報告が残る |
-| `full` で作業の報告が無いまま 3 回起こし直しても `完了` が無い | exit 1（従来どおり） |
+| 外部の文書を取得できなかった（拒否・HTTP の誤り・ネットワーク） | worker が URL と理由を「見つけたもの」に書き、作業の結果ファイルを `gate` で書いて `結果: 判断が要る` で終える。ステップは exit 1 |
+| 作業の結果ファイルが `gate` / `stopped` | 起こし直さずに exit 1。状態の `text` に作業の報告が残る |
+| `full` で作業の結果ファイルが無いまま 3 回起こし直しても書かれない | exit 1 |
+| 作業の結果ファイルが無い・読めない・形が違う（最小構成を含む） | exit 1。CLI が正常に終わっていても成功にしない |
 | 失敗したステップに `on_fail` が無い | 計画の結果が「止まった」になり、後のステップ（設計 PR など）を流さない |
 
 ## セキュリティ
@@ -146,10 +147,10 @@ stateDiagram-v2
 - `full` の work の起動の `--allowed-tools` が前の一覧に `WebFetch`・`WebSearch` を足したものと一致し、`--permission-mode` が `acceptEdits` のままであること（I1・I3、`test_full_work_allows_web_tools`）
 - 最小構成の work の `--tools` と `--allowed-tools` の両方に 2 語が入ること。`serena` の有無で同じであること（I1・I3、`test_minimal_work_lists_web_tools_in_tools_and_allowed`）
 - Tool を渡さない呼び出しは `--tools ""` で `--allowed-tools` を持たず、`WebFetch` を含まないこと（I2、`test_toolless_calls_get_no_tools`）
-- `full` の最初の報告が `判断が要る` / `できなかった` のとき、`--resume` が 0 回で exit 1、設計のプランの `pr` のステップが流れず計画が「止まった」になり、状態の `text` に作業の報告がそのまま入ること（I4・I6、`test_full_report_not_done_stops_without_resume`）
-- 報告無しの後の起こし直しの応答が `判断が要る` なら、`--resume` が 1 回で止まること（I4、`test_full_resume_stops_when_resumed_reply_needs_a_decision`）
-- 報告が 4 回とも無ければ `--resume` が 3 回で exit 1、2 回目で `完了` なら `--resume` 1 回で exit 0 であること（I5、`test_full_without_report_resumes_up_to_three_times`）
-- 最小構成で報告が `判断が要る` / `できなかった` ならステップが失敗し、報告の無い応答は CLI の成否を保つこと（I6、`test_work_report_not_done_fails_the_step`・`test_work_without_report_keeps_cli_result`）
+- `full` の最初の応答で作業の結果ファイルが `gate` / `stopped`（報告が `判断が要る` / `できなかった`）のとき、`--resume` が 0 回で exit 1、設計のプランの `pr` のステップが流れず計画が「止まった」になり、状態の `text` に作業の報告がそのまま入ること（I4・I6、`test_full_report_not_done_stops_without_resume`）
+- 結果ファイル無しの後の起こし直しの応答で結果ファイルが `gate` なら、`--resume` が 1 回で止まること（I4、`test_full_resume_stops_when_resumed_reply_needs_a_decision`）
+- 結果ファイルが 4 回とも無ければ `--resume` が 3 回で exit 1、2 回目で `ok` なら `--resume` 1 回で exit 0 であること（I5、`test_full_without_report_resumes_up_to_three_times`）
+- 最小構成で結果ファイルが `gate` / `stopped` ならステップが失敗し、結果ファイルが無ければ CLI が正常に終わっても失敗し、報告の文に `結果: 完了` が無くても結果ファイルが `ok` なら成功すること（I6、`test_work_report_not_done_fails_the_step`・`test_work_without_a_result_file_fails_even_if_the_cli_ended_well`・`test_work_succeeds_on_an_ok_result_file_without_the_report_words`）
 - `EXTERNAL_DOC_RULE` の文面は照合しない（縛るのは文言で振る舞いではない）
 
 ## 関連リンク

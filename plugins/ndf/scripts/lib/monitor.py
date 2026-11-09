@@ -34,7 +34,8 @@ cross-refactoring は `{agent}-propose-rf{id}` のような別の命名を渡す
      生成されていなければ失敗扱い。err.log に CLI 自身の上限の文言（agy の
      `print timeout after <時間> with turn in progress`）があれば理由 `cli_timeout`（#729）
   5. **hard timeout**: 既定は `--phase` の工程で上限の表（`limits.py`）から引く
-     （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可
+     （省略時は `review`）。`--timeout` → `MONITOR_TIMEOUT_<AGENT>` → `MONITOR_TIMEOUT` の順で上書き可。
+     `--timeout 0` は経過時間の上限が無い（無進捗と結果の判定だけで止まる）
   6. **stall timeout**: err.log + stdout.log の合計サイズが一定時間変化しなければ
      STALLED として中断。既定は agent 別で上限の表から引く。`--stall-timeout` で CLI 明示、
      `MONITOR_STALL_<AGENT>` env で per-agent 上書き、`MONITOR_STALL` env で共通上書き可。
@@ -134,7 +135,6 @@ from monitor_scan import (  # noqa: E402,F401
     _scan_early_warn,
     _scan_claude_stdout,
     _scan_claude_stdout_fatal,
-    _scan_claude_stdout_usage_limit,
     _scan_codex_sentinel,
     EarlyFatal,
     _scan_reasoned_fatal,
@@ -158,7 +158,6 @@ from monitor_types import (  # noqa: E402,F401
     DEFAULT_NO_EARLY_ERROR,
     _safe_int_env,
     _agent_runtime,
-    _agent_stall_default,
     TMP_DIR_ENV_VARS,
     _tmp_dir,
     DEFAULT_STEM_TEMPLATE,
@@ -224,15 +223,15 @@ def main() -> None:
     # env (MONITOR_TIMEOUT / MONITOR_STALL / MONITOR_POLL) は呼び出し時に safe parse で読む。
     # 非数値設定でも上限の表の値 / `DEFAULT_POLL` に戻す。
     poll_default = _safe_int_env("MONITOR_POLL", DEFAULT_POLL)
-    phases = " / ".join(f"{k}={v}" for k, v in limits.PHASE_TIMEOUT.items())
+    phases = " / ".join(f"{k}={v}" for k, v in limits.phases().items())
     p.add_argument("--phase", default=None, help=f"監視の上限を上限の表から引く工程。省略時は {limits.DEFAULT_PHASE} の値 ({phases})")
     p.add_argument(
         "--timeout",
         type=int,
         default=None,
-        help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / MONITOR_TIMEOUT、無ければ --phase の工程の値",
+        help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / MONITOR_TIMEOUT、無ければ --phase の工程の値。0 は上限なし",
     )
-    stalls = ", ".join(f"{k}={v}" for k, v in limits.AGENT_STALL.items())
+    stalls = ", ".join(f"{k}={v}" for k, v in limits.stalls().items())
     p.add_argument(
         "--stall-timeout",
         type=int,
@@ -259,8 +258,8 @@ def main() -> None:
     args = p.parse_args()
     # **表に無い工程は USAGE（終了コード 1）で拒む。** `choices` にすると argparse の
     # 終了コード 2（TIMEOUT と同じ値）になる。
-    if args.phase is not None and args.phase not in limits.PHASE_TIMEOUT:
-        print(f"monitor.py: 上限の表に無い工程です: {args.phase!r} （{' / '.join(limits.PHASE_TIMEOUT)}）", file=sys.stderr, flush=True)
+    if args.phase is not None and args.phase not in limits.phases():
+        print(f"monitor.py: 上限の表に無い工程です: {args.phase!r} （{' / '.join(limits.phases())}）", file=sys.stderr, flush=True)
         sys.exit(1)
     phase = args.phase or limits.DEFAULT_PHASE
 
@@ -304,7 +303,7 @@ def _run_all(agents: list[str], args: argparse.Namespace, phase: str) -> dict[st
         timeout = limits.monitor_timeout(phase, runtime, args.timeout)
         stall = limits.stall_timeout(runtime, args.stall_timeout)
         print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})", file=sys.stderr, flush=True)
-        if stall >= timeout:
+        if timeout and stall >= timeout:
             # 上書きの結果、無進捗の許容が効かない組になった。止めはしない（AC33）。
             print(
                 f"[{agent}] ⚠ 無進捗の許容 {stall}s が監視の上限 {timeout}s 以上です（無進捗では止まらず、監視の上限で止まります）",

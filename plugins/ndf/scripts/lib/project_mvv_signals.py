@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 from pathlib import Path
 
+import gate_answer
 import jsonio
 import legacy_names
 import project_mvv as pm
@@ -39,9 +40,11 @@ def _after(row: dict, since: datetime.datetime | None) -> bool:
 
 
 def unknown_streak(gate_rows: list[dict], sha: str | None) -> int:
-    """同じプロジェクト MVV の sha256 のもとで、末尾から続いた「判定できない」の回数（I13）。"""
-    n = 0
-    for r in reversed(gate_rows):
+    """同じプロジェクト MVV の sha256 のもとで、末尾から続いた「判定できない」の回数（I13）。
+    スプリント状態・承認ゲート・PR の組ごとに 1 件と数える（#2507）。オーガナイザーが同じ依頼の判定を打ち直した行は、
+    隣り合っていなくても同じ組として 1 件にまとめる（閾値は判定できなかった依頼の数で届く）。"""
+    seen: set[tuple] = set()
+    for i, r in enumerate(reversed(gate_rows)):
         ref = r.get("project_mvv") or {}
         if ref.get("sha256") != sha:
             break
@@ -49,8 +52,10 @@ def unknown_streak(gate_rows: list[dict], sha: str | None) -> int:
             continue  # 機械の検査で戻したものは判定ではない
         if r.get("verdict") != "unknown":
             break
-        n += 1
-    return n
+        pr = r.get("pr")
+        # スプリント状態の無い行は組を決められないため、1 行を 1 件と数える
+        seen.add((r.get("sprint"), r.get("gate"), tuple(pr) if isinstance(pr, list) else pr) if r.get("sprint") else ("row", i))
+    return len(seen)
 
 
 def _collect_signals(key, since, sha, approved, log) -> list[dict]:
@@ -115,15 +120,15 @@ def revise_suggestion(sig: dict) -> dict | None:
     }
 
 
-GATE_KEYS = {"関門 1": "design", "関門 2": "release"}  # mvv-gate.py の --gate
+GATE_KEYS = {gate_answer.DESIGN_GATE: "design", gate_answer.RELEASE_GATE: "release"}  # mvv-gate.py の --gate
 
 
 def last_mvv_verdict(state: dict, sprint: str, gate: str, gate_log, pr: int | None = None) -> str | None:
     """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じスプリントの最後の行の新しい方）。
     それより新しい取り消し（`withdrawals`）があれば None。`pr` を渡すと、mvv-gate.jsonl の行は `pr` にその番号を含むものだけを
     見る（1 つのスプリントの複数の設計 PR の判定を取り違えない。#1400 の I8）。"""
-    found = []
-    g = next((g for g in state.get("gates", []) if g.get("name") == gate and g.get("by") == "mvv"), None)
+    found, gate = [], gate_answer.canonical(gate)
+    g = next((g for g in state.get("gates", []) if gate_answer.canonical(g.get("name")) == gate and g.get("by") == "mvv"), None)
     if g:
         found.append((g.get("at") or "", g.get("verdict")))
     me = str(Path(sprint).resolve())
@@ -134,10 +139,11 @@ def last_mvv_verdict(state: dict, sprint: str, gate: str, gate_log, pr: int | No
         and str(Path(str(legacy_names.read_key(r, "sprint") or "")).resolve()) == me
         and (pr is None or pr in (r.get("pr") or []))
     ]
-    if rows:
-        found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
+    if rows:  # 行の順は時刻の順でない（旧の置き場から足し合わせた行は末尾に付く。#2766）ため、最新の時刻を採る
+        last = max(enumerate(rows), key=lambda x: (x[1].get("at") or "", x[0]))[1]
+        found.append((last.get("at") or "", last.get("verdict")))
     # 自動の通過を取り消した（sprint-state.py gate --withdraw）なら、それより前の判定は直前の判定として読まない
-    found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if w.get("name") == gate]
+    found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if gate_answer.canonical(w.get("name")) == gate]
     if not found:
         return None
     verdict = max(found, key=lambda x: (x[0], x[1] == "withdrawn"))[1]  # 同じ時刻なら取り消しを後とみなす

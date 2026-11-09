@@ -1,6 +1,6 @@
 """pace.py: 進め方の宣言（`.ndf/pace.json`）の形の検証。
 
-形が誤った宣言は PaceError で関門側へ倒す。文字列を `list(...)` で 1 文字ずつのパターンに
+形が誤った宣言は PaceError で承認ゲート側へ倒す。文字列を `list(...)` で 1 文字ずつのパターンに
 してしまうと、mvv-gate.py のレッドライン照合が全件不一致になって fast の承認省略を許す。
 """
 
@@ -109,11 +109,11 @@ def test_the_loop_section_is_read_with_defaults(tmp_path):
     d = pace.read_loop(write(tmp_path, {**DECL, "loop": {"enabled": True, "budget": {"laps": 5}, "max_issues": 1}}))
     assert d == {
         "enabled": True,
-        "budget": {"laps": 5, "usd": 60, "hours": 24},
+        "budget": {"laps": 5, "usd": None, "hours": None},
         "same_failure": 2,
         "max_issues": 1,
-        "release_pending_max": 2,
     }
+    assert pace.read_loop(write(tmp_path, {**DECL, "loop": {"budget": {"laps": None}}}))["budget"]["laps"] is None
     assert pace.read_loop(write(tmp_path, {**DECL, "loop": {"enabled": "yes"}}))["enabled"] is False
 
 

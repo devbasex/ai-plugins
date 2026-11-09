@@ -21,7 +21,7 @@ def test_explicit_host_wins(assignment):
 
 @pytest.mark.parametrize("host", HOSTS)
 def test_every_participant_can_host(assignment, host):
-    """4 者とも NDF の配布先であるため、4 者ともホストになれる。"""
+    """4 者とも NDF の導入先のランタイムであるため、4 者ともホストになれる。"""
     assert assignment.detect_host(host) == (host, "explicit")
 
 

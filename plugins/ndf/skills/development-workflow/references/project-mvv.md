@@ -9,7 +9,7 @@
 
 1. 手順 0 で `project-mvv.py check` が終了コード 2（「プロジェクト MVV が無い」）を返す。LLM も `gh` も呼ばず、何も書かない
 2. `project-mvv.py collect` がコミット 3787 件・課題 574 件で履歴モードを選び、出典つきの材料 `materials.json` を
-   リポジトリの外（`~/.local/state/ndf/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
+   リポジトリの外（`~/.claude/ndf/state/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
 3. `project-mvv.py propose --materials <materials.json>` が候補 A・B と「利用者に決めてもらう点」を `candidates.md` に書く
 4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で問い、答えから本文を固める。
    ai-plugins では利用者が承認した `issues/mvv-ai-plugins.md` の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
@@ -23,7 +23,7 @@
 
 | 層 | 置き場 | 誰が変えるか |
 | --- | --- | --- |
-| NDF の共通原則（上位の原則・優先順位・AI の行動の 2 択・判断の範囲と記録・人と AI の対話・C1〜C8） | 配布物の `scripts/data/ndf-common-principles.md` | NDF のリリースだけ。プロジェクトは上書きも除外もできない |
+| NDF の共通原則（上位の原則・優先順位・AI の行動の 2 択・判断の範囲と記録・人と AI の対話・C1〜C8） | リリース対象の `scripts/data/ndf-common-principles.md` | NDF のリリースだけ。プロジェクトは上書きも除外もできない |
 | プロジェクト MVV（Mission / Vision / Value・固有の操作 `P<番号>`） | `.ndf/mvv.md`（本文）と `.ndf/mvv.json`（版の履歴。形は `schemas/mvv.schema.json`） | `project-mvv.py approve` だけ（利用者の承認の後） |
 | スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `sprint-state.py init`（`fast` / `auto` は必須で、コピーできなければ止まる。`normal` は `--mvv` か `--milestone` からコピーできたときだけコピーし、止めない。[pace.md](pace.md)） |
 
@@ -77,7 +77,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 契機 | 出どころ |
 | --- | --- |
 | 振り返りの問い「MVV を見直すか」 | `retrospective` が `project-mvv.py signals` の集計を示して問う |
-| 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じ版のもとで「判定できない」が `settings.unknown_streak` 回続いた、または `signals` の閾値を超えた） |
+| 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じ版のもとで「判定できない」が `settings.unknown_streak` 件続いた。スプリント状態・承認ゲート・PR の組ごとに 1 件と数え、同じ依頼の判定の打ち直しは 1 件にまとめる。または `signals` の閾値を超えた） |
 | 利用者の指示 | — |
 
 | 順 | 打つもの・すること |
@@ -112,7 +112,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 地点 | MVV の節の渡り方 | 渡した事実と根拠の記録 |
 | --- | --- | --- |
 | 承認ゲートの MVV 判定（`auto` / `fast`） | `mvv-gate.py` の材料の先頭 | `mvv-gate.jsonl` の `project_mvv`・`basis`・`pace`・`sprint_mvv`。「従う」でレッドラインが無ければ状態の承認ゲートの記録（`by: mvv`） |
-| 承認ゲートの助言の MVV 判定（`normal` と `supervise.py new sprint --state`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を承認ゲート 1 では設計 PR のコメント、承認ゲート 2 では承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
+| 承認ゲートの助言の MVV 判定（`normal` と `supervise.py new sprint --state`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
 | supervise の `work` のステップ（要求・設計・実装・修正の worker） | worker のシステムプロンプトの末尾（プロジェクト MVV が承認済みのときだけ。プランの `スプリント状態` があればスプリント MVV も） | 記録しない（worker の判断は下の 3 行の記録に残る） |
 | `requirements-design` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | `design` | 下の「工程での読み方」 | 設計文書の決定ごとの「根拠:」の行。反する疑いは作業の報告の理由 |
@@ -144,9 +144,11 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 | 兆候 | 記録 | 書き手 |
 | --- | --- | --- |
-| 覆し（承認ゲートで「従う」を退けた `override_reject`・「反する疑い」か「判定できない」を通した `override_pass`） | `~/.local/state/ndf/project-mvv-signals.jsonl` | `sprint-state.py gate <状態> <承認ゲート> --what <要約> --by user [--pr N] [--outcome approved\|rejected]`（直前の MVV 判定と食い違うときだけ 1 行。`--pr` を渡せばその PR の判定と比べる。助言の MVV 判定も同じ） |
+| 覆し（承認ゲートで「従う」を退けた `override_reject`・「反する疑い」か「判定できない」を通した `override_pass`） | `~/.claude/ndf/state/project-mvv-signals.jsonl` | `sprint-state.py gate <状態> <承認ゲート> --what <要約> --by user [--pr N] [--outcome approved\|rejected]`（直前の MVV 判定と食い違うときだけ 1 行。`--pr` を渡せばその PR の判定と比べる。助言の MVV 判定も同じ） |
 | 「判定できない」 | `mvv-gate.jsonl`（`pace` で進め方を分けられる。集計は分けずに数える） | `mvv-gate.py` |
 | 流出不具合 | 検査の記録の `kind: escape` | `check-trigger.py escape` |
 
 `project-mvv.py signals` は現行の版の承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
-流出不具合 3）と比べる。照合の履歴は `~/.local/state/ndf/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。
+流出不具合 3）と比べる。照合の履歴は `~/.claude/ndf/state/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。
+LLM で判定した行は照合の入力の sha256（`input_sha256`）を持ち、`sprint-state.py init` がスプリント MVV の判定を再利用した行は
+`reused_from`（元の LLM の判定の時刻）を持ち、費用と秒を持たない（[pace.md](pace.md)）。

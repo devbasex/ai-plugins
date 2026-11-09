@@ -309,7 +309,7 @@ def test_deferred_findings_fold_by_path_and_summary(tmp_path):
 
 
 def test_unconverged_review_keeps_its_deferred_findings(tmp_path):
-    """未収束（stopped・終了コード 6）で配布へ進んだレビューも、見送った指摘の本文と位置を承認資料へ載せる。"""
+    """未収束（stopped・終了コード 6）でデプロイへ進んだレビューも、見送った指摘の本文と位置を承認資料へ載せる。"""
     items = [{"kind": "deferred", "path": "a.py", "line": 3, "summary": "残る指摘"}]
     lines = _check(tmp_path, review={**REVIEW, "status": "stopped", "items": items})
     assert "`ok` で終わっていない" in lines[0] and lines[0].endswith("見送った指摘 1 件")

@@ -1,4 +1,4 @@
-"""sprint_loop_gate.py: 開発ループの周回の締め・まとめのステージ・承認ゲートの扱い（#2089）。"""
+"""sprint_loop_gate.py: 開発ループの 1 回の締め・まとめのステージ・承認ゲートの扱い（#2089）。"""
 
 from __future__ import annotations
 
@@ -13,9 +13,15 @@ from pathlib import Path
 
 import gh_sections
 import jsonio
+import legacy_values
 import project_mvv as pm
+import revise_note
 import step_result
-
+from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
+from gate1_requests import carried_over, design_head, lane_unmatched
+from lap_cost import lap_cost
+from lap_close import closed_versions, copy_state_gates
+from sprint_loop_backlog import lap_depths, lap_research
 from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
@@ -27,8 +33,9 @@ from sprint_loop_record import (
     RETURNED,
     RELEASE_PENDING,
     PENDING,
-    GATE_1,
-    GATE_2,
+    DESIGN_GATE,
+    RELEASE_GATE,
+    canonical,
     DESIGN_PHASE,
     FINISHED,
     NOT_RUN,
@@ -66,7 +73,7 @@ def select_cmd(name: str) -> str:
     return f"python3 {shlex.quote(str(SPRINT_STATE))} loop select {name}"
 
 
-DONE_RESULTS = ("完了", NOT_RUN)  # 周回を完了で締められる done の結果（流さなかった計画は前のステージの結果に従う）
+DONE_RESULTS = ("完了", NOT_RUN)  # ループの 1 回を完了で締められる done の結果（流さなかった計画は前のステージの結果に従う）
 
 
 def queue_command(stages: list[list[str]], done: Path) -> str:
@@ -83,9 +90,9 @@ def wait_lap(rec: dict, done: Path) -> str:
 
 def sprint_pipeline(index: list[dict], close: list[str], done: Path, rec: dict) -> tuple[str, str]:
     """manifest のステージ配列から queue と pipeline の文字列を組む。最初の command の後に手で行うステージか
-    別の command（単独の queue の承認ゲート 2）があれば、それを終えるまでまとめへ進めない。"""
+    別の command（単独の queue のリリース承認ゲート）があれば、それを終えるまでまとめへ進めない。"""
     first = next(e for e in index if e.get("command"))
-    hands = [e for e in index[index.index(first) + 1 :] if e.get("command") or "manual" in e]  # 関門は queue と loop gate が扱う
+    hands = [e for e in index[index.index(first) + 1 :] if e.get("command") or "manual" in e]  # 承認ゲートは queue と loop gate が扱う
     if not hands:
         queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
         return queue, f"{queue} && {wait_lap(rec, done)}"
@@ -104,15 +111,14 @@ def refusal_order(summary: str) -> dict:
 def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "close") -> list[str]:
     """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。
     記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。
-    版も渡さない。周回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
-    まとめの配布の版は流す時点に次に空いている版で決める（#2164）。"""
+    版も渡さない。ループの 1 回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
+    まとめのデプロイの版は流す時点に次に空いている版で決める（#2164）。"""
     prev = rec["laps"][lap["n"] - 2] if lap["n"] >= 2 else None
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
     cmd = [sys.executable, str(SUPERVISE), "new", "close", "--pace", "auto", "--name", lap["sprint"], "--worktree", str(env.main_dir())]
     cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", lap.get("mode") or "standard"]
-    if carry:
-        cmd += ["--carry", *map(str, carry)]
+    cmd += ["--loop", rec["name"], "--lap", str(lap["n"]), *(["--carry", *map(str, carry)] if carry else [])]  # loop・lap は #2315 の決定 3
     if lap.get("milestone"):
         cmd += ["--milestone", lap["milestone"]]
     code, so, se = env.run(cmd, cwd=str(env.main_dir()))
@@ -125,11 +131,11 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "c
 
 def refused_stop(env: Env, rec: dict, before: dict, step: str, code: int, summary: str) -> dict:
     stop = {"condition": "refused", "values": {"step": step, "exit": code, "summary": summary[:300]}}
-    return stop_and_report(env, rec, before, stop, f"周回を組めなかった（{step}）: {summary[:200]}")
+    return stop_and_report(env, rec, before, stop, f"ループの 1 回を組めなかった（{step}）: {summary[:200]}")
 
 
 def copy_mvv_gate(rec: dict, lap: dict, state: Path, mvv: Path) -> None:
-    """承認済みのスプリント MVV を周回の状態へ承認ゲート MVV の記録として写す（決定 11）。"""
+    """承認済みのスプリント MVV をループの 1 回の状態へ承認ゲート MVV の記録として写す（決定 11）。"""
     sha = pm.sha256_text(mvv.read_text(encoding="utf-8"))
     hit = next((a for a in rec.get("sprint_mvv_approvals", []) if a["milestone"] == lap["milestone"] and a["sha256"] == sha), None)
     if not hit:
@@ -150,7 +156,7 @@ def read_done_items(path: str) -> list[dict]:
 
 def plan_info(plan: str) -> dict:
     try:
-        return json.loads(Path(plan).read_text(encoding="utf-8"))
+        return legacy_values.current_plan(json.loads(Path(plan).read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
 
@@ -178,7 +184,7 @@ def report_pr(item: dict) -> int | None:
 
 
 def last_verdict(state_path: str, gate: str, pr: int | None = None) -> dict:
-    """mvv-gate.jsonl の、この周回の状態の最後の判定の行（gate は design / release）。pr を渡せば、その PR を判定した行に
+    """MVV 判定の記録（状態の置き場の jsonl）の、このループの 1 回の状態の最後の判定の行（承認ゲートの種類は design / release）。pr を渡せば、その PR を判定した行に
     絞る（並行の設計で別の課題の判定を写さない）。無ければ空。"""
     try:
         rows = jsonio.read_jsonl(pm.gate_log_path(), missing=[], skip_broken=True)
@@ -211,18 +217,25 @@ def waiting_section(rec: dict, w: dict) -> str:
         f"- 根拠の項目: {', '.join(w.get('basis') or []) or '—'}",
         f"- 設計 Pull Request: {pr}",
         f"- 答え: {w.get('answer') or 'まだ'}",
+        *([f"- 設計 PR のマージ: {w['merge'].get('result')}（{w['merge'].get('reason') or '—'}）"] if w.get("merge") else []),
+        *([f"- 利用者へ戻した理由: {w['returned']}"] if w.get("returned") and not w.get("answer") else []),
         f"- 答え方: `{how}`",
     ]
-    if w.get("note"):  # 直して出し直す（#2436 の 6e）: 次の周回の設計がこの指摘を読む
-        lines += ["", "### 直して出し直す指摘", "", w["note"]]
+    if w.get("answer") == "revise":  # 指摘の全文は残る節に置き、ここは回を指す（#2510 の決定 6）
+        lines.append(f"- 指摘: 節「{revise_note.HISTORY.removeprefix('## ')}」の開発ループ {rec['name']} の第 {w['revise_count']} 回")
+        if w.get("missing"):
+            lines.append(f"- 届いていない項目: {'、'.join(w['missing'])}")
     return "\n".join(lines)
 
 
 def mark_issue(env: Env, rec: dict, w: dict) -> str | None:
-    """課題の本文に「人の判断待ち（開発ループ <名>）」の節を書く（本文全体を書き直す）。書けなければ理由を返す。"""
+    """課題の本文に「人の判断待ち（開発ループ <名>）」の節を書く（本文全体を書き直す）。直して出し直すの行は、回を残す節
+    「出し直しの指摘の履歴」へも 1 回分を追記する。書けなければ理由を返す。"""
     heading = f"## 人の判断待ち（開発ループ {rec['name']}）"
     try:
         body = env.issue_body(w["number"])
+        if w.get("answer") == "revise":
+            body = revise_note.with_history(body, rec["name"], w)
         env.edit_issue(w["number"], gh_sections.replace_section(body, heading, waiting_section(rec, w)))
     except OSError as e:
         return str(e)
@@ -230,7 +243,7 @@ def mark_issue(env: Env, rec: dict, w: dict) -> str | None:
 
 
 def refresh_state(lap: dict, update: Callable | None) -> None:
-    """周回を締める前に、周回の done からスプリント状態を埋める（承認ゲートで締める周回も、設計で使った費用と秒を数える）。"""
+    """ループの 1 回を締める前に、ループの 1 回の done からスプリント状態を埋める（承認ゲートで締めるループの 1 回も、設計で使った費用と秒を数える）。"""
     if update and lap.get("state_path"):
         update(lap["state_path"], [d for d in lap.get("dones", []) if Path(d).is_file()])
 
@@ -239,7 +252,7 @@ def cmd_gate(env: Env, name: str, done: str, update: Callable | None = None) -> 
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap or not lap.get("state_path"):
-            return refusal_order("スプリントを組んだ進行中の周回が無い")
+            return refusal_order("スプリントを組んだ進行中のループの 1 回が無い")
         refresh_state(lap, update)
         return handle_gate(env, rec, before, lap, read_done_items(done))
 
@@ -251,7 +264,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     if stop := mvv_change_stop(env, rec):
         return stop_and_report(env, rec, before, stop, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
     request = next((i["plan"] for i in gated if plan_info(i["plan"]).get("フェーズ") == RELEASE_REQUEST_PHASE), None)
-    if request:  # 並列の計画のレーンが配布の依頼を送った: 承認ゲート 2 として止まらず、配布待ちで締めて次の周回へ（#2436 の 6a）
+    if request:  # 並列の計画のレーンがリリースの依頼を送った: 承認ゲートで止まらず、リリース待ちで締めてループの次の 1 回へ（#2436 の 6a）
         return handle_release_pending(env, rec, before, lap, request)
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
@@ -262,7 +275,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
         notes.append(f"設計が完了していない課題を続きから外した（{' '.join(f'#{n}' for n in unfinished)}）")
     if not kept:
         close_lap(env, rec, lap, FAILED if unfinished else RETURNED)
-        return after_close(env, rec, before, f"承認ゲート 1 で全課題を人の判断待ちへ移した（{' '.join(f'#{n}' for n in moved)}）")
+        return after_close(env, rec, before, f"設計承認ゲートで全課題を人の判断待ちへ移した（{' '.join(f'#{n}' for n in moved)}）")
     try:
         queue, done = continuation(env, rec, lap, moved, kept)
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
@@ -270,10 +283,10 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     pipeline = f"{queue} && {wait_lap(rec, done)}"
     write_record(env, rec, before)
     update_handoff(
-        env, rec, f"承認ゲート 1 で {' '.join(f'#{n}' for n in moved)} を人の判断待ちへ移し、残りで続ける", resume_command(rec), pipeline
+        env, rec, f"設計承認ゲートで {' '.join(f'#{n}' for n in moved)} を人の判断待ちへ移し、残りで続ける", resume_command(rec), pipeline
     )
     return loop_ok(
-        f"承認ゲート 1 で {' '.join(f'#{n}' for n in moved)} を人の判断待ちへ移した。残り {' '.join(f'#{n}' for n in kept)} で続ける",
+        f"設計承認ゲートで {' '.join(f'#{n}' for n in moved)} を人の判断待ちへ移した。残り {' '.join(f'#{n}' for n in kept)} で続ける",
         rec,
         [{"waiting": moved}, *({"note": x} for x in notes)],
         status="continue",
@@ -286,29 +299,29 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
 
 
 def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None = None) -> dict:
-    """承認ゲート 2 を人へ戻す。本番を出さずに止まる。plan は承認ゲート 2 で止まった計画（承認の後にそこから続ける）。"""
+    """リリース承認ゲートを人へ戻す。本番を出さずに止まる。plan はリリース承認ゲートで止まった計画（承認の後にそこから続ける）。"""
     row = last_verdict(lap["state_path"], "release")
-    lap.setdefault("gates", []).append(gate_copy(GATE_2, row))
+    lap.setdefault("gates", []).append(gate_copy(RELEASE_GATE, row))
     if plan:
         lap["gate2_plan"] = plan
     prs = pr_numbers(row.get("pr"))
     values = {"pr": prs[0] if len(prs) == 1 else prs or None, "verdict": row.get("verdict", "unknown"), "reasons": row.get("reasons") or []}
     stop = {"condition": "gate2_returned", "values": values}
-    return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
+    return stop_and_report(env, rec, before, stop, "リリース承認ゲートを人へ戻した。本番を出さずに止まる（人の承認を求める）", {"gate": 2})
 
 
-RELEASE_REQUEST_PHASE = "配布の依頼"  # parallel_release.RELEASE_REQUEST_PHASE（配布の依頼のプランの「フェーズ」）
+RELEASE_REQUEST_PHASE = "リリースの依頼"  # parallel_release.RELEASE_REQUEST_PHASE（リリースの依頼のプランの「フェーズ」）
 
 
 def request_record(plan: str) -> tuple[Path, dict]:
-    """配布の依頼のプランの状態ディレクトリの `work/request.txt`（`parallel.py request` が書く）のパスと中身。"""
+    """リリースの依頼のプランの状態ディレクトリの `work/request.txt`（`parallel.py request` が書く）のパスと中身。"""
     out = Path(plan).with_name(Path(plan).stem + "-state") / "work" / "request.txt"
     return out, jsonio.read(out, missing={}, broken={}, want=dict)
 
 
 def handle_release_pending(env: Env, rec: dict, before: dict, lap: dict, plan: str) -> dict:
-    """配布の依頼を送った周回を「配布待ち」で締める。まとめ（同じ queue の残りのステージと close）は流さずに記録へ残し、
-    答えを待たずに次の周回へ進む。答えは周回の境（`pending_step`）で読む。"""
+    """リリースの依頼を送ったループの 1 回を「リリース待ち」で締める。まとめ（同じ queue の残りのステージと close）は流さずに記録へ残し、
+    答えを待たずにループの次の 1 回へ進む。答えはループの 1 回の境（`pending_step`）で読む。"""
     out, sent = request_record(plan)
     rest = [s for s in stages_after(lap, plan) if s and s != lap.get("close_plans")]
     lap["release"] = {
@@ -321,19 +334,21 @@ def handle_release_pending(env: Env, rec: dict, before: dict, lap: dict, plan: s
     }
     close_lap(env, rec, lap, RELEASE_PENDING)
     lap["held_at"] = lap["ended_at"]
-    return after_close(env, rec, before, f"周回 {lap['n']} の配布の依頼（{sent.get('id') or '識別子なし'}）を送り、配布待ちで締めた")
+    return after_close(
+        env, rec, before, f"ループの {lap['n']} 回目 のリリースの依頼（{sent.get('id') or '識別子なし'}）を送り、リリース待ちで締めた"
+    )
 
 
 def finish_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None) -> None:
-    """保留の周回（配布待ち・質問待ち）を 1 回だけ締め直す（I1 の例外）。結果・終わった時刻・費用と秒・振り返り・棚卸しを書き換える。"""
+    """保留したループの 1 回（リリース待ち・質問待ち）を 1 回だけ締め直す（I1 の例外）。結果・終わった時刻・費用と秒・振り返り・棚卸しを書き換える。"""
     if lap.get("outcome") not in PENDING:
-        raise LoopError(f"周回 {lap['n']} は保留の周回でない（締め直しは 1 回だけ）")
+        raise LoopError(f"ループの {lap['n']} 回目 は保留したループの 1 回でない（締め直しは 1 回だけ）")
     lap["outcome"] = IN_PROGRESS
     close_lap(env, rec, lap, outcome, state)
 
 
 def unfinished_design_issues(items: list[dict]) -> list[int]:
-    """done のうち、設計のプランが完了も関門もしなかった（失敗・流さなかった）課題。設計と承認を経ていないため続きに入れない。"""
+    """done のうち、設計のプランが完了も承認ゲートもしなかった（失敗・流さなかった）課題。設計と承認を経ていないため続きに入れない。"""
     out: set[int] = set()
     for i in items:
         info = plan_info(i.get("plan") or "")
@@ -345,7 +360,7 @@ def unfinished_design_issues(items: list[dict]) -> list[int]:
 def move_to_waiting(
     env: Env, rec: dict, lap: dict, gate1: list[dict], unfinished: list[int] = ()
 ) -> tuple[list[int], list[int], list[str]]:
-    """承認ゲート 1 で止まった計画の課題を人の判断待ちへ移す。移した課題・残る課題・書けなかった理由を返す。
+    """設計承認ゲートで止まった計画の課題を人の判断待ちへ移す。移した課題・残る課題・書けなかった理由を返す。
     unfinished（設計が完了していない課題）は判断待ちへ移さず、残る課題からも外す。"""
     moved, notes = [], []
     for i in gate1:
@@ -355,12 +370,18 @@ def move_to_waiting(
             reasons = row.get("reasons") or []
             w = {
                 "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
-                "basis": row.get("basis") or [], "gate": 1, "pr": pr, "lap": lap["n"], "at": env.now(),
+                "basis": row.get("basis") or [], "boundary": row.get("boundary") or [], "gate": 1, "pr": pr, "lap": lap["n"],
+                "at": env.now(), "report": i.get("report") or "", "state": lap["state_path"],
             }  # fmt: skip
-            if pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
-                w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えは周回の境で読む（#2436 の 6c）
+            if pr is not None:  # 承認した先端（#2507）: 並列の計画の外でも書き、答えの時点の先端と比べる
+                w["stamp"] = design_head(env, w)
+            auto = revise_note.apply_table_check(env, rec, w, int(n))
+            if not auto and pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
+                w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えはループの 1 回の境で読む（#2436 の 6c）
             rec["waiting"].append(w)
-            lap.setdefault("gates", []).append(gate_copy(GATE_1, row))
+            if auto:
+                revise_note.count_round(rec, w)
+            lap.setdefault("gates", []).append(gate_copy(DESIGN_GATE, row))
             moved.append(int(n))
             if err := mark_issue(env, rec, w):
                 notes.append(err)
@@ -369,41 +390,112 @@ def move_to_waiting(
     return moved, kept, notes
 
 
-def lane_gate1(env: Env, w: dict, report: str, state: str) -> dict | None:
+def lane_gate1(env: Env, w: dict, report: str, state: str, suffix: str = "", stamp: str | None = None) -> dict | None:
     """並列の計画のレーンなら、設計の承認の依頼（`kind: gate1`）をオーガナイザーへ送り、{request, plan, stamp, report, state}
-    を返す。レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。"""
+    を返す。レーンでない・送れなければ None（今どおり人の判断待ちとして残す）。印は設計 PR の先頭の SHA（問いの時点の印）。
+    同じ承認した先端で利用者へ戻すとき（#2507）は、`stamp` に承認した先端を、`suffix` に依頼の id の接尾辞を渡す
+    （同じ id の依頼は答え済みとして受け取られないため）。依頼の理由にはマージの結果の理由（`w.returned`）も載せ、
+    利用者へ戻した依頼には印 `returned` を付ける（MVV 判定でオーガナイザーが自分で承認しないため。#2507 の決定 9）。"""
     try:
         import parallel_lane
 
         got = parallel_lane.lane_of(env.main_dir())
         if not got:
             return None
-        stamp = design_head(env, w)
+        stamp = stamp or design_head(env, w)
+        reasons = [x for x in (w.get("reason"), w.get("returned")) if x]
         rid = parallel_lane.request_gate1(
-            env.main_dir(), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
-            verdict=w.get("verdict"), reasons=[w.get("reason")] if w.get("reason") else [],
+            parallel_lane.home_of(got, env.main_dir()), got[0], got[1].name, w["number"], int(w["pr"]), report, state, stamp or "0" * 12,
+            verdict=w.get("verdict"), reasons=reasons, boundary=list(w.get("boundary") or []), suffix=suffix,
+            **({"returned": True} if w.get("returned") else {}),
         )  # fmt: skip
     except Exception:  # noqa: BLE001 — 送れなければ今どおり人の判断待ち（loop answer で答える）
         return None
     return {"request": rid, "plan": got[0], "stamp": stamp, "report": report, "state": state}
 
 
-def design_head(env: Env, w: dict) -> str:
-    code, so, _ = env.run(["gh", "pr", "view", str(w["pr"]), "--json", "headRefOid", "-q", ".headRefOid"], cwd=str(env.main_dir()))
-    return so.strip() if code == 0 else ""
-
-
-def regate1(env: Env, w: dict) -> bool:
-    """承認の答えを当てる前に、問いの時点の設計 PR の先端（stamp）と今の先端を比べる。動いていれば新しい先端で問い直し、
-    読めなければ次の境で読み直す（どちらも True。古い範囲への答えで承認を書かない）。印の無い古い依頼は比べない。"""
+def regate1(env: Env, w: dict, answered: bool = True) -> bool:
+    """承認の答えを当てる前に、問いの時点の設計 PR の先端（stamp）と今の先端を比べる。取り込みのコミットだけなら行の先端を
+    書き換えて当てる（False）。それ以外は新しい先端で問い直し、読めなければ次の境で読み直す（どちらも True。古い範囲への答えで
+    承認を書かない）。印の無い古い依頼は比べない。問い直すときは前の依頼を `requests_before` へ移す（`answered` は今の依頼への
+    答えを読んだか。読んだ答えは当たらないため 1 回だけ知らせ、判定済みで移す）。"""
     stamp = w.get("stamp") or ""
     if not stamp.strip("0"):
         return False
     head = design_head(env, w)
-    if head == stamp:
+    if carried_over(env, w, head):
         return False
-    if head and (sent := lane_gate1(env, w, w.get("report") or "", w.get("state") or "")):
+    if head and (sent := lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")):
+        if answered:
+            lane_unmatched(
+                env,
+                w["request"],
+                f"設計 PR #{w['pr']} が問いの後に取り込み以外で動いた（{stamp[:12]} → {head[:12]}）。新しい先端で問い直した",
+            )
+        w.setdefault("requests_before", []).append({"id": w["request"], "stamp": stamp, "settled": answered})
+        w.pop("returned", None)  # 前に利用者へ戻した印と理由は新しい先端の問いに当てはまらない
         w.update(sent, restamped=stamp)
+    return True
+
+
+def note_merge(w: dict, out: dict, lap: int, now: str) -> dict:
+    """承認した設計のマージの結果（`design_pr_merge.merge_approved` の出力）を人の判断待ちの行の `merge` へ書く（#2507）。
+    同じ承認した先端で同じ result と class が続いたループの回数（streak）と、基盤待ちのための再実行の累計（infra_reruns）を数える。
+    infra_reruns は分類が変わっても 0 に戻さない（基盤待ちと実行中が交互に現れても再実行を上限なく増やさない）。
+    足すのは実際に打った再実行の回数（`infra_rerun`。1 回の merge-when-green の中の複数回も数える）。"""
+    prev = w.get("merge") or {}
+    stamp = w.get("stamp") or ""
+    same = prev.get("stamp") == stamp
+    streak = prev.get("streak", 0) + 1 if same and (prev.get("result"), prev.get("class")) == (out.get("result"), out.get("class")) else 1
+    reruns = (prev.get("infra_reruns", 0) if same else 0) + int(out.get("infra_rerun") or 0)
+    w["merge"] = {**out, "lap": lap, "streak": streak, "infra_reruns": reruns, "stamp": stamp}
+    if out.get("result") in MERGED_RESULTS and not w.get("merged_at"):
+        w["merged_at"] = now
+    return w["merge"]
+
+
+def _reopen_waiting(w: dict) -> None:  # 前の回答者 by と利用者へ戻した印 returned も外す（残すと次の問いを読み違える）
+    for k in ("answer", "answered_at", "by", "merge", "merged_at", "returned"):
+        w.pop(k, None)
+
+
+def reask_design(env: Env, rec: dict, w: dict, head: str) -> bool:
+    """承認した設計 PR の先端が承認の後に動いた（または承認した先端が記録に無い）: 新しい先端で問い直す（#2507）。
+    レーンは新しい先端で依頼を送り直し、送れなければ何も変えずにループの次の 1 回の境で打ち直す（古い答えを当てないため）。
+    1 本のループは行の承認した先端を書き換え、答えを外して人の判断待ちへ戻す。問い直したら True。"""
+    if not head:
+        return False
+    old = w.get("stamp") or ""
+    if w.get("request"):
+        sent = lane_gate1(env, dict(w, returned=None), w.get("report") or "", w.get("state") or "")
+        if not sent:
+            return False
+        _reopen_waiting(w)
+        w.update(sent, restamped=old)
+    else:
+        _reopen_waiting(w)
+        w.update(stamp=head, restamped=old)
+    mark_issue(env, rec, w)
+    return True
+
+
+def giveback_design(env: Env, rec: dict, w: dict, reason: str, lap: int) -> bool:
+    """時間で解けないマージの結果を、承認した先端のまま利用者へ戻す（#2507 の決定 9）。依頼にマージの結果の理由を載せる。
+    利用者は「直して出し直す」「やらない」か、手を打ってから「承認」を選ぶ。戻した行のマージの結果（streak・infra_reruns）は消す。
+    レーンは同じ先端でも別の依頼にするため id に `-m<ループの 1 回>-<戻した回数 givebacks。消さない>` を足す。送れなければ何も変えずにループの次の 1 回の境で打ち直す。"""
+    w["returned"] = reason
+    if w.get("request"):
+        n = w.get("givebacks", 0) + 1
+        sent = lane_gate1(env, w, w.get("report") or "", w.get("state") or "", suffix=f"-m{lap}-{n}", stamp=w.get("stamp") or "")
+        if not sent:
+            w.pop("returned", None)
+            return False
+        _reopen_waiting(w)
+        w.update(sent, givebacks=n)
+    else:
+        _reopen_waiting(w)
+    w["returned"] = reason  # _reopen_waiting が外すため書き直す
+    mark_issue(env, rec, w)
     return True
 
 
@@ -423,14 +515,14 @@ def drop_issues(plan: str, moved: list[int]) -> None:
     jsonio.write_atomic(Path(plan), info, indent=2)
 
 
-CONTINUATION_STEP = "続きの queue"  # 承認ゲート 1 の後の続きを組めなかったときの refused の step（loop start が組み直す）
+CONTINUATION_STEP = "続きの queue"  # 設計承認ゲートの後の続きを組めなかったときの refused の step（loop start が組み直す）
 
 
 def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[int]) -> tuple[str, Path]:
-    """承認ゲート 1 の後の続きの queue: 関門 1 の後の then_of のステージから、外した課題だけの計画を除き、
+    """設計承認ゲートの後の続きの queue: 設計承認ゲートの後の then_of のステージから、外した課題だけの計画を除き、
     外した課題を除いた new close --pace auto を最後の --then につなぐ。"""
     index = json.loads(Path(lap["manifest"]).read_text(encoding="utf-8"))["ステージ"]
-    at = next(i for i, e in enumerate(index) if e.get("name") == GATE_1)
+    at = next(i for i, e in enumerate(index) if canonical(e.get("name")) == DESIGN_GATE)
     moved = sorted(set(moved) | (set(selected_issues(lap)) - set(kept)))  # 設計が完了していない課題の計画も外す
     stages = []
     for e in index[at + 1 :]:
@@ -442,24 +534,25 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
         if plans:
             stages.append(plans)
     tag = f"close-{len(lap.get('dones', [])) + 1}"
-    stages.append(build_close(env, rec, lap, kept, tag=tag))
+    lap["close_plans"] = build_close(env, rec, lap, kept, tag=tag)  # リリース待ち・質問待ちで締めたループの 1 回は答えの後にこれを流す
+    stages.append(lap["close_plans"])
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
     return queue_command(stages, done), done
 
 
-GATE_2_RESUME_STEPS = ("bump", "promote-approved", "merge-approved")  # 承認ゲート 2 の承認の後に入るステップ（pace.md の続け方）
+GATE_2_RESUME_STEPS = ("bump", "promote-approved", "merge-approved")  # リリース承認ゲートの承認の後に入るステップ（pace.md の続け方）
 
 
 def gate2_resume_step(plan: str) -> str | None:
-    """承認ゲート 2 で止まった計画を承認の後に続けるステップ: 雛形の本番は bump、昇格は promote-approved、
+    """リリース承認ゲートで止まった計画を承認の後に続けるステップ: 雛形の本番は bump、昇格は promote-approved、
     マージの merge-gate で止まった計画は merge-approved。どれも無い（gate-2 のプラン）なら None（手で行う本番へ進む）。"""
     ids = {s.get("id") for s in plan_info(plan).get("steps") or [] if isinstance(s, dict)}
     return next((s for s in GATE_2_RESUME_STEPS if s in ids), None)
 
 
 def stages_after(lap: dict, plan: str) -> list[list[str]]:
-    """plan のステージより後で、同じ queue が --then で流すはずだったステージの計画（承認ゲート 2 で流れずに残ったもの）。"""
+    """plan のステージより後で、同じ queue が --then で流すはずだったステージの計画（リリース承認ゲートで流れずに残ったもの）。"""
     try:
         index = json.loads(Path(lap.get("manifest") or "").read_text(encoding="utf-8"))["ステージ"]
     except (OSError, ValueError, KeyError):
@@ -478,28 +571,13 @@ def failure_key(state: dict) -> dict | None:
     """スプリント状態の行（完了でもまだでもない最初の行）の課題・種類・止まったところ（決定 8）。理由の文は含めない。"""
     for p in state.get("plans", []):
         row = p.get("row") or {}
-        if row.get("result") not in (None, "まだ", NOT_RUN, *FINISHED):  # 関門は loop gate が扱い、流さなかった計画は失敗の元でない
+        if row.get("result") not in (None, "まだ", NOT_RUN, *FINISHED):  # 承認ゲートは loop gate が扱い、流さなかった計画は失敗の元でない
             return {"issues": sorted(p.get("issues") or []), "kind": p.get("kind", ""), "step": row.get("result")}
     return None
 
 
-def copy_state_gates(lap: dict, state: dict) -> None:
-    """スプリント状態の承認ゲートを周回へ写す（写してあるものは重ねない）。"""
-    for g in state.get("gates", []):
-        copy = {
-            "name": g.get("name"),
-            "by": g.get("by", "user"),
-            "verdict": g.get("verdict", g.get("outcome", "approved")),
-            "basis": g.get("basis") or [],
-            "pr": g.get("pr"),
-            "at": g.get("at", ""),
-        }
-        if copy not in lap.setdefault("gates", []):
-            lap["gates"].append(copy)
-
-
 def refine_summary(env: Env, rec: dict) -> dict:
-    """棚卸しの結果（upkeep の state dir の candidates.json と rank.json）を周回の記録の形にする。"""
+    """棚卸しの結果（upkeep の state dir の candidates.json と rank.json）をループの 1 回の記録の形にする。"""
     sd = env.upkeep_dir(rec.get("repo") or "")
     cands = jsonio.read(sd / "candidates.json", missing={}, broken={}, want=dict)
     rank = jsonio.read(sd / "rank.json", missing={}, broken={}, want=dict)
@@ -530,36 +608,31 @@ def owner_line(env: Env) -> tuple[str, dict | None]:
 
 
 def backlog_summary(env: Env, rec: dict, lap: dict) -> None:
-    """周回の間の棚卸しの深さの行と、調査の費用と秒を周回の記録へ写す（#2315）。
+    """ループの 1 回の間の棚卸しの深さの行と、調査の費用と秒をループの 1 回の記録へ写す（#2315）。
 
-    調査の費用は呼び出しごとの記録（`research/calls.jsonl`。結果を捨てた呼び出しも含む）から集める。背景の調査は周回を
-    締めた後にも終わるため、このループのすべての周回を記録から数え直し、締め済みの周回へ後から終わった費用を精算する。"""
+    調査の費用は呼び出しごとの記録（`research/calls.jsonl`。結果を捨てた呼び出しも含む）から集める。背景の調査はループの 1 回を
+    締めた後にも終わるため、このループのすべてのループの 1 回を記録から数え直し、締め済みのループの 1 回へ後から終わった費用を精算する。"""
     d = env.main_dir() / ".ndf" / "backlog"
-    since = lap.get("started_at") or ""
     rows = jsonio.read_jsonl(d / "depths.jsonl", missing=[], skip_broken=True)
-    lap["depths"] = [{k: r.get(k) for k in ("depth", "event", "trigger", "cost", "seconds")} for r in rows if (r.get("at") or "") >= since]
+    lap["depths"] = lap_depths(rows, lap.get("started_at") or "")
     calls = jsonio.read_jsonl(d / "research" / "calls.jsonl", missing=[], skip_broken=True)
     for each in {id(x): x for x in [*rec.get("laps", []), lap]}.values():
-        mine = [r for r in calls if r.get("lap") == each.get("n") and (r.get("by") or {}).get("loop") == rec.get("name")]
-        if mine:
-            each["research"] = {
-                "items": [r.get("id") for r in mine if r.get("ok")],
-                "cost": round(sum(float(r.get("cost") or 0) for r in mine), 6),
-                "seconds": round(sum(float(r.get("seconds") or 0) for r in mine), 3),
-            }
+        research = lap_research(calls, rec.get("name"), each.get("n"))
+        if research is not None:
+            each["research"] = research
 
 
 def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None, deferred_issues=(), done_rows=()) -> None:
-    """周回を締め、スプリント状態とまとめの記録から値を写して固定する。"""
+    """ループの 1 回を締め、スプリント状態とまとめの記録から値を写して固定する。"""
     if lap.get("outcome") != IN_PROGRESS:
-        raise LoopError(f"周回 {lap['n']} は締めてある（I1）")
+        raise LoopError(f"ループの {lap['n']} 回目 は締めてある（I1）")
     state = (
         state if state is not None else (jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {})
     )
     rows = [p.get("row") or {} for p in state.get("plans", [])]
-    lap["cost"] = round(sum(float(r.get("cost") or 0) for r in rows), 6)
+    lap["cost"], lap["cost_parts"] = lap_cost(lap, round(sum(float(r.get("cost") or 0) for r in rows), 6))
     lap["seconds"] = round(sum(float(r.get("seconds") or 0) for r in rows), 3)
-    lap["versions"] = state.get("versions") or lap.get("versions") or {}
+    lap["versions"] = closed_versions(lap, state)
     copy_state_gates(lap, state)
     close_rep = next((p for p in state.get("plans", []) if p.get("kind") == "まとめ"), None)
     if close_rep:
@@ -569,17 +642,19 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
     lap["deferred_issues"] = sorted(set(lap.get("deferred_issues") or []) | {int(n) for n in deferred_issues})
     lap["failure"] = failure_key(state) if outcome == FAILED else None
     if outcome == FAILED and lap["failure"] is None:
-        lap["failure"] = {"issues": selected_issues(lap), "kind": "周回", "step": "conductor"}
+        lap["failure"] = {"issues": selected_issues(lap), "kind": "ループの 1 回", "step": "conductor"}
     lap["relay_dir"] = os.environ.get("NDF_RELAY_DIR")
     lap["outcome"], lap["ended_at"] = outcome, env.now()
 
 
 def after_close(env: Env, rec: dict, before: dict, summary: str) -> dict:
-    """周回を締めた後の境の判定。止まれば 3、続けば ndf_next を返す。"""
+    """ループの 1 回を締めた後の境の判定。止まれば 3、続けば ndf_next を返す。"""
     stop = held_stop(rec, boundary_stop(env, rec))
     if stop:
         return stop_and_report(env, rec, before, stop, f"{summary}。止まる条件に当たった（{stop['condition']}）")
     write_record(env, rec, before)
     nxt = resume_command(rec)
-    update_handoff(env, rec, f"周回 {rec['laps'][-1]['n']} を締めた。次の周回へ", nxt, select_cmd(rec["name"]))
-    return loop_ok(f"{summary}。次の周回へ進む", rec, [rec["laps"][-1]], status="continue", next_=nxt, ndf_next=f"```ndf-next\n{nxt}\n```")
+    update_handoff(env, rec, f"ループの {rec['laps'][-1]['n']} 回目 を締めた。ループの次の 1 回へ", nxt, select_cmd(rec["name"]))
+    return loop_ok(
+        f"{summary}。ループの次の 1 回へ進む", rec, [rec["laps"][-1]], status="continue", next_=nxt, ndf_next=f"```ndf-next\n{nxt}\n```"
+    )

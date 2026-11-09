@@ -45,7 +45,7 @@ def estimate_overlay(root, numbers, scale) -> dict[int, dict]:
         a = vals.get("A") or {}
         done = e.get("done") or "実装"
         if done not in units:
-            units[done] = ep.size_unit([x.a for x in er.issue_actuals(rows, done).values() if x.completed], decl)
+            units[done] = ep.size_unit_of(er.issue_actuals(rows, done).values(), decl)
         unit = units[done]
         size = ratio = None
         if a.get("mark") == "実績" and isinstance(a.get("typical"), (int, float)) and unit:

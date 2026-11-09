@@ -63,7 +63,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、複数のラッパーを統括役から扱う `spawn` / `ls` / `attach` / `restart`、導入の `install` / `uninstall` / `status` / `startup`、質問シグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、コンテキスト量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、複数のラッパーをリレーハブから扱う `spawn` / `ls` / `attach` / `restart`、導入の `install` / `uninstall` / `status` / `startup`、質問シグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、コンテキスト量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
 | `plugins/ndf/hooks/claude.json` の `UserPromptSubmit` | `hook.py goal-skill` を呼ぶ（`timeout` 5 秒、`continueOnError: true`）。ラッパーの有無に依らず、`/goal /<プラグイン>:<Skill>` の入力に条件の Skill を読み込む案内を足す（付則「`/goal` を付けた場合」） |
 | `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | コピーか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
@@ -115,7 +115,7 @@ graph TB
 | シグナルファイルを書くのは、ラッパーが起動した子の claude だけにする | conductor が Bash から起こす `claude -p` も `NDF_RELAY_DIR` を継ぎ、Stop hook が走る。環境変数だけでは見分けられないため、親をたどって最初に当たる claude が `child.pid` と一致するかで見る |
 | プラグインはカットポイントごとに毎回更新し、失敗したら次のセッションを起動しない | リリースの直後かを判定する材料が無い。版が変わっていなければ更新は数秒で何も変えない。古い版で始めると、リリースした hook と Skill で進んだと記録が誤って示す |
 | 子がシグナルファイルなしで終わればラッパーも終わる。再起動ループは「3 つ続けて起動から 120 秒未満でシグナルファイル」で見る | シグナルファイルの無い終わりは人の `/exit`・Ctrl-C の 2 回・落ちたのいずれかで、同じコマンドで起動し直しても意図に反するか同じく落ちる。同じコマンドの繰り返しでは見ない。入口のコマンドはセッションが違っても同じ文字列になりうる |
-| 1 日の起動回数の上限は 20、アイドルは 5 秒を初期値にし、環境変数で変える | 1 日に 2〜3 のスプリントを進めても 20 には届かず、再起動ループの検出を抜けた暴走は 1 日で止まる。アイドルは切り替えの待ちにそのまま足されるため短くする（15 秒では Stop から次のセッションの起動まで約 34 秒かかった）。`/exit` を早く打ちすぎないことは、シグナルファイルの後の利用者の入力・質問・背景の処理の起動・応答の再開の判定と、利用者の入力の待ちが受け持つ |
+| 1 日の起動回数は数えない。暴走止めは再起動ループの検出だけにする。アイドルは 5 秒を初期値にし、環境変数で変える | 全ラッパーを合わせた 1 日の数は、レーンの数に比例して増える起動を止めてしまう。2026-11-04 に上限 20 で 4 回止まり、実際の起動は 1 日 30 回を超えた。再起動の暴走は「短い時間に何回」で止めるのが標準の形である（systemd の `StartLimitIntervalSec` と `StartLimitBurst`）。アイドルは切り替えの待ちにそのまま足されるため短くする（15 秒では Stop から次のセッションの起動まで約 34 秒かかった）。`/exit` を早く打ちすぎないことは、シグナルファイルの後の利用者の入力・質問・背景の処理の起動・応答の再開の判定と、利用者の入力の待ちが受け持つ |
 | ラッパーと hook は Python の 1 ファイルにする | シグナルファイルの形・作業ディレクトリ・親のたどりを共有し、片方だけが変わって食い違わない。擬似端末・端末の属性・JSON・引数の配列での起動を標準ライブラリだけで書ける。bash では擬似端末の入出力をラッパーできない |
 | 次のコマンドはシェルを通さず、絶対パスと引数の配列で `os.execve` に渡す | 中身は LLM の出力で、引用符や `$(...)` を含みうる |
 | 記録はセッションごとに `start` と `end` の 2 行に分ける | 版は起動の時点で、長さと終わり方は終わった後に分かる。1 行にまとめると、起動の後に落ちたセッションの行が書かれないか、行を書き直すことになる |
@@ -163,9 +163,9 @@ graph TB
 
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
-| `run` | `[claude の引数 ...]`。ラッパーは解釈しない | パススルーでは claude の終了コードそのもの（exec で置き換わる）。ラッパーでは最後のセッションの claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次のセッションの更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目のセッションの exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。シグナルファイルなしで終わるときは何も出さない。統括役が既に居る端末の 2 本目は、統括役に起動を頼んで tmux のセッションへ結び付き、断られたら理由を 1 行出して 3（#2346。[統括役の仕様](ndf-relay-multi-session-supervisor.md#副命令の入出力)の「副命令の入出力」） |
+| `run` | `[claude の引数 ...]`。ラッパーは解釈しない | パススルーでは claude の終了コードそのもの（exec で置き換わる）。ラッパーでは最後のセッションの claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次のセッションの更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目のセッションの exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。シグナルファイルなしで終わるときは何も出さない。リレーハブが既に居る端末の 2 本目は、リレーハブに起動を頼んで tmux のセッションへ結び付き、断られたら理由を 1 行出して 3（#2346。[リレーハブの仕様](ndf-relay-multi-session-supervisor.md#副命令の入出力)の「副命令の入出力」） |
 | `stop` | `[<名前>] [--json]` | 名前なし: 0: 動いているラッパーに停止シグナルファイルを置いた（1 つ以上）/ 1: 動いているラッパーが無い。名前あり: 0: その 1 本を止めた / 3: その名前が無い | 名前なし: 置いたラッパーの pid を 1 行ずつ。名前あり: 結果の 1 行（`--json` は `relay-stop` の 1 行の JSON） |
-| `spawn` / `ls` / `attach` / `restart` | [統括役の仕様](ndf-relay-multi-session-supervisor.md#副命令の入出力)の「副命令の入出力」 | 同左 | 同左 |
+| `spawn` / `ls` / `attach` / `restart` | [リレーハブの仕様](ndf-relay-multi-session-supervisor.md#副命令の入出力)の「副命令の入出力」 | 同左 | 同左 |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | Stop を止めるときだけ `{"decision": "block", "reason": …}` の 1 行（「`mark` の判定」の 5a と 9）。それ以外は無し |
 | `install` / `uninstall` / `status` / `startup` / `question` | [導入の仕様](ndf-relay-install-and-restart.md)の副命令の表 | 同左 | 同左 |
 | `is-child` | 無し（内部用。`relay.md` に載せない） | 0: ラッパーが動いていて、呼んだ claude がラッパーの直接の子 / 1: それ以外 | 無し |
@@ -179,7 +179,9 @@ graph TB
 ### パススルーの条件
 
 `run` は上から順に見る。パススルーは下の「本物の claude」の絶対パスを `os.execve` に渡し、引数を
-そのまま渡す。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える。**
+そのまま渡す。**環境は `NDF_RELAY_DEPTH` を 1 増やすことだけを変える。** ただし、リレーハブが tmux で起動した印
+`NDF_RELAY_SPAWNED` を持つ `run` は、下の表を見る前に親のセッションの環境（`relay_lib/session_env.py` の `drop_parent_env`）を外す。
+そのため深さと `NDF_RELAY_DIR` の条件には当たらず、パススルーするときも外した後の環境で起動する（[リレーハブの仕様](ndf-relay-multi-session-supervisor.md)）。
 
 | # | 条件 | すること |
 | ---: | --- | --- |
@@ -229,7 +231,7 @@ stateDiagram-v2
 | --- | --- |
 | 中継する | 端末の属性を保存して標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す（Ctrl-C もバイトのまま子へ届く）。SIGWINCH で端末の大きさをマスタへ `TIOCSWINSZ` で写す。`NDF_RELAY_POLL` 秒（既定 2）ごとにシグナルファイルを見る。1 つ目のセッションは今の作業ディレクトリで `<本物の claude> <run の引数>` を起動する |
 | アイドルを待つ | 次がそろうまで待つ。(1) シグナルファイルの `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。シグナルファイルより後に目標が未達の判定の行（`attachment.type: "goal_status"`・`met: false`・`sentinel` 無し）があれば、`transcript_path` の更新時刻は数えない。(2) シグナルファイルが消えていない。(3) 質問シグナルファイルが無く、`asked` の時刻がシグナルファイルの `written_at` より前。(4) 会話の記録に、シグナルファイルより後の利用者の入力の行（`type: "user"` で `isMeta` が無く、Tool の結果でも Esc の中断の記録でもない）と、`run_in_background` が真の Tool の呼び出しを含む `assistant` の行が無い。目標が未達の判定の行が無ければ、シグナルファイルより後の `assistant` / `user` の行も無い |
-| 続けさせる | 停止シグナルファイル・1 日の起動回数・再起動ループのどれかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、シグナルファイルを消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次のシグナルファイルでは何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
+| 続けさせる | 停止シグナルファイル・再起動ループのどちらかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、シグナルファイルを消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次のシグナルファイルでは何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
 | 終わらせる | `question.lock` の中で (2)(3)(4) と記録の大きさ・更新時刻を確かめ直し（目標が未達の判定の後は大きさ・更新時刻を除く）、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。目標が未達の判定の後は、先に Esc（`\x1b`）を 1 回書いて `NDF_RELAY_ESC_WAIT` 秒（既定 1）待ち、そのあいだに利用者の入力があれば書かずに戻り、無ければ確かめ直してから `/exit\r` を書く。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問シグナルファイルがある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
 | 起動する | `claude plugin marketplace update <名前>` → `claude plugin update ndf@<名前> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外・打ち切り・版が読めなければ `update-failed`。作業ディレクトリはシグナルファイルの `cwd`、消えていればパスの `/.worktrees/` の手前（メインディレクトリ）、無ければ在る最も近い親、それも無ければ HOME。区切りの 1 行を出し、`<本物の claude> <起動の方針の引数> <合図の中身>`（中身は 1 つの引数）を起動する。exec に失敗したら `start-failed` |
 
@@ -238,10 +240,12 @@ stateDiagram-v2
 出して終了コード 127 で終わる。パススルーし直さない（同じ実体の exec がまた失敗する）。
 
 **exec の成否は close-on-exec の結果のパイプで親へ返す。** 子は exec が失敗したら `errno` をパイプへ
-書いて終わる。親は何も読まずに閉じれば成功とする。失敗した起動は `start` も `end` も書かず、1 日の
-起動回数に数えない。
+書いて終わる。親は何も読まずに閉じれば成功とする。失敗した起動は `start` も `end` も書かない。
 
-**子の環境からは `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` を外し、
+**子の環境からは Claude Code のセッションごとの値（`relay_lib/session_env.py` の `DROP_ENV`。
+`CLAUDECODE` / `CLAUDE_CODE_SESSION_ID` / `CLAUDE_CODE_ENTRYPOINT` / `CLAUDE_CODE_BRIDGE_SESSION_ID` /
+`CLAUDE_CODE_CHILD_SESSION` / `CLAUDE_CODE_EXECPATH` / `CLAUDE_CODE_MESSAGING_SOCKET` /
+`CLAUDE_CODE_MESSAGING_TOKEN` / `CLAUDE_CODE_SESSION_ATTENDED` / `CLAUDE_EFFORT` / `CLAUDE_PID`）を外し、
 `NDF_RELAY_DIR` を置き、`NDF_RELAY_DEPTH` を 1 増やす。** Claude Code の中から起こしたプロセスは
 これらを継ぐためである。`claude plugin ...` の呼び出しは、同じ変数と `NDF_RELAY_DIR` を外し、
 標準入力を `/dev/null` にして行う。打ち切りは `list` が 15 秒、`marketplace update` と `plugin update`
@@ -254,7 +258,6 @@ stateDiagram-v2
 
 | 上限・手段 | 判定 |
 | --- | --- |
-| 1 日の起動回数 | `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` の全 `log.jsonl` の `start` のうち、`at` が端末の地方時で今日のものを数え、`NDF_RELAY_MAX_STARTS`（既定 20）以上なら `max-starts`。**数えてから `start` を書くまで（失敗なら放すまで）親の `count.lock` を排他で持つ。** 取れなければ次の確認まで待つ。同時に動くラッパーが残り 1 枠を取り合っても上限を超えない |
 | 再起動ループ | このラッパーの記録の直前 2 つの `end` の `seconds` がともに `NDF_RELAY_SPIN`（既定 120）未満で、今のセッションの長さ（シグナルファイルの `written_at` − セッションの起動の時刻）も未満なら `spin`。1 つ目のセッション（`run` の引数で起動したセッション）も数える |
 | 停止シグナルファイル | 作業ディレクトリに `stop` があれば `stop-file`。`relay.py stop` か `touch <作業ディレクトリ>/stop` で置く |
 | セッションの中の `/exit`・Ctrl-C の 2 回・子が落ちた | シグナルファイルが無いまま子が終わるので、ラッパーも次のセッションを起動せずに終わる |
@@ -326,7 +329,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `stop` | `stop` か利用者 | 空。在れば停止シグナルファイル |
 | `log.jsonl` | `run` | 記録 |
 
-状態ディレクトリには、作業ディレクトリのほかに `count.lock`・`install.lock`・`rc-added`・`rc-skipped`・`rc-user`・`rc-noticed` を置く。
+状態ディレクトリには、作業ディレクトリのほかに `install.lock`・`rc-added`・`rc-skipped`・`rc-user`・`rc-noticed` を置く。
 
 ### シグナルファイル（`next.json`）
 
@@ -353,7 +356,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `seconds` | セッションの長さ（`end`）。起動から、シグナルファイルの `written_at`（`mark` / `sigterm` / `sigkill`）か子の終わり（`no-mark`）まで |
 | `ended_by` | `mark`（`/exit` で終わった）/ `no-mark`（シグナルファイルなしで終わった）/ `sigterm` / `sigkill`（`end`） |
 | `kind` | `承認待ち` / `回答待ち`（`prose_wait`。本文と抜粋は書かない） |
-| `reason` | `stop-file` / `max-starts` / `spin` / `count-lock`（質問の後に `count.lock` を取り直せない）/ `update-failed` / `start-failed` / `error`（`stop`）。`start-failed` は `errno` も持つ |
+| `reason` | `stop-file` / `spin` / `update-failed` / `start-failed` / `error`（`stop`）。`start-failed` は `errno` も持つ |
 
 **`end` はセッションの claude が実際に終わったときだけ書く。** 落ちると決めたときは `stop` の行だけを書き、
 そのセッションが後で終わったときに `end`（`no-mark`）を書く。ラッパーそのものが SIGTERM / SIGHUP で先に終わると、
@@ -364,7 +367,6 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | 変数 | 既定 | 意味 |
 | --- | --- | --- |
 | `NDF_RELAY` | — | `0` で `run` を常にパススルーにする |
-| `NDF_RELAY_MAX_STARTS` | `20` | 1 日の起動回数の上限（全部のラッパーの合計） |
 | `NDF_RELAY_QUIET` | `5` | アイドルの秒数 |
 | `NDF_RELAY_SPIN` | `120` | 再起動ループとみなすセッションの秒数 |
 | `NDF_RELAY_POLL` | `2` | シグナルファイルを見る間隔（秒） |
@@ -442,8 +444,8 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
   シグナルファイルの後の応答の再開・質問のあいだは `/exit` を送らず、シグナルファイルが消えれば取りやめること
 - 端末: キー入力（`\x03` を含む）と大きさの変化が子へ届くこと。子の終わり・例外・SIGTERM・SIGHUP の後に
   端末の属性が戻り、例外でも子を巻き込まないこと
-- 落とし先と上限: 消えた worktree からメインディレクトリで起動し `cwd_fallback` が載ること。今日の `start` が
-  上限の記録で `max-starts`、残り 1 枠を 2 つのラッパーが取り合って起動が 1 つだけになること。119・119・119 で
+- 落とし先と上限: 消えた worktree からメインディレクトリで起動し `cwd_fallback` が載ること。同じ日の `start` が
+  20 件以上あっても次の区間を起動すること。119・119・119 で
   `spin`、119・121・119 では送ること。`/exit` にも SIGTERM にも反応しない子で `sigkill` を書くこと。更新の
   失敗・打ち切り・次の子の exec の失敗で `stop` と次のコマンドを出して終了コード 2、1 つ目の子の exec の
   失敗で終了コード 127 になること

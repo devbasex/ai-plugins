@@ -13,17 +13,19 @@ import fnmatch
 import graphlib
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from parallel_files import PARALLEL_DIR  # noqa: F401  置き場の正本（問いの hook も読む）
+import parallel_hold
+from parallel_files import PARALLEL_DIR, resolved_path  # noqa: F401  置き場の正本（問いの hook も読む）
 
 VERSION = 1
 PLAN_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")  # 計画名は 24 字まで（一時レーンの名前を 32 字に収める。I1）
-LANE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")  # 統括役の名前の形（relay_lib/common.py の NAME_RE と同じ）
+LANE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")  # リレーハブの名前の形（relay_lib/common.py の NAME_RE と同じ）
 HELPER_RE = re.compile(r"-rel\d+$")  # 一時レーンの名前の形（`<計画名>-rel<連番>`）
 DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（2026-09-25 の実測。8 コア・30 GB）
 DEFAULT_MAX_NAMED = 3  # relay_lib/hub.py の max_named の既定
@@ -51,7 +53,11 @@ def max_plans() -> tuple[int, Optional[str]]:
 
 
 def named_limit() -> tuple[int, Optional[str]]:
-    return _positive_count(MAX_NAMED_ENV, os.environ.get(MAX_NAMED_ENV), DEFAULT_MAX_NAMED)
+    """レーン数の上限と、読めなかった出所の 1 文。リレーハブと同じ関数で読む（`relay_limit`。#2733 の I12）。"""
+    import relay_limit
+
+    n, _source, note = relay_limit.named_cap()
+    return n, note
 
 
 class LoopInput(BaseModel):
@@ -79,6 +85,7 @@ class Lane(BaseModel):
     touches: list[str]
     after: list[str] = Field(default_factory=list)
     handoff: Optional[str] = None
+    repo: Optional[str] = None  # レーンのリポジトリのメインディレクトリ（絶対パス）。省くと計画の置き場のリポジトリ（#2733 の I1）
 
     @field_validator("name")
     @classmethod
@@ -99,6 +106,14 @@ class Lane(BaseModel):
                 "I5", "引継ぎ文書の名の形が違う（{pattern}）: {name}", {"pattern": handoff.NAME_RE.pattern, "name": v}
             )
         return v
+
+    def repo_dir(self, home: Path) -> Path:
+        """レーンのリポジトリ（`repo` を省けば計画の置き場 `home`）。"""
+        return Path(self.repo) if self.repo else Path(home)
+
+    def own_release(self, home: Path) -> bool:
+        """別のリポジトリのレーンか（自分のリポジトリの設定で本番を出し、まとめたリリースに入らない。#2733 の I7）。"""
+        return resolved_path(self.repo_dir(home)) != resolved_path(Path(home))
 
     def handoff_name(self) -> str:
         """引継ぎ文書の名（ループなら `loop-<ループ名>`、スプリントなら `issue-<最初の番号>`）。"""
@@ -149,21 +164,37 @@ class ParallelPlan(BaseModel):
     @model_validator(mode="after")
     def _whole(self, info: ValidationInfo) -> "ParallelPlan":
         ctx = info.context or {}
-        names = [ln.name for ln in self.lanes]
-        dup = sorted({n for n in names if names.count(n) > 1})
+        home = ctx.get("home")
+        self._check_unique(home)
+        self._check_limits(ctx)
+        self._check_deps()
+        overlap = _issue_overlap(self.lanes, home)
+        if overlap:
+            raise PydanticCustomError("I19", "レーンの間で課題かマイルストーンが重なる: {pairs}", {"pairs": overlap})
+        return self
+
+    def _check_unique(self, home: Optional[str]) -> None:
+        """レーン名と引継ぎ文書の重なり（I1）。引継ぎ文書はレーンのリポジトリに置くため、同じリポジトリの間だけで見る（#2733 の I3）。"""
+        dup = _dups([ln.name for ln in self.lanes])
         if dup:
             raise PydanticCustomError("I1", "レーン名が重なる: {names}", {"names": ", ".join(dup)})
-        docs = [ln.handoff_name() for ln in self.lanes]
-        dup = sorted({d for d in docs if docs.count(d) > 1})
+        dup = _dups([f"{lane_repo_key(ln, home)}:{ln.handoff_name()}" for ln in self.lanes])
+        dup = [d.rsplit(":", 1)[1] for d in dup]
         if dup:  # 同じ引継ぎ文書へ書くと、後のレーンの文書が先のレーンの文書を上書きする
             raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
+
+    def _check_limits(self, ctx: dict) -> None:
+        """レーン数とプラン本数の合計の上限（I2）。"""
         cap = int(ctx.get("max_named") or DEFAULT_MAX_NAMED)
         if len(self.lanes) > cap:
             raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(self.lanes), "cap": cap})
         total, limit = sum(ln.plans for ln in self.lanes), int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
         if total > limit:
             raise PydanticCustomError("I2", "プランの本数の合計 {n} が上限 {cap} を超える", {"n": total, "cap": limit})
-        known = set(names)
+
+    def _check_deps(self) -> None:
+        """依存先の存在と循環（I3）。"""
+        known = {ln.name for ln in self.lanes}
         for ln in self.lanes:
             missing = [a for a in ln.after if a not in known]
             if missing:
@@ -173,21 +204,30 @@ class ParallelPlan(BaseModel):
         except graphlib.CycleError as exc:
             cyc = " → ".join(exc.args[1]) if len(exc.args) > 1 else ""
             raise PydanticCustomError("I3", "依存が循環する: {cycle}", {"cycle": cyc}) from None
-        overlap = _issue_overlap(self.lanes)
-        if overlap:
-            raise PydanticCustomError("I19", "レーンの間で課題かマイルストーンが重なる: {pairs}", {"pairs": overlap})
-        return self
 
     def lane(self, name: str) -> Optional[Lane]:
         return next((ln for ln in self.lanes if ln.name == name), None)
 
 
-def _issue_overlap(lanes: list[Lane]) -> str:
-    """課題とマイルストーンの重なり（I19）。`--milestones` の無いループのレーンはほかのレーンと重なるものとする。"""
+def _dups(values: list[str]) -> list[str]:
+    """2 回以上現れる値を整列して返す。"""
+    return sorted({v for v in values if values.count(v) > 1})
+
+
+def lane_repo_key(lane: Lane, home: Optional[str]) -> str:
+    """重なりを比べる単位（レーンのリポジトリ）。置き場が分からないときは `repo` を省いたレーンを 1 つのリポジトリとみなす。"""
+    if not lane.repo:
+        return resolved_path(Path(home)) if home else ""
+    return resolved_path(Path(lane.repo))
+
+
+def _issue_overlap(lanes: list[Lane], home: Optional[str] = None) -> str:
+    """課題とマイルストーンの重なり（I19）。`--milestones` の無いループのレーンはほかのレーンと重なるものとする。
+    課題の番号はリポジトリごとに振られるため、同じリポジトリのレーンの間だけで見る（#2733 の I3）。"""
     pairs = []
     for i, a in enumerate(lanes):
         for b in lanes[i + 1 :]:
-            if _overlaps(a, b):
+            if lane_repo_key(a, home) == lane_repo_key(b, home) and _overlaps(a, b):
                 pairs.append(f"{a.name}・{b.name}")
     return ", ".join(pairs)
 
@@ -204,11 +244,13 @@ def _overlaps(a: Lane, b: Lane) -> bool:
     return False  # ループのマイルストーンとスプリントの課題の照合は課題の取得が要るため検査では見ない
 
 
-def touch_overlaps(plan: ParallelPlan) -> list[dict]:
-    """触る場所が重なるレーンの組（I4。警告）。片方が他方の接頭辞か、glob が他方に当たれば重なる。"""
+def touch_overlaps(plan: ParallelPlan, home: Optional[str] = None) -> list[dict]:
+    """触る場所が重なるレーンの組（I4。警告）。片方が他方の接頭辞か、glob が他方に当たれば重なる。同じリポジトリの間だけで見る。"""
     out = []
     for i, a in enumerate(plan.lanes):
         for b in plan.lanes[i + 1 :]:
+            if lane_repo_key(a, home) != lane_repo_key(b, home):
+                continue
             hits = sorted({f"{x}・{y}" for x in a.touches for y in b.touches if _touch_hit(x, y)})
             if hits:
                 out.append({"lanes": [a.name, b.name], "touches": hits})
@@ -225,14 +267,31 @@ def _touch_hit(x: str, y: str) -> bool:
 # ---- 検査 ----
 
 
-def check_data(data: object) -> tuple[Optional[ParallelPlan], list[dict], dict]:
-    """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。"""
+def repo_errors(lane: Lane) -> Optional[str]:
+    """レーンの `repo` の形の誤り（I20）。絶対パスで、Git のメインディレクトリそのものを指さなければ理由を返す。"""
+    if not lane.repo:
+        return None
+    p = Path(lane.repo)
+    if not p.is_absolute():
+        return f"{lane.name} の repo が絶対パスでない: {lane.repo}"
+    import decl
+
+    main = decl.main_dir(str(p)) if p.is_dir() else None
+    if main is None or resolved_path(Path(main)) != resolved_path(p):
+        return f"{lane.name} の repo が Git のメインディレクトリでない（worktree・存在しないパスは置けない）: {lane.repo}"
+    return None
+
+
+def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[ParallelPlan], list[dict], dict]:
+    """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
+    `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。"""
     plans_cap, plans_note = max_plans()
     named_cap, named_note = named_limit()
     items: list[dict] = []
     notes = [n for n in (plans_note, named_note) if n]
+    ctx = {"max_plans": plans_cap, "max_named": named_cap, "home": str(home) if home else None}
     try:
-        plan = ParallelPlan.model_validate(data, context={"max_plans": plans_cap, "max_named": named_cap})
+        plan = ParallelPlan.model_validate(data, context=ctx)
     except ValidationError as exc:
         plan = None
         for e in exc.errors():
@@ -240,7 +299,13 @@ def check_data(data: object) -> tuple[Optional[ParallelPlan], list[dict], dict]:
             loc = ".".join(str(p) for p in e["loc"])
             items.append({"level": "error", "rule": rule, "at": loc or None, "message": e["msg"]})
     if plan is not None:
-        for ov in touch_overlaps(plan):
+        for i, ln in enumerate(plan.lanes):
+            if err := repo_errors(ln):
+                items.append({"level": "error", "rule": "I20", "at": f"lanes.{i}.repo", "message": err})
+    if plan is not None and any(it["level"] == "error" for it in items):
+        plan = None  # I20 の誤りがある計画は書かない・起動しない
+    if plan is not None:
+        for ov in touch_overlaps(plan, str(home) if home else None):
             items.append(
                 {
                     "level": "warning",
@@ -284,9 +349,12 @@ def load_valid_plan(main: Path, name: str) -> ParallelPlan:
 
 
 def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
-    """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態と配布の内訳。"""
+    """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態とリリースの内訳。"""
     lines = [f"# 並列の計画 {plan.name}", "", "`plan.json` から描画した。正本は `plan.json` である。", "", "## レーン", ""]
-    lines += ["| レーン | 最初の入力 | プランの本数 | 触る場所 | 依存先 | 引継ぎ文書 |", "| --- | --- | --- | --- | --- | --- |"]
+    lines += [
+        "| レーン | リポジトリ | 最初の入力 | プランの本数 | 触る場所 | 依存先 | 引継ぎ文書 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
     for ln in plan.lanes:
         first = (
             f"ループ `{ln.input.loop}`" if isinstance(ln.input, LoopInput) else "スプリント " + " ".join(f"#{n}" for n in ln.input.issues)
@@ -294,15 +362,20 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
         if ln.input.args:
             first += " `" + " ".join(ln.input.args) + "`"
         lines.append(
-            f"| {ln.name} | {first} | {ln.plans} | {', '.join(f'`{t}`' for t in ln.touches) or '-'} | {', '.join(ln.after) or '-'} | `.ndf/handoff/{ln.handoff_name()}.md` |"
+            f"| {ln.name} | {f'`{ln.repo}`' if ln.repo else '計画の置き場'} | {first} | {ln.plans} | {', '.join(f'`{t}`' for t in ln.touches) or '-'} | {', '.join(ln.after) or '-'} | `.ndf/handoff/{ln.handoff_name()}.md` |"
         )
     lines += ["", "## レーンに共通の決まり", ""]
     lines += [
         f"- 同時に流すプランの本数はレーンごとに上の表のとおり（合計 {sum(ln.plans for ln in plan.lanes)} 本）",
         "- 触る場所は上の表のとおり。取り込みの衝突は base-sync で解く",
-        f"- 本番の配布はオーガナイザーが 1 本にまとめる。レーンは本番を自分で出さず、配布の依頼を送る（`parallel.py request {plan.name}`）",
+        f"- リリースの雛形で出すリポジトリでは、オーガナイザーがリリースを 1 本にまとめる。レーンは本番を自分で出さず、リリースの依頼を送る（`parallel.py request {plan.name}`）",
+        "- 昇格で出すリポジトリでは、レーンは昇格のプランをそのまま流す。組み上がったプランを手で置き換えない",
         "- 承認ゲートと区分つきの問いはオーガナイザーだけが出す。レーンは問いで止まらず、別の作業へ進む",
     ]
+    if any(ln.repo for ln in plan.lanes):
+        lines.append(
+            "- 別のリポジトリのレーンは、リリースの依頼を送らず自分のリポジトリの設定で本番を出す。リリース承認ゲートの問いはオーガナイザーへ送る"
+        )
     lines += [f"- {r}" for r in plan.rules]
     if progress:
         lines += ["", "## 進行", "", "| レーン | 状態 | 起動 |", "| --- | --- | --- |"]
@@ -310,9 +383,10 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
             lines.append(f"| {n} | {st.get('state') or '-'} | {st.get('started') or st.get('refused') or '-'} |")
         rels = progress.get("releases") or []
         if rels:
-            lines += ["", "## まとめた配布", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]
+            lines += ["", "## まとめたリリース", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]
             for r in rels:
-                lines.append(f"| {r.get('seq')} | {r.get('state')} | {r.get('version') or '-'} | {(r.get('sha') or '-')[:12]} |")
+                lines.append(f"| {r.get('n')} | {r.get('state')} | {r.get('version') or '-'} | {(r.get('sha') or '-')[:12]} |")
+        lines += parallel_hold.render_hold(progress.get("hold"))
     return "\n".join(lines) + "\n"
 
 
@@ -326,7 +400,8 @@ def render_handoff(plan: ParallelPlan, lane: Lane, plan_md: Path) -> str:
             "## 進め方（利用者の指示）",
             "",
             f"- 並列の計画 `{plan.name}` のレーン `{lane.name}` として進める。共通の決まりは [plan.md]({plan_md}) にあり、ここへは写さない",
-            "- 本番の配布は自分で出さず、オーガナイザーへ配布の依頼を送る。承認ゲートと区分つきの問いはオーガナイザーへ送り、待たずに別の作業へ進む",
+            "- リリースの雛形で出すリポジトリでは、リリースを自分で出さずオーガナイザーへリリースの依頼を送る。昇格で出すリポジトリでは昇格のプランをそのまま流す。組み上がったプランを手で置き換えない",
+            "- 承認ゲートと区分つきの問いはオーガナイザーへ送り、待たずに別の作業へ進む",
             "",
             "## 次にやること",
             "",
@@ -351,11 +426,15 @@ def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
     import handoff
 
     d = plan_dir(main, plan.name)
-    targets = {ln.name: handoff.paths_of(main, ln.handoff_name())[0] for ln in plan.lanes}
+    # 引継ぎ文書はレーンのリポジトリに置く（別のリポジトリのレーンは自分のリポジトリの引継ぎ文書を読む。#2733）
+    targets = {ln.name: handoff.paths_of(ln.repo_dir(main), ln.handoff_name())[0] for ln in plan.lanes}
     existing = [str(p) for p in [d / "plan.json", *targets.values()] if p.exists()]
     if existing:
         raise FileExistsError(", ".join(existing))
     d.mkdir(parents=True, exist_ok=True)
+    import parallel_homes  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733 の決定 1）
+
+    parallel_homes.record_home(main)
     data = dict(raw)
     data["lanes"] = [{**dict(r), "handoff": ln.handoff_name()} for r, ln in zip(raw["lanes"], plan.lanes)]
     (d / "plan.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -365,9 +444,10 @@ def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
     return [d / "plan.json", d / "plan.md", *targets.values()]
 
 
-def manual_commands(plan: ParallelPlan) -> list[str]:
-    """ラッパーの外・tmux が無いときの、レーンごとの手で起動する 1 行（受け入れ条件 9）。"""
-    return [f"NDF_RELAY_NAME={ln.name} claude '{first_input(ln)}'" for ln in plan.lanes]
+def manual_commands(plan: ParallelPlan, home: Path) -> list[str]:
+    """ラッパーの外・tmux が無いときの、レーンごとの手で起動する 1 行（受け入れ条件 9）。レーンのリポジトリ（`home` は計画の置き場）へ
+    移ってから起動する（引継ぎ文書はレーンのリポジトリにある。耐久ステップ「起動」の cwd と同じ。#2733）。"""
+    return [f"cd {shlex.quote(str(ln.repo_dir(home)))} && NDF_RELAY_NAME={ln.name} claude '{first_input(ln)}'" for ln in plan.lanes]
 
 
 def first_input(lane: Lane) -> str:

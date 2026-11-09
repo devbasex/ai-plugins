@@ -73,7 +73,7 @@
 | 5 つの手順の 1 回の実行、引数（増えた 2 つと廃止した 5 つ）、実装担当の決め方 | 参加者プールと認証確認（[参加者の確定仕様](cross-refactoring-participants.md)） |
 | 改善候補の切り出し、リファクタリング計画のマージ処理、見積り・バッファ・件数の選び方・締め切り | 検証・危険フラグ・取り消し・最終ゲート（[検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md)） |
 | 時間の上限の表と手順の監視の上限、固定のまま残す値 | 監視そのものの起動結果の語彙（[起動結果](cross-review-launch-outcome.md)） |
-| Jev を使う箇所・条件・送る中身 | Jev の導入と鍵の配布（#841） |
+| Jev を使う箇所・条件・送る中身 | Jev の導入と鍵のデプロイ（Issue #841） |
 | 配分テーブル・履歴・初期値、状態ファイルの版 2、報告 | 最終ゲートの `cross-review` の中身、駆動の bash を `scripts/` へ移すこと（#560 #870） |
 
 ## 背景
@@ -287,8 +287,8 @@
 （`timeout` / `stalled`）から読み（`gitfacts.note_stopped`）、`phases.<手順>.stopped` に残して
 報告に「監視が止めた手順」の 1 行を出す。
 
-**ライブラリの上限の表（`plugins/ndf/scripts/lib/limits.py`）は cross-review と共有するため、値を
-変えない。** cross-refactoring の手順の名前（`plan` / `add-tests` / `implement`）を表に足したのは、
+**ライブラリの上限の宣言（`plugins/ndf/contracts/limits.json`。`plugins/ndf/scripts/lib/limits.py` が引く）は
+cross-review と共有するため、値を変えない。** cross-refactoring の手順の名前（`plan` / `add-tests` / `implement`）を表に足したのは、
 `start-phase` を通らない起動の既定の下限としてである。
 
 **固定のまま残す値**（`timeline.FIXED_VALUES`。報告に並ぶ）。OS の後始末と通信の待ちで、予算と

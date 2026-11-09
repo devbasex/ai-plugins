@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/scripts/lib/sprint_loop.py", "name": "", "kind": "lines", "reason": "492 行だったところへ #2436（レーンの配布待ち・質問待ち・保留の周回の CLI）で増えて 587 行。500 行以下にしたら消す", "lines": 587}
+{"path": "plugins/ndf/scripts/lib/sprint_loop.py", "name": "", "kind": "lines", "reason": "492 行だったところへ #2436（レーンの配布待ち・質問待ち・保留の周回の CLI）で増えて 587 行、#2507（承認した設計のマージの記録と周回の境のマージし直しの CLI）で 623 行、cmd_answer の文面の決定を answer_after へ抽出して 627 行、#2623 で argv の組み立てを sprint_loop_argv へ抽出し、develop の #2354 と合わせて 593 行、develop の追加（#2707 ほか 2 行）を取り込んで 595 行。500 行以下にしたら消す", "lines": 595}

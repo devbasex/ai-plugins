@@ -31,13 +31,22 @@ allowed-tools:
 
 | 深さ | 頻度（既定） | 行うこと | 読む参照 |
 | --- | --- | --- | --- |
-| `diff`（差分の棚卸し） | 毎スプリント | 扱う 5 つのうち 1（誤りの訂正）と、そのスプリントで起票した課題への見積の段階の付与だけ | この文書 |
+| `diff`（差分の棚卸し） | 毎スプリント | 扱う 5 つのうち 1（誤りの訂正）と、そのスプリントで起票した課題（`--since-ref` のコミットの時刻より後に作られた課題）への見積の段階の付与だけ | この文書 |
 | `review`（見直し） | 3 回に 1 回 | 後回しを除く open の全件に 5 つすべてと、ニーズ・シーズの調査からの起票 | [references/review.md](references/review.md)・[references/research.md](references/research.md) |
 | `overhaul`（大整理） | 12 回に 1 回 | 未完了の全件を原因の型で分けて根本原因を探し、組み直す。後回しの再評価を含む | [references/overhaul.md](references/overhaul.md) |
 
 起動の条件（回数と溜まり具合）・見直しの持ち主・記録の置き場は [references/depths.md](references/depths.md) にある。
 まとめのプランは差分の棚卸しの後に、大整理と見直しを起動の判定つきで流す。`--loop` を使わないときは人が
 `--depth review` か `--depth overhaul` で呼べ、`depth due ... --manual` が起動の条件を `manual` で残す。
+まとめのプランは差分の棚卸しの行（深さの記録）へ、同じプランの進行の記録の棚卸しのステップの秒・ドル・言語モデルと、
+開発ループの名前・ループの回の番号を写す。差分の棚卸しの所要は、デプロイした版のタグより後の行の中央値を基準と比べて確かめる:
+
+```bash
+python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイした版のタグ> --seconds-under <基準の秒> --cost-under <基準のドル> \
+  [--count 3] [--model <言語モデル>]
+```
+
+終了コードは 0 = 秒とドルの中央値が両方とも基準を下回る / 1 = 下回らない / 3 = 行が `--count` 件に満たない（判定の保留）。
 
 **着手の直前は判断が歪む場所である。** 実装を担う側には締め切りがあり、そこで「この課題は
 成り立たない」と気づいても、止める判断は自分の作業を遅らせる。判断を下す人が、その判断で
@@ -162,6 +171,8 @@ python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ>
 `diff-path` / `diff-identifier` / `no-milestone` / `closed-milestone` / `sub-issue` /
 `commit-subject`）。`commit-subject` の候補は上限で切るときも先に残す。`rank` を打ったことのあるリポジトリでは、記録の
 見積が無い課題と、見積を付けた後に要約値が変わった課題も拾う（`unscored`。上限で切るときの経路の数には入れない）。
+差分の棚卸し（`--depth diff`）の `unscored` は、`--since-ref` のコミットの時刻（`metrics.since`）より後に作られた課題だけである。
+それより前の課題は見直しで拾う。手順 2C の `rank` にも同じ `--since-ref` を渡し、それより前の課題を `excluded` にしない。
 `rank` を打ったことが無い初回は、手順 2C の `rank` が見積の無い open の課題をすべて `excluded` で返し、その全件が採点の対象になる。担当が足す
 経路の課題は `--add` で渡す（`manual`）。候補ごとに `updated_at` と課題の要約値（`digest`。題名・本文・
 状態・マイルストーン・ラベルから作る）を返し、手順 3 の照合に使う。未完了が 0 件になったマイルストーンは `kind: milestone` の項目で返る。
@@ -176,7 +187,7 @@ open の全件へ広げる（`--all`）。
 
 | 全体に影響する変更 | 例 |
 | --- | --- |
-| ディレクトリの移動・統合 | 配布物の置き場所を変える |
+| ディレクトリの移動・統合 | リリース対象の置き場所を変える |
 | 対応する実行環境の増減 | 配る先のランタイムを足す |
 | ブランチ戦略の変更 | リリースチャネルを分ける |
 | 識別子の一括改名 | 委譲先の CLI を置き換える |
@@ -257,8 +268,12 @@ open の全件へ広げる（`--all`）。
 ### 手順 2C: 順位を算出する
 
 ```bash
-python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34]
+python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
 ```
+
+差分の棚卸しでは `--since-ref` に手順 1 と同じタグを渡す。見積がどこにも無い課題のうち、そのコミットの時刻以前に
+作られたものは `excluded` にせず（終了コード 20 にしない）、順位にも入れずに `metrics.left_for_review` へ番号だけを返す。
+それらに段階を付けるのは見直しである。見直しと大整理では渡さない。
 
 `rank` は open の課題・マイルストーンの説明・サブイシューを読み、マイルストーンごとの順位・大きい課題の枠・切り出しの
 境界・前倒しと後ろ倒しの候補・前回の `### 順位` の表からの変化を返す。見積は `--scores`（この回に付けた課題）→ 記録 →

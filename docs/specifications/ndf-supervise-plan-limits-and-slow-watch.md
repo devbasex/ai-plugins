@@ -8,6 +8,7 @@
 上限と比べるステップの数に、遅れの見張りの再試行は入らない。`run --from` の再開では、judge と work の `inputs` のうち
 今の実行でまだ流れていないステップへ、前の実行の最後の結果を渡す。遅れの見張りは、work のステップでは worker の
 セッションの記録の伸びを、drive のステップでは Pull Request の投稿・レビュー・コミットの時刻を、進みに数える。
+無進捗の打ち切りを持つステップ（`stall`）は見張りで止めず、所要の履歴だけを残す。打ち切りは [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) が扱う。
 
 例: スプリントの実装のプランは、#1702 の経路（範囲テストの修正 3 回と doc-lint の修正 1 回で 27 本）でも `上限` 141 の
 内側で merge まで届く。手で `上限` 12 と書いた設計のプラン（D は 15）は、`run` が最初のステップを流す前に
@@ -82,8 +83,8 @@
 | `flow._plan_steps` | 上限と比べる数を、遅れの再試行を除いて数える。耐久ステップの番号はすべての回で増やす |
 | `RunState`（`supervise_lib/state.py`） | 進捗ログの `step` の行へ `out` を書く。`prior_rows` で前の実行の範囲を切る。`session` に会話を残す claude -p のセッションの id と設定の置き場を持つ |
 | `steps.prior_results`・`StepContext.inputs_text` | 前の実行の範囲の `step` の行から、ステップごとに最後の行の `exit` と `out` の本文を引き、今の実行 → 前の実行 → 無い の順に入力を組む |
-| `claude.call_claude`（`ClaudeRunner.call` から） | `session` を渡され、`full` で `resume` でない起動なら、uuid を `--session-id` で渡して `session` に id と設定の置き場を入れる |
-| `SlowWatch`（`start_watch`・`slow_probe`・`session_grown`） | ステップの開始でセッションの記録の大きさを覚え、`pr_checked` に開始の時刻を入れる（gh は呼ばない）。一次の調査で work はセッションの記録の伸びを、drive は Pull Request の時刻を足して見る |
+| `claude.call_claude`（`ClaudeRunner.call` から） | `session` を渡され、`full` か進みの観測（`watch`）を伴う起動で `resume` でなければ、uuid を `--session-id` で渡して `session` に id と設定の置き場を入れる |
+| `SlowWatch`（`start_watch`・`slow_probe`・`session_grown`） | ステップの開始でセッションの記録の大きさを覚え、`pr_checked` に開始の時刻を入れる（gh は呼ばない）。一次の調査で work はセッションの記録の伸びを、drive は Pull Request の時刻を足して見る。`stall` を持つステップは `off` で始め、調査も判定役の呼び出しもしない |
 | `lib/slow_step.py` | `session_size`（記録の大きさ。見つからなければ 0）・`probe_worker`・`pr_latest`（最も新しい時刻。読めなければ None）・`probe_drive` |
 
 ### 常に成り立つ条件
@@ -115,13 +116,17 @@
 | 直した後の戻り | `back_to_failed` の work から、そのループの検査のステップへ | 成功 |
 
 - **D**（`longest_path`）: 並びで後ろのステップへ行く遷移だけをたどった最長の経路のステップの数。流し始めるステップを含む
-- **修正のループ**（`loops` の 1 つ目）: 検査のステップ `c` の失敗の遷移 `c → f` 1 本ごとに 1 つ。長さは `f` から成功の遷移だけを
-  通って `c` へ戻る単純な輪のうち、修正の work（`type` が `work` で `kind` が無いか「修正」）を含む最も長いもののステップの数。
+- **修正のループ**（`loops` の 1 つ目）: 検査のステップ `c` の失敗の遷移 `c → f` 1 本ごとに 1 つ。長さは `f` から成功の遷移と
+  `on_exit` の遷移だけを通って `c` へ戻る単純な輪のうち、修正の work（`type` が `work` で `kind` が無いか「修正」）を含む最も長いもののステップの数。
   そういう輪が無ければ数えない（例: 設計のプランの `glossary-recheck → push-glossary`）
 - **戻りの輪**（`loops` の 2 つ目）: 修正の work を含む輪が無く、`kind` が「戻り」（`limits.RETURN_KIND`）のステップを含む輪。
   数え方は修正のループと同じ。今の雛形では、`procedures.base_sync_steps` が組む `base-return` を通る
   `merge →（終了コード 4）base-return → base-sync → … → merge` の輪である（取り込みの経路は #1917 #2003）。
   `base-return` が許す戻りの回数（`base_sync.RETURN_LIMIT`）は `FIX_ROUNDS` 以下でなければならず、テストが縛る
+- 同じステップの集まりから成る輪は、修正のループと戻りの輪の全体で 1 つとして数える。始まりの失敗の遷移が違っても重ねて数えない。
+  鍵は、成功の遷移だけで戻れる輪を持つ失敗の遷移を先に、その中はプランの並びで選ぶ（例: 設計のプランの解決のフロー
+  `review →（終了コード 6）review-settled →（終了コード 1）resolve-sync → resolve → push-resolve → review` は、`review→review-settled`
+  の 1 つだけで長さ 5 と数える。#2388）
 - 輪の探索が `SEARCH_CAP`（100,000 回の展開）を超えたら、そのループの長さを「`f` から行けて `c` へ戻れるステップの数」で代える（多めに見る側）
 
 想定の回数 3 は前提（1 本の実行で、それぞれの修正のループを 3 回まで通る。出所は #1702 の範囲テストの修正 3 回）で、値を持つのは
@@ -138,7 +143,7 @@
 | `new fix` | 14 | 実装と同じ | merge→base-return: 13 | 140 |
 | 検査（`new check`） | 11 | base-sync→fix-base: 2、test-all→judge: 3 | merge→base-return: 6 | 44 |
 | スプリントの検査 | 13 | 検査と同じ | merge→base-return: 6 | 46 |
-| 開発版の配布（`new release`・スプリント） | 11 | bump・changelog・notes・sync→judge: 各 3、release→judge: 4、verify: 5、facts: 6、explain: 7、others: 8 | 無し | 137 |
+| 開発版のデプロイ（`new release`・スプリント） | 11 | bump・changelog・notes・sync→judge: 各 3、release→judge: 4、verify: 5、facts: 6、explain: 7、others: 8 | 無し | 137 |
 
 ### 流す前の照合と数え方
 
@@ -196,7 +201,7 @@ graph TD
 | --- | --- |
 | 雛形が書く `上限` | `limits.step_limit` の値。`steps` の直前に置く |
 | 進捗ログの `step` の行 | 鍵 `out`（`NN-<ステップ>.out` のファイル名）を足した。ほかの鍵の意味は変えない |
-| 会話を残す claude -p の起動（`full: true`、`--resume` でない） | `--session-id <uuid>` を足した。`--resume` で起こし直すときは足さない |
+| 会話を残す claude -p の起動（`full: true` か `stall` を持つステップで、`--resume` でない） | `--session-id <uuid>` を足した。`--resume` で起こし直すときは足さない |
 
 ## エラー処理
 
@@ -215,7 +220,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 想定回数 3 の釣り合い | 実装のプランは 141、開発版の配布は 137 になる。上限まで回ったときの費用は測っていない。変えるなら `limits.FIX_ROUNDS` の 1 か所 |
+| 想定回数 3 の釣り合い | 実装のプランは 141、開発版のデプロイは 137 になる。上限まで回ったときの費用は測っていない。変えるなら `limits.FIX_ROUNDS` の 1 か所 |
 | 書き済みの古いプラン | この形より前に書いた設計のプラン（上限 12）は、D 15 より短いため流し始める前に止まる。理由の文が `上限` を上げるか `new` で書き直すよう示す |
 | セッションの記録の置き場 | `<CLAUDE_CONFIG_DIR>/projects/<作業場所>/<id>.jsonl` は claude 2.1.301 での実測である。claude が置き場を変えると見つからず、今までと同じく判定へ回る |
 | GitHub の上限 | drive の遅れの確認ごとに gh を 1 回呼ぶ。確認は想定の時間（下限 300 秒）ごとだが、並べた drive の数だけ増える |

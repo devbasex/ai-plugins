@@ -15,7 +15,7 @@
 ### Git運用ルール
 - **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
   **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのはリリースの工程だけ
-  （「版と配布の方針」）
+  （「版とリリースの方針」）
   - **起点は `.ndf/worktree.json` の `base_branch` に書く。** worktree のベースブランチと、
     宛先のチェックがこの設定を読む（`follow_branch: true` のときはメインディレクトリの追従先にも
     なる）。設定が無いリポジトリは既定ブランチのまま動く
@@ -29,14 +29,14 @@
 - 必ずfeatureブランチを作成して作業
 - Pull Requestを通じてレビュー・マージ
 - ユーザーの許可なくPRを承認しない
-  - `pace: fast` と `pace: auto` は MVV の承認・ハッシュの一致・判定の記録がそろったゲート 1・2 だけ、MVV の承認を許可として扱う（レッドラインは除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
+  - `pace: fast` と `pace: auto` は MVV の承認・ハッシュの一致・判定の記録がそろった設計承認ゲート・リリース承認ゲートだけ、MVV の承認を許可として扱う（レッドラインは除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
 
-### 版と配布の方針
+### 版とリリースの方針
 
 **判断の基準だけをここに置く。** 版数とリリースの手順・実測・一覧は
 [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) にある（版数の扱いの正本）。
 
-**配布のチャネルは 2 つに分ける。** マージとリリースを別の操作にするためである。
+**デプロイのチャネルは 2 つに分ける。** マージとリリースを別の操作にするためである。
 
 | チャネル | ref | 何が載るか |
 | --- | --- | --- |
@@ -47,7 +47,7 @@
 置けば既存の利用者も新しい利用者も登録し直さなくてよい。
 
 **開発版の版数には接尾辞を付ける。** 接尾辞は人が読むための目印で、入れたくない利用者が版数を見て
-判断できるようにするためである。次に出す正式版の版数へ付け、正式版を出すときに外す（形の一覧は正本の「版の付け方と開発版の配布」）。
+判断できるようにするためである。次に出す正式版の版数へ付け、正式版を出すときに外す（形の一覧は正本の「版の付け方と開発版のデプロイ」）。
 
 **版を上げるのは、スプリント単位でマージが終わった後である。** Pull Request ごとには上げない。
 担い手と時期の決まりは `release` にある（`/ndf:release`）。
@@ -76,7 +76,7 @@
 **ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しない。** 1 つの名前につき
 1 つしか登録できず、利用者の取得元が置き換わる（ランタイムごとの振る舞いは正本の「ランタイムごとの取得と導入」）。
 
-**正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる（手順は正本の「正式版を出す」）。
+**正式版のリリースタグと GitHub Release は CD が作る。** `main` へのマージで `.github/workflows/release-cd.yml` が `ndf--v<版>` のタグと GitHub Release を作り、宣言は `.ndf/project.json` の `delivery` にある。タグは利用者が過去の版へ戻るときの目印になる（手順は正本の「正式版を出す」）。
 
 ### 安定版と実験版
 
@@ -104,6 +104,7 @@
 - 認証情報は環境変数で管理
 - `.env.example`でテンプレートを提供
 - `.gitignore`に機密ファイルを追加
+- 秘密らしい値・`.env` の実ファイル・インフラの定義は `python3 scripts/check-repo-secrets.py`（CI のジョブ `repo-secrets-check`）が落とす。テストの偽の値は `scripts/repo-secrets-allow.json` へ足す
 
 ### 最小限のコード実装
 - 要件を満たす最小限のコードのみを記述
@@ -122,14 +123,13 @@ ai-plugins/
 │   └── mcp/
 │       └── mcp-*/               # MCPプラグイン10個（Claude Code・Codex 共通）
 ├── docs/                         # リポジトリ知識
-├── factory/                      # Web サービス（Neural Development Factory）。プラグインと分け、自分の LICENSE を持つ
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定
 ├── KIRO.md                       # 相手役として起動される Kiro CLI の説明
 └── README.md                     # プロジェクト説明
 ```
 
-`plugins/` と `.claude-plugin/marketplace.json` は `factory/` を参照しない。インフラの定義（CDK など）と秘密は private リポジトリに置き、このリポジトリに入れない。どちらも `python3 scripts/check-service-boundary.py`（CI のジョブ `service-boundary-check`）が落とす。
+**このリポジトリの範囲は、NDF などのプラグイン（`plugins/`）とマーケットプレイス（`.claude-plugin/marketplace.json`）である。** Web サービス（Neural Development Factory）のコードは別のリポジトリで開発し、ここには置かない。そのサービスが NDF を呼ぶときの API・入出力の規約（`NDF_FACTORY_RUN`・`parallel-external.json` など）は、NDF の側の規約として `plugins/ndf/contracts/` が持つ。
 
 ## ドキュメント
 
@@ -137,8 +137,9 @@ ai-plugins/
 |-------------|------|
 | [docs/project-overview.md](docs/project-overview.md) | プロジェクト概要・インストール方法 |
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、検証） |
-| [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版と配布（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
+| [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版とリリース（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
+| [docs/ndf-parallel-model.md](docs/ndf-parallel-model.md) | NDF の並行開発の役割と用語（レーン・オーガナイザー・conductor などの関係を図と表で示す） |
 | [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料。生成スクリプト（pptxgenjs）・台本・構成メモを資料ごとのディレクトリに置く（作り方は `release` の `form-slide.md`）。**発表日時点の記録で、以後の構成変更には追随しない** |
@@ -149,8 +150,8 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は Claude Code・Codex のどちらでも `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
-- Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/{claude,codex}-skills.txt` が決める
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は Claude Code・Codex のどちらでも `ndf` を維持し、リリース対象は `plugins/ndf/` の1ディレクトリにまとまっています。
+- Skill の実体は `plugins/ndf/skills/` の1箇所。導入先のランタイムは Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/{claude,codex}-skills.txt` が決める
 - Claude Code版は専門サブエージェントと実行主体（supervisor・worker）の定義（`plugins/ndf/agents/`）、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro CLI と agy へは何も配らない。cross-review のレビュー担当、cross-refactoring の提案・実装の担当（相手役）として、ホスト（Claude Code・Codex）から CLI プロセスで起動する。相手役が読む手順書はホストの導入先から担当の worktree へ写す（起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md`）
@@ -183,7 +184,7 @@ ai-plugins/
 ### DON'T（非推奨）
 - ファイル全体を無闇に読み込む
 - `main` / `develop` に直接コミット
-- Pull Request ごとに版数を上げる（版を上げるのはスプリント単位のマージの後。「版と配布の方針」）
+- Pull Request ごとに版数を上げる（版を上げるのはスプリント単位のマージの後。「版とリリースの方針」）
 - ドキュメントをスキップ
 - 機密情報をコミット
 - テストをスキップ

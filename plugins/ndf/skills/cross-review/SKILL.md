@@ -45,6 +45,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（参加者プール・担当の輪番・認証・終了基準の 3 層）
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
 - [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
+- [docs/08-review-categories.md](docs/08-review-categories.md) — 変更ファイルの分類から担当へ渡す自動レビュー観点の一覧（手順の途中では読まない）
 - [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
@@ -86,7 +87,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 ```
 
 `init` は変更ファイルを分類して自動のレビュー観点を組み立て、`--focus` / `--extra-instructions-file` をその後ろに
-上乗せする。分類の一覧は [docs/04-contracts.md](docs/04-contracts.md) の「自動レビュー観点テンプレート」にある。
+上乗せする。分類の一覧は [docs/08-review-categories.md](docs/08-review-categories.md) の「自動レビュー観点テンプレート」にある。
 
 ### 設計 PR と実装 PR の戦略
 
@@ -96,11 +97,11 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 | | design | code |
 | --- | --- | --- |
-| 収束の条件 | 上限 3 ラウンドでゲート 1 へ渡す。**収束を待たない**（指摘の連鎖は文書の修正が生むため、回すほど増える） | 新しい指摘が出なくなるまで |
+| 収束の条件 | 上限 3 ラウンドで設計承認ゲートへ渡す。**収束を待たない**（指摘の連鎖は文書の修正が生むため、回すほど増える） | 新しい指摘が出なくなるまで |
 | `--max-rounds` を渡さないときの上限 | `3` | `12` |
 | 担当へ渡す差分 | 2 ラウンド目以降は前のラウンドの head からの変更だけ（`git diff <前の head> <今の head>` をプロンプトに書く） | 全差分 |
 | 大きさ | 設計文書 1 本は 1,000 行以下。超えると `init` が文書と行数を標準エラーへ出し、状態ファイルの `design_doc_oversize` に残す（止めない） | 制限なし |
-| レビューの種類 | 設計文書に `## ドメインモデル` の節があれば、1 ラウンド目はその節と用語集の差分だけを見る（モデルレビュー）。2 ラウンド目以降は確定したモデルを前提に残りを見る（詳細レビュー）。モデルレビューの承認では抜けない。観点と状態ファイルの項目は [docs/04-contracts.md](docs/04-contracts.md) の「設計 PR のモデルレビューと詳細レビュー」 | 分けない |
+| レビューの種類 | 設計文書に `## ドメインモデル` の節があれば、1 ラウンド目はその節と用語集の差分だけを見る（モデルレビュー）。2 ラウンド目以降は確定したモデルを前提に残りを見る（詳細レビュー）。モデルレビューの承認では抜けない。観点と状態ファイルの項目は [docs/08-review-categories.md](docs/08-review-categories.md) の「設計 PR のモデルレビューと詳細レビュー」 | 分けない |
 
 `--max-rounds` を渡せば、どちらの分類でも渡した値が勝つ。
 
@@ -131,11 +132,17 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 ## 実行
 
-Skill のディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。**値のある引数だけを
+**対象のリポジトリの中（メインディレクトリか worktree）で**、次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+駆動の位置は解決のエントリポイント（`resolve.sh`）が導入先から求める（[scripts-lookup.md](../development-workflow/references/scripts-lookup.md)）。
+駆動はリポジトリを作業ディレクトリから求めるため、**Skill のディレクトリへ `cd` しない**（`cd` したときは、`cd` する前の場所が作業ツリーならそこで続ける）。
+シェルの変数は呼び出しをまたいで残らないため、各ブロックを 1 回の呼び出しとして打つ。**値のある引数だけを
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
   [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
@@ -144,9 +151,22 @@ python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rou
 124 が返るあいだ**別の呼び出しとして**打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
 
 ```bash
+# 起動（1 回の呼び出し）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
-bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> [上と同じ引数]
-bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$CR/drive.py" <PR> [上と同じ引数]
+```
+
+```bash
+# 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
+bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
 待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
@@ -165,7 +185,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
 振動を検知したときは、メインが正しい状態を決めてから打ち直す。
 
-再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
+再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`<git の共通ディレクトリ>/ndf/state/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status` / `ci` / `ci_reason`）である。`ci` は最後のラウンドの
 継続的統合の判定（`ci.verdict`。無ければ `null`）、`ci_reason` はその判定が `unverified`・`meta_only`・`pending` のときの理由

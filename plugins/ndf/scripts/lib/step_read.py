@@ -1,138 +1,38 @@
 """step_read.py: 手順のスクリプトの結果と材料を読む側の共通の規則（#2227）。
 
-- `pick_ok_attempt`: 同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から、`status` が
-  `ok` の試行のうち番号の最も大きいものだけを採る。`ok` の試行が無ければ値を返さず、理由を返す
-- `open_place` / `place_stop`: 結果の置き場（ファイル・ディレクトリ）が無い・読めないことと、
-  置き場はあるが材料が 0 件であることを別の値で返す
 - `result_line` / `not_ok_reason`: 子プロセスの標準出力の最後の行を結果 JSON として読み、`ok`（終了コード 0）で
   なければ理由の 1 行を返す。結果 JSON が無い・形が誤っていることも成功と読まない
+- `read_result_file`: 結果ファイル（worker の作業の結果ファイル・`NDF_RESULT_FILE`）を読む
+- `last_json`: 出力の最後の JSON の行を、形を確かめずに読む（要約・件数を写すだけの箇所。成否の判定には使わない）
+- `read_completed`: 子プロセス（`subprocess.CompletedProcess`）の結果を読む
+  どちらも結果 JSON を返し、無い・読めない・形が違う・状態と終了コードが食い違うときは理由つきの `stopped` を返す
 
-読むだけで、試行も置き場も書き換えない。形の正本は同じディレクトリの README.md の
+読むだけで、結果を書き換えない。形の正本は同じディレクトリの README.md の
 「手順のスクリプトの結果」。標準ライブラリだけで書く。
 """
 
 from __future__ import annotations
 
 import json
-import re
+import os
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import step_result  # noqa: E402
 
-# Pick.outcome の語彙
-PICK_OK = "ok"
-PICK_NO_OK_ATTEMPT = "no_ok_attempt"
-PICK_NO_ATTEMPT = "no_attempt"
-PICK_NO_PLACE = "no_place"
-PICK_UNREADABLE = "unreadable"
 
-# Place.state の語彙
-PLACE_MISSING = "missing"
-PLACE_UNREADABLE = "unreadable"
-PLACE_EMPTY = "empty"
-PLACE_PRESENT = "present"
-
-_ATTEMPT_RE = re.compile(r"^(\d+)-(.+)\.out$")
-
-
-@dataclass(frozen=True)
-class Pick:
-    """試行の選び方の結果。採れたときだけ result と number を持つ。"""
-
-    outcome: str
-    result: dict | None = None
-    number: int | None = None
-    attempts: tuple = field(default_factory=tuple)  # (番号, status) の組。結果 JSON の無い試行は "none"
-
-
-@dataclass(frozen=True)
-class Place:
-    """置き場の状態。present のときだけ text（ファイル）か entries（ディレクトリ）を持つ。"""
-
-    path: Path
-    state: str
-    text: str | None = None
-    entries: tuple = field(default_factory=tuple)
-    reason: str = ""
-
-
-def _last_result(text: str, tool: str) -> dict | None:
-    """ファイルの最後の、tool が一致し形の正しい結果 JSON。"""
-    for line in reversed(text.splitlines()):
+def last_json(text: str) -> dict | None:
+    """出力の最後の JSON の行を読む（形は確かめない）。成否は `read_completed` / `not_ok_reason` で決める。"""
+    for line in reversed((text or "").splitlines()):
         line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(obj, dict) and obj.get("tool") == tool and not step_result.validate_result(obj):
-            return obj
-    return None
-
-
-def _attempt_files(d: Path, step: str) -> list[tuple[int, Path]]:
-    found = []
-    for p in d.iterdir():
-        m = _ATTEMPT_RE.match(p.name)
-        if m and m.group(2) == step and p.is_file():
-            found.append((int(m.group(1)), p))
-    return sorted(found)
-
-
-def pick_ok_attempt(dir, step: str, tool: str) -> Pick:
-    """`dir` の `NN-<step>.out` から、status が ok の試行のうち番号の最も大きいものを採る。例外を投げない。"""
-    d = Path(dir)
-    if not d.exists():
-        return Pick(PICK_NO_PLACE)
-    try:
-        files = _attempt_files(d, step)
-    except OSError:
-        return Pick(PICK_UNREADABLE)
-    if not files:
-        return Pick(PICK_NO_ATTEMPT)
-    attempts = []
-    best = None
-    for n, p in files:
-        try:
-            obj = _last_result(p.read_text(encoding="utf-8"), tool)
-        except (OSError, UnicodeDecodeError):
-            obj = None
-        status = obj["status"] if obj else "none"
-        attempts.append((n, status))
-        if status == "ok":
-            best = (n, obj)
-    if best is None:
-        return Pick(PICK_NO_OK_ATTEMPT, attempts=tuple(attempts))
-    return Pick(PICK_OK, result=best[1], number=best[0], attempts=tuple(attempts))
-
-
-def open_place(path) -> Place:
-    """置き場を開き、無い / 読めない / 空 / ある に分ける。例外を投げない。"""
-    p = Path(path)
-    try:
-        if not p.exists():
-            return Place(p, PLACE_MISSING)
-        if p.is_dir():
-            entries = tuple(sorted(p.iterdir()))
-            return Place(p, PLACE_PRESENT, entries=entries) if entries else Place(p, PLACE_EMPTY)
-        text = p.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as e:
-        return Place(p, PLACE_UNREADABLE, reason=str(e))
-    return Place(p, PLACE_PRESENT, text=text) if text.strip() else Place(p, PLACE_EMPTY, text=text)
-
-
-def place_stop(tool: str, place: Place, what: str):
-    """置き場が無い・読めないときの stopped の結果と終了コードの組。空・ありなら None（呼ぶ側が読む）。"""
-    if place.state == PLACE_MISSING:
-        return step_result.result(tool, "stopped", f"{what} の置き場が無い: {place.path}"), step_result.EXIT_PRECONDITION
-    if place.state == PLACE_UNREADABLE:
-        why = f"（{place.reason}）" if place.reason else ""
-        return step_result.result(tool, "stopped", f"{what} の置き場を読めない: {place.path}{why}"), step_result.EXIT_UNREADABLE
+        if line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            return obj if isinstance(obj, dict) else None
     return None
 
 
@@ -161,3 +61,39 @@ def process_if_not_ok(run: str, completed) -> list[dict]:
     """子プロセス（`subprocess.CompletedProcess`）の結果 JSON が ok でなければ、過程の項目 1 件（`run` / `result`）の列を返す。"""
     why = not_ok_reason(completed.stdout, completed.returncode, completed.stderr)
     return [{"run": run, "result": why}] if why else []
+
+
+def _stopped_result(tool: str, kind: str, name: str, reason: str) -> dict:
+    return step_result.result(tool, "stopped", reason, gaps=[{"kind": kind, "name": name, "reason": reason}])
+
+
+def read_result_file(path: str | os.PathLike, tool: str = "result-file") -> dict:
+    """結果ファイルの 1 行を結果 JSON として読む。無い・読めない・形が違えば理由つきの stopped を返す（I10）。"""
+    p = Path(path)
+    try:
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return _stopped_result(tool, "result-missing", str(p), f"結果ファイルが無い: {p}")
+    except OSError as e:
+        return _stopped_result(tool, "result-unreadable", str(p), f"結果ファイルを読めない: {p}: {e}")
+    obj = result_line(text)
+    if obj is None:
+        return _stopped_result(tool, "result-shape", str(p), f"結果ファイルが結果 JSON の形でない: {p}")
+    return obj
+
+
+def read_completed(completed, tool: str = "child") -> dict:
+    """子プロセスの標準出力の最後の行を結果 JSON として読む。無い・形が違う・状態と終了コードが食い違えば stopped を返す。"""
+    obj = result_line(completed.stdout)
+    code = completed.returncode
+    if obj is None:
+        why = f"結果 JSON が無い（exit={code}）: {(completed.stderr or '').strip()[:200]}"
+        return _stopped_result(tool, "result-missing", tool, why)
+    if not step_result.code_matches(obj["status"], code):
+        return _stopped_result(obj.get("tool") or tool, "result-shape", tool, f"状態 {obj['status']} と終了コード {code} が食い違う")
+    return obj
+
+
+def is_ok(obj: dict | None) -> bool:
+    """結果を成功と読むのは status が ok のときだけ。"""
+    return isinstance(obj, dict) and obj.get("status") == "ok"

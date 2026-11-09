@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/lib/parallel_external.py",
+  "name": "release-branch",
+  "kind": "pending",
+  "reason": "並列の計画のまとめたリリースが delivery を読まず、版を plugin.json から決める。#2616 が宣言を読む形へ直すまで残す",
+  "count": 3,
+  "issue": 2616
+}

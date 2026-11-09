@@ -1,17 +1,17 @@
-# 版と配布
+# 版とリリース
 
-NDF プラグインの版数の付け方と、正式版・開発版のリリースの手順・実測・一覧を持つ。**この主題の正本である。**
-判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版と配布の方針」にあり、この文書は
+NDF プラグインの版数の付け方と、正式版のリリース・開発版のデプロイの手順・実測・一覧を持つ。**この主題の正本である。**
+判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版とリリースの方針」にあり、この文書は
 どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は確定仕様（[specifications/](specifications/)）にある（v10.17.51 までは [archive/version-decisions/](archive/version-decisions/)）。
 
 ## チャネルと ref
 
-**配布のチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
+**デプロイのチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
 開発の変更は `develop` へマージし、正式版として出すときだけ `develop` の承認したコミットを
 `main` へ送る。**これにより、マージとリリースが別の操作になる。**
 
 分けない場合、マージした時点で常用する利用者へ届く。レビューを通った変更であっても、利用者の
-環境で動くかはリリースした後にしか分からない。`release` が定めた「検証リリース → 本番リリース」の
+環境で動くかはリリースした後にしか分からない。`release` が定めた「開発版のデプロイ → 本番リリース」の
 2 段階が、チャネルが 1 つでは 1 段階に潰れる。
 
 | チャネル | ref | 何が載るか | 誰が登録するか |
@@ -38,7 +38,7 @@ Codex は全ブランチを取得するが、登録した ref を基準にする
 （後述）、正式版と開発版を同時には入れられない。常用する利用者が開発版を試すときは、一時的に
 登録し直すか、`claude --plugin-dir` で読み込む。
 
-## 版の付け方と開発版の配布
+## 版の付け方と開発版のデプロイ
 
 **セマンティックバージョニング**:
 - **MAJOR**: 破壊的変更
@@ -57,11 +57,11 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `10.27.16` | 利用者が常用してよい |
+| 正式版 | `10.27.46` | 利用者が常用してよい |
 | 開発版 | `10.28.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
 | 公開前の確認版 | `10.28.0-rc.1` | 正式版の候補。残るのは確認だけ |
 
-- 接尾辞は**次に出す正式版の版数へ付ける**。`10.27.16` の次を開発するなら `10.28.0-dev.1`
+- 接尾辞は**次に出す正式版の版数へ付ける**。`10.27.46` の次を開発するなら `10.28.0-dev.1`
 - 連番は開発版を出すたびに増やす。**同じ版数で中身を差し替えない**。差し替えると、利用者の
   手元にある版と `main` の版が同じ番号で別物になり、何を確かめたのかが分からなくなる
 - **正式版を出すときは接尾辞を外す。** `10.28.0-dev.3` の次は `10.28.0`
@@ -69,9 +69,9 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 ## ランタイムごとの取得と導入
 
-**配布先は Claude Code と Codex の 2 つである。** Kiro CLI と agy へは配らず（#2231。最後に配ったのは
+**導入先のランタイムは Claude Code と Codex の 2 つである。** Kiro CLI と agy へは配らず（#2231。最後に配ったのは
 `10.27.4`）、cross-review / cross-refactoring の相手役として CLI を起動するだけである。前の版で入れた手元の扱いは
-[plugins/ndf/README.md の「agy・Kiro CLI への配布の終了」](../plugins/ndf/README.md#agykiro-cli-への配布の終了)にある。
+[plugins/ndf/README.md の「agy・Kiro CLI へのデプロイの終了」](../plugins/ndf/README.md#agykiro-cli-へのデプロイの終了)にある。
 
 **取得元の登録と、プラグインの導入は別の操作である。** 登録は取得元の一覧を書き換えるだけで、
 導入済みの実体には触れない。実体は版ごとのディレクトリ（`plugins/cache/<取得元>/<名前>/<版>/`）
@@ -133,22 +133,22 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 
 ## 正式版を出す
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、承認ゲート 2 で承認したコミット
+**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、リリース承認ゲートで承認したコミット
 （`develop` のコミット）から `release/v<版>` を切って版上げのコミットを積み、`release/v<版>` を先に `develop` へ
 取り込んでから、`release/v<版>` を head にした `main` 宛の Pull Request を管理者の bypass でマージする。
 `main` へ直接コミットしない。`main` 宛の Pull Request は `develop` に含まれるコミットだけを出す（head は
 `develop` か、先頭が `origin/develop` の祖先の `release/v<版>`。`scripts/check-pr-base.sh`）。
 
-**承認の後に `develop` が進んでも、配布は止まらない。** 本番の配布（`release-steps.py release --channel prod`）が
+**承認の後に `develop` が進んでも、デプロイは止まらない。** リリース（`release-steps.py release --channel prod`）が
 承認したコミットと比べる相手は `origin/release/v<版>` の先端とし、`develop` の先端は比べる相手に入れない。`release/v<版>` に
 承認したコミットと版上げの外のコミットがあれば、承認ゲート（終了コード 10）で止まる。承認の後に `develop` へ
-入った変更は、この版の `main` には入らず次の配布で出る。
+入った変更は、この版の `main` には入らず次のリリースで出る。
 
 **`release/v<版>` を `develop` へ取り込むときに版数を持つ箇所が衝突したら、本番の版を取る。** 承認の後に
-開発版の配布が `develop` の版数を上げていると衝突する。`release/v<版>` そのものへは `develop` を取り込まず
+開発版のデプロイが `develop` の版数を上げていると衝突する。`release/v<版>` そのものへは `develop` を取り込まず
 （取り込むと承認の外のコミットが `main` へ出る）、`release/v<版>-sync` に `origin/develop` を取り込んで衝突した塊の
 `release/v<版>` の側を取り、`release/v<版>-sync` → `develop` の Pull Request で取り込む。版数の外の箇所が
-衝突すれば解かずに止まる。取り込んだ後の `develop` の版数は本番の版になり、次の開発版の配布は次に空いている版で
+衝突すれば解かずに止まる。取り込んだ後の `develop` の版数は本番の版になり、次の開発版のデプロイは次に空いている版で
 決め直す。取り込みはマージのコミットで行い（squash と rebase では行わない）、`release/v<版>` の先頭を
 `develop` の祖先に残す。
 
@@ -204,22 +204,25 @@ git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空で
 （`runtime-plugin-validate` など）は常に回す。
 
 **`main` を進めるのが `release` の「本番リリース」である。** そちらには承認が要る。`develop`
-へのマージは「検証リリース」にあたり、承認なしで進めてよい（`/ndf:release`）。
+へのマージは「開発版のデプロイ」にあたり、承認なしで進めてよい（`/ndf:release`）。
 
 **正式版のリリースの Pull Request には、版ごとのトークン消費の記録が載る。** `release` の手順 3 で
 `.ndf/release.json` のリリースコマンド（`scripts/token-usage-snapshot.py --released <版>`）が走り、
 `docs/metrics/ndf-token-usage/<集計日>.md` / `.json` を書く。前の行との比が ±30% を超えた版の
-読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。開発版のリリースでは残さない。
+読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。開発版のデプロイでは残さない。
 
-**正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
+**正式版のリリースタグと GitHub Release は CD が作る。** タグは利用者が過去の版へ戻るときの目印になる。
+`main` へのマージで `.github/workflows/release-cd.yml` が `release-steps.py publish --revision <マージのコミット>` を走らせ、
+そのコミットの `plugin.json` の版で `ndf--v<版>` のタグと、`CHANGELOG.md` の版の節を本文にした GitHub Release の
+うち足りないものを作る。版に接尾辞（開発版）があれば何も作らない。宣言は `.ndf/project.json` の `delivery` にある。
+
+**手元からタグを打たない。** 同じ名前のタグが別のコミットを指して origin にあると、CD の publish は
+「origin のタグが別のコミットを指す」で止まり、直すにはタグの付け替え（強制 push）が要る。
+手で動かすのは CD が失敗したときと CD を外したときだけで、`main` のコミットを指定して同じ処理を呼ぶ。
 
 ```bash
-claude plugin tag plugins/ndf --dry-run   # 打つ内容を確認する
-claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ送る
+python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <main のコミット>
 ```
-
-`{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
-食い違っていないかをチェックする。
 
 ## 版数を持つ箇所
 
@@ -242,25 +245,25 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 
 **plugin の README は版ごとの更新の節（`## vX.Y.Z へ更新するとき`）を持たない。** README は現行版の説明と、
 CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持ち、版ごとの変更と移行の手順は CHANGELOG.md の版の節に
-置く。配布の手順（`release-steps.py` の `bump`・`changelog`・`notes`）は README に触れない。節が戻ると
+置く。リリースの手順（`release-steps.py` の `bump`・`changelog`・`notes`）は README に触れない。節が戻ると
 `scripts/check-doc-staleness.py` が落とす（`plugins/*/README.md`・`plugins/mcp/*/README.md`）。
 
 **説明文書の本文が 5 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
 誤って伝えるか、書かれたとおりに実行できない。
 
-**指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 開発版の配布の `bump` が版数を
-`-dev.<連番>` 付きへ書き換えると、Pull Request で上限に収まった指示書の読み込み量が配布の時点で
+**指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 開発版のデプロイの `bump` が版数を
+`-dev.<連番>` 付きへ書き換えると、Pull Request で上限に収まった指示書の読み込み量がデプロイの時点で
 伸び、指示書のチェックで止まるためである。
 
 | 箇所 | 何を書くか | 突き合わせ先 |
 | --- | --- | --- |
 | `README.md` の概要 | `**NDFプラグイン vX.Y.Z**` | `ndf` の `plugin.json` |
 | `README.md` のプラグイン一覧表 | 版数の列 | 行ごとに `plugins/<名前>/.claude-plugin/plugin.json` |
-| `docs/versioning-and-distribution.md` の「版の付け方と開発版の配布」章 | 版数の例 | `ndf` の `plugin.json`（基底の比較） |
+| `docs/versioning-and-distribution.md` の「版の付け方と開発版のデプロイ」章 | 版数の例 | `ndf` の `plugin.json`（基底の比較） |
 | `plugins/ndf/README.md` の Codex のパス例 | `~/.codex/plugins/cache/.../ndf/X.Y.Z/`（2 箇所） | `ndf` の `plugin.json` |
 | `plugins/ndf/README.md` の `codex plugin list` の出力例 | 期待出力の版数 | `ndf` の `plugin.json` |
 
-**「版の付け方と開発版の配布」章だけは扱いが違う。** この章には現行版そのもの・接尾辞を
+**「版の付け方と開発版のデプロイ」章だけは扱いが違う。** この章には現行版そのもの・接尾辞を
 付けたもの・次に出す版を指すものが混ざるため、1 つの値とは照合しない。章に並ぶ版数の
 **基底**（接尾辞を除いた数字 3 つ）が現行版の基底より小さければ落ちる。次の版を指す例は通る。
 
@@ -322,7 +325,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
    指示書に残っていないかを見る。落ちた段落はその主題の確定仕様（`docs/specifications/`）へ移す
 7. 破壊的変更がある場合は明示
 8. テストを実行
-9. **正式版として `main` を進めた後、リリースタグを打つ**
+9. **正式版として `main` を進めた後、CD がリリースタグと GitHub Release を作ったことを確かめる**（手で打たない。上の「正式版を出す」）
 
 **すべての版数を機械的に置換しない。** 履歴（`docs/archive/version-decisions/`、確定仕様、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
@@ -334,7 +337,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 
 ## 取得元の登録を確かめる
 
-**取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 「ランタイムごとの取得と導入」の手元での確認（`claude --plugin-dir`）は配布物を
+**取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 「ランタイムごとの取得と導入」の手元での確認（`claude --plugin-dir`）はリリース対象を
 直接読み込む確認で、取得元の登録から導入までの経路は通らない。開発版チャネルの取得手順は
 その経路そのものであるため、別の設定ディレクトリを与えて確かめる。**利用者の登録には触れない**
 （claude 2.1.261 / codex-cli 0.153.2 で実測）。

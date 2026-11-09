@@ -250,6 +250,35 @@ def test_rank_without_sub_issue_api_uses_other_sources(env):
     assert code == 0 and any("サブイシューの API" in n for n in out["metrics"]["notes"])
 
 
+def _rows(out):
+    return {r["number"]: r for m in out["metrics"]["milestones"] for r in m["rows"]}
+
+
+def test_rows_carry_open_prerequisites_from_records_and_parallel_groups_only(env):
+    # #2604 受け入れ条件 3・4・5・8: 記録の depends_on と並列の組の依存の先にある open の課題だけを、昇順で載せる
+    def setup(st):
+        st["issues"]["5"] = _issue(5, "01 近い")
+        st["issues"]["6"] = {**_issue(6, "01 近い"), "state": "closed"}
+        st["issues"]["1"]["sub_issues_summary"] = {"total": 1}
+        st["sub_issues"] = {"1": [5]}  # 子の #5 は親の #1 に依存する（サブイシューの辺だけ）
+        st["milestones"][0]["description"] = M1_DESC.replace("| 1 | #1 #2 | a | なし |", "| 1 | #1 | a | なし |\n| 2 | #2 | b | 1 |")
+
+    env.set(setup)
+    specs = [sc(1, depends_on=[4, 6]), sc(2, depends_on=[3]), sc(3), sc(4), sc(5)]
+    code, out = env.run("rank", "--scores", env.scores(specs))
+    assert code == 0, out
+    rows = _rows(out)
+    assert rows[1]["prerequisites"] == [4]  # 閉じた #6 は載らない。#4 はマイルストーン未設定
+    assert rows[2]["prerequisites"] == [1, 3]  # 並列の組の #1 と、別のマイルストーンの #3
+    assert "prerequisites" not in rows[5] and "prerequisites" not in rows[3]
+
+
+def test_rows_without_dependencies_have_no_prerequisites(env):
+    # #2604 受け入れ条件 9: 依存の記録が無ければ行に項目を出さない
+    _, out = env.run("rank", "--scores", env.scores(BASE))
+    assert all("prerequisites" not in r for r in _rows(out).values())
+
+
 # ---------------- apply ----------------
 
 
@@ -367,7 +396,24 @@ def test_waiting_decision_and_needs_detail_are_reported(env):
     assert rep["metrics"]["waiting_decision"] == [4] and rep["metrics"]["needs_detail"] == {"4": ["size"]}
 
 
+def _created(env, before=(), after=()):
+    """起点（v1 のコミットの時刻）より前と後に作られた課題にする。"""
+
+    def fn(st):
+        for n in before:
+            st["issues"][str(n)]["created_at"] = "2000-01-01T00:00:00Z"
+        for n in after:
+            st["issues"][str(n)]["created_at"] = "2999-01-01T00:00:00Z"
+
+    env.set(fn)
+
+
+def _unscored(out):
+    return {i["number"] for i in out["items"] if "unscored" in i.get("routes", [])}
+
+
 def test_candidates_pick_unscored_issues_only_after_rank(env):
+    _created(env, after=(1, 2, 3, 4))
     _, out = env.run("candidates", "--since-ref", "v1")
     assert out["metrics"]["by_route"]["unscored"] == 0
     snaps = {i["number"]: i["digest"] for i in env.run("candidates", "--since-ref", "v1", "--all")[1]["items"]}
@@ -377,6 +423,29 @@ def test_candidates_pick_unscored_issues_only_after_rank(env):
     got = {i["number"] for i in out["items"] if "unscored" in i.get("routes", [])}
     assert got == {1, 4}  # 本文の変わった #1 と、見積の無い #4
     assert not (env.sd / "rank.json").exists()
+
+
+def test_diff_candidates_score_only_issues_created_after_the_ref(env):
+    """差分の棚卸しの見積の無い経路は起点より後に作られた課題だけ。見直しは作られた時刻で絞らない（#2315 の I4・I5）。"""
+    env.run("rank", "--scores", env.scores([]))  # 見積の記録を作る（4 件とも見積が無い）
+    _created(env, before=(1, 3), after=(2, 4))
+    assert _unscored(env.run("candidates", "--since-ref", "v1")[1]) == {2, 4}
+    assert _unscored(env.run("candidates", "--since-ref", "v1", "--depth", "review")[1]) == {1, 2, 3, 4}
+
+
+def test_diff_rank_leaves_issues_created_before_the_ref_for_review(env):
+    """差分の棚卸しの rank は、起点以前に作られた見積の無い課題で止まらず、見直しへ回す（#2315 の決定 1・決定 6）。"""
+    _created(env, before=(1, 3), after=(2, 4))
+    code, out = env.run("rank", "--since-ref", "v1", "--scores", env.scores([s for s in BASE if s["number"] in (2, 4)]))
+    assert code == 0 and out["metrics"]["excluded"] == [] and out["metrics"]["left_for_review"] == [1, 3]
+    ranked = {r["number"] for m in out["metrics"]["milestones"] for r in m["rows"]}
+    assert not ranked & {1, 3}
+    code, out = env.run("rank", "--since-ref", "v1")  # 起点より後の課題は記録の見積を使い、見積が無ければ外す
+    assert code == 0 and out["metrics"]["left_for_review"] == [1, 3]
+    _created(env, after=(1,))
+    code, out = env.run("rank", "--since-ref", "v1")
+    assert code == 20 and {e["number"] for e in out["metrics"]["excluded"]} == {1}
+    assert "left_for_review" not in env.run("rank")[1]["metrics"]  # 渡さなければ従来どおり
 
 
 def test_apply_does_not_write_the_table_when_a_planned_move_fails(env):

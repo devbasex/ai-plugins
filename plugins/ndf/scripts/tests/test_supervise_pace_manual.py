@@ -1,6 +1,6 @@
 """手動反映の本番系（#1454）: 起点と本番チャネルが同じで、本番系の行がすべて手動のリポジトリの pace: auto / fast。
 
-使ってよい条件・ステージの並び（開発版 → 承認ゲート 2 → 本番）・承認ゲート 2 のプランと deploy-facts を見る。
+使ってよい条件・ステージの並び（開発版 → リリース承認ゲート→ 本番）・リリース承認ゲートのプランと deploy-facts を見る。
 実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
 """
 
@@ -62,11 +62,11 @@ def waves_of(tmp_path, rows, pace="auto"):
 
 @pytest.mark.parametrize("pace, rows, tail", [("auto", [STG, PRD], ["開発版"]), ("fast", [PRD], [])])
 def test_manual_production_uses_the_pace(tmp_path, pace, rows, tail):
-    """AC1・AC4・I5: 断らず、承認ゲート 2 の MVV 判定は検査の後・本番の前に 1 回だけある
+    """AC1・AC4・I5: 断らず、リリース承認ゲートの MVV 判定は検査の後・本番の前に 1 回だけある
     （fast の単独の queue は利用者の承認ゲートになる。test_fast_alone_asks_the_user_instead_of_the_mvv_judge）。"""
     waves = waves_of(tmp_path, rows, pace)
     names = [w["name"] for w in waves]
-    assert names[-3:] == [*(["検査"] if pace == "auto" else ["実装レビュー"]) * (not tail), *tail, "承認ゲート 2", "本番"], names
+    assert names[-3:] == [*(["検査"] if pace == "auto" else ["実装レビュー"]) * (not tail), *tail, "リリース承認ゲート", "本番"], names
     gates = [(i, p) for i, w in enumerate(waves) for p in w.get("plans", []) if "--gate release" in Path(p).read_text()]
     first = names.index("検査")
     assert len(gates) == 1 and first < gates[0][0] < names.index("本番"), gates
@@ -75,9 +75,9 @@ def test_manual_production_uses_the_pace(tmp_path, pace, rows, tail):
 
 
 def test_the_gate_waits_for_the_dev_release_when_there_is_one(tmp_path):
-    """決定 6: 開発版があれば承認ゲート 2 は単独の queue で、auto は検査の PR を渡す。"""
+    """決定 6: 開発版があればリリース承認ゲートは単独の queue で、auto は検査の PR を渡す。"""
     waves = {w["name"]: w for w in waves_of(tmp_path, [STG, PRD])}
-    gate = waves["承認ゲート 2"]
+    gate = waves["リリース承認ゲート"]
     assert "command" in gate and "then_of" not in gate
     s = steps_of(load(gate["plans"][0]))
     assert "{queue_pr:check}" in s["mvv"]["cmd"] and s["facts"]["next"] == "mvv" and "on_fail" not in s["facts"]
@@ -86,16 +86,16 @@ def test_the_gate_waits_for_the_dev_release_when_there_is_one(tmp_path):
 
 def test_the_gate_follows_the_check_without_a_dev_release(tmp_path):
     waves = {w["name"]: w for w in waves_of(tmp_path, [PRD])}
-    assert "開発版" not in waves and waves["承認ゲート 2"]["then_of"] == "設計"
-    assert "{queue_pr:check}" in steps_of(load(waves["承認ゲート 2"]["plans"][0]))["mvv"]["cmd"]
+    assert "開発版" not in waves and waves["リリース承認ゲート"]["then_of"] == "設計"
+    assert "{queue_pr:check}" in steps_of(load(waves["リリース承認ゲート"]["plans"][0]))["mvv"]["cmd"]
     fast = {w["name"]: w for w in waves_of(tmp_path / "f", [PRD], "fast")}
-    assert "{queue_prs}" in steps_of(load(fast["承認ゲート 2"]["plans"][0]))["mvv"]["cmd"]
+    assert "{queue_prs}" in steps_of(load(fast["リリース承認ゲート"]["plans"][0]))["mvv"]["cmd"]
 
 
 def test_fast_alone_asks_the_user_instead_of_the_mvv_judge(tmp_path):
     """決定 6: fast の単独の queue は PR を集められないため、MVV 判定を打たずに 10 を返す。"""
     waves = {w["name"]: w for w in waves_of(tmp_path, [STG, PRD], "fast")}
-    mvv = steps_of(load(waves["承認ゲート 2"]["plans"][0]))["mvv"]
+    mvv = steps_of(load(waves["リリース承認ゲート"]["plans"][0]))["mvv"]
     assert "mvv-gate.py" not in mvv["cmd"] and mvv["gate_next"] == "end"
     assert subprocess.run(mvv["cmd"], shell=True, capture_output=True).returncode == 10
 
@@ -134,7 +134,7 @@ def test_a_failed_verify_stops_before_the_mvv_judge(tmp_path, verify, ran):
     commit_all(repo)
     p, out = new_sprint(tmp_path, repo)
     assert p.returncode == 0, p.stdout + p.stderr
-    gate = next(w for w in load(out / "sprint.json")["ステージ"] if w["name"] == "承認ゲート 2")
+    gate = next(w for w in load(out / "sprint.json")["ステージ"] if w["name"] == "リリース承認ゲート")
     plan = load(gate["plans"][0])
     mark = tmp_path / "mvv-ran"
     for s in plan["steps"]:

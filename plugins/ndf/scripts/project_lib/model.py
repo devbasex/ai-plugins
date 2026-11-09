@@ -33,7 +33,8 @@ class Language(schema.Shape):
 
 class Container(schema.Shape):
     """suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを
-    確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければ走らせない。
+    確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければテスト環境を 1 度起こして確かめ直し、
+    それでも見ていなければ走らせない。
     `compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。"""
 
     service: str
@@ -124,6 +125,14 @@ class Services(schema.Shape):
     databases: list[str] = []
 
 
+class DeliveryResult(schema.Shape):
+    """CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない宣言として止める。"""
+
+    workflow: Optional[str] = None  # GitHub Actions のワークフローのファイル名
+    command: Optional[str] = None  # シェルのコマンド。{revision} を 40 桁のリビジョンへ置き換える。0 成功 / 75 待つ / 1 失敗 / ほか未確定
+    timeout_seconds: Optional[Annotated[int, Field(gt=0)]] = None  # 待ちの上限（秒）
+
+
 class Delivery(schema.Shape):
     target: str
     kind: Literal["auto", "manual"]
@@ -132,6 +141,11 @@ class Delivery(schema.Shape):
     channel: Optional[Literal["production", "base"]] = None  # 本番のブランチ / ベースブランチへのマージで動く（名前を写さない。#2336）
     versioned: bool
     production: Optional[StrictBool] = None  # true: 本番系へ届く / false: 届かない（検証の環境）/ 無し: 決めない（#1454）
+    manual_reason: Optional[str] = None  # kind: manual の行で読む。あえて CD を置かない理由（#2623）
+    result: Optional[DeliveryResult] = None  # kind: auto の行で読む。無ければ CD の結果は未確定（#2623）
+    publishes_release: Optional[StrictBool] = (
+        None  # kind: auto・versioned: true の行で読む。真ならこの行の CD がタグと GitHub Release を作る（#2623）
+    )
 
 
 class Issues(schema.Shape):

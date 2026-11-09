@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import worktree_deps
+from state_home import checkout_home
 from supervise_lib import decl, plan as plan_mod
 
 SELF = Path(__file__).resolve().parent.parent / "supervise.py"
@@ -45,7 +46,7 @@ def default_refactor_budget_minutes() -> int:
     return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
 
 
-HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
+HERE = SELF.parent  # デプロイしたスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
     "sync-check": f"python3 {SELF} sync-check --commit",
@@ -57,10 +58,6 @@ PRESETS = {
 
 # テストの実行の入口（#1334）。範囲テスト（scope）と全体テスト（whole）を、宣言の戦略に沿って走らせる
 TEST_RUN_PY = f"python3 {HERE / 'test-run.py'}"
-
-
-WORKTREE_LOCK_RETRIES = 5  # .git/config の lock で落ちたときのやり直しの回数
-WORKTREE_LOCK_WAIT = 1.0  # やり直しの間隔（秒）
 
 
 def is_config_lock(stderr: str) -> bool:
@@ -76,7 +73,7 @@ def _prepare_deps(wt, **kw) -> str | None:
 def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
     """作業ツリーの起点（起点のコミット → 起点 → base_branch → 宣言の順）を決め、origin なら fetch する。(起点, 誤りの文) を返す。
 
-    「起点のコミット」は作業ツリーだけが読む（まとめた配布の本番のプランが承認したコミットを入れる）。版の判定と
+    「起点のコミット」は作業ツリーだけが読む（まとめたリリースの本番のプランが承認したコミットを入れる）。版の判定と
     probe の {base} は「起点」（`origin/<ベースブランチ>`）を読むため、承認したコミットを「起点」へ入れない。"""
     base = plan.get("起点のコミット") or plan.get("起点")
     if not base:
@@ -90,11 +87,12 @@ def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
 
 
 def _add_worktree_with_retry(repo: str, wt: Path, branch: str, base: str, sleep) -> subprocess.CompletedProcess:
-    """作業ツリーを作る。.git/config の lock で落ちたら途中の生成物を片付けてやり直す。最後の結果を返す。"""
-    p = None
-    for i in range(WORKTREE_LOCK_RETRIES + 1):
-        if i:
-            sleep(WORKTREE_LOCK_WAIT)
+    """作業ツリーを作る。.git/config の lock で落ちたら途中の生成物を片付けてやり直す（上限の宣言の方針
+    `supervise.worktree-lock`。打ち直しは lib/waits.py）。最後の結果を返す。"""
+    import limits
+    import waits
+
+    def attempt() -> subprocess.CompletedProcess:
         has = (
             subprocess.run(
                 ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], capture_output=True, text=True
@@ -103,20 +101,28 @@ def _add_worktree_with_retry(repo: str, wt: Path, branch: str, base: str, sleep)
         )
         cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
         p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode == 0 or not is_config_lock(p.stderr):
-            return p
-        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
-        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
-        if wt.exists() and not any(wt.iterdir()):
-            wt.rmdir()
-    return p
+        if p.returncode != 0 and is_config_lock(p.stderr):
+            # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
+            subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
+            if wt.exists() and not any(wt.iterdir()):
+                wt.rmdir()
+        return p
+
+    got = waits.retry_call(
+        attempt,
+        lambda p: p.returncode != 0 and is_config_lock(p.stderr),
+        policy=limits.policy("supervise.worktree-lock"),
+        reason=lambda p: p.stderr,
+        sleep=sleep,
+    )
+    return got.value
 
 
 def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
 
     run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
-    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
+    上限の宣言の方針 `supervise.worktree-lock` の間隔と回数でやり直す。
     """
     plan = plan_mod.normalize_plan(dict(plan))
     branch = plan.get("branch")
@@ -151,6 +157,8 @@ GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
 # 完了判定の設計との突き合わせ（確認 (a) tests・確認 (b) specs。#1241）
 DESIGN_MATCH_PY = f"python3 {HERE / 'design-match.py'}"
+# 自前で作る決定に外部の調査で比べた候補があるかの検査（#2519）
+DESIGN_SURVEY_PY = f"python3 {HERE / 'design-survey.py'}"
 DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
 PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"
@@ -185,11 +193,11 @@ def state_dir_of(plan: str) -> Path:
     プランが一時ディレクトリの下にあり、状態の置き場所がそうでないときだけ、実体を
     `<状態の置き場所>/<stem>-<プランの絶対パスの sha256 の先頭 8 字>/` に作り、`<プラン>-state` を
     そこへのシンボリックリンクにする（#1142 の不足 f。OS の再起動と /tmp の掃除で記録を失わない）。
-    実体にはプランの写し `plan.json` を置く。既にある `<プラン>-state` はそのまま使う。
+    実体にはプランの写し `plan.json` を置く。既にある `<プラン>-state` はそのまま使う（切れたリンクは指し直す）。
     """
     link = Path(plan).parent / (Path(plan).stem + "-state")
     try:
-        if link.exists() or link.is_symlink():
+        if link.exists():
             return link
         home = sv_state_home()
         if not under_temp(Path(plan)) or under_temp(home):
@@ -200,6 +208,8 @@ def state_dir_of(plan: str) -> Path:
         if Path(plan).is_file() and not (real / "plan.json").exists():
             shutil.copyfile(plan, real / "plan.json")
         link.parent.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink():  # 実体を移した（`state-home.py migrate`）後の切れたリンク。移し先の実体を指し直す
+            link.unlink()
         link.symlink_to(real, target_is_directory=True)
     except FileExistsError:
         pass  # 並行する起動が先に作った
@@ -229,16 +239,26 @@ def under_temp(path: Path) -> bool:
 
 
 def sv_state_home() -> Path:
-    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `<チェックアウトの根>/sv`（根は `state_home.checkout_home`）。"""
     if os.environ.get("NDF_SV_STATE_DIR"):
         return Path(os.environ["NDF_SV_STATE_DIR"])
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "sv"
+    return checkout_home() / "sv"
 
 
 def queue_done_path(plans: list[str], done: str | None) -> Path:
     """queue の終わりに結果の JSON を書く所。省けば最初の計画の状態ディレクトリの queue-done.json。"""
     return Path(done) if done else state_dir_of(plans[0]) / "queue-done.json"
+
+
+def queue_done_key(done_path: Path) -> str:
+    """持ち主の鍵に使う done のパス（#2342）。リポジトリの根からの相対にし、worktree の違いで鍵を割らない。git の外は絶対パス。"""
+    import state_home
+
+    path = Path(done_path).resolve()
+    got = state_home.find_git_dir(path.parent if path.parent.exists() else Path.cwd())
+    if got is not None and path.is_relative_to(got[0]):
+        return path.relative_to(got[0]).as_posix()
+    return str(path)
 
 
 def queue_plans_path(done: Path) -> Path:

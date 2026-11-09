@@ -16,6 +16,11 @@ from types import SimpleNamespace
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+OK_LINE = '{"tool": "external-ai", "status": "ok", "summary": "s", "items": [], "metrics": {}}'
+
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "lib"))
@@ -57,11 +62,12 @@ def body_of(name: str) -> str:
 
 class FakeClaude:
     def __init__(self, texts=()):
-        self.texts, self.calls = list(texts), []
+        self.texts, self.calls, self.rfile = list(texts), [], None
 
     def call(self, system, prompt, tools, cwd, timeout, **kw):
         self.calls.append({"system": system, "prompt": prompt, **kw})
         text = self.texts.pop(0) if self.texts else "## 作業の報告\n- 結果: 完了"
+        self.rfile = worker_fake.write_result(prompt, text, self.rfile)
         return {"ok": True, "text": text, "seconds": 0, "session": "s1", "usage": {}}
 
     def record_usage(self, kind, res):
@@ -125,7 +131,7 @@ def test_document_writing_stages_get_document_style(stage):
     assert "document-style" in stage_skills.skills_for_step({"stage": stage}, TABLE)
 
 
-@pytest.mark.parametrize("step", [{}, {"stage": None}, {"stage": "無い工程"}, {"stage": "配布"}])
+@pytest.mark.parametrize("step", [{}, {"stage": None}, {"stage": "無い工程"}, {"stage": "デプロイ"}])
 def test_steps_without_a_table_row_get_nothing(step, tmp_path):
     """受け入れ条件 2: stage が無い・対応表に無い工程は空で、本文の節が入らない。"""
     assert stage_skills.skills_for_step(step, TABLE) == []
@@ -201,7 +207,7 @@ def test_the_plain_worker_gets_only_the_resolved_skill_between_kind_and_mvv(tmp_
 
 
 def test_the_runtime_worker_gets_the_section_in_the_prompt_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(worker_steps, "run_ticking", lambda *a, **k: SimpleNamespace(stdout='{"status": "ok"}'))
+    monkeypatch.setattr(worker_steps, "run_ticking", lambda *a, **k: SimpleNamespace(stdout=OK_LINE, returncode=0, stderr=""))
     ctx = ctx_of(tmp_path)
     worker_steps.WorkStep().execute(ctx, {"id": "w", "stage": "設計", "prompt": "直す", "runtime": "codex"})
     text = (ctx.state.dir / "w-prompt.md").read_text()

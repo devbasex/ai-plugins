@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """sprint-close.py: スプリントを閉じる（progress-tracking の「スプリントを閉じる」の手順）。
 
-    python3 sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage 配布|リリース後テスト|振り返り]
+    python3 sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage デプロイ|リリース後テスト|振り返り]
                              [--prs 1,2] [--issues 3,4] [--with-verification]
                              [--label "<マイルストーン>の<工程名>"] [--dry-run] [--root <dir>]
 
-1. 記録の PR の本文とコメントを読み、最後の「## 配布の記録」ブロックを取る
+1. 記録の PR の本文とコメントを読み、最後の「## リリース記録」ブロックを取る
 2. スプリントの PR の一覧（--prs、無ければブロックの `スプリント:` の行）の本文から、closing keywords
    （GitHub が課題を自動で閉じるキーワード Closes / Fixes / Resolves）と閉じる予定の参照
    （`最終工程の後に閉じる: #N`。既定ブランチ宛の本文で closing keywords を置き換えた形）が指す課題を集める
    （lib/closing-issues.sh）。--issues の課題（記録のリポジトリ）を足す（`pace: fast` の実装 PR は
    closing keywords を持たない）。PR を読んだのに集めた課題が 0 件なら、何も書かずに止まる（終了コード 2）
-3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification か最終工程がリリース後テストのときは
+3. 閉じる条件 1（リリースまで済んだ、またはデプロイなし）と、--with-verification か最終工程がリリース後テストのときは
    条件 2（その課題のリリース後テストの行がすべて合格で、本文の受け入れ条件の番号のすべてに合格の行がある）
    を課題ごとに判定する。`課題` の列が課題を指さない行（`—`・`PR 1869` など）は飛ばす。条件 2 は課題ごとの錠
    （lib/gh_parts.py の issue_lock）の中で状態と本文を 1 回で読んで判定し（本文の `## 受け入れ条件の確認` で
    マージ前に確かめたと記録された条件には合格の行を求めない。#2144）、満たした記録のリポジトリの課題は
    本文の受け入れ条件に印（`[x]`）を付けてから閉じる（規則は lib/acceptance.py。#1683）。
    最後に条件 3（最終工程の記録。--final-stage、省けば振り返り）を判定する。振り返りは課題の本文の
-   `振り返り: <コメントの URL>` の行のうち、コメントの識別子が記録の PR の最後の配布の記録のコメントの識別子以上の
+   `振り返り: <コメントの URL>` の行のうち、コメントの識別子が記録の PR の最後のリリース記録のコメントの識別子以上の
    ものがあること（final_stage_gap。#2228）。条件 2 と同じ 1 回の本文の読みを使い、満たさなければ印も書かない
 4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題ならボードを Done →
    (c) 読み直して OPEN なら閉じる → (d) 読み直して CLOSED を確かめる
@@ -31,13 +31,18 @@ closed / already_closed / failed / kept_open / closed_unverified（既に閉じ�
 開き直さない）（--dry-run では would_close）。checked は印を付けた受け入れ条件の番号、would_check は
 --dry-run で付ける予定の番号。ボードへ Done を書けなかった（`projects-sync.sh` の結果 JSON が ok でない）ときは
 {kind:"board_note"} の項目に理由が載り、課題を閉じる処理は続ける。metrics.final_stage は判定に使った最終工程。
-`--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
-閉じる条件 1・2 を見ずに --issues の課題を閉じる（条件 3 の振り返りは、比べる配布の記録が無いため行があれば満たす）。--issues と一緒のときだけ受ける。
+`--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。リリース記録を読まず、
+閉じる条件 1・2 を見ずに --issues の課題を閉じる（条件 3 の振り返りは、比べるリリース記録が無いため行があれば満たす）。--issues と一緒のときだけ受ける。
 `--record-pr unknown` は「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。
-今のまとめのプランは組まず、記録の PR を流す時点に `{queue_record}` で解決する）。配布の記録を読まず、どの課題も閉じず、ボードも書かずに --issues の課題を理由つきの
-kept_open で返す（終了コード 0）。--issues と一緒のときだけ受ける。
-終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
-閉じる課題が 0 件・--record-pr 0 / unknown に --issues が無い / 3 = 呼び出しの誤り。
+今のまとめのプランは組まず、記録の PR を流す時点に `{queue_record}` で解決する）。リリース記録を読まず、どの課題も閉じず、ボードも書かずに --issues の課題を理由つきの
+kept_open で返す（承認ゲート・終了コード 10）。--issues と一緒のときだけ受ける。
+閉じる対象（2 で集めた課題）のうち閉じなかった課題（kept_open・closed_unverified・failed）は、gaps に 1 件ずつ
+（kind は issue、name は <リポジトリ>#<番号>、reason は項目の理由）載せる。参照だけの課題（5）は items に残し、
+gaps と状態に入れない（#2337 の I14）。
+終了コード: 0 = 閉じる対象をすべて閉じた（ok）/ 1 = 失敗あり（stopped。棚卸しへ進まない）/
+10 = 失敗は無いが閉じなかった課題がある・記録の置き場が分からない（gate。プランは棚卸しへ進む）/
+2 = 一覧が取れない・閉じる課題が 0 件・--record-pr 0 / unknown に --issues が無い・呼び出しの誤り。
+実行の核（lib/run_core.py）を通る。
 """
 
 from __future__ import annotations
@@ -55,8 +60,10 @@ import deps  # noqa: E402
 
 deps.require("md", "locks", "durable", "waits")
 from step_result import (
+    EXIT_GATE,
     EXIT_PRECONDITION,
     EXIT_UNREADABLE,
+    EXIT_VIOLATION,
     StepError,
     emit,
     git_root,  # noqa: E402
@@ -69,26 +76,28 @@ import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
+import run_core  # noqa: E402
 import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#2227）
 
 from dist_record import parse_record, released  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 sys.path.insert(0, str(HERE))
+import limits  # noqa: E402  上限の宣言（#2343）
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
+from sprint_close_lib.summary import close_summary, not_closed_gaps  # noqa: E402
 from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
-    FINAL_GAP_LEAD,
-    FINAL_STAGES,
     NO_BASE,
     STAGE_RETRO,
     STAGE_VERIFY,
+    final_stage_arg,
     final_stage_gap,
     gap_item,
 )
 
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
-UNKNOWN_REASON = "配布の記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
-LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
+UNKNOWN_REASON = "リリース記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
+LOCK_TIMEOUT = limits.seconds("sprint-close.issue-lock")  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
 IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）
@@ -205,7 +214,7 @@ def _record_repo(a, root):
 
 def _read_sprint_record(a, root, record_repo):
     if a.record_pr == 0:
-        return {"found": True, "stage": "配布なし（本番の記録なし）", "sprint_prs": [], "verify_block": None}, []
+        return {"found": True, "stage": "デプロイなし（本番の記録なし）", "sprint_prs": [], "verify_block": None}, []
     if a.record_pr == RECORD_UNKNOWN:
         return {"found": False, "stage": "記録の置き場が分からない", "sprint_prs": [], "verify_block": None}, []
     rec = parse_record(*read_record(root, record_repo, a.record_pr))
@@ -213,16 +222,16 @@ def _read_sprint_record(a, root, record_repo):
 
 
 def _stage_blocker(a, rec):
-    """本番の記録の PR と配布の段階から、閉じられない理由を返す。閉じてよければ None。"""
+    """本番の記録の PR とリリースの段階から、閉じられない理由を返す。閉じてよければ None。"""
     stage = rec["stage"] or ""
     if a.record_pr == 0:
-        return None  # 本番の記録なし: 閉じる条件（配布とリリース後テスト）を見ない
+        return None  # 本番の記録なし: 閉じる条件（リリースとリリース後テスト）を見ない
     if a.record_pr == RECORD_UNKNOWN:
         return UNKNOWN_REASON  # 記録を読めないので閉じない（#1875）
     if not rec["found"] or not stage:
-        return "配布の記録が読めない"
+        return "リリース記録が読めない"
     if not released(stage):
-        return "本番への配布の前（本番への配布の後に閉じる）"
+        return "リリースの前（リリースの後に閉じる）"
     return None
 
 
@@ -231,9 +240,8 @@ def _verify_verdicts(rec, record_repo):
     blk = rec["verify_block"]
     if blk is None:
         stage = rec["stage"] or ""
-        return (
-            "配布なしの後のリリース後テストの記録が無い" if stage.startswith("配布なし") else "本番の版のリリース後テストの記録が無い"
-        ), None
+        where = "デプロイなしの後の" if stage.startswith("デプロイなし") else "本番の版の"
+        return f"{where}リリース後テストの記録が無い", None
     verdicts = verification_verdicts(blk, record_repo)
     if verdicts is not None:
         return None, verdicts
@@ -335,20 +343,6 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
     return close_one(ctx, repo, n)
 
 
-def _close_summary(items, prs, dry_run, referenced):
-    kinds = ("closed", "already_closed", "failed", "closed_unverified", "kept_open", "would_close")
-    count = {k: sum(1 for i in items if i["result"] == k) for k in kinds}
-    metrics = {"issues": len(items), **count, "referenced_only": referenced, "prs": len(prs)}
-    summary = (
-        f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
-        f"失敗 {count['failed']} 件・閉じているが条件を満たさない {count['closed_unverified']} 件・"
-        f"開いたまま {count['kept_open']} 件（うち参照だけ {referenced} 件）"
-    )
-    if dry_run:
-        summary += f"（試行。閉じる予定 {count['would_close']} 件）"
-    return count, metrics, summary
-
-
 def _stop_no_issues(prs, refs):
     """スプリントの PR を読んだのに閉じる課題が 0 件。課題もボードも書かずに止まる（参照の状態は読まない）。"""
     seen = f"（PR が参照した番号: {' '.join(f'#{n}' for n in refs)}）" if refs else ""
@@ -380,28 +374,21 @@ def _collect_close_issues(a, root, record_repo, prs):
     return issues, refs
 
 
-def _emit_close_result(a, items, notes, metrics, summary, count, decisions):
-    """結果を出す: 失敗があれば止める → 記録の置き場が分からなければ閉じない旨 → 通常（最終工程の記録の欠けを案内）。"""
+def _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions):
+    """結果を出す: 失敗があれば止める（1）→ 記録の置き場が分からない・閉じなかった課題があれば承認ゲート（10）→ ok。"""
+    gaps = not_closed_gaps(targets)
+    out = items + notes
     if count["failed"]:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                summary,
-                items + notes,
-                metrics,
-                next="失敗した課題の cmd でやり直す。棚卸しへ進まない",
-                decisions=decisions,
-            )
-        )
+        nxt = "失敗した課題の cmd でやり直す。棚卸しへ進まない"
+        emit(result(TOOL, "stopped", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_VIOLATION)
     if a.record_pr == RECORD_UNKNOWN:
         summary = f"記録の置き場が分からないため閉じない（リリースの経路が雛形でも昇格でもない）: {summary}"
         nxt = "リリース記録とリリース後テストの記録を確かめ、受け入れ条件を満たした課題を手で閉じる"
-        emit(result(TOOL, "ok", summary, items + notes, metrics, next=nxt, decisions=decisions))
-    nxt = None
-    if any(FINAL_GAP_LEAD in (i.get("reason") or "") for i in items):
-        nxt = "最終工程の記録が無い課題は、その工程（振り返りなど）を通してから打ち直す。前の版で工程を通った課題は確かめて手で閉じる"
-    emit(result(TOOL, "ok", summary, items + notes, metrics, next=nxt, decisions=decisions))
+        emit(result(TOOL, "gate", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_GATE)
+    if gaps:
+        nxt = "閉じなかった課題は、条件を満たす工程（振り返り・リリース後テストなど）を通してから打ち直すか、確かめて手で閉じる"
+        emit(result(TOOL, "gate", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_GATE)
+    emit(result(TOOL, "ok", summary, out, metrics, decisions=decisions))
 
 
 def cmd_close(a):
@@ -422,22 +409,23 @@ def cmd_close(a):
     notes = ctx.notes
     for repo, n in issues:
         items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
+    targets = list(items)
     refs_items = referenced_items(root, record_repo, refs, issues)
     items += refs_items
 
-    count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
+    count, metrics, summary = close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     metrics["final_stage"] = a.final_stage
     decisions = [
         {"decision": f"最終工程を {a.final_stage} として判定した", "basis": f"--final-stage {a.final_stage}（省略時は{STAGE_RETRO}）"}
     ]
-    _emit_close_result(a, items, notes, metrics, summary, count, decisions)
+    _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions)
 
 
 class Parser(argparse.ArgumentParser):
-    def error(self, message):  # 呼び出しの誤りは 3
+    def error(self, message):  # 呼び出しの誤りは 2（終了コードの表の「呼び出しの誤り」）
         self.print_usage(sys.stderr)
         print(f"{self.prog}: {message}", file=sys.stderr)
-        raise SystemExit(EXIT_PRECONDITION)
+        raise SystemExit(EXIT_UNREADABLE)
 
 
 def number_list(s):
@@ -466,9 +454,9 @@ def build_parser():
         "--record-pr",
         type=record_pr_arg,
         required=True,
-        help="配布の記録を置いた PR の番号。0 は本番の記録なし、unknown は記録の置き場が分からない（どちらも --issues と一緒に渡す）",
+        help="リリース記録を置いた PR の番号。0 は本番の記録なし、unknown は記録の置き場が分からない（どちらも --issues と一緒に渡す）",
     )
-    ap.add_argument("--prs", type=number_list, help="スプリントの PR の番号（カンマ区切り）。省けば配布の記録から読む")
+    ap.add_argument("--prs", type=number_list, help="スプリントの PR の番号（カンマ区切り）。省けばリリース記録から読む")
     ap.add_argument(
         "--issues",
         type=number_list,
@@ -478,7 +466,7 @@ def build_parser():
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
     ap.add_argument(
         "--final-stage",
-        choices=FINAL_STAGES,
+        type=final_stage_arg,
         default=STAGE_RETRO,
         help="その実行の最終工程（閉じる条件 3）。省けば振り返り。リリース後テストは条件 2 を必ず見る",
     )
@@ -496,4 +484,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_core.main("scripts/sprint-close.py", main)

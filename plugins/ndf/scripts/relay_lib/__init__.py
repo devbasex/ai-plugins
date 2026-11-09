@@ -6,16 +6,17 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 | --- | --- |
 | `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。合図を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
 | `stop [<名前>] [--json]` | 名前が無ければ動いているラッパーすべてに停止の合図を置く。名前があればその 1 本だけを止める（#2346） |
-| `spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | 統括役に頼み、tmux の中に端末の結び付いていない名前つきのラッパーを起動する（#2346）。`--role helper` は一時レーンで、1 本だけ上限を超えて通る（#2436） |
-| `ls [--json]` | 同じコンテナのラッパーの名前・状態・承認待ち・区間・時刻・アカウント・役割を 1 つの表（`--json` は 1 行の JSON）で出す（#2346）。`--json` の `metrics` に統括役と tmux の有無（#2436） |
+| `spawn --name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | リレーハブに頼み、tmux の中に端末の結び付いていない名前つきのラッパーを起動する（#2346）。`--role helper` は一時レーンで、1 本だけ上限を超えて通る（#2436） |
+| `ls [--json]` | 同じコンテナのラッパーの名前・状態・承認待ち・区間・時刻・アカウント・役割を 1 つの表（`--json` は 1 行の JSON）で出す（#2346）。`--json` の `metrics` にリレーハブと tmux の有無（#2436） |
 | `role organizer\|helper --plan <計画名>` / `role --clear` | 作業ディレクトリへ役割のファイルを書く・消す。オーガナイザーの印を持つ 1 本は同時に動かせる数に数えない（#2436） |
 | `attach <名前>` / `restart <名前> [--json]` | 打った端末を名前つきのラッパーの tmux のセッションへ結び付ける・1 本を止めて起動し直す（#2346） |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す。ブロックの無い応答が本文の承認待ちで終われば 1 度止めて AskUserQuestion へ戻す |
+| `cap [--named <n>]` | レーン数の上限（同時に動かせる名前つきのラッパーの数）を読む・マシンの設定へ書く（#2733）。値はマシンの設定 → `NDF_RELAY_MAX_NAMED` → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。1 行の JSON を出す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
 | `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` / `account use <名前>\|--clear` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す・次の区間から使うアカウントを指定する（#1389・#1453・#1468・#2460。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
-| `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
+| `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（承認ゲートを越えない守り） |
 | `is-child` | ラッパーの直接の子の claude から呼ばれていれば 0 |
 | `notice` | カットポイントの告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
 
@@ -33,7 +34,7 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 `login`（OAuth の登録）・`bedrock`（Bedrock の登録と確かめ）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
 `shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）・
-`hub`（統括役）・`hub_client`（統括役への依頼の口と一覧）・`tmux`（tmux の包み）。
+`hub`（リレーハブ）・`hub_client`（リレーハブへの依頼の口と一覧）・`tmux`（tmux の包み）。
 
 規約は skills/development-workflow/references/relay.md にある。
 """
@@ -86,6 +87,7 @@ def main(argv: list[str]) -> int:
         "is-child": lambda: 0 if proc.under_relay() else 1,
         "notice": mark.cmd_notice,
         "account": lambda: accounts.cmd_account(rest),
+        "cap": lambda: _cap_cmd(rest),
     }
     if sub in commands:
         return commands[sub]()
@@ -126,6 +128,28 @@ def _help(subs: list[str], out=sys.stdout) -> int:
         lines = ["usage: relay.py <副命令> [引数 ...]", ""] + lines + ["", "relay.py <副命令> --help でその副命令だけを出す"]
     print("\n".join(lines), file=out)
     return 0
+
+
+def _cap_cmd(rest: list[str]) -> int:
+    """`cap [--named <n>]`: レーン数の上限を読む（省いたとき）・書く。正の整数でなければ 1（#2733 の決定 8）。"""
+    import json
+
+    import relay_limit
+
+    def out(status: str, summary: str, code: int, **metrics) -> int:
+        print(json.dumps({"tool": "relay-cap", "status": status, "summary": summary, "items": [], "metrics": metrics}, ensure_ascii=False))
+        return code
+
+    if rest:
+        if len(rest) != 2 or rest[0] != "--named":
+            return out("stopped", "使い方: relay.py cap [--named <正の整数>]", 1)
+        try:
+            relay_limit.write_max_named(int(rest[1]))
+        except ValueError:
+            return out("stopped", f"上限は正の整数: {rest[1]}", 1)
+    n, source, note = relay_limit.named_cap()
+    summary = f"レーン数の上限は {n}（出所: {source}）" + (f"。{note}" if note else "")
+    return out("ok", summary, 0, max_named=n, source=source, path=str(relay_limit.limits_path()))
 
 
 def _stop_cmd(rest: list[str]) -> int:

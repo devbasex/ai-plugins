@@ -33,9 +33,9 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
 | NDF の開発ワークフロー（`ndf-workflow`） | 問い合わせの区分・問い合わせの宣言・代わりの判断・問い合わせの記録・承認ゲート・レッドライン |
-| Neural Development Factory（`ndf-factory`） | 判断（`gate.reached` の種類）・ランナー・実行ジョブ |
+| Neural Development Factory（`ndf-factory`） | 判断（`gate.reached` の種類）・ランナーのエージェント・実行ジョブ |
 
-`ndf-workflow` が上流、`ndf-factory` が下流で、関係は**公開された言語**である。下流のランナーは問い合わせの記録の 1 行の形
+`ndf-workflow` が上流、`ndf-factory` が下流で、関係は**公開された言語**である。下流のランナーのエージェントは問い合わせの記録の 1 行の形
 （「データ・設定」）を読むだけで、`ndf-workflow` は下流の要求を受けて形を変えない。Claude Code は外部の系で、`ndf-workflow` が
 **順応者**として `AskUserQuestion` の入力と PreToolUse の出力の形をそのまま使う。
 
@@ -49,7 +49,7 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 利用者の依頼（#2206、2026-10-31）は「承認ゲート以外のユーザー問い合わせは原則hookで止めてAIが判断するように強制する」
 「どうしても判断が不可能な場合(金銭的コストがかかるなど)の場合のみ、AskUserQuestionを出して判断を求めます」である。
 それまで `hook.py` は `AskUserQuestion` を待ちの Slack 通知にだけ使い、判定していなかった。AI が自分で決められる問いで
-セッションが止まり、Factory のランナーでは問い合わせ 1 件ごとに実行ジョブが終わる（[ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) の I8）ため、
+セッションが止まり、Factory のランナーのエージェントでは問い合わせ 1 件ごとに実行ジョブが終わる（サービスの確定仕様 `ndf-factory-service-boundary.md` の I8）ため、
 人の答えまでスプリントが止まっていた。
 
 前提として確かめたこと（Claude Code 2.1.314、2026-10-31）:
@@ -67,7 +67,7 @@ Claude Code の `AskUserQuestion` を PreToolUse の hook（問い合わせの g
 | relay の `question open` が同じ判定に従うこと、差し戻しの文の区分の案内 | 承認ゲートの数と置き場所、`pace` の承認の委任（`.ndf/pace.json`） |
 | Codex・Kiro CLI・agy での扱い | Codex・agy の問い合わせの Tool を hook の matcher に足すこと（「運用」の制約） |
 
-**働く範囲は配布先のリポジトリを含む**（hook は NDF の配布物）。宣言が無いリポジトリでも既定で働く。
+**働く範囲は利用先のリポジトリを含む**（hook は NDF のリリース対象）。宣言が無いリポジトリでも既定で働く。
 
 ## 決定と理由
 
@@ -128,7 +128,7 @@ graph LR
     DECL[(.ndf/ask.json)]
     LEDGER[(ask.jsonl)]
     CLI[ask.py]
-    RUN[Factory のランナー]
+    RUN[Factory のランナーのエージェント]
     AI -->|AskUserQuestion| HP
     AI -->|AskUserQuestion| QO
     HP --> AG
@@ -237,9 +237,9 @@ classDiagram
 | E2 | hook が宣言を読んだ | `ask_policy.load_ask_declaration` | `judge_ask` | 無い: 既定。読めない・誤り: 既定と箇所（I4） |
 | E3 | hook が問い合わせを通した（`allow`・`advise`） | `ask_guard.ask_decision` | Claude Code（問いを出す）・待ちの通知・relay（シグナルファイルを作る） | — |
 | E4 | hook が問い合わせを止めた（`deny`） | `ask_guard.ask_decision` | AI（理由と案内を受け取る。オーガナイザーへ送ったときは保留の手順） | 内部の失敗は通す側へ倒す（I8） |
-| E5 | hook が判定を記録に書いた | `ask_ledger.append_ask_row` | 振り返り・Factory のランナー | 書けなくても判定は変えない |
+| E5 | hook が判定を記録に書いた | `ask_ledger.append_ask_row` | 振り返り・Factory のランナーのエージェント | 書けなくても判定は変えない |
 | E6 | AI が止めた理由を受け取り、自分で判断した | AI | （E7 で記録に残る） | 区分を付け替えて出し直したら、hook は区分だけを見て判定する |
-| E7 | AI が判断と理由を記録した | `ask.py decide` | 振り返り・Factory のランナー | 記録しないまま進むと、E5 の止めた行だけが残り `unanswered` に数えられる |
+| E7 | AI が判断と理由を記録した | `ask.py decide` | 振り返り・Factory のランナーのエージェント | 記録しないまま進むと、E5 の止めた行だけが残り `unanswered` に数えられる |
 | E8 | 利用者が通った問い合わせに答えた | 利用者 | AI・relay の `question close`（PostToolUse） | — |
 | E9 | 振り返りで区分の使い方を見直した | `ask.py summary` を読む振り返り | 宣言の書き手（利用者） | — |
 
@@ -403,8 +403,8 @@ erDiagram
 | `answer` | 文字列 | — | 持つ | 選んだ答え |
 
 `—` はその種類の行に列を置かないことを表す。保存の期間は決めず、消すのは利用者である（ほかの状態の記録と同じ）。
-Factory のランナーは実行ジョブの中で同じパスを読み、`session` と `at` で自分の実行の行を選ぶ（事象への翻訳は
-[ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) の `decision.delegated`）。
+Factory のランナーのエージェントは実行ジョブの中で同じパスを読み、`session` と `at` で自分の実行の行を選ぶ（事象への翻訳は
+サービスの確定仕様 `ndf-factory-service-boundary.md` の `decision.delegated`）。
 
 | 名前 | 置き場所 | 値・形 |
 | --- | --- | --- |
@@ -436,7 +436,7 @@ NDF の Skill とエージェントの本文で利用者へ問う手順は、次
 
 | 問いの種類 | 当て方 |
 | --- | --- |
-| 承認ゲート 1・2 の承認と、その委任の承認（スプリント MVV・設計の承認・本番系へ届く操作・リリース・制作物承認・マージの承認） | `ndf-gate:1` / `ndf-gate:2` を付けて問う |
+| 設計承認ゲート・リリース承認ゲートの承認と、その委任の承認（スプリント MVV・設計の承認・本番系へ届く操作・リリース・制作物承認・マージの承認） | `ndf-gate:1` / `ndf-gate:2` を付けて問う |
 | レッドライン（共通原則の C1〜C8・プロジェクトの P・スプリントの R）に当たる操作の承認（例: `.ndf/` の書き換えは `C7`、`-D` や退避先の削除は `C4`、他のリポジトリへの起票や push は `C5`） | `ndf-ask:redline:<番号>` を付けて問う |
 | 費用・レッドラインに当たらない取り消せない外部への操作・人にしかできない操作・規約と契約への同意 | `ndf-ask:cost` / `irreversible` / `human-action` / `legal` を付けて問う |
 | どの区分に当たるかが中身で変わる問い | 区分ごとに場合を分け、どれにも当たらなければ AI が決める |
@@ -493,7 +493,7 @@ hook の判定は PreToolUse の入力 JSON を `hook.py` へ標準入力で渡�
 - [PR #2249](https://github.com/devbasex/ai-plugins/pull/2249) — 実装
 - [`development-workflow` の `references/asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) — 区分と手順の正本
 - [docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../ndf-plugin-reference.md#承認ゲートの外の問い合わせ)
-- [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) — Factory の実行ジョブ（I8）と `decision.delegated` の事象
+- サービスの確定仕様 `ndf-factory-service-boundary.md` — Factory の実行ジョブ（I8）と `decision.delegated` の事象
 - [cross-review-reopen-and-hook-deadline.md](cross-review-reopen-and-hook-deadline.md) — hook の締め切り
 - [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) — 本文で承認を待って終えた応答の差し戻し（`WAIT_REASON`）
 - [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) — 同じ置き場の差し戻しの記録

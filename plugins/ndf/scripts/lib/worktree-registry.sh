@@ -34,6 +34,8 @@ WT_SLOT_MAX=63
 
 # 環境名を作る。`<リポジトリ>-wt-<ブランチ>-<要約値 6 桁>` を小文字英数と `-` に
 # 揃え、40 文字で切る。同じ作業ツリーには常に同じ値が返る。
+# 3 つ目の引数は要約値の元で、省くとブランチ名を使う。detached HEAD の作業ツリーは
+# 名前の語と要約値の元に作業ツリーの語とパスを渡す（HEAD が動いても名前が変わらない）。
 # 名前は 40 文字で切る。**要約値は必ず残す。** 単純に末尾を落とすと、先頭が
 # 同じ長いブランチ名どうしで同じ名前になり、テスト環境が混ざる。
 WT_ENV_NAME_MAX=40
@@ -46,9 +48,9 @@ _wt_slug() {
 }
 
 wt_env_name() {
-  local main_dir="${1:-}" branch="${2:-}" repo digest head room name
+  local main_dir="${1:-}" branch="${2:-}" source="${3:-${2:-}}" repo digest head room name
   [ -n "$main_dir" ] && [ -n "$branch" ] || return 1
-  digest=$(printf '%s' "$branch" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c"1-$WT_ENV_DIGEST_LEN")
+  digest=$(printf '%s' "$source" | (sha1sum 2>/dev/null || shasum 2>/dev/null) | cut -c"1-$WT_ENV_DIGEST_LEN")
   [ -n "$digest" ] || return 1
 
   repo=$(_wt_slug "$(basename "$main_dir")")
@@ -60,6 +62,21 @@ wt_env_name() {
   head=${head%-}
   name=$(printf '%s-%s' "$head" "$digest")
   printf '%s\n' "$(_wt_slug "$name")"
+}
+
+# 同じプロジェクトのボリュームが無いと確かめられたら 0 を返す。読めないときは 1 を返す。
+# -q を省くと、該当が 0 件でも見出しの行が出る。
+wt_no_volumes() {
+  local docker="${1:-}" environment="${2:-}" volumes
+  volumes=$("$docker" volume ls -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null) || return 1
+  [ -z "$volumes" ]
+}
+
+# 宣言が破棄でボリュームも消すかを返す。無し・null・true で消す。読めない値は残す側へ
+# 倒す（消す操作は戻せない）。`//` は false も右辺へ倒すため使わない。
+wt_discards_volumes() {
+  printf '%s' "${1:-}" \
+    | jq -e '.testenv.discard_volumes == null or .testenv.discard_volumes == true' >/dev/null 2>&1
 }
 
 # ポート番号を返す。`<帯の下限> + スロット*20 + 役割番号`。
@@ -121,7 +138,7 @@ _wt_registry_write() {
 # --- 排他 -------------------------------------------------------------------
 #
 # **実装は `lock-common.sh` の 1 箇所にある**（#293）。ここに置くのは、既存の名前で
-# 呼べるようにするための委譲だけである。`flock` を使わない理由・関門が 2 段である
+# 呼べるようにするための委譲だけである。`flock` を使わない理由・承認ゲートが 2 段である
 # 理由・陳腐化の判定・`set -C` を部分シェルの中だけで張る理由は、いずれも共通ファイルの
 # 同じ節にある。
 #
@@ -145,9 +162,10 @@ WT_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 
 # 待ちの上限の既定は 5 秒である。**この既定に環境変数の上書きは置かない。**
 # 上書きは通過記録の側（`NDF_STAGE_LOCK_TIMEOUT`）だけが持つ。
+# 第 3 引数は持ち続ける上限の秒数で、`ndf_lock_acquire` へそのまま渡す。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}"
-  ndf_lock_acquire "$dir" "$timeout"
+  local dir="${1:-}" timeout="${2:-5}" hold="${3:-}"
+  ndf_lock_acquire "$dir" "$timeout" "$hold"
 }
 
 wt_lock_release() {
@@ -271,4 +289,32 @@ wt_slot_set_ports() {
 wt_slot_touch() {
   local main_dir="${1:-}" worktree="${2:-}"
   _wt_slot_set_field "$main_dir" "$worktree" '.last_used_at = (now | todate)'
+}
+
+# 役割一覧を帯の中で採番し、ports JSON を組み立てて出力する。帯を出た番号は他の
+# 用途と衝突するため、その場で理由を出して 1 を返す。解放は呼び出し元が判断する。
+wt_build_ports() {
+  local declaration=$1 slot=$2 band_low=$3 band_high=$4
+  local ports role role_number port
+  ports="{}"
+  while IFS=$'\t' read -r role role_number; do
+    [ -n "$role" ] || continue
+    port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
+    # 帯を出た番号は、他の用途と衝突する。黙って使わない。
+    if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
+      printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
+      return 1
+    fi
+    ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
+  done < <(wt_declaration_get "$declaration" '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
+  printf '%s\n' "$ports"
+}
+
+# この作業ツリーの割り当てのうち $predicate に合う件へ $update を施す jq の式を組む。
+# 開く側と閉じる側で「.worktree == $wt かつ現在有効な 1 件」へ絞る骨組みを 1 箇所へ
+# 寄せる。呼び出し側は `--arg wt "$TARGET"` を渡す。
+_wt_update_current_expose() {
+  local predicate="$1" update="$2"
+  printf '.assignments |= map(if .worktree == $wt and (%s) then %s else . end)' \
+    "$predicate" "$update"
 }

@@ -10,18 +10,14 @@
     step = schema.load_shape(Step, data, where="steps[0]")
     # 誤り: ShapeError("steps[0].id: 必須の項目が無い")
 
-寛容な読み（語彙に無い値を既定の値へ下げる）は、型に `lenient_choice()` を付けて書く。
-
-    severity: schema.lenient_choice(("high", "medium", "low"), "low") = "low"
-
 使う側は `deps.require("schema")` を先に呼ぶ。
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Iterable, TypeVar
+from typing import Any, Iterable, TypeVar
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -114,16 +110,3 @@ def load_shape(model: type[M], data: Any, where: str = "") -> M:
 def dump_shape(obj: BaseModel, *, drop_none: bool = False) -> dict:
     """モデルを JSON にできる辞書へ戻す（`drop_none` で None の項目を落とす）。"""
     return obj.model_dump(mode="json", exclude_none=drop_none)
-
-
-def lenient_choice(allowed: Iterable[str], fallback: str) -> Any:
-    """語彙に無い値（文字列でない値を含む）を `fallback` へ下げる文字列の型。前後の空白と大文字は揃える。"""
-    vocab = tuple(allowed)
-    if fallback not in vocab:
-        raise ValueError(f"下げる先 {fallback!r} が語彙 {vocab} に無い")
-
-    def pick(v: Any) -> str:
-        s = v.strip().lower() if isinstance(v, str) else None
-        return s if s in vocab else fallback
-
-    return Annotated[str, BeforeValidator(pick)]

@@ -32,7 +32,7 @@ WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR\tR
 Pull Request\tR\tR\tR\tR\tR
 確定仕様化\t-\tC\t-\tR\tC
 後片付け\tR\tR\tR\tR\tR
-配布\tR\tR\tR\tR\tR
+デプロイ\tR\tR\tR\tR\tR
 体裁レビュー\t-\t-\t-\t-\tR
 リリース後テスト\t-\tC\tR\tR\tC
 振り返り\t-\tC\tR\tR\tR
@@ -66,7 +66,7 @@ WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
 WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り\n棚卸し'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
-WF_REPORT_STAGE='配布'
+WF_REPORT_STAGE='デプロイ'
 
 # Pull Request を作る時点のチェックで、終点にする工程。この工程より前の必須の工程を見る。
 WF_PR_STAGE='Pull Request'
@@ -593,17 +593,16 @@ wf_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
+ndf_user_state_home() {  # 利用者の台帳の根（#2766）。順は scripts/lib/state_home.py の user_home と同じ。旧の置き場は読まない（state-home.py migrate で移す）
+  local r="${NDF_STATE_HOME:-${XDG_STATE_HOME:+$XDG_STATE_HOME/ndf}}"; printf '%s\n' "${r:-$HOME/.claude/ndf/state}"; }
+
 # 通過記録の置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
-  local base fallback="${TMPDIR:-/tmp}/ndf-stages"
+  local fallback="${TMPDIR:-/tmp}/ndf-stages" base="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
     base="$CLAUDE_PLUGIN_DATA/stages"
-  elif [ -n "${XDG_STATE_HOME:-}" ]; then
-    base="$XDG_STATE_HOME/ndf/stages"
-  elif [ -n "${HOME:-}" ]; then
-    base="$HOME/.local/state/ndf/stages"
-  else
-    base="$fallback"
+  elif [ -n "${NDF_STATE_HOME:-}" ] || [ -n "${XDG_STATE_HOME:-}" ] || [ -n "${HOME:-}" ]; then
+    base="$(ndf_user_state_home)/stages"
   fi
   if mkdir -p "$base" 2>/dev/null && [ -w "$base" ]; then
     printf '%s\n' "$base"
@@ -626,10 +625,10 @@ wf_state_file() {
 #
 # **実装は `<プラグインルート>/scripts/lib/lock-common.sh` の 1 箇所にある**（#293）。
 # ここに置くのは、既存の名前で呼べるようにするための委譲と、待ちの上限の既定の上書き
-# だけである。`flock` を使わない理由・関門が 2 段である理由・陳腐化の判定は、いずれも
+# だけである。`flock` を使わない理由・承認ゲートが 2 段である理由・陳腐化の判定は、いずれも
 # 共通ファイルの同じ節にある。
 #
-# **共通ファイルは自分の位置からの相対で指す。** 4 つの配布先ランタイムのすべてで、
+# **共通ファイルは自分の位置からの相対で指す。** 4 つの導入先のランタイムのすべてで、
 # Skill のディレクトリからプラグインルートの `scripts/` へ 4 階層で戻れる（#293 の実測）。
 # `cd` で戻ってから `pwd` を取る形は採らない。Skill だけを複製する Kiro CLI の配置では
 # symlink の手前へ戻り、プラグインルートを外す。
@@ -655,9 +654,10 @@ WF_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 # 食い違う。
 WF_LOCK_TIMEOUT="${NDF_STAGE_LOCK_TIMEOUT:-5}"
 
+WF_LOCK_HOLD=60  # 持ち続ける上限の秒。PID 名前空間を書く。stages/ は複数のコンテナが共有し、別のコンテナの生きたロックを PID で捨てない（#2766）
 wf_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-$WF_LOCK_TIMEOUT}"
-  ndf_lock_acquire "$dir" "$timeout"
+  local dir="${1:-}" timeout="${2:-$WF_LOCK_TIMEOUT}" hold="${3:-$WF_LOCK_HOLD}"
+  ndf_lock_acquire "$dir" "$timeout" "$hold"
 }
 
 wf_lock_release() {
@@ -731,9 +731,9 @@ wf_record() {
   return 0
 }
 
-# 記録された工程を、通過記録に書かれた順で 1 行 1 件返す。
+# 記録された工程を、通過記録に書かれた順で 1 行 1 件返す（旧い工程名は読み替える）。
 _wf_recorded() {
-  jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null
+  jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null | pj_normalize_stages
 }
 
 # _wf_recorded の出力から空行を除き、記録済み工程を 1 行 1 件返す。

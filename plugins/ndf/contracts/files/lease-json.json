@@ -1,0 +1,7 @@
+{
+  "name": "lease-json",
+  "pattern": "*.lease.json",
+  "kind": "state",
+  "place": "home",
+  "skill_readers": []
+}

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/limits.py", "name": "phases", "kind": "same-name", "reason": "#2343 の設計の入出力の契約が決めた上限の部品の公開の名前（方針の名前で値を引く）。別の概念の関数と名前が重なるだけで、寄せない"}

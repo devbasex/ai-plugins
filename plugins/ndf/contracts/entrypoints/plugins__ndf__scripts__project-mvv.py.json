@@ -8,6 +8,7 @@
   "env": [
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
@@ -18,10 +19,13 @@
     "NDF_MVV_STATE_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
-    "NDF_SUPERVISE_MODEL"
+    "NDF_SUPERVISE_MODEL",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
@@ -43,7 +47,7 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "違反があった・手順が失敗した（status stopped）",
+    "1": "失敗: 違反があった・手順が失敗した（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）"
   },
   "callers": [

@@ -105,14 +105,14 @@ def test_the_explicit_worktree_base_is_resolved(paths, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("NDF_WORKTREE_BASE", "relative-worktrees")
 
-    assert paths.default_worktree_base() == (tmp_path / "relative-worktrees").resolve()
+    assert paths.default_worktree_base(".") == (tmp_path / "relative-worktrees").resolve()
 
 
 def test_the_worktree_base_falls_back_to_the_system_tmpdir(paths, monkeypatch):
     """現状固定: 明示指定が無ければシステム tmpdir 配下を使う。"""
     monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
 
-    assert paths.default_worktree_base() == pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+    assert paths.default_worktree_base(".") == pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
 
 
 def test_found_state_does_not_resolve_the_default_place(paths, tmp_path, monkeypatch):
@@ -125,3 +125,17 @@ def test_found_state_does_not_resolve_the_default_place(paths, tmp_path, monkeyp
     path, _ = paths.load_state(STATE_ID)
 
     assert path == env_path
+
+
+def test_a_failed_registration_makes_no_parent(paths, tmp_path, monkeypatch):
+    """#2567: 置き場を git の無視へ登録できなければ、worktree の親を作らずに止まる。"""
+
+    def refuse(root, worktree):
+        raise OSError("登録できない")
+
+    monkeypatch.setattr(paths.worktree_base, "ensure_ignored", refuse)
+
+    with pytest.raises(SystemExit):
+        paths.prepare_parent(tmp_path / "rf1" / "work")
+
+    assert not (tmp_path / "rf1").exists()

@@ -4,14 +4,15 @@
 #   env <作業ツリー>                       環境名・スロット・ポートを出力し、台帳へ記録する
 #   tag [作業ツリー]                       基準のタグを、データ構造を定める資産の内容から計算する
 #   bake --tag <値>                        基準を作る
-#   up <作業ツリー> [--profile <名前>] [--tag <値>]  起動する
+#   up <作業ツリー> [--profile <名前>] [--tag <値>] [--wait-service <サービス>]...  起動する
 #   test <作業ツリー> --kind <種類> [--out <パス>]   宣言の実行コマンドを走らせる
 #   compose-env <作業ツリー>               割り当て済みのテスト環境をコンテナへ渡す値を KEY=VALUE で出す
 #   stop <作業ツリー>                      止める。データは残す
-#   down <作業ツリー> [--volumes]          破棄し、割り当てを解放する
+#   down <作業ツリー> [--volumes]          破棄し、割り当てを解放する（ボリュームは宣言に従う）
 #   expose <作業ツリー>                    外部公開する
 #   unexpose <作業ツリー>                  公開を閉じる
 #   reap --idle <時間>                     使われていないテスト環境を止める
+#   reclaim [パス] [--volumes]             worktree の消えた割り当てのテスト環境を回収する
 #
 # 終了コードは 0 を「処理が完了した」、1 を「処理できなかった」、2 を「対象外」に
 # 割り当てる。`test` だけは実行したコマンドの終了コードをそのまま返す。
@@ -39,6 +40,7 @@ OUT=""
 TAG=""
 IDLE=""
 WITH_VOLUMES=0
+WAIT_SERVICES=()
 
 # 値を要するオプションは、値が無いまま末尾へ来ることがある。その場合に
 # `shift 2` は失敗し、ループが同じ引数を読み続ける。値の有無を先に見る。
@@ -56,6 +58,7 @@ while [ "$#" -gt 0 ]; do
     --out) need_value "$@"; OUT="$2"; shift 2 ;;
     --tag) need_value "$@"; TAG="$2"; shift 2 ;;
     --idle) need_value "$@"; IDLE="$2"; shift 2 ;;
+    --wait-service) need_value "$@"; WAIT_SERVICES+=("$2"); shift 2 ;;
     --volumes) WITH_VOLUMES=1; shift ;;
     --) shift ;;
     -*) printf '知らないオプションです: %s\n' "$1" >&2; exit 1 ;;
@@ -83,6 +86,12 @@ registry() { wt_registry_path "$MAIN_DIR"; }
 
 # 実行中の作業ツリーが握るロックの位置。
 inuse_lock() { printf '%s/%s.inuse.d\n' "$(dirname "$(registry)")" "$1"; }
+
+# 回収が環境名の共有を確かめてから解放を終えるまで持つ予約の位置。
+reclaim_lock() { printf '%s/%s.reclaim.d\n' "$(dirname "$(registry)")" "$1"; }
+
+# shellcheck source=lib/worktree-testenv-sweep.sh
+. "$SCRIPT_DIR/lib/worktree-testenv-sweep.sh" || exit 1
 
 # --- tag --------------------------------------------------------------------
 
@@ -118,25 +127,6 @@ release_new_slot() {
   return 1
 }
 
-# 役割一覧を帯の中で採番し、ports JSON を組み立てて出力する。帯を出た番号は他の
-# 用途と衝突するため、その場で理由を出して 1 を返す。解放は呼び出し元が判断する。
-build_assigned_ports() {
-  local slot=$1 band_low=$2 band_high=$3
-  local ports role role_number port
-  ports="{}"
-  while IFS=$'\t' read -r role role_number; do
-    [ -n "$role" ] || continue
-    port=$(wt_port_for "$band_low" "$slot" "$role_number") || continue
-    # 帯を出た番号は、他の用途と衝突する。黙って使わない。
-    if [ -n "$band_high" ] && [ "$port" -gt "$band_high" ]; then
-      printf '%s\n' "採番が帯を超えました（役割 $role のポート $port が上限 $band_high を超える）" >&2
-      return 1
-    fi
-    ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
-  done < <(wt_declaration_get "$DECLARATION" '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
-  printf '%s\n' "$ports"
-}
-
 env_assign_ports() {
   local slot=$1 had_slot=$2 environment=$3
   local band_low band_high ports
@@ -144,7 +134,7 @@ env_assign_ports() {
   band_high=$(wt_declaration_get "$DECLARATION" '.testenv.port_band[1] // empty')
   ports="{}"
   if [ -n "$band_low" ]; then
-    ports=$(build_assigned_ports "$slot" "$band_low" "$band_high") || {
+    ports=$(wt_build_ports "$DECLARATION" "$slot" "$band_low" "$band_high") || {
       # 採番が帯を超えた。失敗した呼び出しがスロットを握ったままにしない。
       [ "$had_slot" = 0 ] && release_new_slot
       return 1
@@ -163,16 +153,30 @@ env_assign_ports() {
 }
 
 do_env() {
-  local branch environment slot ports
+  local branch environment slot ports rc
   branch=$(wt_current_branch "$TARGET") || true
-  [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
-
-  environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
+  if [ -n "$branch" ]; then
+    environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
+  elif git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1; then
+    # detached HEAD は HEAD が動くため、作業ツリーのパスから名前を作る。
+    environment=$(wt_env_name "$MAIN_DIR" "detached-$(basename "$TARGET")" "$TARGET") || return 1
+  else
+    printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2
+    return 1
+  fi
   # この呼び出しで新しく取ったかを覚えておく。採番に失敗したときに、
   # 元からあった割り当てまで解放しないため。
   local had_slot=0
   wt_slot_of "$MAIN_DIR" "$TARGET" >/dev/null 2>&1 && had_slot=1
-  slot=$(wt_slot_acquire "$MAIN_DIR" "$TARGET" "$branch" "$environment") || {
+  slot=$(take_slot "$branch" "$environment")
+  rc=$?
+  if [ "$rc" = 1 ] && slots_exhausted; then
+    reclaim_for_slot
+    slot=$(take_slot "$branch" "$environment")
+    rc=$?
+  fi
+  [ "$rc" != 3 ] || return 1
+  [ "$rc" = 0 ] || {
     printf '空きスロットがありません（上限 %s）\n' "$((WT_SLOT_MAX + 1))" >&2
     return 1
   }
@@ -223,7 +227,11 @@ load_assignment() {
 # 割り当てを読み込む。無ければ do_env で初期化してから読み直す。
 # 起動と test で共通のフォールバックをここへ寄せる。
 ensure_assignment() {
-  load_assignment && return 0
+  if load_assignment; then
+    # 回収の予約を通ってから読み直す。回収が先に解放していれば割り当て直す。
+    pass_reclaim_lock "$ENVIRONMENT" || return 1
+    load_assignment && return 0
+  fi
   do_env >/dev/null || return 1
   load_assignment
 }
@@ -336,13 +344,32 @@ do_bake() {
 
 # --- up / stop / down -------------------------------------------------------
 
+# 中身を確かめられない環境に基準のタグを残さない（作り直すと expose の判定を通る）。
+# 時間切れで止められても残らないよう破棄の前に消し、消せなければ破棄へ進まない。
+drop_golden_tag() {
+  [ -z "$(current_assignment | jq -r '.golden_tag // empty')" ] || _wt_slot_set_field "$MAIN_DIR" "$TARGET" 'del(.golden_tag)' || {
+    printf '%s\n' "基準のタグを台帳から消せませんでした。破棄していません: $ENVIRONMENT" >&2
+    return 3
+  }
+}
+
+# 行に基準のタグが無い割り当ては、残ったボリュームが無いと確かめられたときだけ書く。
+# タグはデータを見ずに求めるため、残りの上で書くと古いデータのまま expose の判定を通る。
+golden_tag_writable() {
+  [ -z "$(current_assignment | jq -r '.golden_tag // empty')" ] && ! wt_no_volumes "$(docker_command)" "$ENVIRONMENT" || return 0
+  printf '%s\n' "ボリュームが残っているか確かめられないため、基準のタグを書かずに起こします: $ENVIRONMENT" >&2
+  [ "$(wt_declaration_get "$DECLARATION" '.testenv.expose.enabled // false')" != "true" ] \
+    || printf '%s\n' "公開するには down $TARGET --volumes で消してから up を打ちます" >&2
+  return 1
+}
+
 do_up() {
   ensure_assignment || return 1
   has_docker || { printf 'コンテナ実行系が見つかりません\n' >&2; return 1; }
 
   [ -n "$TAG" ] || TAG=$(do_tag) || TAG=""
-  if [ -n "$TAG" ]; then
-    # 基準のタグは expose の関門が読む。書けないまま起動すると、載っている基準が
+  if [ -n "$TAG" ] && golden_tag_writable; then
+    # 基準のタグは expose の判定が読む。書けないまま起動すると、載っている基準が
     # 台帳に残らず、公開の可否を判定できない（#315）。
     wt_registry_update "$(registry)" '
       .assignments |= map(
@@ -361,7 +388,10 @@ do_up() {
   touch_or_warn
   # 定義に無いコンテナを削除する指定は付けない。稼働中のプロジェクトに定義外の
   # コンテナが属していることがあり、付けると削除される。
-  compose up -d "${services[@]+"${services[@]}"}"
+  compose up -d "${services[@]+"${services[@]}"}" || return
+  [ "${#WAIT_SERVICES[@]}" -gt 0 ] || return 0
+  # 宣言のサービスと依存だけを待つ。全体を待つと、テストに関係しないサービスの不調で止まる。
+  compose up -d --wait "${WAIT_SERVICES[@]}"
 }
 
 do_stop() {
@@ -373,8 +403,9 @@ do_stop() {
 do_down() {
   load_assignment || return 0
   if has_docker; then
+    drop_golden_tag || return
     local rc
-    if [ "$WITH_VOLUMES" = 1 ]; then
+    if [ "$WITH_VOLUMES" = 1 ] || wt_discards_volumes "$DECLARATION"; then
       compose down --volumes
     else
       compose down
@@ -535,11 +566,15 @@ do_unexpose() {
     # 使っている構成で後片付けの対象を特定できない。
     host=${url#https://}
     host=${host#http://}
-    if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
+    # worktree が消えた後もメインディレクトリで閉じる。閉じられないと台帳の公開が
+    # 開いたまま残り、回収がその割り当てを exposed で止め続ける。
+    local close_dir="$TARGET"
+    [ -d "$close_dir" ] || close_dir="$MAIN_DIR"
+    if ! (cd "$close_dir" && env "NDF_EXPOSE_URL=$url" "NDF_EXPOSE_HOST=$host" \
       "NDF_EXPOSE_ENVIRONMENT=$environment" "NDF_EXPOSE_SLOT=$slot" \
       sh -c "$close_command"); then
       # 閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。
-      printf '%s\n' "公開を閉じる手段が失敗しました。台帳は閉じていません: $url" >&2
+      printf '%s\n' "公開を閉じる手段が失敗しました。台帳は閉じていません: $environment $url" >&2
       return 1
     fi
   fi
@@ -547,18 +582,9 @@ do_unexpose() {
   # 閉じる手段は済んでいる。台帳を閉じられないと、次の公開が「別が公開中」で
   # 拒まれ続ける。再実行で台帳の側だけをやり直せる（#315）。
   _close_record || {
-    printf '%s\n' "公開を閉じる手段は実行しましたが、台帳を閉じられませんでした。unexpose を再実行してください: $url" >&2
+    printf '%s\n' "公開を閉じる手段は実行しましたが、台帳を閉じられませんでした。unexpose を再実行してください: $environment $url" >&2
     return 1
   }
-}
-
-# この作業ツリーの割り当てのうち $predicate に合う件へ $update を施す jq の式を組む。
-# 開く側と閉じる側で「.worktree == $wt かつ現在有効な 1 件」へ絞る骨組みを 1 箇所へ
-# 寄せる。呼び出し側は `--arg wt "$TARGET"` を渡す。
-_wt_update_current_expose() {
-  local predicate="$1" update="$2"
-  printf '.assignments |= map(if .worktree == $wt and (%s) then %s else . end)' \
-    "$predicate" "$update"
 }
 
 # 台帳の公開の記録だけを閉じる。口を開けられなかったときの巻き戻しに使う。
@@ -655,10 +681,15 @@ do_expose() {
     return 2
   fi
 
-  local opened
-  opened=$(expose_record_assignment "$host" "$ttl") || return 1
+  # 回収の予約を持って記録する。回収は予約の中で公開を読み直すため、読み直しの後に公開が増えない（I5）。
+  local opened rc
+  _reclaim_reserve "$ENVIRONMENT" || return 1
+  opened=$(expose_record_assignment "$host" "$ttl")
+  rc=$?
+  wt_lock_release "$(reclaim_lock "$ENVIRONMENT")"
+  [ "$rc" = 0 ] || return 1
 
-  # 記録を先に置くのは、先着 1 本の関門を通ったことを示すため。口を開けられ
+  # 記録を先に置くのは、先着 1 本の判定を通ったことを示すため。口を開けられ
   # なければ記録を戻す。残すと、次の公開が「別が公開中」で拒まれ続ける。
   if ! (cd "$TARGET" && env "NDF_EXPOSE_URL=$opened" "NDF_EXPOSE_HOST=$host" \
         "NDF_EXPOSE_ENVIRONMENT=$ENVIRONMENT" "NDF_EXPOSE_SLOT=$SLOT" \
@@ -676,57 +707,6 @@ do_expose() {
 }
 
 
-# --- reap -------------------------------------------------------------------
-
-# 実行中ロックや稼働状態を判定し、個別環境を停止する。
-reap_environment() {
-  local worktree="$1"
-  local environment="$2"
-  local slot="$3"
-  local lock
-
-  TARGET="$worktree"
-  ENVIRONMENT="$environment"
-  # `compose_env` はスロットも渡す。読まずに `compose` を呼ぶと、未定義の
-  # 変数を参照した時点で終了し（`set -u`）、コンテナが動いたまま残る。
-  SLOT="$slot"
-
-  # 実行中の作業ツリーはロックを握っている。握られていれば対象から外す。
-  lock=$(inuse_lock "$environment")
-  if wt_lock_is_held "$lock"; then
-    return 0
-  fi
-
-  # 起動していないものは止める必要がない。
-  if [ -z "$("$(docker_command)" ps -q --filter "label=com.docker.compose.project=$environment" 2>/dev/null)" ]; then
-    return 0
-  fi
-
-  printf '停止します: %s（%s）\n' "$environment" "$worktree"
-  compose stop
-}
-
-do_reap() {
-  local idle_seconds
-  idle_seconds=$(wt_duration_seconds "$IDLE") || {
-    printf '%s\n' '--idle に期間を指定してください（例: 45m）' >&2
-    return 1
-  }
-  has_docker || return 0
-
-  local worktree environment slot
-  while IFS=$'\t' read -r worktree environment slot; do
-    [ -n "$worktree" ] || continue
-    reap_environment "$worktree" "$environment" "$slot"
-  done < <(wt_registry_visible "$(registry)" \
-    | jq -r --argjson idle "$idle_seconds" '
-      [.assignments[]
-       | select(.released_at == null)
-       | select(((.last_used_at // .assigned_at) | fromdateiso8601) < (now - $idle))]
-      | group_by(.worktree) | map(last) | .[]
-      | "\(.worktree)\t\(.environment)\t\(.slot)"')
-}
-
 # --- 入口 -------------------------------------------------------------------
 
 case "$SUBCOMMAND" in
@@ -740,9 +720,10 @@ case "$SUBCOMMAND" in
   down) do_down ;;
   expose) do_expose ;;
   unexpose) do_unexpose ;;
-  reap) do_reap ;;
+  reap) do_reap "$IDLE" ;;
+  reclaim) do_reclaim ;;
   *)
-    printf '使い方: worktree-testenv.sh <env|tag|bake|up|test|compose-env|stop|down|expose|unexpose|reap> [対象] [オプション]\n' >&2
+    printf '使い方: worktree-testenv.sh <env|tag|bake|up|test|compose-env|stop|down|expose|unexpose|reap|reclaim> [対象] [オプション]\n' >&2
     exit 1
     ;;
 esac

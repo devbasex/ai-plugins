@@ -174,6 +174,12 @@ def test_timeout_ends_within_limit(tmp_path):
     assert (out["metrics"]["outcome"], out["metrics"]["monitor_status"]) == ("timeout", "TIMEOUT")
 
 
+def test_timeout_zero_leaves_only_the_stall_limit(tmp_path):
+    code, out = _run(tmp_path, "kiro", "hang", "--timeout", "0", "--stall-timeout", "2")
+    assert code != 0
+    assert (out["metrics"]["outcome"], out["metrics"]["monitor_status"]) == ("stalled", "STALLED")
+
+
 def test_stalled_is_not_ok(tmp_path):
     code, out = _run(tmp_path, "kiro", "hang", "--timeout", "20", "--stall-timeout", "2")
     assert code == 1
@@ -322,10 +328,10 @@ def _load_external_ai():
     [
         ({"status": "OK"}, "file", "/o", ("ok", "codex の結果を回収した（file）: /o", None)),
         (
-            {"status": "NO_RESULT", "reason": "x"},
+            {"status": "NO_RESULT", "reason": "missing"},
             "stderr",
             "/e",
-            ("no_result", "codex は終わったが結果が無い（理由: x）", "stderr の末尾を読む: /e"),
+            ("no_result", "codex は終わったが結果が無い（理由: missing）", "stderr の末尾を読む: /e"),
         ),
         (
             {"status": "EARLY_ERROR", "reason": "r", "detail": "HTTP/2 401"},
@@ -344,6 +350,28 @@ def _load_external_ai():
     ],
     ids=["ok", "no_result", "auth", "usage_limit_over_auth", "unknown_status", "no_record"],
 )
-def test_run_outcome_characterization(rec, source, path, expected):
-    """現状固定 — 監視後の auth 判定・利用上限の優先・未知の状態の結末。"""
-    assert _load_external_ai().run_outcome("codex", rec, source, path) == expected
+def test_run_outcome_characterization(rec, source, path, expected, tmp_path, monkeypatch):
+    """監視後の auth 判定・利用上限の優先・未知の状態の結末。"""
+    mod = _load_external_ai()
+    monkeypatch.setattr(mod, "_readable", lambda p: p == "/o")
+    assert mod.run_outcome("codex", rec, source, path) == expected
+
+
+@pytest.mark.parametrize(
+    "rec, content, outcome",
+    [
+        ({"status": "OK", "reason": "ok"}, "結果", "ok"),
+        ({"status": "OK", "reason": "ok"}, "", "no_result"),
+        ({"status": "OK", "reason": "ok"}, None, "no_result"),
+        ({"status": "OK", "reason": "cli_timeout"}, "結果", "timeout"),
+        ({"status": "NO_RESULT", "reason": "usage_limit"}, "結果", "usage_limit"),
+        ({"status": "OK", "reason": "model_unavailable"}, "結果", "early_error"),
+    ],
+    ids=["readable", "empty", "missing", "timeout_after_result", "usage_limit_after_result", "model_unavailable"],
+)
+def test_run_is_ok_only_when_the_monitor_ended_well_and_the_file_is_readable(rec, content, outcome, tmp_path):
+    """結果ファイルが無い・空なら ok にしない。結果ファイルがあっても監視の理由が失敗なら ok にしない（#2337 の I12）。"""
+    f = tmp_path / "out.md"
+    if content is not None:
+        f.write_text(content)
+    assert _load_external_ai().run_outcome("codex", rec, "file", str(f))[0] == outcome

@@ -9,6 +9,7 @@
     "CLAUDE_CODE_ENTRYPOINT",
     "DEBUG_SLACK_NOTIFY",
     "GIT_REPO",
+    "HOME",
     "KIRO_SESSION_ID",
     "NDF_CODEX_SLACK_NOTIFY",
     "NDF_DEPS_REEXEC",
@@ -17,10 +18,12 @@
     "NDF_HOOK_REEXEC",
     "NDF_SLACK_API_BASE",
     "NDF_SLACK_NOTIFY_DONE",
+    "NDF_STATE_HOME",
     "REDMINE_URL",
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
     "SLACK_USER_MENTION",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [],
@@ -35,5 +38,9 @@
     "plugins/ndf/scripts/hook_lib/wait_notify.py",
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/wait_notice.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "hook のエントリポイント（hook_lib/wait_notify.py を使う hook.py）が起動する"
+  }
 }

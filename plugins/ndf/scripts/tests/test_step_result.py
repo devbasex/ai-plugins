@@ -101,7 +101,7 @@ def test_approval_present_writes_two_layers(tmp_path, monkeypatch):
     path = sr.approval_present(
         "release",
         "v1.2.3",
-        title="ndf v1.2.3 の本番への配布",
+        title="ndf v1.2.3 のリリース",
         targets=[{"url": "https://github.com/o/r/compare/a...b", "title": "a → b", "base_head": "main ← develop"}],
         change="3 ファイル / +10 / −2",
         judge=[("版数", "1.2.3"), ("含む PR", "#1 x | y\n#2 z")],
@@ -235,3 +235,17 @@ def test_cli_emit_refuses_ok_with_gap(capsys):
     with pytest.raises(SystemExit) as e:
         sr.main(["emit", "--tool", "t", "--status", "ok", "--summary", "s", "--gap", "k", "n", "r"])
     assert e.value.code == 2 and capsys.readouterr().out == ""
+
+
+def test_emit_out_writes_the_same_line_to_the_file(tmp_path):
+    import subprocess
+    import sys
+
+    out = tmp_path / "w" / "result.json"
+    lib = Path(__file__).resolve().parents[1] / "lib"
+    cmd = [sys.executable, str(lib / "step_result.py"), "emit", "--tool", "worker", "--status", "gate", "--summary", "s"]
+    p = subprocess.run([*cmd, "--next", "判断が要る", "--out", str(out)], capture_output=True, text=True)
+    assert p.returncode == 10 and json.loads(out.read_text()) == json.loads(p.stdout)
+    bad = tmp_path / "bad.json"
+    p = subprocess.run([*cmd, "--out", str(bad)], capture_output=True, text=True)  # gate に next が無い
+    assert p.returncode == 2 and not bad.exists()

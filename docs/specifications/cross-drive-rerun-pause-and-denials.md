@@ -41,9 +41,9 @@
 
 | 課題 | 起きたこと |
 | --- | --- |
-| #1263 | devbasex/devbase PR #301 の検査: `--round-test` を変えて `--from refactor` で流し直すと、refactor は 1.3 秒・review は 0.1 秒で前回の結果を `ok` で返し、プランは承認ゲート 2 まで進んだ。worktree を外して流し直すと提案 14 件のうち 11 件が採用された。cross-review は head と `--reopen` しか比べず、cross-refactoring は状態ファイルがあれば前回を返していた |
+| #1263 | devbasex/devbase PR #301 の検査: `--round-test` を変えて `--from refactor` で流し直すと、refactor は 1.3 秒・review は 0.1 秒で前回の結果を `ok` で返し、プランはリリース承認ゲートまで進んだ。worktree を外して流し直すと提案 14 件のうち 11 件が採用された。cross-review は head と `--reopen` しか比べず、cross-refactoring は状態ファイルがあれば前回を返していた |
 | #1944 | devbasex/devbase PR #462 の検査: 計画の前に止まった実行を打ち直すと、#1491 のずらしは計画の後だけで効かず、止まっていた時間まで経過に数えた。使える時間が無いまま全候補を時間で見送って `ok` で返り、その件数は `metrics.deferred` に入らなかった |
-| #1513 | PR #1573 の検査で、claude は結果ファイルを書いて `subtype: success` で終えたが、作業中の Bash の読み取り 1 回の拒否で監視が 240 秒で EARLY_ERROR にした。監視は周回ごとに早期の致命を終了の判定より先に照らし、`result_exists` を書くのは終了の判定だけのため、記録は `result_exists: false` になった |
+| #1513 | PR #1573 の検査で、claude は結果ファイルを書いて `subtype: success` で終えたが、作業中の Bash の読み取り 1 回の拒否で監視が 240 秒で EARLY_ERROR にした。監視はループの 1 回ごとに早期の致命を終了の判定より先に照らし、`result_exists` を書くのは終了の判定だけのため、記録は `result_exists: false` になった |
 
 ## 対象範囲
 
@@ -89,7 +89,7 @@
 | drive の `rf` | 子の終了コードが 4 か許す値の外なら、子の出力の `ABORT_DETAIL` を中断の文の末尾へ `: ` で添える |
 | 計画のコメントの件数の行 | `見送り N（うち時間 M）`。M が 0 なら括弧を出さない（`plan.counts_line`） |
 | drive の標準エラー | 文は `keep_finished` が出す（正本の表は上の「正本」の 1 行目）。引数が違えば `↻ 完了の時点と結果を変える引数が違うため（<鍵>・<鍵>）、新しい実行の回を始める` |
-| 監視の標準エラー | `⚠️  <担当> early-error WARN (non-fatal, not killing): permission_denials N 件（subtype: success で終わったため致命にしない）`。標準エラーの記録の警告と同じ周回に出たときは ` / ` でつなぐ |
+| 監視の標準エラー | `⚠️  <担当> early-error WARN (non-fatal, not killing): permission_denials N 件（subtype: success で終わったため致命にしない）`。標準エラーの記録の警告と同じループの 1 回に出たときは ` / ` でつなぐ |
 | 引数・終了コードの表 | 2 つの drive・監視とも変えない |
 
 ### 処理の流れ

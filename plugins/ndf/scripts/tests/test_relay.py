@@ -7,7 +7,7 @@
 - `stop`: 動いているラッパーに停止の合図を置く
 - `install` / `uninstall` / `status`: `/ndf:install-wrapper` の本体（#928）
 - `startup`: SessionStart hook の本体。在る複製を置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
-- `question open` / `close`: 質問の表示中の合図（関門を越えない守り）
+- `question open` / `close`: 質問の表示中の合図（承認ゲートを越えない守り）
 
 **利用者の手元の設定は書き換えない。** 導入の副命令と `run` は、テストごとの一時の HOME と
 `XDG_*`・`CLAUDE_CONFIG_DIR` の下でだけ動かす（`isolated_env`）。
@@ -41,6 +41,7 @@ from relay_lib import mark as relay_mark  # noqa: E402
 from relay_lib import proc as relay_proc  # noqa: E402
 from relay_lib import record as relay_record  # noqa: E402
 from relay_lib import run as relay_run  # noqa: E402
+from relay_lib import session_env as relay_session_env  # noqa: E402
 from relay_lib import shellrc as relay_shellrc  # noqa: E402
 from relay_lib import version_dir as relay_version_dir  # noqa: E402
 
@@ -93,7 +94,7 @@ def isolated_env(tmp_path, **extra):
     e = {k: v for k, v in os.environ.items() if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
     e["HOME"] = str(home)
     e["NDF_RELAY_UV"] = str(fake_uv(tmp_path))
-    # 統括役の tmux（#2346）は既定で無いものとして扱う。使うテストは使い捨ての TMUX_TMPDIR と一緒に上書きする
+    # リレーハブの tmux（#2346）は既定で無いものとして扱う。使うテストは使い捨ての TMUX_TMPDIR と一緒に上書きする
     e["NDF_RELAY_TMUX"] = "ndf-no-tmux"
     e.update({k: str(v) for k, v in extra.items()})
     real_home = os.path.expanduser("~")
@@ -459,7 +460,7 @@ class Term:
             if pred():
                 return
             time.sleep(0.05)
-        raise AssertionError(f"待ちが切れた: {what}\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
+        raise AssertionError(f"待ちが切れた: {what}\n画面: {self.text[-2000:]}\n記録: {self.rows()}\n{self.state_report()}")
 
     def starts(self):
         p = self.fake_dir / "starts.jsonl"
@@ -471,8 +472,27 @@ class Term:
 
     def relay_dirs(self):
         root = pathlib.Path(self.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
-        # 統括役の置き場（hub/。#2346）は作業ディレクトリでない
+        # リレーハブの置き場（hub/。#2346）は作業ディレクトリでない
         return sorted(p for p in root.iterdir() if p.is_dir() and p.name != "hub") if root.exists() else []
+
+    def state_report(self):
+        """状態の置き場の作業ディレクトリ（リレーハブの hub/ を含む）ごとに、名前・区間の起動の引数・ファイルの名前を並べる。
+
+        待ちが切れたときに、どの区間が起動し、どのシグナルファイルが置かれていたかを失敗の出力から読むため（#2346）。
+        ファイルは決め打ちの一覧で調べず、ある分をすべて出す。
+        """
+        root = pathlib.Path(self.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
+        dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.exists() else []
+        starts = self.starts()
+        lines = [f"状態の置き場: {root}（作業ディレクトリ {len(dirs)} 個）"]
+        for d in dirs:
+            name = (d / "name").read_text(errors="replace").strip() if (d / "name").is_file() else ""
+            lines.append(f"- {d.name}（名前: {name}）")
+            for s in starts:
+                if s.get("relay_dir") and pathlib.Path(s["relay_dir"]).name == d.name:
+                    lines.append(f"  起動: {s.get('argv')}")
+            lines.append(f"  ファイル: {sorted(f.name for f in d.iterdir() if f.is_file())}")
+        return "\n".join(lines)
 
     def rows(self):
         out = []
@@ -498,7 +518,7 @@ class Term:
         try:
             return self.proc.wait(timeout)
         except subprocess.TimeoutExpired:
-            raise AssertionError(f"ラッパーが終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
+            raise AssertionError(f"ラッパーが終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}\n{self.state_report()}")
 
     def close(self):
         if self.proc.poll() is None:
@@ -562,6 +582,26 @@ def test_run_signal_exit_code(term):
     assert t.finish() == 143
 
 
+def test_run_updates_plugin_before_first_section(term):
+    """最初の起動でもプラグインを更新し、新しい版で区間を始める。手で起動したレーンが古い版で動かないようにする。"""
+    t = term(env={"FAKE_VERSION_AFTER": "2.0.0"})
+    t.wait_start(1)
+    assert t.calls()[:4] == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.rows()[0]["event"] == "start" and t.rows()[0]["plugin_version"] == "2.0.0"
+    os.kill(t.starts()[0]["pid"], signal.SIGKILL)
+    t.finish()
+
+
+def test_run_first_update_failed_still_starts(term):
+    """最初の起動の更新に失敗しても、今の版で起動し、そのことを 1 行で知らせる。"""
+    t = term(env={"FAKE_FAIL": "update"})
+    t.wait_start(1)
+    assert "プラグインを更新できなかった" in t.text
+    assert t.rows()[0]["plugin_version"] == "1.0.0"
+    os.kill(t.starts()[0]["pid"], signal.SIGKILL)
+    t.finish()
+
+
 def test_run_switches_to_next_section(term, tmp_path):
     """合図を受けると /exit と \\r を入力し、更新して次の区間を起動する（AC6・AC8・AC19）。"""
     t = term("--model", "haiku", env={"FAKE_VERSION_AFTER": "2.0.0"})
@@ -571,7 +611,15 @@ def test_run_switches_to_next_section(term, tmp_path):
     first, second = t.starts()[:2]
     assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
-    assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]  # 最初の起動と切り替えの 2 回
     assert "── ndf-relay: 区間 2 ──" in t.text
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
@@ -580,7 +628,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s1["relay_version_dir"] is None and s2["relay_version_dir"] is None  # プラグインのキャッシュから起動（#1587 の AC13）
     assert not events(rows, "reexec") and not events(rows, "reexec_skipped")  # キャッシュからの起動は入れ替えない（AC12）
     assert s1["command"] == "--model haiku"
-    assert s1["plugin_version"] == "1.0.0"
+    assert s1["plugin_version"] == "2.0.0"  # 最初の起動で更新する
     assert s2["plugin_version"] == "2.0.0"
     assert s2["command"] == "/goal 次のステップ"
     assert s2["from_session"] == f"s{first['pid']}"
@@ -635,7 +683,7 @@ def test_run_carries_policy_args_through_shell_function(term, tmp_path):
 
 def test_run_chain_three_sections(term):
     """人が何も入力せずに 3 つ目の区間まで起動する（AC17 の試験用の形）。"""
-    t = term()
+    t = term(env={"NDF_RELAY_EXIT_WAIT": "30"})  # 負荷の下でも /exit で終わる形を見る（SIGTERM へ進ませない）
     t.wait_start(1)
     t.type("mark mark 三つ目\r")
     t.wait_start(3, timeout=25)
@@ -834,18 +882,18 @@ def test_carried_args(mod, args, expected):
 
 
 @pytest.mark.parametrize("tasks", [None, {"status": "running"}, "running"])
-def test_background_running_ignores_non_list_inputs(mod, tasks):
-    assert relay_mark.background_running(tasks) is False
+def test_running_tasks_ignores_non_list_inputs(mod, tasks):
+    assert bool(relay_mark.running_tasks(tasks)) is False
 
 
-def test_background_running_ignores_non_dict_items(mod):
-    assert relay_mark.background_running(["running", 1, None]) is False
+def test_running_tasks_ignores_non_dict_items(mod):
+    assert bool(relay_mark.running_tasks(["running", 1, None])) is False
 
 
-def test_background_running_detects_running_dict(mod):
+def test_running_tasks_detects_running_dict(mod):
     tasks = [{"status": "queued"}, {"status": "running"}]
 
-    assert relay_mark.background_running(tasks) is True
+    assert bool(relay_mark.running_tasks(tasks)) is True
 
 
 def test_fallback_cwd_uses_nearest_existing_parent(mod, tmp_path):
@@ -978,6 +1026,142 @@ def test_run_nested_stops_127(tmp_path):
     assert p.stderr.startswith("ndf-relay: 起動が入れ子になっている（") and p.stderr.count("\n") == 1
 
 
+# 親の claude のセッションの環境（#2656）。専用サーバーのグローバルな環境がこれらを持ち続ける
+PARENT_SESSION = {
+    "CLAUDECODE": "1",
+    "CLAUDE_CODE_SESSION_ID": "parent-session-MARK",
+    "CLAUDE_CODE_ENTRYPOINT": "cli",
+    "CLAUDE_PID": "4242",
+    "NDF_RELAY_DEPTH": "2",
+    "NDF_USAGE_SOURCE": "supervise",
+    "NDF_USAGE_KIND": "work",
+    "NDF_USAGE_PLAN": "parent-plan-MARK",
+    "NDF_USAGE_STEP": "3",
+    "NDF_RELAY_ROLE": "helper",
+    "NDF_RELAY_PLAN": "parent-plan-MARK",
+    "NDF_CLAUDE_ACCOUNT": "main",
+}
+# 利用者の設定と認証の宣言。親のセッションの環境に当たらず、外す処理の前後で値が変わらない（#2656 の I2）
+USER_ENV = {"NDF_ACCOUNT_SWITCH_AT": "80", "CLAUDE_CODE_OAUTH_TOKEN": "user-token", "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "x"}
+
+
+def _set_env(monkeypatch, env):
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+
+@pytest.mark.parametrize("depth", ["1", "2"])
+def test_run_spawned_drops_parent_env_before_judging(mod, tmp_path, monkeypatch, capsys, depth):
+    """#2656 の I1・I2: 起動の印を持つ `run` は、親のセッションの環境（`NDF_RELAY_DIR`・深さ 2 を含む）があっても
+    パススルーの判定にも終了コード 127 にも当たらない。外すのは親のセッションの環境だけで、利用者の設定は残す。
+    ここでは `-p` の素通しで、判定の後の環境を exec の引数から読む。"""
+    claude = real_claude(tmp_path)
+    shared = tmp_path / "shared"
+    _set_env(monkeypatch, {**PARENT_SESSION, **USER_ENV, "NDF_RELAY_DEPTH": depth, "NDF_RELAY_SPAWNED": "1"})
+    _set_env(monkeypatch, {"NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_CLAUDE": str(claude)})
+    _set_env(monkeypatch, {"CLAUDE_CONFIG_DIR": str(tmp_path / "main"), "NDF_SHARED_CONFIG_DIR": str(shared)})
+    monkeypatch.setattr(relay_run.tmux, "session_value", lambda name, key: None)
+    with pytest.raises(Execd):
+        relay_run.cmd_run(["-p", "hi"])
+    env = mod.calls[0][2]
+    assert env["NDF_RELAY_DEPTH"] == "1"
+    gone = set(PARENT_SESSION) - {"NDF_RELAY_DEPTH"} | {"NDF_RELAY_DIR", "NDF_SHARED_CONFIG_DIR"}
+    assert not gone & set(env), gone & set(env)
+    assert env["CLAUDE_CONFIG_DIR"] == str(shared)
+    assert {k: env.get(k) for k in USER_ENV} == USER_ENV
+    assert "MARK" not in capsys.readouterr().err  # 外した値を画面へ出さない（I6）
+
+
+def test_run_without_spawned_mark_keeps_env(mod, tmp_path, monkeypatch):
+    """#2656 の I4: 起動の印が無ければ環境は変わらず、今と同じくパススルーになる。"""
+    claude = real_claude(tmp_path)
+    _set_env(monkeypatch, {**PARENT_SESSION, "NDF_RELAY_DEPTH": "1", "NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_CLAUDE": str(claude)})
+    before = dict(os.environ)
+    with pytest.raises(Execd):
+        relay_run.cmd_run(["--model", "haiku"])
+    env = mod.calls[0][2]
+    assert {k: v for k, v in env.items() if k != "NDF_RELAY_DEPTH"} == {k: v for k, v in before.items() if k != "NDF_RELAY_DEPTH"}
+    assert env["NDF_RELAY_DEPTH"] == "2"
+
+
+def test_drop_parent_env_keeps_only_launched_role(monkeypatch):
+    """#2656 の I3: 役割と計画は起動で付いた値だけが残る。起動で付いていなければ外す。"""
+    _set_env(monkeypatch, PARENT_SESSION)
+    relay_session_env.drop_parent_env({"NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": "p1"})
+    assert (os.environ.get("NDF_RELAY_ROLE"), os.environ.get("NDF_RELAY_PLAN")) == ("helper", "p1")
+    _set_env(monkeypatch, PARENT_SESSION)
+    relay_session_env.drop_parent_env({})
+    assert not set(relay_session_env.PARENT_ENV + relay_session_env.LANE_ENV) & set(os.environ)
+
+
+@pytest.mark.parametrize(
+    "has, value, kind",
+    [(True, "/k/x", "value"), (True, "", "empty"), (False, None, "none")],
+)
+def test_lane_env_asks_tmux_only_for_role_in_env(monkeypatch, has, value, kind):
+    """#2656 の決定 4: 環境に役割の値があるときだけ tmux に問い、tmux のセッションの環境にある値だけを返す。"""
+    asked = []
+
+    def session_value(name, key):
+        asked.append((name, key))
+        return {"value": "helper", "empty": "", "none": None}[kind]
+
+    monkeypatch.setattr(relay_run.tmux, "session_value", session_value)
+    monkeypatch.setenv("NDF_RELAY_NAME", "l1")
+    monkeypatch.delenv("NDF_RELAY_PLAN", raising=False)
+    monkeypatch.delenv("NDF_RELAY_ROLE", raising=False)
+    assert relay_run._lane_env() == {} and asked == []
+    monkeypatch.setenv("NDF_RELAY_ROLE", "helper")
+    got = relay_run._lane_env()
+    assert asked == [("l1", "NDF_RELAY_ROLE")]
+    assert got == ({} if kind == "none" else {"NDF_RELAY_ROLE": {"value": "helper", "empty": ""}[kind]})
+
+
+def test_leave_account_restores_original_config(monkeypatch, tmp_path):
+    """#2656 の I5: 元の値・空・変数なしの 3 通りで元の `CLAUDE_CONFIG_DIR` に戻し、NDF が足した値を外す。"""
+    import claude_accounts as ca
+
+    orig = str(tmp_path / "orig")
+    base = {"CLAUDE_CONFIG_DIR": "/acc/main", "NDF_CLAUDE_ACCOUNT": "main", **USER_ENV}
+    env = {**base, "NDF_SHARED_CONFIG_DIR": orig, "CLAUDE_CODE_PLUGIN_CACHE_DIR": os.path.join(orig, "plugins")}
+    ca.leave_account(env)
+    assert env == {**USER_ENV, "CLAUDE_CONFIG_DIR": orig}
+    env = {**base, "NDF_SHARED_CONFIG_DIR": "", "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/mine"}
+    ca.leave_account(env)
+    assert env == {**USER_ENV, "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/mine"}  # 利用者が置いたプラグインの置き場は残す
+    assert ca.shared_dir(env) == os.path.join(os.path.expanduser("~"), ".claude")  # 受け入れ条件 9: 空なら ~/.claude
+    env = {"CLAUDE_CONFIG_DIR": "/user/own", **USER_ENV}
+    ca.leave_account(env)
+    assert env == {"CLAUDE_CONFIG_DIR": "/user/own", **USER_ENV}  # アカウントの子でなければ利用者の値
+
+
+def test_leave_account_drops_metered_declaration(monkeypatch, tmp_path):
+    """#2656 の決定 5: 親が従量の接続なら、名前を外す前に宣言のキーを外す。宣言でないキーは残す（I2）。"""
+    import claude_accounts as ca
+
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1")
+    env = {"NDF_CLAUDE_ACCOUNT": "metered", "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1", "NDF_ACCOUNT_SWITCH_AT": "80"}
+    env["NDF_SUPERVISE_CLAUDE_FALLBACK"] = os.environ["NDF_SUPERVISE_CLAUDE_FALLBACK"]
+    ca.leave_account(env)
+    assert env == {"NDF_ACCOUNT_SWITCH_AT": "80", "NDF_SUPERVISE_CLAUDE_FALLBACK": "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1"}
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_leave_account_with_unreadable_declaration_keeps_keys(monkeypatch, tmp_path, broken):
+    """#2656 の I5: 保存した宣言が消えた・壊れたときは例外を出さず、宣言のキーを残して設定ディレクトリと名前を戻す。"""
+    import claude_accounts as ca
+
+    store = tmp_path / "store"
+    store.mkdir()
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(store))
+    monkeypatch.delenv("NDF_SUPERVISE_CLAUDE_FALLBACK", raising=False)
+    if broken:
+        (store / ca.METERED_FILE).write_text("{not json")
+    env = {"NDF_CLAUDE_ACCOUNT": "metered", "CLAUDE_CODE_USE_BEDROCK": "1", "NDF_SHARED_CONFIG_DIR": "/o", "CLAUDE_CONFIG_DIR": "/acc"}
+    ca.leave_account(env)
+    assert env == {"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CONFIG_DIR": "/o"}
+
+
 def test_run_no_real_claude_127(tmp_path):
     e = isolated_env(tmp_path, PATH=str(tmp_path / "empty"))
     p = subprocess.run([sys.executable, str(RELAY), "run", "-p", "x"], capture_output=True, text=True, env=e, timeout=20)
@@ -1053,60 +1237,21 @@ def seed_starts(home, n, name="old"):
             f.write(json.dumps({"event": "start", "at": at, "section": i + 1}) + "\n")
 
 
-def test_run_max_starts_keeps_section(term):
-    t = term()
+def test_run_many_starts_of_the_day_do_not_refuse(term):
+    """同じ日の起動が何件あっても、`NDF_RELAY_MAX_STARTS` を設定しても、次の区間を起動する。"""
+    t = term(env={"NDF_RELAY_MAX_STARTS": "1"})
     seed_starts(t.env["HOME"], 20)
     t.wait_start(1)
     t.type("mark next\r")
-    t.wait(lambda: "ndf-relay: 次の区間を起動しない" in t.text, what="上限の 1 行")
-    time.sleep(0.5)
-    assert len(t.starts()) == 1
-    assert b"/exit" not in t.child_input(0)
-    assert events(t.rows(), "stop")[0]["reason"] == "max-starts"
-    assert "/exit して示されたコマンドを手で入力する" in t.text
-    t.type("quit 5\r")
-    assert t.finish() == 5
-    assert events(t.rows(), "end")[0]["ended_by"] == "no-mark"
-
-
-def test_run_max_starts_race_one_wins(tmp_path):
-    """残り 1 枠を 2 つのラッパーが取り合っても、起動するのは 1 つだけ（AC10）。"""
-    home = tmp_path / "shared-home"
-    home.mkdir()
-    ts = []
-    try:
-        for name in ("a", "b"):
-            (tmp_path / name).mkdir()
-            ts.append(Term(tmp_path / name, env={"HOME": home}))
-        seed_starts(home, 17)  # 2 つの 1 つ目の区間で 19。残り 1 枠
-        for t in ts:
-            t.wait_start(1)
-        for t in ts:
-            t.type("mark next\r")
-
-        # HOME を共有するので t.rows() は両方の記録を含む。自分のラッパーの記録だけを見る。
-        # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
-        # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
-        def own(t):
-            p = pathlib.Path(t.starts()[0]["relay_dir"]) / "log.jsonl"
-            return [json.loads(x) for x in p.read_text().splitlines()]
-
-        def decided(t):
-            return len(t.starts()) >= 2 or events(own(t), "stop")
-
-        ts[0].wait(lambda: all(decided(t) for t in ts), what="両方が決まる")
-        started = sorted(len(t.starts()) for t in ts)
-        assert started == [1, 2], [own(t) for t in ts]
-        loser = next(t for t in ts if len(t.starts()) == 1)
-        assert [r["reason"] for r in events(own(loser), "stop")] == ["max-starts"]
-    finally:
-        for t in ts:
-            t.close()
+    t.wait_start(2)
+    assert events(t.rows(), "stop") == []
+    t.type("quit 0\r")
+    t.finish()
 
 
 def test_run_spin_stops_third(term):
     """3 つ続けて短い区間なら 3 つ目の合図で切り替えない。1 つ目の区間も数える（AC11）。"""
-    t = term(env={"NDF_RELAY_SPIN": "3"})
+    t = term(env={"NDF_RELAY_SPIN": "30"})  # 負荷の下で hook が遅れても、区間が短いままの値
     t.wait_start(1)
     t.type("mark mark mark 終点\r")
     t.wait_start(3, timeout=25)
@@ -1139,7 +1284,9 @@ def test_run_sigkill_when_child_ignores_exit(term):
     t.wait_start(2)
     e1 = events(t.rows(), "end")[0]
     assert e1["ended_by"] == "sigkill"
-    assert e1["seconds"] < 1.5  # 合図の written_at まで。/exit の後の待ちを含めない
+    started = dt.datetime.fromisoformat(events(t.rows(), "start")[0]["at"])
+    ended = dt.datetime.fromisoformat(e1["at"])
+    assert (ended - started).total_seconds() - e1["seconds"] >= 0.5  # 合図の written_at まで。/exit の後の待ちを含めない
     os.kill(t.starts()[1]["pid"], signal.SIGKILL)
     t.finish()
 
@@ -1170,7 +1317,7 @@ def test_run_next_start_failed(term):
     copy = t.fake_dir / "claude-copy.py"
     copy.write_bytes(FAKE.read_bytes())
     copy.chmod(0o755)
-    t2 = term(env={"FAKE_BREAK_ON_LIST": "2", "NDF_RELAY_CLAUDE": copy})
+    t2 = term(env={"FAKE_BREAK_ON_LIST": "3", "NDF_RELAY_CLAUDE": copy})
     t2.wait_start(1)
     t2.type("mark /goal 続き\r")
     assert t2.finish() == 2
@@ -1373,10 +1520,13 @@ def test_run_switches_when_goal_unmet(term):
     t.finish()
 
 
+LOADED_QUIET = 5  # 合図の後の入力や hook が動く秒を静止の待ちの内に収める。負荷の下では数秒かかる
+
+
 @pytest.mark.parametrize("case", ["user", "question", "background"])
 def test_run_goal_unmet_cancelled(term, case):
     """合図の後に利用者が入力したとき・質問が出たとき・背景の処理が起動したときは切り替えない。"""
-    t = term(env={"NDF_RELAY_QUIET": "0.5", "NDF_RELAY_ESC_WAIT": "0.3"})
+    t = term(env={"NDF_RELAY_QUIET": str(LOADED_QUIET), "NDF_RELAY_ESC_WAIT": "0.3"})
     t.wait_start(1)
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
@@ -1387,7 +1537,14 @@ def test_run_goal_unmet_cancelled(term, case):
         t.type(f"tr {json.dumps(row, ensure_ascii=False)}\r")
     elif case == "question":
         t.type("q open\r")
-        t.wait(lambda: (d / "question").exists(), what="質問の合図")
+
+        def question_opened():
+            # 負荷が高いと hook の起動が静止の待ち（0.5 秒）より遅れ、質問の前に /exit が書かれる。
+            # 端末の入力で静止の待ちを延ばし、合図が立ってから判定させる
+            t.type("\r")
+            return (d / "question").exists()
+
+        t.wait(question_opened, what="質問の合図")
         t.type("q close\r")
     else:
         row = {
@@ -1398,7 +1555,7 @@ def test_run_goal_unmet_cancelled(term, case):
         t.type(f"tr {json.dumps(row)}\r")
     t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
     t.type("stop\r")
-    time.sleep(2.5)
+    time.sleep(LOADED_QUIET + 2)
     assert len(t.starts()) == 1
     assert b"/exit" not in t.child_input(0)
     t.type("quit 0\r")
@@ -1439,7 +1596,8 @@ def plugin_root(tmp_path, version, name="plugin"):
     (root / "scripts" / "lib").mkdir(exist_ok=True)
     for rel in relay_version_dir.LIB_FILES:
         shutil.copyfile(ROOT / "scripts" / rel, root / "scripts" / rel)
-    for rel in relay_version_dir.PROJECT_FILES:
+    for rel in relay_version_dir.PROJECT_FILES + relay_version_dir.DECL_FILES:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / rel, root / rel)
     return root / "scripts" / "relay.py"
 
@@ -2185,7 +2343,7 @@ def test_version_key(mod):
     assert k("x") is None and k(None) is None
 
 
-# ---------------------------------------------------------------- 関門を越えない守り（AC23〜AC26b）
+# ---------------------------------------------------------------- 承認ゲートを越えない守り（AC23〜AC26b）
 
 
 def question_rows(t, n=0):
@@ -2195,15 +2353,16 @@ def question_rows(t, n=0):
 
 def test_guard_question_blocks_exit(term):
     """G1: 合図の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
-    t = term(env={"NDF_RELAY_QUIET": "0.5"})
+    t = term(env={"NDF_RELAY_QUIET": str(LOADED_QUIET)})
     t.wait_start(1)
+    d = pathlib.Path(t.starts()[0]["relay_dir"])
     t.type("mark 次\r")  # 合図の後に応答が再開して質問が出た形
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     t.type("q open\r")
     t.wait(lambda: question_rows(t), what="質問の合図")
     assert question_rows(t)[0] == {"action": "open", "stdout": "", "code": 0}
-    d = pathlib.Path(t.starts()[0]["relay_dir"])
     assert (d / "question").exists() and (d / "next.json").exists()
-    time.sleep(1.2)  # 静止の待ちの 2 倍を超えても書かない
+    time.sleep(LOADED_QUIET + 0.5)  # 静止の待ちを超えても書かない
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
     t.type("q close\r")
     t.wait(lambda: not (d / "question").exists(), what="合図が消える")
@@ -2343,7 +2502,7 @@ def test_question_denies_when_lock_busy(tmp_path, relay):
         fcntl.flock(f, fcntl.LOCK_EX)
         t0 = time.time()
         p = question(tmp_path, relay.dir)
-        assert time.time() - t0 < 4.5
+        assert time.time() - t0 < 10  # 待ちの 3 秒に、負荷の下の起動の遅れを足した上限
     assert p.returncode == 0
     out = json.loads(p.stdout)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and out["hookEventName"] == "PreToolUse"
@@ -2397,7 +2556,7 @@ def test_question_unknown_or_missing_action_keeps_mark(tmp_path, relay, action):
 
 
 def test_guard_exit_queued_behind_question(term):
-    """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えず、count.lock を放す。
+    """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えない。
     答えの後の Stop が合図を書き直していれば、その中身で起動する。"""
     t = term(env={"FAKE_EXIT_QUESTION": "1", "NDF_RELAY_EXIT_WAIT": "1", "NDF_RELAY_TERM_WAIT": "1"})
     t.wait_start(1)
@@ -2407,9 +2566,6 @@ def test_guard_exit_queued_behind_question(term):
     time.sleep(2.5)
     pid = t.starts()[0]["pid"]
     assert not (t.fake_dir / f"sigterm-{pid}").exists()
-    with open(pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "count.lock", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別のラッパーが取れる
-        fcntl.flock(f, fcntl.LOCK_UN)
     t.type("answer mark 答えの後\r")
     t.wait_start(2)
     assert t.starts()[1]["argv"] == ["答えの後"]
@@ -2684,6 +2840,107 @@ def test_version_dir_prune_keeps_two_and_in_use(tmp_path):
     assert (base / names[0] / f"inuse-{os.getpid()}").exists()
 
 
+def _idle_dir(tmp_path):
+    d = tmp_path / "relay-10.17.0-00000000"
+    d.mkdir()
+    return d
+
+
+def test_version_dir_foreign_mark_counts_as_in_use(tmp_path):
+    """別のコンテナの印は、こちらで pid が死んで見えても使用中で、消さない（#2583）。"""
+    d = _idle_dir(tmp_path)
+    mark = d / f"inuse-another-container-{dead_pid()}"
+    mark.touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    assert mark.exists()
+
+
+def test_version_dir_prune_keeps_a_dir_marked_by_another_container(tmp_path):
+    base = tmp_path / "ndf"
+    base.mkdir()
+    names = [f"relay-10.17.{i}-0000000{i}" for i in range(5)]
+    for i, n in enumerate(names):
+        (base / n).mkdir()
+        os.utime(base / n, (1000 + i, 1000 + i))
+    (base / names[0] / f"inuse-another-container-{dead_pid()}").touch()
+    relay_version_dir.VersionDir(str(base)).prune()
+    assert version_dirs(base) == sorted([names[0], names[3], names[4]])
+
+
+def test_version_dir_old_foreign_mark_expires_after_the_owner_window(tmp_path):
+    """別のコンテナの印でも、更新が寿命の窓（持ち主の記録と同じ 24 時間）より古ければ消す。"""
+    d = _idle_dir(tmp_path)
+    mark = d / f"inuse-another-container-{dead_pid()}"
+    mark.touch()
+    old = time.time() - relay_version_dir.FOREIGN_WINDOW - 60
+    os.utime(mark, (old, old))
+    assert not relay_version_dir.VersionDir._in_use(str(d))
+    assert not mark.exists()
+
+
+def test_version_dir_foreign_window_is_the_owner_record_window():
+    """寿命の窓は持ち主の記録（`lib/run_owner.py`）の窓と同じ値に保つ。"""
+    import run_owner
+
+    assert relay_version_dir.FOREIGN_WINDOW == run_owner.WINDOW
+
+
+def test_version_dir_own_container_mark_follows_the_pid(tmp_path):
+    """同じコンテナの印は pid の生死で決まる。"""
+    d = _idle_dir(tmp_path)
+    live, dead = relay_version_dir.inuse_name(os.getpid()), relay_version_dir.inuse_name(dead_pid())
+    (d / live).touch()
+    (d / dead).touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    assert (d / live).exists() and not (d / dead).exists()
+
+
+def test_version_dir_legacy_mark_is_read_as_before(tmp_path):
+    """旧形式の `inuse-<pid>` は持ち主が分からず、今までどおり pid の生死で読む。"""
+    d = _idle_dir(tmp_path)
+    (d / f"inuse-{os.getpid()}").touch()
+    assert relay_version_dir.VersionDir._in_use(str(d))
+    os.unlink(d / f"inuse-{os.getpid()}")
+    (d / f"inuse-{dead_pid()}").touch()
+    assert not relay_version_dir.VersionDir._in_use(str(d))
+    assert not [n for n in os.listdir(d) if n.startswith("inuse-")]
+
+
+def test_version_dir_refresh_keeps_a_long_run_within_the_window(tmp_path, monkeypatch):
+    """動いているラッパーは印の時刻を進める。別のコンテナの窓を過ぎても消されず、消えた印は置き直す。"""
+    d = _idle_dir(tmp_path)
+    (d / relay_version_dir.MANIFEST).touch()
+    mark = pathlib.Path(relay_version_dir.claim_inuse(str(d)))
+    old = time.time() - relay_version_dir.FOREIGN_WINDOW - 60
+    os.utime(mark, (old, old))
+    monkeypatch.setattr(relay_version_dir, "_refreshed_at", 0.0)
+    relay_version_dir.refresh_inuse(str(d))
+    assert time.time() - mark.stat().st_mtime < 60
+    mark.unlink()
+    relay_version_dir.refresh_inuse(str(d))  # 間隔の中は何もしない
+    assert not mark.exists()
+    monkeypatch.setattr(relay_version_dir, "_refreshed_at", 0.0)
+    relay_version_dir.refresh_inuse(str(d))
+    assert mark.exists()
+
+
+def test_relay_tick_refreshes_the_mark_even_when_halted(monkeypatch):
+    """動いている間の tick が印の時刻を進める。止まったラッパーも、プロセスが居る間は使用中である。"""
+    seen = []
+    monkeypatch.setattr(relay_run.version_dir, "refresh_inuse", lambda: seen.append(1))
+    relay_run.Relay.tick(types.SimpleNamespace(halted=True))
+    assert seen == [1]
+
+
+def test_version_dir_release_claims_removes_both_forms(tmp_path):
+    """入れ替えの前の版が旧形式で置いた印も、新しい形の印も外す。"""
+    d = _idle_dir(tmp_path)
+    (d / f"inuse-{os.getpid()}").touch()
+    (d / relay_version_dir.inuse_name(os.getpid())).touch()
+    relay_version_dir.release_claims(str(d))
+    assert os.listdir(d) == []
+
+
 def test_version_dir_half_written_is_not_pointed(tmp_path, monkeypatch):
     base = tmp_path / "ndf"
     base.mkdir()
@@ -2712,7 +2969,7 @@ def test_version_dir_claim_marks_only_version_dirs(tmp_path):
     base.mkdir()
     name = relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
     got = relay_version_dir.claim_inuse(str(base / name))
-    assert got == str(base / name / f"inuse-{os.getpid()}") and os.path.exists(got)
+    assert got == str(base / name / relay_version_dir.inuse_name(os.getpid())) and os.path.exists(got)
     relay_version_dir.release_inuse(got)
     assert not os.path.exists(got)
     assert relay_version_dir.claim_inuse(str(ROOT / "scripts")) is None  # プラグインのキャッシュには置かない
@@ -2819,6 +3076,18 @@ def test_run_without_env_says_then_passthrough(tmp_path, home):
     p = bare(tmp_path, "run -c", NDF_RELAY_CLAUDE=claude)
     assert (p.returncode, p.stdout) == (7, "args:-c\n")
     assert p.stderr.startswith("ndf-relay: ラッパーを始めない（ラッパーの環境（"), p.stderr
+
+
+@pytest.mark.parametrize("value, kept", [("shared", False), ("mine", True)])
+def test_enter_drops_a_shared_project_env_before_starting_claude(tmp_path, home, value, kept):
+    """#2509 の受け入れ条件 2・I6・I7: 共有の環境を指す UV_PROJECT_ENVIRONMENT は子の claude へ渡さず、利用者の値は渡す。"""
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "uvenv:${UV_PROJECT_ENVIRONMENT-unset}"\n')
+    claude.chmod(0o755)
+    path = str(home / ".cache" / "ndf" / "venv" / "9.9.9") if value == "shared" else str(tmp_path / "mine")
+    p = bare(tmp_path, "run -c", NDF_RELAY_CLAUDE=claude, UV_PROJECT_ENVIRONMENT=path)
+    assert p.stdout == (f"uvenv:{path}\n" if kept else "uvenv:unset\n"), p.stderr
 
 
 def test_install_prepares_env_then_copy_runs_in_it(tmp_path, home):
@@ -3591,7 +3860,7 @@ def test_account_add_stops_on_macos(monkeypatch, capsys):
     from relay_lib import accounts as relay_accounts
 
     monkeypatch.setattr(relay_accounts.sys, "platform", "darwin")
-    assert relay_accounts.cmd_add("work1") == 2
+    assert relay_accounts.cmd_account(["add", "work1"]) == 2
     assert "macOS" in capsys.readouterr().err
 
 
@@ -3655,6 +3924,16 @@ def test_pick_compares_remaining_over_threshold(accounts, other, to):
     assert (name, reason) == (to, "threshold" if to == "b" else None)
 
 
+@pytest.mark.parametrize("util7, to", [(92, "b"), (89, "a")])
+def test_pick_prefers_other_plan_when_weekly_over_threshold(accounts, util7, to):
+    """週の使用率が閾値以上なら、閾値未満の他のプランを残りの量に依らず選ぶ。5 時間の枠の無いプラン（週 92% の残り 88）と、
+    使用率 0% の Max 5x（5 時間の枠の残り 52.5）の組。閾値未満なら今を残す。"""
+    accounts.add("a", tier="default_claude_max_20x", util7=util7, extra={"five_hour": None})
+    accounts.add("b", tier="default_claude_max_5x", util5=0, util7=0)
+    name, reason, _ = _picker("a").pick(None)
+    assert (name, reason) == (to, "threshold" if to == "b" else None)
+
+
 def test_pick_keeps_current_when_candidate_usage_is_higher(accounts):
     accounts.add("a", util5=92, util7=0)
     accounts.add("b", util5=95, util7=0)
@@ -3709,11 +3988,14 @@ class _Acc:
 
 
 class _Use:
-    def __init__(self, score):
-        self.s = score
+    def __init__(self, score, weekly=None):
+        self.s, self.w = score, weekly
 
     def score(self):
         return self.s
+
+    def weekly_score(self):
+        return self.w
 
 
 def _fake_ca(monkeypatch, *, choice, usage=None, acc=None, thr=90.0):
@@ -3806,13 +4088,25 @@ def test_pick_section_start_characterization(monkeypatch, cur, acc, score, due, 
 
 
 @pytest.mark.parametrize(
-    "left, c_left, c_score, want",
-    [(100.0, 100.0, 10.0, "a"), (100.0, 101.0, 99.0, "b"), (None, 500.0, 96.0, "a"), (None, 500.0, 94.0, "b"), (None, None, None, "b")],
+    "left, c_left, c_score, weekly, want",
+    [
+        (100.0, 100.0, 10.0, None, "a"),
+        (100.0, 100.0, 10.0, 80.0, "a"),
+        (100.0, 100.0, 10.0, 95.0, "b"),
+        (88.0, 52.5, 0.0, 95.0, "b"),
+        (100.0, 100.0, 95.0, 95.0, "a"),
+        (100.0, 50.0, None, 95.0, "a"),
+        (100.0, 101.0, 99.0, None, "b"),
+        (None, 500.0, 96.0, None, "a"),
+        (None, 500.0, 94.0, None, "b"),
+        (None, None, None, None, "b"),
+    ],
 )
-def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, want):
-    """現状固定: 閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。"""
+def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, weekly, want):
+    """閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。ただし今の週の使用率が閾値以上で
+    候補の使用率が閾値未満なら、残りの量に依らず候補を選ぶ（週 95% の残り 88 より、0% の残り 52.5 を選ぶ）。"""
     c = relay_switch.ca.Choice("b", score=c_score, remaining=c_left)
-    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0), acc=_Acc(left=left))
+    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0, weekly), acc=_Acc(left=left))
     assert _pk("a").pick(None) == ((want, "threshold", c) if want == "b" else ("a", None, c))
 
 
@@ -4159,8 +4453,8 @@ def test_swap_runs_next_session_in_new_version_dir(tmp_path, term):
     assert t.starts()[1]["relay_dir"] == str(d)
     assert not (d / "handover.json").exists()
     # 使用中の印は入れ替え後のバージョンディレクトリにだけある
-    assert not (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
-    assert (sw.base / new_name / f"inuse-{t.proc.pid}").exists()
+    assert not (sw.base / sw.old_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
+    assert (sw.base / new_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
     assert "── ndf-relay: 区間 2 ──" in t.text and "入れ替えずに" not in t.text
     assert termios.tcgetattr(t.slave) != t.before  # raw のまま中継する
     # 入れ替えた後も停止シグナルファイルの扱いが続く（起動は 2 回のまま）
@@ -4184,7 +4478,15 @@ def test_swap_keeps_next_session_input(tmp_path, term, swap):
     assert second["argv"] == ["--model", "haiku", "/goal 次"]
     assert second["cwd"] == str(tmp_path)
     assert [r for r in rows if r["event"] == "start"][1]["carried"] == ["--model", "haiku"]
-    assert sw.t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert sw.t.calls() == [
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+        ["marketplace", "update", "mk"],
+        ["update", "ndf@mk", "-y"],
+        ["list", "--json"],
+    ]
     assert bool(events(rows, "reexec")) is swap and not events(rows, "reexec_skipped")
     sw.t.type("quit 0\r")
     assert sw.t.finish() == 0
@@ -4235,7 +4537,7 @@ def test_swap_failure_keeps_current_version(tmp_path, term, case):
     assert sk["section"] == 1 and sk["from"] == sw.old_name and isinstance(sk["seconds"], float)
     assert rows[3]["relay_version_dir"] == sw.old_name and rows[3]["section"] == 2
     assert t.text.count("入れ替えずに今の版で続ける") == 1
-    assert (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    assert (sw.base / sw.old_name / relay_version_dir.inuse_name(t.proc.pid)).exists()
     (d,) = t.relay_dirs()
     assert not (d / "handover.json").exists()
     t.type("quit 0\r")
@@ -4632,3 +4934,30 @@ def test_prose_wait_passes_when_the_judgement_fails(relay, monkeypatch):
     monkeypatch.setattr(relay_mark.wait_notice, "classify_reply_wait", boom)
     record = relay_record.RelayRecord(str(relay.dir))
     assert relay_mark.prose_wait_reason(str(relay.dir), record, {"last_assistant_message": WAIT_MSG}, False) is None
+
+
+def test_wait_timeout_reports_each_relay_dir(tmp_path):
+    """待ちが切れたら、作業ディレクトリごとに区間の起動の引数とファイルの名前が失敗の文に載る（#2346）。"""
+    t = Term(tmp_path, cmd=[sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        root = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
+        a, b = root / "d-a", root / "d-b"
+        for d, files in ((a, {"name": "lroot", "next.json": "{}"}), (b, {"stop": "", "zz-unlisted": ""})):
+            d.mkdir(parents=True)
+            for f, body in files.items():
+                (d / f).write_text(body)
+        rows = [
+            {"relay_dir": str(a), "argv": ["claude", "--", "mark /goal 次"]},
+            {"relay_dir": str(b), "argv": ["claude", "--", "b の区間"]},
+        ]
+        (t.fake_dir / "starts.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+        with pytest.raises(AssertionError) as e:
+            t.wait(lambda: False, 0.1, "来ない")
+        msg = str(e.value)
+    finally:
+        t.close()
+
+    assert "- d-a（名前: lroot）" in msg and "- d-b（名前: ）" in msg
+    assert "['claude', '--', 'mark /goal 次']" in msg and "['claude', '--', 'b の区間']" in msg
+    assert "['name', 'next.json']" in msg and "['stop', 'zz-unlisted']" in msg

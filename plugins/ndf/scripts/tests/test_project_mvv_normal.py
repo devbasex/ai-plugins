@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
+
+OK_LINE = '{"tool": "external-ai", "status": "ok", "summary": "s", "items": [], "metrics": {}}'
 
 from test_project_mvv import BODY, GATE_PY, MVV_PY, STATE_PY, answer, approve, body_file, calls, env, run, sha  # noqa: F401
 from test_supervise_pace import assert_transitions_exist, cli, load, steps_of
@@ -41,7 +47,7 @@ def normal_state(env, *extra: str, name: str = "m.json") -> Path:
 
 def advise(env, state: Path, *extra: str) -> tuple[int, dict, list[dict], Path]:
     material = env["tmp"] / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     log, note = env["tmp"] / "gate.jsonl", env["tmp"] / "note.md"
     args = ["check", "--sprint", str(state), "--gate", "release", "--material", str(material), "--log", str(log)]
     code, out, text = run(env, *args, "--root", str(env["root"]), "--note", str(note), "--advise", *extra, script=GATE_PY)
@@ -132,12 +138,12 @@ def test_user_answers_against_the_advice_are_overrides(env):
     state = normal_state(env)
     answer(env, NOT_FOLLOW)
     advise(env, state)
-    assert user_gate(env, state, "関門 2", "--outcome", "approved") == 0
+    assert user_gate(env, state, "リリース承認ゲート", "--outcome", "approved") == 0
     answer(env, FOLLOW_GATE)
     advise(env, state)
-    assert user_gate(env, state, "関門 2", "--outcome", "rejected") == 0
+    assert user_gate(env, state, "リリース承認ゲート", "--outcome", "rejected") == 0
     advise(env, state)
-    assert user_gate(env, state, "関門 2", "--outcome", "approved") == 0
+    assert user_gate(env, state, "リリース承認ゲート", "--outcome", "approved") == 0
     rows = pms.read_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl")
     assert [r["kind"] for r in rows] == ["override_pass", "override_reject"]
 
@@ -148,9 +154,9 @@ def test_the_override_compares_with_the_verdict_of_the_same_pr(tmp_path):
     sprint = str(tmp_path / "m.json")
     pms.append_jsonl(log, {"at": "2026-09-28T00:00:00Z", "gate": "design", "sprint": sprint, "pr": [1], "verdict": "not_follow"})
     pms.append_jsonl(log, {"at": "2026-09-28T00:01:00Z", "gate": "design", "sprint": sprint, "pr": [2], "verdict": "follow"})
-    assert pms.last_mvv_verdict(state, sprint, "関門 1", log, 1) == "not_follow"
-    assert pms.last_mvv_verdict(state, sprint, "関門 1", log, 2) == "follow"
-    assert pms.last_mvv_verdict(state, sprint, "関門 1", log) == "follow"
+    assert pms.last_mvv_verdict(state, sprint, "設計承認ゲート", log, 1) == "not_follow"
+    assert pms.last_mvv_verdict(state, sprint, "設計承認ゲート", log, 2) == "follow"
+    assert pms.last_mvv_verdict(state, sprint, "設計承認ゲート", log) == "follow"
 
 
 # ---------------------------------------------------------------- スプリント MVV（AC12）
@@ -224,11 +230,12 @@ def test_context_adds_the_sprint_mvv_only_with_a_source(env):
 
 class FakeClaude:
     def __init__(self, texts: list[str]):
-        self.texts, self.calls = list(texts), []
+        self.texts, self.calls, self.rfile = list(texts), [], None
 
     def call(self, system, prompt, tools, cwd, timeout, **kw):
         self.calls.append({"system": system, "prompt": prompt, **kw})
         text = self.texts.pop(0) if self.texts else "## 作業の報告\n- 結果: 完了"
+        self.rfile = worker_fake.write_result(prompt, text, self.rfile)
         return {"ok": True, "text": text, "seconds": 0, "session": "s1", "usage": {}}
 
     def record_usage(self, kind, res):
@@ -258,7 +265,7 @@ def test_worker_gets_the_same_block_in_all_three_calls(env, monkeypatch):
     ctx = work_ctx(env["root"], env["tmp"], texts=["途中"])
     step.execute(ctx, {"id": "w", "prompt": "/ndf:design #1", "full": True})
     assert [c["system"] for c in ctx.claude.calls] == [FULL_SYSTEM + "\n\n" + pm.block(mvv)] * 2  # 再開も同じ 1 回分
-    monkeypatch.setattr(worker_steps, "run_ticking", lambda *a, **k: SimpleNamespace(stdout='{"status": "ok"}'))
+    monkeypatch.setattr(worker_steps, "run_ticking", lambda *a, **k: SimpleNamespace(stdout=OK_LINE, returncode=0, stderr=""))
     ctx = work_ctx(env["root"], env["tmp"])
     step.execute(ctx, {"id": "w", "prompt": "直す", "runtime": "codex"})
     assert (ctx.state.dir / "w-prompt.md").read_text().startswith(WORK_SYSTEM + "\n\n" + pm.block(mvv) + "\n\n")
@@ -320,13 +327,17 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     manifest, out = new_normal_sprint(tmp_path, "--state", str(state))
     assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "sprint/m26")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "--what <要約> --by user --pr <設計 PR>" in waves["関門 1"]["gate"] and "--by user" in waves["関門 2"]["gate"]
-    assert "note" not in waves["配布"] and "'関門 2' --what" in waves["関門 2"]["gate"]
+    assert (
+        "--what <要約> --by user --pr <設計 PR>" in waves["設計承認ゲート"]["gate"] and "--by user" in waves["リリース承認ゲート"]["gate"]
+    )
+    assert "note" not in waves["デプロイ"] and "'リリース承認ゲート' --what" in waves["リリース承認ゲート"]["gate"]
     # 状態があれば承認の記録は本番のプランの先頭の approve が書き、conductor は打たない（#1426 の決定 1）
-    assert "--approved-sha" not in waves["関門 2"]["gate"]
-    assert waves["関門 2"]["gate"].index("'関門 2' --what") < waves["関門 2"]["gate"].index("「本番」のステージ")
+    assert "--approved-sha" not in waves["リリース承認ゲート"]["gate"]
+    assert waves["リリース承認ゲート"]["gate"].index("'リリース承認ゲート' --what") < waves["リリース承認ゲート"]["gate"].index(
+        "「本番」のステージ"
+    )
     # 承認資料は本番の release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）
-    assert re.search(r"承認資料（/\S+/issues/approval-\S+\.md）", waves["関門 2"]["gate"])
+    assert re.search(r"承認資料（/\S+/issues/approval-\S+\.md）", waves["リリース承認ゲート"]["gate"])
     assert "sprint-state.py gate" in out["next"]
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
@@ -335,7 +346,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     assert ds["mvv"]["cmd"].endswith("--advise") and "--gate design --pr {pr}" in ds["mvv"]["cmd"]
     assert (ds["mvv"]["on_fail"], ds["mvv-note"]["on_fail"], ds["mvv-note"]["next"]) == ("mvv-note", "gate", "gate")
     assert "mvv" in ds["gate"]["inputs"] and "gate_next" not in ds["mvv"]
-    rel = steps_of(load(waves["配布"]["plans"][0]))
+    rel = steps_of(load(waves["デプロイ"]["plans"][0]))
     assert (
         rel["explain"]["next"] == "others"
         and rel["others"]["next"] == "mvv"
@@ -372,7 +383,7 @@ def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypat
     tail[0]["cmd"], tail[1]["cmd"], tail[3]["cmd"] = f"exit {code}", "true", "false"  # reject は --from でだけ入る
     fake = tmp_path / "judge.sh"
     fake.write_text(
-        """#!/bin/sh\ncat > /dev/null\necho '{"result": "{\\"decision\\": \\"gate\\", \\"reason\\": \\"関門 1\\"}", "usage": {}}'\n"""
+        """#!/bin/sh\ncat > /dev/null\necho '{"result": "{\\"decision\\": \\"gate\\", \\"reason\\": \\"設計承認ゲート\\"}", "usage": {}}'\n"""
     )
     fake.chmod(0o755)
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", str(fake))

@@ -8,8 +8,8 @@
   "branch": "design/issue-16",
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
-  "規則": "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
-  "上限": 16,
+  "規則": "設計の cross-review は上限 3 ラウンドで打ち切る（収束を待たない）。上限に達して未解決の指摘が 0 件なら、収束と同じ経路（直しの取り込み → 仕様のコピーの照合 → 用語チェック）を通って gate。未解決が残れば解決のフロー（直し → 再レビュー）を回し、解決できない（review-settled の判定）か駆動そのものが失敗したら gate。",
+  "上限": 35,
   "steps": [
     {
       "id": "glossary",
@@ -84,30 +84,106 @@
       "next": "review"
     },
     {
-      "id": "review",
       "type": "drive",
-      "drive": "cross-review",
-      "kind": "ドキュメントレビュー",
       "stage": "ドキュメントレビュー",
       "timeout": 3600,
+      "id": "review",
+      "drive": "cross-review",
+      "kind": "ドキュメントレビュー",
       "args": "{pr}",
+      "on_exit": {
+        "6": "review-settled"
+      },
       "on_fail": "ready",
       "next": "sync-review"
     },
     {
-      "id": "sync-review",
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 120,
+      "id": "review-settled",
+      "cmd": "python3 <NDF>/scripts/supervise.py review-settled --state {state_dir}/state.json --step review --fix-step resolve --max-attempts 2 --max-cost 1.5 --max-seconds 3600",
+      "on_exit": {
+        "1": "resolve-sync",
+        "2": "ready"
+      },
+      "on_fail": "ready",
+      "next": "sync-review"
+    },
+    {
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "id": "resolve-sync",
+      "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+      "on_fail": "ready",
+      "next": "resolve"
+    },
+    {
+      "id": "resolve",
+      "type": "work",
+      "kind": "修正",
+      "stage": "ドキュメントレビュー",
+      "inputs": [
+        "review"
+      ],
+      "timeout": 1800,
+      "prompt": "cross-review が上限のラウンドで終わり、未解決の指摘が残った。review の報告（結果の items[0].report）が示す未解決の指摘を直してコミットする（push しない）。直せない指摘は理由を PR のスレッドへ返信する。",
+      "on_fail": "ready",
+      "next": "push-resolve"
+    },
+    {
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 300,
+      "id": "push-resolve",
+      "cmd": "git push -q && bash <NDF>/scripts/pr-body-decisions.sh sync {pr} && python3 <NDF>/scripts/supervise.py sync-title --pr {pr} --doc issues/issue-16-design.md",
+      "on_fail": "ready",
+      "next": "review"
+    },
+    {
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "id": "sync-review",
       "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
       "next": "requirements-recheck"
     },
     {
-      "id": "requirements-recheck",
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 120,
+      "id": "requirements-recheck",
       "cmd": "python3 <NDF>/scripts/spec-copy.py check 16 issues/issue-16-requirements.md",
+      "next": "survey-check"
+    },
+    {
+      "id": "survey-check",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16",
+      "on_fail": "fix-survey",
+      "next": "glossary-check"
+    },
+    {
+      "id": "fix-survey",
+      "type": "work",
+      "kind": "修正",
+      "stage": "ドキュメントレビュー",
+      "inputs": [
+        "survey-check"
+      ],
+      "timeout": 1800,
+      "next": "survey-recheck",
+      "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。"
+    },
+    {
+      "id": "survey-recheck",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16",
       "next": "glossary-check"
     },
     {
@@ -163,7 +239,7 @@
         "review",
         "glossary-recheck"
       ],
-      "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に用語チェックの当たりが残っていれば、関門 1 の提示に載せる",
+      "question": "設計承認ゲート（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に用語チェックの当たりが残っていれば、設計承認ゲートの提示に載せる",
       "choices": [
         "gate",
         "stop"

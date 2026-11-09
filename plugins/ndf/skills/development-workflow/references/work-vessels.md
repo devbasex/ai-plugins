@@ -107,7 +107,7 @@ ai-plugins の実測を入れた例である。倍率は正本の Opus 5.5 の�
 | w | キャッシュの書き込みの倍率（入力の単価との比。使う寿命の値） | 下の「倍率の正本」 |
 
 **倍率の正本は NDF の `scripts/lib/token_rates.py` の換算表（`READ_RATES` / `READ_RATE_DEFAULT` /
-`WEIGHTS`）である。** 配布する hook と ai-plugins の `scripts/token-usage.py` が同じ表を読む。読み込みの倍率は
+`WEIGHTS`）である。** デプロイする hook と ai-plugins の `scripts/token-usage.py` が同じ表を読む。読み込みの倍率は
 モデルで変わるため、この文書は値をコピーしない。モデルを替えたら正本の値で計算し直す。
 
 - **m ≥ 1（キャッシュが切れる長い待ちを挟む）なら、新しい文脈がほぼ必ず得になる。** 切れるたびに

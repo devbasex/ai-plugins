@@ -21,6 +21,9 @@ LIB = SKILL.parents[1] / "scripts" / "lib"
 OWNERS = {
     "pathkinds": (
         "is_test_path",
+        "is_test_path_in_versions",
+        "lacks_python_tests",
+        "python_text_lacks_tests",
         "_has_shebang",
         "_is_code_path",
         "production_code_changes",
@@ -129,6 +132,6 @@ def test_the_clock_keeps_the_offset_of_the_state_file(refactor):
 
 
 def test_the_repo_slug_is_the_library_slug(refactor):
-    setup = sys.modules["refactor_lib.commands.setup"]
-    assert "repo_slug" not in vars(sys.modules["refactor_lib.paths"])
-    assert setup.repo_lib.slug("o/r") == "o--r"
+    paths = sys.modules["refactor_lib.paths"]
+    assert "repo_slug" not in vars(paths)
+    assert paths.repo_lib.slug("o/r") == "o--r"

@@ -57,7 +57,7 @@ issue のことではない。
 
 | 触る領域 | 読む参照 |
 | --- | --- |
-| すべての変更 | [references/design-template.md](references/design-template.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) |
+| すべての変更 | [references/design-template.md](references/design-template.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) / [references/external-survey.md](references/external-survey.md) |
 | 構成要素を追加・変更する、または配置・依存・反映先を変える | [references/system-architecture.md](references/system-architecture.md) |
 | 型・クラスを追加または変更する、または型を変えずに状態遷移か処理の順序を変える | [references/structure-behavior.md](references/structure-behavior.md) |
 | 永続データを持つ、またはスキーマを変える | [references/data-structure.md](references/data-structure.md) |
@@ -76,7 +76,22 @@ issue のことではない。
 「ドメインモデルの節を書く」の行は数に入れない。「すべての変更」の行は入れると常に該当し、条件が
 条件でなくなる。ドメインモデルの行は、入れるとこの 2 モードの起動が増える。
 
-### 2. 設計文書を書く
+### 2. 外部の調査を通す
+
+**設計の判断の前に、触る領域の業界の標準・仕様、主要な製品の解き方、使える既存のライブラリとサービスを
+一次情報で調べ、設計文書の `## 外部の調査` の節に残す。** 手元のコードと要求の文だけで組むと、比べないまま
+「自前で作る」「古い形に寄せる」と決まるためである。手順の正本は
+[references/external-survey.md](references/external-survey.md) にある。
+
+- 3 種類の調べる対象ごとに調べるかを決め、調べない種類には理由を 1 行残す
+- 調べた行には出典（URL・パス・コマンドのどれかと取得日）を付ける。取得できない対象は推定で埋めず、
+  「確かめられなかったこと」へ書く
+- 上限（種類ごとの候補 6 件・取得の試み 30 回）に当たったら止め、残りを「確かめられなかったこと」へ書く
+- 省ける条件に当たるときは、節に `省く: <理由>` の 1 行だけを置く。省けるか決められないときは通す
+
+この手順はプロジェクトの MVV に調査の項目があるかに依らず通す。
+
+### 3. 設計文書を書く
 
 テンプレートは [references/design-template.md](references/design-template.md) にある。節の並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
@@ -101,15 +116,15 @@ issue のことではない。
 1 つずつ判定する。** モード・出力の形・種類のような集合へ値を足すと、それまでの値だけを想定して
 書かれた規則が、新しい値に当てはまらないまま残る。規則は 2 つの経路で集める。
 
-- 集合の名前と既存の値の名前で配布物を検索する。値ごとに分岐する規則が集まる
+- 集合の名前と既存の値の名前でリリース対象を検索する。値ごとに分岐する規則が集まる
 - **新しい値が通る手順を読む。** 値の名前を書かずに、すべての値へ同じように当たる規則は、
   検索に掛からない
 
 **当てはまらない規則は、変える対象として構成要素の表へ載せる。** 当てはまる規則は記録しない。
 
-この判定は文書の外を見るため、手順 4 の突き合わせには含めない。
+この判定は文書の外を見るため、手順 5 の突き合わせには含めない。
 
-### 3. 決定を記録する
+### 4. 決定を記録する
 
 選んだ結論と、その理由と、採らなかった案を残す。書き方は
 [references/decisions.md](references/decisions.md) にある。
@@ -118,15 +133,22 @@ issue のことではない。
 設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV の節の読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
 
 **承認の工程を足す決定を書かない。** 承認ゲートの数と置き場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
-共通原則の「必ず人の承認が要る操作」（C1〜C8）やプロジェクト固有の操作に当たる変更も、承認ゲート 1・2 で人が見る。
+共通原則の「必ず人の承認が要る操作」（C1〜C8）やプロジェクト固有の操作に当たる変更も、設計承認ゲート・リリース承認ゲートで人が見る。
 「別の Pull Request で承認を取ってから書く」「実装でコミットを止めて承認を待つ」のような決定は書かず、変更は実装の中に置く。
 
-### 4. 進む前に文書の内部整合を突き合わせる
+### 5. 進む前に文書の内部整合を突き合わせる
 
 **[references/design-template.md](references/design-template.md) の「進む前に突き合わせる対」
 の 7 つを通す。** いずれも同じ文書の中だけで確かめられるもので、外部の情報を必要としない。
 
-### 5. 設計 Pull Request を出す
+**続けて、自前で作る決定に比べた候補があるかを検査で確かめる。**
+`python3 "$SCRIPTS/design-survey.py" check --file <パス>...` を打ち、書いた・直した設計文書と、名前の番号を共有する
+設計文書（`issue-7-8-design.md` のような複数の番号の文書と、それを介してつながる文書）と受け入れ条件のファイルを
+すべて並べる（`light` の受け入れ条件のファイルや `operation` の実行の記録も同じ）。`--file` は worktree から読むため、
+コミット前の文書と直した後の中身を検査する。`--issue <番号>` は HEAD だけを読むので、ここでは使わない。1 なら出力の `items` の行を直す（作り方・比べた候補を書き直すか、外部の調査の表へ
+候補の行を足す）。比べずには直せない指摘は、設計を進めずに人へ戻す。
+
+### 6. 設計 Pull Request を出す
 
 **この手順を行うのは、設計 Pull Request が必須または任意のモードだけである**（「設計の
 書き先」の表）。`light` と `operation` は独立した設計文書を作らないため、この手順と、次節の
@@ -140,7 +162,7 @@ issue のことではない。
 本文が正なので、`spec-copy.py write` でコピーを作り直す。
 
 設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルレビュー）、2 ラウンド目以降で
-残りを見る（詳細レビュー）。ゲート 1 は詳細レビューの後の 1 回だけである。
+残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。
 
 **同じ表への指摘が 2 ラウンド続いたら、その表を実装へ送るかを supervisor が判断する。** 送るときは、
 表を振る舞いと壊し方だけに削り、削った細部は `tdd-cycle` で走らせて決める。テストの組み方の細部は、
@@ -207,7 +229,7 @@ API の記述を求めない。
 ## 進行を記録する
 
 **契機は 2 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
-入るときに 1 つ目、手順 5（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
+入るときに 1 つ目、手順 6（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
 `references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
 
@@ -216,10 +238,10 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビュー"
 ```
 
-**手順 5 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
+**手順 6 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
 
 **2 つ目の契機と `document-rebuild` は、設計 Pull Request を出すモードだけに掛かる。**
-`light` と `operation` では手順 5 を通らないため、どちらも呼ばない。工程の分類でも
+`light` と `operation` では手順 6 を通らないため、どちらも呼ばない。工程の分類でも
 「ドキュメント再構成」と「ドキュメントレビュー」はこの 2 モードで対象外である。
 
 ## 関連

@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import io
 from typing import Any, NamedTuple
 
 from ruamel.yaml import YAML
@@ -50,13 +49,6 @@ def load_yaml(text: str, where: str = "") -> Any:
         raise YamlError(f"{where or 'YAML'}: 読めない（{exc}）") from None
 
 
-def dump_yaml(data: Any) -> str:
-    """読んだ値（か普通の辞書と配列）を YAML の文字列へ書く。"""
-    buf = io.StringIO()
-    _yaml().dump(data, buf)
-    return buf.getvalue()
-
-
 def split_front_matter(text: str) -> FrontMatter | None:
     """文書の先頭の frontmatter を分ける。無い・閉じていなければ None。"""
     lines = text.splitlines(keepends=True)
@@ -85,24 +77,3 @@ def read_front_matter(text: str, where: str = "") -> dict:
     if not isinstance(data, dict):
         raise YamlError(f"{where or 'frontmatter'}: キーと値の組にする（{type(data).__name__} だった）")
     return data
-
-
-def update_front_matter(text: str, updates: dict[str, Any], where: str = "") -> str:
-    """frontmatter のキーを書き換えた文書を返す（値に None を渡したキーは消す）。本文と、ほかのキーの字面は保つ。
-
-    frontmatter が無ければ先頭に足す。
-    """
-    fm = split_front_matter(text)
-    data = load_yaml(fm.raw, where or "frontmatter") if fm is not None else None
-    if data is None:
-        data = load_yaml("{}")
-        data.fa.set_block_style()
-    if not isinstance(data, dict):
-        raise YamlError(f"{where or 'frontmatter'}: キーと値の組にする（{type(data).__name__} だった）")
-    for key, value in updates.items():
-        if value is None:
-            data.pop(key, None)
-        else:
-            data[key] = value
-    head = "---\n" + (dump_yaml(data) if len(data) else "") + "---\n"
-    return head + (fm.body if fm is not None else text)

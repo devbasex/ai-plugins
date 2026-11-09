@@ -42,12 +42,12 @@ import durable
 from supervise_lib import actuals, admission, limits, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
-from supervise_lib.engine import Engine
+import limits as limit_decl  # 上限の宣言（#2343）。supervise_lib.limits と分ける
+from supervise_lib.engine import Engine, write_phase_result
 from supervise_lib.queue import FINISHED, NO_REPORT
 from supervise_lib.state import RunState
 
-PLANS = "plans"  # queue が流すプランの耐久キュー
-PARENT_WAIT = 120.0  # 回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限（秒）
+PLANS, PARENT_WAIT = "plans", limit_decl.seconds("supervise.parent-wait")  # queue が流すプランの耐久キュー / plan_workflow の回復を待つ上限
 _ENGINES: dict[str, Engine] = {}
 _TURN: dict[str, int] = {}  # plan_workflow の接頭辞 → 資源の枠を待っているステップの番号
 _READY = threading.Condition()  # 登録簿と _TURN の排他と、slot_workflow への合図
@@ -119,7 +119,7 @@ def launch_run(engine: Engine, start: str | None) -> str:
 def launch_queue(done: Path, max_: int, resources: dict, fresh: bool) -> str:
     """`queue` の耐久の記録を開く（実行の鍵は done の絶対パスから決める）。接頭辞 `queue-<done の鍵>` を返す。
 
-    `fresh` なら、途中の耐久ワークフローを launch の前に子ごと止める（流すプランの並びを変えて打ち直したとき）。"""
+    `fresh`（並びを変えた・`--resume` に `--from` を渡した。#2325）なら、途中の耐久ワークフローを launch の前に子ごと止める。"""
     queues = {PLANS: {"worker_concurrency": max_}, **_queues(resources)}
     actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     launched = durable.launch("queue", str(Path(done).resolve()), queues=queues, keep=() if fresh else None)
@@ -137,6 +137,7 @@ def run_engine(engine: Engine, start: str | None = None) -> str:
     try:
         ref = durable.resolve(prefix, finished=_finished)
         if ref.action == "done":
+            write_phase_result(engine.state.dir, engine.plan, ref.output.get("result"), ref.output.get("reason") or "")  # report の代わり
             if ref.output.get("result") == "関門":
                 engine.state.retell_gates(ref.output.get("gates") or [])
             return ref.output["report"]
@@ -294,16 +295,16 @@ def fill_step(first: bool, stage: list[str], items: list[dict]) -> dict:
 def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None, rerun: list | None = None) -> dict:
     """流すプランの実行の回を選び、重なりの組を数えて標準エラーへ知らせる（耐久ステップの中なので、打ち直しで 2 度出ない）。
 
-    完了か関門の記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
-    `rerun`（キューの続きが続ける対象）のプランは、関門の記録があっても新しい実行の回で流す。
-    関門の記録があるプランは、記録した関門の attention を進捗ログへ書き直す。"""
+    完了か承認ゲートの記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
+    `rerun`（キューの続きが続ける対象）のプランは、承認ゲートの記録があっても新しい実行の回で流す。
+    承認ゲートの記録があるプランは、記録した承認ゲートの attention を進捗ログへ書き直す。"""
     refs: dict[str, dict] = {}
     files: dict[str, list[str]] = {}
     deps: dict[str, list[str]] = {}
     for p in plans:
         body = Path(p).read_text(encoding="utf-8")
         prefix = prefix_of(str(Path(p).resolve()), body, (starts or {}).get(p))  # 開始のステップが違えば別の実行の回
-        gate_ends = p not in (rerun or [])  # 続ける対象は、関門で終えた記録を終わりとして扱わない
+        gate_ends = p not in (rerun or [])  # 続ける対象は、承認ゲートで終えた記録を終わりとして扱わない
         ref = durable.resolve(prefix, finished=lambda out, ends=gate_ends: _finished(out) and (ends or out.get("result") != "関門"))
         refs[p] = {"prefix": prefix, "id": ref.id, "action": ref.action, "output": ref.output}
         if ref.action != "done":
@@ -454,7 +455,7 @@ def _collect_items(plans: list[str], waits: dict[str, tuple[str, int | None]], r
     out_items = []
     for p in plans:
         if p not in waits:
-            out_items.append(queue_files.plan_item(p, refs[p]["output"]))  # 完了か関門の記録があるプランは、記録した結果を返す
+            out_items.append(queue_files.plan_item(p, refs[p]["output"]))  # 完了か承認ゲートの記録があるプランは、記録した結果を返す
             continue
         wid, k = waits[p]
         if wid not in outs:

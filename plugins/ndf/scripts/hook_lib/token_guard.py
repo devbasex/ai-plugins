@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import time
 from collections import deque
 from contextlib import contextmanager
@@ -30,6 +29,8 @@ from pathlib import Path
 from typing import Iterator
 
 import jsonio
+
+from state_home import container_home
 
 from . import payload as pl
 
@@ -65,14 +66,13 @@ def _field(raw: dict, *path: str) -> str:
 
 
 def guards_dir() -> Path | None:
-    """記録の置き場所。順は workflow-common.sh の wf_state_dir と同じ（あちらは stages/、こちらは guards/）。"""
+    """記録の置き場所。順は workflow-common.sh の wf_state_dir と同じ（あちらは stages/、こちらは guards/）。ただし既定の根は
+    分かれる: こちらはコンテナの根（`state_home.container_home`）、あちらは利用者の根（#2766）。"""
     fallback = Path(os.environ.get("TMPDIR") or "/tmp") / "ndf-guards"
     if os.environ.get("CLAUDE_PLUGIN_DATA"):
         base = Path(os.environ["CLAUDE_PLUGIN_DATA"]) / "guards"
-    elif os.environ.get("XDG_STATE_HOME"):
-        base = Path(os.environ["XDG_STATE_HOME"]) / "ndf" / "guards"
-    elif os.environ.get("HOME"):
-        base = Path(os.environ["HOME"]) / ".local" / "state" / "ndf" / "guards"
+    elif os.environ.get("NDF_STATE_HOME") or os.environ.get("XDG_STATE_HOME") or os.environ.get("HOME"):
+        base = container_home() / "guards"
     else:
         base = fallback
     for d in (base, fallback):
@@ -330,12 +330,14 @@ def _context_deny(total: int, limit: int, nxt: str, notice: str | None, cause: s
 
 def _trial_cause(applied, verdict) -> str | None:
     """試行方式の拒否の句。現行方式は None（文面を変えない。I1）。"""
-    if applied.policy != "trial":
+    import context_policy as cp
+
+    if applied.policy != cp.TRIAL:
         return None
     tag = "再起動の方針: 試行方式"
-    if verdict.reason == "容量":
+    if verdict.reason == cp.REASON_CAPACITY:
         return f"容量（窓 {verdict.effective_limit + applied.margin} − 余白 {applied.margin} = {verdict.effective_limit}）を超えた（{tag}、理由: 容量）"
-    if verdict.reason == "費用":
+    if verdict.reason == cp.REASON_COST:
         e = verdict.estimate.to_dict()
         return f"判断開始の値 {applied.decide_from} を超え、再起動のほうが安い（{tag}、理由: 費用（続ける {e['continue']} / 再起動 {e['restart']}、入力の単価に換算））"
     return f"上限 {applied.limit}（{tag}、理由: 運用上限）を超えた"
@@ -451,14 +453,10 @@ def plan_hint(raw: dict) -> dict | None:
         return None
     if _field(raw, "tool_input", "subagent_type") not in ("ndf:supervisor", "ndf:supervisor-waits"):
         return None
-    try:
-        p = subprocess.run(
-            ["git", "-C", _field(raw, "cwd") or ".", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    root = p.stdout.strip()
-    if p.returncode != 0 or not root:
+    import context_decisions as cd
+
+    root = cd.toplevel(_field(raw, "cwd") or None)
+    if not root:
         return None
     if not (Path(root, ".ndf", "supervise.json").is_file() or Path(root, ".ndf", "worktree.json").is_file()):
         return None

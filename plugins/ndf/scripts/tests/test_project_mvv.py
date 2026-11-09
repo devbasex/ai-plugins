@@ -51,7 +51,7 @@ BODY = """# 例のプロジェクト MVV
 
 | # | 操作 | 理由 |
 | --- | --- | --- |
-| P1 | 配布の規則を変える | 利用者全員に効く |
+| P1 | デプロイの規則を変える | 利用者全員に効く |
 
 ## 改訂
 
@@ -220,7 +220,7 @@ def candidate(cid: str, ev: str = "S1") -> dict:
         "mission": {"text": "手を減らす", "evidence": [ev]},
         "vision": {"text": "2 回だけ止まる", "evidence": [ev]},
         "values": [{"title": "まず届ける", "text": "早く出す", "evidence": [ev]}],
-        "redlines": [{"id": "P1", "text": "配布の規則を変える", "reason": "全員に効く", "evidence": [ev]}],
+        "redlines": [{"id": "P1", "text": "デプロイの規則を変える", "reason": "全員に効く", "evidence": [ev]}],
     }
 
 
@@ -628,7 +628,9 @@ def test_signals_do_not_change_when_gate_rejections_are_recorded(env):
     row = {"at": "2999-01-01T00:00:00Z", "repo": pm.mvv_repo_key(env["root"]), "kind": "override_pass", "project_sha256": mvv.sha256}
     pms.append_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl", row)
     before = run(env, "signals", "--root", str(env["root"]), "--format", "json")
-    code, out, text = run(env, "record", "--gate", "関門 2", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py")
+    code, out, text = run(
+        env, "record", "--gate", "リリース承認ゲート", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py"
+    )
     assert code == 0, text
     state = new_state(env, env["tmp"])
     assert sprint_gate(env, state, "--outcome", "rejected") == 0
@@ -647,7 +649,7 @@ def test_signals_without_a_declaration_is_0(env):
 
 
 def sprint_gate(env, state: Path, *args: str) -> int:
-    return run(env, "gate", str(state), "関門 2", "--what", "本番", "--root", str(env["root"]), *args, script=STATE_PY)[0]
+    return run(env, "gate", str(state), "リリース承認ゲート", "--what", "本番", "--root", str(env["root"]), *args, script=STATE_PY)[0]
 
 
 def signal_rows(env) -> list[dict]:
@@ -672,8 +674,8 @@ def test_gate_records_overrides_only_when_the_user_disagrees(env):
     m = json.loads(state.read_text())
     assert "rejections" not in m  # 差し戻しは差し戻しの記録へだけ書く（#1833）
     ledger = gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)
-    assert [r["gate"] for r in ledger if gr.is_rejection(r)] == ["関門 2"]
-    assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
+    assert [r["gate"] for r in ledger if gr.is_rejection(r)] == ["リリース承認ゲート"]
+    assert next(g for g in m["gates"] if g["name"] == "リリース承認ゲート")["by"] == "mvv"  # 差し戻しは承認ゲートを通さない
     sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
     assert sprint_gate(env, state, "--outcome", "approved") == 0
     assert len(signal_rows(env)) == 2
@@ -704,6 +706,181 @@ def test_init_fast_stops_when_the_sprint_mvv_contradicts_the_project_mvv(env):
     assert code == 1 and "P1" in out["summary"] and not state.exists()
 
 
+# ---------------------------------------------------------------- スプリント MVV の照合の再利用（#2614）
+
+SPRINT = "## Mission\n速く\n## Vision\n回る\n## Value\n1. 測って決める\n"
+SUSPECT = '{"verdict": "suspect", "locations": [{"item": "C4", "reason": "揺れ"}]}'
+
+
+def vet_rows(env) -> list[dict]:
+    return pms.read_jsonl(env["tmp"] / "state" / "project-mvv.jsonl")
+
+
+def sprint_rows(env) -> list[dict]:
+    return [r for r in vet_rows(env) if r.get("kind") == "sprint"]
+
+
+def init_fast(env, sprint: str, name: str = "m") -> tuple[int, dict, str, Path]:
+    state = env["tmp"] / name / "m.json"
+    code, out, text = run(
+        env, "init", str(state), "--name", "m", "--pace", "fast", "--mvv", sprint, "--root", str(env["root"]), script=STATE_PY
+    )
+    return code, out, text, state
+
+
+def followed_once(env, text: str = SPRINT) -> str:
+    """承認済みのプロジェクト MVV と、LLM が 1 回「従う」と判定したスプリント MVV。"""
+    assert approve(env) == 0
+    sprint = body_file(env, text, "sprint.md")
+    answer(env, FOLLOW)
+    code, _, out, _ = init_fast(env, sprint, "first")
+    assert code == 0, out
+    return sprint
+
+
+def test_init_reuses_the_latest_follow_without_calling_the_llm(env):
+    # 受け入れ条件 1・3・11、I3・I4
+    sprint = followed_once(env)
+    first = sprint_rows(env)[-1]
+    assert first["input_sha256"] and "reused_from" not in first and "cost_usd" in first
+    before, n = (env["tmp"] / "state" / "project-mvv.jsonl").read_text(), calls(env, "claude")
+    answer(env, SUSPECT)  # 呼ばれれば止まる応答
+    for name in ("second", "third"):
+        code, _, out, state = init_fast(env, sprint, name)
+        assert code == 0 and state.exists(), out
+    assert calls(env, "claude") == n
+    after = (env["tmp"] / "state" / "project-mvv.jsonl").read_text()
+    assert after.startswith(before) and len(after.splitlines()) == len(before.splitlines()) + 2
+    reused = sprint_rows(env)[-2:]
+    for r in reused:
+        assert r["verdict"] == "follow" and r["reused_from"] == first["at"] and r["input_sha256"] == first["input_sha256"]
+        assert "cost_usd" not in r and "seconds" not in r
+
+
+def test_the_loop_init_command_is_not_refused_by_a_wobbling_suspect(env):
+    # 受け入れ条件 2: 開発ループ（loop sprint）が打つ init のコマンドそのもの
+    from sprint_loop_argv import sprint_state_init_argv
+
+    followed_once(env)
+    d = env["tmp"] / "lap"
+    d.mkdir()
+    (d / "mvv.md").write_text(SPRINT)
+    lap = {"state_path": str(d / "state.json"), "sprint": "m", "versions": {"dev": "", "prod": ""}, "dir": str(d), "milestone": "25"}
+    argv = sprint_state_init_argv(str(env["root"]), {"name": "l1"}, lap, [11])
+    answer(env, SUSPECT)
+    n = calls(env, "claude")
+    p = inproc.run(argv[1], *argv[2:], env=env["env"], cwd=env["root"])
+    assert p.returncode == 0 and (d / "state.json").exists(), p.stdout + p.stderr
+    assert calls(env, "claude") == n
+
+
+@pytest.mark.parametrize("change", ["sprint", "project", "principles", "system", "contract"])
+def test_any_change_in_the_vet_input_calls_the_llm(env, monkeypatch, change):
+    # 受け入れ条件 4〜7、I2。判定の指示・共通原則・判定の決まりは同じ処理の中で差し替える
+    from project_lib import mvv_llm
+
+    for k in ("PATH", "HOME", "NDF_MVV_STATE_DIR", "NDF_SUPERVISE_CLAUDE", "NDF_USAGE_DIR"):
+        monkeypatch.setenv(k, env["env"][k])
+    assert approve(env) == 0
+    answer(env, FOLLOW)
+    rec, _ = mvv_llm.vet_body(env["root"], SPRINT, "sprint", reuse=True)
+    assert rec["verdict"] == "follow" and "reused_from" not in rec
+    rec, _ = mvv_llm.vet_body(env["root"], SPRINT, "sprint", reuse=True)
+    assert "reused_from" in rec
+    n, body = calls(env, "claude"), SPRINT
+    if change == "sprint":
+        body = SPRINT.replace("速く", "早く")
+    elif change == "project":
+        assert approve(env, BODY.replace("早く出す。", "早く出し、戻す。"), reason="戻し方", name="v2.md") == 0
+        n = calls(env, "claude")
+    elif change == "principles":
+        alt = env["tmp"] / "principles.md"
+        alt.write_text(pm.PRINCIPLES_PATH.read_text(encoding="utf-8") + "\n追記\n")
+        monkeypatch.setattr(pm, "PRINCIPLES_PATH", alt)
+    elif change == "system":
+        monkeypatch.setattr(mvv_llm, "VET_SYSTEM", mvv_llm.VET_SYSTEM + "\n- 追記")
+    else:
+        monkeypatch.setattr(pm, "CONTRACT", pm.CONTRACT + "\n- 追記")
+    rec, _ = mvv_llm.vet_body(env["root"], body, "sprint", reuse=True)
+    assert calls(env, "claude") == n + 1 and "reused_from" not in rec
+
+
+@pytest.mark.parametrize("later", ["suspect", "unknown", "unreadable"])
+def test_a_later_non_follow_verdict_stops_the_reuse(env, later):
+    # 受け入れ条件 8、I1: 明示の照合（vet）で出た判定が最新になる
+    sprint = followed_once(env)
+    answer(env, {"suspect": SUSPECT, "unknown": '{"verdict": "unknown", "locations": []}', "unreadable": "読めない"}[later])
+    assert run(env, "vet", "--body", sprint, "--kind", "sprint", "--root", str(env["root"]))[0] == 10
+    assert sprint_rows(env)[-1]["verdict"] == later
+    n = calls(env, "claude")
+    answer(env, FOLLOW)
+    code, _, out, _ = init_fast(env, sprint, "again")
+    assert code == 0 and calls(env, "claude") == n + 1, out
+    assert "reused_from" not in sprint_rows(env)[-1]
+
+
+def test_a_missing_or_broken_log_does_not_stop_init(env):
+    # 受け入れ条件 9、I5
+    assert approve(env) == 0
+    log = env["tmp"] / "state" / "project-mvv.jsonl"
+    log.unlink()
+    sprint = body_file(env, SPRINT, "sprint.md")
+    answer(env, FOLLOW)
+    assert init_fast(env, sprint, "a")[0] == 0
+    with log.open("a") as f:
+        f.write("{壊れた行\n[1, 2]\n")
+    n = calls(env, "claude")
+    code, _, out, _ = init_fast(env, sprint, "b")
+    assert code == 0 and calls(env, "claude") == n, out  # 壊れた行を飛ばし、前の「従う」を再利用する
+    log.write_text("{壊れた行\n")
+    assert init_fast(env, sprint, "c")[0] == 0 and calls(env, "claude") == n + 1
+
+
+def test_rows_from_another_repo_key_are_reused(env):
+    # 受け入れ条件 10: メインディレクトリと worktree で repo の値が違っても入力が同じなら再利用する
+    sprint = followed_once(env)
+    log = env["tmp"] / "state" / "project-mvv.jsonl"
+    rows = vet_rows(env)
+    rows[-1]["repo"] = "/somewhere/else"
+    log.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    n = calls(env, "claude")
+    assert init_fast(env, sprint, "again")[0] == 0 and calls(env, "claude") == n
+
+
+def test_vet_sprint_always_calls_the_llm(env):
+    # 受け入れ条件 13、I6
+    sprint = followed_once(env)
+    n = calls(env, "claude")
+    assert run(env, "vet", "--body", sprint, "--kind", "sprint", "--root", str(env["root"]))[0] == 0
+    assert calls(env, "claude") == n + 1 and "reused_from" not in sprint_rows(env)[-1]
+
+
+def test_approve_ignores_reused_sprint_rows(env):
+    # 受け入れ条件 15: 再利用の行（種類はスプリント MVV）は承認が読む候補・改訂案の行に入らない
+    sprint = followed_once(env, BODY)
+    answer(env, FOLLOW)
+    assert init_fast(env, sprint, "again")[0] == 0 and "reused_from" in sprint_rows(env)[-1]
+    v2 = body_file(env, BODY.replace("早く出す。", "早く出し、戻す。"), "v2.md")
+    code, _, out = run(env, "approve", "--body", v2, "--by", "利用者", "--reason", "x", "--root", str(env["root"]))
+    assert code == 1 and "照合の記録が無い" in out
+
+
+def test_unreadable_principles_never_reuse_and_write_no_input_hash(env, monkeypatch):
+    # I7: 共通原則を読めないと代わりの文が毎回同じになり、入力で見分けられない
+    from project_lib import mvv_llm
+
+    for k in ("PATH", "HOME", "NDF_MVV_STATE_DIR", "NDF_SUPERVISE_CLAUDE", "NDF_USAGE_DIR"):
+        monkeypatch.setenv(k, env["env"][k])
+    assert approve(env) == 0
+    monkeypatch.setattr(pm, "PRINCIPLES_PATH", env["tmp"] / "missing.md")
+    answer(env, FOLLOW)
+    n = calls(env, "claude")
+    for _ in range(2):
+        rec, _ = mvv_llm.vet_body(env["root"], SPRINT, "sprint", reuse=True)
+        assert rec["verdict"] == "follow" and "input_sha256" not in rec and "reused_from" not in rec
+    assert calls(env, "claude") == n + 2
+
+
 def test_fast_refusal_asks_for_a_sprint_mvv_when_there_is_no_project_mvv(tmp_path):
     assert "MVV が無い" in pm.approval_refusal({"gates": []}, tmp_path)
 
@@ -730,7 +907,7 @@ def gate_state(env, tmp: Path, with_sprint: bool) -> Path:
 
 def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
     material = env["tmp"] / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     log = env["tmp"] / "gate.jsonl"
     code, out, text = run(
         env,
@@ -789,8 +966,18 @@ def test_mvv_gate_suggests_revision_after_the_unknown_streak(env):
     assert approve(env) == 0
     state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "unknown", "reasons": ["決められない"], "boundary": []}')
-    outs = [gate_check(env, state)[1] for _ in range(3)]
-    assert [any(i.get("kind") == "revise" for i in o["items"]) for o in outs] == [False, False, True]
+
+    # 判定できなかった依頼の数で数える（#2507）: 同じスプリント状態の打ち直しは 1 件、別のスプリント状態なら別の件
+    # 累計（`unknowns`）の閾値でも同じ kind の提案が出る。承認と同じ秒の行は累計に入らず、秒をまたぐと結果が変わるため、連続の提案だけを見る
+    def streak_revise(out: dict) -> bool:
+        return any(i.get("kind") == "revise" and "回続いた" in i.get("reason", "") for i in out["items"])
+
+    assert not streak_revise([gate_check(env, state)[1] for _ in range(3)][-1])
+    states = [state] + [state.with_name(f"m{k}.json") for k in (2, 3)]
+    for s in states[1:]:
+        s.write_text(state.read_text())
+    outs = [gate_check(env, s)[1] for s in states]
+    assert [streak_revise(o) for o in outs] == [False, False, True]
     assert gate_check(env, state)[2][-1]["basis"] == [pm.NO_BASIS]
 
 
@@ -880,3 +1067,27 @@ def test_judge_gets_the_block_and_records_the_basis(env, monkeypatch):
     assert state["project_mvv"] == {"status": "approved", "version": 1, "sha256": sha(BODY)}
     assert state["log"][-1]["basis"] == ["Value 2"]
     assert (env["tmp"] / "judge-prompt.txt").read_text().startswith(pm.principles())
+
+
+def test_unknown_streak_counts_each_sprint_gate_and_pr_once():
+    # オーガナイザーの打ち直しの行（#2507）は、隣り合っていなくても同じ組を 1 件と数える
+    ref = {"project_mvv": {"sha256": "s"}, "verdict": "unknown", "gate": "design"}
+    a, b = {**ref, "sprint": "/a.json", "pr": [5]}, {**ref, "sprint": "/b.json", "pr": [6]}
+    assert pms.unknown_streak([a, a], "s") == 1
+    assert pms.unknown_streak([a, b, a], "s") == 2
+    assert pms.unknown_streak([a, {**b, "verdict": "follow"}, b, a], "s") == 2
+    assert pms.unknown_streak([{**ref}, {**ref}], "s") == 2  # スプリント状態の無い行は 1 行を 1 件と数える
+
+
+def test_last_vet_takes_latest_time_not_last_line(tmp_path, monkeypatch):
+    """旧の置き場から足し合わせた古い判定が末尾に付いても、最新の時刻の判定を採る（#2766）。"""
+    import importlib.util
+
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "st"))
+    spec = importlib.util.spec_from_file_location("project_mvv_cli_last_vet", MVV_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    key = pm.mvv_repo_key(tmp_path)
+    for at, verdict in (("2026-11-07T10:00:00Z", "not_follow"), ("2026-11-01T10:00:00Z", "follow")):
+        pms.append_jsonl(pm.vet_log_path(), {"repo": key, "sha256": "s", "kind": "candidate", "at": at, "verdict": verdict})
+    assert mod.last_vet(tmp_path, "s")["verdict"] == "not_follow"

@@ -7,7 +7,7 @@
   "作業場所": "<TMP>/repo",
   "リポジトリ": "<TMP>/repo",
   "Pull Request": "{queue_pr:design-16}",
-  "規則": "承認の証跡が無ければ approved が関門で止まる。マージが落ちたら止まり、conductor は queue --resume で続ける。",
+  "規則": "承認の証跡が無ければ approved が承認ゲートで止まる。マージが落ちたら止まり、conductor は queue --resume で続ける。",
   "上限": 3,
   "steps": [
     {
@@ -30,7 +30,7 @@
     {
       "id": "merge",
       "type": "run",
-      "timeout": 3960,
+      "timeout": 4290,
       "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
@@ -43,7 +43,7 @@
     {
       "id": "merge-approved",
       "type": "run",
-      "timeout": 3960,
+      "timeout": 4290,
       "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"

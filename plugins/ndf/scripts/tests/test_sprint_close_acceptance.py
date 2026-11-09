@@ -31,7 +31,7 @@ CLOSE = [
     "o/r",
     "--with-verification",
     "--final-stage",
-    "配布",
+    "デプロイ",
 ]  # 条件 2 を見る（条件 3 は test_sprint_close_final_stage.py）
 THREE = "# 課題\n\n## 受け入れ条件\n\n- [ ] 1. 一\n- [ ] 2. 二\n- [ ] 3. 三\n\n## 進行\n\nモード: standard\n"
 
@@ -80,7 +80,7 @@ def test_rows_that_do_not_point_to_an_issue_are_skipped(repo, gh):
     closed = {k: "CLOSED" for k in PR1887_BODIES}
     setup(gh, PR1887_ROWS, PR1887_BODIES, closed, prs=prs)
     code, out, err = call("sprint-close.py", [*CLOSE, "--dry-run"], gh.env, repo)
-    assert code == 0, (out, err)
+    assert code == 10, (out, err)
     with_rows = {k: (v["result"], v["reason"]) for k, v in issues_of(out).items()}
     assert {r for r, _ in with_rows.values()} == {"closed_unverified"}
     assert not any("対応が読めない" in why for _, why in with_rows.values())
@@ -100,7 +100,7 @@ def test_a_table_without_issue_rows_keeps_every_issue_open(repo, gh):
     """課題を指す行が 1 行も無ければ、全件が対応の読めない kept_open（受け入れ条件 2）。閉じた課題も同じ。"""
     setup(gh, [("—", "導入の確認", "合格")], {"o/r#1": THREE, "o/r#2": THREE}, {"o/r#2": "CLOSED"}, prs="Fixes #1, fixes #2")
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
-    assert code == 0, (out, err)
+    assert code == 10, (out, err)
     assert {(i["result"], i["reason"]) for i in issues_of(out).values()} == {("kept_open", "条件と課題の対応が読めない")}
     assert not calls(gh, ["issue", "close"]) and not calls(gh, ["api"])
 
@@ -112,7 +112,7 @@ def test_a_table_without_issue_rows_closes_an_issue_verified_before_merge(repo, 
     )
     setup(gh, [("—", "導入の確認", "合格")], {"o/r#1": THREE + record, "o/r#2": THREE}, prs="Fixes #1, fixes #2")
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
-    assert code == 0, (out, err)
+    assert code == 10, (out, err)
     got = issues_of(out)
     assert got["o/r#1"]["result"] == "closed" and got["o/r#1"]["checked"] == [1, 2, 3]
     assert (got["o/r#2"]["result"], got["o/r#2"]["reason"]) == ("kept_open", "条件と課題の対応が読めない")
@@ -128,7 +128,7 @@ def test_a_criterion_without_a_passing_row_keeps_the_issue_open(repo, gh):
     setup(gh, [("#1", "1. 一", "合格"), ("#1", "2. 二", "合格")], {"o/r#1": THREE})
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
     it = issues_of(out)["o/r#1"]
-    assert code == 0 and it["result"] == "kept_open" and it["reason"] == "合格の行が無い受け入れ条件: 3"
+    assert code == 10 and it["result"] == "kept_open" and it["reason"] == "合格の行が無い受け入れ条件: 3"
     assert not calls(gh, ["issue", "close"]) and not calls(gh, ["api"])
     assert gh.get()["issue_bodies"]["o/r#1"] == THREE
 
@@ -184,7 +184,7 @@ def test_a_closed_issue_that_misses_a_criterion_is_closed_unverified(repo, gh):
     setup(gh, [("#1", "1. c", "合格"), ("#1", "2. c", "合格")], {"o/r#1": THREE}, {"o/r#1": "CLOSED"})
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
     it = issues_of(out)["o/r#1"]
-    assert code == 0 and out["status"] == "ok" and out["metrics"]["closed_unverified"] == 1
+    assert code == 10 and out["status"] == "gate" and out["metrics"]["closed_unverified"] == 1
     assert it["result"] == "closed_unverified" and it["reason"].startswith("閉じているが") and it["reason"].endswith("3")
     assert not calls(gh, ["issue", "reopen"]) and not calls(gh, ["api"])
 
@@ -232,8 +232,8 @@ def test_issue_without_checkboxes_is_judged_by_the_rows_only(repo, gh, body):
 @pytest.mark.parametrize(
     "args",
     [
-        ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布"],
-        ["--record-pr", "0", "--repo", "o/r", "--issues", "1", "--final-stage", "配布"],
+        ["--record-pr", "20", "--repo", "o/r", "--final-stage", "デプロイ"],
+        ["--record-pr", "0", "--repo", "o/r", "--issues", "1", "--final-stage", "デプロイ"],
     ],
 )
 def test_paths_without_verification_do_not_read_the_body(repo, gh, args):
@@ -250,7 +250,7 @@ def test_issues_of_other_repositories_are_judged_but_not_written(repo, gh):
     setup(gh, full + [("x/y#3", "1. c", "合格")], {"x/y#2": THREE, "x/y#3": THREE}, prs="Fixes x/y#2, fixes x/y#3")
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
     res = issues_of(out)
-    assert code == 0 and res["x/y#2"]["result"] == "closed" and "checked" not in res["x/y#2"]
+    assert code == 10 and res["x/y#2"]["result"] == "closed" and "checked" not in res["x/y#2"]
     assert res["x/y#3"]["result"] == "kept_open" and res["x/y#3"]["reason"].endswith("2, 3")
     assert not calls(gh, ["api"])
 
@@ -266,7 +266,7 @@ def test_body_is_read_inside_the_issue_lock_and_a_held_lock_fails(tmp_path, monk
     """本文の読み書きは課題ごとの錠の中で行う。錠を取れなければ failed（非機能の条件）。"""
     monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path))
     mod = load_sprint_close()
-    ctx = mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布")
+    ctx = mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="デプロイ")
     seen = []
 
     def read(root, repo_, n):
@@ -297,7 +297,7 @@ def test_a_check_that_changes_more_than_the_marks_is_not_written(tmp_path, monke
     wrote = []
     monkeypatch.setattr(mod.gh_rest, "update_body", lambda *a: wrote.append(a) or True)
     it = mod._close_verified(
-        _A(), mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3}))
+        _A(), mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="デプロイ"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3}))
     )
     assert it["result"] == "failed" and not wrote
 

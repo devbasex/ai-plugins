@@ -1,9 +1,9 @@
 name: Runtime plugin smoke (latest CLI)
 
-# 最新の版のスモーク（#1982）。配布の経路のスモーク（runtime-plugin-smoke.yml）は
+# 最新の版のスモーク（#1982）。リリースの経路のスモーク（runtime-plugin-smoke.yml）は
 # tests/runtime-smoke/cli-versions.env に書いた版の CLI だけを入れる。この workflow は 4 ランタイムの
 # その時点の最新の版を解決して同じ手順で試し、落ちたらランタイムごとに 1 件の課題に残す。
-# Pull Request と push では起動しない（必須のチェックに入れない。外部の版上げで配布を止めない）
+# Pull Request と push では起動しない（必須のチェックに入れない。外部の版上げでデプロイを止めない）
 on:
   schedule:
     # 毎日 06:00 JST。定期の起動は既定ブランチ（main）の workflow で動く
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 試すブランチ（既定は次に配布する develop）
+        description: 試すブランチ（既定は次にデプロイする develop）
         default: develop
         required: false
 

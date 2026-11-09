@@ -192,7 +192,7 @@
     },
     "Container": {
       "additionalProperties": false,
-      "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
+      "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければテスト環境を 1 度起こして確かめ直し、\nそれでも見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
       "properties": {
         "service": {
           "title": "Service",
@@ -275,6 +275,41 @@
           ],
           "default": null,
           "title": "Production"
+        },
+        "manual_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Manual Reason"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeliveryResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "publishes_release": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publishes Release"
         }
       },
       "required": [
@@ -284,6 +319,51 @@
         "versioned"
       ],
       "title": "Delivery",
+      "type": "object"
+    },
+    "DeliveryResult": {
+      "additionalProperties": false,
+      "description": "CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない宣言として止める。",
+      "properties": {
+        "workflow": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        }
+      },
+      "title": "DeliveryResult",
       "type": "object"
     },
     "Duration": {

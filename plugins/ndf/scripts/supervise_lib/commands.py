@@ -14,9 +14,10 @@ import formatting
 import mdtable
 import report_fields
 import slow_step as ss
-from step_result import result
+import step_read
+from step_result import EXIT_GATE, EXIT_OK, EXIT_VIOLATION, result
 from supervise_lib.decl import SUPERVISE_DECL, DeclError, decl_roots, read_decl, sync_checks_of
-from supervise_lib.engine import Engine
+from supervise_lib.engine import PHASE_RESULT, Engine
 from supervise_lib.paths import HERE, state_dir_of
 from supervise_lib.plan import expand_parts, normalize_plan
 
@@ -122,7 +123,7 @@ def _glossary_note(created: list[str], words: list[dict], ignored: list[str] | N
         + "、".join(f"`{c}`" for c in created)
         + "。"
         + skipped
-        + "\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
+        + "\n語の採否は設計承認ゲートで見る。候補の語（`glossary.py candidates`）:\n\n"
         + (
             mdtable.table_markdown(("語", "回数", "種類", "最初の場所"), rows, align=(None, "right", None, None))
             if rows
@@ -135,7 +136,7 @@ def _glossary_note(created: list[str], words: list[dict], ignored: list[str] | N
 def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | None]:
     """設計のプランの入口（glossary のステップ）。glossary.py gate が通ればそのまま進む。宣言か用語集が無くて
     止まったら、worktree の中で init と candidates を打ち、起こしたファイルをコミットし、候補の語を out へ
-    書く（pr のステップが PR 本文へ足す。語の採否は承認ゲート 1 で利用者が見る）。それ以外の失敗は止まる。"""
+    書く（pr のステップが PR 本文へ足す。語の採否は設計承認ゲートで利用者が見る）。それ以外の失敗は止まる。"""
     gl = [sys.executable, str(HERE / "glossary.py")]
 
     def call(*args) -> tuple[int, dict]:
@@ -157,7 +158,7 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
     # 未コミットで残り、打ち直しの gate が通って用語集のコミットも候補の語も書かれずに進むため
     code, cand = call("candidates")
     if code != 0:
-        # 候補の欠落を「0 件」と区別できなくなるので、承認ゲート 1 の材料が揃わないまま進めない
+        # 候補の欠落を「0 件」と区別できなくなるので、設計承認ゲートの材料が揃わないまま進めない
         return result(
             "supervise-design-glossary", "stopped", f"glossary.py candidates が失敗した: {cand.get('summary')}", [], {"initialized": 0}
         ), code
@@ -187,6 +188,65 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
         [{"name": c, "result": "created-ignored" if c in ignored else "created"} for c in created],
         {"initialized": 1, "candidates": len(words)},
     ), None
+
+
+def cmd_review_settled(state: str, step: str, fix_step: str, max_attempts: int, max_cost: float, max_seconds: float) -> tuple[dict, int]:
+    """設計のプランの review-settled（#2388 の決定 1・3）。実行の記録の `log` から、上限到達（終了コード 6）で終わった
+    `step` の未解決の件数と、解決のフロー（`fix_step`）の回数・費用・秒を読み、行き先を終了コードで返す。
+    0 = 未解決 0 件 / 1 = 解決を続ける / 2 = 解決できない（U1 読めない・U2 回数・U3 繰り返し・U4 費用・U5 時間）。"""
+    tool = "review-settled"
+
+    def out(code: int, reason: str | None, why: str, unresolved=None, attempts=0, cost=0.0, seconds=0.0) -> tuple[dict, int]:
+        metrics = {"unresolved": unresolved, "attempts": attempts, "cost": round(cost, 4), "seconds": round(seconds, 1), "reason": reason}
+        head = "" if unresolved is None else f"未解決 {unresolved} 件。"
+        return result(tool, "ok" if code == 0 else "stopped", f"{head}{reason or '解決を続けるか通常の経路'}: {why}", [], metrics), code
+
+    try:
+        log = json.loads(Path(state).read_text()).get("log")
+    except (OSError, ValueError, AttributeError) as e:
+        return out(2, "U1", f"実行の記録を読めない（{e}）")
+    if not isinstance(log, list):
+        return out(2, "U1", "実行の記録に log が無い")
+    log = [e for e in log if isinstance(e, dict)]
+    reviews = [e for e in log if e.get("id") == step]
+    if not reviews:
+        return out(2, "U1", f"{step} の結果が無い")
+    last = reviews[-1]
+    n = (last.get("counts") or {}).get("unresolved")
+    if last.get("exit") != 6:
+        return out(2, "U1", f"{step} の最後の終了コードが 6 でない（{last.get('exit')}）")
+    if not isinstance(n, int) or isinstance(n, bool):
+        return out(2, "U1", f"{step} の未解決の件数を読めない（{n!r}）")
+    fix = fix_totals(log, step, fix_step)
+    vals = {"unresolved": n, "attempts": fix["attempts"], "cost": fix["cost"], "seconds": fix["seconds"]}
+    if n == 0:
+        return out(0, None, "通常の経路へ進む", **vals)
+    if fix["attempts"] >= max_attempts:
+        return out(2, "U2", f"解決のフローの直しが上限 {max_attempts} 回に達した", **vals)
+    if fix["ran"] and len(reviews) >= 2 and isinstance(prev := (reviews[-2].get("counts") or {}).get("unresolved"), int) and n >= prev:
+        return out(2, "U3", f"未解決の件数が減っていない（{prev} → {n}）", **vals)
+    if fix["cost_unknown"] or fix["cost"] > max_cost:
+        return out(2, "U4", f"直しの費用が上限 ${max_cost} を超えたか不明", **vals)
+    if fix["seconds"] > max_seconds:
+        return out(2, "U5", f"解決のフローの秒が上限 {max_seconds} 秒を超えた", **vals)
+    return out(1, None, "解決のフローを続ける", **vals)
+
+
+def fix_totals(log: list[dict], step: str, fix_step: str) -> dict:
+    """解決のフロー（`fix_step`）の集計。attempts は成功した直しの回数、cost は直しの費用の和（`step` の費用は足さない）、
+    seconds は最初の直し以降の `step` と `fix_step` の秒の和。ran は直しが 1 度でも記録にあるか。"""
+    fixes = [e for e in log if e.get("id") == fix_step]
+    llms = [e.get("llm") or {} for e in fixes]
+    first = next((i for i, e in enumerate(log) if e.get("id") == fix_step), None)
+    return {
+        "ran": bool(fixes),
+        "attempts": sum(1 for e in fixes if e.get("exit") == 0),
+        "cost": sum(float(m.get("cost") or 0.0) for m in llms),
+        "seconds": sum(
+            float(e.get("seconds") or 0.0) for e in (log[first:] if first is not None else []) if e.get("id") in (step, fix_step)
+        ),
+        "cost_unknown": any(m.get("cost_unknown") for m in llms),
+    }
 
 
 def note_row(report: str, next_text: str) -> str:
@@ -285,10 +345,18 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
     ), None
 
 
-def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str | None) -> int:
-    """プランを 1 本流し、報告を標準出力へ出す。終了コードは完了か関門なら 0、それ以外は 3。
+PHASE_CODES = {"ok": EXIT_OK, "gate": EXIT_GATE}
 
-    落ちた後に同じコマンドを打ち直すと、耐久の記録から流れていたステップで続ける。完了か関門の記録があれば流さずに同じ報告を返す。"""
+
+def phase_exit_code(state: Path) -> int:
+    """フェーズの結果（`phase-result.json`）の status から `supervise.py run` の終了コードを決める（ok 0・gate 10・stopped 1）。"""
+    return PHASE_CODES.get(step_read.read_result_file(state / PHASE_RESULT, tool="supervise-run")["status"], EXIT_VIOLATION)
+
+
+def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str | None) -> int:
+    """プランを 1 本流し、報告を標準出力へ出す。終了コードはフェーズの結果の status から決まる（ok 0・gate 10・stopped 1）。
+
+    落ちた後に同じコマンドを打ち直すと、耐久の記録から流れていたステップで続ける。完了か承認ゲートの記録があれば流さずに同じ報告を返す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -299,10 +367,10 @@ def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str |
         flow.launch_run(engine, start)  # 実行の鍵はプランの絶対パスから決める（run-<12 字>）
     except durable.DurableError as e:
         print(f"supervise-run: 止まった: {e}", file=sys.stderr)
-        return 3
+        return EXIT_VIOLATION
     try:
         text = engine.run(start)
     finally:
         durable.close()
     print(text)
-    return 0 if "結果: 完了" in text or "結果: 関門" in text else 3
+    return phase_exit_code(state)

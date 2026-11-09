@@ -329,5 +329,5 @@ by_memory     = running + max(0, ⌊(空き − reserve) ÷ per_lane_used⌋)
 - [PR #751](https://github.com/devbasex/ai-plugins/pull/751) / [PR #758](https://github.com/devbasex/ai-plugins/pull/758) / [PR #761](https://github.com/devbasex/ai-plugins/pull/761) — 実装
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 本数の 1 本 = supervisor 1 つ
 - [ndf-workflow-unit-and-gates.md](ndf-workflow-unit-and-gates.md) — 並行開発の必須ルール
-- [ndf-parallel-organizer.md](ndf-parallel-organizer.md) — tmux のレーンを並列の計画で並べ、オーガナイザーが本番の配布を 1 本にまとめる（スプリントより上の層の並列）
+- [ndf-parallel-organizer.md](ndf-parallel-organizer.md) — tmux のレーンを並列の計画で並べ、オーガナイザーがリリースを 1 本にまとめる（スプリントより上の層の並列）
 - 要求・設計・契約・計画の元の文書は `issues/old/milestone-18-unattended/` にある

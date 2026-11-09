@@ -68,7 +68,7 @@ def land(root: Path, method: str) -> str | None:
 
 @pytest.mark.parametrize("method", ["merge", "squash", "rebase"])
 def test_only_the_release_pr_after_approval_matches(repo, method):
-    """受け入れ条件 3: 承認の後が配布の PR だけなら、マージの方法によらず match。"""
+    """受け入れ条件 3: 承認の後がデプロイの PR だけなら、マージの方法によらず match。"""
     approved = git(repo, "rev-parse", "HEAD")
     rel = release_branch(repo, approved)
     mc = land(repo, method)
@@ -78,7 +78,7 @@ def test_only_the_release_pr_after_approval_matches(repo, method):
 
 @pytest.mark.parametrize("method", ["merge", "squash", "rebase"])
 def test_an_outside_change_after_the_release_pr_is_caught(repo, method):
-    """受け入れ条件 5（後に入った）: 配布の PR の後に外の変更が入れば outside_commits で SHA と件名が並ぶ。"""
+    """受け入れ条件 5（後に入った）: デプロイの PR の後に外の変更が入れば outside_commits で SHA と件名が並ぶ。"""
     approved = git(repo, "rev-parse", "HEAD")
     rel = release_branch(repo, approved)
     mc = land(repo, method)
@@ -89,7 +89,7 @@ def test_an_outside_change_after_the_release_pr_is_caught(repo, method):
 
 
 def test_an_outside_change_before_the_release_branch_is_caught(repo):
-    """受け入れ条件 5（前に入った・I3）: 承認の後の先端から配布のブランチを切ると、その起点の外の変更を拾う。"""
+    """受け入れ条件 5（前に入った・I3）: 承認の後の先端からデプロイのブランチを切ると、その起点の外の変更を拾う。"""
     approved = git(repo, "rev-parse", "HEAD")
     other = commit(repo, "statusline.txt", "x\n", "statusline (#806)")
     rel = release_branch(repo, other)
@@ -158,7 +158,7 @@ UNGATED = ("docs/", "issues/")
 
 
 def doc_pr(root: Path, name: str = "docs/design.md") -> str:
-    """配布物に触れない PR を develop へマージのコミットで入れ、そのマージのコミットを返す。"""
+    """リリース対象に触れない PR を develop へマージのコミットで入れ、そのマージのコミットを返す。"""
     git(root, "checkout", "-q", "-b", f"doc-{name.replace('/', '-')}")
     (root / name).parent.mkdir(parents=True, exist_ok=True)
     commit(root, name, "d\n", "design (#2214)")
@@ -169,7 +169,7 @@ def doc_pr(root: Path, name: str = "docs/design.md") -> str:
 
 @pytest.mark.parametrize("before", [False, True])
 def test_outside_commits_that_ship_nothing_are_tolerated(repo, before):
-    """#2221: 配布の PR の前後に入った外のコミットが配布物に触れなければ、止めずに tolerated へ入れる。"""
+    """#2221: デプロイの PR の前後に入った外のコミットがリリース対象に触れなければ、止めずに tolerated へ入れる。"""
     approved = git(repo, "rev-parse", "HEAD")
     base = doc_pr(repo) if before else approved
     rel = release_branch(repo, base)
@@ -177,11 +177,11 @@ def test_outside_commits_that_ship_nothing_are_tolerated(repo, before):
     tip = git(repo, "rev-parse", "HEAD") if before else doc_pr(repo)
     v = ac.compare_approved(repo, approved, tip, [rel.pr(mc)], UNGATED)
     assert (v.ok, v.reason, v.outside) == (True, ac.MATCH, [])
-    assert "design (#2214)" in [o.subject for o in v.tolerated]  # 配布のブランチの起点より前なら、マージのコミットも並ぶ
+    assert "design (#2214)" in [o.subject for o in v.tolerated]  # デプロイのブランチの起点より前なら、マージのコミットも並ぶ
 
 
 def test_an_outside_commit_that_ships_is_still_caught(repo):
-    """#2221: 配布物に触れる外のコミットは今どおり outside_commits で止め、触れないものは tolerated に分ける。"""
+    """#2221: リリース対象に触れる外のコミットは今どおり outside_commits で止め、触れないものは tolerated に分ける。"""
     approved = git(repo, "rev-parse", "HEAD")
     rel = release_branch(repo, approved)
     mc = land(repo, "merge")
@@ -195,8 +195,8 @@ def test_an_outside_commit_that_ships_is_still_caught(repo):
 
 @pytest.mark.parametrize("move", [False, True])
 def test_an_outside_commit_with_a_quoted_path_or_a_move_out_of_shipped_is_caught(repo, move):
-    """日本語のパス（core.quotePath で引用符に包まれる）と、配布物から外への移動（rename の検出で移動先だけになる）も、
-    配布物に触れる外のコミットとして止める。"""
+    """日本語のパス（core.quotePath で引用符に包まれる）と、リリース対象から外への移動（rename の検出で移動先だけになる）も、
+    リリース対象に触れる外のコミットとして止める。"""
     (repo / "plugins" / "foo").mkdir(parents=True)
     commit(repo, "plugins/foo/a.txt", "a\n")
     approved = git(repo, "rev-parse", "HEAD")
@@ -215,7 +215,7 @@ def test_an_outside_commit_with_a_quoted_path_or_a_move_out_of_shipped_is_caught
 
 @pytest.mark.parametrize("path", ["scripts/runtime-smoke-test.sh", ".github/workflows/ci.yml", "pyproject.toml"])
 def test_an_outside_commit_outside_the_allow_list_is_caught(repo, path):
-    """配布物でなくても、許可リスト（docs/・issues/）の外を変えた承認の外のコミットは止める（秘密を渡す CI が実行する。C1）。"""
+    """リリース対象でなくても、許可リスト（docs/・issues/）の外を変えた承認の外のコミットは止める（秘密を渡す CI が実行する。C1）。"""
     approved = git(repo, "rev-parse", "HEAD")
     rel = release_branch(repo, approved)
     mc = land(repo, "merge")
@@ -227,7 +227,7 @@ def test_an_outside_commit_outside_the_allow_list_is_caught(repo, path):
 
 @pytest.mark.parametrize(("path", "reason"), [("docs/evil.md", ac.MATCH), ("plugins/evil.txt", ac.TREE_DIFFERS)])
 def test_a_merge_commit_carrying_a_change_differs_only_when_it_ships(repo, path, reason):
-    """#2221: マージのコミットの中で入れた変更は、配布物のパスに及ぶときだけ tree_differs。"""
+    """#2221: マージのコミットの中で入れた変更は、リリース対象のパスに及ぶときだけ tree_differs。"""
     approved = git(repo, "rev-parse", "HEAD")
     rel = release_branch(repo, approved)
     git(repo, "merge", "-q", "--no-ff", "--no-commit", "release")

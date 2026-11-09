@@ -70,6 +70,7 @@ import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17�
 import durable_keys  # noqa: E402  記録の有無を DBOS を読まずに確かめる
 import gh_graphql  # noqa: E402  未解決のスレッドの問い合わせ（#1142 の L0）
 import gh_quota  # noqa: E402  上限の語（#1142 の L0）
+import limits  # noqa: E402  上限の宣言（#2343）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 from post_requests import request_for  # noqa: E402  種別ごとの送る内容と冪等の照合条件
 
@@ -111,8 +112,7 @@ TRANSIENT_STATUSES = (500, 502, 503, 504)
 _EMPTY_BODY_WORDS = ("unexpected end of json input", "unexpected eof")
 _NETWORK_WORDS = ("error connecting to", "dial tcp", "connection refused", "connection reset", "i/o timeout", "tls handshake timeout")
 _NETWORK_WORDS += ("context deadline exceeded",)
-# 流し直す待ちの合計と間隔（秒）。上限の再実行の既定（900 秒・30 秒）を超えない（#1843 の決定 4）。
-TRANSIENT_MAX_WAIT, TRANSIENT_INTERVAL = 300.0, 30.0
+# 流し直す待ちの合計と間隔は上限の宣言の方針 post-queue.transient-reflush。上限の再実行（方針 post-queue.rate-limit）を超えない（#1843 の決定 4）。
 
 
 class Attempt(NamedTuple):
@@ -212,24 +212,6 @@ def is_rate_limited(attempt: Attempt) -> bool:
     return False
 
 
-def is_position_unresolved(attempt: Attempt) -> bool:
-    """この失敗が「指した位置を差分の中に見つけられない」ことによるものか。
-
-    **レビューの作成は要求ごとに全件が拒まれる。** 差分の外の行やファイルを指した
-    インラインが 1 件でもあると、正しいインラインも総評も作られない（実測、
-    2026-09-22）。応答は語をつないだ 1 つの文字列で、どの項目かは指さないため、
-    呼び出し側は要求のインラインをまとめて総評へ移して送り直す。
-
-    **同じ状態で返る別の拒まれ方と分ける。** 判定の値の誤り
-    （`Variable $event ... was provided invalid value`）と基準のコミットの誤り
-    （`The commitOID is not part of the pull request`）はこの語を持たない。
-    区別しないと、別の不具合が退避として飲み込まれる。
-    """
-    if attempt.ok or attempt.http != 422:
-        return False
-    return _POSITION_WORD in f"{attempt.message} {attempt.stderr}".lower()
-
-
 def is_transient_failure(attempt: Attempt) -> bool:
     """この失敗が一時的なもの（送り直せば届く見込みがある）か（#1843）。上限の語を持たず、状態が 5xx か、状態が無く
     本文が空で応答を読めなかったか、状態が無くネットワークの失敗のとき真。`gh` を呼ばない（残り回数を引かない）。"""
@@ -245,7 +227,7 @@ def is_transient_failure(attempt: Attempt) -> bool:
 # 要求が受け付けられない）。401 / 403 は項目ではなく認証か上限の問題であり、後ろの
 # 項目も同じく送れないため含めない。
 PERMANENT_STATUSES = (400, 404, 410, 422)
-# 飛ばさない種別。レビューの拒否は呼び出し側が退避（`is_position_unresolved`）か
+# 飛ばさない種別。レビューの拒否は呼び出し側が退避（`rejected_by_position`）か
 # 失敗かを決めるため、先頭で止めて返す。ただし今回分でない位置エラーは `Queue.flush` が控えへ外す（#2084）。
 _NOT_DROPPED_KINDS = ("review-post",)
 
@@ -425,7 +407,7 @@ def read_item(path: pathlib.Path) -> dict[str, Any] | None:
 
 
 def rejected_by_position(item: dict[str, Any]) -> bool:
-    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか（`is_position_unresolved` を項目の状態と説明で行う）。"""
+    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか（状態が 422 で、説明が位置を解決できない語を持つ）。"""
     if int(item.get("last_status") or 0) != 422:
         return False
     return _POSITION_WORD in str(item.get("last_error") or "").lower()
@@ -564,7 +546,9 @@ class Queue:
     def _run(self, fl: dict[str, Any], func: Any, name: str, n: int, *args: Any) -> dict[str, Any]:
         wid = f"post-{name}-a{n}"
         fl["durable"].start(fl["durable"].WorkflowRef(wid, n, "start"), func, *args)
-        if (got := fl["durable"].wait(wid, poll=0.01)).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
+        if (
+            got := fl["durable"].wait(wid, poll=limits.value("post-queue.sync-wait", "interval"))
+        ).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
             raise fl["durable"].DurableError(f"{wid} が終わらなかった: {got.value}")
         return got.value
 
@@ -621,13 +605,6 @@ class Queue:
         if seq is None or self._dormant():
             return False
         return self._close_item(lambda _n, item: item.get("seq") == seq, "withdrawn") is not None
-
-    def set_aside(self, path: pathlib.Path) -> pathlib.Path:
-        """送れない項目を待ち行列から外し、控えを `dropped/` へ残す。`path` は `paths()` の 1 つ。"""
-        got = self._close_item(lambda n, _item: n == pathlib.Path(path).stem, "dropped")
-        if got is None:
-            raise FileNotFoundError(str(path))
-        return _aside(self.dir, got.pop("name"), got)
 
     def add(self, item: dict[str, Any], ident: str | int) -> dict[str, Any]:
         """項目を 1 件足し、連番を入れた項目を返す。連番は記録のある名前の最大 + 1（実行の鍵の排他の中で決める）。"""
@@ -722,8 +699,9 @@ def post(
 # ---------------- 上限のときに待って再実行する ----------------
 
 
-def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin: str | None = None, sleep=time.sleep) -> Attempt:
-    """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。
+def retry(cmd: list[str], policy: limits.Policy | None = None, stdin: str | None = None, sleep=time.sleep) -> Attempt:
+    """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。待ちの合計と間隔は方針（省けば宣言の
+    `post-queue.rate-limit`）。
 
     **Pull Request の作成は積めない。** 作成が終わるまで新しい番号が決まらず、番号が
     決まらないと以降のすべての項目の宛先が決まらない。巻き直しの 3 種（作成・close・
@@ -732,12 +710,17 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin
     """
     import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
 
-    def announce(_seconds: float, _next: int) -> None:
-        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
+    def announce(seconds: float, _next: int) -> None:
+        print(f"⏳ 上限のため {seconds:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
 
     retried = lambda a: not a.ok and is_rate_limited(a)  # noqa: E731
     return waits.retry_call(
-        lambda: run(cmd, stdin=stdin), retried, max_wait=max_wait, interval=interval, sleep=sleep, on_wait=announce
+        lambda: run(cmd, stdin=stdin),
+        retried,
+        policy=policy or limits.policy("post-queue.rate-limit"),
+        reason=lambda a: a.summary(),
+        sleep=sleep,
+        on_wait=announce,
     ).value
 
 
@@ -746,7 +729,7 @@ _sleep = time.sleep  # `reflush` の待ち。テストが差し替える
 
 def reflush(flush: Any) -> dict[str, str]:
     """`flush()`（`PENDING_REMAINING=` と `PENDING_TRANSIENT=` を読んだ dict）を、一時的な失敗で残る間だけ
-    `TRANSIENT_INTERVAL` 秒おきに合計 `TRANSIENT_MAX_WAIT` 秒まで打ち直し、最後の結果を返す。上限では待たない（#1843 の決定 4・5）。"""
+    方針 `post-queue.transient-reflush` の間隔で合計の秒まで打ち直し、最後の結果を返す。上限では待たない（#1843 の決定 4・5）。"""
     import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
 
     def announce(seconds: float, _next: int) -> None:
@@ -755,7 +738,12 @@ def reflush(flush: Any) -> dict[str, str]:
     left = lambda v: v.get("PENDING_REMAINING", "0") not in ("", "0") and v.get("PENDING_TRANSIENT") == "1"  # noqa: E731
     return (
         waits.retry_call(
-            flush, left, max_wait=TRANSIENT_MAX_WAIT, interval=TRANSIENT_INTERVAL, sleep=lambda s: _sleep(s), on_wait=announce
+            flush,
+            left,
+            policy=limits.policy("post-queue.transient-reflush"),
+            reason=lambda v: f"積んだ投稿が残った（一時的な失敗）: 残り {v.get('PENDING_REMAINING')} 件",
+            sleep=lambda s: _sleep(s),
+            on_wait=announce,
         ).value
         or {}
     )
@@ -803,7 +791,12 @@ def cmd_count(args: argparse.Namespace) -> int:
 def cmd_retry(args: argparse.Namespace) -> int:
     deps.require("waits")  # 標準入力を読む前に起動し直す
     stdin = None if sys.stdin.isatty() else sys.stdin.read()
-    attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval, stdin=stdin)
+    policy = limits.policy("post-queue.rate-limit")
+    if args.max_wait is not None:
+        policy = policy._replace(seconds=args.max_wait)
+    if args.interval is not None:
+        policy = policy._replace(interval=args.interval)
+    attempt = retry(args.command, policy, stdin=stdin)
     sys.stdout.write(attempt.stdout)
     sys.stderr.write(attempt.stderr)
     return attempt.code
@@ -831,8 +824,8 @@ def main() -> None:
     sp.set_defaults(func=cmd_count)
 
     sp = sub.add_parser("retry", help="上限のときだけ待って再実行する")
-    sp.add_argument("--max-wait", type=float, default=900.0)
-    sp.add_argument("--interval", type=float, default=30.0)
+    sp.add_argument("--max-wait", type=float, default=None, help="待ちの合計の秒（省けば上限の宣言の post-queue.rate-limit）")
+    sp.add_argument("--interval", type=float, default=None, help="待ちの間隔の秒（省けば上限の宣言の post-queue.rate-limit）")
     sp.add_argument("command", nargs=argparse.REMAINDER)
     sp.set_defaults(func=cmd_retry)
 

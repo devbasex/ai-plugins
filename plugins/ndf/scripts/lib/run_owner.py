@@ -1,8 +1,9 @@
-"""レビュー worktree（`pr<n>`・`rf<n>`）の持ち主の記録と寿命（#2229）。
+"""見直しの持ち主の宣言（`.ndf/backlog/owner.json`。#2315）の読み書きと寿命（#2229）。
 
-記録は worktree の外（隣）の `<pr<n>|rf<n>>.owner.json` に置き（決定 3）、`run`（実行の識別子）・`seen_at`（最後に
-動いた時刻）・`finished_at`（終わった時刻）を持つ。終わっていなくても、最後に動いた時刻から寿命の窓（`WINDOW`）を
-過ぎた実行は終わったとみなす（決定 4）。片付け（`run_state.py`）と cross-review・cross-refactoring の開始が使う。
+記録は `run`（実行の識別子）・`seen_at`（最後に動いた時刻）・`finished_at`（終わった時刻）を持つ。終わっていなくても、
+最後に動いた時刻から寿命の窓を過ぎた実行は終わったとみなす。レビュー worktree（`pr<n>`・`rf<n>`）の持ち主は
+持ち主の部品（`lease.py`。#2342）へ移した。片付け（`run_state.py`）は、旧い版が worktree の隣に残した
+`<pr<n>|rf<n>>.owner.json` を worktree と一緒に消すためだけに `owner_path` を使う。
 """
 
 from __future__ import annotations
@@ -12,18 +13,13 @@ import datetime as _dt
 import json
 import os
 import socket
-import uuid
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 # 寿命の窓: 記録が終わっていなくても、最後に動いた時刻からこの秒数を過ぎた実行を終わったとみなす（決定 4）。
 WINDOW = 24 * 3600
 # レビュー worktree の中の NDF の状態（未追跡の判定から外し、外す前に消す）。
 NDF_STATE_DIRS = (".cross_review", ".cross_refactoring")
-
-
-def _now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _epoch(value: Any) -> float | None:
@@ -71,72 +67,6 @@ def _write_owner(state: Path | str, record: dict[str, Any]) -> None:
 write_owner = _write_owner  # 見直しの持ち主の宣言（#2315）が使う公開の名前
 
 
-def claim_owner(state: Path | str, *, tool: str, pr: int, run: str | None = None) -> str:
-    """持ち主の記録を新しく書き（以前の実行の記録は上書きして引き継ぐ）、実行の識別子を返す。"""
-    run = run or str(uuid.uuid4())
-    now = _now_iso()
-    record = {"version": 1, "kind": "review-worktree", "tool": tool, "pr": int(pr), "run": run}
-    _write_owner(state, {**record, "started_at": now, "seen_at": now, "finished_at": None})
-    return run
-
-
-def _update(state: Path | str, run: str | None, key: str) -> tuple[bool, str | None]:
-    record, err = read_owner(state)
-    if err:
-        return False, err
-    if record is None:
-        return False, f"持ち主の記録が無い ({owner_path(state)})"
-    if not run or record.get("run") != run:
-        return False, f"持ち主の記録は別の実行 {record.get('run')} のもの（渡した実行 {run or '無し'}）"
-    record[key] = _now_iso()
-    _write_owner(state, record)
-    return True, None
-
-
-def touch_owner(state: Path | str, run: str | None) -> tuple[bool, str | None]:
-    """記録の `run` と一致するときだけ、最後に動いた時刻を書く。"""
-    return _update(state, run, "seen_at")
-
-
-def finish_owner(state: Path | str, run: str | None) -> tuple[bool, str | None]:
-    """記録の `run` と一致するときだけ、終わった時刻を書く（E2）。"""
-    return _update(state, run, "finished_at")
-
-
-def adopt_owner(state: Path | str, *, tool: str, pr: int, run: str | None) -> str:
-    """開始が持ち主の記録を書き、実行の識別子を返す。同じ実行の続きなら記録を引き継いで動いた時刻だけを書く。
-
-    cross-review（`pr<n>`）と cross-refactoring（`rf<n>`）の init が共有する。"""
-    record, _ = read_owner(state)
-    if run and record is not None and record.get("run") == run and touch_owner(state, run)[0]:
-        return run
-    return claim_owner(state, tool=tool, pr=pr, run=run)
-
-
-def mark_owner(state: Path | str | None, run: str | None, what: str) -> str | None:
-    """記録へ動いた時刻（`touch`）か終わり（`finish`）を書く。書けなければ理由を返す（別の実行が引き継いだときなど。I12）。
-
-    置き場か実行の識別子が無い（呼び出し元が置き場を持つ）ときは何もしない。drive.py の両方が使う。"""
-    if not state or not run:
-        return None
-    done, why = (finish_owner if what == "finish" else touch_owner)(state, run)
-    return None if done else why
-
-
-def run_args(init_args: Sequence[str]) -> list[str]:
-    """init へ足す `--run <実行の識別子>`。識別子は今の耐久ワークフローの ID（打ち直しでも同じ。#2229）。
-
-    呼び出し元が `--run` を渡した・耐久ワークフローの外のときは空を返す。"""
-    if "--run" in init_args:
-        return []
-    import durable  # 耐久の記録を要する。drive.py の中で呼ぶときだけ読む
-
-    try:
-        return ["--run", durable.current_id()]
-    except durable.DurableError:
-        return []
-
-
 def _last_seen(state: Path, record: dict[str, Any] | None) -> float:
     if record is not None:
         got = _epoch(record.get("seen_at")) or _epoch(record.get("started_at"))
@@ -152,10 +82,6 @@ def mtime(path: Path) -> float:
         with contextlib.suppress(OSError):
             times.append(p.stat().st_mtime)
     return max(times) if times else 0.0
-
-
-def last_seen_iso(state: Path, record: dict[str, Any] | None) -> str:
-    return utc_iso(_last_seen(state, record))
 
 
 def owner_pid_alive(record: dict[str, Any] | None) -> bool:
@@ -179,8 +105,3 @@ def alive(state: Path, record: dict[str, Any] | None, now: float, window: float 
     if record is not None and record.get("finished_at"):
         return False
     return now - _last_seen(state, record) < window and owner_pid_alive(record)
-
-
-def alive_reason(state: Path, record: dict[str, Any] | None) -> str:
-    who = f"持ち主の実行 {record.get('run')}" if record else "持ち主の記録が無く、最終更新が寿命の窓の中の実行"
-    return f"{who} が動いている（最後に動いた時刻 {last_seen_iso(state, record)}）"

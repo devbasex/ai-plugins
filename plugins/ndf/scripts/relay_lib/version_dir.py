@@ -5,10 +5,15 @@
     relay.py                     ランチャー（プラグインの scripts/relay.py と同じバイト列）
     relay.version                複製の版
     relay.current                使うバージョンディレクトリの名前 1 行。原子的に書き換える
-    relay-<版>-<digest 8 字>/    relay_lib/・lib/（LIB_FILES）・pyproject.toml・uv.lock・MANIFEST・.venv/・inuse-<pid>
+    relay-<版>-<digest 8 字>/    relay_lib/・lib/（LIB_FILES）・contracts/limits.json・pyproject.toml・uv.lock・MANIFEST・.venv/・inuse-<持ち主>-<pid>
 
 digest は MANIFEST（ファイルごとの sha256 と相対パス）の sha256 である。バージョンディレクトリは書き終えてから
-`relay.current` を替え（I9）、動いている run が使うもの（生きている pid の `inuse-<pid>`）は消さない。
+`relay.current` を替え（I9）、動いている run が使うもの（使用中の印 `inuse-<持ち主>-<pid>`）は消さない。
+
+置き場は別のコンテナと共有の volume にあり、pid は作ったコンテナの中でしか読めない（#2583）。持ち主はホスト名
+（コンテナの識別）で、同じ持ち主の印は pid の生死で、別の持ち主の印は寿命の窓（`FOREIGN_WINDOW`）で決める
+（`lib/run_owner.py` の `alive` と同じ方針）。動いているラッパーは印の時刻を進める（`refresh_inuse`）。
+旧形式の `inuse-<pid>` は持ち主が分からず、pid の生死で読む。
 
 `.venv/` はラッパーを動かす環境で、書きかけのディレクトリの中でプラグインと同じ `pyproject.toml` と `uv.lock` から
 `uv sync --frozen` で作る（決定 20。`runtime.sync`）。作れなければバージョンディレクトリを置かない。
@@ -20,6 +25,8 @@ import hashlib
 import os
 import re
 import shutil
+import socket
+import time
 
 from . import runtime
 from .common import (
@@ -52,17 +59,26 @@ LIB_FILES = (
     "lib/clock.py",
     "lib/deps.py",
     "lib/jsonio.py",
+    "lib/limits.py",
     "lib/locks.py",
     "lib/md.py",
     "lib/procs.py",
+    "lib/relay_limit.py",
+    "lib/state_home.py",
     "lib/versions.py",
     "lib/wait_notice.py",
 )
 # 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
+DECL_FILES = ("contracts/limits.json",)  # 上限の宣言（lib/limits.py が読む。#2343）
 DIR_RE = re.compile(r"^relay-(.+)-[0-9a-f]{8}$")
 TMP_RE = re.compile(r"^relay-.+-[0-9a-f]{8}\.tmp-(\d+)$")
+INUSE_RE = re.compile(r"^inuse-(?:(?P<owner>.+)-)?(?P<pid>\d+)$")
 KEEP = 2
+# 別のコンテナの印の寿命の窓。`lib/run_owner.py` の `WINDOW` と同じ値（run_owner は複製に入らないため import しない）
+FOREIGN_WINDOW = 24 * 3600
+REFRESH = 3600  # 動いているラッパーが使用中の印の時刻を進める間隔の秒（窓より十分短く）
+_refreshed_at = 0.0
 
 
 def version_of(name: str | None) -> str | None:
@@ -110,11 +126,20 @@ def _alive(pid: int) -> bool:
     return procs.pid_alive(pid)
 
 
+def inuse_owner() -> str:
+    """使用中の印の持ち主（このホストまたはコンテナの識別）。"""
+    return re.sub(r"[^0-9A-Za-z._-]", "_", socket.gethostname()) or "unknown"
+
+
+def inuse_name(pid: int) -> str:
+    return f"inuse-{inuse_owner()}-{pid}"
+
+
 def claim_inuse(root: str = PKG_ROOT, pid: int | None = None) -> str | None:
-    """`root` がバージョンディレクトリなら `inuse-<pid>` を置いてそのパスを返す。プラグインのキャッシュなら None。"""
+    """`root` がバージョンディレクトリなら使用中の印を置いてそのパスを返す。プラグインのキャッシュなら None。"""
     if not os.path.isfile(os.path.join(root, MANIFEST)):
         return None
-    path = os.path.join(root, f"inuse-{os.getpid() if pid is None else pid}")
+    path = os.path.join(root, inuse_name(os.getpid() if pid is None else pid))
     try:
         os.close(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600))
     except OSError:
@@ -130,6 +155,37 @@ def release_inuse(path: str | None) -> None:
             pass
 
 
+def release_claims(root: str) -> None:
+    """`root` に置いたこのプロセスの印を消す。入れ替えの前の版が置いた旧形式の印も消す（pid は exec で変わらない）。"""
+    for name in (inuse_name(os.getpid()), f"inuse-{os.getpid()}"):
+        release_inuse(os.path.join(root, name))
+
+
+def refresh_inuse(root: str = PKG_ROOT) -> None:
+    """使用中の印の時刻を `REFRESH` 秒ごとに進める。別のコンテナの片付けが寿命の窓で読む。消えていれば置き直す。"""
+    global _refreshed_at
+    now = time.time()
+    if now - _refreshed_at < REFRESH:
+        return
+    _refreshed_at = now
+    path = claim_inuse(root)
+    if path:
+        try:
+            os.utime(path)
+        except OSError:
+            pass
+
+
+def _mark_live(mark: str, owner: str | None, pid: int) -> bool:
+    """旧形式（持ち主なし）と自分のコンテナの印は pid の生死、別のコンテナの印は最終更新が寿命の窓の中か。"""
+    if owner in (None, inuse_owner()):
+        return _alive(pid)
+    try:
+        return time.time() - os.stat(mark).st_mtime < FOREIGN_WINDOW
+    except OSError:
+        return False
+
+
 class VersionDir:
     """`base` の下のバージョンディレクトリと、使うものを指す `relay.current`。中身の元は `source`。"""
 
@@ -141,11 +197,11 @@ class VersionDir:
         """バージョンディレクトリに入れるファイルの相対パス。"""
         pkg = os.path.join(self.source, "relay_lib")
         mods = sorted(f"relay_lib/{n}" for n in os.listdir(pkg) if n.endswith(".py"))
-        return mods + list(LIB_FILES) + list(PROJECT_FILES)
+        return mods + list(LIB_FILES) + list(DECL_FILES) + list(PROJECT_FILES)
 
     def src(self, rel: str) -> str:
         """`rel` の元のファイル。環境の宣言と lock は、元がプラグインならプラグインの根から取る。"""
-        if rel in PROJECT_FILES and not runtime.is_version_dir(self.source):
+        if rel in PROJECT_FILES + DECL_FILES and not runtime.is_version_dir(self.source):
             return os.path.join(os.path.dirname(self.source), rel)
         return os.path.join(self.source, rel)
 
@@ -204,7 +260,7 @@ class VersionDir:
 
     def prune(self) -> list[str]:
         """指されず、生きている run も使っていないバージョンディレクトリを、新しい 2 つを残して消す。
-        落ちた書きかけ（死んだ pid の `.tmp-<pid>`）と、死んだ pid の `inuse-<pid>` も消す。消したパスを返す。"""
+        落ちた書きかけ（死んだ pid の `.tmp-<pid>`）と、使用中でなくなった印も消す。消したパスを返す。"""
         try:
             names = os.listdir(self.base)
         except OSError:
@@ -227,18 +283,17 @@ class VersionDir:
 
     @staticmethod
     def _in_use(path: str) -> bool:
+        """印が 1 つでも使用中ならディレクトリは使用中。使用中でなくなった印は消す。"""
         used = False
         for n in os.listdir(path):
-            if not n.startswith("inuse-"):
+            m = INUSE_RE.match(n)
+            if not m:
                 continue
-            try:
-                pid = int(n[len("inuse-") :])
-            except ValueError:
-                continue
-            if _alive(pid):
+            mark = os.path.join(path, n)
+            if _mark_live(mark, m.group("owner"), int(m.group("pid"))):
                 used = True
             else:
-                release_inuse(os.path.join(path, n))
+                release_inuse(mark)
         return used
 
     def remove_all(self) -> list[str]:

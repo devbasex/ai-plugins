@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/post_queue.py", "name": "attempts", "kind": "limit-literal", "reason": "#2343 の決定 4。上限でない数字: 積んだ投稿に記録する、打った回数（1 回目）の値"}

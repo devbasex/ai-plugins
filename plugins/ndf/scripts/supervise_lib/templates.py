@@ -24,7 +24,7 @@ from supervise_lib.procedures import (
     with_touched,
 )
 from supervise_lib.verify_steps import (
-    impl_timeout_estimate,
+    IMPL_STALL_DEFAULT,
     merge_steps,
     pre_test_steps,
     refactor_template_arg,
@@ -56,7 +56,7 @@ IMPL_RULES = (
 
 
 GLOSSARY_RULE = f"- 文書に語を足したら `{GLOSSARY_PY} check --file <文書>` を打ち、新しい語は用語集へ足す"
-DESIGN_DOCS_LINE = "設計文書: {docs}（決定の記録と「設計の結果」を読んでから実装する）"
+DESIGN_DOCS_LINE = "設計文書: {docs}（載せた文書をすべて読んでから実装する）"
 
 
 def impl_prompt(a) -> str:
@@ -87,7 +87,6 @@ def impl_prompt(a) -> str:
 
 
 def plan_impl(a) -> dict:
-    timeout, estimate = impl_timeout_estimate(a)  # 引数 → 宣言 → 実績の見込み → 3600（#1916・#1856）
     impl = {
         "id": "impl",
         "type": "work",
@@ -95,8 +94,8 @@ def plan_impl(a) -> dict:
         "serena": True,
         "stage": "実装",
         "issues": True,
-        "timeout": timeout,
-        "estimate": estimate,
+        "stall": getattr(a, "impl_stall_seconds", None) or IMPL_STALL_DEFAULT,
+        **({"timeout": a.impl_timeout} if getattr(a, "impl_timeout", None) else {}),  # 経過時間の上限は書いたときだけ（#2505 の決定 6）
         "prompt": impl_prompt(a),
     }
     return plan_to_merge(a, [impl])
@@ -489,12 +488,11 @@ def cmd_new(a) -> dict:
     except limits.LimitError as e:
         return result("supervise-new", "stopped", str(e), [], {"steps": len(plan["steps"])})
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
-    src = next((s["estimate"]["source"] for s in plan["steps"] if s["id"] == "impl" and s.get("estimate")), None)
     return result(
         "supervise-new",
         "ok",
-        f"計画を書いた: {out}" + ("。実装の上限は未校正（3600 秒）" if src == "uncalibrated" else ""),
-        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]], **({"impl_timeout_source": src} if src else {})}],
+        f"計画を書いた: {out}",
+        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
         {"steps": len(plan["steps"])},
         next=(f"実装の queue へ --then {out} で渡す（実装がすべて完了した後に続けて流れる）" if a.kind == "release" else None),
     )

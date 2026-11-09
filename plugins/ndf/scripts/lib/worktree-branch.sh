@@ -13,8 +13,8 @@ wt_current_branch() {
 }
 
 # 開発用の作業ツリーを `<パス><タブ><ブランチ名>` の形で 1 行 1 件で出力する。
-# 対象は主ディレクトリ直下の .worktrees/ 配下に限る。レビュー用の作業ツリーは
-# 非永続領域に置かれるため、この一覧には入らない。
+# 対象は主ディレクトリ直下の .worktrees/ 配下に限る。レビューとリファクタリングの
+# 作業ツリー（一時の置き場か .worktrees/.ndf の下）は、この一覧には入らない。
 wt_dev_worktrees() {
   local main_dir="${1:-}" prefix path branch
   [ -n "$main_dir" ] || return 1
@@ -23,6 +23,7 @@ wt_dev_worktrees() {
   # ループ内（空行の枝）とループ後（最後の項目）で食い違わないようにする。
   _wt_emit_worktree() {
     case "$1" in
+      "$prefix.ndf/"*) ;;
       "$prefix"*) printf '%s\t%s\n' "$1" "$2" ;;
     esac
   }

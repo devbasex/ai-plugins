@@ -23,6 +23,7 @@ from pathlib import Path
 import claude_accounts as ca
 from claude_settings import metered_settings
 import procs
+import limits
 import usage_capture
 from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
@@ -68,8 +69,6 @@ SERENA_MCP = {
 }
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch," + WEB_TOOLS
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
-LIMIT_RETRY = 900  # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
-LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
 TICK = 5.0  # 子プロセスの待ちを区切って見る秒数の上限
 
 
@@ -79,10 +78,8 @@ def kill_group(p: subprocess.Popen) -> None:
     # 先頭が先に終わった（ゾンビの）グループの残りを procs.stop_tree は止めない。孫を残さないためグループへも送る
     with contextlib.suppress(OSError):
         os.killpg(p.pid, signal.SIGKILL)
-    try:
-        p.communicate(timeout=5)
-    except (subprocess.TimeoutExpired, ValueError, OSError):
-        pass
+    with contextlib.suppress(subprocess.TimeoutExpired, ValueError, OSError):
+        p.communicate(timeout=limits.seconds("supervise.claude-reap"))
 
 
 _STEP = threading.local()  # このスレッドで起こす子を知らせる先（RunState.note_child。耐久ステップを流すスレッドごと）
@@ -101,8 +98,8 @@ def run_ticking(
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
     子は新しいセッションで起こし、`watch_children` の知らせる先へ渡す（孤児の片付け）。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
     tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。
-    kw の extend(開始の時刻) は待ちの周期ごとに呼び、返した時刻が締め切りより後なら締め切りを後ろへずらす（#2047 の I7）。"""
-    extend = kw.pop("extend", None)
+    kw の extend(開始の時刻) は待ちの周期ごとに呼び、返した時刻が締め切りより後なら後ろへずらす（#2047 の I7）。kw の follow が真なら前へも動かす（#2505）。"""
+    extend, follow = kw.pop("extend", None), kw.pop("follow", False)
     with open(err_path, "w", encoding="utf-8") if err_path else contextlib.nullcontext() as errf:  # 閉じ済みでも閉じ直してよい
         p = subprocess.Popen(
             cmd,
@@ -118,13 +115,13 @@ def run_ticking(
             note(p.pid, True)
         deadline = time.time() + timeout if timeout else None
         try:
-            return _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend)
+            return _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend, follow)
         finally:
             if note:
                 note(p.pid, False)
 
 
-def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend=None) -> subprocess.CompletedProcess:
+def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout, extend, follow) -> subprocess.CompletedProcess:
     """every 秒ごとに tick() を呼びながら p の終わりを待つ。打ち切りと tick() の例外では子のプロセスグループを止める。"""
     first = True
     while True:
@@ -137,7 +134,7 @@ def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd
             return subprocess.CompletedProcess(cmd, p.returncode, out, err)
         except subprocess.TimeoutExpired:
             first = False
-            if extend and deadline is not None and (later := extend(deadline - timeout)) and later > deadline:
+            if extend and deadline is not None and (later := extend(deadline - timeout)) and (follow or later > deadline):
                 deadline, timeout = later, timeout + later - deadline
             if deadline is not None and time.time() >= deadline:
                 kill_group(p)
@@ -205,6 +202,7 @@ def call_claude(
     caller: dict | None = None,
     base: str | None = None,
     session: dict | None = None,
+    watch=None,
 ) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。Claude の使用量の帳簿へ 1 行を書く（#1953）。
 
@@ -212,6 +210,7 @@ def call_claude(
     解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
     `caller` は帳簿の呼び出し元（`source`・`kind`・`plan`・`step`）。`kind` の既定は `claude_kind`、ほかは環境変数（C2）。
     `session` を渡すと、会話を残す起動（full で resume でない）の id を `--session-id` で決め、id と設定の置き場を入れる（#1623）。
+    `watch`（進みの観測）を渡すと、最小構成でも会話を残し、締め切りを `watch.deadline` で動かす。打ち切りは結果の `timed_out` に残す（#2505）。
     帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
     who = {"kind": claude_kind(system, full), **(caller or {})}
@@ -221,9 +220,9 @@ def call_claude(
     usage_env = {f"NDF_USAGE_{k.upper()}": str(v) for k, v in (caller or {}).items() if k in ("plan", "step") and v is not None}
     if usage_env:
         run_env = {**(run_env if run_env is not None else os.environ), **usage_env}
-    if session is not None and full and not resume:  # 遅れの見張りがセッションの記録の伸びを進みに数える
+    if session is not None and (full or watch) and not resume:  # 遅れの見張りと進みの観測がセッションの記録の伸びを進みに数える
         session.update(id=str(uuid.uuid4()), config=(run_env or os.environ).get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude"))
-        cmd += ["--session-id", session["id"]]
+        cmd = [arg for arg in cmd if arg != "--no-session-persistence"] + ["--session-id", session["id"]]
     try:
         p = run_ticking(
             metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
@@ -233,19 +232,19 @@ def call_claude(
             cwd=cwd,
             timeout=timeout,
             env=run_env,
+            **({"extend": watch.deadline, "follow": True} if watch else {}),  # 記録が遅れて現れたら長い許容時間の締め切りを戻す
         )
     except OSError:
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="error")
         raise
-    except subprocess.TimeoutExpired:
-        usage_capture.record_claude({}, cwd=cwd, **who, seconds=timeout, status="timeout")
-        return ClaudeCall(
-            ok=False, text=f"打ち切り（{timeout} 秒）", usage={}, seconds=timeout, kind=claude_kind(system, full), model_usage=None
-        )
+    except subprocess.TimeoutExpired as e:
+        kind, waited = claude_kind(system, full), round(e.timeout)  # 締め切りを動かしたときは動かした後の秒
+        usage_capture.record_claude({}, cwd=cwd, **who, seconds=waited, status="timeout")
+        return ClaudeCall(ok=False, text=f"打ち切り（{waited} 秒）", usage={}, seconds=waited, kind=kind, model_usage=None, timed_out=True)
     try:
         data = json.loads(p.stdout)
     except json.JSONDecodeError:
-        data = {"result": p.stdout, "is_error": p.returncode != 0}
+        data = None
     if not isinstance(data, dict):
         data = {"result": p.stdout, "is_error": p.returncode != 0}
     ok = p.returncode == 0 and not data.get("is_error")
@@ -321,8 +320,8 @@ class ClaudeRunner:
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
         """
         ctx, st = self.ctx, self.ctx.state
-        retry = ctx.plan.get("limit_retry_seconds", LIMIT_RETRY)
-        wait_max = ctx.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
+        retry = ctx.plan.get("limit_retry_seconds", limits.seconds("supervise.limit-retry"))
+        wait_max = ctx.plan.get("limit_wait_max", limits.seconds("supervise.limit-wait-max"))
         fallback = ca.fallback_env()
         self._tell_metered_problem()
         multi = ca.registered() >= 2

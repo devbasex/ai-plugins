@@ -44,7 +44,7 @@ description: |
 
 ## 作業プロセス
 
-1. **差分取得**: `git diff main...HEAD`, `git diff HEAD`, または指定PR番号で `gh pr diff`
+1. **差分取得**: 指定PR番号があれば `gh pr diff`。無ければベースブランチを決めて `git diff origin/<ベースブランチ>...HEAD` と `git diff HEAD` を取る。ベースブランチは `.ndf/worktree.json` の `base_branch`、無ければ `git symbolic-ref --short refs/remotes/origin/HEAD` の結果から `origin/` を外した名前である。どちらも無ければ差分を取らずに止まって報告する
 2. **全体把握**: 変更の目的を1文で言語化（PR説明文やコミットメッセージから）
 3. **ファイル別レビュー**: 変更行ごとに観点適用
 4. **重要度判定**: 🛑 blocker / ⚠️ major / 💡 suggestion / 💅 nit
@@ -87,11 +87,12 @@ description: |
 ```
 入力: 「このブランチをレビューして」
 処理:
-  1. Bash: git diff main...HEAD
-  2. Bash: git log main..HEAD --oneline
-  3. 全体意図の把握
-  4. ファイル別に指摘を整理
-  5. 重要度順に報告
+  1. Read: .ndf/worktree.json の base_branch（無ければ git symbolic-ref --short refs/remotes/origin/HEAD）
+  2. Bash: git diff origin/<ベースブランチ>...HEAD
+  3. Bash: git log origin/<ベースブランチ>..HEAD --oneline
+  4. 全体意図の把握
+  5. ファイル別に指摘を整理
+  6. 重要度順に報告
 ```
 
 ### PRレビュー

@@ -5,7 +5,7 @@
 スプリントの機械の判定が、記録の無い状態や「確かめる中身が無い」行を取り違えないようにする決まりを 2 つ置く。
 
 - **記録の置き場が分からない `close` は、課題を閉じない。** `sprint-close.py --record-pr unknown` は
-  配布の記録を読まず、どの課題も閉じず、ボードも書かずに、`--issues` の課題を理由つきの `kept_open` で返す（終了コード 0）。
+  リリース記録を読まず、どの課題も閉じず、ボードも書かずに、`--issues` の課題を理由つきの `kept_open` で返す（承認ゲート `gate`・終了コード 10。プランは棚卸しへ進む）。
   #2230 から、まとめのプランは `unknown` を組まない。リリースの経路が雛形（`release.form`）でも昇格（promote）でもなく、届ける経路を
   1 つでも含むとき（と開発ループのまとめ）は `--record-pr {queue_record}` を組み、まとめを流し始める時点に queue が記録の PR を探して埋める
   （[ndf-production-release-record.md](ndf-production-release-record.md) の「まとめのプランの記録の PR と `release-verify`」）。
@@ -29,10 +29,10 @@
 
 ## 背景
 
-- **`--record-pr 0` が 2 つの意味を兼ねていた。** `sprint-close.py` の `0` は「本番の記録なし（本番を飛ばした・配布なし）」で、
+- **`--record-pr 0` が 2 つの意味を兼ねていた。** `sprint-close.py` の `0` は「本番の記録なし（本番を飛ばした・デプロイなし）」で、
   閉じる条件を見ずに課題を閉じる。一方、まとめのプランの記録の参照（`supervise_lib/sprint_routes.py` の `record_pr_ref`）は、
   雛形と昇格以外のすべての経路で `0` を返していた。merge（`merged-by-check`）・手で届ける経路で本番まで出たスプリントの課題が、
-  リリース記録とリリース後テストの記録を見ずに閉じ、`close` の結果から「配布しなかった」と「記録を読まなかった」を区別できなかった
+  リリース記録とリリース後テストの記録を見ずに閉じ、`close` の結果から「デプロイしなかった」と「記録を読まなかった」を区別できなかった
 - **「無し」と書いた行で承認ゲートが止まっていた。** 要求に `| 手動確認（マージ前） | 無し（AC はテストで確かめられる） |` と
   書いた課題が、PR 本文の `## 手動確認` に未チェックの行（`- [ ] #<番号> マージ前: 無し（…）`）として載り、merge-gate が
   未確認の手動確認として数えて止まった。利用側のリポジトリで 3 回のスプリント続けて起き、毎回人が印を付けて
@@ -42,7 +42,7 @@
 
 | 含む | 含まない |
 | --- | --- |
-| まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
+| まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`。`versioned` は経路を変えず、`kind: auto` の行は昇格か `merged-by-check` になる）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
 | `sprint-close.py --record-pr unknown` の振る舞い・結果 JSON | 雛形（`{queue_pr:release-prod}`）と昇格（`{queue_pr:promote}`）の経路の振る舞い |
 | 要求から手動確認の行を読む規則（`lib/manual_checks.py` の `rows_of`） | merge-gate（`merged_lib/merge.py` の `manual_gate`）と `unchecked_before_merge` の判定、要求の雛形の文 |
 
@@ -76,9 +76,9 @@
 
 #### `sprint-close.py --record-pr`
 
-`--record-pr` は 0 以上の整数か語 `unknown` を受ける（`record_pr_arg`）。それ以外の文字列と負の数は呼び出しの誤り（終了コード 3）である。
+`--record-pr` は 0 以上の整数か語 `unknown` を受ける（`record_pr_arg`）。それ以外の文字列と負の数は呼び出しの誤り（終了コード 2）である。
 
-| 値 | `--issues` が無いとき | 配布の記録 | 課題 | 終了コード（失敗なし） |
+| 値 | `--issues` が無いとき | リリース記録 | 課題 | 終了コード（失敗なし） |
 | --- | --- | --- | --- | --- |
 | 正の整数 | 記録の `スプリント:` の行の PR から集める | 読む | 閉じる条件を満たせば閉じる | 0 |
 | `0` | `stopped`・終了コード 2（`--record-pr 0（本番の記録なし） は --issues と一緒に渡す`） | 読まない | 条件を見ずに閉じる | 0 |
@@ -90,7 +90,7 @@
 | --- | --- |
 | `status` | `ok`（後続の振り返りへ進む） |
 | `summary` | 先頭に `記録の置き場が分からないため閉じない（リリースの経路が雛形でも昇格でもない）: ` を付け、その後に件数の要約（`_close_summary`）が続く。`0` で閉じたときの `summary` にこの先頭の文は付かず、2 つはこの文で区別できる |
-| `items` | `--issues` の各課題が `result: kept_open` と `reason`（`UNKNOWN_REASON`: 配布の記録の置き場が分からない。リリース記録を確かめて手で閉じる） |
+| `items` | `--issues` の各課題が `result: kept_open` と `reason`（`UNKNOWN_REASON`: リリース記録の置き場が分からない。リリース記録を確かめて手で閉じる） |
 | `next` | `リリース記録とリリース後テストの記録を確かめ、受け入れ条件を満たした課題を手で閉じる` |
 
 #### 手動確認の行の「無し」の形
@@ -117,10 +117,10 @@ flowchart TD
   B -- いいえ --> C{"昇格の経路があり、手動反映の本番系でない"}
   C -- はい --> P["{queue_pr:promote}"]
   C -- いいえ --> U
-  T --> V["merge → release-verify → retro → close"]
+  T --> V["merge → config-save → release-verify → config-check → retro → close"]
   P --> V
   U --> V
-  Z --> W["merge → retro → close（release-verify なし）"]
+  Z --> W["merge → retro → close（config-save・release-verify・config-check なし）"]
 ```
 
 `sprint-close.py` の中では、`cmd_close` が `--issues` の有無を確かめ、`_read_sprint_record` が `0` と `unknown` で記録を読まずに
@@ -134,8 +134,8 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 
 | 決定 | 理由 | 採らなかった案 |
 | --- | --- | --- |
-| `--record-pr` に語 `unknown` を足し、`0` の意味は変えない | 語ならプランの `cmd` と結果を読む人がそのまま意味を取れる。`0` を手で打つ既存の手順の意味が黙って変わらない | 負の数（`-1`）で表す。`0` を「置き場を知らない」に変え、配布なしに別の値を足す |
-| 検証の環境だけ（本番の行の無い）経路・手動反映の本番系の昇格も `unknown` にする（#2230 で `{queue_record}` に置き換わった。閉じる条件を見ずに閉じない方針は変わらない） | 開いたまま残った課題は人が 1 回の操作で閉じられるが、条件を見ずに閉じた課題は確かめていないことが結果から読めない | 検証の環境だけの経路を配布なしとして `0` で閉じる |
+| `--record-pr` に語 `unknown` を足し、`0` の意味は変えない | 語ならプランの `cmd` と結果を読む人がそのまま意味を取れる。`0` を手で打つ既存の手順の意味が黙って変わらない | 負の数（`-1`）で表す。`0` を「置き場を知らない」に変え、デプロイなしに別の値を足す |
+| 検証の環境だけ（本番の行の無い）経路・手動反映の本番系の昇格は `{queue_record}` を組み、閉じる条件を見ずに閉じない | 開いたまま残った課題は人が 1 回の操作で閉じられるが、条件を見ずに閉じた課題は確かめていないことが結果から読めない | 検証の環境だけの経路をデプロイなしとして `0` で閉じる |
 | 「無し」の判定を `rows_of` の 1 か所に置き、語の直後を括弧・句読点・空白・文末に限る | PR 本文の節も merge-gate の数え方も `rows_of` の出力から作られる。後続を限れば「無しの場合は〜」のような確認の文を落とさない | merge-gate で「無し」の行を数えない（PR 本文に未チェックの行が残り続ける）。要求の雛形の文を変える（雛形に「無ければ行を消す」が既にある） |
 
 ## データ・設定
@@ -148,7 +148,7 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 | 状況 | 扱い |
 | --- | --- |
 | `--record-pr unknown` に `--issues` が無い | `stopped`・終了コード 2。何も書かない |
-| `--record-pr` が整数でも `unknown` でもない・負の数 | 呼び出しの誤り。終了コード 3 |
+| `--record-pr` が整数でも `unknown` でもない・負の数 | 呼び出しの誤り。終了コード 2 |
 | 要求の写しが無い課題 | 今どおり手動確認の行を読まずに飛ばす（`issue_rows`） |
 
 ## 運用
@@ -164,8 +164,8 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 | --- | --- |
 | merge・手で届ける・検証の環境だけの経路で、`close` の `cmd` が `--record-pr {queue_record}` になり `unknown` を持たず、`release-verify` が同じ参照を持つこと（I1・I2。#2230） | `test_supervise_pace_verify.py` の `test_close_without_a_plan_record_resolves_it_when_run` |
 | `delivery: []` で `--record-pr 0` のまま変わらないこと（I1） | 同じファイルの `test_close_of_no_delivery_keeps_record_pr_zero` |
-| `--record-pr unknown --issues …` で全課題が `kept_open`・理由つき・終了コード 0、gh の書き込みが 0 回で、`summary` が先頭の文を持つこと（I3） | `test_sprint_close_issues.py` の `test_record_unknown_keeps_the_given_issues_open_with_a_reason` |
-| `unknown` に `--issues` が無ければ終了コード 2、それ以外の値・負の数は終了コード 3 | 同じファイルの `test_record_unknown_alone_returns_two`・`test_record_pr_rejects_other_values` |
+| `--record-pr unknown --issues …` で全課題が `kept_open`・理由つき・`gate`・終了コード 10、gh の書き込みが 0 回で、`summary` が先頭の文を持つこと（I3） | `test_sprint_close_issues.py` の `test_record_unknown_keeps_the_given_issues_open_with_a_reason` |
+| `unknown` に `--issues` が無ければ終了コード 2、それ以外の値・負の数も呼び出しの誤りの終了コード 2 | 同じファイルの `test_record_unknown_alone_returns_two`・`test_record_pr_rejects_other_values` |
 | `0` の既存の振る舞いが変わらないこと（I4） | 同じファイルの `test_record_zero_closes_the_given_issues_without_reading_a_record` |
 | 「無し」だけの要求で行が 0 件・節が空・merge-gate が数えないこと（I5） | `test_manual_checks_none.py` の `test_a_none_row_makes_no_section_and_no_gate` |
 | 「無し」の 7 語の単独と後続つきの形を、両方の項目で落とすこと（I5） | 同じファイルの `test_none_forms_are_not_manual_rows` |

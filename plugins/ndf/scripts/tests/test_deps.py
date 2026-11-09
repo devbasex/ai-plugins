@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -276,3 +277,125 @@ def test_root_declaration_pins_the_same_versions_as_the_plugin():
     for pins in root.values():
         for name, ver in re.findall(r'"([\w-]+)==([\w.]+)"', pins):
             assert f'name = "{name}"\nversion = "{ver}"' in lock
+
+
+# ---------------------------------------------------------------- 子プロセスへ UV_PROJECT_ENVIRONMENT を漏らさない（#2509 の I5〜I7）
+
+REEXEC_UV = """#!/bin/sh
+while [ "$1" != python ]; do shift; done
+shift
+PYTHONPATH="$FAKE_SITE" exec "$FAKE_PY" "$@"
+"""
+
+
+def run_reexec_child(tmp_path: Path, **env: str) -> dict[str, str]:
+    """起動し直した先で import が通る偽の uv（`PYTHONPATH` で印のパッケージを足して本物の python を起動する）で
+    require を通し、スクリプト自身と子プロセスから見た `UV_PROJECT_ENVIRONMENT` を返す。"""
+    bindir, site = tmp_path / "bin", tmp_path / "site"
+    bindir.mkdir(exist_ok=True)
+    site.mkdir(exist_ok=True)
+    (site / "ndf_reexec_mark.py").write_text("")
+    (bindir / "uv").write_text(REEXEC_UV)
+    (bindir / "uv").chmod(0o755)
+    script = tmp_path / "entry.py"
+    script.write_text(
+        f"import os, subprocess, sys\nsys.path.insert(0, {str(LIB)!r})\nimport deps\n"
+        "deps.GROUPS['t'] = ['ndf_reexec_mark']\ndeps.require('t')\n"
+        "print('SELF=' + repr(os.environ.get('UV_PROJECT_ENVIRONMENT')))\n"
+        "print('SAVED=' + repr(os.environ.get('NDF_DEPS_SAVED_UV_PROJECT_ENVIRONMENT')))\n"
+        "c = [sys.executable, '-c', \"import os; print('CHILD=' + repr(os.environ.get('UV_PROJECT_ENVIRONMENT')))\"]\n"
+        "sys.stdout.write(subprocess.run(c, capture_output=True, text=True).stdout)\n"
+    )
+    base = {k: v for k, v in os.environ.items() if k not in ("NDF_DEPS_REEXEC", "UV_PROJECT_ENVIRONMENT", "PYTHONPATH")}
+    base.update(
+        PATH=str(bindir), HOME=str(tmp_path / "home"), NDF_DEPS_VENV=str(tmp_path / "venv"),
+        FAKE_SITE=str(site), FAKE_PY=sys.executable, **env,
+    )  # fmt: skip
+    p = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=base)
+    assert p.returncode == 0, p.stderr
+    return dict(ln.split("=", 1) for ln in p.stdout.splitlines() if "=" in ln)
+
+
+def test_a_reexeced_script_does_not_pass_the_shared_venv_to_children(tmp_path):
+    """受け入れ条件 2・I5・I6: 起動し直したスクリプトの子に、NDF が設定した共有の環境が渡らない。"""
+    got = run_reexec_child(tmp_path)
+    assert got == {"SELF": "None", "SAVED": "None", "CHILD": "None"}
+
+
+def test_a_reexeced_script_gives_back_the_users_own_value(tmp_path):
+    """I7: 利用者が自分で設定した値は、起動し直した後に戻って子へ渡る。"""
+    mine = str(tmp_path / "my-project-venv")
+    got = run_reexec_child(tmp_path, UV_PROJECT_ENVIRONMENT=mine)
+    assert got == {"SELF": repr(mine), "SAVED": "None", "CHILD": repr(mine)}
+
+
+def test_a_shared_venv_inherited_from_an_old_parent_is_dropped(tmp_path):
+    """I6・決定 3: 古い版の親から共有の環境を指す値を継いでも、起動し直した後の子へ渡さない。"""
+    got = run_reexec_child(tmp_path, UV_PROJECT_ENVIRONMENT=str(tmp_path / "venv"))
+    assert got["CHILD"] == "None"
+
+
+def test_an_importable_require_drops_an_inherited_shared_venv(monkeypatch, tmp_path):
+    """I6: 起動し直さずに戻る回も、継いだ共有の環境（既定の置き場の下）を外し、利用者の値は残す。"""
+    monkeypatch.setitem(deps.GROUPS, "t", ["json"])
+    monkeypatch.delenv("NDF_DEPS_VENV", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / ".cache" / "ndf" / "venv" / "9.9.9"))
+    deps.require("t")
+    assert "UV_PROJECT_ENVIRONMENT" not in os.environ
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / "mine"))
+    deps.require("t")
+    assert os.environ["UV_PROJECT_ENVIRONMENT"] == str(tmp_path / "mine")
+
+
+def minor_of(python: str) -> tuple[int, int] | None:
+    """`python` のマイナー版。起動できなければ None。"""
+    p = subprocess.run([python, "-c", "import sys; print(*sys.version_info[:2])"], capture_output=True, text=True)
+    return tuple(int(x) for x in p.stdout.split()) if p.returncode == 0 else None  # type: ignore[return-value]
+
+
+def test_a_child_uv_run_of_another_project_leaves_the_shared_venv_alone(tmp_path):
+    """受け入れ条件 6: 本物の uv で、起動し直したスクリプトの子が打つ別のプロジェクトの `uv run` が共有の環境を作り直さない。
+
+    ネットワークを使わないよう、Python は手元の 2 つを使い、psutil は uv のキャッシュから入れる。そろわなければ skip する。"""
+    uv = shutil.which("uv")
+    first, second = getattr(sys, "_base_executable", sys.executable), "/usr/bin/python3"
+    if uv is None or not Path(second).exists():
+        pytest.skip("uv か /usr/bin/python3 が無い")
+    a, b = minor_of(first), minor_of(second)
+    if a is None or b is None or a == b:
+        pytest.skip(f"マイナー版の違う Python が 2 つそろわない（{a} と {b}）")
+    drop = ("NDF_DEPS_REEXEC", "NDF_DEPS_VENV", "UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "PYTHONPATH")
+    base = {k: v for k, v in os.environ.items() if k not in drop}
+    base.update(UV_PYTHON_DOWNLOADS="never", UV_OFFLINE="1")
+    shared, bare = tmp_path / "shared", tmp_path / "bare"
+    for venv, python in ((shared, first), (bare, first)):
+        if (
+            p := subprocess.run([uv, "venv", "--quiet", "--python", python, str(venv)], capture_output=True, text=True, env=base)
+        ).returncode:
+            pytest.skip(f"環境を作れない: {p.stderr.strip()}")
+    sync = [uv, "sync", "--quiet", "--frozen", "--offline", "--project", str(PLUGIN), "--extra", "procs"]
+    p = subprocess.run(sync, capture_output=True, text=True, env={**base, "UV_PROJECT_ENVIRONMENT": str(shared)})
+    if p.returncode:
+        pytest.skip(f"uv のキャッシュから psutil を入れられない: {p.stderr.strip()}")
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "pyproject.toml").write_text(
+        f'[project]\nname = "other"\nversion = "0"\nrequires-python = ">={b[0]}.{b[1]},<{b[0]}.{b[1] + 1}"\n'
+    )
+    script = tmp_path / "entry.py"
+    script.write_text(
+        f"import subprocess, sys\nsys.path.insert(0, {str(LIB)!r})\nimport deps\ndeps.require('procs')\n"
+        f"c = [{uv!r}, 'run', '--quiet', '--project', {str(other)!r}, '--python', {second!r}, 'python', '-c', 'pass']\n"
+        "sys.exit(subprocess.run(c, cwd=sys.argv[1]).returncode)\n"
+    )
+    cfg = shared / "pyvenv.cfg"
+    before = (cfg.read_text(), cfg.stat().st_mtime_ns)
+    # psutil の無い環境の python で打ち、require に共有の環境へ起動し直させる
+    p = subprocess.run(
+        [str(bare / "bin" / "python"), str(script), str(other)], capture_output=True, text=True, env={**base, "NDF_DEPS_VENV": str(shared)}
+    )
+    assert p.returncode == 0, p.stderr
+    assert (cfg.read_text(), cfg.stat().st_mtime_ns) == before
+    assert (other / ".venv").is_dir()  # 別のプロジェクトは自分の環境で動く
+    assert subprocess.run([str(shared / "bin" / "python"), "-c", "import psutil"], capture_output=True).returncode == 0

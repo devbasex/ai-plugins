@@ -46,7 +46,7 @@ def test_queue_max_default(tmp_path, monkeypatch):
 
 
 def test_generated_queue_lines_use_lane_plans(tmp_path, monkeypatch):
-    """スプリントのステージと周回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
+    """スプリントのステージとループの 1 回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
     import sprint_loop_gate as gate
     from supervise_lib import sprint
 
@@ -67,10 +67,10 @@ def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
     monkeypatch.setattr(
         parallel_release,
         "plan_release_request",
-        lambda a, repo, plan, lane, prs=None: {"フェーズ": "配布の依頼", "plan": plan, "lane": lane},
+        lambda a, repo, plan, lane, prs=None: {"フェーズ": "リリースの依頼", "plan": plan, "lane": lane},
     )
     got = sprint.prod_plans(None, "/r", lambda: {"x": 1})
-    assert got == {"release-request": {"フェーズ": "配布の依頼", "plan": "p1", "lane": "la"}}
+    assert got == {"release-request": {"フェーズ": "リリースの依頼", "plan": "p1", "lane": "la"}}
 
 
 def test_release_request_plan_has_one_gate_step():
@@ -80,8 +80,9 @@ def test_release_request_plan_has_one_gate_step():
     import parallel_release
 
     plan = parallel_release.plan_release_request(argparse.Namespace(issue=[2436], mode="standard"), "/r", "p1", "la", ["{queue_pr:check}"])
-    assert plan["フェーズ"] == "配布の依頼" and [s["id"] for s in plan["steps"]] == ["parallel-request"]
-    assert "request p1 --lane la --prs {queue_pr:check} --issues 2436" in plan["steps"][0]["cmd"]
+    assert plan["フェーズ"] == "リリースの依頼" and [s["id"] for s in plan["steps"]] == ["parallel-request"]
+    # 課題の番号はプランの `課題` だけに持ち、コマンドは流す時点に埋める差し込みを持つ（#2717 の I3）
+    assert plan["課題"] == [2436] and "request p1 --lane la --prs {queue_pr:check} --issues {plan_issues} " in plan["steps"][0]["cmd"]
 
 
 def test_present_gate_puts_approve_after_mvv(tmp_path):
@@ -132,7 +133,7 @@ def test_present_plan_starts_and_collects_range_only(tmp_path):
     by = {s["id"]: s for s in present["steps"]}
     assert limits.run_error(present) is None  # on_fail が無いステップを指さない
     assert not any(by[i].get("on_fail") for i in ("facts", "explain", "others"))
-    assert by["facts"].get("gate_as_ok") is True  # facts の 10 を関門で残さない
+    assert by["facts"].get("gate_as_ok") is True  # facts の 10 を承認ゲートで残さない
     assert "--prs 0" not in json.dumps(present) and "--prs  --approval" in by["facts"]["cmd"]
 
 
@@ -194,7 +195,7 @@ def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
 
 
 def test_merged_on_production_checks_the_production_branch(tmp_path, monkeypatch):
-    """配布済みの照合は origin/main 固定でなく、本番チャネル（repo.production_branch）の先を見る。"""
+    """リリース済みの照合は origin/main 固定でなく、本番チャネル（repo.production_branch）の先を見る。"""
     import subprocess
 
     import repo

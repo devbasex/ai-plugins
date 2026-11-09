@@ -1,4 +1,4 @@
-"""配布の宣言（`.ndf/release.json`）の決まった手順の読み込みと実行（`release-steps.py` の `steps` から分けた）。
+"""リリースの設定（`.ndf/release.json`）の決まった手順の読み込みと実行（`release-steps.py` の `steps` から分けた）。
 
 宣言の形は lib/schema.py で見て、値の決まり（空でない・相対パス・1 以上）は `parse_steps` が見る。コマンドの表示と起動は
 release_lib/step_run.py が持つ。
@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import jsonio
+import limits
 import proc
 import schema
 from release_lib import step_run
@@ -20,7 +21,7 @@ from step_result import StepError
 DECLARATION = ".ndf/release.json"
 
 SUPPORTED_VERSIONS = (1,)
-DEFAULT_TIMEOUT = 600
+DEFAULT_TIMEOUT = limits.seconds("release.declared-step")
 
 
 class DeclarationError(Exception):

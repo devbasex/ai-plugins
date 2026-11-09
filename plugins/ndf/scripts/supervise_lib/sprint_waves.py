@@ -10,12 +10,14 @@ import sys
 from pathlib import Path
 
 import legacy_names
-from gate_answer import GATE_1
+from gate_answer import DESIGN_GATE
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
+from supervise_lib.procedures import survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
+from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
@@ -23,9 +25,12 @@ from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
 RULE_DESIGN = (
-    "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、"
-    "上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。"
+    "設計の cross-review は上限 3 ラウンドで打ち切る（収束を待たない）。上限に達して未解決の指摘が 0 件なら、収束と同じ"
+    "経路（直しの取り込み → 仕様のコピーの照合 → 用語チェック）を通って gate。未解決が残れば解決のフロー（直し → 再レビュー）を"
+    "回し、解決できない（review-settled の判定）か駆動そのものが失敗したら gate。"
 )
+# 解決のフローの「解決できない」の判定の上限: 直しの成功の回数・直しの費用（ドル）・最初の直しから後の秒（#2388 の決定 3）
+RESOLVE_LIMITS = "--max-attempts 2 --max-cost 1.5 --max-seconds 3600"
 
 
 @functools.cache
@@ -47,47 +52,42 @@ def sprint_branch(a) -> str:
     return _branch_of(str(Path(a.worktree).resolve()), a.name)
 
 
-def _review_steps(n: int, copy: str) -> list:
-    """設計のプランのレビューのまとまり（review / sync-review / requirements-recheck）。"""
+def _review_steps(n: int, copy: str, push: str) -> list:
+    """設計のプランのレビューのまとまり。全ペースの設計のプランが共有する（#2388 の決定 4）。cross-review が上限到達
+    （終了コード 6）で終わったら review-settled が未解決の件数を読み、0 件なら sync-review、残れば解決のフロー
+    （resolve-sync → resolve → push-resolve → review の打ち直し）、解決できなければ ready（承認ゲート 1 の判断）へ回す。"""
+    run = {"type": "run", "stage": "ドキュメントレビュー", "timeout": 120}
+    sync = "git fetch -q && git merge -q --ff-only '@{u}'"
+    settled = f"python3 {shlex.quote(str(SELF))} review-settled --state {{state_dir}}/state.json --step review --fix-step resolve {RESOLVE_LIMITS}"
+    fix = "cross-review が上限のラウンドで終わり、未解決の指摘が残った。review の報告（結果の items[0].report）が示す未解決の指摘を直してコミットする（push しない）。直せない指摘は理由を PR のスレッドへ返信する。"
     return [
-        # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
+        # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る。駆動の失敗は ready へ回す
+        {**run, "id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}"}
+        | {"on_exit": {"6": "review-settled"}, "on_fail": "ready", "next": "sync-review"},
         {
-            "id": "review",
-            "type": "drive",
-            "drive": "cross-review",
-            "kind": "ドキュメントレビュー",
-            "stage": "ドキュメントレビュー",
-            "timeout": 3600,
-            "args": "{pr}",
+            **run,
+            "id": "review-settled",
+            "cmd": settled,
+            "on_exit": {"1": "resolve-sync", "2": "ready"},
             "on_fail": "ready",
             "next": "sync-review",
         },
+        {**run, "id": "resolve-sync", "cmd": sync, "on_fail": "ready", "next": "resolve"},
+        {"id": "resolve", "type": "work", "kind": "修正", "stage": run["stage"], "inputs": ["review"], "timeout": 1800, "prompt": fix}
+        | {"on_fail": "ready", "next": "push-resolve"},
+        {**run, "id": "push-resolve", "timeout": 300, "cmd": push, "on_fail": "ready", "next": "review"},
         # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
-        {
-            "id": "sync-review",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
-            "next": "requirements-recheck",
-        },
+        {**run, "id": "sync-review", "cmd": sync, "next": "requirements-recheck"},
         # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
         # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
-        {
-            "id": "requirements-recheck",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
-            "next": "glossary-check",
-        },
+        {**run, "id": "requirements-recheck", "cmd": f"{SPEC_COPY_PY} check {n} {copy}", "next": "survey-check"},
     ]
 
 
 def _glossary_steps(glossary_check: str, push: str) -> list:
     """設計のプランの用語チェックのまとまり（glossary-check / fix-glossary / glossary-recheck / push-glossary）。"""
     return [
-        # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+        # 用語チェック。当たりは 1 回だけ直し、残った当たりは設計承認ゲートの提示へ載せる
         {
             "id": "glossary-check",
             "type": "run",
@@ -124,14 +124,14 @@ def _glossary_steps(glossary_check: str, push: str) -> list:
 
 
 def plan_sprint_design(a, n: int, repo: str) -> dict:
-    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
+    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に設計承認ゲートで止まる。"""
     branch = f"design/issue-{n}"
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
     copy = requirements_path(n)
     doc = f"issues/issue-{n}-design.md"  # 設計文書の頭のファイル（#1289 の決定 2）。題はこの H1 から作る
     # 設計を送った後に題を H1 へ合わせ直す（レビューの直しで H1 が変わる。#1289 の決定 9）
     push = f"{PUSH_DESIGN} && python3 {shlex.quote(str(SELF))} sync-title --pr {{pr}} --doc {doc}"
-    return {
+    plan = {
         "フェーズ": "設計",
         "課題": [n],
         "モード": a.mode,
@@ -142,7 +142,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
         "規則": RULE_DESIGN,
         "steps": [
             # 設計の工程の入口の検査（#1111 の I5）。用語集が無ければ worktree の中で起こし、設計 PR と一緒に
-            # コミットする（承認ゲートを増やさない。語の採否は承認ゲート 1 で利用者が見る）。それ以外の失敗は止まる
+            # コミットする（承認ゲートを増やさない。語の採否は設計承認ゲートで利用者が見る）。それ以外の失敗は止まる
             {
                 "id": "glossary",
                 "type": "run",
@@ -187,7 +187,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "next": "rebuild",
             },
             rebuild_step(n, doc),
-            # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（承認ゲート 1 の材料）
+            # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（設計承認ゲートの材料）
             {
                 "id": "pr",
                 "type": "pr",
@@ -212,21 +212,23 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "cmd": SYNC_DESIGN_BODY,
                 "next": "review",
             },
-            *_review_steps(n, copy),
+            *_review_steps(n, copy, push),
+            *survey_steps(n, next_id="glossary-check"),
             *_glossary_steps(glossary_check, push),
-            # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
+            # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。設計承認ゲートの前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
             {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": DESIGN_READY, "next": "gate"},
             {
                 "id": "gate",
                 "type": "judge",
                 "inputs": ["review", "glossary-recheck"],
-                "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
-                "用語チェックの当たりが残っていれば、関門 1 の提示に載せる",
+                "question": "設計承認ゲート（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
+                "用語チェックの当たりが残っていれば、設計承認ゲートの提示に載せる",
                 "choices": ["gate", "stop"],
             },
         ],
     }
+    return with_revise_note(plan, a, n, doc)
 
 
 def plan_sprint_branch(a, repo: str) -> dict:
@@ -259,7 +261,7 @@ def design_read(a) -> list[int]:
 
 
 def plan_design_results(a, repo: str) -> dict:
-    """設計の結果のステージ（承認ゲート 1 の直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
+    """設計の結果のステージ（設計承認ゲートの直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
     `触るファイル`・取り込んだ課題・`実行の条件` を書く（決定 2）。LLM を呼ばない run のステップ 1 つ。"""
     manifest = sprint_out(a).resolve() / "sprint.json"
     cmd = (
@@ -336,8 +338,8 @@ def plan_sprint_check(a, repo: str) -> dict:
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
-    """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
-    単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
+    """pace: normal のデプロイ。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、リリース承認ゲートの後に単独で流す（#1914）。
     `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
     プランの版の記録から。#2164）。"""
@@ -358,26 +360,25 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         issue=a.issue,
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
-        state=getattr(a, "state", None),  # 本番の approve が承認ゲート 2 の利用者の承認の記録を読む（#1426）
+        state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
     )
     return plan_release(ns)
 
 
 def advise_design_steps(a) -> list[dict]:
-    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも関門 1 の judge（gate）へ進む。"""
-    state = shlex.quote(sprint_state_path(a))
+    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも設計承認ゲートの judge（gate）へ進む。"""
     note = {
         "timeout": 300,
         "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}'",
         "on_fail": "gate",
         "next": "gate",
     }
-    return advise_steps(state, "design", f"--pr {{pr}} --mode {a.mode} --root .", note, {"stage": "設計"})
+    return advise_steps(shlex.quote(sprint_state_path(a)), "design", f"--pr {{pr}} --mode {a.mode} --root .", note, {"stage": "設計"})
 
 
 def plan_advise_design(a, n: int, repo: str) -> dict:
-    """pace: normal と --state の設計: 用語チェックの後の push と関門 1 の judge の間へ助言の MVV 判定を入れる（#1400 の決定 4）。
-    判定は設計 PR へコメントし、プランは判定によらず関門 1 で止まる（承認は利用者が行う）。"""
+    """pace: normal と --state の設計: 用語チェックの後の push と設計承認ゲートの judge の間へ助言の MVV 判定を入れる（#1400 の決定 4）。
+    判定は設計 PR へコメントし、プランは判定によらず設計承認ゲートで止まる（承認は利用者が行う）。"""
     plan = plan_sprint_design(a, n, repo)
     steps = plan["steps"]
     gate = steps.pop()
@@ -385,18 +386,17 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
         if s["id"] == "ready":
             s["next"] = "mvv"
     gate["inputs"] = [*gate["inputs"], "mvv"]
-    gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
-    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}")]
+    gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、設計承認ゲートの提示に載せる（承認は利用者が行う）"
+    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), DESIGN_GATE, "mvv", pr="{pr}")]
     return plan
 
 
 def plan_mvv_design(a, n: int, repo: str) -> dict:
-    """pace: fast と auto の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
-    ラベルの付与かマージが落ちたら handoff で関門 1 の by: mvv の記録を外し、プランを関門で終える（#1370 の I8）。"""
+    """pace: fast と auto の設計: 設計承認ゲートの judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
+    ラベルの付与かマージが落ちたら handoff で設計承認ゲートの by: mvv の記録を外し、プランを承認ゲートで終える（#1370 の I8）。"""
     plan = plan_sprint_design(a, n, repo)
     state = shlex.quote(sprint_state_path(a))
-    note = MVV_NOTE
-    # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
+    # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず設計承認ゲートの judge（gate）へ回す
     push = ""
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
@@ -411,27 +411,29 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "type": "run",
             "stage": "設計",
             "timeout": 900,
-            "cmd": f"{MVV_PY} check --sprint {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
+            "cmd": f"{MVV_PY} check --sprint {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {MVV_NOTE}",
             "next": "approve",
             "gate_next": "end",
         },
         {
             "id": "approve",
             "type": "run",
-            # 控えは mvv が従うときだけ書く。関門を利用者が承認して --from approve で続けたときは無い
+            # 控えは mvv が従うときだけ書く。承認ゲートを利用者が承認して --from approve で続けたときは無い
             "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && "
-            f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
+            f"{{ [ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}; }} && gh pr ready {{pr}}'",
             "on_fail": "handoff",
             "next": "merge-gate",
         },
         *merge_steps(a, next="end", on_fail="handoff"),
-        handoff_step(sprint_state_path(a), GATE_1, "承認ラベルの付与かマージ"),
-        reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}"),
+        handoff_step(sprint_state_path(a), DESIGN_GATE, "承認ラベルの付与かマージ"),
+        reject_step(sprint_state_path(a), DESIGN_GATE, "mvv", pr="{pr}"),
     ]
     plan["規則"] = (
-        "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
+        "設計の cross-review は上限 3 ラウンドで打ち切る（収束を待たない）。上限に達して未解決の指摘が 0 件なら、収束と同じ経路を"
+        "通って設計承認ゲートの判定（mvv のステップ）へ渡す。未解決が残れば解決のフロー（直し → 再レビュー）を回し、解決すれば mvv へ"
+        "渡す。解決できない（review-settled の判定）か駆動そのものが失敗したら gate。"
     )
-    return plan
+    return with_revise_mvv(plan, a, n)
 
 
 def plan_fast_impl(a, n: int, repo: str) -> dict:
@@ -472,7 +474,7 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
 
 
 def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
-    """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップが関門 2 を判定する。
+    """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップがリリース承認ゲートを判定する。
     prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
     `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""
     wt, branch = release_names(version)

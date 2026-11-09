@@ -1,6 +1,6 @@
 """メインディレクトリを編集しようとしたときに、worktree で作業する旨を伝える guard（#1142 の決定 20）。
 
-結線先は `hooks/*.json`（Claude Code・Codex）。Kiro CLI と agy の分岐は、配布を終える前（#2231）に導入した手元の hook が
+結線先は `hooks/*.json`（Claude Code・Codex）。Kiro CLI と agy の分岐は、デプロイを終える前（#2231）に導入した手元の hook が
 この入口を呼び続けるために残す。
 - PreToolUse（Claude Code / Codex CLI）: 編集先のパスを見た案内を `additionalContext` でモデルへ渡す
 - プロンプト送信時（Kiro CLI）: パスを見ない案内を標準出力へ書く
@@ -21,6 +21,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
+import limits
 import jsonio
 
 from . import payload as pl
@@ -62,7 +63,9 @@ class Place:
 
 def _git_lines(cwd: str, *args: str) -> list[str] | None:
     try:
-        p = subprocess.run(["git", "-C", cwd, "rev-parse", *args], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", *args], capture_output=True, text=True, timeout=limits.seconds("hook.git-rev-parse")
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout.split("\n") if p.returncode == 0 else None
@@ -153,24 +156,17 @@ def _save_state(path: str, data: dict[str, Any]) -> None:
 
 
 # セッションの持ち主として探すランタイムのプロセスの名前（先頭の一致）。
-_RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
-
-
 def session_owner() -> dict[str, Any] | None:
     """hook の親をたどって最初に当たるランタイムのプロセス（`{"pid", "started"}`）。見つからなければ None（#2229）。
 
     片付け（`lib/run_state.py`）は、この pid が開始時刻ごと生きている間は状態ファイルを消さない。記録が無ければ
-    最終更新から寿命の窓で判定する。"""
+    最終更新から寿命の窓で判定する。探し方の正本は `procs.runtime_ancestor`。"""
     try:
         import procs  # psutil を要する。無い環境では記録を書かない
     except Exception:  # noqa: BLE001
         return None
-    for pid in procs.ancestor_pids(os.getpid()):
-        got = procs.parent_and_name(pid)
-        if got and got[1].lower().startswith(_RUNTIME_NAMES):
-            started = procs.start_time(pid)
-            return {"pid": pid, "started": started} if started is not None else None
-    return None
+    got = procs.runtime_ancestor()
+    return {"pid": got[0], "started": got[1]} if got else None
 
 
 def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:

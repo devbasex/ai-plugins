@@ -52,7 +52,7 @@
 | | 宣言の検査（`project-decl.py check`）・戦略の解決（`test_strategy.resolve`）の振る舞い（字句の不備だけを見るまま） |
 
 ランナーとテンプレートは宣言（`.ndf/project.json` の `test.suites[].scope_command`）か引数（`--round-test` / `--baseline-test` の
-`{paths}` を含む値）で受け、ランナーの名前とコマンドの語は見ない。配布先のリポジトリでも働く。
+`{paths}` を含む値）で受け、ランナーの名前とコマンドの語は見ない。利用先のリポジトリでも働く。
 
 ## 背景
 
@@ -165,6 +165,10 @@ graph LR
 - 2 で最初の suite へ寄せないのは、どの suite の `paths` にも当たらない宣言していないテスト（`e2e/login.spec.ts` など）で正しいテンプレートが
   落ち、`defect` で止まるのを防ぐためである。`paths` が `.` か空の suite には `suite_for` が全ファイルを当てるため、そうしたファイルも候補に入り
   受け持ちが未確定になる
+- 1 と 2 の「テストの名前の形の追跡ファイル」からは、テストの関数（行頭の空白に続く `def test` か `async def test` の行）を持たない `.py` を
+  外す。`lib/test_strategy.py` のような本番のモジュールと `tests/test_helpers.py` のような補助のファイルは、走らせてもテストを 1 件も集めずに
+  落ちるためである。`--scope` の 1 件がファイル名の形で当たっても、そうした `.py` ならテストの置き場所とみなさない。`tests/` などのディレクトリの
+  名前による置き場所の判定は変わらない
 - 3 はテストの名前が形（`test_*`・`*_test.*`・`*.test.*`・`*_spec.*`・`*.spec.*`）に当たらないエコシステム（`FooTest.java`・`FooTests.cs`・
   `UserTest.php`・`*.bats`・Rust の `tests/*.rs`）でも、suite がテストの置き場所を `paths` に宣言していれば試走できるようにする。配下にはテストで
   ないファイル（`tests/TestCase.php`・`tests/fixtures/*.json`・`tests/common/mod.rs`）が残りうるため受け持ちは未確定である
@@ -264,4 +268,5 @@ suite ごとに 1 段で、「受けません」（`defect`）か「受けるか
 - [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py)・[`refactor_lib/template_check.py`](../../plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py)・[`project_lib/model.py`](../../plugins/ndf/scripts/project_lib/model.py)
 - [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md)（着手前のテストの上限。試走はその残りの中で走る）
 - [cross-refactoring-lint-suite-and-ci-coverage.md](cross-refactoring-lint-suite-and-ci-coverage.md)（静的解析の suite の範囲テスト）
+- [cross-refactoring-test-file-detection.md](cross-refactoring-test-file-detection.md)（テストのファイルの見分け方。テストの関数を持たない `.py` を候補から外す規則）
 - 課題: #1630（由来 takemi-ohama/novel issue #32 / PR #58）。残した主題は #2095（修正のラウンドの止め方）・#2096（着手前のテストへ入れるパスの種類）

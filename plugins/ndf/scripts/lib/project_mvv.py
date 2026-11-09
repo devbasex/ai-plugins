@@ -8,7 +8,7 @@
     ref = record(mvv)           # 状態ファイル・jsonl へ写す {status, version, sha256}
     items = basis(raw, mvv)     # 根拠の項目（Value 3 / C4 / P1 ...）。空なら「MVV なし」か「根拠なし」
 
-NDF の共通原則は配布物の `scripts/data/ndf-common-principles.md` にあり、宣言へは写さない（プロジェクトが上書きも除外もできない）。
+NDF の共通原則はリリース対象の `scripts/data/ndf-common-principles.md` にあり、宣言へは写さない（プロジェクトが上書きも除外もできない）。
 本文の解析は `project_mvv_body.py`、履歴の形と既定は `project_mvv_decl.py`、改訂の兆候は `project_mvv_signals.py` にある。
 """
 
@@ -29,6 +29,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from project_mvv_body import OPERATIONS_HEADING, changes, item_ids, shape_problems  # noqa: E402,F401
 from project_mvv_decl import BODY_FILE, DECL_VERSION, DEFAULTS, decl_problems, resolve_settings  # noqa: E402,F401
 from project_mvv_body import _table_ids  # noqa: E402
+from state_home import user_home  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PRINCIPLES_PATH = HERE.parent / "data" / "ndf-common-principles.md"
@@ -65,9 +66,9 @@ CONTRACT = """## 判断の決まり（NDF の共通原則）
 
 
 def mvv_state_base() -> Path:
-    """記録（照合・覆し・判定）の置き場。`NDF_MVV_STATE_DIR` → `~/.local/state/ndf`。"""
+    """記録（照合・覆し・判定）の置き場。`NDF_MVV_STATE_DIR` → `<状態の根>`（`state_home.user_home`）。"""
     env = os.environ.get("NDF_MVV_STATE_DIR")
-    return Path(env).expanduser() if env else Path("~/.local/state/ndf").expanduser()
+    return Path(env).expanduser() if env else user_home()
 
 
 def vet_log_path() -> Path:
@@ -111,7 +112,7 @@ def principles() -> str:
     try:
         return PRINCIPLES_PATH.read_text(encoding="utf-8").strip()
     except OSError as e:
-        return f"# NDF の共通原則\n\n（配布物の {PRINCIPLES_PATH} を読めない: {e}）\n\n**人を守り、人の発展を支える。**"
+        return f"# NDF の共通原則\n\n（リリース対象の {PRINCIPLES_PATH} を読めない: {e}）\n\n**人を守り、人の発展を支える。**"
 
 
 def principle_ids() -> tuple[str, ...]:

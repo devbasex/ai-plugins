@@ -140,13 +140,59 @@ cross-refactoring は範囲テストを作業ディレクトリの根で走ら�
 | suite | `kind` | `command` / `scope_command` | `paths` | `ci_jobs` |
 | --- | --- | --- | --- | --- |
 | `pytest` | `test` | `uv run … pytest . …` / `… pytest {paths} …` | `["."]` | `.github/workflows/pytest.yml` |
+| `factory` | `test` | `npm --prefix factory ci … && npm --prefix factory run check` / `… vitest run --root factory {paths}` | `["factory"]` | `.github/workflows/factory-check.yml` |
 | `script-structure` | `lint` | `python3 scripts/check-script-structure.py` / `… {paths}` | `plugins/ndf` ほか | `.github/workflows/script-structure.yml` |
+| `ndf-contracts` | `lint` | `python3 scripts/check-ndf-contracts.py` / `… {paths}` | `plugins/ndf` ほか | `.github/workflows/script-structure.yml` |
 | `lint` | `lint` | `bash scripts/check-lint.sh` / `bash scripts/check-lint.sh -- {paths}` | `["."]` | `.github/workflows/lint.yml` |
+| `runtime-plugin-build-check` ほか 9 本 | `lint` | ワークフローの `run` の行と同じ文 / 持たない | 持たない | `.github/workflows/runtime-plugin-validate.yml#<ジョブ>`（1 本に 1 ジョブ） |
 
-`test.ci_exempt` は、手元の検証で結果が決まらないか走らせられない 5 本（`glossary.yml`・`pr-base-guard.yml`・
-`pr-body-decisions.yml`・`runtime-plugin-authenticated-smoke.yml`・`runtime-plugin-smoke.yml`）を理由とともに持つ。
-`runtime-plugin-validate.yml` のジョブはどこにも書かない。生成物の同期・frontmatter・リンクなど項目の変更で壊れうる検査で、
-宣言に無いと知らせるのが正しいためである（扱いは #1694）。
+`runtime-plugin-validate.yml` の 9 本の suite は、ジョブ `runtime-plugin-build-check`・`skill-frontmatter-check`・
+`skill-repo-assumptions-check`・`skill-shell-vars-check`・`repo-secrets-check`・`runtime-plugin-validate`・
+`markdown-link-check`・`doc-line-limit-check`・`instruction-files-check` を 1 つずつ受け持つ。どれも検査のスクリプトが
+ファイルのパスを受けないため `scope_command` と `paths` を持たず、範囲テストでは走らず、最終ゲートで 1 本ずつ判定される。
+`name` は継続的統合のジョブ id と同じにし、最終ゲートの記録と継続的統合のチェックの名前を同じ語で読めるようにする。`runner` は呼ぶスクリプトの
+名前（拡張子を除く）で、判定には使わない。`ci_jobs` の識別子は、同じファイルのジョブの扱いが分かれるときにジョブの単位で書く。
+
+`test.ci_exempt` は、手元の検証で結果が決まらないか走らせられない 7 件（`glossary.yml`・`pr-base-guard.yml`・
+`pr-body-decisions.yml`・`runtime-plugin-authenticated-smoke.yml`・`runtime-plugin-smoke.yml`・
+`runtime-plugin-smoke-latest.yml`・`runtime-plugin-validate.yml#required-checks-check`）を理由とともに持つ。
+`runtime-plugin-smoke-latest.yml` はジョブが 1 件だけなのでファイルの単位で書き、`required-checks-check` は同じファイルに suite にするジョブが
+あるのでジョブの単位で書く。
+
+**suite にするジョブの条件。** 次の 3 つをすべて満たすジョブを suite にし、満たさないジョブを除外する。
+
+- 秘密・ネットワーク・Pull Request の文脈（宛先のブランチ・本文）を使わずに、手元で判定が決まる
+- 継続的統合のジョブと同じスクリプトを同じ引数で走らせる（継続的統合だけで要る準備の手順は除く）
+- 1 回の実行が 60 秒以内に終わる
+
+**ジョブ 1 件に suite を 1 本置く。** 最終ゲートは静的解析の suite を 1 本ずつ走らせ、着手前の suite ごとの成否で既存失敗と変更起因を分ける
+（`gate_lint.py`・`lint_verdict`）。1 本にまとめると、どれか 1 つが着手前から落ちていれば suite 全体が既存失敗として判定から外れ、ほかの 8 件を
+項目が壊しても止まらないためである。`scope_command` を持たないこれらの suite が通る判定は次の 3 行である。
+
+| 着手前の成否 | 判定 |
+| --- | --- |
+| 通っていた | 変更起因（最終ゲートが止まる） |
+| 落ちていた | 既存失敗（判定から外す） |
+| 読めない | 変更起因 |
+
+**`scope_command` と `paths` を書かない。** 静的解析の suite の `paths` は `scope_command` を持つ suite の範囲を決めるときだけ読まれ、読まれない値は
+検査の範囲が変わっても古くなったことに気づけないためである。`{paths}` を受け取って捨てる `scope_command` は書かない。継続的統合と同じ引数で呼ぶ
+約束から外れ、項目ごとに全体の検査が走るためである。
+
+**`runtime-plugin-validate` は `claude` の CLI が無いホストでも suite として走る。** `scripts/validate-runtime-plugins.sh` は CLI が無いと
+`claude plugin validate` だけを飛ばして終了コード 0 で終わり、残りの検査を走らせる。`check-doc-staleness.py` と `check-cross-skill-refs.py` は
+継続的統合ではこのジョブでしか走らないため、除外すると項目が壊しても手元で気づけない。CLI が無いホストでは、`claude plugin validate` の分だけ
+継続的統合より検査が少ない。このスクリプトは別の suite と同じ検査（生成物の同期・リンク・文書の行数）を内部でもう一度行う。
+
+**除外の 2 件の理由。** `required-checks-check` は Pull Request の宛先のブランチと GitHub の API（トークン）を使い、`runtime-plugin-smoke-latest.yml` は
+定期と手動でだけ起動してネットワークから最新の CLI を入れる。どちらも上の条件の 1 つ目を満たさない。
+
+宣言と処理はスキーマの `test.suites[].ci_jobs`・`test.ci_exempt` を介してだけやり取りする。突き合わせの処理とワークフローはこの値を知らない。
+
+足した suite 9 本の所要の合計は、2026-11-05 の実測で 19.6 秒、2026-11-06 の実測で 35.4 秒だった。着手前のテストと最終ゲートは、それぞれこの分だけ
+長くなる。いずれも 1 回の実測で、2 回の差の原因は切り分けていない。`claude plugin validate` が通信をするかは未確認である。
+
+継続的統合にジョブを足すと、`init` はまた宣言に無いジョブとして知らせる。これは突き合わせの目的どおりの振る舞いで、宣言へ足すまで続く。
 
 `analysis.written.test` の指紋は宣言の値と一致しない（suite を手で足したため）。解析の書き出し（`merge.merge_item`）は
 一致しない項目を書き換えずに残すため、手で足した値は解析で消えない。
@@ -170,6 +216,10 @@ cross-refactoring は範囲テストを作業ディレクトリの根で走ら�
   （`plugins/ndf/scripts/tests/test_project_decl_ci_jobs.py`）
 - `measure_ci.workflow_jobs` の数が共通の部品へ移す前と同じであること（`plugins/ndf/scripts/tests/test_lib_ci_workflows.py`）
 - `Strategy.as_state` → `from_state` で `ci_jobs` が残り、`ci_jobs` を持たない旧い状態ファイルも読めること
+- このリポジトリの宣言と作業ディレクトリで `compare_jobs` を打つと、`status` が `compared` で `undeclared` が空になること（テストのコードは持たず、
+  宣言を変えたときにコマンドで確かめる。2026-11-06 の実測: ジョブ 24 件、`undeclared` 0 件）
+- `runtime-plugin-validate.yml` の 9 本の suite の `command` が根で終了コード 0 で終わり、ジョブの `run` の行と同じ文であること
+- `claude` を `PATH` から外しても `runtime-plugin-validate` の `command` が終了コード 0 で終わること
 
 ## 関連リンク
 

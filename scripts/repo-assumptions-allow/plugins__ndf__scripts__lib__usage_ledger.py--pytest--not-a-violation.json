@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/usage_ledger.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "使用量の帳簿の項目名（NDF 自身のテストの実行の識別）。対象リポジトリのテストのコマンドを埋め込んでいない",
+  "count": 8
+}

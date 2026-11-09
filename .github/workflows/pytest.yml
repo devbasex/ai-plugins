@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # 配布の PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
+  # デプロイの PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
   # PR）では重いジョブを省く（#1055）。判定は scripts/ci-heavy-skip.py が差分と develop の
   # push の結果から行う。push では常に回す（develop で通ったという記録を省かない結果にするため）
   ci-scope:
@@ -95,10 +95,24 @@ jobs:
       #
       # 前提のコマンドの確認と git の身元の設定は、根の conftest.py が行う。前提を
       # ワークフローの側にも置くと、増えたときに片方だけが更新される
-      - run: uv run --frozen --project . --all-extras pytest . -q -n auto
+      # 統括役の結合テスト（test_relay_hub.py::TestWithTmux）が tmux を使う。runner のイメージは tmux を
+      # 載せると約束していないため、無いときだけ入れる（ある間は時間を足さない。#2346）。apt の索引が古いと
+      # 取得で落ちるため、入れる経路では update を install の直前に打つ。版はログに残す
+      - name: tmux
+        run: |
+          command -v tmux || { sudo apt-get update && sudo apt-get install -y tmux; }
+          tmux -V
+      # 項目ごとの名前と結果を JUnit XML に残す（ログは -q で件数だけ。#2346）
+      - run: uv run --frozen --project . --all-extras pytest . -q -n auto --junitxml=pytest-junit-${{ matrix.shard }}.xml
         env:
           SHARD_TOTAL: 2
           SHARD_INDEX: ${{ matrix.shard }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pytest-junit-${{ matrix.shard }}
+          path: pytest-junit-${{ matrix.shard }}.xml
+          if-no-files-found: warn
 
   # ruleset の必須のチェックは `pytest` という名前の結果を 1 つ待つ。分けたジョブの結果を
   # ここで 1 つにまとめる。名前を変えると ruleset の変更が要る。

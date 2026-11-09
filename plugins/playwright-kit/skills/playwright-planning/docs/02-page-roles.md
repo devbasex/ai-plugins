@@ -193,8 +193,7 @@
 
 ```python
 @pytest.mark.page_role("search", "list")
-def test_search_result(page, pwk_role_user):
-    ...
+def test_search_result(page, pwk_role_user): ...
 ```
 
 このとき各 role の checklist 全項目を走査する。重複項目は片方で OK。

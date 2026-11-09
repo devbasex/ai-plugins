@@ -17,7 +17,7 @@
 | 何を | 正本 |
 | --- | --- |
 | 宣言（`.ndf/review.json`）の鍵と規則・宣言の例・状態ファイルの `profile_status` / `profile` / `profile_error` / `profile_name` / `profile_others`・`init` の出力の `REVIEW_PROFILE=` / `REVIEW_PROFILE_NAME=`・`version: 3` のプロファイルの選び方と最上位の `criteria`・`not_written`・再開で組み直す条件 | `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) の「レビューの宣言（`.ndf/review.json`）」の節 |
-| 自動レビュー観点の分類の一覧と、プロファイルの分類・`replace_auto_categories` の効き方・`auto_review_categories` | `cross-review` の [docs/04-contracts.md](../../plugins/ndf/skills/cross-review/docs/04-contracts.md) |
+| 自動レビュー観点の分類の一覧と、プロファイルの分類・`replace_auto_categories` の効き方・`auto_review_categories` | `cross-review` の [docs/08-review-categories.md](../../plugins/ndf/skills/cross-review/docs/08-review-categories.md) |
 | 指摘の基準の方針（基準 1〜4 とプロファイルで差し替えられる範囲） | `cross-review` の [references/design-principles.md](../../plugins/ndf/skills/cross-review/references/design-principles.md) の「指摘の基準」の行 |
 | 修正担当の振り分け（`criterion` / `waive_kind` の許す値・見送りの返信・「対象のファイル」の語） | [`fix` の SKILL.md](../../plugins/ndf/skills/fix/SKILL.md) と [`fix-steps.py`](../../plugins/ndf/skills/fix/scripts/fix-steps.py) の冒頭の説明 |
 | 既定の基準・書かないもの・見送りの種類・返信の雛形の文、`reviewer` / `fixer` の打ち方 | [`scripts/lib/review_criteria.py`](../../plugins/ndf/scripts/lib/review_criteria.py) の冒頭の説明と定数 |
@@ -52,7 +52,7 @@
 
 | # | 決定 | 理由 | 採らなかった案 |
 | ---: | --- | --- | --- |
-| 1 | 基準 2 を外せない基準にし、番号 2 と 3 をプロファイルの `criteria` に使わせない（書けば壊れたプロファイル） | プロファイルは PR の head から読むため、基準 2 を消せると PR の作り手がその PR の安全の基準を外せる。原稿のリポジトリでも実在の人物の個人情報や秘密の混入は起こりうる。番号 2 を固定すると、どのリポジトリでも `criterion: 2` が同じ意味になり、振り分けの記録を横断して数えられる。番号 3 は重点が後から足されても衝突しないよう、重点が無いときも予約する。承認ゲート 1（2026-10-11）で利用者が決めた | プロファイルが基準 2 も差し替える（課題の「提案」の例の形）。外せない基準を末尾へ別の番号で足す（既定の出力と番号の意味がプロファイルの有無で変わる） |
+| 1 | 基準 2 を外せない基準にし、番号 2 と 3 をプロファイルの `criteria` に使わせない（書けば壊れたプロファイル） | プロファイルは PR の head から読むため、基準 2 を消せると PR の作り手がその PR の安全の基準を外せる。原稿のリポジトリでも実在の人物の個人情報や秘密の混入は起こりうる。番号 2 を固定すると、どのリポジトリでも `criterion: 2` が同じ意味になり、振り分けの記録を横断して数えられる。番号 3 は重点が後から足されても衝突しないよう、重点が無いときも予約する。設計承認ゲート（2026-10-11）で利用者が決めた | プロファイルが基準 2 も差し替える（課題の「提案」の例の形）。外せない基準を末尾へ別の番号で足す（既定の出力と番号の意味がプロファイルの有無で変わる） |
 | 2 | プロファイルの `paths` は `.ndf/pace.json` の `areas` と同じ規則で照らし、`scripts/lib/pace.py` の `matches` を使う（`*` と `?` は `/` をまたがず、`**` はまたぐ） | `.ndf/` の宣言のパスの書き方が鍵ごとに違うと、書き手が覚え分ける。`fnmatch` は `*` が `/` をまたぎ、`works/*/chapters/*/text.md` が `works/a/x/chapters/011/text.md` にも当たる | `fnmatch` や `PurePath.match` で別に照らす（同じ役割の関数が 2 つになる） |
 | 3 | 修正担当の語はプロファイルの有無だけで「対象のファイル」に切り替え、成果物の呼び名の鍵を足さない。`/ndf:fix` の手順は常にコードに限らない語で書く | 切り替わるのは修正担当の節の見送りの句 1 か所で、呼び名を変えても指示の意味は変わらない。`SKILL.md` は宣言を読まない | プロファイルに呼び名の鍵（例: `artifact`）を足す（使い道が 1 句だけで、検査する鍵が増える） |
 | 4 | 壊れたプロファイルは丸ごと捨てて既定で続け、終了コードを変えない。知らない鍵があるときも丸ごと捨てる。重点（`focus`）はプロファイルと独立に読む | 鍵ごとに捨てると、`waive_kinds` だけ既定で `reply` はプロファイルのまま、のような書き手の意図に無い組み合わせが生まれる。丸ごと捨てれば、出るのは既定かプロファイルかのどちらかで、報告の 1 行で状態が分かる。鍵の打ち間違い（`waive_kind` など）を黙って無視すると、意図に無い既定が効く | 壊れた鍵だけ既定に戻す。宣言を止める（今の重点の宣言の扱い〈止めない〉と食い違う） |
@@ -136,7 +136,7 @@ graph TD
   3 を含め、重点が無いときの 3 は `fix-steps.py` の `_criterion_problems` が別に拒む（重点の検査を 1 か所に残す）
 - **`--focus` と `--extra-instructions-file` は、プロファイルがあっても自動レビュー観点の後ろに足される。**
 - **プロファイルの分類の名前が既定の自動カテゴリの名前と同じときは**、`auto_review_categories` では 1 つにまとめ、
-  観点の文は既定の後ろにプロファイルの文を足す（決定 5）
+  観点の文は既定の後ろにプロファイルの文を足す（決定 5）。既定の分類が `design` か `code` を持てば、その後ろに外部の調査の確認の観点が付く
 - **`version: 2`・`3` の宣言を、それを知らない古い NDF が読むと**、宣言全体を読めないとして基準 1・2・4 で続ける（止まらない）
 - **プロファイルを選ぶ手がかりは PR の変更ファイルのパスだけである。** PR の題・本文・ラベル・ブランチ名では選ばない
 - **レビューの重点（`focus`）はリポジトリに 1 つのまま**で、どのプロファイルを選んでも効く
@@ -176,7 +176,7 @@ PR の作り手が変えられるのは、基準の追加と、基準 1・4・�
 - `waive_kinds` と `reply` を書いた振り分けで、`finalize` の返信が `{inner}` に種類の名前を入れた文になり、重点があっても重点の句が無いこと。既定の雛形では重点の句が付くこと（I8）
 - 写しを持つ振り分けで、プロファイルに無い `wording` と `criteria` に無い番号を `finalize` が `invalid` で止め、`criterion: 2` と（重点があるとき）`3` は通すこと（I5）
 - `works/*/chapters/*/text.md` の分類が `works/novel-a/chapters/011/text.md` に当たり、`works/novel-a/x/chapters/011/text.md` には当たらないこと
-- `replace_auto_categories` が真なら観点の列に `common` / `docs_only` が無く文はプロファイルの分だけ、偽か無ければ既定の文の後ろにプロファイルの文が付くこと
+- `replace_auto_categories` が真なら観点の列に `common` / `docs_only` が無く文はプロファイルの分だけ、偽か無ければ既定の文の後ろにプロファイルの文が付くこと。どちらでも、既定の分類が `design` か `code` を持てば、最後に外部の調査の確認の観点が付くこと
 - プロファイルがある根の `fixer` 出力と `context` の文脈のファイルに「コードを変え」が無く「対象のファイルを変えずに」があること
 - `reply` に `{inner}` が無い宣言・知らない鍵のある宣言で、`review_criteria.py` が終了コード 0・既定の節・標準エラーに理由を出し、`init` の状態ファイルが `profile_status: unreadable` と既定の `reviewer_block` を持ち、`report` が理由を出し、同じ宣言の `focus` は効くこと（I4）
 - 再開の前にプロファイルを書き換えると `reviewer_block` と `review_instructions` が新しい値になり、書き換えなければ状態ファイルが書き直されないこと（I7）
@@ -203,7 +203,7 @@ PR の作り手が変えられるのは、基準の追加と、基準 1・4・�
 ## 関連リンク
 
 - [`scripts/lib/review_criteria.py`](../../plugins/ndf/scripts/lib/review_criteria.py)・[`scripts/lib/pace.py`](../../plugins/ndf/scripts/lib/pace.py)・[`fix-steps.py`](../../plugins/ndf/skills/fix/scripts/fix-steps.py)
-- `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md)・[docs/04-contracts.md](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)・[references/design-principles.md](../../plugins/ndf/skills/cross-review/references/design-principles.md)
+- `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md)・[docs/08-review-categories.md](../../plugins/ndf/skills/cross-review/docs/08-review-categories.md)・[references/design-principles.md](../../plugins/ndf/skills/cross-review/references/design-principles.md)
 - [cross-review-evidence-based.md](cross-review-evidence-based.md)（指摘区分と収束の判定。プロファイルはこれを変えない）
 - [`review_criteria_decl.py`](../../plugins/ndf/scripts/lib/review_criteria_decl.py)
 - 用語集の「レビューのプロファイル」「プロファイルの選択」（[docs/glossary.md](../glossary.md) の `ndf-cross-review`）

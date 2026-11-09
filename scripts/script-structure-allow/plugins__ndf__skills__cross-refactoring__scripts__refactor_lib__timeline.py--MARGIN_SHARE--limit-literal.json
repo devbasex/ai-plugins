@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/timeline.py", "name": "MARGIN_SHARE", "kind": "limit-literal", "reason": "#2343 の決定 4。上限でない数字: 手順の上限と CLI の上限に足す余裕の割合"}

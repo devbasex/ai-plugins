@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/supervise_lib/claude.py", "name": "ClaudeRunner._wait_for_reset", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: claude の利用上限の解除の時刻まで待つ（要求の前提 6）"}

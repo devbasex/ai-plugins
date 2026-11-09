@@ -5,25 +5,18 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 960,
+      "files": 1104,
       "version": "3.11"
-    },
-    {
-      "name": "typescript",
-      "frameworks": [],
-      "files": 100,
-      "version": "24"
     },
     {
       "name": "shell",
       "frameworks": [],
-      "files": 79
+      "files": 66
     },
     {
       "name": "javascript",
       "frameworks": [],
-      "files": 8,
-      "version": "24"
+      "files": 14
     }
   ],
   "test": {
@@ -40,19 +33,6 @@
         ],
         "ci_jobs": [
           ".github/workflows/pytest.yml"
-        ]
-      },
-      {
-        "name": "factory",
-        "runner": "vitest",
-        "command": "npm --prefix factory ci --no-audit --no-fund --silent && npm --prefix factory run check",
-        "scope_command": "npm --prefix factory ci --no-audit --no-fund --silent && factory/node_modules/.bin/vitest run --root factory {paths}",
-        "needs": [],
-        "paths": [
-          "factory"
-        ],
-        "ci_jobs": [
-          ".github/workflows/factory-check.yml"
         ]
       },
       {
@@ -103,6 +83,96 @@
         "ci_jobs": [
           ".github/workflows/lint.yml"
         ]
+      },
+      {
+        "name": "runtime-plugin-build-check",
+        "runner": "build-runtime-plugins",
+        "kind": "lint",
+        "command": "bash scripts/build-runtime-plugins.sh --check",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#runtime-plugin-build-check"
+        ]
+      },
+      {
+        "name": "skill-frontmatter-check",
+        "runner": "check-skill-frontmatter",
+        "kind": "lint",
+        "command": "python3 scripts/check-skill-frontmatter.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#skill-frontmatter-check"
+        ]
+      },
+      {
+        "name": "skill-repo-assumptions-check",
+        "runner": "check-skill-repo-assumptions",
+        "kind": "lint",
+        "command": "python3 scripts/check-skill-repo-assumptions.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#skill-repo-assumptions-check"
+        ]
+      },
+      {
+        "name": "skill-shell-vars-check",
+        "runner": "check-skill-shell-vars",
+        "kind": "lint",
+        "command": "python3 scripts/check-skill-shell-vars.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#skill-shell-vars-check"
+        ]
+      },
+      {
+        "name": "repo-secrets-check",
+        "runner": "check-repo-secrets",
+        "kind": "lint",
+        "command": "python3 scripts/check-repo-secrets.py",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#repo-secrets-check"
+        ]
+      },
+      {
+        "name": "runtime-plugin-validate",
+        "runner": "validate-runtime-plugins",
+        "kind": "lint",
+        "command": "bash scripts/validate-runtime-plugins.sh",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#runtime-plugin-validate"
+        ]
+      },
+      {
+        "name": "markdown-link-check",
+        "runner": "check-markdown-links",
+        "kind": "lint",
+        "command": "python3 scripts/check-markdown-links.py --root .",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#markdown-link-check"
+        ]
+      },
+      {
+        "name": "doc-line-limit-check",
+        "runner": "check-doc-line-limit",
+        "kind": "lint",
+        "command": "python3 scripts/check-doc-line-limit.py --root .",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#doc-line-limit-check"
+        ]
+      },
+      {
+        "name": "instruction-files-check",
+        "runner": "check-instruction-files",
+        "kind": "lint",
+        "command": "python3 plugins/ndf/scripts/instructions-check.py --root .",
+        "needs": [],
+        "ci_jobs": [
+          ".github/workflows/runtime-plugin-validate.yml#instruction-files-check"
+        ]
       }
     ],
     "ci_exempt": [
@@ -125,6 +195,14 @@
       {
         "job": ".github/workflows/runtime-plugin-smoke.yml",
         "reason": "4 つのランタイムの CLI を入れて動かす。手元の検証の時間に収まらない"
+      },
+      {
+        "job": ".github/workflows/runtime-plugin-smoke-latest.yml",
+        "reason": "定期と手動でだけ起動し、ネットワークから最新の CLI の版を解決して入れる。項目のコミットだけでは判定が決まらない"
+      },
+      {
+        "job": ".github/workflows/runtime-plugin-validate.yml#required-checks-check",
+        "reason": "Pull Request の宛先のブランチと GitHub の API（トークン）を使う。項目の変更で結果が変わらない"
       }
     ]
   },
@@ -140,11 +218,6 @@
   "ci": {
     "provider": "github-actions",
     "workflows": [
-      {
-        "path": ".github/workflows/factory-check.yml",
-        "jobs": 1,
-        "wall_seconds": 10.0
-      },
       {
         "path": ".github/workflows/glossary.yml",
         "jobs": 1,
@@ -227,10 +300,14 @@
   "delivery": [
     {
       "target": "ndf プラグイン（Claude Code・Codex）",
-      "kind": "manual",
-      "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
+      "kind": "auto",
+      "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
       "channel": "production",
-      "versioned": true
+      "versioned": true,
+      "publishes_release": true,
+      "result": {
+        "workflow": "release-cd.yml"
+      }
     }
   ],
   "issues": {
@@ -260,26 +337,27 @@
     "imports": [],
     "notes": []
   },
+  "materials": {
+    "unknown": "答えが無い"
+  },
   "analysis": {
-    "analyzer": 2,
-    "at": "2026-10-31T11:01:54+00:00",
+    "analyzer": 3,
+    "at": "2026-11-08T20:16:21+00:00",
     "inputs": {
-      ".github/workflows/factory-check.yml": "60a41abee313ad075bbf9d67c00189cdbaf586b8",
       ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
       ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
-      ".github/workflows/pr-base-guard.yml": "71c0cda668b533694c48064813b68bbd03cd6efc",
+      ".github/workflows/pr-base-guard.yml": "554f6c557ebe3ec78aec116386637552d1b22ede",
       ".github/workflows/pr-body-decisions.yml": "4c9a78fae1d3766973daa66110ad9c6a212d0fe6",
-      ".github/workflows/pytest.yml": "fdd26324b1360e1f56c215873ecff6060b161fbc",
-      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "15e89f83316c0f275f94c1dfff1981a0add61477",
-      ".github/workflows/runtime-plugin-smoke-latest.yml": "4495e9fe0d54537c07e98dc93d5592258801261c",
-      ".github/workflows/runtime-plugin-smoke.yml": "ff951c3adc274597eba75904fe5498f5f9175d4e",
-      ".github/workflows/runtime-plugin-validate.yml": "63ee3f6bfcbe835e49d6b1c0ae7e6e9cd46aea94",
-      ".github/workflows/script-structure.yml": "8d07e6bbe7a20e80da9d8fa830d53be7c698a254",
-      "AGENTS.md": "afdd75dfc8cb7feab6f377bfc388ad10d809bbf6",
-      "CLAUDE.md": "3e34760f5ad5d1df9f965f1acb795e279babdb1a",
-      "KIRO.md": "f15c72bb7ec964a5c3b04e649972d3948f03b12a",
-      "factory/package.json": "b3ad8f1459190e4c84dc35405c85c69d6a7293d1",
-      "factory/vitest.config.ts": "5072b0ecad3046aaa51fbabedfbfa87c80416f15",
+      ".github/workflows/pytest.yml": "11944905d019174f568c7959e369cb6ae7675d01",
+      ".github/workflows/release-cd.yml": "7652bde34f65dd1d999f178de960992626d8ee47",
+      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",
+      ".github/workflows/runtime-plugin-smoke-latest.yml": "d854a0e7a0eea6cae6ad9b7a28c2f4b0c95cd540",
+      ".github/workflows/runtime-plugin-smoke.yml": "ab0ef5762f0e1467c6a2dcfca2abdda283b94771",
+      ".github/workflows/runtime-plugin-validate.yml": "ff3bfbce63461fca5e024045154bf53487cf16f6",
+      ".github/workflows/script-structure.yml": "e0e60c30036184bb55307d65cef78c00ba2bb6da",
+      "AGENTS.md": "5458e5c1ff83f0986b2a1bac299f961ecf12089d",
+      "CLAUDE.md": "d7a7fd6963657f69007124abe9d0d69ba6c1ebe7",
+      "KIRO.md": "bee3558fe2014460b629926b6d778cd78c783dd7",
       "pyproject.toml": "4fe2a1d2450f2ce5a90e34f20340a467e35d0d01",
       "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
     },
@@ -291,15 +369,14 @@
       ]
     },
     "written": {
-      "languages": "a700a1292f7f5c86d732ecceefdc71ada29f66dcd9beb78111f49ba0a9054a3d",
+      "languages": "e27115491c125f783766af591b93b23f505879521b9b1b7c1f3d7aa1a39f41c1",
       "test_duration": "cd482f866f6a3710186622c27a6a5822f95a789d55ae82bec88f634ddc74c9a5",
-      "ci": "62c607bae178d146a8f2bf78f8ac155f11ace605527099bbacec6963e0f8d412",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
-      "delivery": "d4f1c6e5121b913e9147eb9552c3c78f2a4944bba1562c14c6a4056b1da7ac77",
       "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
       "checks": "c53dec6a7bc99ba9a736a0eb9cf4fdaf9bf0d10ccb7be539658df958ed84c50b",
       "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
-      "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f"
+      "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
+      "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
     }
   }
 }

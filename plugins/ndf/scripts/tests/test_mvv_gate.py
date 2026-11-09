@@ -1,4 +1,4 @@
-"""mvv-gate.py: 関門 1・2 の材料が MVV に従うかの判定と、関門を省く条件（#1078）。
+"""mvv-gate.py: 設計承認ゲート・リリース承認ゲートの材料が MVV に従うかの判定と、承認ゲートを省く条件（#1078）。
 
 claude は NDF_MVV_CLAUDE で、gh は PATH の先頭の偽物で差し替える。差し替えた claude は呼ばれるたびに
 calls.txt へ 1 行を足す（機械のチェックで止めるときに LLM を呼ばないことを数で見る）。
@@ -96,7 +96,7 @@ def sprint(tmp_path):
         )
     )
     material = tmp_path / "approval.md"
-    material.write_text("# 配布\n")
+    material.write_text("# デプロイ\n")
     return {"root": root, "state": state, "mvv": mvv, "material": material, "log": tmp_path / "log.jsonl", "tmp": tmp_path}
 
 
@@ -143,13 +143,13 @@ def test_follow_passes_the_gate_and_is_recorded(sprint):
     code, out, rows = run(sprint, FOLLOW, "--pr", "5")
     assert (code, out["status"]) == (0, "ok")
     assert len(rows) == 1 and rows[0]["passed"] is True and rows[0]["reasons"] == ["Value 1 に沿う"]
-    g = gates(sprint)["関門 2"]
+    g = gates(sprint)["リリース承認ゲート"]
     assert (g["by"], g["verdict"], g["reasons"], g["log"]) == ("mvv", "follow", ["Value 1 に沿う"], str(sprint["log"]))
     assert "速くする" in (sprint["tmp"] / "prompt.txt").read_text()
 
 
 APPROVED = "a" * 40
-MATERIAL = f"# 配布\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 承認したコミット | {APPROVED} |\n"
+MATERIAL = f"# デプロイ\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 承認したコミット | {APPROVED} |\n"
 
 
 @pytest.mark.parametrize(
@@ -157,7 +157,7 @@ MATERIAL = f"# 配布\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内�
     [(FOLLOW, (), APPROVED), ('{"verdict": "unknown", "reasons": ["x"], "boundary": []}', (), None), (FOLLOW, ("--advise",), None)],
 )
 def test_release_follow_records_the_approved_commit_in_the_material(sprint, text, extra, recorded):
-    """#815 の I10: 関門 2 を MVV 判定で通したときだけ、承認資料へ承認の記録（by: mvv）を書く。助言では書かない。"""
+    """#815 の I10: リリース承認ゲートを MVV 判定で通したときだけ、承認資料へ承認の記録（by: mvv）を書く。助言では書かない。"""
     sys.path.insert(0, str(SCRIPT.parent / "lib"))
     import approved_commit as ac
 
@@ -194,7 +194,7 @@ def test_design_gate_is_recorded_as_gate_1(sprint):
         env=env,
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    assert gates(sprint)["関門 1"]["by"] == "mvv"
+    assert gates(sprint)["設計承認ゲート"]["by"] == "mvv"
     assert "follow" in (tmp / "note.md").read_text()
 
 
@@ -217,7 +217,7 @@ def test_anything_but_a_clean_follow_asks_the_user(sprint, text):
     code, out, rows = run(sprint, text)
     assert (code, out["status"]) == (10, "gate")
     assert rows[-1]["passed"] is False
-    assert "関門 2" not in gates(sprint)
+    assert "リリース承認ゲート" not in gates(sprint)
 
 
 def test_without_the_approval_the_llm_is_not_called(sprint):
@@ -345,3 +345,36 @@ def test_an_unreadable_design_doc_goes_back_to_the_user(sprint):
     assert (code, llm_calls(sprint)) == (10, 0)
     assert "issues/x-design.md" in out["summary"]
     assert rows[-1]["verdict"] == "machine"
+
+
+def test_revise_notes_go_into_the_material_and_the_question(sprint):
+    """出し直しの指摘の全文が材料の先頭に入り、問いが指摘を満たさない設計を従うにしない（#2510）。"""
+    note = sprint["tmp"] / "revise-1.json"
+    rounds = [
+        {
+            "loop": "l1",
+            "round": 1,
+            "at": "2026-11-05T00:00:00Z",
+            "pr": 5,
+            "by": "user",
+            "note": "- 範囲を絞る",
+            "items": [{"id": "l1:1-1", "text": "範囲を絞る"}],
+            "missing": [],
+        }
+    ]  # noqa: E501
+    note.write_text(json.dumps({"issue": 1, "rounds": rounds}, ensure_ascii=False))
+    code, res, _ = run(sprint, FOLLOW, "--revise-note", str(note))
+    prompt = (sprint["tmp"] / "prompt.txt").read_text(encoding="utf-8")
+    assert code == 0 and res["status"] == "ok"
+    assert "- 範囲を絞る" in prompt and "l1:1-1" in prompt and "満たさない項目があれば" in prompt
+    assert prompt.index("範囲を絞る") < prompt.index("# デプロイ")
+
+
+def test_an_unreadable_revise_note_returns_to_the_gate(sprint):
+    code, res, _ = run(sprint, FOLLOW, "--revise-note", str(sprint["tmp"] / "無い.json"))
+    assert code == 10 and "出し直しの指摘の入力を読めない" in res["summary"] and not (sprint["tmp"] / "calls.txt").exists()
+
+
+def test_a_gate_without_notes_has_no_revise_rule(sprint):
+    run(sprint, FOLLOW)
+    assert "出し直しの指摘" not in (sprint["tmp"] / "prompt.txt").read_text(encoding="utf-8")

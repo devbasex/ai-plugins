@@ -313,24 +313,10 @@ _UNRESOLVED_LINE = json.dumps(
         "status": "422",
     }
 )
-_UNRESOLVED_MANY = json.dumps(
-    {
-        "message": "Unprocessable Entity",
-        "errors": ["Line could not be resolved, Path could not be resolved, and Line could not be resolved"],
-        "status": "422",
-    }
-)
 _BAD_EVENT = json.dumps(
     {
         "message": "Unprocessable Entity",
         "errors": ["Variable $event of type PullRequestReviewEvent was provided invalid value"],
-        "status": "422",
-    }
-)
-_BAD_COMMIT = json.dumps(
-    {
-        "message": "Unprocessable Entity",
-        "errors": ["The commitOID is not part of the pull request"],
         "status": "422",
     }
 )
@@ -339,26 +325,6 @@ _STDERR_422 = "gh: Unprocessable Entity (HTTP 422)\n"
 
 def _attempt(stdout: str, stderr: str = _STDERR_422) -> Any:
     return post_queue.Attempt(1, stdout, stderr)
-
-
-@pytest.mark.parametrize("stdout", [_UNRESOLVED_LINE, _UNRESOLVED_MANY])
-def test_a_rejection_that_cannot_resolve_the_position_is_told_apart(stdout: str) -> None:
-    """行やファイルを解決できない拒まれ方だけを、退避の契機として見分ける。"""
-    assert post_queue.is_position_unresolved(_attempt(stdout)) is True
-
-
-@pytest.mark.parametrize("stdout", [_BAD_EVENT, _BAD_COMMIT])
-def test_another_rejection_of_the_same_status_is_not_a_reason_to_move(stdout: str) -> None:
-    """判定の値の誤りと基準のコミットの誤りは、退避せず失敗として残す。"""
-    assert post_queue.is_position_unresolved(_attempt(stdout)) is False
-
-
-def test_a_rejection_of_another_status_is_not_a_reason_to_move() -> None:
-    assert post_queue.is_position_unresolved(post_queue.Attempt(1, '{"message":"Not Found"}', "gh: Not Found (HTTP 404)")) is False
-
-
-def test_a_success_is_not_a_rejection() -> None:
-    assert post_queue.is_position_unresolved(post_queue.Attempt(0, "{}", "")) is False
 
 
 @pytest.mark.parametrize("stdout", [_UNRESOLVED_LINE, _BAD_EVENT])
@@ -453,12 +419,7 @@ def test_retry_waits_and_re_runs_until_it_succeeds(
     waits: list[float] = []
     monkeypatch.setattr(post_queue, "run", _run_returning([_RATE, _RATE, _OK], calls))
 
-    result = post_queue.retry(
-        ["gh", "pr", "create"],
-        max_wait=900.0,
-        interval=30.0,
-        sleep=_recording_sleep(waits),
-    )
+    result = post_queue.retry(["gh", "pr", "create"], sleep=_recording_sleep(waits))
 
     assert result is _OK
     assert len(calls) == 3
@@ -476,12 +437,8 @@ def test_retry_returns_the_last_rate_limited_attempt_when_the_wait_cap_is_reache
     responses = [_RATE, _RATE, _RATE, last_rate]
     monkeypatch.setattr(post_queue, "run", _run_returning(responses, calls))
 
-    result = post_queue.retry(
-        ["gh", "pr", "create"],
-        max_wait=90.0,
-        interval=30.0,
-        sleep=_recording_sleep(waits),
-    )
+    policy = post_queue.limits.policy("post-queue.rate-limit")._replace(seconds=90.0, interval=30.0)
+    result = post_queue.retry(["gh", "pr", "create"], policy, sleep=_recording_sleep(waits))
 
     assert result is last_rate
     assert len(calls) == 4
@@ -498,11 +455,8 @@ def test_retry_returns_the_first_rate_limited_attempt_when_interval_is_zero(
     first_rate = post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
     monkeypatch.setattr(post_queue, "run", _run_returning([first_rate], calls))
 
-    result = post_queue.retry(
-        ["gh", "pr", "create"],
-        interval=0,
-        sleep=_recording_sleep(waits),
-    )
+    policy = post_queue.limits.policy("post-queue.rate-limit")._replace(interval=0)
+    result = post_queue.retry(["gh", "pr", "create"], policy, sleep=_recording_sleep(waits))
 
     assert result is first_rate
     assert calls == [["gh", "pr", "create"]]
@@ -871,7 +825,8 @@ def test_other_failures_are_not_transient(attempt: post_queue.Attempt, monkeypat
 
 
 def test_the_wait_for_transient_failures_stays_within_the_rate_limit_retry() -> None:
-    assert 0 < post_queue.TRANSIENT_INTERVAL <= post_queue.TRANSIENT_MAX_WAIT <= 900.0
+    reflush, rate = post_queue.limits.policy("post-queue.transient-reflush"), post_queue.limits.policy("post-queue.rate-limit")
+    assert 0 < reflush.interval <= reflush.seconds <= rate.seconds
 
 
 @pytest.mark.parametrize("failure", _TRANSIENT_FAILURES[:1] + _TRANSIENT_FAILURES[4:6])

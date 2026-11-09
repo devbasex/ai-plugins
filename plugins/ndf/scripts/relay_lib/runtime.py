@@ -33,6 +33,7 @@ _LIB = os.path.join(PKG_ROOT, "lib")
 if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
 import deps  # noqa: E402
+import limits
 
 # ラッパーが使うグループ（pyproject.toml の extra）。import できるかは deps.GROUPS の名前で見る
 GROUPS = ("procs", "locks", "md", "versions", "terminal")
@@ -103,7 +104,7 @@ def sync(project: str, venv: str, inexact: bool = False) -> str:
     for pin in (["--no-managed-python"], []):
         cmd = [uv, "sync", "--frozen", "--quiet", *pin, "--project", project, *extras, *(["--inexact"] if inexact else [])]
         try:
-            p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
+            p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=limits.seconds("relay.runtime-install"))
         except (OSError, subprocess.SubprocessError) as e:
             raise EnvUnavailable(f"uv sync を起動できない（{e}）") from None
         if p.returncode == 0:
@@ -121,7 +122,11 @@ def _reexec(python: str, launcher: str, argv: list[str]) -> None:
 
 def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
     """副命令を動かせる python で動いていれば None（続ける）。起動し直すなら戻らない。
-    環境が無くて副命令を動かさないときは、終了コードを返す（`run` は素通しして戻らない）。"""
+    環境が無くて副命令を動かさないときは、終了コードを返す（`run` は素通しして戻らない）。
+
+    共有の環境を指す `UV_PROJECT_ENVIRONMENT`（古い版の NDF のスクリプトから継いだ値）は、子の claude と hook へ継がせない（#2509 の I6）。"""
+    if deps.is_shared_venv(os.environ.get("UV_PROJECT_ENVIRONMENT")):
+        os.environ.pop("UV_PROJECT_ENVIRONMENT", None)
     if ready():
         os.environ.pop(REEXEC_ENV, None)  # 子の claude と hook へ継がせない
         return None

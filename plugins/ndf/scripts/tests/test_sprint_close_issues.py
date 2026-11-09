@@ -1,7 +1,7 @@
 """sprint-close.py の --issues と --record-pr 0（#1078）・unknown（#1875）。
 
 `pace: fast` の実装 Pull Request は閉じる語を持たないため、閉じる課題を --issues で受ける。最終の検査で
-変更が無く本番を飛ばしたときは、配布の記録を読まずに閉じる（--record-pr 0）。gh の偽物は
+変更が無く本番を飛ばしたときは、リリース記録を読まずに閉じる（--record-pr 0）。gh の偽物は
 test_sprint_close_merge_green.py のものを使う。
 """
 
@@ -67,7 +67,7 @@ def test_record_zero_closes_the_given_issues_without_reading_a_record(repo, gh):
     gh.set(issues={"o/r#1": ["OPEN"], "o/r#2": ["CLOSED"]})
     code, out, err = call(
         "sprint-close.py",
-        ["--final-stage", "配布", "--record-pr", "0", "--issues", "1,2", "--repo", "o/r", "--with-verification"],
+        ["--final-stage", "デプロイ", "--record-pr", "0", "--issues", "1,2", "--repo", "o/r", "--with-verification"],
         gh.env,
         repo,
     )
@@ -78,7 +78,7 @@ def test_record_zero_closes_the_given_issues_without_reading_a_record(repo, gh):
 
 
 def test_record_zero_alone_returns_two(repo, gh):
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "0", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "0", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
     assert gh.get().get("calls", []) == []
 
@@ -88,27 +88,31 @@ def test_record_unknown_keeps_the_given_issues_open_with_a_reason(repo, gh):
     gh.set(issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
     args = ["--record-pr", "unknown", "--issues", "1,2", "--repo", "o/r", "--with-verification"]
     code, out, err = call("sprint-close.py", args, gh.env, repo)
-    assert code == 0 and out["status"] == "ok", (out, err)
+    assert code == 10 and out["status"] == "gate", (out, err)
     res = issues_of(out)
     assert sorted(res) == ["o/r#1", "o/r#2"]
     assert all(i["result"] == "kept_open" and "置き場が分からない" in i["reason"] for i in res.values())
     assert gh.get().get("calls", []) == []  # 記録も状態も読まず、閉じもボードも書かない
     assert out["summary"].startswith("記録の置き場が分からない") and out["metrics"]["closed"] == 0
     gh.set(issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
-    _, zero, _ = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "0", "--issues", "1,2", "--repo", "o/r"], gh.env, repo)
+    _, zero, _ = call(
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "0", "--issues", "1,2", "--repo", "o/r"], gh.env, repo
+    )
     assert zero["summary"] != out["summary"] and "置き場" not in zero["summary"]
 
 
 def test_record_unknown_alone_returns_two(repo, gh):
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "unknown", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "unknown", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped" and "unknown" in out["summary"]
     assert gh.get().get("calls", []) == []
 
 
 @pytest.mark.parametrize("value", ["-1", "none"])
 def test_record_pr_rejects_other_values(repo, gh, value):
-    code, _, _ = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", value, "--issues", "1", "--repo", "o/r"], gh.env, repo)
-    assert code == 3
+    code, _, _ = call(
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", value, "--issues", "1", "--repo", "o/r"], gh.env, repo
+    )
+    assert code == 2
 
 
 def test_issues_are_added_to_the_closing_words_of_the_prs(repo, gh):
@@ -118,7 +122,7 @@ def test_issues_are_added_to_the_closing_words_of_the_prs(repo, gh):
         issues={"o/r#1": ["OPEN"], "o/r#3": ["OPEN"]},
     )
     code, out, err = call(
-        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--issues", "3,1"], gh.env, repo
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--issues", "3,1"], gh.env, repo
     )
     assert code == 0, (out, err)
     assert sorted(issues_of(out)) == ["o/r#1", "o/r#3"]
@@ -127,9 +131,11 @@ def test_issues_are_added_to_the_closing_words_of_the_prs(repo, gh):
 
 def test_issues_alone_do_not_need_the_sprint_prs(repo, gh):
     gh.set(
-        records={"20": {"body": "## 配布の記録\n段階: 本番（2026-09-25 承認）\n版: 1.0.0 → 1.1.0\n", "comments": []}},
+        records={"20": {"body": "## リリース記録\n段階: 本番（2026-09-25 承認）\n版: 1.0.0 → 1.1.0\n", "comments": []}},
         issues={"o/r#5": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--issues", "5"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "デプロイ", "--record-pr", "20", "--repo", "o/r", "--issues", "5"], gh.env, repo
+    )
     assert code == 0, (out, err)
     assert issues_of(out)["o/r#5"]["result"] == "closed"

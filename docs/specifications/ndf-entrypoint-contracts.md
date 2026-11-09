@@ -3,7 +3,7 @@
 ## 概要
 
 NDF のエントリポイントが受け取るもの（引数・環境変数・`.ndf/` の設定のキー・標準入力）と返すもの（標準出力の形・
-書くファイル・終了コードとその意味）は、配布物の `plugins/ndf/contracts/` の 1 か所にある（契約の一覧）。
+書くファイル・終了コードとその意味）は、リリース対象の `plugins/ndf/contracts/` の 1 か所にある（契約の一覧）。
 Skill の本文・README・docstring は契約を写さずに指す。コードと契約の一覧の食い違いは、構造チェック
 `scripts/check-ndf-contracts.py` が CI で落とす。
 
@@ -89,7 +89,7 @@ NDF は Skill の手順をスクリプトにしながら育ってきたため、
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/contracts/{entrypoints,files,settings,env}/*.json` | 契約の一覧。配布物に含まれ、実行時にも読める |
+| `plugins/ndf/contracts/{entrypoints,files,settings,env}/*.json` | 契約の一覧。リリース対象に含まれ、実行時にも読める |
 | `plugins/ndf/contracts/index.md` | 読み手と書き手の逆引き（生成物） |
 | `scripts/check-ndf-contracts.py` | 構造チェックの入口（このリポジトリの CI だけで働く） |
 | `scripts/contracts_lib/`（`model`・`extract_py`・`extract_sh`・`ratchet`・`draft`・`render`） | 項目の読み込みと形の検査・コードからの抽出・ラチェット・下書き・逆引きの生成 |
@@ -102,7 +102,7 @@ NDF は Skill の手順をスクリプトにしながら育ってきたため、
 
 ```mermaid
 graph TB
-  subgraph dist["plugins/ndf（配布する）"]
+  subgraph dist["plugins/ndf（デプロイする）"]
     C[contracts/*]
     IDX[contracts/index.md]
     D[lib/decl.py]
@@ -147,7 +147,7 @@ import と source で読まれるライブラリである。構造チェック�
 
 **1 項目 1 ファイルの JSON にする。** 並列のプランが別々のエントリポイントを触っても同じファイルを変えず、マージで
 衝突しないためである。形の検査は標準ライブラリだけで書く（CI の `script-structure` のジョブは依存を入れない素の
-`python3` で動く）。**配布物に置く**のは、実行時に `lib/decl.py` が設定の置き場を同じ一覧から読むためである。
+`python3` で動く）。**リリース対象に置く**のは、実行時に `lib/decl.py` が設定の置き場を同じ一覧から読むためである。
 
 **読み手と書き手はエントリポイントの項目だけが持つ。** ファイル・設定・環境変数の項目は自分の属性だけを持ち、
 逆引きは `--render` が `index.md` へ生成する。同じ事実を 2 か所に持たないためである。Skill の本文が読み手のときだけ、
@@ -155,7 +155,7 @@ import と source で読まれるライブラリである。構造チェック�
 
 | 項目 | 置き場 | キー |
 | --- | --- | --- |
-| エントリポイント | `entrypoints/<パスの / を __ にした名前>.json` | `version`（1）・`path`・`summary`・`callers` か `external`（択一）・`args`・`env`・`settings`・`stdin`・`stdout`・`writes`・`reads`・`exit` |
+| エントリポイント | `entrypoints/<パスの / を __ にした名前>.json` | `version`（1）・`path`・`summary`・`callers` か `external`（択一）・`args`・`env`・`settings`・`stdin`・`stdout`・`writes`・`reads`・`exit`・任意の `lease` |
 | 受け渡しのファイル | `files/<name>.json` | `name`・`pattern`（glob）・`kind`・`place`・`skill_readers` |
 | 設定ファイル | `settings/<.ndf/ の下の名前>.json` | `file`・`summary`・`place`・`scope`・`readers`・`keys` |
 | 環境変数 | `env/<名前>.json` | `name`・`set_by`・`summary` |
@@ -167,6 +167,7 @@ import と source で読まれるライブラリである。構造チェック�
 | `settings` | `[{"file": "project.json", "keys": ["test", "ci"]}]`。最上位のキーだけ |
 | `stdin` | `none`・`json`・`text`・`hook-json` |
 | `stdout` | `step-result`（1 行 JSON）・`json`・`kv`（`eval` する KEY=VALUE）・`text`・`markdown`・`none` |
+| `lease` | 持ち主の鍵の宣言。副命令の名前（副命令の無い入口は `""`）→ `{"key": "<鍵の形。{入力の名前} を埋める>", "unit": "run" か "session", "window_seconds": <正の整数>, "release": <真偽値。任意>}`。宣言した入口は `lease_stage.hold` で鍵を取り、生きた持ち主がいれば `stopped`・終了コード 3 で止まる（[ndf-run-state-owner-and-sweep.md](ndf-run-state-owner-and-sweep.md)。#2342） |
 | `exit` | `{"0": "<意味>", ...}`。読み取れなければ `{"unknown": "<理由>"}`（例外の項目 `exit-unknown` が要る） |
 | ファイルの `kind` | `state`・`record`・`result`・`report` |
 | ファイルの `place` | `worktree`・`main`・`tmp`・`state-dir`（XDG の状態の置き場）・`home` |
@@ -262,7 +263,7 @@ python3 scripts/check-ndf-contracts.py --draft <エントリポイントのパ�
 
 **認可に関わる値はチームの設定でもメインディレクトリから読む。** `project.json` の `delivery`・`worktree.json` の
 `production_branch`（キーごとの `keys.<キー>.place: "main"`）と `runtimes.json`（ファイルの `place: "main"`）である。
-Pull Request の変更だけで承認ゲート 2 の判定やランタイムの制限を緩められないようにするためである。
+Pull Request の変更だけでリリース承認ゲートの判定やランタイムの制限を緩められないようにするためである。
 `read_json_setting` は `main` のキーの値をメインディレクトリのファイルの値で上書きし、そこにキーかファイルが無ければ
 キーを消す（呼ばれた木の値で補わない。補うと、メインディレクトリに無いファイルを Pull Request が足すだけで判定を
 緩められる）。メインディレクトリが解けないときと、呼ばれた木がメインディレクトリそのものなら、呼ばれた木の値を読む。
@@ -286,7 +287,8 @@ Pull Request の変更だけで承認ゲート 2 の判定やランタイムの�
 
 **本番のブランチは `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）だけが持つ。** 決め方は
 `lib/repo.py` の `production_of`・`production_branch` の 1 か所で、`supervise_lib/decl.py` と `lib/delivery.py` は
-独自に後退しない（#2097）。`worktree.json` に寄せるのは、ベースブランチと並ぶ値であり、シェル
+独自に後退しない。既定ブランチを解く木も `lib/repo.py` の `first_git_tree` 1 つで選び（宣言を探す木の並びのうち、
+最初に存在する git の木）、まだ作っていない worktree のパスを渡しても既定ブランチへ後退する。`worktree.json` に寄せるのは、ベースブランチと並ぶ値であり、シェル
 （`lib/worktree-branch.sh`）と `project-decl.py write` も既にここを読み書きするためである。
 
 `.ndf/project.json` の `delivery` の行は、本番のブランチ・ベースブランチへのマージで動くことを `channel` で指し、
@@ -313,6 +315,40 @@ suite を 1 つ組んで渡す（#2011）。`test.no_reports`（pytest のプラ
 `.github/workflows/`・ほかのスクリプトを検索して決め、項目の `callers` に書く（テストを除く）。以後は構造チェックが
 `callers` の各ファイルがエントリポイントの名前を含むかを見る（I8）。呼び手の無い関数の棚卸しは `uvx vulture` で
 1 回だけ行う。CI の常設の検査にしないのは、動的な呼び出しの誤検出が多く、例外の項目が増えるためである。
+
+棚卸しは次のコマンドで行う（vulture 2.16 で確かめた。版で結果が変わりうる）。対象は `plugins/ndf/scripts` と
+`plugins/ndf/skills/*/scripts` の下の `.py` で、テストと実験版を除く。呼び手はテストを除いて数え、テストだけが呼ぶ関数は
+呼び手 0 として、その関数だけを確かめるテストと一緒に消す。
+
+```bash
+uvx vulture plugins/ndf/scripts plugins/ndf/skills/*/scripts scripts/ndf-vulture-keep.txt \
+  --exclude '*/tests/*,*/experimental/*' --min-confidence 60 | grep -E 'unused (function|method)'
+```
+
+出力が 0 行なら、呼び手の無い関数は無い。呼び手が vulture に見えない関数は、残す関数の一覧
+[`scripts/ndf-vulture-keep.txt`](../../scripts/ndf-vulture-keep.txt) に 1 行ずつ載せる。行の形は
+`<名前の式>  # <理由の種類>: <理由の本文>（<定義のあるファイル>）` で、名前の式は関数なら名前、メソッドなら `_.<名前>`
+（`vulture --make-whitelist` の形）である。拡張子が `.txt` なのは、`.py` にすると lint が名前の行を未定義の名前（F821）として
+落とすためである。
+
+| 理由の種類 | 当たる呼ばれ方 |
+| --- | --- |
+| 名前で呼ばれる | `getattr`・`globals()`・名前の辞書で関数を引く |
+| 枠組みが呼ぶ | ライブラリ（urllib・pydantic など）が上書きのメソッドや検証の関数を呼ぶ |
+| 範囲の外から呼ばれる | 棚卸しの対象の外（リポジトリ直下の `scripts/` など）が import して呼ぶ |
+| テストの基盤が呼ぶ | `conftest.py` や、確定仕様が定める契約の検査が呼ぶ |
+| 利用者が手で打つ | 利用者が直に打つ入口 |
+| 呼び手を確かめられない | 名前の検索で呼び出しの形かを決められない |
+
+当たらない呼ばれ方が見つかったら、種類を足してこの表を直す。一覧の古い行は、同じ名前の呼び手の無い関数を棚卸しから隠す。
+棚卸しのたびに、行の括弧のファイルにその名前の `def` があるかを確かめ、無い行を消す。
+
+```bash
+grep -v '^#' scripts/ndf-vulture-keep.txt | while read -r line; do
+  n=$(echo "$line" | sed -E 's/^(_\.)?([A-Za-z0-9_]+).*/\2/'); f=$(echo "$line" | sed -E 's/.*（([^（）]+)）$/\1/')
+  grep -qE "def $n\(" "$f" || echo "古い行: $n（$f）"
+done
+```
 
 ## データ・設定
 
@@ -358,7 +394,7 @@ suite を 1 つ組んで渡す（#2011）。`test.no_reports`（pytest のプラ
 
 ## 関連リンク
 
-- [ndf-production-release-record.md](ndf-production-release-record.md)（本番のブランチを使う本番の配布の記録）
+- [ndf-production-release-record.md](ndf-production-release-record.md)（本番のブランチを使う本番のリリース記録）
 - [ndf-step-result-gaps-and-reading.md](ndf-step-result-gaps-and-reading.md)（結果 JSON の形）
 - [ndf-deps-require-groups-check.md](ndf-deps-require-groups-check.md)（同じ形の構造チェック `check-script-structure.py`）
 - 親の課題 #2335・この仕様の課題 #2336

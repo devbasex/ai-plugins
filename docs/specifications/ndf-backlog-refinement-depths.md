@@ -18,12 +18,12 @@
 | plan に足すキー（`depth`・`owner`・`create`・`reparent`・`policy_verdict`） | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_actions.py` の冒頭 |
 | 材料の宣言の形 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json`（`materials`） |
 | 材料の宣言の案を出す手順 | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
-| 周回の打つ順に待ち時間の調査を並べること | `plugins/ndf/skills/development-workflow/references/loop.md`・`references/waiting.md` |
+| ループの 1 回の打つ順に待ち時間の調査を並べること | `plugins/ndf/skills/development-workflow/references/loop.md`・`references/waiting.md` |
 
 ## 概要
 
 **例（ai-plugins の開発ループ、2026-11-01 時点の値）。** open は 185 件で、そのうち 80 件が後回しのマイルストーンにあった。
-周回ごとの棚卸しは 206〜224 秒・1.41〜1.61 ドルかかり、1 回 10 件では持ち越しが約 160 件まで溜まった。今の形では、周回のまとめは次のように動く。
+ループの 1 回ごとの棚卸しは 206〜224 秒・1.41〜1.61 ドルかかり、1 回 10 件では持ち越しが約 160 件まで溜まった。今の形では、ループの 1 回のまとめは次のように動く。
 
 | 時点 | 振る舞い |
 | --- | --- |
@@ -34,9 +34,9 @@
 | 持ち主の宣言（`review-claim`） | `owner claim --what review --keepalive 5400 --pid $PPID` が宣言を取る。別のセッションの有効な宣言があれば 10 を返し、`review-skipped` が `skipped` の行を残して終わる |
 | 見直し（`review`） | 後回しを除く open の 105 件を、更新の古い順に上限なしで見る。起票は出典つきで 5 件まで。MVV 判定が「従う」でない課題には `needs-decision` が付く |
 | 見直しを終えた | `report --depth review` が報告の土台を組み、`depth record --depth review` が行を足す。`review-release` が宣言を手放す |
-| 次の周回の待ち | conductor は `supervise.py wait` と並べて、`loop sprint` が返す `metrics.research` の 1 行を背景で打つ。調査は記録を書くだけで、課題には触らない |
+| ループの次の 1 回の待ち | conductor は `supervise.py wait` と並べて、`loop sprint` が返す `metrics.research` の 1 行を背景で打つ。調査は記録を書くだけで、課題には触らない |
 
-**コンテキストは 2 つで、関係は顧客 / 供給者である。** 開発ワークフロー（`ndf-workflow`）が顧客で、周回・まとめ・止まる条件・予算を持つ。
+**コンテキストは 2 つで、関係は顧客 / 供給者である。** 開発ワークフロー（`ndf-workflow`）が顧客で、ループの 1 回・まとめ・止まる条件・予算を持つ。
 課題の棚卸し（`ndf-issue-upkeep`）が供給者で、深さ・候補・調査の項目・付け直し・大方針を持つ。開発ループが読むのは、棚卸しの
 起動の判定の終了コードと、深さの記録・調査の費用の記録だけで、深さの中身は知らない。
 
@@ -52,7 +52,7 @@
 | --- | --- |
 | 見直しと大整理は、別の Skill にせず `backlog-refinement` の深さ（`--depth review` / `overhaul`）にする | 区分・見積の段階・`apply` を 1 か所から使え、起票の上限と MVV 判定も 1 つの Skill の中で守れる。入口は `/ndf:backlog-refinement --depth overhaul` |
 | `--depth` を省いたら差分の棚卸しにする | 既存の呼び出し（まとめの `refine`・人の呼び出し）が、そのまま軽い棚卸しで動く。省いたときに 5 つすべてを行うと、指示を直し忘れた呼び出しが重いまま残る |
-| 差分の棚卸しではマイルストーンを設定しない。`no-milestone`・`closed-milestone` の経路は見直しだけが拾う | どのマイルストーンに入れるかは、全体を見ない回では決められない。周回の中で起票した課題は次の周回まで選ばれず、課題が尽きる前に見直しが入るので、着手は止まらない |
+| 差分の棚卸しではマイルストーンを設定しない。`no-milestone`・`closed-milestone` の経路は見直しだけが拾う | どのマイルストーンに入れるかは、全体を見ない回では決められない。ループの 1 回の中で起票した課題はループの次の 1 回まで選ばれず、課題が尽きる前に見直しが入るので、着手は止まらない |
 | 回数と溜まり具合は、深さの記録（`depths.jsonl`）から数える | 棚卸しのたびに 1 行足すので、`--loop` を使わない進め方でも同じ数え方になる。起動しなかった判定も残る |
 | 起動の判定はスクリプト（`depth due`）が行う。まとめのプランでは、大整理と見直しを実行条件つきのステップとして `refine` の後ろに置く | 回数を比べるだけの判断を LLM に任せず、判定の記録の形もそろえる。大整理を先に置くのは、両方が起動したときに組み直した後の課題で順位を付けるため |
 | 持ち主の宣言は、既存の `run_owner`（寿命の窓は引数）と `locks` の上に作る。寿命の窓 900 秒・生きている印 120 秒 | 同じ役割の部品を 2 つ作らない。窓を 24 時間にすると、中断した持ち主の引き取りまでが長すぎる |
@@ -61,15 +61,15 @@
 | 待ち時間の調査はスクリプト（`research run`）が 1 項目ずつ `claude -p` を起こす | 止める時点・空きの判定・上限・記録の形をスクリプトが持ち、LLM には 1 項目の調べと要約だけを任せる |
 | 課題の一覧への書き込み（起票・付け直し）は `apply` に寄せる | 深さ・持ち主・件数の上限・出典と MVV の当たる所とラベル・前の状態の記録を 1 か所で確かめられる |
 | 利用の記録は、スクリプトが宣言のコマンドを打ち、マスクと `secret_redact` を通した集計値だけを LLM へ渡す。宣言が無ければ何も読まない | 範囲の外を読まないことを、手順の文ではなくコードで守る。何を集計値とみなすかは、プロジェクトごとに機械で決められない |
-| 1 回の見直しの起票は既定 5 件まで。MVV 判定が「従う」でない課題には既存の `needs-decision` を付ける | 見直しの間の 3 周回で着手するのは 6〜9 件なので、起票が着手を上回らない。順位付けと選定は `needs-decision` をすでに外すので、新しい除外は要らない |
+| 1 回の見直しの起票は既定 5 件まで。MVV 判定が「従う」でない課題には既存の `needs-decision` を付ける | 見直しの間の 3 ループの 1 回で着手するのは 6〜9 件なので、起票が着手を上回らない。順位付けと選定は `needs-decision` をすでに外すので、新しい除外は要らない |
 | 見直しの候補は上限で切らず、更新の古い順に並べる | 持ち越しが約 160 件あり、10 件ずつでは追いつかない |
-| 選べる課題が尽きたら、止まる前に見直しを 1 回だけ挟む（`review_first`）。答えを待つ作業（保留の周回か、オーガナイザーへ送って答えの無い設計の承認）が残るときは挟まず `waiting_only` で止まる | 調査からの起票を試してから止まる。1 回に限るのは、起票が `needs-decision` に回り続けると見直しと選定の間を回り続けるため |
-| 溜まり具合の閾値は open の増加 30%・持ち越しが上限の 10 倍・型の割合 30%・3 回の連続 | 1 本のループ（4 周回）と 2026-11-01 の分類（最多の型 A が不具合の 31%）から置いた値で、最初の 3 回の見直しの `depths.jsonl` で見直す |
+| 選べる課題が尽きたら、止まる前に見直しを 1 回だけ挟む（`review_first`）。答えを待つ作業（保留したループの 1 回か、オーガナイザーへ送って答えの無い設計の承認）が残るときは挟まず `waiting_only` で止まる | 調査からの起票を試してから止まる。1 回に限るのは、起票が `needs-decision` に回り続けると見直しと選定の間を回り続けるため |
+| 溜まり具合の閾値は open の増加 30%・持ち越しが上限の 10 倍・型の割合 30%・3 回の連続 | 1 本のループ（4 ループの 1 回）と 2026-11-01 の分類（最多の型 A が不具合の 31%）から置いた値で、最初の 3 回の見直しの `depths.jsonl` で見直す |
 | 材料は `.ndf/project.json` の `materials`、頻度と上限は `.ndf/backlog.json` の `depths` に置く | 材料の宣言は解析の 3 手（measure → 答え → write）と「手で書いた値を変えない」規則を使える。頻度は `candidate_limit` と同じ棚卸しの調整の値である |
 | ライブラリは `seeds.libraries` に宣言したものだけを調べ、1 行を「変化」と「競合」の 2 つの項目にする | すべての依存を調べると、費用が依存の数に比例して増える |
 | 付け直しでは、最初の書き込みの前に対象の全件の前の状態を `before.json` に書き、戻しは 1 つのコマンドにする | 1 件ずつ書くと、書き込みの途中で落ちたときに前の状態の無い課題が残る |
 | 調査の記録のファイル名は、英数字でない名前に元の名前のハッシュを足す | 英数字以外を `_` に置き換えるだけでは、日本語の名前どうしが同じファイル名になり、記録が上書きされる |
-| 調査の費用は、結果を捨てた呼び出しも含めて呼び出しごとに `calls.jsonl` へ残す | 支払った費用を予算に数える。背景の調査は周回を締めた後にも終わるので、記録から数え直して精算する |
+| 調査の費用は、結果を捨てた呼び出しも含めて呼び出しごとに `calls.jsonl` へ残す | 支払った費用を予算に数える。背景の調査はループの 1 回を締めた後にも終わるので、記録から数え直して精算する |
 | 大整理の固定の入力は、2026-11-01T04:23Z 時点の open の一覧を作り直したもので、`count` の値だけを試験で縛る | 大方針（#2335）のときの分類の記録はリポジトリに無い。分類は LLM の判断で、同じ文字列は返らない |
 
 ## 仕様
@@ -116,7 +116,7 @@
 | 課題を起票した | `apply`（`create`） | `apply` の結果の `created`・見直しの報告 |
 | 課題を柱の子へ付け直した | `apply`（`reparent`） | 付け直しの記録・大整理の報告 |
 | 付け直しを戻した | `revert --run` | 課題の一覧 |
-| 見直し・大整理を終え、持ち主を手放した | `depth record --depth review\|overhaul`・`owner release` | 深さの記録・周回の記録 |
+| 見直し・大整理を終え、持ち主を手放した | `depth record --depth review\|overhaul`・`owner release` | 深さの記録・ループの 1 回の記録 |
 
 ### `upkeep.py` の副命令
 
@@ -125,9 +125,10 @@
 
 | 副命令 | 引数 | 成功 | 失敗・否定 |
 | --- | --- | --- | --- |
-| `candidates` | 既存の引数に `--depth diff\|review`（既定 `diff`） | `diff`: 経路 `diff-path`・`diff-identifier`・`sub-issue`・`commit-subject`・`manual`・`unscored`（と `--all`）。`review`: 上の経路に `no-milestone`・`closed-milestone` と、後回しを除く open の全件（`all`）を足す。上限で切らず、`updated_at` の古い順に並べる（`metrics.limit` は `null`、`metrics.depth` に深さ） | 既存 |
+| `candidates` | 既存の引数に `--depth diff\|review`（既定 `diff`） | `diff`: 経路 `diff-path`・`diff-identifier`・`sub-issue`・`commit-subject`・`manual`・`unscored`（と `--all`。`unscored` は `--since-ref` のコミットの時刻（`metrics.since`）より後に作られた課題だけ）。`review`: 上の経路に `no-milestone`・`closed-milestone` と、後回しを除く open の全件（`all`）を足す。上限で切らず、`updated_at` の古い順に並べる（`metrics.limit` は `null`、`metrics.depth` に深さ） | 既存 |
 | `depth due review\|overhaul` | `--loop`・`--lap`・`--no-issue`・`--manual`・`--open N`（省くと GitHub から数える） | 0。`metrics.trigger` と `values`。`due` の行を足す | 3。起動しない（`not_due` の行と判定の値）。記録や設定が読めないときも 3 で、`values.reason: unreadable` の行を残す |
-| `depth record` | `--depth diff\|review\|overhaul`（必須）・`--event ran\|not_due\|skipped`（既定 `ran`）・`--trigger a,b`・`--run`・`--report <統一 JSON レポート>`・`--loop`・`--lap`・`--sprint`・`--cost`・`--seconds` | 0。1 行を足す | 2 = `--trigger` の値が条件の一覧に無い |
+| `depth record` | `--depth diff\|review\|overhaul`（必須）・`--event ran\|not_due\|skipped`（既定 `ran`）・`--trigger a,b`・`--run`・`--report <統一 JSON レポート>`・`--loop`・`--lap`・`--sprint`・`--cost`・`--seconds`・`--progress <プランの進行の記録>`・`--step <ステップの id>`（既定 `refine`） | 0。1 行を足す。`--progress` を渡すと、そのステップの最後の `kind: step` の行から秒・ドル・言語モデルの名前を写す（`--cost`・`--seconds` を渡せばその値を優先）。読めなければ空のまま 0 | 2 = `--trigger` の値が条件の一覧に無い |
+| `depth compare` | `--since-ref <ref>`・`--seconds-under`・`--cost-under`（必須）・`--count`（既定 3）・`--model`・`--depth`（既定 `diff`） | 0。`<ref>` のコミットの時刻より後の `ran` の行のうち、秒とドルがそろい（外す理由 `no_usage`）、`--model` を渡せば `values.models` がその 1 つだけの（`model`）行を、同じ開発ループ・ループの 1 回（ループの外では同じスプリント）では最後の 1 行にして（`duplicate`）、古い順に `--count` 件の秒とドルの中央値が両方とも基準を下回る。`metrics` に `count`・`needed`・`median_seconds`・`median_cost`・`baseline`・`delta`・`judged` | 1 = 中央値のどちらかが基準を下回らない / 3 = 件数に満たない（判定の保留）/ 2 = 記録か ref を読めない |
 | `causes record` | `--classes <[{number, type, sub}]>`（必須）・`--depth review\|overhaul`（既定 `review`） | 0。行を足す | 2 = 配列でない・型が `cause_types` に無い |
 | `owner claim` | `--what research\|review\|overhaul`（必須）・`--loop`・`--pid`（省くと呼び出し元）・`--keepalive <秒>` | 0（`run`・`taken_from`・`what`、見張りを起こしたら `keepalive_pid`） | 10 = 他の有効な持ち主がいる（`reason: not_owner`・`owner`）/ 3 = 錠を 5 秒で取れない |
 | `owner keepalive` | `--run`・`--pid`・`--seconds`（すべて必須） | 0（止まった理由 `released` / `owner_gone` / `expired`） | — |
@@ -167,7 +168,7 @@
 
 | `id` | 種類 | 中身 | 遷移 |
 | --- | --- | --- | --- |
-| `refine-record` | run | `depth record --depth diff --sprint <名前>` | → `overhaul-due` |
+| `refine-record` | run | `depth record --depth diff --sprint <名前> --progress {state_dir}/progress.jsonl`（`new close` に `--loop`・`--lap` を渡したときは、それも足す。開発ループのまとめの組み立てが渡す） | → `overhaul-due` |
 | `<深さ>-due` | run | `depth due <深さ>` | 3 なら `skip_to` で後へ。0 なら → `<深さ>-claim` |
 | `<深さ>-claim` | run | `owner claim --what <深さ> --keepalive 5400 --pid "$PPID"` | 10 なら → `<深さ>-skipped`。0 なら → `<深さ>` |
 | `<深さ>` | work（`full: true`、`stage` は `棚卸し`、`timeout` 5400） | `/ndf:backlog-refinement --depth <深さ>` を無人で通す。持ち主の実行は `owner status`、起動した条件は `depths.jsonl` から読む。最後に `depth record` と `owner release` を打つ | 成否によらず（`on_fail` も）→ `<深さ>-release` |
@@ -178,11 +179,11 @@
 
 ### 開発ループ
 
-- **`loop select` の `review_first`** は [開発ループの仕様](ndf-workflow-development-loop.md) の選定の手順 6 にある。挟んだ周回は、ループの記録の `review_first`（その時点の周回の数）に残る
+- **`loop select` の `review_first`** は [開発ループの仕様](ndf-workflow-development-loop.md) の選定の手順 6 にある。挟んだループの 1 回は、ループの記録の `review_first`（その時点のループの回数）に残る
 - **`loop sprint` は `metrics.research` を返す。** 中身は `upkeep.py research run --root <メインディレクトリ> --until <done> --queue <done>.plans.json --max 3 --lap <n> --loop <名>`
   の 1 行で、`--max` はまとめの queue の並列の上限 `QUEUE_MAX`（`lib/sprint_loop_gate.py`）と同じ値である。conductor は `wait` と並べて背景で打つ
-- **周回を締めるとき（`close_lap` → `backlog_summary`）**、周回が始まってからの `depths.jsonl` の行を `lap.depths`（`depth`・`event`・`trigger`・`cost`・`seconds`）に写す。
-  `calls.jsonl` のうちこのループのその周回の行を集め、`lap.research`（成功した項目の `items`・`cost`・`seconds`）に入れる。すでに締めた周回も数え直す
+- **ループの 1 回を締めるとき（`close_lap` → `backlog_summary`）**、ループの 1 回が始まってからの `depths.jsonl` の行を `lap.depths`（`depth`・`event`・`trigger`・`cost`・`seconds`）に写す。
+  `calls.jsonl` のうちこのループのそのループの 1 回の行を集め、`lap.research`（成功した項目の `items`・`cost`・`seconds`）に入れる。すでに締めたループの 1 回も数え直す
 - **予算の消費（`consumed`）の費用には、`lap.research.cost` も足す**
 - **`loop status` は「見直しの持ち主」の行と `metrics.review_owner` を出す**（終わった宣言・宣言なしは「なし」）
 
@@ -199,12 +200,12 @@
 | `depth` | `diff` / `review` / `overhaul` |
 | `event` | `ran`（行った）/ `due`（起動を判定した）/ `not_due`（起動しない）/ `skipped`（持ち主になれず飛ばした） |
 | `trigger` | 起動した条件の配列（`count`・`open_growth`・`carry`・`no_issue`・`manual`・`created_over_closed`・`open_rising`・`cause_share`）。`not_due` は空 |
-| `values` | 判定の行は判定に使った値（`count`・`open`・`open_growth`・`carry`・`cause_share: {type, share}`、読めなければ `reason`・`detail`）。`diff` の `ran` の行は `carry`（`candidates.json` の `deferred` の件数） |
+| `values` | 判定の行は判定に使った値（`count`・`open`・`open_growth`・`carry`・`cause_share: {type, share}`、読めなければ `reason`・`detail`）。`diff` の `ran` の行は `carry`（`candidates.json` の `deferred` の件数）と、プランの進行の記録から読めたときの `models`（棚卸しのステップで使った言語モデルの名前を名前の順に並べた配列） |
 | `loop`・`lap`・`sprint` | 空は `--loop` の外 |
 | `run` | 持ち主の実行。差分の棚卸しと判定の行は空 |
 | `open_before`・`open_after`・`closed`・`created` | `--report` の `metrics` から写す。`diff` の `ran` は `candidates.json` の `open` と `apply.json` の `closed` から写す |
 | `skipped_aspects`・`order`・`research` | `--report` の `metrics` にあれば写す |
-| `cost`・`seconds`・`report` | 引数の値 |
+| `cost`・`seconds`・`report` | 引数の値。`--cost`・`--seconds` が無く `--progress` を渡したときは、プランの進行の記録の棚卸しのステップの値（読めなければ空） |
 
 回数は「最後のその深さの `ran` の行より後にある、`diff` の `ran` の行の数」で数える。`open_growth` は、前の見直しの `ran` の行の `open_after` と比べる。
 `carry` は、最後の `diff` の `ran` の行の `values.carry` と、候補の上限 × `carry_factor` を比べる。`created_over_closed` / `open_rising` は、
@@ -339,11 +340,11 @@ classDiagram
 | 起票は上限まで、ラベルと `needs-decision` つき | 同上の `test_review_creates_up_to_the_limit_with_labels_and_decision` |
 | 付け直しの前に前の状態を書き、戻せる。途中で失敗したら戻すコマンドを返す。大方針が従うまで付け直さない | 同上の `test_reparent_writes_before_state_and_reverts` / `test_reparent_failure_reports_the_revert_command` / `test_reparent_waits_for_a_following_policy` |
 | 選べる課題が尽きた最初の選定は `review_first`、見直しの後も 0 件なら `no_issue` で止まる。答えを待つ作業が残れば `waiting_only` で止まる | `plugins/ndf/scripts/tests/test_sprint_loop.py`（`test_no_candidates_is_no_issue_and_all_excluded_is_outside_mvv`） |
-| 周回の記録に深さの行と調査の費用が入り、調査の費用が予算に数えられる | 同上の `test_lap_records_depths_and_research_and_counts_research_in_the_budget` |
+| ループの 1 回の記録に深さの行と調査の費用が入り、調査の費用が予算に数えられる | 同上の `test_lap_records_depths_and_research_and_counts_research_in_the_budget` |
 | まとめのプランで、`refine` の次が `refine-record`、大整理 → 見直しの判定は 3 で飛び、持ち主になれないと `skipped`、本体の成否によらず `release` を通る | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_retro_and_close_once_each_in_order`）・`test_supervise_pace_verify.py` |
 | `vet --kind issue` が課題の本文をプロジェクト MVV と照合する | `plugins/ndf/scripts/tests/test_project_mvv.py`（`test_vet_issue_judges_an_issue_body_against_the_project_mvv`） |
 | `measure` が直接の依存から材料の案を問いで出す | `plugins/ndf/scripts/tests/test_project_decl.py`（`test_measure_proposes_materials_from_direct_dependencies_as_a_question`） |
-| 毎スプリントの棚卸しの所要（秒・ドル）が、206〜224 秒・1.41〜1.61 ドルより短い | 手動確認（リリース後テスト）。変更の後の周回の `depths.jsonl` の `diff` の行の `cost`・`seconds` と比べる |
+| 毎スプリントの棚卸しの所要（秒・ドル）が、206〜224 秒・1.41〜1.61 ドルより短い | 手動確認（リリース後テスト）。デプロイの後、`depth compare --since-ref <デプロイした版のタグ> --seconds-under 206 --cost-under 1.41 --model <言語モデル>` が 0 を返す |
 | 大整理の分類・柱・付け直しの一覧が #2335 と同じ形になる | 手動確認。固定の入力で大整理の手順 1 をやり直し、件数の差を報告に書く |
 
 ## 運用
@@ -354,11 +355,11 @@ classDiagram
 
 ## 関連リンク
 
-- [#2315](https://github.com/devbasex/ai-plugins/issues/2315) — 要求と受け入れ条件（2026-11-01 の利用者の依頼。2026-11-02 の承認ゲート 1 で、置き場・利用の記録の既定・試すプロジェクトを利用者が決めた）
+- [#2315](https://github.com/devbasex/ai-plugins/issues/2315) — 要求と受け入れ条件（2026-11-01 の利用者の依頼。2026-11-02 の設計承認ゲートで、置き場・利用の記録の既定・試すプロジェクトを利用者が決めた）
 - [#2335](https://github.com/devbasex/ai-plugins/issues/2335) — 2026-11-01 の大整理で立てた大方針（大整理の手順の元になった実例）
 - [#2342](https://github.com/devbasex/ai-plugins/issues/2342) — 持ち主の部品 `lib/lease.py`（持ち主の宣言の移り先）
 - [棚卸しを工程表の行にし、1 回の件数と書き込む先に上限を置く](ndf-backlog-refinement-stage.md) — `refine` ステップ・候補の上限・書き込む先の照合
-- [開発ループ（`--loop`）](ndf-workflow-development-loop.md) — 選定の `review_first`・周回の記録・予算
+- [開発ループ（`--loop`）](ndf-workflow-development-loop.md) — 選定の `review_first`・ループの 1 回の記録・予算
 - [課題を根本原因の場所で直す区分（ルートコーズ）](ndf-issue-upkeep-root-cause.md) — 大整理が課題の集まりへ広げた区分
 - [実行をまたいで残る状態: 持ち主と寿命を記録し、終わった実行の残骸を片付ける](ndf-run-state-owner-and-sweep.md) — `run_owner` の寿命の窓と pid の判定
 - [スプリント課題を最終工程の記録を確かめてから閉じる](ndf-sprint-close-final-stage.md) — まとめのプランの並び

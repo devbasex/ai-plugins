@@ -1,8 +1,8 @@
 """tmux の包み（#2346 の決定 3・決定 11）。tmux を呼ぶのはこのモジュールだけである。
 
 名前つきのラッパー 1 本に tmux のセッション 1 つを割り当て、専用のソケット `-L ndf-relay` に置く（利用者の tmux
-サーバに触れない）。使う操作は `new-session`・`has-session`・`list-sessions`・`kill-session` と、`attach-session`
-への exec の 5 つだけである。実行ファイルは `NDF_RELAY_TMUX`（既定は PATH の `tmux`）。ソケットの置き場は tmux の
+サーバに触れない）。使う操作は `new-session`・`has-session`・`list-sessions`・`show-environment`・`kill-session` と、
+`attach-session` への exec の 6 つだけである。実行ファイルは `NDF_RELAY_TMUX`（既定は PATH の `tmux`）。ソケットの置き場は tmux の
 規則のまま（`TMUX_TMPDIR`）で、テストは `TMUX_TMPDIR` を使い捨てのディレクトリへ向ける。
 
 tmux 3.6 で確かめたこと（2026-11-02）: `new-session -d -s <名前>` の重複は終了コード 1 と `duplicate session`、
@@ -58,6 +58,12 @@ def has_session(name: str) -> bool:
     return p is not None and p.returncode == 0
 
 
+def session_gone(name: str) -> bool:
+    """セッション `name` が無いと tmux が答えた（サーバごと無いときも）。tmux に聞けなければ偽。"""
+    p = _tmux("has-session", "-t", f"={name}")
+    return p is not None and p.returncode != 0
+
+
 def sessions() -> dict[str, dict]:
     """在るセッションの {名前: {attached, activity, pid}}。サーバが無ければ空。"""
     p = _tmux("list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{window_activity}\t#{pane_pid}")
@@ -75,6 +81,16 @@ def sessions() -> dict[str, dict]:
             "pid": int(pid) if pid.isdigit() else None,
         }
     return out
+
+
+def session_value(name: str, key: str) -> str | None:
+    """tmux のセッション `name` の環境（起動の `-e` で付いた値。グローバルな環境は含まない）の `key` の値。
+    無い・tmux に聞けないときは None（#2656 の決定 4）。"""
+    p = _tmux("show-environment", "-t", f"={name}", key)
+    if p is None or p.returncode != 0:
+        return None
+    k, sep, v = p.stdout.rstrip("\n").partition("=")
+    return v if sep and k == key else None
 
 
 def kill_session(name: str) -> bool:

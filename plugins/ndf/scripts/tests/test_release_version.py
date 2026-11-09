@@ -1,12 +1,13 @@
-"""配布の版を流す時点に決める（#2164）: 版の判定（lib/release_version.py）とキューの版の差し込み（queue_fill.fill_release_version）。
+"""デプロイの版を流す時点に決める（#2164）: 版の判定（lib/release_version.py）とキューの版の差し込み（queue_fill.fill_release_version）。
 
 一時の bare の origin にベースブランチ develop・本番のブランチ main・タグ `ndf--v<版>` を作り、プランを作った後に
-別のスプリントが版を出した状況を、origin へ版を送って再現する。自分の配布のマージ済みの PR の照会は差し替える。
+別のスプリントが版を出した状況を、origin へ版を送って再現する。自分のデプロイのマージ済みの PR の照会は差し替える。
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,8 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import release_version as rv  # noqa: E402
+import sprint_loop as sl  # noqa: E402
+import sprint_loop_record as sl_record  # noqa: E402
 from supervise_lib import queue, queue_fill  # noqa: E402
 from supervise_lib.paths import state_dir_of  # noqa: E402
 
@@ -86,7 +89,7 @@ class World:
         self.publish(version, "develop", "main", tag=True)
 
     def publish(self, version: str, *branches: str, tag: bool = False) -> None:
-        """別のスプリントの配布を模す: plugin.json を version にしたコミットを branches へ送り、tag なら正式版のタグも送る。"""
+        """別のスプリントのリリースを模す: plugin.json を version にしたコミットを branches へ送り、tag なら正式版のタグも送る。"""
         f = self.repo / "plugins" / "ndf" / ".claude-plugin" / "plugin.json"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps({"version": version}))
@@ -109,7 +112,7 @@ def write_plan(tmp: Path, world: World, name: str = "7-release", channel: str = 
     v = explicit or "{release_version}"
     base = explicit.split("-")[0] if explicit else "{release_base}"
     plan = {
-        "フェーズ": "配布",
+        "フェーズ": "デプロイ",
         "作業場所": f"{world.repo}/.worktrees/release/v{v}",
         "branch": f"release/v{v}",
         "起点": "origin/develop",
@@ -189,7 +192,7 @@ def test_explicit_dev_version_that_is_free_runs_unchanged(tmp_path, world):
 
 
 def test_rerun_keeps_the_recorded_version(tmp_path, world, monkeypatch):
-    """受け入れ条件 7・I3: 流し直しは記録の版を使う。ベースブランチがまだ小さければ照会せず、自分の配布の後なら照会して同じ版。"""
+    """受け入れ条件 7・I3: 流し直しは記録の版を使う。ベースブランチがまだ小さければ照会せず、自分のデプロイの後なら照会して同じ版。"""
     plan = write_plan(tmp_path, world)
     fill(plan)
     rec = record(plan)
@@ -201,7 +204,7 @@ def test_rerun_keeps_the_recorded_version(tmp_path, world, monkeypatch):
 
 
 def test_rerun_redecides_when_another_sprint_took_the_version_first(tmp_path, world, monkeypatch):
-    """決定 8・I9: 記録の版が自分の配布のマージより前に別のスプリントに出ていたら、写しから次の版で埋め直す。"""
+    """決定 8・I9: 記録の版が自分のデプロイのマージより前に別のスプリントに出ていたら、写しから次の版で埋め直す。"""
     plan = write_plan(tmp_path, world)
     fill(plan)
     sd = state_dir_of(str(plan.absolute()))
@@ -260,7 +263,7 @@ def test_unreadable_origin_stops_without_a_record(tmp_path, world, monkeypatch):
     fill(plan)
     rec, text = record(plan), plan.read_text()
     world.publish("10.27.6", "develop", "main", tag=True)
-    own(monkeypatch, None)  # 自分の配布の照会ができない
+    own(monkeypatch, None)  # 自分のデプロイの照会ができない
     err, info = fill(plan)
     assert info["cause"] == "unreadable" and info["unreadable"] == ["pr"] and record(plan) == rec and plan.read_text() == text
 
@@ -310,7 +313,7 @@ def test_prod_plan_without_the_dev_record_stops(tmp_path, world):
 
 
 def test_prod_follows_a_changed_dev_record_only_before_gate_2(tmp_path, world):
-    """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、承認ゲート 2 の前は追い、後は止める。"""
+    """決定 8・I4: 本番の記録の後に開発版の記録の base が変わったら、リリース承認ゲートの前は追い、後は止める。"""
     dev, prod = dev_and_prod(tmp_path, world)
     fill(prod)
     rec_path = state_dir_of(str(dev.absolute())) / queue_fill.VERSION_RECORD
@@ -335,9 +338,115 @@ def test_fill_stage_reports_the_version_of_a_plan_it_did_not_run(tmp_path, world
 
 @pytest.mark.parametrize(("code", "runs"), [(3, True), (0, False)])
 def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code, runs):
-    """実行の条件が配布不要なら、明示の版が既出でも版を照会せずに流す（engine が条件で完了にする）。要るなら従来どおり止める。"""
+    """実行の条件がデプロイ不要なら、明示の版が既出でも版を照会せずに流す（engine が条件で完了にする）。要るなら従来どおり止める。"""
     plan = write_plan(tmp_path, world, explicit="10.27.5-dev.1")
     info = json.loads(plan.read_text())
     plan.write_text(json.dumps({**info, "実行の条件": {"cmd": f"exit {code}", "skip_code": 3}}, ensure_ascii=False))
     skipped, runnable = queue.fill_stage(True, [str(plan)], [])
     assert (runnable == [str(plan)] and skipped == []) if runs else (runnable == [] and skipped[0]["unfilled"] is True)
+
+
+# ---- 開発ループが組むプラン（#2354） ----
+
+
+def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
+    """開発ループと同じコマンドで実物の開発版のプランを組み、ループの 1 回の行を返す（dev_plan・prod_plan を持つ）。"""
+    ndf = world.repo / ".ndf"
+    (ndf / "supervise.json").write_text((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
+    auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
+    (ndf / "pace.json").write_text(json.dumps({"version": 1, "auto": auto}))
+    d = tmp / "lap"
+    d.mkdir()
+    (d / "mvv.md").write_text("## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n")
+    lap = {
+        "versions": {"dev": dev, "prod": prod},
+        "state_path": str(d / "state.json"),
+        "sprint": "s1",
+        "dir": str(d),
+        "out": str(d / "sprint"),
+        "mode": "standard",
+        "milestone": "01 近い",
+        "selection": [{"number": 11, "decision": sl_record.SELECTED}],
+    }
+    rec = {"name": "l1", "waiting": []}
+    root = str(world.repo)
+    gate = [sys.executable, str(sl.SPRINT_STATE), "gate", lap["state_path"], "MVV", "--what", "MVV を承認"]
+    for cmd in (sl.sprint_state_init_argv(root, rec, lap, [11]), gate, sl.new_sprint_argv(root, rec, lap, list(extra))):
+        p = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout + p.stderr
+    index = json.loads((Path(lap["out"]) / "sprint.json").read_text())["ステージ"]
+    return {**lap, "dev_plan": sl.stage_plan(index, "開発版"), "prod_plan": sl.stage_plan(index, "本番")}
+
+
+def version_field(lap: dict) -> dict:
+    return json.loads(Path(lap["dev_plan"]).read_text())["版"]
+
+
+def test_loop_plan_without_dev_holds_no_version_number(tmp_path, world):
+    """受け入れ条件 1: --dev なしで組むとプランにも sprint.json にも版数が無い。"""
+    lap = looped(tmp_path, world)
+    assert version_field(lap)["明示"] is None
+    for f in (lap["dev_plan"], lap["prod_plan"], Path(lap["out"]) / "sprint.json"):
+        assert not re.search(r"\d+\.\d+\.\d+", Path(f).read_text())
+
+
+def test_loop_plan_without_dev_takes_the_next_free_version(tmp_path, world):
+    """受け入れ条件 3: 組んだ後に別のスプリントが版を出しても、作り直さずに次に空いている版で埋まる。"""
+    lap = looped(tmp_path, world)
+    world.publish("10.27.6", "develop", "main", tag=True)
+    plan = Path(lap["dev_plan"])
+    assert fill(plan) == (None, None)
+    assert record(plan)["version"] == "10.27.7-dev.1" and record(plan)["how"] == "decided"
+    assert queue_fill.recorded_version(lap["dev_plan"]) == "10.27.7-dev.1"
+
+
+def test_loop_plan_without_dev_redecides_on_a_rerun(tmp_path, world, monkeypatch):
+    """受け入れ条件 4: 記録の版を別のスプリントが先に出すと、ループの 1 回を止めずに決め直す。"""
+    lap = looped(tmp_path, world)
+    plan = Path(lap["dev_plan"])
+    fill(plan)
+    (state_dir_of(str(plan.absolute())) / "state.json").write_text('{"log": [{"id": "bump", "exit": 3}]}')
+    world.publish("10.27.6", "develop", "main", tag=True)
+    own(monkeypatch, False)
+    assert fill(plan) == (None, None)
+    assert record(plan)["version"] == "10.27.7-dev.1" and len(record(plan)["history"]) == 1
+
+
+def test_loop_plan_with_dev_stays_explicit_and_stops_when_taken(tmp_path, world):
+    """受け入れ条件 5: --dev の版が既出なら流さず taken になる。"""
+    lap = looped(tmp_path, world, dev="10.27.5-dev.1", prod="10.27.5")
+    assert version_field(lap)["明示"] == "10.27.5-dev.1"
+    why, info = fill(Path(lap["dev_plan"]))
+    assert why and info["cause"] == "taken"
+
+
+def test_loop_plan_takes_the_level_after_the_separator(tmp_path, world):
+    """受け入れ条件 8: `--` より後の --level が開発版のプランの上げ幅になる。"""
+    assert version_field(looped(tmp_path, world, extra=("--level", "minor")))["上げ幅"] == "minor"
+
+
+def test_recorded_version_reads_only_a_usable_record(tmp_path, world):
+    """読み取りは記録が無い・壊れている・版が文字列でないときも例外を投げず、書かない。"""
+    plan = write_plan(tmp_path, world)
+    assert queue_fill.recorded_version(None) is None and queue_fill.recorded_version(str(plan)) is None
+    fill(plan)
+    f = state_dir_of(str(plan.absolute())) / queue_fill.VERSION_RECORD
+    kept = f.read_text()
+    assert queue_fill.recorded_version(str(plan)) == "10.27.6-dev.1" and f.read_text() == kept
+    for broken in ("{", "[]", '{"version": 1}'):
+        f.write_text(broken)
+        assert queue_fill.recorded_version(str(plan)) is None
+
+
+@pytest.mark.parametrize(
+    "report, want",
+    [("- 結果: 完了\n", True), ("- 結果: 関門\n", False), ("- 結果: 止まった\n", False), ("本文だけ\n", False), (None, False)],
+)
+def test_plan_finished_reads_the_result_of_the_report(tmp_path, world, report, want):
+    plan = write_plan(tmp_path, world)
+    if report is not None:
+        sd = state_dir_of(str(plan.absolute()))
+        sd.mkdir(parents=True, exist_ok=True)
+        (sd / "report.md").write_text(report)
+    assert queue_fill.plan_finished(str(plan)) is want
+    assert queue_fill.plan_finished(None) is False

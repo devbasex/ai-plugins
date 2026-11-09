@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/monitor_loop.py", "name": "_initialize_monitor", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: 担当の pid ファイルが現れるのを待つ"}

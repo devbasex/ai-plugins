@@ -131,6 +131,7 @@
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
@@ -138,22 +139,29 @@
     "NDF_CLAUDE_ACCOUNT",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
+    "NDF_LEASE_DIR",
     "NDF_LOCK_DIR",
     "NDF_MVV_STATE_DIR",
     "NDF_PRESENTATION_DIR",
+    "NDF_RUNTIME_SESSION",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_SKIP_AUTH_CHECK",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
     "NDF_SUPERVISE_MODEL",
-    "NDF_WORKTREE_BASE"
+    "NDF_WORKTREE_BASE",
+    "UV_PROJECT_ENVIRONMENT",
+    "WT_DOCKER_COMMAND",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies"
+        "ndf_policies",
+        "test"
       ]
     },
     {
@@ -167,11 +175,14 @@
   ],
   "stdin": "none",
   "stdout": "kv",
-  "writes": [],
+  "writes": [
+    "lease-json"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い: 持ち主の鍵を別の実行が持っている（status stopped）"
   },
   "callers": [
     "plugins/ndf/conftest.py",
@@ -179,5 +190,12 @@
     "plugins/ndf/scripts/hook_lib/worktree.py",
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/clock.py"
-  ]
+  ],
+  "lease": {
+    "init": {
+      "key": "cross-review:pr={pr}",
+      "unit": "run",
+      "window_seconds": 86400
+    }
+  }
 }

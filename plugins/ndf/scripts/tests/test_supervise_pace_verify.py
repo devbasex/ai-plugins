@@ -1,4 +1,4 @@
-"""経路 merge / promote の pace: auto / fast（#1457）: 承認ゲート 2 の前に導入の確認（<節>.verify）を 1 度走らせる。
+"""経路 merge / promote の pace: auto / fast（#1457）: リリース承認ゲートの前に導入の確認（<節>.verify）を 1 度走らせる。
 
 起点 develop・本番 main で release.form を持たないリポジトリ（project-trygroup-prd の形）で、昇格のプランの先頭の verify と、
 経路 merge だけのときの「導入の確認」のステージ、verify-facts の承認資料を見る。実機の claude と gh は呼ばない。
@@ -23,7 +23,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib import queue  # noqa: E402
+from supervise_lib import queue, release_templates  # noqa: E402
 from test_supervise_pace_auto import load, sprint_state, steps_of  # noqa: E402
 from test_supervise_pace_manual import commit_all  # noqa: E402
 
@@ -147,7 +147,7 @@ def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
 
 def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     """#1529 の AC4・AC5: 導入の確認の承認資料が無ければ、plan の promote はマージせずに落ち、handoff が
-    承認ゲート 2 の by: mvv の記録を外して承認ゲートで終わる。"""
+    リリース承認ゲートの by: mvv の記録を外して承認ゲートで終わる。"""
     repo = make_repo(tmp_path, [STG, PRD])
     state = sprint_state(tmp_path, "auto")
     plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
@@ -155,7 +155,7 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     stub = {
         "verify": "true",  # 承認資料を書かない
         "prepare": "true",
-        "mvv": f"{PY} {SCRIPTS / 'sprint-state.py'} gate {state} '関門 2' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
+        "mvv": f"{PY} {SCRIPTS / 'sprint-state.py'} gate {state} 'リリース承認ゲート' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
         "note": "true",
         "record": f"touch {tmp_path / 'recorded'}",
     }
@@ -167,13 +167,13 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     res = queue.cmd_queue([str(path)], 1, poll=0.05)
     assert res["status"] == "gate" and res["items"][0]["result"] == "関門", res
     assert not (tmp_path / "recorded").exists()
-    assert not [g for g in load(state)["gates"] if g["name"] == "関門 2"]
+    assert not [g for g in load(state)["gates"] if g["name"] == "リリース承認ゲート"]
 
 
 def test_a_passed_verify_keeps_the_order(tmp_path):
     """AC4: 確認が 0 なら今と同じ順で続き、マージの後にリリース記録を書く（#1870）。"""
     res, ran = run_promote(tmp_path, "true")
-    assert ran == ["prepare", "mvv", "note", "promote", "record"] and res["items"][0]["result"] == "完了", res
+    assert ran == ["prepare", "mvv", "note", "promote", "cd-result", "record"] and res["items"][0]["result"] == "完了", res
 
 
 @pytest.mark.parametrize("pace", ["auto", "fast"])
@@ -221,7 +221,7 @@ def test_normal_keeps_the_promote_plan(tmp_path):
     """AC11・I6: --pace 無しの昇格のプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), None)
     ids = [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]]
-    assert ids == ["promote", "promote-approved", "record", "judge-record"]
+    assert ids == ["promote", "promote-approved", "cd-result", "record", "judge-record"]
     assert verify_steps(waves) == [] and "導入の確認" not in [w["name"] for w in waves]
 
 
@@ -265,9 +265,9 @@ def test_gate_2_and_the_template_keep_their_stages(tmp_path):
     import test_supervise_pace_manual as pm
 
     waves = pm.waves_of(tmp_path / "g", [pm.PRD])
-    facts = steps_of(load(wave(waves, "承認ゲート 2")["plans"][0]))["facts"]
+    facts = steps_of(load(wave(waves, "リリース承認ゲート")["plans"][0]))["facts"]
     repo = str((tmp_path / "g" / "repo").resolve())
-    assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "配布" and facts["next"] == "mvv"
+    assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "デプロイ" and facts["next"] == "mvv"
     assert "deploy-facts --root" in facts["cmd"] and "--out {state_dir}/work/approval-deploy.md" in facts["cmd"]
     repo = pa.make_repo(tmp_path / "t", {"auto": pa.AUTO}, form=True)
     p, out = pa.new_sprint(tmp_path / "t", repo, pa.sprint_state(tmp_path / "t", "auto"))
@@ -281,7 +281,8 @@ def test_the_promote_plan_records_after_the_merge(tmp_path, pace):
     """#1870 AC2: 昇格の PR のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
     steps = {s["id"]: s for s in load(wave(waves, "本番")["plans"][0])["steps"]}
-    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "record"
+    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
+    assert steps["cd-result"]["next"] == "record"
     rec = steps["record"]
     assert "release-steps.py record --promote --head develop --base main --prs " in rec["cmd"]
     assert rec["on_fail"] == "judge-record" and rec["pr_from"] == "release_pr_url"
@@ -325,7 +326,21 @@ def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
     """#1875 1875-3: 届けない経路（delivery が []）だけなら今どおり --record-pr 0 で、リリース後テストを置かない。"""
     steps = close_steps(tmp_path, [])
     close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr 0 " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
+    assert "--record-pr 0 " in close["cmd"]
+    assert not {"config-save", "release-verify", "config-check", "config-check-on-fail"} & {s["id"] for s in steps}
+
+
+@pytest.mark.parametrize("rows", [[STG, PRD], [STG]], ids=["record", "queue-record"])
+def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
+    """#2401 の受け入れ条件 2・4（I4・I5）: リリース後テストの前に控えを取り、後で比べる。リリース後テストが失敗しても
+    比べて止まり、比べるステップは on_fail を持たない（0 以外で振り返りへ進まない）。起動指示は導入しないことの要点を持つ。"""
+    by = {s["id"]: s for s in close_steps(tmp_path, rows)}
+    save, check, on_fail = by["config-save"], by["config-check"], by["config-check-on-fail"]
+    assert save["cmd"].endswith("user-config-save --dir {state_dir}")
+    assert check["cmd"] == on_fail["cmd"] and check["cmd"].endswith("user-config-check --dir {state_dir}")
+    assert by["release-verify"]["on_fail"] == "config-check-on-fail" and on_fail["on_exit"] == {"0": "stop"}
+    assert all(s["type"] == "run" and "on_fail" not in s and "stage" not in s for s in (save, check, on_fail))
+    assert release_templates.NO_USER_INSTALL in by["release-verify"]["prompt"]
 
 
 def chain(steps) -> list[str]:
@@ -355,9 +370,9 @@ DEPTH_TAIL = [
 @pytest.mark.parametrize(
     "rows, want",
     [
-        ([STG, PRD], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([STG, PRD], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
         ([], ["merge", "retro", "close", "refine"]),
-        ([STG], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([STG], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
     ],
     ids=["record", "no-delivery", "queue-record"],
 )

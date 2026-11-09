@@ -8,9 +8,9 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
      "areas": [{"name": "...", "common": true, "paths": ["<glob>", ...]}, ...],
      "boundary_paths": ["<glob>", ...],
      "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24},
-     "loop": {"enabled": false, "budget": {"laps": 3, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 3}}
+     "loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
 
-`loop` 節は `read_loop` だけが読む（`read_pace` は検証しない。#2089）。
+`loop` 節は `read_loop` だけが読む（`read_pace` は検証しない。#2089）。`loop.budget` の各単位は、書かない・`null` なら無制限である。
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 階層でもよい。
 """
@@ -29,6 +29,10 @@ EXCLUDED_MODES = ("operation", "documentation")  # fast と auto に入れられ
 
 class PaceError(Exception):
     """宣言が無い・読めない・形が誤っている。"""
+
+
+class PaceMissing(PaceError):
+    """宣言が無い。"""
 
 
 def glob_re(pattern: str) -> re.Pattern:
@@ -57,7 +61,7 @@ def _read_pace_decl(root) -> tuple[Path, object]:
     try:
         return path, json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise PaceError(f"進め方の宣言が無い: {path}")
+        raise PaceMissing(f"進め方の宣言が無い: {path}")
     except (OSError, ValueError) as e:
         raise PaceError(f"進め方の宣言を読めない: {path}: {e}")
 
@@ -90,10 +94,9 @@ def read_pace(root) -> dict:
 
 LOOP_DEFAULTS = {
     "enabled": False,
-    "budget": {"laps": 3, "usd": 60, "hours": 24},
+    "budget": {"laps": None, "usd": None, "hours": None},  # None は無制限。書いた単位だけ効く（#2505）
     "same_failure": 2,
     "max_issues": 3,
-    "release_pending_max": 2,  # 配布待ちと質問待ちの周回を合わせた上限（#2436）
 }  # #2089 の決定 5・8
 
 
@@ -108,15 +111,48 @@ def read_loop(root) -> dict:
     if not isinstance(budget, dict):
         raise PaceError(f"進め方の宣言の loop.budget はオブジェクトで書く: {path}")
     budget = {**LOOP_DEFAULTS["budget"], **budget}
-    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(_is_positive_number(v) for v in budget.values()):
-        raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数で書く: {path}")
+    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(v is None or _is_positive_number(v) for v in budget.values()):
+        raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数か null で書く: {path}")
     out = {"enabled": sec.get("enabled") is True, "budget": budget}
-    for key in ("same_failure", "max_issues", "release_pending_max"):
+    for key in ("same_failure", "max_issues"):
         v = _default(sec, key, LOOP_DEFAULTS[key])
         if isinstance(v, bool) or not isinstance(v, int) or v < 1:
             raise PaceError(f"進め方の宣言の loop.{key} は 1 以上の整数で書く: {path}")
         out[key] = v
     return out
+
+
+PARALLEL_DEFAULTS = {"plan": 8, "lane": 3}  # 答え待ちの依頼の閾値の既定（#2707 の利用者の指示の値）
+
+
+def read_parallel(root) -> dict:
+    """並列の計画の節（`parallel.answer_limit`）を読み、`{plan, lane, warnings}` を返す。例外を上げない。
+
+    閾値の誤りで計画を止めないため（#2707 の決定 6）、宣言が無ければ既定で動き、読めない宣言と正の整数でない値は既定へ戻して
+    `warnings` に残す。"""
+    out, warnings = dict(PARALLEL_DEFAULTS), []
+    try:
+        path, d = _read_pace_decl(root)
+    except PaceMissing:
+        return {**out, "warnings": warnings}
+    except PaceError as e:
+        return {**out, "warnings": [f"{e}。答え待ちの閾値は既定を使う"]}
+    sec = _default(d if isinstance(d, dict) else {}, "parallel", {})
+    limit = _default(sec, "answer_limit", {}) if isinstance(sec, dict) else None
+    if not isinstance(limit, dict):
+        return {**out, "warnings": [f"進め方の宣言の parallel.answer_limit はオブジェクトで書く: {path}。既定を使う"]}
+    for key, default in PARALLEL_DEFAULTS.items():
+        v = limit.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            warnings.append(f"進め方の宣言の parallel.answer_limit.{key} は正の整数で書く（{v!r}）: {path}。既定の {default} を使う")
+        else:
+            out[key] = v
+    return {**out, "warnings": warnings}
+
+
+def over_budget(used: float, limit: float | None) -> bool:
+    """予算の 1 単位に当たったか。`limit` が None（無制限）なら当たらない。ループの 1 回の境の判定と再開の判定が同じこれを読む。"""
+    return limit is not None and used >= limit
 
 
 def _is_positive_number(v) -> bool:

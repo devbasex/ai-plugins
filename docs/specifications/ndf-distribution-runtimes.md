@@ -1,14 +1,14 @@
-# 配布先は Claude Code と Codex で、agy・Kiro CLI は cross 系の相手役としてだけ起動する
+# 導入先のランタイムは Claude Code と Codex で、agy・Kiro CLI は cross 系の相手役としてだけ起動する
 
 マーケットプレイスのすべてのプラグイン（ndf・playwright-kit・mcp-* 10 個）を、Claude Code と Codex へすべての Skill で
 配る。agy と Kiro CLI へは何も配らず、cross-review / cross-refactoring の相手役として、ホスト（Claude Code・Codex）から
 CLI プロセスで起動するだけにする（#2231）。
 
-**この文書が配布先の正本である。** 次の確定仕様に残る agy・Kiro CLI への配布・導入物（`dev.agy/`・`dev.kiro/`・
-`agy-skills.txt`・`kiro-skills.txt`）・その生成と検査・スモークの記述は、配布先を 4 つにしていた時点のもので、
-配布先についてはこの文書が優先する。
+**この文書が導入先のランタイムの正本である。** 次の確定仕様に残る agy・Kiro CLI へのデプロイ・導入物（`dev.agy/`・`dev.kiro/`・
+`agy-skills.txt`・`kiro-skills.txt`）・その生成と検査・スモークの記述は、導入先のランタイムを 4 つにしていた時点のもので、
+導入先のランタイムについてはこの文書が優先する。
 
-| 確定仕様 | 配布先を 4 つにしていた時点の記述 |
+| 確定仕様 | 導入先のランタイムを 4 つにしていた時点の記述 |
 | --- | --- |
 | [runtime-plugin-distribution.md](runtime-plugin-distribution.md) | Kiro CLI・agy の名前空間ディレクトリ、manifest、agy のエージェント定義の生成 |
 | [runtime-plugin-container-smoke.md](runtime-plugin-container-smoke.md) | Kiro の像・adapter・確認 |
@@ -18,27 +18,27 @@ CLI プロセスで起動するだけにする（#2231）。
 
 | ランタイム | 役割 | 届けるもの |
 | --- | --- | --- |
-| Claude Code | 配布先・ホスト | すべてのプラグイン。NDF は `plugins/ndf/manifests/claude-skills.txt` の Skill |
-| Codex | 配布先・ホスト | すべてのプラグイン。NDF は `plugins/ndf/manifests/codex-skills.txt` の Skill |
+| Claude Code | 導入先のランタイム・ホスト | すべてのプラグイン。NDF は `plugins/ndf/manifests/claude-skills.txt` の Skill |
+| Codex | 導入先のランタイム・ホスト | すべてのプラグイン。NDF は `plugins/ndf/manifests/codex-skills.txt` の Skill |
 | agy | 相手役 | 何も配らない |
 | Kiro CLI | 相手役 | 何も配らない |
 
 agy・Kiro CLI のためだけに保っていた導入物・その生成と検査・スモークテスト・リリース後の導入の確認を外し、
-agy・Kiro CLI だけで起きる不具合（Skill の本文の切り詰めなど）の置き場を無くした。相手役の起動経路は配布物を
-読まないため、配布を止めても相手役の振る舞いは変わらない。
+agy・Kiro CLI だけで起きる不具合（Skill の本文の切り詰めなど）の置き場を無くした。相手役の起動経路はリリース対象を
+読まないため、デプロイを止めても相手役の振る舞いは変わらない。
 
 ## 用語
 
-配布先のランタイム・相手役・マニフェスト・ホストの定義は、用語集（[docs/glossary.md](../glossary.md)）にある。
+導入先のランタイム・相手役・マニフェスト・ホストの定義は、用語集（[docs/glossary.md](../glossary.md)）にある。
 
 ## 背景
 
-利用者の指示（2026-10-31）は「claude と codex のみ、すべての plugin を配布する。agy、kiro は配布せず、cross 系で
+利用者の指示（2026-10-31）は「claude と codex のみ、すべての plugin をデプロイする。agy、kiro はデプロイせず、cross 系で
 呼ばれるだけ」である。agy・Kiro CLI へ cross 系をホストとして回せる Skill だけを配る案は採らない。ホストとしての
 使い方を残さないため、相手役に要る Skill は 0 本になる。マニフェストを空のファイルにして導入物の枠を残す案も
 採らない。中身の無い導入物のために生成・検査・スモークを保つことになる。
 
-この変更は配布物の取得元を変える操作（プロジェクト MVV の P1）に当たり、承認ゲート 1 の指示と承認ゲート 2 の承認で行った。
+この変更はリリース対象の取得元を変える操作（プロジェクト MVV の P1）に当たり、設計承認ゲートの指示とリリース承認ゲートの承認で行った。
 
 ## 仕様
 
@@ -47,8 +47,8 @@ agy・Kiro CLI だけで起きる不具合（Skill の本文の切り詰めな�
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | I1 | どのプラグインにも `manifests/agy-skills.txt`・`manifests/kiro-skills.txt`・`dev.agy/`・`dev.kiro/` が無く、`.ndf/supervise.json` の `release.runtimes` は `claude`・`codex` の部分集合である | `scripts/tests/test_distribution_runtimes.py` が落ちる |
-| I2 | Claude Code と Codex の配布物（両マニフェスト・各 `.codex-plugin/plugin.json`・`plugins/ndf/hooks/codex.json`・codex 向けの生成物）は配布先を絞った前と同じである | `build-runtime-plugins.sh --check`・`validate-runtime-plugins.sh`・既存の pytest |
-| I3 | agy・Kiro CLI を相手役にする起動（`plugins/ndf/scripts/lib/launch-cli.sh` の `agy` / `kiro` の分岐、`cross-refactoring/scripts/prepare-worktrees.sh` の手順書の写し先）は配布先と関わらずに動く | 起動の既存の pytest |
+| I2 | Claude Code と Codex のリリース対象（両マニフェスト・各 `.codex-plugin/plugin.json`・`plugins/ndf/hooks/codex.json`・codex 向けの生成物）は導入先のランタイムを絞った前と同じである | `build-runtime-plugins.sh --check`・`validate-runtime-plugins.sh`・既存の pytest |
+| I3 | agy・Kiro CLI を相手役にする起動（`plugins/ndf/scripts/lib/launch-cli.sh` の `agy` / `kiro` の分岐、`cross-refactoring/scripts/prepare-worktrees.sh` の手順書の写し先）は導入先のランタイムと関わらずに動く | 起動の既存の pytest |
 | I4 | 前の版で Kiro CLI へ入れた手元の hook が呼ぶ共通のスクリプト（`plugins/ndf/scripts/hook.py` の `--runtime kiro`・`worktree-guard.sh`・`worktree-session.sh`・`wait-notify.py`）が残る | `worktree/tests/test_guard.py` の Kiro の入力のテスト |
 | I5 | ワークフローのジョブと ruleset の必須のチェックが一致する | `required-checks-check`（`scripts/check-required-checks.py`） |
 
@@ -74,7 +74,7 @@ sequenceDiagram
 - 起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md` にある。相手役に使えるかは
   `.ndf/runtimes.json` と各 CLI の認証で決まる。cross-review の既定の参加者（claude・codex・kiro とホスト、agy は `--include agy`）は変わらない
 
-### 配布物を組み立てて確かめる流れ
+### リリース対象を組み立てて確かめる流れ
 
 ```mermaid
 graph LR
@@ -107,9 +107,9 @@ graph LR
 ### 前の版で agy・Kiro CLI へ入れた利用者の手元
 
 こちらから手元を消す操作はしない（共通原則 C6）。最後に配った版は v10.27.4 である。残し方と消し方の正本は
-`plugins/ndf/README.md` の「agy・Kiro CLI への配布の終了」にある。
+`plugins/ndf/README.md` の「agy・Kiro CLI へのデプロイの終了」にある。
 
-| ランタイム | 配布を止めた後 |
+| ランタイム | デプロイを止めた後 |
 | --- | --- |
 | agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）の絶対パスを指すため、そのまま動く。新しい版は届かない |
 | Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の共通のスクリプトを呼び、それが残る（I4）ため、clone を進めても動く。installer は無くなる |
@@ -131,7 +131,7 @@ Claude Code・Codex へ配る Skill の本文とスクリプトに残る、ホ�
 | 項目 | 内容 |
 | --- | --- |
 | プロジェクト MVV との食い違い | Mission は 4 つのランタイムを挙げる。改訂は #2296 で扱う |
-| 相手役が配布を止めた後も同じ結果を返すか | 起動の経路をコードで読んで判断した。実物はリリース後テストで確かめる |
+| 相手役がデプロイを止めた後も同じ結果を返すか | 起動の経路をコードで読んで判断した。実物はリリース後テストで確かめる |
 
 ## テスト観点
 
@@ -139,7 +139,7 @@ Claude Code・Codex へ配る Skill の本文とスクリプトに残る、ホ�
   `release.runtimes` が `claude`・`codex` に収まることを確かめること。`plugins/mcp/mcp-notion/dev.kiro/` を 1 つ戻すと落ち、
   `release.runtimes` に `kiro` を足すと落ちること
 - `build-runtime-plugins.sh --check`・`validate-runtime-plugins.sh` が agy・Kiro CLI の生成物を求めずに通ること
-- Codex のマニフェスト・`.codex-plugin`・`hooks/codex.json` が配布先を絞った前と同じであること
+- Codex のマニフェスト・`.codex-plugin`・`hooks/codex.json` が導入先のランタイムを絞った前と同じであること
 - 相手役の起動の pytest（`test_lib_launch_cli_runtimes.py`・`cross-review/tests/test_launch_cli_runtimes.py`・`test_launch_agy.py`・
   `cross-refactoring/tests/test_launch_agy_phases.py`・`test_prepare_worktrees.py`）が通ること
 - `worktree/tests/test_guard.py` の Kiro の入力のテストが通ること
@@ -149,7 +149,7 @@ Claude Code・Codex へ配る Skill の本文とスクリプトに残る、ホ�
 
 ## 関連リンク
 
-- [runtime-plugin-distribution.md](runtime-plugin-distribution.md): Claude Code・Codex の配布の形
+- [runtime-plugin-distribution.md](runtime-plugin-distribution.md): Claude Code・Codex のリリースの形
 - [cross-review-participants-and-seats.md](cross-review-participants-and-seats.md): 参加者プール
-- [docs/versioning-and-distribution.md](../versioning-and-distribution.md): 版と配布の正本
+- [docs/versioning-and-distribution.md](../versioning-and-distribution.md): 版とリリースの正本
 - #2231

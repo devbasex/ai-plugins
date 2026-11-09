@@ -13,7 +13,12 @@
 
 届かなければテストを走らせない（メインディレクトリのコードで走った偽の green を出さない）。
 
-CLI（シェルから呼ぶ）:
+テストのステップの経路（`env_for`）は、起こせば直りうる理由で届かないと、テスト環境を 1 度だけ起こして確かめ直す
+（テスト環境の用意。#2567）。起こす対象は宣言のサービスだけで、起動は `worktree-testenv.sh` を通す。起こした・
+起こせなかった記録は `wake_events()` が返す。`discard_testenv` は worktree を消す前に公開を閉じてテスト環境を破棄する。
+`reclaim_testenv` は worktree の消えた割り当てのテスト環境を回収し、結果の行を返す（#2660）。
+
+CLI（シェルから呼ぶ）は起こさない:
 
     python3 container_reach.py probe <worktree> --service <サービス> [--compose-file <パス>]...
 
@@ -24,29 +29,49 @@ CLI（シェルから呼ぶ）:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
+import limits
+import secret_redact
+import worktree_base
+
 TESTENV = Path(__file__).resolve().parent.parent / "worktree-testenv.sh"
 EVIDENCE = ".ndf-evidence"
-EXEC_TIMEOUT = 60  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
+EXEC_TIMEOUT = limits.seconds("container-reach.exec")  # compose exec の上限（秒）。コンテナの中の cat 1 回で足りる
+UP_TIMEOUT = limits.seconds("container-reach.up")
+# 回収の外の上限（秒）。`worktree-testenv.sh` の内側の 300 秒に、打ち切りの猶予 5 秒と worktree レジストリの排他の待ちを足した値で、
+# 回収の予約を持ち続ける上限（`lib/worktree-testenv-sweep.sh` の RECLAIM_HOLD）と同じである（#2660 の決定 7）
+RECLAIM_LIMIT = 330
+STOP_GRACE = limits.seconds("container-reach.stop-grace")  # 打ち切った起動の、SIGTERM から SIGKILL までの猶予（秒）
+TAG_KEPT = 3  # `worktree-testenv.sh down` が基準のタグを消せず、破棄へ進まなかったときの終了コード
+TAIL_CHARS = 300  # 理由へ載せる標準エラーの末尾の文字数（伏せ字の後に数える）
 
 # 作業ディレクトリごとの、到達を確かめた後に足す環境（1 プロセスで 1 回だけ確かめる）
 _CACHE: dict[str, dict[str, str]] = {}
+# 作業ディレクトリごとの、起こそうとして届かなかった理由（1 プロセスで起動は 1 度まで）
+_FAILED: dict[str, "Unreachable"] = {}
+# 起こした・起こせなかった記録（結果の `testenv` の行）
+_EVENTS: list[dict] = []
 
 
 class Unreachable(Exception):
-    """worktree をコンテナへ届けられない。`code` は CLI の終了コード（1 届かない / 2 実行系が無い）。"""
+    """worktree をコンテナへ届けられない。`code` は CLI の終了コード（1 届かない / 2 実行系が無い）。
+    `wakeable` はテスト環境を起こせば直りうるか。"""
 
-    def __init__(self, reason: str, code: int = 1) -> None:
+    def __init__(self, reason: str, code: int = 1, wakeable: bool = False) -> None:
         super().__init__(reason)
         self.reason = reason
         self.code = code
+        self.wakeable = wakeable
 
 
 def docker_command() -> str:
@@ -58,35 +83,13 @@ def compose_env(worktree: str | Path) -> dict[str, str]:
     """`worktree-testenv.sh compose-env` が出す環境。割り当てが無ければ空。"""
     p = subprocess.run(["bash", str(TESTENV), "compose-env", str(worktree)], capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise Unreachable(f"テスト環境の値を得られない: {p.stderr.strip()[:300]}")
+        raise Unreachable(f"テスト環境の値を得られない: {_tail(p.stderr)}")
     env: dict[str, str] = {}
     for line in p.stdout.splitlines():
         key, sep, value = line.partition("=")
         if sep and key:
             env[key] = value
     return env
-
-
-def _exclude_evidence(worktree: Path) -> bool:
-    """共通の git ディレクトリの `info/exclude` へ `.ndf-evidence/` を登録する（`worktree-testenv.sh` と同じ）。"""
-    p = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-    )
-    if p.returncode != 0 or not p.stdout.strip():
-        return False
-    exclude = Path(p.stdout.strip()) / "info" / "exclude"
-    line = f"{EVIDENCE}/"
-    try:
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        text = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-        if line not in text.splitlines():
-            with exclude.open("a", encoding="utf-8") as f:
-                f.write(("" if not text or text.endswith("\n") else "\n") + line + "\n")
-    except OSError:
-        return False
-    return True
 
 
 def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[str] = ()) -> dict[str, str]:
@@ -103,7 +106,7 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
     files = [str(wt / f) for f in compose_files]
     if files and "COMPOSE_FILE" not in env:
         env["COMPOSE_FILE"] = ":".join(files)
-    if not _exclude_evidence(wt):
+    if not worktree_base.add_exclude(wt, f"{EVIDENCE}/"):
         raise Unreachable(f"探りの印を git の無視へ登録できない（{wt}）")
     token = secrets.token_hex(16)
     rel = f"{EVIDENCE}/reach-{token}"
@@ -111,17 +114,7 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
     try:
         mark.parent.mkdir(exist_ok=True)
         mark.write_text(token, encoding="utf-8")
-        p = subprocess.run(
-            [docker, "compose", "exec", "-T", service, "cat", rel],
-            cwd=wt,
-            env={**os.environ, **env},
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=EXEC_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise Unreachable(f"サービス {service} のコンテナが {EXEC_TIMEOUT} 秒で答えない") from None
+        p = _exec_marker_probe(docker, service, env, wt, rel)
     except OSError as e:
         raise Unreachable(f"サービス {service} のコンテナを探れない: {e}") from None
     finally:
@@ -133,15 +126,36 @@ def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[s
             mark.parent.rmdir()
         except OSError:
             pass
+    return _interpret_probe(p, service, env, token)
+
+
+def _exec_marker_probe(docker: str, service: str, env: dict[str, str], wt: Path, rel: str) -> subprocess.CompletedProcess:
+    """コンテナに探りの印 `rel` を読ませた結果を返す。"""
+    try:
+        return subprocess.run(
+            [docker, "compose", "exec", "-T", service, "cat", rel],
+            cwd=wt,
+            env={**os.environ, **env},
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=EXEC_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise Unreachable(f"サービス {service} のコンテナが {EXEC_TIMEOUT} 秒で答えない", wakeable=True) from None
+
+
+def _interpret_probe(p: subprocess.CompletedProcess, service: str, env: dict[str, str], token: str) -> dict[str, str]:
+    """探りの結果を判定する。印が読めれば `env` を返し、読めなければ `Unreachable`。"""
     if p.returncode == 0 and p.stdout.strip() == token:
         return env
     if p.returncode == 0 or "No such file" in p.stdout + p.stderr:
-        raise Unreachable(f"サービス {service} の作業ディレクトリはこの worktree ではない（メインディレクトリを見ている可能性がある）")
+        raise Unreachable(
+            f"サービス {service} の作業ディレクトリはこの worktree ではない（メインディレクトリを見ている可能性がある）", wakeable=True
+        )
     project = env.get("COMPOSE_PROJECT_NAME") or "既定"
-    tail = (p.stderr.strip().splitlines() or [""])[-1][:200]
-    raise Unreachable(
-        f"サービス {service} のコンテナが動いていない（プロジェクト {project}）。worktree-testenv.sh up {wt} で起こす（{tail}）"
-    )
+    tail = secret_redact.redact_output(p.stderr, max_lines=1, max_chars=200)
+    raise Unreachable(f"サービス {service} のコンテナが動いていない（プロジェクト {project}。{tail}）", wakeable=True)
 
 
 def container_suites(root: str | Path) -> list[tuple[str, tuple[str, ...]]]:
@@ -161,19 +175,212 @@ def container_suites(root: str | Path) -> list[tuple[str, tuple[str, ...]]]:
     return out
 
 
+def _tail(text: str) -> str:
+    """標準エラーを伏せ字にしてから末尾だけにする（結果と summary へ載るため、切る前に伏せる）。"""
+    return secret_redact.redact_output(text, max_chars=TAIL_CHARS)
+
+
+def _stop_group(p: "subprocess.Popen[str]") -> None:
+    """`start_new_session` で起こしたプロセスのグループへ SIGTERM、猶予の後も残れば SIGKILL を送る。"""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            return
+        try:
+            p.wait(timeout=STOP_GRACE)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _testenv(*args: str, timeout: float | None = None) -> tuple[int | None, str, str]:
+    """`worktree-testenv.sh` を打ち、(終了コード, 標準出力, 標準エラー) を返す。上限を超えたらグループごと止めて終了コードは None。"""
+    with subprocess.Popen(
+        ["bash", str(TESTENV), *args],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as p:
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _stop_group(p)
+            return None, "", ""
+        return p.returncode, out, err
+
+
+def leftover_volumes(environment: str) -> list[str]:
+    """同じプロジェクト名で残っている名前付きボリューム。読めなければ空を返し、止めない。"""
+    try:
+        p = subprocess.run(
+            [docker_command(), "volume", "ls", "-q", "--filter", f"label=com.docker.compose.project={environment}"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=EXEC_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return p.stdout.split() if p.returncode == 0 else []
+
+
+def _wake(cwd: Path, services: list[str], missed: list[str]) -> tuple[str, list[str]]:
+    """テスト環境を起こし、(環境名, 起こす前から残っていたボリューム) を返す。起こせなければ `Unreachable`。"""
+    names = "、".join(missed)
+    started = time.monotonic()
+    code, out, err = _testenv("env", str(cwd), timeout=UP_TIMEOUT)
+    if code is None:
+        raise Unreachable(f"サービス {names} のテスト環境の割り当てが {UP_TIMEOUT} 秒で終わらなかった")
+    if code != 0:
+        raise Unreachable(f"サービス {names} のテスト環境を起こせない: {_tail(err)}")
+    if not out.strip():
+        raise Unreachable(f".ndf/worktree.json に testenv の宣言が無いため、サービス {names} のテスト環境を起こせない")
+    environment = json.loads(out)["environment"]
+    if "COMPOSE_FILE" not in compose_env(cwd):
+        raise Unreachable(".ndf/worktree.json の localenv.compose_files が無いため、テスト環境を起こせない")
+    reused = leftover_volumes(environment)
+    print(f"テスト環境を起こす: {environment}（サービス {names}。上限 {UP_TIMEOUT} 秒）", file=sys.stderr, flush=True)
+    waits = [arg for service in services for arg in ("--wait-service", service)]
+    # スロットの枯渇の回収は `env` の中で走る。ステップの上限へ足す起動の分は 300 秒だけのため分け合う（#2660 の決定 5）
+    left = UP_TIMEOUT - (time.monotonic() - started)
+    code, _, err = _testenv("up", str(cwd), *waits, timeout=left) if left > 0 else (None, "", "")
+    if code is None:
+        raise Unreachable(f"サービス {names} のテスト環境の起動が {UP_TIMEOUT} 秒で終わらなかった")
+    if code != 0:
+        raise Unreachable(f"サービス {names} のテスト環境を起こせない（終了コード {code}）: {_tail(err)}")
+    return environment, reused
+
+
+def _probe_all(cwd: str | Path, suites: list[tuple[str, tuple[str, ...]]]) -> tuple[dict[str, str], dict[str, Unreachable]]:
+    """すべてのサービスを確かめ、(足す環境, 届かなかったサービスと理由) を返す。"""
+    env: dict[str, str] = {}
+    missed: dict[str, Unreachable] = {}
+    for service, files in suites:
+        try:
+            env.update(probe_worktree(cwd, service, files))
+        except Unreachable as e:
+            missed.setdefault(service, e)
+    return env, missed
+
+
+def _wake_and_recheck(key: str, suites: list[tuple[str, tuple[str, ...]]], missed: dict[str, Unreachable]) -> dict[str, str]:
+    """テスト環境を起こして確かめ直す。起こした・起こせなかったことを記録する。"""
+    started = time.monotonic()
+    event: dict = {"environment": None, "result": "failed"}
+    try:
+        event["environment"], reused = _wake(Path(key), list(dict.fromkeys(s for s, _ in suites)), list(missed))
+        if reused:
+            event["reused_volumes"] = reused
+        env, again = _probe_all(key, suites)
+        if again:
+            raise Unreachable(next(iter(again.values())).reason)
+    except Unreachable as e:
+        event["reason"] = e.reason
+        _FAILED[key] = e
+        raise
+    else:
+        event["result"] = "woken"
+        return env
+    finally:
+        event["seconds"] = round(time.monotonic() - started, 1)
+        _EVENTS.append(event)
+
+
 def env_for(cwd: str | Path) -> dict[str, str]:
     """`cwd` で走らせるテストに足す環境。コンテナの suite が無ければ空。届かなければ `Unreachable`。
 
-    作業ディレクトリごとに 1 プロセスで 1 回だけ確かめ、届いた結果を覚えて使い回す。
+    すべてのサービスを確かめ、起こせば直りうる理由で 1 つでも届かなければ、テスト環境を起こして全部を確かめ直す。
+    作業ディレクトリごとに 1 プロセスで 1 回だけ確かめ、結果を覚えて使い回す（起こせなかった理由も送り直す）。
     """
     key = str(Path(cwd).resolve())
     if key in _CACHE:
         return _CACHE[key]
-    env: dict[str, str] = {}
-    for service, files in container_suites(cwd):
-        env.update(probe_worktree(cwd, service, files))
+    if key in _FAILED:
+        raise _FAILED[key]
+    suites = container_suites(cwd)
+    env, missed = _probe_all(cwd, suites)
+    if missed:
+        for e in missed.values():
+            if not e.wakeable:
+                raise e
+        env = _wake_and_recheck(key, suites, missed)
     _CACHE[key] = env
     return env
+
+
+def wake_events() -> list[dict]:
+    """起こした・起こせなかった記録。`result` は `woken` / `failed`。"""
+    return list(_EVENTS)
+
+
+def discard_testenv(worktree: str | Path) -> tuple[bool, str | None]:
+    """worktree を消す前に公開を閉じ、テスト環境を破棄する。(worktree を外してよいか, 理由) を返す。
+
+    公開を閉じられなければ破棄せず (False, 理由)。閉じる手段は worktree で動くため、外すと閉じられない。
+    破棄できなければ (True, 理由)。時間切れでも基準のタグは破棄の前に消えている。タグを消せなければ
+    破棄せず (False, 理由)。割り当ても公開も無ければコンテナ実行系を呼ばず (True, None)。
+    ボリュームを消すかは `worktree-testenv.sh down` が宣言で決める。
+    """
+    wt = str(Path(worktree).resolve())
+    code, _, err = _testenv("unexpose", wt, timeout=UP_TIMEOUT)
+    if code != 0:
+        line = secret_redact.redact_output(err, max_lines=1) or "公開を閉じる手段が終わらなかった: "
+        why, _, where = line.rpartition(": ")
+        return False, f"テスト環境の公開を閉じられない: {where}（{why}）。close_command を直して worktree-testenv.sh unexpose {wt} を打つ"
+    try:
+        environment = compose_env(wt).get("COMPOSE_PROJECT_NAME")
+    except Unreachable as e:
+        return True, f"テスト環境を破棄できない: {wt}（{e.reason}）"
+    if not environment:
+        return True, None
+    code, _, err = _testenv("down", wt, timeout=UP_TIMEOUT)
+    if code == TAG_KEPT:
+        return False, f"テスト環境の基準のタグを消せない: {environment}（{_tail(err)}）。台帳を直して worktree-testenv.sh down {wt} を打つ"
+    if code != 0:
+        return True, f"テスト環境を破棄できない: {environment}（{_tail(err) or f'{UP_TIMEOUT} 秒で終わらなかった'}）"
+    return True, None
+
+
+def _reclaim_not_run(main_dir: str, reason: str) -> list[dict]:
+    return [{"kind": "testenv-reclaim", "name": main_dir, "result": "not_run", "reason": secret_redact.redact_output(reason)}]
+
+
+def reclaim_testenv(main_dir: str | Path) -> list[dict]:
+    """worktree の消えた割り当てのテスト環境を回収し、結果の行を返す。判定は `worktree-testenv.sh reclaim` が持つ。
+
+    後片付けを止めないよう例外を上げない。上限の超過・読めない結果は `not_run` の 1 行にする。残った割り当てが無ければ空。
+    """
+    main = str(main_dir)
+    try:
+        code, out, err = _testenv("reclaim", main, timeout=RECLAIM_LIMIT)
+    except OSError as e:
+        return _reclaim_not_run(main, f"テスト環境の回収を起動できない: {e}")
+    if code is None:
+        return _reclaim_not_run(main, f"テスト環境の回収が {RECLAIM_LIMIT} 秒で終わらなかった")
+    if code not in (0, 1):
+        return _reclaim_not_run(main, f"テスト環境の回収が終了コード {code} で終わった: {_tail(err)}")
+    if code == 0 and not out.strip():
+        return []  # testenv の宣言が無い
+    try:
+        items = json.loads(out)["items"]
+    except (ValueError, KeyError, TypeError):
+        return _reclaim_not_run(main, f"テスト環境の回収の結果を読めない: {_tail(err)}")
+    if not isinstance(items, list) or not all(isinstance(i, dict) and "result" in i for i in items):
+        return _reclaim_not_run(main, "テスト環境の回収の結果の形が違う")
+    return [{**i, "reason": secret_redact.redact_output(i["reason"])} if "reason" in i else i for i in items]
+
+
+def reclaim_summary(items: list[dict]) -> tuple[dict[str, int], str]:
+    """後片付けの記録から、回収の件数と要約の末尾を返す。回収の行の `result` は作業ツリーの語彙と重ならない。"""
+    rows = [i["result"] for i in items if i["kind"] in ("testenv", "testenv-reclaim")]
+    reclaimed, failed = rows.count("reclaimed"), rows.count("failed") + rows.count("not_run")
+    deferred = rows.count("deferred")
+    metrics = {"reclaimed_testenvs": reclaimed, "reclaim_failed": failed, "reclaim_deferred": deferred}
+    note = f"。テスト環境 {reclaimed} 件を回収した（失敗 {failed} 件・残した {deferred} 件）" if reclaimed or failed or deferred else ""
+    return metrics, note
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,7 +394,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         env = probe_worktree(a.worktree, a.service, a.compose_file)
     except Unreachable as e:
-        print(e.reason, file=sys.stderr)
+        hint = f"。worktree-testenv.sh up {Path(a.worktree).resolve()} で起こす" if e.wakeable else ""
+        print(e.reason + hint, file=sys.stderr)
         return e.code
     for key, value in env.items():
         print(f"{key}={value}")

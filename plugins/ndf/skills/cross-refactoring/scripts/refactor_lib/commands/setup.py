@@ -21,8 +21,7 @@ import jev
 import models as models_lib
 import project_mvv
 import project_decl
-import repo as repo_lib
-import run_owner
+import lease_stage
 import run_state
 import statefile
 import test_strategy as ts
@@ -34,7 +33,8 @@ from .. import baseline as baseline_lib
 from .. import ci_coverage, pr_gate, runtime_decl, template_check, timeline
 from ..paths import (
     github_repo_from_origin,
-    default_worktree_base,
+    prepare_parent,
+    run_root,
     sh,
     state_path,
     tmp_dir_for,
@@ -51,6 +51,7 @@ from ..vocabulary import (
 
 # 状態ファイルの版（#933）。無い状態ファイルは v10.17.x までのラウンド制の形である。
 SCHEMA = 2
+ENTRY = "skills/cross-refactoring/scripts/refactor.py"  # 持ち主の契約を引く入口（プラグインの根からのパス。#2342）
 
 # 廃止した引数（決定 5・決定 24）。この変更を含む版では知らせて無視し、その次の版で外す。
 # 修正の回数（`--max-fix-rounds`）とテスト 1 回の上限（`--test-timeout`）は、想定最大
@@ -426,8 +427,8 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def _emit_run(prep: "_InitPreparation") -> None:
-    """持ち主の記録の実行の識別子と、開始の片付けの結果を出す（#2229）。"""
-    statefile.emit(RUN=prep.run, SWEPT=json.dumps(prep.swept, ensure_ascii=False))
+    """開始の片付けの結果を出す（#2229）。"""
+    statefile.emit(SWEPT=json.dumps(prep.swept, ensure_ascii=False))
 
 
 def _normalize_args(args: argparse.Namespace) -> None:
@@ -474,7 +475,6 @@ class _InitPreparation:
     decl: dict[str, Any]
     ci_coverage: dict[str, Any]
     template_checks: list[dict[str, Any]] = field(default_factory=list)
-    run: str = ""  # 持ち主の記録の実行の識別子（#2229）
     swept: list[dict[str, Any]] = field(default_factory=list)  # 開始の片付けの結果
 
 
@@ -500,28 +500,28 @@ def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
 
 
 def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
-    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の検査を通し、テストの戦略を解く。
     継続的統合のジョブのうち宣言に無いものは知らせるだけで止めない（#464 E2）。状態には新しい実行だけが書く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author, status = _fetch_pr_context(args.pr)
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 
-    root = (
-        pathlib.Path(args.worktree_root).resolve() if args.worktree_root else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
-    )
+    root = pathlib.Path(args.worktree_root).resolve() if args.worktree_root else run_root(repo, args.pr)
     work = root / "work"
     # **Pull Request の状態は作業ディレクトリを用意する前に確かめる**（#1658 I4）。止まった実行は何も作らない。
     reason = pr_gate.init_refusal(args.pr, repo, status)
     if reason:
         die(reason)
-    # 持ち主の終わった残る状態を片付け（開始する rf<n> は見ない）、既存の rf<n> を使ってよいかを決める（#2229）
-    owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。記録を書かない
-    swept, stop = run_state.begin_review(root, getattr(args, "run", None), owned=owned)
+    # 持ち主の鍵を取り（別の実行が持っていれば止まる。#2342）、持ち主の終わった残る状態を片付け（開始する rf<n> は
+    # 見ない）、既存の rf<n> を使ってよいかを決める（#2229）
+    owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。持ち主の鍵を取らない
+    if owned:
+        lease_stage.hold(ENTRY, "init", pr=args.pr)
+    swept, stop = run_state.begin_review(root, owned=owned)
     if stop:
         die(stop)
     _ensure_work_worktree(work, head_branch)
-    run = run_owner.adopt_owner(root, tool="cross-refactoring", pr=args.pr, run=getattr(args, "run", None)) if owned else ""
 
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
     # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。引数の雛形の種別は `--test-kind`（#1483 I1）。
@@ -544,7 +544,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     for line in (coverage := ci_coverage.compare_jobs(decl, work)).lines():
         info(line)
 
-    # **`--scope` の関門は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
+    # **`--scope` の検査は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
     # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
     # テストの種別の suite が無い戦略はテスト整備ラウンドを行わないため、検査を通らない（計画に残す）。
     if strategy.has_kind(ts.TEST):
@@ -566,7 +566,6 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         strategy=strategy,
         decl=decl,
         ci_coverage=coverage.as_state(),
-        run=run,
         swept=swept,
     )
 
@@ -890,7 +889,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         stale = work.with_name(f"work.stale-{time.strftime('%Y%m%d%H%M%S')}")
         work.rename(stale)
         info(f"⚠ 現リポジトリの作業ディレクトリではないため退避しました: {stale}")
-    work.parent.mkdir(parents=True, exist_ok=True)
+    prepare_parent(work)
     subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
     sh(["git", "fetch", "origin", head_branch])
     sh(["git", "worktree", "add", "--detach", str(work), f"origin/{head_branch}"])

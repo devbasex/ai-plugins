@@ -27,12 +27,13 @@ from dataclasses import asdict, dataclass
 from . import runtime, version_dir
 from .claude import DROP_ENV, SETTINGS_FILE
 from .common import LOG_FILE, PID_FILE, PKG_ROOT, env_num, read_text, remove
-from .record import RelayRecord, StartLimit, current_section
+from .record import RelayRecord, SpinGuard, current_section
 from .switch import UsageWatch
 from .terminal import Terminal
 from .version_dir import VersionDir, plugin_version
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
+import limits
 
 SCHEMA = 1
 HANDOVER_FILE = "handover.json"
@@ -52,7 +53,7 @@ REQUIRED = ("shown", "from_dir", "to_dir", "written_at", "claude", "marketplace"
 STATE_KEYS = ("section", "account", "multi", "auth_section")
 NEXT_KEYS = ("args", "cwd", "command", "from_session", "cwd_fallback", "carried", "plan")
 # 環境の用意を含む startup の上限の秒（決定 10。中の uv sync と同じ値）
-PREPARE_TIMEOUT = 600
+PREPARE_TIMEOUT = limits.seconds("relay.handover-prepare")
 
 
 @dataclass
@@ -243,7 +244,7 @@ def elapsed(since: float) -> float:
 class Swapper:
     """`Relay` が混ぜる、ラッパーの入れ替え（旧版の側）と申し送りの状態の復元（新版の側）。
 
-    `Relay` の `dir`・`log`・`term`・`limit`・`section`・`account`・`multi`・`auth_section`・`claude`・`marketplace`・
+    `Relay` の `dir`・`log`・`term`・`section`・`account`・`multi`・`auth_section`・`claude`・`marketplace`・
     `version`・`install_path`・`first_args` を使う。"""
 
     first_args: list[str] = []
@@ -297,10 +298,9 @@ class Swapper:
         )
 
     def _exec(self, base: str, to: str, path: str) -> None:
-        """`count.lock` を放し、端末を入力を捨てずに戻して exec する。失敗したら元へ戻して Skip（exec-failed）。"""
+        """端末を入力を捨てずに戻して exec する。失敗したら元へ戻して Skip（exec-failed）。"""
         python, argv = exec_argv(base, to, self.first_args)
         env = exec_env(path)
-        self.limit.release()
         self.term.restore(keep_input=True)
         sys.stdout.flush()
         sys.stderr.flush()
@@ -309,7 +309,6 @@ class Swapper:
         except OSError as e:
             remove(path)
             self.term.set_raw(keep_input=True)
-            self.limit.take_within()
             raise Skip(EXEC_FAILED, f"{to} を起動できない（{e.strerror or type(e).__name__}）") from None
 
     def _swap_skipped(self, reason: str, running: str, to: str | None, detail: str, t0: float) -> None:
@@ -329,12 +328,12 @@ class Swapper:
         h, shown = read_handover(path)
         if h is None:
             return stop_unreadable(d, shown)
-        relay = cls(h["claude"], d, h["marketplace"], h["version"], Terminal(), StartLimit(os.path.join(d, LOG_FILE)))
+        relay = cls(h["claude"], d, h["marketplace"], h["version"], Terminal(), SpinGuard(os.path.join(d, LOG_FILE)))
         relay.restore_state(h["state"])
         # 新しい方へ印を置いてから古い方の印を消す（I11・決定 7。pid は exec で変わらない）
         inuse = version_dir.claim_inuse()
         if h["from_dir"] != os.path.basename(PKG_ROOT):
-            version_dir.release_inuse(os.path.join(copy_base(), h["from_dir"], f"inuse-{os.getpid()}"))
+            version_dir.release_claims(os.path.join(copy_base(), h["from_dir"]))
         written = h["written_at"]
         relay.log(
             event="reexec",
@@ -356,10 +355,8 @@ class Swapper:
             self.watch = UsageWatch(self) if multi else None
 
     def resume(self, h: dict) -> int:
-        """入れ替えた後: `count.lock` を取り直し（上限は判定し直さない）、申し送りの次のセッションを起動して続ける。"""
+        """入れ替えた後: 再起動ループは判定し直さず、申し送りの次のセッションを起動して続ける。"""
         self.first_args = list(h["first_args"])
-        if not self.limit.take_within():
-            return self.give_up("count-lock", "起動の数を数えるロックが取れない", h["shown"])
         self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
         code = self._start_next_section(SectionInput.from_json(h["next"]), h["shown"])
         if code is not None:

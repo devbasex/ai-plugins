@@ -39,7 +39,9 @@ from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_w
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
+import glossary_banned  # noqa: E402
 import glossary_merge  # noqa: E402
+from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
 import ndf_tracking  # noqa: E402
 
 TOOL = "glossary"
@@ -54,7 +56,6 @@ STRUCTURE_RULES = ("schema", "duplicate", "stale_document")
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
-ASCII_WORD = re.compile(r"^[A-Za-z0-9_\-]+$")
 CODE_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 CODE_SUFFIXES = (".py", ".sh", ".js", ".ts")
 MAX_CODE_BYTES = 1_000_000
@@ -111,6 +112,7 @@ class Declaration:
         self.paths = paths
         self.term_sections = sections
         self.source_paths = source_paths  # 語の正本（terms[].source）に認めるパス。空なら見ない
+        self.banned = glossary_banned.parse_banned(check.get("banned"), DECLARATION, unreadable)
 
 
 def _read_declared(path: Path, label: str):
@@ -262,7 +264,7 @@ def _term_schema_findings(i: int, t: dict, decl: Declaration, ids: list[str], hi
         hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
     elif "pending_source" in t and not isinstance(t["pending_source"], str):
         hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
-    elif decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths):
+    elif decl.source_paths and t.get("source") and "://" not in t["source"] and not pathmatch.path_matches(t["source"], decl.source_paths):
         hit(
             "unconfirmed_source",
             t["term"],
@@ -310,6 +312,8 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             continue
         _term_schema_findings(i, t, decl, ids, hit)
         _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
+        for w in glossary_banned.banned_in_term(t, decl.banned):
+            hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
         if code_of(t):
             ckey = (t["context"], code_of(t))
             if ckey in code_seen:
@@ -344,14 +348,6 @@ def stale_findings(g: dict, decl: Declaration) -> list[dict]:
 
 
 # --- 文書の中の語 --------------------------------------------------------------------
-
-
-def word_pattern(words) -> re.Pattern | None:
-    words = sorted({w for w in words if w}, key=len, reverse=True)
-    if not words:
-        return None
-    parts = [rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])" if ASCII_WORD.match(w) else re.escape(w) for w in words]
-    return re.compile("|".join(parts))
 
 
 def mask_inline_code(line: str) -> str:
@@ -501,11 +497,6 @@ def added_lines(root: Path, base: str, pathspecs: tuple[str, ...] = ()) -> dict[
             n = len(p.read_text(encoding="utf-8", errors="replace").splitlines())
             out[rel] = set(range(1, n + 1))
     return out
-
-
-def declared_path_matches(rel: str, patterns: list[str]) -> bool:
-    """宣言のパスのパターン（git の wildmatch。`*` は `/` をまたがない）に当たるか。"""
-    return pathmatch.path_matches(rel, patterns)
 
 
 # --- 副命令 ----------------------------------------------------------------------------
@@ -669,7 +660,7 @@ def cmd_render(a):
 def _build_word_patterns(g):
     """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
     dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
-    dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
+    dep_re, live_re = word_pattern(dep_words, katakana=True), word_pattern(live_words(g))
     live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
     dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
     return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)
@@ -688,7 +679,7 @@ def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | Non
             targets.append((f, text, None))
     else:
         for rel, lines in sorted(added_lines(root, a.diff).items()):
-            if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
+            if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or pathmatch.path_matches(rel, decl.paths)):
                 continue
             p = root / rel
             if p.is_file():
@@ -714,6 +705,7 @@ def cmd_check(a):
                     items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
                 continue
             items += text_findings(rel, text, wanted, g, decl, dep_re, live_re)
+    items += glossary_banned.banned_findings(a, root, decl.banned, added_lines, lambda w: replacement(g, w))
     for it in items:
         print(f"ERROR: {it['path']}:{it['line']}: {it['rule']}: {it['term']}", file=sys.stderr)
     metrics = {"hits": len(items)}
@@ -774,6 +766,21 @@ def cmd_diff(a):
     emit(result(TOOL, "ok", summary, items, counts))
 
 
+def _merge_source_stages(root, decl, have):
+    """取り込みの途中の段 1〜3 の用語集を読み、検証して合わせた結果を返す。"""
+    versions = []
+    for n in (1, 2, 3):
+        text = git_checked(root, "show", f":{n}:./{decl.source}").stdout if n in have else '{"version": 1}'
+        try:
+            g = parse_glossary(json.loads(text), f"段 {n} の用語集")
+        except ValueError as e:
+            raise unreadable(f"段 {n} の用語集を読めない: {e}")
+        if bad := glossary_merge.bad_keys(g):
+            raise unreadable(f"段 {n} の用語集の {bad}")
+        versions.append(g)
+    return glossary_merge.merge_glossaries(*versions)
+
+
 def cmd_merge(a):
     root = Path(a.root)
     decl = require_declaration(root)
@@ -798,17 +805,7 @@ def cmd_merge(a):
         if not {2, 3} <= have:
             side = "ours" if 2 not in have else "theirs"
             stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
-        versions = []
-        for n in (1, 2, 3):
-            text = git_checked(root, "show", f":{n}:./{decl.source}").stdout if n in have else '{"version": 1}'
-            try:
-                g = parse_glossary(json.loads(text), f"段 {n} の用語集")
-            except ValueError as e:
-                raise unreadable(f"段 {n} の用語集を読めない: {e}")
-            if bad := glossary_merge.bad_keys(g):
-                raise unreadable(f"段 {n} の用語集の {bad}")
-            versions.append(g)
-        merged = glossary_merge.merge_glossaries(*versions)
+        merged = _merge_source_stages(root, decl, have)
         if fail := merged.duplicates or merged.conflicts:
             stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
         g, counts = merged.glossary, merged.counts

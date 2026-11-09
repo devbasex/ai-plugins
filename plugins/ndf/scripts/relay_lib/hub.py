@@ -1,9 +1,9 @@
-"""統括役（#2346）: 同じコンテナの名前つきのラッパーを登録し、tmux で起動し、同時に動かす数を判定する。
+"""リレーハブ（#2346）: 同じコンテナの名前つきのラッパーを登録し、tmux で起動し、同時に動かす数を判定する。
 
-統括役は `hub.lock` の排他を持つ前景のラッパーが兼ねる（決定 1）。仕事は前景のラッパーの thread で行い、
+リレーハブは `hub.lock` の排他を持つ前景のラッパーが兼ねる（決定 1）。仕事は前景のラッパーの thread で行い、
 端末へは書かない（決定 12）。頼む側（端末の 2 本目の `run`・`spawn`・`restart`・Stop hook の起動のブロック）は
-受付箱 `hub/requests/<id>.json` へ依頼を置き、統括役が 0.5 秒ごとに `rename` で受け取って処理し、結果を
-`hub/results/<id>.json` へ書く（決定 4）。登録簿 `registry.json` を書くのは統括役だけである（I4）。
+受付箱 `hub/requests/<id>.json` へ依頼を置き、リレーハブが 0.5 秒ごとに `rename` で受け取って処理し、結果を
+`hub/results/<id>.json` へ書く（決定 4）。登録簿 `registry.json` を書くのはリレーハブだけである（I4）。
 
 状態の読み取り（`scan_wrappers`・`live`）は頼む側の一覧（`hub_client`）と共有する。読むのは作業ディレクトリの今のファイル
 （`relay.lock`・`question`・`log.jsonl`・`name`）だけで、各ラッパーの状態機械には触れない（I5・決定 8）。
@@ -44,6 +44,8 @@ from .common import (
 )
 from .record import _start_rows
 
+import limits  # noqa: E402,I001  common が lib/ を sys.path に置く
+
 HUB_DIR = "hub"
 HUB_LOCK = "hub.lock"
 HUB_JSON = "hub.json"
@@ -53,7 +55,7 @@ RESULTS = "results"
 HUB_LOG = "hub-log.jsonl"
 # 名前の形（I7・決定 13）。tmux はセッション名の `.` を `_` へ置き換え、`:` を対象の区切りに使う
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
-POLL = 0.5
+POLL = limits.value("relay.hub-poll", "interval")
 RESULT_TTL = 600  # 結果のファイルを残す秒数（頼む側が読まずに終わった分を消す）
 
 # 断りの理由（結果の items[].result と hub-log の reason）
@@ -81,8 +83,16 @@ def ensure_dirs() -> None:
 
 
 def max_named() -> int:
-    """同時に動かすラッパーの数の上限（`NDF_RELAY_MAX_NAMED`。既定 3。決定 5）。"""
-    return max(1, int(env_num("NDF_RELAY_MAX_NAMED", 3)))
+    """同時に動かすラッパーの数の上限（レーン数の上限）。マシンの設定 → `NDF_RELAY_MAX_NAMED` → 既定 3 の順で、
+    毎回読む（`relay.py cap` で変えた値をハブの起動し直し無しで使う。#2733 の決定 8）。"""
+    import relay_limit
+
+    return relay_limit.named_cap()[0]
+
+
+def launch_check_seconds() -> float:
+    """起動の後、セッションが残っているかを確かめるまで待つ秒数（`NDF_RELAY_LAUNCH_CHECK`。既定 2）。"""
+    return env_num("NDF_RELAY_LAUNCH_CHECK", 2)
 
 
 def wait_seconds() -> float:
@@ -100,7 +110,7 @@ def name_ok(name) -> bool:
 
 
 def hub_log(event: str, name: str | None = None, reason: str | None = None) -> None:
-    """統括役の記録へ 1 行足す（非機能の運用・保守性）。最初の入力は書かない（I10）。"""
+    """リレーハブの記録へ 1 行足す（非機能の運用・保守性）。最初の入力は書かない（I10）。"""
     import locks  # 外部パッケージ（filelock）を使う。読み込みのときには import しない
 
     try:
@@ -112,12 +122,12 @@ def hub_log(event: str, name: str | None = None, reason: str | None = None) -> N
 
 
 def hub_running() -> bool:
-    """`hub.lock` が持たれていれば統括役が居る。"""
+    """`hub.lock` が持たれていればリレーハブが居る。"""
     return lock_busy(hub_path(HUB_LOCK))
 
 
 def hub_relay_dir() -> str | None:
-    """統括役を兼ねるラッパーの作業ディレクトリ。統括役が居なければ None。"""
+    """リレーハブを兼ねるラッパーの作業ディレクトリ。リレーハブが居なければ None。"""
     if not hub_running():
         return None
     h = load_json(hub_path(HUB_JSON))
@@ -181,7 +191,7 @@ def _last_at(d: str) -> str | None:
 
 
 def scan_wrappers() -> list[Wrapper]:
-    """状態ディレクトリの作業ディレクトリをすべて読む。統括役の置き場（`hub/`）は作業ディレクトリと読まない。"""
+    """状態ディレクトリの作業ディレクトリをすべて読む。リレーハブの置き場（`hub/`）は作業ディレクトリと読まない。"""
     root = state_root()
     out = []
     for entry in sorted(os.listdir(root)) if os.path.isdir(root) else []:
@@ -278,7 +288,7 @@ def spawn_input(req: dict) -> tuple[str, list[str]]:
     return cwd, args
 
 
-# ---------------------------------------------------------------- 統括役
+# ---------------------------------------------------------------- リレーハブ
 
 
 def request_id() -> str:
@@ -301,7 +311,7 @@ class Refusal(NamedTuple):
 
 
 class Hub:
-    """統括役の役目。`claim` で `hub.lock` を取り、`start` で受付箱を読む thread を始める。"""
+    """リレーハブの役目。`claim` で `hub.lock` を取り、`start` で受付箱を読む thread を始める。"""
 
     def __init__(self, held):
         self.held = held
@@ -310,7 +320,7 @@ class Hub:
 
     @classmethod
     def claim(cls) -> Hub | None:
-        """`hub.lock` を待たずに取る。取れなければ None（統括役が居る。AC22）。"""
+        """`hub.lock` を待たずに取る。取れなければ None（リレーハブが居る。AC22）。"""
         try:
             ensure_dirs()
             held = _lock(hub_path(HUB_LOCK), 0)
@@ -336,12 +346,12 @@ class Hub:
                 self.serve_once()
                 if self.stopped.wait(POLL):
                     return
-        except Exception as e:  # noqa: BLE001 — 統括役の例外で前景のラッパーを巻き込まない（決定 12）
+        except Exception as e:  # noqa: BLE001 — リレーハブの例外で前景のラッパーを巻き込まない（決定 12）
             hub_log("failed", None, type(e).__name__)
             self.release()
 
     def cleanup(self) -> None:
-        """古い結果のファイルを消す（統括役が替わった直後）。"""
+        """古い結果のファイルを消す（リレーハブが替わった直後）。"""
         now = time.time()
         for entry in os.listdir(hub_path(RESULTS)):
             p = hub_path(RESULTS, entry)
@@ -352,7 +362,7 @@ class Hub:
                 continue
 
     def serve_once(self) -> None:
-        """受付箱の依頼を古い順に処理する（統括役の居ない間に置かれた依頼も含む）。"""
+        """受付箱の依頼を古い順に処理する（リレーハブの居ない間に置かれた依頼も含む）。"""
         box = hub_path(REQUESTS)
         if not private(box):
             hub_log("refused", None, "受付箱の権限が所有者だけでない")
@@ -440,6 +450,10 @@ class Hub:
             env.update(NDF_RELAY_ROLE=role, NDF_RELAY_PLAN=plan or "")
         why = tmux.new_session(name, cwd, argv, env)
         if why:
+            return self.refuse(kind, name, Refusal(TMUX_FAILED, why, 1))
+        time.sleep(launch_check_seconds())
+        if tmux.session_gone(name):
+            why = f"{name} のセッションが起動の直後に消えた（起動のコマンド: {argv[0]}）"
             return self.refuse(kind, name, Refusal(TMUX_FAILED, why, 1))
         registry[name] = {"session": name, "cwd": cwd, "args": args, "created_at": stamp(), "by": by}
         if role:

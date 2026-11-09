@@ -155,8 +155,24 @@ def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
     """本番チャネルと、その出所。`.ndf/worktree.json` の `production_branch` → 既定ブランチ（`default_branch`）の順。
 
     `decl` を渡せばそれを `worktree.json` の中身として使う（読み直さない）。決まらなければ `(None, 理由)`。
+    `root` が `None`（既定ブランチを解ける木が無い）なら既定ブランチを問い合わせない。
     """
-    wt = read_worktree_decl(root)[0] if decl is None else decl
-    if _branch_value(wt.get("production_branch")):
+    if decl is not None:
+        wt = decl
+    else:
+        wt = read_worktree_decl(root)[0] if root is not None else {}
+    if _branch_value(wt.get("production_branch")) or root is None:
         return production_of(wt, None)
     return production_of(wt, default_branch(root))
+
+
+def first_git_tree(roots) -> Path | None:
+    """木の並びのうち、存在するディレクトリで、メインディレクトリ（`decl.main_dir`）を解ける最初の木。無ければ `None`。
+
+    まだ作っていない worktree のパスを並びの先頭に持つ呼び手が、既定ブランチを存在する木から解くために使う（#2097）。
+    存在しないパスには git を起動しない。
+    """
+    for r in roots:
+        if r and Path(r).is_dir() and decl.main_dir(r) is not None:
+            return Path(r)
+    return None

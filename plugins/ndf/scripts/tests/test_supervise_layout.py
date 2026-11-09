@@ -33,10 +33,13 @@ SUBCOMMANDS = [
     "sync-check",
     "format",
     "sync-title",
+    "review-settled",
 ]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
+    "progress_watch",  # 実装のステップの進みの観測（#2505）
+    "rerun",  # ステップの打ち直しの同じ原因の上限（#2343）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
     "pr_materials",
     "design_stage",
@@ -60,12 +63,13 @@ MODULES = [
     "verify_steps",
     "release_templates",
     "delivery_templates",
+    "sprint_revise",
     "sprint_waves",
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）
     "sprint",
-    "design_merge",  # normal の承認ゲート 1 の後の設計 PR のマージ（#1426）
+    "design_merge",  # normal の設計承認ゲートの後の設計 PR のマージ（#1426）
     "absorb",  # new sprint --absorb の取り込んだ課題（#1426）
     "queue_fill",  # queue の差し込みを前の計画の結果で埋める（queue から分けた）
     "queue",
@@ -75,6 +79,7 @@ MODULES = [
 ]
 # プランの実行の部品（ハンドラー・状態・監視・claude）とプランを作る側は Engine を import しない
 NO_ENGINE = [
+    "progress_watch",
     "decl",
     "plan",
     "limits",
@@ -88,6 +93,7 @@ NO_ENGINE = [
     "templates",
     "release_templates",
     "delivery_templates",
+    "sprint_revise",
     "sprint_waves",
     "sprint_routes",
     "sprint_inputs",
@@ -157,6 +163,17 @@ def test_example_is_a_plan():
     p = run("example")
     plan = json.loads(p.stdout)
     assert p.returncode == 0 and plan["steps"] and "作業場所" in plan
+
+
+def test_example_embeds_no_project_values(tmp_path):
+    """見本にテストのコマンドとブランチ名を埋め込まない（どのリポジトリでも写せる形）。プランの読み込みは通る。"""
+    p = run("example")
+    assert "pytest" not in p.stdout
+    plan = json.loads(p.stdout)
+    assert all("base" not in s for s in plan["steps"] if s["type"] == "pr")
+    f = tmp_path / "plan.json"
+    f.write_text(p.stdout, encoding="utf-8")
+    assert run("expected", str(f)).returncode == 0
 
 
 def test_new_without_required_exits_2():

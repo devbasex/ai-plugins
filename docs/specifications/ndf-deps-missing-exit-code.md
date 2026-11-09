@@ -56,7 +56,7 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 ## 決定と理由
 
 - **依存の欠けは 69 にする。** 69 は `sysexits.h` の `EX_UNAVAILABLE`（必要なものが使えない）で、意味が慣習として
-  通じる。配布物の終了コードで使われておらず、共通の契約（0〜3・10〜29）、エントリポイントが自分で使う値
+  通じる。リリース対象の終了コードで使われておらず、共通の契約（0〜3・10〜29）、エントリポイントが自分で使う値
   （`refactor.py` の 4 など）、supervise の打ち切り（124・125）、シェルの予約（126 以上）のどれとも重ならない。
   小さい空き番号は各スクリプトが 4 から順に足す値と衝突しやすく、意味も運ばない
 - **値の持ち主は `deps.py` の 1 つにし、`step_result.py` はそれを参照する。** 依存の欠けを出すのは `deps._stop` の
@@ -97,8 +97,11 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 | uv を入れられない | `ensure_uv` が uv を見つけられず、入れることもできない | 69 |
 | `uv run` 自身の失敗 | `os.execve` の後に uv が環境を作れない | uv の値（1）。`❌ [ndf deps]` の行は出ず、uv の `error:` の行が出る |
 
-3 つの経路はすべて `deps._stop(msg)` を通り、`_stop` が `❌ [ndf deps] <msg>` を標準エラーへ出して
-`sys.exit(EXIT_DEPS_MISSING)` する。標準出力には何も書かない。
+3 つの経路はすべて `deps._stop(msg)` を通り、`_stop` が `❌ [ndf deps] <msg>` を標準エラーへ出してから、
+実行の核の早い出口（`run_core.exit_early`）を通して `EXIT_DEPS_MISSING` で終える。早い出口は `stopped` の結果 JSON
+（`gaps` の `kind` は `deps`、`name` は import できないグループ。グループが無い経路では `uv`）を、契約の `stdout` が
+`step-result` のエントリポイントなら標準出力へ、呼ぶ側が `NDF_RESULT_FILE` を渡していればそのファイルへ書く。それ以外の
+エントリポイントの標準出力には何も書かない。核を読めない場所（ラッパーのバージョンディレクトリ）では結果を出さずに 69 で終える。
 
 ### 定数
 

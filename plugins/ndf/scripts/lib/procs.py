@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+import limits
 import psutil
 
 CGROUP_ROOT = Path("/sys/fs/cgroup")
@@ -119,6 +120,30 @@ def ancestor_pids(pid: int, limit: int = 64) -> list[int]:
         return []
 
 
+# ランタイム（Claude Code・Codex など）のプロセスの名前の頭。hook の持ち主の探し方（#2229）と同じ並び
+RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
+
+
+def ancestors(pid: int | None = None) -> list[tuple[int, float]]:
+    """pid（既定は自分）の親から順に、祖先の (pid, 開始時刻)。開始時刻を読めない祖先は飛ばす。"""
+    out = []
+    for a in ancestor_pids(os.getpid() if pid is None else pid):
+        started = start_time(a)
+        if started is not None:
+            out.append((a, started))
+    return out
+
+
+def runtime_ancestor() -> tuple[int, float] | None:
+    """自分の親をたどって最初に当たるランタイムのプロセスの (pid, 開始時刻)。見つからなければ None。"""
+    for pid in ancestor_pids(os.getpid()):
+        got = parent_and_name(pid)
+        if got and got[1].lower().startswith(RUNTIME_NAMES):
+            started = start_time(pid)
+            return (pid, started) if started is not None else None
+    return None
+
+
 def child_pids(pid: int, recursive: bool = True) -> list[int]:
     p = _process(pid)
     if p is None:
@@ -127,6 +152,15 @@ def child_pids(pid: int, recursive: bool = True) -> list[int]:
         return [c.pid for c in p.children(recursive=recursive)]
     except psutil.Error:
         return []
+
+
+def count_cmdline(*words: str) -> int:
+    """コマンドラインに `words` をすべて含むプロセスの数。"""
+    found = 0
+    for p in psutil.process_iter(["cmdline"]):
+        line = p.info["cmdline"] or []
+        found += all(any(word in arg for arg in line) for word in words)
+    return found
 
 
 def leads_own_group(pid: int) -> bool:
@@ -138,7 +172,9 @@ def leads_own_group(pid: int) -> bool:
     return pgid == pid and pgid != os.getpgrp()
 
 
-def stop_tree(pid: int, grace: float = 3.0, poll: float = 0.1) -> bool:
+def stop_tree(
+    pid: int, grace: float = limits.seconds("procs.stop-tree"), poll: float = limits.value("procs.stop-tree", "interval")
+) -> bool:
     """pid とその子を止める（SIGTERM → 猶予の後に SIGKILL）。止まった（元から無い）なら真。"""
     root = _process(pid)
     if root is None or pid_is_zombie(pid):
@@ -212,11 +248,43 @@ def cgroup_dir(root: Path = CGROUP_ROOT, proc_cgroup: Path = PROC_SELF_CGROUP) -
     return root
 
 
+def self_cgroup(path: Path = PROC_SELF_CGROUP) -> str:
+    """自分の cgroup の行（`/proc/self/cgroup`）。読めなければ OSError。"""
+    return path.read_text(encoding="utf-8")
+
+
+def _cpu_max(path: Path) -> float | None:
+    """1 つの `cpu.max` が許す CPU の数。上限が無い（`max`）・読めないときは None。"""
+    try:
+        quota, period = path.read_text(encoding="utf-8").split()
+        return None if quota == "max" else int(quota) / int(period)
+    except (OSError, ValueError):
+        return None
+
+
+def _cgroup_levels(directory: Path | None, root: Path) -> list[Path]:
+    """自分から `root` までの cgroup のディレクトリ。親の上限も子に効くため上限はこの全部で読む。`root` の外はそこだけ。"""
+    d = cgroup_dir() if directory is None else Path(directory)
+    return [d, *(p for p in d.parents if p.is_relative_to(root))] if d.is_relative_to(root) else [d]
+
+
+def cgroup_cpu(directory: Path | None = None, root: Path = CGROUP_ROOT) -> float | None:
+    """自分から `root` までの cgroup の `cpu.max` が許す CPU の数の最小。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    limits = [v for v in (_cpu_max(p / "cpu.max") for p in _cgroup_levels(directory, root)) if v is not None]
+    return min(limits, default=None)
+
+
 def _read_int(path: Path) -> int | None:
     try:
         return int(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
+
+
+def cgroup_memory_limit(directory: Path | None = None, root: Path = CGROUP_ROOT) -> int | None:
+    """自分から `root` までの cgroup の `memory.max` の最小（バイト）。どの階層にも上限が無い（`max`）・読めないときは None。"""
+    limits = [v for v in (_read_int(p / "memory.max") for p in _cgroup_levels(directory, root)) if v is not None]
+    return min(limits, default=None)
 
 
 def cgroup_memory(directory: Path | None = None) -> CgroupMemory:
@@ -281,13 +349,3 @@ def swap_io_pages(path: Path = PROC_VMSTAT) -> int | None:
     if pages_in is None or pages_out is None:
         return None
     return pages_in + pages_out
-
-
-def wait_gone(pid: int, timeout: float, poll: float = 0.1) -> bool:
-    """pid が終わる（ゾンビを含む）まで最大 `timeout` 秒待つ。終われば真。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not pid_alive(pid):
-            return True
-        time.sleep(poll)
-    return not pid_alive(pid)

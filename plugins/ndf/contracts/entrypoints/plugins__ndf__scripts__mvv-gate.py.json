@@ -1,7 +1,7 @@
 {
   "version": 1,
   "path": "plugins/ndf/scripts/mvv-gate.py",
-  "summary": "mvv-gate.py: 関門の材料が MVV に従うかを判定し、従えば関門を省いた記録を残す（#1078）。",
+  "summary": "mvv-gate.py: 承認ゲートの材料が MVV に従うかを判定し、従えば承認ゲートを省いた記録を残す（#1078）。",
   "args": {
     "options": [],
     "positionals": [],
@@ -16,6 +16,7 @@
           "--note",
           "--pr",
           "--repo",
+          "--revise-note",
           "--root",
           "--sprint"
         ],
@@ -28,6 +29,7 @@
     "CODEX_HOME",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
@@ -39,10 +41,13 @@
     "NDF_MVV_STATE_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
-    "NDF_SUPERVISE_MODEL"
+    "NDF_SUPERVISE_MODEL",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [
     {
@@ -66,12 +71,14 @@
   ],
   "stdin": "none",
   "stdout": "step-result",
-  "writes": [],
+  "writes": [
+    "revise-json"
+  ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "10": "利用者の承認待ち（status gate。機械のチェックの不成立・MVV 判定の差し戻し・関門の記録を書けない）"
+    "10": "承認ゲート: 利用者の承認待ち（status gate。機械のチェックの不成立・MVV 判定の差し戻し・承認ゲートの記録を書けない）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/README.md",

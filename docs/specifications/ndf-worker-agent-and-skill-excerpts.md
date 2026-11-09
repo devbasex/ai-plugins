@@ -69,7 +69,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 | `development-workflow/SKILL.md` | conductor が `$SCRIPTS` を解いてから supervisor を起動し、進捗記録を絶対パスで書くこと |
 | `plugins/ndf/skills/EXCERPTS.md` | 抜粋の規約。`AUTHORING.md` から 1 文で指す（`AUTHORING.md` は分割の基準の 500 行に達しているため別ファイルにした） |
 | `progress-tracking/SKILL.md` / `references/excerpt.md` | 「呼び方」を進捗記録 1 行にし、抜粋を指す。抜粋は形の見本を兼ねる |
-| 工程 Skill 20 個の末尾の記録の文 | 「この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"` を 1 行打つ」の形。`design` は契機が 2 つあり、2 行を示す。`release-verification` は記録を配布の記録の Pull Request へ投稿した後に打ち、プランのステップとして起動指示が打たないと言うときは打たない |
+| 工程 Skill 20 個の末尾の記録の文 | 「この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"` を 1 行打つ」の形。`design` は契機が 2 つあり、2 行を示す。`release-verification` は記録をリリース記録の Pull Request へ投稿した後に打ち、プランのステップとして起動指示が打たないと言うときは打たない |
 
 ```mermaid
 flowchart TB
@@ -116,7 +116,7 @@ projects-sync.sh <課題番号> <キー> <値>
 
 | キー | 打つ時点 | issue の本文 | ボード | 通過記録 |
 | --- | --- | --- | --- | --- |
-| `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む。`配布` のときは記録の無い必須の工程を結果 JSON の `items` の `kind: "stage-missing"` の要素で返す |
+| `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む。`デプロイ` のときは記録の無い必須の工程を結果 JSON の `items` の `kind: "stage-missing"` の要素で返す |
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
 | `pace` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --pace <値>`（見出し行だけ） | 書かない | 進め方を書く |
 | `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | worktree のフィールド | 読まない |
@@ -153,7 +153,7 @@ projects-sync.sh <課題番号> <キー> <値>
 **PreToolUse の hook がコマンドの文字列から記録のスクリプトの呼び出しを推測して積む形は、取りこぼしと誤記録を生む。**
 推測では、1 回の実行に並べた 2 件目以降・番号を変数で書いた記録・`progress-record.sh` だけの記録・
 3 層の supervisor と `supervise.py` の子プロセスの記録（hook が登録されない）が積まれず、ヒアドキュメントや
-コメントに書いた例が積まれ、配布済みの版の hook が知らない工程名が捨てられた（#452 #487 #580 #459 #961）。
+コメントに書いた例が積まれ、デプロイ済みの版の hook が知らない工程名が捨てられた（#452 #487 #580 #459 #961）。
 本文を書くスクリプトと同じプロセスが同じ引数で積めば、どれも起きない。
 
 | 決定 | 理由 |
@@ -163,7 +163,7 @@ projects-sync.sh <課題番号> <キー> <値>
 | ライブラリは同じプラグインの根の相対（`scripts/../skills/development-workflow/scripts/lib/`）で読み、`cd -P` で実体へ解決しない | 積む処理と工程名の一覧が常に同じ版になる。agy の配置（`dev.agy/scripts` と `dev.agy/skills/development-workflow` はどちらも symlink）でも `scripts/` の 1 つ上に `skills/` がある |
 | 工程名・モード・進め方の一覧は `workflow-common.sh` の 1 か所に置く（`WF_STAGE_MATRIX` / `WF_MODES` / `WF_PACES`） | 工程表は `development-workflow` の持ち物で、工程名とモードごとの分類が同じ行にある。`projects-common.sh` はボードの判定だけを持つ。一致を確かめるテストで 2 つの一覧を残すと、変更のたびに 2 か所を直す |
 | 通過記録へ積むのは本文の書き換えより前に置く | 本文の側には `gh` が無い・課題を取得できない・書き換えが失敗したときの早い終わり方（結果 JSON の `stopped`）が並ぶ。前に置けば、引数のチェックを通った呼び出しは必ず 1 回積む |
-| hook から進捗記録の観測を外す（`wf_parse_sync` を消し、`wf_is_candidate` は `pr merge` / `pulls/<番号>/merge` / `pr create` にだけ当たる） | 積む役目が無くなった hook が進捗記録を見分けると、記録のたびに語の分割の費用がかかる。`配布` の案内は記録のスクリプトの標準出力で同じ AI に届き、hook だと Claude Code で `development-workflow` を起動した会話にしか届かない |
+| hook から進捗記録の観測を外す（`wf_parse_sync` を消し、`wf_is_candidate` は `pr merge` / `pulls/<番号>/merge` / `pr create` にだけ当たる） | 積む役目が無くなった hook が進捗記録を見分けると、記録のたびに語の分割の費用がかかる。`デプロイ` の案内は記録のスクリプトの標準出力で同じ AI に届き、hook だと Claude Code で `development-workflow` を起動した会話にしか届かない |
 
 **`wf_record_progress <slug> <課題番号> <工程名|空> <モード|空> <進め方|空>`**（`workflow-common.sh`）。値は
 引数のチェックを済ませたものを受ける。戻り値は常に 0 である。
@@ -173,7 +173,7 @@ projects-sync.sh <課題番号> <キー> <値>
 | 3 つの値がすべて空 | 何もしない（`worktree` / `plan` / `--note` だけの記録） |
 | `slug` が空・`jq` が無い | どのキーも積まず、標準エラーへ `NOTE:` の 1 行 |
 | それ以外 | 空でないキーを `mode` → `pace` → `stage` の順に `wf_record` で積む。排他はキーごとに取り、取れなかったキーだけを飛ばす（`wf_record` が 1 行出す）。残りのキーは続けて積む |
-| `stage` が `WF_REPORT_STAGE`（`配布`） | 積んだ後に `wf_report` を呼び、出力が `記録なし:` か `条件付き:` を含むときだけ標準出力へ出す。`progress-record.sh` はそれを捕まえ、工程ごとに結果 JSON の `items` の `kind: "stage-missing"` の要素（`result` は `missing` か `conditional`、`reason` に記録し直すコマンド）へ移す |
+| `stage` が `WF_REPORT_STAGE`（`デプロイ`） | 積んだ後に `wf_report` を呼び、出力が `記録なし:` か `条件付き:` を含むときだけ標準出力へ出す。`progress-record.sh` はそれを捕まえ、工程ごとに結果 JSON の `items` の `kind: "stage-missing"` の要素（`result` は `missing` か `conditional`、`reason` に記録し直すコマンド）へ移す |
 
 `progress-record.sh` の鍵は、`--repo` があればその値、無ければ作業ディレクトリの `origin` を畳んだ
 `<所有者>/<リポジトリ>`（`wf_repo_slug`）である。どちらのスクリプトもライブラリを読み込めないときは
@@ -204,7 +204,7 @@ supervisor の守る規則のうち、この仕様に関わるのは 2 つであ
 
 | # | 規則 |
 | --- | --- |
-| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ（リリース後テストだけは、記録を配布の記録の Pull Request へ投稿した後に打つ）。`development-workflow` を起動しない。スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
+| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ（リリース後テストだけは、記録をリリース記録の Pull Request へ投稿した後に打つ）。`development-workflow` を起動しない。スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
 | 7 | 委譲してよい作業は worker へ出し、委譲しない 5 つは自分で行う。小さな作業は worker へ出さずにインライン実行にする（`work-vessels.md` の線引き） |
 
 「スプリントを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `sprint-close.py` へ
@@ -218,7 +218,7 @@ supervisor の守る規則のうち、この仕様に関わるのは 2 つであ
 | 項目 | 中身 |
 | --- | --- |
 | 手順 | 作業に要る手順の抜粋（呼び出し・結果の読み方・判断の基準）。抜粋の元の Skill の `references/excerpt.md` を写す。抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけを写す |
-| 読む Skill | 作業の前に読む規則の Skill の名前と `SKILL.md` の絶対パス。supervisor は、いま通している工程の名前で `stage-skills.py lookup <工程>` を打ち、出力をそのまま並べる。工程と Skill の組は対応表（`plugins/ndf/scripts/lib/stage-skills.json`）にだけあり、対応表に置けるのは規則の Skill だけである |
+| 読む Skill | 作業の前に読む規則の Skill の名前と `SKILL.md` の絶対パス。supervisor は、いま通している工程の名前で `stage-skills.py lookup <工程>` を打ち、出力をそのまま並べる。工程と Skill の組は対応表（`plugins/ndf/scripts/lib/stage-skills.json`）にだけあり、対応表に置けるのは規則の Skill だけである。欄は `prompt` の本文に置き、欄の無い起動と、読み込まれた NDF の `stage-skills.py` を絶対パスで指した `lookup` を打たずに Skill を挙げた起動は、hook（読む Skill の guard）が止める |
 | 置き場所 | 長い出力と報告コピーを書くファイルの絶対パス。supervisor が必ず渡し、worker はコピーを書き終えた後に完了マーカー `<置き場所>.done` を作る（#901。理由は [待ち方の仕様](ndf-token-waits-and-context-cut.md) の「中間通知を受けたとき」） |
 
 worker の規則 6 は「Skill を起動しない。工程 Skill の `SKILL.md` を読まない。手順は起動指示の『手順』に従い、

@@ -3,7 +3,7 @@
 - 候補: 版に含む PR のうちそのプラグインのパスに触れた PR の材料だけから、字面で決める（LLM を挟まない）。
   PR の閉じる語が指す課題の要求の「影響」の表の「公開インタフェース」の行に互換なしの印（`BREAKING_MARKS`）が
   あるか、PR 本文の `## 移行の手順` の箇条がプラグインの名前に語として触れれば MAJOR、無ければ PATCH。MINOR の
-  候補は出さない（承認ゲート 2 で `--set <名前>=MINOR` として選ぶ）。材料を読めない PR は根拠の欄に書く
+  候補は出さない（リリース承認ゲートで `--set <名前>=MINOR` として選ぶ）。材料を読めない PR は根拠の欄に書く
 - 承認資料の `## 版を上げる他のプラグイン` の節の組み立て・読み取りと、本番の上げ幅の確かめ（`decided_versions`）
 
 出す（emit）のと GitHub・git を読むのは呼び手（`release-steps.py changed-plugins`）である。
@@ -21,7 +21,7 @@ import mdtable
 from release_lib.names import h2_lines, next_h2
 
 OTHERS_HEADING = "## 版を上げる他のプラグイン"
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-steps.py notes）の材料になる PR 本文の節
+CHANGES_HEADING = "## 利用者向けの変化"  # デプロイの説明文（release-steps.py notes）の材料になる PR 本文の節
 MIGRATION_HEADING = "## 移行の手順"  # PR 本文の節・承認資料の節（CHANGELOG の版の節の中では `### 移行の手順`）
 CONSENT_HEADING = "## 同意を求めること"
 CONSENT_LINE = "- [ ] 「版を上げる他のプラグイン」の表の上げ幅で、他のプラグインの版を上げる"
@@ -163,7 +163,7 @@ def read_section(text: str) -> list[OtherPlugin]:
     """承認資料の節を読む。節が無い・表の形が違えば ValueError。「- 無し」なら空。"""
     content = gh_sections.get_section(text or "", OTHERS_HEADING)
     if content is None:
-        raise ValueError(f"承認資料に {OTHERS_HEADING} の節が無い（開発版の配布の others のステップが書く）")
+        raise ValueError(f"承認資料に {OTHERS_HEADING} の節が無い（開発版のデプロイの others のステップが書く）")
     tables = md.tables(content)
     if not tables:
         if [line.strip() for line in content.splitlines() if line.strip()] == ["- 無し"]:
@@ -179,7 +179,7 @@ def read_section(text: str) -> list[OtherPlugin]:
 
 
 def set_level(rows: list[OtherPlugin], name: str, level: str) -> OtherPlugin:
-    """承認ゲート 2 で決めた上げ幅へ行を書き換える。表に無い名前・上げ済みの行・知らない上げ幅は ValueError。"""
+    """リリース承認ゲートで決めた上げ幅へ行を書き換える。表に無い名前・上げ済みの行・知らない上げ幅は ValueError。"""
     row = next((r for r in rows if r.name == name), None)
     if row is None:
         raise ValueError(f"表に {name} の行が無い")
@@ -188,7 +188,7 @@ def set_level(rows: list[OtherPlugin], name: str, level: str) -> OtherPlugin:
     if level.lower() not in LEVELS:
         raise ValueError(f"上げ幅が違う: {level}（{' / '.join(LEVELS.values())}）")
     row.level, row.to = LEVELS[level.lower()], bumped(row.current, level)
-    row.basis.insert(0, f"承認ゲート 2 で {row.level} に決めた")
+    row.basis.insert(0, f"リリース承認ゲートで {row.level} に決めた")
     return row
 
 
@@ -230,25 +230,6 @@ def put_section(lines: list[str], heading: str, block: list[str], replace: bool 
         return
     at = next((i for i in h2_lines(lines) if lines[i] == CONSENT_HEADING), len(lines))
     lines[at:at] = [heading, "", *block, ""]
-
-
-def merge_lines(lines: list[str], heading: str, block: list[str], drop: tuple[str, ...] = ()) -> int:
-    """承認資料の heading の節へ、block の箇条のうち節に無いもの（1 行目で比べる）だけを足し、足した数を返す。
-    1 つ以上足したら drop の行を節から外す。節が無ければ block で節を作る（put_section）。既にある行は消さない。"""
-    at = next((i for i in h2_lines(lines) if lines[i] == heading), None)
-    if at is None:
-        put_section(lines, heading, block)
-        return len(block)
-    end = next_h2(lines, at)
-    have = set(lines[at + 1 : end])
-    add = [b for b in block if b.split("\n", 1)[0] not in have]
-    if not add:
-        return 0
-    body = [x for x in lines[at + 1 : end] if x not in drop]
-    while body and body[-1] == "":
-        body.pop()
-    lines[at + 1 : end] = [*(body or [""]), *add, ""]
-    return len(add)
 
 
 def add_consent(lines: list[str]) -> bool:

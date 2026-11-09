@@ -657,6 +657,23 @@ def test_a_lost_local_record_still_starts_at_the_last_check_on_origin(repo, env,
     assert full["metrics"]["from"] == rv["metrics"]["from"] == to and full["metrics"]["prs"] == 1
 
 
+def test_a_ledger_merged_from_the_old_place_still_starts_at_the_latest_check(repo, env, tmp_path):
+    """migrate は旧の置き場の検査の行を新しい台帳の末尾へ足す。行の順でなく時刻の順で前回の検査を採る（#2766）。"""
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    record_merged(repo, env, tmp_path, "m-1", 30)
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    to, _ = record_merged(repo, env, tmp_path, "m-2", 31)
+    for branch in ("check-done/check", "check-done/review"):  # origin の印が無いときも手元の記録で決まる
+        git(repo, "push", "-q", "origin", "--delete", branch)
+        git(repo, "update-ref", "-d", f"refs/remotes/origin/{branch}")
+    log = next((Path(env["CLAUDE_PLUGIN_DATA"]) / "checks").glob("*.jsonl"))
+    rows = [json.loads(r) for r in log.read_text().splitlines()]
+    older = [{**r, "at": iso(48)} for r in rows if r.get("id") == "m-1"]  # 旧の置き場の古い行が末尾に付く
+    log.write_text("".join(json.dumps(r) + "\n" for r in [r for r in rows if r.get("id") != "m-1"] + older))
+    _, full, _ = call(repo, env, "eval")
+    assert full["metrics"]["from"] == to and full["metrics"]["prs"] == 0
+
+
 def test_review_only_moves_only_the_review_branch_on_origin(repo, env, tmp_path):
     merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
     to, out = record_merged(repo, env, tmp_path, "m-review", 31, "--review")

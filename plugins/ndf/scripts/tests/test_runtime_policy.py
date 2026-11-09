@@ -229,7 +229,7 @@ def test_summary_copies_seats(tmp_path):
         {"seat": "claude-2", "runtime": "claude", "model": None, "partner": "claude"},
     ]
     st = {"rounds": [{"round": 1, "started_at": "2026-10-01T00:00:00+00:00", "seats": seats}, {"round": 2}]}
-    rows = run_metrics.round_spans(st)
+    rows = run_metrics._round_rows(st, run_metrics.ended_at(st))
     assert rows[0]["seats"] == seats and "seats" not in rows[1]
 
 

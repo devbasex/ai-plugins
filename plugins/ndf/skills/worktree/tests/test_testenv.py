@@ -49,7 +49,7 @@ def registry(main_repo: Path) -> dict:
 # --- 受け入れ条件 39: 宣言が無いリポジトリでは何もしない --------------------
 
 
-@pytest.mark.parametrize("args", [["env"], ["tag"], ["stop"], ["unexpose"]])
+@pytest.mark.parametrize("args", [["env"], ["tag"], ["stop"], ["unexpose"], ["reclaim"]])
 def test_no_declaration_is_silent(main_repo: Path, worktree: Path, args: list[str]) -> None:
     result = run([*args, str(worktree)], cwd=main_repo)
     assert result["rc"] == 0, result
@@ -1061,6 +1061,35 @@ def test_unexpose_after_down_still_knows_the_environment(main_repo: Path, worktr
     assert slot == "0"
 
 
+def test_unexpose_closes_the_record_after_the_worktree_is_gone(main_repo: Path, worktree: Path) -> None:
+    """worktree が消えた後でも、閉じる手段をメインディレクトリで動かして台帳の公開を閉じる。"""
+    marker = main_repo / "closed-gone.txt"
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": "true",
+                "close_command": f"pwd -P > {marker}",
+            },
+        },
+    )
+    run(["env", str(worktree)], cwd=main_repo)
+    golden(main_repo, worktree)
+    run(["expose", str(worktree)], cwd=main_repo)
+    subprocess.run(["git", "worktree", "remove", "--force", str(worktree)], cwd=main_repo, check=True, capture_output=True)
+
+    result = run(["unexpose", str(worktree)], cwd=main_repo)
+
+    assert result["rc"] == 0, result
+    assert marker.read_text().strip() == str(main_repo.resolve())
+    rows = [a for a in registry(main_repo)["assignments"] if a.get("expose")]
+    assert rows and all(a["expose"]["closed_at"] for a in rows), rows
+
+
 def test_unexpose_without_an_open_record_changes_nothing(main_repo: Path, worktree: Path) -> None:
     """開いている公開記録が 0 件のとき、何も変更せず正常終了する。"""
     marker = main_repo / "closed.txt"
@@ -1103,7 +1132,7 @@ def stub_docker(main_repo: Path, dump: Path) -> Path:
     """環境変数と引数を書き出すだけの偽のコンテナ実行系。"""
     stub = main_repo.parent / "fake-docker"
     stub.write_text(
-        f'#!/bin/sh\nenv | grep "^NDF_" | sort > "{dump}"\nprintf "%s\\n" "$*" >> "{dump}"\nexit 0\n',
+        f'#!/bin/sh\n[ "$1" = compose ] || exit 0\nenv | grep "^NDF_" | sort > "{dump}"\nprintf "%s\\n" "$*" >> "{dump}"\nexit 0\n',
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -1675,7 +1704,22 @@ def test_down_reports_when_the_release_cannot_be_recorded(main_repo: Path, workt
     assert result["rc"] == 1, result
     assert "スロットの解放を台帳へ記録できませんでした" in result["err"], result
     assert "down を再実行" in result["err"], result
-    assert dump.read_text().rstrip().endswith("down"), "破棄はしている"
+    assert dump.read_text().rstrip().endswith("down --volumes"), "破棄はしている"
+    assert registry(main_repo)["assignments"][0]["released_at"] is None
+
+
+def test_down_stops_before_the_runtime_when_the_tag_cannot_be_dropped(main_repo: Path, worktree: Path) -> None:
+    """タグを消せないまま破棄すると、時間切れでタグが残って古いデータのまま公開の照合を通る。"""
+    dump = compose_ready(main_repo, worktree)
+    env = {"WT_DOCKER_COMMAND": str(stub_docker(main_repo, dump))}
+    assert run(["up", str(worktree), "--tag", "t1"], cwd=main_repo, env=env)["rc"] == 0
+    dump.write_text("")
+    env = {**failing_jq(main_repo, "del(.golden_tag)"), **env}
+
+    result = run(["down", str(worktree)], cwd=main_repo, env=env)
+
+    assert result["rc"] == 3 and "基準のタグを台帳から消せませんでした" in result["err"], result
+    assert dump.read_text() == "", "破棄していない"
     assert registry(main_repo)["assignments"][0]["released_at"] is None
 
 

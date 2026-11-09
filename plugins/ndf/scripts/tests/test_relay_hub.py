@@ -1,6 +1,6 @@
-"""統括役（#2346）: 同じコンテナの複数のラッパーを 1 つの統括役から起動し、1 つの表で見て 1 本ずつ止める。
+"""リレーハブ（#2346）: 同じコンテナの複数のラッパーを 1 つのリレーハブから起動し、1 つの表で見て 1 本ずつ止める。
 
-前半は統括役の判定（名前・重複・上限・引き継ぎ・権限）を状態ディレクトリだけで確かめる。後半は擬似端末と
+前半はリレーハブの判定（名前・重複・上限・引き継ぎ・権限）を状態ディレクトリだけで確かめる。後半は擬似端末と
 使い捨ての tmux（`TMUX_TMPDIR` を一時のディレクトリへ向け、利用者の tmux サーバに触れない）で、起動・一覧・停止・
 引き継ぎを確かめる。
 """
@@ -28,7 +28,11 @@ from relay_lib import hub as hb  # noqa: E402
 from relay_lib import hub_client as hc  # noqa: E402
 from relay_lib import tmux as tx  # noqa: E402
 
-from test_relay import RELAY, Term, fence, isolated_env, stop_input  # noqa: E402
+from test_relay import FAKE, RELAY, Term, fence, isolated_env, stop_input  # noqa: E402
+from account_fake import accounts, window  # noqa: E402,F401
+import claude_accounts as ca  # noqa: E402
+from relay_lib import pin  # noqa: E402
+from relay_lib import session_env as relay_session_env  # noqa: E402
 
 
 @pytest.fixture()
@@ -37,6 +41,7 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("NDF_RELAY_TMUX", "ndf-no-tmux")
     monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
+    monkeypatch.setenv("NDF_RELAY_LAUNCH_CHECK", "0")
     monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "accounts"))  # 利用者の置き場（`account use` の指定）を読まない
     root = tmp_path / "state" / "ndf" / "relay"
     root.mkdir(parents=True)
@@ -103,7 +108,7 @@ def test_running_name_is_taken(dirs):
 
 
 def test_default_limit_is_three_and_counts_every_running_wrapper(dirs):
-    """上限の既定は 3。統括役・名前つき・名前の無い今のラッパーを、動いているものすべてで数える。"""
+    """上限の既定は 3。リレーハブ・名前つき・名前の無い今のラッパーを、動いているものすべてで数える。"""
     assert hb.max_named() == 3
     dirs("front", name="t1")
     dirs("named", name="lroot")
@@ -131,7 +136,7 @@ def test_auto_name_takes_smallest_free_number():
     assert hb.Hub.auto_name({"t1", "t2", "t4"}) == "t3"
 
 
-# ---------------------------------------------------------------- 統括役の役目（I1・AC21・AC22）
+# ---------------------------------------------------------------- リレーハブの役目（I1・AC21・AC22）
 
 
 def test_only_one_hub_claims(state):
@@ -149,7 +154,7 @@ def test_only_one_hub_claims(state):
 
 
 def test_hub_dir_is_not_a_relay_dir(state):
-    """統括役の置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
+    """リレーハブの置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
     h = hb.Hub.claim()
     try:
         assert hb.scan_wrappers() == []
@@ -328,7 +333,7 @@ def test_stop_name_stops_only_that_one(dirs, capsys):
 
 
 def test_restart_of_the_hub_itself_does_not_stop_it(dirs, capsys, monkeypatch):
-    # 統括役を止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
+    # リレーハブを止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
     t1 = dirs("t1", name="t1")
     monkeypatch.setattr(hb, "hub_running", lambda: True)
     monkeypatch.setattr(hb, "hub_relay_dir", lambda: str(t1.path))
@@ -363,16 +368,20 @@ def test_wait_notice_names_wrapper_and_attach():
 
 # ---------------------------------------------------------------- tmux を通す振る舞い（AC2〜AC4・AC6・AC7・AC11・AC16・AC20・AC21・AC23）
 
-needs_tmux = pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
-
 
 @pytest.fixture()
 def hubenv(tmp_path):
-    """統括役を擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
+    """リレーハブを擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
     sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
     made = []
     # CI には TERM が無く、tmux の attach が端末の種類を決められずに失敗する。擬似端末に実際の端末と同じく TERM を与える
-    env = {"NDF_RELAY_TMUX": "tmux", "TMUX_TMPDIR": sock, "NDF_RELAY_HUB_WAIT": "15", "TERM": "xterm-256color"}
+    env = {
+        "NDF_RELAY_TMUX": "tmux",
+        "TMUX_TMPDIR": sock,
+        "NDF_RELAY_HUB_WAIT": "15",
+        "TERM": "xterm-256color",
+        "NDF_RELAY_LAUNCH_CHECK": "0.2",
+    }
 
     def start(**kw):
         t = Term(tmp_path, env={**env, **kw.pop("env", {})}, **kw)
@@ -400,40 +409,6 @@ def wait_state(t, name, state, timeout=30):
     t.wait(lambda: (ls_rows(t).get(name) or {}).get("state") == state, timeout, f"{name} が {state}")
 
 
-@needs_tmux
-def test_spawn_ls_stop_and_hub_handover(hubenv):
-    hub = hubenv()
-    hub.wait_start(1)
-    p = relay_cli(hub, "spawn", "--name", "lroot", "--json", "--", "mark", "/goal 次")
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert json.loads(p.stdout)["status"] == "ok"
-    wait_state(hub, "lroot", "running")
-    # 最初の入力を受けた区間 1 と、ndf-next で起動した区間 2（端末の結び付いていないラッパーの切り替え。AC3・AC8）
-    hub.wait(lambda: any(s["argv"][-1:] == ["/goal 次"] for s in hub.starts()), 40, "lroot の区間 2")
-    first = next(s for s in hub.starts() if s["argv"][-2:] == ["--", "mark /goal 次"])
-    rows = ls_rows(hub)
-    assert rows["t1"]["hub"] is True and rows["t1"]["attached"] is None
-    assert rows["lroot"]["hub"] is False and rows["lroot"]["attached"] is False
-    assert first["relay_dir"] != hub.starts()[0]["relay_dir"]
-
-    dup = relay_cli(hub, "spawn", "--name", "lroot", "--", "x")
-    assert dup.returncode == 3 and "名前が重なる" in dup.stderr
-
-    # 統括役を kill しても名前つきは動き続け、次の claude が統括役になる（AC21）
-    hub.proc.kill()
-    hub.proc.wait(5)
-    hub.wait(lambda: "t1" not in ls_rows(hub), 20, "統括役のラッパーが一覧から消える")
-    assert ls_rows(hub)["lroot"]["state"] == "running"
-    nxt = hubenv()
-    nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude が統括役になる")
-    assert "lroot" in ls_rows(nxt)
-
-    st = relay_cli(nxt, "stop", "lroot")
-    assert st.returncode == 0, st.stderr
-    wait_state(nxt, "lroot", "stopped")
-    assert ls_rows(nxt)["t1"]["state"] == "running"
-
-
 def hb_pid(t):
     p = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "hub" / "hub.json"
     try:
@@ -442,50 +417,298 @@ def hb_pid(t):
         return None
 
 
-@needs_tmux
-def test_second_claude_attaches_and_survives_terminal_close(hubenv):
-    hub = hubenv()
-    hub.wait_start(1)
-    second = hubenv()
-    hub.wait(lambda: (ls_rows(hub).get("t2") or {}).get("attached") is True, 40, "2 本目が t2 へ結び付く")
-    assert ls_rows(hub)["t2"]["state"] == "running"
-    second.close()  # 端末を閉じる（AC7）
-    hub.wait(lambda: ls_rows(hub)["t2"]["attached"] is False, 20, "端末が外れる")
-    assert ls_rows(hub)["t2"]["state"] == "running"
-
-
-@needs_tmux
-def test_limit_refuses_from_terminal_and_spawn(hubenv):
-    hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
-    hub.wait_start(1)
-    assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
-    p = relay_cli(hub, "spawn", "--name", "b", "--json", "--", "x")
-    res = json.loads(p.stdout)
-    assert p.returncode == 3 and res["items"][0]["result"] == "limit" and "上限 2" in res["summary"]
-    third = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
-    assert third.finish() == 3
-    assert "上限 2" in third.text
-
-
-@needs_tmux
-def test_killed_named_wrapper_shows_stopped(hubenv):
-    hub = hubenv()
-    hub.wait_start(1)
-    assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
-    wait_state(hub, "a", "running")
-    # 一覧の running は起動した直後（ロックの前）の登録簿の行でも立つ。ラッパーが pid を書くまで待つ
-    hub.wait(lambda: any(n == "a" and (d / "relay.pid").exists() for d, n in hb_scan(hub)), 30, "a が pid を書く")
-    d = next(d for d, n in hb_scan(hub) if n == "a" and (d / "relay.pid").exists())
-    os.kill(int((d / "relay.pid").read_text()), 9)
-    wait_state(hub, "a", "stopped")
-    assert ls_rows(hub)["t1"]["state"] == "running"
-
-
 def hb_scan(t):
     root = pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
     return [
         (d, (d / "name").read_text().strip() if (d / "name").exists() else None) for d in root.iterdir() if d.name != "hub" and d.is_dir()
     ]
+
+
+class TestWithTmux:
+    """tmux を使う振る舞い。tmux の有無は根の `conftest.py` の前提のコマンドの一覧がこのクラスの単位で決める。"""
+
+    def test_spawn_ls_stop_and_hub_handover(self, hubenv):
+        hub = hubenv()
+        hub.wait_start(1)
+        p = relay_cli(hub, "spawn", "--name", "lroot", "--json", "--", "mark", "/goal 次")
+        assert p.returncode == 0, p.stdout + p.stderr
+        assert json.loads(p.stdout)["status"] == "ok"
+        wait_state(hub, "lroot", "running")
+        # 最初の入力を受けた区間 1 と、ndf-next で起動した区間 2（端末の結び付いていないラッパーの切り替え。AC3・AC8）
+        hub.wait(lambda: any(s["argv"][-1:] == ["/goal 次"] for s in hub.starts()), 40, "lroot の区間 2")
+        first = next(s for s in hub.starts() if s["argv"][-2:] == ["--", "mark /goal 次"])
+        rows = ls_rows(hub)
+        assert rows["t1"]["hub"] is True and rows["t1"]["attached"] is None
+        assert rows["lroot"]["hub"] is False and rows["lroot"]["attached"] is False
+        assert first["relay_dir"] != hub.starts()[0]["relay_dir"]
+
+        dup = relay_cli(hub, "spawn", "--name", "lroot", "--", "x")
+        assert dup.returncode == 3 and "名前が重なる" in dup.stderr
+
+        # リレーハブを kill しても名前つきは動き続け、次の claude がリレーハブになる（AC21）
+        hub.proc.kill()
+        hub.proc.wait(5)
+        hub.wait(lambda: "t1" not in ls_rows(hub), 20, "リレーハブのラッパーが一覧から消える")
+        assert ls_rows(hub)["lroot"]["state"] == "running"
+        nxt = hubenv()
+        nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude がリレーハブになる")
+        assert "lroot" in ls_rows(nxt)
+
+        st = relay_cli(nxt, "stop", "lroot")
+        assert st.returncode == 0, st.stderr
+        wait_state(nxt, "lroot", "stopped")
+        assert ls_rows(nxt)["t1"]["state"] == "running"
+
+    def test_second_claude_attaches_and_survives_terminal_close(self, hubenv):
+        hub = hubenv()
+        hub.wait_start(1)
+        second = hubenv()
+        hub.wait(lambda: (ls_rows(hub).get("t2") or {}).get("attached") is True, 40, "2 本目が t2 へ結び付く")
+        assert ls_rows(hub)["t2"]["state"] == "running"
+        second.close()  # 端末を閉じる（AC7）
+        hub.wait(lambda: ls_rows(hub)["t2"]["attached"] is False, 20, "端末が外れる")
+        assert ls_rows(hub)["t2"]["state"] == "running"
+
+    def test_limit_refuses_from_terminal_and_spawn(self, hubenv):
+        hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
+        hub.wait_start(1)
+        assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
+        p = relay_cli(hub, "spawn", "--name", "b", "--json", "--", "x")
+        res = json.loads(p.stdout)
+        assert p.returncode == 3 and res["items"][0]["result"] == "limit" and "上限 2" in res["summary"]
+        third = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
+        assert third.finish() == 3
+        assert "上限 2" in third.text
+
+    def test_killed_named_wrapper_shows_stopped(self, hubenv):
+        hub = hubenv()
+        hub.wait_start(1)
+        assert relay_cli(hub, "spawn", "--name", "a", "--", "x").returncode == 0
+        wait_state(hub, "a", "running")
+        # 一覧の running は起動した直後（ロックの前）の登録簿の行でも立つ。ラッパーが pid を書くまで待つ
+        hub.wait(lambda: any(n == "a" and (d / "relay.pid").exists() for d, n in hb_scan(hub)), 30, "a が pid を書く")
+        d = next(d for d, n in hb_scan(hub) if n == "a" and (d / "relay.pid").exists())
+        os.kill(int((d / "relay.pid").read_text()), 9)
+        wait_state(hub, "a", "stopped")
+        assert ls_rows(hub)["t1"]["state"] == "running"
+
+    # 親の claude のセッションの環境を持つ専用サーバー（#2656）。グローバルな環境にこれらを持ったまま、レーンを起動する
+
+    def test_parent_env_server_spawn_and_manual_choose_pinned_account(self, hubenv, accounts, tmp_path):  # noqa: F811
+        """#2656 の受け入れ条件 1・3・4・8・13: `spawn` と手で打つ `new-session` が新しい区間 1 で始まり、指定の
+        アカウントで起動する。環境の `NDF_RELAY_DIR` は動いているリレーハブのラッパーを指す。グローバルな環境の役割と
+        費用の記録先はレーンへ残らない。"""
+        accounts.add("main", util5=10)
+        accounts.add("gmail", util5=20)
+        pin.set_pinned("gmail")
+        hub = _account_hub(hubenv, accounts, tmp_path)
+        hub.wait_start(1)
+        hub_dir = hub.starts()[0]["relay_dir"]
+        _parent_server(hub, accounts, NDF_RELAY_DIR=hub_dir, NDF_RELAY_DEPTH="1")
+        p = relay_cli(hub, "spawn", "--name", "lspawn", "--json", "--", "x")
+        assert p.returncode == 0, p.stdout + p.stderr
+        _manual(hub, "lman")
+        for name in ("lspawn", "lman"):
+            _assert_lane_chose(hub, name, "gmail", hub_dir)
+
+    def test_parent_env_server_restart_depth2_and_limited_pinned(self, hubenv, accounts, tmp_path):  # noqa: F811
+        """#2656 の受け入れ条件 2・5・6・13: 深さ 2 のグローバルな環境でも終了コード 127 にならず、指定の `main` が上限なら
+        `gmail` で起動する。止めたレーンの `restart` も同じ結果になる。"""
+        accounts.add("main", util5=100)
+        accounts.add("gmail", util5=20)
+        pin.set_pinned("main")
+        hub = _account_hub(hubenv, accounts, tmp_path)
+        hub.wait_start(1)
+        hub_dir = hub.starts()[0]["relay_dir"]
+        _parent_server(hub, accounts, NDF_RELAY_DIR=hub_dir, NDF_RELAY_DEPTH="2")
+        assert relay_cli(hub, "spawn", "--name", "lspawn", "--", "x").returncode == 0
+        _manual(hub, "lman")
+        first = _assert_lane_chose(hub, "lspawn", "gmail", hub_dir)
+        _assert_lane_chose(hub, "lman", "gmail", hub_dir)
+        assert relay_cli(hub, "stop", "lspawn").returncode == 0
+        wait_state(hub, "lspawn", "stopped")
+        p = relay_cli(hub, "restart", "lspawn")
+        assert p.returncode == 0, p.stdout + p.stderr
+        hub.wait(lambda: len(_lane_dirs(hub, "lspawn")) == 2, 40, "restart の新しい作業ディレクトリ")
+        again = _assert_lane_chose(hub, "lspawn", "gmail", hub_dir)
+        assert again != first
+
+    def test_parent_env_server_keeps_user_settings_without_accounts(self, hubenv, tmp_path):
+        """#2656 の受け入れ条件 9・10: アカウントを登録していない構成で、利用者の設定と認証の宣言は子まで届き、
+        元の設定ディレクトリが空なら `CLAUDE_CONFIG_DIR` を持たない（親のアカウントの設定ディレクトリにならない）。"""
+        hub = hubenv(env={"NDF_RELAY_CLAUDE": _env_dump_claude(tmp_path), "NDF_ACCOUNTS_DIR": str(tmp_path / "no-accounts")})
+        hub.wait_start(1)
+        hub_dir = hub.starts()[0]["relay_dir"]
+        user = {"NDF_ACCOUNT_SWITCH_AT": "80", "CLAUDE_CODE_OAUTH_TOKEN": "user-token", "CLAUDE_CODE_USE_BEDROCK": "1"}
+        _parent_server(hub, None, NDF_RELAY_DIR=hub_dir, NDF_RELAY_DEPTH="1", **user)
+        assert relay_cli(hub, "spawn", "--name", "lspawn", "--", "x").returncode == 0
+        _manual(hub, "lman")
+        for name in ("lspawn", "lman"):
+            hub.wait(lambda n=name: _lane_start(hub, n) is not None, 40, f"{name} の区間 1")
+            env = _child_env(hub, _lane_start(hub, name))
+            assert {k: env.get(k) for k in user} == user
+            assert "CLAUDE_CONFIG_DIR" not in env and "NDF_CLAUDE_ACCOUNT" not in env
+
+
+# 親の claude のセッションの環境（#2656 の受け入れ条件の「親の環境を持つサーバー」）。値に目印 MARK を入れ、画面と記録に出ないかを見る
+PARENT_SERVER = {
+    "CLAUDECODE": "1",
+    "CLAUDE_CODE_SESSION_ID": "parent-session-MARK",
+    "CLAUDE_CODE_ENTRYPOINT": "cli",
+    "NDF_CLAUDE_ACCOUNT": "main",
+    "NDF_RELAY_ROLE": "helper",
+    "NDF_RELAY_PLAN": "parent-plan-MARK",
+    "NDF_USAGE_PLAN": "parent-plan-MARK",
+    "NDF_USAGE_STEP": "3",
+}
+LANE_DROPPED = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "NDF_RELAY_ROLE", "NDF_RELAY_PLAN", "NDF_USAGE_PLAN", "NDF_USAGE_STEP")
+
+
+def _env_dump_claude(tmp_path):
+    """偽の claude の前に、起動ごとの環境を `FAKE_DIR/envs.jsonl` へ書く包み。pid は exec の後も同じ。"""
+    p = tmp_path / "env-dump" / "claude"
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        "if sys.argv[1:2] != ['plugin']:\n"
+        "    with open(os.path.join(os.environ['FAKE_DIR'], 'envs.jsonl'), 'a') as f:\n"
+        "        f.write(json.dumps({'pid': os.getpid(), 'env': dict(os.environ)}) + '\\n')\n"
+        f"os.execv(sys.executable, [sys.executable, {str(FAKE)!r}, *sys.argv[1:]])\n"
+    )
+    p.chmod(0o755)
+    return p
+
+
+def _account_hub(hubenv, accounts, tmp_path):  # noqa: F811
+    return hubenv(env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1", "NDF_RELAY_CLAUDE": _env_dump_claude(tmp_path)})
+
+
+def _parent_server(hub, accounts, **extra):  # noqa: F811
+    """親のセッションの環境を持つ専用サーバーを、リレーハブより先に起こす（サーバーを起こした側の環境がグローバルな環境になる）。"""
+    env = {k: v for k, v in hub.env.items() if k != "TMUX"}
+    env.update(PARENT_SERVER)
+    if accounts is not None:
+        env.update(CLAUDE_CONFIG_DIR=str(accounts.root / "main"), NDF_SHARED_CONFIG_DIR=str(accounts.shared))
+    else:
+        env.update(CLAUDE_CONFIG_DIR="/parent/accounts/main", NDF_SHARED_CONFIG_DIR="")
+    env.update({k: str(v) for k, v in extra.items()})
+    p = subprocess.run(
+        ["tmux", "-L", tx.SOCKET, "new-session", "-d", "-s", "parent", "--", "sleep", "600"], env=env, capture_output=True, text=True
+    )
+    assert p.returncode == 0, p.stderr
+    shown = subprocess.run(["tmux", "-L", tx.SOCKET, "show-environment", "-g", "NDF_RELAY_DIR"], env=env, capture_output=True, text=True)
+    assert shown.stdout.strip() == f"NDF_RELAY_DIR={extra['NDF_RELAY_DIR']}"
+
+
+def _manual(hub, name):
+    """手で起動する形（受け入れ条件 3）。クライアントの環境はサーバーへ届かないため、何を持っていても同じである。"""
+    argv = [sys.executable, str(RELAY), "run", "--", "x"]
+    opts = ["-e", f"NDF_RELAY_NAME={name}", "-e", "NDF_RELAY_SPAWNED=1"]
+    env = {k: v for k, v in hub.env.items() if k != "TMUX"}
+    p = subprocess.run(
+        ["tmux", "-L", tx.SOCKET, "new-session", "-d", "-s", name, *opts, "--", *argv], env=env, capture_output=True, text=True
+    )
+    assert p.returncode == 0, p.stderr
+
+
+def _lane_dirs(hub, name):
+    return sorted((d for d, n in hb_scan(hub) if n == name), key=lambda d: d.stat().st_mtime)
+
+
+def _lane_start(hub, name):
+    """名前 `name` の最新の作業ディレクトリで起動した区間 1。無ければ None。"""
+    dirs = _lane_dirs(hub, name)
+    if not dirs:
+        return None
+    return next((s for s in hub.starts() if s["relay_dir"] == str(dirs[-1])), None)
+
+
+def _child_env(hub, start):
+    p = hub.fake_dir / "envs.jsonl"
+    rows = [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+    return next(r["env"] for r in rows if r["pid"] == start["pid"])
+
+
+def _assert_lane_chose(hub, name, account, parent_dir):
+    """レーン `name` が新しい作業ディレクトリの区間 1 を `account` で始め、親のセッションの環境を子へ残さない。"""
+    hub.wait(lambda: _lane_start(hub, name) is not None, 40, f"{name} の区間 1")
+    s = _lane_start(hub, name)
+    assert s["relay_dir"] != parent_dir and s["depth"] == "1"
+    assert s["account"] == account
+    hub.wait(lambda: (ls_rows(hub).get(name) or {}).get("sections") == 1, 20, f"{name} の区間の数が 1")
+    env = _child_env(hub, s)
+    assert not set(LANE_DROPPED) & set(env), set(LANE_DROPPED) & set(env)
+    assert not (pathlib.Path(s["relay_dir"]) / hb.ROLE_FILE).exists()
+    logs = "".join(p.read_text() for p in pathlib.Path(s["relay_dir"]).glob("*.jsonl"))
+    assert "MARK" not in logs and "MARK" not in hub.text  # 外した値を記録と画面へ出さない（I6）
+    return s["relay_dir"]
+
+
+def test_all_limited_choice_is_the_same_with_parent_env(accounts, monkeypatch):  # noqa: F811
+    """#2656 の受け入れ条件 7: すべて上限のとき、親のセッションの環境を外した後の選び方の結果は、持たないときと同じ。"""
+    monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
+    accounts.add("main", util5=100)
+    accounts.add("gmail", util5=100)
+    clean = ca.choose()
+    for k, v in {**PARENT_SERVER, "CLAUDE_CONFIG_DIR": str(accounts.root / "main"), "NDF_SHARED_CONFIG_DIR": str(accounts.shared)}.items():
+        monkeypatch.setenv(k, v)
+    relay_session_env.drop_parent_env({})
+    assert os.environ["CLAUDE_CONFIG_DIR"] == str(accounts.shared)
+    got = ca.choose()
+    assert (got.name, got.earliest and got.earliest[0]) == (clean.name, clean.earliest and clean.earliest[0])
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
+def test_session_value_reads_only_the_launch_env(tmp_path, monkeypatch):
+    """#2656 の決定 4: `session_value` は起動の `-e` で付いた値だけを読み、グローバルな環境の値は読まない。"""
+    sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
+    monkeypatch.setenv("TMUX_TMPDIR", sock)
+    monkeypatch.setenv("NDF_RELAY_TMUX", "tmux")
+    monkeypatch.setenv("NDF_TEST_GLOBAL", "glob")  # サーバーを起こす側の環境（グローバルな環境へ入る）
+    try:
+        assert tx.new_session("a", str(tmp_path), ["sleep", "30"], {"NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": ""}) is None
+        assert tx.new_session("b", str(tmp_path), ["sleep", "30"], {}) is None
+        assert tx.session_value("a", "NDF_RELAY_ROLE") == "helper"
+        assert tx.session_value("a", "NDF_RELAY_PLAN") == ""
+        assert tx.session_value("b", "NDF_RELAY_ROLE") is None
+        assert tx.session_value("a", "NDF_TEST_GLOBAL") is None
+        assert tx.session_value("zz", "NDF_RELAY_ROLE") is None
+    finally:
+        subprocess.run(["tmux", "-L", tx.SOCKET, "kill-server"], env={**os.environ, "TMUX_TMPDIR": sock}, capture_output=True)
+        shutil.rmtree(sock, ignore_errors=True)
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux が無い")
+def test_session_gone_with_a_real_tmux(tmp_path, monkeypatch):
+    """実物の tmux: 消えた置き場の python を渡しても `new-session` は成功し、セッションは残らない（#2583 の再現）。
+    サーバごと居ないときも消えたと読み、動いているセッションは消えたと読まない。"""
+    sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
+    monkeypatch.setenv("TMUX_TMPDIR", sock)
+    monkeypatch.setenv("NDF_RELAY_TMUX", "tmux")
+    try:
+        assert tx.new_session("gone", str(tmp_path), ["/無い/.venv/bin/python", "relay.py"], {}) is None
+        end = time.monotonic() + 5
+        while time.monotonic() < end and not tx.session_gone("gone"):
+            time.sleep(0.05)
+        assert tx.session_gone("gone")
+        assert tx.new_session("stays", str(tmp_path), ["sleep", "30"], {}) is None
+        assert not tx.session_gone("stays")
+    finally:
+        subprocess.run(["tmux", "-L", tx.SOCKET, "kill-server"], env={**os.environ, "TMUX_TMPDIR": sock}, capture_output=True)
+        shutil.rmtree(sock, ignore_errors=True)
+
+
+def test_session_gone_is_false_when_tmux_cannot_be_asked(monkeypatch):
+    """tmux を呼べないときは消えたと決めない（動いているセッションを失敗と誤らない）。"""
+    monkeypatch.setattr(hb.tmux, "_tmux", lambda *a: None)
+    assert not tx.session_gone("a")
+
+
+def test_tmux_class_has_no_skip_of_its_own():
+    """tmux の有無は根の前提のコマンドの一覧だけが決め、クラスの各件は自分で読み飛ばさない（#2346）。"""
+    holders = [sys.modules[__name__], TestWithTmux, *(v for k, v in vars(TestWithTmux).items() if k.startswith("test_"))]
+    names = [m.name for h in holders for m in getattr(h, "pytestmark", [])]
+    assert not {"skip", "skipif"} & set(names), names
 
 
 def test_no_tmux_runs_second_in_foreground(tmp_path):
@@ -606,6 +829,41 @@ def test_process_tmux_failure_is_refused_and_registry_untouched(launched, monkey
     assert res["status"] == "stopped" and res["items"][0]["result"] == hb.TMUX_FAILED
     assert res["metrics"]["exit_code"] == 1 and res["summary"] == "duplicate session"
     assert not os.path.exists(hb.hub_path(hb.REGISTRY))
+
+
+def test_process_session_gone_after_launch_is_refused_and_not_registered(launched, monkeypatch):
+    """作ったセッションがすぐ消えたら「起動した」と返さず、登録もしない（#2563・#2583 の受け入れ条件 2）。"""
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: True)
+    res = hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": "/", "args": [], "by": "spawn"})
+    assert res["status"] == "stopped" and res["items"][0]["result"] == hb.TMUX_FAILED
+    assert res["metrics"]["exit_code"] == 1 and "a" in res["summary"]
+    assert not os.path.exists(hb.hub_path(hb.REGISTRY))
+
+
+def test_process_restart_gone_keeps_the_registry_row(launched, tmp_path, monkeypatch):
+    """起こし直しで消えたら、前の登録の行はそのまま残す（次の起こし直しの入力になる）。"""
+    row = {"session": "a", "cwd": str(tmp_path), "args": [], "created_at": "x", "by": "spawn"}
+    _write_registry({"a": row})
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: True)
+    res = hb.Hub(None).process({"kind": "restart", "name": "a", "by": "restart"})
+    assert res["metrics"]["exit_code"] == 1 and hb.read_registry()["a"] == row
+
+
+def test_launch_waits_the_check_seconds_before_looking(launched, monkeypatch):
+    """セッションの確かめの前に `NDF_RELAY_LAUNCH_CHECK` 秒待つ。tmux に聞けなければ起動した扱いのまま。"""
+    monkeypatch.setenv("NDF_RELAY_LAUNCH_CHECK", "1.5")
+    order = []
+    monkeypatch.setattr(hb.time, "sleep", lambda s: order.append(("sleep", s)))
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: order.append(("look", name)) or False)
+    res = hb.Hub(None).process({"kind": "spawn", "name": "a", "cwd": "/", "args": [], "by": "spawn"})
+    assert order == [("sleep", 1.5), ("look", "a")] and res["status"] == "ok"
+
+
+def test_launch_check_seconds_default_and_broken_value(monkeypatch):
+    monkeypatch.delenv("NDF_RELAY_LAUNCH_CHECK", raising=False)
+    assert hb.launch_check_seconds() == 2
+    monkeypatch.setenv("NDF_RELAY_LAUNCH_CHECK", "x")
+    assert hb.launch_check_seconds() == 2
 
 
 def test_process_restart_uses_registry_row(launched, tmp_path):

@@ -311,24 +311,24 @@ sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUG
 | (4) | 作業ディレクトリに `question` が無い（G1） | 待ち続ける |
 | (5) | シグナルファイルの `transcript_path` に、`timestamp` がシグナルファイルの `written_at` より後で `type` が `assistant` か `user` の行が無い（G2）。`attachment`（目標の判定）と `system` の行は数えない | 待ち続ける。次の Stop がシグナルファイルを書き直すか消す |
 
-**終わらせる手順（G3）。** (1)〜(5) がそろい、停止シグナルファイル・`count.lock`・1 日の上限・再起動ループを通った後:
+**終わらせる手順（G3）。** (1)〜(5) がそろい、停止シグナルファイル・再起動ループを通った後:
 
 | 順 | ラッパーがすること |
 | ---: | --- |
 | 1 | そろった時点のシグナルファイルの `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前だけ） |
-| 2 | `question.lock` を待たずに試す。取れなければ `count.lock` を放してアイドルを待つへ戻る |
-| 3 | ロックの中で、`question` が無いこと・シグナルファイルの `written_at`・記録の大きさと更新時刻が 1 の記録と同じことだけを確かめる。外れたら両方のロックを放して戻る |
+| 2 | `question.lock` を待たずに試す。取れなければアイドルを待つへ戻る |
+| 3 | ロックの中で、`question` が無いこと・シグナルファイルの `written_at`・記録の大きさと更新時刻が 1 の記録と同じことだけを確かめる。外れたらロックを放して戻る |
 | 4 | `/exit\r` を **1 回の write** で書く |
 | 5 | `NDF_RELAY_EXIT_HOLD` 秒（既定 1）入出力を流してから放す |
 
-**書いた後に `question` が現れたら、`count.lock` を放し、`question` が消えるまで `NDF_RELAY_EXIT_WAIT` の
+**書いた後に `question` が現れたら、`question` が消えるまで `NDF_RELAY_EXIT_WAIT` の
 秒を数えない。** 書いた `/exit` が応答の待ち行列に入り、質問の答えの後に働く場合に、質問を SIGTERM で
 消さない。この経路で子が終わったらシグナルファイルを読み直す。
 
 | 読み直したシグナルファイル | すること |
 | --- | --- |
 | 無い | 次のセッションを起動しない。`end`（`no-mark`）を書き、子の終了コードで終わる |
-| ある | `count.lock` を 5 秒まで待って取り直し、1 日の上限と再起動ループを判定し直してから、読み直したシグナルファイルの `command` と `cwd` で起動する。取れなければ `count-lock`、上限・再起動ループならその理由で `stop` の行を書き、`次の区間を起動できない（<理由>）。次のコマンド:` と中身を出して終了コード 2 |
+| ある | 再起動ループを判定し直してから、読み直したシグナルファイルの `command` と `cwd` で起動する。再起動ループなら `spin` で `stop` の行を書き、`次の区間を起動できない（<理由>）。次のコマンド:` と中身を出して終了コード 2 |
 
 ### 起動オプションの引継ぎ
 
@@ -433,7 +433,7 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は入力注�
 | `/exit` の後の質問のあいだ SIGTERM までの秒を数えず、シグナルファイルが無ければ起動せず、書き直されたシグナルファイルなら新しい中身で起動すること | `test_guard_exit_queued_behind_question`・`test_guard_exit_queued_then_no_mark`・`test_guard_exit_wait_resumes_after_question` |
 | `question` がラッパーの外で何もせず、ロックの保持・書けないときに拒否し、`close` が消すこと | `test_question_*` |
 | 引数の選び分けと、alias → 関数 → ラッパーを通した 2 つ目のセッションの引数 | `test_carried_args`・`test_run_carries_policy_args_through_shell_function` |
-| Skill の配布と frontmatter（`install-wrapper` に `disable-model-invocation: true`、`restart` に無い。`claude-skills.txt` にだけ載る） | `python3 scripts/check-skill-frontmatter.py` と manifests |
+| Skill のデプロイと frontmatter（`install-wrapper` に `disable-model-invocation: true`、`restart` に無い。`claude-skills.txt` にだけ載る） | `python3 scripts/check-skill-frontmatter.py` と manifests |
 | 本物の Claude Code での `/ndf:restart` の通し | 隔離した HOME・`CLAUDE_CONFIG_DIR` で 1 度通し、記録を実装の Pull Request に残した |
 
 ## 関連リンク

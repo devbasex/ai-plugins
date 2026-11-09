@@ -17,7 +17,8 @@
   "env": [
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
-    "NDF_PRESENTATION_DIR"
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [],
   "stdin": "none",
@@ -26,8 +27,8 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok。対応表に無い工程は空の items）",
-    "1": "対応表か SKILL.md を読めない（status stopped）",
-    "2": "呼び出しの誤り（argparse）"
+    "1": "失敗: 対応表か SKILL.md を読めない（status stopped）",
+    "2": "読めない・呼び出しの誤り（呼び出しの誤り。argparse）"
   },
   "callers": [
     "plugins/ndf/skills/development-workflow/references/agent-layers.md"

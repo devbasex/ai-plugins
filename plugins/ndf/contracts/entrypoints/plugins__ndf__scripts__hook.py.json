@@ -25,10 +25,12 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
     "NDF_RELAY",
     "NDF_RELAY_CLAUDE",
     "NDF_RELAY_DEPTH",
     "NDF_RELAY_DIR",
+    "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
     "NDF_RELAY_PLAN",
     "NDF_RELAY_REEXEC",
@@ -40,6 +42,7 @@
     "NDF_SLACK_API_BASE",
     "NDF_SLACK_NOTIFY_DONE",
     "NDF_SLEEP_MAX_SEC",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISOR_CUT_RATIO",
     "PATH",
@@ -47,6 +50,7 @@
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
     "TMPDIR",
+    "UV_PROJECT_ENVIRONMENT",
     "XDG_DATA_HOME",
     "XDG_STATE_HOME",
     "ZDOTDIR"
@@ -89,5 +93,9 @@
     "plugins/ndf/hooks/codex.json",
     "plugins/ndf/scripts/hook_lib/goal_skill.py",
     "plugins/ndf/scripts/hook_lib/words.py"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json・codex.json が起動する"
+  }
 }

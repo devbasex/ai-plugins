@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/hook-env.py", "name": "main", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: 背景で起動した hook の環境の用意の子プロセスの終わりを待つ"}

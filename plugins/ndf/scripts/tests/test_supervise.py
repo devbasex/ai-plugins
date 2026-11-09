@@ -27,6 +27,9 @@ import claude_accounts as ca  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_step, procedures, queue  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_fake  # noqa: E402
 from supervise_lib.prompts import PR_SYSTEM  # noqa: E402
 import gh_call  # noqa: E402
 
@@ -43,12 +46,18 @@ if a[:2] == ["issue", "view"]:
 sys.exit(1)
 """
 
-FAKE_CLAUDE = """#!{py}
+FAKE_CLAUDE = (
+    """#!{py}
 import json, os, sys
-open(os.environ["FAKE_CLAUDE_LOG"], "a").write(sys.stdin.read() + "\\n=====\\n")
-print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01,
-                  "num_turns": 1}}))
+prompt = sys.stdin.read()
+open(os.environ["FAKE_CLAUDE_LOG"], "a").write(prompt + "\\n=====\\n")
+text = "## 作業の報告\\n- 結果: 完了"
 """
+    + worker_fake.SNIPPET.replace("{", "{{").replace("}", "}}")
+    + """
+print(json.dumps({{"result": text, "usage": {{}}, "total_cost_usd": 0.01, "num_turns": 1}}))
+"""
+)
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -492,7 +501,9 @@ def test_ensure_worktree_gives_up_after_retries(tmp_path, monkeypatch):
     waits = []
     err = paths.ensure_worktree(wt_plan(repo, "feat/a"), sleep=waits.append)
     assert err.startswith("作業ツリーを作れない") and "could not lock config file" in err
-    assert len(waits) == paths.WORKTREE_LOCK_RETRIES
+    import limits
+
+    assert len(waits) == limits.policy("supervise.worktree-lock").attempts - 1
 
 
 def test_ensure_worktree_other_error_does_not_retry(tmp_path):
@@ -540,7 +551,7 @@ def foreign_repo(tmp_path, supervise=None):
 
 
 def run_cmds(plan):
-    """run のステップのコマンドから、配布したスクリプトの置き場（絶対パス）を除いたもの。"""
+    """run のステップのコマンドから、デプロイしたスクリプトの置き場（絶対パス）を除いたもの。"""
     return [
         s.get("cmd", "").replace(str(SCRIPTS), "<scripts>").replace(str(SCRIPTS.parent / "skills"), "<skills>")
         for s in plan["steps"]
@@ -566,11 +577,11 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     assert plan["テストの戦略"]["name"] == "local-full" and "supervise.json" in plan["テストの戦略"]["note"]
     assert plan["テストの時間"]["basis"]["unknown_duration"] is True
     assert steps["test-limited"]["timeout"] == 990 and steps["test-all"]["timeout"] == 1980
-    assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 3960
+    assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 4290
     assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
     for cmd in run_cmds(plan):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
-    # 配布したスクリプトは置き場からの絶対パスで呼ぶ
+    # デプロイしたスクリプトは置き場からの絶対パスで呼ぶ
     assert steps["merge"]["cmd"].startswith(f"python3 {SCRIPTS / 'merged-steps.py'} ")
     assert paths.PRESETS["doc-lint"].startswith(f"python3 {SCRIPTS / 'doc-lint.py'} ")
 
@@ -936,7 +947,7 @@ REPORT_EMPTY = """## フェーズの報告
 - フェーズ: 試験
 - 課題: #858 #859
 - 結果: 完了
-- 関門: 無し
+- 承認ゲート: 無し
 - 次のフェーズ: 検査
 - Pull Request: https://example/pull/9
 - 最後に記録した工程: 無し
@@ -961,7 +972,7 @@ REPORT_RICH = """## フェーズの報告
 - フェーズ: 実装
 - 課題: #1054
 - 結果: 関門
-- 関門: ステップ release（exit=10）; ステップ merge（exit=11）
+- 承認ゲート: ステップ release（exit=10）; ステップ merge（exit=11）
 - 次のフェーズ: 無し
 - Pull Request: 無し
 - 最後に記録した工程: Pull Request
@@ -988,7 +999,7 @@ REPORT_RICH = """## フェーズの報告
 
 @pytest.mark.parametrize("fill, expected", [(_report_state_empty, REPORT_EMPTY), (_report_state_rich, REPORT_RICH)], ids=["empty", "rich"])
 def test_write_report_text_of_a_state(tmp_path, fill, expected):
-    """現状固定: 報告の全文。`{dir}` は状態ディレクトリ、`{empty}` は空（行末の空白を書かないための目印）。空の状態と、関門・認証の切り替え・利用上限・遅れ・途中の報告がある状態。"""
+    """現状固定: 報告の全文。`{dir}` は状態ディレクトリ、`{empty}` は空（行末の空白を書かないための目印）。空の状態と、承認ゲート・認証の切り替え・利用上限・遅れ・途中の報告がある状態。"""
     from supervise_lib.state import RunState
 
     st = RunState(tmp_path / "state", {})
@@ -1000,7 +1011,7 @@ def test_write_report_text_of_a_state(tmp_path, fill, expected):
 
 @pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])
 def test_write_report_without_gates_or_plan_keys(tmp_path, result, gate):
-    """現状固定: 関門の記録が無いときの関門の行と、計画に鍵が無いときの行。完了でなければ次のフェーズを書かない。"""
+    """現状固定: 承認ゲートの記録が無いときの承認ゲートの行と、計画に鍵が無いときの行。完了でなければ次のフェーズを書かない。"""
     from supervise_lib.state import RunState
 
     lines = RunState(tmp_path / "state", {}).write_report({"次のフェーズ": "検査"}, result, "x").splitlines()
@@ -1008,7 +1019,7 @@ def test_write_report_without_gates_or_plan_keys(tmp_path, result, gate):
         "- フェーズ: None",
         "- 課題: ",
         f"- 結果: {result}",
-        f"- 関門: {gate}",
+        f"- 承認ゲート: {gate}",
         "- 次のフェーズ: 無し",
         "- Pull Request: 無し",
     ]
@@ -1092,7 +1103,7 @@ def test_sync_check_without_declaration_stops(tmp_path):
     assert res["status"] == "stopped" and "sync_checks" in res["summary"] and res["items"] == []
 
 
-# --- 利用上限（待ち・認証の切り替え）・関門の終了コード・ステップの作業場所・配布の雛形 ---
+# --- 利用上限（待ち・認証の切り替え）・承認ゲートの終了コード・ステップの作業場所・デプロイの雛形 ---
 
 # 呼ばれるたびに responses の次の 1 件を返す偽の claude。呼ばれた順と、足された認証の変数を記録する
 SEQ_CLAUDE = """import json, os, sys
@@ -1100,13 +1111,22 @@ state = os.environ["SEQ_DIR"]
 n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exists(os.path.join(state, "calls")) else 0
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
-sys.stdin.read()
+prompt = sys.stdin.read()
+_saved = os.path.join(state, "rfile")
+if "作業の結果ファイル: " in prompt:
+    open(_saved, "w").write(prompt.split("作業の結果ファイル: ", 1)[1].split()[0])
+elif os.path.exists(_saved):
+    prompt = "作業の結果ファイル: " + open(_saved).read()
+text = str(r["out"].get("result", "")) if isinstance(r.get("out"), dict) else ""
+if r.get("result") == "ok":
+    text += "\\n結果: 完了"
 open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN"), "argv": sys.argv[1:]}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
 sys.exit(r.get("code", 0))
 """
+SEQ_CLAUDE = SEQ_CLAUDE.replace('print(json.dumps(r["out"]))', worker_fake.SNIPPET + '\nprint(json.dumps(r["out"]))')
 LIMIT = {"out": {"result": "You've hit your session limit · resets 3pm (UTC)", "is_error": True, "api_error_status": 429}, "code": 1}
 LIMIT_NO_TIME = {"out": {"result": "API Error: 429", "is_error": True}, "stderr": "HTTP/1.1 429 Too Many Requests\n", "code": 1}
 OK = {"out": {"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}}
@@ -1467,7 +1487,7 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
     assert copied.read_text() == "# 提示物\n"
     assert s.state.results["facts"]["gate"] is True and "rerun" not in s.state.results["facts"]
     assert "after" in s.state.results and "bad" not in s.state.results
-    assert "結果: 関門" in text and f"提示物: {copied}" in text and "関門: ステップ facts（exit=10）" in text
+    assert "結果: 関門" in text and f"提示物: {copied}" in text and "承認ゲート: ステップ facts（exit=10）" in text
 
 
 def test_run_gate_without_gate_next_uses_next(tmp_path):
@@ -1514,7 +1534,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert st["facts"]["presentation_to"] == "issues/approval-ndf-v10.17.11.md"
     assert st["facts"]["gate_next"] == "explain" and st["verify"]["cwd"] == "/r"
     assert "--ref develop" in st["verify"]["cmd"] and "--channel dev" in st["release"]["cmd"]
-    assert st["verify"]["stage"] == "配布"  # 開発版の導入の確認は「配布」（#2288 の AC2）
+    assert st["verify"]["stage"] == "デプロイ"  # 開発版の導入の確認は「デプロイ」（#2288 の AC2）
 
     p = cli(
         "new",
@@ -1541,6 +1561,7 @@ def test_new_release_dev_and_prod(tmp_path):
         "snapshot",
         "sync",
         "release",
+        "cd-result",
         "record",
         "verify",
         "cleanup",
@@ -1549,7 +1570,7 @@ def test_new_release_dev_and_prod(tmp_path):
         "judge-record",
     ]
     # 導入の確認だけのステップは「リリース後テスト」と記録しない。それは仕上げの release-verify が担う（#2288 の AC1）
-    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "配布"
+    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "デプロイ"
     assert not [s for s in plan["steps"] if s.get("stage") == "リリース後テスト"]
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
     # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
@@ -1586,18 +1607,18 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert manifest["ブランチ"] == "sprint/v10-18"
     assert [w["name"] for w in manifest["ステージ"]] == [
         "設計",
-        "関門 1",
+        "設計承認ゲート",
         "設計 PR のマージ",
         "設計の結果",
         "スプリントブランチ",
         "実装",
         "検査",
-        "配布",
-        "関門 2",
+        "デプロイ",
+        "リリース承認ゲート",
         "本番",
     ]
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
+    assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
@@ -1625,8 +1646,15 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
         "pr",
         "sync-body",
         "review",
+        "review-settled",
+        "resolve-sync",
+        "resolve",
+        "push-resolve",
         "sync-review",
         "requirements-recheck",
+        "survey-check",
+        "fix-survey",
+        "survey-recheck",
         "glossary-check",
         "fix-glossary",
         "glossary-recheck",
@@ -1641,17 +1669,21 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "requirements-recheck"
     # レビューの直しの後にも写しと本文の一致を見て、食い違えば on_fail を置かずに止まる（#1769）
     assert "spec-copy.py check" in ds["requirements-recheck"]["cmd"] and "on_fail" not in ds["requirements-recheck"]
-    assert ds["requirements-recheck"]["next"] == "glossary-check"
+    assert ds["requirements-recheck"]["next"] == "survey-check"
+    # 自前で作る決定に比べた候補が無ければ 1 回だけ直し、残れば on_fail を置かずに止まる（#2519）
+    assert "design-survey.py check --issue" in ds["survey-check"]["cmd"] and ds["survey-check"]["on_fail"] == "fix-survey"
+    assert ds["fix-survey"]["next"] == "survey-recheck" and ds["survey-recheck"]["cmd"] == ds["survey-check"]["cmd"]
+    assert "on_fail" not in ds["survey-recheck"] and ds["survey-check"]["next"] == ds["survey-recheck"]["next"] == "glossary-check"
     assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
     assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
-    # 設計 PR は Draft で作り、関門 1 の前に Draft を外す（#1908）。レビューの駆動が落ちても関門の前に通る
+    # 設計 PR は Draft で作り、設計承認ゲートの前に Draft を外す（#1908）。レビューの駆動が落ちても承認ゲートの前に通る
     assert ds["push-glossary"]["next"] == ds["review"]["on_fail"] == "ready" and ds["ready"]["next"] == "gate"
     # push は push-glossary（on_fail 無し）だけが行う。ready は送り直さない（重複の push と、レビューが落ちた経路で
     # 直しに追いついていない HEAD を送る non-fast-forward を避ける）
     assert ds["ready"]["cmd"] == "gh pr ready {pr}" and "on_fail" not in ds["ready"] and "on_fail" not in ds["push-glossary"]
-    assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 関門の数は変わらない
+    assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートの数は変わらない
     assert "glossary-recheck" in ds["gate"]["inputs"]
 
     impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
@@ -1672,7 +1704,7 @@ def test_new_sprint_without_design_skips_gate(tmp_path):
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
+    assert names == ["スプリントブランチ", "実装", "検査", "デプロイ", "リリース承認ゲート", "本番"]
 
 
 @pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
@@ -1897,8 +1929,11 @@ def test_work_prompt_has_progress_instructions(tmp_path, fakes):
 
 
 def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
-    def w(t):
-        return json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+    """conductor へ知らせるかは state だけで決め、文の語（「止まった」「落ちた」）は読まない（#2337 の I12）。"""
+
+    def w(t, state=None):
+        d = {"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t, **({"state": state} if state else {})}
+        return json.dumps(d, ensure_ascii=False)
 
     fake_worker(
         tmp_path,
@@ -1906,9 +1941,9 @@ def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
         [
             w("課題の本文を読み終えた"),
             "形の違う行",
-            w("テストが 3 件落ちた"),
-            w("テストが 4 件落ちた"),
-            w("関門に当たった: 本番の配布"),
+            w("止まった・落ちたと書いても working なら知らせない"),
+            w("テストが 4 件落ちた", "failing"),
+            w("リリース", "gate"),
             w("実装を 1 つ終えた"),
         ],
         sleep=0.5,
@@ -1967,7 +2002,7 @@ def test_queue_notifies_attention(tmp_path):
     prog = tmp_path / "p-state" / "progress.jsonl"
     prog.parent.mkdir()
     prog.write_text(json.dumps({"kind": "attention", "reason": "前の実行"}) + "\n")
-    line = json.dumps({"kind": "worker", "at": "x", "text": "進めない: 権限が無い"}, ensure_ascii=False)
+    line = json.dumps({"kind": "worker", "at": "x", "state": "stopped", "text": "権限が無い"}, ensure_ascii=False)
     f.write_text(
         json.dumps(
             {
@@ -2054,7 +2089,7 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
     real, seen = flow.run_stage, {}
 
     def batch(plans, adm, args):
-        if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
+        if str(rel) in plans:  # 後続のデプロイは流さず、流す時の計画を読む
             seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
             return [{"plan": p, "result": "完了"} for p in plans]
         return real(plans, adm, args)
@@ -2112,9 +2147,9 @@ def wait_cli(done, *args):
 
 def test_wait_returns_0_on_done(tmp_path):
     done = wait_setup(tmp_path, [])
-    queue.write_text_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 関門 1"}))
+    queue.write_text_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 設計承認ゲート"}))
     code, summary, res = wait_cli(done)
-    assert code == queue.WAIT_DONE == 0 and "関門 1" in summary
+    assert code == queue.WAIT_DONE == 0 and "設計承認ゲート" in summary
     assert res["metrics"]["event"] == "done" and res["metrics"]["queue_status"] == "gate"
 
 
@@ -2545,40 +2580,40 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
-    for name in ("検査", "配布"):
+    for name in ("検査", "デプロイ"):
         for path in waves[name]["plans"]:
             assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path
-    release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
-    assert release["フェーズ"] == "配布（開発版）"
+    release = json.loads(Path(waves["デプロイ"]["plans"][0]).read_text())
+    assert release["フェーズ"] == "開発版のデプロイ"
     assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
-    # 配布は最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
-    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["配布"]["plans"][0])
-    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "スプリントブランチ"
+    # デプロイは最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
+    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["デプロイ"]["plans"][0])
+    assert "command" not in waves["デプロイ"] and waves["デプロイ"]["then_of"] == "スプリントブランチ"
 
 
 def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
-    """normal の雛形の経路は配布の後に関門 2 と本番を置き、本番は承認の後に単独で流す（#1914）。"""
+    """normal の雛形の経路はリリースの後にリリース承認ゲートと本番を置き、本番は承認の後に単独で流す（#1914）。"""
     out = tmp_path / "m"
     p = cli(*new_sprint_args(tmp_path, out))
     assert p.returncode == 0, p.stderr
     index = json.loads((out / "sprint.json").read_text())["ステージ"]
-    assert [w["name"] for w in index][-3:] == ["配布", "関門 2", "本番"]
+    assert [w["name"] for w in index][-3:] == ["デプロイ", "リリース承認ゲート", "本番"]
     waves = {w["name"]: w for w in index}
-    gate, prod = waves["関門 2"], waves["本番"]
+    gate, prod = waves["リリース承認ゲート"], waves["本番"]
     assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]
     assert "then_of" not in prod and prod["plans"][0].endswith("-release-prod.json")
     assert f"queue {prod['plans'][0]} --max 3 --done " in prod["command"] and "--then" not in prod["command"]
-    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["配布"]
+    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["デプロイ"]
     plan = json.loads(Path(prod["plans"][0]).read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     assert "--channel prod" in steps["release"]["cmd"] and "--version 10.18.0 " in steps["release"]["cmd"]
     assert "--prs {queue_pr:check}" in steps["changelog"]["cmd"] and plan["課題"] == [1]
     assert not {"mvv", "note", "handoff"} & set(steps)
-    assert plan["steps"][0]["id"] == "approve"  # 承認ゲート 2 の承認の記録を先頭で書く（#1426 の AC9）
+    assert plan["steps"][0]["id"] == "approve"  # リリース承認ゲートの承認の記録を先頭で書く（#1426 の AC9）
 
 
 def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
-    """関門 2 の後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
+    """リリース承認ゲートの後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
     from supervise_lib import paths, queue
 
     out = tmp_path / "m"
@@ -2720,9 +2755,16 @@ def test_work_report_not_done_fails_the_step(tmp_path, seq, result):
     assert "next" not in s.state.results
 
 
-def test_work_without_report_keeps_cli_result(tmp_path, seq):
-    """報告の無い応答（judge・fix の短い応答）は、今までどおり CLI の終わり方で決める。"""
+def test_work_without_a_result_file_fails_even_if_the_cli_ended_well(tmp_path, seq):
+    """作業の結果ファイルが無ければ、CLI が正常に終わってもステップは失敗する（#2337 の I10）。"""
     seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}})
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
+    assert s.state.results["impl"]["exit"] == 1 and "結果ファイルが無い" in s.state.results["impl"]["text"]
+
+
+def test_work_succeeds_on_an_ok_result_file_without_the_report_words(tmp_path, seq):
+    """報告の文に「結果: 完了」が無くても、作業の結果ファイルが ok なら成功する（#2337 の I10）。"""
+    seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}, "result": "ok"})
     s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
     assert s.state.results["impl"]["exit"] == 0
 
@@ -2811,14 +2853,22 @@ def test_full_without_report_resumes_up_to_three_times(tmp_path, seq, replies, r
     assert _resumes(calls) == resumes and s.state.results["design"]["exit"] == code
 
 
-def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
-    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
+def _gone(pid: int, timeout: float) -> bool:
+    """pid が終わる（ゾンビを含む）まで最大 timeout 秒待つ。"""
     import procs
 
+    deadline = time.monotonic() + timeout
+    while procs.pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return not procs.pid_alive(pid)
+
+
+def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
+    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
     pidfile = tmp_path / "pid"
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; exit 0", shell=True, timeout=1)
-    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+    assert _gone(int(pidfile.read_text()), timeout=3)
 
 
 def _pidfd_einval(procs_, timeout=None):
@@ -2834,7 +2884,7 @@ def test_run_ticking_timeout_stays_a_timeout_when_waiting_raises_einval(tmp_path
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; wait", shell=True, timeout=1)
     monkeypatch.undo()
-    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+    assert _gone(int(pidfile.read_text()), timeout=3)
 
 
 def test_run_ticking_stall_cut_keeps_its_own_error_when_waiting_raises_einval(monkeypatch):
@@ -2911,7 +2961,7 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert limits["basis"]["unknown_duration"] is False
     ci_wait = limits["ci_wait_timeout"]
     assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
-    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] > ci_wait
+    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
     for fixed in (900, 1800, 3600):
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
 

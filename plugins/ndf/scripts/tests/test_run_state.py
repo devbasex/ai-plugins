@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -31,10 +32,32 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 PLUGIN = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
-import run_owner  # noqa: E402
+import lease  # noqa: E402
+import procs  # noqa: E402
 import run_state  # noqa: E402
 
 OLD = time.time() - 2 * run_state.WINDOW
+SLUG = "o--r"
+
+
+def hold(key: str, pid: int, started: float, *, finished: bool = False, run: str = "run-old") -> dict:
+    """持ち主の記録を直に書く（`lease` の記録の形）。"""
+    now = "2026-11-08T00:00:00Z"
+    record = {"version": 1, "key": key, "entry": "test", "run": run, "started_at": now, "seen_at": now}
+    record.update(finished_at=now if finished else None, pid=pid, pid_started=started, host=socket.gethostname())
+    lease._store(lease.path_of(key, SLUG), record)
+    return record
+
+
+@pytest.fixture
+def sleeper():
+    """生きている別のプロセス（祖先でない持ち主）。"""
+    p = subprocess.Popen(["sleep", "60"])
+    try:
+        yield p.pid, procs.start_time(p.pid)
+    finally:
+        p.kill()
+        p.wait()
 
 
 def git(cwd, *args):
@@ -123,8 +146,7 @@ def test_an_open_pr_worktree_stays_even_when_its_owner_finished(place) -> None:
     """AC7・I3: open の PR のレビュー worktree はどの片付けでも外れない。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
-    run_owner.finish_owner(pr, run)
+    hold("cross-review:pr=7", os.getpid(), procs.start_time(os.getpid()), finished=True)
 
     items = run_state.sweep_states(root, view=View({7: "OPEN"}))
 
@@ -132,11 +154,11 @@ def test_an_open_pr_worktree_stays_even_when_its_owner_finished(place) -> None:
     assert pr.exists()
 
 
-def test_a_running_owner_keeps_its_worktree_even_after_the_merge(place) -> None:
-    """AC8・I2・I7: 生きている実行の worktree はマージ済みでも残り、照会もしない。"""
+def test_a_running_owner_keeps_its_worktree_even_after_the_merge(place, sleeper) -> None:
+    """AC8・受け入れ条件 8: 持ち主の記録の持ち主が生きている worktree はマージ済みでも残り、照会もしない。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
+    run = hold("cross-review:pr=7", *sleeper)["run"]
     view = View({7: "MERGED"})
 
     items = run_state.sweep_states(root, view=view)
@@ -144,6 +166,18 @@ def test_a_running_owner_keeps_its_worktree_even_after_the_merge(place) -> None:
     got = by_name(items)["pr7"]
     assert got["result"] == "kept" and run in got["reason"]
     assert pr.exists() and view.calls == []
+
+
+def test_a_dead_owner_does_not_keep_its_run_dir(place) -> None:
+    """受け入れ条件 8・I4: 持ち主の pid が別のプロセスに使い回されていれば（開始時刻が違う）、死んだ持ち主として外す。"""
+    root, base, _ = place
+    rf = base / "rf8"
+    add_tree(root, rf / "work")
+    hold("cross-refactoring:pr=8", os.getpid(), 1.0)
+
+    items = run_state.sweep_states(root, view=View({8: "MERGED"}))
+
+    assert by_name(items)["rf8"]["result"] == "removed" and not rf.exists()
 
 
 @pytest.mark.parametrize("work", ["tracked", "untracked", "unpushed"])
@@ -173,7 +207,8 @@ def test_undecidable_states_are_kept_and_do_not_stop_the_others(place) -> None:
     """I5・I6・I7: 壊れた記録・照会の失敗は kept「判定できない」。ほかは片付き、照会は 1 本 1 回まで。"""
     root, base, _ = place
     broken, failing, done = add_tree(root, base / "pr1"), add_tree(root, base / "pr2"), add_tree(root, base / "pr3")
-    run_state.owner_path(broken).write_text("{", encoding="utf-8")
+    (bad := lease.path_of("cross-review:pr=1", SLUG)).parent.mkdir(parents=True, exist_ok=True)
+    bad.write_text("{", encoding="utf-8")
     age(broken, failing, done)
     view = View({2: None, 3: "MERGED"})
 
@@ -268,32 +303,14 @@ def test_fix_files_and_test_tmp_follow_the_window(place) -> None:
 # ---------------- 持ち主の記録と開始 ----------------
 
 
-def test_touch_and_finish_write_only_for_the_same_run(place) -> None:
-    """I12: 違う run の touch / finish は記録を変えない。"""
+def test_check_start_looks_only_at_the_work_left_by_a_previous_run(place) -> None:
+    """AC15・I11: 持ち主の生死は持ち主の鍵が決め、開始は以前の実行の作業の有無だけで分ける。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
-    before = run_state.owner_path(pr).read_text(encoding="utf-8")
 
-    assert run_owner.touch_owner(pr, "other")[0] is False and run_owner.finish_owner(pr, None)[0] is False
-    assert run_state.owner_path(pr).read_text(encoding="utf-8") == before
-    assert run_owner.finish_owner(pr, run) == (True, None)
-    assert run_state.read_owner(pr)[0]["finished_at"]
-
-
-def test_check_start_separates_continuation_other_run_and_previous_run(place) -> None:
-    """AC15・I11・I12: 同じ実行の続きは通し、別の実行が動いていれば止め、以前の実行は作業の有無で分ける。"""
-    root, base, _ = place
-    pr = add_tree(root, base / "pr7")
-    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
-
-    assert run_state.check_start(pr, run) is None
-    assert "別の実行" in run_state.check_start(pr, None) and "--run" in run_state.check_start(pr, "other")
-
-    run_owner.finish_owner(pr, run)
-    assert run_state.check_start(pr, None) is None
+    assert run_state.check_start(pr) is None
     (pr / "a.txt").write_text("changed\n", encoding="utf-8")
-    assert "作業が残る" in run_state.check_start(pr, None)
+    assert "作業が残る" in run_state.check_start(pr)
     assert (pr / "a.txt").read_text(encoding="utf-8") == "changed\n"
 
 
@@ -306,7 +323,7 @@ def test_check_start_looks_at_the_work_tree_of_a_run_dir(place) -> None:
     git(work, "commit", "-q", "-m", "local")
     age(work, rf)
 
-    assert "未 push" in run_state.check_start(rf, None)
+    assert "未 push" in run_state.check_start(rf)
 
 
 # ---------------- merged の cleanup ----------------
@@ -349,6 +366,150 @@ def test_merged_cleanup_removes_rf_like_pr(place, tmp_path) -> None:
     assert "pr5" not in listed(root) and "rf5" not in listed(root)
     assert {i["result"] for i in out["items"]} <= {"removed", "deleted", "absent", "kept", "stopped", "pulled"}
     assert {"swept_removed", "swept_kept"} <= set(out["metrics"])
+
+
+# ---------------- テスト環境の破棄（#2567） ----------------
+
+FAKE_DOCKER = """#!/bin/sh
+printf '%s\\n' "$*" >> "$DOCKER_LOG"
+case "$*" in
+  *" down"*)
+    [ ! -d "$NDF_WORKTREE" ] || echo "tree-present $NDF_WORKTREE" >> "$DOCKER_LOG"
+    [ -z "${FAKE_DOWN_FAIL:-}" ] || { echo busy >&2; exit 1; }
+    ;;
+esac
+"""
+TESTENV = SCRIPTS / "worktree-testenv.sh"
+
+
+@pytest.fixture
+def declared(place, tmp_path, monkeypatch):
+    """テスト環境とコンテナの宣言があり、`NDF_WORKTREE_BASE` を与えないリポジトリ。(root, 置き場, 環境)。"""
+    root, _, systmp = place
+    monkeypatch.delenv("NDF_WORKTREE_BASE")
+    (root / ".ndf").mkdir()
+    worktree = {"version": 1, "localenv": {"kind": "compose", "compose_files": ["compose.yml"]}, "testenv": {}}
+    (root / ".ndf" / "worktree.json").write_text(json.dumps(worktree), encoding="utf-8")
+    suite = {"name": "unit", "runner": "sh", "command": "x", "container": {"service": "app"}}
+    (root / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": [suite]}}), encoding="utf-8")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "docker").write_text(FAKE_DOCKER, encoding="utf-8")
+    (bindir / "docker").chmod(0o755)
+    (bindir / "gh").write_text(FAKE_GH.format(py=sys.executable), encoding="utf-8")
+    (bindir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("DOCKER_LOG", str(tmp_path / "docker.log"))
+    monkeypatch.setenv("TMPDIR", str(systmp))
+    monkeypatch.setenv("NDF_PRESENTATION_DIR", str(tmp_path / "pres"))
+    return root, root / ".worktrees" / ".ndf" / "o--r", tmp_path / "docker.log"
+
+
+def assign(path) -> None:
+    subprocess.run(["bash", str(TESTENV), "env", str(path)], check=True, capture_output=True)
+
+
+def released(root, path) -> bool:
+    rows = json.loads((root / ".git" / "ndf" / "worktree-registry.json").read_text(encoding="utf-8"))["assignments"]
+    return [r for r in rows if r["worktree"] == str(path.resolve())][-1]["released_at"] is not None
+
+
+def merged_cleanup(root, n, head_ref="feature/z") -> dict:
+    head = git(root, "rev-parse", "HEAD").strip()
+    os.environ["FAKE_GH_PRS"] = json.dumps(
+        {str(n): {"headRefName": head_ref, "state": "MERGED", "mergeCommit": {"oid": head}, "headRefOid": head}}
+    )
+    try:
+        p = subprocess.run(
+            [sys.executable, str(SCRIPTS / "merged-steps.py"), "cleanup", str(n), "--root", str(root)], capture_output=True, text=True
+        )
+    finally:
+        del os.environ["FAKE_GH_PRS"]
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def test_the_new_place_is_found_by_the_cleanup_and_the_testenv_goes_first(declared) -> None:
+    root, base, log = declared
+    pr, work = add_tree(root, base / "pr5"), add_tree(root, base / "rf5" / "work")
+    assign(pr), assign(work)
+
+    out = merged_cleanup(root, 5)
+
+    got = {Path(i["name"]).name: i["result"] for i in out["items"]}
+    assert got["pr5"] == "removed" and got["work"] == "removed", out
+    calls = log.read_text(encoding="utf-8")
+    assert f"tree-present {pr.resolve()}" in calls and f"tree-present {work.resolve()}" in calls
+    assert " down --volumes" in calls
+    assert released(root, pr) and released(root, work)
+
+
+def test_the_new_place_is_found_by_the_sweep(declared) -> None:
+    root, base, log = declared
+    pr = add_tree(root, base / "pr7")
+    assign(pr)
+    age(pr)
+
+    items = run_state.sweep_states(root, view=View({7: "CLOSED"}))
+
+    assert by_name(items)["pr7"]["result"] == "removed"
+    assert f"tree-present {pr.resolve()}" in log.read_text(encoding="utf-8") and released(root, pr)
+
+
+def test_a_failed_discard_removes_the_worktree_and_names_the_environment(declared, monkeypatch) -> None:
+    root, _, _ = declared
+    path = root / ".worktrees" / "feature" / "z"
+    git(root, "worktree", "add", "-q", "-b", "feature/z", str(path))
+    assign(path)
+    monkeypatch.setenv("FAKE_DOWN_FAIL", "1")
+
+    out = merged_cleanup(root, 5)
+
+    item = next(i for i in out["items"] if i["kind"] == "worktree" and i["name"] == str(path))
+    assert item["result"] == "removed" and "テスト環境を破棄できない: repo-wt-feature-z-" in item["reason"]
+    assert not path.exists() and not released(root, path)
+
+
+def test_a_changed_tracked_file_keeps_the_worktree_and_its_testenv(declared) -> None:
+    root, _, log = declared
+    path = root / ".worktrees" / "feature" / "z"
+    git(root, "worktree", "add", "-q", "-b", "feature/z", str(path))
+    assign(path)
+    (path / "a.txt").write_text("changed\n", encoding="utf-8")
+
+    out = merged_cleanup(root, 5)
+
+    item = next(i for i in out["items"] if i["kind"] == "worktree" and i["name"] == str(path))
+    assert item["result"] == "kept" and path.exists() and not released(root, path)
+    assert not log.exists()
+
+
+def test_a_failed_close_keeps_the_worktree_until_the_next_cleanup(declared) -> None:
+    root, base, log = declared
+    decl_file = root / ".ndf" / "worktree.json"
+    decl = json.loads(decl_file.read_text(encoding="utf-8"))
+    decl["testenv"]["expose"] = {
+        "enabled": True,
+        "public_tag": "t",
+        "base_domain": "e.example",
+        "open_command": "true",
+        "close_command": "false",
+    }
+    decl_file.write_text(json.dumps(decl), encoding="utf-8")
+    pr = add_tree(root, base / "pr5")
+    subprocess.run(["bash", str(TESTENV), "up", str(pr), "--tag", "t"], check=True, capture_output=True)
+    subprocess.run(["bash", str(TESTENV), "expose", str(pr)], check=True, capture_output=True)
+
+    out = merged_cleanup(root, 5)
+
+    item = next(i for i in out["items"] if Path(i["name"]).name == "pr5")
+    assert item["result"] == "kept" and "テスト環境の公開を閉じられない" in item["reason"], out
+    assert pr.exists() and not released(root, pr) and " down" not in log.read_text(encoding="utf-8")
+
+    decl["testenv"]["expose"]["close_command"] = "true"
+    decl_file.write_text(json.dumps(decl), encoding="utf-8")
+    out = merged_cleanup(root, 5)
+
+    assert not pr.exists() and released(root, pr)
 
 
 # ---------------- 状態の一覧 ----------------
@@ -401,32 +562,40 @@ def _cr_init(place, tmp_path, *extra):
     return p, base / "pr7"
 
 
-def test_cross_review_init_stops_while_another_run_owns_the_worktree(place, tmp_path) -> None:
-    """I12: 窓の中の別の実行の記録があれば、--run 無し・違う --run の開始は止まり、記録は変わらない。一致すれば再開する。"""
-    _, base, _ = place
-    pr = base / "pr7"
-    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
-    before = run_state.owner_path(pr).read_text(encoding="utf-8")
+def test_cross_review_init_stops_while_another_run_owns_the_worktree(place, tmp_path, sleeper) -> None:
+    """受け入れ条件 3・4: 生きた別の持ち主がいれば、開始は stopped・3 で止まり、案内に打てない手段を書かない。"""
+    record = hold("cross-review:pr=7", *sleeper)
+    path = lease.path_of("cross-review:pr=7", SLUG)
+    before = path.read_text(encoding="utf-8")
 
-    for extra in ((), ("--run", "other")):
-        p, _ = _cr_init(place, tmp_path, *extra)
-        assert p.returncode == 1 and "別の実行" in p.stderr
-        assert run_state.owner_path(pr).read_text(encoding="utf-8") == before
+    p, _ = _cr_init(place, tmp_path)
 
-    p, _ = _cr_init(place, tmp_path, "--run", run)
-    assert p.returncode == 0, p.stderr
-    assert "RESUMED=1" in p.stdout and f"RUN={run}" in p.stdout and "SWEPT=" in p.stdout
+    assert p.returncode == 3, p.stderr
+    assert record["run"] in p.stderr and str(sleeper[0]) in p.stderr
+    assert "--run" not in p.stderr and "finish" not in p.stderr and "kill" not in p.stderr
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_cross_review_init_claims_after_a_finished_run(place, tmp_path) -> None:
-    """AC15・I11: 以前の実行（終わった記録）なら作業の無い開始は通り、新しい実行の記録を書く。"""
-    _, base, _ = place
-    pr = base / "pr7"
-    old = run_owner.claim_owner(pr, tool="cross-review", pr=7)
-    run_owner.finish_owner(pr, old)
+    """受け入れ条件 1・AC15: 以前の実行（終わった記録）なら開始は通り、新しい実行の記録を書いて終わりで返す。"""
+    old = hold("cross-review:pr=7", os.getpid(), procs.start_time(os.getpid()), finished=True)
 
     p, _ = _cr_init(place, tmp_path)
 
     assert p.returncode == 0, p.stderr
-    record = run_state.read_owner(pr)[0]
-    assert record["run"] != old and record["finished_at"] is None and f"RUN={record['run']}" in p.stdout
+    record = lease.read_lease("cross-review:pr=7", SLUG)
+    assert record["run"] != old["run"] and record["finished_at"] and "SWEPT=" in p.stdout
+
+
+def test_cross_review_init_reclaims_a_dead_owner(place, tmp_path) -> None:
+    """受け入れ条件 2: SIGKILL などで終わった時刻の無い記録は、次の開始が引き取って止まらない。"""
+    p = subprocess.Popen(["sleep", "60"])
+    dead = (p.pid, procs.start_time(p.pid))
+    p.kill()
+    p.wait()
+    old = hold("cross-review:pr=7", *dead)
+
+    got, _ = _cr_init(place, tmp_path)
+
+    assert got.returncode == 0, got.stderr
+    assert lease.read_lease("cross-review:pr=7", SLUG)["run"] != old["run"]

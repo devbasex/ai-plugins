@@ -1,8 +1,8 @@
-"""まとめた配布（#2436 の I9・I14・I15）: 範囲の Pull Request をレーンへ対応づける（`present`）・提示したコミットと
+"""まとめたリリース（#2436 の I9・I14・I15）: 範囲の Pull Request をレーンへ対応づける（`present`）・提示したコミットと
 `develop` の先頭を比べる 1 つの関数（`moved`）・範囲で答えられる依頼を決める（`answerable`）・提示のプランと本番の
 プランを作る（`build_plans`）。
 
-配布の中身は依頼の集合ではなく、提示したコミットの範囲 `main..<SHA>` で決まる。内訳は承認する人が読むための表示である。
+リリースの中身は依頼の集合ではなく、提示したコミットの範囲 `main..<SHA>` で決まる。内訳は承認する人が読むための表示である。
 """
 
 from __future__ import annotations
@@ -24,11 +24,15 @@ def moved(presented: str, head: str) -> bool:
     return bool(head) and head.strip() != presented.strip()
 
 
-def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]], requests: Iterable[dict]) -> dict:
+def map_lanes(
+    plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]], requests: Iterable[dict], home: Optional[Path] = None
+) -> dict:
     """範囲の Pull Request をレーンへ対応づける。
 
     依頼のあるレーンは依頼の `prs` が範囲にあるかで決め（依頼済みの印）、依頼の無いレーンは範囲の Pull Request が閉じる
-    課題がスプリントのレーンの `input.issues` にあるかで決める。どちらにも当たらないものは `orphans` に並べる。"""
+    課題がスプリントのレーンの `input.issues` にあるかで決める。どちらにも当たらないものは `orphans` に並べる。
+    別のリポジトリのレーン（`home` と違う `repo`）は自分のリポジトリで本番を出すため対応づけない（課題番号はリポジトリごとに
+    振られ、重なっても別の課題である。#2733 の I7）。`home` を省くと `repo` を持つレーンをすべて別のリポジトリとみなす。"""
     in_range = set(prs)
     lanes: dict[str, dict] = {}
     claimed: set[int] = set()
@@ -41,7 +45,7 @@ def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]
             row["requests"].append(req["id"])
             claimed |= set(hit)
     for ln in plan.lanes:
-        if not isinstance(ln.input, pp.SprintInput):
+        if not isinstance(ln.input, pp.SprintInput) or (ln.repo and (home is None or ln.own_release(home))):
             continue
         own = sorted(n for n in prs if n not in claimed and set(closes.get(n) or []) & set(ln.input.issues))
         if own:
@@ -52,10 +56,10 @@ def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]
 
 
 def answerable(pending: Iterable[dict], prs: Iterable[int], done: Iterable[int] = ()) -> list[str]:
-    """範囲 `prs` に Pull Request を持ち、残りもすべて出せた配布の範囲 `done` に入る依頼の ID（その配布の答えを受ける。I9・I15）。
+    """範囲 `prs` に Pull Request を持ち、残りもすべて出せたリリースの範囲 `done` に入る依頼の ID（そのリリースの答えを受ける。I9・I15）。
 
-    先の Pull Request が前の配布で本番に出た後に届いた依頼も、今回の範囲と合わせて全部が入れば答える。
-    一部が入らない依頼は答えず、次の配布へ回す（残りを本番へ出さずに配布済みと答えない）。"""
+    先の Pull Request が前のリリースで本番に出た後に届いた依頼も、今回の範囲と合わせて全部が入れば答える。
+    一部が入らない依頼は答えず、次のリリースへ回す（残りを本番へ出さずにリリース済みと答えない）。"""
     got = set(prs)
     have = got | set(done)
     return [r["id"] for r in pending if (want := set(r.get("prs") or [])) and want <= have and want & got]
@@ -77,6 +81,26 @@ def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _closing_numbers(fields: Optional[dict]) -> list[int]:
+    """まとめて読んだ 1 本分の欄から、閉じる課題の番号を取り出す。"""
+    refs = (fields or {}).get("closingIssuesReferences") or []
+    return [int(i["number"]) for i in refs if "number" in i]
+
+
+def _closes_one(root: Path, n: int, run: Callable) -> list[int]:
+    """`gh pr view` を 1 本分打って閉じる課題の番号を読む。読めなければ空。"""
+    got = run(
+        ["gh", "pr", "view", str(n), "--json", "closingIssuesReferences", "-q", "[.closingIssuesReferences[].number]"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        return [int(x) for x in json.loads(got.stdout or "[]")] if got.returncode == 0 else []
+    except ValueError:
+        return []
+
+
 def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bulk: Optional[Callable] = None) -> dict[int, list[int]]:
     """Pull Request が閉じる課題（`closingIssuesReferences`）。読めないものは空にする。
 
@@ -86,20 +110,8 @@ def closes_by_pr(root: Path, prs: list[int], run: Callable = subprocess.run, bul
             from release_lib.included import pr_fields as bulk
         got, _ = bulk(prs, cwd=str(root))
         if got is not None:
-            return {n: [int(i["number"]) for i in (got.get(n) or {}).get("closingIssuesReferences") or [] if "number" in i] for n in prs}
-    out: dict[int, list[int]] = {}
-    for n in prs:
-        got = run(
-            ["gh", "pr", "view", str(n), "--json", "closingIssuesReferences", "-q", "[.closingIssuesReferences[].number]"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        )
-        try:
-            out[n] = [int(x) for x in json.loads(got.stdout or "[]")] if got.returncode == 0 else []
-        except ValueError:
-            out[n] = []
-    return out
+            return {n: _closing_numbers(got.get(n)) for n in prs}
+    return {n: _closes_one(root, n, run) for n in prs}
 
 
 def present(
@@ -123,11 +135,11 @@ def present(
     sha = approved_commit.material_sha(approval)
     prs = included.read_included(approval)
     closes = closes_of(root, prs)
-    mapped = map_lanes(plan, prs, closes, requests)
+    mapped = map_lanes(plan, prs, closes, requests, root)
     added = None
     if first:
         extra = [n for n in prs if n not in set(first.get("prs") or [])]
-        added = map_lanes(plan, extra, closes, requests)
+        added = map_lanes(plan, extra, closes, requests, root)
     data = {"sha": sha, "prs": prs, "lanes": mapped["lanes"], "orphans": mapped["orphans"], "added": added}
     d = Path(d)
     work = present_state_dir(d) / "work"
@@ -147,7 +159,7 @@ def present_state_dir(d: Path) -> Path:
 
 
 def write_requests(main: Path, name: str, requests: list[dict]) -> None:
-    """耐久ワークフローが受けた配布の依頼を `releases/requests.json` へ書く（`parallel.py present` が内訳に使う）。"""
+    """耐久ワークフローが受けたリリースの依頼を `releases/requests.json` へ書く（`parallel.py present` が内訳に使う）。"""
     rel = pp.plan_dir(main, name) / "releases"
     rel.mkdir(parents=True, exist_ok=True)
     (rel / "requests.json").write_text(json.dumps(requests, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -165,6 +177,14 @@ def helper_name(name: str, seq: int) -> str:
 def pipeline_cmd(supervise: str, d: Path) -> str:
     """一時レーンが流す 1 行（提示のプラン → 本番のプラン）。"""
     return f"{supervise} queue {d / 'present.json'} --then {d / 'release.json'} --done {d / 'done.json'}"
+
+
+def record_answer_cmd(d: Path, seq: int, k: int) -> str:
+    """確定の後に利用者の承認を答えの記録（`answer.json`）へ書く 1 行。提示のプランの `approve` がこの記録を読む。"""
+    from gate_answer import RELEASE_GATE
+
+    script = Path(__file__).resolve().parents[1] / "sprint-state.py"
+    return f"python3 {script} gate {d / 'answer.json'} '{RELEASE_GATE}' --what 'まとめたリリース {seq} の提示 {k}' --by user --outcome approved"
 
 
 def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: Optional[Callable] = None) -> Path:
@@ -199,12 +219,12 @@ def answer_state(main: Path) -> dict:
 
 
 def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mode: str, facts_from: str, answer_from: str) -> list[dict]:
-    """まとめた配布（#2436）の提示のプランの承認ゲート 2: MVV 判定（mvv・note）→ approve の順に置く。
+    """まとめたリリース（#2436）の提示のプランのリリース承認ゲート: MVV 判定（mvv・note）→ approve の順に置く。
 
     今の本番のプランでは MVV 判定と approve が排他だが、提示のプランは両方を並べる。MVV 判定が通せば承認の記録が
-    既にあるため approve は答えの記録を読まずに通り、関門（10）なら提示のプランは承認ゲートで終わる。確定の後は
+    既にあるため approve は答えの記録を読まずに通り、承認ゲート（10）なら提示のプランは承認ゲートで終わる。確定の後は
     一時レーンが答えを `answer_from` へ書いて `--from approve` で続ける。"""
-    from gate_answer import GATE_2
+    from gate_answer import RELEASE_GATE
     from supervise_lib.paths import MVV_PY, STEPS_PY
     from supervise_lib.release_templates import MVV_NOTE, material_path, mvv_gate_steps
     from supervise_lib.verify_steps import handoff_step, reject_step
@@ -222,7 +242,7 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
         {
             "id": "approve",
             "type": "run",
-            "stage": "配布",
+            "stage": "デプロイ",
             "timeout": 120,
             **({"cwd": repo} if repo else {}),
             "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {shlex.quote(facts_from)}"
@@ -231,29 +251,29 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
             "gate_next": "end",
         }
     )
-    steps.append(handoff_step(str(Path(state).resolve()), GATE_2, "判定のコメント"))
-    steps.append(reject_step(str(Path(state).resolve()), GATE_2, "mvv", root=repo or "."))
+    steps.append(handoff_step(str(Path(state).resolve()), RELEASE_GATE, "判定のコメント"))
+    steps.append(reject_step(str(Path(state).resolve()), RELEASE_GATE, "mvv", root=repo or "."))
     return steps
 
 
-RELEASE_REQUEST_PHASE = "配布の依頼"
+RELEASE_REQUEST_PHASE = "リリースの依頼"
 
 
 def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str] | None = None) -> dict:
-    """並列の計画のレーンの本番のステージ（#2436 の F6）。本番を流さず、オーガナイザーへ配布の依頼を送る。
+    """並列の計画のレーンの本番のステージ（#2436 の F6）。本番を流さず、オーガナイザーへリリースの依頼を送る。
 
     ステップは `parallel-request` の 1 つで、依頼を送れば 10（承認ゲート）で終わり、自分の Pull Request が
     すでに `main` にあれば送らずに 0 で終わる（I15）。`prs` は出す版の Pull Request（`{queue_pr:<名>}` でもよい）。"""
     from supervise_lib.paths import PARALLEL_PY
+    from supervise_lib.plan import PLAN_ISSUES
     from supervise_lib.procedures import with_record
 
-    issues = " ".join(str(n) for n in (a.issue or []))
     pr_args = " ".join(prs or [])
+    # 課題の一覧はプランの `課題` だけに持ち、流す時点に `{plan_issues}` で埋める（#2717 の決定 1）
     cmd = (
         f"{PARALLEL_PY} request {shlex.quote(plan_name)} --lane {shlex.quote(lane)}"
         + (f" --prs {pr_args}" if pr_args else "")
-        + (f" --issues {issues}" if issues else "")
-        + " --state {state_dir}"
+        + f" --issues {PLAN_ISSUES} --state {{state_dir}}"
     )
     return with_record(
         {
@@ -263,17 +283,17 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
             "作業場所": repo,
             "規則": "",
             "並列の計画": plan_name,
-            "steps": [{"id": "parallel-request", "type": "run", "stage": "配布", "timeout": 300, "cmd": cmd, "next": "end"}],
+            "steps": [{"id": "parallel-request", "type": "run", "stage": "デプロイ", "timeout": 300, "cmd": cmd, "next": "end"}],
         }
     )
 
 
 def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]:
-    """まとめた配布（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
+    """まとめたリリース（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
 
     提示のプランは開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで
-    流し、`parallel.py present` でレーンの内訳を足し、最後に承認ゲート 2（MVV 判定 → approve）を置く。本番のプランは
-    承認ゲート 2 を持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。
+    流し、`parallel.py present` でレーンの内訳を足し、最後にリリース承認ゲート（MVV 判定 → approve）を置く。本番のプランは
+    リリース承認ゲートを持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。
     本番のプランの承認資料はこの提示の承認資料で、先頭の approve は提示のプランの facts と答えの記録を読む。"""
     from supervise_lib.decl import apply_decls, decl_fields
     from supervise_lib.paths import PARALLEL_PY
@@ -324,12 +344,12 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     facts = _dev_approval_steps(ns, repo, approval, "", ",".join((ns.release or {}).get("runtimes") or []))
     for s in facts:
         s.pop("on_fail", None)  # 提示のプランに judge は無い。落ちたらそのステップで止まる
-    facts[0]["gate_as_ok"] = True  # facts の 10 は関門にせず、承認の成否は後段の mvv・approve が決める
+    facts[0]["gate_as_ok"] = True  # facts の 10 は承認ゲートにせず、承認の成否は後段の mvv・approve が決める
     facts[-1]["next"] = "present"
     present = {
         "id": "present",
         "type": "run",
-        "stage": "配布",
+        "stage": "デプロイ",
         "timeout": 300,
         "cwd": repo,
         "cmd": f"{PARALLEL_PY} present {shlex.quote(name)} {seq} {k} --approval {approval}"
@@ -339,7 +359,7 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
     gate = present_gate_steps(str(state), repo, approval, "$(cat {state_dir}/work/prs.txt)", "standard", str(present_state), str(state))
     present_plan = with_record(
         {
-            "フェーズ": "配布（提示）",
+            "フェーズ": "リリース（提示）",
             "課題": [],
             "モード": "standard",
             "作業場所": repo,

@@ -25,10 +25,14 @@
     }
   },
   "env": [
+    "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_MVV_STATE_DIR",
-    "NDF_PRESENTATION_DIR"
+    "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
   ],
   "settings": [],
   "stdin": "none",

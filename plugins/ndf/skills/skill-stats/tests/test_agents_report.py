@@ -279,3 +279,21 @@ def test_a_session_narrows_the_skill_statistics_to_the_conductor() -> None:
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
     assert out["meta"]["transcripts"] == 1
+
+
+def test_the_json_keys_keep_their_order(report) -> None:
+    # 結果 JSON のキーの順（現状固定。#2422）。エージェントの報告をまとめて渡しても順を変えない
+    assert list(report) == [
+        "meta",
+        "total",
+        "grand_skills",
+        "projects",
+        "agents",
+        "agent_summary",
+        "layer_totals",
+        "totals",
+        "role_usage",
+        "excluded",
+        "unphased_supervisors",
+    ]
+    assert list(report["meta"])[-3:] == ["window_limit", "window_limit_source", "records_without_decisions"]
