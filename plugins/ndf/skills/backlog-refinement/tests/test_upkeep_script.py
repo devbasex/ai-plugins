@@ -786,3 +786,137 @@ def test_reparent_waits_for_a_following_policy(env):
     assert code == 0 and out["metrics"]["not_reparented"] == [5] and not env.state().get("parents")
     pol = [i for i in env.state()["issues"].values() if i["title"] == "大方針"][0]
     assert {x["name"] for x in pol["labels"]} == {"policy", "needs-decision"}
+
+
+# ---------------- 並行する棚卸しの実行（#2847） ----------------
+
+_BANDS = {1: "なし", 3: "表示", 5: "機能", 13: "全体"}
+
+
+def _scores(env, numbers, name, digests=None, ubv=3):
+    """rank --scores の入力。digests に無い番号は仮の要約値を付ける。"""
+    rows = [
+        {
+            "number": n,
+            "digest": (digests or {}).get(n, f"d{n}"),
+            "ubv": {"step": ubv, "why": "根拠", "impact": _BANDS[ubv]},
+            "tc": {"step": 1, "why": "根拠"},
+            "rr_oe": {"step": 1, "why": "根拠"},
+            "size": {"step": 1, "why": "実績と比べた"},
+        }  # fmt: skip
+        for n in numbers
+    ]
+    f = env.path / name
+    f.write_text(json.dumps({"version": 1, "issues": rows}, ensure_ascii=False))
+    return str(f)
+
+
+def _add_issue(env, n, milestone="M2", **kw):
+    env.set(lambda st: st["issues"].update({str(n): _issue(n, f"別のレーンが起票した {n}", milestone=milestone, **kw)}))
+
+
+def _depth_plan(env, name, **body):
+    f = env.path / name
+    f.write_text(json.dumps({"repo": "o/r", "actions": [], **body}, ensure_ascii=False))
+    return str(f)
+
+
+def test_review_report_keeps_its_own_round_while_a_diff_runs(env):
+    # 2026-11-08 の順序（E2 → E3 → E4 → E5 → E6 → E7 → E8）を見直しと差分の棚卸しで交互に流す（受け入れ条件 1・2・3・5・7）
+    run = env.owner()  # E1
+    code, rc = env.run("candidates", "--since-ref", "v1", "--depth", "review", "--run", run)  # E2
+    assert code == 0 and rc["metrics"]["run"] == run
+    _add_issue(env, 8)  # 別のレーンが起票し、差分の棚卸しの open の件数が見直しと違う
+    code, dc = env.run("candidates", "--since-ref", "v1")  # E3
+    assert dc["metrics"]["run"] is None and dc["metrics"]["open"] != rc["metrics"]["open"]
+    snap = next(i for i in rc["items"] if i.get("number") == 4)
+    close = _action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})
+    code, first = env.run("apply", "--plan", _depth_plan(env, "review-1.json", depth="review", owner=run, actions=[close]))  # E4
+    assert code == 0 and first["metrics"]["applied"] == [4]
+    code, rk = env.run("rank", "--scores", _scores(env, range(1, 9), "s-review.json"), "--run", run)  # E5
+    assert code == 0
+    _add_issue(env, 9)
+    code, drk = env.run("rank", "--scores", _scores(env, range(1, 10), "s-diff.json"))  # E6
+    assert drk["metrics"]["digest"] != rk["metrics"]["digest"]
+    code, dc = env.run("candidates", "--since-ref", "v1")  # 差分の棚卸しの次の回は見直しの apply・rank を消さない
+    rd = env.path / "state" / "o--r" / "runs" / run
+    assert (rd / "apply.json").is_file() and (rd / "rank.json").is_file()
+    code, tab = env.run("apply", "--plan", _depth_plan(env, "review-2.json", depth="review", owner=run, rank=rk["metrics"]["digest"]))  # E7
+    assert code == 0 and tab["metrics"]["tables"]["failed"] == [] and tab["metrics"]["tables"]["written"]
+    code, rep = env.run("report", "--depth", "review", "--run", run)  # E8
+    m = rep["metrics"]
+    assert code == 0
+    assert m["targets"] == rc["metrics"]["candidates"] and m["by_route"] == rc["metrics"]["by_route"]
+    assert m["open_before"] == rc["metrics"]["open"]
+    assert m["verdicts"] == first["metrics"]["verdicts"] and m["applied"] == 1 and m["closed"] == [4]
+    assert m["ranked"] == {x["title"]: len(x["rows"]) for x in rk["metrics"]["milestones"]}
+    # 差分の棚卸しの報告と深さの記録は、差分の棚卸し自身の candidates の値を写す（受け入れ条件 5）
+    code, drep = env.run("report")
+    assert code == 0 and drep["metrics"]["targets"] == dc["metrics"]["candidates"]
+    code, row = env.run("depth", "record", "--depth", "diff")
+    assert code == 0 and row["items"][0]["open_before"] == dc["metrics"]["open"]
+
+
+def test_overhaul_report_keeps_its_own_round_while_a_diff_runs(env):
+    # 大整理の回に、別の実行の candidates・rank の値が入らない（受け入れ条件 4）
+    code, claim = env.run("owner", "claim", "--what", "overhaul", "--pid", str(os.getpid()))
+    run = claim["metrics"]["run"]
+    code, oc = env.run("candidates", "--since-ref", "v1", "--depth", "review", "--run", run)
+    assert code == 0
+    _add_issue(env, 8)
+    plan = {"depth": "overhaul", "owner": run, "create": [_create("大整理の起票")]}
+    code, app = env.run("apply", "--plan", _depth_plan(env, "overhaul.json", **plan))
+    assert code == 0 and len(app["metrics"]["created"]) == 1
+    env.run("candidates", "--since-ref", "v1")
+    env.run("rank", "--scores", _scores(env, range(1, 10), "s-diff.json"))
+    assert (env.path / "state" / "o--r" / "runs" / run / "apply.json").is_file()
+    code, rep = env.run("report", "--depth", "overhaul", "--run", run)
+    m = rep["metrics"]
+    assert code == 0 and m["open_before"] == oc["metrics"]["open"]
+    assert m["closed"] == [] and m["created"] == [c["number"] for c in app["metrics"]["created"]]
+    assert "ranked" not in m or m["ranked"] in ({}, None)
+
+
+def test_rerun_candidates_of_the_same_run_drops_its_previous_round(env):
+    # 同じ実行の candidates の打ち直しは、その実行の前の apply と rank を報告へ混ぜない（受け入れ条件 6）
+    run = env.owner()
+    _, rc = env.run("candidates", "--since-ref", "v1", "--depth", "review", "--run", run)
+    snap = next(i for i in rc["items"] if i.get("number") == 4)
+    close = _action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})
+    env.run("apply", "--plan", _depth_plan(env, "review.json", depth="review", owner=run, actions=[close]))
+    env.run("candidates", "--since-ref", "v1", "--depth", "review", "--run", run)
+    code, rep = env.run("report", "--run", run)
+    assert code == 0 and "applied" not in rep["metrics"] and "closed" not in rep["metrics"]
+
+
+def test_records_across_rounds_stay_shared(env):
+    # 見直しの rank が書いた見積もりを差分の棚卸しの unscored が読み、反映の済みの記録で 2 度書かない（受け入れ条件 6・I4）
+    env.set(lambda st: [st["issues"][k].update(created_at=FUTURE) for k in ("6", "7")])
+    run = env.owner()
+    _, rc = env.run("candidates", "--since-ref", "v1", "--depth", "review", "--run", run)
+    snaps = {i["number"]: i for i in rc["items"] if i.get("number")}
+    env.run("rank", "--scores", _scores(env, range(1, 8), "s.json", digests={7: snaps[7]["digest"]}), "--run", run)
+    close = _action(snaps[4], "閉じてよい", {"state": "closed", "state_reason": "completed"})
+    code, _ = env.run("apply", "--plan", _depth_plan(env, "review.json", depth="review", owner=run, actions=[close]))
+    assert code == 0
+    _, dc = env.run("candidates", "--since-ref", "v1")
+    unscored = {i["number"] for i in dc["items"] if "unscored" in i.get("routes", [])}
+    assert unscored == {6}
+    before = len(env.writes())
+    code, out = env.run("apply", "--plan", _depth_plan(env, "diff.json", actions=[close]))
+    assert code == 0 and out["metrics"]["already"] == [4] and len(env.writes()) == before
+
+
+@pytest.mark.parametrize("cmd", [("candidates", "--since-ref", "v1"), ("rank",), ("report",)])
+@pytest.mark.parametrize("bad", ["../x", "", "-x", "a" * 65])
+def test_malformed_run_stops_without_writing(env, cmd, bad):
+    # 実行の識別子の形が合わなければ終了コード 2 で止まり、置き場の外に書かない（I5）
+    env.run("candidates", "--since-ref", "v1")
+    p = subprocess.run(
+        [PY, str(SCRIPT), *cmd, f"--run={bad}", "--root", str(env.root)],
+        env=dict(os.environ, PATH=os.environ["PATH"], NDF_UPKEEP_STATE_DIR=str(env.path / "state"), NDF_UPKEEP_NO_SLEEP="1"),
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode == 2, (p.stdout, p.stderr)
+    assert not (env.path / "state" / "o--r" / "runs").exists() and not (env.path / "state" / "x").exists()
