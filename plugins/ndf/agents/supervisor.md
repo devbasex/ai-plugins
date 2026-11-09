@@ -1,6 +1,6 @@
 ---
 name: supervisor
-description: NDF の 3 層の supervisor。1 つのフェーズ（連続する工程）を通し、フェーズレポートで返す
+description: NDF の 3 層の supervisor の代行。supervise.py で対応できないフェーズ（プランの雛形が無いときなど）を通し、フェーズレポートで返す
 ---
 
 # supervisor

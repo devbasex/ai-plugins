@@ -52,17 +52,17 @@ from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
-    """動いている並列の計画のレーンなら (計画名, レーン名)。プランを組む時点に 1 度だけ判定する（#2436 の I12）。"""
+    """動いている並列の計画のレーンで、まとめたリリースに入るものなら (計画名, レーン名)。プランを組む時点に 1 度だけ判定する
+    （#2436 の I12）。別のリポジトリのレーンは自分のリポジトリの設定で本番を出すため None（#2733 の I7）。"""
     import decl
     import parallel_lane as pl
 
-    main = decl.main_dir(repo) or Path(repo)
-    got = pl.lane_of(main)
-    return (got[0], got[1].name) if got else None
+    got = pl.lane_of(decl.main_dir(repo) or Path(repo))
+    return (got[0], got[1].name) if got and not (hasattr(got, "own_release") and got.own_release()) else None
 
 
 def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。並列の計画のレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
     lane = parallel_lane(repo)
     if lane:
         from parallel_release import plan_release_request
@@ -204,7 +204,7 @@ def close_waves(a) -> list[dict]:
     """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
     repo = str(Path(a.worktree).resolve())
     if getattr(a, "pace", None) == "auto":
-        # 開発ループの周回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
+        # 開発ループの 1 回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
         return [{"name": "まとめ", "plans": {"close": close_plan(a, repo)}}]
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
@@ -452,7 +452,7 @@ def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
 def manifest_head(a, pace: str, closing: bool = False) -> dict:
     """manifest の見出し（スプリント / 進め方 / 状態 / ブランチ）。"""
     head = {"スプリント": a.name}
-    if closing and pace == "auto":  # new close --pace auto（開発ループの周回のまとめ。#2089）
+    if closing and pace == "auto":  # new close --pace auto（開発ループの 1 回のまとめ。#2089）
         head.update({"進め方": "auto", "状態": sprint_state_path(a)})
         return head
     if pace in MVV_PACES:

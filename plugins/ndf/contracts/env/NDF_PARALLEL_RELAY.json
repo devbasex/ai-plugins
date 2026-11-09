@@ -1,5 +1,5 @@
 {
   "name": "NDF_PARALLEL_RELAY",
   "set_by": "user",
-  "summary": "並列の計画の run が打つ統括役の CLI の差し替え（テスト用。plugins/ndf/scripts/lib/parallel_run.py）"
+  "summary": "並列の計画の run が打つリレーハブの CLI の差し替え（テスト用。plugins/ndf/scripts/lib/parallel_run.py）"
 }

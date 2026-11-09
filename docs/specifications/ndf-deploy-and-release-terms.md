@@ -49,7 +49,7 @@
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
 | NDF のリリース（`ndf-release`） | デプロイ・リリース・開発版のデプロイ・リリース記録の段階・リリース対象・アーティファクト・導入先のランタイム |
-| NDF の開発ワークフロー（`ndf-workflow`） | 工程の名前・フェーズの名前・周回の結果・リリースの依頼・旧い値の読み替え |
+| NDF の開発ワークフロー（`ndf-workflow`） | 工程の名前・フェーズの名前・ループの 1 回の結果・リリースの依頼・旧い値の読み替え |
 | NDF の Factory（`ndf-factory`） | リリースの実行・まとめたリリース |
 
 `ndf-release` と `ndf-workflow` は共有カーネルの関係にあり、同じ用語集（`docs/glossary/glossary.json`）と
@@ -64,7 +64,7 @@
 | 用語集 | `glossary.py`（`render` が文書を作る。語の追加・廃止は用語集の JSON を直す変更） | 用語集 | 語 | 意味・廃止した語・コンテキスト |
 | 旧い値の読み替えの表 | NDF のスクリプト（`plugins/ndf/scripts/data/legacy-values.json`） | 表 | 値の集合 | 旧い値 → 新しい値の組 |
 | 禁止語の宣言 | 利用者の設定（`.ndf/glossary.json` の `check.banned`） | 宣言 | — | 禁止語・検査する範囲・外す範囲 |
-| Factory のフェーズの変換 | Factory のランナー（`factory/runner/src/translate.ts` と `legacy-phases.ts`） | 変換の表 | — | NDF のフェーズの名前 → Factory の段 |
+| Factory のフェーズの変換 | Factory のランナーのエージェント（`factory/runner/src/translate.ts` と `legacy-phases.ts`） | 変換の表 | — | NDF のフェーズの名前 → Factory の段 |
 
 ### 語を選ぶ規則
 
@@ -124,7 +124,7 @@
 | 要素 | 責務 |
 | --- | --- |
 | `plugins/ndf/scripts/data/legacy-values.json` | 値の集合ごとに旧い値 → 新しい値を持つ。旧い値を持つ NDF のファイルはこの表だけである |
-| `plugins/ndf/scripts/lib/legacy_values.py` | 表を読んで I3 を確かめる。`to_current(<値の集合>, <値>)` が変換し、`current_plan()` がプランのフェーズを、`normalize_laps()` がループの記録の周回の結果と失敗の種類を、`old_values()` が旧い値の一覧を返す |
+| `plugins/ndf/scripts/lib/legacy_values.py` | 表を読んで I3 を確かめる。`to_current(<値の集合>, <値>)` が変換し、`current_plan()` がプランのフェーズを、`normalize_laps()` がループの記録のループの 1 回の結果と失敗の種類を、`old_values()` が旧い値の一覧を返す |
 | シェルの読み手（`lib/projects-common.sh`・`projects-sync.sh`） | 同じ表を `jq` で引く |
 | `lib/dist_record.py` | 見出し `## リリース記録` と旧い見出しの両方を記録の始まりとして読み、段階の値を変換する。最後の記録 1 つを選ぶ規則は変えない |
 
@@ -208,7 +208,7 @@ Vale・textlint-rule-prh は使わない。どちらも Pull Request で足し�
 | リリース記録の見出し（`record_heading`） | `release-steps.py record`・`release` の手順 | `lib/dist_record.py` |
 | リリース記録の段階（`record_stage_prefix`） | `sprint-close.py`・`release` の手順 | `lib/dist_record.py` |
 | フェーズの名前（`phase`） | `supervise_lib/release_templates.py`・`lib/parallel_release.py` | `sprint-state.py`・`supervise_lib/queue.py`・`estimate.py`・`lib/estimate_records.py`・`lib/slow_step.py`・`lib/sprint_loop_gate.py`・Factory の `legacy-phases.ts` |
-| 周回の結果（`lap_outcome`）・失敗の種類（`failure_kind`） | `lib/sprint_loop_names.py`・`lib/sprint_loop_gate2.py` | `lib/sprint_loop_record.py`・`lib/parallel_repo.py`（`normalize_laps()` を通す） |
+| ループの 1 回の結果（`lap_outcome`）・失敗の種類（`failure_kind`） | `lib/sprint_loop_names.py`・`lib/sprint_loop_gate2.py` | `lib/sprint_loop_record.py`・`lib/parallel_repo.py`（`normalize_laps()` を通す） |
 | パイプラインのステージの名前（`pipeline_stage`） | `supervise_lib/sprint.py` | 表が持つだけで、`to_current("pipeline_stage", …)` を呼ぶ読み手は無い（2026-11-08 の `git grep -n pipeline_stage -- plugins/ndf/scripts` のヒットは `legacy-values.json` の 1 件と `tests/test_legacy_values.py` の 2 件だけ） |
 
 リリース記録の段階の残りの値（`検証`・`本番`）は変えない。`検証` は開発版のデプロイまでを終えた記録の値として読む。
@@ -279,8 +279,8 @@ Factory の画面・API・OpenAPI とスキーマの説明は、この文書の�
 
 - 禁止語の宣言を置いた一時のリポジトリで、検査する範囲のファイル（Markdown・Python のコメント・TypeScript の文字列）へ禁止語の行を足すと、規則 `banned` がファイルと行を出して失敗すること。外す範囲のファイルへ足した行では失敗しないこと。宣言が無いリポジトリでは走らないこと
 - `glossary.py check --file` が、用語集で「デプロイ」「リリース」「開発版のデプロイ」の廃止した語にした語を含む文書で廃止した語を指摘し、置き換え先の語を出すこと。禁止語を含む語・意味を構造の検査が指摘すること
-- 書き手（プランのテンプレート・周回の締め・リリース記録・見積もりの行・パイプラインの組み立て）が出す値に、読み替えの表の旧い値が含まれないこと
-- 値の集合ごとに、旧い値の記録と新しい値の記録を同じ読み手へ渡すと同じ結果になること。`lap_outcome` の旧い値の周回を持つループの状態で次の周回を選ぶと、保留の周回として扱って選び直さないこと。旧い見出しのリリース記録を `sprint-close.py` が読み、同じ判定を出すこと
+- 書き手（プランのテンプレート・ループの 1 回の締め・リリース記録・見積もりの行・パイプラインの組み立て）が出す値に、読み替えの表の旧い値が含まれないこと
+- 値の集合ごとに、旧い値の記録と新しい値の記録を同じ読み手へ渡すと同じ結果になること。`lap_outcome` の旧い値のループの 1 回を持つループの状態でループの次の 1 回を選ぶと、保留したループの 1 回として扱って選び直さないこと。旧い見出しのリリース記録を `sprint-close.py` が読み、同じ判定を出すこと
 - 表の 1 つの集合で旧い値を 2 つの新しい値へ変換する形、新しい値を旧い値の欄に置く形を読むと、例外で止まること
 - 新しい選択肢が無く旧い選択肢があるボードへ工程を書くと、旧い選択肢へ書き、`NOTE:` に案内が出ること
 - `plugins/ndf/manifests/` と `plugins/ndf/contracts/entrypoints/` の副命令の名前が変わらないこと

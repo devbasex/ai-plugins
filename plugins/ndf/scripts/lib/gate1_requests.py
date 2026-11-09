@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -47,8 +48,8 @@ def lane_unmatched(env, rid: str, reason: str) -> None:
 
         got = parallel_lane.lane_of(env.main_dir())
         if got:
-            parallel_lane.send_unmatched(env.main_dir(), got[0], got[1].name, rid, reason)
-    except Exception:  # noqa: BLE001 — 知らせを送れなくても周回は止めない
+            parallel_lane.send_unmatched(parallel_lane.home_of(got, env.main_dir()), got[0], got[1].name, rid, reason)
+    except Exception:  # noqa: BLE001 — 知らせを送れなくてもループの 1 回は止めない
         return
 
 
@@ -99,9 +100,20 @@ def merge_only(run, main: str | Path, pr: int, issue: int, old: str, new: str) -
 # ---------------------------------------------------------------- 前のループの待ち
 
 
-def prior_id(loop: str, issue: int, lap: int, head: str = "") -> str:
-    """前のループの待ちの依頼の id。行から決まり、問い直すときだけ新しい先頭の SHA を足す。"""
-    return f"{loop}-w{issue}-l{lap}" + (f"-{head[:HEAD_LEN]}" if head else "")
+def prior_id(loop: str, issue: int, lap: int, head: str = "", scope: str = "") -> str:
+    """前のループの待ちの依頼の id。行から決まり、別のリポジトリのループは `scope`（`repo_scope`）を、問い直すときだけ新しい先頭の
+    SHA を足す（別のリポジトリの同じ名前のループ・課題・回数と id を分ける。#2733）。"""
+    return f"{loop}-w{issue}-l{lap}" + (f"-r{scope}" if scope else "") + (f"-{head[:HEAD_LEN]}" if head else "")
+
+
+def repo_scope(main: str | Path, home: str | Path | None) -> str:
+    """ループの記録を読むリポジトリ `main` の識別。計画の置き場 `home`（省けば `main`）と同じなら空（従来の id のまま）。"""
+    import hashlib
+
+    from parallel_files import resolved_path
+
+    got = resolved_path(Path(main))
+    return "" if home is None or got == resolved_path(Path(home)) else hashlib.sha1(got.encode()).hexdigest()[:8]
 
 
 def _other_plan_running(main: Path, w: dict) -> bool:
@@ -115,15 +127,19 @@ def _other_plan_running(main: Path, w: dict) -> bool:
         return False
 
 
-def prior_rows(main: str | Path, name: str) -> tuple[list[tuple[str, dict]], list[dict]]:
-    """計画のレーンでないループの、答えがまだで設計 PR を持つ行の (ループの名前, 行) と、読めなかったループ。"""
+def prior_rows(main: str | Path, name: str, home: str | Path | None = None) -> tuple[list[tuple[str, dict]], list[dict]]:
+    """計画のレーンでないループの、答えがまだで設計 PR を持つ行の (ループの名前, 行) と、読めなかったループ。
+    ループの記録は `main`（レーンのリポジトリ）から、計画とその状態は `home`（計画の置き場。省けば `main`）から読む（#2733）。"""
     import parallel_plan as pp
 
     main = Path(main)
+    home = Path(home) if home is not None else main
     try:
-        lanes = {ln.input.loop for ln in pp.load_valid_plan(main, name).lanes if ln.input.kind == "loop"}
+        plan = pp.load_valid_plan(home, name)
     except (OSError, ValueError) as e:
         return [], [{"loop": name, "reason": f"計画を読めない: {e}"}]
+    here = pp.resolved_path(main)  # 現役のループは、レーンのリポジトリが探す先 `main` と同じレーンだけ（別のリポジトリの同名は旧ループ）
+    lanes = {ln.input.loop for ln in plan.lanes if ln.input.kind == "loop" and pp.resolved_path(ln.repo_dir(home)) == here}
     rows, skipped = [], []
     for p in sorted((main / LOOP_DIR).glob("*/loop.json")):
         loop = p.parent.name
@@ -134,25 +150,31 @@ def prior_rows(main: str | Path, name: str) -> tuple[list[tuple[str, dict]], lis
         except (OSError, ValueError, jsonio.JsonReadError) as e:
             skipped.append({"loop": loop, "reason": str(e)[:200]})
             continue
-        rows += [(loop, w) for w in rec.get("waiting") or [] if not w.get("answer") and w.get("pr") and not _other_plan_running(main, w)]
+        rows += [(loop, w) for w in rec.get("waiting") or [] if not w.get("answer") and w.get("pr") and not _other_plan_running(home, w)]
     return rows, skipped
 
 
-def prior_request(loop: str, w: dict, stamp: str, at: str) -> dict:
-    """問いの一覧へ送る前のループの待ち（`kind: gate1`・`loop`。`lane` を持たない）。"""
+def prior_request(loop: str, w: dict, stamp: str, at: str, via: str | None = None, scope: str = "") -> dict:
+    """問いの一覧へ送る前のループの待ち（`kind: gate1`・`loop`。`lane` を持たない）。`via` は送ったレーンの名前で、別のリポジトリの
+    ループの記録・設計 PR をそのレーンのリポジトリから引くために持たせる（#2733。計画の置き場で始めるときに送る分は持たない）。
+    `scope` はループのリポジトリの識別（`repo_scope`）で、id と同じ行の置き換え（`replace_same`）をリポジトリごとに分ける。"""
     issue, pr, lap = w["number"], w["pr"], w.get("lap") or 0
-    return {
-        "kind": "gate1", "id": prior_id(loop, issue, lap), "loop": loop, "issue": issue, "pr": pr, "lap": lap, "stamp": stamp,
+    return ({"via": via} if via else {}) | ({"scope": scope} if scope else {}) | {
+        "kind": "gate1", "id": prior_id(loop, issue, lap, scope=scope), "loop": loop, "issue": issue, "pr": pr, "lap": lap, "stamp": stamp,
         "verdict": w.get("verdict"), "reasons": [w["reason"]] if w.get("reason") else [], "report": w.get("report") or "",
         "question": f"開発ループ {loop} の #{issue} の設計 PR #{pr} が承認待ちのまま残っている。承認 / 直して出し直す / やらない を答える",
         "at": at,
     }  # fmt: skip
 
 
-def prior_requests(main: str | Path, name: str, at: str, run=design_pr_merge.run_cmd) -> tuple[list[dict], list[dict]]:
-    """前のループの待ちの依頼と、読めなかったループ。印は送る時点の設計 PR の先頭（読めなければ行の印）。"""
-    rows, skipped = prior_rows(main, name)
-    return [prior_request(loop, w, design_pr_head(run, main, w["pr"]) or w.get("stamp") or "", at) for loop, w in rows], skipped
+def prior_requests(
+    main: str | Path, name: str, at: str, run=design_pr_merge.run_cmd, home: str | Path | None = None, via: str | None = None
+) -> tuple[list[dict], list[dict]]:
+    """前のループの待ちの依頼と、読めなかったループ。印は送る時点の設計 PR の先頭（読めなければ行の印）。`home` は `prior_rows`、
+    `via` は `prior_request`。"""
+    rows, skipped = prior_rows(main, name, home)
+    scope = repo_scope(main, home)
+    return [prior_request(loop, w, design_pr_head(run, main, w["pr"]) or w.get("stamp") or "", at, via, scope) for loop, w in rows], skipped
 
 
 def lane_plan(env) -> str | None:
@@ -168,7 +190,7 @@ def lane_plan(env) -> str | None:
 
 
 def lane_sends(env, rec: dict, send_gate1) -> list[dict]:
-    """レーンの周回の境: 自分の行で依頼の id を持たないもの（送れなかった依頼）を `send_gate1` で送り直し、前のループの待ちを
+    """レーンのループの 1 回の境: 自分の行で依頼の id を持たないもの（送れなかった依頼）を `send_gate1` で送り直し、前のループの待ちを
     送る（#2510 の受け入れ条件 12・13）。読めずに飛ばしたループを結果の項目の形で返す。"""
     plan = lane_plan(env)
     if plan is None:
@@ -180,11 +202,14 @@ def lane_sends(env, rec: dict, send_gate1) -> list[dict]:
     import parallel_lane
 
     main = env.main_dir()
-    msgs, skipped = prior_requests(main, plan, env.now(), env.run)
+    home = parallel_lane.plan_home(main, plan)
+    msgs, skipped = prior_requests(
+        main, plan, env.now(), env.run, home, os.environ.get("NDF_RELAY_NAME")
+    )  # レーンの名前（`lane_of` と同じ）
     try:
         for msg in msgs:
-            parallel_lane.send_prior(main, plan, msg)
-    except Exception as e:  # noqa: BLE001 — 送れなければ次の境で送り直す（周回は止めない）
+            parallel_lane.send_prior(home, plan, msg)
+    except Exception as e:  # noqa: BLE001 — 送れなければ次の境で送り直す（ループの 1 回は止めない）
         skipped = [*skipped, {"loop": msg["loop"], "reason": f"依頼を送れない: {e}"[:200]}]
     return [{"skipped_loop": s["loop"], "reason": s["reason"]} for s in skipped]
 
@@ -192,7 +217,12 @@ def lane_sends(env, rec: dict, send_gate1) -> list[dict]:
 def prior_issues(env) -> dict[int, str]:
     """レーンなら、前のループの答えがまだの行を持つ課題（課題 → ループの名前）。レーンでなければ空。"""
     plan = lane_plan(env)
-    return {w["number"]: loop for loop, w in prior_rows(env.main_dir(), plan)[0]} if plan else {}
+    if not plan:
+        return {}
+    import parallel_lane
+
+    main = env.main_dir()
+    return {w["number"]: loop for loop, w in prior_rows(main, plan, parallel_lane.plan_home(main, plan))[0]}
 
 
 def _loop_answer(run, main: Path, q: dict, args: list[str], expect: str | None = None) -> str | None:
@@ -226,7 +256,7 @@ def answer_prior(main: str | Path, plan_dir: Path, q: dict, answer: dict, stamp:
     if moved and stamp is not None:
         return {"unmatched": f"置き換えた問いの先頭 {stamp[:HEAD_LEN]} から設計 PR が取り込み以外で動いた"}
     if moved:
-        return {"reask": {**q, "id": prior_id(q["loop"], q["issue"], q["lap"], moved), "stamp": moved}}
+        return {"reask": {**q, "id": prior_id(q["loop"], q["issue"], q["lap"], moved, q.get("scope") or ""), "stamp": moved}}
     if result == "approved":
         args = ["--approved", "--pr", str(q["pr"])]
     elif result == "revise":

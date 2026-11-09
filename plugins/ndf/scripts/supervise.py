@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """フェーズをスクリプトで駆動する。
 
-supervisor（サブエージェント）の代わりに、このスクリプトがフェーズの手順を順に進める。
+supervisor の役割を主に担い、このスクリプトがフェーズの手順を順に進める（対応できないフェーズだけ、サブエージェント
+`ndf:supervisor` が代行する）。
 判断の要らないステップ（コマンドの実行・待ち・進行の記録）はスクリプトが行い、LLM は
 次の 2 つのステップでだけ、毎回新しい最小構成の `claude -p` として起動する。
 
@@ -239,10 +240,19 @@ def build_parser(sub) -> None:
     rs.add_argument("--max-seconds", type=float, required=True, help="最初の直しから後の、直しとレビューの秒の合計の上限")
 
 
+def outside_plan(a: argparse.Namespace) -> dict | None:
+    """計画の外のセッションの起動の判定（`lib/sprint_loop_cli.outside_plan`）。止めるなら結果（`exit` つき）、通すなら None。"""
+    import parallel_guard
+
+    return parallel_guard.entry_check(a.worktree, getattr(a, "outside_plan", None), "supervise.py new sprint")
+
+
 def _cmd_new(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
     new_args.fill_new_defaults(a)
     if a.kind in ("sprint", "close"):
         new_args.check_sprint(ap, a)
+        if a.kind == "sprint" and (blocked := outside_plan(a)) is not None:  # 何かを書く前に判定する（#2733 の I9）
+            emit(blocked, blocked.pop("exit"))
         try:
             apply_decls(a)
             sprint_routes.apply_routes(a)

@@ -42,7 +42,7 @@ NDF が人の承認を求める 2 つの点を、番号ではなく中身の分�
 | NDF の工程（`ndf-workflow`） | 承認ゲート・設計承認ゲート・リリース承認ゲート・承認ゲートの記録・人へ出す文・機械が読む識別子 |
 | Factory | 承認の依頼とその種類（`gate1` / `gate2` / `decision`）・画面の表示 |
 
-Factory は NDF の工程に対して腐敗防止層を置く。ランナー（`factory/runner/src/translate.ts`）が Factory の
+Factory は NDF の工程に対して腐敗防止層を置く。ランナーのエージェント（`factory/runner/src/translate.ts`）が Factory の
 承認の依頼の種類を NDF の承認ゲートの記録の名前へ翻訳し、`sprint-state.py gate` を呼ぶ。Factory の種類の
 値は NDF の呼び名に引きずられず、翻訳の層だけが NDF の名前を知る。
 
@@ -50,7 +50,7 @@ Factory は NDF の工程に対して腐敗防止層を置く。ランナー（`
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| スプリント状態 | `sprint-state.py gate`（`mvv-gate.py`・開発ループ・並列の計画・Factory のランナーはこのコマンドを呼んで書く） | スプリント状態ファイル | 承認ゲートの記録（`gates[]`）・取り消しの記録（`withdrawals[]`） | 承認ゲートの名前 |
+| スプリント状態 | `sprint-state.py gate`（`mvv-gate.py`・開発ループ・並列の計画・Factory のランナーのエージェントはこのコマンドを呼んで書く） | スプリント状態ファイル | 承認ゲートの記録（`gates[]`）・取り消しの記録（`withdrawals[]`） | 承認ゲートの名前 |
 | 差し戻しの記録 | `sprint-state.py gate --outcome rejected` と `gate-rejections.py record`（どちらも `lib/gate_rejections.py` の書き込みを使う） | `gate-rejections.jsonl` の 1 行 | — | 承認ゲートの名前 |
 | スプリントの目録 | `supervise.py new sprint`（`supervise_lib/sprint.py`） | 目録の `sprint.json` | ステージ（`ステージ[]`） | ステージの名前（承認ゲートのステージは承認ゲートの名前を使う） |
 
@@ -64,9 +64,9 @@ Factory は NDF の工程に対して腐敗防止層を置く。ランナー（`
 | I1 | NDF は承認ゲートの旧名を記録へ書かない。旧名で呼ばれたら正の名前へ寄せて書く。旧名でも正の名前でもない名前（`MVV` を含む）は受けてそのまま書く | テストが落ちる |
 | I2 | 旧名の記録は、正の名前の記録と同じ承認ゲートとして読む。承認済みの判定・差し戻しの件数・改訂の兆候の件数・取り消しの判定・続きの queue の組み立てが、名前を正の名前に書き換えた記録と同じ結果になる | テストが落ちる |
 | I3 | 同じ承認ゲート・同じ Pull Request の利用者の承認の記録は 1 件に置き換わる。旧名の記録も置き換えの対象になる | テストが落ちる |
-| I4 | スクリプトの中で、正の名前は `lib/gate_answer.py`、旧名との対応は `lib/legacy_names.py` の 1 か所にだけ書く。Factory のランナーは NDF を読み込めないため、対応を `translate.ts` の 1 か所に持つ | テストが落ちる |
+| I4 | スクリプトの中で、正の名前は `lib/gate_answer.py`、旧名との対応は `lib/legacy_names.py` の 1 か所にだけ書く。Factory のランナーのエージェントは NDF を読み込めないため、対応を `translate.ts` の 1 か所に持つ | テストが落ちる |
 | I5 | 機械が読む識別子のうち、問いの区分 `ndf-gate:1` / `ndf-gate:2`、Factory の種類 `gate1` / `gate2`、承認ラベル `design-approved`、報告の結果の値 `関門` は値を変えない | hook・Factory・再開の既存のテストが落ちる |
-| I6 | Factory の承認の依頼は、API・ランナー・画面で同じ種類の値（`gate1` / `gate2` / `decision`）を使う | 契約のテストが落ちる |
+| I6 | Factory の承認の依頼は、API・ランナーのエージェント・画面で同じ種類の値（`gate1` / `gate2` / `decision`）を使う | 契約のテストが落ちる |
 
 ### 名前を寄せる仕組み
 
@@ -97,7 +97,7 @@ sequenceDiagram
 
 - **記録の名前は正の名前で書く。** 記録の名前は `sprint-state.py gate <状態> "設計承認ゲート"` のように手順書のコマンドにも現れ、人と AI が打つ値でもある。表示だけを変えると、人が打つコマンドと人が読む文の語が食い違う
 - **旧名の記録は書き換えず、読むときに寄せる。** 既存の記録の書き換えは利用者のデータの変更（共通原則の C3）に当たり、移行の操作を利用者に求めることにもなる。旧名の表は、旧名の記録を読む必要が無くなるまで持ち続ける
-- **ASCII の識別子（`ndf-gate:1/2`・`gate1/gate2`・`design-approved`）は値を変えない。** 問いの区分は hook（`hook_lib/ask_guard.py`）が値の一致で許し、Factory の種類は API・ランナー・画面と進行のイベントの契約が共有する。人へ出す説明（`ask_policy.py` の区分の説明、hook の案内）だけを新しい名前で書く
+- **ASCII の識別子（`ndf-gate:1/2`・`gate1/gate2`・`design-approved`）は値を変えない。** 問いの区分は hook（`hook_lib/ask_guard.py`）が値の一致で許し、Factory の種類は API・ランナーのエージェント・画面と進行のイベントの契約が共有する。人へ出す説明（`ask_policy.py` の区分の説明、hook の案内）だけを新しい名前で書く
 - **報告の結果の値 `関門` は値を変えない。** フェーズレポートの `結果: 関門` と queue の記録の `result: "関門"` は、`supervise_lib/` の queue・再開・流し直しの判定と、開発ループと並列の計画が値の一致で読み、実行中の queue の記録にも保存されている。値を説明する文だけを「承認ゲート」と書く
 - **旧い版の NDF が新しい名前の記録を読む場合は互換の対象にしない。** 一部のセッションだけを更新した状態は、すべてのセッションを更新して再起動すれば解ける
 
@@ -145,8 +145,8 @@ sequenceDiagram
 
 ### Factory
 
-Factory のランナーは、ジョブごとに指定された版の NDF を入れる（`factory/runner/src/main.ts` の `installNdf`）。
-**ランナーは `sprint-state.py gate` へ旧名を渡し続ける。** この呼び名を持たない前の版の NDF も旧名なら読め、
+Factory のランナーのエージェントは、ジョブごとに指定された版の NDF を入れる（`factory/runner/src/main.ts` の `installNdf`）。
+**ランナーのエージェントは `sprint-state.py gate` へ旧名を渡し続ける。** この呼び名を持たない前の版の NDF も旧名なら読め、
 新しい版の NDF は旧名を受けて正の名前で書くためである。旧名を渡すのをやめるのは、Factory が前の版の NDF を
 ジョブで入れなくなったときとする。
 

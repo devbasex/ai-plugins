@@ -1,6 +1,6 @@
 ---
 name: supervisor-waits
-description: NDF の 3 層の supervisor（収束ループから始める起動。キャッシュの寿命 1 時間）。フェーズを通し、フェーズレポートで返す
+description: NDF の 3 層の supervisor の代行（収束ループから始める起動。キャッシュの寿命 1 時間）。supervise.py で対応できないフェーズを通し、フェーズレポートで返す
 experimental:
   cacheTtl: 1h
 ---
