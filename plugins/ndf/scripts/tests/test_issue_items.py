@@ -168,6 +168,21 @@ def test_process_section_headings_that_are_not_strings_stop_reading(tmp_path):
         ii.load_definition(project(tmp_path, defined(record_headings="作業記録")))
 
 
+def test_a_project_definition_renames_the_kind_labels(tmp_path):
+    got = ii.load_definition(project(tmp_path, defined(kind_labels={"調査": "question", "不具合": "type:bug"})))
+    assert got.kind_labels() == {"type:bug": "不具合", "enhancement": "機能", "question": "調査", "operation": "運用"}
+    assert ii.kind_of(["type:bug"], got) == "不具合" and ii.kind_of(["bug"], got) is None
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [["question"], {"雑談": "chat"}, {"調査": ""}, {"調査": "x", "運用": "x"}, {"調査": "bug"}],
+)
+def test_kind_labels_that_cannot_name_one_kind_each_stop_reading(tmp_path, labels):
+    with pytest.raises(ii.DefinitionError, match="kind_labels"):
+        ii.load_definition(project(tmp_path, defined(kind_labels=labels)))
+
+
 def test_headings_in_a_fence_are_not_sections():
     body = BUG.replace("## 影響\n\n止まる。\n", "```\n## 影響\n```\n")
     assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == [ii.Gap("影響", "missing")]

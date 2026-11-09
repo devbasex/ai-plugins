@@ -3,6 +3,7 @@
 定義は `data/issue-items.json`（種類ごとの必須・該当時・不要と水準）、置き場ごとの表し方は `data/issue-stores.json` にある。
 プロジェクトの `.ndf/issue-items.json` があれば、既定の定義の代わりにそのまま読む（表し方のファイルは置き換えない）。
 工程が足す節の見出しの語は、表し方のファイルの `record_headings` に、定義の `record_headings`（あれば）を足したものである。
+種類のラベル名は、表し方のファイルの GitHub の `labels` を、定義の `kind_labels`（種類 → ラベル名。あれば）で種類ごとに置き換えたものである。
 
 - `load_definition(root)`: 定義と表し方を読み、不変条件（各項目が 4 種類の区分と水準を持つ・該当時の項目は条件を持つ・
   3 つの置き場で表し方を 1 つに解決できる）を確かめる。破れていれば `DefinitionError`
@@ -65,6 +66,7 @@ class Definition:
     stores: dict[str, dict]
     record_headings: list[str]
     path: Path = DEFAULT_ITEMS
+    own_kind_labels: dict[str, str] = field(default_factory=dict)
     by_id: dict[str, Item] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -78,10 +80,15 @@ class Definition:
     def is_section(self, item: Item, store: str = "github") -> bool:
         return self.rep(item, store).get("type") == SECTION
 
+    def labels_by_kind(self) -> dict[str, str]:
+        """種類 → GitHub のラベル。定義の `kind_labels` があれば、その種類のラベル名を置き換える。"""
+        labels = dict((self.rep(self.by_id["kind"]).get("labels") or {}) if "kind" in self.by_id else {})
+        labels.update(self.own_kind_labels)
+        return labels
+
     def kind_labels(self) -> dict[str, str]:
         """GitHub のラベル → 種類。"""
-        labels = (self.rep(self.by_id["kind"]).get("labels") or {}) if "kind" in self.by_id else {}
-        return {lab: kind for kind, lab in labels.items()}
+        return {lab: kind for kind, lab in self.labels_by_kind().items()}
 
     def required_sections(self, kind: str) -> list[Item]:
         return [it for it in self.items if it.need.get(kind) == "必須" and self.is_section(it)]
@@ -162,6 +169,21 @@ def items_path(root) -> Path:
     return DEFAULT_ITEMS
 
 
+def _own_kind_labels(raw: dict, kinds: list[str], path: Path) -> dict[str, str]:
+    """定義の `kind_labels`（任意）。種類 → 空でないラベル名で、種類は kinds のどれか、ラベル名は重ならない。"""
+    own = raw.get("kind_labels")
+    if own is None:
+        return {}
+    if not isinstance(own, dict) or not all(isinstance(v, str) and v.strip() for v in own.values()):
+        raise DefinitionError(f"{path}: kind_labels が種類 → ラベル名のオブジェクトでない")
+    unknown = [k for k in own if k not in kinds]
+    if unknown:
+        raise DefinitionError(f"{path}: kind_labels の種類 {'・'.join(unknown)} は kinds に無い")
+    if len(set(own.values())) != len(own):
+        raise DefinitionError(f"{path}: kind_labels で同じラベル名を 2 つ以上の種類に付けている")
+    return {k: v.strip() for k, v in own.items()}
+
+
 def load_definition(root=None) -> Definition:
     path = items_path(root)
     raw = _definition_json(path)
@@ -181,7 +203,11 @@ def load_definition(root=None) -> Definition:
     heads = [h for h in st.get("record_headings") or [] if isinstance(h, str)]
     heads += [h for h in own or [] if h not in heads]
     last = raw.get("last") if isinstance(raw.get("last"), str) else None
-    return Definition(kinds, items, last, stores, heads, path)
+    definition = Definition(kinds, items, last, stores, heads, path, own_kind_labels=_own_kind_labels(raw, kinds, path))
+    merged = definition.labels_by_kind()
+    if len(set(merged.values())) != len(merged):
+        raise DefinitionError(f"{path}: kind_labels で置き換えたラベル名が、ほかの種類の既定のラベル名と重なる")
+    return definition
 
 
 # --- 本文の判定 --------------------------------------------------------------------------

@@ -83,7 +83,7 @@ python3 "$SCRIPTS/issue-file.py" note --repo <起票先> --number <番号> --ori
 
 本文は記載項目の定義（`$SCRIPTS/data/issue-items.json`。プロジェクトに `.ndf/issue-items.json` があればそちら）の
 項目名を見出しにして書く（書式は `document-style`）。**種類（不具合・機能・調査・運用）を 1 つ決め、種類のラベル
-（`bug`・`enhancement`・`investigation`・`operation`）を `--label` で 1 つだけ付ける。** 下の骨格から、その種類で
+（既定は `bug`・`enhancement`・`investigation`・`operation`。定義の `kind_labels` があればそちら）を `--label` で 1 つだけ付ける。** 下の骨格から、その種類で
 必須でない節は削る（不具合なら目的・対象範囲・受け入れ条件は該当時、機能・調査なら事象から環境までは不要）。
 由来は `create` が入れる。`create` は種類の必須の項目と、起票者の推定・由来がそろい空でないかを確かめる（欠ければ 1。
 欠けた項目が `items` に返る。種類のラベルが 0 個か 2 個以上なら「種類」が返る）。
