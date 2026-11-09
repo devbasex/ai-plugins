@@ -80,6 +80,8 @@ class _Scan:
     def __init__(self, base: str | None) -> None:
         self.out: list[str] = []
         self.root = _Place(base or None)
+        self.dirs: dict[tuple[int, int], str | None] = {}
+        self.written: dict[tuple[int, int], int] = {}  # コマンドの開始までに積んだ書き込み先の数（自分のリダイレクトを含む）
 
     def emit(self, v: str, st: _Place) -> None:
         if v in NOT_TARGET or v.startswith(("&", "|")) or "$" in v:
@@ -269,6 +271,7 @@ class _Scan:
             self.seq(s, st.copy())
 
     def command(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        self.dirs[(n.start_byte, n.end_byte)] = st.cwd
         nodes, rs, assigns = sp.command_parts(n, redirs)
         for a in assigns:
             self.substs(a, st)
@@ -282,6 +285,7 @@ class _Scan:
             self.emit(v, st)
         # リダイレクトは cd より前の位置で開く（出す順は、語の書き込み先の後）
         self.redirects(rs, st)
+        self.written[(n.start_byte, n.end_byte)] = len(self.out)
         if st.base is not None and name in st.moving:
             st.cwd = None
         if name != "cd" or st.base is None:
@@ -400,6 +404,18 @@ def shell_targets(cmd: str, base: str = "") -> list[str]:
     scan = _Scan(base)
     scan.seq(root, scan.root)
     return scan.out
+
+
+def command_dirs(root: sp.Node, base: str) -> dict[tuple[int, int], str | None]:
+    """構文木の各 `command` のノード（`(start_byte, end_byte)`）を実行するときの現在地。字面から決められなければ None。"""
+    return command_places(root, base)[0]
+
+
+def command_places(root: sp.Node, base: str) -> tuple[dict[tuple[int, int], str | None], dict[tuple[int, int], frozenset[str]]]:
+    """`(各 command の現在地, 各 command が読み始めるまでに書き込まれる先)`。後者はそのコマンド自身のリダイレクトと語の書き込み先を含む絶対パス。"""
+    scan = _Scan(base)
+    scan.seq(root, scan.root)
+    return scan.dirs, {k: frozenset(scan.out[:n]) for k, n in scan.written.items()}
 
 
 def patch_targets(patch: str) -> list[str]:

@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/issue-items.py",
+  "summary": "Issue の記載項目の定義に照らした検査（#2737）。定義は `lib/issue_items.py` が読む。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "audit": {
+        "options": [
+          "--repo"
+        ],
+        "positionals": []
+      },
+      "templates": {
+        "options": [
+          "--root"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "issues",
+        "ndf_policies"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）。欠け・食い違いが 0 件、または課題の置き場が GitHub でなく検査しなかった",
+    "1": "失敗（status stopped）。欠けのある open の Issue・テンプレートの食い違いが 1 件以上",
+    "2": "読めない・呼び出しの誤り（status stopped）。GitHub・テンプレート・記載項目の定義を読めない"
+  },
+  "callers": [
+    ".github/workflows/script-structure.yml",
+    "plugins/ndf/scripts/hook_lib/issue_guard.py",
+    "plugins/ndf/skills/backlog-refinement/SKILL.md"
+  ]
+}
