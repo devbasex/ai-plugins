@@ -6105,6 +6105,18 @@
       "meaning": "失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ置き場で開くために行う",
       "source": "",
       "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "読み込まれたプラグイン",
+      "context": "ndf-workflow",
+      "meaning": "起動したセッションに Claude Code が読み込んだ NDF。--plugin-dir で指したディレクトリか、導入したプラグインのキャッシュのディレクトリで、起動時の init の plugins の ndf の path に出る",
+      "pending_source": "issues/issue-2813-requirements.md"
+    },
+    {
+      "term": "規約の文書",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が worker の起動指示を組むために読む、NDF の Skill の SKILL.md と references/ の下の文書（development-workflow の references/agent-layers.md、design の references/design-template.md など）",
+      "pending_source": "issues/issue-2813-requirements.md"
     }
   ]
 }
