@@ -50,6 +50,7 @@
 | `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `phase-result-json` | `phase-result.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `plan-json` | `plan.json` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `plan-md` | `plan.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
@@ -67,6 +68,7 @@
 | `resume-mark-json` | `*.mark.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `revise-json` | `revise-*.json` | state | main | `plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/revise-note.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `revise-md` | `revise-*.md` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py` | — |
+| `run-done` | `run.done` | record | main | `plugins/ndf/scripts/lib/parallel_lane.py:settled_status` | — |
 | `run-log` | `run.log` | report | main | `plugins/ndf/scripts/parallel.py` | — |
 | `run-pid` | `run.pid` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `snapshot-json` | `snapshot.json` | record | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
@@ -137,7 +139,7 @@
 | `NDF_RELAY_CLAUDE` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_DEPTH` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_DIR` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py` |
-| `NDF_RELAY_MAX_NAMED` | user | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
+| `NDF_RELAY_MAX_NAMED` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_RELAY_NAME` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_RELAY_PLAN` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |
 | `NDF_RELAY_REEXEC` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/relay.py` |

@@ -1,0 +1,10 @@
+{
+  "name": "run-done",
+  "pattern": "run.done",
+  "kind": "record",
+  "place": "main",
+  "skill_readers": [],
+  "writers": [
+    "plugins/ndf/scripts/lib/parallel_lane.py:settled_status"
+  ]
+}

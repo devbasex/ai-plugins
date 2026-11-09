@@ -80,7 +80,7 @@ def test_request_and_await_through_files(tmp_path, org):
     )
     code, out = _run(["await", "--external", "--from", str(sent)], tmp_path)
     assert code == 0 and out["metrics"]["version"] == "10.28.0"
-    # ループの周回の境は計画名 --external で答えを読む
+    # ループの 1 回の境は計画名 --external で答えを読む
     assert pl.answers_of(tmp_path, pe.EXTERNAL, [rid])[rid]["answer"]["result"] == "released"
 
 

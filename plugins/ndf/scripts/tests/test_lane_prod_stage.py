@@ -113,7 +113,7 @@ def test_request_after_dropping_issues_carries_only_the_kept_issue(tmp_path, org
 
 
 def test_request_without_dropping_keeps_every_issue(tmp_path, org):
-    """受け入れ条件 8 / I6: 課題を外さなかった周回の依頼は、組んだときの全件を載せる。"""
+    """受け入れ条件 8 / I6: 課題を外さなかったループの 1 回の依頼は、組んだときの全件を載せる。"""
     body, plan = run_request(tmp_path, org, (153, 191, 117), [])
     assert plan["課題"] == [153, 191, 117] and body["issues"] == [153, 191, 117]
 

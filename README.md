@@ -1,6 +1,6 @@
 # AI Plugins
 
-Claude Code / Codex で使うプラグインを配るマーケットプレイスです。
+Claude Code / Codex で使うプラグインを配るマーケットプレイスです。このリポジトリは NDF などのプラグインとマーケットプレイスだけを持ちます。
 入れると、Pull Request の作成・レビュー・修正といった開発の作業を、手順どおりに AI へ任せられます。
 よく使う外部サービス（Notion・BigQuery・データベースなど）へつなぐ設定も入ります。
 
@@ -48,8 +48,8 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 | プラグイン名 | バージョン | できること | 詳細 |
 | --- | --- | --- | --- |
-| **ndf** | 10.27.45 | 開発の作業手順（Skill）と専門のサブエージェント。Claude Code と Codex へ同じ名前で入る | [README](./plugins/ndf/README.md) |
-| **playwright-kit** | 4.0.1 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
+| **ndf** | 10.27.46 | 開発の作業手順（Skill）と専門のサブエージェント。Claude Code と Codex へ同じ名前で入る | [README](./plugins/ndf/README.md) |
+| **playwright-kit** | 4.0.2 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
 
 外部サービスへつなぐ MCP サーバーの設定のプラグインが 10 個あります（Claude Code / Codex 向け）。
 使うものだけを入れます（Claude Code なら `/plugin install <プラグイン名>@ai-plugins`）。
@@ -69,7 +69,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 ### NDF プラグインの Skill の一覧
 
-**NDFプラグイン v10.27.45** に入る Skill の数は、AI ツールごとに違います。
+**NDFプラグイン v10.27.46** に入る Skill の数は、AI ツールごとに違います。
 Claude Code向け core 49個、Codex向け core 45個です。
 元Skills（49個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
@@ -99,12 +99,11 @@ Skill のほかに、次のものが入ります。
 | 質問・不具合の報告・要望 | [SUPPORT.md](./SUPPORT.md) |
 | 脆弱性の報告 | [SECURITY.md](./SECURITY.md)。**公開の issue には書かないでください** |
 | 開発に参加する | [CONTRIBUTING.md](./CONTRIBUTING.md)、[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)、[GOVERNANCE.md](./GOVERNANCE.md) |
+| Web サービス | 別のリポジトリ（volareinc/nd-factory）へ移しました |
 
 ## ライセンス
 
 MIT License。詳細は [LICENSE](./LICENSE) にあります。
-
-Web サービスのディレクトリ [factory/](./factory/README.md)（Neural Development Factory）は、自分の [LICENSE](./factory/LICENSE) を持ちます。今は根と同じ MIT License です。ライセンスを差し替えるときは `factory/LICENSE` とこの節だけを書き換え、プラグインのリリース対象は変わりません。
 
 ---
 

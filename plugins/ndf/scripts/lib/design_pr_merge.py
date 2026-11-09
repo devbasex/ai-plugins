@@ -1,12 +1,12 @@
-"""承認した設計のマージ（#2507）。設計の承認の答えと周回の境が、承認した設計 PR を宛先へ待たずに 1 回だけマージしてみる。
+"""承認した設計のマージ（#2507）。設計の承認の答えとループの 1 回の境が、承認した設計 PR を宛先へ待たずに 1 回だけマージしてみる。
 
-呼ぶのは `parallel.py answer --approved`（並列の計画）・`sprint-state.py loop answer --approved`（1 本のループ）・周回の境
+呼ぶのは `parallel.py answer --approved`（並列の計画）・`sprint-state.py loop answer --approved`（1 本のループ）・ループの 1 回の境
 （`sprint_loop_select.settle_approved_designs`）の 3 か所で、どれもこの関数だけを使う（設計 #2507 の決定 2）。
 
 - 承認した先端（問いの時点の設計 PR の先頭のコミット）のままのときだけマージする（`merge-when-green --expect-head`）
 - 宛先が本番チャネルに当たるか決められないときはマージしない（リリース承認ゲートを設計承認ゲートの答えで通さない。決定 3）
 - 必須の検査が緑のときだけマージする。検査の完了は待たない（`probe` で分類し、`passed` と `infra` のときだけ呼ぶ。決定 1）
-- 後片付けは持ち主の周回の境が打つ（`--no-cleanup`。決定 5）
+- 後片付けは持ち主のループの 1 回の境が打つ（`--no-cleanup`。決定 5）
 - 例外を投げず、終了コードを持たない。結果は「マージの結果」の 1 つ（`RESULTS`）にして返す
 """
 
@@ -35,7 +35,7 @@ Run = Callable[..., tuple]
 
 
 def run_cmd(cmd: list[str], cwd: str | None = None, stdin: str | None = None) -> tuple[int, str, str]:
-    """コマンドを起動して (終了コード, 標準出力, 標準エラー) を返す。周回のコマンド（`sprint_loop_record`）もこれを使う。"""
+    """コマンドを起動して (終了コード, 標準出力, 標準エラー) を返す。ループの 1 回のコマンド（`sprint_loop_record`）もこれを使う。"""
     p = subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr
 
@@ -81,7 +81,7 @@ def merge_approved(root, pr: int, stamp: str | None, run: Run | None = None, inf
     """設計 PR `pr` を、承認した先端 `stamp` のままで検査が緑なら宛先へマージする。結果は `RESULTS` の値の 1 つ。
 
     出力: {result, class, reason, pr, head, at, branch, infra_rerun}。`infra_rerun` は基盤待ちのジョブを実際に再実行した
-    回数（merge-when-green の items の `infra_rerun` の数）。周回の境が同じ承認した先端での累計に足す。
+    回数（merge-when-green の items の `infra_rerun` の数）。ループの 1 回の境が同じ承認した先端での累計に足す。
     `infra_budget` は再実行の残りの回数で、merge-when-green の `--infra-reruns` に渡す。0 以下で基盤待ちなら
     merge-when-green を呼ばずに not_green（infra）を返す。"""
     run = run or run_cmd

@@ -123,13 +123,17 @@ dirty 検知 (`beforeunload` 確認) + CSRF token + バリデーション.
 # プリフィル値の検証
 expect(page.get_by_label("商品名")).to_have_value("既存の商品")
 
+
 # 境界値テスト (parametrize)
-@pytest.mark.parametrize("password,expected", [
-    ("1234567", "短すぎ"),       # min-1
-    ("12345678", None),          # min OK
-    ("a"*64, None),              # max OK
-    ("a"*65, "長すぎ"),          # max+1
-])
+@pytest.mark.parametrize(
+    "password,expected",
+    [
+        ("1234567", "短すぎ"),  # min-1
+        ("12345678", None),  # min OK
+        ("a" * 64, None),  # max OK
+        ("a" * 65, "長すぎ"),  # max+1
+    ],
+)
 def test_password_boundary(page, password, expected):
     page.get_by_label("パスワード").fill(password)
     page.get_by_role("button", name="保存").click()
@@ -137,6 +141,7 @@ def test_password_boundary(page, password, expected):
         expect(page.get_by_role("alert")).to_contain_text(expected)
     else:
         expect(page).to_have_url(re.compile(r"/items/\d+$"))
+
 
 # CSRF token 削除攻撃
 page.evaluate("document.querySelector('input[name=_token]').remove()")

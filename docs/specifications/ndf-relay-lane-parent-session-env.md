@@ -9,7 +9,7 @@ tmux の専用サーバー（`tmux -L ndf-relay`）は、最初にサーバー�
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 統括役・名前つきのラッパー・受付箱・`spawn` / `restart` の入出力 | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) |
+| リレーハブ・名前つきのラッパー・受付箱・`spawn` / `restart` の入出力 | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) |
 | 1 本のラッパーの入出力・区間の切り替え・パススルーの条件の表 | [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の「パススルーの条件」 |
 | 起動の印の宣言 | `plugins/ndf/contracts/env/NDF_RELAY_SPAWNED.json` |
 
@@ -20,11 +20,11 @@ tmux の専用サーバー（`tmux -L ndf-relay`）は、最初にサーバー�
 | 順 | 起きること（変更の前） | 変更の後 |
 | ---: | --- | --- |
 | 1 | 専用サーバーのグローバルな環境に `NDF_RELAY_DIR`・`NDF_RELAY_DEPTH=1`・`NDF_CLAUDE_ACCOUNT=main`・`CLAUDE_CONFIG_DIR=<main の設定ディレクトリ>`・`CLAUDECODE=1` などが残っている | 同じ |
-| 2 | 統括役の `spawn` が `new-session -e NDF_RELAY_NAME=<名前> -e NDF_RELAY_SPAWNED=1` で `relay.py run` を起動する | 同じ |
+| 2 | リレーハブの `spawn` が `new-session -e NDF_RELAY_NAME=<名前> -e NDF_RELAY_SPAWNED=1` で `relay.py run` を起動する | 同じ |
 | 3 | `run` は `NDF_RELAY_DIR` を見て親のラッパーの中にいると判断し、パススルーする | `run` は先に親のセッションの環境を外す。深さは 0、`NDF_RELAY_DIR` は無くなる |
 | 4 | アカウントの選定を通らず、`main` の設定ディレクトリのまま claude が起動し、直後に上限で止まる | ラッパーが新しい作業ディレクトリで区間 1 を始め、指定・残量・上限から使えるアカウント（例: `gmail`）を選んで起動する |
 
-統括役の起動（`relay.py spawn`・`restart`・起動のブロック）も、claude のセッションの中で手で打つ
+リレーハブの起動（`relay.py spawn`・`restart`・起動のブロック）も、claude のセッションの中で手で打つ
 `tmux -L ndf-relay new-session ... -e NDF_RELAY_SPAWNED=1 -- <python> relay.py run` も、最後は window の中の
 `relay.py run` を通る。外す処理はこの受け取る側の 1 か所にあるため、どの経路でも同じ結果になる。
 
@@ -34,7 +34,7 @@ tmux の専用サーバー（`tmux -L ndf-relay`）は、最初にサーバー�
 
 tmux の専用サーバー・親のセッションの環境・アカウントの選定の定義は、設定の用語集
 （`.ndf/glossary.json` の `document` が指す [docs/glossary.md](../glossary.md)）にある。ラッパー・区間・レーン・
-統括役は [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) と
+リレーハブは [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) と
 [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) の用語のまま使う。
 
 「グローバルな環境」「tmux のセッションの環境」は tmux(1) の GLOBAL AND SESSION ENVIRONMENT の語である。
@@ -58,7 +58,7 @@ tmux のセッションの環境だけに入る。
 | アカウントの環境の戻し（`lib/claude_accounts.py` の `leave_account`） | 親のアカウントの環境を外して元の値へ戻す。従量の接続の環境を作る処理（`_metered_env`）も同じ戻しを使う |
 | tmux の呼び出し（`relay_lib/tmux.py` の `session_value`） | `show-environment -t =<名前> <キー>` で tmux のセッションの環境の値を 1 つ読む。無い・tmux に聞けないときは `None` |
 
-統括役の起動（`relay_lib/hub.py` の `launch`）は、今と同じく `-e` で名前・起動の印・役割と計画を渡す。
+リレーハブの起動（`relay_lib/hub.py` の `launch`）は、今と同じく `-e` で名前・起動の印・役割と計画を渡す。
 ランチャー（`scripts/relay.py`）の中身が見つからないときの退避は、アカウントの選定を通せないため、
 親のセッションの環境を持つサーバーの上でも終了コード 127 と導入し直す案内で止まる。
 
@@ -127,10 +127,10 @@ graph TD
 
 | 決定 | 理由 |
 | --- | --- |
-| 親のセッションの環境は、受け取る側の `relay.py run` の先頭で外す | 統括役の起動と手で打つ `new-session` のどちらにも 1 か所で効く。動いている専用サーバーのグローバルな環境を変えない。統括役の `new_session` で外す形は、NDF を通らない手の起動に効かない |
+| 親のセッションの環境は、受け取る側の `relay.py run` の先頭で外す | リレーハブの起動と手で打つ `new-session` のどちらにも 1 か所で効く。動いている専用サーバーのグローバルな環境を変えない。リレーハブの `new_session` で外す形は、NDF を通らない手の起動に効かない |
 | 入れ子かどうかは起動の印で分け、親のプロセスの生死を調べない | 起動の印は子の claude へ渡らないため、印があるだけで新しいレーンと決まる。生死で判定すると、親が動いているときに誤る |
 | 外す変数は名前で列挙する。`CLAUDE_CODE_` の前方一致では外さない | `CLAUDE_CODE_*` には利用者の設定と認証の宣言が多数ある。残すものだけを列挙する形（`env -i` 相当）は、`PATH`・`AWS_*` など利用者の環境を列挙し続けることになる |
-| 役割と計画の出所は、tmux のセッションの環境に値があるかで確かめる | window の中では `-e` の値もグローバルな環境の値も同じに見える。`-e` の形を変えないため、古い版の統括役が起動した一時レーンの役割も読める。役割の値が環境にあるときだけ問うので、通常の起動で tmux の呼び出しは増えない |
+| 役割と計画の出所は、tmux のセッションの環境に値があるかで確かめる | window の中では `-e` の値もグローバルな環境の値も同じに見える。`-e` の形を変えないため、古い版のリレーハブが起動した一時レーンの役割も読める。役割の値が環境にあるときだけ問うので、通常の起動で tmux の呼び出しは増えない |
 | アカウントの環境の戻しは `leave_account` の 1 か所に集め、従量の接続の環境を作る処理と共有する | 元の設定ディレクトリへ戻す規則が 2 か所に分かれない。名前を先に外すと宣言のキーを外す条件に当たらなくなるため、宣言のキーを先に外す |
 
 親が従量の接続で、登録のアカウントが 1 つ以下で `account use` の指定も無いレーンは、宣言のキーを外した後、

@@ -22,7 +22,7 @@ from .common import NAME_FILE, PID_FILE, STOP_FILE, _write_file, env_num, read_t
 
 import md  # noqa: E402,I001  common が lib/ を sys.path に置く
 
-EXIT_NO_HUB = 1  # 統括役が居ない・答えない
+EXIT_NO_HUB = 1  # リレーハブが居ない・答えない
 
 
 # ---------------------------------------------------------------- 依頼
@@ -55,7 +55,7 @@ def _wait_result(rid: str, seconds: float) -> dict | None:
 
 
 def send_request(kind: str, name: str | None, cwd: str, args: list[str], by: str, extra: dict | None = None) -> dict | None:
-    """依頼を置いて結果を待つ。`NDF_RELAY_HUB_WAIT` 秒で来なければ依頼を消して None。消せなければ統括役が
+    """依頼を置いて結果を待つ。`NDF_RELAY_HUB_WAIT` 秒で来なければ依頼を消して None。消せなければリレーハブが
     受け取った後なので、もう 1 度同じ秒数だけ待つ（決定 14）。"""
     rid = put_request(kind, name, cwd, args, by, extra)
     seconds = hb.wait_seconds()
@@ -97,7 +97,7 @@ def no_hub(kind: str, name, why: str) -> dict:
 
 
 def terminal_request(args: list[str]) -> tuple[str, dict | None]:
-    """統括役へ端末の 2 本目の起動を頼む。(`attach` / `refused` / `timeout`, 結果)。"""
+    """リレーハブへ端末の 2 本目の起動を頼む。(`attach` / `refused` / `timeout`, 結果)。"""
     name = os.environ.get("NDF_RELAY_NAME") or None
     res = send_request("spawn", name, os.getcwd(), list(args), "terminal")
     if res is None:
@@ -106,7 +106,7 @@ def terminal_request(args: list[str]) -> tuple[str, dict | None]:
 
 
 def claim_hub() -> hb.Hub | None:
-    """統括役を取る。tmux の中の名前つきのラッパーは取りに行かない（決定 1）。取れなければ None。"""
+    """リレーハブを取る。tmux の中の名前つきのラッパーは取りに行かない（決定 1）。取れなければ None。"""
     return None if os.environ.get("NDF_RELAY_SPAWNED") else hb.Hub.claim()
 
 
@@ -116,7 +116,7 @@ def release_hub(hub: hb.Hub | None) -> None:
 
 
 def write_name(relay_dir: str, hub: hb.Hub | None) -> None:
-    """名前つきのラッパーと統括役（`t1`）の作業ディレクトリへ名前を書く。
+    """名前つきのラッパーとリレーハブ（`t1`）の作業ディレクトリへ名前を書く。
 
     `spawn --role <役割> --plan <計画名>` で起動したラッパー（`NDF_RELAY_ROLE`・`NDF_RELAY_PLAN`）は、役割のファイルも
     書く（問いの転送と `helper` の数えが読む。#2436）。"""
@@ -130,7 +130,7 @@ def write_name(relay_dir: str, hub: hb.Hub | None) -> None:
 
 @contextlib.contextmanager
 def serving(hub: hb.Hub | None, relay_dir: str):
-    """統括役を兼ねるならその間だけ受付箱を回し、抜けたら `hub.lock` を放す。"""
+    """リレーハブを兼ねるならその間だけ受付箱を回し、抜けたら `hub.lock` を放す。"""
     if hub is not None:
         hub.start(relay_dir, hb.read_name(relay_dir))
     try:
@@ -140,8 +140,8 @@ def serving(hub: hb.Hub | None, relay_dir: str):
 
 
 def ask_hub(args: list[str], say) -> int | None:
-    """統括役が居るときの端末の 2 本目（#2346）。統括役に起動を頼み、tmux のセッションへ結び付ける（戻らない）。
-    断られたら理由を 1 行出して終了コード。名前つきのラッパー・tmux が無い・統括役が答えないなら None（今の前景の起動）。"""
+    """リレーハブが居るときの端末の 2 本目（#2346）。リレーハブに起動を頼み、tmux のセッションへ結び付ける（戻らない）。
+    断られたら理由を 1 行出して終了コード。名前つきのラッパー・tmux が無い・リレーハブが答えないなら None（今の前景の起動）。"""
     if os.environ.get("NDF_RELAY_SPAWNED"):
         return None
     if tmux.binary() is None:
@@ -149,7 +149,7 @@ def ask_hub(args: list[str], say) -> int | None:
         return None
     kind, res = terminal_request(args)
     if kind == "timeout" or res is None:
-        say(f"統括役が {hb.wait_seconds():g} 秒答えないため、この端末で 1 本のラッパーとして起動する")
+        say(f"リレーハブが {hb.wait_seconds():g} 秒答えないため、この端末で 1 本のラッパーとして起動する")
         return None
     if kind == "refused":
         say(f"起動しない（{res.get('summary', '')}）")
@@ -176,7 +176,7 @@ def spawn_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def place_blocks(text: str, cwd: str, relay_dir: str) -> int:
-    """応答の起動のブロックごとに依頼を置く（待たない。統括役が居なければ次の統括役が処理する）。置いた数。"""
+    """応答の起動のブロックごとに依頼を置く（待たない。リレーハブが居なければ次のリレーハブが処理する）。置いた数。"""
     n = 0
     for name, body in spawn_blocks(text):
         put_request("spawn", name, cwd or os.getcwd(), hb.prompt_args(body), f"block:{relay_dir}")
@@ -214,10 +214,10 @@ def cmd_spawn(argv: list[str]) -> int:
             hb.hub_result("spawn", "stopped", f"名前の形が違う（{hb.NAME_RE.pattern}）: {name}", name, hb.BAD_NAME, 3), as_json
         )
     if not hb.hub_running():
-        return print_result(no_hub("spawn", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
+        return print_result(no_hub("spawn", name, "リレーハブが居ない（端末で claude を起動するとリレーハブになる）"), as_json)
     extra = {"role": role, "plan": plan} if role else None
     res = send_request("spawn", name, os.getcwd(), hb.prompt_args(" ".join(rest)) if rest else [], "spawn", extra)
-    return print_result(res or no_hub("spawn", name, "統括役が答えない"), as_json)
+    return print_result(res or no_hub("spawn", name, "リレーハブが答えない"), as_json)
 
 
 def cmd_role(argv: list[str]) -> int:
@@ -295,12 +295,12 @@ COLUMNS = (
     ("name", "名前"),
     ("state", "状態"),
     ("awaiting_approval", "承認待ち"),
-    ("sections", "区間"),
+    ("sections", "セッション"),
     ("cost_usd", "費用"),
     ("at", "時刻"),
     ("account", "アカウント"),
     ("attached", "結び付き"),
-    ("hub", "統括役"),
+    ("hub", "リレーハブ"),
 )
 
 
@@ -401,17 +401,22 @@ def cmd_restart(argv: list[str]) -> int:
     if not row and not (w and w.running):
         return print_result(_not_found("restart", name), as_json)
     if not hb.hub_running():
-        return print_result(no_hub("restart", name, "統括役が居ない（端末で claude を起動すると統括役になる）"), as_json)
+        return print_result(no_hub("restart", name, "リレーハブが居ない（端末で claude を起動するとリレーハブになる）"), as_json)
     hub_dir = hb.hub_relay_dir()
     if w and hub_dir and os.path.realpath(w.dir) == os.path.realpath(hub_dir):
-        # 統括役自身を止めると、起動し直す依頼を受ける者が居なくなり停止だけが起きる。止めずに、区間の切り替えへ回す
+        # リレーハブ自身を止めると、起動し直す依頼を受ける者が居なくなり停止だけが起きる。止めずに、区間の切り替えへ回す
         res = hb.hub_result(
-            "restart", "stopped", f"{name} は統括役のため止めない。その端末で /ndf:restart を打って区間を切り替える", name, "hub_self", 3
+            "restart",
+            "stopped",
+            f"{name} はリレーハブのため止めない。その端末で /ndf:restart を打って区間を切り替える",
+            name,
+            "hub_self",
+            3,
         )
         return print_result(res, as_json)
     stop_named(name)
     res = send_request("restart", name, os.getcwd(), [], "restart")
-    return print_result(res or no_hub("restart", name, "統括役が答えない"), as_json)
+    return print_result(res or no_hub("restart", name, "リレーハブが答えない"), as_json)
 
 
 def cmd_attach(argv: list[str]) -> int:

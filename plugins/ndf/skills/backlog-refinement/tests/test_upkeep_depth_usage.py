@@ -97,7 +97,7 @@ def test_compare_uses_the_oldest_rows_after_the_ref_once_per_lap(root):
         _ran(BEFORE, seconds=1, cost=0.1, loop="a", lap=1),  # 起点より前
         _ran(AFTER.format(1), seconds=None, cost=None, loop="a", lap=2),  # 秒の空
         _ran(AFTER.format(2), models=("other",), loop="a", lap=3),  # 言語モデルが違う
-        _ran(AFTER.format(3), seconds=300, cost=2.0, loop="a", lap=4),  # 同じ周回の打ち直しで、次の行が採られる
+        _ran(AFTER.format(3), seconds=300, cost=2.0, loop="a", lap=4),  # 同じループの 1 回の打ち直しで、次の行が採られる
         _ran(AFTER.format(4), seconds=100, cost=1.0, loop="a", lap=4),
         _ran(AFTER.format(5), seconds=200, cost=1.2, loop="b", lap=1),  # 最後の行が空でも、前のそろう行を 1 回と数える
         _ran(AFTER.format(6), seconds=None, cost=None, loop="b", lap=1),

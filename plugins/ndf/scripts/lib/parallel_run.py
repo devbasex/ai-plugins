@@ -12,7 +12,7 @@
   最後の起動の指示を `release` に添える）、`questions`: `{seq, items}`
 - イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次のリリースへ回した知らせ）・`range-<連番>`・`lane-<名>`
 
-統括役の CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
+リレーハブの CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
     out = {}
     for n in lanes:
         ln = plan.lane(n)
-        code, res = relay(Path(main), "spawn", "--name", n, "--json", "--", pp.first_input(ln))
+        code, res = relay(ln.repo_dir(Path(main)), "spawn", "--name", n, "--json", "--", pp.first_input(ln))  # cwd はレーンのリポジトリ
         why = ((res.get("items") or [{}])[0] or {}).get("result")
         if code == 0 or why == "name-taken":
             out[n] = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -261,6 +261,8 @@ class _Run(prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
             self.reply(msg)
         elif kind == "left_stopped":
             self.keep_stopped(msg.get("lane"))
+        elif kind == "lanes_changed":  # parallel.py lane add / set の後（#2733 の決定 9）
+            self.take_lanes_changed()
 
     def receive_question(self, msg: dict) -> None:
         """レーンからの問い（gate1 / gate2 / ask）を一覧へ受け付ける。打ち直しは数えず、同じ原因の問いは 1 つにまとめる。"""
@@ -540,7 +542,7 @@ def parallel_workflow(main: str, name: str) -> dict:
 
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
-    """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留の周回があれば None。"""
+    """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
     designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped)
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
         if set(designs) - set(run.wake):
@@ -551,12 +553,13 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     if not held:
         step_finish(main, name, run.progress())
         return run.summary("finished")
-    # 止まったレーンの保留の周回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
+    # 止まったレーンの保留したループの 1 回のまとめを一時レーンで流してから終える（異常系 11）。一時レーンは 1 本ずつ起こす
     todo = [x for x in held if x not in run.held_spawned]
     if todo and not set(run.held_spawned) & set(held):
         run.held_spawned.append(todo[0])
         seq = len(run.releases) + len(run.held_spawned)
-        run.pause("held", loops=[todo[0]], spawn=helper_spawn(name, seq, 0, pending=todo[0]))
+        spawn = helper_spawn(name, seq, 0, pending=todo[0], cwd=prt.step_loop_repo(main, name, todo[0]))  # 別リポジトリはそこで（#2733）
+        run.pause("held", loops=[todo[0]], spawn=spawn)
     return None
 
 
