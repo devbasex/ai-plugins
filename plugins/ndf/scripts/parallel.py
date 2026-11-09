@@ -5,9 +5,9 @@
 | --- | --- |
 | `init <計画名>` | 標準入力の下書きを検査し、`plan.json`・`plan.md`・レーンごとの引継ぎ文書を書く（在る文書は上書きせず、何も書かない） |
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
-| `start <計画名>` | `run` をセッションから切り離して起動する（動いていれば打ったセッションへオーガナイザーの印を付け直し、今の pid を返す。`metrics.organizer` が付けられたか） |
+| `start <計画名>` | `run` をセッションから切り離して起動する（どの経路でも打ったセッションへオーガナイザーの印を付け直す。`metrics.organizer` が付けられたか。動いていれば今の pid を返す。失われた計画は作り直し、`metrics.rebuilt`・`metrics.restored` を返す。#2647） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3 |
+| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3。失われた計画は 1 で `metrics.next` に `start` の 1 行 |
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
