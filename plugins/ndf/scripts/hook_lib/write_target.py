@@ -253,17 +253,21 @@ class _Scan:
             if r.type != "file_redirect":
                 self.substs(r, st)
                 continue
-            dest = sp.redirect_destination(r)
-            if dest is not None:
-                self.substs(dest, st)
-            if dest is None or sp.redirect_operator(r) not in WRITE_OPS:
-                continue
-            if sp.destination_after_newline(r, dest):  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
-                continue
-            v = sp.unquote(dest)
-            if sp.redirect_operator(r) == ">&" and (v == "-" or v.isdigit()):
-                continue
-            self.emit(v, st)
+            self._file_redirect(r, st)
+
+    def _file_redirect(self, r: sp.Node, st: _Place) -> None:
+        """file_redirect の宛先の置換を流し、ファイルへの書き込みなら宛先を出す。"""
+        dest = sp.redirect_destination(r)
+        if dest is not None:
+            self.substs(dest, st)
+        if dest is None or sp.redirect_operator(r) not in WRITE_OPS:
+            return
+        if sp.destination_after_newline(r, dest):  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
+            return
+        v = sp.unquote(dest)
+        if sp.redirect_operator(r) == ">&" and (v == "-" or v.isdigit()):
+            return
+        self.emit(v, st)
 
     def substs(self, n: sp.Node, st: _Place) -> None:
         """語の中のコマンド置換とプロセス置換を、部分シェルとして流す。"""
