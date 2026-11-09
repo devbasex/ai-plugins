@@ -21,11 +21,12 @@ from datetime import datetime
 from pathlib import Path
 
 import claude_accounts as ca
+import claude_api_keys as ak
 from claude_settings import metered_settings
 import procs
 import limits
 import usage_capture
-from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
+from claude_usage import LIMIT_EPOCH, is_credit_low, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
 
@@ -250,9 +251,11 @@ def call_claude(
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
     result = str(data.get("result") or "")
-    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
+    # API クレジットの残高切れ（#2855 の決定 6）。上限と認証の失敗より先に読む
+    credit = not ok and is_credit_low("\n".join([result, p.stderr]))
+    limit = not ok and not credit and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
     # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
-    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    auth = not ok and not credit and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
     usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
     return ClaudeCall(
         {
@@ -267,6 +270,7 @@ def call_claude(
             "seconds": round(time.time() - started, 1),
             "limit": limit,
             "auth": auth,
+            "credit": credit,
             "resets_at": limit_reset_at("\n".join([result, p.stderr])) if limit else None,
         }
     )
@@ -307,7 +311,13 @@ class ClaudeRunner:
         # 次の呼び出しのアカウント（`metered` は従量の接続）。None は起動したときの環境のまま
         self.account = self.section
         self.metered_told = False  # 壊れた保存の宣言の 1 行を出したか
+        self.keys_told = False  # 壊れた API キーの登録簿の 1 行を出したか
         self.running: list[str | None] = []  # 実行中の呼び出しのアカウント
+        # 今の呼び出しの API キーの名前（無ければ None）。`account` とは別に持ち、キーを外したら元の選定へそのまま戻る（#2855）
+        self.key: str | None = None
+        # 起動したときの環境が持つ API キー（入れ子の起動）の (名前, 世代)。使えなくなったら None にして子から外す
+        self.inherited = ak.inherited()
+        self.inherited_dropped = False  # 実行中の呼び出しのアカウント
 
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
@@ -318,25 +328,51 @@ class ClaudeRunner:
         その変数を足して 1 度だけ起動し直す。それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）
         まで待って同じ呼び出しを起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
+
+        API キーの使い方の宣言（`claude_api_keys.use`）が `off` 以外なら、条件を満たす呼び出しを登録済み API キーで起動する
+        （#2855）。残高切れ・認証の失敗はキーの状態に記録して次のキーかアカウントの選定で起動し直し、利用上限・429 は
+        この呼び出しでだけそのキーを外す。上限に当たって替えるアカウントが無いときは、従量の接続へ移る前と待つ前にキーを試す。
         """
         ctx, st = self.ctx, self.ctx.state
         retry = ctx.plan.get("limit_retry_seconds", limits.seconds("supervise.limit-retry"))
         wait_max = ctx.plan.get("limit_wait_max", limits.seconds("supervise.limit-wait-max"))
         fallback = ca.fallback_env()
         self._tell_metered_problem()
+        use = self._key_use()
         multi = ca.registered() >= 2
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
+        tried_keys: set[str] = set()  # この呼び出しで外した API キー
+        limit_hit = False  # この呼び出しで上限に当たり、替えるアカウントが無かった（near-limit の条件 3）
+
+        def key_left() -> bool:
+            nonlocal limit_hit
+            if use == "off" or ak.pick(exclude=tried_keys) is None:
+                return False
+            limit_hit = True
+            return True
+
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
         while True:
-            try:
-                child = self.child_env(fallback) if multi else None
-            except AccountsLimited as e:
-                waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
-                continue
+            key = self._pick_key(use, tried_keys, limit_hit)
+            self._note_key(key)
+            if key is not None:
+                child = ak.child_env(key, dict(os.environ))
+            else:
+                try:
+                    child = self.child_env(fallback) if multi else None
+                except AccountsLimited as e:
+                    if key_left():
+                        continue
+                    waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
+                    continue
+                if self.inherited_dropped:
+                    child = ak.without_key(child if child is not None else dict(os.environ))
             res = self._call_running(lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw))
+            if self._key_result(key, res, tried_keys):
+                continue
             if res.get("auth") and multi and self.account not in (None, ca.METERED) and self.account not in auth_failed:
                 # 認証の失敗の観測を残し、次の child_env が今のアカウントを除いて選び直す（上限のときと同じ経路。#1576 の E9）
                 auth_failed.add(self.account)
@@ -345,8 +381,10 @@ class ClaudeRunner:
             if res.get("limit"):
                 self.note_limit(res)
                 if multi and self.account != ca.METERED:
-                    if self._switch_after_limit(res, tried, fallback):
+                    if self._switch_after_limit(res, tried, fallback, key_left):
                         continue
+                elif not multi and key_left():
+                    continue
                 elif not multi and fallback and not tried_fallback:
                     tried_fallback = True
                     # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
@@ -356,8 +394,12 @@ class ClaudeRunner:
                     )
             if not res.get("limit"):
                 return res
+            if key_left():
+                continue
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+            tried_keys.clear()
+            limit_hit = False  # 待った後は上限の解けたアカウントを選び直せる
 
     def _tell_metered_problem(self) -> None:
         """保存した従量の接続の宣言が壊れていれば、最初の呼び出しの前に標準エラーと進捗ログへ 1 行出す（#1468 の I5）。"""
@@ -369,8 +411,71 @@ class ClaudeRunner:
             print("supervise: " + bad, file=sys.stderr)
             self.ctx.state.progress_write({"kind": "metered_invalid", "detail": bad})
 
-    def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict) -> bool:
-        """上限に当たったアカウントを記録し、登録済みのアカウントか従量の接続へ替える。替えたら真。"""
+    def _key_use(self) -> str:
+        """API キーの使い方の宣言。登録簿が壊れていれば最初の呼び出しの前に 1 行出し、`off` として動く（I6）。"""
+        if not self.keys_told:
+            self.keys_told = True
+            bad = ak.problem()
+            if bad:
+                print("supervise: " + bad, file=sys.stderr)
+                self.ctx.state.progress_write({"kind": "api_keys_invalid", "detail": bad})
+        return ak.use()
+
+    def _pick_key(self, use: str, tried_keys: set[str], limit_hit: bool) -> ak.ApiKey | None:
+        """この起動に使う API キー（使わなければ None）。宣言ごとの使う条件は設計の「使う条件」の表のとおり。"""
+        if use == "off" or (use == "near-limit" and not (limit_hit or self._near_limit())):
+            return None
+        return ak.pick(exclude=tried_keys)
+
+    def _near_limit(self) -> bool:
+        """登録済みアカウントの選定が候補を返さないか、選んだ候補の使用率が切り替えの閾値以上か（near-limit の条件 1・2）。"""
+        if ca.registered() == 0:
+            return False
+        c = ca.choose(keep=self.keep())
+        return c.name is None or (c.score is not None and c.score >= ca.switch_at())
+
+    def _note_key(self, key: ak.ApiKey | None) -> None:
+        """使う API キーが替わったら、プランの状態（`auth`・`switched`）と進捗ログの `account` の行に残す（E3・E7）。"""
+        name = key.name if key is not None else None
+        if name == self.key:
+            return
+        st = self.ctx.state
+        before, self.key = self.key, name
+        if name is not None:
+            st.cur["auth"] = f"API キー {name}"
+            if st.cur["auth"] not in st.switched:
+                st.switched.append(st.cur["auth"])
+        st.progress_write({"kind": "account", "step": st.cur.get("id"), "reason": "api_key", "from_key": before, "to_key": name})
+
+    def _key_result(self, key: ak.ApiKey | None, res: dict, tried_keys: set[str]) -> bool:
+        """API キーで起動した結果を読む。残高切れ・認証の失敗・上限ならキーを外して真（同じ呼び出しを起動し直す）。
+
+        残高切れと認証の失敗は状態に記録する（起動の時の世代が今の登録と一致するときだけ。I10）。上限と 429 は
+        この呼び出しでだけ外す（決定 6）。入れ子の起動で受け継いだキーも同じく読み、使えなければ以後の子から外す。"""
+        if key is None and not (self.inherited and not self.inherited_dropped):
+            return False
+        if key is not None and res.get("ok"):
+            ak.note_success(key)
+            return False
+        failure = ak.CREDIT_LOW if res.get("credit") else ak.AUTH_FAILED if res.get("auth") else None
+        if key is None:  # 受け継いだキー
+            if failure is None:
+                return False
+            name, gen = self.inherited
+            self.inherited_dropped = True
+        elif failure is None and not res.get("limit"):
+            return False
+        else:
+            name, gen = key.name, key.generation
+            tried_keys.add(name)
+        if failure is not None:
+            st = self.ctx.state
+            recorded = ak.note(name, gen, failure)
+            st.progress_write({"kind": "api_key", "step": st.cur.get("id"), "name": name, "reason": failure if recorded else "stale_generation"})
+        return True
+
+    def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict, key_left=None) -> bool:
+        """上限に当たったアカウントを記録し、登録済みのアカウント・API キー（`key_left()` が真）・従量の接続の順に替える。替えたら真。"""
         kind = kind_of_text(res.get("text") or "")
         if self.account:
             ca.note_limit(self.account, kind, res.get("resets_at"))
@@ -378,6 +483,8 @@ class ClaudeRunner:
         nxt = ca.choose(exclude=tried, keep=self.keep())
         if nxt.name:
             self.switch(nxt.name, kind)
+            return True
+        if key_left is not None and key_left():
             return True
         if fallback:
             self.switch(ca.METERED, kind, keys=list(fallback))

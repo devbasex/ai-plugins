@@ -9,6 +9,8 @@
 - 通信は標準ライブラリの `urllib` で行う。ラッパーの環境（`relay_lib/runtime.py` の `GROUPS`）に HTTP の包み
   （`lib/notify.py` の httpx）を足さないためである（#1389 の決定 13）
 - `NDF_ACCOUNT_USAGE_URL`・`NDF_ACCOUNT_TOKEN_URL` は試験用に宛先を差し替える
+- 登録済み API キーの確かめは Messages API へ `max_tokens` 1 の要求を 1 回打つ（#2855）。宛先は `NDF_API_KEY_CHECK_URL`、
+  モデルは `NDF_API_KEY_CHECK_MODEL` で差し替えられる
 """
 
 from __future__ import annotations
@@ -33,6 +35,9 @@ CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 HTTP_TIMEOUT = limits.seconds("claude-usage.http")
 REFRESH_REJECTED = frozenset({400, 401, 403})  # リフレッシュトークンが取り消されたと読む状態
 KINDS = ("five_hour", "seven_day", "spend", "unknown")
+CHECK_URL = "https://api.anthropic.com/v1/messages"
+CHECK_MODEL = "claude-haiku-4-5"  # 確かめに使う安いモデル。版で変わるので NDF_API_KEY_CHECK_MODEL で差し替えられる
+CHECK_TIMEOUT = limits.seconds("claude-api-keys.check")
 # claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）と、`resets 3pm (UTC)` の形
 LIMIT_EPOCH = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
 LIMIT_RESETS = re.compile(r"resets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?(?:\s*\(([^)]+)\))?", re.I)
@@ -259,7 +264,11 @@ def http_json(
         with open_(req, timeout=timeout) as f:
             status, raw = f.status, f.read()
     except urllib.error.HTTPError as e:
-        status, raw = e.code, b""
+        status = e.code
+        try:  # 失敗の応答の本文も返す（API キーの確かめが `error.type` と文言で読み分ける。#2855 の決定 5）
+            raw = e.read()
+        except (OSError, ValueError):
+            raw = b""
     except (OSError, ValueError):
         return 0, None
     try:
@@ -315,7 +324,51 @@ def refresh_oauth(o: dict, now: float, timeout: float = limits.seconds("claude-u
     return "ok", new
 
 
+@dataclass
+class KeyCheck:
+    """API キーの確かめの結果。`result` は `ok`・`auth_failed`・`credit_low`・`network`・`unclassified`。
+
+    `status` は HTTP の状態（通信の失敗は 0）、`error_type` は応答の `error.type`。応答の `message` は値を含みうるので持たない。"""
+
+    result: str
+    status: int = 0
+    error_type: str | None = None
+
+
+def check_api_key(key: str, timeout: float = CHECK_TIMEOUT) -> KeyCheck:
+    """Messages API へ `max_tokens` 1 の要求を 1 回打ち、キーが使えるかを読み分ける（#2855 の決定 5）。"""
+    req = new_request(
+        os.environ.get("NDF_API_KEY_CHECK_URL") or CHECK_URL,
+        {"x-api-key": key, "anthropic-version": "2023-06-01"},
+        "POST",
+    )
+    body = {
+        "model": os.environ.get("NDF_API_KEY_CHECK_MODEL") or CHECK_MODEL,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}],
+    }
+    status, d = http_json(req, timeout, body=body, follow_redirects=False)
+    if status == 200:
+        return KeyCheck("ok", 200)
+    if status == 0:
+        return KeyCheck("network")
+    err = (d or {}).get("error")
+    err = err if isinstance(err, dict) else {}
+    etype = err.get("type") if isinstance(err.get("type"), str) else None
+    if status == 401 or etype == "authentication_error":
+        return KeyCheck("auth_failed", status, etype)
+    if is_credit_low(str(err.get("message") or "")):
+        return KeyCheck("credit_low", status, etype)
+    return KeyCheck("unclassified", status, etype)
+
+
 # ---------------------------------------------------------------- 上限の文言
+
+
+def is_credit_low(text: str) -> bool:
+    """API クレジットの残高切れの文言か（"Your credit balance is too low ..." と "Credit balance too low ..." の共通部分。#2855 の決定 6）。"""
+    t = (text or "").lower()
+    return "credit balance" in t and "too low" in t
 
 
 def kind_of_text(text: str) -> str:

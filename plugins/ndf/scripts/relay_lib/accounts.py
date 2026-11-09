@@ -1,9 +1,10 @@
 """`relay.py account`: 切り替えに使う claude アカウントと従量の接続の登録・一覧・確かめ・枠の大きさの宣言・削除と、
-次の区間から使うアカウントの指定（#1389・#1453・#1468・#2460）。
+次の区間から使うアカウントの指定（#1389・#1453・#1468・#2460）と、worker の `claude -p` に使う API キーの登録（#2855）。
 
 置き場を書くのは `lib/claude_accounts.py` である。ここは副命令の入口（引数の読み取り・登録の途中の状態の掃除・
 結果を文か JSON で出す）と、`list`・`remove`・`capacity`・`check` の中身を持つ（推論は呼ばない）。OAuth の登録は
-`login`、Bedrock の登録と確かめは `bedrock`、値の決定（引数 → 対話 → 足りない引数）は `ask` が持つ。
+`login`、Bedrock の登録と確かめは `bedrock`、API キーの副命令と分岐は `api_keys`、値の決定（引数 → 対話 → 足りない引数）は
+`ask` が持つ。
 
 すべての副命令が `--yes`（確認を飛ばす。確認の無い副命令では何もしない）と `--json`（結果を JSON 1 つで標準出力へ。
 人向けの文と問いは標準エラー）を受ける。端末でなければ入力を待たず、足りない引数を名前で示して終了コード 2 で終わる。
@@ -16,6 +17,7 @@ import json
 import os
 import sys
 
+from . import api_keys as keys
 from . import bedrock as bd
 from . import login, pin
 from .ask import Asker, Fail, MissingArgs
@@ -26,7 +28,9 @@ import claude_accounts as ca  # noqa: E402,I001
 
 USAGE = (
     "usage: relay.py account add [<名前>] [--code <コード>|-] | add-bedrock [--profile <名前>] [--region <地域>] [--model <ID>]"
-    " | check metered | list | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>|metered | use <名前>|--clear"
+    " | add-api-key <名前> --account <アカウント> [--key-file <パス>]（値は標準入力） | api-key-use [off|always|near-limit]"
+    " | check metered|<API キー> | list | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>|metered|<API キー>"
+    " | use <名前>|--clear"
     "  （共通: [--yes] [--json]）"
 )
 AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
@@ -34,6 +38,8 @@ AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動�
 
 def _add(asker: Asker, name: str | None, code: str | None, as_json: bool, swept: set[str]) -> dict:
     name = asker.value("<名前>", "アカウントの名前", name)
+    if keys.is_key(name):  # API キーの名前とは重ねない（#2855 の I1）
+        raise Fail("name_conflict", f"名前が登録済み API キーと重なる: {name}")
     if code is not None:
         res = login.finish_login(name, login.read_code(code), swept)
     elif asker.interactive:
@@ -115,6 +121,7 @@ def _list_rows() -> dict:
         raise Fail("write_failed", f"置き場を読めない（{e}）") from e
     m = _metered_row()
     rows += [m] if m else []  # 従量の接続は指定できないので `pinned` を持たない
+    rows += keys.list_rows()  # 登録済み API キー（値を除く。#2855）
     if not rows:
         return {"rows": rows, "text": "登録済みのアカウントは無い"}
     return {"rows": rows, "text": "\n".join(_table_lines(rows))}
@@ -127,6 +134,8 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
     """一覧の 1 件を表示の 1 行へ写す。`emails` は全件のメールアドレス（小文字）。"""
     if r["kind"] == "metered":
         return (r["name"], _metered_label(r), *("-",) * (len(HEADER) - 3), r["state"])
+    if r["kind"] == "api_key":
+        return keys.table_row(r, len(HEADER))
     spend = {True: "yes", False: "no"}.get(r["spend_limit_reached"], "-")
     if r.get("spend_full") and r["spend_limit_reached"] is not True:
         spend += "（追加の利用は上限）"  # 生の旗と spend の食い違い（#2036）。状態は生の旗で決まる
@@ -194,6 +203,8 @@ def _capacity_cmd(asker: Asker, name: str | None, five: str | None, seven: str |
 
 def _remove(asker: Asker, name: str | None) -> dict:
     name = asker.value("<名前>", "外す名前（アカウントか metered）", name)
+    if keys.is_key(name):
+        return keys.remove(name)
     if name == ca.METERED:
         if not ca.remove_metered():
             raise Fail("no_declaration", "保存した従量の接続の宣言が無い")
@@ -271,7 +282,9 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
 
 
 def _check(name: str | None) -> dict:
-    """今効いている従量の接続の宣言で、Bedrock の Claude を呼べるかを確かめる（F2）。"""
+    """今効いている従量の接続の宣言で、Bedrock の Claude を呼べるかを確かめる（F2）。登録済み API キーの名前ならそのキーを確かめる。"""
+    if keys.is_key(name):
+        return keys.check(name)
     if name != ca.METERED:
         raise Fail("invalid_name", "確かめられるのは metered だけ: account check metered", 2)
     env = ca.fallback_env()
@@ -307,6 +320,11 @@ def _account_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("add-bedrock", parents=[common], add_help=False)
     for k in ("--profile", "--region", "--model"):
         b.add_argument(k)
+    k = sub.add_parser("add-api-key", parents=[common], add_help=False)
+    k.add_argument("name", nargs="?")
+    k.add_argument("--account")
+    k.add_argument("--key-file")
+    sub.add_parser("api-key-use", parents=[common], add_help=False).add_argument("value", nargs="?")
     sub.add_parser("check", parents=[common], add_help=False).add_argument("name", nargs="?")
     sub.add_parser("list", parents=[common], add_help=False)
     sub.add_parser("remove", parents=[common], add_help=False).add_argument("name", nargs="?")
@@ -368,6 +386,8 @@ def cmd_account(args: list[str]) -> int:
     handlers = {
         "add": lambda: _add(asker, a.name, a.code, a.json, swept),
         "add-bedrock": lambda: _add_bedrock(asker, a.profile, a.region, a.model),
+        "add-api-key": lambda: keys.add(asker, a.name, a.account, a.key_file),
+        "api-key-use": lambda: keys.use(a.value),
         "check": lambda: _check(a.name),
         "list": _list_rows,
         "remove": lambda: _remove(asker, a.name),
