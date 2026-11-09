@@ -1669,7 +1669,7 @@
     {
       "term": "本文の骨格",
       "context": "ndf-issue-upkeep",
-      "meaning": "範囲外の課題の本文が持つ 6 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・起票者の推定・由来）",
+      "meaning": "範囲外の課題の本文が持つ見出し。Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）の項目名で書き、種類ごとの必須の項目・起票者の推定・由来を含む",
       "source": "docs/specifications/out-of-scope-issue-file.md"
     },
     {

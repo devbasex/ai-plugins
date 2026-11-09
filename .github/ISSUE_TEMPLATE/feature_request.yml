@@ -2,32 +2,41 @@ name: 機能の要望
 description: 足りない機能、既存の手順の改善
 labels: ["enhancement"]
 body:
-  - type: textarea
-    id: problem
+  - type: markdown
     attributes:
-      label: 解決したい状況
-      description: いま何に困っているかを書いてください。機能の形ではなく、状況から書くと検討しやすくなります。
+      value: |
+        欄の名前と書く水準は、記載項目の定義
+        [plugins/ndf/scripts/data/issue-items.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/scripts/data/issue-items.json)
+        にあります。
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: 今どうなっているか・誰に効くか・変えると何が成り立つかを書いてください。機能の形ではなく、状況から書くと検討しやすくなります。
     validations:
       required: true
 
   - type: textarea
-    id: proposal
+    id: scope
     attributes:
-      label: 案
-      description: どうなると解決するかを書いてください。
+      label: 対象範囲
+      description: 含むものと含まないものを、1 行ずつ以上書いてください。
     validations:
       required: true
 
   - type: textarea
-    id: alternatives
+    id: acceptance
     attributes:
-      label: 代替案
-      description: ほかに考えた方法と、それを採らない理由があれば書いてください。
+      label: 受け入れ条件
+      description: どうなると解決したと言えるかを、1 行 1 条件の観測できる結果で書いてください。案で構いません。
+    validations:
+      required: true
 
   - type: dropdown
     id: runtime
     attributes:
-      label: 影響するランタイム
+      label: "影響: ランタイム"
       multiple: true
       options:
         - Claude Code (claude)
@@ -38,3 +47,9 @@ body:
         - ランタイムに依らない
     validations:
       required: true
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: 直し方の案
+      description: 案と、ほかに考えて採らない方法とその理由があれば書いてください。
