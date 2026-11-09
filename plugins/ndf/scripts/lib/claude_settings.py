@@ -2,10 +2,14 @@
 
 relay の区間・supervise.py の `claude -p`・`launch-cli.sh` の claude が同じ組み立てを使う。宣言の読み先は
 `claude_accounts` が持つ。スクリプトとして呼ぶと、今の環境で足す `--settings` の値を 1 行で出す（足さなければ何も出さない）。
+
+子が読む設定のファイルの `env` の値を集める部品（`env_values`。#2855）もここに置く。claude は設定のファイルの `env` を
+起動の環境より優先する（https://code.claude.com/docs/en/env-vars の Precedence）ため、子へ渡す前に送り先などを確かめる。
 """
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import sys
@@ -16,6 +20,8 @@ import claude_accounts as ca
 # 引数へ載せない名前の語。`SECRET_ENV` に無い資格情報（`AWS_BEARER_TOKEN_BEDROCK`・`ANTHROPIC_CUSTOM_HEADERS` など）を
 # 名前で外す。引数は同じホストの他のプロセスから読める（`ps`・`/proc/<pid>/cmdline`）ため、迷う名前は載せない側へ倒す
 SECRET_WORDS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "HEADERS")
+# 管理の設定（Linux / macOS）と、その横の追加の置き場（managed-settings.d）
+MANAGED_SETTINGS = ("/etc/claude-code/managed-settings.json", "/Library/Application Support/ClaudeCode/managed-settings.json")
 
 
 def is_secret(name: str) -> bool:
@@ -92,6 +98,50 @@ def _read_settings(value: str, cwd: str) -> dict | None:
     except (OSError, ValueError):
         return None
     return d if isinstance(d, dict) else None
+
+
+def _project_dirs(cwd: str) -> list[str]:
+    """子の claude がプロジェクトの設定を読みうる場所。`cwd` とその上の各階層と、worktree なら元の checkout の根。"""
+    dirs, d = [], os.path.abspath(cwd)
+    while True:
+        dirs.append(d)
+        git = os.path.join(d, ".git")
+        if os.path.isfile(git):  # worktree: 手元の設定は元の checkout の根から読まれる
+            try:
+                with open(git, encoding="utf-8") as f:
+                    line = f.readline().strip()
+            except OSError:
+                line = ""
+            if line.startswith("gitdir:") and "/.git/worktrees/" in line:
+                dirs.append(line[len("gitdir:") :].strip().split("/.git/worktrees/")[0])
+        parent = os.path.dirname(d)
+        if parent == d:
+            return dirs
+        d = parent
+
+
+def env_values(name: str, env: dict, cwd: str | None) -> list[str]:
+    """`env` の環境・`cwd` で起動した子の claude が読む設定のファイル（管理・利用者・プロジェクト・手元）の `env` にある `name` の値。
+
+    空でない文字列だけを返す。読めないファイル・壊れた JSON は飛ばす（claude -p も飛ばす）。"""
+    conf = env.get(ca.CONFIG_ENV) or os.path.join(os.path.expanduser("~"), ".claude")
+    files = [os.path.join(conf, "settings.json")]
+    for m in MANAGED_SETTINGS:
+        files += [m, *sorted(glob.glob(os.path.join(os.path.dirname(m), "managed-settings.d", "*.json")))]
+    for d in _project_dirs(cwd or os.getcwd()):
+        files += [os.path.join(d, ".claude", n) for n in ("settings.json", "settings.local.json")]
+    found = []
+    for path in files:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        sub = data.get("env") if isinstance(data, dict) else None
+        value = sub.get(name) if isinstance(sub, dict) else None
+        if isinstance(value, str) and value:
+            found.append(value)
+    return found
 
 
 def main() -> int:

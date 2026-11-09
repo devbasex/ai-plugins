@@ -163,8 +163,8 @@ NDF を読み込んだセッションの開始で、そのアカウントの「�
 - Off にしたときだけ、画面に `[ndf] …を Off にした` を 1 行出します。既に Off なら何も送らず何も出しません
 - 読めない・書き換えられない（認証が無い・401・403・通信の失敗）ときは、`[ndf] 学習の設定を確かめられなかった…` か
   `…Off にできなかった…` を出し、セッションは続けます。次の起動でもう一度試します
-- API キー・Bedrock・Vertex の接続（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・
-  `CLAUDE_CODE_USE_VERTEX` のどれか）と、Codex の API キーのログインには学習の設定が無いため、何もしません
+- API キー・Bedrock・Vertex・Foundry の接続（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・
+  `CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY` のどれか）と、Codex の API キーのログインには学習の設定が無いため、何もしません
 - Off にすると、Anthropic 側の会話の保存期間も、学習に使わない設定の期間に変わります
 - **外すには `NDF_TRAINING_OPTOUT=0` を設定します**（読みも書きも送りません）。恒久にするには `~/.claude/settings.json` の
   `env` に書きます。Codex では起動の環境に置きます
@@ -375,7 +375,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.27.46/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.27.47/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -397,14 +397,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.46/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.47/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.27.46  <path>
+# => ndf@ai-plugins  installed, enabled  10.27.47  <path>
 ```
 
 抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

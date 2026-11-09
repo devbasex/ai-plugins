@@ -1669,7 +1669,7 @@
     {
       "term": "本文の骨格",
       "context": "ndf-issue-upkeep",
-      "meaning": "範囲外の課題の本文が持つ 6 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・起票者の推定・由来）",
+      "meaning": "範囲外の課題の本文が持つ見出し。Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）の項目名で書き、種類ごとの必須の項目・起票者の推定・由来を含む",
       "source": "docs/specifications/out-of-scope-issue-file.md"
     },
     {
@@ -3198,7 +3198,7 @@
     {
       "term": "OAuth でない接続",
       "context": "ndf-training-optout",
-      "meaning": "claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
+      "meaning": "claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX・CLAUDE_CODE_USE_FOUNDRY）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
       "pending_source": "issues/old/issue-1597-design.md"
     },
     {
@@ -4435,7 +4435,7 @@
       "term": "ランナー",
       "context": "ndf-workflow",
       "meaning": "作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "ランナーのエージェント",
@@ -4512,7 +4512,7 @@
     {
       "term": "起票の依頼",
       "context": "ndf-factory",
-      "meaning": "実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーのエージェントが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーのエージェントは自分では起票しない",
+      "meaning": "実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーのエージェントが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文・種類のラベルを持ち、ランナーのエージェントは自分では起票しない",
       "source": ""
     },
     {
@@ -5097,25 +5097,25 @@
       "term": "計画の置き場",
       "context": "ndf-workflow",
       "meaning": "並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。依頼・答えの記録のキーは計画の置き場と計画名から求め、その値は <計画の置き場>/.ndf/parallel/<計画名> の絶対パスのまま変えない",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "レーンのリポジトリ",
       "context": "ndf-workflow",
       "meaning": "レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "計画の所在の一覧",
       "context": "ndf-workflow",
       "meaning": "マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "例外の起動",
       "context": "ndf-workflow",
       "meaning": "計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "保留したループの 1 回",
@@ -5980,19 +5980,19 @@
       "term": "物理層",
       "context": "ndf-workflow",
       "meaning": "並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "ロール層",
       "context": "ndf-workflow",
       "meaning": "並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "フロー層",
       "context": "ndf-workflow",
       "meaning": "並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "棚卸しの実行",
@@ -6028,6 +6028,101 @@
       "meaning": "棚卸しの記録の置き場の下に、実行の識別子ごとに置く棚卸しの回のディレクトリ（runs/<run>/）",
       "source": "",
       "pending_source": "issues/issue-2847-design.md"
+    },
+    {
+      "term": "今の起動",
+      "context": "ndf-workflow",
+      "meaning": "一時レーンでは、耐久ワークフローが最後に指示した起動。通常のレーンでは、ラッパーが最後に起動した回",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "レーンの再起動",
+      "context": "ndf-workflow",
+      "meaning": "止まった、または動かないレーンを `relay.py restart` で起動し直すこと。問いの選択肢の「起こし直す」がこれに当たる",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "停滞の問い",
+      "context": "ndf-workflow",
+      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "途中停止の問い",
+      "context": "ndf-workflow",
+      "meaning": "リリースの途中で止まった一時レーンについて耐久ワークフローが立てる問い（`kind: helper`）",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "問いの取り下げ",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが、答えを待たずに自分の問いを問いの一覧から外すこと",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "再起動の試み",
+      "context": "ndf-workflow",
+      "meaning": "レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、統括役の記録に時刻と結果を残す",
+      "source": "",
+      "pending_source": "issues/issue-2649-design.md"
+    },
+    {
+      "term": "計画の台帳",
+      "context": "ndf-workflow",
+      "meaning": "1 つの並列の計画を続けるのに要る状態を、計画の置き場に持つ記録。受けた行を足す ledger.jsonl と、台帳のチェックポイントからなる",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "耐久ワークフローの作り直し",
+      "context": "ndf-workflow",
+      "meaning": "失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "台帳のチェックポイント",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが自分の状態（答えた依頼・リリースの記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "失われた計画",
+      "context": "ndf-workflow",
+      "meaning": "閉じていないのに、耐久ワークフローが動いていない計画。ERROR か、耐久の記録が無い状態を指す",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "耐久の記録の退避",
+      "context": "ndf-workflow",
+      "meaning": "失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ置き場で開くために行う",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "読み込まれたプラグイン",
+      "context": "ndf-workflow",
+      "meaning": "起動したセッションに Claude Code が読み込んだ NDF。--plugin-dir で指したディレクトリか、導入したプラグインのキャッシュのディレクトリで、起動時の init の plugins の ndf の path に出る",
+      "pending_source": "issues/issue-2813-requirements.md"
+    },
+    {
+      "term": "規約の文書",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が worker の起動指示を組むために読む、NDF の Skill の SKILL.md と references/ の下の文書（development-workflow の references/agent-layers.md、design の references/design-template.md など）",
+      "pending_source": "issues/issue-2813-requirements.md"
+    },
+    {
+      "term": "規約の文書の guard",
+      "context": "ndf-workflow",
+      "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
+      "pending_source": "issues/issue-2813-design.md"
     }
   ]
 }

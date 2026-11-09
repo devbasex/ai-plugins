@@ -7,19 +7,43 @@ body:
       value: |
         脆弱性は公開の issue に書かないでください。報告の方法は
         [SECURITY.md](https://github.com/devbasex/ai-plugins/blob/main/SECURITY.md) にあります。
+        欄の名前と書く水準は、記載項目の定義
+        [plugins/ndf/scripts/data/issue-items.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/scripts/data/issue-items.json)
+        にあります。
 
   - type: textarea
-    id: summary
+    id: symptom
     attributes:
       label: 事象
-      description: 何が起きたかを 1〜3 行で書いてください。
+      description: 観測した結果を、出力・終了コード・画面のとおりに書いてください。エラーの出力はそのまま貼ってください。
+      render: console
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する結果
+      description: 不具合が無ければ何が起きるべきだったかを書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 実行したコマンドと、そのときのリポジトリの状態を書いてください。再現しないときは頻度と「再現しない」と書いてください。
+      placeholder: |
+        1. `/ndf:worktree feature/foo` を実行する
+        2. 作業ツリーの中で `README.md` を編集する
+        3. ...
     validations:
       required: true
 
   - type: dropdown
     id: runtime
     attributes:
-      label: ランタイム
+      label: "環境: ランタイム"
       description: 事象を確認した CLI を選んでください。複数で確認した場合は複数選べます。
       multiple: true
       options:
@@ -33,7 +57,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: NDF の版
+      label: "環境: NDF の版"
       description: "`claude plugin list` / `codex plugin list` / `agy plugin list` で確認できます。"
       placeholder: "10.3.1"
     validations:
@@ -42,7 +66,7 @@ body:
   - type: input
     id: os
     attributes:
-      label: OS
+      label: "環境: OS"
       placeholder: "Ubuntu 24.04 / macOS 15.2 / Windows 11 + WSL2"
     validations:
       required: true
@@ -50,40 +74,32 @@ body:
   - type: input
     id: skill
     attributes:
-      label: 関係する Skill 名
+      label: "環境: 関係する Skill"
       description: 分かる範囲で構いません。フックが原因と思われる場合は「フック」と書いてください。
       placeholder: "cross-review"
 
   - type: textarea
-    id: steps
+    id: impact
     attributes:
-      label: 再現手順
-      description: 実行したコマンドと、そのときのリポジトリの状態を書いてください。
-      placeholder: |
-        1. `/ndf:worktree feature/foo` を実行する
-        2. 作業ツリーの中で `README.md` を編集する
-        3. ...
+      label: 影響
+      description: 誰の何が、どの範囲で困るかを書いてください。
     validations:
       required: true
 
   - type: textarea
-    id: expected
+    id: acceptance
     attributes:
-      label: 期待した結果
-    validations:
-      required: true
+      label: 受け入れ条件
+      description: 期待する結果のほかに、直ったと確かめる条件があれば 1 行 1 条件で書いてください。
 
   - type: textarea
-    id: actual
+    id: cause
     attributes:
-      label: 実際の結果
-      description: エラーの出力があれば、そのまま貼ってください。
-      render: console
-    validations:
-      required: true
+      label: 原因の見当
+      description: 調べた範囲で分かっていることがあれば、確かめた事実か推定かを分けて書いてください。空欄でも構いません。
 
   - type: textarea
-    id: notes
+    id: fix
     attributes:
-      label: 原因の見当・影響・修正案
-      description: 調べた範囲で分かっていることがあれば書いてください。空欄でも構いません。
+      label: 直し方の案
+      description: 案があれば書いてください。空欄でも構いません。
