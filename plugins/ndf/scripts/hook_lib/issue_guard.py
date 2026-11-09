@@ -238,22 +238,30 @@ def issue_decision(ev: pl.Event) -> dict | None:
     base = ev.command_cwd() or ev.cwd
     dirs, writes = write_target.command_places(root, base)
     for node in found:
-        cwd = dirs.get((node.start_byte, node.end_byte)) or base
-        try:
-            definition = issue_items.load_definition(cwd)
-        except issue_items.DefinitionError:
-            continue
-        words = _call_words(node)
-        start = _start([sp.unquote(w) for w in words]) + 3
-        try:
-            body, labels, repo = create_args(words[start:], cwd, writes.get((node.start_byte, node.end_byte), frozenset()))
-        except RewrittenBody as e:
-            return deny(_rewritten_text(str(e), definition))
-        if issue_items.other_repo(repo, cwd):
-            continue
-        if body is None:
-            return deny(_unreadable_text(definition))
-        _kind, gaps = issue_items.judge_body(body, labels, CONTEXT, definition)
-        if gaps:
-            return deny(_gap_text(gaps, definition))
+        span = (node.start_byte, node.end_byte)
+        decision = _create_decision(node, dirs.get(span) or base, writes.get(span, frozenset()))
+        if decision is not None:
+            return decision
+    return None
+
+
+def _create_decision(node: sp.Node, cwd: str, written: frozenset[str]) -> dict | None:
+    """`gh issue create` 1 つ分の判定。定義を読めない・別のリポジトリなら `None`、拒否なら deny。"""
+    try:
+        definition = issue_items.load_definition(cwd)
+    except issue_items.DefinitionError:
+        return None
+    words = _call_words(node)
+    start = _start([sp.unquote(w) for w in words]) + 3
+    try:
+        body, labels, repo = create_args(words[start:], cwd, written)
+    except RewrittenBody as e:
+        return deny(_rewritten_text(str(e), definition))
+    if issue_items.other_repo(repo, cwd):
+        return None
+    if body is None:
+        return deny(_unreadable_text(definition))
+    _kind, gaps = issue_items.judge_body(body, labels, CONTEXT, definition)
+    if gaps:
+        return deny(_gap_text(gaps, definition))
     return None
