@@ -1,0 +1,91 @@
+layer_role,kind,turns,usd
+conductor / 単独の conductor(/goal),変換: JSON・出力を python -c / jq / cut で読む,2519,280.03
+conductor / 単独の conductor(/goal),照合: gh で PR・Issue を読む,1360,221.6
+worker,待ち: sleep・ポーリングの手書き,729,213.12
+conductor / 単独の conductor(/goal),往復: NDF スクリプトを 1 行打つ,1476,189.74
+supervisor,照合: gh で PR・Issue を読む,1762,185.01
+worker,照合: gh で PR・Issue を読む,1946,181.7
+worker,照合: git の状態を見る,2206,181.06
+supervisor,照合: git の状態を見る,1460,159.69
+worker,変換: JSON・出力を python -c / jq / cut で読む,2318,151.71
+conductor / 単独の conductor(/goal),照合: git の状態を見る,997,148.03
+supervisor,変換: JSON・出力を python -c / jq / cut で読む,2059,141.62
+supervisor,待ち: sleep・ポーリングの手書き,595,132.64
+conductor / 単独の conductor(/goal),待ち: sleep・ポーリングの手書き,517,84.1
+相手役(cross-*),照合: git の状態を見る,1175,83.79
+conductor / レーン(--loop),変換: JSON・出力を python -c / jq / cut で読む,1086,80.07
+worker,照合: 版数・タグ,556,76.65
+conductor / 単独の conductor(/goal),転記: PR・Issue の本文を組み立てて書く,299,72.7
+conductor / 単独の conductor(/goal),照合: 版数・タグ,332,72.67
+conductor / 単独の conductor(/goal),照合: CI の状態を gh で見る,522,72.04
+conductor / 人の対話,照合: gh で PR・Issue を読む,349,70.31
+conductor / オーガナイザー(--parallel),変換: JSON・出力を python -c / jq / cut で読む,332,60.12
+conductor / 人の対話,変換: JSON・出力を python -c / jq / cut で読む,372,59.18
+conductor / 人の対話,照合: git の状態を見る,273,50.43
+worker,往復: NDF スクリプトを 1 行打つ,281,45.23
+supervisor,往復: NDF スクリプトを 1 行打つ,558,39.08
+conductor / 単独の conductor(/goal),手作業: gh pr merge を直接,125,37.35
+conductor / 人の対話,往復: NDF スクリプトを 1 行打つ,223,34.36
+worker,照合: CI の状態を gh で見る,420,32.13
+conductor / レーン(--loop),往復: NDF スクリプトを 1 行打つ,615,31.18
+相手役(cross-*),変換: JSON・出力を python -c / jq / cut で読む,335,28.64
+supervisor,照合: CI の状態を gh で見る,304,27.54
+conductor / 人の対話,待ち: sleep・ポーリングの手書き,122,27.32
+worker,転記: PR・Issue の本文を組み立てて書く,342,27.13
+conductor / オーガナイザー(--parallel),往復: NDF スクリプトを 1 行打つ,214,26.17
+conductor / 人の対話,転記: PR・Issue の本文を組み立てて書く,140,25.25
+supervisor,照合: 版数・タグ,265,21.69
+conductor / 人の対話,照合: 版数・タグ,102,17.83
+supervisor,転記: PR 本文のファイル,92,16.02
+conductor / 人の対話,照合: CI の状態を gh で見る,54,15.05
+conductor / レーン(--loop),照合: git の状態を見る,161,13.13
+conductor / 単独の conductor(/goal),転記: 引継ぎ文書の更新,176,12.61
+conductor / レーン(--loop),照合: gh で PR・Issue を読む,215,12.13
+supervisor,転記: PR・Issue の本文を組み立てて書く,164,11.75
+conductor / オーガナイザー(--parallel),待ち: tmux capture-pane の確認,123,10.34
+conductor / オーガナイザー(--parallel),照合: gh で PR・Issue を読む,91,8.58
+conductor / 人の対話,手作業: gh pr merge を直接,52,7.33
+相手役(cross-*),照合: 版数・タグ,101,6.67
+conductor / オーガナイザー(--parallel),待ち: sleep・ポーリングの手書き,51,5.77
+その他(claude -p),照合: git の状態を見る,76,4.71
+supervisor,手作業: gh pr merge を直接,53,4.68
+conductor / 人の対話,転記: 引継ぎ文書の更新,38,4.63
+conductor / 並列のレーン(--parallel-helper),往復: NDF スクリプトを 1 行打つ,135,4.5
+conductor / オーガナイザー(--parallel),照合: 版数・タグ,26,3.95
+conductor / レーン(--loop),照合: CI の状態を gh で見る,61,3.02
+conductor / レーン(--loop),照合: 版数・タグ,51,2.95
+相手役(cross-*),転記: プラン・状態 JSON の手書き,29,2.82
+相手役(cross-*),照合: gh で PR・Issue を読む,31,2.79
+conductor / レーン(--loop),待ち: sleep・ポーリングの手書き,57,2.56
+conductor / 人の対話,転記: PR 本文のファイル,18,2.37
+worker,転記: PR 本文のファイル,14,2.17
+conductor / オーガナイザー(--parallel),照合: git の状態を見る,26,2.12
+conductor / オーガナイザー(--parallel),照合: CI の状態を gh で見る,23,2.11
+conductor / 単独の conductor(/goal),転記: PR 本文のファイル,5,1.59
+conductor / 並列のレーン(--parallel-helper),変換: JSON・出力を python -c / jq / cut で読む,35,1.58
+conductor / レーン(--loop),転記: 引継ぎ文書の更新,25,1.37
+相手役(cross-*),往復: NDF スクリプトを 1 行打つ,35,1.26
+worker,手作業: gh pr merge を直接,4,1.14
+その他(claude -p),変換: JSON・出力を python -c / jq / cut で読む,13,1.02
+試験・疎通,手作業: gh pr merge を直接,8,0.86
+conductor / レーン(--loop),転記: PR・Issue の本文を組み立てて書く,15,0.84
+その他(claude -p),照合: 版数・タグ,6,0.76
+相手役(cross-*),待ち: sleep・ポーリングの手書き,12,0.57
+その他(claude -p),手作業: gh pr merge を直接,5,0.52
+conductor / オーガナイザー(--parallel),転記: PR・Issue の本文を組み立てて書く,7,0.51
+worker,転記: 引継ぎ文書の更新,6,0.43
+conductor / 単独の conductor(/goal),待ち: tmux capture-pane の確認,10,0.36
+worker,待ち: tmux capture-pane の確認,8,0.33
+conductor / レーン(--loop),待ち: tmux capture-pane の確認,4,0.29
+conductor / 並列のレーン(--parallel-helper),照合: git の状態を見る,5,0.24
+その他(claude -p),照合: gh で PR・Issue を読む,7,0.2
+conductor / 並列のレーン(--parallel-helper),照合: CI の状態を gh で見る,5,0.19
+相手役(cross-*),転記: PR 本文のファイル,2,0.17
+conductor / 人の対話,待ち: tmux capture-pane の確認,3,0.15
+conductor / 並列のレーン(--parallel-helper),待ち: sleep・ポーリングの手書き,4,0.15
+supervisor,転記: 引継ぎ文書の更新,2,0.14
+conductor / オーガナイザー(--parallel),転記: 引継ぎ文書の更新,2,0.12
+試験・疎通,待ち: sleep・ポーリングの手書き,7,0.12
+相手役(cross-*),照合: CI の状態を gh で見る,2,0.1
+その他(claude -p),待ち: sleep・ポーリングの手書き,3,0.09
+conductor / 並列のレーン(--parallel-helper),転記: PR・Issue の本文を組み立てて書く,1,0.05
