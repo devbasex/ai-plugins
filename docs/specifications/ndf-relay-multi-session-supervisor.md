@@ -218,7 +218,7 @@ stateDiagram-v2
 | `run`（2 本目） | `[claude の引数 ...]`。名前は `NDF_RELAY_NAME` | リレーハブが起動したら `attach-session` へ exec し、その終了コード。断られたら結果の `metrics.exit_code`（`bad-name`・`name-taken`・`limit`・`no-tmux` は 3、`tmux-failed` は 1）。tmux が無い・リレーハブが答えないときは前景の起動になり、1 本のラッパーと同じ | 断り: `ndf-relay: 起動しない（<summary>）`。tmux が無い: `ndf-relay: tmux が PATH に無いため統括しない。…`。答えない: `ndf-relay: リレーハブが <秒> 秒答えないため、…` |
 | `spawn` | `--name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | 0: 起動した / 2: `--name` が無い・`--role` が `helper` でない・`--role` に `--plan` が無い（使い方を出す）/ 3: 名前の形が違う（リレーハブに頼まずに断る）・名前が重なる・上限（`--role helper` は上限を見ず、動いている `helper` があれば断る）・リレーハブの側で tmux が無い / 1: リレーハブが居ない・答えない（`no-hub`）・tmux のセッションを作れない | 結果（`tool: relay-spawn`）。成功の `summary` は `<名前> を起動した（relay.py attach <名前> で結び付ける）` |
 | `ls` | `[--json]` | 0 / 2: 状態ディレクトリを読めない | `--json` は 1 行の JSON（`tool: relay-ls`・`status: ok`・`summary`・`items`・`metrics`）。無ければ見出しつきの表（列: 名前・状態・承認待ち・区間・費用・時刻・アカウント・結び付き・リレーハブ。空は `-`、真偽は `yes` / `no`） |
-| `role` | `organizer\|helper --plan <計画名>` / `--clear` | 0: 作業ディレクトリ（`NDF_RELAY_DIR`）へ役割のファイル `role.json`（`role`・`plan`・`at`）を書いた・消した / 2: 役割か `--plan` が無い / 1: ラッパーの外（`NDF_RELAY_DIR` が無い） | 1 行の JSON（`tool: relay-role`） |
+| `role` | `organizer\|helper --plan <計画名> [--plan-dir <計画の置き場>]` / `--clear [--plan-dir <計画の置き場>]` | 0: 作業ディレクトリ（`NDF_RELAY_DIR`）へ役割のファイル `role.json`（`role`・`plan`・`at`、`--plan-dir` があれば `plan_dir`）を書いた・消した。`--plan-dir` があるとき、`organizer` は同じ `plan_dir` を持つ他のラッパーのオーガナイザーの印を消し、`--clear` はラッパーの外でも全ラッパーを走査して同じ `plan_dir` の印を消す（`plan_dir` を持たない印は消さない。消した数は `items[0].cleared`） / 2: 役割か `--plan` が無い / 1: ラッパーの外（`NDF_RELAY_DIR` が無い）で、`--clear --plan-dir` でもない | 1 行の JSON（`tool: relay-role`） |
 | `attach` | `<名前>` | 名前の tmux のセッションへ `attach-session` で exec する / 3: セッションが無い / 2: 名前が 1 つでない・標準入力か標準出力が端末でない | 失敗の理由を `relay.py:` の 1 行で標準エラーへ |
 | `stop` | `[<名前>] [--json]` | 名前なし: 1 本のラッパーの仕様のまま。名前あり: 0: 止めた / 3: 動いているものも tmux のセッションも無い（`not-found`） | 名前あり: 結果（`tool: relay-stop`） |
 | `restart` | `<名前> [--json]` | 0: 起動し直した / 2: 名前が 1 つでない / 3: 登録簿の行も動いているものも無い（`not-found`）・リレーハブ自身（`hub_self`。止めない）・起動の判定で断られた / 1: リレーハブが居ない・答えない・tmux のセッションを作れない | 結果（`tool: relay-restart`） |
@@ -266,7 +266,7 @@ stateDiagram-v2
 | `registry.json` | `version`（1）と `entries.<名前>`（`session`・`cwd`・`args`・`created_at`・`by`。`spawn --role helper` で起動した行は `role`・`plan` も持つ） | リレーハブだけ | —（名前ごとの行を上書きする。止まった行は同じ名前で起動し直すまで残る） |
 | `requests/<id>.json` | `kind`（`spawn` / `restart`）・`name`（null は自動で付ける）・`cwd`・`args`・`by`・`at`、`spawn --role helper` なら `role`・`plan`。環境変数は載せない | 頼む側（0600） | リレーハブが `<id>.taken` へ `rename` して受け取った時点。待ちを切った頼む側 |
 | `results/<id>.json` | 結果（上の「結果の形」） | リレーハブ | 頼む側が読んで消す。読まれずに 10 分を過ぎたものは次のリレーハブが消す |
-| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed`）・`name`・`reason` を 1 行ずつ。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
+| `hub-log.jsonl` | `at`・`event`（`claimed` / `started` / `restarted` / `refused` / `stopped` / `failed` / `version-switched`）・`name`・`reason` を 1 行ずつ。`version-switched` は、リレーハブを起こした python のバージョンディレクトリが消え、`relay.current` の仮想環境でレーンを起こしたときの行である。人の起動で上限を超えて起動した `started` の行だけ `over_limit`（`cap`・`running`）も持つ | リレーハブ・名前つきの `stop`（`lib/locks.py` の `append_locked`） | — |
 
 `id` は `<時刻のナノ秒 20 桁>-<pid>-<乱数 6 桁>` で、ファイル名の順が置いた順になる。`by` は `terminal`（端末の 2 本目）・
 `spawn`・`restart`・`block:<作業ディレクトリ>`（起動のブロック）のどれか。
