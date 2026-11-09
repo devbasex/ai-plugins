@@ -250,7 +250,7 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | `request`（リリースの依頼） | レーンのプランのステップ `parallel-request`（`parallel.py request`） | `<レーン名>-r<乱数 12 桁>`。最初の実行でプランの状態ディレクトリの `work/request-id.txt` へ書き、打ち直しでは読む | — |
 | `gate1`（設計の承認） | ループのレーン（`sprint_loop_gate.py`） | `<レーン名>-g<設計 PR>-<先頭の SHA の 12 桁>` | 設計 PR の先頭の SHA |
-| `gate1` で `loop` を持つ（前のループの待ち。`lane` を持たない） | 耐久ワークフローの開始（`parallel.prior-waits`）とレーンのループの 1 回の境（`send_prior`）。同じ行は同じ `id` で 1 つにまとまる | `<ループ>-w<課題>-l<行のループの 1 回>`。問い直すときは末尾に `-<新しい先頭の SHA の 12 桁>` を足す | 送った時点の設計 PR の先頭の SHA |
+| `gate1` で `loop` を持つ（前のループの待ち。`lane` を持たない） | 耐久ワークフローの開始（`parallel.prior-waits`）とレーンのループの 1 回の境（`send_prior`）。同じ行は同じ `id` で 1 つにまとまる | `<ループ>-w<課題>-l<行のループの 1 回>`。別のリポジトリのループは `-r<リポジトリのパスの SHA-1 の 8 桁>` を足し（同じ値を `scope` に持ち、同じ行の置き換えも `scope` が同じものに限る）、問い直すときは末尾に `-<新しい先頭の SHA の 12 桁>` を足す | 送った時点の設計 PR の先頭の SHA |
 | `unmatched`（当たらなかった答え。選択肢は `確かめた`） | レーン（`send_unmatched`）と耐久ワークフロー（`ask_unmatched`） | `<答えた依頼の id>-unmatched`。読めなかったループの知らせは `<計画名>-prior-<ループ>-unmatched` | — |
 | `ask`（承認ゲートの外の問い。1 スプリントのレーンの設計承認ゲートも含む） | 問いの hook（`parallel.py request-ask`） | `<送り手>-q<判定の記録の id>` | 作業の場所の `HEAD` |
 | `gate2`（リリース承認ゲート） | 一時レーン（`parallel.py request-gate2`） | `<計画名>-p<連番>-<提示>` | 承認資料の承認したコミット |

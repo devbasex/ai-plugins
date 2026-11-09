@@ -32,7 +32,7 @@ from parallel_repo import relay_unavailable
 def manual_or_none(main: Path, plan, reply) -> None:
     """ラッパーの外・tmux が無いときは、レーンごとの手で起動する 1 行を返して 3 で終える（#2436 の受け入れ条件 9）。"""
     if why := relay_unavailable(main):
-        lines = pp.manual_commands(plan)
+        lines = pp.manual_commands(plan, main)
         reply(
             "stopped",
             f"{why}ため、レーンを起動しない。手で起動する 1 行を items に並べた",

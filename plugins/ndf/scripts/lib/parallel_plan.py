@@ -13,6 +13,7 @@ import fnmatch
 import graphlib
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Annotated, Literal, Optional, Union
 
@@ -443,9 +444,10 @@ def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
     return [d / "plan.json", d / "plan.md", *targets.values()]
 
 
-def manual_commands(plan: ParallelPlan) -> list[str]:
-    """ラッパーの外・tmux が無いときの、レーンごとの手で起動する 1 行（受け入れ条件 9）。"""
-    return [f"NDF_RELAY_NAME={ln.name} claude '{first_input(ln)}'" for ln in plan.lanes]
+def manual_commands(plan: ParallelPlan, home: Path) -> list[str]:
+    """ラッパーの外・tmux が無いときの、レーンごとの手で起動する 1 行（受け入れ条件 9）。レーンのリポジトリ（`home` は計画の置き場）へ
+    移ってから起動する（引継ぎ文書はレーンのリポジトリにある。耐久ステップ「起動」の cwd と同じ。#2733）。"""
+    return [f"cd {shlex.quote(str(ln.repo_dir(home)))} && NDF_RELAY_NAME={ln.name} claude '{first_input(ln)}'" for ln in plan.lanes]
 
 
 def first_input(lane: Lane) -> str:

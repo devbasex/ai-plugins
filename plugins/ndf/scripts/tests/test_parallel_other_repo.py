@@ -447,3 +447,43 @@ def test_loop_start_keeps_reason_in_record(tmp_path):
     assert slc.stored_outside_plan(str(root), "l1") == "急ぎの修正"
     slc.keep_outside_plan(env, "none", "理由")  # 記録が無ければ作らない
     assert not (root / ".ndf" / "loop" / "none").exists()
+
+
+def test_prior_rows_keeps_same_named_loop_of_other_repo(tmp_path):
+    import gate1_requests as g1
+
+    x, y = _git(tmp_path / "x"), _git(tmp_path / "y")
+    lane = {"name": "lloop", "input": {"kind": "loop", "loop": "lloop"}, "plans": 1, "touches": ["a/"], "repo": str(y)}
+    _plan(x, [lane])
+    d = x / ".ndf" / "loop" / "lloop"
+    d.mkdir(parents=True)
+    (d / "loop.json").write_text(json.dumps({"waiting": [{"number": 4, "pr": 40, "lap": 1}]}))
+    rows, _ = g1.prior_rows(x, "p3")
+    assert [loop for loop, _w in rows] == ["lloop"]  # 現役の lloop は y のレーン。置き場 x の同名は旧ループとして拾う
+
+
+def test_prior_ids_and_replacement_differ_by_repo(tmp_path):
+    import gate1_requests as g1
+    import parallel_reply as prp
+
+    x, y, z = (_git(tmp_path / n) for n in "xyz")
+    _plan(x, [_lane("la", [1])])
+    for r in (x, y, z):
+        d = r / ".ndf" / "loop" / "lold"
+        d.mkdir(parents=True)
+        (d / "loop.json").write_text(json.dumps({"waiting": [{"number": 4, "pr": 40, "lap": 1, "stamp": "s"}]}))
+    run = lambda *_a, **_k: (1, "", "")  # noqa: E731
+    got = {r: g1.prior_requests(r, "p3", "t", run, home=x)[0][0] for r in (x, y, z)}
+    assert got[x]["id"] == "lold-w4-l1" and "scope" not in got[x]  # 置き場のループは従来の id のまま
+    assert len({q["id"] for q in got.values()}) == 3 and got[y]["scope"] != got[z]["scope"]
+    ar = prp.AnswerRouting.__new__(prp.AnswerRouting)
+    ar.routed, ar.questions = True, [got[y]]
+    assert "replaced" not in ar.replace_same(got[z]) and ar.questions == [got[y]]  # 別のリポジトリの同名のループは置き換えない
+    again = {**got[y], "id": g1.prior_id("lold", 4, 1, "h" * 12, got[y]["scope"])}
+    assert ar.replace_same(again)["replaced"][0]["id"] == got[y]["id"] and ar.questions == []
+
+
+def test_manual_commands_move_to_lane_repo(two_repos):
+    x, y = two_repos
+    cmds = pp.manual_commands(pp.load_valid_plan(x, "p3"), x)
+    assert cmds[0].startswith(f"cd {x} && NDF_RELAY_NAME=la ") and cmds[1].startswith(f"cd {y} && NDF_RELAY_NAME=lfactory ")

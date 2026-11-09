@@ -241,7 +241,7 @@ sequenceDiagram
 
 | 問い | 欄 | id |
 | --- | --- | --- |
-| 前のループの待ち | `kind: gate1`・`loop`・`issue`・`pr`・`lap`・`stamp`（送った時点の設計 PR の先頭）・`question`。`lane` を持たない | `<ループ>-w<課題>-l<行のループの 1 回>`。問い直すときは末尾に `-<新しい先頭の SHA の 12 桁>` |
+| 前のループの待ち | `kind: gate1`・`loop`・`issue`・`pr`・`lap`・`stamp`（送った時点の設計 PR の先頭）・`question`。`lane` を持たない | `<ループ>-w<課題>-l<行のループの 1 回>`。別のリポジトリのループは `-r<リポジトリの識別>`（`scope`）を足し、問い直すときは末尾に `-<新しい先頭の SHA の 12 桁>` |
 | 当たらなかった答え | `kind: unmatched`・`answered`・`reason`・`question`・`options: ["確かめた"]`。レーンが送ったときは `lane` | `<答えた依頼の id>-unmatched`。読めなかったループの知らせは `<計画名>-prior-<ループ>-unmatched` |
 
 同じ行の古い問い（`lane` か `loop` と `pr` が同じで id が違う設計の承認の問い）は、新しい問いを受けたときに一覧から外し、新しい問いの

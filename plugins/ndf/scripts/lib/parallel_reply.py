@@ -50,11 +50,17 @@ class AnswerRouting:
     """答えを読んで動く側へ届ける。`_Run` の値（`questions`・`answered`・`revive`・`wake`・`routed` ほか）を使う。"""
 
     def replace_same(self, msg: dict) -> dict:
-        """同じ行の設計の承認の問い（`lane` か `loop` と `pr` が同じで id が違う）を一覧から外し、`replaced` に引き継ぐ（I11）。"""
+        """同じ行の設計の承認の問い（`lane` か `loop` と `pr` が同じで id が違う）を一覧から外し、`replaced` に引き継ぐ（I11）。
+        前のループの待ちは、ループのリポジトリの識別（`scope`）も同じものだけを同じ行とする（別のリポジトリの同名のループを置き換えない）。"""
         if msg.get("kind") != "gate1" or not self.routed:  # 古い記録の打ち直しは置き換えずに従来どおり両方を残す
             return msg
         owner = "loop" if msg.get("loop") else "lane"
-        old = [q for q in self.questions if q.get("kind") == "gate1" and q.get(owner) == msg.get(owner) and q.get("pr") == msg.get("pr")]
+        old = [
+            q
+            for q in self.questions
+            if q.get("kind") == "gate1" and q.get(owner) == msg.get(owner) and q.get("pr") == msg.get("pr")
+            and (owner == "lane" or q.get("scope") == msg.get("scope"))
+        ]  # fmt: skip
         if not old:
             return msg
         self.questions = [q for q in self.questions if q not in old]
