@@ -908,7 +908,7 @@ def test_merge_gate_judges_without_gh(repo, gh):
 
 
 def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
-    """I7: 昇格の Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
+    """I7: リリースの Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
     declare(repo, *TRYGROUP)
     gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop")]})
     code, out, _ = call("merged-steps.py", ["promote", "--head", "develop", "--base", "main", "--interval", "0"], gh.env, repo)
@@ -961,7 +961,7 @@ def test_merge_gate_stops_on_unchecked_before_merge_rows(repo, gh, body, code):
         assert "--from merge-gate" in out["next"]
 
 
-# --- #1529: fast / auto の昇格は、導入の確認で確かめたコミットのときだけマージする ----------------------
+# --- #1529: fast / auto のリリースの Pull Request は、導入の確認で確かめたコミットのときだけマージする ----------------------
 
 X, Y = "a" * 40, "b" * 40
 
@@ -1035,7 +1035,7 @@ def test_promote_help_shows_the_verified_commit_argument(gh, repo):
     assert "リリース承認ゲートへ戻す" in text and "--fromverify" in text
 
 
-# --- #2104: 昇格の承認の後のマージは、リリース承認ゲートの承認資料の承認したコミットのときだけ行う ----------------------
+# --- #2104: リリースの承認の後のマージは、リリース承認ゲートの承認資料の承認したコミットのときだけ行う ----------------------
 
 
 def promote_args(*extra):
@@ -1043,7 +1043,7 @@ def promote_args(*extra):
 
 
 def promote_material(tmp_path, sha=X, row="承認したコミット"):
-    """昇格の承認資料（gate_stop が書く形の判断の表の行）。sha が None なら資料を作らない。"""
+    """リリースの承認資料（gate_stop が書く形の判断の表の行）。sha が None なら資料を作らない。"""
     p = tmp_path / "approval-promote.md"
     if sha is not None:
         p.write_text(f"## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| {row} | {sha} |\n", encoding="utf-8")

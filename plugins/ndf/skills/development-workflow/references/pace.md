@@ -211,7 +211,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 行わず、承認資料のパスと番号を報告に載せて終える）。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
 リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが入り、
-`close` のステップの `--record-pr` は、昇格の経路（手動反映の本番系を除く）なら `{queue_pr:promote}`、経路がすべて届けない経路なら `0`、
+`close` のステップの `--record-pr` は、リリースの Pull Request で届く経路（手動反映の本番系を除く）なら `{queue_pr:promote}`、経路がすべて届けない経路なら `0`、
 それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系）は `{queue_record}` になる。開発ループのまとめ（`new close --pace auto`）は、
 届けない経路だけでなければ経路にかかわらず `{queue_record}` になる。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
 課題を閉じる PR とそれを参照する PR から、段階が本番かデプロイなしのリリース記録を置いた PR を探して埋め、`release-verify` と `close` が
@@ -248,33 +248,33 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 | `delivery` の行 | 経路 | 検査の後に置くステージ |
 | --- | --- | --- |
-| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で昇格の行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く）。ベースブランチが本番チャネルなら、続けて「CD の結果」: プラン `cd-result`（`cd-result` → `record --merged`） |
-| `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 昇格のプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、リリース承認ゲートの後にマージする。後片付けはしない） |
+| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で本番チャネルへ入れる行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く）。ベースブランチが本番チャネルなら、続けて「CD の結果」: プラン `cd-result`（`cd-result` → `record --merged`） |
+| `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 本番チャネルへ入れるリリースプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、リリース承認ゲートの後にマージする。後片付けはしない） |
 | `kind: auto`・`branch` が無いか別のブランチ、`kind: manual` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
 | `delivery: []` | `none` | 置かない |
 | `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
 
 `versioned` は版を持つかを表し、経路を変えない。`kind: auto`・`versioned: true` の行も上の表のとおりに進む。
 
-「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランの `promote` の後は `cd-result` → `record` と進み、CD の結果が失敗なら `record` が書いた後に止まる。昇格のプランは `normal` では `promote`（承認の引数無し。
+「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。本番チャネルへ入れるリリースプランの `promote` の後は `cd-result` → `record` と進み、CD の結果が失敗なら `record` が書いた後に止まる。本番チャネルへ入れるリリースプランは `normal` では `promote`（承認の引数無し。
 リリース承認ゲートで終える）→ 承認の後に `resume` に `--from promote=promote-approved` を足して続ける、`fast` / `auto` では `verify`（導入の確認）→
 `prepare`（Pull Request と承認資料）→ `mvv`（リリース承認ゲートの MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、
 `note` か `promote` が落ちたら `handoff` が承認ゲートへ落とす。`fast` / `auto` の `promote` は、`mvv` が読んだのと同じ
 `approval-verify.md` を `--expect-head-from` に受け、そこに書かれた確かめたコミット（導入の確認を走らせたベースブランチの先頭）が
-昇格の Pull Request の先端のときだけマージする。確認の後にベースブランチが進んで先端が違えば（CI を待つ間に進んだときも）
+リリースの Pull Request の先端のときだけマージする。確認の後にベースブランチが進んで先端が違えば（CI を待つ間に進んだときも）
 `gh pr merge` を呼ばずに `head_moved` で 1、資料から確かめたコミットを読めなければマージせずに 2 で止まり、どちらも `handoff` が
-リリース承認ゲートの `by: mvv` の記録を外して承認ゲートへ落とす。`normal` の `promote` はリリース承認ゲートで止まるときに昇格の
-Pull Request の先端を「承認したコミット」として昇格の承認資料（`approval-promote.md`。`fast` / `auto` では `prepare` が書く）へ載せ、
+リリース承認ゲートの `by: mvv` の記録を外して承認ゲートへ落とす。`normal` の `promote` はリリース承認ゲートで止まるときにリリースの
+Pull Request の先端を「承認したコミット」としてリリースの承認資料（`approval-promote.md`。`fast` / `auto` では `prepare` が書く）へ載せ、
 `promote-approved` は `pace` のどれでもその資料の承認したコミットが先端のときだけマージする。先端が違えば `head_moved` で 1、
 資料から読めなければ 2 で、マージせずに止まる。`fast` / `auto` の `merge` の経路では開発版のステージを置かない
 （ベースブランチへのマージが検証への反映である）。
 
-**`fast` / `auto` の `merge` の経路では、導入の確認（`<節>.verify`）を 1 つのスプリントの中で 1 度だけ走らせる。** 昇格のプランが
+**`fast` / `auto` の `merge` の経路では、導入の確認（`<節>.verify`）を 1 つのスプリントの中で 1 度だけ走らせる。** 本番チャネルへ入れるリリースプランが
 あればその先頭の `verify`、無ければ「導入の確認」のステージの `verify` である。`verify` は `release-steps.py verify-facts` が
 メインディレクトリをベースブランチの先頭へ fast-forward してから `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-verify.md`
 に確認したコミット・コマンド・終了コードを書く。確認の出力は資料へ載せず、所有者だけが読める `<承認資料>.verify.log` へ分ける。
-確認が非 0 なら 1、HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3 で止まり、昇格の Pull Request を作らず `mvv` へも
-進まない。`mvv` は昇格の承認資料と `approval-verify.md` の 2 つを材料に読む。`new close` は `fast` の節を読み、最終の検査で変更が
+確認が非 0 なら 1、HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3 で止まり、リリースの Pull Request を作らず `mvv` へも
+進まない。`mvv` はリリースの承認資料と `approval-verify.md` の 2 つを材料に読む。`new close` は `fast` の節を読み、最終の検査で変更が
 無ければ（実行の条件の skip）確認も走らない。節に `verify` が無ければ `new close` もプランを書かずに 2 で終える。
 開発版のチャネルへの反映を待つのは `<節>.verify` のコマンドの側で、NDF は待たない。止まったら直して `resume` に `--from <プラン名>=verify` を足して打ち直す。
 
@@ -298,8 +298,8 @@ Pull Request の先端を「承認したコミット」として昇格の承認�
 | 答え | 打つもの |
 | --- | --- |
 | 承認（設計承認ゲート） | `sprint-state.py gate <状態> "設計承認ゲート" --what <要約> --by user --outcome approved` → 設計のステージの `resume` に `--from design-<N>=approve` を足して打つ（後続のステージも続けて流れる） |
-| 承認（リリース承認ゲート） | `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved` → 本番のプランを含むステージの `resume` に `--from release-prod=bump` を足して打つ（昇格のプランは `--from promote=promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from promote=verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote=promote` から流し直して新しい先端でリリース承認ゲートを取り直し、`fast` / `auto` は `--from promote=verify` から流し直す。マージの `merge-gate` で止まったプランは `--from <プラン名>=merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
-| 差し戻し | 直してから、止まったプランを `supervise.py run <プラン> --from reject` で流す。`reject` のステップが差し戻しを差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書き、再提示のステップ（設計は `mvv`、`gate-2` は `facts`、昇格は `verify`、本番は `mvv`）へ進む。`sprint-state.py gate ... --outcome rejected` は手で打たない。`reject` を持たないプラン（`pace: normal` の本番など）と状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
+| 承認（リリース承認ゲート） | `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved` → 本番のプランを含むステージの `resume` に `--from release-prod=bump` を足して打つ（本番チャネルへ入れるリリースプランは `--from promote=promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from promote=verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote=promote` から流し直して新しい先端でリリース承認ゲートを取り直し、`fast` / `auto` は `--from promote=verify` から流し直す。マージの `merge-gate` で止まったプランは `--from <プラン名>=merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
+| 差し戻し | 直してから、止まったプランを `supervise.py run <プラン> --from reject` で流す。`reject` のステップが差し戻しを差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書き、再提示のステップ（設計は `mvv`、`gate-2` は `facts`、リリースの Pull Request は `verify`、本番は `mvv`）へ進む。`sprint-state.py gate ... --outcome rejected` は手で打たない。`reject` を持たないプラン（`pace: normal` の本番など）と状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で
 止まった後の承認は `override_pass` になる（[project-mvv.md](project-mvv.md) の「改訂の兆候」）。`handoff` で止まった後は

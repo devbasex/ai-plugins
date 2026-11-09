@@ -545,7 +545,7 @@ GATE_2_RESUME_STEPS = ("bump", "promote-approved", "merge-approved")  # リリ�
 
 
 def gate2_resume_step(plan: str) -> str | None:
-    """リリース承認ゲートで止まった計画を承認の後に続けるステップ: 雛形の本番は bump、昇格は promote-approved、
+    """リリース承認ゲートで止まった計画を承認の後に続けるステップ: 雛形の本番は bump、経路 merge は promote-approved、
     マージの merge-gate で止まった計画は merge-approved。どれも無い（gate-2 のプラン）なら None（手で行う本番へ進む）。"""
     ids = {s.get("id") for s in plan_info(plan).get("steps") or [] if isinstance(s, dict)}
     return next((s for s in GATE_2_RESUME_STEPS if s in ids), None)

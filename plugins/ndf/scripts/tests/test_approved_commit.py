@@ -147,7 +147,7 @@ def test_merge_tree_conflict_is_undecidable(repo):
 
 
 def test_without_allowed_prs_the_tip_must_keep_the_approved_tree(repo):
-    """昇格の経路の形: allowed が空なら、先端に入ったコミットは承認の外。同じなら match。"""
+    """リリースの Pull Request で届く経路の形: allowed が空なら、先端に入ったコミットは承認の外。同じなら match。"""
     approved = git(repo, "rev-parse", "HEAD")
     assert ac.compare_approved(repo, approved, approved).ok
     tip = commit(repo, "b.txt", "b\n")

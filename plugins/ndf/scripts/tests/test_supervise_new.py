@@ -947,14 +947,14 @@ def test_cd_form_has_no_step_that_bumps_tags_or_publishes(tmp_path, wt):
 
 def test_promote_plan_reads_the_cd_result_after_the_merge_and_stops_on_failure(tmp_path):
     _, plans, _ = cd_sprint(tmp_path, TWO_BRANCHES, [CD_ROW])
-    steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（昇格）")["steps"]}
+    steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（本番チャネルへのマージ）")["steps"]}
     assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
     assert "cd-result --base main --head develop" in steps["cd-result"]["cmd"] and steps["cd-result"]["next"] == "record"
     assert "--cd-result {state_dir}/work/cd-result.json" in steps["record"]["cmd"] and steps["record"]["on_exit"] == {"5": "stop"}
 
 
 def test_direct_production_branch_gets_the_cd_result_stage(tmp_path):
-    """決定 9: ベースブランチが本番チャネルなら昇格のプランが無いため、CD の結果のステージが記録を書く。"""
+    """決定 9: ベースブランチが本番チャネルなら本番チャネルへ入れるリリースプランが無いため、CD の結果のステージが記録を書く。"""
     manifest, plans, _ = cd_sprint(tmp_path, ONE_BRANCH, [CD_ROW])
     assert [w["name"] for w in manifest["ステージ"]][-1] == "CD の結果"
     steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（CD の結果）")["steps"]}

@@ -9,7 +9,7 @@
 `delivery` に `develop` へのマージで stg・`main` へのマージで prd へ自動で反映する 2 行を持つとき:
 
 1. 実装の Pull Request（`develop` 宛て）は、`develop` が本番チャネルでないため止まらずにマージする
-2. 昇格の Pull Request（`develop` → `main`）は、`main` が本番チャネルで `delivery` に `kind: auto`・`branch: main` の行が
+2. リリースの Pull Request（`develop` → `main`）は、`main` が本番チャネルで `delivery` に `kind: auto`・`branch: main` の行が
    あるため、`merged-steps.py` が終了コード 10 で止まり、承認資料を書く
 3. 利用者が承認したら、同じコマンドに `--gate-approved user` を付けて打ち直し、マージする
 

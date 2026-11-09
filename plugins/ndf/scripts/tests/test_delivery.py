@@ -240,10 +240,10 @@ PLUGIN = {"form": "package-plugin"}
     [
         ({"delivery": [HAND]}, PLUGIN, delivery.BUILD, ""),  # release.form の雛形があれば delivery を見ない
         ({"delivery": [AUTO_BASE, AUTO_PROD]}, None, delivery.SKIP, "stg はマージで反映する"),
-        ({"delivery": [AUTO_PROD]}, None, delivery.SKIP, "昇格の Pull Request で届く"),
+        ({"delivery": [AUTO_PROD]}, None, delivery.SKIP, "リリースの Pull Request で届く"),
         ({"delivery": []}, None, delivery.SKIP, "デプロイしない"),
         ({"delivery": [AUTO_BASE, HAND]}, None, delivery.REFUSE, "手で流す"),
-        ({"delivery": [{**AUTO_PROD, "versioned": True}]}, None, delivery.SKIP, "昇格の Pull Request で届く"),
+        ({"delivery": [{**AUTO_PROD, "versioned": True}]}, None, delivery.SKIP, "リリースの Pull Request で届く"),
         ({"delivery": [{"kind": "auto", "branch": "other", "target": "x"}]}, None, delivery.REFUSE, "手で届ける"),
         ({"delivery": {"unknown": "調べていない"}}, None, delivery.REFUSE, "調べていない"),
         ({}, None, delivery.REFUSE, "delivery も"),

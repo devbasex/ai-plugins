@@ -31,7 +31,7 @@ STOP_VERDICTS = (PRODUCTION, UNDETERMINED)  # 承認の無いマージを止め�
 TEMPLATE, MERGE, MANUAL, NONE = "template", "merge", "manual", "none"
 STAGE_TEMPLATE = "template"  # release.form の雛形（開発版 → 本番）
 STAGE_MERGED_BY_CHECK = "merged-by-check"  # ベースブランチへのマージで届く（ステージを置かない）
-STAGE_PROMOTE = "promote"  # 昇格の Pull Request（ベースブランチ → 本番チャネル）
+STAGE_PROMOTE = "promote"  # リリースの Pull Request（ベースブランチ → 本番チャネル）
 STAGE_MANUAL = "manual"  # 手で行うステージ（/ndf:release）
 STAGE_NONE = "none"  # 届けない（ステージを置かない）
 
@@ -394,7 +394,7 @@ def _row_route(row: dict, decl: DeliveryDecl) -> Route:
         if branch and branch == decl.base:
             return Route(MERGE, target, branch, STAGE_MERGED_BY_CHECK, production=prod)
         if branch and branch == decl.production:
-            note = f"{decl.base} → {branch} の昇格の Pull Request で届く"
+            note = f"{decl.base} → {branch} のリリースの Pull Request で届く"
             return Route(MERGE, target, branch, STAGE_PROMOTE, note, prod)
         why = "ブランチが無い" if not branch else f"{branch} はベースブランチでも本番チャネルでもない"
         return Route(MERGE, target, branch, STAGE_MANUAL, f"{target}: マージで反映するが{why}ため、手で届ける", prod)
