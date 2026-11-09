@@ -280,16 +280,16 @@ def cmd_request(a) -> None:
 def cmd_await(a) -> None:
     main = main_of()
     try:
-        sent = json.loads(Path(getattr(a, "from")).read_text(encoding="utf-8"))
+        record = json.loads(Path(getattr(a, "from")).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         reply("stopped", f"依頼の記録を読めない: {exc}", code=2)
-    if sent.get("result") == "released" and not sent.get("id"):
-        reply("ok", "リリース済み（依頼を送っていない）", result="released", version=sent.get("version"), deferred=None)
-    if a.external or pe.is_external(sent.get("plan")):
-        ans, dfr = pe.read_answer_file(px.external_dir(reply), sent["id"]), None
+    if record.get("result") == "released" and not record.get("id"):
+        reply("ok", "リリース済み（依頼を送っていない）", result="released", version=record.get("version"), deferred=None)
+    if a.external or pe.is_external(record.get("plan")):
+        ans, dfr = pe.read_answer_file(px.external_dir(reply), record["id"]), None
     else:
         require_name(a)
-        ans, dfr = pl.read_answer(main, a.name, sent["id"], a.timeout)
+        ans, dfr = pl.read_answer(main, a.name, record["id"], a.timeout)
     if ans is None:
         reply("stopped", "答えがまだ無い", code=3, deferred=dfr)
     res = ans.get("result")
@@ -297,7 +297,7 @@ def cmd_await(a) -> None:
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
     reply(
         status,
-        f"リリースの依頼 {sent['id']} の答え: {res}",
+        f"リリースの依頼 {record['id']} の答え: {res}",
         code=code,
         next_step="今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None,
         result=res,
