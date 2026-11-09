@@ -32,7 +32,7 @@
 | --- | --- |
 | NDF のラッパー（`ndf-relay`） | 登録済みアカウント・従量の接続・登録済み API キー・残高切れ・API キーの使い方の宣言 |
 
-1 つのコンテキストに収まる。`supervise.py` の起動口はこのコンテキストの部品（アカウントの置き場の部品）を読むだけで、語を持ち込まない。
+1 つのコンテキストに収まる。`supervise.py` の起動口（`ClaudeRunner`）はこのコンテキストの部品（アカウントの置き場の部品）を読むだけで、語を持ち込まない。
 
 ### 集約
 
@@ -107,7 +107,7 @@
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | `anthropic`（Python SDK） | 2.6.0 | Apache-2.0 | 2026-11-05 | 無し | 確かめの要求は打てる。ラッパーの環境（標準ライブラリだけ）に依存を足すことになる | https://pypi.org/pypi/anthropic/json （2026-11-09） |
+| LIB1 | `anthropic`（Python SDK） | 2.6.0 | Apache-2.0 | 2026-11-05 | 無し | 確かめの要求は打てる。標準ライブラリだけで動くラッパーに依存を足すことになる | https://pypi.org/pypi/anthropic/json （2026-11-09） |
 | LIB2 | `keyring` | 25.7.0 | MIT | 2025-11-16 | 無し | OS のキーチェーンへ保存できる。ヘッドレスのコンテナで使えるキーチェーンの有無は確かめていない | https://pypi.org/pypi/keyring/json （2026-11-09） |
 | LIB3 | `litellm` | 1.108.3 | MIT | 2026-11-07 | 無し | 鍵の使い分けはできるが、`claude -p` の子の認証を選ぶ用途に合わない（API を中継する形） | https://pypi.org/pypi/litellm/json （2026-11-09） |
 | LIB4 | 既存の `lib/claude_usage.py` の `http_json`（標準ライブラリの `urllib`） | リポジトリの現行 | リポジトリと同じ | — | 無し | 確かめの要求を打てる。失敗の応答の本文を捨てるため、本文を返すよう直す | `plugins/ndf/scripts/lib/claude_usage.py` （2026-11-09） |
@@ -298,7 +298,7 @@ erDiagram
 
 **互換性**: `check` と `remove` は、名前が登録済み API キーのときだけ新しい分岐へ入る。`metered`・OAuth のアカウントの名前・どちらでもない名前のときの出力と終了コードは変えない（受け入れ条件 14）。`add` は名前が登録済み API キーと重なるときだけ `name_conflict` で拒む。
 
-**確かめの要求**: `POST https://api.anthropic.com/v1/messages`（`NDF_API_KEY_CHECK_URL` で差し替えられる）、`max_tokens` 1、モデルは上限の宣言の隣に置く定数（`NDF_API_KEY_CHECK_MODEL` で差し替えられる）。読み分けは次のとおり。
+**確かめの要求**: `POST https://api.anthropic.com/v1/messages` へ `max_tokens` 1 で打つ。宛先は `NDF_API_KEY_CHECK_URL` で差し替えられる。モデルは上限の宣言の隣に置く定数で、`NDF_API_KEY_CHECK_MODEL` で差し替えられる。読み分けは次のとおり。
 
 | 応答 | 結果 |
 | --- | --- |
@@ -345,9 +345,9 @@ sequenceDiagram
 | `always` | 使えるキーがあれば、すべての呼び出しで |
 | `near-limit` | 次のどれか。(1) アカウントの選定（`choose`）が候補を返さない、(2) 選んだ候補の使用率が切り替えの閾値（`NDF_ACCOUNT_SWITCH_AT`、既定 90）以上、(3) この呼び出しで利用上限に当たり、替えるアカウントが無い（従量の接続へ移る前と、解除を待つ前に試す） |
 
-**子の環境**: 起動したときの環境から、`STRIPPED_AUTH_ENV`（OAuth のトークンとスコープ・`ANTHROPIC_AUTH_TOKEN`・Bedrock と Vertex の変数・既存の `ANTHROPIC_API_KEY`）と、従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻して（`leave_account`）から、`ANTHROPIC_API_KEY` に選んだ 1 本の値と、`NDF_CLAUDE_API_KEY_NAME` にその名前を足す。従量の接続の `--settings` は付けない（`NDF_CLAUDE_ACCOUNT` を外すため、既存の判定のまま付かない）。
+**子の環境**: 起動したときの環境から、`STRIPPED_AUTH_ENV` と従量の接続の宣言のキーを外す。`STRIPPED_AUTH_ENV` は、OAuth のトークンとスコープ・`ANTHROPIC_AUTH_TOKEN`・Bedrock と Vertex の変数・既存の `ANTHROPIC_API_KEY` である。続いて親のアカウントの環境を元へ戻す（`leave_account`）。その上で、`ANTHROPIC_API_KEY` に選んだ 1 本の値を、`NDF_CLAUDE_API_KEY_NAME` にその名前を足す。従量の接続の `--settings` は付けない（`NDF_CLAUDE_ACCOUNT` を外すため、既存の判定のまま付かない）。
 
-**入れ子の起動**: worker の中で起動した `supervise.py` は、`NDF_CLAUDE_API_KEY_NAME` があれば、起動したときの API キーをその名前として扱い、残高切れなら同じく状態を記録する。
+**入れ子の起動**: worker の中で起動した `supervise.py` は、`NDF_CLAUDE_API_KEY_NAME` を見る。値があれば、起動したときの API キーをその名前として扱い、残高切れなら同じく状態を記録する。
 
 **API キーの状態の遷移**:
 
@@ -375,7 +375,7 @@ stateDiagram-v2
 | 運用・保守性 | 状態の確認と解除が利用者のコマンドで完結する | `account list` に状態、`account check <名前>` で解除 | 副命令のテスト |
 | 移行性 | 置き場に新しいファイルを足すだけで、既存のファイルの形を変えない | 2 つのファイルを足すだけ。無ければ登録 0 本・`off` | 登録 0 本で既存のテストがそのまま通ること |
 
-**残るリスク**: worker の `claude -p` の中で動く道具（Bash など）は、子の環境の `ANTHROPIC_API_KEY` を読める。OAuth のアカウントの子が設定ディレクトリの認証ファイルを読めるのと同じ水準で、環境の値を worker から隠す手段は採らない（決定 3）。
+**残るリスク**: worker の `claude -p` の中で動くツール（Bash など）は、子の環境の `ANTHROPIC_API_KEY` を読める。OAuth のアカウントの子が設定ディレクトリの認証ファイルを読めるのと同じ水準で、環境の値を worker から隠す手段は採らない（決定 3）。
 
 ## 決定の記録
 
@@ -392,7 +392,7 @@ stateDiagram-v2
 
 ### 決定 2: 対話のセッションへ値を入れないよう、使う範囲を supervise.py の起動口の claude -p に限る
 
-API クレジットは対話の Claude Code を払わない（STD1）。起動口（`ClaudeRunner`）は `supervise.py` のすべての `claude -p`（work・drive の worker・判定・遅れの判定・Pull Request）の唯一の呼び出し元なので、ここに置けば受け入れ条件 5 の「worker の `claude -p`」を 1 か所で満たす。
+API クレジットは対話の Claude Code を払わない（STD1）。起動口（`ClaudeRunner`）は、`supervise.py` のすべての `claude -p`（work・drive の worker・判定・遅れの判定・Pull Request）の唯一の呼び出し元である。ここに置けば、受け入れ条件 5 の「worker の `claude -p`」を 1 か所で満たす。
 
 cross-review の担当の CLI（未決 6）は含めない。担当は `lib/assignee_env.py` の別の経路で起動し、失敗の後の振り替え（`assignment.after_no_result`）も別の規則を持つ。含めるとこの 2 つの経路に同じ選定と状態の遷移を足すことになる。起動口で使った結果を見てから、別の課題で広げる。
 
@@ -402,7 +402,7 @@ cross-review の担当の CLI（未決 6）は含めない。担当は `lib/assi
 
 `-p` では `ANTHROPIC_API_KEY` が必ずサブスクリプションのログインより先に使われる（STD2）。実測 1 でも、OAuth のログインがある設定ディレクトリのまま、偽の値で 401 が 0.6 秒で返った。上位の `ANTHROPIC_AUTH_TOKEN` と Bedrock・Vertex の変数は外す。
 
-`apiKeyHelper`（PRD2）は環境に値を置かずに済むが採らない。偽の値の `apiKeyHelper` を `--settings` で渡した `claude -p` は、401 の後に 60 秒で終わらなかった（実測 2: 2026-11-09、`claude` 2.1.319、`timeout 60` で打ち切り）。失敗が速く返らないと、残高切れから起動し直す経路が待ちで詰まる。
+`apiKeyHelper`（PRD2）は環境に値を置かずに済むが採らない。偽の値の `apiKeyHelper` を `--settings` で渡した `claude -p` は、401 の後に 60 秒で終わらなかった。実測 2 の条件は 2026-11-09、`claude` 2.1.319 で、`timeout 60` で打ち切った。失敗が速く返らないと、残高切れから起動し直す経路が待ちで詰まる。
 
 - 作り方: 標準に倣う
 - 比べた候補: STD2 / PRD2
@@ -420,9 +420,9 @@ cross-review の担当の CLI（未決 6）は含めない。担当は `lib/assi
 
 ### 決定 5: 確かめに要る依存を増やさないため、確かめの要求を既存の urllib の部品で打つ
 
-ラッパーの環境は標準ライブラリだけで動く（`lib/claude_usage.py` の冒頭、#1389 の決定 13）。Messages API への 1 回の要求は既存の `http_json` で打てる。足りないのは失敗の応答の本文を返すことだけで、本文を返すよう直す（既存の呼び出し元は状態コードだけを見るので、本文を足しても振る舞いは変わらない）。
+ラッパーは標準ライブラリだけで動く（`lib/claude_usage.py` の冒頭、#1389 の決定 13）。Messages API への 1 回の要求は既存の `http_json` で打てる。足りないのは失敗の応答の本文を返すことだけで、本文を返すよう直す（既存の呼び出し元は状態コードだけを見るので、本文を足しても振る舞いは変わらない）。
 
-`anthropic` の SDK（LIB1）は採らない。1 回の要求のためにラッパーの環境へ依存を足すことになる。確かめを `claude -p` で打つ形も採らない。起動ごとに設定と道具の定義を送るため、1 回の費用が Messages API の `max_tokens` 1 より大きい。
+`anthropic` の SDK（LIB1）は採らない。1 回の要求のためにラッパーへ依存を足すことになる。確かめを `claude -p` で打つ形も採らない。起動ごとに設定とツールの定義を送るため、1 回の費用が Messages API の `max_tokens` 1 より大きい。
 
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: LIB1 / LIB4 / STD3
