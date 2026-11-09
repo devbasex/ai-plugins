@@ -2043,8 +2043,8 @@
     {
       "term": "引継ぎの対象",
       "context": "ndf-workflow",
-      "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭（sprint- / milestone- / issue-）になる",
-      "pending_source": "issues/old/issue-1560-design.md"
+      "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（並列の計画・開発ループ・スプリント・マイルストーン・課題のどれか）。名の頭（parallel- / loop- / sprint- / milestone- / issue-）になる",
+      "pending_source": "issues/issue-2778-design.md"
     },
     {
       "term": "引継ぎの履歴",
