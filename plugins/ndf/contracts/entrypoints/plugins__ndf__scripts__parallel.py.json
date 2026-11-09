@@ -65,6 +65,16 @@
           "name"
         ]
       },
+      "lane": {
+        "options": [
+          "--from",
+          "--lane"
+        ],
+        "positionals": [
+          "name",
+          "action"
+        ]
+      },
       "park": {
         "options": [
           "--clear",

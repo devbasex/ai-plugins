@@ -13,7 +13,7 @@ def approved_issues(rec: dict) -> set[int]:
 
 
 def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -> list[str]:
-    """sprint-state.py init のコマンド。周回のディレクトリに mvv.md があればスプリント MVV を渡す。"""
+    """sprint-state.py init のコマンド。ループの 1 回のディレクトリに mvv.md があればスプリント MVV を渡す。"""
     init = [sys.executable, str(SPRINT_STATE), "init", lap["state_path"], "--name", lap["sprint"], "--pace", "auto", "--root", root]
     init += [x for n in issues for x in ("--issue", str(n))]
     if lap["versions"]["dev"]:
@@ -42,6 +42,8 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
         new += ["--design", *map(str, design)]
     if designed := [n for n in issues if n in approved]:
         new += ["--designed", *map(str, designed)]
+    if rec.get("outside_plan"):  # 例外として始めたループは、内側の起動の判定でも同じ理由で通す（#2733）
+        new += ["--outside-plan", rec["outside_plan"]]
     new += list(extra)
     return new
 

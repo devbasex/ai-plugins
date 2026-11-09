@@ -28,7 +28,7 @@ import transcript_agents  # noqa: E402
 from step_result import EXIT_UNREADABLE, StepError  # noqa: E402
 from supervise_lib import queue  # noqa: E402
 from test_progress_record_stages import RECORD, SYNC, Env  # noqa: E402
-from test_sprint_loop import env as loop_env  # noqa: E402,F401  周回の記録の土台
+from test_sprint_loop import env as loop_env  # noqa: E402,F401  ループの 1 回の記録の土台
 from test_sprint_loop import mvv, rec, request_lap  # noqa: E402,F401
 from test_projects_sync_record import declare, repo, run  # noqa: E402,F401
 
@@ -132,7 +132,7 @@ def test_last_record_is_chosen_across_old_and_new_headings():
 
 
 def test_old_pending_lap_stays_pending_and_is_not_selected_again(loop_env):  # noqa: F811
-    """旧い値（配布待ち）の周回は、新しい値の周回と同じ保留の周回として読み、課題を選び直さない。"""
+    """旧い値（配布待ち）のループの 1 回は、新しい値のループの 1 回と同じ保留したループの 1 回として読み、課題を選び直さない。"""
     request_lap(loop_env)
     path = loop_env.root / ".ndf/loop/l1/loop.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -140,7 +140,7 @@ def test_old_pending_lap_stays_pending_and_is_not_selected_again(loop_env):  # n
     path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
     out = sl_select.cmd_select(loop_env, "l1")
     assert out["metrics"]["selected"] == [13]
-    assert {x["number"]: x["reason"] for x in out["items"]}[11] == "保留の周回の課題"
+    assert {x["number"]: x["reason"] for x in out["items"]}[11] == "保留したループの 1 回の課題"
     assert rec(loop_env)["laps"][0]["outcome"] == "リリース待ち"
 
 

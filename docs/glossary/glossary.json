@@ -1015,14 +1015,14 @@
     {
       "term": "conductor",
       "context": "ndf-workflow",
-      "meaning": "人間と対話しているセッション。スプリントを持ち、承認ゲートで人間へ問えるのはこの層だけ",
+      "meaning": "スプリントを持ち、プランを流す役割。人へ問えるかは置かれた場所で決まる（計画の外のセッションは自分で問い、レーンは問いをオーガナイザーへ送る）",
       "code": "conductor",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "supervisor",
       "context": "ndf-workflow",
-      "meaning": "1 つのフェーズを通すサブエージェント。人間へ問わない",
+      "meaning": "1 つのフェーズを通す役割。supervise.py が主に担い、supervise.py で対応できないとき（プランの雛形が無いときなど）だけサブエージェント（ndf:supervisor）が代行する。人間へ問わない",
       "code": "supervisor",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1799,7 +1799,7 @@
     {
       "term": "3 層",
       "context": "ndf-workflow",
-      "meaning": "工程を conductor → supervisor → worker の順に起動して通す形",
+      "meaning": "スプリントの中の工程を conductor → supervisor → worker の順に起動して通す形。ロール層のうち conductor・supervisor・worker の 3 つ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2600,15 +2600,18 @@
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
-      "term": "周回",
+      "term": "ループの 1 回",
       "context": "ndf-workflow",
-      "meaning": "開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで",
+      "meaning": "開発ループの 1 回分。次のスプリントの選定・スプリント 1 つ・棚卸しと止まる条件の判定からなり、スプリントと 1 対 1",
+      "deprecated": [
+        "周回"
+      ],
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
       "term": "選定",
       "context": "ndf-workflow",
-      "meaning": "開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す",
+      "meaning": "開発ループの 1 回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す",
       "source": "docs/specifications/ndf-loop-select-prerequisites.md"
     },
     {
@@ -2620,7 +2623,7 @@
     {
       "term": "ループの予算",
       "context": "ndf-workflow",
-      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。どの単位も宣言に数を書いたときだけ効き、書かない・null は無制限である",
+      "meaning": "開発ループが使ってよい量の上限。ループの回数・費用・経過時間で数える。どの単位も宣言に数を書いたときだけ効き、書かない・null は無制限である",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
@@ -2632,7 +2635,7 @@
     {
       "term": "ループの記録",
       "context": "ndf-workflow",
-      "meaning": "開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する",
+      "meaning": "開発ループの 1 回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する",
       "source": "docs/specifications/ndf-workflow-development-loop.md"
     },
     {
@@ -4416,6 +4419,12 @@
     },
     {
       "term": "ランナー",
+      "context": "ndf-workflow",
+      "meaning": "作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ",
+      "pending_source": "issues/issue-2733-design-terms.md"
+    },
+    {
+      "term": "ランナーのエージェント",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム",
       "source": "docs/specifications/ndf-ask-guard.md"
@@ -4489,7 +4498,7 @@
     {
       "term": "起票の依頼",
       "context": "ndf-factory",
-      "meaning": "実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない",
+      "meaning": "実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーのエージェントが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーのエージェントは自分では起票しない",
       "source": ""
     },
     {
@@ -4546,7 +4555,7 @@
     {
       "term": "問い合わせの記録",
       "context": "ndf-workflow",
-      "meaning": "状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206）",
+      "meaning": "状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーのエージェントが読む（#2206）",
       "source": "docs/specifications/ndf-ask-guard.md",
       "code": "ask_ledger"
     },
@@ -4870,7 +4879,7 @@
     {
       "term": "区間",
       "context": "ndf-factory",
-      "meaning": "1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る",
+      "meaning": "1 つの実行ジョブの中でランナーのエージェントが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
@@ -4952,17 +4961,20 @@
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
     },
     {
-      "term": "統括役",
+      "term": "リレーハブ",
       "code": "relay_hub",
       "context": "ndf-workflow",
-      "meaning": "同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない",
+      "meaning": "同じマシンで最初に起動したラッパーが兼ねるプロセス。名前つきのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、判断を持たず、各ラッパーの状態機械には触れない",
+      "deprecated": [
+        "統括役"
+      ],
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "名前つきのラッパー",
       "code": "named_relay",
       "context": "ndf-workflow",
-      "meaning": "統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く",
+      "meaning": "リレーハブに名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
@@ -4976,14 +4988,14 @@
       "term": "登録簿",
       "code": "relay_registry",
       "context": "ndf-workflow",
-      "meaning": "統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
+      "meaning": "リレーハブだけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
       "term": "起動の依頼",
       "code": "spawn_request",
       "context": "ndf-workflow",
-      "meaning": "頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ",
+      "meaning": "頼む側がリレーハブの受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
@@ -4996,19 +5008,22 @@
     {
       "term": "並列の計画",
       "context": "ndf-workflow",
-      "meaning": "1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ",
+      "meaning": "計画の置き場のリポジトリに置き、同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書（レーンは別のリポジトリでもよい）。オーガナイザーが読む。名前（計画名）を持つ",
       "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md"
     },
     {
       "term": "レーン",
       "context": "ndf-workflow",
-      "meaning": "並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ",
-      "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md"
+      "meaning": "並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ。レーンのリポジトリは計画の置き場と違ってもよい（別のリポジトリのレーン）。名前は役割を含めず、役割は計画の宣言の入力で読む。物理層のラッパーとフロー層の流れの組",
+      "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md",
+      "deprecated": [
+        "ライン"
+      ]
     },
     {
       "term": "オーガナイザー",
       "context": "ndf-workflow",
-      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。統括役とは別",
+      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
@@ -5029,26 +5044,26 @@
     {
       "term": "一時レーン",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
+      "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "別のリポジトリのレーン",
       "context": "ndf-workflow",
       "meaning": "並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す",
-      "pending_source": "issues/issue-2733-requirements.md"
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "計画の外のセッション",
       "context": "ndf-workflow",
       "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
-      "pending_source": "issues/issue-2733-requirements.md"
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "レーン数の上限",
       "context": "ndf-workflow",
-      "meaning": "同時に動かせる名前つきのラッパーの数。値はマシンの設定（$XDG_STATE_HOME/ndf/relay/hub/limits.json）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まる。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
-      "pending_source": "issues/issue-2733-requirements.md"
+      "meaning": "同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
       "term": "計画の置き場",
@@ -5075,15 +5090,15 @@
       "pending_source": "issues/issue-2733-design.md"
     },
     {
-      "term": "保留の周回",
+      "term": "保留したループの 1 回",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
+      "meaning": "並列の計画のループのレーンで、答えを待たずに締めたループの 1 回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
       "term": "質問待ち",
       "context": "ndf-workflow",
-      "meaning": "作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めた周回の結果",
+      "meaning": "作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めたループの 1 回の結果",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md"
     },
     {
@@ -5376,7 +5391,7 @@
     {
       "term": "設計のプラン",
       "context": "ndf-workflow",
-      "meaning": "開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ",
+      "meaning": "開発ループの 1 回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
@@ -5394,7 +5409,7 @@
     {
       "term": "出し直しの指摘の入力",
       "context": "ndf-workflow",
-      "meaning": "開発ループが周回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
+      "meaning": "開発ループがループの 1 回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む",
       "source": "docs/specifications/ndf-loop-human-answer-delivery.md"
     },
     {
@@ -5532,7 +5547,7 @@
     {
       "term": "リリース待ち",
       "context": "ndf-workflow",
-      "meaning": "リリースの依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない",
+      "meaning": "リリースの依頼を送り、答えを待たずに締めたループの 1 回の結果。まとめはまだ流していない",
       "source": "plugins/ndf/skills/development-workflow/references/loop.md",
       "deprecated": [
         "配布待ち"
@@ -5646,15 +5661,15 @@
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
-      "term": "周回の費用の内訳",
+      "term": "ループの 1 回の費用の内訳",
       "context": "ndf-workflow",
-      "meaning": "周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
+      "meaning": "ループの 1 回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。ループの 1 回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
       "term": "実行環境の調査",
       "context": "ndf-workflow",
-      "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程",
+      "meaning": "動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、ループの 1 回で選ぶ課題の数の候補を出す工程",
       "source": "docs/specifications/ndf-development-loop-limits.md"
     },
     {
@@ -5932,6 +5947,24 @@
       "context": "ndf-relay",
       "meaning": "登録済み API キーと API キーの使い方の宣言を持つ、アカウントの置き場の 1 つのファイル（0600）",
       "pending_source": "issues/issue-2855-design.md"
+    },
+    {
+      "term": "物理層",
+      "context": "ndf-workflow",
+      "meaning": "並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる",
+      "pending_source": "issues/issue-2733-design-terms.md"
+    },
+    {
+      "term": "ロール層",
+      "context": "ndf-workflow",
+      "meaning": "並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す",
+      "pending_source": "issues/issue-2733-design-terms.md"
+    },
+    {
+      "term": "フロー層",
+      "context": "ndf-workflow",
+      "meaning": "並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる",
+      "pending_source": "issues/issue-2733-design-terms.md"
     }
   ]
 }

@@ -1,7 +1,7 @@
 """開発ループのリリース承認ゲートの答えの読み取りと、承認の後の続きのコマンド（sprint_loop から分けた）。
 
-並列の計画のレーン（#2436）では、リリース承認ゲートの答えはリリースの依頼の答えとして耐久の記録に届く。周回の境の `pending_step` が
-保留の周回（リリース待ち・質問待ち）と、オーガナイザーへ送った設計の承認の答えを待たずに読み、残りの工程（まとめ）を流す。"""
+並列の計画のレーン（#2436）では、リリース承認ゲートの答えはリリースの依頼の答えとして耐久の記録に届く。ループの 1 回の境の `pending_step` が
+保留したループの 1 回（リリース待ち・質問待ち）と、オーガナイザーへ送った設計の承認の答えを待たずに読み、残りの工程（まとめ）を流す。"""
 
 from __future__ import annotations
 
@@ -43,8 +43,8 @@ EPOCH = clock.parse("1970-01-01T00:00:00Z")  # 時刻の無い答え（止まっ
 
 
 def gate2_answer(lap: dict, since: str | None = None) -> str | None:
-    """リリース承認ゲートの答え: 止まった時刻（since）より後の、周回の状態の利用者の承認と差し戻しの記録のうち最新のもの。
-    approved / rejected、どちらも無ければ None。since より前の答え（同じ周回の前の承認ゲートへの答え）は数えない。"""
+    """リリース承認ゲートの答え: 止まった時刻（since）より後の、ループの 1 回の状態の利用者の承認と差し戻しの記録のうち最新のもの。
+    approved / rejected、どちらも無ければ None。since より前の答え（同じループの 1 回の前の承認ゲートへの答え）は数えない。"""
     path = lap.get("state_path") or ""
     state = jsonio.read(path, missing={}, broken={}, want=dict) if path else {}
     try:
@@ -96,11 +96,11 @@ def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
     return f"{run} && {queue} && {wait_lap(rec, done)}"
 
 
-# ---------------------------------------------------------------- 保留の周回（#2436 の受け入れ条件 6a・6d・6e）
+# ---------------------------------------------------------------- 保留したループの 1 回（#2436 の受け入れ条件 6a・6d・6e）
 
 
 def pending_requests(rec: dict) -> dict[str, list[str]]:
-    """答えを読む依頼の id を計画名ごとに: 保留の周回の依頼と、オーガナイザーへ送った答えの無い設計の承認。"""
+    """答えを読む依頼の id を計画名ごとに: 保留したループの 1 回の依頼と、オーガナイザーへ送った答えの無い設計の承認。"""
     out: dict[str, list[str]] = {}
     for lap in pending_laps(rec):
         part = lap.get("release") if lap["outcome"] == RELEASE_PENDING else lap.get("question")
@@ -130,7 +130,7 @@ def answer_of(answers: dict, rid: str | None) -> dict | None:
 
 
 def finish_pipeline(env: Env, rec: dict, lap: dict) -> str:
-    """保留の周回の残り（質問待ちなら止まったプランの続き → 同じ queue の残りのステージ）とまとめを流し、
+    """保留したループの 1 回の残り（質問待ちなら止まったプランの続き → 同じ queue の残りのステージ）とまとめを流し、
     `loop finish` で締め直す 1 行。組んだ行は記録へ残し、打ち直しでは同じ行を返す（まとめを二重に流さない）。"""
     part = lap["release"] if lap["outcome"] == RELEASE_PENDING else lap["question"]
     if (part.get("finish") or {}).get("pipeline"):
@@ -156,7 +156,7 @@ def finish_result(env: Env, rec: dict, before: dict, lap: dict) -> dict:
     pipeline = finish_pipeline(env, rec, lap)
     write_record(env, rec, before)
     return loop_ok(
-        f"周回 {lap['n']}（{lap['outcome']}）の答えが届いた。残りの工程を流してから次の周回へ進む",
+        f"ループの {lap['n']} 回目（{lap['outcome']}）の答えが届いた。残りの工程を流してからループの次の 1 回へ進む",
         rec,
         [{"lap": lap["n"], "outcome": lap["outcome"]}],
         status="finish",
@@ -167,7 +167,7 @@ def finish_result(env: Env, rec: dict, before: dict, lap: dict) -> dict:
 
 
 def answered_lap(rec: dict, answers: dict, results: tuple[str, ...] = ("released",)) -> dict | None:
-    """答えの届いた最も古い保留の周回（リリース待ちは results の答え、質問待ちはどの答えでも）。"""
+    """答えの届いた最も古い保留したループの 1 回（リリース待ちは results の答え、質問待ちはどの答えでも）。"""
     for lap in pending_laps(rec):
         if lap["outcome"] == QUESTION_PENDING:
             if answer_of(answers, (lap.get("question") or {}).get("request")):
@@ -178,7 +178,7 @@ def answered_lap(rec: dict, answers: dict, results: tuple[str, ...] = ("released
 
 
 def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
-    """リリース待ちの周回へ届いた答えを書く。差し戻しは人へ戻した、失敗は失敗で締め直す（まとめは流さない）。"""
+    """リリース待ちのループの 1 回へ届いた答えを書く。差し戻しは人へ戻した、失敗は失敗で締め直す（まとめは流さない）。"""
     lap["release"]["answer"] = {**a, "read_at": env.now()}
     if a.get("result") == "released":
         if a.get("version"):
@@ -195,7 +195,7 @@ def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
 
 
 def settle_refused(env: Env, rec: dict, answers: dict) -> bool:
-    """リリース待ちの周回へ届いた差し戻し・失敗の答えを書いて締め直す（まとめは流さない）。1 つでも書いたら True。"""
+    """リリース待ちのループの 1 回へ届いた差し戻し・失敗の答えを書いて締め直す（まとめは流さない）。1 つでも書いたら True。"""
     settled = False
     for lap in pending_laps(rec):
         a = answer_of(answers, (lap.get("release") or {}).get("request")) if lap["outcome"] == RELEASE_PENDING else None
@@ -206,7 +206,7 @@ def settle_refused(env: Env, rec: dict, answers: dict) -> bool:
 
 
 def pending_step(env: Env, rec: dict, before: dict, apply_gate1=None) -> dict | None:
-    """周回の境で、答えの届いた依頼を古い順に扱う（境の 2〜6）。まとめを流す周回があればその結果を返し、無ければ None。"""
+    """ループの 1 回の境で、答えの届いた依頼を古い順に扱う（境の 2〜6）。まとめを流すループの 1 回があればその結果を返し、無ければ None。"""
     answers = read_answers(env, rec)
     if apply_gate1 is not None:
         apply_gate1(env, rec, answers)
@@ -220,21 +220,23 @@ def pending_step(env: Env, rec: dict, before: dict, apply_gate1=None) -> dict | 
 
 
 def pending_pipeline(env: Env, rec: dict, before: dict) -> dict:
-    """`loop pending`: 答えの届いた保留の周回のまとめの pipeline だけを返す（止まったレーンの残りを一時レーンが流す。異常系 11）。"""
+    """`loop pending`: 答えの届いた保留したループの 1 回のまとめの pipeline だけを返す（止まったレーンの残りを一時レーンが流す。異常系 11）。"""
     answers = read_answers(env, rec)
     settled = settle_refused(env, rec, answers)  # 差し戻し・失敗も締め直して残さない（全レーンが止まった後の入口でも）
     lap = answered_lap(rec, answers)
     if lap is None:
         if settled:
             write_record(env, rec, before)
-        return loop_ok("答えの届いた保留の周回は無い" + ("（差し戻し・失敗は締め直した）" if settled else ""), rec, status="none")
+        return loop_ok(
+            "答えの届いた保留したループの 1 回は無い" + ("（差し戻し・失敗は締め直した）" if settled else ""), rec, status="none"
+        )
     if lap["outcome"] == RELEASE_PENDING and not (lap["release"].get("answer") or {}).get("result"):
         settle_release(env, rec, lap, answer_of(answers, lap["release"]["request"]))
     return finish_result(env, rec, before, lap)
 
 
 def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict], state: dict) -> dict:
-    """`loop finish`: 保留の周回の残りの done を読み、周回を 1 回だけ締め直して周回の境へ戻る。
+    """`loop finish`: 保留したループの 1 回の残りの done を読み、ループの 1 回を 1 回だけ締め直してループの 1 回の境へ戻る。
     質問待ちの続きがリリースの依頼で止まったら、リリース待ちへ移して答えを待つ。"""
     from sprint_loop_gate import DONE_RESULTS, RELEASE_REQUEST_PHASE, handle_release_pending
 
@@ -252,4 +254,4 @@ def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict],
     finish_lap(env, rec, lap, FAILED if bad or not items else "完了", state)
     if version and lap["outcome"] == "完了":
         lap.setdefault("versions", {})["prod"] = version
-    return after_close(env, rec, before, f"周回 {lap['n']} の残りを流し、{lap['outcome']} で締め直した")
+    return after_close(env, rec, before, f"ループの {lap['n']} 回目 の残りを流し、{lap['outcome']} で締め直した")

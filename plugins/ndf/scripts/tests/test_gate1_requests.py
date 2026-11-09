@@ -102,7 +102,7 @@ def loop_file(main, name, rows):
 
 
 def plan_file(monkeypatch):
-    lanes = [SimpleNamespace(input=SimpleNamespace(kind="loop", loop="lroot3"))]
+    lanes = [SimpleNamespace(input=SimpleNamespace(kind="loop", loop="lroot3"), repo_dir=lambda home: home)]
     monkeypatch.setattr(pp, "load_valid_plan", lambda main, name: SimpleNamespace(lanes=lanes))
 
 
