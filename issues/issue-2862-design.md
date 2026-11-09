@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 並列のレーンが 3 本動いていると、利用者が端末で `claude` と打っても、統括役が上限（既定 3）で起動を断る。回避は `command claude` だけで、そのセッションは区切りの再起動とアカウントの切り替えを使えない
+- **今どうなっているか**: 並列のレーンが 3 本動いていると、利用者が端末で `claude` と打っても、統括役が上限（既定 3）で起動を断る。回避は `command claude` だけで、そうして起動した claude は区切りの再起動とアカウントの切り替えを使えない
 - **誰に効くか**: 並列の計画を動かしながら、手元で別の作業を始めたい利用者
 - **変えると何が成り立つか**: 端末から打った起動は上限で断られず、上限を超えたことだけを 1 行で知らせる。上限の数にも入れないため、AI がレーンを起動できる余地は減らない。AI が自分で起動を増やす経路の歯止めは今のまま残る
 
@@ -60,7 +60,7 @@
 | E3 | 統括役が名前の形・重複・tmux の有無を判定し、上限は判定しなかった | 統括役（`Hub.judge`） | 統括役（`Hub.launch`） |
 | E4 | 統括役が tmux のセッションを起動し、登録簿の行に `by: terminal` を書いた | 統括役（`Hub.launch`） | 登録簿 |
 | E5 | 上限を超えていたことを、端末へ 1 行で知らせ、統括役の記録に残した | 統括役（記録）とラッパー（端末の 1 行） | 利用者・統括役の記録 |
-| E6 | 端末が起動したセッションへ結び付いた | ラッパー（`tmux.exec_attach`） | 利用者 |
+| E6 | 端末が起動した tmux のセッションへ結び付いた | ラッパー（`tmux.exec_attach`） | 利用者 |
 | E7 | AI が `relay.py spawn`・`restart`・起動のブロックで起動を頼んだ | conductor・オーガナイザー | 統括役 |
 | E8 | 統括役が E7 の上限を、人の起動を外した数で判定した | 統括役（`live` と `Hub.judge`） | 統括役 |
 
@@ -134,7 +134,11 @@ classDiagram
 ```
 
 - `Live.humans` は既定 0 を持ち、`Live` を位置引数で作る既存の呼び出しと既存のテスト（`test_parallel_plan.py` の `hb.live(...)`）を変えずに通す
-- `Hub.judge` の `by` は既定 `None`（AI の起動と同じ扱い）。呼び出し元は `Hub.process` とテストだけである（`grep -rn 'judge(' plugins/ndf/scripts --include=*.py` で、`hub.py:408` と `test_relay_hub.py:92`・`test_parallel_plan.py:174`〜`177` だけが当たる）
+- `Hub.judge` の `by` は既定 `None`（AI の起動と同じ扱い）。呼び出し元は `Hub.process` とテストだけである。次の検索で当たるのは `hub.py:408` と `test_relay_hub.py:92`・`test_parallel_plan.py:174`〜`177` だけである
+
+  ```bash
+  grep -rn 'judge(' plugins/ndf/scripts --include=*.py
+  ```
 
 ## データ構造
 
@@ -153,7 +157,11 @@ classDiagram
 {"at": "2026-11-09T13:20:46+09:00", "event": "started", "name": "t2", "reason": "terminal", "over_limit": {"cap": 3, "running": ["t1", "lcore", "lproc", "lacct"]}}
 ```
 
-`hub-log.jsonl` を読むコードはリリース対象に無い（`grep -rn 'hub-log\|HUB_LOG' --include=*.py plugins | grep -v tests` は `hub.py` の定義・注記・書き込みの 3 行だけ）。欄を足しても既存の読み手は無い。
+`hub-log.jsonl` を読むコードはリリース対象に無い。次の検索で当たるのは `hub.py` の定義・注記・書き込みの 3 行だけである。欄を足しても既存の読み手は無い。
+
+```bash
+grep -rn 'hub-log\|HUB_LOG' --include=*.py plugins | grep -v tests
+```
 
 ## 入出力の契約
 
