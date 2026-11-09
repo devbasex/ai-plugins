@@ -6149,7 +6149,7 @@
     {
       "term": "実装の予算",
       "context": "ndf-cross-refactoring",
-      "meaning": "`--budget-minutes` の値。改善項目を何件選ぶかを決めるためだけに使う、実装（コーディング）時間の見積りの合計の上限。今の用語集の「想定最大時間」（実行全体の子プロセスを止める締め切り）を置き換える",
+      "meaning": "`--budget-minutes` の値（既定 60 分）。採る項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う。今の用語集の「想定最大時間」（実行全体の子プロセスを止める締め切り）を置き換える",
       "pending_source": "issues/issue-2457-requirements.md"
     },
     {
@@ -6193,6 +6193,36 @@
       "context": "ndf-cross-refactoring",
       "meaning": "実装時間と修正の時間の合計に置く上限。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す",
       "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "実効の予算",
+      "context": "ndf-cross-refactoring",
+      "meaning": "予算の延長を当てた後の実装の予算。延ばさなければ実装の予算と同じ",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "比較の木",
+      "context": "ndf-cross-refactoring",
+      "meaning": "HEAD から、取り消していない改善項目のコミットをすべて外した木。着手の後に取り込んだベースブランチの変更を含む。無関係な失敗の見分けに使う",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "差し戻し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目の中の手順の違反（記名の欠け・期待値の欠け・文言を固定するテスト・計画に無いコミット）を、項目を取り消さずに担当へ直させること",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "落ちたテストの材料",
+      "context": "ndf-cross-refactoring",
+      "meaning": "落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "判定の担い手",
+      "context": "ndf-cross-refactoring",
+      "meaning": "成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ",
+      "pending_source": "issues/issue-2457-design.md"
     }
   ]
 }
