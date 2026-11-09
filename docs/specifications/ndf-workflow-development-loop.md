@@ -294,7 +294,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `user_stop` | ファイルを消して解ける |
 | 予算 | 再開の引数で上書きした予算で判定し直す。まだ予算以上なら 3 |
 | `same_failure` | 再開の起動そのものを解けた印とし、失敗の数を数え直す |
-| `gate2_returned` | 答えが無ければ 3。差し戻しならループの 1 回を `人へ戻した` で締める。承認なら `next` に、止まった計画を経路に合うステップ（雛形の本番は `--from bump`、昇格は `--from promote-approved`、マージで止まった計画は `--from merge-approved`）から `supervise.py run` で続け → 同じ queue の残りのステージ → `--record-pr` なしで組み直したまとめ（`{queue_record}` を持つ）→ `wait` → `loop lap` の 1 行を載せる。続けるステップが無い計画は、手で行う本番を先に示す |
+| `gate2_returned` | 答えが無ければ 3。差し戻しならループの 1 回を `人へ戻した` で締める。承認なら `next` に、止まった計画を経路に合うステップ（雛形の本番は `--from bump`、経路 merge は `--from promote-approved`、マージで止まった計画は `--from merge-approved`）から `supervise.py run` で続け → 同じ queue の残りのステージ → `--record-pr` なしで組み直したまとめ（`{queue_record}` を持つ）→ `wait` → `loop lap` の 1 行を載せる。続けるステップが無い計画は、手で行う本番を先に示す |
 | `refused`（続きの queue） | 人の判断待ちへ移した課題を戻さず、残した課題で続きを組み直す。組めなければ 3 |
 | `refused`（ほか） | `next` に同じループの 1 回での `loop sprint` のやり直しを載せる（モードは conductor が決め直す。載せる 1 行は `--dev` を求めない） |
 | `mvv_changed` | 解けない。新しい名前でループを始め直すよう示す（開始時の値を今の値へ置き換えない） |

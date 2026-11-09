@@ -62,12 +62,12 @@ def body_of(root, plugin, ver, tag, prev_tag, prs, cd=None, by_cd=False):
 
 
 def promote_body_of(n, head, base, prev_sha, sha, prs, cd=None):
-    """昇格の Pull Request（head → base）のマージで本番へ出たときのリリース記録の本文。版は `<本番チャネル> <短い SHA>`。"""
+    """リリースの Pull Request（head → base）のマージで本番へ出たときのリリース記録の本文。版は `<本番チャネル> <短い SHA>`。"""
     return dist_record.format_record(
         f"{base} {prev_sha}" if prev_sha else None,
         f"{base} {sha}",
         prs,
-        stage_note=f"リリース承認ゲートの承認の後、昇格の Pull Request #{n}（{head} → {base}）をマージした",
+        stage_note=f"リリース承認ゲートの承認の後、リリースの Pull Request #{n}（{head} → {base}）をマージした",
         version_note=f"#{n} のマージのコミット。直前は {base} の {prev_sha}" if prev_sha else f"#{n} のマージのコミット",
         **cd_fields(cd),
     )

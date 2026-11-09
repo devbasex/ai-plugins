@@ -91,7 +91,7 @@ def test_collect_entries_includes_xfailed_xpassed():
 
 
 def test_collect_entries_promotes_teardown_failure_on_passed_call():
-    """call=passed + teardown=failed (body_check fail) → outcome=failed に昇格。"""
+    """call=passed + teardown=failed (body_check fail) → outcome=failed に変える。"""
     tr = _make_terminalreporter(
         {
             "passed": [_make_rep(nodeid="t::bc", outcome="passed", when="call")],
@@ -139,7 +139,7 @@ def test_collect_entries_promotes_teardown_failure_on_xfailed_call():
 
 
 def test_collect_entries_promotes_teardown_error_with_error_outcome():
-    """teardown=error は outcome=error に昇格 (failed と区別する)。"""
+    """teardown=error は outcome=error に変える (failed と区別する)。"""
     tr = _make_terminalreporter(
         {
             "passed": [_make_rep(nodeid="t::e", outcome="passed", when="call")],
@@ -159,7 +159,7 @@ def test_collect_entries_promotes_teardown_error_with_error_outcome():
 
 
 def test_collect_entries_promotes_teardown_failure_on_xpassed_call():
-    """call=xpassed + teardown=failed → outcome=failed に昇格。"""
+    """call=xpassed + teardown=failed → outcome=failed に変える。"""
     tr = _make_terminalreporter(
         {
             "xpassed": [_make_rep(nodeid="t::xp", outcome="xpassed", when="call")],
@@ -180,7 +180,7 @@ def test_collect_entries_promotes_teardown_failure_on_xpassed_call():
 
 
 def test_collect_entries_promotes_teardown_failure_on_skipped_call():
-    """call=skipped + teardown=failed → outcome=failed に昇格。"""
+    """call=skipped + teardown=failed → outcome=failed に変える。"""
     tr = _make_terminalreporter(
         {
             "skipped": [_make_rep(nodeid="t::sk", outcome="skipped", when="call")],

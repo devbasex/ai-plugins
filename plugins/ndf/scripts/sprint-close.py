@@ -97,7 +97,9 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
 
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
-UNKNOWN_REASON = "リリース記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
+UNKNOWN_REASON = (
+    "リリース記録の置き場が分からない（リリースの経路が雛形でもリリースの Pull Request でもない。リリース記録を確かめて手で閉じる）"
+)
 LOCK_TIMEOUT = limits.seconds("sprint-close.issue-lock")  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
@@ -387,7 +389,7 @@ def _emit_close_result(a, targets, items, notes, metrics, summary, count, decisi
         nxt = "失敗した課題の cmd でやり直す。棚卸しへ進まない"
         emit(result(TOOL, "stopped", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_VIOLATION)
     if a.record_pr == RECORD_UNKNOWN:
-        summary = f"記録の置き場が分からないため閉じない（リリースの経路が雛形でも昇格でもない）: {summary}"
+        summary = f"記録の置き場が分からないため閉じない（リリースの経路が雛形でもリリースの Pull Request でもない）: {summary}"
         nxt = "リリース記録とリリース後テストの記録を確かめ、受け入れ条件を満たした課題を手で閉じる"
         emit(result(TOOL, "gate", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_GATE)
     if gaps:
