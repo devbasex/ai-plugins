@@ -68,12 +68,17 @@ def creates(root: sp.Node) -> list[sp.Node]:
     return out
 
 
-def _heredoc_text(node: sp.Node) -> str | None:
-    """`"$(cat <<'EOF' … EOF)"` の形ならヒアドキュメントの本文。違えば `None`。"""
+def _lone_substitution(node: sp.Node) -> sp.Node | None:
+    """語がコマンド置換 1 つだけならその置換のノード。違えば `None`。"""
     subs = [node] if node.type == "command_substitution" else [c for c in node.children if c.type == "command_substitution"]
-    if len(subs) != 1 or node.type == "string" and any(c.type not in ('"', "command_substitution") for c in node.children):
+    if len(subs) != 1 or (node.type == "string" and any(c.type not in ('"', "command_substitution") for c in node.children)):
         return None
-    inner = [c for c in subs[0].children if c.is_named]
+    return subs[0]
+
+
+def _cat_heredoc(sub: sp.Node) -> tuple[sp.Node, sp.Node] | None:
+    """置換の中身が `cat <<区切り` 1 つなら `(ヒアドキュメントの redirect, 本文)` のノード。違えば `None`。"""
+    inner = [c for c in sub.children if c.is_named]
     if len(inner) != 1 or inner[0].type != "redirected_statement":
         return None
     body = inner[0].child_by_field_name("body")
@@ -84,6 +89,16 @@ def _heredoc_text(node: sp.Node) -> str | None:
     text = next((c for c in r.children if c.type == "heredoc_body"), None)
     if text is None:
         return None
+    return r, text
+
+
+def _heredoc_text(node: sp.Node) -> str | None:
+    """`"$(cat <<'EOF' … EOF)"` の形ならヒアドキュメントの本文。違えば `None`。"""
+    sub = _lone_substitution(node)
+    found = _cat_heredoc(sub) if sub is not None else None
+    if found is None:
+        return None
+    r, text = found
     if not sp.heredoc_quoted(r) and (text.child_count or any(ch in sp.node_text(text) for ch in "$`")):
         return None
     return sp.node_text(text)
