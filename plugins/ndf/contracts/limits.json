@@ -29,7 +29,7 @@
     "hook.deadline-margin": {"summary": "hook の期限の手前に残す余白", "seconds": 1.5},
     "hook.wait-notify-lock": {"summary": "待ちの知らせの記録の排他を待つ上限", "seconds": 5},
     "hook.git-rev-parse": {"summary": "hook が worktree を調べる git rev-parse の上限", "seconds": 5},
-    "hook.git-remote": {"summary": "起票の guard が今のリポジトリを調べる git remote get-url の上限", "seconds": 5},
+    "hook.git-remote": {"summary": "起票の guard と issue-file.py create が今のリポジトリを調べる git remote get-url の上限", "seconds": 5},
     "auth.probe": {"summary": "認証の確かめのコマンドの上限", "seconds": 120},
     "claude-account-dir.lock": {"summary": ".claude.json の排他の待ちの上限", "seconds": 2},
     "claude-accounts.expiry-margin": {"summary": "残りがこの秒数以下のアクセストークンは期限切れとみなす", "seconds": 60},

@@ -237,7 +237,7 @@
 | `hook.ask-forward` | seconds 8 | AskUserQuestion の転送を待つ上限。hook の 10 秒の上限の中に収める | `plugins/ndf/scripts/hook_lib/ask_guard.py:<module>` |
 | `hook.deadline` | seconds 3.5 | hook の処理を打ち切る期限 | `plugins/ndf/scripts/hook_lib/deadline.py:<module>` |
 | `hook.deadline-margin` | seconds 1.5 | hook の期限の手前に残す余白 | `plugins/ndf/scripts/hook_lib/deadline.py:<module>` |
-| `hook.git-remote` | seconds 5 | 起票の guard が今のリポジトリを調べる git remote get-url の上限 | `plugins/ndf/scripts/hook_lib/issue_guard.py:origin_repo` |
+| `hook.git-remote` | seconds 5 | 起票の guard と issue-file.py create が今のリポジトリを調べる git remote get-url の上限 | `plugins/ndf/scripts/lib/issue_items.py:origin_repo` |
 | `hook.git-rev-parse` | seconds 5 | hook が worktree を調べる git rev-parse の上限 | `plugins/ndf/scripts/hook_lib/worktree.py:_git_lines` |
 | `hook.wait-notify-lock` | seconds 5 | 待ちの知らせの記録の排他を待つ上限 | `plugins/ndf/scripts/hook_lib/wait_notify.py:claim` |
 | `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |

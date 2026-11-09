@@ -57,7 +57,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/issue-file.py` | 5 つのサブコマンドの入口。値の形の検査・上流リポジトリの解決（`resolve_upstream`）と開発対象リポジトリの読み取り（`development_repo`）・本文の組み立て（`assemble`）と記載項目の検査（`body_gaps`。判定は `lib/issue_items.py`）・打つ先が開発対象と別かの判定（`_is_other_repo`）・提示の要約値（`_digest`・`digest_of`）・承認資料・結果 JSON |
+| `plugins/ndf/scripts/issue-file.py` | 5 つのサブコマンドの入口。値の形の検査・上流リポジトリの解決（`resolve_upstream`）と開発対象リポジトリの読み取り（`development_repo`）・本文の組み立て（`assemble`）と記載項目の検査（定義の選択は `issue_items.definition_for`。判定は `lib/issue_items.py`）・打つ先が開発対象と別かの判定（`_is_other_repo`）・提示の要約値（`_digest`・`digest_of`）・承認資料・結果 JSON |
 | `plugins/ndf/scripts/lib/gh_rest.py`（`issue_search`・`issue_create`・`comment`） | GitHub の検索・作成・コメント。下は `gh_call` |
 | `plugins/ndf/scripts/lib/gh_sections.py`（`get_section`・`replace_section`） | 本文の節の取得と置換 |
 | `plugins/ndf/scripts/lib/step_result.py`（`result`・`emit`・`approval_present`・`EXIT_*`） | 結果 JSON・承認資料・終了コード |
@@ -79,8 +79,8 @@ flowchart LR
 
 | 条件 | 破れたときの扱い |
 | --- | --- |
-| 作る課題は種類のラベルをちょうど 1 つ持ち、本文は Issue の記載項目の定義（`plugins/ndf/scripts/data/issue-items.json`。`.ndf/issue-items.json` があればそちら）に照らして、その種類の必須の項目と「起票者の推定」「由来」の節を持ち、どの節も空白でない行を持つ（「無し」の 1 行は空としない）。「依頼（原文）」の後ろには工程が足す節しか置かない。コードブロックの中の `#` は見出しに数えない | 課題を作らず、終了コード 1 で欠けた項目（`missing` / `empty` / `order` / `kind`）を `items` に返す。GitHub を呼ぶ前に止まる。定義を読めなければ 2 |
-| 作る課題の「由来」の節に、渡した由来（`PR #<番号>` / `issue #<番号>`）が 1 回だけ入る。既にあれば足さず、`PR #19` は `PR #190` と同じ由来に数えない。「由来」の見出しが無い本文には見出しを足さない（記載項目の検査で落ちる） | 由来の形が違えば GitHub を呼ばずに 2 |
+| 作る課題は種類のラベルをちょうど 1 つ持ち、本文は Issue の記載項目の定義（`plugins/ndf/scripts/data/issue-items.json`。`.ndf/issue-items.json` があればそちら。起票先が今のリポジトリの `remote.origin.url` と別なら宣言を当てず既定）に照らして、その種類の必須の項目と「起票者の推定」「由来」の節を持ち、どの節も空白でない行を持つ（「無し」の 1 行は空としない）。「依頼（原文）」の後ろには工程が足す節しか置かない。コードブロックの中の `#` は見出しに数えない | 課題を作らず、終了コード 1 で欠けた項目（`missing` / `empty` / `order` / `kind`）を `items` に返す。GitHub を呼ぶ前に止まる。定義を読めなければ 2 |
+| 作る課題の「由来」の節に、渡した由来（`PR #<番号>` / `issue #<番号>`）が 1 回だけ入る。既にあれば足さず、`PR #19` は `PR #190` と同じ由来に数えない。由来の節は本文の判定と同じ見出しの規則（`### 由来`・`## 由来: 補足` も当たる）で選ぶ。「由来」の見出しが無い本文には見出しを足さない（記載項目の検査で落ちる） | 由来の形が違えば GitHub を呼ばずに 2 |
 | 作る課題は、直前に示した承認資料と同じ起票先・題・本文（組み立てた後）・ラベル（並べ替えた後）を持つ | `--approved` が無ければ承認資料を書いて 10、要約値が合わなければ課題を作らず 1 |
 | Neural Development Factory のランナーの中（環境変数 `NDF_ISSUE_REQUEST_FILE` がある）で、起票先が開発対象リポジトリと別（読めないときも含む）の `create` は、課題を作らず承認資料も書かず、そのファイルへ `{"repo", "title", "body"}` の 1 行を足す（`lib/runner_issue_request.py`。起票するかはサービスが判定する。サービスの確定仕様「起票の依頼と起票の代行」） | 0（`items[].result` は `requested`）。ファイルへ書けなければ 1。変数が無ければ上の行のとおり 10 |
 | 打つ先が開発対象リポジトリと別の `note` は、直前に示した承認資料と同じ打つ先・番号・1 行（組み立てた後）だけを打つ。同じリポジトリなら同意なしで打ち、`--approved` は照合しない | `--approved` が無ければ承認資料を書いて 10、要約値が合わなければコメントを打たず 1 |

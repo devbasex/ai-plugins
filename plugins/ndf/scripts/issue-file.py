@@ -330,9 +330,10 @@ def _line_with(lines: list[str], text: str) -> int | None:
     return next((i for i, line in enumerate(lines) if pat.search(line)), None)
 
 
-def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
-    """「由来」の節に由来（と上流リポジトリの側の課題）が無ければ入れる。節が無ければ変えない。"""
-    section = gh_sections.get_section(body, ORIGIN_HEADING)
+def assemble(body: str, origin: str, counterpart: str | None, definition: issue_items.Definition) -> str:
+    """「由来」の節（本文の判定と同じ見出しの規則）に由来と上流リポジトリの側の課題が無ければ入れる。節が無ければ変えない。"""
+    heading = issue_items.heading_line(body, definition, "origin") or ORIGIN_HEADING
+    section = gh_sections.get_section(body, heading)
     if section is None:
         return body
     lines = section.split("\n") if section.strip() else []
@@ -346,19 +347,10 @@ def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
         changed = True
     if not changed:
         return body
-    out = gh_sections.replace_section(body, ORIGIN_HEADING, "\n".join(lines))
+    out = gh_sections.replace_section(body, heading, "\n".join(lines))
     if gh_sections.SECTION_END not in body:  # 置換が足す節の終わりの目印は、元の本文に無ければ残さない（本文の形を変えない）
         out = "\n".join(line for line in out.split("\n") if line.strip() != gh_sections.SECTION_END)
     return out
-
-
-def body_gaps(body: str, labels: list[str]) -> list[dict]:
-    """記載項目の定義に照らした欠け（`heading` と `result`）。定義を読めなければ 2 で終える。"""
-    try:
-        definition = issue_items.load_definition(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or None)
-    except issue_items.DefinitionError as exc:
-        _stop_with(f"記載項目の定義を読めない: {exc}", EXIT_UNREADABLE)
-    return [g.to_dict() for g in issue_items.judge_body(body, labels, CREATE_CONTEXT, definition)[1]]
 
 
 def _digest(shown: dict) -> str:
@@ -419,8 +411,12 @@ def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[
     if not a.title.strip():
         _stop_with("題が空", EXIT_UNREADABLE)
     labels = list(a.label or [])
-    body = assemble(_read_body_file(a.body_file), origin, a.counterpart)
-    gaps = body_gaps(body, labels)
+    try:  # 今のリポジトリと別の起票先には、今のリポジトリの宣言を当てない（GitHub は呼ばない）
+        definition = issue_items.definition_for(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or None, repo)
+    except issue_items.DefinitionError as exc:
+        _stop_with(f"記載項目の定義を読めない: {exc}", EXIT_UNREADABLE)
+    body = assemble(_read_body_file(a.body_file), origin, a.counterpart, definition)
+    gaps = [g.to_dict() for g in issue_items.judge_body(body, labels, CREATE_CONTEXT, definition)[1]]
     if gaps:
         names = "・".join(g["heading"] for g in gaps)
         _stop_with(f"本文が記載項目の定義を満たさない: {names}。課題は作っていない", EXIT_VIOLATION, gaps)

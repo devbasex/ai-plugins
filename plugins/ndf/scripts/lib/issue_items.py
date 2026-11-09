@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
 import gh_sections
+import limits
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_ITEMS = DATA / "issue-items.json"
@@ -34,6 +36,7 @@ SECTION = "section"
 EMPTY_MARKS = ("_No response_", "<!-- ndf:section-end -->")
 _HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$")
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
+REPO_IN_URL = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
 
 class DefinitionError(ValueError):
@@ -210,6 +213,37 @@ def load_definition(root=None) -> Definition:
     return definition
 
 
+def origin_repo(cwd) -> str | None:
+    """`cwd` のリポジトリの `git remote get-url origin` の `<所有者>/<リポジトリ>`。読めなければ `None`。GitHub は呼ばない。"""
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(cwd), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=limits.seconds("hook.git-remote"),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = REPO_IN_URL.search(p.stdout.strip()) if p.returncode == 0 else None
+    return m.group(1) if m else None
+
+
+def other_repo(repo: str | None, cwd) -> bool:
+    """起票先 `repo` が `cwd` のリポジトリ（origin）と別か。`repo` が無ければ同じ、origin を読めなければ別とみなす。"""
+    if not repo:
+        return False
+    here = origin_repo(cwd)
+    want = repo.split("github.com/")[-1].removesuffix(".git").strip("/")
+    return here is None or here.lower() != want.lower()
+
+
+def definition_for(root, repo: str | None) -> Definition:
+    """起票先 `repo` を判定する定義。`root` のリポジトリと別の起票先には `root` の宣言を当てず既定を読む（PR 2856）。"""
+    if root is not None and items_path(root) != DEFAULT_ITEMS and other_repo(repo, root):
+        root = None
+    return load_definition(root)
+
+
 # --- 本文の判定 --------------------------------------------------------------------------
 
 
@@ -280,6 +314,16 @@ def _item_gap(item: Item, lines: list[str], heads: list[Heading], definition: De
         return Gap(item.name, "missing")
     if all(_empty(lines, heads, n) for n in at):
         return Gap(item.name, "empty")
+    return None
+
+
+def heading_line(body: str, definition: Definition, item_id: str) -> str | None:
+    """本文で項目 `item_id` の節と判定される最初の見出しの行（`judge_body` と同じ規則）。無ければ `None`。"""
+    item = definition.by_id.get(item_id)
+    lines = (body or "").replace("\r\n", "\n").split("\n")
+    for h in body_headings(lines):
+        if item is not None and h.level >= 2 and definition.item_for_heading(h.text) is item:
+            return lines[h.line].rstrip()
     return None
 
 

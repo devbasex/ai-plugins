@@ -9,7 +9,7 @@
 | `--body-file` / `-F` のファイル | その `gh issue create` を打つときの現在地（前の `cd` を `write_target.command_dirs()` で追う。字面から決められなければコマンドの実行ディレクトリ）からの相対で読む（`-` の標準入力は読めない形） |
 | `--body "$(cat <<'EOF' … EOF)"` | ヒアドキュメントの本文（区切りを引用しないときは展開を含まない本文だけ） |
 
-ラベルは `--label` / `-l`（繰り返しとカンマ区切り）。定義と origin も同じ現在地から読む。`-R` / `--repo` が今のリポジトリ（`git remote get-url origin`）と
+ラベルは `--label` / `-l`（繰り返しとカンマ区切り）。短縮の名前は gh と同じく値を同じ語に続けてよい（`-l値`・`-l=値`・`-F値`）。定義と origin も同じ現在地から読む。`-R` / `--repo` が今のリポジトリ（`git remote get-url origin`）と
 違うときは判定しない。欠けがある・本文を上の形で読めない（標準入力・変数・`--web`）ときは拒否し、理由に欠けた項目名・
 定義のファイル・正しい手段を書く。GitHub は呼ばない。構文木を読み切れない・定義を読めないときは判定せずに通す。
 `bash -c` の中や `gh api` での起票は見ない（起票の後の検査 `issue-items.py audit` が拾う）。
@@ -18,11 +18,9 @@
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
 import issue_items
-import limits
 import shparse as sp
 
 from . import payload as pl
@@ -32,12 +30,12 @@ from .token_guard import deny
 SCRIPTS = Path(__file__).resolve().parents[1]
 WRAPPERS = frozenset({"env", "command", "builtin", "nohup", "exec", "time"})
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
-REPO_IN_URL = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 BODY_OPTS = ("--body", "-b")
 FILE_OPTS = ("--body-file", "-F")
 LABEL_OPTS = ("--label", "-l")
 REPO_OPTS = ("--repo", "-R")
 WEB_OPTS = ("--web", "-w")
+SHORT_VALUED = tuple(o for o in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS if not o.startswith("--"))
 CONTEXT = {"ai": True}
 EXPANSIONS = ("command_substitution", "simple_expansion", "expansion", "process_substitution")
 
@@ -123,12 +121,22 @@ def create_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], 
     i = 0
     while i < len(nodes):
         word = sp.unquote(nodes[i])
-        name, eq, inline = word.partition("=") if word.startswith("--") else (word, "", "")
+        name, eq, inline = _split_opt(word)
         unreadable |= name in WEB_OPTS
         value, i = _opt_value(nodes, i, name, eq, inline)
         unreadable |= _apply_arg(acc, name, value, cwd)
         i += 1
     return (None if unreadable else acc["body"]), acc["labels"], acc["repo"]
+
+
+def _split_opt(word: str) -> tuple[str, str, str]:
+    """オプションの語を `(名前, 値が語に続くなら "=", 続く値)` へ分ける。gh（pflag）と同じく `--name=値`・`-l値`・`-l=値` を分ける。"""
+    if word.startswith("--"):
+        return word.partition("=")
+    if len(word) > 2 and word[:2] in SHORT_VALUED:
+        rest = word[2:]
+        return word[:2], "=", rest.removeprefix("=")
+    return word, "", ""
 
 
 def _opt_value(nodes: list[sp.Node], i: int, name: str, eq: str, inline: str) -> tuple[str | None, int]:
@@ -177,25 +185,6 @@ def _read_file(value: str | None, cwd: str) -> str | None:
         return None
 
 
-def origin_repo(cwd: str) -> str | None:
-    try:
-        p = subprocess.run(
-            ["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=limits.seconds("hook.git-remote")
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    m = REPO_IN_URL.search(p.stdout.strip()) if p.returncode == 0 else None
-    return m.group(1) if m else None
-
-
-def _other_repo(repo: str | None, cwd: str) -> bool:
-    if not repo:
-        return False
-    here = origin_repo(cwd)
-    want = repo.split("github.com/")[-1].removesuffix(".git").strip("/")
-    return here is None or here.lower() != want.lower()
-
-
 def _means(definition: issue_items.Definition) -> str:
     labels = "・".join(f"`{lab}`（{kind}）" for lab, kind in definition.kind_labels().items())
     return (
@@ -239,7 +228,7 @@ def issue_decision(ev: pl.Event) -> dict | None:
         words = _call_words(node)
         start = _start([sp.unquote(w) for w in words]) + 3
         body, labels, repo = create_args(words[start:], cwd)
-        if _other_repo(repo, cwd):
+        if issue_items.other_repo(repo, cwd):
             continue
         if body is None:
             return deny(_unreadable_text(definition))

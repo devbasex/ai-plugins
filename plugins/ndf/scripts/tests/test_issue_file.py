@@ -552,6 +552,48 @@ def test_a_section_after_the_request_that_is_not_a_record_stops(fake, tmp_path):
     assert code == 1 and obj["items"] == [{"heading": "依頼（原文）", "result": "order"}]
 
 
+def _project_with_kind_labels(tmp_path: Path, origin_url: str) -> None:
+    """種類のラベル名を置き換えたプロジェクト（`type:bug`）を今のリポジトリにする。"""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", origin_url], check=True)
+    raw = json.loads((HERE.parent / "data" / "issue-items.json").read_text(encoding="utf-8"))
+    raw["kind_labels"] = {"不具合": "type:bug"}
+    (tmp_path / ".ndf").mkdir(exist_ok=True)
+    (tmp_path / ".ndf" / "issue-items.json").write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+
+@pytest.mark.parametrize(("label", "code"), [("bug", 10), ("type:bug", 1)])
+def test_another_repository_is_judged_by_the_default_definition(fake, tmp_path, label, code):
+    """今のリポジトリと別の起票先には、今のリポジトリの宣言のラベル名を当てない（PR 2856 round 3）。"""
+    _project_with_kind_labels(tmp_path, "https://github.com/example/app.git")
+    target_is(fake, "example/app")
+    got, _ = run("create", "--label", label, "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path), "--origin", "PR #1")
+    assert got == code
+
+
+@pytest.mark.parametrize(("label", "code"), [("type:bug", 10), ("bug", 1)])
+def test_the_own_repository_is_judged_by_the_project_definition(fake, tmp_path, label, code):
+    _project_with_kind_labels(tmp_path, f"git@github.com:{REPO}.git")
+    target_is(fake, REPO)
+    got, _ = run("create", "--label", label, "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path), "--origin", "PR #1")
+    assert got == code
+
+
+@pytest.mark.parametrize("heading", ["### 由来", "## 由来: 補足", "## 由来（補足）"])
+def test_the_origin_goes_into_a_heading_the_judgement_accepts(fake, tmp_path, heading):
+    """本文の判定が由来の節と認める見出しへ、由来と上流リポジトリの側の課題を入れる（PR 2856 round 3）。"""
+    target_is(fake, "example/app")
+    text = BODY.replace("## 由来\n", f"{heading}\n")
+    _, gate = run(
+        "create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text),
+        "--origin", "PR #1900", "--counterpart", "example/app#5",
+    )  # fmt: skip
+    section = Path(gate["metrics"]["body_path"]).read_text(encoding="utf-8").split(heading, 1)[1]
+    assert "PR #1900" in section and "example/app#5" in section
+
+
 @pytest.mark.parametrize("origin", ["PR 1900", "#1900", "pr #1900", "PR #0", "Issue #3"])
 def test_a_malformed_origin_stops_before_github(fake, tmp_path, origin):
     code, _ = run("create", "--label", "bug", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path), "--origin", origin)

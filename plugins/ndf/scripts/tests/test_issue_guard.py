@@ -107,6 +107,13 @@ def test_a_body_in_an_unreadable_form_is_denied(repo, tail):
     assert why is not None and "読めない形" in why
 
 
+def test_short_options_with_the_value_in_the_same_word_pass(repo):
+    """gh と同じく `-l値`・`-l=値`・`-F値` を名前と値へ分ける（PR 2856 round 3）。"""
+    name = write(repo, FEATURE)
+    assert reason(decide(repo, f"gh issue create -t t -lenhancement -F{name}")) is None
+    assert reason(decide(repo, f"gh issue create -t t -l=enhancement -F={name}")) is None
+
+
 def test_another_repository_is_not_judged(repo):
     assert reason(decide(repo, "gh issue create -R other/repo -t t --body-file -")) is None
     assert reason(decide(repo, f"gh issue create --repo {REPO} -t t --body-file -")) is not None
@@ -236,12 +243,16 @@ def _create_args(args: str, cwd: Path):
         ("-b 'a b'", ("a b", [], None)),
         ("--body=x", ("x", [], None)),
         ("--body=", ("", [], None)),
-        ("-b=x", (None, [], None)),
+        ("-b=x", ("x", [], None)),
+        ("-bx", ("x", [], None)),
+        ("-lenhancement -l=bug,a", (None, ["enhancement", "bug", "a"], None)),
+        ("-b$X", (None, [], None)),
         ("--body a --body b", ("b", [], None)),
         ("--label a,b -l ' c , ,d' --label=e", (None, ["a", "b", "c", "d", "e"], None)),
         ("--label ''", (None, [], None)),
         ("--repo o/x", (None, [], "o/x")),
-        ("-R=o/x", (None, [], None)),
+        ("-R=o/x", (None, [], "o/x")),
+        ("-Ro/x", (None, [], "o/x")),
         ("--repo=o/x -b y", ("y", [], "o/x")),
         ("--body x --web", (None, [], None)),
         ("-w --body x", (None, [], None)),
@@ -263,6 +274,8 @@ def test_create_args_reads_body_labels_and_repo(tmp_path, args, expected):
     [
         ("--body-file f.md", "file body\n"),
         ("-F f.md", "file body\n"),
+        ("-Ff.md", "file body\n"),
+        ("-F=f.md", "file body\n"),
         ("--body-file=f.md", "file body\n"),
         ("--body x --body-file f.md", "file body\n"),
         ("--body-file f.md --body x", "x"),
