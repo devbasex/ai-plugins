@@ -427,3 +427,199 @@ def test_phase_cost_agent_rows_empty():
             "unphased_supervisors": 0,
         },
     )
+
+
+# --- call_claude の現状固定（リファクタリング計画 I-002。extract_method の前に分岐と副作用を固定する） ---
+
+
+@pytest.fixture
+def fixed_call(monkeypatch):
+    """run_ticking と帳簿への記録を差し替え、渡された引数と記録の行を集める。`proc` に返す結果か投げる例外を入れる。"""
+    got = {"runs": [], "records": [], "proc": subprocess.CompletedProcess([], 0, json.dumps(CLAUDE_OUT), "")}
+
+    def run(cmd, tick, every, **kw):
+        got["runs"].append({"cmd": cmd, "tick": tick, "every": every, **kw})
+        if isinstance(got["proc"], BaseException):
+            raise got["proc"]
+        return got["proc"]
+
+    monkeypatch.setattr(claude, "run_ticking", run)
+    monkeypatch.setattr(claude.usage_capture, "record_claude", lambda data, **kw: got["records"].append((data, kw)) or True)
+    monkeypatch.setattr(claude, "uuid", type("U", (), {"uuid4": staticmethod(lambda: "fixed-session")}))
+    monkeypatch.delenv("NDF_SUPERVISE_MODEL", raising=False)
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", "claude")
+    return got
+
+
+def proc(stdout: str, rc: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess([], rc, stdout, stderr)
+
+
+def test_call_claude_ok_returns_every_field_and_records_ok(tmp_path, fixed_call):
+    res = claude.call_claude(prompts.JUDGE_SYSTEM, "p", None, str(tmp_path), 10, caller={"source": "supervise", "plan": "x.json", "step": "j"})
+    assert isinstance(res, claude.ClaudeCall)
+    assert {k: v for k, v in res.items() if k != "seconds"} == {
+        "ok": True,
+        "text": CLAUDE_OUT["result"],
+        "usage": USAGE,
+        "model_usage": MODEL_USAGE,
+        "kind": "judge",
+        "cost": 0.06,
+        "turns": 4,
+        "session": "sess-1",
+        "limit": False,
+        "auth": False,
+        "credit": False,
+        "resets_at": None,
+    }
+    assert isinstance(res["seconds"], float)
+    run = fixed_call["runs"][0]
+    assert run["input"] == "p" and run["cwd"] == str(tmp_path) and run["timeout"] == 10
+    assert run["tick"] is None and run["every"] == claude.TICK and "extend" not in run and "follow" not in run
+    assert run["cmd"] == claude.claude_cmd(prompts.JUDGE_SYSTEM, None, str(tmp_path))
+    assert run["env"]["NDF_USAGE_PLAN"] == "x.json" and run["env"]["NDF_USAGE_STEP"] == "j"
+    data, kw = fixed_call["records"][0]
+    assert data == CLAUDE_OUT
+    assert (kw["cwd"], kw["kind"], kw["source"], kw["plan"], kw["step"], kw["status"]) == (str(tmp_path), "judge", "supervise", "x.json", "j", "ok")
+
+
+def test_call_claude_caller_kind_overrides_but_result_kind_does_not(tmp_path, fixed_call):
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10, caller={"kind": "mvv"})
+    assert res["kind"] == "work" and fixed_call["records"][0][1]["kind"] == "mvv"
+
+
+def test_call_claude_env_handling(tmp_path, fixed_call, monkeypatch):
+    monkeypatch.setenv("FIXED_BASE", "1")
+    monkeypatch.setenv("NDF_USAGE_SOURCE", "inherited")
+    monkeypatch.delenv("NDF_USAGE_PLAN", raising=False)
+    claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert fixed_call["runs"][-1]["env"] is None  # env も caller も無ければ親の環境のまま
+    claude.call_claude("s", "p", None, str(tmp_path), 10, env={"EXTRA": "e"})
+    env = fixed_call["runs"][-1]["env"]
+    assert env["EXTRA"] == "e" and env["FIXED_BASE"] == "1"
+    claude.call_claude("s", "p", None, str(tmp_path), 10, env={"EXTRA": "e"}, child_env={"ONLY": "c"})
+    assert fixed_call["runs"][-1]["env"] == {"ONLY": "c"}  # child_env が env より優先し、親の環境を含めない
+    claude.call_claude("s", "p", None, str(tmp_path), 10, caller={"plan": None, "step": "s1", "source": "x"})
+    env = fixed_call["runs"][-1]["env"]
+    # plan と step だけを足し、値が None のキーと source は足さない（source は親の環境の値のまま）
+    assert (env["NDF_USAGE_STEP"], env.get("NDF_USAGE_PLAN"), env["NDF_USAGE_SOURCE"], env["FIXED_BASE"]) == ("s1", None, "inherited", "1")
+
+
+def test_call_claude_session_only_for_full_or_watch_without_resume(tmp_path, fixed_call, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/parent-cfg")
+    monkeypatch.delenv("NDF_USAGE_PLAN", raising=False)
+    s = {}
+    claude.call_claude("s", "p", None, str(tmp_path), 10, session=s)
+    assert s == {} and "--session-id" not in fixed_call["runs"][-1]["cmd"]  # 最小構成で watch 無し
+
+    s = {}
+    claude.call_claude("s", "p", None, str(tmp_path), 10, full=True, resume="r1", session=s)
+    assert s == {} and "--session-id" not in fixed_call["runs"][-1]["cmd"]  # resume のときは決めない
+
+    s = {}
+    claude.call_claude("s", "p", None, str(tmp_path), 10, full=True, child_env={"CLAUDE_CONFIG_DIR": "/cfg"}, session=s)
+    assert s == {"id": "fixed-session", "config": "/cfg"}
+    s = {}
+    claude.call_claude("s", "p", None, str(tmp_path), 10, full=True, child_env={"PATH": "/usr/bin"}, session=s)
+    assert s["config"] == str(Path.home() / ".claude")  # 置き換えた環境に無ければ既定の置き場
+    s = {}
+    claude.call_claude("s", "p", None, str(tmp_path), 10, full=True, child_env={"CLAUDE_CONFIG_DIR": "/cfg"}, session=s)
+    assert s == {"id": "fixed-session", "config": "/cfg"}
+    assert fixed_call["runs"][-1]["cmd"][-2:] == ["--session-id", "fixed-session"]
+
+    class Watch:
+        deadline = object()
+
+    s = {}
+    claude.call_claude("s", "p", None, str(tmp_path), 10, child_env={}, session=s, watch=Watch)
+    run = fixed_call["runs"][-1]
+    assert s == {"id": "fixed-session", "config": "/parent-cfg"}  # 空の child_env は偽なので親の環境から読む
+    assert "--no-session-persistence" not in run["cmd"] and run["cmd"][-2:] == ["--session-id", "fixed-session"]
+    assert run["extend"] is Watch.deadline and run["follow"] is True
+
+
+def test_call_claude_non_json_stdout(tmp_path, fixed_call):
+    fixed_call["proc"] = proc("plain text", 0, "")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["ok"], res["text"], res["usage"], res["model_usage"], res["cost"], res["turns"], res["session"]) == (
+        True,
+        "plain text",
+        {},
+        None,
+        None,
+        None,
+        None,
+    )
+    assert fixed_call["records"][-1][0] == {"result": "plain text", "is_error": False}
+    fixed_call["proc"] = proc("[1, 2]", 3, "boom")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["ok"], res["text"]) == (False, "[1, 2]") and fixed_call["records"][-1][1]["status"] == "error"
+    fixed_call["proc"] = proc("", 1, "x" * 7000 + "tail")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert res["text"] == ("x" * 7000 + "tail")[-claude.TAIL :] and not res["ok"]
+
+
+def test_call_claude_is_error_and_model_usage_not_dict(tmp_path, fixed_call):
+    fixed_call["proc"] = proc(json.dumps({"result": "", "is_error": True, "modelUsage": [1]}), 0, "err")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["ok"], res["text"], res["model_usage"], res["limit"], res["auth"], res["credit"]) == (False, "err", None, False, False, False)
+
+
+def test_call_claude_credit_low_wins_over_limit_and_auth(tmp_path, fixed_call):
+    fixed_call["proc"] = proc(json.dumps({"result": "Failed to authenticate. Credit balance too low", "is_error": True}), 1, "usage limit reached|1700000000")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["credit"], res["limit"], res["auth"], res["resets_at"]) == (True, False, False, None)
+
+
+def test_call_claude_limit_reads_reset_time(tmp_path, fixed_call):
+    fixed_call["proc"] = proc(json.dumps({"result": "Claude AI usage limit reached|1700000000", "is_error": True}), 1, "")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["limit"], res["auth"], res["credit"], res["resets_at"]) == (True, False, False, 1700000000.0)
+
+
+def test_call_claude_limit_seen_only_in_stdout_has_no_reset(tmp_path, fixed_call):
+    # 上限の判定は stdout も読むが、解除の時刻は result と stderr だけから読む（stdout が JSON でないときは result が stdout）
+    fixed_call["proc"] = proc(json.dumps({"result": "x", "is_error": True, "note": "usage limit reached|1700000000"}), 1, "")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["limit"], res["resets_at"]) == (True, None)
+
+
+def test_call_claude_ok_never_flags_failures(tmp_path, fixed_call):
+    fixed_call["proc"] = proc(json.dumps({"result": "Failed to authenticate; credit balance too low; usage limit reached|1700000000"}), 0, "")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["ok"], res["limit"], res["auth"], res["credit"], res["resets_at"]) == (True, False, False, False, None)
+
+
+@pytest.mark.parametrize(
+    "out",
+    [{"result": "Failed to authenticate. API Error: 401", "is_error": True}, {"result": "nope", "is_error": True, "api_error_status": 401}],
+)
+def test_call_claude_auth_failure(tmp_path, fixed_call, out):
+    fixed_call["proc"] = proc(json.dumps(out), 1, "")
+    res = claude.call_claude("s", "p", None, str(tmp_path), 10)
+    assert (res["ok"], res["auth"], res["limit"], res["credit"]) == (False, True, False, False)
+
+
+def test_call_claude_timeout_returns_timed_out(tmp_path, fixed_call):
+    fixed_call["proc"] = subprocess.TimeoutExpired(["claude"], 12.6)
+    res = claude.call_claude(prompts.SLOW_SYSTEM, "p", None, str(tmp_path), 10, caller={"step": "s1"})
+    assert isinstance(res, claude.ClaudeCall)
+    assert dict(res) == {
+        "ok": False,
+        "text": "打ち切り（13 秒）",
+        "usage": {},
+        "seconds": 13,
+        "kind": "slow",
+        "model_usage": None,
+        "timed_out": True,
+    }
+    data, kw = fixed_call["records"][0]
+    assert data == {} and (kw["status"], kw["seconds"], kw["kind"], kw["step"]) == ("timeout", 13, "slow", "s1")
+
+
+def test_call_claude_oserror_records_error_and_raises(tmp_path, fixed_call):
+    fixed_call["proc"] = FileNotFoundError("claude")
+    with pytest.raises(FileNotFoundError):
+        claude.call_claude("s", "p", None, str(tmp_path), 10, full=True)
+    data, kw = fixed_call["records"][0]
+    assert data == {} and (kw["status"], kw["kind"]) == ("error", "full") and isinstance(kw["seconds"], float)
