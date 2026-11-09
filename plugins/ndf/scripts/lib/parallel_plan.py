@@ -282,39 +282,60 @@ def repo_errors(lane: Lane) -> Optional[str]:
     return None
 
 
+def _validation_items(exc: ValidationError) -> list[dict]:
+    """検証の誤りを診断の行へ変える。規則の番号（`I<数>`）を持たない誤りは `form` とする。"""
+    items = []
+    for e in exc.errors():
+        rule = e["type"] if re.fullmatch(r"I\d+", e["type"]) else "form"
+        loc = ".".join(str(p) for p in e["loc"])
+        items.append({"level": "error", "rule": rule, "at": loc or None, "message": e["msg"]})
+    return items
+
+
+def _repo_items(plan: ParallelPlan) -> list[dict]:
+    """検証済みの計画の各レーンの `repo` の実体を見て、I20 の誤りの行を返す。"""
+    return [
+        {"level": "error", "rule": "I20", "at": f"lanes.{i}.repo", "message": err}
+        for i, ln in enumerate(plan.lanes)
+        if (err := repo_errors(ln))
+    ]
+
+
+def _overlap_items(plan: ParallelPlan, home: Optional[str]) -> list[dict]:
+    """触る場所が重なるレーンの組を I4 の警告の行にする。"""
+    return [
+        {
+            "level": "warning",
+            "rule": "I4",
+            "at": "lanes",
+            "message": f"触る場所が重なる: {'・'.join(ov['lanes'])}（{', '.join(ov['touches'])}）",
+            **ov,
+        }
+        for ov in touch_overlaps(plan, home)
+    ]
+
+
 def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
     `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。"""
     plans_cap, plans_note = max_plans()
     named_cap, named_note = named_limit()
-    items: list[dict] = []
     notes = [n for n in (plans_note, named_note) if n]
-    ctx = {"max_plans": plans_cap, "max_named": named_cap, "home": str(home) if home else None}
+    home_s = str(home) if home else None
+    ctx = {"max_plans": plans_cap, "max_named": named_cap, "home": home_s}
     try:
         plan = ParallelPlan.model_validate(data, context=ctx)
     except ValidationError as exc:
-        plan = None
-        for e in exc.errors():
-            rule = e["type"] if re.fullmatch(r"I\d+", e["type"]) else "form"
-            loc = ".".join(str(p) for p in e["loc"])
-            items.append({"level": "error", "rule": rule, "at": loc or None, "message": e["msg"]})
-    if plan is not None:
-        for i, ln in enumerate(plan.lanes):
-            if err := repo_errors(ln):
-                items.append({"level": "error", "rule": "I20", "at": f"lanes.{i}.repo", "message": err})
-    if plan is not None and any(it["level"] == "error" for it in items):
-        plan = None  # I20 の誤りがある計画は書かない・起動しない
-    if plan is not None:
-        for ov in touch_overlaps(plan, str(home) if home else None):
-            items.append(
-                {
-                    "level": "warning",
-                    "rule": "I4",
-                    "at": "lanes",
-                    "message": f"触る場所が重なる: {'・'.join(ov['lanes'])}（{', '.join(ov['touches'])}）",
-                    **ov,
-                }
-            )
+        return None, *_with_metrics(_validation_items(exc), plans_cap, named_cap, notes)
+    items = _repo_items(plan)
+    if items:
+        return None, *_with_metrics(items, plans_cap, named_cap, notes)  # I20 の誤りがある計画は書かない・起動しない
+    items = _overlap_items(plan, home_s)
+    return plan, *_with_metrics(items, plans_cap, named_cap, notes)
+
+
+def _with_metrics(items: list[dict], plans_cap: int, named_cap: int, notes: list[str]) -> tuple[list[dict], dict]:
+    """診断の行と、その件数・上限・注記の集計を組にする。"""
     metrics = {
         "errors": sum(1 for it in items if it["level"] == "error"),
         "warnings": sum(1 for it in items if it["level"] == "warning"),
@@ -322,7 +343,7 @@ def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[Para
         "max_named": named_cap,
         "notes": notes,
     }
-    return plan, items, metrics
+    return items, metrics
 
 
 # ---- 置き場と描画 ----
