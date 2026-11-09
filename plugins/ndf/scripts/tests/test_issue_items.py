@@ -161,7 +161,6 @@ def test_headings_in_a_fence_are_not_sections():
     assert ii.judge_body(body, ["bug"], {}, ii.load_definition())[1] == [ii.Gap("影響", "missing")]
 
 
-
 # --- judge_body の現状固定（リファクタリング前の振る舞い） ----------------------------------
 
 
@@ -224,6 +223,7 @@ def test_a_definition_without_the_kind_item_names_the_gap_kind():
     d = ii.load_definition()
     d.by_id.pop("kind")
     assert ii.judge_body(BUG, ["bug"], {}, d) == (None, [ii.Gap("種類", "kind")])
+
 
 # --- audit（受け入れ条件 13〜15・18、I9・I10） ----------------------------------------------
 
