@@ -55,7 +55,7 @@ def add_wait_args(m):
 def add_promote_args(pm):
     """promote だけが受ける、用意と照合の引数（#1529・#2104）。"""
     pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
-    pm.add_argument("--out", help="--prepare とリリース承認ゲートの停止で書く昇格の承認資料の置き場（既定は提示物の置き場）")
+    pm.add_argument("--out", help="--prepare とリリース承認ゲートの停止で書くリリースの承認資料の置き場（既定は提示物の置き場）")
     pin = pm.add_mutually_exclusive_group()
     pin.add_argument(
         "--expect-head-from",
@@ -69,7 +69,7 @@ def add_promote_args(pm):
     pin.add_argument(
         "--approved-from",
         metavar="資料",
-        help="昇格の承認資料。承認したコミットが PR の先端のときだけマージする（--gate-approved user に要る）",
+        help="リリースの承認資料。承認したコミットが PR の先端のときだけマージする（--gate-approved user に要る）",
     )
 
 
@@ -94,7 +94,7 @@ def _judge_rows(verdict):
 
 def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", approved_sha=None, out=None):
     """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。
-    approved_sha（昇格の Pull Request の先端。#2104）があれば、判断の表の先頭へ「承認したコミット」の行を置き、
+    approved_sha（リリースの Pull Request の先端。#2104）があれば、判断の表の先頭へ「承認したコミット」の行を置き、
     metrics.approved_sha と gate の items[].head にも載せる。out は承認資料の置き場（無ければ既定の置き場）。
     next_cmd は文字列か、書いた承認資料のパスを受けて打ち方を返す関数。"""
     info = info or {}
@@ -243,7 +243,7 @@ def _gate_head(info):
     try:
         return approved_commit.parse_sha(info.get("headRefOid"))
     except ValueError as e:
-        raise StepError(f"昇格の Pull Request の先端を読めないため承認資料を書かない: {e}", EXIT_UNREADABLE) from e
+        raise StepError(f"リリースの Pull Request の先端を読めないため承認資料を書かない: {e}", EXIT_UNREADABLE) from e
 
 
 def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False, moved_next=None):
@@ -287,11 +287,11 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate
     emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
 
 
-# --- promote（昇格の Pull Request。#1336） ------------------------------------
+# --- promote（リリースの Pull Request。#1336） ------------------------------------
 
 
 def _open_promote_pr(root, head, base):
-    """開いた昇格の Pull Request（head → base）の番号。無ければ None。"""
+    """開いたリリースの Pull Request（head → base）の番号。無ければ None。"""
     p = gh_parts.gh(["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number"], cwd=root)
     if p.returncode != 0:
         raise StepError(f"gh pr list が失敗: {p.stderr.strip()[:300]}")
@@ -303,29 +303,29 @@ def _open_promote_pr(root, head, base):
 
 
 def _find_or_create_promote_pr(root, head, base):
-    """昇格の Pull Request を探し、無ければ作る。(番号, 作ったか) を返す。昇格する変更が無ければ ok で終える。"""
+    """リリースの Pull Request を探し、無ければ作る。(番号, 作ったか) を返す。本番チャネルへ入れる変更が無ければ ok で終える。"""
     n = _open_promote_pr(root, head, base)
     if n is not None:
         return n, False
-    title = f"昇格: {head} → {base}"
+    title = f"リリース: {head} → {base}"
     body = f"{head} の変更を本番チャネル {base} へ入れる（merged-steps.py promote が作った）。マージはリリース承認ゲートの後に行う。"
     p = gh_parts.gh(["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body], cwd=root)
     if p.returncode != 0:
         err = (p.stderr or "").strip()
         if "No commits between" in err:
-            emit(result(TOOL, "ok", f"{head} から {base} へ昇格する変更が無い", [], {"pr": None, "target": base}))
+            emit(result(TOOL, "ok", f"{head} から {base} へ入れる変更が無い", [], {"pr": None, "target": base}))
         raise StepError(f"gh pr create が失敗: {err[:300]}")
     return int((p.stdout or "").strip().rstrip("/").rsplit("/", 1)[-1]), True
 
 
 def _prepare_promote(root, a, n, item):
-    """--prepare: 判定と承認資料を書き、昇格の Pull Request を用意した結果を出して終える。"""
+    """--prepare: 判定と承認資料を書き、リリースの Pull Request を用意した結果を出して終える。"""
     info = pr_state(root, n)
     verdict = delivery.judge_target(delivery.load_delivery(root), info.get("baseRefName") or a.base)
     path = approval_present(
         TOOL,
         f"promote-{n}",
-        title=f"#{n} の昇格（{a.head} → {a.base}。リリース承認ゲート）",
+        title=f"#{n} のリリース（{a.head} → {a.base}。リリース承認ゲート）",
         targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
         change=_change_text(info),
         judge=[approved_commit.material_row(_gate_head(info)), *_judge_rows(verdict)],
@@ -337,7 +337,7 @@ def _prepare_promote(root, a, n, item):
         result(
             TOOL,
             "ok",
-            f"昇格の Pull Request #{n} を用意した（{a.head} → {a.base}）",
+            f"リリースの Pull Request #{n} を用意した（{a.head} → {a.base}）",
             verdict.items + [item],
             {"pr": n, "verdict": verdict.value, "target": a.base},
             path,
@@ -350,15 +350,15 @@ def _pin_expect_head(a, reader, path, what):
     try:
         a.expect_head = reader(path)
     except ValueError as e:
-        raise StepError(f"{what}を読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
+        raise StepError(f"{what}を読めないため本番チャネルへ入れない: {e}", EXIT_UNREADABLE) from e
 
 
 def promote(a, cleanup):
-    """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、リリース承認ゲートの後にマージする。
+    """ベースブランチ（--head）から本番チャネル（--base）へのリリースの Pull Request を作り（あれば使い）、リリース承認ゲートの後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
     --expect-head-from があれば、最初に導入の確認の承認資料から確かめたコミットを読み、merge-when-green の
     --expect-head と同じ照合に使う。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる（照合を飛ばさない。#1529）。
-    --approved-from があれば、昇格の承認資料の承認したコミットを同じ照合に使い、先端が違えばリリース承認ゲートから
+    --approved-from があれば、リリースの承認資料の承認したコミットを同じ照合に使い、先端が違えばリリース承認ゲートから
     やり直す打ち方を next に載せる。--gate-approved user は --approved-from 無しでは受けない（#2104 の I3〜I5）。"""
     src = getattr(a, "expect_head_from", None)
     if src:
@@ -370,7 +370,7 @@ def promote(a, cleanup):
             result(
                 TOOL,
                 "stopped",
-                "--gate-approved user に照合の材料（--approved-from の昇格の承認資料）が無いため昇格しない",
+                "--gate-approved user に照合の材料（--approved-from のリリースの承認資料）が無いため本番チャネルへ入れない",
                 next=(
                     f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
                     "（プランなら run <プラン> --from promote から流し直し、リリース承認ゲートを取り直す）"

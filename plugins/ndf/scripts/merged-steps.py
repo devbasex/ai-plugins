@@ -21,7 +21,7 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェッ�
 最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
 CI を待たずにリリース承認ゲートで止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = リリース承認ゲート）。
-promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちでマージする（後片付けはしない）。
+promote: リリースの Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちでマージする（後片付けはしない）。
 --prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from は導入の確認の承認資料の確かめたコミットを --expect-head と同じ照合に使う（違えば head_moved で 1、読めなければ 2。どちらもマージせず、プランの handoff がリリース承認ゲートの by: mvv の記録を外して 10 を返し、リリース承認ゲートへ戻す。流し直しは run <プラン> --from verify。#1529）。リリース承認ゲートで止まるときは先端を「承認したコミット」として承認資料（--out）と metrics.approved_sha に載せ、--approved-from はその資料の承認したコミットを同じ照合に使う（--gate-approved user に要る。#2104）。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ `gh run rerun --job` で再実行し、
 再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が pending のままでも待たずにその結論で扱う。
@@ -456,9 +456,9 @@ def build_parser():
     pm = sub.add_parser(
         "promote",
         parents=[common_parser()],
-        help="昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、リリース承認ゲートの後にマージする",
+        help="リリースの Pull Request（ベースブランチ → 本番チャネル）を作り、リリース承認ゲートの後にマージする",
     )
-    pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
+    pm.add_argument("--head", required=True, help="本番チャネルへ入れるブランチ（ベースブランチ）")
     pm.add_argument("--base", required=True, help="本番チャネル")
     merge.add_promote_args(pm)
     merge.add_wait_args(pm)

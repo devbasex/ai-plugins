@@ -273,3 +273,38 @@ def test_board_without_either_option_still_reports_the_missing_option(board_with
 @pytest.mark.parametrize("old", ["配布（承認ゲート 2）", "リリース（承認ゲート 2）"])
 def test_old_phase_of_the_release_gate_reads_as_the_current_one(old):
     assert legacy_values.to_current("phase", old) == "リリース（リリース承認ゲート）"
+
+
+# ---------------- 本番チャネルへのマージのフェーズ名（#2748）----------------
+
+MERGE_PHASE = "リリース（本番チャネルへのマージ）"
+OLD_MERGE_PHASES = ["リリース（昇格）", "配布（昇格）"]
+
+
+@pytest.mark.parametrize("old", OLD_MERGE_PHASES)
+def test_old_phase_of_the_merge_to_the_production_channel_reads_as_the_new_one(old):
+    assert legacy_values.to_current("phase", old) == MERGE_PHASE
+    assert legacy_values.to_current("phase", MERGE_PHASE) == MERGE_PHASE
+
+
+def test_the_plan_of_the_merge_writes_the_new_phase():
+    from supervise_lib import delivery_templates
+
+    assert delivery_templates.PROMOTE_PHASE == MERGE_PHASE
+
+
+def test_queue_skips_the_pull_request_of_an_old_merge_plan_like_the_new_one(tmp_path):
+    items = []
+    for i, phase in enumerate([*OLD_MERGE_PHASES, MERGE_PHASE, "実装"]):
+        report = tmp_path / f"r{i}.md"
+        report.write_text(f"- フェーズ: {phase}\n- Pull Request: #{i + 1}\n", encoding="utf-8")
+        items.append({"result": "完了", "report": str(report)})
+    assert queue.queue_prs(items) == ["4"]
+
+
+def test_history_of_the_old_merge_phase_counts_for_the_new_phase(tmp_path):
+    hist = tmp_path / "h.jsonl"
+    rows = [{"phase": old, "step": "s", "seconds": i + 1} for i, old in enumerate(OLD_MERGE_PHASES)]
+    rows.append({"phase": MERGE_PHASE, "step": "s", "seconds": 3})
+    hist.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    assert slow_step.read_history(hist, MERGE_PHASE, "s") == [1.0, 2.0, 3.0]
