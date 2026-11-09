@@ -24,7 +24,7 @@
 | `grep -rn "モック" plugins/ndf/skills/design plugins/ndf/skills/development-workflow` が 0 件（要求の「今の定義」） | 実測 | 画面モックの書き方と置き場の定義が今は無い |
 
 要求と受け入れ条件は #2721 の本文にある（コピーは [issue-2721-requirements.md](issue-2721-requirements.md) ）。この文書は「どう作るか」だけを扱う。
-決定の記録は [issue-2721-design-decisions.md](issue-2721-design-decisions.md) に分けた。承認資料の一覧は [issue-2721-design-materials.md](issue-2721-design-materials.md) に分けた。
+決定の記録は [issue-2721-design-decisions.md](issue-2721-design-decisions.md) にある。承認資料の一覧は [issue-2721-design-materials.md](issue-2721-design-materials.md) にある。
 
 ## ドメインモデル
 
@@ -199,7 +199,7 @@ graph TB
 
 ## 承認資料の一覧
 
-[issue-2721-design-materials.md](issue-2721-design-materials.md) に分けた。
+[issue-2721-design-materials.md](issue-2721-design-materials.md) にある。
 
 ## 周辺システムとの関係
 
@@ -266,9 +266,11 @@ python3 design-materials.py links (--issue N... | --file PATH...) [--pr N] [--ou
 - `--issue` / `--file` の読み方は `design-survey.py` と同じである。`--issue` は HEAD の `issues/` から番号でつながる設計文書と仕様のコピーを読み、`--file` は worktree から読む。文書を読む部分は `lib/design_docs.py` を共有する
 - 一覧の表は `design/references/approval-materials.md` から読む（スクリプトからの相対パス）
 - 触る領域の行は、設計文書の「適用範囲」の節の `触る領域` で始まる箇条（`- **触る領域**: 画面・永続データ`）から読む。区切りは `・`・`、`・`,`。値 `無し` は該当時の資料が無いことを表す
-- 設計文書を分けたとき（本体の `issue-<番号>-design.md` と分割先の `issue-<番号>-design-<名前>.md`）は、まとまりの全ファイルを 1 つの設計文書として読む。資料の置き場の節はまとまりの全ファイルから探し、同じ見出しの節が複数あれば中身を持つ方（分割先へのリンクだけの節でない方）を採る。I2 の「本文を持つ」は、採った節で判定する。要旨の件数はまとまり全体で数え、`url` は採った節のファイルとアンカーで作る
-- 画面モックの表現方法は `project_decl.read_project_decl(root)` の `ui_mock` から読む。宣言は利用者が手で書くため、保存時の置き換え（`project-decl.py write`）を通っていないことがある。そこで `check` は読んだ `ui_mock` へ `has_secret` を掛け、秘密の形なら値を出さずに `ui_mock_secret` を挙げて終了コード 1 で終わる
+- 設計文書を分けたときは、まとまりの全ファイルを 1 つの設計文書として読む。まとまりは、本体の `issue-<番号>-design.md` と分割先の `issue-<番号>-design-<名前>.md` である。資料の置き場の節はまとまりの全ファイルから探し、同じ見出しの節が複数あれば中身を持つ方（分割先へのリンクだけの節でない方）を採る。I2 の「本文を持つ」は、採った節で判定する。要旨の件数はまとまり全体で数え、`url` は採った節のファイルとアンカーで作る
+- 画面モックの表現方法は `project_decl.read_project_decl(root)` の `ui_mock` から読む。宣言は利用者が手で書くため、保存時の置き換え（`project-decl.py write`）を通っていないことがある。そこで `check` は読んだ `ui_mock` へ `has_secret` を掛ける。秘密の形なら値を出さずに `ui_mock_secret` を挙げ、終了コード 1 で終わる
 - `check --secret-only` は設計文書も一覧の表も読まず、宣言の `ui_mock` の秘密の判定だけを行う。秘密の形なら `ui_mock_secret` で終了コード 1、宣言を読めなければ終了コード 2、それ以外（`ui_mock` が無い・不明を含む）は 0 で終わる。スプリントの設計のプランが、設計 Pull Request を出す `pr` のステップより前に打つ
+
+### `design-materials.py` の結果
 
 `check` の結果（`lib/step_result.py` の形の 1 行の JSON）:
 
@@ -382,7 +384,17 @@ sequenceDiagram
 
 図は実行する要素だけを描く。構成要素の表のうち参照の文書（`.md`）・生成物（スキーマと契約）・テスト・用語集は実行の順序を持たないため図に現れない。`project_lib/model.py` は `design-materials.py` が宣言を読むときに通る。
 
-スプリントの設計のプランでは、`--mode standard` と `--mode legacy-refactor` のとき、`rebuild` と `pr` の間に `materials-secret`（`design-materials.py check --secret-only`）を打つ。設計 Pull Request の push と cross-review の前に、手で書いた `ui_mock.location` の秘密を止めるためである。落ちれば `pr` へ進まずにプランを止め、「判断が要る」として人へ戻す（宣言を直すのは利用者で、共通原則の C1・C7 に当たる）。続けて、`--mode standard` のときだけ `survey-recheck` の後に `materials-check` を打つ。落ちれば `fix-materials`（直しは 1 回）→ `materials-recheck` を通す。その後の `materials-links` の出力を `gate` の入力に足す。`--mode legacy-refactor` では検査の 3 ステップを足さず、`materials-links` だけを足す。`light` / `operation` / `documentation` のプランは変えない（受け入れ条件 14）。`fix-materials` は欠けた節を書き、`ui_mock_undeclared` と `ui_mock_secret` は直さずに「判断が要る」と返す（宣言はプロジェクトの設定で、共通原則の C7 に当たる。`ui_mock_secret` は秘密にも触れる C1 に当たる）。
+スプリントの設計のプランに足すステップは、モードで決まる。`light` / `operation` / `documentation` のプランは変えない（受け入れ条件 14）。
+
+| ステップ | 置く位置 | 足すモード | 落ちたとき |
+| --- | --- | --- | --- |
+| `materials-secret`（`design-materials.py check --secret-only`） | `rebuild` と `pr` の間 | `standard`・`legacy-refactor` | `pr` へ進まずにプランを止め、「判断が要る」として人へ戻す（宣言を直すのは利用者で、共通原則の C1・C7 に当たる） |
+| `materials-check` | `survey-recheck` の後 | `standard` | `fix-materials`（直しは 1 回）→ `materials-recheck` を通す |
+| `materials-links` | 検査の後。出力を `gate` の入力に足す | `standard`・`legacy-refactor` | — |
+
+`materials-secret` は `pr` の前に置く。設計 Pull Request の push と cross-review の前に、手で書いた `ui_mock.location` の秘密を止めるためである。
+
+`fix-materials` は欠けた節を書く。`ui_mock_undeclared` と `ui_mock_secret` は直さずに「判断が要る」と返す。宣言はプロジェクトの設定で、共通原則の C7 に当たる。`ui_mock_secret` は秘密にも触れるため、C1 にも当たる。
 
 ## 非機能の実現方式
 
@@ -393,7 +405,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-[issue-2721-design-decisions.md](issue-2721-design-decisions.md) に分けた。
+[issue-2721-design-decisions.md](issue-2721-design-decisions.md) にある。
 
 ## テスト設計
 
@@ -422,6 +434,16 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | #2721 | 実装する | — | `plugins/ndf/skills/design/references/approval-materials.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/external-survey.md`、`plugins/ndf/skills/design/references/system-architecture.md`、`plugins/ndf/skills/design/references/interface-ui.md`、`plugins/ndf/skills/design/references/data-structure.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/scripts/design-materials.py`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/scripts/project_lib/merge.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
+## 未確認のまま残ること
+
+| 項目 | 内容 |
+| --- | --- |
+| 要否表の `standard` の列を指していた記述 | 列を外したとき、ほかの Skill と文書が「要否表の `standard`」を指していないか。実装の最初に `grep -rn "standard" plugins/ndf/skills/design` と参照のチェックで洗い出す |
+| 既存の設計文書 | `issues/` と `docs/specifications/` の設計文書は新しい節を持たない。書き直さない（要求の「含まない」）。検査は新しく書く設計文書だけに掛かる |
+| ai-plugins の `ui_mock` の値 | ai-plugins は Factory の画面を持つ。値は #2815 の設計で決めて宣言する（C7。設計承認ゲートで人が見る） |
+| 要旨の「最初の文の行」の読みやすさ | 節の書き出しが表や図のとき、要旨が意味を持たない。実装で実際の設計文書 3 件に `links` を打って確かめ、合わなければ規則を直す |
+| Factory の実行の担い手が `links` の結果を受け取る経路 | ステージの出力から読むか、ファイルで渡すか。#2815 の設計で決める |
+
 ## 出し直しの指摘への対応
 
 | 項目 | 指摘 | 対応 | 直した箇所・直せない理由 |
@@ -432,13 +454,3 @@ sequenceDiagram
 | lproc:3-1 | develop と衝突していて CI が 1 件も走っていない。develop を取り込んで衝突を解き、必須の検査をすべて通す | 直せない | 衝突は解いた: develop を取り込み、衝突した用語集（`docs/glossary/glossary.json` と生成する `docs/glossary.md`）は develop の内容にこの設計の 7 語を足して作り直した。取り込みで develop が廃止した、ループの 1 回を指す古い語が要求文書の 2 行に当たったため、課題 #2721 の本文を「ループの 1 回」へ直し、要求文書を本文から作り直した。取り込んだ後に develop が v10.27.49-dev.1 へ進んだため、もう一度取り込んだ（衝突なし。develop との差分はこの設計の 6 ファイルだけ）。手元では CI と同じ検査が通った（2026-11-09。用語集の検査 `glossary.py check --diff origin/develop --rules all` 当たりなし、`scripts/check-lint.sh` 違反なし、Skill の frontmatter の検査と指示書の検査が終了コード 0、pytest 12933 件成功・4 件スキップ、決定の突き合わせ `pr-body-decisions.sh check 2818` 一致）。pytest は開発ループの実行が持つ環境変数（`ANTHROPIC_API_KEY` など）を外して打った。付けたままでは、アカウントの切り替えを確かめるテストが手元の値を読んで落ちる。ただしこの工程は push しないため、CI の結果は未確認である。push の後に PR の工程が CI を待って確かめる |
 | lproc:3-2 | lproc:2-1 が満たされていない。PR 本文の「テスト」の節に、要求文書の検査の行（原因・打ち直した結果・#1502 への回し先）を足す | 直した | PR #2818 の本文の「テスト」の表に、要求文書の検査の行を足した。中身は lproc:2-1 の行のとおり。2026-11-09 に `gh pr view 2818` で行があることを確かめた。PR の工程が本文を作り直すときは、この行を残す |
 | lproc:3-3 | 設計文書と PR 本文の「指摘への対応」の表を実物の本文と一致させる。確かめていないものを「直した」と書かない | 直した | この表の各行の記載先を実物で確かめた（2026-11-09）。lproc:1-1 の決定 6 の記述は [決定の記録](issue-2721-design-decisions.md) の決定 6 に、lproc:2-2 の承認と知らせる 1 行は決定の記録と、この文書の入出力の契約・テスト設計にある。CI の結果は確かめていないため lproc:3-1 は「直せない」とした。PR 本文の同じ節は設計文書から写す節である。2026-11-09 の時点の PR 本文の表は lproc:2-2 までの 3 行で、lproc:3-1〜3-3 の行と lproc:2-1 の日付はまだ写っていない。push の後に PR の工程が `revise-note.py check` で写す |
-
-## 未確認のまま残ること
-
-| 項目 | 内容 |
-| --- | --- |
-| 要否表の `standard` の列を指していた記述 | 列を外したとき、ほかの Skill と文書が「要否表の `standard`」を指していないか。実装の最初に `grep -rn "standard" plugins/ndf/skills/design` と参照のチェックで洗い出す |
-| 既存の設計文書 | `issues/` と `docs/specifications/` の設計文書は新しい節を持たない。書き直さない（要求の「含まない」）。検査は新しく書く設計文書だけに掛かる |
-| ai-plugins の `ui_mock` の値 | ai-plugins は Factory の画面を持つ。値は #2815 の設計で決めて宣言する（C7。設計承認ゲートで人が見る） |
-| 要旨の「最初の文の行」の読みやすさ | 節の書き出しが表や図のとき、要旨が意味を持たない。実装で実際の設計文書 3 件に `links` を打って確かめ、合わなければ規則を直す |
-| Factory の実行の担い手が `links` の結果を受け取る経路 | ステージの出力から読むか、ファイルで渡すか。#2815 の設計で決める |
