@@ -124,11 +124,8 @@ def _form_labels(form: dict) -> list[str]:
     return [str(x).strip() for x in labels if str(x).strip()]
 
 
-def form_mismatches(rel: str, form: dict, definition: issue_items.Definition) -> list[dict]:
-    """フォーム 1 つの食い違い。受け持つ種類が 1 つに決まらなければ種類の食い違いだけを返す。"""
-    kind = issue_items.kind_of(_form_labels(form), definition)
-    if kind is None:
-        return [_mismatch(rel, "種類", "kind")]
+def _form_fields(rel: str, form: dict, definition: issue_items.Definition) -> tuple[dict, list[dict]]:
+    """body の欄を走査し、項目 ID ごとの required（重複は OR）と未知の欄の食い違いを返す。"""
     out, fields = [], {}
     for el in form.get("body") or []:
         label = ((el or {}).get("attributes") or {}).get("label") if isinstance(el, dict) else None
@@ -140,6 +137,15 @@ def form_mismatches(rel: str, form: dict, definition: issue_items.Definition) ->
             continue
         required = bool(((el.get("validations") or {}).get("required")))
         fields[it.id] = fields.get(it.id, False) or required
+    return fields, out
+
+
+def form_mismatches(rel: str, form: dict, definition: issue_items.Definition) -> list[dict]:
+    """フォーム 1 つの食い違い。受け持つ種類が 1 つに決まらなければ種類の食い違いだけを返す。"""
+    kind = issue_items.kind_of(_form_labels(form), definition)
+    if kind is None:
+        return [_mismatch(rel, "種類", "kind")]
+    fields, out = _form_fields(rel, form, definition)
     for it in definition.required_sections(kind):
         if it.id not in fields:
             out.append(_mismatch(rel, it.name, "missing"))
