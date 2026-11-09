@@ -138,5 +138,6 @@
 | [ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) | 並列の計画のレーンの本番のステージをリリースの経路ごとに組み、手で置き換えずに流すこと、リリースの依頼の課題の一覧をプランの課題だけに持つ課題の差し込み（{plan_issues}）、設計承認ゲートで外した課題を続きのプランから外す常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel.md が正 |
 | [ndf-sprint-mvv-vet-reuse.md](ndf-sprint-mvv-vet-reuse.md) | スプリント MVV の照合で、照合の入力が同じなら最新の「従う」の判定を再利用する常に成り立つ条件・照合の記録の形（input_sha256・reused_from）・決定の理由・テスト観点。手順は development-workflow の references/pace.md が正 |
 | [ndf-parallel-other-repo-lanes-and-outside-plan.md](ndf-parallel-other-repo-lanes-and-outside-plan.md) | 別のリポジトリのレーン（計画の所在の一覧・レーンの `repo`・問いの往復・自分のリポジトリでのリリース）、計画の外のセッションの起動の判定と例外の起動、レーン数の上限（`relay.py cap`）、動いている計画のレーンの追加と書き換え（`parallel.py lane`）。手順は `development-workflow` の `references/parallel.md` が正 |
+| [ndf-relay-api-keys.md](ndf-relay-api-keys.md) | 登録済み API キー（サブスクリプションの API クレジット）で supervise.py の worker の claude -p を動かす仕組みの常に成り立つ条件・登録簿と状態の形・副命令の契約・決定と理由（#2855）。使い方は development-workflow の references/relay-accounts.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
