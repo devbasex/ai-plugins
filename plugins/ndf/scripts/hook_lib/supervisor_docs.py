@@ -92,9 +92,7 @@ def candidates(ev: pl.Event) -> list[Path]:
     return out
 
 
-TAIL = (
-    "版の違う規約で worker の起動指示を組まないためである。止めるなら " + ENV + "=0。"
-)
+TAIL = "版の違う規約で worker の起動指示を組まないためである。止めるなら " + ENV + "=0。"
 
 
 def _read_reason(hit: Path, rel: Path, own: Path) -> str:
@@ -102,9 +100,7 @@ def _read_reason(hit: Path, rel: Path, own: Path) -> str:
     head = f"読み込まれたプラグインの外の規約の文書 {hit} を読もうとした。"
     if inner.exists():
         return f"{head}読み込まれたプラグインの同じ文書 {inner} を読み直す。{TAIL}"
-    return (
-        f"{head}読み込まれたプラグイン（{own}）のこの版には同じ文書が無い。{own / 'skills'} の下から規約の文書を探して読む。{TAIL}"
-    )
+    return f"{head}読み込まれたプラグイン（{own}）のこの版には同じ文書が無い。{own / 'skills'} の下から規約の文書を探して読む。{TAIL}"
 
 
 def _bash_reason(hits: list[tuple[Path, Path]], own: Path) -> str:
