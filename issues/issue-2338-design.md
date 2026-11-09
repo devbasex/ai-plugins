@@ -10,7 +10,7 @@
 
 - **働く範囲**: NDF のリリース対象の実行の核を通るエントリポイントすべてと、移す 2 ファイルである。核は `plugins/ndf/scripts/lib/run_core.py`、2 ファイルは `lib/monitor_loop.py`・`check-trigger.py` である。利用先のリポジトリでも同じ書き口が動く
 - **プロジェクトごとに違うもの**: 無い。記録の置き場の根は利用者の根（`lib/state_home.py` の `user_home`）から取り、リポジトリごとの値は置き場のパスの 1 階層（`<所有者>__<リポジトリ>`）にだけ現れる。出力先は動く場所（手元か Factory か）で変わるため、リポジトリの設定ではなく環境変数で受ける（決定 4）
-- **当たるモード**: `standard`。柱 P1（#2337）の核を拡張する柱である。実装は 1 スプリント・Pull Request 2 本（[issue-2338-design-delivery.md](issue-2338-design-delivery.md) の「Pull Request の分け方」）に収める。**実装は #2337 の核が develop に入った後に始める**（2026-11-09 の時点で PR 2786 がマージ済み）
+- **当たるモード**: `standard`。柱 P1（#2337）の核を拡張する柱である。実装は 1 スプリント・Pull Request 2 本に収める。分け方は [issue-2338-design-delivery.md](issue-2338-design-delivery.md) の「Pull Request の分け方」にある。**実装は #2337 の核が develop に入った後に始める**（2026-11-09 の時点で PR 2786 がマージ済み）
 
 ## あるべき姿の根拠
 
@@ -91,8 +91,13 @@
 
 外部の調査は [issue-2338-design-research.md](issue-2338-design-research.md) にある。複数のプロセスに対応したログの出力・形式と相関・収集と保管の既存の仕組み
 を、8 つの観点で比べた。観点は、並行の書き込みの安全さ・プロセスの親子と別のコンテナ・中断に強いか・依存の重さ・出力先の切り替え・
-保管と寿命・秘密の伏せ方・運用の実績である。手元でロックして書く機構（filelock・portalocker・SQLite・DuckDB・LMDB）と受け手へ送る機構
-（syslog・Fluent Bit の forward・Vector の socket・OpenTelemetry Collector・Redis Streams）も比べ、3 つの実測を添えた。候補は合わせて 26 件である。
+保管と寿命・秘密の伏せ方・運用の実績である。次の 2 つの機構も比べ、3 つの実測を添えた。候補は合わせて 26 件である。
+
+| 機構 | 比べた候補 |
+| --- | --- |
+| 手元でロックして書く機構 | filelock・portalocker・SQLite・DuckDB・LMDB |
+| 受け手へ送る機構 | syslog・Fluent Bit の forward・Vector の socket・OpenTelemetry Collector・Redis Streams |
+
 結論は次の 3 つである。
 
 | 層 | 採るもの | 自前で作るもの |
@@ -464,7 +469,11 @@ stateDiagram-v2
 
 ## 2 ファイルの直し方・Pull Request の分け方・非機能の実現方式
 
-監視のループ（#2059）と検査のトリガー（#2300）の直し方、Pull Request 2 本の分け方、非機能の実現方式は [issue-2338-design-delivery.md](issue-2338-design-delivery.md) にある。
+次の 3 つは [issue-2338-design-delivery.md](issue-2338-design-delivery.md) にある。
+
+- 監視のループ（#2059）と検査のトリガー（#2300）の直し方
+- Pull Request 2 本の分け方
+- 非機能の実現方式
 
 ## 決定の記録
 

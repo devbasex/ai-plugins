@@ -1,6 +1,6 @@
 # #2338 の設計: 2 ファイルの直し方・Pull Request の分け方・非機能の実現方式
 
-設計文書の本体は [issue-2338-design.md](issue-2338-design.md) にある。決定の番号は [issue-2338-design-decisions.md](issue-2338-design-decisions.md) を、不変条件の番号 `I<数>` は本体の「不変条件」の表を指す。
+設計文書の本体は [issue-2338-design.md](issue-2338-design.md) にある。決定の番号は [issue-2338-design-decisions.md](issue-2338-design-decisions.md) を指す。不変条件の番号 `I<数>` は本体の「不変条件」の表を指す。
 
 ## 2 ファイルの直し方
 

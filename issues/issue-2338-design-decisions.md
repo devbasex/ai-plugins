@@ -1,6 +1,6 @@
 # #2338 の設計: 決定の記録
 
-設計文書の本体は [issue-2338-design.md](issue-2338-design.md) にある。番号 `STD<数>`・`PRD<数>`・`LIB<数>`・`MSR<数>` は [issue-2338-design-research.md](issue-2338-design-research.md) の「外部の調査」の表を指す。
+設計文書の本体は [issue-2338-design.md](issue-2338-design.md) にある。番号 `STD<数>`・`PRD<数>`・`LIB<数>`・`MSR<数>` は外部の調査の表を指す。外部の調査は [issue-2338-design-research.md](issue-2338-design-research.md) にある。
 
 ## 決定の記録
 
@@ -13,7 +13,7 @@
 
 自前で作るのは、ファイルの出力先の `Handler` 1 つである。Python の公式の手引き（LIB1）は、複数のプロセスから 1 ファイルへ書く道の 1 つに、
 書き込みを直列化するハンドラを自分で書く形を挙げる。この `Handler` はその道に当たる。手引きの例の `multiprocessing` の `Lock` は
-`subprocess` で起こした子へ届かないため、直列化には `fcntl.flock` を使う。記録のファイルを `O_RDWR|O_APPEND` で開き、`fcntl.flock(LOCK_EX)` の中で 1 行の全バイトを
+`subprocess` で起こした子へ届かないため、直列化には `fcntl.flock` を使う。記録のファイルは `O_RDWR|O_APPEND` で開く。`fcntl.flock(LOCK_EX)` の中で 1 行の全バイトを
 書き切るまで `os.write` を呼ぶ（STD4・STD5）。書き切れないときは、排他を持ったまま追記前の長さへ戻す。強制終了で残った書きかけの行は、
 次に書く者が改行で閉じる（決定 14）。行の形は #2335 の JSON Lines（STD1）のままにし、親子の関係を `run_id` と `parent_id` で持つ。
 この 2 つは OpenTelemetry の TraceId と SpanId（STD2）と同じ役割を持つ。OpenTelemetry へ送る出力先は、送るときに `trace_id`・`span_id`（STD6）へ写す。
@@ -41,8 +41,8 @@
 | journald（PRD4）へ書く | 手元のコンテナに journald が無い |
 
 `fcntl` を import してよいのは `lib/locks.py` だけである（構造の検査 `scripts/check-script-structure.py` の I14）。`lib/locks.py` は filelock を要するため、
-`run_log.py` は読まない。`run_log.py` が `fcntl` を直に使う許可を `scripts/script-structure-allow/` に置き、理由に「標準ライブラリだけで書く・filelock の遅さ」を書く
-（前例は `lib/state_home.py` の許可）。
+`run_log.py` は読まない。`run_log.py` が `fcntl` を直に使う許可を `scripts/script-structure-allow/` に置く（前例は `lib/state_home.py` の許可）。
+許可の理由には「標準ライブラリだけで書く・filelock の遅さ」を書く。
 
 - 作り方: ライブラリやサービスを使う・自前で作る
 - 比べた候補: STD1 / STD2 / STD4 / STD5 / STD6 / LIB1 / LIB2 / LIB3 / LIB4 / LIB5 / LIB6 / LIB7 / LIB8 / LIB9 / LIB10 / LIB11 / LIB12 / PRD4 / PRD5 / PRD6 / PRD7
@@ -54,7 +54,7 @@
 Fluent Bit の入力 `tail` は、1 ファイルの読み込みの領域の既定が 32k で、超える行に当たるとそのファイルの監視をやめる（PRD2）。上限を改行を含めて
 32,000 バイトに置けば、Fluent Bit も Vector（既定 102,400 バイト、PRD3）も既定の設定のまま記録のファイルを後から集められる。CloudWatch Logs の
 1 イベントの上限 1,024 KB（PRD1）にも収まる。手元で測った行の最大は、プランの状態の記録で 570 バイト、使用量の帳簿で 1,929 文字（UTF-8 で
-多くとも 5,787 バイト）であり、上限はその 5 倍を超える。通常の行は全文ファイルを作らずに済み、外部コマンドの失敗の出力のような長い理由だけが移る。
+多くとも 5,787 バイト）である。上限はその 5 倍を超える。通常の行は全文ファイルを作らずに済み、外部コマンドの失敗の出力のような長い理由だけが移る。
 移す単位は行ではなく文字列にし、移した値の位置へ参照（パス・文字数・sha256）を置く。行の残りの鍵は行に残り、`grep` と `jq` で行を絞れる。
 値は上限の宣言（`contracts/limits.json` の `run-log.line`）に置く。`limits.py` が持てる値に `bytes` を足す。
 
