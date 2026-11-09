@@ -562,7 +562,7 @@ def parallel_workflow(main: str, name: str) -> dict:
             if run.pending and not run.hold.plan:  # 計画全体の答え待ちの停止の間は新しいリリースを組まない（I4）
                 run.open_release()
         if not run.stop and _run_finished(run) and (out := _finish_or_hold(run, main, name)) is not None:
-            return out
+            return run.save() or out  # 閉じた計画は作り直さないため、最後の答えをチェックポイントに残して終える
         run.receive(durable.recv("inbox", wait if run.current is None else min(wait, 30)), "inbox")
         if run.current is not None:
             run.receive(durable.recv("resume", min(wait, 30)), "resume")

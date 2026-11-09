@@ -142,6 +142,24 @@ def test_rebuilding_a_legacy_plan_skips_rows_before_the_first_opened_row(tmp_pat
     assert plg.restored_counts(got)["requests"] == 1
 
 
+def test_start_of_a_legacy_plan_counts_none_of_the_rows_before_the_opened_row(tmp_path):
+    """台帳の無い計画の `start` は、これから足す `opened` より前の行（戻さない依頼と問い）を戻す数に入れない。"""
+    _add(tmp_path, _req(1))
+    _add(tmp_path, {"kind": "ask", "id": "la-q1", "lane": "la"})
+    got = plg.restore(tmp_path, "p1", opening=True)
+    assert got["rows"] == [] and plg.restored_counts(got)["requests"] == 0 and plg.restored_counts(got)["questions"] == 0
+
+
+def test_the_checkpoint_masks_credentials_like_the_ledger(tmp_path):
+    """I12: 耐久ワークフロー自身が作る問い・リリースの理由も、チェックポイントへ書く前に伏せる。"""
+    token = "https://x-access-token:ghp_abcdefghijklmnop@github.com/o/r"
+    plg.save_checkpoint(
+        tmp_path, "p1", {"offset": 0, "unread": [], "published": {"notice-1": {"reason": token}}, "questions": [{"text": token}]}
+    )
+    text = plg.checkpoint_path(tmp_path, "p1").read_text()
+    assert "ghp_abcdefghijklmnop" not in text and "***" in text and plg.load_checkpoint(tmp_path, "p1")[0]["offset"] == 0
+
+
 def test_rows_of_an_unknown_form_are_kept_and_reported(tmp_path):
     """条件 12・I5: 知らない形の行は状態へ反映せずに残り、件数と依頼の id が出る。読める版では反映する。"""
     _add(tmp_path, _req(1))
@@ -173,6 +191,15 @@ def test_a_waiting_request_missing_from_the_ledger_is_an_orphan(tmp_path):
     _add(tmp_path, _req(1))
     rep = plg.ledger_report(tmp_path, "p1", [("la", _req(1)["id"]), ("lb", "lb-q9")])
     assert rep["orphans"] == ["lb-q9"]
+
+
+def test_a_waiting_request_written_before_the_opened_row_is_an_orphan(tmp_path):
+    """条件 14: 開く前の行の依頼は作り直しで戻らないため、待ちは台帳に在っても orphans に出る。"""
+    _add(tmp_path, _req(1))
+    _ledger(tmp_path, "opened")
+    _add(tmp_path, _req(2))
+    rep = plg.ledger_report(tmp_path, "p1", [("la", _req(1)["id"]), ("la", _req(2)["id"])])
+    assert rep["orphans"] == [_req(1)["id"]]
 
 
 def _ledger(main, *kinds):
@@ -239,3 +266,17 @@ def test_rebuild_and_open_rows(tmp_path):
     plg.open_run(tmp_path, "p1", tmp_path / "x.retired-1")
     assert [r["key"] for r in plg.read_ledger_rows(tmp_path, "p1").rows if r["kind"] == "rebuilt"] == ["rebuilt:1", "rebuilt:2"]
     assert plg.restore(tmp_path, "p1")["rebuilds"] == 2
+
+
+def test_events_of_reads_the_checkpoint_once_for_all_missing_keys(tmp_path, monkeypatch):
+    """耐久の記録に無いイベントの控えは、呼び出しごとにチェックポイントを 1 回だけ読んで引く（決定 6）。"""
+    import parallel_lane as pl
+
+    plg.save_checkpoint(
+        tmp_path, "p1", {"offset": 0, "unread": [], "published": {"answer-a": {"result": "ok"}, "answer-b": {"result": "ng"}}}
+    )
+    reads = []
+    real = plg.load_checkpoint
+    monkeypatch.setattr(plg, "load_checkpoint", lambda *a: reads.append(a) or real(*a))
+    got = pl.events_of(tmp_path, "p1", ["answer-a", "answer-b", "answer-c"])
+    assert got == [{"result": "ok"}, {"result": "ng"}, None] and len(reads) == 1

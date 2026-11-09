@@ -168,17 +168,24 @@ def load_checkpoint(main: Path, name: str) -> tuple[Optional[dict], Optional[str
 
 
 def save_checkpoint(main: Path, name: str, state: dict) -> None:
-    jsonio.write_atomic(pp.plan_dir(Path(main), name) / "checkpoint.json", {"v": VERSION, **state})
+    """チェックポイントを書く。耐久ワークフロー自身が作る問い・リリースの理由も、台帳と同じく認証情報を伏せる（I12）。"""
+    jsonio.write_atomic(pp.plan_dir(Path(main), name) / "checkpoint.json", {"v": VERSION, **_redact(state)})
 
 
-def restore(main: Path, name: str) -> dict:
+def first_opened(rows: list[dict], default: int = 0) -> int:
+    """最初の `opened` の行の位置。それより前の行は台帳を読まない途中の記録（古い耐久ワークフロー）が処理したもので、戻さない。"""
+    return next((r["_pos"] for r in rows if r["kind"] == "opened"), default)
+
+
+def restore(main: Path, name: str, opening: bool = False) -> dict:
     """作り直しの材料: チェックポイントの状態・その後の行（と読める版で分かった `unread` の行）・作り直しの回数・壊れた行数。
 
     チェックポイントが無ければ最初の `opened` の行から読む。それより前の行は台帳を読まない途中の記録
-    （古い耐久ワークフロー）がすでに処理したもので、戻さない（設計の「それまでの依頼と問いは戻らない」）。"""
+    （古い耐久ワークフロー）がすでに処理したもので、戻さない（設計の「それまでの依頼と問いは戻らない」）。
+    `opening` は `opened` の行をこれから末尾へ足す（台帳の無い計画の `start`）ことを表し、今ある行を戻さない。"""
     cp, warning = load_checkpoint(main, name)
     every = read_ledger_rows(main, name, 0)
-    opened = next((r["_pos"] for r in every.rows if r["kind"] == "opened"), 0)
+    opened = first_opened(every.rows, every.next if opening else 0)
     offset = int(cp.get("offset") or 0) if cp else opened
     late = [r for r in every.rows if r["_pos"] >= offset]
     found, still = read_at(main, name, list((cp or {}).get("unread") or []))
@@ -228,10 +235,15 @@ def accepts(state: str) -> bool:
     return state in ("running", "lost")
 
 
-def published(main: Path, name: str, key: str):
-    """チェックポイントに控えた答え・知らせ・範囲のイベント（作り直しの前に立てたもの。決定 6）。無ければ None。"""
+def published_events(main: Path, name: str) -> dict:
+    """チェックポイントに控えた答え・知らせ・範囲のイベント（作り直しの前に立てたもの。決定 6）の全部。"""
     cp, _ = load_checkpoint(main, name)
-    return ((cp or {}).get("published") or {}).get(key)
+    return dict((cp or {}).get("published") or {})
+
+
+def published(main: Path, name: str, key: str):
+    """`published_events` の 1 つ。無ければ None。"""
+    return published_events(main, name).get(key)
 
 
 def pending_questions(main: Path, name: str) -> list[dict]:
@@ -265,7 +277,8 @@ def ledger_report(main: Path, name: str, waiting: list[tuple[str, str]]) -> dict
         out.update(unknown=len(got.skipped), unknown_ids=[i for i in ids if i])
     if got.broken:
         out["broken"] = got.broken
-    have = {r["id"] for r in got.rows}
+    since = first_opened(got.rows)  # 開く前の行の依頼は作り直しで戻らないため、待ちは orphans に出す
+    have = {r["id"] for r in got.rows if r["_pos"] >= since}
     if orphans := sorted({rid for _, rid in waiting if rid not in have}):
         out["orphans"] = orphans
     return out

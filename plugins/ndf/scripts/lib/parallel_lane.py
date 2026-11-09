@@ -269,7 +269,8 @@ def events_of(main: Path, name: str, keys: list[str]) -> list:
                 got = [c.get_event(workflow_id(name), k, timeout_seconds=0) for k in keys]
         except durable.DurableError:
             pass
-    return [ev if ev is not None else plg.published(main, name, k) for ev, k in zip(got, keys)]
+    kept = plg.published_events(main, name) if None in got else {}  # チェックポイントは 1 回だけ読む
+    return [ev if ev is not None else kept.get(k) for ev, k in zip(got, keys)]
 
 
 def lane_request_id(state: Path, lane: str) -> str:

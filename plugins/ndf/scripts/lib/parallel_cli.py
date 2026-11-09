@@ -47,7 +47,11 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
     if status is None:
         px.manual_or_none(main, plan, reply)
     marked = pr_run.mark_organizer(main, a.name)  # run.pid の死んだ途中の計画は step_init を流し直さないため、ここで付ける
-    rebuild = {"rebuilt": True, "restored": plg.restored_counts(plg.restore(main, a.name))} if state in ("lost", "legacy") else {}
+    rebuild = (
+        {"rebuilt": True, "restored": plg.restored_counts(plg.restore(main, a.name, opening=state == "legacy"))}
+        if state in ("lost", "legacy")
+        else {}
+    )
     try:  # 台帳を書けない置き場では run を起動しない（E1）
         rid = os.environ.get("NDF_RELAY_NAME") or ""
         plg.append_ledger_row(
