@@ -112,17 +112,25 @@ def read_check_kinds(body: str) -> dict[int, Check]:
     head = [c.strip() for c in found[0].header]
     if any(h not in head for h in CHECKS_HEAD):
         return {}
-    ni, ki, mi = (head.index(h) for h in CHECKS_HEAD)
+    cols = tuple(head.index(h) for h in CHECKS_HEAD)
     out: dict[int, Check] = {}
     for row in found[0].rows:
-        cs = [c.strip() for c in row]
-        num, kind, means = re.match(r"^(\d+)", cs[ni]), cs[ki], cs[mi].strip("`").strip()
-        if not num or kind not in KINDS:
-            continue
-        if kind == PRE_MERGE and (not means or means == NO_MEANS):
-            continue
-        out[int(num.group(1))] = Check(kind, "" if kind == POST_RELEASE else cs[mi])
+        parsed = _parse_check_row(row, cols)
+        if parsed is not None:
+            out[parsed[0]] = parsed[1]
     return out
+
+
+def _parse_check_row(row, cols) -> tuple[int, Check] | None:
+    """確認表の 1 行を (条件の番号, Check) に解く。番号・区分が読めない行と、手段の無い `マージ前` の行は None。"""
+    ni, ki, mi = cols
+    cs = [c.strip() for c in row]
+    num, kind, means = re.match(r"^(\d+)", cs[ni]), cs[ki], cs[mi].strip("`").strip()
+    if not num or kind not in KINDS:
+        return None
+    if kind == PRE_MERGE and (not means or means == NO_MEANS):
+        return None
+    return int(num.group(1)), Check(kind, "" if kind == POST_RELEASE else cs[mi])
 
 
 def pre_merge_numbers(body: str) -> frozenset:
