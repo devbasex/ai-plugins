@@ -1,10 +1,10 @@
-"""開発ループの選定で課題を外す理由: 判断待ち・保留・前提の実装待ち・周回の除外・周回の中の起票・容量。"""
+"""開発ループの選定で課題を外す理由: 判断待ち・保留・前提の実装待ち・ループの 1 回の除外・ループの 1 回の中の起票・容量。"""
 
 from __future__ import annotations
 
 from sprint_loop_record import OVER_SCALE, Env, pending_issues
 
-PENDING_REASON = "保留の周回の課題"
+PENDING_REASON = "保留したループの 1 回の課題"
 PRODUCTION_REASON = "設計 PR の宛先が本番（リリース承認ゲートで人がマージする）"
 
 
@@ -43,10 +43,10 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
     for e in rec.get("excluded", []):
         if e["number"] == n and e.get("lap") == lap_n:
             return e["reason"]
-    if row.get("prerequisites"):  # 前提の課題が閉じるまで選ばない（同じ周回に選ばれていても外す。#2604）
+    if row.get("prerequisites"):  # 前提の課題が閉じるまで選ばない（同じループの 1 回に選ばれていても外す。#2604）
         return prerequisite_reason(row)
     if n in lap_created:
-        return "周回の中で起票された（次の周回の棚卸しの後に選ぶ）"
+        return "ループの 1 回の中で起票された（ループの次の 1 回の棚卸しの後に選ぶ）"
     if row.get("size") == OVER_SCALE:
         return "容量（尺度を超える）"
     return None

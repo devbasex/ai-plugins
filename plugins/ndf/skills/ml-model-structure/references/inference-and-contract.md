@@ -82,9 +82,9 @@ SageMaker の `model_data` (tar.gz) には**モデル成果物のみ**を入れ�
 ローカルとコンテナで import 文を共通化するため、`vN/inference/tests/conftest.py` で path を相対計算する:
 
 ```python
-_HERE  = os.path.dirname(__file__)      # vN/inference/tests
-_INFER = os.path.dirname(_HERE)         # vN/inference
-_V    = os.path.dirname(_INFER)         # vN  (features.py 同梱)
+_HERE = os.path.dirname(__file__)  # vN/inference/tests
+_INFER = os.path.dirname(_HERE)  # vN/inference
+_V = os.path.dirname(_INFER)  # vN  (features.py 同梱)
 for p in (_V, _INFER, _HERE):
     sys.path.insert(0, p)
 RESULTS_DIR = os.path.join(_V, "train", "results")

@@ -350,7 +350,7 @@ def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code,
 
 
 def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
-    """開発ループと同じコマンドで実物の開発版のプランを組み、周回の行を返す（dev_plan・prod_plan を持つ）。"""
+    """開発ループと同じコマンドで実物の開発版のプランを組み、ループの 1 回の行を返す（dev_plan・prod_plan を持つ）。"""
     ndf = world.repo / ".ndf"
     (ndf / "supervise.json").write_text((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
     auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
@@ -401,7 +401,7 @@ def test_loop_plan_without_dev_takes_the_next_free_version(tmp_path, world):
 
 
 def test_loop_plan_without_dev_redecides_on_a_rerun(tmp_path, world, monkeypatch):
-    """受け入れ条件 4: 記録の版を別のスプリントが先に出すと、周回を止めずに決め直す。"""
+    """受け入れ条件 4: 記録の版を別のスプリントが先に出すと、ループの 1 回を止めずに決め直す。"""
     lap = looped(tmp_path, world)
     plan = Path(lap["dev_plan"])
     fill(plan)

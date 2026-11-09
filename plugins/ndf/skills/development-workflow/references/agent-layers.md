@@ -2,9 +2,10 @@
 
 **工程を 3 層へ出し、2 つの承認ゲート以外を人間の入力なしで通す。** 人間と対話しているセッション
 （conductor）がフェーズごとにプラン（`supervise.py`）をキューで流し、プランが 1 つの作業を worker
-（毎回新しい `claude -p`）へ出す。**既定はプランである。** プランのテンプレートが無いフェーズと、テンプレートに要る
-設定が無いときだけ、conductor はサブエージェント（supervisor）を起動し、supervisor が 1 つの作業を
-サブエージェント（worker）へ出す（下の「プランで流すか supervisor で回すか」）。
+（毎回新しい `claude -p`）へ出す。**supervisor の役割は `supervise.py` が主に担い、`supervise.py` で対応できないとき
+（プランの雛形が無いときなど）だけ、supervisor のサブエージェント（`ndf:supervisor`）が代行する。** そのときは
+conductor が代行のサブエージェントを起動し、代行が 1 つの作業をサブエージェント（worker）へ出す（下の「プランで流すか
+supervisor で回すか」）。
 
 **`/ndf:development-workflow` を呼べば 3 層へ出す。** 人がその場にいて指示を変えたいときは、
 conductor へ伝えれば次のフェーズから反映する。
@@ -19,7 +20,7 @@ conductor へ伝えれば次のフェーズから反映する。
 | 層 | 何者か | 人間へ問えるか | 起動する相手 | 持たないもの |
 | --- | --- | --- | --- | --- |
 | conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | プラン（キュー）。テンプレートの無いフェーズだけ supervisor | 工程 Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
-| supervisor | 1 つのフェーズ（連続する工程のグループ）を通す。プランで流すときは `supervise.py` が代わりを務め、テンプレートの無いフェーズだけサブエージェントが務める | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
+| supervisor | 1 つのフェーズ（連続する工程のグループ）を通す役割。`supervise.py` が主に担い、プランの雛形が無いなど対応できないフェーズだけサブエージェント（`ndf:supervisor`）が代行する | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント | 問えない | 起動しない。**別のサブエージェントを起動しない** | 人間への問い、進捗記録、収束の判定、設計の決定 |
 
 **worker は葉である。** 深さ 3（worker がさらに起動する形）は実測していない。

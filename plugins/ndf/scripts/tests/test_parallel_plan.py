@@ -1,4 +1,4 @@
-"""並列の計画の検査と作成（#2436 の受け入れ条件 1〜3、I1〜I5・I19）と、統括役の数え方（受け入れ条件 7、I13）。"""
+"""並列の計画の検査と作成（#2436 の受け入れ条件 1〜3、I1〜I5・I19）と、リレーハブの数え方（受け入れ条件 7、I13）。"""
 
 from __future__ import annotations
 
@@ -154,7 +154,7 @@ def test_run_outside_wrapper_returns_manual_lines(tmp_path, monkeypatch):
     assert [i["lane"] for i in res["items"]] == ["lroot", "lflow", "lfac"]
 
 
-# ---- 統括役の数え方（I13） ----
+# ---- リレーハブの数え方（I13） ----
 
 
 def _w(name, role=None):

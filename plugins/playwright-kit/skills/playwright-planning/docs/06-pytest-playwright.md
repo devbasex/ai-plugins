@@ -80,6 +80,7 @@ addopts = "--headed --browser firefox --tracing retain-on-failure"
 ```python
 import pytest
 
+
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args):
     return {

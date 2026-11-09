@@ -120,7 +120,7 @@ expect(row).to_be_hidden()
 
 # 件数
 expect(page.get_by_role("row").nth(0)).to_be_visible()  # ヘッダ
-expect(page.get_by_role("row")).to_have_count(21)      # ヘッダ + 20 行
+expect(page.get_by_role("row")).to_have_count(21)  # ヘッダ + 20 行
 
 # ソート
 page.get_by_role("columnheader", name="価格").click()

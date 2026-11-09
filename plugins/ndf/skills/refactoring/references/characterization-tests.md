@@ -28,7 +28,7 @@
 # 1. まず何が返るか分からない状態でテストを書く
 def test_current_behavior_of_price_calculation():
     result = calculate_price(quantity=3, unit_price=100, coupon="SUMMER")
-    assert result == 0   # ← 仮の値。実行して実際の値に置き換える
+    assert result == 0  # ← 仮の値。実行して実際の値に置き換える
 ```
 
 ```text
