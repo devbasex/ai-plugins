@@ -259,8 +259,9 @@ class ClaudeRunner:
         keys = self.keys.attempt(self.keep)
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
+        direct = lambda env: call_claude(system, prompt, tools, cwd, timeout, child_env=env, **kw)  # noqa: E731
+        once = lambda env: self._call_running(lambda: direct(env))  # noqa: E731
         while True:
-            once = lambda env: self._call_running(lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=env, **kw))  # noqa: E731
             if (res := keys.run(once)) is not None:  # API キーで決着した
                 return res
             try:
@@ -269,26 +270,13 @@ class ClaudeRunner:
                 if not keys.left():
                     waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
                 continue
-            res = self._call_running(lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw))
-            if res.get("auth") and multi and self.account not in (None, ca.METERED) and self.account not in auth_failed:
-                # 認証の失敗の観測を残し、次の child_env が今のアカウントを除いて選び直す（上限のときと同じ経路。#1576 の E9）
-                auth_failed.add(self.account)
-                ca.note_auth_failed(self.account)
+            res = once(child)
+            if self._retry_on_auth(res, multi, auth_failed):
                 continue
             if res.get("limit"):
-                self.note_limit(res)
-                if multi and self.account != ca.METERED:
-                    if self._switch_after_limit(res, tried, fallback, keys.left):
-                        continue
-                elif not multi and keys.left():
+                res, tried_fallback = self._handle_limit(res, multi, tried, fallback, keys, tried_fallback, direct)
+                if res is None:
                     continue
-                elif not multi and fallback and not tried_fallback:
-                    tried_fallback = True
-                    # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
-                    metered = ca.account_env(ca.METERED, dict(os.environ))
-                    res = self._try_fallback_once(
-                        fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=metered, **kw)
-                    )
             if not res.get("limit"):
                 return res
             if keys.left():
@@ -296,6 +284,35 @@ class ClaudeRunner:
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
             keys.reset()
+
+    def _retry_on_auth(self, res: dict, multi: bool, auth_failed: set[str]) -> bool:
+        """認証が通らなかった登録済みのアカウントを記録する。同じ呼び出しを別のアカウントでやり直すなら真。"""
+        if res.get("auth") and multi and self.account not in (None, ca.METERED) and self.account not in auth_failed:
+            # 認証の失敗の観測を残し、次の child_env が今のアカウントを除いて選び直す（上限のときと同じ経路。#1576 の E9）
+            auth_failed.add(self.account)
+            ca.note_auth_failed(self.account)
+            return True
+        return False
+
+    def _handle_limit(
+        self, res: dict, multi: bool, tried: set[str], fallback: dict, keys, tried_fallback: bool, direct
+    ) -> tuple[ClaudeCall | None, bool]:
+        """上限に当たった後の替え先を選ぶ。返すのは（結果, FALLBACK を試したか）で、結果が None ならやり直す。
+
+        結果に上限が残っていれば呼び手が API キーか解除の待ちへ進む。登録が 2 つ以上ならアカウント・API キー・従量の
+        接続の順に替え、1 つ以下なら API キー、次に FALLBACK を 1 度だけ試す。
+        """
+        self.note_limit(res)
+        if multi and self.account != ca.METERED:
+            if self._switch_after_limit(res, tried, fallback, keys.left):
+                return None, tried_fallback
+        elif not multi and keys.left():
+            return None, tried_fallback
+        elif not multi and fallback and not tried_fallback:
+            # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
+            metered = ca.account_env(ca.METERED, dict(os.environ))
+            return self._try_fallback_once(fallback, lambda: direct(metered)), True
+        return res, tried_fallback
 
     def _tell_metered_problem(self) -> None:
         """保存した従量の接続の宣言が壊れていれば、最初の呼び出しの前に標準エラーと進捗ログへ 1 行出す（#1468 の I5）。"""
