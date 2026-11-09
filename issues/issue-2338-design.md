@@ -28,18 +28,6 @@
 決定の記録は [issue-2338-design-decisions.md](issue-2338-design-decisions.md) にある。
 実行の記録の行の鍵は、#2335 の設計（[issue-2335-design.md](issue-2335-design.md) の「実行の記録の行」）のとおりにする。
 
-## 出し直しの指摘への対応
-
-| 項目 | 指摘 | 対応 | 直した箇所・直せない理由 |
-| --- | --- | --- | --- |
-| lcore:1-1 | 設計の前に、複数のプロセスに対応した堅牢なログの出力・収集・保管の既存の仕組みを 8 つの観点で比べる | 直した | [外部の調査](issue-2338-design-research.md) を作り直し、「観点ごとの比べ」の表に 9 件を 8 つの観点で並べた。本体の「外部の調査」に 3 つの層の結論を置いた |
-| lcore:1-2 | 出力: `QueueHandler` / `QueueListener`・structlog・loguru（`enqueue`）・concurrent-log-handler を比べる | 直した | 外部の調査の LIB1〜LIB4 と観点ごとの比べ。採否と理由は決定 1 の表 |
-| lcore:1-3 | 形式と相関: OpenTelemetry の logs と trace の相関・実行の識別子の伝え方、JSON Lines を比べる | 直した | 外部の調査の STD1〜STD3・STD6・LIB5。決定 1（`trace_id`・`span_id` へ写す）と決定 5（環境変数で伝える） |
-| lcore:1-4 | 収集と保管: Fluent Bit・Vector・journald・CloudWatch Logs を比べる | 直した | 外部の調査の PRD1〜PRD4。1 行の上限を収集の仕組みの既定に合わせて 32,000 バイトにした（決定 2）。記録の行を標準出力・標準エラーへ混ぜない理由（決定 4）。書きかけの行を閉じる（決定 14、受け入れ条件 1j） |
-| lcore:1-5 | 決定 1 の「依存を足さずに自前で作る」を調査の結果で決め直し、自前を残すなら比べた候補と採らない理由を書く | 直した | 決定 1 を、枠組みに標準の `logging` を採り、ファイルの出力先の `Handler` だけを自前で作る形へ決め直した。比べた 6 つの候補の採らない理由を決定 1 の表に書いた |
-| lcore:1-6 | 直した設計で設計レビュー（cross-review）から通し直し、用語の検査も通す | 直した | 用語の検査（`glossary.py check`）を 4 ファイルで実行し、当たりは 0 件だった。cross-review は、この設計を載せた設計 Pull Request の上で、次の設計レビューの工程が通す（このステップは push しない） |
-| lcore:1-7 | 受け入れ条件 2c の扱いを調査の結果の形に合わせて決め直してよい | 直した | 要求の前提 10 に合わせ、監視の CLI が核から起動されたときは子の実行として記録へ書く形にした（決定 8、「操作の約束」、テスト設計の 2c の 2 行） |
-
 ## ドメインモデル
 
 ### コンテキスト
@@ -101,8 +89,8 @@
 ## 外部の調査
 
 外部の調査は [issue-2338-design-research.md](issue-2338-design-research.md) にある。複数のプロセスに対応したログの出力・形式と相関・収集と保管の既存の仕組み
-16 件を、8 つの観点（並行の書き込みの安全さ・プロセスの親子と別のコンテナ・中断に強いか・依存の重さ・出力先の切り替え・保管と寿命・秘密の伏せ方・運用の実績）で
-比べた。結論は次の 3 つである。
+16 件を、8 つの観点で比べた。観点は、並行の書き込みの安全さ・プロセスの親子と別のコンテナ・中断に強いか・依存の重さ・出力先の切り替え・
+保管と寿命・秘密の伏せ方・運用の実績である。結論は次の 3 つである。
 
 | 層 | 採るもの | 自前で作るもの |
 | --- | --- | --- |
@@ -271,7 +259,7 @@ classDiagram
 
 ### 操作の約束
 
-- **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・ライブラリとして読み込んだとき）では `None` である。そのとき `diag`・`clip` は、`NDF_RUN_ID` と `NDF_RUN_LOG` の両方を受け継いでいれば最初の 1 行の前に子の実行として記録を開き（`start` の `fields` に `outside_core: true`、`end` は `atexit` で `how: "exit"`・`result: null`）、どちらかが無ければ `diag` は標準エラーへ書くだけ、`clip` は切るだけになる（決定 8）
+- **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・ライブラリとして読み込んだとき）では `None` である。そのとき `diag`・`clip` は、`NDF_RUN_ID` と `NDF_RUN_LOG` の両方を受け継いでいれば、最初の 1 行の前に子の実行として記録を開く（決定 8）。`start` の `fields` に `outside_core: true` を書き、`end` は `atexit` で `how: "exit"`・`result: null` として書く。どちらかが無ければ、`diag` は標準エラーへ書くだけ、`clip` は切るだけになる
 - **出力先は `logging.Handler` の派生の `Sink` である**: 書き口は専用の logger `ndf.run`（`propagate` は偽。ルートの logger にハンドラを足さない）に出力先を 1 つだけ足す。`open` は置き場を用意して位置（子へ渡す文字列）を返す。`emit` は `record.msg` に入った改行を含まない 1 行を書き切る。`put_text` は全文を置いて参照の文字列を返す。どれも書けなければ `OSError` を投げ、`emit` は `logging` の既定の `handleError` で握りつぶさずに書き口へ返す（`raiseExceptions` に頼らない）。伏せる処理と 32,000 バイトの判定は `RunLog` が先に済ませ、出力先は受け取った文字列を書くだけにする（I5・I8）。#2608 は、既存のハンドラ（LIB5・LIB6）を包んで `Sink` にできる（決定 1）
 - **`register_sink(name, factory)`**: 名前と出力先の作り方を登録する。既定で登録するのは `file` だけである。テストは偽物を登録し、#2608 は CloudWatch Logs の出力先を登録する
 - **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種だけを受け、ほかは `ValueError`。8 種は `start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end` である。`event` が `diag` のときは `run_log.diag` へ渡し、標準エラーへ先に出す経路を 1 つにする（I6）。渡す形は `run_log.diag(fields["text"], short=fields.get("display"), **残りの鍵)` である
@@ -495,3 +483,15 @@ stateDiagram-v2
 | 収集の仕組みでの読み込み | Fluent Bit と Vector が既定の設定のまま 32,000 バイトの行を読むことは、文書の既定値（PRD2・PRD3）から決めた。実物の Fluent Bit と Vector で記録のファイルを読ませてはいない。収集を足すときに確かめる |
 | 正規表現に当たらない切る箇所 | 要求の「調べ方」の正規表現に当たらない書き方（`textwrap.shorten` など）で 2 ファイルが切る箇所は数えていない |
 | 監視のループを動かす CLI | 監視のループを動かす CLI（`lib/monitor.py`。cross-review の `scripts/monitor.py` が読み込む）は、2026-11-09 の develop で核を通っていない（`git show origin/develop:plugins/ndf/scripts/lib/monitor.py \| grep -n run_core` が 0 件）。核から起動されたときは決定 8 で子の実行として記録へ書き、核の外から人が起動したときは標準エラーにだけ出す（前提 10）。cross-review が監視の CLI を起こすときに `NDF_RUN_ID`・`NDF_RUN_LOG` が届くかは、Codex の行と同じく未確認 |
+
+## 出し直しの指摘への対応
+
+| 項目 | 指摘 | 対応 | 直した箇所・直せない理由 |
+| --- | --- | --- | --- |
+| lcore:1-1 | 設計の前に、複数のプロセスに対応した堅牢なログの出力・収集・保管の既存の仕組みを 8 つの観点で比べる | 直した | [外部の調査](issue-2338-design-research.md) を作り直し、「観点ごとの比べ」の表に 9 件を 8 つの観点で並べた。本体の「外部の調査」に 3 つの層の結論を置いた |
+| lcore:1-2 | 出力: `QueueHandler` / `QueueListener`・structlog・loguru（`enqueue`）・concurrent-log-handler を比べる | 直した | 外部の調査の LIB1〜LIB4 と観点ごとの比べ。採否と理由は決定 1 の表 |
+| lcore:1-3 | 形式と相関: OpenTelemetry の logs と trace の相関・実行の識別子の伝え方、JSON Lines を比べる | 直した | 外部の調査の STD1〜STD3・STD6・LIB5。決定 1（`trace_id`・`span_id` へ写す）と決定 5（環境変数で伝える） |
+| lcore:1-4 | 収集と保管: Fluent Bit・Vector・journald・CloudWatch Logs を比べる | 直した | 外部の調査の PRD1〜PRD4。1 行の上限を収集の仕組みの既定に合わせて 32,000 バイトにした（決定 2）。記録の行を標準出力・標準エラーへ混ぜない理由（決定 4）。書きかけの行を閉じる（決定 14、受け入れ条件 1j） |
+| lcore:1-5 | 決定 1 の「依存を足さずに自前で作る」を調査の結果で決め直し、自前を残すなら比べた候補と採らない理由を書く | 直した | 決定 1 を、枠組みに標準の `logging` を採り、ファイルの出力先の `Handler` だけを自前で作る形へ決め直した。比べた 6 つの候補の採らない理由を決定 1 の表に書いた |
+| lcore:1-6 | 直した設計で設計レビュー（cross-review）から通し直し、用語の検査も通す | 直した | 用語の検査（`glossary.py check`）を 4 ファイルで実行し、当たりは 0 件だった。cross-review は、この設計を載せた設計 Pull Request の上で、次の設計レビューの工程が通す（このステップは push しない） |
+| lcore:1-7 | 受け入れ条件 2c の扱いを調査の結果の形に合わせて決め直してよい | 直した | 要求の前提 10 に合わせ、監視の CLI が核から起動されたときは子の実行として記録へ書く形にした（決定 8、「操作の約束」、テスト設計の 2c の 2 行） |
