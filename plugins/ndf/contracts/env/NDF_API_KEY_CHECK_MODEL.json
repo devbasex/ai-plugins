@@ -1,0 +1,5 @@
+{
+  "name": "NDF_API_KEY_CHECK_MODEL",
+  "set_by": "user",
+  "summary": "API キーの確かめに使うモデル（#2855）。無いときは claude_usage.CHECK_MODEL（plugins/ndf/scripts/lib/claude_usage.py:346）"
+}
