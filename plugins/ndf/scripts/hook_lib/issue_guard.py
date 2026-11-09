@@ -118,28 +118,40 @@ def _arg_value(node: sp.Node) -> str | None:
 
 def create_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], str | None]:
     """`gh issue create` の引数から `(本文, ラベル, --repo)`。本文を読めない形なら本文は `None`。"""
-    body, labels, repo, unreadable = None, [], None, False
+    acc: dict = {"body": None, "labels": [], "repo": None}
+    unreadable = False
     i = 0
     while i < len(nodes):
         word = sp.unquote(nodes[i])
         name, eq, inline = word.partition("=") if word.startswith("--") else (word, "", "")
         unreadable |= name in WEB_OPTS
-        value: str | None = inline
-        if name in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS and not eq:
-            i += 1
-            value = _arg_value(nodes[i]) if i < len(nodes) else None
-        if name in BODY_OPTS:
-            body = value
-            unreadable |= value is None
-        elif name in FILE_OPTS:
-            body = _read_file(value, cwd)
-            unreadable |= body is None
-        elif name in LABEL_OPTS and value:
-            labels += [x.strip() for x in value.split(",") if x.strip()]
-        elif name in REPO_OPTS:
-            repo = value
+        value, i = _opt_value(nodes, i, name, eq, inline)
+        unreadable |= _apply_arg(acc, name, value, cwd)
         i += 1
-    return (None if unreadable else body), labels, repo
+    return (None if unreadable else acc["body"]), acc["labels"], acc["repo"]
+
+
+def _opt_value(nodes: list[sp.Node], i: int, name: str, eq: str, inline: str) -> tuple[str | None, int]:
+    """オプションの値と、値を読んだ位置。`=` が無い値付きオプションは次の語から読む。"""
+    if name in BODY_OPTS + FILE_OPTS + LABEL_OPTS + REPO_OPTS and not eq:
+        i += 1
+        return (_arg_value(nodes[i]) if i < len(nodes) else None), i
+    return inline, i
+
+
+def _apply_arg(acc: dict, name: str, value: str | None, cwd: str) -> bool:
+    """オプションを `acc`（body・labels・repo）へ反映する。本文を読めなかったら真。"""
+    if name in BODY_OPTS:
+        acc["body"] = value
+        return value is None
+    if name in FILE_OPTS:
+        acc["body"] = _read_file(value, cwd)
+        return acc["body"] is None
+    if name in LABEL_OPTS and value:
+        acc["labels"] += [x.strip() for x in value.split(",") if x.strip()]
+    elif name in REPO_OPTS:
+        acc["repo"] = value
+    return False
 
 
 def _read_file(value: str | None, cwd: str) -> str | None:
