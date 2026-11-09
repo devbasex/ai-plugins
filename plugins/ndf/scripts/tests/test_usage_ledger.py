@@ -456,7 +456,9 @@ def proc(stdout: str, rc: int = 0, stderr: str = "") -> subprocess.CompletedProc
 
 
 def test_call_claude_ok_returns_every_field_and_records_ok(tmp_path, fixed_call):
-    res = claude.call_claude(prompts.JUDGE_SYSTEM, "p", None, str(tmp_path), 10, caller={"source": "supervise", "plan": "x.json", "step": "j"})
+    res = claude.call_claude(
+        prompts.JUDGE_SYSTEM, "p", None, str(tmp_path), 10, caller={"source": "supervise", "plan": "x.json", "step": "j"}
+    )
     assert isinstance(res, claude.ClaudeCall)
     assert {k: v for k, v in res.items() if k != "seconds"} == {
         "ok": True,
@@ -480,7 +482,14 @@ def test_call_claude_ok_returns_every_field_and_records_ok(tmp_path, fixed_call)
     assert run["env"]["NDF_USAGE_PLAN"] == "x.json" and run["env"]["NDF_USAGE_STEP"] == "j"
     data, kw = fixed_call["records"][0]
     assert data == CLAUDE_OUT
-    assert (kw["cwd"], kw["kind"], kw["source"], kw["plan"], kw["step"], kw["status"]) == (str(tmp_path), "judge", "supervise", "x.json", "j", "ok")
+    assert (kw["cwd"], kw["kind"], kw["source"], kw["plan"], kw["step"], kw["status"]) == (
+        str(tmp_path),
+        "judge",
+        "supervise",
+        "x.json",
+        "j",
+        "ok",
+    )
 
 
 def test_call_claude_caller_kind_overrides_but_result_kind_does_not(tmp_path, fixed_call):
@@ -562,11 +571,20 @@ def test_call_claude_non_json_stdout(tmp_path, fixed_call):
 def test_call_claude_is_error_and_model_usage_not_dict(tmp_path, fixed_call):
     fixed_call["proc"] = proc(json.dumps({"result": "", "is_error": True, "modelUsage": [1]}), 0, "err")
     res = claude.call_claude("s", "p", None, str(tmp_path), 10)
-    assert (res["ok"], res["text"], res["model_usage"], res["limit"], res["auth"], res["credit"]) == (False, "err", None, False, False, False)
+    assert (res["ok"], res["text"], res["model_usage"], res["limit"], res["auth"], res["credit"]) == (
+        False,
+        "err",
+        None,
+        False,
+        False,
+        False,
+    )
 
 
 def test_call_claude_credit_low_wins_over_limit_and_auth(tmp_path, fixed_call):
-    fixed_call["proc"] = proc(json.dumps({"result": "Failed to authenticate. Credit balance too low", "is_error": True}), 1, "usage limit reached|1700000000")
+    fixed_call["proc"] = proc(
+        json.dumps({"result": "Failed to authenticate. Credit balance too low", "is_error": True}), 1, "usage limit reached|1700000000"
+    )
     res = claude.call_claude("s", "p", None, str(tmp_path), 10)
     assert (res["credit"], res["limit"], res["auth"], res["resets_at"]) == (True, False, False, None)
 
@@ -585,7 +603,9 @@ def test_call_claude_limit_seen_only_in_stdout_has_no_reset(tmp_path, fixed_call
 
 
 def test_call_claude_ok_never_flags_failures(tmp_path, fixed_call):
-    fixed_call["proc"] = proc(json.dumps({"result": "Failed to authenticate; credit balance too low; usage limit reached|1700000000"}), 0, "")
+    fixed_call["proc"] = proc(
+        json.dumps({"result": "Failed to authenticate; credit balance too low; usage limit reached|1700000000"}), 0, ""
+    )
     res = claude.call_claude("s", "p", None, str(tmp_path), 10)
     assert (res["ok"], res["limit"], res["auth"], res["credit"], res["resets_at"]) == (True, False, False, False, None)
 
