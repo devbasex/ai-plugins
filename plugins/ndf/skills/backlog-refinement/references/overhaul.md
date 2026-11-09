@@ -19,7 +19,11 @@
 | 5 | 付け直す | 大方針の MVV 判定が「従う」のときだけ、解消しうる課題を柱の子へ付け直し、マイルストーンを組み直す | `apply` の `reparent` |
 | 6 | 止める | 大方針の設計が終わるまで、該当の型の新しい課題を個別に直さず子として起票する、と大方針の本文に書く | 大方針の本文 |
 
+最初に `candidates --depth review --run <run>` で大整理の回を始める。`apply` は記録のリポジトリをこの回の候補の記録で確かめ、
+報告の `open_before` もこの回から取る。順位を付け直すときは `rank` にも同じ `--run <run>` を渡す。
+
 ```bash
+python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> --depth review --run <run>
 python3 "$UPKEEP/upkeep.py" overhaul snapshot --out <作業ディレクトリ>
 python3 "$UPKEEP/upkeep.py" causes record --classes <[{number, type, sub}] の JSON> --depth overhaul
 python3 "$UPKEEP/upkeep.py" overhaul count --snapshot <作業ディレクトリ>/snapshot.json --classes <同じ JSON>

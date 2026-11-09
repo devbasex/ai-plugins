@@ -62,5 +62,17 @@ python3 "$UPKEEP/upkeep.py" owner status
 | `research/` | 調査の記録（項目ごとの 1 ファイル） |
 | `overhaul/<run>/` | 大整理の固定の一覧・集計・付け直しの前の状態 |
 
-行は足すだけで書き換えない。開発ループはループの 1 回を締めるとき、ループの 1 回の間の `depths.jsonl` の行と、そのループの 1 回で調べた調査の
+候補・反映・順位と回をまたぐ記録は、`upkeep.py` が `$NDF_UPKEEP_STATE_DIR` の下にリポジトリごとに置く
+（置き場を決めるのは `scripts/upkeep_state.py` だけ）。
+
+| ファイル（`$NDF_UPKEEP_STATE_DIR/<所有者>--<リポジトリ>/`） | 中身 |
+| --- | --- |
+| `candidates.json`・`apply.json`・`rank.json` | `--run` を渡さない実行（差分の棚卸し）の棚卸しの回。次の `candidates` が作り直す |
+| `runs/<run>/` | 見直し・大整理の棚卸しの回（`candidates --run <run>` が始める）。同じ 3 つのファイルを持ち、他の実行は書かない |
+| `ledger.json`・`estimates.json`・`rejected.json` | 回をまたぐ記録（反映の済み・見積もり・人が退けた移動）。実行で分けない |
+
+差分の棚卸しどうしは分けない。2 つのレーンの差分の棚卸しが同じリポジトリで重なると、後の `candidates` が前の回の記録を
+作り直し、前の実行の `report` と `depth record` は後の実行の値を読む。
+
+`depths.jsonl` の行は足すだけで書き換えない。開発ループはループの 1 回を締めるとき、ループの 1 回の間の `depths.jsonl` の行と、そのループの 1 回で調べた調査の
 費用と秒をループの 1 回の記録へ写し、調査の費用を予算に数える。

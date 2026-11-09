@@ -23,6 +23,14 @@
 | 6 | `methods` | ホットスポット分析と失敗の記録の集計 | 調査の項目 `method.hotspot`・`method.failures` |
 | 7 | `create` | 起票と MVV 判定 | `apply` の `create`・`project-mvv.py vet --kind issue` |
 
+見直しの記録は、持ち主の実行の置き場に持つ。`candidates` と `rank` に `owner claim` が返した run を渡し、`apply` の plan の
+`owner` と `report --run` にも同じ run を使う。渡し忘れると、並行する差分の棚卸しの記録を見直しの値として報告する。
+
+```bash
+python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> --depth review --run <run>
+python3 "$UPKEEP/upkeep.py" rank --scores <見積の入力> --run <run>
+```
+
 ## 調査の結果の読み方
 
 ```bash

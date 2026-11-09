@@ -121,6 +121,9 @@ python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイした版の�
 決定（手順 2A / 2B）だけを LLM が持つ。** スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md`
 にある。出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）で、記録は
 `$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/backlog-refinement/`）の下にリポジトリごとに置く。
+見直し・大整理は `candidates` と `rank` に `--run <owner claim の run>` を渡し、候補・反映・順位の記録を実行ごとの置き場
+（`runs/<run>/`）に持つ。並行する差分の棚卸しが同じリポジトリの記録を書いても、見直し・大整理の報告は自分の記録から組む。
+置き場の形は [references/depths.md](references/depths.md) の「記録」にある。
 
 ```bash
 UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
@@ -164,7 +167,7 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
 **起票者は問わない。** 絞ると、未設定のまま溜まる課題を誰も見ないことになる。
 
 ```bash
-python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> [--depth diff|review] [--all] [--add 12,34] [--limit N]
+python3 "$UPKEEP/upkeep.py" candidates --since-ref <前のリリースのタグ> [--depth diff|review] [--run <run>] [--all] [--add 12,34] [--limit N]
 ```
 
 機械の候補・マイルストーン・親 issue・コミットの件名の 4 経路は `candidates` が集める（`items[].routes` が
@@ -280,8 +283,10 @@ GitHub でないときは 0 で「検査しなかった」が返るので、そ�
 ### 手順 2C: 順位を算出する
 
 ```bash
-python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
+python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>] [--run <run>]
 ```
+
+見直しと大整理では、`candidates` に渡したのと同じ `--run <run>` を渡す（順位の記録をその実行の回に書く）。
 
 差分の棚卸しでは `--since-ref` に手順 1 と同じタグを渡す。見積がどこにも無い課題のうち、そのコミットの時刻以前に
 作られたものは `excluded` にせず（終了コード 20 にしない）、順位にも入れずに `metrics.left_for_review` へ番号だけを返す。
