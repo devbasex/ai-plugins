@@ -42,6 +42,7 @@
 | `before-json` | `before.json` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `breakdown-md` | `breakdown.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `candidates-json` | `candidates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `checkpoint-json` | `checkpoint.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `cost-estimates-json` | `*.cost-estimates.json` | result | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `counts-json` | `counts.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `decisions-jsonl` | `*.decisions.jsonl` | record | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
@@ -253,7 +254,7 @@
 | `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
 | `jev.probe` | seconds 10 | JEV に届くかの確かめの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
 | `lease.lock` | seconds 10 | 持ち主の鍵の排他を待つ上限。読んで書くだけの短い区間なので、超えるのは錠の持ち主が止まったとき | `plugins/ndf/scripts/lib/lease.py:<module>` |
-| `locks.append` | seconds 5 | 排他つきで 1 行足すときの錠の待ちの上限 | `plugins/ndf/scripts/lib/locks.py:append_locked` |
+| `locks.append` | seconds 5 | 排他つきで 1 行足すときの錠の待ちの上限 | `plugins/ndf/scripts/lib/locks.py:append_locked`<br>`plugins/ndf/scripts/lib/parallel_ledger.py:append_ledger_row` |
 | `merged.green-wait` | factor 1.5 | merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout | `plugins/ndf/scripts/merged_lib/checks.py:GreenWatch.wait` |
 | `merged.main-lock` | seconds 600 | メインディレクトリの排他を待つ上限。後片付け 1 件と pull は数十秒で終わる | `plugins/ndf/scripts/merged_lib/main_lock.py:<module>` |
 | `monitor-types.poll` | interval 15 | 監視の見回りの間隔（MONITOR_POLL で上書きできる） | `plugins/ndf/scripts/lib/monitor_types.py:<module>` |

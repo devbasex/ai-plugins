@@ -1,0 +1,114 @@
+{
+  "name": "parallel-ledger",
+  "summary": "並列の計画の台帳 `.ndf/parallel/<計画名>/ledger.jsonl` の 1 行（#2647）。送り手（レーン・一時レーン・オーガナイザーの CLI）は耐久ワークフローへ知らせる前にこの行を足し、耐久ワークフローは読み終えた位置から行を読んで状態へ反映する。作り直しのときはチェックポイント `checkpoint.json` とその後の行から状態を戻す",
+  "rule": "1 行 1 つの JSON のオブジェクト（JSON Lines）。v は行の形の版で今は 1、key は重複の判定のキー（同じキーの行は 1 行だけ）、kind は request / gate1 / gate2 / ask / unmatched / answer / stop / left_stopped / lanes_changed / resume / opened / closed / rebuilt / role のどれか、id は依頼の id（依頼に属さない行は空）、at は書いた時刻（UTC の ISO 8601）、by は書いた者のレーン名か organizer（ラッパーの外は空）、ver は書いた者の NDF の版、msg は耐久ワークフローへ渡すメッセージの本体（記録だけの行は null）。v が 1 でないか kind を知らない行は、読み手が状態へ反映せずに残し、件数と id を出す。読めない行は外して数える",
+  "writers": [
+    "plugins/ndf/scripts/lib/parallel_ledger.py",
+    "plugins/ndf/scripts/lib/parallel_lane.py",
+    "plugins/ndf/scripts/lib/parallel_cli.py",
+    "plugins/ndf/scripts/parallel.py"
+  ],
+  "readers": [
+    "plugins/ndf/scripts/lib/parallel_ledger.py",
+    "plugins/ndf/scripts/lib/parallel_run.py"
+  ],
+  "cases": [
+    {
+      "message": {
+        "v": 1,
+        "key": "request:lroot-r000000000042",
+        "kind": "request",
+        "id": "lroot-r000000000042",
+        "at": "2026-11-07T00:00:00Z",
+        "by": "lroot",
+        "ver": "10.27.46",
+        "msg": {
+          "kind": "request",
+          "id": "lroot-r000000000042",
+          "lane": "lroot",
+          "prs": [
+            2420
+          ],
+          "issues": [
+            2647
+          ],
+          "sprint_state": "/w/.ndf/sprints/s1",
+          "at": "2026-11-07T00:00:00Z"
+        }
+      },
+      "valid": true
+    },
+    {
+      "message": {
+        "v": 1,
+        "key": "resume:settle:3",
+        "kind": "resume",
+        "id": "",
+        "at": "2026-11-07T00:00:00Z",
+        "by": "",
+        "ver": "10.27.46",
+        "msg": {
+          "n": 3,
+          "phase": "settle",
+          "result": "released",
+          "version": "1.2.3",
+          "reason": null
+        }
+      },
+      "valid": true
+    },
+    {
+      "message": {
+        "v": 1,
+        "key": "rebuilt:1",
+        "kind": "rebuilt",
+        "id": "",
+        "at": "2026-11-07T00:00:00Z",
+        "by": "organizer",
+        "ver": "10.27.46",
+        "msg": {
+          "retired": ""
+        }
+      },
+      "valid": true
+    },
+    {
+      "message": {
+        "v": 2,
+        "key": "request:lroot-r000000000043",
+        "kind": "request",
+        "id": "lroot-r000000000043",
+        "at": "2026-11-07T00:00:00Z",
+        "by": "lroot",
+        "ver": "10.40.0",
+        "msg": {}
+      },
+      "valid": false
+    },
+    {
+      "message": {
+        "v": 1,
+        "key": "handoff:x",
+        "kind": "handoff",
+        "id": "x",
+        "at": "2026-11-07T00:00:00Z",
+        "by": "lroot",
+        "ver": "10.40.0",
+        "msg": {}
+      },
+      "valid": false
+    },
+    {
+      "message": {
+        "v": 1,
+        "kind": "answer",
+        "id": "q1",
+        "at": "2026-11-07T00:00:00Z",
+        "by": "organizer",
+        "ver": "10.27.46",
+        "msg": {}
+      },
+      "valid": false
+    }
+  ]
+}

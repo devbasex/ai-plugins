@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import time
 from pathlib import Path
 
 from state_home import checkout_home
@@ -48,3 +49,31 @@ def launch_key(kind: str, identity: str) -> str:
 def record_path(kind: str, identity: str, start: Optional[Path] = None) -> Path:
     """耐久の記録のファイル。無ければ DBOS を起動せずに「積んでいない」と答えられる。`start` は `records_dir` と同じ。"""
     return records_dir(start=start) / f"{launch_key(kind, identity)}.sqlite"
+
+
+RETIRED = ".retired-"  # 退避した記録の名前の印（`<鍵>.sqlite.retired-<時刻>`。#2647 の決定 4）
+
+
+def retire_record(path: Path) -> Path:
+    """記録 `path`（`-wal`・`-shm` ごと）を `<名前>.retired-<時刻>` へ移し、移した先を返す。中身は書き換えない。"""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    dst = path.with_name(f"{path.name}{RETIRED}{stamp}")
+    for suffix in ("-wal", "-shm", ""):
+        src = path.with_name(path.name + suffix)
+        if src.exists():
+            os.replace(src, dst.with_name(dst.name + suffix))
+    return dst
+
+
+def purge_retired(directory: Path, days: float, now: Optional[float] = None) -> list[str]:
+    """最終の更新から `days` 日を過ぎた退避の記録を消す。消した名前を返す。"""
+    now = time.time() if now is None else now
+    gone = []
+    for p in sorted(Path(directory).glob(f"*.sqlite{RETIRED}*")):
+        try:
+            if now - p.stat().st_mtime >= days * 86400:
+                p.unlink()
+                gone.append(p.name)
+        except OSError:
+            continue
+    return gone

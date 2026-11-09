@@ -225,27 +225,52 @@ def cmd_spawn(argv: list[str]) -> int:
 
 
 def cmd_role(argv: list[str]) -> int:
-    """`relay.py role organizer --plan <計画名>` / `relay.py role --clear`。作業ディレクトリの役割のファイルを書く・消す（#2436）。"""
+    """`relay.py role organizer --plan <計画名> [--plan-dir <置き場>]` / `relay.py role --clear [--plan-dir <置き場>]`（#2436）。
+
+    作業ディレクトリの役割のファイルを書く・消す。`--plan-dir` は計画の置き場の絶対パスで、同じ計画のオーガナイザーの
+    印をこの値の一致で決める（#2647 の I13・決定 13）。`role organizer` は一致する他のラッパーの印を消し、
+    `role --clear` はラッパーの外（`NDF_RELAY_DIR` が無い）でも全ラッパーを走査して一致する印をすべて消す。
+    """
     relay_dir = os.environ.get("NDF_RELAY_DIR")
     clear = "--clear" in argv
-    role = next((a for a in argv if not a.startswith("-") and a != _flag_value(argv, "--plan")), None)
-    plan = _flag_value(argv, "--plan")
+    plan, plan_dir = _flag_value(argv, "--plan"), _flag_value(argv, "--plan-dir")
+    role = next((a for a in argv if not a.startswith("-") and a not in (plan, plan_dir)), None)
     if not clear and (role not in hb.ROLES or not plan):
-        print("usage: relay.py role organizer|helper --plan <計画名> | relay.py role --clear", file=sys.stderr)
+        print(
+            "usage: relay.py role organizer|helper --plan <計画名> [--plan-dir <置き場>] | relay.py role --clear [--plan-dir <置き場>]",
+            file=sys.stderr,
+        )
         return 2
-    if not relay_dir or not os.path.isdir(relay_dir):
+    inside = bool(relay_dir) and os.path.isdir(relay_dir)
+    if not inside and not (clear and plan_dir):
         res = {"tool": "relay-role", "status": "stopped", "summary": "ラッパーの外（NDF_RELAY_DIR が無い）", "items": [], "metrics": {}}
         print(json.dumps(res, ensure_ascii=False))
         return 1
-    path = os.path.join(relay_dir, hb.ROLE_FILE)
+    path = os.path.join(relay_dir, hb.ROLE_FILE) if inside else None
     if clear:
-        remove(path)
-        summary, item = "役割の印を消した", {"role": None, "plan": None}
+        cleared = _clear_organizers(plan_dir) if plan_dir else 0
+        if path and (not plan_dir or "plan_dir" not in (hb.read_role(relay_dir) or {})):  # 自分の旧い形の印も消す
+            remove(path)
+        summary, item = "役割の印を消した", {"role": None, "plan": None, "cleared": cleared}
     else:
-        write_json_atomic(path, {"role": role, "plan": plan, "at": stamp()})
-        summary, item = f"役割 {role}（計画 {plan}）の印を書いた", {"role": role, "plan": plan}
+        write_json_atomic(path, {"role": role, "plan": plan, "at": stamp(), **({"plan_dir": plan_dir} if plan_dir else {})})
+        cleared = _clear_organizers(plan_dir, keep=relay_dir) if plan_dir and role == "organizer" else 0
+        summary, item = f"役割 {role}（計画 {plan}）の印を書いた", {"role": role, "plan": plan, "cleared": cleared}
     print(json.dumps({"tool": "relay-role", "status": "ok", "summary": summary, "items": [item], "metrics": {}}, ensure_ascii=False))
     return 0
+
+
+def _clear_organizers(plan_dir: str, keep: str | None = None) -> int:
+    """`plan_dir` が一致するオーガナイザーの印を、`keep` の作業ディレクトリを除いて消す。消した数を返す。
+
+    `plan_dir` を持たない印は、どのリポジトリの計画か分からないため消さない（決定 13）。"""
+    n = 0
+    for w in hb.scan_wrappers():
+        row = hb.read_role(w.dir) or {}
+        if row.get("role") == "organizer" and row.get("plan_dir") == plan_dir and not (keep and os.path.samefile(w.dir, keep)):
+            remove(os.path.join(w.dir, hb.ROLE_FILE))
+            n += 1
+    return n
 
 
 # ---------------------------------------------------------------- ls
