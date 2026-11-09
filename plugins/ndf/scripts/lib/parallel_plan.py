@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationIn
 from pydantic_core import PydanticCustomError
 
 import parallel_hold
-from parallel_files import PARALLEL_DIR  # noqa: F401  置き場の正本（問いの hook も読む）
+from parallel_files import PARALLEL_DIR, resolved_path  # noqa: F401  置き場の正本（問いの hook も読む）
 
 VERSION = 1
 PLAN_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")  # 計画名は 24 字まで（一時レーンの名前を 32 字に収める。I1）
@@ -55,7 +55,7 @@ def named_limit() -> tuple[int, Optional[str]]:
     """レーン数の上限と、読めなかった出所の 1 文。リレーハブと同じ関数で読む（`relay_limit`。#2733 の I12）。"""
     import relay_limit
 
-    n, _source, note = relay_limit.max_named()
+    n, _source, note = relay_limit.named_cap()
     return n, note
 
 
@@ -112,7 +112,7 @@ class Lane(BaseModel):
 
     def own_release(self, home: Path) -> bool:
         """別のリポジトリのレーンか（自分のリポジトリの設定で本番を出し、まとめたリリースに入らない。#2733 の I7）。"""
-        return _same(self.repo_dir(home)) != _same(Path(home))
+        return resolved_path(self.repo_dir(home)) != resolved_path(Path(home))
 
     def handoff_name(self) -> str:
         """引継ぎ文書の名（ループなら `loop-<ループ名>`、スプリントなら `issue-<最初の番号>`）。"""
@@ -177,7 +177,7 @@ class ParallelPlan(BaseModel):
         dup = _dups([ln.name for ln in self.lanes])
         if dup:
             raise PydanticCustomError("I1", "レーン名が重なる: {names}", {"names": ", ".join(dup)})
-        dup = _dups([f"{repo_key(ln, home)}:{ln.handoff_name()}" for ln in self.lanes])
+        dup = _dups([f"{lane_repo_key(ln, home)}:{ln.handoff_name()}" for ln in self.lanes])
         dup = [d.rsplit(":", 1)[1] for d in dup]
         if dup:  # 同じ引継ぎ文書へ書くと、後のレーンの文書が先のレーンの文書を上書きする
             raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
@@ -213,18 +213,11 @@ def _dups(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
 
 
-def _same(p: Path) -> str:
-    try:
-        return str(Path(p).resolve())
-    except OSError:
-        return str(p)
-
-
-def repo_key(lane: Lane, home: Optional[str]) -> str:
+def lane_repo_key(lane: Lane, home: Optional[str]) -> str:
     """重なりを比べる単位（レーンのリポジトリ）。置き場が分からないときは `repo` を省いたレーンを 1 つのリポジトリとみなす。"""
     if not lane.repo:
-        return _same(Path(home)) if home else ""
-    return _same(Path(lane.repo))
+        return resolved_path(Path(home)) if home else ""
+    return resolved_path(Path(lane.repo))
 
 
 def _issue_overlap(lanes: list[Lane], home: Optional[str] = None) -> str:
@@ -233,7 +226,7 @@ def _issue_overlap(lanes: list[Lane], home: Optional[str] = None) -> str:
     pairs = []
     for i, a in enumerate(lanes):
         for b in lanes[i + 1 :]:
-            if repo_key(a, home) == repo_key(b, home) and _overlaps(a, b):
+            if lane_repo_key(a, home) == lane_repo_key(b, home) and _overlaps(a, b):
                 pairs.append(f"{a.name}・{b.name}")
     return ", ".join(pairs)
 
@@ -255,7 +248,7 @@ def touch_overlaps(plan: ParallelPlan, home: Optional[str] = None) -> list[dict]
     out = []
     for i, a in enumerate(plan.lanes):
         for b in plan.lanes[i + 1 :]:
-            if repo_key(a, home) != repo_key(b, home):
+            if lane_repo_key(a, home) != lane_repo_key(b, home):
                 continue
             hits = sorted({f"{x}・{y}" for x in a.touches for y in b.touches if _touch_hit(x, y)})
             if hits:
@@ -283,7 +276,7 @@ def repo_errors(lane: Lane) -> Optional[str]:
     import decl
 
     main = decl.main_dir(str(p)) if p.is_dir() else None
-    if main is None or _same(Path(main)) != _same(p):
+    if main is None or resolved_path(Path(main)) != resolved_path(p):
         return f"{lane.name} の repo が Git のメインディレクトリでない（worktree・存在しないパスは置けない）: {lane.repo}"
     return None
 
@@ -437,7 +430,7 @@ def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
     d.mkdir(parents=True, exist_ok=True)
     import parallel_homes  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733 の決定 1）
 
-    parallel_homes.record(main)
+    parallel_homes.record_home(main)
     data = dict(raw)
     data["lanes"] = [{**dict(r), "handoff": ln.handoff_name()} for r, ln in zip(raw["lanes"], plan.lanes)]
     (d / "plan.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

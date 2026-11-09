@@ -59,7 +59,7 @@
 | [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
 | [gh_fields.py](gh_fields.py) | REST の応答を GraphQL の `--json` の形へ変える対応表 | `gh_rest` |
 | [gh_rest.py](gh_rest.py) | PR と課題の単発の読み書き（読み取り・一覧・検索・作成・編集・コメント・マージ）。REST で行い、REST が上限なら `gh pr` / `gh issue` で代わる（検索の `issue_search` は `gh issue list --search` の 1 回）。値は `Attempt`（`value`・`error`・`via`） | `gh_parts` / `issue-file.py` |
-| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
+| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーのエージェントの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
 | [gh_graphql.py](gh_graphql.py) | 入れ子の読み取り（未解決のスレッド）と GraphQL の 1 回の要求（`graphql`） | `gh_parts` / `gh_pr_info` |
 | [gh_checks.py](gh_checks.py) | チェックジョブの読み取りと、名前ごとの最新の実行への畳み方・失敗のログの保存 | `gh_parts` / `gh_pr_info` |
 | [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` |
@@ -109,7 +109,7 @@
 | [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
 | [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
 | [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
-| [lap_cost.py](lap_cost.py) | 周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
+| [lap_cost.py](lap_cost.py) | ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
 | [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |
 | [estimate_records.py](estimate_records.py) | 見積もりの記録と実績の記録の置き場・行の形・追記と読み出し・課題ごとの実績の合計。`.git` を読んで置き場を決め、`git` を起動しない | `estimate.py` / `supervise_lib/actuals.py` / `backlog-refinement`（`upkeep_rank_estimate.py`） |

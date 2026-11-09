@@ -47,7 +47,8 @@ def helper_plan_of(relay_dir: Optional[str]) -> Optional[str]:
     return got.get("plan") if isinstance(got, dict) and got.get("role") == "helper" and got.get("plan") else None
 
 
-def _resolved(p: Path) -> str:
+def resolved_path(p: Path) -> str:
+    """絶対パスの文字列（解けなければそのまま）。同じリポジトリかの比べに使う。"""
     try:
         return str(Path(p).resolve())
     except OSError:
@@ -57,7 +58,7 @@ def _resolved(p: Path) -> str:
 def lane_repo_matches(lane: dict, home: Path, main: Path) -> bool:
     """宣言のレーン（JSON の値）のリポジトリ（`repo`。省けば計画の置き場 `home`）が、自分のメインディレクトリ `main` か（#2733 の決定 3）。"""
     repo = lane.get("repo")
-    return _resolved(Path(repo) if isinstance(repo, str) and repo else Path(home)) == _resolved(Path(main))
+    return resolved_path(Path(repo) if isinstance(repo, str) and repo else Path(home)) == resolved_path(Path(main))
 
 
 def lane_homes_in(main: Path, name: Optional[str], relay_dir: Optional[str]) -> list[tuple[Path, str]]:
@@ -79,7 +80,7 @@ def lane_homes_in(main: Path, name: Optional[str], relay_dir: Optional[str]) -> 
                 out.append((home, plan))
     helper = helper_plan_of(relay_dir)
     if helper and not any(p == helper for _h, p in out):
-        out.append((Path(_resolved(Path(main))), helper))
+        out.append((Path(resolved_path(Path(main))), helper))
     return out
 
 

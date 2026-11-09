@@ -38,7 +38,7 @@ def _role(relay_dir: Optional[str]) -> Optional[str]:
     return got.get("role") if isinstance(got, dict) else None
 
 
-def running_plans(main: Path, status=None) -> tuple[list[str], list[str]]:
+def live_plans(main: Path, status=None) -> tuple[list[str], list[str]]:
     """(動いている計画, 状態を読めなかった計画)。どちらも `<置き場>:<計画名>`。自分のメインディレクトリと計画の所在の一覧を探す。"""
     import parallel_files as pf
     import parallel_homes
@@ -62,12 +62,12 @@ def running_plans(main: Path, status=None) -> tuple[list[str], list[str]]:
     return running, unreadable
 
 
-def judge(main: Path, entry: str, reason: Optional[str] = None, env=None, status=None, is_lane=None) -> Optional[dict]:
+def judge_entry(main: Path, entry: str, reason: Optional[str] = None, env=None, status=None, is_lane=None) -> Optional[dict]:
     """止めるなら統一 JSON レポート（`status: stopped`・`metrics.blocked`）を、通すなら None を返す。例外の起動は記録してから通す。"""
     env = os.environ if env is None else env
     if any(env.get(k) for k in FACTORY_ENVS):
         return None
-    running, unreadable = running_plans(main, status)
+    running, unreadable = live_plans(main, status)
     if not running and not unreadable:
         return None
     if _role(env.get("NDF_RELAY_DIR")) in ("organizer", "helper"):
@@ -97,7 +97,7 @@ def entry_check(root: Optional[str], reason: Optional[str], entry: str) -> Optio
     if reason is not None and not reason.strip():
         return {**step_result.result("parallel-guard", "stopped", "--outside-plan には理由が要る（空の理由では通さない）"), "exit": 1}
     cwd = str(Path(root or ".").resolve())
-    got = judge(Path(decl.main_dir(cwd) or cwd), entry, (reason or "").strip() or None)
+    got = judge_entry(Path(decl.main_dir(cwd) or cwd), entry, (reason or "").strip() or None)
     return {**got, "exit": EXIT_BLOCKED} if got else None
 
 

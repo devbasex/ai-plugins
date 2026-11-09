@@ -83,8 +83,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 危険フラグ | `danger` | cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 設計 Pull Request | — | 要求仕様と設計文書だけを載せ、実装を含まない Pull Request。変更ファイルに issues/ の要求・設計・決定の記録を含む | — | — | `docs/specifications/ndf-design-phase.md` |
 | 正本 | `source` | その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする | — | — | `docs/specifications/doc-consistency-checks.md` |
-| conductor | `conductor` | 人間と対話しているセッション。スプリントを持ち、承認ゲートで人間へ問えるのはこの層だけ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| supervisor | `supervisor` | 1 つのフェーズを通すサブエージェント。人間へ問わない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| conductor | `conductor` | スプリントを持ち、プランを流す役割。人へ問えるかは置かれた場所で決まる（計画の外のセッションは自分で問い、レーンは問いをオーガナイザーへ送る） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| supervisor | `supervisor` | 1 つのフェーズを通す役割。supervise.py が主に担い、supervise.py で対応できないとき（プランの雛形が無いときなど）だけサブエージェント（ndf:supervisor）が代行する。人間へ問わない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | worker | `worker` | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | フェーズ | `phase` | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 作業種別 | — | worker 1 つが行う作業の分類。調査 / 修正 / 検証 / 集計、どれにも当たらなければその他 | 作業の種類 | — | `docs/specifications/ndf-agent-layers-unattended-run.md` |
@@ -143,7 +143,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ステップ | `step` | プランの steps の 1 要素。型は run / work / drive / judge / pr の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ステージ | `pipeline_stage` | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new sprint はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スイッチポイント | — | フェーズの中で supervisor を替える点。収束ループの前で hook が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 3 層 | — | 工程を conductor → supervisor → worker の順に起動して通す形 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 3 層 | — | スプリントの中の工程を conductor → supervisor → worker の順に起動して通す形。ロール層のうち conductor・supervisor・worker の 3 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 最小構成の `claude -p` | — | Tool と指示を絞った 1 回の判断。judge のステップと MVV 判定が使う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 実行レベル | — | 仕事を渡す実行方式の LLM の使い方の水準。レベル 1 = スクリプト、レベル 2 = 分類の判断、レベル 3 = インライン実行の LLM | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | モード | `mode` | 変更の目的物で決める工程の振り分け。上から operation / documentation / standard / legacy-refactor / light | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -210,12 +210,12 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | スプリント | `sprint` | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ミッション | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 開発ループ | — | スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
-| 周回 | — | 開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
-| 選定 | — | 開発ループの周回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
+| ループの 1 回 | — | 開発ループの 1 回分。次のスプリントの選定・スプリント 1 つ・棚卸しと止まる条件の判定からなり、スプリントと 1 対 1 | 周回 | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| 選定 | — | 開発ループの 1 回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
 | 前提の課題 | — | ある課題が依存する、別の open の課題。棚卸しが記録した依存と並列の組の依存から順位の算出が合成した辺の先にある。閉じるまで、依存する課題は選定で選ばれない | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
-| ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数える。どの単位も宣言に数を書いたときだけ効き、書かない・null は無制限である | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| ループの予算 | — | 開発ループが使ってよい量の上限。ループの回数・費用・経過時間で数える。どの単位も宣言に数を書いたときだけ効き、書かない・null は無制限である | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 止まる条件 | — | 開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
-| ループの記録 | — | 開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| ループの記録 | — | 開発ループの 1 回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | スプリントブランチ | — | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | ミッションブランチ、ミッションのブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント課題 | — | 「スプリントを閉じる」が閉じる対象にする課題。スプリントの Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）か閉じる予定の参照で指す課題と、--issues で渡した課題の和 | ミッション課題、ミッションの課題 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | closing keywords | `closing_words` | GitHub の機能。Pull Request の本文に `Closes #123` のように書くと、マージのときにその課題を自動で閉じる。キーワードは Closes / Fixes / Resolves と活用形で、課題の参照が続く。GitHub を使う人なら誰でも知っている機能ではないため、文書では使う箇所ごとに説明を添える | 閉じる語 | — | `docs/specifications/ndf-sprint-close-referenced-issues.md` |
@@ -303,6 +303,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 補正 | — | conductor が雛形の書いたプランへ手で足した指示や値。プランを書き直す側は消さない | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 整形 | — | 規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの宣言が持つ | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 一時的な失敗 | — | GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941） | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
+| ランナー | — | 作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ | — | — | — |
 | 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
@@ -319,7 +320,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
-| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーのエージェントが読む（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 試行 | — | 同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 欠けの残る結果 | — | 手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 結果の置き場 | — | 読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
@@ -368,27 +369,27 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 材料の宣言 | — | プロジェクトがニーズとシーズの調査で読む先（プロダクトの種類と利用者・利用の記録と読む範囲・市場と競合・技術の構成・ライブラリの競合・周辺環境・後回しのマイルストーン）を書いたもの（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 見直しの持ち主 | — | 見直しのフェーズ（待ち時間の調査を含む）を受け持つ 1 つのセッション。宣言をロックの中で取り、終わったら解放する（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
-| 統括役 | `relay_hub` | 同じコンテナで最初に起動したラッパーが兼ねる役。ほかのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、各ラッパーの状態機械には触れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
-| 名前つきのラッパー | `named_relay` | 統括役に名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| リレーハブ | `relay_hub` | 同じマシンで最初に起動したラッパーが兼ねるプロセス。名前つきのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、判断を持たず、各ラッパーの状態機械には触れない | 統括役 | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 名前つきのラッパー | `named_relay` | リレーハブに名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
-| 登録簿 | `relay_registry` | 統括役だけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
-| 起動の依頼 | `spawn_request` | 頼む側が統括役の受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 登録簿 | `relay_registry` | リレーハブだけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 起動の依頼 | `spawn_request` | 頼む側がリレーハブの受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 起動のブロック | `spawn_block` | conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 並列の計画 | — | 1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
-| レーン | — | 並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
-| オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認では設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。統括役とは別 | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| レーン | — | 並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ。レーンのリポジトリは計画の置き場と違ってもよい（別のリポジトリのレーン）。名前は役割を含めず、役割は計画の宣言の入力で読む。物理層のラッパーとフロー層の流れの組 | ライン | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
+| オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | リリースの組み方 | — | リリースの依頼を受けたときに、まとめたリリースをどう扱うか。組む・組まない・組めないの 3 つがあり、宣言から決まる | 配布の組み方 | — | — |
 | 組み直しの依頼 | — | 組めなかったリリースの依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない | — | — | — |
-| 一時レーン | — | 並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留の周回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
-| 別のリポジトリのレーン | — | 並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す | — | — | — |
-| 計画の外のセッション | — | 動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す | — | — | — |
-| レーン数の上限 | — | 同時に動かせる名前つきのラッパーの数。値はマシンの設定（$XDG_STATE_HOME/ndf/relay/hub/limits.json）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まる。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる | — | — | — |
+| 一時レーン | — | 並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 別のリポジトリのレーン | — | 並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 計画の外のセッション | — | 動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| レーン数の上限 | — | 同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 計画の置き場 | — | 並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。依頼・答えの記録のキーは計画の置き場と計画名から求め、その値は <計画の置き場>/.ndf/parallel/<計画名> の絶対パスのまま変えない | — | — | — |
 | レーンのリポジトリ | — | レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ | — | — | — |
 | 計画の所在の一覧 | — | マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う | — | — | — |
 | 例外の起動 | — | 計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る | — | — | — |
-| 保留の周回 | — | 並列の計画のループのレーンで、答えを待たずに締めた周回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
-| 質問待ち | — | 作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めた周回の結果 | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| 保留したループの 1 回 | — | 並列の計画のループのレーンで、答えを待たずに締めたループの 1 回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| 質問待ち | — | 作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めたループの 1 回の結果 | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 再起動の方針 | — | conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 現行方式 | — | 運用上限 200K を超えたら次の工程を止め、4 つのカットポイントではコンテキスト量に関わらず ndf-next を出す再起動の方針。既定 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 試行方式 | — | カットポイントを再起動を判断できる境界として扱い、判断開始の値・運用上限・容量で継続か再起動かを決める再起動の方針。明示的に選んだときだけ働く | — | — | `docs/specifications/ndf-context-restart-policy.md` |
@@ -429,10 +430,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 出し直しの指摘 | — | 設計承認ゲートで人が「直して出し直す」と答えたときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 出し直しの指摘の履歴 | — | 課題の本文に置く、出し直しの指摘を回ごとに追記する節。人の判断待ちの節を書き直しても消えない | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 指摘への対応の表 | — | 出し直しの設計 PR の本文に置く表。出し直しの指摘の項目ごとに、直した / 直せない、直した箇所か直せない理由を 1 行で持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
-| 設計のプラン | — | 開発ループの周回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
+| 設計のプラン | — | 開発ループの 1 回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 答えの種類 | — | 人が承認ゲートや問いに返す答えの区分。承認・直して出し直す・やらない・予算・止めるの 5 つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 自動の出し直し | — | 出し直しの設計が出し直しの指摘の項目を指摘への対応の表に示していないとき、人へ問わずに開発ループが自分で付ける「直して出し直す」の答え。届いていない項目を名指しする。人の出し直しの 1 回につき 1 回まで | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
-| 出し直しの指摘の入力 | — | 開発ループが周回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
+| 出し直しの指摘の入力 | — | 開発ループがループの 1 回ごとに、同じリポジトリのすべてのループの記録から、課題の全回の出し直しの指摘を書き出したファイル。回はループの名前と回数の組で識別する。設計のプラン・MVV 判定・指摘への対応の表の突き合わせが読む | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 設計の承認の依頼 | — | 並列の計画のレーンが、設計承認ゲートの判断をオーガナイザーへ求めて送る依頼。設計 PR の先頭の SHA を持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 取り込みのコミット | — | 起点ブランチを設計 PR のブランチへ取り込むマージコミット。これだけで先頭が動いた設計 PR は、承認の依頼を送り直さない | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 前のループ | — | 同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その答えがまだの人の判断待ちは、オーガナイザーの問いの一覧に出す | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
@@ -445,7 +446,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 人へ出す文 | — | Skill・references・エージェントの定義の本文と、スクリプト・hook が人へ見せる文（問い・承認資料・報告・案内・エラーの文）。機械が読む識別子と対になる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
 | 機械が読む識別子 | — | スクリプトが値の一致で読む文字列（問いの区分・契約の種類の値・記録の名前・ラベルなど）。人へ出す文と対になる | — | — | `docs/specifications/ndf-approval-gate-names.md` |
 | 書いた日の記録 | — | 書いた日時点の内容を残し、以後の構成変更に追随しない文書。発表資料・記事・アーカイブ・開発履歴・変更履歴の出した版の項・issues/ の作業記録 | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
-| リリース待ち | — | リリースの依頼を送り、答えを待たずに締めた周回の結果。まとめはまだ流していない | 配布待ち | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| リリース待ち | — | リリースの依頼を送り、答えを待たずに締めたループの 1 回の結果。まとめはまだ流していない | 配布待ち | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | リリースの依頼 | — | レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る | 配布の依頼 | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 課題の差し込み | — | リリースの依頼のプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | まとめたリリース | — | オーガナイザーが複数のレーンの Pull Request を 1 つの版として出すリリース。提示のプランと本番のプランからなる | まとめた配布 | — | — |
@@ -455,8 +456,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 無進捗の打ち切り | — | 実装のステップで、進みの観測が無進捗の許容時間を越えて途絶えたときだけ打ち切ること | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | 無進捗の許容時間 | `impl_stall_seconds` | 実装のステップで、最後の進みの観測から無進捗の打ち切りまでに待つ秒。.ndf/supervise.json の impl_stall_seconds か supervise.py new の --impl-stall で決め、無ければ 1800 秒 | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | 進みの観測 | — | 実装のステップの間に、会話の記録の伸び・進捗ログの行・コミットの増加のどれかを見つけること | — | — | `docs/specifications/ndf-development-loop-limits.md` |
-| 周回の費用の内訳 | — | 周回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。周回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする | — | — | `docs/specifications/ndf-development-loop-limits.md` |
-| 実行環境の調査 | — | 動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、1 周回で選ぶ課題の数の候補を出す工程 | — | — | `docs/specifications/ndf-development-loop-limits.md` |
+| ループの 1 回の費用の内訳 | — | ループの 1 回の費用を、プランの claude -p・同じプランの中の別の起動・USD に換算できない起動に分けた記録。ループの 1 回の費用の和は、使用量の帳簿の和とスプリントの報告の和の大きい方とする | — | — | `docs/specifications/ndf-development-loop-limits.md` |
+| 実行環境の調査 | — | 動く場所・CPU のコア数・メモリ・同時に動くレーンとプランの数を調べ、ループの 1 回で選ぶ課題の数の候補を出す工程 | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | 答え待ちの依頼 | — | オーガナイザーに届いて、まだ答えていない依頼。設計の承認・リリース承認ゲート・承認ゲートの外の問い・耐久ワークフローが自分で立てた問いの 4 種類 | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 計画の閾値 | — | 計画全体の答え待ちの依頼の件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | レーンの閾値 | — | 1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 で、これを超えるとそのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
@@ -468,6 +469,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 照合 | — | スプリント MVV などの本文が、共通原則とプロジェクト MVV に従うかを LLM に判定させること。判定は「従う」「反する疑い」「判定できない」「読めない」の 4 つで、本文は書き換えない | — | — | `docs/specifications/ndf-sprint-mvv-vet-reuse.md` |
 | 照合の入力 | — | 1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・判定の決まり・本文の種類の名前・照合する本文からなる。1 字でも違えば別の入力である | — | — | `docs/specifications/ndf-sprint-mvv-vet-reuse.md` |
 | 照合の記録 | — | 照合のたびに 1 行を足す JSONL のファイル（project-mvv.jsonl）。機械ごとに 1 つある | — | — | `docs/specifications/ndf-sprint-mvv-vet-reuse.md` |
+| 物理層 | — | 並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる | — | — | — |
+| ロール層 | — | 並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す | — | — | — |
+| フロー層 | — | 並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -992,9 +996,9 @@ Neural Development Factory（別のリポジトリのサービス）が NDF を�
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
 | Neural Development Factory | — | NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う | — | — | `docs/specifications/ndf-parallel-organizer.md` |
-| ランナー | — | 1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム | — | — | `docs/specifications/ndf-ask-guard.md` |
+| ランナーのエージェント | — | 1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 実行ジョブ | — | 実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる | — | — | `docs/specifications/ndf-development-loop-limits.md` |
-| 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない | — | — | — |
+| 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーのエージェントが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーのエージェントは自分では起票しない | — | — | — |
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
-| 区間 | — | 1 つの実行ジョブの中でランナーが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-development-loop-limits.md` |
+| 区間 | — | 1 つの実行ジョブの中でランナーのエージェントが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | リリースの実行 | — | Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで | 配布の実行 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |

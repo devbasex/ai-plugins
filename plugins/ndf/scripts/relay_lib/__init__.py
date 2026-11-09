@@ -147,7 +147,7 @@ def _cap_cmd(rest: list[str]) -> int:
             relay_limit.write_max_named(int(rest[1]))
         except ValueError:
             return out("stopped", f"上限は正の整数: {rest[1]}", 1)
-    n, source, note = relay_limit.max_named()
+    n, source, note = relay_limit.named_cap()
     summary = f"レーン数の上限は {n}（出所: {source}）" + (f"。{note}" if note else "")
     return out("ok", summary, 0, max_named=n, source=source, path=str(relay_limit.limits_path()))
 

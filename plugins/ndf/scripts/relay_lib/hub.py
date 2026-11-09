@@ -87,7 +87,7 @@ def max_named() -> int:
     毎回読む（`relay.py cap` で変えた値をハブの起動し直し無しで使う。#2733 の決定 8）。"""
     import relay_limit
 
-    return relay_limit.max_named()[0]
+    return relay_limit.named_cap()[0]
 
 
 def launch_check_seconds() -> float:

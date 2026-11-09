@@ -766,7 +766,7 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
 
 def test_a_helper_ends_by_stopping_its_own_wrapper():
     """一時レーンは helper-done の後に自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。止めないと対話の claude が
-    入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。リリースと保留の周回のどちらの起動も同じ。"""
+    入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。リリースと保留したループの 1 回のどちらの起動も同じ。"""
     for line in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
         name = line.split("--name ", 1)[1].split()[0]
         assert f"{prun.RELAY} stop {name}" in line.split(" -- ", 1)[1]
@@ -1407,7 +1407,7 @@ PRIOR = {"kind": "gate1", "id": "lroot2-w12-l3", "loop": "lroot2", "issue": 12, 
 def test_prior_waits_enter_the_list_once_and_do_not_block_the_finish(monkeypatch):
     run, _ = _route(monkeypatch)
     run.receive_prior({"requests": [PRIOR], "skipped": []})
-    run.take(dict(PRIOR))  # レーンの周回の境からの同じ行
+    run.take(dict(PRIOR))  # レーンのループの 1 回の境からの同じ行
     assert [q["id"] for q in run.questions] == ["lroot2-w12-l3"] and prun._run_finished(run)
     assert [q["id"] for q in run.summary("finished")["prior_waits"]] == ["lroot2-w12-l3"]
 
@@ -1460,3 +1460,28 @@ def test_a_replay_of_an_old_record_keeps_the_old_steps(monkeypatch):
     run.reply({"id": "q", "result": "approved"})
     run.reply({"id": "unknown", "result": "approved"})
     assert run.questions == [] and "unknown" in run.held
+
+
+def test_other_repo_lane_asks_through_the_plan_home_and_reads_the_answer(env, tmp_path):
+    """#2733 の受け入れ条件 1・2: 別のリポジトリのレーンが計画を見つけ、問いが計画の置き場の依頼の一覧に（`repo` つきで）
+    載り、答えをレーンの側から読める。"""
+    import parallel_homes
+
+    main = env["main"]
+    other = tmp_path / "factory"
+    (other / ".ndf").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    other = other.resolve()
+    raw = json.loads((pp.plan_dir(main, "p1") / "plan.json").read_text())
+    raw["lanes"].append({"name": "lf", "input": {"kind": "sprint", "issues": [1]}, "plans": 1, "touches": ["a/"], "repo": str(other)})
+    (pp.plan_dir(main, "p1") / "plan.json").write_text(json.dumps(raw))
+    parallel_homes.record_home(main)
+    start(main)
+    got = until(lambda: pl.lane_of(other, "lf"))
+    assert got[0] == "p1" and got.home.resolve() == main.resolve() and got.own_release()
+    rid = pl.request_ask(got.home, "p1", "lf", ASK, str(other), "led9")
+    items = until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    assert pa.with_repo(main, "p1", items)[0]["repo"] == str(other)
+    pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
+    ans = until(lambda: pl.answers_of(pl.plan_home(other, "p1", "lf"), "p1", [rid])[rid]["answer"])
+    assert ans["choice"] == ["済んだ"]

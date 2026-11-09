@@ -56,6 +56,7 @@ CDP の操作は 1 回ごとに利用者の PC と往復するので、リモー
 import pytest
 from playwright.sync_api import Browser, BrowserType
 
+
 @pytest.fixture(scope="session")
 def browser(
     browser_type: BrowserType,
@@ -69,9 +70,7 @@ def browser(
     """
     browser_cfg = pwk_config.browser
     # slow_mo: browser_type_launch_args が優先、なければ config の slow_mo_ms
-    _slow_mo = browser_type_launch_args.get(
-        "slow_mo", pwk_config.playwright.slow_mo_ms or None
-    )
+    _slow_mo = browser_type_launch_args.get("slow_mo", pwk_config.playwright.slow_mo_ms or None)
     if browser_cfg.mode == "cdp-remote":
         if browser_type.name != "chromium":
             pytest.fail(
@@ -112,6 +111,7 @@ def context(browser, pwk_config, _cdp_default_context):
         ctx = browser.new_context()
         yield ctx
         ctx.close()
+
 
 @pytest.fixture(scope="session")
 def page(context, pwk_config):

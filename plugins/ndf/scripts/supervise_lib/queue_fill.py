@@ -175,7 +175,7 @@ def _read_version_json(path: Path) -> dict | None:
 
 
 def plan_finished(plan: str | None) -> bool:
-    """プランの `report.md` の結果が `完了` か。承認ゲートの後の続きの実行も report.md を書き直すため、続きで本番を出した周回も真になる。"""
+    """プランの `report.md` の結果が `完了` か。承認ゲートの後の続きの実行も report.md を書き直すため、続きで本番を出したループの 1 回も真になる。"""
     if not plan:
         return False
     try:

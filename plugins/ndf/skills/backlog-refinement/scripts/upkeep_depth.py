@@ -15,7 +15,7 @@
 `kind: step` の行から秒・ドル・言語モデルの名前（`values.models`）を写す。読めなければ空のまま行を書く。`--seconds`・
 `--cost` を渡せばその値を優先する。
 `depth compare` は `<ref>` のコミットの時刻より後の実行の行のうち、秒とドルがそろい（`no_usage`）、`--model` を渡せば
-言語モデルがその 1 つだけの（`model`）行を、同じ開発ループ・周回（ループの外では同じスプリント）では最後の 1 行に
+言語モデルがその 1 つだけの（`model`）行を、同じ開発ループ・ループの 1 回（ループの外では同じスプリント）では最後の 1 行に
 して（`duplicate`）、古い順に `--count` 件の中央値を基準と比べる。0 = 秒とドルの両方が基準を下回る / 1 = 下回らない /
 3 = 件数に満たない（保留）/ 2 = 記録か ref を読めない。
 """
@@ -343,7 +343,7 @@ def cmd_record(a):
 
 
 def _period_key(r: dict, k: int):
-    """同じ周回を 1 回と数える鍵。開発ループの外ではスプリント、どちらも無ければ行ごとに別。"""
+    """同じループの 1 回を 1 回と数える鍵。開発ループの外ではスプリント、どちらも無ければ行ごとに別。"""
     if r.get("loop") is not None:
         return ("loop", r["loop"], r.get("lap"))
     if r.get("sprint") is not None:
@@ -352,7 +352,7 @@ def _period_key(r: dict, k: int):
 
 
 def compare_rows(rows: list[dict], since, *, depth: str, model: str | None) -> tuple[list[dict], list[dict]]:
-    """(使える行を古い順, 外した行と理由)。秒・ドル・言語モデルで絞ってから同じ周回の重複を除く（#2315 の決定 5）。"""
+    """(使える行を古い順, 外した行と理由)。秒・ドル・言語モデルで絞ってから同じループの 1 回の重複を除く（#2315 の決定 5）。"""
     picked, excluded = [], []
     for k, r in enumerate(rows):
         at = clock.parse(r.get("at"), naive="utc")

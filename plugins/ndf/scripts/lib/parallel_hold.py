@@ -298,13 +298,13 @@ def lane_hold(main: Path, lane: Optional[str], kind: str) -> Optional[dict]:
             scope = "plan" if hold.get("plan") is True else "lane"
             count = hold.get("count") if scope == "plan" else (hold.get("by_lane") or {}).get(lane)
             limit = (hold.get("limits") or {}).get(scope)
-            other = {"home": str(home)} if pf._resolved(home) != pf._resolved(Path(main)) else {}  # 別のリポジトリのレーンだけ
+            other = {"home": str(home)} if pf.resolved_path(home) != pf.resolved_path(Path(main)) else {}  # 別のリポジトリのレーンだけ
             return {"plan": name, "scope": scope, "count": count, "limit": limit, **other}
     return None
 
 
 def loop_stop(main: Path) -> Optional[dict]:
-    """ループのレーンの周回の境の判定。自分が停止の範囲にあれば止まる理由を返す。"""
+    """ループのレーンのループの 1 回の境の判定。自分が停止の範囲にあれば止まる理由を返す。"""
     got = lane_hold(main, os.environ.get("NDF_RELAY_NAME"), "loop")
     return {"condition": CONDITION, "values": got} if got else None
 

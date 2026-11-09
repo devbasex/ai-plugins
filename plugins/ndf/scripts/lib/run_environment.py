@@ -72,7 +72,7 @@ def running_plan_count() -> int:
 
 
 def limit_candidates(cores: float, gib: float, lanes: int) -> dict:
-    """実測の 1 点から比で導く候補。ラッパーの数は今の既定の比（3 / 6）を保ち、課題の数は 1 周回が課題ごとに 1 本のプランを
+    """実測の 1 点から比で導く候補。ラッパーの数は今の既定の比（3 / 6）を保ち、課題の数は ループの 1 回が課題ごとに 1 本のプランを
     同時に流すためレーンの数で割る。"""
     plans = max(1, min(math.floor(cores * BASE_PLANS / BASE_CORES), math.floor(round(gib) * BASE_PLANS / BASE_GIB)))
     return {"max_issues": max(1, plans // max(1, lanes)), "max_plans": plans, "max_named": max(1, plans // 2)}

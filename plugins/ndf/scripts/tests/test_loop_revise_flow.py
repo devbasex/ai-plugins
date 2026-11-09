@@ -32,7 +32,7 @@ TABLE = "# 設計\n\n## 出し直しの指摘への対応\n\n| 項目 | 指摘 |
 
 
 def to_waiting(env, n=11, pr=501):
-    """課題を人の判断待ちの行へ入れる（周回を締めて次の境へ進める）。"""
+    """課題を人の判断待ちの行へ入れる（ループの 1 回を締めて次の境へ進める）。"""
     lap = built_lap(env)
     report = design_report(env, f"design-{n}", f"https://github.com/o/r/pull/{pr}")
     sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門", "report": report}]))
@@ -105,7 +105,7 @@ def test_a_revise_is_kept_in_the_history_after_the_waiting_section_is_rewritten(
 
 
 def waiting_again(env, doc, note="- 絞る"):
-    """出し直しの回を持つ課題の次の周回を承認ゲートで終え、人の判断待ちへ移す処理を通す。"""
+    """出し直しの回を持つ課題のループの次の 1 回を承認ゲートで終え、人の判断待ちへ移す処理を通す。"""
     to_waiting(env)
     revise(env, note)
     closed(env)
@@ -160,7 +160,7 @@ def test_an_unreadable_doc_asks_the_human_with_the_reason(env):
 
 
 def asked_row(env, monkeypatch, sent):
-    """レーンの依頼を送った行（印 SHA_A）を作り、周回を締める。"""
+    """レーンの依頼を送った行（印 SHA_A）を作り、ループの 1 回を締める。"""
     to_waiting(env)
     r = rec(env)
     r["waiting"][0].update(request="la-g501-a", plan="p1", pr=501, stamp=SHA_A, report="r.md", state="s.json")

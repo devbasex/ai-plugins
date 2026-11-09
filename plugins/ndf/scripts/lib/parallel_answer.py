@@ -33,7 +33,7 @@ def not_listed(rid: str, items: list[dict]) -> dict:
 
 def mvv_mark(q: dict) -> dict:
     """MVV 判定でオーガナイザーが自分で答えてよい依頼か（#2507 の決定 8）。設計の承認で、レーンの判定が決まらず、
-    レッドラインが空で、利用者へ戻した依頼（印 `returned`。#2507 の決定 9）でなく、判定を打ち直す材料（レーンの周回のスプリント状態）が残るときだけ true。"""
+    レッドラインが空で、利用者へ戻した依頼（印 `returned`。#2507 の決定 9）でなく、判定を打ち直す材料（レーンのループの 1 回のスプリント状態）が残るときだけ true。"""
     if q.get("kind") != "gate1":
         return {"eligible": False, "why": "設計の承認の依頼でない"}
     if q.get("boundary"):

@@ -1,7 +1,7 @@
 """出し直しの指摘の部品（#2510）: 読み取りと項目の数え方の唯一の実装。
 
-ループの記録の人の判断待ちの行が正本で、周回のスプリントの組み立てがすべてのループの記録から課題の回を集めて入力ファイル
-（`<周回のディレクトリ>/revise-<課題>.json`）へ書き出す。設計のプラン・MVV 判定・表の突き合わせはこの入力を読み、
+ループの記録の人の判断待ちの行が正本で、ループの 1 回のスプリントの組み立てがすべてのループの記録から課題の回を集めて入力ファイル
+（`<ループの 1 回のディレクトリ>/revise-<課題>.json`）へ書き出す。設計のプラン・MVV 判定・表の突き合わせはこの入力を読み、
 課題の本文の履歴の節は人が読むためのコピーとして追記だけを行う。
 """
 
@@ -81,7 +81,7 @@ def collect_rounds(main: Path, rec: dict, number: int) -> tuple[dict | None, lis
 
 
 def write_inputs(main: Path, rec: dict, issues: list[int], lap_dir: str | Path) -> tuple[list[str], list[str]]:
-    """出し直しの指摘を持つ課題の入力ファイルを周回のディレクトリへ書き、`new sprint` の引数と読めずに飛ばしたループの名前を返す（決定 1）。"""
+    """出し直しの指摘を持つ課題の入力ファイルをループの 1 回のディレクトリへ書き、`new sprint` の引数と読めずに飛ばしたループの名前を返す（決定 1）。"""
     argv, skipped = [], set()
     for n in issues:
         data, others = collect_rounds(main, rec, n)
