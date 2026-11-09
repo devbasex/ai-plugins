@@ -755,8 +755,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリースタグ | — | 正式版を出したときに本番チャネルのコミットへ打つタグ `<プラグイン>--v<版>`。リリースタグのある版の節は工程から書き換えない | — | — | — |
 | 子の箇条 | — | PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
 | リリース後テストの記録 | — | release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象の版:` の行と課題ごとの表を持つ | — | — | `docs/specifications/ndf-production-release-record.md` |
-| 課題の表 | — | リリース後テストの記録のうち、見出しに `課題` と `結果` の両方の列を持つ表。スプリントの課題を閉じる判定とリリースの承認資料が、課題ごとの合否をここから読む | — | — | — |
-| 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | — |
+| 課題の表 | — | リリース後テストの記録のうち、見出しに `課題` と `結果` の両方の列を持つ表。スプリントの課題を閉じる判定とリリースの承認資料が、課題ごとの合否をここから読む | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
+| 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
 | 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 版上げの PR | — | head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
@@ -851,18 +851,18 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 調査の項目 | — | 調査を小さく分けた単位。側面と対象の組（例: `seeds.library:pytest`）。1 項目が 1 つの調査の記録になる（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 付け直しの記録 | — | 大整理が課題の親とマイルストーンを変える前に残す、課題ごとの前の状態。`upkeep.py revert` が読んで戻す（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 深さの記録 | — | 棚卸しの深さごとの起動の判定と実行を 1 行ずつ残す記録。メインディレクトリの `.ndf/backlog/depths.jsonl` で、コミットしない。差分の棚卸しの行は、棚卸しのステップの秒・ドル・言語モデルの名前を持つ（#2315） | — | — | — |
-| Issue の種類 | — | 不具合・機能・調査・運用など、記載すべき項目の組を決める Issue の区分 | — | — | — |
-| 記載項目 | — | Issue の本文（または課題の置き場の欄）に書く 1 つの事柄。例: 受け入れ条件・再現手順・担当者 | — | — | — |
-| 必須の項目 | — | その種類の Issue で、欠けると起票の前の検査で止まる項目 | — | — | — |
-| 該当時の項目 | — | 条件に当たるときだけ書く項目。当たる条件を定義に書く | — | — | — |
-| 記載の水準 | — | 記載項目に何を書けば満たしたことになるかの基準 | — | — | — |
-| 記載項目の定義 | — | 種類ごとの記載項目・区分・記載の水準をまとめた 1 か所の正本 | — | — | — |
-| 起票の前の検査 | — | AI が Issue を作る前に、本文が記載項目の定義を満たすかを判定する検査 | — | — | — |
-| 起票の後の検査 | — | 作られた open の Issue の本文が記載項目の定義を満たすかを判定する検査 | — | — | — |
-| 課題の置き場 | — | Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す | — | — | — |
-| 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く | — | — | — |
-| 工程が足す節 | — | 起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの答え・閉じた理由・再発など）。起票者は書かない | — | — | — |
-| 置き場ごとの表し方 | — | 記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応 | — | — | — |
+| Issue の種類 | — | 不具合・機能・調査・運用など、記載すべき項目の組を決める Issue の区分 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 記載項目 | — | Issue の本文（または課題の置き場の欄）に書く 1 つの事柄。例: 受け入れ条件・再現手順・担当者 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 必須の項目 | — | その種類の Issue で、欠けると起票の前の検査で止まる項目 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 該当時の項目 | — | 条件に当たるときだけ書く項目。当たる条件を定義に書く | — | — | `docs/specifications/ndf-issue-items.md` |
+| 記載の水準 | — | 記載項目に何を書けば満たしたことになるかの基準 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 記載項目の定義 | — | 種類ごとの記載項目・区分・記載の水準をまとめた 1 か所の正本 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 起票の前の検査 | — | AI が Issue を作る前に、本文が記載項目の定義を満たすかを判定する検査 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 起票の後の検査 | — | 作られた open の Issue の本文が記載項目の定義を満たすかを判定する検査 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 課題の置き場 | — | Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す | — | — | `docs/specifications/ndf-issue-items.md` |
+| 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く | — | — | `docs/specifications/ndf-issue-items.md` |
+| 工程が足す節 | — | 起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの答え・閉じた理由・再発など）。起票者は書かない | — | — | `docs/specifications/ndf-issue-items.md` |
+| 置き場ごとの表し方 | — | 記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 棚卸しの実行 | — | 棚卸しを 1 回流すまとまり。持ち主を持つ実行は owner claim が返した識別子（run）で区別する | — | — | — |
 | 棚卸しの記録の置き場 | — | upkeep.py が記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置き、回をまたぐ記録と、実行の識別子を渡さない棚卸しの回（共有の置き場）と、実行ごとの置き場を持つ | — | — | — |
 | 候補の記録 | — | candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む | — | — | — |
