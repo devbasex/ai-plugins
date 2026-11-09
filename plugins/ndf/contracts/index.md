@@ -217,7 +217,7 @@
 | `claude-accounts.lock` | seconds 30 | アカウントの置き場の排他を待つ上限 | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
 | `claude-accounts.refresh` | seconds 3 | トークンの更新の排他の中の宛先の待ちの上限 | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
 | `claude-api-keys.check` | seconds 30 | API キーの確かめの要求（Messages API への 1 回）の HTTP の上限 | `plugins/ndf/scripts/lib/claude_usage.py:<module>` |
-| `claude-api-keys.credit-hold` | seconds 86400 | 残高切れの API キーを候補から外す秒。過ぎたら次の起動で 1 回だけ試す。請求の周期の日付は読めない（#2855 の決定 7） | `plugins/ndf/scripts/lib/claude_api_keys.py:<module>` |
+| `claude-api-keys.credit-hold` | seconds 86400 | 残高切れの API キーを候補から外す秒。過ぎたら次の起動で 1 回だけ試す。請求の周期の日付は読めないため、固定の秒で外す | `plugins/ndf/scripts/lib/claude_api_keys.py:<module>` |
 | `claude-training.call` | seconds 3 | claude の学習の設定を読み書きするコマンドの上限 | `plugins/ndf/scripts/lib/claude_training.py:<module>` |
 | `claude-training.keychain` | seconds 2 | キーチェーンを読むコマンドの上限 | `plugins/ndf/scripts/lib/claude_training.py:<module>` |
 | `claude-usage.http` | seconds 10 | 使用量の取得先への HTTP の上限 | `plugins/ndf/scripts/lib/claude_usage.py:<module>` |
