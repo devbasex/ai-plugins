@@ -94,7 +94,7 @@ def isolated_env(tmp_path, **extra):
     e = {k: v for k, v in os.environ.items() if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
     e["HOME"] = str(home)
     e["NDF_RELAY_UV"] = str(fake_uv(tmp_path))
-    # 統括役の tmux（#2346）は既定で無いものとして扱う。使うテストは使い捨ての TMUX_TMPDIR と一緒に上書きする
+    # リレーハブの tmux（#2346）は既定で無いものとして扱う。使うテストは使い捨ての TMUX_TMPDIR と一緒に上書きする
     e["NDF_RELAY_TMUX"] = "ndf-no-tmux"
     e.update({k: str(v) for k, v in extra.items()})
     real_home = os.path.expanduser("~")
@@ -472,11 +472,11 @@ class Term:
 
     def relay_dirs(self):
         root = pathlib.Path(self.env["HOME"]) / ".local" / "state" / "ndf" / "relay"
-        # 統括役の置き場（hub/。#2346）は作業ディレクトリでない
+        # リレーハブの置き場（hub/。#2346）は作業ディレクトリでない
         return sorted(p for p in root.iterdir() if p.is_dir() and p.name != "hub") if root.exists() else []
 
     def state_report(self):
-        """状態の置き場の作業ディレクトリ（統括役の hub/ を含む）ごとに、名前・区間の起動の引数・ファイルの名前を並べる。
+        """状態の置き場の作業ディレクトリ（リレーハブの hub/ を含む）ごとに、名前・区間の起動の引数・ファイルの名前を並べる。
 
         待ちが切れたときに、どの区間が起動し、どのシグナルファイルが置かれていたかを失敗の出力から読むため（#2346）。
         ファイルは決め打ちの一覧で調べず、ある分をすべて出す。

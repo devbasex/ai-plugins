@@ -1,4 +1,4 @@
-"""レーンの側の答え待ちの停止（#2707 の受け入れ条件 12〜14）: ループは周回の境、1 スプリントのレーンはキューのプランの開始で止まる。"""
+"""レーンの側の答え待ちの停止（#2707 の受け入れ条件 12〜14）: ループはループの 1 回の境、1 スプリントのレーンはキューのプランの開始で止まる。"""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def test_a_loop_lane_stops_at_the_boundary_with_a_mark_and_the_stop_line(lane):
 
 
 def test_the_hold_stops_before_the_pending_laps_are_handled():
-    """保留の周回があっても waiting_only へ置き換えず、保留の周回の処理より先に止まる。"""
+    """保留したループの 1 回があっても waiting_only へ置き換えず、保留したループの 1 回の処理より先に止まる。"""
     rec_ = {"laps": [{"n": 1, "outcome": sl_record.RELEASE_PENDING}]}
     stop = {"condition": "answer_hold", "values": {}}
     assert sl_select.held_stop(rec_, stop) is stop and stop["condition"] in sl_select.IMMEDIATE_STOPS

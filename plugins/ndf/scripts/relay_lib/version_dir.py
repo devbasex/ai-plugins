@@ -64,6 +64,7 @@ LIB_FILES = (
     "lib/locks.py",
     "lib/md.py",
     "lib/procs.py",
+    "lib/relay_limit.py",
     "lib/state_home.py",
     "lib/versions.py",
     "lib/wait_notice.py",

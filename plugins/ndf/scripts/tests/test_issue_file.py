@@ -328,7 +328,7 @@ def test_create_with_the_shown_digest_files_the_issue_with_the_origin(fake, tmp_
     assert "ndf:section-end" not in payload["body"]
 
 
-# --- ランナーの中の起票の依頼（#2216） -----------------------------------------------
+# --- ランナーのエージェントの中の起票の依頼（#2216） -----------------------------------------------
 
 
 def _requests(path: Path) -> list[dict]:
