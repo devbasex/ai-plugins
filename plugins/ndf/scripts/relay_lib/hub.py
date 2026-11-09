@@ -403,33 +403,36 @@ class Hub:
         write_json_atomic(hub_path(RESULTS, f"{rid}.json"), res)
 
     def process(self, req: dict) -> dict:
-        kind = req.get("kind")
-        name = req.get("name")
-        ws = scan_wrappers()
-        registry = read_registry()
-        sessions = tmux.sessions()
-        now = live(ws, registry, sessions)
+        kind, ws, registry = req.get("kind"), scan_wrappers(), read_registry()
+        now = live(ws, registry, tmux.sessions())
+        got = self._launch_input(kind, req, registry, ws, now)
+        if isinstance(got, Refusal):
+            return self.refuse(kind, req.get("name"), got)
+        name, cwd, args, role = got
+        by = str(req.get("by") or "")
+        if refusal := self.judge(name, now, role, by):
+            return self.refuse(kind, name, refusal)
+        plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
+        return self.launch(kind, name, cwd, args, by, registry, role, plan, self._over_limit(by, now))
+
+    def _launch_input(self, kind, req: dict, registry: dict, ws, now: Live) -> tuple | Refusal:
+        name = req.get("name")  # 依頼の種類ごとの起動の入力 (name, cwd, args, role)。決められなければ Refusal
         if kind == "restart":
             row = registry.get(name) if isinstance(name, str) else None
             if row is None:
-                return self.refuse(kind, name, Refusal(NOT_FOUND, f"その名前は無い: {name}", 3))
+                return Refusal(NOT_FOUND, f"その名前は無い: {name}", 3)
             cwd, args = restart_input(name, row, by_name(ws).get(name))
-            role = row.get("role") if row.get("role") == "helper" else None
-        elif kind == "spawn":
+            return name, cwd, args, (row.get("role") if row.get("role") == "helper" else None)
+        if kind == "spawn":
             cwd, args = spawn_input(req)
-            if name is None:
-                name = self.auto_name(now.taken)
             role = req.get("role") if req.get("role") == "helper" else None
-        else:
-            return self.refuse(kind, name, Refusal("bad-request", f"知らない依頼の種類: {kind}", 2))
-        by = str(req.get("by") or "")
-        refusal = self.judge(name, now, role, by)
-        if refusal:
-            return self.refuse(kind, name, refusal)
-        plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
+            return (self.auto_name(now.taken) if name is None else name), cwd, args, role
+        return Refusal("bad-request", f"知らない依頼の種類: {kind}", 2)
+
+    @staticmethod
+    def _over_limit(by: str, now: Live) -> dict | None:
         cap = max_named()  # 人の起動で、人の起動を外す前の数が上限以上なら記録と通知に載せる（#2862 の I6）
-        over = {"cap": cap, "running": list(now.names)} if by == TERMINAL and now.count + now.humans >= cap else None
-        return self.launch(kind, name, cwd, args, by, registry, role, plan, over)
+        return {"cap": cap, "running": list(now.names)} if by == TERMINAL and now.count + now.humans >= cap else None
 
     @staticmethod
     def auto_name(taken: set[str]) -> str:
