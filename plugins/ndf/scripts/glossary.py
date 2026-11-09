@@ -766,6 +766,31 @@ def cmd_diff(a):
     emit(result(TOOL, "ok", summary, items, counts))
 
 
+def _merge_source_stages(root, decl, have):
+    """取り込みの途中の段 1〜3 の用語集を読み、検証して合わせた結果を返す。"""
+    versions = []
+    for n in (1, 2, 3):
+        text = git_checked(root, "show", f":{n}:./{decl.source}").stdout if n in have else '{"version": 1}'
+        try:
+            g = parse_glossary(json.loads(text), f"段 {n} の用語集")
+        except ValueError as e:
+            raise unreadable(f"段 {n} の用語集を読めない: {e}")
+        if bad := glossary_merge.bad_keys(g):
+            raise unreadable(f"段 {n} の用語集の {bad}")
+        versions.append(g)
+    return glossary_merge.merge_glossaries(*versions)
+
+
+def _write_merge_outputs(writes):
+    """(path, text) の組を順に書き出す。書けなければ unreadable を投げる。"""
+    try:
+        for path, text in writes:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+    except OSError as e:
+        raise unreadable(f"用語集を書けない: {e}")
+
+
 def cmd_merge(a):
     root = Path(a.root)
     decl = require_declaration(root)
@@ -790,17 +815,7 @@ def cmd_merge(a):
         if not {2, 3} <= have:
             side = "ours" if 2 not in have else "theirs"
             stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
-        versions = []
-        for n in (1, 2, 3):
-            text = git_checked(root, "show", f":{n}:./{decl.source}").stdout if n in have else '{"version": 1}'
-            try:
-                g = parse_glossary(json.loads(text), f"段 {n} の用語集")
-            except ValueError as e:
-                raise unreadable(f"段 {n} の用語集を読めない: {e}")
-            if bad := glossary_merge.bad_keys(g):
-                raise unreadable(f"段 {n} の用語集の {bad}")
-            versions.append(g)
-        merged = glossary_merge.merge_glossaries(*versions)
+        merged = _merge_source_stages(root, decl, have)
         if fail := merged.duplicates or merged.conflicts:
             stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
         g, counts = merged.glossary, merged.counts
@@ -809,12 +824,7 @@ def cmd_merge(a):
     else:
         g = load_glossary(decl)
     writes.append((decl.document_path, render_text(g, decl.source)))
-    try:
-        for path, text in writes:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-    except OSError as e:
-        raise unreadable(f"用語集を書けない: {e}")
+    _write_merge_outputs(writes)
     git_checked(root, "add", "--", *[it["name"] for it in items])
     if left := unresolved():
         stop(f"用語集を解いた。用語集の外の衝突が {len(left)} 件残る", left, counts)
