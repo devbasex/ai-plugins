@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import urllib.parse
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -37,6 +38,8 @@ STATES = (OK, CREDIT_LOW, AUTH_FAILED)
 KEY_ENV = "ANTHROPIC_API_KEY"
 NAME_ENV = "NDF_CLAUDE_API_KEY_NAME"  # 子へ渡した API キーの名前（入れ子の supervise.py が読む）
 GENERATION_ENV = "NDF_CLAUDE_API_KEY_GENERATION"  # 子へ渡した API キーの世代
+BASE_URL_ENV = "ANTHROPIC_BASE_URL"  # claude の送り先。Anthropic の外を指すなら登録済みのキーを使わない
+ANTHROPIC_HOST = "api.anthropic.com"
 CREDIT_HOLD = limits.seconds("claude-api-keys.credit-hold")
 
 
@@ -277,13 +280,34 @@ def pick_key(exclude=(), now: float | None = None) -> ApiKey | None:
     return next((k for k in cands if state_of(k, rows).selectable(now)), None)
 
 
-def env_with_key(k: ApiKey, base: dict) -> dict:
-    """`base` から認証の変数と従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻して、選んだ 1 本を足す。"""
+def _key_free_env(base: dict) -> dict:
+    """`base` から認証の変数・従量の接続の宣言のキー・API キーの名前と世代を外し、親のアカウントの環境を元へ戻した写し。"""
     env = dict(base)
     declared = ca.fallback_env(env)
     for name in (*ca.STRIPPED_AUTH_ENV, *declared, NAME_ENV, GENERATION_ENV):
         env.pop(name, None)
     ca.leave_account(env)
+    return env
+
+
+def sends_to_anthropic(base: dict) -> bool:
+    """`base` から組む子の環境で、キーの送り先が Anthropic（`https://api.anthropic.com`）か。
+
+    継承した `ANTHROPIC_BASE_URL` が別のホストを指すなら偽。登録の確かめで Anthropic へだけ送ったキーを、
+    ゲートウェイなど別のサービスへ送らないため、そのときはキーを使わず今の認証で起動する。"""
+    url = _key_free_env(base).get(BASE_URL_ENV)
+    if not url:
+        return True
+    try:
+        p = urllib.parse.urlsplit(url)
+        return p.scheme == "https" and p.hostname == ANTHROPIC_HOST and p.port in (None, 443)
+    except ValueError:
+        return False
+
+
+def env_with_key(k: ApiKey, base: dict) -> dict:
+    """`base` から認証の変数と従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻して、選んだ 1 本を足す。"""
+    env = _key_free_env(base)
     env[KEY_ENV] = k.key
     env[NAME_ENV] = k.name
     env[GENERATION_ENV] = k.generation
@@ -380,7 +404,8 @@ class KeyRoute:
         if failure is None and not res.get("limit"):
             return False
         exclude.add(k.name)
-        if k is self.inherited:
+        if self.inherited is not None and k.name == self.inherited.name:
+            # 登録簿から選んだ同じ名前のキー（宣言が always の入れ子）も、受け継いだキーと同じものとして以後の子から外す
             self.dropped = True
         if failure is not None:
             reason = failure if note_state(k.name, k.generation, failure) else "stale_generation"
@@ -400,7 +425,7 @@ class KeyTry:
         """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。"""
         r = self.route
         if not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep())))):
-            if (k := pick_key(exclude=self.tried)) is not None:
+            if sends_to_anthropic(dict(os.environ)) and (k := pick_key(exclude=self.tried)) is not None:
                 return k
         return r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
 
@@ -415,12 +440,24 @@ class KeyTry:
         return None
 
     def env(self, child: dict | None) -> dict | None:
-        """キーを使わない起動の環境。受け継いだキーを外したなら、キーの変数を外す。"""
-        return without_key(child if child is not None else dict(os.environ)) if self.route.dropped else child
+        """キーを使わない起動の環境。受け継いだキーを外したなら、キーの変数を外す。
+
+        受け継いだキーの環境は親のアカウントを外している（`env_with_key`）。起動したときの環境のままでは、ログインの無い
+        共有の設定ディレクトリで起動しうるため、登録済みアカウントがあれば選定で選んだアカウントの環境へ戻す。"""
+        if not self.route.dropped:
+            return child
+        if child is not None:
+            return without_key(child)
+        base = without_key(dict(os.environ))
+        if ca.registered():
+            _, env = ca.choose_env(keep=self.keep(), base=base)
+            if env is not None:
+                return env
+        return base
 
     def left(self) -> bool:
         """上限に当たって替えるアカウントが無いとき、試せるキーが残っていれば真（以後 near-limit でもキーを使う）。"""
-        if self.how == "off" or pick_key(exclude=self.tried) is None:
+        if self.how == "off" or not sends_to_anthropic(dict(os.environ)) or pick_key(exclude=self.tried) is None:
             return False
         self.limit_hit = True
         return True

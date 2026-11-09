@@ -151,6 +151,32 @@ def test_nested_supervise_records_the_inherited_key(tmp_path, seq, accounts, mon
     assert ak.state_of(ak.get("k")).state == ak.CREDIT_LOW
 
 
+def test_nested_always_drops_the_inherited_key_and_returns_to_an_account(tmp_path, seq, accounts, monkeypatch):  # noqa: F811
+    """宣言が always の入れ子: 登録簿から選んだ同じ名前のキーが残高切れでも、受け継いだキーを外し、登録済みアカウントで起動し直す。"""
+    set_responses, calls = setup(tmp_path, seq, accounts, "always", ("k", KEY_A, "main"))
+    k = ak.get("k")
+    monkeypatch.setenv(ak.KEY_ENV, KEY_A)
+    monkeypatch.setenv(ak.NAME_ENV, "k")
+    monkeypatch.setenv(ak.GENERATION_ENV, k.generation)
+    set_responses(CREDIT, OK)
+    s, text = run_plan(tmp_path, STEP)
+    assert "結果: 完了" in text
+    assert [(c["api_key"], c["account"]) for c in calls()] == [(KEY_A, None), (None, "main")]
+    assert ak.state_of(ak.get("k")).state == ak.CREDIT_LOW
+
+
+def test_key_is_not_sent_to_a_foreign_base_url(tmp_path, seq, accounts, monkeypatch):  # noqa: F811
+    """継承した ANTHROPIC_BASE_URL が Anthropic の外を指すなら、登録済みのキーを使わずに今の認証で起動する。"""
+    assert ak.sends_to_anthropic({}) and ak.sends_to_anthropic({ak.BASE_URL_ENV: "https://api.anthropic.com"})
+    for url in ("https://gateway.example.com", "http://api.anthropic.com", "https://api.anthropic.com.example.com", "::bad"):
+        assert not ak.sends_to_anthropic({ak.BASE_URL_ENV: url}), url
+    set_responses, calls = setup(tmp_path, seq, accounts, "always", ("k", KEY_A, "main"))
+    monkeypatch.setenv(ak.BASE_URL_ENV, "https://gateway.example.com")
+    set_responses(OK)
+    s, text = run_plan(tmp_path, STEP)
+    assert "結果: 完了" in text and [c["api_key"] for c in calls()] == [None]
+
+
 def test_failure_of_a_replaced_key_is_not_recorded(accounts, monkeypatch):  # noqa: F811
     """I10: 置き換える前の世代で起動した worker の 401 は、置き換えた後のキーの状態に書かない。"""
     from supervise_lib import claude as sc

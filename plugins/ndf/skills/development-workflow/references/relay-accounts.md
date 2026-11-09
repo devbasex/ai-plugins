@@ -207,7 +207,8 @@ python3 ~/.claude/ndf/relay.py account remove key-gmail
 | `near-limit` | 登録済みアカウントの選び方が候補を返さないか、選んだアカウントの使用率が `NDF_ACCOUNT_SWITCH_AT` 以上のとき。上限に当たって替えるアカウントが無いときも、従量の接続へ移る前と解除を待つ前に試す |
 
 使えるキーが 2 本以上あれば、名前の順の先頭を選ぶ。子の環境には `ANTHROPIC_API_KEY` に選んだ 1 本を入れ、OAuth の
-トークン・`ANTHROPIC_AUTH_TOKEN`・Bedrock と Vertex の変数・従量の接続の宣言は外す。
+トークン・`ANTHROPIC_AUTH_TOKEN`・Bedrock と Vertex の変数・従量の接続の宣言は外す。`ANTHROPIC_BASE_URL` が
+`https://api.anthropic.com` の外（ゲートウェイなど）を指すときは、キーを別のサービスへ送らないよう、登録済みのキーを使わずに今の認証で起動する。
 
 | 起動の結果 | 扱い |
 | --- | --- |

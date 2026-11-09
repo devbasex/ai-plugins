@@ -21,6 +21,8 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 NAME_ENV = "NDF_CLAUDE_ACCOUNT"  # `claude_accounts.NAME_ENV` と同じ。起動したときのアカウント
+# `claude_api_keys` の KEY_ENV・NAME_ENV・GENERATION_ENV と同じ。supervise.py が worker へ入れた登録済み API キー
+API_KEY_ENV = ("ANTHROPIC_API_KEY", "NDF_CLAUDE_API_KEY_NAME", "NDF_CLAUDE_API_KEY_GENERATION")
 
 
 def initial_account(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
@@ -30,8 +32,14 @@ def initial_account(environ: Optional[Mapping[str, str]] = None) -> Optional[str
 
 
 def seat_env(seat: str, account: Optional[str], base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """担当の起動の環境。claude の席にアカウントがあればその環境、無い・用意できなければ元の環境の写し。"""
+    """担当の起動の環境。claude の席にアカウントがあればその環境、無い・用意できなければ元の環境の写し。
+
+    supervise.py が worker へ入れた登録済み API キー（名前の変数がそろうもの）は、どの席にも渡さない。担当は
+    API キーを使う範囲の外で（#2855 の決定 2）、外した claude の席はサブスクリプションのログインで起動する。"""
     env = dict(os.environ if base is None else base)
+    if env.get(API_KEY_ENV[1]):
+        for name in API_KEY_ENV:
+            env.pop(name, None)
     if not account or not seat.startswith("claude"):
         return env
     import claude_accounts as ca

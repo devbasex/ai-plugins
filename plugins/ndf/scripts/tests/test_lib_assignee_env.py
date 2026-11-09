@@ -43,3 +43,14 @@ def test_pick_account_without_registered_accounts_is_none(tmp_path, monkeypatch)
 def test_initial_account_reads_the_launch_environment():
     assert assignee_env.initial_account({"NDF_CLAUDE_ACCOUNT": "w1"}) == "w1"
     assert assignee_env.initial_account({}) is None
+
+
+def test_registered_api_key_is_not_passed_to_any_seat(accounts):  # noqa: F811
+    """supervise.py が worker へ入れた登録済み API キーは担当へ渡さない（#2855 の決定 2）。利用者のキーは残す。"""
+    accounts.add("work2")
+    keyed = {"PATH": "/bin", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    for seat, account in (("claude", None), ("claude-2", "work2"), ("codex", None)):
+        env = assignee_env.seat_env(seat, account, keyed)
+        assert not any(n in env for n in assignee_env.API_KEY_ENV), seat
+    own = {"PATH": "/bin", "ANTHROPIC_API_KEY": "sk-own"}
+    assert assignee_env.seat_env("claude", None, own) == own
