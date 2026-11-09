@@ -5008,7 +5008,7 @@
     {
       "term": "並列の計画",
       "context": "ndf-workflow",
-      "meaning": "1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ",
+      "meaning": "計画の置き場のリポジトリに置き、同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書（レーンは別のリポジトリでもよい）。オーガナイザーが読む。名前（計画名）を持つ",
       "source": "plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md"
     },
     {

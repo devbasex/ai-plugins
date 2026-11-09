@@ -375,7 +375,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 登録簿 | `relay_registry` | リレーハブだけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 起動の依頼 | `spawn_request` | 頼む側がリレーハブの受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 起動のブロック | `spawn_block` | conductor の応答に置く、情報文字列が ndf-spawn <名前> の囲み。中身が最初の入力になる | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
-| 並列の計画 | — | 1 つのリポジトリで同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書。オーガナイザーが読む。名前（計画名）を持つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
+| 並列の計画 | — | 計画の置き場のリポジトリに置き、同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書（レーンは別のリポジトリでもよい）。オーガナイザーが読む。名前（計画名）を持つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
 | レーン | — | 並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ。レーンのリポジトリは計画の置き場と違ってもよい（別のリポジトリのレーン）。名前は役割を含めず、役割は計画の宣言の入力で読む。物理層のラッパーとフロー層の流れの組 | ライン | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
 | オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | リリースの組み方 | — | リリースの依頼を受けたときに、まとめたリリースをどう扱うか。組む・組まない・組めないの 3 つがあり、宣言から決まる | 配布の組み方 | — | — |
