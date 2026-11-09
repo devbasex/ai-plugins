@@ -43,7 +43,7 @@ from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
 
 import limits
 import locks
-from durable_keys import KIND_RE, DurableError, key_hash, launch_key, record_path, records_dir  # noqa: F401  durable の名前として出す
+from durable_keys import KIND_RE, DurableError, key_hash, launch_key, purge_retired, record_path, records_dir, retire_record  # noqa: F401,E501  durable の名前として出す
 
 FORMAT = "ndf-durable-1"
 POLL_SECONDS = limits.value("durable.poll", "interval")  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
@@ -57,6 +57,7 @@ FINISHED = ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
 class Launched:
     key: str
     path: Path
+    retired: Optional[Path] = None  # 退避した失われた計画の記録（`retire_if`。#2647 の決定 4）
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ def purge_old(directory: Path, days: float = KEEP_DAYS, skip: Iterable[str] = ()
     """最終の更新から `days` 日を過ぎた、使われていない（ロックの取れる）耐久の記録を `-wal`・`-shm`・`.lock` ごと消す。消した鍵を返す。"""
     now = time.time() if now is None else now
     skipped, removed = set(skip), []
+    purge_retired(directory, days, now)  # 退避した記録も同じ日数で消す（#2647 の決定 4）
     for db in sorted(Path(directory).glob("*.sqlite")):
         key = db.stem
         if key in skipped:
@@ -179,6 +181,7 @@ def launch(
     listen: Optional[Iterable[str]] = None,
     keep: Optional[str | Iterable[str]] = None,
     lock_timeout: Optional[float] = None,
+    retire_if: Optional[Callable[[], bool]] = None,
 ) -> Launched:
     """実行の鍵の排他を取り、耐久の記録を開いて DBOS を起動する。1 つのプロセスで 1 回だけ（`close` の後は打てる）。
 
@@ -186,6 +189,7 @@ def launch(
     - `listen`: 待ち受けて取り出す耐久キューの名前。省けば `queues` のすべて、空なら取り出さない
     - `keep`: 続ける耐久ワークフローの接頭辞。渡せば、当たらない途中の耐久ワークフローを launch の前に子ごと止める
     - `lock_timeout`: 同じ実行の鍵の起動が動いている間、待つ秒（None は空くまで待つ）
+    - `retire_if`: 排他の中で打ち、真なら記録を `<鍵>.sqlite.retired-<時刻>` へ退避して新しい記録を開く
     """
     if _STATE["launched"] is not None:
         raise DurableError("耐久の記録はこのプロセスで開いている（1 つの起動は 1 つの耐久の記録）")
@@ -197,6 +201,7 @@ def launch(
         directory.mkdir(parents=True, exist_ok=True)
         stack.enter_context(locks.exclusive(directory / key, timeout=lock_timeout))
         purge_old(directory, skip=[key])
+        retired = retire_record(path) if retire_if is not None and path.exists() and retire_if() else None
         if keep is not None:
             keeps = (keep,) if isinstance(keep, str) else tuple(keep)
             for wid in cancel_others(path, keeps):
@@ -225,7 +230,7 @@ def launch(
         stack.close()
         raise DurableError(f"耐久の記録 {path} を開けない: {exc}") from exc
     _STATE["stack"] = stack
-    _STATE["launched"] = Launched(key, path)
+    _STATE["launched"] = Launched(key, path, retired)
     return _STATE["launched"]
 
 

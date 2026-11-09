@@ -86,6 +86,16 @@ def waiting_lanes(main: Path, name: str) -> list[str]:
     return [ln.name for ln, rec in loop_records(main, name) if held(rec)]
 
 
+def waiting_requests(main: Path, name: str) -> list[tuple[str, str]]:
+    """ループの記録が答えを待つ依頼の (レーン, 依頼の id)。台帳に無い待ちを `wait` が知らせる（#2647 の条件 14）。"""
+    return [
+        (ln.name, w["request"])
+        for ln, rec in loop_records(main, name)
+        for w in rec.get("waiting") or []
+        if w.get("request") and not w.get("answer")
+    ]
+
+
 class ReleaseRouting:
     """組まない・組めないリリースの締めと、組めないときの問い。`parallel_run._Run` が継ぐ（#2616）。"""
 

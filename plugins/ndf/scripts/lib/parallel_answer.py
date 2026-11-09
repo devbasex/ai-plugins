@@ -14,13 +14,20 @@ import parallel_lane as pl
 
 
 def questions(main: Path, name: str) -> tuple[int, list[dict]]:
-    """耐久ワークフローの今の依頼の一覧 (seq, items)。読めなければ (0, [])。"""
-    import durable
+    """耐久ワークフローの今の依頼の一覧 (seq, items)。読めなければ (0, [])。
 
-    got = (
-        durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0, start=pl.record_start(main)) or {}
-    )
-    return int(got.get("seq") or 0), list(got.get("items") or [])
+    耐久ワークフローがまだ受け取っていない問い（失われた計画へ届いた問い・知らせの前の問い）は計画の台帳から足す（#2647）。"""
+    import durable
+    import parallel_ledger as plg
+
+    try:
+        ident, wid = pl.record_identity(main, name), pl.workflow_id(name)
+        got = durable.event_from(pl.KIND, ident, wid, "questions", 0, start=pl.record_start(main))
+    except durable.DurableError:
+        got = None
+    items = list((got or {}).get("items") or [])
+    seen = {x for q in items for x in (q.get("id"), *(q.get("also") or []))}
+    return int((got or {}).get("seq") or 0), items + [q for q in plg.pending_questions(main, name) if q.get("id") not in seen]
 
 
 MVV_VERDICTS = ("unknown", "unreadable")  # レーンの判定が決まらなかった（判定できない・判定を読めない）

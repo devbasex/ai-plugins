@@ -88,6 +88,7 @@
     "answer-json",
     "approved-txt",
     "breakdown-md",
+    "checkpoint-json",
     "lease-json",
     "outside-plan-jsonl",
     "phase-result-json",

@@ -1204,8 +1204,9 @@ def test_same_build_cause_keeps_one_question_across_releases(env, tmp_path, monk
     states.write_text(json.dumps({"la": "running"}))
     start(main)
     r1 = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "s1")
+    assert read(main, r1)["release"] == 1  # 台帳の行はループの 1 周でまとめて読むため、答えの後に次の依頼を送る
     r2 = pl.send_release_request(main, "p1", "la", [20], [2], tmp_path / "s2")
-    assert (read(main, r1)["release"], read(main, r2)["release"]) == (1, 2)
+    assert read(main, r2)["release"] == 2
     q = until(lambda: len((got := build_question(main))["requests"]) == 2 and got)
     assert q["id"] == "p1-build-1" and [r["id"] for r in q["requests"]] == [r1, r2]
     assert len([x for x in event(main, "p1", "questions")["items"] if x.get("kind") == "build"]) == 1

@@ -17,15 +17,17 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import secrets
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
 
 import parallel_external as pe
+import parallel_ledger as plg
 import parallel_plan as pp
+from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
 from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in, resolved_path  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
@@ -147,7 +149,7 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
         return None
     import parallel_homes
 
-    me = resolved_path(Path(main))
+    me, lost = resolved_path(Path(main)), None
     for home in parallel_homes.search_homes(Path(main)):
         for name in plans_in(home):
             try:
@@ -155,9 +157,13 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
             except (OSError, ValueError):
                 continue
             hit = plan.lane(lane)
-            if hit is not None and resolved_path(hit.repo_dir(home)) == me and status(home, name) in RUNNING:
+            if hit is None or resolved_path(hit.repo_dir(home)) != me:
+                continue
+            st = plg.plan_state(home, name, status(home, name))  # 動いている計画を先に、失われた計画は後で当てる（決定 8）
+            if st == "running":
                 return LaneRef(name, hit, home, hit.repo_dir(home))
-    return None
+            lost = lost or (LaneRef(name, hit, home, hit.repo_dir(home)) if st == "lost" else None)
+    return lost
 
 
 def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
@@ -238,8 +244,6 @@ def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
 
     `range-<連番>` は出せたリリースにだけあり、差し戻し・失敗のリリースの連番は欠ける。欠番で打ち切らず、リリースの置き場
     `releases/<連番>/` のある連番をすべて読む。"""
-    import durable
-
     rel = pp.plan_dir(main, name) / "releases"
     try:
         seqs = sorted(int(d.name) for d in rel.iterdir() if d.is_dir() and d.name.isdigit())
@@ -248,12 +252,24 @@ def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
     if not seqs:
         return None
     found = None
-    with durable.open_client(KIND, record_identity(main, name), record_start(main)) as c:
-        for n in seqs:
-            ev = c.get_event(workflow_id(name), f"range-{n}", timeout_seconds=0)
-            if isinstance(ev, dict) and set(prs) & set(ev.get("prs") or []):
-                found = ev.get("version")
+    for n, ev in zip(seqs, events_of(main, name, [f"range-{n}" for n in seqs])):
+        if isinstance(ev, dict) and set(prs) & set(ev.get("prs") or []):
+            found = ev.get("version")
     return found
+
+
+def events_of(main: Path, name: str, keys: list[str]) -> list:
+    """イベントを待たずに読む。耐久の記録に無い（作り直しの前に立てた・記録が無い）ものは台帳のチェックポイントの控えを読む（決定 6）。"""
+    import durable
+
+    got = [None] * len(keys)
+    if record_exists(main, name):
+        try:
+            with durable.open_client(KIND, record_identity(main, name), record_start(main)) as c:
+                got = [c.get_event(workflow_id(name), k, timeout_seconds=0) for k in keys]
+        except durable.DurableError:
+            pass
+    return [ev if ev is not None else plg.published(main, name, k) for ev, k in zip(got, keys)]
 
 
 def lane_request_id(state: Path, lane: str) -> str:
@@ -267,37 +283,9 @@ def lane_request_id(state: Path, lane: str) -> str:
     return rid
 
 
-REQUEST_ID_RE = re.compile(r"^([a-z0-9][a-z0-9_-]{0,31})-r\d{12}$")
-
-
-def request_errors(msg: object) -> list[str]:
-    """リリースの依頼のメッセージの形の誤り（`contracts/forms/parallel-request.json`）。空なら形に合う。"""
-    if not isinstance(msg, dict):
-        return ["オブジェクトでない"]
-    errs = []
-    if msg.get("kind") != "request":
-        errs.append("kind が request でない")
-    m = REQUEST_ID_RE.match(str(msg.get("id") or ""))
-    if not m:
-        errs.append("id が <レーン名>-r<数字 12 桁> でない")
-    elif m.group(1) != msg.get("lane"):
-        errs.append("id のレーン名が lane と違う")
-    for k in ("prs", "issues"):
-        v = msg.get(k)
-        if not isinstance(v, list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in v):
-            errs.append(f"{k} が整数の配列でない")
-    for k in ("sprint_state", "at"):
-        if not isinstance(msg.get(k), str) or not msg.get(k):
-            errs.append(f"{k} が空でない文字列でない")
-    return errs
-
-
 def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
-    """リリースの依頼を話題 `inbox` へ送る。冪等の鍵は `<ID>:inbox:<依頼>`。依頼の ID を返す。"""
-    import durable
-
+    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。依頼の ID を返す。"""
     rid = lane_request_id(state, lane)
-    wid = workflow_id(name)
     msg = {
         "kind": "request",
         "id": rid,
@@ -307,22 +295,19 @@ def send_release_request(main: Path, name: str, lane: str, prs: list[int], issue
         "sprint_state": str(state),
         "at": pe.utc_stamp(),
     }
-    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{rid}", start=record_start(main))
+    deliver_message(main, name, msg, "inbox", rid)
     return rid
 
 
 def read_answer(main: Path, name: str, rid: str, timeout: float = 0) -> tuple[Optional[dict], Optional[dict]]:
     """(答え `answer-<依頼>`, 知らせ `defer-<依頼>`)。`timeout` 秒まで答えを待つ（0 は待たない）。知らせでは返らない（I10）。"""
-    import durable
 
-    ident, wid = record_identity(main, name), workflow_id(name)
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        ans = durable.event_from(KIND, ident, wid, f"answer-{rid}", 0, start=record_start(main))
+        ans, dfr = events_of(main, name, [f"answer-{rid}", f"defer-{rid}"])
         if isinstance(ans, dict):
             return ans, None
         if time.monotonic() >= deadline:
-            dfr = durable.event_from(KIND, ident, wid, f"defer-{rid}", 0, start=record_start(main))
             return None, dfr if isinstance(dfr, dict) else None
         time.sleep(min(5.0, max(0.2, deadline - time.monotonic())))
 
@@ -341,15 +326,11 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
         d = pe.organizer_dir()
         return pe.answer_files_of(d, ids) if d else {i: {"answer": None, "defer": None} for i in ids}
     out = {i: {"answer": None, "defer": None} for i in ids}
-    if not ids or not record_exists(main, name):
+    if not ids or not (record_exists(main, name) or plg.checkpoint_path(main, name).exists()):
         return out
-    import durable
-
-    with durable.open_client(KIND, record_identity(main, name), record_start(main)) as c:
-        for i in ids:
-            ans = c.get_event(workflow_id(name), f"answer-{i}", timeout_seconds=0)
-            dfr = c.get_event(workflow_id(name), f"defer-{i}", timeout_seconds=0)
-            out[i] = {"answer": ans if isinstance(ans, dict) else None, "defer": dfr if isinstance(dfr, dict) else None}
+    got = events_of(main, name, [k for i in ids for k in (f"answer-{i}", f"defer-{i}")])
+    for i, ans, dfr in zip(ids, got[::2], got[1::2]):
+        out[i] = {"answer": ans if isinstance(ans, dict) else None, "defer": dfr if isinstance(dfr, dict) else None}
     return out
 
 
@@ -366,7 +347,7 @@ def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=
     if got:
         return LaneRef(got[0], name, got.home, got.repo)
     plan = helper_plan_of(relay_dir)
-    if name and plan and status(main, plan) in RUNNING:
+    if name and plan and plg.accepts(plg.plan_state(main, plan, status(main, plan))):
         return LaneRef(plan, name, Path(main))
     return None
 
@@ -375,10 +356,25 @@ def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
     if pe.is_external(name):
         # 外のオーガナイザーのレーンは設計の承認と問いを依頼にしない（今どおり止まって人へ戻す。#2439）
         raise ValueError("外のオーガナイザーのレーンは問いを依頼にしない")
+    deliver_message(main, name, msg, "inbox", key)
+
+
+def deliver_message(main: Path, name: str, msg: dict, topic: str, key: str) -> None:
+    """台帳へ書いてから耐久ワークフローへ知らせる（#2647 の I1）。台帳を書けなければ例外で返し、知らせない。
+
+    知らせの失敗（記録が無い・開けない）は標準エラーへ出すだけにする。耐久ワークフローは次の観測で台帳から読む。
+    冪等の鍵は `<ID>:<話題>:<key>`。"""
     import durable
 
+    kind, lkey = plg.message_key(msg, topic, key)
+    plg.append_ledger_row(main, name, kind, lkey, msg, by=msg.get("lane") or ("organizer" if kind == "answer" else None))
+    if not record_exists(main, name):
+        return
     wid = workflow_id(name)
-    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{key}", start=record_start(main))
+    try:
+        durable.send_to(KIND, record_identity(main, name), wid, msg, topic, f"{wid}:{topic}:{key}", start=record_start(main))
+    except durable.DurableError as exc:
+        print(f"parallel: 耐久ワークフローへ知らせられない（台帳には書いた）: {exc}", file=sys.stderr, flush=True)
 
 
 def _head_sha(cwd: str) -> str:
@@ -484,6 +480,5 @@ def requests_for(main: Path, name: str) -> list[dict]:
 
 
 def resume_plan(main: Path, name: str, msg: dict, key: str) -> None:
-    import durable
-
-    durable.send_to(KIND, record_identity(main, name), workflow_id(name), msg, "resume", key, start=record_start(main))
+    """リリースの承認と結果を送る（`key` は話題の中の冪等の鍵）。"""
+    deliver_message(main, name, msg, "resume", key)
