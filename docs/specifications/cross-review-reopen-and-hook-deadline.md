@@ -74,7 +74,7 @@ carmo-system-console の会話の記録（2026-09-27 に集計）で、次の手
 | `plugins/ndf/scripts/lib/loop_drive.py` の `rerun_reason`・`keep_finished`・`keep_finished_output`・`result_args`・`args_diff`・`pr_head` | 完了した実行の回の結果を返してよいかの判定（cross-review と cross-refactoring の駆動の共有の部品。結果を変える引数の比較は #1263） |
 | `cross-review/scripts/drive.py` の `Drive.finished`・`Drive.pr_head` | 耐久の記録の完了を返すかを `keep_finished_output` で決める。終わりの出力に PR の head と結果を変える引数を残す |
 | `plugins/ndf/scripts/hook_lib/deadline.py` | `DEADLINE_SECONDS`・`MARGIN_SECONDS`・`Deadline`・`HookDeadlineExceeded` |
-| `plugins/ndf/scripts/hook.py` の `_guards` | worktree の guard・token の guard・読む Skill の guard・起票の guard・問い合わせの guard を締め切りの中で打つ |
+| `plugins/ndf/scripts/hook.py` の `_guards` | worktree の guard・token の guard・読む Skill の guard・規約の文書の guard・起票の guard・問い合わせの guard を締め切りの中で打つ |
 
 ```mermaid
 classDiagram
@@ -196,7 +196,7 @@ cross-refactoring の駆動も同じ `keep_finished_output` を通る（#1263。
 
 `hook.py` の `dispatch` は事象を問わず `_guards` を通し、`_guards` が `Deadline` を掛けてから guard を打つ。guard を打つのは
 Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ちの Slack 通知（`wait_notify`）は締め切りを外した後に打つ。
-読む Skill の guard（`hook_lib/worker_skills.py`。Claude Code の PreToolUse の Agent・Task）・起票の guard（`hook_lib/issue_guard.py`。Claude Code の PreToolUse の Bash）・問い合わせの guard（`hook_lib/ask_guard.py`。Claude Code の PreToolUse の `AskUserQuestion`）も締め切りの中で打ち、問い合わせの guard が`deny` を返したときは待ちの通知を打たない。
+読む Skill の guard（`hook_lib/worker_skills.py`。Claude Code の PreToolUse の Agent・Task）・規約の文書の guard（`hook_lib/supervisor_docs.py`。Claude Code の PreToolUse の Read・Bash）・起票の guard（`hook_lib/issue_guard.py`。Claude Code の PreToolUse の Bash）・問い合わせの guard（`hook_lib/ask_guard.py`。Claude Code の PreToolUse の `AskUserQuestion`）も締め切りの中で打ち、問い合わせの guard が`deny` を返したときは待ちの通知を打たない。
 副命令 `wait-notify` と `goal-skill`（Claude Code の `UserPromptSubmit` の `/goal` の条件の Skill の案内）は `_guards` を通さず、締め切りを掛けない。
 
 | 項目 | 振る舞い |
@@ -204,8 +204,8 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 | 割り込み | `signal.setitimer(ITIMER_REAL, DEADLINE_SECONDS)` と `SIGALRM`。過ぎたら今の判定の名前（`Deadline.current`）で `HookDeadlineExceeded` を送出する |
 | 例外の型 | `BaseException` から派生する（guard の中の `except Exception` に飲まれない）。`main` は guard の外で届いた場合も捕まえて終了コード 0 で抜ける |
 | 子のプロセス | `subprocess.run` は待っている間の例外で子を止めるため、`git` の子が残らない |
-| 過ぎたときの標準出力 | それまでに終わった判定の結果だけを `_merge` の規則で出す（token の guard・読む Skill の guard・問い合わせの guard のどれかの拒否が済んでいれば拒否） |
-| 過ぎたときの標準エラー | `[ndf hook] 締め切り 3.5 秒を過ぎたため <判定の名前> を飛ばして通した`。名前は `worktree-guard`・`token-guard`・`worker-skills`・`ask-guard` のどれか |
+| 過ぎたときの標準出力 | それまでに終わった判定の結果だけを `_merge` の規則で出す（token の guard・読む Skill の guard・規約の文書の guard・問い合わせの guard のどれかの拒否が済んでいれば拒否） |
+| 過ぎたときの標準エラー | `[ndf hook] 締め切り 3.5 秒を過ぎたため <判定の名前> を飛ばして通した`。名前は `worktree-guard`・`token-guard`・`worker-skills`・`supervisor-docs`・`ask-guard` のどれか |
 | 終了コード | 0 |
 | 掛けられない環境 | `setitimer` を持たない（Windows）・メインのスレッドの外では、`Deadline.start` が偽を返し、締め切りなしで今の振る舞いのまま通す |
 | 外した後に届いた割り込み | 捨てる（`_armed` が偽なら送出しない） |
