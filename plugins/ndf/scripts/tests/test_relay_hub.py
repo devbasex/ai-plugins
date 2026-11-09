@@ -1089,3 +1089,77 @@ def test_terminal_request_only_from_a_human_terminal(state, monkeypatch, spawned
     with pytest.raises(_Passthrough):
         rr.cmd_run([])
     assert seen == ([hb.TERMINAL] if asked else [])
+
+
+# ---------------------------------------------------------------- 版の置き場が消えてもレーンを起こす（#2647 の条件 17・18・I14）
+
+
+def _version_dir(base, name, mark=None):
+    """MANIFEST と仮想環境の python を持つバージョンディレクトリを置く（`uv sync` を通さない）。"""
+    from relay_lib import version_dir as vd
+
+    d = base / name
+    (d / ".venv" / "bin").mkdir(parents=True)
+    (d / vd.MANIFEST).write_text("")
+    (d / ".venv" / "bin" / "python").write_text("")
+    if mark:
+        (d / mark).touch()
+    return d
+
+
+def _point(base, name):
+    (base / "relay.current").write_text(name + "\n")
+
+
+def _launch(monkeypatch, base):
+    from relay_lib import version_dir as vd
+
+    seen = {}
+    monkeypatch.setattr(vd, "launcher_path", lambda: str(base / "relay.py"))
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hb.tmux, "new_session", lambda name, cwd, argv, env: seen.update(argv=argv))
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: not os.path.isfile(seen["argv"][0]))
+    rid = hc.put_request("spawn", "lane1", "/", ["--", "x"], "spawn")
+    hb.Hub(None).serve_once()
+    return seen.get("argv", [None])[0], json.loads(pathlib.Path(hb.hub_path(hb.RESULTS, f"{rid}.json")).read_text())
+
+
+def test_hub_keeps_its_version_dir_across_two_updates_by_another_container(dirs, tmp_path, monkeypatch):
+    """条件 17: リレーハブの起動の後に別のコンテナの更新が 2 回走っても、リレーハブの版の置き場は残り、起こせる。"""
+    from relay_lib import version_dir as vd
+    from test_relay import dead_pid
+
+    base = tmp_path / "ndf"
+    own = _version_dir(base, "relay-10.27.16-00000001", mark=f"inuse-another-container-{dead_pid()}")
+    monkeypatch.setattr(sys, "executable", str(own / ".venv" / "bin" / "python"))
+    for i, ver in enumerate(["10.27.24", "10.27.25", "10.27.26"]):
+        name = f"relay-{ver}-0000000{i + 2}"
+        _version_dir(base, name)
+        _point(base, name)
+        vd.VersionDir(str(base)).prune()
+    python, res = _launch(monkeypatch, base)
+    assert res["status"] == "ok", res
+    assert python == sys.executable
+
+
+def test_hub_launches_from_relay_current_when_its_version_dir_is_gone(dirs, tmp_path, monkeypatch):
+    """条件 18: リレーハブの版の置き場が消えていれば relay.current の仮想環境で起こし、記録に 1 行残す。"""
+    base = tmp_path / "ndf"
+    cur = _version_dir(base, "relay-10.27.26-00000004")
+    _point(base, cur.name)
+    monkeypatch.setattr(sys, "executable", str(base / "relay-10.27.16-00000001" / ".venv" / "bin" / "python"))
+    python, res = _launch(monkeypatch, base)
+    assert res["status"] == "ok", res
+    assert python == str(cur / ".venv" / "bin" / "python")
+    switched = [r for r in _hub_log() if r["event"] == "version-switched"]
+    assert len(switched) == 1 and cur.name in switched[0]["reason"]
+
+
+def test_hub_refuses_when_neither_its_python_nor_relay_current_exists(dirs, tmp_path, monkeypatch):
+    """I14: どちらも無ければ tmux-failed・1 で断り、登録しない。"""
+    base = tmp_path / "ndf"
+    base.mkdir()
+    monkeypatch.setattr(sys, "executable", str(base / "無い" / "python"))
+    _, res = _launch(monkeypatch, base)
+    assert res["items"][0]["result"] == hb.TMUX_FAILED and res["metrics"]["exit_code"] == 1
+    assert "lane1" not in hb.read_registry()
