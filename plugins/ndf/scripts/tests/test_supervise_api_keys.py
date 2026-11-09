@@ -36,7 +36,7 @@ def setup(tmp_path, seq, accounts, use, *keys, section=None, monkeypatch=None): 
     for name, value, account in keys:
         if account not in ca.names():
             accounts.add(account)
-        ak.add(name, value, account)
+        ak.add_key(name, value, account)
     if use:
         ak.set_use(use)
     if section and monkeypatch:
@@ -108,7 +108,7 @@ def test_near_limit_uses_the_key_only_above_the_threshold(tmp_path, seq, account
     set_responses, calls = setup(tmp_path, seq, accounts, "near-limit", section="main", monkeypatch=monkeypatch)
     monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")  # 2 回目の起動で使用量を読み直す
     accounts.add("main", util5=50)
-    ak.add("k", KEY_A, "main")
+    ak.add_key("k", KEY_A, "main")
     set_responses(OK)
     run_plan(tmp_path, STEP)
     assert [c["api_key"] for c in calls()] == [None]
@@ -122,7 +122,7 @@ def test_near_limit_after_a_limit_without_another_account(tmp_path, seq, account
     """near-limit の条件 3: 上限に当たって替えるアカウントが無ければ、待つ前に API キーで起動し直す。"""
     set_responses, calls = setup(tmp_path, seq, accounts, "near-limit", section="main", monkeypatch=monkeypatch)
     accounts.add("main", util5=10)
-    ak.add("k", KEY_A, "main")
+    ak.add_key("k", KEY_A, "main")
     set_responses(LIMIT, OK)
     s, text = run_plan(tmp_path, STEP)
     assert [c["api_key"] for c in calls()] == [None, KEY_A] and "結果: 完了" in text
@@ -156,13 +156,13 @@ def test_failure_of_a_replaced_key_is_not_recorded(accounts, monkeypatch):  # no
     from supervise_lib import claude as sc
 
     accounts.add("main")
-    ak.add("k", KEY_A, "main")
+    ak.add_key("k", KEY_A, "main")
     old = ak.get("k")
-    ak.add("k", KEY_B, "main")
+    ak.add_key("k", KEY_B, "main")
     rows: list[dict] = []
     ctx = SimpleNamespace(state=SimpleNamespace(cur={"id": "s1"}, switched=[], progress_write=rows.append))
     r = sc.ClaudeRunner(ctx)
     assert r.keys.result(old, {"ok": False, "auth": True}, set()) is True
-    assert ak.state_of(ak.get("k")).state == ak.OK and ak.pick().name == "k"
+    assert ak.state_of(ak.get("k")).state == ak.OK and ak.pick_key().name == "k"
     assert rows == [{"kind": "api_key", "step": "s1", "name": "k", "reason": "stale_generation"}]
     assert json.dumps(rows).count("SECRET") == 0

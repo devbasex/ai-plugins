@@ -204,7 +204,7 @@ def _capacity_cmd(asker: Asker, name: str | None, five: str | None, seven: str |
 def _remove(asker: Asker, name: str | None) -> dict:
     name = asker.value("<名前>", "外す名前（アカウントか metered）", name)
     if keys.is_key(name):
-        return keys.remove(name)
+        return keys.key_remove(name)
     if name == ca.METERED:
         if not ca.remove_metered():
             raise Fail("no_declaration", "保存した従量の接続の宣言が無い")
@@ -284,7 +284,7 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
 def _check(name: str | None) -> dict:
     """今効いている従量の接続の宣言で、Bedrock の Claude を呼べるかを確かめる（F2）。登録済み API キーの名前ならそのキーを確かめる。"""
     if keys.is_key(name):
-        return keys.check(name)
+        return keys.key_check(name)
     if name != ca.METERED:
         raise Fail("invalid_name", "確かめられるのは metered だけ: account check metered", 2)
     env = ca.fallback_env()
@@ -387,8 +387,8 @@ def cmd_account(args: list[str]) -> int:
     handlers = {
         "add": lambda: _add(asker, a.name, a.code, a.json, swept),
         "add-bedrock": lambda: _add_bedrock(asker, a.profile, a.region, a.model),
-        "add-api-key": lambda: keys.add(asker, a.name, a.account, a.key_file),
-        "api-key-use": lambda: keys.use(a.value),
+        "add-api-key": lambda: keys.key_add(asker, a.name, a.account, a.key_file),
+        "api-key-use": lambda: keys.key_use(a.value),
         "check": lambda: _check(a.name),
         "list": _list_rows,
         "remove": lambda: _remove(asker, a.name),

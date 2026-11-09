@@ -61,7 +61,7 @@ def _read_key(asker: Asker, key_file: str | None) -> str:
     return value
 
 
-def add(asker: Asker, name: str | None, account: str | None, key_file: str | None) -> dict:
+def key_add(asker: Asker, name: str | None, account: str | None, key_file: str | None) -> dict:
     """API キーを確かめてから登録する（F1）。確かめの失敗・衝突・書けないときは保存しない（I1〜I3・I9）。"""
     name = asker.value("<名前>", "API キーの名前", name)
     account = asker.value("--account", "結び付ける登録済みアカウント", account, ca.names())
@@ -69,17 +69,17 @@ def add(asker: Asker, name: str | None, account: str | None, key_file: str | Non
     key = _read_key(asker, key_file)
     _verify(key)
     try:
-        replaced = ak.add(name, key, account)
+        replaced = ak.add_key(name, key, account)
     except ak.Refused as e:
         raise Fail(e.reason, e.message, 2 if e.reason == "invalid_name" else 1) from e
-    except (ak.BookError, ak.lock_timeout(), OSError) as e:
+    except (ak.BookError, ak.book_lock_timeout(), OSError) as e:
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     print(PURCHASED_NOTE, file=sys.stderr)
     return {"name": name, "account": account, "replaced": replaced, "text": f"登録した: {name}（アカウント {account}）"}
 
 
 def _precheck(name: str, account: str) -> None:
-    """要求を打つ前に分かる拒みの理由を先に返す（保存の直前にも `ak.add` が同じ規則で確かめる）。"""
+    """要求を打つ前に分かる拒みの理由を先に返す（保存の直前にも `ak.add_key` が同じ規則で確かめる）。"""
     if name == ca.METERED or name in ca.names():
         raise Fail("name_conflict", f"名前が登録済みアカウントか予約の名前と重なる: {name}")
     if not ca.valid_name(name):
@@ -94,38 +94,38 @@ def _precheck(name: str, account: str) -> None:
         raise Fail("account_taken", f"アカウント {account} には API キー {taken[0]} が結び付いている（1 アカウントに 1 本）")
 
 
-def use(value: str | None) -> dict:
+def key_use(value: str | None) -> dict:
     """使い方の宣言を読む・変える（F4）。"""
     if value is None:
-        now = ak.use()
+        now = ak.use_setting()
         return {"use": now, "text": f"API キーの使い方: {now}"}
     if value not in ak.USES:
         raise Fail("invalid_name", f"使い方は {' / '.join(ak.USES)} のどれか: {value}", 2)
     try:
         ak.set_use(value)
-    except (ak.BookError, ak.lock_timeout(), OSError) as e:
+    except (ak.BookError, ak.book_lock_timeout(), OSError) as e:
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     return {"use": value, "text": f"API キーの使い方: {value}"}
 
 
 def is_key(name: str | None) -> bool:
-    return bool(name) and name in ak.names()
+    return bool(name) and name in ak.key_names()
 
 
-def check(name: str) -> dict:
+def key_check(name: str) -> dict:
     """登録済み API キーに 1 回要求を打ち、成功なら状態を `ok` へ戻す（F3）。失敗なら状態を変えない。"""
     k = ak.get(name)
     if k is None:
         raise Fail("not_registered", f"登録されていない: {name}")
     _verify(k.key)
-    ak.note(k.name, k.generation, ak.OK, checked=True)
+    ak.note_state(k.name, k.generation, ak.OK, checked=True)
     return {"name": name, "kind": "api_key", "text": f"使える: {name}"}
 
 
-def remove(name: str) -> dict:
+def key_remove(name: str) -> dict:
     try:
-        ak.remove(name)
-    except (ak.BookError, ak.lock_timeout(), OSError) as e:
+        ak.remove_key(name)
+    except (ak.BookError, ak.book_lock_timeout(), OSError) as e:
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     return {"name": name, "kind": "api_key", "text": f"外した: {name}（API キー）"}
 
@@ -133,7 +133,7 @@ def remove(name: str) -> dict:
 def list_rows() -> list[dict]:
     """一覧の API キーの行（値を除く）。登録簿が壊れていれば 1 行を標準エラーへ出して行を足さない。"""
     try:
-        return ak.rows()
+        return ak.key_rows()
     except ak.BookError as e:
         print(f"{e}（API キーを使わずに動く）", file=sys.stderr)
         return []

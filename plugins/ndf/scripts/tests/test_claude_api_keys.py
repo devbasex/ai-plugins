@@ -122,15 +122,15 @@ def test_add_two_keys_replace_and_remove(accounts):  # noqa: F811
     accounts.add("gmail")
     accounts.add("main")
     accounts.add("other")
-    assert ak.add("k-gmail", KEY_A, "gmail") is False
-    assert ak.add("k-main", KEY_B, "main") is False
+    assert ak.add_key("k-gmail", KEY_A, "gmail") is False
+    assert ak.add_key("k-main", KEY_B, "main") is False
     assert [k.name for k in ak.keys()] == ["k-gmail", "k-main"]
     assert stat.S_IMODE(os.stat(book(accounts)).st_mode) == 0o600
     gen = ak.get("k-main").generation
-    assert ak.add("k-main", KEY_B, "other") is True  # 同じ名前は置き換わる（アカウントを替えても）
+    assert ak.add_key("k-main", KEY_B, "other") is True  # 同じ名前は置き換わる（アカウントを替えても）
     assert ak.get("k-main").account == "other" and ak.get("k-main").generation != gen
-    assert ak.remove("k-gmail") and not ak.remove("k-gmail")
-    assert ak.names() == ["k-main"]
+    assert ak.remove_key("k-gmail") and not ak.remove_key("k-gmail")
+    assert ak.key_names() == ["k-main"]
 
 
 @pytest.mark.parametrize(
@@ -145,19 +145,19 @@ def test_add_two_keys_replace_and_remove(accounts):  # noqa: F811
 def test_add_refuses(accounts, name, account, reason):  # noqa: F811
     accounts.add("gmail")
     accounts.add("main")
-    ak.add("k1", KEY_A, "main")
+    ak.add_key("k1", KEY_A, "main")
     with pytest.raises(ak.Refused) as e:
-        ak.add(name, KEY_B, account)
+        ak.add_key(name, KEY_B, account)
     assert e.value.reason == reason
 
 
 def test_state_update_with_old_generation_is_ignored(accounts):  # noqa: F811
     accounts.add("main")
-    ak.add("k", KEY_A, "main")
+    ak.add_key("k", KEY_A, "main")
     old = ak.get("k")
-    ak.add("k", KEY_B, "main")
-    assert ak.note(old.name, old.generation, ak.AUTH_FAILED) is False
-    assert ak.state_of(ak.get("k")).state == ak.OK and ak.pick().name == "k"
+    ak.add_key("k", KEY_B, "main")
+    assert ak.note_state(old.name, old.generation, ak.AUTH_FAILED) is False
+    assert ak.state_of(ak.get("k")).state == ak.OK and ak.pick_key().name == "k"
     (accounts.root / ak.STATE_FILE).write_text(json.dumps({"k": {"state": "auth_failed"}}))  # 世代の無い行
     assert ak.state_of(ak.get("k")).state == ak.OK
 
@@ -165,42 +165,42 @@ def test_state_update_with_old_generation_is_ignored(accounts):  # noqa: F811
 def test_pick_by_name_and_state(accounts):  # noqa: F811
     accounts.add("x")
     accounts.add("y")
-    ak.add("b", KEY_B, "y")
-    ak.add("a", KEY_A, "x")
-    assert ak.pick().name == "a" and ak.pick().name == "a"
+    ak.add_key("b", KEY_B, "y")
+    ak.add_key("a", KEY_A, "x")
+    assert ak.pick_key().name == "a" and ak.pick_key().name == "a"
     a = ak.get("a")
-    ak.note("a", a.generation, ak.CREDIT_LOW)
-    assert ak.pick().name == "b"
-    ak.note("a", a.generation, ak.CREDIT_LOW, now=time.time())
+    ak.note_state("a", a.generation, ak.CREDIT_LOW)
+    assert ak.pick_key().name == "b"
+    ak.note_state("a", a.generation, ak.CREDIT_LOW, now=time.time())
     rows = json.loads((accounts.root / ak.STATE_FILE).read_text())
     rows["a"]["since"] = cu.iso_utc(time.time() - ak.CREDIT_HOLD - 1)  # 保留が過ぎた
     (accounts.root / ak.STATE_FILE).write_text(json.dumps(rows))
-    assert ak.pick().name == "a"
-    ak.note("a", a.generation, ak.AUTH_FAILED)
-    assert ak.pick().name == "b" and ak.pick(exclude={"b"}) is None
+    assert ak.pick_key().name == "a"
+    ak.note_state("a", a.generation, ak.AUTH_FAILED)
+    assert ak.pick_key().name == "b" and ak.pick_key(exclude={"b"}) is None
 
 
 def test_use_is_off_without_or_with_broken_book(accounts):  # noqa: F811
-    assert ak.use() == "off" and ak.problem() is None
+    assert ak.use_setting() == "off" and ak.problem() is None
     accounts.add("main")
-    ak.add("k", KEY_A, "main")
+    ak.add_key("k", KEY_A, "main")
     for v in ak.USES:
         ak.set_use(v)
-        assert ak.use() == v
+        assert ak.use_setting() == v
     book(accounts).write_text("{broken")
-    assert ak.use() == "off" and ak.problem() and ak.pick() is None and ak.names() == []
+    assert ak.use_setting() == "off" and ak.problem() and ak.pick_key() is None and ak.key_names() == []
 
 
 def test_key_env_only_for_worker_not_for_wrapper_section(accounts, monkeypatch):  # noqa: F811
     """受け入れ条件 5・I5: worker の子には値が 1 本入り、OAuth のトークンと AUTH_TOKEN は無い。ラッパーの区間の環境には値が無い。"""
     accounts.add("a")
     accounts.add("b")
-    ak.add("k", KEY_A, "a")
+    ak.add_key("k", KEY_A, "a")
     ak.set_use("always")
     monkeypatch.setenv(ca.TOKEN_ENV, "oauth-SECRET")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "auth-SECRET")
     monkeypatch.setenv(ca.NAME_ENV, "a")
-    env = ak.child_env(ak.pick(), dict(os.environ))
+    env = ak.env_with_key(ak.pick_key(), dict(os.environ))
     assert env[ak.KEY_ENV] == KEY_A and env[ak.NAME_ENV] == "k"
     assert ca.TOKEN_ENV not in env and "ANTHROPIC_AUTH_TOKEN" not in env and ca.NAME_ENV not in env
     from relay_lib import claude as relay_claude
@@ -232,12 +232,12 @@ def test_cli_add_list_check_remove_without_leaking(tmp_path, accounts, aws, mess
     lt = relay(tmp_path, accounts, aws, messages, "list")
     assert "k-gmail" in lt.stdout and "使える" in lt.stdout
     k = ak.get("k-main")
-    ak.note("k-main", k.generation, ak.CREDIT_LOW)
+    ak.note_state("k-main", k.generation, ak.CREDIT_LOW)
     assert "残高切れ" in relay(tmp_path, accounts, aws, messages, "list").stdout
     c = relay(tmp_path, accounts, aws, messages, "check", "k-main")
     assert c.returncode == 0 and ak.state_of(ak.get("k-main")).state == ak.OK
     r = relay(tmp_path, accounts, aws, messages, "remove", "k-gmail")
-    assert r.returncode == 0 and ak.names() == ["k-main"]
+    assert r.returncode == 0 and ak.key_names() == ["k-main"]
     no_leak(a, b, lj, lt, c, r)
     for f in accounts.root.iterdir():
         if f.is_file() and f.name != ak.BOOK_FILE:
@@ -284,19 +284,19 @@ def test_cli_add_check_failure_saves_nothing(tmp_path, accounts, aws, messages, 
 def test_cli_add_refusals(tmp_path, accounts, aws, messages, args, stdin, code, reason):  # noqa: F811
     accounts.add("main")
     accounts.add("gmail")
-    ak.add("k1", KEY_B, "main")
+    ak.add_key("k1", KEY_B, "main")
     messages.ok(KEY_A)
     p = relay(tmp_path, accounts, aws, messages, "add-api-key", *args, "--json", stdin=stdin)
     assert p.returncode == code
     if reason != "invalid_name":
         assert json.loads(p.stdout)["reason"] == reason
-    assert ak.names() == ["k1"]
+    assert ak.key_names() == ["k1"]
     no_leak(p)
 
 
 def test_cli_oauth_add_refuses_a_key_name(tmp_path, accounts, aws, messages):  # noqa: F811
     accounts.add("main")
-    ak.add("k1", KEY_A, "main")
+    ak.add_key("k1", KEY_A, "main")
     p = relay(tmp_path, accounts, aws, messages, "add", "k1", "--json")
     assert p.returncode == 1 and json.loads(p.stdout)["reason"] == "name_conflict"
 
@@ -314,9 +314,9 @@ def test_cli_api_key_use(tmp_path, accounts, aws, messages):  # noqa: F811
 def test_cli_check_failure_keeps_state(tmp_path, accounts, aws, messages):  # noqa: F811
     """受け入れ条件 12: 確かめ直しが失敗すれば状態を変えず、成功すれば ok へ戻す。"""
     accounts.add("main")
-    ak.add("k", KEY_A, "main")
+    ak.add_key("k", KEY_A, "main")
     k = ak.get("k")
-    ak.note("k", k.generation, ak.CREDIT_LOW)
+    ak.note_state("k", k.generation, ak.CREDIT_LOW)
     messages.replies[KEY_A] = (400, CREDIT_BODY)
     p = relay(tmp_path, accounts, aws, messages, "check", "k", "--json")
     assert p.returncode == 1 and json.loads(p.stdout)["reason"] == "credit_low"

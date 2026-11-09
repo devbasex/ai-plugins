@@ -85,12 +85,12 @@ def book_path() -> str:
     return os.path.join(ca.store_dir(), BOOK_FILE)
 
 
-def state_path() -> str:
+def key_state_path() -> str:
     return os.path.join(ca.store_dir(), STATE_FILE)
 
 
 @contextmanager
-def _locked():
+def _book_locked():
     import locks  # 外部パッケージ（filelock）。読み込みのときには import しない
 
     d = os.path.join(ca.make_store(), ca.LOCKS_DIR)
@@ -99,7 +99,7 @@ def _locked():
         yield
 
 
-def lock_timeout() -> type[BaseException]:
+def book_lock_timeout() -> type[BaseException]:
     return ca.lock_timeout()
 
 
@@ -115,7 +115,7 @@ def _raw_book() -> dict:
     return data
 
 
-def _key_of(name: str, row) -> ApiKey | None:
+def _api_key_of(name: str, row) -> ApiKey | None:
     if not isinstance(row, dict):
         return None
     vals = [row.get(k) for k in ("account", "added_at", "generation", "key")]
@@ -127,10 +127,10 @@ def _key_of(name: str, row) -> ApiKey | None:
 def keys() -> list[ApiKey]:
     """登録済み API キー（名前の順）。壊れた行は飛ばす。登録簿が壊れていれば BookError。"""
     raw = _raw_book()["keys"]
-    return [k for k in (_key_of(n, raw[n]) for n in sorted(raw)) if k is not None]
+    return [k for k in (_api_key_of(n, raw[n]) for n in sorted(raw)) if k is not None]
 
 
-def names() -> list[str]:
+def key_names() -> list[str]:
     """登録済み API キーの名前。登録簿が壊れていれば空（OAuth の登録の衝突の検査が使う）。"""
     try:
         return [k.name for k in keys()]
@@ -154,7 +154,7 @@ def problem() -> str | None:
     return None
 
 
-def use() -> str:
+def use_setting() -> str:
     """使い方の宣言。無い・読めない・値が違うときは `off`（I6）。"""
     try:
         v = _raw_book().get("use") or "off"
@@ -166,13 +166,13 @@ def use() -> str:
 def set_use(value: str) -> None:
     if value not in USES:
         raise ValueError(value)
-    with _locked():
+    with _book_locked():
         book = _raw_book()
         book["use"] = value
         ca._write(book_path(), book)
 
 
-def add(name: str, key: str, account: str, now: float | None = None) -> bool:
+def add_key(name: str, key: str, account: str, now: float | None = None) -> bool:
     """確かめの済んだキーを登録する（同じ名前なら置き換える）。置き換えたら真。拒むときは Refused（I1・I2・I9）。"""
     if name == ca.METERED or name in ca.names():
         raise Refused("name_conflict", f"名前が登録済みアカウントか予約の名前と重なる: {name}")
@@ -181,7 +181,7 @@ def add(name: str, key: str, account: str, now: float | None = None) -> bool:
     if account not in ca.names():
         raise Refused("not_registered", f"登録済みアカウントでない: {account}")
     now = time.time() if now is None else now
-    with _locked():
+    with _book_locked():
         book = _raw_book()
         taken = [k.name for k in keys() if k.account == account and k.name != name]
         if taken:
@@ -192,13 +192,13 @@ def add(name: str, key: str, account: str, now: float | None = None) -> bool:
         book.setdefault("use", "off")
         book["keys"][name] = {"key": key, "account": account, "added_at": iso_utc(now), "generation": gen}
         ca._write(book_path(), book)
-        _write_state(name, gen, OK, now, checked=True)
+        _write_key_state(name, gen, OK, now, checked=True)
     return replaced
 
 
-def remove(name: str) -> bool:
+def remove_key(name: str) -> bool:
     """登録を外し、状態の行も消す。登録が無ければ偽。"""
-    with _locked():
+    with _book_locked():
         book = _raw_book()
         if name not in book["keys"]:
             return False
@@ -206,7 +206,7 @@ def remove(name: str) -> bool:
         ca._write(book_path(), book)
         rows = _raw_state()
         if rows.pop(name, None) is not None:
-            ca._write(state_path(), rows)
+            ca._write(key_state_path(), rows)
     return True
 
 
@@ -214,10 +214,10 @@ def remove(name: str) -> bool:
 
 
 def _raw_state() -> dict:
-    return ca._read(state_path()) or {}
+    return ca._read(key_state_path()) or {}
 
 
-def _write_state(name: str, generation: str, state: str, now: float, checked: bool = False) -> None:
+def _write_key_state(name: str, generation: str, state: str, now: float, checked: bool = False) -> None:
     """排他の中で呼ぶ。同じ状態なら `since` を変えない。"""
     rows = _raw_state()
     old = rows.get(name) if isinstance(rows.get(name), dict) else {}
@@ -225,7 +225,7 @@ def _write_state(name: str, generation: str, state: str, now: float, checked: bo
     row = {"generation": generation, "state": state, "since": old.get("since") if same else iso_utc(now)}
     row["checked_at"] = iso_utc(now) if checked else (old.get("checked_at") if old.get("generation") == generation else None)
     rows[name] = row
-    ca._write(state_path(), rows)
+    ca._write(key_state_path(), rows)
 
 
 def state_of(k: ApiKey, rows: dict | None = None) -> KeyState:
@@ -237,16 +237,16 @@ def state_of(k: ApiKey, rows: dict | None = None) -> KeyState:
     return KeyState(row["state"], row.get("since"), row.get("checked_at"))
 
 
-def note(name: str, generation: str, state: str, now: float | None = None, checked: bool = False) -> bool:
+def note_state(name: str, generation: str, state: str, now: float | None = None, checked: bool = False) -> bool:
     """状態を書く。起動の時に選んだ世代が登録簿の今の世代と一致するときだけ書き、書いたら真（I10）。"""
     now = time.time() if now is None else now
     try:
-        with _locked():
+        with _book_locked():
             k = next((x for x in keys() if x.name == name), None)
             if k is None or k.generation != generation:
                 return False
-            _write_state(name, generation, state, now, checked)
-    except (BookError, OSError, lock_timeout()):
+            _write_key_state(name, generation, state, now, checked)
+    except (BookError, OSError, book_lock_timeout()):
         return False
     return True
 
@@ -255,7 +255,7 @@ def note_success(k: ApiKey, now: float | None = None) -> None:
     """成功した起動の後、記録が `ok` でなければ `ok` へ戻す（保留が過ぎた残高切れのキーが通ったとき）。"""
     try:
         if state_of(k).state != OK:
-            note(k.name, k.generation, OK, now)
+            note_state(k.name, k.generation, OK, now)
     except OSError:
         pass
 
@@ -263,7 +263,7 @@ def note_success(k: ApiKey, now: float | None = None) -> None:
 # ---------------------------------------------------------------- 選定と子の環境
 
 
-def pick(exclude=(), now: float | None = None) -> ApiKey | None:
+def pick_key(exclude=(), now: float | None = None) -> ApiKey | None:
     """使えるキーのうち名前の順の先頭（I7・I8）。`exclude` の名前は除く。登録簿が壊れていれば None。"""
     now = time.time() if now is None else now
     try:
@@ -274,7 +274,7 @@ def pick(exclude=(), now: float | None = None) -> ApiKey | None:
     return next((k for k in cands if state_of(k, rows).selectable(now)), None)
 
 
-def child_env(k: ApiKey, base: dict) -> dict:
+def env_with_key(k: ApiKey, base: dict) -> dict:
     """`base` から認証の変数と従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻して、選んだ 1 本を足す。"""
     env = dict(base)
     declared = ca.fallback_env(env)
@@ -302,7 +302,7 @@ def inherited(environ=None) -> tuple[str, str] | None:
     return (name, gen) if name and gen and environ.get(KEY_ENV) else None
 
 
-def rows() -> list[dict]:
+def key_rows() -> list[dict]:
     """`account list` の行（値を除く）。登録簿が壊れていれば BookError。"""
     states = _raw_state()
     out = []
@@ -346,7 +346,7 @@ class KeyRoute:
             if bad:
                 print("supervise: " + bad, file=sys.stderr)
                 self.state.progress_write({"kind": "api_keys_invalid", "detail": bad})
-        return use()
+        return use_setting()
 
     def attempt(self, keep) -> KeyTry:
         """1 回の呼び出しの API キーの試し方。`keep()` はトークンを更新しないアカウントの名前（near-limit の判定へ渡す）。"""
@@ -380,7 +380,7 @@ class KeyRoute:
         if k is self.inherited:
             self.dropped = True
         if failure is not None:
-            reason = failure if note(k.name, k.generation, failure) else "stale_generation"
+            reason = failure if note_state(k.name, k.generation, failure) else "stale_generation"
             self.state.progress_write({"kind": "api_key", "step": self.state.cur.get("id"), "name": k.name, "reason": reason})
         return True
 
@@ -397,7 +397,7 @@ class KeyTry:
         """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。"""
         r = self.route
         if not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep())))):
-            if (k := pick(exclude=self.tried)) is not None:
+            if (k := pick_key(exclude=self.tried)) is not None:
                 return k
         return r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
 
@@ -405,7 +405,7 @@ class KeyTry:
         """キーで起動する（`call(環境)`）。キーで決着したらその結果、使うキーが無くなったら None を返す。"""
         while (k := self.pick()) is not None:
             self.route.note_switch(k)
-            res = call(child_env(k, dict(os.environ)) if k is not self.route.inherited else None)
+            res = call(env_with_key(k, dict(os.environ)) if k is not self.route.inherited else None)
             if not self.route.result(k, res, self.tried):
                 return res
         self.route.note_switch(None)
@@ -417,7 +417,7 @@ class KeyTry:
 
     def left(self) -> bool:
         """上限に当たって替えるアカウントが無いとき、試せるキーが残っていれば真（以後 near-limit でもキーを使う）。"""
-        if self.how == "off" or pick(exclude=self.tried) is None:
+        if self.how == "off" or pick_key(exclude=self.tried) is None:
             return False
         self.limit_hit = True
         return True
