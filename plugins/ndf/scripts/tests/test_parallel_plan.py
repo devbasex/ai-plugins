@@ -211,6 +211,13 @@ def test_handoff_name_follows_handoff_py(name, ok):
     assert (metrics["errors"] == 0) is ok
 
 
+def test_lane_handoff_must_not_take_organizer_name():
+    """レーンの引継ぎ文書はオーガナイザーの文書（parallel-<計画名>）と同じ名をとらない（#2778 の I5）。"""
+    plan, items, metrics = pp.check_data(variant(x=lambda d: d["lanes"][0].__setitem__("handoff", "parallel-p4")))
+    assert plan is None and metrics["errors"] > 0
+    assert [i["rule"] for i in items if i["level"] == "error"] == ["I5"]
+
+
 @pytest.fixture()
 def run_proc():
     """`parallel.py run p1` の起動の引数を持つ、動き続けるプロセス（`run.pid` の確かめが読む。#2647 の決定 9）。"""

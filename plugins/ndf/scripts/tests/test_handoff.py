@@ -220,3 +220,63 @@ def test_untracked_body_does_not_fail_local_doc_checks(main):
     for check in ("check-markdown-links.py", "check-doc-line-limit.py"):
         p = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / check), "--root", str(main)], capture_output=True, text=True)
         assert p.returncode == 0, (check, p.stdout[-500:], p.stderr[-500:])
+
+
+# --- オーガナイザーの文書 parallel-<計画名>（#2778） ----------------------------------
+
+ORGANIZER_CMD = "/goal /ndf:development-workflow --parallel p4 -- 終わり: [ndf-parallel] finished p4 の行を出したとき"
+
+
+def test_parallel_name_init_next_check_path_remove(main):
+    """オーガナイザーの文書を作り、起動と同じ 1 行を置き、形を確かめ、パスを引き、消せる。"""
+    code, out = run(main, "init", "parallel-p4", "--title", "並列の計画 p4")
+    body = body_of(main, "parallel-p4")
+    assert code == 0 and out["items"] == [{"path": str(body), "created": True}]
+    assert body.read_text() == TEMPLATE.replace("{title}", "並列の計画 p4")
+    code, out = run(main, "next", "parallel-p4", stdin=ORGANIZER_CMD + "\n")
+    _, start, end, _ = handoff_doc.find_section(body.read_text(), "次に実行するコマンド")
+    assert code == 0 and body.read_text()[start:end].strip("\n") == f"```ndf-next\n{ORGANIZER_CMD}\n```"
+    assert run(main, "check", "parallel-p4", "--trim")[0] == 0
+    assert run(main, "path", ".ndf/handoff/parallel-p4.md", "--exists")[0] == 0
+    history = main / ".ndf" / "handoff" / "parallel-p4-history.md"
+    history.write_text("x\n")
+    code, out = run(main, "remove", "parallel-p4")
+    assert code == 0 and not body.exists() and not history.exists()
+    assert run(main, "path", ".ndf/handoff/parallel-p4.md", "--exists")[0] == 1
+
+
+@pytest.mark.parametrize("name", ["parallel-", "parallel-P4", "parallel-p4-history", "parallel-_a", "parallel-" + "a" * 25, "plan-p4"])
+def test_parallel_bad_names_are_rejected_with_all_forms(main, name):
+    code, out = run(main, "init", name, "--title", "題")
+    assert code == 2 and "parallel-<計画名>" in out["summary"] and not (main / ".ndf" / "handoff").exists()
+
+
+@pytest.mark.parametrize(
+    "text, hit",
+    [
+        (ORGANIZER_CMD, True),
+        (".ndf/handoff/parallel-p4.md の続きから", True),
+        ("--parallel p40 -- 終わり", False),
+        ("--parallel-helper p4 3 提示 -- 終わり", False),
+        ("xparallel-p4", False),
+        ("--parallel-p4", False),
+        ("p4 の続き", False),
+    ],
+)
+def test_find_parallel_match_rules(main, text, hit):
+    run(main, "init", "parallel-p4", "--title", "t")
+    code, out = run(main, "find", f"--text={text}")  # `--` で始まる入力も値として渡す
+    assert (code, [Path(i["path"]).stem for i in out["items"]]) == ((0, ["parallel-p4"]) if hit else (1, []))
+
+
+def test_plan_name_limit_is_shared_with_parallel_plan():
+    """計画名の形は parallel_files の 1 か所にあり、handoff.py と計画の検査が同じ名を受け付ける（決定 3）。"""
+    sys.path.insert(0, str(SCRIPTS))
+    import handoff
+    import parallel_files
+    import parallel_plan
+
+    assert parallel_plan.PLAN_RE is parallel_files.PLAN_RE
+    for key, ok in (("a" * 24, True), ("a" * 25, False)):
+        assert bool(parallel_files.PLAN_RE.match(key)) is ok
+        assert bool(handoff.NAME_RE.match(f"parallel-{key}")) is ok
