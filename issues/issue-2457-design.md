@@ -2,13 +2,13 @@
 
 ## 目的
 
-- **今どうなっているか**: `--budget-minutes`（既定 30 分）から、選ぶ件数に加えて手順ごとの上限・修正の打ち切り・最終ゲートの締め切りまでを逆算している。テストの失敗・範囲のはみ出し・記名の欠けは項目を取り消す理由になり、PR https://github.com/devbasex/ai-plugins/pull/2452 では 5 項目を実装して範囲テストも通したのに、無関係なテスト 1 件の失敗で採用 0 件・起点の木へ戻して終わった
+- **今どうなっているか**: `--budget-minutes`（既定 30 分）から、選ぶ件数に加えて手順ごとの上限・修正の打ち切り・最終ゲートの締め切りまでを逆算している。テストの失敗・範囲のはみ出し・記名の欠けは項目を取り消す理由になる。PR https://github.com/devbasex/ai-plugins/pull/2452 では 5 項目を実装して範囲テストも通したが、無関係なテスト 1 件の失敗で採用 0 件・起点の木へ戻して終わった
 - **誰に効くか**: cross-refactoring を工程の 1 つ（検査のプラン）か単独で走らせる開発者と conductor
 - **変えると何が成り立つか**: 予算は「実装時間の見積りの合計がいくつまでの項目を選ぶか」にだけ使う。選んだ項目は、成立しないと判定したときと安全網の上限に当たったときを除いて取り消さず、直し切って最終ゲートまで進む。項目ごとの見積りと実装時間が実行ごとに残る
 
 ## 適用範囲
 
-- **働く範囲**: NDF のリリース対象（`plugins/ndf/skills/cross-refactoring/`・`plugins/ndf/contracts/limits.json`・検査のプランの雛形）。利用先のリポジトリで cross-refactoring を走らせたときも同じに働く
+- **働く範囲**: NDF のリリース対象（`plugins/ndf/skills/cross-refactoring/`・`plugins/ndf/contracts/limits.json`・検査のプランの雛形）である。利用先のリポジトリで cross-refactoring を走らせたときも同じに働く
 - **プロジェクトごとに違うもの**: 実装の予算は今どおり `--budget-minutes` か `.ndf/supervise.json` の `refactor_budget_minutes` で受ける。予算の延長と安全網の倍率・停滞と振動の定義は `limits.json` の既定を持ち、安全網の上限だけ引数 `--safety-net-minutes` でも受ける。テストと CI の待ちの上限は今どおり宣言（`.ndf/project.json` の `test`）の所要から決まる
 - **当たるモード**: `standard`
 
@@ -22,7 +22,12 @@
 | エージェントの停滞を「同じ行動と観測の繰り返し」と「交互の繰り返し」で検知し、回数でなく形で止める（STD なし。PRD1） | 外部の一次情報 | 回数の上限を置かず、停滞と振動の形で止める |
 | `git revert` は指定したコミットの変更だけを打ち消すコミットを積む（STD1） | 外部の一次情報 | 項目のコミットだけを打ち消せば、取り込んだベースブランチの変更は残る |
 
-要求と受け入れ条件は #2457 の本文にある（コピーは [issue-2457-requirements.md](issue-2457-requirements.md)）。この文書は「どう作るか」だけを扱う。受け入れ条件の番号はコピーの「受け入れ条件」の 1〜21 を指す。棚卸しの C・D の各行の処置と今の位置は [issue-2457-design-constraints.md](issue-2457-design-constraints.md)、決定の記録は [issue-2457-design-decisions.md](issue-2457-design-decisions.md) にある。
+要求と受け入れ条件は #2457 の本文にある（コピーは [issue-2457-requirements.md](issue-2457-requirements.md) ）。この文書は「どう作るか」だけを扱う。受け入れ条件の番号はコピーの「受け入れ条件」の 1〜21 を指す。
+
+| 分けた文書 | 持つもの |
+| --- | --- |
+| [issue-2457-design-constraints.md](issue-2457-design-constraints.md) | 棚卸しの C・D の各行の処置と今の位置 |
+| [issue-2457-design-decisions.md](issue-2457-design-decisions.md) | 決定の記録 |
 
 ## ドメインモデル
 
@@ -33,7 +38,7 @@
 | cross-refactoring（`ndf-cross-refactoring`） | 実装の予算・実装時間・予算の延長・リファクタリングの成立・無関係な失敗・停滞・振動・安全網の上限・比較の木・差し戻し・落ちたテストの材料 |
 | 開発の工程（`ndf-workflow`） | プラン・ステップ・ステップの延長・承認ゲート・欠け |
 
-関係は公開された言語である。cross-refactoring の駆動（`drive.py`）は共通の結果 JSON（`lib/step_result.py` の `status`・終了コード・`gaps`）とステップの延長のファイルで開発の工程へ伝える。開発の工程は cross-refactoring の状態ファイルを読まない。
+関係は公開された言語である。cross-refactoring の駆動（`drive.py`）は 2 つで開発の工程へ伝える。共通の結果 JSON（`lib/step_result.py` の `status`・終了コード・`gaps`）と、ステップの延長のファイルである。開発の工程は cross-refactoring の状態ファイルを読まない。
 
 ### 集約
 
@@ -193,6 +198,8 @@
 | `plugins/ndf/scripts/supervise_lib/engine.py`（変える） | 終了コード 10〜19 を承認ゲートとして扱う判定（`is_gate`）を、`run` のステップに加えて `drive` のステップにも当てる。今は `drive` の 10 が `on_fail`（`abort`）へ進み、人へ渡す止まりが失敗として記録される |
 | SKILL.md・`docs/01`〜`04`・`references/design-principles.md`・`docs/specifications/cross-refactoring-*.md`・`docs/glossary/glossary.json`（変える） | 変わった振る舞いと語に合わせる |
 
+### 呼び出しの関係
+
 ```mermaid
 graph TD
     subgraph 開発の工程
@@ -258,7 +265,7 @@ graph TD
 | `--budget-minutes N` | 意味が「実行全体の上限」から「実装の予算」に変わる。既定は `limits.json` の `cross-refactoring.default-budget`（3600 秒 = 60 分）。明示した値はそのまま使い、下限まで上げる経路は無い | 名前は変えない。明示している呼び出し元は、その値が実装の予算として読まれる |
 | `--safety-net-minutes N`（新しい） | 安全網の上限（分）。省けば実効の予算 × `cross-refactoring.safety-net` の倍率。止まった実行を、より大きい値で打ち直すと続く | 新しい引数 |
 
-呼び出し元の洗い出しは [issue-2457-design-constraints.md](issue-2457-design-constraints.md) の「`--budget-minutes` の呼び出し元」にある。
+呼び出し元の洗い出しは [issue-2457-design-constraints.md](issue-2457-design-constraints.md) にある（節「`--budget-minutes` の呼び出し元」）。
 
 ### 結果 JSON（`drive.py` の最後の行）
 
@@ -277,6 +284,8 @@ graph TD
 | `refactor.py merge-flaky-fix <ID>` | フレーキーの直しの起動の結果 | `FLAKY_FIX=kept\|none` | `Flaky-Fix` 以外のファイルの変更や記名の欠けは差し戻しと同じ材料で 1 回だけ直させ、直らなければ直しのコミットを打ち消して報告へ残す（項目は触らない） |
 
 ## 処理の流れ
+
+### 1 回の実行の流れ
 
 ```mermaid
 graph TD
@@ -302,6 +311,8 @@ graph TD
     Net[安全網の上限] -.->|どの時点でも| Halt
     Halt --> Rec[項目の行・結果 JSON gate]
 ```
+
+### 改善項目の状態
 
 改善項目の状態は今の値（`planned` / `tested` / `implemented` / `failing` / `verified` / `reverted` / `deferred`）を使い、足さない。止めたことは実行の `safety_net.halted_at` と結果 JSON の `status` が持ち、項目の状態は止めた時点のまま残る。
 

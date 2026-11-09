@@ -4,7 +4,15 @@
 
 ## 今の位置の引き直し
 
-棚卸しの表の位置は v10.27.14 の時点のものである。タグ `ndf--v10.27.14` と HEAD（`0491f91d5`）を `git diff` で比べ、表が挙げるファイルのうち `refactor_lib/` の `budget.py`・`init_test.py`・`verify.py`・`scope_check.py`・`fix_intake.py`・`wholetest.py`・`undo.py`・`triage.py`・`stop_revert.py`・`gate_ci.py`、`refactor_lib/commands/` の `gate.py`・`converge.py`・`plan.py`、`references/design-principles.md` は差分が 0 行だった。行がずれたのは `refactor_lib/commands/implement.py` の 325 行より後ろだけで、制約の中身が変わった行は無い。下の表の「今の位置」は HEAD の行番号である。
+棚卸しの表の位置は v10.27.14 の時点のものである。タグ `ndf--v10.27.14` と HEAD（`0491f91d5`）を `git diff` で比べた。表が挙げるファイルのうち、次のファイルは差分が 0 行だった。
+
+| 置き場 | ファイル |
+| --- | --- |
+| `refactor_lib/` | `budget.py`・`init_test.py`・`verify.py`・`scope_check.py`・`fix_intake.py`・`wholetest.py`・`undo.py`・`triage.py`・`stop_revert.py`・`gate_ci.py` |
+| `refactor_lib/commands/` | `gate.py`・`converge.py`・`plan.py` |
+| `references/` | `design-principles.md` |
+
+行がずれたのは `refactor_lib/commands/implement.py` の 325 行より後ろだけで、制約の中身が変わった行は無い。下の表の「今の位置」は HEAD の行番号である。
 
 パスは `plugins/ndf/skills/cross-refactoring/` からの相対で、`refactor_lib/` は `scripts/refactor_lib/` を指す。
 
@@ -57,7 +65,11 @@
 
 ## `--budget-minutes` の呼び出し元
 
-リポジトリ全体を `grep -rn "budget-minutes\|budget_minutes\|refactor_budget_minutes"` で探した結果である（2026-11-09、HEAD `0491f91d5`）。
+リポジトリ全体を次のコマンドで探した結果である（2026-11-09、HEAD `0491f91d5`）。
+
+```bash
+grep -rn "budget-minutes\|budget_minutes\|refactor_budget_minutes"
+```
 
 | 呼び出し元 | 渡している値 | この変更での扱い |
 | --- | --- | --- |
@@ -68,4 +80,4 @@
 | `plugins/ndf/skills/development-workflow/references/stage-notes.md:122` | 「必要なら `--budget-minutes`（既定 30 分）」と書くだけで、コードは渡していない | 文を「実装の予算（既定 60 分）」へ直す |
 | `plugins/ndf/scripts/tests/fixtures/supervise-contract/` | プランの雛形 6 件は `"budget_minutes": null` | 変えない |
 
-`plugins/ndf/scripts/supervise_lib/steps.py:140` の `budget_minutes is None` は supervise 自身のテストの上限の式（予算なし）を指し、cross-refactoring の予算ではない。変えない。
+`plugins/ndf/scripts/supervise_lib/steps.py:140` の `budget_minutes is None` は変えない。supervise 自身のテストの上限の式（予算なし）を指し、cross-refactoring の予算ではない。
