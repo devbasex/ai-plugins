@@ -9,6 +9,8 @@
 | `--body-file` / `-F` のファイル | その `gh issue create` を打つときの現在地（前の `cd` を `write_target.command_dirs()` で追う。字面から決められなければコマンドの実行ディレクトリ）からの相対で読む（`-` の標準入力は読めない形） |
 | `--body "$(cat <<'EOF' … EOF)"` | ヒアドキュメントの本文（区切りを引用しないときは展開を含まない本文だけ） |
 
+同じ Bash の中でその `gh issue create` より先に本文のファイルへ書き込む形（`printf … > body.md; gh issue create -F body.md`。
+書き込み先は `write_target.command_places()` が推定する）は、実行前の古い本文しか読めないため拒否する。
 ラベルは `--label` / `-l`（繰り返しとカンマ区切り）。短縮の名前は gh と同じく値を同じ語に続けてよい（`-l値`・`-l=値`・`-F値`）。定義と origin も同じ現在地から読む。`-R` / `--repo` が今のリポジトリ（`git remote get-url origin`）と
 違うときは判定しない。欠けがある・本文を上の形で読めない（標準入力・変数・`--web`）ときは拒否し、理由に欠けた項目名・
 定義のファイル・正しい手段を書く。GitHub は呼ばない。構文木を読み切れない・定義を読めないときは判定せずに通す。
@@ -114,8 +116,14 @@ def _arg_value(node: sp.Node) -> str | None:
     return sp.unquote(node)
 
 
-def create_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], str | None]:
-    """`gh issue create` の引数から `(本文, ラベル, --repo)`。本文を読めない形なら本文は `None`。"""
+class RewrittenBody(Exception):
+    """本文のファイルが、同じ Bash の中で `gh issue create` より先に書き込まれる。"""
+
+
+def create_args(nodes: list[sp.Node], cwd: str, written: frozenset[str] = frozenset()) -> tuple[str | None, list[str], str | None]:
+    """`gh issue create` の引数から `(本文, ラベル, --repo)`。本文を読めない形なら本文は `None`。
+
+    `written` は先に書き込まれる絶対パス。本文のファイルがそこにあれば `RewrittenBody` を送る。"""
     acc: dict = {"body": None, "labels": [], "repo": None}
     unreadable = False
     i = 0
@@ -124,7 +132,7 @@ def create_args(nodes: list[sp.Node], cwd: str) -> tuple[str | None, list[str], 
         name, eq, inline = _split_opt(word)
         unreadable |= name in WEB_OPTS
         value, i = _opt_value(nodes, i, name, eq, inline)
-        unreadable |= _apply_arg(acc, name, value, cwd)
+        unreadable |= _apply_arg(acc, name, value, cwd, written)
         i += 1
     return (None if unreadable else acc["body"]), acc["labels"], acc["repo"]
 
@@ -160,13 +168,13 @@ def _has_expansion(node: sp.Node) -> bool:
     return False
 
 
-def _apply_arg(acc: dict, name: str, value: str | None, cwd: str) -> bool:
+def _apply_arg(acc: dict, name: str, value: str | None, cwd: str, written: frozenset[str] = frozenset()) -> bool:
     """オプションを `acc`（body・labels・repo）へ反映する。本文を読めなかったら真。"""
     if name in BODY_OPTS:
         acc["body"] = value
         return value is None
     if name in FILE_OPTS:
-        acc["body"] = _read_file(value, cwd)
+        acc["body"] = _read_file(value, cwd, written)
         return acc["body"] is None
     if name in LABEL_OPTS and value:
         acc["labels"] += [x.strip() for x in value.split(",") if x.strip()]
@@ -175,10 +183,12 @@ def _apply_arg(acc: dict, name: str, value: str | None, cwd: str) -> bool:
     return False
 
 
-def _read_file(value: str | None, cwd: str) -> str | None:
+def _read_file(value: str | None, cwd: str, written: frozenset[str] = frozenset()) -> str | None:
     if value in (None, "", "-"):
         return None
     p = Path(value) if Path(value).is_absolute() else Path(cwd) / value
+    if written and write_target.normalize_path(str(p), "/") in written:
+        raise RewrittenBody(str(p))
     try:
         return p.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -200,6 +210,14 @@ def _unreadable_text(definition: issue_items.Definition) -> str:
     )
 
 
+def _rewritten_text(path: str, definition: issue_items.Definition) -> str:
+    return (
+        f"gh issue create の本文のファイル {path} を、同じコマンドの中で起票より先に書き込んでいる。起票の前の検査は実行前の古い本文"
+        "しか読めないため止めた。Issue は作られていない。本文のファイルの作成・更新を別の Tool 呼び出しで済ませてから、"
+        f"gh issue create だけを打ち直す。定義: {definition.path}。{_means(definition)}"
+    )
+
+
 def _gap_text(gaps, definition: issue_items.Definition) -> str:
     return (
         f"gh issue create の本文が記載項目の定義を満たさない: {issue_items.describe_gaps(gaps)}。Issue は作られていない。"
@@ -218,7 +236,7 @@ def issue_decision(ev: pl.Event) -> dict | None:
     if not found:
         return None
     base = ev.command_cwd() or ev.cwd
-    dirs = write_target.command_dirs(root, base)
+    dirs, writes = write_target.command_places(root, base)
     for node in found:
         cwd = dirs.get((node.start_byte, node.end_byte)) or base
         try:
@@ -227,7 +245,10 @@ def issue_decision(ev: pl.Event) -> dict | None:
             continue
         words = _call_words(node)
         start = _start([sp.unquote(w) for w in words]) + 3
-        body, labels, repo = create_args(words[start:], cwd)
+        try:
+            body, labels, repo = create_args(words[start:], cwd, writes.get((node.start_byte, node.end_byte), frozenset()))
+        except RewrittenBody as e:
+            return deny(_rewritten_text(str(e), definition))
         if issue_items.other_repo(repo, cwd):
             continue
         if body is None:

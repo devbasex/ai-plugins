@@ -135,6 +135,30 @@ def test_the_body_file_is_read_from_the_directory_after_cd(repo):
     assert why is not None and "読めない形" in why
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "printf broken > body.md; gh issue create -t t -l enhancement -F body.md",
+        "echo x >> ./body.md && gh issue create -t t -l enhancement -F body.md",
+        "cp other.md body.md && gh issue create -t t -l enhancement --body-file body.md",
+        "cd sub && printf x > ../body.md; cd ..; gh issue create -t t -l enhancement -F body.md",
+        "gh issue create -t t -l enhancement -F body.md > body.md",
+    ],
+)
+def test_a_body_file_written_earlier_in_the_same_command_is_denied(repo, command):
+    """実行前の古い本文で通さない（PR 2856 round 4）。"""
+    write(repo, FEATURE)
+    (repo / "sub").mkdir()
+    why = reason(decide(repo, command))
+    assert why is not None and "別の Tool 呼び出し" in why
+
+
+def test_writes_to_other_files_or_after_the_filing_pass(repo):
+    write(repo, FEATURE)
+    assert reason(decide(repo, "printf x > note.md; gh issue create -t t -l enhancement -F body.md")) is None
+    assert reason(decide(repo, "gh issue create -t t -l enhancement -F body.md && printf x > body.md")) is None
+
+
 @pytest.mark.parametrize("tail", ['--body="$EMPTY"', '--body="## 目的\n\n$X\n"', "--body=$(cat body.md)", '--body-file="$F"'])
 def test_an_inline_body_value_with_an_expansion_is_unreadable(repo, tail):
     why = reason(decide(repo, f"gh issue create -t t -l enhancement {tail}"))
