@@ -49,6 +49,7 @@ MODULES = [
     "limits",  # ステップの上限をプランの遷移から求める（#1909）
     "prompts",
     "claude",
+    "children",  # 子プロセスの待ち（#2855 で claude から分けた）
     "state",
     "slow",
     "steps",
@@ -85,6 +86,7 @@ NO_ENGINE = [
     "limits",
     "prompts",
     "claude",
+    "children",
     "state",
     "slow",
     "steps",

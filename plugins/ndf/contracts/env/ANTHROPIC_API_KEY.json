@@ -1,0 +1,5 @@
+{
+  "name": "ANTHROPIC_API_KEY",
+  "set_by": "runtime",
+  "summary": "子へ渡した API キー（#2855）。supervise.py が登録簿から選んで子の claude -p へ入れる。入れ子の supervise.py は NDF_CLAUDE_API_KEY_NAME・NDF_CLAUDE_API_KEY_GENERATION とそろうときだけ引き継ぐ（plugins/ndf/scripts/lib/claude_api_keys.py:302）"
+}
