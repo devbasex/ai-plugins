@@ -25,6 +25,6 @@
   "triggers": {"score": 10, "common_weight": 2, "lines": 3000, "escapes": 1, "hours": 24},
   "loop": {
     "enabled": true,
-    "budget": {"laps": 1000, "usd": 200, "hours": 10000}
+    "budget": {"laps": 1000, "hours": 10000}
   }
 }
