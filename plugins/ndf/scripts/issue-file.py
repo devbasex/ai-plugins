@@ -262,11 +262,6 @@ def _note_line(a) -> str:
     return f"開発対象の側は {a.counterpart} として残した。"
 
 
-def _is_other_repo(repo: str, target: str | None) -> bool:
-    """`repo` が開発対象リポジトリ `target` と別か。読めない（`None`）ときは別とみなす（C5 の側へ倒す）。"""
-    return issue_items.repo_differs(target, repo)
-
-
 def _note_gate(repo: str, number: int, line: str, target: str | None, digest: str) -> "NoReturn":  # noqa: F821
     """別リポジトリへの 1 行の承認資料を書いて 10 で止まる。"""
     where = f"{repo}#{number}"
@@ -305,7 +300,7 @@ def cmd_note(a) -> None:
         _stop_with(f"番号の形が違う: {a.number}", EXIT_UNREADABLE)
     line = _note_line(a)
     target = development_repo()  # 形の検査の後に読む（形の誤りでは GitHub を呼ばない）
-    metrics: dict = {"other_repo": _is_other_repo(repo, target)}
+    metrics: dict = {"other_repo": issue_items.repo_differs(target, repo)}
     if metrics["other_repo"]:  # 同じリポジトリなら --approved は照合しない
         digest = _digest({"repo": repo, "number": a.number, "line": line})
         if not a.approved:
@@ -426,7 +421,7 @@ def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[
 def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], approved: str | None) -> tuple[str, bool]:
     """承認が無ければゲートへ回し、あれば要約値を照合する。`(要約値, 開発対象リポジトリと別か)`。"""
     digest = digest_of(repo, title, body, labels)
-    other = runner_issue_request.request_if_runner(TOOL, repo, title, body, _is_other_repo(repo, development_repo()))
+    other = runner_issue_request.request_if_runner(TOOL, repo, title, body, issue_items.repo_differs(development_repo(), repo))
     if not approved:
         _gate(repo, title, body, labels, digest, other)
     if approved != digest:
