@@ -493,6 +493,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 読み込まれたプラグイン | — | 起動したセッションに Claude Code が読み込んだ NDF。--plugin-dir で指したディレクトリか、導入したプラグインのキャッシュのディレクトリで、起動時の init の plugins の ndf の path に出る | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
 | 規約の文書 | — | supervisor が worker の起動指示を組むために読む、NDF の Skill の SKILL.md と references/ の下の文書（development-workflow の references/agent-layers.md、design の references/design-template.md など） | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
 | 規約の文書の guard | — | supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813） | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
+| 機械的なターン | — | AI が判断を伴わずに行う Tool の呼び出し。出力の読み解き・状態の照合・スクリプトを 1 行打つ・手書きの待ち・本文の転記 | — | — | — |
+| ターンの型 | — | 機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類 | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
