@@ -73,9 +73,9 @@ NDF のスクリプトが共有の環境へ起動し直すときに設定した 
 | `plugins/ndf/scripts/relay_lib/runtime.py` の `enter` | 振り分けの前に、`UV_PROJECT_ENVIRONMENT` が共有の環境を指していれば外す。古い版の NDF のスクリプトから継いだ値を含む |
 | `plugins/ndf/scripts/lib/parallel_repo.py` の `relay_proc` | リレーハブの CLI を打ち、終わったプロセスと統一 JSON レポートを返す。`relay` はこれを使い、戻り値の形を保つ |
 | `plugins/ndf/scripts/lib/parallel_run.py` の `step_observe` | 観測の結果に、一覧の終了コード（`code`）・標準エラーの末尾 1 行（`err`）・問える版の記録の印（`can_ask`）を足す |
-| 同 `_observe_run` | 終了コードを `ls_ok` に控え、先に `_track_ls_failure` を呼ぶ。失敗の回はそこで戻る |
-| 同 `_track_ls_failure` | 失敗の回は始まりの時刻を持ち、区切りを超えたら区切りごとに 1 回問う。成功の回は追跡を解き、答えていない一覧の失敗の問いを外す |
-| 同 `_run_finished` | `ls_ok` が偽の間は偽を返す |
+| 同 `_observe_run` | 終了コードを `ls_ok` に控え、先に `parallel_watch.py` の `track_ls_failure` を呼ぶ。失敗の回はそこで戻る |
+| `plugins/ndf/scripts/lib/parallel_watch.py` の `track_ls_failure` | 失敗の回は始まりの時刻を持ち、区切りを超えたら区切りごとに 1 回問う。成功の回は追跡を解き、答えていない一覧の失敗の問いを外す |
+| `plugins/ndf/scripts/lib/parallel_run.py` の `_run_finished` | `ls_ok` が偽の間は偽を返す |
 | `plugins/ndf/scripts/lib/parallel_answer.py` の `owner_next` | `observe` の問いへの答えでは、1 つ目の値に選んだ答えの `commands` を返す |
 
 `plugins/ndf/scripts/hook-env.py` の環境の用意と `relay_lib/runtime.py` の `sync` は、`uv sync` の子にだけ `UV_PROJECT_ENVIRONMENT` を渡す。
@@ -105,7 +105,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     A[step_observe<br/>relay_proc で ls] --> B{終了コード 0?}
-    B -->|いいえ| C[_track_ls_failure<br/>状態を変えずに戻る]
+    B -->|いいえ| C[track_ls_failure<br/>状態を変えずに戻る]
     B -->|はい| D[一覧の失敗の追跡を解く<br/>observe の問いを外す]
     D --> E[既存の観測<br/>行の無いレーンは stopped]
     C --> F{始まりから<br/>停滞の区切り以上?}
