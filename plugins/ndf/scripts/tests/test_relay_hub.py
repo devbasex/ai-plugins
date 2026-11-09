@@ -1218,3 +1218,85 @@ def test_role_organizer_without_plan_dir_keeps_other_marks(dirs, monkeypatch, ca
     _organizer(old, str(tmp_path / "p1"))
     code, res = _role(monkeypatch, capsys, new.path, "organizer", "--plan", "p1")
     assert code == 0 and res["items"][0]["cleared"] == 0 and _organizers() == ["new", "old"]
+
+
+@pytest.mark.parametrize("argv", [(), ("organizer",), ("boss", "--plan", "p1"), ("--plan", "p1")])
+def test_role_refuses_bad_usage(state, monkeypatch, capsys, tmp_path, argv):
+    """役割が無い・知らない役割・計画名が無いときは使い方を出して 2 を返す。標準出力には何も出さない。"""
+    monkeypatch.setenv("NDF_RELAY_DIR", str(tmp_path))
+    capsys.readouterr()
+    assert hc.cmd_role(list(argv)) == 2
+    out = capsys.readouterr()
+    assert out.out == "" and out.err.startswith("usage: relay.py role")
+    assert not (tmp_path / hb.ROLE_FILE).exists()
+
+
+def test_role_outside_a_wrapper_is_stopped(state, monkeypatch, capsys, tmp_path):
+    """ラッパーの外（`NDF_RELAY_DIR` が無い・ディレクトリが無い）で役割を書こうとすると stopped で 1 を返す。"""
+    code, res = _role(monkeypatch, capsys, None, "organizer", "--plan", "p1", "--plan-dir", str(tmp_path))
+    assert code == 1
+    assert res == {"tool": "relay-role", "status": "stopped", "summary": "ラッパーの外（NDF_RELAY_DIR が無い）", "items": [], "metrics": {}}
+    code, res = _role(monkeypatch, capsys, tmp_path / "missing", "helper", "--plan", "p1")
+    assert code == 1 and res["status"] == "stopped"
+
+
+def test_role_helper_writes_its_mark_and_clears_nothing(dirs, monkeypatch, capsys, tmp_path):
+    """`role helper` は自分の印を書き、同じ計画の置き場のオーガナイザーの印は消さない。"""
+    here = str(tmp_path / "p1")
+    org, me = dirs("org", name="org"), dirs("me", name="me")
+    _organizer(org, here)
+    code, res = _role(monkeypatch, capsys, me.path, "helper", "--plan", "p1", "--plan-dir", here)
+    assert code == 0
+    assert res == {
+        "tool": "relay-role",
+        "status": "ok",
+        "summary": "役割 helper（計画 p1）の印を書いた",
+        "items": [{"role": "helper", "plan": "p1", "cleared": 0}],
+        "metrics": {},
+    }
+    row = json.loads((me.path / hb.ROLE_FILE).read_text())
+    assert set(row) == {"role", "plan", "at", "plan_dir"} and row["role"] == "helper" and row["plan_dir"] == here
+    assert _organizers() == ["org"]
+
+
+def test_role_organizer_without_plan_dir_writes_no_plan_dir_key(dirs, monkeypatch, capsys):
+    me = dirs("me", name="me")
+    code, res = _role(monkeypatch, capsys, me.path, "organizer", "--plan", "p2")
+    assert code == 0 and res["summary"] == "役割 organizer（計画 p2）の印を書いた"
+    assert set(json.loads((me.path / hb.ROLE_FILE).read_text())) == {"role", "plan", "at"}
+
+
+def test_role_clear_inside_a_wrapper_removes_own_mark(dirs, monkeypatch, capsys):
+    """ラッパーの中の `role --clear`（置き場の指定なし）は自分の印だけを消す。"""
+    me, other = dirs("me", name="me"), dirs("other", name="other")
+    _organizer(me, "/x/p1")
+    _organizer(other, "/x/p1")
+    code, res = _role(monkeypatch, capsys, me.path, "--clear")
+    assert code == 0
+    assert res == {
+        "tool": "relay-role",
+        "status": "ok",
+        "summary": "役割の印を消した",
+        "items": [{"role": None, "plan": None, "cleared": 0}],
+        "metrics": {},
+    }
+    assert not (me.path / hb.ROLE_FILE).exists() and _organizers() == ["other"]
+    assert _role(monkeypatch, capsys, me.path, "--clear")[0] == 0  # 印が無くても通る
+
+
+def test_role_clear_with_plan_dir_inside_a_wrapper(dirs, monkeypatch, capsys, tmp_path):
+    """置き場の指定ありの `role --clear` は、一致するオーガナイザーの印と、自分の旧い形（plan_dir なし）の印を消す。
+    自分の印が別の置き場を持つときと、helper の印は残す。"""
+    here, there = str(tmp_path / "a"), str(tmp_path / "b")
+    legacy, mine, helper, match = dirs("legacy", name="legacy"), dirs("mine", name="mine"), dirs("helper", name="helper"), dirs("match", name="match")
+    _organizer(legacy)
+    _organizer(mine, there)
+    (helper.path / hb.ROLE_FILE).write_text(json.dumps({"role": "helper", "plan": "p1", "plan_dir": here}))
+    _organizer(match, here)
+    code, res = _role(monkeypatch, capsys, legacy.path, "--clear", "--plan-dir", here)
+    assert code == 0 and res["items"][0]["cleared"] == 1
+    assert not (legacy.path / hb.ROLE_FILE).exists() and not (match.path / hb.ROLE_FILE).exists()
+    code, res = _role(monkeypatch, capsys, mine.path, "--clear", "--plan-dir", here)
+    assert code == 0 and res["items"][0]["cleared"] == 0
+    assert hb.read_role(str(mine.path))["plan_dir"] == there
+    assert hb.read_role(str(helper.path))["role"] == "helper"
