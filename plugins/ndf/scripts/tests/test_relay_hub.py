@@ -1288,7 +1288,12 @@ def test_role_clear_with_plan_dir_inside_a_wrapper(dirs, monkeypatch, capsys, tm
     """置き場の指定ありの `role --clear` は、一致するオーガナイザーの印と、自分の旧い形（plan_dir なし）の印を消す。
     自分の印が別の置き場を持つときと、helper の印は残す。"""
     here, there = str(tmp_path / "a"), str(tmp_path / "b")
-    legacy, mine, helper, match = dirs("legacy", name="legacy"), dirs("mine", name="mine"), dirs("helper", name="helper"), dirs("match", name="match")
+    legacy, mine, helper, match = (
+        dirs("legacy", name="legacy"),
+        dirs("mine", name="mine"),
+        dirs("helper", name="helper"),
+        dirs("match", name="match"),
+    )
     _organizer(legacy)
     _organizer(mine, there)
     (helper.path / hb.ROLE_FILE).write_text(json.dumps({"role": "helper", "plan": "p1", "plan_dir": here}))
