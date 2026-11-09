@@ -54,6 +54,7 @@ LIB_FILES = (
     "lib/ask_policy.py",
     "lib/claude_account_dir.py",
     "lib/claude_accounts.py",
+    "lib/claude_api_keys.py",
     "lib/claude_settings.py",
     "lib/claude_usage.py",
     "lib/clock.py",

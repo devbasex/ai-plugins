@@ -8,6 +8,9 @@ name: Script structure
 # 突き合わせ、scripts/contract-allow/ の例外のほかに当たれば落とす。例外リストはベースブランチとの
 # merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。
 #
+# script-structure-check の後半の手順は、Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）と、
+# GitHub のフォーム・out-of-scope の本文の骨格・仕様のテンプレートが食い違っていないかを確かめる（#2737 の一致の検査）。
+#
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
 on:
   pull_request:
@@ -17,6 +20,7 @@ on:
       - develop
     paths:
       - ".github/workflows/script-structure.yml"
+      - ".github/ISSUE_TEMPLATE/**"
       - "plugins/ndf/**"
       - "scripts/check-script-structure.py"
       - "scripts/script-structure-allow/**"
@@ -37,6 +41,13 @@ jobs:
           python-version: "3.10"
       - name: Check the script structure
         run: python3 scripts/check-script-structure.py
+      # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Check the issue templates against the issue items
+        run: python3 plugins/ndf/scripts/issue-items.py templates --root .
 
   ndf-contracts-check:
     runs-on: ubuntu-latest

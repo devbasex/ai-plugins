@@ -1,0 +1,5 @@
+{
+  "name": "NDF_API_KEY_CHECK_URL",
+  "set_by": "user",
+  "summary": "API キーの確かめで打つ Messages API の宛先（#2855）。無いときは既定の宛先（plugins/ndf/scripts/lib/claude_usage.py:341）"
+}

@@ -21,18 +21,34 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 NAME_ENV = "NDF_CLAUDE_ACCOUNT"  # `claude_accounts.NAME_ENV` と同じ。起動したときのアカウント
+# `claude_api_keys` の KEY_ENV・NAME_ENV・GENERATION_ENV と同じ。supervise.py が worker へ入れた登録済み API キー
+API_KEY_ENV = ("ANTHROPIC_API_KEY", "NDF_CLAUDE_API_KEY_NAME", "NDF_CLAUDE_API_KEY_GENERATION")
+KEY_NAME_ENV = "NDF_CLAUDE_API_KEY_NAME"  # キーで起動した worker の目印
+BACK_ENV = "NDF_CLAUDE_KEY_ACCOUNT"  # `claude_api_keys.BACK_ENV` と同じ。キーを外したときに戻るアカウント
 
 
 def initial_account(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
-    """起動したときの claude のアカウントの名前（`NDF_CLAUDE_ACCOUNT`）。無ければ None（共有の設定）。"""
+    """起動したときの claude のアカウントの名前（`NDF_CLAUDE_ACCOUNT`）。無ければ None（共有の設定）。
+
+    supervise.py が登録済み API キーを入れた worker の中では、キーの環境が外した親のアカウント（`BACK_ENV`）を返す。
+    担当はキーを使わずにそのアカウントで起動する（`seat_env`）ため、振り替えの記録もその名前を試したものに数える。"""
     environ = os.environ if environ is None else environ
-    return environ.get(NAME_ENV) or None
+    return environ.get(NAME_ENV) or (environ.get(BACK_ENV) if environ.get(KEY_NAME_ENV) else None) or None
 
 
 def seat_env(seat: str, account: Optional[str], base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """担当の起動の環境。claude の席にアカウントがあればその環境、無い・用意できなければ元の環境の写し。"""
+    """担当の起動の環境。claude の席にアカウントがあればその環境、無い・用意できなければ元の環境の写し。
+
+    supervise.py が worker へ入れた登録済み API キー（名前の変数がそろうもの）は、どの席にも渡さない。担当は
+    API キーを使う範囲の外で（#2855 の決定 2）、外した claude の席はサブスクリプションのログインで起動する。
+    キーの環境は親のアカウントを外している（`claude_api_keys.env_with_key`）ため、アカウントの無い席は、親が残した
+    戻り先（`initial_account` が返す名前）の環境へ戻す（`KeyTry.env` と同じ戻り先）。"""
     env = dict(os.environ if base is None else base)
-    if not account or not seat.startswith("claude"):
+    if env.get(KEY_NAME_ENV):
+        account = account or initial_account(env)
+        for name in (*API_KEY_ENV, BACK_ENV):
+            env.pop(name, None)
+    if not seat.startswith("claude") or not account:
         return env
     import claude_accounts as ca
 

@@ -43,3 +43,35 @@ def test_pick_account_without_registered_accounts_is_none(tmp_path, monkeypatch)
 def test_initial_account_reads_the_launch_environment():
     assert assignee_env.initial_account({"NDF_CLAUDE_ACCOUNT": "w1"}) == "w1"
     assert assignee_env.initial_account({}) is None
+
+
+def test_registered_api_key_is_not_passed_to_any_seat(accounts):  # noqa: F811
+    """supervise.py が worker へ入れた登録済み API キーは担当へ渡さない（#2855 の決定 2）。利用者のキーは残す。"""
+    accounts.add("work2")
+    keyed = {"PATH": "/bin", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    for seat, account in (("claude", None), ("claude-2", "work2"), ("codex", None)):
+        env = assignee_env.seat_env(seat, account, keyed)
+        assert not any(n in env for n in assignee_env.API_KEY_ENV), seat
+    own = {"PATH": "/bin", "ANTHROPIC_API_KEY": "sk-own"}
+    assert assignee_env.seat_env("claude", None, own) == own
+
+
+def test_keyed_claude_seat_without_account_returns_to_a_registered_account(accounts):  # noqa: F811
+    """キーを外した claude の席は、アカウントが無くても登録済みアカウントのログインへ戻る（共有の設定で起動しない）。"""
+    accounts.add("work2")
+    accounts.add("work1")
+    keyed = {"PATH": "/bin", assignee_env.BACK_ENV: "work2", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    env = assignee_env.seat_env("claude", None, keyed)
+    assert env[ca.CONFIG_ENV] == ca.account_dir("work2")
+    assert not any(n in env for n in (*assignee_env.API_KEY_ENV, assignee_env.BACK_ENV))
+    # 振り替えは戻り先を試したものに数える（同じアカウントを選び直さない）
+    assert assignee_env.initial_account(keyed) == "work2"
+    assert assignee_env.pick_account(frozenset({assignee_env.initial_account(keyed)})) == "work1"
+    assert assignee_env.initial_account({assignee_env.BACK_ENV: "work2"}) is None  # キーの無い起動では読まない
+    assert assignee_env.seat_env("codex", None, keyed).get(ca.CONFIG_ENV) is None
+
+
+def test_keyed_claude_seat_without_registered_accounts_keeps_the_stripped_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "none"))
+    keyed = {"PATH": "/bin", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    assert assignee_env.seat_env("claude", None, keyed) == {"PATH": "/bin"}

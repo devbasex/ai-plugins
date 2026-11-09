@@ -19,7 +19,7 @@
 | 承認資料の「起票者の推定」の行と、差し戻しを記録するコマンド | `development-workflow` の [references/approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) の「答えを記録する」 |
 | 振り返りの観点の表の「承認ゲートの差し戻し」 | [`retrospective` の SKILL.md](../../plugins/ndf/skills/retrospective/SKILL.md) |
 | 副命令・引数・終了コード | [`gate-rejections.py`](../../plugins/ndf/scripts/gate-rejections.py) と [`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py) の冒頭の説明 |
-| 本文の骨格の 6 つの見出しの検査 | [out-of-scope-issue-file.md](out-of-scope-issue-file.md) |
+| 範囲外の課題の本文の記載項目の検査 | [out-of-scope-issue-file.md](out-of-scope-issue-file.md) |
 
 決定の番号は #1833 の設計の番号である。
 
@@ -45,7 +45,7 @@
 
 | # | 決定 | 理由 | 採らなかった案 |
 | ---: | --- | --- | --- |
-| 1 | 起票の骨格（`issue-file.py` の `SKELETON`）に `起票者の推定` の見出しを足し、`create` で欠けを止める。「無し」の 1 行は空としない | 推定かどうかは書き手にしか分からないが、書いたかどうかは機械で確かめられる。推定の無い起票も止まらない | 雛形に節を足すだけにする（書き忘れが起票の時点で見えず、設計承認ゲートまで運ばれない） |
+| 1 | 起票の本文の検査（`issue-file.py create`）が `起票者の推定` の見出しを求め、欠けを止める。「無し」の 1 行は空としない | 推定かどうかは書き手にしか分からないが、書いたかどうかは機械で確かめられる。推定の無い起票も止まらない | 雛形に節を足すだけにする（書き忘れが起票の時点で見えず、設計承認ゲートまで運ばれない） |
 | 2 | 承認資料の起票者の推定は、仕様のコピーの節の行を要約せずに並べる。節が無い・読めないときは「無し（<理由>）」と出し、承認ゲートは止めない | 承認する人が要約で判断を変えない。ほかの行も conductor が設計文書から写している | この行のためだけに抽出のスクリプトを作る（組み立ての経路が 2 つになる） |
 | 3 | 差し戻しの置き場は差し戻しの記録の 1 つだけにする。`sprint-state.py gate --outcome rejected` は `sprint.json` に `rejections` を書かない | 状態ファイルを持たない単発の変更でも記録でき、数える側が読むのは 1 か所になる。`rejections` は読み手も既存の記録も 0 件で、書くのをやめても壊れるものが無い | 状態ファイルの `rejections` と別の記録の 2 か所に分ける。課題や PR へコメントで残す（他者が読む場所へ毎回書き、数えるのに GitHub の検索が要る） |
 | 4 | JSONL の読み書き（`read_jsonl`・`append_jsonl`）を `lib/jsonio.py` に置き、差し戻しの記録と覆しの記録で共有する。壊れた行を止めるか飛ばすかは引数（`skip_broken`）で選ぶ | 差し戻しの件数は壊れた行を「不明」として扱う必要があり、覆しの側は壊れた行を飛ばす。同じ役割の関数を `lib/` に 2 つ並べない | 差し戻しの側に読み方を新しく書く |
@@ -59,7 +59,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/issue-file.py` | `create` の本文の骨格の 6 つの見出しに `起票者の推定` を含め、欠ければ課題を作らない |
+| `plugins/ndf/scripts/issue-file.py` | `create` の本文の検査（記載項目の定義で AI の起票に当たる「起票者の推定」）で `起票者の推定` を求め、欠ければ課題を作らない |
 | `plugins/ndf/scripts/lib/gate_rejections.py` | 差し戻しの記録の置き場（`ledger_path`）・リポジトリの決め方（`ledger_repo`）・1 行の形（`make_row`）・追記（`append`）・読み取り（`read_rejections`）・範囲の当たり（`in_scope`）・承認ゲートごとの件数（`count_by_gate`） |
 | `plugins/ndf/scripts/gate-rejections.py` | 状態ファイルを持たない差し戻しの `record` と、件数の `count` の入口 |
 | `plugins/ndf/scripts/sprint-state.py` | `gate --by user --outcome rejected` で差し戻しの記録へ 1 行書く。承認ゲートは通さず、状態ファイルは変えない。覆しの記録は直前の MVV 判定と食い違うときだけ今までどおり書く |

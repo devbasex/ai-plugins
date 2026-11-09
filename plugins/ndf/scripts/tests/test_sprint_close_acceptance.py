@@ -120,6 +120,77 @@ def test_a_table_without_issue_rows_closes_an_issue_verified_before_merge(repo, 
     assert sorted(c[2] for c in reads) == ["1", "2"]  # 本文は課題ごとに 1 回だけ読む
 
 
+# --- 課題の表の選び方（#2803） ------------------------------------------------------
+
+SUPPLEMENT = "| 記号 | 実行したこと | 実行時刻 | 結果 |\n| --- | --- | --- | --- |\n| T1 | pytest | t | 合格 |\n\n"
+ONE = "## 受け入れ条件\n\n- [ ] 1. 一\n"
+
+
+def with_supplement(rows):
+    """補足の表を課題の表より前に置いたブロック。"""
+    return table(rows).replace("\n\n| 課題 |", "\n\n" + SUPPLEMENT + "| 課題 |", 1)
+
+
+def setup_block(gh, block, bodies, prs="Fixes #1"):
+    gh.set(
+        records={"20": {"body": DIST_PROD, "comments": [{"body": block}]}},
+        bodies={"11": prs, "12": ""},
+        issues={k: ["OPEN"] for k in bodies},
+        issue_bodies=bodies,
+    )
+
+
+def test_a_supplement_table_before_the_issue_table_is_skipped():
+    """補足の表が先にあっても、補足の表を外したブロックと同じ結果を返す（受け入れ条件 1）。"""
+    rows = [("#1", "1. 一", "合格")]
+    got = acceptance.verification_verdicts(with_supplement(rows), "o/r")
+    assert got == acceptance.verification_verdicts(table(rows), "o/r")
+    assert got == {("o/r", 1): acceptance.IssueRows(True, frozenset({1}))}
+
+
+def test_a_supplement_table_before_the_issue_table_closes_the_issue(repo, gh):
+    """補足の表が先のブロックでも、条件をすべて満たした課題は would_close になる（受け入れ条件 2）。"""
+    setup_block(gh, with_supplement([("#1", "1. 一", "合格")]), {"o/r#1": ONE})
+    code, out, err = call("sprint-close.py", [*CLOSE, "--dry-run"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert issues_of(out)["o/r#1"]["result"] == "would_close"
+
+
+def test_a_failing_row_in_a_second_issue_table_keeps_the_issue_open(repo, gh):
+    """課題の表が 2 つあり、2 つ目で不合格なら合格でなく閉じない（受け入れ条件 4）。"""
+    second = table([("#1", "1. 一", "不合格")])
+    second = second[second.index("| 課題 |") : second.index("\n合否:")]
+    block = table([("#1", "1. 一", "合格")]).replace("\n合否:", "補足の段落\n\n" + second + "\n合否:", 1)
+    assert acceptance.verification_verdicts(block, "o/r") == {("o/r", 1): acceptance.IssueRows(False, frozenset())}
+    setup_block(gh, block, {"o/r#1": ONE})
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    assert code == 10, (out, err)
+    assert issues_of(out)["o/r#1"]["result"] == "kept_open"
+    assert not calls(gh, ["issue", "close"])
+
+
+def test_a_block_without_an_issue_table_names_the_missing_columns(repo, gh):
+    """課題の表が無ければ、対応が読めないとは別の理由で全件を開いたまま残す（受け入れ条件 5）。"""
+    block = "## リリース後テスト\n対象の版: 1.1.0（2026-09-24）\n\n" + SUPPLEMENT + "合否: 済\n"
+    setup_block(gh, block, {"o/r#1": ONE})
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    assert code == 10, (out, err)
+    it = issues_of(out)["o/r#1"]
+    assert it["result"] == "kept_open" and it["reason"] == load_sprint_close().NO_ISSUE_TABLE
+    assert it["reason"] != "条件と課題の対応が読めない"
+
+
+def test_a_supplement_table_before_an_issue_table_without_issue_rows_keeps_2144(repo, gh):
+    """補足の表が先でも、課題を指す行が無い課題の表なら #2144 の扱いのまま（受け入れ条件 7）。"""
+    record = "\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | `pytest` |\n"
+    setup_block(gh, with_supplement([("—", "導入の確認", "合格")]), {"o/r#1": ONE + record, "o/r#2": ONE}, prs="Fixes #1, fixes #2")
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    assert code == 10, (out, err)
+    got = issues_of(out)
+    assert got["o/r#1"]["result"] == "closed"
+    assert (got["o/r#2"]["result"], got["o/r#2"]["reason"]) == ("kept_open", "条件と課題の対応が読めない")
+
+
 # --- 閉じる条件 2 と印（受け入れ条件 3〜11） ------------------------------------------
 
 

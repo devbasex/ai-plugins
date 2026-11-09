@@ -41,6 +41,11 @@ def normalize_path(path: str, cwd: str) -> str:
 
     字面で畳むのは、存在しないパスで `..` が残ると前方一致の「配下か」の判定をすり抜けるためである
     （`<対象>/a/../../外` が `<対象>/` で始まって見える）。"""
+    return _realpath_prefix(_collapse_parts(path, cwd))
+
+
+def _collapse_parts(path: str, cwd: str) -> list[str]:
+    """`cwd` を起点に絶対化し、`.` と `..` を字面で畳んだ構成要素を返す。"""
     if not path.startswith("/"):
         path = f"{cwd}/{path}"
     parts: list[str] = []
@@ -52,6 +57,11 @@ def normalize_path(path: str, cwd: str) -> str:
                 parts.pop()
         else:
             parts.append(part)
+    return parts
+
+
+def _realpath_prefix(parts: list[str]) -> str:
+    """実在する最も深い祖先だけを実体のパスへ直し、残りを継ぎ足す。"""
     d, suffix = "/" + "/".join(parts), ""
     while d and d != "/":
         if os.path.isdir(d):
@@ -80,6 +90,8 @@ class _Scan:
     def __init__(self, base: str | None) -> None:
         self.out: list[str] = []
         self.root = _Place(base or None)
+        self.dirs: dict[tuple[int, int], str | None] = {}
+        self.written: dict[tuple[int, int], int] = {}  # コマンドの開始までに積んだ書き込み先の数（自分のリダイレクトを含む）
 
     def emit(self, v: str, st: _Place) -> None:
         if v in NOT_TARGET or v.startswith(("&", "|")) or "$" in v:
@@ -251,17 +263,21 @@ class _Scan:
             if r.type != "file_redirect":
                 self.substs(r, st)
                 continue
-            dest = sp.redirect_destination(r)
-            if dest is not None:
-                self.substs(dest, st)
-            if dest is None or sp.redirect_operator(r) not in WRITE_OPS:
-                continue
-            if sp.destination_after_newline(r, dest):  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
-                continue
-            v = sp.unquote(dest)
-            if sp.redirect_operator(r) == ">&" and (v == "-" or v.isdigit()):
-                continue
-            self.emit(v, st)
+            self._file_redirect(r, st)
+
+    def _file_redirect(self, r: sp.Node, st: _Place) -> None:
+        """file_redirect の宛先の置換を流し、ファイルへの書き込みなら宛先を出す。"""
+        dest = sp.redirect_destination(r)
+        if dest is not None:
+            self.substs(dest, st)
+        if dest is None or sp.redirect_operator(r) not in WRITE_OPS:
+            return
+        if sp.destination_after_newline(r, dest):  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
+            return
+        v = sp.unquote(dest)
+        if sp.redirect_operator(r) == ">&" and (v == "-" or v.isdigit()):
+            return
+        self.emit(v, st)
 
     def substs(self, n: sp.Node, st: _Place) -> None:
         """語の中のコマンド置換とプロセス置換を、部分シェルとして流す。"""
@@ -269,6 +285,7 @@ class _Scan:
             self.seq(s, st.copy())
 
     def command(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        self.dirs[(n.start_byte, n.end_byte)] = st.cwd
         nodes, rs, assigns = sp.command_parts(n, redirs)
         for a in assigns:
             self.substs(a, st)
@@ -282,6 +299,7 @@ class _Scan:
             self.emit(v, st)
         # リダイレクトは cd より前の位置で開く（出す順は、語の書き込み先の後）
         self.redirects(rs, st)
+        self.written[(n.start_byte, n.end_byte)] = len(self.out)
         if st.base is not None and name in st.moving:
             st.cwd = None
         if name != "cd" or st.base is None:
@@ -292,24 +310,33 @@ class _Scan:
 
 def _noncontinuing(n: sp.Node) -> bool:
     """`exit`・`return`・`break`・`continue`（か、それで終わる `{ …; }`）か。"""
-    while n.type == "redirected_statement" and n.child_by_field_name("body") is not None:
-        n = n.child_by_field_name("body")
+    n = _strip_redirects(n)
     if n.type == "command":
-        name = n.child_by_field_name("name")
-        return name is not None and sp.unquote(name) in NONCONT
+        return _is_noncontinuing_command(n)
     if n.type == "compound_statement":
         for c, bg in sp.statement_list(n):
             if bg:
                 continue
             while c.type == "list":
                 c = c.children[0]
-            while c.type == "redirected_statement" and c.child_by_field_name("body") is not None:
-                c = c.child_by_field_name("body")
-            if c.type == "command":
-                name = c.child_by_field_name("name")
-                if name is not None and sp.unquote(name) in NONCONT:
-                    return True
+            if _is_noncontinuing_command(_strip_redirects(c)):
+                return True
     return False
+
+
+def _strip_redirects(n: sp.Node) -> sp.Node:
+    """リダイレクトを剥がした本体の文を返す。"""
+    while n.type == "redirected_statement" and n.child_by_field_name("body") is not None:
+        n = n.child_by_field_name("body")
+    return n
+
+
+def _is_noncontinuing_command(n: sp.Node) -> bool:
+    """単一の command で、名前が `exit`・`return`・`break`・`continue` のどれかか。"""
+    if n.type != "command":
+        return False
+    name = n.child_by_field_name("name")
+    return name is not None and sp.unquote(name) in NONCONT
 
 
 def _apply_cd(st: _Place, args: list[str]) -> None:
@@ -400,6 +427,13 @@ def shell_targets(cmd: str, base: str = "") -> list[str]:
     scan = _Scan(base)
     scan.seq(root, scan.root)
     return scan.out
+
+
+def command_places(root: sp.Node, base: str) -> tuple[dict[tuple[int, int], str | None], dict[tuple[int, int], frozenset[str]]]:
+    """`(各 command の現在地, 各 command が読み始めるまでに書き込まれる先)`。後者はそのコマンド自身のリダイレクトと語の書き込み先を含む絶対パス。"""
+    scan = _Scan(base)
+    scan.seq(root, scan.root)
+    return scan.dirs, {k: frozenset(scan.out[:n]) for k, n in scan.written.items()}
 
 
 def patch_targets(patch: str) -> list[str]:
