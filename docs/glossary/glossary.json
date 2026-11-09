@@ -319,6 +319,13 @@
       "pending_source": "issues/old/issue-1366-design.md"
     },
     {
+      "term": "人へ残す判断",
+      "context": "ndf-workflow",
+      "meaning": "設計文書のうち、レッドラインに当たるため設計者（AI）が決めずに承認ゲートで人が決める判断。判断ごとに当たるレッドラインの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さず、設計者が決める",
+      "source": "plugins/ndf/skills/design/references/decisions.md",
+      "pending_source": "issues/issue-2912-design.md"
+    },
+    {
       "term": "実行条件",
       "context": "ndf-workflow",
       "meaning": "プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする",
@@ -4066,8 +4073,9 @@
     {
       "term": "起票者の推定",
       "context": "ndf-workflow",
-      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで利用者が確かめるまで、利用者の決定として扱わない",
-      "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md"
+      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで確かめるまで利用者の決定として扱わない。扱い（受け入れ条件・前提・含まない・採らない）を書いた推定は設計者が決めた判断として読み、MVV 判定が承認ゲートを省いたときはその判定が確かめた記録になる",
+      "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md",
+      "pending_source": "issues/issue-2912-design.md"
     },
     {
       "term": "承認ゲートの差し戻し",
