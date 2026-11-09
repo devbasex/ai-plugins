@@ -284,12 +284,8 @@ def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
     state, body = got
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
-    if not ok and kept:
-        return {**base, "result": "kept_open", "reason": kept}, []
     if not ok:
-        if state == "CLOSED":
-            return {**base, "result": "closed_unverified", "reason": UNVERIFIED + why}, []
-        return {**base, "result": "kept_open", "reason": why}, []
+        return _unaccepted_item(base, state, why, kept), []
     gap = final_stage_gap(ctx.final_stage, body, ctx.since)
     if gap:  # 条件 3 を満たさない課題の本文は書かない
         return gap_item(base, state, gap), []
@@ -298,10 +294,25 @@ def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
         return ({**out, "would_check": to_check} if own and to_check else out), []
     if not (own and to_check):
         return None, []
+    failed = _write_marks(ctx, base, body, to_check)
+    return (failed, []) if failed is not None else (None, to_check)
+
+
+def _unaccepted_item(base, state, why, kept):
+    """条件 2 を満たさない課題の結果の項目。kept があればその理由で開いたまま残す。"""
+    if kept:
+        return {**base, "result": "kept_open", "reason": kept}
+    if state == "CLOSED":
+        return {**base, "result": "closed_unverified", "reason": UNVERIFIED + why}
+    return {**base, "result": "kept_open", "reason": why}
+
+
+def _write_marks(ctx, base, body, to_check):
+    """印を反映した本文を検査して書く。書けなければ失敗の項目、書ければ None を返す。呼び手の錠の中で呼ぶ。"""
     new = acceptance.check_criteria(body, to_check)
-    if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
-        return _failed(base, "受け入れ条件の印を書けない", ctx), []
-    return None, to_check
+    if not acceptance.only_marks(body, new) or not gh_rest.update_body(base["repo"], base["number"], new):
+        return _failed(base, "受け入れ条件の印を書けない", ctx)
+    return None
 
 
 def _close_verified(a, ctx, repo, n, rows, kept=None):
