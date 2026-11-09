@@ -364,7 +364,7 @@ def test_issue_decision_skips_only_the_filing_whose_definition_cannot_be_read(re
     from hook_lib import issue_guard as guard
 
     real = guard.issue_items.load_definition
-    (repo / "sub").mkdir()
+    subprocess.run(["git", "init", "-q", str(repo / "sub")], check=True)  # 定義は作業ツリーの根で読むため、別の木にする
 
     def per_dir(cwd=None):
         if Path(cwd).name == "sub":
@@ -375,6 +375,25 @@ def test_issue_decision_skips_only_the_filing_whose_definition_cannot_be_read(re
     assert _decision(repo, "(cd sub && gh issue create -t t --body-file -)") is None
     why = reason(_decision(repo, "(cd sub && gh issue create -t t --body-file -); gh issue create -t t --body-file -"))
     assert why is not None and "読めない形" in why
+
+
+def test_a_filing_from_a_worktree_subdirectory_reads_that_worktree_definition(repo):
+    """サブディレクトリから起票しても、その worktree の `.ndf/issue-items.json` を読む（PR 2861 round 1）。"""
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"], check=True
+    )
+    wt = repo / "wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(wt)], check=True)
+    items = json.loads((SCRIPTS / "data" / "issue-items.json").read_text(encoding="utf-8"))
+    items["kind_labels"] = {"機能": "type:feature"}
+    (wt / ".ndf").mkdir()
+    (wt / ".ndf" / "issue-items.json").write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    sub = wt / "sub"
+    sub.mkdir()
+    name = write(sub, FEATURE)
+    assert reason(decide(sub, f"gh issue create -t t -l type:feature -F {name}")) is None
+    why = reason(decide(sub, f"gh issue create -t t -l enhancement -F {name}"))
+    assert why is not None and "type:feature" in why
 
 
 def test_issue_decision_judges_every_filing_in_the_command(repo):

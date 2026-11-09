@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import ask_policy
 import issue_items
 import shparse as sp
 
@@ -248,7 +249,7 @@ def issue_decision(ev: pl.Event) -> dict | None:
 def _create_decision(node: sp.Node, cwd: str, written: frozenset[str]) -> dict | None:
     """`gh issue create` 1 つ分の判定。定義を読めない・別のリポジトリなら `None`、拒否なら deny。"""
     try:
-        definition = issue_items.load_definition(cwd)
+        definition = issue_items.load_definition(ask_policy.project_root(cwd))  # 定義は作業ツリーの根で読む。本文の相対パスは cwd のまま
     except issue_items.DefinitionError:
         return None
     words = _call_words(node)

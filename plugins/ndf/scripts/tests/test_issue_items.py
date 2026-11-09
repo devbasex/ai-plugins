@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import shutil
+import subprocess
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -299,6 +300,18 @@ def test_audit_that_cannot_read_github_is_not_zero_gaps(listed, tmp_path, monkey
     listed(error="HTTP 502")
     code, obj = run("audit", "--repo", "o/r")
     assert code == 2 and "読めなかった" in obj["summary"]
+
+
+def test_audit_applies_the_project_definition_only_to_its_own_repository(listed, tmp_path, monkeypatch):
+    """`--repo` が別のリポジトリなら、今のプロジェクトの `kind_labels` を当てず既定で判定する（PR 2861 round 1）。"""
+    root = project(tmp_path, defined(kind_labels={"不具合": "type:bug"}))
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/o/r.git"], check=True)
+    monkeypatch.chdir(root)
+    listed([issue(1, BUG, "bug")])
+    assert run("audit", "--repo", "other/repo")[0] == 0
+    code, obj = run("audit", "--repo", "o/r")
+    assert code == 1 and [it["missing"] for it in obj["items"]] == [["種類"]]
 
 
 def test_audit_skips_a_store_that_is_not_github(listed, tmp_path, monkeypatch):

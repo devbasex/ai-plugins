@@ -61,9 +61,10 @@ def _items_root(given: str | None) -> Path:
     return Path(proc.git_out(Path.cwd(), "rev-parse", "--show-toplevel") or ".").resolve()
 
 
-def _definition(root: Path) -> issue_items.Definition:
+def _definition(root: Path, repo: str | None = None) -> issue_items.Definition:
+    """`root` の定義。`repo` が `root` と別のリポジトリなら `root` の宣言を当てず既定を読む。"""
     try:
-        return issue_items.load_definition(root)
+        return issue_items.definition_for(root, repo)
     except issue_items.DefinitionError as exc:
         _stop_items(f"記載項目の定義を読めない: {exc}")
 
@@ -94,7 +95,7 @@ def cmd_audit(a) -> None:
     if store != "github":
         metrics = {"checked": None, "missing": None, "store": store}
         emit(result(TOOL, "ok", f"検査しなかった: 課題の置き場は {store}", [], metrics), EXIT_OK)
-    definition = _definition(root)
+    definition = _definition(root, a.repo)
     import gh_rest  # GitHub を読むときだけ読み込む
 
     try:
