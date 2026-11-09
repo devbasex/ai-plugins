@@ -109,6 +109,7 @@
 | [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
 | [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
 | [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
+| [parallel_watch.py](parallel_watch.py) | 並列の計画の見回りの判定。停滞の問い（再起動の試みと開発ループの止まりを含む）・一時レーンの途中停止の問い・一覧の失敗の問い・前提が消えた問いの取り下げ。耐久ステップを呼ばず、`_Run` の値と観測の値だけで決める | `parallel_run.py` |
 | [lap_cost.py](lap_cost.py) | ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
 | [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |
