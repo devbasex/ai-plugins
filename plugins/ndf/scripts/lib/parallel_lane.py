@@ -73,6 +73,33 @@ def run_status(main: Path, name: str) -> Optional[str]:
     return durable.status_from(KIND, record_identity(main, name), workflow_id(name), start=record_start(main))
 
 
+DONE_FILE = "run.done"
+
+
+def settled_status(main: Path, name: str) -> Optional[str]:
+    """`run_status` と同じ答えを、終わった計画ではファイルだけで返す（計画の外の判定がループの 1 回ごとに DBOS を開かないため）。
+    終わった状態（`RUNNING` でも None でもない状態）は変わらない（`run_plan` は終わった耐久ワークフローを始め直さない）ため、
+    一度読んだら計画の置き場の `run.done` へ書き、次からはそれを読む。`start` と `run` は始める前に消す（`clear_settled`）。"""
+    done = pp.plan_dir(main, name) / DONE_FILE
+    try:
+        got = done.read_text(encoding="utf-8").strip()
+    except OSError:
+        got = ""
+    if got:
+        return got
+    st = run_status(main, name)
+    if st is not None and st not in RUNNING:
+        try:
+            done.write_text(f"{st}\n", encoding="utf-8")
+        except OSError:
+            pass  # 書けない置き場でも答えは同じ。次も DBOS で読む
+    return st
+
+
+def clear_settled(main: Path, name: str) -> None:
+    (pp.plan_dir(main, name) / DONE_FILE).unlink(missing_ok=True)
+
+
 def external_lane() -> Optional[tuple[str, pp.Lane]]:
     """外のオーガナイザーのレーンなら (`--external`, レーン)。名前は `NDF_ORGANIZER_LANE`（#2439）。"""
     if pe.organizer_dir() is None:

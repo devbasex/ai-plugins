@@ -338,3 +338,41 @@ def test_loop_start_refuses_empty_reason(tmp_path):
     got = pg.entry_check(str(_git(tmp_path / "z")), "  ", "loop start")
     assert got["status"] == "stopped" and got["exit"] == 1
     assert pg.entry_check(str(tmp_path / "z"), None, "loop start") is None  # 動いている計画が無いマシン
+
+
+# ---- 第 2 ラウンドの指摘（起こし直しの 1 行・終わった計画の判定と通知） ----
+
+
+def test_relaunch_line_spawns_even_if_stop_fails(two_repos):
+    x, _y = two_repos
+    plan, _items, _m = pp.check_data(pp.load_plan(x, "p3"), home=x)
+    line = plc.relaunch_items(x, plan, "la", {"input": {"kind": "sprint", "issues": [1]}})[0]["next"]
+    got = subprocess.run(
+        line.replace("python3 ", "false && echo ", 1).replace(" && python3 ", " && echo spawned ", 1),
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "|| true" in line and "spawned" in got.stdout  # stop が誤りで終わっても spawn を打つ
+
+
+def test_settled_status_reads_dbos_once_for_finished_plan(two_repos, monkeypatch):
+    x, _y = two_repos
+    calls = []
+    monkeypatch.setattr(pl, "run_status", lambda h, n: calls.append(n) or "SUCCESS")
+    assert pl.settled_status(x, "p3") == "SUCCESS" and pl.settled_status(x, "p3") == "SUCCESS"
+    assert calls == ["p3"]  # 2 回目はファイルだけで読む
+    pl.clear_settled(x, "p3")
+    monkeypatch.setattr(pl, "run_status", lambda h, n: calls.append(n) or "PENDING")
+    assert pl.settled_status(x, "p3") == "PENDING" and pl.settled_status(x, "p3") == "PENDING"
+    assert len(calls) == 3 and not (pp.plan_dir(x, "p3") / pl.DONE_FILE).exists()  # 動いている計画は印を書かない
+    assert pg.live_plans(x) == ([f"{x}:p3"], [])
+
+
+def test_notify_skips_finished_plan(two_repos, monkeypatch):
+    x, _y = two_repos
+    monkeypatch.setattr(pl, "run_status", lambda h, n: "SUCCESS")
+    assert plc.notify(x, "p3") == (False, "SUCCESS")
+    pl.clear_settled(x, "p3")
+    monkeypatch.setattr(pl, "run_status", lambda h, n: None)
+    assert plc.notify(x, "p3") == (False, None)

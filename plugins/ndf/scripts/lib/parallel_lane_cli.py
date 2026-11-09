@@ -14,6 +14,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import parallel_lane as pl
 import parallel_plan as pp
@@ -49,8 +50,10 @@ def relaunch_items(main: Path, plan: pp.ParallelPlan, lane_name: str, body: dict
     ln = plan.lane(lane_name)
     relay = shlex.quote(str(Path(__file__).resolve().parent.parent / "relay.py"))
     repo = shlex.quote(str(ln.repo_dir(main)))
+    # 止まっている・まだ起動していないレーンでは stop が誤りで終わるため、stop の成否によらず spawn を打つ
     line = (
-        f"cd {repo} && python3 {relay} stop {ln.name} && python3 {relay} spawn --name {ln.name} --json -- {shlex.quote(pp.first_input(ln))}"
+        f"cd {repo} && (python3 {relay} stop {ln.name} || true) && "
+        f"python3 {relay} spawn --name {ln.name} --json -- {shlex.quote(pp.first_input(ln))}"
     )
     msg = f"レーン {ln.name} を新しい入力で起こし直すには、この 1 行を打つ（relay.py restart は前の入力を使い直す）"
     return [{"level": "info", "rule": "relaunch", "message": msg, "next": line}]
@@ -101,10 +104,12 @@ def write_lane(main: Path, plan: pp.ParallelPlan, raw: dict, lane_name: str, act
     return [d / "plan.json", d / "plan.md", target]
 
 
-def notify(main: Path, name: str) -> bool:
-    """耐久ワークフローへ `lanes_changed` を送る。記録が無い（まだ start していない）なら送らずに False。"""
-    if not pl.record_exists(main, name):
-        return False
+def notify(main: Path, name: str) -> tuple[bool, Optional[str]]:
+    """耐久ワークフローへ `lanes_changed` を送る。(送ったか, 耐久ワークフローの状態)。
+    記録が無い（まだ start していない）か、終わった計画（受け手が居ない）なら送らずに False。"""
+    st = pl.settled_status(main, name)
+    if st not in pl.RUNNING:
+        return False, st
     import durable
 
     wid = pl.workflow_id(name)
@@ -117,7 +122,7 @@ def notify(main: Path, name: str) -> bool:
         f"{wid}:inbox:lanes:{time.time_ns()}",
         start=pl.record_start(main),
     )
-    return True
+    return True, st
 
 
 def emit_reply(status: str, summary: str, items=None, code: int | None = None, next_step: str | None = None, **metrics):
@@ -163,10 +168,24 @@ def cmd_lane(a) -> None:
         emit_reply("stopped", f"書けない: {exc}", items, 2)
     if a.action == "set":
         items = [*items, *relaunch_items(main, plan, lane_name, body)]
-    sent = notify(main, a.name)
-    wait = f"python3 {Path(__file__).resolve().parent.parent / 'parallel.py'} wait {a.name}"
+    sent, run_st = notify(main, a.name)
+    cli = Path(__file__).resolve().parent.parent / "parallel.py"
+    next_line = f"python3 {cli} wait {a.name}" if sent else (f"python3 {cli} start {a.name}" if run_st is None else None)
     verb = "足した" if a.action == "add" else "書き換えた"
-    summary = f"並列の計画 {a.name} のレーン {lane_name} を{verb}" + (
-        "。耐久ワークフローへ知らせた" if sent else "（計画はまだ動いていない）"
+    if sent:
+        tail = "。耐久ワークフローへ知らせた"
+    elif run_st is None:
+        tail = "（計画はまだ動いていない。start で起動すると計画のとおりに起動する）"
+    else:
+        tail = f"。計画は動いていない（耐久ワークフローは {run_st} で終わった）ため、レーンは起動しない"
+    summary = f"並列の計画 {a.name} のレーン {lane_name} を{verb}{tail}"
+    emit_reply(
+        "ok",
+        summary,
+        [{"path": str(p)} for p in written] + items,
+        lane=lane_name,
+        notified=sent,
+        run_status=run_st,
+        next_step=next_line,
+        **metrics,
     )
-    emit_reply("ok", summary, [{"path": str(p)} for p in written] + items, lane=lane_name, notified=sent, next_step=wait, **metrics)

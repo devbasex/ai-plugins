@@ -51,7 +51,7 @@ def live_plans(main: Path, status=None) -> tuple[list[str], list[str]]:
                 if status is None:
                     import parallel_lane as pl
 
-                    st, live = pl.run_status(home, name), pl.RUNNING
+                    st, live = pl.settled_status(home, name), pl.RUNNING  # 終わった計画は DBOS を開かない
                 else:
                     st, live = status(home, name), ("PENDING", "ENQUEUED")
             except Exception:  # noqa: BLE001 — 読めない計画は動いている計画として扱う（決定 6）

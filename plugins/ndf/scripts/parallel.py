@@ -136,6 +136,7 @@ def cmd_run(a) -> None:
     import durable
     import parallel_run as pr_run
 
+    pl.clear_settled(main, a.name)  # 終わった印を残したまま動かすと、計画の外の判定が動いていないと読む
     try:
         got, resumed = pr_run.run_plan(main, a.name)
     except durable.DurableError as exc:
@@ -167,6 +168,7 @@ def cmd_start(a) -> None:
     if pl.run_status(main, a.name) is None:
         px.manual_or_none(main, plan, reply)
     log = pp.plan_dir(main, a.name) / "run.log"
+    pl.clear_settled(main, a.name)  # 切り離した run が消す前に判定が読んでも、動いていないと読まない
     with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:
         p = subprocess.Popen([sys.executable, str(SELF), "run", a.name], cwd=main, stdout=f, stderr=f, start_new_session=True)
     (pp.plan_dir(main, a.name) / "run.pid").write_text(f"{p.pid}\n")
