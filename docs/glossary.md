@@ -371,6 +371,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 大方針 | — | 大整理で見つけた根本原因を直す親の Issue。柱と受け入れ条件を持つ（例 #2335）（#2315） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | リレーハブ | `relay_hub` | 同じマシンで最初に起動したラッパーが兼ねるプロセス。名前つきのラッパーの登録・起動・同時に動かす数の判定・一覧だけを持ち、判断を持たず、各ラッパーの状態機械には触れない | 統括役 | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 名前つきのラッパー | `named_relay` | リレーハブに名前で登録され、tmux の 1 つの window で動く relay.py run の 1 本。カットポイントで区間を切り替えても同じ名前で続く | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| 人の起動 | `human_launch` | 端末で利用者が打った claude が、リレーハブへ by: terminal で頼んだ起動（端末の 2 本目）。上限で断らず、上限の数にも入れない | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
+| AI の起動 | `ai_launch` | 依頼の by が spawn・restart・block:<作業ディレクトリ> の起動。リレーハブが上限で判定する | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 端末の結び付け | `attach` | 利用者の端末を、名前つきのラッパーの tmux の window へ attach すること。端末を閉じても window の中のラッパーは動き続ける | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 登録簿 | `relay_registry` | リレーハブだけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない） | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
 | 起動の依頼 | `spawn_request` | 頼む側がリレーハブの受付箱へ置く 1 件のファイル。起動・やり直しの種類と名前・作業ディレクトリ・引数を持つ | — | — | `docs/specifications/ndf-relay-multi-session-supervisor.md` |
@@ -472,6 +474,17 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 物理層 | — | 並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる | — | — | — |
 | ロール層 | — | 並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す | — | — | — |
 | フロー層 | — | 並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる | — | — | — |
+| 今の起動 | — | 一時レーンでは、耐久ワークフローが最後に指示した起動。通常のレーンでは、ラッパーが最後に起動した回 | — | — | — |
+| レーンの再起動 | — | 止まった、または動かないレーンを `relay.py restart` で起動し直すこと。問いの選択肢の「起こし直す」がこれに当たる | — | — | — |
+| 停滞の問い | — | 動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ | — | — | — |
+| 途中停止の問い | — | リリースの途中で止まった一時レーンについて耐久ワークフローが立てる問い（`kind: helper`） | — | — | — |
+| 問いの取り下げ | — | 耐久ワークフローが、答えを待たずに自分の問いを問いの一覧から外すこと | — | — | — |
+| 再起動の試み | — | レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、統括役の記録に時刻と結果を残す | — | — | — |
+| 計画の台帳 | — | 1 つの並列の計画を続けるのに要る状態を、計画の置き場に持つ記録。受けた行を足す ledger.jsonl と、台帳のチェックポイントからなる | — | — | — |
+| 耐久ワークフローの作り直し | — | 失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと | — | — | — |
+| 台帳のチェックポイント | — | 耐久ワークフローが自分の状態（答えた依頼・リリースの記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える | — | — | — |
+| 失われた計画 | — | 閉じていないのに、耐久ワークフローが動いていない計画。ERROR か、耐久の記録が無い状態を指す | — | — | — |
+| 耐久の記録の退避 | — | 失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ置き場で開くために行う | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -847,6 +860,11 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く | — | — | — |
 | 工程が足す節 | — | 起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの答え・閉じた理由・再発など）。起票者は書かない | — | — | — |
 | 置き場ごとの表し方 | — | 記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応 | — | — | — |
+| 棚卸しの実行 | — | 棚卸しを 1 回流すまとまり。持ち主を持つ実行は owner claim が返した識別子（run）で区別する | — | — | — |
+| 棚卸しの記録の置き場 | — | upkeep.py が記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置き、回をまたぐ記録と、実行の識別子を渡さない棚卸しの回（共有の置き場）と、実行ごとの置き場を持つ | — | — | — |
+| 候補の記録 | — | candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む | — | — | — |
+| 棚卸しの回 | — | 1 回の candidates から始まり、続く apply・rank・report が読み書きする候補・反映・順位の記録のまとまり。実行の識別子を渡した candidates は、その実行の回を実行ごとの置き場に始める | — | — | — |
+| 実行ごとの置き場 | — | 棚卸しの記録の置き場の下に、実行の識別子ごとに置く棚卸しの回のディレクトリ（runs/<run>/） | — | — | — |
 
 ## NDF の worktree（`ndf-worktree`）
 
@@ -934,7 +952,7 @@ LLM のアカウントが入力を学習に使う設定かを確かめ、NDF の
 | 学習の設定の確認 | — | 学習の設定を読み、1 行の JSON で返すこと（check）。書き換えない | — | — | — |
 | 学習の設定の書き換え | — | NDF のセッションの開始で、true の学習の設定を false にすること | — | — | — |
 | 書き換えの無効化 | — | 利用者が環境変数 NDF_TRAINING_OPTOUT=0 で学習の設定の書き換えを止めること。確認（check）は止めない | — | — | — |
-| OAuth でない接続 | — | claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い | — | — | — |
+| OAuth でない接続 | — | claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX・CLAUDE_CODE_USE_FOUNDRY）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い | — | — | — |
 | ChatGPT でないログイン | — | codex の auth.json の auth_mode が chatgpt でない起動（API キーのログイン）。ChatGPT のアカウントの学習の設定が無く、読みを送らない | — | — | — |
 
 ## NDF の Google Workspace の操作（`ndf-google-workspace`）

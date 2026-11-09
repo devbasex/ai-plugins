@@ -3198,7 +3198,7 @@
     {
       "term": "OAuth でない接続",
       "context": "ndf-training-optout",
-      "meaning": "claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
+      "meaning": "claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX・CLAUDE_CODE_USE_FOUNDRY）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
       "pending_source": "issues/old/issue-1597-design.md"
     },
     {
@@ -4992,6 +4992,20 @@
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
+      "term": "人の起動",
+      "code": "human_launch",
+      "context": "ndf-workflow",
+      "meaning": "端末で利用者が打った claude が、リレーハブへ by: terminal で頼んだ起動（端末の 2 本目）。上限で断らず、上限の数にも入れない",
+      "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
+    },
+    {
+      "term": "AI の起動",
+      "code": "ai_launch",
+      "context": "ndf-workflow",
+      "meaning": "依頼の by が spawn・restart・block:<作業ディレクトリ> の起動。リレーハブが上限で判定する",
+      "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
+    },
+    {
       "term": "端末の結び付け",
       "code": "attach",
       "context": "ndf-workflow",
@@ -5979,6 +5993,118 @@
       "context": "ndf-workflow",
       "meaning": "並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる",
       "pending_source": "issues/issue-2733-design-terms.md"
+    },
+    {
+      "term": "棚卸しの実行",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しを 1 回流すまとまり。持ち主を持つ実行は owner claim が返した識別子（run）で区別する",
+      "source": "",
+      "pending_source": "issues/issue-2847-requirements.md"
+    },
+    {
+      "term": "棚卸しの記録の置き場",
+      "context": "ndf-issue-upkeep",
+      "meaning": "upkeep.py が記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置き、回をまたぐ記録と、実行の識別子を渡さない棚卸しの回（共有の置き場）と、実行ごとの置き場を持つ",
+      "source": "",
+      "pending_source": "issues/issue-2847-design.md"
+    },
+    {
+      "term": "候補の記録",
+      "context": "ndf-issue-upkeep",
+      "meaning": "candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む",
+      "source": "",
+      "pending_source": "issues/issue-2847-requirements.md"
+    },
+    {
+      "term": "棚卸しの回",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の candidates から始まり、続く apply・rank・report が読み書きする候補・反映・順位の記録のまとまり。実行の識別子を渡した candidates は、その実行の回を実行ごとの置き場に始める",
+      "source": "",
+      "pending_source": "issues/issue-2847-design.md"
+    },
+    {
+      "term": "実行ごとの置き場",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しの記録の置き場の下に、実行の識別子ごとに置く棚卸しの回のディレクトリ（runs/<run>/）",
+      "source": "",
+      "pending_source": "issues/issue-2847-design.md"
+    },
+    {
+      "term": "今の起動",
+      "context": "ndf-workflow",
+      "meaning": "一時レーンでは、耐久ワークフローが最後に指示した起動。通常のレーンでは、ラッパーが最後に起動した回",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "レーンの再起動",
+      "context": "ndf-workflow",
+      "meaning": "止まった、または動かないレーンを `relay.py restart` で起動し直すこと。問いの選択肢の「起こし直す」がこれに当たる",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "停滞の問い",
+      "context": "ndf-workflow",
+      "meaning": "動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "途中停止の問い",
+      "context": "ndf-workflow",
+      "meaning": "リリースの途中で止まった一時レーンについて耐久ワークフローが立てる問い（`kind: helper`）",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "問いの取り下げ",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが、答えを待たずに自分の問いを問いの一覧から外すこと",
+      "source": "",
+      "pending_source": "issues/issue-2649-requirements.md"
+    },
+    {
+      "term": "再起動の試み",
+      "context": "ndf-workflow",
+      "meaning": "レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、統括役の記録に時刻と結果を残す",
+      "source": "",
+      "pending_source": "issues/issue-2649-design.md"
+    },
+    {
+      "term": "計画の台帳",
+      "context": "ndf-workflow",
+      "meaning": "1 つの並列の計画を続けるのに要る状態を、計画の置き場に持つ記録。受けた行を足す ledger.jsonl と、台帳のチェックポイントからなる",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "耐久ワークフローの作り直し",
+      "context": "ndf-workflow",
+      "meaning": "失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "台帳のチェックポイント",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが自分の状態（答えた依頼・リリースの記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "失われた計画",
+      "context": "ndf-workflow",
+      "meaning": "閉じていないのに、耐久ワークフローが動いていない計画。ERROR か、耐久の記録が無い状態を指す",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
+    },
+    {
+      "term": "耐久の記録の退避",
+      "context": "ndf-workflow",
+      "meaning": "失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ置き場で開くために行う",
+      "source": "",
+      "pending_source": "issues/issue-2647-design.md"
     }
   ]
 }

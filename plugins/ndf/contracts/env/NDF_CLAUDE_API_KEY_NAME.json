@@ -1,0 +1,5 @@
+{
+  "name": "NDF_CLAUDE_API_KEY_NAME",
+  "set_by": "runtime",
+  "summary": "子へ渡した API キーの名前（#2855）。supervise.py が子へ入れ、入れ子の supervise.py が読む（plugins/ndf/scripts/lib/claude_api_keys.py:301）"
+}
