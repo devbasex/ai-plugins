@@ -495,6 +495,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 規約の文書の guard | — | supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813） | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
 | 機械的なターン | — | AI が判断を伴わずに行う Tool の呼び出し。出力の読み解き・状態の照合・スクリプトを 1 行打つ・手書きの待ち・本文の転記 | — | — | — |
 | ターンの型 | — | 機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類 | — | — | — |
+| 手順の連続実行 | — | 判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

@@ -6157,6 +6157,12 @@
       "context": "ndf-workflow",
       "meaning": "機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類",
       "pending_source": "issues/issue-2909-requirements.md"
+    },
+    {
+      "term": "手順の連続実行",
+      "context": "ndf-workflow",
+      "meaning": "判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance）",
+      "pending_source": "issues/issue-2909-design.md"
     }
   ]
 }
