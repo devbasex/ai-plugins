@@ -196,12 +196,17 @@ def track_ls_failure(run, seen: dict, limit: float) -> None:
     run.ask("observe", rid, None, text, [rebuild, "待つ"], commands={rebuild: f"python3 {RELAY} status"})
 
 
+def forget_wake(run, lane: str) -> None:
+    """レーンを起こす 1 行（`wake`）と再開待ち（`revive`・`revive_at`）から外す。"""
+    run.wake = [n for n in run.wake if n != lane]
+    run.revive = [n for n in run.revive if n != lane]
+    run.revive_at.pop(lane, None)
+
+
 def answer_refused(run, lane: str, stop: bool) -> None:
     """再起動を断られた問いへの答え（決定 3・I11）。「止める」は保留と起こす 1 行から外して `halted` へ入れ、止まったものと数える。
     「起こし直す」はレーンの種類によらず、動き出すまで依存先の起動と計画の終わりを保留する。"""
-    run.revive = [n for n in run.revive if n != lane]
-    run.revive_at.pop(lane, None)
-    run.wake = [n for n in run.wake if n != lane]
+    forget_wake(run, lane)
     run.halted = [n for n in run.halted if n != lane] + ([lane] if stop else [])
     if not stop:
         run.revive, run.revive_at[lane], run.wake = sorted({*run.revive, lane}), run.seen_at, sorted({*run.wake, lane})
