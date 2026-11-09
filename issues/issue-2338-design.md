@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: NDF の配布物の実行の核（`plugins/ndf/scripts/lib/run_core.py`）を通るエントリポイントすべてと、移す 2 ファイル（`lib/monitor_loop.py`・`check-trigger.py`）。配布先のリポジトリでも同じ書き口が動く
+- **働く範囲**: NDF の配布物の実行の核を通るエントリポイントすべてと、移す 2 ファイルである。核は `plugins/ndf/scripts/lib/run_core.py`、2 ファイルは `lib/monitor_loop.py`・`check-trigger.py` である。配布先のリポジトリでも同じ書き口が動く
 - **プロジェクトごとに違うもの**: 無い。記録の置き場の根は利用者の根（`lib/state_home.py` の `user_home`）から取り、リポジトリごとの値は置き場のパスの 1 階層（`<所有者>__<リポジトリ>`）にだけ現れる。出力先は動く場所（手元か Factory か）で変わるため、リポジトリの設定ではなく環境変数で受ける（決定 4）
 - **当たるモード**: `standard`。柱 P1（#2337）の核を拡張する柱である。実装は 1 スプリント・Pull Request 2 本（「Pull Request の分け方」）に収める。**実装は #2337 の核が develop に入った後に始める**（2026-11-09 の時点で PR 2786 がマージ済み）
 
@@ -86,46 +86,7 @@
 
 ## 外部の調査
 
-| 種類 | 調べるか | 理由 |
-| --- | --- | --- |
-| 標準・仕様 | 調べる | 構造化ログの行の形・親子の実行のつなぎ方・追記と排他の OS の保証に、標準と仕様がある |
-| 主要な製品 | 調べる | 差し替える出力先の代表（CloudWatch Logs）の 1 イベントの上限が、1 行の上限を決める |
-| ライブラリとサービス | 調べる | 構造化ログ・出力先の差し替え・排他を、既存のライブラリで得られるかを決める |
-
-### 標準・仕様
-
-| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| STD1 | JSON Lines | UTF-8・BOM なし・1 行に 1 つの JSON の値・空行は不可・区切りは `\n` | 記録のファイルの形。空行を書かない | https://jsonlines.org/ （2026-11-09） |
-| STD2 | OpenTelemetry Logs Data Model（Stable） | 行は Timestamp・TraceId・SpanId・SeverityText・Body・Attributes などを持つ。TraceId は 1 つの処理に属する行をまとめ、SpanId は処理の中の区間を指す | `run_id`（起点からの区間）と `parent_id` の親子で同じ役割を持たせる。行の鍵は #2335 の形のままにし、OpenTelemetry の形へは変えない（決定 1） | https://opentelemetry.io/docs/specs/otel/logs/data-model/ （2026-11-09） |
-| STD3 | OpenTelemetry の環境変数による文脈の伝搬（Release Candidate） | ネットワークを使わない子プロセスへ、親が環境変数へ文脈を入れて渡す。子は起動時に取り出す。秘密を載せない | 親が `NDF_RUN_ID`・`NDF_RUN_LOG` を子へ渡す形（決定 5） | https://opentelemetry.io/docs/specs/otel/context/env-carriers/ （2026-11-09） |
-| STD4 | Linux の `flock(2)` | 鍵は開いたファイルの記述に付く。別々に `open` したものは独立に排他になる。NFS では `fcntl` のバイト範囲の鍵として模される | 1 行を書く区間を `flock` で囲む。同じプロセスでも開き直した記述どうしで排他になる点を、シグナルの扱いに反映する（決定 1・決定 7） | https://man7.org/linux/man-pages/man2/flock.2.html （2026-11-09） |
-| STD5 | Linux の `write(2)` | 成功した `write` が要求より少ないバイト数を返すことがある（容量不足など）。`O_APPEND` の位置の調整と書き込みは 1 つの原子的な手順 | 戻り値を確かめて残りを書き切る。書き切れないときは長さを戻す（決定 1） | https://man7.org/linux/man-pages/man2/write.2.html （2026-11-09） |
-
-### 主要な製品
-
-| # | 製品 | どう解いているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| PRD1 | Amazon CloudWatch Logs | 1 イベントの上限 1,024 KB、`PutLogEvents` の 1 回の上限 1 MB（どちらも変えられない） | 1 行の上限 64 KiB は、差し替えた出力先でも 1 イベントで送れる（決定 2）。送る出力先の実装は #2608 | https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch_limits_cwl.html （2026-11-09） |
-
-### ライブラリとサービス
-
-| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | Python 標準の `logging`（Handler で出力先を差し替える） | Python 3 の標準ライブラリ | PSF | 標準ライブラリに従う | 無し | 一部。出力先の差し替えはできるが、プロセスの全体で共有するため `argparse` や依存先の出力まで混ざる。排他・全文ファイル・秘密を伏せる処理は自前で足す | `python3 -c "import logging.handlers"`（2026-11-09） |
-| LIB2 | structlog | 26.1.0 | MIT OR Apache-2.0 | 2026-06-06 | 無し | 一部。行の形と処理の連鎖は得られるが、extras の無い環境（`deps.py` の診断も書き口を通る）で動かない | https://pypi.org/pypi/structlog/json （2026-11-09） |
-| LIB3 | python-json-logger | 4.2.0 | BSD-2-Clause | 2026-08-15 | 無し | 一部。LIB1 の行を JSON にするだけで、LIB1 と同じ不足が残る。extras が要る | https://pypi.org/pypi/python-json-logger/json （2026-11-09） |
-| LIB4 | watchtower（LIB1 から CloudWatch Logs へ送る Handler） | 3.4.0 | Apache-2.0 | 2025-02-25 | 無し | この課題では使わない。CloudWatch Logs の出力先の実装（#2608）の候補 | https://pypi.org/pypi/watchtower/json （2026-11-09） |
-| LIB5 | opentelemetry-sdk（ログの出力先の差し替え） | 1.45.2 | Apache-2.0 | 2026-10-29 | 無し | 満たさない。送り先（Collector）の運用が前提で、手元の既定のファイルへ 1 行ずつ排他で書く形を持たない。extras が要る | https://pypi.org/pypi/opentelemetry-sdk/json （2026-11-09） |
-| LIB6 | filelock（extras の `locks` にある） | 4.2.9 | MIT | 2026-11-04 | 無し | 満たさない。extras の無い環境で動かない。標準の `fcntl.flock` で足りる | https://pypi.org/pypi/filelock/json （2026-11-09） |
-
-### 確かめられなかったこと
-
-| 対象 | 試した手段 | 結果と理由 |
-| --- | --- | --- |
-| CloudWatch Logs が上限を超えたイベントを切るか拒むか | PRD1 の URL | 取得できたが、その頁に記述が無い。#2608 の設計で確かめる |
-
-調べた量: 候補 12 件・取得の試み 11 回。
+外部の調査は [issue-2338-design-research.md](issue-2338-design-research.md) にある。
 
 ## 機能一覧
 
@@ -243,6 +204,8 @@ scripts/contracts_lib/model.py       # 変更（secret）
 
 ## 構造
 
+### 型と関係
+
 ```mermaid
 classDiagram
     class RunLog {
@@ -280,12 +243,14 @@ classDiagram
     run_log ..> RunLog : 開いたものを 1 つ持つ
 ```
 
+### 操作の約束
+
 - **プロセスに開いた記録は 1 つだけ**: `open_run` は開いた `RunLog` をモジュールの変数に持ち、`current()` で返す。核の外のプロセス（hook・テスト・ライブラリとして読み込んだとき）では `None` で、`diag` は標準エラーへ書くだけ、`clip` は切るだけになる（決定 8）
 - **出力先は `Sink` の 4 つの操作だけを持つ**: `open` は置き場を用意して位置（子へ渡す文字列）を返す。`append` は改行を含まない 1 行を書き切る。`put_text` は全文を置いて参照の文字列を返す。どれも書けなければ `OSError` を投げる。伏せる処理と 64 KiB の判定は `RunLog` が先に済ませ、出力先は受け取った文字列を書くだけにする（I5・I8）
 - **`register_sink(name, factory)`**: 名前と出力先の作り方を登録する。既定で登録するのは `file` だけである。テストは偽物を登録し、#2608 は CloudWatch Logs の出力先を登録する
-- **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種（`start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end`）だけを受け、ほかは `ValueError`。`event` が `diag` のときは `run_log.diag(fields["text"], short=fields.get("display"), **残りの鍵)` へ渡し、標準エラーへ先に出す経路を 1 つにする（I6）
+- **`ctx.log(event, fields)`** は `current().write` を呼ぶ。`event` は #2335 の 8 種だけを受け、ほかは `ValueError`。8 種は `start` / `input` / `lease` / `ref` / `retry` / `decision` / `diag` / `end` である。`event` が `diag` のときは `run_log.diag` へ渡し、標準エラーへ先に出す経路を 1 つにする（I6）。渡す形は `run_log.diag(fields["text"], short=fields.get("display"), **残りの鍵)` である
 - **`run_log.diag(text, short=None, **fields)`**: 標準エラーへは `short` があれば `short`、無ければ `text` を 1 行で書く。記録へは `{"text": text, **fields}` を書き、`short` があれば `"display": short` も書く
-- **`run_log.clip(text, limit, what)`**: `text` が `limit` 字以下ならそのまま返す。超えるときは、開いた記録があれば `diag` の行 `{"text": 全文, "display": 切った文, "what": what, "stderr": false}` を書いてから、先頭 `limit` 字を返す。標準エラーへは書かない（呼ぶ側が切った文を出す）
+- **`run_log.clip(text, limit, what)`**: `text` が `limit` 字以下ならそのまま返す。超えるときは、開いた記録があれば `diag` の行を書いてから、先頭 `limit` 字を返す。書く行は `{"text": 全文, "display": 切った文, "what": what, "stderr": false}` である。標準エラーへは書かない（呼ぶ側が切った文を出す）
 - **`write` が書けなかったとき**: 例外を投げず、`failed` に理由を持ち、標準エラーへ理由を 1 回だけ出す。以後の `write` は出力先へ渡さない。核は E8 の前と後の 2 回 `failed` を見る（「処理の流れ」）
 
 ## データ構造
@@ -490,7 +455,7 @@ stateDiagram-v2
 1. `__main__` を `run_core.main("scripts/check-trigger.py", main)` にする。`main` は `emit` で結果を出す。`scope` は `SystemExit(cmd_scope(...))` で終わる
 2. `cmd_scope` の標準エラーへの 1 か所を `run_log.diag` へ置き換える
 3. `append_event` は、開いた記録があれば行へ `run_id` を足す
-4. `findings_of` は、落ちたステップが無いときに `failed_reason`（「データ構造」の 3 つの形）を返す。`record_target` と `cmd_record` は、`failed_at` が「不明」の行へ `failed_reason` を足し、同じ理由を `decision` の行 `{"reason": ..., "state": <パス>}` で記録へ書く。結果の `summary` は今の文に理由を足す
+4. `findings_of` は、落ちたステップが無いときに `failed_reason`（「データ構造」の 3 つの形）を返す。`record_target` と `cmd_record` は、`failed_at` が「不明」の行へ `failed_reason` を足す。同じ理由を `decision` の行 `{"reason": ..., "state": <パス>}` で記録へ書く。結果の `summary` は今の文に理由を足す
 5. `failed_at` の値の決め方は変えない。数え方を変えると、`stats` の既存の集計と食い違うためである
 
 ## Pull Request の分け方
@@ -517,32 +482,7 @@ stateDiagram-v2
 
 ## テスト設計
 
-| 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
-| --- | --- | --- |
-| 1・I1 | 核を通るエントリポイントを正常・例外・SIGTERM・時間切れで終わらせると、1 ファイルに同じ `run_id` で `start` から `end` までが並び、すべての行が 5 つの鍵を持つ | 中断の経路で `end` を書かない／`at` を地方時で書く |
-| 1・I1 | 主スレッドが排他の区間にいる時点で SIGTERM と SIGALRM を送っても、時間内に終わり、`end` の行が最後に 1 つだけ並ぶ | 受け手が区間の中で `_Interrupt` を投げる／印を `Lock` を取った後に立てる |
-| 1a・I3 | エントリポイントが別のエントリポイントを子プロセスで起こすと、子の行が親のファイルに入り、`parent_id` が親の `run_id`。親のファイルを消してから子を起こすと、子は自分のファイルを作り `inherited_log_missing` を書く | 子へ `NDF_RUN_LOG` を渡さない／子が自分の識別子を `parent_id` に書く |
-| 1b・I2 | 子の実行を並行に複数起こし、64 KiB 近い行を書かせても、全行が JSON として読める | 排他を外して 2 回の `os.write` に分ける |
-| 1b・I2 | `os.write` が少ないバイト数を返す・例外を投げるように差し替えると、前者は行を書き切り、後者はファイルの長さが追記前に戻って `failed` になる。どちらの後も次の行は独立に読める | 戻り値を確かめない／書きかけの行を残して排他を返す |
-| 1c | 本体の `decision` と止まった理由が行に残り、`end` の `fields` が標準出力の結果 JSON と終了コードに一致する | `end` に `summary` だけを書く／`run_id` を足す前の結果を書く |
-| 1e・I10 | 31 日前の日付のディレクトリが消え、29 日前は残る。消せない（権限）ときは `diag` が残り、本体の結果が変わらない。子の実行の起動では消さない | 更新時刻で判定する／消せない例外で止まる |
-| 1f・I7 | 置き場を書けない場所にすると、標準エラーに理由が出て `stopped`・1 で本体が動かない。途中で書けなくすると本体は終わりまで動き、`stopped`・1・`gaps` に `run-log-unwritable`、`original_result` に元の結果 JSON | 書けない例外を握りつぶして `ok` を返す／元の結果を捨てる |
-| 1f・I7 | 本体が `ok` で終わり、`end` の行で初めて書けなくすると、標準出力は `original_result` を持つ `stopped`、終了コードは 1 | `failed` を E8 の前にだけ見る |
-| 1g・I8 | 偽物の出力先を登録して `NDF_RUN_LOG_SINK` に名前を入れると、同じ 5 つの鍵の行が偽物へ届き、ファイルは作られない。偽物へ届く行も伏せてある。登録の無い名前では `stopped`・1 | 書き口が出力先の名前を見ずにファイルへ書く／偽物の出力先へ伏せる前の行を渡す |
-| 1h | `NDF_RUNS_DIR` が無いとき、記録は `NDF_STATE_HOME` の下の `runs/` に書かれる | 置き場の根をコンテナの根から取る |
-| 1h | 全体テストの後に、テストの外の置き場の `runs/` の中身が増えも減りもしない。`plugins/ndf/` だけを根にしてテストを実行しても同じ | `conftest.py` から `NDF_RUNS_DIR` の行を外す／受け継いだ `NDF_RUN_LOG` を外さない |
-| 2 | 2 ファイルに `print(..., file=sys.stderr)` と `sys.stderr.write` が無い（`grep -nE 'file=sys\.stderr\|sys\.stderr\.write'` が 0 件） | 直書きを 1 か所残す |
-| 2a・I6 | `run_log.diag` と `ctx.log("diag", ...)` の文が、標準エラーと記録の `diag` の両方に出る。記録へ書けないときも標準エラーの文は同じ | 記録へ書いた後でしか標準エラーへ書かない |
-| 2c | 標準エラーの記録の警告を出した後の周回で拒否の件数が見つかると、拒否の件数の警告が 1 回出て、記録にも `diag` で残る。以後の周回では 2 つとも繰り返さない | 出した印を 1 つに戻す |
-| 2d・I9 | 核を通して `record` した検査の行が、標準出力の結果 JSON と同じ `run_id` を持つ。`run_id` の無い既存の行を混ぜても `stats` の値が変わらない | 鍵を必須にする／読み手が未知の鍵で落ちる |
-| 2e | `record --target-pr --failed` に、`state.json` の無い状態・`log` が空の状態・欠けを残したステップだけの状態を渡すと、行の `failed_reason` と記録の `decision` に、パスと見つからなかったものが残る。行の `run_id` で記録の行が引ける | 理由を結果の文にだけ書く |
-| 3・I4 | 本体が渡した 10,000 字の `summary` と、例外の 10 行の理由が、結果 JSON と `end` の行に同じ文字列で残る | 核が例外の理由を `redact_output` で縮める |
-| 3a・I4 | 64 KiB を超える理由は全文ファイルへ移り、参照の文字数と sha256 が全文と一致する。全文ファイルが行より先に在る | 全文ファイルを書かずに参照だけ残す／長い文字列を切る |
-| 3b | 6 か所それぞれで、長い入力の全文が記録の `diag`（`stderr: false`）に残り、表示は今の長さのまま | `clip` が記録へ書かずに切る |
-| 4・4a | （手動）PR 2 のマージの前に #2059 と #2300 の再現の手順を 1 回ずつ通し、本文の「子の課題の判定」へ書く。残りの 6 件は今の理由のまま残す | — |
-| 5・I5 | `secret: true` の環境変数に値を入れ、本体がその値を診断・例外の理由・`summary` へ入れても、記録と全文ファイルと偽物の出力先に値が無い。空の値で他の文字列が壊れない | 全文ファイルに伏せる処理を通さない／空の値で置き換える |
-| 6 | 2 ファイルの診断が、同じ入力に対して移す前と同じ文で標準エラーへ出る（拒否の件数の警告が増える場合を除く） | 表示を全文にする |
-| 7 | 各 Pull Request で `uv run --frozen --project . --all-extras pytest . -q -n 4` が前後で通る | — |
+テスト設計は [issue-2338-design-tests.md](issue-2338-design-tests.md) にある。
 
 ## 設計の結果
 
