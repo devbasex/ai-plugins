@@ -198,3 +198,73 @@ def test_heredoc_text_reads_a_cat_heredoc_in_a_substitution(arg, text):
 )
 def test_heredoc_text_is_none_for_other_forms(arg):
     assert _body_word_text(arg) is None
+
+
+def _create_args(args: str, cwd: Path):
+    """`gh issue create <args>` の引数を `create_args` に渡した結果（現状固定）。"""
+    from hook_lib import issue_guard as guard
+    import shparse as sp
+
+    node = guard.creates(sp.parse_bash(f"gh issue create {args}"))[0]
+    words = guard._call_words(node)
+    start = guard._start([sp.unquote(w) for w in words]) + 3
+    return guard.create_args(words[start:], str(cwd))
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ("", (None, [], None)),
+        ("--title t", (None, [], None)),
+        ("--body x", ("x", [], None)),
+        ("-b 'a b'", ("a b", [], None)),
+        ("--body=x", ("x", [], None)),
+        ("--body=", ("", [], None)),
+        ("-b=x", (None, [], None)),
+        ("--body a --body b", ("b", [], None)),
+        ("--label a,b -l ' c , ,d' --label=e", (None, ["a", "b", "c", "d", "e"], None)),
+        ("--label ''", (None, [], None)),
+        ("--repo o/x", (None, [], "o/x")),
+        ("-R=o/x", (None, [], None)),
+        ("--repo=o/x -b y", ("y", [], "o/x")),
+        ("--body x --web", (None, [], None)),
+        ("-w --body x", (None, [], None)),
+        ("--body $X", (None, [], None)),
+        ('--body "a $X"', (None, [], None)),
+        ("--body x --body $X --body y", (None, [], None)),
+        ("--body", (None, [], None)),
+        ("--label", (None, [], None)),
+        ("--repo", (None, [], None)),
+        ("--body \"$(cat <<'EOF'\nhi $X\nEOF\n)\" -l bug", ("hi $X\n", ["bug"], None)),
+    ],
+)
+def test_create_args_reads_body_labels_and_repo(tmp_path, args, expected):
+    assert _create_args(args, tmp_path) == expected
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ("--body-file f.md", "file body\n"),
+        ("-F f.md", "file body\n"),
+        ("--body-file=f.md", "file body\n"),
+        ("--body x --body-file f.md", "file body\n"),
+        ("--body-file f.md --body x", "x"),
+        ("--body-file missing.md", None),
+        ("--body-file missing.md --body x", None),
+        ("--body-file -", None),
+        ("--body-file=", None),
+        ("--body-file bin.md", None),
+        ("--body-file", None),
+    ],
+)
+def test_create_args_reads_the_body_file_relative_to_cwd(tmp_path, args, expected):
+    (tmp_path / "f.md").write_text("file body\n", encoding="utf-8")
+    (tmp_path / "bin.md").write_bytes(b"\xff\xfe\x00")
+    assert _create_args(args, tmp_path) == (expected, [], None)
+
+
+def test_create_args_reads_an_absolute_body_file(tmp_path):
+    f = tmp_path / "abs.md"
+    f.write_text("abs\n", encoding="utf-8")
+    assert _create_args(f"-F {f} -l x", tmp_path / "elsewhere") == ("abs\n", ["x"], None)
