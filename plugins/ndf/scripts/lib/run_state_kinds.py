@@ -118,7 +118,7 @@ KINDS: tuple[Kind, ...] = (
             "scripts/statusline-switch.sh",
             "scripts/supervise_lib/paths.py",
             "scripts/worktree-setup.sh",
-            "skills/backlog-refinement/scripts/upkeep.py",
+            "skills/backlog-refinement/scripts/upkeep_state.py",
             "skills/development-workflow/scripts/lib/workflow-common.sh",
             "skills/external-ai/scripts/external-ai.py",
             "skills/pr-review/scripts/pr-review-steps.py",
