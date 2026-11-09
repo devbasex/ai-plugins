@@ -79,6 +79,11 @@ def release_halted(run, rows: dict) -> None:
     run.halted = [n for n in run.halted if (rows.get(n) or {}).get("state") not in ("running", "awaiting_approval")]
 
 
+def _has_loop_stop_question(run, n: str) -> bool:
+    """答えていない開発ループの止まりの問いがこのレーンにあるか（I7）。"""
+    return any(q.get("lane") == n and q.get("loop_stop") for q in run.questions)
+
+
 def ask_loop_stops(run, rows: dict, loops: dict, now: float, limit: float) -> None:
     """開発ループの記録が `waiting_only` 以外で止まったのに行が `running` のレーンを、区切りを待たずに問う（決定 6・I6・I7）。
     記録が今の起動より後に止まったものだけを問う。記録が止まっていないレーンは次に問える時刻を消す。"""
@@ -92,7 +97,7 @@ def ask_loop_stops(run, rows: dict, loops: dict, now: float, limit: float) -> No
         started, stopped_at = _seconds_of(run.lanes[n].get("started")), _seconds_of(stop.get("at"))
         if started is not None and stopped_at is not None and stopped_at <= started:
             continue  # 前の起動のときの止まり（続きから引き継いだレーン）
-        if now < run.loop_until.get(n, 0) or any(q.get("lane") == n and q.get("loop_stop") for q in run.questions):
+        if now < run.loop_until.get(n, 0) or _has_loop_stop_question(run, n):
             continue
         run.loop_until[n] = run.stall_until[n] = now + limit
         text = f"レーン {n} の開発ループ {stop.get('loop')} が止まった（条件: {stop.get('condition')}）。一覧の状態は running のまま"
@@ -117,7 +122,7 @@ def ask_stalls(run, rows: dict, now: float, limit: float) -> None:
         base = max([x for x in (at, *ok) if x is not None], default=None)
         if r.get("state") != "running" or base is None or now - base < limit or now < run.stall_until.get(n, 0):
             continue
-        if any(q.get("lane") == n and q.get("loop_stop") for q in run.questions):
+        if _has_loop_stop_question(run, n):
             continue  # 答えていない開発ループの止まりの問いに重ねない（I7）
         run.stall_until[n] = now + limit
         text = f"レーン {n} が {int((now - base) // 60)} 分動いていない（最後に動いた時刻: {r.get('at')}{_tries_text(tries)}）"
