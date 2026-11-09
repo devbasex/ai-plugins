@@ -6,7 +6,7 @@
 
 - **記録の置き場が分からない `close` は、課題を閉じない。** `sprint-close.py --record-pr unknown` は
   リリース記録を読まず、どの課題も閉じず、ボードも書かずに、`--issues` の課題を理由つきの `kept_open` で返す（承認ゲート `gate`・終了コード 10。プランは棚卸しへ進む）。
-  #2230 から、まとめのプランは `unknown` を組まない。リリースの経路が雛形（`release.form`）でもリリースの Pull Request（promote）でもなく、届ける経路を
+  まとめのプランは `unknown` を組まない。リリースの経路が雛形（`release.form`）でもリリースの Pull Request（promote）でもなく、届ける経路を
   1 つでも含むとき（と開発ループのまとめ）は `--record-pr {queue_record}` を組み、まとめを流し始める時点に queue が記録の PR を探して埋める
   （[ndf-production-release-record.md](ndf-production-release-record.md) の「まとめのプランの記録の PR と `release-verify`」）。
   `unknown` を渡すのは手で打つ入口と、#2230 より前に組んだまとめのプランだけである

@@ -84,8 +84,8 @@
 **承認資料にコミットを書いて本番の範囲を縛る形は、手で反映する経路（`release-steps.py deploy-facts`）で既に使っていた。**
 同じ形を `package-plugin` のリリースへ広げた。
 
-**リリースの Pull Request で届く経路にも同じ欠けがあった（#1529）。** `pace: fast` / `auto` の本番チャネルへ入れるリリースプランは導入の確認をベースブランチの先頭で走らせ、
-確かめたコミットを承認資料へ載せる（#1457）。しかし `promote` ステップは CI が通ったリリースの Pull Request の先端をそのまま
+**リリースの Pull Request で届く経路にも同じ欠けがあった。** `pace: fast` / `auto` の本番チャネルへ入れるリリースプランは導入の確認をベースブランチの先頭で走らせ、
+確かめたコミットを承認資料へ載せる。しかし `promote` ステップは CI が通ったリリースの Pull Request の先端をそのまま
 マージしていた。確認の後にベースブランチが進むと（別のスプリントのマージなど）、確かめていないコミットが MVV 判定の後に
 本番チャネルへ入りえた。
 
@@ -218,7 +218,7 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 | `AllowedPR` | `number`・`head`・`commits`・`merge_commit` |
 | `Unapproved` | `ValueError` の子。`sha`（承認したコミット）と `recorded`（記録の SHA。無ければ `None`）。`release` は 10、`approve` は 1 に読み替える |
 
-### リリースの Pull Request で届く経路の照合（#1529）
+### リリースの Pull Request で届く経路の照合
 
 `pace: fast` / `auto` の本番チャネルへ入れるリリースプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）は
 `verify` → `prepare` → `mvv` → `note` → `promote` → `cd-result` → `record` の順に流れ、`note` か `promote` が落ちたら `handoff` へ進む。
@@ -292,7 +292,7 @@ sequenceDiagram
 （`head_moved`・資料を読めない）ときは `run <プラン> --from verify` から流し直す。`--from promote-approved` は `prepare` が書いた
 リリースの承認資料の承認したコミットで照合するが、導入の確認も MVV 判定もその先端では走っていないためである。
 
-### リリースの承認の後の照合（#2104）
+### リリースの承認の後の照合
 
 `normal` の本番チャネルへ入れるリリースプランは `promote`（`--out {state_dir}/work/approval-promote.md`）→ リリース承認ゲート→ `promote-approved` の順に流れる。
 `promote-approved` ステップは `normal` と `fast` / `auto` で同じコマンド
@@ -409,7 +409,7 @@ sequenceDiagram
 | 判定できないときは承認ゲートで止まる（I6） | 通すと承認の外の変更を見落としうる。失敗（1）にすると、本番のリリースプランの judge が直す（fix）か同じステップをもう一度（retry）を選び、人の承認を経ずに打ち直されうる |
 | `--mvv` 付きのプランは承認ゲートで `handoff` へ進む（I7） | MVV 判定が承認したのは承認資料の中身で、承認の外のコミットは判定の材料に入っていない。人が外のコミットを見てから承認し直す。`gate_next` を置かないと、10 を受けて `next` の `verify` へ進み、配っていない版の導入を確かめに行く |
 | 比べる関数を `lib/` に置く | リリースの Pull Request で届く経路にも同じ欠けがあり、`release-steps.py` の中に置くと同じ役割の関数が 2 つになる。`allowed` を空にすれば promote の判定になると見込んだが、#1529 は木が等しい別のコミットを通すため採らず、経路 merge は `--expect-head` の照合を使う |
-| リリースの Pull Request の照合に `--expect-head` を使い、`compare_approved` を使わない（#1529） | `--expect-head` は CI を待つ間の読みのたびに先端を比べ、マージを `--match-head-commit` で比べた先端に固定する。待つ間の変化と、最後の読みとマージの間の変化の両方を既存のコードのまま塞げる。`compare_approved` に `allowed` を 0 個で渡す形は手元の git を 1 度読むだけで待つ間の変化を見ず、木が等しい別のコミット（中身の無いマージなど）を通す |
+| リリースの Pull Request の照合に `--expect-head` を使い、`compare_approved` を使わない | `--expect-head` は CI を待つ間の読みのたびに先端を比べ、マージを `--match-head-commit` で比べた先端に固定する。待つ間の変化と、最後の読みとマージの間の変化の両方を既存のコードのまま塞げる。`compare_approved` に `allowed` を 0 個で渡す形は手元の git を 1 度読むだけで待つ間の変化を見ず、木が等しい別のコミット（中身の無いマージなど）を通す |
 | `promote` は SHA ではなく承認資料のパスを受けて自分で読む（#1529） | プランのコマンドで `--expect-head "$(…)"` と SHA を置換して渡すと、読めなかったときに空の値が渡り、`_check_expected` は空を「照合しない」と扱う。パスを受けて中で読めば、読めないことを `promote` 自身が失敗として返せる（P2）。SHA を出す副命令を足してプランで繋ぐ形は、ステップが増え空の値の経路も残る |
 | 確かめたコミットの行の形を `lib/approved_commit.py` に置き、`verify_markdown` もそれで書く（#1529） | 読み手だけを足すと、書き手の文言を直したときに読み手が黙って読めなくなる。承認資料に `\| 承認したコミット \|` の欄を足して `material_sha` で読む形は、`mvv-gate.py` がその欄を見て承認の記録を書き足すようになり、承認資料の中身を変える |
 | プランは `mvv` と同じ定数 `VERIFY_MATERIAL` を `promote` に渡す（#1529） | MVV 判定が読んだ資料と照合に使う資料が同じファイルになる。資料を書くのは `verify` ステップだけで、`--from verify` で打ち直すと資料も作り直される。プランを組む時点の先端や `origin/<ベースブランチ>` を引き直すと、確認の後に進んだ先端を拾い照合の意味が無くなる |
