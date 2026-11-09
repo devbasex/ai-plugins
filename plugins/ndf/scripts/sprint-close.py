@@ -85,6 +85,7 @@ sys.path.insert(0, str(HERE))
 import limits  # noqa: E402  上限の宣言（#2343）
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
 from sprint_close_lib.summary import close_summary, not_closed_gaps  # noqa: E402
+from sprint_close_lib.unaccepted import unaccepted_item  # noqa: E402  閉じる条件 2 を満たさない項目
 from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
     NO_BASE,
     STAGE_RETRO,
@@ -106,7 +107,6 @@ verification_verdicts = acceptance.verification_verdicts
 
 NO_ROWS = "リリース後テストの行が無い"
 NOT_PASSED = "リリース後テストに合格でない条件がある（不合格・保留）"
-UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
 UNREADABLE_BODY = "本文を読めない（最終工程の記録を確かめられない）"
 NO_MAPPING = "条件と課題の対応が読めない"
 NO_ISSUE_TABLE = "リリース後テストの記録に `課題` と `結果` の列を持つ表が無い"
@@ -285,7 +285,7 @@ def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
     if not ok:
-        return _unaccepted_item(base, state, why, kept), []
+        return unaccepted_item(base, state, why, kept), []
     gap = final_stage_gap(ctx.final_stage, body, ctx.since)
     if gap:  # 条件 3 を満たさない課題の本文は書かない
         return gap_item(base, state, gap), []
@@ -296,15 +296,6 @@ def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
         return None, []
     failed = _write_marks(ctx, base, body, to_check)
     return (failed, []) if failed is not None else (None, to_check)
-
-
-def _unaccepted_item(base, state, why, kept):
-    """条件 2 を満たさない課題の結果の項目。kept があればその理由で開いたまま残す。"""
-    if kept:
-        return {**base, "result": "kept_open", "reason": kept}
-    if state == "CLOSED":
-        return {**base, "result": "closed_unverified", "reason": UNVERIFIED + why}
-    return {**base, "result": "kept_open", "reason": why}
 
 
 def _write_marks(ctx, base, body, to_check):
