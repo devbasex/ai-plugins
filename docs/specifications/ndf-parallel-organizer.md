@@ -146,7 +146,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/lib/delivery.py` | 宣言とリリースの経路からリリースの組み方と理由を返す（`release_way`） |
 | `plugins/ndf/scripts/lib/parallel_release.py` | まとめたリリース: 範囲の Pull Request をレーンへ対応づける（`present`・`map_lanes`）、先頭が進んだかを比べる 1 つの関数（`moved`）、範囲で答えられる依頼（`answerable`）、提示のプランと本番のプランの組み立て（`build_plans`・`present_gate_steps`）、リリースの依頼のプラン（`plan_release_request`） |
 | `plugins/ndf/scripts/lib/parallel_lane.py` | レーンの側: 自分が属する計画の判定（`lane_of`）・送り手の資格（`sender_of`）・本番チャネルにあるかの判定（`merged_on_production`）・依頼を送る（`send_release_request`・`request_gate1`・`request_ask`・`request_gate2`）・答えを読む（`read_answer`・`answers_of`）・プランの本数（`lane_plans`・`queue_max`） |
-| `plugins/ndf/scripts/lib/parallel_files.py` | DBOS を読まずにファイルだけで、レーンか一時レーンかを決める（`lane_name_in_plans`。問いの hook の 10 秒の上限の中で使う） |
+| `plugins/ndf/scripts/lib/parallel_files.py` | DBOS を読まずにファイルだけで、レーンか一時レーンかを決める（`lane_name_in_plans`。問いの hook の 10 秒の上限の中で使う）。計画名の形（`PLAN_NAME`・`PLAN_RE`）の唯一の定義を持ち、計画の検査と引継ぎ文書の名 `parallel-<計画名>`（`handoff.py`）がそれを使う |
 | `plugins/ndf/scripts/lib/durable.py` | 外のプロセスから記録を開く関数（`open_client`・`send_to`・`event_from`・`status_from`・`wait_from`）と、耐久ワークフローの中の `recv`・`set_event`・`patched`。DBOS を import するのはこのファイルだけである |
 | `plugins/ndf/scripts/relay_lib/hub.py`・`hub_client.py` | 役割のファイルの読み書き（`relay.py role`・`spawn --role helper --plan`）と数え方（I13）。`ls --json` の `metrics.hub`・`metrics.tmux` |
 | `plugins/ndf/scripts/lib/sprint_loop_gate.py` | ループのレーンが設計の承認を「人の判断待ち」へ移すときに、`kind: gate1` の依頼を送る。答えを当てる前に設計 PR の先頭を比べ、取り込みのコミットだけの違いなら当てる |

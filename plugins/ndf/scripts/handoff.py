@@ -15,7 +15,7 @@ r"""引継ぎ文書（`.ndf/handoff/<名>.md`）のパスの解決・作る・�
 | `check <名> [--trim] [--max-lines N]` | 節の形と行数（既定 300）を確かめる。`--trim` は先に「前の会話の進み」を履歴へ移す | 0 通る / 1 形の違反か行数の超過 |
 | `remove <名>` | 本体と履歴を消し、消したパスを返す | 0 |
 
-共通: 名が `loop-<名>`・`sprint-<名>`・`milestone-<番号>`・`issue-<番号>` の形でない・パスが `.ndf/handoff/` の下でない・
+共通: 名が `parallel-<計画名>`・`loop-<名>`・`sprint-<名>`・`milestone-<番号>`・`issue-<番号>` の形でない・パスが `.ndf/handoff/` の下でない・
 読めない・書けない → 2。git の中でない・メインディレクトリに `.ndf/` が無い → 3。
 出力は `lib/step_result.py` の形の 1 行の JSON（`tool` は `handoff`）。実行の核（`lib/run_core.py`）を通る。
 
@@ -36,6 +36,7 @@ import deps  # noqa: E402
 
 deps.require("md")
 import handoff_doc  # noqa: E402
+import parallel_files  # noqa: E402
 import repo  # noqa: E402
 import run_core  # noqa: E402
 import step_result  # noqa: E402
@@ -44,7 +45,12 @@ TOOL = "handoff"
 TEMPLATE = Path(__file__).resolve().parent / "data" / "handoff-template.md"
 HANDOFF_DIR = Path(".ndf") / "handoff"
 HISTORY_SUFFIX = "-history"
-NAME_RE = re.compile(r"^(?:issue-[0-9]+|milestone-[0-9]+|sprint-[0-9A-Za-z][0-9A-Za-z_-]*|loop-[0-9A-Za-z][0-9A-Za-z_-]*)$")
+PARALLEL_PREFIX = "parallel-"  # オーガナイザーの文書。鍵は計画名の形（parallel_files.PLAN_NAME）を組み込む（#2778）
+NAME_RE = re.compile(
+    rf"^(?:{PARALLEL_PREFIX}{parallel_files.PLAN_NAME}|issue-[0-9]+|milestone-[0-9]+"
+    r"|sprint-[0-9A-Za-z][0-9A-Za-z_-]*|loop-[0-9A-Za-z][0-9A-Za-z_-]*)$"
+)
+NAME_FORMS = "parallel-<計画名>・loop-<名>・sprint-<名>・milestone-<番号>・issue-<番号>"
 OPTIONAL_MARK = "<!-- 任意"
 DEFAULT_MAX_LINES = 300
 
@@ -66,7 +72,7 @@ def emit_result(summary: str, items=None, metrics=None, code: int = 0, next: str
 
 def handoff_name(name: str) -> str:
     if not NAME_RE.match(name) or name.endswith(HISTORY_SUFFIX):
-        raise Failure(f"名が loop-<名>・sprint-<名>・milestone-<番号>・issue-<番号> の形でない: {name}")
+        raise Failure(f"名が {NAME_FORMS} の形でない: {name}")
     return name
 
 
@@ -143,6 +149,9 @@ def match_words(name: str) -> re.Pattern:
     if kind == "milestone":
         return re.compile(rf"(?:マイルストーン\s*|milestone\s*|milestone-){key}(?![0-9])", re.I)
     k = re.escape(key)
+    if kind == "parallel":
+        # `--parallel <X>` か文書の名そのものだけ。裸の計画名・一時レーンの `--parallel-helper` では当てない（#2778 の決定 2）
+        return re.compile(rf"(?<![0-9A-Za-z_-])(?:--parallel\s+|{PARALLEL_PREFIX}){k}(?![0-9A-Za-z_-])")
     return re.compile(rf"sprint-{k}(?![0-9A-Za-z-])|(?<![0-9A-Za-z-]){k}(?![0-9A-Za-z-])")
 
 

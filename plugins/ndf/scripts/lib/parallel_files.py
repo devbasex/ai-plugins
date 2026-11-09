@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Optional
 
 PARALLEL_DIR = Path(".ndf") / "parallel"
+# 計画名の形の唯一の定義。24 字まで（一時レーンの名前を 32 字に収める）。引継ぎ文書の名 `parallel-<計画名>` も組み込む（#2778）
+PLAN_NAME = r"[a-z0-9][a-z0-9_-]{0,23}"
+PLAN_RE = re.compile(rf"^{PLAN_NAME}$")
 ROLE_FILE = (
     "role.json"  # リレーハブの作業ディレクトリの役割のファイル（relay_lib.hub.ROLE_FILE と同じ公開の形。リレーハブを import しない）
 )

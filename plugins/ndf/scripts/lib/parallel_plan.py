@@ -21,10 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationIn
 from pydantic_core import PydanticCustomError
 
 import parallel_hold
-from parallel_files import PARALLEL_DIR, resolved_path  # noqa: F401  置き場の正本（問いの hook も読む）
+from parallel_files import PARALLEL_DIR, PLAN_RE, resolved_path  # noqa: F401  置き場と計画名の形の正本（問いの hook も読む）
 
 VERSION = 1
-PLAN_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")  # 計画名は 24 字まで（一時レーンの名前を 32 字に収める。I1）
 LANE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")  # リレーハブの名前の形（relay_lib/common.py の NAME_RE と同じ）
 HELPER_RE = re.compile(r"-rel\d+$")  # 一時レーンの名前の形（`<計画名>-rel<連番>`）
 DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（2026-09-25 の実測。8 コア・30 GB）
@@ -101,7 +100,8 @@ class Lane(BaseModel):
     def _handoff(cls, v: Optional[str]) -> Optional[str]:
         import handoff  # 引継ぎ文書の名の規則は handoff.py が持つ
 
-        if v is not None and (not handoff.NAME_RE.match(v) or v.endswith(handoff.HISTORY_SUFFIX)):
+        # オーガナイザーの文書（`parallel-<計画名>`）と同じ名にしない（#2778 の決定 4）
+        if v is not None and (not handoff.NAME_RE.match(v) or v.endswith(handoff.HISTORY_SUFFIX) or v.startswith(handoff.PARALLEL_PREFIX)):
             raise PydanticCustomError(
                 "I5", "引継ぎ文書の名の形が違う（{pattern}）: {name}", {"pattern": handoff.NAME_RE.pattern, "name": v}
             )
