@@ -247,8 +247,8 @@ flowchart LR
 ## レーンの動き方の規定で欠けているもの
 
 今ある規定は `development-workflow/references/parallel.md` の「レーンの側」と、
-`issue-plan-strategy/references/parallel-plan.md` の「レーンごとに決めること」である。起動と依頼の形は決まっているが、次の規定が無かった。規定は #2733 で、形によらない規定とスタンドアロン（A）だけの規定に分けて
-`development-workflow/references/parallel.md` の「レーンの動き方」（R1〜R7）へ置いた。下の表は、規定を決めるもとになった実際の例の一覧として残す。
+`issue-plan-strategy/references/parallel-plan.md` の「レーンごとに決めること」である。起動と依頼の形はこの 2 つが決める。レーンの動き方は、形によらない規定とスタンドアロン（A）だけの規定に分けて
+`development-workflow/references/parallel.md` の「レーンの動き方」（R1〜R7）が決める。下の表は、その規定のもとになった実際の例の一覧である。
 
 | 欠けていた規定 | 実際に起きたこと |
 | --- | --- |

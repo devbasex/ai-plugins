@@ -86,7 +86,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | 本番チャネルへの Pull Request の head を、承認したコミットから切った `release/v<版>` にする | `develop` を止めずに、承認したコミットと版上げだけを `main` へ出せる。`main` へ出るコミットはすべて `develop` に含まれる。並列の計画の外のリリースにも同じ規則が効く |
 | 並列の計画の下では、区分つきの問いはオーガナイザーだけが出す。レーンの問いは問いの hook が送る | レーンは問いで止まらず別の作業へ進める。conductor の手順だけで送ると、手順に書いていない場所の問いが漏れる。送れなければ今どおり通すので、DBOS が読めないときも今の振る舞いに戻る |
 | オーガナイザーは、設計の承認の答えで設計 PR をマージするほかは作業を持たない。答えの後の処理は持ち主のレーンが、持ち主のいない共有の作業は一時レーン（同時に 1 本）が行う | オーガナイザーに作業を積むと、その間は問いとリリースの取りまとめが止まる。空いているレーンへ移す形は、空きの判定と他のレーンのループの 1 回への割り込みが要る |
-| 計画名での停止は `relay.py` ではなく `parallel.py stop` に置く | リレーハブはリポジトリをまたぐ層で、並列の計画を知らない。リレーハブが知る語を役割の印だけに留める |
+| 計画名での停止は `parallel.py stop` に置き、`relay.py` には置かない | リレーハブはリポジトリをまたぐ層で、並列の計画を知らない。リレーハブが知る語を役割の印だけに留める |
 | `parallel.py start` のたびに実行環境を調べ、結果の `environment` に候補を載せる | レーンの数は開始する計画の `lanes` の数を渡す（まだ動いていないため）。宣言は書かず、変えるのは人である（`loop.md`・#2505） |
 | レーンの数の上限はリレーハブと同じ関数（`lib/relay_limit.py`。マシンの設定 → `NDF_RELAY_MAX_NAMED` → 既定 3）で読み、依存のあるレーンも数える | リレーハブが実際に断る値と同じにする。同時に動く本数を依存から求めると、起動の前に確かめられない |
 | プランの本数の合計の上限は `NDF_PARALLEL_MAX_PLANS`（既定 6） | 2026-09-25 の実測（8 コア・30 GB で 6 本）。マシンごとに違うため環境変数で変える（2026-11-03 の設計承認ゲートで利用者が決めた） |
@@ -414,6 +414,6 @@ stateDiagram-v2
 - [issue #2439](https://github.com/devbasex/ai-plugins/issues/2439) — Factory のオーガナイザー（同じ層の別の実装）
 - [issue #2616](https://github.com/devbasex/ai-plugins/issues/2616) — リリースの組み方を宣言から決め、リリースの依頼で計画を止めない
 - [ndf-shared-venv-and-relay-ls-failure.md](ndf-shared-venv-and-relay-ls-failure.md) — 状態の一覧の失敗を止まったと読まない決定と条件（#2509）
-- [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) — リレーハブ（#2346）
+- [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) — リレーハブ
 - [ndf-execution-plan-and-parallel-capacity.md](ndf-execution-plan-and-parallel-capacity.md) — 1 つのスプリントの中の並列の実行計画と本数（この文書のレーンの並列とは別の層）
 - [ndf-ask-guard.md](ndf-ask-guard.md)・[ndf-workflow-development-loop.md](ndf-workflow-development-loop.md)・[ndf-production-release-record.md](ndf-production-release-record.md) — レーンの側の問い・ループの 1 回・本番のステージ
