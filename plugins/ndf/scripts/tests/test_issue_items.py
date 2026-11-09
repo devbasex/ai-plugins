@@ -347,3 +347,68 @@ def test_a_required_field_that_is_not_required_is_reported(tmp_path, copy_templa
 def test_missing_templates_cannot_be_read(tmp_path):
     code, obj = run("templates", "--root", str(tmp_path))
     assert code == 2 and obj["status"] == "stopped"
+
+
+# --- form_mismatches の現状固定（フォーム 1 つの食い違い） -------------------------------------
+
+
+def field(label, required=None) -> dict:
+    el = {"type": "textarea", "attributes": {"label": label}}
+    if required is not None:
+        el["validations"] = {"required": required}
+    return el
+
+
+FEATURE_FIELDS = [field("目的", True), field("対象範囲", True), field("受け入れ条件", True)]
+
+
+def mismatches(form: dict) -> list[tuple[str, str]]:
+    got = cli.form_mismatches("f.yml", form, ii.load_definition(REPO_ROOT))
+    assert all(it["kind"] == "template" and it["name"] == "f.yml" for it in got)
+    return [(it["item"], it["result"]) for it in got]
+
+
+@pytest.mark.parametrize("labels", [None, [], ["question"], ["bug", "enhancement"], "bug, enhancement"])
+def test_form_mismatches_without_exactly_one_kind_returns_only_the_kind_gap(labels):
+    form = {"body": [field("困りごと")]}
+    if labels is not None:
+        form["labels"] = labels
+    assert mismatches(form) == [("種類", "kind")]
+
+
+def test_form_mismatches_reads_comma_separated_labels():
+    assert mismatches({"labels": " enhancement , ", "body": FEATURE_FIELDS}) == []
+
+
+def test_form_mismatches_skips_elements_without_a_label():
+    body = [None, "x", {}, {"attributes": None}, {"attributes": {"label": ""}}, {"type": "markdown"}] + FEATURE_FIELDS
+    assert mismatches({"labels": ["enhancement"], "body": body}) == []
+
+
+def test_form_mismatches_without_a_body_lists_every_required_section_as_missing():
+    assert mismatches({"labels": ["enhancement"], "body": None}) == [
+        ("目的", "missing"),
+        ("対象範囲", "missing"),
+        ("受け入れ条件", "missing"),
+    ]
+
+
+def test_form_mismatches_lists_unknown_labels_first_then_required_sections_in_definition_order():
+    body = [field("困りごと", True), field("受け入れ条件"), field("目的", False), field("補足")]
+    assert mismatches({"labels": ["enhancement"], "body": body}) == [
+        ("困りごと", "unknown"),
+        ("補足", "unknown"),
+        ("目的", "not-required"),
+        ("対象範囲", "missing"),
+        ("受け入れ条件", "not-required"),
+    ]
+
+
+def test_form_mismatches_counts_a_repeated_field_as_required_if_any_copy_is():
+    body = [field("目的: 補足"), field("目的（別）", True), field("対象範囲", True), field("対象範囲"), field("受け入れ条件", "yes")]
+    assert mismatches({"labels": ["enhancement"], "body": body}) == []
+
+
+def test_form_mismatches_ignores_optional_fields_that_are_not_required():
+    body = FEATURE_FIELDS + [field("影響"), field("前提", False)]
+    assert mismatches({"labels": ["enhancement"], "body": body}) == []
