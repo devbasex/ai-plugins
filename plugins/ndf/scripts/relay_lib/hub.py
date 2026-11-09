@@ -112,9 +112,7 @@ def name_ok(name) -> bool:
 
 
 def hub_log(event: str, name: str | None = None, reason: str | None = None, over_limit: dict | None = None) -> None:
-    """リレーハブの記録へ 1 行足す（非機能の運用・保守性）。最初の入力は書かない（I10）。
-
-    `over_limit`（`{"cap", "running"}`）は上限を超えて起動した人の起動のときだけ行に足す（#2862）。"""
+    """リレーハブの記録へ 1 行足す（I10）。`over_limit` は上限を超えた人の起動のときだけ足す（#2862）。"""
     import locks  # 外部パッケージ（filelock）を使う。読み込みのときには import しない
 
     try:
@@ -429,15 +427,9 @@ class Hub:
         if refusal:
             return self.refuse(kind, name, refusal)
         plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
-        return self.launch(kind, name, cwd, args, by, registry, role, plan, self.over_limit(now, by))
-
-    @staticmethod
-    def over_limit(now: Live, by: str) -> dict | None:
-        """人の起動で、人の起動を外す前の数が上限以上なら `{"cap", "running"}`。ほかは None（#2862 の I6）。"""
-        cap = max_named()
-        if by != TERMINAL or now.count + now.humans < cap:
-            return None
-        return {"cap": cap, "running": list(now.names)}
+        cap = max_named()  # 人の起動で、人の起動を外す前の数が上限以上なら記録と通知に載せる（#2862 の I6）
+        over = {"cap": cap, "running": list(now.names)} if by == TERMINAL and now.count + now.humans >= cap else None
+        return self.launch(kind, name, cwd, args, by, registry, role, plan, over)
 
     @staticmethod
     def auto_name(taken: set[str]) -> str:
@@ -467,18 +459,7 @@ class Hub:
             return Refusal(NO_TMUX, "tmux が PATH に無い", 3)
         return None
 
-    def launch(
-        self,
-        kind: str,
-        name: str,
-        cwd: str,
-        args: list[str],
-        by: str,
-        registry: dict,
-        role: str | None = None,
-        plan: str | None = None,
-        over: dict | None = None,
-    ) -> dict:
+    def launch(self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role=None, plan=None, over=None) -> dict:
         argv = [sys.executable, launcher_path(), "run", *args]
         env = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1"}
         if role:
