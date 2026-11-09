@@ -16,7 +16,7 @@
     wid = durable.start(ref, plan_workflow, prefix)       # done なら何も始めない
     out = ref.output if ref.action == "done" else durable.output_of(wid)
 
-- 置き場: `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`（`records_dir`）
+- 置き場: `NDF_DBOS_DIR` → `<チェックアウトの根>/dbos`（`records_dir`。根は `state_home.checkout_home`）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`。ファイル名・executor_id・ファイルロック（`<鍵>.lock`）に使う（I17）
 - 形式の版: `FORMAT`。耐久ワークフローの中の DBOS の呼び出しの順を変えたら上げる（I18・決定 28）。
   途中の記録を続ける必要があるときは、上げずに `patched` で新旧の処理を分ける（#2616 の決定 2）
@@ -41,11 +41,12 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 
 from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
 
+import limits
 import locks
 from durable_keys import KIND_RE, DurableError, key_hash, launch_key, record_path, records_dir  # noqa: F401  durable の名前として出す
 
 FORMAT = "ndf-durable-1"
-POLL_SECONDS = 0.2  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
+POLL_SECONDS = limits.value("durable.poll", "interval")  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
 KEEP_DAYS = 30  # 使われていない耐久の記録を消すまでの日数
 PAUSE_SECONDS = 30 * 86400  # 止まり（pause）の待ちの上限
 RUNNING = ("PENDING", "ENQUEUED")
@@ -241,7 +242,12 @@ def close() -> None:
 
 
 def exit_leaving_pending(code: int) -> None:
-    """止まり（pause）のまま耐久ワークフローを残してプロセスを抜ける。出力を流してから `os._exit` で抜ける。"""
+    """止まり（pause）のまま耐久ワークフローを残してプロセスを抜ける。出力を流してから `os._exit` で抜ける。
+
+    `os._exit` は atexit を通らないため、持ち主の段（`lease_stage`）が取った鍵を先に返す（#2342）。"""
+    stage = sys.modules.get("lease_stage")
+    if stage is not None:
+        stage.release_held()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(code)
@@ -387,9 +393,10 @@ def set_event(key: str, value: Any) -> None:
 
 
 @contextlib.contextmanager
-def open_client(kind: str, identity: str) -> Any:
-    """`record_path(kind, identity)` の SQLite を開いた `DBOSClient`。ファイルが無ければ `DurableError`。"""
-    path = record_path(kind, identity)
+def open_client(kind: str, identity: str, start: Optional[Path] = None) -> Any:
+    """`record_path(kind, identity, start)` の SQLite を開いた `DBOSClient`。ファイルが無ければ `DurableError`。
+    `start` は記録の置き場を決めるチェックアウト（省けば作業ディレクトリ。`records_dir`）。"""
+    path = record_path(kind, identity, start)
     if not path.exists():
         raise DurableError(f"耐久の記録 {path} が無い")
     c = DBOSClient(system_database_url=_url(path))
@@ -399,32 +406,25 @@ def open_client(kind: str, identity: str) -> Any:
         c.destroy()
 
 
-def send_to(kind: str, identity: str, wid: str, msg: Any, topic: str, key: str) -> None:
+def send_to(kind: str, identity: str, wid: str, msg: Any, topic: str, key: str, start: Optional[Path] = None) -> None:
     """外から耐久ワークフロー `wid` へメッセージを送る。同じ `key` の 2 度目は数えない。"""
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         c.send(wid, msg, topic, idempotency_key=key)
 
 
-def event_from(kind: str, identity: str, wid: str, key: str, timeout: float = 0) -> Any:
+def event_from(kind: str, identity: str, wid: str, key: str, timeout: float = 0, start: Optional[Path] = None) -> Any:
     """外から耐久ワークフロー `wid` のイベント `key` を読む。`timeout` 秒待ち、無ければ None。"""
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         return c.get_event(wid, key, timeout_seconds=timeout)
 
 
-def status_from(kind: str, identity: str, wid: str) -> Optional[str]:
+def status_from(kind: str, identity: str, wid: str, start: Optional[Path] = None) -> Optional[str]:
     """外から耐久ワークフロー `wid` の状態を読む（記録が無い・耐久ワークフローが無いときは None）。"""
-    if not record_path(kind, identity).exists():
+    if not record_path(kind, identity, start).exists():
         return None
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=False)
         return rows[0].status if rows else None
-
-
-def output_from(kind: str, identity: str, wid: str) -> Any:
-    """外から、終わった耐久ワークフロー `wid` の出力を読む（無ければ None）。"""
-    with open_client(kind, identity) as c:
-        rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
-        return rows[0].output if rows else None
 
 
 def wait_from(
@@ -434,7 +434,8 @@ def wait_from(
     keys: Iterable[str],
     after: Mapping[str, int] | int = 0,
     timeout: Optional[float] = None,
-    poll: float = 1.0,
+    poll: float = limits.value("durable.wait-from-poll", "interval"),
+    start: Optional[Path] = None,
 ) -> Outcome:
     """`wait` と同じ判定を外から行う。終わりか、`keys` のどれかのイベントの `seq` が `after` を超えるまで待つ。
     超えたイベントが複数あれば `seq` の最も小さいものを返す（`keys` の `seq` は同じ連番を共有する前提）。
@@ -444,7 +445,7 @@ def wait_from(
     marks = {k: (after.get(k, 0) if isinstance(after, Mapping) else after) for k in names}
     deadline = None if timeout is None else time.monotonic() + timeout
     # 接続は待ちの間 1 つを使い回す（ポーリングごとに DBOSClient を作り直さない）
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         while True:
             rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
             if not rows:

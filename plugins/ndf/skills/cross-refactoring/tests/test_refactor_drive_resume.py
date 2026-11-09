@@ -260,6 +260,7 @@ def test_outside_a_repository_the_drive_stops_before_anything_runs(tmp_path, mon
     nogit.mkdir()
     monkeypatch.chdir(nogit)
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.delenv("OLDPWD", raising=False)  # 打った人のシェルの cd の前の場所（リポジトリの中）へ移らせない
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
     fake = FakeRefactor(tmp_path)
     monkeypatch.setattr(rf, "call", fake)

@@ -28,10 +28,9 @@ locator.filter(has_text="...", has_not_text="...", has=..., has_not=...)
 locator.first / locator.last / locator.nth(i)
 # AND / OR
 locator.and_(...)  # 両方マッチ
-locator.or_(...)   # どちらかマッチ
+locator.or_(...)  # どちらかマッチ
 # チェイン
-page.get_by_role("listitem").filter(has_text="Product 2") \
-    .get_by_role("button", name="Add to cart").click()
+page.get_by_role("listitem").filter(has_text="Product 2").get_by_role("button", name="Add to cart").click()
 # iframe
 page.frame_locator("#my-iframe").get_by_role("button", name="Sign in").click()
 # trace 用ラベル (1.50+)
@@ -165,6 +164,7 @@ dashboard / list の動的領域 (時計 / 広告) を除外して visual regres
 ```python
 from axe_playwright_python.sync_playwright import Axe
 
+
 def test_a11y(page):
     page.goto("/dashboard")
     axe = Axe()
@@ -192,7 +192,7 @@ def measure_lcp(page):
 
 ```python
 iphone = playwright.devices["iPhone 13"]
-context = browser.new_context(**iphone)         # viewport+UA+touch+DPR
+context = browser.new_context(**iphone)  # viewport+UA+touch+DPR
 page.emulate_media(color_scheme="dark", reduced_motion="reduce")
 context.set_offline(True)
 context.set_geolocation({"latitude": 35.68, "longitude": 139.69})

@@ -1,0 +1,5 @@
+{
+  "name": "OLDPWD",
+  "set_by": "runtime",
+  "summary": "シェルが cd の前の作業ディレクトリを入れる。drive の作業ディレクトリが git の作業ツリーの外のとき、ここが作業ツリーならそこへ移って続ける（plugins/ndf/scripts/lib/loop_drive.py の anchor_repo_cwd）。無い・作業ツリーの外なら何もしない"
+}

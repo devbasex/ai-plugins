@@ -21,5 +21,9 @@
     "plugins/ndf/hooks/claude.json",
     "plugins/ndf/scripts/lib/run_state_kinds.py",
     "plugins/ndf/skills/statusline/SKILL.md"
-  ]
+  ],
+  "core": {
+    "exempt": "hook",
+    "evidence": "plugins/ndf/hooks/claude.json が statusline-switch.sh ensure を起動する"
+  }
 }

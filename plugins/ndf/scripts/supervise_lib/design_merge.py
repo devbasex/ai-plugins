@@ -15,6 +15,7 @@ from typing import Callable
 import gate_answer
 from gate_answer import DESIGN_GATE
 from step_result import EXIT_GATE, EXIT_UNREADABLE, result
+import limits
 from supervise_lib.paths import SELF
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.procedures import with_record
@@ -55,7 +56,7 @@ def plan_design_merge(a, n: int, repo: str) -> dict:
 
 def _gh_out(args: list[str]) -> tuple[int, str]:
     try:
-        p = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
+        p = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=limits.seconds("supervise.design-merge-gh"))
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
     return p.returncode, p.stdout if p.returncode == 0 else p.stderr

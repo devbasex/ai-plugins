@@ -177,8 +177,8 @@ def test_quoted_and_non_limit_lines_are_not_usage_limits(tmp_path, monitor_mod, 
 def test_claude_stdout_json_is_matched_without_the_quote_exclusion(tmp_path, monitor_mod):
     """stdout.log の JSON は 1 行に引用符が多く、行単位の除外を掛けると取りこぼす。"""
     out = _write(tmp_path / "stdout.log", CLAUDE_429)
-    assert monitor_mod._scan_claude_stdout_usage_limit(out) is not None
-    assert monitor_mod._scan_claude_stdout_usage_limit(_write(tmp_path / "ok.log", '{"is_error":false}')) is None
+    assert monitor_mod._scan_claude_stdout(out, monitor_mod.CLAUDE_STDOUT_USAGE_LIMIT) is not None
+    assert monitor_mod._scan_claude_stdout(_write(tmp_path / "ok.log", '{"is_error":false}'), monitor_mod.CLAUDE_STDOUT_USAGE_LIMIT) is None
 
 
 @pytest.mark.parametrize(

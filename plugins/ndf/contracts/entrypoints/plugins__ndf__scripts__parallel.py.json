@@ -65,6 +65,26 @@
           "name"
         ]
       },
+      "lane": {
+        "options": [
+          "--from",
+          "--lane"
+        ],
+        "positionals": [
+          "name",
+          "action"
+        ]
+      },
+      "park": {
+        "options": [
+          "--clear",
+          "--done",
+          "--lane"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
       "present": {
         "options": [
           "--approval",
@@ -142,6 +162,7 @@
       "wait": {
         "options": [
           "--after",
+          "--changes-after",
           "--timeout"
         ],
         "positionals": [
@@ -155,6 +176,7 @@
     "CODEX_HOME",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
@@ -177,6 +199,7 @@
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -216,6 +239,8 @@
   "stdin": "text",
   "stdout": "step-result",
   "writes": [
+    "answer-hold-json",
+    "answer-hold-log-jsonl",
     "answer-json",
     "answers-sent-json",
     "approved-txt",
@@ -228,17 +253,19 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
+    "resume-mark-json",
+    "revise-md",
     "run-log",
     "run-pid"
   ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "計画が無い・検査に誤り・動いていない・承認したコミットが無い（status stopped）",
+    "1": "失敗: 計画が無い・検査に誤り・動いていない・承認したコミットが無い（status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "3": "まだ変化が無い・答えがまだ無い（status stopped）",
+    "3": "前提が無い（正常な否定の結果）: まだ変化が無い・答えがまだ無い（status stopped）",
     "4": "本番のプランが承認ゲートで止まっている（status stopped）",
-    "10": "リリースの依頼を送った・依頼が退けられた（status gate）"
+    "10": "承認ゲート: リリースの依頼を送った・依頼が退けられた（status gate）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/parallel_lane.py",

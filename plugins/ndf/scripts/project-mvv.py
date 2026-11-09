@@ -20,7 +20,8 @@
 - `propose`: 最小構成の claude -p を 1 回呼び、候補 2 案以上と分かれる点を `candidates.json`・`candidates.md` へ書く。
   形が足りなければ 1
 - `vet`: 本文を NDF の共通原則（と承認済みのプロジェクト MVV）に照らす。0 = 従う / 10 = 反する疑い・判定できない・読めない。
-  照合は `~/.local/state/ndf/project-mvv.jsonl` に残す
+  照合は `<状態の根>/project-mvv.jsonl`（根は `lib/state_home.py`） に残す。種類によらず毎回 LLM で判定し、前の判定を再利用しない
+  （再利用するのは `sprint-state.py init` のスプリント MVV の照合だけ。#2614）
 - `approve`: 利用者の承認の後に打つ。同じ本文への直近の照合が「従う」（か `--accept-unknown` で人が引き受けた「判定できない」）
   のときだけ宣言を書く。書くのはこの副命令だけである
 - `show`: 版の本文、または版 M から N への差分
@@ -57,6 +58,7 @@ from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError
 from project_lib import mvv_candidates as mc  # noqa: E402
 from project_lib import mvv_collect as mcol  # noqa: E402
 from project_lib import mvv_llm  # noqa: E402
+from project_lib import mvv_propose_io as mio  # noqa: E402
 
 TOOL = "project-mvv"
 EXIT_MISMATCH = 4
@@ -160,18 +162,7 @@ def cmd_collect(a):
 
 def cmd_propose(a):
     root = _root(a)
-    mpath = Path(a.materials).resolve()
-    try:
-        mats = json.loads(mpath.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise StepError(f"材料を読めない: {mpath}: {e}", EXIT_UNREADABLE) from None
-    current = None
-    kind = "new"
-    if a.current:
-        mvv = pm.load_mvv(root)
-        if not mvv.approved:
-            raise StepError(f"--current には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）", EXIT_PRECONDITION)
-        current, kind = mvv.body, "revision"
+    mpath, mats, current, kind = mio.load_materials(a, root)
     reason = Path(a.reason_file).read_text(encoding="utf-8") if a.reason_file else None
     data, raw, usage = mvv_llm.call_llm_json(mc.PROPOSE_SYSTEM, mc.propose_prompt(mats, current, reason), root, "mvv-propose")
     known = {s["id"] for s in mats.get("sources", [])}
@@ -252,12 +243,9 @@ def cmd_vet(a):
 
 def last_vet(root: Path, sha: str) -> dict | None:
     key = pm.mvv_repo_key(root)
-    rows = [
-        r
-        for r in pms.read_jsonl(pm.vet_log_path())
-        if r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")
-    ]
-    return rows[-1] if rows else None
+    return mvv_llm.latest_vet_where(
+        lambda r: r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")
+    )
 
 
 def _approvable_vet(root: Path, sha: str, accept_unknown: bool) -> dict:

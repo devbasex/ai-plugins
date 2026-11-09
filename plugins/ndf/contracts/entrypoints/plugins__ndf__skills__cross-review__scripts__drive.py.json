@@ -18,6 +18,7 @@
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "NDF_ACCOUNTS_DIR",
     "NDF_ACCOUNT_TOKEN_URL",
     "NDF_ACCOUNT_USAGE_URL",
@@ -25,13 +26,17 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
+    "NDF_LEASE_DIR",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
+    "NDF_RUNTIME_SESSION",
     "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
     "NDF_STEP_EXTEND_FILE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_WHOLE_RUNS_DIR",
     "NDF_WORKTREE_BASE",
+    "OLDPWD",
     "UV_PROJECT_ENVIRONMENT",
     "WT_DOCKER_COMMAND",
     "XDG_STATE_HOME"
@@ -62,12 +67,14 @@
   "stdin": "none",
   "stdout": "step-result",
   "writes": [
-    "drive-prx-report-md"
+    "drive-prx-report-md",
+    "lease-json"
   ],
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い: 持ち主の鍵を別の実行が持っている（status stopped）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/README.md",
@@ -75,5 +82,12 @@
     "plugins/ndf/scripts/lib/drive_pause.py",
     "plugins/ndf/scripts/lib/durable.py",
     "plugins/ndf/scripts/lib/loop_drive.py"
-  ]
+  ],
+  "lease": {
+    "": {
+      "key": "cross-review:pr={pr}",
+      "unit": "run",
+      "window_seconds": 86400
+    }
+  }
 }

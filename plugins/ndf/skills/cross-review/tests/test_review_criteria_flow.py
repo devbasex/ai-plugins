@@ -53,7 +53,7 @@ def _criteria_numbers(prompt: str) -> list[str]:
 def test_the_prompt_carries_the_criteria_from_the_state(tmp_path):
     crit = review_lib.commands.init.review_criteria
     _declare(tmp_path / "wt", json.dumps({"version": 1, "focus": ["起動の回数を増やす変更"]}))
-    block = crit.as_state(crit.load_focus(tmp_path / "wt"))
+    block = crit.as_state(crit.load_review_decl(tmp_path / "wt").focus)
     prompt = _prompt(tmp_path, review_criteria=block)
     assert OLD_FLUSH_LINE not in prompt
     assert _criteria_numbers(prompt) == ["1", "2", "3", "4"]

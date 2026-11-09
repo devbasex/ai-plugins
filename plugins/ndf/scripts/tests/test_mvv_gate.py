@@ -345,3 +345,36 @@ def test_an_unreadable_design_doc_goes_back_to_the_user(sprint):
     assert (code, llm_calls(sprint)) == (10, 0)
     assert "issues/x-design.md" in out["summary"]
     assert rows[-1]["verdict"] == "machine"
+
+
+def test_revise_notes_go_into_the_material_and_the_question(sprint):
+    """出し直しの指摘の全文が材料の先頭に入り、問いが指摘を満たさない設計を従うにしない（#2510）。"""
+    note = sprint["tmp"] / "revise-1.json"
+    rounds = [
+        {
+            "loop": "l1",
+            "round": 1,
+            "at": "2026-11-05T00:00:00Z",
+            "pr": 5,
+            "by": "user",
+            "note": "- 範囲を絞る",
+            "items": [{"id": "l1:1-1", "text": "範囲を絞る"}],
+            "missing": [],
+        }
+    ]  # noqa: E501
+    note.write_text(json.dumps({"issue": 1, "rounds": rounds}, ensure_ascii=False))
+    code, res, _ = run(sprint, FOLLOW, "--revise-note", str(note))
+    prompt = (sprint["tmp"] / "prompt.txt").read_text(encoding="utf-8")
+    assert code == 0 and res["status"] == "ok"
+    assert "- 範囲を絞る" in prompt and "l1:1-1" in prompt and "満たさない項目があれば" in prompt
+    assert prompt.index("範囲を絞る") < prompt.index("# デプロイ")
+
+
+def test_an_unreadable_revise_note_returns_to_the_gate(sprint):
+    code, res, _ = run(sprint, FOLLOW, "--revise-note", str(sprint["tmp"] / "無い.json"))
+    assert code == 10 and "出し直しの指摘の入力を読めない" in res["summary"] and not (sprint["tmp"] / "calls.txt").exists()
+
+
+def test_a_gate_without_notes_has_no_revise_rule(sprint):
+    run(sprint, FOLLOW)
+    assert "出し直しの指摘" not in (sprint["tmp"] / "prompt.txt").read_text(encoding="utf-8")

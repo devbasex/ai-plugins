@@ -18,8 +18,11 @@ from typing import Any, Protocol
 import container_reach
 import gh_call
 import stage_skills
+import step_read
 import test_strategy as ts
+from step_result import GATE_CODES
 from supervise_lib import decl, paths, plan as plan_mod
+import limits
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
 import project_mvv
@@ -27,7 +30,7 @@ import project_mvv
 
 def is_gate(code: int | None) -> bool:
     """run のステップの終了コード 10〜19 は共通の契約の承認ゲート（lib/step_result.py の EXIT_GATE）。"""
-    return code is not None and 10 <= code <= 19
+    return code is not None and code in GATE_CODES
 
 
 def parse_decision(text: str) -> dict:
@@ -40,16 +43,8 @@ def parse_decision(text: str) -> dict:
     return {"decision": "stop", "reason": f"判断の答えを読めない: {(text or '')[:200]}"}
 
 
-def last_json(text: str) -> dict | None:
-    """出力の最後の JSON の行（step_result の形）を読む。"""
-    for line in reversed((text or "").splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    return None
+# 出力の最後の JSON の行の読みは共通の読み手が持つ（#2337 の決定 12）
+last_json = step_read.last_json
 
 
 SKILLS_FORM = "本文"  # プランの worker への Skill の渡し方（本文を system プロンプトへ入れる。#2376 の決定 4）
@@ -90,7 +85,14 @@ def run_condition(cond: dict, plan: dict, state_dir: str | Path) -> tuple[str, i
     cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(state_dir))
     started = time.time()
     try:
-        p = subprocess.run(cmd, shell=True, cwd=condition_cwd(plan), capture_output=True, text=True, timeout=cond.get("timeout", 900))
+        p = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=condition_cwd(plan),
+            capture_output=True,
+            text=True,
+            timeout=cond.get("timeout", limits.seconds("supervise.condition")),
+        )
         code, text = p.returncode, p.stdout + p.stderr
     except subprocess.TimeoutExpired as e:
         code, text = 124, f"打ち切り（{e.timeout} 秒）"
@@ -128,7 +130,7 @@ def fill_test_limit(ctx, step: dict, cmd: str) -> tuple[str, Any]:
     コンテナの宣言があるときは、テスト環境の用意の分として `timeout` だけへ起動の上限を足す（`--limit` は変えない）。"""
     from supervise_lib.verify_steps import with_margin
 
-    timeout = step.get("timeout", 3600)
+    timeout = step.get("timeout", limits.seconds("supervise.run-step"))
     m = TEST_LIMIT.search(cmd)
     if not m:
         return cmd, timeout
@@ -255,30 +257,47 @@ class RunStep:
                 write({"kind": "extend", "step": step.get("id"), "timeout": longer, "planned": int(timeout), "reason": got[1]})
         return longer
 
-    def run_cmd(self, ctx, step: dict, extend_file: Path | None = None) -> tuple[int, str]:
-        """コマンドを締め切りまで待つ。`extend_file` を渡すと（drive のステップ）、子へ `NDF_STEP_EXTEND_FILE` で置き場を渡し、
-        子が書いた見込みの秒で締め切りを後ろへずらす（#2047 の決定 4）。"""
-        cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
-        if not cmd:
-            return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
+    @staticmethod
+    def _substitute(ctx, step: dict, cmd: str) -> tuple[str, str | None, Any]:
+        """cmd のプレースホルダ（{pr}・{base}・{state_dir}・{plan_issues}・test_limit）を置き換える。
+        (cmd, err, timeout) を返す。置き換えられないときは err に理由が入る。"""
         cmd, err = ctx.fill_pr(cmd)
         if err:
-            return 2, err
+            return cmd, err, None
         if "{base}" in cmd:
             base = ctx.base_branch()
             if not base:
-                return 2, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）"
+                return cmd, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）", None
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(ctx.state.dir))
+        cmd = cmd.replace(plan_mod.PLAN_ISSUES, " ".join(str(int(i)) for i in ctx.plan.get("課題") or []))
         cmd, timeout = fill_test_limit(ctx, step, cmd)
-        env = dict(os.environ)
-        # 親の run のステップから受け継いだ no_reports は、reports: true なら外す
+        return cmd, None, timeout
+
+    def _pytest_env(self, ctx, step: dict, env: dict) -> None:
+        """env の PYTEST_ADDOPTS を組み立てる。親の run のステップから受け継いだ no_reports は、reports: true なら外す。"""
         no_reports = self.no_reports(ctx)
         inherited = env.get("PYTEST_ADDOPTS", "")
         addopts = [(inherited.replace(no_reports, "") if no_reports else inherited).strip()]
         if no_reports and not step.get("reports"):
             addopts.append(no_reports)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+
+    def _extend_hook(self, ctx, step: dict, extend_file: Path, timeout):
+        """延長の締め切りを返す関数を作る。子が書いた見込みの秒で締め切りを後ろへずらす。"""
+        return lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t
+
+    def run_cmd(self, ctx, step: dict, extend_file: Path | None = None) -> tuple[int, str]:
+        """コマンドを締め切りまで待つ。`extend_file` を渡すと（drive のステップ）、子へ `NDF_STEP_EXTEND_FILE` で置き場を渡し、
+        子が書いた見込みの秒で締め切りを後ろへずらす（#2047 の決定 4）。"""
+        cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
+        if not cmd:
+            return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
+        cmd, err, timeout = self._substitute(ctx, step, cmd)
+        if err:
+            return 2, err
+        env = dict(os.environ)
+        self._pytest_env(ctx, step, env)
         # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         extend = None
@@ -286,7 +305,7 @@ class RunStep:
             import drive_pause
 
             env[drive_pause.EXTEND_ENV] = str(extend_file)
-            extend = lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t  # noqa: E731
+            extend = self._extend_hook(ctx, step, extend_file, timeout)
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
             p = run_ticking(
@@ -330,7 +349,7 @@ class JudgeStep:
             + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
             + f"\n## 規則\n{ctx.plan.get('規則', '（無し）')}\n\n## 結果\n{ctx.inputs_text(step)}"
         )
-        res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", 600))
+        res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", limits.seconds("supervise.judge-step")))
         ctx.claude.record_usage("judge", res)
         d = parse_decision(res["text"]) if res["ok"] else {"decision": "stop", "reason": res["text"][:200]}
         d["basis"] = project_mvv.basis(d.get("basis"), mvv, sprint=sprint)  # 返されなければ「根拠なし」か「MVV なし」（止めない）

@@ -15,6 +15,7 @@ import os
 import urllib.parse
 from pathlib import Path
 
+import limits
 from claude_usage import http_json, new_request
 from training_common import NOT_LOCAL, Reading, http_reason, patch_reason, target, unread
 
@@ -23,10 +24,10 @@ URL_ENV = "NDF_CODEX_SETTINGS_URL"  # 試験用の差し替え（手元のホス
 PATCH_PATH = "account_user_setting"  # GET の URL から相対で決める
 SOURCE = "chatgpt/settings/user.training_allowed"
 KEYS = ("training_allowed", "codex_training_allowed", "codex_training_allowed_v2")
-TIMEOUT = 3.0
+TIMEOUT = limits.seconds("codex-training.call")
 # session-start の通信（GET 1 回と PATCH 最大 3 回）全体の時間予算。hooks/codex.json の timeout 10 秒から、
 # Python の起動と知らせの出力の分を引いた残り。1 回あたりの上限は TIMEOUT と予算の残りの小さい方
-BUDGET = 7.0
+BUDGET = limits.seconds("codex-training.budget")
 OUT_OF_TIME = "時間の予算の内に送れなかった"
 USER_AGENT = "ndf-training-optout"  # Python の既定の User-Agent では 403 が返る（2026-10-02 の実測）
 

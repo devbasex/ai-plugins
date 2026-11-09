@@ -71,7 +71,7 @@ conductor が足した行（補正）を順のまま残す。実装のプラン�
 | [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py) | `format_of`（`formatting.format_commands` を通し、誤りは `DeclError`）と `glossary_ready` を `apply_decls` で `a` に載せ、`decl_fields` でスプリントの子のプランへ引き継ぐ |
 | [`supervise_lib/commands.py`](../../plugins/ndf/scripts/supervise_lib/commands.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py) | `cmd_format`（`supervise.py format`）と preset `format`（`supervise.py format --commit`） |
 | [`test-run.py`](../../plugins/ndf/scripts/test-run.py) | `scope --only-kind test\|lint` |
-| [`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py) | `Row.doc`（その行を読んだ設計文書のパス）と `DesignResults.docs_of`。`design-results.json` の `rows[].doc` へ写す |
+| [`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py) | `Row.doc`（その行を読んだ設計文書のパス）・`DesignResults.base_docs`（ベースブランチの `issues/` の直下の設計文書）と `DesignResults.docs_of`（行を読んだ文書を先頭に、それと番号でつながる文書をパスの昇順で続ける）。`design-results.json` の `rows[].doc` と `base_docs` へ写す。触るファイルのセルを Markdown のインラインのトークンで読み、書式から外れたセルを `DesignCellError` で返す |
 | [`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py) | `push_fix` が `formatting.format_before_push` → `tool_paths.before_push` の後に push する |
 | [`.ndf/supervise.json`](../../.ndf/supervise.json) | ai-plugins の `format`: `[{"name": "lint-fix", "command": "bash scripts/check-lint.sh --fix"}]` |
 
@@ -133,6 +133,10 @@ sequenceDiagram
     G-->>R: 番号 / 空 / 失敗
     R->>G: gh pr view --json files・git fetch・git ls-tree -z・git show
     G-->>R: 設計文書 / 失敗
+    opt PR が変えた文書に表が無い
+      R->>G: git show（課題と番号でつながるベースブランチの設計文書）
+      G-->>R: 設計文書 / 失敗
+    end
   end
   alt 打ち直しても失敗
     R-->>C: ReadFailed（課題・コマンド・末尾・読んでいない課題）
@@ -145,8 +149,8 @@ sequenceDiagram
   end
 ```
 
-- 「PR が無い」は `gh pr list` が 0 で空のとき、「表が無い」は文書を読めたうえで「設計の結果」の表が無いときで、どちらも `metrics.unread` に
-  入って `ok` で進む。一時的な失敗は `gh` / `git fetch` / `git ls-tree` / `git show` が打ち直しの後も 0 以外のとき
+- 「PR が無い」は `gh pr list` が 0 で空のとき、「表が無い」は PR が変えた文書と、課題と番号でつながるベースブランチの設計文書の
+  どれにも「設計の結果」の表が無いときで、どちらも `metrics.unread` に入って `ok` で進む。一時的な失敗は `gh` / `git fetch` / `git ls-tree` / `git show` が打ち直しの後も 0 以外のとき
 - `rewrite` が触るのは `impl` の `prompt` と、プランの `課題`・`触るファイル`・`設計文書`・`実行の条件` だけで、`timeout` などは残す
 
 ### 修正の送信（`push_fix`）
@@ -195,7 +199,7 @@ cross-refactoring の送信は `push_fix` を通らず、整形しない。
 
 | 項目 | 形 |
 | --- | --- |
-| `設計文書`（省略可） | `design-results` が書く設計文書のパスの並び。`impl_prompt` が `設計文書: <パス>、…（決定の記録と「設計の結果」を読んでから実装する）` の行を組む |
+| `設計文書`（省略可） | `design-results` が書く設計文書のパスの並び。`impl_prompt` が `設計文書: <パス>、…（載せた文書をすべて読んでから実装する）` の行を組む |
 | `format` のステップ | `{"type": "run", "preset": "format", "stage": "実装", "on_exit": {"2": "stop"}, "on_fail": "fix-format"}` |
 | `sync` のステップ | `{"type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync"}` |
 | `lint-limited` のステップ | `{"type": "run", "stage": "完了判定", "cmd": "<範囲テストの cmd> --only-kind lint", "on_exit": {"2": "stop"}, "on_fail": "fix-lint"}` |
@@ -209,9 +213,11 @@ cross-refactoring の送信は `push_fix` を通らず、整形しない。
 
 | 場合 | status | 終了コード | 書くもの |
 | --- | --- | --- | --- |
-| すべて読めた・PR が無い・表が無い | `ok` | 0 | 実装のプランと `design-results.json`（`rows[].doc` を持つ）。`metrics` は `rows`・`unread`・`design_prs` |
+| すべて読めた・PR が無い・表が無い | `ok` | 0 | 実装のプランと `design-results.json`（`rows[].doc` と `base_docs` を持つ）。`metrics` は `rows`・`unread`・`design_prs` |
 | 打ち直しても `gh` / `git` が 0 以外 | `stopped` | 2 | 何も書かない。`summary` に読めなかった課題・コマンド・出力の末尾 300 文字・読んでいない課題。`metrics` は `failed_issue`・`not_read` |
 | 取り込み先に流れる実装のプランが無い | `stopped` | 2 | 何も書かない（`DesignResultsError`） |
+| 「実装する」の行の触るファイルのセルが書式から外れている（括弧の外の語・リンク。括弧の中のリンクを含む） | `stopped` | 2 | 何も書かない（`DesignCellError`）。すべての課題と文書の誤りを集め、`summary` は `#<番号>（<文書のパス>）の触るファイルのセルを読めない: <読めなかった部分（1 件あたり先頭 120 文字）>` を `。` でつなぎ、最後に直し方の案内を 1 回置く。一時的な失敗が先に起きたときはそちらで止まる |
+| 同じ課題の設計の結果が 2 本の設計文書で違う（扱い・取り込み先・触るファイルのどれか。触るファイルの順序は問わない） | `stopped` | 2 | 何も書かない（`DesignResultsError`）。`summary` は 1 行で、課題・2 本の設計文書のパス（先 / 後。パスが空なら `パスの記録なし`）・違う項目ごとの両方の値を扱い → 取り込み先 → 触るファイルの順に載せる。触るファイルは個数と、片方にしか無いファイル（重なりを数えて取り、数を切らない）を出す |
 
 ## 運用
 

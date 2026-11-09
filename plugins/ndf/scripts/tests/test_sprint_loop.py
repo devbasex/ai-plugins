@@ -60,7 +60,7 @@ def ms(title, nums, boundary=None, sizes=None, **extra):
 
 @pytest.fixture
 def env(tmp_path, mvv, monkeypatch):
-    # 中継の下で起動したシェルの値を受け継ぐと、周回がその中継の記録を指し、状態の表示が変わる
+    # 中継の下で起動したシェルの値を受け継ぐと、ループの 1 回がその中継の記録を指し、状態の表示が変わる
     monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "pace.json").write_text(json.dumps(DECL))
@@ -121,6 +121,7 @@ def fake_run(e):
                         plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
                         plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
                 (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
+                (out / "dev.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
                 (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
                 design = [str(plans[f"design-{n}"]) for n in issues]
                 stages = [
@@ -130,6 +131,8 @@ def fake_run(e):
                     {"name": "検査", "plans": [str(out / "check.json")], "then_of": "設計"},
                     {"name": "本番", "plans": [str(out / "prod.json")], "then_of": "設計"},
                 ]
+                if "--version" not in cmd:  # 版を渡さないループの 1 回の開発版のプラン（#2354）
+                    stages.insert(-1, {"name": "開発版", "plans": [str(out / "dev.json")], "then_of": "設計"})
             (out / "sprint.json").write_text(json.dumps({"ステージ": stages}, ensure_ascii=False))
             return 0, "{}", ""
         return 0, "{}", ""
@@ -158,7 +161,7 @@ def set_state(env, lap, cost=1.0, seconds=10, result="完了", kind="実装", is
 
 
 def run_lap(env, failed=False, result="完了", cost=1.0, kind="実装"):
-    """1 周回: 選ぶ → 組む → 締める。"""
+    """ループの 1 回: 選ぶ → 組む → 締める。"""
     got = sl_select.cmd_select(env, "l1")
     if got["status"] != "ok":
         return got
@@ -364,7 +367,7 @@ def test_exclude_redoes_the_selection_and_all_excluded_stops(env):
 
 
 def test_excluded_rows_of_the_lap_do_not_use_up_max_issues_without_a_boundary(env):
-    # #2627: 容量の宣言が無いとき、今の周回で loop exclude した行で枠を埋めない（埋めると後ろの課題が候補に上がらず outside_mvv で止まった）
+    # #2627: 容量の宣言が無いとき、今のループの 1 回で loop exclude した行で枠を埋めない（埋めると後ろの課題が候補に上がらず outside_mvv で止まった）
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13, 14]))
     start(env)
     assert sl_select.cmd_select(env, "l1")["metrics"]["selected"] == [11, 12]
@@ -377,7 +380,7 @@ def test_excluded_rows_of_the_lap_do_not_use_up_max_issues_without_a_boundary(en
 
 
 def test_exclusions_of_an_earlier_lap_still_use_max_issues(env):
-    # 前の周回の除外は今の周回の選定に効かない（候補の枠も、外す理由も）
+    # ループの前の 1 回の除外は今のループの 1 回の選定に効かない（候補の枠も、外す理由も）
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
     start(env)
     r = rec(env)
@@ -388,7 +391,7 @@ def test_exclusions_of_an_earlier_lap_still_use_max_issues(env):
 
 
 def test_env_exclusions_drop_issues_held_by_other_runs(env, monkeypatch):
-    # #2347 の決定 3: Factory が同じリポジトリの別の実行の課題を NDF_LOOP_EXCLUDE で渡し、その周回の選定から外す
+    # #2347 の決定 3: Factory が同じリポジトリの別の実行の課題を NDF_LOOP_EXCLUDE で渡し、そのループの 1 回の選定から外す
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13]))
     monkeypatch.setenv("NDF_LOOP_EXCLUDE", "11, x 13")
     start(env)
@@ -439,7 +442,11 @@ def test_stopped_time_inside_a_lap_is_not_counted_but_boundary_stops_are_not_sub
             {"n": 2, "outcome": "完了", "started_at": "2026-10-27T00:00:00Z", "ended_at": "2026-10-27T01:00:00Z"},
         ],
         "stops": [
-            {"condition": "gate2_returned", "at": "2026-10-25T00:30:00Z", "resumed_at": "2026-10-26T00:30:00Z"},  # 周回 1 の途中で一晩
+            {
+                "condition": "gate2_returned",
+                "at": "2026-10-25T00:30:00Z",
+                "resumed_at": "2026-10-26T00:30:00Z",
+            },  # ループの 1 回目 の途中で一晩
             {"condition": "user_stop", "at": "2026-10-26T02:00:00Z", "resumed_at": "2026-10-26T23:00:00Z"},  # 境
         ],
     }
@@ -511,7 +518,7 @@ def declare(env, **loop):
 
 
 def closed_laps(n, hours):
-    """1 周回が `hours` 時間かかった `n` 周の締めた周回。"""
+    """ループの 1 回が `hours` 時間かかった `n` 周の締めたループの 1 回。"""
     return [
         {
             "n": i + 1,
@@ -525,7 +532,7 @@ def closed_laps(n, hours):
 
 @pytest.mark.parametrize("budget", [{}, {"laps": None, "usd": None, "hours": None}])
 def test_units_not_written_never_stop_the_loop(env, budget):
-    """書かない宣言と null の宣言は同じ意味で、周回の数・時間・費用のどれでも止まらない。"""
+    """書かない宣言と null の宣言は同じ意味で、ループの回数・時間・費用のどれでも止まらない。"""
     declare(env, budget=budget)
     start(env)
     r = rec(env)
@@ -778,7 +785,7 @@ def test_gate_2_stops_in_the_middle_of_the_lap(env):
     lap = sl.current_lap(rec(env))
     out = sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "gate2_returned"
-    assert sl.current_lap(rec(env)) is not None  # 周回は進行中のまま
+    assert sl.current_lap(rec(env)) is not None  # ループの 1 回は進行中のまま
     assert sl.cmd_start(env, "l1", [], {})["exit"] == 3  # 答えが無いうちは止まったまま
 
 
@@ -896,7 +903,7 @@ def test_gate_1_stops_with_refused_when_the_continuation_close_is_refused(env):
     stop = out["metrics"]["stop"]
     assert out["exit"] == 3 and stop["condition"] == "refused"
     assert stop["values"]["step"] == "続きの queue" and stop["values"]["exit"] == 1 and "断った理由" in stop["values"]["summary"]
-    assert "周回を組めなかった（続きの queue）" in out["summary"]
+    assert "ループの 1 回を組めなかった（続きの queue）" in out["summary"]
     r = rec(env)
     assert r["status"] == "stopped" and [w["number"] for w in r["waiting"]] == [11]  # before は検査用。移した課題は記録に残る
 
@@ -935,7 +942,7 @@ def test_answers_control_reselection(env):
     env.prs[501] = "MERGED"
     assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) is None and r["waiting"][0]["merged_at"]
     assert any(c[2:4] == ["gate", lap["state_path"]] and "approved" in c for c in env.calls)
-    # 選び直した周回では、承認済みの #11 を --design から外して --designed で設計の結果を読む
+    # 選び直したループの 1 回では、承認済みの #11 を --design から外して --designed で設計の結果を読む
     argv = sl.new_sprint_argv(str(env.root), r, {**lap, "selection": [{"number": n, "decision": "選んだ"} for n in (11, 13)]}, [])
     assert argv[argv.index("--design") + 1 :][:1] == ["13"] and argv[argv.index("--designed") + 1] == "11"
 
@@ -943,14 +950,40 @@ def test_answers_control_reselection(env):
 def test_created_issues_are_not_selected_in_the_same_lap(env):
     start(env)
     r = rec(env)
-    assert sl_select.exclusion_reason(env, r, {"number": 99}, 1, {99}).startswith("周回の中で起票された")
+    assert sl_select.exclusion_reason(env, r, {"number": 99}, 1, {99}).startswith("ループの 1 回の中で起票された")
+
+
+def test_exclusion_reason_reads_each_pr_once_in_rank_order(env):
+    """候補ごとに 1 回、順位の順に PR の状態を読み、マージ済みの行にだけ merged_at を書く。"""
+    start(env)
+    r = rec(env)
+    r["waiting"] = [{"number": 11, "answer": "approved", "pr": 501}, {"number": 12, "answer": "approved", "pr": 502}]
+    env.prs[502] = "MERGED"
+    seen, read = [], env.pr_state
+    env.pr_state = lambda n: seen.append(n) or read(n)
+    cands = [{"number": 12, "rank": 1}, {"number": 11, "rank": 2}]
+    picked, _ = sl_select._select_candidate_rows(cands, "M", 2, lambda row: sl_select.exclusion_reason(env, r, row, 2, set()))
+    assert seen == [502, 501] and picked == [12]
+    assert r["waiting"][1]["merged_at"] and "merged_at" not in r["waiting"][0]
+
+
+def test_exclusion_reason_keeps_scanning_rows_of_the_same_issue(env):
+    """マージ済みの承認の行は理由にならず、同じ課題の後ろの行と次の段階へ進む。"""
+    start(env)
+    r = rec(env)
+    merged = {"number": 11, "answer": "approved", "merged_at": "t"}
+    r["waiting"] = [merged, {"number": 11}]
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "人の判断待ち"
+    r["waiting"] = [merged]
+    r["excluded"] = [{"number": 11, "lap": 2, "reason": "対象外"}]
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "対象外"
 
 
 # ---------------- 受け入れ条件 14・15・16・21 ----------------
 
 
 def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
-    # 周回の記録に深さの行と調査の費用・秒が別の行で残り、予算に数える（#2315 の受け入れ条件 7）
+    # ループの 1 回の記録に深さの行と調査の費用・秒が別の行で残り、予算に数える（#2315 の受け入れ条件 7）
     start(env)
     sl_select.cmd_select(env, "l1")
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
@@ -974,7 +1007,7 @@ def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
     assert lap["research"] == {"items": ["seeds.library:pytest"], "cost": 0.75, "seconds": 40.0}
     assert lap["depths"][0]["depth"] == "review" and sl.consumed(rec(env))["usd"] == 2.25
     assert "調査: 1 項目" in (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
-    # 周回を締めた後に終わった背景の調査の費用は、次に締めるときに締め済みの周回へ精算する
+    # ループの 1 回を締めた後に終わった背景の調査の費用は、次に締めるときに締め済みのループの 1 回へ精算する
     late = {"id": "seeds.alternatives:pytest", "ok": True, "cost": 1.0, "seconds": 5, "lap": 1, "by": {"run": "r", "loop": "l1"}}
     with (b / "research" / "calls.jsonl").open("a") as f:
         f.write(json.dumps(late) + "\n")
@@ -1000,8 +1033,8 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     sl_select.cmd_select(env, "l1")
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     assert "--carry 31 32" in out["metrics"]["close_command"] and "--pace auto" in out["metrics"]["close_command"]
-    assert "--loop l1 --lap 2" in out["metrics"]["close_command"]  # 差分の棚卸しの行に開発ループと周回を残す（#2315 の 17b-2）
-    # 周回の版は出し終えているので、まとめへ明示の版として渡さない（流す時点に次に空いている版で決める。#2164）
+    assert "--loop l1 --lap 2" in out["metrics"]["close_command"]  # 差分の棚卸しの行に開発ループとループの 1 回を残す（#2315 の 17b-2）
+    # ループの 1 回の版は出し終えているので、まとめへ明示の版として渡さない（流す時点に次に空いている版で決める。#2164）
     assert "--version" not in out["metrics"]["close_command"] and "--prod" not in out["metrics"]["close_command"]
     assert "1-close.json" in out["metrics"]["queue"].split("--then")[-1]
     assert out["metrics"]["pipeline"].count("&&") == 2 and "wait" in out["metrics"]["pipeline"]
@@ -1018,6 +1051,25 @@ def test_new_sprint_refusal_stops_with_refused_and_resume_retries(env):
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "refused"
     res = sl.cmd_start(env, "l1", [], {})
     assert res["metrics"]["status"] == "resumed" and "loop sprint l1" in res["metrics"]["next"]
+
+
+def test_sprint_without_a_version_runs_when_no_template_route_needs_it(env):
+    """#2623 の受け入れ条件 4: 版数の要らない経路では --dev なしでループの 1 回を始め、状態にも new sprint にも版を渡さない。"""
+    (env.main_dir() / ".ndf" / "project.json").write_text(json.dumps({"delivery": []}))
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    seen = []
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        seen.append(cmd)
+        return base(cmd, cwd=cwd, stdin=stdin)
+
+    env.run = run
+    out = sl.cmd_sprint(env, "l1", "standard", None, None, [])
+    assert out["status"] == "ok", out
+    assert not rec(env)["laps"][-1]["versions"]["dev"]
+    assert not [c for c in seen if "--dev" in c or "--version" in c or "--prod" in c]
 
 
 # ---------------- I1 ----------------
@@ -1074,12 +1126,12 @@ def test_render_laps_characterizes_every_section():
         "\n"
         "- 状態: stopped。予算: {'laps': 3}。消費: {'laps': 1, 'usd': 1.5, 'hours': 0.166667}\n"
         "\n"
-        "| 周回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |\n"
+        "| ループの 1 回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |\n"
         "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
         "| 1 | #3 | 1.0.0-dev.1 / 1.0.0 | 1.5 | 10 | 完了 | budget | #7 #8 |\n"
         "| 2 | — | — | — | — | 進行中 | same_failure | — |\n"
         "\n"
-        "## 周回 1（s1）\n"
+        "## ループの 1 回目（s1）\n"
         "\n"
         "| 課題 | マイルストーン | 順位 | 選定 | 理由 |\n"
         "| --- | --- | --- | --- | --- |\n"
@@ -1092,7 +1144,7 @@ def test_render_laps_characterizes_every_section():
         "- 棚卸し: 持ち越し [5]・順位の変化 2 件\n"
         "- 振り返り: 良い\n"
         "\n"
-        "## 周回 2（）\n"
+        "## ループの 2 回目（）\n"
         "\n"
         "| 課題 | マイルストーン | 順位 | 選定 | 理由 |\n"
         "| --- | --- | --- | --- | --- |\n"
@@ -1113,7 +1165,7 @@ def test_render_laps_characterizes_every_section():
         "\n"
         "- 状態: None。予算: None。消費: {'laps': 0, 'usd': 0, 'hours': 0.0}\n"
         "\n"
-        "| 周回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |\n"
+        "| ループの 1 回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |\n"
         "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
     )
 
@@ -1338,7 +1390,7 @@ def test_sprint_pipeline_waits_for_hands_before_the_close(tmp_path):
         {"name": "リリース", "manual": "/ndf:release"},
     ]
     queue, pipeline = sl.sprint_pipeline(index, ["c1"], done, rec_)
-    assert queue == f"python3 {sl.SUPERVISE} queue c1 --max 3 --done {done}"
+    assert queue == f"python3 {sl_record.SUPERVISE} queue c1 --max 3 --done {done}"
     assert pipeline == f"Q1 を流し、続けて Q2 → リリース（/ndf:release で行う） を終えてから: {queue} && {sl_gate.wait_lap(rec_, done)}"
 
 
@@ -1386,7 +1438,7 @@ def test_gate_2_resume_builds_the_close_without_the_check_pr_as_the_record(env):
 
 
 def test_lap_with_an_unfilled_close_is_closed_as_failed(env):
-    """#2230 の決定 7: 差し込みを埋められずに流さなかったまとめ（記録の PR が見つからない）がある周回は完了で締めない。"""
+    """#2230 の決定 7: 差し込みを埋められずに流さなかったまとめ（記録の PR が見つからない）があるループの 1 回は完了で締めない。"""
     lap = built_lap(env, nums=(11,))
     set_state(env, lap)
     items = [
@@ -1585,7 +1637,7 @@ def test_resume_stopped_refused_in_a_lap_asks_to_rebuild_the_sprint(env):
     r = stopped_on(env, "refused", values={"step": "new sprint"})
     out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
     nxt = out["metrics"]["next"]
-    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード> --dev <開発版>" in nxt
+    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード>（" in nxt and "--dev" not in nxt
 
 
 def test_resume_stopped_refused_continuation_rebuilds_the_queue_with_kept_issues(env, monkeypatch):
@@ -1627,15 +1679,15 @@ def test_resume_stopped_refused_continuation_failure_stays_stopped(env, monkeypa
 REQ = "lroot-r000000000001"
 
 
-def lane_lap(env, nums=(11, 12), rid=REQ, rank=None):
-    """並列の計画のレーンの周回: 本番のステージがリリースの依頼のプラン（フェーズ「リリースの依頼」）で、依頼の記録がある。"""
+def lane_lap(env, nums=(11, 12), rid=REQ, rank=None, dev="1.0.0-dev.1"):
+    """並列の計画のレーンのループの 1 回: 本番のステージがリリースの依頼のプラン（フェーズ「リリースの依頼」）で、依頼の記録がある。"""
     env.rank_box["out"] = rank or rank_out(ms("01 近い", [11, 12, 13]))
     env.answer_box = {}
     env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
     if not (env.root / ".ndf/loop/l1/loop.json").exists():
         start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sl.cmd_sprint(env, "l1", "standard", dev, None, [])
     lap = sl.current_lap(rec(env))
     prod = Path(lap["out"]) / "prod.json"
     prod.write_text(json.dumps({"フェーズ": "リリースの依頼", "課題": list(nums), "並列の計画": "p1"}, ensure_ascii=False))
@@ -1668,7 +1720,7 @@ def test_issues_of_a_pending_lap_are_not_selected(env):
     out = sl_select.cmd_select(env, "l1")
     assert out["metrics"]["selected"] == [13]
     why = {x["number"]: x["reason"] for x in out["items"]}
-    assert why[11] == why[12] == "保留の周回の課題"
+    assert why[11] == why[12] == "保留したループの 1 回の課題"
 
 
 def test_released_answer_runs_the_close_and_finish_closes_the_lap_with_the_version(env):
@@ -1679,7 +1731,7 @@ def test_released_answer_runs_the_close_and_finish_closes_the_lap_with_the_versi
     pipe = out["metrics"]["pipeline"]
     assert "1-close.json" in pipe and "loop finish l1 1 --done" in pipe
     r = rec(env)
-    assert r["laps"][0]["release"]["answer"]["version"] == "10.28.0" and len(r["laps"]) == 1  # 新しい周回を先に始めない
+    assert r["laps"][0]["release"]["answer"]["version"] == "10.28.0" and len(r["laps"]) == 1  # 新しいループの 1 回を先に始めない
     d = r["laps"][0]["release"]["finish"]["done"]
     Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
     fin = sl.cmd_finish(env, "l1", 1, d)
@@ -1696,6 +1748,23 @@ def test_released_answer_without_a_version_runs_the_close_and_writes_no_version(
     assert out["metrics"]["status"] == "finish" and "1-close.json" in out["metrics"]["pipeline"]
     lap = rec(env)["laps"][0]
     assert lap["release"]["answer"]["version"] is None and "prod" not in lap.get("versions", {})
+
+
+def test_released_answer_after_gate_1_runs_the_close_of_the_kept_issue_only(env):
+    """#2717 の受け入れ条件 7 / I5: 設計承認ゲートで課題を外したループの 1 回をリリース待ちで締めると、答えの後のまとめは残った課題だけ。"""
+    lap = lane_lap(env)
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    prod = Path(lap["out"]) / "prod.json"
+    assert json.loads(prod.read_text())["課題"] == [12]  # 依頼の --issues はこの `課題` で埋まる
+    set_state(env, sl.current_lap(rec(env)))
+    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(prod), "result": "関門"}]), [])
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": None}, "defer": None}
+    pipe = sl_select.cmd_select(env, "l1")["metrics"]["pipeline"]
+    closes = [w for w in pipe.split() if w.endswith("1-close.json")]
+    assert len(closes) == 1
+    # 偽の new close は --issue の後の数字をすべて拾うため、そのまとめを組んだ呼び出しの --issue を読む
+    built = next(c for c in env.calls if "close" in c and str(Path(closes[0]).parent) in c)
+    assert built[built.index("--issue") + 1 : built.index("--state")] == ["12"]
 
 
 def test_two_answered_pending_laps_are_finished_oldest_first(env):
@@ -1716,7 +1785,7 @@ def test_rejected_answer_returns_the_lap_without_the_close(env):
     r = rec(env)
     assert r["laps"][0]["outcome"] == "人へ戻した" and "finish" not in r["laps"][0]["release"]
     assert r["fixes"][0]["lap"] == 1 and r["fixes"][0]["reason"] == "直す"
-    assert out["metrics"]["status"] == "selected" and out["metrics"]["selected"][0] in (11, 12)  # 直しの周回が先頭に選ぶ
+    assert out["metrics"]["status"] == "selected" and out["metrics"]["selected"][0] in (11, 12)  # 直しのループの 1 回が先頭に選ぶ
 
 
 def test_failed_answer_closes_the_lap_as_failed(env):
@@ -1735,7 +1804,7 @@ def test_defer_keeps_the_lap_pending(env):
 
 
 def test_unanswered_pending_laps_do_not_stop_the_next_selection(env):
-    """答えの無い保留の周回がいくつあっても、選べる課題があれば次の周回を選ぶ。"""
+    """答えの無い保留したループの 1 回がいくつあっても、選べる課題があればループの次の 1 回を選ぶ。"""
     start(env, laps=100)
     request_lap(env, rid="lroot-r000000000001")
     for i, n in enumerate((13, 14), 2):
@@ -1807,7 +1876,7 @@ def test_loop_pending_returns_only_the_answered_close(env):
 
 
 def test_loop_pending_settles_a_rejected_answer_and_keeps_the_record(env):
-    """全レーンが止まった後の入口（loop pending）でも、差し戻しの答えで保留の周回を締め直して記録へ残す。"""
+    """全レーンが止まった後の入口（loop pending）でも、差し戻しの答えで保留したループの 1 回を締め直して記録へ残す。"""
     request_lap(env)
     env.answer_box[REQ] = {"answer": {"result": "rejected", "reason": "直す"}, "defer": None}
     assert sl.cmd_pending(env, "l1")["metrics"]["status"] == "none"
@@ -1847,7 +1916,7 @@ def test_answer_revise_keeps_the_note_and_selects_the_issue_first(env, tmp_path)
     assert "API の形を変える" in env.bodies[11]
     r = rec(env)
     assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) is None
-    assert sl.current_lap(r) is None  # 両方の課題を人の判断待ちへ移した周回は締まっている
+    assert sl.current_lap(r) is None  # 両方の課題を人の判断待ちへ移したループの 1 回は締まっている
     env.rank_box["out"] = rank_out(ms("01 近い", [13, 14, 11]))
     assert sl_select.cmd_select(env, "l1")["metrics"]["selected"][0] == 11
 
@@ -1918,7 +1987,7 @@ def test_gate_1_of_a_lane_sends_the_request_to_the_organizer(env, monkeypatch):
 
 
 def test_selecting_a_returned_issue_marks_its_fix(env):
-    # 直しの周回: 差し戻された周回の課題を選ぶと、その直しを済みにする。選ばなかった直しと済みの直しは変えない（現状固定。#2422）
+    # 直しのループの 1 回: 差し戻されたループの 1 回の課題を選ぶと、その直しを済みにする。選ばなかった直しと済みの直しは変えない（現状固定。#2422）
     start(env)
     with sl_record.open_record(env, "l1") as (r, before):
         r["fixes"] = [{"lap": 0, "issues": [12]}, {"lap": 0, "issues": [99]}, {"lap": 0, "issues": [11], "fixed_by": 7}]
@@ -1934,7 +2003,7 @@ def test_selecting_a_returned_issue_marks_its_fix(env):
 
 
 def gated_both(env):
-    """#11（設計 PR 501）と #12（設計 PR 502）を設計承認ゲートで人の判断待ちへ移し、周回を締めた記録。"""
+    """#11（設計 PR 501）と #12（設計 PR 502）を設計承認ゲートで人の判断待ちへ移し、ループの 1 回を締めた記録。"""
     lap = built_lap(env)
     items = [
         {
@@ -1966,13 +2035,13 @@ def test_loop_answer_merges_the_approved_design_and_the_next_lap_selects_it_firs
     assert got["metrics"]["selected"][0] == 11
     first = next(x for x in got["items"] if x["number"] == 11)
     assert first["reason"] == sl_select.APPROVED_REASON
-    assert any(c[-2:] == ["cleanup", "501"] for c in env.calls)  # 後片付けは周回の境が打つ
-    # 選ばれた後の周回では先頭に選ばない
+    assert any(c[-2:] == ["cleanup", "501"] for c in env.calls)  # 後片付けはループの 1 回の境が打つ
+    # 選ばれた後のループの 1 回では先頭に選ばない
     assert 11 not in sl_select.approved_designs(rec(env))
 
 
 def test_loop_exclude_keeps_the_approved_design_first_on_every_reselection(env):
-    """同じ周回の取り直し（loop exclude）は、取り直す周回自身の選定を「選ばれた後の周回」に数えない。"""
+    """同じループの 1 回の取り直し（loop exclude）は、取り直すループの 1 回自身の選定を「選ばれた後のループの 1 回」に数えない。"""
     gated_both(env)
     sl.cmd_answer(env, "l1", 11, True, None)
     sl.cmd_answer(env, "l1", 12, False, None)
@@ -2011,7 +2080,7 @@ def test_a_failed_merge_still_answers_and_is_retried_at_the_next_boundary(env):
     sl.cmd_answer(env, "l1", 12, False, None)
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 13, 14]))
     env.merge_box = {"result": "merged", "class": "passed", "reason": ""}
-    got = sl_select.cmd_select(env, "l1")  # 境で 1 回マージし直し、同じ周回の選定に含める（受け入れ条件 7）
+    got = sl_select.cmd_select(env, "l1")  # 境で 1 回マージし直し、同じループの 1 回の選定に含める（受け入れ条件 7）
     assert len(env.merges) == 2 and got["metrics"]["selected"][0] == 11 and row(env, 11)["merge"]["lap"] == 2
 
 
@@ -2028,7 +2097,7 @@ def test_a_merge_that_fails_again_only_drops_that_issue(env):
 
 
 def boundary(env, n=1):
-    """周回の境のマージし直しだけを n 回打つ（選定は流さない）。"""
+    """ループの 1 回の境のマージし直しだけを n 回打つ（選定は流さない）。"""
     for _ in range(n):
         with sl_record.open_record(env, "l1") as (r, before):
             sl_select.settle_approved_designs(env, r)
@@ -2238,8 +2307,8 @@ def test_lane_gate1_marks_a_given_back_request_so_the_organizer_does_not_self_ap
 @pytest.mark.parametrize(
     "box, after, merged",
     [
-        ({"result": "merged", "class": "passed", "reason": ""}, "設計 PR をマージした。次の周回で先頭に選ぶ", True),
-        ({"result": "already_merged", "class": "passed", "reason": ""}, "設計 PR をマージした。次の周回で先頭に選ぶ", True),
+        ({"result": "merged", "class": "passed", "reason": ""}, "設計 PR をマージした。ループの次の 1 回で先頭に選ぶ", True),
+        ({"result": "already_merged", "class": "passed", "reason": ""}, "設計 PR をマージした。ループの次の 1 回で先頭に選ぶ", True),
         (
             {"result": "production", "class": None, "reason": "宛先 main が本番"},
             "設計 PR をマージしない（宛先 main が本番）。リリース承認ゲートで人がマージするまで実装に選ばない",
@@ -2247,7 +2316,7 @@ def test_lane_gate1_marks_a_given_back_request_so_the_organizer_does_not_self_ap
         ),
         (
             {"result": "not_green", "class": "running", "reason": "走っている"},
-            "設計 PR をマージできない（not_green: 走っている）。次の周回の境でマージし直す",
+            "設計 PR をマージできない（not_green: 走っている）。ループの次の 1 回の境でマージし直す",
             False,
         ),
     ],
@@ -2277,7 +2346,7 @@ def test_characterize_answer_approved_without_a_design_pr_does_not_merge(env):
     out = sl.cmd_answer(env, "l1", 11, True, None)
     w = row(env, 11)
     assert out["status"] == "ok" and out["metrics"]["status"] == "answered"
-    assert out["summary"] == "#11 の答え（approved）を書いた。設計 PR のマージの後の周回で選定の対象に戻る"
+    assert out["summary"] == "#11 の答え（approved）を書いた。設計 PR のマージの後のループの 1 回で選定の対象に戻る"
     assert out["items"] == [w] and w["answer"] == "approved" and w["pr"] is None and "merge" not in w and env.merges == []
     gate = [c for c in env.calls if c[2:3] == ["gate"]]
     assert len(gate) == 1 and "--pr" not in gate[0] and gate[0][gate[0].index("--outcome") + 1] == "approved"
@@ -2293,7 +2362,7 @@ def test_characterize_answer_rejected_and_revise_summaries(env, tmp_path):
     note.write_text("  直す\n")
     out = sl.cmd_answer(env, "l1", 11, False, None, revise=True, note=str(note))
     w = row(env, 11)
-    assert out["summary"] == "#11 の答え（revise）を書いた。次の周回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
+    assert out["summary"] == "#11 の答え（revise）を書いた。ループの次の 1 回で先頭に選び、指摘を読んで同じ設計 Pull Request を直す"
     assert out["items"] == [w] and w["note"] == "直す" and w["revise_count"] == 1 and env.merges == []
 
 
@@ -2344,15 +2413,15 @@ def _lap(s, e=None, **kw):
         ({}, 0.0),
         ({"laps": [], "stops": []}, 0.0),
         ({"laps": [_lap("2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z")]}, 3600.0),
-        # 進行中の周回（終わりが無い）は数えない
+        # 進行中のループの 1 回（終わりが無い）は数えない
         ({"laps": [_lap("2026-10-25T00:00:00Z")]}, 0.0),
-        # 始まりが無い周回も数えない
+        # 始まりが無いループの 1 回も数えない
         ({"laps": [_lap(None, "2026-10-25T01:00:00Z")]}, 0.0),
         # 終わりが始まりより前なら 0 に丸める
         ({"laps": [_lap("2026-10-25T01:00:00Z", "2026-10-25T00:00:00Z")]}, 0.0),
         # タイムゾーンの無い時刻は UTC として読む
         ({"laps": [_lap("2026-10-25T00:00:00", "2026-10-25T00:30:00Z")]}, 1800.0),
-        # 複数の周回は足す
+        # 複数のループの 1 回は足す
         (
             {"laps": [_lap("2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z"), _lap("2026-10-25T02:00:00Z", "2026-10-25T02:30:00Z")]},
             5400.0,
@@ -2366,16 +2435,16 @@ def test_characterize_active_seconds_laps(rec_, expected):
 @pytest.mark.parametrize(
     ("stops", "expected"),
     [
-        # 周回の途中の停止は重なりを引く
+        # ループの 1 回の途中の停止は重なりを引く
         ([{"at": "2026-10-25T00:10:00Z", "resumed_at": "2026-10-25T00:20:00Z"}], 3000.0),
         # 再開していない停止は引かない
         ([{"at": "2026-10-25T00:10:00Z"}], 3600.0),
         ([{"at": None, "resumed_at": "2026-10-25T00:20:00Z"}], 3600.0),
-        # 周回の外の停止は引かない
+        # ループの 1 回の外の停止は引かない
         ([{"at": "2026-10-25T02:00:00Z", "resumed_at": "2026-10-25T03:00:00Z"}], 3600.0),
-        # 周回にまたがる停止は重なった分だけ引く
+        # ループの 1 回にまたがる停止は重なった分だけ引く
         ([{"at": "2026-10-24T23:00:00Z", "resumed_at": "2026-10-25T00:15:00Z"}], 2700.0),
-        # 周回より長い停止は 0 に丸める
+        # ループの 1 回より長い停止は 0 に丸める
         ([{"at": "2026-10-24T23:00:00Z", "resumed_at": "2026-10-25T02:00:00Z"}], 0.0),
         # 重なる停止は別々に引き、負になれば 0 に丸める
         (
@@ -2521,3 +2590,215 @@ def test_characterize_select_candidate_rows_approved_alone_does_not_take_capacit
 
 def test_characterize_select_candidate_rows_empty_candidates():
     assert sl_select._select_candidate_rows([], "M", 2, lambda r: None) == ([], [])
+
+
+# ---------------- #2354: 開発版を決めずに組み、ループの 1 回の版は版の記録からコピーする ----------------
+
+
+def versionless_lap(env):
+    """--dev なしで組んだループの 1 回。スプリント状態の版の欄は sprint-state.py init と同じく空文字である。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    out = sl.cmd_sprint(env, "l1", "standard", None, None, [])
+    assert out["status"] == "ok"
+    lap = sl.current_lap(rec(env))
+    versionless_state(lap)
+    return lap
+
+
+def versionless_state(lap, result="完了"):
+    row = {"result": result, "cost": 1.0, "seconds": 10}
+    state = {"plans": [{"kind": "実装", "issues": [11], "row": row}], "versions": {"dev": "", "prod": ""}, "gates": []}
+    Path(lap["state_path"]).write_text(json.dumps(state))
+
+
+def plan_state(plan, version=None, result=None):
+    """プランの状態ディレクトリへ版の記録と report.md を置く。"""
+    sd = Path(plan).with_name(Path(plan).stem + "-state")
+    sd.mkdir(exist_ok=True)
+    if version:
+        (sd / "version.json").write_text(json.dumps({"version": version}))
+    if result:
+        (sd / "report.md").write_text(f"- 結果: {result}\n")
+    return sd
+
+
+def lap_table(env):
+    return (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
+
+
+def test_sprint_without_dev_passes_no_version_to_init_or_new_sprint(env):
+    """受け入れ条件 1・2・I1: 省いたら版数をどのコマンドにもループの 1 回の組み立てにも持たない。"""
+    lap = versionless_lap(env)
+    init = next(c for c in env.calls if "init" in c)
+    new = next(c for c in env.calls if "new" in c and "sprint" in c)
+    assert "--dev" not in init and "--prod" not in init and "--version" not in new
+    assert "--version" not in lap["sprint_command"] and lap["versions"] == {"dev": "", "prod": ""}
+    assert lap["dev_plan"].endswith("/dev.json") and lap["prod_plan"].endswith("/prod.json")
+
+
+def test_sprint_treats_an_empty_dev_as_omitted(env):
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    assert sl.cmd_sprint(env, "l1", "standard", "", None, [])["status"] == "ok"
+    assert "--version" not in sl.current_lap(rec(env))["sprint_command"]
+
+
+@pytest.mark.parametrize("prod, want", [(None, "1.0.0"), ("1.0.1", "1.0.1")])
+def test_sprint_with_dev_keeps_the_explicit_version(env, prod, want):
+    """受け入れ条件 5・6・I2: --dev を渡す組み立てとループの 1 回の版は変わらない。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", prod, [])
+    lap = sl.current_lap(rec(env))
+    assert lap["versions"] == {"dev": "1.0.0-dev.1", "prod": want}
+    init = next(c for c in env.calls if "init" in c)
+    assert init[init.index("--dev") + 1] == "1.0.0-dev.1" and init[init.index("--prod") + 1] == want
+    assert "--version 1.0.0-dev.1" in lap["sprint_command"]
+
+
+def test_prod_without_dev_is_refused_before_anything_changes(env):
+    """受け入れ条件 7・I3: --prod だけなら 1 で断り、状態ファイルも new sprint もループの 1 回の記録の変更も無い。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    before = rec(env)
+    env.calls.clear()
+    out = sl.cmd_sprint(env, "l1", "standard", None, "1.0.0", [])
+    assert out["exit"] == 1 and out["metrics"]["status"] == "refused" and "--prod は --dev と一緒に渡す" in out["summary"]
+    assert env.calls == [] and rec(env) == before
+    assert not Path(sl.current_lap(before)["dir"], "state.json").exists()
+
+
+def test_select_next_and_rebuild_next_do_not_ask_for_a_version(env):
+    """受け入れ条件 11: 案内の 1 行は --dev を求めず、モードを埋めれば組める。"""
+    start(env)
+    nxt = sl_select.cmd_select(env, "l1")["metrics"]["next"]
+    line = re.search(r"python3 \S+ (loop sprint l1 --mode <モード>)", nxt)
+    assert line and "--dev" not in nxt
+    assert sl.cmd_sprint(env, "l1", "standard", None, None, [])["status"] == "ok"
+
+
+def test_sprint_help_shows_dev_as_optional():
+    """受け入れ条件 12。"""
+    got = subprocess.run([sys.executable, str(SCRIPTS / "sprint-state.py"), "loop", "sprint", "--help"], capture_output=True, text=True)
+    assert got.returncode == 0 and "[--dev DEV]" in " ".join(got.stdout.split())
+
+
+def test_closing_copies_the_dev_version_from_the_record(env):
+    """受け入れ条件 9・I4・I7: 版の記録の版を締めたループの 1 回が持ち、記録は変わらない。本番へ進まなければ本番の版は空。"""
+    lap = versionless_lap(env)
+    sd = plan_state(lap["dev_plan"], "10.27.7-dev.1")
+    kept = (sd / "version.json").read_text()
+    sl.cmd_lap(env, "l1", False, None, [])
+    closed = rec(env)["laps"][0]
+    assert closed["versions"] == {"dev": "10.27.7-dev.1", "prod": ""}
+    assert "10.27.7-dev.1" in lap_table(env) and (sd / "version.json").read_text() == kept
+
+
+def test_prod_version_is_not_copied_when_the_plan_stopped_at_the_release_gate(env):
+    """I4: 本番のプランの版の記録があっても、結果が完了でなければ本番を出していない。"""
+    lap = versionless_lap(env)
+    plan_state(lap["prod_plan"], "10.27.7", "関門")
+    sl.cmd_lap(env, "l1", False, None, [])
+    assert rec(env)["laps"][0]["versions"]["prod"] == ""
+
+
+def test_prod_version_is_copied_when_the_continued_plan_finished(env):
+    """I4: 続きの実行はスプリント状態の行を変えないが、report.md が完了なら本番の版が載る。"""
+    lap = versionless_lap(env)
+    versionless_state(lap, result="関門")
+    plan_state(lap["dev_plan"], "10.27.7-dev.1")
+    plan_state(lap["prod_plan"], "10.27.7", "完了")
+    sl.cmd_lap(env, "l1", False, None, [])
+    closed = rec(env)["laps"][0]
+    assert closed["versions"] == {"dev": "10.27.7-dev.1", "prod": "10.27.7"}
+    assert "10.27.7-dev.1 / 10.27.7" in lap_table(env)
+
+
+@pytest.mark.parametrize("broken", [None, "{", '{"version": 1}'])
+def test_closing_without_a_usable_record_leaves_the_version_empty(env, broken):
+    """受け入れ条件 10・I5: 版の記録が無い・読めなくてもループの 1 回は締まり、版の欄は空のまま。"""
+    lap = versionless_lap(env)
+    if broken:
+        plan_state(lap["dev_plan"]).joinpath("version.json").write_text(broken)
+    out = sl.cmd_lap(env, "l1", False, None, [])
+    closed = rec(env)["laps"][0]
+    assert out["status"] == "ok" and closed["outcome"] == "完了" and closed["versions"] == {"dev": "", "prod": ""}
+
+
+def test_closing_a_lap_without_dev_plan_keeps_its_versions(env):
+    """移行性: dev_plan を持たない進行中のループの 1 回は今の値で締まる。"""
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    path = env.root / ".ndf" / "loop" / "l1" / "loop.json"
+    r = json.loads(path.read_text())
+    del r["laps"][-1]["dev_plan"]
+    path.write_text(json.dumps(r))
+    Path(r["laps"][-1]["state_path"]).unlink()
+    sl.cmd_lap(env, "l1", False, None, [])
+    assert rec(env)["laps"][0]["versions"] == {"dev": "1.0.0-dev.1", "prod": "1.0.0"}
+
+
+def versionless_request(env):
+    lap = lane_lap(env, dev=None)
+    versionless_state(lap)
+    plan_state(lap["dev_plan"], "10.27.7-dev.1")
+    sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
+    return lap
+
+
+def test_held_lap_keeps_the_copied_dev_and_the_answered_prod(env):
+    """I6: 開発版を渡さないループの 1 回のリリース待ちは、締め直しでも開発版と答えの本番の版を失わない。"""
+    versionless_request(env)
+    assert rec(env)["laps"][0]["versions"] == {"dev": "10.27.7-dev.1", "prod": ""}
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": "10.27.7"}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    d = rec(env)["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
+    sl.cmd_finish(env, "l1", 1, d)
+    closed = rec(env)["laps"][0]
+    assert closed["outcome"] == "完了" and closed["versions"] == {"dev": "10.27.7-dev.1", "prod": "10.27.7"}
+
+
+def test_held_lap_keeps_the_dev_version_when_the_record_is_gone_on_the_second_close(env):
+    """I6: 開発版を渡したかはスプリント状態で見るため、締め直しでループの 1 回の開発版を失わない。"""
+    lap = versionless_request(env)
+    (Path(lap["dev_plan"]).with_name("dev-state") / "version.json").unlink()
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": None}, "defer": None}
+    sl_select.cmd_select(env, "l1")
+    d = rec(env)["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": [{"plan": "x", "result": "完了"}]}))
+    sl.cmd_finish(env, "l1", 1, d)
+    assert rec(env)["laps"][0]["versions"]["dev"] == "10.27.7-dev.1"
+
+
+def test_cli_a_second_session_cannot_take_the_same_loop_until_the_first_stops(tmp_path):
+    """受け入れ条件 6（#2316）: 別のセッションが生きた持ち主の間、loop start・loop pending は stopped・3 で止まる。
+    読むだけ・答える副命令は止まらない。持ち主のセッションの loop stop が返した後は取れる。"""
+    import os
+
+    import procs
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".ndf").mkdir()
+    sp = SCRIPTS / "sprint-state.py"
+    other = subprocess.Popen(["sleep", "60"])
+    session_a = {**os.environ, "NDF_RUNTIME_SESSION": f"{other.pid}:{procs.start_time(other.pid)}"}
+
+    def loop(*args, env=None):
+        return subprocess.run([sys.executable, str(sp), "loop", *args, "--root", str(tmp_path)], capture_output=True, text=True, env=env)
+
+    try:
+        assert loop("start", "x1", env=session_a).returncode != 3
+        for args in (("start", "x1"), ("pending", "x1")):
+            p = loop(*args)
+            assert p.returncode == 3, p.stderr
+            assert str(other.pid) in p.stdout + p.stderr
+        assert loop("status", "x1", "--json").returncode != 3
+        assert loop("answer", "x1", "1", "--approved").returncode != 3
+        assert loop("stop", "x1", env=session_a).returncode != 3
+        assert loop("start", "x1").returncode != 3
+    finally:
+        other.kill()
+        other.wait()

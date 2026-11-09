@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/supervise_lib/queue.py", "name": "cmd_wait", "kind": "sleep-loop", "reason": "#2343 の決定 5。再試行でなく条件が揃うまでの待ち: queue の終わりか attention の行を待つ"}

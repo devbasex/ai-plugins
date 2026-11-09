@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/project_lib/model.py",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身の宣言の形（project.schema.json）の URL。対象リポジトリを指していない",
+  "count": 1
+}

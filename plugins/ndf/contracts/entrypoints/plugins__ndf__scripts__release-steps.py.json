@@ -34,6 +34,19 @@
         ],
         "positionals": []
       },
+      "cd-guidance": {
+        "options": [],
+        "positionals": []
+      },
+      "cd-result": {
+        "options": [
+          "--base",
+          "--head",
+          "--out",
+          "--prs"
+        ],
+        "positionals": []
+      },
       "changed-plugins": {
         "options": [
           "--approval",
@@ -78,10 +91,19 @@
         ],
         "positionals": []
       },
+      "publish": {
+        "options": [
+          "--plugin",
+          "--revision"
+        ],
+        "positionals": []
+      },
       "record": {
         "options": [
           "--base",
+          "--cd-result",
           "--head",
+          "--merged",
           "--plugin",
           "--promote",
           "--prs",
@@ -123,11 +145,13 @@
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
     "NDF_WHOLE_RUNS_DIR",
     "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
@@ -167,7 +191,8 @@
   "exit": {
     "0": "成功（status ok）",
     "2": "読めない・呼び出しの誤り（status stopped）",
-    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）"
+    "3": "前提が無い、またはスクリプトが定めた正常な否定の結果（status stopped）",
+    "5": "CD の結果が失敗。リリース記録を書いた後に止まる（status stopped）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/README.md",

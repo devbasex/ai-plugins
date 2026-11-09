@@ -27,6 +27,7 @@ from pathlib import Path
 import clock
 import jsonio
 import secret_redact
+import limits
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git_root, result
 import upkeep_depth as D
 import upkeep_owner as O
@@ -60,18 +61,13 @@ SYSTEM = (
     "あなたは NDF の調査の supervisor である。渡した 1 つの調査の項目だけを調べる。外部へ書き込まない・Issue を作らない・"
     "人へ問わない。秘密と個人情報を書かない。"
 )
-POLL = 30
+POLL = limits.value("backlog-refinement.research-poll", "interval")
 WEB_ASPECTS = ("needs.market", "seeds.library", "seeds.alternatives", "seeds.environment")
 FAIL_LIMIT = 3
 
 
 class GraceOver(Exception):
     """待っていたプランが終わってから research.grace 秒を過ぎた（調査中の呼び出しを止める）。"""
-
-
-def calls_path(root) -> Path:
-    """呼び出しごとの費用の記録（失敗・上限超過も含む）。周回の調査費用はこれを集める（sprint_loop_gate.backlog_summary）。"""
-    return D.backlog_dir(root) / "research" / "calls.jsonl"
 
 
 def _old_slug(s: str) -> str:
@@ -223,7 +219,10 @@ def tools_of(aspect: str) -> str:
 def hotspots(root, limit: int = 30) -> str:
     """変更の多いファイル（直近 500 コミット）。git はスクリプトが打ち、結果だけを渡す。"""
     p = subprocess.run(
-        ["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"], capture_output=True, text=True, timeout=120
+        ["git", "-C", str(root), "log", "-n", "500", "--format=", "--name-only"],
+        capture_output=True,
+        text=True,
+        timeout=limits.seconds("backlog-refinement.hotspots-git"),
     )
     counts: dict = {}
     for f in p.stdout.splitlines():
@@ -287,7 +286,7 @@ def free_slot(listing: str | None, max_: int) -> bool:
 def log_call(root, item_id: str, ok: bool, usage: dict, run, loop, lap) -> None:
     """呼び出し 1 回の費用を記録する。結果を捨てた呼び出しも支払った費用は予算に数える。"""
     row = {"id": item_id, "at": clock.now_iso("utc"), "ok": bool(ok), **usage, "lap": lap, "by": {"run": run, "loop": loop}}
-    jsonio.append_jsonl(D.backlog_dir(root) / "research" / "calls.jsonl", row)  # calls_path と同じ置き場
+    jsonio.append_jsonl(D.backlog_dir(root) / "research" / "calls.jsonl", row)
 
 
 def research_one(root, it: dict, cfg: dict, product, run: str, loop, lap, tick) -> tuple[dict | None, dict]:
@@ -328,7 +327,7 @@ def _ticker(root, run_id, until: str | None, cfg: dict):
         # 調査中も待っていたプランの完了を見て、research.grace 秒を過ぎた呼び出しを止める（持ち主を手放し、後の見直しへ渡す）
         if until and Path(until).exists():
             seen = beat["until_seen"] = beat["until_seen"] or time.time()
-            if time.time() - seen >= float(cfg["research"].get("grace", 300)):
+            if time.time() - seen >= float(cfg["research"].get("grace", limits.seconds("backlog-refinement.research-grace"))):
                 raise GraceOver
 
     return tick

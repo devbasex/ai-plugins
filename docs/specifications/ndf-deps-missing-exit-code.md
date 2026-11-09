@@ -97,8 +97,11 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 | uv を入れられない | `ensure_uv` が uv を見つけられず、入れることもできない | 69 |
 | `uv run` 自身の失敗 | `os.execve` の後に uv が環境を作れない | uv の値（1）。`❌ [ndf deps]` の行は出ず、uv の `error:` の行が出る |
 
-3 つの経路はすべて `deps._stop(msg)` を通り、`_stop` が `❌ [ndf deps] <msg>` を標準エラーへ出して
-`sys.exit(EXIT_DEPS_MISSING)` する。標準出力には何も書かない。
+3 つの経路はすべて `deps._stop(msg)` を通り、`_stop` が `❌ [ndf deps] <msg>` を標準エラーへ出してから、
+実行の核の早い出口（`run_core.exit_early`）を通して `EXIT_DEPS_MISSING` で終える。早い出口は `stopped` の結果 JSON
+（`gaps` の `kind` は `deps`、`name` は import できないグループ。グループが無い経路では `uv`）を、契約の `stdout` が
+`step-result` のエントリポイントなら標準出力へ、呼ぶ側が `NDF_RESULT_FILE` を渡していればそのファイルへ書く。それ以外の
+エントリポイントの標準出力には何も書かない。核を読めない場所（ラッパーのバージョンディレクトリ）では結果を出さずに 69 で終える。
 
 ### 定数
 

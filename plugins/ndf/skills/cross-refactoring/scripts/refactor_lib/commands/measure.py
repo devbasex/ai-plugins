@@ -20,12 +20,13 @@ from typing import Any, Callable, Optional
 import statefile
 
 from .. import clock, codemetrics as cm, codemetrics_read as read, codemetrics_view as view, info, timeline
+import limits as limit_decl  # 上限の宣言（#2343）
 from ..codemetrics_record import propose_started
 from ..paths import git_out, load_state, work_dir
 from ..process import run_capture
 
 # 打ち切ったプロセスグループへ SIGKILL を送るまでの待ち（`timeline.FIXED_VALUES` の kill_grace）。
-KILL_GRACE = 5.0
+KILL_GRACE = limit_decl.seconds("cross-refactoring.kill-grace")
 
 
 def metrics_path(tmp_dir: pathlib.Path, run_id: Any) -> pathlib.Path:

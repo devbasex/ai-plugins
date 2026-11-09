@@ -1,6 +1,6 @@
 {
   "name": "parallel-external",
-  "summary": "外のオーガナイザーと、環境変数 NDF_ORGANIZER_DIR の置き場のファイルでやり取りする形（#2439）。レーンは requests/ にリリースの依頼を書き、外のオーガナイザーは answers/・ranges/・batch.json を書き、リリースの実行は presented/・progress/・results/ を書く。どちらの書き手も一時ファイルへ書いて名前を付け替える。外のオーガナイザーの側の読み手と書き手（サービスのランナーなど）も同じ例の組を読む",
+  "summary": "外のオーガナイザーと、環境変数 NDF_ORGANIZER_DIR の置き場のファイルでやり取りする形（#2439）。レーンは requests/ にリリースの依頼を書き、外のオーガナイザーは answers/・ranges/・batch.json を書き、リリースの実行は presented/・progress/・results/ を書く。どちらの書き手も一時ファイルへ書いて名前を付け替える。外のオーガナイザーの側の読み手と書き手（サービスのランナーのエージェントなど）も同じ例の組を読む",
   "rule": "message.file は置き場からの相対パス、message.body は中身。requests/<id>.json は #2436 のリリースの依頼（parallel-request）に ndf_version（空でない文字列）を足した形で、ファイル名は id。answers/<id>.json の result は released / rejected。ranges/<連番>.json は {sha, version, prs, lanes}。batch.json の step は present / represent / confirm:1 / confirm:2 / continue、lanes は {lane, requests:[{id, prs}], issues}。presented/<連番>-<提示>.json の k は 1 か 2 で、auto は真偽。progress/<連番>.json の stages は release_branch / develop_merged / prod_pr_opened / main_merged / tagged の並び。results/<連番>.json の result は released / failed",
   "writers": [
     "plugins/ndf/scripts/lib/parallel_external.py"

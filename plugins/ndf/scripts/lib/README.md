@@ -20,14 +20,16 @@
 | [worktree-branch.sh](worktree-branch.sh) | worktree の一覧・追従先・ブランチの判定（`wt_current_branch` ほか） | 同上 |
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
-| [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
+| [lock-common.sh](lock-common.sh) | 排他の取得と解放。持ち続ける上限の秒を受け、別の PID 名前空間の持ち主のロックをその時刻まで捨てない | 上の 2 つと `development-workflow` |
+| [worktree-testenv-sweep.sh](worktree-testenv-sweep.sh) | テスト環境の片付け（使われていない環境の停止、残った割り当ての回収、回収の予約） | `worktree-testenv.sh` |
+| [run-limited.sh](run-limited.sh) | コマンドを別のプロセスグループで走らせ、期限か呼び出し元の消失で止める。`timeout` の有無に左右されない | `worktree-testenv-sweep.sh` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける。`main()` が `deps.require("procs", "locks")` を呼ぶ | 収束ループの 2 つ / `external-ai.py` |
 | [monitor_patterns.py](monitor_patterns.py) | 監視の照合の表（利用上限・致命・警告・無害・CLI の上限・codex の終わりの印）。標準ライブラリだけを読む | `monitor.py` / `supervise_lib/claude.py`（`USAGE_LIMIT_FATAL`） |
 | [monitor_scan.py](monitor_scan.py) | 監視のログの末尾の読み取りと、照合の表による致命・警告・利用上限の判定 | `monitor.py` |
 | [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・停止（プロセスグループごと）。生死とゾンビの判定・cmdline の照合は `procs.py` へ渡す（使う関数の中で import する） | `monitor.py` |
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
-| [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
+| [limits.py](limits.py) | 上限の宣言（`plugins/ndf/contracts/limits.json`）の読み手。上限の秒・再試行の回数・待ちの間隔を方針の名前で引き（`policy`・`seconds`・`value`）、宣言が読めなければ組み込みの値へ戻らずに止まる。監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + `monitor.cli-margin`）も宣言の `monitor.*` から引く（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）、結果ファイル・監視の記録の読み書き、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`、担当 1 者の結末を書く `_record_outcome` | 同上 |
 | [bg-wait.sh](bg-wait.sh) | 600 秒を超える待ちを、背景の起動（`run`）と 540 秒以内に区切った待ち（`wait`）に分ける。終了コードは rc ファイルに残る | 収束ループの 2 つ（Codex / Kiro / agy で `drive.py` を待つ）/ `cross-review` の手順の監視 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する。起動の直前に `runtime_policy.py check` で作業ディレクトリのリポジトリの宣言と照らし、外なら起動せずに終了コード 3 | 同上 |
@@ -38,8 +40,7 @@
 | [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番、結果を残さなかった担当を起動し直すか振り替えるかの規則（`after_no_result`。リトライ可否 `relaunch_same_agent` と、結果なしの記録から導く外した担当・今のアカウントを含む） | 同上 |
 | [assignee_env.py](assignee_env.py) | 担当の起動の環境（claude の席にアカウントがあれば `claude_accounts.account_env` の環境）と、振り替え先のアカウントを選ぶ `pick_account`（`claude_accounts.choose_env` を包み、名前だけを返す）。状態ファイルへは名前だけを書く | 収束ループの 2 つ |
-| [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
-| [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
+| [models.py](models.py) | `--model` の解析、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
 | [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの宣言（`.ndf/review.json`。重点と、`version: 2` の 1 つか `version: 3` の名前つきの複数のレビューのプロファイル）の読み取りと、変更ファイルのパスによるプロファイルの選択。レビュー担当への節・修正担当への節（要求の変更が要る指摘は写しを直さずに止めて返す節を含む）・見送りの返信・振り分けで許す値・プロファイルの分類の照合（glob は `pace.py` の `matches`）を組む。宣言が読めなくても例外を上げず既定の基準で返す。基準 2 と、`version: 3` の最上位の `criteria`（宣言の側で外せない基準）は、どのプロファイルを選んでも外せない | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [review_criteria_decl.py](review_criteria_decl.py) | レビューの宣言のプロファイル（`version: 2` の `profile`・`version: 3` の `profiles` の各要素）の形の検査と `Profile` の型。既定の基準・節の組み立て・選択は持たない | `review_criteria.py` |
@@ -50,7 +51,7 @@
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
 | [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
-| [step_read.py](step_read.py) | 結果を読む側の共通の規則。同じステップの試行から `ok` の最も新しい試行だけを採る `pick_ok_attempt`、置き場の無い・読めない・空・ありを分ける `open_place` と、無い・読めないときの結果を組む `place_stop`、子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` / 子の課題の読み手（承認資料・差し戻しの件数ほか） |
+| [step_read.py](step_read.py) | 結果を読む側の共通の規則。子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` |
 | [step-result.sh](step-result.sh) | シェルの手順のスクリプトが結果 JSON を 1 行出すための関数（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric` で値を溜め、`sr_emit` が `step_result.py emit` を呼ぶ。`sr_gh` は `gh` の失敗の要旨を `SR_GH_ERR` に残す。`sr_absorb` は別のスクリプトの結果 JSON を取り込む）。JSON をシェルで組まない | `progress-record.sh` / `projects-sync.sh` |
 | [dist_record.py](dist_record.py) | リリース記録（`## リリース記録`）の組み立て（`format_record`）と読み取り（`parse_record`）。形は `progress-tracking` の「リリース記録」が定める | `release-steps.py`（`record`） / `sprint-close.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`review_lib/` の未解決のスレッドと checks） |
@@ -58,7 +59,7 @@
 | [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
 | [gh_fields.py](gh_fields.py) | REST の応答を GraphQL の `--json` の形へ変える対応表 | `gh_rest` |
 | [gh_rest.py](gh_rest.py) | PR と課題の単発の読み書き（読み取り・一覧・検索・作成・編集・コメント・マージ）。REST で行い、REST が上限なら `gh pr` / `gh issue` で代わる（検索の `issue_search` は `gh issue list --search` の 1 回）。値は `Attempt`（`value`・`error`・`via`） | `gh_parts` / `issue-file.py` |
-| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
+| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーのエージェントの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
 | [gh_graphql.py](gh_graphql.py) | 入れ子の読み取り（未解決のスレッド）と GraphQL の 1 回の要求（`graphql`） | `gh_parts` / `gh_pr_info` |
 | [gh_checks.py](gh_checks.py) | チェックジョブの読み取りと、名前ごとの最新の実行への畳み方・失敗のログの保存 | `gh_parts` / `gh_pr_info` |
 | [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` |
@@ -79,6 +80,7 @@
 | [gate_rejections.py](gate_rejections.py) | 承認ゲートの差し戻しの記録（`gate-rejections.jsonl`。覆しの記録と同じ置き場）の 1 行の形・追記・読み取り・設計承認ゲート・リリース承認ゲートごとの件数 | `gate-rejections.py` / `sprint-state.py` |
 | [sprint_mvv.py](sprint_mvv.py) | `sprint-state.py init --pace fast` のスプリント MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `sprint-state.py` |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
+| [run_core.py](run_core.py) / [run-core.sh](run-core.sh) | 実行の核。エントリポイントの本体の終わり方を `ok` / `gate` / `stopped` と決まった終了コードへ変える（「実行の核」） | すべてのエントリポイント（核の対象外を除く） |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
@@ -87,22 +89,27 @@
 | [glossary_merge.py](glossary_merge.py) | 用語集の 3 方向の取り込み（祖先・自分・相手を語は `(context, term)`、コンテキストは `id` で突き合わせ、片側だけの変更を採り、両側の食い違いを語の衝突として返す）と、`git ls-files -u -z` の段の読み取り。ファイルも git も触らない。標準ライブラリだけ | `glossary.py merge` |
 | [merged_range.py](merged_range.py) | 範囲の first-parent のログから、merge commit と squash merge（件名の末尾 `(#N)`）でベースブランチへ入った PR を拾う。squash の head のブランチは GitHub から 100 件ずつ読む。どの PR を外すかは持たない（呼び手が決める） | `check-trigger.py`・`release_lib/included.py` |
 | [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
-| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
+| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直す | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
 | [versions.py](versions.py) | 版数（`X.Y.Z`・`-dev.N`・`-rc.N`）の比較と次の版、bump-my-version の `replace`。semver と bump-my-version を呼ぶのはここだけ | 同上 |
 | [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
-| [textparse.py](textparse.py) | unified diff の足した行の番号と、コードのコメントを空白へ置き換える処理。unidiff と pygments を呼ぶのはここだけ | 同上 |
+| [textparse.py](textparse.py) | unified diff の足した行の番号。unidiff を呼ぶのはここだけ | 同上 |
 | [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
-| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
-| [notify.py](notify.py) | HTTP の 1 回の要求・Slack の Web API・`.env` の読み取り。httpx・slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
+| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。上限・間隔・回数は方針で受け、同じ原因（[cause_key.py](cause_key.py) の原因の鍵）の失敗が方針の回数に達したら止まり、期限の時刻に最後の照会を打ってから止まる。止まった理由は結果に載る。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
+| [notify.py](notify.py) | Slack の Web API・`.env` の読み取り。slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
 | [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py`・`hook_lib/wait_notify.py` |
 | [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
 | [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | `hook_lib/`（token の guard・待ちの通知） |
-| [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・途中の記録を続ける新旧の分岐（`patched`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
+| [lease.py](lease.py) | 持ち主の部品。持ち主の鍵ごとの持ち主の記録（`<コンテナの状態の根>/leases/<owner>--<repo>/<鍵>.lease.json`。`NDF_LEASE_DIR` で置き場を変える）を鍵ごとの排他の中で取り・返し・死んだ持ち主を引き取る（`acquire`・`release_lease`・`touch_lease`・`read_lease`・`prune`）。同じホストの生死は pid と開始時刻、別のホストは寿命の窓で決め、持ち主のプロセスが自分の祖先なら取り直さずに使う。ランタイムのセッションは `NDF_RUNTIME_SESSION` を先に読む | `lease_stage.py`・`run_state.py`（レビュー worktree の持ち主の判定・古い記録の削除） |
+| [lease_stage.py](lease_stage.py) | 入口が持ち主の鍵を取り・返す手順（実行の核が呼ぶ部分）。契約の行の `lease` を宣言した入口が入力を解いた後に `hold` を呼び、生きた持ち主がいれば stopped・3 で止まる。取った鍵は本体の終わり（核の finally、核の外の入口は atexit・SIGTERM・`durable.exit_leaving_pending`）で返し、結果 JSON の `lease` に出す | cross-review・cross-refactoring の `drive.py` と init・`supervise.py queue`・`sprint-state.py loop` |
+| [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `<git の共通ディレクトリ>/ndf/state/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・途中の記録を続ける新旧の分岐（`patched`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
 | [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
-| [lap_cost.py](lap_cost.py) | 周回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
+| [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
+| [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
+| [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
+| [lap_cost.py](lap_cost.py) | ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
 | [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |
 | [estimate_records.py](estimate_records.py) | 見積もりの記録と実績の記録の置き場・行の形・追記と読み出し・課題ごとの実績の合計。`.git` を読んで置き場を決め、`git` を起動しない | `estimate.py` / `supervise_lib/actuals.py` / `backlog-refinement`（`upkeep_rank_estimate.py`） |
@@ -137,7 +144,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 
 | 項目 | 必須 | 形 | 意味 |
 | --- | --- | --- | --- |
-| `tool` | はい | 文字列 | 呼んだ Skill かスクリプトの名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close`、`progress-record.sh` は `progress-record`、`projects-sync.sh` は `projects-sync` |
+| `tool` | はい | 文字列 | 呼んだ Skill かスクリプトの名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close`、`progress-record.sh` は `progress-record`、`projects-sync.sh` は `projects-sync`、`worktree-testenv.sh reclaim` は `testenv-reclaim` |
 | `status` | はい | `ok` / `gate` / `stopped` | 3 値に固定する |
 | `summary` | はい | 文字列 | 1 行の要約。報告へそのまま写せる |
 | `items` | はい | オブジェクトの配列 | 対象ごとの結果。`kind` / `name` / `result` を持つ。`result` の語彙はスクリプトごとに決めてよい |
@@ -174,6 +181,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 | 2 | `stopped` | 読めない・呼び出しの誤り。「一致」「0 件」と読まない |
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
 | 4 | `stopped` | PR がベースブランチと衝突している（`merge-when-green`・`promote`。値の持ち主は `step_result.py` の `EXIT_BASE_CONFLICT`。#1917） |
+| 5 | `stopped` | CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。値の持ち主は `step_result.py` の `EXIT_CD_FAILED`。#2623） |
 | 6 | `stopped` | 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた。「0 件」「一致」と読まない（値の持ち主は `step_result.py` の `EXIT_INCOMPLETE`） |
 | 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |
@@ -183,11 +191,37 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 ### 読む側の規則
 
 - **成功と読むのは `status` が `ok`（終了コード 0）だけである。** 6 を含め、ほかの値・終了コードを成功と読まない。結果 JSON が無い・形が誤っているときも成功と読まない（`supervise_lib` は `on_fail` へ回すか止まる）
-- **同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から値を採るのは、`status` が `ok` の試行のうち番号の最も大きいものだけである。** 落ちた試行の値を採らない。`step_read.pick_ok_attempt(dir, step, tool)` を使い、採れなければ `Pick.outcome`（`no_ok_attempt` / `no_attempt` / `no_place` / `unreadable`）を理由として返す
-- **置き場が無い・読めないことと、材料が 0 件であることを分ける。** `step_read.open_place(path)` の `Place.state` が `missing` なら 3、`unreadable` なら 2 の `stopped` で返し（`place_stop` が組む）、0 件・「無し」とは返さない。`empty` のときだけ 0 件として `ok` を返してよい
-- 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、`open_place` の前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
-- 子プロセスとして打った手順のスクリプトの結果は `step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない
+- **同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から値を採るのは、`status` が `ok` の試行のうち番号の最も大きいものだけである。** 落ちた試行の値を採らない。採れなければ理由（`ok` の試行が無い・試行が無い・置き場が無い・読めない）を返す
+- **置き場が無い・読めないことと、材料が 0 件であることを分ける。** 置き場が無ければ 3、読めなければ 2 の `stopped` で返し、0 件・「無し」とは返さない。置き場があって空のときだけ 0 件として `ok` を返してよい
+- 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、置き場を開く前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
+- 子プロセスとして打った手順のスクリプトの結果は `step_read.read_completed`・`step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない。結果ファイル（worker の作業の結果ファイル・`NDF_RESULT_FILE`）は `step_read.read_result_file` で読む。どちらも無い・読めない・形が違うときは理由つきの `stopped` を返す
+- 最後の行を `json.loads(<出力>.splitlines()[-1])` で読む書き方と、名前に `last_json` を含む関数は `step_read.py` の外に置かない（契約の検査 `result-read`）。要約・件数を写すだけの箇所は `step_read.last_json` を使う
 - 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）が `ok` 以外を返しても、呼ぶ側は工程を止めない。`supervise_lib` の `record_stage` はフェーズレポートへ、`sprint-close.py` は `board_note` の項目へ、LLM は作業の報告の「見つけたもの」へ、`summary` と `gaps[].reason` を載せる
+
+### 実行の核
+
+エントリポイントは実行の核（[run_core.py](run_core.py)）を通る。Python は `__main__` の中身を
+`run_core.main("<id>", main)` の 1 文に、シェルは先頭の実行文を `. "<lib>/run-core.sh"; rc_enter "<id>" "$@"` にする
+（契約の検査 `core-entry`）。id はプラグインの根からのパス（例 `scripts/handoff.py`）で、契約の一覧の項目を引く。hook とランタイムが直接
+起動するエントリポイントは、契約の一覧の `core` に `hook` か `runtime` の印と根拠を書いて外す（`core-exempt`）。
+
+| 本体の終わり方 | 結果 | 終了コード |
+| --- | --- | --- |
+| `step_result.emit` で出した | 形・欠け・状態と終了コード・契約の `exit` を確かめた結果 | 本体の値 |
+| `ok` に `gaps` を添えた | `stopped`（`gaps` はそのまま） | 6 |
+| 形の違い・状態と終了コードの食い違い・契約に無い終了コード・`step-result` の本体が結果 JSON を出さずに返った | `stopped`（`gaps` の `kind` は `result-shape`） | 1 |
+| 例外 | `stopped`（`kind` は `exception`。例外の跡は標準エラー） | 1 |
+| SIGTERM | `stopped`（`kind` は `interrupted`） | 1 |
+| 時間切れ（`NDF_RUN_TIMEOUT` 秒） | `stopped`（`kind` は `timeout`） | 1 |
+| 契約の一覧に無い | `stopped`（`kind` は `contract`） | 2 |
+| optional extras が無い（`deps.require` が `run_core.exit_early` を通す） | `stopped`（`kind` は `deps`、`name` はグループ） | 69 |
+| `SystemExit`（`--help`・引数の誤りを含む）か終了コードを返した | 結果 JSON を足さない | 本体の値 |
+
+- 契約の `stdout` が `step-result` なら、核が確かめた結果を標準出力へ 1 行出す（`run_id` を足す）。それ以外の形の標準出力は変えず、止まった理由を標準エラーへ 1 行出す
+- 呼ぶ側が `NDF_RESULT_FILE` でファイルを渡せば、最終の結果 JSON をそこへ 1 行で書く。`NDF_RESULT_FILE` と `NDF_RUN_TIMEOUT` は子プロセスへ継がない
+- 核が動いている間の `step_result.emit` は出力せずに `Emitted`（`SystemExit` の子クラス）を投げ、核が確かめてから出す。テストが本体を直に呼ぶときは今までどおり出す
+- 中断したときに耐久の記録が開いていれば、DBOS を閉じずに `durable.exit_leaving_pending` で抜ける
+- 契約の `exit` の値は終了コードの表の見出し（`step_result.EXIT_LABELS`）で始め、エントリポイントとその部品は `EXIT_` で始まる整数の定数を持たない（契約の検査 `exit-meaning`）
 
 承認資料は `development-workflow/references/approval-request.md` の 2 層（対象を開くもの・判断に
 使うもの）に、同意を求めること・戻し方を足した形で書く。置き場所は `NDF_PRESENTATION_DIR`
@@ -250,7 +284,6 @@ Skill の下にライブラリを置くと、その Skill を配らない導入�
 | `limits.py` | 使う | `critique.sh` が使う（監視の上限は `monitor.py` がライブラリの表から引く） |
 | `assignment.py` / `auth.py` / `statefile.py` / `run_metrics.py` / `monitor_outcome.py` / `assignee_env.py` | 使う | 使う（`review_lib/` / `drive.py`） |
 | `models.py` | 使う | 未移行 |
-| `metrics.py` | 未移行 | 未移行 |
 | `post_queue.py` / `result_posts.py` | 未移行（リファクタリング計画のコメントは `refactor_lib/plan.py` が `gh` で書く） | 使う（`review_lib/` / `rotate-pr.sh` / `drive.py`） |
 | `git-credential.sh` | 使う（`refactor_lib/publish.py`） | 使わない |
 | `bg-wait.sh` | Codex / Kiro / agy で `drive.py` を待つ（SKILL.md の「実行」） | Codex / Kiro / agy で `drive.py` を待つ（SKILL.md の「実行」）。手順の監視の待ち（`docs/01-state-and-review.md`） |

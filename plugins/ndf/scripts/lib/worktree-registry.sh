@@ -162,9 +162,10 @@ WT_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 
 # 待ちの上限の既定は 5 秒である。**この既定に環境変数の上書きは置かない。**
 # 上書きは通過記録の側（`NDF_STAGE_LOCK_TIMEOUT`）だけが持つ。
+# 第 3 引数は持ち続ける上限の秒数で、`ndf_lock_acquire` へそのまま渡す。
 wt_lock_acquire() {
-  local dir="${1:-}" timeout="${2:-5}"
-  ndf_lock_acquire "$dir" "$timeout"
+  local dir="${1:-}" timeout="${2:-5}" hold="${3:-}"
+  ndf_lock_acquire "$dir" "$timeout" "$hold"
 }
 
 wt_lock_release() {

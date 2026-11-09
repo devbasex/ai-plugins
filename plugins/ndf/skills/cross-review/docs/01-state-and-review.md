@@ -294,7 +294,7 @@ eval "$JUDGE_VARS"
 | `state.py flush` の結果 | 扱い |
 | --- | --- |
 | 残りが 0 | 判定をもう一度打ち、修正（2）か収束（0）へ進む |
-| 一時的な失敗で残る（`PENDING_TRANSIENT=1`） | 30 秒おきに、合計 300 秒まで流し直す（`post_queue.TRANSIENT_INTERVAL` / `TRANSIENT_MAX_WAIT`）。その後に判定を打ち直す |
+| 一時的な失敗で残る（`PENDING_TRANSIENT=1`） | 30 秒おきに、合計 300 秒まで流し直す（上限の宣言 `plugins/ndf/contracts/limits.json` の方針 `post-queue.transient-reflush`）。その後に判定を打ち直す |
 | 上限か読めない項目で残る | 待たずに判定を打ち直す |
 
 打ち直した判定がなお 8 なら「投稿待ち」で止まる。止まりの結果は `status` が `stopped`、`summary` が

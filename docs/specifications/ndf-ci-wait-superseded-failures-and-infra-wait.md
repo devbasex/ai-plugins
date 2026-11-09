@@ -283,7 +283,7 @@ stateDiagram-v2
 | 順序 | 終了コードを読んだら、`skip_to` の次・承認ゲートの終了コード（10〜19）の前に `on_exit` を見る。当たれば `on_fail` と judge へ行かない |
 | `stop` | `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた: <出力の最後の JSON の summary>` |
 | 検査 | 対応表でない・鍵が整数でない・行き先が `end` / `stop` / 知っているステップの id のどれでもないなら、ステップを流す前に `結果: 止まった` |
-| 雛形 | `release`（`supervise.py new release`）と、`merge`・`merge-approved`（`merge_steps`）が `{"75": "stop"}` を持つ。実装と検査のプランの `merge`・`merge-approved` は、ベースブランチとの衝突（4）で `base-return` へ進む `{"4": "base-return"}` も持つ（`merge_steps` の `on_conflict`。#1917） |
+| 雛形 | 本番チャネルへのマージの後の `record`（`supervise.py new release`・昇格のプラン・CD の結果のプラン）が `{"5": "stop"}` を持つ。`release`（`supervise.py new release`）と、`merge`・`merge-approved`（`merge_steps`）が `{"75": "stop"}` を持つ。実装と検査のプランの `merge`・`merge-approved` は、ベースブランチとの衝突（4）で `base-return` へ進む `{"4": "base-return"}` も持つ（`merge_steps` の `on_conflict`。#1917） |
 
 `release` のステップの `cmd` は `release --version <版> --ci-wait <ci_wait_timeout> --channel <チャネル>` で、`timeout` は
 `max(2400（開発版）/ 3000（本番）, with_margin(待つ PR の数 × ci_wait_timeout))`。`ci_wait_timeout` はマージのプランと
@@ -293,7 +293,7 @@ stateDiagram-v2
 ```mermaid
 flowchart LR
   N[notes ほか] --> RL[release]
-  RL -->|0| V[record / verify]
+  RL -->|0| V[cd-result / verify]
   RL -->|10〜19| GN[gate_next]
   RL -->|75: on_exit| S[止まった: 基盤待ち]
   RL -->|ほか| J[judge] --> FX[fix]

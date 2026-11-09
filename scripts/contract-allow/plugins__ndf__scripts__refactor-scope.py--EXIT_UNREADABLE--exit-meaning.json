@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/refactor-scope.py",
+  "name": "EXIT_UNREADABLE",
+  "kind": "exit-meaning",
+  "reason": "終了コードの意味が終了コードの表と食い違う（#2337）。移す Pull Request が表の番号へ寄せて消す"
+}

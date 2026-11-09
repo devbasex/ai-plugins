@@ -42,12 +42,12 @@ import durable
 from supervise_lib import actuals, admission, limits, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
-from supervise_lib.engine import Engine
+import limits as limit_decl  # 上限の宣言（#2343）。supervise_lib.limits と分ける
+from supervise_lib.engine import Engine, write_phase_result
 from supervise_lib.queue import FINISHED, NO_REPORT
 from supervise_lib.state import RunState
 
-PLANS = "plans"  # queue が流すプランの耐久キュー
-PARENT_WAIT = 120.0  # 回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限（秒）
+PLANS, PARENT_WAIT = "plans", limit_decl.seconds("supervise.parent-wait")  # queue が流すプランの耐久キュー / plan_workflow の回復を待つ上限
 _ENGINES: dict[str, Engine] = {}
 _TURN: dict[str, int] = {}  # plan_workflow の接頭辞 → 資源の枠を待っているステップの番号
 _READY = threading.Condition()  # 登録簿と _TURN の排他と、slot_workflow への合図
@@ -119,7 +119,7 @@ def launch_run(engine: Engine, start: str | None) -> str:
 def launch_queue(done: Path, max_: int, resources: dict, fresh: bool) -> str:
     """`queue` の耐久の記録を開く（実行の鍵は done の絶対パスから決める）。接頭辞 `queue-<done の鍵>` を返す。
 
-    `fresh` なら、途中の耐久ワークフローを launch の前に子ごと止める（流すプランの並びを変えて打ち直したとき）。"""
+    `fresh`（並びを変えた・`--resume` に `--from` を渡した。#2325）なら、途中の耐久ワークフローを launch の前に子ごと止める。"""
     queues = {PLANS: {"worker_concurrency": max_}, **_queues(resources)}
     actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     launched = durable.launch("queue", str(Path(done).resolve()), queues=queues, keep=() if fresh else None)
@@ -137,6 +137,7 @@ def run_engine(engine: Engine, start: str | None = None) -> str:
     try:
         ref = durable.resolve(prefix, finished=_finished)
         if ref.action == "done":
+            write_phase_result(engine.state.dir, engine.plan, ref.output.get("result"), ref.output.get("reason") or "")  # report の代わり
             if ref.output.get("result") == "関門":
                 engine.state.retell_gates(ref.output.get("gates") or [])
             return ref.output["report"]

@@ -261,6 +261,18 @@ def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
     assert "--watch" not in cmd
 
 
+def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
+    """自動反映の本番チャネルへのマージは --gate-approved が無ければ止まる。開発版の経路には渡さない（#2623 の I2）。"""
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+    out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
+    mod.wait_and_merge(".", 5)
+    mod.wait_and_merge(".", 5, gate_approved="mvv")
+    assert "--gate-approved" not in calls[0] and calls[1][-2:] == ["--gate-approved", "mvv"]
+
+
 def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
     """merge-when-green が止まったら、その summary を持って止まる（上限なしで待ち続けない）。"""
     mod = _release_steps_module(monkeypatch)
@@ -742,6 +754,7 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
         return subprocess.CompletedProcess(args, rc, out, "")
 
     monkeypatch.setattr(mod, "git", git)
+    monkeypatch.setattr(mod.publish, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: root)
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))
@@ -1060,3 +1073,138 @@ def test_decided_versions_resumes_after_a_partial_bump():
         others.decided_versions(rows, {"b": "2.0.0"}, {"a": "1.1.0"})
     with pytest.raises(ValueError, match="差分に無い: a"):
         others.decided_versions(rows, {"b": "2.0.0"})
+
+
+# --- #2623: 公開の担い手と CD の結果 -------------------------------------------------
+
+CD_ROW = {"target": "ndf", "kind": "auto", "trigger": "release-cd.yml", "channel": "production", "versioned": True}
+
+
+@pytest.mark.parametrize(
+    ("row", "by_cd"),
+    [
+        ({**CD_ROW, "publishes_release": True}, True),
+        (CD_ROW, False),  # 別の成果物を届ける行が公開を省かせない（決定 12）
+        ({"target": "ndf", "kind": "manual", "trigger": "手順", "channel": "production", "versioned": True}, False),
+    ],
+)
+def test_release_publishes_only_when_no_row_declares_the_cd_does(monkeypatch, tmp_path, row, by_cd):
+    """受け入れ条件 20・I11: 公開の担い手は宣言の publishes_release だけで決まり、両方で打たない。"""
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}, ensure_ascii=False))
+    _, _, calls, out = _release_prod(monkeypatch, tmp_path, {"base_branch": "develop", "production_branch": "main"}, "ndf")
+    tagged = ("tag", "-a", "ndf--v1.2.3", "m-2", "-m", "ndf v1.2.3") in calls
+    assert tagged is (not by_cd)
+    assert out["metrics"]["tag"] == (None if by_cd else "ndf--v1.2.3")
+    assert out["metrics"]["publisher"] == ("cd" if by_cd else "ndf")
+
+
+@pytest.mark.parametrize(("by", "use_material", "expected"), [("mvv", True, "mvv"), ("user", True, "user"), (None, False, "user")])
+def test_the_production_merge_carries_who_approved(monkeypatch, tmp_path, by, use_material, expected):
+    """受け入れ条件 6・I2: 照合を通った本番のマージは、承認の担い手を渡して CD で届く本番チャネルのゲートを通る。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    sha = "a" * 40
+    material = tmp_path / "approval.md"
+    material.write_text(f"| 項目 | 値 |\n| --- | --- |\n| 承認したコミット | {sha} |\n", encoding="utf-8")
+    if by:
+        mod.ac.record_approval(material, sha, by, "2026-11-07T10:00")
+    seen = []
+    monkeypatch.setattr(mod, "find_pr", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: seen.append(kw) or "m")
+    a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=str(material) if use_material else None)
+    verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
+    mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
+    assert seen[0]["gate_approved"] == expected and seen[0]["expect"] == "b" * 40
+
+
+def _record(monkeypatch, root, **args):
+    """record を gh と git を差し替えて流し、(結果, 投稿した本文, 終了コード) を返す。"""
+    import argparse
+
+    (root / ".ndf").mkdir(exist_ok=True)
+    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    (root / ".ndf" / "supervise.json").write_text(
+        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
+    )
+    mod = _release_steps_module(monkeypatch)
+    posted, codes = [], []
+    monkeypatch.setattr(mod, "git_root", lambda r: root)
+    monkeypatch.setattr(mod, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1, "", ""))
+    monkeypatch.setattr(mod.record, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 0, "abc1234\n", ""))
+    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: {"number": 7, "state": "MERGED"})
+    monkeypatch.setattr(mod, "merge_commit_of", lambda r, n: "5d6e7f8" + "0" * 33)
+    monkeypatch.setattr(mod, "release_tag_before", lambda r, plugin, current: None)
+    monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 1, "", ""))
+    monkeypatch.setattr(mod.record, "release_pr_text", lambda r, n: ("", "https://x/pull/7"))
+    monkeypatch.setattr(mod.record, "post_comment", lambda r, n, body: posted.append((n, body)))
+
+    def emit(obj, code=None, *a, **k):
+        codes.append(code)
+        raise SystemExit(obj)
+
+    monkeypatch.setattr(mod, "emit", emit)
+    ns = {
+        "root": str(root),
+        "promote": False,
+        "merged": False,
+        "version": None,
+        "head": None,
+        "base": None,
+        "prs": [3, 4],
+        "cd_result": None,
+    }
+    with pytest.raises(SystemExit) as e:
+        mod.cmd_record(argparse.Namespace(**{**ns, **args}))
+    return e.value.code, posted, codes[-1] if codes else None
+
+
+def _cd_file(tmp_path, value, reason=""):
+    f = tmp_path / "cd.json"
+    f.write_text(
+        json.dumps({"value": value, "revision": "5d6e7f8" + "0" * 33, "reason": reason, "evidence": [{"url": "https://x/runs/1"}]})
+    )
+    return str(f)
+
+
+def test_record_merged_writes_to_the_last_pr_with_the_revision(monkeypatch, tmp_path):
+    """受け入れ条件 3: 版の無い CD の形はリビジョンを版の値にして記録を書く。"""
+    out, posted, code = _record(monkeypatch, tmp_path, merged=True, base="main", cd_result=_cd_file(tmp_path, "success"))
+    assert code is None and out["status"] == "ok" and out["metrics"]["cd_result"] == "success"
+    n, body = posted[0]
+    assert n == 4 and "main 5d6e7f8" in body and "CD の結果: 成功" in body and body.count("段階: 本番") == 1
+
+
+def test_record_stops_with_5_after_writing_a_failure(monkeypatch, tmp_path):
+    """受け入れ条件 8・I14: 失敗は書いた後に 5 で止まる。"""
+    out, posted, code = _record(monkeypatch, tmp_path, merged=True, base="main", cd_result=_cd_file(tmp_path, "failure", "落ちた"))
+    assert code == 5 and out["status"] == "stopped" and "段階: 反映失敗（落ちた）" in posted[0][1]
+
+
+def test_record_by_cd_replaces_the_tag_check_with_the_result(monkeypatch, tmp_path):
+    """公開物を CD が作る形はタグの照会を CD の結果へ置き換える。結果のファイルが無ければ今と同じく前提で止まる。"""
+    (tmp_path / ".ndf").mkdir()
+    row = {**CD_ROW, "publishes_release": True}
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}, ensure_ascii=False))
+    out, posted, _ = _record(monkeypatch, tmp_path, version="1.2.3", cd_result=_cd_file(tmp_path, "undetermined", "待ちの上限"))
+    assert out["status"] == "ok" and "CD の結果: 未確定" in posted[0][1] and "公開は CD が担う" in posted[0][1]
+    import step_result
+
+    with pytest.raises(step_result.StepError):
+        _record(monkeypatch, tmp_path, version="1.2.3")
+
+
+def test_cd_result_reads_the_merge_commit_of_the_last_pr_not_the_branch_tip(monkeypatch):
+    """直接本番へマージする経路は record --merged と同じリビジョン（最後の PR のマージのコミット）を読む。読めなければ先端で代えない。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod, "git", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "tip\n", ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: f"merge-{n}")
+    a = argparse.Namespace(base="main", head=None, prs=[3, 7])
+    assert mod._cd_revision(".", a) == "merge-7"
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: None)
+    assert mod._cd_revision(".", a) == ""
+    assert mod._cd_revision(".", argparse.Namespace(base="main", head=None, prs=None)) == "tip"

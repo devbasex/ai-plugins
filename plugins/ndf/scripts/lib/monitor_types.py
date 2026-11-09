@@ -40,16 +40,16 @@ def _agent_runtime(agent: str) -> str:
 # import / 監視プロセスがクラッシュしないようにする。
 # (codex round 5 指摘: import 時の `int(os.environ.get(...))` は
 #  `MONITOR_STALL=abc` のような誤設定で落ちてしまうため)
-DEFAULT_TIMEOUT = limits.PHASE_TIMEOUT[limits.DEFAULT_PHASE]
-DEFAULT_STALL = limits.DEFAULT_STALL
-DEFAULT_STALL_AGENT_BUILTIN = limits.AGENT_STALL
-DEFAULT_POLL = 15  # 15 sec — env `MONITOR_POLL` で上書き可
+DEFAULT_TIMEOUT = limits.phases()[limits.DEFAULT_PHASE]
+DEFAULT_STALL = limits.stall_default()
+DEFAULT_STALL_AGENT_BUILTIN = limits.stalls()
+DEFAULT_POLL = limits.value("monitor-types.poll", "interval")  # 15 sec — env `MONITOR_POLL` で上書き可
 # 心拍の間隔（秒）。待つ側が心拍のファイルの更新時刻を今にする間隔で、見回りの間隔（`DEFAULT_POLL` / `MONITOR_POLL`）とは
 # 別の定数である（cross-refactoring の #1743 決定 3）。`monitor.py` と cross-refactoring の `process.py` がここから読む。
 HEARTBEAT_SECONDS = 15
 # result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
-RESULT_AGE_GRACE = 30
+RESULT_AGE_GRACE = limits.seconds("monitor-types.result-age-grace")
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
     "1",
@@ -62,24 +62,6 @@ DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in
 # env を safe に int parse する。非数値時は warn を stderr に出して fallback 値を返す。
 # 上限の表と同じ規則で読むため、表の側の実装を使う。
 _safe_int_env = limits.safe_int_env
-
-
-def _agent_stall_default(agent: str) -> int:
-    """agent ごとの既定 stall timeout を解決する。
-
-    解決順（`limits.stall_timeout`）:
-      1. env `MONITOR_STALL_<AGENT>` (per-agent 明示)
-      2. env `MONITOR_STALL` (全 agent 共通)
-      3. 上限の表の `AGENT_STALL[agent]`
-      4. `DEFAULT_STALL` (表に無い agent)
-
-    env は **呼び出し時** に再評価し、非数値なら warn を出して表の値に戻す。
-
-    **席の名前はランタイム名へ直してから引く**（#727）。上限の表も担当別の環境変数も
-    ランタイム名で引くため、`claude-2` のまま渡すと表に無い担当として `DEFAULT_STALL`
-    へ落ち、1 席目より早く無進捗と判定される。
-    """
-    return limits.stall_timeout(_agent_runtime(agent))
 
 
 # `--tmp-dir` で明示指定された一時ディレクトリ。CLI の解析時にだけ設定する。
@@ -247,4 +229,4 @@ def heartbeat(path: "Optional[os.PathLike[str] | str]"):
         yield
     finally:
         stop.set()
-        thread.join(timeout=1.0)
+        thread.join(timeout=limits.seconds("monitor-types.thread-join"))

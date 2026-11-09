@@ -84,10 +84,6 @@ def _origin_tip(repo) -> str:
     return _run("rev-parse", HEAD_BRANCH, cwd=repo["origin"])
 
 
-def _no_comment(patch_lib):
-    patch_lib("publish_plan_comment", lambda state: None)
-
-
 # ---------- AC-1 / AC-2: 判定は 1 か所 ----------
 
 
@@ -136,7 +132,6 @@ def _published_run(tmp_path, repo, patch_lib, cmd_setup=None):
     _change(work, "src/b.py", 2, "by-I-002")
     c2 = commit_with_trailers(work, "I-002", item_trailers("I-002"))
     path = _state(tmp_path, work, base, [_item("I-001", 1, "src/a.py", c1), _item("I-002", 2, "src/b.py", c2)])
-    _no_comment(patch_lib)
     return path, c1
 
 
@@ -243,7 +238,6 @@ def test_the_push_never_forces(publish, patch_lib, tmp_path, repo):
     path = _state(tmp_path, repo["work"], base, [], phase="final")
     seen: list[list[str]] = []
     patch_lib("_push_with_credential_fallback", lambda args, cwd: seen.append(list(args)))
-    _no_comment(patch_lib)
 
     publish.push_head(read_state(path))
 
@@ -392,7 +386,7 @@ def test_a_conflict_ejects_only_the_item_whose_commit_conflicted(undo, ledger, t
         assert f"by-{kept}" in (work / FILES_1237[kept]).read_text(encoding="utf-8")
     assert "I-002 の取り消しで" in items["I-004"]["failure_reason"]
     state["final_gate"]["status"] = "passed"
-    assert ledger.adoption_confirmed(state) and ledger.remaining_count(state) == 3
+    assert ledger.adoption_confirmed(state) and sum(1 for i in state["items"] if ledger.is_live(i)) == 3
 
 
 def test_drops_after_an_ejecting_drop_keep_the_history_bounded(undo, tmp_path, repo):

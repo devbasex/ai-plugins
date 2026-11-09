@@ -23,7 +23,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib import queue  # noqa: E402
+from supervise_lib import queue, release_templates  # noqa: E402
 from test_supervise_pace_auto import load, sprint_state, steps_of  # noqa: E402
 from test_supervise_pace_manual import commit_all  # noqa: E402
 
@@ -173,7 +173,7 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
 def test_a_passed_verify_keeps_the_order(tmp_path):
     """AC4: 確認が 0 なら今と同じ順で続き、マージの後にリリース記録を書く（#1870）。"""
     res, ran = run_promote(tmp_path, "true")
-    assert ran == ["prepare", "mvv", "note", "promote", "record"] and res["items"][0]["result"] == "完了", res
+    assert ran == ["prepare", "mvv", "note", "promote", "cd-result", "record"] and res["items"][0]["result"] == "完了", res
 
 
 @pytest.mark.parametrize("pace", ["auto", "fast"])
@@ -221,7 +221,7 @@ def test_normal_keeps_the_promote_plan(tmp_path):
     """AC11・I6: --pace 無しの昇格のプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), None)
     ids = [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]]
-    assert ids == ["promote", "promote-approved", "record", "judge-record"]
+    assert ids == ["promote", "promote-approved", "cd-result", "record", "judge-record"]
     assert verify_steps(waves) == [] and "導入の確認" not in [w["name"] for w in waves]
 
 
@@ -281,7 +281,8 @@ def test_the_promote_plan_records_after_the_merge(tmp_path, pace):
     """#1870 AC2: 昇格の PR のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
     steps = {s["id"]: s for s in load(wave(waves, "本番")["plans"][0])["steps"]}
-    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "record"
+    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
+    assert steps["cd-result"]["next"] == "record"
     rec = steps["record"]
     assert "release-steps.py record --promote --head develop --base main --prs " in rec["cmd"]
     assert rec["on_fail"] == "judge-record" and rec["pr_from"] == "release_pr_url"
@@ -325,7 +326,21 @@ def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
     """#1875 1875-3: 届けない経路（delivery が []）だけなら今どおり --record-pr 0 で、リリース後テストを置かない。"""
     steps = close_steps(tmp_path, [])
     close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr 0 " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
+    assert "--record-pr 0 " in close["cmd"]
+    assert not {"config-save", "release-verify", "config-check", "config-check-on-fail"} & {s["id"] for s in steps}
+
+
+@pytest.mark.parametrize("rows", [[STG, PRD], [STG]], ids=["record", "queue-record"])
+def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
+    """#2401 の受け入れ条件 2・4（I4・I5）: リリース後テストの前に控えを取り、後で比べる。リリース後テストが失敗しても
+    比べて止まり、比べるステップは on_fail を持たない（0 以外で振り返りへ進まない）。起動指示は導入しないことの要点を持つ。"""
+    by = {s["id"]: s for s in close_steps(tmp_path, rows)}
+    save, check, on_fail = by["config-save"], by["config-check"], by["config-check-on-fail"]
+    assert save["cmd"].endswith("user-config-save --dir {state_dir}")
+    assert check["cmd"] == on_fail["cmd"] and check["cmd"].endswith("user-config-check --dir {state_dir}")
+    assert by["release-verify"]["on_fail"] == "config-check-on-fail" and on_fail["on_exit"] == {"0": "stop"}
+    assert all(s["type"] == "run" and "on_fail" not in s and "stage" not in s for s in (save, check, on_fail))
+    assert release_templates.NO_USER_INSTALL in by["release-verify"]["prompt"]
 
 
 def chain(steps) -> list[str]:
@@ -355,9 +370,9 @@ DEPTH_TAIL = [
 @pytest.mark.parametrize(
     "rows, want",
     [
-        ([STG, PRD], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([STG, PRD], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
         ([], ["merge", "retro", "close", "refine"]),
-        ([STG], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([STG], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
     ],
     ids=["record", "no-delivery", "queue-record"],
 )

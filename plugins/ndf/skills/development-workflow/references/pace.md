@@ -125,10 +125,11 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | `areas[].name` / `common` / `paths` | 文字列 / bool / glob の配列 | name と paths は許さない | 領域。`common` が真なら重点領域で、触った Pull Request は `common_weight` 点。流出不具合の重なりはこの単位で数える |
 | `boundary_paths` | glob の配列 | 機械のチェックは無し | レッドラインに当たるファイル |
 | `triggers.score` / `common_weight` / `lines` / `escapes` / `hours` | 数 | 15 / 2 / 5000 / 2 / 24 | トリガーの閾値 |
-| `loop.enabled` | bool | 偽（ループを断る） | 開発ループ（`--loop`）を許すか。周回は `auto` で組むため `auto` 節も要る。手順は [loop.md](loop.md) |
-| `loop.budget.laps` / `usd` / `hours` | 正の数か `null` | 無制限（書かない・`null`） | ループの予算（周回の数・費用・動いていた時間）。書いた単位だけ効き、予算以上になった周回の境で止まる |
+| `loop.enabled` | bool | 偽（ループを断る） | 開発ループ（`--loop`）を許すか。ループの 1 回は `auto` で組むため `auto` 節も要る。手順は [loop.md](loop.md) |
+| `loop.budget.laps` / `usd` / `hours` | 正の数か `null` | 無制限（書かない・`null`） | ループの予算（ループの回数・費用・動いていた時間）。書いた単位だけ効き、予算以上になったループの 1 回の境で止まる |
 | `loop.same_failure` | 1 以上の整数 | 2 | 同じ失敗（課題の組・計画の種類・止まったところ）が続いたら止まる回数 |
 | `loop.max_issues` | 1 以上の整数 | 3 | 1 周の課題の上限。候補は `loop start` の実行環境の調査が出し、書くのは人である |
+| `parallel.answer_limit.plan` / `lane` | 正の整数 | 8 / 3（正の整数でない値は既定へ戻して警告を出す） | 並列の計画の答え待ちの閾値。超えるとレーンが区切りで止まる。手順は [parallel.md](parallel.md) の「答え待ちの停止」 |
 
 **`loop` 節は `read_loop` だけが読む。** 節の形が誤っていても、`fast` / `auto` / トリガー / MVV 判定は今どおり動き、
 ループの開始だけが断る。
@@ -151,6 +152,9 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `--mvv <ファイル>` を渡すと、マイルストーンからコピーせずにそのファイルを使う。承認済みのプロジェクト MVV がある
 リポジトリ（`--root`）では、`init` がその参照（版・sha256）を状態に書き、スプリント MVV を `project-mvv.py vet --kind sprint` に
 通す。プロジェクト MVV のレッドラインを緩める・Value を打ち消すスプリント MVV は、状態を書かずに箇所を示して止まる（終了コード 1）。
+照合の入力（判定の指示・共通原則・プロジェクト MVV・照合する本文）が前と 1 字も変わらず、同じ入力の最新の判定が「従う」なら、
+`init` は LLM を呼ばずにその判定を使い、照合の記録へ再利用の行（`reused_from` に元の判定の時刻）を足す。入力が変わったとき・
+最新の判定が「従う」でないときは LLM で判定し直す。`project-mvv.py vet` は毎回 LLM で判定するため、判定をやり直したいときに打つ。
 `--milestone` も `--mvv` も渡さなければ、プロジェクト MVV だけで判定する（承認ゲート `MVV` の記録は要らない）。**承認の後に MVV を書き換えると
 ハッシュが食い違い、判定は利用者の承認へ戻る。**
 
@@ -212,7 +216,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 届けない経路だけでなければ経路にかかわらず `{queue_record}` になる。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
 課題を閉じる PR とそれを参照する PR から、段階が本番かデプロイなしのリリース記録を置いた PR を探して埋め、`release-verify` と `close` が
 同じ番号を受ける。見つからない・2 つ以上のスプリントにある・GitHub を読めなければ、まとめを流さずに止まり（queue の結果は `stopped`、
-開発ループの周回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
+開発ループの 1 回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
 
 ## リリースの経路からステージを組む
 
@@ -244,13 +248,15 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 | `delivery` の行 | 経路 | 検査の後に置くステージ |
 | --- | --- | --- |
-| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で昇格の行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く） |
+| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で昇格の行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く）。ベースブランチが本番チャネルなら、続けて「CD の結果」: プラン `cd-result`（`cd-result` → `record --merged`） |
 | `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 昇格のプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、リリース承認ゲートの後にマージする。後片付けはしない） |
-| `kind: auto`・`branch` が無いか別のブランチ、`kind: manual`、`versioned: true` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
+| `kind: auto`・`branch` が無いか別のブランチ、`kind: manual` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
 | `delivery: []` | `none` | 置かない |
 | `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
 
-「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランは `normal` では `promote`（承認の引数無し。
+`versioned` は版を持つかを表し、経路を変えない。`kind: auto`・`versioned: true` の行も上の表のとおりに進む。
+
+「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランの `promote` の後は `cd-result` → `record` と進み、CD の結果が失敗なら `record` が書いた後に止まる。昇格のプランは `normal` では `promote`（承認の引数無し。
 リリース承認ゲートで終える）→ 承認の後に `resume` に `--from promote=promote-approved` を足して続ける、`fast` / `auto` では `verify`（導入の確認）→
 `prepare`（Pull Request と承認資料）→ `mvv`（リリース承認ゲートの MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、
 `note` か `promote` が落ちたら `handoff` が承認ゲートへ落とす。`fast` / `auto` の `promote` は、`mvv` が読んだのと同じ
@@ -431,7 +437,7 @@ Pull Request のコメント）の 3 つがそろったときに限る。** レ�
 （`new check --since-last`。`scope: since`）も、PR を指す検査（`new check --pr N`。`record --target-pr N`・`scope: pr`）も、
 マージ・変更なし・落ちたのどの終わり方でも 1 行を書く。** PR を指す検査の行は `pr` と `to` を持たないため、トリガーの範囲の
 起点にも、範囲から外す PR にもならない。承認ゲートで止まった間と、計画の外から止められた計画は書かない。
-検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf` →
+検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `~/.claude/ndf/state` →
 `${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
 
 | `kind` | いつ足すか | 主な列 |

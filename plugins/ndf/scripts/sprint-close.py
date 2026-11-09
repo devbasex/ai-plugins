@@ -35,9 +35,14 @@ closed / already_closed / failed / kept_open / closed_unverified（既に閉じ�
 閉じる条件 1・2 を見ずに --issues の課題を閉じる（条件 3 の振り返りは、比べるリリース記録が無いため行があれば満たす）。--issues と一緒のときだけ受ける。
 `--record-pr unknown` は「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。
 今のまとめのプランは組まず、記録の PR を流す時点に `{queue_record}` で解決する）。リリース記録を読まず、どの課題も閉じず、ボードも書かずに --issues の課題を理由つきの
-kept_open で返す（終了コード 0）。--issues と一緒のときだけ受ける。
-終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
-閉じる課題が 0 件・--record-pr 0 / unknown に --issues が無い / 3 = 呼び出しの誤り。
+kept_open で返す（承認ゲート・終了コード 10）。--issues と一緒のときだけ受ける。
+閉じる対象（2 で集めた課題）のうち閉じなかった課題（kept_open・closed_unverified・failed）は、gaps に 1 件ずつ
+（kind は issue、name は <リポジトリ>#<番号>、reason は項目の理由）載せる。参照だけの課題（5）は items に残し、
+gaps と状態に入れない（#2337 の I14）。
+終了コード: 0 = 閉じる対象をすべて閉じた（ok）/ 1 = 失敗あり（stopped。棚卸しへ進まない）/
+10 = 失敗は無いが閉じなかった課題がある・記録の置き場が分からない（gate。プランは棚卸しへ進む）/
+2 = 一覧が取れない・閉じる課題が 0 件・--record-pr 0 / unknown に --issues が無い・呼び出しの誤り。
+実行の核（lib/run_core.py）を通る。
 """
 
 from __future__ import annotations
@@ -55,8 +60,10 @@ import deps  # noqa: E402
 
 deps.require("md", "locks", "durable", "waits")
 from step_result import (
+    EXIT_GATE,
     EXIT_PRECONDITION,
     EXIT_UNREADABLE,
+    EXIT_VIOLATION,
     StepError,
     emit,
     git_root,  # noqa: E402
@@ -69,14 +76,16 @@ import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
+import run_core  # noqa: E402
 import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#2227）
 
 from dist_record import parse_record, released  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 sys.path.insert(0, str(HERE))
+import limits  # noqa: E402  上限の宣言（#2343）
 from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
+from sprint_close_lib.summary import close_summary, not_closed_gaps  # noqa: E402
 from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
-    FINAL_GAP_LEAD,
     NO_BASE,
     STAGE_RETRO,
     STAGE_VERIFY,
@@ -88,7 +97,7 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（手で打つ入口と、#2230 より前に組んだまとめのプランが渡す。#1875）
 UNKNOWN_REASON = "リリース記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
-LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
+LOCK_TIMEOUT = limits.seconds("sprint-close.issue-lock")  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
 IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）
@@ -334,20 +343,6 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
     return close_one(ctx, repo, n)
 
 
-def _close_summary(items, prs, dry_run, referenced):
-    kinds = ("closed", "already_closed", "failed", "closed_unverified", "kept_open", "would_close")
-    count = {k: sum(1 for i in items if i["result"] == k) for k in kinds}
-    metrics = {"issues": len(items), **count, "referenced_only": referenced, "prs": len(prs)}
-    summary = (
-        f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
-        f"失敗 {count['failed']} 件・閉じているが条件を満たさない {count['closed_unverified']} 件・"
-        f"開いたまま {count['kept_open']} 件（うち参照だけ {referenced} 件）"
-    )
-    if dry_run:
-        summary += f"（試行。閉じる予定 {count['would_close']} 件）"
-    return count, metrics, summary
-
-
 def _stop_no_issues(prs, refs):
     """スプリントの PR を読んだのに閉じる課題が 0 件。課題もボードも書かずに止まる（参照の状態は読まない）。"""
     seen = f"（PR が参照した番号: {' '.join(f'#{n}' for n in refs)}）" if refs else ""
@@ -379,28 +374,21 @@ def _collect_close_issues(a, root, record_repo, prs):
     return issues, refs
 
 
-def _emit_close_result(a, items, notes, metrics, summary, count, decisions):
-    """結果を出す: 失敗があれば止める → 記録の置き場が分からなければ閉じない旨 → 通常（最終工程の記録の欠けを案内）。"""
+def _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions):
+    """結果を出す: 失敗があれば止める（1）→ 記録の置き場が分からない・閉じなかった課題があれば承認ゲート（10）→ ok。"""
+    gaps = not_closed_gaps(targets)
+    out = items + notes
     if count["failed"]:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                summary,
-                items + notes,
-                metrics,
-                next="失敗した課題の cmd でやり直す。棚卸しへ進まない",
-                decisions=decisions,
-            )
-        )
+        nxt = "失敗した課題の cmd でやり直す。棚卸しへ進まない"
+        emit(result(TOOL, "stopped", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_VIOLATION)
     if a.record_pr == RECORD_UNKNOWN:
         summary = f"記録の置き場が分からないため閉じない（リリースの経路が雛形でも昇格でもない）: {summary}"
         nxt = "リリース記録とリリース後テストの記録を確かめ、受け入れ条件を満たした課題を手で閉じる"
-        emit(result(TOOL, "ok", summary, items + notes, metrics, next=nxt, decisions=decisions))
-    nxt = None
-    if any(FINAL_GAP_LEAD in (i.get("reason") or "") for i in items):
-        nxt = "最終工程の記録が無い課題は、その工程（振り返りなど）を通してから打ち直す。前の版で工程を通った課題は確かめて手で閉じる"
-    emit(result(TOOL, "ok", summary, items + notes, metrics, next=nxt, decisions=decisions))
+        emit(result(TOOL, "gate", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_GATE)
+    if gaps:
+        nxt = "閉じなかった課題は、条件を満たす工程（振り返り・リリース後テストなど）を通してから打ち直すか、確かめて手で閉じる"
+        emit(result(TOOL, "gate", summary, out, metrics, next=nxt, decisions=decisions, gaps=gaps), EXIT_GATE)
+    emit(result(TOOL, "ok", summary, out, metrics, decisions=decisions))
 
 
 def cmd_close(a):
@@ -421,22 +409,23 @@ def cmd_close(a):
     notes = ctx.notes
     for repo, n in issues:
         items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
+    targets = list(items)
     refs_items = referenced_items(root, record_repo, refs, issues)
     items += refs_items
 
-    count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
+    count, metrics, summary = close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     metrics["final_stage"] = a.final_stage
     decisions = [
         {"decision": f"最終工程を {a.final_stage} として判定した", "basis": f"--final-stage {a.final_stage}（省略時は{STAGE_RETRO}）"}
     ]
-    _emit_close_result(a, items, notes, metrics, summary, count, decisions)
+    _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions)
 
 
 class Parser(argparse.ArgumentParser):
-    def error(self, message):  # 呼び出しの誤りは 3
+    def error(self, message):  # 呼び出しの誤りは 2（終了コードの表の「呼び出しの誤り」）
         self.print_usage(sys.stderr)
         print(f"{self.prog}: {message}", file=sys.stderr)
-        raise SystemExit(EXIT_PRECONDITION)
+        raise SystemExit(EXIT_UNREADABLE)
 
 
 def number_list(s):
@@ -495,4 +484,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_core.main("scripts/sprint-close.py", main)

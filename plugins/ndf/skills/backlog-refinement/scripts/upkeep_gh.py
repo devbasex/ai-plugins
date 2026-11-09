@@ -8,13 +8,14 @@ import re
 import sys
 import time
 
+import limits
 import post_queue
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError
 
 # 待ちの既定。倍々の起点は、作成の二次的な制限で実測した 60 秒の間隔に合わせる。
 DOUBLING_START = 60.0
-DEFAULT_MAX_WAITS = 8
-DEFAULT_MAX_WAIT = 900.0
+DEFAULT_MAX_WAITS = limits.value("backlog-refinement.gh-limit", "attempts") - 1
+DEFAULT_MAX_WAIT = limits.value("backlog-refinement.gh-limit", "per_call")
 
 
 def _decode_concat(text: str) -> list:

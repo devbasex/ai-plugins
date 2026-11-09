@@ -10,7 +10,7 @@
     "design-glossary": "usage: supervise.py design-glossary [-h] [--mode MODE] [--root ROOT] --out OUT",
     "note": "usage: supervise.py note [-h] --report REPORT [--next NEXT] [--section SECTION] doc",
     "sync-check": "usage: supervise.py sync-check [-h] [--root ROOT] [--commit]",
-    "new sprint": "usage: supervise.py new sprint [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--production-branch PRODUCTION_BRANCH] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--scope PATH [PATH ...]] [--impl-timeout SECONDS] [--impl-stall SECONDS] [--refactor-budget-minutes MINUTES] [--version VERSION] [--name NAME] [--design DESIGN [DESIGN ...]] [--designed DESIGNED [DESIGNED ...]] [--pace {normal,fast,auto}] [--state STATE] [--absorb ISSUE:HOST [ISSUE:HOST ...]] [--level {patch,minor,major}]",
+    "new sprint": "usage: supervise.py new sprint [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--production-branch PRODUCTION_BRANCH] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--scope PATH [PATH ...]] [--impl-timeout SECONDS] [--impl-stall SECONDS] [--refactor-budget-minutes MINUTES] [--version VERSION] [--name NAME] [--design DESIGN [DESIGN ...]] [--designed DESIGNED [DESIGNED ...]] [--revise-note <課題>=<パス>] [--pace {normal,fast,auto}] [--state STATE] [--outside-plan 理由] [--absorb ISSUE:HOST [ISSUE:HOST ...]] [--level {patch,minor,major}]",
     "new impl": "usage: supervise.py new impl [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--impl-timeout SECONDS] [--impl-stall SECONDS] [--title TITLE] [--summary SUMMARY] [--prompt PROMPT] [--prompt-file PROMPT_FILE] [--files PATH [PATH ...]] [--after NAME [NAME ...]] [--changes CHANGES] [--branch BRANCH] [--escape-of ESCAPE_OF]",
     "new fix": "usage: supervise.py new fix [-h] [--worktree WORKTREE] [--issue ISSUE [ISSUE ...]] [--base BASE] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--title TITLE] [--summary SUMMARY] [--branch BRANCH] [--escape-of ESCAPE_OF]",
     "new check": "usage: supervise.py new check [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--scope PATH [PATH ...]] [--refactor-budget-minutes MINUTES] [--pr PR] [--since-last] [--id ID] [--final] [--since-ref SINCE_REF] [--review-only] [--sprint SPRINT]",
@@ -24,11 +24,11 @@
       "result": "- 結果: 完了"
     },
     "run gate": {
-      "exit": 0,
+      "exit": 10,
       "result": "- 結果: 関門"
     },
     "run stop": {
-      "exit": 3,
+      "exit": 1,
       "result": "- 結果: 止まった"
     },
     "example": {
@@ -86,6 +86,7 @@
       "exit": 0,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -113,6 +114,7 @@
       "exit": 0,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -120,6 +122,7 @@
       ],
       "item_keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -135,6 +138,7 @@
       "exit": 1,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "status",
         "summary",
@@ -165,6 +169,7 @@
       "exit": 10,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "next",
         "status",
@@ -211,6 +216,7 @@
       "exit": 20,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "next",
         "status",
@@ -235,6 +241,7 @@
       "exit": 3,
       "keys": [
         "items",
+        "lease",
         "metrics",
         "next",
         "status",

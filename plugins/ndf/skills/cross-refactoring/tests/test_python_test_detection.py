@@ -110,9 +110,8 @@ def test_a_production_test_named_file_is_not_a_probe_candidate(scope, repo):
 def test_a_location_with_only_production_test_named_files_is_not_a_test_location(scope, repo):
     """受け入れ条件 2・4・I4: ファイルでも配下でも当たらない。tests/ と同じ場所のテストは置き場所のまま。"""
     assert scope.test_locations(["lib/test_x.py", "lib", "colo", "tests"], str(repo)) == ["colo", "tests"]
-    assert scope.is_test_location("lib", str(repo)) is False
-    assert scope.is_test_location("colo/test_z.py", str(repo)) is True
-    assert scope.is_test_location("lib/test_new.py", str(repo)) is True, "まだ無いファイルは名前で読む"
+    assert scope.test_locations(["colo/test_z.py"], str(repo)) == ["colo/test_z.py"]
+    assert scope.test_locations(["lib/test_new.py"], str(repo)) == ["lib/test_new.py"], "まだ無いファイルは名前で読む"
 
 
 def test_the_probe_candidates_and_is_test_path_agree(scope, pathkinds, repo):

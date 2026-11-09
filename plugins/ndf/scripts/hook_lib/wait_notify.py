@@ -17,7 +17,9 @@ import sys
 import time
 from pathlib import Path
 
+import limits
 import wait_notice as wn
+from state_home import container_home
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 ENTRY = SCRIPTS / "wait-notify.py"
@@ -100,8 +102,7 @@ def read_transcript(path: str | None) -> tuple[str, str] | None:
 
 
 def state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "wait-notify"
+    return container_home() / "wait-notify"
 
 
 def _session_file(session: str) -> Path:
@@ -127,7 +128,7 @@ def claim(session: str, key: str, kind: str, window: bool, now: float | None = N
     directory.mkdir(parents=True, exist_ok=True)
     _prune(directory, now)
     path = _session_file(session)
-    with locks.exclusive(path, timeout=5):
+    with locks.exclusive(path, timeout=limits.seconds("hook.wait-notify-lock")):
         try:
             prev = json.loads(path.read_text(encoding="utf-8") or "{}")
         except (OSError, ValueError):

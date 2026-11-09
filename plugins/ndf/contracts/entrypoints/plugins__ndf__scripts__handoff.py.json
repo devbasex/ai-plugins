@@ -71,7 +71,10 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "2": "読めない・呼び出しの誤り（status stopped）"
+    "1": "失敗: 本体が無い・一致する本体が無い・節が無い・形の違反か行数の超過（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い: git の中でない・メインディレクトリに .ndf/ が無い（status stopped）",
+    "10": "承認ゲート: 一致する本体が 2 本以上（status gate。利用者へ聞く）"
   },
   "callers": [
     "plugins/ndf/scripts/lib/README.md",

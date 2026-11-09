@@ -3,7 +3,7 @@
 記録が有るかを確かめるだけの呼び出し（空の投稿キューの `count()` など）が、DBOS の import と
 耐久ワークフローの登録を起こさずに答えられるように分ける。`durable.py` はここの名前をそのまま出す。
 
-- 置き場: `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`（`records_dir`）
+- 置き場: `NDF_DBOS_DIR` → `<チェックアウトの根>/dbos`（`records_dir`。根は `state_home.checkout_home`。旧の置き場は読まない）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`（I17）
 """
 
@@ -13,6 +13,8 @@ import hashlib
 import os
 import re
 from pathlib import Path
+
+from state_home import checkout_home
 from typing import Mapping, Optional
 
 KIND_RE = re.compile(r"^[a-z][a-z0-9]*$")
@@ -22,13 +24,13 @@ class DurableError(RuntimeError):
     """耐久の記録を開けない・書けない・使い方の誤り。理由を文にして持つ。"""
 
 
-def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
-    """耐久の記録の置き場（モジュールの docstring の順）。"""
+def records_dir(env: Optional[Mapping[str, str]] = None, start: Optional[Path] = None) -> Path:
+    """耐久の記録の置き場（モジュールの docstring の順）。`start` を渡すと、作業ディレクトリでなくそのチェックアウトの根から決める
+    （別のリポジトリのレーンが計画の置き場の記録を読む。#2733）。"""
     env = os.environ if env is None else env
     if env.get("NDF_DBOS_DIR"):
         return Path(env["NDF_DBOS_DIR"])
-    base = env.get("XDG_STATE_HOME") or str(Path(env.get("HOME") or Path.home()) / ".local" / "state")
-    return Path(base) / "ndf" / "dbos"
+    return checkout_home(start, env=env) / "dbos"
 
 
 def key_hash(text: str, n: int = 12) -> str:
@@ -43,6 +45,6 @@ def launch_key(kind: str, identity: str) -> str:
     return f"{kind}-{key_hash(identity)}"
 
 
-def record_path(kind: str, identity: str) -> Path:
-    """耐久の記録のファイル。無ければ DBOS を起動せずに「積んでいない」と答えられる。"""
-    return records_dir() / f"{launch_key(kind, identity)}.sqlite"
+def record_path(kind: str, identity: str, start: Optional[Path] = None) -> Path:
+    """耐久の記録のファイル。無ければ DBOS を起動せずに「積んでいない」と答えられる。`start` は `records_dir` と同じ。"""
+    return records_dir(start=start) / f"{launch_key(kind, identity)}.sqlite"

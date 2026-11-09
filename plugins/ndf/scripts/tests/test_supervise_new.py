@@ -21,6 +21,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import commands, engine, pr as pr_step  # noqa: E402
+from supervise_lib.verify_steps import RECLAIM_LIMIT, with_margin  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sprint_args import new_sprint_args  # noqa: E402
@@ -169,7 +170,7 @@ SAMPLES = {
         {"base_branch": "main", "production_branch": "main"},
         [{"target": "本番（ECS）", "kind": "auto", "trigger": "CodePipeline", "branch": "main", "versioned": False}],
         [("merge", "merged-by-check")],
-        [],
+        ["CD の結果"],
     ),
     "project-trygroup-prd": (
         {"base_branch": "develop", "production_branch": "main"},
@@ -187,7 +188,7 @@ SAMPLES = {
             {"target": "api", "kind": "manual", "trigger": "sam deploy --config-env prod", "versioned": False},
         ],
         [("merge", "merged-by-check"), ("manual", "manual")],
-        ["リリース"],
+        ["CD の結果", "リリース"],
     ),
     "with-ai-dev": (
         {"base_branch": "main", "production_branch": "main"},
@@ -199,7 +200,7 @@ SAMPLES = {
 }
 
 # new close（fast のスプリントの終わり）が検査の後に置くステージ。経路 merge だけなら「導入の確認」が加わる（#1457）
-CLOSE_STAGES = {"carmo-system-console": ["導入の確認"], "carmo-contractors-app": ["導入の確認", "リリース"]}
+CLOSE_STAGES = {"carmo-system-console": ["導入の確認", "CD の結果"], "carmo-contractors-app": ["導入の確認", "CD の結果", "リリース"]}
 
 
 @pytest.mark.parametrize("name", list(SAMPLES))
@@ -590,8 +591,10 @@ def test_prod_release_records_after_the_release_and_never_goes_back_to_it(tmp_pa
     extra = ("--mvv", str(tmp_path / "s.json")) if mvv else ()
     steps = release_steps_of(root, tmp_path, "prod", "1.0.1", *extra)
     rec = steps["record"]
-    assert steps["release"]["next"] == "record" and rec["next"] == "verify"
-    assert rec["cmd"].endswith("release-steps.py record --version 1.0.1 --prs 1") and rec["pr_from"] == "release_pr_url"
+    assert steps["release"]["next"] == "cd-result" and steps["cd-result"]["next"] == "record" and rec["next"] == "verify"
+    assert "release-steps.py cd-result --base main --head release/v1.0.1 --out {state_dir}/work/cd-result.json" in steps["cd-result"]["cmd"]
+    assert "release-steps.py record --version 1.0.1 --prs 1 --cd-result {state_dir}/work/cd-result.json" in rec["cmd"]
+    assert rec["pr_from"] == "release_pr_url" and rec["on_exit"] == {"5": "stop"}
     assert rec["on_fail"] == "judge-record" and steps["judge-record"]["choices"] == ["record", "stop"]
     assert "record" not in steps["judge"]["choices"] and "record" not in steps["fix"]["inputs"]
     dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
@@ -607,7 +610,7 @@ def test_prod_release_passes_the_approval_material_and_stops_at_the_gate(tmp_pat
     steps = release_steps_of(root, tmp_path, "prod", "1.0.1", *extra)
     rel = steps["release"]
     assert rel["cmd"].endswith(f"--channel prod --approval {root}/issues/approval-ndf-v1.0.1.md")
-    assert rel["gate_next"] == ("handoff" if mvv else "end") and rel["next"] == "record"
+    assert rel["gate_next"] == ("handoff" if mvv else "end") and rel["next"] == "cd-result"
     assert ("handoff" in steps) == mvv
     dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")["release"]
     assert "--approval" not in dev["cmd"] and "gate_next" not in dev
@@ -710,6 +713,9 @@ def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
     assert approved["next"] == merge["next"] == "end"
     # CI の基盤待ちは judge を通らずに止まり（#1645）、ベースブランチとの衝突は取り込みへ戻る（#1917）
     assert merge["on_exit"] == approved["on_exit"] == {"75": "stop", "4": "base-return"}
+    # マージに続く後片付けのテスト環境の回収の分を足す（#2660 の決定 8）
+    ci_wait = int(merge["cmd"].split("--timeout ")[1].split()[0])
+    assert merge["timeout"] == approved["timeout"] == with_margin(ci_wait) + RECLAIM_LIMIT
 
 
 def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
@@ -904,3 +910,82 @@ def test_check_new_check_reports_since_last_with_pr_before_missing_id(capsys):
     with pytest.raises(SystemExit):
         new_args.check_new(argparse.ArgumentParser(prog="p"), new_ns("check", since_last=True, pr="5", review_only=True, final=True))
     assert "--since-last と --pr は同時に渡せない" in capsys.readouterr().err
+
+
+# --- #2623: デプロイとリリースを CD で解く -----------------------------------------
+
+
+def cd_sprint(tmp_path, wt, rows, *extra, name="r"):
+    """宣言の形ごとの作業用のリポジトリで new sprint を打ち、(目録, プランの並び) を返す。"""
+    root = plain_repo(tmp_path / name if (tmp_path / name).mkdir() is None else tmp_path)
+    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
+    if rows is not None:
+        (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
+    (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
+    out = tmp_path / name / "m"
+    p = cli(*new_sprint_args(root, out, name="m6", issue=("216",), version=None), *extra, cwd=root)
+    assert p.returncode == 0, p.stderr
+    manifest = json.loads((out / "sprint.json").read_text())
+    plans = [json.loads(Path(x).read_text()) for e in manifest["ステージ"] for x in e.get("plans", [])]
+    return manifest, plans, json.loads(p.stdout)
+
+
+TWO_BRANCHES = {"base_branch": "develop", "production_branch": "main"}
+ONE_BRANCH = {"base_branch": "main", "production_branch": "main"}
+CD_ROW = {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "branch": "main", "versioned": False}
+HAND_ROW = {"target": "aws", "kind": "manual", "trigger": "cdk deploy", "versioned": False}
+
+
+@pytest.mark.parametrize("wt", [TWO_BRANCHES, ONE_BRANCH])
+def test_cd_form_has_no_step_that_bumps_tags_or_publishes(tmp_path, wt):
+    """受け入れ条件 2・I1: CD の形のプランに版上げ・変更履歴・タグ・GitHub Release のコマンドが無い。"""
+    _, plans, _ = cd_sprint(tmp_path, wt, [CD_ROW])
+    cmds = [s.get("cmd") or "" for p in plans for s in p["steps"]]
+    for word in ("release-steps.py bump", "release-steps.py changelog", " tag ", "release create", "release-steps.py publish"):
+        assert not [c for c in cmds if word in c], word
+
+
+def test_promote_plan_reads_the_cd_result_after_the_merge_and_stops_on_failure(tmp_path):
+    _, plans, _ = cd_sprint(tmp_path, TWO_BRANCHES, [CD_ROW])
+    steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（昇格）")["steps"]}
+    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
+    assert "cd-result --base main --head develop" in steps["cd-result"]["cmd"] and steps["cd-result"]["next"] == "record"
+    assert "--cd-result {state_dir}/work/cd-result.json" in steps["record"]["cmd"] and steps["record"]["on_exit"] == {"5": "stop"}
+
+
+def test_direct_production_branch_gets_the_cd_result_stage(tmp_path):
+    """決定 9: ベースブランチが本番チャネルなら昇格のプランが無いため、CD の結果のステージが記録を書く。"""
+    manifest, plans, _ = cd_sprint(tmp_path, ONE_BRANCH, [CD_ROW])
+    assert [w["name"] for w in manifest["ステージ"]][-1] == "CD の結果"
+    steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（CD の結果）")["steps"]}
+    assert "cd-result --base main --prs {queue_prs} --out" in steps["cd-result"]["cmd"] and "--head" not in steps["cd-result"]["cmd"]
+    assert "record --merged --base main" in steps["record"]["cmd"]
+
+
+def test_a_base_channel_cd_on_another_branch_has_no_cd_result_stage(tmp_path):
+    row = {**CD_ROW, "branch": "develop"}
+    manifest, _, _ = cd_sprint(tmp_path, TWO_BRANCHES, [row])
+    assert "CD の結果" not in [w["name"] for w in manifest["ステージ"]]
+
+
+def test_guidance_goes_to_the_manifest_and_items_without_changing_the_stages(tmp_path):
+    """受け入れ条件 9・13: 案内の有無でステージの数と終了コードが変わらない。"""
+    without, _, res_a = cd_sprint(tmp_path, TWO_BRANCHES, [{**HAND_ROW, "manual_reason": "人が確かめる"}], name="a")
+    guided, _, res_b = cd_sprint(tmp_path, TWO_BRANCHES, [HAND_ROW], name="b")
+    assert "CD の案内" not in without and guided["CD の案内"]["rows"] == ["aws"]
+    assert [w["name"] for w in without["ステージ"]] == [w["name"] for w in guided["ステージ"]]
+    assert [i for i in res_b["items"] if i.get("kind") == "cd-guidance"] and not [
+        i for i in res_a["items"] if i.get("kind") == "cd-guidance"
+    ]
+    assert len(res_b["items"]) == len(res_a["items"]) + 1
+
+
+def test_guidance_is_not_given_to_a_documentation_sprint(tmp_path):
+    """I7: documentation の提出は CD の定義に含めない。"""
+    manifest, _, res = cd_sprint(tmp_path, TWO_BRANCHES, None, "--mode", "documentation")
+    assert "CD の案内" not in manifest and not [i for i in res["items"] if i.get("kind") == "cd-guidance"]
+
+
+def test_guidance_is_given_when_delivery_is_missing(tmp_path):
+    manifest, _, _ = cd_sprint(tmp_path, TWO_BRANCHES, None)
+    assert "delivery" in manifest["CD の案内"]["missing"]

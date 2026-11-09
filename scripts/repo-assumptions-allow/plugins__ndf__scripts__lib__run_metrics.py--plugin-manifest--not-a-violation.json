@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/run_metrics.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "NDF 自身のプラグインの版を読む箇所。対象リポジトリを指していない",
+  "count": 1
+}

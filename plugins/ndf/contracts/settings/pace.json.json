@@ -34,6 +34,9 @@
     },
     "verify": {
       "summary": "verify（読む箇所 plugins/ndf/scripts/lib/sprint_loop.py:102）"
+    },
+    "parallel": {
+      "summary": "並列の計画の答え待ちの閾値（answer_limit の plan と lane。無ければ既定の 8 と 3。正の整数でない値は既定へ戻して警告を出す）"
     }
   }
 }

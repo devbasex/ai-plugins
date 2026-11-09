@@ -262,28 +262,14 @@ def _failing_in(
     return still, readable, cut
 
 
-def failing_at(
-    work: str,
-    sha: str,
-    strategy: ts.Strategy,
-    ids: list[str],
-    timeout: int,
-    log_dir: pathlib.Path,
-    run: Runner,
-    started: Optional[float] = None,
-) -> Optional[list[str]]:
+def _failing_at(ctx: RerunContext, work: str, sha: str, ids: list[str]) -> Optional[list[str]]:
     """着手前の HEAD（`sha`）の一時のworktreeでも落ちる ID。作れない・読めなければ空（既存失敗とみなさない）。
 
     **上限で打ち切った suite があれば `None`**（見分けられない）。空にすると既存失敗が変更起因へ入るため。
     宣言（`.ndf/worktree.json` の `deps`）の依存の用意に失敗したときも `None` を返す。
-    依存の用意も上限 `timeout`（`started` から。走らせ直しと同じ 1 つ）の中で行い、使い切れば `None` を返す。
+    依存の用意も上限 `ctx.timeout`（`ctx.started` から。走らせ直しと同じ 1 つ）の中で行い、使い切れば `None` を返す。
     宣言にコンテナで走る suite があれば、一時の worktree はコンテナへ届かないため用意の前に `None` を返す。
     """
-    started = time.monotonic() if started is None else started
-    return _failing_at(RerunContext(strategy, timeout, log_dir, run, started), work, sha, ids)
-
-
-def _failing_at(ctx: RerunContext, work: str, sha: str, ids: list[str]) -> Optional[list[str]]:
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
@@ -446,9 +432,11 @@ def wait_check(
     上限に届いた・照会に失敗した（`None`）ときは `None` を返し、呼ぶ側は通さない（fail-closed）。
     `sleep` を省けばモジュールの `SLEEP`（テストが差し替える）。
     """
+    import limits
     import waits
 
-    waited = waits.wait_until(fetch, lambda v: v != "pending", max_wait=max_wait, sleep=sleep or SLEEP, on_wait=on_wait)
+    policy = limits.policy("test-triage.check-wait")._replace(seconds=max_wait)
+    waited = waits.wait_until(fetch, lambda v: v != "pending", policy=policy, sleep=sleep or SLEEP, on_wait=on_wait)
     value = waited.value if waited.done else None
     return (value if value != "pending" else None), float(waited.waited), int(waited.attempts)
 

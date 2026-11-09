@@ -54,7 +54,7 @@ def test_canonical_folds_only_the_old_gate_names(old, new):
 
 @pytest.mark.parametrize("mode", ["forward", "refuse"])
 def test_old_gate_name_is_accepted_whatever_the_mode_is(monkeypatch, capsys, mode):
-    """Factory のランナーが旧名を渡し続けるため、受け付けをやめる切り替えでも止まらない（決定 5）。"""
+    """Factory のランナーのエージェントが旧名を渡し続けるため、受け付けをやめる切り替えでも止まらない（決定 5）。"""
     monkeypatch.setattr(legacy_names, "MODE", mode)
     assert gate_answer.accept(OLD_RELEASE) == RELEASE
     assert capsys.readouterr().err.strip() == f"{OLD_RELEASE} は {RELEASE} へ改名した。{RELEASE} で呼ぶ"

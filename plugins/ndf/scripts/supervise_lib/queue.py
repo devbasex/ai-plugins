@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
 
+import lease_stage
 import legacy_values
+import parallel_hold
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
-from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
+import limits
+from supervise_lib.paths import queue_done_key, queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 from supervise_lib.queue_fill import FINISHED, fill_queue_pr, fill_release_version, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
@@ -111,10 +115,11 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
 
 NOT_RUN = "流さなかった"
 NO_REPORT = "報告なし"
+QUEUE_POLL, WAIT_POLL = limits.value("supervise.queue-poll", "interval"), limits.value("supervise.queue-wait-poll", "interval")
 
 
 def cmd_queue(
-    plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None, starts=None, rerun=None
+    plans: list[str], max_: int, poll: float = QUEUE_POLL, then=None, done: str | None = None, starts=None, rerun=None, restart=False
 ) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
@@ -131,7 +136,7 @@ def cmd_queue(
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
     記録を止めて頭から流す（完了か承認ゲートの記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
     キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
-    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
+    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。`restart`（`--from`）なら前の途中を止める（#2325）。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -139,31 +144,46 @@ def cmd_queue(
     prepared = _prepare_queue(all_plans, plans, done, max_)
     if isinstance(prepared, dict):
         return prepared
-    decl, done_path, seen, listing = prepared
+    decl, done_path, seen, changed = prepared
+    # launch の直後に回復したプランも prepare で答え待ちの停止を読むよう、launch の前から close の後まで立てる（#2707）
+    flow.Engine.queued = True
     try:
-        prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
-    except durable.DurableError as e:
-        return _not_started(str(e), max_, done_path)
-    try:
-        ref = durable.resolve(prefix)
-        if ref.action == "continue":
-            print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
-        args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
-        args["starts"] = starts or {}
-        args["rerun"] = list(rerun or [])
-        wid = durable.start(ref, flow.queue_workflow, args)
-        while True:
-            got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
-            for p in all_plans:
-                seen[p] = notify_attention(p, seen[p])
-            if got.kind != "timeout":
-                break
-        if got.kind != "done":
-            durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
-            raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
-        return got.value
+        try:
+            prefix = flow.launch_queue(done_path, max_, decl["resources"], restart or changed)
+        except durable.DurableError as e:
+            return _not_started(str(e), max_, done_path)
+        try:
+            return _drive_queue(durable, flow, prefix, _queue_args(stages, max_, done_path, decl, starts, rerun), all_plans, seen, poll)
+        finally:
+            durable.close()
     finally:
-        durable.close()
+        flow.Engine.queued = False
+
+
+def _queue_args(stages: list[list[str]], max_: int, done_path: Path, decl: dict, starts, rerun) -> dict:
+    """`queue_workflow` へ渡す入力。"""
+    args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
+    args["starts"] = starts or {}
+    args["rerun"] = list(rerun or [])
+    return args
+
+
+def _drive_queue(durable, flow, prefix: str, args: dict, all_plans: list[str], seen: dict, poll: float) -> dict:
+    """耐久ワークフロー `queue_workflow` を始めるか続け、終わるまで attention を知らせながら待つ。"""
+    ref = durable.resolve(prefix)
+    if ref.action == "continue":
+        print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
+    wid = durable.start(ref, flow.queue_workflow, args)
+    while True:
+        got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
+        for p in all_plans:
+            seen[p] = notify_attention(p, seen[p])
+        if got.kind != "timeout":
+            break
+    if got.kind != "done":
+        durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
+        raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
+    return got.value
 
 
 def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[str]], list[str]]:
@@ -174,8 +194,9 @@ def _normalize_stages(plans: list[str], then: list | None) -> tuple[list[list[st
 
 
 def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max_: int):
-    """宣言を読み、done を消して知らせ始める位置と前の一覧を読む。宣言の形が違えば _not_started の結果を返す。"""
+    """done の持ち主の鍵を取り（#2342）、宣言・知らせ始める位置・並びが変わったかを読む。宣言が違えば _not_started の結果。"""
     done_path = queue_done_path(plans, done)
+    lease_stage.hold("scripts/supervise.py", "queue", done=queue_done_key(done_path))
     try:
         decl = queue_decl_of([_read_plan(p) for p in all_plans])
     except DeclError as e:
@@ -183,7 +204,7 @@ def _prepare_queue(all_plans: list[str], plans: list[str], done: str | None, max
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
     seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
     listing = _read_listing(queue_plans_path(done_path))
-    return decl, done_path, seen, listing
+    return decl, done_path, seen, listing is not None and listing.get("plans") != all_plans
 
 
 def _read_plan(plan: str) -> dict:
@@ -245,7 +266,6 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
 
 def _release_skipped_by_condition(plan: str) -> bool:
     """「版」と「実行の条件」を持つリリースプランで、条件がデプロイ不要（skip_code）を返すか。
-
     条件で飛ぶデプロイは版を使わないため、版の照会・差し込みより先に条件を打つ。明示の版が既出でも止めない（#2164）。
     判定できないときと流すときは False（版を埋めてから流し、engine が条件を打ち直す）。"""
     try:
@@ -304,10 +324,9 @@ def blocked(plan: str, deps: list[str], items: list[dict], queued: list[str]) ->
 
 def plan_item(plan: str, out: dict) -> dict:
     """プランの耐久ワークフローの出力から、結果の JSON の items の 1 件を作り、報告を <プラン>.log へ書く。
-
     前提のプランで流さなかったプランの出力（`result` が流さなかった）は、そのまま item にする。"""
     if out.get("result") == NOT_RUN:
-        return {**out, "plan": plan}
+        return {**out, "plan": plan, **({"answer_hold": True} if parallel_hold.skip_of(out.get("reason")) else {})}
     rep = state_dir_of(plan) / "report.md"
     if "error" in out:
         print(f"supervise-queue: {plan} が例外で終わった: {out['error']}", file=sys.stderr, flush=True)
@@ -337,31 +356,37 @@ def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dic
 
 
 def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
-    """items から status・summary・metrics を組み立てる。"""
+    """items から status・summary・metrics と持ち主の鍵（`lease`。標準出力の結果と同じ形にする。#2342）を組み立てる。"""
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
     unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
-    status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
+    held = next((parallel_hold.skip_of(i.get("reason")) for i in items if i.get("answer_hold")), None)  # 答え待ちの停止（#2707）
+    status = "stopped" if stopped or unfilled else "gate" if gates or held else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 承認ゲート {len(gates)} / 止まった {len(stopped)}"
     if skipped:
         summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
-    nxt = "承認ゲートの計画の report.md を読んで提示する" if status == "gate" else None
-    return result(
-        "supervise-queue",
-        status,
-        summary,
-        items,
-        {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)},
-        next=nxt,
-    )
+    present = "承認ゲートの計画の report.md を読んで提示する"
+    nxt = present if status == "gate" else None
+    metrics = {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)}
+    if held:  # park の 1 行は status（止まった・承認ゲートの同居）に依らず metrics.park と next で渡す
+        metrics["answer_hold"] = held
+        metrics["park"] = park = _park_line(held, done_path)
+        nxt = f"{present}。続けて {park} を打つ" if gates else park  # 止まったプランと同居しても提示の指示を落とさない
+    return lease_stage.with_lease(result("supervise-queue", status, summary, items, metrics, next=nxt))
+
+
+def _park_line(held: dict, done_path: Path) -> str:
+    """答え待ちの停止で流さなかったレーンが打つ 1 行（`parallel.py park`）。"""
+    tool = Path(__file__).resolve().parent.parent / "parallel.py"
+    return f"python3 {shlex.quote(str(tool))} park {held['plan']} --lane {held['lane']} --done {shlex.quote(str(done_path))}"
 
 
 WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
 
 
-def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
+def cmd_wait(done: str, timeout: float, poll: float = WAIT_POLL, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
     """queue の終わり（done）か、queue が流す計画の attention の行まで待つ。(要約, 結果, 終了コード) を返す。
 
     計画の一覧と読み始める所は queue が done の隣に書いた <done>.plans.json から読む。知らせた attention の

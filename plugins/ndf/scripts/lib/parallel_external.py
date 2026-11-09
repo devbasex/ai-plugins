@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+import repo
 from gate_answer import RELEASE_GATE, canonical
 
 DIR_ENV = "NDF_ORGANIZER_DIR"
@@ -262,20 +263,25 @@ def record_presented(d: Path, seq: int, k: int, auto: bool) -> dict:
 
 
 def stages_of(root: Path, version: str, run=subprocess.run) -> list[str]:
-    """リリースが届いた段を GitHub で読む（head が `release/v<版>` の `main` 宛ての Pull Request）。"""
+    """リリースが届いた段を GitHub で読む（head が `release/v<版>` の本番のブランチ宛ての Pull Request）。
+
+    本番のブランチが決まらなければ Pull Request を照会せず、ブランチの有無だけを見る。"""
     if not version:
         return []
     head = f"release/v{version}"
-    got = run(
-        ["gh", "pr", "list", "--head", head, "--base", "main", "--state", "all", "--json", "state,url"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-    )
-    try:
-        pulls = json.loads(got.stdout or "[]") if got.returncode == 0 else []
-    except ValueError:
-        pulls = []
+    prod = repo.production_branch(root)[0]
+    pulls = []
+    if prod:
+        got = run(
+            ["gh", "pr", "list", "--head", head, "--base", prod, "--state", "all", "--json", "state,url"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            pulls = json.loads(got.stdout or "[]") if got.returncode == 0 else []
+        except ValueError:
+            pulls = []
     if any(p.get("state") == "MERGED" for p in pulls):
         return ["release_branch", "prod_pr_opened", "main_merged"]
     if pulls:
@@ -285,8 +291,11 @@ def stages_of(root: Path, version: str, run=subprocess.run) -> list[str]:
 
 
 def prod_pr_url(root: Path, version: str, run=subprocess.run) -> Optional[str]:
+    prod = repo.production_branch(root)[0]
+    if not prod:
+        return None
     got = run(
-        ["gh", "pr", "list", "--head", f"release/v{version}", "--base", "main", "--state", "merged", "--json", "url", "-q", ".[0].url"],
+        ["gh", "pr", "list", "--head", f"release/v{version}", "--base", prod, "--state", "merged", "--json", "url", "-q", ".[0].url"],
         cwd=root,
         capture_output=True,
         text=True,

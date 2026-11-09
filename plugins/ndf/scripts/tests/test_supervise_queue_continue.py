@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_supervise_queue import PY, SUPERVISE, Queue, run_step  # noqa: E402
-from test_supervise_resume import note  # noqa: E402
+from test_supervise_queue import PY, SUPERVISE, Queue, run_step, wait_for  # noqa: E402
+from test_supervise_resume import note, once_slow  # noqa: E402
 
 
 @pytest.fixture
@@ -108,3 +108,46 @@ def test_resume_keeps_the_start_of_a_finished_plan(tmp_path, env):
     stages, _, found = queue_resume.resume_targets(done)
     assert stages == [["d"], ["v"]]
     assert {t.plan: t.step for t in found}["d"] == "approve"
+
+
+def test_resume_with_from_after_a_kill_starts_from_the_given_step(tmp_path, env):
+    """受け入れ条件 7（#2325）: 強制終了で途中のまま残っても、--from は前の途中を止めて指定のステップから流す。"""
+    t, q = tmp_path, Queue(tmp_path, env)
+    g = q.plan("g", [run_step(once_slow(t, "g1"), "g1"), run_step(note(t, "g2"), "g2")])
+    q.kill_when_sleeping(g, "g1", g)
+
+    p, res = resume(q, "--from", "g=g2")
+
+    assert p.returncode == 0, p.stderr
+    assert (results(res), q.visits()) == ({"g": "完了"}, ["g1", "g2"])  # 前の途中（g1）を続けない
+    assert res["lease"]["outcome"] == "reclaimed"  # 強制終了した前の起動の持ち主の記録を引き取った
+
+
+def test_resume_without_from_after_a_kill_continues_the_previous_run(tmp_path, env):
+    """受け入れ条件 7: --from も --only も無い打ち直しは、今までどおり前の起動を続ける。"""
+    t, q = tmp_path, Queue(tmp_path, env)
+    g = q.plan("g", [run_step(once_slow(t, "g1"), "g1"), run_step(note(t, "g2"), "g2")])
+    q.kill_when_sleeping(g, "g1", g)
+
+    p, res = q.run(g)
+
+    assert p.returncode == 0, p.stderr
+    assert (results(res), q.visits()) == ({"g": "完了"}, ["g1", "g1", "g2"])
+
+
+def test_a_second_queue_on_the_same_done_stops_while_the_first_runs(tmp_path, env):
+    """受け入れ条件 4・6（#2316）: 同じ done を流すキューが生きている間、後から来たキューは続きとして流さずに止まる。"""
+    t, q = tmp_path, Queue(tmp_path, env)
+    g = q.plan("g", [run_step(once_slow(t, "g1"), "g1")])
+    first = q.spawn(g)
+    try:
+        wait_for(lambda: q.sleeping(g, "g1"))
+        p, res = resume(q)
+        assert p.returncode == 3, p.stderr
+        assert res["status"] == "stopped" and res["lease"]["outcome"] == "refused"
+        assert res["lease"]["holder_pid"] == first.pid and res["lease"]["holder_run"] and res["lease"]["holder_seen_at"]
+        assert "--run" not in res.get("next", "") and "kill" not in res.get("next", "")
+        assert q.visits() == ["g1"]
+    finally:
+        first.kill()
+        first.wait(timeout=10)

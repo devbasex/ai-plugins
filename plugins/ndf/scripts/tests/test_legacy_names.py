@@ -123,7 +123,9 @@ def test_old_state_script_gives_the_same_result_with_one_notice(tmp_path):
 def test_old_close_scripts_return_the_exit_code_of_the_new_one(old):
     new = run(SCRIPTS / "sprint-close.py", "--record-pr", "0")  # --issues が無い: 2
     got = run(SCRIPTS / old, "--record-pr", "0")
-    assert (got.returncode, got.stdout) == (new.returncode, new.stdout) and new.returncode == 2
+    # 実行ごとに変わる実行の識別子（run_id。#2337）を除いて比べる
+    strip = lambda out: {k: v for k, v in json.loads(out).items() if k != "run_id"}  # noqa: E731
+    assert (got.returncode, strip(got.stdout)) == (new.returncode, strip(new.stdout)) and new.returncode == 2
     assert notices(got.stderr) == [ln.rename_notice(old, "sprint-close.py")]
 
 

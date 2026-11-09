@@ -209,6 +209,7 @@ def test_dev2_keeps_the_dev1_prs(monkeypatch, world):
     seed = world["seed"]
     merge_into(seed, 50, "feat/dev2", "trunk")
     git(seed, "push", "-q", "origin", "HEAD:trunk")
+    git(world["work"], "pull", "-q", "origin", "trunk")  # dev.2 の worktree はその時点のベースブランチの先頭から作る
     changelog(mod, world, [50], "1.0.1-dev.2")
     notes(mod, world, [50], version="1.0.1-dev.2")
     sec = section(world)

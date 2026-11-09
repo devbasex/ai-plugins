@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from contracts_lib import limits_decl
 from contracts_lib.model import Contracts
 
 HEADER = """# NDF の契約の一覧: 読み手と書き手の逆引き
@@ -15,7 +18,7 @@ def _cell(xs) -> str:
     return "<br>".join(f"`{x}`" for x in xs) if xs else "—"
 
 
-def render(c: Contracts) -> str:
+def render(c: Contracts, root: Path | None = None) -> str:
     lines = [HEADER]
     lines += [
         "## 設定（`.ndf/`）",
@@ -41,11 +44,13 @@ def render(c: Contracts) -> str:
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for name, f in sorted(c.files.items()):
-        writers = [p for p, e in sorted(c.entrypoints.items()) if name in e["writes"]]
+        writers = [p for p, e in sorted(c.entrypoints.items()) if name in e["writes"]] + list(f.get("writers", []))
         readers = [p for p, e in sorted(c.entrypoints.items()) if name in e["reads"]] + list(f["skill_readers"])
         lines.append(f"| `{name}` | `{f['pattern']}` | {f['kind']} | {f['place']} | {_cell(writers)} | {_cell(readers)} |")
     lines += ["", "## 環境変数", "", "| 名前 | 誰が設定するか | 読むエントリポイント |", "| --- | --- | --- |"]
     for name, v in sorted(c.env.items()):
         users = [p for p, e in sorted(c.entrypoints.items()) if name in e["env"]]
         lines.append(f"| `{name}` | {v['set_by']} | {_cell(users)} |")
+    if root is not None:
+        lines += limits_decl.render_section(root, limits_decl.code_files(root))
     return "\n".join(lines) + "\n"

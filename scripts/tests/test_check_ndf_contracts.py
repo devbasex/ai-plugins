@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,7 @@ import sys
 from pathlib import Path
 
 import repo
+import run_core
 
 
 def main():
@@ -39,7 +41,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_core.main("scripts/tool.py", main)
 '''
 REPO_LIB = """import json
 from pathlib import Path
@@ -60,7 +62,7 @@ ENTRY = {
     "stdout": "none",
     "writes": ["out"],
     "reads": [],
-    "exit": {"0": "成功", "2": "引数の誤り"},
+    "exit": {"0": "成功", "2": "読めない・呼び出しの誤り"},
 }
 SETTING = {
     "file": "worktree.json",
@@ -70,6 +72,9 @@ SETTING = {
     "readers": ["plugins/ndf/scripts/lib/repo.py:read_worktree_decl"],
     "keys": {"base_branch": {"summary": "ベースブランチ"}},
 }
+
+
+LIMITS = {"version": 1, "policies": {"monitor.cli-margin": {"summary": "CLI の上限の差", "seconds": 120}}}
 
 
 def wj(p: Path, d: dict) -> None:
@@ -103,6 +108,8 @@ def tree(tmp_path: Path) -> Path:
     wj(c / "settings/worktree.json.json", SETTING)
     wj(c / "env/NDF_X.json", {"name": "NDF_X", "set_by": "user", "summary": "x"})
     wj(c / "files/out.json", {"name": "out", "pattern": "out.json", "kind": "result", "place": "worktree", "skill_readers": []})
+    wj(c / "limits.json", LIMITS)
+    shutil.copy(REPO / "plugins/ndf/scripts/lib/limits.py", s / "lib/limits.py")
     assert run(tmp_path, "--render")[0] == 0
     return tmp_path
 
@@ -237,9 +244,13 @@ def git(root: Path, *a: str) -> None:
     subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True)
 
 
-def _repo(tree: Path, ci_runs_check: bool) -> None:
+def _repo(tree: Path, ci_runs_check: bool, known=("env-undeclared",)) -> None:
     wf = tree / ".github/workflows/script-structure.yml"
     wf.parent.mkdir(parents=True)
+    chk = tree / "scripts/check-ndf-contracts.py"
+    if not chk.exists():
+        chk.parent.mkdir(exist_ok=True)
+        chk.write_text("ALLOW_KINDS = (" + "".join(f'"{k}", ' for k in known) + ")\n")
     wf.write_text("run: python3 scripts/check-ndf-contracts.py\n" if ci_runs_check else "run: python3 scripts/other.py\n")
     git(tree, "init", "-q")
     git(tree, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "base", "--allow-empty")
@@ -268,6 +279,8 @@ def test_renaming_an_allow_item_with_the_same_kind_and_name_passes(tree: Path):
     old = {"path": "plugins/ndf/scripts/tool.py", "name": "NDF_Y", "kind": "env-undeclared", "reason": "初版"}
     (tree / "scripts/contract-allow" / allow_file_name(old)).unlink()
     (tree / "plugins/ndf/scripts/tool.py").rename(tree / "plugins/ndf/scripts/tool2.py")
+    t2 = tree / "plugins/ndf/scripts/tool2.py"
+    t2.write_text(t2.read_text().replace('"scripts/tool.py"', '"scripts/tool2.py"'))
     for f in (tree / "plugins/ndf/contracts/entrypoints").glob("*.json"):
         f.unlink()
     wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool2.py.json", dict(ENTRY, path="plugins/ndf/scripts/tool2.py"))
@@ -287,9 +300,18 @@ def test_moving_two_allow_items_with_the_same_kind_and_name_offsets_both(monkeyp
     rows = {f"{p}.json": {"kind": "env-undeclared", "name": "NDF_Y", "path": p} for p in ("a", "b", "c", "d")}
     monkeypatch.setattr(ratchet, "_names_at", lambda *a: {"a.json", "b.json"})
     monkeypatch.setattr(ratchet, "_row_at", lambda root, sha, rel, name: rows[name])
+    monkeypatch.setattr(ratchet, "base_knows", lambda *a: True)
     now = [rows["c.json"], rows["d.json"]]
     assert ratchet.added(Path("."), "sha", "x", now, lambda r: f"{r['path']}.json") == []
     assert ratchet.added(Path("."), "sha", "x", [*now, dict(rows["c.json"], path="e")], lambda r: f"{r['path']}.json") != []
+
+
+def test_rows_of_a_kind_the_base_checker_does_not_know_are_not_counted(tree: Path):
+    """新しい検査の種類を入れる変更は、その種類の行を初めて置ける（#2337 の決定 6）。"""
+    _repo(tree, ci_runs_check=True, known=())
+    _add_allowed_violation(tree)
+    code, r = run(tree, "--base", "origin/develop")
+    assert code == 0 and r["metrics"]["ratchet"] == "checked", r
 
 
 def test_first_version_before_ci_runs_the_check_is_initial(tree: Path):
@@ -896,3 +918,155 @@ def test_load_stops_at_the_first_bad_item_in_name_order(tmp_path: Path):
     with pytest.raises(_model.ContractError) as e:
         _load_one(tmp_path, "env", "NDF_B.json", dict(ENV_ITEM, name="NDF_B", set_by="bad"))
     assert str(e.value).startswith("NDF_B.json:")
+
+
+# --- 実行の核の検査（#2337） ---
+
+
+def test_entrypoint_that_does_not_go_through_the_core_fails_by_name(tree: Path):
+    edit(tree, 'run_core.main("scripts/tool.py", main)', "sys.exit(main())")
+    code, r = run(tree)
+    assert code == 1 and ("core-entry", "") in kinds(r)
+    assert _item(r, "core-entry")["path"] == "plugins/ndf/scripts/tool.py"
+
+
+def test_core_entry_id_must_be_the_contract_path(tree: Path):
+    edit(tree, 'run_core.main("scripts/tool.py"', 'run_core.main("scripts/other.py"')
+    code, r = run(tree)
+    assert code == 1 and "プラグインの根からのパス" in _item(r, "core-entry")["detail"]
+
+
+def test_shell_entrypoint_must_call_rc_enter_first(tree: Path):
+    sh = tree / "plugins/ndf/scripts/t.sh"
+    sh.write_text("#!/usr/bin/env bash\n# 説明\nset -e\necho hi\n")
+    (tree / "plugins/ndf/skills/a/SKILL.md").write_text("python3 scripts/tool.py --root .\nbash scripts/t.sh\n")
+    entry = dict(ENTRY, path="plugins/ndf/scripts/t.sh", env=[], settings=[], writes=[], args={"unparsed": "手で読む"})
+    wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__t.sh.json", entry)
+    run(tree, "--render")
+    assert ("core-entry", "") in [(i["kind"], i["name"]) for i in run(tree)[1]["items"] if i["path"].endswith("t.sh")]
+    sh.write_text('#!/usr/bin/env bash\n# 説明\n. "$(dirname "$0")/lib/run-core.sh"; rc_enter "scripts/t.sh" "$@"\necho hi\n')
+    assert not [i for i in run(tree)[1]["items"] if i["path"].endswith("t.sh") and i["kind"] == "core-entry"]
+
+
+def test_hook_mark_needs_evidence(tree: Path):
+    f = tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json"
+    wj(f, dict(ENTRY, core={"exempt": "hook", "evidence": "hook が起動する"}))
+    code, r = run(tree)
+    assert code == 1 and ("core-exempt", "hook") in kinds(r)
+    (tree / "plugins/ndf/hooks").mkdir(parents=True)
+    (tree / "plugins/ndf/hooks/claude.json").write_text('{"command": "python3 scripts/tool.py"}')
+    edit(tree, 'run_core.main("scripts/tool.py", main)', "sys.exit(main())")
+    assert run(tree)[0] == 0
+
+
+def test_unknown_core_mark_stops_with_2(tree: Path):
+    f = tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json"
+    wj(f, dict(ENTRY, core={"exempt": "other", "evidence": "x"}))
+    assert run(tree)[0] == 2
+
+
+@pytest.mark.parametrize("exit_map,name", [({"0": "成功", "2": "引数の誤り"}, "exit:2"), ({"0": "成功", "5": "失敗"}, "exit:5")])
+def test_exit_values_must_start_with_the_table_label(tree: Path, exit_map, name):
+    wj(tree / "plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__tool.py.json", dict(ENTRY, exit=exit_map))
+    code, r = run(tree)
+    assert code == 1 and ("exit-meaning", name) in kinds(r)
+
+
+def test_own_exit_constants_fail(tree: Path):
+    edit(tree, "def main():", "EXIT_FOUND_MANY = 4\n\n\ndef main():")
+    code, r = run(tree)
+    assert code == 1 and ("exit-meaning", "EXIT_FOUND_MANY") in kinds(r)
+
+
+def test_reading_the_last_line_outside_the_common_reader_fails(tree: Path):
+    (tree / "plugins/ndf/scripts/lib/reader.py").write_text(
+        "import json\n\n\ndef last_json(out):\n    return json.loads(out.splitlines()[-1])\n"
+    )
+    code, r = run(tree)
+    assert code == 1
+    assert {("result-read", "def:last_json"), ("result-read", "last_json:last-line")} <= set(kinds(r))
+
+
+def test_declared_writer_of_a_passed_file_is_not_file_dynamic(tree: Path):
+    edit(tree, 'Path("out.json").write_text("{}")', 'Path("out.json").write_text("{}")\n    Path(a.root).write_text("{}")')
+    assert ("file-dynamic", "main") in kinds(run(tree)[1])
+    item = {"name": "res", "pattern": "*-result.json", "kind": "result", "place": "state-dir", "skill_readers": []}
+    wj(tree / "plugins/ndf/contracts/files/res.json", dict(item, writers=["plugins/ndf/scripts/tool.py:main"]))
+    run(tree, "--render")
+    assert run(tree)[0] == 0
+
+
+def test_base_knows_runs_once_per_kind(monkeypatch):
+    """merge-base の検査を読む git show は、種類ごとに 1 回だけ起こす。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import ratchet
+
+    calls = []
+    monkeypatch.setattr(ratchet, "_names_at", lambda *a: set())
+    monkeypatch.setattr(ratchet, "base_knows", lambda root, sha, kind: calls.append(kind) or True)
+    now = [{"kind": k, "name": f"N{i}", "path": f"p{i}"} for i, k in enumerate(["a", "a", "b", "a", "b"])]
+    assert len(ratchet.added(Path("."), "sha", "x", now, lambda r: f"{r['path']}.json")) == 5
+    assert sorted(calls) == ["a", "b"]
+
+
+def test_base_runtime_count_reads_the_base_with_two_git_processes(tmp_path: Path, monkeypatch):
+    """ベースの runtime の印は、契約の数によらず git 2 回（一覧と一括読み）で数える。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import core_checks
+
+    d = tmp_path / "plugins/ndf/contracts/entrypoints"
+    d.mkdir(parents=True)
+    for i, ex in enumerate(["runtime", "hook", None, "runtime"]):
+        wj(d / f"e{i}.json", {"path": f"e{i}.py", **({"core": {"exempt": ex}} if ex else {})})
+    (d / "broken.json").write_text("{")
+    g = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*g[:3], "init", "-q"], check=True)
+    subprocess.run([*g, "add", "-A"], check=True)
+    subprocess.run([*g, "commit", "-qm", "c"], check=True)
+    sha = subprocess.run([*g[:3], "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    calls = []
+    real = subprocess.run
+    monkeypatch.setattr(core_checks.subprocess, "run", lambda *a, **k: calls.append(a[0]) or real(*a, **k))
+    assert core_checks.base_runtime_count(tmp_path, sha) == 2
+    assert len(calls) == 2
+
+
+# ---------- 上限の宣言（#2343 の決定 13・不変条件 I1・I4） ----------
+
+
+def _limits(tree: Path, policies: dict) -> None:
+    wj(tree / "plugins/ndf/contracts/limits.json", {"version": 1, "policies": {**LIMITS["policies"], **policies}})
+
+
+def test_a_policy_name_the_declaration_lacks_fails(tree: Path):
+    (tree / "plugins/ndf/scripts/lib/part.py").write_text('import limits\n\n\ndef f():\n    return limits.seconds("part.wait")\n')
+    code, r = run(tree)
+    assert code == 1 and ("limits-unknown", "part.wait") in kinds(r)
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": 5}})
+    assert run(tree, "--render")[0] == 0
+    code, r = run(tree)
+    assert code == 0, r
+    assert "`plugins/ndf/scripts/lib/part.py:f`" in (tree / "plugins/ndf/contracts/index.md").read_text()
+
+
+def test_a_policy_no_code_reads_fails(tree: Path):
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": 5}})
+    run(tree, "--render")
+    code, r = run(tree)
+    assert code == 1 and kinds(r) == [("limits-unused", "part.wait")]
+
+
+def test_a_name_kept_in_a_module_constant_counts_and_a_computed_name_fails(tree: Path):
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": 5}})
+    run(tree, "--render")
+    part = tree / "plugins/ndf/scripts/lib/part.py"
+    part.write_text('import limits as lim\n\nPOLICY = "part.wait"\n\n\ndef f(x):\n    return lim.policy(POLICY), lim.value(x, "seconds")\n')
+    run(tree, "--render")
+    code, r = run(tree)
+    assert code == 1 and [k for k, _ in kinds(r)] == ["limits-unknown"]
+
+
+def test_a_malformed_declaration_fails(tree: Path):
+    _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": -1}})
+    code, r = run(tree)
+    assert code == 1 and ("limits-shape", "") in kinds(r)

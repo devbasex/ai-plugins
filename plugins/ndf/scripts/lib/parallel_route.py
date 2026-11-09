@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import delivery
+import durable
+from parallel_hold import limit_items
 from parallel_repo import dev_version, loop_records
 from sprint_loop_names import PENDING
 
@@ -26,10 +28,10 @@ def check_items(main: Path) -> list[dict]:
     """起動の前の検査の警告。リリースを組めないなら 1 件。起動は断らない（レーンがリリースの依頼を送らない計画もある）。"""
     got = way_of(main)
     if got.way == delivery.REFUSE:
-        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}]
+        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}, *limit_items(main)]
     if got.way == delivery.BUILD and not dev_version(main):
-        return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}]
-    return []
+        return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}, *limit_items(main)]
+    return limit_items(main)
 
 
 def with_release_warnings(main: Path, checked: tuple) -> tuple:
@@ -42,15 +44,32 @@ def with_release_warnings(main: Path, checked: tuple) -> tuple:
 
 
 def held_loops(main: Path, name: str, answered: list[str]) -> list[str]:
-    """答えを受けたのに残りを流していない保留の周回を持つ、計画のループのレーンのループ名（異常系 11）。"""
+    """答えを受けたのに残りを流していない保留したループの 1 回を持つ、計画のループのレーンのループ名（異常系 11）。"""
     asked = lambda lap: (lap.get("release") or lap.get("question") or {}).get("request") if lap.get("outcome") in PENDING else None  # noqa: E731
     return [ln.input.loop for ln, rec in loop_records(main, name) if any(asked(lap) in answered for lap in rec.get("laps") or [])]
+
+
+def loop_repo(main: Path, name: str, loop: str) -> str | None:
+    """ループ `loop` を持つ別のリポジトリのレーンのリポジトリ。計画の置き場のレーン・見つからない・計画を読めなければ None（#2733）。"""
+    import parallel_plan as pp
+
+    try:
+        plan = pp.load_valid_plan(main, name)
+    except (OSError, ValueError):
+        return None
+    hit = next((ln for ln in plan.lanes if ln.input.kind == "loop" and ln.input.loop == loop), None)
+    return str(hit.repo_dir(Path(main))) if hit is not None and hit.own_release(Path(main)) else None
+
+
+@durable.step(name="parallel.loop-repo")
+def step_loop_repo(main: str, name: str, loop: str) -> str | None:
+    return loop_repo(Path(main), name, loop)
 
 
 def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
     """設計の承認の依頼に答えたのに、持ち主のループのレーンが答えをまだ当てていないレーンの名前（#2436 の 6f）。
 
-    答え（`answer-<依頼>`）は持ち主が周回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後のリリースの
+    答え（`answer-<依頼>`）は持ち主がループの 1 回の境で当てる。当てる前に計画を終えると、起こしたレーンが以後のリリースの
     依頼を送れないため、当てるまで計画を終えない。"""
     held = lambda rec: any(w.get("request") in answered and not w.get("answer") for w in rec.get("waiting") or [])  # noqa: E731
     return [ln.name for ln, rec in loop_records(main, name) if held(rec)]
