@@ -7,10 +7,10 @@
 - **食い違いに気づくのは `release-steps.py` の手順の上の確認である。** リリース対象の差分の数え直しのような偶然に頼らない
 - **止まったときの結果 JSON だけで、承認したコミット・比べた先端・承認の外のコミットが読める。** LLM が git を
   照会し直さなくてよい
-- **`pace: fast` / `auto` の昇格の経路では、本番チャネルへ入るのは MVV 判定が読んだ導入の確認の記録のコミット（確かめたコミット）に限る。**
-  確認の後にベースブランチが進めば、マージせずにリリース承認ゲートへ戻る（#1529。「昇格の経路の照合」）
-- **リリース承認ゲートの承認の後の昇格のマージ（`promote-approved`）は、利用者が承認資料に見た昇格の Pull Request の先端（承認したコミット）に限る。**
-  承認の後にベースブランチが進めば、マージせずにリリース承認ゲートへ戻る（#2104。「昇格の承認の後の照合」）
+- **`pace: fast` / `auto` のリリースの Pull Request で届く経路では、本番チャネルへ入るのは MVV 判定が読んだ導入の確認の記録のコミット（確かめたコミット）に限る。**
+  確認の後にベースブランチが進めば、マージせずにリリース承認ゲートへ戻る（#1529。「リリースの Pull Request で届く経路の照合」）
+- **リリース承認ゲートの承認の後のリリースの Pull Request のマージ（`promote-approved`）は、利用者が承認資料に見たリリースの Pull Request の先端（承認したコミット）に限る。**
+  承認の後にベースブランチが進めば、マージせずにリリース承認ゲートへ戻る（#2104。「リリースの承認の後の照合」）
 
 例: ndf のある版を本番へ出すとき、承認の 6 分後に別の PR がベースブランチへマージされた。
 
@@ -46,9 +46,9 @@
 | デプロイの PR | この版の `release/v<版>` → ベースブランチの Pull Request（開発版の接尾辞を外す bump・changelog・他のプラグインの bump を含む） |
 | 本番チャネルの PR | `release/v<版>` → 本番チャネルの Pull Request。`release/v<版>` は先にベースブランチへ取り込み、先頭をベースブランチの祖先にしてから出す |
 | 承認資料 | `issues/approval-<プラグイン>-v<版>.md`。`approval-facts` が書く |
-| 導入の確認の承認資料 | 昇格のプランの `verify` ステップ（`release-steps.py verify-facts`）が書く `approval-verify.md`。確かめたコミットの行を 1 行持つ |
-| 昇格の Pull Request | ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作ってマージするもの。head はベースブランチそのもの |
-| 昇格の承認資料 | 昇格のリリース承認ゲートで利用者（か MVV 判定）が見る `{state_dir}/work/approval-promote.md`。`normal` では `promote` のリリース承認ゲートの停止が、`fast` / `auto` では `prepare` が書く。「承認したコミット」の行を 1 行持つ |
+| 導入の確認の承認資料 | 本番チャネルへ入れるリリースプランの `verify` ステップ（`release-steps.py verify-facts`）が書く `approval-verify.md`。確かめたコミットの行を 1 行持つ |
+| リリースの Pull Request | ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作ってマージするもの。head はベースブランチそのもの |
+| リリースの承認資料 | リリースの Pull Request のリリース承認ゲートで利用者（か MVV 判定）が見る `{state_dir}/work/approval-promote.md`。`normal` では `promote` のリリース承認ゲートの停止が、`fast` / `auto` では `prepare` が書く。「承認したコミット」の行を 1 行持つ |
 
 ベースブランチ・本番チャネル・プラグイン名は宣言（`.ndf/worktree.json` の `base_branch`・`production_branch` と `.ndf/supervise.json` の `release.plugin`）と引数から読み、
 `develop` / `main` を埋め込まない。
@@ -63,12 +63,12 @@
 | 扱う | 扱わない |
 | --- | --- |
 | `release-steps.py approval-facts` が承認したコミットを書くこと | `--channel dev` の振る舞い（開発版はマージした変更がそのまま載るチャネルで、承認を要しない。引数も結果も変わらない） |
-| `release-steps.py approve` が承認の記録を書くこと、`mvv-gate.py check --gate release` が `by: mvv` で書くこと | 昇格の承認資料の「承認の記録」の行（`promote-approved` は承認したコミットの行だけで照合し、承認の記録を求めない） |
+| `release-steps.py approve` が承認の記録を書くこと、`mvv-gate.py check --gate release` が `by: mvv` で書くこと | リリースの承認資料の「承認の記録」の行（`promote-approved` は承認したコミットの行だけで照合し、承認の記録を求めない） |
 | `release-steps.py release --channel prod` が承認したコミットを受け取り、承認の外のコミットがあれば止まること | 承認資料のほかの欄、MVV 判定の判定の中身、導入の確認（`verify-facts`）の走らせ方 |
 | `merged-steps.py merge-when-green --expect-head` が比べた先端だけをマージすること | 食い違ったときに承認資料を自動で作り直して再承認を求める仕組み、導入の確認と MVV 判定を自動でやり直す仕組み（止まって人へ戻すまでを扱う） |
 | 本番のリリースプラン（`supervise.py new release --channel prod`。`--mvv` 付きを含む）が承認資料を渡すこと | 手動反映の本番系（`gate-2` のプラン。#1454） |
-| `pace: fast` / `auto` の昇格のプラン（`plan_promote`）の `promote` ステップが、確かめたコミットのときだけ本番チャネルへマージし、違えばリリース承認ゲートへ戻ること（`merged-steps.py promote --expect-head-from`。#1529） | 経路 `merge` で宛先が自動反映の本番チャネルのときの `merge-approved`（`merge-when-green --gate-approved user`）の照合 |
-| 昇格のプランの `promote-approved` が、昇格の承認資料の承認したコミットのときだけ本番チャネルへマージし、違えばリリース承認ゲートへ戻ること（`merged-steps.py promote --approved-from`。#2104） | |
+| `pace: fast` / `auto` の本番チャネルへ入れるリリースプラン（`plan_promote`）の `promote` ステップが、確かめたコミットのときだけ本番チャネルへマージし、違えばリリース承認ゲートへ戻ること（`merged-steps.py promote --expect-head-from`。#1529） | 経路 `merge` で宛先が自動反映の本番チャネルのときの `merge-approved`（`merge-when-green --gate-approved user`）の照合 |
+| 本番チャネルへ入れるリリースプランの `promote-approved` が、リリースの承認資料の承認したコミットのときだけ本番チャネルへマージし、違えばリリース承認ゲートへ戻ること（`merged-steps.py promote --approved-from`。#2104） | |
 
 ## 背景
 
@@ -84,8 +84,8 @@
 **承認資料にコミットを書いて本番の範囲を縛る形は、手で反映する経路（`release-steps.py deploy-facts`）で既に使っていた。**
 同じ形を `package-plugin` のリリースへ広げた。
 
-**昇格の経路にも同じ欠けがあった（#1529）。** `pace: fast` / `auto` の昇格のプランは導入の確認をベースブランチの先頭で走らせ、
-確かめたコミットを承認資料へ載せる（#1457）。しかし `promote` ステップは CI が通った昇格の Pull Request の先端をそのまま
+**リリースの Pull Request で届く経路にも同じ欠けがあった（#1529）。** `pace: fast` / `auto` の本番チャネルへ入れるリリースプランは導入の確認をベースブランチの先頭で走らせ、
+確かめたコミットを承認資料へ載せる（#1457）。しかし `promote` ステップは CI が通ったリリースの Pull Request の先端をそのまま
 マージしていた。確認の後にベースブランチが進むと（別のスプリントのマージなど）、確かめていないコミットが MVV 判定の後に
 本番チャネルへ入りえた。
 
@@ -187,9 +187,9 @@ A = 承認したコミット、T = 比べた先端、H = デプロイの PR の�
 
 `ungated`（承認を取り直さずに通すパスの接頭辞。許可リスト）を渡すと、3 と 4 で見つけたコミットのうち第 1 親との差分が
 すべて `ungated` の下に収まるもの（差分を読めないものは収まらないとみなす）を `Verdict.tolerated` へ移して止めず、3 で見つけても
-4 まで進む。5 は 2 つの木の違いが `ungated` の外に及ぶときだけ `tree_differs` にする。リリースは `UNGATED` を渡し、昇格の経路は渡さない。
+4 まで進む。5 は 2 つの木の違いが `ungated` の外に及ぶときだけ `tree_differs` にする。リリースは `UNGATED` を渡し、リリースの Pull Request で届く経路は渡さない。
 
-`allowed`（入ってよい PR）を空にすると、5 は「T の木が A の木と等しいか」になる（昇格の経路はこの形を使わない。#1529）。
+`allowed`（入ってよい PR）を空にすると、5 は「T の木が A の木と等しいか」になる（リリースの Pull Request で届く経路はこの形を使わない。#1529）。
 `allowed` が 2 つ以上のときは期待する木を作らず `undecidable` を返す。`git merge-tree --write-tree` は git 2.38 からで、
 使えない git では 0 以外を返し `undecidable`（I6）に倒れる。
 
@@ -218,30 +218,30 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 | `AllowedPR` | `number`・`head`・`commits`・`merge_commit` |
 | `Unapproved` | `ValueError` の子。`sha`（承認したコミット）と `recorded`（記録の SHA。無ければ `None`）。`release` は 10、`approve` は 1 に読み替える |
 
-### 昇格の経路の照合（#1529）
+### リリースの Pull Request で届く経路の照合（#1529）
 
-`pace: fast` / `auto` の昇格のプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）は
+`pace: fast` / `auto` の本番チャネルへ入れるリリースプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）は
 `verify` → `prepare` → `mvv` → `note` → `promote` → `cd-result` → `record` の順に流れ、`note` か `promote` が落ちたら `handoff` へ進む。
 `promote` ステップは `merged-steps.py promote ... --expect-head-from {state_dir}/work/approval-verify.md --gate-approved mvv` を打つ。
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | 値オブジェクト |
 | --- | --- | --- | --- |
 | 導入の確認の承認資料 | `release_lib/deploy.py` の `verify_facts`（書く）。確かめたコミットの行の形は `lib/approved_commit.py` | `approval-verify.md` | 確かめたコミット（40 桁）・ベースブランチの名前・確認の終了コード |
-| 昇格のマージ | `merged_lib/merge.py` の `promote` | 昇格の Pull Request | 先端（`headRefOid`）・照合する SHA（`expect_head`） |
-| 昇格のプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン（エンティティはステップ） | 承認資料のパス（`VERIFY_MATERIAL`） |
+| リリースの Pull Request のマージ | `merged_lib/merge.py` の `promote` | リリースの Pull Request | 先端（`headRefOid`）・照合する SHA（`expect_head`） |
+| 本番チャネルへ入れるリリースプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン（エンティティはステップ） | 承認資料のパス（`VERIFY_MATERIAL`） |
 
-昇格のマージは導入の確認の承認資料をパスで参照し、中身を書き換えない。確かめたコミットの行は書き手（`verify-facts`）と
+リリースの Pull Request のマージは導入の確認の承認資料をパスで参照し、中身を書き換えない。確かめたコミットの行は書き手（`verify-facts`）と
 読み手（`merged-steps.py promote`）が `lib/approved_commit.py` の 1 か所を共有して決める。
 
 常に成り立つ条件:
 
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
-| P1 | 照合する SHA を受けた `promote` は、昇格の Pull Request の先端がその SHA に等しいときだけ `gh pr merge` を呼び、`--match-head-commit` にその SHA を渡す | 読むたびに比べ、違えば `gh pr merge` を呼ばずに `items[].result: head_moved`（`head` と `expected` つき）で終了コード 1 |
+| P1 | 照合する SHA を受けた `promote` は、リリースの Pull Request の先端がその SHA に等しいときだけ `gh pr merge` を呼び、`--match-head-commit` にその SHA を渡す | 読むたびに比べ、違えば `gh pr merge` を呼ばずに `items[].result: head_moved`（`head` と `expected` つき）で終了コード 1 |
 | P2 | `--expect-head-from` を受けた `promote` は、資料から確かめたコミットを読めないまま照合を飛ばさない | `gh` を 1 度も呼ばずに終了コード 2（`EXIT_UNREADABLE`）で止まる |
 | P3 | 確かめたコミットの行を書く形と読む形は `verified_line` / `verified_sha` の 1 か所が決める | 読めなければ P2 の扱い |
 | P4 | `fast` / `auto` の `promote` ステップは、`mvv` ステップが材料に渡すのと同じパス（`VERIFY_MATERIAL`）を `--expect-head-from` に渡し、失敗は `handoff` へ進む | プランの組み立てのテストで落とす |
-| P5 | `--expect-head-from` は `fast` / `auto` の `promote` ステップだけが持ち、`promote-approved` は持たない（昇格の承認の後の照合は `--approved-from`） | プランの組み立てのテストで落とす |
+| P5 | `--expect-head-from` は `fast` / `auto` の `promote` ステップだけが持ち、`promote-approved` は持たない（リリースの承認の後の照合は `--approved-from`） | プランの組み立てのテストで落とす |
 
 ```mermaid
 sequenceDiagram
@@ -258,7 +258,7 @@ sequenceDiagram
         S->>S: handoff（by: mvv の記録を外して 10）
     else 読めた（X）
         A-->>P: X
-        P->>GH: 昇格の PR を探す（無ければ作る）
+        P->>GH: リリースの Pull Request を探す（無ければ作る）
         P->>G: merge_when_green（expect_head = X）
         loop 読むたび
             G->>GH: pr view（headRefOid）
@@ -284,30 +284,30 @@ sequenceDiagram
 | --- | --- | --- |
 | 導入の確認がベースブランチの先頭 X で走り、承認資料に X を書いた | `verify` ステップ（`verify-facts`） | `mvv` ステップ（材料として読む）・`promote` ステップ（X を読む） |
 | ベースブランチが X から Y へ進んだ | プランの外のマージ | `promote` ステップ（先端の Y として読む。`verify` と `prepare` の間に起きても同じ） |
-| 昇格の Pull Request の先端を読み、X と比べた | `promote` ステップ（`GreenWatch` の 1 回の読み） | 一致なら本番チャネルへのマージ、違えば `handoff` |
+| リリースの Pull Request の先端を読み、X と比べた | `promote` ステップ（`GreenWatch` の 1 回の読み） | 一致なら本番チャネルへのマージ、違えば `handoff` |
 | マージせずに止まり、`handoff` が MVV 判定の記録を外してリリース承認ゲートへ戻した | `promote`（非 0）→ `handoff` | 人（リリース承認ゲート） |
 
 `promote` の失敗の種類（`head_moved` の 1・読めない 2・マージの拒否 1・衝突 4）で行き先を分けず、どれも `on_fail: handoff` が
 リリース承認ゲートへ戻す。戻った後の続きは `development-workflow` の `references/pace.md` のリリース承認ゲートの行が正で、照合で止まった
 （`head_moved`・資料を読めない）ときは `run <プラン> --from verify` から流し直す。`--from promote-approved` は `prepare` が書いた
-昇格の承認資料の承認したコミットで照合するが、導入の確認も MVV 判定もその先端では走っていないためである。
+リリースの承認資料の承認したコミットで照合するが、導入の確認も MVV 判定もその先端では走っていないためである。
 
-### 昇格の承認の後の照合（#2104）
+### リリースの承認の後の照合（#2104）
 
-`normal` の昇格のプランは `promote`（`--out {state_dir}/work/approval-promote.md`）→ リリース承認ゲート→ `promote-approved` の順に流れる。
+`normal` の本番チャネルへ入れるリリースプランは `promote`（`--out {state_dir}/work/approval-promote.md`）→ リリース承認ゲート→ `promote-approved` の順に流れる。
 `promote-approved` ステップは `normal` と `fast` / `auto` で同じコマンド
 `merged-steps.py promote ... --approved-from {state_dir}/work/approval-promote.md --gate-approved user` を打つ。
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | 値オブジェクト |
 | --- | --- | --- | --- |
-| 昇格の承認資料 | 本文と「承認したコミット」の行は `merged_lib/merge.py` の `gate_stop`（`normal`）と `_prepare_promote`（`fast` / `auto`）。「承認の記録」（`by: mvv`）の行は `fast` / `auto` の `mvv-gate.py` だけ。行の形は `lib/approved_commit.py` の `material_row` / `material_sha` | `approval-promote.md` | 承認したコミット（40 桁） |
-| 昇格のプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン | 昇格の承認資料のパス（`PROMOTE_MATERIAL`） |
+| リリースの承認資料 | 本文と「承認したコミット」の行は `merged_lib/merge.py` の `gate_stop`（`normal`）と `_prepare_promote`（`fast` / `auto`）。「承認の記録」（`by: mvv`）の行は `fast` / `auto` の `mvv-gate.py` だけ。行の形は `lib/approved_commit.py` の `material_row` / `material_sha` | `approval-promote.md` | 承認したコミット（40 桁） |
+| 本番チャネルへ入れるリリースプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン | リリースの承認資料のパス（`PROMOTE_MATERIAL`） |
 
 常に成り立つ条件:
 
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
-| P6 | `promote` が昇格の Pull Request でリリース承認ゲートに止まる（終了コード 10）とき、止まる判定に使った読みの `headRefOid` が承認資料の「承認したコミット」の行・`metrics.approved_sha`・gate の `items[].head` に同じ値で載る。`--prepare` の資料にも同じ形の行が載る | 先端が 40 桁の 16 進で読めなければ資料を書かずに終了コード 2 |
+| P6 | `promote` がリリースの Pull Request でリリース承認ゲートに止まる（終了コード 10）とき、止まる判定に使った読みの `headRefOid` が承認資料の「承認したコミット」の行・`metrics.approved_sha`・gate の `items[].head` に同じ値で載る。`--prepare` の資料にも同じ形の行が載る | 先端が 40 桁の 16 進で読めなければ資料を書かずに終了コード 2 |
 | P7 | `--approved-from` を受けた `promote` は、先端が資料の承認したコミットのときだけ `--match-head-commit` でマージする | 違えば `gh pr merge` を呼ばずに `head_moved`（`head`・`expected`）で 1。`next` にリリース承認ゲートからのやり直しを書く |
 | P8 | `--approved-from` の資料を読めないまま照合を飛ばさない。`--gate-approved user` は `--approved-from` 無しで受けない | `gh` を 1 度も呼ばずに終了コード 2。資料が無いときは `next` に資料つきの打ち方を書く |
 | P9 | `normal` の `promote` の `--out`、両方の `promote-approved` の `--approved-from`、`fast` / `auto` の `prepare` の `--out` は同じ `PROMOTE_MATERIAL` である | プランの組み立てのテストで落とす |
@@ -372,14 +372,14 @@ sequenceDiagram
 | 先端が確かめたコミットのまま CI が通った | 0 | 今と同じ。`items[]` に `{"kind": "pr", "result": "merged", "head": <X>, "gate_approved": "mvv"}` |
 | 先端が確かめたコミットでない（待つ間に変わった・別の先端でマージ済みを含む） | 1 | `status: stopped`・`items[]` に `{"kind": "pr", "name": "#<番号>", "result": "head_moved", "head": <Y>, "expected": <X>}`。`gh pr merge` は呼ばない |
 | 最後の読みとマージの間に先端が変わった | 1 | `--match-head-commit X` で GitHub がマージを拒み、既存の「`gh pr merge --admin` が失敗」になる |
-| 資料が無い・確かめたコミットの行が無いか 2 つ以上・40 桁の 16 進でない | 2 | `status: stopped`。昇格の Pull Request を探さず・作らず、`gh` を呼ばない |
+| 資料が無い・確かめたコミットの行が無いか 2 つ以上・40 桁の 16 進でない | 2 | `status: stopped`。リリースの Pull Request を探さず・作らず、`gh` を呼ばない |
 
 `--prepare` と一緒に渡したときも先に読み（読めなければ 2）、読めればマージへ進まない今の振る舞いのまま終える。
 
-### `merged-steps.py promote --approved-from <昇格の承認資料>`
+### `merged-steps.py promote --approved-from <リリースの承認資料>`
 
 `--approved-from` は `--expect-head-from` と同時には受けない。渡すと最初に `material_sha` で承認したコミットを読み、同じ照合に使う。
-`--gate-approved user` はこの引数が要る。`--out` は `--prepare` とリリース承認ゲートの停止で書く昇格の承認資料の置き場である。
+`--gate-approved user` はこの引数が要る。`--out` は `--prepare` とリリース承認ゲートの停止で書くリリースの承認資料の置き場である。
 
 | 場合 | 終了コード | 結果 |
 | --- | --- | --- |
@@ -408,13 +408,13 @@ sequenceDiagram
 | 比べる時点はリリースの PR のマージの後の 1 つ | リリースの PR はベースブランチへ入るだけで本番へは届かない。マージの前にも比べると判定の時点が 2 つになる。承認したコミットの形と有無・承認の記録だけは最初に確かめ、何もマージせずに止まる |
 | 判定できないときは承認ゲートで止まる（I6） | 通すと承認の外の変更を見落としうる。失敗（1）にすると、本番のリリースプランの judge が直す（fix）か同じステップをもう一度（retry）を選び、人の承認を経ずに打ち直されうる |
 | `--mvv` 付きのプランは承認ゲートで `handoff` へ進む（I7） | MVV 判定が承認したのは承認資料の中身で、承認の外のコミットは判定の材料に入っていない。人が外のコミットを見てから承認し直す。`gate_next` を置かないと、10 を受けて `next` の `verify` へ進み、配っていない版の導入を確かめに行く |
-| 比べる関数を `lib/` に置く | 昇格の経路にも同じ欠けがあり、`release-steps.py` の中に置くと同じ役割の関数が 2 つになる。`allowed` を空にすれば promote の判定になると見込んだが、#1529 は木が等しい別のコミットを通すため採らず、昇格は `--expect-head` の照合を使う |
-| 昇格の照合に `--expect-head` を使い、`compare_approved` を使わない（#1529） | `--expect-head` は CI を待つ間の読みのたびに先端を比べ、マージを `--match-head-commit` で比べた先端に固定する。待つ間の変化と、最後の読みとマージの間の変化の両方を既存のコードのまま塞げる。`compare_approved` に `allowed` を 0 個で渡す形は手元の git を 1 度読むだけで待つ間の変化を見ず、木が等しい別のコミット（中身の無いマージなど）を通す |
+| 比べる関数を `lib/` に置く | リリースの Pull Request で届く経路にも同じ欠けがあり、`release-steps.py` の中に置くと同じ役割の関数が 2 つになる。`allowed` を空にすれば promote の判定になると見込んだが、#1529 は木が等しい別のコミットを通すため採らず、経路 merge は `--expect-head` の照合を使う |
+| リリースの Pull Request の照合に `--expect-head` を使い、`compare_approved` を使わない（#1529） | `--expect-head` は CI を待つ間の読みのたびに先端を比べ、マージを `--match-head-commit` で比べた先端に固定する。待つ間の変化と、最後の読みとマージの間の変化の両方を既存のコードのまま塞げる。`compare_approved` に `allowed` を 0 個で渡す形は手元の git を 1 度読むだけで待つ間の変化を見ず、木が等しい別のコミット（中身の無いマージなど）を通す |
 | `promote` は SHA ではなく承認資料のパスを受けて自分で読む（#1529） | プランのコマンドで `--expect-head "$(…)"` と SHA を置換して渡すと、読めなかったときに空の値が渡り、`_check_expected` は空を「照合しない」と扱う。パスを受けて中で読めば、読めないことを `promote` 自身が失敗として返せる（P2）。SHA を出す副命令を足してプランで繋ぐ形は、ステップが増え空の値の経路も残る |
 | 確かめたコミットの行の形を `lib/approved_commit.py` に置き、`verify_markdown` もそれで書く（#1529） | 読み手だけを足すと、書き手の文言を直したときに読み手が黙って読めなくなる。承認資料に `\| 承認したコミット \|` の欄を足して `material_sha` で読む形は、`mvv-gate.py` がその欄を見て承認の記録を書き足すようになり、承認資料の中身を変える |
 | プランは `mvv` と同じ定数 `VERIFY_MATERIAL` を `promote` に渡す（#1529） | MVV 判定が読んだ資料と照合に使う資料が同じファイルになる。資料を書くのは `verify` ステップだけで、`--from verify` で打ち直すと資料も作り直される。プランを組む時点の先端や `origin/<ベースブランチ>` を引き直すと、確認の後に進んだ先端を拾い照合の意味が無くなる |
-| 昇格の承認資料に「承認したコミット」の行を置き、`material_row` / `material_sha` で読み書きする | 昇格の Pull Request の先端はベースブランチの先端で、本番のリリースの承認資料と同じ語の意味が当たる。`verified_line` を流用すると、導入の確認を走らせない `normal` で「導入の確認をこのコミットで走らせた」と書くことになる |
-| 照合の基準は承認したコミットの行だけにし、承認の記録を求めない | リリース承認ゲートの承認は `sprint-state.py gate ... --by user` で既に残る。`approve` まで求めると昇格の経路だけ承認の後の操作が 1 つ増える。防ぐのは利用者が見た先端と違う先端のマージで、資料の SHA との一致で足りる |
+| リリースの承認資料に「承認したコミット」の行を置き、`material_row` / `material_sha` で読み書きする | リリースの Pull Request の先端はベースブランチの先端で、本番のリリースの承認資料と同じ語の意味が当たる。`verified_line` を流用すると、導入の確認を走らせない `normal` で「導入の確認をこのコミットで走らせた」と書くことになる |
+| 照合の基準は承認したコミットの行だけにし、承認の記録を求めない | リリース承認ゲートの承認は `sprint-state.py gate ... --by user` で既に残る。`approve` まで求めるとリリースの Pull Request で届く経路だけ承認の後の操作が 1 つ増える。防ぐのは利用者が見た先端と違う先端のマージで、資料の SHA との一致で足りる |
 | `--gate-approved user` は `--approved-from` 無しで受けない | 版の更新の前に書き出したプランの `promote-approved` を照合なしで通すと、照合を飛ばす経路が残る。止めても `--from promote` で流し直せば戻せる |
 | 照合で止まった後を `on_fail` で自動に戻さない | `on_fail` は CI の失敗やマージの拒否にも掛かり、リリース承認ゲートの取り直しに読み替えてしまう。続きは `next` と `pace.md` が示す |
 | `promote` の失敗の種類で行き先を分けない | どれも `on_fail: handoff` がリリース承認ゲートへ戻す。`on_exit` で種類ごとに行き先を変えると、戻った後の人の手順が種類ごとに分かれる。代わりに人が選ぶ続き（`--from verify`）を `pace.md` に書く |
@@ -424,10 +424,10 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | デプロイの PR のコミット数 | `gh pr view --json commits` は 250 件までを返す。超えるデプロイの PR では I3 が外のコミットと誤り、止まる側に倒れる。デプロイの PR は bump・changelog・説明文・消費の記録の数件である |
-| 照合で止まった後の続き（`fast` / `auto`） | 人が `--from promote-approved` を選ぶと、`prepare` が書いた承認したコミットのままなら、導入の確認と MVV 判定の後に進んでいない先端としてマージされる。`promote` が `head_moved` で止まった後は承認資料の先端と昇格の Pull Request の先端も違うため、`promote-approved` も止まる |
+| 照合で止まった後の続き（`fast` / `auto`） | 人が `--from promote-approved` を選ぶと、`prepare` が書いた承認したコミットのままなら、導入の確認と MVV 判定の後に進んでいない先端としてマージされる。`promote` が `head_moved` で止まった後は承認資料の先端とリリースの Pull Request の先端も違うため、`promote-approved` も止まる |
 | 書き出し済みのプラン | 版の更新の前に書き出したプランの `promote-approved` は `--approved-from` を持たず 2 で止まる。`--from promote` で流し直すと、書き出し済みの `promote` は `--out` を持たないため資料は既定の置き場へ書かれ、`next` の手で打つ形で続ける |
 | 経路 `merge` の `merge-approved` | 宛先が自動反映の本番チャネルのとき、`merge-when-green` のリリース承認ゲートの停止も先端を資料へ残さず、`--from merge-approved` は今の先端をマージする（この文書の範囲外。#2147） |
-| 実機での昇格 | 本番チャネルへのマージを伴うため、手元では `gh` を差し替えたテストでだけ確かめた。実機はリリース後テストで、経路 `promote` を持つリポジトリが `fast` / `auto` で通るときに見る |
+| 実機での本番チャネルへのマージ | 本番チャネルへのマージを伴うため、手元では `gh` を差し替えたテストでだけ確かめた。実機はリリース後テストで、経路 `promote` を持つリポジトリが `fast` / `auto` で通るときに見る |
 | rebase で入れたデプロイの PR の `mergeCommit` | 実物で確かめていない。`mergeCommit` は承認の外のコミットの一覧から除くのにだけ使い、木の比較には使わない。違っていても、patch-id で除けないものが一覧に余分に並ぶだけで、通す・止めるの向きは止まる側である |
 
 ## テスト観点
@@ -450,11 +450,11 @@ sequenceDiagram
 | 本番のリリースプラン（I7） | 本番の `release` のステップが `--approval <承認資料>` を持ち、`--mvv` 付きは `gate_next: handoff`、無しは `end` であること。開発版のステップに `--approval` も `gate_next` も無いこと（`test_supervise_new.py`） |
 | 退行しない | `--channel dev` の引数・`items`・`metrics` が変わらないこと。`--channel prod` でデプロイの PR がマージ済みのとき、打ち直しで続きから進み、一致すれば `ok` になること |
 | `allowed` が空の形 | `allowed` を空にしたとき、先端の木が承認したコミットの木と等しいかで判定すること |
-| 昇格: 確かめたコミットならマージする（P1） | 先端が資料の X のまま CI が通ると、`promote --expect-head-from` が `gh pr merge … --match-head-commit X` を 1 度呼んで 0 で終わること |
-| 昇格: 先端が進んだらマージしない（P1） | 最初の読みで先端が Y なら `gh pr merge` を呼ばずに `head_moved`（`head: Y`・`expected: X`）と終了コード 1。1 回目の読みは X・2 回目で Y でも同じ。待つ間に Y で既にマージされた PR も成功にしないこと |
-| 昇格: 資料を読めなければ何もしない（P2） | 資料が無い・行が無い・行が 2 つ・SHA が 39 桁のそれぞれで、`gh` を 1 度も呼ばずに終了コード 2 になること |
-| 昇格のプラン（P4・P5・P9） | `fast` / `auto` の `promote` ステップが `--expect-head-from` と `mvv` の `--material` に同じ `VERIFY_MATERIAL` を持ち、`on_fail` が `handoff` で、非 0 で `handoff` へ進み終了コード 10 になること。`promote-approved` が `--expect-head-from` を含まず、`normal` と `fast` / `auto` で等しく `--approved-from PROMOTE_MATERIAL` を持ち、`normal` の `promote` と `fast` / `auto` の `prepare` の `--out` が同じパスであること。`base` と `production_branch` を `develop` / `main` 以外で組むとその名前だけが現れること（`test_supervise_pace_verify.py`・`test_supervise_new.py`） |
-| 昇格の承認の後の照合（P6〜P8） | リリース承認ゲートの停止で資料・`metrics.approved_sha`・gate の `items[].head` が最初の読みの先端に等しく、先端が読めなければ資料を書かずに 2 であること。`--prepare` の資料も同じ行を持つこと。`--approved-from` の資料が X で先端が X なら `--match-head-commit X` で 1 度マージし、Y なら（最初の読みでも待つ間でも）マージせずに `head_moved` と `--from promote` を含む `next` で 1 であること。資料が無い・欄が無い・形が違う・`--gate-approved user` に資料が無いときは `gh` を呼ばずに 2 であること（`test_sprint_close_merge_green.py`） |
+| リリースの Pull Request: 確かめたコミットならマージする（P1） | 先端が資料の X のまま CI が通ると、`promote --expect-head-from` が `gh pr merge … --match-head-commit X` を 1 度呼んで 0 で終わること |
+| リリースの Pull Request: 先端が進んだらマージしない（P1） | 最初の読みで先端が Y なら `gh pr merge` を呼ばずに `head_moved`（`head: Y`・`expected: X`）と終了コード 1。1 回目の読みは X・2 回目で Y でも同じ。待つ間に Y で既にマージされた PR も成功にしないこと |
+| リリースの Pull Request: 資料を読めなければ何もしない（P2） | 資料が無い・行が無い・行が 2 つ・SHA が 39 桁のそれぞれで、`gh` を 1 度も呼ばずに終了コード 2 になること |
+| 本番チャネルへ入れるリリースプラン（P4・P5・P9） | `fast` / `auto` の `promote` ステップが `--expect-head-from` と `mvv` の `--material` に同じ `VERIFY_MATERIAL` を持ち、`on_fail` が `handoff` で、非 0 で `handoff` へ進み終了コード 10 になること。`promote-approved` が `--expect-head-from` を含まず、`normal` と `fast` / `auto` で等しく `--approved-from PROMOTE_MATERIAL` を持ち、`normal` の `promote` と `fast` / `auto` の `prepare` の `--out` が同じパスであること。`base` と `production_branch` を `develop` / `main` 以外で組むとその名前だけが現れること（`test_supervise_pace_verify.py`・`test_supervise_new.py`） |
+| リリースの承認の後の照合（P6〜P8） | リリース承認ゲートの停止で資料・`metrics.approved_sha`・gate の `items[].head` が最初の読みの先端に等しく、先端が読めなければ資料を書かずに 2 であること。`--prepare` の資料も同じ行を持つこと。`--approved-from` の資料が X で先端が X なら `--match-head-commit X` で 1 度マージし、Y なら（最初の読みでも待つ間でも）マージせずに `head_moved` と `--from promote` を含む `next` で 1 であること。資料が無い・欄が無い・形が違う・`--gate-approved user` に資料が無いときは `gh` を呼ばずに 2 であること（`test_sprint_close_merge_green.py`） |
 | 書き手と読み手（P3） | `verify_markdown` の出力を `verified_sha` で読むと書いた SHA が返り、出力の文字列が変わらないこと。`merged-steps.py promote --help` が `--expect-head-from` を出すこと（`test_approved_commit.py`・`test_sprint_close_merge_green.py`） |
 
 ## 関連リンク
@@ -465,10 +465,10 @@ sequenceDiagram
 - [`release_lib/approval.py`](../../plugins/ndf/scripts/release_lib/approval.py)
 - [`merged_lib/checks.py`](../../plugins/ndf/scripts/merged_lib/checks.py)（`--expect-head` の比較）
 - [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py)
-- [`supervise_lib/delivery_templates.py`](../../plugins/ndf/scripts/supervise_lib/delivery_templates.py)（昇格のプラン `plan_promote`）・[`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py)（`promote`）・[`release_lib/deploy.py`](../../plugins/ndf/scripts/release_lib/deploy.py)（`verify_markdown`）
-- `development-workflow` の [references/pace.md](../../plugins/ndf/skills/development-workflow/references/pace.md)（昇格のプランとリリース承認ゲートの続き）
+- [`supervise_lib/delivery_templates.py`](../../plugins/ndf/scripts/supervise_lib/delivery_templates.py)（本番チャネルへ入れるリリースプラン `plan_promote`）・[`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py)（`promote`）・[`release_lib/deploy.py`](../../plugins/ndf/scripts/release_lib/deploy.py)（`verify_markdown`）
+- `development-workflow` の [references/pace.md](../../plugins/ndf/skills/development-workflow/references/pace.md)（本番チャネルへ入れるリリースプランとリリース承認ゲートの続き）
 - [用語集](../glossary.md)
 - [版とリリース](../versioning-and-distribution.md)
 - [承認資料の「含む PR」](ndf-release-approval-included-prs.md)（直前の正式版から後に入った PR の集め方）
 - [後片付けとスプリント課題を閉じる時点](ndf-cleanup-and-bundle-closing.md)（リリースの後の退避先の回収）
-- 課題 [#815](https://github.com/devbasex/ai-plugins/issues/815)、昇格の経路の照合の課題 [#1529](https://github.com/devbasex/ai-plugins/issues/1529)（由来 #1457。手動反映の本番系は #1454）、昇格の承認の後の照合の課題 [#2104](https://github.com/devbasex/ai-plugins/issues/2104)
+- 課題 [#815](https://github.com/devbasex/ai-plugins/issues/815)、リリースの Pull Request で届く経路の照合の課題 [#1529](https://github.com/devbasex/ai-plugins/issues/1529)（由来 #1457。手動反映の本番系は #1454）、リリースの承認の後の照合の課題 [#2104](https://github.com/devbasex/ai-plugins/issues/2104)
