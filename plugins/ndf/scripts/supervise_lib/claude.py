@@ -108,6 +108,27 @@ def claude_kind(system: str, full: bool) -> str:
     return "pr" if system.startswith(PR_SYSTEM) else {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow"}.get(system, "work")
 
 
+def _output_data(stdout: str, returncode: int) -> dict:
+    """claude -p の出力を辞書へそろえる。JSON の辞書でなければ本文を `result` に、終了コードの失敗を `is_error` に置く。"""
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict):
+        data = {"result": stdout, "is_error": returncode != 0}
+    return data
+
+
+def _failure_kinds(data: dict, result: str, p: subprocess.CompletedProcess, ok: bool) -> tuple[bool, bool, bool]:
+    """失敗の分類（残高切れ・利用上限・認証の失敗）。互いに排他で、この順に先に当たったほうを採る。"""
+    # API クレジットの残高切れ（#2855 の決定 6）。上限と認証の失敗より先に読む
+    credit = not ok and is_credit_low("\n".join([result, p.stderr]))
+    limit = not ok and not credit and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
+    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
+    auth = not ok and not credit and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    return credit, limit, auth
+
+
 def call_claude(
     system: str,
     prompt: str,
@@ -135,7 +156,8 @@ def call_claude(
     `watch`（進みの観測）を渡すと、最小構成でも会話を残し、締め切りを `watch.deadline` で動かす。打ち切りは結果の `timed_out` に残す（#2505）。
     帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
-    who = {"kind": claude_kind(system, full), **(caller or {})}
+    kind = claude_kind(system, full)
+    who = {"kind": kind, **(caller or {})}
     cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
     run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
     # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
@@ -160,23 +182,14 @@ def call_claude(
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="error")
         raise
     except subprocess.TimeoutExpired as e:
-        kind, waited = claude_kind(system, full), round(e.timeout)  # 締め切りを動かしたときは動かした後の秒
+        waited = round(e.timeout)  # 締め切りを動かしたときは動かした後の秒
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=waited, status="timeout")
         return ClaudeCall(ok=False, text=f"打ち切り（{waited} 秒）", usage={}, seconds=waited, kind=kind, model_usage=None, timed_out=True)
-    try:
-        data = json.loads(p.stdout)
-    except json.JSONDecodeError:
-        data = None
-    if not isinstance(data, dict):
-        data = {"result": p.stdout, "is_error": p.returncode != 0}
+    data = _output_data(p.stdout, p.returncode)
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
     result = str(data.get("result") or "")
-    # API クレジットの残高切れ（#2855 の決定 6）。上限と認証の失敗より先に読む
-    credit = not ok and is_credit_low("\n".join([result, p.stderr]))
-    limit = not ok and not credit and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
-    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
-    auth = not ok and not credit and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    credit, limit, auth = _failure_kinds(data, result, p, ok)
     usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
     return ClaudeCall(
         {
@@ -184,7 +197,7 @@ def call_claude(
             "text": text,
             "usage": data.get("usage") or {},
             "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
-            "kind": claude_kind(system, full),
+            "kind": kind,
             "cost": data.get("total_cost_usd"),
             "turns": data.get("num_turns"),
             "session": data.get("session_id"),
