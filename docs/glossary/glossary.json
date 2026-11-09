@@ -6145,6 +6145,54 @@
       "context": "ndf-workflow",
       "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
       "source": "docs/specifications/ndf-supervisor-docs-guard.md"
+    },
+    {
+      "term": "実装の予算",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`--budget-minutes` の値。改善項目を何件選ぶかを決めるためだけに使う、実装（コーディング）時間の見積りの合計の上限。今の用語集の「想定最大時間」（実行全体の子プロセスを止める締め切り）を置き換える",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "実装時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目のテスト追加・実装・修正で担当の CLI が動いた時間。提案・選定・テストの実行・CI の待ちは含めない",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "予算の延長",
+      "context": "ndf-cross-refactoring",
+      "meaning": "順位の高い候補を境目で絞り切れないときに、実装の予算を 2 倍までの範囲で増やすこと",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "リファクタリングの成立",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目が、振る舞いを変えずに、計画の前提にした構造の上で直し切れる見込みがあること。成立しない例: 振る舞いを変えないと直せない・前提の構造が実在しない",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "無関係な失敗",
+      "context": "ndf-cross-refactoring",
+      "meaning": "着手前の木（取り込んだベースブランチを含む）でも落ちるテストの失敗。改善項目の合否に数えない",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "停滞",
+      "context": "ndf-cross-refactoring",
+      "meaning": "修正の後の落ちたテストの集合が、前の回と同じであること",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "振動",
+      "context": "ndf-cross-refactoring",
+      "meaning": "修正の後の落ちたテストの集合が、前に見た集合へ戻ること",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "安全網の上限",
+      "context": "ndf-cross-refactoring",
+      "meaning": "実装時間と修正の時間の合計に置く上限。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す",
+      "pending_source": "issues/issue-2457-requirements.md"
     }
   ]
 }
