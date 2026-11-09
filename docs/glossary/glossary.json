@@ -5924,8 +5924,14 @@
     {
       "term": "API キーの使い方の宣言",
       "context": "ndf-relay",
-      "meaning": "登録済み API キーを worker にいつ使うかを決める 1 つの設定。既定は「使わない」",
+      "meaning": "登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」",
       "pending_source": "issues/issue-2855-requirements.md"
+    },
+    {
+      "term": "API キーの登録簿",
+      "context": "ndf-relay",
+      "meaning": "登録済み API キーと API キーの使い方の宣言を持つ、アカウントの置き場の 1 つのファイル（0600）",
+      "pending_source": "issues/issue-2855-design.md"
     }
   ]
 }
