@@ -34,6 +34,7 @@ import project_decl
 import repo as repo_lib
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, git, git_root, result
 import upkeep_rank_cmd as RC
+import upkeep_state as S
 
 TOOL = "backlog-refinement"
 DEPTHS = ("diff", "review", "overhaul")
@@ -272,14 +273,16 @@ def _report_metrics(path: str | None) -> dict:
 
 
 def _state_values(a, root) -> dict:
-    """差分の棚卸しの値（open・持ち越し・閉じた件数）を upkeep の記録（candidates.json・apply.json）から写す。"""
+    """差分の棚卸しの値（open・持ち越し・閉じた件数）を upkeep の記録（candidates.json・apply.json）から写す。
+
+    差分の棚卸しは実行の識別子を持たないため、共有の置き場の回を読む（実行ごとの置き場は読まない。#2847）。"""
     from upkeep_gh import target_repo
 
     try:
         repo = target_repo(root, getattr(a, "repo", None))
     except StepError:
         return {}
-    sd = a.state_dir_of(getattr(a, "state_dir", None), repo)
+    sd = S.state_dir(getattr(a, "state_dir", None), repo)
     cands = (jsonio.read(sd / "candidates.json", missing={}, broken={}, want=dict).get("metrics")) or {}
     applied = (jsonio.read(sd / "apply.json", missing={}, broken={}, want=dict).get("metrics")) or {}
     out = {}
@@ -416,7 +419,7 @@ def cmd_causes(a):
     emit(result(TOOL, "ok", f"型の記録へ {len(rows)} 行を足した", [], {"path": str(d / "causes.jsonl"), "rows": len(rows)}))
 
 
-def add_depth_parsers(sub, common, state_dir) -> None:
+def add_depth_parsers(sub, common) -> None:
     dp = sub.add_parser("depth").add_subparsers(dest="depth_cmd", required=True)
     du = dp.add_parser("due", parents=[common])
     du.add_argument("depth", choices=("review", "overhaul"))
@@ -441,7 +444,7 @@ def add_depth_parsers(sub, common, state_dir) -> None:
         "--progress", default=None, help="プランの進行の記録（progress.jsonl）。--step の最後の行から秒・ドル・言語モデルを写す"
     )
     dr.add_argument("--step", default="refine", help="--progress で読むステップの id")
-    dr.set_defaults(func=cmd_record, state_dir_of=state_dir)
+    dr.set_defaults(func=cmd_record)
     dc = dp.add_parser("compare", parents=[common])
     dc.add_argument("--since-ref", required=True, help="この ref のコミットの時刻より後の行だけを使う（リリースした正式版のタグ）")
     dc.add_argument("--seconds-under", type=float, required=True)

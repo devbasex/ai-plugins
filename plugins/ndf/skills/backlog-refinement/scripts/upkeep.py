@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """upkeep.py: backlog-refinement の手順 1（候補の収集）と手順 3（反映）の決まった手順。
 
-    python3 upkeep.py candidates --since-ref <ref> [--all] [--add 12,34] [--limit N]
+    python3 upkeep.py candidates --since-ref <ref> [--depth diff|review] [--run R] [--all] [--add 12,34] [--limit N]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py apply --plan plan.json [--max-waits N] [--max-wait 秒]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
@@ -31,6 +31,8 @@ apply: plan.json の変更を反映する。反映の直前に updated_at を照
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
 report: candidates・rank・apply の記録から完了報告の値を返す。candidates は前の回の apply と rank の記録を消す。
+  記録の置き場は upkeep_state.py が決める。`candidates --run R`・`rank --run R` は実行 R の置き場（runs/R/）に回を持ち、
+  apply は plan の owner（review・overhaul のとき）、report は --run（省くと持ち主の宣言）で同じ回を読む（#2847）。
   `--depth` を渡すと深さの値（起動した条件・open の前後・閉じた・起票した・飛ばした側面・調べた材料 `research`・
   根本原因・戻すコマンド）を足す（upkeep_report.depth_metrics）。
 rank: 順位・切り出しの境界・前倒しと後ろ倒しの候補（算出は upkeep_rank.py）。plan の rank・rejected・reschedule は
@@ -60,9 +62,7 @@ import argparse
 import functools
 import hashlib
 import json
-import os
 import sys
-import tempfile
 import urllib.parse
 from pathlib import Path
 
@@ -76,6 +76,7 @@ from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepErro
 from step_result import emit, git_root, main_with, result  # noqa: E402
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
+import upkeep_state as S  # noqa: E402
 from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, with_labels  # noqa: E402
 from upkeep_routes import _Routes, _route_commits, _route_diff, _route_manual, _route_milestones, _route_review, _route_sub_issues  # noqa: E402
 import upkeep_actions as A  # noqa: E402
@@ -118,13 +119,6 @@ def snapshot_digest(issue: dict) -> str:
         "labels": sorted(lb.get("name", "") for lb in issue.get("labels") or []),
     }
     return hashlib.sha256(json.dumps(snap, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-
-
-def _state_dir(arg, repo: str) -> Path:
-    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "backlog-refinement")
-    d = Path(base) / repo.replace("/", "--")
-    d.mkdir(parents=True, exist_ok=True)
-    return d
 
 
 def _read_state(path: Path):
@@ -176,6 +170,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
         "deferred": deferred,
         "limit": a.limit,
         "depth": a.depth,
+        "run": a.run,
         "by_route": by_route,
         "closed_since": len(closed),
         "paths": len(paths),
@@ -203,6 +198,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
 
 def cmd_candidates(a):
     root = git_root(a.root)
+    S.check_run(a.run)  # 形の合わない識別子は集める前に止める（I5）
     a.limit = RC.candidate_limit(a.limit, RC.read_backlog_decl(root))  # 候補を集める前に決める（不正なら集めない）
     a.limit = None if a.depth == "review" else a.limit
     repo = target_repo(root, a.repo)
@@ -217,7 +213,7 @@ def cmd_candidates(a):
     _route_sub_issues(gh, repo, closed, open_issues, routes, notes)
     _route_commits(root, a.since_ref, routes)
     _route_manual(a, routes, notes)
-    sd = _state_dir(a.state_dir, repo)
+    sd = S.state_dir(a.state_dir, repo)
     # 差分の棚卸しが見積の段階を付けるのは起点より後に作られた課題だけ（#2315 の決定 1・決定 6）。見直しは絞らない
     pool = open_issues if a.depth == "review" else [i for i in open_issues if (i.get("created_at") or "") > since]
     for n in RC.unscored(sd, _read_state, pool, snapshot_digest) if has_milestones else []:
@@ -226,9 +222,10 @@ def cmd_candidates(a):
         _route_review(open_issues, set((D.materials(root) or {}).get("deferred_milestones") or []), routes)
 
     out, deferred = _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, gh.waits)
-    for f in ("apply.json", "rank.json"):  # 前の回の apply と rank を今回の報告へ混ぜない
-        (sd / f).unlink(missing_ok=True)
-    jsonio.write_atomic(sd / "candidates.json", out, indent=1)
+    rd = S.round_dir(sd, a.run, start=True)  # --run を渡すと実行ごとの置き場に回を始める（#2847）
+    for f in ("apply.json", "rank.json"):  # 前の回の apply と rank を今回の報告へ混ぜない（自分の回の置き場だけ）
+        (rd / f).unlink(missing_ok=True)
+    jsonio.write_atomic(rd / "candidates.json", out, indent=1)
     emit(out, EXIT_PAUSE if deferred else None)
 
 
@@ -387,10 +384,12 @@ def cmd_apply(a):
     root = git_root(a.root)
     plan, wrong = A.precheck_depth(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
     repo = target_repo(root, a.repo)
-    sd = _state_dir(a.state_dir, repo)
+    sd = S.state_dir(a.state_dir, repo)
+    # 見直し・大整理は持ち主の実行の回を読み書きする。回が始まっていなければ共有の置き場（#2847 の決定 2）
+    rd = S.round_dir(sd, plan.get("owner") if plan["depth"] != "diff" else None)
     # 記録のリポジトリ（保存した candidates.json の metrics.repo）の外へ書かない（#842 の決定 7）。
     # 書き込み先と plan の repo の双方を記録と照合する（同じ呼び出しの --repo どうしを比べると、両方を別のリポジトリにすれば通る）
-    recorded = ((_read_state(sd / "candidates.json") or {}).get("metrics") or {}).get("repo")
+    recorded = ((_read_state(rd / "candidates.json") or {}).get("metrics") or {}).get("repo")
     why = None
     if recorded is None:
         why = f"書き込み先 {repo} の記録（candidates.json）が無い。candidates を打ってから plan を作る"
@@ -411,9 +410,9 @@ def cmd_apply(a):
     items, partial, why_partial = [], False, ""
     # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映・区分・待ちを落とさない。
     # 書き込む前に読み、前の記録が読めないときは 1 件も書かずに止める
-    prev_out = _read_state(sd / "apply.json")
+    prev_out = _read_state(rd / "apply.json")
     prev = (((prev_out or {}).get("metrics") or {}).get("round") or {"runs": 1}) if prev_out is not None else {}
-    rp = RC.RankPlan(plan, sd, _read_state)
+    rp = RC.RankPlan(plan, rd, _read_state, sd)
     actions = [] if rp.stale else plan["actions"]  # rank.json と合わない plan は何も書かない
 
     def record(value=None, key=None):
@@ -449,7 +448,7 @@ def cmd_apply(a):
     status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits, rp)
     status, code, nxt = A.merge_outcome(extra, wrong, status, code, nxt, metrics, items)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
-    jsonio.write_atomic(sd / "apply.json", out, indent=1)
+    jsonio.write_atomic(rd / "apply.json", out, indent=1)
     emit(out, code)
 
 
@@ -475,20 +474,21 @@ def build_parser():
     c.add_argument("--all", action="store_true")
     c.add_argument("--add", type=_numbers, default=[], help="担当が足す課題の番号（12,34）")
     c.add_argument("--limit", type=int, default=None, help="1 回に扱う候補の上限（省くと宣言の candidate_limit、無ければ既定 10）")
+    c.add_argument("--run", default=None, help="見直し・大整理の実行（owner claim の run）。実行ごとの置き場に回を始める")
     c.set_defaults(func=cmd_candidates)
     p = sub.add_parser("apply", parents=[common])
     p.add_argument("--plan", required=True)
     p.add_argument("--max-waits", type=int, default=DEFAULT_MAX_WAITS)
     p.add_argument("--max-wait", type=float, default=DEFAULT_MAX_WAIT, help="1 回の待ちの上限（秒）")
     p.set_defaults(func=cmd_apply)
-    ctx = argparse.Namespace(tool=TOOL, state_dir=_state_dir, read_state=_read_state)
+    ctx = argparse.Namespace(tool=TOOL, read_state=_read_state)
     r = sub.add_parser("report", parents=[common])
     r.add_argument("--depth", choices=("diff", "review", "overhaul"), default=None, help="棚卸しの深さの値を足す（#2315）")
     r.add_argument("--run", default=None, help="見直し・大整理の実行（省くと持ち主の宣言の実行）")
     r.add_argument("--order", default=None, help="通した手順の並び（prune,rank,... 省くと null）")
     r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
     RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
-    D.add_depth_parsers(sub, common, _state_dir)  # 深さ・持ち主・調査・大整理・戻し（#2315）
+    D.add_depth_parsers(sub, common)  # 深さ・持ち主・調査・大整理・戻し（#2315）
     for add in (O.add_owner_parsers, R.add_research_parsers, V.add_overhaul_parsers, A.add_revert_parser):
         add(sub, common)
     return ap

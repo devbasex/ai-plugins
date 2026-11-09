@@ -10,13 +10,15 @@ from upkeep_gh import target_repo
 import upkeep_owner as O
 from upkeep_rank_config import SLOT_SPLIT
 import upkeep_research as R
+import upkeep_state as S
 
 
 def cmd_report(a, ctx):
     root = git_root(a.root)
     repo = target_repo(root, a.repo)
-    sd = ctx.state_dir(a.state_dir, repo)
-    cand, app, rank = (ctx.read_state(sd / f"{f}.json") for f in ("candidates", "apply", "rank"))
+    run = report_run(root, a)
+    sd = S.round_dir(S.state_dir(a.state_dir, repo), run)  # 実行の回が始まっていればその回だけを読む（#2847 の I2）
+    cand, app, rank = (ctx.read_state(sd / f) for f in S.ROUND_FILES)
     if cand is None and app is None and rank is None:
         raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
     items, metrics, gaps = [], {"repo": repo}, []
@@ -51,7 +53,7 @@ def cmd_report(a, ctx):
     items += rank_items
     metrics.update(rank_metrics)
     if getattr(a, "depth", None):
-        dm = depth_metrics(root, a, cand, app)
+        dm = depth_metrics(root, a, cand, app, run)
         metrics.update(dm)
         items.append(
             {
@@ -67,17 +69,27 @@ def cmd_report(a, ctx):
     emit(result(ctx.tool, "stopped" if gaps else "ok", summary, items, metrics, gaps=gaps))
 
 
-def depth_metrics(root, a, cand, app) -> dict:
+def report_run(root, a) -> str | None:
+    """報告が読む実行。`--run` を渡せばそれ、省くと `--depth` を渡したときだけ持ち主の宣言のうち `what` が同じ深さの実行。"""
+    run = S.check_run(getattr(a, "run", None))
+    depth = getattr(a, "depth", None)
+    if run is None and depth:
+        cur, _ = run_owner.read_owner(O.owner_file(root))
+        run = (cur or {}).get("run") if (cur or {}).get("what") == depth else None
+        try:
+            S.check_run(run)
+        except StepError:
+            run = None  # 宣言の識別子の形が合わなければ共有の置き場を読む（識別子なしと同じ）
+    return run
+
+
+def depth_metrics(root, a, cand, app, run) -> dict:
     """`report --depth` が足す値（設計の契約の `report --depth`）。記録から取れない値は None。
 
     出どころ: 起動した条件は深さの記録（`depths.jsonl` の `due` の行）、open の前は candidates の記録、閉じた・起票した・
     起票しなかった・戻すコマンドは apply の記録、飛ばした側面と調べた材料は材料の宣言と調査の記録。
     実行（`--run`）を省くと、見直しの持ち主の宣言のうち `what` が同じ深さのものの実行を使う。"""
     depth = a.depth
-    run = a.run
-    if not run:
-        cur, _ = run_owner.read_owner(O.owner_file(root))
-        run = (cur or {}).get("run") if (cur or {}).get("what") == depth else None
     rows = D.read_depth_rows(D.backlog_dir(root) / "depths.jsonl")
     am = (app or {}).get("metrics") or {}
     rnd = am.get("round") or am

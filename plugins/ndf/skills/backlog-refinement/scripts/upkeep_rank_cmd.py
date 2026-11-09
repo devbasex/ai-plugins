@@ -3,7 +3,7 @@
     python3 upkeep.py rank [--scores <見積の入力>] [--approved 12,34] [--capacity N] [--scale 1,2,3,5,8,13,20]
                            [--margin-steps N] [--auto-threshold N] [--dependents-steps 0:1,1:5,2:8,3:13,5:20]
                            [--size-exponent X] [--large-slot-ratio X] [--large-min-size N]
-                           [--label-floor "<ラベル>=8"]... [--since-ref <ref>] [--repo owner/name] [--state-dir <dir>] [--root <dir>]
+                           [--label-floor "<ラベル>=8"]... [--since-ref <ref>] [--run R] [--repo owner/name] [--state-dir <dir>] [--root <dir>]
 
 rank: GitHub から open の課題・マイルストーン（説明）・サブイシューを読み、見積（--scores → 記録の estimates.json →
   説明の `### 順位` の表の順に採る）から、マイルストーンごとの順位・大きい課題の枠・切り出しの境界・前倒しと後ろ倒しの
@@ -12,8 +12,9 @@ rank: GitHub から open の課題・マイルストーン（説明）・サブ�
   作られたものは excluded にせず metrics.left_for_review に番号だけを返す（見直しで段階を付ける）。終了コード: 0 = 算出した（マイルストーンが無ければ飛ばす）/ 20 = 段階の欠けた課題がある /
   2 = 入力・宣言が読めない・依存が循環した / 3 = gh が使えない。
 
-記録（$NDF_UPKEEP_STATE_DIR/<repo>/）: estimates.json（課題ごとの最新の見積。rank が書く）・rejected.json（却下した移動。
-apply だけが書く）・rank.json（その回の rank の出力。candidates が消す）。
+記録（$NDF_UPKEEP_STATE_DIR/<repo>/。置き場は upkeep_state.py が決める）: estimates.json（課題ごとの最新の見積。rank が書く）・
+rejected.json（却下した移動。apply だけが書く）は共有の置き場に、rank.json（その回の rank の出力。candidates が消す）は
+棚卸しの回の置き場に置く。--run R を渡し、R の回（candidates --run R）が始まっていれば runs/R/ に書く（#2847）。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from pathlib import Path
 import jsonio
 import repo as repo_lib
 import upkeep_rank as R
+import upkeep_state as S
 from upkeep_rank_estimate import apply_overlay, estimate_overlay
 from upkeep_rank_inputs import estimates, read_scores
 from step_result import EXIT_PAUSE, EXIT_UNREADABLE, StepError, emit, git, git_root, result
@@ -111,6 +113,7 @@ def add_parser(sub, common, numbers, func):
     k.add_argument("--large-min-size", type=int, default=None)
     k.add_argument("--label-floor", action="append", default=[], help="ラベル=段階（何度でも）")
     k.add_argument("--since-ref", default=None, help="差分の棚卸しの起点。これ以前に作られた見積の無い課題は外さず見直しへ回す（#2315）")
+    k.add_argument("--run", default=None, help="見直し・大整理の実行（owner claim の run）。その実行の回へ rank.json を書く（#2847）")
     k.set_defaults(func=func)
 
 
@@ -146,8 +149,8 @@ def _rank_summary(got, excluded, cfg) -> str:
     return s + (f"・外した {len(excluded)} 件" if excluded else "")
 
 
-def _write_rank_result(sd, out, code=None):
-    jsonio.write_atomic(sd / "rank.json", out, indent=1)
+def _write_rank_result(rd, out, code=None):
+    jsonio.write_atomic(rd / "rank.json", out, indent=1)
     return emit(out, code)
 
 
@@ -207,7 +210,8 @@ def cmd_rank(a, ctx):
     root = git_root(a.root)
     repo = target_repo(root, a.repo)
     gh = Gh(repo)
-    sd = ctx.state_dir(a.state_dir, repo)
+    sd = S.state_dir(a.state_dir, repo)
+    rd = S.round_dir(sd, a.run)  # 順位の記録は回の置き場、見積もり・退けた移動は共有の置き場（I4）
     try:
         cfg = R.build_config(config_args(a), read_backlog_decl(root))
     except R.RankError as e:
@@ -216,7 +220,7 @@ def cmd_rank(a, ctx):
     rows = Milestones(gh).open_rows()
     if not rows:
         return _write_rank_result(
-            sd, result(ctx.tool, "ok", "マイルストーンが無いため順位の算出を飛ばした", [], {"repo": repo, "skipped": True})
+            rd, result(ctx.tool, "ok", "マイルストーンが無いため順位の算出を飛ばした", [], {"repo": repo, "skipped": True})
         )
     order = R.milestone_order([r["title"] for r in rows], scores.get("milestones"))
     notes = []
@@ -233,7 +237,7 @@ def cmd_rank(a, ctx):
             {"repo": repo, "cycle": e.numbers},
             next="循環する依存の記述を直す（どちらを先にするかは人が決める）",
         )
-        return _write_rank_result(sd, out, EXIT_UNREADABLE)
+        return _write_rank_result(rd, out, EXIT_UNREADABLE)
     metrics = _rank_metrics(repo, order, cfg, got, ests, excluded)
     metrics["digest"] = R.stable_digest(metrics)
     if a.since_ref:  # 順位の算出の結果ではないため digest に入れない
@@ -247,7 +251,7 @@ def cmd_rank(a, ctx):
     out = result(
         ctx.tool, "gate" if excluded else "ok", _rank_summary(got, excluded, cfg), _items(issues, got, excluded), metrics, next=nxt
     )
-    _write_rank_result(sd, out, EXIT_PAUSE if excluded else None)
+    _write_rank_result(rd, out, EXIT_PAUSE if excluded else None)
 
 
 # ---------------- candidates ----------------
@@ -292,12 +296,15 @@ def _write_one(ms, cur, m, desc):
 
 
 class RankPlan:
-    """plan の順位付けの部分（`rank`・`rejected`・actions の `reschedule`）。"""
+    """plan の順位付けの部分（`rank`・`rejected`・actions の `reschedule`）。
 
-    def __init__(self, plan: dict, sd: Path, read_state):
-        self.plan, self.sd, self.read_state = plan, sd, read_state
+    順位の記録（rank.json）は棚卸しの回の置き場 `rd` から、人が退けた移動（rejected.json）は共有の置き場 `sd`
+    （省くと `rd`）から読み書きする（#2847）。"""
+
+    def __init__(self, plan: dict, rd: Path, read_state, sd: Path | None = None):
+        self.plan, self.sd, self.read_state = plan, sd or rd, read_state
         self.used = bool(plan.get("rank") or plan.get("rejected") or any(act.get("reschedule") for act in plan["actions"]))
-        self.out = read_state(sd / "rank.json") if self.used else None
+        self.out = read_state(rd / "rank.json") if self.used else None
         self.metrics = (self.out or {}).get("metrics") or {}
         self.stale = bool(plan.get("rank")) and plan.get("rank") != self.metrics.get("digest")
         self.holds: dict = {}
