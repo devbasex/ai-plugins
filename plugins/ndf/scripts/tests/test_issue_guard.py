@@ -156,3 +156,45 @@ def test_the_hook_entrypoint_denies(repo):
     )
     assert p.returncode == 0
     assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def _body_word_text(arg: str) -> str | None:
+    """`gh issue create --body <arg>` の `<arg>` の語を `_heredoc_text` に渡した結果（現状固定）。"""
+    from hook_lib import issue_guard as guard
+    import shparse as sp
+
+    node = guard.creates(sp.parse_bash(f"gh issue create --body {arg}"))[0]
+    words = guard._call_words(node)
+    i = [sp.unquote(w) for w in words].index("--body")
+    return guard._heredoc_text(words[i + 1])
+
+
+@pytest.mark.parametrize(
+    ("arg", "text"),
+    [
+        ("\"$(cat <<'EOF'\nhello $X\nEOF\n)\"", "hello $X\n"),
+        ('"$(cat <<"EOF"\nhello $X\nEOF\n)"', "hello $X\n"),
+        ("$(cat <<'EOF'\nhi\nEOF\n)", "hi\n"),
+        ('"$(cat <<EOF\nplain\nEOF\n)"', "plain\n"),
+    ],
+)
+def test_heredoc_text_reads_a_cat_heredoc_in_a_substitution(arg, text):
+    assert _body_word_text(arg) == text
+
+
+@pytest.mark.parametrize(
+    "arg",
+    [
+        '"$(cat <<EOF\na $X\nEOF\n)"',
+        '"$(cat <<EOF\na `x`\nEOF\n)"',
+        '"$(cat <<EOF\na \\$\nEOF\n)"',
+        "\"x$(cat <<'EOF'\nhi\nEOF\n)\"",
+        "\"$(cat <<'EOF'\nhi\nEOF\n)$(cat <<'EOF'\nhi\nEOF\n)\"",
+        "\"$(printf <<'EOF'\nhi\nEOF\n)\"",
+        '"$(cat f.md)"',
+        "'plain'",
+        "\"$(cat <<'A' <<'B'\na\nA\nb\nB\n)\"",
+    ],
+)
+def test_heredoc_text_is_none_for_other_forms(arg):
+    assert _body_word_text(arg) is None
