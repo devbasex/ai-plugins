@@ -37,7 +37,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 引継ぎ文書 | conductor（`handoff.py` の `init`・`next`・`check --trim`・`remove` を打つ）。オーガナイザーも conductor の役割の 1 つとしてここに入る | 本体（`<名>.md`） | 引継ぎの履歴（`<名>-history.md`） | 名（引継ぎの対象の種類と鍵の組）・再開コマンド |
-| 並列の計画 | `parallel.py`（`init`・`lane`）。この変更では変えない | 計画の宣言（`plan.json`） | レーン | 計画名・レーンの引継ぎ文書の名 |
+| 並列の計画 | `parallel.py`（`init`・`lane`）。この変更で変えるのは、計画の検査（`parallel_plan.py`）のレーンの引継ぎ文書の名の検査 1 つ（I5）と、計画名の形（`PLAN_RE`）の定義の置き場（`parallel_files.py` へ移す。形は変えない）だけである。計画の宣言とレーンを書き換える処理（`parallel.py` の副命令）は変えない | 計画の宣言（`plan.json`） | レーン | 計画名・レーンの引継ぎ文書の名 |
 
 引継ぎ文書は並列の計画を計画名（文字列）だけで参照し、計画の宣言を読まない（ほかの集約を ID で参照する規則）。
 並列の計画のレーンの引継ぎ文書の名は、引継ぎ文書の名の規則で検査する（今と同じ）。
@@ -49,7 +49,7 @@
 | I1 | 引継ぎ文書 | 名は `parallel-<計画名>`・`loop-<名>`・`sprint-<名>`・`milestone-<番号>`・`issue-<番号>` のどれかの形で、`-history` で終わらない | `handoff.py` が終了コード 2 で断り、何も書かない。summary に 5 つの形を並べる |
 | I2 | 引継ぎ文書 | `parallel-` の後ろは計画名の形（並列の計画の `PLAN_RE`）に合う | I1 と同じ |
 | I3 | 引継ぎ文書 | 既存の 4 つの形の名の受け付けと、`find` の一致の規則は変わらない | 既存の `test_handoff.py` が落ちる |
-| I4 | 引継ぎ文書 | `find` で本体 `parallel-<X>` が一致するのは、入力に `--parallel <X>`（空白は 1 個以上）か `parallel-<X>` があり、その後ろに英数字・`_`・`-` が続かないときだけである。裸の `<X>` では一致しない | 一時レーンの入力（`--parallel-helper <X> ...`）がオーガナイザーの文書に当たる・`--parallel p40` が `parallel-p4` に当たる |
+| I4 | 引継ぎ文書 | `find` で本体 `parallel-<X>` が一致するのは、次の 3 つをすべて満たす語が入力にあるときだけである。(1) 一致する語: `--parallel <X>`（空白は 1 個以上）か `parallel-<X>`。(2) 前の境界: 語の前が英数字・`_`・`-` でない（入力の先頭はよい）。(3) 後ろの境界: 語の後ろに英数字・`_`・`-` が続かない。裸の `<X>` だけでは一致しない | 一時レーンの入力（`--parallel-helper <X> ...`）がオーガナイザーの文書に当たる・`--parallel p40` が `parallel-p4` に当たる・`xparallel-p4` や `--parallel-p4` が `parallel-p4` に当たる |
 | I5 | 並列の計画 | レーンの引継ぎ文書の名は `parallel-` の形をとらない | 計画の検査が誤りの種類 `I5` で断る（今の振る舞いと同じ結果） |
 | I6 | 引継ぎ文書 | オーガナイザーのセッションの再開コマンドは起動と同じ 1 行で、文書のパスを足さない | `/goal` の終わりの条件に「の続きから」が混ざり、新しいセッションの終わりの判定が変わる |
 
@@ -63,7 +63,7 @@
 | E4 | `handoff.py next` が「次に実行するコマンド」に起動と同じ 1 行を置いた | `handoff.py` | `handoff.py check` |
 | E5 | `handoff.py check --trim` が形と行数を確かめた | `handoff.py` | `restart` の手順 3（ブロックを出す） |
 | E6 | `restart` が `ndf-next` のブロックを出し、中継が新しいセッションへ切り替えた | `restart`・中継 | 新しいセッション |
-| E7 | 新しいセッションが `find` で引継ぎ文書を読み、オーガナイザーを再開した | 新しいセッションの `development-workflow` | `parallel.py start <計画名>` |
+| E7 | 新しいセッションが `find` で引継ぎ文書を読み、オーガナイザーを再開した | 新しいセッションの `development-workflow`（`parallel.md` の手順 0。`parallel.py start` より先に打つ） | `parallel.py start <計画名>` |
 
 ### 用語
 
@@ -94,6 +94,7 @@
 | `scripts/tests/test_handoff.py`（変える） | 受け入れ条件 1〜5・8 と I1〜I4 を縛る |
 | `scripts/tests/test_parallel_plan.py`（変える） | I5 を縛る |
 | `skills/development-workflow/references/handoff.md`（変える） | 「置き場と名」の表の先頭に並列の計画の行を足す。`find` の一致の規則の表に `parallel-<X>` の行を足す。「作る・更新する」の 3 に、オーガナイザーの再開コマンドは文書のパスを含めない例外を書く（I6） |
+| `skills/development-workflow/references/parallel.md`（変える） | 「手順」の 1（`parallel.py start`）の前に手順 0 を足す。`handoff.py find --text "<最初の入力の全文>"` を打ち、扱いは `handoff.md` の「読む」の名指しが無い行と同じにする（0: 本体を読み、「進め方（利用者の指示）」を守って手順 1 へ進む。1・3: 文書なしで手順 1 へ進む。10: どれも読まずに、候補のパスを示して利用者へ聞く）。本体の「次にやること」は、手順 1 の後に `wait` が返す計画の状態と照らし、食い違いを報告する（状態の正は耐久ワークフロー）。名の規則は変えない |
 | `skills/restart/SKILL.md`（変える） | 手順 2 の名の一覧を 5 つの形にする。「再開コマンドを決める」の表の先頭に、オーガナイザーのセッションの行（起動と同じ 1 行。文書なしでも同じ）を足す |
 | `docs/glossary/glossary.json`・`docs/glossary.md`（変える） | 「引継ぎの対象」の意味を 5 つの種類にする（この設計の変更に含めてある） |
 
@@ -143,6 +144,7 @@ grep -rn "NAME_RE\|handoff\.\|milestone-<番号>\|sprint-<" plugins/ndf/scripts 
 | `handoff.md` の「置き場と名」・`find` の一致の規則・「再開コマンドは文書のパスを含める」 | 当てはまらない | 変える |
 | `restart` の手順 2 の名の一覧・「再開コマンドを決める」の 1 行目 | 当てはまらない | 変える |
 | 用語集の「引継ぎの対象」 | 当てはまらない | 変える |
+| `parallel.md` の「手順」（`--parallel <計画名>` の入力は判定の手順へ進まず、「新しい会話で戻す」の引継ぎ文書を読む行を通らずに `parallel.py start` へ進む） | 当てはまらない | 変える（E7。手順 0 を足す） |
 
 ## 入出力の契約
 
@@ -169,6 +171,8 @@ grep -rn "NAME_RE\|handoff\.\|milestone-<番号>\|sprint-<" plugins/ndf/scripts 
 | `.ndf/handoff/parallel-p4.md の続きから` | する |
 | `--parallel p40 -- ...` | しない |
 | `--parallel-helper p4 3 <提示> -- ...`（一時レーン） | しない |
+| `xparallel-p4` | しない |
+| `--parallel-p4` | しない |
 
 ## 処理の流れ
 
@@ -190,6 +194,7 @@ sequenceDiagram
     R->>N: 起動と同じ 1 行を最初の入力にして起動
     N->>H: find --text（入力の全文）
     H-->>N: 0（parallel-p4.md）
+    N->>N: 本体を読む（parallel.md の手順 0）
     N->>N: parallel.py start p4
 ```
 
@@ -251,10 +256,10 @@ sequenceDiagram
 | 受け入れ条件 1 | `.ndf/` のある一時のリポジトリで `init parallel-p4 --title ...` が 0 を返し、メインディレクトリの `.ndf/handoff/parallel-p4.md` がテンプレートの中身になる | `NAME_RE` から `parallel-` を外すと落ちる |
 | 受け入れ条件 2 | 課題の事象の再開コマンドを標準入力に渡した `next parallel-p4` が 0 を返し、「次に実行するコマンド」の節がその 1 行のブロックになる。続く `check parallel-p4 --trim` が 0 を返す | `next` か `check` が名の検証で 2 を返すと落ちる |
 | 受け入れ条件 3 | `path .ndf/handoff/parallel-p4.md --exists` が文書のあるとき 0、無いとき 1。`remove parallel-p4` の後に本体と履歴が無い | パスからの名の取り出しで `parallel-` を断ると落ちる |
-| 受け入れ条件 4・I4 | `parallel-p4.md` だけがあるとき、`find --text` が上の一致の例の表の 4 行どおりに 0 か 1 を返す | 裸の鍵で一致させると一時レーンの行で、後ろの境界を外すと `p40` の行で落ちる |
+| 受け入れ条件 4・I4 | `parallel-p4.md` だけがあるとき、`find --text` が上の一致の例の表の 6 行どおりに 0 か 1 を返す | 裸の鍵で一致させると一時レーンの行で、後ろの境界を外すと `p40` の行で、前の境界を外すと `xparallel-p4` と `--parallel-p4` の行で落ちる |
 | 受け入れ条件 5・I1・I2 | `parallel-`・`parallel-P4`・`parallel-p4-history`・25 字の計画名・`plan-p4` が 2 を返し、summary に `parallel-<計画名>` が載る | 鍵の形を緩める（`.*` など）と落ちる |
 | 受け入れ条件 6 | テストを書かない（`.md` の文言を照合するテストは書かない）。設計 Pull Request と実装 Pull Request のレビューで、正本の 2 つの表と `restart` の 2 か所を見る | — |
-| 受け入れ条件 7・I6 | リリース後テストで、中継の下のオーガナイザーで `/ndf:restart` を打ち、ブロックが出て切り替わり、新しいセッションが `parallel.py start <計画名>` で同じ計画を続けることを見る | `restart` が文書のパスを足すと、新しいセッションの `/goal` の終わりの条件が変わる |
+| 受け入れ条件 7・I6・E7 | リリース後テストで、中継の下のオーガナイザーで `/ndf:restart` を打ち、ブロックが出て切り替わり、新しいセッションが `parallel.py start <計画名>` より先に引継ぎ文書を読み、同じ計画を続けることを見る | `restart` が文書のパスを足すと、新しいセッションの `/goal` の終わりの条件が変わる |
 | 受け入れ条件 8・I3 | 既存の `test_handoff.py` がそのまま通る | 既存の 4 つの形の正規表現か一致の規則を変えると落ちる |
 | I5 | レーンの `handoff` に `parallel-p4` を書いた計画の検査が、誤りの種類 `I5` で断る | レーンの検査を `NAME_RE` だけにすると落ちる |
 | 決定 3 | 計画名の上限を `parallel_files.py` で変えると、`handoff.py` と計画の検査の両方が同じ名を受け付ける（25 字の計画名を両方が断る） | `handoff.py` に正規表現を写すと、一方だけ変えたときに食い違う（テストでは両方が 25 字を断ることを縛る） |
@@ -263,11 +268,10 @@ sequenceDiagram
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2778 | 実装する | — | `plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/tests/test_handoff.py`、`plugins/ndf/scripts/tests/test_parallel_plan.py`、`plugins/ndf/skills/development-workflow/references/handoff.md`、`plugins/ndf/skills/restart/SKILL.md` |
+| #2778 | 実装する | — | `plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/tests/test_handoff.py`、`plugins/ndf/scripts/tests/test_parallel_plan.py`、`plugins/ndf/skills/development-workflow/references/handoff.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/restart/SKILL.md` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 新しいセッションが引継ぎ文書を読むか | `development-workflow` は `--parallel <計画名>` があると判定の手順へ進まず `parallel.md` の手順 1（`parallel.py start`）へ進む。「新しい会話で戻す」の 0 行目（引継ぎ文書を読む）がこの経路でも先に通るかは、文書からは決まらない。計画の状態は耐久ワークフローが持つため、読まなくても受け入れ条件 7 の再開は成り立つ。読まれるかは受け入れ条件 7 のリリース後テストで見る |
 | コンテキスト量の hook の案内 | `hook_lib/token_guard.py` の止めるときの文面は、再開コマンドを「`/goal <次> .ndf/handoff/<名>.md の続きから`」と案内し、決定 5 と合わない。この hook が止めるのは `supervise.py` のプラン・工程 Skill・工程のサブエージェントの起動だけで（`shell_checks.starts_plan` は `supervise.py` を含まないコマンドで偽を返す）、オーガナイザーはそれらを起動しない（`parallel.md` の「手順」）。オーガナイザーの会話で hook が止めた実例は未確認で、この変更では文面を変えない |
