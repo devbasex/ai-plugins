@@ -187,12 +187,35 @@ def _own_kind_labels(raw: dict, kinds: list[str], path: Path) -> dict[str, str]:
     return {k: v.strip() for k, v in own.items()}
 
 
-def load_definition(root=None) -> Definition:
-    path = items_path(root)
-    raw = _definition_json(path)
+def _read_kinds(raw: dict, path: Path) -> list[str]:
+    """定義の `kinds`。空でない文字列の並び。"""
     kinds = raw.get("kinds")
     if not isinstance(kinds, list) or not kinds or not all(isinstance(k, str) and k for k in kinds):
         raise DefinitionError(f"{path}: kinds が文字列の並びでない")
+    return kinds
+
+
+def _record_headings(raw: dict, st: dict, path: Path) -> list[str]:
+    """表し方の `record_headings` に、定義の `record_headings`（任意）のうち無いものを足した並び。"""
+    own = raw.get("record_headings")
+    if own is not None and (not isinstance(own, list) or not all(isinstance(h, str) and h.strip() for h in own)):
+        raise DefinitionError(f"{path}: record_headings が文字列の並びでない")
+    heads = [h for h in st.get("record_headings") or [] if isinstance(h, str)]
+    heads += [h for h in own or [] if h not in heads]
+    return heads
+
+
+def _check_merged_labels(definition: Definition, path: Path) -> None:
+    """kind_labels で置き換えた後のラベル名が種類どうしで重ならないこと。"""
+    merged = definition.labels_by_kind()
+    if len(set(merged.values())) != len(merged):
+        raise DefinitionError(f"{path}: kind_labels で置き換えたラベル名が、ほかの種類の既定のラベル名と重なる")
+
+
+def load_definition(root=None) -> Definition:
+    path = items_path(root)
+    raw = _definition_json(path)
+    kinds = _read_kinds(raw, path)
     rows = raw.get("items")
     if not isinstance(rows, list) or not rows:
         raise DefinitionError(f"{path}: items が無い")
@@ -200,16 +223,10 @@ def load_definition(root=None) -> Definition:
     st = _definition_json(STORES)
     stores = st.get("stores") if isinstance(st.get("stores"), dict) else {}
     _check_stores(stores, items)
-    own = raw.get("record_headings")
-    if own is not None and (not isinstance(own, list) or not all(isinstance(h, str) and h.strip() for h in own)):
-        raise DefinitionError(f"{path}: record_headings が文字列の並びでない")
-    heads = [h for h in st.get("record_headings") or [] if isinstance(h, str)]
-    heads += [h for h in own or [] if h not in heads]
+    heads = _record_headings(raw, st, path)
     last = raw.get("last") if isinstance(raw.get("last"), str) else None
     definition = Definition(kinds, items, last, stores, heads, path, own_kind_labels=_own_kind_labels(raw, kinds, path))
-    merged = definition.labels_by_kind()
-    if len(set(merged.values())) != len(merged):
-        raise DefinitionError(f"{path}: kind_labels で置き換えたラベル名が、ほかの種類の既定のラベル名と重なる")
+    _check_merged_labels(definition, path)
     return definition
 
 
