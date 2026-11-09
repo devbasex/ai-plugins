@@ -5896,6 +5896,42 @@
       "meaning": "記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応",
       "source": "",
       "pending_source": "issues/issue-2737-design.md"
+    },
+    {
+      "term": "サブスクリプション",
+      "context": "ndf-relay",
+      "meaning": "利用者が Anthropic と結ぶ Claude の契約（Max・Ultra・Team）。利用上限（5 時間・週）と月の API クレジットを持つ。supervise.py の「プラン」とは別の物",
+      "pending_source": "issues/issue-2855-requirements.md"
+    },
+    {
+      "term": "API クレジット",
+      "context": "ndf-relay",
+      "meaning": "サブスクリプションにリンクした Console 組織へ毎月付く API の残高。利用上限と別枠で、未使用分は請求の周期の終わりで消える",
+      "pending_source": "issues/issue-2855-requirements.md"
+    },
+    {
+      "term": "登録済み API キー",
+      "context": "ndf-relay",
+      "meaning": "利用者が `relay.py account` の副命令で預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持ち、worker の `claude -p` にだけ使う",
+      "pending_source": "issues/issue-2855-requirements.md"
+    },
+    {
+      "term": "残高切れ",
+      "context": "ndf-relay",
+      "meaning": "API キーの要求が \"credit balance is too low\" で失敗した状態。そのキーは解除の条件を満たすまで候補から外れる",
+      "pending_source": "issues/issue-2855-requirements.md"
+    },
+    {
+      "term": "API キーの使い方の宣言",
+      "context": "ndf-relay",
+      "meaning": "登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」",
+      "pending_source": "issues/issue-2855-requirements.md"
+    },
+    {
+      "term": "API キーの登録簿",
+      "context": "ndf-relay",
+      "meaning": "登録済み API キーと API キーの使い方の宣言を持つ、アカウントの置き場の 1 つのファイル（0600）",
+      "pending_source": "issues/issue-2855-design.md"
     }
   ]
 }

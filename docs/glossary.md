@@ -697,6 +697,12 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | tmux の専用サーバー | — | 中継のレーンを動かす tmux サーバー（tmux -L ndf-relay）。利用者の既定の tmux サーバーとは別である | — | — | `docs/specifications/ndf-relay-lane-parent-session-env.md` |
 | 親のセッションの環境 | — | 動いている claude のセッションとそのラッパーに固有の環境変数。別のプロセスへ継がれると、そのプロセスを親のセッションの中にいると誤らせる | — | — | `docs/specifications/ndf-relay-lane-parent-session-env.md` |
 | アカウントの選定 | — | ラッパーが区間を起動するときに、指定・残量・上限から使うアカウントを決める手順 | — | — | `docs/specifications/ndf-relay-lane-parent-session-env.md` |
+| サブスクリプション | — | 利用者が Anthropic と結ぶ Claude の契約（Max・Ultra・Team）。利用上限（5 時間・週）と月の API クレジットを持つ。supervise.py の「プラン」とは別の物 | — | — | — |
+| API クレジット | — | サブスクリプションにリンクした Console 組織へ毎月付く API の残高。利用上限と別枠で、未使用分は請求の周期の終わりで消える | — | — | — |
+| 登録済み API キー | — | 利用者が `relay.py account` の副命令で預けた Anthropic の API キー。名前と、結び付いた登録済みアカウントを持ち、worker の `claude -p` にだけ使う | — | — | — |
+| 残高切れ | — | API キーの要求が "credit balance is too low" で失敗した状態。そのキーは解除の条件を満たすまで候補から外れる | — | — | — |
+| API キーの使い方の宣言 | — | 登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」 | — | — | — |
+| API キーの登録簿 | — | 登録済み API キーと API キーの使い方の宣言を持つ、アカウントの置き場の 1 つのファイル（0600） | — | — | — |
 
 ## NDF のリリース（`ndf-release`）
 
