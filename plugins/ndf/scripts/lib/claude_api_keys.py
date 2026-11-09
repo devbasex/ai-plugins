@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import claude_accounts as ca
+import claude_settings
 import limits
 from claude_usage import epoch, iso_utc
 
@@ -38,6 +39,8 @@ STATES = (OK, CREDIT_LOW, AUTH_FAILED)
 KEY_ENV = "ANTHROPIC_API_KEY"
 NAME_ENV = "NDF_CLAUDE_API_KEY_NAME"  # 子へ渡した API キーの名前（入れ子の supervise.py が読む）
 GENERATION_ENV = "NDF_CLAUDE_API_KEY_GENERATION"  # 子へ渡した API キーの世代
+# キーで起動した子が、キーを外したときに戻る登録済みアカウントの名前（キーの環境は親のアカウントを外すため、名前だけを残す）
+BACK_ENV = "NDF_CLAUDE_KEY_ACCOUNT"
 BASE_URL_ENV = "ANTHROPIC_BASE_URL"  # claude の送り先。Anthropic の外を指すなら登録済みのキーを使わない
 ANTHROPIC_HOST = "api.anthropic.com"
 CREDIT_HOLD = limits.seconds("claude-api-keys.credit-hold")
@@ -284,20 +287,13 @@ def _key_free_env(base: dict) -> dict:
     """`base` から認証の変数・従量の接続の宣言のキー・API キーの名前と世代を外し、親のアカウントの環境を元へ戻した写し。"""
     env = dict(base)
     declared = ca.fallback_env(env)
-    for name in (*ca.STRIPPED_AUTH_ENV, *declared, NAME_ENV, GENERATION_ENV):
+    for name in (*ca.STRIPPED_AUTH_ENV, *declared, NAME_ENV, GENERATION_ENV, BACK_ENV):
         env.pop(name, None)
     ca.leave_account(env)
     return env
 
 
-def sends_to_anthropic(base: dict) -> bool:
-    """`base` から組む子の環境で、キーの送り先が Anthropic（`https://api.anthropic.com`）か。
-
-    継承した `ANTHROPIC_BASE_URL` が別のホストを指すなら偽。登録の確かめで Anthropic へだけ送ったキーを、
-    ゲートウェイなど別のサービスへ送らないため、そのときはキーを使わず今の認証で起動する。"""
-    url = _key_free_env(base).get(BASE_URL_ENV)
-    if not url:
-        return True
+def _is_anthropic(url: str) -> bool:
     try:
         p = urllib.parse.urlsplit(url)
         return p.scheme == "https" and p.hostname == ANTHROPIC_HOST and p.port in (None, 443)
@@ -305,21 +301,44 @@ def sends_to_anthropic(base: dict) -> bool:
         return False
 
 
-def env_with_key(k: ApiKey, base: dict) -> dict:
-    """`base` から認証の変数と従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻して、選んだ 1 本を足す。"""
+def sends_to_anthropic(base: dict, cwd: str | None = None) -> bool:
+    """`base` から組む子の環境で、`cwd` で起動した claude のキーの送り先が Anthropic（`https://api.anthropic.com`）か。
+
+    継承した `ANTHROPIC_BASE_URL` か、子が読む設定のファイルの `env` の `ANTHROPIC_BASE_URL`（起動の環境より優先される）の
+    どれかが別のホストを指すなら偽。登録の確かめで Anthropic へだけ送ったキーを、ゲートウェイなど別のサービスへ送らないため、
+    そのときはキーを使わず今の認証で起動する。どの設定が勝つかは決めず、どれか 1 つでも外を指せば使わない。"""
+    env = _key_free_env(base)
+    urls = [u for u in (env.get(BASE_URL_ENV), *claude_settings.env_values(BASE_URL_ENV, env, cwd)) if u]
+    return all(_is_anthropic(u) for u in urls)
+
+
+def env_with_key(k: ApiKey, base: dict, account: str | None = None) -> dict:
+    """`base` から認証の変数と従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻して、選んだ 1 本を足す。
+
+    キーを外したときに戻るアカウント（`account`。無ければ `base` の起動したときのアカウントか、`base` が受け継いだ戻り先）の
+    名前を `BACK_ENV` に残す。従量の接続へは戻さない。"""
+    back = account if account is not None else (base.get(ca.NAME_ENV) or base.get(BACK_ENV))
     env = _key_free_env(base)
     env[KEY_ENV] = k.key
     env[NAME_ENV] = k.name
     env[GENERATION_ENV] = k.generation
+    if back and back != ca.METERED:
+        env[BACK_ENV] = back
     return env
 
 
 def without_key(base: dict) -> dict:
-    """`base` から API キーの変数を外した環境（入れ子の起動で、受け継いだキーを使えなくなったとき）。"""
+    """`base` から API キーの変数と戻り先の名前を外した環境（入れ子の起動で、受け継いだキーを使えなくなったとき）。"""
     env = dict(base)
-    for name in (KEY_ENV, NAME_ENV, GENERATION_ENV):
+    for name in (KEY_ENV, NAME_ENV, GENERATION_ENV, BACK_ENV):
         env.pop(name, None)
     return env
+
+
+def back_account(environ=None) -> str | None:
+    """受け継いだキーを外したときに戻る登録済みアカウントの名前（`BACK_ENV`）。無ければ None。"""
+    environ = os.environ if environ is None else environ
+    return environ.get(BACK_ENV) or None
 
 
 def inherited(environ=None) -> tuple[str, str] | None:
@@ -354,14 +373,17 @@ class KeyRoute:
     """`supervise.py` の起動口（`ClaudeRunner`）の 1 プロセスの API キーの持ち方。
 
     `state` はプランの状態（`cur`・`switched`・`progress_write`）。`key` は直前の起動の API キーの名前（無ければ None）。
-    `inherited` は起動したときの環境が持つキー（入れ子の起動）で、使えなくなったら `dropped` にして以後の子から外す。"""
+    `inherited` は起動したときの環境が持つキー（入れ子の起動）で、使えなくなったら `dropped` にして以後の子から外す。
+    `back` はそのとき戻る登録済みアカウント。`account()` は呼び手の今のアカウント（キーの子の戻り先に残す）。"""
 
-    def __init__(self, state, environ=None):
+    def __init__(self, state, environ=None, account=None):
         self.state = state
         self.key: str | None = None
+        self.account = account or (lambda: None)
         environ = os.environ if environ is None else environ
         got = inherited(environ)
         self.inherited = ApiKey(got[0], "", "", got[1], environ[KEY_ENV]) if got else None
+        self.back = back_account(environ) if got else None
         self.dropped = False
         self.told = False
 
@@ -375,9 +397,10 @@ class KeyRoute:
                 self.state.progress_write({"kind": "api_keys_invalid", "detail": bad})
         return use_setting()
 
-    def attempt(self, keep) -> KeyTry:
-        """1 回の呼び出しの API キーの試し方。`keep()` はトークンを更新しないアカウントの名前（near-limit の判定へ渡す）。"""
-        return KeyTry(self, self.use(), keep)
+    def attempt(self, keep, cwd: str | None = None) -> KeyTry:
+        """1 回の呼び出しの API キーの試し方。`keep()` はトークンを更新しないアカウントの名前（near-limit の判定へ渡す）。
+        `cwd` は子の claude を起動する場所（子が読むプロジェクトの設定の送り先を確かめる）。"""
+        return KeyTry(self, self.use(), keep, cwd)
 
     def note_switch(self, k: ApiKey | None) -> None:
         """使うキーが替わったら、プランの状態（`auth`・`switched`）と進捗ログの `account` の行に残す（E3・E7）。"""
@@ -416,8 +439,8 @@ class KeyRoute:
 class KeyTry:
     """1 回の呼び出しの中の API キーの試し方（外したキーと、上限に当たって替えるアカウントが無かったか）。"""
 
-    def __init__(self, route: KeyRoute, how: str, keep):
-        self.route, self.how, self.keep = route, how, keep
+    def __init__(self, route: KeyRoute, how: str, keep, cwd: str | None = None):
+        self.route, self.how, self.keep, self.cwd = route, how, keep, cwd
         self.tried: set[str] = set()
         self.limit_hit = False  # near-limit の条件 3
 
@@ -425,7 +448,7 @@ class KeyTry:
         """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。"""
         r = self.route
         if not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep())))):
-            if sends_to_anthropic(dict(os.environ)) and (k := pick_key(exclude=self.tried)) is not None:
+            if sends_to_anthropic(dict(os.environ), self.cwd) and (k := pick_key(exclude=self.tried)) is not None:
                 return k
         return r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
 
@@ -433,7 +456,7 @@ class KeyTry:
         """キーで起動する（`call(環境)`）。キーで決着したらその結果、使うキーが無くなったら None を返す。"""
         while (k := self.pick()) is not None:
             self.route.note_switch(k)
-            res = call(env_with_key(k, dict(os.environ)) if k is not self.route.inherited else None)
+            res = call(env_with_key(k, dict(os.environ), self.route.account()) if k is not self.route.inherited else None)
             if not self.route.result(k, res, self.tried):
                 return res
         self.route.note_switch(None)
@@ -443,21 +466,19 @@ class KeyTry:
         """キーを使わない起動の環境。受け継いだキーを外したなら、キーの変数を外す。
 
         受け継いだキーの環境は親のアカウントを外している（`env_with_key`）。起動したときの環境のままでは、ログインの無い
-        共有の設定ディレクトリで起動しうるため、登録済みアカウントがあれば選定で選んだアカウントの環境へ戻す。"""
+        共有の設定ディレクトリで起動しうるため、親が残した戻り先（`back`）のアカウントの環境へ戻す。登録が 2 つ以上なら
+        呼び手（`ClaudeRunner`）が先に戻り先へ替えるため、ここへ来るのは登録が 1 つ以下のときである。"""
         if not self.route.dropped:
             return child
         if child is not None:
             return without_key(child)
         base = without_key(dict(os.environ))
-        if ca.registered():
-            _, env = ca.choose_env(keep=self.keep(), base=base)
-            if env is not None:
-                return env
-        return base
+        back = self.route.back
+        return (ca.account_env(back, base) if back else None) or base
 
     def left(self) -> bool:
         """上限に当たって替えるアカウントが無いとき、試せるキーが残っていれば真（以後 near-limit でもキーを使う）。"""
-        if self.how == "off" or not sends_to_anthropic(dict(os.environ)) or pick_key(exclude=self.tried) is None:
+        if self.how == "off" or not sends_to_anthropic(dict(os.environ), self.cwd) or pick_key(exclude=self.tried) is None:
             return False
         self.limit_hit = True
         return True

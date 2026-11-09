@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_accounts as ca  # noqa: E402
 import claude_api_keys as ak  # noqa: E402
+import claude_settings  # noqa: E402
 from account_fake import accounts  # noqa: E402,F401
 from test_supervise import LIMIT, OK, SEQ_CLAUDE, progress_rows, run_plan, seq  # noqa: E402,F401
 
@@ -158,10 +159,24 @@ def test_nested_always_drops_the_inherited_key_and_returns_to_an_account(tmp_pat
     monkeypatch.setenv(ak.KEY_ENV, KEY_A)
     monkeypatch.setenv(ak.NAME_ENV, "k")
     monkeypatch.setenv(ak.GENERATION_ENV, k.generation)
+    monkeypatch.setenv(ak.BACK_ENV, "main")
     set_responses(CREDIT, OK)
     s, text = run_plan(tmp_path, STEP)
     assert "結果: 完了" in text
     assert [(c["api_key"], c["account"]) for c in calls()] == [(KEY_A, None), (None, "main")]
+
+
+def test_nested_drop_switches_to_the_back_account_and_reassigns_on_auth(tmp_path, seq, accounts, monkeypatch):  # noqa: F811
+    """キーを外した入れ子は戻り先を今のアカウントとして持ち、そのログインが通らなければ別のアカウントへ振り替える。"""
+    set_responses, calls = setup(tmp_path, seq, accounts, None, ("k", KEY_A, "a"))
+    accounts.add("b")
+    k = ak.get("k")
+    for name, value in ((ak.KEY_ENV, KEY_A), (ak.NAME_ENV, "k"), (ak.GENERATION_ENV, k.generation), (ak.BACK_ENV, "a")):
+        monkeypatch.setenv(name, value)
+    set_responses(CREDIT, BAD_KEY, OK)
+    s, text = run_plan(tmp_path, STEP)
+    assert "結果: 完了" in text
+    assert [(c["api_key"], c["account"]) for c in calls()] == [(KEY_A, None), (None, "a"), (None, "b")]
     assert ak.state_of(ak.get("k")).state == ak.CREDIT_LOW
 
 
@@ -192,3 +207,29 @@ def test_failure_of_a_replaced_key_is_not_recorded(accounts, monkeypatch):  # no
     assert ak.state_of(ak.get("k")).state == ak.OK and ak.pick_key().name == "k"
     assert rows == [{"kind": "api_key", "step": "s1", "name": "k", "reason": "stale_generation"}]
     assert json.dumps(rows).count("SECRET") == 0
+
+
+def test_key_is_not_sent_when_settings_point_elsewhere(tmp_path, monkeypatch):
+    """子が読む設定のファイルの env にある送り先（起動の環境より優先される）も確かめる。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(claude_settings, "MANAGED_SETTINGS", (str(tmp_path / "managed" / "managed-settings.json"),))
+    proj = tmp_path / "repo" / "sub"
+    proj.mkdir(parents=True)
+
+    def put(path: Path, url: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"env": {ak.BASE_URL_ENV: url}}))
+
+    assert ak.sends_to_anthropic({}, str(proj))
+    put(tmp_path / "repo" / ".claude" / "settings.json", "https://api.anthropic.com")
+    assert ak.sends_to_anthropic({}, str(proj))
+    for path in (
+        tmp_path / "repo" / ".claude" / "settings.local.json",
+        tmp_path / "conf" / "settings.json",
+        tmp_path / "managed" / "managed-settings.d" / "10.json",
+    ):
+        put(path, "https://gateway.example.com")
+        assert not ak.sends_to_anthropic({"CLAUDE_CONFIG_DIR": str(tmp_path / "conf")}, str(proj)), path
+        path.unlink()
+    (tmp_path / "repo" / ".claude" / "settings.local.json").write_text("{broken")  # claude -p も読み飛ばす
+    assert ak.sends_to_anthropic({}, str(proj))

@@ -247,7 +247,7 @@ class ClaudeRunner:
         self.metered_told = False  # 壊れた保存の宣言の 1 行を出したか
         self.running: list[str | None] = []  # 実行中の呼び出しのアカウント
         # 登録済み API キー（#2855）。`account` とは別に持ち、外したら元のアカウントの選定へそのまま戻る
-        self.keys = ak.KeyRoute(ctx.state)
+        self.keys = ak.KeyRoute(ctx.state, account=lambda: self.account)
 
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
@@ -269,7 +269,7 @@ class ClaudeRunner:
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
-        keys = self.keys.attempt(self.keep)
+        keys = self.keys.attempt(self.keep, cwd)
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
         direct = lambda env: call_claude(system, prompt, tools, cwd, timeout, child_env=env, **kw)  # noqa: E731
@@ -277,6 +277,7 @@ class ClaudeRunner:
         while True:
             if (res := keys.run(once)) is not None:  # API キーで決着した
                 return res
+            self._return_from_key(multi)
             try:
                 child = keys.env(self.child_env(fallback) if multi else None)
             except AccountsLimited as e:
@@ -297,6 +298,15 @@ class ClaudeRunner:
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
             keys.reset()
+
+    def _return_from_key(self, multi: bool) -> None:
+        """受け継いだキーを外した入れ子で、アカウントを持たなければ親が残した戻り先（`KeyRoute.back`）へ替える。
+
+        キーの環境は親のアカウントを外している（`claude_api_keys.env_with_key`）。今のアカウントとして持つことで、
+        戻り先のログインが通らないときも認証の失敗の振り替え（`_retry_on_auth`）と上限の切り替えが働く。"""
+        back = self.keys.back
+        if multi and self.keys.dropped and self.account is None and back and back in ca.names():
+            self.switch(back, "api_key")
 
     def _retry_on_auth(self, res: dict, multi: bool, auth_failed: set[str]) -> bool:
         """認証が通らなかった登録済みのアカウントを記録する。同じ呼び出しを別のアカウントでやり直すなら真。"""

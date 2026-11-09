@@ -202,9 +202,15 @@ def test_key_env_only_for_worker_not_for_wrapper_section(accounts, monkeypatch):
     monkeypatch.setenv(ca.TOKEN_ENV, "oauth-SECRET")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "auth-SECRET")
     monkeypatch.setenv(ca.NAME_ENV, "a")
+    monkeypatch.setenv("CLAUDE_CODE_USE_FOUNDRY", "1")
     env = ak.env_with_key(ak.pick_key(), dict(os.environ))
     assert env[ak.KEY_ENV] == KEY_A and env[ak.NAME_ENV] == "k"
     assert ca.TOKEN_ENV not in env and "ANTHROPIC_AUTH_TOKEN" not in env and ca.NAME_ENV not in env
+    assert "CLAUDE_CODE_USE_FOUNDRY" not in env  # 認証の優先順位でキーより上に来る
+    # 外した親のアカウントは、キーを外したときの戻り先として名前だけ残る。呼び手の今のアカウントがあればそちら
+    assert env[ak.BACK_ENV] == "a"
+    assert ak.env_with_key(ak.pick_key(), dict(os.environ), "b")[ak.BACK_ENV] == "b"
+    assert ak.BACK_ENV not in ak.env_with_key(ak.pick_key(), dict(os.environ), ca.METERED)
     from relay_lib import claude as relay_claude
 
     wrapped = relay_claude.section_env(dict(os.environ), "a")

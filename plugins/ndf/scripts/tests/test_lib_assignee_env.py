@@ -59,10 +59,15 @@ def test_registered_api_key_is_not_passed_to_any_seat(accounts):  # noqa: F811
 def test_keyed_claude_seat_without_account_returns_to_a_registered_account(accounts):  # noqa: F811
     """キーを外した claude の席は、アカウントが無くても登録済みアカウントのログインへ戻る（共有の設定で起動しない）。"""
     accounts.add("work2")
-    keyed = {"PATH": "/bin", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
+    accounts.add("work1")
+    keyed = {"PATH": "/bin", assignee_env.BACK_ENV: "work2", **dict(zip(assignee_env.API_KEY_ENV, ("sk-SECRET", "k", "g")))}
     env = assignee_env.seat_env("claude", None, keyed)
     assert env[ca.CONFIG_ENV] == ca.account_dir("work2")
-    assert not any(n in env for n in assignee_env.API_KEY_ENV)
+    assert not any(n in env for n in (*assignee_env.API_KEY_ENV, assignee_env.BACK_ENV))
+    # 振り替えは戻り先を試したものに数える（同じアカウントを選び直さない）
+    assert assignee_env.initial_account(keyed) == "work2"
+    assert assignee_env.pick_account(frozenset({assignee_env.initial_account(keyed)})) == "work1"
+    assert assignee_env.initial_account({assignee_env.BACK_ENV: "work2"}) is None  # キーの無い起動では読まない
     assert assignee_env.seat_env("codex", None, keyed).get(ca.CONFIG_ENV) is None
 
 
