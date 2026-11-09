@@ -393,9 +393,10 @@ def set_event(key: str, value: Any) -> None:
 
 
 @contextlib.contextmanager
-def open_client(kind: str, identity: str) -> Any:
-    """`record_path(kind, identity)` の SQLite を開いた `DBOSClient`。ファイルが無ければ `DurableError`。"""
-    path = record_path(kind, identity)
+def open_client(kind: str, identity: str, start: Optional[Path] = None) -> Any:
+    """`record_path(kind, identity, start)` の SQLite を開いた `DBOSClient`。ファイルが無ければ `DurableError`。
+    `start` は記録の置き場を決めるチェックアウト（省けば作業ディレクトリ。`records_dir`）。"""
+    path = record_path(kind, identity, start)
     if not path.exists():
         raise DurableError(f"耐久の記録 {path} が無い")
     c = DBOSClient(system_database_url=_url(path))
@@ -405,23 +406,23 @@ def open_client(kind: str, identity: str) -> Any:
         c.destroy()
 
 
-def send_to(kind: str, identity: str, wid: str, msg: Any, topic: str, key: str) -> None:
+def send_to(kind: str, identity: str, wid: str, msg: Any, topic: str, key: str, start: Optional[Path] = None) -> None:
     """外から耐久ワークフロー `wid` へメッセージを送る。同じ `key` の 2 度目は数えない。"""
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         c.send(wid, msg, topic, idempotency_key=key)
 
 
-def event_from(kind: str, identity: str, wid: str, key: str, timeout: float = 0) -> Any:
+def event_from(kind: str, identity: str, wid: str, key: str, timeout: float = 0, start: Optional[Path] = None) -> Any:
     """外から耐久ワークフロー `wid` のイベント `key` を読む。`timeout` 秒待ち、無ければ None。"""
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         return c.get_event(wid, key, timeout_seconds=timeout)
 
 
-def status_from(kind: str, identity: str, wid: str) -> Optional[str]:
+def status_from(kind: str, identity: str, wid: str, start: Optional[Path] = None) -> Optional[str]:
     """外から耐久ワークフロー `wid` の状態を読む（記録が無い・耐久ワークフローが無いときは None）。"""
-    if not record_path(kind, identity).exists():
+    if not record_path(kind, identity, start).exists():
         return None
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=False)
         return rows[0].status if rows else None
 
@@ -434,6 +435,7 @@ def wait_from(
     after: Mapping[str, int] | int = 0,
     timeout: Optional[float] = None,
     poll: float = limits.value("durable.wait-from-poll", "interval"),
+    start: Optional[Path] = None,
 ) -> Outcome:
     """`wait` と同じ判定を外から行う。終わりか、`keys` のどれかのイベントの `seq` が `after` を超えるまで待つ。
     超えたイベントが複数あれば `seq` の最も小さいものを返す（`keys` の `seq` は同じ連番を共有する前提）。
@@ -443,7 +445,7 @@ def wait_from(
     marks = {k: (after.get(k, 0) if isinstance(after, Mapping) else after) for k in names}
     deadline = None if timeout is None else time.monotonic() + timeout
     # 接続は待ちの間 1 つを使い回す（ポーリングごとに DBOSClient を作り直さない）
-    with open_client(kind, identity) as c:
+    with open_client(kind, identity, start) as c:
         while True:
             rows = c.list_workflows(workflow_ids=[wid], load_input=False, load_output=True)
             if not rows:

@@ -273,7 +273,7 @@ def test_a_head_moved_merge_carries_over_a_merge_only_move(env, monkeypatch):
 
 def lane(monkeypatch, env, rows):
     monkeypatch.setattr(g1, "lane_plan", lambda e: "p1")
-    monkeypatch.setattr(g1, "prior_rows", lambda main, plan: (rows, []))
+    monkeypatch.setattr(g1, "prior_rows", lambda main, plan, home=None: (rows, []))
 
 
 def test_a_prior_wait_drops_the_issue_with_the_loop_name_and_frees_its_slot(env, monkeypatch):

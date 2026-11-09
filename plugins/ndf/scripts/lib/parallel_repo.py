@@ -58,7 +58,8 @@ def dev_version(main: Path) -> str:
 
 
 def loop_records(main: Path, name: str) -> list[tuple]:
-    """計画のループのレーンと、読めたループの記録（loop.json）の組。計画を読めなければ空。"""
+    """計画のループのレーンと、読めたループの記録（loop.json）の組。計画を読めなければ空。
+    記録はレーンのリポジトリ（`repo` を省けば計画の置き場）から読む（#2733 の決定 2）。"""
     try:
         plan = pp.load_valid_plan(main, name)
     except (OSError, ValueError):
@@ -66,7 +67,7 @@ def loop_records(main: Path, name: str) -> list[tuple]:
     out = []
     for ln in (ln for ln in plan.lanes if ln.input.kind == "loop"):
         try:
-            rec = json.loads((Path(main) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
+            rec = json.loads((ln.repo_dir(Path(main)) / LOOP_DIR / ln.input.loop / "loop.json").read_text(encoding="utf-8"))
             out.append((ln, legacy_values.normalize_laps(rec)))
         except (OSError, ValueError):
             continue

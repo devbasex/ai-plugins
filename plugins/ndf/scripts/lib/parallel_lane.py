@@ -42,10 +42,16 @@ def record_identity(main: Path, name: str) -> str:
     return str(pp.plan_dir(main, name).resolve())
 
 
+def record_start(main: Path) -> Path:
+    """耐久の記録の置き場を決めるチェックアウト（計画の置き場）。別のリポジトリのレーンの作業ディレクトリからでも、
+    オーガナイザーが書いた計画の置き場の記録を読む（#2733）。`durable` の `start` へ渡す。"""
+    return Path(main)
+
+
 def record_exists(main: Path, name: str) -> bool:
     from durable_keys import record_path
 
-    return record_path(KIND, record_identity(main, name)).exists()
+    return record_path(KIND, record_identity(main, name), record_start(main)).exists()
 
 
 def live_run_pid(main: Path, name: str) -> Optional[int]:
@@ -64,7 +70,7 @@ def run_status(main: Path, name: str) -> Optional[str]:
         return None
     import durable
 
-    return durable.status_from(KIND, record_identity(main, name), workflow_id(name))
+    return durable.status_from(KIND, record_identity(main, name), workflow_id(name), start=record_start(main))
 
 
 def external_lane() -> Optional[tuple[str, pp.Lane]]:
@@ -210,7 +216,7 @@ def released_version(main: Path, name: str, prs: list[int]) -> Optional[str]:
     if not seqs:
         return None
     found = None
-    with durable.open_client(KIND, record_identity(main, name)) as c:
+    with durable.open_client(KIND, record_identity(main, name), record_start(main)) as c:
         for n in seqs:
             ev = c.get_event(workflow_id(name), f"range-{n}", timeout_seconds=0)
             if isinstance(ev, dict) and set(prs) & set(ev.get("prs") or []):
@@ -269,7 +275,7 @@ def send_release_request(main: Path, name: str, lane: str, prs: list[int], issue
         "sprint_state": str(state),
         "at": pe.utc_stamp(),
     }
-    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{rid}")
+    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{rid}", start=record_start(main))
     return rid
 
 
@@ -280,11 +286,11 @@ def read_answer(main: Path, name: str, rid: str, timeout: float = 0) -> tuple[Op
     ident, wid = record_identity(main, name), workflow_id(name)
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        ans = durable.event_from(KIND, ident, wid, f"answer-{rid}", 0)
+        ans = durable.event_from(KIND, ident, wid, f"answer-{rid}", 0, start=record_start(main))
         if isinstance(ans, dict):
             return ans, None
         if time.monotonic() >= deadline:
-            dfr = durable.event_from(KIND, ident, wid, f"defer-{rid}", 0)
+            dfr = durable.event_from(KIND, ident, wid, f"defer-{rid}", 0, start=record_start(main))
             return None, dfr if isinstance(dfr, dict) else None
         time.sleep(min(5.0, max(0.2, deadline - time.monotonic())))
 
@@ -307,7 +313,7 @@ def answers_of(main: Path, name: str, ids: list[str]) -> dict[str, dict]:
         return out
     import durable
 
-    with durable.open_client(KIND, record_identity(main, name)) as c:
+    with durable.open_client(KIND, record_identity(main, name), record_start(main)) as c:
         for i in ids:
             ans = c.get_event(workflow_id(name), f"answer-{i}", timeout_seconds=0)
             dfr = c.get_event(workflow_id(name), f"defer-{i}", timeout_seconds=0)
@@ -340,7 +346,7 @@ def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
     import durable
 
     wid = workflow_id(name)
-    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{key}")
+    durable.send_to(KIND, record_identity(main, name), wid, msg, "inbox", f"{wid}:inbox:{key}", start=record_start(main))
 
 
 def _head_sha(cwd: str) -> str:
@@ -448,4 +454,4 @@ def requests_for(main: Path, name: str) -> list[dict]:
 def resume_plan(main: Path, name: str, msg: dict, key: str) -> None:
     import durable
 
-    durable.send_to(KIND, record_identity(main, name), workflow_id(name), msg, "resume", key)
+    durable.send_to(KIND, record_identity(main, name), workflow_id(name), msg, "resume", key, start=record_start(main))

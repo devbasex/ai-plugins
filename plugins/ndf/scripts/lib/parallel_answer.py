@@ -17,7 +17,9 @@ def questions(main: Path, name: str) -> tuple[int, list[dict]]:
     """耐久ワークフローの今の依頼の一覧 (seq, items)。読めなければ (0, [])。"""
     import durable
 
-    got = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0) or {}
+    got = (
+        durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0, start=pl.record_start(main)) or {}
+    )
     return int(got.get("seq") or 0), list(got.get("items") or [])
 
 

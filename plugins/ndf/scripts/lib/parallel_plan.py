@@ -301,6 +301,9 @@ def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[Para
         for i, ln in enumerate(plan.lanes):
             if err := repo_errors(ln):
                 items.append({"level": "error", "rule": "I20", "at": f"lanes.{i}.repo", "message": err})
+    if plan is not None and any(it["level"] == "error" for it in items):
+        plan = None  # I20 の誤りがある計画は書かない・起動しない
+    if plan is not None:
         for ov in touch_overlaps(plan, str(home) if home else None):
             items.append(
                 {

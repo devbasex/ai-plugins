@@ -39,6 +39,23 @@ def cap_hint_items(items: list[dict], lanes: int) -> list[dict]:
     ]
 
 
+def relaunch_items(main: Path, plan: pp.ParallelPlan, lane_name: str, body: dict) -> list[dict]:
+    """`set` で入力（ループの名前）か引継ぎ文書の名を変えたら、レーンを新しい最初の入力で起こし直す 1 行を返す。
+    `relay.py restart` は登録簿の前の入力を使い直し、古いループ・古い引継ぎ文書から再開するため使わない。"""
+    import shlex
+
+    if not ({"input", "handoff"} & set(body)):
+        return []
+    ln = plan.lane(lane_name)
+    relay = shlex.quote(str(Path(__file__).resolve().parent.parent / "relay.py"))
+    repo = shlex.quote(str(ln.repo_dir(main)))
+    line = (
+        f"cd {repo} && python3 {relay} stop {ln.name} && python3 {relay} spawn --name {ln.name} --json -- {shlex.quote(pp.first_input(ln))}"
+    )
+    msg = f"レーン {ln.name} を新しい入力で起こし直すには、この 1 行を打つ（relay.py restart は前の入力を使い直す）"
+    return [{"level": "info", "rule": "relaunch", "message": msg, "next": line}]
+
+
 def updated(raw: dict, action: str, lane_name: str | None, body: object) -> tuple[dict | None, str, str | None]:
     """(書き換えた計画の JSON か None, 対象のレーン名, 誤りの 1 文か None)。"""
     if not isinstance(body, dict):
@@ -65,7 +82,8 @@ def updated(raw: dict, action: str, lane_name: str | None, body: object) -> tupl
 
 
 def write_lane(main: Path, plan: pp.ParallelPlan, raw: dict, lane_name: str, action: str) -> list[Path]:
-    """`plan.json`・`plan.md`・対象のレーンの引継ぎ文書を書く。add では在る引継ぎ文書を上書きしない（FileExistsError）。"""
+    """`plan.json`・`plan.md`・対象のレーンの引継ぎ文書を書く。add では在る引継ぎ文書を上書きしない（FileExistsError）。
+    set では在る引継ぎ文書を残す（作業の状態・利用者の指示を消さない）。ループ名を変えて引継ぎ文書の名が変わったときだけ新しく書く。"""
     import handoff
 
     d = pp.plan_dir(main, plan.name)
@@ -77,6 +95,8 @@ def write_lane(main: Path, plan: pp.ParallelPlan, raw: dict, lane_name: str, act
     data["lanes"] = [{**dict(r), "handoff": x.handoff_name()} for r, x in zip(raw["lanes"], plan.lanes)]
     (d / "plan.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (d / "plan.md").write_text(pp.render_md(plan), encoding="utf-8")
+    if target.exists():
+        return [d / "plan.json", d / "plan.md"]
     handoff.write_doc(target, pp.render_handoff(plan, ln, d / "plan.md"))
     return [d / "plan.json", d / "plan.md", target]
 
@@ -88,7 +108,15 @@ def notify(main: Path, name: str) -> bool:
     import durable
 
     wid = pl.workflow_id(name)
-    durable.send_to(pl.KIND, pl.record_identity(main, name), wid, {"kind": "lanes_changed"}, "inbox", f"{wid}:inbox:lanes:{time.time_ns()}")
+    durable.send_to(
+        pl.KIND,
+        pl.record_identity(main, name),
+        wid,
+        {"kind": "lanes_changed"},
+        "inbox",
+        f"{wid}:inbox:lanes:{time.time_ns()}",
+        start=pl.record_start(main),
+    )
     return True
 
 
@@ -133,6 +161,8 @@ def cmd_lane(a) -> None:
         emit_reply("stopped", f"引継ぎ文書を書けない: {exc}", items, exc.code)
     except OSError as exc:
         emit_reply("stopped", f"書けない: {exc}", items, 2)
+    if a.action == "set":
+        items = [*items, *relaunch_items(main, plan, lane_name, body)]
     sent = notify(main, a.name)
     wait = f"python3 {Path(__file__).resolve().parent.parent / 'parallel.py'} wait {a.name}"
     verb = "足した" if a.action == "add" else "書き換えた"

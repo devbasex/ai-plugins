@@ -228,8 +228,8 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
 
 | # | 手順 |
 | --- | --- |
-| R1 | `python3 "$NDF_SCRIPTS/parallel.py" lane p1 set --lane <名> --from <JSON>` で書き換える（書き換えられるキーは `input`・`plans`・`touches`・`after`・`handoff`。`plan.md` と引継ぎ文書も書き直し、耐久ワークフローへ知らせる）。`name` と `repo` は変えられない |
-| R2 | `lane set` で `input.loop` を書き換え、レーンを `relay.py restart <名>` で起こし直す |
+| R1 | `python3 "$NDF_SCRIPTS/parallel.py" lane p1 set --lane <名> --from <JSON>` で書き換える（書き換えられるキーは `input`・`plans`・`touches`・`after`・`handoff`。`plan.md` を書き直し、耐久ワークフローへ知らせる。在る引継ぎ文書は残し、ループの名前を変えて引継ぎ文書の名が変わったときだけ新しく書く）。`name` と `repo` は変えられない |
+| R2 | `lane set` で `input.loop` を書き換え、結果の `items` の `rule: relaunch` の `next`（レーンを止めて新しい最初の入力で起動する 1 行）で起こし直す。`relay.py restart <名>` は前の入力を使い直すため使わない |
 | R3 | 引継ぎ文書は `handoff.py` で書き、除く課題は `sprint-state.py loop exclude` で指す |
 | R4 | 1 行の入力は `tmux send-keys` で行い、画面へ指示の本文を打たない |
 | R5 | `relay.py ls` の `running` を止まっていない根拠にしない |

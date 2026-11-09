@@ -180,7 +180,9 @@ def cmd_wait(a) -> None:
     if not pl.record_exists(main, a.name):
         reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
     keys = ["pause", "questions", "answer-hold"]
-    got = durable.wait_from(pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout)
+    got = durable.wait_from(
+        pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout, start=pl.record_start(main)
+    )
     if got.kind == "timeout":
         reply(
             "stopped",
@@ -282,7 +284,7 @@ def cmd_stop(a) -> None:
     if pl.run_status(main, a.name) in pl.RUNNING:
         wid = pl.workflow_id(a.name)
         msg, key = ({"kind": "stop", "force": True}, f"{wid}:inbox:stop:force") if a.force else ({"kind": "stop"}, f"{wid}:inbox:stop")
-        durable.send_to(pl.KIND, pl.record_identity(main, a.name), wid, msg, "inbox", key)
+        durable.send_to(pl.KIND, pl.record_identity(main, a.name), wid, msg, "inbox", key, start=pl.record_start(main))
     left = [ln.name for ln in plan.lanes if pr_run.relay(main, "stop", ln.name, "--json")[0] not in (0, 3)]
     if left:
         reply("stopped", f"止まらないレーンがある: {', '.join(left)}", [{"lane": n} for n in left], 1, not_stopped=left)

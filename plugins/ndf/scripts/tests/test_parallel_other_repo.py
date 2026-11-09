@@ -86,8 +86,8 @@ def test_relay_cap_cli_writes_and_reads(monkeypatch):
 def test_repo_must_be_absolute_main_dir(tmp_path):
     x = _git(tmp_path / "x")
     for bad in ("rel/path", str(tmp_path / "missing")):
-        _, items, _ = pp.check_data({"version": 1, "name": "p", "rules": [], "lanes": [_lane("la", [1], repo=bad)]}, home=x)
-        assert any(it["rule"] == "I20" for it in items)
+        plan, items, _ = pp.check_data({"version": 1, "name": "p", "rules": [], "lanes": [_lane("la", [1], repo=bad)]}, home=x)
+        assert plan is None and any(it["rule"] == "I20" for it in items)  # 誤りのある計画は書かせない
     plan, items, _ = pp.check_data({"version": 1, "name": "p", "rules": [], "lanes": [_lane("la", [1], repo=x)]}, home=x)
     assert plan is not None and not [it for it in items if it["level"] == "error"]
 
@@ -146,6 +146,21 @@ def test_file_only_lookup_and_plan_home(two_repos):
     assert pf.lane_plans_in(x, "lfactory", None) == []
 
 
+def test_lane_in_other_repo_reads_records_at_plan_home(two_repos, monkeypatch):
+    """状態の置き場の上書きが無い既定の環境でも、別のリポジトリのレーンは計画の置き場の耐久の記録を読む。"""
+    import durable_keys
+
+    x, y = two_repos
+    for k in ("NDF_DBOS_DIR", "NDF_STATE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.chdir(y)
+    rec = durable_keys.record_path(pl.KIND, pl.record_identity(x, "p3"), pl.record_start(x))
+    assert rec.parent != durable_keys.records_dir()  # 作業ディレクトリ（レーンのリポジトリ）の置き場とは違う
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.touch()
+    assert pl.record_exists(x, "p3")
+
+
 def test_questions_carry_lane_repo_from_plan(two_repos):
     x, y = two_repos
     got = pa.with_repo(x, "p3", [{"id": "q1", "lane": "lfactory", "repo": "/forged"}, {"id": "q2", "lane": "la"}])
@@ -158,6 +173,34 @@ def test_lane_waits_reads_lane_repo(two_repos):
     d.mkdir(parents=True)
     (d / "issue-1.md").write_text("待ち: lfactory-r000000000001\n")
     assert pl.lane_waits(x, "p3", "lfactory", "lfactory-r000000000001", lambda: (1, {}))
+
+
+def test_organizer_reads_loop_record_in_lane_repo(tmp_path):
+    import parallel_route as pr
+
+    x, y = _git(tmp_path / "x"), _git(tmp_path / "y")
+    lane = {"name": "lloop", "input": {"kind": "loop", "loop": "lloop"}, "plans": 1, "touches": ["a/"], "repo": str(y)}
+    _plan(x, [lane])
+    d = y / ".ndf" / "loop" / "lloop"
+    d.mkdir(parents=True)
+    rec = {"status": "stopped", "stop": {"condition": "waiting_only"}, "waiting": [{"request": "lloop-g1-abc", "answer": None}]}
+    (d / "loop.json").write_text(json.dumps(rec))
+    assert pr.waiting_lanes(x, "p3") == ["lloop"]
+    assert pr.design_held(x, "p3", ["lloop-g1-abc"]) == ["lloop"]
+
+
+def test_prior_waits_read_plan_at_home_and_loops_in_lane_repo(tmp_path):
+    import gate1_requests as g1
+
+    x, y = _git(tmp_path / "x"), _git(tmp_path / "y")
+    lane = {"name": "lloop", "input": {"kind": "loop", "loop": "lloop"}, "plans": 1, "touches": ["a/"], "repo": str(y)}
+    _plan(x, [lane])
+    for loop in ("lloop", "lold"):
+        d = y / ".ndf" / "loop" / loop
+        d.mkdir(parents=True)
+        (d / "loop.json").write_text(json.dumps({"waiting": [{"number": 4, "pr": 40, "lap": 1}]}))
+    rows, skipped = g1.prior_rows(y, "p3", home=x)
+    assert [loop for loop, _w in rows] == ["lold"] and not skipped  # 計画は置き場から、ループの記録はレーンのリポジトリから読む
 
 
 def test_answer_hold_counts_other_repo_lane(two_repos):
@@ -219,6 +262,29 @@ def test_lane_cli_writes_plan_and_handoff(tmp_path, monkeypatch, two_repos):
     )
     assert got.returncode == 1 and "cap --named 4" in got.stdout
     assert len(pp.load_plan(x, "p3")["lanes"]) == 3  # 何も書かない
+    doc = y / ".ndf" / "handoff" / "issue-5.md"
+    doc.write_text("作業の状態と利用者の指示\n")
+    src.write_text(json.dumps({"touches": ["c/"]}))
+    got = subprocess.run(
+        [sys.executable, str(SCRIPTS / "parallel.py"), "lane", "p3", "set", "--lane", "lc", "--from", str(src)],
+        cwd=x,
+        capture_output=True,
+        text=True,
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert doc.read_text() == "作業の状態と利用者の指示\n"  # set は在る引継ぎ文書を残す
+    assert not [it for it in json.loads(got.stdout)["items"] if it.get("rule") == "relaunch"]  # 入力を変えなければ起こし直さない
+    src.write_text(json.dumps({"input": {"kind": "sprint", "issues": [7]}}))
+    got = subprocess.run(
+        [sys.executable, str(SCRIPTS / "parallel.py"), "lane", "p3", "set", "--lane", "lc", "--from", str(src)],
+        cwd=x,
+        capture_output=True,
+        text=True,
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert (y / ".ndf" / "handoff" / "issue-7.md").is_file()  # ループ名を変えたら新しい引継ぎ文書を書く
+    relaunch = [it["next"] for it in json.loads(got.stdout)["items"] if it.get("rule") == "relaunch"]
+    assert len(relaunch) == 1 and "spawn --name lc" in relaunch[0] and "issue-7.md" in relaunch[0]  # restart でなく新しい入力で起動する
 
 
 # ---- 計画の外のセッション（受け入れ条件 5・6・18・I9〜I11） ----
