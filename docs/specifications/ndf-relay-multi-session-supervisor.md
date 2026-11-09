@@ -346,7 +346,7 @@ tmux のソケットの置き場は tmux の規則（`TMUX_TMPDIR`）のまま�
 | 名前つきのラッパーの待ち通知に名前と `relay.py attach <名前>` の 1 行が入る | 同上の `test_wait_notice_names_wrapper_and_attach` |
 | `spawn` で起動した端末の無いラッパーが最初の入力を受け、`ndf-next` で区間 2 へ進む。重複は 3。リレーハブを kill しても名前つきは動き、次の `claude` がリレーハブになって一覧に既存が出る。`stop <名前>` で止まる | 同上の `test_spawn_ls_stop_and_hub_handover`（使い捨ての tmux サーバと擬似端末） |
 | 2 本目の `claude` が `t2` へ結び付き、端末を閉じてもラッパーが動き続ける | 同上の `test_second_claude_attaches_and_survives_terminal_close` |
-| 上限で `spawn` を 3 で断り、端末の 2 本目は断らずに知らせの 1 行を出して起動し、一覧に出る | 同上の `test_limit_refuses_spawn_but_starts_from_terminal` |
+| 上限で `spawn` を 3 で断り、端末の 2 本目は断らずに知らせの 1 行を出して起動し、一覧に出る | 同上の `test_limit_refuses_from_terminal_and_spawn` |
 | 上限に達していても人の起動は起動し、`notice` と記録の `over_limit` を残す。上限未満では残さない | 同上の `test_terminal_request_is_started_over_the_limit_with_notice`・`test_terminal_request_under_the_limit_has_no_notice` |
 | AI の起動（`spawn`・`restart`・`block:<作業ディレクトリ>`）は上限で `limit`・3 で断る | 同上の `test_ai_requests_are_refused_at_the_limit` |
 | 人の起動で動いているラッパーは数えず、セッションの無い行は人の起動として外さない。人の起動の `organizer` は 1 回だけ外す | 同上の `test_human_wrappers_are_not_counted`・`test_human_organizer_is_taken_once` |

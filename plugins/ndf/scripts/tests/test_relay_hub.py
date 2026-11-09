@@ -469,7 +469,7 @@ class TestWithTmux:
         hub.wait(lambda: ls_rows(hub)["t2"]["attached"] is False, 20, "端末が外れる")
         assert ls_rows(hub)["t2"]["state"] == "running"
 
-    def test_limit_refuses_spawn_but_starts_from_terminal(self, hubenv):
+    def test_limit_refuses_from_terminal_and_spawn(self, hubenv):
         """上限は AI の起動（spawn）を断り、端末から打った起動は断らずに知らせの 1 行を出して起動する（#2862 の AC1・AC9）。"""
         hub = hubenv(env={"NDF_RELAY_MAX_NAMED": "2"})
         hub.wait_start(1)
