@@ -303,7 +303,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 補正 | — | conductor が雛形の書いたプランへ手で足した指示や値。プランを書き直す側は消さない | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 整形 | — | 規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの宣言が持つ | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 一時的な失敗 | — | GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941） | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
-| ランナー | — | 作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ | — | — | — |
+| ランナー | — | 作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
@@ -386,10 +386,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 別のリポジトリのレーン | — | 並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 計画の外のセッション | — | 動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | レーン数の上限 | — | 同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
-| 計画の置き場 | — | 並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。依頼・答えの記録のキーは計画の置き場と計画名から求め、その値は <計画の置き場>/.ndf/parallel/<計画名> の絶対パスのまま変えない | — | — | — |
-| レーンのリポジトリ | — | レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ | — | — | — |
-| 計画の所在の一覧 | — | マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う | — | — | — |
-| 例外の起動 | — | 計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る | — | — | — |
+| 計画の置き場 | — | 並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。依頼・答えの記録のキーは計画の置き場と計画名から求め、その値は <計画の置き場>/.ndf/parallel/<計画名> の絶対パスのまま変えない | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
+| レーンのリポジトリ | — | レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
+| 計画の所在の一覧 | — | マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
+| 例外の起動 | — | 計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | 保留したループの 1 回 | — | 並列の計画のループのレーンで、答えを待たずに締めたループの 1 回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、答えの後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 質問待ち | — | 作業の途中の問いを問いの hook がオーガナイザーへ送り、止まったプランとステップを残して締めたループの 1 回の結果 | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 再起動の方針 | — | conductor が工程境界で会話を切るかを決める規則の組。現行方式と試行方式の 2 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
@@ -471,9 +471,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 照合 | — | スプリント MVV などの本文が、共通原則とプロジェクト MVV に従うかを LLM に判定させること。判定は「従う」「反する疑い」「判定できない」「読めない」の 4 つで、本文は書き換えない | — | — | `docs/specifications/ndf-sprint-mvv-vet-reuse.md` |
 | 照合の入力 | — | 1 回の照合で LLM へ渡す全体。判定の指示・共通原則・プロジェクト MVV・判定の決まり・本文の種類の名前・照合する本文からなる。1 字でも違えば別の入力である | — | — | `docs/specifications/ndf-sprint-mvv-vet-reuse.md` |
 | 照合の記録 | — | 照合のたびに 1 行を足す JSONL のファイル（project-mvv.jsonl）。機械ごとに 1 つある | — | — | `docs/specifications/ndf-sprint-mvv-vet-reuse.md` |
-| 物理層 | — | 並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる | — | — | — |
-| ロール層 | — | 並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す | — | — | — |
-| フロー層 | — | 並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる | — | — | — |
+| 物理層 | — | 並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
+| ロール層 | — | 並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
+| フロー層 | — | 並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | 今の起動 | — | 一時レーンでは、耐久ワークフローが最後に指示した起動。通常のレーンでは、ラッパーが最後に起動した回 | — | — | — |
 | レーンの再起動 | — | 止まった、または動かないレーンを `relay.py restart` で起動し直すこと。問いの選択肢の「起こし直す」がこれに当たる | — | — | — |
 | 停滞の問い | — | 動かないレーンについて耐久ワークフローが立てる問い（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ | — | — | — |

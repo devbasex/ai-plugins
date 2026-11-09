@@ -4435,7 +4435,7 @@
       "term": "ランナー",
       "context": "ndf-workflow",
       "meaning": "作業を動かす 1 台。スタンドアロンではマシンそのもの、Factory を使う形では実行を受け取る手元のマシンか ECS のタスク。Factory の実行ジョブの中のプログラムはランナーのエージェントと呼ぶ",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "ランナーのエージェント",
@@ -5097,25 +5097,25 @@
       "term": "計画の置き場",
       "context": "ndf-workflow",
       "meaning": "並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。依頼・答えの記録のキーは計画の置き場と計画名から求め、その値は <計画の置き場>/.ndf/parallel/<計画名> の絶対パスのまま変えない",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "レーンのリポジトリ",
       "context": "ndf-workflow",
       "meaning": "レーンが開発するリポジトリのメインディレクトリ。計画の宣言のレーンの repo で指し、省くと計画の置き場のリポジトリ",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "計画の所在の一覧",
       "context": "ndf-workflow",
       "meaning": "マシンにある計画の置き場を指す一覧（$XDG_STATE_HOME/ndf/parallel/homes/）。別のリポジトリのセッションが、レーンの判定と計画の外のセッションの判定に使う",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "例外の起動",
       "context": "ndf-workflow",
       "meaning": "計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る",
-      "pending_source": "issues/issue-2733-design.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "保留したループの 1 回",
@@ -5980,19 +5980,19 @@
       "term": "物理層",
       "context": "ndf-workflow",
       "meaning": "並行開発の実行の入れ物の軸。マシン → ラッパー → セッション → プロセスの順に入れ子になる",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "ロール層",
       "context": "ndf-workflow",
       "meaning": "並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "フロー層",
       "context": "ndf-workflow",
       "meaning": "並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる",
-      "pending_source": "issues/issue-2733-design-terms.md"
+      "source": "docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md"
     },
     {
       "term": "棚卸しの実行",

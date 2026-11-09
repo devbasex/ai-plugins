@@ -60,7 +60,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
   外のオーガナイザーのレーン（環境変数 `NDF_ORGANIZER_DIR`）は、計画名の代わりに `--external` を付けて依頼と答えを置き場のファイルで受け渡す。
   置き場の形は契約 `parallel-external.json`、手順は parallel.md の「外のオーガナイザーのレーン」にある
 - **モード**: オーガナイザーはモードを持たない。レーンの中のスプリントは今どおりモードを判定する
-- **扱わないもの**: `main` へのホットフィックス、動いている計画へのレーンの追加（新しい計画名で `init` し直す）、GitHub API の同時本数の枠
+- **扱わないもの**: `main` へのホットフィックス、GitHub API の同時本数の枠。動いている計画へのレーンの追加と書き換え・別のリポジトリのレーン・計画の外のセッションは [ndf-parallel-other-repo-lanes-and-outside-plan.md](ndf-parallel-other-repo-lanes-and-outside-plan.md) にある
 
 ## 決定と理由
 
