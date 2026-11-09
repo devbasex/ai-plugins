@@ -8,7 +8,7 @@
 
     0   欠け・食い違いが 0 件。課題の置き場が GitHub でないときの audit（検査しなかった）
     1   欠けのある open の Issue・食い違いが 1 件以上
-    2   GitHub・テンプレート・定義を読めない、引数の誤り（「0 件」と読ませない）
+    2   GitHub・テンプレート・定義を読めない、open の Issue が上限を超えて全件を検査できない、引数の誤り（「0 件」と読ませない）
 
 `audit` は open の Issue だけを読み、本文とラベルを `judge_body(本文, ラベル, {})` で判定する（起票した者が AI かは GitHub から
 決められないので、必須の項目・種類・順序だけを見る）。課題の置き場は `.ndf/project.json` の `issues.primary`（無ければ `github`）。
@@ -99,13 +99,22 @@ def cmd_audit(a) -> None:
     import gh_rest  # GitHub を読むときだけ読み込む
 
     try:
-        got = gh_rest.issue_list(a.repo, "number,title,body,labels", "open", None, AUDIT_LIMIT)
+        got = gh_rest.issue_list(a.repo, "number,title,body,labels", "open", None, AUDIT_LIMIT + 1)  # 1 件多く読み、残りの有無を知る
     except ValueError as exc:  # リポジトリを決められない
         _stop_items(f"GitHub を読めなかった: {exc}")
     if not got.ok or not isinstance(got.value, list):
         _stop_items(f"GitHub を読めなかった: {str(got.error or '一覧が並びでない')[:ERROR_EXCERPT]}")
-    items = audit_rows(got.value, definition)
-    metrics = {"checked": len(got.value), "missing": len(items), "store": store}
+    rows = got.value[:AUDIT_LIMIT]
+    items = audit_rows(rows, definition)
+    metrics = {"checked": len(rows), "missing": len(items), "store": store}
+    if len(got.value) > AUDIT_LIMIT:  # 全件を検査できていない。欠け 0 件・検査済みと読ませない
+        metrics["truncated"] = True
+        _stop_items(
+            f"open の Issue が上限 {AUDIT_LIMIT} 件を超え、全件を検査できていない（先頭 {len(rows)} 件のうち {len(items)} 件に欠け）",
+            EXIT_UNREADABLE,
+            items,
+            metrics,
+        )
     if items:
         _stop_items(f"open の Issue {len(got.value)} 件のうち {len(items)} 件に欠けがある", EXIT_VIOLATION, items, metrics)
     emit(result(TOOL, "ok", f"open の Issue {len(got.value)} 件に欠けは無い", [], metrics), EXIT_OK)

@@ -302,6 +302,17 @@ def test_audit_that_cannot_read_github_is_not_zero_gaps(listed, tmp_path, monkey
     assert code == 2 and "読めなかった" in obj["summary"]
 
 
+def test_audit_over_the_limit_is_not_complete(listed, tmp_path, monkeypatch):
+    """上限を超える open の Issue があれば、全件を検査できていないとして 2 で返す（PR 2870 round 1）。"""
+    monkeypatch.chdir(project(tmp_path))
+    monkeypatch.setattr(cli, "AUDIT_LIMIT", 2)
+    listed([issue(1, BUG, "bug"), issue(2, BUG), issue(3, BUG, "bug")])
+    code, obj = run("audit", "--repo", "o/r")
+    assert code == 2 and obj["status"] == "stopped" and "全件を検査できていない" in obj["summary"]
+    assert [it["name"] for it in obj["items"]] == ["#2"]
+    assert obj["metrics"] == {"checked": 2, "missing": 1, "store": "github", "truncated": True}
+
+
 def test_audit_applies_the_project_definition_only_to_its_own_repository(listed, tmp_path, monkeypatch):
     """`--repo` が別のリポジトリなら、今のプロジェクトの `kind_labels` を当てず既定で判定する（PR 2861 round 1）。"""
     root = project(tmp_path, defined(kind_labels={"不具合": "type:bug"}))

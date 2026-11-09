@@ -421,7 +421,7 @@ def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[
 def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], approved: str | None) -> tuple[str, bool]:
     """承認が無ければゲートへ回し、あれば要約値を照合する。`(要約値, 開発対象リポジトリと別か)`。"""
     digest = digest_of(repo, title, body, labels)
-    other = runner_issue_request.request_if_runner(TOOL, repo, title, body, issue_items.repo_differs(development_repo(), repo))
+    other = runner_issue_request.request_if_runner(TOOL, repo, title, body, labels, issue_items.repo_differs(development_repo(), repo))
     if not approved:
         _gate(repo, title, body, labels, digest, other)
     if approved != digest:

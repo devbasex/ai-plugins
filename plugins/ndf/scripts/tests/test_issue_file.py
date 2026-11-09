@@ -363,6 +363,7 @@ def test_create_to_another_repository_inside_the_runner_writes_a_request(fake, t
     assert obj["items"] == [{"repo": REPO, "title": "題", "result": "requested"}]
     (request,) = _requests(requests)
     assert request["repo"] == REPO and request["title"] == "題"
+    assert request["labels"] == ["bug"]  # 検査した種類のラベルを依頼にも渡す（PR 2870 round 1）
     assert "PR #1900" in request["body"].split("## 由来", 1)[1]
     assert posted(fake) == []
     assert not (tmp_path / "present").exists() or not any((tmp_path / "present").iterdir())
