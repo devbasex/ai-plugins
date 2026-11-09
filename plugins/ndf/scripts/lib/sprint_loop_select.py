@@ -57,7 +57,7 @@ from sprint_loop_exclusion import PENDING_REASON, PRODUCTION_REASON, exclusion_r
 def review_first(env: Env, rec: dict, before: dict, got: dict) -> dict:
     """選べる課題が尽きたとき、止まる前に見直しを 1 回だけ挟む（#2315 の決定 12）。
 
-    前の周回を締めてから挟んでいなければ `review_first` を返し、見直しを流して選定をやり直すコマンドを `next` に置く。
+    ループの前の 1 回を締めてから挟んでいなければ `review_first` を返し、見直しを流して選定をやり直すコマンドを `next` に置く。
     見直しの後も 0 件なら、次の選定は今までどおり `no_issue` で止まる。"""
     rec["review_first"] = len(rec["laps"])
     write_record(env, rec, before)
@@ -78,7 +78,7 @@ def candidates_of(ms: dict, max_issues: int, held: set[int] = frozenset()) -> li
     elif b:
         idx = next((i for i, r in enumerate(rows) if r["number"] == b["number"]), len(rows) - 1)
         nums = {r["number"] for r in rows[: idx + 1]}
-    else:  # 判断待ち・保留の周回（held）・前提の課題の実装待ちの行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
+    else:  # 判断待ち・保留したループの 1 回（held）・前提の課題の実装待ちの行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
         free = [r for r in rows if not r.get("waiting_decision") and not r.get("prerequisites") and r["number"] not in held]
         open_rows = free[:max_issues]
         last = rows.index(open_rows[-1]) if len(open_rows) == max_issues else len(rows) - 1  # 枠が埋まらなければ末尾まで
@@ -94,8 +94,8 @@ APPROVED_REASON = "承認した設計"
 
 
 def approved_designs(rec: dict, reselecting: int | None = None) -> set[int]:
-    """承認し、設計 PR のマージが済み、その後の周回でまだ選ばれていない課題（#2507 の I7）。
-    reselecting は取り直している周回の番号で、その周回の前の選定は「選ばれた」に数えない。"""
+    """承認し、設計 PR のマージが済み、その後のループの 1 回でまだ選ばれていない課題（#2507 の I7）。
+    reselecting は取り直しているループの回の番号で、そのループの 1 回の前の選定は「選ばれた」に数えない。"""
     out = set()
     for w in rec.get("waiting", []):
         if w.get("answer") != "approved" or not w.get("merged_at"):
@@ -108,7 +108,7 @@ def approved_designs(rec: dict, reselecting: int | None = None) -> set[int]:
 
 
 def first_issues(rec: dict, reselecting: int | None = None) -> set[int]:
-    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・デプロイを差し戻された周回の直し・
+    """順位によらず先頭に選ぶ課題（#2436 の 6e・#2507）: 設計を直して出し直す課題・デプロイを差し戻されたループの 1 回の直し・
     承認とマージが済んだ設計の課題。"""
     last = {w["number"]: w for w in rec.get("waiting", [])}
     revise = {n for n, w in last.items() if w.get("answer") == "revise"}
@@ -118,13 +118,13 @@ def first_issues(rec: dict, reselecting: int | None = None) -> set[int]:
 
 # ---------------------------------------------------------------- 承認した設計のマージし直し（#2507 の I6）
 
-STREAK_LIMIT = 3  # 同じ分類の not_green がこの周回の数だけ続いたら利用者へ戻す（既定。測っていない）
+STREAK_LIMIT = 3  # 同じ分類の not_green がこのループの回数だけ続いたら利用者へ戻す（既定。測っていない）
 UNSOLVABLE = ("stale_again",)  # 時間で解けない not_green の分類
 
 
 def settle_approved_designs(env: Env, rec: dict) -> list[str]:
-    """周回の境（選定の前）で、承認済みで未マージの設計 PR ごとに、前のマージの結果に応じた手を 1 回だけ打つ。
-    マージ済みになった設計 PR は後片付けを打つ。失敗はその課題を外す理由にとどめ、周回は止めない。打った手の 1 行を返す。"""
+    """ループの 1 回の境（選定の前）で、承認済みで未マージの設計 PR ごとに、前のマージの結果に応じた手を 1 回だけ打つ。
+    マージ済みになった設計 PR は後片付けを打つ。失敗はその課題を外す理由にとどめ、ループの 1 回は止めない。打った手の 1 行を返す。"""
     lap_n = len(rec.get("laps", [])) + 1
     notes = []
     for w in rec.get("waiting", []):
@@ -142,7 +142,7 @@ def settle_approved_designs(env: Env, rec: dict) -> list[str]:
 
 
 def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
-    """「周回の境が結果ごとに打つ手」の表（設計 #2507）の 1 行を打つ。"""
+    """「ループの 1 回の境が結果ごとに打つ手」の表（設計 #2507）の 1 行を打つ。"""
     m = w.get("merge") or {}
     res, cls, pr = m.get("result"), m.get("class"), int(w["pr"])
     if res in MERGED_RESULTS:
@@ -150,7 +150,7 @@ def _settle_one(env: Env, rec: dict, w: dict, lap_n: int) -> str | None:
         return None
     if res == "no_stamp" or (res == "head_moved" and not carried_over(env, w)):  # 取り込みのコミットだけなら承認を引き継いでマージし直す
         return f"#{w['number']} の設計 PR #{pr} を新しい先端で問い直した" if reask_design(env, rec, w, design_head(env, w)) else None
-    if res == "production":  # 宛先は周回を重ねても変わらない。人がリリース承認ゲートでマージしたかだけを読む
+    if res == "production":  # 宛先はループの 1 回を重ねても変わらない。人がリリース承認ゲートでマージしたかだけを読む
         if env.pr_state(pr) == "MERGED":
             w["merged_at"] = env.now()
         return None
@@ -255,7 +255,7 @@ def _rows_by_rank(ms: dict) -> list[dict]:
 
 def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int, prior: dict | tuple = ()) -> list[dict]:
     """マイルストーンの候補（切り出しの境界の内）に、境界の外にある先に選ぶ課題を順位の順で足す。
-    保留の周回の課題・今の周回で外した課題（loop exclude）・前のループの待ちの課題は、境界が無いときの枠を使わない（#2627）。"""
+    保留したループの 1 回の課題・今のループの 1 回で外した課題（loop exclude）・前のループの待ちの課題は、境界が無いときの枠を使わない（#2627）。"""
     lap_excluded = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == lap_n}
     cands = candidates_of(ms, rec["max_issues"], pending_issues(rec) | lap_excluded | set(prior))
     have = {r["number"] for r in cands}
@@ -310,12 +310,12 @@ def cmd_select(env: Env, name: str) -> dict:
         if rec.get("status") == "stopped":
             return stopped_result(env, rec, f"ループ {name} は止まっている。再開のコマンド（loop start）で理由を判定し直す")
         if current_lap(rec):
-            return refusal_order("進行中の周回がある（I2）。周回を締めてから選ぶ")
+            return refusal_order("進行中のループの 1 回がある（I2）。ループの 1 回を締めてから選ぶ")
         return boundary_then_select(env, rec, before)
 
 
 def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
-    """周回の境（#2436 の lane-loop の「周回の境」の 1〜9）: すぐ止まる条件 → 届いた答えの処理と保留の周回のまとめ →
+    """ループの 1 回の境（#2436 の lane-loop の「ループの 1 回の境」の 1〜9）: すぐ止まる条件 → 届いた答えの処理と保留したループの 1 回のまとめ →
     保留の上限・待ちだけ → ほかの止まる条件 → 選定。"""
     stop = boundary_stop(env, rec)
     if stop and stop["condition"] in IMMEDIATE_STOPS:
@@ -341,7 +341,7 @@ def resume_answer_hold(env: Env, rec: dict, before: dict, stop: dict, lap: dict 
 
 
 def has_held_work(rec: dict) -> bool:
-    """答えを待つ作業があるか（保留の周回か、オーガナイザーへ送って答えの無い設計の承認）。"""
+    """答えを待つ作業があるか（保留したループの 1 回か、オーガナイザーへ送って答えの無い設計の承認）。"""
     return bool(pending_laps(rec)) or any(w.get("request") and not w.get("answer") for w in rec.get("waiting", []))
 
 
@@ -356,7 +356,7 @@ def env_excluded(raw: str | None) -> list[int]:
 
 
 def add_env_exclusions(rec: dict, n: int) -> None:
-    """環境変数の課題を周回 n の除外へ足す（同じ番号と周回の行が既にあれば足さない）。"""
+    """環境変数の課題をループの 1 回 n の除外へ足す（同じ番号とループの 1 回の行が既にあれば足さない）。"""
     have = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == n}
     for num in env_excluded(os.environ.get(EXCLUDE_ENV)):
         if num not in have:
@@ -366,7 +366,7 @@ def add_env_exclusions(rec: dict, n: int) -> None:
 def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict, lap: dict | None) -> dict:
     """選べる課題が無いときの止まり方（待ちだけ・見直しを先に・no_issue・outside_mvv）。"""
     if lap is not None:
-        rec["laps"].remove(lap)  # スプリントを組む前の周回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
+        rec["laps"].remove(lap)  # スプリントを組むループの前の 1 回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
     if has_held_work(rec):  # 選べる課題が無く答えを待つ作業だけが残る: no_issue で止まらず、見直しも挟まない（異常系 6）
         return stop_and_report(
             env, rec, before, waiting_only(rec, "no_selectable"), "手元の作業が待ちだけになった", {"selection": got["selection"]}
@@ -393,7 +393,7 @@ def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict
 
 
 def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, lap: dict | None) -> dict:
-    """周回 n の行を作って（または取り直した周回を書き換えて）記録する。選んだ課題の直しを済みにし、スプリントの MVV を置く。"""
+    """ループの 1 回 n の行を作って（または取り直したループの 1 回を書き換えて）記録する。選んだ課題の直しを済みにし、スプリントの MVV を置く。"""
     d = loop_dir(env, rec["name"]) / f"lap-{n}"
     new = lap or {"n": n, "outcome": IN_PROGRESS, "started_at": env.now(), "created": [], "gates": [], "deferred_issues": []}
     new.update(
@@ -407,7 +407,7 @@ def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, 
     )
     if lap is None:
         rec["laps"].append(new)
-    for f in rec.get("fixes", []):  # 直しの周回: 差し戻された周回の課題を選んだら、その直しを済みにする
+    for f in rec.get("fixes", []):  # 直しのループの 1 回: 差し戻されたループの 1 回の課題を選んだら、その直しを済みにする
         if not f.get("fixed_by") and set(f.get("issues") or []) & set(selected_issues(new)):
             f["fixed_by"] = n
     if got["sprint_mvv"]:
@@ -432,9 +432,9 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
     new = _open_lap(env, rec, before, got, rank, n, lap)
     chosen = selected_issues(new)
     nxt = f"モードを決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> を打つ"
-    update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
+    update_handoff(env, rec, f"ループの {n} 回目 の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
-        f"周回 {n} の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),
+        f"ループの {n} 回目 の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),
         rec,
         [*got["selection"], *notes],
         status="selected",
@@ -450,6 +450,6 @@ def cmd_exclude(env: Env, name: str, number: int, reason: str) -> dict:
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap or lap.get("state_path"):
-            return refusal_order("スプリントを組む前の進行中の周回が無い（loop exclude は選定の後・loop sprint の前に打つ）")
+            return refusal_order("スプリントを組む前の進行中のループの 1 回が無い（loop exclude は選定の後・loop sprint の前に打つ）")
         rec["excluded"].append({"number": number, "reason": reason, "lap": lap["n"]})
         return run_selection(env, rec, before, lap["n"], lap)

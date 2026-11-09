@@ -46,7 +46,7 @@ def test_queue_max_default(tmp_path, monkeypatch):
 
 
 def test_generated_queue_lines_use_lane_plans(tmp_path, monkeypatch):
-    """スプリントのステージと周回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
+    """スプリントのステージとループの 1 回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
     import sprint_loop_gate as gate
     from supervise_lib import sprint
 

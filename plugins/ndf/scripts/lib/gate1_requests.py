@@ -47,8 +47,8 @@ def lane_unmatched(env, rid: str, reason: str) -> None:
 
         got = parallel_lane.lane_of(env.main_dir())
         if got:
-            parallel_lane.send_unmatched(env.main_dir(), got[0], got[1].name, rid, reason)
-    except Exception:  # noqa: BLE001 — 知らせを送れなくても周回は止めない
+            parallel_lane.send_unmatched(parallel_lane.home_of(got, env.main_dir()), got[0], got[1].name, rid, reason)
+    except Exception:  # noqa: BLE001 — 知らせを送れなくてもループの 1 回は止めない
         return
 
 
@@ -168,7 +168,7 @@ def lane_plan(env) -> str | None:
 
 
 def lane_sends(env, rec: dict, send_gate1) -> list[dict]:
-    """レーンの周回の境: 自分の行で依頼の id を持たないもの（送れなかった依頼）を `send_gate1` で送り直し、前のループの待ちを
+    """レーンのループの 1 回の境: 自分の行で依頼の id を持たないもの（送れなかった依頼）を `send_gate1` で送り直し、前のループの待ちを
     送る（#2510 の受け入れ条件 12・13）。読めずに飛ばしたループを結果の項目の形で返す。"""
     plan = lane_plan(env)
     if plan is None:
@@ -183,8 +183,8 @@ def lane_sends(env, rec: dict, send_gate1) -> list[dict]:
     msgs, skipped = prior_requests(main, plan, env.now(), env.run)
     try:
         for msg in msgs:
-            parallel_lane.send_prior(main, plan, msg)
-    except Exception as e:  # noqa: BLE001 — 送れなければ次の境で送り直す（周回は止めない）
+            parallel_lane.send_prior(parallel_lane.plan_home(main, plan), plan, msg)
+    except Exception as e:  # noqa: BLE001 — 送れなければ次の境で送り直す（ループの 1 回は止めない）
         skipped = [*skipped, {"loop": msg["loop"], "reason": f"依頼を送れない: {e}"[:200]}]
     return [{"skipped_loop": s["loop"], "reason": s["reason"]} for s in skipped]
 

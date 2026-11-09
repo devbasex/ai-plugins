@@ -26,7 +26,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
 
 | コンテキスト | この文書で扱う範囲 |
 | --- | --- |
-| NDF の開発ワークフロー（`ndf-workflow`） | 判定の記録・文脈の量の方針・トークンの監視の hook・スプリントの周回の選定 |
+| NDF の開発ワークフロー（`ndf-workflow`） | 判定の記録・文脈の量の方針・トークンの監視の hook・スプリントのループの 1 回の選定 |
 | NDF の課題の棚卸し（`ndf-issue-upkeep`） | 調査・深さ・大整理（`upkeep_*.py`） |
 | NDF の cross-refactoring（`ndf-cross-refactoring`） | 見送った提案の出所。この文書の構造はその語と兆候の分類を受け取る（順応者） |
 
@@ -81,7 +81,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
 | `context-policy.py` の `report_work` | 区間の作成（`_session_spans`）・部分の合算（`_sum_sessions`）・再起動の数え上げ（`_restarts_by_reason`）・やり直しの数え上げ（`_rework`） |
 | `context-policy.py` の `session_parts` | 印の境目の取得（`_mark_bounds`）・サブエージェントの加算（`_add_subagents`）・帳簿の加算（`_add_ledger`） |
 | `context_decisions.py` の `read_calls` | 自動の要約の検出（`_is_auto_compact`）・最初の発言の取得（`_user_text`）・JSON 行の読み取り（`_json_lines`）、使用量の行は `usage_call` |
-| `sprint_loop_select.py` の `run_selection` | 課題を選べなかったときの止まり方（`_stop_without_issue`）・周回の行を作って記録する（`_open_lap`） |
+| `sprint_loop_select.py` の `run_selection` | 課題を選べなかったときの止まり方（`_stop_without_issue`）・ループの 1 回の行を作って記録する（`_open_lap`） |
 | `skill-stats.py` の `aggregate_by_project` | 利用者の発言 1 件の数え上げ（`_count_user_text`） |
 | `skill-stats.py` の `emit_json`・`emit_markdown` | `--agents` の報告の値（記録の行・要約・層ごとの合計・総計・役割ごとの使用量・要約から除いた数・上限と出所）を 1 つの値の型 `AgentReport` で受ける。値は `agent_report` が組む |
 | `upkeep_overhaul.py` の `count_types` | 型ごとの件数（`_issue_types`）・本文からの部品の拾い出し（`_components`）・月ごとの数え上げ（`_months`）。戻す辞書のキーと順序は変えない |
@@ -100,7 +100,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
   自動の要約と引継ぎ開始の数え上げは `plugins/ndf/scripts/tests/test_context_policy_hook.py` が、
   時刻の読み取りは `plugins/ndf/scripts/tests/test_lib_clock.py` が見る
 - 作業の報告の秒・費用・再起動の数、Skill の利用統計のトリガーとヒットの数とエージェントの報告の JSON、
-  直しの周回の印が変わらないこと（`test_context_policy_hook.py`・`skill-stats/tests/test_agents_report.py`・
+  直しのループの 1 回の印が変わらないこと（`test_context_policy_hook.py`・`skill-stats/tests/test_agents_report.py`・
   `skill-stats/tests/test_skill_stats_wrappers.py`・`plugins/ndf/scripts/tests/test_sprint_loop.py`）
 - hook が締切の中で応答すること（`plugins/ndf/scripts/tests/test_hook_deadline.py`）
 - `python3 scripts/check-ndf-contracts.py` で `plugins/ndf/contracts/` に差分が出ないこと

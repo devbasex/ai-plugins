@@ -36,11 +36,15 @@ def environment_result(root: Path, as_json: bool) -> dict | None:
 
 
 def run_loop_command(a, update) -> dict | None:
-    """`sprint-state.py loop` の副命令を振り分ける。update は周回を締める前にスプリント状態を埋める関数（`update` と同じ）。
+    """`sprint-state.py loop` の副命令を振り分ける。update はループの 1 回を締める前にスプリント状態を埋める関数（`update` と同じ）。
 
     先に開発ループの持ち主（単位 session）を取る。宣言の無い副命令（答える・読むだけ）は何もしない（#2342）。"""
     if a.loop_cmd == "start":
         a.loop_name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+        import parallel_guard
+
+        if (blocked := parallel_guard.entry_check(a.root, getattr(a, "outside_plan", None), "sprint-state.py loop start")) is not None:
+            return blocked
     import lease_stage  # loop のときだけ読む（filelock と psutil を要する）
 
     # 鍵のリポジトリはループの記録と同じ --root から決める（カレントから決めると、別の場所から同じループを別の鍵で進められる）
@@ -112,7 +116,7 @@ def parse_args(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Nam
 
 
 def add_loop_parser(sub, cmd_update) -> None:
-    """`sprint-state.py` の副命令 `loop` の引数を足す。cmd_update は `sprint-state.py update` の本体（周回を締める前に呼ぶ）。"""
+    """`sprint-state.py` の副命令 `loop` の引数を足す。cmd_update は `sprint-state.py update` の本体（ループの 1 回を締める前に呼ぶ）。"""
     lp = sub.add_parser("loop", help="開発ループ（#2089）")
     lp.set_defaults(
         loop_run=lambda a: run_loop_command(a, lambda state, dones: cmd_update(argparse.Namespace(sprint=state, done=dones, next=None)))
@@ -130,6 +134,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--budget-usd", type=budget_value)
     s.add_argument("--budget-hours", type=budget_value)
     s.add_argument("--no-goal", action="store_true", help="/goal で始めていない（再開のコマンドに /goal を付けない）")
+    s.add_argument("--outside-plan", metavar="理由", help="動いている並列の計画の外で例外として始める（理由はマシンの記録に残る。#2733）")
     name(ls.add_parser("select"))
     s = name(ls.add_parser("exclude"))
     s.add_argument("issue", type=int)
@@ -146,17 +151,17 @@ def add_loop_parser(sub, cmd_update) -> None:
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--approved", action="store_true")
     g.add_argument("--rejected", action="store_true")
-    g.add_argument("--revise", action="store_true", help="直して出し直す（--note の指摘を課題の本文に書き、次の周回で先頭に選ぶ）")
+    g.add_argument("--revise", action="store_true", help="直して出し直す（--note の指摘を課題の本文に書き、ループの次の 1 回で先頭に選ぶ）")
     s.add_argument("--pr", type=int)
     s.add_argument("--note", help="--revise: 指摘を書いたファイル")
     s = name(ls.add_parser("approve-mvv"))
     s.add_argument("--milestone", required=True)
     s = name(ls.add_parser("lap"))
-    s.add_argument("--failed", action="store_true", help="その周回を先へ進められない（失敗で締める）")
-    s.add_argument("--done", help="周回の queue の done（承認ゲートで止まっていれば loop gate と同じに扱う）")
+    s.add_argument("--failed", action="store_true", help="そのループの 1 回を先へ進められない（失敗で締める）")
+    s.add_argument("--done", help="ループの 1 回の queue の done（承認ゲートで止まっていれば承認ゲートの副命令と同じに扱う）")
     s.add_argument("--deferred-issues", type=int, nargs="+", help="上限に達して Issue へ回した指摘の Issue 番号（決定 13）")
     s = name(ls.add_parser("finish"))
-    s.add_argument("lap", type=int, help="締め直す保留の周回（リリース待ち・質問待ち）")
+    s.add_argument("lap", type=int, help="締め直す保留したループの 1 回（リリース待ち・質問待ち）")
     s.add_argument("--done", required=True, help="残りの工程（まとめ）の queue の done")
     name(ls.add_parser("pending"))
     s = name(ls.add_parser("hold-question"))

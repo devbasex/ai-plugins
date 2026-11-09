@@ -41,6 +41,7 @@ import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
 import glossary_banned  # noqa: E402
 import glossary_merge  # noqa: E402
+from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
 import ndf_tracking  # noqa: E402
 
 TOOL = "glossary"
@@ -55,7 +56,6 @@ STRUCTURE_RULES = ("schema", "duplicate", "stale_document")
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
-ASCII_WORD = re.compile(r"^[A-Za-z0-9_\-]+$")
 CODE_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 CODE_SUFFIXES = (".py", ".sh", ".js", ".ts")
 MAX_CODE_BYTES = 1_000_000
@@ -348,14 +348,6 @@ def stale_findings(g: dict, decl: Declaration) -> list[dict]:
 
 
 # --- 文書の中の語 --------------------------------------------------------------------
-
-
-def word_pattern(words) -> re.Pattern | None:
-    words = sorted({w for w in words if w}, key=len, reverse=True)
-    if not words:
-        return None
-    parts = [rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])" if ASCII_WORD.match(w) else re.escape(w) for w in words]
-    return re.compile("|".join(parts))
 
 
 def mask_inline_code(line: str) -> str:
@@ -668,7 +660,7 @@ def cmd_render(a):
 def _build_word_patterns(g):
     """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
     dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
-    dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
+    dep_re, live_re = word_pattern(dep_words, katakana=True), word_pattern(live_words(g))
     live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
     dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
     return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)

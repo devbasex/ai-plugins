@@ -71,7 +71,7 @@ NDF のスクリプトが共有の環境へ起動し直すときに設定した 
 | 同 `release_project_env` | 自分を起動し直した回なら退避した値を戻す（無ければ外す）。続けて、値が共有の環境を指していれば外す。退避の変数も外す |
 | 同 `is_shared_venv` | 渡したパスが共有の環境の置き場か（`NDF_DEPS_VENV` と同じか、親が `~/.cache/ndf/venv`）を返す。標準ライブラリだけで判定する |
 | `plugins/ndf/scripts/relay_lib/runtime.py` の `enter` | 振り分けの前に、`UV_PROJECT_ENVIRONMENT` が共有の環境を指していれば外す。古い版の NDF のスクリプトから継いだ値を含む |
-| `plugins/ndf/scripts/lib/parallel_repo.py` の `relay_proc` | 統括役の CLI を打ち、終わったプロセスと統一 JSON レポートを返す。`relay` はこれを使い、戻り値の形を保つ |
+| `plugins/ndf/scripts/lib/parallel_repo.py` の `relay_proc` | リレーハブの CLI を打ち、終わったプロセスと統一 JSON レポートを返す。`relay` はこれを使い、戻り値の形を保つ |
 | `plugins/ndf/scripts/lib/parallel_run.py` の `step_observe` | 観測の結果に、一覧の終了コード（`code`）・標準エラーの末尾 1 行（`err`）・問える版の記録の印（`can_ask`）を足す |
 | 同 `_observe_run` | 終了コードを `ls_ok` に控え、先に `_track_ls_failure` を呼ぶ。失敗の回はそこで戻る |
 | 同 `_track_ls_failure` | 失敗の回は始まりの時刻を持ち、区切りを超えたら区切りごとに 1 回問う。成功の回は追跡を解き、答えていない一覧の失敗の問いを外す |

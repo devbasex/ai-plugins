@@ -19,17 +19,23 @@
 from enum import Enum
 from typing import assert_never  # 3.11+（それ以前は typing_extensions）
 
+
 class Rank(Enum):
     GOLD = "gold"
     SILVER = "silver"
     BRONZE = "bronze"
 
+
 def label(rank: Rank) -> str:
     match rank:
-        case Rank.GOLD:   return "ゴールド"
-        case Rank.SILVER: return "シルバー"
-        case Rank.BRONZE: return "ブロンズ"
-        case _:           assert_never(rank)   # ケース追加漏れを mypy が検出
+        case Rank.GOLD:
+            return "ゴールド"
+        case Rank.SILVER:
+            return "シルバー"
+        case Rank.BRONZE:
+            return "ブロンズ"
+        case _:
+            assert_never(rank)  # ケース追加漏れを mypy が検出
 ```
 
 `Rank` に階級を足すと mypy が `assert_never` の行で型エラーを出す。**この検査が効いている
@@ -74,7 +80,7 @@ def import_rows(rows):
             ok.append(parse(row))
         except ValueError as e:
             failures.append({"index": i, "reason": type(e).__name__, "id": row.get("id")})
-    return ok, failures          # 呼び出し側が件数・種類・対象を報告できる
+    return ok, failures  # 呼び出し側が件数・種類・対象を報告できる
 ```
 
 例外を握りつぶさず、最初の失敗で打ち切らない。ここは明示的なループでよい（逐次依存では

@@ -1,5 +1,5 @@
 {
   "name": "NDF_RELAY_MAX_NAMED",
   "set_by": "user",
-  "summary": "名前つきのラッパーの数の上限（#2346）。並列の計画の検査も同じ値を読む（plugins/ndf/scripts/lib/parallel_plan.py・relay_lib/hub.py）"
+  "summary": "名前つきのラッパーの数の上限（レーン数の上限。#2346）。マシンの設定（relay.py cap が書く <状態の根>/relay/hub/limits.json）が先に効き、無ければこの値、無ければ既定 3（#2733）。リレーハブと並列の計画の検査が同じ関数で読む（plugins/ndf/scripts/lib/relay_limit.py）"
 }

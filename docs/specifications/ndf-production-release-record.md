@@ -184,7 +184,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 `{queue_record}` は、まとめの課題を閉じる PR とそれを参照する PR のリリース記録のうち、段階が本番かデプロイなしで `スプリント:` が
 その閉じる PR を含む記録を置いた PR の番号で埋まる（`sprint_close_lib/record_find.py`）。見つからない・2 つ以上のスプリントにある・
-GitHub を読めなければ、まとめを流さずに止まる（queue の結果は `stopped`、開発ループの周回は失敗で締まる）。まとめのプランは
+GitHub を読めなければ、まとめを流さずに止まる（queue の結果は `stopped`、開発ループの 1 回は失敗で締まる）。まとめのプランは
 `sprint-close.py --record-pr unknown` を組まず、`unknown` を渡すのは手で打つ入口と #2230 より前に組んだプランだけである。
 
 `release-verify` は、記録の PR にリリース後テストの記録をコメントで置き、課題は閉じない。実行時に番号が `0` になったとき
@@ -256,7 +256,7 @@ stateDiagram-v2
 自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。手順は `development-workflow` の
 [references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 ステップのコマンドは課題の番号を持たず、`--issues {plan_issues}` を持つ。`{plan_issues}` は流す時点に、プランの `課題` の番号の空白区切り
-（空なら空文字）で埋まる（`supervise_lib/steps.py` の `RunStep`）。設計承認ゲートで課題を外した周回では、`loop gate` の `drop_issues` が
+（空なら空文字）で埋まる（`supervise_lib/steps.py` の `RunStep`）。設計承認ゲートで課題を外したループの 1 回では、`loop gate` の `drop_issues` が
 書き換えた `課題` がそのまま依頼の `issues` になる。
 
 この置き換えは、リリースの雛形（`release.form`）で出す経路だけが対象である。昇格の経路など雛形の無い経路の本番のステージは

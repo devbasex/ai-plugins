@@ -24,11 +24,15 @@ def moved(presented: str, head: str) -> bool:
     return bool(head) and head.strip() != presented.strip()
 
 
-def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]], requests: Iterable[dict]) -> dict:
+def map_lanes(
+    plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]], requests: Iterable[dict], home: Optional[Path] = None
+) -> dict:
     """範囲の Pull Request をレーンへ対応づける。
 
     依頼のあるレーンは依頼の `prs` が範囲にあるかで決め（依頼済みの印）、依頼の無いレーンは範囲の Pull Request が閉じる
-    課題がスプリントのレーンの `input.issues` にあるかで決める。どちらにも当たらないものは `orphans` に並べる。"""
+    課題がスプリントのレーンの `input.issues` にあるかで決める。どちらにも当たらないものは `orphans` に並べる。
+    別のリポジトリのレーン（`home` と違う `repo`）は自分のリポジトリで本番を出すため対応づけない（課題番号はリポジトリごとに
+    振られ、重なっても別の課題である。#2733 の I7）。`home` を省くと `repo` を持つレーンをすべて別のリポジトリとみなす。"""
     in_range = set(prs)
     lanes: dict[str, dict] = {}
     claimed: set[int] = set()
@@ -41,7 +45,7 @@ def map_lanes(plan: pp.ParallelPlan, prs: list[int], closes: dict[int, list[int]
             row["requests"].append(req["id"])
             claimed |= set(hit)
     for ln in plan.lanes:
-        if not isinstance(ln.input, pp.SprintInput):
+        if not isinstance(ln.input, pp.SprintInput) or (ln.repo and (home is None or ln.own_release(home))):
             continue
         own = sorted(n for n in prs if n not in claimed and set(closes.get(n) or []) & set(ln.input.issues))
         if own:
@@ -131,11 +135,11 @@ def present(
     sha = approved_commit.material_sha(approval)
     prs = included.read_included(approval)
     closes = closes_of(root, prs)
-    mapped = map_lanes(plan, prs, closes, requests)
+    mapped = map_lanes(plan, prs, closes, requests, root)
     added = None
     if first:
         extra = [n for n in prs if n not in set(first.get("prs") or [])]
-        added = map_lanes(plan, extra, closes, requests)
+        added = map_lanes(plan, extra, closes, requests, root)
     data = {"sha": sha, "prs": prs, "lanes": mapped["lanes"], "orphans": mapped["orphans"], "added": added}
     d = Path(d)
     work = present_state_dir(d) / "work"

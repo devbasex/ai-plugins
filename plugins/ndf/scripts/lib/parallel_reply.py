@@ -27,6 +27,16 @@ def step_prior_answer(main: str, name: str, q: dict, answer: dict, stamp: Option
     return g1.answer_prior(main, pp.plan_dir(Path(main), name), q, answer, stamp)
 
 
+@durable.step(name="parallel.reload-lanes")
+def step_reload_lanes(main: str, name: str) -> Optional[list[dict]]:
+    """`lanes_changed` を受けたときに計画を読み直す（#2733 の決定 9）。読めなければ None（前の計画のまま続ける）。"""
+    try:
+        return [ln.model_dump(mode="json") for ln in pp.load_valid_plan(Path(main), name).lanes]
+    except (OSError, ValueError) as exc:
+        print(f"[parallel] 計画を読み直せないため前の計画のまま続ける: {exc}", file=sys.stderr)
+        return None
+
+
 @durable.step(name="parallel.waiting-lanes")
 def step_waiting_lanes(main: str, name: str) -> list[str]:
     return prt.waiting_lanes(Path(main), name)
@@ -47,6 +57,25 @@ class AnswerRouting:
         chain = [x for q in old for x in ({"id": q.get("id"), "stamp": q.get("stamp")}, *(q.get("replaced") or []))]
         return {**msg, "replaced": [*(msg.get("replaced") or []), *chain]}
 
+    def take_lanes_changed(self) -> None:
+        """計画を読み直し、足したレーンを起動の候補に入れ、書き換えたレーンの依存と入力の種類を反映する。読み直せなければ
+        前の計画のまま続け、知らせに出す。名前を消したレーンは起動済みの状態を残す（止めるのは `relay.py stop`）。"""
+        lanes = step_reload_lanes(self.main, self.name)
+        if lanes is None:
+            self.pause("notice", lanes=[], attach=[], warning="計画を読み直せないため前の計画のまま続ける")
+            return
+        for ln in lanes:
+            n = ln["name"]
+            if n not in self.lanes:
+                self.order.append(n)
+                self.lanes[n] = {}
+            self.after[n] = list(ln.get("after") or [])
+            if (ln.get("input") or {}).get("kind") == "sprint":
+                self.sprint.add(n)
+            else:
+                self.sprint.discard(n)
+        self.pause("notice", lanes=[], attach=[])
+
     def blocking(self) -> list[dict]:
         """計画の終わりを止める問い。前のループの待ちは止めない（I12）。"""
         return [q for q in self.questions if not q.get("loop")]
@@ -64,7 +93,7 @@ class AnswerRouting:
                 self.ask_unmatched(rid, "問いの一覧に無い依頼への答え。その依頼が届いたら当たる")
 
     def reply_replaced(self, holder: dict, msg: dict) -> None:
-        """置き換えた依頼への答え。答えのイベントを立て、今の問いの持ち主へ流す: レーンは起こす（当てるかは周回の境で判定する）、
+        """置き換えた依頼への答え。答えのイベントを立て、今の問いの持ち主へ流す: レーンは起こす（当てるかはループの 1 回の境で判定する）、
         前のループは置き換えた問いの印と今の先頭を比べて当てる。"""
         rid = msg.get("id")
         self.answered.add(rid)

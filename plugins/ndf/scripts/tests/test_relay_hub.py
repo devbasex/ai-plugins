@@ -1,6 +1,6 @@
-"""統括役（#2346）: 同じコンテナの複数のラッパーを 1 つの統括役から起動し、1 つの表で見て 1 本ずつ止める。
+"""リレーハブ（#2346）: 同じコンテナの複数のラッパーを 1 つのリレーハブから起動し、1 つの表で見て 1 本ずつ止める。
 
-前半は統括役の判定（名前・重複・上限・引き継ぎ・権限）を状態ディレクトリだけで確かめる。後半は擬似端末と
+前半はリレーハブの判定（名前・重複・上限・引き継ぎ・権限）を状態ディレクトリだけで確かめる。後半は擬似端末と
 使い捨ての tmux（`TMUX_TMPDIR` を一時のディレクトリへ向け、利用者の tmux サーバに触れない）で、起動・一覧・停止・
 引き継ぎを確かめる。
 """
@@ -108,7 +108,7 @@ def test_running_name_is_taken(dirs):
 
 
 def test_default_limit_is_three_and_counts_every_running_wrapper(dirs):
-    """上限の既定は 3。統括役・名前つき・名前の無い今のラッパーを、動いているものすべてで数える。"""
+    """上限の既定は 3。リレーハブ・名前つき・名前の無い今のラッパーを、動いているものすべてで数える。"""
     assert hb.max_named() == 3
     dirs("front", name="t1")
     dirs("named", name="lroot")
@@ -136,7 +136,7 @@ def test_auto_name_takes_smallest_free_number():
     assert hb.Hub.auto_name({"t1", "t2", "t4"}) == "t3"
 
 
-# ---------------------------------------------------------------- 統括役の役目（I1・AC21・AC22）
+# ---------------------------------------------------------------- リレーハブの役目（I1・AC21・AC22）
 
 
 def test_only_one_hub_claims(state):
@@ -154,7 +154,7 @@ def test_only_one_hub_claims(state):
 
 
 def test_hub_dir_is_not_a_relay_dir(state):
-    """統括役の置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
+    """リレーハブの置き場は一覧・停止・起動の数の走査に作業ディレクトリと読まれない。"""
     h = hb.Hub.claim()
     try:
         assert hb.scan_wrappers() == []
@@ -333,7 +333,7 @@ def test_stop_name_stops_only_that_one(dirs, capsys):
 
 
 def test_restart_of_the_hub_itself_does_not_stop_it(dirs, capsys, monkeypatch):
-    # 統括役を止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
+    # リレーハブを止めると再起動の依頼を受ける者が居なくなる。止めずに断り、区間の切り替え（/ndf:restart）を案内する
     t1 = dirs("t1", name="t1")
     monkeypatch.setattr(hb, "hub_running", lambda: True)
     monkeypatch.setattr(hb, "hub_relay_dir", lambda: str(t1.path))
@@ -371,7 +371,7 @@ def test_wait_notice_names_wrapper_and_attach():
 
 @pytest.fixture()
 def hubenv(tmp_path):
-    """統括役を擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
+    """リレーハブを擬似端末で起動する環境。tmux のソケットは使い捨ての `TMUX_TMPDIR`（短いパス）に置く。"""
     sock = tempfile.mkdtemp(prefix="ndf-tests-tmux-", dir="/tmp")
     made = []
     # CI には TERM が無く、tmux の attach が端末の種類を決められずに失敗する。擬似端末に実際の端末と同じく TERM を与える
@@ -445,13 +445,13 @@ class TestWithTmux:
         dup = relay_cli(hub, "spawn", "--name", "lroot", "--", "x")
         assert dup.returncode == 3 and "名前が重なる" in dup.stderr
 
-        # 統括役を kill しても名前つきは動き続け、次の claude が統括役になる（AC21）
+        # リレーハブを kill しても名前つきは動き続け、次の claude がリレーハブになる（AC21）
         hub.proc.kill()
         hub.proc.wait(5)
-        hub.wait(lambda: "t1" not in ls_rows(hub), 20, "統括役のラッパーが一覧から消える")
+        hub.wait(lambda: "t1" not in ls_rows(hub), 20, "リレーハブのラッパーが一覧から消える")
         assert ls_rows(hub)["lroot"]["state"] == "running"
         nxt = hubenv()
-        nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude が統括役になる")
+        nxt.wait(lambda: hb_pid(nxt) == nxt.proc.pid, 20, "次の claude がリレーハブになる")
         assert "lroot" in ls_rows(nxt)
 
         st = relay_cli(nxt, "stop", "lroot")
@@ -496,7 +496,7 @@ class TestWithTmux:
 
     def test_parent_env_server_spawn_and_manual_choose_pinned_account(self, hubenv, accounts, tmp_path):  # noqa: F811
         """#2656 の受け入れ条件 1・3・4・8・13: `spawn` と手で打つ `new-session` が新しい区間 1 で始まり、指定の
-        アカウントで起動する。環境の `NDF_RELAY_DIR` は動いている統括役のラッパーを指す。グローバルな環境の役割と
+        アカウントで起動する。環境の `NDF_RELAY_DIR` は動いているリレーハブのラッパーを指す。グローバルな環境の役割と
         費用の記録先はレーンへ残らない。"""
         accounts.add("main", util5=10)
         accounts.add("gmail", util5=20)
@@ -584,7 +584,7 @@ def _account_hub(hubenv, accounts, tmp_path):  # noqa: F811
 
 
 def _parent_server(hub, accounts, **extra):  # noqa: F811
-    """親のセッションの環境を持つ専用サーバーを、統括役より先に起こす（サーバーを起こした側の環境がグローバルな環境になる）。"""
+    """親のセッションの環境を持つ専用サーバーを、リレーハブより先に起こす（サーバーを起こした側の環境がグローバルな環境になる）。"""
     env = {k: v for k, v in hub.env.items() if k != "TMUX"}
     env.update(PARENT_SERVER)
     if accounts is not None:
