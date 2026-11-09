@@ -251,6 +251,7 @@
     "answers-sent-json",
     "approved-txt",
     "breakdown-md",
+    "checkpoint-json",
     "plan-json",
     "plan-md",
     "present-json",

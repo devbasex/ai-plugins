@@ -125,6 +125,15 @@ def relay(main: Path, *args: str) -> tuple[int, dict]:
     return got.returncode, res
 
 
+def mark_organizer(main: Path, name: str, clear: bool = False) -> bool:
+    """打ったセッションへ計画 `name` のオーガナイザーの印を付け、同じ計画の他の印を消す（`clear` なら計画の印をすべて消す）。
+
+    同じ計画は計画の置き場の絶対パス（耐久の記録の識別と同じ値）で照合する（#2647 の I13・決定 13）。付けられたかを返す。"""
+    plan_dir = str(pp.plan_dir(main, name).resolve())
+    args = ("--clear", "--plan-dir", plan_dir) if clear else ("organizer", "--plan", name, "--plan-dir", plan_dir)
+    return relay(main, "role", *args)[0] == 0
+
+
 def relay_unavailable(main: Path) -> str | None:
     """リレーハブの CLI でレーンを起動できない理由。起動できれば None（ラッパーの外・tmux が無い・リレーハブが居ない）。"""
     if not os.environ.get("NDF_RELAY_DIR"):

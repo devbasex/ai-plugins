@@ -107,7 +107,7 @@ class AnswerRouting:
         前のループは置き換えた問いの印と今の先頭を比べて当てる。"""
         rid = msg.get("id")
         self.answered.add(rid)
-        durable.set_event(f"answer-{rid}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "merge", "by", "at")})
+        self.publish(f"answer-{rid}", {k: msg.get(k) for k in ("result", "note", "choice", "stamp", "merge", "by", "at")})
         if holder.get("loop"):
             self.land_prior(holder, msg, next(r.get("stamp") or "" for r in holder["replaced"] if r.get("id") == rid))
         else:

@@ -1089,3 +1089,131 @@ def test_terminal_request_only_from_a_human_terminal(state, monkeypatch, spawned
     with pytest.raises(_Passthrough):
         rr.cmd_run([])
     assert seen == ([hb.TERMINAL] if asked else [])
+
+
+# ---------------------------------------------------------------- 版の置き場が消えてもレーンを起こす（#2647 の条件 17・18・I14）
+
+
+def _version_dir(base, name, mark=None):
+    """MANIFEST と仮想環境の python を持つバージョンディレクトリを置く（`uv sync` を通さない）。"""
+    from relay_lib import version_dir as vd
+
+    d = base / name
+    (d / ".venv" / "bin").mkdir(parents=True)
+    (d / vd.MANIFEST).write_text("")
+    (d / ".venv" / "bin" / "python").write_text("")
+    if mark:
+        (d / mark).touch()
+    return d
+
+
+def _point(base, name):
+    (base / "relay.current").write_text(name + "\n")
+
+
+def _launch(monkeypatch, base):
+    from relay_lib import version_dir as vd
+
+    seen = {}
+    monkeypatch.setattr(vd, "launcher_path", lambda: str(base / "relay.py"))
+    monkeypatch.setattr(hb.tmux, "binary", lambda: "/bin/true")
+    monkeypatch.setattr(hb.tmux, "new_session", lambda name, cwd, argv, env: seen.update(argv=argv))
+    monkeypatch.setattr(hb.tmux, "session_gone", lambda name: not os.path.isfile(seen["argv"][0]))
+    rid = hc.put_request("spawn", "lane1", "/", ["--", "x"], "spawn")
+    hb.Hub(None).serve_once()
+    return seen.get("argv", [None])[0], json.loads(pathlib.Path(hb.hub_path(hb.RESULTS, f"{rid}.json")).read_text())
+
+
+def test_hub_keeps_its_version_dir_across_two_updates_by_another_container(dirs, tmp_path, monkeypatch):
+    """条件 17: リレーハブの起動の後に別のコンテナの更新が 2 回走っても、リレーハブの版の置き場は残り、起こせる。"""
+    from relay_lib import version_dir as vd
+    from test_relay import dead_pid
+
+    base = tmp_path / "ndf"
+    own = _version_dir(base, "relay-10.27.16-00000001", mark=f"inuse-another-container-{dead_pid()}")
+    monkeypatch.setattr(sys, "executable", str(own / ".venv" / "bin" / "python"))
+    for i, ver in enumerate(["10.27.24", "10.27.25", "10.27.26"]):
+        name = f"relay-{ver}-0000000{i + 2}"
+        _version_dir(base, name)
+        _point(base, name)
+        vd.VersionDir(str(base)).prune()
+    python, res = _launch(monkeypatch, base)
+    assert res["status"] == "ok", res
+    assert python == sys.executable
+
+
+def test_hub_launches_from_relay_current_when_its_version_dir_is_gone(dirs, tmp_path, monkeypatch):
+    """条件 18: リレーハブの版の置き場が消えていれば relay.current の仮想環境で起こし、記録に 1 行残す。"""
+    base = tmp_path / "ndf"
+    cur = _version_dir(base, "relay-10.27.26-00000004")
+    _point(base, cur.name)
+    monkeypatch.setattr(sys, "executable", str(base / "relay-10.27.16-00000001" / ".venv" / "bin" / "python"))
+    python, res = _launch(monkeypatch, base)
+    assert res["status"] == "ok", res
+    assert python == str(cur / ".venv" / "bin" / "python")
+    switched = [r for r in _hub_log() if r["event"] == "version-switched"]
+    assert len(switched) == 1 and cur.name in switched[0]["reason"]
+
+
+def test_hub_refuses_when_neither_its_python_nor_relay_current_exists(dirs, tmp_path, monkeypatch):
+    """I14: どちらも無ければ tmux-failed・1 で断り、登録しない。"""
+    base = tmp_path / "ndf"
+    base.mkdir()
+    monkeypatch.setattr(sys, "executable", str(base / "無い" / "python"))
+    _, res = _launch(monkeypatch, base)
+    assert res["items"][0]["result"] == hb.TMUX_FAILED and res["metrics"]["exit_code"] == 1
+    assert "lane1" not in hb.read_registry()
+
+
+# ---------------------------------------------------------------- オーガナイザーの役割の引き継ぎ（#2647 の条件 16・I13）
+
+
+def _organizer(d, plan_dir=None, plan="p1"):
+    (d.path / hb.ROLE_FILE).write_text(json.dumps({"role": "organizer", "plan": plan, **({"plan_dir": plan_dir} if plan_dir else {})}))
+
+
+def _organizers():
+    return sorted(w.name for w in hb.scan_wrappers() if w.role == "organizer")
+
+
+def _role(monkeypatch, capsys, relay_dir, *argv):
+    if relay_dir is None:
+        monkeypatch.delenv("NDF_RELAY_DIR", raising=False)
+    else:
+        monkeypatch.setenv("NDF_RELAY_DIR", str(relay_dir))
+    capsys.readouterr()
+    code = hc.cmd_role(list(argv))
+    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_role_organizer_moves_the_mark_of_the_same_plan_dir_only(dirs, monkeypatch, capsys, tmp_path):
+    """新しいセッションへ付けた時点で、同じ計画の置き場の前の印は外れる。別のリポジトリの同じ名前の計画と旧い形の印は残る。"""
+    here, there = str(tmp_path / "a" / ".ndf" / "parallel" / "p1"), str(tmp_path / "b" / ".ndf" / "parallel" / "p1")
+    old, other, legacy, new = dirs("old", name="old"), dirs("other", name="other"), dirs("legacy", name="legacy"), dirs("new", name="new")
+    _organizer(old, here)
+    _organizer(other, there)
+    _organizer(legacy)
+    code, res = _role(monkeypatch, capsys, new.path, "organizer", "--plan", "p1", "--plan-dir", here)
+    assert code == 0 and res["items"][0]["cleared"] == 1
+    assert _organizers() == ["legacy", "new", "other"]
+    assert hb.read_role(str(new.path))["plan_dir"] == here
+
+
+def test_role_clear_with_plan_dir_works_outside_a_wrapper(dirs, monkeypatch, capsys, tmp_path):
+    """計画の終わりの `role --clear --plan-dir` は、ラッパーの外からでも同じ計画の印をすべて消す。"""
+    here, there = str(tmp_path / "a" / "p1"), str(tmp_path / "b" / "p1")
+    one, two, other = dirs("one", name="one"), dirs("two", name="two"), dirs("other", name="other")
+    _organizer(one, here)
+    _organizer(two, here)
+    _organizer(other, there)
+    code, res = _role(monkeypatch, capsys, None, "--clear", "--plan-dir", here)
+    assert code == 0 and res["items"][0]["cleared"] == 2
+    assert _organizers() == ["other"]
+    assert _role(monkeypatch, capsys, None, "--clear")[0] == 1  # 指定が無ければ今どおりラッパーの外を断る
+
+
+def test_role_organizer_without_plan_dir_keeps_other_marks(dirs, monkeypatch, capsys, tmp_path):
+    old, new = dirs("old", name="old"), dirs("new", name="new")
+    _organizer(old, str(tmp_path / "p1"))
+    code, res = _role(monkeypatch, capsys, new.path, "organizer", "--plan", "p1")
+    assert code == 0 and res["items"][0]["cleared"] == 0 and _organizers() == ["new", "old"]

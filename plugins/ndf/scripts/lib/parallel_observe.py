@@ -1,9 +1,12 @@
-"""並列の進行の観測（#2436）: 一覧の状態を耐久ワークフローの値へ写す。
+"""並列の進行の観測（#2436）: 一覧の状態を耐久ワークフローの値へ写し、一時レーンの止まりを問う。
 
 耐久ワークフローの中で呼ぶため、耐久ステップもイベントも呼ばず、渡された値だけで決める（`parallel_run.py` の決まり）。
 """
 
 from __future__ import annotations
+
+import parallel_plan as pp
+import parallel_release as pr
 
 
 def apply_observed_states(run, rows: dict) -> list[str]:
@@ -22,3 +25,35 @@ def apply_observed_states(run, rows: dict) -> list[str]:
             if st == "awaiting_approval":
                 noticed.append(n)
     return noticed
+
+
+def _asking_lanes(run) -> set[str]:
+    """答えていない問い（まとめた問いの `merged` も含む）を送ったレーンの名前。"""
+    return {x for q in run.questions for x in (q.get("lane"), *(m.get("lane") for m in q.get("merged") or [])) if x}
+
+
+def _ask_helper(run, rows: dict) -> None:
+    """リリースの途中で一時レーンが止まり、settle もリリース承認ゲートの依頼も、その一時レーンが送った答えていない問い（ask も含む）も
+    無ければ問う（受け入れ条件 6g）。一時レーンは問いを保留すると自分のラッパーを止めるため、問いを送って止まったものは問わない。"""
+    rel = run.current
+    if rel is None or not run.launch or run.helper_asked == run.launch["seq"]:
+        return
+    name = pr.helper_name(run.name, rel["n"])
+    if (rows.get(name) or {}).get("state") != "stopped" or any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in run.questions):
+        return
+    if name in _asking_lanes(run):
+        return
+    run.helper_asked = run.launch["seq"]
+    run.ask(
+        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle もリリース承認ゲートの依頼も無い）",
+        ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")}, n=rel["n"],
+    )  # fmt: skip
+
+
+def _plan_view(run) -> pp.ParallelPlan:
+    """起動の判定に使う計画の形（耐久ワークフローの入力から作る。ファイルを読まない）。"""
+    lanes = [
+        {"name": n, "input": {"kind": "loop", "loop": n, "args": ["--milestones", n]}, "plans": 1, "touches": [], "after": run.after[n]}
+        for n in run.order
+    ]
+    return pp.ParallelPlan.model_construct(version=1, name=run.name, rules=[], lanes=[pp.Lane.model_construct(**ln) for ln in lanes])
