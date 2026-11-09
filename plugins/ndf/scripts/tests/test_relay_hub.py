@@ -266,6 +266,7 @@ def test_ls_json_lists_state_from_files(dirs, capsys):
             "attached",
             "hub",
             "role",
+            "restarts",
         }
         assert it["cost_usd"] is None and "最初" not in json.dumps(it, ensure_ascii=False)
     assert res["metrics"] == {
