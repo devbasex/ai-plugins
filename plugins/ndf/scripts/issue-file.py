@@ -264,7 +264,7 @@ def _note_line(a) -> str:
 
 def _is_other_repo(repo: str, target: str | None) -> bool:
     """`repo` が開発対象リポジトリ `target` と別か。読めない（`None`）ときは別とみなす（C5 の側へ倒す）。"""
-    return issue_items.differs(target, repo)
+    return issue_items.repo_differs(target, repo)
 
 
 def _note_gate(repo: str, number: int, line: str, target: str | None, digest: str) -> "NoReturn":  # noqa: F821
