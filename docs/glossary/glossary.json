@@ -717,12 +717,6 @@
       "source": "docs/specifications/cross-refactoring-round-tests-and-assess.md"
     },
     {
-      "term": "想定最大時間",
-      "context": "ndf-cross-refactoring",
-      "meaning": "利用者が与える所要の上限（分、--budget-minutes）。1 回の実行の子プロセスは、最終ゲートの確かめ・最終ゲート修正・打ち切りの後の取り消しも含めて、すべて想定最大時間の終わりまでに止まる",
-      "source": "docs/specifications/cross-refactoring-time-budget.md"
-    },
-    {
       "term": "手順",
       "context": "ndf-workflow",
       "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-rebuild の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
@@ -787,7 +781,7 @@
     {
       "term": "フレーキー / 既存失敗 / 変更起因",
       "context": "ndf-cross-refactoring",
-      "meaning": "全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類（flaky / preexisting / caused。着手前は baseline_test.existing_failures（既存失敗）、危険フラグは whole_test、最終ゲートは final_gate.checks[] の記録に書く）。ID は JUnit から読み、落ちたファイルだけを HEAD と着手前の HEAD で走らせ直して分ける",
+      "meaning": "全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類（flaky / preexisting / caused。着手前は baseline_test.existing_failures（既存失敗）、危険フラグは whole_test、最終ゲートは final_gate.checks[] の記録に書く）。ID は JUnit から読み、落ちたファイルだけを HEAD と比較の木で走らせ直して分ける。フレーキーと既存失敗は項目の合否に数えず、フレーキーはその実行の中で直す",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md",
       "deprecated": [
         "元からの失敗"
@@ -3027,12 +3021,6 @@
       "pending_source": "issues/old/issue-1482-design.md"
     },
     {
-      "term": "積み直しの起点",
-      "context": "ndf-cross-refactoring",
-      "meaning": "取り消しで git reset --hard する先。未公開の範囲で最も古い「消すコミット」の親で、公開した地点より前には置かない",
-      "pending_source": "issues/old/issue-1482-design.md"
-    },
-    {
       "term": "耐久ワークフロー",
       "context": "ndf-workflow",
       "meaning": "DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ",
@@ -3360,13 +3348,6 @@
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
-      "term": "打ち切りの後の取り消し",
-      "context": "ndf-cross-refactoring",
-      "meaning": "工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後か、最終ゲートの確かめを始められないときに、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理",
-      "code": "stop_revert",
-      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
-    },
-    {
       "term": "リファクタリング計画のコメント",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる",
@@ -3541,25 +3522,9 @@
       "source": ""
     },
     {
-      "term": "想定最大時間の下限",
-      "context": "ndf-cross-refactoring",
-      "meaning": "着手前のテストの実測から求める、手順の枠と計画の後の見込みが収まる想定最大時間の最小値（分）。init が「--budget-minutes を N 以上に」と案内する N",
-      "code": "required_budget_minutes",
-      "source": "",
-      "pending_source": "issues/issue-2047-requirements.md"
-    },
-    {
       "term": "着手前のテストの初回の上限",
       "context": "ndf-cross-refactoring",
       "meaning": "同じ範囲の打ち切りと実測が配分の履歴に無いときの、着手前のテストの上限（秒）。max(0.10·B, 3·s) で、s は手元の全体テストの直近の実測 m → 宣言の w の順に採る（どちらも無ければ 0.10·B）",
-      "source": "",
-      "pending_source": "issues/issue-2047-design.md"
-    },
-    {
-      "term": "想定最大時間の出所",
-      "context": "ndf-cross-refactoring",
-      "meaning": "その実行の想定最大時間をどこから決めたか。explicit（引数か宣言で渡した）・default（省いて既定の 30 分を使った）・floor（省いて想定最大時間の下限まで上げた）の 3 つ",
-      "code": "budget_source",
       "source": "",
       "pending_source": "issues/issue-2047-design.md"
     },
@@ -3569,12 +3534,6 @@
       "meaning": "着手前のテストが上限で打ち切られたか、明示した想定最大時間が想定最大時間の下限に届かないこと。init は SKIP を出して止まり、駆動はリファクタリングを飛ばした欠けの残る結果を返す",
       "source": "",
       "pending_source": "issues/issue-2047-design.md"
-    },
-    {
-      "term": "手順の枠",
-      "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。枠が想定最大時間に収まらずに止めた後の init の打ち直しでは打ち直した時刻から数える",
-      "source": ""
     },
     {
       "term": "範囲テストの所要",
@@ -3767,18 +3726,6 @@
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
-      "term": "積み直し",
-      "context": "ndf-cross-refactoring",
-      "meaning": "取り消しで、取り消しの起点から HEAD までの残すコミット（未公開のもの）を cherry-pick で順に積み直すこと。項目に属するコミットが衝突したら、その項目だけを外して続ける",
-      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
-    },
-    {
-      "term": "外した項目",
-      "context": "ndf-cross-refactoring",
-      "meaning": "cross-refactoring の取り消しの積み直しで、自分のコミットが衝突したために取り消した改善項目。外した理由（どの項目の取り消しで、どのコミットが衝突したか）を持つ",
-      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
-    },
-    {
       "term": "直さなかった項目",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、結果を残して終わった修正の起動の後、修正の範囲に自分の Item-Id のコミットが 1 つも無い改善項目。次の検証の最初に取り消す",
@@ -3827,12 +3774,6 @@
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
-      "term": "使える時間",
-      "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes`",
-      "source": "docs/specifications/cross-refactoring-implementation-window-and-readopt.md"
-    },
-    {
       "term": "止まっていた時間",
       "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` を中断してから、init か drive.py を打ち直して再開するまでの時間。リファクタリング計画の前の中断を含む。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない",
@@ -3848,13 +3789,6 @@
       "term": "心拍のファイル",
       "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す",
-      "source": "docs/specifications/cross-refactoring-implementation-window-and-readopt.md"
-    },
-    {
-      "term": "実装の終わり",
-      "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` で実装の CLI を止める唯一の時刻。最終ゲート修正の打ち切り − バッファ − 採っていて未検証の改善項目の検証の見積り。項目ごとの見積りでは止めない",
-      "code": "implement_end_at",
       "source": "docs/specifications/cross-refactoring-implementation-window-and-readopt.md"
     },
     {
@@ -3875,27 +3809,6 @@
       "meaning": "計画に入らなかった提案と見送った改善項目を合わせたもの。理由を 1 つ持つ。状態ファイルの deferred_items",
       "code": "deferred_items",
       "source": "docs/specifications/cross-refactoring-pr-gate-and-skip-counts.md"
-    },
-    {
-      "term": "想定最大時間の終わり",
-      "context": "ndf-cross-refactoring",
-      "meaning": "started_at + 想定最大時間（limits.final_end_at）。中断して再開した実行では、止まっていた分だけずれる。子プロセスへ渡す上限はすべてこの時刻で切る",
-      "code": "final_end_at",
-      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
-    },
-    {
-      "term": "確かめの見込み",
-      "context": "ndf-cross-refactoring",
-      "meaning": "最終ゲートの確かめ 1 回にかかる見込みの秒（limits.gate_seconds）。手元で全体テストを走らせるなら w、CI で見るなら c、どちらも測れていなければ 0",
-      "code": "gate_seconds",
-      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
-    },
-    {
-      "term": "確かめの開始の締め切り",
-      "context": "ndf-cross-refactoring",
-      "meaning": "想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる",
-      "code": "gate_start_end",
-      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "テストの無い宣言",
@@ -6156,26 +6069,26 @@
     {
       "term": "実装の予算",
       "context": "ndf-cross-refactoring",
-      "meaning": "`--budget-minutes` の値（既定 60 分）。採る項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う。今の用語集の「想定最大時間」（実行全体の子プロセスを止める締め切り）を置き換える",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "meaning": "`--budget-minutes` の値（既定 60 分）。採る改善項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う。締め切りを導かない",
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "実装時間",
       "context": "ndf-cross-refactoring",
       "meaning": "改善項目のテスト追加・実装・修正で担当の CLI が動いた時間。提案・選定・テストの実行・CI の待ちは含めない",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "予算の延長",
       "context": "ndf-cross-refactoring",
-      "meaning": "順位の高い候補を境目で絞り切れないときに、実装の予算を 2 倍までの範囲で増やすこと",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "meaning": "グレード high の候補の見積りの和が実装の予算を超え 2 倍以下のとき、実効の予算をその和まで増やすこと",
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "リファクタリングの成立",
       "context": "ndf-cross-refactoring",
       "meaning": "改善項目が、振る舞いを変えずに、計画の前提にした構造の上で直し切れる見込みがあること。成立しない例: 振る舞いを変えないと直せない・前提の構造が実在しない",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "無関係な失敗",
@@ -6187,49 +6100,55 @@
       "term": "停滞",
       "context": "ndf-cross-refactoring",
       "meaning": "修正の後の落ちたテストの集合が、前の回と同じであること",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "振動",
       "context": "ndf-cross-refactoring",
       "meaning": "修正の後の落ちたテストの集合が、前に見た集合へ戻ること",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "安全網の上限",
       "context": "ndf-cross-refactoring",
-      "meaning": "コーディングの CLI（テストの追加・実装・修正・最終ゲート修正・フレーキーの直し）の起動ごとの秒を、各起動 1 回ずつ累計した値に置く上限。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "meaning": "コーディングの CLI（テストの追加・実装・修正・最終ゲート修正）の起動ごとの秒の累計に置く上限。既定は実効の予算 × 2。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す",
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "実効の予算",
       "context": "ndf-cross-refactoring",
       "meaning": "予算の延長を当てた後の実装の予算。延ばさなければ実装の予算と同じ",
-      "pending_source": "issues/issue-2457-design.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "比較の木",
       "context": "ndf-cross-refactoring",
-      "meaning": "HEAD から、取り消していない改善項目のコミットをすべて外した木。着手の後に取り込んだベースブランチの変更を含む。無関係な失敗の見分けに使う",
-      "pending_source": "issues/issue-2457-design.md"
+      "meaning": "HEAD から、取り消していない改善項目と最終ゲート修正のコミットをすべて外した木。着手の後に取り込んだベースブランチの変更を含む。そこでも落ちるテストを無関係な失敗として見分ける",
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
+    },
+    {
+      "term": "フレーキーの直し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring がその実行の中でフレーキーと見分けたテストを、実装担当に 1 テストにつき 1 回だけ直させる工程（flaky-fix）。直しは Flaky-Fix のトレーラーを持つテストだけのコミットで、項目の合否と実装時間に数えない",
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "差し戻し",
       "context": "ndf-cross-refactoring",
       "meaning": "改善項目の中の手順の違反（記名の欠け・期待値の欠け・文言を固定するテスト・計画に無いコミット）を、項目を取り消さずに担当へ直させること",
-      "pending_source": "issues/issue-2457-design.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "落ちたテストの材料",
       "context": "ndf-cross-refactoring",
       "meaning": "落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す",
-      "pending_source": "issues/issue-2457-design.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "判定の担い手",
       "context": "ndf-cross-refactoring",
       "meaning": "成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ",
-      "pending_source": "issues/issue-2457-design.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "文書のファイル",

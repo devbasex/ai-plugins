@@ -228,8 +228,9 @@ def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_p
         }
     ]
     problem = cmd_implement._implement_problem(item, facts, [], {"worktrees": {"work": str(tmp_path)}})
-    assert problem is not None
-    assert "期待" in problem
+    # 取り消さずに修正へ差し戻す（#2457 の棚卸し #25）
+    assert problem is not None and problem[0] == "expectations" and problem[2] is True
+    assert "期待" in problem[1]
 
 
 def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
@@ -245,7 +246,8 @@ def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
         }
     ]
     problems = fix_intake._fix_problems({}, facts, {"I-001"})
-    assert len(problems) == 1 and "期待" in problems[0]
+    # 外れたコミットだけを差し戻す（#2457 の棚卸し #31）
+    assert len(problems) == 1 and "期待" in problems[0]["problem"] and problems[0]["sha"] == "b" * 40
 
 
 def test_the_round_verification_reports_undecidable_diffs(verify) -> None:

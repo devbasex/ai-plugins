@@ -14,11 +14,9 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from . import clock, culprit, info, launch, timeline, triage
+from . import culprit, info, launch, timeline, triage
 from .gitfacts import run_with_timeout
-from .outbound import dropped_line
 from .paths import work_dir
-from .undo import drop
 
 
 def defer_to_final_gate(path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str], flagged: list[str]) -> None:
@@ -44,7 +42,7 @@ def run_locally(state: dict[str, Any], log: pathlib.Path, path: Any = None) -> t
     passed, timed_out = True, False
     with open(log, "wb"):
         pass
-    limit, started = timeline.state_whole_timeout(state, clock.now()), time.monotonic()
+    limit, started = timeline.state_whole_timeout(state), time.monotonic()
     for i, command in enumerate(commands):
         part = log.with_name(f"{log.stem}-{i}.log") if len(commands) > 1 else log
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
@@ -99,8 +97,9 @@ def fallback(
 ) -> bool:
     """JUnit で見分けられないときは全体を 1 度走らせ直す（#1334 前提 4・見分けの 4）。
 
-    通ればフレーキー（残す）。落ちれば、着手前が green なら変更起因として原因の項目を修正へ回し、
-    着手前も red なら見分けられないので危険フラグの項目をまとめて取り消して理由を残す。
+    通ればフレーキー（残す）。落ちれば、着手前が green なら変更起因として原因の項目を修正へ回す。着手前も red なら
+    見分けられないため、取り消さずに落ちたテストの材料（ログの要約の ID・ログの置き場・走らせ直すコマンド）を残し、
+    最終ゲート修正へ寄せる（#2457 の棚卸し #35）。
 
     原因の項目は、走らせ直しのログに現れるパスだけで決める（手がかり 1）。項目を外した走らせ直しは全体テストになり
     締め切りに収まらないため行わず、決まらなければ `undetermined` にする（#1649）。
@@ -119,13 +118,16 @@ def fallback(
         record["resolution"] = "fixing"
         record["rerun_command"] = None
         info("🔧 走らせ直しでも落ち、着手前は通っていたため変更起因とみなします")
-        culprit.judge(state, record, {"caused": record["caused"], "caused_output": {"<全体>": _log_text(rerun_log)}}, None, isolate=False)
+        culprit.judge(state, record, {"caused": record["caused"], "caused_output": {"<全体>": _log_text(rerun_log)}}, isolate=False)
         return fix_or_narrow(path, state, record, rerun_log)
-    reason = f"危険フラグ（{', '.join(flags)}）で走らせた全体テストが落ち、見分けられなかった（{record['fallback_reason']}）"
-    for item in flagged:
-        item["failure_reason"] = reason
-    drop(path, state, [i["id"] for i in flagged], reason)
-    record["reverted"] = True
-    record["resolution"] = "reverted_all"
-    info(f"↩ {dropped_line(state, len(flagged))}。取り消した後の HEAD は最終ゲートが全体テストで確かめます")
+    from . import failure_material
+
+    record["material"] = failure_material.compose_material(
+        None, _log_text(rerun_log), str(rerun_log), [], timeline.strategy_of(state).whole_commands(ts.TEST)
+    )
+    record["resolution"] = "deferred"
+    info(
+        f"ℹ 危険フラグ（{', '.join(flags)}）で走らせた全体テストが落ち、着手前も落ちていたため見分けられません"
+        f"（{record['fallback_reason']}）。取り消さず、最終ゲート修正へ寄せます"
+    )
     return False

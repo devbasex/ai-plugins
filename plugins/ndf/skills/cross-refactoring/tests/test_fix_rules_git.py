@@ -15,7 +15,7 @@ import argparse
 
 import pytest
 
-from crossref_helpers import build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state, past_fix_end
+from crossref_helpers import verify_judged, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state
 
 FAR = "2099-01-01T00:00:00+00:00"
 FIX_STEM = "claude-fix-rf130"
@@ -121,13 +121,13 @@ def _fix(flow, cmd_setup, cmd_merge_fix, commits, *, result=True):
     _call(cmd_merge_fix, "cmd_merge_fix")
 
 
-def test_an_item_the_fixer_did_not_commit_is_dropped_on_the_next_verify(
+def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
     flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys
 ):
-    """R3 AC1・AC2: コミットしなかった I-002 は次の修正へ回らず取り消す。コミットした I-001 は範囲テストで通る。"""
+    """#2457 の棚卸し #29: コミットしなかった I-002 は取り消さず停滞として数え、判定し直して修正担当を替える。"""
     _implement(flow, cmd_setup, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001", "I-002"]
 
@@ -136,33 +136,33 @@ def test_an_item_the_fixer_did_not_commit_is_dropped_on_the_next_verify(
     assert items["I-002"]["unfixed"] == 1 and "unfixed" not in items["I-001"]
     assert [items[i]["fix_count"] for i in ("I-001", "I-002")] == [1, 1]
 
-    _call(cmd_converge, "cmd_verify")
-    assert _emitted(capsys, "VERIFY") == "done", "締め切りの前でも、直さなかった項目を修正へ回さない"
+    verify_judged(cmd_converge, flow["path"], capsys)
+    assert _emitted(capsys, "VERIFY") == "fix"
     items = _items(flow)
-    assert items["I-002"]["status"] == "reverted"
-    assert items["I-002"]["failure_reason"].startswith("修正担当が直さなかった")
+    assert items["I-002"]["status"] == "failing" and items["I-002"]["fixer_switched"] is True
+    assert items["I-002"]["fix_history"][-1]["progress"] == "stalled"
     assert items["I-001"]["status"] == "verified"
     assert int(items["I-001"]["verify_runs"]) == 2
-    assert _module("b") == (flow["work"] / "src" / "b.py").read_text(encoding="utf-8")
+    assert read_state(flow["path"])["fix"]["items"] == ["I-002"]
 
 
 def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
     """R3 AC4（I6）: 結果を残さずに終わった修正の起動は数えず、締め切りの前なら同じ項目を修正へ回す。"""
     _implement(flow, cmd_setup, cmd_implement, ["a"], {"I-001": ("a", _module("a", 2))})
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     _fix(flow, cmd_setup, cmd_merge_fix, {}, result=False)
     assert "unfixed" not in _items(flow)["I-001"]
 
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001"]
 
 
-def test_an_item_whose_fix_was_discarded_for_breaking_the_rules_is_not_unfixed(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix):
-    """手順を外れた修正: 範囲ごと捨てても、コミットした I-001 は直さなかったと扱わない。コミットしなかった I-002 は扱う。"""
+def test_a_fix_outside_the_scope_is_kept_and_reported(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+    """#2457 受け入れ条件 8: 範囲の外を変えた修正を捨てず、`outside_scope` に残す。コミットしなかった I-002 は直さなかったと扱う。"""
     _implement(flow, cmd_setup, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     _call(cmd_setup, "cmd_start_phase", phase="fix")
     # 範囲の外の既存のファイルを、項目が変えた名前と関係なく変える（新しいファイルは範囲の中として扱うため使わない。#1814）
     ignore = flow["work"] / ".gitignore"
@@ -172,17 +172,18 @@ def test_an_item_whose_fix_was_discarded_for_breaking_the_rules_is_not_unfixed(f
     _call(cmd_merge_fix, "cmd_merge_fix")
 
     items = _items(flow)
-    assert "build/" not in ignore.read_text(encoding="utf-8"), "手順を外れた修正は範囲ごと捨てる"
-    assert "unfixed" not in items["I-001"]
+    assert "build/" in ignore.read_text(encoding="utf-8")
+    assert [r["path"] for r in items["I-001"]["outside_scope"]] == [".gitignore"]
+    assert "unfixed" not in items["I-001"] and len(items["I-001"]["commits"]["fix"]) == 1
     assert items["I-002"]["unfixed"] == 1
 
 
 def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
     flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
 ):
-    """R3 AC3（#1733 の形）: 18 件のうち 8 件が同じ構造検査で落ち、修正担当が 8 件ともコミットしない。
+    """#1733 の形・#2457 受け入れ条件 17: 18 件のうち 8 件が同じ構造検査で落ち、修正担当が 8 件ともコミットしない。
 
-    8 件は 1 回目の修正の後に取り消され（`fix_count` 1）、取り消しで残りを巻き込まず、残りは検証を通る。"""
+    1 回目の修正の後は停滞として修正担当を替え、替えた後も停滞したら 8 件を打ち消す。残りは巻き込まれず検証を通る。"""
     limit = "import pathlib\n\n\ndef test_big_stays_small():\n    assert len(pathlib.Path('src/big.py').read_text().splitlines()) <= 3\n"
     names = [f"m{n:02d}" for n in range(1, 11)]
     changes = {}
@@ -212,19 +213,24 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
     write_state(flow["path"], state)
 
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
     assert sorted(read_state(flow["path"])["fix"]["items"]) == sorted(big_ids)
     _fix(flow, cmd_setup, cmd_merge_fix, {})
 
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
+    assert _emitted(capsys, "VERIFY") == "fix", "1 回目の停滞では修正担当を替えて続ける"
+    _fix(flow, cmd_setup, cmd_merge_fix, {})
+
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
     assert {i for i in big_ids if items[i]["status"] == "reverted"} == set(big_ids)
-    assert all(items[i]["fix_count"] == 1 for i in big_ids)
+    assert all(items[i]["revert_reason"] == "stalled_after_switch" for i in big_ids)
+    assert all(items[i]["fix_count"] == 2 for i in big_ids)
     kept = [i for i in items if i not in big_ids]
     assert all(items[i]["status"] == "verified" for i in kept)
-    assert read_state(flow["path"])["fix_stats"]["launches"] == 1
+    assert read_state(flow["path"])["fix_stats"]["launches"] == 2
 
     _call(cmd_gate, "cmd_final_gate")
     tally = ledger.tally(read_state(flow["path"]))
@@ -232,9 +238,9 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
 
 
 def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """R2 AC3（I3）: 検証の中の取り消しの後、残った項目を新しい HEAD の範囲テストで判定し直す。
+    """R2 AC3（I3）: 検証の中の打ち消しの後、残った項目を新しい HEAD の範囲テストで判定し直す。
 
-    I-002 は I-001 が足した関数を使う。I-001 を締め切りで取り消すと、確かめ直しで I-002 が落ちて取り消される。
+    I-002 は I-001 が足した関数を使う。I-001 を成立しないと判定して打ち消すと、確かめ直しで I-002 が落ちて修正へ回る。
     I-003 は確かめ直しを通って `verified` のまま残る。"""
     helper = _module("a") + "\n\ndef helper():\n    return 5\n"
     uses = "from src.a import helper\n\n\ndef b():\n    return helper() - 4\n"
@@ -245,18 +251,13 @@ def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setu
         ["a", "b", "c"],
         {"I-001": ("a", helper.replace("return 1", "return 9")), "I-002": ("b", uses), "I-003": ("c", _module("c") + "\n\nY = 1\n")},
     )
-    state = read_state(flow["path"])
-    past_fix_end(state)
-    write_state(flow["path"], state)
-
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    assert verify_judged(cmd_converge, flow["path"], capsys, feasible={"I-001": False}) == "fix"
 
-    assert _emitted(capsys, "VERIFY") == "done"
     saved = read_state(flow["path"])
     items = {i["id"]: i for i in saved["items"]}
     assert items["I-001"]["status"] == "reverted"
-    assert items["I-002"]["status"] == "reverted", "確かめ直しで落ちた項目は範囲テストの失敗として扱う"
+    assert items["I-002"]["status"] == "failing", "確かめ直しで落ちた項目は範囲テストの失敗として修正へ回す"
     assert items["I-003"]["status"] == "verified"
     assert int(items["I-003"]["verify_runs"]) >= 2
     assert "I-003" in saved["drops"][0]["recheck"]

@@ -62,7 +62,8 @@ def close_refactors(root, out, *extra) -> list[dict]:
 
 def assert_budget(refactor: dict, minutes: int) -> None:
     assert f"--budget-minutes {minutes}" in refactor["cmd"]
-    assert refactor["timeout"] == with_margin(minutes * 60)
+    # 実装の予算 ×（1 + 安全網の倍率 2）（#2457 決定 8）
+    assert refactor["timeout"] == with_margin(minutes * 60 * 3)
 
 
 @pytest.mark.parametrize("by", ["arg", "decl", "null"])
@@ -82,7 +83,7 @@ def test_without_values_impl_and_refactor_cmd_stay_and_refactor_timeout_follows_
     assert new_check(root, tmp_path / "c.json").returncode == 0
     refactor = steps(tmp_path / "c.json")["refactor"]
     assert "--budget-minutes" not in refactor["cmd"]
-    assert refactor["timeout"] == with_margin(paths.default_refactor_budget_minutes() * 60)
+    assert refactor["timeout"] == with_margin(paths.default_refactor_budget_minutes() * 60 * 3)
 
 
 def test_refactor_timeout_follows_a_changed_default_budget(tmp_path, monkeypatch):
@@ -92,7 +93,7 @@ def test_refactor_timeout_follows_a_changed_default_budget(tmp_path, monkeypatch
     monkeypatch.setattr(paths._refactor_vocabulary(), "DEFAULT_BUDGET_MINUTES", 7)
     a = argparse.Namespace(refactor_budget_minutes=None)
     refactor = next(s for s in templates._inspect_steps(a, "5", "x") if s["id"] == "refactor")
-    assert refactor["timeout"] == with_margin(7 * 60) and "--budget-minutes" not in refactor["cmd"]
+    assert refactor["timeout"] == with_margin(7 * 60 * 3) and "--budget-minutes" not in refactor["cmd"]
 
 
 def test_the_default_budget_is_cross_refactorings_constant():

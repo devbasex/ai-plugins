@@ -103,7 +103,7 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
     tmp_dir = tmp_path / ".cross_refactoring"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     state = {
-        "schema": 2,
+        "schema": 3,
         "id": state_id,
         # **開始は今の少し前に置く。** 固定の時刻にすると、その時刻から想定最大時間が
         # 過ぎた後に走らせたテストだけが、修正の締め切りと最終ゲートの打ち切りで落ちる。
@@ -269,3 +269,42 @@ def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
     limits["fix_end_at"] = LATE
     state["limits"] = limits
     return state
+
+
+def answer_judge(state_path: pathlib.Path, feasible: Any = True, reason: str = "直せる見込みがある") -> dict:
+    """成立の判定の依頼（`feasibility_request`）に答える（#2457 決定 3）。担い手の結果ファイルを書き、`judge` を打つ。
+
+    `feasible` は真偽か `{項目: 真偽}`。答えた依頼を返す。依頼が無ければ空。
+    """
+    import argparse as _argparse
+    import importlib
+
+    state = read_state(state_path)
+    request = state.get("feasibility_request") or {}
+    if not request.get("items"):
+        return {}
+    answers = [
+        {"item": i, "feasible": bool(feasible.get(i, True) if isinstance(feasible, dict) else feasible), "reason": reason, "evidence": "e"}
+        for i in request["items"]
+    ]
+    write_result(state_path, f"{request['by']}-judge-rf{state['id']}", {"items": answers})
+    importlib.import_module("refactor_lib.commands.judge").cmd_judge(_argparse.Namespace(id=state["id"]))
+    return request
+
+
+def verify_judged(cmd_converge: Any, state_path: pathlib.Path, capsys: Any, feasible: Any = True) -> str:
+    """`verify` を打ち、成立の判定を求められたら答えてもう一度打つ。最後の `VERIFY` の値を返す。"""
+    import argparse as _argparse
+
+    state_id = read_state(state_path)["id"]
+    for _ in range(4):
+        capsys.readouterr()
+        cmd_converge.cmd_verify(_argparse.Namespace(id=state_id))
+        out = capsys.readouterr().out
+        values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith("VERIFY=")]
+        verdict = values[-1] if values else ""
+        if verdict != "judge":
+            print(out, end="")
+            return verdict
+        answer_judge(state_path, feasible)
+    return verdict

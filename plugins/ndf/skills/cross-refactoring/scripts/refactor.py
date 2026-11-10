@@ -59,11 +59,13 @@ from refactor_lib.commands.propose import cmd_merge_proposals  # noqa: E402
 from refactor_lib.commands.reassign import STEPS as REASSIGN_STEPS, cmd_reassign  # noqa: E402
 from refactor_lib.commands.report import (  # noqa: E402
     cmd_finalize,
+    cmd_item_actuals,
     cmd_report,
     cmd_status,
 )
-from refactor_lib.commands.phases import PHASE_NAMES, cmd_start_phase  # noqa: E402
-from refactor_lib.commands.catch_up import cmd_catch_up  # noqa: E402
+from refactor_lib.commands.phases import PHASE_NAMES, cmd_coding_time, cmd_start_phase  # noqa: E402
+from refactor_lib.commands.judge import cmd_judge  # noqa: E402
+from refactor_lib.commands.flaky import cmd_merge_flaky_fix  # noqa: E402
 from refactor_lib.commands.setup import cmd_init, runtime_list  # noqa: E402
 from refactor_lib.measure import summary_extra  # noqa: E402
 
@@ -130,7 +132,14 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         "--budget-minutes",
         default=None,
         metavar="N",
-        help=f"想定最大時間（分）。この時間に収まる改修計画を 1 回だけ実行する (default: {DEFAULT_BUDGET_MINUTES})",
+        help=f"実装の予算（分）。採る改善項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う (default: {DEFAULT_BUDGET_MINUTES})",
+    )
+    init.add_argument(
+        "--safety-net-minutes",
+        type=float,
+        default=None,
+        metavar="N",
+        help="安全網の上限（分）。コーディングの CLI の起動の秒の累計がここに届いたら、取り消さずに止めて人へ渡す（既定: 実効の予算 × limits.json の倍率）",
     )
     init.add_argument(
         "--implementer",
@@ -139,7 +148,7 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         help="改修計画・テスト追加・実装・修正を通す 1 者。参加者の中から選ぶ。既定はホスト（参加者にいれば）→ 参加者の先頭",
     )
     # 廃止した引数（決定 5・決定 24）。**受け取って知らせ、値は使わない。** 次の版で外す。
-    # 修正の回数とテスト 1 回の上限は、想定最大時間から逆算する（決定 24）。
+    # 修正は前進の判定で続け（#2457 決定 4）、テスト 1 回の上限は所要の記録から決める（決定 11）。
     for name in ("--max-test-rounds", "--max-outer-rounds", "--max-items-per-round", "--max-fix-rounds", "--test-timeout"):
         init.add_argument(name, default=None, help=argparse.SUPPRESS)
     init.add_argument(
@@ -225,13 +234,16 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     for name, func, help_ in (
         ("measure", cmd_measure, "提案の前に指標を 1 回だけ測り、指標のファイルを書く（失敗しても 0）"),
         ("merge-proposals", cmd_merge_proposals, "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
-        ("merge-plan", cmd_merge_plan, "改修計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・実装の終わり"),
-        ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / コミットの無い項目は持ち越し）"),
-        ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / コミットの無い項目は持ち越し）"),
-        ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ。VERIFY=done|fix"),
+        (
+            "merge-plan",
+            cmd_merge_plan,
+            "改修計画の取り込み・等級と同じ変更か（Jev）・見積り（テストの追加と実装）・実装の予算に収まる件数・予算の延長",
+        ),
+        ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（手順の違反は差し戻し / コミットの無い項目は持ち越し）"),
+        ("merge-implement", cmd_merge_implement, "実装の取り込み（手順の違反は差し戻し / コミットの無い項目は持ち越し）"),
+        ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ・前進の判定。VERIFY=done|fix|judge|halt"),
         ("merge-fix", cmd_merge_fix, "修正の取り込み"),
-        ("readopt", cmd_readopt, "検証の後、残った時間に入る見送りの候補を採り直す。0 = 採った / 2 = 入らない（最終ゲートへ）"),
-        ("catch-up", cmd_catch_up, "再開で止まっていた時間を測り、まだ来ていない締め切りをずらす（常に 0）"),
+        ("readopt", cmd_readopt, "検証の後、実装の予算の残りに入る見送りの候補を採り直す。0 = 採った / 2 = 入らない（最終ゲートへ）"),
         ("final-gate", cmd_final_gate, "最終ゲート。--ci-check があれば継続的統合、無ければ全体のテスト"),
         ("merge-final-fix", cmd_merge_final_fix, "最終ゲートの修正結果の取り込み"),
         ("status", cmd_status, "現在の状態を人が読む形で出す"),
@@ -250,6 +262,25 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     sp.add_argument("id", type=int)
     sp.add_argument("phase", choices=list(PHASE_NAMES))
     sp.set_defaults(func=cmd_start_phase)
+
+    sp = sub.add_parser("coding-time", help="コーディングの CLI の起動 1 回の秒を安全網へ足す（HALT=0|1）")
+    sp.add_argument("id", type=int)
+    sp.add_argument("phase", choices=list(PHASE_NAMES))
+    sp.add_argument("--seconds", type=float, required=True)
+    sp.set_defaults(func=cmd_coding_time)
+
+    sp = sub.add_parser("judge", help="成立の判定の答えを読み、項目の feasibility[] へ積む（JUDGE=continue|infeasible|no_judge）")
+    sp.add_argument("id", type=int)
+    sp.set_defaults(func=cmd_judge)
+
+    sp = sub.add_parser("merge-flaky-fix", help="フレーキーなテストの直しを取り込む（FLAKY_FIX=kept|none|sendback|reverted）")
+    sp.add_argument("id", type=int)
+    sp.set_defaults(func=cmd_merge_flaky_fix)
+
+    sp = sub.add_parser("item-actuals", help="止まった出口で、採った項目ごとの実績の行を配分の履歴へ書く（失敗しても 0）")
+    sp.add_argument("id", type=int)
+    sp.add_argument("--end", choices=["safety_net", "aborted"], required=True)
+    sp.set_defaults(func=cmd_item_actuals)
 
     sp = sub.add_parser(
         "plan-comment",

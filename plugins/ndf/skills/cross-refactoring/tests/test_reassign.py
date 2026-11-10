@@ -184,10 +184,6 @@ def test_a_fix_without_a_candidate_raises_only_the_fix_flag(cmd_reassign, cmd_co
     assert "no_relaunch" not in st["final_gate"]
     assert st["no_results"][-1]["attempt"] == 2
     assert undo_spy["reverted"] == []
-    # 時計に余裕があっても修正を求めない
-    assert cmd_converge._fix_stop(st) is True
-    st.pop("fix_no_relaunch")
-    assert cmd_converge._fix_stop(st) is False
 
 
 def test_a_fix_with_a_candidate_switches_the_next_fix(cmd_reassign, tmp_path, env_tmp_dir, undo_spy, capsys):

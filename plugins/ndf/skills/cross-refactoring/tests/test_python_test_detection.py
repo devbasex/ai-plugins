@@ -147,7 +147,7 @@ def test_the_add_tests_intake_treats_a_production_test_named_file_as_other(cmd_i
     fact["test_changes"] = {}
     fact["files"] = ["lib/test_x.py", "colo/test_z.py"]
     problem = cmd_implement._test_commit_problem([fact], [], {"worktrees": {"work": str(repo)}})
-    assert problem == "テストの追加がテスト以外のファイルを変えています（lib/test_x.py）"
+    assert problem == ("non_test_files", "テストの追加がテスト以外のファイルを変えています（lib/test_x.py）", False)
 
 
 # ---------- コミットの事実 ----------

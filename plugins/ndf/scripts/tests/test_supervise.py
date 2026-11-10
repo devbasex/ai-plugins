@@ -378,6 +378,31 @@ def test_a_skipped_refactor_goes_on_to_the_review(tmp_path, monkeypatch):
     assert [e["id"] for e in s.state.log] == ["refactor", "abort"], text
 
 
+def _halting_drive(tmp_path, monkeypatch):
+    """安全網の上限で止まった駆動の形（status gate・終了コード 10。#2457 決定 5）。"""
+    drive = tmp_path / "halt-drive.py"
+    drive.write_text(
+        f"import json, sys\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport step_result as sr\n"
+        "out = sr.result('d', 'gate', '安全網の上限 120 分に当たった', [], {'exit': 10}, next='打ち直すか打ち切るかを決める')\n"
+        "print(json.dumps(out)); sys.exit(10)\n"
+    )
+    monkeypatch.setitem(paths.DRIVES, "halt", drive)
+    return [
+        {"id": "refactor", "type": "drive", "drive": "halt", "on_exit": {"6": "review"}, "on_fail": "abort", "next": "review"},
+        {"id": "review", "type": "run", "cmd": "true", "next": "end"},
+        {"id": "abort", "type": "run", "cmd": "true", "next": "end"},
+    ]
+
+
+def test_a_drive_that_returns_a_gate_is_taken_as_a_gate_not_a_failure(tmp_path, monkeypatch):
+    """#2457 決定 8: drive の終了コード 10 は on_fail（abort）へ進まず、承認ゲートとして残る。"""
+    s, text = run_plan(tmp_path, _halting_drive(tmp_path, monkeypatch))
+    ids = [e["id"] for e in s.state.log]
+    assert "abort" not in ids, text
+    assert s.state.log[0]["exit"] == 10 and s.state.log[0].get("gate") is True
+    assert [g["id"] for g in s.state.gates] == ["refactor"]
+
+
 def _extending_drive(tmp_path, monkeypatch, seconds):
     """延長のファイルへ `seconds` を書いてから 2 秒眠る駆動。"""
     drive = tmp_path / "slow-drive.py"

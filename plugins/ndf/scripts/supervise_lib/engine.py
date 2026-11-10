@@ -375,7 +375,8 @@ class Engine:
             st.cur["presentation"] = self.copy_presentation(step)
             st.cur["gate_as_ok"] = True
             return self.next_of(sid, step), None, None
-        if is_run and is_gate(st.cur.get("exit")):
+        if step["type"] in ("run", "drive") and is_gate(st.cur.get("exit")):
+            # drive の 10〜19 も承認ゲート（共通の契約 `step_result.GATE_CODES`。cross-refactoring の安全網など。#2457 決定 8）
             self.take_gate(step)
             gnext = step.get("gate_next")
             return ((None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)), None, None
@@ -478,7 +479,7 @@ class Engine:
         return path
 
     def take_gate(self, step: dict) -> None:
-        """run のステップの承認ゲートを残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+        """run と drive のステップの承認ゲートを残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
         cur = self.state.cur
         path = self.copy_presentation(step)
         cur["gate"] = True

@@ -1,8 +1,9 @@
 """採り直し（`readopt`、#1743 の F7・決定 10）。
 
-検証（直しの試行を含む）が終わった後、残った時間 `final_end_at − 今 − Σ plan.reserve` に入る候補を、計画と同じ順位
-（`budget.rank_key`）と選び方（`budget.select`。入らない候補は飛ばして次を見る）で採り直す。候補は `budget` で見送った
-候補と、実装の終わりまでにコミットが無かった持ち越しの項目だけである（I15）。見積り・範囲テスト・等級・`risk` は
+検証（直しの試行を含む）が終わった後、実装の予算の残り（実効の予算 − 採っていて取り消していない項目の見積りの和。
+#2457 の I1・I3）に入る候補を、計画と同じ順位（`budget.rank_key`）と選び方（`budget.select`。入らない候補は飛ばして
+次を見る）で採り直す。実装時間の実績は使わない。候補は `budget` で見送った候補と、コミットが無かった持ち越しの項目
+だけである（I15）。見積り・範囲テスト・等級・`risk` は
 `merge-plan` が計画の時点で書いた値を使い、**LLM を呼ばない**（I14）。D5（`public_io`）は実装担当の `risk` を使う。
 
 | 終了コード | 意味 |
@@ -21,7 +22,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, info, timeline
+from .. import budget, clock, info
 from ..items import CARRIED, DEFERRED, PLANNED, defer, new_items
 from ..paths import load_state
 from ..vocabulary import DEFER_BUDGET, DEFER_NOT_DONE
@@ -30,7 +31,7 @@ SELECTED = "selected"
 NO_FIT = "no_fit"
 # 採るときに前の巡の記録を `phases_history` へ移す手順（巡ごとに取り込みと所要を数える）
 ROUND_PHASES = ("add-tests", "implement", "verify", "fix")
-NOT_DONE_REASON = "実装の終わりまでにコミットが無く、残った時間に入らない"
+NOT_DONE_REASON = "コミットが無く、実装の予算の残りに入らない"
 
 
 def _budget_candidates(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -89,16 +90,6 @@ def _adopt(state: dict[str, Any], selected: list[dict[str, Any]], carried: list[
     return ids
 
 
-def _rewrite_limits(state: dict[str, Any]) -> None:
-    """採っていて未検証の項目で、テストの追加の終わりと実装の終わりを書き直す（I13）。最終ゲート修正の打ち切りは動かさない。"""
-    limits = state["limits"]
-    final_end = clock.parse(limits["final_end_at"])
-    pending = timeline.pending_items(state.get("items") or [])
-    implement_end = budget.implement_end(final_end, (state.get("plan") or {}).get("reserve") or {}, pending)
-    limits["implement_end_at"] = clock.iso(implement_end)
-    limits["add_tests_end_at"] = clock.iso(budget.add_tests_end(implement_end, pending))
-
-
 def _close(path: Any, state: dict[str, Any], record: dict[str, Any], available: float, shortest: Optional[float]) -> None:
     """入る候補が無い。持ち越しの項目を `not_done` で見送り、最終ゲートへ移す。"""
     for item in state.get("items") or []:
@@ -112,7 +103,7 @@ def _close(path: Any, state: dict[str, Any], record: dict[str, Any], available: 
     state["phase"] = "final"
     statefile.save(path, state)
     smallest = f"最も短い候補の見積り {shortest:.1f} 分" if shortest is not None else "候補なし"
-    info(f"採り直し: 残った時間 {available:.1f} 分に入る候補がありません（{smallest}）。最終ゲートへ進みます")
+    info(f"採り直し: 実装の予算の残り {available:.1f} 分に入る候補がありません（{smallest}）。最終ゲートへ進みます")
     sys.exit(2)
 
 
@@ -134,7 +125,7 @@ def _replayed(state: dict[str, Any]) -> bool:
 
 
 def cmd_readopt(args: argparse.Namespace) -> None:
-    """検証の後、残った時間に入る見送りの候補を採り直す。"""
+    """検証の後、実装の予算の残りに入る見送りの候補を採り直す。"""
     path, state = load_state(args.id)
     if not state.get("plan"):
         info("採り直しの対象がありません（リファクタリング計画の前）。最終ゲートへ進みます")
@@ -145,9 +136,10 @@ def cmd_readopt(args: argparse.Namespace) -> None:
         return
     round_no = int(readopt.get("round") or 1)
     now = clock.now()
-    reserve = (state.get("plan") or {}).get("reserve") or {}
-    available = budget.readopt_available(clock.parse(timeline.limits_of(state)["final_end_at"]), reserve, now)
     carried = [i for i in state.get("items") or [] if i.get("status") == CARRIED]
+    plan_budget = state.get("budget") or {"minutes": int(state.get("budget_minutes") or 0)}
+    # 持ち越しの項目は採り直す候補なので、採っている見積りの和に数えない
+    available = budget.readopt_left(plan_budget, [i for i in state.get("items") or [] if i.get("status") != CARRIED])
     ranked = sorted([*carried, *_budget_candidates(state)], key=budget.rank_key)
     record = {"at": clock.iso(now), "round": round_no, "available_minutes": round(available, 2), "carried": [i["id"] for i in carried]}
     selected = budget.select(ranked, available)[0] if available > 0 and state.get("phase") == "readopt" else []
@@ -160,12 +152,11 @@ def cmd_readopt(args: argparse.Namespace) -> None:
     readopt["round"] = round_no + 1
     record.update({"round": round_no + 1, "reason": SELECTED, "selected": ids})
     readopt["events"].append(record)
-    _rewrite_limits(state)
     tests_needed = any(i.get("tests") for i in state["items"] if i["id"] in ids)
     state["phase"] = "add-tests" if tests_needed else "implement"
     statefile.save(path, state)
     left = len(_budget_candidates(state))
     info(
-        f"採り直し: 残った時間 {available:.1f} 分に {len(ids)} 件（{', '.join(ids)}）を採りました（巡 {round_no + 1}。採らずに残った budget の候補 {left} 件）"
+        f"採り直し: 実装の予算の残り {available:.1f} 分に {len(ids)} 件（{', '.join(ids)}）を採りました（巡 {round_no + 1}。採らずに残った budget の候補 {left} 件）"
     )
     statefile.emit(TESTS_NEEDED=1 if tests_needed else 0)

@@ -150,9 +150,10 @@ def _state(tmp_path, reject: bool | None = True) -> dict:
 def test_the_implement_intake_rejects_the_item_with_the_reason(cmd_implement, tmp_path):
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
     problem = cmd_implement._implement_problem(ITEM, facts, TRACKED, _state(tmp_path))
-    assert problem is not None
-    assert problem.startswith(REASON)
-    assert "tests/test_full.py: README.md" in problem
+    # 取り消さず、そのテストだけを外すよう修正へ差し戻す（#2457 の棚卸し #26）
+    assert problem is not None and problem[2] is True
+    assert problem[1].startswith(REASON)
+    assert "tests/test_full.py: README.md" in problem[1]
 
 
 def test_the_implement_intake_passes_a_temporary_markdown(cmd_implement, tmp_path):
@@ -164,7 +165,7 @@ def test_the_add_tests_intake_rejects_the_item_with_the_reason(cmd_implement, tm
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
     facts[0]["files"] = ["tests/test_full.py"]
     problem = cmd_implement._test_commit_problem(facts, TRACKED, _state(tmp_path))
-    assert problem is not None and problem.startswith(REASON)
+    assert problem is not None and problem[1].startswith(REASON)
 
 
 @pytest.mark.parametrize("reject", [None, False])
