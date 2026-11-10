@@ -85,7 +85,7 @@ from sprint_loop_gate import (
     owner_line,
 )
 
-from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
+from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
 from sprint_loop_select import resume_answer_hold
 
 
