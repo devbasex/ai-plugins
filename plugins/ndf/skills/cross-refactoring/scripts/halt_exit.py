@@ -57,7 +57,7 @@ class HaltExit:
 
 def budget_metrics(s: dict) -> dict:
     """結果 JSON の予算・安全網・判定の件数（#2457）。"""
-    from refactor_lib import budget as budget_lib, safety_net
+    from refactor_lib import budget as budget_lib, progress, safety_net
 
     plan_budget = s.get("budget") or {"minutes": s.get("budget_minutes")}
     items = s.get("items") or []
@@ -71,14 +71,14 @@ def budget_metrics(s: dict) -> dict:
         "safety_net_minutes": round(safety_net.limit_minutes(s), 1),
         "coding_minutes": round(safety_net.used_seconds(s) / 60, 1),
         "judged": sum(len(i.get("feasibility") or []) for i in items),
-        "stalled": sum(1 for i in items for h in i.get("fix_history") or [] if h.get("progress") in ("stalled", "oscillating")),
+        "stalled": sum(1 for i in items for h in i.get("fix_history") or [] if h.get("progress") in progress.STOPPING),
         "flaky_fixed": len(s.get("flaky_fixes") or []),
     }
 
 
 def refactor_items(s: dict) -> list[dict]:
     """結果 JSON の項目ごとの状態（`items[0].refactor_items`。#2457）。"""
-    from refactor_lib import fixloop, item_actuals
+    from refactor_lib import fixloop, item_actuals, items as items_lib
 
     out = []
     for i in s.get("items") or []:
@@ -88,7 +88,7 @@ def refactor_items(s: dict) -> list[dict]:
                 "target": f"{i.get('path')}#{i.get('symbol')}",
                 "status": i.get("status"),
                 "feasibility": list(i.get("feasibility") or []),
-                "failing": fixloop.failing_set(i) if i.get("status") == "failing" else [],
+                "failing": fixloop.failing_set(i) if i.get("status") == items_lib.FAILING else [],
                 "fix_history": list(i.get("fix_history") or []),
                 "outside_scope": list(i.get("outside_scope") or []),
                 "estimate_minutes": {k: (i.get("estimate") or {}).get(k) for k in ("test", "implement")},
