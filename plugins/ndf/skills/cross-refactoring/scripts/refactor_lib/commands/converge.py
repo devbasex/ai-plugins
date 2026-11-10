@@ -46,7 +46,7 @@ class Halt(Exception):
     """止めて人へ渡す（打ち消しの衝突・判定の担い手が居ないまま停滞。#2457 決定 3・6）。"""
 
 
-def _halt(path: pathlib.Path, state: dict[str, Any], reason: str, detail: str, item_id: Any) -> NoReturn:
+def _converge_halt(path: pathlib.Path, state: dict[str, Any], reason: str, detail: str, item_id: Any) -> NoReturn:
     """止めた理由を `state["halt"]` へ書いて保存し、`Halt` を送る。"""
     state["halt"] = {"reason": reason, "detail": detail, "item": item_id, "at": statefile.now()}
     statefile.save(path, state)
@@ -89,7 +89,7 @@ def _revert(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any
     try:
         revert_items(path, state, [i["id"] for i in items], fixloop.REASON_TEXT[why])
     except UndoConflict as exc:
-        _halt(path, state, "revert_conflict", str(exc), exc.item_id)
+        _converge_halt(path, state, "revert_conflict", str(exc), exc.item_id)
 
 
 def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[str, Any]]) -> Optional[str]:
@@ -122,10 +122,10 @@ def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[
             revert_now.setdefault(fixloop.STALLED_AFTER_SWITCH, []).append(item)
         elif move == fixloop.SWITCH:
             if answer is not None and answer.get("feasible") is None and answer.get("rejudge"):
-                _halt(path, state, "no_judge", f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない", item["id"])
+                _converge_halt(path, state, "no_judge", f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない", item["id"])
             new = fixloop.switch_fixer(state, item, answer.get("by") if answer else None)
             if new is None:
-                _halt(path, state, "no_fixer", f"{item['id']} の修正が停滞し、替える修正担当が居ない", item["id"])
+                _converge_halt(path, state, "no_fixer", f"{item['id']} の修正が停滞し、替える修正担当が居ない", item["id"])
             info(f"🔁 {item['id']} の修正が{('停滞' if verdict == progress.STALLED else '振動')}したため、修正担当を {new} へ替えます")
     for why, items in revert_now.items():
         _revert(path, state, items, why)
