@@ -116,16 +116,20 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>" "<工程名>"...
 ```
 
-**値は引用符で囲む。** スクリプトは引数をちょうど 3 つ受け取る。引用を落とすと、空白を含む値が
+**続けて通った工程は 1 行に並べる。** `stage` は工程名を並べて受け、本文の書き換えを 1 回で済ませる（通過記録は
+工程ごとに 1 件ずつ積まれ、ボードの「工程」の列には最後の工程名が入る）。同じ課題の `stage` を続けて打たない。
+1 つでも工程表に無い名があれば、何も書かずに終了コード 2 で返る。
+
+**値は引用符で囲む。** スクリプトは `stage` のほかは引数をちょうど 3 つ受け取る。引用を落とすと、空白を含む値が
 シェルの側で分割され、4 つ目の引数になる。上の対応表の `Pull Request` がこれにあたり、
 引用せずに呼ぶと引数のチェックで終了コード 2 になり、ボードには何も書き込まれない。空白を含まない値も
 同じ形で書き、呼び方を 1 つに揃える。
 
 ```bash
-bash "$SCRIPTS/projects-sync.sh" 186 stage "実装レビュー"
-bash "$SCRIPTS/projects-sync.sh" 186 stage "Pull Request"
+bash "$SCRIPTS/projects-sync.sh" 186 stage "実装レビュー" "Pull Request"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 bash "$SCRIPTS/projects-sync.sh" 186 worktree ".worktrees/fix/issue-186"
 bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"

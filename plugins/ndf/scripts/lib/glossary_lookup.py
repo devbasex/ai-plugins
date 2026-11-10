@@ -35,21 +35,23 @@ def glossary_lookup(g: dict, terms=None, context: str | None = None, contexts_on
     return step_result.result(tool, "ok", f"{len(rows)} 語が当たった", rows, {"matched": len(rows)})
 
 
-def add_glossary_parsers(sub, add, load_declaration, load_glossary) -> None:
-    """`glossary.py` に `lookup` を足し、`check`・`diff`・`lookup` に `--field` を足す。`add` は glossary.py の副命令の登録。"""
+FIELD_COMMANDS = ("check", "diff", "lookup")  # `--field` を受ける副命令（引数は glossary.py が足す）
+
+
+def lookup_command(load_declaration, load_glossary):
+    """`glossary.py lookup` の本体を返す。宣言と用語集の読み込みは glossary.py の関数を受ける。"""
 
     def cmd_lookup(a):
-        root = Path(a.root)
-        decl = load_declaration(root)
+        decl = load_declaration(Path(a.root))
         if decl is None or not decl.source_path.exists():
             step_result.emit(step_result.result("glossary", "stopped", "用語集の宣言か用語集が無い"), step_result.EXIT_PRECONDITION)
         step_result.emit(glossary_lookup(load_glossary(decl), a.term, a.context, a.contexts))
 
-    p = add("lookup", cmd_lookup)
-    p.add_argument("--term", action="append", help="語（部分一致・繰り返し）")
-    p.add_argument("--context", help="コンテキストの id で絞る")
-    p.add_argument("--contexts", action="store_true", help="コンテキストの id の一覧だけを返す")
-    for name in ("check", "diff", "lookup"):
+    return cmd_lookup
+
+
+def wrap_fields(sub) -> None:
+    """`FIELD_COMMANDS` の本体を、`--field` を渡したときだけ値を取り出して出し直す形に包む（`json_pick.picked`）。"""
+    for name in FIELD_COMMANDS:
         q = sub.choices[name]
-        q.add_argument("--field", action="append", help="JSON Pointer（結果 JSON を根にする。繰り返し）")
         q.set_defaults(func=json_pick.picked(q.get_default("func"), "glossary"))

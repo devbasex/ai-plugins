@@ -18,6 +18,7 @@ import json
 import re
 import sys
 
+import step_read
 import step_result
 
 _INDEX = re.compile(r"^(0|[1-9][0-9]*)$")
@@ -102,10 +103,10 @@ def picked(func, tool: str):
             code = 0
         except SystemExit as e:
             code = e.code if isinstance(e.code, int) else 1
-        lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
-        if not lines:
+        obj = step_read.result_line(buf.getvalue())
+        if obj is None:
+            sys.stdout.write(buf.getvalue())
             raise SystemExit(code)
-        obj = json.loads(lines[-1])
         values, _ = pick_fields(obj, fields)
         step_result.emit({**obj, "items": [], "metrics": values}, code)
 
@@ -113,18 +114,6 @@ def picked(func, tool: str):
 
 
 # --- `step_result.py pick`（標準入力の結果 JSON から値を取り出す） ---------------------------
-
-
-def _last_result(text: str) -> dict | None:
-    """標準入力の最後の空でない行を結果 JSON として読む。読めなければ None。"""
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        return None
-    try:
-        obj = json.loads(lines[-1])
-    except ValueError:
-        return None
-    return obj if isinstance(obj, dict) and not step_result.validate_result(obj) else None
 
 
 def _raw_line(v) -> str:
@@ -141,7 +130,7 @@ def cli_pick(a, stdin=None) -> "NoReturn":  # noqa: F821
         step_result.emit(step_result.result("pick", "stopped", str(e)), step_result.EXIT_UNREADABLE)
     if a.raw and len(a.field) != 1:
         step_result.emit(step_result.result("pick", "stopped", "--raw には --field を 1 つだけ渡す"), step_result.EXIT_UNREADABLE)
-    src = _last_result((stdin or sys.stdin).read())
+    src = step_read.result_line((stdin or sys.stdin).read())
     if src is None:
         step_result.emit(step_result.result("pick", "stopped", "標準入力の最後の行が結果 JSON でない"), step_result.EXIT_UNREADABLE)
     values, missing = pick_fields(src, a.field)

@@ -32,19 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("md", "mdtable", "textparse", "pathmatch")
-import md  # noqa: E402
-import mdtable  # noqa: E402
-import pathmatch  # noqa: E402
-import textparse  # noqa: E402
+import jsonio, md, mdtable, pathmatch, proc, textparse  # noqa: E402,E401
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
-import jsonio  # noqa: E402
-import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
-import glossary_banned  # noqa: E402
-import glossary_merge  # noqa: E402
+import glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
 from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
-import ndf_tracking  # noqa: E402
-import glossary_lookup  # noqa: E402  lookup と --field（#2909）
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -857,7 +849,13 @@ def build_parser():
     p.add_argument("--base", required=True)
     p.add_argument("--head")
     add("merge", cmd_merge)
-    glossary_lookup.add_glossary_parsers(sub, add, load_declaration, load_glossary)
+    p = add("lookup", glossary_lookup.lookup_command(load_declaration, load_glossary))
+    p.add_argument("--term", action="append", help="語（部分一致・繰り返し）")
+    p.add_argument("--context", help="コンテキストの id で絞る")
+    p.add_argument("--contexts", action="store_true", help="コンテキストの id の一覧だけを返す")
+    for name in glossary_lookup.FIELD_COMMANDS:
+        sub.choices[name].add_argument("--field", action="append", help="JSON Pointer（結果 JSON を根にする。繰り返し）")
+    glossary_lookup.wrap_fields(sub)
     return ap
 
 

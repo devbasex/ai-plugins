@@ -175,7 +175,7 @@
 | 人が送っていない文から止める指示を置いたと気づいた | `.ndf/loop/<名>/stop` を消し、消したことと理由を引継ぎ文書に書く。人が置いた止める指示と、置いた経緯が分からない止める指示は消さない（境で `user_stop` で止まり、人が `loop start` で解く） |
 
 止める指示は、ループの 1 回の境で止まるためのものである。止まった後の起こし直し（`relay.py restart`・`loop start`）を断る理由にしない。
-`loop start` はファイルを消して続ける。止める指示の出所は記録（`loop status <名> --json` の `metrics.stop.values.by`）で読み、
+`loop start` はファイルを消して続ける。止める指示の出所は記録の値（`$SS loop get <名> --field /stop/values/by` の `metrics`）で読み、
 `by` が `user` でない止める指示（`organizer`・`unknown`、主体の書かれていないファイル）を人の意思として扱わない。
 
 ## 並列の計画のレーン
@@ -240,6 +240,6 @@
 | `.ndf/loop/<名>/laps.md` | 人が読む描画。書き換えるたびに作り直す |
 | `.ndf/handoff/loop-<名>.md` | 引継ぎ文書。現在地と次に実行するコマンドだけ |
 
-どれもメインディレクトリに置き、コミットしない。ループの 1 回の一覧は `$SS loop list <名>`、今の状態（見直しの持ち主を含む）は `$SS loop status <名>` で出す。
+どれもメインディレクトリに置き、コミットしない。ループの 1 回の一覧は `$SS loop list <名>`、今の状態（見直しの持ち主を含む）は `$SS loop status <名>` で出す。次の操作（止まった理由と再開のコマンド・人の判断待ち・答え待ち）は `$SS loop get <名>` の `next` に、記録の 1 つの値は `--field <JSON Pointer>` で `metrics` に返る。記録をその場の Python の 1 行で読み直さない。
 まとめの棚卸しは差分の棚卸しの後に、大整理と見直しを起動の判定つきで流す（`backlog-refinement` の `references/depths.md`）。
 ループの前の 1 回の棚卸しの持ち越し（`metrics.deferred`）は、ループの次の 1 回のまとめの棚卸しへ `new close --carry` で渡る。

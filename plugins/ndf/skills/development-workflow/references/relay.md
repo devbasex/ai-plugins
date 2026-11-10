@@ -240,6 +240,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
    - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
+   - `sprint-state.py get <sprint-state.json> [--field <JSON Pointer>]`（読むだけ。計画ごとの状態と、最初の終わっていない計画の次の欄を `next` に返す。状態ファイルをその場の Python の 1 行で読み直さない）
    - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
    - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
@@ -247,7 +248,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 
 ```bash
 O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
-DOC=$(python3 $H path $N | python3 -c 'import json, sys; print(json.load(sys.stdin)["items"][0]["path"])')
+DOC=$(python3 $H path $N | python3 plugins/ndf/scripts/lib/step_result.py pick --field /items/0/path --raw)
 python3 $H init $N --title "<表示名>" >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py queue $O/9-release-prod.json --max 3 --done $O/done-9.json >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py wait $O/done-9.json --timeout 3600 >/dev/null &&

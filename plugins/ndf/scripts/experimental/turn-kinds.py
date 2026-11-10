@@ -25,6 +25,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import deps  # noqa: E402
+
+deps.require("mdtable")  # transcript_agents が表の包みを読む
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, emit, result  # noqa: E402
 import transcript_agents  # noqa: E402
 
@@ -110,7 +113,7 @@ def transcript_files(root: Path, start: dt.datetime) -> list[Path]:
     return sorted(files)
 
 
-def _stamp(obj: dict) -> dt.datetime | None:
+def _line_time(obj: dict) -> dt.datetime | None:
     try:
         return dt.datetime.fromisoformat(str(obj.get("timestamp")).replace("Z", "+00:00"))
     except ValueError:
@@ -135,7 +138,7 @@ def tool_uses(path: Path, start: dt.datetime, end: dt.datetime, seen: set, count
                 continue
             if not isinstance(obj, dict) or obj.get("type") != "assistant":
                 continue
-            at = _stamp(obj)
+            at = _line_time(obj)
             if at is None or not start <= at < end:
                 continue
             content = (obj.get("message") or {}).get("content")
@@ -149,7 +152,7 @@ def tool_uses(path: Path, start: dt.datetime, end: dt.datetime, seen: set, count
                 yield block
 
 
-def count(files: list[Path], rules: Rules, start: dt.datetime, end: dt.datetime) -> dict:
+def count_turn_kinds(files: list[Path], rules: Rules, start: dt.datetime, end: dt.datetime) -> dict:
     kinds: dict[str, int] = {}
     cands: dict[str, int] = {c["name"]: 0 for c in rules.candidates}
     counts = {"tool_calls": 0, "unreadable_lines": 0, "unreadable_files": 0}
@@ -193,7 +196,7 @@ def main(argv=None) -> "NoReturn":  # noqa: F821
     if not root.is_dir():
         emit(result(TOOL, "stopped", f"transcript の根が無い: {root}"), EXIT_PRECONDITION)
     files = transcript_files(root, start)
-    got = count(files, rules, start, end)
+    got = count_turn_kinds(files, rules, start, end)
     total = got["tool_calls"]
     metrics = {
         "tool_calls": total,

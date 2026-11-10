@@ -46,11 +46,15 @@ allowed-tools:
 
 **通過記録へ積むのは記録のスクリプト（`progress-record.sh`）自身である。** hook には依らないため、ランタイム（Claude Code・Codex・Kiro CLI・agy）・Skill の起動の有無・
 `supervise.py` の子プロセスのどれから呼んでも積まれる。`projects-sync.sh` は中で
-`progress-record.sh` を呼び、1 回の記録で積むのは 1 件である。
+`progress-record.sh` を呼び、1 回の記録で積むのは渡した工程ごとに 1 件である。
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>" "<工程名>"...
 ```
+
+**続けて通った工程は 1 行に並べる。** `stage` は工程名を並べて受け、本文の書き換えを 1 回で済ませる（ボードの「工程」の列には
+最後の工程名が入る）。同じ課題の `stage` を続けて打たない。1 つでも工程表に無い名があれば、何も書かずに終了コード 2 で返る。
 
 | キー | 打つ時点 | 値 | issue の本文 |
 | --- | --- | --- | --- |
@@ -65,7 +69,7 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
 変数で書いてもよい**（`for n in 11 12; do …; done`）。どの呼び出しも自分で通過記録へ積む。
 
 ```bash
-bash "$SCRIPTS/projects-sync.sh" 186 stage "設計"
+bash "$SCRIPTS/projects-sync.sh" 186 stage "要求と受け入れ条件" "設計"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 ```
 
