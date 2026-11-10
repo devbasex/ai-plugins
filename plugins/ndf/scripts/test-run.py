@@ -415,6 +415,9 @@ def _docs_tests(root: pathlib.Path, a, ctx: OutcomeContext, kinds: diff_kinds.Di
     if not kinds.tests:
         detail = f"全体テストを飛ばした（差分が文書のファイルだけ: {len(kinds.docs)} ファイル）"
         return _emit_outcome(ctx._replace(passed=not ctx.lint, detail=detail))
+    if unscoped := ts.unscoped_owners(ctx.strategy, list(kinds.tests)):  # 雛形を持つ別の suite へ渡さない
+        ctx.notes.append(f"テストを受け持つ suite（{', '.join(unscoped)}）が範囲テストの雛形を持たず、全体テストを走らせる")
+        return None
     runs = [r.command for r in ts.scope_runs(ctx.strategy, list(kinds.tests), []) if r.kind == ts.TEST]
     if not runs:
         ctx.notes.append("テストが読む文書を変えたが、範囲テストの雛形（scope_command）を持つ suite が無く、全体テストを走らせる")

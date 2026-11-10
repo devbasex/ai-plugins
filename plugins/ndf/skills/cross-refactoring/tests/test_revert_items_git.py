@@ -35,8 +35,14 @@ def _commit(work, rel, index, text, item_id=None):
     return commit_with_trailers(work, text, item_trailers(item_id) if item_id else {})
 
 
-def _item(item_id, implement, status="failing"):
-    return {"id": item_id, "rank": 1, "path": "src/foo.py", "status": status, "commits": {"test": None, "implement": implement, "fix": []}}
+def _item(item_id, implement, status="failing", rank=1):
+    return {
+        "id": item_id,
+        "rank": rank,
+        "path": "src/foo.py",
+        "status": status,
+        "commits": {"test": None, "implement": implement, "fix": []},
+    }
 
 
 def test_only_the_items_commits_are_reverted_and_the_merged_base_stays(tmp_path, undo):
@@ -82,3 +88,36 @@ def test_a_conflicting_revert_restores_head_and_keeps_every_item(tmp_path, undo)
     statuses = {i["id"]: i["status"] for i in read_state(path)["items"]}
     assert statuses == {"I-A": "failing", "I-B": "verified"}
     assert not any(d.get("ejected") for d in read_state(path).get("drops") or [])
+
+
+def test_a_conflict_after_an_earlier_revert_keeps_every_item_state(tmp_path, undo):
+    """先の項目を打ち消せた後で次の項目が衝突したら、HEAD と一緒に項目の状態も開始前のまま残す。"""
+    work, base = _init(tmp_path)
+    a = _commit(work, "src/foo.py", 2, "by-A", "I-A")
+    b = _commit(work, "src/foo.py", 29, "by-B", "I-B")
+    c = _commit(work, "src/foo.py", 2, "by-C", "I-C")
+    items = [_item("I-A", [a]), _item("I-B", [b], rank=2), _item("I-C", [c], status="verified", rank=3)]
+    path = make_state_v2(tmp_path, work, items=items, plan={"base_sha": base}, phase="verify")
+
+    with pytest.raises(undo.UndoConflict):
+        undo.revert_items(path, read_state(path), ["I-A", "I-B"], "成立しないと判定した")
+
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == c
+    statuses = {i["id"]: i["status"] for i in read_state(path)["items"]}
+    assert statuses == {"I-A": "failing", "I-B": "failing", "I-C": "verified"}
+
+
+def test_uncommitted_changes_stop_the_revert_without_discarding_them(tmp_path, undo):
+    """C4: 衝突の巻き戻し（`reset --hard`）で消さないよう、未コミットの変更があれば打ち消さずに止まる。"""
+    work, base = _init(tmp_path)
+    a = _commit(work, "src/foo.py", 2, "by-A", "I-A")
+    path = make_state_v2(tmp_path, work, items=[_item("I-A", [a])], plan={"base_sha": base}, phase="verify")
+    (work / "src" / "bar.py").write_text("edited\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        undo.revert_items(path, read_state(path), ["I-A"], "成立しないと判定した")
+    with pytest.raises(SystemExit):
+        undo.revert_unattributed(path, read_state(path), [a], "手順の違反")
+
+    assert (work / "src" / "bar.py").read_text(encoding="utf-8") == "edited\n"
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == a

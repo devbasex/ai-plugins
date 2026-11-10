@@ -188,9 +188,14 @@ def _mark_unfixed(
     結果を残して終わった起動で、範囲を確定でき、範囲のコミットの `Item-Id` にその項目が無いものだけを数える。
     **判定は手順を外れて範囲ごと捨てる前のコミットで行う**（直そうとしてコミットした項目は直さなかったと扱わない）。
     """
-    if not left_result or not result.get("known"):
+    if not result.get("known"):
         return []
     touched = {_item_id_of(work, sha) for sha in result["ordered"]}
+    for item in fix_items:
+        if item["id"] in touched:
+            item.pop("unfixed", None)  # 前の起動で直さなかった項目も、今回コミットしたら再検証へ戻す
+    if not left_result:
+        return []
     attempt = int(fix.get("attempt") or 1)
     unfixed = []
     for item in fix_items:

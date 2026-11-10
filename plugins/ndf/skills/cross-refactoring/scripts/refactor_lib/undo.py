@@ -276,13 +276,16 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
         targets = _close_commitless(state, targets, reason)
         # 新しい項目から打ち消す（同じ行を順に書き換えた項目を古い方から戻すと衝突する）
         targets.sort(key=lambda i: int(find_item(state, i).get("rank") or 0), reverse=True)
+        if targets:
+            # 衝突の巻き戻しは `reset --hard` で、未コミットの変更を戻せずに消す（C4）
+            worktree.stop_if_dirty(state, work, "打ち消しの")
         before = git_out(work, ["rev-parse", "HEAD"]) or ""
         reverts: list[str] = []
         for item_id in targets:
-            item = find_item(state, item_id)
-            shas = list(reversed([full_commit(work, s) for s in item_shas(item)]))
+            shas = list(reversed([full_commit(work, s) for s in item_shas(find_item(state, item_id))]))
             conflict = revert_range(work, shas)
             if conflict:
+                # 項目の状態は全部を打ち消せてから書く。途中で衝突したら HEAD と一緒に開始前のまま残す
                 reset_hard(work, before)
                 state["pending_drop"] = None
                 statefile.save(path, state)
@@ -292,6 +295,8 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
                     conflict,
                 )
             reverts.extend(_new_commits(work, len(shas)))
+        for item_id in targets:
+            item = find_item(state, item_id)
             item["failure_reason"] = reason
             item["reverted_by_commit"] = True
             ledger.mark_dropped(item, reason)
@@ -323,6 +328,8 @@ def revert_unattributed(path: pathlib.Path, state: dict[str, Any], shas: list[st
     戻して終了コード 4 で止まる。打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録し、差し戻しに残す。
     """
     work = work_dir(state)
+    # 衝突の巻き戻しは `reset --hard` で、未コミットの変更を戻せずに消す（C4）
+    worktree.stop_if_dirty(state, work, "打ち消しの")
     before = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered = list(reversed(shas))
     worktree.wait_past_rewrite()

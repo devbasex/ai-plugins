@@ -107,3 +107,31 @@ def test_the_same_test_is_requested_only_once_per_run(tmp_path, monkeypatch, cmd
 
     assert cmd_flaky.queue_flaky(state, [TEST_ID], "x.log") == [], "依頼済みのテストは積まない"
     assert state["flaky_request"] is None
+
+
+def test_a_sendback_keeps_the_first_base_even_if_the_phase_moves_it(tmp_path, monkeypatch, cmd_flaky, capsys):
+    """差し戻しの起動し直しで `start-phase` が起点を置き直しても、初回の違反コミットを打ち消す。"""
+    work, path, _ = _setup(tmp_path, monkeypatch)
+    (work / "src" / "calc.py").write_text("X = 3\n", encoding="utf-8")
+    commit_with_trailers(work, "fix flaky in src", {"Flaky-Fix": TEST_ID})
+    assert _merge(cmd_flaky, capsys) == "sendback"
+
+    state = read_state(path)
+    state["phases"]["flaky-fix"]["base_sha"] = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    write_state(path, state)
+
+    assert _merge(cmd_flaky, capsys) == "reverted"
+    assert (work / "src" / "calc.py").read_text(encoding="utf-8") == "X = 2\n"
+
+
+def test_a_pending_fix_starts_after_the_flaky_fix(tmp_path, monkeypatch, cmd_flaky, capsys):
+    """検証が同時に修正へ回していたら、修正の起点を直しの後へ置き直す（直しを手順違反として打ち消させない）。"""
+    work, path, impl = _setup(tmp_path, monkeypatch)
+    state = read_state(path)
+    state["fix"] = {"items": ["I-001"], "base_sha": impl, "attempt": 1, "impl": "claude"}
+    write_state(path, state)
+    (work / "tests" / "test_clock.py").write_text("def test_now():\n    assert 1 == 1\n", encoding="utf-8")
+    fix = commit_with_trailers(work, "fix flaky", {"Flaky-Fix": TEST_ID})
+
+    assert _merge(cmd_flaky, capsys) == "kept"
+    assert read_state(path)["fix"]["base_sha"] == fix

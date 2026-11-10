@@ -145,6 +145,11 @@ def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
     assert int(items["I-001"]["verify_runs"]) == 2
     assert read_state(flow["path"])["fix"]["items"] == ["I-002"]
 
+    # 替えた修正担当がコミットしたら、前の起動の `unfixed` を外して再検証へ戻す
+    _fix(flow, cmd_setup, cmd_merge_fix, {"I-002": ("b", _module("b"))})
+    items = _items(flow)
+    assert "unfixed" not in items["I-002"] and items["I-002"]["status"] == "implemented"
+
 
 def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
     """R3 AC4（I6）: 結果を残さずに終わった修正の起動は数えず、締め切りの前なら同じ項目を修正へ回す。"""

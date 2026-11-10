@@ -351,3 +351,27 @@ def test_unreadable_docs_decl_runs_the_whole_tests(tmp_path):
     _branch_then_commit(root, {"docs/a.md": "# a\n"})
     code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
     assert code != 0 and _diff_kinds_item(out)["unknown"]
+
+
+def test_tested_docs_owned_by_a_suite_without_a_scope_template_run_the_whole_tests(tmp_path):
+    """文書に対応するテストを受け持つ suite が範囲の雛形を持たなければ、雛形を持つ別の suite へ渡さず全体テストへ戻す。"""
+    import subprocess
+
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "py", "runner": "sh", "kind": "test", "paths": ["py"], "command": "true", "scope_command": "sh {paths}"},
+                {"name": "js", "runner": "sh", "kind": "test", "paths": ["js"], "command": "false"},
+            ]
+        },
+        "docs": {"tested": [{"paths": ["docs/glossary.md"], "tests": ["js/test_g.sh"]}]},
+    }
+    root = _repo(tmp_path, decl)
+    (root / "js").mkdir()
+    (root / "js" / "test_g.sh").write_text("exit 0\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"], check=True)
+    _branch_then_commit(root, {"docs/glossary.md": "# g\n"})
+    code, out = _run(root, "whole", "--base", "base")
+    assert code != 0 and not out["summary"].startswith("文書を読むテスト"), out
+    assert any("js" in n and "全体テストを走らせる" in n for n in _notes(out)), out

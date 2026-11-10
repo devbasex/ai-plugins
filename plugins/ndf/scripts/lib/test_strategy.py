@@ -288,6 +288,29 @@ def suite_for(strategy: Strategy, path: str, kind: str = TEST) -> Optional[Suite
     return best
 
 
+def owner_suite(strategy: Strategy, path: str, kind: str = TEST) -> Optional[Suite]:
+    """パスを受け持つ `kind` の suite（`paths` の最長の一致）。`suite_for` と違い、`scope_command` の無い suite も見る。
+
+    範囲の雛形を持たない suite が受け持つテストを、雛形を持つ別の suite へ渡さないために使う。"""
+    best, best_len = None, -1
+    for suite in strategy.suites:
+        if suite.kind != kind:
+            continue
+        n = _match_len(suite, path)
+        if n is not None and n > best_len:
+            best, best_len = suite, n
+    return best
+
+
+def unscoped_owners(strategy: Strategy, targets: list[str]) -> list[str]:
+    """対象を受け持つテストの suite のうち、範囲の雛形（`scope_command`）を持たないものの名前（重なりなし・名前順）。
+
+    `suite_groups` は受け持つ suite の無い対象を最初の範囲の suite へ渡すため、別のランナーの対象（例: JavaScript の
+    テストを pytest へ）を渡す前にここで見分ける。"""
+    owners = (owner_suite(strategy, target_path(t)) for t in targets)
+    return sorted({o.name for o in owners if o is not None and not o.scope_command})
+
+
 def suite_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:
     """テストの対象を受け持つテストの suite ごとに分ける。受け持つ suite の無いものは最初のテストの suite へ。
 

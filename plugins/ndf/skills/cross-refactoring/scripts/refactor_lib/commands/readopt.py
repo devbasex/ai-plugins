@@ -23,7 +23,7 @@ from typing import Any, Optional
 import statefile
 
 from .. import budget, clock, info
-from ..items import CARRIED, DEFERRED, PLANNED, defer, new_items
+from ..items import CARRIED, DEFERRED, PLANNED, TESTED, defer, new_items
 from ..paths import load_state
 from ..vocabulary import DEFER_BUDGET, DEFER_NOT_DONE
 
@@ -53,18 +53,31 @@ def _archive_round(state: dict[str, Any], round_no: int) -> None:
 
 
 def _reopen(item: dict[str, Any], round_no: int) -> None:
-    """持ち越しの項目を、新しい巡の未着手の項目へ戻す（変更は取り込みが捨ててある）。"""
+    """持ち越しの項目を、新しい巡の未着手の項目へ戻す。
+
+    持ち越しは項目のコミットを取り消さない（#2457）。テストの追加のコミットは HEAD に残るため、項目の記録から外すと
+    どの項目にも属さないコミットになり、公開の直前の台帳の照合（`ledger.unpublishable`）で止まる。テストのコミットを
+    持つ項目はそれを持ったまま `tested` へ戻し、テストを足し直させない。"""
+    old = item.get("commits") or {}
+    test, test_extra = old.get("test"), list(old.get("test_extra") or [])
+    commits: dict[str, Any] = {"test": test, "implement": [], "fix": []}
+    if test_extra:
+        commits["test_extra"] = test_extra
+    seconds = {"test": item["seconds"]["test"]} if test and "test" in (item.get("seconds") or {}) else {}
     item.update(
         {
-            "status": PLANNED,
+            "status": TESTED if test else PLANNED,
             "round": round_no,
-            "commits": {"test": None, "implement": [], "fix": []},
-            "seconds": {},
+            "commits": commits,
+            "seconds": seconds,
             "fix_count": 0,
             "danger": [],
         }
     )
-    for key in ("failure_reason", "danger_checked", "danger_hits", "diff_lines", "review_test_judgements", "review_scope_judgements"):
+    dropped = ["failure_reason", "danger_checked", "danger_hits", "diff_lines", "review_scope_judgements"]
+    if not test:
+        dropped.append("review_test_judgements")
+    for key in dropped:
         item.pop(key, None)
 
 

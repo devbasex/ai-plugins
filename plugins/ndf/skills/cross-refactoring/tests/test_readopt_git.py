@@ -129,6 +129,23 @@ def test_all_items_carried_reach_the_readopt(flow, cmd_setup, cmd_implement, rea
     assert [e["name"] for e in state["phases_history"]] == ["implement"]
 
 
+def test_a_carried_item_keeps_its_test_commit_when_readopted(flow, readopt):
+    """持ち越しは項目のコミットを取り消さない（#2457）。採り直しでテストのコミットを外すと、公開の直前に未所属で止まる。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert True\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    item = _entry("I-001", 1, "total", status="carried")
+    item["commits"]["test"] = test_sha
+    item["seconds"] = {"test": 12.0}
+    _plan(flow, [item], phase="readopt")
+
+    _call(readopt, "cmd_readopt")
+
+    got = read_state(flow["path"])["items"][0]
+    assert got["status"] == "tested" and got["round"] == 2
+    assert got["commits"] == {"test": test_sha, "implement": [], "fix": []} and got["seconds"] == {"test": 12.0}
+
+
 def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implement, readopt):
     """巡: 1 巡目の取り込みの後に採り直した項目は、2 巡目の新しい起点からのコミットで取り込まれる。"""
     work = flow["work"]

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 from typing import Any, Optional
 
 import statefile
@@ -68,6 +69,18 @@ def fix_violations(work: str, shas: list[str], tests: list[str]) -> list[dict[st
     return found
 
 
+def _close_request(path: pathlib.Path, state: dict[str, Any], work: str, base: str) -> None:
+    """依頼を閉じて保存する。検証が同時に修正へ回していたら、修正の起点を直しの後の HEAD へ置き直す。
+
+    置き直さないと、修正の取り込み（`merge-fix`）が直しのコミット（と打ち消しのコミット）を `Item-Id` の無い
+    手順違反として打ち消す。起点が直しの起点と同じとき（直しより前に置いた起点）だけ動かす。"""
+    state["flaky_request"] = None
+    fix = state.get("fix")
+    if fix and base and fix.get("base_sha") == base:
+        fix["base_sha"] = git_out(work, ["rev-parse", "HEAD"]) or fix["base_sha"]
+    statefile.save(path, state)
+
+
 def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
     """フレーキーの直しの起動の結果を取り込む。出力は `FLAKY_FIX=kept|none|sendback|reverted`。"""
     path, state = load_state(args.id)
@@ -77,15 +90,17 @@ def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
         statefile.emit(FLAKY_FIX="none")
         return
     work = work_dir(state)
-    base = str(((state.get("phases") or {}).get("flaky-fix") or {}).get("base_sha") or "")
+    # 他の取り込みと同じく、検証を受けていない未コミットの変更を先に捨てる（打ち消しの清浄性のチェックで止まらないように）
+    gitfacts.discard_impl_leftovers(state, work)
+    # 差し戻しの起動し直しは `start-phase` が起点を今の HEAD へ置き直す。初回の起点を依頼に持ち、初回からのコミット全体を見る
+    base = str(pending.get("base_sha") or ((state.get("phases") or {}).get("flaky-fix") or {}).get("base_sha") or "")
     shas = _commits(work, base) if base else []
     by = str(state.get("implementer") or "")
     fixes = state.setdefault("flaky_fixes", [])
     if not shas:
         for test_id in tests:
             fixes.append({"test_id": test_id, "commit": None, "by": by, "result": "none"})
-        state["flaky_request"] = None
-        statefile.save(path, state)
+        _close_request(path, state, work, base)
         info(f"ℹ フレーキーなテスト {len(tests)} 件の直しのコミットがありませんでした（報告に残します）")
         statefile.emit(FLAKY_FIX="none")
         return
@@ -94,7 +109,7 @@ def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
     found = fix_violations(work, shas, tests)
     attempts = int(pending.get("attempts") or 0) + 1
     if found and attempts < 2:
-        pending.update({"attempts": attempts, "sendback": found})
+        pending.update({"attempts": attempts, "sendback": found, "base_sha": base})
         state["flaky_request"] = pending
         statefile.save(path, state)
         info(f"↩ フレーキーの直しに手順の違反が {len(found)} 件あります。1 回だけ差し戻します")
@@ -107,15 +122,13 @@ def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
             state.setdefault("flaky_fixes", []).append(
                 {"test_id": test_id, "commit": None, "by": by, "result": "reverted", "violations": found}
             )
-        state["flaky_request"] = None
-        statefile.save(path, state)
+        _close_request(path, state, work, base)
         info("↩ 差し戻しの後も手順の違反が残ったため、フレーキーの直しのコミットを打ち消しました（項目には触れません）")
         statefile.emit(FLAKY_FIX="reverted")
         return
     named = {str(gitfacts.commit_trailers(work, sha).get(TRAILER) or "").strip(): sha for sha in shas}
     for test_id in tests:
         fixes.append({"test_id": test_id, "commit": named.get(test_id), "by": by, "result": "kept" if test_id in named else "none"})
-    state["flaky_request"] = None
-    statefile.save(path, state)
+    _close_request(path, state, work, base)
     info(f"✅ フレーキーなテストの直しを {len(named)} 件残しました（項目とは別のコミット）")
     statefile.emit(FLAKY_FIX="kept")
