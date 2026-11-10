@@ -104,7 +104,7 @@ def test_trial_cost_denial_keeps_denying_under_relay(tmp_path, state, ctx, relay
     payload = agent(tp, cwd=str(tmp_path))  # git の外（_local）で見込みを読む
     first, second = denied(run(payload, state, env)), denied(run(payload, state, env))
     assert first and second and "理由: 費用" in second
-    assert [r["relay"] for r in rows(ctx)] == [True, True]
+    assert [(r["event"], r["relay"]) for r in rows(ctx)] == [("判定", True), ("引継ぎ開始", True), ("判定", True)]
 
 
 def test_unreadable_context_passes_and_records(tmp_path, state, ctx):
@@ -571,4 +571,132 @@ PINNED_REST = {
     "auto_compacts": "不明",
     "quality": {"rework": 1, "review_fixes": "不明", "missed_requirements": "不明"},
     "no_policy_rows": 0,
+    "restores": [{"context": 1170, "calls": 1}],
 }
+
+
+# ---------------------------------------------------------------- 印の自動化・識別子・区切り（#2908 の I1〜I7・受け入れ条件 6）
+
+
+def handoff_transcript(tmp_path, total: int, name: str = "h.jsonl", first: str = "/goal /ndf:development-workflow .ndf/handoff/issue-7.md の続きから", ts: str | None = None) -> Path:
+    """先頭の利用者の発言が `first` で、最後の文脈が `total` の会話の記録。"""
+    usage = {"input_tokens": 10, "cache_read_input_tokens": total - 110, "cache_creation_input_tokens": 100, "output_tokens": 5}
+    lines = [{"type": "user", "message": {"content": first}}, {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}]
+    if ts:
+        lines[1]["timestamp"] = ts
+    path = tmp_path / name
+    path.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n")
+    return path
+
+
+def marks_of(ctx: Path, event: str) -> list[dict]:
+    return [r for r in rows(ctx) if r.get("event") == event]
+
+
+def test_restored_mark_once_after_the_entry_point(tmp_path, state, ctx):
+    # I1: エントリポイントの Skill では書かず、その後の最初の工程の起動で 1 行だけ。文脈の量は起動の直前の量
+    tp = handoff_transcript(tmp_path, 1_000)
+    run(skill(tp, name="ndf:development-workflow", args="#7"), state, env_of(ctx))
+    assert marks_of(ctx, "復元完了") == []
+    run(agent(tp, desc="設計: #7"), state, env_of(ctx))
+    run(skill(tp, args="#7"), state, env_of(ctx))
+    (m,) = marks_of(ctx, "復元完了")
+    assert (m["context"], m["work"], m["session_id"], m["verdict"]) == (1_000, "#7", "s1", None)
+
+
+def test_no_restored_mark_without_a_handoff_start(tmp_path, state, ctx):
+    # I2: 先頭が引継ぎ文書を指さない会話では、何度起動しても書かない
+    tp = handoff_transcript(tmp_path, 1_000, first="#7 を進めて")
+    for _ in range(2):
+        run(skill(tp), state, env_of(ctx))
+    assert marks_of(ctx, "復元完了") == []
+
+
+def test_head_is_read_once_per_session(tmp_path, state, ctx):
+    # 2 回目以降の起動では先頭を読まず、状態のファイルで決める（非機能: 先頭の読みは 1 セッションに 1 回）
+    tp = handoff_transcript(tmp_path, 1_000)
+    run(skill(tp, name="ndf:development-workflow"), state, env_of(ctx))  # 待ち
+    handoff_transcript(tmp_path, 1_000, first="別の依頼")  # 先頭を書き換えても状態で決まる
+    run(skill(tp), state, env_of(ctx))
+    assert len(marks_of(ctx, "復元完了")) == 1
+    other = handoff_transcript(tmp_path, 1_000, name="o.jsonl", first="別の依頼")
+    run(skill(other, session="s2"), state, env_of(ctx))  # 対象外
+    handoff_transcript(tmp_path, 1_000, name="o.jsonl")
+    run(skill(other, session="s2"), state, env_of(ctx))
+    assert [m["session_id"] for m in marks_of(ctx, "復元完了")] == ["s1"]
+
+
+def test_handoff_mark_once_under_the_relay_only(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # I3: ラッパーの直接の子を止めると 1 行、続けて止めても増えない。ラッパーの外で止めても書かない
+    tp = transcript(tmp_path, 200_001)
+    run(skill(tp, session="out"), state, env_of(ctx))
+    assert marks_of(ctx, "引継ぎ開始") == []
+    env = env_of(ctx, NDF_RELAY_DIR=str(relay_dir))
+    assert denied(run(skill(tp), state, env)) and denied(run(skill(tp), state, env))
+    (m,) = marks_of(ctx, "引継ぎ開始")
+    assert (m["session_id"], m["work"], m["context"], m["relay"]) == ("s1", "#829", 200_001, True)
+
+
+def test_unwritable_marks_keep_the_verdict(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # I4: 印と状態を書けなくても、判定と拒否の文面は印の無いときと同じ
+    bad = tmp_path / "file"
+    bad.write_text("")
+    over = transcript(tmp_path, 200_001)
+    good = denied(run(skill(over), state, env_of(ctx, NDF_RELAY_DIR=str(relay_dir))))
+    worse = denied(run(skill(over, session="s2"), state, {"NDF_CONTEXT_DIR": str(bad / "x"), "NDF_RELAY_DIR": str(relay_dir)}))
+    assert good and good == worse
+    tp = handoff_transcript(tmp_path, 1_000)
+    assert denied(run(skill(tp, session="s3"), state, {"NDF_CONTEXT_DIR": str(bad / "x")})) is None
+
+
+def test_subagent_writes_no_marks(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # I5: サブエージェントの中の起動では判定も印も書かない
+    tp = handoff_transcript(tmp_path, 300_000)
+    env = env_of(ctx, NDF_RELAY_DIR=str(relay_dir))
+    assert denied(run(skill(tp, agent_id="a1"), state, env)) is None
+    assert rows(ctx) == []
+
+
+def test_record_cli_normalizes_the_work(tmp_path, ctx):
+    # I6: 課題番号を含めば昇順の並び。含まずセッションがあれば空で書き、集計はセッションの前の行で補う
+    cli("record", "--event", "引継ぎ開始", "--work", ".ndf/handoff/issue-30.md と #7", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    cli("record", "--event", "引継ぎ開始", "--work", "loop-lcore", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    cli("record", "--event", "引継ぎ開始", "--work", "loop-lcore", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="")
+    assert [r["work"] for r in rows(ctx)] == ["#7 #30", "", "loop-lcore"]
+    assert [r["work"] for r in cd.fill_work(rows(ctx))][:2] == ["#7 #30", "#7 #30"]
+
+
+def test_report_span_cuts_every_source(tmp_path):
+    # I7: 区切りの外の呼び出しは会話・サブエージェント・帳簿のどれからも数えない。区切りが無ければ今の値
+    m = load_cli()
+    tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m1"), call("2026-11-01T02:00:00Z", "m2")])
+    write_transcript(
+        tmp_path / "s1" / "subagents" / "agent-x.jsonl", [call("2026-11-01T00:01:00Z", "m3"), call("2026-11-01T02:01:00Z", "m4")]
+    )
+    usage = call("t", "m9")["message"]["usage"]
+    ledger = [
+        {"session_id": "p1", "parent_session_id": "s1", "at": "2026-11-01T00:02:00Z", "usage": usage, "seconds": 1},
+        {"session_id": "p2", "parent_session_id": "s1", "at": "2026-11-01T02:02:00Z", "usage": usage, "seconds": 1},
+    ]
+    recs = [hook_row("s1", tp, "2026-11-01T00:00:00Z"), hook_row("s1", tp, "2026-11-01T02:00:00Z", verdict="再起動", reason="手動")]
+    whole = m.report_work("#7", recs, ledger)
+    span = (cd.parse_ts("2026-11-01T01:00:00Z"), cd.parse_ts("2026-11-01T03:00:00Z"))
+    cut = m.report_work("#7", recs, ledger, span)
+    assert (whole["parts"]["conductor"]["calls"], whole["parts"]["ndf"]["calls"]) == (2, 4)
+    assert (cut["parts"]["conductor"]["calls"], cut["parts"]["ndf"]["calls"], cut["restart_count"]) == (1, 2, 1)
+    early = m.report_work("#7", recs, ledger, (cd.parse_ts("2026-11-01T00:00:00Z"), cd.parse_ts("2026-11-01T00:30:00Z")))
+    assert (early["parts"]["conductor"]["calls"], early["parts"]["ndf"]["calls"], early["restart_count"]) == (1, 2, 0)
+
+
+def test_hook_marks_make_both_parts_known(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # 受け入れ条件 6: hook が書いた 2 つの印で、引継ぎの区間と復元の区間が「不明」でなく、復元の量がセッションごとに出る
+    env = env_of(ctx, NDF_RELAY_DIR=str(relay_dir))
+    old = transcript(tmp_path, 250_000, name="old.jsonl")
+    assert denied(run(skill(old, args="#7", session="old"), state, env))
+    new = handoff_transcript(tmp_path, 30_000, ts="2026-11-01T00:00:00Z")
+    run(skill(new, name="ndf:development-workflow", args="#7", session="new"), state, env)
+    run(skill(new, args="#7", session="new"), state, env)
+    out = load_cli().report_work("#7", rows(ctx))
+    assert out["unknown_parts"] == {"restore": 0, "handoff": 0}
+    assert out["restores"] == [{"context": 30_000, "calls": 1}]
+    assert out["parts"]["restore"]["calls"] == 1

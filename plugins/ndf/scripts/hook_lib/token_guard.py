@@ -15,13 +15,14 @@
 
 工程の起動の判定は、再起動の方針（`lib/context_policy.py`。既定は現行方式で上限 200,000）の帯で決め、起動 1 回ごとに
 判定の記録（`lib/context_decisions.py`）へ 1 行を足す。記録を書けなくても判定は変えない（#2262）。
+ラッパーの直接の子を止めたときの「引継ぎ開始」と、引継ぎ文書で始まったセッションの最初の工程の起動での「復元完了」の
+印も、ここで 1 セッションに 1 回だけ書く（#2908）。
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from collections import deque
 from contextlib import contextmanager
@@ -280,16 +281,7 @@ def relay_notice() -> str | None:
     return text if kind == "relay" else None
 
 
-ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")
-NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
-
-
-def issue_refs(text: str) -> str:
-    """課題番号を `#829 #830` の形で並べる。日付・版数・小数は先に取り除く。範囲（#829-830）は両端を残す。"""
-    refs = []
-    for line in text.split("\n"):
-        refs += [f"#{m.group(1)}" for m in ISSUE.finditer(NOISE.sub("", line))]
-    return " ".join(refs)
+ENTRY_SKILLS = ("skill:development-workflow", "skill:issue-plan-strategy")  # 状態を戻す途中のエントリポイント（復元完了を書かない）
 
 
 def _launch_key(raw: dict, tool: str) -> tuple[str, str] | None:
@@ -378,17 +370,59 @@ def guard_context(raw: dict, tool: str) -> dict | None:
         repo = cd.decisions_repo(root)
         estimate = cp.estimate_cost(cp.Estimates.from_dict(cd.read_cost_estimates(repo)), total, model, stage)
     verdict = cp.decide_boundary(applied, total, window, estimate)
-    row = dict(source="hook", session_id=sid, transcript=tp, model=model, work=cd.work_id(issue_refs(words)), stage=stage)
+    row = dict(source="hook", session_id=sid, transcript=tp, model=model, work=cd.work_id(cd.issue_refs(words)), stage=stage)
     row.update(context=total, window=window, applied=applied, verdict_obj=verdict)
     d = guards_dir()
     out = _judge(d, sid, key, words, total, applied, verdict, row) if d is not None and total is not None else None
     if d is None or total is None:
         row["passed_once"] = False
-    cd.append_decision(cd.boundary_row(**row), cd.decisions_repo(root))
+    repo = cd.decisions_repo(root)
+    cd.append_decision(cd.boundary_row(**row), repo)
     cd.write_applied(sid, applied)
+    if d is not None:
+        _write_marks(d, sid, tp, stage, row, repo, handoff=bool(row["relay"]) and out is not None)
     if out is None and d is not None:
         return _config_notice(d, sid, applied)
     return out
+
+
+def _write_marks(d: Path, sid: str, tp: str, stage: str, row: dict, repo: str, handoff: bool) -> None:
+    """「引継ぎ開始」と「復元完了」の印を hook が書く（#2908 の決定 2）。失敗は飲み、判定を変えない（I4）。
+
+    - 引継ぎ開始: ラッパーの直接の子を止めたとき、そのセッションで 1 回だけ（I3）
+    - 復元完了: 引継ぎ文書で始まったセッションの、エントリポイントの Skill を除く最初の起動で 1 回だけ（I1・I2）。
+      引継ぎ文書で始まったかは会話の記録の先頭を 1 セッションに 1 回だけ読み、状態のファイルに持つ"""
+    import context_decisions as cd
+
+    try:
+        with session_lock(d, sid) as held:
+            if not held:
+                return
+            if handoff and not cd.handoff_marked(sid) and cd.set_handoff_marked(sid):
+                cd.append_decision(_mark_row(cd, row, cd.MARK_HANDOFF), repo)
+            state = cd.read_restore_state(sid)
+            if state in (cd.RESTORE_DONE, cd.RESTORE_NA):
+                return
+            if state is None:
+                started = cd.started_by_handoff(tp)
+                if started is None:
+                    return  # 先頭が読めない・発言がまだ無い: 未判定のまま次の起動で読み直す
+                state = cd.RESTORE_PENDING if started else cd.RESTORE_NA
+                if state == cd.RESTORE_NA or stage in ENTRY_SKILLS:
+                    cd.write_restore_state(sid, state)
+                    return
+            elif stage in ENTRY_SKILLS:
+                return
+            if cd.write_restore_state(sid, cd.RESTORE_DONE):  # 状態を書けなければ 2 行目を避けて印も書かない
+                cd.append_decision(_mark_row(cd, row, cd.MARK_RESTORED), repo)
+    except Exception:  # noqa: BLE001 — 印の失敗で起動の判定を変えない（I4）
+        return
+
+
+def _mark_row(cd, row: dict, event: str) -> dict:
+    """判定の行と同じセッション・作業・文脈の量・方針で、印の 1 行を作る（判定の列は空）。"""
+    keep = ("source", "session_id", "transcript", "model", "work", "context", "window", "applied", "relay")
+    return cd.boundary_row(**{k: row[k] for k in keep if k in row}, event=event)
 
 
 def _judge(d: Path, sid: str, key: str, words: str, total: int, applied, verdict, row: dict) -> dict | None:
@@ -411,7 +445,9 @@ def _judge(d: Path, sid: str, key: str, words: str, total: int, applied, verdict
         if not over:
             return None
         write_json(mark, {"key": key})
-    nxt = f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}"
+    import context_decisions as cd
+
+    nxt = f"/ndf:development-workflow {cd.issue_refs(words) or '<課題番号>'}"
     return _context_deny(total, applied.limit, nxt, notice, _trial_cause(applied, verdict))
 
 
