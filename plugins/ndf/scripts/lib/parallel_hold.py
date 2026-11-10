@@ -30,6 +30,7 @@ LOG_FILE = "answer-hold-log.jsonl"
 RESUME_DIR = "resume"
 LANE_KINDS = ("gate1", "ask")  # レーンが送った依頼。耐久ワークフローの問いとリリース承認ゲートはレーンの数へ入らない
 CONDITION = "answer_hold"  # 開発ループの止まる条件と `parallel.py wait` の action
+WAIT_STOPS = ("waiting_only", CONDITION)  # 答えを待って止まったループの止まる条件。答えを受けたら起こす
 SKIP_REASON = "答え待ちの停止のため流さなかった"  # プランの開始で流さなかった理由の頭
 REASONS = {
     ("on", "plan"): "答え待ちの依頼が計画の閾値を超えた",
@@ -322,7 +323,7 @@ def self_stop(main: Path, stop: dict) -> Optional[str]:
     """止まったレーンが自分のラッパーを止める 1 行。答え待ちの停止では、止まる前に再開の印を置く。"""
     if stop["condition"] == CONDITION and (lane := os.environ.get("NDF_RELAY_NAME")):
         place_mark(Path(stop["values"].get("home") or main), stop["values"]["plan"], lane, "boundary")
-    return pf.stop_self(main) if stop["condition"] in ("waiting_only", CONDITION) else None
+    return pf.stop_self(main) if stop["condition"] in WAIT_STOPS else None
 
 
 def plan_skip(lane: Optional[str]) -> Optional[str]:

@@ -175,7 +175,9 @@ def test_lane_waits_reads_lane_repo(two_repos):
     assert pl.lane_waits(x, "p3", "lfactory", "lfactory-r000000000001", lambda: (1, {}))
 
 
-def test_organizer_reads_loop_record_in_lane_repo(tmp_path):
+@pytest.mark.parametrize("condition", ["waiting_only", "answer_hold"])
+def test_organizer_reads_loop_record_in_lane_repo(tmp_path, condition):
+    """答えを待って止まったループ（答え待ちの停止も）は、答えを受けたら起こす対象になる。"""
     import parallel_route as pr
 
     x, y = _git(tmp_path / "x"), _git(tmp_path / "y")
@@ -183,7 +185,7 @@ def test_organizer_reads_loop_record_in_lane_repo(tmp_path):
     _plan(x, [lane])
     d = y / ".ndf" / "loop" / "lloop"
     d.mkdir(parents=True)
-    rec = {"status": "stopped", "stop": {"condition": "waiting_only"}, "waiting": [{"request": "lloop-g1-abc", "answer": None}]}
+    rec = {"status": "stopped", "stop": {"condition": condition}, "waiting": [{"request": "lloop-g1-abc", "answer": None}]}
     (d / "loop.json").write_text(json.dumps(rec))
     assert pr.waiting_lanes(x, "p3") == ["lloop"]
     assert pr.design_held(x, "p3", ["lloop-g1-abc"]) == ["lloop"]

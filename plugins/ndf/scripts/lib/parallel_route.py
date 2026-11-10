@@ -82,10 +82,11 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
 
 
 def waiting_lanes(main: Path, name: str) -> list[str]:
-    """記録が `waiting_only` で止まり、答えをまだ当てていない待ちを持つループのレーンの名前（保留中。依存の判定で止まったと数えない）。"""
+    """記録が `waiting_only` か答え待ちの停止（`answer_hold`）で止まり、答えをまだ当てていない待ちを持つループのレーンの名前
+    （保留中。依存の判定で止まったと数えない。答えを受けたら再起動の対象へ入れる）。"""
 
     def held(rec: dict) -> bool:
-        if rec.get("status") != "stopped" or (rec.get("stop") or {}).get("condition") != "waiting_only":
+        if rec.get("status") != "stopped" or (rec.get("stop") or {}).get("condition") not in parallel_hold.WAIT_STOPS:
             return False
         return any(not w.get("answer") for w in rec.get("waiting") or [])
 

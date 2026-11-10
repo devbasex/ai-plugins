@@ -599,8 +599,7 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
     gave_up = {n for n, st in run.lanes.items() if st.get("given_up")}  # 再起動の失敗の問いへ「止める」と答えたレーンは起こさない
     designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped - gave_up)
-    for n in set(run.wake_tries) - set(designs):  # 答えが当たった（持ち主から外れた）レーンは再起動の回数を数え直す
-        run.wake_tries.pop(n, None)
+    run.wake_tries = {n: c for n, c in run.wake_tries.items() if n in designs}  # 答えが当たったレーンは再起動の回数を数え直す
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。動いて観えるまで 1 回ずつ再起動する（6f）
         run.wake = sorted({*run.wake, *run.wake_or_ask(set(designs) - run.woken)})
         return None

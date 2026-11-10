@@ -39,9 +39,9 @@ LOST = ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
 FIELDS = (
     "lanes", "pending", "questions", "releases", "launch", "held", "answered", "received", "refusals", "stall_until",
     "helper_asked", "held_spawned", "wake", "revive", "revive_at", "stop", "force", "left_stopped", "superseded", "holds",
-    "launches", "helper_seen",
+    "launches", "helper_seen", "woken", "wake_tries",
 )  # fmt: skip
-SETS = ("answered", "left_stopped", "superseded")
+SETS = ("answered", "left_stopped", "superseded", "woken")
 
 
 def plan_ledger_path(main: Path, name: str) -> Path:

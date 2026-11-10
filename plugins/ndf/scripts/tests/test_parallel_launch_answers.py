@@ -120,6 +120,14 @@ def test_restarts_are_counted_until_the_answer_lands_even_if_the_lane_was_seen_r
     assert "la" not in run.wake_tries
 
 
+def test_restart_counts_and_woken_lanes_survive_a_rebuild(run):
+    """作り直しで再起動の回数と再起動直後の印を失わない（2 回で問う上限が外れず、古い停止の行で打ち直さない）。"""
+    run.woken, run.wake_tries = {"la"}, {"la": 2}
+    again = prun._Run("/m", "p1", LANES)
+    again._adopt_state(run.state())
+    assert again.woken == {"la"} and again.wake_tries == {"la": 2}
+
+
 def test_restarting_a_release_helper_after_its_question_carries_the_release_number(run, monkeypatch):
     """問いに答えた一時レーンの再起動が立ち上がらなければ、起動の問いへリリースの連番を添え、「止める」でリリースを締められる。"""
 
