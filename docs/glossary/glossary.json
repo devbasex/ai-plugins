@@ -6292,6 +6292,24 @@
       "context": "ndf-workflow",
       "meaning": "文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown",
       "pending_source": "issues/issue-2925-design.md"
+    },
+    {
+      "term": "機械的なターン",
+      "context": "ndf-workflow",
+      "meaning": "AI が判断を伴わずに行う Tool の呼び出し。出力の読み解き・状態の照合・スクリプトを 1 行打つ・手書きの待ち・本文の転記",
+      "pending_source": "issues/issue-2909-requirements.md"
+    },
+    {
+      "term": "ターンの型",
+      "context": "ndf-workflow",
+      "meaning": "機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類",
+      "pending_source": "issues/issue-2909-requirements.md"
+    },
+    {
+      "term": "手順の連続実行",
+      "context": "ndf-workflow",
+      "meaning": "判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance）",
+      "pending_source": "issues/issue-2909-design.md"
     }
   ]
 }
