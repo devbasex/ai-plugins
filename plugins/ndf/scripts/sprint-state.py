@@ -55,7 +55,6 @@ TOOL = "sprint-state"
 SECTION_DEFAULT = PROGRESS_SECTION
 NEXT_SECTION_DEFAULT = COMMAND_SECTION
 NOT_DONE = state_get.NOT_DONE
-DONE = state_get.DONE
 PACES = ("normal", "fast", "auto")
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 
@@ -253,7 +252,7 @@ def cmd_update(a) -> dict:
     jsonio.write_atomic(a.sprint, m, indent=1)
     rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
     finished = sum(1 for r in rows if r["result"] != NOT_DONE)
-    stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, DONE))
+    stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, state_get.DONE))
     summary = f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}"
     return outcome("ok", summary, rows, {"plans": len(rows), "finished": finished, "stopped": stopped})
 
@@ -358,7 +357,7 @@ def fmt_cost(v) -> str:
 
 def state_text(r: dict) -> str:
     s = r["result"]
-    if r["result"] not in (NOT_DONE, DONE) and r.get("exit") not in (None, 0):
+    if r["result"] not in (NOT_DONE, state_get.DONE) and r.get("exit") not in (None, 0):
         s += f"（exit={r['exit']}）"
     if r.get("reason"):
         s += f"。理由: {r['reason']}"
