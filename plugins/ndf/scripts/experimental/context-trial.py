@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -47,19 +46,7 @@ def _cli():
 
 
 def _entries(path) -> list[dict]:
-    try:
-        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
-    out = []
-    for line in lines:
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(e, dict):
-            out.append(e)
-    return out
+    return list(cd.json_lines(path) or [])
 
 
 def _blocks(e: dict, kind: str) -> list[dict]:
