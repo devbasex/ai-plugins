@@ -1,8 +1,8 @@
-# claude -p の起動先: 1 つの規則の表で、5 時間の枠のあるアカウントを先に使い、全アカウントの週の上限が近いときだけ API キーへ逃がす（#2930）
+# claude -p の起動先: 5 時間の枠のあるアカウントを先に使い、全アカウントの週の上限が近いときだけ API キーへ逃がす（#2930）
 
 ## 目的
 
-- **今どうなっているか**: 起動先の判定が 2 か所（アカウントの選び方と API キーの使い方）に分かれ、どちらも 5 時間の枠と週の枠を区別しない。5 時間の枠の無いアカウントが先に選ばれ、5 時間の上限だけで API キーへ移り、API キーは名前の順の先頭を使い続け、一度立つと戻らない印と残高切れの 24 時間の保留を持つ
+- **今どうなっているか**: 起動先の判定が 2 か所（アカウントの選び方と API キーの使い方）に分かれ、どちらも 5 時間の枠と週の枠を区別しない。5 時間の枠の無いアカウントが先に選ばれ、5 時間の上限だけで API キーへ移る。API キーは名前の順の先頭を使い続け、一度立つと戻らない印と残高切れの 24 時間の保留を持つ
 - **誰に効くか**: 登録済みのアカウントを 2 つ以上持ち、API キーの月のクレジットで worker の `claude -p` を補う利用者
 - **変えると何が成り立つか**: 起動先が、その時点の観測と使用量の帳簿だけから 1 つの規則の表で決まる。5 時間の枠は使い切ってから週だけの枠へ回り、API キーは全アカウントの週の枠が尽きかけたときだけ、週の利用枠の中で均等に使われる。プロセスや端末を起動し直しても、同じ観測から同じ起動先が出る
 
@@ -140,11 +140,11 @@
 | --- | --- |
 | 決定の関数（新設 `lib/launch_rules.py`） | 観測のスナップショットから起動先の決定を返す。I/O を持たない。規則の表・選ぶ順の組の表・組の中の並べ方を持つ |
 | 観測の収集（新設 `lib/launch_observe.py`） | アカウントの使用率（控えを通す）・上限の観測・起動できるか・API キーの宣言・帳簿の直近 7 日の使用額・時刻を集め、スナップショットを組む。決定の関数を呼ぶ口（`decide_now`）を持つ |
-| アカウントの置き場（`lib/claude_accounts.py`） | 今の `choose` の並べ方（`_try_order`・`_order_side`）と切り替えの閾値（`switch_at`）を外す。`choose` は決定の口を呼ぶ薄い互換の口になる。使用率の控えをリセット時刻で取り直す |
-| API キーの登録簿（`lib/claude_api_keys.py`） | 月の額と閾値 T を読み書きする。状態のファイル・`near_limit`・`pick_key`・`KeyTry.limit_hit` を外す。`KeyTry` は決定の口の結果で起動し、残高切れと認証の失敗はその呼び出しの除外へ足すだけにする |
+| アカウントの置き場（`lib/claude_accounts.py`） | 今の `choose` の並べ方（`_try_order`・`_order_side`）と切り替えの閾値（`switch_at`）を外す。`choose` は決定のエントリポイントを呼ぶ薄い互換の口になる。使用率の控えをリセット時刻で取り直す |
+| API キーの登録簿（`lib/claude_api_keys.py`） | 月の額と閾値 T を読み書きする。状態のファイル・`near_limit`・`pick_key`・`KeyTry.limit_hit` を外す。`KeyTry` は決定のエントリポイントの結果で起動し、残高切れと認証の失敗はその呼び出しの除外へ足すだけにする |
 | 使用量の帳簿（`lib/usage_ledger.py`・`lib/usage_capture.py`・`supervise_lib/claude.py` の `call_claude`） | 記録に API キーの名前（任意の列）を足す。API キーごとの直近 7 日の使用額を返す |
-| 起動口（`supervise_lib/claude.py` の `ClaudeRunner`） | 起動のたびに決定の口を呼ぶ。決定が「待つ」なら今の扱い（従量の接続の宣言があれば移り、無ければ解除を待つ）へ進む |
-| relay の区切り（`relay_lib/switch.py`・`relay_lib/run.py`・`relay_lib/handover.py`） | 区切りの起動先を決定の口で決める。使用率の定期の確認（`UsageWatch`）を外す |
+| 起動口（`supervise_lib/claude.py` の `ClaudeRunner`） | 起動のたびに決定のエントリポイントを呼ぶ。決定が「待つ」なら今の扱い（従量の接続の宣言があれば移り、無ければ解除を待つ）へ進む |
+| relay の区切り（`relay_lib/switch.py`・`relay_lib/run.py`・`relay_lib/handover.py`） | 区切りの起動先を決定のエントリポイントで決める。使用率の定期の確認（`UsageWatch`）を外す |
 | 副命令と一覧（`relay_lib/accounts.py`・`relay_lib/api_keys.py`） | `add-api-key --monthly`・`api-key-monthly`・`api-key-use near-limit --weekly-at` を受ける。一覧に組・5 時間の枠の有無・API キーの使用額と利用枠を出す |
 
 ```mermaid
@@ -180,7 +180,7 @@ graph TD
 plugins/ndf/scripts/
 ├── lib/
 │   ├── launch_rules.py        （新設。決定の関数と規則の表）
-│   ├── launch_observe.py      （新設。観測の収集と決定の口）
+│   ├── launch_observe.py      （新設。観測の収集と決定のエントリポイント）
 │   ├── claude_accounts.py     （変更）
 │   ├── claude_api_keys.py     （変更）
 │   ├── usage_ledger.py        （変更）
@@ -258,7 +258,7 @@ classDiagram
 
 ## 入出力の契約
 
-### 決定の口
+### 決定のエントリポイント
 
 | 項目 | 内容 |
 | --- | --- |
@@ -273,14 +273,14 @@ classDiagram
 | 規則の名前 | 起動先 | 当たる条件 |
 | --- | --- | --- |
 | `always_key` | API キー（名前の順の先頭） | `use` が `always` で、外していない API キーがある |
-| `near_limit_key` | API キー（使用の割合の最も小さいもの） | `use` が `near-limit`、全アカウントの週の使用率が T 以上、帳簿を読め、月の額を宣言し利用枠の残る API キーがある |
+| `near_limit_key` | API キー（使用の割合（直近 7 日の使用額 ÷ 週の利用枠）の最も小さいもの） | `use` が `near-limit`、全アカウントの週の使用率が T 以上、帳簿を読め、月の額を宣言し利用枠の残る API キーがある |
 | `near_limit_ledger_unreadable` | アカウントか待つ | 上の条件のうち帳簿を読めない |
 | `near_limit_no_declared_key` | アカウントか待つ | 帳簿を読めたが、外していない API キーのどれも月の額を宣言していない |
 | `near_limit_budget_used_up` | アカウントか待つ | 宣言のある API キーがすべて週の利用枠を使い切った |
 | `account` | アカウント | 上のどれにも当たらず、候補のアカウントがある |
 | `wait_reset` | 待つ | 候補のアカウントが無い |
 
-アカウントへ決まったときの `account_rule` は、組の名前（`five_hour_first` / `weekly_only` / `over_threshold` / `usage_unknown`）か `keep_current` である。
+アカウントへ決まったときの `account_rule` は、組の名前か `keep_current` である。組の名前は `five_hour_first` / `weekly_only` / `over_threshold` / `usage_unknown` である。
 
 ### 副命令
 
@@ -378,11 +378,11 @@ classDiagram
 ```mermaid
 sequenceDiagram
     participant 起動口
-    participant 決定の口
+    participant 決定のエントリポイント
     participant claude
     participant 帳簿
-    起動口->>決定の口: 今のアカウント・この呼び出しの除外
-    決定の口-->>起動口: 決定（規則の名前・根拠）
+    起動口->>決定のエントリポイント: 今のアカウント・この呼び出しの除外
+    決定のエントリポイント-->>起動口: 決定（規則の名前・根拠）
     alt API キー
         起動口->>claude: キーの環境で claude -p
         claude-->>起動口: 結果
@@ -399,8 +399,8 @@ sequenceDiagram
 ```
 
 - 除外（`exclude_accounts`・`exclude_keys`）は 1 回の呼び出しの中だけの集合で、呼び出しが終われば捨てる。次の呼び出しは空から決める
-- 起動口は起動のたびに決定の口を呼ぶ。今のアカウント（`self.account`）を `current` に渡すので、組が同じなら呼び出しの間でアカウントを替えない
-- 決定が変わったとき（API キーへ移った・アカウントへ戻った・規則 3〜5 に当たった・アカウントを替えた）だけ、進捗記録の `account` の行に `rule`・`account_rule`・`evidence` を足して書く
+- 起動口は起動のたびに決定のエントリポイントを呼ぶ。今のアカウント（`self.account`）を `current` に渡すので、組が同じなら呼び出しの間でアカウントを替えない
+- 進捗記録の `account` の行に `rule`・`account_rule`・`evidence` を足して書くのは、決定が変わったときだけである。API キーへ移った・アカウントへ戻った・規則 3〜5 に当たった・アカウントを替えた、がこれに当たる
 - 受け継いだ API キー（入れ子の起動）の扱いは今のまま。受け継いだキーは決定の外にあり、`always` の入れ子の振る舞い（受け入れ条件 26）を変えない
 
 ### relay の区切り
@@ -408,10 +408,10 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant relay
-    participant 決定の口
+    participant 決定のエントリポイント
     participant 記録
-    relay->>決定の口: 今のアカウント（API キーは使わない）
-    決定の口-->>relay: 決定
+    relay->>決定のエントリポイント: 今のアカウント（API キーは使わない）
+    決定のエントリポイント-->>relay: 決定
     alt 指定（account use）が使える
         Note over relay: 指定を優先する（今のまま）
     else 決定のアカウントが今と違う
@@ -428,7 +428,7 @@ sequenceDiagram
 
 ### 使用率の控え
 
-`claude_accounts.usage` の控えの寿命は今の `NDF_ACCOUNT_CHECK_INTERVAL`（既定 300 秒）のまま使い、次の条件を足す: 控えの中のどれかの枠のリセット時刻が今以前なら、寿命の中でも取り直す（I7）。控えのファイルが無くても同じ決定が出る（取り直すだけ）。
+`claude_accounts.usage` の控えの寿命は、今の `NDF_ACCOUNT_CHECK_INTERVAL`（既定 300 秒）のまま使う。控えの中のどれかの枠のリセット時刻が今以前なら、寿命の中でも取り直す（I7）。控えのファイルが無くても同じ決定が出る（取り直すだけ）。
 
 ## 非機能の実現方式
 
