@@ -261,3 +261,140 @@ def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setu
     assert items["I-003"]["status"] == "verified"
     assert int(items["I-003"]["verify_runs"]) >= 2
     assert "I-003" in saved["drops"][0]["recheck"]
+
+
+# ---------- `fix_intake._apply_fix_result` の現状固定（実際の git） ----------
+
+
+def _repo(tmp_path):
+    work = tmp_path / "apply"
+    work.mkdir()
+    git("init", "-q", str(work), cwd=tmp_path)
+    git("config", "user.email", "t@e.st", cwd=work)
+    git("config", "user.name", "test", cwd=work)
+    _write(work, "a.txt", "a0\n")
+    _write(work, "b.txt", "b0\n")
+    commit_with_trailers(work, "init", {})
+    return work
+
+
+def _bare_item(item_id):
+    return {"id": item_id, "commits": {"test": None, "implement": None, "fix": []}}
+
+
+def _said(capsys):
+    """`info` の出力（標準出力・標準エラーのどちらに出ても拾う）。"""
+    got = capsys.readouterr()
+    return got.out + got.err
+
+
+def _newest_first(*shas):
+    return list(reversed(shas))
+
+
+def test_apply_fix_result_with_an_unknown_range_only_reports(tmp_path, fix_intake, capsys):
+    """範囲を確定できなかったときは問題を出すだけで、状態も履歴も変えない。"""
+    work = _repo(tmp_path)
+    head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    state = {"items": [_bare_item("I-001")]}
+    result = {"head": head, "ordered": [], "known": False, "problems": ["範囲が不明"]}
+    fix_intake._apply_fix_result(tmp_path / "s.json", state, str(work), result)
+    assert "❌ 範囲が不明" in _said(capsys)
+    assert state == {"items": [_bare_item("I-001")]}
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
+
+
+def test_apply_fix_result_links_good_commits_oldest_first_and_rewrites(tmp_path, fix_intake):
+    """問題の無いコミットは古い順に項目の `commits.fix` へ足し、計画に無い項目のコミットは捨て置く。書き換えの判定を項目へ足す。"""
+    work = _repo(tmp_path)
+    _write(work, "a.txt", "a1\n")
+    first = commit_with_trailers(work, "Fix I-001", item_trailers("I-001"))
+    _write(work, "b.txt", "b1\n")
+    second = commit_with_trailers(work, "Fix I-002", item_trailers("I-002"))
+    _write(work, "a.txt", "a2\n")
+    third = commit_with_trailers(work, "Fix I-001 again", item_trailers("I-001"))
+    _write(work, "b.txt", "b2\n")
+    commit_with_trailers(work, "Fix I-009", item_trailers("I-009"))
+    unknown = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    head = unknown
+    state = {"items": [_bare_item("I-001"), _bare_item("I-002")]}
+    state["items"][1]["review_scope_judgements"] = [{"path": "old"}]
+    result = {
+        "head": head,
+        "ordered": _newest_first(first, second, third, unknown),
+        "known": True,
+        "problems": [],
+        "rewrites": {"I-001": [{"path": "a.txt"}], "I-002": [{"path": "b.txt"}], "I-009": [{"path": "x"}]},
+    }
+    fix_intake._apply_fix_result(tmp_path / "s.json", state, str(work), result)
+    items = {i["id"]: i for i in state["items"]}
+    assert items["I-001"]["commits"]["fix"] == [first, third]
+    assert items["I-002"]["commits"]["fix"] == [second]
+    assert items["I-001"]["review_scope_judgements"] == [{"path": "a.txt"}]
+    assert items["I-002"]["review_scope_judgements"] == [{"path": "old"}, {"path": "b.txt"}]
+    assert "sendbacks" not in state and "ledger" not in state
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
+
+
+def test_apply_fix_result_reverts_only_the_bad_commits_and_records_sendbacks(tmp_path, fix_intake, capsys):
+    """手順を外れたコミットだけを新しい順に打ち消し、打ち消しのコミットを台帳へ古い順に載せる。
+
+    差し戻しは項目があればその項目へ、無ければ状態の `sendbacks` へ残す。残りのコミットは項目へ関連付ける。"""
+    work = _repo(tmp_path)
+    _write(work, "a.txt", "a1\n")
+    bad_a = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
+    _write(work, "b.txt", "b1\n")
+    good = commit_with_trailers(work, "Fix I-002", item_trailers("I-002"))
+    _write(work, "c.txt", "c1\n")
+    bad_x = commit_with_trailers(work, "stray", {})
+    state = {"items": [_bare_item("I-001"), _bare_item("I-002")]}
+    problems = [
+        {"sha": bad_a, "item": "I-001", "problem": "外れた A"},
+        {"sha": bad_x, "item": "", "problem": "外れた X"},
+    ]
+    result = {"head": bad_x, "ordered": _newest_first(bad_a, good, bad_x), "known": True, "problems": problems}
+    fix_intake._apply_fix_result(tmp_path / "s.json", state, str(work), result)
+
+    out = _said(capsys)
+    assert "↪ 外れた A（差し戻し）" in out and "↪ 外れた X（差し戻し）" in out
+    assert (work / "a.txt").read_text(encoding="utf-8") == "a0\n"
+    assert (work / "b.txt").read_text(encoding="utf-8") == "b1\n"
+    assert not (work / "c.txt").exists()
+    made = git("rev-list", "-2", "HEAD", cwd=work).stdout.split()
+    assert state["ledger"]["orchestrator_commits"] == list(reversed(made))
+    subjects = git("log", "-2", "--format=%s", cwd=work).stdout.splitlines()
+    assert subjects == ['Revert "Fix I-001 bad"', 'Revert "stray"']
+    items = {i["id"]: i for i in state["items"]}
+    assert items["I-001"]["commits"]["fix"] == []
+    assert items["I-002"]["commits"]["fix"] == [good]
+    [row_a] = items["I-001"]["sendbacks"]
+    assert (row_a["kind"], row_a["reason"], row_a["commit"]) == ("fix_procedure", "外れた A", bad_a)
+    assert isinstance(row_a["at"], str) and row_a["at"]
+    [row_x] = state["sendbacks"]
+    assert (row_x["kind"], row_x["reason"], row_x["commit"]) == ("fix_procedure", "外れた X", bad_x)
+
+
+def test_apply_fix_result_keeps_everything_when_the_revert_conflicts(tmp_path, fix_intake, capsys):
+    """打ち消しが衝突したら着手前の HEAD へ戻し、差し戻しだけを残す。外れたコミットも項目へ関連付ける。"""
+    work = _repo(tmp_path)
+    _write(work, "a.txt", "a1\n")
+    bad = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
+    _write(work, "a.txt", "a2\n")
+    good = commit_with_trailers(work, "Fix I-001", item_trailers("I-001"))
+    state = {"items": [_bare_item("I-001")]}
+    result = {
+        "head": good,
+        "ordered": _newest_first(bad, good),
+        "known": True,
+        "problems": [{"sha": bad, "item": "I-001", "problem": "外れた"}],
+    }
+    fix_intake._apply_fix_result(tmp_path / "s.json", state, str(work), result)
+
+    out = _said(capsys)
+    assert f"⚠ 手順を外れた修正のコミット {bad[:12]} を打ち消せません（衝突）" in out
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == good
+    assert git("status", "--porcelain", cwd=work).stdout == ""
+    assert "ledger" not in state
+    item = state["items"][0]
+    assert item["commits"]["fix"] == [bad, good]
+    assert [r["commit"] for r in item["sendbacks"]] == [bad]
