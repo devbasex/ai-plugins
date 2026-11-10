@@ -144,5 +144,6 @@
 | [ndf-supervisor-docs-guard.md](ndf-supervisor-docs-guard.md) | supervisor が規約の文書を読み込まれたプラグインから読む決まりと、外の規約の文書の読み込みを止める hook（規約の文書の guard）の判定の規則・構成要素・扱わないもの |
 | [ndf-release-pr-and-merge-route-terms.md](ndf-release-pr-and-merge-route-terms.md) | ベースブランチから本番チャネルへ変更を入れる道筋もリリースと呼ぶ規則、リリースの Pull Request とリリースの承認資料の語、変えない識別子（promote）、フェーズ名の旧い値の読み替え、禁止語の外すパス。語の定義は用語集が正 |
 | [ndf-diff-kinds-and-docs-only-checks.md](ndf-diff-kinds-and-docs-only-checks.md) | 差分を文書のファイルとコードのファイルに分け、文書だけの Pull Request で cross-refactoring・全体テスト・CI の全体の pytest を省くこと（テストが読む文書は対応するテストだけ）、振る舞いを決める文書の振る舞いの確認、宣言 `docs` の形と既定。工程表は `development-workflow` の SKILL.md が正 |
+| [ndf-whole-test-duration.md](ndf-whole-test-duration.md) | 全体テストの所要を確かめる振る舞いを弱めずに縮める手段の当て方（テストヘルパーの待ち・永続ワークフローの待ちの間隔・起動の遅延 import）、起動を縮めないスクリプトとその理由、基準 6 で消したテスト、消したテストの照合、届いた値。削る基準と手段は `docs/plugin-development-guide.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
