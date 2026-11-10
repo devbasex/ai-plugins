@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import time
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 import statefile
 
@@ -44,6 +44,13 @@ STOP_REASON = scope_verdict.STOP_REASON
 
 class Halt(Exception):
     """止めて人へ渡す（打ち消しの衝突・判定の担い手が居ないまま停滞。#2457 決定 3・6）。"""
+
+
+def _halt(path: pathlib.Path, state: dict[str, Any], reason: str, detail: str, item_id: Any) -> NoReturn:
+    """止めた理由を `state["halt"]` へ書いて保存し、`Halt` を送る。"""
+    state["halt"] = {"reason": reason, "detail": detail, "item": item_id, "at": statefile.now()}
+    statefile.save(path, state)
+    raise Halt(detail) from None
 
 
 def _items_in(state: dict[str, Any], status: str) -> list[dict[str, Any]]:
@@ -82,9 +89,7 @@ def _revert(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any
     try:
         revert_items(path, state, [i["id"] for i in items], fixloop.REASON_TEXT[why])
     except UndoConflict as exc:
-        state["halt"] = {"reason": "revert_conflict", "detail": str(exc), "item": exc.item_id, "at": statefile.now()}
-        statefile.save(path, state)
-        raise Halt(str(exc)) from None
+        _halt(path, state, "revert_conflict", str(exc), exc.item_id)
 
 
 def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[str, Any]]) -> Optional[str]:
@@ -117,24 +122,10 @@ def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[
             revert_now.setdefault(fixloop.STALLED_AFTER_SWITCH, []).append(item)
         elif move == fixloop.SWITCH:
             if answer is not None and answer.get("feasible") is None and answer.get("rejudge"):
-                state["halt"] = {
-                    "reason": "no_judge",
-                    "detail": f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない",
-                    "item": item["id"],
-                    "at": statefile.now(),
-                }
-                statefile.save(path, state)
-                raise Halt(state["halt"]["detail"])
+                _halt(path, state, "no_judge", f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない", item["id"])
             new = fixloop.switch_fixer(state, item, answer.get("by") if answer else None)
             if new is None:
-                state["halt"] = {
-                    "reason": "no_fixer",
-                    "detail": f"{item['id']} の修正が停滞し、替える修正担当が居ない",
-                    "item": item["id"],
-                    "at": statefile.now(),
-                }
-                statefile.save(path, state)
-                raise Halt(state["halt"]["detail"])
+                _halt(path, state, "no_fixer", f"{item['id']} の修正が停滞し、替える修正担当が居ない", item["id"])
             info(f"🔁 {item['id']} の修正が{('停滞' if verdict == progress.STALLED else '振動')}したため、修正担当を {new} へ替えます")
     for why, items in revert_now.items():
         _revert(path, state, items, why)
