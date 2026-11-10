@@ -60,7 +60,13 @@ def _fix_problems(
     for fact in reversed(facts):
         item_id = str((fact.get("trailers") or {}).get("Item-Id") or "")
         if item_id not in allowed:
-            bad.append({"sha": fact["sha"], "item": item_id, "problem": f"コミット {fact['sha'][:7]} の Item-Id（{item_id or 'なし'}）は修正の対象ではありません"})
+            bad.append(
+                {
+                    "sha": fact["sha"],
+                    "item": item_id,
+                    "problem": f"コミット {fact['sha'][:7]} の Item-Id（{item_id or 'なし'}）は修正の対象ではありません",
+                }
+            )
             continue
         problem = verify_commit_basics(fact, "コミットが範囲にありません", check_test=False)
         if problem:

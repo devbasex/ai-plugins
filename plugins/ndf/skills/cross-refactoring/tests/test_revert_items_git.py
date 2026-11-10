@@ -48,7 +48,9 @@ def test_only_the_items_commits_are_reverted_and_the_merged_base_stays(tmp_path,
     git("checkout", "-q", "-", cwd=work)
     git("merge", "-q", "--no-edit", "base-update", cwd=work)
     b = _commit(work, "src/foo.py", 29, "by-B", "I-B")
-    path = make_state_v2(tmp_path, work, items=[_item("I-A", [a]), _item("I-B", [b], status="verified")], plan={"base_sha": base}, phase="verify")
+    path = make_state_v2(
+        tmp_path, work, items=[_item("I-A", [a]), _item("I-B", [b], status="verified")], plan={"base_sha": base}, phase="verify"
+    )
 
     record = undo.revert_items(path, read_state(path), ["I-A"], "成立しないと判定した")
 
@@ -67,7 +69,9 @@ def test_a_conflicting_revert_restores_head_and_keeps_every_item(tmp_path, undo)
     work, base = _init(tmp_path)
     a = _commit(work, "src/foo.py", 2, "by-A", "I-A")
     b = _commit(work, "src/foo.py", 2, "by-B", "I-B")
-    path = make_state_v2(tmp_path, work, items=[_item("I-A", [a]), _item("I-B", [b], status="verified")], plan={"base_sha": base}, phase="verify")
+    path = make_state_v2(
+        tmp_path, work, items=[_item("I-A", [a]), _item("I-B", [b], status="verified")], plan={"base_sha": base}, phase="verify"
+    )
 
     with pytest.raises(undo.UndoConflict) as e:
         undo.revert_items(path, read_state(path), ["I-A"], "成立しないと判定した")

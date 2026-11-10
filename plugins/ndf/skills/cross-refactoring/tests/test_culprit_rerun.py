@@ -104,5 +104,3 @@ def test_isolation_does_not_wait_when_the_rerun_crossed_the_second(refactor, tmp
     events = _isolate_once(refactor, tmp_path, monkeypatch, 0.9)
 
     assert events == ["revert --no-commit abc", "rerun", "revert --quit", "discard"]
-
-

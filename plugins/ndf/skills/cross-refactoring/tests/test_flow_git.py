@@ -144,7 +144,10 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     state = read_state(path)
     assert state["final_gate"]["status"] == "passed"
     assert state["history_written"] is True
-    rows = [json.loads(r) for r in (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = [
+        json.loads(r)
+        for r in (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     assert [r["kind"] for r in rows] == ["run", "item"]
     row = rows[0]
     assert row["kinds"]["test"]["count"] == 1

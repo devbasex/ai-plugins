@@ -252,7 +252,9 @@ def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
 
 def test_the_gate_keeps_fixing_past_the_budget(cmd_gate, tmp_path, env_tmp_dir, spy):
     """#2457 受け入れ条件 5: 実装の予算をとうに超えても、最終ゲート修正を時間で打ち切らない。"""
-    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", budget={"minutes": 1, "extension": None}, final_gate={"fix_rounds": 2, "checks": []})
+    state_path = _state(
+        tmp_path, started_at="2000-01-01T00:00:00", budget={"minutes": 1, "extension": None}, final_gate={"fix_rounds": 2, "checks": []}
+    )
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
@@ -679,7 +681,7 @@ def test_the_gate_checks_even_when_the_tree_is_the_planned_tree(patch_lib, cmd_g
 
     assert "FINAL_GATE=passed" in capsys.readouterr().out
     gate = read_state(state_path)["final_gate"]
-    assert spy["tests"], "確かめを走らせた" 
+    assert spy["tests"], "確かめを走らせた"
     assert "check_skipped" not in gate and gate["checks"]
 
 

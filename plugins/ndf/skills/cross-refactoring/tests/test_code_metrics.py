@@ -301,5 +301,3 @@ def test_measure_timeout_does_not_follow_the_budget(timeline):
     assert timeline.measure_timeout() == 600
     assert timeline.measure_deadline({"measure_timeout": 90}) == 90
     assert timeline.measure_deadline({}) == 600
-
-

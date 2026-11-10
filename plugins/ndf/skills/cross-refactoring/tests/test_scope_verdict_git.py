@@ -19,7 +19,17 @@ import sys
 
 import pytest
 
-from crossref_helpers import verify_judged, SCOPE_COMMAND, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_state, past_fix_end
+from crossref_helpers import (
+    verify_judged,
+    SCOPE_COMMAND,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    write_state,
+    past_fix_end,
+)
 
 FAR = "2099-01-01T00:00:00+00:00"
 LIMIT = 12

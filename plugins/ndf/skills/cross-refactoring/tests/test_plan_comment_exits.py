@@ -154,7 +154,15 @@ def test_the_metrics_keep_their_keys_and_values_after_a_passed_final_gate(refact
     expected = {"items": 3, "adopted": 1, "reverted": 1, "deferred": 1, "fix_rounds": 2, "final_gate": "passed", "reassigned": 0}
     assert {k: m[k] for k in expected} == expected
     # #2457: 予算・安全網・判定の件数を足す（既存の項目は削らない）
-    assert {"budget_minutes", "effective_budget_minutes", "budget_extension", "safety_net_minutes", "coding_minutes", "judged", "stalled"} <= set(m)
+    assert {
+        "budget_minutes",
+        "effective_budget_minutes",
+        "budget_extension",
+        "safety_net_minutes",
+        "coding_minutes",
+        "judged",
+        "stalled",
+    } <= set(m)
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,16 @@ import shutil
 
 import pytest
 
-from crossref_helpers import verify_judged, build_git_flow, commit_with_trailers, git, item_trailers, read_state, strategy_state, write_state
+from crossref_helpers import (
+    verify_judged,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    strategy_state,
+    write_state,
+)
 
 REPO = pathlib.Path(__file__).resolve().parents[5]
 CHECK = REPO / "scripts" / "check-script-structure.py"

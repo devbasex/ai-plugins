@@ -99,7 +99,15 @@ def test_items_that_do_not_fit_the_budget_are_skipped_and_the_rest_packed(planne
 def test_the_number_of_items_does_not_depend_on_the_test_duration(planned, cmd_plan, init_seconds):
     """受け入れ条件 2・I1: 同じ候補と配分テーブルで、着手前のテストの所要だけを変えても採る件数は同じ。経過時間も引かない。"""
     cands = [_candidate(n, f"s{n}") for n in range(1, 6)]
-    baseline = {"mode": "whole", "command": "x", "status": "green", "checked_at": "t", "seconds": init_seconds, "whole_seconds": init_seconds, "existing_failures": []}
+    baseline = {
+        "mode": "whole",
+        "command": "x",
+        "status": "green",
+        "checked_at": "t",
+        "seconds": init_seconds,
+        "whole_seconds": init_seconds,
+        "existing_failures": [],
+    }
     path = planned(cands, [_answer(c, tier="low") for c in cands], budget_minutes=4, baseline_test=baseline)
     _run(cmd_plan)
     assert len(read_state(path)["items"]) == 3  # 1.3 分 × 3 = 3.9 分 ≤ 4 分

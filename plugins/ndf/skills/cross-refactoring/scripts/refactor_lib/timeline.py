@@ -73,6 +73,7 @@ def test_limits(state: dict[str, Any]) -> dict[str, Any]:
 
 def compute(tests: dict[str, Any]) -> dict[str, Any]:
     """上限の表。`tests` は `test_strategy.limits` の表。"""
+
     def floor(key: str) -> int:
         return max(int(tests[key]), MIN_TEST_SECONDS)
 

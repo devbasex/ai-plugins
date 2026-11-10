@@ -76,10 +76,7 @@ def record_whole_run(prep: Any, baseline: dict[str, Any]) -> None:
 def abort_timed_out(baseline: dict[str, Any], timeout: int) -> None:
     """着手前のテストの打ち切りで止める（ハングの検知。`SKIP=init-timeout`）。履歴に残したことを添える。"""
     statefile.emit(SKIP="init-timeout", SKIP_DETAIL=f"着手前のテストが上限 {timeout} 秒で終わらなかった")
-    die(
-        f"着手前のテストが {timeout} 秒で終わりませんでした（{baseline.get('command')}）。打ち切りました\n"
-        "打ち切りを配分の履歴に残しました"
-    )
+    die(f"着手前のテストが {timeout} 秒で終わりませんでした（{baseline.get('command')}）。打ち切りました\n打ち切りを配分の履歴に残しました")
 
 
 def budget_source(state: dict[str, Any]) -> str:

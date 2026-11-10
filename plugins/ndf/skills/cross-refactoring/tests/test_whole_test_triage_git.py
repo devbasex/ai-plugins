@@ -258,7 +258,9 @@ def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_
     assert items["I-001"]["status"] == "verified" and items["I-002"]["status"] == "failing"
 
 
-def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_is_kept(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_is_kept(
+    flow, cmd_setup, cmd_implement, cmd_converge, capsys
+):
     """#2457 の棚卸し #35: JUnit が無く着手前も red なら、まとめて取り消さず、落ちたテストの材料を残して最終ゲートへ寄せる。"""
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     state = read_state(flow["path"])

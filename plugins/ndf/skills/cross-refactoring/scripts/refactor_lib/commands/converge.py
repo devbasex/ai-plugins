@@ -116,12 +116,22 @@ def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[
             revert_now.setdefault(fixloop.STALLED_AFTER_SWITCH, []).append(item)
         elif move == fixloop.SWITCH:
             if answer is not None and answer.get("feasible") is None and answer.get("rejudge"):
-                state["halt"] = {"reason": "no_judge", "detail": f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない", "item": item["id"], "at": statefile.now()}
+                state["halt"] = {
+                    "reason": "no_judge",
+                    "detail": f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない",
+                    "item": item["id"],
+                    "at": statefile.now(),
+                }
                 statefile.save(path, state)
                 raise Halt(state["halt"]["detail"])
             new = fixloop.switch_fixer(state, item, answer.get("by") if answer else None)
             if new is None:
-                state["halt"] = {"reason": "no_fixer", "detail": f"{item['id']} の修正が停滞し、替える修正担当が居ない", "item": item["id"], "at": statefile.now()}
+                state["halt"] = {
+                    "reason": "no_fixer",
+                    "detail": f"{item['id']} の修正が停滞し、替える修正担当が居ない",
+                    "item": item["id"],
+                    "at": statefile.now(),
+                }
                 statefile.save(path, state)
                 raise Halt(state["halt"]["detail"])
             info(f"🔁 {item['id']} の修正が{('停滞' if verdict == progress.STALLED else '振動')}したため、修正担当を {new} へ替えます")

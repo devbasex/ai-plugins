@@ -287,7 +287,9 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
                 state["pending_drop"] = None
                 statefile.save(path, state)
                 raise UndoConflict(
-                    f"{item_id} のコミット {str(conflict)[:12]} を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました", item_id, conflict
+                    f"{item_id} のコミット {str(conflict)[:12]} を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました",
+                    item_id,
+                    conflict,
                 )
             reverts.extend(_new_commits(work, len(shas)))
             item["failure_reason"] = reason
@@ -334,7 +336,14 @@ def revert_unattributed(path: pathlib.Path, state: dict[str, Any], shas: list[st
             ledger.note_orchestrator_commit(state, sha)
         state.setdefault("sendbacks", []).append({"kind": "unattributed", "commits": list(shas), "phase": label, "at": statefile.now()})
         state.setdefault("drops", []).append(
-            {"at": statefile.now(), "mode": "revert", "reason": label, "round": int((state.get("readopt") or {}).get("round") or 1), "dropped": [], "reverted": len(made)}
+            {
+                "at": statefile.now(),
+                "mode": "revert",
+                "reason": label,
+                "round": int((state.get("readopt") or {}).get("round") or 1),
+                "dropped": [],
+                "reverted": len(made),
+            }
         )
         statefile.save(path, state)
         return len(made)

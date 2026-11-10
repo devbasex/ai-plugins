@@ -1521,7 +1521,9 @@ def test_start_phase_leaves_the_reading_phases_to_the_declared_limit(phase_state
 @pytest.mark.parametrize("phase", ["add-tests", "implement", "fix", "final-fix"])
 def test_start_phase_cuts_the_coding_phases_at_the_safety_net(phase_state, start_phase, phase):
     """#2457 決定 5・I8: コーディングの手順の上限は安全網の残り（実効の予算 × 2 − 累計）。"""
-    phase_state.edit(budget={"minutes": 60, "extension": None}, safety_net={"used_seconds": 600.0, "limit_minutes": None, "halted_at": None})
+    phase_state.edit(
+        budget={"minutes": 60, "extension": None}, safety_net={"used_seconds": 600.0, "limit_minutes": None, "halted_at": None}
+    )
     state, timeout = start_phase(phase)
     assert timeout == str(120 * 60 - 600)
     assert state["phases"][phase]["cli_timeout"] > 120 * 60 - 600

@@ -600,7 +600,11 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
 def _emit_if_halted(out: dict) -> dict:
     """止めて人へ渡した結果（gate・`metrics.exit` 10）は、判断待ちの表（`drive_pause.exit_code`）を通さず承認ゲートの
     終了コードで出す（#2457 決定 5）。それ以外はそのまま返す。"""
-    if out.get("status") == "gate" and (out.get("metrics") or {}).get("exit") == sr.EXIT_GATE and not (out.get("items") or [{}])[0].get("result_file"):
+    if (
+        out.get("status") == "gate"
+        and (out.get("metrics") or {}).get("exit") == sr.EXIT_GATE
+        and not (out.get("items") or [{}])[0].get("result_file")
+    ):
         sr.emit(out, sr.EXIT_GATE)
     return out
 

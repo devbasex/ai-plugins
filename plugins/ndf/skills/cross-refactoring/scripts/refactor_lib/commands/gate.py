@@ -346,7 +346,9 @@ def _local_gate(path: pathlib.Path, state: dict[str, Any]) -> tuple[bool, str, O
     log = pathlib.Path(state["tmp_dir"]) / "final-gate-whole-test.log" if state.get("tmp_dir") else None
     for command in commands:
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
-        code, timed_out = test_triage.run_within(timeout, started, lambda left, command=command: run_with_timeout(command, work, left, output=log))
+        code, timed_out = test_triage.run_within(
+            timeout, started, lambda left, command=command: run_with_timeout(command, work, left, output=log)
+        )
         result = ts.outcome(code, timed_out)
         if result.launch_failed:
             launch.stop(path, state, "gate", command, result)

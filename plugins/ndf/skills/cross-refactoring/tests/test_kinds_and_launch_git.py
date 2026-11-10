@@ -15,7 +15,17 @@ import importlib
 
 import pytest
 
-from crossref_helpers import verify_judged, CALC, build_git_flow, commit_with_trailers, git, item_trailers, read_state, strategy_state, write_state
+from crossref_helpers import (
+    verify_judged,
+    CALC,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    strategy_state,
+    write_state,
+)
 
 FAR = "2099-01-01T00:00:00+00:00"
 # 行末の空白を「整形の違反」とみなす静的解析（ruff format --check の代わり。ツールに依存しない）。

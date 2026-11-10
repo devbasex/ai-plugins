@@ -209,7 +209,11 @@ def _budget_line(state: dict[str, Any], elapsed: float) -> str:
     plan_budget = state.get("budget") or {"minutes": state.get("budget_minutes")}
     ext = plan_budget.get("extension")
     grown = f"（延長: {ext['from']} → {ext['to']} 分。{ext['reason']}）" if ext else ""
-    net = f"安全網 {safety_net.used_seconds(state) / 60:.1f} / {safety_net.limit_minutes(state):.0f} 分" if plan_budget.get("minutes") else "安全網 —"
+    net = (
+        f"安全網 {safety_net.used_seconds(state) / 60:.1f} / {safety_net.limit_minutes(state):.0f} 分"
+        if plan_budget.get("minutes")
+        else "安全網 —"
+    )
     return f"- 実装の予算: {plan_budget.get('minutes')} 分{grown} / {net} / 所要: {elapsed / 60:.1f} 分（cross-review を除く）"
 
 

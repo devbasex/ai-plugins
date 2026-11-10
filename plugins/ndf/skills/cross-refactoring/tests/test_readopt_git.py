@@ -74,7 +74,11 @@ def _plan(flow, items, candidates=(), deferred=(), left_minutes=None, phase="imp
 def _left(state, minutes):
     """実装の予算を、着手済みの項目の見積りの和 + `minutes` にする（採り直しの残り = `minutes`。#2457 の I1）。"""
     budget = __import__("refactor_lib.budget", fromlist=["estimate_total"])
-    used = sum(budget.estimate_total(i["estimate"]) for i in state["items"] if i.get("status") not in ("planned", "carried", "reverted", "deferred"))
+    used = sum(
+        budget.estimate_total(i["estimate"])
+        for i in state["items"]
+        if i.get("status") not in ("planned", "carried", "reverted", "deferred")
+    )
     state["budget"] = {"minutes": round(used + minutes, 6), "extension": None}
 
 

@@ -233,7 +233,11 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     for name, func, help_ in (
         ("measure", cmd_measure, "提案の前に指標を 1 回だけ測り、指標のファイルを書く（失敗しても 0）"),
         ("merge-proposals", cmd_merge_proposals, "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
-        ("merge-plan", cmd_merge_plan, "改修計画の取り込み・等級と同じ変更か（Jev）・見積り（テストの追加と実装）・実装の予算に収まる件数・予算の延長"),
+        (
+            "merge-plan",
+            cmd_merge_plan,
+            "改修計画の取り込み・等級と同じ変更か（Jev）・見積り（テストの追加と実装）・実装の予算に収まる件数・予算の延長",
+        ),
         ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（手順の違反は差し戻し / コミットの無い項目は持ち越し）"),
         ("merge-implement", cmd_merge_implement, "実装の取り込み（手順の違反は差し戻し / コミットの無い項目は持ち越し）"),
         ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ・前進の判定。VERIFY=done|fix|judge|halt"),

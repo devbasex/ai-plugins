@@ -477,13 +477,22 @@ def _apply_implement(_path: pathlib.Path, state: dict[str, Any], intake: Intake)
         if item_id in intake.send_to_fix:
             # 期待値の欠け・文言を固定するテストは修正へ差し戻す（棚卸し #25・#26）
             item["status"] = FAILING
-            item["failed_check"] = {"kind": "sendback", "suite": "sendback", "command": "", "files": [], "tests": [], "note": intake.send_to_fix[item_id]}
+            item["failed_check"] = {
+                "kind": "sendback",
+                "suite": "sendback",
+                "command": "",
+                "files": [],
+                "tests": [],
+                "note": intake.send_to_fix[item_id],
+            }
     _record_seconds(state, "implement", "implement", intake.accepted)
 
 
 def _report_implement(state: dict[str, Any], intake: Intake) -> None:
     carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 差し戻し {sum(len(v) for v in intake.sendbacks.values())} 件")
+    info(
+        f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 差し戻し {sum(len(v) for v in intake.sendbacks.values())} 件"
+    )
     if carried:
         info(
             f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"

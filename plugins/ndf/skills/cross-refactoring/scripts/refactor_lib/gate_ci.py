@@ -72,8 +72,12 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
     if outcome == "success":
         return True, f"{label} の結論は success でした", None
     places = [str(r.get("html_url") or r.get("details_url") or "") for r in last.get("runs") or [] if isinstance(r, dict)]
-    return False, f"{label} の結論は {outcome} でした", {
-        "timed_out": False,
-        "ci_xmls": ci_junit(state, sha, checks, last.get("runs")),
-        "log_place": " ".join(p for p in places if p),
-    }
+    return (
+        False,
+        f"{label} の結論は {outcome} でした",
+        {
+            "timed_out": False,
+            "ci_xmls": ci_junit(state, sha, checks, last.get("runs")),
+            "log_place": " ".join(p for p in places if p),
+        },
+    )

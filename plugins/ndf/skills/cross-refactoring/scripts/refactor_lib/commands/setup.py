@@ -322,7 +322,12 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         # 実装の予算（#2457）。選定にだけ使う。`budget` は `merge-plan` が延長と実効の予算を足す
         "budget_minutes": args.budget_minutes,
         "budget_source": getattr(args, "budget_source", None) or "explicit",
-        "budget": {"minutes": args.budget_minutes, "source": getattr(args, "budget_source", None) or "explicit", "effective_minutes": args.budget_minutes, "extension": None},
+        "budget": {
+            "minutes": args.budget_minutes,
+            "source": getattr(args, "budget_source", None) or "explicit",
+            "effective_minutes": args.budget_minutes,
+            "extension": None,
+        },
         # 安全網（#2457 決定 5）。`safety_net_minutes` は引数の上書き（無ければ実効の予算 × 倍率）
         "safety_net_minutes": getattr(args, "safety_net_minutes", None),
         "safety_net": {"limit_minutes": None, "used_seconds": 0.0, "halted_at": None},
@@ -615,7 +620,13 @@ def _verify_init(
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
     m = init_test.recent_whole_seconds(prep)
-    kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "recent_seconds": m, "recent_source": "recent" if m is not None else None}
+    kw: dict[str, Any] = {
+        "whole_seconds_value": w,
+        "whole_source": w_source,
+        "ci_seconds": c,
+        "recent_seconds": m,
+        "recent_source": "recent" if m is not None else None,
+    }
     timeout = ts.limits(prep.strategy, None, **kw)["init_test_timeout"]
     info(f"   着手前のテストの上限: {timeout} 秒（ハングの検知）")
     init_test.extend_for_init_test(timeout)  # 親のステップの締め切りで先に切られない（#2457 決定 8）
@@ -764,7 +775,12 @@ def _resume(
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
     if _before_plan(state):
-        state["budget"] = {"minutes": state["budget_minutes"], "source": state.get("budget_source") or "explicit", "effective_minutes": state["budget_minutes"], "extension": None}
+        state["budget"] = {
+            "minutes": state["budget_minutes"],
+            "source": state.get("budget_source") or "explicit",
+            "effective_minutes": state["budget_minutes"],
+            "extension": None,
+        }
     for line in statefile.apply_resume_args(state, args, RESUME_SAFETY_NET):
         info(line)  # 安全網で止まった実行は、より大きい上限で打ち直すと続く（#2457 決定 5）
     view, given = _notify_view(state, args, inputs.model_spec)
