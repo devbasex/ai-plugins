@@ -5,8 +5,8 @@
 だけを変えるコミットで、オーケストレーターが残すコミットとして台帳へ記録する。項目の合否・停滞の判定・項目の実装時間
 には数えず、安全網の累計には数える（起動の秒は `coding-time` が足す）。
 
-手順の違反（`Flaky-Fix` の欠け・テスト以外のファイルの変更）は 1 回だけ差し戻し、それでも直らなければ直しのコミットを
-`git revert` で打ち消して報告へ残す。項目には触れない。
+手順の違反（`Flaky-Fix` の欠け・テスト以外のファイルの変更）は、違反のコミットを `git revert` で打ち消してから 1 回だけ
+差し戻し、それでも直らなければ 2 回目のコミットを打ち消して報告へ残す。項目には触れない。
 
 規則と見分けの部品の正本は #2458 にある。共通の部品ができたら、ここをその部品へ寄せる。
 """
@@ -81,6 +81,20 @@ def _close_request(path: pathlib.Path, state: dict[str, Any], work: str, base: s
     statefile.save(path, state)
 
 
+def _sendback(path: pathlib.Path, state: dict[str, Any], work: str, shas: list[str], found: list[dict[str, Any]]) -> None:
+    """違反のコミットを打ち消してから差し戻す。2 回目は打ち消しの後の HEAD から後の新しいコミットだけを判定する。
+
+    違反の無いコミットは残し、`kept` に持って 2 回目の結果へ数える。"""
+    pending = state["flaky_request"]
+    bad = {f["commit"] for f in found}
+    undo.revert_unattributed(path, state, [s for s in shas if s in bad], "フレーキーの直しの手順の違反（差し戻しの前）")
+    kept = list(pending.get("kept") or []) + [s for s in shas if s not in bad]
+    head = git_out(work, ["rev-parse", "HEAD"]) or str(pending.get("base_sha") or "")
+    pending.update({"attempts": int(pending.get("attempts") or 0) + 1, "sendback": found, "base_sha": head, "kept": kept})
+    state["flaky_request"] = pending
+    statefile.save(path, state)
+
+
 def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
     """フレーキーの直しの起動の結果を取り込む。出力は `FLAKY_FIX=kept|none|sendback|reverted`。"""
     path, state = load_state(args.id)
@@ -92,43 +106,50 @@ def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
     work = work_dir(state)
     # 他の取り込みと同じく、検証を受けていない未コミットの変更を先に捨てる（打ち消しの清浄性のチェックで止まらないように）
     gitfacts.discard_impl_leftovers(state, work)
-    # 差し戻しの起動し直しは `start-phase` が起点を今の HEAD へ置き直す。初回の起点を依頼に持ち、初回からのコミット全体を見る
+    # 差し戻しは違反のコミットを打ち消してから起動し直し、起点を打ち消しの後の HEAD へ置く。修正の起点の置き直しは初回の起点で見る
     base = str(pending.get("base_sha") or ((state.get("phases") or {}).get("flaky-fix") or {}).get("base_sha") or "")
+    origin = str(pending.get("origin_sha") or base)
+    pending["origin_sha"] = origin
+    kept = [str(s) for s in pending.get("kept") or [] if s]
     shas = _commits(work, base) if base else []
     by = str(state.get("implementer") or "")
     fixes = state.setdefault("flaky_fixes", [])
-    if not shas:
+    if not shas and not kept:
         for test_id in tests:
             fixes.append({"test_id": test_id, "commit": None, "by": by, "result": "none"})
-        _close_request(path, state, work, base)
+        _close_request(path, state, work, origin)
         info(f"ℹ フレーキーなテスト {len(tests)} 件の直しのコミットがありませんでした（報告に残します）")
         statefile.emit(FLAKY_FIX="none")
         return
     for sha in shas:
         ledger.note_orchestrator_commit(state, sha)
     found = fix_violations(work, shas, tests)
-    attempts = int(pending.get("attempts") or 0) + 1
-    if found and attempts < 2:
-        pending.update({"attempts": attempts, "sendback": found, "base_sha": base})
+    if found and int(pending.get("attempts") or 0) + 1 < 2:
         state["flaky_request"] = pending
-        statefile.save(path, state)
-        info(f"↩ フレーキーの直しに手順の違反が {len(found)} 件あります。1 回だけ差し戻します")
+        _sendback(path, state, work, shas, found)
+        info(f"↩ フレーキーの直しに手順の違反が {len(found)} 件あります。違反のコミットを打ち消し、1 回だけ差し戻します")
         statefile.emit(FLAKY_FIX="sendback")
         return
     if found:
         undo.revert_unattributed(path, state, shas, "フレーキーの直しの手順の違反")
         path, state = load_state(args.id)
+        named = _named(work, kept)
         for test_id in tests:
-            state.setdefault("flaky_fixes", []).append(
-                {"test_id": test_id, "commit": None, "by": by, "result": "reverted", "violations": found}
-            )
-        _close_request(path, state, work, base)
+            entry = {"test_id": test_id, "commit": named.get(test_id), "by": by, "result": "kept" if test_id in named else "reverted"}
+            if test_id not in named:
+                entry["violations"] = found
+            state.setdefault("flaky_fixes", []).append(entry)
+        _close_request(path, state, work, origin)
         info("↩ 差し戻しの後も手順の違反が残ったため、フレーキーの直しのコミットを打ち消しました（項目には触れません）")
         statefile.emit(FLAKY_FIX="reverted")
         return
-    named = {str(gitfacts.commit_trailers(work, sha).get(TRAILER) or "").strip(): sha for sha in shas}
+    named = _named(work, kept + shas)
     for test_id in tests:
         fixes.append({"test_id": test_id, "commit": named.get(test_id), "by": by, "result": "kept" if test_id in named else "none"})
-    _close_request(path, state, work, base)
+    _close_request(path, state, work, origin)
     info(f"✅ フレーキーなテストの直しを {len(named)} 件残しました（項目とは別のコミット）")
     statefile.emit(FLAKY_FIX="kept")
+
+
+def _named(work: str, shas: list[str]) -> dict[str, str]:
+    return {str(gitfacts.commit_trailers(work, sha).get(TRAILER) or "").strip(): sha for sha in shas}

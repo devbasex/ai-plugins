@@ -134,15 +134,17 @@ def test_a_carried_item_keeps_its_test_commit_when_readopted(flow, readopt):
     work = flow["work"]
     (work / "tests" / "test_total.py").write_text("def test_total():\n    assert True\n", encoding="utf-8")
     test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
-    item = _entry("I-001", 1, "total", status="carried")
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
     item["commits"]["test"] = test_sha
     item["seconds"] = {"test": 12.0}
     _plan(flow, [item], phase="readopt")
 
     _call(readopt, "cmd_readopt")
 
-    got = read_state(flow["path"])["items"][0]
+    state = read_state(flow["path"])
+    got = state["items"][0]
     assert got["status"] == "tested" and got["round"] == 2
+    assert state["phase"] == "implement", "テストを持つ項目だけを採り直したら、テストの追加を起動しない"
     assert got["commits"] == {"test": test_sha, "implement": [], "fix": []} and got["seconds"] == {"test": 12.0}
 
 

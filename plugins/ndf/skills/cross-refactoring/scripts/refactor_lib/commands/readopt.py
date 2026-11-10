@@ -165,7 +165,7 @@ def cmd_readopt(args: argparse.Namespace) -> None:
     readopt["round"] = round_no + 1
     record.update({"round": round_no + 1, "reason": SELECTED, "selected": ids})
     readopt["events"].append(record)
-    tests_needed = any(i.get("tests") for i in state["items"] if i["id"] in ids)
+    tests_needed = any(i.get("tests") and i.get("status") == PLANNED for i in state["items"] if i["id"] in ids)
     state["phase"] = "add-tests" if tests_needed else "implement"
     statefile.save(path, state)
     left = len(_budget_candidates(state))

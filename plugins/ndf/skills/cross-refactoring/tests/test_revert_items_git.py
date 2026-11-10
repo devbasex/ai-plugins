@@ -121,3 +121,16 @@ def test_uncommitted_changes_stop_the_revert_without_discarding_them(tmp_path, u
 
     assert (work / "src" / "bar.py").read_text(encoding="utf-8") == "edited\n"
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == a
+
+
+def test_untracked_files_do_not_stop_the_revert(tmp_path, undo):
+    """`reset --hard` は追跡外のファイルを消さないため、範囲テストが残した成果物では止まらずに打ち消す。"""
+    work, base = _init(tmp_path)
+    a = _commit(work, "src/foo.py", 2, "by-A", "I-A")
+    path = make_state_v2(tmp_path, work, items=[_item("I-A", [a])], plan={"base_sha": base}, phase="verify")
+    (work / "report.xml").write_text("<testsuite/>\n", encoding="utf-8")
+
+    undo.revert_items(path, read_state(path), ["I-A"], "成立しないと判定した")
+
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() != a
+    assert (work / "report.xml").read_text(encoding="utf-8") == "<testsuite/>\n"

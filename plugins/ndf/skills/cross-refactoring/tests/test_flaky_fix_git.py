@@ -3,7 +3,7 @@
 | 確かめること |
 | --- |
 | 見分けたテストの直しは `Flaky-Fix` のコミットで残り、オーケストレーターが残すコミットとして台帳に載る。項目には結ばない |
-| テスト以外のファイルを変えた直しは 1 回だけ差し戻し、それでも直らなければ打ち消す。項目には触れない |
+| テスト以外のファイルを変えた直しは打ち消してから 1 回だけ差し戻し、2 回目の正しい直しは残す。それでも直らなければ打ち消す。項目には触れない |
 | 直しのコミットが無ければ、報告に残して終える |
 | 同じテストの直しは 1 回の実行で 1 回だけ依頼する |
 """
@@ -73,14 +73,17 @@ def test_a_flaky_fix_is_kept_as_its_own_commit_and_not_tied_to_an_item(tmp_path,
     assert state["flaky_request"] is None
 
 
-def test_a_fix_outside_the_tests_is_sent_back_once_then_reverted(tmp_path, monkeypatch, cmd_flaky, capsys):
+def test_a_fix_outside_the_tests_is_reverted_before_the_sendback_then_reverted_again(tmp_path, monkeypatch, cmd_flaky, capsys):
     work, path, _ = _setup(tmp_path, monkeypatch)
     (work / "src" / "calc.py").write_text("X = 3\n", encoding="utf-8")
     commit_with_trailers(work, "fix flaky in src", {"Flaky-Fix": TEST_ID})
 
     assert _merge(cmd_flaky, capsys) == "sendback"
     assert read_state(path)["flaky_request"]["sendback"][0]["kind"] == "non_test"
+    assert (work / "src" / "calc.py").read_text(encoding="utf-8") == "X = 2\n", "差し戻しの前に違反のコミットを打ち消す"
 
+    (work / "src" / "calc.py").write_text("X = 4\n", encoding="utf-8")
+    commit_with_trailers(work, "fix flaky in src again", {"Flaky-Fix": TEST_ID})
     assert _merge(cmd_flaky, capsys) == "reverted"
     state = read_state(path)
     assert (work / "src" / "calc.py").read_text(encoding="utf-8") == "X = 2\n", "直しのコミットだけを打ち消す"
@@ -109,8 +112,8 @@ def test_the_same_test_is_requested_only_once_per_run(tmp_path, monkeypatch, cmd
     assert state["flaky_request"] is None
 
 
-def test_a_sendback_keeps_the_first_base_even_if_the_phase_moves_it(tmp_path, monkeypatch, cmd_flaky, capsys):
-    """差し戻しの起動し直しで `start-phase` が起点を置き直しても、初回の違反コミットを打ち消す。"""
+def test_a_correct_fix_after_the_sendback_is_kept(tmp_path, monkeypatch, cmd_flaky, capsys):
+    """2 回目は打ち消しの後の起点から判定する。`start-phase` が起点を置き直しても、正しい直しは残る。"""
     work, path, _ = _setup(tmp_path, monkeypatch)
     (work / "src" / "calc.py").write_text("X = 3\n", encoding="utf-8")
     commit_with_trailers(work, "fix flaky in src", {"Flaky-Fix": TEST_ID})
@@ -119,8 +122,12 @@ def test_a_sendback_keeps_the_first_base_even_if_the_phase_moves_it(tmp_path, mo
     state = read_state(path)
     state["phases"]["flaky-fix"]["base_sha"] = git("rev-parse", "HEAD", cwd=work).stdout.strip()
     write_state(path, state)
+    (work / "tests" / "test_clock.py").write_text("def test_now():\n    assert 1 == 1\n", encoding="utf-8")
+    fix = commit_with_trailers(work, "fix flaky", {"Flaky-Fix": TEST_ID})
 
-    assert _merge(cmd_flaky, capsys) == "reverted"
+    assert _merge(cmd_flaky, capsys) == "kept"
+    state = read_state(path)
+    assert state["flaky_fixes"] == [{"test_id": TEST_ID, "commit": fix, "by": "claude", "result": "kept"}]
     assert (work / "src" / "calc.py").read_text(encoding="utf-8") == "X = 2\n"
 
 

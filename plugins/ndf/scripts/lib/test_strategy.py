@@ -306,7 +306,7 @@ def unscoped_owners(strategy: Strategy, targets: list[str]) -> list[str]:
     """対象を受け持つテストの suite のうち、範囲の雛形（`scope_command`）を持たないものの名前（重なりなし・名前順）。
 
     `suite_groups` は受け持つ suite の無い対象を最初の範囲の suite へ渡すため、別のランナーの対象（例: JavaScript の
-    テストを pytest へ）を渡す前にここで見分ける。"""
+    テストを Python のランナーへ）を渡す前にここで見分ける。"""
     owners = (owner_suite(strategy, target_path(t)) for t in targets)
     return sorted({o.name for o in owners if o is not None and not o.scope_command})
 
