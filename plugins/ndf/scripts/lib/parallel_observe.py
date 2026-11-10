@@ -15,6 +15,7 @@ def listed_rows(res: dict) -> dict[str, dict]:
     """`relay.py ls --json` の結果の行（名前 → 行）。dict でない行と名前の無い行は除く。"""
     return {it["name"]: it for it in res.get("items") or [] if isinstance(it, dict) and it.get("name")}
 
+
 def apply_observed_states(run, rows: dict) -> list[str]:
     """一覧の状態を各レーンへ写し、承認待ちへ移ったレーンを返す。一覧に無い起動済みのレーンは止まったと読む。"""
     states = {n: r.get("state") for n, r in rows.items()}
