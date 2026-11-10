@@ -186,6 +186,20 @@ def test_a_launch_failure_in_the_test_round_stops_without_dropping_the_item(flow
     assert read_state(flow["path"])["launch_failure"]["phase"] == "tests"
 
 
+def test_added_tests_run_the_files_of_every_commit_of_the_item(flow, refactor, monkeypatch):
+    """2 つ目以降のコミットで足したテストも走らせ、落ちれば印を付ける（1 つ目のコミットだけで組まない）。"""
+    implement = importlib.import_module("refactor_lib.commands.implement")
+    state = read_state(flow["path"])
+    state["items"] = [_item("I-001", 1)]
+    seen: list[list[str]] = []
+    monkeypatch.setattr(implement, "_added_test_commands", lambda _s, _i, files: seen.append(files) or ["false"])
+    commits = [{"sha": "a", "files": ["tests/test_a.py"]}, {"sha": "b", "files": ["tests/test_b.py", "tests/test_a.py"]}]
+    intake = implement.Intake(accepted={"I-001": commits})
+    implement._run_added_tests(flow["path"], state, intake)
+    assert seen == [["tests/test_a.py", "tests/test_b.py"]]
+    assert "I-001" in intake.test_failed
+
+
 # ---------- 最終ゲートの静的解析（I12） ----------
 
 
