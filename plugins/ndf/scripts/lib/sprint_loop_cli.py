@@ -104,7 +104,7 @@ def _dispatch(a, update) -> dict | None:
         handlers = {
             "select": lambda: sl_select.cmd_select(env, a.loop_name),
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
-            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra)),
+            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra), a.judgments),
             "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done, update=update),
             "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr, revise=a.revise, note=a.note),
             "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
@@ -174,7 +174,8 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("issue", type=int)
     s.add_argument("--reason", required=True)
     s = name(ls.add_parser("sprint"))
-    s.add_argument("--mode", required=True)
+    s.add_argument("--judgments", required=True, metavar="ファイル", help="判定の根拠のファイル（JSON。mode-materials.py --out の下書きを埋めたもの。#2923）")
+    s.add_argument("--mode", help="照合するモード。省くと判定の根拠から決まるモードで組む")
     s.add_argument("--dev", help="明示の開発版。省くと流す直前に次に空いている版を決める")
     s.add_argument("--prod", help="明示の本番の版（--dev と一緒に渡す）")
     s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて supervise.py new sprint へそのまま渡す

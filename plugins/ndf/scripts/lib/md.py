@@ -205,3 +205,24 @@ def _link_label(kids: list, start: int) -> str:
         if d.type in ("text", "code_inline"):
             label.append(d.content)
     return "".join(label)
+
+
+class CodeSpan(NamedTuple):
+    content: str
+    line: int
+
+
+def code_spans(text: str) -> list[CodeSpan]:
+    """インラインの code span（CommonMark 6.1）の中身と行。コードの囲みとインデントのコードブロックの中は含めない。
+    表のセルの中の code span も含める。"""
+    out: list[CodeSpan] = []
+    for t in _tokens(text):
+        if t.type != "inline" or not t.map:
+            continue
+        line = t.map[0]
+        for c in t.children or []:
+            if c.type in ("softbreak", "hardbreak"):
+                line += 1
+            elif c.type == "code_inline":
+                out.append(CodeSpan(c.content, line))
+    return out

@@ -67,6 +67,21 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
     return new
 
 
+def redo_sprint_argv(root: str, rec: dict, lap: dict, issues: list[int], mode: str, out: str) -> list[str]:
+    """モードを決め直して下がったとき、設計承認ゲートの後のステージを新しいモードで作り直す supervise.py new sprint の
+    コマンド（#2923 の決定 4）。設計は済んでいるため --design を渡さず、残った課題を --designed で渡す。"""
+    dev = lap["versions"]["dev"]
+    new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
+    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", mode, "--designed", *map(str, issues)]
+    if dev:
+        new += ["--version", dev]
+    new += ["--out", out]
+    if rec.get("outside_plan"):
+        new += ["--outside-plan", rec["outside_plan"]]
+    new += list(lap.get("sprint_extra") or [])
+    return new
+
+
 def stage_plan(index: list[dict], stage: str) -> str | None:
     """マニフェストのステージの先頭のプラン。ステージが無ければ None。"""
     return next((p for e in index if e.get("name") == stage for p in e.get("plans", [])), None)
