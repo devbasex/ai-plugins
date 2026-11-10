@@ -22,8 +22,8 @@ import run_environment
 import sprint_loop_gate
 import sprint_mvv
 import step_result
-from pace import PaceError, over_budget, read_loop, read_pace
-from sprint_loop_argv import approved_issues, new_sprint_argv, sprint_state_init_argv, stage_plan
+from pace import PaceError, hours_items, over_budget, read_loop, read_pace
+from sprint_loop_argv import design_issues, new_sprint_argv, sprint_refusal, sprint_state_init_argv, stage_plan
 
 from sprint_loop_record import (
     TOOL,
@@ -130,6 +130,12 @@ def apply_budget(env: Env, rec: dict, given: dict, defaults: dict) -> None:
 
 
 def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bool = True) -> dict:
+    out = start_or_resume(env, name, milestones, budget, goal)
+    out["items"] = [*out["items"], *hours_items(env.main_dir())]  # 業務時間の宣言の誤り（#2913）。警告を出しても始める
+    return out
+
+
+def start_or_resume(env: Env, name: str, milestones: list[str], budget: dict, goal: bool) -> dict:
     with locked(env, name):
         decl, why, project = permission(env)
         p = loop_record_path(env, name)
@@ -185,14 +191,8 @@ def resume_record(env: Env, rec: dict) -> None:
 
 
 def _resume_mvv_changed(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
-    return (
-        stopped_result(
-            env,
-            rec,
-            "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）",
-        ),
-        nxt,
-    )
+    why = "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）"
+    return stopped_result(env, rec, why), nxt
 
 
 def _resume_user_stop(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
@@ -285,8 +285,8 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
             return refusal_order("進行中のループの 1 回が無い（loop select で選んでから組む）")
         if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
             return stopped_result(env, rec, "ループは止まっている")
-        if lap.get("issues_kept") is not None:
-            return refusal_order("設計承認ゲートの後のループの 1 回は組み直さない（loop start で残した課題の続きを組む）")
+        if refused := sprint_refusal(rec, lap):  # 設計承認ゲートの後のループの 1 回・答え待ちの停止の範囲の設計（#2913 の I1）
+            return {**refusal_order(refused[1]), "exit": refused[0]}
         issues = selected_issues(lap)
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
@@ -300,7 +300,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         if mvv.is_file():
             copy_mvv_gate(rec, lap, state, mvv)
         try:
-            notes, skipped = revise_note.write_inputs(env.main_dir(), rec, [n for n in issues if n not in approved_issues(rec)], lap["dir"])
+            notes, skipped = revise_note.write_inputs(env.main_dir(), rec, design_issues(rec, issues), lap["dir"])
         except OSError as e:
             return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e))
         new = new_sprint_argv(root, rec, lap, [*notes, *extra])
