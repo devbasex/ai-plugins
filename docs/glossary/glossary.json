@@ -4948,8 +4948,32 @@
     {
       "term": "差分の棚卸し",
       "context": "ndf-workflow",
-      "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題（起点のタグの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315）",
+      "meaning": "開発ループでは数回のループの 1 回に 1 回（既定 3 回。`.ndf/backlog.json` の `depths.diff.every`）、ループの外では毎スプリントのまとめで行う棚卸しの深さ。振り返りの範囲の変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・その範囲で起票した課題（振り返りの範囲の始まりの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315・#2914）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
+    },
+    {
+      "term": "振り返りの範囲",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。まだどの範囲にも入っていない見送ったループの 1 回（深さの記録の `diff` の `not_due` の行）と、今のループの 1 回からなる。ループの外では今のスプリントだけで、見送ったループの 1 回は次に開発ループで走らせる回まで残る。深さの記録の `diff` の `due` の行の `values.scope` に残る（#2914）",
+      "pending_source": "issues/issue-2914-design.md"
+    },
+    {
+      "term": "仕上げのプラン",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）。確定仕様化・リリース後テスト・振り返り・課題を閉じる・棚卸しのステップを持つ（#2914）",
+      "pending_source": "issues/issue-2914-design.md"
+    },
+    {
+      "term": "起動の判定",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しの深さごとに、その回で走らせるかを決める判定。`upkeep.py depth due <深さ>` が終了コード 0（起動する）か 3（起動しない）を返し、深さの記録へ判定の行を残す（#2315・#2914）",
+      "pending_source": "issues/issue-2914-design.md"
+    },
+    {
+      "term": "走らなかったステップ",
+      "context": "ndf-workflow",
+      "meaning": "起動の判定などの終了コードで飛ばされ、プランの実行で通らなかったステップ。フェーズレポートの「通ったステップ」の後に、ステップの id と飛ばした判定の要約を 1 行で並べる（#2914）",
+      "pending_source": "issues/issue-2914-design.md"
     },
     {
       "term": "見直し",
