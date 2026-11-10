@@ -93,6 +93,36 @@ def env(tmp_path, mvv, monkeypatch):
 HEAD = "h" * 40
 
 
+def _close_stages(out, issues):
+    """supervise.py new close の差し替え: まとめのプランを 1 つ書き、そのステージを返す。"""
+    p = out / "1-close.json"
+    p.write_text(json.dumps({"フェーズ": "まとめ", "課題": issues}))
+    return [{"name": "まとめ", "plans": [str(p)], "command": f"queue {p}"}]
+
+
+def _sprint_stages(cmd, out, issues):
+    """supervise.py new sprint の差し替え: 課題ごとの設計・実装と検査・リリースのプランを書き、ステージを返す。"""
+    plans = {}
+    for n in issues:
+        for k, phase in (("design", "設計"), ("impl", "実装")):
+            plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
+            plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
+    (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
+    (out / "dev.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
+    (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
+    design = [str(plans[f"design-{n}"]) for n in issues]
+    stages = [
+        {"name": "設計", "plans": design, "command": "queue " + " ".join(design) + " --max 3"},
+        {"name": "設計承認ゲート", "gate": "..."},
+        {"name": "実装", "plans": [str(plans[f"impl-{n}"]) for n in issues], "then_of": "設計"},
+        {"name": "検査", "plans": [str(out / "check.json")], "then_of": "設計"},
+        {"name": "本番", "plans": [str(out / "prod.json")], "then_of": "設計"},
+    ]
+    if "--version" not in cmd:  # 版を渡さないループの 1 回の開発版のプラン（#2354）
+        stages.insert(-1, {"name": "開発版", "plans": [str(out / "dev.json")], "then_of": "設計"})
+    return stages
+
+
 def fake_run(e):
     """sprint-state.py init・supervise.py new sprint / new close の差し替え。--out にマニフェストを書く。"""
 
@@ -110,29 +140,7 @@ def fake_run(e):
             out.mkdir(parents=True, exist_ok=True)
             kind = cmd[cmd.index("new") + 1]
             issues = [int(x) for x in cmd[cmd.index("--issue") + 1 :] if x.isdigit()][:5]
-            if kind == "close":
-                p = out / "1-close.json"
-                p.write_text(json.dumps({"フェーズ": "まとめ", "課題": issues}))
-                stages = [{"name": "まとめ", "plans": [str(p)], "command": f"queue {p}"}]
-            else:
-                plans = {}
-                for n in issues:
-                    for k, phase in (("design", "設計"), ("impl", "実装")):
-                        plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
-                        plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
-                (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
-                (out / "dev.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
-                (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
-                design = [str(plans[f"design-{n}"]) for n in issues]
-                stages = [
-                    {"name": "設計", "plans": design, "command": "queue " + " ".join(design) + " --max 3"},
-                    {"name": "設計承認ゲート", "gate": "..."},
-                    {"name": "実装", "plans": [str(plans[f"impl-{n}"]) for n in issues], "then_of": "設計"},
-                    {"name": "検査", "plans": [str(out / "check.json")], "then_of": "設計"},
-                    {"name": "本番", "plans": [str(out / "prod.json")], "then_of": "設計"},
-                ]
-                if "--version" not in cmd:  # 版を渡さないループの 1 回の開発版のプラン（#2354）
-                    stages.insert(-1, {"name": "開発版", "plans": [str(out / "dev.json")], "then_of": "設計"})
+            stages = _close_stages(out, issues) if kind == "close" else _sprint_stages(cmd, out, issues)
             (out / "sprint.json").write_text(json.dumps({"ステージ": stages}, ensure_ascii=False))
             return 0, "{}", ""
         return 0, "{}", ""
