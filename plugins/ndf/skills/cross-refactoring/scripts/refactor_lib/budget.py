@@ -99,10 +99,10 @@ def extension(ranked: list[dict[str, Any]], budget_minutes: int, factor: Optiona
     }
 
 
-def effective_minutes(budget: dict[str, Any]) -> int:
+def effective_minutes(budget: dict[str, Any]) -> float:
     """実効の予算（分）。延ばしていなければ実装の予算と同じ。"""
     ext = budget.get("extension") or None
-    return int(ext["to"]) if ext else int(budget["minutes"])
+    return ext["to"] if ext else budget["minutes"]
 
 
 def adopted_minutes(items: list[dict[str, Any]]) -> float:

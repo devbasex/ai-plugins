@@ -343,7 +343,7 @@ def _local_gate(path: pathlib.Path, state: dict[str, Any]) -> tuple[bool, str, O
     timeout = timeline.state_whole_timeout(state)
     triage.clear_junit(state)
     started = time.monotonic()
-    log = pathlib.Path(state["tmp_dir"]) / "final-gate-whole-test.log"
+    log = pathlib.Path(state["tmp_dir"]) / "final-gate-whole-test.log" if state.get("tmp_dir") else None
     for command in commands:
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
         code, timed_out = test_triage.run_within(timeout, started, lambda left, command=command: run_with_timeout(command, work, left, output=log))

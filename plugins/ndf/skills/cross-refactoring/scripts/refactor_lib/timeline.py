@@ -38,7 +38,8 @@ def measure_timeout() -> int:
 
 def measure_deadline(limits: dict[str, Any]) -> int:
     """その実行で測定に使える秒（上限の表の `measure_timeout`。無ければ既定）。"""
-    return int(limits.get("measure_timeout") or measure_timeout())
+    value = limits.get("measure_timeout")
+    return int(value) if value is not None else measure_timeout()
 
 
 def strategy_of(state: dict[str, Any]) -> ts.Strategy:

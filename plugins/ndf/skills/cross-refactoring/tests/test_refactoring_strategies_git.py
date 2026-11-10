@@ -20,7 +20,7 @@ import argparse
 
 import pytest
 
-from crossref_helpers import build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state
+from crossref_helpers import verify_judged, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state
 
 FAR = "2099-01-01T00:00:00+00:00"
 FIX_STEM = "claude-fix-rf130"
@@ -122,7 +122,7 @@ def _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
     """実装を取り込み、検証して最終ゲートまで進め、採用の件数を返す。"""
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done", _items(flow)
     _call(cmd_gate, "cmd_final_gate")
     return ledger.tally(read_state(flow["path"])).adopted
@@ -181,7 +181,7 @@ def test_splitting_a_module_that_fails_the_structure_check_is_adopted(
     _commit(flow, "I-001", {"src/big.py": "def first():\n    return helper_one()\n\n\ndef helper_one():\n    return 1\n"})
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
 
     _call(cmd_setup, "cmd_start_phase", phase="fix")
@@ -194,7 +194,7 @@ def test_splitting_a_module_that_fails_the_structure_check_is_adopted(
     _call(cmd_merge_fix, "cmd_merge_fix")
     assert len(_items(flow)["I-001"]["commits"]["fix"]) == 2, "新しいファイルを作った修正を取り消さない"
 
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done"
     _call(cmd_gate, "cmd_final_gate")
     assert ledger.tally(read_state(flow["path"])).adopted == 1
@@ -330,7 +330,7 @@ def test_a_fix_that_only_rewrites_a_forgotten_outside_caller_is_adopted(
     )
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
 
     _call(cmd_setup, "cmd_start_phase", phase="fix")
@@ -342,7 +342,7 @@ def test_a_fix_that_only_rewrites_a_forgotten_outside_caller_is_adopted(
     assert len(item["commits"]["fix"]) == 1, "呼び手の import だけを直した修正を取り消さない"
     assert {j["path"] for j in item["review_scope_judgements"]} == {"tools/report.py"}
 
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done"
     _call(cmd_gate, "cmd_final_gate")
     assert ledger.tally(read_state(flow["path"])).adopted == 1
@@ -374,8 +374,8 @@ def test_moving_test_values_into_a_new_helper_file_is_adopted(flow, cmd_setup, c
     assert _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys) == 1
 
 
-def test_a_test_value_that_really_disappeared_still_rejects_the_item(flow, cmd_setup, cmd_implement):
-    """AC8・AC10: 値が項目の変えたテストのファイルのどこにも無くなった変更は、今までどおり取り消す。"""
+def test_a_test_value_that_really_disappeared_is_sent_back_to_the_fix(flow, cmd_setup, cmd_implement):
+    """AC8・AC10・#2457 の棚卸し #25: 値が項目の変えたテストのファイルのどこにも無くなった変更は、取り消さず修正へ差し戻す。"""
     _start(
         flow,
         cmd_setup,
@@ -392,9 +392,10 @@ def test_a_test_value_that_really_disappeared_still_rejects_the_item(flow, cmd_s
         },
     )
 
-    with pytest.raises(SystemExit):
-        _call(cmd_implement, "cmd_merge_implement")
-    assert "期待する振る舞い" in _items(flow)["I-001"]["failure_reason"]
+    _call(cmd_implement, "cmd_merge_implement")
+    item = _items(flow)["I-001"]
+    assert item["status"] == "failing" and item["failed_check"]["kind"] == "sendback"
+    assert "期待する振る舞い" in item["sendbacks"][0]["reason"]
 
 
 # ---------- 不要コードの削除 ----------
@@ -424,7 +425,7 @@ def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_fix(flow, cmd_se
     _commit(flow, "I-001", {"src/dead.py": "def live():\n    return 1\n"})
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
 
     assert _emitted(capsys, "VERIFY") == "fix"
 
@@ -432,8 +433,8 @@ def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_fix(flow, cmd_se
 # ---------- 複数コミットの項目と取り消し ----------
 
 
-def test_dropping_a_two_commit_item_reverts_both_commits(flow, cmd_setup, cmd_implement):
-    """AC6a・I8: 2 コミット目が範囲の外の既存のファイルを勝手に変えた項目は、2 コミットとも戻る。"""
+def test_a_two_commit_item_outside_the_scope_keeps_both_commits(flow, cmd_setup, cmd_implement):
+    """AC6a・#2457 受け入れ条件 8: 2 コミット目が範囲の外の既存のファイルを変えても取り消さず、2 コミットとも残して報告する。"""
     work = flow["work"]
     _start(
         flow,
@@ -452,9 +453,9 @@ def test_dropping_a_two_commit_item_reverts_both_commits(flow, cmd_setup, cmd_im
     )
     _commit(flow, "I-001", {".gitignore": (work / ".gitignore").read_text() + "build/\n"})
 
-    with pytest.raises(SystemExit):
-        _call(cmd_implement, "cmd_merge_implement")
+    _call(cmd_implement, "cmd_merge_implement")
 
-    assert _items(flow)["I-001"]["status"] == "reverted"
-    assert (work / "src" / "shop.py").read_text() == SHOP
-    assert "build/" not in (work / ".gitignore").read_text()
+    item = _items(flow)["I-001"]
+    assert item["status"] == "implemented" and len(item["commits"]["implement"]) == 2
+    assert [r["path"] for r in item["outside_scope"]] == [".gitignore"]
+    assert "build/" in (work / ".gitignore").read_text()

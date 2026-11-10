@@ -37,7 +37,7 @@ from .paths import git_out, head_sha, load_state, work_dir
 from .phases import add_phase_seconds, phase_record
 from .results import read_result
 from .scope_check import judge_commits, note_outside
-from .worktree import reset_hard, revert_range
+from .worktree import reset_hard, revert_range  # 手順を外れた修正のコミットだけを打ち消す
 from . import ledger
 from .verify import collect_test_changes, verify_commit_basics, verify_test_changes
 

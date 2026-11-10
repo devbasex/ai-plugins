@@ -597,6 +597,14 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
     return dict(result=result, state_file=str(d.state_file()) if d.has_state() else "", head=head, args=result_args(init_args, PLACE_ARGS))
 
 
+def _emit_if_halted(out: dict) -> dict:
+    """止めて人へ渡した結果（gate・`metrics.exit` 10）は、判断待ちの表（`drive_pause.exit_code`）を通さず承認ゲートの
+    終了コードで出す（#2457 決定 5）。それ以外はそのまま返す。"""
+    if out.get("status") == "gate" and (out.get("metrics") or {}).get("exit") == sr.EXIT_GATE and not (out.get("items") or [{}])[0].get("result_file"):
+        sr.emit(out, sr.EXIT_GATE)
+    return out
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("pr", type=int)
@@ -606,7 +614,7 @@ def main(argv: list[str] | None = None) -> None:
         lease_stage.hold(ENTRY, pr=a.pr)  # 同じ PR の改修計画実行を 2 本流さない。終わりで返す（#2342）
     d = Drive(a.pr, rest)
     try:
-        dp.main(TOOL, d.run, dict)
+        dp.main(TOOL, lambda: _emit_if_halted(d.run()), dict)
     except SystemExit as e:
         if d.paused:
             # 耐久ワークフローは続きを待ったまま残す（DBOS の後始末で待たない）

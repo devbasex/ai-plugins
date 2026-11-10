@@ -61,8 +61,8 @@ from ..pathkinds import is_test_path
 from ..paths import git_out, load_state, work_dir
 from ..phases import finish_phase, phase_record
 from ..scope_check import judge_commits, note_outside
+from .. import undo
 from ..undo import resume_pending_drop
-from ..worktree import revert_range
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -169,20 +169,7 @@ def _settle(
 
 def _revert_extra(path: pathlib.Path, state: dict[str, Any], extra: list[str], label: str, this_round: int) -> None:
     """どの項目にも属さないコミットを、新しい順に `git revert` で打ち消す（棚卸し #22。`reset --hard` は使わない）。"""
-    work = work_dir(state)
-    before = git_out(work, ["rev-parse", "HEAD"]) or ""
-    ordered = list(reversed(extra))
-    conflict = revert_range(work, ordered)
-    if conflict:
-        from ..worktree import reset_hard
-
-        reset_hard(work, before)
-        die(f"どの項目にも属さないコミット {conflict[:12]} を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
-    made = (git_out(work, ["rev-list", f"-{len(ordered)}", "HEAD"]) or "").splitlines()
-    for sha in reversed(made):
-        ledger.note_orchestrator_commit(state, sha)
-    state.setdefault("sendbacks", []).append({"kind": "unattributed", "commits": list(extra), "phase": label, "at": statefile.now()})
-    state.setdefault("drops", []).append({"at": statefile.now(), "mode": "revert", "reason": label, "round": this_round, "dropped": [], "reverted": len(made)})
+    undo.revert_unattributed(path, state, extra, label)
     info(f"↩ どの項目にも属さないコミット {len(extra)} 件を git revert で打ち消しました（Item-Id を付け直して出し直させる差し戻し）")
 
 
@@ -325,14 +312,13 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
         state,
         # 今の巡で採った、テストを足す未了の項目だけ。前の巡で検証を終えた項目のコミットに触れない（#1743）
         lambda item: bool(item.get("tests")) and item.get("status") == PLANNED and in_current_round(state, item),
-        lambda item, commits: _test_commit_problem(item, commits, tracked, state),
+        lambda _item, commits: _test_commit_problem(commits, tracked, state),
         "add-tests",
         intake,
     )
 
 
 def _test_commit_problem(
-    item: dict[str, Any],
     commits: list[dict[str, Any]],
     tracked: list[str],
     state: dict[str, Any],

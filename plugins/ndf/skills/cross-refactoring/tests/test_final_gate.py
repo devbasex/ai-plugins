@@ -14,7 +14,6 @@ AC16b）。検証の中で全体のテストが通り、取り消しが無く、
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
 
 import pytest
@@ -43,7 +42,7 @@ def spy(patch_lib, refactor, monkeypatch):
     """テストの実行と `gh` の呼び出しを差し替え、何を呼んだかを記録する。"""
     seen: dict[str, list] = {"tests": [], "gh": []}
 
-    def fake_run(command, cwd, timeout, grace=5.0, output=None):
+    def fake_run(command, cwd, timeout, grace=5.0, output=None, **kw):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
@@ -251,52 +250,44 @@ def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
     assert gate["status"] == "failing"
 
 
-def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
-    """**単独で起動したとき、Step 7 は push 済みの地点である。** 上限に達しても取り消さない（#1669 AC9）。
-
-    取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。
-    """
-    dropped: list = []
-    patch_lib("drop", lambda *a, **k: dropped.append(a) or {})
-    patch_lib("revert_range", lambda *a, **k: dropped.append(a))
-    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 2, "checks": []})
+def test_the_gate_keeps_fixing_past_the_budget(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """#2457 受け入れ条件 5: 実装の予算をとうに超えても、最終ゲート修正を時間で打ち切らない。"""
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", budget={"minutes": 1, "extension": None}, final_gate={"fix_rounds": 2, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 1, "報告へ抜ける。進行ごと止める中断（4）ではない"
-    assert dropped == [], "取り消さない"
-    assert read_state(state_path)["final_gate"]["status"] == "failed"
-
-
-def test_the_first_fix_is_not_launched_when_it_does_not_fit_before_the_check_start_deadline(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """#1932 I2 — 今 + 最終ゲート修正 1 回の見込み F が確かめの開始の締め切りを越えると、1 回目でも修正を起動しない。
-    単独の起動は取り消さずに終了コード 1 で終え、理由を `check_skipped` に残す。"""
-    started = (_dt.datetime.now() - _dt.timedelta(minutes=59)).isoformat(timespec="seconds")  # H まで約 60 秒
-    state_path = _state(tmp_path, started_at=started, plan={"reserve": {"final_fix": 5.0}})  # F = 300 秒
-    env_tmp_dir(state_path)
-    spy["test_code"] = 1
-
-    with pytest.raises(SystemExit) as e:
-        cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 1
+    assert e.value.code == 2
     gate = read_state(state_path)["final_gate"]
-    assert gate["fix_rounds"] == 0 and gate["status"] == "failed"
-    assert gate["check_skipped"]["reason"] == cmd_gate.NO_FIX_ROOM and gate["check_skipped"]["base_identity"] is False
-    assert spy["tests"], "確かめは H − v より前なので走らせた"
+    assert gate["status"] == "failing" and gate["fix_rounds"] == 3
+    assert "check_skipped" not in gate
 
 
-def test_the_second_fix_after_the_budget_ran_out_is_not_tried(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """#1932 I2・I3 — 確かめを始められない実行は、単独の起動なら取り消さずに 1 で終わる。"""
-    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 1, "checks": []})
+def test_a_stalled_final_fix_switches_the_fixer_once_then_halts_without_reverting(patch_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """#2457 決定 4: 落ちたテストの集合が変わらなければ停滞。修正担当を 1 回替え、替えた後も停滞なら取り消さずに止める。"""
+    dropped: list = []
+    patch_lib("revert_range", lambda *a, **k: dropped.append(a))
+    state_path = _state(tmp_path, workflow_step=True)
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
+    impls = []
+    for _ in range(3):
+        with pytest.raises(SystemExit) as e:
+            cmd_gate.cmd_final_gate(_args())
+        assert e.value.code == 2
+        impls.append(read_state(state_path)["final_gate"].get("impl"))
+    gate = read_state(state_path)["final_gate"]
+    assert [h["progress"] for h in gate["fix_history"]] == ["first", "stalled", "stalled"]
+    assert impls[0] != impls[1] and gate["fixer_switched"] is True
+
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 1
-    assert read_state(state_path)["final_gate"]["status"] == "failed"
+    gate = read_state(state_path)["final_gate"]
+    assert gate["status"] == "halted" and "FINAL_GATE=halt" in capsys.readouterr().out
+    assert read_state(state_path)["halt"]["reason"] == "final_gate"
+    assert dropped == [], "取り消さない"
 
 
 def test_the_report_shows_the_final_gate(refactor, tmp_path, env_tmp_dir, capsys):
@@ -538,7 +529,7 @@ def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
     state_path = _state(tmp_path, workflow_step=True, limits={"test_timeout": 60})
     env_tmp_dir(state_path)
     # 全体テストの実行を打ち切りへ差し替える（spy の差し替えを上書きする）。
-    patch_lib("run_with_timeout", lambda command, cwd, timeout, grace=5.0: (None, True))
+    patch_lib("run_with_timeout", lambda command, cwd, timeout, grace=5.0, output=None, **kw: (None, True))
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
@@ -555,7 +546,7 @@ def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
     # 打ち切った秒数が含まれることだけを見る）。
     check = gate["checks"][-1]
     assert check["status"] == "fail"
-    assert "60" in check["detail"]
+    assert "秒で終わりませんでした" in check["detail"]
 
 
 # ---------- #1334: 全体テストを CI に任せる戦略の最終ゲート ----------
@@ -626,98 +617,6 @@ def _item(item_id, rank):
     return {"id": item_id, "rank": rank, "status": "verified", "danger": ["D2"]}
 
 
-def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_first(
-    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
-):
-    """AC8・I8 — 単独の起動で寄せた危険フラグの全体テストが落ち、時間以外の理由で修正を打ち切ったら、原因の判定の順に
-    取り消し、通った時点で止める。
-
-    本文に項目のパスが現れず、項目のコミットも無い（外して走らせ直せない）ため原因は決まらず、新しい順になる（#1649 AC6）。
-    """
-    dropped: list = []
-    pushed: list = []
-
-    def fake_drop(path, state, ids, reason, on_conflict="stop"):
-        dropped.extend(ids)
-        spy["test_code"] = 0  # 取り消した後の走らせ直しは通る
-
-    patch_lib("drop", fake_drop)
-    patch_lib("push_with_retry_marker", lambda *a, **k: pushed.append(True))
-    patch_lib("_dirty_paths", lambda state, work: [])  # 作業ツリーは git でない（drop を差し替える）
-    state_path = _ci_whole_state(
-        tmp_path,
-        workflow_step=False,
-        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2999-01-01T00:30:00"},
-        # 時間以外の打ち切り（起動し直しても解けない結末）。時間で打ち切った単独の起動は取り消さない（#1932 原則 4）
-        final_gate={"fix_rounds": 1, "checks": [], "no_relaunch": True},
-        items=[_item("I1", 1), _item("I2", 2), _item("I3", 3)],
-        whole_test={
-            "ran": False,
-            "flags": [],
-            "status": None,
-            "seconds": None,
-            "head": None,
-            "reverted": False,
-            "deferred": {"flags": ["D2"], "items": ["I1", "I3"]},
-        },
-    )
-    env_tmp_dir(state_path)
-    _failed_ci(patch_lib, spy, [NEW_FAILURE])
-
-    with pytest.raises(SystemExit) as e:
-        cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2, "取り消しを公開して、次の最終ゲートが CI を待ち直す"
-    assert dropped == ["I3"], "原因が決まらなければ新しい（rank の大きい）項目から取り消し、通った時点で止める"
-    assert pushed == [True]
-    gate = read_state(state_path)["final_gate"]
-    assert gate["reverted_deferred"] == ["I3"]
-    # 修正の依頼ではない。起点を取り消し後の HEAD へ置き直し、取り消しを後の修正の範囲へ入れない。
-    assert "FINAL_GATE=recheck" in capsys.readouterr().out
-    assert gate["status"] == "recheck" and gate["fix_base_sha"]
-
-
-def test_the_deferred_revert_reverts_the_culprit_named_by_the_failure_not_the_flagged_items(
-    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch
-):
-    """#1649 AC6 — 寄せた危険フラグの取り消しも原因の判定に従う。本文に現れたファイルを変えた I2 だけを取り消す。"""
-    import sys
-
-    dropped: list = []
-
-    def fake_drop(path, state, ids, reason, on_conflict="stop"):
-        dropped.extend(ids)
-        spy["test_code"] = 0
-
-    patch_lib("drop", fake_drop)
-    patch_lib("push_with_retry_marker", lambda *a, **k: None)
-    patch_lib("_dirty_paths", lambda state, work: [])
-    culprit = sys.modules["refactor_lib.culprit"]
-    monkeypatch.setattr(culprit, "_changed_by", lambda work, item: {"I2": ["src/i2.py"]}.get(item["id"], [f"src/{item['id']}.py"]))
-    items = [_item("I1", 1), {**_item("I2", 2), "danger": []}, _item("I3", 3)]
-    state_path = _ci_whole_state(
-        tmp_path,
-        workflow_step=False,
-        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2999-01-01T00:30:00"},
-        # 時間以外の打ち切り（起動し直しても解けない結末）。時間で打ち切った単独の起動は取り消さない（#1932 原則 4）
-        final_gate={"fix_rounds": 1, "checks": [], "no_relaunch": True},
-        items=items,
-        whole_test={"ran": False, "flags": [], "status": None, "deferred": {"flags": ["D2"], "items": ["I1", "I3"]}},
-    )
-    env_tmp_dir(state_path)
-    _failed_ci(patch_lib, spy, [NEW_FAILURE])
-    classified = {"failed_tests": [NEW_FAILURE], "flaky": [], "preexisting": [], "caused": [NEW_FAILURE], "fallback_reason": None}
-    classified.update({"caused_output": {NEW_FAILURE: "E  src/i2.py:3: boom"}, "rerun_command": "pytest -q tests/test_new.py"})
-    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(classified))
-
-    with pytest.raises(SystemExit) as e:
-        cmd_gate.cmd_final_gate(_args())
-
-    assert e.value.code == 2
-    assert dropped == ["I2"], "危険フラグの I1・I3 ではなく、本文に現れたファイルを変えた I2"
-    gate = read_state(state_path)["final_gate"]
-    assert gate["culprit"]["culprits"] == ["I2"] and gate["culprit"]["basis"] == "path"
-
-
 def test_the_ci_gate_waits_without_pushing(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
     """I9 — 最終ゲートは公開の手順が push 済みの HEAD のチェックを待つだけで、待ちの前に push しない。"""
     pushed: list = []
@@ -770,20 +669,36 @@ def test_the_lint_limit_excludes_the_triage_time(cmd_gate, tmp_path, env_tmp_dir
     assert seen["started"] == 1100.0
 
 
-def test_a_standalone_run_past_the_deadline_with_the_planned_tree_skips_the_check(
-    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
-):
-    """#1932 I3 — 確かめを始められず、HEAD の木が起点の木と同じなら、単独の起動でも確かめを省いて通し、報告に理由が出る。"""
+def test_the_gate_checks_even_when_the_tree_is_the_planned_tree(patch_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """#2457 受け入れ条件 21・I11 — 木が起点と同じでも、確かめを省いて `passed` を返さない（確かめを走らせる）。"""
     patch_lib("push_with_retry_marker", lambda *a, **k: None)
-    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", plan={"base_sha": "BASE", "reserve": {"final_whole_test": 1.0}})
+    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00", plan={"base_sha": "HEADSHA"})
     env_tmp_dir(state_path)
 
     cmd_gate.cmd_final_gate(_args())
 
     assert "FINAL_GATE=passed" in capsys.readouterr().out
     gate = read_state(state_path)["final_gate"]
-    assert gate["status"] == "passed" and gate["check_skipped"]["base_identity"] is True
-    assert gate["check_skipped"]["gate_seconds"] == 60 and gate["check_skipped"]["left_seconds"] == 0
-    assert spy["tests"] == [], "確かめは走らせない"
-    refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
-    assert "確かめを省いた" in capsys.readouterr().out
+    assert spy["tests"], "確かめを走らせた" 
+    assert "check_skipped" not in gate and gate["checks"]
+
+
+def test_without_junit_the_ci_failure_material_reaches_the_final_fix(patch_lib, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch, capsys):
+    """#2457 受け入れ条件 13・決定 12 — CI の JUnit を読めなくても、落ちたテストの材料（ログの置き場・走らせ直すコマンド）が
+    最終ゲート修正の依頼に入る。"""
+    state_path = _ci_whole_state(tmp_path)
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs({**_run("tests", conclusion="failure"), "html_url": "https://github.com/acme/demo/actions/runs/7"})
+    patch_lib("ci_junit", lambda state, sha, checks, runs=None: [])
+    fallback = {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": "JUnit が無い"}
+    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(fallback))
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+
+    assert e.value.code == 2
+    gate = read_state(state_path)["final_gate"]
+    assert gate["status"] == "failing"
+    assert gate["material"]["log"] == "https://github.com/acme/demo/actions/runs/7"
+    assert gate["material"]["commands"]
+    assert "落ちたテストの材料" in gate["fix_request"] and "actions/runs/7" in gate["fix_request"]

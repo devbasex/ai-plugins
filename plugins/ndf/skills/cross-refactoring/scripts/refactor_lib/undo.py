@@ -274,6 +274,8 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
     try:
         targets = [i for i in item_ids if ledger.is_live(find_item(state, i, required=False))]
         targets = _close_commitless(state, targets, reason)
+        # 新しい項目から打ち消す（同じ行を順に書き換えた項目を古い方から戻すと衝突する）
+        targets.sort(key=lambda i: int(find_item(state, i).get("rank") or 0), reverse=True)
         before = git_out(work, ["rev-parse", "HEAD"]) or ""
         reverts: list[str] = []
         for item_id in targets:
@@ -289,6 +291,7 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
                 )
             reverts.extend(_new_commits(work, len(shas)))
             item["failure_reason"] = reason
+            item["reverted_by_commit"] = True
             ledger.mark_dropped(item, reason)
         for sha in reverts:
             ledger.note_orchestrator_commit(state, sha)
@@ -307,6 +310,34 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
         statefile.save(path, state)
         info(f"↩ 打ち消し: {', '.join(item_ids) or '—'} のコミット {len(reverts)} 件を git revert しました（{reason}）")
         return record
+    finally:
+        worktree.mark_rewritten()
+
+
+def revert_unattributed(path: pathlib.Path, state: dict[str, Any], shas: list[str], label: str) -> int:
+    """どの項目にも属さないコミット（`shas` は古い順）を新しい順に `git revert` で打ち消し、作ったコミットの数を返す。
+
+    `reset --hard` で外さない（取り込んだベースブランチの変更を消さない。#2457 決定 6）。衝突したら打ち消しの前の HEAD へ
+    戻して終了コード 4 で止まる。打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録し、差し戻しに残す。
+    """
+    work = work_dir(state)
+    before = git_out(work, ["rev-parse", "HEAD"]) or ""
+    ordered = list(reversed(shas))
+    worktree.wait_past_rewrite()
+    try:
+        conflict = revert_range(work, ordered)
+        if conflict:
+            reset_hard(work, before)
+            die(f"どの項目にも属さないコミット {conflict[:12]} を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
+        made = _new_commits(work, len(ordered))
+        for sha in made:
+            ledger.note_orchestrator_commit(state, sha)
+        state.setdefault("sendbacks", []).append({"kind": "unattributed", "commits": list(shas), "phase": label, "at": statefile.now()})
+        state.setdefault("drops", []).append(
+            {"at": statefile.now(), "mode": "revert", "reason": label, "round": int((state.get("readopt") or {}).get("round") or 1), "dropped": [], "reverted": len(made)}
+        )
+        statefile.save(path, state)
+        return len(made)
     finally:
         worktree.mark_rewritten()
 

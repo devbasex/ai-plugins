@@ -267,7 +267,8 @@ def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     for sha in (state.get("final_gate") or {}).get("fix_commits") or []:
         kept[full_commit(work, sha)] = FINAL_FIX
     for item in state.get("items") or []:
-        if is_live(item):
+        # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）
+        if is_live(item) or item.get("reverted_by_commit"):
             for sha in item_shas(item):
                 kept[full_commit(work, sha)] = ITEM
     return kept
