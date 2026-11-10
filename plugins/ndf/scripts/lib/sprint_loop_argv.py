@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -85,3 +86,16 @@ def redo_sprint_argv(root: str, rec: dict, lap: dict, issues: list[int], mode: s
 def stage_plan(index: list[dict], stage: str) -> str | None:
     """マニフェストのステージの先頭のプラン。ステージが無ければ None。"""
     return next((p for e in index if e.get("name") == stage for p in e.get("plans", [])), None)
+
+
+def sprint_guidance(rec: dict, chosen: list[int], lap_dir: str) -> str:
+    """選定の後の案内: 材料を集めて判定表の行を選び、ループの 1 回のディレクトリの judgments.json（判定の根拠のファイル）を
+    渡して loop sprint を打つ（#2923）。"""
+    judgments = Path(lap_dir) / "judgments.json"
+    q = shlex.quote
+    materials = SPRINT_STATE.parent / "mode-materials.py"
+    return (
+        f"python3 {q(str(materials))} --issue {' '.join(map(str, chosen))} --out {q(str(judgments))} で材料を集め、"
+        "課題ごとに判定表の行（row・mode・condition・files）を埋め、対象外は loop exclude で外し、"
+        f"python3 {q(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments {q(str(judgments))} を打つ"
+    )

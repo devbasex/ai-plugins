@@ -19,7 +19,7 @@ class JudgmentError(Exception):
         self.reasons = reasons
 
 
-def _check_one(x) -> tuple[dict | None, list[str]]:
+def _checked_judgment(x) -> tuple[dict | None, list[str]]:
     if not isinstance(x, dict) or not isinstance(x.get("number"), int) or isinstance(x.get("number"), bool):
         return None, [f"課題の番号（number）が整数でない根拠がある: {str(x)[:80]}"]
     n, bad = x["number"], []
@@ -46,7 +46,7 @@ def check_judgments(data, selected: list[int]) -> list[dict]:
     reasons: list[str] = []
     got: dict[int, dict] = {}
     for x in items:
-        j, bad = _check_one(x)
+        j, bad = _checked_judgment(x)
         reasons += bad
         if j is None:
             continue

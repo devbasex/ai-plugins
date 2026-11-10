@@ -86,7 +86,9 @@ def test_the_sprint_mode_is_the_highest_row_and_is_recorded_with_the_judgments(e
     lap = sl.current_lap(rec(env))
     assert lap["mode"] == "standard" and [x["number"] for x in lap["judgments"]] == [11, 12]
     assert lap["judgments"][0] == {"number": 11, "row": 5, "mode": "light", "condition": "条件", "files": ["src/11.py"]}
-    assert [(d["trigger"], d["issues"], d["from_mode"], d["mode"]) for d in lap["mode_decisions"]] == [("loop sprint", [11, 12], None, "standard")]
+    assert [(d["trigger"], d["issues"], d["from_mode"], d["mode"]) for d in lap["mode_decisions"]] == [
+        ("loop sprint", [11, 12], None, "standard")
+    ]
     assert lap["sprint_extra"] == ["--x"]
     new = new_sprints(env)[0]
     assert new[new.index("--mode") + 1] == "standard"

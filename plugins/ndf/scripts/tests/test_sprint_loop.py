@@ -1236,10 +1236,14 @@ def test_cli_sprint_reads_options_after_the_loop_name_and_passes_only_what_follo
 
     ap = argparse.ArgumentParser()
     sprint_loop_cli.add_loop_parser(ap.add_subparsers(dest="cmd"), lambda a: None)
-    head, extra = sprint_loop_cli.split_extra(["loop", "sprint", "l1", "--judgments", "j.json", "--mode", "standard", "--dev", "1.0.0-dev.1"])
+    head, extra = sprint_loop_cli.split_extra(
+        ["loop", "sprint", "l1", "--judgments", "j.json", "--mode", "standard", "--dev", "1.0.0-dev.1"]
+    )
     a = ap.parse_args(head)
     assert extra is None and (a.loop_name, a.judgments, a.mode, a.dev, a.extra) == ("l1", "j.json", "standard", "1.0.0-dev.1", [])
-    head, extra = sprint_loop_cli.split_extra(["loop", "sprint", "l1", "--judgments", "j.json", "--dev", "2.0.0-dev.1", "--", "--design", "11"])
+    head, extra = sprint_loop_cli.split_extra(
+        ["loop", "sprint", "l1", "--judgments", "j.json", "--dev", "2.0.0-dev.1", "--", "--design", "11"]
+    )
     a = ap.parse_args(head)
     assert (a.mode, a.dev, extra) == (None, "2.0.0-dev.1", ["--design", "11"])
     with pytest.raises(SystemExit) as e:  # 判定の根拠を渡さない呼び出しは引数の誤り（#2923 の受け入れ条件 1）

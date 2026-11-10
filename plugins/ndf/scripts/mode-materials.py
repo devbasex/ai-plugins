@@ -82,7 +82,7 @@ def tests_of(path: str, files: list[str], fileset: set[str]) -> list[str]:
     return [f for f in files if PurePosixPath(f).name.startswith(names) and f != path]
 
 
-def kind_of(body: str) -> str | None:
+def issue_kind(body: str) -> str | None:
     sec = md.section_named(body, "種類")
     if sec is None:
         return None
@@ -104,7 +104,7 @@ def public_interface(body: str) -> dict:
     return {"value": "記載なし", "cell": ""}
 
 
-def collect(number: int, body: str, files: list[str], designs: list[tuple[str, list[str]]]) -> dict:
+def issue_materials(number: int, body: str, files: list[str], designs: list[tuple[str, list[str]]]) -> dict:
     """1 つの課題の材料。`designs` は (設計文書のパス, その課題の「触るファイル」) の並び。"""
     fileset = set(files)
     seen: dict[str, dict] = {}
@@ -120,7 +120,7 @@ def collect(number: int, body: str, files: list[str], designs: list[tuple[str, l
             if path not in seen:
                 seen[path] = {"path": path, "exists": exists_in(path, files, fileset), "source": "設計", "section": doc}
     out = [{**f, "tests": tests_of(f["path"], files, fileset) if f["exists"] else []} for f in seen.values()]
-    return {"number": number, "kind": kind_of(body), "public_interface": public_interface(body), "files": out, "files_found": len(out)}
+    return {"number": number, "kind": issue_kind(body), "public_interface": public_interface(body), "files": out, "files_found": len(out)}
 
 
 def draft(items: list[dict]) -> dict:
@@ -150,7 +150,7 @@ def ls_files(root: str) -> list[str]:
     return p.stdout.splitlines()
 
 
-def issue_body(number: int, root: str) -> str:
+def fetch_issue_body(number: int, root: str) -> str:
     import gh_rest
 
     r = gh_rest.view_json("issue", number, "body", cwd=root)
@@ -189,17 +189,17 @@ def write_draft(path: str, items: list[dict]) -> None:
     jsonio.write_atomic(path, draft(items))
 
 
-def run(a) -> None:
+def cmd_materials(a) -> None:
     root = str(Path(a.root).resolve())
     files = ls_files(root)
     items, gaps = [], []
     for n in a.issue:
         try:
-            body = issue_body(n, root)
+            body = fetch_issue_body(n, root)
         except (OSError, ValueError) as e:
             gaps.append({"kind": "材料", "name": f"#{n}", "reason": f"課題の本文を読めない: {e}"})
             continue
-        items.append(collect(n, body, files, design_files(root, n)))
+        items.append(issue_materials(n, body, files, design_files(root, n)))
     metrics = {"issues": len(items), "files_found": {str(i["number"]): i["files_found"] for i in items}}
     if gaps:
         emit(result(TOOL, "stopped", f"{len(gaps)} 件の課題の本文を読めない", items, metrics, gaps=gaps), EXIT_VIOLATION)
@@ -211,17 +211,17 @@ def run(a) -> None:
     emit(result(TOOL, "ok", f"{len(items)} 件の課題の判定の材料を集めた{note}", items, metrics))
 
 
-def parser() -> argparse.ArgumentParser:
+def materials_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="課題の本文と設計文書から、モードの判定の材料を集める")
     ap.add_argument("--issue", type=int, nargs="+", required=True)
     ap.add_argument("--root", default=".")
     ap.add_argument("--out", help="判定の根拠のファイルの下書きを書く先")
-    ap.set_defaults(func=run)
+    ap.set_defaults(func=cmd_materials)
     return ap
 
 
 def main(argv: list[str] | None = None):
-    return main_with(parser(), lambda a: TOOL, argv)
+    return main_with(materials_parser(), lambda a: TOOL, argv)
 
 
 if __name__ == "__main__":

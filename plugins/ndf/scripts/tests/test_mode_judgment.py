@@ -132,7 +132,7 @@ cat plugins/ndf/scripts/lib/fenced.py
 
 
 def test_collect_reads_candidates_tests_kind_and_public_interface():
-    got = mm.collect(7, BODY, FILES, [("issues/issue-7-design.md", ["plugins/ndf/scripts/lib/md.py", "README.md"])])
+    got = mm.issue_materials(7, BODY, FILES, [("issues/issue-7-design.md", ["plugins/ndf/scripts/lib/md.py", "README.md"])])
     paths = {f["path"]: f for f in got["files"]}
     assert list(paths) == [
         "plugins/ndf/scripts/lib/sprint_loop.py",
@@ -158,17 +158,19 @@ def test_collect_reads_candidates_tests_kind_and_public_interface():
 
 
 def test_collect_shows_zero_candidates_without_guessing():
-    got = mm.collect(8, "## 種類\n\n機能\n\n触るのは sprint_loop のあたり。`--mode` を足す。\n", FILES, [])
+    got = mm.issue_materials(8, "## 種類\n\n機能\n\n触るのは sprint_loop のあたり。`--mode` を足す。\n", FILES, [])
     assert got["files"] == [] and got["files_found"] == 0
     assert got["public_interface"] == {"value": "記載なし", "cell": ""}
 
 
 def test_test_file_itself_is_its_own_test():
-    assert mm.tests_of("plugins/ndf/scripts/tests/test_sprint_loop.py", FILES, set(FILES)) == ["plugins/ndf/scripts/tests/test_sprint_loop.py"]
+    assert mm.tests_of("plugins/ndf/scripts/tests/test_sprint_loop.py", FILES, set(FILES)) == [
+        "plugins/ndf/scripts/tests/test_sprint_loop.py"
+    ]
 
 
 def test_draft_leaves_the_row_to_the_conductor_and_keeps_existing_files():
-    items = [mm.collect(7, BODY, FILES, [])]
+    items = [mm.issue_materials(7, BODY, FILES, [])]
     d = mm.draft(items)["issues"][0]
     assert (d["number"], d["row"], d["mode"], d["condition"]) == (7, None, None, "")
     assert "plugins/ndf/scripts/new-thing.py" not in d["files"] and "README.md" in d["files"]

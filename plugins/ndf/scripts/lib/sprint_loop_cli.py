@@ -174,7 +174,12 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("issue", type=int)
     s.add_argument("--reason", required=True)
     s = name(ls.add_parser("sprint"))
-    s.add_argument("--judgments", required=True, metavar="ファイル", help="判定の根拠のファイル（JSON。mode-materials.py --out の下書きを埋めたもの。#2923）")
+    s.add_argument(
+        "--judgments",
+        required=True,
+        metavar="ファイル",
+        help="判定の根拠のファイル（JSON。mode-materials.py --out の下書きを埋めたもの。#2923）",
+    )
     s.add_argument("--mode", help="照合するモード。省くと判定の根拠から決まるモードで組む")
     s.add_argument("--dev", help="明示の開発版。省くと流す直前に次に空いている版を決める")
     s.add_argument("--prod", help="明示の本番の版（--dev と一緒に渡す）")

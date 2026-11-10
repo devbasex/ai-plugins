@@ -6,7 +6,6 @@ import os
 import re
 import shlex
 import sys
-from pathlib import Path
 
 import clock
 import design_pr_merge
@@ -17,7 +16,6 @@ import project_mvv as pm
 import sprint_mvv
 
 from sprint_loop_record import (
-    SPRINT_STATE,
     UPKEEP,
     IN_PROGRESS,
     SELECTED,
@@ -54,7 +52,7 @@ from sprint_loop_gate import (
     refusal_order,
     select_cmd,
 )
-from sprint_loop_argv import design_issues
+from sprint_loop_argv import design_issues, sprint_guidance
 from sprint_loop_gate2 import pending_step
 from sprint_loop_exclusion import PENDING_REASON, PRODUCTION_REASON, exclusion_reason, prerequisite_reason  # noqa: F401
 
@@ -474,7 +472,7 @@ def run_selection(
         return _stop_without_issue(env, rec, before, got, rank, lap, hold)
     new = _open_lap(env, rec, before, got, rank, n, lap, marks)
     chosen = selected_issues(new)
-    nxt = sprint_guidance(rec, chosen, Path(new["dir"]) / "judgments.json")
+    nxt = sprint_guidance(rec, chosen, new["dir"])
     update_handoff(env, rec, f"ループの {n} 回目 の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"ループの {n} 回目 の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),
@@ -488,17 +486,6 @@ def run_selection(
         rank_digest=new["rank_digest"],
         hours=marks["hours"],
         **({"answer_hold": hold} if hold is not None else {}),
-    )
-
-
-def sprint_guidance(rec: dict, chosen: list[int], judgments: Path) -> str:
-    """選定の後の案内: 材料を集めて判定表の行を選び、判定の根拠のファイルを渡して loop sprint を打つ（#2923）。"""
-    q = shlex.quote
-    materials = SPRINT_STATE.parent / "mode-materials.py"
-    return (
-        f"python3 {q(str(materials))} --issue {' '.join(map(str, chosen))} --out {q(str(judgments))} で材料を集め、"
-        "課題ごとに判定表の行（row・mode・condition・files）を埋め、対象外は loop exclude で外し、"
-        f"python3 {q(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments {q(str(judgments))} を打つ"
     )
 
 

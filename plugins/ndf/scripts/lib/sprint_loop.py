@@ -233,7 +233,10 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
     if not lap:
         return None, nxt
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
-        return None, f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments <判定の根拠のファイル>（判定の根拠を確かめて組み直す）"
+        return (
+            None,
+            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments <判定の根拠のファイル>（判定の根拠を確かめて組み直す）",
+        )
     # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:

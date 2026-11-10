@@ -546,7 +546,9 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
     stages.append(close)
     if manifest is not None:
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
-        lap.update(manifest=str(manifest), dev_plan=stage_plan(index, "開発版"), prod_plan=stage_plan(index, "本番"), sprint_command=command)
+        lap.update(
+            manifest=str(manifest), dev_plan=stage_plan(index, "開発版"), prod_plan=stage_plan(index, "本番"), sprint_command=command
+        )
     if judgments is not None:
         lap["mode"] = mode
         lap.setdefault("mode_decisions", []).append(mode_decision(env, DESIGN_GATE, kept, current, mode))

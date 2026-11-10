@@ -30,7 +30,8 @@
   },
   "callers": [
     "plugins/ndf/scripts/lib/sprint_loop.py",
+    "plugins/ndf/scripts/lib/sprint_loop_argv.py",
     "plugins/ndf/scripts/lib/sprint_loop_cli.py",
-    "plugins/ndf/scripts/lib/sprint_loop_select.py"
+    "plugins/ndf/skills/development-workflow/references/loop.md"
   ]
 }
