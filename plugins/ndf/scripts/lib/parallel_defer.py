@@ -36,7 +36,7 @@ def control_path(main: Path, name: str) -> Path:
 
 def read_control(main: Path, name: str) -> dict:
     """控えを読む。無い・読めなければ空の控え（I5 の読めないとき）。"""
-    got = jsonio.read(control_path(main, name), missing={}, broken={}, want=dict)
+    got = jsonio.read(pp.plan_dir(main, name) / FILE, missing={}, broken={}, want=dict)
     out = {k: [str(x) for x in got.get(k) or [] if isinstance(x, str)] if isinstance(got.get(k), list) else [] for k in KEYS}
     return {"version": 1, **out, "since": got.get("since"), "until": got.get("until")}
 
@@ -56,7 +56,7 @@ def write_control(main: Path, name: str, d: dict, items: list[dict]) -> None:
     out = {**d, **{k: sorted(set(d.get(k) or []) & _live_ids(items)) for k in KEYS}}
     if not out["ids"]:
         out.update(since=None, until=None)
-    jsonio.write_atomic(control_path(main, name), out)
+    jsonio.write_atomic(pp.plan_dir(main, name) / FILE, out)
 
 
 def hours_of(main: Path, now: _dt.datetime | None = None) -> dict:
