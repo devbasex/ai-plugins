@@ -90,7 +90,7 @@ def _change(change: str, scope: str, lanes: list[str], count: int, limit: int) -
     return {"change": change, "scope": scope, "lanes": lanes, "count": count, "limit": limit, "reason": REASONS[change, scope]}
 
 
-def question_senders(q: dict) -> set:
+def _senders(q: dict) -> set:
     """依頼を送ったレーン（まとめた問いは送った各レーン）。"""
     return {q.get("lane"), *(m.get("lane") for m in q.get("merged") or [])}
 
@@ -105,7 +105,7 @@ def decide_hold(questions: list[dict], order: list[str], limits: Limits) -> Hold
             continue
         seen.add(key)
         if q.get("kind") in LANE_KINDS:
-            for lane in question_senders(q) & set(order):
+            for lane in _senders(q) & set(order):
                 by_lane[lane] = by_lane.get(lane, 0) + 1
     lanes = tuple(n for n in order if by_lane.get(n, 0) > limits.lane)
     return Hold(len(seen) > limits.plan, lanes, len(seen), by_lane)
@@ -379,7 +379,7 @@ class AnswerHold:
 
     def note_answered(self, q: dict) -> None:
         """答えた依頼の持ち主を止めたままの控えから外し、同じレーン・同じ設計 PR の古い依頼の id を控える。"""
-        self.left_stopped -= question_senders(q)
+        self.left_stopped -= _senders(q)
         if q.get("kind") != "gate1" or not q.get("pr"):
             return
         older = self.questions[: self.questions.index(q)]  # 依頼の `at` は秒までなので、新旧は届いた順で決める
