@@ -30,6 +30,7 @@ LOG_FILE = "answer-hold-log.jsonl"
 RESUME_DIR = "resume"
 LANE_KINDS = ("gate1", "ask")  # レーンが送った依頼。耐久ワークフローの問いとリリース承認ゲートはレーンの数へ入らない
 CONDITION = "answer_hold"  # 開発ループの止まる条件と `parallel.py wait` の action
+WAIT_STOPS = ("waiting_only", CONDITION)  # 答えを待って止まったループの止まる条件。答えを受けたら起こす
 SKIP_REASON = "答え待ちの停止のため流さなかった"  # プランの開始で流さなかった理由の頭
 REASONS = {
     ("on", "plan"): "答え待ちの依頼が計画の閾値を超えた",
@@ -322,7 +323,7 @@ def self_stop(main: Path, stop: dict) -> Optional[str]:
     """止まったレーンが自分のラッパーを止める 1 行。答え待ちの停止では、止まる前に再開の印を置く。"""
     if stop["condition"] == CONDITION and (lane := os.environ.get("NDF_RELAY_NAME")):
         place_mark(Path(stop["values"].get("home") or main), stop["values"]["plan"], lane, "boundary")
-    return pf.stop_self(main) if stop["condition"] in ("waiting_only", CONDITION) else None
+    return pf.stop_self(main) if stop["condition"] in WAIT_STOPS else None
 
 
 def plan_skip(lane: Optional[str]) -> Optional[str]:
@@ -356,10 +357,6 @@ class AnswerHold:
         self.superseded: set[str] = set()  # 答えた設計 PR の古い依頼の id。次の突き合わせで一覧から外す
         self.holds = 0  # 止めた回数
 
-    def wake_lanes(self) -> list[str]:
-        """起こす 1 行を添えるレーン。停止の範囲と、人が止めたままにしたレーンを除く。"""
-        return [n for n in self.wake if not self.hold.covers(n) and n not in self.left_stopped]
-
     def clear_revived(self, rows: dict) -> None:
         """起こしたレーンの最後に動いた時刻（`relay.py ls` の `at`）が、答えたときの観測の時刻より後へ進んだら `revive` から外す。
         答えを当ててすぐ止まるレーンは観測の間隔の中で stopped → running → stopped と動き、状態の変化として見えないためである。"""
@@ -373,7 +370,7 @@ class AnswerHold:
                 self.revive_at.pop(n, None)
 
     def keep_stopped(self, lane: Optional[str]) -> None:
-        """`park --clear` のメッセージを受ける。起こす 1 行と起こした後の待ちから外す。"""
+        """`park --clear` のメッセージを受ける。再起動の対象と起こした後の待ちから外す。"""
         if lane not in self.lanes:
             return
         self.left_stopped.add(lane)
@@ -394,13 +391,13 @@ class AnswerHold:
         """観測の後の突き合わせ。閾値の載らない古い観測の記録の再生では何もしない（記録の順を変えないため）。"""
         if seen.get("limits") is None:
             return
-        shown = self.wake_lanes()
+        shown = [] if self.launching else self.legacy_wake_lanes()
         self._retire_superseded()
         self._update_hold(Limits(**seen["limits"]))
         if self.ls_ok:
             self._reconcile({n: m for n, m in (seen.get("marks") or {}).items() if n in self.lanes})
-        if (now := self.wake_lanes()) and set(now) - set(shown):
-            self.pause("notice", lanes=[], attach=[])
+        if not self.launching and (now := self.legacy_wake_lanes()) and set(now) - set(shown):
+            self.pause("notice", lanes=[], attach=[])  # 古い記録: 起こす 1 行（wake）が増えたらオーガナイザーへ知らせる
 
     def restore_hold(self, limits: Optional[dict], written: Optional[dict] = None) -> None:
         """作り直しの直後に、戻した問いと閾値から停止の範囲を戻す。閾値が無い（台帳を読まない途中の記録・閾値を載せない

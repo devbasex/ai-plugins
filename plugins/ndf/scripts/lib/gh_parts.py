@@ -15,9 +15,11 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
 | `gh_graphql` | 入れ子の読み取りと REST に無い操作（GraphQL） |
 | `gh_checks` | チェックジョブの読み取りと畳み方 |
 | `gh_pr_info` | `pr-info` の組み立て |
+| `gh_pr_status` | `pr-status` の組み立て（照合と次の 1 手の判定。#2909） |
 | `gh_sections` | 本文の節の文字列の操作 |
 
     python3 gh_parts.py pr-info 812 --with checks,threads > ctx.json
+    python3 gh_parts.py pr-status 812 [--issue 659]...
     python3 gh_parts.py unresolved-threads 812
     python3 gh_parts.py body-section get --issue 659 --heading "## 進行"
     python3 gh_parts.py body-section replace --issue 659 --heading "## 進行" --content-file s.md
@@ -28,6 +30,7 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
 | 部品 | 返すもの |
 | --- | --- |
 | `pr-info` | メタ・本文・差分の統計・checks（名前ごとの最新の実行へ畳んだもの）・未解決のスレッド。差分とログはファイルへ書き、パスを返す |
+| `pr-status` | PR の状態・checks・未解決のスレッドの数・マージの状態・PR が指す Issue の開閉と、次の 1 手（`metrics.action` が `wait`・`fix`・`merge`・`escalate`、`next` に 1 文）。`merge` だけ 0（`ok`）、`fix` 20・`wait` 21・`escalate` 10（`gate`）、取得できない 2。判定の表は `gh_pr_status.py` |
 | `unresolved-threads` | 未解決のレビュースレッド（`thread_id` / `path` / `line`） |
 | `body-section` | 本文の指定の節の取得・置換と、末尾への 1 行の追記。置換と追記は課題ごとの錠の中で読みから書きまでを行う |
 | `body-lock` | 課題ごとの錠を取ったまま `--` の後のコマンドを走らせ、その終了コードで終わる。`--timeout` 秒で取れなければ走らせずに 2 |
@@ -62,6 +65,7 @@ import gh_checks  # noqa: E402
 import gh_fields  # noqa: E402
 import gh_graphql  # noqa: E402
 import gh_pr_info  # noqa: E402
+import gh_pr_status  # noqa: E402
 import gh_quota  # noqa: E402
 import gh_rest  # noqa: E402
 import gh_sections  # noqa: E402
@@ -277,6 +281,11 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--with", dest="with_parts", default="", help=f"カンマ区切り: {', '.join(gh_pr_info.WITH_PARTS)}")
     sp.add_argument("--out-dir", help="差分とログを書く場所")
 
+    sp = sub.add_parser("pr-status", help="PR・checks・未解決のスレッド・Issue を照合し、次の 1 手を返す（#2909）")
+    sp.add_argument("pr", type=int)
+    sp.add_argument("--repo")
+    sp.add_argument("--issue", type=int, action="append", default=[], help="PR が閉じる Issue に加えて開閉を見る Issue")
+
     sp = sub.add_parser("unresolved-threads", help="未解決のレビュースレッド")
     sp.add_argument("pr", type=int)
     sp.add_argument("--repo")
@@ -346,6 +355,7 @@ def _cmd_review_post(args: argparse.Namespace) -> tuple[dict, int]:
 
 _COMMANDS = {
     "pr-info": _cmd_pr_info,
+    "pr-status": lambda args: gh_pr_status.pr_status(args.pr, args.repo, args.issue),
     "unresolved-threads": _cmd_unresolved_threads,
     "body-section": _cmd_body_section,
     "review-post": _cmd_review_post,

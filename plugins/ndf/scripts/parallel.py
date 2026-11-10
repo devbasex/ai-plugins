@@ -7,7 +7,8 @@
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
 | `start <計画名>` | `run` をセッションから切り離して起動する（どの経路でも打ったセッションへオーガナイザーの印を付け直す。`metrics.organizer` が付けられたか。動いていれば今の pid を返す。失われた計画は作り直し、`metrics.rebuilt`・`metrics.restored` を返す。#2647） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3。失われた計画は 1 で `metrics.next` に `start` の 1 行 |
+| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 人へ問うもの（questions / answer_hold）か終わり（finished / stopped）まで待つ。上限なら 3。失われた計画は 1（error）で `metrics.next` に `start` の 1 行 |
+| `status <計画名>` | レーンごとに 1 行（状態・何回目のループか・今の課題・最後の知らせの時刻・費用・承認待ちのレーンへ入る 1 行）を返す。計画が無ければ 2 |
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
@@ -17,7 +18,7 @@
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
-| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
+| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（止まった持ち主の再起動は耐久ワークフローが打つ。`metrics.next` は一覧の失敗の問いで選んだ 1 行だけ。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 | `lane <計画名> add --from <JSON>` / `lane <計画名> set --lane <名> --from <JSON>` | 動いている計画へレーンを足す・レーンの入力を書き換える（上限を含む検査を通ったときだけ書き、耐久ワークフローへ知らせる。`lib/parallel_lane_cli.py`。#2733） |
 
@@ -176,6 +177,20 @@ def cmd_start(a) -> None:
 
 def cmd_wait(a) -> None:
     pcli.wait_plan(a, reply, main_of(), SELF)
+
+
+def cmd_status(a) -> None:
+    import parallel_status as pst
+
+    main = main_of()
+    try:
+        plan = pp.load_valid_plan(main, a.name)
+    except FileNotFoundError:
+        reply("stopped", f"並列の計画 {a.name} が無い", code=2)
+    except (OSError, ValueError) as exc:
+        reply("stopped", f"並列の計画 {a.name} を読めない: {exc}", code=2)
+    rows = pst.lane_rows(main, a.name, plan)
+    reply("ok", pst.status_summary(rows), rows)
 
 
 def cmd_present(a) -> None:
@@ -394,6 +409,8 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--after", type=int, default=0)
     w.add_argument("--changes-after", type=int, default=0, help="出した答え待ちの停止の変化の最後の番号")
     w.add_argument("--timeout", type=float, default=3600)
+    stt = sub.add_parser("status")
+    stt.add_argument("name")
     p = sub.add_parser("present")
     p.add_argument("name", nargs="?")
     p.add_argument("n", type=int)

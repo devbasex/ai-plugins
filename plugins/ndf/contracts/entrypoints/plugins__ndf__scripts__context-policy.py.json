@@ -27,7 +27,9 @@
         "options": [
           "--all",
           "--format",
+          "--from",
           "--since",
+          "--until",
           "--work"
         ],
         "positionals": []
@@ -60,7 +62,9 @@
   "writes": [
     "applied-json",
     "cost-estimates-json",
-    "decisions-jsonl"
+    "decisions-jsonl",
+    "handoff-mark-json",
+    "restore-json"
   ],
   "reads": [],
   "exit": {

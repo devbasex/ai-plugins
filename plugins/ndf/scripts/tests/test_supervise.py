@@ -981,6 +981,7 @@ REPORT_EMPTY = """## フェーズの報告
 - 提示物: 無し
 - 理由: 無し
 - 通ったステップ: {empty}
+- 走らなかったステップ: 無し
 - 件数: 無し
 - 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
@@ -1009,6 +1010,7 @@ REPORT_RICH = """## フェーズの報告
 - 提示物: /w/gate.md, /w/shown.md
 - 理由: 承認を待つ
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
+- 走らなかったステップ: 無し
 - 件数: impl: passed 3 / skipped 0; judge: 無し
 - 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
@@ -1032,6 +1034,20 @@ def test_write_report_text_of_a_state(tmp_path, fill, expected):
     text = st.write_report(plan, result, reason)
     assert text.replace(str(st.dir), "{dir}") == expected.replace("{empty}", "")
     assert (st.dir / "report.md").read_text() == text
+
+
+def test_write_report_lists_steps_a_due_check_skipped(tmp_path):
+    """起動の判定で飛んだ run のステップは、id と結果の要約が「走らなかったステップ」の行に載る（#2914 の I7・受け入れ条件 6）。"""
+    from supervise_lib.state import RunState
+
+    st = RunState(tmp_path / "state", {})
+    said = {"tool": "backlog-refinement", "status": "stopped", "summary": "振り返りと差分の棚卸しは起動しない（次は 2 回後）"}
+    st.cur = {"id": "deep-due", "type": "run", "exit": 3, "skipped": True, "text": "x\n" + json.dumps(said, ensure_ascii=False)}
+    st.record(1, "deep-due", "merge-gate", "run", lambda code: False)
+    st.cur = {"id": "merge", "type": "run", "exit": 0, "text": "merged"}
+    st.record(2, "merge", "close", "run", lambda code: False)
+    line = next(l for l in st.write_report({}, "完了", "x").splitlines() if l.startswith("- 走らなかったステップ: "))
+    assert line == "- 走らなかったステップ: deep-due（振り返りと差分の棚卸しは起動しない（次は 2 回後））"
 
 
 @pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])
@@ -1798,6 +1814,70 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
     assert lines[-1].startswith("🤖 Generated with")
     assert sum(pr_step.PR_FOOTER in l for l in lines) == 1
+
+
+FAKE_GH_PR_EDIT = """#!{py}
+import os, sys
+a = sys.argv[1:]
+path = os.environ["FAKE_GH_BODY"]
+open(path + ".calls", "a").write(" ".join(a[:2]) + "\\n")
+if a[:2] == ["pr", "list"]:
+    sys.exit(0)
+if a[:2] in (["pr", "create"], ["pr", "edit"]):
+    open(path, "w").write(a[a.index("--body") + 1])
+    if a[1] == "create":
+        print("https://github.com/o/r/pull/5")
+    sys.exit(0)
+if a[:2] == ["pr", "view"]:
+    print(open(path).read()); sys.exit(0)
+sys.exit(1)
+"""
+
+
+def test_pr_body_stages_include_steps_after_pr(tmp_path, monkeypatch):
+    """スプリントの検査のプランの形（PR を出した後に構造改善・実装レビュー・完了判定）で、本文の通した工程が
+    プランの通ったステップの工程と一致する（#2921）。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_PR_EDIT.format(py=PY))
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1],
+        "モード": "standard",
+        "作業場所": str(root),
+        "steps": [
+            {"id": "collect", "type": "run", "cmd": "true", "stage": "実装", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "refactor"},
+            {"id": "refactor", "type": "run", "cmd": "true", "stage": "構造改善", "next": "review"},
+            {"id": "review", "type": "run", "cmd": "true", "stage": "実装レビュー", "next": "test-all"},
+            {"id": "test-all", "type": "run", "cmd": "true", "stage": "完了判定", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "true", "next": "end"},
+        ],
+    }
+    text = engine.Engine(plan, tmp_path / "state").run()
+    assert "結果: 完了" in text, text
+    lines = [l for l in body.read_text().splitlines() if l.strip()]
+    assert lines[-2] == "モード: standard / 通した工程: 実装 → Pull Request → 構造改善 → 実装レビュー → 完了判定"
+    assert lines[-1].startswith("🤖 Generated with")
+
+
+def test_pr_body_stages_skip_gh_when_nothing_new(tmp_path, monkeypatch):
+    """PR を出した後に新しい工程が無ければ、プランの終わりに PR の本文を読みに行かない（#2921）。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_PR_EDIT.format(py=PY))
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1],
+        "モード": "standard",
+        "作業場所": str(root),
+        "steps": [
+            {"id": "collect", "type": "run", "cmd": "true", "stage": "実装", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "true", "next": "end"},
+        ],
+    }
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    assert "pr view" not in Path(str(body) + ".calls").read_text().splitlines()
+    assert [l for l in body.read_text().splitlines() if l.startswith("モード: ")] == ["モード: standard / 通した工程: 実装 → Pull Request"]
 
 
 def advance_develop(root):

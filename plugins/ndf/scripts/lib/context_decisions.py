@@ -9,9 +9,11 @@
 | `estimates/<owner>__<repo>.cost-estimates.json` | 費用の見込み（`calibrate` が書く） | 上書き |
 | `sessions/<sid>.window.json` | statusline が書く窓の大きさとモデル | 7 日 |
 | `sessions/<sid>.applied.json` | `publish` と hook が書く適用値 | 7 日 |
+| `sessions/<sid>.restore.json` | hook が持つセッションの復元の状態（待ち・済み・対象外。無ければ未判定。#2908） | 7 日 |
+| `sessions/<sid>.handoff.json` | hook がそのセッションで「引継ぎ開始」を書いた印（#2908） | 7 日 |
 
 較正（`calibrate`）と、`context-policy.py report` の集計は会話の記録の全体を読む。hook はここの関数のうち、記録の追記と
-小さな JSON の読み書きだけを使う（決定 6）。
+小さな JSON の読み書きと、1 セッションに 1 回だけ会話の記録の先頭（最初の利用者の発言まで）を読む関数だけを使う（決定 6）。
 """
 
 from __future__ import annotations
@@ -86,6 +88,34 @@ def work_id(refs: str) -> str:
     """作業の識別子（課題番号の昇順・空白区切り。決定 7）。refs は `#829 #830` の形の並び。"""
     nums = sorted({int(r.lstrip("#")) for r in refs.split() if r.lstrip("#").isdigit()})
     return " ".join(f"#{n}" for n in nums)
+
+
+ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")
+NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
+
+
+def issue_refs(text: str) -> str:
+    """課題番号を `#829 #830` の形で並べる。日付・版数・小数は先に取り除く。範囲（#829-830）は両端を残す。"""
+    refs = []
+    for line in text.split("\n"):
+        refs += [f"#{m.group(1)}" for m in ISSUE.finditer(NOISE.sub("", line))]
+    return " ".join(refs)
+
+
+def recorded_work(text: str, sid: str | None) -> str:
+    """記録の CLI へ渡した作業の識別子を、集計が結び付けられる形にする（I6・#2908 の決定 7）。
+
+    課題番号を含めば昇順の `#<番号>` の並び。含まずセッションの識別子があれば空（読むときに `fill_work` が
+    同じセッションの前の行の値で補う）。どちらでもなければ渡した文字のまま（拒むと印が欠けるため拒まない）。"""
+    refs = work_id(issue_refs(text))
+    if refs:
+        return refs
+    return "" if sid else text
+
+
+def record_session(runtime: str) -> str | None:
+    """記録の CLI と sprint-state.py が書く行のセッションの識別子（Claude Code だけ）。"""
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID") or None) if runtime == "claude" else None
 
 
 def stage_of(key: str) -> str:
@@ -197,6 +227,11 @@ def fill_work(rows: list[dict]) -> list[dict]:
     return out
 
 
+def of_work(rows: list[dict], work: str) -> list[dict]:
+    """作業の識別子が work の行（識別子の無い行は空の識別子として比べる）。"""
+    return [r for r in rows if (r.get("work") or "") == work]
+
+
 def last_denial(rows: list[dict], work: str, within: float = 1800, now: float | None = None) -> dict | None:
     """同じ作業の識別子で、直前 `within` 秒の内にある最後の拒否の行（`sprint-state.py next` が理由を引き継ぐ）。"""
     now = time.time() if now is None else now
@@ -285,7 +320,7 @@ def _user_text(e: dict) -> str | None:
     return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
 
 
-def _json_lines(path) -> Iterator[dict] | None:
+def json_lines(path) -> Iterator[dict] | None:
     """JSONL の辞書の行を 1 行ずつ返す（全行を辞書のまま保持しない）。読めなければ None。壊れた行と辞書でない行は飛ばす。"""
     try:
         lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
@@ -307,7 +342,7 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
     時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
     呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
     seen = set() if seen is None else seen
-    entries = _json_lines(path)
+    entries = json_lines(path)
     if entries is None:
         return [], None, False
     calls, here = [], {}  # here はこのファイルで数えた message.id → calls の位置
@@ -333,7 +368,61 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
         else:
             here[mid] = len(calls)
             calls.append(call)
-    return calls, compacts, bool(first_user and HANDOFF_PATH.search(first_user))
+    return calls, compacts, _points_to_handoff(first_user)
+
+
+def _points_to_handoff(first_user: str | None) -> bool:
+    """最初の利用者の発言が引継ぎ文書を指すか（集計と hook で同じ判定）。"""
+    return bool(first_user and HANDOFF_PATH.search(first_user))
+
+
+def started_by_handoff(path) -> bool | None:
+    """会話の記録の先頭から最初の利用者の発言だけを読み、引継ぎ文書を指すかを返す（hook の「復元完了」。#2908）。
+    `read_calls` と同じ発言の読み方で、見つけた時点で読むのをやめる。読めない・発言がまだ無ければ None。"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                e = _loads_or_none(line)
+                if not isinstance(e, dict) or _is_auto_compact(e):
+                    continue
+                text = _user_text(e)
+                if text is not None:
+                    return _points_to_handoff(text)
+    except OSError:
+        return None
+    return None
+
+
+# --- セッションの復元の状態（#2908）------------------------------------------------------------------
+
+RESTORE_PENDING, RESTORE_DONE, RESTORE_NA = "待ち", "済み", "対象外"  # ファイルが無ければ未判定
+
+
+def read_restore_state(sid: str, env: Mapping | None = None) -> str | None:
+    """`sessions/<sid>.restore.json` の状態。無い・形が違えば None（未判定）。"""
+    s = jsonio.read(session_file(sid, "restore", env), missing={}, broken={}, want=dict).get("state")
+    return s if s in (RESTORE_PENDING, RESTORE_DONE, RESTORE_NA) else None
+
+
+def write_restore_state(sid: str, state: str, env: Mapping | None = None) -> bool:
+    try:
+        jsonio.write_atomic(context_state_dir(env) / "sessions" / f"{sid}.restore.json", {"state": state}, indent=None)
+    except OSError:
+        return False
+    return True
+
+
+def handoff_marked(sid: str, env: Mapping | None = None) -> bool:
+    """このセッションで hook が「引継ぎ開始」を書いたか（`sessions/<sid>.handoff.json`）。"""
+    return session_file(sid, "handoff", env).is_file()
+
+
+def set_handoff_marked(sid: str, env: Mapping | None = None) -> bool:
+    try:
+        jsonio.write_atomic(context_state_dir(env) / "sessions" / f"{sid}.handoff.json", {"at": now_utc()}, indent=None)
+    except OSError:
+        return False
+    return True
 
 
 # --- セッションと印 ---------------------------------------------------------------------------------
@@ -367,8 +456,7 @@ def attach_marks(marks: list[dict], spans: dict[str, tuple[float, float]]) -> di
 
 def record_row(runtime: str, source: str, work: str, applied, context: int | None = None, event: str | None = None, reason=None) -> dict:
     """CLI と sprint-state.py が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。"""
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") if runtime == "claude" else None
-    row = boundary_row(runtime=runtime, source=source, session_id=sid or None, work=work, context=context, applied=applied)
+    row = boundary_row(runtime=runtime, source=source, session_id=record_session(runtime), work=work, context=context, applied=applied)
     return row | ({"event": event} if event else {"stage": "cut", "verdict": cp.RESTART, "reason": reason})
 
 

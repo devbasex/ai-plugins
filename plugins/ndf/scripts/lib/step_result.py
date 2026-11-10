@@ -11,6 +11,8 @@
 `ok` は欠け（`gaps`）が無いときだけ返せ、欠けが残るなら `stopped` と終了コード 6 で返す（#2227）。
 `items[].result` の語彙はスクリプトごとに持ってよい。承認ゲートの提示物は `approval_present()` が書き出す。
 シェルのスクリプトは `python3 step_result.py emit ...`（`step-result.sh` の `sr_emit`）で同じ形を出す。
+ほかの手順の結果から値を読むときは `... | python3 step_result.py pick --field <JSON Pointer> [--raw]` を使い、
+`python -c` で読み直さない（#2909。取り出しの規則は `json_pick.py`）。
 
 後半は、手順のスクリプトが共通に使う小さな関数（git / gh の呼び出し、版の形、plugin の置き場所）。
 標準ライブラリだけで書く。
@@ -448,6 +450,9 @@ def cli_parser() -> argparse.ArgumentParser:
     e.add_argument("--next", default=None)
     e.add_argument("--presentation-path", default=None)
     e.add_argument("--out", default=None, help="同じ 1 行をこのファイルへも書く（worker の作業の結果ファイル）")
+    p = sub.add_parser("pick", help="標準入力の最後の行の結果 JSON から JSON Pointer の値を取り出す（json_pick.py。#2909）")
+    p.add_argument("--field", action="append", required=True, help="JSON Pointer（結果 JSON を根にする。繰り返し）")
+    p.add_argument("--raw", action="store_true", help="--field 1 つの値だけを 1 行で出す（文字列は引用符なし）")
     return ap
 
 
@@ -462,6 +467,10 @@ def _write_out(path: str, obj: dict, code: int | None) -> None:
 
 def main(argv=None) -> "NoReturn":  # noqa: F821
     a = cli_parser().parse_args(argv)  # 引数の誤りは argparse が 2 で終える
+    if a.cmd == "pick":
+        import json_pick
+
+        json_pick.cli_pick(a)
     obj = _cli_result(a)
     if a.out:
         _write_out(a.out, obj, a.code)

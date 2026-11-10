@@ -8,7 +8,7 @@
     python3 upkeep.py report [--depth diff|review|overhaul [--run R] [--order prune,rank,...]]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
-    python3 upkeep.py depth due|record|compare ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
+    python3 upkeep.py depth due|scope|record|compare ... / causes record ...（棚卸しの深さ。upkeep_depth.py の冒頭）
     python3 upkeep.py owner claim|touch|release|status ...（見直しの持ち主。upkeep_owner.py の冒頭）
     python3 upkeep.py research plan|run ...（ニーズとシーズの調査。upkeep_research.py の冒頭）
     python3 upkeep.py overhaul snapshot|count|measure ...（大整理。upkeep_overhaul.py の冒頭）
@@ -383,6 +383,17 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
     return status, code, summary, metrics, pres, nxt
 
 
+def repo_mismatch(repo: str, recorded: str | None, plan: dict) -> str | None:
+    """書き込み先と plan の repo を記録のリポジトリと照合し、書かない理由を返す（合えば None）。"""
+    if recorded is None:
+        return f"書き込み先 {repo} の記録（candidates.json）が無い。candidates を打ってから plan を作る"
+    if repo != recorded:
+        return f"書き込み先 {repo} は記録のリポジトリ {recorded} と違う"
+    if plan.get("repo") not in (None, recorded):
+        return f"plan の repo {plan['repo']} は記録のリポジトリ {recorded} と違う"
+    return None
+
+
 def cmd_apply(a):
     root = git_root(a.root)
     plan, wrong = A.precheck_depth(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
@@ -391,14 +402,7 @@ def cmd_apply(a):
     # 記録のリポジトリ（保存した candidates.json の metrics.repo）の外へ書かない（#842 の決定 7）。
     # 書き込み先と plan の repo の双方を記録と照合する（同じ呼び出しの --repo どうしを比べると、両方を別のリポジトリにすれば通る）
     recorded = ((_read_state(sd / "candidates.json") or {}).get("metrics") or {}).get("repo")
-    why = None
-    if recorded is None:
-        why = f"書き込み先 {repo} の記録（candidates.json）が無い。candidates を打ってから plan を作る"
-    elif repo != recorded:
-        why = f"書き込み先 {repo} は記録のリポジトリ {recorded} と違う"
-    elif plan.get("repo") not in (None, recorded):
-        why = f"plan の repo {plan['repo']} は記録のリポジトリ {recorded} と違う"
-    if why:
+    if why := repo_mismatch(repo, recorded, plan):
         emit(
             result(TOOL, "stopped", f"{why}。1 件も書かない", [{"kind": "plan", "name": a.plan, "result": "stopped", "reason": why}], {}),
             EXIT_PRECONDITION,
@@ -488,7 +492,7 @@ def build_parser():
     r.add_argument("--order", default=None, help="通した手順の並び（prune,rank,... 省くと null）")
     r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
     RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
-    D.add_depth_parsers(sub, common, _state_dir)  # 深さ・持ち主・調査・大整理・戻し（#2315）
+    D.add_depth_parsers(sub, common, _state_dir, _numbers)  # 深さ・持ち主・調査・大整理・戻し（#2315）
     for add in (O.add_owner_parsers, R.add_research_parsers, V.add_overhaul_parsers, A.add_revert_parser):
         add(sub, common)
     return ap

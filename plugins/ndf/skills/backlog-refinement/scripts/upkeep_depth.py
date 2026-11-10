@@ -1,6 +1,8 @@
 """upkeep_depth.py: 棚卸しの深さの設定・深さの記録・起動の判定・型の記録（#2315）。
 
     upkeep.py depth due review|overhaul [--loop L] [--lap N] [--no-issue] [--manual] [--open N]
+    upkeep.py depth due diff [--loop L --lap N] --sprint S [--issues 1,2] [--manual]
+    upkeep.py depth scope --sprint S
     upkeep.py depth record --depth diff|review|overhaul [--event ran|not_due|skipped] [--trigger a,b] [--run R]
                            [--report <統一 JSON レポート>] [--loop L] [--lap N] [--sprint S] [--cost USD] [--seconds S]
                            [--progress <プランの進行の記録> [--step <ステップの id>]]
@@ -11,6 +13,10 @@
 `depth due` は起動するとき 0、起動しないとき 3（プランの実行条件の `skip_code`）を返し、起動しない判定を
 `not_due` の行で、起動する判定を `due` の行で残す。記録が読めないときも 3 で返し、理由（`unreadable`）を行に残す。
 頻度・閾値・上限は `.ndf/backlog.json` の `depths` で上書きでき、無ければ `DEFAULTS` を使う。
+`depth due diff` は振り返りと差分の棚卸しの起動の判定（#2914 の決定 3）。開発ループの外（`--loop` が無い）は毎回起動し、
+開発ループでは見送った回（範囲に入っていない `not_due` の行）+ 1 が `depths.diff.every` 以上で起動する。起動するときは
+振り返りの範囲（見送った回と今の回・課題の番号・範囲の始まりの時刻）を `due` の行の `values.scope` に置き、
+`depth scope --sprint S` がその範囲を返す（worker は深さの記録を直接読まない）。
 `depth record --progress` はプランの進行の記録（supervise の `progress.jsonl`）の `--step`（既定 `refine`）の最後の
 `kind: step` の行から秒・ドル・言語モデルの名前（`values.models`）を写す。読めなければ空のまま行を書く。`--seconds`・
 `--cost` を渡せばその値を優先する。
@@ -34,14 +40,16 @@ import project_decl
 import repo as repo_lib
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, git, git_root, result
 import upkeep_rank_cmd as RC
+from upkeep_depth_diff import _diff_rows, diff_due
 
 TOOL = "backlog-refinement"
 DEPTHS = ("diff", "review", "overhaul")
 EVENTS = ("ran", "not_due", "skipped")
-TRIGGERS = ("count", "open_growth", "carry", "no_issue", "manual", "created_over_closed", "open_rising", "cause_share")
+TRIGGERS = ("count", "open_growth", "carry", "no_issue", "manual", "created_over_closed", "open_rising", "cause_share", "no_loop")
 
 # 既定の頻度・閾値・上限（設計の「棚卸しの設定」）。値は最初の 3 回の見直しの実測で見直す（決定 13）
 DEFAULTS = {
+    "diff": {"every": 3},  # 開発ループで振り返りと差分の棚卸しを走らせる間隔（ループの 1 回の数。#2914 の決定 2）
     "review": {"every": 3, "open_growth": 0.3, "carry_factor": 10, "issue_limit": 5, "usd": 6, "seconds": 1800},
     "overhaul": {"every": 12, "streak": 3, "cause_share": 0.3},
     "research": {"item_usd": 1, "item_seconds": 900, "grace": 300},
@@ -229,13 +237,29 @@ def _open_now(root, a) -> tuple[int | None, set | None]:
     return len(issues), {i["number"] for i in issues}
 
 
+def _cmd_due_diff(a, d: Path, base: dict, cfg: dict, rows: list[dict]):
+    """振り返りと差分の棚卸しの起動の判定。起動しないときは要約に次に走る時点を載せる（I7）。"""
+    trig, values = diff_due(rows, cfg, {k: base[k] for k in ("loop", "lap", "sprint", "issues")}, manual=a.manual)
+    append_depth_row(d / "depths.jsonl", {**base, "event": "due" if trig else "not_due", "trigger": trig, "values": values})
+    m = {"trigger": trig, "values": values}
+    if not trig:
+        what = f"前に走らせてから {values['count']} 回目。次は {values['next_in']} 回後"
+        emit(result(TOOL, "stopped", f"振り返りと差分の棚卸しは起動しない（{what}）", [], m), EXIT_PRECONDITION)
+    laps = len(values["scope"]["laps"])
+    emit(result(TOOL, "ok", f"振り返りと差分の棚卸しを起動する（{'・'.join(trig)}。範囲はループの 1 回 {laps} 回分）", [], m))
+
+
 def cmd_due(a):
     root = git_root(a.root)
     d = backlog_dir(root)
     base = {"at": clock.now_iso("utc"), "depth": a.depth, **_scope(a), "run": None}
+    if a.depth == "diff":
+        base["issues"] = a.issues or []
     try:
         cfg = settings(root)
         rows = read_depth_rows(d / "depths.jsonl")
+        if a.depth == "diff":
+            _cmd_due_diff(a, d, base, cfg, rows)
         causes = read_depth_rows(d / "causes.jsonl") if a.depth == "overhaul" else []
         types = cause_types(root) if a.depth == "overhaul" else []
         open_now, open_numbers = _open_now(root, a)
@@ -262,6 +286,18 @@ def cmd_due(a):
     # 起動する判定も行に残す（`report --depth` と見直しの手順が、起動した条件をここから読む）
     append_depth_row(d / "depths.jsonl", {**base, "event": "due", "trigger": trig, "values": values})
     emit(result(TOOL, "ok", f"{a.depth} を起動する（{'・'.join(trig)}）", [], {"trigger": trig, "values": values}))
+
+
+def cmd_scope(a):
+    """スプリントの振り返りの範囲（最後の diff の `due` の行の `values.scope`）。無ければ 3。"""
+    rows = read_depth_rows(backlog_dir(git_root(a.root)) / "depths.jsonl")
+    got = next((r for _, r in reversed(_diff_rows(rows, "due")) if r.get("sprint") == a.sprint), None)
+    scope = ((got or {}).get("values") or {}).get("scope")
+    if not scope:
+        emit(result(TOOL, "stopped", f"スプリント {a.sprint} の振り返りの範囲が無い", [], {"sprint": a.sprint}), EXIT_PRECONDITION)
+    emit(
+        result(TOOL, "ok", f"振り返りの範囲: ループの 1 回 {len(scope['laps'])} 回分・課題 {len(scope['issues'])} 件", scope["laps"], scope)
+    )
 
 
 def _report_metrics(path: str | None) -> dict:
@@ -416,16 +452,21 @@ def cmd_causes(a):
     emit(result(TOOL, "ok", f"型の記録へ {len(rows)} 行を足した", [], {"path": str(d / "causes.jsonl"), "rows": len(rows)}))
 
 
-def add_depth_parsers(sub, common, state_dir) -> None:
+def add_depth_parsers(sub, common, state_dir, numbers) -> None:
     dp = sub.add_parser("depth").add_subparsers(dest="depth_cmd", required=True)
     du = dp.add_parser("due", parents=[common])
-    du.add_argument("depth", choices=("review", "overhaul"))
+    du.add_argument("depth", choices=DEPTHS)
     du.add_argument("--loop", default=None)
     du.add_argument("--lap", type=int, default=None)
+    du.add_argument("--sprint", default=None, help="diff: 今のスプリントの名前（振り返りの範囲に置く）")
+    du.add_argument("--issues", type=numbers, default=None, help="diff: 今の回の課題の番号（カンマ区切り）")
     du.add_argument("--no-issue", action="store_true", help="選べる課題が尽きた（loop select の review_first）")
     du.add_argument("--manual", action="store_true", help="人が呼んだ（ループの外の単独の起動）")
     du.add_argument("--open", type=int, default=None, help="open の件数（省くと GitHub から数える）")
     du.set_defaults(func=cmd_due)
+    ds = dp.add_parser("scope", parents=[common])
+    ds.add_argument("--sprint", required=True)
+    ds.set_defaults(func=cmd_scope)
     dr = dp.add_parser("record", parents=[common])
     dr.add_argument("--depth", choices=DEPTHS, required=True)
     dr.add_argument("--event", choices=EVENTS, default="ran")

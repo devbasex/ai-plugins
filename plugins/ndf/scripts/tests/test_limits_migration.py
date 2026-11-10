@@ -74,6 +74,7 @@ BEFORE = {
     "monitor-types.result-age-grace": {"seconds": 30},
     "monitor-types.thread-join": {"seconds": 1},
     "notify.slack": {"seconds": 10},
+    "parallel-launch.up": {"seconds": 120, "interval": 5},
     "parallel-repo.stall": {"seconds": 3600},
     "procs.stop-tree": {"seconds": 3, "interval": 0.1},
     "refresh.http": {"seconds": 10},

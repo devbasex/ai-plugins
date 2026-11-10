@@ -5,32 +5,25 @@
                               [--material <ファイル>...] [--pr N...] [--mode M]
                               [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>] [--advise]
 
-`pace: fast` と `pace: auto` の設計承認ゲートとリリース承認ゲートを、利用者が承認した MVV への事前の
-承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに承認ゲートへ戻す。
+`pace: fast` と `pace: auto` の設計承認ゲートとリリース承認ゲートを、利用者が承認した MVV への事前の承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに承認ゲートへ戻す。
 
 1. プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`。#1366）が 未承認・承認と一致しない・壊れている のどれでもない
-2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（承認ゲート `MVV` の `sha256`）があり、今の MVV のファイルの
-   ハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` がすべて一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV と
-   状態に残したその参照（`project_mvv.sha256`）が一致すればよい（`lib/project_mvv.approval_refusal`）
+2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（承認ゲート `MVV` の `sha256`）があり、今の MVV のファイルのハッシュ・状態の
+   `mvv.sha256`・承認の記録の `sha256` がすべて一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV と状態に残したその参照（`project_mvv.sha256`）が一致すればよい（`lib/project_mvv.approval_refusal`）
 3. `--mode` が `operation` でも `documentation` でもない
 4. `--pr` の変更したファイルが、進め方の宣言（`.ndf/pace.json`）の `boundary_paths` に当たらない
 5. `--pr` がプロジェクト MVV の宣言（`.ndf/mvv.md`・`.ndf/mvv.json`）を変えない（共通原則の C7。宣言では外せない固定の検査）
 
-通れば、MVV の節（NDF の共通原則の本文全体 → プロジェクト MVV → スプリント MVV → 判断の決まり。`lib/project_mvv.block`）と
-材料（提示物のファイル・PR の題名と本文と変更したファイル。`--gate design` では PR が変更した `issues/` の設計文書の
-PR の先頭のコミットの中身も足す）を最小構成の claude -p に渡し、
-「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
+通れば、MVV の節（NDF の共通原則の本文全体 → プロジェクト MVV → スプリント MVV → 判断の決まり。`lib/project_mvv.block`）と材料（提示物のファイル・PR の題名と本文と
+変更したファイル。`--gate design` では PR が変更した `issues/` の設計文書の PR の先頭のコミットの中身も足す）を最小構成の claude -p に渡し、「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
 
-- 従う（越えない線なし）: `sprint-state.py gate` で承認ゲートの記録（`by: mvv`・判定・理由・ログ）を書き、
-  status ok（終了コード 0）。記録を書けなければ承認ゲートへ戻す。`--gate release` では判定に読んだ承認資料（`--material`）へ
-  承認の記録（`by: mvv`）も書く（`lib/approved_commit.py` の record_all。#815）。`--advise` では書かない
-- それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
-  利用者の承認を求める
+- 従う（越えない線なし）: `sprint-state.py gate` で承認ゲートの記録（`by: mvv`・判定・理由・ログ）を書き、status ok（終了コード 0）。記録を書けなければ承認ゲートへ戻す。
+  `--gate release` では判定に読んだ承認資料（`--material`）へ承認の記録（`by: mvv`）も書く（`lib/approved_commit.py` の record_all。#815）。`--advise` では書かない
+- それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。利用者の承認を求める
 
 判定は毎回 --log（既定 <状態の根>/mvv-gate.jsonl。根は lib/state_home.py）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
 スプリントの状態の進め方 `pace`・判定に渡したスプリント MVV の `sprint_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
-結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
-コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
+結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request のコメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
 
 `--advise`（助言の MVV 判定。`pace: normal` の設計承認ゲート・リリース承認ゲートの前。#1400）: 判定の規則と機械のチェックは同じだが、
 承認ゲートの記録（`by: mvv`）を書かず、どの判定でも status ok（終了コード 0）で返す。承認するのは利用者である。
@@ -50,6 +43,7 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -86,8 +80,15 @@ MVV に従う変更なら承認ゲートでの個別の承認を省いてよい�
 - どれかに反するなら not_follow。材料から読み取れず決められないなら unknown（迷ったら unknown）
 - デプロイの前に取れない実測（デプロイした後の効果）は判定の対象にしない。デプロイの後の測定へ回るものとして扱い、
   それが無いことだけを理由に unknown にしない
-- 必ず人の承認が要る操作（共通原則の C の番号・プロジェクト MVV の P の番号・スプリント MVV の越えない線）に当たる変更を
-  含むなら、boundary にその中身を書く（boundary が空でなければ承認ゲートは省かれない）
+- 設計者（AI）が判断（作り方・範囲の取り方・既定値・扱いの選択）を決め、決定の記録に結論と理由を書いているなら、
+  その判断を人が見ていないことだけを理由に unknown にしない
+- 要求の「起票者の推定」の行に扱い（受け入れ条件・前提・含まない・採らない）が書かれていれば、設計者が決めた判断として読む。
+  推定であることだけを理由に unknown にしない
+- 設計文書が「人へ残す判断」にレッドラインの番号を挙げている、または材料から読み取れる変更が必ず人の承認が要る操作
+  （共通原則の C の番号・プロジェクト MVV の P の番号・スプリント MVV の越えない線）に当たるなら、boundary にその中身を書く
+  （設計文書が名指していなくても書く。boundary が空でなければ承認ゲートは省かれない）
+- 設計文書が番号を挙げずに判断を人へ残しているときは、設計の推奨が書かれていればそれを結論として読む。
+  推奨も無く材料から決められないときだけ unknown
 - basis に根拠にした項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2 など）を並べる
 
 出力は次の JSON の 1 つだけ。前後に文を書かない。
@@ -340,38 +341,55 @@ def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
 
 
 def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple[str | None, list[str]]:
-    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
+    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。`CHECKS` を順に当て、スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
     state = json.loads(Path(a.sprint).read_text(encoding="utf-8"))
-    if project.status in ("unapproved", "mismatch", "unreadable"):
-        raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
-    if why := pm.approval_refusal(state, root, project, advise=a.advise):
-        raise Back(why)
-    sprint = sprint_text(state)
-    if sprint is not None:
-        record["sprint_mvv"] = {"sha256": state["mvv"]["sha256"]}
-    if a.mode in EXCLUDED_MODES:
-        raise Back(f"モード {a.mode} は承認ゲートを省かない")
-    infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
-    if changed := decl_changes(infos):
-        raise Back("プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed))
-    if hits := boundary_hits(root, infos, a.advise):
-        raise Back("越えない線のパスに当たる: " + " / ".join(hits))
-    materials = []
-    for m in a.material:
+    c = SimpleNamespace(a=a, root=root, project=project, record=record, state=state, sprint=None, infos={}, materials=[])
+    for check in CHECKS:
+        if why := check(c):
+            raise Back(why)
+    return c.sprint, c.materials
+
+
+def _read_sprint(c: SimpleNamespace) -> None:
+    c.sprint = sprint_text(c.state)
+    if c.sprint is not None:
+        c.record["sprint_mvv"] = {"sha256": c.state["mvv"]["sha256"]}
+
+
+def _collect_materials(c: SimpleNamespace) -> str | None:
+    for m in c.a.material:
         if not Path(m).is_file():
-            raise Back(f"材料のファイルが無い: {m}")
-        materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
-        if a.gate == "release" and (sha := ac.material_sha_or_none(m)):  # 従うときに承認の記録を書く（#815 の I10）
-            vars(a).setdefault("approved", {})[m] = sha
-    materials += [pr_material(n, info) for n, info in infos.items()]
-    if a.gate == "design":
-        for n, info in infos.items():
+            return f"材料のファイルが無い: {m}"
+        c.materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
+        if c.a.gate == "release" and (sha := ac.material_sha_or_none(m)):  # 従うときに承認の記録を書く（#815 の I10）
+            vars(c.a).setdefault("approved", {})[m] = sha
+    c.materials += [pr_material(n, info) for n, info in c.infos.items()]
+    if c.a.gate == "design":
+        for n, info in c.infos.items():
             for path in design_docs(info):
-                materials.append(design_material(n, path, info, a.repo, root))
-                record["material"].append(f"#{n} {path}")
-    if not materials:
-        raise Back("材料が無い（--material か --pr を渡す）")
-    return sprint, materials
+                c.materials.append(design_material(n, path, info, c.a.repo, c.root))
+                c.record["material"].append(f"#{n} {path}")
+    return None
+
+
+# 機械のチェックを当てる順。外れたら理由を返す（当たらなければ偽）。読んだ値は c へ置き、後のチェックが使う
+CHECKS = (
+    lambda c: (
+        c.project.status in ("unapproved", "mismatch", "unreadable")
+        and f"プロジェクト MVV が{pm.STATUS_LABEL[c.project.status]}（{c.project.error or ''}）"
+    ),
+    lambda c: pm.approval_refusal(c.state, c.root, c.project, advise=c.a.advise),
+    _read_sprint,
+    lambda c: c.a.mode in EXCLUDED_MODES and f"モード {c.a.mode} は承認ゲートを省かない",
+    lambda c: setattr(c, "infos", {n: pr_facts(n, c.a.repo, c.root) for n in c.a.pr}),
+    lambda c: (
+        (changed := decl_changes(c.infos))
+        and "プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed)
+    ),
+    lambda c: (hits := boundary_hits(c.root, c.infos, c.a.advise)) and "越えない線のパスに当たる: " + " / ".join(hits),
+    _collect_materials,
+    lambda c: not c.materials and "材料が無い（--material か --pr を渡す）",
+)
 
 
 def new_record(a, root: Path, project) -> dict:

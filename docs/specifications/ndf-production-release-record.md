@@ -172,7 +172,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 ### まとめのプランの記録の PR と `release-verify`
 
 まとめのプラン（`supervise_lib/sprint.py` の `close_plan`）は、記録の PR の参照を経路から決め（`supervise_lib/sprint_routes.py` の
-`record_pr_ref`）、記録の PR の参照が `0` でない経路ではマージの後・`close` の前に work ステップ `release-verify`（`/ndf:release-verification`）を置く。
+`record_pr_ref`）、記録の PR の参照が `0` でない経路では確定仕様化の Pull Request を ready にした後・起動の判定（`deep-due`）の前に work ステップ `release-verify`（`/ndf:release-verification`）を置く。`close` はマージの後に置く。
 
 | 経路 | `close` の `--record-pr` | `release-verify` |
 | --- | --- | --- |

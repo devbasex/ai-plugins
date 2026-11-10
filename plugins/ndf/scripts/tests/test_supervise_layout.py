@@ -26,6 +26,7 @@ SUBCOMMANDS = [
     "new",
     "queue",
     "wait",
+    "advance",
     "design-glossary",
     "design-results",
     "design-approved",
@@ -38,6 +39,7 @@ SUBCOMMANDS = [
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
+    "advance",  # 手順の連続実行（supervise.py advance。#2909）
     "progress_watch",  # 実装のステップの進みの観測（#2505）
     "rerun",  # ステップの打ち直しの同じ原因の上限（#2343）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
@@ -66,6 +68,7 @@ MODULES = [
     "delivery_templates",
     "sprint_revise",
     "sprint_waves",
+    "design_steps",  # 設計のプランの工程の定義（sprint_waves から分けた）
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）

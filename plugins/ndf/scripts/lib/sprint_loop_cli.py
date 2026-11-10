@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 
 import clock
+import state_get
 import step_result
+from sprint_loop_stop import STOP_BY
 
 ENTRY = "scripts/sprint-state.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
 
@@ -102,17 +104,19 @@ def _dispatch(a, update) -> dict | None:
         handlers = {
             "select": lambda: sl_select.cmd_select(env, a.loop_name),
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
-            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra)),
+            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra), a.judgments),
             "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done, update=update),
             "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr, revise=a.revise, note=a.note),
             "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
             "lap": lambda: sl.cmd_lap(env, a.loop_name, a.failed, a.done, a.deferred_issues or [], update=update),
             "finish": lambda: sl.cmd_finish(env, a.loop_name, a.lap, a.done, update=update),
             "pending": lambda: sl.cmd_pending(env, a.loop_name),
+            "reclose": lambda: sl.cmd_reclose(env, a.loop_name),
             "hold-question": lambda: sl.cmd_hold_question(env, a.loop_name, a.ref, a.plan, a.step, a.parallel),
-            "stop": lambda: sl.cmd_stop(env, a.loop_name),
+            "stop": lambda: sl.cmd_stop(env, a.loop_name, a.by, a.reason),
             "status": lambda: sl.cmd_status(env, a.loop_name),
             "list": lambda: sl.cmd_list(env, a.loop_name),
+            "get": lambda: state_get.loop_get(env, a.loop_name, a.field),
         }
         if a.loop_cmd == "answer" and a.revise and not a.note:
             return step_result.result(sl.TOOL, "stopped", "--revise には --note <指摘ファイル> が要る", [], {"status": "refused"})
@@ -170,7 +174,13 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("issue", type=int)
     s.add_argument("--reason", required=True)
     s = name(ls.add_parser("sprint"))
-    s.add_argument("--mode", required=True)
+    s.add_argument(
+        "--judgments",
+        required=True,
+        metavar="ファイル",
+        help="判定の根拠のファイル（JSON。mode-materials.py --out の下書きを埋めたもの。#2923）",
+    )
+    s.add_argument("--mode", help="照合するモード。省くと判定の根拠から決まるモードで組む")
     s.add_argument("--dev", help="明示の開発版。省くと流す直前に次に空いている版を決める")
     s.add_argument("--prod", help="明示の本番の版（--dev と一緒に渡す）")
     s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて supervise.py new sprint へそのまま渡す
@@ -194,14 +204,24 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("lap", type=int, help="締め直す保留したループの 1 回（リリース待ち・質問待ち）")
     s.add_argument("--done", required=True, help="残りの工程（まとめ）の queue の done")
     name(ls.add_parser("pending"))
+    name(ls.add_parser("reclose", help="リリースまで届いたのに失敗で締めたループの 1 回を完了で締め直す（#2911）"))
     s = name(ls.add_parser("hold-question"))
     s.add_argument("--ref", required=True, help="オーガナイザーへ送った問いの依頼の id")
     s.add_argument("--plan", required=True, help="問いで止まったプラン")
     s.add_argument("--step", required=True, help="答えの後に続けるステップ")
     s.add_argument("--parallel", help="並列の計画名（省くと NDF_RELAY_NAME のレーンが属する計画）")
-    name(ls.add_parser("stop"))
+    s = name(ls.add_parser("stop"))
+    s.add_argument(
+        "--by",
+        choices=STOP_BY,
+        default="unknown",
+        help="置いた主体（人・利用者の指示を受けたオーガナイザー・不明。既定 unknown）",
+    )
+    s.add_argument("--reason", default="", help="止める理由（止める指示のファイルに書く）")
     for k in ("status", "list"):
         name(ls.add_parser(k)).add_argument("--json", action="store_true")
+    s = name(ls.add_parser("get", help="読むだけ。次の操作を next に、--field の値を metrics に返す（#2909）"))
+    s.add_argument("--field", action="append", help="JSON Pointer（ループの記録を根にする。繰り返し）")
     s = ls.add_parser("environment", help="実行環境を調べ、同時の数の候補を出す（宣言は書かない）")
     s.add_argument("--root", help="リポジトリの根（既定はカレント）")
     s.add_argument("--json", action="store_true")
