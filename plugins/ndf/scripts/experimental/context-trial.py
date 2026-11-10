@@ -84,11 +84,8 @@ def first_call_after(entries: list[dict], at: float) -> float | None:
     return min(times, default=None)
 
 
-def trial_row(
-    work: str, condition: str, transcript: str, rows: list[dict], ledger: list[dict], lo: float | None, hi: float | None, usd: float
-) -> dict:
-    """計測の回 1 つの行。区切りを見つけられなければ ValueError。"""
-    work_rows = [r for r in cd.fill_work(rows) if (r.get("work") or "") == work]
+def trial_span(work_rows: list[dict], transcript: str, lo: float | None, hi: float | None) -> tuple[float, float, list]:
+    """計測の回の区切り（始め・終わり）と、始めより後の答え待ち（lo, hi, asks）。区切りを見つけられなければ ValueError。"""
     paths = [transcript] + sorted({r["transcript"] for r in work_rows if r.get("transcript") and r["transcript"] != transcript})
     entries = sorted((e for p in paths for e in _entries(p)), key=lambda e: cd.parse_ts(e.get("timestamp")) or 0.0)
     lo = queue_launch(_entries(transcript)) if lo is None else lo
@@ -99,8 +96,24 @@ def trial_row(
         hi = first_call_after(entries, asks[0][1]) if asks else None
     if hi is None:
         raise ValueError("承認ゲートの答えの後の呼び出しが見つからない。--until を渡す")
-    span = (lo, hi)
-    rep = _cli().report_work(work, rows, ledger, span)
+    return lo, hi, asks
+
+
+def trial_row(
+    work: str,
+    condition: str,
+    transcript: str,
+    rows: list[dict],
+    ledger: list[dict],
+    lo: float | None,
+    hi: float | None,
+    usd: float,
+    report=None,
+) -> dict:
+    """計測の回 1 つの行。区切りを見つけられなければ ValueError。`report` は集計（無ければ context-policy.py の report_work）。"""
+    work_rows = [r for r in cd.fill_work(rows) if (r.get("work") or "") == work]
+    lo, hi, asks = trial_span(work_rows, transcript, lo, hi)
+    rep = (report or _cli().report_work)(work, rows, ledger, (lo, hi))
     inside = [r for r in work_rows if lo <= (cd.parse_ts(r.get("at")) or float("-inf")) <= hi]
     first = next((r for r in inside if r.get("event", cd.EVENT_DECISION) == cd.EVENT_DECISION), {})
     held = [round(b - a) for a, b in asks if a <= hi]
@@ -152,7 +165,17 @@ def main(argv=None) -> None:
     root = cd.toplevel(None)
     work = cd.recorded_work(a.work, None)
     try:
-        row = trial_row(work, a.condition, a.transcript, cd.read_decisions(cd.decisions_repo(root)), cli._ledger(root), lo, hi, a.input_usd)
+        row = trial_row(
+            work,
+            a.condition,
+            a.transcript,
+            cd.read_decisions(cd.decisions_repo(root)),
+            cli._ledger(root),
+            lo,
+            hi,
+            a.input_usd,
+            cli.report_work,
+        )
     except ValueError as e:
         emit(result(TOOL, "stopped", str(e)), 1)
     print(table_line(row))
