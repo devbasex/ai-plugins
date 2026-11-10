@@ -181,7 +181,7 @@ def cmd_measure(a) -> None:
         "suites": runs,
         **counted,
     }
-    write_record(out, {"metrics": metrics, "tests": tests})
+    write_timing_record(out, {"metrics": metrics, "tests": tests})
     failed = [r["name"] for r in runs if r["exit"] != 0]
     status = "stopped" if failed else "ok"
     summary = f"壁時計 {wall} 秒・{counted['tests']} 件・合計 {counted['sum_seconds']} 秒・load average {load1:.2f}"
@@ -190,7 +190,7 @@ def cmd_measure(a) -> None:
     emit(result(TOOL, status, summary, items, metrics))
 
 
-def write_record(path: Path, data: dict) -> None:
+def write_timing_record(path: Path, data: dict) -> None:
     """記録を書く。`.gz` で終わるパスは gzip で縮める（nodeid の全件は 2 MB ほどになる）。"""
     text = json.dumps(data, ensure_ascii=False, indent=1)
     if path.suffix == ".gz":
@@ -199,7 +199,7 @@ def write_record(path: Path, data: dict) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-def read_record(path: Path) -> dict:
+def read_timing_record(path: Path) -> dict:
     raw = path.read_bytes()
     return json.loads(gzip.decompress(raw) if path.suffix == ".gz" else raw)
 
@@ -215,7 +215,7 @@ def ledger_nodeids(text: str) -> set[str]:
 
 def _read_out(path: str) -> dict:
     try:
-        return read_record(Path(path))["tests"]
+        return read_timing_record(Path(path))["tests"]
     except (OSError, ValueError, KeyError, TypeError, EOFError, gzip.BadGzipFile) as e:
         raise StepError(f"計測の記録を読めない: {path}: {e}", EXIT_UNREADABLE)
 

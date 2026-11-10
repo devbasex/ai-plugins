@@ -71,8 +71,8 @@ def test_measure_runs_suites_in_order_and_reads_junit(monkeypatch, tmp_path, cap
 
 def test_a_gzip_record_is_read_back_by_diff(tmp_path, capsys):
     rec = {"tests": {"t.py::a": {"outcome": "passed", "seconds": 1.0}}}
-    wtt.write_record(tmp_path / "b.json.gz", rec)
-    assert wtt.read_record(tmp_path / "b.json.gz") == rec
+    wtt.write_timing_record(tmp_path / "b.json.gz", rec)
+    assert wtt.read_timing_record(tmp_path / "b.json.gz") == rec
     (tmp_path / "ledger.md").write_text("")
     with pytest.raises(SystemExit) as e:
         wtt.main(
