@@ -2,13 +2,17 @@
 
 - measure は宣言の順に suite を流し、最初の起動から最後の終了までを壁時計にする。負荷が CPU の数を超えたら参考の値にする
 - junit の skip を件数から外し、遅いテストを秒の長い順に、ファイルを秒の合計の順に並べる
-- diff は台帳に無い消えたテストと、skip に変わったテストを、nodeid を丸めずに出す
+- diff は台帳に無い消えたテストと、skip・deselect に変わったテストを、nodeid を丸めずに出す。台帳に載る消したテストの
+  定義が着手後の木に残っていれば出す（#2309）
+- measure は集められて実行から外された nodeid を deselect として記録し、入れ子の pytest へプラグインを渡さない（#2309）
+- startup はスクリプトの起動を N 回流し、中央値と終了コードを返す（#2309）
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,14 +76,41 @@ def test_measure_marks_high_load_as_reference_and_fails_on_a_failed_suite(monkey
     assert out["metrics"]["suites"][0]["exit"] == 3
 
 
+CONFTEST = """
+def pytest_collection_modifyitems(config, items):
+    items[:] = [i for i in items if "drop" not in i.name]
+"""
+NESTED = """
+import os
+
+def test_keep():
+    assert "WTT_COLLECT_DIR" not in os.environ
+    assert "wtt_collect" not in os.environ.get("PYTEST_PLUGINS", "")
+
+def test_drop():
+    pass
+"""
+
+
+def test_measure_records_deselected_tests_and_hides_its_plugin_from_the_tests(monkeypatch, tmp_path):
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    (tmp_path / "conftest.py").write_text(CONFTEST)
+    (tmp_path / "test_n.py").write_text(NESTED)
+    cmd = f"{sys.executable} -m pytest -q -p no:cacheprovider -n 2 -o junit_family=xunit1 --junitxml=j.xml"
+    code, out = _measure(monkeypatch, tmp_path, [{"name": "pytest", "command": cmd, "junit": "j.xml"}], load=1.0)
+    assert code == 0
+    assert out["tests"]["test_n.py::test_keep"]["outcome"] == "passed"
+    assert out["tests"]["test_n.py::test_drop"] == {"outcome": "deselected", "seconds": 0.0}
+    assert (out["metrics"]["tests"], out["metrics"]["deselected"]) == (1, 1)
+
+
 def _diff(tmp_path, before, after, ledger):
     for name, tests in (("b.json", before), ("a.json", after)):
         (tmp_path / name).write_text(json.dumps({"tests": tests}))
     (tmp_path / "ledger.md").write_text(ledger)
+    args = ["--before", str(tmp_path / "b.json"), "--after", str(tmp_path / "a.json"), "--ledger", str(tmp_path / "ledger.md")]
     with pytest.raises(SystemExit) as e:
-        wtt.main(
-            ["diff", "--before", str(tmp_path / "b.json"), "--after", str(tmp_path / "a.json"), "--ledger", str(tmp_path / "ledger.md")]
-        )
+        wtt.main(["diff", *args, "--root", str(tmp_path)])
     return e.value.code
 
 
@@ -100,3 +131,62 @@ def test_diff_lists_tests_that_became_skipped(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert [(i["kind"], i["name"]) for i in out["items"]] == [("now_skipped", "t.py::a")]
     assert _diff(tmp_path, before, before, "") == 0
+
+
+RAN = {"outcome": "passed", "seconds": 1.0}
+
+
+def test_diff_lists_deselected_tests_even_when_they_are_in_the_ledger(tmp_path, capsys):
+    before = {"t.py::a": RAN, "t.py::b": RAN}
+    after = {"t.py::a": {"outcome": "deselected", "seconds": 0.0}, "t.py::b": RAN}
+    assert _diff(tmp_path, before, after, "| `t.py::a` | 消した | 1 | `t.py::b` |\n") == 1
+    out = json.loads(capsys.readouterr().out)
+    assert [(i["kind"], i["name"]) for i in out["items"]] == [("now_deselected", "t.py::a")]
+
+
+@pytest.mark.parametrize(
+    "source, after, flagged",
+    [
+        ("def test_b():\n    pass\n", {"t.py::test_b": RAN}, []),
+        ("class TestK:\n    def test_a(self):\n        pass\n", {}, ["t.py::TestK::test_a"]),
+        ("def test_p(x):\n    pass\n", {"t.py::test_p[2]": RAN}, []),
+        ("def test_p(x):\n    pass\n", {}, ["t.py::test_p[1]"]),
+    ],
+    ids=["function-gone", "function-left", "case-gone", "file-ignored"],
+)
+def test_diff_lists_removed_tests_whose_definition_is_left(tmp_path, capsys, source, after, flagged):
+    (tmp_path / "t.py").write_text(source)
+    before = {"t.py::TestK::test_a": RAN, "t.py::test_p[1]": RAN, "t.py::test_b": RAN}
+    ledger = "| `t.py::TestK::test_a` | 消した | 1 | x |\n| `t.py::test_p[1]` | 消した | 5 | x |\n| `t.py::test_b` | 速くした |\n"
+    after = {**after, "t.py::test_b": RAN}
+    if "TestK" not in source:
+        after.setdefault("t.py::TestK::test_a", RAN)
+    code = _diff(tmp_path, before, after, ledger)
+    out = json.loads(capsys.readouterr().out)
+    assert [i["name"] for i in out["items"] if i["kind"] == "still_defined"] == flagged
+    assert code == (1 if flagged else 0)
+
+
+def _startup(tmp_path, *args):
+    with pytest.raises(SystemExit) as e:
+        wtt.main(["startup", "--root", str(tmp_path), *args])
+    return e.value.code
+
+
+def test_startup_reports_the_median_and_the_exit_code_of_each_script(tmp_path, capsys):
+    (tmp_path / "ok.py").write_text("import sys\nsys.exit(0 if sys.argv[1:] == ['--version'] else 4)\n")
+    assert _startup(tmp_path, "--runs", "3", "ok.py", "--", "--version") == 0
+    out = json.loads(capsys.readouterr().out)
+    item = out["items"][0]
+    assert (item["name"], item["result"], out["metrics"]["runs"]) == ("ok.py", "0", 3)
+    assert item["min_ms"] <= item["median_ms"] <= item["max_ms"]
+
+
+def test_startup_fails_when_the_exit_code_varies_or_the_script_is_absent(tmp_path, capsys):
+    (tmp_path / "flip.py").write_text(
+        "import pathlib, sys\np = pathlib.Path('n')\nn = int(p.read_text()) if p.exists() else 0\n"
+        "p.write_text(str(n + 1))\nsys.exit(n % 2)\n"
+    )
+    assert _startup(tmp_path, "--runs", "2", "flip.py") == 1
+    assert json.loads(capsys.readouterr().out)["items"][0]["result"] == "varied"
+    assert _startup(tmp_path, "absent.py") == 2
