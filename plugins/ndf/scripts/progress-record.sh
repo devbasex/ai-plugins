@@ -324,7 +324,7 @@ if [ "$STAGE" = "-" ]; then
   DONE_TEXT="#$ISSUE 進行の見出し = $(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p;}' "$NEW_FILE" | head -1)"
 else
   JOINED=''
-  for s in "${STAGE_LIST[@]}"; do JOINED="${JOINED:+$JOINED・}$s"; done
+  for s in "${STAGE_LIST[@]}"; do JOINED="${JOINED:+${JOINED}・}${s}"; done
   DONE_TEXT="#$ISSUE 進行 = $JOINED"
 fi
 if cmp -s "$BODY_FILE" "$NEW_FILE"; then
