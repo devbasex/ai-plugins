@@ -401,7 +401,7 @@ def read_restore_state(sid: str, env: Mapping | None = None) -> str | None:
 
 def write_restore_state(sid: str, state: str, env: Mapping | None = None) -> bool:
     try:
-        jsonio.write_atomic(session_file(sid, "restore", env), {"state": state}, indent=None)
+        jsonio.write_atomic(context_state_dir(env) / "sessions" / f"{sid}.restore.json", {"state": state}, indent=None)
     except OSError:
         return False
     return True
@@ -414,7 +414,7 @@ def handoff_marked(sid: str, env: Mapping | None = None) -> bool:
 
 def set_handoff_marked(sid: str, env: Mapping | None = None) -> bool:
     try:
-        jsonio.write_atomic(session_file(sid, "handoff", env), {"at": now_utc()}, indent=None)
+        jsonio.write_atomic(context_state_dir(env) / "sessions" / f"{sid}.handoff.json", {"at": now_utc()}, indent=None)
     except OSError:
         return False
     return True

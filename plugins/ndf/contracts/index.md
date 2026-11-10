@@ -48,6 +48,7 @@
 | `decisions-jsonl` | `*.decisions.jsonl` | record | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `drive-prx-report-md` | `drive-pr*-report.md` | report | tmp | `plugins/ndf/skills/cross-review/scripts/drive.py` | — |
 | `estimates-json` | `estimates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `handoff-mark-json` | `*.handoff.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `laps-md` | `laps.md` | report | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
@@ -66,6 +67,7 @@
 | `requests-json` | `requests.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `research-calls-jsonl` | `calls.jsonl` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `research-item-json` | `*--*.item.json` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `restore-json` | `*.restore.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `result-file` | `*-result.json` | result | state-dir | `plugins/ndf/scripts/lib/run_core.py:_write_result_file`<br>`plugins/ndf/scripts/lib/step_result.py:_write_out` | — |
 | `resume-mark-json` | `*.mark.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `revise-json` | `revise-*.json` | state | main | `plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/revise-note.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
