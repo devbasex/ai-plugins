@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import clock
+import parallel_hold as ph
 import parallel_plan as pp
 import parallel_release as pr
 
@@ -34,7 +35,7 @@ def apply_observed_states(run, rows: dict) -> list[str]:
 
 def _asking_lanes(run) -> set[str]:
     """答えていない問い（まとめた問いの `merged` も含む）を送ったレーンの名前。"""
-    return {x for q in run.questions for x in (q.get("lane"), *(m.get("lane") for m in q.get("merged") or [])) if x}
+    return {x for q in run.questions for x in ph.question_senders(q) if x}
 
 
 def _ask_helper(run, rows: dict) -> None:
