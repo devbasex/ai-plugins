@@ -10,6 +10,9 @@
 | --- | --- | --- |
 | 着手前 | `issues/issue-2309-timing/before.json.gz` | `issues/issue-2309-timing/before.result.json` |
 | 着手後 1 | `issues/issue-2309-timing/after-1.json.gz` | `issues/issue-2309-timing/after-1.result.json` |
+| 着手後 2 | `issues/issue-2309-timing/after-2.json.gz` | `issues/issue-2309-timing/after-2.result.json` |
+| 着手後 3 | `issues/issue-2309-timing/after-3.json.gz` | `issues/issue-2309-timing/after-3.result.json` |
+| 着手後 4 | `issues/issue-2309-timing/after-4.json.gz` | `issues/issue-2309-timing/after-4.result.json` |
 | 起動の秒（着手前・着手後） | `issues/issue-2309-timing/startup-before.json`・`startup-after.json` | 同じファイル |
 | 着手前後の照合（`diff`） | `issues/issue-2309-timing/diff.json` | 同じファイル |
 
@@ -22,9 +25,13 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 着手前 | 2026-11-10 14:15 | 4.01 | 使う | 1129.0 秒 | pytest 1064.8（2 件が落ちた）・script-structure 18.7・runtime-plugin-validate 14.3・ndf-contracts 12.3・markdown-link-check 8.5・lint 7.1・repo-secrets-check 1.6 | 12994（4・0） | 4048.6 秒 |
 | 着手後 1 | 2026-11-10 14:37 | 9.93 | 参考（8 を超えた） | 1095.4 秒 | pytest 1049.8（すべて通った）・script-structure 13.0（落ちた。下の注）・runtime-plugin-validate 10.6・ndf-contracts 8.2・markdown-link-check 5.9・lint 5.4・repo-secrets-check 1.1 | 12988（4・0） | 3807.5 秒 |
+| 着手後 2 | 2026-11-10 17:49 | 2.25 | 使う | 806.4 秒 | pytest 760.2・script-structure 12.8・ndf-contracts 8.4・lint 5.1・repo-secrets-check 1.9・runtime-plugin-validate 10.8・markdown-link-check 5.9（すべて通った） | 12917（skip 4・deselect 0） | 2809.7 秒 |
+| 着手後 3 | 2026-11-10 18:03 | 3.16 | 使う | 918.8 秒 | pytest 859.8・script-structure 15.7・ndf-contracts 9.5・lint 8.6・repo-secrets-check 1.6・runtime-plugin-validate 14.6・markdown-link-check 7.0（すべて通った） | 12917（skip 4・deselect 0） | 3215.5 秒 |
+| 着手後 4 | 2026-11-10 18:19 | 7.46 | 使う | 1014.8 秒 | pytest 965.1・script-structure 14.6・ndf-contracts 9.1・lint 5.4・repo-secrets-check 1.3・runtime-plugin-validate 11.6・markdown-link-check 6.2（すべて通った） | 12917（skip 4・deselect 0） | 3677.0 秒 |
 
 - 180 秒に届いていない。着手後の壁時計は 1095.4 秒で、差は約 915 秒である。各テストの所要の合計は 241.1 秒（6 %）縮んだ。設計の見込み（手段 1〜5 で 420〜900 秒）より小さいのは、手段 4（プロセスの中への置き換え）を入れず、手段 5 が 7 件に留まったため
-- 受け入れ条件 1 の 3 回の計測は取れていない。着手後 1 の開始時の load average が 9.93 で、ほかのスプリントのテストが同じマシンで並んで動いていた。1 回 18 分かかり、8 以下の負荷の下で測り直す時間を取れなかった
+- 受け入れ条件 1 の 3 回の計測は、着手後 2〜4 で取った（開始時の load average 2.25・3.16・7.46、すべて 8 以下）。3 回とも全 suite が通り、壁時計は 806.4・918.8・1014.8 秒で、180 秒との差は 626〜835 秒である。着手後 1（9.93）は参考の値として残す。途中の負荷はほかのスプリントのテストで上がるため、3 回の差には負荷の差が入っている
+- 設計の決定 5（手段 4: 子プロセスを起こすテストをプロセスの中の呼び出しへ置き換える）は入れていない。設計の見込み（決定 1）でも 180 秒に届かず、残りは 1 スプリントに収まらないと設計が書いているため、設計と違う点として PR に書く
 - 着手前の pytest で落ちた 2 件（`plugins/ndf/skills/cross-review/tests/test_state_offline_fetch.py::test_the_repository_is_resolved_from_git`・`plugins/ndf/scripts/tests/test_supervise_slow.py::test_limit_wait_is_not_counted_as_slow`）は、着手後には通った。負荷で時間の判定がずれる種類のテストである
 - 着手後 1 の `script-structure` は、計測のスクリプトに足した `write_record`・`read_record` がほかのスクリプトの同名の関数と重なって落ちた。名前を `write_timing_record`・`read_timing_record` へ変えて通した（計測の後のコミット）
 - 照合（`whole-test-timing.py diff`）: 台帳に無い消えたテスト 0 件・skip に変わったテスト 0 件・deselect に変わったテスト 0 件・定義が残る消したテスト 0 件（`issues/issue-2309-timing/diff.json`）
