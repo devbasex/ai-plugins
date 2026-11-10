@@ -116,7 +116,10 @@ def _left_table_rows(text: str, sections: list) -> list[tuple[int, str, str, str
         why_col = next((k for k, h in enumerate(head) if "なぜ" in h), 2)
         for k, row in enumerate(t.rows):
             line = t.start + 2 + k
-            cell = (lambda c: row[c].strip() if c < len(row) else "")
+
+            def cell(c: int, row: list = row) -> str:
+                return row[c].strip() if c < len(row) else ""
+
             out.append((line, lines[line] if line < len(lines) else "", cell(num_col), cell(why_col)))
     return out
 
@@ -229,10 +232,7 @@ def cmd_check(a):
     metrics["unnamed_redline"] = len(unnamed)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = (
-            f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドラインに "
-            f"{len(items)} 件の指摘がある"
-        )
+        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドラインに {len(items)} 件の指摘がある"
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
     summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件と人へ残す判断に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)

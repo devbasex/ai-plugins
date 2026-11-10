@@ -321,9 +321,7 @@ def test_delegating_line_without_redline_is_flagged(tmp_path, word):
     assert out["metrics"]["unnamed_redline"] == 1
 
 
-@pytest.mark.parametrize(
-    "title", ["## 未確認のまま残ること", "## 人へ残す判断", "## 決定の記録\n\n### 決定 2: 何かを決める"]
-)
+@pytest.mark.parametrize("title", ["## 未確認のまま残ること", "## 人へ残す判断", "## 決定の記録\n\n### 決定 2: 何かを決める"])
 def test_delegating_line_is_flagged_in_each_section(tmp_path, title):
     body = design(f"{title}\n\n| 項目 | 内容 |\n| --- | --- |\n| 既定値 | 利用者が決める |\n")
     root = repo(tmp_path, {"notes/d.md": body})

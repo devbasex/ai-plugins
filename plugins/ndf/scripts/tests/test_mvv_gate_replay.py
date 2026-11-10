@@ -76,9 +76,9 @@ def env(tmp_path):
         outs[name].write_text(json.dumps({"result": text, "total_cost_usd": 0.25, "duration_ms": 10}, ensure_ascii=False))
     claude = tmp_path / "claude"
     claude.write_text(
-        f'#!/bin/sh\necho x >> {tmp_path / "calls.txt"}\ncat > /dev/null\n'
+        f"#!/bin/sh\necho x >> {tmp_path / 'calls.txt'}\ncat > /dev/null\n"
         f'case "$*" in *{NEW_ONLY}*) ;; *) cat {outs["unknown"]}; exit 0;; esac\n'
-        f'if [ -f {tmp_path / "boundary.flag"} ]; then cat {outs["boundary"]}; else cat {outs["follow"]}; fi\n'
+        f"if [ -f {tmp_path / 'boundary.flag'} ]; then cat {outs['boundary']}; else cat {outs['follow']}; fi\n"
     )
     claude.chmod(0o755)
     return {"root": root, "log": log, "tmp": tmp_path, "bin": bindir, "claude": claude}
