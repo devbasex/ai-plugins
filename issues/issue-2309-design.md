@@ -28,16 +28,23 @@
 
 ### コンテキスト
 
-| コンテキスト | 何の語が 1 つの意味に決まるか |
-| --- | --- |
-| NDF の開発ワークフロー（`ndf-workflow`） | 全体テスト・着手前のテスト・範囲テスト。この変更はこのリポジトリの全体テストの中身と、テストが起動するスクリプトの起動の部分だけを変え、語の意味は変えない |
+| コンテキスト | 何の語が 1 つの意味に決まるか | `ndf-workflow` との関係 |
+| --- | --- | --- |
+| NDF の開発ワークフロー（`ndf-workflow`） | 全体テスト・範囲テスト。この変更の主のコンテキストで、全体テストの中身を変え、`supervise.py`・`parallel.py`・`sprint-state.py`・`test-run.py` の起動を縮める | — |
+| NDF の cross-refactoring（`ndf-cross-refactoring`） | 着手前のテスト・着手前のテストの初回の上限。全体テストの実測（秒）を上限の計算に使う | 顧客と供給者。`ndf-workflow` が全体テストを供給し、cross-refactoring は秒を受け取る側である。この変更は全体テストの秒を縮めるだけで、受け取る値の形と語の意味は変えない |
+| NDF のリリース（`ndf-release`） | リリースの種別・リリースコマンド。`release-steps.py` と `release_lib/` を持つ | 公表された言語。起動を縮めるのは import の位置だけで、引数・標準出力・結果 JSON・終了コード・書くファイル（公表された入出力）は変えない（I4） |
+| プロジェクトの用語集（`project-glossary`） | 語・意味・コンテキスト。`glossary.py` を持つ | 公表された言語。`ndf-release` と同じく、起動の秒だけを変え、入出力は変えない（I4） |
+
+どのコンテキストでも語の意味と入出力は変えないため、用語集の語と各コンテキストの契約は変えない。
 
 ### 集約
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| テストの台帳 | 実装の担当（`issues/issue-2309-test-ledger.md`） | 着手前と着手後の nodeid の集合 | 消した・まとめた・置き換えたテストの行 | 当たった基準の番号・守るテストの名前・処置 |
-| 全体テストの実測の記録 | 計測のスクリプト（`plugins/ndf/scripts/experimental/whole-test-timing.py`） | 1 回の計測 | suite ごとの結果 | 開始時の load average・壁時計・件数・合計・遅いテストの表 |
+| テストの台帳 | 実装の担当（`issues/issue-2309-test-ledger.md`） | 台帳の文書 | 消した・まとめた・置き換えたテストの行・遅いテストとファイルの処置の行 | 当たった基準の番号・守るテストの名前・処置・実測の記録のファイルのパス |
+| 全体テストの実測の記録 | 計測のスクリプト（`plugins/ndf/scripts/experimental/whole-test-timing.py`）。記録のファイルは `issues/issue-2309-timing/` に置き、手で書き換えない | 1 回の計測 | suite ごとの結果・nodeid ごとの結果（走った・skip・deselect） | 開始時の load average・壁時計・件数・合計・遅いテストの表・起動の秒 |
+
+実測の値（件数・秒・load average・起動の秒）の持ち主は、全体テストの実測の記録だけである。台帳は記録のファイルのパスで指し、秒を書き写さない。PR の本文に載せる表（受け入れ条件 1・2・5・7）は、記録の値と台帳の処置を nodeid とファイルで突き合わせて組む。
 | 削る基準と速くする手段 | `docs/plugin-development-guide.md` の「テストを削る基準」 | 節 | 基準の行・手段の行 | 基準の番号 |
 | スクリプトの起動 | 起動を縮めるスクリプト（決定 4 の 6 本）と、その下のモジュール | 1 回の起動 | — | 引数・標準出力・結果 JSON・終了コード・書くファイル |
 
@@ -46,7 +53,7 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | テストの台帳 | 着手前に既定の実行で走っていたテストは、着手後も走るか、台帳に処置・基準の番号（置き換えたものは「置き換え」）・守るテスト（または守らなくてよい理由）つきで載る | 計測のスクリプトの `diff` が終了コード 1 で落ち、載っていない nodeid を出す |
-| I2 | テストの台帳 | 着手前に既定の実行で走っていたテストが、着手後に skip・deselect に変わらない | `diff` が終了コード 1 で落ち、変わった nodeid を出す |
+| I2 | テストの台帳 | 着手前に既定の実行で走っていたテストが、着手後に skip・deselect に変わらない。台帳に載せたテストは、着手後に集められない（消えている）。集められて実行から外されたもの（deselect）は台帳に載っていても通さない | `diff` が終了コード 1 で落ち、変わった nodeid を出す |
 | I3 | 全体テストの実測の記録 | 受け入れ条件 1 の判定に使う計測は、開始時の 1 分の load average が CPU の数（8）以下である | その計測を「参考」として残し、判定に数えない |
 | I4 | スクリプトの起動 | 起動を縮めたスクリプトは、着手前と同じ引数に対して同じ標準出力・結果 JSON・終了コードを返し、同じファイルを書く | 既存のテストが落ちる。落ちたら起動の短縮を戻す |
 | I5 | テストの台帳 | 台帳の基準の番号は、すべて削る基準の文書の表にある番号である | 実装の PR のレビューで照らす。表に無い番号の行は基準を文書へ足すか、消すのをやめる |
@@ -57,18 +64,18 @@
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | 着手前の全体テストの件数・合計・壁時計・遅いテストの表と、スクリプトの起動の秒を測った | 計測のスクリプト（`measure`・`startup`） | テストの台帳（着手前の集合）・E2・E3・E4 |
-| E2 | 削る基準に当たるテストを消した・まとめた | 実装の担当 | テストの台帳 |
-| E3 | 子プロセスを起こすテストを、プロセスの中のテストへ置き換えた。テストヘルパーの固定の待ちと、プロセスの中の待ちの間隔を縮めた | 実装の担当 | テストの台帳 |
+| E1 | 着手前の全体テストの件数・合計・壁時計・遅いテストの表と、スクリプトの起動の秒を測った | 計測のスクリプト（`measure`・`startup`） | 全体テストの実測の記録（着手前の記録）・テストの台帳（記録のパスと、遅いテストとファイルの処置の行） |
+| E2 | 削る基準に当たるテストを消した・まとめた | 実装の担当 | テストの台帳（基準の番号は削る基準と速くする手段の表から引く。I5） |
+| E3 | 子プロセスを起こすテストを、プロセスの中のテストへ置き換えた。テストヘルパーの固定の待ちと、プロセスの中の待ちの間隔を縮めた | 実装の担当 | テストの台帳・削る基準と速くする手段（使った手段を一覧へ足す。I6） |
 | E4 | テストの対象のスクリプトの起動を縮めた | 実装の担当 | スクリプトの起動（I4 を既存のテストで確かめる）・テストの台帳 |
-| E5 | 着手後の全体テストを 3 回測った | 計測のスクリプト | 実装の PR（受け入れ条件 1・2・5）・`diff` の照合 |
+| E5 | 着手後の全体テストを 3 回測った | 計測のスクリプト | 全体テストの実測の記録（着手後の記録 3 つ）・テストの台帳（記録のパスと、`diff` で I1・I2 を照らした結果） |
 
 ### 用語
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 全体テスト | 用語集のとおり。この変更では `.ndf/project.json` の `test.suites` の 13 個すべて | 変更なし |
-| 着手前のテスト | 用語集のとおり | 変更なし |
+| 着手前のテスト | 用語集のとおり（`ndf-cross-refactoring` の語） | 変更なし |
 | 範囲テスト | 用語集のとおり | 変更なし |
 
 ## 外部の調査
@@ -120,8 +127,8 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 計測のスクリプト（`plugins/ndf/scripts/experimental/whole-test-timing.py`、実験版） | 既存の `measure` と `diff` をそのまま使う。`startup` を足し、渡したスクリプトの最小の起動を N 回流して中央値を出す（決定 7） |
-| テストの台帳（`issues/issue-2309-test-ledger.md`） | 着手前後の実測・遅いテストの上位 30 件とファイルの上位 10 本の処置・起動の秒の前後・消した・まとめた・置き換えたテストの 1 件ごとの基準と守るテスト。PR の本文から指す |
+| 計測のスクリプト（`plugins/ndf/scripts/experimental/whole-test-timing.py`、実験版） | `measure` に、集められて実行から外された nodeid（deselect）の記録を足し、`diff` に台帳に載っていても通さない deselect の照合を足す（I2）。`startup` を足し、渡したスクリプトの最小の起動を N 回流して中央値を出す（決定 7）。記録を `issues/issue-2309-timing/` へ書く |
+| テストの台帳（`issues/issue-2309-test-ledger.md`） | 実測の記録のファイルのパス・遅いテストの上位 30 件とファイルの上位 10 本の処置・消した・まとめた・置き換えたテストの 1 件ごとの基準と守るテスト。秒は書き写さない。PR の本文から指す |
 | 偽の HTTP サーバーのテストヘルパー（`plugins/ndf/scripts/tests/account_fake.py` と、`serve_forever` を呼ぶ 5 本のテストのファイル） | ポーリングの間隔を縮め、後始末の 0.5 秒の待ちを無くす（決定 2） |
 | 待ちの間隔の差し替え（`plugins/ndf/scripts/tests/conftest.py` のフィクスチャ） | プロセスの中で永続ワークフローを動かすテストで、ポーリングの間隔の値をテストの側で縮める。上限の宣言（`plugins/ndf/contracts/limits.json`）は変えない（決定 3） |
 | 起動を縮めるスクリプト（`supervise.py`・`parallel.py`・`release-steps.py`・`sprint-state.py`・`test-run.py`・`glossary.py` と、その下の `supervise_lib/`・`release_lib/`・`lib/`） | その起動で使わないサードパーティのライブラリの import を、使う関数の中へ移す（決定 4） |
@@ -203,14 +210,19 @@ graph TD
 
 ### 計測のスクリプト
 
-`measure` と `diff` の契約は #2291 のまま変えない（`issues/issue-2291-design.md` の「入出力の契約」）。足すのは `startup` だけである。
+`measure` と `diff` の引数と結果の形は #2291 のまま使う（`issues/issue-2291-design.md` の「入出力の契約」）。足すのは、deselect の記録と照合（I2）と、`startup` である。
+
+junit は集められて実行から外されたテストを書かないため、着手後の結果に無い nodeid は、消したテストと deselect したテストの区別がつかない。台帳に載せたテストを deselect で外しても、#2291 の `diff` は通す。そこで、集められたテストと実行に残ったテストの差を `measure` が記録する。
 
 | 副命令 | 入力 | 出力 | 終了コード |
 | --- | --- | --- | --- |
+| `measure`（足すもの） | #2291 のまま。宣言のコマンドは変えない（I7） | 計測のスクリプトが持つ pytest のプラグインを、環境変数 `PYTEST_PLUGINS` で各 suite の pytest へ読み込ませる。プラグインは `pytest_collection_modifyitems` を最初と最後に囲む形（`wrapper=True`・`tryfirst=True`）で、ほかの実装が動く前の集められた nodeid と、動いた後に残った nodeid を記録する。差を deselect として、`--out` の nodeid ごとの結果に `outcome: "deselected"` で書く。pytest-xdist の worker ごとに書いたファイルを合わせる | #2291 のまま |
+| `diff`（足すもの） | #2291 のまま | 着手前に走っていて、着手後に `deselected` になった nodeid を `kind: "now_deselected"` で出す。台帳に載っていても出す | 1: `missing`・`now_skipped`・`now_deselected` のどれかが 1 件以上 |
 | `startup --root <dir> [--runs N] <スクリプトのパス>... [-- <引数>...]` | スクリプトのパス（`--root` からの相対）と、最小の起動の引数（既定は `--help`）。`--runs` の既定は 10 | NDF の結果の形（`tool`・`status`・`summary`・`items`・`metrics`）。`items` にスクリプトごとの中央値・最小・最大のミリ秒と終了コード。`metrics` に開始時の `load_average_1m`・`cpus`・`reference` | 0: すべてのスクリプトが起動できた / 1: 起動の終了コードが 1 回でも前の回と違った / 2: スクリプトが無い・読めない |
 
 - 起動は `python3 <スクリプト> <引数>` を作業ディレクトリ `--root` で打ち、時間は打ってから終わるまでを測る
-- 着手前と着手後で同じ引数・同じ回数で流し、両方の出力を台帳に載せる（受け入れ条件 7）
+- 着手前と着手後で同じ引数・同じ回数で流し、両方の出力を `issues/issue-2309-timing/` の記録のファイルへ書く。台帳はそのパスを指す（受け入れ条件 7）
+- `-k`・`-m`・`--deselect` と、conftest の `pytest_collection_modifyitems` で項目を外す書き方は、どれも囲んだ範囲の中で起きるため、同じ照合で見つかる
 
 ### 起動を縮めるスクリプト
 
@@ -283,7 +295,7 @@ pytest-console-scripts（LIB1）は同じことをプラグインとして持つ
 
 ### 決定 6: 作業の量を 1 回の承認で読み切れる量に収めるため、書き直しと削除の対象を着手前の遅いファイルの上位 30 本と、手段 1〜3 が当たるファイルに限る
 
-着手前の測り（2026-11-10）では、ファイルごとの合計の上位 30 本で計約 1,580 秒（全体の 47%）である。533 本のファイルをすべて読むと、台帳の行と差分がレビューで読み切れない量になる。上位 30 本は E1 の測りで決め直す。上位 30 本の外のファイルでも、手段 1〜3 はテストヘルパー・フィクスチャ・テストの対象の側の変更で効くため、そのまま効く。削る基準に当たるテストを上位 30 本の外で見つけたときは、消して台帳に載せてよい。台帳の書き方と `diff` の照合は #2291 と同じにする。
+着手前の測り（2026-11-10）では、ファイルごとの合計の上位 30 本で計約 1,580 秒（全体の 47%）である。533 本のファイルをすべて読むと、台帳の行と差分がレビューで読み切れない量になる。上位 30 本は E1 の測りで決め直す。上位 30 本の外のファイルでも、手段 1〜3 はテストヘルパー・フィクスチャ・テストの対象の側の変更で効くため、そのまま効く。削る基準に当たるテストを上位 30 本の外で見つけたときは、消して台帳に載せてよい。台帳の書き方は #2291 と同じにする。`diff` の照合は #2291 の照合に、deselect の照合（I2）を足して使う。
 
 根拠: Value 2 / Value 3（MVV 版 6）
 
@@ -309,13 +321,13 @@ pytest-console-scripts（LIB1）は同じことをプラグインとして持つ
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I3 | `measure` を load average 8 以下で 3 回流し、3 回とも全 suite が通り、壁時計と suite ごとの秒と開始時の load average が台帳に載る | load average が 8 を超えた計測を判定に数えると、台帳の `reference` の列と食い違う |
-| 受け入れ条件 2 | 着手前と着手後の `measure` の `tests`・`sum_seconds`・`wall_seconds` が台帳に並ぶ | 着手前後で宣言のコマンドが違うと、台帳の比較の行に並べられない（I7） |
+| 受け入れ条件 1・I3 | `measure` を load average 8 以下で 3 回流し、3 回とも全 suite が通り、壁時計と suite ごとの秒と開始時の load average が記録のファイルにあり、台帳がそのパスを指す | load average が 8 を超えた計測を判定に数えると、記録の `reference` と食い違う |
+| 受け入れ条件 2 | 着手前と着手後の記録の `tests`・`sum_seconds`・`wall_seconds` を PR の本文に並べる | 着手前後で宣言のコマンドが違うと、比較の行に並べられない（I7） |
 | 受け入れ条件 3・I1 | `diff` が、着手前にあって着手後に無い nodeid のうち台帳に無いものを出し、終了コード 1 を返す | 台帳の行を 1 つ消すと落ちる |
-| 受け入れ条件 4・I2 | `diff` が、着手前に走って着手後に skip になった nodeid を出し、終了コード 1 を返す | 既存のテストに skip の印を足すと落ちる |
-| 受け入れ条件 5 | 着手前の `measure` の `items` の上位 30 件とファイルの上位 10 本が、処置と着手後の秒つきで台帳に載る | 処置の列が空の行が残る |
+| 受け入れ条件 4・I2 | `diff` が、着手前に走って着手後に skip または deselect になった nodeid を出し、終了コード 1 を返す。deselect は台帳に載っていても出す | 既存のテストに skip の印を足すと落ちる。台帳に載せたテストを消さずに conftest や `--deselect` で外すと落ちる |
+| 受け入れ条件 5 | 着手前の記録の `items` の上位 30 件とファイルの上位 10 本が台帳に処置つきで載り、PR の本文の表で着手後の記録の秒と並ぶ | 処置の列が空の行が残る |
 | 受け入れ条件 6・I5・I6 | 台帳の基準の番号と、実装で使った手段が、すべて文書の表にある | 文書に無い番号・手段を台帳に書くと、レビューで照らしたときに見つかる |
-| 受け入れ条件 7・I4 | 起動を縮めた 6 本の既存のテストが変更なしで通る。`startup` の着手前後の中央値が台帳に載る | 遅らせた import が、起動の経路で必要なモジュールを外すと、そのスクリプトの既存のテストが落ちる |
+| 受け入れ条件 7・I4 | 起動を縮めた 6 本の既存のテストが変更なしで通る。`startup` の着手前後の中央値が記録のファイルにあり、台帳がそのパスを指す | 遅らせた import が、起動の経路で必要なモジュールを外すと、そのスクリプトの既存のテストが落ちる |
 | `startup`（決定 7） | 渡したスクリプトを N 回起動し、中央値・最小・最大と終了コードを返す。終了コードが回ごとに違えば終了コード 1 | 回数を引数から読まない・中央値の代わりに平均を返すと落ちる |
 | 決定 2 | 偽の HTTP サーバーを使うテストの後始末が 0.1 秒以内で終わる | 間隔を既定へ戻すと、そのテストの後始末が 0.5 秒になる（`--durations` の teardown の行で見つかる） |
 | 決定 3 | 待ちの間隔を差し替えたテストが、差し替える前と同じ結果を確かめて通る | 差し替えのフィクスチャが上限の宣言のファイルを書き換えると、`git diff` に宣言の差分が出る |
@@ -326,7 +338,7 @@ pytest-console-scripts（LIB1）は同じことをプラグインとして持つ
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2309 | 実装する | — | `plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/skills/cross-review/tests/`、`plugins/ndf/skills/worktree/tests/`、`plugins/ndf/skills/backlog-refinement/tests/`、`plugins/ndf/skills/development-workflow/tests/`、`plugins/playwright-kit/skills/playwright-authoring/tests/`、`scripts/tests/`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release_lib/`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/experimental/`、`docs/plugin-development-guide.md`、`docs/ndf-experiments.md`、`issues/issue-2309-test-ledger.md` |
+| #2309 | 実装する | — | `plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/skills/cross-review/tests/`、`plugins/ndf/skills/worktree/tests/`、`plugins/ndf/skills/backlog-refinement/tests/`、`plugins/ndf/skills/development-workflow/tests/`、`plugins/playwright-kit/skills/playwright-authoring/tests/`、`scripts/tests/`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release_lib/`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/experimental/`、`docs/plugin-development-guide.md`、`docs/ndf-experiments.md`、`issues/issue-2309-test-ledger.md`、`issues/issue-2309-timing/` |
 | #2204 | 取り込む | #2309 | — |
 
 ## 未確認のまま残ること
