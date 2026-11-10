@@ -169,7 +169,7 @@ def test_a_running_lap_is_not_stopped_by_the_hold_or_the_hours(lane):
 
 
 def test_an_answer_wakes_a_held_loop_lane_but_not_a_held_sprint_lane(run_env, monkeypatch):
-    """決定 6: 停止の範囲でも、答えを受けたループのレーンは起こす。1 スプリントのレーンは今と同じく再開の印だけを置く。"""
+    """決定 6: 停止の範囲でも、答えを受けたループのレーンには再開の印を置かない（耐久ワークフローが起こす）。1 スプリントのレーンは再開の印を置く。"""
     main = run_env["main"]
     p = pp.plan_dir(main, "p1") / "plan.json"
     data = json.loads(p.read_text())
@@ -178,5 +178,5 @@ def test_an_answer_wakes_a_held_loop_lane_but_not_a_held_sprint_lane(run_env, mo
     tph.hold_file(main, lanes=["la", "lb"])
     monkeypatch.setattr(pa, "owner_lanes", lambda *_a: ["la", "lb"])
     nxt, held = pa.owner_next(main, "p1", "q1", None, [{"id": "q1", "kind": "gate1", "lane": "la"}])
-    assert held == ["lb"] and "restart la" in nxt and "restart lb" not in nxt
+    assert held == ["lb"] and nxt is None  # ループのレーンの再起動は耐久ワークフローが打つ（#2936）
     assert set(ph.read_marks(main, "p1")) == {"lb"}

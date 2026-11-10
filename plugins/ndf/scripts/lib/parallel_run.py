@@ -8,8 +8,9 @@
 - リリースの組み方は依頼を受けるたびに耐久ステップ `parallel.route` が宣言から読む。組まないなら `released`、組めないなら
   `failed` と理由を依頼へ答え、計画を止めるかは問い（`kind: build`）への人の答えで決まる（#2616）
 - イベント `answer-hold`: `{seq, action: "answer_hold", n, line, hold}`（答え待ちの停止の最新の変化。#2707）
-- イベント `pause`: `{seq, action}`（`running` / `notice` / `release` / `confirmed`。リリースの途中の `notice` は
-  最後の起動の指示を `release` に添える）、`questions`: `{seq, items}`
+- イベント `pause`: `{seq, action}`（`running` / `release` / `confirmed` / `held`。一時レーンが流すものを決める
+  （`parallel.py helper` が読む）。`parallel.py wait` は読まない。#2936）、`questions`: `{seq, items}`
+- 一時レーンの起動と止まったレーンの再起動は耐久ワークフローが打つ（`parallel_launch`。#2936）
 - イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次のリリースへ回した知らせ）・`range-<連番>`・`lane-<名>`
 
 リレーハブの CLI（`relay.py spawn`・`ls`・`stop`・`role`）は子プロセスで打ち、統一 JSON レポートだけを読む。
@@ -32,6 +33,7 @@ import parallel_release as pr
 import parallel_route as prt
 from parallel_files import RELAY
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
+from parallel_launch import LaunchRouting
 from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
 from parallel_question import cause_of
 from parallel_reply import AnswerRouting, step_prior_waits, step_waiting_lanes
@@ -188,7 +190,7 @@ def render_progress(main: str, name: str, progress: dict) -> None:
 # ---- 耐久ワークフロー ----
 
 
-class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
+class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting):
     """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。"""
 
     write_hold, resume_lanes = staticmethod(step_answer_hold), staticmethod(step_resume_lanes)
@@ -223,6 +225,10 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         self.ls_ask_until = 0.0  # 一覧の失敗を次に問うてよい時刻（エポック秒）
         self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
         self.routed = True  # 答えの届け先の耐久ステップを打ってよいか。古い記録の打ち直しでは False（#2510）
+        self.launching = True  # 起動と再起動を耐久ワークフローが打つか。古い記録の打ち直しでは False（#2936）
+        self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
+        self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
+        self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
         self.init_answer_hold()
         self.init_run_state(False)
 
@@ -231,18 +237,14 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         return self.seq
 
     def pause(self, action: str, **fields) -> None:
-        """イベント `pause` は上書きされるため、流れているリリースの最後の起動の指示（release / confirmed）を
-        他の知らせにも `release` として添え、知らせが重なっても起動の指示を失わない。リリースの答えを受けた止まっている
-        レーンを起こす行（`wake`）も、そのレーンが動き出すまでどの知らせにも添える。"""
+        """イベント `pause` は上書きされるため、流れているリリースの最後の起動（release / confirmed）を他のイベントにも
+        `release` として添え、一時レーンが流すもの（`helper_task`）を失わない。"""
         seq = self.bump()
         if action in ("release", "confirmed"):
             self.launch = {"seq": seq, "action": action, **fields}
         elif self.current is not None and self.launch:
             fields = {**fields, "release": self.launch}
-        stopped = self.stopped()
-        self.wake = [n for n in self.wake if n in stopped]
-        wake = {"wake": [f"python3 {RELAY} restart {n}" for n in lanes]} if (lanes := self.wake_lanes()) else {}
-        durable.set_event("pause", {"seq": seq, "action": action, **fields, **wake})
+        durable.set_event("pause", {"seq": seq, "action": action, **fields})
 
     def publish(self, key: str, value) -> None:
         """答え・次のリリースへ回した知らせ・範囲のイベントを立て、作り直しの後に読み手が読めるよう控える（決定 6）。"""
@@ -349,16 +351,18 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         if q.get("kind") == "build":
             self.apply_build(q, choice)
             return
-        if prt.STOP_PLAN not in choice:
+        if self.relaunch(q, choice) or prt.STOP_PLAN not in choice:
             return
-        if q.get("kind") == "spawn" and q.get("lane") in self.lanes:
+        if q.get("kind") == "stall" and q.get("lane") in self.lanes:
+            step_stop_lanes(self.main, [q["lane"]])
+        elif q.get("kind") == "spawn" and q.get("lane") in self.lanes:
             lane = q["lane"]
             self.lanes[lane].update(started=True, state="stopped", given_up=True)
             # reply が持ち主を再開待ちへ加えた後でも、止めたレーンを起こす 1 行と再開待ちから外す（計画を終えられるように）
             self.wake = [n for n in self.wake if n != lane]
             self.revive = [n for n in self.revive if n != lane]
             self.revive_at.pop(lane, None)
-        elif q.get("kind") == "helper" and (rel := self.current) is not None and q.get("n") == rel["n"]:
+        elif q.get("kind") in ("helper", "spawn") and (rel := self.current) is not None and q.get("n") == rel["n"]:
             if not rel.get("prs"):  # 提示の前に止まったなら、このリリースへ入れた依頼の Pull Request を範囲として締める
                 own = {n for r in self.pending if r["id"] in rel.get("requests", []) for n in r.get("prs") or []}
                 rel["prs"] = step_presented(rel["dirs"][-1]).get("prs") or sorted(own)
@@ -447,14 +451,10 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
 
     def emit_release(self, rel: dict, k: int, represent: bool) -> None:
         d = Path(rel["dirs"][k - 1])
-        self.pause(
-            "release",
-            n=rel["n"],
-            k=k,
-            represent=represent,
-            pipeline=pr.pipeline_cmd(SUPERVISE, d),
-            spawn=helper_spawn(self.name, rel["n"], k),
-        )
+        spec = helper_spawn(self.name, rel["n"], k)
+        purpose = f"rel-{rel['n']}-{k}-present"
+        self.pause("release", n=rel["n"], k=k, represent=represent, pipeline=pr.pipeline_cmd(SUPERVISE, d), purpose=purpose, **spec)
+        self.launch_helper()
 
     def resume(self, msg: dict) -> None:
         rel = self.current
@@ -489,9 +489,9 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         got = step_presented(rel["dirs"][k - 1])
         versions = rel.get("versions") or [rel.get("version")]
         rel.update(state="confirmed", k=k, sha=got.get("sha"), prs=got.get("prs") or [], version=versions[min(k, len(versions)) - 1])
-        self.pause(
-            "confirmed", n=rel["n"], k=k, plan=str(Path(rel["dirs"][k - 1]) / "release.json"), spawn=helper_spawn(self.name, rel["n"], k)
-        )
+        plan, spec = str(Path(rel["dirs"][k - 1]) / "release.json"), helper_spawn(self.name, rel["n"], k)
+        self.pause("confirmed", n=rel["n"], k=k, plan=plan, purpose=f"rel-{rel['n']}-{k}-confirmed", **spec)
+        self.launch_helper()
 
     def settle(self, rel: dict, msg: dict) -> list[dict]:
         """リリースを締め、範囲で答えられる依頼へ答える。答えた依頼を返す。"""
@@ -527,12 +527,11 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold):
         return answered
 
     def wake_answered(self, answered: list[dict]) -> None:
-        """止まった宛先を起こす 1 行を知らせへ（異常系 6）。全レーンが止まれば異常系 11 に任せる。組み直しの依頼の答えを読むレーンはいない。"""
+        """止まった宛先を再起動の対象へ入れる（異常系 6）。全レーンが止まれば異常系 11 に任せる。組み直しの依頼の答えを読むレーンはいない。"""
         stopped = self.stopped()
         wake = sorted({r["lane"] for r in answered if r.get("lane") in stopped and not r.get("again")})
         if wake and len(stopped) < len(self.order):
             self.wake = sorted({*self.wake, *wake})
-            self.pause("notice", lanes=[], attach=[])
 
 
 @durable.workflow(name="parallel")
@@ -544,9 +543,11 @@ def parallel_workflow(main: str, name: str) -> dict:
     run = _Run(main, name, init["lanes"])
     run.init_run_state(ledgered)
     run.routed = durable.patched("parallel-answers")
+    run.launching = durable.patched("parallel-launch")
     restored = step_restore(main, name) if ledgered else None
-    run.adopt(restored)  # 台帳から戻し、running と戻した問い・知らせを立てる
+    run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
     run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す
+    run.launch_helper()  # 作り直し: 流れているリリースの一時レーンを、起動の記録が無ければ起動する（I3）
     if run.routed:
         run.receive_prior(step_prior_waits(main, name))
     wait = poll_seconds()
@@ -568,16 +569,15 @@ def parallel_workflow(main: str, name: str) -> dict:
             run.receive(durable.recv("resume", min(wait, 30)), "resume")
         if not run.stop:
             run.govern_hold(_observe_run(run, main))
+            run.launch_wakes()
         run.save()
 
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
     designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped)
-    if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。起こす 1 行を知らせへ添え続ける（6f）
-        if set(designs) - set(run.wake):
-            run.wake = sorted({*run.wake, *designs})
-            run.pause("notice", lanes=[], attach=[])
+    if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。動いて観えるまで 1 回ずつ再起動する（6f）
+        run.wake = sorted({*run.wake, *(set(designs) - run.woken)})
         return None
     held = step_held_loops(main, name, sorted(run.answered))
     if not held:
@@ -588,8 +588,9 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     if todo and not set(run.held_spawned) & set(held):
         run.held_spawned.append(todo[0])
         seq = len(run.releases) + len(run.held_spawned)
-        spawn = helper_spawn(name, seq, 0, pending=todo[0], cwd=prt.step_loop_repo(main, name, todo[0]))  # 別リポジトリはそこで（#2733）
-        run.pause("held", loops=[todo[0]], spawn=spawn)
+        spec = helper_spawn(name, seq, 0, pending=todo[0], cwd=prt.step_loop_repo(main, name, todo[0]))  # 別リポジトリはそこで（#2733）
+        run.pause("held", loops=[todo[0]], purpose=f"held-{todo[0]}", **spec)
+        run.launch_once(f"held-{todo[0]}", pr.helper_name(name, seq), spec["argv"], spec["cwd"])
     return None
 
 
@@ -644,9 +645,8 @@ def _observe_run(run: _Run, main: str) -> dict:
     run.clear_revived(rows)
     _ask_stalls(run, rows, run.seen_at)
     _ask_helper(run, rows)
-    noticed = apply_observed_states(run, rows)
-    if noticed:
-        run.pause("notice", lanes=noticed, attach=[f"python3 {RELAY} attach {n}" for n in noticed])
+    apply_observed_states(run, rows)
+    run.woken = {n for n in run.woken if run.lanes[n].get("state") in (None, "stopped")}  # 動いて観えたら設計の答えの再起動を解く
     return seen
 
 
@@ -684,9 +684,8 @@ def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
         run.stall_until[n] = now + limit
         mins = int((now - at.timestamp()) // 60)
         run.ask(
-            "stall", f"{n}-s{int(now)}", n, f"レーン {n} が {mins} 分動いていない", ["起こし直す", "止める", "待つ"],
-            commands={"起こし直す": f"python3 {RELAY} restart {n}", "止める": f"python3 {RELAY} stop {n}"},
-        )  # fmt: skip
+            "stall", f"{n}-s{int(now)}", n, f"レーン {n} が {mins} 分動いていない", ["起こし直す", "止める", "待つ"]
+        )  # fmt: skip  答えは耐久ワークフローが当てる（apply_own。#2936 の決定 6）
 
 
 # ---- 外の入口 ----

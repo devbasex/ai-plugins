@@ -140,6 +140,7 @@
 | `NDF_MVV_STATE_DIR` | user | `plugins/ndf/scripts/ask.py`<br>`plugins/ndf/scripts/gate-rejections.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/project-mvv.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `NDF_ORGANIZER_DIR` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_ORGANIZER_LANE` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
+| `NDF_PARALLEL_LAUNCH_SECONDS` | user | `plugins/ndf/scripts/parallel.py` |
 | `NDF_PARALLEL_MAX_PLANS` | user | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_PARALLEL_POLL` | user | `plugins/ndf/scripts/parallel.py` |
 | `NDF_PARALLEL_RELAY` | user | `plugins/ndf/scripts/parallel.py` |
@@ -280,6 +281,7 @@
 | `monitor.stall.codex` | seconds 180 | codex の無進捗の許容。推論ログを逐次出す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.stall.kiro` | seconds 480 | kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `notify.slack` | seconds 10 | Slack へ送る HTTP の上限 | `plugins/ndf/scripts/lib/notify.py:<module>` |
+| `parallel-launch.up` | seconds 120 / interval 5 | 一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる） | `plugins/ndf/scripts/lib/parallel_launch.py:<module>`<br>`plugins/ndf/scripts/lib/parallel_launch.py:_hit_once` |
 | `parallel-repo.stall` | seconds 3600 | 動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる） | `plugins/ndf/scripts/lib/parallel_repo.py:<module>` |
 | `post-queue.rate-limit` | seconds 900 / interval 30 / same_cause 31 | 上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒 | `plugins/ndf/scripts/lib/post_queue.py:retry`<br>`plugins/ndf/scripts/lib/post_queue.py:cmd_retry` |
 | `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |

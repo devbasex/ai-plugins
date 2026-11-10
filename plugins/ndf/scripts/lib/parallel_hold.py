@@ -356,10 +356,6 @@ class AnswerHold:
         self.superseded: set[str] = set()  # 答えた設計 PR の古い依頼の id。次の突き合わせで一覧から外す
         self.holds = 0  # 止めた回数
 
-    def wake_lanes(self) -> list[str]:
-        """起こす 1 行を添えるレーン。停止の範囲と、人が止めたままにしたレーンを除く。"""
-        return [n for n in self.wake if not self.hold.covers(n) and n not in self.left_stopped]
-
     def clear_revived(self, rows: dict) -> None:
         """起こしたレーンの最後に動いた時刻（`relay.py ls` の `at`）が、答えたときの観測の時刻より後へ進んだら `revive` から外す。
         答えを当ててすぐ止まるレーンは観測の間隔の中で stopped → running → stopped と動き、状態の変化として見えないためである。"""
@@ -373,7 +369,7 @@ class AnswerHold:
                 self.revive_at.pop(n, None)
 
     def keep_stopped(self, lane: Optional[str]) -> None:
-        """`park --clear` のメッセージを受ける。起こす 1 行と起こした後の待ちから外す。"""
+        """`park --clear` のメッセージを受ける。再起動の対象と起こした後の待ちから外す。"""
         if lane not in self.lanes:
             return
         self.left_stopped.add(lane)
@@ -394,13 +390,10 @@ class AnswerHold:
         """観測の後の突き合わせ。閾値の載らない古い観測の記録の再生では何もしない（記録の順を変えないため）。"""
         if seen.get("limits") is None:
             return
-        shown = self.wake_lanes()
         self._retire_superseded()
         self._update_hold(Limits(**seen["limits"]))
         if self.ls_ok:
             self._reconcile({n: m for n, m in (seen.get("marks") or {}).items() if n in self.lanes})
-        if (now := self.wake_lanes()) and set(now) - set(shown):
-            self.pause("notice", lanes=[], attach=[])
 
     def restore_hold(self, limits: Optional[dict], written: Optional[dict] = None) -> None:
         """作り直しの直後に、戻した問いと閾値から停止の範囲を戻す。閾値が無い（台帳を読まない途中の記録・閾値を載せない

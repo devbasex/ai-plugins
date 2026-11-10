@@ -1,5 +1,5 @@
 """並列の計画の答えの届け方（#2510）: 同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・
-止まった持ち主を起こす対象。`parallel_run._Run` が継ぐ。耐久ワークフローの中で動くので、外を読むのは耐久ステップだけである。"""
+止まった持ち主の再起動の対象。`parallel_run._Run` が継ぐ。耐久ワークフローの中で動くので、外を読むのは耐久ステップだけである。"""
 
 from __future__ import annotations
 
@@ -46,6 +46,9 @@ def step_waiting_lanes(main: str, name: str) -> list[str]:
     return prt.waiting_lanes(Path(main), name)
 
 
+OWN_KINDS = ("stall", "helper", "spawn", "observe", "build", "unmatched")  # 耐久ワークフローが自分で立てる問いの区分
+
+
 class AnswerRouting:
     """答えを読んで動く側へ届ける。`_Run` の値（`questions`・`answered`・`revive`・`wake`・`routed` ほか）を使う。"""
 
@@ -71,8 +74,7 @@ class AnswerRouting:
         """計画を読み直し、足したレーンを起動の候補に入れ、書き換えたレーンの依存と入力の種類を反映する。読み直せなければ
         前の計画のまま続け、知らせに出す。名前を消したレーンは起動済みの状態を残す（止めるのは `relay.py stop`）。"""
         lanes = step_reload_lanes(self.main, self.name)
-        if lanes is None:
-            self.pause("notice", lanes=[], attach=[], warning="計画を読み直せないため前の計画のまま続ける")
+        if lanes is None:  # 理由は耐久ステップが run.log へ残した
             return
         for ln in lanes:
             n = ln["name"]
@@ -84,7 +86,6 @@ class AnswerRouting:
                 self.sprint.add(n)
             else:
                 self.sprint.discard(n)
-        self.pause("notice", lanes=[], attach=[])
 
     def blocking(self) -> list[dict]:
         """計画の終わりを止める問い。前のループの待ちは止めない（I12）。"""
@@ -147,12 +148,15 @@ class AnswerRouting:
             )
 
     def wake_owners(self, q: dict) -> None:
-        """問いの止まった持ち主を起こす対象へ入れる: 1 スプリントのレーンと、記録が `waiting_only` で答えのまだの行を持つループのレーン（#2510 の決定 9）。"""
-        owners = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))} & self.stopped()
+        """問いの止まった持ち主を再起動の対象へ入れる: 1 スプリントのレーンと、記録が `waiting_only` で答えのまだの行を持つループのレーン
+        （#2510 の決定 9）。問いを送った一時レーンは、この場で再起動する（打つ前の一覧で動いていれば打たない）。"""
+        senders = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))}
+        own = q.get("kind") in OWN_KINDS  # 耐久ワークフローが立てた問いの答えは apply_own が当てる
+        for h in sorted(x for x in senders if x and not own and x not in self.lanes and x.startswith(f"{self.name}-rel")):
+            self.launch_once(f"ans-{h}-{q.get('id')}", h, ["restart", h])  # 問いを保留して止まった一時レーン（計画全体の停止の間も起こす）
+        owners = senders & self.stopped()
         waits = set(step_waiting_lanes(self.main, self.name)) if self.routed and owners - self.sprint else set()
         owners &= self.sprint | waits
         self.revive = sorted({*self.revive, *owners})  # 止まった持ち主を起こして答えを当てるまで計画を終えない
         self.revive_at.update({o: self.seen_at for o in owners})  # 止まったと観た時刻。これより後に動いたら起きたと数える
-        if owners - set(self.wake):  # 保留中の持ち主の後に依存先を起こさないため、全レーンが止まるのを待たずに起こす 1 行を添える
-            self.wake = sorted({*self.wake, *owners})
-            self.pause("notice", lanes=[], attach=[])
+        self.wake = sorted({*self.wake, *owners})  # 全レーンが止まるのを待たずに、この周の終わりに耐久ワークフローが再起動する（#2936）

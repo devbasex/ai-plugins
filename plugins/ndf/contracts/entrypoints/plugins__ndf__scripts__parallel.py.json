@@ -151,6 +151,12 @@
           "name"
         ]
       },
+      "status": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
       "stop": {
         "options": [
           "--force"
@@ -195,6 +201,7 @@
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
     "NDF_ORGANIZER_LANE",
+    "NDF_PARALLEL_LAUNCH_SECONDS",
     "NDF_PARALLEL_MAX_PLANS",
     "NDF_PARALLEL_POLL",
     "NDF_PARALLEL_RELAY",
