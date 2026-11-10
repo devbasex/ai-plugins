@@ -256,7 +256,11 @@ def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict],
     finish_lap(env, rec, lap, DONE if released or not (bad or not items) else FAILED, state)
     if released and (bad or not items):
         # リリースまで届いたループの 1 回は完了で締め、後のまとめの失敗は失敗の鍵とは別に残す（#2911。同じ失敗の判定に数えない）
-        lap["close_failure"] = failure_key(state) or {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "まとめ", "step": "止まった"}
+        lap["close_failure"] = failure_key(state) or {
+            "issues": lap.get("issues_kept") or selected_issues(lap),
+            "kind": "まとめ",
+            "step": "止まった",
+        }
     if version and lap["outcome"] == DONE:
         lap.setdefault("versions", {})["prod"] = version
     return after_close(env, rec, before, f"ループの {lap['n']} 回目 の残りを流し、{lap['outcome']} で締め直した")
