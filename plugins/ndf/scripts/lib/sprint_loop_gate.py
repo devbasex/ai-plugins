@@ -17,6 +17,7 @@ import legacy_values
 import mode_judgment
 import project_mvv as pm
 import revise_note
+import state_get
 import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
 from gate1_requests import carried_over, design_head, lane_unmatched
@@ -639,7 +640,7 @@ def failure_key(state: dict) -> dict | None:
     """スプリント状態の行（完了でもまだでもない最初の行）の課題・種類・止まったところ（決定 8）。理由の文は含めない。"""
     for p in state.get("plans", []):
         row = p.get("row") or {}
-        if row.get("result") not in (None, "まだ", NOT_RUN, *FINISHED):  # 承認ゲートは loop gate が扱い、流さなかった計画は失敗の元でない
+        if row.get("result") not in (None, state_get.NOT_DONE, NOT_RUN, *FINISHED):  # 承認ゲートは loop gate が扱い、流さなかった計画は失敗の元でない
             return {"issues": sorted(p.get("issues") or []), "kind": p.get("kind", ""), "step": row.get("result")}
     return None
 

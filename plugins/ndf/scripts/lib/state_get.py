@@ -22,6 +22,7 @@ import step_result
 
 TOOL = "sprint-state"
 NOT_DONE = "まだ"  # 計画の行の状態で「まだ終わっていない」を表す語（`sprint-state.py` も同じ値を使う）
+DONE = "完了"  # 計画の行の状態で「終わった」を表す語（`sprint-state.py` が使う。`sprint_loop_record.DONE` と同じ語）
 
 
 def _get_result(status: str, summary: str, items=None, metrics=None, next_: str | None = None, code: int | None = None) -> dict:
