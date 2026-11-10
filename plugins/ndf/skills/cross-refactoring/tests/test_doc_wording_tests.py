@@ -164,8 +164,8 @@ def test_the_implement_intake_passes_a_temporary_markdown(cmd_implement, tmp_pat
 def test_the_add_tests_intake_rejects_the_item_with_the_reason(cmd_implement, tmp_path):
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
     facts[0]["files"] = ["tests/test_full.py"]
-    problem = cmd_implement._test_commit_problem(facts, TRACKED, _state(tmp_path))
-    assert problem is not None and problem[1].startswith(REASON)
+    problems = cmd_implement._test_commit_problems(facts, TRACKED, _state(tmp_path))
+    assert len(problems) == 1 and problems[0][1].startswith(REASON)
 
 
 @pytest.mark.parametrize("reject", [None, False])
@@ -174,4 +174,4 @@ def test_the_intakes_do_not_reject_unless_the_declaration_says_so(cmd_implement,
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
     assert cmd_implement._implement_problem(ITEM, facts, TRACKED, _state(tmp_path, reject)) is None
     facts[0]["files"] = ["tests/test_full.py"]
-    assert cmd_implement._test_commit_problem(facts, TRACKED, _state(tmp_path, reject)) is None
+    assert cmd_implement._test_commit_problems(facts, TRACKED, _state(tmp_path, reject)) == []

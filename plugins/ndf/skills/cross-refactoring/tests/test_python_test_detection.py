@@ -146,8 +146,19 @@ def test_the_add_tests_intake_treats_a_production_test_named_file_as_other(cmd_i
     fact["trailers"] = {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"}
     fact["test_changes"] = {}
     fact["files"] = ["lib/test_x.py", "colo/test_z.py"]
-    problem = cmd_implement._test_commit_problem([fact], [], {"worktrees": {"work": str(repo)}})
-    assert problem == ("non_test_files", "テストの追加がテスト以外のファイルを変えています（lib/test_x.py）", False)
+    problems = cmd_implement._test_commit_problems([fact], [], {"worktrees": {"work": str(repo)}})
+    assert problems == [("non_test_files", "テストの追加がテスト以外のファイルを変えています（lib/test_x.py）", False)]
+
+
+def test_the_add_tests_intake_marks_non_test_files_across_several_commits(cmd_implement, repo):
+    """コミット数の違反とは独立に、全コミットの本番のファイルの変更を `non_test_files` として記録する。"""
+    base = {"exists": True, "test_status": "pass", "touches_tests": True, "diff_lines": 1, "test_changes": {}}
+    trailers = {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"}
+    first = {**base, "sha": "abc1234", "trailers": trailers, "files": ["tests/test_y.py"]}
+    second = {**base, "sha": "def5678", "trailers": trailers, "files": ["lib/test_x.py"]}
+    rows = cmd_implement._test_commit_problems([first, second], [], {"worktrees": {"work": str(repo)}})
+    assert [row[0] for row in rows] == ["commits", "non_test_files"]
+    assert "lib/test_x.py" in rows[1][1]
 
 
 # ---------- コミットの事実 ----------

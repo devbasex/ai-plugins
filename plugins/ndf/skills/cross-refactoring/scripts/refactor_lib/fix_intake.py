@@ -25,6 +25,7 @@ import statefile
 from . import clock, die, info, intake, undo
 from .gitfacts import (
     collect_commit_facts,
+    commit_test_changes,
     commit_trailers,
     commits_in_range,
     discard_impl_leftovers,
@@ -42,11 +43,25 @@ from .verify import collect_test_changes, verify_commit_basics, verify_test_chan
 UNFIXED_REASON = "修正担当が直さなかった（修正の範囲にこの項目のコミットが無い）"
 
 
+def _cumulative_test_changes(
+    work: str,
+    context: list[str],
+    unit: list[dict[str, Any]],
+) -> dict[str, tuple[list[str], list[str]]]:
+    """実装の前から今回の修正の後までのテストの変化（`context` は項目の実装と前の修正のコミット、古い順）。
+
+    **期待値は累積で判定する。** 修正のコミットだけを見ると、実装が誤って変えた期待値を元へ戻す正常な修正が
+    「値の消失」に見えて打ち消され、振る舞いの変更と変えたテストが残る。"""
+    prior = [{"test_changes": commit_test_changes(work, sha)} for sha in context] if work else []
+    return collect_test_changes([*prior, *unit])
+
+
 def _fix_problems(
     state: dict[str, Any],
     facts: list[dict[str, Any]],
     allowed: set[str],
     rewrites: Optional[dict[str, list[dict[str, str]]]] = None,
+    work: str = "",
 ) -> list[dict[str, str]]:
     """手順を外れたコミット（`{"sha", "problem", "item"}`）。**外れたコミットだけを差し戻す**（#2457 の棚卸し #31）。
 
@@ -76,7 +91,7 @@ def _fix_problems(
         context = [*implement_shas(item), *((item.get("commits") or {}).get("fix") or [])]
         verdict = judge_commits(state, [f["sha"] for f in unit], context)
         note_outside(item or None, verdict)
-        problem = verify_test_changes(collect_test_changes(unit))
+        problem = verify_test_changes(_cumulative_test_changes(work, context, unit))
         if problem:
             bad.extend({"sha": f["sha"], "item": item_id, "problem": problem} for f in unit)
         elif verdict.rewrites and rewrites is not None:
@@ -106,7 +121,7 @@ def _inspect_fix_commits(
         "head": head,
         "ordered": ordered,
         "known": True,
-        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}, rewrites),
+        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}, rewrites, work),
         "rewrites": rewrites,
     }
 

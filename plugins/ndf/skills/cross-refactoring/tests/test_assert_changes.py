@@ -250,6 +250,30 @@ def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
     assert len(problems) == 1 and "期待" in problems[0]["problem"] and problems[0]["sha"] == "b" * 40
 
 
+def _fix_fact(before: str, after: str) -> dict:
+    return {
+        "sha": "b" * 40,
+        "exists": True,
+        "diff_lines": 2,
+        "files": ["tests/test_a.py"],
+        "trailers": {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+        "test_changes": {"tests/test_a.py": ([before], [after])},
+    }
+
+
+def test_the_fix_intake_accepts_restoring_an_expectation(fix_intake, monkeypatch) -> None:
+    """実装が誤って変えた期待値を元へ戻す修正は、実装の前からの累積で見て受け取ること。"""
+    impl = {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])}
+    monkeypatch.setattr(fix_intake, "commit_test_changes", lambda _work, sha: impl if sha == "a" * 40 else {})
+    state = {"items": [{"id": "I-001", "commits": {"implement": ["a" * 40]}}]}
+    facts = [_fix_fact("    assert f(1) == 4\n", "    assert f(1) == 3\n")]
+    assert fix_intake._fix_problems(state, facts, {"I-001"}, None, "/work") == []
+    # 累積でも期待値が元と違えば落とす
+    facts = [_fix_fact("    assert f(1) == 4\n", "    assert f(1) == 5\n")]
+    problems = fix_intake._fix_problems(state, facts, {"I-001"}, None, "/work")
+    assert len(problems) == 1 and "期待" in problems[0]["problem"]
+
+
 def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
     """判定できない差分を、検証の結果として持ち出せること。
 

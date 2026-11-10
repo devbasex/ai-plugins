@@ -291,9 +291,9 @@ def _intake_phase(
             intake.carried[item["id"]] = f"{label}の終わりまでにコミットが無い"
             continue
         problem = problem_fn(item, commits)
-        if problem:
+        for one in filter(None, problem if isinstance(problem, list) else [problem]):  # 違反は 1 件か並び
             # 取り消さない（#2457）。差し戻しに残し、期待値の欠けと文言を固定するテストは修正へ回す
-            kind, text, to_fix = problem if isinstance(problem, tuple) else ("procedure", str(problem), False)
+            kind, text, to_fix = one if isinstance(one, tuple) else ("procedure", str(one), False)
             intake.sendbacks.setdefault(item["id"], []).append({"kind": kind, "reason": text})
             if to_fix:
                 intake.send_to_fix[item["id"]] = text
@@ -308,31 +308,30 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
         state,
         # 今の巡で採った、テストを足す未了の項目だけ。前の巡で検証を終えた項目のコミットに触れない（#1743）
         lambda item: bool(item.get("tests")) and item.get("status") == PLANNED and in_current_round(state, item),
-        lambda _item, commits: _test_commit_problem(commits, tracked, state),
+        lambda _item, commits: _test_commit_problems(commits, tracked, state),
         "add-tests",
         intake,
     )
 
 
-def _test_commit_problem(
+def _test_commit_problems(
     commits: list[dict[str, Any]],
     tracked: list[str],
     state: dict[str, Any],
-) -> Optional[str]:
-    """テストの追加のコミットの手順の違反（種類, 理由, 修正へ回すか）。無ければ `None`。取り消しの理由にしない（#2457）。"""
-    commit = commits[0]
+) -> list[tuple[str, str, bool]]:
+    """テストの追加のコミットの手順の違反（種類, 理由, 修正へ回すか）の並び。取り消しの理由にしない（#2457）。
+
+    **本番のファイルの変更（`non_test_files`）は、コミット数・記名の違反とは独立に全コミットで調べる。** 印が無いと
+    見送りへ変えた項目の未検証のテストの打ち消し（`readopt`）を通らず、検証していない本番の変更が公開へ流れる。"""
+    others = list(dict.fromkeys(f for c in commits for f in c.get("files") or [] if not is_test_path(f, work_dir(state))))
+    rows = [("non_test_files", f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）", False)] if others else []
     if len(commits) > 1:
-        return ("commits", f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）", False)
-    problem = verify_commit_basics(commit, "コミットが範囲にありません", check_test=False)
-    if problem:
-        return ("trailers", problem, False)
-    others = [f for f in commit.get("files") or [] if not is_test_path(f, work_dir(state))]
-    if others:
-        return ("non_test_files", f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）", False)
+        return [("commits", f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）", False), *rows]
+    problem = verify_commit_basics(commits[0], "コミットが範囲にありません", check_test=False)
+    if problem or rows:
+        return [("trailers", problem, False), *rows] if problem else rows
     hits = _wording_hits(commits, tracked, state)
-    if hits:
-        return ("doc_wording", _doc_wording_reason(hits), False)
-    return None
+    return [("doc_wording", _doc_wording_reason(hits), False)] if hits else []
 
 
 def _merge_phase(
