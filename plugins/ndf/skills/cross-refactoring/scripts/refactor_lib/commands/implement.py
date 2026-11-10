@@ -61,8 +61,7 @@ from ..pathkinds import is_test_path
 from ..paths import git_out, load_state, work_dir
 from ..phases import finish_phase, phase_record
 from ..scope_check import judge_commits, note_outside
-from .. import undo
-from ..undo import resume_pending_drop
+from ..undo import resume_pending_drop, revert_unattributed
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -156,7 +155,7 @@ def _settle(
     done = any(d.get("reason") == label and int(d.get("round") or 1) == this_round for d in state.get("drops") or [])
     if intake.extra and not done:
         # 新しい順に `git revert` で打ち消す（棚卸し #22。`reset --hard` は使わない）
-        undo.revert_unattributed(path, state, intake.extra, label)
+        revert_unattributed(path, state, intake.extra, label)
         info(f"↩ どの項目にも属さないコミット {len(intake.extra)} 件を git revert で打ち消しました（Item-Id を付け直して出させる差し戻し）")
     # コミットの無い項目は見送らずに持ち越す（`readopt` が採り直すか `not_done` にする。I15）
     for item_id, reason in intake.carried.items():
