@@ -23,6 +23,7 @@ from sprint_loop_record import (
     SLOT_FIT,
     PAUSE_RANK,
     Env,
+    ResumeContext,
     loop_dir,
     write_record,
     open_record,
@@ -359,10 +360,10 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     )
 
 
-def resume_answer_hold(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def resume_answer_hold(ctx: ResumeContext) -> tuple[dict | None, str]:
     """答え待ちの停止で止まったループの再開: 範囲に残っていても解く。承認の要らない候補があるかは次の境の選定が決め、
     無ければ同じ条件で止まり直す（#2913 の決定 6）。"""
-    return None, nxt
+    return None, ctx.nxt
 
 
 def has_held_work(rec: dict) -> bool:

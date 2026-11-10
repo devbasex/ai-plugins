@@ -172,6 +172,18 @@ class Env:
 # ---------------------------------------------------------------- 記録
 
 
+@dataclass
+class ResumeContext:
+    """止まったループの再開 1 回分の値。rec・before・stop・lap は記録の dict そのものを指す（写さない・保存しない）。"""
+
+    env: Env
+    rec: dict
+    before: dict
+    stop: dict
+    lap: dict | None
+    nxt: str
+
+
 def loop_dir(env: Env, name: str) -> Path:
     if not NAME_RE.match(name or ""):
         raise LoopError(f"ループの名前は英数字・- ・_ で書く: {name!r}")

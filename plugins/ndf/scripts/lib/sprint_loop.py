@@ -44,6 +44,7 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
+    ResumeContext,
     prod_of,
     loop_dir,
     loop_record_path,
@@ -193,21 +194,22 @@ def resume_record(env: Env, rec: dict) -> None:
     rec["stop"], rec["status"] = None, "running"
 
 
-def _resume_mvv_changed(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_mvv_changed(ctx: ResumeContext) -> tuple[dict | None, str]:
     why = "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）"
-    return stopped_result(env, rec, why), nxt
+    return stopped_result(ctx.env, ctx.rec, why), ctx.nxt
 
 
-def _resume_user_stop(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
-    (loop_dir(env, rec["name"]) / STOP_FILE).unlink(missing_ok=True)
-    return None, nxt
+def _resume_user_stop(ctx: ResumeContext) -> tuple[dict | None, str]:
+    (loop_dir(ctx.env, ctx.rec["name"]) / STOP_FILE).unlink(missing_ok=True)
+    return None, ctx.nxt
 
 
-def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_budget(ctx: ResumeContext) -> tuple[dict | None, str]:
+    env, rec, stop, nxt = ctx.env, ctx.rec, ctx.stop, ctx.nxt
     unit = stop["condition"].removeprefix("budget_")
     used = consumed(rec)[unit]
     if over_budget(used, rec["budget"].get(unit)):
-        write_record(env, rec, before)
+        write_record(env, rec, ctx.before)
         return (
             stopped_result(
                 env, rec, f"予算（{unit}）を超えたまま（消費 {used} / 予算 {rec['budget'][unit]}）。--budget-{unit} で上書きして再開する"
@@ -217,7 +219,8 @@ def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | No
     return None, nxt
 
 
-def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_gate2(ctx: ResumeContext) -> tuple[dict | None, str]:
+    env, rec, stop, lap, nxt = ctx.env, ctx.rec, ctx.stop, ctx.lap, ctx.nxt
     if not lap:
         return None, nxt
     answer = gate2_answer(lap, stop.get("at"))
@@ -229,7 +232,8 @@ def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | Non
     return None, gate2_pipeline(env, rec, lap, stop)
 
 
-def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_refused(ctx: ResumeContext) -> tuple[dict | None, str]:
+    env, rec, stop, lap, nxt = ctx.env, ctx.rec, ctx.stop, ctx.lap, ctx.nxt
     if not lap:
         return None, nxt
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
@@ -242,7 +246,7 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
     try:
         queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
-        write_record(env, rec, before)
+        write_record(env, rec, ctx.before)
         return stopped_result(env, rec, f"設計承認ゲートの後の続きをまだ組めない: {str(e)[:200]}"), nxt
     return None, f"{queue} && {wait_lap(rec, done)}"
 
@@ -269,7 +273,7 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
     cond, nxt = stop["condition"], select_cmd(name)
     handler = _resume_handler(cond)
     if handler:
-        stopped, nxt = handler(env, rec, before, stop, current_lap(rec), nxt)
+        stopped, nxt = handler(ResumeContext(env, rec, before, stop, current_lap(rec), nxt))
         if stopped is not None:
             return stopped
     resume_record(env, rec)
