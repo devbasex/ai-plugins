@@ -295,7 +295,7 @@ def _fix_or_narrow(
         info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
         return True
     record["resolution"] = "deferred"
-    info("ℹ 全体テストの変更起因の失敗の原因の項目を決められません。取り消さず、最終ゲートの修正へ寄せます")
+    info("ℹ 全体テストの変更起因の失敗の原因の項目を決められません。取り消さず、最終ゲート修正へ寄せます")
     return False
 
 
