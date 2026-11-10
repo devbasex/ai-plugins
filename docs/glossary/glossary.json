@@ -6152,7 +6152,7 @@
       "term": "無関係な失敗",
       "context": "ndf-cross-refactoring",
       "meaning": "着手前の木（取り込んだベースブランチを含む）でも落ちるテストの失敗。改善項目の合否に数えない",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "停滞",

@@ -688,7 +688,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 実装時間 | — | 改善項目のテスト追加・実装・修正で担当の CLI が動いた時間。提案・選定・テストの実行・CI の待ちは含めない | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 予算の延長 | — | グレード high の候補の見積りの和が実装の予算を超え 2 倍以下のとき、実効の予算をその和まで増やすこと | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | リファクタリングの成立 | — | 改善項目が、振る舞いを変えずに、計画の前提にした構造の上で直し切れる見込みがあること。成立しない例: 振る舞いを変えないと直せない・前提の構造が実在しない | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
-| 無関係な失敗 | — | 着手前の木（取り込んだベースブランチを含む）でも落ちるテストの失敗。改善項目の合否に数えない | — | — | — |
+| 無関係な失敗 | — | 着手前の木（取り込んだベースブランチを含む）でも落ちるテストの失敗。改善項目の合否に数えない | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 停滞 | — | 修正の後の落ちたテストの集合が、前の回と同じであること | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 振動 | — | 修正の後の落ちたテストの集合が、前に見た集合へ戻ること | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 安全網の上限 | — | コーディングの CLI（テストの追加・実装・修正・最終ゲート修正）の起動ごとの秒の累計に置く上限。既定は実効の予算 × 2。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |

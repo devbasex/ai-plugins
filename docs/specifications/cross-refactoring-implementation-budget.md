@@ -31,7 +31,72 @@ PR https://github.com/devbasex/ai-plugins/pull/2452 の完了判定で、cross-r
 | 差し戻し | 改善項目の中の手順の違反を、項目を取り消さずに担当へ直させること |
 | 落ちたテストの材料 | 落ちたテストの ID・ログの置き場・走らせ直すコマンドの組 |
 
+## 背景
+
+| 決めたこと | 理由 |
+| --- | --- |
+| 見積りはテストの追加と実装の和にし、経過とバッファを引かない | 選ぶ件数がテストと CI の所要で変わらないようにするため |
+| グレード high の見積りの和が予算と 2 倍の間にあるときだけ、予算をその和まで延ばす | 順位の高い候補が予算の境目で切れないようにするため |
+| 成立の判定は実装担当と別のランタイムが行う | 成立しない項目だけを打ち切るため。実装担当の自己評価に頼らない |
+| 修正の回数に上限を置かず、落ちたテストの集合を履歴と比べて前進・停滞・振動を判定する | 進んでいる修正を回数で切らず、空回りだけを止めるため |
+| 時間の上限はコーディングの起動の秒の累計に置く安全網だけにし、当たったら取り消さずに `gate` で止める | 時間の上限を異常の検知にだけ使うため |
+| 打ち消しは項目のコミットの `git revert` だけにし、衝突したら止める | 取り込んだベースブランチの変更を消さないため（共通原則の C4 に当たる履歴の書き換えをしない） |
+| 無関係な失敗は比較の木で見分ける | ベースブランチ由来の失敗を変更起因と取り違えないため |
+| フレーキーは見分けたテストの直しを 1 回依頼し、項目とは別のコミットで残す | フレーキーをその実行の中で直し、項目の合否と混ぜないため |
+| 項目ごとの実績を、終わり方を問わず配分の履歴へ追記する | 次回の見積りの材料を失わないため |
+| テストと CI の待ちの上限は共通ライブラリの予算なしの式を使う | 予算に縛られない上限を 1 つの式に揃えるため |
+| 状態ファイルの版を 3 へ上げ、版 2 の実行は再開しない | 意味の変わった状態を旧い記録と混ぜないため |
+
 ## 仕様
+
+### 常に成り立つ条件
+
+| 条件 | 破れたときの扱い |
+| --- | --- |
+| 採っていて取り消していない項目（採り直しで採った項目を含む）の見積りの合計は、実効の予算以下である | 選定の単体テストが落とす |
+| 予算を読むのは選定（`merge-plan`・`readopt`）だけである。選定の外で予算から導く値は安全網の上限だけである | 時間の上限の表の単体テストが落とす |
+| 項目の `status` を `reverted` にする理由は `infeasible` と `stalled_after_switch` の 2 つだけである。時間・範囲・記名の欠けから `reverted` へは遷移しない | 取り消しの経路の単体テストが落とす |
+| 打ち消しは、項目のコミットだけを新しい順に `git revert` する。`reset --hard` で未公開のコミットを外す経路と、起点の木へ戻すコミットを積む経路は無い | git の一時リポジトリの結合テストが落とす |
+| 成立の判定と判定し直しは実装担当と別のランタイムが行い、修正担当を替えるのは 1 項目に 1 回だけである | 判定の担い手の選び方の単体テストが落とす |
+| 安全網の上限に届いた後は、項目を取り消さず、新しいコーディングの CLI を起動しない | 駆動の単体テストが落とす |
+| 打ち消しが衝突したら、打ち消しの前の HEAD へ戻して止まる。衝突した項目をほかの理由で外さない | git の一時リポジトリの結合テストが落とす |
+| 最終ゲートは確かめを省いて `passed` を返さない | 最終ゲートの単体テストが落とす |
+| push はオーケストレーターだけが行い、`--force`・`--no-verify` を使わない。送るのは状態ファイルに記録した残すコミットだけである | 公開のテストが落とす |
+| フレーキーの直しは改善項目と別のコミット（トレーラー `Flaky-Fix`）で、項目の合否・停滞の判定・実装時間に数えない | 駆動の単体テストが落とす |
+
+### 引数とコマンド
+
+| 引数・コマンド | 中身 |
+| --- | --- |
+| `--budget-minutes N`（`drive.py`・`refactor.py init`） | 実装の予算。明示した値はそのまま使い、下限まで上げない |
+| `--safety-net-minutes N` | 安全網の上限（分）。省けば実効の予算 × `cross-refactoring.safety-net` の倍率。止まった実行は、大きい値で同じコマンドを打ち直すと続く |
+| `refactor.py judge` | 判定の担い手の答えを読み、項目の `feasibility[]` へ積む。出力は `JUDGE=continue\|infeasible\|no_judge`。答えを読めない項目は `feasible: null` として積む |
+| `refactor.py merge-flaky-fix` | フレーキーの直しを取り込む。出力は `FLAKY_FIX=kept\|none\|sendback\|reverted` |
+
+着手前のテストのハングの検知（`init-timeout`）は終了コード 6 で終わる。時間で打ち切る終了コードは持たない。
+
+### 改善項目の状態
+
+状態は `planned` / `tested` / `implemented` / `failing` / `verified` / `reverted` / `deferred` の 7 つである。止めたことは
+実行の `safety_net.halted_at` と結果 JSON の `status` が持ち、項目の状態は止めた時点のまま残る。
+
+```mermaid
+stateDiagram-v2
+    [*] --> planned: 選んだ
+    planned --> tested: テストを足した
+    planned --> implemented: 実装した
+    tested --> implemented: 実装した
+    implemented --> verified: 範囲テストが通った
+    implemented --> failing: 変更起因で落ちた
+    failing --> implemented: 修正を取り込んだ
+    failing --> reverted: 成立しない・替えた後も停滞
+    verified --> implemented: 打ち消しで HEAD が変わった
+    verified --> failing: 最終ゲートで原因の項目になった
+    planned --> deferred: 採り直しに入らない
+    verified --> [*]
+    reverted --> [*]
+    deferred --> [*]
+```
 
 ### 選定（`merge-plan`・`readopt`）
 
@@ -134,6 +199,25 @@ PR https://github.com/devbasex/ai-plugins/pull/2452 の完了判定で、cross-r
 | --- | --- |
 | `plugins/ndf/contracts/limits.json` | `cross-refactoring.default-budget`（3600 秒）・`cross-refactoring.budget-extension`（`factor: 2`）・`cross-refactoring.safety-net`（`factor: 2`）・`cross-refactoring.fix-progress`（`same_cause: 2`）・`monitor.phase.judge`（1200 秒）・`monitor.phase.flaky-fix`（3600 秒。駆動は安全網の残りを渡す） |
 | 状態ファイル | `budget`（`minutes`・`source`・`effective_minutes`・`extension`）・`safety_net_minutes`・`safety_net`（`limit_minutes`・`used_seconds`・`halted_at`）・`items[].feasibility[]`・`fix_history[]`・`fixer`・`fixer_switched`・`outside_scope[]`・`sendbacks[]`・`coding_seconds`・`revert_reason`・`halt`・`feasibility_request`・`flaky_request`・`flaky_requested`・`flaky_fixes[]`。版は 3（`schema: 3`）で、版 2 の途中の状態ファイルは再開せずに止める |
+
+## テスト観点
+
+- `--budget-minutes` を省いた実行で、結果 JSON の `metrics.budget_minutes` が 60 であること
+- 着手前のテストの秒だけを変えて選定を 2 回走らせても、採る件数が同じであること
+- 採り直しの残りを、実装時間の実績ではなく見積りの和で数えること。取り消した項目の見積りは残りへ戻ること
+- high の和が B と 2B の間なら `ceil(和)` に延ばして理由を残し、2B を超えれば延ばさないこと
+- 予算 1 分の実行で、予算を超えた後も最終ゲートまで進むこと
+- 変更起因で落ちた項目に `feasibility[]` が積まれ、成立なら修正へ回り、記名の欠けは差し戻しになること
+- 範囲の外の既存ファイルを変えた項目が残り、`outside_scope` と報告に載ること
+- 成立しない項目のコミットだけが打ち消され、着手の後に取り込んだベースブランチのコミットが残ること
+- ベースブランチの取り込みで落ちるテストがあっても、通っていた項目が残り、失敗が無関係と記録されること
+- フレーキーの直しが `Flaky-Fix` のコミットで残り、項目の合否に数えないこと
+- JUnit の無い CI の失敗でも、修正の依頼に落ちたテストの材料が入ること
+- 最終ゲートの通過・安全網・中断のどの終わり方でも、採った項目ごとの `kind: item` の行が書かれること
+- 前進の間は回数の上限なく修正へ回り、停滞で判定し直して修正担当が 1 回だけ替わり、2 回目の停滞で打ち消すこと
+- 安全網の上限で `gate`・終了コード 10 で止まり、検査のプランでは `drive` のステップが承認ゲートで止まること
+- 打ち消しが衝突したら、打ち消しの前の HEAD のまま `gate` で止まること
+- 木が起点と同じ再開でも、最終ゲートが確かめを走らせること
 
 ## 関連リンク
 
