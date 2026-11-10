@@ -419,7 +419,7 @@ def _docs_tests(root: pathlib.Path, a, ctx: OutcomeContext, kinds: diff_kinds.Di
     if not runs:
         ctx.notes.append("テストが読む文書を変えたが、範囲テストの雛形（scope_command）を持つ suite が無く、全体テストを走らせる")
         return None
-    return _run_tests(root, a, ctx, runs, "文書を読むテスト（全体テストの代わり）", None)
+    return _run_tests(root, a, ctx, runs, f"文書を読むテスト（全体テストの代わり。{len(kinds.tests)} ファイル）", None)
 
 
 def cmd_whole(a) -> int:

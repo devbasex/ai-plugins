@@ -336,7 +336,7 @@ def test_tested_docs_run_only_their_tests_and_failures_block(tmp_path, body, wan
     _branch_then_commit(root, {"docs/glossary.md": "# g\n", "docs/other.md": "# o\n"})
     code, out = _run(root, "whole", "--base", "base")
     assert (code == 0) == (want == 0), out
-    assert out["summary"].startswith("文書を読むテスト（全体テストの代わり） 1 本")
+    assert out["summary"].startswith("文書を読むテスト（全体テストの代わり。1 ファイル） 1 本")
     assert _diff_kinds_item(out)["tests"] == ["t/test_g.sh"]
 
 
