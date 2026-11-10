@@ -775,6 +775,26 @@ def _merge_source_stages(root, decl, have):
     return glossary_merge.merge_glossaries(*versions)
 
 
+def prepare_merge_files(root, decl, stages, stop):
+    """衝突した段から書くファイルを決める。items・counts・writes（パスと本文の組）を返す。止めるときは stop を呼ぶ。"""
+    items, counts, writes = [{"name": decl.document, "result": "rendered"}], {}, []
+    if decl.source in stages:
+        have = stages[decl.source]
+        if not {2, 3} <= have:
+            side = "ours" if 2 not in have else "theirs"
+            stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
+        merged = _merge_source_stages(root, decl, have)
+        if fail := merged.duplicates or merged.conflicts:
+            stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
+        g, counts = merged.glossary, merged.counts
+        writes.append((decl.source_path, json.dumps(g, ensure_ascii=False, indent=2) + "\n"))
+        items.insert(0, {"name": decl.source, "result": "merged"})
+    else:
+        g = load_glossary(decl)
+    writes.append((decl.document_path, render_text(g, decl.source)))
+    return items, counts, writes
+
+
 def cmd_merge(a):
     root = Path(a.root)
     decl = require_declaration(root)
@@ -793,21 +813,7 @@ def cmd_merge(a):
     stages = glossary_merge.unmerged_stages(git_checked(root, "ls-files", "-u", "-z", "--", decl.source, decl.document).stdout)
     if not stages:
         stop("用語集は衝突していない", unresolved())
-    items, counts, writes = [{"name": decl.document, "result": "rendered"}], {}, []
-    if decl.source in stages:
-        have = stages[decl.source]
-        if not {2, 3} <= have:
-            side = "ours" if 2 not in have else "theirs"
-            stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
-        merged = _merge_source_stages(root, decl, have)
-        if fail := merged.duplicates or merged.conflicts:
-            stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
-        g, counts = merged.glossary, merged.counts
-        writes.append((decl.source_path, json.dumps(g, ensure_ascii=False, indent=2) + "\n"))
-        items.insert(0, {"name": decl.source, "result": "merged"})
-    else:
-        g = load_glossary(decl)
-    writes.append((decl.document_path, render_text(g, decl.source)))
+    items, counts, writes = prepare_merge_files(root, decl, stages, stop)
     try:
         for path, text in writes:
             path.parent.mkdir(parents=True, exist_ok=True)
