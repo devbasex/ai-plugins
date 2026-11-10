@@ -10,16 +10,8 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import limits, release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import (
-    BEHAVIOR_STEPS,
-    CHECK_PY,
-    DRIVES,
-    GLOSSARY_PY,
-    READY,
-    REFACTOR_SCOPE_PY,
-    default_refactor_budget_minutes,
-    refactor_step_seconds,
-)
+from supervise_lib.paths import BEHAVIOR_STEPS, CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import refactor_step_seconds
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
     base_sync_steps,
@@ -264,8 +256,7 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "cmd": f"ndf_scope={scope} || exit 2; python3 {DRIVES['cross-refactoring']} {pr_ref} --workflow-step --scope $ndf_scope"
             f"{budget_arg}{refactor_template_arg(a)}",
             # 着手前のテストのハングでリファクタリングを飛ばした終わり（終了コード 6 と gaps）はコードレビューへ進む（#2047 の I6）。
-            # テストの実行・CI の待ちの分の締め切りは、駆動が書くステップの延長で実行の時点に延ばす（#2457 決定 8）。
-            # 安全網の上限で止めた終わり（終了コード 10）は承認ゲートとして人へ渡す（エンジンの `is_gate`）
+            # テストと CI の待ちの分は駆動がステップの延長で延ばし、安全網で止めた終了コード 10 はエンジンが承認ゲートにする（#2457 決定 8）
             "on_exit": {"6": "review"},
             "on_fail": "abort",
             "next": "review",
