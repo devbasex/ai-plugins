@@ -2858,3 +2858,46 @@ def test_cli_a_second_session_cannot_take_the_same_loop_until_the_first_stops(tm
     finally:
         other.kill()
         other.wait()
+
+
+def test_cli_another_session_places_the_stop_order_while_the_loop_holds_the_key(tmp_path):
+    """#2910 受け入れ条件 1・2: 生きた持ち主が鍵を持つ間も、別のセッションの loop stop は 0 で止める指示を置き、主体と理由を書く。
+    持ち主の鍵は返さない（持ち主のセッションの loop start は続けて取れ、別のセッションの loop start は断られる）。"""
+    import os
+
+    import procs
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".ndf").mkdir()
+    sp = SCRIPTS / "sprint-state.py"
+    other = subprocess.Popen(["sleep", "60"])
+    session_a = {**os.environ, "NDF_RUNTIME_SESSION": f"{other.pid}:{procs.start_time(other.pid)}"}
+
+    def loop(*args, env=None):
+        return subprocess.run([sys.executable, str(sp), "loop", *args, "--root", str(tmp_path)], capture_output=True, text=True, env=env)
+
+    try:
+        assert loop("start", "x1", env=session_a).returncode != 3
+        (tmp_path / ".ndf" / "loop" / "x1").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ndf" / "loop" / "x1" / "loop.json").write_text(json.dumps({"name": "x1", "laps": []}))
+        p = loop("stop", "x1", "--by", "organizer", "--reason", "利用者が今のループの 1 回で止めると指示した")
+        assert p.returncode == 0, p.stdout + p.stderr
+        order = json.loads((tmp_path / ".ndf" / "loop" / "x1" / "stop").read_text())
+        assert order["by"] == "organizer" and order["reason"] == "利用者が今のループの 1 回で止めると指示した" and order["at"]
+        assert loop("start", "x1").returncode == 3
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_stop_order_carries_who_placed_it_and_an_unrecorded_source_is_unknown(env):
+    """#2910 受け入れ条件 2・3: 境の止まりの値に置いた主体と理由を載せる。主体の記録が無いファイルは人の意思として扱わず unknown。"""
+    start(env)
+    sl.cmd_stop(env, "l1", by="user", reason="人が止めると送った")
+    got = sl_record.boundary_stop(env, rec(env))
+    assert got["condition"] == "user_stop" and got["values"]["by"] == "user" and got["values"]["reason"] == "人が止めると送った"
+    (env.root / ".ndf" / "loop" / "l1" / "stop").write_text("2026-11-09T17:30:00Z\n")
+    got = sl_record.boundary_stop(env, rec(env))
+    assert got["values"] == {"at": "2026-11-09T17:30:00Z", "by": "unknown", "reason": ""}
+    sl.cmd_stop(env, "l1")
+    assert sl_record.boundary_stop(env, rec(env))["values"]["by"] == "unknown"

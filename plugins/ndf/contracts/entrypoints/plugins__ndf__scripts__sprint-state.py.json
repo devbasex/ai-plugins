@@ -181,7 +181,8 @@
       "key": "supervise.loop:name={name}",
       "unit": "session",
       "window_seconds": 86400,
-      "release": true
+      "release": true,
+      "shared": true
     }
   }
 }
