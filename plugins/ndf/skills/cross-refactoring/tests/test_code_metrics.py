@@ -6,9 +6,7 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
-import math
 import sys
 
 import pytest
@@ -298,27 +296,8 @@ def test_file_metrics_come_from_the_collected_list(codemetrics, codemetrics_read
 # ---------------- 時間 ----------------
 
 
-@pytest.mark.parametrize("budget", [30, 60, 7])
-def test_measure_timeout_comes_from_the_budget(timeline, budget):
-    """AC13: 上限は `ceil(0.05·B·60)` で、B に比例する。"""
-    start = _dt.datetime(2026, 9, 26, 10, 0, tzinfo=_dt.timezone.utc)
-    limits = timeline.compute(start, budget, None)
-    assert limits["measure_timeout"] == math.ceil(budget * 60 * 0.05)
-
-
-def test_measuring_does_not_move_any_phase_end(timeline):
-    """AC15: 提案の枠の終わりは `開始 + 0.20·B` のまま。ほかの終わりも開始からの式のまま。"""
-    start = _dt.datetime(2026, 9, 26, 10, 0, tzinfo=_dt.timezone.utc)
-    limits = timeline.compute(start, 30, None)
-    assert limits["propose_end_at"] == (start + _dt.timedelta(minutes=6)).isoformat(timespec="seconds")
-    assert limits["plan_end_at"] == (start + _dt.timedelta(minutes=9)).isoformat(timespec="seconds")
-    assert limits["final_end_at"] == (start + _dt.timedelta(minutes=30)).isoformat(timespec="seconds")
-
-
-def test_measure_deadline_takes_at_most_half_of_what_is_left(timeline):
-    """測定に使える時間 = min(上限, 0.5·max(0, 提案の枠の終わり − 今))。"""
-    start = _dt.datetime(2026, 9, 26, 10, 0, tzinfo=_dt.timezone.utc)
-    limits = timeline.compute(start, 30, None)
-    assert timeline.measure_deadline(start, limits) == 90
-    assert timeline.measure_deadline(start + _dt.timedelta(minutes=5), limits) == 30
-    assert timeline.measure_deadline(start + _dt.timedelta(minutes=7), limits) == 0
+def test_measure_timeout_does_not_follow_the_budget(timeline):
+    """#2457 I3: 指標の測定の上限は予算から導かず、提案の工程の監視の上限の半分。上限の表に書いた値を使う。"""
+    assert timeline.measure_timeout() == 600
+    assert timeline.measure_deadline({"measure_timeout": 90}) == 90
+    assert timeline.measure_deadline({}) == 600

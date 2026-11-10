@@ -141,7 +141,8 @@ graph TB
   `pre_test_steps(a)` が返す並びの先頭（`format`・`sync`・`lint-limited` のうち宣言で置いたもの）で、並びが空なら `test-limited`。
   `new fix` は `impl` を持たず、先頭が `base-sync` になる。整形を取り込みの後に置くのは、取り込んだ合成の形を整えてから sync と範囲テストへ
   渡すためである。`fix-base` の後は `base-sync` を打ち直してから並びの先頭へ進む
-- **検査のプランでは `review` の次が `base-sync`、その次が `test-all` で、`ready` より前にある。** スプリントの検査は先頭に `collect` → `pr` が付く。
+- **検査のプランでは `review` の後に振る舞いの確認（`behavior-targets` → `behavior` → `behavior-verify`。振る舞いを決める文書の変更が無ければ
+  `behavior-targets` から飛ぶ）を通って `base-sync`、その次が `test-all` で、`ready` より前にある。** スプリントの検査は先頭に `collect` → `pr` が付く。
   全体テストの修正（`fix`）の後は `test-all` へ戻る
 - **差分の検査では全体テストの修正の後を `base-sync` へ戻す。** 毎回取り込んでから測るため、`test-all` の `cmd` は `git merge` を持たない
 - **`base-return` はプランの並びの末尾に置く。** `merge` から `base-return` への遷移を並びで後ろへ行くものにし、`limits.py` の「ループを
@@ -175,7 +176,7 @@ graph TD
 
 ```mermaid
 graph TD
-    rev[assess → refactor → review] --> bs[base-sync --pr --push]
+    rev[assess → refactor → review<br/>→ 振る舞いの確認] --> bs[base-sync --pr --push]
     bs -->|0| ta[test-all]
     bs -->|1| fb[fix-base] --> bs
     bs -->|2・3| ab[abort]

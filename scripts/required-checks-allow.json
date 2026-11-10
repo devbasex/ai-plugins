@@ -3,6 +3,7 @@
   "not_required": [
     {"name": "pytest (0/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (1/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
+    {"name": "pytest (文書)", "reason": "文書だけの PR でテストが読む文書のテストを回す（#2925）。結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],

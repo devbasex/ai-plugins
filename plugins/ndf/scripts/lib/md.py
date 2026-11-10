@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import unicodedata
 from functools import lru_cache
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import unquote
 
-from markdown_it import MarkdownIt
-from markdown_it.token import Token
+if TYPE_CHECKING:  # markdown_it は解析するときだけ読む（起動を縮める。#2309）
+    from markdown_it import MarkdownIt
+    from markdown_it.token import Token
 
 
 class Heading(NamedTuple):
@@ -51,6 +52,8 @@ class Link(NamedTuple):
 
 @lru_cache(maxsize=1)
 def _md_parser() -> MarkdownIt:
+    from markdown_it import MarkdownIt
+
     return MarkdownIt("commonmark").enable("table")
 
 

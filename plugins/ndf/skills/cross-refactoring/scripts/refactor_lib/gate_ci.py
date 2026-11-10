@@ -1,22 +1,19 @@
 """最終ゲートの CI の側（#1334 F4・決定 7・9）。`commands/gate.py` が呼ぶ。
 
 全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か `--ci-check` のとき、push 済みの HEAD のチェックを
-`limits.ci_wait_timeout` まで待ち、落ちたら run の成果物の JUnit を落として見分けの材料にする。検証で最終ゲートへ
-寄せた危険フラグの全体テストで変更起因が残って締め切りを過ぎたときは、原因の項目から順に取り消す（#1649）。
+`limits.ci_wait_timeout`（`3·c`。予算に依らない。#2457 決定 11）まで待ち、落ちたら run の成果物の JUnit と run の
+置き場を見分けと落ちたテストの材料にする。
 """
 
 from __future__ import annotations
 
-import pathlib
 from typing import Any, Optional
 
 import gh_checks
 import test_triage
 
-from . import clock, culprit, die, info, rounds, timeline
+from . import die, info, timeline
 from .github import gh_api_get
-from .items import live_items
-from .outbound import plan_line
 from .paths import git_out, work_dir
 
 
@@ -56,7 +53,7 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
     checks = ci_checks(state)
     if not checks:
         die("最終ゲートで待つチェックの名前がありません（--ci-check か宣言の test.ci.check・ci.required_checks）")
-    max_wait = float(timeline.state_ci_wait_timeout(state, clock.now()))
+    max_wait = float(timeline.state_ci_wait_timeout(state))
     last: dict[str, Any] = {}
 
     def fetch() -> Optional[str]:
@@ -74,27 +71,13 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
         die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
     if outcome == "success":
         return True, f"{label} の結論は success でした", None
-    return False, f"{label} の結論は {outcome} でした", {"timed_out": False, "ci_xmls": ci_junit(state, sha, checks, last.get("runs"))}
-
-
-def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
-    """検証で最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て締め切りを過ぎたとき、原因の項目から取り消す（#1649）。
-
-    取り消す対象は寄せた危険フラグの項目ではなく、原因の判定（`culprit.judge`。締め切りは打ち切りの後の取り消しと同じ
-    確かめの開始の締め切り H − v。#1932 原則 3）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点か締め切りで止める。
-    取り消したら真。寄せた項目が無い・変更起因でない・走らせ直す語が無い・残る項目が無いときは何もせず偽。
-    """
-    deferred = rounds.deferred_union(state)
-    verdict = gate.get("triage") or {}
-    rerun = culprit.rerun_of(verdict)
-    if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):
-        return False
-    end = timeline.gate_start_end(state)
-    found = culprit.judge(state, gate, verdict, end)
-    reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
-    passes = culprit.rerun_passes(state, rerun, end)
-    reverted = culprit.revert_in_order(path, state, found.order, reason, passes, deadline=end).reverted
-    gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
-    if reverted:
-        info(f"↩ 原因の項目から順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")
-    return bool(reverted)
+    places = [str(r.get("html_url") or r.get("details_url") or "") for r in last.get("runs") or [] if isinstance(r, dict)]
+    return (
+        False,
+        f"{label} の結論は {outcome} でした",
+        {
+            "timed_out": False,
+            "ci_xmls": ci_junit(state, sha, checks, last.get("runs")),
+            "log_place": " ".join(p for p in places if p),
+        },
+    )

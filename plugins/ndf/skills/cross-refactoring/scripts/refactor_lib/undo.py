@@ -1,9 +1,13 @@
-"""取り消しの実行（#933 の AC10 AC15、#1482）。どのコミットを消し・積み直し・戻すかは `ledger` が決める。
+"""取り消しの実行（#933 の AC10 AC15、#1482、#2457 決定 6）。
+
+**改善項目の打ち消しは、その項目のコミットだけを新しい順に `git revert` する**（`revert_items`・`drop`）。公開の
+前でも後でも同じ手順で、取り込んだベースブランチの変更には触れない（#2323）。衝突したら打ち消しの前の HEAD へ
+戻して止める（`UndoConflict`）。衝突した項目を外して続けない。
+
+以下は、どの項目にも記録されていないコミットを消す `discard_range`（結果を残さなかった起動の範囲）だけが使う
+積み直しの説明である。
 
 **未公開のコミットは積み直しの起点へ `reset --hard` して、残すコミットだけを古い順に積み直す。**
-公開済みのコミットは書き換えず、取り消す改善項目のコミットだけを新しい順に `git revert` する
-（共通原則 C4）。前の取り消しの積み直しは「残すコミット」として置き換わるだけなので、取り消しを
-何度くり返してもコミット数は伸びない（#1399）。
 
 **積み直しで項目に属するコミット（テスト・実装・修正）が衝突したら、そのコミットを持つ項目だけを外し、
 計画を作り直して起点から積み直す**（外した項目。#1793 の R2）。外した項目に依存して後で衝突した項目も同じく
@@ -250,26 +254,166 @@ def _rebuild(
     return _record(path, state, plan, outcome, reason, ejected)
 
 
+class UndoConflict(Exception):
+    """項目のコミットの打ち消しが衝突した。HEAD は打ち消しの前へ戻してある（#2457 決定 6・I9）。"""
+
+    def __init__(self, message: str, item_id: str, commit: str):
+        super().__init__(message)
+        self.item_id, self.commit = item_id, commit
+
+
+def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason: str) -> dict[str, Any]:
+    """改善項目のコミット（テスト・実装・修正）だけを新しい順に `git revert` で打ち消す（#2457 決定 6・I5）。
+
+    どの記録にも無いコミット（取り込んだベースブランチのマージなど）には触れない。`reset --hard` で外す・
+    起点の木へ戻す経路は無い。打ち消しが衝突したら打ち消しの前の HEAD へ戻し、衝突した項目を外さずに
+    `UndoConflict` を投げる（I9）。打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録する。
+    """
+    work = work_dir(state)
+    worktree.wait_past_rewrite()
+    try:
+        targets = [i for i in item_ids if ledger.is_live(find_item(state, i, required=False))]
+        targets = _close_commitless(state, targets, reason)
+        # 新しい項目から打ち消す（同じ行を順に書き換えた項目を古い方から戻すと衝突する）
+        targets.sort(key=lambda i: int(find_item(state, i).get("rank") or 0), reverse=True)
+        if targets:
+            # 衝突の巻き戻しは `reset --hard` で、未コミットの変更を戻せずに消す（C4）
+            worktree.stop_if_dirty(state, work, "打ち消しの")
+        before = git_out(work, ["rev-parse", "HEAD"]) or ""
+        reverts: list[str] = []
+        for item_id in targets:
+            shas = list(reversed([full_commit(work, s) for s in item_shas(find_item(state, item_id))]))
+            conflict = revert_range(work, shas)
+            if conflict:
+                # 項目の状態は全部を打ち消せてから書く。途中で衝突したら HEAD と一緒に開始前のまま残す
+                reset_hard(work, before)
+                state["pending_drop"] = None
+                statefile.save(path, state)
+                raise UndoConflict(
+                    f"{item_id} のコミット {str(conflict)[:12]} を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました",
+                    item_id,
+                    conflict,
+                )
+            reverts.extend(_new_commits(work, len(shas)))
+        for item_id in targets:
+            item = find_item(state, item_id)
+            item["failure_reason"] = reason
+            item["reverted_by_commit"] = True
+            ledger.mark_dropped(item, reason)
+        for sha in reverts:
+            ledger.note_orchestrator_commit(state, sha)
+        record = {
+            "at": statefile.now(),
+            "mode": "revert",
+            "reason": reason,
+            "round": int((state.get("readopt") or {}).get("round") or 1),
+            "dropped": list(item_ids),
+            "recheck": (ledger.mark_recheck(state) if reverts and not ledger.in_final_gate(state) else []),
+            "reverted": len(reverts),
+            "before": before,
+        }
+        state.setdefault("drops", []).append(record)
+        state["pending_drop"] = None
+        statefile.save(path, state)
+        info(f"↩ 打ち消し: {', '.join(item_ids) or '—'} のコミット {len(reverts)} 件を git revert しました（{reason}）")
+        return record
+    finally:
+        worktree.mark_rewritten()
+
+
+def revert_or_widen(work: str, shas: list[str], widen: Optional[list[str]] = None) -> Optional[list[str]]:
+    """`shas`（古い順）を新しい順に `git revert` で打ち消し、打ち消した元のコミット（古い順）を返す。
+
+    衝突したら打ち消しの前の HEAD へ戻し、`widen`（古い順。`shas` を含む範囲）があればその全体を新しい順に打ち消す。
+    違反のコミットの後に同じ行を直したコミットがあると違反のコミットだけは戻せないが、範囲の末尾から全部を戻すと
+    衝突しない。それでも戻せなければ HEAD を戻して `None` を返す（止めるかは呼び出し側が決める）。"""
+    before = git_out(work, ["rev-parse", "HEAD"]) or ""
+    first, wide = list(shas), list(widen or [])
+    if revert_range(work, list(reversed(first))) is None:
+        return first
+    reset_hard(work, before)
+    if not wide or wide == first:
+        return None
+    if revert_range(work, list(reversed(wide))) is None:
+        info(f"↩ 違反のコミットだけを打ち消せないため、範囲のコミット {len(wide)} 件をまとめて打ち消しました")
+        return wide
+    reset_hard(work, before)
+    return None
+
+
+def note_reverted(state: dict[str, Any], work: str, originals: list[str]) -> list[str]:
+    """打ち消した元のコミットと打ち消しのコミットを、残すコミットとして台帳へ記録し、打ち消しのコミット（古い順）を返す。
+
+    `git revert` は元のコミットを履歴に残すため、元のコミットも記録しないと公開の直前の照合（`ledger.unpublishable`）が
+    `stray` として止める（項目の打ち消しの `reverted_by_commit` と同じ扱い）。"""
+    made = _new_commits(work, len(originals))
+    for sha in [*originals, *made]:
+        ledger.note_orchestrator_commit(state, full_commit(work, sha))
+    return made
+
+
+def revert_unattributed(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    shas: list[str],
+    label: str,
+    widen: Optional[list[str]] = None,
+    stop_on_conflict: bool = True,
+) -> list[str]:
+    """どの項目にも属さないコミット（`shas` は古い順）を新しい順に `git revert` で打ち消し、打ち消した元のコミットを返す。
+
+    `reset --hard` で外さない（取り込んだベースブランチの変更を消さない。#2457 決定 6）。衝突したら `widen`（古い順）の
+    全体を打ち消す（`revert_or_widen`）。それでも戻せなければ打ち消しの前の HEAD へ戻して終了コード 4 で止まる
+    （`stop_on_conflict` が偽なら止まらずに空を返す。残すかは呼び出し側が決める）。
+    元のコミットと打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録し、差し戻しに残す。
+    """
+    work = work_dir(state)
+    # 衝突の巻き戻しは `reset --hard` で、未コミットの変更を戻せずに消す（C4）
+    worktree.stop_if_dirty(state, work, "打ち消しの")
+    before = git_out(work, ["rev-parse", "HEAD"]) or ""
+    worktree.wait_past_rewrite()
+    try:
+        done = revert_or_widen(work, shas, widen)
+        if done is None and not stop_on_conflict:
+            info(f"⚠ どの項目にも属さないコミット {len(shas)} 件を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
+            return []
+        if done is None:
+            die(f"どの項目にも属さないコミット {len(shas)} 件を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
+        made = note_reverted(state, work, done)
+        state.setdefault("sendbacks", []).append({"kind": "unattributed", "commits": list(done), "phase": label, "at": statefile.now()})
+        state.setdefault("drops", []).append(
+            {
+                "at": statefile.now(),
+                "mode": "revert",
+                "reason": label,
+                "round": int((state.get("readopt") or {}).get("round") or 1),
+                "dropped": [],
+                "reverted": len(made),
+            }
+        )
+        statefile.save(path, state)
+        return done
+    finally:
+        worktree.mark_rewritten()
+
+
+def _new_commits(work: str, count: int) -> list[str]:
+    out = git_out(work, ["rev-list", f"-{count}", "HEAD"]) or ""
+    return list(reversed([line for line in out.splitlines() if line]))
+
+
 def drop(
     path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason: str, on_conflict: str = ON_CONFLICT_STOP
 ) -> dict[str, Any]:
-    """改善項目（と、どの項目にも属さないコミット）を取り消す。
-
-    積み直しで項目のコミットが衝突したらその項目を外して続ける。項目に属さないコミットの積み直しか公開済みの
-    revert が衝突したら、既定（`stop`）は終了コード 4 で止まり、`raise` なら `DropConflict` を投げる。
-
-    戻り値は `{"mode", "dropped", "removed", "replayed", "reverted", ...}`。取り消した項目は
-    `status: reverted`、`failure_reason` に理由を持つ。**見送り（`deferred_items`）へ入れるかは
-    呼び出し側が決める**（`test_failed` / `not_done` は見送り、検証の失敗は項目の状態だけ）。
-    """
-    targets = [i for i in item_ids if ledger.is_live(find_item(state, i, required=False))]
-    targets = _close_commitless(state, targets, reason)
-    # 直前の書き換えの後に走らせ直したキャッシュを、取り消した後に読ませない（#1806 決定 6）
-    worktree.wait_past_rewrite()
+    """改善項目を打ち消す（`revert_items` の包み）。衝突したら既定（`stop`）は終了コード 4 で止まり、`raise` なら
+    `DropConflict` を投げる。HEAD は打ち消しの前へ戻してある。"""
     try:
-        return _rebuild(path, state, targets, reason, on_conflict)
-    finally:
-        worktree.mark_rewritten()
+        return revert_items(path, state, item_ids, reason)
+    except UndoConflict as exc:
+        if on_conflict == ON_CONFLICT_RAISE:
+            raise DropConflict(str(exc)) from None
+        die(str(exc))
+        raise
 
 
 def discard_range(path: pathlib.Path, state: dict[str, Any], reason: str) -> dict[str, Any]:

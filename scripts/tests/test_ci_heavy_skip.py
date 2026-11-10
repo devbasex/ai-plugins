@@ -1,4 +1,4 @@
-"""配布の PR で重いジョブを省くかの判定（`scripts/ci-heavy-skip.py`、#1055）。
+"""配布の PR と文書だけの PR で重いジョブを省くかの判定（`scripts/ci-heavy-skip.py`、#1055・#2925）。
 
 一時ディレクトリに最小のリポジトリを作り、版上げの差分とコードの差分を比べる。
 GitHub の API は偽物（呼ばれたパスから返す値を決める関数）で置き換える。
@@ -68,6 +68,12 @@ def repo(tmp_path: Path) -> Path:
     write(root, "CHANGELOG.md", "# Changelog\n")
     write(root, "README.md", "NDFプラグイン v1.0.0\n")
     write(root, "docs/other.md", "other\n")
+    # テストが読む文書の宣言（ai-plugins の宣言と同じ形。#2925）
+    docs = {
+        "files": ["**/*.md", "docs/glossary/glossary.json"],
+        "tested": [{"paths": ["docs/glossary.md", "docs/glossary/**"], "tests": ["scripts/tests/test_x.py"]}],
+    }
+    write(root, ".ndf/project.json", json.dumps({"version": 1, "docs": docs}))
     commit(root, "base")
     return root
 
@@ -85,8 +91,8 @@ def none_passed(path: str) -> dict:
     return {"workflow_runs": []}
 
 
-def decide(mod, root: Path, base: str, head: str, api=none_passed, event="pull_request"):
-    return mod.decide(str(root), event, base, head, "o/r", "pytest.yml", api=api)
+def decide(mod, root: Path, base: str, head: str, api=none_passed, event="pull_request", workflow="pytest.yml"):
+    return tuple(mod.decide(str(root), event, base, head, "o/r", workflow, api=api))[:2]
 
 
 # --- 1. 版数と説明だけの差分 -------------------------------------------------------
@@ -142,21 +148,8 @@ def test_deleted_issue_markdown_skips(mod, repo):
     assert decide(mod, repo, base, head)[0]
 
 
-@pytest.mark.parametrize(
-    "rel",
-    [
-        # テストが中身を読む文書（全体テストの読み取りを計測して決めた）
-        "docs/glossary.md",
-        "docs/glossary/glossary.json",
-        "docs/ndf-experiments.md",
-        "docs/presentations/deck/script.md",
-        "issues/mvv-ai-plugins.md",
-        # Markdown 以外
-        "docs/figure.svg",
-        "issues/plan.json",
-    ],
-)
-def test_docs_that_tests_read_still_run(mod, repo, rel):
+@pytest.mark.parametrize("rel", ["docs/figure.svg", "issues/plan.json", "plugins/ndf/scripts/tool.py"])
+def test_docs_with_a_non_doc_file_still_run(mod, repo, rel):
     base = git(repo, "rev-parse", "HEAD")
     write(repo, "docs/other.md", "changed\n")
     write(repo, rel, "changed\n")
@@ -164,6 +157,45 @@ def test_docs_that_tests_read_still_run(mod, repo, rel):
     skip, reason = decide(mod, repo, base, head)
     assert not skip
     assert rel in reason
+
+
+def test_tested_docs_only_diff_skips_with_their_tests(mod, repo):
+    """#2925 AC6: 用語集を変えた文書だけの差分（設計・確定仕様化の PR の形）は全体を省き、読むテストだけを出す。"""
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "docs/glossary.md", "changed\n")
+    write(repo, "docs/glossary/glossary.json", "{}\n")
+    write(repo, "docs/specifications/a.md", "# a\n")
+    write(repo, "issues/issue-1-design.md", "# 設計\n")
+    head = commit(repo, "design")
+    d = mod.decide(str(repo), "pull_request", base, head, "o/r", "pytest.yml", api=none_passed)
+    assert d.skip and d.docs_tests == ("scripts/tests/test_x.py",), d.reason
+
+
+def test_untested_docs_only_diff_has_no_docs_tests(mod, repo):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "docs/other.md", "changed\n")
+    head = commit(repo, "docs")
+    d = mod.decide(str(repo), "pull_request", base, head, "o/r", "pytest.yml", api=none_passed)
+    assert d.skip and d.docs_tests == ()
+
+
+def test_skill_body_skips_pytest_but_not_runtime_smoke(mod, repo):
+    """#2925 決定 8: runtime smoke は振る舞いを決める文書をコードとして扱う。"""
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf/skills/design/SKILL.md", "---\nname: design\n---\n")
+    head = commit(repo, "skill")
+    assert decide(mod, repo, base, head)[0]
+    skip, reason = decide(mod, repo, base, head, workflow="runtime-plugin-smoke.yml")
+    assert not skip and "SKILL.md" in reason
+
+
+def test_unreadable_docs_decl_does_not_skip(mod, repo):
+    """#2925 AC5: 分け方の宣言が読めなければ省かない。"""
+    write(repo, ".ndf/project.json", '{"version": 1, "docs": {"files": "x"}}')
+    base = commit(repo, "broken decl")
+    write(repo, "docs/other.md", "changed\n")
+    head = commit(repo, "docs")
+    assert not decide(mod, repo, base, head)[0]
 
 
 def test_manifest_change_other_than_version_runs(mod, repo):
@@ -315,7 +347,37 @@ def test_cli_writes_github_output(repo, tmp_path):
         env={"PATH": "/usr/bin:/bin", "GITHUB_OUTPUT": str(out)},
     )
     assert p.returncode == 0, p.stderr
-    assert "skip=true" in out.read_text()
+    assert "skip=true" in out.read_text() and "docs_tests=" in out.read_text()
+
+
+# --- 必須のチェック pytest を返す集約のジョブ（#2925 の AC7） ---------------------------------
+
+
+def aggregate(shard: str, docs: str, skip: str, docs_tests: str) -> bool:
+    """pytest.yml の集約のジョブの run を、ジョブの結果の組で bash -e に打つ。成功なら真。"""
+    from ruamel.yaml import YAML
+
+    step = YAML(typ="safe").load((REPO / ".github" / "workflows" / "pytest.yml").read_text())["jobs"]["pytest"]["steps"][0]
+    env = {"PATH": "/usr/bin:/bin", "SHARD": shard, "DOCS": docs, "SKIP": skip, "DOCS_TESTS": docs_tests}
+    assert set(step["env"]) == set(env) - {"PATH"}
+    return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "shard, docs, skip, docs_tests, ok",
+    [
+        ("success", "skipped", "false", "", True),  # 全体を回して通った
+        ("failure", "skipped", "false", "", False),
+        ("cancelled", "skipped", "", "", False),
+        ("skipped", "skipped", "true", "", True),  # 省き、文書のテストも無い
+        ("skipped", "success", "true", "t/test_g.py", True),  # 省き、文書のテストが通った
+        ("skipped", "failure", "true", "t/test_g.py", False),  # 文書のテストが落ちたらマージを塞ぐ
+        ("skipped", "skipped", "true", "t/test_g.py", False),  # 出した文書のテストが走らなかった
+        ("skipped", "skipped", "false", "", False),  # 省かないのに分けたジョブが走らなかった
+    ],
+)
+def test_required_pytest_check_follows_the_job_results(shard, docs, skip, docs_tests, ok):
+    assert aggregate(shard, docs, skip, docs_tests) is ok
 
 
 # --- release-steps.py の待ちとマージ -------------------------------------------------

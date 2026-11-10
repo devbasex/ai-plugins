@@ -22,7 +22,7 @@ from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.progress_watch import ProgressWatch
 import limits
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
-from supervise_lib.steps import RunStep, deliver_skills, last_json
+from supervise_lib.steps import RunStep, deliver_skills, is_gate, last_json
 import project_mvv
 
 # worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
@@ -331,6 +331,9 @@ class DriveStep:
                 ctx.state.cur["counts"]["inner"] = inner[-1]
         # 欠けの残る終わり（stopped と gaps。収束しなかったなど）は終了コード 6 として控え、on_exit で分けられるようにする
         code = 0 if ok else (EXIT_INCOMPLETE if out and out.get("status") == "stopped" and out.get("gaps") else 1)
+        if not ok and out and out.get("status") == "gate" and is_gate((out.get("metrics") or {}).get("exit")):
+            # 人へ渡す止まり（cross-refactoring の安全網など。#2457 決定 8）は承認ゲートの終了コードのまま控える
+            code = int(out["metrics"]["exit"])
         if code == EXIT_INCOMPLETE:
             ctx.state.cur["gaps"] = list(out.get("gaps") or [])  # フェーズレポートの「欠けを残して進んだステップ」（#2047 の決定 5）
         ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))

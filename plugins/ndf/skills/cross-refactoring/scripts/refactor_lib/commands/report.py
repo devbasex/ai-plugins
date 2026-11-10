@@ -12,7 +12,7 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, culprit, info, launch, ledger, pause, rounds, stop_revert, time_report, timeline
+from .. import allocation, clock, culprit, info, item_actuals, launch, ledger, rounds, safety_net, time_report, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
@@ -62,6 +62,15 @@ def cmd_finalize(args: argparse.Namespace) -> None:
     else:
         _append_history(state)
     statefile.save(path, state)
+    # 項目の行は終わり方を問わず書く（#2457 決定 10）。ここは最終ゲートを経た終わり
+    item_actuals.append_item_rows(path, state, "final_gate")
+
+
+def cmd_item_actuals(args: argparse.Namespace) -> None:
+    """止まった出口（安全網・中断）で、採った項目ごとの実績の行を書く（#2457 決定 10・I12）。失敗しても 0。"""
+    path, state = load_state(args.id)
+    written = item_actuals.append_item_rows(path, state, args.end)
+    statefile.emit(ITEM_ACTUALS=written)
 
 
 def _append_history(state: dict[str, Any]) -> None:
@@ -81,14 +90,14 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
     print(f"参加者（提案）: {' / '.join(state['runtimes'])} / 実装担当: {state.get('implementer')}")
-    print(f"手順: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
+    print(f"手順: {state.get('phase')} / 実装の予算: {state.get('budget_minutes')} 分")
     print()
     print(_item_table(state))
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    """完了報告（AC26）。手順別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
-    全体のテスト・Jev の使用を並べる。"""
+    """完了報告（AC26）。手順別の所要・実装の予算と延長・安全網・採用と見送りの件数（理由別）・
+    全体のテスト・Jev の使用・成立の判定・差し戻し・範囲の外のファイル・止めた理由を並べる。"""
     path, state = load_state(args.id)
     _print_header(state)
     print()
@@ -173,15 +182,6 @@ def _final_gate_lines(gate: dict[str, Any]) -> list[str]:
         lines.append(f"- 最終ゲートの見分け: {_triage_line(triage)}")
     if gate.get("culprit"):
         lines.append(f"- 最終ゲートの原因の項目: {culprit.verdict_line(gate['culprit'])}")
-    if gate.get("stop_revert"):
-        lines.append(f"- 打ち切りの後の取り消し: {stop_revert.record_line(gate['stop_revert'])}")
-    skipped = gate.get("check_skipped")
-    if skipped:
-        same = "同じ" if skipped.get("base_identity") else "違う"
-        lines.append(
-            f"- 最終ゲートの確かめを省いた: {skipped.get('reason')}（想定最大時間の終わりまで {skipped.get('left_seconds')} 秒"
-            f" / 確かめの見込み {skipped.get('gate_seconds')} 秒 / HEAD の木は起点の木と{same}）"
-        )
     lines.append(
         f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
@@ -204,30 +204,51 @@ def _reassigned_lines(state: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _budget_source_text(state: dict[str, Any]) -> str:
-    """想定最大時間の出所の添え書き（#2047）。下限まで上げた実行だけ「下限から決めた」と上げる前の分を添える。"""
-    if state.get("budget_source") != "floor":
-        return ""
-    before = (state.get("budget_floor") or {}).get("from_minutes")
-    return f"（下限から決めた。既定 {before} 分）"
+def _report_budget_line(state: dict[str, Any], elapsed: float) -> str:
+    """実装の予算・延長・安全網・所要の行（#2457）。"""
+    plan_budget = state.get("budget") or {"minutes": state.get("budget_minutes")}
+    ext = plan_budget.get("extension")
+    grown = f"（延長: {ext['from']} → {ext['to']} 分。{ext['reason']}）" if ext else ""
+    net = (
+        f"安全網 {safety_net.used_seconds(state) / 60:.1f} / {safety_net.limit_minutes(state):.0f} 分"
+        if plan_budget.get("minutes")
+        else "安全網 —"
+    )
+    return f"- 実装の予算: {plan_budget.get('minutes')} 分{grown} / {net} / 所要: {elapsed / 60:.1f} 分（cross-review を除く）"
+
+
+def _decision_lines(state: dict[str, Any]) -> list[str]:
+    """項目ごとの成立の判定・修正の履歴・差し戻し・範囲の外のファイルと、止めた理由（#2457）。"""
+    lines: list[str] = []
+    for item in state.get("items") or []:
+        for f in item.get("feasibility") or []:
+            verdict = {True: "成立", False: "成立しない", None: "判定できない"}[f.get("feasible")]
+            again = "判定し直し" if f.get("rejudge") else "判定"
+            lines.append(f"- {item['id']} の{again}（{f.get('by') or '担い手なし'}）: {verdict} — {f.get('reason')}")
+        if item.get("fixer_switched"):
+            lines.append(f"- {item['id']} の修正担当を {item.get('fixer')} へ替えた（停滞か振動）")
+        if item.get("revert_reason"):
+            lines.append(f"- {item['id']} を打ち消した: {item['revert_reason']}")
+        for row in item.get("sendbacks") or []:
+            lines.append(f"- {item['id']} の差し戻し（{row.get('kind')}）: {row.get('reason')}")
+        outside = [r.get("path") for r in item.get("outside_scope") or []]
+        if outside:
+            lines.append(f"- {item['id']} が範囲の外で変えたファイル（コードレビューへ引き継ぐ）: {', '.join(outside[:10])}")
+    halt = state.get("halt") or {}
+    if halt:
+        lines.append(f"- 止めた理由: {halt.get('detail') or halt.get('reason')}")
+    return lines
 
 
 def _print_header(state: dict[str, Any]) -> None:
-    budget_seconds = int(state.get("budget_minutes") or 0) * 60
-    # 止まっていた時間の分だけ締め切りをずらしたなら、所要からその秒を除いて想定最大時間と比べる（#1491・決定 8）
-    shifted = pause.shifted_seconds(state)
-    elapsed = max(_elapsed_seconds(state) - shifted, 0.0)
-    paused = f"止まっていた {shifted / 60:.1f} 分を除く。" if shifted else ""
+    elapsed = _elapsed_seconds(state)
     judge = state.get("judge") or {}
     gate = state.get("final_gate") or {}
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
     print(f"- 件数: {counts_line(state)}")
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
-    print(
-        f"- 想定最大時間: {state.get('budget_minutes')} 分{_budget_source_text(state)} / 所要: {elapsed / 60:.1f} 分"
-        f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。{paused}cross-review を除く）"
-    )
+    print(_report_budget_line(state, elapsed))
     print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}） / モデル: {_implementer_model_text(state)}")
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
@@ -235,7 +256,7 @@ def _print_header(state: dict[str, Any]) -> None:
         print(line)
     baseline = state.get("baseline_test") or {}
     print(f"- 着手前のテスト（{baseline.get('mode') or 'whole'}）: {baseline_line(baseline)} / 既存失敗 {existing_failures_line(baseline)}")
-    for line in _whole_test_lines(state) + _final_gate_lines(gate) + time_report.lines(state):
+    for line in _whole_test_lines(state) + _final_gate_lines(gate) + time_report.lines(state) + _decision_lines(state):
         print(line)
     if state.get("launch_failure"):
         print(f"- {launch.line(state['launch_failure'])}")
@@ -257,7 +278,7 @@ def _stopped_line(state: dict[str, Any]) -> str:
 
 
 def _print_fixed_values() -> None:
-    """想定最大時間から導かず、固定のまま残した値（決定 24）。"""
+    """予算から導かず、固定のまま残した値（決定 24）。"""
     print("## 固定のまま残した値")
     print()
     for name, value, why in timeline.FIXED_VALUES:
@@ -269,9 +290,9 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、原因の項目から順に取り消した",
-    "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した",
-    "deferred": "全体テストを CI に任せる戦略のため、最終ゲートへ寄せた",
+    "narrowed": "直らず、原因の項目から順に取り消した（旧い記録）",
+    "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した（旧い記録）",
+    "deferred": "取り消さず、最終ゲートへ寄せた",
 }
 
 

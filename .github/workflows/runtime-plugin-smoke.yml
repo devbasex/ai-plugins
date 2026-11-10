@@ -18,7 +18,9 @@ on:
 
 jobs:
   # デプロイの PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
-  # PR）では smoke を省く（#1055）。判定は scripts/ci-heavy-skip.py が行う。push では常に回す
+  # PR）と、文書のファイルだけの PR では smoke を省く（#1055・#2925）。判定は scripts/ci-heavy-skip.py が行う。
+  # Skill の本文などの振る舞いを決める文書は frontmatter がランタイムの読み込みを変えるため、コードとして扱う
+  # （#2925 の決定 8）。push では常に回す
   ci-scope:
     name: runtime-smoke-scope
     runs-on: ubuntu-latest
@@ -32,6 +34,13 @@ jobs:
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
+      # 差分の分類がパスの照合に pathspec を使う。版は根の pyproject.toml の pin から読む
+      - uses: actions/setup-python@v7
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: "3.x"
+      - if: github.event_name == 'pull_request'
+        run: python3 -m pip install --quiet "$(grep -oE 'pathspec==[0-9.]+' pyproject.toml)"
       - id: decide
         if: github.event_name == 'pull_request'
         env:
@@ -56,7 +65,7 @@ jobs:
     env:
       SKIP_HEAVY: ${{ needs.ci-scope.outputs.skip == 'true' }}
     steps:
-      - name: Skip (release PR with version and description changes only)
+      - name: Skip (version and description or documents only)
         if: env.SKIP_HEAVY == 'true'
         run: echo "判定が重いジョブを省いた（ci-scope の出力を見る）"
       - uses: actions/checkout@v7

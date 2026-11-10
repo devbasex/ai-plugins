@@ -349,10 +349,11 @@ def test_prepare_points_check_base_at_from_even_if_left_over(repo, env, tmp_path
     assert check["from"] == base and check["files"] == ["app/a.py"]
 
 
-def test_scope_orders_common_then_escaped_then_others(repo, env, tmp_path):
-    gh_set(env, files={"21": ["docs/x.md"]})
+def test_scope_orders_common_then_escaped_then_others_and_drops_docs(repo, env, tmp_path):
+    # #2925 AC3: 文書のファイルのディレクトリは範囲に入らない
+    gh_set(env, files={"21": ["tools/x.py"]})
     call(repo, env, "escape", "--pr", "21")
-    merge_pr(repo, 11, "feat/a", {"app/a.py": 1, "docs/x.md": 1, "core/lib/c.py": 1})
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1, "tools/x.py": 1, "core/lib/c.py": 1, "docs/x.md": 1})
     st = state_dir(tmp_path, [])
     call(repo, env, "prepare", "--id", "m-1", "--state", str(st))
     p = subprocess.run(
@@ -361,7 +362,7 @@ def test_scope_orders_common_then_escaped_then_others(repo, env, tmp_path):
         text=True,
         env=env,
     )
-    assert p.returncode == 0 and p.stdout.split() == ["core/lib", "docs", "app"]
+    assert p.returncode == 0 and p.stdout.split() == ["core/lib", "tools", "app"]
 
 
 def test_scope_without_check_json_returns_two(repo, env, tmp_path):

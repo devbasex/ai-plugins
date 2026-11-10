@@ -35,7 +35,7 @@ def gate_spy(patch_lib, refactor, monkeypatch):
     """テストの実行・git・push を差し替える。"""
     seen: dict[str, list] = {"tests": [], "pushed": []}
 
-    def fake_run(command, cwd, timeout, grace=5.0):
+    def fake_run(command, cwd, timeout, grace=5.0, output=None, **kw):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
@@ -482,7 +482,7 @@ def test_a_usage_limit_without_a_candidate_stops_the_fix(cmd_final_fix, cmd_reas
 def test_the_gate_after_the_cap_reports_without_reverting(
     cmd_final_fix, cmd_gate, cmd_reassign, tmp_path, env_tmp_dir, merge_spy, gate_spy
 ):
-    """AC30: 単独で起動したとき、上限に達した後の最終ゲートは、落ちても取り消さず報告で終わる（#1669 AC9）。"""
+    """AC30・#2457: 起動し直しても解けない結末の後の最終ゲートは、落ちても取り消さず、止めて人へ渡す。"""
     state_path = _failing_gate_state(tmp_path, workflow_step=False, participants={"pool": ["codex"], "available": ["codex"]})
     env_tmp_dir(state_path)
     _usage_limit(state_path)
@@ -494,8 +494,9 @@ def test_the_gate_after_the_cap_reports_without_reverting(
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
 
-    assert e.value.code == 1
-    assert read_state(state_path)["final_gate"]["status"] == "failed"
+    assert e.value.code == 2
+    state = read_state(state_path)
+    assert state["final_gate"]["status"] == "halted" and state["halt"]["reason"] == "final_gate"
 
 
 def test_a_verified_final_fix_keeps_no_failure_record(cmd_final_fix, cmd_gate, tmp_path, env_tmp_dir, merge_spy):

@@ -14,6 +14,8 @@
 `whole --paths` は静的解析の雛形の全体テストの `{paths}` に入れる範囲である。
 `scope --only-kind` は渡した種別の suite だけを打ち（当てる範囲は同じ）、打つものが無ければ通る（0）。
 手元の全体検証が上限の中で終わったら（通った・落ちたを問わない）、その秒を全体テストの実測として `lib/whole_runs.py` へ残す。
+`whole` は差分が文書のファイルだけ（`lib/diff_kinds.py`。#2925）ならテストの種別を走らせず、テストが読む文書があれば対応するテストだけを
+範囲テストの雛形で手元で走らせる（静的解析は今と同じ。読めなければ全体。分類は `items[].diff_kinds`）。
 
 終了コード: 0 = 通った（フレーキーと既存失敗だけのときも 0。`items` に分類を持つ）/ 1 = 変更起因の失敗がある /
 2 = 判断できない（起動の失敗・CI が上限までに終わらない・`gh` が使えない・宣言の不足・コンテナで走る suite が worktree を
@@ -38,8 +40,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema")  # 全体テストの実測（whole_runs → estimate_records）が宣言の形に pydantic を使う
+deps.require("schema", "pathmatch")  # 全体テストの実測（whole_runs → estimate_records）が pydantic を、差分の分類が pathspec を使う
 import container_reach  # noqa: E402
+import diff_kinds  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import secret_redact  # noqa: E402
 import step_result  # noqa: E402
@@ -63,9 +66,8 @@ def _emit_step(obj: dict, code: int | None = None):
 
 
 def _supervise_decl(root: pathlib.Path) -> dict:
-    f = root / ".ndf" / "supervise.json"
     try:
-        data = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+        data = json.loads((root / ".ndf" / "supervise.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -108,6 +110,8 @@ def _base_sha(root: pathlib.Path, base: str | None) -> str | None:
 
 
 def _classify(root: pathlib.Path, strategy: ts.Strategy, limits: dict, base: str | None, ci_xmls: list[bytes] | None = None) -> dict:
+    if strategy.name == ts.ROUND_ONLY and ci_xmls is None:
+        return {"fallback_reason": "round-only は JUnit を読まない"}
     work = str(root)
     if ci_xmls is not None:
         failed, reason = test_triage.merged_failed_ids(ci_xmls, test_triage.tracked_files(work))
@@ -131,6 +135,15 @@ def _emit_launch(strategy: ts.Strategy, command: str, outcome: ts.Outcome, log: 
     """起動の失敗を「落ちた」と別の状態で返す（#1483 AC12）。終了コードは 2。"""
     item = {"launch_failed": {"command": command, "code": outcome.code, "reason": outcome.reason, "log": str(log)}}
     _emit_step(result(TOOL, "stopped", f"起動の失敗: {command}（{outcome.reason}）", [item], {"strategy": strategy.name}), code=2)
+    return 2
+
+
+def _emit_stopped(strategy: ts.Strategy, stopped: tuple, label: str, limit) -> int:
+    """`_run_each` が止めた理由（起動の失敗か打ち切り）を結果に出して終了コードを返す。"""
+    command, outcome, log = stopped
+    if outcome.launch_failed:
+        return _emit_launch(strategy, command, outcome, log)
+    _emit_step(result(TOOL, "stopped", f"{label}が {limit} 秒で終わらなかった", [], {}))
     return 2
 
 
@@ -238,7 +251,6 @@ def _decide_status(passed: bool, triage: dict | None, lint: list[dict] | None) -
     if lint_caused:
         # 変更起因と確定した静的解析の失敗は、テスト側の見分け（判断不能の 2 を含む）より先に効く。
         status, code = "stopped", 1
-    if lint_caused:
         suffix += "。静的解析が落ちた: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint_caused)
     elif lint:
         suffix += "。落ちた静的解析は既存失敗: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint)
@@ -256,10 +268,11 @@ class OutcomeContext(NamedTuple):
     triage: dict | None = None
     lint: list[dict] | None = None
     failed_commands: list[dict] | None = None
+    extra: tuple = ()
 
 
 def _emit_outcome(ctx: OutcomeContext) -> int:
-    items = _outcome_items(ctx.strategy, ctx.limits, ctx.notes, ctx.triage, ctx.lint)
+    items = _outcome_items(ctx.strategy, ctx.limits, ctx.notes, ctx.triage, ctx.lint) + list(ctx.extra)
     if ctx.failed_commands:
         items.append({"failed_commands": ctx.failed_commands})
     status, code, suffix = _decide_status(ctx.passed, ctx.triage, ctx.lint)
@@ -306,11 +319,7 @@ def cmd_scope(a) -> int:
     started = time.monotonic()
     done, stopped = _run_each(root, [r.command for r in runs], float(limits["test_timeout"]), "scope")
     if stopped is not None:
-        command, outcome, log = stopped
-        if outcome.launch_failed:
-            return _emit_launch(strategy, command, outcome, log)
-        _emit_step(result(TOOL, "stopped", f"範囲テストが {limits['test_timeout']} 秒で終わらなかった", [], {}))
-        return 2
+        return _emit_stopped(strategy, stopped, "範囲テスト", limits["test_timeout"])
     failed = [c for c, o, _ in done if o.status != ts.PASSED]
     seconds = round(time.monotonic() - started, 1)
     detail = f"範囲テスト {len(runs)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
@@ -319,11 +328,7 @@ def cmd_scope(a) -> int:
     lint_failed, test_failed = _split_scope_failures(runs, failed)
     if not test_failed:
         return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", lint=lint_failed))
-    triage = (
-        _classify(root, strategy, limits, a.base)
-        if strategy.name != ts.ROUND_ONLY
-        else {"fallback_reason": "round-only は JUnit を読まない"}
-    )
+    triage = _classify(root, strategy, limits, a.base)
     return _emit_outcome(
         OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", triage=triage, lint=lint_failed or None)
     )
@@ -334,11 +339,11 @@ class _Resp:
         self.body = body
 
 
-def _wait_ci(
-    root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: list[str], base: str | None, lint: list[dict] | None = None
-) -> int:
+def _wait_ci(root: pathlib.Path, ctx: OutcomeContext, base: str | None) -> int:
     """Pull Request のチェックを上限まで待ち、落ちたら CI の JUnit で見分ける（F4）。"""
     import gh_checks
+
+    strategy, limits = ctx.strategy, ctx.limits
 
     owner_repo = repo_lib.owner_repo(root)
     sha = _git_out(root, "rev-parse", "HEAD") or ""
@@ -350,16 +355,12 @@ def _wait_ci(
         _emit_step(result(TOOL, "stopped", "待つチェックの名前が無い（test.ci.check か ci.required_checks）", [], {}))
         return 2
 
-    def runs_now():
-        return gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)), empty_ok=True)
-
     last: dict = {}
 
     def fetch():
-        runs = runs_now()
-        last["runs"] = runs
+        last["runs"] = gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)), empty_ok=True)
         # 照会の失敗は `None`、チェックの未登録は `pending`（`gh_checks.checks_outcome`）
-        return gh_checks.checks_outcome(runs, checks)
+        return gh_checks.checks_outcome(last["runs"], checks)
 
     outcome, waited, attempts = test_triage.wait_check(fetch, float(limits["ci_wait_timeout"]))
     detail = (
@@ -369,14 +370,11 @@ def _wait_ci(
         _emit_step(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))
         return 2
     if outcome == "success":
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail=detail, lint=lint))
-    xmls = test_triage.ci_junit_xmls(
-        owner_repo, sha, checks, (strategy.ci or {}).get("junit_artifacts"), fetch_runs=lambda: last.get("runs")
-    )
+        return _emit_outcome(ctx._replace(passed=not ctx.lint, detail=detail))
+    artifacts = (strategy.ci or {}).get("junit_artifacts")
+    xmls = test_triage.ci_junit_xmls(owner_repo, sha, checks, artifacts, fetch_runs=lambda: last.get("runs"))
     triage = _classify(root, strategy, limits, base, ci_xmls=xmls)
-    return _emit_outcome(
-        OutcomeContext(strategy, limits, notes, passed=False, detail=detail + f" の結論は {outcome}", triage=triage, lint=lint)
-    )
+    return _emit_outcome(ctx._replace(passed=False, detail=detail + f" の結論は {outcome}", triage=triage))
 
 
 def _run_lint_whole(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a, started: float) -> tuple[list[dict] | None, int | None]:
@@ -389,18 +387,49 @@ def _run_lint_whole(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a, 
         return None, None
     done, stopped = _run_each(root, commands, float(limits["whole_timeout"]), "whole-lint", started)
     if stopped is not None:
-        command, outcome, log = stopped
-        if outcome.launch_failed:
-            return None, _emit_launch(strategy, command, outcome, log)
-        _emit_step(result(TOOL, "stopped", f"静的解析の全体テストが {limits['whole_timeout']} 秒で終わらなかった", [], {}))
-        return None, 2
+        return None, _emit_stopped(strategy, stopped, "静的解析の全体テスト", limits["whole_timeout"])
     failed = [c for c, o, _ in done if o.status != ts.PASSED]
     return _lint_verdicts(root, strategy, limits, a, failed), None
+
+
+def _run_tests(root: pathlib.Path, a, ctx: OutcomeContext, commands: list[str], label: str, started: float | None) -> int:
+    """テストの種別のコマンドを走らせて結果を出す。`started` を渡すと静的解析と上限を共有し、所要を全体テストの実測に残す。"""
+    test_triage.clear_junit(str(root), ctx.strategy)
+    t0 = time.monotonic()
+    done, stopped = _run_each(root, commands, float(ctx.limits["whole_timeout"]), "whole" if started else "whole-docs", started)
+    if stopped is not None:
+        return _emit_stopped(ctx.strategy, stopped, label, ctx.limits["whole_timeout"])
+    if started is not None:
+        _record_whole(root, ctx.strategy, started)
+    failed = _failed_commands(root, done)
+    tail = f"（{round(time.monotonic() - t0, 1)} 秒 / 戦略 {ctx.strategy.name}）"
+    if not failed:
+        return _emit_outcome(ctx._replace(passed=not ctx.lint, detail=f"{label} {len(commands)} 本{tail}"))
+    triage = _classify(root, ctx.strategy, ctx.limits, a.base)
+    detail = f"{label} {len(commands)} 本のうち {len(failed)} 本が落ちた{tail}"
+    return _emit_outcome(ctx._replace(passed=False, detail=detail, triage=triage, failed_commands=failed))
+
+
+def _docs_tests(root: pathlib.Path, a, ctx: OutcomeContext, kinds: diff_kinds.DiffKinds) -> int | None:
+    """文書だけの差分の全体テスト。範囲の雛形を持つ suite が無ければ `None`（呼び手が今と同じ全体テストを走らせる）。"""
+    if not kinds.tests:
+        detail = f"全体テストを飛ばした（差分が文書のファイルだけ: {len(kinds.docs)} ファイル）"
+        return _emit_outcome(ctx._replace(passed=not ctx.lint, detail=detail))
+    if unscoped := ts.unscoped_owners(ctx.strategy, list(kinds.tests)):  # 雛形を持つ別の suite へ渡さない
+        ctx.notes.append(f"テストを受け持つ suite（{', '.join(unscoped)}）が範囲テストの雛形を持たず、全体テストを走らせる")
+        return None
+    runs = [r.command for r in ts.scope_runs(ctx.strategy, list(kinds.tests), []) if r.kind == ts.TEST]
+    if not runs:
+        ctx.notes.append("テストが読む文書を変えたが、範囲テストの雛形（scope_command）を持つ suite が無く、全体テストを走らせる")
+        return None
+    return _run_tests(root, a, ctx, runs, f"文書を読むテスト（全体テストの代わり。{len(kinds.tests)} ファイル）", None)
 
 
 def cmd_whole(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
+    # 起点との merge-base から HEAD までの差分（消したファイルを含む）。取れなければ全部をコードとして扱う
+    kinds = diff_kinds.classify_root(root, diff_kinds.git_changed(root, f"{sha}..HEAD") if (sha := _base_sha(root, a.base)) else None)
     if strategy.whole_commands(ts.LINT) or (not strategy.whole_on_ci and strategy.whole_commands(ts.TEST)):
         container_reach.env_for(root)  # 用意の秒は全体テストの上限と実測へ数えない
     # 手元の全体検証（静的解析とテスト）は 1 つの whole_timeout に収める
@@ -408,38 +437,20 @@ def cmd_whole(a) -> int:
     lint, code = _run_lint_whole(root, strategy, limits, a, budget_started)
     if code is not None:
         return code
+    extra = ({"diff_kinds": json.loads(kinds.as_json())},)
+    ctx = OutcomeContext(strategy, limits, notes, passed=not lint, detail="静的解析の全体テスト", lint=lint, extra=extra)
+    if kinds.docs_only() and (code := _docs_tests(root, a, ctx, kinds)) is not None:
+        return code
     if strategy.whole_on_ci:
-        return _wait_ci(root, strategy, limits, notes, a.base, lint)
+        return _wait_ci(root, ctx, a.base)
     commands = strategy.whole_commands(ts.TEST)
-    if not commands:
-        if lint is not None:
-            _record_whole(root, strategy, budget_started)
-            return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail="静的解析の全体テスト", lint=lint))
-        _emit_step(result(TOOL, "stopped", "全体テストのコマンド（suites[].command）が無い", [{"note": n} for n in notes], {}))
-        return 2
-    test_triage.clear_junit(str(root), strategy)
-    started = time.monotonic()
-    done, stopped = _run_each(root, commands, float(limits["whole_timeout"]), "whole", budget_started)
-    if stopped is not None:
-        command, outcome, log = stopped
-        if outcome.launch_failed:
-            return _emit_launch(strategy, command, outcome, log)
-        _emit_step(result(TOOL, "stopped", f"全体テストが {limits['whole_timeout']} 秒で終わらなかった", [], {}))
-        return 2
-    _record_whole(root, strategy, budget_started)
-    failed = _failed_commands(root, done)
-    seconds = round(time.monotonic() - started, 1)
-    if not failed:
-        detail = f"全体テスト {len(commands)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail=detail, lint=lint))
-    detail = f"全体テスト {len(commands)} 本のうち {len(failed)} 本が落ちた（{seconds} 秒 / 戦略 {strategy.name}）"
-    if strategy.name == ts.ROUND_ONLY:
-        triage = {"fallback_reason": "round-only は JUnit を読まない"}
-    else:
-        triage = _classify(root, strategy, limits, a.base)
-    return _emit_outcome(
-        OutcomeContext(strategy, limits, notes, passed=False, detail=detail, triage=triage, lint=lint, failed_commands=failed)
-    )
+    if commands:
+        return _run_tests(root, a, ctx, commands, "全体テスト", budget_started)
+    if lint is not None:
+        _record_whole(root, strategy, budget_started)
+        return _emit_outcome(ctx)
+    _emit_step(result(TOOL, "stopped", "全体テストのコマンド（suites[].command）が無い", [{"note": n} for n in notes], {}))
+    return 2
 
 
 def main(argv=None) -> int:
