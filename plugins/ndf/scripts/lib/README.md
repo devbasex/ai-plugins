@@ -52,7 +52,7 @@
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
 | [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
 | [step_read.py](step_read.py) | 結果を読む側の共通の規則。子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` |
-| [json_pick.py](json_pick.py) | JSON Pointer（RFC 6901）で JSON の値を取り出す `pick_fields`・`resolve_pointer` と、`--field` を渡したときだけ結果 JSON の `metrics` を取り出した値へ置き換える `picked`。`step_result.py pick` の本体 `cli_pick` も持つ。`--field` の規則はここだけに置く（#2909） | `state_get` / `glossary_lookup` / `step_result.py pick` |
+| [json_pick.py](json_pick.py) | JSON Pointer（RFC 6901）で JSON の値を取り出す `pick_fields`・`resolve_pointer` と、`--field` を渡したときだけ結果 JSON の `metrics` を取り出した値へ置き換える `picked`。`step_result.py pick` の本体 `cli_pick` も持つ。`--field` の規則はここだけに置く | `state_get` / `glossary_lookup` / `step_result.py pick` |
 | [state_get.py](state_get.py) | スプリントの状態と開発ループの記録を読むだけの取り出し（`sprint-state.py get`・`loop get`）。次の操作を `next` に、`--field` の値を `metrics` に返す。状態ファイルを書き換えない | `sprint-state.py` / `sprint_loop_cli` |
 | [glossary_lookup.py](glossary_lookup.py) | `glossary.py lookup`（語を部分一致で引く）と、`check`・`diff`・`lookup` の `--field` の包み。引数の定義は `glossary.py` が持つ | `glossary.py` |
 | [step-result.sh](step-result.sh) | シェルの手順のスクリプトが結果 JSON を 1 行出すための関数（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric` で値を溜め、`sr_emit` が `step_result.py emit` を呼ぶ。`sr_gh` は `gh` の失敗の要旨を `SR_GH_ERR` に残す。`sr_absorb` は別のスクリプトの結果 JSON を取り込む）。JSON をシェルで組まない | `progress-record.sh` / `projects-sync.sh` |
@@ -66,7 +66,7 @@
 | [gh_graphql.py](gh_graphql.py) | 入れ子の読み取り（未解決のスレッド）と GraphQL の 1 回の要求（`graphql`）。`pr-status` のための、スレッド・マージの状態・PR が閉じる Issue を 1 回で読む `pr_status_parts` | `gh_parts` / `gh_pr_info` / `gh_pr_status` |
 | [gh_checks.py](gh_checks.py) | チェックジョブの読み取りと、名前ごとの最新の実行への畳み方・失敗のログの保存 | `gh_parts` / `gh_pr_info` |
 | [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` / `gh_pr_status` |
-| [gh_pr_status.py](gh_pr_status.py) | `pr-status` の組み立て。PR の状態・チェック・未解決のスレッド・マージの状態・PR が指す Issue を 1 回で読み、次の 1 手（待つ・直す・マージへ進める・人へ戻す）へ訳す。判定の表は docstring（#2909） | `gh_parts` |
+| [gh_pr_status.py](gh_pr_status.py) | `pr-status` の組み立て。PR の状態・チェック・未解決のスレッド・マージの状態・PR が指す Issue を 1 回で読み、次の 1 手（待つ・直す・マージへ進める・人へ戻す）へ訳す。判定の表は docstring | `gh_parts` |
 | [gh_sections.py](gh_sections.py) | 本文の節の取得・置換・末尾への 1 行の追記（GitHub を呼ばない） | `gh_parts` |
 | [clock.py](clock.py) | 今の時刻・ISO の書き出し（`local` / `utc` / `naive` / `z-ms` を引数で選ぶ）と読み取り（`Z` を含む）・秒の差。標準ライブラリだけ | `statefile.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/clock.py`）（C1〜C7 で各スクリプト） |
 | [jsonio.py](jsonio.py) | JSON の読み（無い・壊れた・形が違うときの扱いを引数で選ぶ）と原子的な書き込み、JSONL の読み（壊れた行を止めるか飛ばすかを引数で選ぶ）と追記。標準ライブラリだけ | 同上 |
@@ -200,7 +200,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 - 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、置き場を開く前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
 - 子プロセスとして打った手順のスクリプトの結果は `step_read.read_completed`・`step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない。結果ファイル（worker の作業の結果ファイル・`NDF_RESULT_FILE`）は `step_read.read_result_file` で読む。どちらも無い・読めない・形が違うときは理由つきの `stopped` を返す
 - 最後の行を `json.loads(<出力>.splitlines()[-1])` で読む書き方と、名前に `last_json` を含む関数は `step_read.py` の外に置かない（契約の検査 `result-read`）。要約・件数を写すだけの箇所は `step_read.last_json` を使う
-- シェルから結果 JSON の値を 1 つ読むときは `... | python3 step_result.py pick --field <JSON Pointer> [--raw]` を使い、`python -c` で読み直さない。状態ファイルとループの記録は `sprint-state.py get`・`loop get`、用語集の結果は `glossary.py check|diff|lookup --field` で読む（`--field` の規則は `json_pick.py`。#2909）
+- シェルから結果 JSON の値を 1 つ読むときは `... | python3 step_result.py pick --field <JSON Pointer> [--raw]` を使い、`python -c` で読み直さない。状態ファイルとループの記録は `sprint-state.py get`・`loop get`、用語集の結果は `glossary.py check|diff|lookup --field` で読む（`--field` の規則は `json_pick.py`）
 - 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）が `ok` 以外を返しても、呼ぶ側は工程を止めない。`supervise_lib` の `record_stage` はフェーズレポートへ、`sprint-close.py` は `board_note` の項目へ、LLM は作業の報告の「見つけたもの」へ、`summary` と `gaps[].reason` を載せる
 
 ### 実行の核

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import json
 import shlex
 import subprocess
 import sys
@@ -28,7 +27,7 @@ import step_read
 import step_result
 
 TOOL = "advance"
-PLUGIN_NAME = "ndf"
+ROOT_MARKER = Path("scripts") / "supervise.py"  # NDF のプラグインの根の目印（このファイルの入口）
 # `--` の後のコマンドをそのまま走らせる副命令（プラグインの scripts/ からのパス, 副命令）。
 # `argparse.REMAINDER` を持つ副命令はすべてここに載せる（テストで縛る）
 RELAYS = frozenset({("lib/gh_parts.py", "body-lock"), ("lib/post_queue.py", "retry"), ("supervise.py", "advance")})
@@ -41,14 +40,10 @@ class StepRefused(ValueError):
 
 
 def _ndf_plugin_root(path: Path) -> Path | None:
-    """パスを含む NDF のプラグインの根（`.claude-plugin/plugin.json` の name が ndf）。無ければ None。"""
+    """パスを含む NDF のプラグインの根（`scripts/supervise.py` と `skills/` を持つディレクトリ）。無ければ None。"""
     for d in path.parents:
-        manifest = d / ".claude-plugin" / "plugin.json"
-        if manifest.is_file():
-            try:
-                return d if json.loads(manifest.read_text(encoding="utf-8")).get("name") == PLUGIN_NAME else None
-            except (OSError, ValueError):
-                return None
+        if (d / ROOT_MARKER).is_file() and (d / "skills").is_dir():
+            return d
     return None
 
 

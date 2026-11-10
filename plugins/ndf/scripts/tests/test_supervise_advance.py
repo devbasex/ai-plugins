@@ -1,6 +1,6 @@
 """手順の連続実行（`supervise.py advance`、#2909 の F5）。
 
-偽の NDF のプラグイン（`.claude-plugin/plugin.json` の name が ndf）の `scripts/` に、決めた結果 JSON を返す小さな
+偽の NDF のプラグイン（`scripts/supervise.py` と `skills/` を持つディレクトリ）の `scripts/` に、決めた結果 JSON を返す小さな
 スクリプトを置いて並べる。GitHub も LLM も呼ばない。
 """
 
@@ -40,9 +40,9 @@ CHILD = textwrap.dedent(
 
 @pytest.fixture()
 def plug(tmp_path):
-    (tmp_path / ".claude-plugin").mkdir()
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "ndf"}))
     (tmp_path / "scripts").mkdir()
+    (tmp_path / "skills").mkdir()
+    (tmp_path / "scripts" / "supervise.py").write_text("")
     (tmp_path / "scripts" / "child.py").write_text(CHILD)
     (tmp_path / "outside.py").write_text(CHILD)
     return tmp_path
