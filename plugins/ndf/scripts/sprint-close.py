@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """sprint-close.py: スプリントを閉じる（progress-tracking の「スプリントを閉じる」の手順）。
 
-    python3 sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage デプロイ|リリース後テスト|振り返り]
+    python3 sprint-close.py --record-pr <PR番号|0|unknown> [--final-stage デプロイ|リリース後テスト|振り返り | --final-stage-from <progress.jsonl>]
                              [--prs 1,2] [--issues 3,4] [--with-verification]
                              [--label "<マイルストーン>の<工程名>"] [--dry-run] [--root <dir>]
 
@@ -17,7 +17,7 @@
    （lib/gh_parts.py の issue_lock）の中で状態と本文を 1 回で読んで判定し（本文の `## 受け入れ条件の確認` で
    マージ前に確かめたと記録された条件には合格の行を求めない。#2144）、満たした記録のリポジトリの課題は
    本文の受け入れ条件に印（`[x]`）を付けてから閉じる（規則は lib/acceptance.py。#1683）。
-   最後に条件 3（最終工程の記録。--final-stage、省けば振り返り）を判定する。振り返りは課題の本文の
+   最後に条件 3（最終工程の記録。--final-stage、省けば振り返り。--final-stage-from は stage_from_progress。#2914）を判定する。振り返りは課題の本文の
    `振り返り: <コメントの URL>` の行のうち、コメントの識別子が記録の PR の最後のリリース記録のコメントの識別子以上の
    ものがあること（final_stage_gap。#2228）。条件 2 と同じ 1 回の本文の読みを使い、満たさなければ印も書かない
 4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題ならボードを Done →
@@ -93,6 +93,7 @@ from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2
     final_stage_arg,
     final_stage_gap,
     gap_item,
+    stage_from_progress,
 )
 
 TOOL = "sprint-close"
@@ -399,6 +400,7 @@ def _emit_close_result(a, targets, items, notes, metrics, summary, count, decisi
 
 
 def cmd_close(a):
+    a.final_stage, basis = stage_from_progress(a.final_stage_from, a.final_stage)
     if a.record_pr in (0, RECORD_UNKNOWN) and not a.issues:
         what = "0（本番の記録なし）" if a.record_pr == 0 else f"{RECORD_UNKNOWN}（記録の置き場が分からない）"
         _stop_close(f"--record-pr {what} は --issues と一緒に渡す", "閉じる課題を --issues で渡して打ち直す")
@@ -423,7 +425,7 @@ def cmd_close(a):
     count, metrics, summary = close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     metrics["final_stage"] = a.final_stage
     decisions = [
-        {"decision": f"最終工程を {a.final_stage} として判定した", "basis": f"--final-stage {a.final_stage}（省略時は{STAGE_RETRO}）"}
+        {"decision": f"最終工程を {a.final_stage} として判定した", "basis": basis}
     ]
     _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions)
 
@@ -477,6 +479,7 @@ def build_parser():
         default=STAGE_RETRO,
         help="その実行の最終工程（閉じる条件 3）。省けば振り返り。リリース後テストは条件 2 を必ず見る",
     )
+    ap.add_argument("--final-stage-from", help="まとめのプランの進捗記録。retro が通っていれば振り返り、無ければリリース後テスト（--final-stage より優先）")
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")
     ap.add_argument("--dry-run", action="store_true", help="状態を読むだけで、ボードも課題も書かない")
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
