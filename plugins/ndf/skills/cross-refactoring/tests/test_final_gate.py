@@ -439,12 +439,16 @@ def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(refactor, cmd_
 def test_a_new_gate_run_drops_the_previous_triage(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
     """前回の見分けは今回の取り消しの根拠にしない（今回のテストが通れば変更起因は無い）。"""
     stale = {"caused": ["tests/test_a.py::t"], "rerun_command": "pytest -q tests/test_a.py"}
-    state_path = _state(tmp_path, whole_test=PASSED_IN_VERIFY, final_gate={"fix_rounds": 1, "checks": [], "triage": stale})
+    material = {"ids": ["tests/test_a.py::t"], "source": "junit", "log": "", "commands": []}
+    state_path = _state(
+        tmp_path, whole_test=PASSED_IN_VERIFY, final_gate={"fix_rounds": 1, "checks": [], "triage": stale, "material": material}
+    )
     env_tmp_dir(state_path)
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert "triage" not in read_state(state_path)["final_gate"]
+    gate = read_state(state_path)["final_gate"]
+    assert "triage" not in gate and "material" not in gate
 
 
 @pytest.mark.parametrize(
@@ -599,6 +603,8 @@ def test_a_ci_failure_that_is_only_an_existing_failure_passes(patch_lib, refacto
     assert all("tests/test_old.py" in words for words in spy["tests"])
     triage = read_state(state_path)["final_gate"]["triage"]
     assert triage["preexisting"] == [OLD_FAILURE] and triage["caused"] == []
+    # 仕分け済みの既存失敗は修正の材料と前進の判定へ戻さない（静的解析だけが落ちた回も同じ材料を使う）
+    assert read_state(state_path)["final_gate"]["material"]["ids"] == []
 
 
 def test_a_ci_failure_outside_the_existing_failures_does_not_pass(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy):

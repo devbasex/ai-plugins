@@ -405,3 +405,16 @@ def test_apply_fix_result_reverts_the_whole_range_when_the_bad_commit_alone_conf
     item = state["items"][0]
     assert item["commits"]["fix"] == [], "違反のコミットを項目へ結ばない"
     assert [r["commit"] for r in item["sendbacks"]] == [bad]
+
+
+def test_a_switched_item_waits_for_the_new_fixer_before_it_is_reverted(refactor):
+    """交代先がまだ直していない項目は、交代の前の停滞の記録で打ち消さない。交代先が 1 回直した後の停滞で打ち消す。"""
+    fixloop = __import__("refactor_lib.fixloop", fromlist=["next_move"])
+    state = {"implementer": "claude", "runtimes": ["claude", "codex"], "host": "claude"}
+    item = {"id": "I-002", "fixer": "claude", "fix_count": 1}
+    assert fixloop.next_move(state, item, "stalled") == fixloop.SWITCH
+    assert fixloop.switch_fixer(state, item, None) == "codex"
+    # 先頭の項目の担当（元の担当）だけが起動され、この項目の修正の回数は進んでいない
+    assert fixloop.next_move(state, item, "stalled") == fixloop.FIX
+    item["fix_count"] = 2
+    assert fixloop.next_move(state, item, "stalled") == fixloop.REVERT

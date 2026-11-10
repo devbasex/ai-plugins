@@ -114,7 +114,9 @@ def _revert_unverified_tests(path: Any, state: dict[str, Any], deferred: list[di
     実装が採られないまま見送ると、今のコードで落ちるテストが HEAD に残って最終ゲートの全体テストを落とすか、
     検証を受けていない本番のファイルの変更が公開へ流れる。打ち消した元のコミットと revert は
     `undo.revert_unattributed` が残すコミットとして台帳へ記録し、項目のテストのコミットからは外す
-    （`unverified_reverted` に残す）。衝突すれば HEAD を戻して終了コード 4 で止まる。"""
+    （`unverified_reverted` に残す）。打ち消しが衝突したら（後の項目が同じファイルを書き換えた）実行全体を止めず、
+    HEAD を戻したうえでコミットを残すコミットとして台帳へ記録し、項目に `unverified_kept` を残して最終ゲートの
+    全体テストに判定を任せる（readopt は最終ゲートの直前で必ず通るため、止めると再開しても同じ衝突で止まり続ける）。"""
     targets = {item["id"]: ledger.unverified_tests(item) for item in deferred}
     targets = {k: v for k, v in targets.items() if v}
     if not targets:
@@ -123,13 +125,27 @@ def _revert_unverified_tests(path: Any, state: dict[str, Any], deferred: list[di
     wanted = {full_commit(work, sha): sha for shas in targets.values() for sha in shas}
     order = (git_out(work, ["rev-list", "--reverse", "HEAD"]) or "").split()
     shas = [wanted[sha] for sha in order if sha in wanted]
+    done = undo.revert_unattributed(path, state, shas, "見送りの項目の検証を受けていないテスト", stop_on_conflict=False)
     for item in deferred:
-        if item["id"] in targets:
-            commits = item.setdefault("commits", {})
-            item["unverified_reverted"] = targets[item["id"]]
-            commits["test"] = None
-            commits.pop("test_extra", None)
-    undo.revert_unattributed(path, state, shas, "見送りの項目の検証を受けていないテスト")
+        if item["id"] not in targets:
+            continue
+        if not done:
+            for sha in targets[item["id"]]:
+                ledger.note_orchestrator_commit(state, full_commit(work, sha))
+            item["unverified_kept"] = targets[item["id"]]
+            item["failure_reason"] = (
+                f"{item.get('failure_reason') or ''}（未検証のテストが残っている。打ち消しが衝突したため最終ゲートの全体テストで判定する）"
+            )
+            continue
+        commits = item.setdefault("commits", {})
+        item["unverified_reverted"] = targets[item["id"]]
+        commits["test"] = None
+        commits.pop("test_extra", None)
+    if not done:
+        info(
+            f"⚠ 見送りへ変えた {', '.join(targets)} の検証を受けていないテストのコミット {len(shas)} 件は打ち消せず（衝突）、残して最終ゲートで判定します"
+        )
+        return
     info(
         f"↩ 見送りへ変えた {', '.join(targets)} のテストのコミット {len(shas)} 件を打ち消しました（今のコードで落ちる・テスト以外を変える）"
     )

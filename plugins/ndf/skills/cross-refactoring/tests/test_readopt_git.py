@@ -231,6 +231,32 @@ def test_deferring_reverts_a_test_commit_that_was_sent_back(flow, readopt, kind)
     assert ledger.unpublishable(state, str(work), state["plan"]["base_sha"]) == []
 
 
+def test_deferring_keeps_an_unverified_test_commit_when_its_revert_conflicts(flow, readopt):
+    """打ち消しが衝突しても実行全体を止めず、HEAD を戻してコミットを残し、最終ゲートに判定を任せる。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert False\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    # 後のコミットが同じ行を書き換えると、テストのコミットだけの revert は衝突する
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert 1 == 2\n", encoding="utf-8")
+    git("commit", "-qam", "later change", cwd=work)
+    later = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    item["sendbacks"] = [{"kind": "test_failed", "reason": "x", "at": "2026-11-10T00:00:00"}]
+    _plan(flow, [item], left_minutes=0.5, phase="readopt")
+    _set(flow, ledger={"orchestrator_commits": [later]})
+
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    state = read_state(flow["path"])
+    got = state["items"][0]
+    assert got["status"] == "deferred" and got["commits"]["test"] == test_sha and got["unverified_kept"] == [test_sha]
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == later
+    assert state["phase"] == "final"
+    ledger = __import__("refactor_lib.ledger", fromlist=["unpublishable"])
+    assert ledger.unpublishable(state, str(work), state["plan"]["base_sha"]) == []
+
+
 def test_deferring_keeps_a_test_commit_without_a_sendback(flow, readopt):
     """差し戻しの無いテストのコミットは、見送りへ変えても打ち消さずに公開できるコミットとして残す。"""
     work = flow["work"]

@@ -83,6 +83,10 @@ def next_move(state: dict[str, Any], item: dict[str, Any], verdict: str) -> str:
     if verdict not in progress.STOPPING:
         return FIX
     if item.get("fixer_switched"):
+        # 交代先がまだ直していない（同じ担当の項目だけを起動するため、後ろの項目は待つ）なら、古い停滞の記録で打ち消さない
+        switched_at = item.get("switched_at_fix")
+        if switched_at is not None and int(item.get("fix_count") or 0) <= int(switched_at):
+            return FIX
         return REVERT
     return SWITCH
 
@@ -95,6 +99,8 @@ def switch_fixer(state: dict[str, Any], item: dict[str, Any], judge_by: Optional
     if new is None:
         return None
     item["fixer"], item["fixer_switched"] = new, True
+    # 交代した時点の修正の回数。交代先が 1 回直すまでは停滞の判定で打ち消さない（`next_move`）
+    item["switched_at_fix"] = int(item.get("fix_count") or 0)
     return new
 
 

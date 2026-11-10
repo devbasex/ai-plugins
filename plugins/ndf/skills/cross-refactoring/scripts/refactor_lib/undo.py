@@ -353,12 +353,18 @@ def note_reverted(state: dict[str, Any], work: str, originals: list[str]) -> lis
 
 
 def revert_unattributed(
-    path: pathlib.Path, state: dict[str, Any], shas: list[str], label: str, widen: Optional[list[str]] = None
+    path: pathlib.Path,
+    state: dict[str, Any],
+    shas: list[str],
+    label: str,
+    widen: Optional[list[str]] = None,
+    stop_on_conflict: bool = True,
 ) -> list[str]:
     """どの項目にも属さないコミット（`shas` は古い順）を新しい順に `git revert` で打ち消し、打ち消した元のコミットを返す。
 
     `reset --hard` で外さない（取り込んだベースブランチの変更を消さない。#2457 決定 6）。衝突したら `widen`（古い順）の
-    全体を打ち消す（`revert_or_widen`）。それでも戻せなければ打ち消しの前の HEAD へ戻して終了コード 4 で止まる。
+    全体を打ち消す（`revert_or_widen`）。それでも戻せなければ打ち消しの前の HEAD へ戻して終了コード 4 で止まる
+    （`stop_on_conflict` が偽なら止まらずに空を返す。残すかは呼び出し側が決める）。
     元のコミットと打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録し、差し戻しに残す。
     """
     work = work_dir(state)
@@ -368,6 +374,9 @@ def revert_unattributed(
     worktree.wait_past_rewrite()
     try:
         done = revert_or_widen(work, shas, widen)
+        if done is None and not stop_on_conflict:
+            info(f"⚠ どの項目にも属さないコミット {len(shas)} 件を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
+            return []
         if done is None:
             die(f"どの項目にも属さないコミット {len(shas)} 件を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
         made = note_reverted(state, work, done)

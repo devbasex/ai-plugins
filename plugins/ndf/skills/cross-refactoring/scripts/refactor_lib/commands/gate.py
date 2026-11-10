@@ -146,7 +146,10 @@ def _gate_halt(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], 
 def _run_gate_checks(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
     """全体テスト（か継続的統合）と静的解析の全体テストを走らせ、合否と記録の 1 行を返す。"""
     whole_started: Optional[float] = None
-    gate.pop("triage", None)  # 前回の見分けを残さない（今回のテストが通り静的解析だけが落ちたとき、古い変更起因で取り消さない）
+    # 前回の見分けと材料を残さない。テストが通り静的解析だけが落ちた回も古い失敗の ID で前進を判定し、
+    # 失敗が減った回を停滞とみなすため（`_gate_failing_set`）
+    gate.pop("triage", None)
+    gate.pop("material", None)
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
         passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
@@ -264,14 +267,21 @@ def _gate_material(state: dict[str, Any], classified: dict[str, Any], verdict: d
             text = pathlib.Path(log).read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
-    junit_ids = classified.get("caused") or classified.get("failed_tests") or []
-    return failure_material.compose_material(
+    # 仕分け済みの既存失敗・フレーキーは修正の材料にも前進の判定にも入れない（ログからの補完も含める）
+    settled = {str(i) for i in [*(classified.get("preexisting") or []), *(classified.get("flaky") or [])]}
+    junit_ids = classified.get("caused") or [i for i in classified.get("failed_tests") or [] if str(i) not in settled]
+    material = failure_material.compose_material(
         junit_ids,
         text,
         str(verdict.get("log_place") or log or ""),
         classified.get("rerun_commands") or [],
         timeline.strategy_of(state).whole_commands(ts.TEST),
     )
+    if settled and material["ids"]:
+        material["ids"] = [i for i in material["ids"] if str(i) not in settled]
+        if not material["ids"]:
+            material["source"] = "none"
+    return material
 
 
 def _gate_command(state: dict[str, Any]) -> str:
