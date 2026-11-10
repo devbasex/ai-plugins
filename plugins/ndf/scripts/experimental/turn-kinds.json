@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "about": "ターンの型と候補の分類の規則（#2909 の F7）。型は上から当て、最初に当たったものを採る。pattern は Bash のコマンドの先頭の 1 つ（cd・変数の代入・env・timeout・コメントの行を飛ばしたもの）へ当てる。scope が all の型はコマンド全体へ当てる（変換は、コマンドのどこかで python -c・jq・cut が出力を読むものだけ。grep・cat などのコード探索と、python - のヒアドキュメント（ファイルを書く・調べる手順）は数えない）。型の名前は PR #2905 の usage/mechanical_turns.csv に合わせる（[小] の付いた行と付かない行は同じ型として数える）",
+  "kinds": [
+    {
+      "name": "待ち: tmux capture-pane の確認",
+      "pattern": "^tmux\\s+capture-pane\\b"
+    },
+    {
+      "name": "待ち: sleep・ポーリングの手書き",
+      "pattern": "^sleep\\s|^(for|while|until)\\b[\\s\\S]*\\bsleep\\s"
+    },
+    {
+      "name": "手作業: gh pr merge を直接",
+      "pattern": "^gh\\s+pr\\s+merge\\b"
+    },
+    {
+      "name": "照合: CI の状態を gh で見る",
+      "pattern": "^gh\\s+(pr\\s+checks|run\\s+(view|list|watch))\\b"
+    },
+    {
+      "name": "転記: PR・Issue の本文を組み立てて書く",
+      "pattern": "^gh\\s+(pr|issue)\\s+(edit|create|comment)\\b"
+    },
+    {
+      "name": "照合: gh で PR・Issue を読む",
+      "pattern": "^gh\\s+(pr\\s+(view|list|diff)|issue\\s+(view|list)|api)\\b"
+    },
+    {
+      "name": "往復: NDF スクリプトを 1 行打つ",
+      "pattern": "^((python3?|bash|sh)\\s+(-\\S+\\s+)*)?[\"']?\\S*(/scripts/|\\$\\{?[A-Za-z_]+\\}?/)[^\\s\"']*\\.(py|sh)\\b"
+    },
+    {
+      "name": "照合: 版数・タグ",
+      "pattern": "^git\\s+(tag|describe)\\b"
+    },
+    {
+      "name": "照合: git の状態を見る",
+      "pattern": "^git\\s+(status|log|fetch|diff|show|rev-parse|branch|remote)\\b"
+    },
+    {
+      "name": "変換: JSON・出力を python -c / jq / cut で読む",
+      "pattern": "(^|[|;&]\\s*)(python3?\\s+-c\\b|jq\\b|cut\\b)",
+      "scope": "all"
+    }
+  ],
+  "candidates": [
+    {
+      "name": "1. 状態の取り出し",
+      "kinds": [
+        "変換: JSON・出力を python -c / jq / cut で読む"
+      ],
+      "all": [
+        "python3?\\s+-c\\b|\\bjq\\b",
+        "sprint(-state)?\\.json|loop\\.json|queue-done\\.json|plans\\.json|done-[\\w-]*\\.json|glossary|/scripts/[^\\s\"']*\\.(py|sh)"
+      ]
+    },
+    {
+      "name": "2. PR・CI の照合",
+      "kinds": [
+        "照合: gh で PR・Issue を読む",
+        "照合: CI の状態を gh で見る"
+      ]
+    },
+    {
+      "name": "3. スクリプトの往復",
+      "kinds": [
+        "往復: NDF スクリプトを 1 行打つ"
+      ]
+    },
+    {
+      "name": "4. 進行の連打",
+      "all": [
+        "projects-sync\\.sh[\"']?\\s+\\S+\\s+stage\\b|progress-record\\.sh\\b"
+      ],
+      "repeat": true
+    }
+  ]
+}
