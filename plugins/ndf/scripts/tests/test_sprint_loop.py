@@ -2824,10 +2824,10 @@ def test_cli_another_session_places_the_stop_order_while_the_loop_holds_the_key(
         assert loop("start", "x1", env=session_a).returncode != 3
         (tmp_path / ".ndf" / "loop" / "x1").mkdir(parents=True, exist_ok=True)
         (tmp_path / ".ndf" / "loop" / "x1" / "loop.json").write_text(json.dumps({"name": "x1", "laps": []}))
-        p = loop("stop", "x1", "--by", "organizer", "--reason", "利用者が今の周回で止めると指示した")
+        p = loop("stop", "x1", "--by", "organizer", "--reason", "利用者が今のループの 1 回で止めると指示した")
         assert p.returncode == 0, p.stdout + p.stderr
         order = json.loads((tmp_path / ".ndf" / "loop" / "x1" / "stop").read_text())
-        assert order["by"] == "organizer" and order["reason"] == "利用者が今の周回で止めると指示した" and order["at"]
+        assert order["by"] == "organizer" and order["reason"] == "利用者が今のループの 1 回で止めると指示した" and order["at"]
         assert loop("start", "x1").returncode == 3
     finally:
         other.kill()

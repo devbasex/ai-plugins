@@ -484,7 +484,7 @@ def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
 
 
 def cmd_stop(env: Env, name: str, by: str = "unknown", reason: str = "") -> dict:
-    """止める指示を置く。置いた主体（STOP_BY）と理由を書く。ループの記録は読むだけで、持ち主が周回の途中でも置ける（#2910）。"""
+    """止める指示を置く。置いた主体（STOP_BY）と理由を書く。ループの記録は読むだけで、持ち主がループの 1 回の途中でも置ける（#2910）。"""
     if by not in STOP_BY:
         raise LoopError(f"止める指示の主体は {'/'.join(STOP_BY)} のどれか: {by!r}")
     read_loop_record(env, name)
