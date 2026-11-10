@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""design-survey.py: 設計文書の自前で作る決定に、外部の調査で比べた候補があるかを確かめる（#2519）。LLM を呼ばず、読むだけ。
+"""design-survey.py: 設計文書の検査。自前で作る決定に外部の調査で比べた候補があるかと、人へ残す判断がレッドラインを名指すかを確かめる。LLM を呼ばず、読むだけ。
 
     python3 design-survey.py check (--issue N... | --file PATH...) [--root DIR]
 
@@ -13,6 +13,10 @@
 - `no_candidates`: 作り方に「自前で作る」を含む決定の `比べた候補:` に番号が無い（まとまりの外部の調査を `省く:` で
   省いたときは除く）
 - `unknown_candidate`: `比べた候補:` の番号が、まとまりの外部の調査の表の 1 列目（`STD<数>` / `PRD<数>` / `LIB<数>`）に無い
+- `unnamed_redline`: 文書ごとに判定する。見出しが「決定の記録」「未確認のまま残ること」「人へ残す判断」で始まる節
+  （下位の節を含む）で、判断を人へ委ねる語（`DELEGATE`）を含みレッドラインの番号（`C<数>` / `P<数>` / `R<数>`）を
+  含まない行。「人へ残す判断」の表で、番号のセルに番号が無い行と「なぜ当たるか」のセルが空の行。
+  インラインコードの中の語は数えない
 
 終了コードは 0 = 指摘なし（作り方の行が 0 件の文書を含む）/ 1 = 指摘あり / 2 = 文書か git を読めない /
 3 = `--issue` で文書が 1 つも見つからない。結果は lib/step_result.py の形の 1 行の JSON。
@@ -54,6 +58,17 @@ CANDIDATES_LINE = re.compile(LEAD + r"比べた候補\s*[:：]\s*(?P<v>.*)$")
 SKIP_LINE = re.compile(LEAD + r"省く\s*[:：]")
 CANDIDATE_ID = re.compile(r"(?<![A-Za-z0-9])(?:STD|PRD|LIB)\d+(?![0-9])")
 SPLIT = re.compile(r"\s*[・/]\s*")
+REDLINE_TITLES = ("決定の記録", "未確認のまま残ること", "人へ残す判断")
+LEFT_TITLE = "人へ残す判断"
+# 判断の主語を人に置いて決めさせる言い回し（これから決めさせる形だけ。「利用者が決めた」の記録は含めない）。
+# 用語「人へ残す判断」と重なる言い回しは入れない
+DELEGATE = re.compile(
+    r"利用者が(?:決める|選ぶ|確かめる|判断する)"
+    r"|承認ゲートで(?:人|利用者)が(?:決める|選ぶ|確かめる)"
+    r"|(?:人|利用者)(?:へ|に)委ねる"
+)
+REDLINE_ID = re.compile(r"(?<![A-Za-z0-9])[CPR][0-9]+(?![0-9])")
+INLINE_CODE = re.compile(r"(`+)(?:(?!\1).)+?\1")
 
 
 def _first_match(body: list[tuple[int, str]], pattern: re.Pattern[str]) -> tuple[int, str, str] | None:
@@ -87,8 +102,45 @@ def _read_decisions(sections: list, prose: list[tuple[int, str]]) -> list:
     return decisions
 
 
+def _left_table_rows(text: str, sections: list) -> list[tuple[int, str, str, str]]:
+    """「人へ残す判断」の表の行ごとに（行番号, 行, 番号のセル, なぜ当たるかのセル）を読む。"""
+    lefts = [s for s in sections if s.heading.title.startswith(LEFT_TITLE)]
+    lines = text.splitlines()
+    out = []
+    for t in md.tables(text):
+        if not any(s.start <= t.start < s.end for s in lefts):
+            continue
+        head = [h.strip() for h in t.header]
+        num_col = next((k for k, h in enumerate(head) if "レッドライン" in h), 1)
+        why_col = next((k for k, h in enumerate(head) if "なぜ" in h), 2)
+        for k, row in enumerate(t.rows):
+            line = t.start + 2 + k
+            cell = (lambda c: row[c].strip() if c < len(row) else "")
+            out.append((line, lines[line] if line < len(lines) else "", cell(num_col), cell(why_col)))
+    return out
+
+
+def unnamed_redlines(path: str, text: str) -> list[dict]:
+    """人へ委ねる判断がレッドラインの番号を名指していない行を指摘する（規則 unnamed_redline）。"""
+    sections = [s for s in md.md_sections(text) if s.heading.title.startswith(REDLINE_TITLES)]
+    if not sections:
+        return []
+    lines = text.splitlines()
+    fenced = md.fenced_lines(text)
+    flagged: dict[int, str] = {}
+    for i, ln in enumerate(lines):
+        if fenced[i] or not any(s.start <= i < s.end for s in sections):
+            continue
+        if DELEGATE.search(INLINE_CODE.sub("", ln)) and not REDLINE_ID.search(ln):
+            flagged[i] = ln
+    for i, ln, num, why in _left_table_rows(text, sections):
+        if not REDLINE_ID.search(num) or not why.strip("`*_ "):
+            flagged[i] = ln
+    return [{"name": f"{path}:{i + 1}", "rule": "unnamed_redline", "text": ln.strip()} for i, ln in sorted(flagged.items())]
+
+
 class Doc:
-    """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行を読んだもの。"""
+    """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行と、名指しの無い委ねる行を読んだもの。"""
 
     def __init__(self, path: str, text: str):
         self.path = path
@@ -99,6 +151,7 @@ class Doc:
         sections = md.md_sections(text)
         self.skipped, self.candidates = _read_survey(text, sections, prose)
         self.decisions = _read_decisions(sections, prose)
+        self.unnamed = unnamed_redlines(path, text)
 
 
 def survey_groups(docs: list[Doc]) -> list[list[Doc]]:
@@ -170,11 +223,17 @@ def cmd_check(a):
         items += got
         for k, v in counts.items():
             metrics[k] += v
+    unnamed = [it for d in docs for it in d.unnamed]
+    items += unnamed
+    metrics["unnamed_redline"] = len(unnamed)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補に {len(items)} 件の指摘がある"
+        summary = (
+            f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドラインに "
+            f"{len(items)} 件の指摘がある"
+        )
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
-    summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件に指摘なし"
+    summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件と人へ残す判断に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)
 
 
@@ -182,7 +241,7 @@ def build_parser():
     common = common_parser()
     ap = argparse.ArgumentParser(prog="design-survey.py", description=__doc__.splitlines()[0], parents=[common])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("check", parents=[common], help="自前で作る決定に比べた候補があるか")
+    p = sub.add_parser("check", parents=[common], help="自前で作る決定に比べた候補があるか・人へ残す判断がレッドラインを名指すか")
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--issue", nargs="+", type=int, help="課題の番号（issues/ の文書を HEAD から読む）")
     g.add_argument("--file", nargs="+", help="読む文書のパス（worktree から読む）")

@@ -1,4 +1,4 @@
-"""design-survey.py: 自前で作る決定に、外部の調査で比べた候補があるかの検査（#2519）。"""
+"""design-survey.py: 自前で作る決定に外部の調査で比べた候補があるかと、人へ残す判断がレッドラインを名指すかの検査。"""
 
 from __future__ import annotations
 
@@ -201,11 +201,24 @@ def test_works_without_ndf_declarations(tmp_path):
 
 
 def test_existing_issue_documents_pass():
-    """このリポジトリの既存の設計文書と受け入れ条件のファイルで落ちない（受け入れ条件 10）。"""
+    """このリポジトリの既存の設計文書と受け入れ条件のファイルで、外部の調査の規則が落ちない（受け入れ条件 10）。
+
+    unnamed_redline は規則より前に書いた文書（判断を承認ゲートへ残す書き方だった）を指摘するため、ここでは数えない。
+    """
     files = [f for f in git(REPO, "ls-files", "issues/").splitlines() if f.endswith(".md")]
     assert files
+    _, out = run(REPO, "--file", *files)
+    survey = [it for it in out["items"] if it["rule"] != "unnamed_redline"]
+    assert survey == [], survey[:5]
+
+
+def test_this_design_document_passes():
+    """規則を定めた設計文書（#2912）と要求のコピーは、委ねる語を説明していても指摘されない。"""
+    files = ["issues/issue-2912-design.md", "issues/issue-2912-requirements.md"]
+    if not all((REPO / f).exists() for f in files):
+        pytest.skip("#2912 の設計文書が無い")
     code, out = run(REPO, "--file", *files)
-    assert code == 0, out["items"][:5]
+    assert code == 0, out["items"]
 
 
 def _load_survey():
@@ -272,3 +285,96 @@ def test_judge_group_empty_method_value_is_unknown_method():
     items, counts = mod.judge_group([doc])
     assert [it["rule"] for it in items] == ["unknown_method"]
     assert counts == {"decisions": 1, "with_method": 1, "self_built": 0, "skipped": 0}
+
+
+# --- unnamed_redline（人へ残す判断がレッドラインを名指すか） ---
+
+
+def _delegate_words() -> list[str]:
+    """委ねる語の一覧（design-survey.py の DELEGATE）から、テストの入力の言い回しを組む。"""
+    mod = _load_survey()
+    words = ["利用者が決める", "利用者が選ぶ", "利用者が確かめる", "設計承認ゲートで人が決める", "人へ委ねる"]
+    got = [w for w in words if mod.DELEGATE.search(w)]
+    assert got, "委ねる語の一覧が空"
+    return got
+
+
+def left(*rows: str) -> str:
+    head = "## 人へ残す判断\n\n| 判断 | 当たるレッドライン | なぜ当たるか |\n| --- | --- | --- |\n"
+    return head + "".join(r + "\n" for r in rows)
+
+
+def unnamed(out) -> list[str]:
+    return [it["text"] for it in out["items"] if it["rule"] == "unnamed_redline"]
+
+
+@pytest.mark.parametrize("word", _delegate_words())
+def test_delegating_line_without_redline_is_flagged(tmp_path, word):
+    line = f"既定値を 3 にするかは{word}。"
+    body = design(decisions(f"### 決定 1: 既定値を決める\n\n{line}\n"))
+    root = repo(tmp_path, {"issues/issue-1-design.md": body})
+    code, out = run(root, "--file", "issues/issue-1-design.md")
+    assert code == 1
+    assert unnamed(out) == [line]
+    name = out["items"][0]["name"]
+    assert body.splitlines()[int(name.rsplit(":", 1)[1]) - 1] == line
+    assert out["metrics"]["unnamed_redline"] == 1
+
+
+@pytest.mark.parametrize(
+    "title", ["## 未確認のまま残ること", "## 人へ残す判断", "## 決定の記録\n\n### 決定 2: 何かを決める"]
+)
+def test_delegating_line_is_flagged_in_each_section(tmp_path, title):
+    body = design(f"{title}\n\n| 項目 | 内容 |\n| --- | --- |\n| 既定値 | 利用者が決める |\n")
+    root = repo(tmp_path, {"notes/d.md": body})
+    code, out = run(root, "--file", "notes/d.md")
+    assert code == 1
+    assert len(unnamed(out)) == 1
+
+
+def test_left_table_rows_need_number_and_reason(tmp_path):
+    body = design(
+        left(
+            "| `.ndf/pace.json` へ 1 行足すか | C7 | 利用者の設定を書き換える |",
+            "| 既定値を 3 にするか | 無し | 何となく |",
+            "| 鍵を入れ替えるか | C1 |  |",
+        )
+    )
+    root = repo(tmp_path, {"notes/d.md": body})
+    code, out = run(root, "--file", "notes/d.md")
+    assert code == 1
+    assert unnamed(out) == ["| 既定値を 3 にするか | 無し | 何となく |", "| 鍵を入れ替えるか | C1 |  |"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        design(decisions("### 決定 1: 何かを決める\n\n既定値は 3 にする。理由。\n"), "## 人へ残す判断\n\n無し\n"),
+        design(decisions("### 決定 1: 何かを決める\n\n`.ndf/` を変えるかは利用者が決める（C7）。\n")),
+        design(left("| 秘密を入れ替えるか | C1・P1 | 鍵に触れる |")),
+        design("## 起票者の推定\n\n| # | 条件 |\n| --- | --- |\n| S1 | 設計承認ゲートで利用者が確かめる |\n"),
+        design(decisions("### 決定 1: 語を定める\n\n委ねる語は `利用者が決める` などである。\n")),
+        design(decisions("### 決定 1: 例を示す\n\n```markdown\n既定値は利用者が決める\n```\n")),
+        design(decisions("### 決定 1: 経緯\n\nこれは承認ゲートの答えで利用者が決めた。\n")),
+    ],
+    ids=["no-delegation", "named-line", "named-table", "outside-section", "inline-code", "code-block", "past-record"],
+)
+def test_documents_without_unnamed_delegation_pass(tmp_path, body):
+    root = repo(tmp_path, {"notes/d.md": body})
+    code, out = run(root, "--file", "notes/d.md")
+    assert code == 0, out["items"]
+    assert out["metrics"]["unnamed_redline"] == 0
+
+
+def test_unnamed_redline_is_judged_per_document(tmp_path):
+    """番号を共有するまとまりでも、名指しの有無は文書ごとに判定する。"""
+    root = repo(
+        tmp_path,
+        {
+            "issues/issue-1-design.md": design(left("| `.ndf/` を変えるか | C7 | 設定を書き換える |")),
+            "issues/issue-1-design-decisions.md": design(decisions("### 決定 1: x\n\n範囲は利用者が選ぶ。\n")),
+        },
+    )
+    code, out = run(root, "--issue", "1")
+    assert code == 1
+    assert [it["name"].split(":")[0] for it in out["items"]] == ["issues/issue-1-design-decisions.md"]
