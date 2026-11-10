@@ -6415,6 +6415,13 @@
       "meaning": "NDF のスクリプトのうち、他のモジュールから最も多く読まれ、自分は上の層を読まない共通ライブラリ。結果を出す層 step_result がこれに当たる",
       "source": "",
       "pending_source": "issues/issue-2988-requirements.md"
+    },
+    {
+      "term": "終了コードの表",
+      "context": "repo-dev-checks",
+      "meaning": "NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する",
+      "source": "",
+      "pending_source": "issues/issue-2988-design.md"
     }
   ]
 }
