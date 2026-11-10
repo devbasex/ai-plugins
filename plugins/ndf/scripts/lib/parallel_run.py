@@ -229,7 +229,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
         self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
-        self.wake_tries: dict[str, int] = {}  # レーン → 最後に動いて観えた後に設計の答えのために再起動した回数
+        self.wake_tries: dict[str, int] = {}  # レーン → 設計の答えが当たるまでに再起動した回数
         self.init_answer_hold()
         self.init_run_state(False)
 
@@ -599,6 +599,8 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
     gave_up = {n for n, st in run.lanes.items() if st.get("given_up")}  # 再起動の失敗の問いへ「止める」と答えたレーンは起こさない
     designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped - gave_up)
+    for n in set(run.wake_tries) - set(designs):  # 答えが当たった（持ち主から外れた）レーンは再起動の回数を数え直す
+        run.wake_tries.pop(n, None)
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。動いて観えるまで 1 回ずつ再起動する（6f）
         run.wake = sorted({*run.wake, *run.wake_or_ask(set(designs) - run.woken)})
         return None

@@ -104,15 +104,20 @@ def test_a_lane_asked_after_two_restarts_is_not_restarted_until_answered(run, mo
     assert run.relaunch(q, ["起こし直す"]) and "la" not in run.wake_tries  # 人が起こし直すと答えたら数え直す
 
 
-def test_restarts_for_an_earlier_answer_are_not_counted_once_the_lane_was_seen_running(run, monkeypatch):
-    """動いて観えたレーンは再起動の回数を数え直す。別の答えのための再起動を通算して問わない。"""
+def test_restarts_are_counted_until_the_answer_lands_even_if_the_lane_was_seen_running(run, monkeypatch):
+    """動いて観えても再起動の回数は数え直さない（動いた後に答えを当てずに止まるレーンを打ち続けない）。答えが当たって持ち主から外れたら数え直す。"""
     monkeypatch.setattr(run, "stopped", lambda: {"la"})
     for at in ("2026-11-10T00:01:00Z", "2026-11-10T00:02:00Z"):
         run.wake = ["la"]
         run.launch_wakes()
         run.release_woken({"la": {"state": "running", "at": at}})
-    assert run.woken == set() and "la" not in run.wake_tries
-    assert run.wake_or_ask({"la"}) == ["la"] and run.questions == []
+    assert run.woken == set() and run.wake_tries["la"] == 2
+    assert run.wake_or_ask({"la"}) == [] and [q["lane"] for q in run.questions] == ["la"]
+    monkeypatch.setattr(prun, "step_design_held", lambda *_a: [])
+    monkeypatch.setattr(prun, "step_held_loops", lambda *_a: [])
+    monkeypatch.setattr(prun, "step_finish", lambda *_a: None)
+    prun._finish_or_hold(run, "/m", "p1")
+    assert "la" not in run.wake_tries
 
 
 def test_restarting_a_release_helper_after_its_question_carries_the_release_number(run, monkeypatch):

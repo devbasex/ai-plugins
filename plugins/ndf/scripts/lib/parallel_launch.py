@@ -164,7 +164,7 @@ class LaunchRouting:
                 self.wake_tries[n] = self.wake_tries.get(n, 0) + 1
 
     def wake_or_ask(self, designs: set[str]) -> list[str]:
-        """答えを当てていない持ち主（`designs`）のうち、再起動の対象へ戻すレーンを返す。動いて観えないまま 2 回再起動したレーンは
+        """答えを当てていない持ち主（`designs`）のうち、再起動の対象へ戻すレーンを返す。答えを当てないまま 2 回再起動したレーンは
         戻さずに区分 `spawn` の問いを立てる（答えが来るまで再起動を打ち続けない。「止める」なら `given_up` で外れる）。"""
         again = []
         for n in sorted(designs):
@@ -181,13 +181,10 @@ class LaunchRouting:
     def release_woken(self, rows: dict) -> None:
         """設計の答えを当てるために再起動したレーン（`woken`）が、今の再起動より後に止まって観えたら `woken` から外す。
         動いて観える前に止まったレーンを、答えが未適用のまま待ち続けないためである。外したレーンは次の周回で、答えがまだ当たって
-        いなければ `_finish_or_hold` が `wake_or_ask` で再起動の対象へ戻すか問う。動いて観えたレーンは再起動の回数を数え直す
-        （別の答えのための再起動を通算しない）。"""
+        いなければ `_finish_or_hold` が `wake_or_ask` で再起動の対象へ戻すか問う。再起動の回数は動いて観えても数え直さない
+        （動いた後に答えを当てずに止まるレーンを打ち続けない）。数え直すのは答えが当たったとき（`_finish_or_hold`）である。"""
         import clock
 
-        for n, row in rows.items():
-            if row.get("state") in UP:
-                self.wake_tries.pop(n, None)
         for n in sorted(self.woken):
             row = rows.get(n)
             if row is not None and row.get("state") != "stopped":
