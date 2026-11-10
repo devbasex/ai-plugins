@@ -332,3 +332,18 @@ def test_an_auto_plan_records_the_pace_before_the_first_stage(tmp_path):
     plan["steps"] = [{"id": "a", "type": "run", "cmd": "true", "stage": "実装", "next": "end"}]
     engine.Engine(plan, tmp_path / "state").run()
     assert log.read_text().splitlines() == ["5 pace auto", "5 stage 実装"]
+
+
+def test_a_plan_records_the_mode_once_before_the_first_stage(tmp_path):
+    """課題の進行の見出し行へモードを書く（`モード: —` のまま残らない。#2921）。"""
+    from supervise_lib import engine
+
+    log, rec = tmp_path / "rec.log", tmp_path / "rec.sh"
+    rec.write_text(f'echo "$@" >> {log}\n')
+    plan = {"フェーズ": "試験", "課題": [5], "作業場所": str(tmp_path), "記録": str(rec), "モード": "standard", "進め方": "auto"}
+    plan["steps"] = [
+        {"id": "a", "type": "run", "cmd": "true", "stage": "実装", "next": "b"},
+        {"id": "b", "type": "run", "cmd": "true", "stage": "完了判定", "next": "end"},
+    ]
+    engine.Engine(plan, tmp_path / "state").run()
+    assert log.read_text().splitlines() == ["5 mode standard", "5 pace auto", "5 stage 実装", "5 stage 完了判定"]
