@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 結果を出す層（`lib/step_result.py`）が、終了コード 69 の定数を自分の名前で公開するためだけに依存の確認（`lib/deps.py`）を読み、依存の確認は止まるときに関数の中で実行の核（`lib/run_core.py`）を読み、実行の核は結果を出す層を読む。cross-refactoring では台帳（`refactor_lib/ledger.py`）がコミットのトレーラーを読むためだけに `gitfacts` を読み、`gitfacts → publish → plan → ledger → gitfacts` が最上位の import だけで輪になる
+- **今どうなっているか**: 結果を出す層（`lib/step_result.py`）は、終了コード 69 の定数を自分の名前で公開するためだけに依存の確認（`lib/deps.py`）を読む。依存の確認は止まるときに関数の中で実行の核（`lib/run_core.py`）を読み、実行の核は結果を出す層を読む。cross-refactoring では、台帳（`refactor_lib/ledger.py`）がコミットのトレーラーを読むためだけに `gitfacts` を読む。そのため `gitfacts → publish → plan → ledger → gitfacts` が最上位の import だけで輪になる
 - **誰に効くか**: NDF のスクリプトを直す人と AI。#1142 の分割と重複の整理を始める前の足場になる
 - **変えると何が成り立つか**: 上の 2 組の輪が消え、読み込みの順序に頼る注意書きが要らなくなる。輪を足し直すとテストが落ちる
 
@@ -32,7 +32,7 @@
 | `plugins/ndf/scripts/lib/` | 最上位・関数の中・`importlib.import_module` の文字列 | `step_result`・`deps`・`run_core`・`json_pick`・`step_read` |
 | `refactor_lib/` | 最上位だけ | `gitfacts`・`publish`・`plan`・`ledger` |
 
-同じ集計で変更後の辺（下の「構成要素」）を模擬すると、`deps`・`run_core`・`refactor_lib` の 4 モジュールは輪から外れる。`step_result` は `json_pick`・`step_read` との輪に残る（決定 5）。
+同じ集計で変更後の辺（下の「構成要素」）を模擬すると、`deps`・`run_core` と `refactor_lib` の 4 モジュールは輪から外れる。`step_result` は `json_pick`・`step_read` との輪に残る（決定 5）。
 
 ## ドメインモデル
 
@@ -101,7 +101,7 @@
 | LIB2 | grimp | 3.19 | BSD 2-Clause | 2026-11-06 | 無し | 満たさない。`build_graph` はトップレベルのパッケージ名を取る（LIB1 と同じ理由）。関数の中の import を `is_lazy` で区別できる点は要件に合う | https://pypi.org/pypi/grimp/json ・ https://grimp.readthedocs.io/en/stable/usage.html （2026-11-10） |
 | LIB3 | pylint | 4.1.3 | GPL-2.0-or-later | 2026-10-11 | 無し | 確かめていない（「確かめられなかったこと」） | https://pypi.org/pypi/pylint/json （2026-11-10） |
 | LIB4 | pydeps | 3.0.9 | BSD-2-Clause | 2026-10-01 | 無し | 確かめていない（「確かめられなかったこと」） | https://pypi.org/pypi/pydeps/json （2026-11-10） |
-| LIB5 | 標準ライブラリの `ast` と `graphlib` | Python 3.10 以上（プラグインの `requires-python`） | PSF | — | 無し | `ast` で import を集められる。`graphlib.TopologicalSorter.prepare()` の `CycleError` は輪を 1 つしか返さないため、「対象の組を含む輪が無い」の判定には到達の判定を数行足す | https://docs.python.org/3/library/graphlib.html （2026-11-10）・`python3 -c` で `CycleError` の `args[1]` が `['a', 'c', 'b', 'a']` を返すことを確かめた |
+| LIB5 | 標準ライブラリの `ast` と `graphlib` | Python 3.10 以上（プラグインの `requires-python`） | PSF | — | 無し | `ast` で import を集められる。`graphlib.TopologicalSorter.prepare()` の `CycleError` は輪を 1 つしか返さないため、「対象の組を含む輪が無い」の判定には使わず、到達の判定を数行で書く（決定 6） | https://docs.python.org/3/library/graphlib.html （2026-11-10）・`python3 -c` で `CycleError` の `args[1]` が `['a', 'c', 'b', 'a']` を返すことを確かめた |
 
 ### 確かめられなかったこと
 
@@ -135,6 +135,8 @@
 | `refactor_lib/gitfacts.py` | トレーラーの読み取りの 2 つの名前を再エクスポートする（分けた先の 6 本と同じ形）。`publish` の関数の再エクスポートは残す（決定 4） |
 | 台帳（`refactor_lib/ledger.py`） | `commit_trailers` をトレーラーの読み取りから最上位で読む。`gitfacts` を読まない |
 | 輪の検査（`plugins/ndf/scripts/tests/test_import_cycles.py`、新設） | 2 組の import を `ast` で集め、I4〜I6 を確かめる |
+
+## 構造
 
 次の 2 つの図は import の向きだけを描く。ラッパーのバージョンディレクトリ・契約の検査・輪の検査は import の辺を持たないため描かない。
 
@@ -210,7 +212,7 @@ sequenceDiagram
 
 終了コードの表を `lib/exit_codes.py` へ移し、結果を出す層と依存の確認はどちらもそこから読む。表の持ち主が 1 つになり、依存の確認だけが 69 を持つ例外が無くなる。結果を出す層は同じ名前で公開し続けるため、111 ファイルの呼び出しは変わらない。分けた部品を元のモジュールが同じ名前で公開する形は、`step_result` が `proc` に対して既に取っている（`StepError = proc.StepError`）。新しいモジュールは標準ライブラリも読まないため、ラッパーのバージョンディレクトリへコピーしても依存を増やさない。
 
-依存の確認が結果を出す層を読む形は採らない。依存の確認はラッパーにも使われ、結果を出す層をコピーすると `proc` もコピーすることになる（`docs/specifications/ndf-deps-missing-exit-code.md` の決定と同じ理由）。69 を 2 か所に書き、テストで一致を確かめる形も採らない。同じ役割の定数が 2 つになり、同じ確定仕様が退けた形に戻る。依存の欠けの 1 つの定数だけを移す形は、表を 2 つのモジュールに分けたまま残すため採らない。
+依存の確認が結果を出す層を読む形は採らない。依存の確認はラッパーにも使われるため、結果を出す層をコピーすると `proc` もコピーすることになる。`docs/specifications/ndf-deps-missing-exit-code.md` の決定と同じ理由である。69 を 2 か所に書き、テストで一致を確かめる形も採らない。同じ役割の定数が 2 つになり、同じ確定仕様が退けた形に戻る。依存の欠けの 1 つの定数だけを移す形は、表を 2 つのモジュールに分けたまま残すため採らない。
 
 根拠: Value 7（MVV 版 6）
 
@@ -224,7 +226,7 @@ sequenceDiagram
 
 ### 決定 3: 台帳が gitfacts を読まずに済むよう、コミットのトレーラーの読み取りを新しいモジュールへ移す
 
-`commit_trailers` と `_parse_trailer_paragraph` を `refactor_lib/trailers.py` へ移し、台帳はそこから最上位で読む。台帳から `gitfacts` への辺が消えると、`gitfacts → publish → plan → ledger` と `publish → ledger` はどちらも台帳で止まり、輪が無くなる。`gitfacts` は 2 つの名前を再エクスポートし、`fix_intake.py`・`commands/flaky.py`・テストの呼び出しは変えない。移した先の形は、#1142 の C4 で `gitfacts` から分けた 6 本（`pathkinds`・`process` など）と同じで、`test_module_owners.py` の表に 1 行を足して縛る。
+`commit_trailers` と `_parse_trailer_paragraph` を `refactor_lib/trailers.py` へ移し、台帳はそこから最上位で読む。台帳から `gitfacts` への辺が消えると、`gitfacts → publish → plan → ledger` と `publish → ledger` はどちらも台帳で止まり、輪が無くなる。`gitfacts` は 2 つの名前を再エクスポートし、`fix_intake.py`・`commands/flaky.py`・テストの呼び出しは変えない。移した先の形は、#1142 の C4 で `gitfacts` から分けた 6 本（`pathkinds`・`process` など）と同じである。`test_module_owners.py` の表に 1 行を足して縛る。
 
 トレーラーの読み取りを `paths.py` へ入れる形は採らない。`paths` は作業ディレクトリと git の呼び出しの部品で、コミットの中身の解釈を持たない。`publish` が台帳を読む辺を除く形は、`publish` と `plan` の両方が台帳を読むため 2 本を除くことになり、変更が大きい。
 
@@ -240,7 +242,7 @@ sequenceDiagram
 
 ### 決定 5: 受け入れ条件の組に絞るため、結果を出す層を直接起動したときの pick の副命令が作る輪はこの課題で扱わない
 
-`step_result.py` の `main` は、副命令 `pick` のときだけ関数の中で `json_pick` を読み、`json_pick` と `step_read` は結果を出す層を最上位で読む。この輪は、結果を出す層をライブラリとして読んだときには辿られない（`main` は `python3 step_result.py pick` で直接起動したときだけ動き、そのときのモジュールは `__main__` である）。ほどくには、Skill の手順（`development-workflow` の `references/relay.md`）と `lib/README.md` が案内する `python3 step_result.py pick` の起動の形を変えることになり、前提 1（エントリポイントの引数と出力を変えない）に当たる。
+`step_result.py` の `main` は、副命令 `pick` のときだけ関数の中で `json_pick` を読み、`json_pick` と `step_read` は結果を出す層を最上位で読む。この輪は、結果を出す層をライブラリとして読んだときには辿られない。`main` が動くのは `python3 step_result.py pick` で直接起動したときだけで、そのときのモジュールは `__main__` である。ほどくには、この起動の形を変えることになる。この形は Skill の手順（`development-workflow` の `references/relay.md`）と `lib/README.md` が案内している。変えると前提 1（エントリポイントの引数と出力を変えない）に当たる。
 
 受け入れ条件 5 の検査は「3 つのうち 2 つ以上を含む輪が無い」の形で書き、この輪では落ちない。この輪は #1142 の残りの遅延の輪と同じ扱いにする。
 
@@ -248,7 +250,7 @@ sequenceDiagram
 
 ### 決定 6: 依存を足さずに 2 組の輪を検査するため、標準ライブラリの ast で import を集めるテストを書く
 
-テストは `ast` で各ファイルの import を集め、`lib/` では最上位・関数の中・`importlib.import_module` の文字列の定数を、`refactor_lib/` では最上位の相対の import だけを辺にする。到達の判定は数行で書く。`graphlib` の `CycleError` は輪を 1 つしか返さず、対象の組と関係の無い輪でも落ちるため使わない。
+テストは `ast` で各ファイルの import を集める。辺にするのは、`lib/` では最上位・関数の中・`importlib.import_module` の文字列の定数で、`refactor_lib/` では最上位の相対の import だけである。到達の判定は数行で書く。`graphlib` の `CycleError` は輪を 1 つしか返さず、対象の組と関係の無い輪でも落ちるため使わない。
 
 import-linter と grimp は、対象をパッケージとして渡す形で、`lib/` をパッケージへ組み直さないと使えない。pylint と pydeps は検査の範囲を確かめていない（「確かめられなかったこと」）。どれも今の依存に無く、2 組の検査のために開発の依存と lock を増やす。
 
