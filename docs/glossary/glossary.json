@@ -319,6 +319,13 @@
       "pending_source": "issues/old/issue-1366-design.md"
     },
     {
+      "term": "人へ残す判断",
+      "context": "ndf-workflow",
+      "meaning": "設計文書のうち、レッドラインに当たるため設計者（AI）が決めずに承認ゲートで人が決める判断。判断ごとに当たるレッドラインの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さず、設計者が決める",
+      "source": "plugins/ndf/skills/design/references/decisions.md",
+      "pending_source": "issues/issue-2912-design.md"
+    },
+    {
       "term": "実行条件",
       "context": "ndf-workflow",
       "meaning": "プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする",
@@ -2013,6 +2020,13 @@
       "deprecated": [
         "全体のテスト"
       ]
+    },
+    {
+      "term": "消したテスト",
+      "context": "ndf-workflow",
+      "meaning": "着手前に走っていて、着手後の結果（走った・skip・deselect）のどれにも無く、テストの台帳に載るテストの nodeid。計測のスクリプトの diff が、着手後の木にその定義が残っていないことを照合する対象",
+      "source": "",
+      "pending_source": "issues/issue-2309-design.md"
     },
     {
       "term": "現状固定テスト",
@@ -4066,8 +4080,9 @@
     {
       "term": "起票者の推定",
       "context": "ndf-workflow",
-      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで利用者が確かめるまで、利用者の決定として扱わない",
-      "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md"
+      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで確かめるまで利用者の決定として扱わない。扱い（受け入れ条件・前提・含まない・採らない）を書いた推定は設計者が決めた判断として読み、MVV 判定が承認ゲートを省いたときはその判定が確かめた記録になる",
+      "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md",
+      "pending_source": "issues/issue-2912-design.md"
     },
     {
       "term": "承認ゲートの差し戻し",
@@ -4933,8 +4948,32 @@
     {
       "term": "差分の棚卸し",
       "context": "ndf-workflow",
-      "meaning": "毎スプリントのまとめで行う棚卸しの深さ。そのスプリントの変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・そのスプリントで起票した課題（起点のタグの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315）",
+      "meaning": "開発ループでは数回のループの 1 回に 1 回（既定 3 回。`.ndf/backlog.json` の `depths.diff.every`）、ループの外では毎スプリントのまとめで行う棚卸しの深さ。振り返りの範囲の変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・その範囲で起票した課題（振り返りの範囲の始まりの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315・#2914）",
       "source": "docs/specifications/ndf-backlog-refinement-depths.md"
+    },
+    {
+      "term": "振り返りの範囲",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。まだどの範囲にも入っていない見送ったループの 1 回（深さの記録の `diff` の `not_due` の行）と、今のループの 1 回からなる。ループの外では今のスプリントだけで、見送ったループの 1 回は次に開発ループで走らせる回まで残る。深さの記録の `diff` の `due` の行の `values.scope` に残る（#2914）",
+      "pending_source": "issues/issue-2914-design.md"
+    },
+    {
+      "term": "仕上げのプラン",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）。確定仕様化・リリース後テスト・振り返り・課題を閉じる・棚卸しのステップを持つ（#2914）",
+      "pending_source": "issues/issue-2914-design.md"
+    },
+    {
+      "term": "起動の判定",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しの深さごとに、その回で走らせるかを決める判定。`upkeep.py depth due <深さ>` が終了コード 0（起動する）か 3（起動しない）を返し、深さの記録へ判定の行を残す（#2315・#2914）",
+      "pending_source": "issues/issue-2914-design.md"
+    },
+    {
+      "term": "走らなかったステップ",
+      "context": "ndf-workflow",
+      "meaning": "起動の判定などの終了コードで飛ばされ、プランの実行で通らなかったステップ。フェーズレポートの「通ったステップ」の後に、ステップの id と飛ばした判定の要約を 1 行で並べる（#2914）",
+      "pending_source": "issues/issue-2914-design.md"
     },
     {
       "term": "見直し",
@@ -6145,6 +6184,114 @@
       "context": "ndf-workflow",
       "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
       "source": "docs/specifications/ndf-supervisor-docs-guard.md"
+    },
+    {
+      "term": "実装の予算",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`--budget-minutes` の値（既定 60 分）。採る項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う。今の用語集の「想定最大時間」（実行全体の子プロセスを止める締め切り）を置き換える",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "実装時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目のテスト追加・実装・修正で担当の CLI が動いた時間。提案・選定・テストの実行・CI の待ちは含めない",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "予算の延長",
+      "context": "ndf-cross-refactoring",
+      "meaning": "順位の高い候補を境目で絞り切れないときに、実装の予算を 2 倍までの範囲で増やすこと",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "リファクタリングの成立",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目が、振る舞いを変えずに、計画の前提にした構造の上で直し切れる見込みがあること。成立しない例: 振る舞いを変えないと直せない・前提の構造が実在しない",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "無関係な失敗",
+      "context": "ndf-cross-refactoring",
+      "meaning": "着手前の木（取り込んだベースブランチを含む）でも落ちるテストの失敗。改善項目の合否に数えない",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "停滞",
+      "context": "ndf-cross-refactoring",
+      "meaning": "修正の後の落ちたテストの集合が、前の回と同じであること",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "振動",
+      "context": "ndf-cross-refactoring",
+      "meaning": "修正の後の落ちたテストの集合が、前に見た集合へ戻ること",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "安全網の上限",
+      "context": "ndf-cross-refactoring",
+      "meaning": "コーディングの CLI（テストの追加・実装・修正・最終ゲート修正・フレーキーの直し）の起動ごとの秒を、各起動 1 回ずつ累計した値に置く上限。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す",
+      "pending_source": "issues/issue-2457-requirements.md"
+    },
+    {
+      "term": "実効の予算",
+      "context": "ndf-cross-refactoring",
+      "meaning": "予算の延長を当てた後の実装の予算。延ばさなければ実装の予算と同じ",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "比較の木",
+      "context": "ndf-cross-refactoring",
+      "meaning": "HEAD から、取り消していない改善項目のコミットをすべて外した木。着手の後に取り込んだベースブランチの変更を含む。無関係な失敗の見分けに使う",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "差し戻し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目の中の手順の違反（記名の欠け・期待値の欠け・文言を固定するテスト・計画に無いコミット）を、項目を取り消さずに担当へ直させること",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "落ちたテストの材料",
+      "context": "ndf-cross-refactoring",
+      "meaning": "落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "判定の担い手",
+      "context": "ndf-cross-refactoring",
+      "meaning": "成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ",
+      "pending_source": "issues/issue-2457-design.md"
+    },
+    {
+      "term": "文書のファイル",
+      "context": "ndf-workflow",
+      "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の宣言が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
+      "pending_source": "issues/issue-2925-design.md"
+    },
+    {
+      "term": "コードのファイル",
+      "context": "ndf-workflow",
+      "meaning": "差分のうち文書のファイルでないもの。スクリプト・設定・テスト・ワークフローを含む",
+      "pending_source": "issues/issue-2925-requirements.md"
+    },
+    {
+      "term": "テストが読む文書",
+      "context": "ndf-workflow",
+      "meaning": "文書のファイルのうち、プロジェクトの設定でテストとの対応を宣言したもの（用語集・Skill の本文など）",
+      "pending_source": "issues/issue-2925-design.md"
+    },
+    {
+      "term": "振る舞いの確認",
+      "context": "ndf-workflow",
+      "meaning": "Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること",
+      "pending_source": "issues/issue-2925-requirements.md"
+    },
+    {
+      "term": "振る舞いを決める文書",
+      "context": "ndf-workflow",
+      "meaning": "文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown",
+      "pending_source": "issues/issue-2925-design.md"
     },
     {
       "term": "機械的なターン",
