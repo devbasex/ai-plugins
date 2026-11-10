@@ -424,9 +424,7 @@ def cmd_close(a):
 
     count, metrics, summary = close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     metrics["final_stage"] = a.final_stage
-    decisions = [
-        {"decision": f"最終工程を {a.final_stage} として判定した", "basis": basis}
-    ]
+    decisions = [{"decision": f"最終工程を {a.final_stage} として判定した", "basis": basis}]
     _emit_close_result(a, targets, items, notes, metrics, summary, count, decisions)
 
 
@@ -479,7 +477,10 @@ def build_parser():
         default=STAGE_RETRO,
         help="その実行の最終工程（閉じる条件 3）。省けば振り返り。リリース後テストは条件 2 を必ず見る",
     )
-    ap.add_argument("--final-stage-from", help="まとめのプランの進捗記録。retro が通っていれば振り返り、無ければリリース後テスト（--final-stage より優先）")
+    ap.add_argument(
+        "--final-stage-from",
+        help="まとめのプランの進捗記録。retro が通っていれば振り返り、無ければリリース後テスト（--final-stage より優先）",
+    )
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")
     ap.add_argument("--dry-run", action="store_true", help="状態を読むだけで、ボードも課題も書かない")
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")

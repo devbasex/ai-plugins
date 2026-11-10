@@ -295,7 +295,9 @@ def cmd_scope(a):
     scope = ((got or {}).get("values") or {}).get("scope")
     if not scope:
         emit(result(TOOL, "stopped", f"スプリント {a.sprint} の振り返りの範囲が無い", [], {"sprint": a.sprint}), EXIT_PRECONDITION)
-    emit(result(TOOL, "ok", f"振り返りの範囲: ループの 1 回 {len(scope['laps'])} 回分・課題 {len(scope['issues'])} 件", scope["laps"], scope))
+    emit(
+        result(TOOL, "ok", f"振り返りの範囲: ループの 1 回 {len(scope['laps'])} 回分・課題 {len(scope['issues'])} 件", scope["laps"], scope)
+    )
 
 
 def _report_metrics(path: str | None) -> dict:
@@ -450,18 +452,14 @@ def cmd_causes(a):
     emit(result(TOOL, "ok", f"型の記録へ {len(rows)} 行を足した", [], {"path": str(d / "causes.jsonl"), "rows": len(rows)}))
 
 
-def _numbers(s: str) -> list[int]:
-    return [int(x.lstrip("#")) for x in s.replace(" ", ",").split(",") if x.strip()]
-
-
-def add_depth_parsers(sub, common, state_dir) -> None:
+def add_depth_parsers(sub, common, state_dir, numbers) -> None:
     dp = sub.add_parser("depth").add_subparsers(dest="depth_cmd", required=True)
     du = dp.add_parser("due", parents=[common])
     du.add_argument("depth", choices=DEPTHS)
     du.add_argument("--loop", default=None)
     du.add_argument("--lap", type=int, default=None)
     du.add_argument("--sprint", default=None, help="diff: 今のスプリントの名前（振り返りの範囲に置く）")
-    du.add_argument("--issues", type=_numbers, default=None, help="diff: 今の回の課題の番号（カンマ区切り）")
+    du.add_argument("--issues", type=numbers, default=None, help="diff: 今の回の課題の番号（カンマ区切り）")
     du.add_argument("--no-issue", action="store_true", help="選べる課題が尽きた（loop select の review_first）")
     du.add_argument("--manual", action="store_true", help="人が呼んだ（ループの外の単独の起動）")
     du.add_argument("--open", type=int, default=None, help="open の件数（省くと GitHub から数える）")

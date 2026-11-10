@@ -357,7 +357,11 @@ def test_close_merges_last_and_closes_issues_only_after_the_merge(tmp_path):
     steps = _close_plan(tmp_path, "--record-pr", "40")
     assert steps["merge"]["next"] == "close" and steps["merge-approved"]["next"] == "close" and steps["close"]["next"] == "end"
     assert _reach(steps, "merge") <= {"merge", "close", "stop"}
-    into_close = {sid for sid, st in steps.items() if "close" in [st.get("next"), st.get("skip_to"), st.get("on_fail"), *(st.get("on_exit") or {}).values()]}
+    into_close = {
+        sid
+        for sid, st in steps.items()
+        if "close" in [st.get("next"), st.get("skip_to"), st.get("on_fail"), *(st.get("on_exit") or {}).values()]
+    }
     assert into_close == {"merge", "merge-approved"} and steps["merge-gate"]["gate_next"] == "end"
     # LLM と CI を待つステップは merge より前（ready から辿れ、merge-gate を通らずに着く）
     before = _reach(steps, "ready", until="merge-gate")

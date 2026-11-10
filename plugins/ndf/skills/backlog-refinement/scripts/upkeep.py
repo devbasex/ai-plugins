@@ -488,7 +488,7 @@ def build_parser():
     r.add_argument("--order", default=None, help="通した手順の並び（prune,rank,... 省くと null）")
     r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
     RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
-    D.add_depth_parsers(sub, common, _state_dir)  # 深さ・持ち主・調査・大整理・戻し（#2315）
+    D.add_depth_parsers(sub, common, _state_dir, _numbers)  # 深さ・持ち主・調査・大整理・戻し（#2315）
     for add in (O.add_owner_parsers, R.add_research_parsers, V.add_overhaul_parsers, A.add_revert_parser):
         add(sub, common)
     return ap

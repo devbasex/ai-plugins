@@ -463,7 +463,9 @@ class RunState:
         gap = lambda e: ", ".join(f"{g.get('name') or g.get('kind')}: {g.get('reason')}" for g in e["gaps"])  # noqa: E731
         gaps = [f"{e['id']}（{gap(e)}）" for e in self.log if e.get("gaps")]
         skipped = "; ".join(f"{e['id']}（{e.get('skip_summary') or '要約なし'}）" for e in self.log if e.get("skipped")) or "無し"
-        gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates) or ("本番の系へ届く操作" if result == "関門" else "無し")
+        gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates) or (
+            "本番の系へ届く操作" if result == "関門" else "無し"
+        )
         shown = [g["presentation"] for g in self.gates if g.get("presentation")]
         shown += [e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")]
         presented = ", ".join(shown) or "無し"

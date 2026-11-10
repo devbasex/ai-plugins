@@ -68,14 +68,18 @@ def carry_text(a) -> str:
 
 def scope_text(a, repo: str) -> str:
     """振り返りと差分の棚卸しの指示へ足す、振り返りの範囲の読み方の 1 文。"""
-    return (f"扱うループの 1 回と課題は振り返りの範囲（`{_upkeep(repo, 'depth', 'scope', '--sprint', a.name)}` の "
-            "`items` と `metrics.issues`。見送った回の課題を含む）である。")
+    return (
+        f"扱うループの 1 回と課題は振り返りの範囲（`{_upkeep(repo, 'depth', 'scope', '--sprint', a.name)}` の "
+        "`items` と `metrics.issues`。見送った回の課題を含む）である。"
+    )
 
 
 def keep_open_text(issues: str) -> str:
     """棚卸しの指示へ足す、閉じない課題の 1 文（I8）。課題を閉じるのは merge の後の close だけである。"""
-    return (f"今の回の課題 {issues} は閉じない課題である。閉じてよい・重複の正本でない側・やらないのどの区分にも入れず、"
-            "重複の組に入るときは閉じない課題を正本にする。")
+    return (
+        f"今の回の課題 {issues} は閉じない課題である。閉じてよい・重複の正本でない側・やらないのどの区分にも入れず、"
+        "重複の組に入るときは閉じない課題を正本にする。"
+    )
 
 
 def _retro_step(a, refs: str, stats: str, repo: str) -> dict:
