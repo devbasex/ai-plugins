@@ -151,7 +151,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/relay_lib/hub.py`・`hub_client.py` | 役割のファイルの読み書き（`relay.py role`・`spawn --role helper --plan`）と数え方（I13）。`ls --json` の `metrics.hub`・`metrics.tmux` |
 | `plugins/ndf/scripts/lib/sprint_loop_gate.py` | ループのレーンが設計の承認を「人の判断待ち」へ移すときに、`kind: gate1` の依頼を送る。答えを当てる前に設計 PR の先頭を比べ、取り込みのコミットだけの違いなら当てる |
 | `plugins/ndf/scripts/lib/design_pr_merge.py` | 承認した設計のマージ（`merge_approved`）。`parallel.py answer --approved`・`loop answer --approved`・ループの 1 回の境が呼ぶ |
-| `plugins/ndf/scripts/lib/parallel_answer.py` | 答えの後に起こす 1 行（`owner_next`。答え待ちの停止の範囲にある持ち主へは再開の印を置く）と、答えの後に残る依頼の一覧と除外の印（`after_items`・`mvv_mark`） |
+| `plugins/ndf/scripts/lib/parallel_answer.py` | 答えの後に起こす 1 行（`owner_next`。答え待ちの停止の範囲にある 1 スプリントのレーンの持ち主へは再開の印を置く）と、答えの後に残る依頼の一覧と除外の印（`after_items`・`mvv_mark`） |
 | `plugins/ndf/scripts/hook_lib/ask_guard.py` | 判定が通す問いを、レーンか一時レーンなら `parallel.py request-ask` で送って止める |
 
 ```mermaid
@@ -265,7 +265,11 @@ stateDiagram-v2
 - 同じ原因の問いは 1 つにまとめる。対象は `ndf-ask:human-action` の問いで、区分・選択肢・文面が同じものである。文面はレーン名・パス・数字を伏せ、空白をまとめてから比べる。
   答えは依頼してきた全レーンへ `answer-<依頼>` で配る。取り消せない操作・レッドライン・費用の問いは、番号の違いで別の対象になり得るためまとめない
 - 1 スプリントのレーンの持ち主が止まっていれば、`answer` は `metrics.next` に `relay.py restart <レーン>` の 1 行を返す。
-  起こすかは、レーンの側の待ちの記録（`lane_waits`）で決める。持ち主が答え待ちの停止の範囲にあれば、1 行を返さず再開の印を置き、`metrics.held_owners` にレーン名を返す
+  起こすかは、レーンの側の待ちの記録（`lane_waits`）で決める。1 スプリントのレーンの持ち主が答え待ちの停止の範囲にあれば、1 行を返さず再開の印を置き、`metrics.held_owners` にレーン名を返す。
+  ループのレーンは範囲にあっても 1 行を返して起こす（境の選定が承認の要らない候補を選び、無ければ同じ条件で止まり直す）
+- 業務時間（進め方の宣言の `business_hours`）の外は、`wait` が `gate1`・`ask` の依頼を返さずに `.ndf/parallel/<計画名>/deferred.json` へ溜め、
+  ほかの依頼と、まだ返していない MVV 判定を試せる設計の承認だけを返す。今問う依頼が無ければ終了コード 3 で返り、待ちの上限は次の業務時間の始まりで切る。
+  業務時間に入った後の最初の `wait` は、答えていない依頼の全件を `metrics.batch: true` で返す。宣言が無い・不正なら溜めない
 - 問いの止まった持ち主は、1 スプリントのレーンに加えて、記録が `waiting_only` で答えのまだの行を持つループのレーンも起こす対象に入る（`wake_owners`）。起こす 1 行は、動き出すまで以後の知らせ（`pause` の `wake`）に添う
 
 ## データ・設定
@@ -284,6 +288,7 @@ stateDiagram-v2
 | 同 `releases/<連番>/<提示>/presented.json`・`breakdown.md` | 提示したコミット・範囲の Pull Request・レーンの対応・レーンの無い Pull Request・出し直しで加わった範囲、承認資料へ足す内訳 | `parallel.py present` |
 | 同 `releases/<連番>/<提示>/done.json`・`release-done.json` | 提示と本番のプランの queue の done | 一時レーン |
 | 同 `answer-hold.json` | 今の答え待ちの停止の範囲。停止が無ければファイルも無い。計画の終わりに消す | 耐久ステップ `parallel.answer-hold` |
+| 同 `deferred.json` | 業務時間外に溜めた依頼の控え（`ids`・`offered`・`shown`・`since`・`until`）。業務時間の宣言があるときだけ書く | `parallel.py wait` |
 | 同 `answer-hold-log.jsonl` | 止めた・解けたの履歴（1 変化 1 行。止まった回数は `change: on` の行で数える）。消さない | 耐久ステップ `parallel.answer-hold` |
 | 同 `resume/<レーン>.mark.json` | 再開の印（`why` は `boundary` か `answered`）。再開したとき・止まったと観た後で動いたとき・「止める」と答えたとき・計画の終わりに消す | ループの境・`park`・`answer` |
 | レーンのプランの状態ディレクトリの `work/request-id.txt`・`work/request.txt` | 依頼の `id`、送った依頼かリリース済みの結果 | `parallel.py request` |
