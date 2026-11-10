@@ -824,10 +824,10 @@ def test_the_ci_check_is_not_set_by_default(patch_lib, refactor, monkeypatch):
 
 
 def test_init_starts_at_the_propose_phase(run_init, tmp_path):
-    """版 2 の状態は提案の手順から始まり、改修計画はまだ無い（#933）。"""
+    """版 3 の状態は提案の手順から始まり、改修計画はまだ無い（#933・#2457 決定 13）。"""
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
-    assert state["schema"] == 2
+    assert state["schema"] == 3
     assert state["phase"] == "propose"
     assert state["plan"] is None
     assert state["phases"] == {}
@@ -1237,20 +1237,34 @@ def test_an_unfinished_old_state_stops_the_init(run_init, tmp_path, capsys):
     assert path.read_text(encoding="utf-8") == before
 
 
+def test_an_unfinished_version_2_state_stops_the_init(run_init, tmp_path):
+    """#2457 決定 13 — 版 2 の途中の状態ファイルは再開せずに止め、状態を変えない。"""
+    run_init(_args(tmp_path))
+    path, state = _state_of(tmp_path)
+    state.update({"schema": 2, "phase": "verify"})
+    _overwrite_state(tmp_path, state)
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path))
+    assert e.value.code == refactor_abort()
+    assert path.read_text(encoding="utf-8") == before
+
+
 def test_a_finished_old_state_is_rebuilt(run_init, tmp_path):
-    """AC25 — 旧い形で `final` が入っていれば、版 2 の形で新しく作り直す。"""
+    """AC25 — 旧い形で `final` が入っていれば、今の版の形で新しく作り直す。"""
     run_init(_args(tmp_path))
     _overwrite_state(tmp_path, {"id": 130, "rounds": [{"round": 1}], "final": {"status": "approved"}, "phase": "done"})
 
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
-    assert state["schema"] == 2
+    assert state["schema"] == 3
     assert state["phase"] == "propose"
     assert "rounds" not in state and "final" not in state
 
 
 def test_a_done_state_is_rebuilt(run_init, tmp_path):
-    """版 2 で `phase` が `done` なら再開せず、新しく始める。"""
+    """版 3 で `phase` が `done` なら再開せず、新しく始める。"""
     run_init(_args(tmp_path))
     path, state = _state_of(tmp_path)
     state["phase"] = "done"

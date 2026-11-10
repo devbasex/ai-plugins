@@ -50,7 +50,7 @@ from ..vocabulary import (
 )
 
 # 状態ファイルの版（#933）。無い状態ファイルは v10.17.x までのラウンド制の形である。
-SCHEMA = 2
+SCHEMA = 3  # 版 3（#2457 決定 13）: 予算は選定にだけ使い、締め切りの鍵を持たない。版 2 の途中の実行は再開しない
 ENTRY = "skills/cross-refactoring/scripts/refactor.py"  # 持ち主の契約を引く入口（プラグインの根からのパス。#2342）
 
 # 廃止した引数（決定 5・決定 24）。この変更を含む版では知らせて無視し、その次の版で外す。
@@ -583,8 +583,10 @@ def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _Ini
     | 前回の状態 | 扱い |
     | --- | --- |
     | 無い | 新しく始める |
-    | 版 2 で `phase` が `done` | 新しく始める（状態を作り直す） |
-    | 版 2 で終わっていない | 再開する |
+    | 版 3 で `phase` が `done` | 新しく始める（状態を作り直す） |
+    | 版 3 で終わっていない | 再開する |
+    | 版 2 で終わっていない | **止める**（#2457 決定 13。締め切りを導いた前提の途中から締め切りの無い経路へ入れない） |
+    | 版 2 で `phase` が `done` | 新しく始める（版 3 の形で作り直す） |
     | 旧い形（`schema` を持たず `rounds` を持つ）で `final` が空 | **止める**（決定 18） |
     | 旧い形で `final` が入っている | 新しく始める（版 2 の形で作り直す） |
     """
@@ -596,6 +598,11 @@ def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _Ini
             die(
                 "旧い版（ラウンド制）の状態ファイルが途中のまま残っています。"
                 f"旧い版（v10.17.5 以前）で終えるか、{prep.state_file} を消して始め直してください"
+            )
+        if state.get("schema") == 2 and state.get("phase") != "done":
+            die(
+                "版 2（予算から締め切りを導いていた版）の状態ファイルが途中のまま残っています。"
+                f"締め切りの無い経路へ途中から入れないため再開しません。{prep.state_file} を消して始め直してください"
             )
         info(f"ℹ 旧い版の終わった状態ファイルを版 {SCHEMA} の形で作り直します")
         return False

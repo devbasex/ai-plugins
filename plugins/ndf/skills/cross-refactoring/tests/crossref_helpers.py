@@ -103,7 +103,7 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
     tmp_dir = tmp_path / ".cross_refactoring"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     state = {
-        "schema": 2,
+        "schema": 3,
         "id": state_id,
         # **開始は今の少し前に置く。** 固定の時刻にすると、その時刻から想定最大時間が
         # 過ぎた後に走らせたテストだけが、修正の締め切りと最終ゲートの打ち切りで落ちる。
