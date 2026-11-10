@@ -16,12 +16,13 @@ SELECTED = "選んだ"  # ループの記録の選んだ課題の印（`sprint_l
 def _ls(main: Path) -> dict[str, dict]:
     """一覧の行（名前 → 行）。読めなければ空。"""
     try:
+        from parallel_observe import listed_rows
         from parallel_repo import relay_proc
 
         got, res = relay_proc(main, "ls", "--json")
         if got.returncode != 0:
             return {}
-        return {it["name"]: it for it in res.get("items") or [] if isinstance(it, dict) and it.get("name")}
+        return listed_rows(res)
     except Exception:  # noqa: BLE001  一覧が読めなくても他の欄は返す（I6）
         return {}
 

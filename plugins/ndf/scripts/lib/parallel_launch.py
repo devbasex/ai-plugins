@@ -19,6 +19,7 @@ from typing import Optional
 import durable
 import limits
 import parallel_release as pr
+from parallel_observe import listed_rows
 from parallel_repo import relay, relay_proc
 
 UP = ("running", "awaiting_approval")
@@ -44,7 +45,7 @@ def _ls_row(main: Path, lane: str) -> Optional[dict]:
     got, res = relay_proc(main, "ls", "--json")
     if got.returncode != 0:
         return None
-    return next((it for it in res.get("items") or [] if isinstance(it, dict) and it.get("name") == lane), {})
+    return listed_rows(res).get(lane, {})
 
 
 def _moved_since(row: dict, since: float) -> bool:

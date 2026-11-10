@@ -34,7 +34,7 @@ import parallel_route as prt
 from parallel_files import RELAY
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
 from parallel_launch import LaunchRouting
-from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
+from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states, listed_rows
 from parallel_question import cause_of
 from parallel_reply import AnswerRouting, step_prior_waits, step_waiting_lanes
 from parallel_repo import dev_version, git_head, mark_organizer, poll_seconds, relay, relay_proc, spawn_refusals, stall_seconds
@@ -75,11 +75,7 @@ def step_observe(main: str, name: str) -> dict:
     `can_ask` は一覧の失敗を問える版の記録の印で、無い記録の再生では問わない（問いの DBOS の呼び出しが記録の順を崩す。決定 5）。
     `limits`・`marks` も同じで、再開の印は一覧の後に読む（止まって見えたレーンの印を読み逃さない。#2707 の I7・I9）。"""
     got, res = relay_proc(Path(main), "ls", "--json")
-    rows = {
-        it["name"]: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")}
-        for it in res.get("items") or []
-        if isinstance(it, dict) and it.get("name")
-    }
+    rows = {n: {"state": it.get("state"), "at": it.get("at"), "role": it.get("role")} for n, it in listed_rows(res).items()}
     err = (got.stderr or "").strip().splitlines()[-1:]
     seen = {"now": time.time(), "rows": rows, "code": got.returncode, "err": err[0] if err else "", "can_ask": True}
     return {**seen, "limits": ph.limit_values(Path(main)), "marks": ph.read_marks(Path(main), name)}
@@ -148,8 +144,7 @@ def step_finish(main: str, name: str, progress: dict) -> None:
 @durable.step(name="parallel.restore")
 def step_restore(main: str, name: str) -> dict:
     """作り直しの材料（`parallel_ledger.restore_run`）。一覧に居るレーンを添える（チェックポイントの無い計画の I10）。"""
-    items = relay_proc(Path(main), "ls", "--json")[1].get("items") or []
-    got = plg.restore_run(Path(main), name, [it["name"] for it in items if isinstance(it, dict) and it.get("name")])
+    got = plg.restore_run(Path(main), name, list(listed_rows(relay_proc(Path(main), "ls", "--json")[1])))
     return {**got, "limits": ph.limit_values(Path(main)), "hold_file": {"hold": ph.read_hold(Path(main), name)}}  # 停止を戻す材料
 
 
