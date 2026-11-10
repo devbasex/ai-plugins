@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -67,6 +68,34 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
     return new
 
 
+def redo_sprint_argv(root: str, rec: dict, lap: dict, issues: list[int], mode: str, out: str) -> list[str]:
+    """モードを決め直して下がったとき、設計承認ゲートの後のステージを新しいモードで作り直す supervise.py new sprint の
+    コマンド（#2923 の決定 4）。設計は済んでいるため --design を渡さず、残った課題を --designed で渡す。"""
+    dev = lap["versions"]["dev"]
+    new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
+    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", mode, "--designed", *map(str, issues)]
+    if dev:
+        new += ["--version", dev]
+    new += ["--out", out]
+    if rec.get("outside_plan"):
+        new += ["--outside-plan", rec["outside_plan"]]
+    new += list(lap.get("sprint_extra") or [])
+    return new
+
+
 def stage_plan(index: list[dict], stage: str) -> str | None:
     """マニフェストのステージの先頭のプラン。ステージが無ければ None。"""
     return next((p for e in index if e.get("name") == stage for p in e.get("plans", [])), None)
+
+
+def sprint_guidance(rec: dict, chosen: list[int], lap_dir: str) -> str:
+    """選定の後の案内: 材料を集めて判定表の行を選び、ループの 1 回のディレクトリの judgments.json（判定の根拠のファイル）を
+    渡して loop sprint を打つ（#2923）。"""
+    judgments = Path(lap_dir) / "judgments.json"
+    q = shlex.quote
+    materials = SPRINT_STATE.parent / "mode-materials.py"
+    return (
+        f"python3 {q(str(materials))} --issue {' '.join(map(str, chosen))} --out {q(str(judgments))} で材料を集め、"
+        "課題ごとに判定表の行（row・mode・condition・files）を埋め、対象外は loop exclude で外し、"
+        f"python3 {q(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments {q(str(judgments))} を打つ"
+    )

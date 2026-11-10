@@ -16,7 +16,6 @@ import project_mvv as pm
 import sprint_mvv
 
 from sprint_loop_record import (
-    SPRINT_STATE,
     UPKEEP,
     IN_PROGRESS,
     SELECTED,
@@ -53,7 +52,7 @@ from sprint_loop_gate import (
     refusal_order,
     select_cmd,
 )
-from sprint_loop_argv import design_issues
+from sprint_loop_argv import design_issues, sprint_guidance
 from sprint_loop_gate2 import pending_step
 from sprint_loop_exclusion import PENDING_REASON, PRODUCTION_REASON, exclusion_reason, prerequisite_reason  # noqa: F401
 
@@ -473,7 +472,7 @@ def run_selection(
         return _stop_without_issue(env, rec, before, got, rank, lap, hold)
     new = _open_lap(env, rec, before, got, rank, n, lap, marks)
     chosen = selected_issues(new)
-    nxt = f"モードを決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> を打つ"
+    nxt = sprint_guidance(rec, chosen, new["dir"])
     update_handoff(env, rec, f"ループの {n} 回目 の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"ループの {n} 回目 の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),

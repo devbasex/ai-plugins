@@ -68,7 +68,7 @@ def test_a_held_lane_selects_only_approved_designs_and_records_why(lane):
     assert got["metrics"]["hours"]["declared"] is False and got["metrics"]["hours"]["inside"] is True
     lap = sl.current_lap(rec(lane))
     assert lap["hold_only"] is True and lap["hours"]["at"]
-    assert sl.cmd_sprint(lane, "l1", "standard", "1.0.0-dev.1", None, [])["status"] == "ok"
+    assert tsl.sprint(lane, "l1", "standard", "1.0.0-dev.1", None, [])["status"] == "ok"
 
 
 def test_a_held_lane_without_approved_designs_stops_with_a_mark_and_opens_no_lap(lane):
@@ -112,7 +112,7 @@ def test_a_hold_only_lap_refuses_to_build_a_design_step(lane):
     with sl_record.open_record(lane, "l1") as (r, before):
         sl.current_lap(r)["selection"].append({"number": 11, "decision": sl_record.SELECTED, "reason": "順位"})
         sl_record.write_record(lane, r, before)
-    out = sl.cmd_sprint(lane, "l1", "standard", "1.0.0-dev.1", None, [])
+    out = tsl.sprint(lane, "l1", "standard", "1.0.0-dev.1", None, [])
     assert out["exit"] == 2 and sl_argv.HOLD_ONLY_REFUSAL in out["summary"] and "#11" in out["summary"]
 
 
@@ -160,7 +160,7 @@ def test_a_running_lap_is_not_stopped_by_the_hold_or_the_hours(lane):
     assert sl_select.cmd_select(lane, "l1")["metrics"]["status"] == "selected"
     lane.hold.write_text(json.dumps(HOLD))
     declare_hours(lane, OUTSIDE)
-    assert sl.cmd_sprint(lane, "l1", "standard", "1.0.0-dev.1", None, [])["status"] == "ok"
+    assert tsl.sprint(lane, "l1", "standard", "1.0.0-dev.1", None, [])["status"] == "ok"
     tsl.set_state(lane, sl.current_lap(rec(lane)))
     out = sl.cmd_lap(lane, "l1", False, None, [])
     assert out["metrics"]["status"] == "continue" and rec(lane)["laps"][0]["outcome"] == sl_record.DONE

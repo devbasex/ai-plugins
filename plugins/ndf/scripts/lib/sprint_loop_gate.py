@@ -14,6 +14,7 @@ from pathlib import Path
 import gh_sections
 import jsonio
 import legacy_values
+import mode_judgment
 import project_mvv as pm
 import revise_note
 import step_result
@@ -21,6 +22,7 @@ from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint
 from gate1_requests import carried_over, design_head, lane_unmatched
 from lap_cost import lap_cost
 from lap_close import closed_versions, copy_state_gates
+from sprint_loop_argv import redo_sprint_argv, stage_plan
 from sprint_loop_backlog import lap_depths, lap_research
 from sprint_loop_record import (
     TOOL,
@@ -108,7 +110,7 @@ def refusal_order(summary: str) -> dict:
 # ---------------------------------------------------------------- sprint
 
 
-def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "close") -> list[str]:
+def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "close", mode: str | None = None) -> list[str]:
     """まとめのステージ（new close --pace auto）を組み、プランのパスを返す。断れば LoopError。
     記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。
     版も渡さない。ループの 1 回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
@@ -118,7 +120,7 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "c
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
     cmd = [sys.executable, str(SUPERVISE), "new", "close", "--pace", "auto", "--name", lap["sprint"], "--worktree", str(env.main_dir())]
-    cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", lap.get("mode") or "standard"]
+    cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", mode or lap.get("mode") or "standard"]
     cmd += ["--loop", rec["name"], "--lap", str(lap["n"]), *(["--carry", *map(str, carry)] if carry else [])]  # loop・lap は #2315 の決定 3
     if lap.get("milestone"):
         cmd += ["--milestone", lap["milestone"]]
@@ -278,7 +280,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
         close_lap(env, rec, lap, FAILED if unfinished else RETURNED)
         return after_close(env, rec, before, f"設計承認ゲートで全課題を人の判断待ちへ移した（{' '.join(f'#{n}' for n in moved)}）")
     try:
-        queue, done = continuation(env, rec, lap, moved, kept)
+        queue, done = continuation(env, rec, lap, moved, kept, notes)
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
         return refused_stop(env, rec, before, CONTINUATION_STEP, 1, str(e))
     pipeline = f"{queue} && {wait_lap(rec, done)}"
@@ -519,12 +521,49 @@ def drop_issues(plan: str, moved: list[int]) -> None:
 CONTINUATION_STEP = "続きの queue"  # 設計承認ゲートの後の続きを組めなかったときの refused の step（loop start が組み直す）
 
 
-def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[int]) -> tuple[str, Path]:
+def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[int], notes: list[str] | None = None) -> tuple[str, Path]:
     """設計承認ゲートの後の続きの queue: 設計承認ゲートの後の then_of のステージから、外した課題だけの計画を除き、
-    外した課題を除いた new close --pace auto を最後の --then につなぐ。"""
+    外した課題を除いた new close --pace auto を最後の --then につなぐ。
+
+    判定の根拠を持つループの 1 回は、残った課題でモードを決め直す（#2923 の I4）。下がったときは設計承認ゲートの後の
+    ステージを新しいモードで作り直す（決定 4）。記録のモードとマニフェストと決め直しの記録は、組み直しが通ってから
+    書く（I5）。根拠を持たないループの 1 回（この版より前に組んだもの）は決め直さない（I6・決定 7）。"""
+    judgments = lap.get("judgments")
+    current = lap.get("mode") or "standard"
+    mode = current
+    if judgments is not None:
+        try:
+            mode = mode_judgment.redecide(judgments, kept, current)
+        except mode_judgment.JudgmentError as e:
+            raise LoopError(f"モードを決め直せない: {e}") from e
+    k = len(lap.get("dones", [])) + 1
+    if mode != current:
+        stages, manifest, command = rebuilt_stages(env, rec, lap, kept, mode, Path(lap["dir"]) / f"sprint-{k}")
+    else:
+        stages, manifest, command = kept_stages(lap, moved, kept), None, None
+    close = build_close(env, rec, lap, kept, tag=f"close-{k}", mode=mode)
+    lap["close_plans"] = close  # リリース待ち・質問待ちで締めたループの 1 回は答えの後にこれを流す
+    stages.append(close)
+    if manifest is not None:
+        index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
+        lap.update(
+            manifest=str(manifest), dev_plan=stage_plan(index, "開発版"), prod_plan=stage_plan(index, "本番"), sprint_command=command
+        )
+    if judgments is not None:
+        lap["mode"] = mode
+        lap.setdefault("mode_decisions", []).append(mode_decision(env, DESIGN_GATE, kept, current, mode))
+        (notes if notes is not None else []).extend(sync_mode(env, kept, mode))
+    done = Path(lap["dir"]) / f"done-{k}.json"
+    lap.setdefault("dones", []).append(str(done))
+    return queue_command(stages, done), done
+
+
+def kept_stages(lap: dict, moved: list[int], kept: list[int]) -> list[list[str]]:
+    """組み済みのマニフェストの設計承認ゲートの後のステージから、外した課題（設計が完了していない課題を含む）だけの
+    計画を除き、残る計画からも外した課題を除く。"""
     index = json.loads(Path(lap["manifest"]).read_text(encoding="utf-8"))["ステージ"]
     at = next(i for i, e in enumerate(index) if canonical(e.get("name")) == DESIGN_GATE)
-    moved = sorted(set(moved) | (set(selected_issues(lap)) - set(kept)))  # 設計が完了していない課題の計画も外す
+    moved = sorted(set(moved) | (set(selected_issues(lap)) - set(kept)))
     stages = []
     for e in index[at + 1 :]:
         plans = [
@@ -534,12 +573,40 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
             drop_issues(p, moved)
         if plans:
             stages.append(plans)
-    tag = f"close-{len(lap.get('dones', [])) + 1}"
-    lap["close_plans"] = build_close(env, rec, lap, kept, tag=tag)  # リリース待ち・質問待ちで締めたループの 1 回は答えの後にこれを流す
-    stages.append(lap["close_plans"])
-    done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
-    lap.setdefault("dones", []).append(str(done))
-    return queue_command(stages, done), done
+    return stages
+
+
+def rebuilt_stages(env: Env, rec: dict, lap: dict, kept: list[int], mode: str, out: Path) -> tuple[list[list[str]], Path, str]:
+    """残った課題の設計の結果から本番までのステージを、決め直したモードで作り直す（#2923 の決定 4）。断れば LoopError。"""
+    cmd = redo_sprint_argv(str(env.main_dir()), rec, lap, kept, mode, str(out))
+    code, so, se = env.run(cmd, cwd=str(env.main_dir()))
+    if code != 0:
+        raise LoopError(f"new sprint --pace auto（モード {mode} での作り直し）が断った（{code}）: {(se or so).strip()[:300]}")
+    manifest = out / "sprint.json"
+    index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
+    return [list(e["plans"]) for e in index if e.get("plans")], manifest, shlex.join(cmd)
+
+
+PROJECTS_SYNC = SPRINT_STATE.parent / "projects-sync.sh"
+
+
+def mode_decision(env: Env, trigger: str, issues: list[int], from_mode: str | None, mode: str) -> dict:
+    """モードの決定の記録の 1 件（`loop sprint` か設計承認ゲートでの決め直し）。"""
+    return {"at": env.now(), "trigger": trigger, "issues": list(issues), "from_mode": from_mode, "mode": mode}
+
+
+def sync_mode(env: Env, issues: list[int], mode: str) -> list[str]:
+    """課題の本文の「進行」の `モード:` の行にスプリントのモードを書く（#2923 の決定 6）。書けなくても止めず、
+    書けなかった課題ごとに理由を返す。"""
+    notes = []
+    for n in issues:
+        try:
+            code, so, se = env.run(["bash", str(PROJECTS_SYNC), str(n), "mode", mode], cwd=str(env.main_dir()))
+        except OSError as e:
+            code, so, se = 1, "", str(e)
+        if code != 0:
+            notes.append(f"#{n} の本文の「進行」にモードを書けなかった（{code}）: {(se or so).strip()[:200]}")
+    return notes
 
 
 GATE_2_RESUME_STEPS = ("bump", "promote-approved", "merge-approved")  # リリース承認ゲートの承認の後に入るステップ（pace.md の続け方）

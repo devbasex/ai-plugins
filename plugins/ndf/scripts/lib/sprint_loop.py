@@ -15,6 +15,7 @@ from typing import Callable
 import design_pr_merge
 import gate1_requests
 import jsonio
+import mode_judgment
 import project_mvv as pm
 import repo as repo_lib
 import revise_note
@@ -82,6 +83,8 @@ from sprint_loop_gate import (
     after_close,
     research_command,
     owner_line,
+    mode_decision,
+    sync_mode,
 )
 
 from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
@@ -230,7 +233,10 @@ def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | N
     if not lap:
         return None, nxt
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
-        return None, f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード>（モードを決め直す）"
+        return (
+            None,
+            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments <判定の根拠のファイル>（判定の根拠を確かめて組み直す）",
+        )
     # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:
@@ -275,7 +281,29 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
 # ---------------------------------------------------------------- sprint
 
 
-def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None, extra: list[str]) -> dict:
+def read_judgments(path: str | None, selected: list[int]) -> list[dict]:
+    """判定の根拠のファイルを読み、検査を通った根拠を返す（#2923 の I1・I2）。読めなければ JudgmentError。"""
+    if not path:
+        raise mode_judgment.JudgmentError(["判定の根拠のファイル（--judgments）が無い"])
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise mode_judgment.JudgmentError([f"判定の根拠のファイルを読めない（{path}）: {str(e)[:200]}"]) from e
+    return mode_judgment.check_judgments(data, selected)
+
+
+def judgment_refusal(reasons: list[str]) -> dict:
+    """判定の根拠が欠ける・合わないときの断り（終了コード 1。記録は書き換えない）。"""
+    summary = f"判定の根拠が契約に合わない（{len(reasons)} 件）。mode-materials.py で材料を集め、根拠を直して loop sprint を打ち直す"
+    items = [{"reason": r} for r in reasons]
+    return {**step_result.result(TOOL, "stopped", summary, items, {"status": "refused"}), "exit": EXIT_REFUSED}
+
+
+def cmd_sprint(
+    env: Env, name: str, mode: str | None, dev: str | None, prod: str | None, extra: list[str], judgments: str | None = None
+) -> dict:
+    """ループの 1 回を組む。モードは判定の根拠のファイルから算出し、`mode` を渡したときは照合だけに使う（#2923 の決定 2）。
+    根拠の検査はどの書き込みよりも前に置く（I1〜I3・I8 で断ったときに記録を変えない）。"""
     dev = dev or ""
     if prod and not dev:
         return refusal_order("--prod は --dev と一緒に渡す（版を流す時点に決めるなら両方を省く）")
@@ -288,6 +316,14 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         if refused := sprint_refusal(rec, lap):  # 設計承認ゲートの後のループの 1 回・答え待ちの停止の範囲の設計（#2913 の I1）
             return {**refusal_order(refused[1]), "exit": refused[0]}
         issues = selected_issues(lap)
+        try:
+            judged = read_judgments(judgments, issues)
+            decided = mode_judgment.sprint_mode(judged)
+            if mode and mode != decided:
+                raise mode_judgment.JudgmentError([f"--mode {mode} が判定の根拠から決まるモード {decided} と違う"])
+        except mode_judgment.JudgmentError as e:
+            return judgment_refusal(e.reasons)
+        mode = decided
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
@@ -321,15 +357,24 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         done = d / "done-1.json"
         queue, pipeline = sprint_pipeline(index, close, done, rec)
         lap["dones"] = [str(done)]
+        lap.update(judgments=judged, mode_decisions=[mode_decision(env, "loop sprint", issues, None, mode)], sprint_extra=list(extra))
         if rec.get("status") == "stopped":  # refused からのやり直し
             resume_record(env, rec)
         write_record(env, rec, before)
         update_handoff(env, rec, f"ループの {lap['n']} 回目 のスプリントを組んだ。pipeline を流す", resume_command(rec), pipeline)
+        synced = sync_mode(env, issues, mode)
         return loop_ok(
             f"ループの {lap['n']} 回目 のスプリント {lap['sprint']} を pace: auto で組んだ",
             rec,
-            [{"command": lap["sprint_command"]}, {"command": lap["close_command"]}, *({"skipped_loop": x} for x in skipped)],
+            [
+                {"command": lap["sprint_command"]},
+                {"command": lap["close_command"]},
+                *({"skipped_loop": x} for x in skipped),
+                *({"note": x} for x in synced),
+            ],
             status="sprint",
+            mode=mode,
+            judgments={str(j["number"]): j["row"] for j in judged},
             next_=pipeline,
             state_path=str(state),
             out=lap["out"],
