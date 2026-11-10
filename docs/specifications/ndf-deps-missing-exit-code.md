@@ -59,9 +59,13 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
   通じる。リリース対象の終了コードで使われておらず、共通の契約（0〜3・10〜29）、エントリポイントが自分で使う値
   （`refactor.py` の 4 など）、supervise の打ち切り（124・125）、シェルの予約（126 以上）のどれとも重ならない。
   小さい空き番号は各スクリプトが 4 から順に足す値と衝突しやすく、意味も運ばない
-- **値の持ち主は `deps.py` の 1 つにし、`step_result.py` はそれを参照する。** 依存の欠けを出すのは `deps._stop` の
-  1 か所だからである。逆向き（`deps.py` が `step_result.py` を import する）は、ラッパーにも使われる最下層の
-  `deps.py` に `proc` を引き込む。両方に 69 を書くと値が割れうる
+- **値の持ち主は終了コードの表（`exit_codes.py`）の 1 つにし、`deps.py` と `step_result.py` はそれを参照する（#2988）。**
+  `deps.py` が `step_result.py` を import すると、ラッパーにも使われる最下層の `deps.py` に `proc` を引き込む。
+  `step_result.py` が `deps.py` を import すると、`deps` が止まるときに読む実行の核（`run_core`）を通して import の輪になる。
+  両方に 69 を書くと値が割れうる。`exit_codes.py` は標準ライブラリも NDF のモジュールも読まず、ラッパーのバージョン
+  ディレクトリへ写しても依存を増やさない
+- **`deps.py` は実行の核を止まるときだけ関数の中で読む。** ラッパーのバージョンディレクトリは核を写さないため、
+  最上位で読むとラッパーが起動できない。核を読めなければ結果を出さずに 69 で終える
 - **supervise の判定は変えない。** `RunStep.is_skip` と `check_condition` は終了コードが `skip_code` と等しいとき
   だけ飛ばす・完了にするため、69 は既存の分岐で `on_fail` か `止まった` へ進む。69 を名指しする分岐を足すと、
   終了コードの意味を supervise にも持たせることになる。報告には `exit=69` と `❌ [ndf deps]` の行が既に載る
@@ -83,7 +87,8 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 | I1 | `deps.require` の 3 つの止まり方（起動し直した後も import できない・`pyproject.toml` と `uv.lock` が無い・uv を入れられない）は、どれも `deps.EXIT_DEPS_MISSING` で終わり、標準エラーに `❌ [ndf deps]` で始まる 1 行を出す | テストが落ちる |
 | I2 | `EXIT_DEPS_MISSING` は 0〜3 と 10〜29 のどれとも重ならない | テストが落ちる |
 | I3 | `step_result.code_matches("stopped", 69)` は真、`"ok"` と `"gate"` では偽 | テストが落ちる |
-| I4 | `step_result.EXIT_DEPS_MISSING` は `deps.EXIT_DEPS_MISSING` を参照し、値を写さない | テストが落ちる |
+| I4 | `step_result.EXIT_DEPS_MISSING` と `deps.EXIT_DEPS_MISSING` は `exit_codes.EXIT_DEPS_MISSING` を参照し、値を写さない | テストが落ちる |
+| I8 | `deps` が実行の核と結果を出す層より先に読み込まれても、欠けで止まると 69 と `stopped`・`gaps` の `kind` が `deps` の結果になる | テストが落ちる |
 | I5 | `skip_code` を書かない run のステップは、69 で終わっても `skip_to` へ進まず `skipped` を記録しない。`実行の条件`（`skip_code: 3`）のコマンドが 69 で終わると `結果: 止まった` | テストが落ちる |
 | I6 | 依存がそろった環境の assess は、差分なしで 3、差分ありで 0、`<base>` を解けなければ 2 で終わる | テストが落ちる |
 | I7 | ラッパーの環境を作れないときの `install` は終了コード 3 で止まる | テストが落ちる |
@@ -107,12 +112,13 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 
 | 定数 | 置き場所 | 値 |
 | --- | --- | --- |
-| `EXIT_DEPS_MISSING` | `plugins/ndf/scripts/lib/deps.py` | 69（値の持ち主） |
-| `EXIT_DEPS_MISSING` | `plugins/ndf/scripts/lib/step_result.py` | `deps.EXIT_DEPS_MISSING`（参照） |
-| `EXIT_PRECONDITION` | `plugins/ndf/scripts/lib/step_result.py` | 3（共通の契約の「前提が無い・正常な否定の結果」） |
+| `EXIT_DEPS_MISSING` | `plugins/ndf/scripts/lib/exit_codes.py` | 69（値の持ち主） |
+| `EXIT_DEPS_MISSING` | `plugins/ndf/scripts/lib/deps.py` | `exit_codes.EXIT_DEPS_MISSING`（参照） |
+| `EXIT_DEPS_MISSING` | `plugins/ndf/scripts/lib/step_result.py` | `exit_codes.EXIT_DEPS_MISSING`（参照） |
+| `EXIT_PRECONDITION` | `plugins/ndf/scripts/lib/exit_codes.py` | 3（共通の契約の「前提が無い・正常な否定の結果」。`step_result.py` が同じ名前で公開する） |
 | `EXIT_PRECONDITION` | `plugins/ndf/scripts/relay_lib/runtime.py` | 3（ラッパーの環境が無い。`deps.require` の経路の外） |
 
-`deps.py` には `EXIT_PRECONDITION` が無い。テストを除く `plugins/ndf` で 69 を数値で書く定数は `deps.py` の 1 行だけである。
+`deps.py` には `EXIT_PRECONDITION` が無い。テストを除く `plugins/ndf` で 69 を数値で書く定数は `exit_codes.py` の 1 行だけである。
 
 ### supervise の読み方
 
@@ -141,8 +147,11 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 - site-packages を外した python で起動し直した後の `refactor.py assess` が、3 でなく 69 で終わること
   （`test_refactor_assess_without_its_packages_stops_as_deps_missing`）
 - `EXIT_DEPS_MISSING` が 0〜3 と 10〜29 に入らないこと（`test_deps_missing_does_not_overlap_the_common_codes`）
-- `step_result.EXIT_DEPS_MISSING` が `deps` の値と等しく、`code_matches` が `stopped` だけで真になること
-  （`plugins/ndf/scripts/tests/test_step_result.py`）
+- `step_result.EXIT_DEPS_MISSING` と `deps.EXIT_DEPS_MISSING` が `exit_codes` の定数そのもので、`code_matches` が `stopped` だけで
+  真になること（`plugins/ndf/scripts/tests/test_step_result.py`）
+- `deps` を核より先に読み込んだエントリポイントが欠けで止まると 69・`stopped`・`deps` の欠けになり、核の無い置き場では結果を出さずに
+  69 で終えること（`plugins/ndf/scripts/tests/test_deps.py`）
+- 結果を出す層・`deps`・核の間に import の輪が無いこと（`plugins/ndf/scripts/tests/test_import_cycles.py`）
 - `skip_to` と `on_fail` を持つ run のステップが 69 で終わると、`skipped` を記録せず `on_fail` へ進むこと
   （`plugins/ndf/scripts/tests/test_supervise.py` の `test_skip_to_does_not_jump_when_deps_are_missing`）。3 なら今どおり `skip_to` へ進むこと
 - `実行の条件`（`skip_code: 3`）のコマンドが 69 で終わると、本体を走らせず `結果: 止まった` になること
@@ -157,4 +166,4 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 - [`plugins/ndf/scripts/lib/deps.py`](../../plugins/ndf/scripts/lib/deps.py)
 - [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md)
 - [cross-refactoring-round-tests-and-assess.md](cross-refactoring-round-tests-and-assess.md)（assess と飛ばした記録）
-- 課題: #1654（由来 #725）
+- 課題: #1654（由来 #725）・#2988

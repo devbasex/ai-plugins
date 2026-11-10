@@ -50,7 +50,8 @@
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（スプリントを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
-| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
+| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の、`EXIT_*`・`EXIT_LABELS`・`label_of`・`GATE_CODES`・`PAUSE_CODES` は `exit_codes` の再エクスポート。`deps`・`run_core` を読まない） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
+| [exit_codes.py](exit_codes.py) | 終了コードの表。終了コードの定数・承認ゲートと判断待ちの範囲（`GATE_CODES`・`PAUSE_CODES`）・見出し（`EXIT_LABELS`・`label_of`）を持ち、`EXIT_` で始まる整数の定数を値で書くのはここだけ（契約の検査 `exit-meaning`）。標準ライブラリも NDF のモジュールも読まない | `step_result.py`（同じ名前で公開する）/ `deps.py` / ラッパーのバージョンディレクトリ（`relay_lib/version_dir.py` の `LIB_FILES`） |
 | [step_read.py](step_read.py) | 結果を読む側の共通の規則。子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` |
 | [json_pick.py](json_pick.py) | JSON Pointer（RFC 6901）で JSON の値を取り出す `pick_fields`・`resolve_pointer` と、`--field` を渡したときだけ結果 JSON の `metrics` を取り出した値へ置き換える `picked`。`step_result.py pick` の本体 `cli_pick` も持つ。`--field` の規則はここだけに置く | `state_get` / `glossary_lookup` / `step_result.py pick` |
 | [state_get.py](state_get.py) | スプリントの状態と開発ループの記録を読むだけの取り出し（`sprint-state.py get`・`loop get`）。次の操作を `next` に、`--field` の値を `metrics` に返す。状態ファイルを書き換えない | `sprint-state.py` / `sprint_loop_cli` |
@@ -85,7 +86,7 @@
 | [sprint_mvv.py](sprint_mvv.py) | `sprint-state.py init --pace fast` のスプリント MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `sprint-state.py` |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
 | [run_core.py](run_core.py) / [run-core.sh](run-core.sh) | 実行の核。エントリポイントの本体の終わり方を `ok` / `gate` / `stopped` と決まった終了コードへ変える（「実行の核」） | すべてのエントリポイント（核の対象外を除く） |
-| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
+| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値は終了コードの表 `exit_codes.py` から読む）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
 | [glossary_banned.py](glossary_banned.py) | 禁止語の宣言（`.ndf/glossary.json` の `check.banned`）の形の確かめと、検査する範囲・行の照合。特定のプロジェクトの語を持たない。標準ライブラリと `pathmatch` だけ | `glossary.py check` |
@@ -185,13 +186,13 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 | 1 | `stopped` | チェックで違反があった・手順が失敗した |
 | 2 | `stopped` | 読めない・呼び出しの誤り。「一致」「0 件」と読まない |
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
-| 4 | `stopped` | PR がベースブランチと衝突している（`merge-when-green`・`promote`。値の持ち主は `step_result.py` の `EXIT_BASE_CONFLICT`。#1917） |
-| 5 | `stopped` | CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。値の持ち主は `step_result.py` の `EXIT_CD_FAILED`。#2623） |
-| 6 | `stopped` | 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた。「0 件」「一致」と読まない（値の持ち主は `step_result.py` の `EXIT_INCOMPLETE`） |
+| 4 | `stopped` | PR がベースブランチと衝突している（`merge-when-green`・`promote`。値の持ち主は `exit_codes.py` の `EXIT_BASE_CONFLICT`。#1917） |
+| 5 | `stopped` | CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。値の持ち主は `exit_codes.py` の `EXIT_CD_FAILED`。#2623） |
+| 6 | `stopped` | 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた。「0 件」「一致」と読まない（値の持ち主は `exit_codes.py` の `EXIT_INCOMPLETE`） |
 | 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |
-| 69 | `stopped` | 依存の欠け。`deps.require` が外部パッケージを用意できずに止まった。手順は何も判定していない。「飛ばしてよい」とも 3 とも読まない（値の持ち主は `deps.py` の `EXIT_DEPS_MISSING`） |
-| 75 | `stopped` | CI の基盤待ち。Runner が付かずに取り消されたジョブが再実行でも解けない。後で打ち直せば通りうる（`merge-when-green`・`release`。値の持ち主は `step_result.py` の `EXIT_INFRA_WAIT`。#1645） |
+| 69 | `stopped` | 依存の欠け。`deps.require` が外部パッケージを用意できずに止まった。手順は何も判定していない。「飛ばしてよい」とも 3 とも読まない（値の持ち主は `exit_codes.py` の `EXIT_DEPS_MISSING`） |
+| 75 | `stopped` | CI の基盤待ち。Runner が付かずに取り消されたジョブが再実行でも解けない。後で打ち直せば通りうる（`merge-when-green`・`release`。値の持ち主は `exit_codes.py` の `EXIT_INFRA_WAIT`。#1645） |
 
 ### 読む側の規則
 
