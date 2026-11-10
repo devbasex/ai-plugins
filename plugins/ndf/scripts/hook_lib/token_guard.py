@@ -33,6 +33,7 @@ import jsonio
 
 from state_home import container_home
 
+from . import context_marks
 from . import payload as pl
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -281,9 +282,6 @@ def relay_notice() -> str | None:
     return text if kind == "relay" else None
 
 
-ENTRY_SKILLS = ("skill:development-workflow", "skill:issue-plan-strategy")  # 状態を戻す途中のエントリポイント（復元完了を書かない）
-
-
 def _launch_key(raw: dict, tool: str) -> tuple[str, str] | None:
     """新しいフェーズの起動なら (1 度だけ通すための鍵, 課題番号を探す文)。対象の起動でなければ None。"""
     if tool == "Bash":
@@ -380,49 +378,20 @@ def guard_context(raw: dict, tool: str) -> dict | None:
     cd.append_decision(cd.boundary_row(**row), repo)
     cd.write_applied(sid, applied)
     if d is not None:
-        _write_marks(d, sid, tp, stage, row, repo, handoff=bool(row["relay"]) and out is not None)
+        _session_marks(d, sid, tp, stage, row, repo, handoff=bool(row["relay"]) and out is not None)
     if out is None and d is not None:
         return _config_notice(d, sid, applied)
     return out
 
 
-def _write_marks(d: Path, sid: str, tp: str, stage: str, row: dict, repo: str, handoff: bool) -> None:
-    """「引継ぎ開始」と「復元完了」の印を hook が書く（#2908 の決定 2）。失敗は飲み、判定を変えない（I4）。
-
-    - 引継ぎ開始: ラッパーの直接の子を止めたとき、そのセッションで 1 回だけ（I3）
-    - 復元完了: 引継ぎ文書で始まったセッションの、エントリポイントの Skill を除く最初の起動で 1 回だけ（I1・I2）。
-      引継ぎ文書で始まったかは会話の記録の先頭を 1 セッションに 1 回だけ読み、状態のファイルに持つ"""
-    import context_decisions as cd
-
+def _session_marks(d: Path, sid: str, tp: str, stage: str, row: dict, repo: str, handoff: bool) -> None:
+    """引継ぎ開始・復元完了の印をセッションの排他の中で書く（`context_marks`）。失敗は飲み、判定を変えない（I4）。"""
     try:
         with session_lock(d, sid) as held:
-            if not held:
-                return
-            if handoff and not cd.handoff_marked(sid) and cd.set_handoff_marked(sid):
-                cd.append_decision(_mark_row(cd, row, cd.MARK_HANDOFF), repo)
-            state = cd.read_restore_state(sid)
-            if state in (cd.RESTORE_DONE, cd.RESTORE_NA):
-                return
-            if state is None:
-                started = cd.started_by_handoff(tp)
-                if started is None:
-                    return  # 先頭が読めない・発言がまだ無い: 未判定のまま次の起動で読み直す
-                state = cd.RESTORE_PENDING if started else cd.RESTORE_NA
-                if state == cd.RESTORE_NA or stage in ENTRY_SKILLS:
-                    cd.write_restore_state(sid, state)
-                    return
-            elif stage in ENTRY_SKILLS:
-                return
-            if cd.write_restore_state(sid, cd.RESTORE_DONE):  # 状態を書けなければ 2 行目を避けて印も書かない
-                cd.append_decision(_mark_row(cd, row, cd.MARK_RESTORED), repo)
+            if held:
+                context_marks.record_marks(sid, tp, stage, row, repo, handoff)
     except Exception:  # noqa: BLE001 — 印の失敗で起動の判定を変えない（I4）
         return
-
-
-def _mark_row(cd, row: dict, event: str) -> dict:
-    """判定の行と同じセッション・作業・文脈の量・方針で、印の 1 行を作る（判定の列は空）。"""
-    keep = ("source", "session_id", "transcript", "model", "work", "context", "window", "applied", "relay")
-    return cd.boundary_row(**{k: row[k] for k in keep if k in row}, event=event)
 
 
 def _judge(d: Path, sid: str, key: str, words: str, total: int, applied, verdict, row: dict) -> dict | None:
