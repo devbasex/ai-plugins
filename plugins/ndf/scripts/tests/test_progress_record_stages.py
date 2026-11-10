@@ -48,6 +48,7 @@ case "$1 $2" in
   "issue view")
     f={self.bodies}/$3.md; [ -f "$f" ] || printf '%s' {json.dumps(BODY)} > "$f"; cat "$f" ;;
   "issue edit")
+    echo "$3" >> {self.bodies}/edits.log
     prev=; for a in "$@"; do [ "$prev" = --body-file ] && cp "$a" {self.bodies}/$3.md; prev=$a; done ;;
 esac
 exit 0
@@ -106,6 +107,40 @@ def test_four_records_in_one_run_are_all_kept(env: Env) -> None:
     assert out.returncode == 0, out.stderr
     assert env.stages(42) == names
     assert _checked(env.body(42)) == names
+
+
+def edits(env: Env) -> list[str]:
+    f = env.bodies / "edits.log"
+    return f.read_text().split() if f.exists() else []
+
+
+@pytest.mark.parametrize("entry", ["record", "sync"])
+def test_several_stages_in_one_call_edit_the_body_once(env: Env, entry: str) -> None:
+    """#2909: 工程名を並べて 1 回で渡すと、本文の書き換えは 1 回で、すべての行に印が付き、通過記録は工程ごとに 1 件ずつ積まれる。"""
+    names = ["要求と受け入れ条件", "作業場所の用意", "設計"]
+    args = (str(RECORD), "42", *names, "--mode", "standard") if entry == "record" else (str(SYNC), "42", "stage", *names)
+    out = env.run(*args)
+    assert out.returncode == 0, out.stderr
+    assert edits(env) == ["42"]
+    assert _checked(env.body(42)) == names
+    assert env.stages(42) == names
+    res = json.loads(out.stdout.strip().splitlines()[-1])
+    assert res["summary"].startswith("#42 進行 = 要求と受け入れ条件・作業場所の用意・設計")
+    assert sum(1 for p in res.get("process", []) if p["run"].startswith("通過記録へ積む")) == len(names)
+
+
+@pytest.mark.parametrize("entry", ["record", "sync"])
+def test_an_unknown_stage_among_several_writes_nothing(env: Env, entry: str) -> None:
+    names = ["設計", "無い工程", "計画"]
+    args = (str(RECORD), "42", *names) if entry == "record" else (str(SYNC), "42", "stage", *names)
+    out = env.run(*args)
+    assert out.returncode == 2
+    assert edits(env) == [] and env.stages(42) == [] and env.body(42) == ""
+
+
+def test_dash_is_accepted_only_alone(env: Env) -> None:
+    out = env.run(str(RECORD), "42", "-", "設計")
+    assert out.returncode == 2 and edits(env) == []
 
 
 def test_an_issue_number_in_a_variable_is_recorded(env: Env) -> None:
