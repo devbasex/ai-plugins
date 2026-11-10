@@ -26,6 +26,7 @@ from typing import Any, Optional
 import statefile
 
 from .. import culprit, danger, fixloop, info, progress, scope_verdict, targets, timeline, triage, wholetest
+from . import flaky
 from ..gitfacts import commit_files, discard_impl_leftovers
 from ..items import FAILING, VERIFIED, in_current_round, item_shas, live_items, newest_first
 from ..outbound import item_lines, plan_line
@@ -254,6 +255,7 @@ def _triage_whole(
     flagged = [i for i in newest_first(live_items(state)) if i.get("danger") and in_current_round(state, i)]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
+    flaky.request(state, record.get("flaky"), str(log))
     statefile.save(path, state)
     if record.get("fallback_reason"):
         return wholetest.fallback(path, state, record, flags, flagged, log, _fix_or_narrow)

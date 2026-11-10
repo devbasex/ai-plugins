@@ -4,7 +4,7 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID>
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | plan | judge | add-tests | implement | fix | final-fix
+#   phase    propose | plan | judge | add-tests | implement | fix | final-fix | flaky-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #
 # **手順の名前は状態・履歴・`limits.py`・雛形で同じ語を使う。** 提案だけが参加者の
@@ -57,7 +57,7 @@ case "$PHASE" in
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$ROOT/$RUNTIME
     ;;
-  add-tests|implement|fix)
+  add-tests|implement|fix|flaky-fix)
     # 書き換える手順は常に work/ の中だけで行う。並列には起動しない。
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$WORK
@@ -144,6 +144,10 @@ case "$PHASE" in
                         else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end),
          test_log: .last_log}
       + (if .failed_check then {failed_check} else {} end)]' "$STATE")
+    ;;
+  flaky-fix)
+    # フレーキーと見分けたテストの直しの依頼（#2457 決定 9）。ID・ログの置き場・走らせ直すコマンドと、前回の差し戻し
+    ITEMS_JSON=$(jq '(.flaky_request // {}) | {tests: (.tests // []), log, commands: (.commands // []), sendback}' "$STATE")
     ;;
   *)
     ITEMS_JSON='[]'

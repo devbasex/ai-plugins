@@ -65,6 +65,7 @@ from refactor_lib.commands.report import (  # noqa: E402
 )
 from refactor_lib.commands.phases import PHASE_NAMES, cmd_coding_time, cmd_start_phase  # noqa: E402
 from refactor_lib.commands.judge import cmd_judge  # noqa: E402
+from refactor_lib.commands.flaky import cmd_merge_flaky_fix  # noqa: E402
 from refactor_lib.commands.setup import cmd_init, runtime_list  # noqa: E402
 from refactor_lib.measure import summary_extra  # noqa: E402
 
@@ -271,6 +272,10 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     sp = sub.add_parser("judge", help="成立の判定の答えを読み、項目の feasibility[] へ積む（JUDGE=continue|infeasible|no_judge）")
     sp.add_argument("id", type=int)
     sp.set_defaults(func=cmd_judge)
+
+    sp = sub.add_parser("merge-flaky-fix", help="フレーキーなテストの直しを取り込む（FLAKY_FIX=kept|none|sendback|reverted）")
+    sp.add_argument("id", type=int)
+    sp.set_defaults(func=cmd_merge_flaky_fix)
 
     sp = sub.add_parser("item-actuals", help="止まった出口で、採った項目ごとの実績の行を配分の履歴へ書く（失敗しても 0）")
     sp.add_argument("id", type=int)

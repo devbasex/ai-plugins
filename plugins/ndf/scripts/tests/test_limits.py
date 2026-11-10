@@ -31,6 +31,7 @@ PHASES = {
     "fix": 3600,
     "final-fix": 3600,
     "judge": 1200,
+    "flaky-fix": 3600,
 }
 STALLS = {"codex": 180, "agy": 480, "kiro": 480, "claude": 900}
 
@@ -61,9 +62,9 @@ def test_the_phase_table_holds_the_contract_values(limits) -> None:
     assert limits.phases() == PHASES
 
 
-def test_six_phases_take_1200_and_four_take_3600(limits) -> None:
+def test_six_phases_take_1200_and_five_take_3600(limits) -> None:
     values = sorted(limits.phases().values())
-    assert values.count(1200) == 6 and values.count(3600) == 4
+    assert values.count(1200) == 6 and values.count(3600) == 5
 
 
 def test_the_agent_table_holds_the_contract_values(limits) -> None:
@@ -86,8 +87,8 @@ def test_stall_is_below_monitor_is_below_cli(limits, phase: str, agent: str) -> 
     assert stall < monitor < cli, (phase, agent, stall, monitor, cli)
 
 
-def test_all_40_pairs_are_covered(limits) -> None:
-    assert len(list(itertools.product(limits.phases(), limits.stalls()))) == 40
+def test_all_44_pairs_are_covered(limits) -> None:
+    assert len(list(itertools.product(limits.phases(), limits.stalls()))) == 44
 
 
 def test_check_passes_on_the_table(limits) -> None:

@@ -351,6 +351,8 @@ class Drive(AssigneeLaunch):
         verdict = self.v.get("VERIFY")
         if verdict == "halt":
             raise Halt(self.v.get("HALT_REASON") or "検証が止めて人へ渡した")
+        if self.flaky_requested():
+            self.flaky_phase()
         if verdict == "judge":
             self.judge_phase(self.v.get("JUDGE_IMPL") or "")
             return True
@@ -371,6 +373,26 @@ class Drive(AssigneeLaunch):
             self.monitor(seat, "judge", f"{{agent}}-judge-rf{i}")
         self.rf("judge", i)
 
+    def flaky_requested(self) -> bool:
+        return bool((self.state().get("flaky_request") or {}).get("tests"))
+
+    def flaky_phase(self) -> None:
+        """フレーキーと見分けたテストの直しを実装担当に依頼して取り込む（決定 9）。差し戻しは 1 回だけ起動し直す。
+
+        振り替えはしない（直せなくても項目の合否に関わらない）。起動の秒は安全網に数える。"""
+        i = self.v["ID"]
+        for _ in range(2):
+            self.start_phase("flaky-fix")
+            impl = self.v["IMPL"]
+            if self.launch(impl, "flaky-fix") == 0:
+                began = time.monotonic()
+                self.monitor(impl, "flaky-fix", f"{{agent}}-flaky-fix-rf{i}")
+                self.coding_time("flaky-fix", time.monotonic() - began)
+            self.v.pop("FLAKY_FIX", None)
+            self.rf("merge-flaky-fix", i)
+            if self.v.get("FLAKY_FIX") != "sendback":
+                return
+
     def merge_open_final_fix(self) -> None:
         """最終ゲートの修正の途中で止まった駆動の打ち直しは、先にその試行を取り込む（#674）。
 
@@ -388,6 +410,9 @@ class Drive(AssigneeLaunch):
         self.final_rc = rc
         if self.v.get("FINAL_GATE") == "halt":
             raise Halt(self.v.get("HALT_REASON") or "最終ゲート修正が停滞した")
+        if self.v.get("FINAL_GATE") == "flaky":
+            self.flaky_phase()
+            return False
         if rc in (0, 1):
             return True
         if self.v.get("FINAL_GATE") == "recheck":

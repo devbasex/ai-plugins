@@ -14,7 +14,7 @@ import statefile
 
 from . import budget
 
-CODING_PHASES = ("add-tests", "implement", "fix", "final-fix")
+CODING_PHASES = ("add-tests", "implement", "fix", "final-fix", "flaky-fix")
 
 
 def record(state: dict[str, Any]) -> dict[str, Any]:

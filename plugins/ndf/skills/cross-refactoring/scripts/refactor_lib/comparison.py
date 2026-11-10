@@ -54,7 +54,7 @@ def build(state: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     shas = change_commits(state, work)
     if not shas:
         return head, None
-    base = pathlib.Path(state.get("tmp_dir") or tempfile.gettempdir())
+    base = pathlib.Path(state["tmp_dir"])  # 状態の置き場の下に作り、終わったら消す
     base.mkdir(parents=True, exist_ok=True)
     tree = pathlib.Path(tempfile.mkdtemp(prefix="comparison-", dir=base))
     shutil.rmtree(tree)

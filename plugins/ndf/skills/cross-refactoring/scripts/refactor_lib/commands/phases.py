@@ -13,7 +13,7 @@ import statefile
 from .. import die, safety_net, step_extend
 from ..paths import git_out, load_state, work_dir
 
-PHASE_NAMES = ("propose", "plan", "add-tests", "implement", "fix", "final-fix", "judge")
+PHASE_NAMES = ("propose", "plan", "add-tests", "implement", "fix", "final-fix", "judge", "flaky-fix")
 
 
 def cmd_start_phase(args: argparse.Namespace) -> None:
@@ -24,7 +24,7 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
         die(f"未知の手順です: {phase}（{' / '.join(PHASE_NAMES)}）")
     record = state.setdefault("phases", {}).setdefault(phase, {})
     now = statefile.now()
-    if phase in ("fix", "final-fix", "judge") or not record.get("started_at"):
+    if phase in ("fix", "final-fix", "judge", "flaky-fix") or not record.get("started_at"):
         record.setdefault("started_at", now)
         record["launch_started_at"] = now
         record["base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
@@ -44,7 +44,7 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
         record["cli_timeout"] = left + int(limit_decl.cli_margin())
         timeout = str(left)
         step_extend.ahead(record["cli_timeout"], f"{phase} の CLI の上限（安全網の残り）{left} 秒")
-    if phase not in ("final-fix", "judge"):
+    if phase not in ("final-fix", "judge", "flaky-fix"):
         state["phase"] = phase
     statefile.save(path, state)
     statefile.emit(PHASE_TIMEOUT=timeout)

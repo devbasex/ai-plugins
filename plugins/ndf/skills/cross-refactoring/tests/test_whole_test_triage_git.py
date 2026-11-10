@@ -164,6 +164,9 @@ def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_implement, cmd_con
     assert record["flaky"] == ["tests/test_flaky.py::tests.test_flaky::test_once"]
     assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
     assert _items(flow)["I-001"]["status"] == "verified"
+    # 受け入れ条件 11: 見分けたフレーキーは、その実行の中での直しの依頼に積まれる（項目の合否には数えない）
+    request = read_state(flow["path"])["flaky_request"]
+    assert request["tests"] == record["flaky"] and request["commands"]
 
 
 def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup, cmd_implement, cmd_converge, tmp_path, capsys):

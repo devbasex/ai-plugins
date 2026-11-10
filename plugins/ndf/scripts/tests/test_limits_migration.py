@@ -23,6 +23,7 @@ BEFORE = {
     "monitor.phase.fix": {"seconds": 3600},
     "monitor.phase.final-fix": {"seconds": 3600},
     "monitor.phase.judge": {"seconds": 1200},  # #2457 で足した成立の判定の工程
+    "monitor.phase.flaky-fix": {"seconds": 3600},  # #2457 で足したフレーキーなテストの直しの工程
     "monitor.stall.codex": {"seconds": 180},
     "monitor.stall.agy": {"seconds": 480},
     "monitor.stall.kiro": {"seconds": 480},

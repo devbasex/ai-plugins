@@ -34,6 +34,7 @@ import test_strategy as ts
 import test_triage
 
 from .. import failure_material, fixloop, gate_lint, info, launch, prepush_lint, progress, publish, timeline, triage
+from . import flaky
 from ..gitfacts import run_with_timeout, safe_int
 from ..gate_ci import ci_checks, ci_gate, ci_mode
 from ..paths import head_sha, load_state, work_dir
@@ -42,7 +43,8 @@ from ..paths import head_sha, load_state, work_dir
 def cmd_final_gate(args: argparse.Namespace) -> None:
     """最終ゲートを通す（#933 の AC16b・決定 15・決定 16、#1334 F4〜F6、#2457）。
 
-    終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた（修正ラウンドへ）か止めて人へ渡す（`FINAL_GATE=halt`）/
+    終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた（修正ラウンドへ）・フレーキーの直しへ（`FINAL_GATE=flaky`）・
+    止めて人へ渡す（`FINAL_GATE=halt`）/
     4 = 判断できない（CI が終わらない）。**木が起点と同じでも確かめを走らせる**（I11）。
 
     | 全体テストの置き場 | 見るもの |
@@ -68,6 +70,12 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     else:
         passed, detail = _run_gate_checks(path, state, gate)
         _remember_failure(state, gate, passed, detail)
+        if (state.get("flaky_request") or {}).get("tests"):
+            # フレーキーと見分けたテストを先に直し、直した木で確かめ直す（#2457 決定 9）
+            statefile.save(path, state)
+            info("🔁 フレーキーなテストを直してから最終ゲートを確かめ直します")
+            statefile.emit(FINAL_GATE="flaky")
+            sys.exit(2)
 
     if passed and standalone:
         _emit_cross_review(
@@ -198,7 +206,18 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
-_TRIAGE_KEYS = ("failed_tests", "flaky", "preexisting", "caused", "caused_output", "fallback_reason", "rerun_command", "rerun_commands")
+_TRIAGE_KEYS = (
+    "failed_tests",
+    "flaky",
+    "preexisting",
+    "caused",
+    "caused_output",
+    "fallback_reason",
+    "rerun_command",
+    "rerun_commands",
+    "comparison_tree",
+    "comparison_fallback",
+)
 
 
 def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str, float]:
@@ -218,6 +237,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
         classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
         gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
         gate["material"] = _material(state, classified, verdict)
+        flaky.request(state, classified.get("flaky"), verdict.get("log"))
         if classified.get("fallback_reason"):
             detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
         else:
