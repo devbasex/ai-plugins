@@ -45,7 +45,7 @@
 
 | 扱う | 扱わない |
 | --- | --- |
-| `sprint-state.py loop` の副命令（`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `list`） | 今の 1 スプリントの進め方（`normal` / `auto` / `fast`）の振る舞い |
+| `sprint-state.py loop` の副命令（`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `get` / `list`） | 今の 1 スプリントの進め方（`normal` / `auto` / `fast`）の振る舞い |
 | `.ndf/pace.json` の `loop` 節と `read_loop` | `mvv-gate.py` の判定の規則・レッドラインの定義・`boundary_paths` の既定（ループのために緩めない） |
 | `supervise.py new close` の `--pace auto`・`--carry`・`--record-pr`、`new sprint` の `--designed` | 持ち越しをマシンをまたいで残す置き場（#1640） |
 | `upkeep.py rank` の品質の枠（`.ndf/backlog.json` の `quality` 節） | Codex・Kiro・agy でのラッパーと同じ自動の切り替え（ラッパーは Claude Code だけ） |
@@ -158,9 +158,10 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `stop <名>` | — | `path`（`.ndf/loop/<名>/stop` に時刻を書く） | — |
 | `environment [--root] [--json]` | 動く場所・CPU・メモリ・計画の状態 | 実行環境の報告（`place`・`cpus`・`memory_gib`・`lanes`・`plans`・`candidates`・`current`・`reason`・`unreadable`）。宣言を書かない | 読めない項目は `unreadable` に載せ、終了コードは 0 |
 | `status <名> [--json]` / `list <名> [--json]` | 記録 | `status`・`consumed`・`budget`・`waiting`・止まっていれば `stop` と `stop_line` / ループの 1 回の一覧（何周目・選んだ課題・版・費用・秒・結果・止まった理由・後へ回した Issue） | 1 = 記録が無い。`--json` が無ければ文で出す |
+| `get <名> [--field <JSON Pointer>]...` | 記録 | 読むだけで、続けてよいかを判断しない。`status` と同じ `metrics` と、次の操作（止まっていれば止まった理由と再開のコマンド、人の判断待ちがあれば待っている課題と `answer`、答えの無い保留したループの 1 回があればその回）を `next` に返す。`--field` を渡すと、ループの記録を根にした値だけを `metrics` に返す | 0 = 読めた（`ok`）。2 = 読めない・指し先の書き方の誤り。3 = 記録が無い |
 
 **1 つのループ名を進めるのは、1 つのランタイムのセッション（Claude Code・Codex）だけである。** 利用者が答える副命令（`answer`・`approve-mvv`）と
-読むだけの副命令（`status`・`list`・`environment`）を除く副命令は、副命令の本体の前に持ち主の鍵 `supervise.loop:name=<名>` を単位 `session` で取る。
+読むだけの副命令（`status`・`get`・`list`・`environment`）を除く副命令は、副命令の本体の前に持ち主の鍵 `supervise.loop:name=<名>` を単位 `session` で取る。
 同じセッションの副命令は持ち主を継いで通る。別のセッションに生きた持ち主がいれば `stopped`・終了コード 3 で止まり、`lease` に持ち主の実行の識別子・pid・
 最後に動いた時刻を出す。ランタイムのセッションの外では、鍵を取る副命令は `stopped`・終了コード 1 で止まる。`stop` と `finish` は鍵を返し、
 セッションの外でも本体を走らせる（`lease.outcome` は `no_session`）。持ち主の記録の形は
