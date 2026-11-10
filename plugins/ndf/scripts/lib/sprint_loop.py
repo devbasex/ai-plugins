@@ -29,8 +29,6 @@ from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
     LAPS_MD,
-    STOP_BY,
-    STOP_FILE,
     VERSION,
     BUDGET_DEFAULT,
     EXIT_REFUSED,
@@ -48,7 +46,6 @@ from sprint_loop_record import (
     prod_of,
     loop_dir,
     loop_record_path,
-    stop_order_text,
     read_loop_record,
     write_record,
     locked,
@@ -89,6 +86,7 @@ from sprint_loop_gate import (
 
 from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
 from sprint_loop_select import resume_answer_hold
+from sprint_loop_stop import STOP_FILE, read_stop_order, stop_order_text
 
 
 # ---------------------------------------------------------------- start
@@ -484,13 +482,9 @@ def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
 
 
 def cmd_stop(env: Env, name: str, by: str = "unknown", reason: str = "") -> dict:
-    """止める指示を置く。置いた主体（STOP_BY）と理由を書く。ループの記録は読むだけで、持ち主がループの 1 回の途中でも置ける（#2910）。"""
-    if by not in STOP_BY:
-        raise LoopError(f"止める指示の主体は {'/'.join(STOP_BY)} のどれか: {by!r}")
     read_loop_record(env, name)
-    p = loop_dir(env, name) / STOP_FILE
-    p.write_text(stop_order_text(env.now(), by, reason.strip()), encoding="utf-8")
-    order = {"path": str(p), "by": by, "reason": reason.strip()}
+    (p := loop_dir(env, name) / STOP_FILE).write_text(stop_order_text(env.now(), by, reason), encoding="utf-8")
+    order = {"path": str(p), **read_stop_order(p)}
     return step_result.result(TOOL, "ok", f"止める指示を置いた（主体 {by}。ループの次の 1 回の境で効く）: {p}", [order], order)
 
 

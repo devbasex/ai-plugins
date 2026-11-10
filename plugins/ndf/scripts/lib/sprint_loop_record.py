@@ -43,6 +43,7 @@ import limits
 import step_result
 from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
+from sprint_loop_stop import STOP_BY, STOP_FILE, read_stop_order  # noqa: F401 -- 正本として再び公開する
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
@@ -56,28 +57,6 @@ HANDOFF_DIR = Path(".ndf") / "handoff"
 NEXT_STEP_SECTION = handoff_doc.NEXT_STEP_SECTION  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
 LAPS_MD = "laps.md"
-STOP_FILE = "stop"
-STOP_BY = ("user", "organizer", "unknown")  # 止める指示を置いた主体: 人・オーガナイザー（利用者の指示を受けて）・不明（#2910）
-
-
-def stop_order_text(at: str, by: str, reason: str) -> str:
-    """止める指示のファイルの中身（1 行の JSON。置いた時刻・主体・理由）。"""
-    return json.dumps({"at": at, "by": by, "reason": reason}, ensure_ascii=False) + "\n"
-
-
-def read_stop_order(path: Path) -> dict:
-    """止める指示のファイルを読む。主体の記録が無い（時刻だけ・直接置いた・読めない）ものは主体を unknown とし、人の意思として扱わない。"""
-    text = path.read_text(encoding="utf-8").strip()
-    try:
-        got = json.loads(text)
-    except ValueError:
-        got = None
-    if not isinstance(got, dict):
-        return {"at": text, "by": "unknown", "reason": ""}
-    by = got.get("by") if got.get("by") in STOP_BY else "unknown"
-    return {"at": str(got.get("at") or ""), "by": by, "reason": str(got.get("reason") or "")}
-
-
 NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]*$")
 VERSION = 1
 

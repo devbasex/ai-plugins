@@ -8,6 +8,7 @@ from pathlib import Path
 
 import clock
 import step_result
+from sprint_loop_stop import STOP_BY
 
 ENTRY = "scripts/sprint-state.py"  # 持ち主の契約を引く入口（プラグインの根からのパス）
 
@@ -202,7 +203,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s = name(ls.add_parser("stop"))
     s.add_argument(
         "--by",
-        choices=("user", "organizer", "unknown"),
+        choices=STOP_BY,
         default="unknown",
         help="置いた主体（人・利用者の指示を受けたオーガナイザー・不明。既定 unknown）",
     )
