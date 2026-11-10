@@ -361,6 +361,29 @@ def unfinished_design_issues(items: list[dict]) -> list[int]:
     return sorted(out)
 
 
+def waiting_row(env: Env, lap: dict, item: dict, row: dict, pr, n) -> dict:
+    """設計承認ゲートで止まった課題 1 つの判断待ちの行（判定の記録から組む。設計 PR があれば承認した先端を付ける）。"""
+    reasons = row.get("reasons") or []
+    w = {
+        "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
+        "basis": row.get("basis") or [], "boundary": row.get("boundary") or [], "gate": 1, "pr": pr, "lap": lap["n"],
+        "at": env.now(), "report": item.get("report") or "", "state": lap["state_path"],
+    }  # fmt: skip
+    if pr is not None:  # 承認した先端（#2507）: 並列の計画の外でも書き、答えの時点の先端と比べる
+        w["stamp"] = design_head(env, w)
+    return w
+
+
+def _enqueue_waiting(env: Env, rec: dict, w: dict, item: dict, lap: dict, n) -> None:
+    """表の検査で自動に進めるか、レーンならオーガナイザーへ依頼してから、判断待ちへ足す。"""
+    auto = revise_note.apply_table_check(env, rec, w, int(n))
+    if not auto and w["pr"] is not None and (sent := lane_gate1(env, w, item.get("report") or "", lap["state_path"])):
+        w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えはループの 1 回の境で読む（#2436 の 6c）
+    rec["waiting"].append(w)
+    if auto:
+        revise_note.count_round(rec, w)
+
+
 def move_to_waiting(
     env: Env, rec: dict, lap: dict, gate1: list[dict], unfinished: list[int] = ()
 ) -> tuple[list[int], list[int], list[str]]:
@@ -371,20 +394,8 @@ def move_to_waiting(
         pr = report_pr(i)
         row = last_verdict(lap["state_path"], "design", pr) if pr is not None else {}
         for n in plan_info(i["plan"]).get("課題", []):
-            reasons = row.get("reasons") or []
-            w = {
-                "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
-                "basis": row.get("basis") or [], "boundary": row.get("boundary") or [], "gate": 1, "pr": pr, "lap": lap["n"],
-                "at": env.now(), "report": i.get("report") or "", "state": lap["state_path"],
-            }  # fmt: skip
-            if pr is not None:  # 承認した先端（#2507）: 並列の計画の外でも書き、答えの時点の先端と比べる
-                w["stamp"] = design_head(env, w)
-            auto = revise_note.apply_table_check(env, rec, w, int(n))
-            if not auto and pr is not None and (sent := lane_gate1(env, w, i.get("report") or "", lap["state_path"])):
-                w.update(sent)  # 並列の計画のレーン: 設計の承認をオーガナイザーへ依頼し、答えはループの 1 回の境で読む（#2436 の 6c）
-            rec["waiting"].append(w)
-            if auto:
-                revise_note.count_round(rec, w)
+            w = waiting_row(env, lap, i, row, pr, n)
+            _enqueue_waiting(env, rec, w, i, lap, n)
             lap.setdefault("gates", []).append(gate_copy(DESIGN_GATE, row))
             moved.append(int(n))
             if err := mark_issue(env, rec, w):
