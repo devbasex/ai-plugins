@@ -192,13 +192,17 @@ def merge_design(main: Path, q: dict, name: str | None = None) -> dict | None:
 def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[dict], **kw) -> tuple[str, dict]:
     """依頼 `q` へ答えを送る。設計の承認なら、承認した設計 PR をマージしてから送る（成否によらず送る。#2507）。
     返すのは (要約へ足す 1 文, 出力へ足す `merge`（`merge_note`）と `after`)。`after` は今の一覧 `items` から、今の答えと、
-    前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）。"""
+    前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）に、`wait` と同じ業務時間外の振り分け
+    （`parallel_defer.route`）を通したもの。業務時間外は溜めた `gate1`・`ask` を `after` へ出さず、`deferred` に件数を載せる（#2913）。"""
+    import parallel_defer as pdf
+
     earlier = sent_answers(main, name, items)
     merge = merge_design(main, q, name) if result == "approved" else None
     pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
     remember_answers(main, name, [*earlier, q])
     tail, extra = merge_note(merge)
-    return tail, {**extra, "after": after_items(items, q, earlier)}
+    after, kept = pdf.route(main, name, after_items(items, q, earlier), pdf.hours_of(main))
+    return tail, {**extra, **kept, "after": after}
 
 
 def merge_note(merge: dict | None) -> tuple[str, dict]:

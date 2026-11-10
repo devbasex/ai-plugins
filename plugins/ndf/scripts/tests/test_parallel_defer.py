@@ -176,3 +176,24 @@ def test_check_and_start_warn_about_a_broken_declaration(env):
     (main / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "business_hours": {**HOURS, "end": "08:00"}}))
     assert [i["rule"] for i in prt.start_warnings(main)] == ["business-hours"]
     assert "business-hours" in [i["rule"] for i in prt.check_items(main)]
+
+
+def test_an_answer_at_night_leaves_the_kept_requests_out_of_after(plan, monkeypatch, capsys):
+    """答えの後の整理（手順 4）が時間外に溜めた gate1・ask を問い直さないよう、answer の metrics.after にも同じ振り分けを通す。"""
+    main, box, call = plan
+    box["items"] = [gate1("g1"), ASK, BUILD]
+    call()
+    monkeypatch.setattr(pa, "owner_next", lambda *a, **k: (None, []))
+    monkeypatch.setattr(pl, "send_answer", lambda *a, **k: None)
+    monkeypatch.setattr(pl, "run_status", lambda *_a: next(iter(pl.RUNNING)))
+    cli = tph.load_cli()
+    monkeypatch.setattr(cli, "main_of", lambda: main)
+    with pytest.raises(SystemExit):
+        cli.main(["answer", "p1", "b1", "--choice", "A"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["metrics"]["after"] == [] and out["metrics"]["deferred"]["count"] == 2
+    box["now"] = MORNING
+    with pytest.raises(SystemExit):
+        cli.main(["answer", "p1", "b1", "--choice", "A"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert [q["id"] for q in out["metrics"]["after"]] == ["g1", "a1"] and "deferred" not in out["metrics"]
