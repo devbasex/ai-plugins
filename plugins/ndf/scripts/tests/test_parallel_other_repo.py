@@ -429,9 +429,9 @@ def test_held_loop_helper_spawns_in_loop_repo(tmp_path):
     _plan(x, lanes)
     assert prt.loop_repo(x, "p3", "lloop") == str(y)
     assert prt.loop_repo(x, "p3", "lhome") is None
-    line = phelp.helper_spawn("p3", 1, 0, pending="lloop", cwd=str(y))
-    assert line.startswith(f"cd {y} && ") and "pending lloop" in line
-    assert phelp.helper_spawn("p3", 1, 0, pending="lhome").startswith("python3 ")
+    spec = phelp.helper_spawn("p3", 1, 0, pending="lloop", cwd=str(y))
+    assert spec["cwd"] == str(y) and "pending lloop" in spec["argv"][-1]  # 起動の耐久ステップがそのリポジトリで打つ（#2936）
+    assert phelp.helper_spawn("p3", 1, 0, pending="lhome")["cwd"] is None
 
 
 def test_loop_start_keeps_reason_in_record(tmp_path):
