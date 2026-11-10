@@ -25,7 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("md", "durable", "waits")
+import jsonio  # noqa: E402
 import md  # noqa: E402
+import run_core  # noqa: E402
 from step_result import EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 
 TOOL = "mode-materials"
@@ -181,6 +183,12 @@ def design_files(root: str, number: int) -> list[tuple[str, list[str]]]:
     return out
 
 
+def write_draft(path: str, items: list[dict]) -> None:
+    """判定の根拠のファイルの下書きを、呼ぶ側が渡したパスへ書く（契約 files の judgments-json）。"""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    jsonio.write_atomic(path, draft(items))
+
+
 def run(a) -> None:
     root = str(Path(a.root).resolve())
     files = ls_files(root)
@@ -196,8 +204,7 @@ def run(a) -> None:
     if gaps:
         emit(result(TOOL, "stopped", f"{len(gaps)} 件の課題の本文を読めない", items, metrics, gaps=gaps), EXIT_VIOLATION)
     if a.out:
-        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.out).write_text(json.dumps(draft(items), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_draft(a.out, items)
         metrics["out"] = a.out
     empty = [i["number"] for i in items if not i["files_found"]]
     note = f"。触るファイルの候補が 0 件: {' '.join(f'#{n}' for n in empty)}" if empty else ""
@@ -213,5 +220,9 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+def main(argv: list[str] | None = None):
+    return main_with(parser(), lambda a: TOOL, argv)
+
+
 if __name__ == "__main__":
-    main_with(parser(), lambda a: TOOL)
+    run_core.main("scripts/mode-materials.py", main)
