@@ -11,12 +11,21 @@
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import importlib
 
 import pytest
 
-from crossref_helpers import CALC, build_git_flow, commit_with_trailers, git, item_trailers, read_state, strategy_state, write_state
+from crossref_helpers import (
+    verify_judged,
+    CALC,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    strategy_state,
+    write_state,
+)
 
 FAR = "2099-01-01T00:00:00+00:00"
 # 行末の空白を「整形の違反」とみなす静的解析（ruff format --check の代わり。ツールに依存しない）。
@@ -106,7 +115,7 @@ def test_a_format_violation_fails_the_item_scope_test(flow, cmd_setup, cmd_imple
     """AC14 — 宣言の静的解析の suite が項目の範囲テストで走り、整形の違反を入れた項目が落ちる。"""
     _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1 \n", _strategy(_lint()))
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["items"][0]["status"] == "failing"
 
@@ -114,7 +123,7 @@ def test_a_format_violation_fails_the_item_scope_test(flow, cmd_setup, cmd_imple
 def test_a_clean_change_passes_the_lint_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", _strategy(_lint()))
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done"
     assert read_state(flow["path"])["items"][0]["status"] == "verified"
 
@@ -134,7 +143,7 @@ def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_implement, cmd_c
     del state["items"][0]["scope_commands"]
     write_state(flow["path"], state)
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done"
 
 
@@ -144,7 +153,7 @@ def test_a_launch_failure_in_the_item_scope_test_stops_without_reverting(flow, c
     _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", strategy_state(), scope_commands=runs)
     head = _head(flow["work"])
     with pytest.raises(SystemExit) as e:
-        _call(cmd_converge, "cmd_verify")
+        verify_judged(cmd_converge, flow["path"], capsys)
     assert e.value.code == 4
     state = read_state(flow["path"])
     assert state["items"][0]["status"] == "implemented"
@@ -175,29 +184,6 @@ def test_a_launch_failure_in_the_test_round_stops_without_dropping_the_item(flow
         implement._run_added_tests(flow["path"], state, intake)
     assert e.value.code == 4 and intake.test_failed == {} and intake.extra == []
     assert read_state(flow["path"])["launch_failure"]["phase"] == "tests"
-
-
-def test_added_tests_take_the_time_left_to_h_right_before_each_launch(flow, refactor, monkeypatch):
-    """別コマンドの追加テストが続くとき、後のコマンドへは起動の直前の H までの残りを渡す（H を越えて走らせない）。"""
-    implement = importlib.import_module("refactor_lib.commands.implement")
-    state = read_state(flow["path"])
-    start = dt.datetime.now().astimezone()
-    state["limits"] = {**(state.get("limits") or {}), "test_timeout": 600, "final_end_at": (start + dt.timedelta(seconds=100)).isoformat()}
-    state["items"] = [_item("I-001", 1), _item("I-002", 2)]
-    now = [start]
-    given: list[int] = []
-
-    def run(commands, work, timeout, log):
-        given.append(timeout)
-        now[0] += dt.timedelta(seconds=70)
-        return implement.ts.outcome(0, False), commands[-1]
-
-    monkeypatch.setattr(implement.clock, "now", lambda: now[0])
-    monkeypatch.setattr(implement.targets, "run_commands", run)
-    monkeypatch.setattr(implement, "_added_test_commands", lambda state, item, files: [f"true {item['id']}"])
-    intake = implement.Intake(accepted={"I-001": [{"sha": "a", "files": []}], "I-002": [{"sha": "b", "files": []}]})
-    implement._run_added_tests(flow["path"], state, intake)
-    assert given == [100, 30]
 
 
 # ---------- 最終ゲートの静的解析（I12） ----------
@@ -247,24 +233,10 @@ def test_the_final_gate_lint_shares_the_whole_timeout_with_the_test_run(flow, re
     gate_lint = importlib.import_module("refactor_lib.gate_lint")
     state = _gate_state(flow, before="green", lint=_lint(), change="Z = 3\n")
     gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
-    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state, dt.datetime.now().astimezone())
+    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state)
     ok, _ = gate_lint.lint_gate(flow["path"], state, gate, started=time.monotonic() - limit)
     assert ok is False
     assert gate["lint"][0]["verdict"] == "caused"
-
-
-def test_the_final_gate_lint_subtracts_the_whole_test_elapsed_once_near_h(flow, refactor):
-    """H まで 20 秒・全体テストの経過 30 秒でも、静的解析は H までの残りで走る（経過を二重に引かない）。"""
-    import time
-
-    gate_lint = importlib.import_module("refactor_lib.gate_lint")
-    state = _gate_state(flow, before="red", lint=_lint(), change="Z = 3\n")
-    end = dt.datetime.now().astimezone() + dt.timedelta(seconds=20)
-    state["limits"] = {**(state.get("limits") or {}), "test_timeout": 600, "whole_timeout": 600, "final_end_at": end.isoformat()}
-    gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
-    ok, _ = gate_lint.lint_gate(flow["path"], state, gate, started=time.monotonic() - 30)
-    assert ok is True
-    assert [v["verdict"] for v in gate["lint"]] == ["preexisting"]
 
 
 def test_a_launch_failure_in_the_final_gate_stops(flow, refactor, capsys):

@@ -19,7 +19,7 @@ import json
 import pytest
 
 from crossref_helpers import (
-    past_fix_end,
+    verify_judged,
     CALC,
     TEST_TOTAL,
     build_git_flow,
@@ -128,8 +128,8 @@ def _deferred(flow):
 # ---------- テストの追加（merge-tests） ----------
 
 
-def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(flow, cmd_setup, cmd_implement):
-    """AC10: 今のコードで落ちるテストを足した項目は見送り、そのテストのコミットを取り消す。"""
+def test_a_test_failing_on_the_current_code_is_sent_back_not_deferred(flow, cmd_setup, cmd_implement):
+    """#2457 の棚卸し #20: 今のコードで落ちるテストを足した項目は見送らず、テストを残して差し戻しに記録する。"""
     work = flow["work"]
     _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
@@ -138,11 +138,12 @@ def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(flow,
 
     _call(cmd_implement, "cmd_merge_tests")
 
-    assert _deferred(flow) == {"I-001": "test_failed"}
-    # 見送った項目は取り消しと別に数える（設計の状態遷移 planned --> deferred）。
-    assert _items(flow)["I-001"]["status"] == "deferred"
+    assert _deferred(flow) == {}
+    item = _items(flow)["I-001"]
+    assert item["status"] == "tested"
+    assert [r["kind"] for r in item["sendbacks"]] == ["test_failed"]
     assert _items(flow)["I-002"]["status"] == "planned"
-    assert not (work / "tests" / "test_total.py").exists()
+    assert (work / "tests" / "test_total.py").exists()
 
 
 def test_an_item_without_a_test_commit_is_carried(flow, cmd_setup, cmd_implement):
@@ -173,7 +174,7 @@ def test_a_late_test_commit_is_taken_in(flow, cmd_setup, cmd_implement):
 
 
 def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_implement):
-    """AC10: 改修計画に無いテストのコミットだけを取り消し、項目のテストは残す。"""
+    """AC10・#2457 の棚卸し #22: 改修計画に無いコミットだけを git revert で打ち消し、項目のテストは残す。"""
     work = flow["work"]
     _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
@@ -188,14 +189,15 @@ def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_
     assert items["I-001"]["status"] == "tested"
     assert (work / "tests" / "test_total.py").exists()
     assert not (work / "tests" / "test_extra.py").exists()
-    # 消すコミットより古いコミットは積み直さない。記録は元のコミットのまま、HEAD がそれを指す（#1482）
+    # 打ち消しは revert のコミットを積む（履歴を書き換えない）。項目のコミットの記録は元のまま
     recorded = items["I-001"]["commits"]["test"]
     assert recorded == kept
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == kept
+    assert git("rev-parse", "HEAD~2", cwd=work).stdout.strip() == kept
+    assert [r["kind"] for r in read_state(flow["path"])["sendbacks"]] == ["unattributed"]
 
 
 def test_a_test_commit_touching_production_code_rejects_the_item(flow, cmd_setup, cmd_implement):
-    """I5: テストの追加でテスト以外を変えた項目は取り消す。見送りには入れない。"""
+    """#2457 の棚卸し #21: テストの追加でテスト以外を変えても取り消さず、差し戻しとして報告に載せる。"""
     work = flow["work"]
     _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
@@ -205,8 +207,9 @@ def test_a_test_commit_touching_production_code_rejects_the_item(flow, cmd_setup
 
     _call(cmd_implement, "cmd_merge_tests")
 
-    assert _items(flow)["I-001"]["status"] == "reverted"
-    assert "テスト以外" in _items(flow)["I-001"]["failure_reason"]
+    item = _items(flow)["I-001"]
+    assert item["status"] == "tested"
+    assert "テスト以外" in item["sendbacks"][0]["reason"]
     assert _deferred(flow) == {}
 
 
@@ -266,15 +269,16 @@ def test_a_commit_outside_the_scope_rejects_the_item(flow, cmd_setup, cmd_implem
     _write(work, ".gitignore", (work / ".gitignore").read_text() + "build/\n")
     commit_with_trailers(work, "Refactor", item_trailers("I-001"))
 
-    with pytest.raises(SystemExit) as exc:
-        _call(cmd_implement, "cmd_merge_implement")
+    _call(cmd_implement, "cmd_merge_implement")
 
-    assert exc.value.code == 2  # 残る項目 0 件で最終ゲートへ
-    assert "対象範囲の外" in _items(flow)["I-001"]["failure_reason"]
+    # #2457 受け入れ条件 8: 範囲の外の変更で取り消さず、`outside_scope` に残す
+    item = _items(flow)["I-001"]
+    assert item["status"] == "implemented"
+    assert [r["path"] for r in item["outside_scope"]] == [".gitignore"]
 
 
 def test_a_changed_expectation_rejects_the_item(flow, cmd_setup, cmd_implement):
-    """期待値を変えた実装は振る舞いの変更として取り消す（#443 の一次の判定）。"""
+    """#2457 の棚卸し #25: 期待値を変えた実装は取り消さず、期待値を戻すよう修正へ差し戻す（#443 の一次の判定）。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _write(work, "src/calc.py", CALC.replace("return a + b", "return a + b + 0"))
@@ -285,7 +289,9 @@ def test_a_changed_expectation_rejects_the_item(flow, cmd_setup, cmd_implement):
 
     _call(cmd_implement, "cmd_merge_implement")
 
-    assert "期待する振る舞い" in _items(flow)["I-001"]["failure_reason"]
+    item = _items(flow)["I-001"]
+    assert item["status"] == "failing" and item["failed_check"]["kind"] == "sendback"
+    assert "期待する振る舞い" in item["sendbacks"][0]["reason"]
 
 
 # ---------- 検証と修正（verify / merge-fix） ----------
@@ -308,10 +314,11 @@ def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, c
         change=lambda w: (_write(w, "tests/test_total.py", TEST_TOTAL), _break_total(w)),
     )
     # 実装にテストのファイルを含めた形でも、期待値を変えなければ取り込む。
-    capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
-    assert _emitted(capsys, "VERIFY") == "fix"
-    assert _items(flow)["I-001"]["status"] == "failing"
+    # 初めて落ちた項目は実装担当と別のランタイムが成立を判定してから修正へ回る（#2457 決定 3）
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
+    item = _items(flow)["I-001"]
+    assert item["status"] == "failing"
+    assert item["feasibility"][0]["feasible"] is True and item["feasibility"][0]["by"] != "claude"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001"]
 
     _call(cmd_setup, "cmd_start_phase", phase="fix")
@@ -329,8 +336,7 @@ def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, c
     assert stats["launches"] == 1
 
 
-def test_an_item_without_time_to_fix_is_reverted_alone(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC15 決定 23: 修正に使える時間が尽きたら落ちた項目だけを取り消し、他の項目のコミットは残す。"""
+def _two_items_one_broken(flow, cmd_setup, cmd_implement):
     work = flow["work"]
     first = _item("I-001", 1, symbol="add", targets=["tests/test_calc.py"])
     broken = _item("I-002", 2, targets=["tests/test_total.py"], tests=["tests/test_total.py"])
@@ -341,23 +347,62 @@ def test_an_item_without_time_to_fix_is_reverted_alone(flow, cmd_setup, cmd_impl
     _break_total(work)
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
-    state = read_state(flow["path"])
-    past_fix_end(state)
-    write_state(flow["path"], state)
+    return work
 
-    capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+def test_an_item_judged_infeasible_is_reverted_alone(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 受け入れ条件 6・9: 成立しないと判定した項目だけを打ち消し、他の項目のコミットは残す。判定と根拠が残る。"""
+    work = _two_items_one_broken(flow, cmd_setup, cmd_implement)
+
+    assert verify_judged(cmd_converge, flow["path"], capsys, feasible={"I-002": False}) == "done"
+
     items = _items(flow)
     assert items["I-001"]["status"] == "verified"
-    assert items["I-002"]["status"] == "reverted"
+    assert items["I-002"]["status"] == "reverted" and items["I-002"]["revert_reason"] == "infeasible"
+    assert items["I-002"]["feasibility"][-1]["feasible"] is False and items["I-002"]["feasibility"][-1]["evidence"]
     assert (work / "src" / "other.py").exists()
     assert "return result + 1" not in (work / "src" / "calc.py").read_text()
 
 
-def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC15: 同じ語の並びを共有した項目は新しい方から 1 件ずつ取り消し、通った時点で止める（時間切れ）。"""
+def test_time_does_not_revert_a_failing_item(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 受け入れ条件 5・7: 実装の予算をとうに超えていても、成立している項目は修正へ回り、取り消さない。"""
+    _two_items_one_broken(flow, cmd_setup, cmd_implement)
+    state = read_state(flow["path"])
+    state["started_at"] = "2000-01-01T00:00:00"
+    state["budget"] = {"minutes": 1, "extension": None, "effective_minutes": 1}
+    write_state(flow["path"], state)
+
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
+    items = _items(flow)
+    assert items["I-002"]["status"] == "failing" and items["I-001"]["status"] == "verified"
+
+
+def test_a_stalled_fix_switches_the_fixer_once_then_reverts(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+    """#2457 受け入れ条件 16・17: 落ちたテストが変わらない修正は停滞。判定し直して修正担当を 1 回替え、替えた後も停滞なら打ち消す。"""
+    _two_items_one_broken(flow, cmd_setup, cmd_implement)
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
+    first_fixer = read_state(flow["path"])["fix"]["impl"]
+
+    def no_fix():
+        _call(cmd_setup, "cmd_start_phase", phase="fix")
+        _call(cmd_merge_fix, "cmd_merge_fix")  # コミットを作らない（直さなかった。停滞として数える）
+
+    no_fix()
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
+    state = read_state(flow["path"])
+    item = next(i for i in state["items"] if i["id"] == "I-002")
+    assert item["fix_history"][-1]["progress"] == "stalled"
+    assert item["fixer_switched"] is True and state["fix"]["impl"] != first_fixer
+    assert [f["rejudge"] for f in item["feasibility"]] == [False, True]
+
+    no_fix()
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "done"
+    item = _items(flow)["I-002"]
+    assert item["status"] == "reverted" and item["revert_reason"] == "stalled_after_switch"
+
+
+def test_items_sharing_a_failing_command_both_go_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 の棚卸し #30: 同じ範囲テストを共有した項目は新しい順に取り消さず、どちらも修正へ回して項目ごとに判定する。"""
     work = flow["work"]
     older = _item("I-001", 1, symbol="add", targets=["tests/test_calc.py"])
     newer = _item("I-002", 2, targets=["tests/test_calc.py"])
@@ -373,17 +418,12 @@ def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(flow,
     _break_total(work)
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
-    state = read_state(flow["path"])
-    past_fix_end(state)
-    write_state(flow["path"], state)
 
-    capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
-
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
     items = _items(flow)
-    assert items["I-002"]["status"] == "reverted"
-    assert items["I-001"]["status"] == "verified"
-    assert (work / "src" / "other.py").exists()
+    assert {items["I-001"]["status"], items["I-002"]["status"]} == {"failing"}
+    assert all(i["feasibility"] for i in items.values())
+    assert sorted(read_state(flow["path"])["fix"]["items"]) == ["I-001", "I-002"]
 
 
 def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reuses_it(
@@ -408,11 +448,8 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
     assert gate["checks"] == []
 
 
-def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate_runs_again(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate
-):
-    """決定 22: 直す時間が無ければ危険フラグの項目を取り消す。全体のテストは検証の中で
-    走らせ直さず、最終ゲートが走らせる。"""
+def test_a_whole_test_failure_goes_to_fix_without_reverting(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 の棚卸し #34: 危険フラグの全体テストの変更起因は、締め切りで取り消さず原因の項目の修正へ回す。"""
     work = flow["work"]
 
     def rename_and_break_outside(w):
@@ -424,19 +461,10 @@ def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate
     _write(work, "tests/test_total.py", TEST_TOTAL)
     commit_with_trailers(work, "既存のテスト", {})
     _verify_phase(flow, cmd_setup, cmd_implement, item, change=rename_and_break_outside)
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
     state = read_state(flow["path"])
-    past_fix_end(state)
-    write_state(flow["path"], state)
-    _call(cmd_converge, "cmd_verify")
-    state = read_state(flow["path"])
-    assert state["whole_test"]["status"] == "fail"
-    assert state["whole_test"]["reverted"] is True
-    assert _items(flow)["I-001"]["status"] == "reverted"
-
-    _call(cmd_gate, "cmd_final_gate")
-    gate = read_state(flow["path"])["final_gate"]
-    assert len(gate["checks"]) == 1
-    assert gate["status"] == "passed"
+    assert state["whole_test"]["status"] == "fail" and not state["whole_test"].get("reverted")
+    assert _items(flow)["I-001"]["status"] == "failing"
 
 
 # ---------- 最終ゲートと履歴（final-gate / finalize） ----------

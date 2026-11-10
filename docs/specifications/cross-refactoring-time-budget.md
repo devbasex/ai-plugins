@@ -1,5 +1,7 @@
 # cross-refactoring: ラウンドを上限まで回し、所要を時間で指定できず、テストの整備が半分を占めていた → 想定最大時間に収まるリファクタリング計画を 1 回だけ立てて実行し、時間の値をすべて予算から逆算する
 
+> **今は働かない記述:** この文書のうち、予算から締め切り・バッファ（`plan.reserve`）・時間の上限の表・手順の枠を導く決まりと、既定 30 分・下限まで上げる決まり、状態ファイルの版 2は今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+
 ## 目的
 
 **利用者は所要の上限を時間（`--budget-minutes`。既定 30 分）で指定する。**
@@ -39,7 +41,7 @@
 
 **手順・引数の表・式と係数は
 [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) と
-[`docs/02-plan-and-implement.md` の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)
+[`docs/02-plan-and-implement.md` の「時間の上限」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#時間の上限)
 が正である。** ここに式をコピーしない。この文書が扱うのは、そこに書かない決定の理由と、
 リファクタリング計画と時間の内部の契約である。検証・取り消し・最終ゲートは
 [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md) が持つ。
@@ -246,7 +248,7 @@
 理由は [実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md) の決定 9）。
 
 **時間の上限の表の要点**（係数は `refactor_lib/timeline.py` にだけ置く。式の正本は
-[docs/02 の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)）。
+[docs/02 の「時間の上限」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#時間の上限)）。
 
 | 値 | 要点 | 係数・関数 |
 | --- | --- | --- |

@@ -75,45 +75,56 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
     assert items[0]["tests"] == ["tests/test_new.py"]
     # 範囲テストは戦略の雛形の `{paths}` を対象へ置き換えたもの（#1334 AC2）。語は雛形の語の並びから `{paths}` を除いたものを含む。
     assert items[0]["scope_commands"] == [{"suite": "pytest", "kind": "test", "command": shlex.join(SCOPE_WORDS + ["tests/test_new.py"])}]
-    assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3, "verify": 0.2}
+    assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3}
     # 項目は期限を持たず、巡の番号を持つ（#1743 I13）
     assert all("start_deadline" not in i and "test_start_deadline" not in i and i["round"] == 1 for i in items)
     assert state["readopt"] == {"round": 1, "events": []}
-    assert state["pause"] == {"seconds": 0, "shifted_seconds": 0, "legacy": False, "events": []}
     assert state["plan"]["table_source"] == "defaults"
     assert "TESTS_NEEDED=1" in capsys.readouterr().out
 
 
-def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan):
-    """AC8 / 決定 10: 入らない項目は飛ばし、後ろの小さな項目を詰める。"""
+def test_items_that_do_not_fit_the_budget_are_skipped_and_the_rest_packed(planned, cmd_plan):
+    """受け入れ条件 3 / 決定 10: 見積り（テストの追加と実装）の和が実装の予算に入る分を順位の順に採り、入らない候補を飛ばす。"""
     big, small = _candidate(1, "big"), _candidate(2, "small")
-    # 使える時間 = 20 − 経過 5 − 予備時間（最終ゲートの全体テスト 0.1 + 5.5 + 最終ゲートの修正 5.5）≒ 3.9 分。
-    # 危険フラグの全体テストは最終ゲートと兼ねるため数えない（#1743 決定 1）。
-    # big は 4.2 分、small は 1.5 分。
-    path = planned(
-        [big, small],
-        [
-            _answer(big, tier="high", tests=[f"tests/t{n}.py" for n in range(1)]),
-            _answer(small, tier="low"),
-        ],
-        budget_minutes=20,
-    )
+    # big は テスト 2.7 + 実装 1.3 = 4.0 分、small は 1.3 分。予算 3 分には small だけが入る
+    path = planned([big, small], [_answer(big, tier="medium", tests=["tests/t0.py"]), _answer(small, tier="low")], budget_minutes=3)
     _run(cmd_plan)
     state = read_state(path)
     assert [i["candidate_id"] for i in state["items"]] == ["C-002"]
     assert [(d["path"], d["symbol"], d["defer_reason"]) for d in state["deferred_items"]] == [("src/a.py", "big", "budget")]
-    reserve = state["plan"]["reserve"]
-    assert reserve["danger_whole_test"] == 0.0
-    assert reserve["final_whole_test"] == pytest.approx(0.1)
-    assert reserve["fix"] == pytest.approx(5.5)
-    assert reserve["final_fix"] == pytest.approx(5.5)
+    assert state["budget"]["extension"] is None and state["budget"]["effective_minutes"] == 3
 
 
-def test_the_final_reserve_is_zero_with_a_ci_check(planned, cmd_plan):
-    a = _candidate(1, "f")
-    path = planned([a], [_answer(a)], ci_check="ci")
+@pytest.mark.parametrize("init_seconds", [1.0, 3000.0])
+def test_the_number_of_items_does_not_depend_on_the_test_duration(planned, cmd_plan, init_seconds):
+    """受け入れ条件 2・I1: 同じ候補と配分テーブルで、着手前のテストの所要だけを変えても採る件数は同じ。経過時間も引かない。"""
+    cands = [_candidate(n, f"s{n}") for n in range(1, 6)]
+    baseline = {
+        "mode": "whole",
+        "command": "x",
+        "status": "green",
+        "checked_at": "t",
+        "seconds": init_seconds,
+        "whole_seconds": init_seconds,
+        "existing_failures": [],
+    }
+    path = planned(cands, [_answer(c, tier="low") for c in cands], budget_minutes=4, baseline_test=baseline)
     _run(cmd_plan)
-    assert read_state(path)["plan"]["reserve"]["final_whole_test"] == 0
+    assert len(read_state(path)["items"]) == 3  # 1.3 分 × 3 = 3.9 分 ≤ 4 分
+
+
+def test_the_budget_is_extended_when_the_high_items_do_not_fit(planned, cmd_plan, capsys):
+    """受け入れ条件 4・I2: high の和が予算と 2 倍の間なら ceil(和) へ延ばして採り、理由が状態と報告に残る。"""
+    a, b, c = _candidate(1, "f"), _candidate(2, "g"), _candidate(3, "h")
+    # high 2 件 × (2.7 + 1.3) = 8 分 > 予算 5 分 ≤ 10 分
+    answers = [_answer(x, tier="high", tests=["tests/t.py"]) for x in (a, b)] + [_answer(c, tier="low")]
+    path = planned([a, b, c], answers, budget_minutes=5)
+    _run(cmd_plan)
+    state = read_state(path)
+    ext = state["budget"]["extension"]
+    assert (ext["from"], ext["to"]) == (5, 8) and "high の候補" in ext["reason"]
+    assert [i["candidate_id"] for i in state["items"]] == ["C-001", "C-002"]
+    assert "延長: 5 → 8 分" in capsys.readouterr().err
 
 
 def test_an_item_without_a_limited_test_is_no_target(planned, cmd_plan):
@@ -154,15 +165,6 @@ def test_a_missing_plan_result_uses_defaults_and_does_not_stop(planned, cmd_plan
     _run(cmd_plan)
     item = read_state(path)["items"][0]
     assert (item["tier"], item["tests"], item["command_source"]) == ("medium", [], "round_test")
-
-
-def test_the_verify_estimate_grows_with_the_measured_scope_test(planned, cmd_plan):
-    """項目の検証の見積りは、配分の verify と着手前の範囲テストの実測の大きい方（#1334 決定 8）。"""
-    a = _candidate(1, "f")
-    baseline = {"mode": "scope", "command": "x", "status": "green", "checked_at": "t", "seconds": 90.0, "existing_failures": []}
-    path = planned([a], [_answer(a)], strategy=strategy_state("local-scoped-ci-whole"), baseline_test=baseline)
-    _run(cmd_plan)
-    assert read_state(path)["items"][0]["estimate"]["verify"] == pytest.approx(1.5)
 
 
 def test_runtime_merge_into_defers_the_duplicate(planned, cmd_plan):
@@ -231,46 +233,6 @@ def test_the_plan_is_not_rebuilt_on_resume(planned, cmd_plan):
     assert read_state(path)["plan"] == first
 
 
-def test_no_available_time_stops_without_a_plan_and_counts_the_deferred(planned, cmd_plan, capsys, refactor):
-    """1944-3・1944-4・I7: 使える時間が 0 分以下で候補があれば、計画を置かずに終了コード 4 で止め、候補を時間の見送りに数える。"""
-    import sys
-
-    a, b = _candidate(1, "f"), _candidate(2, "g")
-    path = planned([a, b], [_answer(a), _answer(b)], budget_minutes=10)
-    with pytest.raises(SystemExit) as stop:
-        _run(cmd_plan)
-    assert stop.value.code == 4
-    out = capsys.readouterr().out
-    assert "ABORT_DETAIL=" in out and "候補 2 件が入らない" in out and "使える時間 -" in out
-    state = read_state(path)
-    assert state.get("plan") is None
-    assert [d["defer_reason"] for d in state["deferred_items"]] == ["budget", "budget"]
-    assert sys.modules["refactor_lib.ledger"].tally(state).as_metrics()["deferred"] == 2
-
-
-def test_the_rerun_after_no_available_time_builds_the_plan_again(planned, cmd_plan):
-    """1944-1・I5: 打ち直しは止まっていた時間を除いた経過時間で計画を作り直し、前の試行の時間の見送りを積まない。"""
-    a, b = _candidate(1, "f"), _candidate(2, "g")
-    path = planned([a, b], [_answer(a), _answer(b)], budget_minutes=16)
-    with pytest.raises(SystemExit):
-        _run(cmd_plan)
-    state = read_state(path)
-    # 止まっていた 4 分をずらした（経過 5 分 → 1 分）。計画の前の記録は計画へ引き継ぐ
-    state["pause"] = {
-        "seconds": 240,
-        "shifted_seconds": 240,
-        "legacy": False,
-        "events": [{"reason": "shifted", "shifted": True, "seconds": 240}],
-    }
-    write_state(path, state)
-    _run(cmd_plan)
-    state = read_state(path)
-    assert state["plan"]["elapsed_minutes"] == pytest.approx(1, abs=0.1)
-    assert state["items"]
-    assert sum(1 for d in state["deferred_items"] if d["defer_reason"] == "budget") == 2 - len(state["items"])
-    assert state["pause"]["shifted_seconds"] == 240
-
-
 # ---------- 実行時の値を改修計画の終わりまでに書き出す（決定 24・25） ----------
 
 
@@ -281,18 +243,10 @@ def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
     _run(cmd_plan)
     state = read_state(path)
     limits = state["limits"]
-    for key in (
-        "margin_seconds",
-        "init_test_timeout",
-        "test_timeout",
-        "propose_end_at",
-        "plan_end_at",
-        "add_tests_end_at",
-        "implement_end_at",
-        "fix_end_at",
-        "final_end_at",
-    ):
+    for key in ("init_test_timeout", "test_timeout", "whole_timeout", "ci_wait_timeout"):
         assert limits[key] is not None, key
+    assert not [k for k in limits if k.endswith("_end_at")]
+    assert state["budget"]["effective_minutes"] == 60 and state["safety_net"]["limit_minutes"] == pytest.approx(120.0)
     for item in state["items"]:
         assert "public_io" in item
 

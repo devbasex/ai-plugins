@@ -22,6 +22,8 @@ BEFORE = {
     "monitor.phase.implement": {"seconds": 3600},
     "monitor.phase.fix": {"seconds": 3600},
     "monitor.phase.final-fix": {"seconds": 3600},
+    "monitor.phase.judge": {"seconds": 1200},  # #2457 で足した成立の判定の工程
+    "monitor.phase.flaky-fix": {"seconds": 3600},  # #2457 で足したフレーキーなテストの直しの工程
     "monitor.stall.codex": {"seconds": 180},
     "monitor.stall.agy": {"seconds": 480},
     "monitor.stall.kiro": {"seconds": 480},
@@ -122,8 +124,10 @@ BEFORE = {
     "backlog-refinement.research-grace": {"seconds": 300},
     "backlog-refinement.hotspots-git": {"seconds": 120},
     "cross-refactoring.kill-grace": {"seconds": 5},
-    "cross-refactoring.resume-grace": {"seconds": 300},
-    "cross-refactoring.default-budget": {"seconds": 1800},
+    "cross-refactoring.default-budget": {"seconds": 3600},  # #2457 で実装の予算の既定を 60 分にした
+    "cross-refactoring.budget-extension": {"factor": 2},
+    "cross-refactoring.safety-net": {"factor": 2},
+    "cross-refactoring.fix-progress": {"same_cause": 2},
     "cross-review.verify": {"seconds": 300},
     "google-workspace.call": {"seconds": 120},
     "google-workspace.install": {"seconds": 600},

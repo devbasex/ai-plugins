@@ -1,4 +1,8 @@
-"""範囲の判定（#1814 決定 1・2・11）。実装・修正・最終ゲート修正・テストの追加の取り込みが同じ `judge_unit` を呼ぶ。
+"""範囲の判定（#1814 決定 1・2・11、#2457 の棚卸し #24）。実装・修正・最終ゲート修正・テストの追加の取り込みが同じ `judge_unit` を呼ぶ。
+
+**範囲の外の変更で取り消さない。** 範囲（`--scope`）は案出しの対象を決めるのにだけ使う。判定は範囲の外で変えた
+ファイルを分類して返すだけで（`outside`）、取り込みは項目の `outside_scope` へ残して報告とコードレビューへ引き継ぐ
+（`note_outside`）。`problem` は常に空である。
 
 判定の単位（1 回の取り込みで同じ規則に掛けるコミットの組）が触った各ファイルを、上から最初に当たった分類にする。
 
@@ -59,7 +63,11 @@ class FileVerdict:
 class UnitVerdict:
     files: list[FileVerdict] = field(default_factory=list)
     rewrites: list[dict[str, str]] = field(default_factory=list)  # `review_scope_judgements` へ書く `{"path", "sha"}`
-    problem: str = ""
+    problem: str = ""  # 範囲では取り消さない（#2457）。旧い呼び手のために空のまま残す
+
+    @property
+    def outside(self) -> list[FileVerdict]:
+        return [f for f in self.files if f.kind == OUTSIDE]
 
 
 def path_in_scope(path: str, scope: Iterable[str]) -> bool:
@@ -226,15 +234,6 @@ def judge_unit(work: str, unit: Unit, cache_dir: Optional[str] = None) -> UnitVe
             else:
                 verdict.files.append(FileVerdict(path, OUTSIDE, "変えた名前の読み込み・呼び出しの書き換え以外の変更があります"))
     verdict.files.sort(key=lambda f: f.path)
-    outside = [f for f in verdict.files if f.kind == OUTSIDE]
-    if outside:
-        shown = "、".join(f"{f.path}（{f.reason}）" for f in outside[:5])
-        more = f" ほか {len(outside) - 5} 件" if len(outside) > 5 else ""
-        verdict.problem = (
-            f"対象範囲の外の既存のファイルを変更しています: {shown}{more}。"
-            "範囲の外の既存のファイルは、項目が変えた名前の読み込みと呼び出しの書き換えだけ変えられます。"
-            "生成物の同期は進行側が公開の直前に行います"
-        )
     return verdict
 
 
@@ -245,3 +244,19 @@ def judge_commits(state: dict, shas: list[str], context: Iterable[str] = ()) -> 
         return UnitVerdict()
     base = (state.get("plan") or {}).get("base_sha")
     return judge_unit(work_dir(state), Unit(list(shas), scope, base, list(context)), state.get("tmp_dir"))
+
+
+def note_outside(item: Optional[dict], verdict: UnitVerdict, sha: str = "") -> list[dict[str, str]]:
+    """範囲の外で変えたファイルを項目の `outside_scope` へ足す（同じパスは 1 度だけ）。足した行を返す。"""
+    if item is None:
+        return []
+    rows = item.setdefault("outside_scope", [])
+    known = {r.get("path") for r in rows}
+    added = []
+    for f in verdict.outside:
+        if f.path in known:
+            continue
+        row = {"path": f.path, "kind": f.kind, "reason": f.reason, **({"sha": sha} if sha else {})}
+        rows.append(row)
+        added.append(row)
+    return added

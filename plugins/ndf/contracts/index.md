@@ -94,6 +94,7 @@
 | `CLAUDE_PLUGIN_ROOT` | runtime | `plugins/ndf/scripts/resolve.sh`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` |
 | `CODEX_HOME` | runtime | `plugins/ndf/scripts/gate-rejections.py`<br>`plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/project-mvv.py`<br>`plugins/ndf/scripts/release-verification-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/scripts/usage-report.py`<br>`plugins/ndf/scripts/usage-subagent.py`<br>`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/external-ai/scripts/external-ai.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `CRITIQUE_RETRY_AGENTS` | runtime | `plugins/ndf/skills/cross-review/scripts/critique-round.sh` |
+| `CROSS_REFACTORING_STEP_STARTED` | runtime | `plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py` |
 | `CROSS_REFACTORING_TMP_DIR` | runtime | `plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/launch-cli.sh`<br>`plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py` |
 | `CROSS_REVIEW_STATE` | runtime | `plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `CROSS_REVIEW_TMP_DIR` | runtime | `plugins/ndf/scripts/acceptance-check.py`<br>`plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/parallel-measure.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/release-steps.py`<br>`plugins/ndf/scripts/spec-copy.py`<br>`plugins/ndf/scripts/sprint-close.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
@@ -233,9 +234,11 @@
 | `container-reach.stop-grace` | seconds 5 | 打ち切った起動の、SIGTERM から SIGKILL までの猶予 | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
 | `container-reach.up` | seconds 300 | テスト環境の起動の上限。実測の最長 49 秒の 6 倍 | `plugins/ndf/scripts/lib/container_reach.py:<module>` |
 | `context-decisions.git` | seconds 5 | worktree の根を調べる git の上限 | `plugins/ndf/scripts/lib/context_decisions.py:toplevel` |
-| `cross-refactoring.default-budget` | seconds 1800 | 想定最大時間の既定（分で引数に出す） | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py:<module>` |
+| `cross-refactoring.budget-extension` | factor 2 | グレード high の候補の見積りの和が予算を超えたとき、予算を延ばしてよい倍率 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py:extension_factor` |
+| `cross-refactoring.default-budget` | seconds 3600 | 実装の予算の既定（分で引数に出す）。採る項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py:<module>` |
+| `cross-refactoring.fix-progress` | same_cause 2 | 修正の前進の判定。同じ落ちたテストの集合が same_cause 回続けば停滞。前に見たどれかの集合へ戻れば振動（前に見たすべての集合と比べる） | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/progress.py:same_sets` |
 | `cross-refactoring.kill-grace` | seconds 5 | プロセスグループを止めるときの SIGTERM から SIGKILL までの猶予 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/measure.py:<module>`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/process.py:_kill_process_group` |
-| `cross-refactoring.resume-grace` | seconds 300 | 中断から再開するときに上限へ足す猶予 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/timeline.py:<module>` |
+| `cross-refactoring.safety-net` | factor 2 | 安全網の上限 = 実効の予算 × この倍率（分）。コーディングの CLI の起動ごとの秒の累計に置き、当たったら取り消さずに止めて人へ渡す | `plugins/ndf/scripts/supervise_lib/paths.py:refactor_step_seconds`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py:safety_net_factor` |
 | `cross-review.verify` | seconds 300 | 指摘の確かめのコマンドの上限 | `plugins/ndf/skills/cross-review/scripts/review_lib/commands/verify_findings.py:<module>` |
 | `delivery.cd-result` | seconds 1800 | CD の結果の待ちの上限。行の宣言が無いときの既定 | `plugins/ndf/scripts/lib/delivery.py:<module>` |
 | `delivery.cd-result-total` | seconds 7200 | CD の結果の 1 回の読み取りの合計の上限 | `plugins/ndf/scripts/lib/delivery.py:<module>` |
@@ -265,10 +268,12 @@
 | `monitor.phase.critique` | seconds 1200 | 批評の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.final-fix` | seconds 3600 | cross-refactoring の最後の修正の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.fix` | seconds 3600 | cross-refactoring の修正の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.flaky-fix` | seconds 3600 | cross-refactoring のフレーキーなテストの直しの工程の監視の上限。駆動は安全網の残りを --timeout で渡す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.implement` | seconds 3600 | cross-refactoring の実装の工程の監視の上限の下限。駆動が予算から導いた上限を --timeout で渡す | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.judge` | seconds 1200 | cross-refactoring の成立の判定の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.judge-test-changes` | seconds 1200 | cross-refactoring のテストの変更の判定の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.phase.plan` | seconds 1200 | cross-refactoring の計画の工程の監視の上限。提案と同じ桁 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
-| `monitor.phase.propose` | seconds 1200 | 提案の工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
+| `monitor.phase.propose` | seconds 1200 | 提案の工程の監視の上限 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/timeline.py:measure_timeout` |
 | `monitor.phase.review` | seconds 1200 | レビューの工程の監視の上限 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.stall-default` | seconds 180 | 表に無い担当の無進捗の許容 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `monitor.stall.agy` | seconds 480 | agy の無進捗の許容。err.log がほぼ無音 | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |

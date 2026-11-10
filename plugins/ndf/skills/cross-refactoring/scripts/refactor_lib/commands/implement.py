@@ -4,12 +4,17 @@
 トレーラー `Item-Id` だけで決め（実装計画 I4）、所要はコミットの時刻で測る（決定 8）。
 **コミットの時刻で項目を見送らない**（項目ごとの期限は持たない。#1743 決定 9）。
 
+**手順の違反で項目を取り消さない**（#2457 の原則 3・棚卸し #20〜#26）。違反は項目の `sendbacks[]` に残し、直させるものは
+修正の繰り返しへ回す（差し戻し）。
+
 | 見つけたもの | 扱い |
 | --- | --- |
-| どの項目にも属さないコミット（`Item-Id` が無い・改修計画に無い） | そのコミットだけを取り消す |
-| 手順を外れたコミット（範囲の外の既存のファイル・トレーラー欠け・文言固定テスト・期待値の変更） | 項目を取り消す（`status: reverted`。見送りには入れない。I5） |
-| コミットの無い項目 | 持ち越し（`carried`）にして項目のコミットを取り消す。次の `readopt` が採り直すか `not_done` で見送る（I15） |
-| 足したテストが今のコードで落ちた項目 | `test_failed` で見送り、テストのコミットを取り消す（決定 13） |
+| どの項目にも属さないコミット（`Item-Id` が無い・改修計画に無い） | そのコミットだけを `git revert` で打ち消し、差し戻しに残す |
+| 範囲の外の既存のファイルの変更 | 取り消さない。項目の `outside_scope` に残し、報告とコードレビューへ引き継ぐ |
+| トレーラーの欠け・テストの追加のコミットの数やテスト以外のファイル | 取り消さない。差し戻しに残して報告に出す |
+| 期待値の欠け・文言を固定するテスト（実装） | 取り消さない。項目を `failing` にして修正へ差し戻す |
+| 足したテストが今のコードで落ちた項目 | 取り消さない。差し戻しに残し、実装の後の検証が修正へ回す |
+| コミットの無い項目 | 持ち越し（`carried`）。次の `readopt` が採り直すか `not_done` で見送る（I15） |
 
 実装の項目は同じ `Item-Id` のコミットを何件でも 1 項目として採り、所要は最後のコミットの時刻で測る（#1814 決定 6）。
 範囲は項目の全コミットを 1 つの単位として `scope_check` が判定する（#1814 決定 11）。
@@ -42,12 +47,11 @@ from ..gitfacts import (
 )
 from ..items import (
     CARRIED,
-    DEFERRED,
+    FAILING,
     IMPLEMENTED,
     PLANNED,
     TESTED,
     current_round,
-    defer,
     find_item,
     in_current_round,
     item_label,
@@ -56,8 +60,9 @@ from ..items import (
 from ..pathkinds import is_test_path
 from ..paths import git_out, load_state, work_dir
 from ..phases import finish_phase, phase_record
-from ..scope_check import judge_commits
-from ..undo import drop, resume_pending_drop
+from ..scope_check import judge_commits, note_outside
+from .. import undo
+from ..undo import resume_pending_drop
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -65,7 +70,6 @@ from ..verify import (
     pending_test_judgements,
     verify_test_changes,
 )
-from ..vocabulary import DEFER_TEST_FAILED
 
 
 @dataclass
@@ -75,7 +79,9 @@ class Intake:
     extra: list[str] = field(default_factory=list)  # どの項目にも属さないコミット
     rejected: dict[str, str] = field(default_factory=dict)  # 項目 → 手順を外れた理由
     carried: dict[str, str] = field(default_factory=dict)  # 項目 → 持ち越しの理由（コミットが無い）
-    test_failed: dict[str, str] = field(default_factory=dict)  # 項目 → テストの結果
+    test_failed: dict[str, str] = field(default_factory=dict)  # 項目 → テストの結果（差し戻しに残すだけ）
+    sendbacks: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # 項目 → 差し戻し（種類・理由）
+    send_to_fix: dict[str, str] = field(default_factory=dict)  # 項目 → 修正へ差し戻す理由（期待値の欠け・文言を固定するテスト）
     accepted: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # 項目 → コミットの事実（古い順）
     rewrites: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # 項目 → 呼び手の書き換えとして通したファイル
 
@@ -145,32 +151,22 @@ def _settle(
     intake: Intake,
     label: str,
 ) -> None:
-    """取り消しと見送りを 1 度にまとめて行う。"""
-    for item_id, reason in intake.rejected.items():
-        find_item(state, item_id)["failure_reason"] = reason
-    for item_id, reason in {**intake.carried, **intake.test_failed}.items():
-        find_item(state, item_id)["failure_reason"] = reason
-    targets = sorted({*intake.rejected, *intake.carried, *intake.test_failed})
-    # **同じ巡の同じ取り込みの取り消しを 2 度行わない。** 途中で落ちた取り消しは入口の
-    # `resume_pending_drop` がやり直している。済んだ取り消しをもう一度行うと、範囲の
-    # 逆再生と積み直しで履歴だけが伸びる。巡が違えば別の取り込みである（#1743）。
+    """どの項目にも属さないコミットだけを打ち消し、持ち越しを記録する。項目は取り消さない（#2457）。"""
     this_round = current_round(state)
     done = any(d.get("reason") == label and int(d.get("round") or 1) == this_round for d in state.get("drops") or [])
-    if (targets or intake.extra) and not done:
-        drop(path, state, targets, label)
-    # 見送った項目は `drop` が付けた `reverted` を `deferred` へ改める。取り消しと見送りの
-    # 両方に数えると、報告の件数の和が項目の数を超える（設計の状態遷移）。
-    for item_id, reason in intake.test_failed.items():
-        item = find_item(state, item_id)
-        defer(state, item, DEFER_TEST_FAILED, reason)
-        item["status"] = DEFERRED
+    if intake.extra and not done:
+        # 新しい順に `git revert` で打ち消す（棚卸し #22。`reset --hard` は使わない）
+        undo.revert_unattributed(path, state, intake.extra, label)
+        info(f"↩ どの項目にも属さないコミット {len(intake.extra)} 件を git revert で打ち消しました（Item-Id を付け直して出させる差し戻し）")
     # コミットの無い項目は見送らずに持ち越す（`readopt` が採り直すか `not_done` にする。I15）
-    for item_id in intake.carried:
-        find_item(state, item_id)["status"] = CARRIED
-    for item_id, reason in intake.rejected.items():
-        info(f"❌ {item_id} {item_label(find_item(state, item_id))}: {reason}")
-    if intake.extra:
-        info(f"↩ どの項目にも属さないコミット {len(intake.extra)} 件を取り消しました")
+    for item_id, reason in intake.carried.items():
+        item = find_item(state, item_id)
+        item["failure_reason"] = reason
+        item["status"] = CARRIED
+    for item_id, rows in intake.sendbacks.items():
+        for row in rows:
+            info(f"↪ {item_id} {item_label(find_item(state, item_id))}: {row['reason']}（差し戻し）")
+    statefile.save(path, state)
 
 
 def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Intake) -> None:
@@ -186,6 +182,8 @@ def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Int
         "rejected": dict(intake.rejected),
         "carried": dict(intake.carried),
         "test_failed": dict(intake.test_failed),
+        "sendbacks": dict(intake.sendbacks),
+        "send_to_fix": dict(intake.send_to_fix),
     }
     statefile.save(path, state)
 
@@ -199,6 +197,8 @@ def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
         rejected=dict(saved.get("rejected") or {}),
         carried=dict(saved.get("carried") or {}),
         test_failed=dict(saved.get("test_failed") or {}),
+        sendbacks=dict(saved.get("sendbacks") or {}),
+        send_to_fix=dict(saved.get("send_to_fix") or {}),
     )
 
 
@@ -261,13 +261,14 @@ def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) 
         if key not in results:
             log = pathlib.Path(state["tmp_dir"]) / f"add-tests-{item_id}.log"
             # H までの残りは起動の直前に取る。ループの前に 1 度だけ取ると、後のコマンドが H を越えて走る（#1932 原則 1）
-            result, last = targets.run_commands(commands, work, timeline.state_test_timeout(state, clock.now()), log)
+            result, last = targets.run_commands(commands, work, timeline.state_test_timeout(state), log)
             if result.launch_failed:
                 launch.stop(path, state, "tests", last, result, log)
             results[key] = result.status == ts.PASSED
         if not results[key]:
-            intake.test_failed[item_id] = f"足したテストが今のコードで通りません（{targets.command_text(commands)}）"
-            intake.extra.append(fact["sha"])
+            reason = f"足したテストが今のコードで通りません（{targets.command_text(commands)}）"
+            intake.test_failed[item_id] = reason
+            intake.sendbacks.setdefault(item_id, []).append({"kind": "test_failed", "reason": reason})
 
 
 def _intake_phase(
@@ -291,12 +292,12 @@ def _intake_phase(
             continue
         problem = problem_fn(item, commits)
         if problem:
-            intake.rejected[item["id"]] = problem
-        else:
-            intake.accepted[item["id"]] = commits
-            continue
-        # 採らないコミットは項目の記録に載らない。取り消しの対象として明示する。
-        intake.extra.extend(c["sha"] for c in commits)
+            # 取り消さない（#2457）。差し戻しに残し、期待値の欠けと文言を固定するテストは修正へ回す
+            kind, text, to_fix = problem if isinstance(problem, tuple) else ("procedure", str(problem), False)
+            intake.sendbacks.setdefault(item["id"], []).append({"kind": kind, "reason": text})
+            if to_fix:
+                intake.send_to_fix[item["id"]] = text
+        intake.accepted[item["id"]] = commits
     return intake
 
 
@@ -318,20 +319,19 @@ def _test_commit_problem(
     tracked: list[str],
     state: dict[str, Any],
 ) -> Optional[str]:
-    """テストの追加のコミットが手順を満たすか。**テスト以外のファイルを触らない。** テストの追加は 1 項目 1 コミット。"""
-    if len(commits) > 1:
-        return f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）"
+    """テストの追加のコミットの手順の違反（種類, 理由, 修正へ回すか）。無ければ `None`。取り消しの理由にしない（#2457）。"""
     commit = commits[0]
+    if len(commits) > 1:
+        return ("commits", f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）", False)
     problem = verify_commit_basics(commit, "コミットが範囲にありません", check_test=False)
-    problem = problem or judge_commits(state, [commit["sha"]]).problem
     if problem:
-        return problem
+        return ("trailers", problem, False)
     others = [f for f in commit.get("files") or [] if not is_test_path(f, work_dir(state))]
     if others:
-        return f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）"
+        return ("non_test_files", f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）", False)
     hits = _wording_hits(commits, tracked, state)
     if hits:
-        return _doc_wording_reason(hits)
+        return ("doc_wording", _doc_wording_reason(hits), False)
     return None
 
 
@@ -372,19 +372,24 @@ def _apply_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) -> N
     """足したテストを走らせ、通った項目にテストのコミットを記録する。"""
     _run_added_tests(path, state, intake)
     for item_id, commits in intake.accepted.items():
-        if item_id in intake.test_failed:
-            continue
         item = find_item(state, item_id)
         item["commits"]["test"] = commits[0]["sha"]
+        item["commits"]["test_extra"] = [c["sha"] for c in commits[1:]]
         item["status"] = TESTED
-    _record_seconds(state, "add-tests", "test", {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
+        _note_sendbacks(item, intake.sendbacks.get(item_id))
+    _record_seconds(state, "add-tests", "test", intake.accepted)
+
+
+def _note_sendbacks(item: dict[str, Any], rows: Optional[list[dict[str, str]]]) -> None:
+    for row in rows or []:
+        item.setdefault("sendbacks", []).append({**row, "at": statefile.now()})
 
 
 def _report_tests(state: dict[str, Any], intake: Intake) -> None:
     kept = [i for i in live_items(state) if i.get("status") == TESTED]
     info(
-        f"テストの追加: 採用 {len(kept)} 件 / test_failed {len(intake.test_failed)} 件 / "
-        f"持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件"
+        f"テストの追加: 採用 {len(kept)} 件 / 今のコードで落ちたテスト {len(intake.test_failed)} 件 / "
+        f"持ち越し {len(intake.carried)} 件 / 差し戻し {sum(len(v) for v in intake.sendbacks.values())} 件"
     )
 
 
@@ -418,25 +423,24 @@ def _implement_problem(
     state: dict[str, Any],
     intake: Optional[Intake] = None,
 ) -> Optional[str]:
-    """実装のコミット（同じ `Item-Id` の全件）が手順を満たすか。項目の全コミットを 1 つの単位として判定する。
+    """実装のコミット（同じ `Item-Id` の全件）の手順の違反（種類, 理由, 修正へ回すか）。無ければ `None`。
 
-    実差分の行数では取り消さない（#1814 決定 4）。範囲の逸脱は `scope_check` が直接見る。
+    取り消しの理由にしない（#2457）。範囲の外の変更は `outside_scope` に残すだけ（棚卸し #24）。実差分の行数では判定しない（#1814 決定 4）。
     """
+    verdict = judge_commits(state, [c["sha"] for c in commits])
+    note_outside(item, verdict)
+    if verdict.rewrites and intake is not None:
+        intake.rewrites[item["id"]] = verdict.rewrites
+    problem = verify_test_changes(collect_test_changes(commits))
+    if problem:
+        return ("expectations", problem, True)
+    hits = _wording_hits(commits, tracked, state)
+    if hits:
+        return ("doc_wording", _doc_wording_reason(hits) + "。そのテストだけを外す", True)
     for commit in commits:
         problem = verify_commit_basics(commit, "コミットが範囲にありません", check_test=False)
         if problem:
-            return problem
-    verdict = judge_commits(state, [c["sha"] for c in commits])
-    if verdict.problem:
-        return verdict.problem
-    problem = verify_test_changes(collect_test_changes(commits))
-    if problem:
-        return problem
-    hits = _wording_hits(commits, tracked, state)
-    if hits:
-        return _doc_wording_reason(hits)
-    if verdict.rewrites and intake is not None:
-        intake.rewrites[item["id"]] = verdict.rewrites
+            return ("trailers", problem, False)
     return None
 
 
@@ -465,12 +469,19 @@ def _apply_implement(_path: pathlib.Path, state: dict[str, Any], intake: Intake)
             item["review_test_judgements"] = pending
         if intake.rewrites.get(item_id):
             item["review_scope_judgements"] = intake.rewrites[item_id]
+        _note_sendbacks(item, intake.sendbacks.get(item_id))
+        if item_id in intake.send_to_fix:
+            # 期待値の欠け・文言を固定するテストは修正へ差し戻す（棚卸し #25・#26）
+            item["status"] = FAILING
+            note = intake.send_to_fix[item_id]
+            item["failed_check"] = {"kind": "sendback", "suite": "sendback", "command": "", "files": [], "tests": [], "note": note}
     _record_seconds(state, "implement", "implement", intake.accepted)
 
 
 def _report_implement(state: dict[str, Any], intake: Intake) -> None:
     carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件")
+    sent = sum(len(v) for v in intake.sendbacks.values())
+    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 差し戻し {sent} 件")
     if carried:
         info(
             f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"
