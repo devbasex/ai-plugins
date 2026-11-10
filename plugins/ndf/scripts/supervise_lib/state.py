@@ -293,14 +293,15 @@ class RunState:
         rec = plan.get("記録")
         if not rec or stage in self.recorded_stages or stage in plan.get("記録しない工程", ()):
             return
-        once = not self.recorded_stages  # 最初の記録の前にモードと進め方を見出し行へ書く（#2921）
+        once = not self.recorded_stages  # 最初の記録でモードと進め方を見出し行へ書く（#2921）
         self.recorded_stages.append(stage)
-        heads = [["mode", m]] if once and (m := plan.get("モード")) else []
-        heads += [["pace", pace]] if once and (pace := plan.get("進め方")) in MVV_PACES else []
-        for issue in plan.get("課題", []):  # 進め方を先に書く（まとめる工程を記録なしと数えない）。書けなくても止めない（#2227）
-            for args in [[str(issue), *h] for h in heads] + [[str(issue), "stage", stage]]:
-                p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
-                self.process += step_read.process_if_not_ok(" ".join([Path(rec).name, *args]), p)
+        heads = ["--mode", m] if once and (m := plan.get("モード")) else []
+        heads += ["--pace", pace] if once and (pace := plan.get("進め方")) in MVV_PACES else []
+        # 工程・モード・進め方を課題ごとに 1 回の呼び出しで書く（本文の取得と更新は 1 回）。書けなくても止めない（#2227）
+        for issue in plan.get("課題", []):
+            args = [str(issue), "stage", stage, *heads]
+            p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
+            self.process += step_read.process_if_not_ok(" ".join([Path(rec).name, *args]), p)
 
     def add_usage(self, kind: str, res: dict) -> None:
         """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""

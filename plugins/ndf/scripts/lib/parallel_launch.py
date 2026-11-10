@@ -19,6 +19,8 @@ from typing import Optional
 import durable
 import limits
 import parallel_release as pr
+from parallel_files import RELAY
+from parallel_helper import spawn_line
 from parallel_repo import relay, relay_proc
 
 UP = ("running", "awaiting_approval")
@@ -132,19 +134,25 @@ class LaunchRouting:
         spec = q.get("launch") or {}
         if kind in ("spawn", "helper") and q.get("purpose") and spec.get("argv"):
             extra = {"n": q["n"]} if q.get("n") is not None else {}
-            self.launch_once(f"{q['purpose']}-a{qid}", lane, spec["argv"], spec.get("cwd"), bool(spec.get("fresh")), **extra)
+            purpose = f"{q['purpose']}-a{qid}"
+            if self.launch and self.launch.get("purpose") == q["purpose"]:
+                # 流れているリリースの一時レーンを起こし直した: 止まりの見張り（`_ask_helper`）を新しい起動へ向け、もう一度問えるようにする
+                self.launch = {**self.launch, "purpose": purpose, "retry": int(self.launch.get("retry") or 0) + 1}
+                self.helper_asked = None
+            self.launch_once(purpose, lane, spec["argv"], spec.get("cwd"), bool(spec.get("fresh")), **extra)
             return True
         return False  # 起動の断り（区分 spawn の目的の無い問い）は、起動の条件がそろうたびに耐久ワークフローが打ち直す
 
     def launch_wakes(self) -> None:
         """再起動の対象（`wake`）のうち止まっているレーンを再起動する。止まっていないレーンは対象から外す。人が止めたままにした
-        レーンと、答え待ちの停止の範囲にある 1 スプリントのレーン（再開の印で起こす）は打たない。"""
+        レーンと、再起動の失敗の問いへ「止める」と答えたレーン（`given_up`）と、答え待ちの停止の範囲にある 1 スプリントのレーン
+        （再開の印で起こす）は打たない。"""
         if not self.launching:
             return
         stopped = self.stopped()
         self.wake = [n for n in self.wake if n in stopped]
         for n in list(self.wake):
-            if n in self.left_stopped or (self.hold.covers(n) and n in self.sprint):
+            if n in self.left_stopped or self.lanes[n].get("given_up") or (self.hold.covers(n) and n in self.sprint):
                 continue
             k = 1 + sum(1 for p in self.launches if re.fullmatch(rf"wake-{re.escape(n)}-\d+", p))
             rec = self.launch_once(f"wake-{n}-{k}", n, ["restart", n])
@@ -152,3 +160,29 @@ class LaunchRouting:
             if rec.get("result") == "up":
                 self.lanes[n]["state"] = None  # 次の観測で読み直す。古い観測の stopped で打ち直さない
                 self.woken.add(n)
+
+    # -- 起動の印（`parallel-launch`）の無い古い記録の道: 起動と再起動はオーガナイザーが 1 行で打つ（#2936 の前の道） --
+
+    def legacy_spawn(self, fields: dict) -> dict:
+        """古い記録なら、知らせ `pause` の起動の入力へオーガナイザーが打つ 1 行（`spawn`）を添える。"""
+        return {**fields, "spawn": spawn_line(fields)} if not self.launching and fields.get("argv") else fields
+
+    def legacy_wake(self) -> dict:
+        """古い記録なら、止まっているレーンを起こす 1 行（`wake`）を知らせへ添える。"""
+        if self.launching:
+            return {}
+        stopped = self.stopped()
+        self.wake = [n for n in self.wake if n in stopped]
+        lanes = self.legacy_wake_lanes()
+        return {"wake": [f"python3 {RELAY} restart {n}" for n in lanes]} if lanes else {}
+
+    def legacy_wake_lanes(self) -> list[str]:
+        return [n for n in self.wake if not self.hold.covers(n) and n not in self.left_stopped]
+
+    def legacy_commands(self, commands: dict) -> dict:
+        """古い記録なら、問いの答えごとにオーガナイザーが打つ 1 行（`commands`。answer が `metrics.next` に返す）を添える。"""
+        return {} if self.launching else {"commands": commands}
+
+    def legacy_mark(self) -> dict:
+        """古い記録なら、問いの一覧の知らせへ印を添える（answer が持ち主を起こす 1 行を返すかを読む）。"""
+        return {} if self.launching else {"launching": False}

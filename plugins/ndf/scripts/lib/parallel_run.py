@@ -240,11 +240,12 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         """イベント `pause` は上書きされるため、流れているリリースの最後の起動（release / confirmed）を他のイベントにも
         `release` として添え、一時レーンが流すもの（`helper_task`）を失わない。"""
         seq = self.bump()
+        fields = self.legacy_spawn(fields)
         if action in ("release", "confirmed"):
             self.launch = {"seq": seq, "action": action, **fields}
         elif self.current is not None and self.launch:
             fields = {**fields, "release": self.launch}
-        durable.set_event("pause", {"seq": seq, "action": action, **fields})
+        durable.set_event("pause", {"seq": seq, "action": action, **fields, **self.legacy_wake()})
 
     def publish(self, key: str, value) -> None:
         """答え・次のリリースへ回した知らせ・範囲のイベントを立て、作り直しの後に読み手が読めるよう控える（決定 6）。"""
@@ -319,7 +320,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             self.reply({**msg, "id": target or rid})
 
     def publish_questions(self) -> None:
-        durable.set_event("questions", {"seq": self.bump(), "items": self.questions})
+        durable.set_event("questions", {"seq": self.bump(), "items": self.questions, **self.legacy_mark()})
 
     def reply(self, msg: dict) -> None:
         """オーガナイザーの答えを `answer-<依頼>` に 1 回だけ立て、問いの一覧から外す。答えの後の処理は持ち主のレーンが行う（6f）。
@@ -347,7 +348,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
     def apply_own(self, q: dict, choice: list[str]) -> None:
         """耐久ワークフローが自分で立てた問いへの答えを当てる。「止める」は、起動できないレーンなら起こし直しをやめて
         止まったものと数え、リリースの途中で止まった一時レーンならリリースを失敗として締める（依頼へ failed を答える）。
-        リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。"""
+        リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。保留したループの残りを流す
+        一時レーンを起こせない問いの「止める」も計画を止める（保留の中身はループの記録に残る）。"""
         if q.get("kind") == "build":
             self.apply_build(q, choice)
             return
@@ -355,6 +357,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             return
         if q.get("kind") == "stall" and q.get("lane") in self.lanes:
             step_stop_lanes(self.main, [q["lane"]])
+        elif q.get("kind") == "spawn" and str(q.get("purpose") or "").startswith("held-"):
+            self.stop = True  # 保留したループの残りを流す一時レーンを起こせない: 保留の中身はループの記録に残したまま計画を止める
         elif q.get("kind") == "spawn" and q.get("lane") in self.lanes:
             lane = q["lane"]
             self.lanes[lane].update(started=True, state="stopped", given_up=True)
@@ -592,7 +596,8 @@ _TICK = (
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     """全レーンが止まった後: 終えられれば要約を返す。答えを当てていない設計の承認か、保留したループの 1 回があれば None。"""
-    designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped)
+    gave_up = {n for n, st in run.lanes.items() if st.get("given_up")}  # 再起動の失敗の問いへ「止める」と答えたレーンは起こさない
+    designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped - gave_up)
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。動いて観えるまで 1 回ずつ再起動する（6f）
         run.wake = sorted({*run.wake, *(set(designs) - run.woken)})
         return None
@@ -700,9 +705,10 @@ def _ask_stalls(run: _Run, rows: dict, now: float) -> None:
             continue
         run.stall_until[n] = now + limit
         mins = int((now - at.timestamp()) // 60)
+        legacy = run.legacy_commands({"起こし直す": f"python3 {RELAY} restart {n}", "止める": f"python3 {RELAY} stop {n}"})
         run.ask(
-            "stall", f"{n}-s{int(now)}", n, f"レーン {n} が {mins} 分動いていない", ["起こし直す", "止める", "待つ"]
-        )  # fmt: skip  答えは耐久ワークフローが当てる（apply_own。#2936 の決定 6）
+            "stall", f"{n}-s{int(now)}", n, f"レーン {n} が {mins} 分動いていない", ["起こし直す", "止める", "待つ"], **legacy
+        )  # fmt: skip  答えは耐久ワークフローが当てる（apply_own。#2936 の決定 6）。古い記録はオーガナイザーが commands の 1 行を打つ
 
 
 # ---- 外の入口 ----

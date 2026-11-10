@@ -114,6 +114,19 @@ def test_mode_changes_only_the_heading_line(repo):
     assert "- [x] 作業場所の用意 — 2026-01-01 00:00" in body
 
 
+def test_stage_with_mode_and_pace_reads_and_writes_the_body_once(repo):
+    """`stage` に `--mode` / `--pace` を添えると、本文の取得と更新は 1 回で、ボードは工程とモードの列を書く。"""
+    declare(repo)
+    out = run(repo, SYNC, "42", "stage", "設計", "--mode", "standard", "--pace", "fast")
+    assert out.returncode == 0, out.stdout + out.stderr
+    body = repo.body.read_text(encoding="utf-8")
+    assert "モード: standard" in body and "進め方: fast" in body and "- [x] 設計 —" in body
+    log = calls(repo).splitlines()
+    assert sum("--json body" in c for c in log) == 1 and sum(c.startswith("issue edit") for c in log) == 1
+    edits = [c for c in log if c.startswith("project item-edit")]
+    assert len(edits) == 2 and "F_stage" in edits[0] and "F_mode" in edits[1]
+
+
 @pytest.mark.parametrize("key,value", [("stage", "でたらめ"), ("mode", "でたらめ"), ("tier", "x")])
 def test_a_wrong_value_writes_nothing(repo, key, value):
     """誤りは 2 を返し、issue の本文もボードも書かない（宣言の有無によらない）。"""

@@ -633,10 +633,8 @@ def test_a_fast_plan_records_the_pace_before_the_first_stage(tmp_path):
     )
     s.run()
     assert log.read_text().splitlines() == [
-        "5 pace fast",
-        "5 stage 確定仕様化",
-        "6 pace fast",
-        "6 stage 確定仕様化",
+        "5 stage 確定仕様化 --pace fast",
+        "6 stage 確定仕様化 --pace fast",
         "5 stage 振り返り",
         "6 stage 振り返り",
     ]

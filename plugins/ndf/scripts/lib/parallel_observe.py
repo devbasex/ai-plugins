@@ -61,8 +61,9 @@ def _ask_helper(run, rows: dict) -> None:
     run.helper_asked = run.launch["seq"]
     spec = {"argv": run.launch.get("argv"), "cwd": run.launch.get("cwd")}
     run.ask(
-        "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle もリリース承認ゲートの依頼も無い）",
+        "helper", f"{name}-h{run.launch['seq']}" + (f"-r{run.launch['retry']}" if run.launch.get("retry") else ""), name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle もリリース承認ゲートの依頼も無い）",
         ["続きから起こし直す", "止める"], n=rel["n"], purpose=run.launch.get("purpose"), launch=spec,
+        **run.legacy_commands({"続きから起こし直す": run.launch.get("spawn")}),
     )  # fmt: skip
 
 

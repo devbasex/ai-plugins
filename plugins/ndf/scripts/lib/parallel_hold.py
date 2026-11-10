@@ -390,10 +390,13 @@ class AnswerHold:
         """観測の後の突き合わせ。閾値の載らない古い観測の記録の再生では何もしない（記録の順を変えないため）。"""
         if seen.get("limits") is None:
             return
+        shown = [] if self.launching else self.legacy_wake_lanes()
         self._retire_superseded()
         self._update_hold(Limits(**seen["limits"]))
         if self.ls_ok:
             self._reconcile({n: m for n, m in (seen.get("marks") or {}).items() if n in self.lanes})
+        if not self.launching and (now := self.legacy_wake_lanes()) and set(now) - set(shown):
+            self.pause("notice", lanes=[], attach=[])  # 古い記録: 起こす 1 行（wake）が増えたらオーガナイザーへ知らせる
 
     def restore_hold(self, limits: Optional[dict], written: Optional[dict] = None) -> None:
         """作り直しの直後に、戻した問いと閾値から停止の範囲を戻す。閾値が無い（台帳を読まない途中の記録・閾値を載せない

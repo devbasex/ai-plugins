@@ -27,6 +27,7 @@
 | `finished` / `stopped` | レーンごとの結果（リリースした版・止まった理由）を要約し、`metrics.prior_waits`（答えのまだの前のループの待ち）があれば並べ、`[ndf-parallel] finished p1` の行を出して終える |
 | 終了コード 3 | 同じ `wait` を打ち直す（業務時間外に依頼を溜めただけのときも 3 で、`metrics.next` に打ち直す 1 行が載る） |
 | 終了コード 1・`action: error` | 耐久ワークフローが失われた（下の「失われた計画」）。`metrics.next` の `parallel.py start p1` を 1 回打つ |
+| `release` / `confirmed` / `held` / `notice` など（版を上げる前に始めた計画だけ） | 起動を耐久ワークフローが打たない古い記録の道。`metrics.spawn`（`metrics.release.spawn`）の 1 行を、その `seq` でまだ打っていなければ打ち、`metrics.wake` の各行も打つ。問いの答えの後に `metrics.next` が返ればそれも打つ |
 
 レーンの様子は `python3 "$NDF_SCRIPTS/parallel.py" status p1` で読む。レーンごとに 1 行（`state`・何回目のループか `lap`・今の課題 `issues`・
 台帳でそのレーンが最後に送った時刻 `last_at`・ループの記録の費用 `cost_usd`）を返し、承認待ちのレーンと答えていない依頼を送ったレーンの行には

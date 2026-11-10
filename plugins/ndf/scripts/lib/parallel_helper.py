@@ -27,6 +27,15 @@ def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None, cwd: 
     return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": cwd}
 
 
+def spawn_line(spec: dict) -> str:
+    """起動の入力（`helper_spawn` の値）をオーガナイザーが打つ 1 行にする。起動の印の無い古い記録の道（`metrics.spawn`）だけが使う。"""
+    import shlex
+
+    argv = list(spec["argv"])
+    line = f"python3 {RELAY} {' '.join(argv[:-1])} '{argv[-1]}'"
+    return f"cd {shlex.quote(spec['cwd'])} && {line}" if spec.get("cwd") else line
+
+
 def present_approval(d: Path) -> str:
     """提示のプランの承認資料の絶対パス（ステップ `present` の `--approval` と `cwd` から読む）。読めなければ空。"""
     import re

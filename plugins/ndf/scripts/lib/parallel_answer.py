@@ -120,15 +120,34 @@ def owner_next(
     起こす。境で承認の要らない候補（承認した設計の実装など）を選び、無ければ同じ条件で止まり直す（#2913 の決定 6）。"""
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
+    chosen = next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
     if q.get("kind") in ("stall", "helper", "spawn"):
-        return None, []
+        return chosen, []  # commands を持つのは起動の印の無い古い記録の問いだけ（オーガナイザーが打つ）
     if q.get("kind") == "observe" or not q.get("lane"):
-        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None), []
+        return chosen, []
     lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
     held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane) and ph._lane_kind(main, name, lane) != "loop"]
     for lane in held:
         ph.place_mark(main, name, lane, "answered")
-    return None, held
+    rest = [lane for lane in lanes if lane not in held]
+    return (_restart_lines(rest) if rest and legacy_launch(main, name) else None), held
+
+
+def _restart_lines(lanes: list[str]) -> str | None:
+    import parallel_run as pr_run
+
+    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+
+
+def legacy_launch(main: Path, name: str) -> bool:
+    """起動の印（`parallel-launch`）の無い古い記録か。古い記録は起動と再起動をオーガナイザーが打つ（#2936 の前の道）。"""
+    import durable
+
+    try:
+        got = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0, start=pl.record_start(main))
+    except durable.DurableError:
+        return False
+    return (got or {}).get("launching") is False
 
 
 def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:

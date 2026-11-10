@@ -94,7 +94,13 @@ def batch_reply(reply, main: Path, name: str, extra: dict) -> None:
         reply("ok", f"並列の計画 {name}: questions（業務時間外に溜めた依頼をまとめて示す）", items, action="questions", **{**extra, **m})
 
 
-WAIT_KEYS = ("questions", "answer-hold")  # オーガナイザーへ返すイベント。`pause` は一時レーンが読み、wait は読まない（#2936）
+# オーガナイザーへ返すイベント。`pause` は古い記録の起動の 1 行を持つものだけ返す（#2936）
+WAIT_KEYS = ("questions", "answer-hold", "pause")
+
+
+def legacy_pause(ev: dict) -> bool:
+    """起動の印の無い古い記録の `pause`（オーガナイザーが打つ起動・再起動の 1 行を持つ）か。新しい記録の `pause` は一時レーンが読む。"""
+    return bool(ev.get("spawn") or ev.get("wake") or (ev.get("release") or {}).get("spawn"))
 
 
 def has_unanswered(main: Path, name: str, items: list[dict]) -> bool:
@@ -108,6 +114,7 @@ def has_unanswered(main: Path, name: str, items: list[dict]) -> bool:
 
 def wait_event(main: Path, name: str, after: int, timeout: float):
     """`questions`・`answer-hold` のイベントか終わりまで待つ。答えを送った依頼だけの `questions` は読み飛ばして待ち続ける（決定 5）。
+    `pause` は古い記録の起動の 1 行を持つものだけ返し、ほかは読み飛ばす。
     (結果, 読み飛ばした最後の seq) を返す。"""
     import time
 
@@ -118,7 +125,10 @@ def wait_event(main: Path, name: str, after: int, timeout: float):
         got = durable.wait_from(
             pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), list(WAIT_KEYS), after, left, start=pl.record_start(main)
         )
-        if got.kind != "event" or got.value.get("key") != "questions" or has_unanswered(main, name, got.value.get("items") or []):
+        key = got.value.get("key") if got.kind == "event" else None
+        if got.kind != "event" or (key == "pause" and legacy_pause(got.value)) or key == "answer-hold":
+            return got, after
+        if key == "questions" and has_unanswered(main, name, got.value.get("items") or []):
             return got, after
         after, left = int(got.value.get("seq") or after), max(0.0, end - time.monotonic())
 
