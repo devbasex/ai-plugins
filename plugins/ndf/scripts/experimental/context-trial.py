@@ -97,7 +97,9 @@ def first_call_after(entries: list[dict], at: float) -> float | None:
     return min(times, default=None)
 
 
-def trial_row(work: str, condition: str, transcript: str, rows: list[dict], ledger: list[dict], lo: float | None, hi: float | None, usd: float) -> dict:
+def trial_row(
+    work: str, condition: str, transcript: str, rows: list[dict], ledger: list[dict], lo: float | None, hi: float | None, usd: float
+) -> dict:
     """計測の回 1 つの行。区切りを見つけられなければ ValueError。"""
     work_rows = [r for r in cd.fill_work(rows) if (r.get("work") or "") == work]
     paths = [transcript] + sorted({r["transcript"] for r in work_rows if r.get("transcript") and r["transcript"] != transcript})

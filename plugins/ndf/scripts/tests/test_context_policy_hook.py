@@ -578,7 +578,13 @@ PINNED_REST = {
 # ---------------------------------------------------------------- 印の自動化・識別子・区切り（#2908 の I1〜I7・受け入れ条件 6）
 
 
-def handoff_transcript(tmp_path, total: int, name: str = "h.jsonl", first: str = "/goal /ndf:development-workflow .ndf/handoff/issue-7.md の続きから", ts: str | None = None) -> Path:
+def handoff_transcript(
+    tmp_path,
+    total: int,
+    name: str = "h.jsonl",
+    first: str = "/goal /ndf:development-workflow .ndf/handoff/issue-7.md の続きから",
+    ts: str | None = None,
+) -> Path:
     """先頭の利用者の発言が `first` で、最後の文脈が `total` の会話の記録。"""
     usage = {"input_tokens": 10, "cache_read_input_tokens": total - 110, "cache_creation_input_tokens": 100, "output_tokens": 5}
     lines = [{"type": "user", "message": {"content": first}}, {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}]
@@ -659,7 +665,16 @@ def test_subagent_writes_no_marks(tmp_path, state, ctx, relay_dir):  # noqa: F81
 
 def test_record_cli_normalizes_the_work(tmp_path, ctx):
     # I6: 課題番号を含めば昇順の並び。含まずセッションがあれば空で書き、集計はセッションの前の行で補う
-    cli("record", "--event", "引継ぎ開始", "--work", ".ndf/handoff/issue-30.md と #7", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    cli(
+        "record",
+        "--event",
+        "引継ぎ開始",
+        "--work",
+        ".ndf/handoff/issue-30.md と #7",
+        ctx=ctx,
+        cwd=str(tmp_path),
+        CLAUDE_CODE_SESSION_ID="s9",
+    )
     cli("record", "--event", "引継ぎ開始", "--work", "loop-lcore", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
     cli("record", "--event", "引継ぎ開始", "--work", "loop-lcore", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="")
     assert [r["work"] for r in rows(ctx)] == ["#7 #30", "", "loop-lcore"]
@@ -703,7 +718,11 @@ def test_hook_marks_make_both_parts_known(tmp_path, state, ctx, relay_dir):  # n
 
 
 def _tool_use(ts: str, name: str, tid: str, **inp) -> dict:
-    return {"type": "assistant", "timestamp": ts, "message": {"id": f"u-{tid}", "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]}}
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "message": {"id": f"u-{tid}", "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]},
+    }
 
 
 def _tool_result(ts: str, tid: str) -> dict:
