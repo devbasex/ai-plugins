@@ -120,6 +120,34 @@ def _line_time(obj: dict) -> dt.datetime | None:
         return None
 
 
+def _assistant_line(line: str, start: dt.datetime, end: dt.datetime, counts: dict) -> dict | None:
+    """期間の中の assistant の行（tool_use を含みうる行だけを読む）。JSON でない行は counts に数えて None。"""
+    if '"tool_use"' not in line or '"assistant"' not in line:
+        return None
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        counts["unreadable_lines"] += 1
+        return None
+    if not isinstance(obj, dict) or obj.get("type") != "assistant":
+        return None
+    at = _line_time(obj)
+    return obj if at is not None and start <= at < end else None
+
+
+def _new_tool_blocks(obj: dict, seen: set):
+    """行の tool_use のブロックのうち、まだ見ていないもの（id で 1 度だけ）。"""
+    content = (obj.get("message") or {}).get("content")
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        key = block.get("id") or id(block)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield block
+
+
 def tool_uses(path: Path, start: dt.datetime, end: dt.datetime, seen: set, counts: dict):
     """期間の中の assistant の行の tool_use を順に返す（id で 1 度だけ）。読めない行は counts に数える。"""
     try:
@@ -129,27 +157,8 @@ def tool_uses(path: Path, start: dt.datetime, end: dt.datetime, seen: set, count
         return
     with fh:
         for line in fh:
-            if '"tool_use"' not in line or '"assistant"' not in line:
-                continue
-            try:
-                obj = json.loads(line)
-            except ValueError:
-                counts["unreadable_lines"] += 1
-                continue
-            if not isinstance(obj, dict) or obj.get("type") != "assistant":
-                continue
-            at = _line_time(obj)
-            if at is None or not start <= at < end:
-                continue
-            content = (obj.get("message") or {}).get("content")
-            for block in content if isinstance(content, list) else []:
-                if not isinstance(block, dict) or block.get("type") != "tool_use":
-                    continue
-                key = block.get("id") or id(block)
-                if key in seen:
-                    continue
-                seen.add(key)
-                yield block
+            if (obj := _assistant_line(line, start, end, counts)) is not None:
+                yield from _new_tool_blocks(obj, seen)
 
 
 def count_turn_kinds(files: list[Path], rules: Rules, start: dt.datetime, end: dt.datetime) -> dict:
