@@ -299,6 +299,51 @@ def judgment_refusal(reasons: list[str]) -> dict:
     return {**step_result.result(TOOL, "stopped", summary, items, {"status": "refused"}), "exit": EXIT_REFUSED}
 
 
+def _sprint_blocked(env: Env, rec: dict, lap: dict | None) -> dict | None:
+    """ループの 1 回を組めないときの断り（1 回が無い・止まっている・設計承認ゲートの後）。組めれば None。"""
+    if not lap:
+        return refusal_order("進行中のループの 1 回が無い（loop select で選んでから組む）")
+    if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
+        return stopped_result(env, rec, "ループは止まっている")
+    if refused := sprint_refusal(rec, lap):  # 設計承認ゲートの後のループの 1 回・答え待ちの停止の範囲の設計（#2913 の I1）
+        return {**refusal_order(refused[1]), "exit": refused[0]}
+    return None
+
+
+def _decide_mode(judgments: str | None, issues: list[int], mode: str | None) -> tuple[list[dict], str]:
+    """判定の根拠からモードを決め、`mode` を渡したときは照合する。合わなければ JudgmentError。"""
+    judged = read_judgments(judgments, issues)
+    decided = mode_judgment.sprint_mode(judged)
+    if mode and mode != decided:
+        raise mode_judgment.JudgmentError([f"--mode {mode} が判定の根拠から決まるモード {decided} と違う"])
+    return judged, decided
+
+
+def _make_plans(env: Env, rec: dict, before: dict, lap: dict, issues: list[int], extra: list[str]) -> tuple[dict | None, list, list]:
+    """スプリント状態の初期化・出し直しの指摘の入力・スプリントとまとめのプランを作る。(止めた結果, 飛ばした課題, まとめ) を返す。"""
+    root, state = str(env.main_dir()), Path(lap["state_path"])
+    mvv = Path(lap["dir"]) / "mvv.md"
+    code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
+    if code != 0:
+        return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip()), [], []
+    if mvv.is_file():
+        copy_mvv_gate(rec, lap, state, mvv)
+    try:
+        notes, skipped = revise_note.write_inputs(env.main_dir(), rec, design_issues(rec, issues), lap["dir"])
+    except OSError as e:
+        return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e)), [], []
+    new = new_sprint_argv(root, rec, lap, [*notes, *extra])
+    code, so, se = env.run(new, cwd=root)
+    lap["sprint_command"] = shlex.join(new)
+    if code != 0:
+        return refused_stop(env, rec, before, "supervise.py new sprint --pace auto", code, (se or so).strip()), [], []
+    try:
+        close = build_close(env, rec, lap, issues)
+    except (LoopError, OSError, ValueError) as e:
+        return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e)), [], []
+    return None, skipped, close
+
+
 def cmd_sprint(
     env: Env, name: str, mode: str | None, dev: str | None, prod: str | None, extra: list[str], judgments: str | None = None
 ) -> dict:
@@ -309,45 +354,21 @@ def cmd_sprint(
         return refusal_order("--prod は --dev と一緒に渡す（版を流す時点に決めるなら両方を省く）")
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
-        if not lap:
-            return refusal_order("進行中のループの 1 回が無い（loop select で選んでから組む）")
-        if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
-            return stopped_result(env, rec, "ループは止まっている")
-        if refused := sprint_refusal(rec, lap):  # 設計承認ゲートの後のループの 1 回・答え待ちの停止の範囲の設計（#2913 の I1）
-            return {**refusal_order(refused[1]), "exit": refused[0]}
+        if blocked := _sprint_blocked(env, rec, lap):
+            return blocked
         issues = selected_issues(lap)
         try:
-            judged = read_judgments(judgments, issues)
-            decided = mode_judgment.sprint_mode(judged)
-            if mode and mode != decided:
-                raise mode_judgment.JudgmentError([f"--mode {mode} が判定の根拠から決まるモード {decided} と違う"])
+            judged, mode = _decide_mode(judgments, issues, mode)
         except mode_judgment.JudgmentError as e:
             return judgment_refusal(e.reasons)
-        mode = decided
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
         root = str(env.main_dir())
         lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
-        mvv = d / "mvv.md"
-        code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
-        if code != 0:
-            return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip())
-        if mvv.is_file():
-            copy_mvv_gate(rec, lap, state, mvv)
-        try:
-            notes, skipped = revise_note.write_inputs(env.main_dir(), rec, design_issues(rec, issues), lap["dir"])
-        except OSError as e:
-            return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e))
-        new = new_sprint_argv(root, rec, lap, [*notes, *extra])
-        code, so, se = env.run(new, cwd=root)
-        lap["sprint_command"] = shlex.join(new)
-        if code != 0:
-            return refused_stop(env, rec, before, "supervise.py new sprint --pace auto", code, (se or so).strip())
-        try:
-            close = build_close(env, rec, lap, issues)
-        except (LoopError, OSError, ValueError) as e:
-            return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
+        stopped, skipped, close = _make_plans(env, rec, before, lap, issues, extra)
+        if stopped:
+            return stopped
         lap["close_plans"] = close  # リリース待ち・質問待ちで締めたループの 1 回は、答えの後にこのまとめを流す（#2436）
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
