@@ -10,6 +10,8 @@
 
 ## 次にやること
 
+<!-- 状態は sprint-state.py get <状態> と loop get <名> の next、PR は gh_parts.py pr-status <番号> で 1 回で読む。その場の Python の 1 行で読み直さない -->
+
 ## 今の会話の進み
 
 <!-- 任意。使わなければ見出しごと消してよい -->

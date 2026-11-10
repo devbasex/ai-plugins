@@ -4,6 +4,10 @@
 #
 #   projects-sync.sh <issue番号> <キー> <値>
 #     キー: stage | mode | pace | status | worktree | plan
+#   projects-sync.sh <issue番号> stage <工程名> [<工程名>...]
+#
+# **`stage` は工程名を並べて渡せる（#2909）。** すべての工程名を何かを書く前に工程表と照らし、`progress-record.sh` へ
+# 1 回で渡す（本文の書き換えは 1 回、通過記録は工程ごと）。ボードの「工程」の列は 1 つの値しか持たないため、最後の工程名を書く。
 #
 # `stage` / `mode` / `pace` / `worktree` / `plan` は、ボードの宣言の有無にかかわらず先に
 # `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`pace`（normal / fast）は
@@ -41,22 +45,30 @@ TOOL=projects-sync
   || sr_emit --tool "$TOOL" --status stopped --summary "development-workflow の workflow-common.sh を読めない" --code 3
 
 usage() {
-  printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>\n' >&2
+  printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>（stage は <工程名>...）\n' >&2
 }
 
 
 ISSUE="${1:-}"
 KEY="${2:-}"
 VALUE="${3:-}"
+STAGE_VALUES=("${@:3}")
 
-if [ "$#" -ne 3 ] || [ -z "$ISSUE" ] || [ -z "$KEY" ] || [ -z "$VALUE" ]; then
+if { [ "$#" -ne 3 ] && { [ "$KEY" != stage ] || [ "$#" -lt 3 ]; }; } || [ -z "$ISSUE" ] || [ -z "$KEY" ] || [ -z "$VALUE" ]; then
   sr_bad_args "$TOOL" "引数が足りません" usage
 fi
 case "$ISSUE" in
   ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
 KIND=$(pj_key_kind "$KEY") || sr_bad_args "$TOOL" "知らないキーです: $KEY" usage
-[ "$KEY" != stage ] || VALUE=$(pj_normalize_stage "$VALUE")
+if [ "$KEY" = stage ]; then
+  # 並べた工程名をすべて照らす。ボードへは最後の工程名を書く
+  for i in "${!STAGE_VALUES[@]}"; do
+    STAGE_VALUES[i]=$(pj_normalize_stage "${STAGE_VALUES[$i]}")
+    wf_is_stage "${STAGE_VALUES[$i]}" || sr_bad_args "$TOOL" "$KEY が取らない値です: ${STAGE_VALUES[$i]}"
+  done
+  VALUE=${STAGE_VALUES[${#STAGE_VALUES[@]}-1]}
+fi
 case "$KEY" in
   stage) wf_is_stage "$VALUE" ;;
   mode) wf_is_mode "$VALUE" ;;
@@ -79,7 +91,7 @@ record_body() {
   fi
 }
 case "$KEY" in
-  stage) record_body "$ISSUE" "$VALUE" ;;
+  stage) record_body "$ISSUE" "${STAGE_VALUES[@]}" ;;
   mode|pace|worktree|plan) record_body "$ISSUE" - "--$KEY" "$VALUE" ;;
 esac
 

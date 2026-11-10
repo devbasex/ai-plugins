@@ -115,3 +115,44 @@ def graphql(query: str, variables: dict[str, Any] | None = None) -> gh_quota.Att
     if r.returncode != 0 or errors or not isinstance(d, dict):
         return gh_quota.Attempt(None, _graphql_failure(r, errors), "graphql")
     return gh_quota.Attempt(d.get("data"), "", "graphql")
+
+
+# 未解決のスレッド・マージの状態・PR が閉じる Issue の開閉を 1 回で読む（`gh_parts.py pr-status`。#2909 の決定 5）。
+# 今の `UNRESOLVED_THREADS_QUERY` は変えない（`pr-info`・`unresolved-threads` の出力を変えないため）
+PR_STATUS_QUERY = """
+query($owner: String!, $name: String!, $pr: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      mergeStateStatus
+      reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
+      closingIssuesReferences(first: 50) { nodes { number state } }
+    }
+  }
+}
+"""
+
+
+def pr_status_parts(repo: str, pr: int) -> tuple[dict[str, Any] | None, str]:
+    """`(部品, 失敗の理由)`。部品は `{merge_state, unresolved_threads, issues: [{number, state}]}`。
+
+    スレッドが 100 件を超えるときだけ `unresolved_threads` で数え直す。取得できなければ `(None, 理由)`。
+    Resolve の状態は REST から読めないため、上限のときも退避せずに理由を返す。
+    """
+    owner, sep, name = str(repo or "").partition("/")
+    if not (owner and sep and name):
+        return None, f"リポジトリの形が owner/name でない: {repo!r}"
+    got = graphql(PR_STATUS_QUERY, {"owner": owner, "name": name, "pr": int(pr)})
+    node = ((got.value or {}).get("repository") or {}).get("pullRequest") if got.ok else None
+    if not isinstance(node, dict):
+        return None, got.error or "GraphQL の応答に PR が無い"
+    threads = node.get("reviewThreads") or {}
+    unresolved: int | None = sum(1 for t in threads.get("nodes") or [] if isinstance(t, dict) and not t.get("isResolved"))
+    if (threads.get("pageInfo") or {}).get("hasNextPage"):
+        full = unresolved_threads(repo, pr)
+        unresolved = None if full is None else len(full)
+    issues = [
+        {"number": int(n["number"]), "state": str(n.get("state") or "").lower()}
+        for n in (node.get("closingIssuesReferences") or {}).get("nodes") or []
+        if isinstance(n, dict) and n.get("number") is not None
+    ]
+    return {"merge_state": node.get("mergeStateStatus"), "unresolved_threads": unresolved, "issues": issues}, ""
