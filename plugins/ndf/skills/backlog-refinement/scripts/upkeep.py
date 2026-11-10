@@ -383,6 +383,29 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
     return status, code, summary, metrics, pres, nxt
 
 
+def _apply_actions(actions, apply_one):
+    """課題ごとに apply_one(act) で反映し、(buckets, items, partial, why_partial) を返す。
+    Partial が出たら、その課題を含む残りをすべて pending にして止める。"""
+    buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
+    items, partial, why_partial = [], False, ""
+    for idx, act in enumerate(actions):
+        n, verdict = act["number"], act["verdict"]
+        try:
+            bucket, reason = apply_one(act)
+        except Partial as e:
+            partial, why_partial = True, str(e)
+            for rest in actions[idx:]:
+                buckets["pending"].append(rest["number"])
+                items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
+            break
+        buckets[bucket].append(n)
+        it = {"kind": "issue", "name": f"#{n}", "result": bucket, "verdict": verdict}
+        if reason:
+            it["reason"] = reason
+        items.append(it)
+    return buckets, items, partial, why_partial
+
+
 def cmd_apply(a):
     root = git_root(a.root)
     plan, wrong = A.precheck_depth(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
@@ -407,8 +430,6 @@ def cmd_apply(a):
     ledger = _read_state(ledger_path) or {}
     gh = Gh(repo, max_waits=a.max_waits, max_wait=a.max_wait)
     ms = Milestones(gh)
-    buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
-    items, partial, why_partial = [], False, ""
     # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映・区分・待ちを落とさない。
     # 書き込む前に読み、前の記録が読めないときは 1 件も書かずに止める
     prev_out = _read_state(sd / "apply.json")
@@ -422,22 +443,11 @@ def cmd_apply(a):
             ledger[key] = value
         jsonio.write_atomic(ledger_path, ledger, indent=1)
 
-    for idx, act in enumerate(actions):
-        n, verdict = act["number"], act["verdict"]
+    def apply_one(act):
         key = _ledger_key(repo, act)
-        try:
-            bucket, reason = _apply_one(gh, ms, repo, act, ledger.get(key), functools.partial(record, key=key), rp.hold(act))
-        except Partial as e:
-            partial, why_partial = True, str(e)
-            for rest in actions[idx:]:
-                buckets["pending"].append(rest["number"])
-                items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
-            break
-        buckets[bucket].append(n)
-        it = {"kind": "issue", "name": f"#{n}", "result": bucket, "verdict": verdict}
-        if reason:
-            it["reason"] = reason
-        items.append(it)
+        return _apply_one(gh, ms, repo, act, ledger.get(key), functools.partial(record, key=key), rp.hold(act))
+
+    buckets, items, partial, why_partial = _apply_actions(actions, apply_one)
     rp.withheld = [] if partial else rp.unmoved(actions, buckets)
     try:
         rp.tables = rp.write_tables(None if partial else ms)
