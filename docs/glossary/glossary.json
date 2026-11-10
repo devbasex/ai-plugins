@@ -6145,6 +6145,24 @@
       "context": "ndf-workflow",
       "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
       "source": "docs/specifications/ndf-supervisor-docs-guard.md"
+    },
+    {
+      "term": "業務時間",
+      "context": "ndf-workflow",
+      "meaning": "利用者が承認ゲートへ答えられる時間帯。進め方の宣言に、時刻帯・曜日・始まりと終わりの時刻で書く。時間外は承認の依頼を溜め、業務時間の始めにまとめて示す",
+      "pending_source": "issues/issue-2913-requirements.md"
+    },
+    {
+      "term": "新しい承認を生む作業",
+      "context": "ndf-workflow",
+      "meaning": "ループの 1 回のプランに設計承認ゲートを含む作業。答え待ちの停止の範囲に入ったレーンは始めない",
+      "pending_source": "issues/issue-2913-requirements.md"
+    },
+    {
+      "term": "承認の要らない作業",
+      "context": "ndf-workflow",
+      "meaning": "新しい承認を生む作業以外の作業。承認した設計の実装、設計のステップを置かないモードの課題、答えの届いた保留したループの 1 回の残りを含む",
+      "pending_source": "issues/issue-2913-requirements.md"
     }
   ]
 }
