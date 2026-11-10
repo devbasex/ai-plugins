@@ -279,7 +279,8 @@ classDiagram
 
 ### `loop sprint`
 
-`hold_only: true` のループの 1 回で `design_issues` が空でなければ、組まずに終了コード 2 で断る（理由: 「答え待ちの停止の範囲で始めたループの 1 回に設計のステップを置かない」）。
+`hold_only: true` のループの 1 回で `design_issues` が空でなければ、組まずに終了コード 2 で断る。
+返す理由は「答え待ちの停止の範囲で始めたループの 1 回に設計のステップを置かない」である。
 `loop exclude` で選び直したループの 1 回も `hold_only` を引き継ぐ。
 
 ### `parallel.py wait`
@@ -292,8 +293,12 @@ classDiagram
 | 業務時間外の待ちが業務時間の始まりに達した | 0 | `questions` | 1 行目と同じ |
 | 宣言が無い・不正 | 今と同じ | 今と同じ | 今と同じ |
 
-「今問う依頼」は、`kind` が `gate1`・`ask` 以外の依頼（リリース承認ゲート・耐久ワークフローが立てた問い・当たらなかった答え）と、
-まだ返していない `mvv.eligible` の設計の承認である。`title`・`url` を `gh` で引けなければ `null` にし、`metrics.annotate_errors` に件数を載せる。
+「今問う依頼」は次の 2 つである。
+
+- `kind` が `gate1`・`ask` 以外の依頼（リリース承認ゲート・耐久ワークフローが立てた問い・当たらなかった答え）
+- まだ返していない `mvv.eligible` の設計の承認
+
+`title`・`url` を `gh` で引けなければ `null` にし、`metrics.annotate_errors` に件数を載せる。
 
 ### `parallel.py answer`
 
@@ -302,12 +307,17 @@ classDiagram
 
 ### `loop start`・`parallel.py check`・`parallel.py start` の警告
 
-業務時間の宣言が不正なら、`items` に `{"level": "warning", "rule": "business-hours", "at": "business_hours", "message": <理由>}` を 1 行足す。
-`loop start` は警告を出しても始める。
+業務時間の宣言が不正なら、`items` に次の 1 行を足す。`loop start` は警告を出しても始める。
+
+```json
+{"level": "warning", "rule": "business-hours", "at": "business_hours", "message": <理由>}
+```
 
 ## 処理の流れ
 
 ### ループの 1 回の境
+
+答え待ちの停止は、保留したループの 1 回の残りを流した後に判定する。答えの届いた残りは承認の要らない作業であり、先に止まると流れない。
 
 ```mermaid
 sequenceDiagram
@@ -327,11 +337,16 @@ sequenceDiagram
   end
 ```
 
-図の「ループの 1 回の境」と「選定」は `sprint_loop_select.py` の中の 2 つの段で、「答え待ちの停止」は今の `parallel_hold.loop_stop` である（この変更で変えない）。分類の `sprint_loop_argv.py`、止まる条件の表の `sprint_loop_record.py`、`loop start`・`loop sprint` の `sprint_loop.py` はこの図に描かない。
-
-答え待ちの停止は、保留したループの 1 回の残りを流した後に判定する。答えの届いた残りは承認の要らない作業であり、先に止まると流れない。
+| 構成要素 | 図での扱い |
+| --- | --- |
+| `sprint_loop_select.py` | 中の 2 つの段が「ループの 1 回の境」と「選定」 |
+| `parallel_hold.loop_stop`（今のまま。この変更で変えない） | 「答え待ちの停止」 |
+| 分類の `sprint_loop_argv.py`、止まる条件の表の `sprint_loop_record.py`、`loop start`・`loop sprint` の `sprint_loop.py` | 描かない |
 
 ### オーガナイザーの待ち
+
+業務時間外の `wait` は、待ちの上限を次の業務時間の始まりで切る。オーガナイザーは終了コード 3 で同じ `wait` を打ち直す（今の手順のまま）ので、
+業務時間の始まりの後の最初の `wait` がまとめて返す。
 
 ```mermaid
 sequenceDiagram
@@ -350,10 +365,10 @@ sequenceDiagram
   end
 ```
 
-図の `parallel.py wait` は `parallel_cli.py` の `wait_plan` である。答えの後の `parallel_answer.py`（`owner_next`）と検査の `parallel_route.py` はこの図に描かない。
-
-業務時間外の `wait` は、待ちの上限を次の業務時間の始まりで切る。オーガナイザーは終了コード 3 で同じ `wait` を打ち直す（今の手順のまま）ので、
-業務時間の始まりの後の最初の `wait` がまとめて返す。
+| 構成要素 | 図での扱い |
+| --- | --- |
+| `parallel_cli.py` の `wait_plan` | 「parallel.py wait」 |
+| 答えの後の `parallel_answer.py`（`owner_next`）、検査の `parallel_route.py` | 描かない |
 
 ### 溜めた依頼の状態
 
@@ -386,8 +401,9 @@ stateDiagram-v2
 選定の前にモードの判定を寄せる形は採らない。モードはこの規則に効かず、判定の手間だけが増える。
 
 このため、開発ループの中で承認の要らない作業になる課題は「承認した設計」と「答えの届いた保留したループの 1 回の残り」だけである。
-要求の前提 2 が挙げる `light`・`operation`・`documentation` の課題は、ループの中では承認の要らない作業にならない（`light` にも設計のステップが置かれ、
-ほかの 2 つは `pace: auto` で組めない）。業務時間外の順の「設計の要らない課題」の組は、ループの 1 回の組み方が変わるまで空になる。
+要求の前提 2 が挙げる `light`・`operation`・`documentation` の課題は、ループの中では承認の要らない作業にならない。
+`light` にも設計のステップが置かれ、ほかの 2 つは `pace: auto` で組めないためである。
+業務時間外の順の「設計の要らない課題」の組は、ループの 1 回の組み方が変わるまで空になる。
 
 根拠: Value 7 / Value 5（MVV 版 6）
 
