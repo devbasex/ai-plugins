@@ -140,6 +140,7 @@
 | `NDF_MVV_STATE_DIR` | user | `plugins/ndf/scripts/ask.py`<br>`plugins/ndf/scripts/gate-rejections.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/project-mvv.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py`<br>`plugins/ndf/skills/fix/scripts/fix-steps.py` |
 | `NDF_ORGANIZER_DIR` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_ORGANIZER_LANE` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
+| `NDF_PARALLEL_LAUNCH_SECONDS` | user | `plugins/ndf/scripts/parallel.py` |
 | `NDF_PARALLEL_MAX_PLANS` | user | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_PARALLEL_POLL` | user | `plugins/ndf/scripts/parallel.py` |
 | `NDF_PARALLEL_RELAY` | user | `plugins/ndf/scripts/parallel.py` |

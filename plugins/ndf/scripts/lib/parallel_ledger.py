@@ -39,6 +39,7 @@ LOST = ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
 FIELDS = (
     "lanes", "pending", "questions", "releases", "launch", "held", "answered", "received", "refusals", "stall_until",
     "helper_asked", "held_spawned", "wake", "revive", "revive_at", "stop", "force", "left_stopped", "superseded", "holds",
+    "launches", "helper_seen",
 )  # fmt: skip
 SETS = ("answered", "left_stopped", "superseded")
 
@@ -304,7 +305,8 @@ class RunState:
         return {**out, "offset": self.offset, "unread": list(self.unread), "published": dict(self.published)}
 
     def adopt(self, got: Optional[dict]) -> None:
-        """`restore` の値を戻し（設計の「作り直す」の順）、`running` と戻した問い・流れているリリースの知らせを立てる。
+        """`restore` の値を戻し（設計の「作り直す」の順）、`running` と戻した問いを立てる。流れているリリースの一時レーンは
+        耐久ワークフローが起動の記録を見て起動する（`_Run.launch_helper`。#2936）。
         `got` が None（台帳を読まない途中の記録）なら `running` を立てるだけにする。"""
         if got is None:
             self.pause("running")
@@ -326,8 +328,6 @@ class RunState:
             self.apply(row)
         if self.questions:
             self.publish_questions()
-        if self.current is not None:
-            self.pause("notice", lanes=[], attach=[])
 
     def _adopt_state(self, st: dict) -> None:
         """チェックポイントの `FIELDS` の値とレーンを戻す。"""

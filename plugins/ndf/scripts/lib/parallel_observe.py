@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import clock
 import parallel_plan as pp
 import parallel_release as pr
 
@@ -34,19 +35,34 @@ def _asking_lanes(run) -> set[str]:
 
 def _ask_helper(run, rows: dict) -> None:
     """リリースの途中で一時レーンが止まり、settle もリリース承認ゲートの依頼も、その一時レーンが送った答えていない問い（ask も含む）も
-    無ければ問う（受け入れ条件 6g）。一時レーンは問いを保留すると自分のラッパーを止めるため、問いを送って止まったものは問わない。"""
+    無ければ問う（受け入れ条件 6g）。一時レーンは問いを保留すると自分のラッパーを止めるため、問いを送って止まったものは問わない。
+
+    耐久ワークフローが起動を打つ記録（#2936 の I4）では、今の起動の立ち上がりを確かめた後に、今の起動より後に止まった行を
+    2 回続けて観たときだけ問う。前の起動の止まった行・時刻の無い行は数えない（#2629）。"""
     rel = run.current
     if rel is None or not run.launch or run.helper_asked == run.launch["seq"]:
         return
     name = pr.helper_name(run.name, rel["n"])
-    if (rows.get(name) or {}).get("state") != "stopped" or any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in run.questions):
+    row = rows.get(name) or {}
+    if row.get("state") != "stopped" or any(q.get("kind") == "gate2" and q.get("n") == rel["n"] for q in run.questions):
+        run.helper_seen.pop(name, None)
         return
     if name in _asking_lanes(run):
         return
+    if run.launching:
+        rec = run.launches.get(run.launch.get("purpose") or "") or {}
+        since = clock.parse(rec.get("at"), naive="utc") if rec.get("result") == "up" and rec.get("at") else None
+        at = clock.parse(row.get("at"), naive="utc") if row.get("at") else None
+        if since is None or at is None or at.timestamp() < since.timestamp() - 0.5:
+            return  # 立ち上がりを確かめる前か、前の起動の行
+        run.helper_seen[name] = run.helper_seen.get(name, 0) + 1
+        if run.helper_seen[name] < 2:
+            return
     run.helper_asked = run.launch["seq"]
+    spec = {"argv": run.launch.get("argv"), "cwd": run.launch.get("cwd")}
     run.ask(
         "helper", f"{name}-h{run.launch['seq']}", name, f"一時レーン {name} がリリース {rel['n']} の途中で止まった（settle もリリース承認ゲートの依頼も無い）",
-        ["続きから起こし直す", "止める"], commands={"続きから起こし直す": run.launch.get("spawn")}, n=rel["n"],
+        ["続きから起こし直す", "止める"], n=rel["n"], purpose=run.launch.get("purpose"), launch=spec,
     )  # fmt: skip
 
 

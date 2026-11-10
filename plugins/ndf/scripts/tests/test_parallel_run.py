@@ -58,6 +58,19 @@ FAKE = textwrap.dedent(
         print(json.dumps({"items": [{"result": "limit"}], "metrics": {}}))
         sys.exit(1)
     else:
+        # 一時レーンの起動と再起動は一覧へ running で現れる。FAKE_DOWN の回数だけは現れない（#2936 の受け入れ条件 3）
+        name = sys.argv[3] if sub == "spawn" else sys.argv[2] if sub == "restart" else None
+        if name and (sub == "restart" or "--role" in sys.argv):
+            down, used = int(os.environ.get("FAKE_DOWN") or 0), os.environ["FAKE_LOG"] + ".down"
+            n = int(open(used).read()) if os.path.exists(used) else 0
+            if n < down:
+                open(used, "w").write(str(n + 1))
+            else:
+                import time
+                st = json.load(open(states)) if os.path.exists(states) else {}
+                st[name] = {"state": "running", "at": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "role": "helper" if sub == "spawn" else None}
+                json.dump(st, open(states + ".tmp", "w"))
+                os.replace(states + ".tmp", states)
         print(json.dumps({"items": [{"result": "started"}], "metrics": {}}))
     """
 )
@@ -79,6 +92,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_STATES", str(states))
     monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
+    monkeypatch.setenv("NDF_PARALLEL_LAUNCH_SECONDS", "1")
     heads = {"v": "sha1"}
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
     monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
